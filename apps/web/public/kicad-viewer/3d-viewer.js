@@ -1,0 +1,1175 @@
+var _e = Object.defineProperty;
+var r = (t, e) => _e(t, "name", { value: e, configurable: !0 });
+function A(t) {
+  window.setTimeout(() => {
+    t();
+  }, 0);
+}
+r(A, "later");
+var p = class {
+  static {
+    r(this, "DeferredPromise");
+  }
+  #t;
+  #r;
+  #s;
+  #e;
+  #n;
+  constructor() {
+    this.#t = new Promise((e, n) => {
+      ((this.#r = e), (this.#s = n));
+    });
+  }
+  get rejected() {
+    return this.#e === 1;
+  }
+  get resolved() {
+    return this.#e === 0;
+  }
+  get settled() {
+    return !!this.#e;
+  }
+  get value() {
+    return this.#n;
+  }
+  then(e, n) {
+    return this.#t.then(e, n);
+  }
+  resolve(e) {
+    ((this.#e = 0), (this.#n = e), this.#r(e));
+  }
+  reject(e) {
+    ((this.#e = 1), (this.#n = e), this.#s(e));
+  }
+};
+var y = class t extends Event {
+  constructor(n, s) {
+    super(t.type, { bubbles: !0, cancelable: !0, composed: !0 });
+    this.context_name = n;
+    this._callback = s;
+  }
+  static {
+    r(this, "ContextRequestEvent");
+  }
+  static {
+    this.type = "context-request";
+  }
+  callback(n) {
+    (this.stopPropagation(), this._callback(n));
+  }
+};
+async function I(t, e) {
+  return new Promise((n) => {
+    t.dispatchEvent(
+      new y(e, (s) => {
+        n(s);
+      }),
+    );
+  });
+}
+r(I, "requestContext");
+function j(t, e, n) {
+  t.addEventListener(y.type, (s) => {
+    let i = s;
+    i.context_name == e && i.callback(n);
+  });
+}
+r(j, "provideContext");
+async function Le(t, e) {
+  return (await I(t, e))();
+}
+r(Le, "requestLazyContext");
+async function Me(t, e, n) {
+  j(t, e, n);
+}
+r(Me, "provideLazyContext");
+function O(t) {
+  return class extends t {
+    static {
+      r(this, "WithContext");
+    }
+    constructor(...n) {
+      super(...n);
+    }
+    async requestContext(n) {
+      return await I(this, n);
+    }
+    provideContext(n, s) {
+      j(this, n, s);
+    }
+    async requestLazyContext(n) {
+      return await Le(this, n);
+    }
+    provideLazyContext(n, s) {
+      Me(this, n, s);
+    }
+  };
+}
+r(O, "WithContext");
+function R(t) {
+  return t === null || (typeof t != "object" && typeof t != "function");
+}
+r(R, "is_primitive");
+function F(t) {
+  return typeof t == "number" && !isNaN(t);
+}
+r(F, "is_number");
+function v(t) {
+  return Array.isArray(t) || typeof t?.[Symbol.iterator] == "function";
+}
+r(v, "is_iterable");
+function N(t) {
+  return Array.isArray(t);
+}
+r(N, "is_array");
+var q = new Map(),
+  C = class {
+    constructor(e) {
+      this.css_string = e;
+    }
+    static {
+      r(this, "CSS");
+    }
+    get stylesheet() {
+      let e = q.get(this.css_string);
+      return (
+        e == null &&
+          ((e = new CSSStyleSheet()), e.replaceSync(this.css_string), q.set(this.css_string, e)),
+        e
+      );
+    }
+  };
+function b(t, ...e) {
+  let n = "";
+  for (let s = 0; s < t.length - 1; s++) {
+    n += t[s];
+    let i = e[s];
+    if (i instanceof C) n += i.css_string;
+    else if (F(i)) n += String(i);
+    else throw new Error("Only CSS or number variables allowed in css template literal");
+  }
+  return ((n += t.at(-1)), new C(n));
+}
+r(b, "css");
+function z(t, e) {
+  t.adoptedStyleSheets = t.adoptedStyleSheets.concat(
+    e.map((n) => (n instanceof CSSStyleSheet ? n : n.stylesheet)),
+  );
+}
+r(z, "adopt_styles");
+function K(t) {
+  return N(t) ? t : [t];
+}
+r(K, "as_array");
+var bt = new Intl.Collator(void 0, { numeric: !0 });
+var x = class {
+  constructor() {
+    this._disposables = new Set();
+    this._is_disposed = !1;
+  }
+  static {
+    r(this, "Disposables");
+  }
+  add(e) {
+    if (this._is_disposed)
+      throw new Error("Tried to add item to a DisposableStack that's already been disposed");
+    return (this._disposables.add(e), e);
+  }
+  disposeAndRemove(e) {
+    e && (e.dispose(), this._disposables.delete(e));
+  }
+  get isDisposed() {
+    return this._is_disposed;
+  }
+  dispose() {
+    if (this._is_disposed) {
+      console.trace("dispose() called on an already disposed resource");
+      return;
+    }
+    for (let e of this._disposables.values()) e.dispose();
+    (this._disposables.clear(), (this._is_disposed = !0));
+  }
+};
+function Pe(t) {
+  return typeof HTMLElement == "object" && t instanceof HTMLElement;
+}
+r(Pe, "is_HTMLElement");
+function f(t, ...e) {
+  let n = document.createElement("template");
+  n.innerHTML = De(t, e);
+  let s = n.content;
+  return (
+    (s = document.importNode(s, !0)), He(s, e), s.childElementCount == 1 ? s.firstElementChild : s
+  );
+}
+r(f, "html");
+var _ = class {
+    constructor(e) {
+      this.text = e;
+    }
+    static {
+      r(this, "Literal");
+    }
+  },
+  L = /\$\$:(\d+):\$\$/g;
+function De(t, e) {
+  let n = [];
+  for (let i = 0; i < t.length - 1; i++)
+    (n.push(t[i]), e[i] instanceof _ ? n.push(e[i].text) : n.push(`$$:${i}:$$`));
+  return (n.push(t[t.length - 1]), n.join(""));
+}
+r(De, "prepare_template_html");
+function He(t, e) {
+  let n = document.createTreeWalker(t, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, null),
+    s;
+  for (; (s = n.nextNode()) !== null;)
+    if (s.nodeType == Node.TEXT_NODE) Ae(s.parentNode, s, e);
+    else if (s.nodeType == Node.ELEMENT_NODE) {
+      let i = s;
+      for (let o of i.getAttributeNames()) {
+        let a = i.getAttributeNode(o);
+        Ie(i, a, e);
+      }
+    }
+}
+r(He, "apply_values_to_tree");
+function Ae(t, e, n) {
+  if (!t) return;
+  let s = e.data.split(L);
+  if (!(!s || s.length == 1)) {
+    if (Pe(t) && ["script", "style"].includes(t.localName))
+      throw new Error("Cannot bind values inside of <script> or <style> tags");
+    for (let i = 0; i < s.length; i++) {
+      let o = s[i];
+      if (o)
+        if (i % 2 == 0) t.insertBefore(new Text(o), e);
+        else for (let a of $(n[parseInt(o, 10)])) a != null && t.insertBefore(a, e);
+    }
+    e.data = "";
+  }
+}
+r(Ae, "apply_content_value");
+function Ie(t, e, n) {
+  let s = e.value.split(L);
+  if (!(!s || s.length == 1)) {
+    if (e.localName.startsWith("on"))
+      throw new Error(`Cannot bind to event handler ${e.localName}.`);
+    if (s.length == 3 && s[0] == "" && s[2] == "") {
+      let i = n[parseInt(s[1], 10)];
+      i === !0
+        ? (e.value = "")
+        : i === !1 || i === null || i === void 0
+          ? t.removeAttribute(e.name)
+          : (e.value = M(i, e.name));
+      return;
+    }
+    e.value = e.value.replaceAll(L, (i, o) => {
+      let a = n[parseInt(o, 10)];
+      return M(a, e.localName);
+    });
+  }
+}
+r(Ie, "apply_attribute_value");
+function* $(t) {
+  if (!(t == null || t == null)) {
+    if (R(t)) {
+      yield new Text(t.toString());
+      return;
+    }
+    if (t instanceof Node || t instanceof DocumentFragment) {
+      yield t;
+      return;
+    }
+    if (v(t)) {
+      for (let e of t) yield* $(e);
+      return;
+    }
+    throw new Error(`Invalid value ${t}`);
+  }
+}
+r($, "convert_value_for_content");
+function M(t, e) {
+  if (t == null || t == null) return "";
+  if (R(t)) return t.toString();
+  if (v(t))
+    return Array.from(t)
+      .map((n) => M(n, e))
+      .join("");
+  throw new Error(`Invalid value ${t}`);
+}
+r(M, "convert_value_for_attr");
+var g = class extends HTMLElement {
+  constructor() {
+    super();
+    this.updateComplete = new p();
+    this.disposables = new x();
+    let n = this.constructor;
+    n.exportparts.length && this.setAttribute("exportparts", n.exportparts.join(","));
+  }
+  static {
+    r(this, "CustomElement");
+  }
+  static {
+    this.useShadowRoot = !0;
+  }
+  static {
+    this.exportparts = [];
+  }
+  addDisposable(n) {
+    return this.disposables.add(n);
+  }
+  get renderRoot() {
+    return this.shadowRoot ?? this;
+  }
+  connectedCallback() {
+    this.#t();
+  }
+  disconnectedCallback() {
+    this.disposables.dispose();
+  }
+  initialContentCallback() {}
+  render() {
+    return f``;
+  }
+  async load(n) {
+    await this.update();
+  }
+  renderedCallback() {}
+  async update() {
+    for (this.updateComplete = new p(); this.renderRoot.firstChild;)
+      this.renderRoot.firstChild.remove();
+    return (
+      this.renderRoot.appendChild(await this.render()),
+      this.renderedCallback(),
+      window.requestAnimationFrame(() => {
+        this.updateComplete.resolve(!0);
+      }),
+      this.updateComplete
+    );
+  }
+  #t() {
+    let n = this.constructor;
+    return (
+      (this.updateComplete = new p()),
+      this.constructor.useShadowRoot && this.attachShadow({ mode: "open" }),
+      n.styles && z(this.shadowRoot ?? document, K(n.styles)),
+      (async () => {
+        let s = this.render();
+        (this.renderRoot.appendChild(s),
+          this.renderedCallback(),
+          this.initialContentCallback(),
+          window.requestAnimationFrame(() => {
+            this.updateComplete.resolve(!0);
+          }));
+      })(),
+      this.updateComplete
+    );
+  }
+  queryAssignedElements(n, s) {
+    let o =
+      this.renderRoot
+        .querySelector(`slot${n ? `[name=${n}]` : ":not([name])"}`)
+        ?.assignedElements() ?? [];
+    return s ? o.filter((a) => a.matches(s)) : o;
+  }
+};
+var je = b`
+    :host {
+        box-sizing: border-box;
+    }
+
+    :host *,
+    :host *::before,
+    :host *::after {
+        box-sizing: inherit;
+    }
+
+    [hidden] {
+        display: none !important;
+    }
+`,
+  d = class extends O(g) {
+    static {
+      r(this, "KCUIElement");
+    }
+    static {
+      this.styles = [je];
+    }
+  };
+var l = class extends CustomEvent {
+    static {
+      r(this, "KiCanvasEvent");
+    }
+    constructor(e, n, s = !1) {
+      super(e, { detail: n, composed: !0, bubbles: s });
+    }
+  },
+  U = class t extends l {
+    static {
+      r(this, "KiCanvasLoadEvent");
+    }
+    static {
+      this.type = "kicanvas:load";
+    }
+    constructor() {
+      super(t.type, null);
+    }
+  },
+  B = class t extends l {
+    static {
+      r(this, "KiCanvasAiSelectEvent");
+    }
+    static {
+      this.type = "kicanvas:ai-select";
+    }
+    constructor(e) {
+      super(t.type, e, !0);
+    }
+  },
+  V = class t extends l {
+    static {
+      r(this, "KiCanvasSelectEvent");
+    }
+    static {
+      this.type = "kicanvas:select";
+    }
+    constructor(e) {
+      super(t.type, e, !0);
+    }
+  },
+  W = class t extends l {
+    static {
+      r(this, "KiCanvasContextMenuEvent");
+    }
+    static {
+      this.type = "kicanvas:context-selection";
+    }
+    constructor(e) {
+      super(t.type, e, !0);
+    }
+  },
+  G = class t extends l {
+    static {
+      r(this, "KiCanvasSchContextMenuEvent");
+    }
+    static {
+      this.type = "kicanvas:sch-context-selection";
+    }
+    constructor(e) {
+      super(t.type, e, !0);
+    }
+  },
+  X = class t extends l {
+    static {
+      r(this, "KiCanvasFitterMenuEvent");
+    }
+    static {
+      this.type = "kicanvas:fitter-selection";
+    }
+    constructor(e) {
+      super(t.type, e, !0);
+    }
+  },
+  Y = class t extends l {
+    static {
+      r(this, "KiCanvasMouseMoveEvent");
+    }
+    static {
+      this.type = "kicanvas:mousemove";
+    }
+    constructor(e) {
+      super(t.type, e, !0);
+    }
+  },
+  J = class t extends l {
+    static {
+      r(this, "KicadSyncHoverEvent");
+    }
+    static {
+      this.type = "kicanvas:sync_hover";
+    }
+    constructor(e) {
+      super(t.type, e, !0);
+    }
+  },
+  Q = class t extends CustomEvent {
+    static {
+      r(this, "TabActivateEvent");
+    }
+    static {
+      this.type = "kicanvas:tab:activate";
+    }
+    constructor(e) {
+      super(t.type, { detail: e });
+    }
+  },
+  Z = class t extends CustomEvent {
+    static {
+      r(this, "TabMenuVisibleChangeEvent");
+    }
+    static {
+      this.type = "kicanvas:tab:menu:visible";
+    }
+    constructor(e) {
+      super(t.type, { detail: e });
+    }
+  },
+  ee = class t extends CustomEvent {
+    static {
+      r(this, "TabMenuChangeEvent");
+    }
+    static {
+      this.type = "file:tab:menu:change";
+    }
+    constructor(e) {
+      super(t.type, { detail: e });
+    }
+  },
+  te = class t extends CustomEvent {
+    static {
+      r(this, "TabMenuClickEvent");
+    }
+    static {
+      this.type = "kicanvas:tab:menu:click";
+    }
+    constructor(e) {
+      super(t.type, { detail: e });
+    }
+  },
+  ne = class t extends CustomEvent {
+    static {
+      r(this, "SheetChangeEvent");
+    }
+    static {
+      this.type = "kicanvas:sheet:change";
+    }
+    constructor(e) {
+      super(t.type, { detail: e });
+    }
+  },
+  re = class t extends CustomEvent {
+    static {
+      r(this, "SheetLoadEvent");
+    }
+    static {
+      this.type = "kicanvas:sheet:loaded";
+    }
+    constructor(e) {
+      super(t.type, { detail: e });
+    }
+  },
+  E = class t extends CustomEvent {
+    static {
+      r(this, "Online3dViewerUrlReady");
+    }
+    static {
+      this.type = "3d:url:ready";
+    }
+    constructor(e) {
+      super(t.type, { detail: e });
+    }
+  },
+  w = class t extends CustomEvent {
+    static {
+      r(this, "Online3dViewerLoaded");
+    }
+    static {
+      this.type = "3d:viewer:loaded";
+    }
+    constructor() {
+      super(t.type);
+    }
+  },
+  se = class t extends CustomEvent {
+    static {
+      r(this, "SchViewerLoaded");
+    }
+    static {
+      this.type = "sch:viewer:loaded";
+    }
+    constructor() {
+      super(t.type);
+    }
+  },
+  ie = class t extends CustomEvent {
+    static {
+      r(this, "PCBViewerLoaded");
+    }
+    static {
+      this.type = "pcb:viewer:loaded";
+    }
+    constructor() {
+      super(t.type);
+    }
+  },
+  oe = class t extends CustomEvent {
+    static {
+      r(this, "BoardContentReady");
+    }
+    static {
+      this.type = "pcb:board_content:ready";
+    }
+    constructor(e) {
+      super(t.type, { detail: e });
+    }
+  },
+  ae = class t extends CustomEvent {
+    static {
+      r(this, "AdBoardContentReady");
+    }
+    static {
+      this.type = "ad:board_content:ready";
+    }
+    constructor(e) {
+      super(t.type, { detail: e });
+    }
+  },
+  le = class t extends CustomEvent {
+    static {
+      r(this, "LabelClickEvent");
+    }
+    static {
+      this.type = "sch:label:click";
+    }
+    constructor(e) {
+      super(t.type, { detail: e });
+    }
+  },
+  ce = class t extends CustomEvent {
+    static {
+      r(this, "HierarchicalSheetPinClickEvent");
+    }
+    static {
+      this.type = "sch:hierarchical_sheet_pin:click";
+    }
+    constructor(e) {
+      super(t.type, { detail: e });
+    }
+  },
+  pe = class t extends CustomEvent {
+    static {
+      r(this, "SelectDesignatorEvent");
+    }
+    static {
+      this.type = "sch:select:designator";
+    }
+    constructor(e) {
+      super(t.type, { detail: e });
+    }
+  },
+  ue = class t extends CustomEvent {
+    static {
+      r(this, "ComponentERCResultEvent");
+    }
+    static {
+      this.type = "sch:erc:component";
+    }
+    constructor(e) {
+      super(t.type, { detail: e });
+    }
+  },
+  de = class t extends CustomEvent {
+    static {
+      r(this, "ProjectERCResultEvent");
+    }
+    static {
+      this.type = "sch:erc:project";
+    }
+    constructor(e) {
+      super(t.type, { detail: e });
+    }
+  },
+  he = class t extends CustomEvent {
+    static {
+      r(this, "NetItemSelectEvent");
+    }
+    static {
+      this.type = "net:select_item";
+    }
+    constructor(e) {
+      super(t.type, { detail: e });
+    }
+  },
+  me = class t extends CustomEvent {
+    static {
+      r(this, "OpenBarrierEvent");
+    }
+    static {
+      this.type = "ecad-viewer:open_barrier";
+    }
+    constructor() {
+      super(t.type);
+    }
+  },
+  ye = class t extends CustomEvent {
+    static {
+      r(this, "ShowBarrierEvent");
+    }
+    static {
+      this.type = "ecad-viewer:show_barrier";
+    }
+    constructor() {
+      super(t.type);
+    }
+  },
+  ve = class t extends CustomEvent {
+    static {
+      r(this, "PresetChangeEvent");
+    }
+    static {
+      this.type = "ecad-viewer:preset:change";
+    }
+    constructor(e) {
+      super(t.type, { detail: e });
+    }
+  },
+  Ce = class t extends CustomEvent {
+    static {
+      r(this, "PresetUnsetEvent");
+    }
+    static {
+      this.type = "ecad-viewer:preset:unset";
+    }
+    constructor() {
+      super(t.type);
+    }
+  },
+  be = class t extends l {
+    static {
+      r(this, "CrossProbeRequestEvent");
+    }
+    static {
+      this.type = "ecad-viewer:crossprobe:request";
+    }
+    constructor(e) {
+      super(t.type, e, !0);
+    }
+  },
+  xe = class t extends l {
+    static {
+      r(this, "CrossProbeResultEvent");
+    }
+    static {
+      this.type = "ecad-viewer:crossprobe:result";
+    }
+    constructor(e) {
+      super(t.type, e, !0);
+    }
+  },
+  fe = class t extends l {
+    static {
+      r(this, "CommentClickEvent");
+    }
+    static {
+      this.type = "ecad-viewer:comment:click";
+    }
+    constructor(e) {
+      super(t.type, e, !0);
+    }
+  };
+import {
+  AmbientLight as Oe,
+  AnimationMixer as Fe,
+  AxesHelper as ge,
+  Box3 as Ne,
+  Cache as qe,
+  Color as ze,
+  DirectionalLight as Ke,
+  GridHelper as $e,
+  LoaderUtils as Ue,
+  LoadingManager as Be,
+  PMREMGenerator as Ve,
+  PerspectiveCamera as Ee,
+  PointsMaterial as We,
+  REVISION as Ge,
+  Scene as we,
+  SkeletonHelper as Xe,
+  Vector3 as Te,
+  WebGLRenderer as Se,
+  LinearToneMapping as Ye,
+} from "three";
+import { GLTFLoader as Je } from "three/addons/loaders/GLTFLoader.js";
+import { KTX2Loader as Qe } from "three/addons/loaders/KTX2Loader.js";
+import { DRACOLoader as Ze } from "three/addons/loaders/DRACOLoader.js";
+import { MeshoptDecoder as et } from "three/addons/libs/meshopt_decoder.module.js";
+import { TrackballControls as tt } from "three/addons/controls/TrackballControls.js";
+import { EXRLoader as nt } from "three/addons/loaders/EXRLoader.js";
+import { RoomEnvironment as rt } from "three/addons/environments/RoomEnvironment.js";
+var P = [
+  { id: "", name: "None", path: null },
+  { id: "neutral", name: "Neutral", path: null },
+  {
+    id: "venice-sunset",
+    name: "Venice Sunset",
+    path: "https://storage.googleapis.com/donmccurdy-static/venice_sunset_1k.exr",
+    format: ".exr",
+  },
+  {
+    id: "footprint-court",
+    name: "Footprint Court (HDR Labs)",
+    path: "https://storage.googleapis.com/donmccurdy-static/footprint_court_2k.exr",
+    format: ".exr",
+  },
+];
+var D = "[default]",
+  T = new Be(),
+  Re = `https://unpkg.com/three@0.${Ge}.x`,
+  st = new Ze(T).setDecoderPath(`${Re}/examples/jsm/libs/draco/gltf/`),
+  it = new Qe(T).setTranscoderPath(`${Re}/examples/jsm/libs/basis/`);
+qe.enabled = !0;
+var S = class {
+  static {
+    r(this, "Viewer");
+  }
+  constructor(e) {
+    ((this.el = e),
+      (this.lights = []),
+      (this.content = null),
+      (this.mixer = null),
+      (this.clips = []),
+      (this.gui = null),
+      (this.state = {
+        environment: P[1].name,
+        background: !1,
+        playbackSpeed: 1,
+        actionStates: {},
+        camera: D,
+        wireframe: !1,
+        skeleton: !1,
+        grid: !1,
+        autoRotate: !1,
+        punctualLights: !0,
+        exposure: 0,
+        toneMapping: Ye,
+        ambientIntensity: 0.3,
+        ambientColor: "#FFFFFF",
+        directIntensity: 0.8 * Math.PI,
+        directColor: "#FFFFFF",
+        bgColor: "#F1F1F1",
+        pointSize: 1,
+      }),
+      (this.prevTime = 0),
+      (this.backgroundColor = new ze(this.state.bgColor)),
+      (this.scene = new we()),
+      (this.scene.background = this.backgroundColor));
+    let n = 50,
+      s = e.clientWidth / e.clientHeight;
+    ((this.defaultCamera = new Ee(n, s, 0.1, 500)),
+      (this.activeCamera = this.defaultCamera),
+      this.scene.add(this.defaultCamera),
+      (this.renderer = new Se({ antialias: !0 })),
+      this.renderer.setClearColor(13421772),
+      this.renderer.setPixelRatio(window.devicePixelRatio),
+      this.renderer.setSize(e.clientWidth, e.clientHeight),
+      (this.pmremGenerator = new Ve(this.renderer)),
+      this.pmremGenerator.compileEquirectangularShader(),
+      (this.neutralEnvironment = this.pmremGenerator.fromScene(new rt()).texture),
+      (this.controls = new tt(this.defaultCamera, this.renderer.domElement)),
+      this.el.appendChild(this.renderer.domElement),
+      (this.cameraCtrl = null),
+      (this.cameraFolder = null),
+      (this.animFolder = null),
+      (this.animCtrls = []),
+      (this.morphFolder = null),
+      (this.morphCtrls = []),
+      (this.skeletonHelpers = []),
+      (this.gridHelper = null),
+      (this.axesHelper = null),
+      this.addAxesHelper(),
+      (this.animate = this.animate.bind(this)),
+      requestAnimationFrame(this.animate),
+      window.addEventListener("resize", this.resize.bind(this), !1));
+  }
+  get renderer_element() {
+    return this.renderer.domElement;
+  }
+  animate(e) {
+    requestAnimationFrame(this.animate);
+    let n = (e - this.prevTime) / 1e3;
+    (this.controls.update(),
+      this.mixer && this.mixer.update(n),
+      this.render(),
+      (this.prevTime = e));
+  }
+  render() {
+    (this.renderer.render(this.scene, this.activeCamera),
+      this.state.grid &&
+        (this.axesCamera.position.copy(this.defaultCamera.position),
+        this.axesCamera.lookAt(this.axesScene.position),
+        this.axesRenderer.render(this.axesScene, this.axesCamera)));
+  }
+  resize() {
+    let { clientHeight: e, clientWidth: n } = this.el;
+    (console.log("resize", n, e),
+      (this.defaultCamera.aspect = n / e),
+      this.defaultCamera.updateProjectionMatrix(),
+      this.renderer.setSize(n, e),
+      (this.axesCamera.aspect = this.axesDiv.clientWidth / this.axesDiv.clientHeight),
+      this.axesCamera.updateProjectionMatrix(),
+      this.axesRenderer.setSize(this.axesDiv.clientWidth, this.axesDiv.clientHeight),
+      this.controls.handleResize());
+  }
+  load(e, n) {
+    let s = Ue.extractUrlBase(e);
+    return new Promise((i, o) => {
+      T.setURLModifier((c) => {
+        let u = decodeURI(c)
+          .replace(s, "")
+          .replace(/^(\.?\/)/, "");
+        if (n.has(u)) {
+          let k = n.get(u),
+            H = URL.createObjectURL(k);
+          return (m.push(H), H);
+        }
+        return c;
+      });
+      let a = new Je(T)
+          .setCrossOrigin("anonymous")
+          .setDRACOLoader(st)
+          .setKTX2Loader(it.detectSupport(this.renderer))
+          .setMeshoptDecoder(et),
+        m = [];
+      a.load(
+        e,
+        (c) => {
+          let u = c.scene || c.scenes[0],
+            k = c.animations || [];
+          if (!u)
+            throw new Error(
+              "This model contains no scene, and cannot be viewed here. However, it may contain individual 3D resources.",
+            );
+          (this.setContent(u, k), m.forEach(URL.revokeObjectURL), i(c));
+        },
+        void 0,
+        o,
+      );
+    });
+  }
+  setContent(e, n) {
+    (this.clear(), e.updateMatrixWorld());
+    let s = new Ne().setFromObject(e),
+      i = s.getSize(new Te()).length(),
+      o = s.getCenter(new Te());
+    (this.controls.reset(),
+      (this.controls.rotateSpeed = 1),
+      (this.controls.zoomSpeed = 1.2),
+      (this.controls.panSpeed = 0.8),
+      (e.position.x -= o.x),
+      (e.position.y -= o.y),
+      (e.position.z -= o.z),
+      (this.controls.maxDistance = i * 10),
+      (this.defaultCamera.near = i / 100),
+      (this.defaultCamera.far = i * 100),
+      this.defaultCamera.updateProjectionMatrix(),
+      this.defaultCamera.position.copy(o),
+      (this.defaultCamera.position.x = 0),
+      (this.defaultCamera.position.y = i),
+      (this.defaultCamera.position.z = i / 2),
+      this.defaultCamera.lookAt(o),
+      this.setCamera(D),
+      this.axesCamera.position.copy(this.defaultCamera.position),
+      this.axesCamera.lookAt(this.axesScene.position),
+      (this.axesCamera.near = i / 100),
+      (this.axesCamera.far = i * 100),
+      this.axesCamera.updateProjectionMatrix(),
+      this.axesCorner.scale.set(i, i, i),
+      this.controls.update(),
+      this.scene.add(e),
+      (this.content = e),
+      (this.state.punctualLights = !0),
+      this.content.traverse((a) => {
+        a.isLight && (this.state.punctualLights = !1);
+      }),
+      this.setClips(n),
+      this.updateLights(),
+      this.updateEnvironment(),
+      this.updateDisplay());
+  }
+  setClips(e) {
+    (this.mixer &&
+      (this.mixer.stopAllAction(),
+      this.mixer.uncacheRoot(this.mixer.getRoot()),
+      (this.mixer = null)),
+      (this.clips = e),
+      e.length && (this.mixer = new Fe(this.content)));
+  }
+  playAllClips() {
+    this.clips.forEach((e) => {
+      (this.mixer.clipAction(e).reset().play(), (this.state.actionStates[e.name] = !0));
+    });
+  }
+  setCamera(e) {
+    e === D
+      ? ((this.controls.enabled = !0), (this.activeCamera = this.defaultCamera))
+      : ((this.controls.enabled = !1),
+        this.content.traverse((n) => {
+          n.isCamera && n.name === e && (this.activeCamera = n);
+        }));
+  }
+  updateLights() {
+    let e = this.state,
+      n = this.lights;
+    (e.punctualLights && !n.length
+      ? this.addLights()
+      : !e.punctualLights && n.length && this.removeLights(),
+      (this.renderer.toneMapping = Number(e.toneMapping)),
+      (this.renderer.toneMappingExposure = Math.pow(2, e.exposure)),
+      n.length === 2 &&
+        ((n[0].intensity = e.ambientIntensity),
+        n[0].color.set(e.ambientColor),
+        (n[1].intensity = e.directIntensity),
+        n[1].color.set(e.directColor)));
+  }
+  addLights() {
+    let e = this.state,
+      n = new Oe(e.ambientColor, e.ambientIntensity);
+    ((n.name = "ambient_light"), this.defaultCamera.add(n));
+    let s = new Ke(e.directColor, e.directIntensity);
+    (s.position.set(0.5, 0, 0.866),
+      (s.name = "main_light"),
+      this.defaultCamera.add(s),
+      this.lights.push(n, s));
+  }
+  removeLights() {
+    (this.lights.forEach((e) => e.parent.remove(e)), (this.lights.length = 0));
+  }
+  updateEnvironment() {
+    let e = P.filter((n) => n.name === this.state.environment)[0];
+    this.getCubeMapTexture(e).then(({ envMap: n }) => {
+      ((this.scene.environment = n),
+        (this.scene.background = this.state.background ? n : this.backgroundColor));
+    });
+  }
+  getCubeMapTexture(e) {
+    let { id: n, path: s } = e;
+    return n === "neutral"
+      ? Promise.resolve({ envMap: this.neutralEnvironment })
+      : n === ""
+        ? Promise.resolve({ envMap: null })
+        : new Promise((i, o) => {
+            new nt().load(
+              s,
+              (a) => {
+                let m = this.pmremGenerator.fromEquirectangular(a).texture;
+                (this.pmremGenerator.dispose(), i({ envMap: m }));
+              },
+              void 0,
+              o,
+            );
+          });
+  }
+  updateDisplay() {
+    (this.skeletonHelpers.length && this.skeletonHelpers.forEach((e) => this.scene.remove(e)),
+      ke(this.content, (e) => {
+        ((e.wireframe = this.state.wireframe), e instanceof We && (e.size = this.state.pointSize));
+      }),
+      this.content.traverse((e) => {
+        if (e.geometry && e.skeleton && this.state.skeleton) {
+          let n = new Xe(e.skeleton.bones[0].parent);
+          ((n.material.linewidth = 3), this.scene.add(n), this.skeletonHelpers.push(n));
+        }
+      }),
+      this.state.grid !== !!this.gridHelper &&
+        (this.state.grid
+          ? ((this.gridHelper = new $e()),
+            (this.axesHelper = new ge()),
+            (this.axesHelper.renderOrder = 999),
+            (this.axesHelper.onBeforeRender = (e) => e.clearDepth()),
+            this.scene.add(this.gridHelper),
+            this.scene.add(this.axesHelper))
+          : (this.scene.remove(this.gridHelper),
+            this.scene.remove(this.axesHelper),
+            (this.gridHelper = null),
+            (this.axesHelper = null),
+            this.axesRenderer.clear())));
+  }
+  updateBackground() {
+    this.backgroundColor.set(this.state.bgColor);
+  }
+  addAxesHelper() {
+    ((this.axesDiv = document.createElement("div")),
+      this.el.appendChild(this.axesDiv),
+      this.axesDiv.classList.add("axes"));
+    let { clientWidth: e, clientHeight: n } = this.axesDiv;
+    ((this.axesScene = new we()),
+      (this.axesCamera = new Ee(50, e / n, 0.1, 10)),
+      this.axesScene.add(this.axesCamera),
+      (this.axesRenderer = new Se({ alpha: !0 })),
+      this.axesRenderer.setPixelRatio(window.devicePixelRatio),
+      this.axesRenderer.setSize(this.axesDiv.clientWidth, this.axesDiv.clientHeight),
+      (this.axesCamera.up = this.defaultCamera.up),
+      (this.axesCorner = new ge(5)),
+      this.axesScene.add(this.axesCorner),
+      this.axesDiv.appendChild(this.axesRenderer.domElement));
+  }
+  clear() {
+    this.content &&
+      (this.scene.remove(this.content),
+      this.content.traverse((e) => {
+        e.geometry && e.geometry.dispose();
+      }),
+      ke(this.content, (e) => {
+        for (let n in e) n !== "envMap" && e[n] && e[n].isTexture && e[n].dispose();
+      }));
+  }
+};
+function ke(t, e) {
+  t.traverse((n) => {
+    if (!n.geometry) return;
+    (Array.isArray(n.material) ? n.material : [n.material]).forEach(e);
+  });
+}
+r(ke, "traverseMaterials");
+var h = class extends d {
+  static {
+    r(this, "Online3dViewer");
+  }
+  static {
+    this.styles = [
+      ...d.styles,
+      b`
+            :host {
+                height: 100%;
+                width: 100%;
+            }
+        `,
+    ];
+  }
+  constructor() {
+    (super(),
+      window.addEventListener(E.type, (e) => {
+        this._load_src(e.detail);
+      }));
+  }
+  connectedCallback() {
+    (async () => (
+      (this.project = await this.requestContext("project")),
+      await this.project.loaded,
+      super.connectedCallback()
+    ))();
+  }
+  initialContentCallback() {
+    A(() => {
+      this.project.ov_3d_url && this._load_src(this.project.ov_3d_url);
+    });
+  }
+  on_show() {
+    this._viewer_container.resize();
+  }
+  async _load_src(e) {
+    (await this._viewer_container.load(e, new Map()),
+      URL.revokeObjectURL(e),
+      this.project.dispatchEvent(new w()),
+      this.on_show());
+  }
+  render() {
+    return (
+      (this._viewer_container = new S(this)),
+      (this._canvas = this._viewer_container.renderer.domElement),
+      f` ${this._canvas}`
+    );
+  }
+};
+window.customElements.define("ecad-3d-viewer", h);
+var fn = { Online3dViewer: h };
+export { h as Online3dViewer, fn as default };

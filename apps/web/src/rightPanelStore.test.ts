@@ -356,6 +356,18 @@ describe("rightPanelStore", () => {
     });
   });
 
+  it("opens KiCad as a thread-scoped singleton surface", () => {
+    useRightPanelStore.getState().open(refA, "kicad");
+    useRightPanelStore.getState().open(refA, "kicad");
+
+    const state = selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA);
+    expect(state).toMatchObject({
+      isOpen: true,
+      activeSurfaceId: "kicad",
+      surfaces: [{ id: "kicad", kind: "kicad" }],
+    });
+  });
+
   it("replaces the standalone explorer with peer file surfaces", () => {
     useRightPanelStore.getState().open(refA, "files");
     useRightPanelStore.getState().openFile(refA, "src/index.ts");

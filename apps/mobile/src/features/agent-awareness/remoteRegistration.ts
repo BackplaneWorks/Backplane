@@ -492,7 +492,7 @@ function armAgentAwarenessLiveActivityForLocalWorkNow(input: {
     }
     const nowIso = new Date(Date.now()).toISOString();
     const activity = AgentActivity.start({
-      title: "T3 Code",
+      title: "T3CAD",
       subtitle: "Agent work in progress",
       activeCount: 1,
       updatedAt: nowIso,
