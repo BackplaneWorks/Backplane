@@ -49,9 +49,25 @@
       "channel": "production",
       "environment": "production",
       "autoIncrement": true
+    },
+    "k3eda": {
+      "corepack": true,
+      "env": {
+        "APP_VARIANT": "k3eda",
+        "NODE_OPTIONS": "--max-old-space-size=4096"
+      },
+      "channel": "k3eda",
+      "environment": "production",
+      "distribution": "store",
+      "autoIncrement": true
     }
   },
   "submit": {
+    "k3eda": {
+      "ios": {
+        "ascAppId": "6809006324"
+      }
+    },
     "production": {
       "ios": {
         "ascAppId": "6787819824"

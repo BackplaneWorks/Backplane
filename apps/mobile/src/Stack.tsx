@@ -21,6 +21,7 @@ import { useAgentNotificationNavigation } from "./features/agent-awareness/notif
 import { ConnectOnboardingRouteScreen } from "./features/cloud/ConnectOnboardingRouteScreen";
 import { useConnectOnboardingNavigation } from "./features/cloud/connectOnboardingNavigation";
 import { ThreadFilesTreeScreen, ThreadFileScreen } from "./features/files/ThreadFilesRouteScreen";
+import { KiCadViewerRouteScreen } from "./features/kicad/KiCadViewerRouteScreen";
 import { AdaptiveWorkspaceLayout } from "./features/layout/AdaptiveWorkspaceLayout";
 import { HardwareKeyboardCommandProvider } from "./features/keyboard/HardwareKeyboardCommandProvider";
 import { ReviewCommentComposerSheet } from "./features/review/ReviewCommentComposerSheet";
@@ -496,6 +497,14 @@ export const RootStack = createNativeStackNavigator({
       options: {
         ...GLASS_HEADER_OPTIONS,
         title: "Files",
+      },
+    }),
+    KiCadViewer: createNativeStackScreen({
+      screen: KiCadViewerRouteScreen,
+      linking: `${THREAD_LINKING_PREFIX}/kicad`,
+      options: {
+        ...SOLID_HEADER_OPTIONS,
+        gestureEnabled: false,
       },
     }),
     ThreadFile: createNativeStackScreen({

@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <title>Prism viewer</title>
+    <style>
+      html,
+      body,
+      #viewer {
+        height: 100%;
+        width: 100%;
+        margin: 0;
+        overflow: hidden;
+      }
+      body {
+        background: #101214;
+        color: #b8b8b8;
+        font: 12px system-ui;
+      }
+      #error {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        text-align: center;
+        pointer-events: none;
+      }
+      #error:empty {
+        display: none;
+      }
+      ecad-viewer,
+      ecad-3d-viewer {
+        display: block;
+        height: 100%;
+        width: 100%;
+      }
+    </style>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "./three/three.module.js",
+          "three/addons/": "./three/addons/",
+          "3d-viewer": "./3d-viewer.js",
+          "glyph-full": "./glyph-full.js"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div id="viewer"></div>
+    <div id="error" role="status"></div>
+    <script type="module" src="./runtime.js"></script>
+  </body>
+</html>

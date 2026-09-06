@@ -87,6 +87,10 @@
       "types": "./src/state/assets.ts",
       "default": "./src/state/assets.ts"
     },
+    "./state/kicad": {
+      "types": "./src/state/kicad.ts",
+      "default": "./src/state/kicad.ts"
+    },
     "./state/attachments": {
       "types": "./src/state/attachments.ts",
       "default": "./src/state/attachments.ts"

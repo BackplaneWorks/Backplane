@@ -267,6 +267,12 @@ export default defineConfig(() => {
       devSourcemap: buildSourcemap !== false,
     },
     build: {
+      rolldownOptions: {
+        input: {
+          app: new URL("./index.html", import.meta.url).pathname,
+          kicad: new URL("./kicad.html", import.meta.url).pathname,
+        },
+      },
       outDir: "dist",
       emptyOutDir: true,
       manifest: true,

@@ -20,6 +20,10 @@ import {
   staticAndDevRouteLayer,
   browserApiCorsLayer,
   httpCompressionLayer,
+  kicadProjectRouteLayer,
+  kicadViewerSessionRouteLayer,
+  kicadModelRouteLayer,
+  kicadGerberRouteLayer,
 } from "./http.ts";
 import { guardHttpResponseWriteErrors } from "./httpResponseErrorGuard.ts";
 import { fixPath } from "./os-jank.ts";
@@ -541,6 +545,10 @@ export const makeRoutesLayer = Layer.mergeAll(
     ),
     otlpTracesProxyRouteLayer,
     assetRouteLayer,
+    kicadProjectRouteLayer,
+    kicadViewerSessionRouteLayer,
+    kicadModelRouteLayer,
+    kicadGerberRouteLayer,
     attachmentUploadRouteLayer,
     staticAndDevRouteLayer,
     websocketRpcRouteLayer,
