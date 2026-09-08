@@ -258,17 +258,17 @@ function FullDiskAccessStep({
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Let T3 Code read {source.name}&rsquo;s cookies</DialogTitle>
+        <DialogTitle>Let Backplane read {source.name}&rsquo;s cookies</DialogTitle>
         <DialogDescription>
-          To import cookies from {source.name}, T3 Code needs Full Disk Access. Turn it on in System
-          Settings, then come back to finish the import — you can revoke it again once the import is
-          done.
+          To import cookies from {source.name}, Backplane needs Full Disk Access. Turn it on in
+          System Settings, then come back to finish the import — you can revoke it again once the
+          import is done.
         </DialogDescription>
       </DialogHeader>
       {stillRequired ? (
         <DialogPanel>
           <p role="status" className="text-sm text-muted-foreground">
-            Full Disk Access is still required. If you just turned it on, quit and reopen T3 Code,
+            Full Disk Access is still required. If you just turned it on, quit and reopen Backplane,
             then try again.
           </p>
         </DialogPanel>

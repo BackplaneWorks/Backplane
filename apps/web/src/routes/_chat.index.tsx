@@ -161,11 +161,11 @@ function HostedStaticOnboardingState() {
                 <LinkIcon className="size-5" />
               </div>
               <EmptyTitle className="text-foreground text-xl">
-                Connect to a computer running T3 Code
+                Connect to a computer running Backplane
               </EmptyTitle>
               <EmptyDescription className="mt-2 text-sm leading-relaxed text-muted-foreground/78">
-                This browser connects to T3 Code running on your computer or a server. Start the T3
-                Code desktop app or command-line server on that machine and keep it running.
+                This browser connects to Backplane running on your computer or a server. Open
+                Backplane on that machine and keep it running.
               </EmptyDescription>
               <EmptyDescription className="mt-2 text-sm leading-relaxed text-muted-foreground/78">
                 {cloudEnabled

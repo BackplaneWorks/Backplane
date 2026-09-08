@@ -176,6 +176,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: backplane-${{ matrix.platform }}-${{ matrix.arch }}
+          compression-level: 0
           retention-days: 1
           path: |
             release/*.AppImage
@@ -208,7 +209,7 @@ jobs:
           version="$DISPATCH_VERSION"
           if [[ -z "$version" ]]; then version="${GITHUB_REF_NAME#v}"; fi
           echo "tag=v$version" >> "$GITHUB_OUTPUT"
-      - name: Publish release
+      - name: Create draft release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ steps.meta.outputs.tag }}
@@ -216,4 +217,13 @@ jobs:
         run: |
           args=(--draft)
           if [[ "$RELEASE_TAG" == *-* ]]; then args+=(--prerelease); fi
-          gh release create "$RELEASE_TAG" release/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Backplane $RELEASE_TAG" --generate-notes "${args[@]}"
+          cat > "$RUNNER_TEMP/backplane-release.md" <<'NOTES'
+          Linux x64 AppImage. Download it, make it executable, and open Backplane.
+
+          Includes the desktop server, Python, and the stable Backplane KiCad runtime with PCB and schematic IPC patches. KiCad's matching source archives and licenses are available in [Backplane_KiCad releases](https://github.com/i2cjak/Backplane_KiCad/releases); the bundled manifest identifies the exact source commit.
+
+          Configure your coding provider in Settings. Berkeley Mono is used when installed locally; no Berkeley Mono font files are included.
+
+          SHA-256 checksums are provided in `SHA256SUMS`.
+          NOTES
+          gh release create "$RELEASE_TAG" release/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Backplane $RELEASE_TAG" --notes-file "$RUNNER_TEMP/backplane-release.md" "${args[@]}"

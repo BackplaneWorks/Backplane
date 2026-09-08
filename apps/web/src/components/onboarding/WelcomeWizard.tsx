@@ -490,8 +490,8 @@ function ConnectMachinesStep({
             <CollapsiblePanel>
               <CommandBlock command={CONNECT_LOGIN_COMMAND} className="mt-2" />
               <p className="mt-2 text-xs text-muted-foreground">
-                Keep T3 Code running on that computer. If it is not running, open T3 Code or run{" "}
-                <code className="font-mono">npx t3 serve</code>.
+                Keep Backplane running on that computer. If it is not running, open the installed
+                Backplane app.
               </p>
             </CollapsiblePanel>
           </Collapsible>
@@ -503,8 +503,8 @@ function ConnectMachinesStep({
         <>
           <CommandBlock command={CONNECT_LOGIN_COMMAND} className="mt-7" prominent />
           <p className="mt-2 text-xs text-muted-foreground">
-            Keep T3 Code running on that computer. If it is not running, open T3 Code or run{" "}
-            <code className="font-mono">npx t3 serve</code>.
+            Keep Backplane running on that computer. If it is not running, open the installed
+            Backplane app.
           </p>
           <div className="mt-5 overflow-hidden border-y border-border">
             <CloudEnvironmentConnectRows
@@ -591,7 +591,7 @@ function PairDirectStep({
           </p>
           <CommandBlock command="npx t3 pair" className="mt-2" />
           <p className="mt-2 text-xs text-muted-foreground">
-            Start the server with <code className="font-mono">npx t3 serve</code> first. Add{" "}
+            Start the installed Backplane app or server first. Add{" "}
             <code className="font-mono">--tailscale</code> to use your tailnet.
           </p>
         </div>
