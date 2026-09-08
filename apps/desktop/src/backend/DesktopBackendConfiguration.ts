@@ -467,6 +467,25 @@ const buildObservabilityFragment = (observabilitySettings: BackendObservabilityS
   }),
 });
 
+const resolveBundledRuntimeEnvironment = (
+  environment: DesktopEnvironment.DesktopEnvironment["Service"],
+): Record<string, string> => {
+  if (!environment.isPackaged) return {};
+
+  const defaults = {
+    BACKPLANE_KICAD_ROOT: environment.path.join(environment.resourcesPath, "kicad"),
+    BACKPLANE_PYTHON: environment.path.join(
+      environment.resourcesPath,
+      "python",
+      "bin",
+      process.platform === "win32" ? "python.exe" : "python3",
+    ),
+  };
+  return Object.fromEntries(
+    Object.entries(defaults).filter(([name]) => !(process.env[name]?.trim() ?? "")),
+  );
+};
+
 const resolvePrimaryStartConfig = Effect.fn("desktop.backendConfiguration.resolvePrimary")(
   function* (
     input: SharedBootstrapInput & {
@@ -507,6 +526,7 @@ const resolvePrimaryStartConfig = Effect.fn("desktop.backendConfiguration.resolv
       env: {
         ...backendChildEnvPatch(),
         ELECTRON_RUN_AS_NODE: "1",
+        ...resolveBundledRuntimeEnvironment(environment),
       },
       // Primary wants process.env (PATH, dev-runner's T3CODE_HOME, etc.).
       extendEnv: true,

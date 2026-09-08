@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <defs>
+    <mask id="backplane-cards">
+      <g stroke-linejoin="miter" transform="translate(256 0) scale(-1 1)">
+        <path d="m103 22 128 40v112l-128-40Z" fill="black" stroke="white" stroke-width="7"/>
+        <g fill="white" stroke="black" stroke-width="7">
+          <path d="m122 40-83 67v80l83-67Z"/>
+          <path d="m161 52-83 67v80l83-67Z"/>
+          <path d="m200 64-83 67v80l83-67Z"/>
+        </g>
+        <g stroke="black" stroke-width="4">
+          <path d="M49 109v66M88 121v66M127 133v66"/>
+        </g>
+      </g>
+    </mask>
+  </defs>
+  <path fill="#101214" mask="url(#backplane-cards)" d="M0 0h256v256H0z"/>
+</svg>

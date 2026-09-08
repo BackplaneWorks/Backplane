@@ -105,6 +105,7 @@ const withHarness = <A, E, R>(
     | FileSystem.FileSystem
     | DesktopBackendConfiguration.DesktopBackendConfiguration
   >,
+  environmentOptions: Parameters<typeof makeEnvironmentLayer>[1] = {},
 ) =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
@@ -119,7 +120,7 @@ const withHarness = <A, E, R>(
           Layer.provideMerge(DesktopAppSettings.layerTest()),
           Layer.provideMerge(DesktopWslEnvironment.layerTest()),
           Layer.provideMerge(DesktopWslServerTree.layerTest()),
-          Layer.provideMerge(makeEnvironmentLayer(baseDir)),
+          Layer.provideMerge(makeEnvironmentLayer(baseDir, environmentOptions)),
         ),
       ),
     );
@@ -235,6 +236,8 @@ describe("DesktopBackendConfiguration", () => {
         assert.isUndefined(first.env.T3CODE_PORT);
         assert.isUndefined(first.env.T3CODE_MODE);
         assert.isUndefined(first.env.T3CODE_DESKTOP_LAN_HOST);
+        assert.equal(first.env.BACKPLANE_KICAD_ROOT, "/missing/resources/kicad");
+        assert.equal(first.env.BACKPLANE_PYTHON, "/missing/resources/python/bin/python3");
 
         assert.equal(first.bootstrap.mode, "desktop");
         assert.equal(first.bootstrap.noBrowser, true);
@@ -248,6 +251,41 @@ describe("DesktopBackendConfiguration", () => {
       }),
     ),
   );
+
+  it.effect("does not inject packaged runtime paths into development backends", () =>
+    withHarness(
+      Effect.gen(function* () {
+        const configuration = yield* DesktopBackendConfiguration.DesktopBackendConfiguration;
+        const config = yield* configuration.resolvePrimary;
+        assert.isUndefined(config.env.BACKPLANE_KICAD_ROOT);
+        assert.isUndefined(config.env.BACKPLANE_PYTHON);
+      }),
+      { isPackaged: false, resourcesPath: "/dev/resources" },
+    ),
+  );
+
+  it("preserves explicit runtime environment overrides for packaged backends", async () => {
+    const previousRoot = process.env.BACKPLANE_KICAD_ROOT;
+    const previousPython = process.env.BACKPLANE_PYTHON;
+    process.env.BACKPLANE_KICAD_ROOT = "/custom/kicad";
+    process.env.BACKPLANE_PYTHON = "/custom/python3";
+    try {
+      await Effect.runPromise(
+        withHarness(
+          Effect.gen(function* () {
+            const configuration = yield* DesktopBackendConfiguration.DesktopBackendConfiguration;
+            const config = yield* configuration.resolvePrimary;
+            assert.isUndefined(config.env.BACKPLANE_KICAD_ROOT);
+            assert.isUndefined(config.env.BACKPLANE_PYTHON);
+          }),
+          { isPackaged: true, resourcesPath: "/packaged/resources" },
+        ),
+      );
+    } finally {
+      restoreEnv("BACKPLANE_KICAD_ROOT", previousRoot);
+      restoreEnv("BACKPLANE_PYTHON", previousPython);
+    }
+  });
 
   it.effect("resolvePrimary starts from server.asar without materializing the WSL tree", () =>
     Effect.gen(function* () {

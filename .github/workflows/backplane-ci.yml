@@ -1,0 +1,53 @@
+name: Backplane CI
+
+on:
+  push:
+    branches: [t3cad]
+  pull_request:
+    branches: [t3cad]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backplane-ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  focused:
+    name: Focused desktop and runtime checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: true
+
+      - name: Install Linux packaging dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libsecret-1-dev pkg-config
+
+      - name: Run focused checks
+        run: >-
+          ./node_modules/.bin/vp test run
+          scripts/build-desktop-artifact.test.ts
+          scripts/lib/brand-assets.test.ts
+          apps/desktop/src/app/DesktopEnvironment.test.ts
+          apps/desktop/src/app/DesktopAppIdentity.test.ts
+          apps/desktop/src/app/DesktopAssets.test.ts
+          apps/desktop/src/app/DesktopLinuxUrlHandler.test.ts
+          apps/desktop/src/backend/DesktopBackendConfiguration.test.ts
+          apps/desktop/src/electron/ElectronProtocol.test.ts
+          apps/server/src/kicad/KiCadExecutable.test.ts
+          apps/server/src/kicad/PrismGerber.test.ts
+          apps/web/src/branding.test.ts
+          apps/web/src/appearanceFonts.test.ts
+          apps/web/src/components/desktopUpdate.logic.test.ts
+          apps/web/src/components/ProjectFavicon.test.tsx

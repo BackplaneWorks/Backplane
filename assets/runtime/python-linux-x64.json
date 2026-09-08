@@ -1,0 +1,14 @@
+{
+  "runtime": "python-build-standalone",
+  "version": "3.13.15",
+  "release": "20260901",
+  "installOnly": {
+    "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.13.15%2B20260901-x86_64-unknown-linux-gnu-install_only.tar.gz",
+    "sha256": "0651dd7157d3debf769e15a52c1de9de7fbcdc36ba72faf79fde3c44f14d9461"
+  },
+  "fullBuild": {
+    "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.13.15%2B20260901-x86_64-unknown-linux-gnu-pgo%2Blto-full.tar.zst",
+    "sha256": "9d57bd835f5663e7947cfb4428ec8decbd9f3d7141c40eb413fad4096f82a819"
+  },
+  "licenseDirectory": "python/licenses"
+}

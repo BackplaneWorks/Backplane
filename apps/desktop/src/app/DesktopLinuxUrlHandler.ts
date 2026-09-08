@@ -71,7 +71,9 @@ export function renderUrlHandlerDesktopEntry(input: {
   readonly displayName: string;
   readonly execTarget: string;
   readonly scheme: string;
+  readonly schemes?: readonly string[];
 }): string {
+  const schemes = input.schemes ?? [input.scheme];
   return [
     "[Desktop Entry]",
     "Type=Application",
@@ -80,7 +82,7 @@ export function renderUrlHandlerDesktopEntry(input: {
     "Terminal=false",
     "NoDisplay=true",
     "StartupNotify=false",
-    `MimeType=x-scheme-handler/${input.scheme};`,
+    `MimeType=${schemes.map((scheme) => `x-scheme-handler/${scheme};`).join("")}`,
     "",
   ].join("\n");
 }
@@ -98,6 +100,7 @@ export const make = Effect.gen(function* () {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
 
   const scheme = ElectronProtocol.getDesktopScheme(environment.isDevelopment);
+  const schemes = ElectronProtocol.getDesktopSchemeAliases(environment.isDevelopment);
   const desktopEntryPath = environment.path.join(
     environment.linuxApplicationsDir,
     URL_HANDLER_DESKTOP_ENTRY_NAME,
@@ -114,6 +117,7 @@ export const make = Effect.gen(function* () {
         displayName: environment.displayName,
         execTarget,
         scheme,
+        schemes,
       }),
     );
   }).pipe(
@@ -130,23 +134,25 @@ export const make = Effect.gen(function* () {
 
   const setDefaultHandler = Effect.scoped(
     Effect.gen(function* () {
-      const command = ChildProcess.make(
-        "xdg-mime",
-        ["default", URL_HANDLER_DESKTOP_ENTRY_NAME, `x-scheme-handler/${scheme}`],
-        {
-          stdin: "ignore",
-          stdout: "ignore",
-          stderr: "ignore",
-        },
-      );
-      const handle = yield* spawner.spawn(command);
-      const exitCode = yield* handle.exitCode;
-      if ((exitCode as unknown as number) !== 0) {
-        return yield* new DesktopLinuxUrlHandlerRegistrationError({
-          step: "set-default-handler",
-          scheme,
-          exitCode: Number(exitCode),
-        });
+      for (const registeredScheme of schemes) {
+        const command = ChildProcess.make(
+          "xdg-mime",
+          ["default", URL_HANDLER_DESKTOP_ENTRY_NAME, `x-scheme-handler/${registeredScheme}`],
+          {
+            stdin: "ignore",
+            stdout: "ignore",
+            stderr: "ignore",
+          },
+        );
+        const handle = yield* spawner.spawn(command);
+        const exitCode = yield* handle.exitCode;
+        if ((exitCode as unknown as number) !== 0) {
+          return yield* new DesktopLinuxUrlHandlerRegistrationError({
+            step: "set-default-handler",
+            scheme: registeredScheme,
+            exitCode: Number(exitCode),
+          });
+        }
       }
     }),
   ).pipe(

@@ -1,7 +1,9 @@
+import { Platform } from "react-native";
+
 const FONT_FAMILIES = {
-  regular: "DMSans-Regular",
-  medium: "DMSans-Medium",
-  bold: "DMSans-Bold",
+  regular: Platform.select({ ios: "Menlo", default: "monospace" }) ?? "monospace",
+  medium: Platform.select({ ios: "Menlo", default: "monospace" }) ?? "monospace",
+  bold: Platform.select({ ios: "Menlo", default: "monospace" }) ?? "monospace",
 } as const;
 
 /**

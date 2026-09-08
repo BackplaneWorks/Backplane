@@ -9,8 +9,8 @@ export const PROJECT_ICON_COLORS: ReadonlyArray<{
   {
     value: "gray",
     label: "Gray",
-    className: "text-gray-600 dark:text-gray-400",
-    swatchClassName: "bg-gray-500",
+    className: "text-neutral-600 dark:text-neutral-400",
+    swatchClassName: "bg-neutral-500",
   },
   {
     value: "red",

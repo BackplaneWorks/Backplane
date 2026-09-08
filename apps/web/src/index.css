@@ -138,9 +138,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
    the variables and Settings -> Appearance can override them at runtime. The
    default stacks are mirrored in `appearanceFonts.ts`. */
 @theme {
-  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-  --font-mono:
-    ui-monospace, "SF Mono", "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+  --font-sans: "Berkeley Mono", monospace;
+  --font-mono: "Berkeley Mono", monospace;
 }
 
 @theme inline {
@@ -1540,6 +1539,59 @@ body {
   font-family: var(--font-sans);
   margin: 0;
   padding: 0;
+}
+
+/* Backplane's default surface is deliberately flat and monochrome. A user
+   theme can still opt into its own palette through the data-theme-id mapping
+   above, while the unthemed app keeps controls and status surfaces readable
+   without relying on hue. */
+:root:not([data-theme-id]),
+html:not([data-theme-id]),
+html[data-theme-id=""] {
+  --radius: 0;
+  --primary: var(--foreground);
+  --primary-foreground: var(--background);
+  --secondary: var(--background);
+  --secondary-foreground: var(--foreground);
+  --muted: var(--background);
+  --muted-foreground: color-mix(in srgb, var(--foreground) 62%, var(--background));
+  --accent: color-mix(in srgb, var(--foreground) 9%, var(--background));
+  --accent-foreground: var(--foreground);
+  --message-surface: var(--accent);
+  --message-foreground: var(--foreground);
+  --message-action: var(--foreground);
+  --message-action-foreground: var(--background);
+  --message-action-hover: color-mix(in srgb, var(--foreground) 82%, var(--background));
+  --error: var(--foreground);
+  --error-foreground: var(--foreground);
+  --destructive: var(--foreground);
+  --destructive-foreground: var(--background);
+  --info: var(--foreground);
+  --info-foreground: var(--foreground);
+  --success: var(--foreground);
+  --success-foreground: var(--foreground);
+  --warning: var(--foreground);
+  --warning-foreground: var(--foreground);
+  --update: var(--foreground);
+  --update-foreground: var(--foreground);
+  --border: color-mix(in srgb, var(--foreground) 18%, var(--background));
+  --input: color-mix(in srgb, var(--foreground) 28%, var(--background));
+  --ring: var(--foreground);
+}
+
+/* Keep the geometry consistent across utilities and third-party surfaces.
+   Circular controls are still recognizable through contrast and borders. */
+*,
+*::before,
+*::after {
+  border-radius: 0 !important;
+}
+
+/* Channel artwork remains useful for identifying a build, while the product
+   chrome stays monochrome. */
+.sidebar-stage-backdrop,
+.stage-art {
+  filter: grayscale(1);
 }
 
 html,

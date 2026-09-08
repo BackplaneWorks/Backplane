@@ -1,3 +1,17 @@
+# Backplane-specific working agreements
+
+- This fork is the Backplane desktop app. Use `gpt-5.6-luna` subagents for
+  substantial implementation, investigation, and review tasks, with the
+  primary agent coordinating integration and verification.
+- Backplane's UI is monochrome with square corners and Berkeley Mono as the
+  global interface font. Keep copy minimal and avoid decorative eyebrow
+  headings. Viewer-tab behavior is outside routine UI work unless explicitly
+  requested.
+- All commits in this repository use `i2cjak <build@amemb.com>` as both author
+  and committer. Verify the identity before committing; before pushing, verify
+  the authenticated GitHub account, remote owner/repository, branch, outgoing
+  commits, staged diff, and relevant checks.
+
 # T3 Code
 
 T3 Code is a minimal GUI for coding agents. A Node WebSocket server wraps provider CLIs and agents (Codex, Claude Code, Cursor, Grok, OpenCode, Antigravity) and serves web, desktop, and mobile clients.

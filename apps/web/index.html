@@ -413,7 +413,7 @@
       body {
         background: #ffffff;
         color: #262626;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+        font-family: "Berkeley Mono", monospace;
       }
 
       html.dark body {
@@ -453,6 +453,10 @@
         object-fit: contain;
       }
 
+      html.dark #boot-shell-logo {
+        filter: invert(1);
+      }
+
       #boot-error {
         display: grid;
         justify-items: center;
@@ -477,13 +481,13 @@
         cursor: pointer;
       }
     </style>
-    <title>T3CAD (Alpha)</title>
+    <title>Backplane</title>
   </head>
   <body>
     <div id="root">
       <div id="boot-shell">
-        <div id="boot-shell-card" aria-label="T3CAD splash screen">
-          <img id="boot-shell-logo" src="/apple-touch-icon.png" alt="T3CAD" />
+        <div id="boot-shell-card" aria-label="Backplane splash screen">
+          <img id="boot-shell-logo" src="/backplane.svg" alt="Backplane" />
         </div>
       </div>
     </div>

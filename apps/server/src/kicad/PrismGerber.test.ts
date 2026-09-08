@@ -1,9 +1,16 @@
 import { expect, it } from "vite-plus/test";
 import {
   clearPrismGerberRenderCache,
+  resolvePrismPython,
   renderPrismGerber,
   renderPrismGerberComposite,
 } from "./PrismGerber.ts";
+
+it("uses the bundled Python override for packaged Gerber rendering", () => {
+  expect(resolvePrismPython({ BACKPLANE_PYTHON: "/opt/backplane/python3" })).toBe(
+    "/opt/backplane/python3",
+  );
+});
 
 it("frames upstream Gerber artwork in SVG coordinates", async () => {
   const svg = await renderPrismGerber(

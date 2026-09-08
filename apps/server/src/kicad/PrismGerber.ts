@@ -17,6 +17,10 @@ margin = max(x1 - x0, y1 - y0, 1) * 0.025
 print(render_layer_svg(layer, (x0-margin, y0-margin, x1+margin, y1+margin)))
 `;
 
+export function resolvePrismPython(env: NodeJS.ProcessEnv = process.env): string {
+  return env.BACKPLANE_PYTHON?.trim() || "python3";
+}
+
 const compositeRenderCommand = `${prismGerberPython}
 import sys
 import re
@@ -155,7 +159,7 @@ function runPrismCommand(command: string, payload: unknown, key: string): Promis
     () =>
       new Promise<string>((resolve, reject) => {
         const child = NodeChildProcess.execFile(
-          "python3",
+          resolvePrismPython(),
           ["-c", command],
           {
             timeout: 20_000,

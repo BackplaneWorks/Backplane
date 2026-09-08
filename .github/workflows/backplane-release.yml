@@ -1,0 +1,219 @@
+name: Backplane release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version without the v prefix
+        required: true
+        type: string
+      kicad_runtime_url:
+        description: URL of the matching stable Backplane KiCad runtime archive
+        required: true
+        type: string
+      kicad_runtime_sha256:
+        description: SHA-256 for the matching runtime archive
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backplane-release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NODE_OPTIONS: --max-old-space-size=8192
+  KICAD_RUNTIME_URL_LINUX_X64: ${{ vars.BACKPLANE_KICAD_RUNTIME_URL_LINUX_X64 }}
+  KICAD_RUNTIME_SHA256_LINUX_X64: ${{ vars.BACKPLANE_KICAD_RUNTIME_SHA256_LINUX_X64 }}
+
+jobs:
+  package:
+    name: ${{ matrix.platform }} ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux
+            arch: x64
+            runner: ubuntu-24.04
+            target: AppImage
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout Backplane
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version
+        id: meta
+        env:
+          DISPATCH_VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          version="$DISPATCH_VERSION"
+          if [[ -z "$version" ]]; then version="${GITHUB_REF_NAME#v}"; fi
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]] || { echo "Invalid version: $version" >&2; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Download stable Backplane KiCad runtime
+        env:
+          DISPATCH_RUNTIME_URL: ${{ inputs.kicad_runtime_url }}
+          DISPATCH_RUNTIME_SHA256: ${{ inputs.kicad_runtime_sha256 }}
+        shell: bash
+        run: |
+          case "${{ matrix.platform }}-${{ matrix.arch }}" in
+            linux-x64) runtime_url="$KICAD_RUNTIME_URL_LINUX_X64"; runtime_sha="$KICAD_RUNTIME_SHA256_LINUX_X64" ;;
+            *) echo "No KiCad runtime mapping for this target" >&2; exit 1 ;;
+          esac
+          if [[ -n "$DISPATCH_RUNTIME_URL" ]]; then runtime_url="$DISPATCH_RUNTIME_URL"; fi
+          if [[ -n "$DISPATCH_RUNTIME_SHA256" ]]; then runtime_sha="$DISPATCH_RUNTIME_SHA256"; fi
+          test -n "$runtime_url" -a -n "$runtime_sha" || { echo "Pinned KiCad runtime URL/checksum is not configured" >&2; exit 1; }
+          mkdir -p apps/desktop/prod-resources/kicad-runtime
+          curl --fail --location --retry 3 "$runtime_url" --output "$RUNNER_TEMP/kicad-runtime.tar.gz"
+          if command -v sha256sum >/dev/null; then
+            echo "$runtime_sha  $RUNNER_TEMP/kicad-runtime.tar.gz" | sha256sum --check --status
+          else
+            actual_sha="$(shasum -a 256 "$RUNNER_TEMP/kicad-runtime.tar.gz" | awk '{print $1}')"
+            test "$actual_sha" = "$runtime_sha" || { echo "KiCad runtime checksum mismatch" >&2; exit 1; }
+          fi
+          tar -xzf "$RUNNER_TEMP/kicad-runtime.tar.gz" -C apps/desktop/prod-resources/kicad-runtime --strip-components=1
+          test -f apps/desktop/prod-resources/kicad-runtime/bin/kicad-cli
+
+      - name: Download pinned Python runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          metadata=assets/runtime/python-linux-x64.json
+          install_url="$(node -p "require('./$metadata').installOnly.url")"
+          install_sha="$(node -p "require('./$metadata').installOnly.sha256")"
+          full_url="$(node -p "require('./$metadata').fullBuild.url")"
+          full_sha="$(node -p "require('./$metadata').fullBuild.sha256")"
+          mkdir -p apps/desktop/prod-resources/python-runtime/LICENSES
+          curl --fail --location --retry 3 "$install_url" --output "$RUNNER_TEMP/python-runtime.tar.gz"
+          echo "$install_sha  $RUNNER_TEMP/python-runtime.tar.gz" | sha256sum --check --status
+          tar -xzf "$RUNNER_TEMP/python-runtime.tar.gz" -C apps/desktop/prod-resources/python-runtime --strip-components=1
+          test -x apps/desktop/prod-resources/python-runtime/bin/python3
+          curl --fail --location --retry 3 "$full_url" --output "$RUNNER_TEMP/python-full.tar.zst"
+          echo "$full_sha  $RUNNER_TEMP/python-full.tar.zst" | sha256sum --check --status
+          test "$(tar --zstd -tf "$RUNNER_TEMP/python-full.tar.zst" 'python/PYTHON.json' 2>/dev/null | wc -l)" = 1
+          tar --zstd -xOf "$RUNNER_TEMP/python-full.tar.zst" python/PYTHON.json > apps/desktop/prod-resources/python-runtime/PYTHON.json
+          mapfile -t license_paths < <(tar --zstd -tf "$RUNNER_TEMP/python-full.tar.zst" | awk '/^python\/licenses\/LICENSE\..+\.txt$/ { print }')
+          test "${#license_paths[@]}" = 19
+          for license_path in "${license_paths[@]}"; do
+            tar --zstd -xOf "$RUNNER_TEMP/python-full.tar.zst" "$license_path" \
+              > "apps/desktop/prod-resources/python-runtime/LICENSES/${license_path##*/}"
+          done
+          cat > apps/desktop/prod-resources/python-runtime/LICENSES/SOURCE.txt <<EOF
+          python-build-standalone CPython $(node -p "require('./$metadata').version")
+          Install-only source: $install_url
+          Install-only SHA-256: $install_sha
+          Full-build metadata source: $full_url
+          Full-build SHA-256: $full_sha
+          EOF
+          test "$(find apps/desktop/prod-resources/python-runtime/LICENSES -type f -name 'LICENSE.*.txt' | wc -l)" = 19
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: true
+
+      - name: Install Linux packaging dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libsecret-1-dev pkg-config
+
+      - name: Check packaging and runtime behavior
+        env:
+          BACKPLANE_PYTHON: ${{ github.workspace }}/apps/desktop/prod-resources/python-runtime/bin/python3
+        run: >-
+          ./node_modules/.bin/vp test run
+          scripts/build-desktop-artifact.test.ts
+          scripts/lib/brand-assets.test.ts
+          apps/desktop/src/app/DesktopEnvironment.test.ts
+          apps/desktop/src/app/DesktopAppIdentity.test.ts
+          apps/desktop/src/backend/DesktopBackendConfiguration.test.ts
+          apps/server/src/kicad/KiCadExecutable.test.ts
+          apps/server/src/kicad/PrismGerber.test.ts
+
+      - name: Build installer
+        shell: bash
+        env:
+          T3CAD_KICAD_RUNTIME: apps/desktop/prod-resources/kicad-runtime
+          T3CAD_REQUIRE_BUNDLED_KICAD: "1"
+          T3CAD_PYTHON_RUNTIME: apps/desktop/prod-resources/python-runtime
+          T3CAD_REQUIRE_BUNDLED_PYTHON: "1"
+        run: ./node_modules/.bin/vp run dist:desktop:artifact --platform ${{ matrix.platform }} --target ${{ matrix.target }} --arch ${{ matrix.arch }} --build-version ${{ steps.meta.outputs.version }}
+
+      - name: Verify bundled runtimes and checksum installer
+        shell: bash
+        run: |
+          set -euo pipefail
+          installers=(release/*.AppImage)
+          test "${#installers[@]}" = 1
+          installer="$(realpath "${installers[0]}")"
+          mkdir -p "$RUNNER_TEMP/backplane-installer-check"
+          (cd "$RUNNER_TEMP/backplane-installer-check" && "$installer" --appimage-extract >/dev/null)
+          resources="$RUNNER_TEMP/backplane-installer-check/squashfs-root/resources"
+          "$resources/kicad/bin/kicad-cli" --version
+          "$resources/kicad/bin/kicad-cli" api-server --help
+          "$resources/python/bin/python3" -I -c 'import json, math, xml.etree.ElementTree; print("Bundled Python ready")'
+          test -f "$resources/python/PYTHON.json"
+          test "$(find "$resources/python/LICENSES" -type f -name 'LICENSE.*.txt' | wc -l)" = 19
+          test -f "$resources/python/lib/python3.13/LICENSE.txt"
+          test -n "$(find "$resources/python/lib/python3.13/site-packages" -path '*pip-*.dist-info/licenses/LICENSE.txt' -print -quit)"
+          test -f "$resources/python/LICENSES/SOURCE.txt"
+          test -f "$resources/kicad/manifest.json"
+          test -d "$resources/kicad/licenses"
+          (cd release && sha256sum *.AppImage > SHA256SUMS)
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: backplane-${{ matrix.platform }}-${{ matrix.arch }}
+          retention-days: 1
+          path: |
+            release/*.AppImage
+            release/*.yml
+            release/*.blockmap
+            release/SHA256SUMS
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub release
+    needs: package
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          path: release
+          pattern: backplane-*
+          merge-multiple: true
+      - name: Resolve tag
+        id: meta
+        env:
+          DISPATCH_VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          version="$DISPATCH_VERSION"
+          if [[ -z "$version" ]]; then version="${GITHUB_REF_NAME#v}"; fi
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.meta.outputs.tag }}
+        shell: bash
+        run: |
+          args=(--draft)
+          if [[ "$RELEASE_TAG" == *-* ]]; then args+=(--prerelease); fi
+          gh release create "$RELEASE_TAG" release/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Backplane $RELEASE_TAG" --generate-notes "${args[@]}"

@@ -52,7 +52,8 @@ import { Command, Flag } from "effect/unstable/cli";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 const LINUX_ICON_SIZES = [16, 22, 24, 32, 48, 64, 128, 256, 512] as const;
-const DESKTOP_APP_ID = "com.t3tools.t3code";
+const DESKTOP_APP_ID = "com.i2cjak.backplane";
+const DESKTOP_PROTOCOL = "backplane";
 const APPLE_TEAM_ID_PATTERN = /^[A-Z0-9]{10}$/u;
 
 const BuildPlatform = Schema.Literals(["mac", "linux", "win"]);
@@ -1090,6 +1091,18 @@ export const DESKTOP_EXTRA_RESOURCES = [
   {
     from: "apps/desktop/prod-resources/resource-monitor",
     to: "resource-monitor",
+  },
+  {
+    // The stable Backplane KiCad fork is staged by the release workflow. Keep
+    // it outside app.asar so its helper binaries can load their data files.
+    from: "apps/desktop/prod-resources/kicad",
+    to: "kicad",
+    filter: ["**/*"],
+  },
+  {
+    from: "apps/desktop/prod-resources/python",
+    to: "python",
+    filter: ["**/*"],
   },
 ] as const;
 export const LINUX_BROWSER_SECRET_EXTRA_RESOURCES = [
@@ -2221,6 +2234,99 @@ export const stageResourceMonitor = Effect.fn("stageResourceMonitor")(function* 
   }
 });
 
+export function resolveKiCadRuntimeExecutableName(
+  platform: typeof BuildPlatform.Type,
+): "kicad-cli" | "kicad-cli.exe" {
+  return platform === "win" ? "kicad-cli.exe" : "kicad-cli";
+}
+
+export function isKiCadRuntimeManifest(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const manifest = value as Record<string, unknown>;
+  return ["sourceRepository", "sourceCommit", "version", "license"].every(
+    (key) => typeof manifest[key] === "string" && (manifest[key] as string).trim().length > 0,
+  );
+}
+
+export function resolveBundledPythonExecutableName(platform: typeof BuildPlatform.Type): string {
+  return platform === "win" ? "python.exe" : platform === "mac" ? "python3" : "python3";
+}
+
+export const stageKiCadRuntime = Effect.fn("stageKiCadRuntime")(function* (input: {
+  readonly repoRoot: string;
+  readonly stageResourcesDir: string;
+  readonly platform: typeof BuildPlatform.Type;
+}) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const configured = process.env.T3CAD_KICAD_RUNTIME?.trim();
+  const source = path.resolve(
+    input.repoRoot,
+    configured || "apps/desktop/prod-resources/kicad-runtime",
+  );
+  const executable = path.join(source, "bin", resolveKiCadRuntimeExecutableName(input.platform));
+  const destination = path.join(input.stageResourcesDir, "kicad");
+  const present = yield* fs.exists(executable);
+  yield* fs.remove(destination, { recursive: true, force: true }).pipe(Effect.ignore);
+  if (!present) {
+    yield* fs.makeDirectory(destination, { recursive: true });
+    if (process.env.T3CAD_REQUIRE_BUNDLED_KICAD === "1") {
+      return yield* Effect.fail(
+        new Error(
+          `Bundled KiCad runtime is required but ${executable} is missing. Set T3CAD_KICAD_RUNTIME to the stable Backplane KiCad runtime.`,
+        ),
+      );
+    }
+    yield* Effect.log(
+      `[desktop-artifact] No bundled KiCad runtime at ${source}; packaged builds will use BACKPLANE_KICAD_CLI or PATH.`,
+    );
+    return;
+  }
+  const manifestPath = path.join(source, "manifest.json");
+  const manifestValid = yield* fs.readFileString(manifestPath).pipe(
+    Effect.flatMap((text) =>
+      Effect.try({ try: () => JSON.parse(text) as unknown, catch: () => undefined }),
+    ),
+    Effect.map(isKiCadRuntimeManifest),
+    Effect.orElseSucceed(() => false),
+  );
+  if (!manifestValid && process.env.T3CAD_REQUIRE_BUNDLED_KICAD === "1") {
+    return yield* Effect.fail(
+      new Error(
+        `Bundled KiCad runtime manifest is missing or invalid at ${manifestPath}; include sourceRepository, sourceCommit, version, and license.`,
+      ),
+    );
+  }
+  yield* fs.copy(source, destination);
+  yield* Effect.log(`[desktop-artifact] Staged bundled KiCad runtime from ${source}.`);
+});
+
+export const stagePythonRuntime = Effect.fn("stagePythonRuntime")(function* (input: {
+  readonly repoRoot: string;
+  readonly stageResourcesDir: string;
+  readonly platform: typeof BuildPlatform.Type;
+}) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const source = path.resolve(
+    input.repoRoot,
+    process.env.T3CAD_PYTHON_RUNTIME?.trim() || "apps/desktop/prod-resources/python-runtime",
+  );
+  const executable = path.join(source, "bin", resolveBundledPythonExecutableName(input.platform));
+  const destination = path.join(input.stageResourcesDir, "python");
+  yield* fs.remove(destination, { recursive: true, force: true }).pipe(Effect.ignore);
+  if (!(yield* fs.exists(executable))) {
+    if (process.env.T3CAD_REQUIRE_BUNDLED_PYTHON === "1") {
+      return yield* Effect.fail(new Error(`Bundled Python runtime is missing: ${executable}`));
+    }
+    yield* fs.makeDirectory(destination, { recursive: true });
+    yield* Effect.log(`[desktop-artifact] No bundled Python runtime at ${source}; using PATH.`);
+    return;
+  }
+  yield* fs.copy(source, destination);
+  yield* Effect.log(`[desktop-artifact] Staged bundled Python runtime from ${source}.`);
+});
+
 export const stageBrowserSecret = Effect.fn("stageBrowserSecret")(function* (input: {
   readonly repoRoot: string;
   readonly stageResourcesDir: string;
@@ -2558,8 +2664,8 @@ export function resolvePackageManagerUserAgent(packageManager: string): string {
 
 export function resolveDesktopProductName(version: string): string {
   return resolveDesktopUpdateChannel(version) === "nightly"
-    ? "T3 Code (Nightly)"
-    : (desktopPackageJson.productName ?? "T3 Code");
+    ? "Backplane (Nightly)"
+    : (desktopPackageJson.productName ?? "Backplane");
 }
 
 export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
@@ -2584,7 +2690,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   const buildConfig: Record<string, unknown> = {
     appId: DESKTOP_APP_ID,
     productName: resolveDesktopProductName(version),
-    artifactName: "T3-Code-${version}-${arch}.${ext}",
+    artifactName: "Backplane-${version}-${arch}.${ext}",
     electronLanguages: [...DESKTOP_ELECTRON_LANGUAGES],
     files: [
       ...DESKTOP_FILE_EXCLUSIONS,
@@ -2628,8 +2734,8 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       category: "public.app-category.developer-tools",
       protocols: [
         {
-          name: "T3 Code",
-          schemes: ["t3code", "t3code-dev"],
+          name: "Backplane",
+          schemes: [DESKTOP_PROTOCOL, `${DESKTOP_PROTOCOL}-dev`, "t3code", "t3code-dev"],
         },
       ],
       ...(signed ? { sign: path.join(repoRoot, "scripts/sign-macos.ts") } : {}),
@@ -2668,21 +2774,21 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   if (platform === "linux") {
     buildConfig.linux = {
       target: [target],
-      executableName: "t3code",
+      executableName: "backplane",
       icon: "icons",
       category: "Development",
       // electron-builder turns these into MimeType=x-scheme-handler/<scheme>;
       // in the .desktop entry (Exec already gets %U), so browsers can hand
-      // t3code:// OAuth callbacks to the app.
+      // backplane:// OAuth callbacks to the app.
       protocols: [
         {
-          name: "T3 Code",
-          schemes: ["t3code", "t3code-dev"],
+          name: "Backplane",
+          schemes: [DESKTOP_PROTOCOL, `${DESKTOP_PROTOCOL}-dev`, "t3code", "t3code-dev"],
         },
       ],
       desktop: {
         entry: {
-          StartupWMClass: "t3code",
+          StartupWMClass: "backplane",
         },
       },
     };
@@ -3572,6 +3678,16 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     platform: options.platform,
     arch: options.arch,
     verbose: options.verbose,
+  });
+  yield* stageKiCadRuntime({
+    repoRoot,
+    stageResourcesDir,
+    platform: options.platform,
+  });
+  yield* stagePythonRuntime({
+    repoRoot,
+    stageResourcesDir,
+    platform: options.platform,
   });
   yield* stageBrowserSecret({
     repoRoot,

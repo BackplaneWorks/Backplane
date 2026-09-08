@@ -75,7 +75,7 @@ const PROJECT_ICON_COLOR_BY_NAME: Record<ProjectIconName, ProjectIconColor> = {
   braces: "purple",
   circuit: "teal",
   cloud: "sky",
-  code: "blue",
+  code: "gray",
   database: "cyan",
   desktop: "indigo",
   "folder-code": "orange",

@@ -85,7 +85,7 @@
       /* Markdown */
       --color-md-body: #111111;
       --color-md-strong: #000000;
-      --color-md-link: #2563eb;
+      --color-md-link: #525252;
       --color-md-blockquote-border: rgba(0, 0, 0, 0.08);
       --color-md-blockquote-bg: rgba(0, 0, 0, 0.02);
       --color-md-code-bg: rgba(0, 0, 0, 0.04);
@@ -97,10 +97,10 @@
       --color-md-hr: rgba(0, 0, 0, 0.08);
 
       /* iMessage-style user bubble */
-      --color-user-bubble: #007aff;
+      --color-user-bubble: #262626;
       --color-user-bubble-foreground: #ffffff;
       --color-user-bubble-foreground-muted: rgba(255, 255, 255, 0.78);
-      --color-user-bubble-skill-foreground: #f0abfc;
+      --color-user-bubble-skill-foreground: #d4d4d4;
 
       /* Drawer / modal backdrop */
       --color-backdrop: rgba(0, 0, 0, 0.22);
@@ -189,7 +189,7 @@
       /* Markdown */
       --color-md-body: #e5e5e5;
       --color-md-strong: #f5f5f5;
-      --color-md-link: #60a5fa;
+      --color-md-link: #a3a3a3;
       --color-md-blockquote-border: rgba(255, 255, 255, 0.1);
       --color-md-blockquote-bg: rgba(255, 255, 255, 0.03);
       --color-md-code-bg: rgba(255, 255, 255, 0.06);
@@ -201,10 +201,10 @@
       --color-md-hr: rgba(255, 255, 255, 0.08);
 
       /* iMessage-style user bubble */
-      --color-user-bubble: #0a84ff;
-      --color-user-bubble-foreground: #ffffff;
-      --color-user-bubble-foreground-muted: rgba(255, 255, 255, 0.78);
-      --color-user-bubble-skill-foreground: #f0abfc;
+      --color-user-bubble: #f5f5f5;
+      --color-user-bubble-foreground: #0a0a0a;
+      --color-user-bubble-foreground-muted: rgba(10, 10, 10, 0.72);
+      --color-user-bubble-skill-foreground: #525252;
 
       /* Drawer / modal backdrop */
       --color-backdrop: rgba(0, 0, 0, 0.48);
@@ -221,10 +221,11 @@
 
 /* ─── Typography ────────────────────────────────────────────────────── */
 @theme {
-  /* Keep these native family names aligned with app.config.ts. */
-  --font-sans: "DMSans-Regular";
-  --font-medium: "DMSans-Medium";
-  --font-bold: "DMSans-Bold";
+  /* No Berkeley Mono font file ships in the native bundle, so use each
+     platform's installed monospace face instead of naming a missing font. */
+  --font-sans: monospace;
+  --font-medium: monospace;
+  --font-bold: monospace;
 
   /* Keep this scale aligned with src/lib/typography.ts for native style props. */
   --text-3xs: 11px;
