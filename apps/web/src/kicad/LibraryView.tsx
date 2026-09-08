@@ -26,32 +26,46 @@ export function LibraryView({
   kind,
   path,
   revision,
+  member,
   read,
 }: {
   kind: LibraryKind;
   path: string;
   revision: string;
+  member?: string;
   read: LibraryRead;
 }) {
   const [members, setMembers] = useState<LibraryMember[]>([]);
   const [selected, setSelected] = useState(0);
+  const selectedNameRef = useRef<string | undefined>(undefined);
+  const pathRef = useRef(path);
   const [error, setError] = useState("");
   const [zoom, setZoom] = useState(1);
   const readRef = useRef(read);
   readRef.current = read;
   useEffect(() => {
     const controller = new AbortController();
+    const preferred = pathRef.current === path ? selectedNameRef.current : member;
+    pathRef.current = path;
     setMembers([]);
-    setSelected(0);
     setError("");
     readRef
       .current(path, controller.signal)
-      .then((text) => setMembers(payload(text)))
+      .then((text) => {
+        const next = payload(text);
+        const index = preferred ? next.findIndex((item) => item.name === preferred) : -1;
+        setMembers(next);
+        setSelected(index >= 0 ? index : 0);
+        selectedNameRef.current = next[index >= 0 ? index : 0]?.name;
+      })
       .catch((cause) => {
         if (!controller.signal.aborted) setError(String(cause));
       });
     return () => controller.abort();
-  }, [path, revision]);
+  }, [member, path, revision]);
+  useEffect(() => {
+    selectedNameRef.current = members[selected]?.name;
+  }, [members, selected]);
   const item = members[selected] ?? members[0];
   const src = item ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(item.svg)}` : "";
   return (

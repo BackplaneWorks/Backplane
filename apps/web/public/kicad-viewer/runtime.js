@@ -1,3 +1,4 @@
+import { installCanvasPresentation } from "./canvas-presentation.js";
 import { installSchematicSizing } from "./schematic-sizing.js";
 import { installNativeTouch } from "./native-touch.js";
 import { installMobileProperties } from "./properties-mobile.js";
@@ -22,7 +23,12 @@ window.addEventListener("message", (event) => {
   chain = chain
     .then(async () => {
       error.textContent = "";
-      if (snapshot.kind === "model") {
+      if (snapshot.kind === "step") {
+        if (viewer) return;
+        viewer = host;
+        const { showStep } = await import("./step-viewer.js");
+        await showStep(host, snapshot.url, error);
+      } else if (snapshot.kind === "model") {
         if (viewer) return;
         error.textContent = "Generating 3D preview…";
         const response = await fetch(snapshot.url);
@@ -66,6 +72,7 @@ window.addEventListener("message", (event) => {
         viewer.setActive(snapshot.active !== false);
         if (snapshot.active !== false) {
           viewer.resize();
+          installCanvasPresentation(viewer);
           installSchematicSizing(viewer);
           installNativeTouch(viewer);
           installMobileProperties(viewer);

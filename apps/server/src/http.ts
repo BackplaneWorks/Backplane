@@ -1,3 +1,5 @@
+import { IosNotificationRegistration } from "@t3tools/contracts";
+import { DirectIosPushService } from "./notifications/DirectIosPushService.ts";
 // @effect-diagnostics globalDate:off globalDateInEffect:off globalErrorInEffectCatch:off globalErrorInEffectFailure:off
 import Mime from "@effect/platform-node/Mime";
 import * as NodeCrypto from "node:crypto";
@@ -447,6 +449,36 @@ export const kicadViewerSessionRouteLayer = HttpRouter.add(
       EnvironmentInternalError: HttpServerRespondable.toResponse,
       EnvironmentScopeRequiredError: HttpServerRespondable.toResponse,
     }),
+  ),
+);
+
+export const iosNotificationRegistrationRouteLayer = HttpRouter.add(
+  "POST",
+  "/api/notifications/ios",
+  Effect.gen(function* () {
+    yield* authenticateRawRouteWithScope(AuthOrchestrationReadScope);
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const input = yield* request.json.pipe(
+      Effect.flatMap(Schema.decodeUnknownEffect(IosNotificationRegistration)),
+    );
+    const push = yield* DirectIosPushService;
+    return yield* HttpServerResponse.json(yield* push.register(input), {
+      headers: { "Cache-Control": "no-store" },
+    });
+  }).pipe(
+    Effect.catchTags({
+      EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,
+      EnvironmentInternalError: HttpServerRespondable.toResponse,
+      EnvironmentScopeRequiredError: HttpServerRespondable.toResponse,
+    }),
+    Effect.catch((error) =>
+      Effect.succeed(
+        HttpServerResponse.text(
+          error instanceof Error ? error.message : "Unable to register iOS notifications",
+          { status: 400 },
+        ),
+      ),
+    ),
   ),
 );
 

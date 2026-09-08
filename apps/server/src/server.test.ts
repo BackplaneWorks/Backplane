@@ -98,6 +98,7 @@ const encodeTestJson = Schema.encodeUnknownSync(Schema.fromJsonString(Schema.Unk
 import * as BackgroundPolicy from "./background/BackgroundPolicy.ts";
 import * as ServerConfig from "./config.ts";
 import { HTTP_ROUTER_CONFIG, makeRoutesLayer } from "./server.ts";
+import { DirectIosPushService } from "./notifications/DirectIosPushService.ts";
 import {
   isThreadDetailEvent,
   resolveAvailableEditorsForConfig,
@@ -744,6 +745,9 @@ const buildAppUnderTest = (options?: {
     ).pipe(
       Layer.provide(
         Layer.mergeAll(
+          Layer.succeed(DirectIosPushService, {
+            register: () => Effect.succeed({ configured: false }),
+          }),
           Layer.mock(Keybindings.Keybindings)({
             loadConfigState: Effect.succeed({
               keybindings: [],
@@ -1653,6 +1657,35 @@ const NodeHttpServerTestWithWsDeflate = HttpServer.layerTestClient.pipe(
 );
 
 it.layer(NodeServices.layer)("server router seam", (it) => {
+  it.effect("authenticates and validates direct iOS notification registration", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest();
+      const body = {
+        deviceId: "phone",
+        bundleId: "com.i2cjak.k3eda",
+        apsEnvironment: "production",
+        pushToken: "a".repeat(64),
+        notificationsEnabled: true,
+        liveActivitiesEnabled: true,
+      };
+      const unauthorized = yield* HttpClient.post("/api/notifications/ios", {
+        body: yield* HttpBody.json(body),
+      });
+      assert.equal(unauthorized.status, 401);
+      const cookie = yield* getAuthenticatedSessionCookieHeader();
+      const invalid = yield* HttpClient.post("/api/notifications/ios", {
+        headers: { cookie },
+        body: yield* HttpBody.json({ ...body, pushToken: "invalid/token" }),
+      });
+      assert.equal(invalid.status, 400);
+      const response = yield* HttpClient.post("/api/notifications/ios", {
+        headers: { cookie },
+        body: yield* HttpBody.json(body),
+      });
+      assert.equal(response.status, 200);
+      assert.deepEqual(yield* response.json, { configured: false });
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
   it.effect("parks HTTP ingress until command readiness", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;

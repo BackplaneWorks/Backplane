@@ -6,20 +6,498 @@ body,
   margin: 0;
   overflow: hidden;
 }
+.design-workspace {
+  --design-highlight: #467652;
+  --design-line: color-mix(in srgb, var(--foreground) 10%, transparent);
+  --design-surface: color-mix(in srgb, var(--background) 96%, var(--foreground));
+  position: relative;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 12px;
+  isolation: isolate;
+}
+.design-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--design-line);
+}
+.design-mark {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  border: 1px solid var(--design-line);
+  border-radius: 10px;
+  color: var(--design-highlight);
+  background: var(--design-surface);
+}
+.design-identity {
+  min-width: 0;
+  flex: 1;
+}
+.design-eyebrow {
+  display: block;
+  color: var(--muted-foreground);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  line-height: 1.5;
+}
+.design-identity h1 {
+  margin: 2px 0 0;
+  font-size: 15px;
+  font-weight: 550;
+  letter-spacing: -0.025em;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.design-live {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+.design-live > span {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--design-highlight);
+}
 .kicad-icon-button {
   display: inline-flex;
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
   align-items: center;
   justify-content: center;
-  border-radius: 6px;
+  border-radius: 7px;
   color: var(--muted-foreground);
+  transition:
+    background-color 140ms,
+    color 140ms;
 }
 .kicad-icon-button:hover {
   background: var(--accent);
-  color: var(--accent-foreground);
+  color: var(--foreground);
 }
-.kicad-icon-button:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 1px;
+.design-navigation {
+  display: flex;
+  align-items: stretch;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--design-line);
+  flex-shrink: 0;
+  gap: 8px;
+}
+.design-tabs {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  flex: 1;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.design-tabs::-webkit-scrollbar {
+  display: none;
+}
+.design-tab-wrap {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  position: relative;
+}
+.design-tab {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+  padding: 14px 11px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-weight: 500;
+  transition:
+    color 160ms,
+    background-color 160ms;
+}
+.design-tab::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 11px;
+  right: 11px;
+  height: 2px;
+  background: var(--design-highlight);
+  transform: scaleX(0.35);
+  opacity: 0;
+  transition:
+    transform 180ms ease-out,
+    opacity 180ms ease-out;
+}
+.design-tab[aria-selected="true"] {
+  color: var(--foreground);
+}
+.design-tab[aria-selected="true"]::after {
+  transform: scaleX(1);
+  opacity: 1;
+}
+.design-tab[aria-selected="true"] svg {
+  color: var(--design-highlight);
+}
+.design-tab:hover {
+  color: var(--foreground);
+  background: var(--design-surface);
+}
+.design-tab-close {
+  color: var(--muted-foreground);
+  padding: 6px;
+  margin-left: -5px;
+  border-radius: 5px;
+}
+.design-tab-close:hover {
+  color: var(--foreground);
+  background: var(--accent);
+}
+.design-tools {
+  display: flex;
+  position: relative;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--muted-foreground);
+}
+.design-tools select {
+  appearance: none;
+  cursor: pointer;
+  background: transparent;
+  padding: 10px 22px 10px 8px;
+  font-size: 11px;
+  width: 67px;
+}
+.design-tools svg {
+  position: absolute;
+  right: 6px;
+  pointer-events: none;
+}
+.design-workspace option {
+  background: var(--background);
+  color: var(--foreground);
+}
+.design-filebar {
+  display: flex;
+  align-items: center;
+  min-height: 43px;
+  padding: 5px 16px;
+  gap: 12px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--design-line);
+  background: var(--design-surface);
+}
+.design-file-identity {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+.design-file-identity > svg {
+  color: var(--muted-foreground);
+  flex-shrink: 0;
+}
+.design-filename {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+.design-file-identity select {
+  width: 100%;
+  min-width: 0;
+  background: transparent;
+  border: 0;
+  padding: 4px 0;
+  font-size: 11px;
+  text-overflow: ellipsis;
+}
+.design-source {
+  color: var(--muted-foreground);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.design-text-button {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  flex-shrink: 0;
+  border: 1px solid var(--design-line);
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 10px;
+  color: var(--muted-foreground);
+  transition:
+    color 140ms,
+    border-color 140ms,
+    background-color 140ms;
+}
+.design-text-button:hover {
+  color: var(--foreground);
+  background: var(--accent);
+  border-color: color-mix(in srgb, var(--foreground) 25%, transparent);
+}
+.design-file-browser {
+  position: absolute;
+  top: 154px;
+  right: 12px;
+  left: 12px;
+  z-index: 60;
+  max-width: 660px;
+  margin-left: auto;
+  border: 1px solid var(--design-line);
+  border-radius: 10px;
+  padding: 12px;
+  background: var(--background);
+  box-shadow: 0 18px 60px #0005;
+  animation: design-menu-in 160ms ease-out;
+}
+.design-browser-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 0 10px;
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+.design-browser-heading > :first-child {
+  letter-spacing: 0.1em;
+  font-size: 9px;
+}
+.design-file-browser > input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--design-line);
+  border-radius: 6px;
+  background: var(--design-surface);
+  font-size: 12px;
+}
+.design-file-results {
+  overflow-y: auto;
+  max-height: min(45dvh, 340px);
+  margin-top: 8px;
+}
+.design-file-results > button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 11px 8px;
+  text-align: left;
+  border-radius: 5px;
+}
+.design-file-results > button:hover {
+  background: var(--accent);
+}
+.design-file-results > button > svg {
+  flex-shrink: 0;
+  color: var(--muted-foreground);
+}
+.design-file-results > button > span {
+  overflow-wrap: anywhere;
+  font-size: 11px;
+}
+.design-file-current {
+  margin-left: auto;
+  color: var(--design-highlight);
+}
+.design-file-results > p {
+  padding: 18px 8px;
+  color: var(--muted-foreground);
+}
+.design-canvas {
+  overflow: hidden;
+}
+.design-view-transition {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  pointer-events: none;
+  background: var(--background);
+  animation: design-reveal 170ms ease-out forwards;
+}
+.design-inspectbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: 7px 14px;
+  border-bottom: 1px solid var(--design-line);
+  background: var(--background);
+}
+.design-search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  flex: 1;
+  color: var(--muted-foreground);
+}
+.design-search input {
+  min-width: 0;
+  width: 100%;
+  padding: 5px 0;
+  font-size: 11px;
+  background: transparent;
+  color: var(--foreground);
+  outline: none;
+}
+.design-search:focus-within {
+  color: var(--design-highlight);
+}
+.design-inspectbar label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.design-inspectbar input[type="checkbox"] {
+  accent-color: var(--design-highlight);
+}
+.design-inspectbar button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.design-selection-status {
+  padding: 6px 16px;
+  border-bottom: 1px solid var(--design-line);
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+.design-workspace button:focus-visible,
+.design-workspace select:focus-visible,
+.design-workspace input:focus-visible {
+  outline: 2px solid var(--design-highlight);
+  outline-offset: 2px;
+}
+@keyframes design-reveal {
+  from {
+    opacity: 0.5;
+  }
+  to {
+    opacity: 0;
+    visibility: hidden;
+  }
+}
+@keyframes design-menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (max-width: 640px) {
+  .design-header {
+    padding: 10px 12px;
+    gap: 9px;
+  }
+  .design-mark {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+  }
+  .design-eyebrow {
+    font-size: 8px;
+  }
+  .design-identity h1 {
+    font-size: 14px;
+  }
+  .design-live {
+    display: none;
+  }
+  .design-navigation {
+    padding: 0 6px;
+    gap: 2px;
+  }
+  .design-tab {
+    padding: 13px 8px;
+    gap: 5px;
+    font-size: 10px;
+    min-height: 44px;
+  }
+  .design-tools select {
+    width: 36px;
+    font-size: 0;
+    min-height: 44px;
+  }
+  .design-tools::before {
+    content: "···";
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    font-size: 20px;
+    pointer-events: none;
+  }
+  .design-tools svg {
+    display: none;
+  }
+  .design-tools option {
+    font-size: 12px;
+  }
+  .design-tab svg {
+    width: 13px;
+  }
+  .design-filebar {
+    padding: 4px 10px;
+    gap: 7px;
+  }
+  .design-source {
+    display: none;
+  }
+  .design-filebar .design-text-button {
+    min-height: 34px;
+  }
+  .design-file-browser {
+    top: 145px;
+    left: 8px;
+    right: 8px;
+  }
+  .design-inspectbar {
+    padding: 4px 10px;
+    gap: 6px;
+    min-height: 44px;
+  }
+  .design-inspectbar .design-text-button {
+    min-height: 32px;
+  }
+  .design-crossprobe-label {
+    display: none;
+  }
+  .kicad-icon-button {
+    width: 36px;
+    height: 36px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .design-workspace *,
+  .design-workspace *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+  .design-view-transition {
+    display: none;
+  }
+}
+
+.dark .design-workspace {
+  --design-highlight: #8fbe9a;
 }

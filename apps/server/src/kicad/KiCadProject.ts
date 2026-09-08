@@ -34,6 +34,9 @@ export interface KiCadProjectConfig {
   readonly pcb?: string;
   readonly schematic?: string;
   readonly gerbers?: readonly string[];
+  readonly symbol?: string;
+  readonly symbolMember?: string;
+  readonly footprint?: string;
 }
 
 const manifestCache = new Map<
@@ -120,6 +123,9 @@ export async function discoverKiCadProject(root: string): Promise<KiCadProjectMa
       ...(Array.isArray(parsed.gerbers)
         ? { gerbers: parsed.gerbers.filter((value): value is string => typeof value === "string") }
         : {}),
+      ...(typeof parsed.symbol === "string" ? { symbol: parsed.symbol } : {}),
+      ...(typeof parsed.symbolMember === "string" ? { symbolMember: parsed.symbolMember } : {}),
+      ...(typeof parsed.footprint === "string" ? { footprint: parsed.footprint } : {}),
     };
   } catch {
     try {
@@ -175,6 +181,10 @@ export async function discoverKiCadProject(root: string): Promise<KiCadProjectMa
     warnings.push(`Configured PCB file not found: ${config.pcb}`);
   if (config?.schematic && !files.some((file) => file.path === config!.schematic))
     warnings.push(`Configured schematic file not found: ${config.schematic}`);
+  if (config?.symbol && !files.some((file) => file.path === config!.symbol && file.kind === "symbol"))
+    warnings.push(`Configured symbol library not found: ${config.symbol}`);
+  if (config?.footprint && !files.some((file) => file.path === config!.footprint && file.kind === "footprint"))
+    warnings.push(`Configured footprint file not found: ${config.footprint}`);
   for (const directory of config?.gerbers ?? [])
     if (
       !files.some(

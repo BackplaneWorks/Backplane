@@ -102,3 +102,25 @@ it.effect("discovers library assets and preserves the optional analysis dashboar
     );
   }),
 );
+
+it.effect("reads explicit library assignments and reports missing assigned assets", () =>
+  Effect.promise(async () => {
+    const root = tempRoot();
+    NodeFS.mkdirSync(root, { recursive: true });
+    NodeFS.writeFileSync(NodePath.join(root, "parts.kicad_sym"), "(kicad_symbol_lib)");
+    NodeFS.writeFileSync(NodePath.join(root, ".k3eda.json"), JSON.stringify({
+      symbol: "parts.kicad_sym",
+      symbolMember: "Controller",
+      footprint: "generated/controller.kicad_mod",
+    }));
+    const manifest = await discoverKiCadProject(root);
+    expect(manifest.config).toMatchObject({
+      symbol: "parts.kicad_sym",
+      symbolMember: "Controller",
+      footprint: "generated/controller.kicad_mod",
+    });
+    expect(manifest.warnings).toContain(
+      "Configured footprint file not found: generated/controller.kicad_mod",
+    );
+  }),
+);

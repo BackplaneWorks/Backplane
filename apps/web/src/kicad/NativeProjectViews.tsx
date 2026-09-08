@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowLeftRight, Search } from "lucide-react";
+import { loadSchematicSources } from "./schematicSources";
 
 type Source = { filename: string; content: string };
 export type NativeView = "pcb" | "schematic";
@@ -104,6 +105,10 @@ export function NativeProjectViews({
   const [net, setNet] = useState(false);
   const [probe, setProbe] = useState<Probe>();
   const [status, setStatus] = useState("");
+  const [visited, setVisited] = useState(new Set<NativeView>());
+  useEffect(() => {
+    if (view) setVisited((old) => (old.has(view) ? old : new Set([...old, view])));
+  }, [view]);
   const requestId = useRef(0);
   const readRef = useRef(read);
   readRef.current = read;
@@ -116,13 +121,12 @@ export function NativeProjectViews({
       ["schematic", schematic],
     ] as const) {
       if (!path) continue;
-      const paths = context === "pcb" ? [path] : [path, ...sheets.filter((item) => item !== path)];
-      void Promise.all(
-        paths.map(async (filename) => ({
-          filename,
-          content: await readRef.current(filename, controller.signal),
-        })),
-      )
+      const readFile = (filename: string) => readRef.current(filename, controller.signal);
+      const load =
+        context === "schematic"
+          ? loadSchematicSources(path, sheets, readFile)
+          : readFile(path).then((content) => [{ filename: path, content }]);
+      void load
         .then((sources) => {
           if (!controller.signal.aborted)
             setLoaded((old) => ({ ...old, [context]: { key: `${revision}:${path}`, sources } }));
@@ -159,39 +163,44 @@ export function NativeProjectViews({
   return (
     <div className="flex h-full min-h-0 flex-col">
       <form
-        className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-2 py-1 text-xs"
+        className="design-inspectbar"
         onSubmit={(event) => {
           event.preventDefault();
           if (view) runProbe(query, net ? "net" : "component", view);
         }}
       >
-        <Search size={14} className="text-muted-foreground" />
-        <input
-          aria-label="Find component or net"
-          placeholder={net ? "Net name" : "Reference, e.g. U1"}
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          className="min-w-0 flex-1 bg-transparent px-1 py-1 outline-none"
-        />
-        <label className="flex items-center gap-1">
+        <div className="design-search">
+          <Search size={14} />
+          <input
+            aria-label="Find component or net"
+            placeholder={net ? "Net name" : "Reference, e.g. U1"}
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            className="min-w-0 flex-1 bg-transparent px-1 py-1 outline-none"
+          />
+        </div>
+        <label>
           <input type="checkbox" checked={net} onChange={(event) => setNet(event.target.checked)} />
           Net
         </label>
-        <button type="submit" className="rounded px-2 py-1 hover:bg-accent">
+        <button type="submit" className="design-text-button">
           Find
         </button>
         <button
           type="button"
           disabled={!selection || !pcb || !schematic}
           onClick={() => selection && crossProbe(selection)}
-          className="flex items-center gap-1 rounded px-2 py-1 hover:bg-accent disabled:opacity-40"
+          className="design-text-button"
+          aria-label={`Show selection in ${view === "pcb" ? "schematic" : "PCB"}`}
         >
           <ArrowLeftRight size={14} />
-          Show in {view === "pcb" ? "schematic" : "PCB"}
+          <span className="design-crossprobe-label">
+            Show in {view === "pcb" ? "schematic" : "PCB"}
+          </span>
         </button>
       </form>
       {status && (
-        <div role="status" className="shrink-0 px-3 py-1 text-xs text-muted-foreground">
+        <div role="status" className="design-selection-status">
           {status}
         </div>
       )}
@@ -201,7 +210,7 @@ export function NativeProjectViews({
         const current = data?.key === `${revision}:${path}`;
         return (
           <div key={context} hidden={view !== context} className="relative min-h-0 flex-1">
-            {data && (
+            {data && (view === context || visited.has(context)) && (
               <NativeFrame
                 key={path}
                 view={context}
@@ -232,7 +241,10 @@ export function NativeProjectViews({
                 role="status"
                 className="absolute inset-0 flex items-center justify-center bg-background p-4 text-center text-xs text-muted-foreground"
               >
-                {errors[context] ?? (path ? "Loading saved project…" : `No ${context} file found.`)}
+                {errors[context] ??
+                  (path
+                    ? "Loading saved project…"
+                    : `Choose a ${context === "pcb" ? "PCB" : "schematic"} with Browse to open this view.`)}
               </div>
             )}
           </div>

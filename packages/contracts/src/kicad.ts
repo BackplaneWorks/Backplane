@@ -26,6 +26,9 @@ export const KiCadProjectConfig = Schema.Struct({
   pcb: Schema.optionalKey(Schema.String),
   schematic: Schema.optionalKey(Schema.String),
   gerbers: Schema.optionalKey(Schema.Array(Schema.String)),
+  symbol: Schema.optionalKey(Schema.String),
+  symbolMember: Schema.optionalKey(Schema.String),
+  footprint: Schema.optionalKey(Schema.String),
 });
 export type KiCadProjectConfig = typeof KiCadProjectConfig.Type;
 

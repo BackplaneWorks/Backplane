@@ -33,6 +33,8 @@ import {
 } from "../../persistence/imperative";
 import AgentActivity, { type AgentActivityProps } from "../../widgets/AgentActivity";
 import { resolveCloudPublicConfig } from "../cloud/publicConfig";
+import { hasCloudPublicConfig } from "../cloud/publicConfig";
+import { armLocalActivity } from "./localActivityArm";
 import { supportsAgentAwarenessPush } from "./capabilities";
 import { makeRelayDeviceRegistrationRequest, resolveApsEnvironment } from "./registrationPayload";
 
@@ -463,6 +465,10 @@ export function armAgentAwarenessLiveActivityForLocalWork(input: {
   readonly threadTitle: string;
   readonly projectTitle: string;
 }): void {
+  if (Platform.OS === "ios" && !relayTokenProvider && !hasCloudPublicConfig()) {
+    armLocalActivity(input);
+    return;
+  }
   if (!canRegisterRemoteLiveActivities() || !relayTokenProvider) {
     return;
   }

@@ -32,6 +32,61 @@
       #error:empty {
         display: none;
       }
+      .canvas-actions {
+        position: absolute;
+        bottom: 16px;
+        right: 16px;
+        display: flex;
+        gap: 2px;
+        border: 1px solid #ffffff20;
+        border-radius: 9px;
+        padding: 4px;
+        background: #182023;
+        box-shadow: 0 4px 20px #0003;
+        z-index: 20;
+      }
+      .canvas-actions button {
+        border: 0;
+        border-radius: 5px;
+        background: transparent;
+        color: #dce5e0;
+        height: 32px;
+        min-width: 32px;
+        padding: 0 10px;
+        font: 11px system-ui;
+        cursor: pointer;
+        transition: background-color 140ms;
+      }
+      .canvas-actions button:hover {
+        background: #ffffff14;
+      }
+      [data-color-scheme="light"] .canvas-actions {
+        background: #f8faf9;
+        border-color: #18202326;
+      }
+      [data-color-scheme="light"] .canvas-actions button {
+        color: #283830;
+      }
+      [data-color-scheme="light"] .canvas-actions button:hover {
+        background: #1820230c;
+      }
+      .canvas-actions button:focus-visible {
+        outline: 2px solid #8fbe9a;
+      }
+      @media (max-width: 640px) {
+        .canvas-actions {
+          right: 10px;
+          bottom: 10px;
+        }
+        .canvas-actions button {
+          min-height: 40px;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .canvas-actions button {
+          transition: none;
+        }
+      }
       ecad-viewer,
       ecad-3d-viewer {
         display: block;
