@@ -561,6 +561,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     // forgetting the exclusion leaves the exclusion list untouched, so it still
     // matches. Assert the invariant first, where the failure names the culprit.
     for (const resource of [
+      ...DESKTOP_EXTRA_RESOURCES,
       ...WSL_RUNTIME_EXTRA_RESOURCES,
       ...LINUX_BROWSER_SECRET_EXTRA_RESOURCES,
     ]) {
@@ -577,6 +578,12 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       "!apps/desktop/resources/browser-secret/**/*",
       "!apps/desktop/prod-resources/browser-secret",
       "!apps/desktop/prod-resources/browser-secret/**/*",
+      "!apps/desktop/prod-resources/resource-monitor",
+      "!apps/desktop/prod-resources/resource-monitor/**/*",
+      "!apps/desktop/prod-resources/kicad",
+      "!apps/desktop/prod-resources/kicad/**/*",
+      "!apps/desktop/prod-resources/python",
+      "!apps/desktop/prod-resources/python/**/*",
       "!apps/desktop/prod-resources/windows-server",
       "!apps/desktop/prod-resources/windows-server/**/*",
       "!apps/desktop/prod-resources/wsl-runtime.tar.gz",
