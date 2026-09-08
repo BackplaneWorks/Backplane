@@ -126,7 +126,7 @@ jobs:
       - name: Install Linux packaging dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y libsecret-1-dev pkg-config
+          sudo apt-get install --no-install-recommends -y libsecret-1-dev pkg-config xvfb xauth
 
       - name: Check packaging and runtime behavior
         env:
@@ -160,6 +160,9 @@ jobs:
           mkdir -p "$RUNNER_TEMP/backplane-installer-check"
           (cd "$RUNNER_TEMP/backplane-installer-check" && "$installer" --appimage-extract >/dev/null)
           resources="$RUNNER_TEMP/backplane-installer-check/squashfs-root/resources"
+          xvfb-run --auto-servernum --server-args="-screen 0 1280x800x24" \
+            python3 scripts/smoke-desktop-release.py \
+            "$RUNNER_TEMP/backplane-installer-check/squashfs-root"
           "$resources/kicad/bin/kicad-cli" --version
           "$resources/kicad/bin/kicad-cli" api-server --help
           "$resources/python/bin/python3" -I -c 'import json, math, xml.etree.ElementTree; print("Bundled Python ready")'

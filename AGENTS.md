@@ -4,7 +4,8 @@
   substantial implementation, investigation, and review tasks, with the
   primary agent coordinating integration and verification.
 - Backplane's UI is monochrome with square corners and Berkeley Mono as the
-  global interface font. Keep copy minimal and avoid decorative eyebrow
+  global interface font when installed locally. Never include Berkeley Mono
+  font files in repositories or releases. Keep copy minimal and avoid decorative eyebrow
   headings. Viewer-tab behavior is outside routine UI work unless explicitly
   requested.
 - All commits in this repository use `i2cjak <build@amemb.com>` as both author
