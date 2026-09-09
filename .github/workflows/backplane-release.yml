@@ -82,6 +82,7 @@ jobs:
           fi
           tar -xzf "$RUNNER_TEMP/kicad-runtime.tar.gz" -C apps/desktop/prod-resources/kicad-runtime --strip-components=1
           test -f apps/desktop/prod-resources/kicad-runtime/bin/kicad-cli
+          rm -f "$RUNNER_TEMP/kicad-runtime.tar.gz"
 
       - name: Download pinned Python runtime
         shell: bash
@@ -97,6 +98,7 @@ jobs:
           echo "$install_sha  $RUNNER_TEMP/python-runtime.tar.gz" | sha256sum --check --status
           tar -xzf "$RUNNER_TEMP/python-runtime.tar.gz" -C apps/desktop/prod-resources/python-runtime --strip-components=1
           test -x apps/desktop/prod-resources/python-runtime/bin/python3
+          rm -f "$RUNNER_TEMP/python-runtime.tar.gz"
           curl --fail --location --retry 3 "$full_url" --output "$RUNNER_TEMP/python-full.tar.zst"
           echo "$full_sha  $RUNNER_TEMP/python-full.tar.zst" | sha256sum --check --status
           test "$(tar --zstd -tf "$RUNNER_TEMP/python-full.tar.zst" 'python/PYTHON.json' 2>/dev/null | wc -l)" = 1
@@ -115,6 +117,7 @@ jobs:
           Full-build SHA-256: $full_sha
           EOF
           test "$(find apps/desktop/prod-resources/python-runtime/LICENSES -type f -name 'LICENSE.*.txt' | wc -l)" = 19
+          rm -f "$RUNNER_TEMP/python-full.tar.zst"
 
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
@@ -126,7 +129,7 @@ jobs:
       - name: Install Linux packaging dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y libsecret-1-dev pkg-config xvfb xauth
+          sudo apt-get install --no-install-recommends -y imagemagick libsecret-1-dev pkg-config xvfb xauth
 
       - name: Check packaging and runtime behavior
         env:
@@ -157,6 +160,11 @@ jobs:
           installers=(release/*.AppImage)
           test "${#installers[@]}" = 1
           installer="$(realpath "${installers[0]}")"
+          installer_size="$(stat -c '%s' "$installer")"
+          test "$installer_size" -lt 2147483648 || {
+            echo "GitHub release asset exceeds the 2 GiB limit: $installer ($installer_size bytes)" >&2
+            exit 1
+          }
           mkdir -p "$RUNNER_TEMP/backplane-installer-check"
           (cd "$RUNNER_TEMP/backplane-installer-check" && "$installer" --appimage-extract >/dev/null)
           resources="$RUNNER_TEMP/backplane-installer-check/squashfs-root/resources"

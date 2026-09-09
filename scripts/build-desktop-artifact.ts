@@ -3795,6 +3795,16 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
 
   // electron-builder is filtering out stageResourcesDir directory in the AppImage for production
   const stageProdResourcesDir = path.join(stageAppDir, "apps/desktop/prod-resources");
+  // Keep the large runtime trees in a single staging location. Copying the
+  // whole resources directory first briefly duplicates the KiCad libraries
+  // and bundled Python runtime, which can exceed the CI runner's disk space.
+  yield* fs.makeDirectory(stageProdResourcesDir, { recursive: true });
+  for (const resourceName of ["kicad", "python"] as const) {
+    const stagedResource = path.join(stageResourcesDir, resourceName);
+    if (yield* fs.exists(stagedResource)) {
+      yield* fs.rename(stagedResource, path.join(stageProdResourcesDir, resourceName));
+    }
+  }
   yield* fs.copy(stageResourcesDir, stageProdResourcesDir);
 
   const configuredMacPasskeySigning =
