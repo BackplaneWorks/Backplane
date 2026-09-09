@@ -1,5 +1,5 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { assert, describe, it } from "@effect/vitest";
+import { afterEach, assert, beforeEach, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -95,6 +95,21 @@ const restoreEnv = (name: string, value: string | undefined) => {
     process.env[name] = value;
   }
 };
+
+const inheritedBundledRuntimeEnvironment = {
+  kicad: process.env.BACKPLANE_KICAD_ROOT,
+  python: process.env.BACKPLANE_PYTHON,
+};
+
+beforeEach(() => {
+  delete process.env.BACKPLANE_KICAD_ROOT;
+  delete process.env.BACKPLANE_PYTHON;
+});
+
+afterEach(() => {
+  restoreEnv("BACKPLANE_KICAD_ROOT", inheritedBundledRuntimeEnvironment.kicad);
+  restoreEnv("BACKPLANE_PYTHON", inheritedBundledRuntimeEnvironment.python);
+});
 
 const withHarness = <A, E, R>(
   effect: Effect.Effect<
