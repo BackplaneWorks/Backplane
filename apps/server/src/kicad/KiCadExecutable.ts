@@ -42,3 +42,27 @@ export function resolveKiCadExecutable(env: NodeJS.ProcessEnv = process.env): st
   // system path is still useful, but APPDIR must not shadow KiCad's libraries.
   return "kicad-cli";
 }
+
+/**
+ * Add the standard libraries shipped beside a bundled CLI to its child
+ * process environment. Explicit user values always win, including empty
+ * values, so system and development KiCad installations keep their normal
+ * lookup behavior.
+ */
+export function resolveKiCadEnvironment(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const executable = resolveKiCadExecutable(env);
+  if (!NodePath.isAbsolute(executable)) return { ...env };
+
+  const runtimeRoot = NodePath.dirname(NodePath.dirname(executable));
+  const bundled = {
+    KICAD10_SYMBOL_DIR: NodePath.join(runtimeRoot, "share", "kicad", "symbols"),
+    KICAD10_FOOTPRINT_DIR: NodePath.join(runtimeRoot, "share", "kicad", "footprints"),
+    KICAD10_3DMODEL_DIR: NodePath.join(runtimeRoot, "share", "kicad", "3dmodels"),
+    KICAD10_TEMPLATE_DIR: NodePath.join(runtimeRoot, "share", "kicad", "template"),
+  } as const;
+  const resolved = { ...env };
+  for (const [name, directory] of Object.entries(bundled)) {
+    if (resolved[name] === undefined && NodeFS.existsSync(directory)) resolved[name] = directory;
+  }
+  return resolved;
+}

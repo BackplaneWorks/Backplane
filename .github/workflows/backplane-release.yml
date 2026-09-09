@@ -223,7 +223,7 @@ jobs:
           cat > "$RUNNER_TEMP/backplane-release.md" <<'NOTES'
           Linux x64 AppImage. Download it, make it executable, and open Backplane.
 
-          Includes the Chromium browser, desktop server, Python, and the stable Backplane KiCad runtime with PCB and schematic IPC patches. KiCad's matching source archives and licenses are available in [Backplane_KiCad releases](https://github.com/i2cjak/Backplane_KiCad/releases); the bundled manifest identifies the exact source commit.
+          Includes the Chromium browser, desktop server, Python, and the stable Backplane KiCad runtime with PCB and schematic IPC patches, symbols, footprints, 3D models, and project templates. KiCad's matching source archives and licenses are available in [Backplane_KiCad releases](https://github.com/i2cjak/Backplane_KiCad/releases); the bundled manifest identifies the exact source commit.
 
           Configure your coding provider in Settings. Berkeley Mono is used when installed locally; no Berkeley Mono font files are included.
 

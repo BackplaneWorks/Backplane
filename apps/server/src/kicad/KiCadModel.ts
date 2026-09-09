@@ -4,7 +4,7 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeUtil from "node:util";
-import { resolveKiCadExecutable } from "./KiCadExecutable.ts";
+import { resolveKiCadEnvironment, resolveKiCadExecutable } from "./KiCadExecutable.ts";
 
 import { nameKiCadGlbLayers } from "./KiCadGlb.ts";
 
@@ -33,7 +33,7 @@ const exportModel = async (board: string, output: string) => {
     ],
     {
       cwd: NodePath.dirname(board),
-      env,
+      env: resolveKiCadEnvironment(env),
       timeout: 120_000,
       windowsHide: true,
     },

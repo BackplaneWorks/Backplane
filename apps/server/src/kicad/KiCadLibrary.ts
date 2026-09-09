@@ -4,7 +4,7 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeUtil from "node:util";
-import { resolveKiCadExecutable } from "./KiCadExecutable.ts";
+import { resolveKiCadEnvironment, resolveKiCadExecutable } from "./KiCadExecutable.ts";
 
 const execFile = NodeUtil.promisify(NodeChildProcess.execFile);
 const cleanEnv = () => {
@@ -49,7 +49,7 @@ export async function exportKiCadLibrary(
           ];
     await execFile(resolveKiCadExecutable(), args, {
       cwd: NodePath.dirname(input),
-      env: cleanEnv(),
+      env: resolveKiCadEnvironment(cleanEnv()),
       timeout: 120_000,
       windowsHide: true,
     });

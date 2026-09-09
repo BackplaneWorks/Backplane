@@ -4,6 +4,7 @@
 import * as NodeFSP from "node:fs/promises";
 import * as NodeCrypto from "node:crypto";
 import * as NodeModule from "node:module";
+import * as NodePath from "node:path";
 
 import {
   createPackageWithOptions,
@@ -2254,6 +2255,83 @@ export function isKiCadRuntimeManifest(value: unknown): boolean {
   );
 }
 
+async function hasRuntimeFile(
+  directory: string,
+  predicate: (file: string) => boolean,
+): Promise<boolean> {
+  let entries;
+  try {
+    entries = await NodeFSP.readdir(directory, { withFileTypes: true });
+  } catch {
+    return false;
+  }
+  for (const entry of entries) {
+    const file = NodePath.join(directory, entry.name);
+    if (entry.isFile() && predicate(entry.name)) return true;
+    if (entry.isDirectory() && (await hasRuntimeFile(file, predicate))) return true;
+  }
+  return false;
+}
+
+/** Validate the standard-library and provenance contract of a bundled runtime. */
+export async function validateKiCadRuntimeBundle(source: string): Promise<void> {
+  const manifestPath = NodePath.join(source, "manifest.json");
+  let manifest: unknown;
+  try {
+    manifest = JSON.parse(await NodeFSP.readFile(manifestPath, "utf8")) as unknown;
+  } catch {
+    throw new Error(`Bundled KiCad runtime has no readable manifest: ${manifestPath}`);
+  }
+  if (!isKiCadRuntimeManifest(manifest))
+    throw new Error(`Bundled KiCad runtime manifest is missing provenance fields: ${manifestPath}`);
+
+  const libraryChecks: ReadonlyArray<readonly [string, (file: string) => boolean]> = [
+    ["symbols", (file) => file.endsWith(".kicad_sym")],
+    ["footprints", (file) => file.endsWith(".kicad_mod")],
+    ["3dmodels", (file) => /\.(?:wrl|wrz|step|stp|iges|igs)$/iu.test(file)],
+    ["template", (file) => /\.(?:kicad_pro|pro)$/iu.test(file)],
+  ];
+  for (const [directory, predicate] of libraryChecks) {
+    if (!(await hasRuntimeFile(NodePath.join(source, "share", "kicad", directory), predicate)))
+      throw new Error(`Bundled KiCad runtime is missing a standard ${directory} library file.`);
+  }
+
+  for (const table of [
+    ["template", "sym-lib-table"],
+    ["template", "fp-lib-table"],
+    ["", "sym-lib-table"],
+    ["", "fp-lib-table"],
+  ] as const) {
+    const tablePath = table[0]
+      ? NodePath.join(source, "share", "kicad", table[0], table[1])
+      : NodePath.join(source, "share", "kicad", table[1]);
+    try {
+      if (!(await NodeFSP.stat(tablePath)).isFile()) throw new Error();
+    } catch {
+      const location = table[0] ? `template/${table[1]}` : table[1];
+      throw new Error(`Bundled KiCad runtime is missing ${location}.`);
+    }
+  }
+
+  const libraryNotices = {
+    symbols: "kicad-symbols",
+    footprints: "kicad-footprints",
+    models: "kicad-packages3D",
+    templates: "kicad-templates",
+  } as const;
+  for (const [library, directory] of Object.entries(libraryNotices)) {
+    const noticeRoot = NodePath.join(source, "licenses", "kicad-libraries", directory);
+    if (!(await hasRuntimeFile(noticeRoot, (file) => file === "BACKPLANE_SOURCE.txt")))
+      throw new Error(`Bundled ${library} library is missing BACKPLANE_SOURCE.txt.`);
+    if (
+      !(await hasRuntimeFile(noticeRoot, (file) =>
+        /^(?:license|copying)(?:[._-].*)?$/iu.test(file),
+      ))
+    )
+      throw new Error(`Bundled ${library} library is missing its license or copying notice.`);
+  }
+}
+
 export function resolveBundledPythonExecutableName(platform: typeof BuildPlatform.Type): string {
   return platform === "win" ? "python.exe" : platform === "mac" ? "python3" : "python3";
 }
@@ -2303,6 +2381,7 @@ export const stageKiCadRuntime = Effect.fn("stageKiCadRuntime")(function* (input
       ),
     );
   }
+  if (manifestValid) yield* Effect.tryPromise(() => validateKiCadRuntimeBundle(source));
   yield* fs.copy(source, destination);
   yield* Effect.log(`[desktop-artifact] Staged bundled KiCad runtime from ${source}.`);
 });

@@ -45,3 +45,14 @@ T3CODE_DESKTOP_UPDATE_REPOSITORY=i2cjak/Backplane \
 
 The runtime path above must contain `bin/kicad-cli` and the provenance
 `manifest.json`. The resulting installer is written to `release/`.
+
+The [KiCad runtime workflow](https://github.com/i2cjak/Backplane_KiCad/blob/main/.github/workflows/backplane-linux-release.yml)
+pins the official symbol, footprint, 3D model, and project template libraries
+to matching stable release commits. The runtime carries their source metadata
+and licenses under `licenses/kicad-libraries`; matching source archives accompany
+the runtime release.
+
+Library files live under `share/kicad/{symbols,footprints,3dmodels,template}`.
+The runtime launcher sets the corresponding `KICAD10_*_DIR` defaults and creates
+missing user library tables that reference the bundled stock tables. Existing
+user configuration and explicit library path overrides are preserved.

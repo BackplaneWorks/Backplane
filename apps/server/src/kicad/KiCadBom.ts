@@ -6,7 +6,7 @@ import * as NodePath from "node:path";
 import * as NodeUtil from "node:util";
 import type { KiCadBom } from "@t3tools/contracts";
 import { discoverKiCadProject, resolveKiCadProjectFile } from "./KiCadProject.ts";
-import { resolveKiCadExecutable } from "./KiCadExecutable.ts";
+import { resolveKiCadEnvironment, resolveKiCadExecutable } from "./KiCadExecutable.ts";
 
 const execFile = NodeUtil.promisify(NodeChildProcess.execFile);
 const record = (value: unknown): Record<string, unknown> =>
@@ -87,7 +87,7 @@ const runExport = async (args: string[], cwd: string) => {
   delete env.APPIMAGE;
   await execFile(resolveKiCadExecutable(env), args, {
     cwd,
-    env,
+    env: resolveKiCadEnvironment(env),
     timeout: 120_000,
     windowsHide: true,
   });

@@ -1,4 +1,8 @@
 import * as NodeCrypto from "node:crypto";
+import * as NodeAssert from "node:assert/strict";
+import * as NodeFSP from "node:fs/promises";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
@@ -54,6 +58,7 @@ import {
   resolveResourceMonitorRustTargets,
   resolveKiCadRuntimeExecutableName,
   isKiCadRuntimeManifest,
+  validateKiCadRuntimeBundle,
   resolveWindowsServerAsarIgnoreGlobs,
   resourceMonitorExecutableName,
   resolveGitHubPublishConfig,
@@ -280,6 +285,81 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       true,
     );
     assert.equal(isKiCadRuntimeManifest({ version: "nightly" }), false);
+  });
+
+  it("requires standard libraries, notices, and provenance in a bundled runtime", async () => {
+    const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "backplane-kicad-runtime-"));
+    try {
+      await Promise.all([
+        NodeFSP.mkdir(NodePath.join(root, "share", "kicad", "symbols"), { recursive: true }),
+        NodeFSP.mkdir(NodePath.join(root, "share", "kicad", "footprints", "Demo.pretty"), {
+          recursive: true,
+        }),
+        NodeFSP.mkdir(NodePath.join(root, "share", "kicad", "3dmodels"), { recursive: true }),
+        NodeFSP.mkdir(NodePath.join(root, "share", "kicad", "template"), { recursive: true }),
+        ...["kicad-symbols", "kicad-footprints", "kicad-packages3D", "kicad-templates"].map(
+          (directory) =>
+            NodeFSP.mkdir(NodePath.join(root, "licenses", "kicad-libraries", directory), {
+              recursive: true,
+            }),
+        ),
+      ]);
+      await Promise.all([
+        NodeFSP.writeFile(
+          NodePath.join(root, "manifest.json"),
+          JSON.stringify({
+            sourceRepository: "https://github.com/i2cjak/Backplane_KiCad",
+            sourceCommit: "abcdef",
+            version: "10.0.6-backplane.1",
+            license: "GPL-3.0-or-later",
+          }),
+        ),
+        NodeFSP.writeFile(
+          NodePath.join(root, "share", "kicad", "symbols", "Demo.kicad_sym"),
+          "sym",
+        ),
+        NodeFSP.writeFile(
+          NodePath.join(root, "share", "kicad", "footprints", "Demo.pretty", "Demo.kicad_mod"),
+          "footprint",
+        ),
+        NodeFSP.writeFile(NodePath.join(root, "share", "kicad", "3dmodels", "Demo.step"), "model"),
+        NodeFSP.writeFile(
+          NodePath.join(root, "share", "kicad", "template", "Demo.kicad_pro"),
+          "{}",
+        ),
+        ...[
+          NodePath.join(root, "share", "kicad", "template", "sym-lib-table"),
+          NodePath.join(root, "share", "kicad", "template", "fp-lib-table"),
+          NodePath.join(root, "share", "kicad", "sym-lib-table"),
+          NodePath.join(root, "share", "kicad", "fp-lib-table"),
+        ].map((file) => NodeFSP.writeFile(file, "table")),
+        ...["kicad-symbols", "kicad-footprints", "kicad-packages3D", "kicad-templates"].flatMap(
+          (directory) => [
+            NodeFSP.writeFile(
+              NodePath.join(root, "licenses", "kicad-libraries", directory, "BACKPLANE_SOURCE.txt"),
+              "source",
+            ),
+            NodeFSP.writeFile(
+              NodePath.join(root, "licenses", "kicad-libraries", directory, "LICENSE.txt"),
+              "license",
+            ),
+          ],
+        ),
+      ]);
+      await validateKiCadRuntimeBundle(root);
+      await NodeFSP.rm(NodePath.join(root, "share", "kicad", "3dmodels", "Demo.step"));
+      await NodeAssert.rejects(validateKiCadRuntimeBundle(root), /standard 3dmodels library/);
+      await NodeFSP.writeFile(
+        NodePath.join(root, "share", "kicad", "3dmodels", "Demo.step"),
+        "model",
+      );
+      await NodeFSP.rm(
+        NodePath.join(root, "licenses", "kicad-libraries", "kicad-symbols", "LICENSE.txt"),
+      );
+      await NodeAssert.rejects(validateKiCadRuntimeBundle(root), /symbols library is missing/);
+    } finally {
+      await NodeFSP.rm(root, { recursive: true, force: true });
+    }
   });
 
   it("switches desktop packaging icons to the nightly artwork for nightly versions", () => {

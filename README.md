@@ -4,7 +4,7 @@ Backplane is a workspace for agentic hardware development. It combines coding-ag
 
 ## Install
 
-Download an installer for your system from [Backplane Releases](https://github.com/i2cjak/Backplane/releases). Each release lists its supported platforms. Installers include the desktop app, Chromium browser, server, Python, and the matching Backplane KiCad runtime.
+Download an installer for your system from [Backplane Releases](https://github.com/i2cjak/Backplane/releases). Each release lists its supported platforms. Installers include the desktop app, Chromium browser, server, Python, and the matching Backplane KiCad runtime with standard libraries.
 
 Open Backplane and configure the coding provider you use. Provider accounts and credentials are your own. Berkeley Mono is used when installed on your system; the font is not redistributed with Backplane.
 
