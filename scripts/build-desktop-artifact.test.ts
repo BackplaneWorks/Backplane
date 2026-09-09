@@ -75,6 +75,8 @@ import {
   copyDirectoryPreservingSymlinks,
   LinuxBrowserSecretHostError,
   stageBrowserSecret,
+  stageKiCadRuntime,
+  stagePythonRuntime,
   validateWindowsPackagedPayload,
   WindowsPrimaryNativeProbeError,
   WindowsDesktopBuildPrerequisitesMissingError,
@@ -2378,6 +2380,63 @@ it.effect.skipIf(!symlinksSupported)("rebases packaged links into the isolated t
     assert.equal(
       yield* fs.realPath(path.join(destination, "node_modules/example-absolute")),
       resolvedCopiedPackage,
+    );
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect.skipIf(!symlinksSupported)("preserves relocatable KiCad and Python runtime links", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3code-stage-runtime-links-" });
+    const kicadSource = path.join(root, "kicad-source");
+    const pythonSource = path.join(root, "python-source");
+    const stageResources = path.join(root, "stage", "apps/desktop/resources");
+
+    yield* fs.makeDirectory(path.join(kicadSource, "bin"), { recursive: true });
+    yield* fs.writeFileString(path.join(kicadSource, "bin/kicad-cli.real"), "kicad\n");
+    yield* fs.symlink("kicad-cli.real", path.join(kicadSource, "bin/kicad-cli"));
+    yield* fs.makeDirectory(path.join(pythonSource, "bin"), { recursive: true });
+    yield* fs.writeFileString(path.join(pythonSource, "bin/python3.13"), "python\n");
+    yield* fs.symlink("python3.13", path.join(pythonSource, "bin/python3"));
+
+    const previousKiCadRuntime = process.env.T3CAD_KICAD_RUNTIME;
+    const previousPythonRuntime = process.env.T3CAD_PYTHON_RUNTIME;
+    process.env.T3CAD_KICAD_RUNTIME = kicadSource;
+    process.env.T3CAD_PYTHON_RUNTIME = pythonSource;
+
+    try {
+      yield* stageKiCadRuntime({
+        repoRoot: root,
+        stageResourcesDir: stageResources,
+        platform: "linux",
+      });
+      yield* stagePythonRuntime({
+        repoRoot: root,
+        stageResourcesDir: stageResources,
+        platform: "linux",
+      });
+    } finally {
+      if (previousKiCadRuntime === undefined) delete process.env.T3CAD_KICAD_RUNTIME;
+      else process.env.T3CAD_KICAD_RUNTIME = previousKiCadRuntime;
+      if (previousPythonRuntime === undefined) delete process.env.T3CAD_PYTHON_RUNTIME;
+      else process.env.T3CAD_PYTHON_RUNTIME = previousPythonRuntime;
+    }
+
+    yield* fs.remove(kicadSource, { recursive: true });
+    yield* fs.remove(pythonSource, { recursive: true });
+
+    const stagedKiCadLink = path.join(stageResources, "kicad/bin/kicad-cli");
+    const stagedPythonLink = path.join(stageResources, "python/bin/python3");
+    assert.equal(yield* fs.readLink(stagedKiCadLink), "kicad-cli.real");
+    assert.equal(yield* fs.readLink(stagedPythonLink), "python3.13");
+    assert.equal(
+      yield* fs.realPath(stagedKiCadLink),
+      path.join(stageResources, "kicad/bin/kicad-cli.real"),
+    );
+    assert.equal(
+      yield* fs.realPath(stagedPythonLink),
+      path.join(stageResources, "python/bin/python3.13"),
     );
   }).pipe(Effect.provide(NodeServices.layer)),
 );

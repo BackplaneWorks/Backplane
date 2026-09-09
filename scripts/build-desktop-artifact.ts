@@ -2382,7 +2382,9 @@ export const stageKiCadRuntime = Effect.fn("stageKiCadRuntime")(function* (input
     );
   }
   if (manifestValid) yield* Effect.tryPromise(() => validateKiCadRuntimeBundle(source));
-  yield* fs.copy(source, destination);
+  yield* Effect.tryPromise(() =>
+    NodeFSP.cp(source, destination, { recursive: true, verbatimSymlinks: true }),
+  );
   yield* Effect.log(`[desktop-artifact] Staged bundled KiCad runtime from ${source}.`);
 });
 
@@ -2408,7 +2410,9 @@ export const stagePythonRuntime = Effect.fn("stagePythonRuntime")(function* (inp
     yield* Effect.log(`[desktop-artifact] No bundled Python runtime at ${source}; using PATH.`);
     return;
   }
-  yield* fs.copy(source, destination);
+  yield* Effect.tryPromise(() =>
+    NodeFSP.cp(source, destination, { recursive: true, verbatimSymlinks: true }),
+  );
   yield* Effect.log(`[desktop-artifact] Staged bundled Python runtime from ${source}.`);
 });
 

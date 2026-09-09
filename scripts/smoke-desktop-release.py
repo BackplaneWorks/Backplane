@@ -157,6 +157,9 @@ def run_smoke(app_root: Path, timeout_seconds: float, headless: bool) -> int:
     executable = app_root / "backplane"
     if not executable.is_file() or not os.access(executable, os.X_OK):
         raise RuntimeError(f"packaged executable is missing or not executable: {executable}")
+    for link in app_root.rglob("*"):
+        if link.is_symlink() and not link.resolve(strict=True).is_relative_to(app_root):
+            raise RuntimeError(f"packaged symlink escapes the application: {link}")
     verify_packaged_browser(app_root)
 
     with tempfile.TemporaryDirectory(prefix="backplane-release-smoke-") as temporary:
