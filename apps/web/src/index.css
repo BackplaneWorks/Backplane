@@ -1196,7 +1196,7 @@ html[data-onboarding-surface]:root {
   --border: #262626;
   --card: #000;
   --card-foreground: #fff;
-  --destructive: var(--color-red-400);
+  --destructive: var(--foreground);
   --foreground: #fff;
   --icon-muted: #a1a1aa;
   --input: #262626;
@@ -1209,7 +1209,8 @@ html[data-onboarding-surface]:root {
   --secondary: #171717;
   --secondary-foreground: #fff;
   --secondary-label: #a1a1aa;
-  --success-foreground: var(--color-emerald-400);
+  --success: var(--foreground);
+  --success-foreground: var(--foreground);
   --terminal-background: #000;
   --terminal-cursor: #fff;
   --terminal-foreground: #fff;
