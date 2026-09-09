@@ -126,9 +126,7 @@ export function MobileClientsUserProfilePage() {
             role="alert"
           >
             <div>
-              <p className="font-medium text-destructive-foreground">
-                Could not load mobile clients
-              </p>
+              <p className="font-medium text-error-foreground">Could not load mobile clients</p>
               <p className="mt-0.5 text-xs text-muted-foreground">{devicesState.error}</p>
             </div>
             <Button size="xs" variant="outline" onClick={devicesState.refresh}>

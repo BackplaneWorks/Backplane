@@ -47,7 +47,7 @@
       --color-secondary: #ffffff;
       --color-secondary-foreground: #262626;
       --color-secondary-border: rgba(0, 0, 0, 0.08);
-      --color-switch-active-track: #34c759;
+      --color-switch-active-track: #262626;
       --color-switch-active-thumb: #ffffff;
       --color-switch-inactive-track: rgba(0, 0, 0, 0.08);
       --color-switch-inactive-thumb: #8e8e93;
@@ -151,8 +151,8 @@
       --color-secondary: rgba(255, 255, 255, 0.04);
       --color-secondary-foreground: #f5f5f5;
       --color-secondary-border: rgba(255, 255, 255, 0.06);
-      --color-switch-active-track: #30d158;
-      --color-switch-active-thumb: #ffffff;
+      --color-switch-active-track: #f5f5f5;
+      --color-switch-active-thumb: #0a0a0a;
       --color-switch-inactive-track: rgba(255, 255, 255, 0.06);
       --color-switch-inactive-thumb: #8e8e93;
 
@@ -221,8 +221,7 @@
 
 /* ─── Typography ────────────────────────────────────────────────────── */
 @theme {
-  /* No Berkeley Mono font file ships in the native bundle, so use each
-     platform's installed monospace face instead of naming a missing font. */
+  /* No Berkeley Mono font file ships in the native bundle. */
   --font-sans: monospace;
   --font-medium: monospace;
   --font-bold: monospace;
@@ -248,13 +247,27 @@
   --text-3xl--line-height: 36px;
 }
 
+/* Menlo is iOS's installed monospace face; Android uses the generic face. */
+@layer theme {
+  :root {
+    @variant ios {
+      --font-mono: "Menlo";
+      --font-sans: "Menlo";
+      --font-medium: "Menlo";
+      --font-bold: "Menlo-Bold";
+    }
+  }
+}
+
 /* ─── Custom utilities ──────────────────────────────────────────────── */
 @utility font-t3-medium {
   font-family: var(--font-medium);
+  font-weight: 500;
 }
 
 @utility font-t3-bold {
   font-family: var(--font-bold);
+  font-weight: 700;
 }
 
 @utility font-t3-extrabold {

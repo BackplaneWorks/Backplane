@@ -64,7 +64,7 @@ export function LocalNotificationSettings() {
               if (!notificationPermissionGranted(result))
                 Alert.alert(
                   "Notifications are disabled",
-                  "Enable notifications for T3CAD in iOS Settings.",
+                  "Enable notifications for Backplane in iOS Settings.",
                   [
                     { text: "Cancel", style: "cancel" },
                     {

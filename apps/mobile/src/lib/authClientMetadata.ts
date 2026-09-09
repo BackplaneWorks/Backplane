@@ -7,7 +7,7 @@ export function authClientMetadata(appVersion?: string): AuthClientPresentationM
   const deviceModel = Device.modelName?.trim();
 
   return {
-    label: "T3CAD Mobile",
+    label: "Backplane Mobile",
     deviceType:
       Device.deviceType === Device.DeviceType.TABLET
         ? "tablet"

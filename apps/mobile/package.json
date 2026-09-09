@@ -38,6 +38,7 @@
     "config:dev": "APP_VARIANT=development expo config",
     "config:preview": "APP_VARIANT=preview expo config",
     "config:prod": "APP_VARIANT=production expo config",
+    "config:k3eda": "APP_VARIANT=k3eda expo config",
     "profile:android:hermes": "mkdir -p profiles/review && react-native profile-hermes profiles/review",
     "sync:pierre-icons": "node modules/t3-markdown-text/scripts/sync-pierre-file-icons.mjs",
     "generate": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/generate-uniwind-themes.mts",
@@ -47,7 +48,6 @@
   "dependencies": {
     "@clerk/expo": "catalog:",
     "@effect/atom-react": "catalog:",
-    "@expo-google-fonts/dm-sans": "^0.4.2",
     "@expo/metro-runtime": "~57.0.14",
     "@expo/ui": "~57.0.14",
     "@legendapp/list": "catalog:",

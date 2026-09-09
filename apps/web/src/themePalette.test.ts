@@ -5,6 +5,7 @@ import {
   applyThemeColorPreview,
   applyThemePalette,
   getThemeColorsForMode,
+  getDestructiveForeground,
   getThemeDefinition,
   getThemeModes,
   getThemePreviewSidebarArtwork,
@@ -78,6 +79,19 @@ function contrastRatio(first: string, second: string): number {
   const darker = Math.min(luminance(first), luminance(second));
   return (lighter + 0.05) / (darker + 0.05);
 }
+
+describe("solid destructive labels", () => {
+  it.each(["#000000", "#ffffff", "#777777", "#fb2c36", "#c10007", "#ff6467"])(
+    "keeps text readable on a %s button",
+    (error) => {
+      for (const canvas of ["#fafafa", "#0a0a0a"]) {
+        expect(
+          contrastRatio(getDestructiveForeground({ error, canvas }), error),
+        ).toBeGreaterThanOrEqual(4.5);
+      }
+    },
+  );
+});
 
 describe("theme files", () => {
   it("keeps every built-in palette value in canonical OKLCH form", () => {

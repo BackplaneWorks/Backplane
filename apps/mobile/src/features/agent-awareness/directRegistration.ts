@@ -96,7 +96,9 @@ async function registerNow(input: RegistrationInput) {
           timer = setTimeout(
             () =>
               reject(
-                new Error("Apple has not returned a notification token. Reopen T3CAD to retry."),
+                new Error(
+                  "Apple has not returned a notification token. Reopen Backplane to retry.",
+                ),
               ),
             10_000,
           );

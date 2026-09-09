@@ -1608,6 +1608,22 @@ const APP_THEME_VARIABLES: Readonly<Record<ThemeColorRole, string>> = {
   terminalScrollbarHover: "--app-theme-terminal-scrollbar-hover",
 };
 
+const DESTRUCTIVE_FOREGROUND_VARIABLE = "--app-theme-destructive-foreground";
+
+export function getDestructiveForeground(colors: Pick<ThemeColors, "error" | "canvas">): string {
+  const canvas = parseThemeRgbColor(colors.canvas, THEME_WHITE_FOREGROUND);
+  const error = parseThemeColor(colors.error);
+  const surface = error
+    ? mixThemeRgbColors(canvas, themeOklchToRgb(error.color), error.alpha)
+    : canvas;
+  return themeRgbToHexColor(
+    themeContrastRatio(surface, THEME_WHITE_FOREGROUND) >=
+      themeContrastRatio(surface, THEME_BLACK_FOREGROUND)
+      ? THEME_WHITE_FOREGROUND
+      : THEME_BLACK_FOREGROUND,
+  );
+}
+
 export function getThemeColorVariable(role: ThemeColorRole): string {
   return APP_THEME_VARIABLES[role];
 }
@@ -1634,6 +1650,9 @@ export function applyThemeColorPreview(colors: ThemeColors, appearance: ThemeApp
     // A half-typed hex keeps the last good value instead of blanking the role.
     if (isThemeColor(value)) root.style.setProperty(APP_THEME_VARIABLES[role], value);
   }
+  if (isThemeColor(colors.error) && isThemeColor(colors.canvas)) {
+    root.style.setProperty(DESTRUCTIVE_FOREGROUND_VARIABLE, getDestructiveForeground(colors));
+  }
 }
 
 export function applyThemePalette(theme: ThemePreference, appearance?: ThemeAppearance): void {
@@ -1652,10 +1671,12 @@ export function applyThemePalette(theme: ThemePreference, appearance?: ThemeAppe
     for (const [role, value] of Object.entries(colors) as Array<[ThemeColorRole, string]>) {
       root.style.setProperty(APP_THEME_VARIABLES[role], value);
     }
+    root.style.setProperty(DESTRUCTIVE_FOREGROUND_VARIABLE, getDestructiveForeground(colors));
     return;
   }
 
   delete root.dataset.themeId;
+  root.style.removeProperty(DESTRUCTIVE_FOREGROUND_VARIABLE);
   for (const variable of Object.values(APP_THEME_VARIABLES)) {
     root.style.removeProperty(variable);
   }

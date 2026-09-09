@@ -47,7 +47,7 @@ export function ComposerInlineControl(props: {
       accessibilityState={
         props.static ? undefined : { disabled: props.disabled, selected: props.selected }
       }
-      className="h-11 flex-row items-center gap-2 rounded-xl px-2 active:bg-subtle"
+      className="h-11 flex-row items-center gap-2 rounded-none px-2 active:bg-subtle"
       disabled={props.disabled || props.static}
       onPress={props.onPress}
       style={{ maxWidth: props.maxWidth ?? 190, opacity: props.disabled ? 0.45 : 1 }}
@@ -235,7 +235,7 @@ export function ComposerActionButton(props: {
     >
       <View
         className={cn(
-          "size-[30px] items-center justify-center rounded-full",
+          "size-[30px] items-center justify-center rounded-none",
           props.variant === "danger"
             ? "bg-danger"
             : props.disabled
@@ -295,7 +295,7 @@ export function ComposerToolbarButton(props: {
         // so callers can lift it with max-w-full — flex-filling pills in the
         // thread composer stretch to the row's edge. The numeric maxWidth
         // prop still wins via the inline style below.
-        "h-11 max-w-[172px] flex-row items-center justify-center rounded-full border active:opacity-70",
+        "h-11 max-w-[172px] flex-row items-center justify-center rounded-none border active:opacity-70",
         variant === "primary" && "shadow-lg shadow-adaptive-black-a10-a25 disabled:shadow-none",
         isCircle ? "w-11" : "gap-2 px-3.5",
         variant === "primary"

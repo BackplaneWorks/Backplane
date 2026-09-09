@@ -1,18 +1,20 @@
-# T3 Code Mobile
+# Backplane Mobile
 
 > [!WARNING]
-> T3 Code Mobile is currently in development and is not distributed yet. If you want to try it out, you can build it from source.
+> Backplane Mobile is currently in development. The `k3eda` profile carries the existing
+> App Store bundle identity; delivery credentials and project ownership remain external.
 
 ## Quickstart
 
 > [!NOTE]
 > Uses native modules so using Expo Go is not supported. You need to use the Expo Dev Client.
 
-This app has three variants:
+This app has four variants:
 
-- `development`: Expo dev client, installable side-by-side as `T3 Code Dev`
-- `preview`: persistent internal preview build, installable side-by-side as `T3 Code Preview`
-- `production`: store/release build as `T3 Code`
+- `development`: Expo dev client, installable side-by-side as `Backplane Dev`
+- `preview`: persistent internal preview build, installable side-by-side as `Backplane Preview`
+- `production`: generic store/release build as `Backplane`
+- `k3eda`: Backplane store build (`com.i2cjak.k3eda`), submitted to App Store Connect app `6809006324`
 
 Run commands from `apps/mobile`.
 
@@ -94,6 +96,7 @@ Inspect the resolved Expo config for a variant:
 ```bash
 vp run config:dev
 vp run config:preview
+vp run config:k3eda
 ```
 
 Run static checks for mobile native code:
@@ -113,6 +116,10 @@ The development variant uses `appVersion` to avoid recalculating the native fing
 For preview or production EAS environments, set `T3CODE_CLERK_PUBLISHABLE_KEY`,
 `T3CODE_CLERK_JWT_TEMPLATE`, and `T3CODE_RELAY_URL`
 as EAS environment variables. Expo config maps the canonical values into the mobile build.
+
+The `k3eda` profile records the Backplane bundle identifier, Apple team, and App Store Connect
+app ID. The EAS project ownership and authenticated uploader still need to be verified before a
+TestFlight build is submitted; the profile alone does not prove that delivery path.
 
 Create a PR preview dev-client build manually:
 

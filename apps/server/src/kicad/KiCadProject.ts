@@ -108,6 +108,7 @@ export async function discoverKiCadProject(root: string): Promise<KiCadProjectMa
   const cached = manifestCache.get(projectRoot);
   if (cached && cached.expiresAt > Date.now()) return cached.manifest;
   const files: KiCadProjectFile[] = [];
+  const metadataRevisions: string[] = [];
   let visited = 0;
   let scanLimitWarningAdded = false;
   let config: KiCadProjectConfig | undefined;
@@ -157,12 +158,20 @@ export async function discoverKiCadProject(root: string): Promise<KiCadProjectMa
       }
       const extension = entry.name.slice(entry.name.lastIndexOf(".")).toLowerCase();
       const kind = fileKind(extension);
-      if (!kind) continue;
+      const metadata = /\.kicad_(?:pcb|sch|mod|sym)\.backplane\.json$/i.test(entry.name);
+      if (!kind && !metadata) continue;
       const absolute = NodePath.join(directory, entry.name);
       try {
         const info = await NodeFSP.lstat(absolute);
         if (info.isSymbolicLink()) continue;
         if (!info.isFile()) continue;
+        if (metadata) {
+          metadataRevisions.push(
+            `${NodePath.relative(projectRoot, absolute)}\0${info.size}\0${info.mtimeMs}`,
+          );
+          continue;
+        }
+        if (!kind) continue;
         files.push({
           path: NodePath.relative(projectRoot, absolute).split(NodePath.sep).join("/"),
           kind,
@@ -181,9 +190,15 @@ export async function discoverKiCadProject(root: string): Promise<KiCadProjectMa
     warnings.push(`Configured PCB file not found: ${config.pcb}`);
   if (config?.schematic && !files.some((file) => file.path === config!.schematic))
     warnings.push(`Configured schematic file not found: ${config.schematic}`);
-  if (config?.symbol && !files.some((file) => file.path === config!.symbol && file.kind === "symbol"))
+  if (
+    config?.symbol &&
+    !files.some((file) => file.path === config!.symbol && file.kind === "symbol")
+  )
     warnings.push(`Configured symbol library not found: ${config.symbol}`);
-  if (config?.footprint && !files.some((file) => file.path === config!.footprint && file.kind === "footprint"))
+  if (
+    config?.footprint &&
+    !files.some((file) => file.path === config!.footprint && file.kind === "footprint")
+  )
     warnings.push(`Configured footprint file not found: ${config.footprint}`);
   for (const directory of config?.gerbers ?? [])
     if (
@@ -199,6 +214,7 @@ export async function discoverKiCadProject(root: string): Promise<KiCadProjectMa
     .update(
       `${configFingerprint}\n${JSON.stringify(warnings)}\n${files.map((file) => `${file.path}\0${file.size}\0${file.mtimeMs}`).join("\n")}`,
     )
+    .update(metadataRevisions.sort().join("\n"))
     .digest("hex")
     .slice(0, 16);
   const manifest = { root: projectRoot, revision, files, ...(config ? { config } : {}), warnings };

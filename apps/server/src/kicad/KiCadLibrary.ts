@@ -5,6 +5,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeUtil from "node:util";
 import { resolveKiCadEnvironment, resolveKiCadExecutable } from "./KiCadExecutable.ts";
+import { copyKiCadMetadata } from "./KiCadMetadata.ts";
 
 const execFile = NodeUtil.promisify(NodeChildProcess.execFile);
 const cleanEnv = () => {
@@ -26,6 +27,7 @@ export async function exportKiCadLibrary(
     await NodeFSP.mkdir(sourceDir);
     const source = NodePath.join(sourceDir, NodePath.basename(input));
     await NodeFSP.copyFile(input, source);
+    await copyKiCadMetadata(input, source);
     const args =
       kind === "footprint"
         ? [

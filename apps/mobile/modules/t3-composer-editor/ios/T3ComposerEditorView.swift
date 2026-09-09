@@ -326,7 +326,7 @@ public final class T3ComposerEditorView: ExpoView, UITextViewDelegate, UITextDro
     skillText: "#a21caf",
     fileTint: "#737373"
   )
-  private var fontFamily = "DMSans-Regular"
+  private var fontFamily = "Menlo"
   private var fontSize: CGFloat = 14
   private var lineHeight: CGFloat = 20
   private var contentInsetVertical: CGFloat = 0
@@ -688,8 +688,7 @@ public final class T3ComposerEditorView: ExpoView, UITextViewDelegate, UITextDro
     iconImage: UIImage?,
     style: ComposerChipStyle
   ) -> UIImage {
-    let font = UIFont(name: "DMSans-Medium", size: max(12, fontSize - 2))
-      ?? UIFont.systemFont(ofSize: max(12, fontSize - 2), weight: .medium)
+    let font = UIFont.monospacedSystemFont(ofSize: max(12, fontSize - 2), weight: .medium)
     let fallbackIcon = UIImage(
       systemName: iconName,
       withConfiguration: UIImage.SymbolConfiguration(pointSize: 12, weight: .medium)
@@ -705,7 +704,7 @@ public final class T3ComposerEditorView: ExpoView, UITextViewDelegate, UITextDro
     let renderer = UIGraphicsImageRenderer(size: CGSize(width: width, height: height), format: format)
     return renderer.image { context in
       let rect = CGRect(origin: .zero, size: CGSize(width: width, height: height))
-      let path = UIBezierPath(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), cornerRadius: 7)
+      let path = UIBezierPath(rect: rect.insetBy(dx: 0.5, dy: 0.5))
       style.backgroundColor.setFill()
       path.fill()
       style.borderColor.setStroke()

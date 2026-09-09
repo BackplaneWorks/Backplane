@@ -34,7 +34,7 @@ if (
 
 const DEVELOPMENT_ASSETS = {
   appIcon: fromRepoRoot(BRAND_ASSET_PATHS.developmentIosIconPng),
-  iosIcon: fromRepoRoot(BRAND_ASSET_PATHS.developmentIconComposerProject),
+  iosIcon: fromRepoRoot(BRAND_ASSET_PATHS.developmentIosIconPng),
   splashIcon: fromRepoRoot(BRAND_ASSET_PATHS.developmentIosIconPng),
   androidAdaptiveForeground,
   androidAdaptiveBackgroundColor: "#00639B",
@@ -45,7 +45,7 @@ const DEVELOPMENT_ASSETS = {
 
 const PREVIEW_ASSETS = {
   appIcon: fromRepoRoot(BRAND_ASSET_PATHS.nightlyIosIconPng),
-  iosIcon: fromRepoRoot(BRAND_ASSET_PATHS.nightlyIconComposerProject),
+  iosIcon: fromRepoRoot(BRAND_ASSET_PATHS.nightlyIosIconPng),
   splashIcon: fromRepoRoot(BRAND_ASSET_PATHS.nightlyIosIconPng),
   androidAdaptiveForeground,
   androidAdaptiveBackgroundColor: "#111533",
@@ -56,7 +56,7 @@ const PREVIEW_ASSETS = {
 
 const RELEASE_ASSETS = {
   appIcon: fromRepoRoot(BRAND_ASSET_PATHS.productionIosIconPng),
-  iosIcon: fromRepoRoot(BRAND_ASSET_PATHS.productionIconComposerProject),
+  iosIcon: fromRepoRoot(BRAND_ASSET_PATHS.productionIosIconPng),
   splashIcon: fromRepoRoot(BRAND_ASSET_PATHS.productionIosIconPng),
   androidAdaptiveForeground,
   androidAdaptiveBackgroundColor: "#000000",
@@ -67,7 +67,7 @@ const RELEASE_ASSETS = {
 
 const VARIANT_CONFIG = {
   development: {
-    appName: "T3CAD Dev",
+    appName: "Backplane Dev",
     scheme: "t3code-dev",
     iosBundleIdentifier: "com.t3tools.t3code.dev",
     androidPackage: "com.t3tools.t3code.dev",
@@ -75,7 +75,7 @@ const VARIANT_CONFIG = {
     assets: DEVELOPMENT_ASSETS,
   },
   preview: {
-    appName: "T3CAD Preview",
+    appName: "Backplane Preview",
     scheme: "t3code-preview",
     iosBundleIdentifier: "com.t3tools.t3code.preview",
     androidPackage: "com.t3tools.t3code.preview",
@@ -83,7 +83,7 @@ const VARIANT_CONFIG = {
     assets: PREVIEW_ASSETS,
   },
   production: {
-    appName: "T3CAD",
+    appName: "Backplane",
     scheme: "t3code",
     iosBundleIdentifier: "com.t3tools.t3code",
     androidPackage: "com.t3tools.t3code",
@@ -91,7 +91,7 @@ const VARIANT_CONFIG = {
     assets: RELEASE_ASSETS,
   },
   k3eda: {
-    appName: "T3CAD",
+    appName: "Backplane",
     scheme: "k3eda",
     iosBundleIdentifier: "com.i2cjak.k3eda",
     androidPackage: "com.i2cjak.k3eda",
@@ -119,12 +119,6 @@ const iosBundleIdentifier = isIosPersonalTeamBuild
   ? personalTeamBundleIdentifier!
   : variant.iosBundleIdentifier;
 
-const dmSansFonts = {
-  regular: "@expo-google-fonts/dm-sans/400Regular/DMSans_400Regular.ttf",
-  medium: "@expo-google-fonts/dm-sans/500Medium/DMSans_500Medium.ttf",
-  bold: "@expo-google-fonts/dm-sans/700Bold/DMSans_700Bold.ttf",
-} as const;
-
 const widgetsPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
   "expo-widgets",
   {
@@ -138,7 +132,7 @@ const widgetsPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
       {
         name: "AgentActivity",
         displayName: "Agent Activity",
-        description: "Shows the current state of active T3CAD agents.",
+        description: "Shows the current state of active Backplane agents.",
         supportedFamilies: ["systemSmall", "systemMedium", "accessoryRectangular"],
       },
     ],
@@ -170,10 +164,6 @@ const sharingPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
     },
   },
 ];
-
-// These aliases match the fonts' PostScript names on iOS. Register the same
-// names on Android so React Native and the native composer use one set of
-// family names without waiting for runtime font loading.
 
 const config: ExpoConfig = {
   name: variant.appName,
@@ -224,8 +214,8 @@ const config: ExpoConfig = {
         NSAllowsArbitraryLoads: true,
       },
       NSLocalNetworkUsageDescription:
-        "Allow T3CAD to connect to T3CAD servers on your local network or tailnet.",
-      NSPhotoLibraryAddUsageDescription: "Allow T3CAD to save images to your photo library.",
+        "Allow Backplane to connect to Backplane servers on your local network or tailnet.",
+      NSPhotoLibraryAddUsageDescription: "Allow Backplane to save images to your photo library.",
       ITSAppUsesNonExemptEncryption: false,
       // The App Store screenshot harness rotates the iPad interface from
       // inside the app (CI denies osascript the Accessibility access that
@@ -262,30 +252,6 @@ const config: ExpoConfig = {
   },
   plugins: [
     "expo-asset",
-    [
-      "expo-font",
-      {
-        ios: {
-          fonts: [dmSansFonts.regular, dmSansFonts.medium, dmSansFonts.bold],
-        },
-        android: {
-          fonts: [
-            {
-              fontFamily: "DMSans-Regular",
-              fontDefinitions: [{ path: dmSansFonts.regular, weight: 400 }],
-            },
-            {
-              fontFamily: "DMSans-Medium",
-              fontDefinitions: [{ path: dmSansFonts.medium, weight: 500 }],
-            },
-            {
-              fontFamily: "DMSans-Bold",
-              fontDefinitions: [{ path: dmSansFonts.bold, weight: 700 }],
-            },
-          ],
-        },
-      },
-    ],
     "expo-secure-store",
     "expo-sqlite",
     ...(isIosPersonalTeamBuild
@@ -322,7 +288,7 @@ const config: ExpoConfig = {
     [
       "expo-audio",
       {
-        microphonePermission: "Allow T3CAD to use your microphone for voice input.",
+        microphonePermission: "Allow Backplane to use your microphone for voice input.",
         recordAudioAndroid: false,
         enableBackgroundPlayback: false,
         enableBackgroundRecording: false,
@@ -331,7 +297,7 @@ const config: ExpoConfig = {
     [
       "expo-camera",
       {
-        cameraPermission: "Allow T3CAD to access your camera so you can scan pairing QR codes.",
+        cameraPermission: "Allow Backplane to access your camera so you can scan pairing QR codes.",
         microphonePermission: false,
         barcodeScannerEnabled: true,
         recordAudioAndroid: false,

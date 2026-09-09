@@ -69,6 +69,34 @@ it.effect(
     }),
 );
 
+it.effect("invalidates revision for companion metadata without listing it as a native file", () =>
+  Effect.promise(async () => {
+    const root = tempRoot();
+    NodeFS.mkdirSync(root, { recursive: true });
+    const board = NodePath.join(root, "board.kicad_pcb");
+    const metadata = `${board}.backplane.json`;
+    NodeFS.writeFileSync(board, "pcb");
+
+    const first = await discoverKiCadProject(root);
+    expect(first.files.map((file) => file.path)).toEqual(["board.kicad_pcb"]);
+
+    const clock = Date.now();
+    const now = vi.spyOn(Date, "now");
+    now.mockReturnValue(clock + 400);
+    NodeFS.writeFileSync(metadata, '{"custom_properties":{"root":{"key":"one"}}}');
+    const second = await discoverKiCadProject(root);
+    expect(second.revision).not.toBe(first.revision);
+    expect(second.files.map((file) => file.path)).toEqual(["board.kicad_pcb"]);
+    expect(await resolveKiCadProjectFile(root, "board.kicad_pcb.backplane.json")).toBeUndefined();
+
+    now.mockReturnValue(clock + 800);
+    NodeFS.writeFileSync(metadata, '{"custom_properties":{"root":{"key":"updated"}}}');
+    const third = await discoverKiCadProject(root);
+    expect(third.revision).not.toBe(second.revision);
+    expect(third.files.map((file) => file.path)).toEqual(["board.kicad_pcb"]);
+  }),
+);
+
 it.effect("reports malformed project configuration without preventing discovery", () =>
   Effect.promise(async () => {
     const root = tempRoot();
@@ -108,11 +136,14 @@ it.effect("reads explicit library assignments and reports missing assigned asset
     const root = tempRoot();
     NodeFS.mkdirSync(root, { recursive: true });
     NodeFS.writeFileSync(NodePath.join(root, "parts.kicad_sym"), "(kicad_symbol_lib)");
-    NodeFS.writeFileSync(NodePath.join(root, ".k3eda.json"), JSON.stringify({
-      symbol: "parts.kicad_sym",
-      symbolMember: "Controller",
-      footprint: "generated/controller.kicad_mod",
-    }));
+    NodeFS.writeFileSync(
+      NodePath.join(root, ".k3eda.json"),
+      JSON.stringify({
+        symbol: "parts.kicad_sym",
+        symbolMember: "Controller",
+        footprint: "generated/controller.kicad_mod",
+      }),
+    );
     const manifest = await discoverKiCadProject(root);
     expect(manifest.config).toMatchObject({
       symbol: "parts.kicad_sym",

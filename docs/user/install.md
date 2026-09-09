@@ -11,6 +11,20 @@ If your system cannot mount AppImages, launch it from a terminal with
 Berkeley Mono is used when installed locally. Backplane includes no Berkeley Mono
 font files and falls back to your system monospace font.
 
+## Open the bundled KiCad editor
+
+To use the full KiCad GUI, extract the AppImage into its own directory:
+
+```sh
+mkdir -p ~/Applications/backplane-kicad
+cd ~/Applications/backplane-kicad
+/path/to/Backplane.AppImage --appimage-extract
+./squashfs-root/resources/kicad/bin/kicad
+```
+
+This starts KiCad's schematic and PCB editor. It is separate from the Backplane
+viewer.
+
 ## First run
 
 Open **Settings → Providers**, enable your coding provider, and follow its

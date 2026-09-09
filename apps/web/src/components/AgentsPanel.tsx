@@ -179,7 +179,7 @@ function AgentRow({ agent }: { agent: RuntimeSubagent }) {
       <span
         className={cn(
           "col-start-2 col-end-4 row-start-2 block truncate text-xs",
-          agent.status === "failed" ? "text-destructive-foreground" : "text-muted-foreground",
+          agent.status === "failed" ? "text-error-foreground" : "text-muted-foreground",
         )}
       >
         {activity ?? statusLabel}
@@ -302,7 +302,7 @@ function WorkflowScriptView({
             {result.value.truncated ? "\n… (truncated)" : ""}
           </pre>
         ) : result._tag === "Failure" ? (
-          <p className="text-xs text-destructive-foreground">Could not load the script.</p>
+          <p className="text-xs text-error-foreground">Could not load the script.</p>
         ) : (
           <p className="text-xs text-muted-foreground">Loading…</p>
         )}
@@ -488,7 +488,7 @@ function CollapsedWorkflowSection({
           {group.workflow.workflowName ?? group.workflow.title}
         </span>
         <span className="ml-auto flex items-center gap-1.5 font-mono text-[.7rem] text-muted-foreground/80">
-          {failed > 0 ? <span className="text-destructive-foreground">{failed} failed</span> : null}
+          {failed > 0 ? <span className="text-error-foreground">{failed} failed</span> : null}
           <span>{members.length} agents</span>
           <span className="tabular-nums">· {formatSubagentTokenCount(totalTokens)} tok</span>
           {elapsed ? <span className="tabular-nums">· {elapsed}</span> : null}

@@ -102,7 +102,7 @@ export function useLocalAgentAwareness() {
         try {
           const updatedAt = new Date().toISOString();
           const props: AgentActivityProps = {
-            title: "T3CAD",
+            title: "Backplane",
             subtitle: "Agent work in progress",
             activeCount: 1,
             updatedAt,

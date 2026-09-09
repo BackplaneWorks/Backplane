@@ -991,7 +991,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --border: var(--color-zinc-200);
   --input: var(--color-zinc-300);
   --ring: var(--primary);
-  --destructive-foreground: var(--error-foreground);
+  --destructive-foreground: #000;
   --info: var(--color-blue-500);
   --info-foreground: var(--color-blue-700);
   --success: var(--color-emerald-500);
@@ -1156,7 +1156,7 @@ html[data-theme-id]:not([data-theme-id=""]) {
   --tool-error-icon: var(--error-foreground);
   --error-surface: var(--app-theme-error-surface);
   --destructive: var(--error);
-  --destructive-foreground: var(--error-foreground);
+  --destructive-foreground: var(--app-theme-destructive-foreground);
   --warning: var(--app-theme-warning);
   --warning-foreground: var(--app-theme-warning-foreground);
   --warning-surface: var(--app-theme-warning-surface);
@@ -1197,6 +1197,7 @@ html[data-onboarding-surface]:root {
   --card: #000;
   --card-foreground: #fff;
   --destructive: var(--foreground);
+  --destructive-foreground: #000;
   --foreground: #fff;
   --icon-muted: #a1a1aa;
   --input: #262626;

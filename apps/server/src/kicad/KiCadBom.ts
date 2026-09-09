@@ -7,6 +7,7 @@ import * as NodeUtil from "node:util";
 import type { KiCadBom } from "@t3tools/contracts";
 import { discoverKiCadProject, resolveKiCadProjectFile } from "./KiCadProject.ts";
 import { resolveKiCadEnvironment, resolveKiCadExecutable } from "./KiCadExecutable.ts";
+import { copyKiCadMetadata } from "./KiCadMetadata.ts";
 
 const execFile = NodeUtil.promisify(NodeChildProcess.execFile);
 const record = (value: unknown): Record<string, unknown> =>
@@ -120,6 +121,7 @@ export function createKiCadBomCache(run = runExport) {
             const destination = NodePath.join(directory, file.path);
             await NodeFSP.mkdir(NodePath.dirname(destination), { recursive: true });
             await NodeFSP.copyFile(source.absolutePath, destination);
+            await copyKiCadMetadata(source.absolutePath, destination);
           }
           await NodeFSP.writeFile(
             NodePath.join(directory, projectPath),

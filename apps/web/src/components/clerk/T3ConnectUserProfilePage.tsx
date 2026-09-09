@@ -213,7 +213,7 @@ export function T3ConnectUserProfilePage() {
       <div>
         {environmentsState.error ? (
           <div className="mb-4 border-t border-destructive/35 py-3 text-[0.8125rem]" role="alert">
-            <p className="font-medium text-destructive-foreground">
+            <p className="font-medium text-error-foreground">
               Could not load T3 Connect environments
             </p>
             <p className="mt-1 text-xs text-muted-foreground">{environmentsState.error}</p>

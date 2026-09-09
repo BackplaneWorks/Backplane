@@ -42,7 +42,7 @@ export const ComposerPendingApprovalActions = memo(function ComposerPendingAppro
             variant="ghost-muted"
             className={`${APPROVAL_ACTION_CLASS_NAME}${
               option.decision === "decline"
-                ? " text-destructive-foreground [:hover,[data-pressed]]:text-destructive-foreground"
+                ? " text-error-foreground [:hover,[data-pressed]]:text-error-foreground"
                 : option.decision === "accept"
                   ? " text-foreground"
                   : option.warning

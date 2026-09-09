@@ -162,8 +162,8 @@ export function KiCadViewerRouteScreen({ route }: Props) {
           {error ? (
             <>
               <Text className="text-center text-sm text-foreground-muted">{error}</Text>
-              <Pressable className="rounded-md bg-accent px-4 py-2" onPress={retry}>
-                <Text className="text-sm font-t3-bold text-foreground">Retry</Text>
+              <Pressable className="bg-primary px-4 py-2" onPress={retry}>
+                <Text className="text-sm font-t3-bold text-primary-foreground">Retry</Text>
               </Pressable>
               <Text className="text-sm text-foreground-muted">
                 Use the back button to leave the viewer.

@@ -64,12 +64,17 @@ it("shares exports per revision, preserves source settings, and removes temporar
   try {
     await NodeFSP.writeFile(NodePath.join(root, "board.kicad_sch"), "(kicad_sch)");
     await NodeFSP.writeFile(NodePath.join(root, "board.kicad_pro"), original);
+    const metadata = '{"format":"backplane-kicad-metadata","version":1,"items":{}}';
+    await NodeFSP.writeFile(NodePath.join(root, "board.kicad_sch.backplane.json"), metadata);
     const cache = createKiCadBomCache(async (args, cwd) => {
       runs++;
       expect(cwd).not.toBe(root);
       expect(await NodeFSP.readFile(NodePath.join(cwd, "board.kicad_sch"), "utf8")).toBe(
         "(kicad_sch)",
       );
+      expect(
+        await NodeFSP.readFile(NodePath.join(cwd, "board.kicad_sch.backplane.json"), "utf8"),
+      ).toBe(metadata);
       outputPath = args[args.indexOf("--output") + 1]!;
       await NodeFSP.writeFile(outputPath, '"Ref","Value"\n"R1","10k"\n');
     });

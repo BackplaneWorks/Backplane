@@ -37,7 +37,7 @@ export function localActivityProps(states: ReadonlyArray<AgentAwarenessState>): 
     .filter(isActiveAwareness)
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   return {
-    title: "T3CAD",
+    title: "Backplane",
     subtitle: active.length ? "Agent work in progress" : "Agent work finished",
     activeCount: active.length,
     updatedAt: active[0]?.updatedAt ?? states[0]?.updatedAt ?? new Date().toISOString(),
