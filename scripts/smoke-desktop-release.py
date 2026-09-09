@@ -5,9 +5,11 @@ from __future__ import annotations
 
 import argparse
 import ctypes
+import json
 import os
 import re
 import signal
+import struct
 import subprocess
 import sys
 import tempfile
@@ -18,6 +20,63 @@ from pathlib import Path
 
 
 BASE_URL_RE = re.compile(r"baseUrl: http://127\.0\.0\.1:(\d+)/")
+ASAR_HEADER_READ_LIMIT = 16 * 1024 * 1024
+
+
+def verify_packaged_browser(app_root: Path) -> None:
+    """Verify that the Linux installer carries Electron's browser runtime.
+
+    The preview uses Electron WebContents/webviews. It must never fall back to
+    a separately installed Chrome, so the release gate checks both Electron's
+    native Chromium payload and the Playwright injection bundle shipped in the
+    app archive.
+    """
+    required_payload = (
+        "chrome_100_percent.pak",
+        "chrome_200_percent.pak",
+        "resources.pak",
+        "icudtl.dat",
+        "libEGL.so",
+        "libGLESv2.so",
+    )
+    missing = [name for name in required_payload if not (app_root / name).is_file()]
+    app_archive = app_root / "resources" / "app.asar"
+    if not app_archive.is_file():
+        missing.append("resources/app.asar")
+    if missing:
+        raise RuntimeError(
+            "packaged Electron browser payload is incomplete; missing: " + ", ".join(missing)
+        )
+
+    # ASAR stores a four-word header followed by a JSON file table. Parse the
+    # table rather than matching arbitrary bytes: this prevents a release from
+    # passing because an unrelated file happens to mention these names.
+    with app_archive.open("rb") as archive:
+        prefix = archive.read(16)
+        if len(prefix) != 16:
+            raise RuntimeError("packaged resources/app.asar has an incomplete header")
+        header_size = struct.unpack_from("<I", prefix, 12)[0]
+        if header_size > ASAR_HEADER_READ_LIMIT:
+            raise RuntimeError("packaged resources/app.asar header is unexpectedly large")
+        header_bytes = archive.read(header_size)
+    try:
+        file_tree = json.loads(header_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise RuntimeError("packaged resources/app.asar has an invalid file table") from error
+
+    node = file_tree.get("files") if isinstance(file_tree, dict) else None
+    for component in ("node_modules", "playwright-core", "lib", "coreBundle.js"):
+        if not isinstance(node, dict) or component not in node:
+            raise RuntimeError(
+                "packaged app.asar does not contain node_modules/playwright-core/lib/coreBundle.js"
+            )
+        node = node[component]
+        if component != "coreBundle.js":
+            node = node.get("files") if isinstance(node, dict) else None
+    if not isinstance(node, dict):
+        raise RuntimeError(
+            "packaged app.asar does not contain playwright-core's injection bundle"
+        )
 
 
 def set_parent_death_signal() -> None:
@@ -98,6 +157,7 @@ def run_smoke(app_root: Path, timeout_seconds: float, headless: bool) -> int:
     executable = app_root / "backplane"
     if not executable.is_file() or not os.access(executable, os.X_OK):
         raise RuntimeError(f"packaged executable is missing or not executable: {executable}")
+    verify_packaged_browser(app_root)
 
     with tempfile.TemporaryDirectory(prefix="backplane-release-smoke-") as temporary:
         root = Path(temporary)

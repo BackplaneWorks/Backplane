@@ -1,8 +1,8 @@
 # Install Backplane
 
 Download the Linux x64 AppImage from [Backplane Releases](https://github.com/i2cjak/Backplane/releases).
-The desktop app includes its server, Python, and the matching Backplane KiCad runtime.
-You do not need to install Node.js, Python, or KiCad separately.
+The desktop app includes its Chromium browser, server, Python, and the matching Backplane KiCad runtime.
+You do not need to install Chrome, Node.js, Python, or KiCad separately.
 
 Make the downloaded AppImage executable in your file manager, then open it.
 If your system cannot mount AppImages, launch it from a terminal with
