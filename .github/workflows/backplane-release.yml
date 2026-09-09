@@ -191,7 +191,9 @@ jobs:
           retention-days: 1
           path: |
             release/*.AppImage
-            release/*.yml
+            release/alpha*.yml
+            release/beta*.yml
+            release/latest*.yml
             release/*.blockmap
             release/SHA256SUMS
           if-no-files-found: error
@@ -237,4 +239,14 @@ jobs:
 
           SHA-256 checksums are provided in `SHA256SUMS`.
           NOTES
-          gh release create "$RELEASE_TAG" release/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Backplane $RELEASE_TAG" --notes-file "$RUNNER_TEMP/backplane-release.md" "${args[@]}"
+          shopt -s nullglob
+          release_files=(
+            release/*.AppImage
+            release/alpha*.yml
+            release/beta*.yml
+            release/latest*.yml
+            release/*.blockmap
+            release/SHA256SUMS
+          )
+          test "${#release_files[@]}" -gt 0
+          gh release create "$RELEASE_TAG" "${release_files[@]}" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Backplane $RELEASE_TAG" --notes-file "$RUNNER_TEMP/backplane-release.md" "${args[@]}"
