@@ -1528,7 +1528,7 @@ def View.hist.said(live: Bool, +text: String) -> List<&2, D.Node>:
       [WI.WIcon.button("icon", "hist-jump", "", "Go to this point of the thread", "message-square", 16, ""),
        D.El{"button", "", [D.At{"class", "said"}, D.At{"title", "Go to this point of the thread"}, D.At{"data-value", ""}, D.On{"click", "hist-jump"}], [D.Txt{text}]}]
 
-def View.hist.walk(b: U.HBar, +u: U.Ui) -> D.Node:
+def View.hist.walk(b: U.HBar, +ss: List<&2, HS.Step>, +u: U.Ui) -> D.Node:
   match b:
     case U.HBar{_, +n, +at, +title, _, +label, +said, +pl, +df, _, _, _, _}:
       D.El{"div", "", [D.At{"class", "hist"}], [
@@ -1541,7 +1541,7 @@ def View.hist.walk(b: U.HBar, +u: U.Ui) -> D.Node:
           D.Dom.span("title", title), D.Dom.span("grow", ""),
           D.Dom.button(Bool.pick(String, df, "hbtn on", "hbtn"), "hist-diff", "", "Mark what each step changed", "Changes"),
           D.Dom.button("hbtn", "cmp", "a", "Compare two versions of the file", "Compare")], View.hist.live(at))},
-        D.El{"div", "", [D.At{"class", "hist-scrub"}], View.hist.ticks(U.Hs.track(u), 0n, n, at)},
+        D.El{"div", "", [D.At{"class", "hist-scrub"}], View.hist.ticks(ss, 0n, n, at)},
         D.El{"div", "", [D.At{"class", "hist-said"}], View.hist.said(Nat.is_eq(at, 0n), Bool.pick(String, String.is_empty(said), label, said))}]}
 
 def View.hist.key(+layer: U32, +label: String) -> D.Node:
@@ -1557,17 +1557,22 @@ def View.hist.cmp(b: U.HBar) -> D.Node:
           D.Dom.span("grow", ""), D.Dom.button("hbtn", "cmp-close", "", "Back to the file as it is now", "Close")]},
         D.El{"div", "", [D.At{"class", "hist-legend"}], [View.hist.key(26, "Removed"), View.hist.key(27, "Changed"), View.hist.key(28, "Added")]}]}
 
-def View.hist.k(on: Bool, cmp: Bool, b: U.HBar, +u: U.Ui) -> List<&2, D.Node>:
+def View.hist.k(on: Bool, cmp: Bool, b: U.HBar, +ss: List<&2, HS.Step>, +u: U.Ui) -> List<&2, D.Node>:
   match on cmp:
     case False{} _:
       Nil{}
     case True{} True{}:
       [View.hist.cmp(b)]
     case True{} False{}:
-      [View.hist.walk(b, u)]
+      [View.hist.walk(b, ss, u)]
 
-def View.hist(+b: U.HBar, +u: U.Ui) -> List<&2, D.Node>:
-  View.hist.k(U.HBar.on(b), U.HBar.cmp(b), b, u)
+def View.hist(+b: U.HBar, +ss: List<&2, HS.Step>, +u: U.Ui) -> List<&2, D.Node>:
+  View.hist.k(U.HBar.on(b), U.HBar.cmp(b), b, ss, u)
+
+# the bar and its ticks from one read of the track (each read parses every
+# step of the thread)
+def View.hist.of(+ss: List<&2, HS.Step>, +u: U.Ui) -> List<&2, D.Node>:
+  View.hist(U.Hs.bar.with(ss, u), ss, u)
 
 # the menu of versions over the stage, a row each; a press outside shuts it
 def View.hist.rows(rs: List<&2, U.HRow>) -> List<&2, D.Node>:
@@ -1596,7 +1601,7 @@ def View.plot(+u: U.Ui, +what: List<&2, D.Node>) -> List<&2, D.Node>:
         D.At{"data-off", U32.show(LY.Masks.off(LY.Lyr.masks(U.Lfocus.kind(u), U.Solid.off(u), U.Lfocus.of(u))))},
         D.At{"data-dim", U32.show(LY.Masks.dim(LY.Lyr.masks(U.Lfocus.kind(u), U.Solid.off(u), U.Lfocus.of(u))))}, D.At{"data-lift", U32.show(LY.Lyr.top(U.Lfocus.of(u)))},
         D.At{"data-fade", Nat.show(U.Hs.fade())}, D.At{"data-fam", HS.Hist.key.family(U.Solid.want(u))}], Nil{}}, View.hist.menu(u)]}
-   <> View.hist(U.Hs.bar(u), u)
+   <> View.hist.of(U.Hs.track(u), u)
 
 # over a part in 3D: the thread's parts and Renders; the board: its name
 # after the parts: Renders for one of them, or the name of another model
