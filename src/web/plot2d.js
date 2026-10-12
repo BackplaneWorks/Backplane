@@ -191,6 +191,8 @@ class View {
     this.oy = h / 2 - (y0 + y1) / 2 * this.scale;
     this.fitted = true;
     this.touched = false;
+    // a jump, not a move: drawn at once rather than stretched from the bitmap
+    this.rest = true;
     this.later();
   }
 
