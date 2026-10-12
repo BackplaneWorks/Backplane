@@ -18,7 +18,17 @@
 #if defined(__linux__)
 
 #include <dlfcn.h>
+#include <math.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <X11/Xlib.h>
+
+/* popen is POSIX. These units are compiled as -std=c11, and this file is
+   included after other headers, so a feature-test macro would be too late. */
+extern FILE* popen(const char*, const char*);
+extern int pclose(FILE*);
 #include <X11/Xutil.h>
 #include <X11/Xatom.h>
 #include <X11/keysym.h>
@@ -82,7 +92,14 @@ typedef struct {
   Window    win;
   Atom      del, clip, utf8, targets, prop, incr;
   XImage*   img;
+  // w, h are the size the app lays out. pw, ph are the X window. Hyprland's
+  // xwayland.force_zero_scaling leaves an X11 window unscaled by the
+  // compositor; scale (BACKPLANE_UI_SCALE, else the focused monitor) draws
+  // the same layout into a larger window. scale == 1 keeps pw == w.
+  XImage*   scaled;
   u32       w, h;
+  u32       pw, ph;
+  double    scale;
   // present: the blocks (64 px) a fill changed, and whether the next
   // present must send the whole frame (a new image, or an expose)
   u8*       dirty;
@@ -125,6 +142,99 @@ static void win_push(AppWin* a, u32 kind, u32 p, u32 q, u32 r, u32 s) {
 static u32 win_mods(unsigned state) {
   return (state & ShiftMask ? 1u : 0) | (state & ControlMask ? 2u : 0)
     | (state & Mod1Mask ? 4u : 0) | (state & Mod4Mask ? 8u : 0);
+}
+
+// A usable monitor factor. Values near 1 draw 1:1, so the extra image is skipped.
+static double win_scale_clamp(double v) {
+  if (v < 0.5 || v > 4.0) {
+    return 0;
+  }
+  if (v > 0.99 && v < 1.01) {
+    return 1.0;
+  }
+  return v;
+}
+
+// BACKPLANE_UI_SCALE overrides. Otherwise the focused Hyprland monitor's
+// scale is used. No Hyprland, or a bad value, leaves pixels at 1.
+static double win_scale_env(void) {
+  const char* s = getenv("BACKPLANE_UI_SCALE");
+  char* end = NULL;
+  double v;
+  if (s == NULL || *s == 0) {
+    return 0;
+  }
+  v = strtod(s, &end);
+  if (end == s) {
+    return 0;
+  }
+  return win_scale_clamp(v);
+}
+
+static double win_scale_hypr(void) {
+  FILE* p;
+  char line[512];
+  double cur = 0, chosen = 0;
+  int have = 0;
+  p = popen("hyprctl monitors 2>/dev/null", "r");
+  if (p == NULL) {
+    return 0;
+  }
+  while (fgets(line, (int)sizeof line, p) != NULL) {
+    double v;
+    char* s = line;
+    while (*s == ' ' || *s == '\t') {
+      s += 1;
+    }
+    if (strncmp(s, "Monitor ", 8) == 0) {
+      cur = 0;
+    } else if (sscanf(s, "scale: %lf", &v) == 1) {
+      cur = v;
+    } else if (strncmp(s, "focused: yes", 12) == 0 && cur != 0) {
+      chosen = cur;
+      have = 1;
+      break;
+    }
+  }
+  pclose(p);
+  return have ? win_scale_clamp(chosen) : 0;
+}
+
+static double win_ui_scale(void) {
+  double v = win_scale_env();
+  if (v == 0) {
+    v = win_scale_hypr();
+  }
+  return v == 0 ? 1.0 : v;
+}
+
+static u32 win_phys(u32 logical, double scale) {
+  double p = (double)logical * scale + 0.5;
+  if (p < 1.0) {
+    return 1;
+  }
+  if (p > 16384.0) {
+    return 16384;
+  }
+  return (u32)p;
+}
+
+static u32 win_log_px(u32 physical, double scale) {
+  double l = (double)physical / scale + 0.5;
+  if (l < 1.0) {
+    return 1;
+  }
+  return (u32)l;
+}
+
+// a physical window pixel as the layout pixel under it
+static u32 win_to_log(u32 phys, u32 logical, u32 physical) {
+  u32 v;
+  if (physical <= 1 || logical == 0) {
+    return 0;
+  }
+  v = (u32)((double)phys * (double)logical / (double)physical);
+  return v >= logical ? logical - 1 : v;
 }
 
 // The window's icon (_NET_WM_ICON): the mark over #111410 at 64 and 32 px.
@@ -384,7 +494,9 @@ static int win_dnd(AppWin* a, XClientMessageEvent* m) {
     x_XTranslateCoordinates(a->dpy, DefaultRootWindow(a->dpy), a->win, rx, ry, &x, &y, &child);
     win_dnd_send(a, a->dnd_status, a->dnd_ok ? 3 : 2, 0, 0, a->dnd_ok ? (long)a->dnd_copy : 0);
     if (a->dnd_ok) {
-      win_push(a, 8, x < 0 ? 0 : (u32)x, y < 0 ? 0 : (u32)y, 0, 0);
+      u32 lx = x < 0 ? 0 : win_to_log((u32)x, a->w, a->pw);
+      u32 ly = y < 0 ? 0 : win_to_log((u32)y, a->h, a->ph);
+      win_push(a, 8, lx, ly, 0, 0);
     }
   } else if (t == a->dnd_leave) {
     if (a->dnd_ok) {
@@ -475,8 +587,8 @@ static void win_pump(AppWin* a) {
       case ButtonPress:
       case ButtonRelease: {
         u32 b = ev.xbutton.button;
-        u32 x = ev.xbutton.x < 0 ? 0 : (u32)ev.xbutton.x;
-        u32 y = ev.xbutton.y < 0 ? 0 : (u32)ev.xbutton.y;
+        u32 x = ev.xbutton.x < 0 ? 0 : win_to_log((u32)ev.xbutton.x, a->w, a->pw);
+        u32 y = ev.xbutton.y < 0 ? 0 : win_to_log((u32)ev.xbutton.y, a->h, a->ph);
         if (b >= 4 && b <= 7) {
           if (ev.type == ButtonPress) {
             win_push(a, 3, x, y, b - 4, 0);
@@ -487,8 +599,10 @@ static void win_pump(AppWin* a) {
         break;
       }
       case MotionNotify:
-        win_push(a, 2, ev.xmotion.x < 0 ? 0 : (u32)ev.xmotion.x,
-          ev.xmotion.y < 0 ? 0 : (u32)ev.xmotion.y, win_mods(ev.xmotion.state), 0);
+        win_push(a, 2,
+          ev.xmotion.x < 0 ? 0 : win_to_log((u32)ev.xmotion.x, a->w, a->pw),
+          ev.xmotion.y < 0 ? 0 : win_to_log((u32)ev.xmotion.y, a->h, a->ph),
+          win_mods(ev.xmotion.state), 0);
         break;
       case FocusOut:
         win_push(a, 11, 0, 0, 0, 0);
@@ -497,13 +611,24 @@ static void win_pump(AppWin* a) {
         win_keys_missed(a);
         win_push(a, 12, 0, 0, 0, 0);
         break;
-      case ConfigureNotify:
-        if ((u32)ev.xconfigure.width != a->w || (u32)ev.xconfigure.height != a->h) {
-          a->w = (u32)ev.xconfigure.width;
-          a->h = (u32)ev.xconfigure.height;
+      case ConfigureNotify: {
+        u32 nw = (u32)ev.xconfigure.width;
+        u32 nh = (u32)ev.xconfigure.height;
+        u32 lw, lh;
+        if (nw == a->pw && nh == a->ph) {
+          break;
+        }
+        a->pw = nw;
+        a->ph = nh;
+        lw = a->scale == 1.0 ? nw : win_log_px(nw, a->scale);
+        lh = a->scale == 1.0 ? nh : win_log_px(nh, a->scale);
+        if (lw != a->w || lh != a->h) {
+          a->w = lw;
+          a->h = lh;
           win_push(a, 4, a->w, a->h, 0, 0);
         }
         break;
+      }
       case Expose:
         a->full = 1;
         if (ev.xexpose.count == 0) {
@@ -604,9 +729,16 @@ Term win_open_run(Env e, Term* f, IoWork* w) {
     int scr = DefaultScreen(dpy);
     a = io_mem(calloc(1, sizeof *a));
     a->dpy = dpy;
+    a->scale = win_ui_scale();
     a->w = ww;
     a->h = hh;
-    a->win = x_XCreateSimpleWindow(dpy, RootWindow(dpy, scr), 0, 0, ww, hh, 0, 0,
+    a->pw = a->scale == 1.0 ? ww : win_phys(ww, a->scale);
+    a->ph = a->scale == 1.0 ? hh : win_phys(hh, a->scale);
+    if (a->scale != 1.0) {
+      fprintf(stderr, "backplane: UI scale %g (window %ux%u for a %ux%u layout)\n",
+        a->scale, a->pw, a->ph, a->w, a->h);
+    }
+    a->win = x_XCreateSimpleWindow(dpy, RootWindow(dpy, scr), 0, 0, a->pw, a->ph, 0, 0,
       BlackPixel(dpy, scr));
     a->del     = x_XInternAtom(dpy, "WM_DELETE_WINDOW", False);
     a->clip    = x_XInternAtom(dpy, "CLIPBOARD", False);
@@ -801,6 +933,147 @@ static void win_snap(AppWin* a) {
   fclose(out);
 }
 
+static void win_scaled_fit(AppWin* a) {
+  int scr;
+  if (a->scale == 1.0) {
+    return;
+  }
+  if (a->scaled != NULL && (u32)a->scaled->width == a->pw && (u32)a->scaled->height == a->ph) {
+    return;
+  }
+  if (a->scaled != NULL) {
+    XDestroyImage(a->scaled);
+    a->scaled = NULL;
+  }
+  scr = DefaultScreen(a->dpy);
+  a->scaled = x_XCreateImage(a->dpy, DefaultVisual(a->dpy, scr), DefaultDepth(a->dpy, scr),
+    ZPixmap, 0, io_mem(calloc((size_t)a->pw * a->ph, 4)), a->pw, a->ph, 32, (int)a->pw * 4);
+  a->scaled->byte_order = LSBFirst;
+}
+
+// sRGB <-> linear, so a fractional enlarge blends coverage instead of
+// doubling pixels. Built once. win_srgb is indexed by a 16-bit linear value.
+static uint16_t win_lin[256];
+static uint8_t win_srgb[65536];
+static int win_lut_ready;
+
+static void win_lut_init(void) {
+  int i;
+  if (win_lut_ready) {
+    return;
+  }
+  for (i = 0; i < 256; i += 1) {
+    double c = (double)i / 255.0;
+    double l = c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4);
+    int v = (int)(l * 65535.0 + 0.5);
+    win_lin[i] = (uint16_t)(v < 0 ? 0 : v > 65535 ? 65535 : v);
+  }
+  for (i = 0; i < 65536; i += 1) {
+    double l = (double)i / 65535.0;
+    double c = l <= 0.0031308 ? l * 12.92 : 1.055 * pow(l, 1.0 / 2.4) - 0.055;
+    int s = (int)(c * 255.0 + 0.5);
+    win_srgb[i] = (uint8_t)(s < 0 ? 0 : s > 255 ? 255 : s);
+  }
+  win_lut_ready = 1;
+}
+
+// dest pixel i as a source pixel index and a 16-bit blend toward the next.
+// The sample sits on the dest pixel's center.
+static u32 win_axis(u32 i, u32 sn, u32 dn, u32* frac) {
+  u64 q;
+  u32 max;
+  if (sn <= 1 || dn <= 1) {
+    *frac = 0;
+    return 0;
+  }
+  q = ((u64)(i * 2u + 1u) * sn << 15) / dn;
+  if (q < (1u << 15)) {
+    *frac = 0;
+    return 0;
+  }
+  q -= 1u << 15;
+  max = (sn - 1u) << 16;
+  if (q > max) {
+    q = max;
+  }
+  *frac = (u32)(q & 0xffff);
+  return (u32)(q >> 16);
+}
+
+static u32 win_lerp16(u32 a, u32 b, u32 t) {
+  return (u32)(((u64)a * (65536u - t) + (u64)b * t + 32768u) >> 16);
+}
+
+static u32 win_pack(u32 r, u32 g, u32 b) {
+  if (r > 65535u) {
+    r = 65535u;
+  }
+  if (g > 65535u) {
+    g = 65535u;
+  }
+  if (b > 65535u) {
+    b = 65535u;
+  }
+  return ((u32)win_srgb[r] << 16) | ((u32)win_srgb[g] << 8) | (u32)win_srgb[b];
+}
+
+// one bilinear sample. Channels are 0x00RRGGBB, which is what the frame stores.
+static u32 win_bilinear(const u32* src, u32 sw, u32 sh, u32 i, u32 j, u32 dw, u32 dh) {
+  u32 fx, fy, x0, y0, x1, y1;
+  u32 p00, p10, p01, p11;
+  u32 r0, g0, b0, r1, g1, b1;
+  x0 = win_axis(i, sw, dw, &fx);
+  y0 = win_axis(j, sh, dh, &fy);
+  x1 = x0 + 1u < sw ? x0 + 1u : x0;
+  y1 = y0 + 1u < sh ? y0 + 1u : y0;
+  p00 = src[(size_t)y0 * sw + x0];
+  p10 = src[(size_t)y0 * sw + x1];
+  p01 = src[(size_t)y1 * sw + x0];
+  p11 = src[(size_t)y1 * sw + x1];
+  r0 = win_lerp16(win_lin[(p00 >> 16) & 255], win_lin[(p10 >> 16) & 255], fx);
+  g0 = win_lerp16(win_lin[(p00 >> 8) & 255], win_lin[(p10 >> 8) & 255], fx);
+  b0 = win_lerp16(win_lin[p00 & 255], win_lin[p10 & 255], fx);
+  r1 = win_lerp16(win_lin[(p01 >> 16) & 255], win_lin[(p11 >> 16) & 255], fx);
+  g1 = win_lerp16(win_lin[(p01 >> 8) & 255], win_lin[(p11 >> 8) & 255], fx);
+  b1 = win_lerp16(win_lin[p01 & 255], win_lin[p11 & 255], fx);
+  return win_pack(win_lerp16(r0, r1, fy), win_lerp16(g0, g1, fy), win_lerp16(b0, b1, fy));
+}
+
+// the logical framebuffer, bilinear, into the physical window.
+// A 1.6 monitor scale is not an integer, so nearest-neighbor copies some
+// source pixels twice and others once and the glyphs look stair-stepped.
+static void win_blit_scaled(AppWin* a) {
+  const u32* src = (const u32*)a->img->data;
+  u32* dst;
+  u32 sw = a->w, sh = a->h, dw = a->pw, dh = a->ph;
+  u32 j;
+  win_lut_init();
+  win_scaled_fit(a);
+  if (a->scaled == NULL || sw == 0 || sh == 0) {
+    return;
+  }
+  dst = (u32*)a->scaled->data;
+  for (j = 0; j < dh; j += 1) {
+    u32* row = dst + (size_t)j * dw;
+    u32 i;
+    for (i = 0; i < dw; i += 1) {
+      row[i] = win_bilinear(src, sw, sh, i, j, dw, dh);
+    }
+  }
+  x_XPutImage(a->dpy, a->win, DefaultGC(a->dpy, DefaultScreen(a->dpy)), a->scaled,
+    0, 0, 0, 0, dw, dh);
+}
+
+static int win_dirty_any(AppWin* a) {
+  u32 i, n = a->dw * a->dh;
+  for (i = 0; i < n; i += 1) {
+    if (a->dirty[i]) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
 // fill the buffer with image (over old where it may skip, has_old) and
 // send what changed
 static void win_show_image(Env e, AppWin* a, Term image, Term old, int has_old) {
@@ -831,7 +1104,12 @@ static void win_show_image(Env e, AppWin* a, Term image, Term old, int has_old) 
     win_fill(e.mem, (u32*)a->img->data, a->w, a->h, a->dirty, a->dw, image, 0, 0, n);
   }
   a->stale = !has_old;
-  if (whole) {
+  if (a->scale != 1.0) {
+    if (whole || win_dirty_any(a)) {
+      memset(a->dirty, 0, (size_t)a->dw * a->dh);
+      win_blit_scaled(a);
+    }
+  } else if (whole) {
     memset(a->dirty, 0, (size_t)a->dw * a->dh);
     x_XPutImage(a->dpy, a->win, DefaultGC(a->dpy, DefaultScreen(a->dpy)), a->img,
       0, 0, 0, 0, a->w, a->h);
