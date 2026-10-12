@@ -2178,10 +2178,13 @@ def View.boards(+u: U.Ui, +what: String) -> List<&2, D.Node>:
 def View.sheet.chips(rs: List<&2, HI.Row>, +i: Nat, +cur: String) -> List<&2, D.Node>:
   View.sheet.chips.loc(I.En{}, rs, i, cur)
 
-def View.sheets.loc(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
+def View.sheets.of(+lc: I.Loc, +rs: List<&2, HI.Row>, +u: U.Ui) -> List<&2, D.Node>:
+  Bool.pick(List<&2, D.Node>, Nat.is_gt(List.length(&2, HI.Row, rs), 1n),
+    View.sheet.chips.loc(lc, rs, 0n, U.Ui.view_get(u, "view.path")), [D.Dom.span("what", MSG.T.viewer.schematic.tip(lc))])
 
-  Bool.pick(List<&2, D.Node>, Nat.is_gt(List.length(&2, HI.Row, HI.Hier.read(U.Ui.info(u, "sheets:" ++ U.Ui.root(u)))), 1n),
-    View.sheet.chips.loc(lc, HI.Hier.read(U.Ui.info(u, "sheets:" ++ U.Ui.root(u))), 0n, U.Ui.view_get(u, "view.path")), [D.Dom.span("what", MSG.T.viewer.schematic.tip(lc))])
+# the project's sheets, read once per render
+def View.sheets.loc(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
+  View.sheets.of(lc, HI.Hier.read(U.Ui.info(u, "sheets:" ++ U.Ui.root(u))), u)
 
 # the Layers menu (core/layers.bend): each layer shown by default, in
 # KiCad's order (plot2d.js hides those the file has nothing on), a row of
