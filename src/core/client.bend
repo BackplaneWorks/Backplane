@@ -6246,12 +6246,30 @@ def HBar.h(+b: HBar) -> U32:
 def Hs.fade() -> Nat:
   220n
 
+# the bar at the step on show; the track read once (each read parses every
+# step of the thread)
+def Hs.bar.at(+ss: List<&2, HI.Step>, +at: Nat, +u: Ui) -> HBar:
+  Hs.bar.k(HI.Hist.nth(ss, at), u, Hs.n(ss), at, M.State.mine(Ui.state(u), Ui.sel(u)))
+
+def Hs.bar.track(+ss: List<&2, HI.Step>, +u: Ui) -> HBar:
+  Hs.bar.at(ss, Hs.at(u, ss), u)
+
+def Hs.bar.off() -> HBar:
+  HBar{False{}, 0n, 0n, "", "", "", "", False{}, False{}, False{}, "", "", ""}
+
 def Hs.bar.on(on: Bool, +u: Ui) -> HBar:
   match on:
     case True{}:
-      Hs.bar.k(HI.Hist.nth(Hs.track(u), Hs.at(u, Hs.track(u))), u, Hs.n(Hs.track(u)), Hs.at(u, Hs.track(u)), M.State.mine(Ui.state(u), Ui.sel(u)))
+      Hs.bar.track(Hs.track(u), u)
     case False{}:
-      HBar{False{}, 0n, 0n, "", "", "", "", False{}, False{}, False{}, "", "", ""}
+      Hs.bar.off()
+
+def Hs.bar.on.with(on: Bool, +ss: List<&2, HI.Step>, +u: Ui) -> HBar:
+  match on:
+    case True{}:
+      Hs.bar.track(ss, u)
+    case False{}:
+      Hs.bar.off()
 
 # the bar for the selected thread's viewer when it shows (on): off unless
 # a board or a schematic shows
@@ -6261,6 +6279,11 @@ def Hs.bar.for(+u: Ui, on: Bool) -> HBar:
 # (the window's and the web's: while the panel is open)
 def Hs.bar(+u: Ui) -> HBar:
   Hs.bar.for(u, Ui.panel(u))
+
+# Hs.bar for a track already read (the web's viewer reads it once a render,
+# for the bar and its ticks)
+def Hs.bar.with(+ss: List<&2, HI.Step>, +u: Ui) -> HBar:
+  Hs.bar.on.with(Bool.and(Ui.panel(u), Bool.and(Nat.is_lt(Hs.kind(u), 2n), Bool.not(String.is_empty(Ui.sel(u))))), ss, u)
 
 # Actions (Ui.actions from "hist-go")
 def Hs.act(i: Nat, +u: Ui, +value: String) -> Act:
