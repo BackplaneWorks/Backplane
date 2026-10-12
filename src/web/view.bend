@@ -1425,9 +1425,13 @@ def View.sheet.chips(rs: List<&2, HI.Row>, +i: Nat, +cur: String) -> List<&2, D.
       D.Dom.button(Bool.pick(String, String.eq(Bool.pick(String, Nat.is_eq(i, 0n), "", f), cur), "on", ""), "view-sheet", Bool.pick(String, Nat.is_eq(i, 0n), "", f), f,
         Bool.pick(String, Nat.is_eq(i, 0n), "Top sheet", String.repeat("› ", d) ++ n)) <> View.sheet.chips(t, 1n+i, cur)
 
+def View.sheets.of(+rs: List<&2, HI.Row>, +u: U.Ui) -> List<&2, D.Node>:
+  Bool.pick(List<&2, D.Node>, Nat.is_gt(List.length(&2, HI.Row, rs), 1n),
+    View.sheet.chips(rs, 0n, U.Ui.view_get(u, "view.path")), [D.Dom.span("what", "The project's schematic")])
+
+# the project's sheets, read once per render
 def View.sheets(+u: U.Ui) -> List<&2, D.Node>:
-  Bool.pick(List<&2, D.Node>, Nat.is_gt(List.length(&2, HI.Row, HI.Hier.read(U.Ui.info(u, "sheets:" ++ U.Ui.root(u)))), 1n),
-    View.sheet.chips(HI.Hier.read(U.Ui.info(u, "sheets:" ++ U.Ui.root(u))), 0n, U.Ui.view_get(u, "view.path")), [D.Dom.span("what", "The project's schematic")])
+  View.sheets.of(HI.Hier.read(U.Ui.info(u, "sheets:" ++ U.Ui.root(u))), u)
 
 # the Layers menu (core/layers.bend): each layer shown by default, in
 # KiCad's order (plot2d.js hides those the file has nothing on), a row of
