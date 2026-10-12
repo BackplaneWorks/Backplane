@@ -243,7 +243,86 @@ class View {
       if (!(p && p.none) && !this.tick) this.tick = setInterval(() => { if (this.plot && (this.plot.chunks || this.plot.none)) { clearInterval(this.tick); this.tick = null; } this.later(); }, 1000);
       return;
     }
-    g.setTransform(this.scale * dpr, 0, 0, this.scale * dpr, this.ox * dpr, this.oy * dpr);
+    // while the view moves, the layers come from a bitmap of them with a
+    // margin (the native window keeps a base frame the same way): a pan
+    // inside the margin only places it; a zoom, or a pan past it, stretches
+    // it until the view rests a moment, then it is drawn again. A view that
+    // has not moved (a new plot, a fade, a layer turned off) draws the
+    // layers straight onto the page, and the bitmap follows when idle.
+    const look = `${this.off} ${this.dim} ${this.lift} ${w} ${h} ${dpr}`;
+    const view = `${this.scale} ${this.ox} ${this.oy}`;
+    const moved = this.shown !== undefined && view !== this.shown;
+    this.shown = view;
+    let b = this.cache;
+    if (b && (b.plot !== p || b.look !== look)) b = null;
+    const placed = b && b.scale === this.scale && Math.abs((this.ox - b.ox) * dpr) <= b.m && Math.abs((this.oy - b.oy) * dpr) <= b.m;
+    if (b && !placed && !this.rest) {
+      const f = this.scale / b.scale;
+      g.setTransform(f, 0, 0, f, this.ox * dpr - f * (b.ox * dpr + b.m), this.oy * dpr - f * (b.oy * dpr + b.m));
+      g.drawImage(b.canvas, 0, 0);
+      clearTimeout(this.resting);
+      this.resting = setTimeout(() => { this.rest = true; this.later(); }, 120);
+    } else if (placed || ((b || moved || this.prebake) && !this.fading)) {
+      if (!placed) b = this.bake(p, look, w, h, dpr);
+      g.drawImage(b.canvas, Math.round(this.ox * dpr - (b.ox * dpr + b.m)), Math.round(this.oy * dpr - (b.oy * dpr + b.m)));
+    } else {
+      const t = performance.now();
+      this.fading = this.paint(g, dpr, 0);
+      this.drew = performance.now() - t;
+      // only while something fades in does it ask for the next frame
+      if (this.fading) this.later();
+      else this.idle();
+    }
+    this.rest = false;
+    this.prebake = false;
+    // how it came and how long the layers took to draw, small in a corner
+    const st = stats.get(this.key);
+    if (st) {
+      g.setTransform(1, 0, 0, 1, 0, 0);
+      g.fillStyle = "rgba(138,143,152,0.9)";
+      g.font = `${11 * dpr}px system-ui, sans-serif`;
+      g.textAlign = "left";
+      g.fillText(`${mb(st.bytes)}` + (st.waited > 0.5 ? ` · came after ${st.waited.toFixed(1)} s` : "") + (this.drew ? ` · drawn in ${Math.round(this.drew)} ms` : ""), 8 * dpr, h - 8 * dpr);
+    }
+  }
+
+  // the layers at the current view into the bitmap, kept for the next frames
+  // unless something is still fading in (then the next frame draws again)
+  bake(p, look, w, h, dpr) {
+    const m = Math.round(256 * dpr);
+    const b = this.cache && this.cache.canvas.width === w + 2 * m && this.cache.canvas.height === h + 2 * m ? this.cache : { canvas: document.createElement("canvas") };
+    if (b.canvas.width !== w + 2 * m) b.canvas.width = w + 2 * m;
+    if (b.canvas.height !== h + 2 * m) b.canvas.height = h + 2 * m;
+    const g = b.canvas.getContext("2d");
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.fillStyle = this.bg;
+    g.fillRect(0, 0, b.canvas.width, b.canvas.height);
+    const t = performance.now();
+    const fading = this.paint(g, dpr, m);
+    this.drew = performance.now() - t;
+    Object.assign(b, { plot: fading ? null : p, look, scale: this.scale, ox: this.ox, oy: this.oy, m });
+    this.cache = b;
+    this.fading = fading;
+    // only while something fades in does it ask for the next frame
+    if (fading) this.later();
+    return b;
+  }
+
+  // the bitmap for the view on screen, made when the page is idle so the
+  // first pan or zoom finds it ready
+  idle() {
+    clearTimeout(this.baking);
+    this.baking = setTimeout(() => {
+      const go = () => { if (!this.fading && this.plot && this.plot.chunks) { this.prebake = true; this.later(); } };
+      if (window.requestIdleCallback) requestIdleCallback(go, { timeout: 1000 }); else go();
+    }, 150);
+  }
+
+  // every layer at the current view, shifted by the bitmap's margin; whether
+  // something is still fading in
+  paint(g, dpr, m) {
+    const p = this.plot;
+    g.setTransform(this.scale * dpr, 0, 0, this.scale * dpr, this.ox * dpr + m, this.oy * dpr + m);
     g.lineCap = "round";
     g.lineJoin = "round";
     const now = performance.now();
@@ -266,17 +345,7 @@ class View {
       g.stroke(k.line);
     }
     g.globalAlpha = 1;
-    // only while something fades in does it ask for the next frame
-    if (fading) this.later();
-    // how it came, small in a corner
-    const st = stats.get(this.key);
-    if (st) {
-      g.setTransform(1, 0, 0, 1, 0, 0);
-      g.fillStyle = "rgba(138,143,152,0.9)";
-      g.font = `${11 * dpr}px system-ui, sans-serif`;
-      g.textAlign = "left";
-      g.fillText(`${mb(st.bytes)}` + (st.waited > 0.5 ? ` · came after ${st.waited.toFixed(1)} s` : ""), 8 * dpr, h - 8 * dpr);
-    }
+    return fading;
   }
 }
 
