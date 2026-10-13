@@ -57,7 +57,7 @@ def log() -> List<&2, M.Change>:
      M.TaskSet{"b0", "jlcpcb-status", task(), at()},
      M.ActivityLogged{"bt0", "r1:a", "task", "run", run("running"), Nat.add(at(), 20n)},
      M.ActivityLogged{"bt0", "r1:b", "task", "run", run("ok"), Nat.add(at(), 30n)},
-     M.AskOpened{"k1", "bt0", "browser", "task_pause", pause(), "continue|skip|stop", Nat.add(at(), 50n)}]])
+     M.AskOpened{"k1", "bt0", "browser", "task_pause", pause(), "continue\nskip\nstop", Nat.add(at(), 50n)}]])
 
 def act.k(a: U.Act) -> U.Ui:
   match a:

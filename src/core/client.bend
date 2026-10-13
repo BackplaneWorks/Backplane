@@ -8986,7 +8986,7 @@ def Teach.choice.safe(+risky: Bool, +c: String) -> String:
 def Teach.choices(+o: String, +risky: Bool) -> List<&2, String>:
   Bool.pick(List<&2, String>, String.is_empty(String.trim(o)),
     Bool.pick(List<&2, String>, risky, ["confirm", "skip", "stop"], ["continue", "skip", "stop"]),
-    String.split(o, '|'))
+    String.split(o, '\n'))
 
 def Teach.ask.btns(cs: List<&2, String>, +id: String, +risky: Bool) -> List<&2, TBtn>:
   match cs:
