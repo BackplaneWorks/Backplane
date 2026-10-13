@@ -98,8 +98,13 @@ data class Entry(
 
 // what the agent waits on the user for: an approval, a question or a
 // plan; each button sends "answer" with its value
-data class AskButton(val label: String, val value: String, val primary: Boolean)
-data class Ask(val id: String, val kind: String, val head: String, val detail: String, val blocks: List<Block>, val buttons: List<AskButton>)
+// action: what the button sends ("" is "answer"; a browser card's Take over is "tk-takeover")
+data class AskButton(val label: String, val value: String, val primary: Boolean, val action: String = "")
+// image: the hub path of a browser task's screenshot at the pause ("" for none)
+data class Ask(
+    val id: String, val kind: String, val head: String, val detail: String, val blocks: List<Block>, val buttons: List<AskButton>,
+    val image: String = "", val risky: Boolean = false,
+)
 
 // the subagent panel (src/core/subs.bend): what the thread delegated and
 // the agent's own; a row sends act with value (a task opens its thread, a
@@ -351,8 +356,25 @@ data class BotSettings(
     val persona: String, val personaField: String, val invite: String, val purl: String, val join: String,
     val google: BotGoogle, val peers: List<BotPeer>,
 )
+// Browser tasks (src/core/client.bend's Teach.*). The strip: mode 0 idle,
+// 1 recording, 2 review (the save sheet), 3 the person has the browser; its
+// buttons send their own action. While `input` the frame takes the
+// person's taps ("bb-click" "x y" in thousandths), drags ("bb-scroll" dy),
+// text ("bb-type"), keys ("bb-key"), the address ("bb-nav", field bburl),
+// "bb-back" and "bb-reload".
+data class TBtn(val label: String, val action: String, val value: String, val primary: Boolean)
+data class TStep(val n: Int, val text: String, val chip: String, val secret: Boolean, val marked: Boolean, val pname: String, val field: String)
 // the hub's latest frame of the bot's page: n changes with every new one
-data class BotBrowser(val url: String, val n: String)
+data class BotBrowser(
+    val url: String, val n: String, val mode: Int = 0, val title: String = "", val clock: String = "", val steps: Int = 0,
+    val btns: List<TBtn> = emptyList(), val input: Boolean = false, val addr: String = "", val note: String = "",
+    val name: String = "", val desc: String = "", val rows: List<TStep> = emptyList(), val asks: List<Ask> = emptyList(),
+)
+// the Tasks tab: a card each (open: its run form, one field per param), then the recent runs
+data class TaskParam(val field: String, val label: String, val example: String, val value: String)
+data class TaskItem(val slug: String, val name: String, val desc: String, val open: Boolean, val asking: Boolean, val last: String, val params: List<TaskParam>)
+data class TaskRun(val run: String, val slug: String, val status: String, val summary: String, val shots: List<String>)
+data class BotTasks(val items: List<TaskItem>, val runs: List<TaskRun>)
 data class BotPost(val id: String, val from: String, val text: String, val ago: String, val mine: Boolean)
 
 // what the main area shows when it is not a thread: a bot (kind "bot",
@@ -366,6 +388,7 @@ data class BotView(
     val hooks: List<BotHook>, val settings: BotSettings?, val posts: List<BotPost>,
     // the name as shown: "Kit · desk" for a bot on a linked machine
     val title: String,
+    val tasks: BotTasks? = null,
 )
 
 // hub: the one in focus (its thread is shown, its plots are drawn)
@@ -470,10 +493,7 @@ private fun thread(o: JSONObject) = threadOf(o).copy(
                 it.optString("cancel"))
         }, u.optString("word"), u.optBoolean("open", true), u.optString("act"), u.optString("value"))
     },
-    asks = o.optJSONArray("asks").map { a ->
-        Ask(a.optString("id"), a.optString("kind"), a.optString("head"), a.optString("detail"), blocks(a.optJSONArray("blocks")),
-            a.optJSONArray("buttons").map { AskButton(it.optString("label"), it.optString("value"), it.optBoolean("primary")) })
-    },
+    asks = o.optJSONArray("asks").map(::askOf),
     skills = o.optJSONArray("skills").map { Skill(it.optString("name"), it.optString("desc"), it.optBoolean("on")) },
     btw = o.optJSONObject("btw")?.let { Btw(it.optString("q"), it.optString("a")) },
     attaching = chips(o.optJSONArray("attaching")),
@@ -578,6 +598,30 @@ private fun island(o: JSONObject?) = Island(
     o?.optJSONArray("lines").map { IslandLine(it.optString("thread"), it.optString("title"), it.optString("doing")) },
 )
 
+private fun askOf(a: JSONObject) =
+    Ask(a.optString("id"), a.optString("kind"), a.optString("head"), a.optString("detail"), blocks(a.optJSONArray("blocks")),
+        a.optJSONArray("buttons").map { AskButton(it.optString("label"), it.optString("value"), it.optBoolean("primary"), it.optString("action")) },
+        a.optString("image"), a.optBoolean("risky"))
+
+private fun botBrowser(o: JSONObject) = BotBrowser(
+    o.optString("url"), o.optString("n"), o.optInt("mode"), o.optString("title"), o.optString("clock"), o.optInt("steps"),
+    o.optJSONArray("btns").map { TBtn(it.optString("label"), it.optString("action"), it.optString("value"), it.optBoolean("primary")) },
+    o.optBoolean("input"), o.optString("bburl"), o.optString("tknote"), o.optString("tkname"), o.optString("tkdesc"),
+    o.optJSONArray("rows").map {
+        TStep(it.optInt("n"), it.optString("text"), it.optString("chip"), it.optBoolean("secret"), it.optBoolean("marked"),
+            it.optString("pname"), it.optString("field"))
+    },
+    o.optJSONArray("asks").map(::askOf),
+)
+
+private fun botTasks(o: JSONObject) = BotTasks(
+    o.optJSONArray("items").map { t ->
+        TaskItem(t.optString("slug"), t.optString("name"), t.optString("desc"), t.optBoolean("open"), t.optBoolean("asking"), t.optString("last"),
+            t.optJSONArray("params").map { TaskParam(it.optString("field"), it.optString("label"), it.optString("example"), it.optString("value")) })
+    },
+    o.optJSONArray("runs").map { r -> TaskRun(r.optString("run"), r.optString("slug"), r.optString("status"), r.optString("summary"), strs(r.optJSONArray("shots"))) },
+)
+
 private fun botView(o: JSONObject) = BotView(
     o.optString("kind"), o.optString("id"), o.optString("name"), o.optString("mood"), o.optString("note"),
     o.optString("tab", "chat"), o.optString("peer"), o.optString("members"), o.optString("draft"),
@@ -585,7 +629,7 @@ private fun botView(o: JSONObject) = BotView(
     o.optJSONArray("tabs").map { BotTab(it.optString("id"), it.optString("label")) },
     o.optJSONObject("space")?.let(::spaceModel),
     o.optJSONObject("page")?.let { SpacePageModel(it.optString("bot"), it.optString("url"), it.optString("n")) },
-    o.optJSONObject("browser")?.let { BotBrowser(it.optString("url"), it.optString("n")) },
+    o.optJSONObject("browser")?.let(::botBrowser),
     o.optJSONArray("memory").map {
         BotMemory(it.optString("key"), it.optString("kind"), it.optString("text"), it.optString("tags"), it.optString("updated"))
     },
@@ -610,6 +654,7 @@ private fun botView(o: JSONObject) = BotView(
         BotPost(it.optString("id"), it.optString("from"), it.optString("text"), it.optString("ago"), it.optBoolean("mine"))
     },
     o.optString("title", o.optString("name")),
+    o.optJSONObject("tasks")?.let(::botTasks),
 )
 
 fun parseScreen(o: JSONObject) = Screen(

@@ -96,6 +96,43 @@ def ons(js: List<&2, J.Json>) -> List<&2, J.Json>:
     case j <> t:
       J.Json.get_obj(j, "on") <> ons(t)
 
+# a bot that learned a task, ran it, and is paused on a risky step
+def tk_task() -> String:
+  "{\"v\":1,\"slug\":\"jlcpcb\",\"name\":\"Check order\",\"description\":\"Look up an order\",\"origin\":\"show\",\"start\":\"https://jlcpcb.com\",\"params\":[{\"name\":\"order\",\"label\":\"Order number\",\"kind\":\"text\",\"example\":\"\"}],\"steps\":[],\"urls\":[],\"created\":1,\"updated\":2}"
+
+def tk_run() -> String:
+  "{\"slug\":\"jlcpcb\",\"run\":\"r1\",\"status\":\"ok\",\"n\":3,\"summary\":\"done\",\"shots\":[\"/bots/b1/tasks/shot?run=r1&n=2\"]}"
+
+def tk_ask() -> String:
+  "{\"bot\":\"b1\",\"run\":\"r1\",\"slug\":\"jlcpcb\",\"n\":3,\"kind\":\"purchase\",\"question\":\"Place the order?\",\"risky\":true,\"shot\":\"/bots/b1/tasks/shot?run=r1&n=3\"}"
+
+def taught() -> H.Hubs:
+  H.Hubs.after(A.recv(shown(), "box:3787", changes([M.TaskSet{"b1", "jlcpcb", tk_task(), 200n}, M.ActivityLogged{"bt1", "r1:b", "task", "run", tk_run(), 310n},
+    M.AskOpened{"k1", "bt1", "browser", "task_pause", tk_ask(), "", 400n}])))
+
+def drives(+h: H.Hubs, +drive: String, +teach: String) -> H.Hubs:
+  H.Hubs.after(A.recv(h, "box:3787", J.Json.obj([J.KV{"t", J.Json.str("info")},
+    J.KV{"info", J.Json.obj([J.KV{"drive.b1", J.Json.str(drive)}, J.KV{"teach.b1", J.Json.str(teach)}])}])))
+
+def tasks_tab() -> J.Json:
+  J.Json.get_obj(bot(go(taught(), "bot-tab", "tasks")), "tasks")
+
+def br(+h: H.Hubs) -> J.Json:
+  J.Json.get_obj(bot(go(h, "bot-tab", "browser")), "browser")
+
+def first(js: List<&2, J.Json>) -> J.Json:
+  match js:
+    case Nil{}:
+      J.Null{}
+    case j <> _:
+      j
+
+def btn_labels(+h: H.Hubs) -> String:
+  strs(J.Json.elems(J.Json.get_obj(br(h), "btns")), "label")
+
+def thread_asks(+h: H.Hubs) -> J.Json:
+  J.Json.get_obj(J.Json.get_obj(H.Hubs.screen(h), "thread"), "asks")
+
 def main() -> IO(Unit):
   do IO<Unit>:
     C.Check.str("cats of every hub, ids qualified", list(two(), "bots", "id"), "box:3787|b1;")
@@ -111,7 +148,7 @@ def main() -> IO(Unit):
     C.Check.str("its id stays its hub's", J.Json.get_str(bot(shown()), "id", ""), "b1")
     C.Check.str("chat first, as the thread", J.Json.get_str(bot(shown()), "tab", ""), "chat")
     C.Check.str("its thread is the chat, with its owning machine", J.Json.get_str(J.Json.get_obj(H.Hubs.screen(shown()), "thread"), "title", ""), "Kit · box")
-    C.Check.str("tabs", strs(J.Json.elems(J.Json.get_obj(bot(shown()), "tabs")), "label"), "Chat;Space;Browser;Memory;Routines;Webhooks;Settings;")
+    C.Check.str("tabs", strs(J.Json.elems(J.Json.get_obj(bot(shown()), "tabs")), "label"), "Chat;Space;Browser;Tasks;Memory;Routines;Webhooks;Settings;")
     C.Check.str("no tab content on chat", J.Json.show(J.Json.get_obj(bot(shown()), "memory")), "null")
     C.Check.str("memory", strs(J.Json.elems(J.Json.get_obj(tab("memory"), "memory")), "text"), "green;")
     C.Check.str("routines", strs(J.Json.elems(J.Json.get_obj(tab("routines"), "routines")), "id"), "o1;")
@@ -142,3 +179,20 @@ def main() -> IO(Unit):
     C.Check.str("named with their machine", strs(picks(go(far(), "room-new", "box:3787|")), "name"), "Kit;Nori@laptop;")
     C.Check.str("picked on", J.Json.show(J.Json.arr(ons(picks(go(go(far(), "room-new", "box:3787|"), "room-pick", "Nori@laptop"))))), "[false,true]")
     C.Check.str("a member no machine lists stays", strs(picks(go(go(two(), "room-new", "box:3787|"), "bfield", "rmembers\u{1f}Ghost@far")), "id"), "b1;Ghost@far;")
+    C.Check.str("a task listed", strs(J.Json.elems(J.Json.get_obj(tasks_tab(), "items")), "name"), "Check order;")
+    C.Check.str("its param is a run field", strs(J.Json.elems(J.Json.get_obj(first(J.Json.elems(J.Json.get_obj(tasks_tab(), "items"))), "params")), "field"), "tkrun.order;")
+    C.Check.str("its last run", strs(J.Json.elems(J.Json.get_obj(tasks_tab(), "items")), "last"), "ok;")
+    C.Check.str("a run with its picture", J.Json.show(J.Json.get_obj(first(J.Json.elems(J.Json.get_obj(tasks_tab(), "runs"))), "shots")), "[\"/bots/b1/tasks/shot?run=r1&n=2\"]")
+    C.Check.str("opening a task", J.Json.show(J.Json.get_obj(first(J.Json.elems(J.Json.get_obj(J.Json.get_obj(bot(go(go(taught(), "bot-tab", "tasks"), "tk-open", "jlcpcb")), "tasks"), "items"))), "open")), "true")
+    C.Check.str("idle strip", btn_labels(taught()), "Teach a task;Take over;")
+    C.Check.str("an idle frame takes no input", J.Json.show(J.Json.get_obj(br(taught()), "input")), "false")
+    C.Check.str("recording", btn_labels(drives(taught(), "teach", "rec 1000 2")), "Stop & save;Discard;")
+    C.Check.str("the person has it", btn_labels(drives(taught(), "takeover", "")), "Hand back;")
+    C.Check.str("and the frame takes input", J.Json.show(J.Json.get_obj(br(drives(taught(), "takeover", "")), "input")), "true")
+    C.Check.str("a paused run is a browser ask", strs(J.Json.elems(thread_asks(taught())), "kind"), "browser;")
+    C.Check.str("with its picture", strs(J.Json.elems(thread_asks(taught())), "image"), "/bots/b1/tasks/shot?run=r1&n=3;")
+    C.Check.str("a risky step is confirmed, never continued", strs(J.Json.elems(J.Json.get_obj(first(J.Json.elems(thread_asks(taught()))), "buttons")), "label"), "Confirm;Skip this step;Stop task;Take over;")
+    C.Check.str("answers go by the ask's id", strs(J.Json.elems(J.Json.get_obj(first(J.Json.elems(thread_asks(taught()))), "buttons")), "value"), "k1|confirm;k1|skip;k1|stop;;")
+    C.Check.str("the Browser tab carries the same card", strs(J.Json.elems(J.Json.get_obj(br(taught()), "asks")), "id"), "k1;")
+    C.Check.str("take over is its own action", strs(J.Json.elems(J.Json.get_obj(first(J.Json.elems(thread_asks(taught()))), "buttons")), "action"), "answer;answer;answer;tk-takeover;")
+    C.Check.str("no ask, no card", J.Json.show(J.Json.get_obj(br(shown()), "asks")), "[]")

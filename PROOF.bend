@@ -8603,3 +8603,12 @@ def Laws.teach_recording_not_early():
 
 def Laws.teach_draft_secret_no_value():
   {==}
+
+def Laws.mobile_browser_ask_card(a, d, nf):
+  {==}
+
+def Laws.mobile_other_ask_standard(a, d, nf):
+  {==}
+
+def Laws.mobile_browser_card_only_browser(t, rest):
+  {==}

@@ -8,6 +8,7 @@ import ../core/botui.bend as B
 import ../core/cron.bend as CR
 import ../core/cat.bend as CT
 import ./space.bend as MS
+import ../core/task.bend as TK
 
 # Bots on the phones (docs/bots.md): the cats in the list with their
 # moods, the rooms, the new bot and room forms, and what a bot, a room or
@@ -225,11 +226,118 @@ def MBots.settings(+u: U.Ui, +persona: String) -> J.Json:
     J.KV{"google", MBots.google(u)}, J.KV{"peers", J.Json.arr(MBots.peers(B.BU.peers(u)))},
     J.KV{"invite", J.Json.str(U.Ui.scratch(u, "@peer.invite"))}, MBots.str(u, "purl"), J.KV{"join", J.Json.str(B.BU.field(u, "invite"))}])
 
+# a button of the browser strip, a task's card or a paused run's card; it
+# sends its own action with its value
+def MBots.tbtns(bs: List<&2, U.TBtn>) -> List<&2, J.Json>:
+  match bs:
+    case Nil{}:
+      Nil{}
+    case U.TBtn{+label, +action, +value, +primary} <> t:
+      J.Json.obj([J.KV{"label", J.Json.str(label)}, J.KV{"action", J.Json.str(action)}, J.KV{"value", J.Json.str(value)}, J.KV{"primary", J.Json.bool(primary)}]) <> MBots.tbtns(t)
+
+# the save sheet's rows (client.bend's Teach.rows): what a step did and its
+# typed value as a chip that "tk-mark" (the step's number) makes a
+# parameter, named in the field "tkp.<n>"
+def MBots.srows(rs: List<&2, U.TStepRow>) -> List<&2, J.Json>:
+  match rs:
+    case Nil{}:
+      Nil{}
+    case U.TStepRow{+n, +text, _, +chip, +secret, +marked, +pname} <> t:
+      J.Json.obj([J.KV{"n", J.Json.nat(n)}, J.KV{"text", J.Json.str(text)}, J.KV{"chip", J.Json.str(chip)}, J.KV{"secret", J.Json.bool(secret)},
+        J.KV{"marked", J.Json.bool(marked)}, J.KV{"pname", J.Json.str(pname)}, J.KV{"field", J.Json.str("tkp." ++ Nat.show(n))}]) <> MBots.srows(t)
+
+# the strip above the page and, once a recording is stopped, the save sheet;
+# "input" is whether the frame takes the person's taps and keys (bb-click
+# "x y" in thousandths, bb-scroll dy, bb-type text, bb-key name, bb-nav with
+# the field "bburl", bb-back, bb-reload)
+def MBots.strip(s: U.TStrip, +u: U.Ui, +id: String) -> List<&2, J.KV>:
+  match s:
+    case U.TStrip{+mode, +title, +clock, +steps, bs}:
+      [J.KV{"mode", J.Json.nat(mode)}, J.KV{"title", J.Json.str(title)}, J.KV{"clock", J.Json.str(clock)}, J.KV{"steps", J.Json.nat(steps)},
+       J.KV{"btns", J.Json.arr(MBots.tbtns(bs))}, J.KV{"input", J.Json.bool(U.Teach.input(u, id))},
+       MBots.str(u, "bburl"), MBots.str(u, "tknote"), MBots.str(u, "tkname"), MBots.str(u, "tkdesc"),
+       J.KV{"rows", J.Json.arr(MBots.srows(U.Teach.rows(u, id)))}]
+
+# a browser task paused for help (client.bend's Teach.ask): the same card
+# with its screenshot (a hub path, loaded with the pairing token) and the
+# person's choices. Answers are "answer" values; Take over is "tk-takeover"
+# (the buttons carry their action).
+def MBots.ask(t: U.TAsk) -> J.Json:
+  match t:
+    case U.TAsk{+id, _, +slug, +n, _, +q, +risky, +shot, bs}:
+      J.Json.obj([J.KV{"id", J.Json.str(id)}, J.KV{"kind", J.Json.str("browser")},
+        J.KV{"head", J.Json.str("Task paused: " ++ slug ++ " (step " ++ Nat.show(n) ++ ")")},
+        J.KV{"detail", J.Json.str(q)}, J.KV{"blocks", J.Json.arr(Nil{})}, J.KV{"image", J.Json.str(shot)}, J.KV{"risky", J.Json.bool(risky)},
+        J.KV{"buttons", J.Json.arr(MBots.tbtns(bs))}])
+
+def MBots.asks.m(browser: Bool, t: U.TAsk, rest: List<&2, J.Json>) -> List<&2, J.Json>:
+  match browser:
+    case True{}:
+      MBots.ask(t) <> rest
+    case False{}:
+      rest
+
+def MBots.asks.k(+a: M.Ask, rest: List<&2, J.Json>, +u: U.Ui, +bot: String) -> List<&2, J.Json>:
+  match a:
+    case M.Ask{_, _, +k, _, _, _, _, _}:
+      MBots.asks.m(String.eq(k, "browser"), U.Teach.ask.of(a, u, bot), rest)
+
+def MBots.asks.go(as: List<&2, M.Ask>, +u: U.Ui, +bot: String) -> List<&2, J.Json>:
+  match as:
+    case Nil{}:
+      Nil{}
+    case a <> r:
+      MBots.asks.k(a, MBots.asks.go(r, u, bot), u, bot)
+
 # the browser's frame: where the hub serves it, and how many it has sent
-# (a new n is a new frame)
+# (a new n is a new frame), with the strip
 def MBots.browser(+u: U.Ui, +id: String) -> J.Json:
-  J.Json.obj([J.KV{"url", J.Json.str("/bots/" ++ id ++ "/screen.jpg")},
-    J.KV{"n", J.Json.str(Bool.pick(String, String.is_empty(U.Ui.info(u, "shot." ++ id)), "0", U.Ui.info(u, "shot." ++ id)))}])
+  J.Json.obj(List.append(&2, J.KV, [J.KV{"url", J.Json.str("/bots/" ++ id ++ "/screen.jpg")},
+    J.KV{"n", J.Json.str(Bool.pick(String, String.is_empty(U.Ui.info(u, "shot." ++ id)), "0", U.Ui.info(u, "shot." ++ id)))}],
+    List.append(&2, J.KV, MBots.strip(U.Teach.strip(u, id), u, id),
+      [J.KV{"asks", J.Json.arr(MBots.asks.go(U.Asks.open(U.Ui.state(u), BT.Bot.thread(BT.World.bot(M.State.bots(U.Ui.state(u)), id))), u, id))}])))
+
+# Tasks (client.bend's Teach.tasks): a card each; open, its run form (one
+# field "tkrun.<param>" each, then "tk-run" with the slug) and Delete
+# ("tk-del", which asks first: "asking")
+def MBots.tparams(ps: List<&2, TK.TkParam>, +u: U.Ui) -> List<&2, J.Json>:
+  match ps:
+    case Nil{}:
+      Nil{}
+    case TK.TkParam{+name, +label, _, +example} <> t:
+      J.Json.obj([J.KV{"field", J.Json.str(U.Teach.pfield(name))}, J.KV{"label", J.Json.str(TK.Tk.first(label, name))},
+        J.KV{"example", J.Json.str(example)}, J.KV{"value", J.Json.str(B.BU.field(u, U.Teach.pfield(name)))}]) <> MBots.tparams(t, u)
+
+def MBots.task(t: U.TTask, +u: U.Ui) -> J.Json:
+  match t:
+    case U.TTask{+slug, +name, +desc, ps, +open, +asking, +last}:
+      J.Json.obj([J.KV{"slug", J.Json.str(slug)}, J.KV{"name", J.Json.str(name)}, J.KV{"desc", J.Json.str(desc)},
+        J.KV{"open", J.Json.bool(open)}, J.KV{"asking", J.Json.bool(asking)}, J.KV{"last", J.Json.str(last)},
+        J.KV{"params", J.Json.arr(MBots.tparams(ps, u))}])
+
+def MBots.tasks(ts: List<&2, U.TTask>, +u: U.Ui) -> List<&2, J.Json>:
+  match ts:
+    case Nil{}:
+      Nil{}
+    case t <> r:
+      MBots.task(t, u) <> MBots.tasks(r, u)
+
+def MBots.run(r: U.TRun) -> J.Json:
+  match r:
+    case U.TRun{+run, +slug, +status, _, +summary, +shots}:
+      J.Json.obj([J.KV{"run", J.Json.str(run)}, J.KV{"slug", J.Json.str(slug)}, J.KV{"status", J.Json.str(status)},
+        J.KV{"summary", J.Json.str(summary)}, J.KV{"shots", J.Json.arr(MBots.strs(shots))}])
+
+def MBots.runs(rs: List<&2, U.TRun>) -> List<&2, J.Json>:
+  match rs:
+    case Nil{}:
+      Nil{}
+    case r <> t:
+      MBots.run(r) <> MBots.runs(t)
+
+def MBots.tasks.tab(+u: U.Ui, +id: String) -> J.Json:
+  J.Json.obj([J.KV{"items", J.Json.arr(MBots.tasks(U.Teach.tasks(u, id), u))},
+    J.KV{"runs", J.Json.arr(MBots.runs(List.take(&2, U.TRun, U.Teach.runs(u, id), 8n)))}])
 
 def MBots.space.k(none: Bool, +at: Nat, +u: U.Ui, b: BT.Bot, +id: String) -> List<&2, J.KV>:
   match none:
@@ -254,14 +362,16 @@ def MBots.tab.k(i: Nat, +u: U.Ui, b: BT.Bot, +id: String, +persona: String, +now
     case 2n:
       [J.KV{"browser", MBots.browser(u, id)}]
     case 3n:
-      [J.KV{"memory", J.Json.arr(MBots.mems(B.BU.mems(u, id), now))}]
+      [J.KV{"tasks", MBots.tasks.tab(u, id)}]
     case 4n:
-      [J.KV{"routines", J.Json.arr(MBots.routines(B.BU.routines(u, id), now))}, J.KV{"routine", MBots.routine.form(u)}]
+      [J.KV{"memory", J.Json.arr(MBots.mems(B.BU.mems(u, id), now))}]
     case 5n:
+      [J.KV{"routines", J.Json.arr(MBots.routines(B.BU.routines(u, id), now))}, J.KV{"routine", MBots.routine.form(u)}]
+    case 6n:
       [J.KV{"hooks", J.Json.arr(MBots.hooks(B.BU.hooks(u, id), now))}, J.KV{"secret", J.Json.str(U.Ui.scratch(u, "@hook.secret"))},
        J.KV{"secretFor", J.Json.str(U.Ui.scratch(u, "@hook.id"))}, J.KV{"token", J.Json.str(U.Ui.scratch(u, "@hook.token"))},
        J.KV{"tokenFor", J.Json.str(U.Ui.scratch(u, "@hook.tokfor"))}, J.KV{"tokenUrl", J.Json.str(U.Ui.scratch(u, "@hook.tokurl"))}, MBots.str(u, "hname")]
-    case 6n:
+    case 7n:
       [J.KV{"settings", MBots.settings(u, persona)}]
     case _:
       Nil{}

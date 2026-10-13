@@ -648,7 +648,7 @@ def Mob.ask.body(plan: Bool, +d: String) -> List<&2, J.Json>:
     case False{}:
       Nil{}
 
-def Mob.ask(a: M.Ask, +draft: String) -> J.Json:
+def Mob.ask.std(a: M.Ask, +draft: String) -> J.Json:
   match a:
     case M.Ask{+id, _, +k, +tool, +d, +o, _, _}:
       J.Json.obj([J.KV{"id", J.Json.str(id)}, J.KV{"kind", J.Json.str(k)},
@@ -657,12 +657,24 @@ def Mob.ask(a: M.Ask, +draft: String) -> J.Json:
         J.KV{"blocks", J.Json.arr(Mob.ask.body(String.eq(k, "plan"), d))},
         J.KV{"buttons", J.Json.arr(Mob.ask.btns(C.Codec.pos(["plan", "input"], k), id, o, draft))}])
 
-def Mob.asks(as: List<&2, M.Ask>, +draft: String) -> List<&2, J.Json>:
+def Mob.ask.k(web: Bool, a: M.Ask, +draft: String, nf: Map<&2, String>) -> J.Json:
+  match web:
+    case True{}:
+      MB.MBots.ask(U.Teach.ask.from(a, nf))
+    case False{}:
+      Mob.ask.std(a, draft)
+
+def Mob.ask(a: M.Ask, +draft: String, nf: Map<&2, String>) -> J.Json:
+  match a:
+    case M.Ask{_, _, +k, _, _, _, _, _}:
+      Mob.ask.k(String.eq(k, "browser"), a, draft, nf)
+
+def Mob.asks(as: List<&2, M.Ask>, +draft: String, nf: Map<&2, String>) -> List<&2, J.Json>:
   match as:
     case Nil{}:
       Nil{}
     case a <> t:
-      Mob.ask(a, draft) <> Mob.asks(t, draft)
+      Mob.ask(a, draft, nf) <> Mob.asks(t, draft, nf)
 
 # Subagents (core/subs.bend): what this thread delegated ("select" with
 # the row's key opens its thread) and the agent's own ("fold" with its
@@ -875,7 +887,7 @@ def Mob.thread(u: U.Ui, t: M.Thread, pend: List<&2, String>, vw: J.Json, +atts: 
         J.KV{"entries", J.Json.arr(Mob.paged.es(pg, st, id, nf, drafts, V.View.running(turn)))},
         J.KV{"earlier", J.Json.nat(U.Win.hidden(pg))},
         J.KV{"sending", J.Json.arr(Mob.strs(pend))},
-        J.KV{"asks", J.Json.arr(Mob.asks(U.Asks.open(st, id), U.Str.get(drafts, sel)))},
+        J.KV{"asks", J.Json.arr(Mob.asks(U.Asks.open(st, id), U.Str.get(drafts, sel), nf))},
         J.KV{"queued", J.Json.str(M.Queue.of(st, id))},
         J.KV{"queue", J.Json.arr(Mob.queue(M.Queue.items(st, id), True{}, V.View.running(turn)))},
         J.KV{"todos", Mob.todos(nf, id, U.Todos.shown(st, id, V.View.running(turn)))},

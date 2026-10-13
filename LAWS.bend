@@ -52,6 +52,7 @@ import ./src/core/links.bend as LK
 import ./src/web/dom.bend as DM
 import ./src/core/client.bend as U
 import ./src/mobile/screen.bend as MSC
+import ./src/mobile/bots.bend as MBT
 import ./src/core/gh.bend as GH
 import ./src/gfx/text.bend as X
 import ./src/core/fold.bend as FO
@@ -7224,3 +7225,26 @@ law teach_recording_not_early:
 # a draft's secret step carries no value
 law teach_draft_secret_no_value:
   {String.contains(TCH.Teach.draft.text(TCH.Teach.add(TCH.Teach.start("b1", 1n), J.Json.obj([J.KV{"do", J.Str{"type"}}, J.KV{"secret", J.Flag{True{}}}, J.KV{"value", J.Str{"hunter2"}}]))), "hunter2") == False{} : Bool}
+
+# Browser tasks on the phones
+# ---------------------------
+
+# a pause is the browser card (its picture and the person's choices);
+# every other ask keeps the standard card
+law mobile_browser_ask_card:
+  for +a: M.Ask
+  for +d: String
+  for +nf: Map<&2, String>
+  {MSC.Mob.ask.k(True{}, a, d, nf) == MBT.MBots.ask(U.Teach.ask.from(a, nf)) : J.Json}
+
+law mobile_other_ask_standard:
+  for +a: M.Ask
+  for +d: String
+  for +nf: Map<&2, String>
+  {MSC.Mob.ask.k(False{}, a, d, nf) == MSC.Mob.ask.std(a, d) : J.Json}
+
+# a card on the Browser tab is added only for a browser ask
+law mobile_browser_card_only_browser:
+  for t: U.TAsk
+  for rest: List<&2, J.Json>
+  {MBT.MBots.asks.m(False{}, t, rest) == rest : List<&2, J.Json>}

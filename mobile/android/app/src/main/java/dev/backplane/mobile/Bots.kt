@@ -281,7 +281,8 @@ private fun BotScreen(m: AppModel, s: Screen, b: BotView) {
             when (b.tab) {
                 "status" -> StatusTab(m, m.plane(s))
                 "space" -> if (b.page != null) SpacePage(m, b.page) else b.space?.let { SpaceView(it) { a, v -> m.act(a, v) } }
-                "browser" -> BrowserTab(m, b.browser)
+                "browser" -> BrowserTab(m, b)
+                "tasks" -> TasksTab(m, b)
                 "memory" -> MemoryTab(m, b.memory)
                 "routines" -> RoutinesTab(m, b)
                 "hooks" -> HooksTab(m, b)
@@ -295,34 +296,6 @@ private fun BotScreen(m: AppModel, s: Screen, b: BotView) {
 private fun Empty(text: String) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Text(text, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.outline)
-    }
-}
-
-// the bot's page, as the hub's latest frame (fetched again when n moves)
-@Composable
-private fun BrowserTab(m: AppModel, b: BotBrowser?) {
-    val url = b?.let { m.hubUrl(it.url, "n=" + it.n) }
-    var image by remember { mutableStateOf<ImageBitmap?>(null) }
-    LaunchedEffect(url) {
-        if (url == null) return@LaunchedEffect
-        val got = withContext(Dispatchers.IO) {
-            runCatching {
-                val c = URL(url).openConnection() as HttpURLConnection
-                c.connectTimeout = 5000
-                c.readTimeout = 15000
-                try {
-                    if (c.responseCode == 200) c.inputStream.use { BitmapFactory.decodeStream(it) } else null
-                } finally {
-                    c.disconnect()
-                }
-            }.getOrNull()
-        }
-        if (got != null) image = got.asImageBitmap()
-    }
-    val img = image
-    if (img == null) Empty("No page yet")
-    else Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        Image(img, "The bot's page", Modifier.fillMaxWidth(), contentScale = ContentScale.FillWidth)
     }
 }
 
