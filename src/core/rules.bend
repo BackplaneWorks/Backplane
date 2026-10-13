@@ -2,6 +2,7 @@ import Base
 import ./json.bend as J
 import ./model.bend as M
 import ./bot.bend as BT
+import ./ruledata.bend as RD
 import ./hub.bend as B
 import ./mcp.bend as MC
 
@@ -20,128 +21,118 @@ import ./mcp.bend as MC
 type Rule is Data:
   Rule{id: String, text: String, bot: String, project: String, tool: String, enforce: Bool, word: String, on: Bool, at: Nat, by: String}
 
-def Rule.id(+r: Rule) -> String:
+def Rule.data(r: Rule) -> RD.Rule:
   match r:
-    case Rule{i, _, _, _, _, _, _, _, _, _}:
-      i
+    case Rule{id, text, bot, project, tool, enforce, word, on, at, by}:
+      RD.Rule{id, text, bot, project, tool, enforce, word, on, at, by}
 
-def Rule.text(+r: Rule) -> String:
+def Rule.here(r: RD.Rule) -> Rule:
   match r:
-    case Rule{_, x, _, _, _, _, _, _, _, _}:
-      x
+    case RD.Rule{id, text, bot, project, tool, enforce, word, on, at, by}:
+      Rule{id, text, bot, project, tool, enforce, word, on, at, by}
 
-def Rule.bot(+r: Rule) -> String:
-  match r:
-    case Rule{_, _, b, _, _, _, _, _, _, _}:
-      b
-
-def Rule.project(+r: Rule) -> String:
-  match r:
-    case Rule{_, _, _, p, _, _, _, _, _, _}:
-      p
-
-def Rule.tool(+r: Rule) -> String:
-  match r:
-    case Rule{_, _, _, _, t, _, _, _, _, _}:
-      t
-
-def Rule.enforce(+r: Rule) -> Bool:
-  match r:
-    case Rule{_, _, _, _, _, e, _, _, _, _}:
-      e
-
-def Rule.word(+r: Rule) -> String:
-  match r:
-    case Rule{_, _, _, _, _, _, w, _, _, _}:
-      w
-
-def Rule.on(+r: Rule) -> Bool:
-  match r:
-    case Rule{_, _, _, _, _, _, _, o, _, _}:
-      o
-
-def Rule.at(+r: Rule) -> Nat:
-  match r:
-    case Rule{_, _, _, _, _, _, _, _, a, _}:
-      a
-
-def Rule.by(+r: Rule) -> String:
-  match r:
-    case Rule{_, _, _, _, _, _, _, _, _, b}:
-      b
-
-def Rules.blank() -> Rule:
-  Rule{"", "", "", "", "", False{}, "", True{}, 0n, ""}
-
-def Rules.json(+r: Rule) -> J.Json:
-  match r:
-    case Rule{i, x, b, p, t, e, w, o, a, y}:
-      J.Json.obj([J.KV{"id", J.Str{i}}, J.KV{"text", J.Str{x}}, J.KV{"bot", J.Str{b}}, J.KV{"project", J.Str{p}}, J.KV{"tool", J.Str{t}},
-        J.KV{"enforce", J.Flag{e}}, J.KV{"word", J.Str{w}}, J.KV{"on", J.Flag{o}}, J.KV{"at", J.Json.nat(a)}, J.KV{"by", J.Str{y}}])
-
-def Rules.value(+r: Rule) -> String:
-  J.Json.show(Rules.json(r))
-
-def Rules.of.stored(+o: J.Json) -> Rule:
-  Rule{J.Json.get_str(o, "id", ""), J.Json.get_str(o, "text", ""), J.Json.get_str(o, "bot", ""), J.Json.get_str(o, "project", ""),
-    J.Json.get_str(o, "tool", ""), J.Json.get_bool(o, "enforce", False{}), J.Json.get_str(o, "word", ""), J.Json.get_bool(o, "on", True{}),
-    J.Json.get_nat(o, "at", 0n), J.Json.get_str(o, "by", "")}
-
-def Rules.is(+k: String) -> Bool:
-  String.starts_with(k, "rule.")
-
-def Rules.with.id(+r: Rule, +id: String) -> Rule:
-  match r:
-    case Rule{_, x, b, p, t, e, w, o, a, y}:
-      Rule{id, x, b, p, t, e, w, o, a, y}
-
-# a stored rule without its id takes the one in its key
-def Rules.read.id(+id: String, +r: Rule, +key: String) -> Rule:
-  Bool.pick(Rule, String.is_empty(id), Rules.with.id(r, key), r)
-
-def Rules.read.one(+m: Maybe<&2, J.Json>, +k: String, +acc: List<&2, Rule>) -> List<&2, Rule>:
-  match m:
-    case Some{+o}:
-      Rules.read.id(J.Json.get_str(o, "id", ""), Rules.of.stored(o), String.drop(k, 5n)) <> acc
-    case None{}:
-      acc
-
-def Rules.read.put(+hit: Bool, +k: String, +s: M.State, +acc: List<&2, Rule>) -> List<&2, Rule>:
-  match hit:
-    case True{}:
-      Rules.read.one(J.Json.parse(M.Setting.get(s, k, "")), k, acc)
-    case False{}:
-      acc
-
-def Rules.read(+ks: List<&2, String>, +s: M.State, +acc: List<&2, Rule>) -> List<&2, Rule>:
-  match ks:
-    case Nil{}:
-      acc
-    case +k <> t:
-      Rules.read(t, s, Rules.read.put(Rules.is(k), k, s, acc))
-
-# oldest first, then by id
-def Rules.older.k(+aa: Nat, +ab: Nat, +ia: String, +ib: String) -> Bool:
-  Bool.or(Nat.is_lt(aa, ab), Bool.and(Nat.is_eq(aa, ab), String.is_le(ia, ib)))
-
-def Rules.older(a: Rule, b: Rule) -> Bool:
-  match a b:
-    case Rule{ia, _, _, _, _, _, _, _, aa, _} Rule{ib, _, _, _, _, _, _, _, ab, _}:
-      Rules.older.k(aa, ab, ia, ib)
-
-# every rule, oldest first, in one pass over the settings' keys
-def Rules.all(+s: M.State) -> List<&2, Rule>:
-  List.sort(~Rule, ~Rules.older, Rules.read(M.Setting.keys(s), s, Nil{}))
-
-def Rules.get.go(+rs: List<&2, Rule>, +id: String) -> Maybe<&2, Rule>:
+def Rule.datas(rs: List<&2, Rule>) -> List<&2, RD.Rule>:
   match rs:
     case Nil{}:
+      Nil{}
+    case r <> t:
+      Rule.data(r) <> Rule.datas(t)
+
+def Rule.data_m(r: Maybe<&2, Rule>) -> Maybe<&2, RD.Rule>:
+  match r:
+    case Some{x}:
+      Some{Rule.data(x)}
+    case None{}:
       None{}
-    case +r <> t:
-      BT.Pick.first(Rule, String.eq(Rule.id(r), id), r, Rules.get.go(t, id))
+
+def Rule.heres(rs: List<&2, RD.Rule>) -> List<&2, Rule>:
+  match rs:
+    case Nil{}:
+      Nil{}
+    case r <> t:
+      Rule.here(r) <> Rule.heres(t)
+
+def Rule.here_m(r: Maybe<&2, RD.Rule>) -> Maybe<&2, Rule>:
+  match r:
+    case Some{x}:
+      Some{Rule.here(x)}
+    case None{}:
+      None{}
+
+def Rule.id(+r: Rule) -> String:
+  RD.Rule.id(Rule.data(r))
+
+def Rule.text(+r: Rule) -> String:
+  RD.Rule.text(Rule.data(r))
+
+def Rule.bot(+r: Rule) -> String:
+  RD.Rule.bot(Rule.data(r))
+
+def Rule.project(+r: Rule) -> String:
+  RD.Rule.project(Rule.data(r))
+
+def Rule.tool(+r: Rule) -> String:
+  RD.Rule.tool(Rule.data(r))
+
+def Rule.enforce(+r: Rule) -> Bool:
+  RD.Rule.enforce(Rule.data(r))
+
+def Rule.word(+r: Rule) -> String:
+  RD.Rule.word(Rule.data(r))
+
+def Rule.on(+r: Rule) -> Bool:
+  RD.Rule.on(Rule.data(r))
+
+def Rule.at(+r: Rule) -> Nat:
+  RD.Rule.at(Rule.data(r))
+
+def Rule.by(+r: Rule) -> String:
+  RD.Rule.by(Rule.data(r))
+
+def Rules.blank() -> Rule:
+  Rule.here(RD.Rules.blank())
+
+def Rules.json(+r: Rule) -> J.Json:
+  RD.Rules.json(Rule.data(r))
+
+def Rules.value(+r: Rule) -> String:
+  RD.Rules.value(Rule.data(r))
+
+def Rules.of.stored(+o: J.Json) -> Rule:
+  Rule.here(RD.Rules.of.stored(o))
+
+def Rules.is(+k: String) -> Bool:
+  RD.Rules.is(k)
+
+def Rules.with.id(+r: Rule, +id: String) -> Rule:
+  Rule.here(RD.Rules.with.id(Rule.data(r), id))
+
+def Rules.read.id(+id: String, +r: Rule, +key: String) -> Rule:
+  Rule.here(RD.Rules.read.id(id, Rule.data(r), key))
+
+def Rules.read.one(+m: Maybe<&2, J.Json>, +k: String, +acc: List<&2, Rule>) -> List<&2, Rule>:
+  Rule.heres(RD.Rules.read.one(m, k, Rule.datas(acc)))
+
+def Rules.read.put(+hit: Bool, +k: String, +s: M.State, +acc: List<&2, Rule>) -> List<&2, Rule>:
+  Rule.heres(RD.Rules.read.put(hit, k, s, Rule.datas(acc)))
+
+def Rules.read(+ks: List<&2, String>, +s: M.State, +acc: List<&2, Rule>) -> List<&2, Rule>:
+  Rule.heres(RD.Rules.read(ks, s, Rule.datas(acc)))
+
+def Rules.older.k(+aa: Nat, +ab: Nat, +ia: String, +ib: String) -> Bool:
+  RD.Rules.older.k(aa, ab, ia, ib)
+
+def Rules.older(a: Rule, b: Rule) -> Bool:
+  RD.Rules.older(Rule.data(a), Rule.data(b))
+
+def Rules.all(+s: M.State) -> List<&2, Rule>:
+  Rule.heres(RD.Rules.all(s))
+
+def Rules.get.go(+rs: List<&2, Rule>, +id: String) -> Maybe<&2, Rule>:
+  Rule.here_m(RD.Rules.get.go(Rule.datas(rs), id))
 
 def Rules.get(+s: M.State, +id: String) -> Maybe<&2, Rule>:
-  Rules.get.go(Rules.read(M.Setting.keys(s), s, Nil{}), id)
+  Rule.here_m(RD.Rules.get(s, id))
 
 # Which threads
 # -------------
