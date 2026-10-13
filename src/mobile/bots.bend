@@ -277,10 +277,13 @@ def MBots.asks.m(browser: Bool, t: U.TAsk, rest: List<&2, J.Json>) -> List<&2, J
     case False{}:
       rest
 
-def MBots.asks.k(+a: M.Ask, rest: List<&2, J.Json>, +u: U.Ui, +bot: String) -> List<&2, J.Json>:
+def MBots.ask.kind(a: M.Ask) -> String:
   match a:
     case M.Ask{_, _, +k, _, _, _, _, _}:
-      MBots.asks.m(String.eq(k, "browser"), U.Teach.ask.of(a, u, bot), rest)
+      k
+
+def MBots.asks.k(+a: M.Ask, rest: List<&2, J.Json>, +u: U.Ui, +bot: String) -> List<&2, J.Json>:
+  MBots.asks.m(String.eq(MBots.ask.kind(a), "browser"), U.Teach.ask.of(a, u, bot), rest)
 
 def MBots.asks.go(as: List<&2, M.Ask>, +u: U.Ui, +bot: String) -> List<&2, J.Json>:
   match as:

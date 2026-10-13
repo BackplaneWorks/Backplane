@@ -3,6 +3,7 @@ import ../core/json.bend as J
 import ../core/model.bend as M
 import ../core/notice.bend as NO
 import ../core/desk.bend as DK
+import ../core/client.bend as U
 
 # What the phone tells its owner: an alert when a turn ends, and the
 # Dynamic Island (iOS Live Activity, Android promoted notification) while
@@ -144,25 +145,41 @@ def Note.line(s: String, +n: Nat) -> String:
 def Note.body(+kind: String, +said: String) -> String:
   Bool.pick(String, String.eq(kind, "fail"), "Failed", Bool.pick(String, String.is_empty(said), "Finished", Note.line(said, 180n)))
 
-def Note.alert.k(+kind: String, +key: String, +id: String, +title: String, +said: String, +rest: List<&2, J.Json>) -> List<&2, J.Json>:
+# the screenshot of a browser task paused on this thread (a hub path), for
+# a banner to show; "" when none waits
+def Note.shot.k(browser: Bool, +d: String, rest: String) -> String:
+  match browser:
+    case True{}:
+      J.Json.get_str(Maybe.default(&2, J.Json, J.Json.parse(d), J.Null{}), "shot", "")
+    case False{}:
+      rest
+
+def Note.shot.of(as: List<&2, M.Ask>) -> String:
+  match as:
+    case Nil{}:
+      ""
+    case M.Ask{_, _, +k, _, +d, _, _, _} <> t:
+      Note.shot.k(String.eq(k, "browser"), d, Note.shot.of(t))
+
+def Note.alert.k(+kind: String, +key: String, +id: String, +title: String, +said: String, +image: String, +rest: List<&2, J.Json>) -> List<&2, J.Json>:
   J.Json.obj([J.KV{"thread", J.Json.str(id)}, J.KV{"title", J.Json.str(title)}, J.KV{"kind", J.Json.str(kind)},
-    J.KV{"body", J.Json.str(Note.body(kind, said))}, J.KV{"key", J.Json.str(key)}]) <> rest
+    J.KV{"body", J.Json.str(Note.body(kind, said))}, J.KV{"key", J.Json.str(key)}, J.KV{"image", J.Json.str(image)}]) <> rest
 
 # a turn that ended: core/notice.bend says whether it is news (a room
 # exchange alerts once, on whichever paired hub's bot answered first) and
 # under which key the apps show it; what the thread last said is read only
 # for a thread that alerts
-def Note.alert.n.k(quiet: Bool, +kind: String, +key: String, +id: String, +title: String, +es: List<&2, M.Entry>, +rest: List<&2, J.Json>) -> List<&2, J.Json>:
+def Note.alert.n.k(quiet: Bool, +st: M.State, +kind: String, +key: String, +id: String, +title: String, +es: List<&2, M.Entry>, +rest: List<&2, J.Json>) -> List<&2, J.Json>:
   match quiet:
     case True{}:
       rest
     case False{}:
-      Note.alert.k(kind, key, id, title, Note.said(es, id, False{}, ""), rest)
+      Note.alert.k(kind, key, id, title, Note.said(es, id, False{}, ""), Note.shot.of(U.Asks.open(st, id)), rest)
 
-def Note.alert.n(n: NO.Notice, +id: String, +title: String, +es: List<&2, M.Entry>, +rest: List<&2, J.Json>) -> List<&2, J.Json>:
+def Note.alert.n(n: NO.Notice, +st: M.State, +id: String, +title: String, +es: List<&2, M.Entry>, +rest: List<&2, J.Json>) -> List<&2, J.Json>:
   match n:
     case NO.Notice{+kind, +key}:
-      Note.alert.n.k(String.is_empty(kind), kind, key, id, title, es, rest)
+      Note.alert.n.k(String.is_empty(kind), st, kind, key, id, title, es, rest)
 
 # a thread a desk (the window, a web page) is watching raises no alert
 # here: the person is looking at it (core/desk.bend; law alert_watched_quiet)
@@ -171,7 +188,7 @@ def Note.alert.w(watched: Bool, +kind: String, +id: String, +title: String, +st:
     case True{}:
       rest
     case False{}:
-      Note.alert.n(NO.Notice.of(st, id, String.eq(kind, "fail"), False{}), id, title, es, rest)
+      Note.alert.n(NO.Notice.of(st, id, String.eq(kind, "fail"), False{}), st, id, title, es, rest)
 
 def Note.alert.q(none: Bool, +kind: String, +id: String, +title: String, +st: M.State, +es: List<&2, M.Entry>, +desk: String, +rest: List<&2, J.Json>) -> List<&2, J.Json>:
   match none:

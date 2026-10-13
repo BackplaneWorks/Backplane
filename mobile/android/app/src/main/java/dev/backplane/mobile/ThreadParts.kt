@@ -476,6 +476,7 @@ fun SubsView(m: AppModel, subs: Subs) {
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AskCard(m: AppModel, a: Ask) {
+    if (a.kind == "browser") { BrowserAsk(m, a); return }
     Surface(color = orange.copy(alpha = 0.14f), shape = corner, modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -483,14 +484,13 @@ fun AskCard(m: AppModel, a: Ask) {
                     null, Modifier.size(18.dp), tint = orange)
                 Text(a.head, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
             }
-            if (a.kind == "browser") { BrowserAsk(m, a); return@Column }
             if (a.blocks.isNotEmpty()) Box(Modifier.heightIn(max = 220.dp).verticalScroll(rememberScrollState())) { Markdown(a.blocks) }
             else if (a.detail.isNotEmpty()) Text(a.detail, style = MaterialTheme.typography.labelMedium.copy(fontFamily = mono),
                 maxLines = 8, overflow = TextOverflow.Ellipsis)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 for (b in a.buttons) {
-                    if (b.primary) Button(onClick = { m.act("answer", b.value) }, shape = corner) { Text(b.label) }
-                    else OutlinedButton(onClick = { m.act("answer", b.value) }, shape = corner) { Text(b.label) }
+                    if (b.primary) Button(onClick = { m.act(b.action.ifEmpty { "answer" }, b.value) }, shape = corner) { Text(b.label) }
+                    else OutlinedButton(onClick = { m.act(b.action.ifEmpty { "answer" }, b.value) }, shape = corner) { Text(b.label) }
                 }
             }
         }

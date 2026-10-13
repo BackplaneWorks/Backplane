@@ -423,6 +423,8 @@ data class Cmd(
     // key alerts about the same item share
     val thread: String = "", val title: String = "", val kind: String = "", val body: String = "",
     val key: String = "",
+    // a browser task paused: the hub path of its screenshot, for the banner
+    val image: String = "",
     // a "later": an action (with its value) to send after ms; a "jump": the entry to show
     val ms: Long = 0, val action: String = "", val value: String = "", val id: String = "",
 )
@@ -733,6 +735,6 @@ fun parseScreen(o: JSONObject) = Screen(
 fun parseCmds(o: JSONObject): List<Cmd> =
     o.optJSONArray("cmds").map {
         Cmd(it.optString("type"), it.optString("text"), it.optString("data"), it.optString("hub"),
-            it.optString("thread"), it.optString("title"), it.optString("kind"), it.optString("body"), it.optString("key"),
+            it.optString("thread"), it.optString("title"), it.optString("kind"), it.optString("body"), it.optString("key"), it.optString("image"),
             it.optDouble("ms", 0.0).toLong(), it.optString("action"), it.optString("value"), it.optString("id"))
     }

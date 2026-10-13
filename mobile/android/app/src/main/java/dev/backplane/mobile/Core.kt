@@ -281,6 +281,28 @@ class Core(private val app: Application) : Application.ActivityLifecycleCallback
         }
     }
 
+    // an alert; a browser task's pause carries its screenshot's hub path,
+    // fetched with the pairing token for the banner (none if it cannot be)
+    private fun notify(c: Cmd) {
+        val url = if (c.image.isEmpty()) null else web(c.image)
+        if (url == null) { Notes.turn(app, c, null); return }
+        scope.launch {
+            val pic = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching {
+                    val h = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+                    h.connectTimeout = 5000
+                    h.readTimeout = 10000
+                    try {
+                        if (h.responseCode == 200) h.inputStream.use { android.graphics.BitmapFactory.decodeStream(it) } else null
+                    } finally {
+                        h.disconnect()
+                    }
+                }.getOrNull()
+            }
+            Notes.turn(app, c, pic)
+        }
+    }
+
     // a bot form's field ("bfield"), typed: Bend keeps it without a new
     // screen, the field on screen already shows it
     fun field(name: String, text: String) {
@@ -395,7 +417,7 @@ class Core(private val app: Application) : Application.ActivityLifecycleCallback
             }
             "jump" -> if (c.id.isNotEmpty()) { jumping = c.id; jumpLeft = 4 }
             "keep" -> keep(c.thread, c.text)
-            "notify" -> if (!(foreground && screen?.sel == c.thread)) Notes.turn(app, c)
+            "notify" -> if (!(foreground && screen?.sel == c.thread)) notify(c)
         }
         jumping?.let { id ->
             val t = screen?.thread ?: return@let

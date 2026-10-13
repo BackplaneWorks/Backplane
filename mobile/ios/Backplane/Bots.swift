@@ -269,7 +269,9 @@ struct BotScreen: View {
                 SpaceView(space: s) { model.act($0, $1) }.navigationTitle(bot.name).navigationBarTitleDisplayMode(.inline)
             }
         case "browser":
-            BrowserTab(model: model, browser: bot.browser).navigationTitle(bot.name).navigationBarTitleDisplayMode(.inline)
+            BrowserTab(model: model, browser: bot.browser, name: bot.name).navigationTitle(bot.name).navigationBarTitleDisplayMode(.inline)
+        case "tasks":
+            TasksTab(model: model, tasks: bot.tasks).navigationTitle(bot.name).navigationBarTitleDisplayMode(.inline)
         case "memory":
             MemoryTab(model: model, items: bot.memory ?? []).navigationTitle(bot.name).navigationBarTitleDisplayMode(.inline)
         case "routines":
@@ -280,32 +282,6 @@ struct BotScreen: View {
             if let s = bot.settings { SettingsTab(model: model, bot: bot, settings: s).navigationTitle(bot.name).navigationBarTitleDisplayMode(.inline) }
         default:
             if let t = live ? model.screen?.thread : cachedThread { ThreadScreen(model: model, thread: t, live: live) }
-        }
-    }
-}
-
-// the bot's page, as the hub's latest frame (fetched again when n moves)
-private struct BrowserTab: View {
-    let model: AppModel
-    let browser: BotBrowser?
-    @State private var image: UIImage?
-
-    private var url: URL? {
-        browser.flatMap { model.hubURL($0.url, query: [URLQueryItem(name: "n", value: $0.n)]) }
-    }
-
-    var body: some View {
-        ScrollView {
-            if let image {
-                Image(uiImage: image).resizable().scaledToFit().frame(maxWidth: .infinity)
-            } else {
-                ContentUnavailableView("No page yet", systemImage: "globe")
-            }
-        }
-        .task(id: url) {
-            guard let u = url, let (d, r) = try? await URLSession.shared.data(from: u),
-                  (r as? HTTPURLResponse)?.statusCode == 200, let i = UIImage(data: d) else { return }
-            image = i
         }
     }
 }

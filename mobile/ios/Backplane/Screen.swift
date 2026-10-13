@@ -120,12 +120,16 @@ struct Entry: Decodable, Identifiable {
 struct AskButton: Decodable, Hashable {
     let label, value: String
     let primary: Bool
+    // what it sends ("" or none is "answer"; a browser card's Take over is "tk-takeover")
+    let action: String?
 }
 
 struct Ask: Decodable, Identifiable {
     let id, kind, head, detail: String
     let blocks: [Block]
     let buttons: [AskButton]
+    // a browser task's pause: the hub path of its screenshot
+    let image: String?
 }
 
 // the subagent panel (src/core/subs.bend): what the thread delegated and
@@ -684,6 +688,54 @@ struct BotSettings: Decodable {
 // the hub's latest frame of the bot's page: n changes with every new one
 struct BotBrowser: Decodable {
     let url, n: String
+    // browser tasks (src/core/client.bend's Teach.*): the strip (mode 0 idle,
+    // 1 recording, 2 save sheet, 3 the person has the browser), its buttons
+    // (each sends its own action), whether the frame takes input ("bb-click"
+    // "x y" in thousandths, "bb-scroll" dy, "bb-type", "bb-key", "bb-nav"
+    // with the field bburl, "bb-back", "bb-reload"), the fields' text, the
+    // sheet's rows, and the pauses waiting on the person
+    let mode: Int?
+    let title, clock, bburl, tknote, tkname, tkdesc: String?
+    let steps: Int?
+    let btns: [TBtn]?
+    let input: Bool?
+    let rows: [TStep]?
+    let asks: [Ask]?
+}
+
+struct TBtn: Decodable, Hashable {
+    let label, action, value: String
+    let primary: Bool
+}
+
+struct TStep: Decodable, Identifiable, Hashable {
+    let n: Int
+    let text, chip, pname, field: String
+    let secret, marked: Bool
+    var id: Int { n }
+}
+
+// the Tasks tab: a card each (open: its run form, one field per param), then the recent runs
+struct TaskParam: Decodable, Hashable {
+    let field, label, example, value: String
+}
+
+struct TaskItem: Decodable, Identifiable, Hashable {
+    let slug, name, desc, last: String
+    let open, asking: Bool
+    let params: [TaskParam]
+    var id: String { slug }
+}
+
+struct TaskRun: Decodable, Identifiable, Hashable {
+    let run, slug, status, summary: String
+    let shots: [String]
+    var id: String { run }
+}
+
+struct BotTasks: Decodable {
+    let items: [TaskItem]
+    let runs: [TaskRun]
 }
 
 struct BotPost: Decodable, Identifiable {
@@ -704,6 +756,7 @@ struct BotView: Decodable {
     let space: SpaceModel?
     let page: SpacePageModel?
     let browser: BotBrowser?
+    let tasks: BotTasks?
     let memory: [BotMemory]?
     let routines: [BotRoutine]?
     let routine: RoutineForm?

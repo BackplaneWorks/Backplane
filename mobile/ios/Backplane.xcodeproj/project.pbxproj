@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		B1000000000000000000000C /* BackplaneIsland.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = B10000000000000000000001 /* BackplaneIsland.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		C1000000000000000000000C /* BackplaneNotify.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = C10000000000000000000001 /* BackplaneNotify.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -17,6 +18,13 @@
 			proxyType = 1;
 			remoteGlobalIDString = B10000000000000000000004;
 			remoteInfo = BackplaneIsland;
+		};
+		C1000000000000000000000D /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A1000000000000000000000A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = C10000000000000000000004;
+			remoteInfo = BackplaneNotify;
 		};
 /* End PBXContainerItemProxy section */
 
@@ -28,6 +36,7 @@
 			dstSubfolderSpec = 13;
 			files = (
 				B1000000000000000000000C /* BackplaneIsland.appex in Embed Foundation Extensions */,
+				C1000000000000000000000C /* BackplaneNotify.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -37,12 +46,14 @@
 /* Begin PBXFileReference section */
 		A10000000000000000000001 /* Backplane.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Backplane.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B10000000000000000000001 /* BackplaneIsland.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = BackplaneIsland.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		C10000000000000000000001 /* BackplaneNotify.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = BackplaneNotify.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		A10000000000000000000002 /* Backplane */ = {isa = PBXFileSystemSynchronizedRootGroup; path = Backplane; sourceTree = "<group>"; };
 		B10000000000000000000002 /* Island */ = {isa = PBXFileSystemSynchronizedRootGroup; path = Island; sourceTree = "<group>"; };
 		B10000000000000000000003 /* Shared */ = {isa = PBXFileSystemSynchronizedRootGroup; path = Shared; sourceTree = "<group>"; };
+		C10000000000000000000002 /* Notify */ = {isa = PBXFileSystemSynchronizedRootGroup; path = Notify; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -60,6 +71,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		C10000000000000000000009 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -69,6 +87,7 @@
 				A10000000000000000000002 /* Backplane */,
 				B10000000000000000000002 /* Island */,
 				B10000000000000000000003 /* Shared */,
+				C10000000000000000000002 /* Notify */,
 				A10000000000000000000005 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -78,6 +97,7 @@
 			children = (
 				A10000000000000000000001 /* Backplane.app */,
 				B10000000000000000000001 /* BackplaneIsland.appex */,
+				C10000000000000000000001 /* BackplaneNotify.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -98,6 +118,7 @@
 			);
 			dependencies = (
 				B1000000000000000000000E /* PBXTargetDependency */,
+				C1000000000000000000000E /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				A10000000000000000000002 /* Backplane */,
@@ -129,6 +150,26 @@
 			productReference = B10000000000000000000001 /* BackplaneIsland.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
+		C10000000000000000000004 /* BackplaneNotify */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C10000000000000000000005 /* Build configuration list for PBXNativeTarget "BackplaneNotify" */;
+			buildPhases = (
+				C10000000000000000000008 /* Sources */,
+				C10000000000000000000009 /* Frameworks */,
+				C1000000000000000000000A /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				C10000000000000000000002 /* Notify */,
+			);
+			name = BackplaneNotify;
+			productName = BackplaneNotify;
+			productReference = C10000000000000000000001 /* BackplaneNotify.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -155,6 +196,7 @@
 			targets = (
 				A10000000000000000000006 /* Backplane */,
 				B10000000000000000000004 /* BackplaneIsland */,
+				C10000000000000000000004 /* BackplaneNotify */,
 			);
 		};
 /* End PBXProject section */
@@ -168,6 +210,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		B1000000000000000000000A /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C1000000000000000000000A /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -191,6 +240,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		C10000000000000000000008 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -198,6 +254,11 @@
 			isa = PBXTargetDependency;
 			target = B10000000000000000000004 /* BackplaneIsland */;
 			targetProxy = B1000000000000000000000D /* PBXContainerItemProxy */;
+		};
+		C1000000000000000000000E /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = C10000000000000000000004 /* BackplaneNotify */;
+			targetProxy = C1000000000000000000000D /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -350,6 +411,52 @@
 			};
 			name = Release;
 		};
+		C10000000000000000000006 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Notify.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = NotifyInfo.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Backplane;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "$(BASE_BUNDLE_ID).notify";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		C10000000000000000000007 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Notify.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = NotifyInfo.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Backplane;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "$(BASE_BUNDLE_ID).notify";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -376,6 +483,15 @@
 			buildConfigurations = (
 				B10000000000000000000006 /* Debug */,
 				B10000000000000000000007 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		C10000000000000000000005 /* Build configuration list for PBXNativeTarget "BackplaneNotify" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C10000000000000000000006 /* Debug */,
+				C10000000000000000000007 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

@@ -193,10 +193,14 @@ final class AppModel {
     private func save() {
         UserDefaults.standard.set(links, forKey: "links")
         UserDefaults.standard.removeObject(forKey: "link")
+        // the notification service extension reads the hubs paired from here
+        UserDefaults(suiteName: "group.dev.backplane.mobile")?.set(links, forKey: "links")
     }
 
     // an APNs token for this device's alerts (from the app delegate)
     func registered(_ token: Data) {
+        // (links paired before the extension existed are shared at launch too)
+        UserDefaults(suiteName: "group.dev.backplane.mobile")?.set(links, forKey: "links")
         register("alert", token.map { String(format: "%02x", $0) }.joined())
     }
 

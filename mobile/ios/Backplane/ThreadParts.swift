@@ -365,6 +365,14 @@ struct AskCard: View {
     let ask: Ask
 
     var body: some View {
+        if ask.kind == "browser" {
+            BrowserAskCard(model: model, ask: ask)
+        } else {
+            standard
+        }
+    }
+
+    private var standard: some View {
         VStack(alignment: .leading, spacing: 8) {
             Label(ask.head, systemImage: ask.kind == "plan" ? "list.bullet.clipboard" : ask.kind == "input" ? "questionmark.bubble" : "hand.raised")
                 .font(.subheadline.bold())
