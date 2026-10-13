@@ -1101,13 +1101,136 @@ def Mob.notify.rows(rs: List<&2, U.NotifyRow>) -> List<&2, J.Json>:
 def Mob.notify(st: M.State) -> List<&2, J.Json>:
   Mob.set.row(U.Notify.title(), U.Notify.lead(), Nil{}) <> Mob.notify.rows(U.Notify.rows(st))
 
+# Rules (client.bend's RulesUi), as every client draws them: the note, one
+# row a rule (On/Off, Edit, Delete: the first tap asks "Delete?"), Add rule,
+# and the form when it is open (its fields send "bfield"; the bot and the
+# project are buttons)
+def Mob.rules.btns(r: U.RRow) -> List<&2, J.Json>:
+  match r:
+    case U.RRow{+id, _, _, +on, +armed}:
+      List.append(&2, J.Json, Bool.pick(List<&2, J.Json>, armed, [Mob.set.btn("Keep", "rule-keep", "", False{})], Nil{}), [Mob.set.btn(Bool.pick(String, on, "On", "Off"), "rule-on", id, on),
+        Mob.set.btn("Edit", "rule-edit", id, False{}), Mob.set.btn(Bool.pick(String, armed, "Delete?", "Delete"), "rule-del", id, armed)])
+
+def Mob.rules.row(r: U.RRow) -> J.Json:
+  match r:
+    case U.RRow{_, +title, +note, _, _}:
+      Mob.set.row(title, note, Mob.rules.btns(r))
+
+def Mob.rules.rows(rs: List<&2, U.RRow>) -> List<&2, J.Json>:
+  match rs:
+    case Nil{}:
+      Nil{}
+    case r <> t:
+      Mob.rules.row(r) <> Mob.rules.rows(t)
+
+def Mob.rules.chips(cs: List<&2, U.RChip>, +act: String) -> List<&2, J.Json>:
+  match cs:
+    case Nil{}:
+      Nil{}
+    case U.RChip{+l, +v, +on} <> t:
+      Mob.set.btn(l, act, v, on) <> Mob.rules.chips(t, act)
+
+def Mob.rules.form(open: Bool, +u: U.Ui) -> List<&2, J.Json>:
+  match open:
+    case True{}:
+      [Mob.set.row.f(Bool.pick(String, String.is_empty(U.RulesUi.edit(u)), "New rule", "Edit rule"), U.RulesUi.err(u),
+          [Mob.set.field("rutext", "What every agent should always (or never) do", False{}, U.Ui.scratch(u, "@f.rutext"))], Nil{}),
+        Mob.set.row("Bot", "", Mob.rules.chips(U.RulesUi.chips.bot(u), "rule-bot")),
+        Mob.set.row("Project", "", Mob.rules.chips(U.RulesUi.chips.proj(u), "rule-proj")),
+        Mob.set.row.f("Tool and word", "", [Mob.set.field("rutool", "Tool, e.g. bot_send", False{}, U.Ui.scratch(u, "@f.rutool")), Mob.set.field("ruword", "Word that lets it through", False{}, U.Ui.scratch(u, "@f.ruword"))],
+          [Mob.set.btn("Enforce", "rule-enf", "", U.RulesUi.enf(u)), Mob.set.btn("Save", "rule-save", "", True{}), Mob.set.btn("Cancel", "rule-cancel", "", False{})])]
+    case False{}:
+      [Mob.set.row("", "", [Mob.set.btn("Add rule", "rule-new", "", False{})])]
+
+def Mob.rules.none(rs: List<&2, U.RRow>) -> List<&2, J.Json>:
+  Bool.pick(List<&2, J.Json>, List.is_empty(&2, U.RRow, rs), [Mob.set.row(U.RulesUi.none(), "", Nil{})], Nil{})
+
+def Mob.rules(+u: U.Ui) -> List<&2, J.Json>:
+  Mob.set.row(U.RulesUi.title(), U.RulesUi.lead(), Nil{}) <> List.concat(&2, J.Json, [Mob.rules.none(U.RulesUi.rows(u)), Mob.rules.rows(U.RulesUi.rows(u)), Mob.rules.form(U.RulesUi.open(u), u)])
+
+# The Board (client.bend's BoardUi), as every client draws it: the filters
+# as chips, the sections with their rows, a field to add an item. A row has a
+# status (the leading button ticks it: "tb-tick"), a sub line, and while
+# open its title and notes to edit (fields "tbedit", "tbnotes"), its links
+# and Blocked, Drop and Delete. The board is the hub in focus's.
+def Mob.board.chip(c: U.BChip) -> J.Json:
+  match c:
+    case U.BChip{+l, +a, +v, +on}:
+      Mob.set.btn(l, a, v, on)
+
+def Mob.board.chips(cs: List<&2, U.BChip>) -> List<&2, J.Json>:
+  match cs:
+    case Nil{}:
+      Nil{}
+    case c <> t:
+      Mob.board.chip(c) <> Mob.board.chips(t)
+
+def Mob.board.link(+l: String) -> J.Json:
+  J.Json.obj([J.KV{"label", J.Json.str(l)}, J.KV{"action", J.Json.str(U.BoardUi.link.act(l))}, J.KV{"value", J.Json.str(l)}])
+
+def Mob.board.links(ls: List<&2, String>) -> List<&2, J.Json>:
+  match ls:
+    case Nil{}:
+      Nil{}
+    case l <> t:
+      Mob.board.link(l) <> Mob.board.links(t)
+
+# an open row's buttons
+def Mob.board.btns(+id: String, +status: String, +armed: Bool) -> List<&2, J.Json>:
+  [Mob.set.btn(Bool.pick(String, String.eq(status, "blocked"), "Unblock", "Blocked"), "tb-status", id ++ "\u{9}" ++ Bool.pick(String, String.eq(status, "blocked"), "todo", "blocked"), False{}),
+   Mob.set.btn(Bool.pick(String, String.eq(status, "dropped"), "Reopen", "Drop"), "tb-status", id ++ "\u{9}" ++ Bool.pick(String, String.eq(status, "dropped"), "todo", "dropped"), False{}),
+   Mob.set.btn(Bool.pick(String, armed, "Delete?", "Delete"), "tb-del", id, armed)]
+
+def Mob.board.fields(+id: String, +title: String, +notes: String) -> List<&2, J.Json>:
+  [Mob.set.field("tbedit", "Title", False{}, title), Mob.set.field("tbnotes", "Notes", False{}, notes)]
+
+def Mob.board.row.k(+id: String, +title: String, +sub: String, +status: String, +soon: Bool, +over: Bool, +open: Bool, +notes: String, +links: List<&2, String>, +armed: Bool, +u: U.Ui) -> J.Json:
+  J.Json.obj(List.append(&2, J.KV,
+    [J.KV{"id", J.Json.str(id)}, J.KV{"title", J.Json.str(title)}, J.KV{"sub", J.Json.str(sub)}, J.KV{"status", J.Json.str(status)}, J.KV{"soon", J.Json.bool(soon)},
+     J.KV{"overdue", J.Json.bool(over)}, J.KV{"open", J.Json.bool(open)}, J.KV{"notes", J.Json.str(notes)}, J.KV{"links", J.Json.arr(Mob.board.links(links))}],
+    Bool.pick(List<&2, J.KV>, open,
+      [J.KV{"buttons", J.Json.arr(Mob.board.btns(id, status, armed))}, J.KV{"fields", J.Json.arr(Mob.board.fields(id, U.Ui.scratch(u, "@f.tbedit"), U.Ui.scratch(u, "@f.tbnotes")))},
+       J.KV{"save", J.Json.arr([Mob.set.btn("Rename", "tb-title", id, False{}), Mob.set.btn("Save notes", "tb-notes", id, False{})])}],
+      Nil{})))
+
+def Mob.board.row(r: U.BRow, +u: U.Ui) -> J.Json:
+  match r:
+    case U.BRow{+id, +title, +sub, +status, +soon, +over, +open, +notes, +links, +armed}:
+      Mob.board.row.k(id, title, sub, status, soon, over, open, notes, links, armed, u)
+
+def Mob.board.rows(rs: List<&2, U.BRow>, +u: U.Ui) -> List<&2, J.Json>:
+  match rs:
+    case Nil{}:
+      Nil{}
+    case r <> t:
+      Mob.board.row(r, u) <> Mob.board.rows(t, u)
+
+def Mob.board.secs(ss: List<&2, U.BSec>, +u: U.Ui) -> List<&2, J.Json>:
+  match ss:
+    case Nil{}:
+      Nil{}
+    case U.BSec{+title, +n, rs} <> t:
+      J.Json.obj([J.KV{"title", J.Json.str(title)}, J.KV{"count", J.Json.nat(n)}, J.KV{"rows", J.Json.arr(Mob.board.rows(rs, u))}]) <> Mob.board.secs(t, u)
+
+def Mob.board.k(on: Bool, +u: U.Ui) -> J.Json:
+  match on:
+    case True{}:
+      J.Json.obj([J.KV{"title", J.Json.str(U.BoardUi.title())}, J.KV{"open", J.Json.nat(U.BoardUi.count(u))}, J.KV{"filters", J.Json.arr(Mob.board.chips(U.BoardUi.chips(u)))},
+        J.KV{"sections", J.Json.arr(Mob.board.secs(U.BoardUi.sections(u), u))}, J.KV{"empty", J.Json.str(U.BoardUi.empty())},
+        J.KV{"add", Mob.set.field("tbtitle", U.BoardUi.hint(), False{}, U.Ui.scratch(u, "@f.tbtitle"))}, J.KV{"addAction", J.Json.str("tb-add")}, J.KV{"closeAction", J.Json.str("tb-close")}])
+    case False{}:
+      J.Null{}
+
+def Mob.board(+u: U.Ui) -> J.Json:
+  Mob.board.k(U.BoardUi.is(u), u)
+
 def Mob.settings.of(+u: U.Ui, +st: M.State, +nf: Map<&2, String>, +v: String, +note: String, more: List<&2, J.Json>) -> J.Json:
   +prov = M.Setting.get(st, "agent.provider", "claude")
   +models = U.Str.get(nf, "models")
   +model = M.Setting.get(st, "agent.model", "")
   J.Json.obj([J.KV{"rows", J.Json.arr(List.append(&2, J.Json, List.append(&2, J.Json, List.concat(&2, J.Json, [[
     Mob.set.row(Mob.set.days.label(M.Setting.get(st, "settle.days", "3")), "Threads idle this long move to Settled. They stay saved.", Mob.set.days(M.Setting.get(st, "settle.days", "3"))),
-    Mob.set.row("Continue after a restart", "Turns a restart cuts short go on by themselves.", Mob.set.chips(["on", "off"], Bool.pick(String, M.Carry.on(st), "on", "off"), "restart.continue"))], Mob.notify(st), [
+    Mob.set.row("Continue after a restart", "Turns a restart cuts short go on by themselves.", Mob.set.chips(["on", "off"], Bool.pick(String, M.Carry.on(st), "on", "off"), "restart.continue"))], Mob.notify(st), Mob.rules(u), [
     Mob.set.row("Provider for new threads", Bool.pick(String, String.is_empty(U.Models.cli(models, prov)), prov ++ " is not installed", U.Models.cli(models, prov)), Mob.set.chips(["claude", "codex", "grok", "muse", "antigravity"], prov, "agent.provider")),
     Mob.set.row("Model for new threads", Bool.pick(String, String.is_empty(model), "default", model) ++ ": " ++ U.Models.label_of(models, prov, model), Mob.set.chips("" <> U.Models.list(models, prov), model, "agent.model")),
     Mob.set.row(U.KiCad.cli.label(nf), U.KiCad.cli.note(nf), Bool.pick(List<&2, J.Json>, String.is_empty(U.Str.get(nf, "kicad.fork")), [Mob.set.btn("Install Backplane KiCad", "kicad-install", "", False{})], Nil{})),
@@ -1269,6 +1392,7 @@ def Mob.screen.go(+focus: Bool, +u: U.Ui, +ix: U.SIx, +g: U.SGroups, +side: MSid
       +renaming = Mob.renaming(u)
       +removing = Mob.removing(u)
       +settings = Mob.settings(U.Ui.flag(u, "settings"), u)
+      +board = Mob.board(u)
       +find = Mob.find(U.Ui.flag(u, "palette"), u)
       +folders = PK.MPick.json(u)
       +newbot = MB.MBots.new(u)
@@ -1288,8 +1412,9 @@ def Mob.screen.go(+focus: Bool, +u: U.Ui, +ix: U.SIx, +g: U.SGroups, +side: MSid
         J.KV{"deleting", deleting},
         J.KV{"renaming", renaming},
         J.KV{"removing", removing},
-        J.KV{"tour", Mob.tour.gate(Mob.covered(e, [rmenu, deleting, renaming, removing, settings, find, folders, newbot, newroom], thread, bot), u)},
+        J.KV{"tour", Mob.tour.gate(Mob.covered(e, [rmenu, deleting, renaming, removing, settings, board, find, folders, newbot, newroom], thread, bot), u)},
         J.KV{"settings", settings},
+        J.KV{"board", board},
         J.KV{"find", find},
         J.KV{"folders", folders},
         J.KV{"island", N.Note.island.h(N.Note.heard(on, now, Mob.heard(u)), U.Ui.threads(st), st)},
@@ -1298,6 +1423,7 @@ def Mob.screen.go(+focus: Bool, +u: U.Ui, +ix: U.SIx, +g: U.SGroups, +side: MSid
         J.KV{"plane", J.Null{}},
         J.KV{"bots", J.Json.arr(MB.MBots.rows(B.BU.rows(u)))},
         J.KV{"rooms", J.Json.arr(MB.MBots.rooms(B.BU.rooms(u)))},
+        J.KV{"boardRow", J.Json.str(U.BoardUi.entry(u))},
         J.KV{"newBot", newbot},
         J.KV{"newRoom", newroom},
         J.KV{"bot", bot}])

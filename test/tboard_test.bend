@@ -9,6 +9,7 @@ import ../src/core/mcp.bend as MC
 import ../src/core/ledger.bend as LG
 import ../src/core/told.bend as TD
 import ../src/core/tboard.bend as TB
+import ../src/core/tbdata.bend as TT
 
 # The task board (tboard.bend), and the ledger tools every agent has
 # (ledger.bend): told_check, told_mark and task_board_*.
@@ -43,34 +44,34 @@ def th.of(+s: M.State, +name: String) -> String:
 def id.of(+s: M.State, +name: String) -> String:
   BT.Bot.id(Maybe.default(&2, BT.Bot, BT.World.find(M.State.bots(s), name), BT.Bot.blank("?")))
 
-def n(+xs: List<&2, TB.TbItem>) -> String:
-  Nat.show(List.length(&2, TB.TbItem, xs))
+def n(+xs: List<&2, TT.TbItem>) -> String:
+  Nat.show(List.length(&2, TT.TbItem, xs))
 
 def base() -> M.State:
   M.State.replay([M.ProjectCreated{"p1", "Power board", "/tmp/power", 900n}, M.ProjectCreated{"p2", "Backplane", "/tmp/bp", 901n}, M.ThreadCreated{"t-pb", "p1", "Rev C review", M.Local{}, "", "", "claude", "", 1000n}],
     made(made(M.State.empty(), 1000n, "Miso"), 1001n, "Tofu"))
 
-def titles(+xs: List<&2, TB.TbItem>) -> String:
+def titles(+xs: List<&2, TT.TbItem>) -> String:
   match xs:
     case Nil{}:
       ""
     case t <> r:
       TB.Tb.title(t) ++ "|" ++ titles(r)
 
-def blank() -> TB.TbItem:
+def blank() -> TT.TbItem:
   TB.Tb.blank("?", 0n)
 
-def by.title.go(+xs: List<&2, TB.TbItem>, +title: String) -> TB.TbItem:
+def by.title.go(+xs: List<&2, TT.TbItem>, +title: String) -> TT.TbItem:
   match xs:
     case Nil{}:
       blank()
     case +t <> r:
-      Bool.pick(TB.TbItem, String.eq(TB.Tb.title(t), title), t, by.title.go(r, title))
+      Bool.pick(TT.TbItem, String.eq(TB.Tb.title(t), title), t, by.title.go(r, title))
 
-def by.title(+s: M.State, +title: String) -> TB.TbItem:
+def by.title(+s: M.State, +title: String) -> TT.TbItem:
   by.title.go(TB.Tb.all(s), title)
 
-def line(+t: TB.TbItem) -> String:
+def line(+t: TT.TbItem) -> String:
   TB.Tb.status(t) ++ "/" ++ TB.Tb.group(t) ++ "/" ++ TB.Tb.due(t) ++ "/" ++ TB.Tb.project(t) ++ "/" ++ TB.Tb.owner(t)
 
 def imp.cs(+r: TB.TbImp) -> List<&2, M.Change>:
@@ -250,7 +251,7 @@ def main() -> IO(Unit):
     C.Check.str("filter person", n(TB.Tb.filter(TB.Tb.all(o2), "", "person", "", "")), "6")
     C.Check.str("filter an owner", n(TB.Tb.filter(TB.Tb.all(o2), "", id.of(s, "Miso"), "", "")), "0")
     # a merge sort: a few hundred items
-    C.Check.str("order: many", Nat.show(List.length(&2, TB.TbItem, TB.Tb.order(TB.Tb.all(many(300n, s))))), "300")
+    C.Check.str("order: many", Nat.show(List.length(&2, TT.TbItem, TB.Tb.order(TB.Tb.all(many(300n, s))))), "300")
     # update merges
     +u0 : M.State = added(s, 3000n, "{\"title\":\"Fix it\",\"notes\":\"a note\",\"group\":\"G\",\"links\":\"http://x http://y,/p\",\"due\":\"2026-11-02\"}")
     +uid : String = TB.Tb.id(by.title(u0, "Fix it"))

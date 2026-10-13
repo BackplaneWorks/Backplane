@@ -4,6 +4,7 @@ import ./model.bend as M
 import ./bot.bend as BT
 import ./hub.bend as B
 import ./rules.bend as RL
+import ./tbdata.bend as TD
 
 # The task board: what the person and their bots have to do, in one place.
 # An item is the setting "board.<id>" holding
@@ -15,273 +16,149 @@ import ./rules.bend as RL
 # markdown todo list imports once (Tb.import). Settings, so they stay on
 # this machine.
 
-type TbItem is Data:
-  TbItem{id: String, title: String, status: String, owner: String, project: String, due: String, group: String, links: List<&2, String>, notes: String, at: Nat, updated: Nat, by: String}
+def Tb.id(+t: TD.TbItem) -> String:
+  TD.Tb.id(t)
 
-def Tb.id(+t: TbItem) -> String:
-  match t:
-    case TbItem{i, _, _, _, _, _, _, _, _, _, _, _}:
-      i
+def Tb.title(+t: TD.TbItem) -> String:
+  TD.Tb.title(t)
 
-def Tb.title(+t: TbItem) -> String:
-  match t:
-    case TbItem{_, x, _, _, _, _, _, _, _, _, _, _}:
-      x
+def Tb.status(+t: TD.TbItem) -> String:
+  TD.Tb.status(t)
 
-def Tb.status(+t: TbItem) -> String:
-  match t:
-    case TbItem{_, _, s, _, _, _, _, _, _, _, _, _}:
-      s
+def Tb.owner(+t: TD.TbItem) -> String:
+  TD.Tb.owner(t)
 
-def Tb.owner(+t: TbItem) -> String:
-  match t:
-    case TbItem{_, _, _, o, _, _, _, _, _, _, _, _}:
-      o
+def Tb.project(+t: TD.TbItem) -> String:
+  TD.Tb.project(t)
 
-def Tb.project(+t: TbItem) -> String:
-  match t:
-    case TbItem{_, _, _, _, p, _, _, _, _, _, _, _}:
-      p
+def Tb.due(+t: TD.TbItem) -> String:
+  TD.Tb.due(t)
 
-def Tb.due(+t: TbItem) -> String:
-  match t:
-    case TbItem{_, _, _, _, _, d, _, _, _, _, _, _}:
-      d
+def Tb.group(+t: TD.TbItem) -> String:
+  TD.Tb.group(t)
 
-def Tb.group(+t: TbItem) -> String:
-  match t:
-    case TbItem{_, _, _, _, _, _, g, _, _, _, _, _}:
-      g
+def Tb.links(+t: TD.TbItem) -> List<&2, String>:
+  TD.Tb.links(t)
 
-def Tb.links(+t: TbItem) -> List<&2, String>:
-  match t:
-    case TbItem{_, _, _, _, _, _, _, l, _, _, _, _}:
-      l
+def Tb.notes(+t: TD.TbItem) -> String:
+  TD.Tb.notes(t)
 
-def Tb.notes(+t: TbItem) -> String:
-  match t:
-    case TbItem{_, _, _, _, _, _, _, _, n, _, _, _}:
-      n
+def Tb.at(+t: TD.TbItem) -> Nat:
+  TD.Tb.at(t)
 
-def Tb.at(+t: TbItem) -> Nat:
-  match t:
-    case TbItem{_, _, _, _, _, _, _, _, _, a, _, _}:
-      a
+def Tb.updated(+t: TD.TbItem) -> Nat:
+  TD.Tb.updated(t)
 
-def Tb.updated(+t: TbItem) -> Nat:
-  match t:
-    case TbItem{_, _, _, _, _, _, _, _, _, _, u, _}:
-      u
+def Tb.by(+t: TD.TbItem) -> String:
+  TD.Tb.by(t)
 
-def Tb.by(+t: TbItem) -> String:
-  match t:
-    case TbItem{_, _, _, _, _, _, _, _, _, _, _, b}:
-      b
-
-def Tb.blank(+id: String, +at: Nat) -> TbItem:
-  TbItem{id, "", "todo", "", "", "", "", Nil{}, "", at, at, ""}
-
-# Status
-# ------
+def Tb.blank(+id: String, +at: Nat) -> TD.TbItem:
+  TD.Tb.blank(id, at)
 
 def Tb.has(+xs: List<&2, String>, +x: String) -> Bool:
-  match xs:
-    case Nil{}:
-      False{}
-    case +h <> t:
-      Bool.or(String.eq(h, x), Tb.has(t, x))
+  TD.Tb.has(xs, x)
 
 def Tb.statuses() -> List<&2, String>:
-  ["doing", "blocked", "todo", "done", "dropped"]
+  TD.Tb.statuses()
 
 def Tb.status.k(+l: String) -> String:
-  Bool.pick(String, Tb.has(Tb.statuses(), l), l, "todo")
+  TD.Tb.status.k(l)
 
-# a status as written: lower case; an unknown or an empty one is todo
 def Tb.status.norm(+s: String) -> String:
-  Tb.status.k(String.to_lower(String.take(String.trim(s), 20n)))
+  TD.Tb.status.norm(s)
 
-# the order of statuses: doing, blocked, todo, then done and dropped
 def Tb.rank(+s: String) -> Nat:
-  Bool.pick(Nat, String.eq(s, "doing"), 0n, Bool.pick(Nat, String.eq(s, "blocked"), 1n, Bool.pick(Nat, String.eq(s, "todo"), 2n,
-    Bool.pick(Nat, String.eq(s, "done"), 3n, 4n))))
+  TD.Tb.rank(s)
 
-# not done and not dropped
-def Tb.is.open(+t: TbItem) -> Bool:
-  Nat.is_lt(Tb.rank(Tb.status(t)), 3n)
-
-# Dates
-# -----
+def Tb.is.open(+t: TD.TbItem) -> Bool:
+  TD.Tb.is.open(t)
 
 def Tb.digit(+c: U32) -> Bool:
-  Bool.and(U32.is_ge(c, 48), U32.is_le(c, 57))
+  TD.Tb.digit(c)
 
 def Tb.num(+s: String, +acc: Nat) -> Nat:
-  match s:
-    case SNil{}:
-      acc
-    case SCon{Chr{+c}, t}:
-      Tb.num(t, Nat.add(Nat.mul(acc, 10n), U32.to_nat((c - 48 : U32))))
+  TD.Tb.num(s, acc)
 
 def Tb.digits.all(+s: String, +ok: Bool) -> Bool:
-  match s ok:
-    case _ False{}:
-      False{}
-    case SNil{} True{}:
-      True{}
-    case SCon{Chr{+c}, t} True{}:
-      Tb.digits.all(t, Tb.digit(c))
+  TD.Tb.digits.all(s, ok)
 
 def Tb.date.parts(+y: String, +m: String, +d: String, +s1: String, +s2: String) -> Bool:
-  Bool.and(Bool.and(Tb.digits.all(y, True{}), Tb.digits.all(m, True{})), Bool.and(Tb.digits.all(d, True{}),
-    Bool.and(Bool.and(String.eq(s1, "-"), String.eq(s2, "-")),
-      Bool.and(Bool.and(Nat.is_ge(Tb.num(m, 0n), 1n), Nat.is_le(Tb.num(m, 0n), 12n)), Bool.and(Nat.is_ge(Tb.num(d, 0n), 1n), Nat.is_le(Tb.num(d, 0n), 31n))))))
+  TD.Tb.date.parts(y, m, d, s1, s2)
 
 def Tb.date.k(+s: String) -> Bool:
-  Tb.date.parts(String.take(s, 4n), String.take(String.drop(s, 5n), 2n), String.drop(s, 8n), String.take(String.drop(s, 4n), 1n), String.take(String.drop(s, 7n), 1n))
+  TD.Tb.date.k(s)
 
-# a due date is YYYY-MM-DD (the month 1 to 12, the day 1 to 31)
 def Tb.date(+s: String) -> Bool:
-  Bool.and(Nat.is_eq(String.length(s), 10n), Tb.date.k(s))
-
-# Reading
-# -------
+  TD.Tb.date(s)
 
 def Tb.strs(+xs: List<&2, J.Json>) -> List<&2, String>:
-  match xs:
-    case Nil{}:
-      Nil{}
-    case +o <> t:
-      J.Json.as_str(Some{o}, "") <> Tb.strs(t)
+  TD.Tb.strs(xs)
 
-def Tb.of.stored(+id: String, +o: J.Json) -> TbItem:
-  TbItem{id, J.Json.get_str(o, "title", ""), Tb.status.norm(J.Json.get_str(o, "status", "todo")), J.Json.get_str(o, "owner", ""), J.Json.get_str(o, "project", ""),
-    J.Json.get_str(o, "due", ""), J.Json.get_str(o, "group", ""), Tb.strs(J.Json.elems(J.Json.get_obj(o, "links"))), J.Json.get_str(o, "notes", ""),
-    J.Json.get_nat(o, "at", 0n), J.Json.get_nat(o, "updated", 0n), J.Json.get_str(o, "by", "")}
+def Tb.of.stored(+id: String, +o: J.Json) -> TD.TbItem:
+  TD.Tb.of.stored(id, o)
 
 def Tb.jstrs(+xs: List<&2, String>) -> List<&2, J.Json>:
-  match xs:
-    case Nil{}:
-      Nil{}
-    case x <> t:
-      J.Str{x} <> Tb.jstrs(t)
+  TD.Tb.jstrs(xs)
 
-def Tb.raw(+t: TbItem) -> J.Json:
-  match t:
-    case TbItem{i, x, s, o, p, d, g, l, n, a, u, b}:
-      J.Json.obj([J.KV{"id", J.Str{i}}, J.KV{"title", J.Str{x}}, J.KV{"status", J.Str{s}}, J.KV{"owner", J.Str{o}}, J.KV{"project", J.Str{p}}, J.KV{"due", J.Str{d}},
-        J.KV{"group", J.Str{g}}, J.KV{"links", J.Json.arr(Tb.jstrs(l))}, J.KV{"notes", J.Str{n}}, J.KV{"at", J.Json.nat(a)}, J.KV{"updated", J.Json.nat(u)}, J.KV{"by", J.Str{b}}])
+def Tb.raw(+t: TD.TbItem) -> J.Json:
+  TD.Tb.raw(t)
 
-def Tb.value(+t: TbItem) -> String:
-  J.Json.show(Tb.raw(t))
+def Tb.value(+t: TD.TbItem) -> String:
+  TD.Tb.value(t)
 
 def Tb.is(+k: String) -> Bool:
-  String.starts_with(k, "board.")
+  TD.Tb.is(k)
 
-def Tb.read.one(+m: Maybe<&2, J.Json>, +k: String, +acc: List<&2, TbItem>) -> List<&2, TbItem>:
-  match m:
-    case Some{o}:
-      Tb.of.stored(String.drop(k, 6n), o) <> acc
-    case None{}:
-      acc
+def Tb.read.one(+m: Maybe<&2, J.Json>, +k: String, +acc: List<&2, TD.TbItem>) -> List<&2, TD.TbItem>:
+  TD.Tb.read.one(m, k, acc)
 
-def Tb.read.put(+hit: Bool, +k: String, +s: M.State, +acc: List<&2, TbItem>) -> List<&2, TbItem>:
-  match hit:
-    case True{}:
-      Tb.read.one(J.Json.parse(M.Setting.get(s, k, "")), k, acc)
-    case False{}:
-      acc
+def Tb.read.put(+hit: Bool, +k: String, +s: M.State, +acc: List<&2, TD.TbItem>) -> List<&2, TD.TbItem>:
+  TD.Tb.read.put(hit, k, s, acc)
 
-def Tb.read(+ks: List<&2, String>, +s: M.State, +acc: List<&2, TbItem>) -> List<&2, TbItem>:
-  match ks:
-    case Nil{}:
-      acc
-    case +k <> t:
-      Tb.read(t, s, Tb.read.put(Tb.is(k), k, s, acc))
+def Tb.read(+ks: List<&2, String>, +s: M.State, +acc: List<&2, TD.TbItem>) -> List<&2, TD.TbItem>:
+  TD.Tb.read(ks, s, acc)
 
-# every item, in one pass over the settings' keys (Tb.order sorts them)
-def Tb.all(+s: M.State) -> List<&2, TbItem>:
-  Tb.read(M.Setting.keys(s), s, Nil{})
+def Tb.all(+s: M.State) -> List<&2, TD.TbItem>:
+  TD.Tb.all(s)
 
-def Tb.get.go(+xs: List<&2, TbItem>, +id: String) -> Maybe<&2, TbItem>:
-  match xs:
-    case Nil{}:
-      None{}
-    case +t <> r:
-      BT.Pick.first(TbItem, String.eq(Tb.id(t), id), t, Tb.get.go(r, id))
+def Tb.get.go(+xs: List<&2, TD.TbItem>, +id: String) -> Maybe<&2, TD.TbItem>:
+  TD.Tb.get.go(xs, id)
 
-def Tb.get(+s: M.State, +id: String) -> Maybe<&2, TbItem>:
-  Tb.get.go(Tb.all(s), id)
-
-# Order
-# -----
+def Tb.get(+s: M.State, +id: String) -> Maybe<&2, TD.TbItem>:
+  TD.Tb.get(s, id)
 
 def Tb.due.key(+d: String) -> String:
-  Bool.pick(String, String.is_empty(d), "9999-99-99", d)
+  TD.Tb.due.key(d)
 
 def Tb.before.k(+ra: Nat, +rb: Nat, +da: String, +db: String, +aa: Nat, +ab: Nat) -> Bool:
-  Bool.or(Nat.is_lt(ra, rb), Bool.and(Nat.is_eq(ra, rb), Bool.or(String.is_lt(da, db), Bool.and(String.eq(da, db), Nat.is_le(aa, ab)))))
+  TD.Tb.before.k(ra, rb, da, db, aa, ab)
 
-# a is not after b: by status (open first), then due date (none last),
-# then when it was made
-def Tb.before(a: TbItem, b: TbItem) -> Bool:
-  match a b:
-    case TbItem{_, _, sa, _, _, da, _, _, _, aa, _, _} TbItem{_, _, sb, _, _, db, _, _, _, ab, _, _}:
-      Tb.before.k(Tb.rank(sa), Tb.rank(sb), Tb.due.key(da), Tb.due.key(db), aa, ab)
+def Tb.before(a: TD.TbItem, b: TD.TbItem) -> Bool:
+  TD.Tb.before(a, b)
 
-# open before closed (doing, blocked, todo, then done, dropped); within a
-# status the earliest due first, none last, then the oldest first. A merge
-# sort, so hundreds of items cost little.
-def Tb.order(+xs: List<&2, TbItem>) -> List<&2, TbItem>:
-  List.sort(~TbItem, ~Tb.before, xs)
+def Tb.order(+xs: List<&2, TD.TbItem>) -> List<&2, TD.TbItem>:
+  TD.Tb.order(xs)
 
-def Tb.keep(+ok: Bool, +t: TbItem, +rest: List<&2, TbItem>) -> List<&2, TbItem>:
-  match ok:
-    case True{}:
-      t <> rest
-    case False{}:
-      rest
+def Tb.keep(+ok: Bool, +t: TD.TbItem, +rest: List<&2, TD.TbItem>) -> List<&2, TD.TbItem>:
+  TD.Tb.keep(ok, t, rest)
 
-def Tb.open(+xs: List<&2, TbItem>) -> List<&2, TbItem>:
-  match xs:
-    case Nil{}:
-      Nil{}
-    case +t <> r:
-      Tb.keep(Tb.is.open(t), t, Tb.open(r))
-
-# Filtering
-# ---------
+def Tb.open(+xs: List<&2, TD.TbItem>) -> List<&2, TD.TbItem>:
+  TD.Tb.open(xs)
 
 def Tb.owner.is(+want: String, +have: String) -> Bool:
-  Bool.or(String.is_empty(want), Bool.or(String.eq(want, have), Bool.and(String.eq(want, "person"), String.is_empty(have))))
+  TD.Tb.owner.is(want, have)
 
-# `status` may list several, separated by commas or spaces; `owner` is a
-# bot's id, or "person" for the person's own
-def Tb.matches(+sts: List<&2, String>, +owner: String, +project: String, +group: String, +t: TbItem) -> Bool:
-  Bool.and(Bool.or(List.is_empty(&2, String, sts), Tb.has(sts, Tb.status(t))),
-    Bool.and(Bool.and(Tb.owner.is(owner, Tb.owner(t)), Bool.or(String.is_empty(project), String.eq(project, Tb.project(t)))),
-      Bool.or(String.is_empty(group), String.eq(group, Tb.group(t)))))
+def Tb.matches(+sts: List<&2, String>, +owner: String, +project: String, +group: String, +t: TD.TbItem) -> Bool:
+  TD.Tb.matches(sts, owner, project, group, t)
 
-def Tb.filter.go(+xs: List<&2, TbItem>, +sts: List<&2, String>, +status: String, +owner: String, +project: String, +group: String) -> List<&2, TbItem>:
-  match xs:
-    case Nil{}:
-      Nil{}
-    case +t <> r:
-      Tb.keep(Tb.matches(sts, owner, project, group, t), t, Tb.filter.go(r, sts, status, owner, project, group))
+def Tb.filter.go(+xs: List<&2, TD.TbItem>, +sts: List<&2, String>, +status: String, +owner: String, +project: String, +group: String) -> List<&2, TD.TbItem>:
+  TD.Tb.filter.go(xs, sts, status, owner, project, group)
 
 def Tb.lowers(+xs: List<&2, String>) -> List<&2, String>:
-  match xs:
-    case Nil{}:
-      Nil{}
-    case +h <> t:
-      Tb.status.norm(h) <> Tb.lowers(t)
+  TD.Tb.lowers(xs)
 
-# empty means any; the owner and the project are ids
-def Tb.filter(+xs: List<&2, TbItem>, +status: String, +owner: String, +project: String, +group: String) -> List<&2, TbItem>:
-  Tb.filter.go(xs, Tb.lowers(RL.Rules.pats(status)), status, owner, project, group)
-
-# Names
-# -----
+def Tb.filter(+xs: List<&2, TD.TbItem>, +status: String, +owner: String, +project: String, +group: String) -> List<&2, TD.TbItem>:
+  TD.Tb.filter(xs, status, owner, project, group)
 
 def Tb.owner.name(+s: M.State, +id: String) -> String:
   Bool.pick(String, String.is_empty(id), "person", BT.Bot.name(BT.World.bot(M.State.bots(s), id)))
@@ -304,7 +181,7 @@ def Tb.json.k(+o: J.Json, +owner: String, +project: String) -> J.Json:
       o
 
 # the item's JSON, with the owner's and the project's names added
-def Tb.json(+t: TbItem, +s: M.State) -> J.Json:
+def Tb.json(+t: TD.TbItem, +s: M.State) -> J.Json:
   Tb.json.k(Tb.raw(t), Tb.owner.name(s, Tb.owner(t)), Tb.proj.name(s, Tb.project(t)))
 
 def Tb.text.at(+pre: String, +v: String) -> String:
@@ -330,13 +207,13 @@ def Tb.text.join(+xs: List<&2, String>) -> String:
 def Tb.text.owner(+id: String, +s: M.State) -> String:
   Bool.pick(String, String.is_empty(id), "", Tb.owner.name(s, id))
 
-def Tb.text.parts(+t: TbItem, +s: M.State) -> String:
+def Tb.text.parts(+t: TD.TbItem, +s: M.State) -> String:
   Tb.text.join([Tb.id(t), Tb.text.at("@", Tb.text.owner(Tb.owner(t), s)), Tb.text.at("%", Tb.proj.name(s, Tb.project(t))), Tb.text.at("due ", Tb.due(t)), Tb.group(t)])
 
-def Tb.text.one(+t: TbItem, +s: M.State) -> String:
+def Tb.text.one(+t: TD.TbItem, +s: M.State) -> String:
   "[" ++ Tb.status(t) ++ "] " ++ Tb.title(t) ++ " (" ++ Tb.text.parts(t, s) ++ ")"
 
-def Tb.text.go(+xs: List<&2, TbItem>, +s: M.State) -> List<&2, String>:
+def Tb.text.go(+xs: List<&2, TD.TbItem>, +s: M.State) -> List<&2, String>:
   match xs:
     case Nil{}:
       Nil{}
@@ -345,7 +222,7 @@ def Tb.text.go(+xs: List<&2, TbItem>, +s: M.State) -> List<&2, String>:
 
 # a compact listing for agents, a line an item:
 # [status] title (id; @owner; %project; due D; group)
-def Tb.text(+xs: List<&2, TbItem>, +s: M.State) -> String:
+def Tb.text(+xs: List<&2, TD.TbItem>, +s: M.State) -> String:
   String.join(Tb.text.go(xs, s), "\n")
 
 # Saving
@@ -426,26 +303,26 @@ def Tb.due.err(+d: String) -> String:
 def Tb.notes.err(+n: String) -> String:
   Bool.pick(String, Nat.is_gt(String.length(n), 4000n), "notes are at most 4000 characters", "")
 
-def Tb.set.one(+t: TbItem) -> M.Change:
+def Tb.set.one(+t: TD.TbItem) -> M.Change:
   M.SettingSet{"board." ++ Tb.id(t), Tb.value(t), Tb.updated(t)}
 
-def Tb.set.of(+t: TbItem) -> List<&2, M.Change>:
+def Tb.set.of(+t: TD.TbItem) -> List<&2, M.Change>:
   [Tb.set.one(t)]
 
-def Tb.make.fin(+err: String, +t: TbItem) -> TbR:
+def Tb.make.fin(+err: String, +t: TD.TbItem) -> TbR:
   match err:
     case SNil{}:
       TbOk{Tb.id(t), Tb.set.of(t)}
     case SCon{_, _}:
       TbErr{err}
 
-def Tb.make.k(+title: String, +due: String, +notes: String, +ow: RL.RS, +pr: RL.RS, +status: String, +group: String, +links: List<&2, String>, +old: TbItem, +now: Nat, +by: String) -> TbR:
+def Tb.make.k(+title: String, +due: String, +notes: String, +ow: RL.RS, +pr: RL.RS, +status: String, +group: String, +links: List<&2, String>, +old: TD.TbItem, +now: Nat, +by: String) -> TbR:
   Tb.make.fin(RL.Rules.err.first([Tb.title.err(title), Tb.due.err(due), Tb.notes.err(notes), RL.RS.err(ow), RL.RS.err(pr)]),
-    TbItem{Tb.id(old), title, status, RL.RS.v(ow), RL.RS.v(pr), due, String.take(group, 80n), links, notes, Tb.at(old), now, by})
+    TD.TbItem{Tb.id(old), title, status, RL.RS.v(ow), RL.RS.v(pr), due, String.take(group, 80n), links, notes, Tb.at(old), now, by})
 
 # the item that results from the request on `old`: the fields given
 # replace the old ones (notes_append adds a line to the notes)
-def Tb.make(+s: M.State, +now: Nat, +by: String, +o: J.Json, +old: TbItem) -> TbR:
+def Tb.make(+s: M.State, +now: Nat, +by: String, +o: J.Json, +old: TD.TbItem) -> TbR:
   Tb.make.k(String.trim(J.Json.get_str(o, "title", Tb.title(old))), String.trim(J.Json.get_str(o, "due", Tb.due(old))),
     Tb.notes.add(String.trim(J.Json.get_str(o, "notes", Tb.notes(old))), String.trim(J.Json.get_str(o, "notes_append", ""))),
     Tb.res.pick(Tb.given(o, "owner"), Tb.owner.res(s, String.trim(J.Json.get_str(o, "owner", ""))), Tb.owner(old)),
@@ -461,7 +338,7 @@ def Tb.add.k(+id: String, +s: M.State, +now: Nat, +by: String, +o: J.Json) -> Tb
 def Tb.add(+s: M.State, +now: Nat, +by: String, +o: J.Json) -> TbR:
   Tb.add.k(B.Hub.id("b", now, B.Hub.seq(s)), s, now, by, o)
 
-def Tb.update.k(+m: Maybe<&2, TbItem>, +s: M.State, +now: Nat, +by: String, +o: J.Json, +id: String) -> TbR:
+def Tb.update.k(+m: Maybe<&2, TD.TbItem>, +s: M.State, +now: Nat, +by: String, +o: J.Json, +id: String) -> TbR:
   match m:
     case Some{old}:
       Tb.make(s, now, by, o, old)
@@ -480,7 +357,7 @@ def Tb.remove.k(+found: Bool, +id: String, +now: Nat) -> TbR:
     case False{}:
       TbErr{"no item " ++ id}
 
-def Tb.found(+m: Maybe<&2, TbItem>) -> Bool:
+def Tb.found(+m: Maybe<&2, TD.TbItem>) -> Bool:
   match m:
     case Some{_}:
       True{}
@@ -759,7 +636,7 @@ def Tb.norm(+s: String) -> String:
 def Tb.dupkey(+g: String, +t: String) -> String:
   Tb.norm(g) ++ "\n" ++ Tb.norm(t)
 
-def Tb.seen(+xs: List<&2, TbItem>, +acc: List<&2, String>) -> List<&2, String>:
+def Tb.seen(+xs: List<&2, TD.TbItem>, +acc: List<&2, String>) -> List<&2, String>:
   match xs:
     case Nil{}:
       acc
@@ -773,12 +650,12 @@ type IF is Data:
 def Tb.imp.id(+now: Nat, +seq: Nat, +idx: Nat) -> String:
   "b" ++ Nat.show(now) ++ "-" ++ Nat.show(seq) ++ "-" ++ Nat.show(idx)
 
-def Tb.imp.item(+i: Imp, +id: String, +now: Nat, +owner: String, +by: String) -> TbItem:
+def Tb.imp.item(+i: Imp, +id: String, +now: Nat, +owner: String, +by: String) -> TD.TbItem:
   match i:
     case Imp{+t, s, d, +g, p, n}:
-      TbItem{id, t, s, owner, p, d, String.take(g, 80n), Nil{}, String.take(n, 4000n), now, now, by}
+      TD.TbItem{id, t, s, owner, p, d, String.take(g, 80n), Nil{}, String.take(n, 4000n), now, now, by}
 
-def Tb.imp.put(+dup: Bool, +key: String, +t: TbItem, +st: IF) -> IF:
+def Tb.imp.put(+dup: Bool, +key: String, +t: TD.TbItem, +st: IF) -> IF:
   match dup st:
     case True{} IF{seen, cs, added, +dups}:
       IF{seen, cs, added, Nat.add(dups, 1n)}
@@ -790,10 +667,10 @@ def Tb.imp.dup(+st: IF, +key: String) -> Bool:
     case IF{seen, _, _, _}:
       Tb.has(seen, key)
 
-def Tb.imp.step.d(+key: String, +t: TbItem, +st: IF) -> IF:
+def Tb.imp.step.d(+key: String, +t: TD.TbItem, +st: IF) -> IF:
   Tb.imp.put(Tb.imp.dup(st, key), key, t, st)
 
-def Tb.imp.step.k(+t: TbItem, +st: IF) -> IF:
+def Tb.imp.step.k(+t: TD.TbItem, +st: IF) -> IF:
   Tb.imp.step.d(Tb.dupkey(Tb.group(t), Tb.title(t)), t, st)
 
 def Tb.imp.step(+i: Imp, +now: Nat, +seq: Nat, +owner: String, +by: String, +idx: Nat, +st: IF) -> IF:
@@ -862,10 +739,10 @@ def Tb.demo.summary(+r: TbImp) -> String:
     case TbImp{a, d, sk, _, _}:
       Nat.show(a) ++ " " ++ Nat.show(d) ++ " " ++ String.join(sk, " / ")
 
-def Tb.demo.line(+t: TbItem) -> String:
+def Tb.demo.line(+t: TD.TbItem) -> String:
   Tb.status(t) ++ " " ++ Tb.group(t) ++ " " ++ Tb.title(t)
 
-def Tb.demo.lines.go(+xs: List<&2, TbItem>) -> List<&2, String>:
+def Tb.demo.lines.go(+xs: List<&2, TD.TbItem>) -> List<&2, String>:
   match xs:
     case Nil{}:
       Nil{}
@@ -892,4 +769,4 @@ def Tb.demo.updated() -> M.State:
   Tb.demo.updated.k(Tb.update(Tb.demo.item(), 9n, "person", "i1", Maybe.default(&2, J.Json, J.Json.parse("{\"status\":\"doing\"}"), J.Null{})))
 
 def Tb.demo.merged(+s: M.State) -> String:
-  Tb.title(Maybe.default(&2, TbItem, Tb.get(s, "i1"), Tb.blank("?", 0n))) ++ "|" ++ Tb.notes(Maybe.default(&2, TbItem, Tb.get(s, "i1"), Tb.blank("?", 0n))) ++ "|" ++ Tb.status(Maybe.default(&2, TbItem, Tb.get(s, "i1"), Tb.blank("?", 0n)))
+  Tb.title(Maybe.default(&2, TD.TbItem, Tb.get(s, "i1"), Tb.blank("?", 0n))) ++ "|" ++ Tb.notes(Maybe.default(&2, TD.TbItem, Tb.get(s, "i1"), Tb.blank("?", 0n))) ++ "|" ++ Tb.status(Maybe.default(&2, TD.TbItem, Tb.get(s, "i1"), Tb.blank("?", 0n)))

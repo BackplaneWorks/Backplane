@@ -8,6 +8,7 @@ import ./client.bend as U
 import ./botui.bend as BU
 import ./uber.bend as UB
 import ./ubersync.bend as US
+import ./tbdata.bend as TBA
 
 # The status plane (docs/uber.md)
 # -------------------------------
@@ -31,47 +32,57 @@ type PMach is Data:
   PMach{name: String, state: String}
 
 type Plane is Data:
-  Plane{need: List<&2, PRow>, run: List<&2, PRow>, bots: List<&2, PRow>, rooms: List<&2, PRow>, routines: List<&2, PRow>, idle: List<&2, PRow>, idle_n: Nat, machines: List<&2, PMach>}
+  Plane{need: List<&2, PRow>, run: List<&2, PRow>, bots: List<&2, PRow>, rooms: List<&2, PRow>, routines: List<&2, PRow>, idle: List<&2, PRow>, idle_n: Nat, machines: List<&2, PMach>, board: List<&2, PRow>, board_n: Nat}
 
 def Plane.need(p: Plane) -> List<&2, PRow>:
   match p:
-    case Plane{n, _, _, _, _, _, _, _}:
+    case Plane{n, _, _, _, _, _, _, _, _, _}:
       n
 
 def Plane.run(p: Plane) -> List<&2, PRow>:
   match p:
-    case Plane{_, r, _, _, _, _, _, _}:
+    case Plane{_, r, _, _, _, _, _, _, _, _}:
       r
 
 def Plane.bots(p: Plane) -> List<&2, PRow>:
   match p:
-    case Plane{_, _, b, _, _, _, _, _}:
+    case Plane{_, _, b, _, _, _, _, _, _, _}:
       b
 
 def Plane.rooms(p: Plane) -> List<&2, PRow>:
   match p:
-    case Plane{_, _, _, r, _, _, _, _}:
+    case Plane{_, _, _, r, _, _, _, _, _, _}:
       r
 
 def Plane.routines(p: Plane) -> List<&2, PRow>:
   match p:
-    case Plane{_, _, _, _, r, _, _, _}:
+    case Plane{_, _, _, _, r, _, _, _, _, _}:
       r
 
 def Plane.idle(p: Plane) -> List<&2, PRow>:
   match p:
-    case Plane{_, _, _, _, _, i, _, _}:
+    case Plane{_, _, _, _, _, i, _, _, _, _}:
       i
 
 def Plane.idle_n(p: Plane) -> Nat:
   match p:
-    case Plane{_, _, _, _, _, _, n, _}:
+    case Plane{_, _, _, _, _, _, n, _, _, _}:
       n
 
 def Plane.machines(p: Plane) -> List<&2, PMach>:
   match p:
-    case Plane{_, _, _, _, _, _, _, m}:
+    case Plane{_, _, _, _, _, _, _, m, _, _}:
       m
+
+def Plane.board(p: Plane) -> List<&2, PRow>:
+  match p:
+    case Plane{_, _, _, _, _, _, _, _, b, _}:
+      b
+
+def Plane.board_n(p: Plane) -> Nat:
+  match p:
+    case Plane{_, _, _, _, _, _, _, _, _, n}:
+      n
 
 def PRow.id(r: PRow) -> String:
   match r:
@@ -359,18 +370,78 @@ def Plane.machine.names(rs: List<&2, U.MRow>) -> List<&2, String>:
 def Plane.machines.of(+u: U.Ui) -> List<&2, PMach>:
   PMach{Maybe.default(&2, String, List.head(&2, String, Plane.machine.names(U.Machines.rows(u))), "This machine"), "here"} <> Plane.machs(BU.BU.peers.of(u), u)
 
+# Board
+# -----
+# The open items of the task board (core/tbdata.bend): doing first, then
+# what is overdue or due within two days, then the rest in the board's own
+# order, at most Plane.board.max(); the section head carries how many are open.
+
+type PB is Data:
+  PB{rank: Nat, item: TBA.TbItem}
+
+def Plane.board.max() -> Nat:
+  6n
+
+def Plane.board.rank(+t: TBA.TbItem, +now: Nat) -> Nat:
+  Bool.pick(Nat, String.eq(TBA.Tb.status(t), "doing"), 0n, Bool.pick(Nat, Nat.is_ge(TBA.Tb.due.state(TBA.Tb.due(t), now), 2n), 1n, 2n))
+
+def Plane.board.le(a: PB, b: PB) -> Bool:
+  match a b:
+    case PB{ra, ta} PB{rb, tb}:
+      Bool.or(Nat.is_lt(ra, rb), Bool.and(Nat.is_eq(ra, rb), TBA.Tb.before(ta, tb)))
+
+def Plane.board.keyed(+xs: List<&2, TBA.TbItem>, +now: Nat) -> List<&2, PB>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case +t <> r:
+      PB{Plane.board.rank(t, now), t} <> Plane.board.keyed(r, now)
+
+# "you · due Oct 28": the owner, then the due date when there is one
+def Plane.board.sub(+t: TBA.TbItem, +st: M.State) -> String:
+  U.BoardUi.owner.name(st, TBA.Tb.owner(t)) ++ Bool.pick(String, String.is_empty(TBA.Tb.due(t)), "", " · due " ++ TBA.Tb.due.words(TBA.Tb.due(t)))
+
+def Plane.board.row(+t: TBA.TbItem, +st: M.State) -> PRow:
+  PRow{"board", TBA.Tb.id(t), "tb-open", TBA.Tb.id(t), TBA.Tb.title(t), Plane.board.sub(t, st), "", TBA.Tb.status(t), TBA.Tb.updated(t), False{}}
+
+def Plane.board.rows.go(+ps: List<&2, PB>, +st: M.State) -> List<&2, PRow>:
+  match ps:
+    case Nil{}:
+      Nil{}
+    case PB{_, +t} <> r:
+      Plane.board.row(t, st) <> Plane.board.rows.go(r, st)
+
+# the rows to show, from the open items
+def Plane.board.rows(+open: List<&2, TBA.TbItem>, +st: M.State, +now: Nat) -> List<&2, PRow>:
+  Plane.board.rows.go(List.take(&2, PB, List.sort(~PB, ~Plane.board.le, Plane.board.keyed(open, now)), Plane.board.max()), st)
+
+# how many items are open and the newest change among all (the plane's key)
+def Plane.board.stamp(+xs: List<&2, TBA.TbItem>, +n: Nat, +mx: Nat) -> String:
+  match xs:
+    case Nil{}:
+      Nat.show(n) ++ ":" ++ Nat.show(mx)
+    case +t <> r:
+      Plane.board.stamp(r, 1n+n, M.Time.max(mx, TBA.Tb.updated(t)))
+
+def Plane.board.key(+st: M.State) -> String:
+  Plane.board.stamp(TBA.Tb.all(st), 0n, 0n)
+
 # The plane
 # ---------
 
 def Plane.sort(rs: List<&2, PRow>) -> List<&2, PRow>:
   List.sort(~PRow, ~Plane.before, rs)
 
-def Plane.of.i(+idle: List<&2, PRow>, +all: List<&2, PRow>, +u: U.Ui, +ix: U.SIx, +now: Nat) -> Plane:
+def Plane.of.b(+open: List<&2, TBA.TbItem>, +idle: List<&2, PRow>, +all: List<&2, PRow>, +u: U.Ui, +ix: U.SIx, +now: Nat) -> Plane:
   Plane{Plane.sort(Plane.part(all, 0n)), List.sort(~PRow, ~Plane.newer, Plane.part(all, 1n)),
     Plane.bot.rows(BU.BU.rows(u), U.Ui.state(u)),
     List.sort(~PRow, ~Plane.newer, Plane.rooms.go(BT.World.rooms(M.State.bots(U.Ui.state(u))), u)),
     List.sort(~PRow, ~Plane.due.before, Plane.routines.go(BT.World.routines.all(M.State.bots(U.Ui.state(u))), u, ix, now)),
-    List.take(&2, PRow, idle, Plane.idle.max()), List.length(&2, PRow, idle), Plane.machines.of(u)}
+    List.take(&2, PRow, idle, Plane.idle.max()), List.length(&2, PRow, idle), Plane.machines.of(u),
+    Plane.board.rows(open, U.Ui.state(u), now), List.length(&2, TBA.TbItem, open)}
+
+def Plane.of.i(+idle: List<&2, PRow>, +all: List<&2, PRow>, +u: U.Ui, +ix: U.SIx, +now: Nat) -> Plane:
+  Plane.of.b(TBA.Tb.open(TBA.Tb.all(U.Ui.state(u))), idle, all, u, ix, now)
 
 def Plane.of.k(+all: List<&2, PRow>, +u: U.Ui, +ix: U.SIx, +now: Nat) -> Plane:
   Plane.of.i(Plane.sort(Plane.recent(Plane.part(all, 2n), now)), all, u, ix, now)
@@ -459,7 +530,7 @@ def Plane.key.peers(ps: List<&2, BT.Peer>, +u: U.Ui) -> String:
       BT.Peer.id(p) ++ ":" ++ Nat.show(FR.Fr.head(U.Ui.state(u), BT.Peer.id(p))) ++ ":" ++ U.Ui.info(u, "far.away." ++ BT.Peer.id(p)) ++ ";" ++ Plane.key.peers(t, u)
 
 def Plane.key(+u: U.Ui, +now: Nat) -> String:
-  Nat.show(U.Ui.seq(u)) ++ "|" ++ Nat.show(Nat.div(now, 60n)) ++ "|" ++ Plane.key.peers(BU.BU.peers.of(u), u)
+  Nat.show(U.Ui.seq(u)) ++ "|" ++ Nat.show(Nat.div(now, 60n)) ++ "|" ++ Plane.key.peers(BU.BU.peers.of(u), u) ++ "|b" ++ Plane.board.key(U.Ui.state(u))
 
 # the bots at work now (their mood: working or talking), for the strip
 def Plane.working.k(hit: Bool, +n: Nat) -> Nat:
@@ -540,6 +611,15 @@ def Plane.threads.ids(+p: Plane) -> List<&2, String>:
   List.append(&2, String, Plane.ids(Plane.need(p)), List.append(&2, String, Plane.ids(Plane.run(p)), Plane.ids(Plane.idle(p))))
 
 # a client for the laws: threads in every state, a bot at work, a room, a routine
+# the board: nine open items (one doing, one overdue at the day 200000n falls on, 1970-01-03) and one done
+def Plane.demo.board.item(+id: String, +status: String, +due: String, +at: Nat) -> M.Change:
+  M.SettingSet{"board." ++ id, TBA.Tb.value(TBA.TbItem{id, "Item " ++ id, status, "", "", due, "", Nil{}, "", at, at, ""}), at}
+
+def Plane.demo.board() -> M.State:
+  M.State.replay([Plane.demo.board.item("b1", "doing", "", 10n), Plane.demo.board.item("b2", "todo", "", 11n), Plane.demo.board.item("b3", "todo", "1970-01-02", 12n),
+    Plane.demo.board.item("b4", "todo", "", 13n), Plane.demo.board.item("b5", "todo", "", 14n), Plane.demo.board.item("b6", "todo", "", 15n), Plane.demo.board.item("b7", "todo", "", 16n),
+    Plane.demo.board.item("b8", "blocked", "", 17n), Plane.demo.board.item("b9", "doing", "", 18n), Plane.demo.board.item("b0", "done", "", 19n)], M.State.empty())
+
 def Plane.demo() -> U.Ui:
   U.Ui.far.st(U.Ui.init(200000n), M.State.replay([M.ProjectCreated{"p1", "One", "/a", 1n},
     M.ThreadCreated{"t1", "p1", "A", M.Local{}, "", "", "claude", "", 199000n}, M.TurnChanged{"t1", M.Running{}, 199001n}, M.AskOpened{"a1", "t1", "approval", "Bash", "ls", "", 199002n},
@@ -780,10 +860,15 @@ def Plane.text.idle.k(shown: Bool, +n: Nat, rs: List<&2, PRow>, +pre: String, +n
     case False{}:
       Bool.pick(String, Nat.is_eq(n, 0n), "", "Idle in the last day: " ++ Nat.show(n) ++ " (plane_read with idle: true lists them).\n")
 
+# the open board items shown, and how many more there are
+def Plane.text.board(+rs: List<&2, PRow>, +n: Nat, +pre: String, +now: Nat) -> String:
+  Plane.text.sec("Board", rs, pre, now) ++ Bool.pick(String, Nat.is_gt(n, List.length(&2, PRow, rs)), "More on the board: " ++ Nat.show(Nat.sub(n, List.length(&2, PRow, rs))) ++ " open (task_board_list lists them).\n", "")
+
 def Plane.text(+p: Plane, +pre: String, +name: String, +now: Nat, +idle: Bool) -> String:
   "Status plane of " ++ name ++ "\n"
     ++ Bool.pick(String, Bool.and(List.is_empty(&2, PRow, Plane.need(p)), List.is_empty(&2, PRow, Plane.run(p))), "Nothing needs you and nothing is running.\n", "")
     ++ Plane.text.sec("Needs you", Plane.need(p), pre, now) ++ Plane.text.sec("Running", Plane.run(p), pre, now)
+    ++ Plane.text.board(Plane.board(p), Plane.board_n(p), pre, now)
     ++ Plane.text.sec("Bots", Plane.bots(p), pre, now) ++ Plane.text.sec("Rooms with unread posts", Plane.rooms(p), pre, now)
     ++ Plane.text.sec("Routines", Plane.routines(p), pre, now) ++ Plane.text.idle.k(idle, Plane.idle_n(p), Plane.idle(p), pre, now)
     ++ Plane.text.machines.k(Nat.is_gt(List.length(&2, PMach, Plane.machines(p)), 1n), Plane.machines(p))

@@ -610,7 +610,7 @@ def Hubs.calm.flag_names() -> List<&2, String>:
   ["palette", "settings", "pairqr", "keyform", "proj"]
 
 def Hubs.calm.scratch_names() -> List<&2, String>:
-  ["@menu", "@del", "@rm", "@ren", "@bnew", "@rnew", "@onew"]
+  ["@menu", "@del", "@rm", "@ren", "@bnew", "@rnew", "@onew", "@board"]
 
 def Hubs.calm(u: U.Ui) -> U.Ui:
   U.Ui.error_set(Hubs.calm.keys(Hubs.calm.scratch_names(), Hubs.calm.flags(Hubs.calm.flag_names(), u)), "")
@@ -1763,6 +1763,8 @@ def Hubs.pl.json(+need: List<&2, J.Json>, +run: List<&2, J.Json>, +idle: List<&2
       J.KV{"bots", J.Json.arr(Hubs.pl.once(Hubs.pl.all(ss, hs, "bots", many)))},
       J.KV{"rooms", J.Json.arr(Hubs.pl.once(List.sort(~J.Json, ~Hubs.pl.newer, Hubs.pl.all(ss, hs, "rooms", many))))},
       J.KV{"routines", J.Json.arr(Hubs.pl.once(List.sort(~J.Json, ~Hubs.pl.due.before, Hubs.pl.all(ss, hs, "routines", many))))},
+      J.KV{"board", J.Json.arr(List.take(&2, J.Json, Hubs.pl.once(List.sort(~J.Json, ~Hubs.pl.newer, Hubs.pl.all(ss, hs, "board", many))), PL.Plane.board.max()))},
+      J.KV{"boardN", J.Json.nat(Hubs.pl.idle.n(ss, "boardN", 0n))},
       J.KV{"machines", J.Json.get_obj(J.Json.get_obj(Hubs.of(ss, Hubs.key_of(J.Json.get_str(uber, "id", ""))), "plane"), "machines")},
       J.KV{"home", J.Json.get_obj(J.Json.get_obj(Hubs.of(ss, Hubs.key_of(J.Json.get_str(uber, "id", ""))), "plane"), "home")}])}
 
@@ -1899,6 +1901,8 @@ def Hubs.screen.p(+pl: MPL.MUber, +ss: List<&2, Shown>, +cur: String, +list: Lis
     J.KV{"search", Hubs.first_obj(ss, "search")},
     J.KV{"folders", J.Json.get_obj(Hubs.of(ss, cur), "folders")},
     J.KV{"settings", J.Json.get_obj(Hubs.of(ss, cur), "settings")},
+    J.KV{"board", J.Json.get_obj(Hubs.of(ss, cur), "board")},
+    J.KV{"boardRow", J.Json.str(J.Json.get_str(Hubs.of(ss, cur), "boardRow", ""))},
     J.KV{"tour", J.Json.get_obj(Hubs.of(ss, cur), "tour")},
     J.KV{"find", J.Json.get_obj(Hubs.of(ss, cur), "find")},
     J.KV{"island", N.Note.island.k(Hubs.lines.once(Hubs.lines(ss)))},

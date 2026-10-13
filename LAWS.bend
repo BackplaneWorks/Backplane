@@ -104,6 +104,7 @@ import ./src/core/agy.bend as AGY
 import ./src/core/told.bend as TLD
 import ./src/core/rules.bend as RLS
 import ./src/core/tboard.bend as TBD
+import ./src/core/tbdata.bend as TBT
 
 # Backplane's rules, stated over the real code. `bend PROOF.bend` proves each
 # one. Humans own this file: an agent may add laws, never weaken or delete
@@ -7292,7 +7293,7 @@ law rules_off_ignored:
 
 # open items sort before done ones
 law tb_order_open_first:
-  {TBD.Tb.id(Maybe.default(&2, TBD.TbItem, List.head(&2, TBD.TbItem, TBD.Tb.order([TBD.TbItem{"done", "a", "done", "", "", "", "", Nil{}, "", 1n, 1n, ""}, TBD.TbItem{"todo", "b", "todo", "", "", "", "", Nil{}, "", 2n, 2n, ""}])), TBD.Tb.blank("?", 0n))) == "todo" : String}
+  {TBD.Tb.id(Maybe.default(&2, TBT.TbItem, List.head(&2, TBT.TbItem, TBD.Tb.order([TBT.TbItem{"done", "a", "done", "", "", "", "", Nil{}, "", 1n, 1n, ""}, TBT.TbItem{"todo", "b", "todo", "", "", "", "", Nil{}, "", 2n, 2n, ""}])), TBD.Tb.blank("?", 0n))) == "todo" : String}
 
 # checkbox items become items, headings groups, other lines are skipped
 law tb_import_checkbox:

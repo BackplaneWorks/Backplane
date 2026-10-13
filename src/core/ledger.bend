@@ -8,6 +8,8 @@ import ./codec.bend as C
 import ./told.bend as TD
 import ./rules.bend as RL
 import ./tboard.bend as TB
+import ./tbdata.bend as TT
+import ./ruledata.bend as RDD
 
 # The tools of the three ledgers, for every thread's agent (a bot's or a
 # plain thread's): told_check and told_mark (what the person was already
@@ -155,17 +157,17 @@ def Ledger.own.k(+o: String, +bot: String, +s: M.State) -> RL.RS:
 def Ledger.own(+s: M.State, +bot: String, +o: String) -> RL.RS:
   Ledger.own.k(String.trim(o), bot, s)
 
-def Ledger.list.items(+xs: List<&2, TB.TbItem>, +s: M.State) -> List<&2, J.Json>:
+def Ledger.list.items(+xs: List<&2, TT.TbItem>, +s: M.State) -> List<&2, J.Json>:
   match xs:
     case Nil{}:
       Nil{}
     case t <> r:
       TB.Tb.json(t, s) <> Ledger.list.items(r, s)
 
-def Ledger.list.out(+xs: List<&2, TB.TbItem>, +s: M.State) -> MC.Res:
+def Ledger.list.out(+xs: List<&2, TT.TbItem>, +s: M.State) -> MC.Res:
   MC.Res.ok(J.Json.obj([J.KV{"text", J.Str{TB.Tb.text(xs, s)}}, J.KV{"items", J.Json.arr(Ledger.list.items(xs, s))}]))
 
-def Ledger.list.pick(+open: Bool, +xs: List<&2, TB.TbItem>) -> List<&2, TB.TbItem>:
+def Ledger.list.pick(+open: Bool, +xs: List<&2, TT.TbItem>) -> List<&2, TT.TbItem>:
   match open:
     case True{}:
       TB.Tb.open(xs)
@@ -316,7 +318,7 @@ def Ledger.board.set(+given: Bool, +s: M.State, +now: Nat, +item: J.Json) -> TB.
     case False{}:
       TB.Tb.add(s, now, "person", item)
 
-def Ledger.some(+m: Maybe<&2, RL.Rule>) -> Bool:
+def Ledger.some(+m: Maybe<&2, RDD.Rule>) -> Bool:
   match m:
     case Some{_}:
       True{}

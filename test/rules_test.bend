@@ -7,6 +7,7 @@ import ../src/core/bot.bend as BT
 import ../src/core/bothub.bend as BH
 import ../src/core/ledger.bend as LG
 import ../src/core/rules.bend as RL
+import ../src/core/ruledata.bend as RDD
 
 # Standing rules (rules.bend): the block each turn starts with, the
 # enforced ones the server's gate checks, the person's word that unlocks
@@ -62,7 +63,7 @@ def err.of(+r: RL.RR) -> String:
     case RL.RRerr{m}:
       m
 
-def rule.of(r: RL.RR) -> RL.Rule:
+def rule.of(r: RL.RR) -> RDD.Rule:
   match r:
     case RL.RRok{x}:
       x
@@ -84,7 +85,7 @@ def rule.keys(+ks: List<&2, String>) -> Nat:
       Nat.add(Bool.pick(Nat, String.starts_with(k, "rule."), 1n, 0n), rule.keys(t))
 
 def id.rule(+s: M.State, +n: Nat) -> String:
-  RL.Rule.id(Maybe.default(&2, RL.Rule, List.head(&2, RL.Rule, List.drop(&2, RL.Rule, RL.Rules.all(s), n)), RL.Rules.blank()))
+  RL.Rule.id(Maybe.default(&2, RDD.Rule, List.head(&2, RDD.Rule, List.drop(&2, RDD.Rule, RL.Rules.all(s), n)), RL.Rules.blank()))
 
 def main() -> IO(Unit):
   do IO<Unit>:
@@ -103,7 +104,7 @@ def main() -> IO(Unit):
     C.Check.str("bot rule in its thread", has(RL.Rules.block(b, miso), "Never email Scott"), "yes")
     C.Check.str("bot rule not in another bot's", has(RL.Rules.block(b, tofu), "Never email Scott"), "no")
     C.Check.str("bot rule not in a plain thread", has(RL.Rules.block(b, "t-other"), "Never email Scott"), "no")
-    C.Check.str("bot name resolved to its id", RL.Rule.bot(Maybe.default(&2, RL.Rule, List.head(&2, RL.Rule, List.drop(&2, RL.Rule, RL.Rules.all(b), 1n)), RL.Rules.blank())), id.of(b, "Miso"))
+    C.Check.str("bot name resolved to its id", RL.Rule.bot(Maybe.default(&2, RDD.Rule, List.head(&2, RDD.Rule, List.drop(&2, RDD.Rule, RL.Rules.all(b), 1n)), RL.Rules.blank())), id.of(b, "Miso"))
     +c : M.State = rule(b, 2002n, "{\"text\":\"Check the 3D view\",\"project\":\"power BOARD\"}")
     C.Check.str("project rule in its thread", has(RL.Rules.block(c, "t-pb"), "Check the 3D view"), "yes")
     C.Check.str("project rule not elsewhere", has(RL.Rules.block(c, "t-other"), "Check the 3D view"), "no")
@@ -159,9 +160,9 @@ def main() -> IO(Unit):
     +off : M.State = rule(e, 2007n, "{\"id\":\"" ++ rid ++ "\",\"on\":false}")
     C.Check.str("off: not in the block", RL.Rules.block(off, miso), "")
     C.Check.str("off: no refusal", RL.Rules.gate(off, miso, call("bot_send")), "")
-    C.Check.str("off: still saved", Nat.show(List.length(&2, RL.Rule, RL.Rules.all(off))), "1")
-    C.Check.str("off: update merged", RL.Rule.text(Maybe.default(&2, RL.Rule, List.head(&2, RL.Rule, RL.Rules.all(off)), RL.Rules.blank())), "No spending")
-    C.Check.str("off: tool kept", RL.Rule.tool(Maybe.default(&2, RL.Rule, List.head(&2, RL.Rule, RL.Rules.all(off)), RL.Rules.blank())), "bot_send")
+    C.Check.str("off: still saved", Nat.show(List.length(&2, RDD.Rule, RL.Rules.all(off))), "1")
+    C.Check.str("off: update merged", RL.Rule.text(Maybe.default(&2, RDD.Rule, List.head(&2, RDD.Rule, RL.Rules.all(off)), RL.Rules.blank())), "No spending")
+    C.Check.str("off: tool kept", RL.Rule.tool(Maybe.default(&2, RDD.Rule, List.head(&2, RDD.Rule, RL.Rules.all(off)), RL.Rules.blank())), "bot_send")
     # validation
     C.Check.str("text required", err.of(RL.Rules.of.json(J.Json.obj([J.KV{"text", J.Str{"  "}}]), s, 1n, "person")), "a rule needs its text")
     C.Check.str("text length", err.of(RL.Rules.of.json(J.Json.obj([J.KV{"text", J.Str{String.repeat("x", 501n)}}]), s, 1n, "person")), "a rule's text is at most 500 characters")
@@ -175,9 +176,9 @@ def main() -> IO(Unit):
     # requests
     C.Check.str("rules.set replies ok", reply.of(LG.Ledger.request(s, 2100n, 1, req("rules.set", "{\"rule\":{\"text\":\"x\"}}"))), "{\"t\":\"reply\",\"id\":1,\"ok\":true}")
     C.Check.str("rules.set error comes back", reply.of(LG.Ledger.request(s, 2100n, 1, req("rules.set", "{\"rule\":{\"text\":\"\"}}"))), "{\"t\":\"reply\",\"id\":1,\"ok\":false,\"error\":\"a rule needs its text\"}")
-    C.Check.str("rules.set error saves nothing", Nat.show(List.length(&2, RL.Rule, RL.Rules.all(run(s, LG.Ledger.request(s, 2100n, 1, req("rules.set", "{\"rule\":{\"text\":\"\"}}")))))), "0")
+    C.Check.str("rules.set error saves nothing", Nat.show(List.length(&2, RDD.Rule, RL.Rules.all(run(s, LG.Ledger.request(s, 2100n, 1, req("rules.set", "{\"rule\":{\"text\":\"\"}}")))))), "0")
     C.Check.str("rules.drop unknown", reply.of(LG.Ledger.request(s, 2100n, 1, req("rules.drop", "{\"id\":\"zz\"}"))), "{\"t\":\"reply\",\"id\":1,\"ok\":false,\"error\":\"no rule zz\"}")
-    C.Check.str("rules.drop", Nat.show(List.length(&2, RL.Rule, RL.Rules.all(run(e, LG.Ledger.request(e, 2200n, 1, req("rules.drop", "{\"id\":\"" ++ rid ++ "\"}")))))), "0")
+    C.Check.str("rules.drop", Nat.show(List.length(&2, RDD.Rule, RL.Rules.all(run(e, LG.Ledger.request(e, 2200n, 1, req("rules.drop", "{\"id\":\"" ++ rid ++ "\"}")))))), "0")
     C.Check.str("rules.drop leaves no key", Nat.show(rule.keys(M.Setting.keys(run(e, LG.Ledger.request(e, 2200n, 1, req("rules.drop", "{\"id\":\"" ++ rid ++ "\"}")))))), "0")
     # the turn's text, for a bot's thread and a plain thread
     C.Check.str("turn: bot thread", has(BH.Bots.turn(c, 3000n, miso, "hello"), "<rules>\nStanding rules from the person. Follow them; the enforced ones are checked by Backplane.\n- Reply in French\n- Never email Scott\n</rules>\n\n"), "yes")

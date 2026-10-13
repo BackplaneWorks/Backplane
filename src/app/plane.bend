@@ -22,9 +22,9 @@ def Pl.vis(+rel: U32, +h: U32, +off: U32, +vh: U32) -> Bool:
   Bool.and(U32.is_gt((rel + h : U32), off), U32.is_lt(rel, (off + vh : U32)))
 
 def Pl.dot(+s: String) -> U32:
-  Bool.pick(U32, Bool.or(Bool.or(String.eq(s, "approval"), String.eq(s, "question")), Bool.or(String.eq(s, "wait"), String.eq(s, "unread"))), T.Th.warn(),
+  Bool.pick(U32, Bool.or(Bool.or(Bool.or(String.eq(s, "approval"), String.eq(s, "question")), Bool.or(String.eq(s, "wait"), String.eq(s, "unread"))), String.eq(s, "blocked")), T.Th.warn(),
     Bool.pick(U32, Bool.or(String.eq(s, "failed"), String.eq(s, "error")), T.Th.bad(),
-      Bool.pick(U32, Bool.or(Bool.or(String.eq(s, "working"), String.eq(s, "work")), String.eq(s, "talk")), T.Th.ok(),
+      Bool.pick(U32, Bool.or(Bool.or(Bool.or(String.eq(s, "working"), String.eq(s, "work")), String.eq(s, "talk")), String.eq(s, "doing")), T.Th.ok(),
         Bool.pick(U32, Bool.or(String.eq(s, "queued"), String.eq(s, "think")), T.Th.dim(),
           Bool.pick(U32, String.eq(s, "finished"), T.Th.soft(), T.Th.faint())))))
 
@@ -174,12 +174,13 @@ def Pl.none.if(on: Bool, +ty: L.Ty, +c: D.Clip, +x: U32, +y: U32) -> L.Out:
       L.Out.none()
 
 def Pl.main(+p: P.Plane, +ty: L.Ty, +c: D.Clip, +x: U32, +w: U32, +rel: U32, +top: U32, +off: U32, +vh: U32, +now: Nat) -> L.Col:
-  +quiet = Bool.and(Bool.and(List.is_empty(&2, P.PRow, P.Plane.need(p)), List.is_empty(&2, P.PRow, P.Plane.run(p))), List.is_empty(&2, P.PRow, P.Plane.idle(p)))
+  +quiet = Bool.and(Bool.and(Bool.and(List.is_empty(&2, P.PRow, P.Plane.need(p)), List.is_empty(&2, P.PRow, P.Plane.run(p))), List.is_empty(&2, P.PRow, P.Plane.idle(p))), List.is_empty(&2, P.PRow, P.Plane.board(p)))
   L.Lay.col.cat(Pl.none.if(quiet, ty, c, x, (top + rel - off : U32)),
     L.Lay.col.then(L.Col{L.Out.none(), Bool.pick(U32, quiet, (rel + 40 : U32), rel)}, r1 =>
       L.Lay.col.then(Pl.sect(P.Plane.need(p), "NEEDS YOU", 0n, False{}, ty, c, x, w, r1, top, off, vh, now), r2 =>
         L.Lay.col.then(Pl.sect(P.Plane.run(p), "RUNNING", 0n, False{}, ty, c, x, w, r2, top, off, vh, now), r3 =>
-          Pl.sect(P.Plane.idle(p), "IDLE " ++ Nat.show(P.Plane.idle_n(p)), Nat.sub(P.Plane.idle_n(p), Pl.len(P.Plane.idle(p))), False{}, ty, c, x, w, r3, top, off, vh, now)))))
+          L.Lay.col.then(Pl.sect(P.Plane.board(p), "BOARD " ++ Nat.show(P.Plane.board_n(p)), Nat.sub(P.Plane.board_n(p), Pl.len(P.Plane.board(p))), False{}, ty, c, x, w, r3, top, off, vh, now), r4 =>
+            Pl.sect(P.Plane.idle(p), "IDLE " ++ Nat.show(P.Plane.idle_n(p)), Nat.sub(P.Plane.idle_n(p), Pl.len(P.Plane.idle(p))), False{}, ty, c, x, w, r4, top, off, vh, now))))))
 
 def Pl.side(+p: P.Plane, +ty: L.Ty, +c: D.Clip, +x: U32, +w: U32, +rel: U32, +top: U32, +off: U32, +vh: U32, +now: Nat) -> L.Col:
   L.Lay.col.then(Pl.sect(P.Plane.bots(p), "BOTS", 0n, True{}, ty, c, x, w, rel, top, off, vh, now), r2 =>

@@ -3193,6 +3193,122 @@ def Set.notify(+st: M.State, +ty: Ty, +x: U32, +w: U32, +y: U32) -> Out:
     Set.agy.lines(Ty.wrap(ty, 2n, U.Notify.lead(), (w - 32 : U32)), ty, (x + 16 : U32), (y + 38 : U32)),
     Set.notify.rows(U.Notify.rows(st), ty, x, w, (y + 50 + Set.agy.nh(ty, U.Notify.lead(), w) : U32))])
 
+# Rules (client.bend's RulesUi): the note, one row a rule (On/Off, Edit,
+# Delete: the first click asks "Delete?"), and Add rule, which opens the
+# form: the rule's text, the bot and the project it is for (chips), the
+# tool it names, the word that lets it through, Enforce, Save and Cancel
+def Set.rc.wraps(+ty: Ty, +l: String, +x0: U32, +x1: U32, +x: U32) -> Bool:
+  Bool.and(U32.is_gt(x, x0), U32.is_gt((x + Lay.button.w(ty, l) : U32), x1))
+
+# how many extra rows the chips take
+def Set.rc.rows(cs: List<&2, U.RChip>, +ty: Ty, +x0: U32, +x1: U32, +x: U32) -> U32:
+  match cs:
+    case Nil{}:
+      0
+    case U.RChip{+l, _, _} <> t:
+      +cx = {Bool.pick(U32, Set.rc.wraps(ty, l, x0, x1, x), x0, x) : U32}
+      (Bool.pick(U32, Set.rc.wraps(ty, l, x0, x1, x), 1, 0) + Set.rc.rows(t, ty, x0, x1, (cx + Lay.button.w(ty, l) + 8 : U32)) : U32)
+
+def Set.rc(cs: List<&2, U.RChip>, +ty: Ty, +act: String, +x0: U32, +x1: U32, +x: U32, +y: U32) -> Out:
+  match cs:
+    case Nil{}:
+      Out.none()
+    case U.RChip{+l, +v, +on} <> t:
+      +cx = {Bool.pick(U32, Set.rc.wraps(ty, l, x0, x1, x), x0, x) : U32}
+      +cy = {Bool.pick(U32, Set.rc.wraps(ty, l, x0, x1, x), (y + 34 : U32), y) : U32}
+      Out.cat(Lay.chip(ty, cx, cy, l, on, act, v), Set.rc(t, ty, act, x0, x1, (cx + Lay.button.w(ty, l) + 8 : U32), cy))
+
+def Set.rules.rw(+ty: Ty, +on: Bool, +armed: Bool) -> U32:
+  (Lay.button.w(ty, Bool.pick(String, on, "On", "Off")) + 6 + Lay.button.w(ty, "Edit") + 6 + Lay.button.w(ty, Bool.pick(String, armed, "Delete?", "Delete")) + Bool.pick(U32, armed, (Lay.button.w(ty, "Keep") + 6 : U32), 0) + 22 : U32)
+
+def Set.rules.row(r: U.RRow, +ty: Ty, +x: U32, +w: U32, +y: U32) -> Out:
+  match r:
+    case U.RRow{+id, +title, +note, +on, +armed}:
+      +dl = Bool.pick(String, armed, "Delete?", "Delete")
+      +dx = {(x + w - 16 - Lay.button.w(ty, dl) : U32) : U32}
+      +kx = {(dx - 6 - Lay.button.w(ty, "Keep") : U32) : U32}
+      +ex = {(Bool.pick(U32, armed, kx, dx) - 6 - Lay.button.w(ty, "Edit") : U32) : U32}
+      +ox = {(ex - 6 - Lay.button.w(ty, Bool.pick(String, on, "On", "Off")) : U32) : U32}
+      Out.all([
+        Set.row.r(ty, title, note, x, y, w, Set.rules.rw(ty, on, armed)),
+        Lay.chip(ty, ox, (y + 6 : U32), Bool.pick(String, on, "On", "Off"), on, "rule-on", id),
+        Lay.button(ty, D.Clip.all(), ex, (y + 6 : U32), "Edit", T.Th.soft(), "rule-edit", id),
+        Bool.pick(Out, armed, Lay.button(ty, D.Clip.all(), kx, (y + 6 : U32), "Keep", T.Th.soft(), "rule-keep", ""), Out.none()),
+        Lay.button(ty, D.Clip.all(), dx, (y + 6 : U32), dl, Bool.pick(U32, armed, T.Th.bad(), T.Th.soft()), "rule-del", id)])
+
+def Set.rules.rows(rs: List<&2, U.RRow>, +ty: Ty, +x: U32, +w: U32, +y: U32) -> Out:
+  match rs:
+    case Nil{}:
+      Set.row(ty, U.RulesUi.none(), "", x, y, w)
+    case r <> t:
+      Out.cat(Set.rules.row(r, ty, x, w, y), Set.rules.rows(t, ty, x, w, (y + 44 : U32)))
+
+def Set.rules.lh(rs: List<&2, U.RRow>) -> U32:
+  Bool.pick(U32, List.is_empty(&2, U.RRow, rs), 36, (U32.from_nat(List.length(&2, U.RRow, rs)) * 44 : U32))
+
+# the form's height
+def Set.rules.fh(+ty: Ty, +u: U.Ui, +x: U32, +w: U32) -> U32:
+  (36 + 34 * (1 + Set.rc.rows(U.RulesUi.chips.bot(u), ty, (x + 88 : U32), (x + w - 16 : U32), (x + 88 : U32))) + 34 * (1 + Set.rc.rows(U.RulesUi.chips.proj(u), ty, (x + 88 : U32), (x + w - 16 : U32), (x + 88 : U32)))
+    + 36 + Bool.pick(U32, String.is_empty(U.RulesUi.err(u)), 0, 24) + 36 : U32)
+
+def Set.rules.tail(open: Bool, +ty: Ty, +u: U.Ui, +x: U32, +w: U32) -> U32:
+  match open:
+    case True{}:
+      Set.rules.fh(ty, u, x, w)
+    case False{}:
+      36
+
+# the section's height, its head included
+def Set.rules.h(+ty: Ty, +n: S.Nui, +x: U32, +w: U32) -> U32:
+  (58 + Set.agy.nh(ty, U.RulesUi.lead(), w) + Set.rules.lh(U.RulesUi.rows(S.Nui.ui(n))) + Set.rules.tail(U.RulesUi.open(S.Nui.ui(n)), ty, S.Nui.ui(n), x, w) : U32)
+
+def Set.rules.form(+ty: Ty, +n: S.Nui, +x: U32, +w: U32, +y: U32) -> Out:
+  +u = S.Nui.ui(n)
+  +x0 = {(x + 88 : U32) : U32}
+  +x1 = {(x + w - 16 : U32) : U32}
+  +tid = S.Fld.id("rutext", "rule-save", "")
+  +gid = S.Fld.id("rutool", "rule-save", "")
+  +wid = S.Fld.id("ruword", "rule-save", "")
+  +rb = {(1 + Set.rc.rows(U.RulesUi.chips.bot(u), ty, x0, x1, x0) : U32) : U32}
+  +rp = {(1 + Set.rc.rows(U.RulesUi.chips.proj(u), ty, x0, x1, x0) : U32) : U32}
+  +py = {(y + 36 + 34 * rb : U32) : U32}
+  +ty2 = {(py + 34 * rp : U32) : U32}
+  +fw = {U32.shr((w - 40 : U32)) : U32}
+  +ey = {(ty2 + 36 : U32) : U32}
+  +by = {(ey + Bool.pick(U32, String.is_empty(U.RulesUi.err(u)), 0, 24) : U32) : U32}
+  +sw = Lay.button.w(ty, "Save")
+  +cw = Lay.button.w(ty, "Cancel")
+  Out.all([
+    Lay.field(ty, D.Clip.all(), (x + 16 : U32), y, (w - 32 : U32), U.Ui.scratch(u, "@f.rutext"), String.eq(S.Nui.focus_of(n), tid), S.Blink.on(n), S.Nui.caret_of(n), S.Nui.mark(n), "What every agent should always (or never) do", tid),
+    Out.ops(Ty.text(ty, 2n, "Bot", D.Clip.all(), (x + 16 : U32), (y + 36 : U32), 28, T.Th.dim())),
+    Set.rc(U.RulesUi.chips.bot(u), ty, "rule-bot", x0, x1, x0, (y + 36 : U32)),
+    Out.ops(Ty.text(ty, 2n, "Project", D.Clip.all(), (x + 16 : U32), py, 28, T.Th.dim())),
+    Set.rc(U.RulesUi.chips.proj(u), ty, "rule-proj", x0, x1, x0, py),
+    Lay.field(ty, D.Clip.all(), (x + 16 : U32), ty2, fw, U.Ui.scratch(u, "@f.rutool"), String.eq(S.Nui.focus_of(n), gid), S.Blink.on(n), S.Nui.caret_of(n), S.Nui.mark(n), "Tool, e.g. bot_send", gid),
+    Lay.field(ty, D.Clip.all(), (x + 24 + fw : U32), ty2, fw, U.Ui.scratch(u, "@f.ruword"), String.eq(S.Nui.focus_of(n), wid), S.Blink.on(n), S.Nui.caret_of(n), S.Nui.mark(n), "Word that lets it through", wid),
+    Bool.pick(Out, String.is_empty(U.RulesUi.err(u)), Out.none(), Out.ops(Ty.text(ty, 2n, Ty.fit(ty, 2n, U.RulesUi.err(u), (w - 32 : U32)), D.Clip.all(), (x + 16 : U32), ey, 24, T.Th.bad()))),
+    Lay.chip(ty, (x + 16 : U32), by, "Enforce", U.RulesUi.enf(u), "rule-enf", ""),
+    Lay.button(ty, D.Clip.all(), (x + w - 16 - cw - 6 - sw : U32), by, "Save", T.Th.accent(), "rule-save", ""),
+    Lay.button(ty, D.Clip.all(), (x + w - 16 - cw : U32), by, "Cancel", T.Th.soft(), "rule-cancel", "")])
+
+def Set.rules.tailout(open: Bool, +ty: Ty, +n: S.Nui, +x: U32, +w: U32, +y: U32) -> Out:
+  match open:
+    case True{}:
+      Set.rules.form(ty, n, x, w, y)
+    case False{}:
+      Lay.button(ty, D.Clip.all(), (x + 16 : U32), y, "Add rule", T.Th.soft(), "rule-new", "")
+
+def Set.rules(+ty: Ty, +n: S.Nui, +x: U32, +w: U32, +y: U32) -> Out:
+  +u = S.Nui.ui(n)
+  +rs = U.RulesUi.rows(u)
+  +nh = Set.agy.nh(ty, U.RulesUi.lead(), w)
+  Out.all([
+    Set.head(ty, U.RulesUi.title(), x, y),
+    Set.card(x, (y + 32 : U32), w, (Set.rules.h(ty, n, x, w) - 42 : U32)),
+    Set.agy.lines(Ty.wrap(ty, 2n, U.RulesUi.lead(), (w - 32 : U32)), ty, (x + 16 : U32), (y + 38 : U32)),
+    Set.rules.rows(rs, ty, x, w, (y + 44 + nh : U32)),
+    Set.rules.tailout(U.RulesUi.open(u), ty, n, x, w, (y + 50 + nh + Set.rules.lh(rs) : U32))])
+
 def Lay.settings(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x0: U32, +x1: U32, +h: U32, +raw: U32) -> Out:
   +w = {U32.min((x1 - x0 - 64 : U32), 720) : U32}
   +x = {(x0 + U32.shr((x1 - x0 - w : U32)) : U32) : U32}
@@ -3206,10 +3322,10 @@ def Lay.settings(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: S
   +er = {(Set.rows(ty, tms, (x + 16 : U32), (x + w - 16 : U32), (x + 16 : U32)) * 34 : U32) : U32}
   +ey = {(202 + er : U32) : U32}
   +fy = {(ey + 46 : U32) : U32}
-  +total = {(1156 + Set.notify.h(st, ty, w) + dy + fy + Set.voice.h(ty, n, x, w) + Set.mates.h(n) + Set.keys.h(n) + Set.agy.h(ty, n, x, w) + 132 : U32) : U32}
+  +total = {(1156 + Set.notify.h(st, ty, w) + Set.rules.h(ty, n, x, w) + dy + fy + Set.voice.h(ty, n, x, w) + Set.mates.h(n) + Set.keys.h(n) + Set.agy.h(ty, n, x, w) + 132 : U32) : U32}
   +off = {U32.min(raw, U32.dim(total, h)) : U32}
   +b = {(0 - off : U32) : U32}
-  +b2 = {(b + 128 + Set.notify.h(st, ty, w) : U32) : U32}
+  +b2 = {(b + 128 + Set.notify.h(st, ty, w) + Set.rules.h(ty, n, x, w) : U32) : U32}
   +fu = M.Setting.get(st, "followup", "")
   Out.all([
     Out{Nil{}, [Lay.hit(x0, 52, (x1 - x0 : U32), (h - 52 : U32), "set-bg", U32.show(U32.dim(total, h)))]},
@@ -3224,6 +3340,7 @@ def Lay.settings(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: S
     Lay.chip(ty, (x + w - 16 - Lay.button.w(ty, "Steer") : U32), (b + 188 : U32), "Steer", String.eq(fu, "steer"), "setting", "followup=steer"),
     Set.carry(ty, M.Carry.on(st), x, w, (b + 238 : U32)),
     Set.notify(st, ty, x, w, (b + 320 : U32)),
+    Set.rules(ty, n, x, w, (b + 320 + Set.notify.h(st, ty, w) : U32)),
     Set.head(ty, "Agents", x, (b2 + 192 : U32)),
     Set.card(x, (b2 + 224 : U32), w, (124 + dy : U32)),
     Set.row(ty, "Provider and model for new threads", Set.cli(U.Models.cli(U.Str.get(info, "models"), prov), prov) ++ ". Each thread keeps its own; change it from the composer.", x, (b2 + 226 : U32), w),
