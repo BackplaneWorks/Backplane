@@ -79,3 +79,42 @@ Running -pause(kind,q)-> Waiting(ask) -Take over-> PersonDrives -Hand back-> Run
 A pause is an ask of kind `browser`; the MCP reply is parked until it
 closes. A risky step goes on only by Confirm. Each pause alerts once (key
 `task-<run>-<n>`).
+
+## Protocol (hub requests, info keys, asks)
+
+Requests (client → hub, like `bots.routine`):
+
+- `bots.browser {bot, op, ...}`: the person's input on the bot's page.
+  `click {x, y}` and `mouse {type: down|move|up, x, y}` with x, y in
+  thousandths of the frame (0..1000, `Task.scale` against the viewport);
+  `type {text}`; `press {key}` (Playwright key names); `scroll {dy}`;
+  `navigate {url}`; `back`; `reload`; `takeover` (the person drives); `handback`
+  (the bot drives again). Input other than takeover is refused while the bot
+  drives and no take over or teaching is on.
+- `bots.teach {bot, op}`: `start` (the person drives, recording on),
+  `note {text}`, `stop` (recording off, the draft kept for review),
+  `discard`, `save {name, description, params: [{step, name, label}]}`
+  (each param marks step n's typed value as `{{name}}`; a TaskSet, the
+  bot woken with "[taught: <name>] ...").
+- `bots.task {bot, op, slug, params?}`: `run` (wakes the bot with
+  "[task: <slug>] Run the task skill <slug> with {params}"), `delete`
+  (TaskDeleted).
+
+Info (hub → clients, per bot):
+
+- `drive.<bot>`: "" (the bot drives), "teach" or "takeover".
+- `teach.<bot>`: "" , `rec <start secs> <steps>` while recording, `review`
+  after stop until save or discard.
+- `teach.draft.<bot>`: the draft steps as a JSON array (the record steps,
+  numbered from 1, notes included) while recording or in review.
+
+Asks: a pause opens `AskOpened{kind: "browser"}` on the bot's thread, tool
+`task_pause`, detail a JSON object `{bot, run, slug, n, kind, question,
+risky, shot}` (`shot` the hub URL of the pause's screenshot,
+`/bots/<id>/tasks/shot?run=<run>&n=<n>`), options `confirm|skip|stop` for a
+risky pause, else `continue|skip|stop`. Answering closes it; the person may
+take over first (`bots.browser takeover`), and answering also hands back.
+
+Runs: each run's steps go to its folder, and the run is an Act of tone
+`task` on the bot's thread, text a JSON object `{slug, run, status, n,
+summary, shots: [urls]}`, logged at its start and end.
