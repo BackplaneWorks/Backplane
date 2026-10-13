@@ -5796,6 +5796,17 @@ def BoardUi.uniq(+xs: List<&2, String>, +acc: List<&2, String>) -> List<&2, Stri
     case +h <> t:
       BoardUi.uniq(t, Bool.pick(List<&2, String>, Bool.or(String.is_empty(h), TBA.Tb.has(acc, h)), acc, h <> acc))
 
+def BoardUi.without(+xs: List<&2, String>, +x: String) -> List<&2, String>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case +h <> t:
+      Bool.pick(List<&2, String>, String.eq(h, x), BoardUi.without(t, x), h <> BoardUi.without(t, x))
+
+# you first, then the rest in order
+def BoardUi.you(+xs: List<&2, String>) -> List<&2, String>:
+  Bool.pick(List<&2, String>, TBA.Tb.has(xs, "person"), "person" <> BoardUi.without(xs, "person"), xs)
+
 def BoardUi.vals(+xs: List<&2, String>) -> List<&2, String>:
   List.sort(~String, ~BoardUi.le, BoardUi.uniq(xs, Nil{}))
 
@@ -5838,7 +5849,7 @@ def BoardUi.chips.go(+vs: List<&2, String>, +kind: Nat, +st: M.State, +act: Stri
 # (choosing the one on turns it off)
 def BoardUi.chips(+u: Ui) -> List<&2, BChip>:
   List.concat(&2, BChip, [[BChip{"Open", "tb-f", "open", Bool.not(BoardUi.all(u))}, BChip{"All", "tb-f", "all", BoardUi.all(u)}],
-    BoardUi.chips.go(BoardUi.vals(BoardUi.owners(TBA.Tb.all(Ui.state.of(u)))), 0n, Ui.state.of(u), "tb-who", BoardUi.who(u)),
+    BoardUi.chips.go(BoardUi.you(BoardUi.vals(BoardUi.owners(TBA.Tb.all(Ui.state.of(u))))), 0n, Ui.state.of(u), "tb-who", BoardUi.who(u)),
     BoardUi.chips.go(BoardUi.vals(BoardUi.projs(TBA.Tb.all(Ui.state.of(u)))), 1n, Ui.state.of(u), "tb-proj", BoardUi.proj(u)),
     BoardUi.chips.go(BoardUi.vals(BoardUi.groups(TBA.Tb.all(Ui.state.of(u)))), 2n, Ui.state.of(u), "tb-group", BoardUi.group(u))])
 
