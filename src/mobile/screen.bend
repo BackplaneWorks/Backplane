@@ -1,4 +1,5 @@
 import Base
+import ../core/tbdata.bend as TBD
 import ../core/json.bend as J
 import ../core/model.bend as M
 import ../core/client.bend as U
@@ -1155,7 +1156,7 @@ def Mob.settings.k(+u: U.Ui, more: List<&2, J.Json>) -> J.Json:
 def Mob.settings(open: Bool, +u: U.Ui) -> J.Json:
   match open:
     case True{}:
-      Mob.settings.k(u, List.concat(&2, J.Json, [Mob.keys(u), Mob.agy(u), [Mob.set.row("Tour", "The short walk through projects, threads, bots, your agents and your machines.", [Mob.set.btn("Show the tour", "ob-open", "", False{})])]]))
+      Mob.settings.k(u, List.concat(&2, J.Json, [Mob.keys(u), Mob.agy.rows(U.RulesUi.cards(u)), Mob.agy(u), [Mob.set.row("Tour", "The short walk through projects, threads, bots, your agents and your machines.", [Mob.set.btn("Show the tour", "ob-open", "", False{})])]]))
     case False{}:
       J.Null{}
 
@@ -1261,6 +1262,48 @@ def Mob.tour.gate(covered: Bool, +u: U.Ui) -> J.Json:
     case False{}:
       Mob.tour(u)
 
+# Board JSON is presentation only; the kept Hubs/Ui types do not change.
+def Mob.board.links(xs: List<&2, String>) -> List<&2, J.Json>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case +x <> t:
+      J.Json.obj([J.KV{"on", J.Flag{False{}}}, J.KV{"label", J.Str{x}}, J.KV{"action", J.Str{Bool.pick(String, LK.Link.is_web(x), "open-url", "file-open")}}, J.KV{"value", J.Str{x}}]) <> Mob.board.links(t)
+
+def Mob.board.row(r: U.BRow, +u: U.Ui) -> J.Json:
+  match r:
+    case U.BRow{+id, title, sub, +status, soon, over, open}:
+      J.Json.obj([J.KV{"id", J.Str{id}}, J.KV{"title", J.Str{title}}, J.KV{"sub", J.Str{sub}}, J.KV{"status", J.Str{status}}, J.KV{"mark", J.Str{U.BoardUi.mark(status)}},
+        J.KV{"dueSoon", J.Flag{soon}}, J.KV{"overdue", J.Flag{over}}, J.KV{"open", J.Flag{open}}, J.KV{"notes", J.Str{TBD.Tb.notes(U.BoardUi.item(u, id))}},
+        J.KV{"edit", J.Str{U.Bots.field(u, "tbedit")}}, J.KV{"editNotes", J.Str{U.Bots.field(u, "tbnotes")}},
+        J.KV{"links", J.Json.arr(Mob.board.links(TBD.Tb.links(U.BoardUi.item(u, id))))}, J.KV{"buttons", J.Json.arr(Mob.agy.btns(U.BoardUi.btns(u, id)))}])
+
+def Mob.board.rows(rs: List<&2, U.BRow>, +u: U.Ui) -> List<&2, J.Json>:
+  match rs:
+    case Nil{}:
+      Nil{}
+    case r <> t:
+      Mob.board.row(r, u) <> Mob.board.rows(t, u)
+
+def Mob.board.sects(ss: List<&2, U.BSec>, +u: U.Ui) -> List<&2, J.Json>:
+  match ss:
+    case Nil{}:
+      Nil{}
+    case U.BSec{title, count, rs} <> t:
+      J.Json.obj([J.KV{"title", J.Str{title}}, J.KV{"count", J.Json.nat(count)}, J.KV{"rows", J.Json.arr(Mob.board.rows(rs, u))}]) <> Mob.board.sects(t, u)
+
+def Mob.board.k(open: Bool, +u: U.Ui) -> J.Json:
+  match open:
+    case False{}:
+      J.Null{}
+    case True{}:
+      J.Json.obj([J.KV{"title", J.Str{"Board"}}, J.KV{"filters", J.Json.arr(Mob.agy.btns(U.BoardUi.filters(u)))},
+        J.KV{"sections", J.Json.arr(Mob.board.sects(U.BoardUi.sections(u), u))},
+        J.KV{"add", J.Json.obj([J.KV{"name", J.Str{"tbtitle"}}, J.KV{"hint", J.Str{"Add a task"}}, J.KV{"text", J.Str{U.Bots.field(u, "tbtitle")}}])}])
+
+def Mob.board(+u: U.Ui) -> J.Json:
+  Mob.board.k(U.BoardUi.is(u), u)
+
 def Mob.screen.go(+focus: Bool, +u: U.Ui, +ix: U.SIx, +g: U.SGroups, +side: MSide) -> J.Json:
   match u:
     case U.Ui{+st, +sel, +dr, _, +o, +on, +now, _, _, +v, _, _, +e, +note, _, _, _}:
@@ -1275,6 +1318,7 @@ def Mob.screen.go(+focus: Bool, +u: U.Ui, +ix: U.SIx, +g: U.SGroups, +side: MSid
       +newroom = MB.MBots.rnew(u)
       +thread = Mob.focus.thread(focus, u, sel)
       +bot = Mob.focus.bot(focus, u)
+      +board = Mob.board(u)
       J.Json.obj([J.KV{"online", J.Json.bool(on)}, J.KV{"version", J.Json.str(v)}, J.KV{"seq", J.Json.nat(U.Ui.seq(u))}, J.KV{"error", J.Json.str(e)},
         J.KV{"note", J.Json.str(note)}, J.KV{"sel", J.Json.str(sel)}, J.KV{"making", J.Json.bool(U.Made.waiting(u))}, J.KV{"theme", J.Json.str(M.Setting.get(st, "ui.theme", ""))},
         J.KV{"empty", J.Json.str(Mob.empty(List.length(&2, M.Project, U.Ui.projects(st))))},
@@ -1288,7 +1332,9 @@ def Mob.screen.go(+focus: Bool, +u: U.Ui, +ix: U.SIx, +g: U.SGroups, +side: MSid
         J.KV{"deleting", deleting},
         J.KV{"renaming", renaming},
         J.KV{"removing", removing},
-        J.KV{"tour", Mob.tour.gate(Mob.covered(e, [rmenu, deleting, renaming, removing, settings, find, folders, newbot, newroom], thread, bot), u)},
+        J.KV{"tour", Mob.tour.gate(Mob.covered(e, [rmenu, deleting, renaming, removing, settings, find, folders, newbot, newroom, board], thread, bot), u)},
+        J.KV{"board", board},
+        J.KV{"boardEntry", J.Json.obj([J.KV{"on", J.Flag{False{}}}, J.KV{"label", J.Str{U.BoardUi.label(u)}}, J.KV{"action", J.Str{"tb-open"}}, J.KV{"value", J.Str{""}}])},
         J.KV{"settings", settings},
         J.KV{"find", find},
         J.KV{"folders", folders},

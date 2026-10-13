@@ -196,6 +196,10 @@ fun App(m: AppModel) {
             BackHandler { pairing = false }
             Hubs(m, s) { pairing = false }
         }
+        s.board != null -> {
+            BackHandler { m.act("tb-close", s.hub + "|") }
+            BoardScreen(m, s.board, s.hub)
+        }
         // New Thread: its page at once, waiting for the hub's thread
         s.making && !leftNew -> {
             BackHandler { leftNew = true; m.back() }

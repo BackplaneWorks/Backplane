@@ -178,12 +178,12 @@ def Q.named(value: Bool, +k: String) -> Nat:
 def Q.kind.k(may: Bool, +k: String) -> Nat:
   match may:
     case True{}:
-      Q.named(String.eq(k, "value"), k)
+      Bool.pick(Nat, String.eq(k, "board"), 1n, Q.named(String.eq(k, "value"), k))
     case False{}:
       0n
 
 def Q.kind(+k: String) -> Nat:
-  Bool.pick(Nat, String.eq(k, "nav"), 3n, Q.kind.k(Q.may(k), k))
+  Bool.pick(Nat, String.eq(k, "board"), 1n, Bool.pick(Nat, String.eq(k, "nav"), 3n, Q.kind.k(Q.may(k), k)))
 
 # whether every name is its own kind through Q.kind (law q_kind_names)
 def Q.own(ns: List<&2, QN>) -> Bool:
@@ -720,7 +720,7 @@ def Hubs.focus(move: Bool, hs: Hubs, +key: String, +op: Op) -> HAct:
 def Hubs.act.k(+hs: Hubs, +cur: String, known: Bool, +action: String, +value: String) -> HAct:
   match known:
     case True{}:
-      Hubs.focus(Bool.and(Nat.is_lt(Hubs.routed(action), Hubs.moves()), Bool.not(String.eq(Hubs.key_of(value), cur))), hs, Hubs.key_of(value), Do{action, Hubs.rest(value)})
+      Hubs.focus(Bool.and(Bool.or(String.eq(action, "tb-open"), Nat.is_lt(Hubs.routed(action), Hubs.moves())), Bool.not(String.eq(Hubs.key_of(value), cur))), hs, Hubs.key_of(value), Do{action, Hubs.rest(value)})
     case False{}:
       Hubs.focus(False{}, hs, cur, Do{action, value})
 
@@ -809,7 +809,7 @@ def Hubs.act.r(routed: Bool, +hs: Hubs, +action: String, +value: String) -> HAct
       Hubs.act.k(hs, Hubs.cur(hs), False{}, action, value)
 
 def Hubs.act.one(+hs: Hubs, +action: String, +value: String) -> HAct:
-  Hubs.act.r(Nat.is_lt(Hubs.routed(action), Hubs.routes()), hs, action, value)
+  Hubs.act.r(Bool.or(String.starts_with(action, "tb-"), Nat.is_lt(Hubs.routed(action), Hubs.routes())), hs, action, value)
 
 def Hubs.act.then(a: HAct, b: HAct) -> HAct:
   match a b:
@@ -1762,6 +1762,8 @@ def Hubs.pl.json(+need: List<&2, J.Json>, +run: List<&2, J.Json>, +idle: List<&2
       J.KV{"working", J.Json.nat(Hubs.pl.working(Hubs.pl.once(Hubs.pl.all(ss, hs, "bots", many))))},
       J.KV{"bots", J.Json.arr(Hubs.pl.once(Hubs.pl.all(ss, hs, "bots", many)))},
       J.KV{"rooms", J.Json.arr(Hubs.pl.once(List.sort(~J.Json, ~Hubs.pl.newer, Hubs.pl.all(ss, hs, "rooms", many))))},
+      J.KV{"board", J.Json.arr(Hubs.pl.all(ss, hs, "board", many))},
+      J.KV{"boardN", J.Json.nat(Hubs.pl.idle.n(ss, "boardN", 0n))},
       J.KV{"routines", J.Json.arr(Hubs.pl.once(List.sort(~J.Json, ~Hubs.pl.due.before, Hubs.pl.all(ss, hs, "routines", many))))},
       J.KV{"machines", J.Json.get_obj(J.Json.get_obj(Hubs.of(ss, Hubs.key_of(J.Json.get_str(uber, "id", ""))), "plane"), "machines")},
       J.KV{"home", J.Json.get_obj(J.Json.get_obj(Hubs.of(ss, Hubs.key_of(J.Json.get_str(uber, "id", ""))), "plane"), "home")}])}
@@ -1880,6 +1882,19 @@ def Hubs.pl.kv(plane: J.Json) -> List<&2, J.KV>:
     case x:
       [J.KV{"plane", x}]
 
+def Hubs.board.walk(j: J.Json, +from: String) -> J.Json:
+  match j:
+    case J.Obj{+fs}:
+      Bool.pick(J.Json, String.starts_with(J.Json.get_str(J.Obj{fs}, "action", ""), "tb-"), Q.all(J.Obj{fs}, from), J.Obj{Hubs.board.walk(fs, from)})
+    case J.Arr{xs}:
+      J.Arr{Hubs.board.walk(xs, from)}
+    case J.Item{h, t}:
+      J.Item{Hubs.board.walk(h, from), Hubs.board.walk(t, from)}
+    case J.Field{+k, +v, t}:
+      J.Field{k, Bool.pick(J.Json, String.eq(k, "id"), Q.walk(v, from, 2n), Hubs.board.walk(v, from)), Hubs.board.walk(t, from)}
+    case x:
+      x
+
 def Hubs.screen.p(+pl: MPL.MUber, +ss: List<&2, Shown>, +cur: String, +list: List<&2, Hub>) -> J.Json:
   J.Json.obj(List.append(&2, J.KV, Hubs.pl.kv(MPL.MUber.plane(pl)), [J.KV{"online", J.Json.bool(Hubs.all_on(ss))}, J.KV{"version", J.Json.str(J.Json.get_str(Hubs.of(ss, cur), "version", ""))},
     J.KV{"error", J.Json.str(Hubs.said(ss, "error"))}, J.KV{"note", J.Json.str(Hubs.said(ss, "note"))},
@@ -1898,6 +1913,8 @@ def Hubs.screen.p(+pl: MPL.MUber, +ss: List<&2, Shown>, +cur: String, +list: Lis
     J.KV{"removing", Hubs.first_obj(ss, "removing")},
     J.KV{"search", Hubs.first_obj(ss, "search")},
     J.KV{"folders", J.Json.get_obj(Hubs.of(ss, cur), "folders")},
+    J.KV{"board", Hubs.board.walk(J.Json.get_obj(Hubs.of(ss, cur), "board"), cur)},
+    J.KV{"boardEntry", J.Json.get_obj(Hubs.of(ss, cur), "boardEntry")},
     J.KV{"settings", J.Json.get_obj(Hubs.of(ss, cur), "settings")},
     J.KV{"tour", J.Json.get_obj(Hubs.of(ss, cur), "tour")},
     J.KV{"find", J.Json.get_obj(Hubs.of(ss, cur), "find")},

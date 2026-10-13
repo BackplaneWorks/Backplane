@@ -8,6 +8,7 @@ import ./client.bend as U
 import ./botui.bend as BU
 import ./uber.bend as UB
 import ./ubersync.bend as US
+import ./tbdata.bend as TD
 
 # The status plane (docs/uber.md)
 # -------------------------------
@@ -31,47 +32,57 @@ type PMach is Data:
   PMach{name: String, state: String}
 
 type Plane is Data:
-  Plane{need: List<&2, PRow>, run: List<&2, PRow>, bots: List<&2, PRow>, rooms: List<&2, PRow>, routines: List<&2, PRow>, idle: List<&2, PRow>, idle_n: Nat, machines: List<&2, PMach>}
+  Plane{need: List<&2, PRow>, run: List<&2, PRow>, bots: List<&2, PRow>, rooms: List<&2, PRow>, routines: List<&2, PRow>, idle: List<&2, PRow>, idle_n: Nat, machines: List<&2, PMach>, board: List<&2, PRow>, board_n: Nat}
 
 def Plane.need(p: Plane) -> List<&2, PRow>:
   match p:
-    case Plane{n, _, _, _, _, _, _, _}:
+    case Plane{n, _, _, _, _, _, _, _, _, _}:
       n
 
 def Plane.run(p: Plane) -> List<&2, PRow>:
   match p:
-    case Plane{_, r, _, _, _, _, _, _}:
+    case Plane{_, r, _, _, _, _, _, _, _, _}:
       r
 
 def Plane.bots(p: Plane) -> List<&2, PRow>:
   match p:
-    case Plane{_, _, b, _, _, _, _, _}:
+    case Plane{_, _, b, _, _, _, _, _, _, _}:
       b
 
 def Plane.rooms(p: Plane) -> List<&2, PRow>:
   match p:
-    case Plane{_, _, _, r, _, _, _, _}:
+    case Plane{_, _, _, r, _, _, _, _, _, _}:
       r
 
 def Plane.routines(p: Plane) -> List<&2, PRow>:
   match p:
-    case Plane{_, _, _, _, r, _, _, _}:
+    case Plane{_, _, _, _, r, _, _, _, _, _}:
       r
 
 def Plane.idle(p: Plane) -> List<&2, PRow>:
   match p:
-    case Plane{_, _, _, _, _, i, _, _}:
+    case Plane{_, _, _, _, _, i, _, _, _, _}:
       i
 
 def Plane.idle_n(p: Plane) -> Nat:
   match p:
-    case Plane{_, _, _, _, _, _, n, _}:
+    case Plane{_, _, _, _, _, _, n, _, _, _}:
       n
 
 def Plane.machines(p: Plane) -> List<&2, PMach>:
   match p:
-    case Plane{_, _, _, _, _, _, _, m}:
+    case Plane{_, _, _, _, _, _, _, m, _, _}:
       m
+
+def Plane.board(p: Plane) -> List<&2, PRow>:
+  match p:
+    case Plane{_, _, _, _, _, _, _, _, b, _}:
+      b
+
+def Plane.board_n(p: Plane) -> Nat:
+  match p:
+    case Plane{_, _, _, _, _, _, _, _, _, n}:
+      n
 
 def PRow.id(r: PRow) -> String:
   match r:
@@ -365,12 +376,54 @@ def Plane.machines.of(+u: U.Ui) -> List<&2, PMach>:
 def Plane.sort(rs: List<&2, PRow>) -> List<&2, PRow>:
   List.sort(~PRow, ~Plane.before, rs)
 
+# Board rows are capped after prioritising doing, then dates, then board order.
+def Plane.board.rank(+t: TD.TbItem, +now: Nat) -> Nat:
+  Bool.pick(Nat, String.eq(TD.Tb.status(t), "doing"), 0n,
+    Bool.pick(Nat, Bool.or(U.BoardUi.overdue(TD.Tb.due(t), now), U.BoardUi.soon(TD.Tb.due(t), now)), 1n, 2n))
+
+def Plane.board.part(xs: List<&2, TD.TbItem>, +rank: Nat, +now: Nat) -> List<&2, TD.TbItem>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case +t <> r:
+      TD.Tb.keep(Nat.is_eq(Plane.board.rank(t, now), rank), t, Plane.board.part(r, rank, now))
+
+def Plane.board.rows(xs: List<&2, TD.TbItem>, +u: U.Ui) -> List<&2, PRow>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case +t <> r:
+      PRow{"board", TD.Tb.id(t), "tb-open", TD.Tb.id(t), TD.Tb.title(t),
+        U.BoardUi.join([TD.Tb.owner.name(U.Ui.state(u), TD.Tb.owner(t)), U.BoardUi.due(TD.Tb.due(t))]), "", TD.Tb.status(t), 0n, False{}} <> Plane.board.rows(r, u)
+
+def Plane.board.ordered(+xs: List<&2, TD.TbItem>, +u: U.Ui, +now: Nat) -> List<&2, PRow>:
+  Plane.board.rows(List.concat(&2, TD.TbItem, [Plane.board.part(xs, 0n, now), Plane.board.part(xs, 1n, now), Plane.board.part(xs, 2n, now)]), u)
+
+def Plane.board.of.xs(+xs: List<&2, TD.TbItem>, +u: U.Ui, +now: Nat) -> List<&2, PRow>:
+  List.take(&2, PRow, Plane.board.ordered(xs, u, now), 6n)
+
+def Plane.board.all(+u: U.Ui) -> List<&2, TD.TbItem>:
+  TD.Tb.order(TD.Tb.open(TD.Tb.all(U.Ui.state(u))))
+
+def Plane.board.of(+u: U.Ui, +now: Nat) -> List<&2, PRow>:
+  Plane.board.of.xs(Plane.board.all(u), u, now)
+
+def Plane.board.key.go(xs: List<&2, TD.TbItem>, +n: Nat, +latest: Nat) -> String:
+  match xs:
+    case Nil{}:
+      Nat.show(n) ++ ":" ++ Nat.show(latest)
+    case +t <> r:
+      Plane.board.key.go(r, 1n+n, M.Time.max(latest, TD.Tb.updated(t)))
+
+def Plane.board.key(+u: U.Ui) -> String:
+  Plane.board.key.go(TD.Tb.all(U.Ui.state(u)), 0n, 0n)
+
 def Plane.of.i(+idle: List<&2, PRow>, +all: List<&2, PRow>, +u: U.Ui, +ix: U.SIx, +now: Nat) -> Plane:
   Plane{Plane.sort(Plane.part(all, 0n)), List.sort(~PRow, ~Plane.newer, Plane.part(all, 1n)),
     Plane.bot.rows(BU.BU.rows(u), U.Ui.state(u)),
     List.sort(~PRow, ~Plane.newer, Plane.rooms.go(BT.World.rooms(M.State.bots(U.Ui.state(u))), u)),
     List.sort(~PRow, ~Plane.due.before, Plane.routines.go(BT.World.routines.all(M.State.bots(U.Ui.state(u))), u, ix, now)),
-    List.take(&2, PRow, idle, Plane.idle.max()), List.length(&2, PRow, idle), Plane.machines.of(u)}
+    List.take(&2, PRow, idle, Plane.idle.max()), List.length(&2, PRow, idle), Plane.machines.of(u), Plane.board.of(u, now), U.BoardUi.count(u)}
 
 def Plane.of.k(+all: List<&2, PRow>, +u: U.Ui, +ix: U.SIx, +now: Nat) -> Plane:
   Plane.of.i(Plane.sort(Plane.recent(Plane.part(all, 2n), now)), all, u, ix, now)
@@ -459,7 +512,7 @@ def Plane.key.peers(ps: List<&2, BT.Peer>, +u: U.Ui) -> String:
       BT.Peer.id(p) ++ ":" ++ Nat.show(FR.Fr.head(U.Ui.state(u), BT.Peer.id(p))) ++ ":" ++ U.Ui.info(u, "far.away." ++ BT.Peer.id(p)) ++ ";" ++ Plane.key.peers(t, u)
 
 def Plane.key(+u: U.Ui, +now: Nat) -> String:
-  Nat.show(U.Ui.seq(u)) ++ "|" ++ Nat.show(Nat.div(now, 60n)) ++ "|" ++ Plane.key.peers(BU.BU.peers.of(u), u)
+  Nat.show(U.Ui.seq(u)) ++ "|" ++ Nat.show(Nat.div(now, 60n)) ++ "|" ++ Plane.key.peers(BU.BU.peers.of(u), u) ++ "|board:" ++ Plane.board.key(u)
 
 # the bots at work now (their mood: working or talking), for the strip
 def Plane.working.k(hit: Bool, +n: Nat) -> Nat:
@@ -785,6 +838,7 @@ def Plane.text(+p: Plane, +pre: String, +name: String, +now: Nat, +idle: Bool) -
     ++ Bool.pick(String, Bool.and(List.is_empty(&2, PRow, Plane.need(p)), List.is_empty(&2, PRow, Plane.run(p))), "Nothing needs you and nothing is running.\n", "")
     ++ Plane.text.sec("Needs you", Plane.need(p), pre, now) ++ Plane.text.sec("Running", Plane.run(p), pre, now)
     ++ Plane.text.sec("Bots", Plane.bots(p), pre, now) ++ Plane.text.sec("Rooms with unread posts", Plane.rooms(p), pre, now)
+    ++ Plane.text.sec("Board " ++ Nat.show(Plane.board_n(p)) ++ " open", Plane.board(p), pre, now)
     ++ Plane.text.sec("Routines", Plane.routines(p), pre, now) ++ Plane.text.idle.k(idle, Plane.idle_n(p), Plane.idle(p), pre, now)
     ++ Plane.text.machines.k(Nat.is_gt(List.length(&2, PMach, Plane.machines(p)), 1n), Plane.machines(p))
 

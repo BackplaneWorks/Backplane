@@ -68,6 +68,9 @@ struct BotsSection: View {
                 }
                 .opacity(b.mood == "away" ? 0.5 : 1)
             }
+            if let b = screen.boardEntry {
+                Button(b.label) { model.act("tb-open", screen.hub + "|") }
+            }
             ForEach(screen.rooms) { r in
                 Button { model.open(nav: r.nav ?? "", action: "room", value: r.id, title: r.name, kind: "room") } label: {
                     HStack(spacing: 12) {

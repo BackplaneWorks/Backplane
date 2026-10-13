@@ -49,7 +49,7 @@ def MPlane.nav.k(room: Bool, +kind: String, +id: String, +value: String, +st: M.
       Bool.pick(String, String.eq(kind, "thread"), value, MPlane.nav.bot(BT.World.find.id(BT.World.bot(M.State.bots(st), MPlane.nav.id(kind, id, value))), MPlane.nav.id(kind, id, value)))
 
 def MPlane.nav(+kind: String, +id: String, +value: String, +st: M.State) -> String:
-  MPlane.nav.k(String.eq(kind, "room"), kind, id, value, st)
+  Bool.pick(String, String.eq(kind, "board"), "", MPlane.nav.k(String.eq(kind, "room"), kind, id, value, st))
 
 def MPlane.row(r: PL.PRow, +now: Nat, +st: M.State) -> J.Json:
   match r:
@@ -78,6 +78,7 @@ def MPlane.json(+p: PL.Plane, +now: Nat, +st: M.State) -> J.Json:
   J.Json.obj([J.KV{"need", J.Json.arr(MPlane.rows(PL.Plane.need(p), now, st))}, J.KV{"run", J.Json.arr(MPlane.rows(PL.Plane.run(p), now, st))},
     J.KV{"idle", J.Json.arr(MPlane.rows(PL.Plane.idle(p), now, st))}, J.KV{"idleN", J.Json.nat(PL.Plane.idle_n(p))},
     J.KV{"working", J.Json.nat(PL.Plane.working(p))}, J.KV{"bots", J.Json.arr(MPlane.rows(PL.Plane.bots(p), now, st))}, J.KV{"rooms", J.Json.arr(MPlane.rows(PL.Plane.rooms(p), now, st))},
+    J.KV{"board", J.Json.arr(MPlane.rows(PL.Plane.board(p), now, st))}, J.KV{"boardN", J.Json.nat(PL.Plane.board_n(p))},
     J.KV{"routines", J.Json.arr(MPlane.rows(PL.Plane.routines(p), now, st))}, J.KV{"machines", J.Json.arr(MPlane.mach(PL.Plane.machines(p)))}])
 
 # where the conversation is held (core's Plane.home): null with no uberbot

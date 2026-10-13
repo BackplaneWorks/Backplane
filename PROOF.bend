@@ -8684,3 +8684,30 @@ def Laws.told_quiet_record_nothing():
   {==}
 
 # ---- end told-rules-board ----
+
+# ---- told-rules-board ui ----
+def Laws.boardui_sections_order():
+  {==}
+
+def Laws.boardui_open_hides_done():
+  {==}
+
+law board_take_le:
+  for xs: List<&2, PLN.PRow>
+  for n: Nat
+  {Nat.is_le(List.length(&2, PLN.PRow, List.take(&2, PLN.PRow, xs, n)), n) == True{} : Bool}
+
+def board_take_le(xs, n):
+  match xs n:
+    case Nil{} 0n:
+      {==}
+    case Nil{} 1n+p:
+      {==}
+    case h <> t 0n:
+      {==}
+    case h <> t 1n+p:
+      board_take_le(t, p)
+
+def Laws.plane_board_capped(u, now):
+  board_take_le(PLN.Plane.board.ordered(PLN.Plane.board.all(u), u, now), 6n)
+# ---- end told-rules-board ui ----

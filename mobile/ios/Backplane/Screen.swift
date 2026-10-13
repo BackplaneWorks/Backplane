@@ -737,6 +737,8 @@ struct Screen: Decodable {
     // the uberbot's card and the status plane (Plane.swift); none without an uberbot
     let uber: UberCard?
     let plane: PlaneModel?
+    let board: BoardModel?
+    let boardEntry: SetButton?
     let newBot: NewBot?
     let newRoom: NewRoom?
     let bot: BotView?
@@ -838,7 +840,7 @@ extension KeyedDecodingContainer {
 extension Screen {
     private enum K: String, CodingKey {
         case online, version, error, note, sel, empty, hub, hubs, found, projects, view, making, active, older, settled,
-             rowMenu, bots, rooms, uber, plane, newBot, newRoom, bot, deleting, removing, renaming, tour, search,
+             rowMenu, bots, rooms, uber, plane, board, boardEntry, newBot, newRoom, bot, deleting, removing, renaming, tour, search,
              folders, settings, find, island, islands, thread, theme
     }
 
@@ -864,6 +866,8 @@ extension Screen {
         rooms = c.lossyList(.rooms)
         uber = c.lossy(.uber)
         plane = c.lossy(.plane)
+        board = c.lossy(.board)
+        boardEntry = c.lossy(.boardEntry)
         newBot = c.lossy(.newBot)
         newRoom = c.lossy(.newRoom)
         bot = c.lossy(.bot)

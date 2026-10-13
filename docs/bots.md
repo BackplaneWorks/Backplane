@@ -314,6 +314,8 @@ unlocks it, and whether it is on. The person edits them with `rules.set
 {rule}` (with an `id` it changes that rule) and `rules.drop {id}`; the
 reply carries a validation error (`bot` and `project` may be names).
 
+All four clients list and edit them in Settings, Rules (after API keys). The form chooses a bot and project, tool patterns, enforcement and its unlock word; deleting takes two taps. Client actions use the `rule-` prefix, with validation errors returned to the form.
+
 Every turn of every thread starts with the `<rules>` block of the rules
 that apply to it (`Rules.agent`, outermost in `Bots.turn`, before the
 memory block and the references). An enforced rule with a tool is also
@@ -349,6 +351,10 @@ in every thread have:
   sets the project), a due date at the end of a title is taken out of it,
   indented lines under an item are its notes. Other lines are returned as
   `skipped`; importing the same list again adds nothing.
+
+The Board entry beside Rooms opens the task board on the window, web and both phones. Doing, Blocked and To do show by default; All also includes Done and Dropped. Filters show the owners, projects and groups in the board. Status boxes cycle To do → Doing → Done; expanded rows offer every status, editable titles and notes, links, and a two-tap delete. The Status plane previews at most six open items, doing first, then overdue or due within two days. On paired phones a board belongs to its focused hub and its actions carry that hub’s prefix.
+
+Pure reads live in `ruledata.bend` and `tbdata.bend`; clients never import the rule/tool gate or board writers. `rules.bend` and `tboard.bend` retain their original public constructors and defs as compatibility adapters for existing laws and callers.
 
 The person edits the board with `board.set {item}` (with an `id` it
 updates) and `board.drop {id}`. The items are settings, local to this

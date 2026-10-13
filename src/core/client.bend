@@ -33,6 +33,9 @@ import ./layers.bend as LY
 import ./slash.bend as SL
 import ./uber.bend as UB
 import ./ubersync.bend as US
+import ./ruledata.bend as RD
+import ./tbdata.bend as TBD
+import ./cron.bend as CR
 
 # The client state, Elm-style, shared by the native window and the web
 # page: a host feeds server messages to Ui.recv and user actions to Ui.act,
@@ -865,7 +868,7 @@ def Ui.on_thread(u: Ui, m: String) -> Act:
 def Ui.select.k(u: Ui, +id: String) -> Ui:
   match u:
     case Ui{st, _, dr, live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}:
-      Ui{st, id, Map.set(&2, String, Map.set(&2, String, Map.set(&2, String, Map.set(&2, String, Map.set(&2, String, Map.set(&2, String, dr, "@del", ""), "@bot", ""), "@room", ""), "@remote", ""), "@bot.want", ""), "@thread.want", ""), live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}
+      Ui{st, id, Map.set(&2, String, Map.set(&2, String, Map.set(&2, String, Map.set(&2, String, Map.set(&2, String, Map.set(&2, String, Map.set(&2, String, dr, "@board", ""), "@del", ""), "@bot", ""), "@room", ""), "@remote", ""), "@bot.want", ""), "@thread.want", ""), live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}
 
 # Drafts kept
 # -----------
@@ -5330,7 +5333,7 @@ def Bots.sel.set(u: Ui, +th: String) -> Ui:
 
 # (a bot still awaited, "@bot.want", gives way to what was chosen since)
 def Bots.views(u: Ui, +bot: String, +room: String, +remote: String) -> Ui:
-  Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(u, "@bot", bot), "@room", room), "@remote", remote), "@del", ""), "@bot.want", ""), "@thread.want", "")
+  Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(u, "@board", ""), "@bot", bot), "@room", room), "@remote", remote), "@del", ""), "@bot.want", ""), "@thread.want", "")
 
 # a bot shown: its thread is selected, its tab kept
 # the thread a bot's Chat tab shows: its own, but the uberbot's is where the
@@ -7522,8 +7525,20 @@ def Made.made(+t: String, +th: String) -> J.Json:
   Seq.demo(t, [C.Change.encode(M.ThreadCreated{th, "p1", "New thread", M.Local{}, "", "", "claude", "", 1n})])
 
 # an answer: its request leaves the outbox; a diff opens the diff view
+def RulesUi.reply.k(mine: Bool, ok: Bool, +u: Ui, +o: J.Json) -> Ui:
+  match mine ok:
+    case True{} False{}:
+      Ui.flag_on(Ui.scratch_set(Ui.scratch_set(u, "@rule.rid", ""), "@rule.err", Ui.reply.err(o)), "ruleform")
+    case True{} True{}:
+      Ui.scratch_set(u, "@rule.rid", "")
+    case _ _:
+      u
+
+def RulesUi.reply(+u: Ui, +o: J.Json) -> Ui:
+  RulesUi.reply.k(Bool.and(Bool.not(String.is_empty(Ui.scratch(u, "@rule.rid"))), String.eq(Ui.scratch(u, "@rule.rid"), J.Json.as_raw(J.Json.get(o, "id"), ""))), J.Json.get_bool(o, "ok", True{}), u, o)
+
 def Ui.reply(u: Ui, +o: J.Json) -> Ui:
-  Made.reply(o, Bots.reply(o, Proj.reply(o, Btw.reply(Ui.reply.skills(u, o), o))))
+  RulesUi.reply(Made.reply(o, Bots.reply(o, Proj.reply(o, Btw.reply(Ui.reply.skills(u, o), o)))), o)
 
 # A link's threads and bots (far.bend): its batch folded into the read
 # model under this hub's ids, and whether it answered ("far.away.<link>")
@@ -8750,8 +8765,362 @@ def Ui.act.s(close: Bool, +u: Ui, +action: String, +value: String) -> Act:
     case False{}:
       Ui.act.g(String.starts_with(action, "agy-"), u, action, value)
 
+def Ui.now(u: Ui) -> Nat:
+  match u:
+    case Ui{_, _, _, _, _, _, now, _, _, _, _, _, _, _, _, _, _}:
+      now
+
+# Standing rules and task board: shared rows, forms, actions for all clients.
+type RRow is Data:
+  RRow{id: String, title: String, note: String, buttons: List<&2, AgBtn>}
+
+def RulesUi.lead() -> String:
+  "Standing rules every agent is given. Enforced rules refuse the named tools unless your latest message has the word."
+
+def RulesUi.note(+r: RD.Rule, +st: M.State) -> String:
+  RD.Rules.scope(r, st) ++ Bool.pick(String, String.is_empty(RD.Rule.tool(r)), "", " · tool " ++ RD.Rule.tool(r)) ++
+    Bool.pick(String, RD.Rule.enforce(r), " · enforced" ++ Bool.pick(String, String.is_empty(RD.Rule.word(r)), "", " unless \"" ++ RD.Rule.word(r) ++ "\""), "") ++
+    Bool.pick(String, RD.Rule.on(r), "", " · off")
+
+def RulesUi.del.btns(+u: Ui, +id: String) -> List<&2, AgBtn>:
+  Bool.pick(List<&2, AgBtn>, String.eq(Ui.scratch(u, "@rule.del"), id),
+    [AgBtn{"Delete?", "rule-del", id, True{}}, AgBtn{"Keep", "rule-keep", "", False{}}], [AgBtn{"Delete", "rule-del", id, False{}}])
+
+def RulesUi.rows.go(rs: List<&2, RD.Rule>, +u: Ui) -> List<&2, RRow>:
+  match rs:
+    case Nil{}:
+      Nil{}
+    case +r <> t:
+      RRow{RD.Rule.id(r), RD.Rule.text(r), RulesUi.note(r, Ui.state(u)), List.append(&2, AgBtn,
+        [AgBtn{Bool.pick(String, RD.Rule.on(r), "On", "Off"), "rule-on", RD.Rule.id(r), RD.Rule.on(r)}, AgBtn{"Edit", "rule-edit", RD.Rule.id(r), False{}}],
+        RulesUi.del.btns(u, RD.Rule.id(r)))} <> RulesUi.rows.go(t, u)
+
+def RulesUi.rows(+u: Ui) -> List<&2, RRow>:
+  RulesUi.rows.go(RD.Rules.all(Ui.state(u)), u)
+
+def RulesUi.bot.chip(here: Bool, +b: BT.Bot, +cur: String, rest: List<&2, AgBtn>) -> List<&2, AgBtn>:
+  match here:
+    case True{}:
+      AgBtn{BT.Bot.name(b), "rule-bot", BT.Bot.id(b), String.eq(cur, BT.Bot.id(b))} <> rest
+    case False{}:
+      rest
+
+def RulesUi.bots(bs: List<&2, BT.Bot>, +cur: String) -> List<&2, AgBtn>:
+  match bs:
+    case Nil{}:
+      Nil{}
+    case +b <> t:
+      RulesUi.bot.chip(Bool.not(FR.Fr.is(BT.Bot.id(b))), b, cur, RulesUi.bots(t, cur))
+
+def RulesUi.projects(ps: List<&2, M.Project>, +cur: String) -> List<&2, AgBtn>:
+  match ps:
+    case Nil{}:
+      Nil{}
+    case M.Project{+id, title, _, _, False{}} <> t:
+      AgBtn{title, "rule-proj", id, String.eq(cur, id)} <> RulesUi.projects(t, cur)
+    case _ <> t:
+      RulesUi.projects(t, cur)
+
+def RulesUi.form.k(open: Bool, +u: Ui) -> List<&2, AgRow>:
+  match open:
+    case False{}:
+      Nil{}
+    case True{}:
+      [AgRow{Bool.pick(String, String.is_empty(Ui.scratch(u, "@rule.edit")), "New rule", "Edit rule"), Ui.scratch(u, "@rule.err"),
+        [AgField{"rtext", "Rule", False{}, Bots.field(u, "rtext"), "rule-save"}, AgField{"rtool", "Tools", False{}, Bots.field(u, "rtool"), "rule-save"},
+         AgField{"rword", "Unlock word", False{}, Bots.field(u, "rword"), "rule-save"}],
+        [AgBtn{"Enforce", "rule-enf", "", String.eq(Ui.scratch(u, "@rule.enf"), "1")}, AgBtn{"Save", "rule-save", "", True{}}, AgBtn{"Cancel", "rule-cancel", "", False{}}]},
+       AgRow{"Bot", Bool.pick(String, String.is_empty(Bots.field(u, "rbot")), "Any", RD.Rules.bot.name(Ui.state(u), Bots.field(u, "rbot"))), Nil{},
+         AgBtn{"Any", "rule-bot", "", String.is_empty(Bots.field(u, "rbot"))} <> RulesUi.bots(BT.World.bots(M.State.bots(Ui.state(u))), Bots.field(u, "rbot"))},
+       AgRow{"Project", Bool.pick(String, String.is_empty(Bots.field(u, "rproj")), "Any", RD.Rules.project.name(Ui.state(u), Bots.field(u, "rproj"))), Nil{},
+         AgBtn{"Any", "rule-proj", "", String.is_empty(Bots.field(u, "rproj"))} <> RulesUi.projects(Ui.projects(Ui.state(u)), Bots.field(u, "rproj"))}]
+
+def RulesUi.form(+u: Ui) -> List<&2, AgRow>:
+  RulesUi.form.k(Ui.flag(u, "ruleform"), u)
+
+def RulesUi.row.forms(rs: List<&2, RRow>) -> List<&2, AgRow>:
+  match rs:
+    case Nil{}:
+      [AgRow{"No rules yet.", "", Nil{}, Nil{}}]
+    case RRow{_, t, n, bs} <> Nil{}:
+      [AgRow{t, n, Nil{}, bs}]
+    case RRow{_, t, n, bs} <> tail:
+      AgRow{t, n, Nil{}, bs} <> RulesUi.row.forms(tail)
+
+def RulesUi.cards(+u: Ui) -> List<&2, AgRow>:
+  List.concat(&2, AgRow, [[AgRow{"Rules", RulesUi.lead(), Nil{}, [AgBtn{"Add rule", "rule-new", "", False{}}]}], RulesUi.form(u), RulesUi.row.forms(RulesUi.rows(u))])
+
+def RulesUi.fill(+u: Ui, +r: RD.Rule) -> Ui:
+  Ui.flag_on(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(u,
+    "@f.rtext", RD.Rule.text(r)), "@f.rbot", RD.Rule.bot(r)), "@f.rproj", RD.Rule.project(r)), "@f.rtool", RD.Rule.tool(r)), "@f.rword", RD.Rule.word(r)),
+    "@rule.enf", Bool.pick(String, RD.Rule.enforce(r), "1", "")), "@rule.edit", RD.Rule.id(r)), "@rule.err", ""), "ruleform")
+
+def RulesUi.params(+u: Ui) -> J.Json:
+  J.Json.obj(List.append(&2, J.KV, Bool.pick(List<&2, J.KV>, String.is_empty(Ui.scratch(u, "@rule.edit")), Nil{}, [J.KV{"id", J.Str{Ui.scratch(u, "@rule.edit")}}]),
+    [J.KV{"text", J.Str{Bots.field(u, "rtext")}}, J.KV{"bot", J.Str{Bots.field(u, "rbot")}}, J.KV{"project", J.Str{Bots.field(u, "rproj")}},
+     J.KV{"tool", J.Str{Bots.field(u, "rtool")}}, J.KV{"word", J.Str{Bots.field(u, "rword")}}, J.KV{"enforce", J.Flag{String.eq(Ui.scratch(u, "@rule.enf"), "1")}},
+     J.KV{"on", J.Flag{RD.Rule.on(Maybe.default(&2, RD.Rule, RD.Rules.get(Ui.state(u), Ui.scratch(u, "@rule.edit")), RD.Rules.blank()))}}]))
+
+def RulesUi.save(+u: Ui) -> Act:
+  Ui.rpc.keep(Ui.flag_off(Ui.scratch_set(Ui.scratch_set(u, "@rule.rid", Nat.show(Made.rid(u))), "@rule.err", ""), "ruleform"), "rules.set", [J.KV{"rule", RulesUi.params(u)}])
+
+def RulesUi.delete(armed: Bool, +u: Ui, +id: String) -> Act:
+  match armed:
+    case True{}:
+      Ui.rpc.keep(Ui.scratch_set(u, "@rule.del", ""), "rules.drop", [J.KV{"id", J.Str{id}}])
+    case False{}:
+      Act{Ui.scratch_set(u, "@rule.del", id), Nil{}}
+
+def RulesUi.act.k(i: Nat, +u: Ui, +v: String) -> Act:
+  match i:
+    case 0n:
+      Act{RulesUi.fill(u, RD.Rules.blank()), [Focus{"rtext"}]}
+    case 1n:
+      Act{RulesUi.fill(u, Maybe.default(&2, RD.Rule, RD.Rules.get(Ui.state(u), v), RD.Rules.blank())), [Focus{"rtext"}]}
+    case 2n:
+      Act{Ui.scratch_set(u, "@rule.enf", Bool.pick(String, String.eq(Ui.scratch(u, "@rule.enf"), "1"), "", "1")), Nil{}}
+    case 3n:
+      Act{Ui.scratch_set(u, "@f.rbot", v), Nil{}}
+    case 4n:
+      Act{Ui.scratch_set(u, "@f.rproj", v), Nil{}}
+    case 5n:
+      RulesUi.save(u)
+    case 6n:
+      Act{Ui.flag_off(u, "ruleform"), Nil{}}
+    case 7n:
+      Ui.rpc.keep(u, "rules.set", [J.KV{"rule", J.Json.obj([J.KV{"id", J.Str{v}}, J.KV{"on", J.Flag{Bool.not(RD.Rule.on(Maybe.default(&2, RD.Rule, RD.Rules.get(Ui.state(u), v), RD.Rules.blank())))}}])}])
+    case 8n:
+      RulesUi.delete(String.eq(Ui.scratch(u, "@rule.del"), v), u, v)
+    case 9n:
+      Act{Ui.scratch_set(u, "@rule.del", ""), Nil{}}
+    case _:
+      Act{u, Nil{}}
+
+def RulesUi.act(+u: Ui, +a: String, +v: String) -> Act:
+  RulesUi.act.k(C.Codec.pos(["rule-new", "rule-edit", "rule-enf", "rule-bot", "rule-proj", "rule-save", "rule-cancel", "rule-on", "rule-del", "rule-keep"], a), u, v)
+
+type BRow is Data:
+  BRow{id: String, title: String, sub: String, status: String, due_soon: Bool, overdue: Bool, open: Bool}
+
+type BSec is Data:
+  BSec{title: String, count: Nat, rows: List<&2, BRow>}
+
+def BoardUi.is(+u: Ui) -> Bool:
+  String.eq(Ui.scratch(u, "@board"), "1")
+
+def BoardUi.filter(+u: Ui) -> String:
+  Bool.pick(String, String.eq(Ui.scratch(u, "@tb.f"), "all"), "all", "open")
+
+def BoardUi.join(xs: List<&2, String>) -> String:
+  String.join(TBD.Tb.text.nonempty(xs), " · ")
+
+def BoardUi.due.day(+d: String) -> Nat:
+  CR.Cron.days(TBD.Tb.num(String.take(d, 4n), 0n), TBD.Tb.num(String.take(String.drop(d, 5n), 2n), 0n), TBD.Tb.num(String.drop(d, 8n), 0n))
+
+def BoardUi.overdue(+d: String, +now: Nat) -> Bool:
+  Bool.and(TBD.Tb.date(d), Nat.is_lt(BoardUi.due.day(d), Nat.div(now, 86400n)))
+
+def BoardUi.soon(+d: String, +now: Nat) -> Bool:
+  Bool.and(TBD.Tb.date(d), Bool.and(Nat.is_ge(BoardUi.due.day(d), Nat.div(now, 86400n)), Nat.is_le(BoardUi.due.day(d), Nat.add(Nat.div(now, 86400n), 2n))))
+
+def BoardUi.due(+d: String) -> String:
+  Bool.pick(String, TBD.Tb.date(d), "due " ++ Maybe.default(&2, String, List.get(&2, String, ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"], Nat.sub(TBD.Tb.num(String.take(String.drop(d, 5n), 2n), 0n), 1n)), "") ++ " " ++ Nat.show(TBD.Tb.num(String.drop(d, 8n), 0n)), "")
+
+def BoardUi.item(+u: Ui, +id: String) -> TBD.TbItem:
+  Maybe.default(&2, TBD.TbItem, TBD.Tb.get(Ui.state(u), id), TBD.Tb.blank(id, 0n))
+
+def BoardUi.row(+t: TBD.TbItem, +u: Ui) -> BRow:
+  BRow{TBD.Tb.id(t), TBD.Tb.title(t), BoardUi.join([TBD.Tb.owner.name(Ui.state(u), TBD.Tb.owner(t)), TBD.Tb.proj.name(Ui.state(u), TBD.Tb.project(t)), BoardUi.due(TBD.Tb.due(t)), TBD.Tb.group(t)]),
+    TBD.Tb.status(t), BoardUi.soon(TBD.Tb.due(t), Ui.now(u)), BoardUi.overdue(TBD.Tb.due(t), Ui.now(u)), String.eq(Ui.scratch(u, "@tb.row"), TBD.Tb.id(t))}
+
+def BoardUi.rows(xs: List<&2, TBD.TbItem>, +u: Ui) -> List<&2, BRow>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case +x <> t:
+      BoardUi.row(x, u) <> BoardUi.rows(t, u)
+
+def BoardUi.items(+u: Ui) -> List<&2, TBD.TbItem>:
+  TBD.Tb.order(TBD.Tb.filter(TBD.Tb.all(Ui.state(u)), Bool.pick(String, String.eq(BoardUi.filter(u), "all"), "", "doing,blocked,todo"), Ui.scratch(u, "@tb.who"), Ui.scratch(u, "@tb.proj"), Ui.scratch(u, "@tb.group")))
+
+def BoardUi.sections.go(ss: List<&2, String>, +xs: List<&2, TBD.TbItem>, +u: Ui) -> List<&2, BSec>:
+  match ss:
+    case Nil{}:
+      Nil{}
+    case +s <> t:
+      +rows = BoardUi.rows(TBD.Tb.filter(xs, s, "", "", ""), u)
+      BSec{TBD.Tb.words(s), List.length(&2, BRow, rows), rows} <> BoardUi.sections.go(t, xs, u)
+
+def BoardUi.sections(+u: Ui) -> List<&2, BSec>:
+  BoardUi.sections.go(Bool.pick(List<&2, String>, String.eq(BoardUi.filter(u), "all"), TBD.Tb.statuses(), ["doing", "blocked", "todo"]), BoardUi.items(u), u)
+
+def BoardUi.count(+u: Ui) -> Nat:
+  List.length(&2, TBD.TbItem, TBD.Tb.open(TBD.Tb.all(Ui.state(u))))
+
+def BoardUi.label(+u: Ui) -> String:
+  "Board · " ++ Nat.show(BoardUi.count(u)) ++ " open"
+
+def BoardUi.cycle(+s: String) -> String:
+  Bool.pick(String, String.eq(s, "todo"), "doing", Bool.pick(String, String.eq(s, "doing"), "done", "todo"))
+
+def BoardUi.mark(+s: String) -> String:
+  Bool.pick(String, String.eq(s, "todo"), "□", Bool.pick(String, String.eq(s, "doing"), "◧", Bool.pick(String, String.eq(s, "done"), "✓", Bool.pick(String, String.eq(s, "blocked"), "!", "–"))))
+
+def BoardUi.btns(+u: Ui, +id: String) -> List<&2, AgBtn>:
+  List.append(&2, AgBtn, [AgBtn{"Blocked", "tb-status", id ++ "\tblocked", False{}}, AgBtn{"Drop", "tb-status", id ++ "\tdropped", False{}},
+    AgBtn{"To do", "tb-status", id ++ "\ttodo", False{}}, AgBtn{"Doing", "tb-status", id ++ "\tdoing", False{}}, AgBtn{"Done", "tb-status", id ++ "\tdone", False{}}],
+    Bool.pick(List<&2, AgBtn>, String.eq(Ui.scratch(u, "@tb.del"), id), [AgBtn{"Delete?", "tb-del", id, True{}}, AgBtn{"Keep", "tb-keep", "", False{}}], [AgBtn{"Delete", "tb-del", id, False{}}]))
+
+def BoardUi.chip.val(+t: TBD.TbItem, k: Nat) -> String:
+  match k:
+    case 0n:
+      Bool.pick(String, String.is_empty(TBD.Tb.owner(t)), "person", TBD.Tb.owner(t))
+    case 1n:
+      TBD.Tb.project(t)
+    case _:
+      TBD.Tb.group(t)
+
+def BoardUi.chip.name(+v: String, k: Nat, +u: Ui) -> String:
+  match k:
+    case 0n:
+      Bool.pick(String, String.eq(v, "person"), "you", TBD.Tb.owner.name(Ui.state(u), v))
+    case 1n:
+      TBD.Tb.proj.name(Ui.state(u), v)
+    case _:
+      v
+
+def BoardUi.chip.push(skip: Bool, +v: String, +k: Nat, +a: String, +cur: String, +u: Ui, rest: List<&2, AgBtn>) -> List<&2, AgBtn>:
+  match skip:
+    case True{}:
+      rest
+    case False{}:
+      AgBtn{BoardUi.chip.name(v, k, u), a, v, String.eq(cur, v)} <> rest
+
+def BoardUi.chips.go(xs: List<&2, TBD.TbItem>, +k: Nat, +a: String, +cur: String, +u: Ui, +seen: List<&2, String>) -> List<&2, AgBtn>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case +x <> t:
+      +v = BoardUi.chip.val(x, k)
+      BoardUi.chip.push(Bool.or(String.is_empty(v), TBD.Tb.has(seen, v)), v, k, a, cur, u, BoardUi.chips.go(t, k, a, cur, u, v <> seen))
+
+def BoardUi.filters(+u: Ui) -> List<&2, AgBtn>:
+  List.concat(&2, AgBtn, [[AgBtn{"Open", "tb-f", "open", String.eq(BoardUi.filter(u), "open")}, AgBtn{"All", "tb-f", "all", String.eq(BoardUi.filter(u), "all")},
+    AgBtn{"Any owner", "tb-who", "", String.is_empty(Ui.scratch(u, "@tb.who"))}], BoardUi.chips.go(TBD.Tb.all(Ui.state(u)), 0n, "tb-who", Ui.scratch(u, "@tb.who"), u, Nil{}),
+    [AgBtn{"Any project", "tb-proj", "", String.is_empty(Ui.scratch(u, "@tb.proj"))}], BoardUi.chips.go(TBD.Tb.all(Ui.state(u)), 1n, "tb-proj", Ui.scratch(u, "@tb.proj"), u, Nil{}),
+    [AgBtn{"Any group", "tb-group", "", String.is_empty(Ui.scratch(u, "@tb.group"))}], BoardUi.chips.go(TBD.Tb.all(Ui.state(u)), 2n, "tb-group", Ui.scratch(u, "@tb.group"), u, Nil{})])
+
+def BoardUi.links(xs: List<&2, String>) -> List<&2, AgBtn>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case +x <> t:
+      AgBtn{x, Bool.pick(String, LK.Link.is_web(x), "open-url", "file-open"), x, False{}} <> BoardUi.links(t)
+
+def BoardUi.detail(+u: Ui, +id: String) -> List<&2, AgRow>:
+  [AgRow{"", TBD.Tb.notes(BoardUi.item(u, id)), Nil{}, BoardUi.links(TBD.Tb.links(BoardUi.item(u, id)))},
+   AgRow{"Title", "", [AgField{"tbedit", "Title", False{}, Bots.field(u, "tbedit"), "tb-title"}], [AgBtn{"Rename", "tb-title", id, False{}}]},
+   AgRow{"Notes", "", [AgField{"tbnotes", "Notes", False{}, Bots.field(u, "tbnotes"), "tb-notes"}], [AgBtn{"Save notes", "tb-notes", id, False{}}]},
+   AgRow{"", "", Nil{}, BoardUi.btns(u, id)}]
+
+def BoardUi.set(+u: Ui, fs: List<&2, J.KV>) -> Act:
+  Ui.rpc.keep(u, "board.set", [J.KV{"item", J.Json.obj(fs)}])
+
+def BoardUi.status(+u: Ui, +id: String, +s: String) -> Act:
+  BoardUi.set(u, [J.KV{"id", J.Str{id}}, J.KV{"status", J.Str{s}}])
+
+def BoardUi.delete(armed: Bool, +u: Ui, +id: String) -> Act:
+  match armed:
+    case True{}:
+      Ui.rpc.keep(Ui.scratch_set(u, "@tb.del", ""), "board.drop", [J.KV{"id", J.Str{id}}])
+    case False{}:
+      Act{Ui.scratch_set(u, "@tb.del", id), Nil{}}
+
+def BoardUi.add(empty: Bool, +u: Ui) -> Act:
+  match empty:
+    case True{}:
+      Act{u, Nil{}}
+    case False{}:
+      BoardUi.set(Ui.scratch_set(u, "@f.tbtitle", ""), [J.KV{"title", J.Str{Bots.field(u, "tbtitle")}}, J.KV{"owner", J.Str{Ui.scratch(u, "@tb.who")}},
+        J.KV{"project", J.Str{Ui.scratch(u, "@tb.proj")}}, J.KV{"group", J.Str{Ui.scratch(u, "@tb.group")}}])
+
+def BoardUi.open(+u: Ui) -> Ui:
+  Ui.scratch_set(Ui.flag_off(Ui.select.k(u, ""), "settings"), "@board", "1")
+
+def BoardUi.act.k(i: Nat, +u: Ui, +v: String) -> Act:
+  match i:
+    case 0n:
+      Act{BoardUi.open(u), Nil{}}
+    case 1n:
+      Act{Ui.scratch_set(u, "@board", ""), Nil{}}
+    case 2n:
+      Act{Ui.scratch_set(u, "@tb.f", v), Nil{}}
+    case 3n:
+      Act{Ui.scratch_set(u, "@tb.who", v), Nil{}}
+    case 4n:
+      Act{Ui.scratch_set(u, "@tb.proj", v), Nil{}}
+    case 5n:
+      Act{Ui.scratch_set(u, "@tb.group", v), Nil{}}
+    case 6n:
+      BoardUi.status(u, v, BoardUi.cycle(TBD.Tb.status(BoardUi.item(u, v))))
+    case 7n:
+      BoardUi.status(u, Maybe.default(&2, String, List.head(&2, String, String.split(v, '\t')), ""), Maybe.default(&2, String, List.get(&2, String, String.split(v, '\t'), 1n), "todo"))
+    case 8n:
+      Act{Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(u, "@tb.del", ""), "@f.tbnotes", TBD.Tb.notes(BoardUi.item(u, v))), "@f.tbedit", TBD.Tb.title(BoardUi.item(u, v))), "@tb.row", Bool.pick(String, String.eq(Ui.scratch(u, "@tb.row"), v), "", v)), Nil{}}
+    case 9n:
+      BoardUi.add(String.is_empty(String.trim(Bots.field(u, "tbtitle"))), u)
+    case 10n:
+      BoardUi.set(u, [J.KV{"id", J.Str{Bool.pick(String, String.is_empty(v), Ui.scratch(u, "@tb.row"), v)}}, J.KV{"notes", J.Str{Bots.field(u, "tbnotes")}}])
+    case 11n:
+      BoardUi.set(u, [J.KV{"id", J.Str{Bool.pick(String, String.is_empty(v), Ui.scratch(u, "@tb.row"), v)}}, J.KV{"title", J.Str{Bots.field(u, "tbedit")}}])
+    case 12n:
+      BoardUi.delete(String.eq(Ui.scratch(u, "@tb.del"), v), u, v)
+    case 13n:
+      Act{Ui.scratch_set(u, "@tb.del", ""), Nil{}}
+    case _:
+      Act{u, Nil{}}
+
+def BoardUi.act(+u: Ui, +a: String, +v: String) -> Act:
+  BoardUi.act.k(C.Codec.pos(["tb-open", "tb-close", "tb-f", "tb-who", "tb-proj", "tb-group", "tb-tick", "tb-status", "tb-row", "tb-add", "tb-notes", "tb-title", "tb-del", "tb-keep"], a), u, v)
+
+# Small adversarial examples read by the UI laws: a todo older than doing,
+# and a closed item which the default filter must hide.
+def BoardUi.demo() -> Ui:
+  Ui.far.st(Ui.init(200000n), M.State.replay([
+    M.SettingSet{"board.todo", "{\"title\":\"Plan\",\"status\":\"todo\",\"at\":1}", 1n},
+    M.SettingSet{"board.doing", "{\"title\":\"Build\",\"status\":\"doing\",\"at\":2}", 2n},
+    M.SettingSet{"board.done", "{\"title\":\"Finished\",\"status\":\"done\",\"at\":3}", 3n}], M.State.empty()))
+
+def BoardUi.rows.ids(rs: List<&2, BRow>) -> List<&2, String>:
+  match rs:
+    case Nil{}:
+      Nil{}
+    case BRow{id, _, _, _, _, _, _} <> t:
+      id <> BoardUi.rows.ids(t)
+
+def BoardUi.sections.ids(ss: List<&2, BSec>) -> List<&2, String>:
+  match ss:
+    case Nil{}:
+      Nil{}
+    case BSec{_, _, rs} <> t:
+      List.append(&2, String, BoardUi.rows.ids(rs), BoardUi.sections.ids(t))
+
+def Ui.act.tb(board: Bool, +u: Ui, +a: String, +v: String) -> Act:
+  match board:
+    case True{}:
+      BoardUi.act(u, a, v)
+    case False{}:
+      Ui.act.s(String.eq(a, "skill-close"), u, a, v)
+
+def Ui.act.rule(rule: Bool, +u: Ui, +a: String, +v: String) -> Act:
+  match rule:
+    case True{}:
+      RulesUi.act(u, a, v)
+    case False{}:
+      Ui.act.tb(String.starts_with(a, "tb-"), u, a, v)
+
 def Ui.act(+u: Ui, +action: String, +value: String) -> Act:
-  Rc.sync.of(Ui.act.s(String.eq(action, "skill-close"), u, action, value))
+  Rc.sync.of(Ui.act.rule(String.starts_with(action, "rule-"), u, action, value))
 
 # the newest n of a list (oldest first), and how many are left out
 type Win is Data:

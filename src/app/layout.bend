@@ -3146,6 +3146,12 @@ def Set.agy(+ty: Ty, +n: S.Nui, +x: U32, +w: U32, +y: U32) -> Out:
     Set.card(x, (y + 32 : U32), w, (Set.agy.sum(rs, ty, x, w) + 10 : U32)),
     Set.agy.rows(rs, ty, n, x, w, (y + 38 : U32))])
 
+def Set.rules.h(+ty: Ty, +n: S.Nui, +x: U32, +w: U32) -> U32:
+  (52 + Set.agy.sum(U.RulesUi.cards(S.Nui.ui(n)), ty, x, w) : U32)
+
+def Set.rules(+ty: Ty, +n: S.Nui, +x: U32, +w: U32, +y: U32) -> Out:
+  Out.all([Set.card(x, y, w, Set.rules.h(ty, n, x, w)), Set.agy.rows(U.RulesUi.cards(S.Nui.ui(n)), ty, n, x, w, (y + 8 : U32))])
+
 def Set.tour(+ty: Ty, +x: U32, +w: U32, +y: U32) -> Out:
   +bw = Lay.button.w(ty, "Show the tour")
   Out.all([
@@ -3206,7 +3212,7 @@ def Lay.settings(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: S
   +er = {(Set.rows(ty, tms, (x + 16 : U32), (x + w - 16 : U32), (x + 16 : U32)) * 34 : U32) : U32}
   +ey = {(202 + er : U32) : U32}
   +fy = {(ey + 46 : U32) : U32}
-  +total = {(1156 + Set.notify.h(st, ty, w) + dy + fy + Set.voice.h(ty, n, x, w) + Set.mates.h(n) + Set.keys.h(n) + Set.agy.h(ty, n, x, w) + 132 : U32) : U32}
+  +total = {(1156 + Set.notify.h(st, ty, w) + dy + fy + Set.voice.h(ty, n, x, w) + Set.mates.h(n) + Set.keys.h(n) + Set.rules.h(ty, n, x, w) + Set.agy.h(ty, n, x, w) + 132 : U32) : U32}
   +off = {U32.min(raw, U32.dim(total, h)) : U32}
   +b = {(0 - off : U32) : U32}
   +b2 = {(b + 128 + Set.notify.h(st, ty, w) : U32) : U32}
@@ -3267,8 +3273,9 @@ def Lay.settings(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: S
     Set.voice(ty, st, n, x, w, (b2 + 1010 + dy + fy : U32)),
     Set.mates(ty, n, x, w, (b2 + 1010 + dy + fy + Set.voice.h(ty, n, x, w) : U32)),
     Set.keys(ty, n, x, w, (b2 + 1010 + dy + fy + Set.voice.h(ty, n, x, w) + Set.mates.h(n) : U32)),
-    Set.agy(ty, n, x, w, (b2 + 1010 + dy + fy + Set.voice.h(ty, n, x, w) + Set.mates.h(n) + Set.keys.h(n) + 16 : U32)),
-    Set.tour(ty, x, w, (b2 + 1010 + dy + fy + Set.voice.h(ty, n, x, w) + Set.mates.h(n) + Set.keys.h(n) + Set.agy.h(ty, n, x, w) + 16 : U32))])),
+    Set.rules(ty, n, x, w, (b2 + 1010 + dy + fy + Set.voice.h(ty, n, x, w) + Set.mates.h(n) + Set.keys.h(n) : U32)),
+    Set.agy(ty, n, x, w, (b2 + 1010 + dy + fy + Set.voice.h(ty, n, x, w) + Set.mates.h(n) + Set.keys.h(n) + Set.rules.h(ty, n, x, w) + 16 : U32)),
+    Set.tour(ty, x, w, (b2 + 1010 + dy + fy + Set.voice.h(ty, n, x, w) + Set.mates.h(n) + Set.keys.h(n) + Set.rules.h(ty, n, x, w) + Set.agy.h(ty, n, x, w) + 16 : U32))])),
     Out{List.append(&2, R.Op, [D.Draw.rect(D.Clip.all(), x0, 0, (x1 - x0 : U32), 51, T.Th.bg(), 255), D.Draw.rect(D.Clip.all(), x0, 51, (x1 - x0 : U32), 1, T.Th.line(), 255)],
       Ty.text(ty, 0n, "Settings", D.Clip.all(), (x0 + 24 : U32), 0, 52, T.Th.text())), Nil{}},
     Lay.button(ty, D.Clip.all(), (x1 - 16 - Lay.button.w(ty, "Close") : U32), 12, "Close", T.Th.soft(), "flag", "settings"),

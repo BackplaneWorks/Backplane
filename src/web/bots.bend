@@ -151,7 +151,7 @@ def WB.side(+u: U.Ui) -> List<&2, D.Node>:
     [WB.shead("Bots", "bot-new", "New bot")],
     WB.bot.form(BI.BU.open(u, "@bnew"), u),
     WB.rows(BI.BU.rows(u)),
-    [WB.shead("Rooms", "room-new", "New room")],
+    [D.Dom.button("project-head board-entry", "tb-open", "", "Open Board", U.BoardUi.label(u)), WB.shead("Rooms", "room-new", "New room")],
     WB.room.form(BI.BU.open(u, "@rnew"), u),
     WB.rrows(BI.BU.rooms(u))])}]
 
@@ -628,6 +628,7 @@ def WB.plane.k(+p: PL.Plane, +h: PL.PHome, +now: Nat) -> D.Node:
       WB.div("plane-side", List.concat(&2, D.Node, [
         WB.psec("Bots", PL.Plane.bots(p), 0n, now),
         WB.psec("Rooms", PL.Plane.rooms(p), 0n, now),
+        WB.psec("Board · " ++ Nat.show(PL.Plane.board_n(p)) ++ " open", PL.Plane.board(p), Nat.sub(PL.Plane.board_n(p), List.length(&2, PL.PRow, PL.Plane.board(p))), now),
         WB.psec("Routines", PL.Plane.routines(p), 0n, now)]))])])
 
 # the Status tab's body

@@ -763,6 +763,42 @@ def View.agy.rows(rs: List<&2, U.AgRow>) -> List<&2, D.Node>:
     case U.AgRow{+l, +n, fs, bs} <> t:
       View.setrow(l, n, List.append(&2, D.Node, View.agy.fields(fs), View.agy.btns(bs))) <> View.agy.rows(t)
 
+def View.rules(+u: U.Ui) -> List<&2, D.Node>:
+  View.agy.rows(U.RulesUi.cards(u))
+
+def View.board.detail(open: Bool, +u: U.Ui, +id: String) -> List<&2, D.Node>:
+  match open:
+    case False{}:
+      Nil{}
+    case True{}:
+      View.agy.rows(U.BoardUi.detail(u, id))
+
+def View.board.rows(rs: List<&2, U.BRow>, +u: U.Ui) -> List<&2, D.Node>:
+  match rs:
+    case Nil{}:
+      Nil{}
+    case U.BRow{+id, title, sub, status, soon, over, +open} <> t:
+      D.El{"article", "tb-" ++ id, [D.At{"class", "board-row" ++ Bool.pick(String, over, " overdue", Bool.pick(String, soon, " due-soon", ""))}],
+        List.append(&2, D.Node, [D.El{"div", "", [D.At{"class", "board-summary"}],
+          [D.Dom.button("board-status", "tb-tick", id, "Change status", U.BoardUi.mark(status)),
+           D.El{"button", "", [D.At{"class", "board-task"}, D.On{"click", "tb-row"}, D.At{"data-value", id}, D.At{"aria-expanded", Bool.pick(String, open, "true", "false")}],
+             [D.Dom.span("title", title), D.Dom.span("meta", sub)]}]}], View.board.detail(open, u, id))} <> View.board.rows(t, u)
+
+def View.board.sections(ss: List<&2, U.BSec>, +u: U.Ui) -> List<&2, D.Node>:
+  match ss:
+    case Nil{}:
+      Nil{}
+    case U.BSec{title, count, rs} <> t:
+      D.El{"section", "", [D.At{"class", "board-section"}],
+        D.Dom.span("board-heading", title ++ " · " ++ Nat.show(count)) <> View.board.rows(rs, u)} <> View.board.sections(t, u)
+
+def View.board(+u: U.Ui) -> D.Node:
+  D.El{"main", "board", [D.At{"class", "board-view"}],
+    [D.El{"header", "", [D.At{"class", "thread-head"}], [D.Dom.span("title", "Board"), D.Dom.button("", "tb-close", "", "Close Board", "Close")]},
+     D.El{"div", "", [D.At{"class", "board-content"}], List.concat(&2, D.Node, [
+       [D.Dom.div("board-filters", View.agy.btns(U.BoardUi.filters(u))), D.Dom.div("board-add", [WB.WB.input("tbtitle", "tbtitle", U.Bots.field(u, "tbtitle"), "Add a task", "tb-add"),
+         D.Dom.button("primary", "tb-add", "", "Add a task", "Add")])], View.board.sections(U.BoardUi.sections(u), u)])}]}
+
 def View.keys.set(+u: U.Ui) -> List<&2, D.Node>:
   List.concat(&2, D.Node, [
     [View.setrow("API keys", U.ApiKeys.note(u),
@@ -849,7 +885,7 @@ def View.settings(+u: U.Ui, +st: M.State, +nf: Map<&2, String>, +v: String, +not
         D.Dom.when(Bool.not(String.is_empty(U.Pair.link(nf))), D.Dom.copy(U.Pair.link(nf)))))],
       View.pair.qr(U.Ui.flag(u, "pairqr"), nf),
       [View.setrow("Update channel", "Stable takes releases; nightly also takes the daily builds.", View.chips(["stable", "nightly"], M.Setting.get(st, "update.channel", "stable"), "update.channel")),
-      View.setrow("Backplane " ++ v, U.Update.line.w(st, nf, note), View.update.btn(U.Update.btn(st, nf, note)))], View.voice.set(u, st), View.keys.set(u), View.agy.rows(U.Agv.rows(u)), [View.setrow("Tour", "The short walk through projects, threads, bots, your agents and your machines.", [D.Dom.button("", "ob-open", "", "Show the tour again", "Show the tour")])]])}]}
+      View.setrow("Backplane " ++ v, U.Update.line.w(st, nf, note), View.update.btn(U.Update.btn(st, nf, note)))], View.voice.set(u, st), View.keys.set(u), View.rules(u), View.agy.rows(U.Agv.rows(u)), [View.setrow("Tour", "The short walk through projects, threads, bots, your agents and your machines.", [D.Dom.button("", "ob-open", "", "Show the tour again", "Show the tour")])]])}]}
 
 def View.empty(n: Nat) -> D.Node:
   D.El{"main", "empty", [D.At{"class", "empty"}], [D.Txt{Bool.pick(String, Nat.is_eq(n, 0n), "Add a project with + to start.", "Pick a thread, or start one with + next to a project.")}]}
@@ -1389,7 +1425,7 @@ def View.main.k(none: Bool, u: U.Ui, +sel: String, +n: Nat) -> D.Node:
       View.main.s(U.Flag.get(o, "settings"), none, u, sel, n)
 
 # settings, else a bot, a room or a bot elsewhere, else the thread
-def View.main.b(settings: Bool, bv: BI.View, +u: U.Ui, +sel: String, +n: Nat) -> D.Node:
+def View.main.bot(settings: Bool, bv: BI.View, +u: U.Ui, +sel: String, +n: Nat) -> D.Node:
   match settings bv:
     case False{} BI.VBot{b}:
       View.bot(u, b)
@@ -1399,6 +1435,16 @@ def View.main.b(settings: Bool, bv: BI.View, +u: U.Ui, +sel: String, +n: Nat) ->
       WB.WB.remote(u, id)
     case _ _:
       View.main.k(String.is_empty(sel), u, sel, n)
+
+def View.main.board(shown: Bool, settings: Bool, bv: BI.View, +u: U.Ui, +sel: String, +n: Nat) -> D.Node:
+  match shown:
+    case True{}:
+      View.board(u)
+    case False{}:
+      View.main.bot(settings, bv, u, sel, n)
+
+def View.main.b(+settings: Bool, bv: BI.View, +u: U.Ui, +sel: String, +n: Nat) -> D.Node:
+  View.main.board(Bool.and(Bool.not(settings), U.BoardUi.is(u)), settings, bv, u, sel, n)
 
 # the thread's own browser page (a bot's is the bot's), as a bot's
 # Browser tab shows it
@@ -1995,7 +2041,7 @@ def View.tour.cls(+u: U.Ui) -> String:
 def View.page.b(+bv: BI.View, u: U.Ui) -> D.Node:
   match u:
     case U.Ui{+st, +sel, +d, +l, +o, +on, +now, +ad, +pa, +v, +r, +w, +e, +note, +nf, +ob, +tr}:
-      D.El{"div", "app", [D.At{"class", Bool.pick(String, pa, "app panel", "app") ++ Bool.pick(String, Bool.or(Bool.or(Bool.not(String.is_empty(sel)), U.Flag.get(o, "settings")), WB.WB.shown(bv)), " picked", "")
+      D.El{"div", "app", [D.At{"class", Bool.pick(String, pa, "app panel", "app") ++ Bool.pick(String, Bool.or(Bool.or(Bool.not(String.is_empty(sel)), U.Flag.get(o, "settings")), Bool.or(WB.WB.shown(bv), String.eq(U.Str.get(d, "@board"), "1"))), " picked", "")
         ++ Bool.pick(String, String.eq(M.Setting.get(st, "ui.theme", ""), "light"), " light", "") ++ View.tour.cls(U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr})}],
         D.Dom.cat([View.sidebar(U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}),
           View.main.b(U.Flag.get(o, "settings"), bv, U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}, sel, List.length(&2, M.Project, U.Ui.projects(st)))],

@@ -155,6 +155,7 @@ fun LazyListScope.botsSection(m: AppModel, s: Screen) {
                 .clickable { m.open(b.nav, b.act, b.id, b.name, b.cat, if (b.remote) "remote" else "bot") },
         )
     }
+    s.boardEntry?.let { b -> item(key = "board") { ListItem(headlineContent = { Text(b.label) }, modifier = Modifier.clickable { m.act("tb-open", s.hub + "|") }) } }
     items(s.rooms, key = { "r:" + it.id }) { r ->
         ListItem(
             headlineContent = { Text(r.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },

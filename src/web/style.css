@@ -734,3 +734,20 @@ button.mic.starting, button.mic.stopping { border-color: var(--bad); color: var(
 .rl-form .field { width: min(300px, 100%); padding: 4px 8px; background: var(--bg); border: 1px solid var(--line); color: var(--text); border-radius: 0; }
 .rl-form button.primary { padding: 5px 12px; }
 .rl-form button.primary[disabled] { opacity: .5; cursor: default; }
+
+/* Standing rules and board share the existing theme and form controls. */
+.board-view { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
+.board-content { overflow: auto; padding: 16px; }
+.board-filters, .board-add { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.board-add input { flex: 1; min-width: 120px; }
+.board-section { margin-bottom: 20px; }
+.board-heading { display: block; color: var(--dim); margin: 8px 0; }
+.board-row { border-bottom: 1px solid var(--line); padding: 8px 0; }
+.board-summary { display: flex; align-items: center; gap: 12px; }
+.board-status { width: 32px; height: 32px; flex-shrink: 0; }
+.board-task { display: flex; flex: 1; flex-direction: column; text-align: left; min-width: 0; border: 0; background: transparent; color: inherit; gap: 4px; }
+.board-task .title, .board-task .meta { overflow-wrap: anywhere; }
+.board-task .meta { font-size: 12px; color: var(--dim); }
+.board-row.overdue .meta { color: var(--bad); }
+.board-row .set-row { flex-wrap: wrap; }
+@media (max-width: 680px) { .board-content { padding: 12px; } .board-view { width: 100%; } }

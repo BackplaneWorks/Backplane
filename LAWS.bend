@@ -7329,3 +7329,19 @@ law told_note_marked:
 law told_quiet_record_nothing:
   {List.length(&2, M.Change, TLD.Told.alerts([M.SettingSet{"alert.tb", NO.Alert.line("", "", "m1", "5.1", ""), 5n}], TLD.Told.demo.chatter(), 0n)) == 0n : Nat}
 # ---- end told-rules-board ----
+
+# ---- told-rules-board ui ----
+# Doing precedes an older todo in the sections the clients actually draw.
+law boardui_sections_order:
+  {String.join(U.BoardUi.sections.ids(U.BoardUi.sections(U.BoardUi.demo())), ",") == "doing,todo" : String}
+
+# A done item cannot leak into the default open view.
+law boardui_open_hides_done:
+  {String.contains(String.join(U.BoardUi.sections.ids(U.BoardUi.sections(U.BoardUi.demo())), ","), "done") == False{} : Bool}
+
+# Every board preview is capped, however many open items there are.
+law plane_board_capped:
+  for +u: U.Ui
+  for +now: Nat
+  {Nat.is_le(List.length(&2, PLN.PRow, PLN.Plane.board.of(u, now)), 6n) == True{} : Bool}
+# ---- end told-rules-board ui ----

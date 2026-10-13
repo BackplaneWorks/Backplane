@@ -125,24 +125,25 @@ def Bv.rrows(rs: List<&2, BU.RRow>, +ty: L.Ty, +c: D.Clip, +y: U32) -> L.Col:
 # what the sidebar's bots section needs, gathered before the sidebar's
 # layout calls it (one value, so the call back holds little)
 type Sd is Data:
-  Sd{ty: L.Ty, cats: Map<&2, CA.CatF>, f: F.FS, ms: Nat, bn: Bool, rn: Bool, rows: List<&2, BU.BRow>, rooms: List<&2, BU.RRow>, up: Maybe<&2, BU.BRow>, cn: String}
+  Sd{ty: L.Ty, cats: Map<&2, CA.CatF>, f: F.FS, ms: Nat, bn: Bool, rn: Bool, rows: List<&2, BU.BRow>, rooms: List<&2, BU.RRow>, up: Maybe<&2, BU.BRow>, cn: String, board: String}
 
 def Bv.sd(+ty: L.Ty, +cats: Map<&2, CA.CatF>, +n: S.Nui) -> Sd:
-  Sd{ty, cats, F.Fm.fs(n), S.Nui.ms_of(n), BU.BU.open(S.Nui.ui(n), "@bnew"), BU.BU.open(S.Nui.ui(n), "@rnew"), BU.BU.rows(S.Nui.ui(n)), BU.BU.rooms(S.Nui.ui(n)), BU.BU.uber(S.Nui.ui(n)), ""}
+  Sd{ty, cats, F.Fm.fs(n), S.Nui.ms_of(n), BU.BU.open(S.Nui.ui(n), "@bnew"), BU.BU.open(S.Nui.ui(n), "@rnew"), BU.BU.rows(S.Nui.ui(n)), BU.BU.rooms(S.Nui.ui(n)), BU.BU.uber(S.Nui.ui(n)), "", U.BoardUi.label(S.Nui.ui(n))}
 
-def Bv.side.k(+ty: L.Ty, +cats: Map<&2, CA.CatF>, +f: F.FS, +ms: Nat, +bn: Bool, +rn: Bool, rows: List<&2, BU.BRow>, rooms: List<&2, BU.RRow>, +c: D.Clip, +y: U32) -> L.Col:
+def Bv.side.k(+ty: L.Ty, +cats: Map<&2, CA.CatF>, +f: F.FS, +ms: Nat, +bn: Bool, +rn: Bool, rows: List<&2, BU.BRow>, rooms: List<&2, BU.RRow>, +c: D.Clip, +y: U32, +board: String) -> L.Col:
   L.Lay.col.cat(L.Out.cat(L.Out.ops([D.Draw.rect(c, 12, (y + 4 : U32), 240, 1, T.Th.line(), 255)]), Bv.head(ty, c, "Bots", "bot-new", bn, (y + 10 : U32))),
     L.Lay.col.then(Bv.bform(bn, ty, f, c, (y + 40 : U32)), y1 =>
       L.Lay.col.then(Bv.rows(rows, ty, cats, ms, c, y1), +y2 =>
-        L.Lay.col.cat(Bv.head(ty, c, "Rooms", "room-new", rn, (y2 + 8 : U32)),
-          L.Lay.col.then(Bv.rform(rn, ty, f, c, (y2 + 38 : U32)), y3 =>
-            Bv.rrows(rooms, ty, c, y3))))))
+        L.Lay.col.cat(L.Out{L.Ty.text(ty, 0n, board, c, 20, y2, 32, T.Th.soft()), [L.Lay.hit(0, y2, 264, 32, "tb-open", "")]},
+        L.Lay.col.cat(Bv.head(ty, c, "Rooms", "room-new", rn, (y2 + 40 : U32)),
+          L.Lay.col.then(Bv.rform(rn, ty, f, c, (y2 + 70 : U32)), y3 =>
+            Bv.rrows(rooms, ty, c, y3)))))))
 
 # the sidebar under the projects: a rule, the cats, then the rooms
 def Bv.side.of(sd: Sd, +c: D.Clip, +y: U32) -> L.Col:
   match sd:
-    case Sd{+ty, +cats, +f, +ms, +bn, +rn, rows, rooms, _, _}:
-      Bv.side.k(ty, cats, f, ms, bn, rn, rows, rooms, c, y)
+    case Sd{+ty, +cats, +f, +ms, +bn, +rn, rows, rooms, _, _, board}:
+      Bv.side.k(ty, cats, f, ms, bn, rn, rows, rooms, c, y, board)
 
 def Bv.side(+ty: L.Ty, +cats: Map<&2, CA.CatF>, +n: S.Nui, +c: D.Clip, +y: U32) -> L.Col:
   Bv.side.of(Bv.sd(ty, cats, n), c, y)
@@ -164,14 +165,14 @@ def Bv.uber.row(+ty: L.Ty, +cats: Map<&2, CA.CatF>, +ms: Nat, r: BU.BRow, +cn: S
 
 def Bv.uber.out(sd: Sd) -> L.Out:
   match sd:
-    case Sd{+ty, +cats, _, +ms, _, _, _, _, Some{r}, +cn}:
+    case Sd{+ty, +cats, _, +ms, _, _, _, _, Some{r}, +cn, _}:
       Bv.uber.row(ty, cats, ms, r, cn, D.Clip{0, 52, 264, 100})
     case _:
       L.Out.none()
 
 def Bv.uber.top(sd: Sd) -> U32:
   match sd:
-    case Sd{_, _, _, _, _, _, _, _, Some{_}, _}:
+    case Sd{_, _, _, _, _, _, _, _, Some{_}, _, _}:
       Bv.uber.h()
     case _:
       0
@@ -741,7 +742,7 @@ def Bv.wraps.none() -> Map<&2, PW>:
 
 # the plane kept with the posts (Bv.plane.keep), an empty one before any
 def Bv.plane.none() -> PC.Plane:
-  PC.Plane{Nil{}, Nil{}, Nil{}, Nil{}, Nil{}, Nil{}, 0n, Nil{}}
+  PC.Plane{Nil{}, Nil{}, Nil{}, Nil{}, Nil{}, Nil{}, 0n, Nil{}, Nil{}, 0n}
 
 def Bv.plane.got(p: PW) -> PC.Plane:
   match p:
@@ -770,7 +771,7 @@ def Bv.plane.words(+ws: Map<&2, PW>) -> String:
 
 def Bv.sd.w(+ty: L.Ty, +cats: Map<&2, CA.CatF>, +n: S.Nui, +ws: Map<&2, PW>) -> Sd:
   Sd{ty, cats, F.Fm.fs(n), S.Nui.ms_of(n), BU.BU.open(S.Nui.ui(n), "@bnew"), BU.BU.open(S.Nui.ui(n), "@rnew"), BU.BU.rows(S.Nui.ui(n)), BU.BU.rooms(S.Nui.ui(n)),
-    BU.BU.uber(S.Nui.ui(n)), Bv.plane.words(ws)}
+    BU.BU.uber(S.Nui.ui(n)), Bv.plane.words(ws), U.BoardUi.label(S.Nui.ui(n))}
 
 
 def Bv.wrap.key(+id: String, +w: U32) -> String:
@@ -931,12 +932,129 @@ def Bv.view(v: BU.View, +ty: L.Ty, +memo: L.TLMemo, +cats: Map<&2, CA.CatF>, +ws
     case BU.VRemote{+id}:
       Some{Bv.remote(ty, ws, cats, n, id, 264, x1)}
 
+# Native Board: only laid out by the shown branch. Pane scrolling uses 64px steps.
+def TbWin.cut.ops(xs: List<&2, R.Op>, +c: D.Clip) -> List<&2, R.Op>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case R.Op{x0, y0, x1, y1, co, a, shape} <> t:
+      D.Clip.cut(c, x0, y0, x1, y1, co, a, shape) <> TbWin.cut.ops(t, c)
+
+def TbWin.cut.hits(xs: List<&2, S.Hit>, +c: D.Clip) -> List<&2, S.Hit>:
+  match xs c:
+    case Nil{} _:
+      Nil{}
+    case S.Hit{x0, y0, x1, y1, a, v} <> t D.Clip{+cx0, +cy0, +cx1, +cy1}:
+      S.Hit{U32.max(x0, cx0), U32.max(y0, cy0), U32.min(x1, cx1), U32.min(y1, cy1), a, v} <> TbWin.cut.hits(t, c)
+
+def TbWin.cut(o: L.Out, +c: D.Clip) -> L.Out:
+  match o:
+    case L.Out{os, hs}:
+      L.Out{TbWin.cut.ops(os, c), TbWin.cut.hits(hs, c)}
+
+def TbWin.detail.h(open: Bool, +u: U.Ui, +id: String, +ty: L.Ty, +x: U32, +w: U32) -> U32:
+  match open:
+    case True{}:
+      L.Set.agy.sum(U.BoardUi.detail(u, id), ty, x, w)
+    case False{}:
+      0
+
+def TbWin.detail(open: Bool, +u: U.Ui, +id: String, +ty: L.Ty, +n: S.Nui, +c: D.Clip, +x: U32, +w: U32, +y: U32) -> L.Out:
+  match open:
+    case True{}:
+      TbWin.cut(L.Set.agy.rows(U.BoardUi.detail(u, id), ty, n, x, w, y), c)
+    case False{}:
+      L.Out.none()
+
+def TbWin.rh(r: U.BRow, +u: U.Ui, +ty: L.Ty, +x: U32, +w: U32) -> U32:
+  match r:
+    case U.BRow{id, _, _, _, _, _, open}:
+      (64 + TbWin.detail.h(open, u, id, ty, x, w) : U32)
+
+def TbWin.row(r: U.BRow, +ty: L.Ty, +n: S.Nui, +c: D.Clip, +x: U32, +w: U32, +y: U32) -> L.Out:
+  match r:
+    case U.BRow{+id, +title, sub, status, _, over, open}:
+      L.Out.all([
+        L.Out{List.append(&2, R.Op, L.Ty.text(ty, 0n, L.Ty.fit(ty, 0n, title, (w - 52 : U32)), c, (x + 40 : U32), y, 30, T.Th.text()),
+          L.Ty.text(ty, 2n, L.Ty.fit(ty, 2n, sub, (w - 52 : U32)), c, (x + 40 : U32), (y + 28 : U32), 26, Bool.pick(U32, over, T.Th.bad(), T.Th.dim()))),
+          [L.Lay.hit((x + 36 : U32), y, (w - 36 : U32), 58, "tb-row", id)]},
+        L.Lay.button(ty, c, x, (y + 8 : U32), U.BoardUi.mark(status), T.Th.soft(), "tb-tick", id),
+        TbWin.detail(open, S.Nui.ui(n), id, ty, n, c, x, w, (y + 60 : U32))])
+
+def TbWin.row.if(seen: Bool, r: U.BRow, +ty: L.Ty, +n: S.Nui, +c: D.Clip, +x: U32, +w: U32, +y: U32) -> L.Out:
+  match seen:
+    case True{}:
+      TbWin.cut(TbWin.row(r, ty, n, c, x, w, y), c)
+    case False{}:
+      L.Out.none()
+
+def TbWin.rows(rs: List<&2, U.BRow>, +ty: L.Ty, +n: S.Nui, +c: D.Clip, +x: U32, +w: U32, +rel: U32, +top: U32, +off: U32, +vh: U32) -> L.Col:
+  match rs:
+    case Nil{}:
+      L.Col{L.Out.none(), rel}
+    case +r <> t:
+      +rh = TbWin.rh(r, S.Nui.ui(n), ty, x, w)
+      L.Lay.col.cat(TbWin.row.if(PV.Pl.vis(rel, rh, off, vh), r, ty, n, c, x, w, (top + rel - off : U32)),
+        TbWin.rows(t, ty, n, c, x, w, (rel + rh : U32), top, off, vh))
+
+def TbWin.sections(ss: List<&2, U.BSec>, +ty: L.Ty, +n: S.Nui, +c: D.Clip, +x: U32, +w: U32, +rel: U32, +top: U32, +off: U32, +vh: U32) -> L.Col:
+  match ss:
+    case Nil{}:
+      L.Col{L.Out.none(), rel}
+    case U.BSec{title, count, rs} <> t:
+      L.Lay.col.cat(L.Out.ops(L.Ty.text(ty, 1n, title ++ " · " ++ Nat.show(count), c, x, (top + rel - off : U32), 32, T.Th.soft())),
+        L.Lay.col.then(TbWin.rows(rs, ty, n, c, x, w, (rel + 36 : U32), top, off, vh), r2 => TbWin.sections(t, ty, n, c, x, w, (r2 + 12 : U32), top, off, vh)))
+
+def TbWin.rows.h(rs: List<&2, U.BRow>, +u: U.Ui, +ty: L.Ty, +x: U32, +w: U32) -> U32:
+  match rs:
+    case Nil{}:
+      0
+    case r <> t:
+      (TbWin.rh(r, u, ty, x, w) + TbWin.rows.h(t, u, ty, x, w) : U32)
+
+def TbWin.h(ss: List<&2, U.BSec>, +u: U.Ui, +ty: L.Ty, +x: U32, +w: U32) -> U32:
+  match ss:
+    case Nil{}:
+      0
+    case U.BSec{_, _, rs} <> t:
+      (48 + TbWin.rows.h(rs, u, ty, x, w) + TbWin.h(t, u, ty, x, w) : U32)
+
+def TbWin.draw(+ty: L.Ty, +n: S.Nui, +x1: U32) -> L.Out:
+  +u = S.Nui.ui(n)
+  +x = {280 : U32}
+  +w = {(x1 - x - 16 : U32) : U32}
+  +h = S.Nui.height(n)
+  +filters = U.BoardUi.filters(u)
+  +fh = L.Set.agy.bh(filters, ty, x, w)
+  +top = {(112 + fh : U32) : U32}
+  +vh = L.U32.dim(h, top)
+  +ss = U.BoardUi.sections(u)
+  +total = TbWin.h(ss, u, ty, x, w)
+  +last = {((L.U32.dim(total, vh) + 63 : U32) / 64 : U32) : U32}
+  +off = {(U32.min(U32.from_nat(Maybe.default(&2, Nat, Nat.read(U.Ui.info(u, "pane:tb")), 0n)), last) * 64 : U32) : U32}
+  +c = {D.Clip{x, top, (x + w : U32), h} : D.Clip}
+  L.Out.all([
+    L.Out{Nil{}, [L.Lay.hit(x, top, w, vh, "pane", "tb|" ++ U32.show(last))]},
+    L.Lay.col.out(TbWin.sections(ss, ty, n, c, x, w, 0, top, off, vh)),
+    L.Out.ops(L.Ty.text(ty, 1n, "Board", D.Clip.all(), x, 12, 32, T.Th.text())),
+    L.Lay.button(ty, D.Clip.all(), (x1 - 90 : U32), 12, "Close", T.Th.soft(), "tb-close", ""),
+    L.Set.agy.btns(filters, ty, x, (x + w : U32), x, 50),
+    L.Set.agy.field(ty, n, U.AgField{"tbtitle", "Add a task", False{}, U.Bots.field(u, "tbtitle"), "tb-add"}, x, (56 + fh : U32), (w - 70 : U32)),
+    L.Lay.button(ty, D.Clip.all(), (x + w - 62 : U32), (56 + fh : U32), "Add", T.Th.accent(), "tb-add", "")])
+
+def Bv.main.board(shown: Bool, +ty: L.Ty, +memo: L.TLMemo, +cats: Map<&2, CA.CatF>, +ws: Map<&2, PW>, +n: S.Nui) -> Maybe<&2, L.Out>:
+  match shown:
+    case True{}:
+      Some{TbWin.draw(ty, n, L.Lay.x1(n))}
+    case False{}:
+      Bv.view(BU.BU.view(S.Nui.ui(n)), ty, memo, cats, ws, L.Lay.shrink(n, L.Lay.term_h(n)), L.Lay.x1(n))
+
 def Bv.main.k(settings: Bool, +ty: L.Ty, +memo: L.TLMemo, +cats: Map<&2, CA.CatF>, +ws: Map<&2, PW>, +n: S.Nui) -> Maybe<&2, L.Out>:
   match settings:
     case True{}:
       None{}
     case False{}:
-      Bv.view(BU.BU.view(S.Nui.ui(n)), ty, memo, cats, ws, L.Lay.shrink(n, L.Lay.term_h(n)), L.Lay.x1(n))
+      Bv.main.board(U.BoardUi.is(S.Nui.ui(n)), ty, memo, cats, ws, n)
 
 # a bot's, room's or remote bot's main area (None: the usual one)
 def Bv.main.w(+ty: L.Ty, +memo: L.TLMemo, +cats: Map<&2, CA.CatF>, +ws: Map<&2, PW>, +n: S.Nui) -> Maybe<&2, L.Out>:

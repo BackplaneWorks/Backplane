@@ -40,6 +40,8 @@ struct PlaneHome: Decodable {
 
 struct PlaneModel: Decodable {
     let need, run, idle, bots, rooms, routines: [PlaneRow]
+    let board: [PlaneRow]?
+    let boardN: Int?
     let idleN, working: Int
     let machines: [PlaneMachine]
     let home: PlaneHome?
@@ -264,6 +266,7 @@ struct PlaneSections: View {
         // the home list has its own Bots section (the cats)
         if full && !plane.bots.isEmpty { section("Bots", plane.bots, mood: true) }
         if !plane.rooms.isEmpty { section("Rooms", plane.rooms) }
+        if let b = plane.board, !b.isEmpty { section("Board · \(plane.boardN ?? b.count) open", b) }
         if !plane.routines.isEmpty { section("Routines", plane.routines) }
         if full && plane.need.isEmpty && plane.run.isEmpty && plane.idleN == 0 && plane.bots.isEmpty && plane.rooms.isEmpty && plane.routines.isEmpty {
             Section { Text("Nothing active").foregroundStyle(.secondary) }

@@ -22,6 +22,9 @@ struct RootView: View {
                 .sheet(isPresented: settingsShown) {
                     if let st = model.screen?.settings { SettingsSheet(model: model, settings: st, version: model.screen?.version ?? "") }
                 }
+                .sheet(isPresented: Binding(get: { model.screen?.board != nil }, set: { if !$0 { model.act("tb-close", (model.screen?.hub ?? "") + "|") } })) {
+                    if let b = model.screen?.board { BoardScreen(model: model, board: b, hub: model.screen?.hub ?? "") }
+                }
                 .sheet(isPresented: findShown) {
                     if let f = model.screen?.find { FindSheet(model: model, find: f) }
                 }

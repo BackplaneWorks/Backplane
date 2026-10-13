@@ -184,7 +184,8 @@ def Pl.main(+p: P.Plane, +ty: L.Ty, +c: D.Clip, +x: U32, +w: U32, +rel: U32, +to
 def Pl.side(+p: P.Plane, +ty: L.Ty, +c: D.Clip, +x: U32, +w: U32, +rel: U32, +top: U32, +off: U32, +vh: U32, +now: Nat) -> L.Col:
   L.Lay.col.then(Pl.sect(P.Plane.bots(p), "BOTS", 0n, True{}, ty, c, x, w, rel, top, off, vh, now), r2 =>
     L.Lay.col.then(Pl.sect(P.Plane.rooms(p), "ROOMS", 0n, True{}, ty, c, x, w, r2, top, off, vh, now), r3 =>
-      Pl.sect(P.Plane.routines(p), "ROUTINES", 0n, True{}, ty, c, x, w, r3, top, off, vh, now)))
+      L.Lay.col.then(Pl.sect(P.Plane.board(p), "Board · " ++ Nat.show(P.Plane.board_n(p)) ++ " open", Nat.sub(P.Plane.board_n(p), Pl.len(P.Plane.board(p))), True{}, ty, c, x, w, r3, top, off, vh, now), r4 =>
+        Pl.sect(P.Plane.routines(p), "ROUTINES", 0n, True{}, ty, c, x, w, r4, top, off, vh, now))))
 
 def Pl.wide() -> U32:
   760

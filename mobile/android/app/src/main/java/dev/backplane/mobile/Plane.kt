@@ -75,6 +75,7 @@ data class PlaneModel(
     val rooms: List<PlaneRow>, val routines: List<PlaneRow>, val idleN: Int, val working: Int,
     val machines: List<PlaneMachine>,
     val home: PlaneHome?,
+    val board: List<PlaneRow> = emptyList(), val boardN: Int = 0,
 )
 
 private fun planeRows(a: JSONArray?): List<PlaneRow> =
@@ -98,6 +99,7 @@ fun parsePlane(o: JSONObject) = PlaneModel(
     o.optJSONObject("home")?.let {
         PlaneHome(it.optString("name"), it.optString("line"), it.optString("label"), it.optString("act"), it.optString("value"), it.optBoolean("here"), it.optBoolean("button"))
     },
+    planeRows(o.optJSONArray("board")), o.optInt("boardN"),
 )
 
 // a thread row's dot, from the plane's states
@@ -213,6 +215,7 @@ fun LazyListScope.planeSections(m: AppModel, p: PlaneModel, full: Boolean, idleO
     // the home list has its own Bots section (the cats)
     if (full) planeSection(m, "bots", "Bots", p.bots, true)
     planeSection(m, "rooms", "Rooms", p.rooms)
+    planeSection(m, "board", "Board · ${p.boardN} open", p.board)
     planeSection(m, "routines", "Routines", p.routines)
     if (full && p.need.isEmpty() && p.run.isEmpty() && p.idleN == 0 && p.bots.isEmpty() && p.rooms.isEmpty() && p.routines.isEmpty()) {
         item(key = "pl:none") {

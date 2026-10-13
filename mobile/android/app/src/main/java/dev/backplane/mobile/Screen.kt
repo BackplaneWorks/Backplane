@@ -390,6 +390,7 @@ data class Screen(
     val making: Boolean = false,
     // the uberbot's card and the status plane (Plane.kt); none without an uberbot
     val uber: UberCard? = null, val plane: PlaneModel? = null,
+    val board: BoardModel? = null, val boardEntry: SetButton? = null,
 )
 
 data class Cmd(
@@ -668,6 +669,8 @@ fun parseScreen(o: JSONObject) = Screen(
     making = o.optBoolean("making"),
     uber = o.optJSONObject("uber")?.let(::parseUber),
     plane = o.optJSONObject("plane")?.let(::parsePlane),
+    board = o.optJSONObject("board")?.let(::parseBoard),
+    boardEntry = o.optJSONObject("boardEntry")?.let { SetButton(it.optString("label"), it.optString("action"), it.optString("value"), it.optBoolean("on")) },
     active = o.optJSONArray("active").map(::row),
     older = o.optJSONObject("older")?.let { Older(it.optInt("count"), it.optBoolean("open")) },
     settled = o.optJSONObject("settled")?.let { Older(it.optInt("count"), it.optBoolean("open")) },
