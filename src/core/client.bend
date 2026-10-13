@@ -9459,3 +9459,22 @@ def Page.since.k(t: M.Thread) -> Nat:
 
 def Page.since(s: M.State, +th: String) -> Nat:
   Page.since.k(Ui.thread(s, th))
+
+# a board of one todo, one doing and one done item, in that order of making (for laws)
+def BoardUi.demo.item(+id: String, +status: String, +at: Nat) -> M.Change:
+  M.SettingSet{"board." ++ id, TBA.Tb.value(TBA.TbItem{id, "Item " ++ id, status, "", "", "", "", Nil{}, "", at, at, ""}), at}
+
+def BoardUi.demo() -> Ui:
+  Ui.far.st(Ui.init(1000n), M.State.replay([BoardUi.demo.item("a", "todo", 1n), BoardUi.demo.item("b", "doing", 2n), BoardUi.demo.item("c", "done", 3n)], M.State.empty()))
+
+def BoardUi.titles(+ss: List<&2, BSec>) -> String:
+  match ss:
+    case Nil{}:
+      ""
+    case BSec{+t, _, _} <> r:
+      t ++ "," ++ BoardUi.titles(r)
+
+# the section titles of the demo board with the filter open
+def BoardUi.sections.demo() -> String:
+  BoardUi.titles(BoardUi.sections(BoardUi.demo()))
+

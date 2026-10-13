@@ -8684,3 +8684,21 @@ def Laws.told_quiet_record_nothing():
   {==}
 
 # ---- end told-rules-board ----
+
+# ---- told-rules-board ui ----
+def Laws.boardui_sections_order():
+  {==}
+
+def Laws.boardui_open_hides_done():
+  {==}
+
+def Laws.plane_board_capped():
+  {==}
+
+def Laws.ruledata_note_scope():
+  {==}
+
+def Laws.tbdata_due_words():
+  {==}
+
+# ---- end told-rules-board ui ----

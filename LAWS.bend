@@ -105,6 +105,7 @@ import ./src/core/told.bend as TLD
 import ./src/core/rules.bend as RLS
 import ./src/core/tboard.bend as TBD
 import ./src/core/tbdata.bend as TBT
+import ./src/core/ruledata.bend as RDT
 
 # Backplane's rules, stated over the real code. `bend PROOF.bend` proves each
 # one. Humans own this file: an agent may add laws, never weaken or delete
@@ -7330,3 +7331,25 @@ law told_note_marked:
 law told_quiet_record_nothing:
   {List.length(&2, M.Change, TLD.Told.alerts([M.SettingSet{"alert.tb", NO.Alert.line("", "", "m1", "5.1", ""), 5n}], TLD.Told.demo.chatter(), 0n)) == 0n : Nat}
 # ---- end told-rules-board ----
+
+# ---- told-rules-board ui ----
+# a doing item's section comes before a todo item's
+law boardui_sections_order:
+  {U.BoardUi.sections.demo() == "Doing,To do," : String}
+
+# with the filter "open", done items are in no section
+law boardui_open_hides_done:
+  {String.contains(U.BoardUi.sections.demo(), "Done") == False{} : Bool}
+
+# the plane shows at most six board rows
+law plane_board_capped:
+  {Nat.is_le(List.length(&2, PLN.PRow, PLN.Plane.board.rows(TBT.Tb.open(TBT.Tb.all(PLN.Plane.demo.board())), PLN.Plane.demo.board(), 200000n)), 6n) == True{} : Bool}
+
+# a rule's note says its scope in words
+law ruledata_note_scope:
+  {RDT.Rules.note("Miso", "", "bot_send", True{}, "sudo", True{}) == "Bot Miso · tool bot_send · enforced unless \"sudo\"" : String}
+
+# a due date reads as month and day
+law tbdata_due_words:
+  {TBT.Tb.due.words("2026-10-28") == "Oct 28" : String}
+# ---- end told-rules-board ui ----
