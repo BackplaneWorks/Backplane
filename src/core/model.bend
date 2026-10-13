@@ -260,6 +260,10 @@ type Change is Data:
   # whether its turn ends, asks and failures go back to `by` (Launch below).
   # Again later with the same `by`: the report choice changes (thread_update)
   ThreadLaunched{id: String, by: String, report: Bool, at: Nat}
+  # a bot's browser task skill (task.bend), its JSON as text; TaskDeleted
+  # takes it away. Folded into the bot world like memory
+  TaskSet{bot: String, slug: String, json: String, at: Nat}
+  TaskDeleted{bot: String, slug: String, at: Nat}
 
 # the later of two times. Base's Nat.max recurses once per unit and
 # overflows at epoch scale; Nat.is_ge compiles to a machine comparison.
@@ -1713,6 +1717,10 @@ def State.apply.go(s: State, e: Change) -> State:
       State.world((w => BT.World.mem_saved(w, bot, key, kind, text, tags, at)), s)
     case MemoryForgot{bot, key, _}:
       State.world((w => BT.World.mem_forgot(w, bot, key)), s)
+    case TaskSet{bot, slug, json, _}:
+      State.world((w => BT.World.task_set(w, bot, slug, json)), s)
+    case TaskDeleted{bot, slug, _}:
+      State.world((w => BT.World.task_del(w, bot, slug)), s)
     case SpaceSet{bot, spec, _}:
       State.world((w => BT.World.space_set(w, bot, spec)), s)
     case PeerSet{id, name, url, revoked, at}:

@@ -153,6 +153,10 @@ def Fr.change(+l: String, c: M.Change) -> Maybe<&2, M.Change>:
       Some{M.MemorySaved{Fr.id(l, bot), key, kind, text, tags, at}}
     case M.MemoryForgot{+bot, key, at}:
       Some{M.MemoryForgot{Fr.id(l, bot), key, at}}
+    case M.TaskSet{+bot, slug, json, at}:
+      Some{M.TaskSet{Fr.id(l, bot), slug, json, at}}
+    case M.TaskDeleted{+bot, slug, at}:
+      Some{M.TaskDeleted{Fr.id(l, bot), slug, at}}
     case M.SpaceSet{+bot, spec, at}:
       Some{M.SpaceSet{Fr.id(l, bot), spec, at}}
     case M.SpacePageSet{+bot, html, at}:
@@ -291,6 +295,10 @@ def Fr.shared(+s: M.State, c: M.Change) -> Bool:
     case M.MemorySaved{_, _, _, _, _, _}:
       True{}
     case M.MemoryForgot{_, _, _}:
+      True{}
+    case M.TaskSet{_, _, _, _}:
+      True{}
+    case M.TaskDeleted{_, _, _}:
       True{}
     case M.SpaceSet{_, _, _}:
       True{}
@@ -706,9 +714,9 @@ def Fr.index(es: List<&2, M.Entry>, by: Map<&2, List<&2, M.Entry>>) -> Map<&2, L
 
 def Fr.world(w: BT.World, +prefix: String) -> BT.World:
   match w:
-    case BT.World{bs, rs, ps, hs, ro, ms, pe, sp, ho, ta, pg}:
+    case BT.World{bs, rs, ps, hs, ro, ms, pe, sp, ho, ta, pg, tk}:
       BT.World{Fr.map(BT.Bot, bs, prefix), rs, ps, hs, Fr.map(BT.Routine, ro, prefix), Fr.map(BT.Mem, ms, prefix), pe,
-        Fr.map(String, sp, prefix), Fr.map(BT.Hops, ho, prefix), Fr.map(Nat, ta, prefix), Fr.map(BT.Page, pg, prefix)}
+        Fr.map(String, sp, prefix), Fr.map(BT.Hops, ho, prefix), Fr.map(Nat, ta, prefix), Fr.map(BT.Page, pg, prefix), Fr.map(String, tk, prefix)}
 
 def Fr.ext.spec(bw: List<&2, M.Ext>, +prefix: String, es: List<&2, M.Entry>) -> List<&2, M.Ext>:
   [M.Ext{Fr.world(M.Ext.world(M.Ext.of(bw)), prefix), Fr.index(List.reverse(&2, M.Entry, es), Map.new(&2, List<&2, M.Entry>))}]

@@ -11,6 +11,7 @@ scripts/build-browser.sh              # -> dist/backplane-browser (bun --compile
 dist/backplane-browser --frames /tmp/bp-preview.rgb --profile ~/.x/browser-profile --jpeg-dir ~/.x/shots
 bun tools/browser/test/smoke.ts [URL] # end-to-end check (src/main.ts, or $BACKPLANE_BROWSER)
 bun tools/browser/test/pages.ts       # pages per owner, the new ops, profile persistence
+bun tools/browser/test/record.ts      # the in-page recorder
 ```
 
 Flags:
@@ -110,6 +111,7 @@ written to stdout; diagnostics go to stderr.
 | `pdf` | `path` | `{path, bytes}`. Headless only. |
 | `cookies_clear` | `domain?` | `{}`. Clears cookies for every page (one profile). |
 | `tabs` | none, or `new` (`true` or a URL), `select` (index), `close` (index) | `{page, active, tabs: [{index, url, title, active}]}` after the change. |
+| `record` | `on` (bool) | `{on, page}`. Turns the in-page recorder on or off for the owner (all its tabs, popups too); steps arrive as `record` events. See Recording. |
 | `pages` | | `{pages: [{page, url, title, tabs, shot, n}]}`: every owner with an open tab. |
 | `frames` | `on` (bool), `maxFps?` (1..60, default 15) | `{on, maxFps, seq, path}`. Turning on publishes a frame at once. Shared page only. |
 | `frame` | | the frame event it published (always published, even if unchanged). Shared page only. |
@@ -166,7 +168,44 @@ only when asked for.
 | `frame` | `page`, `n`, `path` | a new JPEG of that owner's page is in place (with `--jpeg-dir`) |
 | `navigated` | `page`, `url` | an owner's active tab committed a navigation |
 | `load` | `page`, `url` | an owner's active tab fired `load` |
+| `record` | `page`, `step` | a step the owner's recorder saw while `record` is on: `{do, target?, value?, key?, url, at, frame}` |
 | `closed` | | Chromium went away (crash or close); the next request relaunches it |
+
+## Recording
+
+`record {on:true}` (owner page only) starts the recorder for that owner's
+tabs, including popups adopted later; `{on:false}` stops it, and closing
+the owner or the browser does too. One binding (`__bpRec`) and one init
+script live on the context; the script is inert until its owner records
+(documents ask the helper on load, open ones are told). The helper ignores
+reports from owners that are not recording and rebuilds each step from known
+keys. Steps come as `{"event":"record","page":OWNER,"step":S}`, each with
+`at` (ms epoch) and `frame` (the frame's URL, `""` for the main frame):
+
+| `do` | fields |
+|---|---|
+| `click` | `target`, `url` (capture phase, nearest `a`/`button`/`input`/`select`/`textarea`/`label`/`summary`/`[role]`/`[onclick]`/`[tabindex]`) |
+| `type` | `target`, `value`, `url`: one step per field edit (on `change`, or before Enter/Tab), the final value |
+| `select` | `target`, `value`, `text`, `url` |
+| `press` | `key` (`Enter`, `Tab`, `Escape` only), `target`, `url` |
+| `submit` | `target`, `url` |
+| `navigate` | `url`: main-frame navigation of the active tab, not repeated for the same URL (from the helper, not the page) |
+
+`target` is `{role, name, label, placeholder, text, testid, css, nth, near,
+tag, type}` (strings, `nth` a number; `""` when unknown): role and accessible
+name, the field's label, `data-testid`/`data-test`/`data-qa`, a short stable
+CSS selector (a `#id` unless it looks generated, else tag, stable classes
+and `:nth-of-type` up to four levels), `nth` among elements with the same
+role and name, and the nearest preceding heading or labelled landmark.
+
+Masking, done in the page before anything is sent: a field is secret when
+it is `type=password`, its `autocomplete` has `password` or `one-time-code`
+or starts `cc-`, or its name, id, label, placeholder or aria-label matches
+`card|cvv|cvc|iban|ssn|social security|\bpin\b|otp|2fa|one.?time|security
+code|passcode`. A secret's step is `{do:"type", target, secret:true, label}`
+with no `value` key; its value is also kept out of every target's `text` and
+`name`. Real clicks, keys and submits are recorded; of scripted events only
+`change` is (Playwright's `selectOption` fires one).
 
 ## Frames
 

@@ -8468,4 +8468,33 @@ def Laws.mnav_remote_local(hub, id):
 def Laws.mnav_bot_thread(hub, id, thread, some, own):
   %Equal.sym(Bool, String.is_empty(thread), False{}, some) : {Hb.Hubs.nav.qual(hub, MBN.MBots.nav.k(_, id, thread)) == Hb.Hubs.id(hub, thread) : String}
   %Equal.sym(Bool, Hb.Hubs.nav.tag(thread), False{}, own) : {Bool.pick(String, _, thread, Hb.Hubs.id(hub, thread)) == Hb.Hubs.id(hub, thread) : String}
+def Laws.task_secret_never_stored(v, label):
+  {==}
+
+def Laws.task_risky_needs_confirm(n, kind):
+  {==}
+
+def Laws.run_confirm_runs(n, k, r):
+  {==}
+
+def Laws.run_stuck_alerts_once(n, k, r, s):
+  {==}
+
+def Laws.run_pause_alerts(n, k, r):
+  {==}
+
+def Laws.run_stop_ends(n, k, r):
+  {==}
+
+def Laws.drive_person_locks_bot(w):
+  {==}
+
+def Laws.task_slug_nonempty(x):
+  match x:
+    case SNil{}:
+      {==}
+    case SCon{c, t}:
+      {==}
+
+def Laws.task_slug_empty():
   {==}

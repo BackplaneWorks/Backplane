@@ -13,6 +13,7 @@ import { chromium, type BrowserContext, type CDPSession, type Locator, type Page
 
 import { findChromium, installChrome, INSTALL_HINT } from "./chromium.ts";
 import { decodePng } from "./png.ts";
+import { RECORDER_SCRIPT } from "./recorder.ts";
 
 type Json = Record<string, any>;
 
@@ -98,6 +99,9 @@ type Owner = {
   console: Json[];
   shot: Shot;
   opening: Promise<Page> | null;
+  // the in-page recorder is on for this owner (record op)
+  recording: boolean;
+  lastNav: string;
 };
 
 const owners = new Map<string, Owner>();
@@ -114,6 +118,8 @@ function ownerFor(name: string): Owner {
       console: [],
       shot: { cdp: null, seq: 0, last: 0, lastHash: 0n, pending: null, timer: null },
       opening: null,
+      recording: false,
+      lastNav: "",
     };
     owners.set(name, o);
   }
@@ -185,6 +191,10 @@ async function launch(): Promise<BrowserContext> {
     acceptDownloads: true,
     args: ["--hide-scrollbars", "--mute-audio", "--no-first-run", "--no-default-browser-check"],
   });
+  // the recorder: one binding and one init script on the context, so every
+  // tab and popup has them; the page stays inert until its owner records
+  await ctx.exposeBinding("__bpRec", (source, ev) => onRecord(source, ev));
+  await ctx.addInitScript(RECORDER_SCRIPT);
   ctx.on("close", () => {
     if (context !== ctx) return;
     context = null;
@@ -194,6 +204,7 @@ async function launch(): Promise<BrowserContext> {
     for (const o of owners.values()) {
       o.tabs = [];
       o.active = null;
+      o.recording = false;
       clearShot(o);
     }
     send({ event: "closed" });
@@ -229,6 +240,7 @@ async function adopt(o: Owner, p: Page): Promise<void> {
   p.on("pageerror", (e) => pushLog(o, { level: "error", text: String(e) }));
   p.on("framenavigated", (f) => {
     if (p === o.active && f === p.mainFrame()) send({ event: "navigated", page: o.name, url: f.url() });
+    if (o.recording && p === o.active && f === p.mainFrame()) recordNavigate(o, f.url());
   });
   p.on("load", () => {
     if (p === o.active) send({ event: "load", page: o.name, url: p.url() });
@@ -247,6 +259,63 @@ async function adopt(o: Owner, p: Page): Promise<void> {
     else clearShot(o);
   });
   await p.setViewportSize(o.viewport).catch(() => {});
+  // a tab adopted while recording (a popup) was told "no" on its first load
+  if (o.recording) await recorderSet(o, true);
+}
+
+// Recording
+// ---------
+
+const STEP_KEYS = new Set(["click", "type", "select", "press", "submit"]);
+const TARGET_KEYS = ["role", "name", "label", "placeholder", "text", "testid", "css", "nth", "near", "tag", "type"];
+
+// tell every document of the owner's tabs to record or stop
+async function recorderSet(o: Owner, on: boolean): Promise<void> {
+  for (const t of [...o.tabs]) {
+    if (t.isClosed()) continue;
+    for (const f of t.frames()) {
+      await f.evaluate((v) => { (window as any).__bpRecSet?.(v); }, on).catch(() => {});
+    }
+  }
+}
+
+function recordNavigate(o: Owner, url: string): void {
+  if (!url || url === "about:blank" || url === o.lastNav) return;
+  o.lastNav = url;
+  send({ event: "record", page: o.name, step: { do: "navigate", url, at: Date.now(), frame: "" } });
+}
+
+// the binding: the page asks whether to record, or reports one step. The
+// step is rebuilt here from known keys, and a secret's value is dropped
+// whatever the page sent.
+function onRecord(source: { page: Page; frame: any }, ev: Json): any {
+  const o = ownerOf.get(source.page);
+  if (ev?.q === "on?") return Boolean(o?.recording);
+  if (!o || !o.recording) return;
+  const s = ev?.step;
+  if (!s || typeof s !== "object" || !STEP_KEYS.has(s.do)) return;
+  const t: Json = {};
+  for (const k of TARGET_KEYS) {
+    const v = s.target?.[k];
+    t[k] = k === "nth" ? (Number.isFinite(v) ? v : 0) : typeof v === "string" ? v.slice(0, 200) : "";
+  }
+  const secret = s.secret === true;
+  const step: Json = { do: s.do };
+  if (s.do === "press") step.key = ["Enter", "Tab", "Escape"].includes(s.key) ? s.key : "";
+  if (s.do === "press" && !step.key) return;
+  step.target = t;
+  if (secret && (s.do === "type" || s.do === "select")) {
+    step.secret = true;
+    step.label = String(s.label ?? "").slice(0, 80);
+  } else if (s.do === "type") step.value = String(s.value ?? "").slice(0, 10_000);
+  else if (s.do === "select") {
+    step.value = String(s.value ?? "").slice(0, 500);
+    step.text = String(s.text ?? "").slice(0, 200);
+  }
+  step.url = source.page.url();
+  step.at = Date.now();
+  step.frame = source.frame === source.page.mainFrame() ? "" : String(source.frame?.url?.() ?? "");
+  send({ event: "record", page: o.name, step });
 }
 
 // make p the tab the owner drives, and the one its frames show
@@ -495,6 +564,7 @@ async function closeOwner(name: string): Promise<void> {
   const o = owners.get(name);
   if (!o) return;
   owners.delete(name);
+  o.recording = false;
   await stopShots(o);
   clearShot(o);
   if (name === "") await stopScreencast();
@@ -797,6 +867,20 @@ const handlers: Record<string, (a: Json, name: string) => Promise<any>> = {
       if (!o.tabs.length) await ensurePage(name);
     }
     return tabList(o);
+  },
+  async record(a, name) {
+    const o = ownerFor(name);
+    const on = a.on === true;
+    if (on) {
+      await ensurePage(name);
+      o.recording = true;
+      o.lastNav = "";
+      await recorderSet(o, true);
+    } else {
+      o.recording = false;
+      await recorderSet(o, false);
+    }
+    return { on: o.recording, page: name };
   },
   async pages(_a, _name) {
     const list = await Promise.all([...owners.values()].filter((o) => o.tabs.length > 0).map(async (o) => ({

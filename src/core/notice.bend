@@ -262,7 +262,7 @@ def Ex.of.k(found: List<&2, BT.Post>, +name: String, +start: Nat, +local: Bool) 
 
 def World.posts.all(w: BT.World) -> List<&2, BT.Post>:
   match w:
-    case BT.World{_, _, ps, _, _, _, _, _, _, _, _}:
+    case BT.World{_, _, ps, _, _, _, _, _, _, _, _, _}:
       ps
 
 def Ex.of(+w: BT.World, +name: String, +start: Nat, local: Bool) -> Ex:

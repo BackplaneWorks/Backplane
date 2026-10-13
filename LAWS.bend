@@ -28,6 +28,7 @@ import ./src/core/handoff.bend as HD
 import ./src/core/agent.bend as AG
 import ./src/core/tailnet.bend as TN
 import ./src/core/fuzzy.bend as FZ
+import ./src/core/task.bend as TSK
 import ./src/mobile/notify.bend as Nt
 import ./src/core/notice.bend as NO
 import ./src/core/codec.bend as C
@@ -7033,3 +7034,57 @@ law mnav_bot_thread:
   for some: {String.is_empty(thread) == False{} : Bool}
   for own: {Hb.Hubs.nav.tag(thread) == False{} : Bool}
   {Hb.Hubs.nav.bot(hub, BU.BRow{id, "", thread, 0n, "idle", "", False{}, False{}, "", ""}) == Hb.Hubs.id(hub, thread) : String}
+# Browser task skills (src/core/task.bend, docs/teach.md)
+
+# a recorded step in a secret field keeps only the field's label, whatever value came with it
+law task_secret_never_stored:
+  for +v: String
+  for +label: String
+  {TSK.TkStep.value_of(True{}, v, label) == TSK.VSecret{label} : TSK.TkValue}
+
+# a risky step is not continued past, only confirmed
+law task_risky_needs_confirm:
+  for +n: Nat
+  for +kind: String
+  {TSK.Run.step(TSK.Waiting{n, kind, True{}}, TSK.Answer{"continue"}) == TSK.Waiting{n, kind, True{}} : TSK.TkRun}
+
+law run_confirm_runs:
+  for +n: Nat
+  for +k: String
+  for +r: Bool
+  {TSK.Run.step(TSK.Waiting{n, k, r}, TSK.Answer{"confirm"}) == TSK.Running{n} : TSK.TkRun}
+
+# a run that waits asks the person once: nothing after a pause alerts again
+law run_stuck_alerts_once:
+  for +n: Nat
+  for +k: String
+  for +r: Bool
+  for +s: TSK.TkRun
+  {TSK.Run.alerts(TSK.Waiting{n, k, r}, s) == False{} : Bool}
+
+# and a pause from running does
+law run_pause_alerts:
+  for +n: Nat
+  for +k: String
+  for +r: Bool
+  {TSK.Run.alerts(TSK.Running{n}, TSK.Waiting{n, k, r}) == True{} : Bool}
+
+# Stop task ends a pause
+law run_stop_ends:
+  for +n: Nat
+  for +k: String
+  for +r: Bool
+  {TSK.Run.step(TSK.Waiting{n, k, r}, TSK.Answer{"stop"}) == TSK.Ended{"stopped"} : TSK.TkRun}
+
+# while the person drives, the bot's calls do nothing
+law drive_person_locks_bot:
+  for +w: String
+  {TSK.Drive.can_bot(TSK.DPerson{w}) == False{} : Bool}
+
+# a slug is never empty
+law task_slug_nonempty:
+  for +x: String
+  {String.is_empty(TSK.Tk.slug.or(x)) == False{} : Bool}
+
+law task_slug_empty:
+  {TSK.Task.slug("") == "task" : String}
