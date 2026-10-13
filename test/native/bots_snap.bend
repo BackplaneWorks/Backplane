@@ -26,6 +26,18 @@ def bot(+i: Nat, +name: String, +look: Nat, +persona: String) -> List<&2, M.Chan
 def space() -> String:
   "{\"title\":\"Mochi's desk\",\"blocks\":[{\"type\":\"heading\",\"text\":\"Today\"},{\"type\":\"row\",\"blocks\":[{\"type\":\"stat\",\"label\":\"Open PRs\",\"value\":\"3\",\"hint\":\"2 need review\"},{\"type\":\"stat\",\"label\":\"Build\",\"value\":\"green\"},{\"type\":\"stat\",\"label\":\"Boards\",\"value\":\"12\",\"hint\":\"+2 this week\"}]},{\"type\":\"progress\",\"label\":\"Release 0.9\",\"value\":0.64},{\"type\":\"text\",\"text\":\"I watch the repo and the fab queue. Ask me for a summary any time.\"},{\"type\":\"list\",\"items\":[\"Review power board rev C\",\"Order stencils\",\"Reply to JLC about the panel\"]},{\"type\":\"kv\",\"rows\":[[\"Fab\",\"JLCPCB\"],[\"Next check\",\"09:00\"]]},{\"type\":\"table\",\"head\":[\"Board\",\"Rev\",\"State\"],\"rows\":[[\"power\",\"C\",\"fab\"],[\"sensor\",\"B\",\"layout\"]]},{\"type\":\"divider\"},{\"type\":\"row\",\"blocks\":[{\"type\":\"button\",\"label\":\"Summarize\",\"action\":\"summary\"},{\"type\":\"button\",\"label\":\"Check fab\",\"action\":\"fab\"}]},{\"type\":\"input\",\"label\":\"Ask Mochi\",\"action\":\"ask\",\"placeholder\":\"What should I look at?\"},{\"type\":\"badge\",\"text\":\"all good\",\"tone\":\"ok\"},{\"type\":\"code\",\"text\":\"make fab\\nmake check\"}]}"
 
+def task() -> String:
+  "{\"v\":1,\"slug\":\"jlcpcb-status\",\"name\":\"Check JLCPCB order status\",\"description\":\"Look up where an order is in production.\",\"origin\":\"show\",\"start\":\"https://jlcpcb.com\",\"params\":[{\"name\":\"order\",\"label\":\"Order number\",\"kind\":\"text\",\"example\":\"W2026\"}],\"steps\":[],\"urls\":[],\"created\":1,\"updated\":2}"
+
+def run(+status: String) -> String:
+  "{\"slug\":\"jlcpcb-status\",\"run\":\"r1\",\"status\":\"" ++ status ++ "\",\"n\":5,\"summary\":\"Order W2026 is in production, ships Thursday.\",\"shots\":[\"/bots/b0/tasks/shot?run=r1&n=2\",\"/bots/b0/tasks/shot?run=r1&n=5\"]}"
+
+def pause() -> String:
+  "{\"bot\":\"b0\",\"run\":\"r2\",\"slug\":\"jlcpcb-status\",\"n\":3,\"kind\":\"login\",\"question\":\"JLCPCB wants me to sign in. Sign in yourself, or tell me to skip.\",\"risky\":false,\"shot\":\"/bots/b0/tasks/shot?run=r2&n=3\"}"
+
+def draft() -> String:
+  "[{\"n\":1,\"do\":\"navigate\",\"url\":\"https://jlcpcb.com/user-center\"},{\"n\":2,\"do\":\"type\",\"target\":{\"role\":\"textbox\",\"label\":\"Order number\"},\"value\":\"W2026\"},{\"n\":3,\"do\":\"type\",\"target\":{\"label\":\"Password\"},\"value\":{\"secret\":\"Password\"}},{\"n\":4,\"do\":\"click\",\"target\":{\"role\":\"button\",\"name\":\"Search\"}},{\"n\":5,\"do\":\"note\",\"note\":\"use the second tab\"}]"
+
 def log() -> List<&2, M.Change>:
   List.concat(&2, M.Change, [
     [M.ProjectCreated{"p1", "board", "/tmp/board", at()}, M.ThreadCreated{"t0", "p1", "Power sequencing", M.Local{}, "", "", "claude", "", at()},
@@ -41,19 +53,27 @@ def log() -> List<&2, M.Change>:
      M.RoutineSet{"o0", "b0", "Morning summary", "0 9 * * 1-5", "Summarize open PRs and the fab queue.", True{}, at()},
      M.RoutineSet{"o1", "b0", "Weekly cleanup", "@weekly", "Close stale branches.", False{}, at()},
      M.HookSet{"h0", "b0", "GitHub pushes", False{}, at()},
-     M.SpaceSet{"b0", space(), at()}]])
+     M.SpaceSet{"b0", space(), at()},
+     M.TaskSet{"b0", "jlcpcb-status", task(), at()},
+     M.ActivityLogged{"bt0", "r1:a", "task", "run", run("running"), Nat.add(at(), 20n)},
+     M.ActivityLogged{"bt0", "r1:b", "task", "run", run("ok"), Nat.add(at(), 30n)},
+     M.AskOpened{"k1", "bt0", "browser", "task_pause", pause(), "continue|skip|stop", Nat.add(at(), 50n)}]])
 
 def act.k(a: U.Act) -> U.Ui:
   match a:
     case U.Act{u, _}:
       u
 
+# "!key=value" sets the hub's info (drive.b0, teach.b0, ...)
+def step.i(info: Bool, +u: U.Ui, +k: String, +v: String) -> U.Ui:
+  Bool.pick(U.Ui, info, U.Ui.info_set(u, String.drop(k, 1n), v), act.k(U.Ui.act(u, k, v)))
+
 # a step: "action=value", or "@key=value" to set the scratch (what a hub's
 # answer would, e.g. the Google accounts); "|" in a value is a line break
 def step.k(scratch: Bool, +p: String, +u: U.Ui) -> U.Ui:
   +k = String.join(List.take(&2, String, String.split(p, '='), 1n), "")
   +v = String.join(String.split(String.join(List.drop(&2, String, String.split(p, '='), 1n), "="), '|'), "\n")
-  Bool.pick(U.Ui, scratch, U.Ui.scratch_set(u, k, v), act.k(U.Ui.act(u, k, v)))
+  Bool.pick(U.Ui, scratch, U.Ui.scratch_set(u, k, v), step.i(String.starts_with(p, "!"), u, k, v))
 
 def acts(ps: List<&2, String>, u: U.Ui) -> U.Ui:
   match ps:
@@ -78,7 +98,8 @@ def with_focus(n: N.Nui, fo: String) -> N.Nui:
       N.Nui{u, w, h, mx, my, sd, sc, ca, fo, pa, hi, ms, vw}
 
 def info(u: U.Ui) -> U.Ui:
-  U.Ui.info_set(U.Ui.info_set(u, "shot.ok.b0", "shot:b0:3"), "img:shot:b0:3", "1280x800")
+  U.Ui.info_set(U.Ui.info_set(U.Ui.info_set(U.Ui.info_set(U.Ui.info_set(U.Ui.info_set(u, "shot.ok.b0", "shot:b0:3"), "img:shot:b0:3", "1280x800"), "listen", "127.0.0.1:3787"),
+    "img:tshot:3787:/bots/b0/tasks/shot?run=r1&n=2", "1280x800"), "img:tshot:3787:/bots/b0/tasks/shot?run=r1&n=5", "1280x800"), "img:tshot:3787:/bots/b0/tasks/shot?run=r2&n=3", "1280x800")
 
 def base() -> U.Ui:
   info(act.k(U.Ui.act(U.Ui.fold(log(), U.Ui.init(Nat.add(at(), 100n))), "select", "t0")))
@@ -147,6 +168,12 @@ def main() -> IO(Unit):
     shot(ty, dir, "chat", "bot=b0", "composer")
     shot(ty, dir, "space", "bot=b0;bot-tab=space", "")
     shot(ty, dir, "browser", "bot=b0;bot-tab=browser", "")
+    shot(ty, dir, "teach-idle", "bot=b0;bot-tab=browser", "")
+    shot(ty, dir, "teach-rec", "bot=b0;bot-tab=browser;!drive.b0=teach;!teach.b0=rec " ++ Nat.show(Nat.sub(at(), 85n)) ++ " 5;!teach.draft.b0=" ++ draft(), "")
+    shot(ty, dir, "teach-review", "bot=b0;bot-tab=browser;!drive.b0=teach;!teach.b0=review;!teach.draft.b0=" ++ draft() ++ ";tk-mark=2;bfield=tkname" ++ sep() ++ "Check JLCPCB order status", "")
+    shot(ty, dir, "teach-takeover", "bot=b0;bot-tab=browser;!drive.b0=takeover", "")
+    shot(ty, dir, "tasks", "bot=b0;bot-tab=tasks", "")
+    shot(ty, dir, "tasks-open", "bot=b0;bot-tab=tasks;tk-open=jlcpcb-status", "")
     shot(ty, dir, "memory", "bot=b0;bot-tab=memory", "")
     shot(ty, dir, "routines", "bot=b0;bot-tab=routines", "")
     shot(ty, dir, "hooks", "bot=b0;bot-tab=hooks", "")

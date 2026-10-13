@@ -10,6 +10,7 @@ import ../core/botui.bend as BI
 import ../core/cron.bend as CR
 import ../core/plane.bend as PL
 import ../core/uber.bend as UB
+import ../core/task.bend as TK
 
 # The bots on the web (docs/bots.md): the sidebar's cats and rooms, a bot's
 # header, tabs and tab bodies, a room, a bot on another machine. What is
@@ -199,17 +200,151 @@ def WB.tabs(+hd: BI.Head) -> D.Node:
   D.El{"nav", "", [D.At{"class", "bot-tabs"}], WB.tabs.go(BI.Head.tabs(hd), BI.Head.tab(hd))}
 
 # Browser: the bot's page, a frame the hub serves (the pairing cookie
-# carries the token, as for /img); n changes with each "shot" message
-def WB.browser.k(none: Bool, +n: String, +id: String, +name: String) -> D.Node:
+# carries the token, as for /img); n changes with each "shot" message.
+# While the person drives it (client.bend's Teach.input) the frame takes
+# their clicks, wheel and keys: host.js only forwards them, as the actions
+# the img names (data-pt: a click in thousandths of the frame, data-wheel:
+# a notch's pixels, data-keyto: a key's name, data-type: typed text).
+def WB.frame(+id: String, +n: String, +name: String) -> D.Node:
+  D.El{"img", "bot-frame", [D.At{"src", "/bots/" ++ id ++ "/screen.jpg?n=" ++ n}, D.At{"alt", name ++ "'s browser"}, D.At{"tabindex", "0"}, D.At{"draggable", "false"},
+    D.At{"data-pt", "bb-click"}, D.At{"data-wheel", "bb-scroll"}, D.At{"data-keyto", "bb-key"}, D.At{"data-type", "bb-type"}], Nil{}}
+
+def WB.browser.in(input: Bool, none: Bool, +n: String, +id: String, +name: String) -> D.Node:
   match none:
     case True{}:
       WB.note(name ++ " hasn't opened the browser yet.")
     case False{}:
-      D.El{"a", "", [D.At{"class", "bot-screen"}, D.At{"href", "/bots/" ++ id ++ "/screen.jpg?n=" ++ n}, D.At{"target", "_blank"}, D.At{"data-lightbox", "/bots/" ++ id ++ "/screen.jpg?n=" ++ n}],
-        [D.El{"img", "", [D.At{"src", "/bots/" ++ id ++ "/screen.jpg?n=" ++ n}, D.At{"alt", name ++ "'s browser"}], Nil{}}]}
+      Bool.pick(D.Node, input, WB.div("bot-screen driven", [WB.frame(id, n, name)]),
+        D.El{"a", "", [D.At{"class", "bot-screen"}, D.At{"href", "/bots/" ++ id ++ "/screen.jpg?n=" ++ n}, D.At{"target", "_blank"}, D.At{"data-lightbox", "/bots/" ++ id ++ "/screen.jpg?n=" ++ n}],
+          [D.El{"img", "", [D.At{"src", "/bots/" ++ id ++ "/screen.jpg?n=" ++ n}, D.At{"alt", name ++ "'s browser"}], Nil{}}]})
+
+def WB.browser.k(none: Bool, +n: String, +id: String, +name: String) -> D.Node:
+  WB.browser.in(False{}, none, n, id, name)
+
+def WB.tbtns(bs: List<&2, U.TBtn>) -> List<&2, D.Node>:
+  match bs:
+    case Nil{}:
+      Nil{}
+    case U.TBtn{+label, +action, +value, +primary} <> t:
+      D.Dom.button(Bool.pick(String, primary, "primary", ""), action, value, label, label) <> WB.tbtns(t)
+
+def WB.urlbar(+u: U.Ui) -> D.Node:
+  WB.div("bform row", [D.Dom.button("", "bb-back", "", "Back", "Back"), D.Dom.button("", "bb-reload", "", "Reload", "Reload"),
+    WB.input("bot-url", "bburl", BI.BU.field(u, "bburl"), "Address", "bb-nav"), D.Dom.button("", "bb-nav", "", "Go", "Go")])
+
+def WB.notebar(+u: U.Ui) -> D.Node:
+  WB.div("bform row", [WB.input("tk-note", "tknote", BI.BU.field(u, "tknote"), "Tell it what matters, e.g. use the second tab", "tk-note"), D.Dom.button("", "tk-note", "", "Add a note for what you just did", "Add note")])
+
+# the strip above the page: who has it, and what to do
+def WB.strip.k(s: U.TStrip, +u: U.Ui, +input: Bool) -> D.Node:
+  match s:
+    case U.TStrip{+mode, +title, +clock, +steps, bs}:
+      +rec = {Nat.is_eq(mode, 1n) : Bool}
+      WB.div("tk-strip mode" ++ Nat.show(mode), D.Dom.cat([WB.div("tk-head", [D.Dom.span("tk-title", title),
+          D.Dom.span("tk-meta", Bool.pick(String, rec, clock ++ " · " ++ Nat.show(steps) ++ Bool.pick(String, Nat.is_eq(steps, 1n), " step", " steps"), "")),
+          WB.div("tk-btns", WB.tbtns(bs))])],
+        D.Dom.cat(D.Dom.when(input, WB.urlbar(u)), D.Dom.when(rec, WB.notebar(u)))))
+
+# one recorded step in the save sheet: its typed value is a chip that makes
+# it a parameter (a secret has none), named in a field once marked
+def WB.srow(r: U.TStepRow, +u: U.Ui) -> D.Node:
+  match r:
+    case U.TStepRow{+n, +text, _, +chip, +secret, +marked, +pname}:
+      D.El{"div", "tk-step:" ++ Nat.show(n), [D.At{"class", "tk-step"}], D.Dom.cat([D.Dom.span("tk-n", Nat.show(n) ++ "."), D.Dom.span("tk-what", text)],
+        D.Dom.cat(D.Dom.when(secret, D.Dom.span("tk-secret", "private")),
+          D.Dom.cat(D.Dom.when(Bool.not(String.is_empty(chip)), D.Dom.button(Bool.pick(String, marked, "chip on", "chip"), "tk-mark", Nat.show(n), "Ask for this value each time the task runs", chip)),
+            D.Dom.when(marked, WB.input("tkp-" ++ Nat.show(n), "tkp." ++ Nat.show(n), BI.BU.field(u, "tkp." ++ Nat.show(n)), pname, "tk-save")))))}
+
+def WB.srows(rs: List<&2, U.TStepRow>, +u: U.Ui) -> List<&2, D.Node>:
+  match rs:
+    case Nil{}:
+      Nil{}
+    case r <> t:
+      WB.srow(r, u) <> WB.srows(t, u)
+
+def WB.sheet(+u: U.Ui, +b: BT.Bot) -> D.Node:
+  WB.div("bot-list tk-sheet", D.Dom.cat([D.Dom.span("tk-title", "Save this task"),
+      WB.note("Name it. Mark a value you typed to ask for it each time the task runs."),
+      WB.input("tk-name", "tkname", BI.BU.field(u, "tkname"), "Name", "tk-save"),
+      WB.input("tk-desc", "tkdesc", BI.BU.field(u, "tkdesc"), "What it does (optional)", "")],
+    D.Dom.cat(WB.srows(U.Teach.rows(u, BT.Bot.id(b)), u),
+      [WB.btns([D.Dom.button("primary", "tk-save", "", "Save the task", "Save"), D.Dom.button("", "tk-discard", "", "Throw the recording away", "Discard")])])))
+
+def WB.browser.m(sheet: Bool, +u: U.Ui, +b: BT.Bot) -> D.Node:
+  match sheet:
+    case True{}:
+      WB.sheet(u, b)
+    case False{}:
+      +id = BT.Bot.id(b)
+      +input = {U.Teach.input(u, id) : Bool}
+      WB.div("tk-live", [WB.strip.k(U.Teach.strip(u, id), u, input),
+        WB.browser.in(input, String.is_empty(U.Ui.info(u, "shot." ++ id)), U.Ui.info(u, "shot." ++ id), id, BT.Bot.name(b))])
 
 def WB.browser(+u: U.Ui, +b: BT.Bot) -> D.Node:
-  WB.browser.k(String.is_empty(U.Ui.info(u, "shot." ++ BT.Bot.id(b))), U.Ui.info(u, "shot." ++ BT.Bot.id(b)), BT.Bot.id(b), BT.Bot.name(b))
+  WB.browser.m(Nat.is_eq(U.Teach.mode(u, BT.Bot.id(b)), 2n), u, b)
+
+# Tasks: what the bot has learned, each opened for its run form, then its
+# recent runs with their screenshots
+def WB.status.cls(+s: String) -> String:
+  Bool.pick(String, String.eq(s, "ok"), "state ok", Bool.pick(String, Bool.or(String.eq(s, "failed"), String.eq(s, "stopped")), "state bad", "state"))
+
+def WB.pfields(ps: List<&2, TK.TkParam>, +u: U.Ui) -> List<&2, D.Node>:
+  match ps:
+    case Nil{}:
+      Nil{}
+    case TK.TkParam{+name, +label, _, +example} <> t:
+      WB.input("tkr-" ++ name, U.Teach.pfield(name), BI.BU.field(u, U.Teach.pfield(name)), TK.Tk.first(label, name) ++ Bool.pick(String, String.is_empty(example), "", " (" ++ example ++ ")"), "") <> WB.pfields(t, u)
+
+def WB.task.open(t: U.TTask, +u: U.Ui) -> List<&2, D.Node>:
+  match t:
+    case U.TTask{+slug, _, _, +ps, _, +asking, _}:
+      D.Dom.cat(WB.pfields(ps, u), [WB.btns([D.Dom.button("primary", "tk-run", slug, "Run it now", "Run"),
+        D.Dom.button(Bool.pick(String, asking, "danger", ""), "tk-del", slug, "Delete this task", Bool.pick(String, asking, "Click again to delete", "Delete"))])])
+
+def WB.task(t: U.TTask, +u: U.Ui) -> D.Node:
+  match t:
+    case U.TTask{+slug, +name, +desc, ps, +open, +asking, +last}:
+      D.El{"div", "tk:" ++ slug, [D.At{"class", Bool.pick(String, open, "item open", "item")}], D.Dom.cat([
+        D.El{"div", "", [D.At{"class", "item-main"}, D.At{"data-value", slug}, D.On{"click", "tk-open"}],
+          [D.Dom.span("item-key", name), D.Dom.span("item-text", desc)]},
+        D.Dom.span(WB.status.cls(last), last)],
+        Bool.pick(List<&2, D.Node>, open, WB.task.open(U.TTask{slug, name, desc, ps, open, asking, last}, u), Nil{}))}
+
+def WB.tasks.go(ts: List<&2, U.TTask>, +u: U.Ui) -> List<&2, D.Node>:
+  match ts:
+    case Nil{}:
+      Nil{}
+    case t <> r:
+      WB.task(t, u) <> WB.tasks.go(r, u)
+
+def WB.shots(ss: List<&2, String>) -> List<&2, D.Node>:
+  match ss:
+    case Nil{}:
+      Nil{}
+    case +s <> t:
+      D.El{"a", "", [D.At{"class", "tk-shot"}, D.At{"href", s}, D.At{"target", "_blank"}, D.At{"data-lightbox", s}], [D.El{"img", "", [D.At{"src", s}, D.At{"alt", "screenshot"}, D.At{"loading", "lazy"}], Nil{}}]} <> WB.shots(t)
+
+def WB.run(r: U.TRun) -> D.Node:
+  match r:
+    case U.TRun{+id, +slug, +status, _, +summary, +shots}:
+      D.El{"div", "tr:" ++ id, [D.At{"class", "item run"}], [
+        WB.div("item-main", [D.Dom.span("item-key", slug), D.Dom.span("item-text", summary)]),
+        D.Dom.span(WB.status.cls(status), status),
+        WB.div("tk-shots", WB.shots(shots))]}
+
+def WB.runs.go(rs: List<&2, U.TRun>) -> List<&2, D.Node>:
+  match rs:
+    case Nil{}:
+      Nil{}
+    case r <> t:
+      WB.run(r) <> WB.runs.go(t)
+
+def WB.tasks(+u: U.Ui, +b: BT.Bot) -> D.Node:
+  +ts = U.Teach.tasks(u, BT.Bot.id(b))
+  +rs = List.take(&2, U.TRun, U.Teach.runs(u, BT.Bot.id(b)), 8n)
+  WB.div("bot-list", D.Dom.cat([WB.note(Bool.pick(String, List.is_empty(&2, U.TTask, ts), "None yet. Teach one in the Browser tab, or tell it in chat.", "Open one to run it. A routine can run it too."))],
+    D.Dom.cat(WB.tasks.go(ts, u),
+      D.Dom.cat(D.Dom.when(Bool.not(List.is_empty(&2, U.TRun, rs)), D.Dom.span("tk-title", "Recent runs")), WB.runs.go(rs)))))
 
 # Memory: grouped by kind
 def WB.kind.of(ms: List<&2, BT.Mem>, +k: String) -> List<&2, BT.Mem>:
@@ -510,17 +645,19 @@ def WB.body.k(i: Nat, +u: U.Ui, +b: BT.Bot) -> D.Node:
     case 1n:
       WB.browser(u, b)
     case 2n:
-      WB.memory(u, b)
+      WB.tasks(u, b)
     case 3n:
-      WB.routines(u, b)
+      WB.memory(u, b)
     case 4n:
+      WB.routines(u, b)
+    case 5n:
       WB.hooks(u, b)
     case _:
       WB.settings(u, b)
 
 # a tab other than Chat
 def WB.body(+u: U.Ui, +b: BT.Bot, +tab: String) -> D.Node:
-  D.El{"div", "bot-body:" ++ tab, [D.At{"class", "bot-body"}], [WB.body.k(WB.pos(["space", "browser", "memory", "routines", "hooks"], tab, 0n), u, b)]}
+  D.El{"div", "bot-body:" ++ tab, [D.At{"class", "bot-body"}], [WB.body.k(WB.pos(["space", "browser", "tasks", "memory", "routines", "hooks"], tab, 0n), u, b)]}
 
 # The uberbot (docs/uber.md)
 # --------------------------

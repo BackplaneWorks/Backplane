@@ -16,6 +16,7 @@ import ./space.bend as SV
 import ./plane.bend as PV
 import ../core/plane.bend as PC
 import ../core/uber.bend as UB
+import ../core/task.bend as TK
 import ../core/eq.bend as Q
 
 # The bots in the window (docs/bots.md): their cats under the projects in
@@ -610,10 +611,183 @@ def Bv.stab(+ty: L.Ty, +f: F.FS, b: BT.Bot, +c: D.Clip, +x: U32, +w: U32, +y: U3
 
 # Browser
 # -------
-# The bot's page (layout.bend's Lay.page).
+# The bot's page (layout.bend's Lay.page) under a strip that says who has it
+# and what the person can do (client.bend's Teach.strip): teach it a task,
+# take it over, hand it back. While the person drives, the frame takes their
+# clicks, wheel and keys (nui.bend's Bb) and an address bar shows. Once a
+# recording is stopped the tab is the save sheet.
 
-def Bv.browser(+ty: L.Ty, +u: U.Ui, +id: String, +name: String, +x0: U32, +x1: U32, +top: U32, +h: U32) -> L.Out:
-  L.Lay.page(ty, u, id, "No page yet. Ask " ++ name ++ " to open one.", x0, x1, top, h)
+# the strip's buttons, right to left from x1 (the first is leftmost)
+def Bv.tbtns(bs: List<&2, U.TBtn>, +ty: L.Ty, +c: D.Clip, +y: U32, +x1: U32) -> L.Out:
+  match bs:
+    case Nil{}:
+      L.Out.none()
+    case U.TBtn{+label, +action, +value, +primary} <> t:
+      +w = F.Fm.button.w(ty, label)
+      L.Out.cat(F.Fm.button(ty, c, (x1 - w : U32), y, label, Bool.pick(U32, primary, T.Th.accent(), T.Th.soft()), action, value),
+        Bv.tbtns(t, ty, c, y, (x1 - w - 8 : U32)))
+
+def Bv.urlbar(+ty: L.Ty, +f: F.FS, +c: D.Clip, +x: U32, +w: U32, +y: U32) -> L.Out:
+  +bw = F.Fm.button.w(ty, "Back")
+  +rw = F.Fm.button.w(ty, "Reload")
+  L.Out.all([F.Fm.button(ty, c, x, y, "Back", T.Th.soft(), "bb-back", ""),
+    F.Fm.button(ty, c, (x + bw + 8 : U32), y, "Reload", T.Th.soft(), "bb-reload", ""),
+    Bv.row2(ty, f, "bburl", "bb-nav", "Address", "Go", "", c, (x + bw + rw + 16 : U32), (w - bw - rw - 16 : U32), y)])
+
+def Bv.strip.k(s: U.TStrip, +ty: L.Ty, +f: F.FS, +input: Bool, +c: D.Clip, +x: U32, +w: U32, +y: U32) -> L.Col:
+  match s:
+    case U.TStrip{+mode, +title, +clock, +steps, bs}:
+      +rec = {Nat.is_eq(mode, 1n) : Bool}
+      +meta = {Bool.pick(String, rec, clock ++ " · " ++ Nat.show(steps) ++ Bool.pick(String, Nat.is_eq(steps, 1n), " step", " steps"), "") : String}
+      +ub = {Bool.pick(U32, input, 40, 0) : U32}
+      +nb = {Bool.pick(U32, rec, 40, 0) : U32}
+      L.Col{L.Out.all([
+          L.Out.ops(L.Ty.text(ty, 1n, title, c, x, y, 30, T.Th.accent())),
+          L.Out.ops(L.Ty.text(ty, 2n, meta, c, (x + L.Ty.width(ty, 1n, title) + 12 : U32), y, 30, T.Th.faint())),
+          Bv.tbtns(List.reverse(&2, U.TBtn, bs), ty, c, y, (x + w : U32)),
+          Bv.when(input, Bv.urlbar(ty, f, c, x, w, (y + 40 : U32))),
+          Bv.when(rec, Bv.row2(ty, f, "tknote", "tk-note", "Tell it what matters, e.g. use the second tab", "Add note", "", c, x, w, (y + 40 + ub : U32)))]),
+        (y + 44 + ub + nb : U32)}
+
+# the page under its strip
+def Bv.live(+ty: L.Ty, +f: F.FS, +b: BT.Bot, +x0: U32, +x1: U32, +top: U32, +h: U32) -> L.Out:
+  +u = F.FS.ui(f)
+  +id = BT.Bot.id(b)
+  +input = {U.Teach.input(u, id) : Bool}
+  L.Lay.col.out(L.Lay.col.then(Bv.strip.k(U.Teach.strip(u, id), ty, f, input, D.Clip.all(), (x0 + 24 : U32), (x1 - x0 - 48 : U32), top), +y2 =>
+    L.Col{L.Lay.page.in(ty, u, id, "No page yet. Ask " ++ BT.Bot.name(b) ++ " to open one.", x0, x1, y2, h, input), y2}))
+
+# one recorded step in the save sheet: what it did, its typed value as a
+# chip (a secret shows none: it is never kept), and once marked a parameter
+# its name
+def Bv.srow(r: U.TStepRow, +ty: L.Ty, +f: F.FS, +c: D.Clip, +x: U32, +w: U32, +y: U32) -> L.Col:
+  match r:
+    case U.TStepRow{+n, +text, _, +chip, +secret, +marked, +pname}:
+      +label = {L.Ty.fit(ty, 2n, chip, 200) : String}
+      +cw = {Bool.pick(U32, String.is_empty(chip), 0, F.Fm.button.w(ty, label)) : U32}
+      +sw = {Bool.pick(U32, secret, L.Ty.width(ty, 2n, "private"), 0) : U32}
+      L.Col{L.Out.all([
+          L.Out.ops(L.Ty.text(ty, 2n, L.Ty.fit(ty, 2n, Nat.show(n) ++ ". " ++ text, L.U32.dim(w, (cw + sw + 24 : U32))), c, x, y, 28, T.Th.soft())),
+          Bv.when(secret, L.Out.ops(L.Ty.text(ty, 2n, "private", c, (x + w - sw : U32), y, 28, T.Th.faint()))),
+          Bv.when(Bool.not(String.is_empty(chip)), F.Fm.chip(ty, c, (x + w - cw : U32), y, label, marked, "tk-mark", Nat.show(n))),
+          Bv.when(marked, F.Fm.field(ty, f, c, (x + 24 : U32), (y + 32 : U32), 280, "tkp." ++ Nat.show(n), "tk-save", "", pname))]),
+        (y + Bool.pick(U32, marked, 76, 34) : U32)}
+
+def Bv.srows(rs: List<&2, U.TStepRow>, +ty: L.Ty, +f: F.FS, +c: D.Clip, +x: U32, +w: U32, +y: U32) -> L.Col:
+  match rs:
+    case Nil{}:
+      L.Col{L.Out.none(), y}
+    case r <> t:
+      L.Lay.col.then(Bv.srow(r, ty, f, c, x, w, y), y2 => Bv.srows(t, ty, f, c, x, w, y2))
+
+def Bv.sheet(+ty: L.Ty, +f: F.FS, +b: BT.Bot, +c: D.Clip, +x: U32, +w: U32, +y: U32) -> L.Col:
+  L.Lay.col.cat(L.Out.all([Bv.h2(ty, c, "Save this task", x, y),
+      Bv.faint(ty, c, "Name it. Mark a value you typed to ask for it each time the task runs.", x, w, (y + 30 : U32)),
+      F.Fm.field(ty, f, c, x, (y + 58 : U32), w, "tkname", "tk-save", "", "Name"),
+      F.Fm.field(ty, f, c, x, (y + 98 : U32), w, "tkdesc", "tk-save", "", "What it does (optional)")]),
+    L.Lay.col.then(Bv.srows(U.Teach.rows(F.FS.ui(f), BT.Bot.id(b)), ty, f, c, x, w, (y + 148 : U32)), +y2 =>
+      L.Col{L.Out.all([F.Fm.button(ty, c, x, (y2 + 8 : U32), "Save", T.Th.accent(), "tk-save", ""),
+          F.Fm.button(ty, c, (x + F.Fm.button.w(ty, "Save") + 8 : U32), (y2 + 8 : U32), "Discard", T.Th.soft(), "tk-discard", "")]), (y2 + 56 : U32)}))
+
+def Bv.browser.k(sheet: Bool, +ty: L.Ty, +f: F.FS, +b: BT.Bot, +x0: U32, +x1: U32, +h: U32) -> L.Out:
+  match sheet:
+    case True{}:
+      +top = {(Bv.hy() + 24 : U32) : U32}
+      +off = Bv.off(F.FS.ui(f))
+      Bv.pane(Bv.sheet(ty, f, b, D.Clip{x0, Bv.hy(), x1, h}, Bv.pane.x(x0, x1), Bv.pane.w(x0, x1), (top - off : U32)), x0, x1, Bv.hy(), off, h)
+    case False{}:
+      Bv.live(ty, f, b, x0, x1, (Bv.hy() + 16 : U32), h)
+
+def Bv.browser(+ty: L.Ty, +f: F.FS, +b: BT.Bot, +x0: U32, +x1: U32, +h: U32) -> L.Out:
+  Bv.browser.k(Nat.is_eq(U.Teach.mode(F.FS.ui(f), BT.Bot.id(b)), 2n), ty, f, b, x0, x1, h)
+
+# Tasks
+# -----
+# What the bot has learned (client.bend's Teach.tasks): a row each, opened
+# for its run form, then its recent runs with their screenshots.
+
+def Bv.status.color(+s: String) -> U32:
+  Bool.pick(U32, String.eq(s, "ok"), T.Th.accent(), Bool.pick(U32, Bool.or(String.eq(s, "failed"), String.eq(s, "stopped")), T.Th.bad(), T.Th.faint()))
+
+# a parameter's field in the run form
+def Bv.pfields(ps: List<&2, TK.TkParam>, +ty: L.Ty, +f: F.FS, +c: D.Clip, +x: U32, +w: U32, +y: U32) -> L.Col:
+  match ps:
+    case Nil{}:
+      L.Col{L.Out.none(), y}
+    case TK.TkParam{+name, +label, _, +example} <> t:
+      L.Lay.col.cat(F.Fm.field(ty, f, c, x, y, w, U.Teach.pfield(name), "", "", TK.Tk.first(label, name) ++ Bool.pick(String, String.is_empty(example), "", " (" ++ example ++ ")")),
+        Bv.pfields(t, ty, f, c, x, w, (y + 40 : U32)))
+
+def Bv.task(t: U.TTask, +ty: L.Ty, +f: F.FS, +c: D.Clip, +x: U32, +w: U32, +y: U32) -> L.Col:
+  match t:
+    case U.TTask{+slug, +name, +desc, +ps, +open, +asking, +last}:
+      +lw = {L.Ty.width(ty, 2n, last) : U32}
+      +np = {U32.from_nat(List.length(&2, TK.TkParam, ps)) : U32}
+      +h = {Bool.pick(U32, open, (56 + np * 40 + 44 : U32), 56) : U32}
+      +head = L.Out.all([
+          L.Out.ops(L.Lay.box(c, x, y, w, h, 0, T.Th.panel(), Bool.pick(U32, open, T.Th.accent(), T.Th.line()))),
+          L.Out.ops(L.Ty.text(ty, 0n, L.Ty.fit(ty, 0n, name, L.U32.dim(w, (lw + 40 : U32))), c, (x + 12 : U32), (y + 4 : U32), 28, T.Th.text())),
+          L.Out.ops(L.Ty.text(ty, 2n, last, c, (x + w - lw - 12 : U32), (y + 4 : U32), 28, Bv.status.color(last))),
+          Bv.faint(ty, c, desc, (x + 12 : U32), (w - 24 : U32), (y + 30 : U32))])
+      L.Lay.col.cat(head,
+        L.Lay.col.cat(Bv.when(open, L.Out.all([
+            L.Lay.col.out(Bv.pfields(ps, ty, f, c, (x + 12 : U32), (w - 24 : U32), (y + 60 : U32))),
+            F.Fm.button(ty, c, (x + 12 : U32), (y + h - 40 : U32), "Run", T.Th.accent(), "tk-run", slug),
+            F.Fm.button(ty, c, (x + 20 + F.Fm.button.w(ty, "Run") : U32), (y + h - 40 : U32), Bool.pick(String, asking, "Click again to delete", "Delete"), Bool.pick(U32, asking, T.Th.bad(), T.Th.soft()), "tk-del", slug)])),
+          L.Col{L.Out{Nil{}, [L.Lay.hit(x, y, w, h, "tk-open", slug)]}, (y + h + 8 : U32)}))
+
+def Bv.tasks(ts: List<&2, U.TTask>, +ty: L.Ty, +f: F.FS, +c: D.Clip, +x: U32, +w: U32, +y: U32) -> L.Col:
+  match ts:
+    case Nil{}:
+      L.Col{L.Out.none(), y}
+    case t <> r:
+      L.Lay.col.then(Bv.task(t, ty, f, c, x, w, y), y2 => Bv.tasks(r, ty, f, c, x, w, y2))
+
+# a run's screenshots, 120 by 80 each
+def Bv.shots(ss: List<&2, String>, +ty: L.Ty, +u: U.Ui, +x: U32, +y: U32) -> L.Out:
+  match ss:
+    case Nil{}:
+      L.Out.none()
+    case +s <> t:
+      L.Out.cat(L.Lay.thumb(ty, L.Lay.tshot(U.Ui.info(u, "listen"), s), U.Ui.info(u, "img:" ++ L.Lay.tshot(U.Ui.info(u, "listen"), s)), x, y, 120, 80),
+        Bv.shots(t, ty, u, (x + 132 : U32), y))
+
+def Bv.run(r: U.TRun, +ty: L.Ty, +u: U.Ui, +c: D.Clip, +x: U32, +w: U32, +y: U32) -> L.Col:
+  match r:
+    case U.TRun{_, +slug, +status, +n, +summary, +shots}:
+      +sw = {L.Ty.width(ty, 2n, status) : U32}
+      +h = {Bool.pick(U32, List.is_empty(&2, String, shots), 56, 148) : U32}
+      L.Col{L.Out.all([
+          L.Out.ops(L.Lay.box(c, x, y, w, h, 0, T.Th.panel(), T.Th.line())),
+          L.Out.ops(L.Ty.text(ty, 0n, L.Ty.fit(ty, 0n, slug, L.U32.dim(w, (sw + 40 : U32))), c, (x + 12 : U32), (y + 4 : U32), 28, T.Th.text())),
+          L.Out.ops(L.Ty.text(ty, 2n, status, c, (x + w - sw - 12 : U32), (y + 4 : U32), 28, Bv.status.color(status))),
+          Bv.faint(ty, c, summary, (x + 12 : U32), (w - 24 : U32), (y + 30 : U32)),
+          Bv.shots(shots, ty, u, (x + 12 : U32), (y + 56 : U32))]),
+        (y + h + 8 : U32)}
+
+def Bv.runs(rs: List<&2, U.TRun>, +ty: L.Ty, +u: U.Ui, +c: D.Clip, +x: U32, +w: U32, +y: U32) -> L.Col:
+  match rs:
+    case Nil{}:
+      L.Col{L.Out.none(), y}
+    case r <> t:
+      L.Lay.col.then(Bv.run(r, ty, u, c, x, w, y), y2 => Bv.runs(t, ty, u, c, x, w, y2))
+
+def Bv.runs.head(some: Bool, +ty: L.Ty, +c: D.Clip, +x: U32, +y: U32) -> L.Out:
+  match some:
+    case True{}:
+      Bv.h2(ty, c, "Recent runs", x, y)
+    case False{}:
+      L.Out.none()
+
+def Bv.ttab(+ty: L.Ty, +f: F.FS, +bot: String, +c: D.Clip, +x: U32, +w: U32, +y: U32) -> L.Col:
+  +u = F.FS.ui(f)
+  +ts = U.Teach.tasks(u, bot)
+  +rs = List.take(&2, U.TRun, U.Teach.runs(u, bot), 8n)
+  L.Lay.col.cat(L.Out.cat(Bv.h2(ty, c, "Tasks", x, y),
+      Bv.faint(ty, c, Bool.pick(String, List.is_empty(&2, U.TTask, ts), "None yet. Teach one in the Browser tab, or tell it in chat.", "Open one to run it. A routine can run it too."), x, w, (y + 30 : U32))),
+    L.Lay.col.then(Bv.tasks(ts, ty, f, c, x, w, (y + 60 : U32)), +y2 =>
+      L.Lay.col.cat(Bv.runs.head(Bool.not(List.is_empty(&2, U.TRun, rs)), ty, c, x, (y2 + 12 : U32)),
+        Bv.runs(rs, ty, u, c, x, w, (y2 + 52 : U32)))))
 
 # A bot
 # -----
@@ -677,10 +851,12 @@ def Bv.pane.k(k: Nat, +ty: L.Ty, +f: F.FS, +b: BT.Bot, +c: D.Clip, +x: U32, +w: 
     case 1n:
       SV.Spv.draw(ty, f, BU.BU.space(F.FS.ui(f), b), BT.Bot.id(b), c, x, w, y)
     case 3n:
-      Bv.memory(ty, F.FS.ui(f), BT.Bot.id(b), c, x, w, y)
+      Bv.ttab(ty, f, BT.Bot.id(b), c, x, w, y)
     case 4n:
-      Bv.rtab(ty, f, BT.Bot.id(b), c, x, w, y)
+      Bv.memory(ty, F.FS.ui(f), BT.Bot.id(b), c, x, w, y)
     case 5n:
+      Bv.rtab(ty, f, BT.Bot.id(b), c, x, w, y)
+    case 6n:
       Bv.htab(ty, f, BT.Bot.id(b), c, x, w, y)
     case _:
       Bv.stab(ty, f, b, c, x, w, y)
@@ -690,8 +866,8 @@ def Bv.bot.k(k: Nat, +ty: L.Ty, +memo: L.TLMemo, +pl: PC.Plane, +n: S.Nui, +b: B
     case 0n:
       L.Out.hits_below(Bv.hy(), L.Lay.thread.at(ty, memo, n, x0, x1, (Bv.hy() - 52 : U32)))
     case 2n:
-      Bv.browser(ty, S.Nui.ui(n), BT.Bot.id(b), BT.Bot.name(b), x0, x1, (Bv.hy() + 16 : U32), S.Nui.height(n))
-    case 7n:
+      Bv.browser(ty, F.Fm.fs(n), b, x0, x1, S.Nui.height(n))
+    case 8n:
       +top = {(Bv.hy() + 24 : U32) : U32}
       +off = Bv.off(S.Nui.ui(n))
       Bv.pane(PV.Pl.draw(pl, PC.Plane.home(S.Nui.ui(n)), ty, D.Clip{x0, Bv.hy(), x1, S.Nui.height(n)}, (x0 + 24 : U32), (x1 - x0 - 48 : U32), top, off, L.U32.dim(S.Nui.height(n), top), U.Side.now(S.Nui.ui(n))),

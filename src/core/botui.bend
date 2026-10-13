@@ -359,11 +359,11 @@ def BU.view(+u: U.Ui) -> View:
   BU.view.room(BU.room.get(BT.World.room(M.State.bots(U.Ui.state(u)), BU.room.sel(u))), u)
 
 def BU.tabs() -> List<&2, String>:
-  ["chat", "space", "browser", "memory", "routines", "hooks", "settings"]
+  ["chat", "space", "browser", "tasks", "memory", "routines", "hooks", "settings"]
 
 # a bot's tabs: all of them for a bot here; for one mirrored from a linked
 # machine (far.bend) what its machine shares: its chat, space, memory and
-# routines. Its browser, webhooks and settings stay on its machine (law
+# routines. Its browser, tasks, webhooks and settings stay on its machine (law
 # far_bot_tabs).
 def BU.tabs.of(+id: String) -> List<&2, String>:
   Bool.pick(List<&2, String>, FR.Fr.is(id), ["chat", "space", "memory", "routines"], BU.tabs())
@@ -376,9 +376,10 @@ def BU.tab.label(+t: String) -> String:
   Bool.pick(String, String.eq(t, "chat"), "Chat",
     Bool.pick(String, String.eq(t, "space"), "Space",
       Bool.pick(String, String.eq(t, "browser"), "Browser",
+        Bool.pick(String, String.eq(t, "tasks"), "Tasks",
         Bool.pick(String, String.eq(t, "memory"), "Memory",
           Bool.pick(String, String.eq(t, "routines"), "Routines",
-            Bool.pick(String, String.eq(t, "hooks"), "Webhooks", Bool.pick(String, String.eq(t, "status"), "Status", "Settings")))))))
+            Bool.pick(String, String.eq(t, "hooks"), "Webhooks", Bool.pick(String, String.eq(t, "status"), "Status", "Settings"))))))))
 
 def BU.tab.has(ts: List<&2, String>, +t: String) -> Bool:
   match ts:

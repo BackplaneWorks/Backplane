@@ -29,6 +29,7 @@ import ./src/core/agent.bend as AG
 import ./src/core/tailnet.bend as TN
 import ./src/core/fuzzy.bend as FZ
 import ./src/core/task.bend as TSK
+import ./src/core/teach.bend as TCH
 import ./src/mobile/notify.bend as Nt
 import ./src/core/notice.bend as NO
 import ./src/core/codec.bend as C
@@ -7088,3 +7089,138 @@ law task_slug_nonempty:
 
 law task_slug_empty:
   {TSK.Task.slug("") == "task" : String}
+
+# Teaching a bot browser tasks, in the clients (client.bend's Teach.*; docs/teach.md)
+
+# the Browser tab's strip: idle, recording, in review, the person has the browser
+law teach_mode_idle:
+  {U.Teach.mode.of("", "") == 0n : Nat}
+
+law teach_mode_recording:
+  {U.Teach.mode.of("rec 100 2", "teach") == 1n : Nat}
+
+law teach_mode_review:
+  {U.Teach.mode.of("review", "teach") == 2n : Nat}
+
+law teach_mode_takeover:
+  {U.Teach.mode.of("", "takeover") == 3n : Nat}
+
+# the frame takes the person's input exactly while they drive
+law teach_input_only_when_driving:
+  for +d: String
+  {U.Teach.driving(d) == Bool.not(String.is_empty(d)) : Bool}
+
+law teach_bot_drives_no_input:
+  {U.Teach.driving("") == False{} : Bool}
+
+# a risky pause goes on only by Confirm, never Continue
+law teach_risky_confirms:
+  {U.Teach.choice.safe(True{}, "continue") == "confirm" : String}
+
+law teach_plain_continues:
+  {U.Teach.choice.safe(False{}, "continue") == "continue" : String}
+
+law teach_risky_default_options:
+  {U.Teach.choices("", True{}) == ["confirm", "skip", "stop"] : List<&2, String>}
+
+law teach_risky_button:
+  for +id: String
+  {U.Teach.ask.btns(["continue"], id, True{}) == [U.TBtn{"Confirm", "answer", id ++ "|confirm", True{}}] : List<&2, U.TBtn>}
+
+# a secret's step is never a chip the person could make a parameter
+law teach_secret_no_chip:
+  for +act: String
+  for +l: String
+  {U.Teach.chip(act, TSK.VSecret{l}) == "" : String}
+
+law teach_secret_row_no_chip:
+  for +n: Nat
+  for +t: String
+  for +l: String
+  for +c: String
+  for +m: Bool
+  for +p: String
+  {U.Teach.chip.ok(U.TStepRow{n, t, l, c, True{}, m, p}) == False{} : Bool}
+
+# the Tasks tab sits right after Browser, and a bot elsewhere has neither
+law teach_tasks_tab:
+  {BU.BU.tabs() == ["chat", "space", "browser", "tasks", "memory", "routines", "hooks", "settings"] : List<&2, String>}
+
+law teach_clock:
+  {U.Teach.clock(160n) == "2:40" : String}
+
+# Teaching a bot's browser (src/core/teach.bend, docs/teach.md)
+
+# while the person teaches, the bot's preview calls are refused
+law teach_preview_refused_teaching:
+  {TCH.Teach.bot_may(TCH.Teach.put(TCH.Teach.empty(), TCH.Teach.start("b1", 5n)), "b1") == False{} : Bool}
+
+# and while they take the browser over
+law teach_preview_refused_takeover:
+  {TCH.Teach.bot_may(TCH.Teach.put(TCH.Teach.empty(), TCH.Teach.takeover(TCH.Teach.blank("b1"))), "b1") == False{} : Bool}
+
+# another bot's browser is its own
+law teach_preview_other_bot_free:
+  {TCH.Teach.bot_may(TCH.Teach.put(TCH.Teach.empty(), TCH.Teach.start("b1", 5n)), "b2") == True{} : Bool}
+
+law teach_preview_allowed_idle:
+  {TCH.Teach.bot_may(TCH.Teach.empty(), "b1") == True{} : Bool}
+
+# handing back gives the browser to the bot again
+law teach_handback_returns_browser:
+  {TCH.Teach.bot_may(TCH.Teach.put(TCH.Teach.empty(), TCH.Teach.handback(TCH.Teach.takeover(TCH.Teach.blank("b1")))), "b1") == True{} : Bool}
+
+# the info text of the teach state
+law teach_info_idle:
+  {TCH.Teach.mode.text(TCH.Teach.blank("b1")) == "" : String}
+
+law teach_info_recording:
+  {TCH.Teach.mode.text(TCH.Teach.start("b1", 5n)) == "rec 5 0" : String}
+
+law teach_info_review:
+  {TCH.Teach.mode.text(TCH.Teach.stop(TCH.Teach.start("b1", 5n))) == "review" : String}
+
+# a risky pause is confirmed, any other continued; both may be skipped or stopped
+law teach_pause_options_risky:
+  {TCH.Pause.options(True{}) == "confirm\nskip\nstop" : String}
+
+law teach_pause_options_plain:
+  {TCH.Pause.options(False{}) == "continue\nskip\nstop" : String}
+
+# a pause alerts once: its key is noted and the same key does not alert again
+law teach_pause_alerts_once:
+  {TCH.Pause.alerts(TCH.Teach.alert_mark(TCH.Teach.empty(), TSK.Run.alert_key("r", 2n)), "r", 2n) == False{} : Bool}
+
+law teach_pause_first_alerts:
+  {TCH.Pause.alerts(TCH.Teach.empty(), "r", 2n) == True{} : Bool}
+
+# a click at the frame's corner lands inside the page
+law teach_scale_corner:
+  {TSK.Task.scale(1000n, 1000n, 1000n, 1000n, 1280n, 800n) == TSK.TkPt{1279n, 799n} : TSK.TkPt}
+
+law teach_scale_middle:
+  {TSK.Task.scale(500n, 500n, 1000n, 1000n, 1280n, 800n) == TSK.TkPt{640n, 400n} : TSK.TkPt}
+
+# a run's folder and a picture's name are plain names: no / and no ..
+law teach_run_no_slash:
+  {TCH.Teach.run.ok("a/b-1") == False{} : Bool}
+
+law teach_run_no_dots:
+  {TCH.Teach.run.ok("..-1") == False{} : Bool}
+
+law teach_file_no_traversal:
+  {TCH.Teach.file.ok("../x.jpg") == False{} : Bool}
+
+law teach_run_slug_roundtrip:
+  {TCH.Teach.run.slug(TCH.Teach.run.id("a-b", 5n)) == "a-b" : String}
+
+# a recording stops by itself after ten minutes, not before
+law teach_recording_expires:
+  {TCH.Teach.expired(TCH.Teach.start("b1", 100n), 700n) == True{} : Bool}
+
+law teach_recording_not_early:
+  {TCH.Teach.expired(TCH.Teach.start("b1", 100n), 699n) == False{} : Bool}
+
+# a draft's secret step carries no value
+law teach_draft_secret_no_value:
+  {String.contains(TCH.Teach.draft.text(TCH.Teach.add(TCH.Teach.start("b1", 1n), J.Json.obj([J.KV{"do", J.Str{"type"}}, J.KV{"secret", J.Flag{True{}}}, J.KV{"value", J.Str{"hunter2"}}]))), "hunter2") == False{} : Bool}

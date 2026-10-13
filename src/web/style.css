@@ -734,3 +734,29 @@ button.mic.starting, button.mic.stopping { border-color: var(--bad); color: var(
 .rl-form .field { width: min(300px, 100%); padding: 4px 8px; background: var(--bg); border: 1px solid var(--line); color: var(--text); border-radius: 0; }
 .rl-form button.primary { padding: 5px 12px; }
 .rl-form button.primary[disabled] { opacity: .5; cursor: default; }
+
+/* teaching a bot a browser task (docs/teach.md) */
+.tk-strip { display: flex; flex-direction: column; gap: 6px; padding: 12px 16px 0; max-width: 860px; }
+.tk-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.tk-title { color: var(--accent); font-weight: 600; }
+.tk-meta { color: var(--faint); font-size: 12px; }
+.tk-btns { display: flex; gap: 6px; margin-left: auto; }
+.tk-btns button.primary { border-color: var(--accent); color: var(--accent); }
+.tk-strip .bform.row { margin: 0; }
+.bot-screen.driven img { outline: 2px solid var(--accent); outline-offset: -1px; cursor: crosshair; user-select: none; }
+.bot-screen.driven img:focus { outline-color: var(--text); }
+.tk-sheet .tk-step { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; border-bottom: 1px solid var(--line); padding: 4px 0; }
+.tk-step .tk-n { color: var(--faint); font-family: var(--mono); font-size: 12px; }
+.tk-step .tk-what { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.tk-step .tk-secret { color: var(--faint); font-size: 12px; }
+.tk-step button.chip.on { border-color: var(--accent); color: var(--accent); }
+.tk-step .field { flex-basis: 100%; max-width: 280px; margin-left: 24px; }
+.item.open { flex-wrap: wrap; border-color: var(--accent); }
+.item.open .item-main { cursor: pointer; }
+.item .state { color: var(--faint); font-size: 12px; white-space: nowrap; }
+.item .state.ok { color: var(--accent); }
+.item .state.bad { color: var(--bad); }
+.item.open > .field, .item.open > .bform-btns { flex-basis: 100%; }
+.tk-shots { display: flex; gap: 6px; flex-wrap: wrap; flex-basis: 100%; }
+.tk-shot img { display: block; width: 120px; height: 80px; object-fit: cover; border: 1px solid var(--line); }
+.ask.browser .tk-shot img { width: auto; height: auto; max-width: 100%; max-height: 220px; object-fit: contain; }

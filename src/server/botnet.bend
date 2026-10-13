@@ -11,6 +11,7 @@ import ../core/bothub.bend as BH
 import ../core/far.bend as FR
 import ../core/live.bend as LV
 import ../core/farlive.bend as FL
+import ../core/teach.bend as TE
 
 # Bots' IO that needs secrets (docs/bots.md): webhook and peer secrets,
 # signed requests to linked machines, verifying signed requests to us, and
@@ -26,57 +27,57 @@ import ../core/farlive.bend as FL
 # threads elsewhere (far.bend: mirrors, pushes, this hub's feed), and each
 # thread's streamed text since its last message (core/live.bend)
 type Bn is Data:
-  Bn{dir: String, seen: SG.Seen, work: BH.DirWork, far: FR.Fh, live: List<&2, LV.Buf>, broken: String, fl: List<&2, FL.LQ>}
+  Bn{dir: String, seen: SG.Seen, work: BH.DirWork, far: FR.Fh, live: List<&2, LV.Buf>, broken: String, fl: List<&2, FL.LQ>, tch: TE.TeachSt}
 
 def Bn.empty() -> Bn:
-  Bn{"[]", SG.Seen.empty(), BH.DirWork.empty(), FR.Fh.empty(), Nil{}, "", Nil{}}
+  Bn{"[]", SG.Seen.empty(), BH.DirWork.empty(), FR.Fh.empty(), Nil{}, "", Nil{}, TE.Teach.empty()}
 
 def Bn.dir(b: Bn) -> String:
   match b:
-    case Bn{d, _, _, _, lv, _, _}:
+    case Bn{d, _, _, _, lv, _, _, _}:
       d
 
 def Bn.far(b: Bn) -> FR.Fh:
   match b:
-    case Bn{_, _, _, f, lv, _, _}:
+    case Bn{_, _, _, f, lv, _, _, _}:
       f
 
 def Bn.live(b: Bn) -> List<&2, LV.Buf>:
   match b:
-    case Bn{_, _, _, _, lv, _, _}:
+    case Bn{_, _, _, _, lv, _, _, _}:
       lv
 
 def Bn.fl(b: Bn) -> List<&2, FL.LQ>:
   match b:
-    case Bn{_, _, _, _, _, _, q}:
+    case Bn{_, _, _, _, _, _, q, _}:
       q
 
 def Bn.with_fl(b: Bn, q: List<&2, FL.LQ>) -> Bn:
   match b:
-    case Bn{d, s, w, f, lv, bk, _}:
-      Bn{d, s, w, f, lv, bk, q}
+    case Bn{d, s, w, f, lv, bk, _, tc}:
+      Bn{d, s, w, f, lv, bk, q, tc}
 
 def Bn.with_live(b: Bn, lv: List<&2, LV.Buf>) -> Bn:
   match b:
-    case Bn{d, s, w, f, _, bk, fl}:
-      Bn{d, s, w, f, lv, bk, fl}
+    case Bn{d, s, w, f, _, bk, fl, tc}:
+      Bn{d, s, w, f, lv, bk, fl, tc}
 
 # why the log can no longer be appended to ("" while it can): a failed
 # write could not be taken back, so nothing more is committed until it is
 def Bn.broken(b: Bn) -> String:
   match b:
-    case Bn{_, _, _, _, _, bk, _}:
+    case Bn{_, _, _, _, _, bk, _, _}:
       bk
 
 def Bn.with_broken(b: Bn, +bk: String) -> Bn:
   match b:
-    case Bn{d, s, w, f, lv, _, fl}:
-      Bn{d, s, w, f, lv, bk, fl}
+    case Bn{d, s, w, f, lv, _, fl, tc}:
+      Bn{d, s, w, f, lv, bk, fl, tc}
 
 def Bn.with_far(b: Bn, f: FR.Fh) -> Bn:
   match b:
-    case Bn{d, s, w, _, lv, bk, fl}:
-      Bn{d, s, w, f, lv, bk, fl}
+    case Bn{d, s, w, _, lv, bk, fl, tc}:
+      Bn{d, s, w, f, lv, bk, fl, tc}
 
 # Files
 # -----
@@ -464,18 +465,18 @@ def Bn.seen.k(had: Bool, s: SG.Seen, +key: String, +now: Nat) -> Maybe<&2, SG.Se
 
 def Bn.accept(+b: Bn, +key: String, +now: Nat) -> Maybe<&2, SG.Seen>:
   match b:
-    case Bn{_, +s, _, _, lv, _, _}:
+    case Bn{_, +s, _, _, lv, _, _, _}:
       Bn.seen.k(SG.Seen.has(s, key), s, key, now)
 
 def Bn.with_seen(b: Bn, s: SG.Seen) -> Bn:
   match b:
-    case Bn{d, _, w, f, lv, bk, fl}:
-      Bn{d, s, w, f, lv, bk, fl}
+    case Bn{d, _, w, f, lv, bk, fl, tc}:
+      Bn{d, s, w, f, lv, bk, fl, tc}
 
 def Bn.with_dir(b: Bn, d: String) -> Bn:
   match b:
-    case Bn{_, s, w, f, lv, bk, fl}:
-      Bn{d, s, w, f, lv, bk, fl}
+    case Bn{_, s, w, f, lv, bk, fl, tc}:
+      Bn{d, s, w, f, lv, bk, fl, tc}
 
 # Signed requests out
 # -------------------
@@ -727,13 +728,24 @@ def Bn.fetched(r: Resp, +peer: String, +pname: String, +now: Nat) -> Maybe<&2, L
 
 def Bn.work(b: Bn) -> BH.DirWork:
   match b:
-    case Bn{_, _, w, _, lv, _, _}:
+    case Bn{_, _, w, _, lv, _, _, _}:
       w
 
 def Bn.with_work(b: Bn, w: BH.DirWork) -> Bn:
   match b:
-    case Bn{d, s, _, f, lv, bk, fl}:
-      Bn{d, s, w, f, lv, bk, fl}
+    case Bn{d, s, _, f, lv, bk, fl, tc}:
+      Bn{d, s, w, f, lv, bk, fl, tc}
+
+# the teach state of the bots' browsers (core/teach.bend)
+def Bn.tch(b: Bn) -> TE.TeachSt:
+  match b:
+    case Bn{_, _, _, _, _, _, _, t}:
+      t
+
+def Bn.with_tch(b: Bn, t: TE.TeachSt) -> Bn:
+  match b:
+    case Bn{d, s, w, f, lv, bk, fl, _}:
+      Bn{d, s, w, f, lv, bk, fl, t}
 
 def Bn.cache(home: String) -> String:
   home ++ "/bots.cache"

@@ -111,10 +111,38 @@ Info (hub → clients, per bot):
 Asks: a pause opens `AskOpened{kind: "browser"}` on the bot's thread, tool
 `task_pause`, detail a JSON object `{bot, run, slug, n, kind, question,
 risky, shot}` (`shot` the hub URL of the pause's screenshot,
-`/bots/<id>/tasks/shot?run=<run>&n=<n>`), options `confirm|skip|stop` for a
-risky pause, else `continue|skip|stop`. Answering closes it; the person may
-take over first (`bots.browser takeover`), and answering also hands back.
+`/bots/<id>/tasks/shot?run=<run>&n=<n>`), options (the ask's `options`, one
+per line) `confirm`, `skip`, `stop` for a risky pause, else `continue`, `skip`,
+`stop`. Answering closes it; the person may take over first (`bots.browser
+takeover`), and answering also hands back.
 
 Runs: each run's steps go to its folder, and the run is an Act of tone
 `task` on the bot's thread, text a JSON object `{slug, run, status, n,
 summary, shots: [urls]}`, logged at its start and end.
+
+## The hub's side
+
+`src/core/teach.bend` (pure: the per-bot driver and draft, info text, saving
+a draft as a task, the pause ask; laws `teach_*`; test `test/teach_test.bend`);
+`src/server/server.bend`'s "Teaching a bot's browser" and "Task runs" (IO).
+The state lives in the hub's `Cfg` (`BN.Bn.tch`), never in the event log, and
+is sent as the info keys above (in every join's `info`, and as `{"t":"info"}`
+when a bot's state changes). Recorder steps arrive as helper `record` events
+(`Shot.msg` routes them to the hub as `BrowserEv`); input from the person is
+scaled with `Task.scale` against the page's `status` size. A recording stops
+by itself after ten minutes (the minute tick).
+
+A bot's `preview_*` calls are answered "The person has the browser (teaching
+or taking over); wait for them to hand it back." while `drive.<bot>` is set.
+
+Task tools: `task_list`, `task_get`, `task_save`, `task_delete` are pure
+(`Bots.call`); `task_run` (the filled plan, each step with its selectors),
+`task_step`, `task_pause` and `task_end` are answered by the server. A run
+is `<slug>-<seconds>`, its files `<home>/bots/<id>/tasks/<slug>/runs/<run>/`
+(`log.jsonl`, `<n>.jpg`, `pause-<n>.jpg`); the newest twenty runs are kept.
+`GET /bots/<id>/tasks/shot?run=<run>&n=<n>` (or `&f=<file>`) serves a
+picture behind the same auth as `screen.jpg`, only from that bot's folder.
+A pause alerts once per `task-<run>-<n>`: a desktop notification (kind
+`ask`) to the desk used last, and an APNs alert whose payload is mutable and
+carries the screenshot's path as a top-level `image`. Test:
+`bun test/tools/teach_e2e.ts`.

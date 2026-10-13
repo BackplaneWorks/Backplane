@@ -588,7 +588,7 @@ def View.ask.btns(+k: String, +id: String, +o: String, +draft: String) -> List<&
         Bool.pick(List<&2, D.Node>, String.is_empty(String.trim(draft)), [D.Dom.button("", "answer", id ++ "|", "Dismiss", "Dismiss")], [D.Dom.button("primary", "answer", id ++ "|" ++ String.trim(draft), "Answer with your draft", "Answer with draft")])),
       [D.Dom.button("primary", "answer", id ++ "|accept", "Allow once", "Allow"), D.Dom.button("", "answer", id ++ "|session", "Allow this tool for the session", "Allow for session"), D.Dom.button("", "answer", id ++ "|decline", "Deny", "Deny")]))
 
-def View.ask(a: M.Ask, +draft: String) -> D.Node:
+def View.ask.std(a: M.Ask, +draft: String) -> D.Node:
   match a:
     case M.Ask{+id, _, +k, +tool, +d, +o, _, _}:
       D.El{"div", id, [D.At{"class", "ask " ++ k}], [
@@ -596,12 +596,43 @@ def View.ask(a: M.Ask, +draft: String) -> D.Node:
         Bool.pick(D.Node, String.eq(k, "plan"), D.El{"div", "", [D.At{"class", "body"}], D.Md.render(d)}, D.El{"div", "", [D.At{"class", "ask-detail"}], [D.Txt{d}]}),
         D.El{"div", "", [D.At{"class", "ask-btns"}], View.ask.btns(k, id, o, draft)}]}
 
-def View.asks(as: List<&2, M.Ask>, +draft: String) -> List<&2, D.Node>:
+# a browser task paused for help: its question, the screenshot, and the
+# person's choices (client.bend's Teach.ask)
+def View.ask.web.btns(bs: List<&2, U.TBtn>) -> List<&2, D.Node>:
+  match bs:
+    case Nil{}:
+      Nil{}
+    case U.TBtn{+label, +action, +value, +primary} <> t:
+      D.Dom.button(Bool.pick(String, primary, "primary", ""), action, value, label, label) <> View.ask.web.btns(t)
+
+def View.ask.web(t: U.TAsk) -> D.Node:
+  match t:
+    case U.TAsk{+id, _, +slug, +n, _, +q, _, +shot, bs}:
+      D.El{"div", id, [D.At{"class", "ask browser"}], D.Dom.cat([
+        D.Dom.span("ask-head", "Task paused: " ++ slug ++ " (step " ++ Nat.show(n) ++ ")"),
+        D.El{"div", "", [D.At{"class", "ask-detail"}], [D.Txt{q}]}],
+        D.Dom.cat(D.Dom.when(Bool.not(String.is_empty(shot)), D.El{"a", "", [D.At{"class", "tk-shot"}, D.At{"href", shot}, D.At{"target", "_blank"}, D.At{"data-lightbox", shot}],
+            [D.El{"img", "", [D.At{"src", shot}, D.At{"alt", "where the task stopped"}], Nil{}}]}),
+          [D.El{"div", "", [D.At{"class", "ask-btns"}], View.ask.web.btns(bs)}]))}
+
+def View.ask.k(web: Bool, a: M.Ask, +draft: String, nf: Map<&2, String>) -> D.Node:
+  match web:
+    case True{}:
+      View.ask.web(U.Teach.ask.from(a, nf))
+    case False{}:
+      View.ask.std(a, draft)
+
+def View.ask(a: M.Ask, +draft: String, nf: Map<&2, String>) -> D.Node:
+  match a:
+    case M.Ask{_, _, +k, _, _, _, _, _}:
+      View.ask.k(String.eq(k, "browser"), a, draft, nf)
+
+def View.asks(as: List<&2, M.Ask>, +draft: String, +nf: Map<&2, String>) -> List<&2, D.Node>:
   match as:
     case Nil{}:
       Nil{}
     case a <> t:
-      View.ask(a, draft) <> View.asks(t, draft)
+      View.ask(a, draft, nf) <> View.asks(t, draft, nf)
 
 def View.qbtns(bs: List<&2, U.QBtn>) -> List<&2, D.Node>:
   match bs:
@@ -1309,8 +1340,8 @@ def View.composer.t(+st: M.State, +sel: String, +drafts: Map<&2, String>, +op: M
   View.composer(U.Str.get(drafts, sel), U.Follow.button(st, sel, View.running(turn), stop, U.Str.get(drafts, sel)), U.Follow.act(stop), U.Models.label(pr, mo), U.Usage.tail(st, sel), U.Flag.get(op, "models"), U.Models.menu(U.Str.get(nf, "models"), pr), mo, U.Str.get(nf, "models"), pr,
     U.Chip.all(U.Str.get(nf, "models"), pr, mo), U.Effort.of(st, sel), U.Skills.shown(st, sel, drafts, nf), atts, up, vo, mic)
 
-def View.asks.box(+st: M.State, +id: String, +draft: String) -> D.Node:
-  D.El{"div", "asks", [D.At{"class", "asks"}, D.At{"id", "asks"}], View.asks(U.Asks.open(st, id), draft)}
+def View.asks.box(+st: M.State, +id: String, +draft: String, +nf: Map<&2, String>) -> D.Node:
+  D.El{"div", "asks", [D.At{"class", "asks"}, D.At{"id", "asks"}], View.asks(U.Asks.open(st, id), draft, nf)}
 
 # the same two from the Ui alone (app.bend's composer and asks)
 def View.composer.k(u: U.Ui, t: M.Thread, +atts: List<&2, String>, +up: String, vo: List<&2, D.Node>, +mic: String) -> D.Node:
@@ -1321,8 +1352,10 @@ def View.composer.k(u: U.Ui, t: M.Thread, +atts: List<&2, String>, +up: String, 
 def View.composer.u(+u: U.Ui) -> D.Node:
   View.composer.k(u, U.Ui.thread(U.Ui.state(u), U.Ui.sel(u)), U.Ui.atts(u, U.Ui.sel(u)), U.Ui.uploading(u, U.Ui.sel(u)), D.Dom.cat(View.btw(u), View.voice(u, U.Ui.sel(u))), View.mic.of(u, U.Ui.sel(u)))
 
-def View.asks.u(+u: U.Ui) -> D.Node:
-  View.asks.box(U.Ui.state(u), U.Ui.sel(u), U.Ui.draft_text(u))
+def View.asks.u(u: U.Ui) -> D.Node:
+  match u:
+    case U.Ui{+st, +sel, +drafts, _, _, _, _, _, _, _, _, _, _, _, +nf, _, _}:
+      View.asks.box(st, sel, U.Str.get(drafts, sel), nf)
 
 def View.thread.p(u: U.Ui, t: M.Thread, pend: List<&2, String>, +atts: List<&2, String>, +up: String, +term: Bool, hd: List<&2, D.Node>, vo: List<&2, D.Node>, +mic: String) -> D.Node:
   match u t:
@@ -1335,7 +1368,7 @@ def View.thread.p(u: U.Ui, t: M.Thread, pend: List<&2, String>, +atts: List<&2, 
           D.Dom.cat(View.parent(st, id, U.Tasks.up(st, id)), D.Dom.cat([D.El{"div", "work", [D.At{"class", "work"}], D.Dom.cat(View.subs(nf, id, SB.Subs.rows(st, nf, id)), View.pins(U.Ec.pins(U.Ec.make(tr, st, id, now), st, id), U.Ec.make(tr, st, id, now)))}], D.Dom.cat(Nil{},
           D.Dom.cat(View.paged(drafts, M.State.mine(st, id), st, id, nf, View.running(turn), U.Ec.make(tr, st, id, now)), D.Dom.cat(View.sending(pend),
             View.live.k(String.is_empty(U.Str.get(live, id)), U.Side.phase(st, U.Ui.thread(st, id)), U.Str.get(live, id)))))))},
-        View.asks.box(st, id, U.Str.get(drafts, sel)),
+        View.asks.box(st, id, U.Str.get(drafts, sel), nf),
         View.todos(nf, id, U.Todos.shown(st, id, View.running(turn))),
         View.queued(M.Queue.items(st, id), View.running(turn)),
         View.composer.t(st, sel, drafts, op, nf, turn, pr, mo, atts, up, vo, mic)]),

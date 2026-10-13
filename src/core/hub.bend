@@ -85,6 +85,10 @@ type Out is Data:
   # the outbox of reports to launchers on other machines (the setting
   # launch.far, Lr.far.*) is due to be sent, in order
   LaunchFar{}
+  # a request about a bot's browser and what it is taught (core/teach.bend):
+  # the server keeps the driver and the draft, so it answers (m is
+  # bots.browser or bots.teach, p the request's params as JSON text)
+  Teach{client: U32, id: String, m: String, p: String}
 
 type Step is Data:
   Step{changes: List<&2, M.Change>, outs: List<&2, Out>}

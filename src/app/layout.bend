@@ -2562,20 +2562,75 @@ def Lay.parent(+ty: Ty, +st: M.State, +thread: String, +x0: U32, +y: U32) -> Out
 # Asks: what the agent waits on the user for
 # ------------------------------------------
 
+def Page.num(+s: String, +i: Nat) -> U32:
+  U32.from_nat(Maybe.default(&2, Nat, Nat.read(Maybe.default(&2, String, List.get(&2, String, String.split(s, 'x'), i), "")), 0n))
+
+def Page.fit.w(+bw: U32, +bh: U32, +pw: U32, +ph: U32) -> U32:
+  U32.min(bw, Bool.pick(U32, U32.is_gt((bw * ph : U32), (bh * pw : U32)), pw, ((bw * ph : U32) / U32.max(bh, 1) : U32)))
+
+# a picture fitted into cw x ch, never enlarged, with a rule round it; `size`
+# is "WxH" once it is loaded. An "img" region asks the window to load it, and
+# a click on it opens the lightbox.
+def Lay.thumb(+ty: Ty, +key: String, +size: String, +x: U32, +y: U32, +cw: U32, +ch: U32) -> Out:
+  +bw = Page.num(size, 0n)
+  +bh = Page.num(size, 1n)
+  +fw = Page.fit.w(bw, bh, cw, ch)
+  +fh = {((fw * bh : U32) / U32.max(bw, 1) : U32) : U32}
+  Out.cat(Out.when(String.is_empty(size), Out.ops(Ty.text(ty, 2n, "loading…", D.Clip.all(), x, y, 20, T.Th.faint()))),
+    Out{Bool.pick(List<&2, R.Op>, String.is_empty(size), Nil{}, D.Draw.frame(D.Clip.all(), (x - 1 : U32), (y - 1 : U32), (fw + 2 : U32), (fh + 2 : U32), T.Th.line())),
+      [Lay.hit(x, y, U32.max(fw, 1), U32.max(fh, 1), "img", key)]})
+
+# a run's or a pause's screenshot: the hub's URL path under the key the
+# window loads it by (main.bend's Pics): "tshot:<port>:<path>", the port of
+# the hub the window itself runs (info "listen"), used when that hub is here
+def Lay.tshot(+listen: String, +url: String) -> String:
+  "tshot:" ++ Maybe.default(&2, String, List.last(&2, String, String.split(listen, ':')), "") ++ ":" ++ url
+
+
 def Ask.plan_lines(+ty: Ty, +text: String, +px: U32) -> List<&2, String>:
   List.take(&2, String, Ty.wrap(ty, 4n, text, px), 8n)
 
-def Ask.h(+ty: Ty, a: M.Ask, +px: U32) -> U32:
+def Ask.std.h(+ty: Ty, a: M.Ask, +px: U32) -> U32:
   match a:
     case M.Ask{_, _, +k, _, +d, _, _, _}:
       Bool.pick(U32, String.eq(k, "plan"), (U32.from_nat(List.length(&2, String, Ask.plan_lines(ty, d, px))) * 21 + 76 : U32), 76)
 
-def Asks.h(+ty: Ty, as: List<&2, M.Ask>, +px: U32) -> U32:
+# a paused browser task: its head, the question (at most four lines), the
+# screenshot and a row of buttons
+def Ask.web.lines(+ty: Ty, t: U.TAsk, +px: U32) -> List<&2, String>:
+  match t:
+    case U.TAsk{_, _, _, _, _, +q, _, _, _}:
+      List.take(&2, String, Ty.wrap(ty, 3n, q, px), 4n)
+
+def Ask.web.shot(t: U.TAsk) -> String:
+  match t:
+    case U.TAsk{_, _, _, _, _, _, _, +shot, _}:
+      shot
+
+def Ask.web.h.k(+ls: Nat, +shot: String) -> U32:
+  (U32.from_nat(ls) * 22 + 78 + Bool.pick(U32, String.is_empty(shot), 0, 160) : U32)
+
+def Ask.web.h(+ty: Ty, +t: U.TAsk, +px: U32) -> U32:
+  Ask.web.h.k(List.length(&2, String, Ask.web.lines(ty, t, px)), Ask.web.shot(t))
+
+def Ask.h.k(web: Bool, +ty: Ty, a: M.Ask, +nf: Map<&2, String>, +px: U32) -> U32:
+  match web:
+    case True{}:
+      Ask.web.h(ty, U.Teach.ask.from(a, nf), px)
+    case False{}:
+      Ask.std.h(ty, a, px)
+
+def Ask.h(+ty: Ty, a: M.Ask, +nf: Map<&2, String>, +px: U32) -> U32:
+  match a:
+    case M.Ask{_, _, +k, _, _, _, _, _}:
+      Ask.h.k(String.eq(k, "browser"), ty, a, nf, px)
+
+def Asks.h(+ty: Ty, as: List<&2, M.Ask>, +nf: Map<&2, String>, +px: U32) -> U32:
   match as:
     case Nil{}:
       0
     case a <> t:
-      (Ask.h(ty, a, px) + 8 + Asks.h(ty, t, px) : U32)
+      (Ask.h(ty, a, nf, px) + 8 + Asks.h(ty, t, nf, px) : U32)
 
 def Ask.buttons(+ty: Ty, bs: List<&2, S.Hit>, +y: U32, +x: U32) -> Out:
   match bs:
@@ -2607,10 +2662,10 @@ def Ask.choices(+k: String, +id: String, +o: String, +draft: String) -> List<&2,
         List.reverse(&2, S.Hit, Ask.opts(String.split(o, '\n'), id))),
       [S.Hit{0, 0, 0, 0, "Allow", id ++ "|accept"}, S.Hit{0, 0, 0, 0, "Allow for session", id ++ "|session"}, S.Hit{0, 0, 0, 0, "Deny", id ++ "|decline"}]))
 
-def Ask.card(+ty: Ty, a: M.Ask, +draft: String, +x0: U32, +x1: U32, +y: U32) -> Out:
+def Ask.std.card(+ty: Ty, a: M.Ask, +draft: String, +nf: Map<&2, String>, +x0: U32, +x1: U32, +y: U32) -> Out:
   match a:
     case M.Ask{+id, _, +k, +tool, +d, +o, _, _}:
-      +h = Ask.h(ty, M.Ask{id, "", k, tool, d, o, True{}, ""}, (x1 - x0 - 32 : U32))
+      +h = Ask.std.h(ty, M.Ask{id, "", k, tool, d, o, True{}, ""}, (x1 - x0 - 32 : U32))
       +head = Bool.pick(String, String.eq(k, "plan"), "Proposed plan", Bool.pick(String, String.eq(k, "input"), "The agent asks", "Allow " ++ tool ++ "?"))
       Out.all([
         Out.ops(Lay.box(D.Clip.all(), x0, y, (x1 - x0 : U32), h, 0, T.Th.panel(), T.Th.warn())),
@@ -2619,12 +2674,63 @@ def Ask.card(+ty: Ty, a: M.Ask, +draft: String, +x0: U32, +x1: U32, +y: U32) -> 
           Out.ops(Ty.text(ty, Bool.pick(Nat, String.eq(k, "approval"), 4n, 3n), Ty.fit(ty, 4n, d, (x1 - x0 - 28 : U32)), D.Clip.all(), (x0 + 14 : U32), (y + 26 : U32), 22, T.Th.text()))),
         Ask.buttons(ty, Ask.choices(k, id, o, draft), (y + h - 36 : U32), (x1 - 12 : U32))])
 
-def Lay.asks(+ty: Ty, as: List<&2, M.Ask>, +draft: String, +x0: U32, +x1: U32, +y: U32) -> Out:
+# the buttons of a paused task's card, right to left (the first is leftmost)
+def Ask.tbtns(bs: List<&2, U.TBtn>, +ty: Ty, +y: U32, +x: U32) -> Out:
+  match bs:
+    case Nil{}:
+      Out.none()
+    case U.TBtn{+label, +action, +value, +primary} <> t:
+      Out.cat(Lay.button(ty, D.Clip.all(), (x - Lay.button.w(ty, label) : U32), y, label, Bool.pick(U32, primary, T.Th.accent(), T.Th.soft()), action, value),
+        Ask.tbtns(t, ty, y, (x - Lay.button.w(ty, label) - 8 : U32)))
+
+def Ask.web.btns(t: U.TAsk) -> List<&2, U.TBtn>:
+  match t:
+    case U.TAsk{_, _, _, _, _, _, _, _, bs}:
+      List.reverse(&2, U.TBtn, bs)
+
+def Ask.web.head(t: U.TAsk) -> String:
+  match t:
+    case U.TAsk{_, _, +slug, +n, _, _, _, _, _}:
+      "Task paused: " ++ slug ++ " (step " ++ Nat.show(n) ++ ")"
+
+def Ask.rows(ls: List<&2, String>, +ty: Ty, +x: U32, +y: U32) -> List<&2, R.Op>:
+  match ls:
+    case Nil{}:
+      Nil{}
+    case l <> t:
+      List.append(&2, R.Op, Ty.text(ty, 3n, l, D.Clip.all(), x, y, 22, T.Th.text()), Ask.rows(t, ty, x, (y + 22 : U32)))
+
+def Ask.web.card.k(+t: U.TAsk, +ty: Ty, +nf: Map<&2, String>, +x0: U32, +x1: U32, +y: U32) -> Out:
+  +ls = {Ask.web.lines(ty, t, (x1 - x0 - 28 : U32)) : List<&2, String>}
+  +shot = {Ask.web.shot(t) : String}
+  +h = {Ask.web.h(ty, t, (x1 - x0 - 32 : U32)) : U32}
+  +ly = {(y + 28 : U32) : U32}
+  +sy = {(ly + U32.from_nat(List.length(&2, String, ls)) * 22 + 4 : U32) : U32}
+  Out.all([
+    Out.ops(Lay.box(D.Clip.all(), x0, y, (x1 - x0 : U32), h, 0, T.Th.panel(), T.Th.warn())),
+    Out.ops(Ty.text(ty, 2n, Ask.web.head(t), D.Clip.all(), (x0 + 14 : U32), (y + 4 : U32), 22, T.Th.warn())),
+    Out.ops(Ask.rows(ls, ty, (x0 + 14 : U32), ly)),
+    Out.when(Bool.not(String.is_empty(shot)), Lay.thumb(ty, Lay.tshot(U.Str.get(nf, "listen"), shot), U.Str.get(nf, "img:" ++ Lay.tshot(U.Str.get(nf, "listen"), shot)), (x0 + 14 : U32), sy, (x1 - x0 - 28 : U32), 148)),
+    Ask.tbtns(Ask.web.btns(t), ty, (y + h - 36 : U32), (x1 - 12 : U32))])
+
+def Ask.card.k(web: Bool, +ty: Ty, a: M.Ask, +draft: String, +nf: Map<&2, String>, +x0: U32, +x1: U32, +y: U32) -> Out:
+  match web:
+    case True{}:
+      Ask.web.card.k(U.Teach.ask.from(a, nf), ty, nf, x0, x1, y)
+    case False{}:
+      Ask.std.card(ty, a, draft, nf, x0, x1, y)
+
+def Ask.card(+ty: Ty, a: M.Ask, +draft: String, +nf: Map<&2, String>, +x0: U32, +x1: U32, +y: U32) -> Out:
+  match a:
+    case M.Ask{_, _, +k, _, _, _, _, _}:
+      Ask.card.k(String.eq(k, "browser"), ty, a, draft, nf, x0, x1, y)
+
+def Lay.asks(+ty: Ty, as: List<&2, M.Ask>, +draft: String, +nf: Map<&2, String>, +x0: U32, +x1: U32, +y: U32) -> Out:
   match as:
     case Nil{}:
       Out.none()
     case +a <> t:
-      Out.cat(Ask.card(ty, a, draft, x0, x1, y), Lay.asks(ty, t, draft, x0, x1, (y + Ask.h(ty, a, (x1 - x0 - 32 : U32)) + 8 : U32)))
+      Out.cat(Ask.card(ty, a, draft, nf, x0, x1, y), Lay.asks(ty, t, draft, nf, x0, x1, (y + Ask.h(ty, a, nf, (x1 - x0 - 32 : U32)) + 8 : U32)))
 
 # A side question (/btw) and its answer, in a card over the composer until
 # closed; its answer wraps to at most Btw.rows() lines
@@ -3716,41 +3822,48 @@ def Lay.scene(n: S.Nui) -> List<&2, V.Seen>:
 # "shot:<page>:<n>"; the one last loaded ("shot.ok.<page>") shows while
 # the next loads.
 
-def Page.num(+s: String, +i: Nat) -> U32:
-  U32.from_nat(Maybe.default(&2, Nat, Nat.read(Maybe.default(&2, String, List.get(&2, String, String.split(s, 'x'), i), "")), 0n))
-
-def Page.fit.w(+bw: U32, +bh: U32, +pw: U32, +ph: U32) -> U32:
-  U32.min(bw, Bool.pick(U32, U32.is_gt((bw * ph : U32), (bh * pw : U32)), pw, ((bw * ph : U32) / U32.max(bh, 1) : U32)))
-
 # the frame fitted to the pane (never enlarged), centred, with a rule round it
-def Page.draw(+key: String, +size: String, +x0: U32, +x1: U32, +top: U32, +h: U32) -> Out:
+def Page.hits(input: Bool, +x: U32, +y: U32, +w: U32, +h: U32, +key: String) -> List<&2, S.Hit>:
+  match input:
+    case True{}:
+      [Lay.hit(x, y, w, h, "bb-frame", U32.show(x) ++ " " ++ U32.show(y) ++ " " ++ U32.show(w) ++ " " ++ U32.show(h)), Lay.hit(x, y, w, h, "img", key)]
+    case False{}:
+      [Lay.hit(x, y, w, h, "img", key)]
+
+# the frame fitted to the pane (never enlarged), centred, with a rule round
+# it; while the person drives it (`input`) the rule is the accent and a
+# press on it is a click in the page (nui.bend's Bb)
+def Page.draw(+key: String, +size: String, +x0: U32, +x1: U32, +top: U32, +h: U32, +input: Bool) -> Out:
   +bw = Page.num(size, 0n)
   +bh = Page.num(size, 1n)
   +fw = Page.fit.w(bw, bh, (x1 - x0 - 48 : U32), (h - top - 24 : U32))
   +fh = {((fw * bh : U32) / U32.max(bw, 1) : U32) : U32}
   +x = {(x0 + U32.shr((x1 - x0 - fw : U32)) : U32) : U32}
-  Out{D.Draw.frame(D.Clip.all(), (x - 1 : U32), (top - 1 : U32), (fw + 2 : U32), (fh + 2 : U32), T.Th.line()), [Lay.hit(x, top, fw, fh, "img", key)]}
+  Out{D.Draw.frame(D.Clip.all(), (x - 1 : U32), (top - 1 : U32), (fw + 2 : U32), (fh + 2 : U32), Bool.pick(U32, input, T.Th.accent(), T.Th.line())), Page.hits(input, x, top, fw, fh, key)}
 
-def Page.k(state: Nat, +ty: Ty, +key: String, +size: String, +none: String, +x0: U32, +x1: U32, +top: U32, +h: U32) -> Out:
+def Page.k(state: Nat, +ty: Ty, +key: String, +size: String, +none: String, +x0: U32, +x1: U32, +top: U32, +h: U32, +input: Bool) -> Out:
   match state:
     case 0n:
       Out.ops(Ty.text(ty, 2n, "Loading the page…", D.Clip.all(), (x0 + 24 : U32), top, 28, T.Th.faint()))
     case 1n:
       Out.ops(Ty.text(ty, 2n, none, D.Clip.all(), (x0 + 24 : U32), top, 28, T.Th.faint()))
     case _:
-      Page.draw(key, size, x0, x1, top, h)
+      Page.draw(key, size, x0, x1, top, h, input)
 
 def Page.state(+shown: String, +size: String, +next: String) -> Nat:
   Bool.pick(Nat, Bool.and(Bool.not(String.is_empty(shown)), Bool.not(String.is_empty(size))), 2n, Bool.pick(Nat, String.starts_with(next, "err:"), 1n, 0n))
 
 # page id's newest frame from top down, or `none` while it has none
-def Lay.page(+ty: Ty, +u: U.Ui, +id: String, +none: String, +x0: U32, +x1: U32, +top: U32, +h: U32) -> Out:
+def Lay.page.in(+ty: Ty, +u: U.Ui, +id: String, +none: String, +x0: U32, +x1: U32, +top: U32, +h: U32, +input: Bool) -> Out:
   +n = U.Ui.info(u, "shot." ++ id)
   +key = "shot:" ++ id ++ ":" ++ Bool.pick(String, String.is_empty(n), "0", n)
   +shown = U.Ui.info(u, "shot.ok." ++ id)
   +size = U.Ui.info(u, "img:" ++ shown)
   Out.cat(Out{Nil{}, [Lay.hit(x0, top, 1, 1, "img", key)]},
-    Page.k(Page.state(shown, size, U.Ui.info(u, "img:" ++ key)), ty, shown, size, none, x0, x1, (top + 12 : U32), h))
+    Page.k(Page.state(shown, size, U.Ui.info(u, "img:" ++ key)), ty, shown, size, none, x0, x1, (top + 12 : U32), h, input))
+
+def Lay.page(+ty: Ty, +u: U.Ui, +id: String, +none: String, +x0: U32, +x1: U32, +top: U32, +h: U32) -> Out:
+  Lay.page.in(ty, u, id, none, x0, x1, top, h, False{})
 
 # the Browser tab: the selected thread's own page
 def Lay.page.if(on: Bool, +ty: Ty, +u: U.Ui, +x0: U32, +x1: U32, +h: U32) -> Out:
@@ -5352,7 +5465,7 @@ def Lay.thread.k(+ty: Ty, +memo: TLMemo, t: M.Thread, +draft: String, +held: Str
       +pins = U.Ec.pins(ec, st, sel)
       +top = {(52 + hy + pl + Subs.height(ts, svis, sopen) + Pins.height(pins) : U32) : U32}
       +asks = U.Asks.open(st, sel)
-      +ah = Asks.h(ty, asks, (cw - 32 : U32))
+      +ah = Asks.h(ty, asks, pics, (cw - 32 : U32))
       +qs = M.Queue.items(st, sel)
       +tds = U.Todos.shown(st, sel, Lay.running(turn))
       +tdo = U.Todos.open(pics, sel)
@@ -5379,7 +5492,7 @@ def Lay.thread.k(+ty: Ty, +memo: TLMemo, t: M.Thread, +draft: String, +held: Str
           Lay.composer.a(ty, draft, ls, held, caret, mark, focus, blink, cx0, cx1, h, U.Follow.button(st, sel, Lay.running(turn), stop, draft), U.Follow.act(stop), U.Effort.label(U.Models.label(pr, mo), U.Effort.of(st, sel)) ++ U.Usage.tail(st, sel), rs, atts, up, path),
           Lay.queued(ty, qs, Lay.running(turn), cx0, cx1, (h - eh : U32)),
           Lay.todos(ty, tds, tdr, tdm, tdo, tda, sel, tdoff, List.length(&2, TD.TRow, tdall), cx0, cx1, (h - eh - 124 - Lay.qh(qs) : U32)),
-          Lay.asks(ty, asks, draft, cx0, cx1, (h - 132 - ah - qh - eh - bh + 4 : U32)),
+          Lay.asks(ty, asks, draft, pics, cx0, cx1, (h - 132 - ah - qh - eh - bh + 4 : U32)),
           Btw.card.if(Bool.not(String.is_empty(bq)), ty, bq, ba, cx0, cx1, (h - 132 - qh - eh - bh + 4 : U32)),
           Lay.picker(picking, ty, U.Models.menu(info, pr), mo, info, pr, cx0, cx1, (h - 128 - eh : U32), (60 + hy : U32), U.Chip.all(info, pr, mo), U.Effort.of(st, sel), moff)])
       Out.cat(tl, ch)

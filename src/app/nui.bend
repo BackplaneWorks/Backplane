@@ -2650,11 +2650,64 @@ def Nui.key.term.k(term: Bool, pal: Bool, +n: Nui, +code: U32, +text: U32, +mods
 def Nui.key.term(term: Bool, +n: Nui, +code: U32, +text: U32, +mods: U32) -> Step:
   Nui.key.term.k(term, String.eq(Nui.focus_of(n), "palette"), n, code, text, mods)
 
+# keys for the bot's page while the person drives it (Playwright's names)
+def Bb.keyname(+code: U32) -> String:
+  Bool.pick(String, Bool.or(U32.is_eq(code, Key.enter()), U32.is_eq(code, Key.kp_enter())), "Enter",
+    Bool.pick(String, U32.is_eq(code, Key.backspace()), "Backspace",
+      Bool.pick(String, U32.is_eq(code, Key.tab()), "Tab",
+        Bool.pick(String, U32.is_eq(code, Key.escape()), "Escape",
+          Bool.pick(String, U32.is_eq(code, Key.delete()), "Delete",
+            Bool.pick(String, U32.is_eq(code, Key.left()), "ArrowLeft",
+              Bool.pick(String, U32.is_eq(code, Key.right()), "ArrowRight",
+                Bool.pick(String, U32.is_eq(code, Key.up()), "ArrowUp",
+                  Bool.pick(String, U32.is_eq(code, Key.down()), "ArrowDown",
+                    Bool.pick(String, U32.is_eq(code, Key.home()), "Home",
+                      Bool.pick(String, U32.is_eq(code, Key.end()), "End",
+                        Bool.pick(String, U32.is_eq(code, 65365), "PageUp", Bool.pick(String, U32.is_eq(code, 65366), "PageDown", ""))))))))))))) 
+
+def Bb.char(+text: U32) -> String:
+  SCon{Chr{text}, SNil{}}
+
+def Bb.key.c(chord: Bool, +n: Nui, +text: U32) -> Step:
+  match chord:
+    case True{}:
+      Nui.act(n, "bb-key", "Control+" ++ Bb.char(U32.or(text, 32)))
+    case False{}:
+      Step{n, Nil{}, False{}}
+
+def Bb.key.t(plain: Bool, +n: Nui, +code: U32, +text: U32, +mods: U32) -> Step:
+  match plain:
+    case True{}:
+      Nui.act(n, "bb-type", Bb.char(text))
+    case False{}:
+      Bb.key.c(Bool.and(Keys.ctrl(mods), U32.is_ne(text, 0)), n, text)
+
+def Bb.key.k(named: Bool, +n: Nui, +name: String, +code: U32, +text: U32, +mods: U32) -> Step:
+  match named:
+    case True{}:
+      Nui.act(n, "bb-key", Bool.pick(String, Bool.and(Keys.shift(mods), String.eq(name, "Tab")), "Shift+Tab", name))
+    case False{}:
+      Bb.key.t(Bool.and(U32.is_ne(text, 0), U32.is_eq(U32.and(mods, 6), 0)), n, code, text, mods)
+
+def Bb.key(+n: Nui, +code: U32, +text: U32, +mods: U32) -> Step:
+  Bb.key.k(Bool.not(String.is_empty(Bb.keyname(code))), n, Bb.keyname(code), code, text, mods)
+
+# the frame has the keyboard while the person drives the page
+def Bb.keys(+n: Nui) -> Bool:
+  Bool.and(String.eq(Nui.focus_of(n), "bb-frame"), U.Teach.input(Nui.ui(n), U.Bots.cur(Nui.ui(n))))
+
+def Nui.key.bb(on: Bool, +n: Nui, +code: U32, +text: U32, +mods: U32) -> Step:
+  match on:
+    case True{}:
+      Bb.key(n, code, text, mods)
+    case False{}:
+      Nui.key.term(String.eq(Nui.focus_of(n), "terminal"), n, code, text, mods)
+
 # keys in a terminal of the chat go to its program
 def Nui.key.emb(none: Bool, +key: String, +n: Nui, +code: U32, +text: U32, +mods: U32) -> Step:
   match none:
     case True{}:
-      Nui.key.term(String.eq(Nui.focus_of(n), "terminal"), n, code, text, mods)
+      Nui.key.bb(Bb.keys(n), n, code, text, mods)
     case False{}:
       Nui.act.k(U.Ui.emb_keys(Nui.ui(n), key, VT.Vt.key(U.Ui.term(Nui.ui(n), key), code, text, Keys.vt(mods))), n)
 
@@ -2783,12 +2836,35 @@ def Row.press.a(line: Bool, +n: Nui, +action: String, +value: String, +x: U32, +
       Row.press.k(Bool.and(Bool.or(String.eq(action, "select"), String.eq(action, "project")), U32.is_lt(x, 264)), Nui.click.act(String.eq(action, "focus"), n, action, value),
         Bool.pick(String, String.eq(action, "project"), "project:" ++ value, value), y)
 
+# The bot's page while the person drives it (client.bend's Teach, layout.bend's
+# Lay.page): a press on the frame is a click at that spot, in thousandths of
+# the frame ("bb-frame" hit, value "x y w h" of its box), and takes the
+# keyboard; the wheel scrolls it, typed text and keys go to the page.
+def Bb.part(+v: String, +i: Nat) -> U32:
+  U32.from_nat(M.Switch.num(Maybe.default(&2, String, List.get(&2, String, String.split(v, ' '), i), ""), 0n))
+
+def Bb.thou(+p: U32, +o: U32, +w: U32) -> U32:
+  U32.min(1000, (((Bool.pick(U32, U32.is_ge(p, o), (p - o : U32), 0)) * 1000 : U32) / U32.max(w, 1) : U32))
+
+def Bb.at(+v: String, +x: U32, +y: U32) -> String:
+  U32.show(Bb.thou(x, Bb.part(v, 0n), Bb.part(v, 2n))) ++ " " ++ U32.show(Bb.thou(y, Bb.part(v, 1n), Bb.part(v, 3n)))
+
+def Bb.press(+n: Nui, +v: String, +x: U32, +y: U32) -> Step:
+  Nui.focus.step(Nui.act(n, "bb-click", Bb.at(v, x, y)), "bb-frame")
+
+def Row.press.b(frame: Bool, +n: Nui, +action: String, +value: String, +x: U32, +y: U32) -> Step:
+  match frame:
+    case True{}:
+      Bb.press(n, value, x, y)
+    case False{}:
+      Row.press.a(String.eq(action, "tl-line"), n, action, value, x, y)
+
 def Row.press.c(comp: Bool, +n: Nui, +action: String, +value: String, +x: U32, +y: U32) -> Step:
   match comp:
     case True{}:
       Cq.press(n, x, y)
     case False{}:
-      Row.press.a(String.eq(action, "tl-line"), n, action, value, x, y)
+      Row.press.b(String.eq(action, "bb-frame"), n, action, value, x, y)
 
 def Row.press(m: Maybe<&2, Hit>, +n: Nui, +x: U32, +y: U32) -> Step:
   match m:
@@ -2942,6 +3018,14 @@ def Nui.desk(+n: Nui, +now: Nat) -> Step:
 def Nui.desk.reset(+n: Nui) -> Nui:
   Nui.with_ui(n, U.Ui.desk.reset(Nui.ui(n)))
 
+# a wheel notch: over the driven page it scrolls the page, else as before
+def Bb.wheel(none: Bool, +n: Nui, +x: U32, +y: U32, +dir: U32) -> Step:
+  match none:
+    case True{}:
+      Pane.spin(String.is_empty(Hit.value_at(Nui.hits(n), "pane", x, y)), Hit.value_at(Nui.hits(n), "pane", x, y), n, x, y, dir)
+    case False{}:
+      Nui.act(n, "bb-scroll", Bool.pick(String, U32.is_eq(dir, 0), "-120", "120"))
+
 # one window event
 def Nui.event(+n: Nui, e: W.WinEv) -> Step:
   match e:
@@ -2968,7 +3052,7 @@ def Nui.event(+n: Nui, e: W.WinEv) -> Step:
     case W.WMove{+x, +y, +mods}:
       Nui.move(Nui.dragging(n), n, x, y, mods)
     case W.WWheel{+x, +y, +dir}:
-      Pane.spin(String.is_empty(Hit.value_at(Nui.hits(n), "pane", x, y)), Hit.value_at(Nui.hits(n), "pane", x, y), n, x, y, dir)
+      Bb.wheel(String.is_empty(Hit.value_at(Nui.hits(n), "bb-frame", x, y)), n, x, y, dir)
     case W.WSize{w, h}:
       Nui.resize(n, w, h)
     case W.WExpose{}:

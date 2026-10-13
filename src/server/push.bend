@@ -197,6 +197,19 @@ def Push.alert(+thread: String, +key: String, title: String, body: String) -> St
       J.KV{"thread-id", J.Str{key}}])},
     J.KV{"thread", J.Str{thread}}, J.KV{"key", J.Str{key}}]))
 
+# an alert that carries a picture (a task pause's screenshot): the hub URL
+# of the image rides at the top level and the payload is mutable, for a
+# service extension on the phone to fetch it
+def Push.alert.image(+thread: String, +key: String, +title: String, +body: String, +image: String) -> String:
+  Bool.pick(String, String.is_empty(image), Push.alert(thread, key, title, body),
+    J.Json.show(J.Json.obj([
+      J.KV{"aps", J.Json.obj([
+        J.KV{"alert", J.Json.obj([J.KV{"title", J.Str{title}}, J.KV{"body", J.Str{body}}])},
+        J.KV{"sound", J.Str{"default"}},
+        J.KV{"mutable-content", J.Json.nat(1n)},
+        J.KV{"thread-id", J.Str{key}}])},
+      J.KV{"thread", J.Str{thread}}, J.KV{"key", J.Str{key}}, J.KV{"image", J.Str{image}}])))
+
 # the island: every thread still running once this one has ended
 def Island.keep(+thread: String, t: M.Thread) -> Bool:
   match t:
@@ -580,7 +593,7 @@ def Push.alerts.only(ds: List<&2, M.Device>) -> List<&2, M.Device>:
 # that machine decided it is news and under which key; this hub pushes it
 # to its own phones like any alert (same key: one collapse id, so a phone
 # paired with both machines shows it once)
-def Push.note.send(+home: String, +st: M.State, +thread: String, +title: String, +body: String, +akey: String, +pkey: String, +kid: String, +team: String) -> IO(List<&2, String>):
+def Push.note.send(+home: String, +st: M.State, +thread: String, +title: String, +body: String, +akey: String, +image: String, +pkey: String, +kid: String, +team: String) -> IO(List<&2, String>):
   do IO<List<&2, String>>:
     +dir : String = home ++ "/tmp"
     mk : Result<&1, &1, U32 & String, Unit> <- H.FS.mkdirs(dir)
@@ -591,18 +604,18 @@ def Push.note.send(+home: String, +st: M.State, +thread: String, +title: String,
     +jwt : String <- Jwt.sign(pkey, dir, prefix, Jwt.input(kid, team, now))
     base : String <- Push.env("BACKPLANE_APNS_URL")
     +others : List<&2, M.Thread> = Island.others(st, thread)
-    +job : Job = Job{dir, base, jwt, now, thread, Push.alert(thread, akey, title, body), Island.state(others), List.is_empty(&2, M.Thread, others), akey}
+    +job : Job = Job{dir, base, jwt, now, thread, Push.alert.image(thread, akey, title, body, image), Island.state(others), List.is_empty(&2, M.Thread, others), akey}
     Push.gate(String.is_empty(jwt), Push.alerts.only(Push.devices(st)), job, prefix)
 
-def Push.note.go(ok: Bool, phones: Bool, +home: String, +st: M.State, +thread: String, +title: String, +body: String, +akey: String, +pkey: String, +kid: String, +team: String) -> IO(List<&2, String>):
+def Push.note.go(ok: Bool, phones: Bool, +home: String, +st: M.State, +thread: String, +title: String, +body: String, +akey: String, +image: String, +pkey: String, +kid: String, +team: String) -> IO(List<&2, String>):
   match ok:
     case True{}:
-      Push.note.send(home, st, thread, title, body, akey, pkey, kid, team)
+      Push.note.send(home, st, thread, title, body, akey, image, pkey, kid, team)
     case False{}:
       Push.skip(phones)
 
 # the push for a far turn's end (akey "" when a desk watches it: none goes)
-def Push.note.dead(+home: String, +st: M.State, +thread: String, +title: String, +body: String, +akey: String) -> IO(List<&2, String>):
+def Push.note.dead(+home: String, +st: M.State, +thread: String, +title: String, +body: String, +akey: String, +image: String) -> IO(List<&2, String>):
   do IO<List<&2, String>>:
     +pkey : String = M.Setting.get(st, "push.apns.key", "")
     +kid : String = M.Setting.get(st, "push.apns.keyid", "")
@@ -610,4 +623,4 @@ def Push.note.dead(+home: String, +st: M.State, +thread: String, +title: String,
     has : Bool <- Push.exists(pkey)
     +phones : Bool = Push.any(Push.devices(st))
     Push.note.go(Bool.and(has, Bool.and(phones, Bool.not(Bool.or(String.is_empty(akey), Bool.or(String.is_empty(kid), String.is_empty(team)))))),
-      phones, home, st, thread, title, body, akey, pkey, kid, team)
+      phones, home, st, thread, title, body, akey, image, pkey, kid, team)

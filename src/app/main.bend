@@ -406,9 +406,25 @@ def Pics.fetched(r: P.Ran, +q: Chan(ShellMsg), +tag: String, +path: String) -> I
 def Pics.file(+src: String, +home: String, +bp: String) -> String:
   Bool.pick(String, Shot.is(src), Shot.file(bp, src), Bool.pick(String, String.starts_with(src, "~/"), home ++ String.drop(src, 1n), src))
 
+# "tshot:<port>:<path>": a task run's or pause's screenshot, the path the hub
+# serves it at (/bots/<id>/tasks/shot?...); <port> reaches the hub the window
+# runs
+def Tshot.is(+key: String) -> Bool:
+  String.starts_with(key, "tshot:")
+
+def Tshot.port(+key: String) -> String:
+  Maybe.default(&2, String, List.get(&2, String, String.split(key, ':'), 1n), "")
+
+def Tshot.path(+key: String) -> String:
+  String.drop(key, Nat.add(7n, String.length(Tshot.port(key))))
+
+# where the hub is for an image key: the window's link, else this machine
+def Pics.base(+p: String, +url: String) -> String:
+  Bool.pick(String, Bool.and(Tshot.is(p), String.is_empty(url)), "http://127.0.0.1:" ++ Tshot.port(p), url)
+
 # where another machine's hub serves an image key
 def Pics.route(+src: String) -> String:
-  Bool.pick(String, Shot.is(src), Shot.url(src), IM.Img.url(src))
+  Bool.pick(String, Tshot.is(src), Tshot.path(src), Bool.pick(String, Shot.is(src), Shot.url(src), IM.Img.url(src)))
 
 # an image on this machine is read here; another machine's hub sends it
 def Pics.load(local: Bool, +path: String, +url: String, +q: Chan(ShellMsg), +tag: String, +bp: String) -> IO(Unit):
@@ -446,7 +462,7 @@ def Pics.spawn(ps: List<&2, String>, +url: String, +q: Chan(ShellMsg), +tag: Str
       IO.pure(Unit, Unit{})
     case +p <> t:
       do IO<Unit>:
-        IO.spawn(Unit, Pics.load(String.is_empty(url), p, url, q, tag, bp))
+        IO.spawn(Unit, Pics.load(Bool.and(String.is_empty(url), Bool.not(Tshot.is(p))), p, Pics.base(p, url), q, tag, bp))
         Pics.spawn(t, url, q, tag, bp)
 
 def Pics.keep(m: Maybe<&2, BM.Bitmap>, ps: Map<&2, BM.Bitmap>, +path: String) -> Map<&2, BM.Bitmap>:

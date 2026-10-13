@@ -32,6 +32,7 @@ import ./layers.bend as LY
 import ./slash.bend as SL
 import ./uber.bend as UB
 import ./ubersync.bend as US
+import ./task.bend as TK
 
 # The client state, Elm-style, shared by the native window and the web
 # page: a host feeds server messages to Ui.recv and user actions to Ui.act,
@@ -2735,12 +2736,17 @@ def Asks.kind(as: List<&2, M.Ask>, +k: String) -> Bool:
     case M.Ask{_, _, +x, _, _, _, _, _} <> t:
       Bool.or(String.eq(x, k), Asks.kind(t, k))
 
+# a question for the person: an agent's, a proposed plan, or a browser task
+# paused for help (docs/teach.md)
+def Asks.question(+as: List<&2, M.Ask>) -> Bool:
+  Bool.or(Bool.or(Asks.kind(as, "input"), Asks.kind(as, "plan")), Asks.kind(as, "browser"))
+
 # what a thread's dot shows (M.Status.of has the order)
 # (a thread's open asks are looked up once: a row asks three questions of
 # them, and the sidebar has a row a thread)
 def Side.status.k(+st: M.State, +id: String, turn: M.TurnState, +pending: Nat, +as: List<&2, M.Ask>) -> M.Status:
   M.Status.wait.f(Nat.is_gt(M.Work.rows(st, id), 0n), M.Status.of(Bool.or(Nat.is_gt(pending, 0n), Asks.kind(as, "approval")),
-    Bool.or(Asks.kind(as, "input"), Asks.kind(as, "plan")), turn,
+    Asks.question(as), turn,
     M.Queue.waiting(st, id)))
 
 def Side.status(+st: M.State, t: M.Thread) -> M.Status:
@@ -2759,7 +2765,7 @@ def Side.live(ts: List<&2, M.Task>) -> Nat:
 # what the line at the end of a thread's timeline says (M.Phase.of has the order)
 def Side.phase.k(+st: M.State, +id: String, turn: M.TurnState, +pending: Nat, +as: List<&2, M.Ask>) -> M.Phase:
   M.Phase.of(Bool.or(Nat.is_gt(pending, 0n), Asks.kind(as, "approval")),
-    Bool.or(Asks.kind(as, "input"), Asks.kind(as, "plan")), Nat.add(Side.live(Tasks.of(st, id)), M.Work.rows(st, id)), turn,
+    Asks.question(as), Nat.add(Side.live(Tasks.of(st, id)), M.Work.rows(st, id)), turn,
     M.Queue.waiting(st, id))
 
 def Side.phase(+st: M.State, t: M.Thread) -> M.Phase:
@@ -2775,7 +2781,7 @@ def Side.status.ix(+ix: SIx, +st: M.State, t: M.Thread) -> M.Status:
 
 def Side.phase.ix.k(+st: M.State, +ix: SIx, +id: String, turn: M.TurnState, +pending: Nat, +as: List<&2, M.Ask>) -> M.Phase:
   M.Phase.of(Bool.or(Nat.is_gt(pending, 0n), Asks.kind(as, "approval")),
-    Bool.or(Asks.kind(as, "input"), Asks.kind(as, "plan")), Nat.add(SIx.kids(ix, id), SIx.work(ix, id)), turn,
+    Asks.question(as), Nat.add(SIx.kids(ix, id), SIx.work(ix, id)), turn,
     M.Queue.waiting(st, id))
 
 # Side.phase from the index (law side_phase_ix_eq)
@@ -8649,6 +8655,548 @@ def Uber.act.go(route: Bool, +u: Ui, +action: String, +value: String) -> Act:
     case False{}:
       Ui.act.k(C.Codec.pos(Ui.actions(), action), u, value)
 
+# Teaching a bot browser tasks (docs/teach.md)
+# --------------------------------------------
+# The Browser tab, the Tasks tab and a paused run's card, for all four
+# clients. The hub says who drives a bot's page (info "drive.<bot>": ""
+# the bot, "teach" or "takeover" the person), whether a recording runs
+# ("teach.<bot>": "rec <start secs> <steps>", or "review" once stopped)
+# and the draft steps ("teach.draft.<bot>", a JSON array of task.bend's
+# steps). Everything a client draws is decided here: the strip's state and
+# buttons, whether the frame takes the person's input, the save sheet's rows
+# (a typed value that is no secret can be marked as a parameter), the
+# tasks, their runs and the stuck card. Secrets reach no client: a
+# recorded secret is only its label.
+
+type TBtn is Data:
+  TBtn{label: String, action: String, value: String, primary: Bool}
+
+# mode: 0 idle, 1 recording, 2 review (the save sheet), 3 the person has the
+# browser
+type TStrip is Data:
+  TStrip{mode: Nat, title: String, clock: String, steps: Nat, btns: List<&2, TBtn>}
+
+# one draft step in the save sheet: what it did; its typed value as a chip
+# the person can make a parameter ("" for a secret or a step with none)
+type TStepRow is Data:
+  TStepRow{n: Nat, text: String, label: String, chip: String, secret: Bool, marked: Bool, pname: String}
+
+type TRun is Data:
+  TRun{run: String, slug: String, status: String, n: Nat, summary: String, shots: List<&2, String>}
+
+type TTask is Data:
+  TTask{slug: String, name: String, description: String, params: List<&2, TK.TkParam>, open: Bool, asking: Bool, last: String}
+
+type TAsk is Data:
+  TAsk{id: String, run: String, slug: String, n: Nat, kind: String, question: String, risky: Bool, shot: String, btns: List<&2, TBtn>}
+
+def Teach.drive(+u: Ui, +bot: String) -> String:
+  Ui.info(u, "drive." ++ bot)
+
+def Teach.info(+u: Ui, +bot: String) -> String:
+  Ui.info(u, "teach." ++ bot)
+
+# the strip's state from the teach info and the drive info
+def Teach.mode.of(+t: String, +d: String) -> Nat:
+  Bool.pick(Nat, String.starts_with(t, "rec"), 1n,
+    Bool.pick(Nat, String.eq(t, "review"), 2n,
+      Bool.pick(Nat, String.eq(d, "takeover"), 3n,
+        Bool.pick(Nat, String.eq(d, "teach"), 1n, 0n))))
+
+def Teach.mode(+u: Ui, +bot: String) -> Nat:
+  Teach.mode.of(Teach.info(u, bot), Teach.drive(u, bot))
+
+# the frame takes the person's clicks, keys and wheel only while they drive
+# (law teach_input_only_when_driving)
+def Teach.driving(+d: String) -> Bool:
+  Bool.not(String.is_empty(d))
+
+def Teach.input(+u: Ui, +bot: String) -> Bool:
+  Teach.driving(Teach.drive(u, bot))
+
+def Teach.part(+t: String, +i: Nat) -> String:
+  Maybe.default(&2, String, List.get(&2, String, String.split(t, ' '), i), "")
+
+def Teach.two(+n: Nat) -> String:
+  Bool.pick(String, Nat.is_lt(n, 10n), "0" ++ Nat.show(n), Nat.show(n))
+
+# m:ss
+def Teach.clock(+secs: Nat) -> String:
+  Nat.show(Nat.div(secs, 60n)) ++ ":" ++ Teach.two(Nat.mod(secs, 60n))
+
+def Teach.draft(+u: Ui, +bot: String) -> List<&2, TK.TkStep>:
+  TK.Tk.steps.of(J.Json.elems(Maybe.default(&2, J.Json, J.Json.parse(Ui.info(u, "teach.draft." ++ bot)), J.Null{})))
+
+def Teach.label(t: TK.TkTarget) -> String:
+  match t:
+    case TK.TkTarget{_, +name, +label, +placeholder, +text, +testid, +css, _, _, _}:
+      TK.Tk.first(name, TK.Tk.first(label, TK.Tk.first(placeholder, TK.Tk.first(text, TK.Tk.first(testid, css)))))
+
+# the steps recorded so far (the draft's length, else the info's count)
+def Teach.count(+u: Ui, +bot: String) -> Nat:
+  +n = {List.length(&2, TK.TkStep, Teach.draft(u, bot)) : Nat}
+  Bool.pick(Nat, Nat.is_eq(n, 0n), M.Switch.num(Teach.part(Teach.info(u, bot), 2n), 0n), n)
+
+def Teach.elapsed(+u: Ui, +bot: String) -> Nat:
+  +start = {M.Switch.num(Teach.part(Teach.info(u, bot), 1n), 0n) : Nat}
+  Bool.pick(Nat, Nat.is_eq(start, 0n), 0n, Nat.sub(Side.now(u), start))
+
+def Teach.title(+mode: Nat, +name: String) -> String:
+  match mode:
+    case 0n:
+      ""
+    case 1n:
+      name ++ " is watching and learning"
+    case 2n:
+      "Save this task"
+    case _:
+      "You have the browser"
+
+def Teach.btns(mode: Nat) -> List<&2, TBtn>:
+  match mode:
+    case 0n:
+      [TBtn{"Teach a task", "tk-teach", "", True{}}, TBtn{"Take over", "tk-takeover", "", False{}}]
+    case 1n:
+      [TBtn{"Stop & save", "tk-stop", "", True{}}, TBtn{"Discard", "tk-discard", "", False{}}]
+    case 2n:
+      [TBtn{"Save", "tk-save", "", True{}}, TBtn{"Discard", "tk-discard", "", False{}}]
+    case _:
+      [TBtn{"Hand back", "tk-handback", "", True{}}]
+
+def Teach.strip.k(+mode: Nat, +name: String, +clock: String, steps: Nat) -> TStrip:
+  TStrip{mode, Teach.title(mode, name), Bool.pick(String, Nat.is_eq(mode, 1n), clock, ""), steps, Teach.btns(mode)}
+
+def Teach.bot.name(+u: Ui, +bot: String) -> String:
+  BT.Bot.name(BT.World.bot(M.State.bots(Ui.state(u)), bot))
+
+# the strip above the bot's page
+def Teach.strip(+u: Ui, +bot: String) -> TStrip:
+  Teach.strip.k(Teach.mode(u, bot), Teach.bot.name(u, bot), Teach.clock(Teach.elapsed(u, bot)), Teach.count(u, bot))
+
+# The save sheet
+# --------------
+
+def Teach.verb(+act: String) -> String:
+  Bool.pick(String, String.eq(act, "navigate"), "Go to ",
+    Bool.pick(String, String.eq(act, "click"), "Click ",
+      Bool.pick(String, String.eq(act, "type"), "Type in ",
+        Bool.pick(String, String.eq(act, "select"), "Choose in ",
+          Bool.pick(String, String.eq(act, "press"), "Press ",
+            Bool.pick(String, String.eq(act, "scroll"), "Scroll ",
+              Bool.pick(String, String.eq(act, "wait"), "Wait for ",
+                Bool.pick(String, String.eq(act, "check"), "Check ", ""))))))))
+
+def Teach.chip(+act: String, v: TK.TkValue) -> String:
+  match v:
+    case TK.VLit{t}:
+      Bool.pick(String, Bool.or(String.eq(act, "type"), String.eq(act, "select")), t, "")
+    case _:
+      ""
+
+def Teach.secret(v: TK.TkValue) -> Bool:
+  match v:
+    case TK.VSecret{_}:
+      True{}
+    case _:
+      False{}
+
+def Teach.what(+act: String, +target: TK.TkTarget, +url: String, +note: String) -> String:
+  Bool.pick(String, String.eq(act, "note"), note,
+    Bool.pick(String, String.eq(act, "navigate"), Teach.verb(act) ++ url,
+      Teach.verb(act) ++ Teach.label(target)))
+
+# a parameter's default name: the field's label, else value<n>
+def Teach.pdflt(+label: String, +n: Nat) -> String:
+  Bool.pick(String, String.is_empty(label), "value" ++ Nat.show(n), TK.Task.slug(label))
+
+def Teach.pname(+u: Ui, +label: String, +n: Nat) -> String:
+  +f = {String.trim(Ui.scratch(u, "@f.tkp." ++ Nat.show(n))) : String}
+  Bool.pick(String, String.is_empty(f), Teach.pdflt(label, n), f)
+
+def Teach.row(+u: Ui, s: TK.TkStep) -> TStepRow:
+  match s:
+    case TK.TkStep{+n, +act, +target, +value, _, _, +url, _, +note}:
+      +label = {Teach.label(target) : String}
+      TStepRow{n, Teach.what(act, target, url, note), label, Teach.chip(act, value), Teach.secret(value), String.eq(Ui.scratch(u, "@tkm." ++ Nat.show(n)), "1"), Teach.pname(u, label, n)}
+
+def Teach.rows.go(ss: List<&2, TK.TkStep>, +u: Ui) -> List<&2, TStepRow>:
+  match ss:
+    case Nil{}:
+      Nil{}
+    case s <> t:
+      Teach.row(u, s) <> Teach.rows.go(t, u)
+
+# every draft step as a row
+def Teach.rows(+u: Ui, +bot: String) -> List<&2, TStepRow>:
+  Teach.rows.go(Teach.draft(u, bot), u)
+
+# the chips: the typed values that are no secret
+def Teach.chip.ok(r: TStepRow) -> Bool:
+  match r:
+    case TStepRow{_, _, _, +c, +s, _, _}:
+      Bool.and(Bool.not(s), Bool.not(String.is_empty(c)))
+
+def Teach.chips.k(keep: Bool, r: TStepRow, rest: List<&2, TStepRow>) -> List<&2, TStepRow>:
+  match keep:
+    case True{}:
+      r <> rest
+    case False{}:
+      rest
+
+def Teach.chips.go(rs: List<&2, TStepRow>) -> List<&2, TStepRow>:
+  match rs:
+    case Nil{}:
+      Nil{}
+    case +h <> r:
+      Teach.chips.k(Teach.chip.ok(h), h, Teach.chips.go(r))
+
+# The parameters the person marked, as the save request wants them
+def Teach.params.k(keep: Bool, +n: Nat, +t: String, +p: String, rest: List<&2, J.Json>) -> List<&2, J.Json>:
+  match keep:
+    case True{}:
+      J.Json.obj([J.KV{"step", J.Json.nat(n)}, J.KV{"name", J.Str{p}}, J.KV{"label", J.Str{t}}]) <> rest
+    case False{}:
+      rest
+
+# Runs
+# ----
+
+def Teach.params.go(rs: List<&2, TStepRow>) -> List<&2, J.Json>:
+  match rs:
+    case Nil{}:
+      Nil{}
+    case TStepRow{+n, _, +t, +c, +s, +m, +p} <> r:
+      Teach.params.k(Bool.and(m, Bool.and(Bool.not(s), Bool.not(String.is_empty(c)))), n, t, p, Teach.params.go(r))
+
+def Teach.shots(xs: List<&2, J.Json>) -> List<&2, String>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case J.Str{s} <> t:
+      s <> Teach.shots(t)
+    case _ <> t:
+      Teach.shots(t)
+
+def Teach.run.of(+o: J.Json) -> TRun:
+  TRun{J.Json.get_str(o, "run", ""), J.Json.get_str(o, "slug", ""), J.Json.get_str(o, "status", ""), J.Json.get_nat(o, "n", 0n), J.Json.get_str(o, "summary", ""), Teach.shots(J.Json.elems(J.Json.get_obj(o, "shots")))}
+
+def Teach.run.k(ok: Bool, +sum: String) -> Maybe<&2, TRun>:
+  match ok:
+    case True{}:
+      Some{Teach.run.of(Maybe.default(&2, J.Json, J.Json.parse(sum), J.Null{}))}
+    case False{}:
+      None{}
+
+# a run from the thread's entry (an Act of tone "task", its text the JSON)
+def Teach.run.entry(e: M.Entry) -> Maybe<&2, TRun>:
+  match e:
+    case M.Act{_, _, +tone, _, +sum, _}:
+      Teach.run.k(String.eq(tone, "task"), sum)
+    case _:
+      None{}
+
+def Teach.seen(rs: List<&2, TRun>, +run: String) -> Bool:
+  match rs:
+    case Nil{}:
+      False{}
+    case TRun{+r, _, _, _, _, _} <> t:
+      Bool.or(String.eq(r, run), Teach.seen(t, run))
+
+def Teach.runs.put(seen: Bool, r: TRun, acc: List<&2, TRun>) -> List<&2, TRun>:
+  match seen:
+    case True{}:
+      acc
+    case False{}:
+      r <> acc
+
+def Teach.runs.add(m: Maybe<&2, TRun>, +acc: List<&2, TRun>) -> List<&2, TRun>:
+  match m:
+    case Some{TRun{+r, sl, st, n, sm, sh}}:
+      Teach.runs.put(Teach.seen(acc, r), TRun{r, sl, st, n, sm, sh}, acc)
+    case None{}:
+      acc
+
+# a bot's runs, newest first, each once (its newest log): the thread's newest
+# entries, within a fixed reach
+def Teach.runs.go(fuel: Nat, es: List<&2, M.Entry>, acc: List<&2, TRun>) -> List<&2, TRun>:
+  match fuel es:
+    case 0n _:
+      List.reverse(&2, TRun, acc)
+    case 1n+_ Nil{}:
+      List.reverse(&2, TRun, acc)
+    case 1n+k e <> t:
+      Teach.runs.go(k, t, Teach.runs.add(Teach.run.entry(e), acc))
+
+def Teach.runs.of(st: M.State, +thread: String) -> List<&2, TRun>:
+  Teach.runs.go(400n, M.State.mine(st, thread), Nil{})
+
+def Teach.runs(+u: Ui, +bot: String) -> List<&2, TRun>:
+  Teach.runs.of(Ui.state(u), BT.Bot.thread(BT.World.bot(M.State.bots(Ui.state(u)), bot)))
+
+def Teach.last(rs: List<&2, TRun>, +slug: String) -> String:
+  match rs:
+    case Nil{}:
+      ""
+    case TRun{_, +s, +st, _, _, _} <> t:
+      Bool.pick(String, String.eq(s, slug), st, Teach.last(t, slug))
+
+# The tasks
+# ---------
+
+def Teach.task.row(t: TK.TkTask, runs: List<&2, TRun>, +open: String, +asking: String) -> TTask:
+  match t:
+    case TK.TkTask{+slug, +name, +description, _, _, params, _, _, _, _}:
+      TTask{slug, TK.Tk.first(name, slug), description, params, String.eq(open, slug), String.eq(asking, slug), Teach.last(runs, slug)}
+
+def Teach.tasks.k(m: Maybe<&2, TK.TkTask>, rest: List<&2, TTask>, runs: List<&2, TRun>, +open: String, +asking: String) -> List<&2, TTask>:
+  match m:
+    case Some{t}:
+      Teach.task.row(t, runs, open, asking) <> rest
+    case None{}:
+      rest
+
+def Teach.tasks.go(rs: List<&2, BT.TRow>, +runs: List<&2, TRun>, +open: String, +asking: String) -> List<&2, TTask>:
+  match rs:
+    case Nil{}:
+      Nil{}
+    case BT.TRow{_, +json} <> t:
+      Teach.tasks.k(TK.Task.read(json), Teach.tasks.go(t, runs, open, asking), runs, open, asking)
+
+# the bot's tasks by name, each with how its last run went
+def Teach.tasks(+u: Ui, +bot: String) -> List<&2, TTask>:
+  Teach.tasks.go(BT.World.tasks_of(M.State.bots(Ui.state(u)), bot), Teach.runs(u, bot), Ui.scratch(u, "@tkopen"), Ui.scratch(u, "@tkdel"))
+
+# a run form's field for parameter `name`
+def Teach.pfield(+name: String) -> String:
+  "tkrun." ++ name
+
+# The stuck card
+# --------------
+
+def Teach.choice.label(+c: String) -> String:
+  Bool.pick(String, String.eq(c, "confirm"), "Confirm",
+    Bool.pick(String, String.eq(c, "continue"), "Continue",
+      Bool.pick(String, String.eq(c, "skip"), "Skip this step",
+        Bool.pick(String, String.eq(c, "stop"), "Stop task", c))))
+
+# a risky step goes on only by Confirm, never Continue
+def Teach.choice.safe(+risky: Bool, +c: String) -> String:
+  Bool.pick(String, Bool.and(risky, String.eq(c, "continue")), "confirm", c)
+
+def Teach.choices(+o: String, +risky: Bool) -> List<&2, String>:
+  Bool.pick(List<&2, String>, String.is_empty(String.trim(o)),
+    Bool.pick(List<&2, String>, risky, ["confirm", "skip", "stop"], ["continue", "skip", "stop"]),
+    String.split(o, '|'))
+
+def Teach.ask.btns(cs: List<&2, String>, +id: String, +risky: Bool) -> List<&2, TBtn>:
+  match cs:
+    case Nil{}:
+      Nil{}
+    case +c <> t:
+      TBtn{Teach.choice.label(Teach.choice.safe(risky, c)), "answer", id ++ "|" ++ Teach.choice.safe(risky, c), Bool.not(String.eq(c, "stop"))} <> Teach.ask.btns(t, id, risky)
+
+# Take over is offered while the bot has the browser
+def Teach.ask.take(drive: Bool) -> List<&2, TBtn>:
+  Bool.pick(List<&2, TBtn>, drive, Nil{}, [TBtn{"Take over", "tk-takeover", "", False{}}])
+
+# the card of an open ask of kind "browser" (its detail is a JSON object)
+def Teach.ask(a: M.Ask, +drive: String) -> TAsk:
+  match a:
+    case M.Ask{+id, _, _, _, +d, +o, _, _}:
+      +j = {Maybe.default(&2, J.Json, J.Json.parse(d), J.Null{}) : J.Json}
+      +risky = {J.Json.get_bool(j, "risky", False{}) : Bool}
+      TAsk{id, J.Json.get_str(j, "run", ""), J.Json.get_str(j, "slug", ""), J.Json.get_nat(j, "n", 0n), J.Json.get_str(j, "kind", ""), J.Json.get_str(j, "question", ""), risky, J.Json.get_str(j, "shot", ""),
+        List.append(&2, TBtn, Teach.ask.btns(Teach.choices(o, risky), id, risky), Teach.ask.take(Bool.not(String.is_empty(drive))))}
+
+# the bot an ask is about (its detail's "bot")
+def Teach.ask.bot(a: M.Ask) -> String:
+  match a:
+    case M.Ask{_, _, _, _, +d, _, _, _}:
+      J.Json.get_str(Maybe.default(&2, J.Json, J.Json.parse(d), J.Null{}), "bot", "")
+
+# the card of a browser ask, with the drive info from the info map
+def Teach.ask.from(+a: M.Ask, nf: Map<&2, String>) -> TAsk:
+  Teach.ask(a, Str.get(nf, "drive." ++ Teach.ask.bot(a)))
+
+# the person's choices for a browser ask whose detail is `d`
+def Teach.ask.of(a: M.Ask, +u: Ui, +bot: String) -> TAsk:
+  Teach.ask(a, Teach.drive(u, bot))
+
+# The Browser tab's actions
+# -------------------------
+
+def Teach.is(+action: String) -> Bool:
+  Bool.or(String.starts_with(action, "tk-"), String.starts_with(action, "bb-"))
+
+def Teach.marks.go(rs: List<&2, TStepRow>, u: Ui) -> Ui:
+  match rs:
+    case Nil{}:
+      u
+    case TStepRow{+n, _, _, _, _, _, _} <> t:
+      Teach.marks.go(t, Ui.scratch_set(Ui.scratch_set(u, "@tkm." ++ Nat.show(n), ""), "@f.tkp." ++ Nat.show(n), ""))
+
+# the save sheet's marks and fields forgotten
+def Teach.clear(+u: Ui, +bot: String) -> Ui:
+  Bots.fields.clear(Teach.marks.go(Teach.rows(u, bot), u), ["tkname", "tkdesc", "tknote"])
+
+def Teach.teach(+u: Ui, +bot: String, +op: String) -> Act:
+  Ui.rpc(u, "bots.teach", [J.KV{"bot", J.Str{bot}}, J.KV{"op", J.Str{op}}])
+
+def Teach.browser(u: Ui, +bot: String, +op: String, ps: List<&2, J.KV>) -> Act:
+  Ui.rpc(u, "bots.browser", J.KV{"bot", J.Str{bot}} <> J.KV{"op", J.Str{op}} <> ps)
+
+def Teach.note.k(none: Bool, +u: Ui, +bot: String, +t: String) -> Act:
+  match none:
+    case True{}:
+      Act{u, Nil{}}
+    case False{}:
+      Ui.rpc(Bots.fields.clear(u, ["tknote"]), "bots.teach", [J.KV{"bot", J.Str{bot}}, J.KV{"op", J.Str{"note"}}, J.KV{"text", J.Str{t}}])
+
+def Teach.note(+u: Ui, +bot: String) -> Act:
+  +t = {String.trim(Bots.field(u, "tknote")) : String}
+  Teach.note.k(String.is_empty(t), u, bot, t)
+
+def Teach.save.k(none: Bool, +u: Ui, +bot: String, +name: String) -> Act:
+  match none:
+    case True{}:
+      Act{u, Nil{}}
+    case False{}:
+      Ui.rpc(Teach.clear(u, bot), "bots.teach", [J.KV{"bot", J.Str{bot}}, J.KV{"op", J.Str{"save"}}, J.KV{"name", J.Str{name}},
+        J.KV{"description", J.Str{String.trim(Bots.field(u, "tkdesc"))}}, J.KV{"params", J.Json.arr(Teach.params.go(Teach.rows(u, bot)))}])
+
+def Teach.save(+u: Ui, +bot: String) -> Act:
+  +name = {String.trim(Bots.field(u, "tkname")) : String}
+  Teach.save.k(String.is_empty(name), u, bot, name)
+
+# a chip marked as a parameter, or unmarked
+def Teach.mark(+u: Ui, +n: String) -> Act:
+  Act{Ui.scratch_set(u, "@tkm." ++ n, Bool.pick(String, String.eq(Ui.scratch(u, "@tkm." ++ n), "1"), "", "1")), Nil{}}
+
+# a task's run form: one value for each parameter, by name
+def Teach.args(ps: List<&2, TK.TkParam>, +u: Ui) -> List<&2, J.KV>:
+  match ps:
+    case Nil{}:
+      Nil{}
+    case TK.TkParam{+name, _, _, _} <> t:
+      J.KV{name, J.Str{Bots.field(u, Teach.pfield(name))}} <> Teach.args(t, u)
+
+def Teach.fields.go(ps: List<&2, TK.TkParam>, u: Ui) -> Ui:
+  match ps:
+    case Nil{}:
+      u
+    case TK.TkParam{+name, _, _, _} <> t:
+      Teach.fields.go(t, Ui.scratch_set(u, "@f." ++ Teach.pfield(name), ""))
+
+def Teach.task.k(m: Maybe<&2, String>) -> Maybe<&2, TK.TkTask>:
+  match m:
+    case Some{j}:
+      TK.Task.read(j)
+    case None{}:
+      None{}
+
+def Teach.task.get(st: M.State, +bot: String, +slug: String) -> Maybe<&2, TK.TkTask>:
+  Teach.task.k(BT.World.task(M.State.bots(st), bot, slug))
+
+def Teach.params.of(m: Maybe<&2, TK.TkTask>) -> List<&2, TK.TkParam>:
+  match m:
+    case Some{TK.TkTask{_, _, _, _, _, ps, _, _, _, _}}:
+      ps
+    case None{}:
+      Nil{}
+
+def Teach.run(+u: Ui, +bot: String, +slug: String) -> Act:
+  +ps = {Teach.params.of(Teach.task.get(Ui.state(u), bot, slug)) : List<&2, TK.TkParam>}
+  Ui.rpc(Teach.fields.go(ps, u), "bots.task", [J.KV{"bot", J.Str{bot}}, J.KV{"op", J.Str{"run"}}, J.KV{"slug", J.Str{slug}}, J.KV{"params", J.Json.obj(Teach.args(ps, u))}])
+
+# deleting asks first (the same click again deletes)
+def Teach.del.k(sure: Bool, +u: Ui, +bot: String, +slug: String) -> Act:
+  match sure:
+    case True{}:
+      Ui.rpc(Ui.scratch_set(u, "@tkdel", ""), "bots.task", [J.KV{"bot", J.Str{bot}}, J.KV{"op", J.Str{"delete"}}, J.KV{"slug", J.Str{slug}}])
+    case False{}:
+      Act{Ui.scratch_set(u, "@tkdel", slug), Nil{}}
+
+def Teach.del(+u: Ui, +bot: String, +slug: String) -> Act:
+  Teach.del.k(String.eq(Ui.scratch(u, "@tkdel"), slug), u, bot, slug)
+
+def Teach.open(+u: Ui, +slug: String) -> Act:
+  Act{Ui.scratch_set(Ui.scratch_set(u, "@tkdel", ""), "@tkopen", Bool.pick(String, String.eq(Ui.scratch(u, "@tkopen"), slug), "", slug)), Nil{}}
+
+# thousandths of the frame: "x y"
+def Teach.thou(+s: String, +i: Nat) -> J.Json:
+  J.Num{Nat.show(Nat.min(M.Switch.num(Teach.part(s, i), 0n), 1000n))}
+
+def Teach.click(u: Ui, +bot: String, +v: String) -> Act:
+  Teach.browser(u, bot, "click", [J.KV{"x", Teach.thou(v, 0n)}, J.KV{"y", Teach.thou(v, 1n)}])
+
+# a wheel notch's pixels, negative upwards
+def Teach.dy(+v: String) -> J.Json:
+  J.Num{Bool.pick(String, String.starts_with(v, "-"), "-" ++ Nat.show(M.Switch.num(String.drop(v, 1n), 0n)), Nat.show(M.Switch.num(v, 0n)))}
+
+def Teach.url(+s: String) -> String:
+  Bool.pick(String, String.is_empty(s), "", Bool.pick(String, String.contains(s, "://"), s, "https://" ++ s))
+
+def Teach.nav.k(none: Bool, +u: Ui, +bot: String, +url: String) -> Act:
+  match none:
+    case True{}:
+      Act{u, Nil{}}
+    case False{}:
+      Teach.browser(u, bot, "navigate", [J.KV{"url", J.Str{url}}])
+
+def Teach.nav(+u: Ui, +bot: String) -> Act:
+  +url = {Teach.url(String.trim(Bots.field(u, "bburl"))) : String}
+  Teach.nav.k(String.is_empty(url), u, bot, url)
+
+def Teach.act.k(i: Nat, +u: Ui, +bot: String, +value: String) -> Act:
+  match i:
+    case 0n:
+      Teach.teach(Teach.clear(u, bot), bot, "start")
+    case 1n:
+      Teach.note(u, bot)
+    case 2n:
+      Teach.teach(u, bot, "stop")
+    case 3n:
+      Teach.teach(Teach.clear(u, bot), bot, "discard")
+    case 4n:
+      Teach.save(u, bot)
+    case 5n:
+      Teach.mark(u, value)
+    case 6n:
+      Teach.browser(u, bot, "takeover", Nil{})
+    case 7n:
+      Teach.browser(u, bot, "handback", Nil{})
+    case 8n:
+      Teach.run(u, bot, value)
+    case 9n:
+      Teach.del(u, bot, value)
+    case 10n:
+      Teach.open(u, value)
+    case 11n:
+      Teach.click(u, bot, value)
+    case 12n:
+      Teach.browser(u, bot, "type", [J.KV{"text", J.Str{value}}])
+    case 13n:
+      Teach.browser(u, bot, "press", [J.KV{"key", J.Str{value}}])
+    case 14n:
+      Teach.browser(u, bot, "scroll", [J.KV{"dy", Teach.dy(value)}])
+    case 15n:
+      Teach.nav(u, bot)
+    case 16n:
+      Teach.browser(u, bot, "back", Nil{})
+    case 17n:
+      Teach.browser(u, bot, "reload", Nil{})
+    case _:
+      Act{u, Nil{}}
+
+def Teach.actions() -> List<&2, String>:
+  ["tk-teach", "tk-note", "tk-stop", "tk-discard", "tk-save", "tk-mark", "tk-takeover", "tk-handback", "tk-run", "tk-del", "tk-open",
+   "bb-click", "bb-type", "bb-key", "bb-scroll", "bb-nav", "bb-back", "bb-reload"]
+
+# the tk- and bb- actions act on the bot whose tab is open
+def Teach.act(+u: Ui, +action: String, +value: String) -> Act:
+  Teach.act.k(C.Codec.pos(Teach.actions(), action), u, Bots.cur(u), value)
+
+
 # a user action with its value
 def Ui.act.m(menu: Bool, +i: Nat, +u: Ui, +action: String, +value: String) -> Act:
   match menu:
@@ -8721,12 +9269,20 @@ def Ui.act.g(agy: Bool, +u: Ui, +action: String, +value: String) -> Act:
     case False{}:
       Ui.act.r(String.starts_with(action, "rv-"), u, action, value)
 
+# (browser tasks' "tk-" and "bb-" actions: Teach.act)
+def Ui.act.tk(tk: Bool, +u: Ui, +action: String, +value: String) -> Act:
+  match tk:
+    case True{}:
+      Teach.act(u, action, value)
+    case False{}:
+      Ui.act.g(String.starts_with(action, "agy-"), u, action, value)
+
 def Ui.act.s(close: Bool, +u: Ui, +action: String, +value: String) -> Act:
   match close:
     case True{}:
       Skills.close(u)
     case False{}:
-      Ui.act.g(String.starts_with(action, "agy-"), u, action, value)
+      Ui.act.tk(Teach.is(action), u, action, value)
 
 def Ui.act(+u: Ui, +action: String, +value: String) -> Act:
   Rc.sync.of(Ui.act.s(String.eq(action, "skill-close"), u, action, value))

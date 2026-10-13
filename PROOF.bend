@@ -8498,3 +8498,108 @@ def Laws.task_slug_nonempty(x):
 
 def Laws.task_slug_empty():
   {==}
+
+def Laws.teach_mode_idle():
+  {==}
+
+def Laws.teach_mode_recording():
+  {==}
+
+def Laws.teach_mode_review():
+  {==}
+
+def Laws.teach_mode_takeover():
+  {==}
+
+def Laws.teach_input_only_when_driving(d):
+  {==}
+
+def Laws.teach_bot_drives_no_input():
+  {==}
+
+def Laws.teach_risky_confirms():
+  {==}
+
+def Laws.teach_plain_continues():
+  {==}
+
+def Laws.teach_risky_default_options():
+  {==}
+
+def Laws.teach_risky_button(id):
+  {==}
+
+def Laws.teach_secret_no_chip(act, l):
+  {==}
+
+def Laws.teach_secret_row_no_chip(n, t, l, c, m, p):
+  {==}
+
+def Laws.teach_tasks_tab():
+  {==}
+
+def Laws.teach_clock():
+  {==}
+
+def Laws.teach_preview_refused_teaching():
+  {==}
+
+def Laws.teach_preview_refused_takeover():
+  {==}
+
+def Laws.teach_preview_other_bot_free():
+  {==}
+
+def Laws.teach_preview_allowed_idle():
+  {==}
+
+def Laws.teach_handback_returns_browser():
+  {==}
+
+def Laws.teach_info_idle():
+  {==}
+
+def Laws.teach_info_recording():
+  {==}
+
+def Laws.teach_info_review():
+  {==}
+
+def Laws.teach_pause_options_risky():
+  {==}
+
+def Laws.teach_pause_options_plain():
+  {==}
+
+def Laws.teach_pause_alerts_once():
+  {==}
+
+def Laws.teach_pause_first_alerts():
+  {==}
+
+def Laws.teach_scale_corner():
+  {==}
+
+def Laws.teach_scale_middle():
+  {==}
+
+def Laws.teach_run_no_slash():
+  {==}
+
+def Laws.teach_run_no_dots():
+  {==}
+
+def Laws.teach_file_no_traversal():
+  {==}
+
+def Laws.teach_run_slug_roundtrip():
+  {==}
+
+def Laws.teach_recording_expires():
+  {==}
+
+def Laws.teach_recording_not_early():
+  {==}
+
+def Laws.teach_draft_secret_no_value():
+  {==}

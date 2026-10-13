@@ -69,6 +69,8 @@ import ../core/qr.bend as QR
 import ../core/uber.bend as UB
 import ../core/ubersync.bend as UBS
 import ../core/ubop.bend as UBO
+import ../core/task.bend as TKS
+import ../core/teach.bend as TE
 
 # The server. One hub computation owns the read model and the event log;
 # every connection and agent process is its own computation and talks to
@@ -167,6 +169,14 @@ type Msg is Data:
   BotVerified{kind: String, arg: String, key: String, body: String, me: String, reply: Chan(List<&2, U32>)}
   # a browser page has a new frame: {"t":"shot",...} for every client
   Shot{text: String}
+  # the person's request about a bot's browser or what it is taught (the
+  # hub keeps the driver and the draft: core/teach.bend); a helper event
+  # about a page (a recorder step); the person's answer to a pause handed
+  # the browser back; a task run asks the person (task_pause)
+  TeachReq{client: U32, id: String, m: String, p: String}
+  BrowserEv{line: String}
+  TeachBack{bot: String}
+  TaskPaused{thread: String, bot: String, run: String, slug: String, n: Nat, kind: String, question: String, risky: Bool, rid: String, reply: Chan(String)}
   # a bot's new project, approved by the person, its folder made and
   # resolved: the hub adds it and answers the tool call (`id` as JSON)
   NewProject{thread: String, root: String, name: String, id: String, reply: Chan(String)}
@@ -1210,6 +1220,12 @@ def Info.qr(+lk: String) -> String:
 def Info.tailscale(tn: Bool, +st: String) -> String:
   Bool.pick(String, tn, Bool.pick(String, String.is_empty(st), "checking", st), "off")
 
+# the bots' browsers: who drives, what is being taught (core/teach.bend)
+def Info.tch(n: Net) -> List<&2, J.KV>:
+  match n:
+    case Net{_, _, _, _, _, _, _, _, _, _, _, bnx, _, _, _}:
+      TE.Teach.info(BN.Bn.tch(bnx))
+
 def Info.net(n: Net) -> List<&2, J.KV>:
   match n:
     case Net{+tn, hs, _, ms, _, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, +lk, fc}:
@@ -1219,8 +1235,8 @@ def Info.net(n: Net) -> List<&2, J.KV>:
 # what this machine runs, for the settings screen and the model picker
 def Hub.info(c: Cfg) -> J.Json:
   match c:
-    case Cfg{+home, _, host, port, _, _, _, net}:
-      J.Json.obj(List.append(&2, J.KV, [J.KV{"home", J.Str{home}}, J.KV{"browser.frames", J.Str{home ++ "/browser.rgb"}}, J.KV{"listen", J.Str{host ++ ":" ++ U32.show(port)}}], Info.net(net)))
+    case Cfg{+home, _, host, port, _, _, _, +net}:
+      J.Json.obj(List.append(&2, J.KV, [J.KV{"home", J.Str{home}}, J.KV{"browser.frames", J.Str{home ++ "/browser.rgb"}}, J.KV{"listen", J.Str{host ++ ":" ++ U32.show(port)}}], List.append(&2, J.KV, Info.net(net), Info.tch(net))))
 
 # A link change is handled after it has been stored, through the inbox,
 # so both sides of an invite refresh immediately (revokes prune rows).
@@ -4663,6 +4679,12 @@ def Cfg.with_bn(c: Cfg, b: BN.Bn) -> Cfg:
     case Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, _, mgd, lk, fc}}:
       Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, b, mgd, lk, fc}}
 
+def Cfg.tch(c: Cfg) -> TE.TeachSt:
+  BN.Bn.tch(Cfg.bn(c))
+
+def Cfg.with_tch(+c: Cfg, t: TE.TeachSt) -> Cfg:
+  Cfg.with_bn(c, BN.Bn.with_tch(Cfg.bn(c), t))
+
 def Live.with(+cfg: Cfg, lv: List<&2, LV.Buf>) -> Cfg:
   Cfg.with_bn(cfg, BN.Bn.with_live(Cfg.bn(cfg), lv))
 
@@ -4790,11 +4812,25 @@ def Bot.is_bot(m: Maybe<&2, BO.Bot>) -> Bool:
 def Preview.view(+thread: String) -> String:
   J.Json.show(J.Json.obj([J.KV{"t", J.Str{"view"}}, J.KV{"thread", J.Str{thread}}, J.KV{"kind", J.Str{"browser"}}, J.KV{"path", J.Str{""}}]))
 
+# the person has the page (teaching or taking over): the bot's call is
+# refused and the helper never hears of it
+def Preview.refuse(+id: String, +reply: Chan(String)) -> IO(Unit):
+  do IO<Unit>:
+    ok : Result<&1, &1, String, Unit> <- Chan.send(String, reply, Preview.answer(id, BR.Browser.fail(TE.Teach.refusal())))
+    return Unit{}
+
+def Preview.go(may: Bool, +cfg: Cfg, +page: String, +o: J.Json, +reply: Chan(String)) -> IO(Unit):
+  match may:
+    case True{}:
+      Preview.run(cfg, page, o, reply)
+    case False{}:
+      Preview.refuse(J.Json.as_raw(J.Json.get(o, "id"), "null"), reply)
+
 def Hub.preview(h: Hub, +thread: String, +o: J.Json, +reply: Chan(String)) -> IO(Hub):
   match h:
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
       do IO<Hub>:
-        IO.spawn(Unit, Preview.run(cfg, Bot.page(st, thread), o, reply))
+        IO.spawn(Unit, Preview.go(TE.Teach.bot_may(Cfg.tch(cfg), Bot.page(st, thread)), cfg, Bot.page(st, thread), o, reply))
         cl2 : List<&2, Client> <- Hub.auto.k(Bool.not(Bool.and(Bool.not(Bot.is_bot(BO.World.of_thread(M.State.bots(st), thread))), Preview.shows(o))), cl, Preview.view(thread))
         return Hub{st, f, ls, cl2, as, inbox, cfg, note}
 
@@ -5532,6 +5568,157 @@ def VoiceJob.go(+p: J.Json, +inbox: Chan(Msg), +home: String, +client: U32, +id:
 def VoiceJob.run(+inbox: Chan(Msg), +home: String, +params: String, +client: U32, +id: String) -> IO(Unit):
   VoiceJob.go(Maybe.default(&2, J.Json, J.Json.parse(params), J.Null{}), inbox, home, client, id)
 
+# The bots' browsers: who drives, teaching, task runs (core/teach.bend)
+# ---------------------------------------------------------------------
+# IO that needs no hub state: files under <home>/bots/<id>/tasks/ and the
+# person's input passed to the helper. Nothing here keeps a secret: a
+# recorded secret is only a label (the recorder masks it in the page).
+
+def Tk.dir(+home: String, +bot: String) -> String:
+  home ++ "/bots/" ++ bot ++ "/tasks"
+
+# best effort: a line added to a file (the folder made)
+def Tk.append(+path: String, +line: String) -> IO(Unit):
+  do IO<Unit>:
+    r : P.Ran <- P.Proc.run("sh", ["-c", "mkdir -p -- \"$(dirname -- \"$1\")\" && printf '%s\\n' \"$2\" >> \"$1\"", "sh", path, line], "/")
+    return Unit{}
+
+def Tk.draft.clear(+home: String, +bot: String) -> IO(Unit):
+  PU.Push.rm(Tk.dir(home, bot) ++ "/.draft.jsonl")
+
+def Tk.draft.add(+home: String, +bot: String, +line: String) -> IO(Unit):
+  Bool.pick(IO(Unit), String.is_empty(line), IO.pure(Unit, Unit{}), Tk.append(Tk.dir(home, bot) ++ "/.draft.jsonl", line))
+
+# <home>/bots/<bot>/tasks/<slug>.json, the copy of a task (a plain id and slug only)
+def Tk.file.go(ok: Bool, +home: String, +bot: String, +slug: String, +json: String) -> IO(Unit):
+  match ok:
+    case True{}:
+      do IO<Unit>:
+        mk : Result<&1, &1, U32 & String, Unit> <- H.FS.mkdirs(Tk.dir(home, bot))
+        PU.Push.write(Tk.dir(home, bot) ++ "/" ++ slug ++ ".json", json)
+    case False{}:
+      IO.pure(Unit, Unit{})
+
+def Tk.file(+home: String, +bot: String, +slug: String, +json: String) -> IO(Unit):
+  Tk.file.go(Bool.and(BN.Bn.safe(bot), TE.Teach.part(slug, False{})), home, bot, slug, json)
+
+def Tk.gone(+home: String, +bot: String, +slug: String) -> IO(Unit):
+  Bool.pick(IO(Unit), Bool.and(BN.Bn.safe(bot), TE.Teach.part(slug, False{})), PU.Push.rm(Tk.dir(home, bot) ++ "/" ++ slug ++ ".json"), IO.pure(Unit, Unit{}))
+
+# the recorder on or off for a bot's page
+def Tk.record(m: Maybe<&2, Chan(BR.BMsg)>, +bot: String, on: Bool) -> IO(Unit):
+  match m:
+    case Some{q}:
+      do IO<Unit>:
+        r : String <- BR.Browser.ask_on(q, bot, "record", J.Json.obj([J.KV{"on", J.Flag{on}}]))
+        return Unit{}
+    case None{}:
+      IO.pure(Unit, Unit{})
+
+# teach begins: an empty draft file, the recorder on
+def Tk.begin(m: Maybe<&2, Chan(BR.BMsg)>, +home: String, +bot: String) -> IO(Unit):
+  do IO<Unit>:
+    Tk.draft.clear(home, bot)
+    Tk.record(m, bot, True{})
+
+# the page's size from a status reply (the viewport a click lands in)
+def Tk.size.r(+r: J.Json) -> TKS.TkPt:
+  TKS.TkPt{J.Json.get_nat(r, "width", 1280n), J.Json.get_nat(r, "height", 800n)}
+
+def Tk.size(+line: String) -> TKS.TkPt:
+  Tk.size.r(J.Json.get_obj(Maybe.default(&2, J.Json, J.Json.parse(line), J.Null{}), "result"))
+
+def Tk.pt.w(p: TKS.TkPt) -> Nat:
+  match p:
+    case TKS.TkPt{w, _}:
+      w
+
+def Tk.pt.h(p: TKS.TkPt) -> Nat:
+  match p:
+    case TKS.TkPt{_, h}:
+      h
+
+def Tk.pt.x(p: TKS.TkPt) -> Nat:
+  match p:
+    case TKS.TkPt{x, _}:
+      x
+
+def Tk.pt.y(p: TKS.TkPt) -> Nat:
+  match p:
+    case TKS.TkPt{_, y}:
+      y
+
+# the person's input ops, in order
+def Tk.ops() -> List<&2, String>:
+  ["click", "mouse", "type", "press", "scroll", "navigate", "back", "reload"]
+
+def Tk.num.k(m: Maybe<&2, J.Json>, +key: String) -> List<&2, J.KV>:
+  match m:
+    case Some{J.Num{r}}:
+      [J.KV{key, J.Num{r}}]
+    case _:
+      Nil{}
+
+def Tk.num(+o: J.Json, +key: String) -> List<&2, J.KV>:
+  Tk.num.k(J.Json.get(o, key), key)
+
+# the mouse event's kind: only move, down or up
+def Tk.mouse.type(+t: String) -> String:
+  Bool.pick(String, Bool.or(String.eq(t, "down"), String.eq(t, "up")), t, "move")
+
+# what the helper is asked for an op; click and mouse positions come in
+# thousandths of the frame and are scaled to the page (Task.scale)
+def Tk.args.k(i: Nat, +o: J.Json, +p: TKS.TkPt) -> J.Json:
+  match i:
+    case 0n:
+      J.Json.obj([J.KV{"x", J.Json.nat(Tk.pt.x(p))}, J.KV{"y", J.Json.nat(Tk.pt.y(p))}])
+    case 1n:
+      J.Json.obj([J.KV{"type", J.Str{Tk.mouse.type(J.Json.get_str(o, "type", "move"))}}, J.KV{"x", J.Json.nat(Tk.pt.x(p))}, J.KV{"y", J.Json.nat(Tk.pt.y(p))}])
+    case 2n:
+      J.Json.obj([J.KV{"text", J.Str{J.Json.get_str(o, "text", "")}}])
+    case 3n:
+      J.Json.obj([J.KV{"key", J.Str{J.Json.get_str(o, "key", "")}}])
+    case 4n:
+      J.Json.obj(List.append(&2, J.KV, Tk.num(o, "dx"), Tk.num(o, "dy")))
+    case 5n:
+      J.Json.obj([J.KV{"url", J.Str{J.Json.get_str(o, "url", "")}}])
+    case _:
+      J.Json.obj(Nil{})
+
+# the click's point in the page, scaled from the thousandths of the frame
+def Tk.at(+o: J.Json, +pt: TKS.TkPt) -> TKS.TkPt:
+  TKS.Task.scale(J.Json.get_nat(o, "x", 0n), J.Json.get_nat(o, "y", 0n), 1000n, 1000n, Tk.pt.w(pt), Tk.pt.h(pt))
+
+def Tk.args(i: Nat, +o: J.Json, +pt: TKS.TkPt) -> J.Json:
+  Tk.args.k(i, o, Tk.at(o, pt))
+
+def Tk.view(need: Bool, +q: Chan(BR.BMsg), +bot: String) -> IO(TKS.TkPt):
+  match need:
+    case True{}:
+      IO.bind(String, TKS.TkPt, BR.Browser.ask_on(q, bot, "status", J.Json.obj(Nil{})), line => IO.pure(TKS.TkPt, Tk.size(line)))
+    case False{}:
+      IO.pure(TKS.TkPt, TKS.TkPt{1280n, 800n})
+
+def Tk.input.go(skip: Bool, +i: Nat, +q: Chan(BR.BMsg), +bot: String, +o: J.Json, +pt: TKS.TkPt) -> IO(Unit):
+  match skip:
+    case True{}:
+      IO.pure(Unit, Unit{})
+    case False{}:
+      do IO<Unit>:
+        r : String <- BR.Browser.ask_on(q, bot, Maybe.default(&2, String, List.get(&2, String, Tk.ops(), i), "status"), Tk.args(i, o, pt))
+        return Unit{}
+
+def Tk.input.k(+i: Nat, m: Maybe<&2, Chan(BR.BMsg)>, +bot: String, +o: J.Json) -> IO(Unit):
+  match m:
+    case Some{+q}:
+      IO.bind(TKS.TkPt, Unit, Tk.view(Nat.is_lt(i, 2n), q, bot), pt => Tk.input.go(Nat.is_ge(i, 8n), i, q, bot, o, pt))
+    case None{}:
+      IO.pure(Unit, Unit{})
+
+# the person's input on a bot's page, passed to the helper on that page
+def Tk.input(m: Maybe<&2, Chan(BR.BMsg)>, +bot: String, +o: J.Json) -> IO(Unit):
+  Tk.input.k(C.Codec.pos(Tk.ops(), J.Json.get_str(o, "op", "")), m, bot, o)
+
 # one B.BotFx: home, gone, hook, unhook, send, invite, join, unpeer, google,
 # token, retoken, untoken, voice
 def Bot.fx(i: Nat, +st: M.State, +inbox: Chan(Msg), +cfg: Cfg, +a: String, +b: String, +c: String) -> IO(Unit):
@@ -5571,6 +5758,10 @@ def Bot.fx(i: Nat, +st: M.State, +inbox: Chan(Msg), +cfg: Cfg, +a: String, +b: S
         BO.Bot.thread(BO.World.bot(M.State.bots(st), a)), BotJob.client(b), BotJob.id(c)))
     case 16n:
       Self.post(inbox, UberDo{"home:" ++ a})
+    case 17n:
+      IO.spawn(Unit, Tk.file(Cfg.home(cfg), a, b, c))
+    case 18n:
+      IO.spawn(Unit, Tk.gone(Cfg.home(cfg), a, b))
     case _:
       IO.pure(Unit, Unit{})
 
@@ -6301,7 +6492,7 @@ def Far.note.out(h: Hub, +thread: String, +state: String, seen: Bool) -> IO(Hub)
 
 # the phones of this hub hear of a far turn's end
 def Far.note.push(+home: String, st: M.State, +thread: String, +title: String, +body: String, +akey: String, +inbox: Chan(Msg)) -> IO(Unit):
-  IO.bind(List<&2, String>, Unit, PU.Push.note.dead(home, st, thread, title, body, akey), ds => Hub.drop_dead(ds, inbox))
+  IO.bind(List<&2, String>, Unit, PU.Push.note.dead(home, st, thread, title, body, akey, ""), ds => Hub.drop_dead(ds, inbox))
 
 # the desk used last shows it (none when a desk watches the thread)
 def Far.note.desk(m: Maybe<&2, U32>, +cl: List<&2, Client>, +farid: String, +o: J.Json) -> IO(List<&2, Client>):
@@ -7080,6 +7271,10 @@ def Hub.out(h: Hub, o: B.Out) -> IO(Hub):
       do IO<Hub>:
         IO.spawn(Unit, FsJob.run(op, inbox, client, id, path))
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
+    case Hub{st, f, ls, cl, as, +inbox, cfg, note} B.Teach{+client, +id, +m, +p}:
+      do IO<Hub>:
+        Self.post(inbox, TeachReq{client, id, m, p})
+        return Hub{st, f, ls, cl, as, inbox, cfg, note}
     case Hub{st, f, ls, cl, as, inbox, +cfg, note} B.TermOp{+op, +thread, +cwd, data, +cols, +rows}:
       do IO<Hub>:
         Term.put(Cfg.tm(cfg), Term.msg(op, thread, cwd, data, cols, rows))
@@ -7119,7 +7314,7 @@ def Hub.out(h: Hub, o: B.Out) -> IO(Hub):
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
     case Hub{+st, f, ls, cl, as, +inbox, +cfg, note} B.BotFx{+kind, +a, +b, +c}:
       do IO<Hub>:
-        Bot.fx(C.Codec.pos(["home", "gone", "hook", "unhook", "send", "invite", "join", "unpeer", "google", "token", "retoken", "untoken", "voice", "scratch", "scratch-gone", "uber", "uber-home"], kind), st, inbox, cfg, a, b, c)
+        Bot.fx(C.Codec.pos(["home", "gone", "hook", "unhook", "send", "invite", "join", "unpeer", "google", "token", "retoken", "untoken", "voice", "scratch", "scratch-gone", "uber", "uber-home", "task-file", "task-gone"], kind), st, inbox, cfg, a, b, c)
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
 
 def Hub.outs(os: List<&2, B.Out>, h: Hub) -> IO(Hub):
@@ -7499,6 +7694,218 @@ def Hub.step.drop(r: Hub & Bool) -> Hub:
 
 def Hub.step(h: Hub, s: B.Step) -> IO(Hub):
   IO.bind(Hub & Bool, Hub, Hub.step.ok(h, s), r => IO.pure(Hub, Hub.step.drop(r)))
+
+# Teaching a bot's browser (docs/teach.md)
+# ----------------------------------------
+# bots.browser and bots.teach reach the hub as TeachReq (B.Teach): the hub
+# keeps each bot's driver and draft in its Cfg (core/teach.bend) and tells
+# every client the info keys drive.<bot>, teach.<bot>, teach.draft.<bot>.
+
+def Hub.tch.put(h: Hub, +b: TE.TeachBot) -> IO(Hub):
+  match h:
+    case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      do IO<Hub>:
+        cl2 : List<&2, Client> <- Wire.all(cl, TE.Teach.msg(b))
+        return Hub{st, f, ls, cl2, as, inbox, Cfg.with_tch(cfg, TE.Teach.put(Cfg.tch(cfg), b)), note}
+
+def Hub.tch.ok(h: Hub, +client: U32, +id: String) -> IO(Hub):
+  Hub.out(h, B.Reply.ok(client, id))
+
+def Hub.tch.err(h: Hub, +client: U32, +id: String, +msg: String) -> IO(Hub):
+  Hub.out(h, B.Reply.err(client, id, msg))
+
+# the draft's newest step joins its file, and clients hear the draft
+def Hub.tch.step(h: Hub, +b: TE.TeachBot) -> IO(Hub):
+  match h:
+    case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      do IO<Hub>:
+        IO.spawn(Unit, Tk.draft.add(Cfg.home(cfg), TE.Teach.bot.id(b), TE.Teach.last(b)))
+        Hub.tch.put(Hub{st, f, ls, cl, as, inbox, cfg, note}, b)
+
+# recording off, the draft kept for review
+def Hub.tch.stop(h: Hub, +b: TE.TeachBot) -> IO(Hub):
+  match h:
+    case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      do IO<Hub>:
+        IO.spawn(Unit, Tk.record(Cfg.br(cfg), TE.Teach.bot.id(b), False{}))
+        Hub.tch.put(Hub{st, f, ls, cl, as, inbox, cfg, note}, TE.Teach.stop(b))
+
+def Hub.browser.go(h: Hub, +client: U32, +id: String, +o: J.Json) -> IO(Hub):
+  match h:
+    case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      do IO<Hub>:
+        IO.spawn(Unit, Tk.input(Cfg.br(cfg), J.Json.get_str(o, "bot", ""), o))
+        Hub.tch.ok(Hub{st, f, ls, cl, as, inbox, cfg, note}, client, id)
+
+# the person's input goes through only while they have the browser
+def Hub.browser.input(idle: Bool, h: Hub, +client: U32, +id: String, +o: J.Json) -> IO(Hub):
+  match idle:
+    case True{}:
+      Hub.tch.err(h, client, id, "take over the browser first")
+    case False{}:
+      Hub.browser.go(h, client, id, o)
+
+def Hub.browser.k(i: Nat, h: Hub, +client: U32, +id: String, +o: J.Json, +b: TE.TeachBot) -> IO(Hub):
+  match i:
+    case 0n:
+      IO.bind(Hub, Hub, Hub.tch.put(h, TE.Teach.takeover(b)), h2 => Hub.tch.ok(h2, client, id))
+    case 1n:
+      IO.bind(Hub, Hub, Hub.tch.put(h, TE.Teach.handback(b)), h2 => Hub.tch.ok(h2, client, id))
+    case _:
+      Hub.browser.input(String.is_empty(TE.Teach.bot.drive(b)), h, client, id, o)
+
+# bots.browser {bot, op, ...}
+def Hub.browser(h: Hub, +client: U32, +id: String, +o: J.Json) -> IO(Hub):
+  match h:
+    case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      Hub.browser.k(C.Codec.pos(["takeover", "handback"], J.Json.get_str(o, "op", "")), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, id, o,
+        TE.Teach.get(Cfg.tch(cfg), J.Json.get_str(o, "bot", "")))
+
+def Hub.teach.start(h: Hub, +client: U32, +id: String, +bot: String, +now: Nat) -> IO(Hub):
+  match h:
+    case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      do IO<Hub>:
+        IO.spawn(Unit, Tk.begin(Cfg.br(cfg), Cfg.home(cfg), bot))
+        h2 : Hub <- Hub.tch.put(Hub{st, f, ls, cl, as, inbox, cfg, note}, TE.Teach.start(bot, now))
+        Hub.tch.ok(h2, client, id)
+
+def Hub.teach.note(h: Hub, +client: U32, +id: String, +b: TE.TeachBot, +text: String) -> IO(Hub):
+  do IO<Hub>:
+    h2 : Hub <- Hub.tch.step(h, TE.Teach.add(b, TE.Teach.note(String.take(String.trim(text), 500n))))
+    Hub.tch.ok(h2, client, id)
+
+def Hub.teach.stop(h: Hub, +client: U32, +id: String, +b: TE.TeachBot) -> IO(Hub):
+  do IO<Hub>:
+    h2 : Hub <- Hub.tch.stop(h, b)
+    Hub.tch.ok(h2, client, id)
+
+def Hub.teach.discard(h: Hub, +client: U32, +id: String, +bot: String) -> IO(Hub):
+  match h:
+    case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      do IO<Hub>:
+        IO.spawn(Unit, Tk.record(Cfg.br(cfg), bot, False{}))
+        IO.spawn(Unit, Tk.draft.clear(Cfg.home(cfg), bot))
+        h2 : Hub <- Hub.tch.put(Hub{st, f, ls, cl, as, inbox, cfg, note}, TE.Teach.blank(bot))
+        Hub.tch.ok(h2, client, id)
+
+# save: the draft, with the marked values as parameters, is the person's
+# task (a TaskSet and its file); the bot is woken to learn it
+def Hub.teach.save.go(h: Hub, +client: U32, +id: String, +b: TE.TeachBot, +o: J.Json, +now: Nat) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
+      do IO<Hub>:
+        +bot : String = TE.Teach.bot.id(b)
+        +name : String = String.trim(J.Json.get_str(o, "name", ""))
+        +task : TKS.TkTask = TE.Teach.build(b, name, J.Json.get_str(o, "description", ""), J.Json.elems(J.Json.get_obj(o, "params")), now)
+        +text : String = TE.Teach.task.text(task)
+        +slug : String = TE.Teach.task.slug(task)
+        +step : B.Step = BH.Step.cat(B.Step{[M.TaskSet{bot, slug, text, now}], [B.Reply.ok(client, id), B.BotFx{"task-file", bot, slug, text}]},
+          BH.Bots.wake(st, now, "", BH.Bots.bot(st, bot), BH.Bots.msg(now, B.Hub.seq(st), 0n), TE.Teach.taught(name, task), 0n))
+        h2 : Hub <- Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, step)
+        IO.spawn(Unit, Tk.record(Cfg.br(cfg), bot, False{}))
+        IO.spawn(Unit, Tk.draft.clear(Cfg.home(cfg), bot))
+        Hub.tch.put(h2, TE.Teach.blank(bot))
+
+def Hub.teach.save(bad: Bool, h: Hub, +client: U32, +id: String, +b: TE.TeachBot, +o: J.Json, +now: Nat) -> IO(Hub):
+  match bad:
+    case True{}:
+      Hub.tch.err(h, client, id, "name the task and record at least one step")
+    case False{}:
+      Hub.teach.save.go(h, client, id, b, o, now)
+
+def Hub.teachop.k(i: Nat, h: Hub, +client: U32, +id: String, +o: J.Json, +b: TE.TeachBot, +now: Nat) -> IO(Hub):
+  match i:
+    case 0n:
+      Hub.teach.start(h, client, id, J.Json.get_str(o, "bot", ""), now)
+    case 1n:
+      Hub.teach.note(h, client, id, b, J.Json.get_str(o, "text", ""))
+    case 2n:
+      Hub.teach.stop(h, client, id, b)
+    case 3n:
+      Hub.teach.discard(h, client, id, J.Json.get_str(o, "bot", ""))
+    case 4n:
+      Hub.teach.save(Bool.or(String.is_empty(String.trim(J.Json.get_str(o, "name", ""))), List.is_empty(&2, TKS.TkStep, TE.Teach.bot.steps(b))), h, client, id, b, o, now)
+    case _:
+      Hub.tch.err(h, client, id, "unknown teach request")
+
+# bots.teach {bot, op: start | note | stop | discard | save, ...}
+def Hub.teachop(h: Hub, +client: U32, +id: String, +o: J.Json, +now: Nat) -> IO(Hub):
+  match h:
+    case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      Hub.teachop.k(C.Codec.pos(["start", "note", "stop", "discard", "save"], J.Json.get_str(o, "op", "")), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, id, o,
+        TE.Teach.get(Cfg.tch(cfg), J.Json.get_str(o, "bot", "")), now)
+
+def Hub.teach.req(i: Nat, h: Hub, +client: U32, +id: String, +o: J.Json, +now: Nat) -> IO(Hub):
+  match i:
+    case 0n:
+      Hub.browser(h, client, id, o)
+    case 1n:
+      Hub.teachop(h, client, id, o, now)
+    case _:
+      Hub.tch.err(h, client, id, "unknown request")
+
+def Hub.teach(h: Hub, +client: U32, +id: String, +m: String, +p: String, +now: Nat) -> IO(Hub):
+  Hub.teach.req(C.Codec.pos(["bots.browser", "bots.teach"], m), h, client, id, Maybe.default(&2, J.Json, J.Json.parse(p), J.Null{}), now)
+
+# a step the recorder saw joins the bot's draft while it records
+def Hub.rec.add(added: Bool, h: Hub, b: TE.TeachBot) -> IO(Hub):
+  match added:
+    case True{}:
+      Hub.tch.step(h, b)
+    case False{}:
+      IO.pure(Hub, h)
+
+def Hub.rec.k(+b: TE.TeachBot, h: Hub, +step: J.Json) -> IO(Hub):
+  Hub.rec.add(Nat.is_lt(List.length(&2, TKS.TkStep, TE.Teach.bot.steps(b)), List.length(&2, TKS.TkStep, TE.Teach.bot.steps(TE.Teach.add(b, step)))), h, TE.Teach.add(b, step))
+
+def Hub.rec(h: Hub, +bot: String, +step: J.Json) -> IO(Hub):
+  match h:
+    case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      Hub.rec.k(TE.Teach.get(Cfg.tch(cfg), bot), Hub{st, f, ls, cl, as, inbox, cfg, note}, step)
+
+def Hub.browser_ev.k(rec: Bool, h: Hub, +bot: String, +step: J.Json) -> IO(Hub):
+  match rec:
+    case True{}:
+      Hub.rec(h, bot, step)
+    case False{}:
+      IO.pure(Hub, h)
+
+def Hub.browser_ev.o(h: Hub, +o: J.Json) -> IO(Hub):
+  Hub.browser_ev.k(String.eq(J.Json.get_str(o, "event", ""), "record"), h, J.Json.get_str(o, "page", ""), J.Json.get_obj(o, "step"))
+
+# a helper event about a bot's page: a recorder step (navigations and loads
+# need nothing here: the recorder reports the person's own navigations)
+def Hub.browser_ev(h: Hub, +line: String) -> IO(Hub):
+  Hub.browser_ev.o(h, Maybe.default(&2, J.Json, J.Json.parse(line), J.Null{}))
+
+# the person answered a pause: the browser is the bot's again
+def Hub.back.k(+b: TE.TeachBot, h: Hub) -> IO(Hub):
+  Hub.tch.put(h, TE.Teach.handback(b))
+
+def Hub.back(h: Hub, +bot: String) -> IO(Hub):
+  match h:
+    case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      Hub.back.k(TE.Teach.get(Cfg.tch(cfg), bot), Hub{st, f, ls, cl, as, inbox, cfg, note})
+
+# a recording ends after ten minutes
+def Hub.tch.expire(yes: Bool, h: Hub, +b: TE.TeachBot) -> IO(Hub):
+  match yes:
+    case True{}:
+      Hub.tch.stop(h, b)
+    case False{}:
+      IO.pure(Hub, h)
+
+def Hub.tch.tick(bs: List<&2, TE.TeachBot>, h: Hub, +now: Nat) -> IO(Hub):
+  match bs:
+    case Nil{}:
+      IO.pure(Hub, h)
+    case +b <> t:
+      IO.bind(Hub, Hub, Hub.tch.expire(TE.Teach.expired(b, now), h, b), h2 => Hub.tch.tick(t, h2, now))
+
+def Hub.tch.ticks(h: Hub, +now: Nat) -> IO(Hub):
+  match h:
+    case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      Hub.tch.tick(TE.Teach.st.bots(Cfg.tch(cfg)), Hub{st, f, ls, cl, as, inbox, cfg, note}, now)
 
 def Hub.rpc.k(p: M.State & Hub, +client: U32, +text: String, +now: Nat) -> IO(Hub):
   (st, h) = p
@@ -8205,7 +8612,8 @@ def Hub.bot_tick(h: Hub, +tz: String, +now: Nat) -> IO(Hub):
         h2 : Hub <- Hub.dir.refresh(Hub{st, f, ls, cl, as, inbox, cfg, note}, "")
         h3 : Hub <- Hub.pair(h2)
         h4 : Hub <- Hub.step(h3, BH.Bots.tick(st, now, BH.Tz{M.Snooze.tz.secs(tz), M.Snooze.tz.east(tz)}))
-        Hub.uber.tick(h4, now)
+        h5 : Hub <- Hub.tch.ticks(h4, now)
+        Hub.uber.tick(h5, now)
 
 # Discovery and signed inbound traffic are return signals. Fetch just the
 # returning peer, and never bounce every successful directory request.
@@ -8846,22 +9254,19 @@ def Hub.bot.view(h: Hub, +arg: String, +reply: Chan(List<&2, U32>)) -> IO(Hub):
         RVW.Rview.kind(W.Http.route(arg)), Hub{st, f, ls, cl, as, inbox, cfg, note}, RVW.Rview.root(Cfg.home(cfg), st, AT.Att.unpct(W.Http.param(arg, "thread")), AT.Att.unpct(W.Http.param(arg, "root"))),
         AT.Att.unpct(W.Http.param(arg, "thread")), AT.Att.unpct(W.Http.param(arg, "want")), AT.Att.unpct(W.Http.param(arg, "have")), AT.Att.unpct(W.Http.param(arg, "path")), reply)
 
-def Hub.bot_http.page(i: Nat, h: Hub, +kind: String, +arg: String, +peer: String, +ts: String, +sig: String, +gh: String, +dl: String, +body: String,
-    +ct: String, +raw: List<&2, U32>,
-    +reply: Chan(List<&2, U32>), +now: Nat) -> IO(Hub):
-  match i:
-    case 0n:
-      Hub.bot.page(h, arg, reply)
-    case 1n:
-      Hub.bot.pair(h, arg, reply)
-    case 2n:
-      Hub.bot.view(h, arg, reply)
-    case _:
-      Hub.bot_http.job(h, kind, arg, peer, ts, sig, gh, dl, body, ct, raw, reply, now)
+# GET /bots/<id>/tasks/shot?run=<run>&n=<n> (or &f=<file>): a picture of a
+# task run (a pause's, or a step's), only from that bot's own tasks folder;
+# the run and file names are plain (no / or ..)
+def Bot.tshot.file(+p: String) -> String:
+  Bool.pick(String, String.is_empty(AT.Att.unpct(W.Http.param(p, "f"))),
+    TE.Teach.pause.file(Maybe.default(&2, Nat, Nat.read(W.Http.param(p, "n")), 0n)), AT.Att.unpct(W.Http.param(p, "f")))
 
-def Hub.bot_http(h: Hub, +kind: String, +arg: String, +peer: String, +ts: String, +sig: String, +gh: String, +dl: String, +body: String,
-    +ct: String, +raw: List<&2, U32>, +reply: Chan(List<&2, U32>), +now: Nat) -> IO(Hub):
-  Hub.bot_http.page(C.Codec.pos(["page", "pair", "view"], kind), h, kind, arg, peer, ts, sig, gh, dl, body, ct, raw, reply, now)
+def Bot.tshot.go(ok: Bool, +path: String, +reply: Chan(List<&2, U32>)) -> IO(Unit):
+  match ok:
+    case True{}:
+      IO.bind(List<&2, U32>, Unit, Files.read(path), bs => Bot.shot.sent(bs, reply))
+    case False{}:
+      Bot.answer(reply, W.Http.text("404 Not Found", "no such picture"))
 
 def Bot.hook.live.k(hk: BO.Hook, +st: M.State) -> Bool:
   match hk:
@@ -8982,7 +9387,8 @@ def Conn.bot.kind.k(+post: Bool, +get: Bool, +r: String) -> Nat:
                 Bool.pick(Nat, Bool.and(post, String.eq(r, "/far/push")), 8n,
                   Bool.pick(Nat, Bool.and(post, String.eq(r, "/far/log")), 9n,
                     Bool.pick(Nat, Bool.and(post, String.eq(r, "/far/rpc")), 10n,
-                      Bool.pick(Nat, Bool.and(post, String.eq(r, "/bots/pair")), 11n, Bool.pick(Nat, Bool.and(get, Nat.is_gt(RVW.Rview.kind(r), 0n)), 12n, 0n))))))))))))
+                      Bool.pick(Nat, Bool.and(post, String.eq(r, "/bots/pair")), 11n, Bool.pick(Nat, Bool.and(get, Nat.is_gt(RVW.Rview.kind(r), 0n)), 12n,
+                        Bool.pick(Nat, Bool.and(get, Bool.and(String.starts_with(r, "/bots/"), String.ends_with(r, "/tasks/shot"))), 13n, 0n)))))))))))))
 
 # which bots' route a request is (0: none)
 def Conn.bot.kind(req: W.Request) -> Nat:
@@ -8993,6 +9399,36 @@ def Conn.bot.kind(req: W.Request) -> Nat:
 # /bots/<id>/screen.jpg: the id ("" when it is not a plain id)
 def Conn.bot.shot_id(+r: String) -> String:
   Bool.pick(String, BN.Bn.safe(String.take(String.drop(r, 6n), Nat.sub(String.length(r), 17n))), String.take(String.drop(r, 6n), Nat.sub(String.length(r), 17n)), "")
+
+def Bot.tshot(+home: String, +p: String, +reply: Chan(List<&2, U32>)) -> IO(Unit):
+  Bot.tshot.go(Bool.and(BN.Bn.safe(Conn.bot.shot_id(W.Http.route(p))), Bool.and(TE.Teach.run.ok(AT.Att.unpct(W.Http.param(p, "run"))), TE.Teach.file.ok(Bot.tshot.file(p)))),
+    home ++ "/bots/" ++ Conn.bot.shot_id(W.Http.route(p)) ++ "/" ++ TE.Teach.run.dir(AT.Att.unpct(W.Http.param(p, "run"))) ++ "/" ++ Bot.tshot.file(p), reply)
+
+def Hub.bot.tshot(h: Hub, +arg: String, +reply: Chan(List<&2, U32>)) -> IO(Hub):
+  match h:
+    case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      do IO<Hub>:
+        IO.spawn(Unit, Bot.tshot(Cfg.home(cfg), arg, reply))
+        return Hub{st, f, ls, cl, as, inbox, cfg, note}
+
+def Hub.bot_http.page(i: Nat, h: Hub, +kind: String, +arg: String, +peer: String, +ts: String, +sig: String, +gh: String, +dl: String, +body: String,
+    +ct: String, +raw: List<&2, U32>,
+    +reply: Chan(List<&2, U32>), +now: Nat) -> IO(Hub):
+  match i:
+    case 0n:
+      Hub.bot.page(h, arg, reply)
+    case 1n:
+      Hub.bot.pair(h, arg, reply)
+    case 2n:
+      Hub.bot.view(h, arg, reply)
+    case 3n:
+      Hub.bot.tshot(h, arg, reply)
+    case _:
+      Hub.bot_http.job(h, kind, arg, peer, ts, sig, gh, dl, body, ct, raw, reply, now)
+
+def Hub.bot_http(h: Hub, +kind: String, +arg: String, +peer: String, +ts: String, +sig: String, +gh: String, +dl: String, +body: String,
+    +ct: String, +raw: List<&2, U32>, +reply: Chan(List<&2, U32>), +now: Nat) -> IO(Hub):
+  Hub.bot_http.page(C.Codec.pos(["page", "pair", "view", "tshot"], kind), h, kind, arg, peer, ts, sig, gh, dl, body, ct, raw, reply, now)
 
 # /bots/<id>/space.html: the id ("" when it is not a plain id)
 # (a plain id, or a mirrored bot's "<link>~<id>" of two plain ids)
@@ -9211,6 +9647,8 @@ def Conn.route.bot(k: Nat, s: Socket, +req: W.Request, rest: List<&2, U32>, +web
       Conn.bot.own(Conn.allowed(trusted, hs, p, token), s, BotReq{"pair", p, "", "", "", "", ""}, inbox)
     case 12n W.Request{_, +p, +hs}:
       Conn.bot.own(Conn.allowed(trusted, hs, p, token), s, BotReq{"view", p, "", "", "", "", ""}, inbox)
+    case 13n W.Request{_, +p, +hs}:
+      Conn.bot.own(Conn.allowed(trusted, hs, p, token), s, BotReq{"tshot", p, "", "", "", "", ""}, inbox)
     case _ _:
       Conn.route.att(Conn.is_att(req), s, req, rest, web, id, inbox, trusted, token)
 
@@ -9448,12 +9886,253 @@ def Hub.newproj(bot: Bool, h: Hub, +thread: String, +o: J.Json, +reply: Chan(Str
         Gg.say(reply, J.Json.get_obj(o, "id"), False{}, "only bots have this tool")
         return h
 
+# Task runs (the bot's task_* tools; docs/teach.md)
+# -------------------------------------------------
+
+def Tk.say(+reply: Chan(String), +rid: String, ok: Bool, text: String) -> IO(Unit):
+  Gg.say(reply, Maybe.default(&2, J.Json, J.Json.parse(rid), J.Null{}), ok, text)
+
+def Tk.rundir(+home: String, +bot: String, +run: String) -> String:
+  home ++ "/bots/" ++ bot ++ "/" ++ TE.Teach.run.dir(run)
+
+# the run's folder, its first Act, and the plan back to the bot
+def Tk.start(+inbox: Chan(Msg), +dir: String, +thread: String, +run: String, +slug: String, +plan: String, +rid: String, +reply: Chan(String), +now: Nat) -> IO(Unit):
+  do IO<Unit>:
+    mk : Result<&1, &1, U32 & String, Unit> <- H.FS.mkdirs(dir)
+    ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, Commit{[M.ActivityLogged{thread, "task:" ++ run, "task", "task", TE.Teach.act.text(slug, run, "running", 0n, "", Nil{}), now}]})
+    Tk.say(reply, rid, True{}, plan)
+
+def Hub.task.run.f(r: Result<&2, &2, String, TKS.TkTask>, h: Hub, +thread: String, +bot: String, +slug: String, +rid: String, +reply: Chan(String), +now: Nat) -> IO(Hub):
+  match r h:
+    case Done{+filled} Hub{st, f, ls, cl, as, +inbox, +cfg, note}:
+      do IO<Hub>:
+        +run : String = TE.Teach.run.id(slug, now)
+        IO.spawn(Unit, Tk.start(inbox, Tk.rundir(Cfg.home(cfg), bot, run), thread, run, slug,
+          J.Json.show(J.Json.obj([J.KV{"run", J.Str{run}}, J.KV{"plan", TE.Teach.plan(filled)}])), rid, reply, now))
+        return Hub{st, f, ls, cl, as, inbox, cfg, note}
+    case Fail{+e} _:
+      do IO<Hub>:
+        IO.spawn(Unit, Tk.say(reply, rid, False{}, e))
+        return h
+
+def Hub.task.run.p(m: Maybe<&2, TKS.TkTask>, h: Hub, +thread: String, +bot: String, +slug: String, +a: J.Json, +rid: String, +reply: Chan(String), +now: Nat) -> IO(Hub):
+  match m:
+    case Some{+t}:
+      Hub.task.run.f(TKS.Task.fill(t, TE.Teach.args.of(J.Json.get_obj(a, "params"))), h, thread, bot, slug, rid, reply, now)
+    case None{}:
+      do IO<Hub>:
+        IO.spawn(Unit, Tk.say(reply, rid, False{}, "that task is damaged: save it again with task_save"))
+        return h
+
+def Hub.task.run.k(m: Maybe<&2, String>, h: Hub, +thread: String, +bot: String, +slug: String, +a: J.Json, +rid: String, +reply: Chan(String), +now: Nat) -> IO(Hub):
+  match m:
+    case Some{+j}:
+      Hub.task.run.p(TKS.Task.read(j), h, thread, bot, slug, a, rid, reply, now)
+    case None{}:
+      do IO<Hub>:
+        IO.spawn(Unit, Tk.say(reply, rid, False{}, "no such task: task_list shows yours"))
+        return h
+
+def Hub.task.run(h: Hub, +thread: String, +a: J.Json, +rid: String, +reply: Chan(String), +now: Nat) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
+      Hub.task.run.k(BO.World.task(M.State.bots(st), Bot.page(st, thread), TKS.Task.slug(J.Json.get_str(a, "slug", ""))),
+        Hub{st, f, ls, cl, as, inbox, cfg, note}, thread, Bot.page(st, thread), TKS.Task.slug(J.Json.get_str(a, "slug", "")), a, rid, reply, now)
+
+# task_step: a line in the run's log; with shot, the page's picture
+def Tk.step.shot(want: Bool, m: Maybe<&2, Chan(BR.BMsg)>, +bot: String, +dir: String, +n: Nat) -> IO(Unit):
+  match want m:
+    case True{} Some{+q}:
+      do IO<Unit>:
+        r : String <- BR.Browser.ask_on(q, bot, "screenshot", J.Json.obj([J.KV{"path", J.Str{dir ++ "/" ++ TE.Teach.step.file(n)}}, J.KV{"fullPage", J.Flag{False{}}}]))
+        return Unit{}
+    case _ _:
+      IO.pure(Unit, Unit{})
+
+def Tk.step.job(m: Maybe<&2, Chan(BR.BMsg)>, +bot: String, +dir: String, +run: String, +a: J.Json, +rid: String, +reply: Chan(String), +now: Nat) -> IO(Unit):
+  do IO<Unit>:
+    +n : Nat = J.Json.get_nat(a, "n", 0n)
+    +shot : Bool = J.Json.get_bool(a, "shot", False{})
+    Tk.append(dir ++ "/log.jsonl", J.Json.show(J.Json.obj([J.KV{"n", J.Json.nat(n)}, J.KV{"ok", J.Flag{J.Json.get_bool(a, "ok", True{})}}, J.KV{"note", J.Str{String.take(J.Json.get_str(a, "note", ""), 500n)}},
+      J.KV{"shot", J.Str{Bool.pick(String, shot, TE.Teach.step.file(n), "")}}, J.KV{"at", J.Json.nat(now)}])))
+    Tk.step.shot(shot, m, bot, dir, n)
+    Tk.say(reply, rid, True{}, J.Json.show(J.Json.obj([J.KV{"ok", J.Flag{True{}}}, J.KV{"shot", J.Str{Bool.pick(String, shot, "/bots/" ++ bot ++ "/tasks/shot?run=" ++ run ++ "&f=" ++ TE.Teach.step.file(n), "")}}])))
+
+def Hub.task.step.k(ok: Bool, h: Hub, +thread: String, +a: J.Json, +rid: String, +reply: Chan(String), +now: Nat) -> IO(Hub):
+  match ok h:
+    case True{} Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
+      do IO<Hub>:
+        IO.spawn(Unit, Tk.step.job(Cfg.br(cfg), Bot.page(st, thread), Tk.rundir(Cfg.home(cfg), Bot.page(st, thread), J.Json.get_str(a, "run", "")), J.Json.get_str(a, "run", ""), a, rid, reply, now))
+        return Hub{st, f, ls, cl, as, inbox, cfg, note}
+    case False{} _:
+      do IO<Hub>:
+        IO.spawn(Unit, Tk.say(reply, rid, False{}, "no such run"))
+        return h
+
+def Hub.task.step(h: Hub, +thread: String, +a: J.Json, +rid: String, +reply: Chan(String), +now: Nat) -> IO(Hub):
+  Hub.task.step.k(TE.Teach.run.ok(J.Json.get_str(a, "run", "")), h, thread, a, rid, reply, now)
+
+def Tk.pause.shot(m: Maybe<&2, Chan(BR.BMsg)>, +bot: String, +path: String) -> IO(Unit):
+  match m:
+    case Some{q}:
+      do IO<Unit>:
+        r : String <- BR.Browser.ask_on(q, bot, "screenshot", J.Json.obj([J.KV{"path", J.Str{path}}, J.KV{"fullPage", J.Flag{False{}}}]))
+        return Unit{}
+    case None{}:
+      IO.pure(Unit, Unit{})
+
+# task_pause: the page's picture, then the ask (Hub.task.paused)
+def Tk.pause.job(m: Maybe<&2, Chan(BR.BMsg)>, +inbox: Chan(Msg), +dir: String, +thread: String, +bot: String, +run: String, +n: Nat, +kind: String, +question: String, +risky: Bool, +rid: String, +reply: Chan(String)) -> IO(Unit):
+  do IO<Unit>:
+    mk : Result<&1, &1, U32 & String, Unit> <- H.FS.mkdirs(dir)
+    Tk.pause.shot(m, bot, dir ++ "/" ++ TE.Teach.pause.file(n))
+    ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, TaskPaused{thread, bot, run, TE.Teach.run.slug(run), n, kind, question, risky, rid, reply})
+    return Unit{}
+
+def Hub.task.pause.k(ok: Bool, h: Hub, +thread: String, +a: J.Json, +rid: String, +reply: Chan(String), +now: Nat) -> IO(Hub):
+  match ok h:
+    case True{} Hub{+st, f, ls, cl, as, +inbox, +cfg, note}:
+      do IO<Hub>:
+        IO.spawn(Unit, Tk.pause.job(Cfg.br(cfg), inbox, Tk.rundir(Cfg.home(cfg), Bot.page(st, thread), J.Json.get_str(a, "run", "")), thread, Bot.page(st, thread), J.Json.get_str(a, "run", ""),
+          J.Json.get_nat(a, "n", now), J.Json.get_str(a, "kind", "stuck"), String.take(J.Json.get_str(a, "question", ""), 300n), J.Json.get_bool(a, "risky", False{}), rid, reply))
+        return Hub{st, f, ls, cl, as, inbox, cfg, note}
+    case False{} _:
+      do IO<Hub>:
+        IO.spawn(Unit, Tk.say(reply, rid, False{}, "no such run"))
+        return h
+
+def Hub.task.pause(h: Hub, +thread: String, +a: J.Json, +rid: String, +reply: Chan(String), +now: Nat) -> IO(Hub):
+  Hub.task.pause.k(TE.Teach.run.ok(J.Json.get_str(a, "run", "")), h, thread, a, rid, reply, now)
+
+# the person's answer to a pause: the bot gets it, the browser is handed back
+def Tk.wait.k(m: Maybe<&1, String>, +inbox: Chan(Msg), +bot: String, +rid: String, +reply: Chan(String)) -> IO(Unit):
+  match m:
+    case Some{+answer}:
+      do IO<Unit>:
+        Self.post(inbox, TeachBack{bot})
+        Tk.say(reply, rid, True{}, TE.Pause.reply(answer))
+    case None{}:
+      IO.pure(Unit, Unit{})
+
+def Tk.wait(+r2: Chan(String), +inbox: Chan(Msg), +bot: String, +rid: String, +reply: Chan(String)) -> IO(Unit):
+  IO.bind(Maybe<&1, String>, Unit, Chan.recv(String, r2), m => Tk.wait.k(m, inbox, bot, rid, reply))
+
+# the phones hear of the pause once, with its screenshot's address
+def Tk.push(+home: String, st: M.State, +thread: String, +title: String, +body: String, +akey: String, +image: String, +inbox: Chan(Msg)) -> IO(Unit):
+  IO.bind(List<&2, String>, Unit, PU.Push.note.dead(home, st, thread, title, body, akey, image), ds => Hub.drop_dead(ds, inbox))
+
+# the desk used last shows it (none when a desk watches the thread)
+def Tk.desk(m: Maybe<&2, U32>, +cl: List<&2, Client>, +thread: String, +title: String, +body: String, +key: String) -> IO(List<&2, Client>):
+  match m:
+    case Some{+c}:
+      Wire.to(cl, c, DK.Desk.notify(thread, title, body, "ask", key))
+    case None{}:
+      IO.pure(List<&2, Client>, cl)
+
+def Tk.alert(fresh: Bool, +cl: List<&2, Client>, +st: M.State, +cfg: Cfg, +inbox: Chan(Msg), +thread: String, +title: String, +body: String, +key: String, +image: String, +now: Nat) -> IO(List<&2, Client>):
+  match fresh:
+    case True{}:
+      do IO<List<&2, Client>>:
+        IO.spawn(Unit, Tk.push(Cfg.home(cfg), st, thread, title, body, DK.Desk.hold(DK.Desk.seen(Clients.looks(cl), thread, now), key), image, inbox))
+        Tk.desk(DK.Desk.to(Clients.looks(cl), thread, now), cl, thread, title, body, key)
+    case False{}:
+      IO.pure(List<&2, Client>, cl)
+
+def Hub.task.paused(h: Hub, +thread: String, +bot: String, +run: String, +slug: String, +n: Nat, +kind: String, +question: String, +risky: Bool, +rid: String, +reply: Chan(String), +now: Nat) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, +cl, as, +inbox, +cfg, note}:
+      do IO<Hub>:
+        +ask : String = B.Hub.id("q", now, B.Hub.seq(st))
+        +r2 : Chan(String) <- Chan.new(String, 1)
+        Park.put(Cfg.pk(cfg), PK.PPark{ask, "", r2})
+        IO.spawn(Unit, Tk.wait(r2, inbox, bot, rid, reply))
+        +key : String = TKS.Run.alert_key(run, n)
+        +fresh : Bool = TE.Pause.alerts(Cfg.tch(cfg), run, n)
+        cl2 : List<&2, Client> <- Tk.alert(fresh, cl, st, cfg, inbox, thread, TE.Pause.title(bot), question, key, TE.Pause.shot_url(bot, run, n), now)
+        Hub.step(Hub{st, f, ls, cl2, as, inbox, Cfg.with_tch(cfg, TE.Teach.alert_mark(Cfg.tch(cfg), key)), note},
+          B.Step{[M.AskOpened{ask, thread, "browser", "task_pause", TE.Pause.detail(bot, run, slug, n, kind, question, risky), TE.Pause.options(risky), now}], Nil{}})
+
+# task_end: the end line, the picture list, the oldest runs pruned, the final Act
+def Tk.end.sh() -> String:
+  "cd \"$2\" 2>/dev/null && { ls -1t | tail -n +21 | while IFS= read -r d; do rm -rf -- \"$d\"; done; }; cd \"$1\" 2>/dev/null || exit 0; if [ -f log.jsonl ]; then wc -l < log.jsonl | tr -d ' '; else echo 0; fi; ls -1 | grep -E '[.]jpg$'; true"
+
+def Tk.end.url.put(ok: Bool, url: String, rest: List<&2, String>) -> List<&2, String>:
+  match ok:
+    case True{}:
+      url <> rest
+    case False{}:
+      rest
+
+def Tk.end.urls(ns: List<&2, String>, +bot: String, +run: String) -> List<&2, String>:
+  match ns:
+    case Nil{}:
+      Nil{}
+    case +f <> t:
+      Tk.end.url.put(TE.Teach.file.ok(f), "/bots/" ++ bot ++ "/tasks/shot?run=" ++ run ++ "&f=" ++ f, Tk.end.urls(t, bot, run))
+
+def Tk.end.done(r: P.Ran, +inbox: Chan(Msg), +thread: String, +bot: String, +run: String, +status: String, +summary: String, +rid: String, +reply: Chan(String), +now: Nat) -> IO(Unit):
+  match r:
+    case P.Ran{_, +out}:
+      do IO<Unit>:
+        +lines : List<&2, String> = String.lines(String.trim(out))
+        +n : Nat = Maybe.default(&2, Nat, Nat.read(Maybe.default(&2, String, List.head(&2, String, lines), "0")), 0n)
+        ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, Commit{[M.ActivityLogged{thread, "task:" ++ run ++ ".end", "task", "task",
+          TE.Teach.act.text(TE.Teach.run.slug(run), run, status, n, summary, Tk.end.urls(List.drop(&2, String, lines, 1n), bot, run)), now}]})
+        Tk.say(reply, rid, True{}, "run ended")
+
+def Tk.end.job(+inbox: Chan(Msg), +home: String, +thread: String, +bot: String, +run: String, +status: String, +summary: String, +rid: String, +reply: Chan(String), +now: Nat) -> IO(Unit):
+  do IO<Unit>:
+    Tk.append(Tk.rundir(home, bot, run) ++ "/log.jsonl", J.Json.show(J.Json.obj([J.KV{"end", J.Flag{True{}}}, J.KV{"status", J.Str{status}}, J.KV{"summary", J.Str{String.take(summary, 500n)}}, J.KV{"at", J.Json.nat(now)}])))
+    r : P.Ran <- P.Proc.run("sh", ["-c", Tk.end.sh(), "sh", Tk.rundir(home, bot, run), home ++ "/bots/" ++ bot ++ "/tasks/" ++ TE.Teach.run.slug(run) ++ "/runs"], "/")
+    Tk.end.done(r, inbox, thread, bot, run, status, summary, rid, reply, now)
+
+def Hub.task.end.k(ok: Bool, h: Hub, +thread: String, +a: J.Json, +rid: String, +reply: Chan(String), +now: Nat) -> IO(Hub):
+  match ok h:
+    case True{} Hub{+st, f, ls, cl, as, +inbox, +cfg, note}:
+      do IO<Hub>:
+        IO.spawn(Unit, Tk.end.job(inbox, Cfg.home(cfg), thread, Bot.page(st, thread), J.Json.get_str(a, "run", ""), J.Json.get_str(a, "status", "ok"), J.Json.get_str(a, "summary", ""), rid, reply, now))
+        return Hub{st, f, ls, cl, as, inbox, cfg, note}
+    case False{} _:
+      do IO<Hub>:
+        IO.spawn(Unit, Tk.say(reply, rid, False{}, "no such run"))
+        return h
+
+def Hub.task.end(h: Hub, +thread: String, +a: J.Json, +rid: String, +reply: Chan(String), +now: Nat) -> IO(Hub):
+  Hub.task.end.k(TE.Teach.run.ok(J.Json.get_str(a, "run", "")), h, thread, a, rid, reply, now)
+
+def Hub.task.k(i: Nat, h: Hub, +thread: String, +o: J.Json, +reply: Chan(String), +now: Nat) -> IO(Hub):
+  match i:
+    case 0n:
+      Hub.task.run(h, thread, Gg.args(o), J.Json.show(J.Json.get_obj(o, "id")), reply, now)
+    case 1n:
+      Hub.task.step(h, thread, Gg.args(o), J.Json.show(J.Json.get_obj(o, "id")), reply, now)
+    case 2n:
+      Hub.task.pause(h, thread, Gg.args(o), J.Json.show(J.Json.get_obj(o, "id")), reply, now)
+    case _:
+      Hub.task.end(h, thread, Gg.args(o), J.Json.show(J.Json.get_obj(o, "id")), reply, now)
+
+def Hub.task(bot: Bool, h: Hub, +thread: String, +o: J.Json, +reply: Chan(String), +now: Nat) -> IO(Hub):
+  match bot:
+    case True{}:
+      Hub.task.k(C.Codec.pos(TE.Teach.io_names(), Gg.tool(o)), h, thread, o, reply, now)
+    case False{}:
+      do IO<Hub>:
+        Gg.say(reply, J.Json.get_obj(o, "id"), False{}, "only bots have this tool")
+        return h
+
+def Hub.mcp.tk(tk: Bool, h: Hub, +thread: String, +o: J.Json, body: String, +reply: Chan(String), +now: Nat) -> IO(Hub):
+  match tk h:
+    case True{} Hub{+st, f, ls, cl, as, inbox, cfg, note}:
+      Hub.task(BO.World.is_bot_thread(M.State.bots(st), thread), Hub{st, f, ls, cl, as, inbox, cfg, note}, thread, o, reply, now)
+    case False{} _:
+      Hub.mcp.w(MC.Wait.secs(o), h, thread, o, body, reply, now)
+
 def Hub.mcp.np(np: Bool, h: Hub, +thread: String, +o: J.Json, body: String, +reply: Chan(String), +now: Nat) -> IO(Hub):
   match np h:
     case True{} Hub{+st, f, ls, cl, as, inbox, cfg, note}:
       Hub.newproj(BO.World.is_bot_thread(M.State.bots(st), thread), Hub{st, f, ls, cl, as, inbox, cfg, note}, thread, o, reply, now)
     case False{} _:
-      Hub.mcp.w(MC.Wait.secs(o), h, thread, o, body, reply, now)
+      Hub.mcp.tk(TE.Teach.tool.is(o), h, thread, o, body, reply, now)
 
 def Hub.mcp.gg(g: Bool, h: Hub, +thread: String, +o: J.Json, body: String, +reply: Chan(String), +now: Nat) -> IO(Hub):
   match g h:
@@ -9594,6 +10273,14 @@ def Msg.kind(m: Msg) -> String:
       "bot_verified"
     case Shot{_}:
       "shot"
+    case TeachReq{_, _, _, _}:
+      "teach_req"
+    case BrowserEv{_}:
+      "browser_ev"
+    case TeachBack{_}:
+      "teach_back"
+    case TaskPaused{_, _, _, _, _, _, _, _, _, _}:
+      "task_paused"
     case NewProject{_, _, _, _, _}:
       "new_project"
     case AttDir{_, _}:
@@ -9934,6 +10621,14 @@ def Hub.handle(h: Hub, m: Msg, +now: Nat) -> IO(Hub):
       Hub.newproj.made(h, root, name, id, reply, now)
     case Shot{text}:
       Hub.broadcast(h, text)
+    case TeachReq{client, id, m, p}:
+      Hub.teach(h, client, id, m, p, now)
+    case BrowserEv{line}:
+      Hub.browser_ev(h, line)
+    case TeachBack{bot}:
+      Hub.back(h, bot)
+    case TaskPaused{thread, bot, run, slug, n, kind, question, risky, rid, reply}:
+      Hub.task.paused(h, thread, bot, run, slug, n, kind, question, risky, rid, reply, now)
     case AttDir{thread, reply}:
       Hub.att_dir(h, thread, reply)
     case FarFeed{ls2, epoch}:
@@ -10159,11 +10854,23 @@ def Lock.word(+held: String, +i: Nat) -> String:
 # Browser frames
 # --------------
 
+def Shot.msg.k(frame: Bool, +line: String) -> Msg:
+  match frame:
+    case True{}:
+      Shot{BR.Browser.shot(line)}
+    case False{}:
+      BrowserEv{line}
+
+# a frame goes to every client; a recorder step, navigation or load to the
+# hub's teach state
+def Shot.msg(+line: String) -> Msg:
+  Shot.msg.k(String.eq(J.Json.get_str(Maybe.default(&2, J.Json, J.Json.parse(line), J.Null{}), "event", ""), "frame"), line)
+
 def Shot.fwd.got(m: Maybe<&1, String>, +inbox: Chan(Msg), k: Unit -> IO(Unit)) -> IO(Unit):
   match m:
     case Some{+line}:
       do IO<Unit>:
-        ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, Shot{BR.Browser.shot(line)})
+        ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, Shot.msg(line))
         k(Unit{})
     case None{}:
       IO.pure(Unit, Unit{})

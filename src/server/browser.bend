@@ -264,6 +264,12 @@ def Browser.has_page(m: Maybe<&2, J.Json>) -> Bool:
 def Browser.is_shot(+o: J.Json) -> Bool:
   Bool.and(String.eq(J.Json.get_str(o, "event", ""), "frame"), Browser.has_page(J.Json.get(o, "page")))
 
+# a helper line about an owner's page that the hub hears: its JPEG frame, a
+# step the recorder saw (record), a navigation or a load (docs/teach.md)
+def Browser.is_page_event(+o: J.Json) -> Bool:
+  Bool.and(Browser.has_page(J.Json.get(o, "page")), Bool.or(String.eq(J.Json.get_str(o, "event", ""), "frame"),
+    Bool.or(String.eq(J.Json.get_str(o, "event", ""), "record"), Bool.or(String.eq(J.Json.get_str(o, "event", ""), "navigated"), String.eq(J.Json.get_str(o, "event", ""), "load")))))
+
 # a page-frame event to the event channel, sent off the actor's thread so
 # a slow reader never holds the browser up
 def Browser.event(hit: Bool, +ev: Chan(String), +text: String) -> IO(Unit):
@@ -277,12 +283,12 @@ def Browser.line.k(b: Br, +ev: Chan(String), +text: String, +o: J.Json) -> IO(Br
   match b:
     case Br{m, ps, n, exe, home}:
       do IO<Br>:
-        Browser.event(Browser.is_shot(o), ev, text)
+        Browser.event(Browser.is_page_event(o), ev, text)
         ps2 : List<&2, Pend> <- Browser.deliver(ps, J.Json.as_raw(J.Json.get(o, "id"), ""), text)
         return Br{m, ps2, n, exe, home}
 
 # a line from the helper: a reply (by id), a page's frame event (to the
-# event channel), or another event (ignored here)
+# event channel), a record, navigated or load event of a page (the same), or another event (ignored here)
 def Browser.line(b: Br, +ev: Chan(String), +text: String) -> IO(Br):
   Browser.line.k(b, ev, text, Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{}))
 
