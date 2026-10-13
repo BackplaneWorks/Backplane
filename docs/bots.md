@@ -353,6 +353,10 @@ in every thread have:
 The person edits the board with `board.set {item}` (with an `id` it
 updates) and `board.drop {id}`. The items are settings, local to this
 machine (not synced to others).
+### In the clients
+
+Settings › Rules (after "Notify me for") lists the rules with On/Off, Edit and Delete (the first click asks "Delete?"); Add rule opens the form (text, bot and project chips, tool, word, Enforce). The Board is an entry above Rooms ("Board · N open"): filter chips, an add field, sections Doing, Blocked, To do (and Done, Dropped with the filter "all"); the box ticks an item on, a row opens its notes, links and Blocked, Drop, Delete. The Status tab has a Board section (at most six open items). All four clients draw the same `RulesUi`/`BoardUi` (client.bend) over `ruledata.bend`/`tbdata.bend`; actions are `rule-*` and `tb-*` (`Ui.act.w`). The rule form's fields are `@f.rutext`, `rubot`, `ruproj`, `rutool`, `ruword` (`rtext` is the remote chat's).
+
 ## Mentions in threads
 
 In any thread's composer (web, window, phones) a word that starts with a
