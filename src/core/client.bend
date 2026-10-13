@@ -5905,6 +5905,10 @@ def BoardUi.row.pick(+shut: Bool, +u: Ui, +id: String) -> Ui:
 def BoardUi.row.toggle(+u: Ui, +id: String) -> Ui:
   BoardUi.row.pick(String.eq(Ui.scratch(u, "@tb.row"), id), u, id)
 
+# (a plane row names its item: its detail opens too)
+def BoardUi.open.item(+u: Ui, +id: String) -> Ui:
+  BoardUi.row.open.k(BoardUi.item(u, id), u, id)
+
 # choosing a filter value again turns it off
 def BoardUi.filter(+u: Ui, +key: String, +value: String) -> Ui:
   Ui.scratch_set(u, key, Bool.pick(String, String.eq(Ui.scratch(u, key), value), "", value))
@@ -5954,12 +5958,12 @@ def BoardUi.rowid(+u: Ui, +value: String) -> String:
   Bool.pick(String, String.is_empty(value), Ui.scratch(u, "@tb.row"), value)
 
 def BoardUi.acts() -> List<&2, String>:
-  ["tb-open", "tb-close", "tb-f", "tb-who", "tb-proj", "tb-group", "tb-tick", "tb-status", "tb-row", "tb-del", "tb-add", "tb-notes", "tb-title", "tb-keep"]
+  ["tb-open", "tb-close", "tb-f", "tb-who", "tb-proj", "tb-group", "tb-tick", "tb-status", "tb-row", "tb-del", "tb-add", "tb-notes", "tb-title", "tb-keep", "tb-rename"]
 
 def BoardUi.act.k(+i: Nat, +u: Ui, +value: String) -> Act:
   match i:
     case 0n:
-      Act{BoardUi.open.to(u), Nil{}}
+      Act{BoardUi.open.item(BoardUi.open.to(u), value), Nil{}}
     case 1n:
       Act{BoardUi.close(u), Nil{}}
     case 2n:
@@ -5986,6 +5990,8 @@ def BoardUi.act.k(+i: Nat, +u: Ui, +value: String) -> Act:
       BoardUi.rename(u, BoardUi.rowid(u, value))
     case 13n:
       Act{Ui.scratch_set(u, "@tb.del", ""), Nil{}}
+    case 14n:
+      BoardUi.rename(u, Ui.scratch(u, "@tb.row"))
     case _:
       Act{u, Nil{}}
 

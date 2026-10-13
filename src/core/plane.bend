@@ -387,7 +387,7 @@ def Plane.board.rank(+t: TBA.TbItem, +now: Nat) -> Nat:
 
 def Plane.board.le(a: PB, b: PB) -> Bool:
   match a b:
-    case PB{ra, ta} PB{rb, tb}:
+    case PB{+ra, ta} PB{+rb, tb}:
       Bool.or(Nat.is_lt(ra, rb), Bool.and(Nat.is_eq(ra, rb), TBA.Tb.before(ta, tb)))
 
 def Plane.board.keyed(+xs: List<&2, TBA.TbItem>, +now: Nat) -> List<&2, PB>:

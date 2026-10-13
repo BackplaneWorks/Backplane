@@ -22,6 +22,9 @@ struct RootView: View {
                 .sheet(isPresented: settingsShown) {
                     if let st = model.screen?.settings { SettingsSheet(model: model, settings: st, version: model.screen?.version ?? "") }
                 }
+                .sheet(isPresented: boardShown) {
+                    if let b = model.screen?.board { BoardSheet(model: model, board: b) }
+                }
                 .sheet(isPresented: findShown) {
                     if let f = model.screen?.find { FindSheet(model: model, find: f) }
                 }
@@ -49,6 +52,11 @@ struct RootView: View {
     // split up so Swift type-checks each part in reasonable time
     private var settingsShown: Binding<Bool> {
         Binding(get: { model.screen?.settings != nil }, set: { if !$0, model.screen?.settings != nil { model.act("flag", "settings") } })
+    }
+
+    // the task board (Board.swift): up while the screen carries one
+    private var boardShown: Binding<Bool> {
+        Binding(get: { model.screen?.board != nil }, set: { if !$0, model.screen?.board != nil { model.act("tb-close") } })
     }
 
     // the first-run tour (core/onboard.bend): up while the screen carries a

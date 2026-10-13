@@ -9,6 +9,7 @@ import android.webkit.MimeTypeMap
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -69,6 +70,8 @@ import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.BrokenImage
+import androidx.compose.material.icons.filled.CheckBox
+import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
 import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
@@ -87,6 +90,7 @@ import androidx.compose.material.icons.filled.PanTool
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.QuestionAnswer
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -103,6 +107,9 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -988,6 +995,134 @@ fun SettingsSheet(m: AppModel, st: Settings) {
                     }
                 }
                 HorizontalDivider()
+            }
+            // the last row clears the navigation bar
+            item { Spacer(Modifier.navigationBarsPadding().height(24.dp)) }
+        }
+    }
+}
+
+
+// The task board (src/mobile/screen.bend's Mob.board; client.bend's BoardUi): the
+// field that adds an item, the filters, then the sections under sticky
+// headers. A row's leading icon ticks it on, a tap opens its detail, a swipe
+// marks it Done (from the start) or Drops it (from the end). All of it is
+// the screen's; this only draws it and sends each action back.
+private fun boardIcon(s: String) = when (s) {
+    "doing" -> Icons.Filled.PlayArrow
+    "done" -> Icons.Filled.CheckBox
+    "blocked" -> Icons.Filled.Error
+    "dropped" -> Icons.Filled.Remove
+    else -> Icons.Filled.CheckBoxOutlineBlank
+}
+
+private fun boardTint(s: String) = when (s) {
+    "doing" -> PhaseColor.accent
+    "done" -> PhaseColor.ok
+    "blocked" -> PhaseColor.warn
+    else -> PhaseColor.faint
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun BoardButtons(m: AppModel, bs: List<SetButton>) {
+    if (bs.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        for (b in bs) {
+            if (b.on) Button(onClick = { m.act(b.action, b.value) }, shape = corner) { Text(b.label) }
+            else OutlinedButton(onClick = { m.act(b.action, b.value) }, shape = corner) { Text(b.label) }
+        }
+    }
+}
+
+@Composable
+private fun BoardRowView(m: AppModel, r: BoardRow) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(verticalAlignment = Alignment.Top) {
+            IconButton(onClick = { m.act("tb-tick", r.id) }) { Icon(boardIcon(r.status), "Move ${r.title} on", tint = boardTint(r.status)) }
+            Column(Modifier.weight(1f).clickable { m.act("tb-row", r.id) }.padding(vertical = 8.dp)) {
+                Text(r.title, maxLines = if (r.open) Int.MAX_VALUE else 2, overflow = TextOverflow.Ellipsis,
+                    color = if (r.status == "done" || r.status == "dropped") MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.onSurface)
+                if (r.sub.isNotEmpty()) Text(r.sub, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    color = if (r.overdue) PhaseColor.bad else if (r.soon) PhaseColor.warn else MaterialTheme.colorScheme.outline)
+            }
+        }
+        if (r.open) Column(Modifier.fillMaxWidth().padding(start = 48.dp, end = 8.dp, bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            for (f in r.fields) {
+                var t by remember(r.id, f.name) { mutableStateOf(f.value) }
+                OutlinedTextField(t, { t = it; m.field(f.name, it) }, Modifier.fillMaxWidth(), label = { Text(f.hint) },
+                    minLines = if (f.name == "tbnotes") 3 else 1, maxLines = if (f.name == "tbnotes") 6 else 2)
+            }
+            BoardButtons(m, r.save)
+            for (l in r.links) Text(l.label, Modifier.clickable { m.act(l.action, l.value) }, color = PhaseColor.accent,
+                style = MaterialTheme.typography.bodySmall)
+            BoardButtons(m, r.buttons)
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun BoardSwipe(m: AppModel, r: BoardRow) {
+    val state = rememberSwipeToDismissBoxState(confirmValueChange = {
+        when (it) {
+            SwipeToDismissBoxValue.StartToEnd -> m.act("tb-status", r.id + "\t" + "done")
+            SwipeToDismissBoxValue.EndToStart -> m.act("tb-status", r.id + "\t" + "dropped")
+            SwipeToDismissBoxValue.Settled -> {}
+        }
+        false
+    })
+    SwipeToDismissBox(state, backgroundContent = {
+        val start = state.dismissDirection == SwipeToDismissBoxValue.StartToEnd
+        Box(Modifier.fillMaxSize().background(if (start) PhaseColor.ok else MaterialTheme.colorScheme.outline).padding(horizontal = 24.dp),
+            contentAlignment = if (start) Alignment.CenterStart else Alignment.CenterEnd) {
+            Text(if (start) "Done" else "Drop", style = MaterialTheme.typography.labelLarge)
+        }
+    }) {
+        Surface { BoardRowView(m, r) }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
+@Composable
+fun BoardScreen(m: AppModel, b: BoardModel) {
+    var text by remember { mutableStateOf(b.add.value) }
+    val add = {
+        if (text.isNotBlank()) { m.field(b.add.name, text); m.act(b.addAction); text = "" }
+    }
+    Sheet("${b.title} · ${b.open} open", { m.act(b.closeAction) }, closeLabel = "Done") { pad ->
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = pad) {
+            item(key = "add") {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(text, { text = it; m.field(b.add.name, it) }, Modifier.weight(1f), singleLine = true, label = { Text(b.add.hint) },
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done), keyboardActions = KeyboardActions(onDone = { add() }))
+                    Button(onClick = { add() }, enabled = text.isNotBlank(), shape = corner) { Text("Add") }
+                }
+            }
+            item(key = "filters") {
+                FlowRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    for (f in b.filters) {
+                        if (f.on) Button(onClick = { m.act(f.action, f.value) }, shape = corner) { Text(f.label) }
+                        else OutlinedButton(onClick = { m.act(f.action, f.value) }, shape = corner) { Text(f.label) }
+                    }
+                }
+            }
+            for (s in b.sections) {
+                stickyHeader(key = "h:" + s.title) {
+                    Surface(Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.surfaceVariant) {
+                        Row(Modifier.padding(horizontal = 16.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(s.title.uppercase(), style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold), color = MaterialTheme.colorScheme.outline)
+                            Text("${s.count}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                        }
+                    }
+                }
+                items(s.rows, key = { "b:" + it.id }) { r ->
+                    BoardSwipe(m, r)
+                    HorizontalDivider()
+                }
+            }
+            if (b.sections.isEmpty()) item(key = "none") {
+                Text(b.empty, Modifier.padding(16.dp), style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.outline)
             }
             // the last row clears the navigation bar
             item { Spacer(Modifier.navigationBarsPadding().height(24.dp)) }

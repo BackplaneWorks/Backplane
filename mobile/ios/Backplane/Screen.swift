@@ -748,6 +748,9 @@ struct Screen: Decodable {
     let search: Search?
     let folders: Folders?
     let settings: Settings?
+    // the task board while it is open (Board.swift), and its entry's words in the bots list
+    let board: BoardModel?
+    let boardRow: String?
     let find: Find?
     let island: IslandAttributes.ContentState
     // each paired hub's own island, for its Live Activity (hubs.bend's
@@ -839,7 +842,7 @@ extension Screen {
     private enum K: String, CodingKey {
         case online, version, error, note, sel, empty, hub, hubs, found, projects, view, making, active, older, settled,
              rowMenu, bots, rooms, uber, plane, newBot, newRoom, bot, deleting, removing, renaming, tour, search,
-             folders, settings, find, island, islands, thread, theme
+             folders, settings, board, boardRow, find, island, islands, thread, theme
     }
 
     init(from decoder: Decoder) throws {
@@ -874,6 +877,8 @@ extension Screen {
         search = c.lossy(.search)
         folders = c.lossy(.folders)
         settings = c.lossy(.settings)
+        board = c.lossy(.board)
+        boardRow = c.lossy(.boardRow)
         find = c.lossy(.find)
         island = c.lossy(.island) ?? IslandAttributes.ContentState(running: 0, headline: "", lines: [])
         islands = c.lossy(.islands).map { (l: [Lossy<HubIsland>]) in l.compactMap(\.value) }

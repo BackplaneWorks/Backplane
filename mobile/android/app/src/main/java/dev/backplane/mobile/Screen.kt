@@ -145,6 +145,21 @@ data class SetRow(val label: String, val note: String, val buttons: List<SetButt
                   val qr: List<String> = emptyList(), val qrnote: String = "")
 data class Settings(val rows: List<SetRow>)
 
+// The task board (src/mobile/screen.bend's Mob.board): sections of rows, the
+// filters as buttons, the field that adds an item. An open row has its
+// fields (title, notes), their buttons (save) and its own (Blocked, Drop, Delete).
+data class BoardLink(val label: String, val action: String, val value: String)
+data class BoardRow(
+    val id: String, val title: String, val sub: String, val status: String, val soon: Boolean, val overdue: Boolean,
+    val open: Boolean, val notes: String, val links: List<BoardLink>, val buttons: List<SetButton>,
+    val fields: List<SetField>, val save: List<SetButton>,
+)
+data class BoardSection(val title: String, val count: Int, val rows: List<BoardRow>)
+data class BoardModel(
+    val title: String, val open: Int, val filters: List<SetButton>, val sections: List<BoardSection>, val empty: String,
+    val add: SetField, val addAction: String, val closeAction: String,
+)
+
 // thread search ("search") or the file picker ("files"): its query and rows
 data class Find(val mode: String, val query: String, val rows: List<FolderRow>)
 
@@ -390,6 +405,8 @@ data class Screen(
     val making: Boolean = false,
     // the uberbot's card and the status plane (Plane.kt); none without an uberbot
     val uber: UberCard? = null, val plane: PlaneModel? = null,
+    // the task board while it is open, and its entry's words in the bots list
+    val board: BoardModel? = null, val boardRow: String = "",
 )
 
 data class Cmd(
@@ -612,6 +629,23 @@ private fun botView(o: JSONObject) = BotView(
     o.optString("title", o.optString("name")),
 )
 
+private fun setButtons(a: JSONArray?) = a.map { SetButton(it.optString("label"), it.optString("action"), it.optString("value"), it.optBoolean("on")) }
+
+private fun setFields(a: JSONArray?) = a.map { SetField(it.optString("name"), it.optString("hint"), it.optBoolean("secret"), it.optString("value")) }
+
+private fun parseBoard(o: JSONObject) = BoardModel(
+    o.optString("title", "Board"), o.optInt("open"), setButtons(o.optJSONArray("filters")),
+    o.optJSONArray("sections").map { s ->
+        BoardSection(s.optString("title"), s.optInt("count"), s.optJSONArray("rows").map { r ->
+            BoardRow(r.optString("id"), r.optString("title"), r.optString("sub"), r.optString("status"), r.optBoolean("soon"), r.optBoolean("overdue"),
+                r.optBoolean("open"), r.optString("notes"), r.optJSONArray("links").map { BoardLink(it.optString("label"), it.optString("action"), it.optString("value")) },
+                setButtons(r.optJSONArray("buttons")), setFields(r.optJSONArray("fields")), setButtons(r.optJSONArray("save")))
+        })
+    },
+    o.optString("empty"), o.optJSONObject("add")?.let { SetField(it.optString("name"), it.optString("hint"), false, it.optString("value")) } ?: SetField("tbtitle", "Add an item", false, ""),
+    o.optString("addAction", "tb-add"), o.optString("closeAction", "tb-close"),
+)
+
 fun parseScreen(o: JSONObject) = Screen(
     o.optBoolean("online"), o.optString("version"), o.optString("error"), o.optString("note"),
     o.optString("sel"), o.optString("empty"),
@@ -668,6 +702,8 @@ fun parseScreen(o: JSONObject) = Screen(
     making = o.optBoolean("making"),
     uber = o.optJSONObject("uber")?.let(::parseUber),
     plane = o.optJSONObject("plane")?.let(::parsePlane),
+    board = o.optJSONObject("board")?.let(::parseBoard),
+    boardRow = o.optString("boardRow"),
     active = o.optJSONArray("active").map(::row),
     older = o.optJSONObject("older")?.let { Older(it.optInt("count"), it.optBoolean("open")) },
     settled = o.optJSONObject("settled")?.let { Older(it.optInt("count"), it.optBoolean("open")) },

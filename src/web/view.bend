@@ -27,6 +27,7 @@ import ../core/review.bend as RVW
 import ../core/emb.bend as EM
 import ../core/qr.bend as QR
 import ../core/onboard.bend as OB
+import ../core/links.bend as LKS
 
 # Ui -> Node. Every decision (order, shelf, status) comes from core defs
 # with laws behind them; this file only lays them out.
@@ -822,6 +823,55 @@ def View.notify.rows(rs: List<&2, U.NotifyRow>) -> List<&2, D.Node>:
 def View.notify(st: M.State) -> List<&2, D.Node>:
   View.setrow(U.Notify.title(), U.Notify.lead(), Nil{}) <> View.notify.rows(U.Notify.rows(st))
 
+# Rules (client.bend's RulesUi): the note, one row a rule (On/Off, Edit,
+# Delete: the first click asks "Delete?"), Add rule, and the form
+def View.rules.btns(r: U.RRow) -> List<&2, D.Node>:
+  match r:
+    case U.RRow{+id, _, _, +on, +armed}:
+      List.concat(&2, D.Node, [[D.Dom.button(Bool.pick(String, on, "on", ""), "rule-on", id, "Turn the rule on or off", Bool.pick(String, on, "On", "Off")),
+        D.Dom.button("", "rule-edit", id, "Change the rule", "Edit")],
+        Bool.pick(List<&2, D.Node>, armed, [D.Dom.button("", "rule-keep", "", "Keep the rule", "Keep")], Nil{}),
+        [D.Dom.button(Bool.pick(String, armed, "danger", ""), "rule-del", id, "Delete the rule", Bool.pick(String, armed, "Delete?", "Delete"))]])
+
+def View.rules.row(r: U.RRow) -> D.Node:
+  match r:
+    case U.RRow{_, +title, +note, _, _}:
+      View.setrow(title, note, View.rules.btns(r))
+
+def View.rules.rows(rs: List<&2, U.RRow>) -> List<&2, D.Node>:
+  match rs:
+    case Nil{}:
+      Nil{}
+    case r <> t:
+      View.rules.row(r) <> View.rules.rows(t)
+
+def View.rules.chips(cs: List<&2, U.RChip>, +act: String) -> List<&2, D.Node>:
+  match cs:
+    case Nil{}:
+      Nil{}
+    case U.RChip{+l, +v, +on} <> t:
+      D.Dom.button(Bool.pick(String, on, "on", ""), act, v, l, l) <> View.rules.chips(t, act)
+
+def View.rules.form(open: Bool, +u: U.Ui) -> List<&2, D.Node>:
+  match open:
+    case True{}:
+      [View.setrow(Bool.pick(String, String.is_empty(U.RulesUi.edit(u)), "New rule", "Edit rule"), U.RulesUi.err(u),
+          [WB.WB.input("rule-text", "rutext", U.Ui.scratch(u, "@f.rutext"), "What every agent should always (or never) do", "rule-save")]),
+        View.setrow("Bot", "", View.rules.chips(U.RulesUi.chips.bot(u), "rule-bot")),
+        View.setrow("Project", "", View.rules.chips(U.RulesUi.chips.proj(u), "rule-proj")),
+        View.setrow("Tool and word", "", [WB.WB.input("rule-tool", "rutool", U.Ui.scratch(u, "@f.rutool"), "Tool, e.g. bot_send", "rule-save"),
+          WB.WB.input("rule-word", "ruword", U.Ui.scratch(u, "@f.ruword"), "Word that lets it through", "rule-save"),
+          D.Dom.button(Bool.pick(String, U.RulesUi.enf(u), "on", ""), "rule-enf", "", "Refuse the tool unless the word is in your latest message", "Enforce"),
+          D.Dom.button("primary", "rule-save", "", "Keep the rule", "Save"), D.Dom.button("", "rule-cancel", "", "Close the form", "Cancel")])]
+    case False{}:
+      [View.setrow("", "", [D.Dom.button("", "rule-new", "", "Make a rule", "Add rule")])]
+
+def View.rules.none(rs: List<&2, U.RRow>) -> List<&2, D.Node>:
+  Bool.pick(List<&2, D.Node>, List.is_empty(&2, U.RRow, rs), [View.setrow(U.RulesUi.none(), "", Nil{})], Nil{})
+
+def View.rules(+u: U.Ui) -> List<&2, D.Node>:
+  View.setrow(U.RulesUi.title(), U.RulesUi.lead(), Nil{}) <> List.concat(&2, D.Node, [View.rules.none(U.RulesUi.rows(u)), View.rules.rows(U.RulesUi.rows(u)), View.rules.form(U.RulesUi.open(u), u)])
+
 def View.settings(+u: U.Ui, +st: M.State, +nf: Map<&2, String>, +v: String, +note: String) -> D.Node:
   +prov = M.Setting.get(st, "agent.provider", "claude")
   +ipc = M.Setting.get(st, "kicad.ipc", "on")
@@ -833,6 +883,7 @@ def View.settings(+u: U.Ui, +st: M.State, +nf: Map<&2, String>, +v: String, +not
         View.chips(["", "queue", "steer"], M.Setting.get(st, "followup", ""), "followup")),
       View.setrow("Continue after a restart", "Turns a restart cuts short go on by themselves.", View.chips(["on", "off"], Bool.pick(String, M.Carry.on(st), "on", "off"), "restart.continue"))],
       View.notify(st),
+      View.rules(u),
       [View.setrow("Provider for new threads", Bool.pick(String, String.is_empty(U.Models.cli(U.Str.get(nf, "models"), prov)), prov ++ " is not installed", U.Models.cli(U.Str.get(nf, "models"), prov)) ++ ". Each thread keeps its own; change it from the composer.", View.chips(["claude", "codex", "grok", "muse", "antigravity"], prov, "agent.provider")),
       View.setrow("Model for new threads", Bool.pick(String, String.is_empty(M.Setting.get(st, "agent.model", "")), "default", M.Setting.get(st, "agent.model", "")) ++ ": " ++ U.Models.label_of(U.Str.get(nf, "models"), prov, M.Setting.get(st, "agent.model", "")), View.chips(U.Models.menu(U.Str.get(nf, "models"), prov), M.Setting.get(st, "agent.model", ""), "agent.model")),
       View.setrow("Writing: provider", "Titles threads, names branches and writes commit messages. A small model keeps this cheap.", View.chips(["claude", "codex", "grok", "muse"], U.TextGen.provider(st), "text.provider")),
@@ -1399,6 +1450,95 @@ def View.main.b(settings: Bool, bv: BI.View, +u: U.Ui, +sel: String, +n: Nat) ->
       WB.WB.remote(u, id)
     case _ _:
       View.main.k(String.is_empty(sel), u, sel, n)
+
+# The Board (client.bend's BoardUi): the filters as chips, a field that adds
+# an item, the sections; a row's box ticks it on, the row opens its detail
+def View.tb.glyph(+s: String) -> String:
+  Bool.pick(String, String.eq(s, "doing"), "◐", Bool.pick(String, String.eq(s, "done"), "✓", Bool.pick(String, String.eq(s, "blocked"), "!", Bool.pick(String, String.eq(s, "dropped"), "–", ""))))
+
+def View.tb.chips(cs: List<&2, U.BChip>) -> List<&2, D.Node>:
+  match cs:
+    case Nil{}:
+      Nil{}
+    case U.BChip{+l, +a, +v, +on} <> t:
+      D.Dom.button(Bool.pick(String, on, "on", ""), a, v, l, l) <> View.tb.chips(t)
+
+def View.tb.link(+l: String) -> D.Node:
+  Bool.pick(D.Node, LKS.Link.is_web(l), D.El{"a", "", [D.At{"class", "tb-link"}, D.At{"href", l}, D.At{"target", "_blank"}, D.At{"rel", "noopener noreferrer"}], [D.Txt{l}]},
+    D.Dom.button("tb-link", "file-open", l, "Open the file", l))
+
+def View.tb.links(ls: List<&2, String>) -> List<&2, D.Node>:
+  match ls:
+    case Nil{}:
+      Nil{}
+    case l <> t:
+      View.tb.link(l) <> View.tb.links(t)
+
+def View.tb.btns(+id: String, +status: String, +armed: Bool) -> List<&2, D.Node>:
+  [D.Dom.button("", "tb-status", id ++ "\u{9}" ++ Bool.pick(String, String.eq(status, "blocked"), "todo", "blocked"), "Blocked on something", Bool.pick(String, String.eq(status, "blocked"), "Unblock", "Blocked")),
+   D.Dom.button("", "tb-status", id ++ "\u{9}" ++ Bool.pick(String, String.eq(status, "dropped"), "todo", "dropped"), "Not doing it", Bool.pick(String, String.eq(status, "dropped"), "Reopen", "Drop")),
+   D.Dom.button(Bool.pick(String, armed, "danger", ""), "tb-del", id, "Delete the item", Bool.pick(String, armed, "Delete?", "Delete"))]
+
+def View.tb.detail(+id: String, +status: String, +armed: Bool, +links: List<&2, String>, +u: U.Ui) -> D.Node:
+  D.El{"div", "", [D.At{"class", "tb-detail"}], List.concat(&2, D.Node, [
+    [WB.WB.div("tb-edit", [WB.WB.input("tb-edit", "tbedit", U.Ui.scratch(u, "@f.tbedit"), "Title", "tb-rename"), D.Dom.button("", "tb-title", id, "Rename the item", "Rename")]),
+     WB.WB.area("tb-notes", "tbnotes", U.Ui.scratch(u, "@f.tbnotes"), "Notes"),
+     WB.WB.btns([D.Dom.button("", "tb-notes", id, "Keep the notes", "Save notes")])],
+    Bool.pick(List<&2, D.Node>, List.is_empty(&2, String, links), Nil{}, [WB.WB.div("tb-links", View.tb.links(links))]),
+    [WB.WB.btns(View.tb.btns(id, status, armed))]])}
+
+def View.tb.open.if(open: Bool, +id: String, +status: String, +armed: Bool, +links: List<&2, String>, +u: U.Ui) -> List<&2, D.Node>:
+  match open:
+    case True{}:
+      [View.tb.detail(id, status, armed, links, u)]
+    case False{}:
+      Nil{}
+
+def View.tb.row(r: U.BRow, +u: U.Ui) -> D.Node:
+  match r:
+    case U.BRow{+id, +title, +sub, +status, +soon, +over, +open, _, +links, +armed}:
+      D.El{"div", "tb:" ++ id, [D.At{"class", "tb-row " ++ status ++ Bool.pick(String, open, " open", "")}], List.append(&2, D.Node,
+        [D.El{"div", "", [D.At{"class", "tb-line"}], [
+          D.Dom.button("tb-box " ++ status, "tb-tick", id, "Move it on: to do, doing, done", View.tb.glyph(status)),
+          D.El{"div", "", [D.At{"class", "tb-main"}, D.At{"data-value", id}, D.On{"click", "tb-row"}], [
+            D.Dom.span("tb-title", title), D.Dom.span(Bool.pick(String, over, "tb-sub overdue", Bool.pick(String, soon, "tb-sub soon", "tb-sub")), sub)]}]}],
+        View.tb.open.if(open, id, status, armed, links, u))}
+
+def View.tb.rows(rs: List<&2, U.BRow>, +u: U.Ui) -> List<&2, D.Node>:
+  match rs:
+    case Nil{}:
+      Nil{}
+    case r <> t:
+      View.tb.row(r, u) <> View.tb.rows(t, u)
+
+def View.tb.secs(ss: List<&2, U.BSec>, +u: U.Ui) -> List<&2, D.Node>:
+  match ss:
+    case Nil{}:
+      Nil{}
+    case U.BSec{+title, +n, rs} <> t:
+      WB.WB.div("tb-sec", D.Dom.span("plane-label", title ++ " " ++ Nat.show(n)) <> View.tb.rows(rs, u)) <> View.tb.secs(t, u)
+
+def View.tb.body(+u: U.Ui) -> D.Node:
+  +ss = U.BoardUi.sections(u)
+  D.El{"div", "", [D.At{"class", "board"}], List.concat(&2, D.Node, [
+    [WB.WB.div("tb-add", [WB.WB.input("tb-add", "tbtitle", U.Ui.scratch(u, "@f.tbtitle"), U.BoardUi.hint(), "tb-add"), D.Dom.button("primary", "tb-add", "", "Add the item", "Add")]),
+     WB.WB.div("chips-row", View.tb.chips(U.BoardUi.chips(u)))],
+    View.tb.secs(ss, u),
+    D.Dom.when(List.is_empty(&2, U.BSec, ss), WB.WB.note(U.BoardUi.empty()))])}
+
+def View.board(+u: U.Ui) -> D.Node:
+  D.El{"main", "board", [D.At{"class", "board-view"}], [
+    D.El{"header", "", [D.At{"class", "thread-head"}], [D.Dom.button("back", "tb-close", "", "Back", "‹"), D.Dom.span("title", U.BoardUi.title()),
+      D.Dom.span("meta", Nat.show(U.BoardUi.count(u)) ++ " open"), D.Dom.button("", "tb-close", "", "Close the board", "Close")]},
+    View.tb.body(u)]}
+
+# the board, else settings, a bot, a room or a bot elsewhere, else the thread
+def View.main.w(board: Bool, settings: Bool, bv: BI.View, +u: U.Ui, +sel: String, +n: Nat) -> D.Node:
+  match board settings:
+    case True{} False{}:
+      View.board(u)
+    case _ _:
+      View.main.b(settings, bv, u, sel, n)
 
 # the thread's own browser page (a bot's is the bot's), as a bot's
 # Browser tab shows it
@@ -1995,10 +2135,10 @@ def View.tour.cls(+u: U.Ui) -> String:
 def View.page.b(+bv: BI.View, u: U.Ui) -> D.Node:
   match u:
     case U.Ui{+st, +sel, +d, +l, +o, +on, +now, +ad, +pa, +v, +r, +w, +e, +note, +nf, +ob, +tr}:
-      D.El{"div", "app", [D.At{"class", Bool.pick(String, pa, "app panel", "app") ++ Bool.pick(String, Bool.or(Bool.or(Bool.not(String.is_empty(sel)), U.Flag.get(o, "settings")), WB.WB.shown(bv)), " picked", "")
+      D.El{"div", "app", [D.At{"class", Bool.pick(String, pa, "app panel", "app") ++ Bool.pick(String, Bool.or(Bool.or(Bool.or(Bool.not(String.is_empty(sel)), U.Flag.get(o, "settings")), WB.WB.shown(bv)), String.eq(U.Str.get(d, "@board"), "1")), " picked", "")
         ++ Bool.pick(String, String.eq(M.Setting.get(st, "ui.theme", ""), "light"), " light", "") ++ View.tour.cls(U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr})}],
         D.Dom.cat([View.sidebar(U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}),
-          View.main.b(U.Flag.get(o, "settings"), bv, U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}, sel, List.length(&2, M.Project, U.Ui.projects(st)))],
+          View.main.w(String.eq(U.Str.get(d, "@board"), "1"), U.Flag.get(o, "settings"), bv, U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}, sel, List.length(&2, M.Project, U.Ui.projects(st)))],
           D.Dom.cat(View.aside.if(pa, U.Str.get(nf, "view.kind:" ++ sel), U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}),
             D.Dom.cat(View.picker(U.Flag.get(o, "proj"), U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}), D.Dom.cat(View.error(e), View.tour(U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr})))))}
 

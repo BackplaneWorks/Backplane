@@ -145,12 +145,18 @@ def WB.room.form(open: Bool, +u: U.Ui) -> List<&2, D.Node>:
 def WB.shead(+label: String, +act: String, +title: String) -> D.Node:
   D.El{"div", "", [D.At{"class", "project-head bots-head"}], [D.Dom.span("name", label), WI.WIcon.button("icon", act, "", title, "plus", 16, "")]}
 
+# the Board's entry above Rooms: "Board", and how many items are open
+def WB.brow(+u: U.Ui) -> D.Node:
+  D.El{"div", "board-row", [D.At{"class", Bool.pick(String, U.BoardUi.is(u), "board-entry on", "board-entry")}, D.At{"title", "The task board"}, D.On{"click", "tb-open"}],
+    [D.Dom.span("title", U.BoardUi.title()), D.Dom.span("ago", Nat.show(U.BoardUi.count(u)) ++ " open")]}
+
 # the sidebar's bots and rooms (below the projects)
 def WB.side(+u: U.Ui) -> List<&2, D.Node>:
   [D.El{"section", "bots", [D.At{"class", "bots"}], List.concat(&2, D.Node, [
     [WB.shead("Bots", "bot-new", "New bot")],
     WB.bot.form(BI.BU.open(u, "@bnew"), u),
     WB.rows(BI.BU.rows(u)),
+    [WB.brow(u)],
     [WB.shead("Rooms", "room-new", "New room")],
     WB.room.form(BI.BU.open(u, "@rnew"), u),
     WB.rrows(BI.BU.rooms(u))])}]
@@ -546,10 +552,10 @@ def WB.uber(+u: U.Ui) -> List<&2, D.Node>:
 
 # the dot of a row: thread states and bot moods alike
 def WB.pdot(+s: String) -> String:
-  Bool.pick(String, Bool.or(String.eq(s, "approval"), String.eq(s, "wait")), "dot approval",
+  Bool.pick(String, Bool.or(Bool.or(String.eq(s, "approval"), String.eq(s, "wait")), String.eq(s, "blocked")), "dot approval",
     Bool.pick(String, String.eq(s, "question"), "dot input",
       Bool.pick(String, Bool.or(String.eq(s, "failed"), String.eq(s, "error")), "dot failed",
-        Bool.pick(String, Bool.or(String.eq(s, "working"), Bool.or(String.eq(s, "work"), String.eq(s, "talk"))), "dot working",
+        Bool.pick(String, Bool.or(Bool.or(String.eq(s, "working"), String.eq(s, "doing")), Bool.or(String.eq(s, "work"), String.eq(s, "talk"))), "dot working",
           Bool.pick(String, Bool.or(String.eq(s, "queued"), String.eq(s, "think")), "dot queued",
             Bool.pick(String, String.eq(s, "unread"), "dot waiting", "dot"))))))
 
@@ -614,7 +620,7 @@ def WB.pidle.more(+shown: Nat, +n: Nat) -> Nat:
   Bool.pick(Nat, Nat.is_gt(n, shown), Nat.sub(n, shown), 0n)
 
 def WB.pempty(+p: PL.Plane) -> Bool:
-  Bool.and(List.is_empty(&2, PL.PRow, PL.Plane.need(p)), Bool.and(List.is_empty(&2, PL.PRow, PL.Plane.run(p)), List.is_empty(&2, PL.PRow, PL.Plane.idle(p))))
+  Bool.and(List.is_empty(&2, PL.PRow, PL.Plane.need(p)), Bool.and(List.is_empty(&2, PL.PRow, PL.Plane.run(p)), Bool.and(List.is_empty(&2, PL.PRow, PL.Plane.idle(p)), List.is_empty(&2, PL.PRow, PL.Plane.board(p)))))
 
 def WB.plane.k(+p: PL.Plane, +h: PL.PHome, +now: Nat) -> D.Node:
   WB.div("plane", [
@@ -623,6 +629,7 @@ def WB.plane.k(+p: PL.Plane, +h: PL.PHome, +now: Nat) -> D.Node:
       WB.div("plane-main", List.concat(&2, D.Node, [
         WB.psec("Needs you", PL.Plane.need(p), 0n, now),
         WB.psec("Running", PL.Plane.run(p), 0n, now),
+        WB.psec("Board " ++ Nat.show(PL.Plane.board_n(p)), PL.Plane.board(p), WB.pidle.more(List.length(&2, PL.PRow, PL.Plane.board(p)), PL.Plane.board_n(p)), now),
         WB.psec("Idle", PL.Plane.idle(p), WB.pidle.more(List.length(&2, PL.PRow, PL.Plane.idle(p)), PL.Plane.idle_n(p)), now),
         D.Dom.when(WB.pempty(p), WB.note("Nothing active"))])),
       WB.div("plane-side", List.concat(&2, D.Node, [

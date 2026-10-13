@@ -1005,12 +1005,12 @@ def Bv.tb.nl(ls: List<&2, String>) -> U32:
 def Bv.tb.dh(+links: List<&2, String>) -> U32:
   (6 + 34 + 6 + 72 + 6 + 34 + Bv.tb.nl(links) * 22 + 6 + 34 + 8 : U32)
 
-def Bv.tb.link(+k: TbC, l: String, +y: U32) -> L.Out:
+def Bv.tb.link(+k: TbC, +l: String, +y: U32) -> L.Out:
   match k:
     case TbC{+ty, _, +c, +x, +w, _, _, _}:
       L.Out{L.Ty.text(ty, 2n, L.Ty.fit(ty, 2n, l, (w - 52 : U32)), c, (x + 44 : U32), y, 22, T.Th.accent()), [L.Lay.hit((x + 44 : U32), y, (w - 52 : U32), 22, U.BoardUi.link.act(l), l)]}
 
-def Bv.tb.link.if(on: Bool, +k: TbC, l: String, +y: U32) -> L.Out:
+def Bv.tb.link.if(on: Bool, +k: TbC, +l: String, +y: U32) -> L.Out:
   match on:
     case True{}:
       Bv.tb.link(k, l, y)
@@ -1035,7 +1035,7 @@ def Bv.tb.title.out(+k: TbC, +id: String, +y: U32) -> L.Out:
   match k:
     case TbC{+ty, +f, +c, +x, +w, _, _, _}:
       +rw = L.Lay.button.w(ty, "Rename")
-      L.Out.cat(F.Fm.field(ty, f, c, (x + 44 : U32), y, (w - 44 - rw - 14 : U32), "tbedit", "tb-title", "", "Title"),
+      L.Out.cat(F.Fm.field(ty, f, c, (x + 44 : U32), y, (w - 44 - rw - 14 : U32), "tbedit", "tb-rename", "", "Title"),
         F.Fm.button(ty, c, (x + w - 6 - rw : U32), y, "Rename", T.Th.soft(), "tb-title", id))
 
 def Bv.tb.notes.out(+k: TbC, +y: U32) -> L.Out:
@@ -1077,7 +1077,7 @@ def Bv.tb.open.if(open: Bool, r: U.BRow, +k: TbC, +rel: U32) -> L.Out:
     case False{}:
       L.Out.none()
 
-def Bv.tb.row.k(r: U.BRow, +k: TbC, +rel: U32) -> L.Col:
+def Bv.tb.row.k(+r: U.BRow, +k: TbC, +rel: U32) -> L.Col:
   match r:
     case U.BRow{_, _, _, _, _, _, +open, _, +links, _}:
       L.Col{L.Out.cat(Bv.tb.if(TbC.vis(k, rel, Bv.tb.rh()), r, k, rel), Bv.tb.open.if(open, r, k, (rel + Bv.tb.rh() : U32))),
@@ -1156,7 +1156,7 @@ def Bv.tb.col(+u: U.Ui, +k: TbC) -> L.Col:
     L.Lay.col.then(Bv.tb.chips(U.BoardUi.chips(u), k, TbC.x(k), TbC.y(k, 60), 0), +rows =>
       L.Lay.col.then(L.Col{L.Out.none(), (60 + rows * 34 + 10 : U32)}, +r1 =>
         L.Lay.col.cat(Bv.tb.empty.if(List.is_empty(&2, U.BSec, ss), k, TbC.y(k, r1)),
-          Bv.tb.secs(ss, k, Bool.pick(U32, List.is_empty(&2, U.BSec, ss), (r1 + 40 : U32), r1)))))
+          Bv.tb.secs(ss, k, Bool.pick(U32, List.is_empty(&2, U.BSec, ss), (r1 + 40 : U32), r1))))))
 
 def Bv.board.head(+ty: L.Ty, +u: U.Ui, +x0: U32, +x1: U32) -> L.Out:
   L.Out.all([

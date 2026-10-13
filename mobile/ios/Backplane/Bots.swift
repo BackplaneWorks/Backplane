@@ -68,6 +68,17 @@ struct BotsSection: View {
                 }
                 .opacity(b.mood == "away" ? 0.5 : 1)
             }
+            // the task board, beside Rooms: how many items are open
+            if let w = screen.boardRow, !w.isEmpty {
+                Button { model.act("tb-open", screen.hub + "|") } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "checklist").frame(width: 36).foregroundStyle(.secondary)
+                        Text(w).foregroundStyle(.primary)
+                        Spacer()
+                        Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+                    }
+                }
+            }
             ForEach(screen.rooms) { r in
                 Button { model.open(nav: r.nav ?? "", action: "room", value: r.id, title: r.name, kind: "room") } label: {
                     HStack(spacing: 12) {

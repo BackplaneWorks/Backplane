@@ -734,3 +734,40 @@ button.mic.starting, button.mic.stopping { border-color: var(--bad); color: var(
 .rl-form .field { width: min(300px, 100%); padding: 4px 8px; background: var(--bg); border: 1px solid var(--line); color: var(--text); border-radius: 0; }
 .rl-form button.primary { padding: 5px 12px; }
 .rl-form button.primary[disabled] { opacity: .5; cursor: default; }
+
+/* Board (client.bend's BoardUi): the sidebar's entry, the view, its rows */
+.board-entry { display: flex; align-items: center; gap: 6px; padding: 4px 12px; cursor: pointer; }
+.board-entry:hover { background: var(--raise); }
+.board-entry.on { background: var(--raise); box-shadow: inset 2px 0 var(--accent); }
+.board-entry .title { flex: 1; }
+.board-entry .ago { color: var(--faint); font-size: 11px; }
+.board-view { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+.board { overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; max-width: 760px; }
+.tb-add { display: flex; gap: 6px; }
+.tb-add .field { flex: 1; min-width: 0; }
+.tb-sec { display: flex; flex-direction: column; }
+.tb-sec .plane-label { padding-left: 0; }
+.tb-row { border-bottom: 1px solid var(--line); }
+.tb-row.open { background: var(--panel); }
+.tb-line { display: flex; align-items: center; gap: 10px; padding: 6px 0; }
+.tb-box { width: 20px; height: 20px; padding: 0; flex: none; display: flex; align-items: center; justify-content: center; border: 1px solid var(--faint); background: var(--bg); color: var(--faint); font-size: 12px; line-height: 1; }
+.tb-box.doing { border-color: var(--accent); color: var(--accent); }
+.tb-box.done { border-color: var(--ok); color: var(--ok); }
+.tb-box.blocked { border-color: var(--warn); color: var(--warn); }
+.tb-main { flex: 1; min-width: 0; display: flex; flex-direction: column; cursor: pointer; }
+.tb-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tb-row.done .tb-title, .tb-row.dropped .tb-title { color: var(--faint); }
+.tb-sub { color: var(--faint); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tb-sub.soon { color: var(--warn); }
+.tb-sub.overdue { color: var(--bad); }
+.tb-detail { display: flex; flex-direction: column; gap: 6px; padding: 4px 0 10px 30px; }
+.tb-edit { display: flex; gap: 6px; }
+.tb-edit .field { flex: 1; min-width: 0; }
+.tb-links { display: flex; flex-direction: column; gap: 2px; }
+.tb-link { color: var(--accent); background: none; border: 0; padding: 0; text-align: left; text-decoration: none; overflow-wrap: anywhere; cursor: pointer; }
+.tb-detail button.danger { border-color: var(--bad); color: var(--bad); }
+@media (max-width: 760px) {
+  .board { padding: 12px 10px; }
+  .board-entry { padding: 6px 12px; }
+  .tb-detail { padding-left: 0; }
+}

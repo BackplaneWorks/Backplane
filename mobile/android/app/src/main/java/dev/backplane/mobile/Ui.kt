@@ -339,6 +339,7 @@ fun App(m: AppModel) {
         )
     }
     s.settings?.let { SettingsSheet(m, it) }
+    s.board?.let { BoardScreen(m, it) }
     s.find?.let { FindSheet(m, it) }
     // a row's, a project's or (in a thread) a file link's menu
     s.rowMenu?.let { RowMenuSheet(m, it) }

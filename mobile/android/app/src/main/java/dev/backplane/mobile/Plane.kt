@@ -75,6 +75,8 @@ data class PlaneModel(
     val rooms: List<PlaneRow>, val routines: List<PlaneRow>, val idleN: Int, val working: Int,
     val machines: List<PlaneMachine>,
     val home: PlaneHome?,
+    // the task board's open items, doing first, and how many are open
+    val board: List<PlaneRow> = emptyList(), val boardN: Int = 0,
 )
 
 private fun planeRows(a: JSONArray?): List<PlaneRow> =
@@ -98,6 +100,7 @@ fun parsePlane(o: JSONObject) = PlaneModel(
     o.optJSONObject("home")?.let {
         PlaneHome(it.optString("name"), it.optString("line"), it.optString("label"), it.optString("act"), it.optString("value"), it.optBoolean("here"), it.optBoolean("button"))
     },
+    planeRows(o.optJSONArray("board")), o.optInt("boardN"),
 )
 
 // a thread row's dot, from the plane's states
@@ -105,6 +108,8 @@ private fun planeStatus(s: String) = when (s) {
     "question" -> "input"
     "finished" -> "complete"
     "away" -> "idle"
+    "doing" -> "working"
+    "blocked" -> "approval"
     else -> s
 }
 
@@ -194,6 +199,14 @@ private fun LazyListScope.planeSection(m: AppModel, key: String, name: String, r
 fun LazyListScope.planeSections(m: AppModel, p: PlaneModel, full: Boolean, idleOpen: Boolean = true, onIdle: () -> Unit = {}) {
     planeSection(m, "need", "Needs you", p.need)
     planeSection(m, "run", "Running", p.run)
+    if (p.board.isNotEmpty()) {
+        item(key = "pl:board") { PlaneLabel("Board", p.boardN.coerceAtLeast(p.board.size)) }
+        items(p.board, key = { "pl:board:${it.kind}:${it.id}" }) { PlaneItem(m, it) }
+        if (p.boardN > p.board.size) item(key = "pl:board:more") {
+            Text("${p.boardN - p.board.size} more", Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
+        }
+    }
     if (full && p.idleN > 0) {
         item(key = "pl:idle") {
             Row(Modifier.fillMaxWidth().clickable(onClick = onIdle), verticalAlignment = Alignment.CenterVertically) {
@@ -214,7 +227,7 @@ fun LazyListScope.planeSections(m: AppModel, p: PlaneModel, full: Boolean, idleO
     if (full) planeSection(m, "bots", "Bots", p.bots, true)
     planeSection(m, "rooms", "Rooms", p.rooms)
     planeSection(m, "routines", "Routines", p.routines)
-    if (full && p.need.isEmpty() && p.run.isEmpty() && p.idleN == 0 && p.bots.isEmpty() && p.rooms.isEmpty() && p.routines.isEmpty()) {
+    if (full && p.need.isEmpty() && p.run.isEmpty() && p.board.isEmpty() && p.idleN == 0 && p.bots.isEmpty() && p.rooms.isEmpty() && p.routines.isEmpty()) {
         item(key = "pl:none") {
             Text("Nothing active", Modifier.padding(16.dp), style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.outline)
         }

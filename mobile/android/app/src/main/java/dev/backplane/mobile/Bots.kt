@@ -34,6 +34,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
@@ -153,6 +154,14 @@ fun LazyListScope.botsSection(m: AppModel, s: Screen) {
             leadingContent = { BotCat(m, b.cat, 40.dp) },
             modifier = Modifier.alpha(if (b.mood == "away") 0.5f else 1f)
                 .clickable { m.open(b.nav, b.act, b.id, b.name, b.cat, if (b.remote) "remote" else "bot") },
+        )
+    }
+    // the task board, beside Rooms: how many items are open
+    if (s.boardRow.isNotEmpty()) item(key = "board") {
+        ListItem(
+            headlineContent = { Text(s.boardRow, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+            leadingContent = { Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) { Icon(Icons.Filled.Checklist, null) } },
+            modifier = Modifier.clickable { m.act("tb-open", s.hub + "|") },
         )
     }
     items(s.rooms, key = { "r:" + it.id }) { r ->

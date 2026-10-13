@@ -3243,7 +3243,7 @@ def Set.rules.rows(rs: List<&2, U.RRow>, +ty: Ty, +x: U32, +w: U32, +y: U32) -> 
     case r <> t:
       Out.cat(Set.rules.row(r, ty, x, w, y), Set.rules.rows(t, ty, x, w, (y + 44 : U32)))
 
-def Set.rules.lh(rs: List<&2, U.RRow>) -> U32:
+def Set.rules.lh(+rs: List<&2, U.RRow>) -> U32:
   Bool.pick(U32, List.is_empty(&2, U.RRow, rs), 36, (U32.from_nat(List.length(&2, U.RRow, rs)) * 44 : U32))
 
 # the form's height

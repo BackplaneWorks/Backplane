@@ -41,6 +41,9 @@ struct PlaneHome: Decodable {
 struct PlaneModel: Decodable {
     let need, run, idle, bots, rooms, routines: [PlaneRow]
     let idleN, working: Int
+    // the task board's open items, doing first, and how many are open
+    let board: [PlaneRow]?
+    let boardN: Int?
     let machines: [PlaneMachine]
     let home: PlaneHome?
 }
@@ -51,6 +54,8 @@ private func planeStatus(_ s: String) -> String {
     case "question": "input"
     case "finished": "complete"
     case "away": "idle"
+    case "doing": "working"
+    case "blocked": "approval"
     default: s
     }
 }
@@ -246,6 +251,14 @@ struct PlaneSections: View {
     var body: some View {
         if !plane.need.isEmpty { section("Needs you", plane.need) }
         if !plane.run.isEmpty { section("Running", plane.run) }
+        if let b = plane.board, !b.isEmpty {
+            Section {
+                ForEach(b) { PlaneAny(model: model, row: $0) }
+                if let n = plane.boardN, n > b.count { Text("\(n - b.count) more").font(.caption).foregroundStyle(.secondary) }
+            } header: {
+                PlaneLabel(text: "Board", count: plane.boardN ?? b.count)
+            }
+        }
         if full && plane.idleN > 0 {
             Section {
                 if idleOpen { ForEach(plane.idle) { PlaneAny(model: model, row: $0) } }
@@ -265,7 +278,7 @@ struct PlaneSections: View {
         if full && !plane.bots.isEmpty { section("Bots", plane.bots, mood: true) }
         if !plane.rooms.isEmpty { section("Rooms", plane.rooms) }
         if !plane.routines.isEmpty { section("Routines", plane.routines) }
-        if full && plane.need.isEmpty && plane.run.isEmpty && plane.idleN == 0 && plane.bots.isEmpty && plane.rooms.isEmpty && plane.routines.isEmpty {
+        if full && plane.need.isEmpty && plane.run.isEmpty && (plane.board ?? []).isEmpty && plane.idleN == 0 && plane.bots.isEmpty && plane.rooms.isEmpty && plane.routines.isEmpty {
             Section { Text("Nothing active").foregroundStyle(.secondary) }
         }
     }
