@@ -1,0 +1,36 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Rules and Board fixture</title><link rel="stylesheet" href="../../src/web/style.css"><link rel="stylesheet" href="../../src/web/space.css"></head><body><div id="root"></div><script type="module">
+import TRB from './trb_web.bend';
+const q = new URLSearchParams(location.search);
+let ui = TRB.screen(q.get('view') || 'board', q.get('theme') || 'dark');
+const root = document.getElementById('root');
+globalThis.trbRequests = [];
+function cmds(xs) {
+  while (xs && xs.head) {
+    const c = xs.head;
+    if (c.text && String(c.$).endsWith('.Send')) globalThis.trbRequests.push(JSON.parse(c.text));
+    xs = xs.tail;
+  }
+}
+function draw() {
+  root.innerHTML = TRB.body(ui);
+  for (const el of root.querySelectorAll('[data-cat]')) el.src = TRB.cat(el.dataset.cat);
+  if ((q.get('view') || '').startsWith('rules')) {
+    const rules = [...root.querySelectorAll('.set-row')].find(el => el.textContent.startsWith('Rules'));
+    if (rules) rules.scrollIntoView({block: 'start'});
+  }
+}
+function act(a, v) { const r = TRB.act(ui, a, v); ui = r.ui; cmds(r.cmds); draw(); }
+root.addEventListener('click', e => {
+  const el = e.target.closest('[data-on-click]');
+  if (el) { e.preventDefault(); act(el.dataset.onClick, el.dataset.value || ''); }
+});
+root.addEventListener('input', e => {
+  const el = e.target;
+  if (el.dataset.bfield) ui = TRB.act(ui, 'bfield', el.dataset.bfield + '\u001f' + el.value).ui;
+});
+root.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && e.target.dataset.enter) { e.preventDefault(); act(e.target.dataset.enter, ''); }
+});
+draw();
+</script></body></html>
