@@ -12715,3 +12715,13 @@ law hook_secret_default:
 
 law hook_secret_path:
   {WN.Wn.path("/h", "/tmp/s") == "/tmp/s" : String}
+
+# a queued follow-up may already be running; the notice keeps the end word
+law hook_report_keeps_end:
+  {WN.Wn.report("completed", M.Running{}) == "completed" : String}
+
+law hook_report_keeps_fail:
+  {WN.Wn.report("failed", M.Running{}) == "failed" : String}
+
+law hook_report_fallback:
+  {WN.Wn.report("", M.Interrupted{}) == "stopped" : String}

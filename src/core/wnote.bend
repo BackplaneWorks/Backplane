@@ -94,6 +94,21 @@ def Wn.outcome(t: M.TurnState) -> String:
     case M.Idle{}:
       "idle"
 
+def Wn.known(+s: String) -> Bool:
+  Bool.or(Bool.or(String.eq(s, "completed"), String.eq(s, "failed")), String.eq(s, "stopped"))
+
+# the end the hub reported, or the thread's turn when that word is absent
+# (a queued message can start the next turn before the notice is posted)
+def Wn.report.k(known: Bool, +given: String, t: M.TurnState) -> String:
+  match known:
+    case True{}:
+      given
+    case False{}:
+      Wn.outcome(t)
+
+def Wn.report(+given: String, t: M.TurnState) -> String:
+  Wn.report.k(Wn.known(given), given, t)
+
 def Wn.body(+thread: String, +state: String, +title: String, +text: String) -> String:
   J.Json.show(J.Json.obj([
     J.KV{"event", J.Str{"turn.ended"}},

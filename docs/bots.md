@@ -279,8 +279,9 @@ is sent and nothing else changes.
 {"event":"turn.ended","thread":"…","state":"completed","title":"…","text":"…"}
 ```
 
-`state` is the thread's turn as stored: `completed`, `failed`, or `stopped`
-(a stop, an archive or a delete; the codec's `interrupted`). `text` is
+`state` is the word the turn ended with: `completed`, `failed`, or
+`stopped` (a stop, an archive or a delete). A message already waiting does
+not replace it when it starts the next turn. `text` is
 `Failed`, or the first line of the last reply. A POST that fails is logged
 (`backplane: push webhook -> …`) and does not affect the turn.
 

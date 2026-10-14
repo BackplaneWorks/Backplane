@@ -588,8 +588,8 @@ def Push.island.beat(+st: M.State, +now: Nat) -> Bool:
 # missing curl, a refused address or a dead endpoint is logged; the
 # dead-token list is still returned.
 
-def Push.hook.state(+st: M.State, +thread: String) -> String:
-  WN.Wn.outcome(M.Thread.turn(B.Hub.thread(st, thread)))
+def Push.hook.word(+st: M.State, +thread: String, +state: String) -> String:
+  WN.Wn.report(state, M.Thread.turn(B.Hub.thread(st, thread)))
 
 def Push.hook.text(+st: M.State, +thread: String, +state: String) -> String:
   Push.body(String.eq(state, "failed"), Push.first(B.Task.last(st, thread)))
@@ -597,22 +597,22 @@ def Push.hook.text(+st: M.State, +thread: String, +state: String) -> String:
 def Push.hook.note.k(+st: M.State, +thread: String, +state: String) -> String:
   WN.Wn.body(thread, state, Push.title(B.Hub.thread(st, thread)), Push.hook.text(st, thread, state))
 
-def Push.hook.note(+st: M.State, +thread: String) -> String:
-  Push.hook.note.k(st, thread, Push.hook.state(st, thread))
+def Push.hook.note(+st: M.State, +thread: String, +state: String) -> String:
+  Push.hook.note.k(st, thread, Push.hook.word(st, thread, state))
 
 def Push.hook.read(+path: String) -> IO(String):
   do IO<String>:
     bs : List<&2, U32> <- Push.read(path)
     return String.trim(U.Utf8.decode(bs))
 
-def Push.hook.post(+home: String, +st: M.State, +thread: String, +url: String, +secret: String) -> IO(Unit):
+def Push.hook.post(+home: String, +st: M.State, +thread: String, +state: String, +url: String, +secret: String) -> IO(Unit):
   do IO<Unit>:
     +dir : String = home ++ "/tmp"
     mk : Result<&1, &1, U32 & String, Unit> <- H.FS.mkdirs(dir)
     m : Result<&1, &1, U32 & String, Unit> <- H.FS.chmod(dir, 448)
     t : U32 <- H.Clock.epoch()
     +now : Nat = U32.to_nat(t)
-    +body : String = Push.hook.note(st, thread)
+    +body : String = Push.hook.note(st, thread, state)
     +name : String = "hook-" ++ Nat.show(now) ++ "-" ++ WN.Wn.safe(thread)
     +file : String = dir ++ "/" ++ name ++ ".json"
     +out : String = dir ++ "/" ++ name ++ ".out"
@@ -627,18 +627,18 @@ def Push.hook.post(+home: String, +st: M.State, +thread: String, +url: String, +
     IO.print_err("backplane: push webhook -> " ++ code)
     return Unit{}
 
-def Push.hook.act(mode: Nat, +home: String, +st: M.State, +thread: String, +url: String, +secret: String) -> IO(Unit):
+def Push.hook.act(mode: Nat, +home: String, +st: M.State, +thread: String, +state: String, +url: String, +secret: String) -> IO(Unit):
   match mode:
     case 0n:
       IO.print_err("backplane: push webhook: push.webhook.secret could not be read")
     case _:
-      Push.hook.post(home, st, thread, url, secret)
+      Push.hook.post(home, st, thread, state, url, secret)
 
-def Push.hook.send(+home: String, +st: M.State, +thread: String, +url: String) -> IO(Unit):
+def Push.hook.send(+home: String, +st: M.State, +thread: String, +state: String, +url: String) -> IO(Unit):
   do IO<Unit>:
     +set : String = M.Setting.get(st, WN.Wn.secret.key(), "")
     +text : String <- Push.hook.read(WN.Wn.path(home, set))
-    Push.hook.act(WN.Wn.mode(WN.Wn.asked(set), text), home, st, thread, url, text)
+    Push.hook.act(WN.Wn.mode(WN.Wn.asked(set), text), home, st, thread, state, url, text)
 
 def Push.hook.bad() -> IO(Unit):
   IO.print_err("backplane: push webhook: push.webhook.url is not an http address")
@@ -646,31 +646,32 @@ def Push.hook.bad() -> IO(Unit):
 def Push.hook.skip() -> IO(Unit):
   IO.pure(Unit, Unit{})
 
-def Push.hook.go(ok: Bool, +home: String, +st: M.State, +thread: String, +url: String) -> IO(Unit):
+def Push.hook.go(ok: Bool, +home: String, +st: M.State, +thread: String, +state: String, +url: String) -> IO(Unit):
   match ok:
     case True{}:
-      Push.hook.send(home, st, thread, url)
+      Push.hook.send(home, st, thread, state, url)
     case False{}:
       Push.hook.bad()
 
-def Push.hook.k(set: Bool, +home: String, +st: M.State, +thread: String, +url: String) -> IO(Unit):
+def Push.hook.k(set: Bool, +home: String, +st: M.State, +thread: String, +state: String, +url: String) -> IO(Unit):
   match set:
     case False{}:
       Push.hook.skip()
     case True{}:
-      Push.hook.go(WN.Wn.url.ok(url), home, st, thread, url)
+      Push.hook.go(WN.Wn.url.ok(url), home, st, thread, state, url)
 
-def Push.hook(+home: String, +st: M.State, +thread: String) -> IO(Unit):
+# `state` is the turn's end: "completed", "failed" or "stopped"
+def Push.hook(+home: String, +st: M.State, +thread: String, +state: String) -> IO(Unit):
   do IO<Unit>:
     +url : String = String.trim(M.Setting.get(st, WN.Wn.url.key(), ""))
-    Push.hook.k(WN.Wn.on(url), home, st, thread, url)
+    Push.hook.k(WN.Wn.on(url), home, st, thread, state, url)
 
 # the island push for a turn that ended; answers the tokens APNs reported dead.
 # the webhook runs after it and cannot drop the tokens it found
-def Push.turn_ended.dead(+home: String, +st: M.State, +thread: String) -> IO(List<&2, String>):
+def Push.turn_ended.dead(+home: String, +st: M.State, +thread: String, +state: String) -> IO(List<&2, String>):
   do IO<List<&2, String>>:
     dead : List<&2, String> <- Push.start(home, st, thread, M.Setting.get(st, "push.apns.key", ""), M.Setting.get(st, "push.apns.keyid", ""), M.Setting.get(st, "push.apns.team", ""))
-    Push.hook(home, st, thread)
+    Push.hook(home, st, thread, state)
     return dead
 
 # the request that forgets a dead token (for the hub's inbox, as a client
@@ -683,8 +684,8 @@ def Push.turn_ended.done(dead: List<&2, String>) -> IO(Unit):
 
 # without the hub's inbox: dead tokens are found but not dropped (the hub
 # calls Push.turn_ended.dead and posts Push.drop_request for each)
-def Push.turn_ended(+home: String, st: M.State, +thread: String) -> IO(Unit):
-  IO.bind(List<&2, String>, Unit, Push.turn_ended.dead(home, st, thread), Push.turn_ended.done)
+def Push.turn_ended(+home: String, st: M.State, +thread: String, +state: String) -> IO(Unit):
+  IO.bind(List<&2, String>, Unit, Push.turn_ended.dead(home, st, thread, state), Push.turn_ended.done)
 
 # (a far turn's end is an alert only: each hub's Live Activity is its own
 # threads', so this hub never ends or rewrites it for another's)
