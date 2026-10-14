@@ -6,6 +6,7 @@ import ../core/sha1.bend as S
 import ../core/utf8.bend as U
 import ../core/notice.bend as NO
 import ../core/desk.bend as DK
+import ../core/wnote.bend as WN
 import ./host.bend as H
 import ./proc.bend as P
 
@@ -22,6 +23,12 @@ import ./proc.bend as P
 # `openssl` and sends it with `curl`, both host tools. Device tokens and
 # the signed token go to curl in a config file (-K), never on its command
 # line, and never into a log.
+#
+# push.webhook.url, when set to an http(s) address, also POSTs a JSON
+# notice for the turn (core/wnote.bend). Unset, that does nothing. An
+# optional secret (push.webhook.secret, a path, or <home>/secrets/push.webhook)
+# signs it; a POST that fails is logged and does not change what this
+# returns.
 
 # Files
 # -----
@@ -574,9 +581,97 @@ def Push.island.beat.k(due: Bool, st: M.State) -> Bool:
 def Push.island.beat(+st: M.State, +now: Nat) -> Bool:
   Push.island.beat.k(Nat.is_lt(Nat.mod(now, 3600n), 90n), st)
 
-# the island push for a turn that ended; answers the tokens APNs reported dead
+# Webhook
+# -------
+# push.webhook.url posts one JSON notice per turn end. The URL, the body
+# and the signature stay in a 0600 curl config, as the APNs push does. A
+# missing curl, a refused address or a dead endpoint is logged; the
+# dead-token list is still returned.
+
+def Push.hook.state(+st: M.State, +thread: String) -> String:
+  WN.Wn.outcome(M.Thread.turn(B.Hub.thread(st, thread)))
+
+def Push.hook.text(+st: M.State, +thread: String, +state: String) -> String:
+  Push.body(String.eq(state, "failed"), Push.first(B.Task.last(st, thread)))
+
+def Push.hook.note.k(+st: M.State, +thread: String, +state: String) -> String:
+  WN.Wn.body(thread, state, Push.title(B.Hub.thread(st, thread)), Push.hook.text(st, thread, state))
+
+def Push.hook.note(+st: M.State, +thread: String) -> String:
+  Push.hook.note.k(st, thread, Push.hook.state(st, thread))
+
+def Push.hook.read(+path: String) -> IO(String):
+  do IO<String>:
+    bs : List<&2, U32> <- Push.read(path)
+    return String.trim(U.Utf8.decode(bs))
+
+def Push.hook.post(+home: String, +st: M.State, +thread: String, +url: String, +secret: String) -> IO(Unit):
+  do IO<Unit>:
+    +dir : String = home ++ "/tmp"
+    mk : Result<&1, &1, U32 & String, Unit> <- H.FS.mkdirs(dir)
+    m : Result<&1, &1, U32 & String, Unit> <- H.FS.chmod(dir, 448)
+    t : U32 <- H.Clock.epoch()
+    +now : Nat = U32.to_nat(t)
+    +body : String = Push.hook.note(st, thread)
+    +name : String = "hook-" ++ Nat.show(now) ++ "-" ++ WN.Wn.safe(thread)
+    +file : String = dir ++ "/" ++ name ++ ".json"
+    +out : String = dir ++ "/" ++ name ++ ".out"
+    +cfg : String = dir ++ "/" ++ name ++ ".curl"
+    Push.write(file, body)
+    Push.write(cfg, Curl.config(url, WN.Wn.headers(secret, now, body), file, out))
+    r : P.Ran <- P.Proc.run("curl", ["-sS", "--proto", "=http,https", "--max-redirs", "0", "--max-time", "15", "-X", "POST", "-K", cfg], dir)
+    +code : String = Curl.code(Push.ran(r))
+    Push.rm(cfg)
+    Push.rm(file)
+    Push.rm(out)
+    IO.print_err("backplane: push webhook -> " ++ code)
+    return Unit{}
+
+def Push.hook.act(mode: Nat, +home: String, +st: M.State, +thread: String, +url: String, +secret: String) -> IO(Unit):
+  match mode:
+    case 0n:
+      IO.print_err("backplane: push webhook: push.webhook.secret could not be read")
+    case _:
+      Push.hook.post(home, st, thread, url, secret)
+
+def Push.hook.send(+home: String, +st: M.State, +thread: String, +url: String) -> IO(Unit):
+  do IO<Unit>:
+    +set : String = M.Setting.get(st, WN.Wn.secret.key(), "")
+    +text : String <- Push.hook.read(WN.Wn.path(home, set))
+    Push.hook.act(WN.Wn.mode(WN.Wn.asked(set), text), home, st, thread, url, text)
+
+def Push.hook.bad() -> IO(Unit):
+  IO.print_err("backplane: push webhook: push.webhook.url is not an http address")
+
+def Push.hook.skip() -> IO(Unit):
+  IO.pure(Unit, Unit{})
+
+def Push.hook.go(ok: Bool, +home: String, +st: M.State, +thread: String, +url: String) -> IO(Unit):
+  match ok:
+    case True{}:
+      Push.hook.send(home, st, thread, url)
+    case False{}:
+      Push.hook.bad()
+
+def Push.hook.k(set: Bool, +home: String, +st: M.State, +thread: String, +url: String) -> IO(Unit):
+  match set:
+    case False{}:
+      Push.hook.skip()
+    case True{}:
+      Push.hook.go(WN.Wn.url.ok(url), home, st, thread, url)
+
+def Push.hook(+home: String, +st: M.State, +thread: String) -> IO(Unit):
+  do IO<Unit>:
+    +url : String = String.trim(M.Setting.get(st, WN.Wn.url.key(), ""))
+    Push.hook.k(WN.Wn.on(url), home, st, thread, url)
+
+# the island push for a turn that ended; answers the tokens APNs reported dead.
+# the webhook runs after it and cannot drop the tokens it found
 def Push.turn_ended.dead(+home: String, +st: M.State, +thread: String) -> IO(List<&2, String>):
-  Push.start(home, st, thread, M.Setting.get(st, "push.apns.key", ""), M.Setting.get(st, "push.apns.keyid", ""), M.Setting.get(st, "push.apns.team", ""))
+  do IO<List<&2, String>>:
+    dead : List<&2, String> <- Push.start(home, st, thread, M.Setting.get(st, "push.apns.key", ""), M.Setting.get(st, "push.apns.keyid", ""), M.Setting.get(st, "push.apns.team", ""))
+    Push.hook(home, st, thread)
+    return dead
 
 # the request that forgets a dead token (for the hub's inbox, as a client
 # request would; the reply goes to no one)

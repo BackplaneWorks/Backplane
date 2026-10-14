@@ -268,6 +268,40 @@ browser's notifications (the page asks for permission on the first click or
 key; macOS, Windows, Linux) or `notify-send` from the Linux window.
 Clicking it opens the thread.
 
+### Webhook
+
+`push.webhook.url` (a setting: an `http` or `https` address) makes the hub
+POST a JSON notice when a turn ends. The hub calls `Push.turn_ended` for
+every end, including a failure and a stop, off its own thread. Unset, nothing
+is sent and nothing else changes.
+
+```
+{"event":"turn.ended","thread":"…","state":"completed","title":"…","text":"…"}
+```
+
+`state` is the thread's turn as stored: `completed`, `failed`, or `stopped`
+(a stop, an archive or a delete; the codec's `interrupted`). `text` is
+`Failed`, or the first line of the last reply. A POST that fails is logged
+(`backplane: push webhook -> …`) and does not affect the turn.
+
+The notice is signed when a secret is configured. `push.webhook.secret` is
+the path of a file that holds it (only the path is a setting, as with
+`push.apns.key`). With that unset, `<home>/secrets/push.webhook` is used
+when the file exists. The request then carries the same headers a signed
+webhook in does (`src/core/sign.bend`):
+
+```
+X-Backplane-Timestamp: <unix seconds>
+X-Backplane-Signature: sha256=<hex HMAC-SHA256(secret, timestamp + "." + body)>
+```
+
+A secret of 64 hex digits is the raw 32 bytes; any other text is the key as
+written. With no secret the notice is still posted, without those headers.
+A secret path that cannot be read is logged and nothing is posted, so an
+unsigned notice is never sent in place of a signed one. The address, the
+body and the signature go to `curl` in a config file, never on its command
+line.
+
 ## Already told
 
 A record of what the person has actually been told, so a bot's digest, a
