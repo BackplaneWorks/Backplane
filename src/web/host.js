@@ -10,6 +10,7 @@ import * as Solid from "./solid.js";
 import * as Plot2d from "./plot2d.js";
 import * as Wire from "./wire.js";
 import { T, is, learnJson, learnDom } from "./wire.js";
+import { takeToken } from "./pair.js";
 
 // the constructors' tags as this bundle names them (wire.js)
 learnJson(App.json_tags());
@@ -225,10 +226,15 @@ ui = App.act(ui, "lang", forcedLang === "ja" || forcedLang === "en" ? forcedLang
 ui = App.act(ui, "lang-os", navigator.languages?.[0] || navigator.language || "").ui;
 document.documentElement.lang = App.lang(ui);
 window.addEventListener("languagechange", () => dispatch("lang-os", navigator.languages?.[0] || navigator.language || ""));
-// opened from another hub to show one of this machine's bots ("#bot=<name>")
-if (location.hash) {
-  try { ui = App.wanted(ui, decodeURIComponent(location.hash)); } catch {}
+// A pairing link keeps its token in the fragment (#token=<hex>). Save it
+// before the fragment is cleared, or the first open loses it. "#bot=<name>"
+// still selects that bot. The token is only sent to this server.
+const fragment = location.hash;
+const token = takeToken(fragment, localStorage, () => {
   history.replaceState(null, "", location.pathname + location.search);
+});
+if (fragment) {
+  try { ui = App.wanted(ui, decodeURIComponent(fragment)); } catch {}
 }
 // drafts this browser kept (Keep commands), one key per thread
 const DRAFT = "backplane-draft:";
@@ -1117,17 +1123,6 @@ window.addEventListener("resize", () => {
 // ------
 
 let backoff = 250;
-
-// A tailnet link carries the pairing token in its fragment; keep it for
-// later visits and never send it anywhere but this server's socket.
-const token = (() => {
-  const m = location.hash.match(/token=([0-9a-f]+)/);
-  if (m) {
-    localStorage.setItem("backplane-token", m[1]);
-    history.replaceState(null, "", location.pathname);
-  }
-  return localStorage.getItem("backplane-token") ?? "";
-})();
 
 // images in threads load by URL (<img src="/img?...">) and cannot carry the
 // token in a query the way the socket does: a same-site cookie carries it
