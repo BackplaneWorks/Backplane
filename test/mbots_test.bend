@@ -169,7 +169,7 @@ def main() -> IO(Unit):
     C.Check.str("its posts", strs(J.Json.elems(J.Json.get_obj(bot(go(two(), "room", "box:3787|r1")), "posts")), "from"), "you;")
     C.Check.str("back to the list", J.Json.show(bot(go(go(two(), "room", "box:3787|r1"), "select", ""))), "null")
     C.Check.str("the new bot form on its hub", H.Hubs.cur(go(two(), "bot-new", "box:3787|")), "box:3787")
-    C.Check.str("its providers", strs(J.Json.elems(J.Json.get_obj(J.Json.get_obj(H.Hubs.screen(go(two(), "bot-new", "box:3787|")), "newBot"), "providers")), "provider"), "claude;codex;grok;muse;antigravity;")
+    C.Check.str("its providers", strs(J.Json.elems(J.Json.get_obj(J.Json.get_obj(H.Hubs.screen(go(two(), "bot-new", "box:3787|")), "newBot"), "providers")), "provider"), "claude;codex;grok;muse;antigravity;omp;")
     C.Check.str("a field typed", J.Json.get_str(J.Json.get_obj(H.Hubs.screen(go(go(two(), "bot-new", "box:3787|"), "bfield", "name\u{1f}Tom")), "newBot"), "name", ""), "Tom")
     C.Check.str("a form closed", J.Json.show(J.Json.get_obj(H.Hubs.screen(go(go(two(), "bot-new", "box:3787|"), "form-close", "@bnew")), "newBot")), "null")
     C.Check.str("the routine form opens blank", J.Json.show(J.Json.get_obj(J.Json.get_obj(bot(go(go(shown(), "bot-tab", "routines"), "routine-edit", "")), "routine"), "open")), "true")

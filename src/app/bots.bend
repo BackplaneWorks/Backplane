@@ -310,7 +310,7 @@ def Bv.bform(open: Bool, +ty: L.Ty, +f: F.FS, +c: D.Clip, +y: U32) -> L.Col:
       L.Col{L.Out.all([
           F.Fm.field(ty, f, c, 12, y, 240, "name", "bot-create", "", U.Bots.name.hint(F.FS.ui(f))),
           F.Fm.area(ty, f, c, 12, (y + 34 : U32), 240, 3n, "persona", "bot-create", "", "Who it is, what it does"),
-          Bv.provs(["claude", "codex", "grok", "muse", "antigravity"], ty, Bv.prov(F.FS.ui(f)), c, 12, (y + 112 : U32)),
+          Bv.provs(["claude", "codex", "grok", "muse", "antigravity", "omp"], ty, Bv.prov(F.FS.ui(f)), c, 12, (y + 112 : U32)),
           F.Fm.button(ty, c, 12, (y + 146 : U32), "Create", T.Th.accent(), "bot-create", "")]),
         (y + 182 : U32)}
     case False{}:

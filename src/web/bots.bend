@@ -121,7 +121,7 @@ def WB.bot.form(open: Bool, +u: U.Ui) -> List<&2, D.Node>:
       [WB.div("bform", [
         WB.input("bot-name", "name", BI.BU.field(u, "name"), U.Bots.name.hint(u), "bot-create"),
         WB.area("bot-persona", "persona", BI.BU.field(u, "persona"), "Persona: who it is, what it does"),
-        WB.div("chips-row", WB.pchips(["claude", "codex", "grok", "muse", "antigravity"], WB.prov(u))),
+        WB.div("chips-row", WB.pchips(["claude", "codex", "grok", "muse", "antigravity", "omp"], WB.prov(u))),
         WB.btns([D.Dom.button("primary", "bot-create", "", "Make the bot", "Create"), D.Dom.button("", "bot-new", "", "Cancel", "Cancel")])])]
     case False{}:
       Nil{}

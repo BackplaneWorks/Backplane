@@ -3705,7 +3705,7 @@ def Effort.chips(+info: String, +provider: String, +model: String) -> List<&2, S
 # clients: a chip's value starting with "@" is a provider.
 
 def Chip.providers() -> List<&2, String>:
-  ["@claude", "@codex", "@grok", "@muse", "@antigravity"]
+  ["@claude", "@codex", "@grok", "@muse", "@antigravity", "@omp"]
 
 def Chip.all(+info: String, +provider: String, +model: String) -> List<&2, String>:
   List.append(&2, String, Chip.providers(), Effort.chips(info, provider, model))

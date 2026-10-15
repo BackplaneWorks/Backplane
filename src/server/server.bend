@@ -4265,8 +4265,8 @@ def Models.text3(+cl: List<&2, String>, +cx: List<&2, String>, +gk: List<&2, Str
 def Models.text4(+cl: List<&2, String>, +cx: List<&2, String>, +gk: List<&2, String>, +ms: List<&2, String>) -> String:
   Models.join(Models.text3(cl, cx, gk), Models.line("muse", ms))
 
-def Models.text5(+cl: List<&2, String>, +cx: List<&2, String>, +gk: List<&2, String>, +ms: List<&2, String>, +ag: List<&2, String>) -> String:
-  Models.join(Models.text4(cl, cx, gk, ms), Models.line("antigravity", ag))
+def Models.text5(+cl: List<&2, String>, +cx: List<&2, String>, +gk: List<&2, String>, +ms: List<&2, String>, +ag: List<&2, String>, +om: List<&2, String>) -> String:
+  Models.join(Models.join(Models.text4(cl, cx, gk, ms), Models.line("antigravity", ag)), Models.line("omp", om))
 
 # what the providers offer: the models JSON clients read, and a line for
 # the agents' prompt
@@ -4527,10 +4527,10 @@ def Refresh.found(fd: Found, +inbox: Chan(Msg), +cache: String, +last: String) -
       Refresh.news(BT.Models.news(ms, last), ms, mt, inbox, cache, last)
 
 # (Antigravity's "agy": what is installed and its accounts, AGY.Agy.info.json)
-def Models.found(+cl: List<&2, String>, +cx: List<&2, String>, +gk: List<&2, String>, +ms: List<&2, String>, +ag: List<&2, String>, agy: J.Json, about: J.Json) -> Found:
+def Models.found(+cl: List<&2, String>, +cx: List<&2, String>, +gk: List<&2, String>, +ms: List<&2, String>, +ag: List<&2, String>, +om: List<&2, String>, agy: J.Json, about: J.Json) -> Found:
   Found{J.Json.show(J.Json.obj([J.KV{"claude", Models.strs(cl)}, J.KV{"codex", Models.strs(cx)}, J.KV{"grok", Models.strs(gk)}, J.KV{"muse", Models.strs(ms)}, J.KV{"antigravity", Models.strs(ag)},
-    J.KV{"agy", agy}, J.KV{"about", about}])),
-    Models.text5(cl, cx, gk, ms, ag)}
+    J.KV{"omp", Models.strs(om)}, J.KV{"agy", agy}, J.KV{"about", about}])),
+    Models.text5(cl, cx, gk, ms, ag, om)}
 
 def Models.boot(ks: String & List<&2, Q.Skill>, +rt: K.Rt, fd: Found, +fc: String) -> Boot:
   (kdir, skills) = ks
@@ -4560,6 +4560,14 @@ def Models.grok(r: P.Ran) -> List<&2, String>:
   match r:
     case P.Ran{0, out}:
       Models.grok.go(String.lines(out))
+    case _:
+      Nil{}
+
+# `omp models --json` (kind chat): the selectors of its chat models
+def Models.omp(r: P.Ran) -> List<&2, String>:
+  match r:
+    case P.Ran{0, out}:
+      OM.Omp.models(out)
     case _:
       Nil{}
 
@@ -4657,6 +4665,16 @@ def About.muse.go(xs: List<&2, J.Json>) -> List<&2, J.KV>:
 def About.muse(+xs: List<&2, J.Json>) -> List<&2, J.KV>:
   Bool.pick(List<&2, J.KV>, List.is_empty(&2, J.Json, xs), Nil{}, J.KV{"default", J.Str{"Muse's own default"}} <> About.muse.go(xs))
 
+def About.omp.go(xs: List<&2, String>) -> List<&2, J.KV>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case +m <> t:
+      J.KV{m, J.Str{m}} <> About.omp.go(t)
+
+def About.omp(+xs: List<&2, String>) -> List<&2, J.KV>:
+  Bool.pick(List<&2, J.KV>, List.is_empty(&2, String, xs), Nil{}, J.KV{"default", J.Str{"oh-my-pi's own default"}} <> About.omp.go(xs))
+
 def About.cli(r: P.Ran) -> String:
   match r:
     case P.Ran{0, out}:
@@ -4685,12 +4703,15 @@ def Models.detect(+user: String, +home: String) -> IO(Found):
     vg : P.Ran <- P.Proc.run("sh", ["-c", (PT.Port.tmo() ++ "tmo 10 grok --version")], "/")
     mu : P.Ran <- P.Proc.run("sh", ["-c", Muse.probe.sh()], "/")
     vm : P.Ran <- P.Proc.run("sh", ["-c", (PT.Port.tmo() ++ "command -v muse >/dev/null && tmo 10 muse --version")], "/")
+    oc : P.Ran <- P.Proc.run("sh", ["-c", (PT.Port.tmo() ++ "command -v omp >/dev/null && tmo 15 omp models --json")], "/")
+    vo : P.Ran <- P.Proc.run("sh", ["-c", (PT.Port.tmo() ++ "command -v omp >/dev/null && tmo 10 omp --version")], "/")
     +xs : List<&2, J.Json> = Claude.listed(pc)
     +mx : List<&2, J.Json> = Muse.catalog(mu)
     +ag : AGY.AgyInfo <- AGX.Agx.probe(AGX.Agx.root(home))
-    return Models.found(Claude.models(Main.has(cl), xs), Models.on(Main.has(cx), Models.codex(cache)), Models.grok(gk), Models.muse(mx), AGY.Agy.info.models(ag), AGY.Agy.info.json(ag),
+    +om : List<&2, String> = Models.omp(oc)
+    return Models.found(Claude.models(Main.has(cl), xs), Models.on(Main.has(cx), Models.codex(cache)), Models.grok(gk), Models.muse(mx), AGY.Agy.info.models(ag), om, AGY.Agy.info.json(ag),
       J.Json.obj([J.KV{"claude", Claude.about(About.cli(vc), xs)}, J.KV{"codex", About.one(About.cli(vx), About.codex(cache))}, J.KV{"grok", About.one(About.cli(vg), About.grok(gk))},
-        J.KV{"muse", About.one(About.cli(vm), About.muse(mx))}, J.KV{"antigravity", AGY.Agy.info.about(ag)}]))
+        J.KV{"muse", About.one(About.cli(vm), About.muse(mx))}, J.KV{"antigravity", AGY.Agy.info.about(ag)}, J.KV{"omp", About.one(About.cli(vo), About.omp(om))}]))
 
 # The CLIs are looked for on PATH, which a launcher's or a service's hub
 # lacks the login shell's part of (nvm, volta...): before each detection the
@@ -4715,11 +4736,11 @@ def Path.refresh(+home: String) -> IO(Unit):
     +next : String = CPA.CliPath.next(cur, home, Path.out(r))
     Path.set(String.eq(cur, next), next)
 
-# which of the four CLIs are on PATH now (Antigravity's agy lives in
+# which of the five CLIs are on PATH now (Antigravity's agy lives in
 # <home>/antigravity, AGX.Agx.probe, not on PATH), "claude codex " style
 def Models.present() -> IO(String):
   do IO<String>:
-    r : P.Ran <- P.Proc.run("sh", ["-c", "for c in claude codex grok muse; do command -v $c >/dev/null 2>&1 && printf '%s ' $c; done; true"], "/")
+    r : P.Ran <- P.Proc.run("sh", ["-c", "for c in claude codex grok muse omp; do command -v $c >/dev/null 2>&1 && printf '%s ' $c; done; true"], "/")
     return Path.out(r)
 
 # a full detection when it is due, else nothing; answers the list kept

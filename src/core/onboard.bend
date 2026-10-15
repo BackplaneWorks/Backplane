@@ -119,7 +119,7 @@ def Ob.body.s4(+k: Nat) -> String:
     ++ ", then mention it in any message: @scout look at the BOM."
 
 def Ob.body.s5() -> String:
-  "Backplane runs the Claude Code, Codex, Grok or Muse Code command-line program: install one and sign in to it on the machine that runs this hub. Settings shows whether each is found, not whether you are signed in. Google's Antigravity agent installs and signs in from Settings. Choose the provider and model in a thread's composer, or in Settings for new threads."
+  "Backplane runs the Claude Code, Codex, Grok, Muse Code or oh-my-pi command-line program: install one and sign in to it on the machine that runs this hub. Settings shows whether each is found, not whether you are signed in. Google's Antigravity agent installs and signs in from Settings. Choose the provider and model in a thread's composer, or in Settings for new threads."
 
 def Ob.body.s6(+k: Nat) -> String:
   "API keys for other services are kept in a file on the hub's machine that agents running there could read. They are told not to print them; nothing enforces it. "

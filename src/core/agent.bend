@@ -2,6 +2,7 @@ import Base
 import ./json.bend as J
 import ./prompt.bend as Q
 import ./model.bend as M
+import ./omp.bend as OM
 
 # Agent features, pure: user and project skills (SKILL.md frontmatter, the
 # skills block Codex, Grok and Muse are told, `$skill` mentions), reasoning
@@ -284,7 +285,8 @@ def Effort.levels(+provider: String) -> List<&2, String>:
   Bool.pick(List<&2, String>, String.eq(provider, "claude"), ["low", "medium", "high", "xhigh", "max"],
     Bool.pick(List<&2, String>, String.eq(provider, "codex"), ["low", "medium", "high", "xhigh"],
       Bool.pick(List<&2, String>, String.eq(provider, "grok"), ["low", "medium", "high"],
-        Bool.pick(List<&2, String>, String.eq(provider, "muse"), ["minimal", "low", "medium", "high", "xhigh", "max"], Nil{}))))
+        Bool.pick(List<&2, String>, String.eq(provider, "muse"), ["minimal", "low", "medium", "high", "xhigh", "max"],
+          Bool.pick(List<&2, String>, String.eq(provider, "omp"), OM.Omp.levels(), Nil{})))))
 
 def Effort.in(xs: List<&2, String>, +e: String) -> Bool:
   match xs:

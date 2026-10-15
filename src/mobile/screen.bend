@@ -1176,7 +1176,7 @@ def Mob.settings.of(+u: U.Ui, +st: M.State, +nf: Map<&2, String>, +v: String, +n
   J.Json.obj([J.KV{"rows", J.Json.arr(List.append(&2, J.Json, List.append(&2, J.Json, List.concat(&2, J.Json, [[
     Mob.set.row(Mob.set.days.label(M.Setting.get(st, "settle.days", "3")), "Threads idle this long move to Settled. They stay saved.", Mob.set.days(M.Setting.get(st, "settle.days", "3"))),
     Mob.set.row("Continue after a restart", "Turns a restart cuts short go on by themselves.", Mob.set.chips(["on", "off"], Bool.pick(String, M.Carry.on(st), "on", "off"), "restart.continue"))], Mob.notify(st), [
-    Mob.set.row("Provider for new threads", Bool.pick(String, String.is_empty(U.Models.cli(models, prov)), prov ++ " is not installed", U.Models.cli(models, prov)), Mob.set.chips(["claude", "codex", "grok", "muse", "antigravity"], prov, "agent.provider")),
+    Mob.set.row("Provider for new threads", Bool.pick(String, String.is_empty(U.Models.cli(models, prov)), prov ++ " is not installed", U.Models.cli(models, prov)), Mob.set.chips(["claude", "codex", "grok", "muse", "antigravity", "omp"], prov, "agent.provider")),
     Mob.set.row("Model for new threads", Bool.pick(String, String.is_empty(model), "default", model) ++ ": " ++ U.Models.label_of(models, prov, model), Mob.set.chips("" <> U.Models.list(models, prov), model, "agent.model")),
     Mob.set.row(U.KiCad.cli.label(nf), U.KiCad.cli.note(nf), Bool.pick(List<&2, J.Json>, String.is_empty(U.Str.get(nf, "kicad.fork")), [Mob.set.btn("Install Backplane KiCad", "kicad-install", "", False{})], Nil{})),
     Mob.set.row(U.FreeCAD.label(nf), U.FreeCAD.note(nf), Nil{}),

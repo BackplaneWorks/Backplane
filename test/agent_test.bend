@@ -55,6 +55,8 @@ def main() -> IO(Unit):
     C.Check.str("effort grok no xhigh", String.join(A.Effort.args("grok", "xhigh"), " "), "")
     C.Check.str("effort muse on the wire", String.join(A.Effort.args("muse", "high"), " "), "")
     C.Check.str("effort muse levels", String.join(A.Effort.levels("muse"), ","), "minimal,low,medium,high,xhigh,max")
+    C.Check.str("effort omp levels", String.join(A.Effort.levels("omp"), ","), "off,auto,low,medium,high,xhigh,max")
+    C.Check.str("effort omp no argv", String.join(A.Effort.args("omp", "high"), " "), "")
     C.Check.str("effort default", String.join(A.Effort.args("claude", ""), " "), "")
     C.Check.str("effort bogus", String.join(A.Effort.args("codex", "max; rm"), " "), "")
     C.Check.str("temp branch", yes(A.Name.temp("backplane/0a1b2c3d")), "yes")

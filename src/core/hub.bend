@@ -401,8 +401,8 @@ def Hub.title.k(fresh: Bool, +thread: String, +text: String, +now: Nat, rest: Li
 
 # the effects that run one turn of a thread's agent, by provider: Claude
 # keeps one process per thread fed with stream-json; Codex, Grok, Muse and
-# Antigravity run a process per turn, resuming their session (Grok and
-# Antigravity over ACP, Muse over MSP, all reported in Codex's event shapes)
+# Antigravity run a process per turn, resuming their session (Grok, Antigravity
+# and oh-my-pi over ACP, Muse over MSP, all reported in Codex's event shapes)
 def Hub.run.k(i: Nat, +thread: String, +cwd: String, +provider: String, +model: String, +session: String, runtime: M.RuntimeMode, interaction: M.InteractionMode, +text: String, +uuid: String) -> List<&2, Out>:
   match i:
     case 1n:
@@ -413,6 +413,8 @@ def Hub.run.k(i: Nat, +thread: String, +cwd: String, +provider: String, +model: 
       [MuseTurn{thread, cwd, model, session, runtime, text}]
     case 4n:
       [AgyTurn{thread, cwd, model, session, runtime, text}]
+    case 5n:
+      [OmpTurn{thread, cwd, model, session, runtime, text}]
     case _:
       [AgentStart{thread, cwd, provider, model, session, runtime, interaction}, Claude.send(thread, cwd, text, uuid)]
 
@@ -420,7 +422,7 @@ def Hub.run.k(i: Nat, +thread: String, +cwd: String, +provider: String, +model: 
 def Hub.run(t: M.Thread, +cwd: String, +text: String, +uuid: String) -> List<&2, Out>:
   match t:
     case M.Thread{+id, _, _, _, _, _, _, _, _, _, _, _, _, _, _, +provider, model, runtime, interaction, session, _}:
-      Hub.run.k(C.Codec.pos(["claude", "codex", "grok", "muse", "antigravity"], provider), id, cwd, provider, model, session, runtime, interaction, text, uuid)
+      Hub.run.k(C.Codec.pos(["claude", "codex", "grok", "muse", "antigravity", "omp"], provider), id, cwd, provider, model, session, runtime, interaction, text, uuid)
 
 def Hub.post.go(wait: Bool, +t: M.Thread, +cwd: String, +queued: String, +now: Nat, +thread: String, +msg: String, role: M.Role, +text: String) -> Step:
   match wait:
@@ -2614,7 +2616,7 @@ def Codex.line.parsed(m: Maybe<&2, J.Json>, +s: M.State, +thread: String, +now: 
 # Grok's and Muse's tool calls are logged before they run: their design
 # steps come at "tool.done"
 def Hub.acp_like(+p: String) -> Bool:
-  Bool.or(Bool.or(String.eq(p, "grok"), String.eq(p, "muse")), String.eq(p, "antigravity"))
+  Bool.or(Bool.or(Bool.or(String.eq(p, "grok"), String.eq(p, "muse")), String.eq(p, "antigravity")), String.eq(p, "omp"))
 
 # the open-call outs of a Codex-like line, after its step
 def Tools.codex(acp: Bool, m: Maybe<&2, J.Json>, st: Step, +thread: String) -> Step:
