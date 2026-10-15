@@ -187,7 +187,7 @@ def main() -> IO(Unit):
     C.Check.str("omp prompt error fails", R.emits(badprompt), "{\"type\":\"thread.started\",\"thread_id\":\"01a14112-89a7-7544-b120-9a13b2948ace\"} | {\"type\":\"turn.failed\",\"message\":\"prompt rejected\"}")
     # omp's approval forms: an approval form is asked, its answer goes back as Approve or decline
     C.Check.str("omp form asks", ap.kind(ap.cs(ap.handle(ap.form("Approve the tool?", "[\"Approve\",\"Deny\"]")))), "approval|t1|Approve the tool?|Approve the tool?")
-    C.Check.str("omp form parks its ask", Bool.show(String.eq(ap.id(ap.cs(ap.handle(ap.form("Approve the tool?", "[\"Approve\",\"Deny\"]")))), ap.park(ap.handle(ap.form("Approve the tool?", "[\"Approve\",\"Deny\"]"))))), "True")
+    C.Check.str("omp form parks its ask", Bool.show(Bool.and(Bool.not(String.is_empty(ap.id(ap.cs(ap.handle(ap.form("Approve the tool?", "[\"Approve\",\"Deny\"]")))))), String.eq(ap.id(ap.cs(ap.handle(ap.form("Approve the tool?", "[\"Approve\",\"Deny\"]")))), ap.park(ap.handle(ap.form("Approve the tool?", "[\"Approve\",\"Deny\"]")))))), "True")
     C.Check.str("omp form reply waits", ap.reply(ap.handle(ap.form("Approve the tool?", "[\"Approve\",\"Deny\"]"))), "")
     C.Check.str("omp form accept", MC.Mcp.permission.reply(ap.form("Approve the tool?", "[\"Approve\",\"Deny\"]"), "accept"), "{\"jsonrpc\":\"2.0\",\"id\":\"e1\",\"result\":{\"action\":\"accept\",\"content\":{\"value\":\"Approve\"}}}")
     C.Check.str("omp form decline", MC.Mcp.permission.reply(ap.form("Approve the tool?", "[\"Approve\",\"Deny\"]"), "decline"), "{\"jsonrpc\":\"2.0\",\"id\":\"e1\",\"result\":{\"action\":\"decline\"}}")

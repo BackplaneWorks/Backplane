@@ -1023,6 +1023,8 @@ def Elicit.permit.k(approve: Bool, +ask: String, +now: Nat, +thread: String, +o:
     case False{}:
       McpOut{AC.Acp.elicit.reply(AC.Acp.id(J.Json.get(o, "id")), "decline"), B.Step.none(), ""}
 
+# only asks that were parked reach here: full access's auto-accept is decided
+# in Acp.line / Acp.request.k (case 2n) before anything parks
 def Elicit.permit(+s: M.State, +now: Nat, +thread: String, +o: J.Json) -> McpOut:
   Elicit.permit.k(AC.Acp.elicit.approve(J.Json.get_obj(o, "params")), B.Hub.id("q", now, B.Hub.seq(s)), now, thread, o,
     J.Json.get_str(J.Json.get_obj(o, "params"), "message", ""))
