@@ -19,6 +19,7 @@ import ./kicad.bend as K
 import ./browser.bend as BR
 import ../core/acp.bend as AC
 import ../core/msp.bend as MS
+import ../core/omp.bend as OM
 import ../core/agy.bend as AGY
 import ./agyio.bend as AGX
 import ../core/cbor.bend as CB
@@ -3713,6 +3714,17 @@ def Grok.go(+cfg: Cfg, +st: M.State, +thread: String, +cwd: String, +model: Stri
     +keys : String <- AKS.Ak.prompt(Cfg.home(cfg))
     Grok.run(Grok.args(r, model, Hub.effort_of(st, thread)),
       MS.PAcp{AC.AcpTurn{cwd, Hub.mcp_url.g(cfg, thread, gen), Hub.prompt(cfg, st, thread, cwd, fs, keys) ++ AG.USkill.prompt(ss), AG.Mention.expand("grok", text, ss), session, Grok.asks(r)}}, cwd, thread, gen, inbox)
+
+# one oh-my-pi turn: Grok's runner over ACP, one process per turn, the
+# argv of omp.bend (its approval mode) and the model and thinking level
+# the composer chose (POmp)
+def Omp.go(+cfg: Cfg, +st: M.State, +thread: String, +cwd: String, +model: String, +session: String, +r: M.RuntimeMode, +text: String, +gen: String, +inbox: Chan(Msg)) -> IO(Unit):
+  do IO<Unit>:
+    +fs : K.Files <- Files.prepared(thread, cwd, inbox)
+    +ss : List<&2, AG.USkill> <- Skills.scan(cwd)
+    +keys : String <- AKS.Ak.prompt(Cfg.home(cfg))
+    Grok.run(OM.Omp.args(r),
+      MS.POmp{AC.AcpTurn{cwd, Hub.mcp_url.g(cfg, thread, gen), Hub.prompt(cfg, st, thread, cwd, fs, keys) ++ AG.USkill.prompt(ss), AG.Mention.expand("omp", text, ss), session, Grok.asks(r)}, model, Hub.effort_of(st, thread)}, cwd, thread, gen, inbox)
 
 # one Muse turn: Grok's runner over MSP; the turn's gen makes its command
 # ids (Muse refuses one it has seen)
@@ -7735,6 +7747,13 @@ def Hub.out(h: Hub, o: B.Out) -> IO(Hub):
         +t2 : String = Far.turn(cfg, st, now, thread, text)
         +g : String = Hub.gen(st, now)
         IO.spawn(Unit, IO.bind(String, Unit, EmbNote.take(cfg, st, thread), n => Agt.go(cfg, st, thread, cwd, model, session, r, t2 ++ n, g, inbox)))
+        Hub.placeholder(Hub{st, f, ls, cl, as, inbox, cfg, note}, thread, g)
+    case Hub{+st, f, ls, cl, as, +inbox, +cfg, note} B.OmpTurn{+thread, +cwd, +model, +session, r, +text}:
+      do IO<Hub>:
+        +now : Nat <- Now.nat()
+        +t2 : String = Far.turn(cfg, st, now, thread, text)
+        +g : String = Hub.gen(st, now)
+        IO.spawn(Unit, IO.bind(String, Unit, EmbNote.take(cfg, st, thread), n => Omp.go(cfg, st, thread, cwd, model, session, r, t2 ++ n, g, inbox)))
         Hub.placeholder(Hub{st, f, ls, cl, as, inbox, cfg, note}, thread, g)
     case Hub{st, f, ls, cl, as, +inbox, cfg, note} B.LockGuard{+name, old, +holder}:
       do IO<Hub>:

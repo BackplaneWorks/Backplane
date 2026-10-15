@@ -57,6 +57,8 @@ type Out is Data:
   MuseTurn{thread: String, cwd: String, model: String, session: String, runtime: M.RuntimeMode, text: String}
   # Google's Antigravity agent over ACP (core/agy.bend)
   AgyTurn{thread: String, cwd: String, model: String, session: String, runtime: M.RuntimeMode, text: String}
+  # oh-my-pi over ACP (core/omp.bend): one process per turn
+  OmpTurn{thread: String, cwd: String, model: String, session: String, runtime: M.RuntimeMode, text: String}
   # a turn ended: "completed", "failed", or "stopped" (Stop, archive,
   # delete: no alert, but the phones' island still hears of it)
   TurnEnded{thread: String, state: String}
