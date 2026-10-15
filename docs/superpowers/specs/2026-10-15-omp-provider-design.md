@@ -64,9 +64,9 @@ Provider id `omp`. The copy says "oh-my-pi". The command is `omp`.
 
 The list comes from `omp models --json` (its `selector` values, grouped by provider), read in the same detection cycle as the others. Blank means omp's own default, and nothing is sent. A chosen model goes over `session/set_config_option` as `model`.
 
-### Thinking (my call)
+### Thinking (decided from the catalog)
 
-Levels: off, auto, low, medium, high, xhigh, max. Blank means omp's default, and nothing is sent. Chips appear for the models whose catalog entry has `reasoning` true. If no model has it, there are no chips and omp's default applies. The field is in `omp models --json`; whether any model sets it is unchecked.
+omp's catalog gives each model its own `thinking` list in `omp models --json`, and 29 of the 35 chat models have `reasoning` true. Checked against omp 18.11.1's ACP for all 35 models (0 mismatches): a reasoning model's options are `off`, `auto` and its catalog list, and nothing else. A level the model lacks is silently clamped (`max` on `anthropic/claude-haiku-4-5` ran as `xhigh`), and an unknown name is an error. So the chips are per model: `off`, `auto` and the model's own catalog levels, in the order `off, auto, minimal, low, medium, high, xhigh, max`. A non-reasoning model has no chips. The blank model (omp's own default) has no chips either, since the catalog does not say which model that is. Blank means nothing is sent.
 
 ### Approvals (decided: option a)
 
