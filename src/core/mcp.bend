@@ -923,14 +923,16 @@ def Mcp.permission.reply.acp(i: Nat, +o: J.Json, +body: String, +answer: String)
       AC.Acp.permit.answer(body, answer)
     case 1n:
       MS.Msp.decide(body, answer)
+    case 2n:
+      AC.Acp.elicit.answer(body, answer)
     case _:
       Mcp.permission.reply.k(o, answer)
 
 # the parked reply for a request body, once the user answered: an MCP
 # permission_prompt result, the ACP response to a Grok request, or Muse's
-# approval/decide
+# approval/decide, or the answer to an omp approval form (Acp.elicit.answer)
 def Mcp.permission.reply(+body: String, +answer: String) -> String:
-  Mcp.permission.reply.acp(C.Codec.pos(["session/request_permission", "approval/request"], J.Json.get_str(Maybe.default(&2, J.Json, J.Json.parse(body), J.Null{}), "method", "")),
+  Mcp.permission.reply.acp(C.Codec.pos(["session/request_permission", "approval/request", "elicitation/create"], J.Json.get_str(Maybe.default(&2, J.Json, J.Json.parse(body), J.Null{}), "method", "")),
     Maybe.default(&2, J.Json, J.Json.parse(body), J.Null{}), body, answer)
 
 def Mcp.reply(+id: J.Json, r: Res) -> McpOut:
@@ -1007,18 +1009,38 @@ def Muse.permit(+s: M.State, +now: Nat, +thread: String, +o: J.Json) -> McpOut:
   Muse.permit.k(Perm.session_ok(M.Asks.all(s), thread, MS.Msp.tool(J.Json.get_obj(o, "params"))), B.Hub.id("q", now, B.Hub.seq(s)), now, thread, o,
     MS.Msp.tool(J.Json.get_obj(o, "params")))
 
+# omp's approval forms
+# --------------------
+# An elicitation/create form omp sends for an approval (Acp.elicit.approve)
+# is an approval ask like Grok's, its card showing the form's message; the
+# answer goes back as Approve or decline (Acp.elicit.answer). Any other form
+# is declined at once and never asked.
+
+def Elicit.permit.k(approve: Bool, +ask: String, +now: Nat, +thread: String, +o: J.Json, +text: String) -> McpOut:
+  match approve:
+    case True{}:
+      McpOut{"", B.Step{[M.AskOpened{ask, thread, "approval", text, text, "", now}], Nil{}}, ask}
+    case False{}:
+      McpOut{AC.Acp.elicit.reply(AC.Acp.id(J.Json.get(o, "id")), "decline"), B.Step.none(), ""}
+
+def Elicit.permit(+s: M.State, +now: Nat, +thread: String, +o: J.Json) -> McpOut:
+  Elicit.permit.k(AC.Acp.elicit.approve(J.Json.get_obj(o, "params")), B.Hub.id("q", now, B.Hub.seq(s)), now, thread, o,
+    J.Json.get_str(J.Json.get_obj(o, "params"), "message", ""))
+
 def Mcp.handle.k(i: Nat, +s: M.State, +now: Nat, +thread: String, +models: J.Json, +version: String, +o: J.Json) -> McpOut:
   match i:
     case 0n:
       Grok.permit(s, now, thread, o)
     case 1n:
       Muse.permit(s, now, thread, o)
+    case 2n:
+      Elicit.permit(s, now, thread, o)
     case _:
       Mcp.method.k(Mcp.method.pos(J.Json.get_str(o, "method", "")), s, now, thread, models, version, J.Json.get_obj(o, "id"), J.Json.get_obj(o, "params"))
 
 # one JSON-RPC message from an agent of `thread` ("" reply: a notification)
 def Mcp.handle(+s: M.State, +now: Nat, +thread: String, +models: J.Json, +version: String, +o: J.Json) -> McpOut:
-  Mcp.handle.k(C.Codec.pos(["session/request_permission", "approval/request"], J.Json.get_str(o, "method", "")), s, now, thread, models, version, o)
+  Mcp.handle.k(C.Codec.pos(["session/request_permission", "approval/request", "elicitation/create"], J.Json.get_str(o, "method", "")), s, now, thread, models, version, o)
 
 def Mcp.text.k(m: Maybe<&2, J.Json>, +s: M.State, +now: Nat, +thread: String, +models: J.Json, +version: String) -> McpOut:
   match m:

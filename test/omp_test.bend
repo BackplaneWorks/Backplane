@@ -7,6 +7,7 @@ import ../src/core/acp.bend as AC
 import ../src/core/msp.bend as MS
 import ../src/core/json.bend as J
 import ../src/core/hub.bend as B
+import ../src/core/mcp.bend as MC
 
 # oh-my-pi (core/omp.bend): the mapping, the install line, the models, the
 # runner's Proto, and the turn replayed from test/fixtures/omp/turn.jsonl
@@ -63,6 +64,48 @@ def spawn.omp() -> MS.Proto:
 
 def spawn.grok() -> MS.Proto:
   MS.PAcp{AC.AcpTurn{"/tmp/p", "u", "P", "t", "", True{}}}
+
+# omp's approval forms through the MCP route: an approval form is asked of
+# the person and its reply waits; any other form is declined at once
+def ap.form(+msg: String, +values: String) -> String:
+  "{\"jsonrpc\":\"2.0\",\"id\":\"e1\",\"method\":\"elicitation/create\",\"params\":{\"mode\":\"form\",\"sessionId\":\"S1\",\"message\":\"" ++ msg ++ "\",\"requestedSchema\":{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"string\",\"enum\":" ++ values ++ "}},\"required\":[\"value\"]}}}"
+
+def ap.handle(+line: String) -> MC.McpOut:
+  MC.Mcp.handle(M.State.empty(), 10n, "t1", J.Json.arr(Nil{}), "1", Maybe.default(&2, J.Json, J.Json.parse(line), J.Null{}))
+
+def ap.cs(o: MC.McpOut) -> List<&2, M.Change>:
+  match o:
+    case MC.McpOut{_, st, _}:
+      B.Queue.changes(st)
+
+def ap.kind(cs: List<&2, M.Change>) -> String:
+  match cs:
+    case Nil{}:
+      ""
+    case M.AskOpened{_, th, k, tool, d, _, _} <> _:
+      k ++ "|" ++ th ++ "|" ++ tool ++ "|" ++ d
+    case _ <> t:
+      ap.kind(t)
+
+def ap.id(cs: List<&2, M.Change>) -> String:
+  match cs:
+    case Nil{}:
+      ""
+    case M.AskOpened{i, _, _, _, _, _, _} <> _:
+      i
+    case _ <> t:
+      ap.id(t)
+
+def ap.park(o: MC.McpOut) -> String:
+  match o:
+    case MC.McpOut{_, _, p}:
+      p
+
+def ap.reply(o: MC.McpOut) -> String:
+  match o:
+    case MC.McpOut{r, _, _}:
+      r
+
 
 def main() -> IO(Unit):
   do IO<Unit>:
@@ -142,3 +185,11 @@ def main() -> IO(Unit):
       replay([R.nth(fx, 0n), R.nth(fx, 1n)], R.Run.new(), turn("", "", "")), turn("", "", ""))
     C.Check.str("omp prompt error sends", String.join(R.methods(R.sends(badprompt)), ","), "session/new,session/prompt")
     C.Check.str("omp prompt error fails", R.emits(badprompt), "{\"type\":\"thread.started\",\"thread_id\":\"01a14112-89a7-7544-b120-9a13b2948ace\"} | {\"type\":\"turn.failed\",\"message\":\"prompt rejected\"}")
+    # omp's approval forms: an approval form is asked, its answer goes back as Approve or decline
+    C.Check.str("omp form asks", ap.kind(ap.cs(ap.handle(ap.form("Approve the tool?", "[\"Approve\",\"Deny\"]")))), "approval|t1|Approve the tool?|Approve the tool?")
+    C.Check.str("omp form parks its ask", Bool.show(String.eq(ap.id(ap.cs(ap.handle(ap.form("Approve the tool?", "[\"Approve\",\"Deny\"]")))), ap.park(ap.handle(ap.form("Approve the tool?", "[\"Approve\",\"Deny\"]"))))), "True")
+    C.Check.str("omp form reply waits", ap.reply(ap.handle(ap.form("Approve the tool?", "[\"Approve\",\"Deny\"]"))), "")
+    C.Check.str("omp form accept", MC.Mcp.permission.reply(ap.form("Approve the tool?", "[\"Approve\",\"Deny\"]"), "accept"), "{\"jsonrpc\":\"2.0\",\"id\":\"e1\",\"result\":{\"action\":\"accept\",\"content\":{\"value\":\"Approve\"}}}")
+    C.Check.str("omp form decline", MC.Mcp.permission.reply(ap.form("Approve the tool?", "[\"Approve\",\"Deny\"]"), "decline"), "{\"jsonrpc\":\"2.0\",\"id\":\"e1\",\"result\":{\"action\":\"decline\"}}")
+    C.Check.str("omp other form declines", ap.reply(ap.handle(ap.form("Pick one", "[\"Yes\",\"No\"]"))), "{\"jsonrpc\":\"2.0\",\"id\":\"e1\",\"result\":{\"action\":\"decline\"}}")
+    C.Check.str("omp other form never asks", ap.kind(ap.cs(ap.handle(ap.form("Pick one", "[\"Yes\",\"No\"]")))), "")
