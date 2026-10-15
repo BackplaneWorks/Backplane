@@ -2704,7 +2704,7 @@ def Grok.started.ok(started: U32 & Socket, +t: MS.Proto, +thread: String, +gen: 
 def Grok.failed(e: U32 & String, +p: MS.Proto, +thread: String, +gen: String, +inbox: Chan(Msg)) -> IO(Unit):
   (_, msg) = e
   do IO<Unit>:
-    ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, SpawnFailed{thread, gen, AC.Acp.failed("could not start " ++ MS.Proto.name(p) ++ ": " ++ msg ++ ". " ++ MS.Proto.install(p))})
+    ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, SpawnFailed{thread, gen, MS.Proto.spawn_failed(p, msg)})
     return Unit{}
 
 def Grok.started(r: Result<&1, &1, U32 & String, U32 & Socket>, +t: MS.Proto, +thread: String, +gen: String, +inbox: Chan(Msg)) -> IO(Unit):

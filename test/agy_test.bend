@@ -3,7 +3,7 @@ import ./check.bend as C
 import ../src/core/acp.bend as A
 import ../src/core/agy.bend as G
 import ../src/core/json.bend as J
-import ../src/core/utf8.bend as U
+import ./replay.bend as R
 
 # Google Antigravity (core/agy.bend): turns, the sign-in and the models
 # replayed from what agy_acp_server 1.3.0 wrote (test/fixtures/antigravity:
@@ -13,67 +13,47 @@ import ../src/core/utf8.bend as U
 def turn(+sid: String, +model: String) -> G.AgyTurn:
   G.AgyTurn{A.AcpTurn{"/tmp/p", "http://127.0.0.1:1/mcp/t?token=x", "RULES", "hello", sid, True{}}, "gemini-api-key", "default", model}
 
-type Run is Data:
-  Run{a: A.Acp, sends: List<&2, String>, emits: List<&2, String>}
-
-def Run.add(o: A.AcpOut, +ss: List<&2, String>, +es: List<&2, String>) -> Run:
-  match o:
-    case A.AcpOut{a, s, e, _}:
-      Run{a, List.append(&2, String, ss, s), List.append(&2, String, es, e)}
-
-def Run.step(r: Run, +t: G.AgyTurn, +l: String) -> Run:
+def feed(r: R.Run, +t: G.AgyTurn, +l: String) -> R.Run:
   match r:
-    case Run{a, +ss, +es}:
-      Run.add(G.Agy.line(a, t, l), ss, es)
+    case R.Run{a, +ss, +es}:
+      R.Run.add(G.Agy.line(a, t, l), ss, es)
 
-def replay(ls: List<&2, String>, r: Run, +t: G.AgyTurn) -> Run:
+def replay(ls: List<&2, String>, r: R.Run, +t: G.AgyTurn) -> R.Run:
   match ls:
     case Nil{}:
       r
     case +l <> rest:
-      replay(rest, Run.step(r, t, l), t)
+      replay(rest, feed(r, t, l), t)
 
-def sends(r: Run) -> List<&2, String>:
-  match r:
-    case Run{_, s, _}:
-      s
+def sends(r: R.Run) -> List<&2, String>:
+  R.sends(r)
 
-def emits(r: Run) -> String:
-  match r:
-    case Run{_, _, e}:
-      String.join(e, " | ")
+def emits(r: R.Run) -> String:
+  R.emits(r)
 
-def done(r: Run) -> String:
-  match r:
-    case Run{A.Acp{_, _, True{}}, _, _}:
-      "done"
-    case Run{_, _, _}:
-      "open"
+def done(r: R.Run) -> String:
+  R.done(r)
 
 def obj(+line: String) -> J.Json:
-  Maybe.default(&2, J.Json, J.Json.parse(line), J.Null{})
+  R.obj(line)
 
 def method(+line: String) -> String:
-  J.Json.get_str(obj(line), "method", "")
+  R.method(line)
 
 def methods(xs: List<&2, String>) -> List<&2, String>:
-  match xs:
-    case Nil{}:
-      Nil{}
-    case +x <> t:
-      method(x) <> methods(t)
+  R.methods(xs)
 
 def params(+line: String) -> J.Json:
-  J.Json.get_obj(obj(line), "params")
+  R.params(line)
 
 def nth(xs: List<&2, String>, n: Nat) -> String:
-  Maybe.default(&2, String, List.head(&2, String, List.drop(&2, String, xs, n)), "")
+  R.nth(xs, n)
 
 def yes(b: Bool) -> String:
-  Bool.pick(String, b, "yes", "no")
+  R.yes(b)
 
-def start() -> Run:
-  Run{A.Acp.new(), Nil{}, Nil{}}
+def start() -> R.Run:
+  R.Run.new()
 
 # the sign-in, line by line
 type SRun is Data:
@@ -111,29 +91,8 @@ def sdone(r: SRun) -> String:
     case SRun{s, _, _}:
       yes(G.AgySign.done(s))
 
-def lines.r(r: U.Lines & List<&2, String>) -> List<&2, String>:
-  (_, ls) = r
-  ls
-
-def file.done(r: File & Result<&1, &1, U32 & String, List<&2, U32>>) -> IO(List<&2, String>):
-  (f, res) = r
-  do IO<List<&2, String>>:
-    File.close(f)
-    return lines.r(U.Lines.feed(U.Lines.new(), Result.default(&1, &1, U32 & String, List<&2, U32>, res, Nil{})))
-
-def file.sized(r: File & Result<&1, &1, U32 & String, U32>) -> IO(List<&2, String>):
-  (f, res) = r
-  IO.bind(File & Result<&1, &1, U32 & String, List<&2, U32>>, List<&2, String>, File.read_bytes(f, U32.max(Result.default(&1, &1, U32 & String, U32, res, 0), 1)), file.done)
-
-def file.opened(r: Result<&1, &1, U32 & String, File>) -> IO(List<&2, String>):
-  match r:
-    case Done{f}:
-      IO.bind(File & Result<&1, &1, U32 & String, U32>, List<&2, String>, File.size(f), file.sized)
-    case Fail{_}:
-      IO.pure(List<&2, String>, Nil{})
-
 def file(path: String) -> IO(List<&2, String>):
-  IO.bind(Result<&1, &1, U32 & String, File>, List<&2, String>, File.open(path, "r"), file.opened)
+  R.file(path)
 
 def asks(o: A.AcpOut) -> String:
   match o:
@@ -151,8 +110,8 @@ def main() -> IO(Unit):
     +fresh : List<&2, String> <- file("test/fixtures/antigravity/turn.jsonl")
     +res : List<&2, String> <- file("test/fixtures/antigravity/resume.jsonl")
     +sign : List<&2, String> <- file("test/fixtures/antigravity/signin.jsonl")
-    +r1 : Run = replay(fresh, start(), turn("", "gemini-3.1-pro-low"))
-    +r2 : Run = replay(res, start(), turn("b2edf953-0194-476f-8e17-e65a3bc9c466", ""))
+    +r1 : R.Run = replay(fresh, start(), turn("", "gemini-3.1-pro-low"))
+    +r2 : R.Run = replay(res, start(), turn("b2edf953-0194-476f-8e17-e65a3bc9c466", ""))
     +rs : SRun = sreplay(sign, SRun{G.AgySign.new(), Nil{}, Nil{}})
     C.Check.str("fixtures read", Nat.show(List.length(&2, String, fresh)) ++ "," ++ Nat.show(List.length(&2, String, res)) ++ "," ++ Nat.show(List.length(&2, String, sign)), "8,5,4")
     # a fresh turn: authenticate, session/new with Backplane's MCP, the mode, the model, the prompt

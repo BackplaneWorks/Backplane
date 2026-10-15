@@ -51,11 +51,6 @@ def Omp.models(+text: String) -> List<&2, String>:
 def Omp.install() -> String:
   "Install oh-my-pi with `curl -fsSL https://omp.sh/install | sh` or `bun install -g @oh-my-pi/pi-coding-agent`, then sign in with `omp login`."
 
-# an auth-looking failure gets the sign-in hint, as Acp.hint does for Grok
-def Omp.hint(+msg: String) -> String:
-  Bool.pick(String, Bool.or(String.contains(String.to_lower(msg), "auth"), String.contains(String.to_lower(msg), "login")),
-    msg ++ " (sign in once with `omp login`)", msg)
-
 # A turn
 # ------
 # initialize (1), then session/new (2) or session/load (2), then the config
@@ -152,7 +147,7 @@ def Omp.note() -> String:
 
 # a session/load the agent cannot answer: a new session, noted in the turn
 def Omp.renew(+a: AC.Acp, +t: OmpTurn) -> AC.AcpOut:
-  AC.AcpOut{a, [Omp.renew.rpc(Omp.acp(t))], [AC.Acp.event("item.completed", [J.KV{"item", J.Json.obj([J.KV{"type", J.Str{"agent_message"}}, J.KV{"text", J.Str{Omp.note()}}])}])], Nil{}}
+  AC.AcpOut{a, [Omp.renew.rpc(Omp.acp(t))], [AC.Acp.event("item.completed", [J.KV{"item", J.Json.obj([J.KV{"type", J.Str{"backplane_note"}}, J.KV{"text", J.Str{Omp.note()}}])}])], Nil{}}
 
 def Omp.failed(a: AC.Acp, +o: J.Json) -> AC.AcpOut:
   AC.Acp.fail(a, "omp login", AC.Acp.error(o))
@@ -179,8 +174,6 @@ def Omp.reply.k(id: Nat, ok: Bool, a: AC.Acp, +t: OmpTurn, +line: String, +o: J.
       Omp.reopen(Omp.fresh(t), a, t, o)
     case 7n True{}:
       Omp.opened(True{}, 14n, a, t, Omp.reply.sid(o, t))
-    case 7n False{}:
-      Omp.failed(a, o)
     case 4n True{}:
       Omp.model.done(Omp.fresh(t), 4n, a, t)
     case 14n True{}:
@@ -189,13 +182,7 @@ def Omp.reply.k(id: Nat, ok: Bool, a: AC.Acp, +t: OmpTurn, +line: String, +o: J.
       Omp.thinking.done(Omp.fresh(t), a, t)
     case 15n True{}:
       Omp.thinking.done(True{}, a, t)
-    case 4n False{}:
-      Omp.failed(a, o)
-    case 5n False{}:
-      Omp.failed(a, o)
-    case 14n False{}:
-      Omp.failed(a, o)
-    case 15n False{}:
+    case _ False{}:
       Omp.failed(a, o)
     case _ _:
       AC.Acp.line.login(a, Omp.acp(t), "omp login", line)

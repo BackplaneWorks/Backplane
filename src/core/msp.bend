@@ -453,3 +453,8 @@ def Proto.gone(p: Proto) -> String:
       "antigravity exited before the turn ended (is it installed and signed in? see Settings › Antigravity)"
     case POmp{_, _, _}:
       "omp exited before the turn ended (is it signed in? run `omp login`)"
+
+# the turn's failure when its process could not start: the program's name,
+# what went wrong and how to install it
+def Proto.spawn_failed(+p: Proto, +msg: String) -> String:
+  AC.Acp.failed("could not start " ++ Proto.name(p) ++ ": " ++ msg ++ ". " ++ Proto.install(p))

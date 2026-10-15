@@ -2566,6 +2566,8 @@ def Codex.item.k(i: Nat, +thread: String, +now: Nat, +seq: Nat, +it: J.Json) -> 
       Step{[M.ActivityLogged{thread, Hub.id("f", now, seq), "tool", "edit", J.Json.show(J.Json.get_obj(it, "changes")), now}], Nil{}}
     case 3n:
       Step{[M.TodosSet{thread, TD.Todo.show(TD.Todo.codex(it)), now}], Nil{}}
+    case 4n:
+      Step{[M.ActivityLogged{thread, Hub.id("n", now, seq), "info", "resume", J.Json.get_str(it, "text", ""), now}], Nil{}}
     case _:
       Step.none()
 
@@ -2588,7 +2590,7 @@ def Codex.line.k(i: Nat, +s: M.State, +thread: String, +now: Nat, +o: J.Json) ->
     case 0n:
       Claude.init.k(Claude.init.same(Hub.thread(s, thread), J.Json.get_str(o, "thread_id", "")), thread, J.Json.get_str(o, "thread_id", ""), now)
     case 1n:
-      Codex.item.k(C.Codec.pos(["agent_message", "command_execution", "file_change", "todo_list"], J.Json.get_str(J.Json.get_obj(o, "item"), "type", "")), thread, now, Hub.seq(s), J.Json.get_obj(o, "item"))
+      Codex.item.k(C.Codec.pos(["agent_message", "command_execution", "file_change", "todo_list", "backplane_note"], J.Json.get_str(J.Json.get_obj(o, "item"), "type", "")), thread, now, Hub.seq(s), J.Json.get_obj(o, "item"))
     case 2n:
       Step{[M.TurnChanged{thread, M.Completed{}, now}], Nil{}}
     case 4n:
