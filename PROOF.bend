@@ -10361,3 +10361,12 @@ def Laws.mail_origin_keeps_outputs(st, thread, msg, origin, at):
       {==}
 
 # ---- end mail 1 ----
+
+# ---- omp ----
+def Laws.omp_approval_total():
+  {==}
+
+def Laws.omp_yolo_only_full():
+  {==}
+
+# ---- end omp ----
