@@ -134,3 +134,11 @@ def main() -> IO(Unit):
     C.Check.str("omp note item", item.of(B.Codex.item.k(4n, "T", 5n, 7n, R.obj("{\"type\":\"backplane_note\",\"text\":\"The earlier session could not be resumed, so this turn starts a new one.\"}"))),
       "act info resume The earlier session could not be resumed, so this turn starts a new one.")
     C.Check.str("omp message item", item.of(B.Codex.item.k(0n, "T", 5n, 7n, R.obj("{\"id\":\"m1\",\"type\":\"agent_message\",\"text\":\"hi\"}"))), "msg hi")
+    # an omp error with no message names omp, not grok
+    C.Check.str("omp error default", R.emits(replay(["{\"jsonrpc\":\"2.0\",\"id\":2,\"error\":{\"code\":-32000}}"], replay([R.nth(fx, 0n)], R.Run.new(), turn("", "", "")), turn("", "", ""))),
+      "{\"type\":\"turn.failed\",\"message\":\"omp failed\"}")
+    # an error reply to the prompt fails the turn with its message, and nothing is sent after it
+    +badprompt : R.Run = replay(["{\"jsonrpc\":\"2.0\",\"id\":3,\"error\":{\"code\":-32000,\"message\":\"prompt rejected\"}}"],
+      replay([R.nth(fx, 0n), R.nth(fx, 1n)], R.Run.new(), turn("", "", "")), turn("", "", ""))
+    C.Check.str("omp prompt error sends", String.join(R.methods(R.sends(badprompt)), ","), "session/new,session/prompt")
+    C.Check.str("omp prompt error fails", R.emits(badprompt), "{\"type\":\"thread.started\",\"thread_id\":\"01a14112-89a7-7544-b120-9a13b2948ace\"} | {\"type\":\"turn.failed\",\"message\":\"prompt rejected\"}")

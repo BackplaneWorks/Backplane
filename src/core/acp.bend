@@ -81,8 +81,12 @@ def Acp.event(+ty: String, kvs: List<&2, J.KV>) -> String:
 def Acp.failed(+msg: String) -> String:
   Acp.event("turn.failed", [J.KV{"message", J.Str{msg}}])
 
+# the failure's message, or "<name> failed" when the reply has none
+def Acp.error.named(o: J.Json, name: String) -> String:
+  J.Json.get_str(J.Json.get_obj(o, "error"), "message", name ++ " failed")
+
 def Acp.error(o: J.Json) -> String:
-  J.Json.get_str(J.Json.get_obj(o, "error"), "message", "grok failed")
+  Acp.error.named(o, "grok")
 
 # a sign-in problem says how to fix it
 def Acp.hint(+login: String, +msg: String) -> String:

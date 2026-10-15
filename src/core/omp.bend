@@ -5,7 +5,7 @@ import ./acp.bend as AC
 
 # oh-my-pi (omp, core/omp.bend): the approval modes it takes on its ACP
 # command line, the thinking levels it offers, the chat models it lists
-# from `omp models --json`, its install line and its auth hint. One process
+# from `omp models --json` and its install line. One process
 # per turn: `omp acp --approval-mode <mode>`. Pure: no IO here.
 
 # the --approval-mode argument for a runtime mode
@@ -150,7 +150,7 @@ def Omp.renew(+a: AC.Acp, +t: OmpTurn) -> AC.AcpOut:
   AC.AcpOut{a, [Omp.renew.rpc(Omp.acp(t))], [AC.Acp.event("item.completed", [J.KV{"item", J.Json.obj([J.KV{"type", J.Str{"backplane_note"}}, J.KV{"text", J.Str{Omp.note()}}])}])], Nil{}}
 
 def Omp.failed(a: AC.Acp, +o: J.Json) -> AC.AcpOut:
-  AC.Acp.fail(a, "omp login", AC.Acp.error(o))
+  AC.Acp.fail(a, "omp login", AC.Acp.error.named(o, "omp"))
 
 # a failed session/load of a resumed session opens afresh; a new session
 # that fails ends the turn

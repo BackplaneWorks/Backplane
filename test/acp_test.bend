@@ -104,3 +104,6 @@ def main() -> IO(Unit):
     C.Check.str("acp elicit answer accept", A.Acp.elicit.answer(ea, "accept"), "{\"jsonrpc\":\"2.0\",\"id\":\"e1\",\"result\":{\"action\":\"accept\",\"content\":{\"value\":\"Approve\"}}}")
     C.Check.str("acp elicit answer deny", A.Acp.elicit.answer(ea, "decline"), "{\"jsonrpc\":\"2.0\",\"id\":\"e1\",\"result\":{\"action\":\"decline\"}}")
     C.Check.str("acp hint grok unchanged", A.Acp.hint("grok login", "Authentication required"), "Authentication required (sign in once with `grok login`)")
+    C.Check.str("acp error default grok", A.Acp.error(J.Json.obj([J.KV{"id", J.Num{"2"}}])), "grok failed")
+    C.Check.str("acp error named", A.Acp.error.named(J.Json.obj([J.KV{"id", J.Num{"2"}}]), "omp"), "omp failed")
+    C.Check.str("acp error message kept", A.Acp.error.named(J.Json.obj([J.KV{"error", J.Json.obj([J.KV{"message", J.Str{"nope"}}])}]), "omp"), "nope")
