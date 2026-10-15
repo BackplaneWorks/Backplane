@@ -24,9 +24,10 @@ def Omp.approval(r: M.RuntimeMode) -> String:
 def Omp.args(r: M.RuntimeMode) -> List<&2, String>:
   ["acp", "--approval-mode", Omp.approval(r)]
 
-# the thinking levels omp accepts
+# the thinking levels omp accepts: the union of every model's (an omp model
+# takes a subset, see Omp.efforts)
 def Omp.levels() -> List<&2, String>:
-  ["off", "auto", "low", "medium", "high", "xhigh", "max"]
+  ["off", "auto", "minimal", "low", "medium", "high", "xhigh", "max"]
 
 # one entry's selector ahead of the rest, when it is a chat model
 def Omp.chat.one(on: Bool, +m: J.Json, +rest: List<&2, String>) -> List<&2, String>:
@@ -47,6 +48,34 @@ def Omp.chat.rows(xs: List<&2, J.Json>) -> List<&2, String>:
 # is not JSON or has no models)
 def Omp.models(+text: String) -> List<&2, String>:
   Omp.chat.rows(J.Json.elems(J.Json.get_obj(Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{}), "models")))
+
+# one chat model's thinking levels as omp's ACP takes them: off and auto,
+# then the model's own list; a model without reasoning takes none
+def Omp.efforts.k(reasoning: Bool, +m: J.Json) -> J.Json:
+  match reasoning:
+    case True{}:
+      J.Json.arr(List.append(&2, J.Json, [J.Json.str("off"), J.Json.str("auto")], J.Json.elems(Maybe.default(&2, J.Json, J.Json.get(m, "thinking"), J.Null{}))))
+    case False{}:
+      J.Json.arr(Nil{})
+
+def Omp.efforts.one(on: Bool, +m: J.Json, +rest: List<&2, J.KV>) -> List<&2, J.KV>:
+  match on:
+    case True{}:
+      J.KV{J.Json.get_str(m, "selector", ""), Omp.efforts.k(J.Json.get_bool(m, "reasoning", False{}), m)} <> rest
+    case False{}:
+      rest
+
+def Omp.efforts.rows(xs: List<&2, J.Json>) -> List<&2, J.KV>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case +m <> t:
+      Omp.efforts.one(String.eq(J.Json.get_str(m, "kind", ""), "chat"), m, Omp.efforts.rows(t))
+
+# the thinking levels of each chat model in `omp models --json`, by selector,
+# and "default" (the provider's own model: none sent, so no levels)
+def Omp.efforts(+text: String) -> List<&2, J.KV>:
+  J.KV{"default", J.Json.arr(Nil{})} <> Omp.efforts.rows(J.Json.elems(J.Json.get_obj(Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{}), "models")))
 
 def Omp.install() -> String:
   "Install oh-my-pi with `curl -fsSL https://omp.sh/install | sh` or `bun install -g @oh-my-pi/pi-coding-agent`, then sign in with `omp login`."

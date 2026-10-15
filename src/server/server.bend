@@ -4564,12 +4564,20 @@ def Models.grok(r: P.Ran) -> List<&2, String>:
       Nil{}
 
 # `omp models --json` (kind chat): the selectors of its chat models
-def Models.omp(r: P.Ran) -> List<&2, String>:
+def Models.omp(+r: P.Ran) -> List<&2, String>:
   match r:
     case P.Ran{0, out}:
       OM.Omp.models(out)
     case _:
       Nil{}
+
+# (oh-my-pi's thinking levels per model, by selector: OM.Omp.efforts)
+def Models.omp.efforts(+r: P.Ran) -> List<&2, J.KV>:
+  match r:
+    case P.Ran{0, out}:
+      OM.Omp.efforts(out)
+    case _:
+      OM.Omp.efforts("")
 
 def Main.has(r: P.Ran) -> Bool:
   match r:
@@ -4703,15 +4711,17 @@ def Models.detect(+user: String, +home: String) -> IO(Found):
     vg : P.Ran <- P.Proc.run("sh", ["-c", (PT.Port.tmo() ++ "tmo 10 grok --version")], "/")
     mu : P.Ran <- P.Proc.run("sh", ["-c", Muse.probe.sh()], "/")
     vm : P.Ran <- P.Proc.run("sh", ["-c", (PT.Port.tmo() ++ "command -v muse >/dev/null && tmo 10 muse --version")], "/")
-    oc : P.Ran <- P.Proc.run("sh", ["-c", (PT.Port.tmo() ++ "command -v omp >/dev/null && tmo 15 omp models --json")], "/")
+    +oc : P.Ran <- P.Proc.run("sh", ["-c", (PT.Port.tmo() ++ "command -v omp >/dev/null && tmo 15 omp models --json")], "/")
     vo : P.Ran <- P.Proc.run("sh", ["-c", (PT.Port.tmo() ++ "command -v omp >/dev/null && tmo 10 omp --version")], "/")
     +xs : List<&2, J.Json> = Claude.listed(pc)
     +mx : List<&2, J.Json> = Muse.catalog(mu)
     +ag : AGY.AgyInfo <- AGX.Agx.probe(AGX.Agx.root(home))
     +om : List<&2, String> = Models.omp(oc)
+    +oe : List<&2, J.KV> = Models.omp.efforts(oc)
     return Models.found(Claude.models(Main.has(cl), xs), Models.on(Main.has(cx), Models.codex(cache)), Models.grok(gk), Models.muse(mx), AGY.Agy.info.models(ag), om, AGY.Agy.info.json(ag),
       J.Json.obj([J.KV{"claude", Claude.about(About.cli(vc), xs)}, J.KV{"codex", About.one(About.cli(vx), About.codex(cache))}, J.KV{"grok", About.one(About.cli(vg), About.grok(gk))},
-        J.KV{"muse", About.one(About.cli(vm), About.muse(mx))}, J.KV{"antigravity", AGY.Agy.info.about(ag)}, J.KV{"omp", About.one(About.cli(vo), About.omp(om))}]))
+        J.KV{"muse", About.one(About.cli(vm), About.muse(mx))}, J.KV{"antigravity", AGY.Agy.info.about(ag)},
+        J.KV{"omp", J.Json.obj([J.KV{"cli", J.Str{About.cli(vo)}}, J.KV{"labels", J.Json.obj(About.omp(om))}, J.KV{"efforts", J.Json.obj(oe)}])}]))
 
 # The CLIs are looked for on PATH, which a launcher's or a service's hub
 # lacks the login shell's part of (nvm, volta...): before each detection the
