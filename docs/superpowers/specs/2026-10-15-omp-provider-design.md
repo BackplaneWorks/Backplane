@@ -68,7 +68,7 @@ The list comes from `omp models --json` (its `selector` values, grouped by provi
 
 Levels: off, auto, low, medium, high, xhigh, max. Blank means omp's default, and nothing is sent. Chips appear for the models whose catalog entry has `reasoning` true. If no model has it, there are no chips and omp's default applies. The field is in `omp models --json`; whether any model sets it is unchecked.
 
-### Approvals (decision pending)
+### Approvals (decided: option a)
 
 Backplane's runtime mode maps to omp's `--approval-mode` on the process. Observed: the flag takes effect. A `write` under `always-ask` was refused, which it could not be under omp's default `yolo`.
 
@@ -81,7 +81,7 @@ Observed live: `write` under `always-ask` ended with `Tool call denied by user: 
 
 Consequence today: Supervised cannot create files, and AcceptEdits cannot run `eval`, `browser` or `task`. These are exec-tier tools outside the gated list. [INFERENCE from the source; `write` is the only one seen live.]
 
-Decision needed:
+Decided by the person: option (a). Option (b) was not chosen.
 
 - **(a) Build the approval forms (recommended).** Advertise `elicitation.form`. Answer `elicitation/create` for the Approve/Deny select through the asks card: accept with "Approve", or decline. Decline every other form in v1. The card has Allow and Deny only, so "Allow for session" answers as Allow once. This adds one request type to `acp.bend`, its tests, and a second recorded turn that shows a form.
 - **(b) Full access only in v1.** omp is offered in full access, and the other modes come later. Needs a per-provider filter on the mode picker, which is shared across providers today (`codec.bend`). I have not traced the four clients' pickers.
