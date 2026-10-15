@@ -44,10 +44,18 @@ def Omp.chat.rows(xs: List<&2, J.Json>) -> List<&2, String>:
     case +m <> t:
       Omp.chat.one(String.eq(J.Json.get_str(m, "kind", ""), "chat"), m, Omp.chat.rows(t))
 
+# the parsed `omp models --json` ("null" when the text is not JSON)
+def Omp.catalog(+text: String) -> J.Json:
+  Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{})
+
+# the selectors of the chat models in a parsed catalog
+def Omp.models.j(+doc: J.Json) -> List<&2, String>:
+  Omp.chat.rows(J.Json.elems(J.Json.get_obj(doc, "models")))
+
 # the selectors of the chat models in `omp models --json` ("" when the text
 # is not JSON or has no models)
 def Omp.models(+text: String) -> List<&2, String>:
-  Omp.chat.rows(J.Json.elems(J.Json.get_obj(Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{}), "models")))
+  Omp.models.j(Omp.catalog(text))
 
 # one chat model's thinking levels as omp's ACP takes them: off and auto,
 # then the model's own list; a model without reasoning takes none
@@ -72,10 +80,13 @@ def Omp.efforts.rows(xs: List<&2, J.Json>) -> List<&2, J.KV>:
     case +m <> t:
       Omp.efforts.one(String.eq(J.Json.get_str(m, "kind", ""), "chat"), m, Omp.efforts.rows(t))
 
-# the thinking levels of each chat model in `omp models --json`, by selector,
+# the thinking levels of each chat model in a parsed catalog, by selector,
 # and "default" (the provider's own model: none sent, so no levels)
+def Omp.efforts.j(+doc: J.Json) -> List<&2, J.KV>:
+  J.KV{"default", J.Json.arr(Nil{})} <> Omp.efforts.rows(J.Json.elems(J.Json.get_obj(doc, "models")))
+
 def Omp.efforts(+text: String) -> List<&2, J.KV>:
-  J.KV{"default", J.Json.arr(Nil{})} <> Omp.efforts.rows(J.Json.elems(J.Json.get_obj(Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{}), "models")))
+  Omp.efforts.j(Omp.catalog(text))
 
 def Omp.install() -> String:
   "Install oh-my-pi with `curl -fsSL https://omp.sh/install | sh` or `bun install -g @oh-my-pi/pi-coding-agent`, then sign in with `omp login`."
