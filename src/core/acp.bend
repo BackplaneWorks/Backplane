@@ -32,9 +32,18 @@ def Acp.rpc(+id: Nat, +method: String, params: J.Json) -> String:
   J.Json.show(J.Json.obj([J.KV{"jsonrpc", J.Str{"2.0"}}, J.KV{"id", J.Num{Nat.show(id)}}, J.KV{"method", J.Str{method}}, J.KV{"params", params}]))
 
 # the first line of every turn
+def Acp.caps(+elic: List<&2, J.KV>) -> J.Json:
+  J.Json.obj(List.append(&2, J.KV, [J.KV{"fs", J.Json.obj([J.KV{"readTextFile", J.Flag{False{}}}, J.KV{"writeTextFile", J.Flag{False{}}}])}, J.KV{"terminal", J.Flag{False{}}}], elic))
+
+def Acp.init.k(+caps: J.Json) -> String:
+  Acp.rpc(1n, "initialize", J.Json.obj([J.KV{"protocolVersion", J.Num{"1"}}, J.KV{"clientCapabilities", caps}]))
+
 def Acp.init() -> String:
-  Acp.rpc(1n, "initialize", J.Json.obj([J.KV{"protocolVersion", J.Num{"1"}},
-    J.KV{"clientCapabilities", J.Json.obj([J.KV{"fs", J.Json.obj([J.KV{"readTextFile", J.Flag{False{}}}, J.KV{"writeTextFile", J.Flag{False{}}}])}, J.KV{"terminal", J.Flag{False{}}}])}]))
+  Acp.init.k(Acp.caps(Nil{}))
+
+# the same line, advertising omp's approval forms (elicitation/create)
+def Acp.init.form() -> String:
+  Acp.init.k(Acp.caps([J.KV{"elicitation", J.Json.obj([J.KV{"form", J.Json.obj(Nil{})}])}]))
 
 def Acp.mcp(+url: String) -> J.Json:
   J.Json.arr([J.Json.obj([J.KV{"type", J.Str{"http"}}, J.KV{"name", J.Str{"backplane"}}, J.KV{"url", J.Str{url}}, J.KV{"headers", J.Json.arr(Nil{})}])])
@@ -76,14 +85,14 @@ def Acp.error(o: J.Json) -> String:
   J.Json.get_str(J.Json.get_obj(o, "error"), "message", "grok failed")
 
 # a sign-in problem says how to fix it
-def Acp.hint(+msg: String) -> String:
+def Acp.hint(+login: String, +msg: String) -> String:
   Bool.pick(String, Bool.or(String.contains(String.to_lower(msg), "auth"), String.contains(String.to_lower(msg), "login")),
-    msg ++ " (sign in once with `grok login`)", msg)
+    msg ++ " (sign in once with `" ++ login ++ "`)", msg)
 
-def Acp.fail(a: Acp, +msg: String) -> AcpOut:
+def Acp.fail(a: Acp, +login: String, +msg: String) -> AcpOut:
   match a:
     case Acp{s, b, _}:
-      AcpOut{Acp{s, b, True{}}, Nil{}, [Acp.failed(Acp.hint(msg))], Nil{}}
+      AcpOut{Acp{s, b, True{}}, Nil{}, [Acp.failed(Acp.hint(login, msg))], Nil{}}
 
 # Replies to our requests (by id)
 # -------------------------------
@@ -100,10 +109,10 @@ def Acp.finished(a: Acp) -> AcpOut:
         List.append(&2, String, Bool.pick(List<&2, String>, String.is_empty(b), Nil{}, [Acp.event("item.completed", [J.KV{"item", J.Json.obj([J.KV{"type", J.Str{"agent_message"}}, J.KV{"text", J.Str{b}}])}])]),
           [Acp.event("turn.completed", Nil{})]), Nil{}}
 
-def Acp.reply.k(id: Nat, ok: Bool, a: Acp, +t: AcpTurn, +o: J.Json) -> AcpOut:
+def Acp.reply.k(id: Nat, ok: Bool, a: Acp, +t: AcpTurn, +login: String, +o: J.Json) -> AcpOut:
   match id ok:
     case _ False{}:
-      Acp.fail(a, Acp.error(o))
+      Acp.fail(a, login, Acp.error(o))
     case 1n True{}:
       AcpOut{a, [Acp.open(t)], Nil{}, Nil{}}
     case 2n True{}:
@@ -204,12 +213,49 @@ def Acp.ask_of(t: AcpTurn) -> Bool:
     case AcpTurn{_, _, _, _, _, k}:
       k
 
+# an elicitation form the agent sends (omp's approvals): an approval form
+# offers "Approve" in its value's enum
+def Acp.has.str(xs: List<&2, J.Json>, +x: String) -> Bool:
+  match xs:
+    case Nil{}:
+      False{}
+    case +h <> t:
+      Bool.pick(Bool, String.eq(J.Json.show(h), J.Json.show(J.Str{x})), True{}, Acp.has.str(t, x))
+
+def Acp.elicit.approve(params: J.Json) -> Bool:
+  Acp.has.str(J.Json.elems(J.Json.get_obj(J.Json.get_obj(J.Json.get_obj(J.Json.get_obj(params, "requestedSchema"), "properties"), "value"), "enum")), "Approve")
+
+# the response: accept carries Approve, anything else declines
+def Acp.elicit.result(+answer: String) -> String:
+  Bool.pick(String, String.eq(answer, "accept"), "{\"action\":\"accept\",\"content\":{\"value\":\"Approve\"}}", "{\"action\":\"decline\"}")
+
+def Acp.elicit.reply(+id: String, +answer: String) -> String:
+  "{\"jsonrpc\":\"2.0\",\"id\":" ++ id ++ ",\"result\":" ++ Acp.elicit.result(answer) ++ "}"
+
+# full access answers an approval at once; a supervised one goes to the user
+def Acp.elicit.grant(+ask: Bool, a: Acp, +id: String, +o: J.Json) -> AcpOut:
+  match ask:
+    case True{}:
+      AcpOut{a, Nil{}, Nil{}, [J.Json.show(o)]}
+    case False{}:
+      AcpOut{a, [Acp.elicit.reply(id, "accept")], Nil{}, Nil{}}
+
+# a form that is not an approval is declined, never asked
+def Acp.elicit.route(approve: Bool, +ask: Bool, a: Acp, +id: String, +o: J.Json) -> AcpOut:
+  match approve:
+    case True{}:
+      Acp.elicit.grant(ask, a, id, o)
+    case False{}:
+      AcpOut{a, [Acp.elicit.reply(id, "decline")], Nil{}, Nil{}}
+
 def Acp.request.k(i: Nat, ask: Bool, +a: Acp, +id: String, +o: J.Json) -> AcpOut:
   match i:
     case 0n:
       Acp.update.live(Acp.open_now(a), a, o)
     case 1n:
       Acp.permit.route(ask, a, id, o)
+    case 2n:
+      Acp.elicit.route(Acp.elicit.approve(J.Json.get_obj(o, "params")), ask, a, id, o)
     case _:
       AcpOut{a, Bool.pick(List<&2, String>, String.is_empty(id), Nil{},
         ["{\"jsonrpc\":\"2.0\",\"id\":" ++ id ++ ",\"error\":{\"code\":-32601,\"message\":\"not supported\"}}"]), Nil{}, Nil{}}
@@ -222,23 +268,26 @@ def Acp.id(m: Maybe<&2, J.Json>) -> String:
     case None{}:
       ""
 
-def Acp.line.k(req: Bool, a: Acp, +t: AcpTurn, +o: J.Json) -> AcpOut:
+def Acp.line.k(req: Bool, a: Acp, +t: AcpTurn, +login: String, +o: J.Json) -> AcpOut:
   match req:
     case True{}:
-      Acp.request.k(Acp.pos(["session/update", "session/request_permission"], J.Json.get_str(o, "method", ""), 0n), Acp.ask_of(t), a, Acp.id(J.Json.get(o, "id")), o)
+      Acp.request.k(Acp.pos(["session/update", "session/request_permission", "elicitation/create"], J.Json.get_str(o, "method", ""), 0n), Acp.ask_of(t), a, Acp.id(J.Json.get(o, "id")), o)
     case False{}:
-      Acp.reply.k(Maybe.default(&2, Nat, Nat.read(J.Json.as_raw(J.Json.get(o, "id"), "0")), 0n), String.eq(J.Json.show(J.Json.get_obj(o, "error")), "null"), a, t, o)
+      Acp.reply.k(Maybe.default(&2, Nat, Nat.read(J.Json.as_raw(J.Json.get(o, "id"), "0")), 0n), String.eq(J.Json.show(J.Json.get_obj(o, "error")), "null"), a, t, login, o)
 
-def Acp.line.parsed(m: Maybe<&2, J.Json>, a: Acp, +t: AcpTurn) -> AcpOut:
+def Acp.line.parsed(m: Maybe<&2, J.Json>, a: Acp, +t: AcpTurn, +login: String) -> AcpOut:
   match m:
     case Some{+o}:
-      Acp.line.k(Bool.not(String.is_empty(J.Json.get_str(o, "method", ""))), a, t, o)
+      Acp.line.k(Bool.not(String.is_empty(J.Json.get_str(o, "method", ""))), a, t, login, o)
     case None{}:
       AcpOut{a, Nil{}, Nil{}, Nil{}}
 
-# one line from the agent
+# one line from the agent (its sign-in hint names the caller's login command)
+def Acp.line.login(a: Acp, +t: AcpTurn, +login: String, line: String) -> AcpOut:
+  Acp.line.parsed(J.Json.parse(line), a, t, login)
+
 def Acp.line(a: Acp, +t: AcpTurn, line: String) -> AcpOut:
-  Acp.line.parsed(J.Json.parse(line), a, t)
+  Acp.line.login(a, t, "grok login", line)
 
 # Permission answers
 # ------------------
@@ -276,6 +325,13 @@ def Acp.permit.answer.k(+o: J.Json, +answer: String) -> String:
 # the response for a parked request line, once the user answered
 def Acp.permit.answer(+body: String, +answer: String) -> String:
   Acp.permit.answer.k(Maybe.default(&2, J.Json, J.Json.parse(body), J.Null{}), answer)
+
+# the response for a parked elicitation line, once the user answered
+def Acp.elicit.answer.k(+o: J.Json, +answer: String) -> String:
+  Acp.elicit.reply(Acp.id(J.Json.get(o, "id")), answer)
+
+def Acp.elicit.answer(+body: String, +answer: String) -> String:
+  Acp.elicit.answer.k(Maybe.default(&2, J.Json, J.Json.parse(body), J.Null{}), answer)
 
 # what a request asks to run: the tool (its kind, else its title; what
 # "Allow for session" remembers) and a line for the approval card

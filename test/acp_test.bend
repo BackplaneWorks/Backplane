@@ -37,6 +37,20 @@ def done(a: A.Acp) -> String:
     case A.Acp{_, _, False{}}:
       "open"
 
+def sends(o: A.AcpOut) -> String:
+  match o:
+    case A.AcpOut{_, send, _, _}:
+      String.join(send, " | ")
+
+def elicit(+id: String, +schema: String) -> String:
+  "{\"jsonrpc\":\"2.0\",\"id\":" ++ id ++ ",\"method\":\"elicitation/create\",\"params\":{\"mode\":\"form\",\"sessionId\":\"S1\",\"message\":\"Approve the tool?\",\"requestedSchema\":" ++ schema ++ "}}"
+
+def approve_schema() -> String:
+  "{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"string\",\"enum\":[\"Approve\",\"Deny\"]}},\"required\":[\"value\"]}"
+
+def yes_no_schema() -> String:
+  "{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"string\",\"enum\":[\"Yes\",\"No\"]}},\"required\":[\"value\"]}"
+
 def main() -> IO(Unit):
   +t = turn("")
   +a0 = A.Acp.new()
@@ -51,6 +65,12 @@ def main() -> IO(Unit):
   +op = A.Acp.line(a0, t, "{\"jsonrpc\":\"2.0\",\"id\":\"p9\",\"method\":\"session/request_permission\",\"params\":{\"options\":[{\"optionId\":\"no\",\"kind\":\"reject_once\"},{\"optionId\":\"yes\",\"kind\":\"allow_once\"}]}}")
   +oq = A.Acp.line(a0, turn.ask(""), "{\"jsonrpc\":\"2.0\",\"id\":\"p9\",\"method\":\"session/request_permission\",\"params\":{\"toolCall\":{\"toolCallId\":\"c1\",\"title\":\"List files\",\"kind\":\"execute\",\"rawInput\":{\"command\":\"ls -la\"}},\"options\":[{\"optionId\":\"no\",\"kind\":\"reject_once\"},{\"optionId\":\"always\",\"kind\":\"allow_always\"},{\"optionId\":\"yes\",\"kind\":\"allow_once\"}]}}")
   +body = {"{\"jsonrpc\":\"2.0\",\"id\":\"p9\",\"method\":\"session/request_permission\",\"params\":{\"toolCall\":{\"toolCallId\":\"c1\",\"title\":\"List files\",\"kind\":\"execute\",\"rawInput\":{\"command\":\"ls -la\"}},\"options\":[{\"optionId\":\"no\",\"kind\":\"reject_once\"},{\"optionId\":\"always\",\"kind\":\"allow_always\"},{\"optionId\":\"yes\",\"kind\":\"allow_once\"}]}}" : String}
+  +ea = elicit("\"e1\"", approve_schema())
+  +eo = elicit("\"e1\"", yes_no_schema())
+  +ae = A.Acp.line(a0, turn.ask(""), ea)
+  +af = A.Acp.line(a0, turn(""), ea)
+  +ano = A.Acp.line(a0, turn(""), eo)
+  +ano2 = A.Acp.line(a0, turn.ask(""), eo)
   do IO<Unit>:
     C.Check.str("acp init method", method(A.Acp.init()), "initialize")
     C.Check.str("acp new session", method(outs(o1)), "session/new")
@@ -73,3 +93,14 @@ def main() -> IO(Unit):
     C.Check.str("acp answer no reject", A.Acp.permit.answer("{\"id\":4,\"params\":{\"options\":[{\"optionId\":\"y\",\"kind\":\"allow_once\"}]}}", "decline"), "{\"jsonrpc\":\"2.0\",\"id\":4,\"result\":{\"outcome\":{\"outcome\":\"cancelled\"}}}")
     C.Check.str("acp tool", A.Acp.tool(J.Json.get_obj(Maybe.default(&2, J.Json, J.Json.parse(body), J.Null{}), "params")), "execute")
     C.Check.str("acp detail", A.Acp.detail(J.Json.get_obj(Maybe.default(&2, J.Json, J.Json.parse(body), J.Null{}), "params")), "ls -la")
+    C.Check.str("acp init unchanged for grok", A.Acp.init(), "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":1,\"clientCapabilities\":{\"fs\":{\"readTextFile\":false,\"writeTextFile\":false},\"terminal\":false}}}")
+    C.Check.str("acp init form advertises", Bool.pick(String, String.contains(A.Acp.init.form(), "\"elicitation\":{\"form\":{}}"), "yes", "no"), "yes")
+    C.Check.str("acp elicit parks in supervised", asks(ae), ea)
+    C.Check.str("acp elicit full access never parks", asks(af), "")
+    C.Check.str("acp elicit approve at once", sends(af), "{\"jsonrpc\":\"2.0\",\"id\":\"e1\",\"result\":{\"action\":\"accept\",\"content\":{\"value\":\"Approve\"}}}")
+    C.Check.str("acp elicit other form declines", sends(ano), "{\"jsonrpc\":\"2.0\",\"id\":\"e1\",\"result\":{\"action\":\"decline\"}}")
+    C.Check.str("acp elicit other form never asks", asks(ano2), "")
+    C.Check.str("acp elicit other form declines supervised", sends(ano2), "{\"jsonrpc\":\"2.0\",\"id\":\"e1\",\"result\":{\"action\":\"decline\"}}")
+    C.Check.str("acp elicit answer accept", A.Acp.elicit.answer(ea, "accept"), "{\"jsonrpc\":\"2.0\",\"id\":\"e1\",\"result\":{\"action\":\"accept\",\"content\":{\"value\":\"Approve\"}}}")
+    C.Check.str("acp elicit answer deny", A.Acp.elicit.answer(ea, "decline"), "{\"jsonrpc\":\"2.0\",\"id\":\"e1\",\"result\":{\"action\":\"decline\"}}")
+    C.Check.str("acp hint grok unchanged", A.Acp.hint("grok login", "Authentication required"), "Authentication required (sign in once with `grok login`)")
