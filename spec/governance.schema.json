@@ -1,0 +1,131 @@
+{
+  "protocol": "BP/GOV/3",
+  "schema": 3,
+  "wire": {
+    "event": "SettingSet",
+    "key": "gov.receipt.latest"
+  },
+  "committee": ["architecture", "reliability", "experience"],
+  "deployment": {
+    "activation": "shadow-until-all-paired-hubs-advertise-v3",
+    "quorum": "unanimous",
+    "processing": "fifo",
+    "queue_path": "governance-pending.jsonl",
+    "queue_limit_bytes": 268435456,
+    "vote_receipts_path": "governance-votes.jsonl",
+    "restart": "resume-pending",
+    "peer_payload": "content-free proposal metadata only",
+    "appeal": "second reading reruns checks and cannot override a no vote"
+  },
+  "receipt_fields": [
+    "id", "protocol", "actor", "action", "intent", "policy", "dissent",
+    "schema", "changes", "digest", "architecture", "reliability", "experience", "at"
+  ],
+  "render_certificate": {
+    "algorithm": "SHA-256",
+    "input": "BP/GOV/3 plus canonical Plane.text projection"
+  },
+  "ledgers": [
+    {"path": "governance.jsonl", "purpose": "Content-free review receipts"},
+    {"path": "projections.jsonl", "purpose": "SHA-256 batch projection certificates"},
+    {"path": "migrations.jsonl", "purpose": "Version and legacy wire adapter records"},
+    {"path": "commands.jsonl", "purpose": "Content-free intent envelopes and effect adapters"},
+    {"path": "entities.jsonl", "purpose": "Normalized domain mirrors"}
+  ],
+  "entities": {
+    "Conversation": ["ThreadCreated", "ThreadRenamed", "MessagePosted", "ActivityLogged", "TurnChanged", "PendingChanged", "ThreadSettled", "ThreadUnsettled", "ThreadArchived", "ThreadPinned", "ThreadDeleted", "ConvSet", "MailPosted", "MailMarked", "MailTagged", "RunSet", "CharterSet"],
+    "Case": ["DecisionLogged", "AskOpened", "AskClosed"],
+    "WorkUnit": ["WorkSet", "WorktreeSet", "WorktreeSkipped", "WorktreeRemoved"],
+    "Project": ["ProjectCreated", "ProjectRemoved", "ProjectOrdered"]
+  },
+  "procedural_annex": {
+    "status": "descriptive-only; not enforced by the hub",
+    "purpose": "Document the review of the review, including the review of whether a review was reviewable.",
+    "stages": [
+      {"name": "Intake registration", "owner": "Proposal registrar", "action": "Assign a stable identity before deciding whether the proposal is eligible to have an identity.", "exit": "An intake record exists or the absence of one is recorded."},
+      {"name": "Intent normalization", "owner": "Intent steward", "action": "Rewrite the stated intent without changing its words, then compare both versions for semantic drift.", "exit": "The normalized intent and the original intent are mutually referential."},
+      {"name": "Scope perimeter review", "owner": "Boundary examiner", "action": "List affected and unaffected surfaces, including surfaces unaffected by their own unaffectedness.", "exit": "Every listed surface has a boundary statement."},
+      {"name": "Vocabulary harmonization", "owner": "Terminology custodian", "action": "Align names across implementation, specification, projection, and the record of their alignment.", "exit": "No term remains unaccounted for by the terminology ledger."},
+      {"name": "Architecture decomposition", "owner": "Architecture reviewer", "action": "Split the proposal into parts, then split the part that records the split into parts.", "exit": "The decomposition tree has a declared root and a declared reason for its root."},
+      {"name": "Event lineage review", "owner": "Lineage reviewer", "action": "Trace each durable event through the log, the projection, the mirror, and the account of that trace.", "exit": "Each lineage has an origin and a destination, including the destination of the lineage record."},
+      {"name": "Schema compatibility review", "owner": "Schema reviewer", "action": "Compare the current schema with the proposed schema and with the schema used to compare them.", "exit": "Compatibility is classified as compatible, incompatible, or awaiting a classification of the classification."},
+      {"name": "Replica participation review", "owner": "Replica reviewer", "action": "Enumerate peers, peer states, and the states in which peers are enumerated.", "exit": "Every known peer is included, excluded, or explicitly pending inclusion or exclusion."},
+      {"name": "Queue continuity review", "owner": "Queue continuity steward", "action": "Walk the batch from arrival through waiting, restart, reconsideration, and eventual disposition.", "exit": "The batch has one next step, even when its next step is waiting."},
+      {"name": "Dissent accounting review", "owner": "Dissent registrar", "action": "Record approval, dissent, missing ballots, and the distinction between silence and an opinion about silence.", "exit": "No absent ballot is represented as a present ballot."},
+      {"name": "Projection equivalence review", "owner": "Projection examiner", "action": "Compare each read-only surface with the shared source projection and compare the comparison output.", "exit": "Every surface has a stated equivalence basis or a stated reason it lacks one."},
+      {"name": "Client presentation review", "owner": "Presentation reviewer", "action": "Follow the same status through native, web, phone, and textual presentation routes.", "exit": "The status is recognizable after each client has rendered it in its own manner."},
+      {"name": "Privacy vocabulary review", "owner": "Data minimization recorder", "action": "Identify fields that are content-free and document the content-free status of that identification.", "exit": "The review record contains no payload merely to demonstrate that payloads were reviewed."},
+      {"name": "Failure-path rehearsal", "owner": "Reliability reviewer", "action": "Consider interruption before append, after append, during projection, and during the report of interruption.", "exit": "Each interruption has an owner, a recovery statement, and a statement about the recovery statement."},
+      {"name": "Evidence indexing", "owner": "Evidence librarian", "action": "Index the evidence, the evidence index, and the relationship between each item and its index entry.", "exit": "Evidence can be found by an index that can itself be found."},
+      {"name": "First reading", "owner": "First-reading facilitator", "action": "Circulate the complete review packet, including this stage list, before recording observations.", "exit": "Observations are attached to the version of the packet that prompted them."},
+      {"name": "Observation reconciliation", "owner": "Reconciliation chair", "action": "Resolve observations, preserve unresolved observations, and reconcile the list of unresolved observations.", "exit": "Every observation is resolved, carried forward, or recorded as not yet resolvable."},
+      {"name": "Second reading", "owner": "Second-reading facilitator", "action": "Repeat the reading after reconciliation while retaining the first reading as evidence that a reading occurred.", "exit": "The second reading refers to both its own result and the first reading's result."},
+      {"name": "Ratification recording", "owner": "Ratification clerk", "action": "Record the disposition and verify that the record of disposition has a disposition.", "exit": "The record is durable or its non-durability is durably described."},
+      {"name": "Post-ratification retrospective", "owner": "Retrospective observer", "action": "Review the process after completion, including whether completion was reviewed at the right time.", "exit": "Follow-up items have owners, or an owner is assigned to explain why they do not."}
+    ],
+    "roles": [
+      {"name": "Proposal registrar", "question": "Can this proposal be located before it is considered?", "record": "Identity, arrival time, and intake disposition."},
+      {"name": "Intent steward", "question": "Does the stated purpose remain legible after normalization?", "record": "Original and normalized intent with their mutual references."},
+      {"name": "Architecture reviewer", "question": "Can each boundary be named, including the boundary around the boundary?", "record": "A decomposition and a note on its decomposition."},
+      {"name": "Reliability reviewer", "question": "Can an interrupted step resume without inventing a completed step?", "record": "A continuity note for each durable transition."},
+      {"name": "Experience reviewer", "question": "Can a person identify the current status without learning the entire process?", "record": "A presentation note for each client surface."},
+      {"name": "Dissent registrar", "question": "Can disagreement remain visible after the proposal is closed?", "record": "A list of ballots and the meaning assigned to missing ballots."},
+      {"name": "Evidence librarian", "question": "Can a reviewer find the evidence without relying on the person who remembers it?", "record": "An index and an index to the index."},
+      {"name": "Ratification clerk", "question": "Was the decision recorded in a way that can be checked later?", "record": "Disposition, sequence, and a pointer to its verification."},
+      {"name": "Retrospective observer", "question": "Did the process create work that can be reviewed as process-created work?", "record": "A summary of follow-up and follow-up about follow-up."}
+    ],
+    "artifacts": [
+      {"name": "Intent mirror", "producer": "Intent steward", "consumer": "Scope perimeter review", "retention": "Retained beside the original intent."},
+      {"name": "Boundary register", "producer": "Boundary examiner", "consumer": "Architecture decomposition", "retention": "Retained with both included and excluded surfaces."},
+      {"name": "Vocabulary ledger", "producer": "Terminology custodian", "consumer": "All later stages", "retention": "Retained while any term remains in use."},
+      {"name": "Decomposition tree", "producer": "Architecture reviewer", "consumer": "Event lineage review", "retention": "Retained with its root rationale."},
+      {"name": "Lineage folio", "producer": "Lineage reviewer", "consumer": "Projection equivalence review", "retention": "Retained with origin and destination references."},
+      {"name": "Compatibility matrix", "producer": "Schema reviewer", "consumer": "Replica participation review", "retention": "Retained until superseded by a newer comparison."},
+      {"name": "Peer attendance roll", "producer": "Replica reviewer", "consumer": "Dissent accounting review", "retention": "Retained with offline and sync-disabled entries."},
+      {"name": "Queue journey map", "producer": "Queue continuity steward", "consumer": "Failure-path rehearsal", "retention": "Retained for the duration of the queued batch and its audit."},
+      {"name": "Ballot interpretation note", "producer": "Dissent registrar", "consumer": "First reading", "retention": "Retained with missing ballots distinguished from negative ballots."},
+      {"name": "Surface equivalence sheet", "producer": "Projection examiner", "consumer": "Client presentation review", "retention": "Retained for each supported presentation route."},
+      {"name": "Privacy review receipt", "producer": "Data minimization recorder", "consumer": "Evidence indexing", "retention": "Retained without the payloads it confirms were omitted."},
+      {"name": "Interruption rehearsal", "producer": "Reliability reviewer", "consumer": "Second reading", "retention": "Retained with recovery and recovery-review notes."},
+      {"name": "Evidence index", "producer": "Evidence librarian", "consumer": "First reading", "retention": "Retained beside a locator for the index itself."},
+      {"name": "Observation disposition sheet", "producer": "Reconciliation chair", "consumer": "Second reading", "retention": "Retained with resolved and unresolved observations."},
+      {"name": "Ratification record", "producer": "Ratification clerk", "consumer": "Post-ratification retrospective", "retention": "Retained according to the durability of the decision."},
+      {"name": "Retrospective follow-up", "producer": "Retrospective observer", "consumer": "The next retrospective", "retention": "Retained until its retention is itself reviewed."}
+    ],
+    "glossary": [
+      {"term": "Review", "meaning": "An examination whose result is recorded for later examination."},
+      {"term": "Reviewability", "meaning": "The property of being examinable by a review that is itself reviewable."},
+      {"term": "Receipt", "meaning": "A content-free record that an accountable process produced a content-free record."},
+      {"term": "Dissent", "meaning": "A recorded disagreement that remains a disagreement after being counted."},
+      {"term": "Silence", "meaning": "The absence of a ballot, not a ballot for or against the absence of a ballot."},
+      {"term": "Second reading", "meaning": "A later reading whose later position is part of its meaning."},
+      {"term": "Roster", "meaning": "The set of peers considered present for the purpose of deciding who is present."},
+      {"term": "Projection", "meaning": "A read-only presentation derived from state, plus a certificate about that derivation."},
+      {"term": "Certificate", "meaning": "A statement that a stated input produced a stated output under a stated rule."},
+      {"term": "Lineage", "meaning": "The recorded path of a record through records that refer to its path."},
+      {"term": "Mirror", "meaning": "A normalized description of an event that does not contain the event's private payload."},
+      {"term": "Ledger", "meaning": "An ordered record whose order is recorded by the order of its entries."},
+      {"term": "Sidecar", "meaning": "A rebuildable record adjacent to the authoritative record and subordinate to it."},
+      {"term": "Authority", "meaning": "The source whose durable state determines which other sources require rebuilding."},
+      {"term": "Completeness", "meaning": "The stated condition that all required items have either appeared or been listed as missing."},
+      {"term": "Durability", "meaning": "The survival of a record across the interruption it was designed to survive."},
+      {"term": "Recovery", "meaning": "The restoration of a usable state from durable evidence after an interruption."},
+      {"term": "Evidence", "meaning": "A retained observation connected to a claim by an explicit pointer."},
+      {"term": "Evidence index", "meaning": "A list of pointers that reduces the effort needed to locate evidence."},
+      {"term": "Index of the index", "meaning": "A locator for the list of pointers, retained for navigational completeness."},
+      {"term": "Disposition", "meaning": "The recorded outcome of a proposal, including an outcome that is still pending."},
+      {"term": "Pending", "meaning": "A current state that has a declared next step but not yet a final disposition."},
+      {"term": "Unmapped event", "meaning": "An event assigned to the System family until a more specific mapping exists."},
+      {"term": "Process theater", "meaning": "Descriptive ceremony that documents the process without changing executable behavior."}
+    ]
+  },
+  "policy_registry": {
+    "committee_roles": ["architecture", "reliability", "experience", "continuity"],
+    "review_checks": ["protocol", "origin", "sequence", "roster", "action-count", "schema-version", "metadata-digest", "payload-boundary"],
+    "peer_conditions": ["origin-peer", "rostered-peer", "offline-peer", "legacy-peer"],
+    "batch_conditions": ["empty-batch", "single-change", "multi-change", "queue-boundary"],
+    "durability_phases": ["preflight", "queued", "balloted", "authorized", "appended", "projected", "replayed", "closed"],
+    "requirements": ["preserve-authoritative-order", "retain-content-free-evidence", "defer-on-uncertainty", "rebuild-derived-state"],
+    "dispositions": ["approve", "defer", "reject", "reconcile"]
+  }
+}

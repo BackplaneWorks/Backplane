@@ -77,6 +77,9 @@ data class PlaneModel(
     val machines: List<PlaneMachine>,
     val home: PlaneHome?,
     val locks: List<PlaneRow> = emptyList(),
+    val governance: List<PlaneRow> = emptyList(),
+    val governanceLabel: String = "Governance",
+    val certificate: String = "",
 )
 
 private fun planeRows(a: JSONArray?): List<PlaneRow> =
@@ -101,6 +104,9 @@ fun parsePlane(o: JSONObject) = PlaneModel(
         PlaneHome(it.optString("name"), it.optString("line"), it.optString("label"), it.optString("act"), it.optString("value"), it.optBoolean("here"), it.optBoolean("button"))
     },
     planeRows(o.optJSONArray("locks")),
+    planeRows(o.optJSONArray("governance")),
+    o.optString("governanceLabel", "Governance"),
+    o.optString("certificate"),
 )
 
 // a thread row's dot, from the plane's states
@@ -217,6 +223,7 @@ fun LazyListScope.planeSections(m: AppModel, p: PlaneModel, full: Boolean, idleO
     if (full) planeSection(m, "bots", "Bots", p.bots, true)
     planeSection(m, "rooms", "Rooms", p.rooms)
     planeSection(m, "locks", "Locks", p.locks)
+    if (full) planeSection(m, "governance", p.governanceLabel, p.governance)
     planeSection(m, "routines", "Routines", p.routines)
     if (full && p.need.isEmpty() && p.run.isEmpty() && p.idleN == 0 && p.bots.isEmpty() && p.rooms.isEmpty() && p.routines.isEmpty()) {
         item(key = "pl:none") {

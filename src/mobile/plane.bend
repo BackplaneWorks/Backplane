@@ -74,11 +74,14 @@ def MPlane.mach(ms: List<&2, PL.PMach>) -> List<&2, J.Json>:
     case PL.PMach{+n, +s} <> t:
       J.Json.obj([J.KV{"name", J.Json.str(n)}, J.KV{"state", J.Json.str(s)}]) <> MPlane.mach(t)
 
-def MPlane.json(+p: PL.Plane, +now: Nat, +st: M.State) -> J.Json:
+def MPlane.json(+p: PL.Plane, +now: Nat, +st: M.State, +locale: String) -> J.Json:
   J.Json.obj([J.KV{"need", J.Json.arr(MPlane.rows(PL.Plane.need(p), now, st))}, J.KV{"run", J.Json.arr(MPlane.rows(PL.Plane.run(p), now, st))},
     J.KV{"idle", J.Json.arr(MPlane.rows(PL.Plane.idle(p), now, st))}, J.KV{"idleN", J.Json.nat(PL.Plane.idle_n(p))},
     J.KV{"working", J.Json.nat(PL.Plane.working(p))}, J.KV{"bots", J.Json.arr(MPlane.rows(PL.Plane.bots(p), now, st))}, J.KV{"rooms", J.Json.arr(MPlane.rows(PL.Plane.rooms(p), now, st))},
-    J.KV{"locks", J.Json.arr(MPlane.rows(PL.Plane.locks(p), now, st))}, J.KV{"routines", J.Json.arr(MPlane.rows(PL.Plane.routines(p), now, st))}, J.KV{"machines", J.Json.arr(MPlane.mach(PL.Plane.machines(p)))}])
+    J.KV{"locks", J.Json.arr(MPlane.rows(PL.Plane.locks(p), now, st))}, J.KV{"routines", J.Json.arr(MPlane.rows(PL.Plane.routines(p), now, st))},
+    J.KV{"governance", J.Json.arr(MPlane.rows(PL.Plane.governance(p), now, st))}, J.KV{"governanceLabel", J.Json.str(PL.Plane.governance.label(locale))},
+    J.KV{"certificate", J.Json.str(PL.Plane.certificate(p, now, Nat.is_gt(PL.Plane.idle_n(p), 0n)))},
+    J.KV{"machines", J.Json.arr(MPlane.mach(PL.Plane.machines(p)))}])
 
 # where the conversation is held (core's Plane.home): null with no uberbot
 # here; "button" says whether to offer "Make this the home" (a tap sends

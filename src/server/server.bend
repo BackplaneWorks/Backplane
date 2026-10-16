@@ -85,6 +85,8 @@ import ../core/rules.bend as RLS
 import ../core/task.bend as TKS
 import ../core/teach.bend as TE
 import ../core/usage.bend as UZ
+import ../core/governance.bend as GV
+import ../core/governance_policy.bend as GP
 
 # The server. One hub computation owns the read model and the event log;
 # every connection and agent process is its own computation and talks to
@@ -1291,7 +1293,9 @@ def Info.net(n: Net) -> List<&2, J.KV>:
 def Hub.info(c: Cfg) -> J.Json:
   match c:
     case Cfg{+home, _, host, port, _, _, _, +net}:
-      J.Json.obj(List.append(&2, J.KV, [J.KV{"home", J.Str{home}}, J.KV{"listen", J.Str{host ++ ":" ++ U32.show(port)}}], List.append(&2, J.KV, Info.net(net), Info.tch(net))))
+      J.Json.obj(List.append(&2, J.KV, [J.KV{"home", J.Str{home}}, J.KV{"listen", J.Str{host ++ ":" ++ U32.show(port)}}, J.KV{"governance.protocol", J.Str{GV.Governance.protocol()}},
+        J.KV{"governance.ledgers", J.Str{"governance.jsonl,projections.jsonl,migrations.jsonl,commands.jsonl,entities.jsonl"}},
+        J.KV{"governance.wire", J.Str{"SettingSet:gov.receipt.latest"}}], List.append(&2, J.KV, Info.net(net), Info.tch(net))))
 
 # A link change is handled after it has been stored, through the inbox,
 # so both sides of an invite refresh immediately (revokes prune rows).
@@ -1314,6 +1318,14 @@ def Bot.dir.changed(c: M.Change, +inbox: Chan(Msg)) -> IO(Unit):
 # why it failed
 type Wrote is Data:
   Wrote{fresh: List<&2, String>, ok: Bool, err: String}
+
+# Private local queue entry. The change bodies stay here and on the origin;
+# only Proposal.metadata crosses the paired-hub RPC boundary.
+type GovItem is Data:
+  GovItem{proposal: GV.Proposal, changes: List<&2, M.Change>, outs: List<&2, B.Out>, appeal: Nat, state: String, votes: String, dissent: String, at: Nat}
+
+type GovReview is Data:
+  GovReview{complete: Bool, architecture: Bool, reliability: Bool, experience: Bool, dissent: String, received: Nat, total: Nat}
 
 def Hub.lines.disk(cs: List<&2, M.Change>) -> List<&2, String>:
   match cs:
@@ -5103,6 +5115,371 @@ def Hub.cut.ok(r: P.Ran) -> Bool:
 def Hub.cut(+len: String, +cfg: Cfg) -> IO(Bool):
   IO.bind(P.Ran, Bool, P.Proc.run("truncate", ST.Store.trunc.args(len, Store.path(Cfg.home(cfg))), "/"), r => IO.pure(Bool, Hub.cut.ok(r)))
 
+# Rebuildable, private sidecars. The event log is authoritative; a crash
+# between its append and these replacements is repaired at the next boot.
+def GovLedger.renamed(ok: Bool, +path: String) -> IO(Bool):
+  match ok:
+    case True{}:
+      IO.bind(Result<&1, &1, U32 & String, Unit>, Bool, H.FS.rename(path ++ ".tmp", path), r => IO.pure(Bool, BN.Bf.done(r)))
+    case False{}:
+      IO.pure(Bool, False{})
+
+def GovLedger.replace(+path: String, text: String) -> IO(Bool):
+  IO.bind(Bool, Bool, BN.Bf.secret(path ++ ".tmp", text), ok => GovLedger.renamed(ok, path))
+
+def GovLedger.rebuild.data(+home: String, ledger: GV.Ledgers) -> IO(Bool):
+  match ledger:
+    case GV.Ledgers{governance, projections, migrations, commands, entities}:
+      do IO<Bool>:
+        a : Bool <- GovLedger.replace(home ++ "/governance.jsonl", governance)
+        b : Bool <- GovLedger.replace(home ++ "/projections.jsonl", projections)
+        c : Bool <- GovLedger.replace(home ++ "/migrations.jsonl", migrations)
+        d : Bool <- GovLedger.replace(home ++ "/commands.jsonl", commands)
+        e : Bool <- GovLedger.replace(home ++ "/entities.jsonl", entities)
+        return Bool.and(a, Bool.and(b, Bool.and(c, Bool.and(d, e))))
+
+def GovLedger.rebuild(+home: String, +cs: List<&2, M.Change>) -> IO(Bool):
+  GovLedger.rebuild.data(home, GV.Governance.ledgers(cs))
+
+def GovLedger.append.data(+home: String, ledger: GV.Ledgers) -> IO(Bool):
+  match ledger:
+    case GV.Ledgers{governance, projections, migrations, commands, entities}:
+      do IO<Bool>:
+        a : Bool <- BN.Bf.append(home ++ "/governance.jsonl", governance)
+        b : Bool <- BN.Bf.append(home ++ "/projections.jsonl", projections)
+        c : Bool <- BN.Bf.append(home ++ "/migrations.jsonl", migrations)
+        d : Bool <- BN.Bf.append(home ++ "/commands.jsonl", commands)
+        e : Bool <- BN.Bf.append(home ++ "/entities.jsonl", entities)
+        return Bool.and(a, Bool.and(b, Bool.and(c, Bool.and(d, e))))
+
+def GovLedger.append(+home: String, +cs: List<&2, M.Change>) -> IO(Bool):
+  GovLedger.append.data(home, GV.Governance.ledgers(cs))
+
+def GovLedger.report(ok: Bool) -> IO(Unit):
+  match ok:
+    case True{}:
+      IO.pure(Unit, Unit{})
+    case False{}:
+      Log.info("governance sidecars need replay; event log is intact")
+
+def GovItem.changes.json(cs: List<&2, M.Change>) -> List<&2, J.Json>:
+  match cs:
+    case Nil{}:
+      Nil{}
+    case +c <> t:
+      C.Change.encode(c) <> GovItem.changes.json(t)
+
+def GovItem.strings.json(xs: List<&2, String>) -> List<&2, J.Json>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case +x <> t:
+      J.Json.str(x) <> GovItem.strings.json(t)
+
+def GovItem.u32s.json(xs: List<&2, U32>) -> List<&2, J.Json>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case x <> t:
+      J.Json.nat(U32.to_nat(x)) <> GovItem.u32s.json(t)
+
+def GovItem.out.json(o: B.Out) -> J.Json:
+  match o:
+    case B.LockGuard{+name, +old, +holder}: J.Json.obj([J.KV{"$", J.Json.str("LockGuard")}, J.KV{"name", J.Json.str(name)}, J.KV{"old", J.Json.str(old)}, J.KV{"holder", J.Json.str(holder)}])
+    case B.Send{client, +text}: J.Json.obj([J.KV{"$", J.Json.str("Send")}, J.KV{"client", J.Json.nat(U32.to_nat(client))}, J.KV{"text", J.Json.str(text)}])
+    case B.Broadcast{+text}: J.Json.obj([J.KV{"$", J.Json.str("Broadcast")}, J.KV{"text", J.Json.str(text)}])
+    case B.AgentStart{+thread, +cwd, +provider, +model, +session, +runtime, +interaction}: J.Json.obj([J.KV{"$", J.Json.str("AgentStart")}, J.KV{"thread", J.Json.str(thread)}, J.KV{"cwd", J.Json.str(cwd)}, J.KV{"provider", J.Json.str(provider)}, J.KV{"model", J.Json.str(model)}, J.KV{"session", J.Json.str(session)}, J.KV{"runtime", J.Json.str(C.Runtime.name(runtime))}, J.KV{"interaction", J.Json.str(C.Interaction.name(interaction))}])
+    case B.AgentSend{+thread, +line}: J.Json.obj([J.KV{"$", J.Json.str("AgentSend")}, J.KV{"thread", J.Json.str(thread)}, J.KV{"line", J.Json.str(line)}])
+    case B.AgentStop{+thread}: J.Json.obj([J.KV{"$", J.Json.str("AgentStop")}, J.KV{"thread", J.Json.str(thread)}])
+    case B.Watch{client, +kind, +root, +path}: J.Json.obj([J.KV{"$", J.Json.str("Watch")}, J.KV{"client", J.Json.nat(U32.to_nat(client))}, J.KV{"kind", J.Json.str(kind)}, J.KV{"root", J.Json.str(root)}, J.KV{"path", J.Json.str(path)}])
+    case B.Upgrade{}: J.Json.obj([J.KV{"$", J.Json.str("Upgrade")}])
+    case B.UpgradeForce{}: J.Json.obj([J.KV{"$", J.Json.str("UpgradeForce")}])
+    case B.Restart{}: J.Json.obj([J.KV{"$", J.Json.str("Restart")}])
+    case B.KiCadInstall{}: J.Json.obj([J.KV{"$", J.Json.str("KiCadInstall")}])
+    case B.CodexTurn{+thread, +cwd, +model, +session, +runtime, +text}: J.Json.obj([J.KV{"$", J.Json.str("CodexTurn")}, J.KV{"thread", J.Json.str(thread)}, J.KV{"cwd", J.Json.str(cwd)}, J.KV{"model", J.Json.str(model)}, J.KV{"session", J.Json.str(session)}, J.KV{"runtime", J.Json.str(C.Runtime.name(runtime))}, J.KV{"text", J.Json.str(text)}])
+    case B.GrokTurn{+thread, +cwd, +model, +session, +runtime, +text}: J.Json.obj([J.KV{"$", J.Json.str("GrokTurn")}, J.KV{"thread", J.Json.str(thread)}, J.KV{"cwd", J.Json.str(cwd)}, J.KV{"model", J.Json.str(model)}, J.KV{"session", J.Json.str(session)}, J.KV{"runtime", J.Json.str(C.Runtime.name(runtime))}, J.KV{"text", J.Json.str(text)}])
+    case B.MuseTurn{+thread, +cwd, +model, +session, +runtime, +text}: J.Json.obj([J.KV{"$", J.Json.str("MuseTurn")}, J.KV{"thread", J.Json.str(thread)}, J.KV{"cwd", J.Json.str(cwd)}, J.KV{"model", J.Json.str(model)}, J.KV{"session", J.Json.str(session)}, J.KV{"runtime", J.Json.str(C.Runtime.name(runtime))}, J.KV{"text", J.Json.str(text)}])
+    case B.AgyTurn{+thread, +cwd, +model, +session, +runtime, +text}: J.Json.obj([J.KV{"$", J.Json.str("AgyTurn")}, J.KV{"thread", J.Json.str(thread)}, J.KV{"cwd", J.Json.str(cwd)}, J.KV{"model", J.Json.str(model)}, J.KV{"session", J.Json.str(session)}, J.KV{"runtime", J.Json.str(C.Runtime.name(runtime))}, J.KV{"text", J.Json.str(text)}])
+    case B.TurnEnded{+thread, +state}: J.Json.obj([J.KV{"$", J.Json.str("TurnEnded")}, J.KV{"thread", J.Json.str(thread)}, J.KV{"state", J.Json.str(state)}])
+    case B.IslandSync{}: J.Json.obj([J.KV{"$", J.Json.str("IslandSync")}])
+    case B.AskAnswered{+id, +answer}: J.Json.obj([J.KV{"$", J.Json.str("AskAnswered")}, J.KV{"id", J.Json.str(id)}, J.KV{"answer", J.Json.str(answer)}])
+    case B.Git{client, +id, +job, +thread, +cwd, +a, +b}: J.Json.obj([J.KV{"$", J.Json.str("Git")}, J.KV{"client", J.Json.nat(U32.to_nat(client))}, J.KV{"id", J.Json.str(id)}, J.KV{"job", J.Json.str(job)}, J.KV{"thread", J.Json.str(thread)}, J.KV{"cwd", J.Json.str(cwd)}, J.KV{"a", J.Json.str(a)}, J.KV{"b", J.Json.str(b)}])
+    case B.TermOp{+op, +thread, +cwd, +data, cols, rows}: J.Json.obj([J.KV{"$", J.Json.str("TermOp")}, J.KV{"op", J.Json.str(op)}, J.KV{"thread", J.Json.str(thread)}, J.KV{"cwd", J.Json.str(cwd)}, J.KV{"data", J.Json.arr(GovItem.u32s.json(data))}, J.KV{"cols", J.Json.nat(U32.to_nat(cols))}, J.KV{"rows", J.Json.nat(U32.to_nat(rows))}])
+    case B.TermRun{+key, +title, +cwd, +cmd, cols, rows, again}: J.Json.obj([J.KV{"$", J.Json.str("TermRun")}, J.KV{"key", J.Json.str(key)}, J.KV{"title", J.Json.str(title)}, J.KV{"cwd", J.Json.str(cwd)}, J.KV{"cmd", J.Json.str(cmd)}, J.KV{"cols", J.Json.nat(U32.to_nat(cols))}, J.KV{"rows", J.Json.nat(U32.to_nat(rows))}, J.KV{"again", J.Json.bool(again)}])
+    case B.TermSnap{client, +key}: J.Json.obj([J.KV{"$", J.Json.str("TermSnap")}, J.KV{"client", J.Json.nat(U32.to_nat(client))}, J.KV{"key", J.Json.str(key)}])
+    case B.TermKill{+key}: J.Json.obj([J.KV{"$", J.Json.str("TermKill")}, J.KV{"key", J.Json.str(key)}])
+    case B.Fs{client, +id, +op, +path}: J.Json.obj([J.KV{"$", J.Json.str("Fs")}, J.KV{"client", J.Json.nat(U32.to_nat(client))}, J.KV{"id", J.Json.str(id)}, J.KV{"op", J.Json.str(op)}, J.KV{"path", J.Json.str(path)}])
+    case B.PlotInfo{client, +id, +key, +at, +idx}: J.Json.obj([J.KV{"$", J.Json.str("PlotInfo")}, J.KV{"client", J.Json.nat(U32.to_nat(client))}, J.KV{"id", J.Json.str(id)}, J.KV{"key", J.Json.str(key)}, J.KV{"at", J.Json.nat(at)}, J.KV{"idx", J.Json.nat(idx)}])
+    case B.BotFx{+kind, +a, +b, +c}: J.Json.obj([J.KV{"$", J.Json.str("BotFx")}, J.KV{"kind", J.Json.str(kind)}, J.KV{"a", J.Json.str(a)}, J.KV{"b", J.Json.str(b)}, J.KV{"c", J.Json.str(c)}])
+    case B.DeskLook{client, +thread, focused}: J.Json.obj([J.KV{"$", J.Json.str("DeskLook")}, J.KV{"client", J.Json.nat(U32.to_nat(client))}, J.KV{"thread", J.Json.str(thread)}, J.KV{"focused", J.Json.bool(focused)}])
+    case B.BotReply{+thread, +to, +text, +done}: J.Json.obj([J.KV{"$", J.Json.str("BotReply")}, J.KV{"thread", J.Json.str(thread)}, J.KV{"to", J.Json.str(to)}, J.KV{"text", J.Json.str(text)}, J.KV{"done", J.Json.str(done)}])
+    case B.Await{+thread, +id, +kind, +target, +ident, +deadline, +cwd}: J.Json.obj([J.KV{"$", J.Json.str("Await")}, J.KV{"thread", J.Json.str(thread)}, J.KV{"id", J.Json.str(id)}, J.KV{"kind", J.Json.str(kind)}, J.KV{"target", J.Json.str(target)}, J.KV{"ident", J.Json.str(ident)}, J.KV{"deadline", J.Json.nat(deadline)}, J.KV{"cwd", J.Json.str(cwd)}])
+    case B.WatchStop{+thread, +id, +kind, +target, +ident}: J.Json.obj([J.KV{"$", J.Json.str("WatchStop")}, J.KV{"thread", J.Json.str(thread)}, J.KV{"id", J.Json.str(id)}, J.KV{"kind", J.Json.str(kind)}, J.KV{"target", J.Json.str(target)}, J.KV{"ident", J.Json.str(ident)}])
+    case B.Live{+thread, +text}: J.Json.obj([J.KV{"$", J.Json.str("Live")}, J.KV{"thread", J.Json.str(thread)}, J.KV{"text", J.Json.str(text)}])
+    case B.LaunchFar{}: J.Json.obj([J.KV{"$", J.Json.str("LaunchFar")}])
+    case B.Alerted{+thread}: J.Json.obj([J.KV{"$", J.Json.str("Alerted")}, J.KV{"thread", J.Json.str(thread)}])
+    case B.WakePoll{+prs, +files}: J.Json.obj([J.KV{"$", J.Json.str("WakePoll")}, J.KV{"prs", J.Json.arr(GovItem.strings.json(prs))}, J.KV{"files", J.Json.arr(GovItem.strings.json(files))}])
+    case B.DeployProbe{}: J.Json.obj([J.KV{"$", J.Json.str("DeployProbe")}])
+    case B.ToolOpen{+thread, +call}: J.Json.obj([J.KV{"$", J.Json.str("ToolOpen")}, J.KV{"thread", J.Json.str(thread)}, J.KV{"call", J.Json.str(call)}])
+    case B.ToolShut{+thread, +call}: J.Json.obj([J.KV{"$", J.Json.str("ToolShut")}, J.KV{"thread", J.Json.str(thread)}, J.KV{"call", J.Json.str(call)}])
+    case B.ToolsGone{+thread}: J.Json.obj([J.KV{"$", J.Json.str("ToolsGone")}, J.KV{"thread", J.Json.str(thread)}])
+    case B.DeployGo{+stage}: J.Json.obj([J.KV{"$", J.Json.str("DeployGo")}, J.KV{"stage", J.Json.str(stage)}])
+    case B.Teach{client, +id, +m, +p}: J.Json.obj([J.KV{"$", J.Json.str("Teach")}, J.KV{"client", J.Json.nat(U32.to_nat(client))}, J.KV{"id", J.Json.str(id)}, J.KV{"m", J.Json.str(m)}, J.KV{"p", J.Json.str(p)}])
+
+def GovItem.outs.json(os: List<&2, B.Out>) -> List<&2, J.Json>:
+  match os:
+    case Nil{}:
+      Nil{}
+    case +o <> t:
+      GovItem.out.json(o) <> GovItem.outs.json(t)
+
+def GovItem.strings.decode(xs: List<&2, J.Json>) -> List<&2, String>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case J.Str{+s} <> t:
+      s <> GovItem.strings.decode(t)
+    case _ <> t:
+      GovItem.strings.decode(t)
+
+def GovItem.u32s.decode(xs: List<&2, J.Json>) -> List<&2, U32>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case x <> t:
+      Maybe.default(&2, U32, U32.read(J.Json.as_raw(Some{x}, "")), 0) <> GovItem.u32s.decode(t)
+
+def GovItem.changes.decode.k(m: Maybe<&2, M.Change>, acc: List<&2, M.Change>) -> List<&2, M.Change>:
+  match m:
+    case Some{c}: c <> acc
+    case None{}: acc
+
+def GovItem.changes.decode.go(xs: List<&2, J.Json>, acc: List<&2, M.Change>) -> List<&2, M.Change>:
+  match xs:
+    case Nil{}:
+      List.reverse(&2, M.Change, acc)
+    case +x <> t:
+      GovItem.changes.decode.go(t, GovItem.changes.decode.k(C.Change.decode(x), acc))
+
+def GovItem.changes.decode(xs: List<&2, J.Json>) -> List<&2, M.Change>:
+  GovItem.changes.decode.go(xs, Nil{})
+
+def GovItem.out.decode.k(i: Nat, +o: J.Json) -> Maybe<&2, B.Out>:
+  match i:
+    case 0n: Some{B.LockGuard{J.Json.get_str(o, "name", ""), J.Json.get_str(o, "old", ""), J.Json.get_str(o, "holder", "")}}
+    case 1n: Some{B.Send{J.Json.get_u32(o, "client", 0), J.Json.get_str(o, "text", "")}}
+    case 2n: Some{B.Broadcast{J.Json.get_str(o, "text", "")}}
+    case 3n: Some{B.AgentStart{J.Json.get_str(o, "thread", ""), J.Json.get_str(o, "cwd", ""), J.Json.get_str(o, "provider", ""), J.Json.get_str(o, "model", ""), J.Json.get_str(o, "session", ""), C.Runtime.of(J.Json.get_str(o, "runtime", "")), C.Interaction.of(J.Json.get_str(o, "interaction", ""))}}
+    case 4n: Some{B.AgentSend{J.Json.get_str(o, "thread", ""), J.Json.get_str(o, "line", "")}}
+    case 5n: Some{B.AgentStop{J.Json.get_str(o, "thread", "")}}
+    case 6n: Some{B.Watch{J.Json.get_u32(o, "client", 0), J.Json.get_str(o, "kind", ""), J.Json.get_str(o, "root", ""), J.Json.get_str(o, "path", "")}}
+    case 7n: Some{B.Upgrade{}}
+    case 8n: Some{B.UpgradeForce{}}
+    case 9n: Some{B.Restart{}}
+    case 10n: Some{B.KiCadInstall{}}
+    case 11n: Some{B.CodexTurn{J.Json.get_str(o, "thread", ""), J.Json.get_str(o, "cwd", ""), J.Json.get_str(o, "model", ""), J.Json.get_str(o, "session", ""), C.Runtime.of(J.Json.get_str(o, "runtime", "")), J.Json.get_str(o, "text", "")}}
+    case 12n: Some{B.GrokTurn{J.Json.get_str(o, "thread", ""), J.Json.get_str(o, "cwd", ""), J.Json.get_str(o, "model", ""), J.Json.get_str(o, "session", ""), C.Runtime.of(J.Json.get_str(o, "runtime", "")), J.Json.get_str(o, "text", "")}}
+    case 13n: Some{B.MuseTurn{J.Json.get_str(o, "thread", ""), J.Json.get_str(o, "cwd", ""), J.Json.get_str(o, "model", ""), J.Json.get_str(o, "session", ""), C.Runtime.of(J.Json.get_str(o, "runtime", "")), J.Json.get_str(o, "text", "")}}
+    case 14n: Some{B.AgyTurn{J.Json.get_str(o, "thread", ""), J.Json.get_str(o, "cwd", ""), J.Json.get_str(o, "model", ""), J.Json.get_str(o, "session", ""), C.Runtime.of(J.Json.get_str(o, "runtime", "")), J.Json.get_str(o, "text", "")}}
+    case 15n: Some{B.TurnEnded{J.Json.get_str(o, "thread", ""), J.Json.get_str(o, "state", "")}}
+    case 16n: Some{B.IslandSync{}}
+    case 17n: Some{B.AskAnswered{J.Json.get_str(o, "id", ""), J.Json.get_str(o, "answer", "")}}
+    case 18n: Some{B.Git{J.Json.get_u32(o, "client", 0), J.Json.get_str(o, "id", ""), J.Json.get_str(o, "job", ""), J.Json.get_str(o, "thread", ""), J.Json.get_str(o, "cwd", ""), J.Json.get_str(o, "a", ""), J.Json.get_str(o, "b", "")}}
+    case 19n: Some{B.TermOp{J.Json.get_str(o, "op", ""), J.Json.get_str(o, "thread", ""), J.Json.get_str(o, "cwd", ""), GovItem.u32s.decode(J.Json.elems(J.Json.get_obj(o, "data"))), J.Json.get_u32(o, "cols", 0), J.Json.get_u32(o, "rows", 0)}}
+    case 20n: Some{B.TermRun{J.Json.get_str(o, "key", ""), J.Json.get_str(o, "title", ""), J.Json.get_str(o, "cwd", ""), J.Json.get_str(o, "cmd", ""), J.Json.get_u32(o, "cols", 0), J.Json.get_u32(o, "rows", 0), J.Json.get_bool(o, "again", False{})}}
+    case 21n: Some{B.TermSnap{J.Json.get_u32(o, "client", 0), J.Json.get_str(o, "key", "")}}
+    case 22n: Some{B.TermKill{J.Json.get_str(o, "key", "")}}
+    case 23n: Some{B.Fs{J.Json.get_u32(o, "client", 0), J.Json.get_str(o, "id", ""), J.Json.get_str(o, "op", ""), J.Json.get_str(o, "path", "")}}
+    case 24n: Some{B.PlotInfo{J.Json.get_u32(o, "client", 0), J.Json.get_str(o, "id", ""), J.Json.get_str(o, "key", ""), J.Json.get_nat(o, "at", 0n), J.Json.get_nat(o, "idx", 0n)}}
+    case 25n: Some{B.BotFx{J.Json.get_str(o, "kind", ""), J.Json.get_str(o, "a", ""), J.Json.get_str(o, "b", ""), J.Json.get_str(o, "c", "")}}
+    case 26n: Some{B.DeskLook{J.Json.get_u32(o, "client", 0), J.Json.get_str(o, "thread", ""), J.Json.get_bool(o, "focused", False{})}}
+    case 27n: Some{B.BotReply{J.Json.get_str(o, "thread", ""), J.Json.get_str(o, "to", ""), J.Json.get_str(o, "text", ""), J.Json.get_str(o, "done", "")}}
+    case 28n: Some{B.Await{J.Json.get_str(o, "thread", ""), J.Json.get_str(o, "id", ""), J.Json.get_str(o, "kind", ""), J.Json.get_str(o, "target", ""), J.Json.get_str(o, "ident", ""), J.Json.get_nat(o, "deadline", 0n), J.Json.get_str(o, "cwd", "")}}
+    case 29n: Some{B.WatchStop{J.Json.get_str(o, "thread", ""), J.Json.get_str(o, "id", ""), J.Json.get_str(o, "kind", ""), J.Json.get_str(o, "target", ""), J.Json.get_str(o, "ident", "")}}
+    case 30n: Some{B.Live{J.Json.get_str(o, "thread", ""), J.Json.get_str(o, "text", "")}}
+    case 31n: Some{B.LaunchFar{}}
+    case 32n: Some{B.Alerted{J.Json.get_str(o, "thread", "")}}
+    case 33n: Some{B.WakePoll{GovItem.strings.decode(J.Json.elems(J.Json.get_obj(o, "prs"))), GovItem.strings.decode(J.Json.elems(J.Json.get_obj(o, "files")))}}
+    case 34n: Some{B.DeployProbe{}}
+    case 35n: Some{B.ToolOpen{J.Json.get_str(o, "thread", ""), J.Json.get_str(o, "call", "")}}
+    case 36n: Some{B.ToolShut{J.Json.get_str(o, "thread", ""), J.Json.get_str(o, "call", "")}}
+    case 37n: Some{B.ToolsGone{J.Json.get_str(o, "thread", "")}}
+    case 38n: Some{B.DeployGo{J.Json.get_str(o, "stage", "")}}
+    case 39n: Some{B.Teach{J.Json.get_u32(o, "client", 0), J.Json.get_str(o, "id", ""), J.Json.get_str(o, "m", ""), J.Json.get_str(o, "p", "")}}
+    case _:
+      None{}
+
+def GovItem.out.decode(+o: J.Json) -> Maybe<&2, B.Out>:
+  GovItem.out.decode.k(C.Codec.pos(["LockGuard", "Send", "Broadcast", "AgentStart", "AgentSend", "AgentStop", "Watch", "Upgrade", "UpgradeForce", "Restart", "KiCadInstall", "CodexTurn", "GrokTurn", "MuseTurn", "AgyTurn", "TurnEnded", "IslandSync", "AskAnswered", "Git", "TermOp", "TermRun", "TermSnap", "TermKill", "Fs", "PlotInfo", "BotFx", "DeskLook", "BotReply", "Await", "WatchStop", "Live", "LaunchFar", "Alerted", "WakePoll", "DeployProbe", "ToolOpen", "ToolShut", "ToolsGone", "DeployGo", "Teach"], J.Json.get_str(o, "$", "")), o)
+
+def GovItem.outs.decode.k(m: Maybe<&2, B.Out>, acc: List<&2, B.Out>) -> List<&2, B.Out>:
+  match m:
+    case Some{o}: o <> acc
+    case None{}: acc
+
+def GovItem.outs.decode.go(xs: List<&2, J.Json>, acc: List<&2, B.Out>) -> List<&2, B.Out>:
+  match xs:
+    case Nil{}:
+      List.reverse(&2, B.Out, acc)
+    case +x <> t:
+      GovItem.outs.decode.go(t, GovItem.outs.decode.k(GovItem.out.decode(x), acc))
+
+def GovItem.outs.decode(xs: List<&2, J.Json>) -> List<&2, B.Out>:
+  GovItem.outs.decode.go(xs, Nil{})
+
+def GovItem.changes.ok(+row: J.Json) -> Bool:
+  Nat.is_eq(List.length(&2, J.Json, J.Json.elems(J.Json.get_obj(row, "changes"))), List.length(&2, M.Change, GovItem.changes.decode(J.Json.elems(J.Json.get_obj(row, "changes")))))
+
+def GovItem.outs.ok(+row: J.Json) -> Bool:
+  Nat.is_eq(List.length(&2, J.Json, J.Json.elems(J.Json.get_obj(row, "outs"))), List.length(&2, B.Out, GovItem.outs.decode(J.Json.elems(J.Json.get_obj(row, "outs")))))
+
+def GovItem.valid(+row: J.Json) -> Bool:
+  +proposal = GV.Governance.proposal.from.json(J.Json.get_obj(row, "proposal"))
+  +changes = GovItem.changes.decode(J.Json.elems(J.Json.get_obj(row, "changes")))
+  Bool.and(GP.GovPolicy.registry.valid(), Bool.and(GV.Governance.proposal.valid(proposal), Bool.and(GovItem.changes.ok(row), Bool.and(GovItem.outs.ok(row),
+    Bool.and(Nat.is_eq(GV.Proposal.count(proposal), List.length(&2, M.Change, changes)), String.eq(String.join(GV.Proposal.tags(proposal), ","), String.join(GV.Governance.tags(changes), ",")))))))
+
+def GovItem.from.json(+row: J.Json) -> GovItem:
+  GovItem{GV.Governance.proposal.from.json(J.Json.get_obj(row, "proposal")), GovItem.changes.decode(J.Json.elems(J.Json.get_obj(row, "changes"))),
+    GovItem.outs.decode(J.Json.elems(J.Json.get_obj(row, "outs"))), J.Json.get_nat(row, "appeal", 0n), J.Json.get_str(row, "state", "pending"),
+    J.Json.get_str(row, "votes", ""), J.Json.get_str(row, "dissent", ""), J.Json.get_nat(row, "at", 0n)}
+
+def GovItem.json(i: GovItem) -> J.Json:
+  match i:
+    case GovItem{+proposal, +changes, +outs, appeal, +state, +votes, +dissent, at}:
+      J.Json.obj([J.KV{"proposal", GV.Proposal.metadata(proposal)}, J.KV{"changes", J.Json.arr(GovItem.changes.json(changes))},
+        J.KV{"outs", J.Json.arr(GovItem.outs.json(outs))},
+        J.KV{"appeal", J.Json.nat(appeal)}, J.KV{"state", J.Json.str(state)}, J.KV{"votes", J.Json.str(votes)},
+        J.KV{"dissent", J.Json.str(dissent)}, J.KV{"at", J.Json.nat(at)}])
+
+def GovQueue.path(+home: String) -> String:
+  home ++ "/governance-pending.jsonl"
+
+def GovQueue.file(+lines: List<&2, String>) -> String:
+  Bool.pick(String, List.is_empty(&2, String, lines), "", String.join(lines, "\n") ++ "\n")
+
+def GovQueue.bytes(+text: String) -> Nat:
+  List.length(&2, U32, U.Utf8.encode(text))
+
+def GovQueue.replace(+home: String, +text: String) -> IO(Bool):
+  GovLedger.replace(GovQueue.path(home), text)
+
+def GovQueue.add.text(+old: String, +line: String) -> String:
+  Bool.pick(String, String.is_empty(old), line ++ "\n", old ++ line ++ "\n")
+
+def GovQueue.add.cap(ok: Bool, +home: String, +text: String) -> IO(Bool):
+  Bool.pick(IO(Bool), ok, GovQueue.replace(home, text), IO.pure(Bool, False{}))
+
+def GovQueue.add(+home: String, +old: String, +item: GovItem) -> IO(Bool):
+  +text = GovQueue.add.text(old, J.Json.show(GovItem.json(item)))
+  GovQueue.add.cap(Bool.and(Bool.or(String.is_empty(old), String.ends_with(old, "\n")), Nat.is_le(GovQueue.bytes(text), GV.Governance.queue_limit())), home, text)
+
+def GovQueue.summary(+item: GovItem, +depth: Nat) -> String:
+  match item:
+    case GovItem{proposal, _, _, appeal, +state, +votes, +dissent, at}:
+      J.Json.show(J.Json.obj([J.KV{"id", J.Json.str(GV.Proposal.id(proposal))}, J.KV{"state", J.Json.str(state)},
+        J.KV{"depth", J.Json.nat(depth)}, J.KV{"digest", J.Json.str(GV.Proposal.digest(proposal))}, J.KV{"votes", J.Json.str(votes)},
+        J.KV{"appeal", J.Json.nat(appeal)}, J.KV{"dissent", J.Json.str(dissent)}, J.KV{"at", J.Json.nat(at)}]))
+
+def GovItem.review(+item: GovItem, +state: String, +votes: String, +dissent: String) -> GovItem:
+  match item:
+    case GovItem{proposal, +changes, +outs, appeal, _, _, _, at}:
+      GovItem{proposal, changes, outs, appeal, state, votes, dissent, at}
+
+def GovItem.revise(+item: GovItem, +roster: List<&2, String>) -> GovItem:
+  match item:
+    case GovItem{+proposal, +changes, +outs, appeal, +state, +votes, +dissent, at}:
+      +id = GV.Proposal.id(proposal) ++ ":roster-" ++ Nat.show(List.length(&2, String, roster))
+      +next = GV.Governance.proposal(id, GV.Proposal.origin(proposal), GV.Proposal.sequence(proposal), roster, changes)
+      GovItem{next, changes, outs, Nat.add(appeal, 1n), state, votes, dissent, at}
+
+def GovReview.join.dissent(+old: String, +next: String) -> String:
+  Bool.pick(String, String.is_empty(next), old,
+    Bool.pick(String, String.is_empty(old), next, old ++ "; " ++ next))
+
+def GovReview.local(ballot: GV.Ballot, total: Nat) -> GovReview:
+  match ballot:
+    case GV.Ballot{_, architecture, reliability, experience, +dissent}:
+      GovReview{True{}, architecture, reliability, experience, dissent, 1n, total}
+
+def GovReview.add(m: Maybe<&2, GV.Ballot>, +review: GovReview) -> GovReview:
+  match m review:
+    case Some{GV.Ballot{_, architecture, reliability, experience, +dissent}} GovReview{complete, a, r, e, +old, received, total}:
+      GovReview{complete, Bool.and(a, architecture), Bool.and(r, reliability), Bool.and(e, experience), GovReview.join.dissent(old, dissent), 1n+received, total}
+    case None{} GovReview{_, a, r, e, +dissent, received, total}:
+      GovReview{False{}, a, r, e, dissent, received, total}
+
+def GovReview.votes(r: GovReview) -> String:
+  match r:
+    case GovReview{_, _, _, _, _, received, total}:
+      Nat.show(received) ++ "/" ++ Nat.show(total) ++ " votes received"
+
+def GovReview.complete(r: GovReview) -> Bool:
+  match r:
+    case GovReview{complete, _, _, _, _, _, _}:
+      complete
+
+def GovReview.architecture(r: GovReview) -> Bool:
+  match r:
+    case GovReview{_, architecture, _, _, _, _, _}:
+      architecture
+
+def GovReview.reliability(r: GovReview) -> Bool:
+  match r:
+    case GovReview{_, _, reliability, _, _, _, _}:
+      reliability
+
+def GovReview.experience(r: GovReview) -> Bool:
+  match r:
+    case GovReview{_, _, _, experience, _, _, _}:
+      experience
+
+def GovReview.approved(r: GovReview) -> Bool:
+  match r:
+    case GovReview{complete, architecture, reliability, experience, +dissent, _, _}:
+      Bool.and(complete, Bool.and(GV.Governance.quorum(architecture, reliability, experience), String.is_empty(dissent)))
+
+def GovReview.rejected(r: GovReview) -> Bool:
+  match r:
+    case GovReview{_, architecture, reliability, experience, +dissent, _, _}:
+      Bool.or(Bool.not(GV.Governance.quorum(architecture, reliability, experience)), Bool.not(String.is_empty(dissent)))
+
+def GovReview.dissent(r: GovReview) -> String:
+  match r:
+    case GovReview{_, _, _, _, dissent, _, _}:
+      dissent
+
+def GovQueue.head.lines(xs: List<&2, String>) -> Maybe<&2, GovItem>:
+  match xs:
+    case Nil{}:
+      None{}
+    case +line <> _:
+      +row = Maybe.default(&2, J.Json, J.Json.parse(line), J.Null{})
+      Bool.pick(Maybe<&2, GovItem>, GovItem.valid(row), Some{GovItem.from.json(row)}, None{})
+
+def GovQueue.head(+text: String) -> Maybe<&2, GovItem>:
+  GovQueue.head.lines(String.split(text, '\n'))
+
+def GovQueue.tail.lines(xs: List<&2, String>) -> String:
+  match xs:
+    case Nil{}:
+      ""
+    case _ <> +rest:
+      String.join(rest, "\n")
+
+def GovQueue.tail(+text: String) -> String:
+  GovQueue.tail.lines(String.split(text, '\n'))
+
+def GovQueue.replace.head.lines(xs: List<&2, String>, +item: GovItem) -> String:
+  match xs:
+    case Nil{}:
+      ""
+    case _ <> +rest:
+      J.Json.show(GovItem.json(item)) ++ "\n" ++ String.join(rest, "\n")
+
+def GovQueue.replace.head(+old: String, +item: GovItem) -> String:
+  GovQueue.replace.head.lines(String.split(old, '\n'), item)
+
 def Hub.held(+hold: String, st: M.State, f: File, ls: List<&2, String>, cl: List<&2, Client>,
     as: List<&2, Agent>, inbox: Chan(Msg), +cfg: Cfg, note: String) -> Hub & Wrote:
   (Hub{st, f, ls, cl, as, inbox, Cfg.with_bn(cfg, BN.Bn.with_broken(Cfg.bn(cfg), hold)), note}, Wrote{Nil{}, False{}, ST.Store.held.msg(hold)})
@@ -5122,6 +5499,8 @@ def Hub.commit.done(r: File & Result<&1, &1, U32 & String, Unit>, +disk: List<&2
   match res:
     case Done{_}:
       do IO<Hub & Wrote>:
+        ledgers : Bool <- GovLedger.append(Cfg.home(cfg), cs)
+        GovLedger.report(ledgers)
         Bot.dir.changed.all(cs, inbox)
         return Hub.commit.k(Hub.fold(cs, disk, Folded{st, ls, Nil{}}), f, cl, as, inbox, Live.with(cfg, LV.Live.ends(cs, Live.of(cfg))), note)
     case Fail{e}:
@@ -5167,13 +5546,247 @@ def Hub.commit.gate(ok: Bool, +cs: List<&2, M.Change>, st: M.State, f: File, ls:
         cut : Bool <- Hub.cut(ST.Store.hold.len(hold), cfg)
         Hub.commit.heal(cut, hold, cs, st, f, ls, cl, as, inbox, cfg, note)
 
+def Hub.commit.review(approved: Bool, +cs: List<&2, M.Change>, st: M.State, f: File, ls: List<&2, String>, cl: List<&2, Client>,
+    as: List<&2, Agent>, +inbox: Chan(Msg), +cfg: Cfg, note: String) -> IO(Hub & Wrote):
+  match approved:
+    case True{}:
+      Hub.commit.gate(String.is_empty(BN.Bn.broken(Cfg.bn(cfg))), cs, st, f, ls, cl, as, inbox, cfg, note)
+    case False{}:
+      IO.pure(Hub & Wrote, (Hub{st, f, ls, cl, as, inbox, cfg, note}, Wrote{Nil{}, False{}, "governance committee rejected the change batch"}))
+
 # persist a step's changes in one write, then fold them in
-def Hub.commit.w(+cs: List<&2, M.Change>, h: Hub) -> IO(Hub & Wrote):
+def GovPeer.member(m: Maybe<&2, String>) -> Bool:
+  match m:
+    case Some{_}:
+      True{}
+    case None{}:
+      False{}
+
+def GovPeer.paired(p: BO.Peer, +st: M.State, +cfg: Cfg) -> Bool:
+  match p:
+    case BO.Peer{_, +name, +url, _, revoked}:
+      Bool.and(Bool.not(revoked), GovPeer.member(UC.Far.machine(Maybe.default(&2, J.Json, J.Json.parse(Cfg.machines(cfg)), J.Null{}), name, url)))
+
+def GovPeer.keep(ok: Bool, p: BO.Peer, +rest: List<&2, BO.Peer>) -> List<&2, BO.Peer>:
+  Bool.pick(List<&2, BO.Peer>, ok, p <> rest, rest)
+
+def GovPeer.paired.go(ps: List<&2, BO.Peer>, +st: M.State, +cfg: Cfg) -> List<&2, BO.Peer>:
+  match ps:
+    case Nil{}:
+      Nil{}
+    case +p <> t:
+      GovPeer.keep(GovPeer.paired(p, st, cfg), p, GovPeer.paired.go(t, st, cfg))
+
+def GovPeer.roster(+st: M.State, +cfg: Cfg) -> List<&2, BO.Peer>:
+  GovPeer.paired.go(BO.World.peers(M.State.bots(st)), st, cfg)
+
+def GovPeer.ids(ps: List<&2, BO.Peer>) -> List<&2, String>:
+  match ps:
+    case Nil{}:
+      Nil{}
+    case BO.Peer{+id, _, _, _, _} <> t:
+      id <> GovPeer.ids(t)
+
+def GovPeer.has(xs: List<&2, String>, +id: String) -> Bool:
+  match xs:
+    case Nil{}:
+      False{}
+    case +x <> t:
+      Bool.or(String.eq(x, id), GovPeer.has(t, id))
+
+def GovPeer.roster.in.go(ps: List<&2, BO.Peer>, +ids: List<&2, String>) -> List<&2, BO.Peer>:
+  match ps:
+    case Nil{}:
+      Nil{}
+    case +p <> t:
+      match p:
+        case BO.Peer{+id, _, _, _, _}:
+          GovPeer.keep(GovPeer.has(ids, id), p, GovPeer.roster.in.go(t, ids))
+
+def GovPeer.roster.in(+ids: List<&2, String>, +ps: List<&2, BO.Peer>) -> List<&2, BO.Peer>:
+  GovPeer.roster.in.go(ps, ids)
+
+def GovPeer.method(+m: String) -> Bool:
+  Bool.or(String.eq(m, "governance.capability"), String.eq(m, "governance.vote"))
+
+def GovPeer.allowed(+st: M.State, +cfg: Cfg, +link: String) -> Bool:
+  GovPeer.has(GovPeer.ids(GovPeer.roster(st, cfg)), link)
+
+def GovPeer.auth(+st: M.State, +cfg: Cfg, +link: String, +body: String) -> Bool:
+  Bool.and(GovPeer.allowed(st, cfg, link), GovPeer.method(J.Json.get_str(Maybe.default(&2, J.Json, J.Json.parse(body), J.Null{}), "m", "")))
+
+def GovPeer.cap.path(+home: String) -> String:
+  home ++ "/governance-capabilities.jsonl"
+
+def GovPeer.cap.row(+link: String) -> String:
+  J.Json.show(J.Json.obj([J.KV{"link", J.Json.str(link)}, J.KV{"protocol", J.Json.str(GV.Governance.protocol())}]))
+
+def GovPeer.cap.known(+text: String, +link: String) -> Bool:
+  String.contains(text, "\"link\":\"" ++ link ++ "\",\"protocol\":\"" ++ GV.Governance.protocol() ++ "\"")
+
+def GovPeer.ask.cap.response(r: BN.Resp) -> Bool:
+  match r:
+    case BN.Resp{code, +text}:
+      Bool.and(Nat.is_eq(code, 200n), String.eq(J.Json.get_str(Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{}), "protocol", ""), GV.Governance.protocol()))
+
+def GovPeer.ask.cap(+home: String, +url: String, +link: String) -> IO(Bool):
+  +body = J.Json.show(J.Json.obj([J.KV{"id", J.Num{"1"}}, J.KV{"m", J.Str{"governance.capability"}}, J.KV{"p", J.Json.obj(Nil{})}]))
+  IO.bind(Nat, Bool, Now.nat(), now =>
+    IO.bind(String, Bool, BN.Bn.random(4n), nonce =>
+      IO.bind(BN.Resp, Bool, BN.Bn.to_peer(home, url, link, now, "/far/rpc", True{}, FR.Fr.nonced(body, nonce)), r => IO.pure(Bool, GovPeer.ask.cap.response(r)))))
+
+def GovPeer.supported.go(ps: List<&2, BO.Peer>, +st: M.State, +cfg: Cfg, +home: String, +caps: String) -> IO(Bool):
+  match ps:
+    case Nil{}:
+      IO.pure(Bool, True{})
+    case BO.Peer{+id, _, +url, _, _} <> +t:
+      Bool.pick(IO(Bool), GovPeer.cap.known(caps, id), GovPeer.supported.go(t, st, cfg, home, caps),
+        IO.bind(Bool, Bool, GovPeer.ask.cap(home, url, id), ok =>
+          Bool.pick(IO(Bool), ok,
+            IO.bind(Bool, Bool, BN.Bf.append(GovPeer.cap.path(home), GovPeer.cap.row(id) ++ "\n"), saved =>
+              Bool.pick(IO(Bool), saved, GovPeer.supported.go(t, st, cfg, home, caps), IO.pure(Bool, False{}))),
+            IO.pure(Bool, False{}))))
+
+def GovPeer.supported(+ps: List<&2, BO.Peer>, +st: M.State, +cfg: Cfg, +home: String) -> IO(Bool):
+  IO.bind(String, Bool, BN.Bf.text(GovPeer.cap.path(home)), caps => GovPeer.supported.go(ps, st, cfg, home, caps))
+
+def GovVote.path(+home: String) -> String:
+  home ++ "/governance-votes.jsonl"
+
+def GovVote.find(xs: List<&2, String>, +id: String) -> String:
+  match xs:
+    case Nil{}:
+      ""
+    case +line <> t:
+      +row = Maybe.default(&2, J.Json, J.Json.parse(line), J.Null{})
+      Bool.pick(String, String.eq(J.Json.get_str(row, "id", ""), id), line, GovVote.find(t, id))
+
+def GovVote.row(+id: String, +proposal: GV.Proposal, ballot: GV.Ballot) -> String:
+  J.Json.show(J.Json.obj([J.KV{"id", J.Json.str(id)}, J.KV{"digest", J.Json.str(GV.Proposal.digest(proposal))}, J.KV{"ballot", Maybe.default(&2, J.Json, J.Json.parse(GV.Ballot.row(ballot)), J.Null{})}]))
+
+def GovVote.found.empty(found: String) -> Bool:
+  String.is_empty(found)
+
+def GovVote.response(+r: BN.Resp, +link: String) -> Maybe<&2, GV.Ballot>:
+  match r:
+    case BN.Resp{code, +text}:
+      +row = Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{})
+      +ballot = J.Json.get_obj(row, "ballot")
+      +valid = Bool.and(Nat.is_eq(code, 200n), Bool.and(J.Json.get_bool(row, "ok", False{}), String.eq(J.Json.get_str(ballot, "peer", ""), link)))
+      Bool.pick(Maybe<&2, GV.Ballot>, valid, Some{GV.Ballot{link, J.Json.get_bool(ballot, "architecture", False{}), J.Json.get_bool(ballot, "reliability", False{}), J.Json.get_bool(ballot, "experience", False{}), J.Json.get_str(ballot, "dissent", "missing ballot fields")}}, None{})
+
+def GovVote.body(+proposal: GV.Proposal, +nonce: String) -> String:
+  FR.Fr.nonced(J.Json.show(J.Json.obj([J.KV{"id", J.Num{"1"}}, J.KV{"m", J.Str{"governance.vote"}},
+    J.KV{"p", J.Json.obj([J.KV{"proposal", GV.Proposal.metadata(proposal)}])}])), nonce)
+
+def GovVote.ask.r(r: BN.Resp, +link: String) -> IO(Maybe<&2, GV.Ballot>):
+  IO.pure(Maybe<&2, GV.Ballot>, GovVote.response(r, link))
+
+def GovVote.ask.nonce(+home: String, +url: String, +link: String, +proposal: GV.Proposal, +now: Nat, +nonce: String) -> IO(Maybe<&2, GV.Ballot>):
+  IO.bind(BN.Resp, Maybe<&2, GV.Ballot>, BN.Bn.to_peer(home, url, link, now, "/far/rpc", True{}, GovVote.body(proposal, nonce)), r => GovVote.ask.r(r, link))
+
+def GovVote.ask.peer(p: BO.Peer, +proposal: GV.Proposal, +home: String) -> IO(Maybe<&2, GV.Ballot>):
+  match p:
+    case BO.Peer{+link, _, +url, _, _}:
+      IO.bind(Nat, Maybe<&2, GV.Ballot>, Now.nat(), now =>
+        IO.bind(String, Maybe<&2, GV.Ballot>, BN.Bn.random(4n), nonce => GovVote.ask.nonce(home, url, link, proposal, now, nonce)))
+
+
+def GovQueue.depth(+text: String) -> Nat:
+  Bool.pick(Nat, String.is_empty(text), 0n, Nat.sub(List.length(&2, String, String.split(text, '\n')), 1n))
+
+def GovQueue.status.go(lines: List<&2, String>, +text: String) -> String:
+  match lines:
+    case Nil{}:
+      ""
+    case +line <> _:
+      +row = Maybe.default(&2, J.Json, J.Json.parse(line), J.Null{})
+      +proposal = J.Json.get_obj(row, "proposal")
+      +id = J.Json.get_str(proposal, "id", "")
+      Bool.pick(String, String.is_empty(id), "", J.Json.show(J.Json.obj([J.KV{"id", J.Json.str(id)}, J.KV{"state", J.Json.str(J.Json.get_str(row, "state", "pending"))},
+        J.KV{"depth", J.Json.nat(GovQueue.depth(text))}, J.KV{"digest", J.Json.str(J.Json.get_str(proposal, "digest", ""))}, J.KV{"votes", J.Json.str(J.Json.get_str(row, "votes", "awaiting every paired hub"))},
+        J.KV{"appeal", J.Json.nat(J.Json.get_nat(row, "appeal", 0n))}, J.KV{"dissent", J.Json.str(J.Json.get_str(row, "dissent", ""))}, J.KV{"at", J.Json.nat(J.Json.get_nat(row, "at", 0n))}])))
+
+def GovQueue.status(+text: String) -> String:
+  GovQueue.status.go(String.split(text, '\n'), text)
+
+def Hub.gov.queue.state(h: Hub, +status: String) -> Hub:
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
+      Hub{M.State.setting(st, "gov.queue.latest", status), f, ls, cl, as, inbox, cfg, note}
+
+def Hub.commit.queue.saved(saved: Bool, h: Hub, +item: GovItem, +depth: Nat) -> IO(Hub & Wrote):
+  match saved:
+    case True{}:
+      +status = GovQueue.summary(item, 1n+depth)
+      IO.pure(Hub & Wrote, (Hub.gov.queue.state(h, status), Wrote{[status], True{}, "governance pending"}))
+    case False{}:
+      IO.pure(Hub & Wrote, (h, Wrote{Nil{}, False{}, "governance queue is full or could not be written; retry later"}))
+
+def Hub.commit.queue.make(+old: String, +peers: List<&2, BO.Peer>, +cs: List<&2, M.Change>, +outs: List<&2, B.Out>, h: Hub, +now: Nat, +nonce: String) -> IO(Hub & Wrote):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
+      +origin = J.Json.get_str(J.Json.get_obj(Maybe.default(&2, J.Json, J.Json.parse(Cfg.machines(cfg)), J.Null{}), "self"), "name", "this-hub")
+      +sequence = (M.State.seq(st) + Nat.add(GovQueue.depth(old), 1n) : Nat)
+      +id = "gov:" ++ origin ++ ":" ++ Nat.show(sequence) ++ ":" ++ nonce
+      +roster : List<&2, String> = origin <> GovPeer.ids(peers)
+      +proposal = GV.Governance.proposal(id, origin, sequence, roster, cs)
+      +item : GovItem = GovItem{proposal, cs, outs, 0n, "pending", "awaiting every paired hub", "", now}
+      IO.bind(Bool, Hub & Wrote, GovQueue.add(Cfg.home(cfg), old, item), saved =>
+        Hub.commit.queue.saved(saved, Hub{st, f, ls, cl, as, inbox, cfg, note}, item, GovQueue.depth(old)))
+
+def Hub.commit.queue(+old: String, +peers: List<&2, BO.Peer>, +cs: List<&2, M.Change>, +outs: List<&2, B.Out>, h: Hub) -> IO(Hub & Wrote):
+  IO.bind(Nat, Hub & Wrote, Now.nat(), now =>
+    IO.bind(String, Hub & Wrote, BN.Bn.random(6n), nonce => Hub.commit.queue.make(old, peers, cs, outs, h, now, nonce)))
+
+def Hub.commit.queue.mode.supported(ok: Bool, +old: String, +peers: List<&2, BO.Peer>, +cs: List<&2, M.Change>, +outs: List<&2, B.Out>, h: Hub) -> IO(Hub & Wrote):
+  match ok:
+    case True{}:
+      Hub.commit.queue(old, peers, cs, outs, h)
+    case False{}:
+      match h:
+        case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
+          +reviewed = GV.Governance.audit(M.State.seq(st), cs)
+          Hub.commit.review(GV.Governance.accepted(reviewed), reviewed, st, f, ls, cl, as, inbox, cfg, note)
+
+def Hub.commit.queue.mode.peers(empty: Bool, +old: String, +peers: List<&2, BO.Peer>, +cs: List<&2, M.Change>, +outs: List<&2, B.Out>, h: Hub) -> IO(Hub & Wrote):
+  match empty:
+    case True{}:
+      match h:
+        case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
+          +reviewed = GV.Governance.audit(M.State.seq(st), cs)
+          Hub.commit.review(GV.Governance.accepted(reviewed), reviewed, st, f, ls, cl, as, inbox, cfg, note)
+    case False{}:
+      match h:
+        case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
+          IO.bind(Bool, Hub & Wrote, GovPeer.supported(peers, st, cfg, Cfg.home(cfg)), ok =>
+      Hub.commit.queue.mode.supported(ok, old, peers, cs, outs, Hub{st, f, ls, cl, as, inbox, cfg, note}))
+
+def Hub.commit.queue.mode(empty: Bool, +old: String, +peers: List<&2, BO.Peer>, +cs: List<&2, M.Change>, +outs: List<&2, B.Out>, h: Hub) -> IO(Hub & Wrote):
+  match empty:
+    case False{}:
+      Hub.commit.queue(old, peers, cs, outs, h)
+    case True{}:
+      Hub.commit.queue.mode.peers(List.is_empty(&2, BO.Peer, peers), old, peers, cs, outs, h)
+
+def Hub.commit.governance(+old: String, +cs: List<&2, M.Change>, +outs: List<&2, B.Out>, h: Hub) -> IO(Hub & Wrote):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
+      Hub.commit.queue.mode(String.is_empty(old), old, GovPeer.roster(st, cfg), cs, outs, Hub{st, f, ls, cl, as, inbox, cfg, note})
+
+def Hub.commit.governance.loaded(+old: String, +cs: List<&2, M.Change>, +outs: List<&2, B.Out>, h: Hub) -> IO(Hub & Wrote):
+  Hub.commit.governance(old, cs, outs, h)
+
+def Hub.commit.w.outputs(+cs: List<&2, M.Change>, +outs: List<&2, B.Out>, h: Hub) -> IO(Hub & Wrote):
   match cs h:
     case Nil{} _:
       IO.pure(Hub & Wrote, (h, Wrote{Nil{}, True{}, ""}))
-    case _ Hub{st, f, ls, cl, as, +inbox, +cfg, note}:
-      Hub.commit.gate(String.is_empty(BN.Bn.broken(Cfg.bn(cfg))), cs, st, f, ls, cl, as, inbox, cfg, note)
+    case _ Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
+      IO.bind(String, Hub & Wrote, BN.Bf.text(GovQueue.path(Cfg.home(cfg))), old =>
+        Hub.commit.governance.loaded(old, cs, outs, Hub{st, f, ls, cl, as, inbox, cfg, note}))
+
+def Hub.commit.w(+cs: List<&2, M.Change>, h: Hub) -> IO(Hub & Wrote):
+  Hub.commit.w.outputs(cs, Nil{}, h)
 
 def Hub.commit.b(r: Hub & List<&2, String>, moved: Bool) -> IO(Hub & List<&2, String>):
   (h, fr) = r
@@ -8226,6 +8839,11 @@ def Hub.uber.after(h: Hub, +cs: List<&2, M.Change>) -> IO(Hub):
 def Hub.step.wrote(r: Hub & Wrote, +cs: List<&2, M.Change>, os: List<&2, B.Out>, +from: Nat) -> IO(Hub & Bool):
   (h, w) = r
   match w:
+    case Wrote{[+status], True{}, "governance pending"}:
+      do IO<Hub & Bool>:
+        +text : String = J.Json.show(J.Json.obj([J.KV{"t", J.Json.str("info")}, J.KV{"info", J.Json.obj([J.KV{"governance.queue", J.Json.str(status)}])}]))
+        h2 : Hub <- Hub.broadcast(h, text)
+        return (h2, True{})
     case Wrote{+fresh, True{}, _}:
       do IO<Hub & Bool>:
         t0 : U32 <- PS.Perf.us()
@@ -8244,12 +8862,169 @@ def Hub.step.wrote(r: Hub & Wrote, +cs: List<&2, M.Change>, os: List<&2, B.Out>,
         h2 : Hub <- Hub.note(h, Hub.write_fail.note(err))
         return (h2, False{})
 
-def Hub.step.go(+st: M.State, h: Hub, cs: List<&2, M.Change>, os: List<&2, B.Out>) -> IO(Hub & Bool):
+def GovQueue.vote.peers(ps: List<&2, BO.Peer>, +proposal: GV.Proposal, +home: String, +review: GovReview) -> IO(GovReview):
+  match ps:
+    case Nil{}:
+      IO.pure(GovReview, review)
+    case +peer <> +rest:
+      IO.bind(Maybe<&2, GV.Ballot>, GovReview, GovVote.ask.peer(peer, proposal, home), ballot =>
+        GovQueue.vote.peers(rest, proposal, home, GovReview.add(ballot, review)))
+
+def GovQueue.vote.item(+item: GovItem, +peers: List<&2, BO.Peer>, +home: String) -> IO(GovReview):
+  match item:
+    case GovItem{+proposal, _, _, _, _, _, _, _}:
+      +local = GV.Governance.vote(proposal, GV.Proposal.origin(proposal))
+      GovQueue.vote.peers(peers, proposal, home, GovReview.local(local, Nat.add(1n, List.length(&2, BO.Peer, peers))))
+
+def GovQueue.committed(+st: M.State, +id: String) -> Bool:
+  String.eq(J.Json.get_str(Maybe.default(&2, J.Json, J.Json.parse(M.Setting.get(st, "gov.receipt.latest", "")), J.Null{}), "id", ""), id)
+
+def Hub.gov.queue.info(h: Hub, +status: String) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
+      do IO<Hub>:
+        +text : String = J.Json.show(J.Json.obj([J.KV{"t", J.Json.str("info")}, J.KV{"info", J.Json.obj([J.KV{"governance.queue", J.Json.str(status)}])}]))
+        h2 : Hub <- Hub.broadcast(Hub{M.State.setting(st, "gov.queue.latest", status), f, ls, cl, as, inbox, cfg, note}, text)
+        return h2
+
+def Hub.gov.queue.popped(m: Maybe<&2, GovItem>, +rest: String, +status: String, h: Hub) -> IO(Hub):
+  match m h:
+    case Some{+item} h:
+      Hub.gov.queue.info(h, GovQueue.summary(item, GovQueue.depth(rest)))
+    case None{} h:
+      Hub.gov.queue.info(h, status)
+
+def Hub.gov.queue.pop.saved(saved: Bool, +rest: String, +status: String, h: Hub) -> IO(Hub):
+  match saved:
+    case True{}:
+      Hub.gov.queue.popped(GovQueue.head(rest), rest, status, h)
+    case False{}:
+      IO.pure(Hub, h)
+
+def Hub.gov.queue.pop(+old: String, +status: String, h: Hub) -> IO(Hub):
+  match h:
+    case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      +rest = GovQueue.tail(old)
+      IO.bind(Bool, Hub, GovQueue.replace(Cfg.home(cfg), rest), saved =>
+        Hub.gov.queue.pop.saved(saved, rest, status, Hub{st, f, ls, cl, as, inbox, cfg, note}))
+
+def Hub.gov.queue.commit.saved(ok: Bool, +old: String, +status: String, +pending: String, h: Hub) -> IO(Hub):
+  match ok:
+    case True{}:
+      Hub.gov.queue.pop(old, status, h)
+    case False{}:
+      Hub.gov.queue.info(h, pending)
+
+def Hub.gov.queue.commit.done(r: Hub & Bool, +old: String, +status: String, +pending: String) -> IO(Hub):
+  (h, ok) = r
+  Hub.gov.queue.commit.saved(ok, old, status, pending, h)
+
+def Hub.gov.queue.commit(+item: GovItem, +review: GovReview, +old: String, h: Hub) -> IO(Hub):
+  match item review h:
+    case GovItem{proposal, +changes, +outs, _, _, _, _, _} GovReview{_, architecture, reliability, experience, +dissent, _, _} Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
+      +cs = GV.Governance.audit.with(GV.Proposal.id(proposal), changes, architecture, reliability, experience, dissent)
+      +accepted = GovItem.review(item, "accepted", GovReview.votes(review), GovReview.dissent(review))
+      +status = GovQueue.summary(accepted, GovQueue.depth(old))
+      +pending = GovQueue.summary(GovItem.review(item, "pending", GovReview.votes(review), GovReview.dissent(review)), GovQueue.depth(old))
+      +from = M.State.seq(st)
+      IO.bind(Hub & Wrote, Hub, Hub.commit.review(True{}, cs, st, f, ls, cl, as, inbox, cfg, note), wrote =>
+        IO.bind(Hub & Bool, Hub, Hub.step.wrote(wrote, cs, outs, from), result => Hub.gov.queue.commit.done(result, old, status, pending)))
+
+def Hub.gov.queue.already(committed: Bool, +item: GovItem, +review: GovReview, +old: String, h: Hub) -> IO(Hub):
+  match committed h:
+    case True{} h:
+      match item:
+        case GovItem{_, _, +outs, _, _, _, _, _}:
+          IO.bind(Hub, Hub, Hub.outs(outs, h), h2 =>
+            Hub.gov.queue.pop(old, GovQueue.summary(GovItem.review(item, "accepted", GovReview.votes(review), GovReview.dissent(review)), GovQueue.depth(old)), h2))
+    case False{} h:
+      Hub.gov.queue.commit(item, review, old, h)
+
+def GovQueue.proposal(i: GovItem) -> GV.Proposal:
+  match i:
+    case GovItem{proposal, _, _, _, _, _, _, _}:
+      proposal
+
+def Hub.gov.queue.result.ready(complete: Bool, approved: Bool, +item: GovItem, +review: GovReview, +old: String, h: Hub) -> IO(Hub):
+  match complete approved h:
+    case False{} _ h:
+      +pending = GovItem.review(item, "pending", GovReview.votes(review), GovReview.dissent(review))
+      Hub.gov.queue.info(h, GovQueue.summary(pending, GovQueue.depth(old)))
+    case True{} True{} Hub{+st, f, ls, cl, as, inbox, cfg, note}:
+      +id = GV.Proposal.id(GovQueue.proposal(item))
+      Hub.gov.queue.already(GovQueue.committed(st, id), item, review, old, Hub{st, f, ls, cl, as, inbox, cfg, note})
+    case True{} False{} h:
+      +rejected = GovItem.review(item, "rejected", GovReview.votes(review), GovReview.dissent(review))
+      Hub.gov.queue.pop(old, GovQueue.summary(rejected, GovQueue.depth(old)), h)
+
+def Hub.gov.queue.result(rejected: Bool, complete: Bool, approved: Bool, +item: GovItem, +review: GovReview, +old: String, h: Hub) -> IO(Hub):
+  match rejected h:
+    case True{} h:
+      +item2 = GovItem.review(item, "rejected", GovReview.votes(review), GovReview.dissent(review))
+      Hub.gov.queue.pop(old, GovQueue.summary(item2, GovQueue.depth(old)), h)
+    case False{} h:
+      Hub.gov.queue.result.ready(complete, approved, item, review, old, h)
+
+def Hub.gov.queue.review(+item: GovItem, +peers: List<&2, BO.Peer>, +old: String, h: Hub) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
+      IO.bind(GovReview, Hub, GovQueue.vote.item(item, peers, Cfg.home(cfg)), +review =>
+        Hub.gov.queue.result(GovReview.rejected(review), GovReview.complete(review), GovReview.approved(review), item, review, old, Hub{st, f, ls, cl, as, inbox, cfg, note}))
+
+def Hub.gov.queue.revised(saved: Bool, +text: String, +item: GovItem, +peers: List<&2, BO.Peer>, h: Hub) -> IO(Hub):
+  match saved:
+    case True{}:
+      Hub.gov.queue.review(item, peers, text, h)
+    case False{}:
+      IO.pure(Hub, h)
+
+def Hub.gov.queue.roster(same: Bool, +item: GovItem, +roster: List<&2, String>, +peers: List<&2, BO.Peer>, +old: String, h: Hub) -> IO(Hub):
+  match same:
+    case True{}:
+      Hub.gov.queue.review(item, peers, old, h)
+    case False{}:
+      match h:
+        case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+          +revised = GovItem.revise(item, roster)
+          +text = GovQueue.replace.head(old, revised)
+          IO.bind(Bool, Hub, GovQueue.replace(Cfg.home(cfg), text), saved =>
+            Hub.gov.queue.revised(saved, text, revised, peers, Hub{st, f, ls, cl, as, inbox, cfg, note}))
+
+def Hub.gov.queue.head(+item: GovItem, +old: String, h: Hub) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
+      +proposal = GovQueue.proposal(item)
+      +peers = GovPeer.roster.in(GV.Proposal.roster(proposal), GovPeer.roster(st, cfg))
+      +roster = GV.Governance.roster(GV.Proposal.origin(proposal) <> GovPeer.ids(peers))
+      +same = String.eq(String.join(roster, "\n"), String.join(GV.Proposal.roster(proposal), "\n"))
+      Hub.gov.queue.roster(same, item, roster, peers, old, Hub{st, f, ls, cl, as, inbox, cfg, note})
+
+def Hub.gov.queue.process.head(m: Maybe<&2, GovItem>, +old: String, h: Hub) -> IO(Hub):
+  match m h:
+    case Some{+item} h:
+      Hub.gov.queue.head(item, old, h)
+    case None{} h:
+      IO.pure(Hub, h)
+
+def Hub.gov.queue.process.empty(empty: Bool, +old: String, h: Hub) -> IO(Hub):
+  match empty h:
+    case True{} h:
+      IO.pure(Hub, h)
+    case False{} h:
+      Hub.gov.queue.process.head(GovQueue.head(old), old, h)
+
+def Hub.gov.queue.tick(h: Hub) -> IO(Hub):
+  match h:
+    case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      IO.bind(String, Hub, BN.Bf.text(GovQueue.path(Cfg.home(cfg))), +old =>
+        Hub.gov.queue.process.empty(String.is_empty(old), old, Hub{st, f, ls, cl, as, inbox, cfg, note}))
+
+def Hub.step.go(+st: M.State, h: Hub, cs: List<&2, M.Change>, +os: List<&2, B.Out>) -> IO(Hub & Bool):
   do IO<Hub & Bool>:
     t0 : U32 <- PS.Perf.us()
     +cs2 : List<&2, M.Change> = B.Pend.fix(st, cs)
     t1 : U32 <- PS.Perf.span("hub.step.pend", t0)
-    r : Hub & Wrote <- Hub.commit.w(cs2, h)
+    r : Hub & Wrote <- Hub.commit.w.outputs(cs2, os, h)
     t2 : U32 <- PS.Perf.span("hub.step.commit", t1)
     Hub.step.wrote(r, cs2, os, M.State.seq(st))
 
@@ -8750,7 +9525,7 @@ def Hub.gone(h: Hub, +thread: String, +code: U32, +pid: U32, +why: String, +now:
       Hub.gone.k(Agent.pid_is(Agents.get(as, thread), pid), Hub{st, f, ls, cl, as, inbox, cfg, note}, thread, code, why, now)
 
 # each minute the hub's size goes into the gauges
-def Hub.tick(h: Hub, +now: Nat) -> IO(Hub):
+def Hub.tick.base(h: Hub, +now: Nat) -> IO(Hub):
   match h:
     case Hub{+st, f, +ls, +cl0, +as, +inbox, cfg, note}:
       do IO<Hub>:
@@ -8766,6 +9541,9 @@ def Hub.tick(h: Hub, +now: Nat) -> IO(Hub):
         Self.post(inbox, Release{})
         Self.post(inbox, Silence{})
         Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, B.Hub.tick(st, now))
+
+def Hub.tick(h: Hub, +now: Nat) -> IO(Hub):
+  IO.bind(Hub, Hub, Hub.gov.queue.tick(h), h2 => Hub.tick.base(h2, now))
 
 # a tool call's answer goes once its step is stored: a call whose changes
 # could not be written is told so, never that it worked
@@ -9586,6 +10364,73 @@ def Hub.answer(h: Hub, +reply: Chan(List<&2, U32>), bs: List<&2, U32>) -> IO(Hub
 def Bot.json(+status: String, +text: String) -> List<&2, U32>:
   W.Http.response(status, "application/json", U.Utf8.encode(text), "")
 
+def Hub.gov.vote.answer(h: Hub, +reply: Chan(List<&2, U32>), +code: String, +body: String) -> IO(Hub):
+  Hub.answer(h, reply, Bot.json(code, body))
+
+def Hub.gov.vote.saved.found(empty: Bool, +found: String, +ballot: GV.Ballot, h: Hub, +reply: Chan(List<&2, U32>)) -> IO(Hub):
+  match empty h:
+    case True{} h:
+      Hub.gov.vote.answer(h, reply, "200 OK", J.Json.show(J.Json.obj([J.KV{"ok", J.Json.bool(True{})}, J.KV{"ballot", Maybe.default(&2, J.Json, J.Json.parse(GV.Ballot.row(ballot)), J.Null{})}])) )
+    case False{} h:
+      Hub.gov.vote.answer(h, reply, "200 OK", J.Json.show(J.Json.obj([J.KV{"ok", J.Json.bool(True{})}, J.KV{"ballot", J.Json.get_obj(Maybe.default(&2, J.Json, J.Json.parse(found), J.Null{}), "ballot")}])) )
+
+def Hub.gov.vote.saved(conflict: Bool, +found: String, ballot: GV.Ballot, h: Hub, +reply: Chan(List<&2, U32>)) -> IO(Hub):
+  match conflict h:
+    case True{} h:
+      Hub.answer(h, reply, W.Http.text("409 Conflict", "proposal id already has a different digest"))
+    case False{} h:
+      Hub.gov.vote.saved.found(GovVote.found.empty(found), found, ballot, h, reply)
+
+def Hub.gov.vote.persist(saved: Bool, +found: String, +proposal: GV.Proposal, ballot: GV.Ballot, h: Hub, +reply: Chan(List<&2, U32>)) -> IO(Hub):
+  match saved:
+    case True{}:
+      Hub.gov.vote.saved(False{}, found, ballot, h, reply)
+    case False{}:
+      Hub.answer(h, reply, W.Http.text("500 Internal Server Error", "could not persist governance vote"))
+
+def Hub.gov.vote.lookup.empty(empty: Bool, conflict: Bool, +found: String, +proposal: GV.Proposal, +ballot: GV.Ballot, h: Hub, +reply: Chan(List<&2, U32>), +home: String) -> IO(Hub):
+  match empty h:
+    case True{} h:
+      IO.bind(Bool, Hub, BN.Bf.append(GovVote.path(home), GovVote.row(GV.Proposal.id(proposal), proposal, ballot) ++ "\n"), saved =>
+        Hub.gov.vote.persist(saved, found, proposal, ballot, h, reply))
+    case False{} h:
+      Hub.gov.vote.saved(conflict, found, ballot, h, reply)
+
+def Hub.gov.vote.lookup(+found: String, +proposal: GV.Proposal, ballot: GV.Ballot, h: Hub, +reply: Chan(List<&2, U32>), +home: String) -> IO(Hub):
+  +row = Maybe.default(&2, J.Json, J.Json.parse(found), J.Null{})
+  +conflict = Bool.and(Bool.not(String.is_empty(found)), Bool.not(String.eq(J.Json.get_str(row, "digest", ""), GV.Proposal.digest(proposal))))
+  Hub.gov.vote.lookup.empty(GovVote.found.empty(found), conflict, found, proposal, ballot, h, reply, home)
+
+def Hub.gov.vote.paired(allowed: Bool, +proposal: GV.Proposal, +link: String, h: Hub, +reply: Chan(List<&2, U32>)) -> IO(Hub):
+  match allowed h:
+    case True{} Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
+      IO.bind(String, Hub, BN.Bf.text(GovVote.path(Cfg.home(cfg))), text =>
+        Hub.gov.vote.lookup(GovVote.find(String.split(text, '\n'), GV.Proposal.id(proposal)), proposal, GV.Governance.vote(proposal, link), Hub{st, f, ls, cl, as, inbox, cfg, note}, reply, Cfg.home(cfg)))
+    case False{} h:
+      Hub.answer(h, reply, W.Http.text("403 Forbidden", "proposal roster does not name this paired hub"))
+
+def Hub.gov.vote.valid(valid: Bool, +proposal: GV.Proposal, +link: String, h: Hub, +reply: Chan(List<&2, U32>)) -> IO(Hub):
+  match valid h:
+    case True{} Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
+      +allowed = Bool.and(GovPeer.allowed(st, cfg, link), GovPeer.has(GV.Proposal.roster(proposal), link))
+      Hub.gov.vote.paired(allowed, proposal, link, Hub{st, f, ls, cl, as, inbox, cfg, note}, reply)
+    case False{} _:
+      Hub.answer(h, reply, W.Http.text("422 Unprocessable Content", "invalid governance proposal"))
+
+def Hub.gov.vote(o: J.Json, +link: String, h: Hub, +reply: Chan(List<&2, U32>)) -> IO(Hub):
+  +proposal = GV.Governance.proposal.from.json(J.Json.get_obj(J.Json.get_obj(o, "p"), "proposal"))
+  Hub.gov.vote.valid(Bool.and(GP.GovPolicy.registry.valid(), GV.Governance.proposal.valid(proposal)), proposal, link, h, reply)
+
+def Hub.gov.peer.k(i: Nat, +arg: String, h: Hub, +o: J.Json, +reply: Chan(List<&2, U32>)) -> IO(Hub):
+  match i:
+    case 0n:
+      Hub.answer(h, reply, Bot.json("200 OK", J.Json.show(J.Json.obj([J.KV{"protocol", J.Json.str(GV.Governance.protocol())}]))))
+    case _:
+      Hub.gov.vote(o, arg, h, reply)
+
+def Hub.gov.peer(+arg: String, h: Hub, +o: J.Json, +reply: Chan(List<&2, U32>)) -> IO(Hub):
+  Hub.gov.peer.k(C.Codec.pos(["governance.capability", "governance.vote"], J.Json.get_str(o, "m", "")), arg, h, o, reply)
+
 # POST /far/rpc uber.sync: the answer is what the asking machine lacks
 def Hub.uber.in(h: Hub, +link: String, +o: J.Json, +reply: Chan(List<&2, U32>), +now: Nat) -> IO(Hub):
   match h:
@@ -9898,17 +10743,21 @@ def Hub.far.rpc.s(show: Bool, +arg: String, view: Bool, +st: M.State, h: Hub, +o
       Hub.far.rpc.v(view, st, h, o, text, reply, now)
 
 # (uber.sync is the uberbot's: the owner's machines exchange its ops)
-def Hub.far.rpc.u(uber: Bool, show: Bool, +arg: String, view: Bool, +st: M.State, h: Hub, +o: J.Json, +text: String, +reply: Chan(List<&2, U32>), +now: Nat) -> IO(Hub):
-  match uber:
+def Hub.far.rpc.u(governance: Bool, uber: Bool, show: Bool, +arg: String, view: Bool, +st: M.State, h: Hub, +o: J.Json, +text: String, +reply: Chan(List<&2, U32>), +now: Nat) -> IO(Hub):
+  match governance:
     case True{}:
-      Hub.uber.in(h, arg, o, reply, now)
+      Hub.gov.peer(arg, h, o, reply)
     case False{}:
-      Hub.far.rpc.s(show, arg, view, st, h, o, text, reply, now)
+      match uber:
+        case True{}:
+          Hub.uber.in(h, arg, o, reply, now)
+        case False{}:
+          Hub.far.rpc.s(show, arg, view, st, h, o, text, reply, now)
 
 def Hub.far.rpc(ok: Bool, +arg: String, m: Maybe<&2, J.Json>, h: Hub, +text: String, +reply: Chan(List<&2, U32>), +now: Nat) -> IO(Hub):
   match ok m h:
     case True{} Some{+o} Hub{+st, f, ls, cl, as, inbox, cfg, note}:
-      Hub.far.rpc.u(String.eq(J.Json.get_str(o, "m", ""), "uber.sync"), FV.Fv.show.is(J.Json.get_str(o, "m", "")), arg, FV.Fv.read(J.Json.get_str(o, "m", "")), st, Hub{st, f, ls, cl, as, inbox, cfg, note}, o, text, reply, now)
+      Hub.far.rpc.u(GovPeer.method(J.Json.get_str(o, "m", "")), String.eq(J.Json.get_str(o, "m", ""), "uber.sync"), FV.Fv.show.is(J.Json.get_str(o, "m", "")), arg, FV.Fv.read(J.Json.get_str(o, "m", "")), st, Hub{st, f, ls, cl, as, inbox, cfg, note}, o, text, reply, now)
     case True{} None{} _:
       Hub.answer(h, reply, W.Http.text("400 Bad Request", "not JSON"))
     case False{} _ _:
@@ -10259,7 +11108,7 @@ def Hub.bot.act(i: Nat, h: Hub, +arg: String, +body: String, +me: String, +reply
     case 5n Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
       Hub.far.log(Far.own.id(st, cfg, arg), J.Json.parse(body), Hub{st, f, ls, cl, as, inbox, cfg, note}, reply)
     case 6n Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
-      Hub.far.rpc(Far.own.id(st, cfg, arg), arg, J.Json.parse(body), Hub{st, f, ls, cl, as, inbox, cfg, note}, body, reply, now)
+      Hub.far.rpc(Bool.or(Far.own.id(st, cfg, arg), GovPeer.auth(st, cfg, arg, body)), arg, J.Json.parse(body), Hub{st, f, ls, cl, as, inbox, cfg, note}, body, reply, now)
     case _ _:
       Hub.answer(h, reply, W.Http.text("404 Not Found", "not found"))
 
@@ -12218,6 +13067,13 @@ def Main.torn(r: Result<&1, &1, U32 & String, File>, +fix: String) -> IO(Result<
     case Fail{e}:
       IO.pure(Result<&1, &1, U32 & String, File>, Fail{e})
 
+def GovLedger.booted(ok: Bool) -> IO(Unit):
+  match ok:
+    case True{}:
+      IO.pure(Unit, Unit{})
+    case False{}:
+      Log.info("governance sidecar rebuild will retry at next startup")
+
 # replay the log, start the hub (and the web server), then run front
 # with the hub's inbox; `need` makes a taken web port fatal
 def Main.boot(cfg: Cfg, need: Bool, front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
@@ -12229,7 +13085,12 @@ def Main.boot(cfg: Cfg, need: Bool, front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
         +bs : List<&2, U32> <- Files.read(Store.path(home))
         t1 : U32 <- PS.Perf.span("boot.read", t0)
         +ld : ST.Loaded = ST.Store.load(Store.lines(bs), ST.Loaded{M.State.empty(), Nil{}})
-        +st : M.State = ST.Loaded.st(ld)
+        +changes : List<&2, M.Change> = ST.Store.changes(Store.lines(bs))
+        sidecars : Bool <- GovLedger.rebuild(home, changes)
+        GovLedger.booted(sidecars)
+        +state : M.State = ST.Loaded.st(ld)
+        +pending : String <- BN.Bf.text(GovQueue.path(home))
+        +st : M.State = M.State.setting(state, "gov.queue.latest", GovQueue.status(pending))
         +ls : List<&2, String> = ST.Loaded.wire(ld)
         t2 : U32 <- PS.Perf.span("boot.replay", t1)
         Log.info("replayed " ++ Nat.show(List.length(&2, String, ls)) ++ " changes from " ++ Store.path(home))

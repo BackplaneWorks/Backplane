@@ -790,8 +790,8 @@ def WB.pidle.more(+shown: Nat, +n: Nat) -> Nat:
 def WB.pempty(+p: PL.Plane) -> Bool:
   Bool.and(List.is_empty(&2, PL.PRow, PL.Plane.need(p)), Bool.and(List.is_empty(&2, PL.PRow, PL.Plane.run(p)), List.is_empty(&2, PL.PRow, PL.Plane.idle(p))))
 
-def WB.plane.k(+p: PL.Plane, +h: PL.PHome, +now: Nat) -> D.Node:
-  WB.div("plane", [
+def WB.plane.k(+p: PL.Plane, +h: PL.PHome, +now: Nat, +governance: String, +certificate: String) -> D.Node:
+  D.El{"div", "", [D.At{"class", "plane"}, D.At{"data-projection-certificate", certificate}], [
     WB.pstrip(p, h),
     WB.div("plane-grid", [
       WB.div("plane-main", List.concat(&2, D.Node, [
@@ -802,11 +802,14 @@ def WB.plane.k(+p: PL.Plane, +h: PL.PHome, +now: Nat) -> D.Node:
       WB.div("plane-side", List.concat(&2, D.Node, [
         WB.psec("Bots", PL.Plane.bots(p), 0n, now),
         WB.psec("Rooms", PL.Plane.rooms(p), 0n, now),
-        WB.psec("Locks", PL.Plane.locks(p), 0n, now), WB.psec("Routines", PL.Plane.routines(p), 0n, now)]))])])
+        WB.psec("Locks", PL.Plane.locks(p), 0n, now), WB.psec("Routines", PL.Plane.routines(p), 0n, now),
+        WB.psec(governance, PL.Plane.governance(p), 0n, now)]))])]}
 
 # the Status tab's body
 def WB.plane(+u: U.Ui) -> D.Node:
-  WB.plane.k(PL.Plane.of(u, U.Side.now(u)), PL.Plane.home(u), U.Side.now(u))
+  +now = U.Side.now(u)
+  +p = PL.Plane.of(u, now)
+  WB.plane.k(p, PL.Plane.home(u), now, PL.Plane.governance.label(U.Ui.scratch(u, "@lang.tag")), PL.Plane.certificate(p, now, True{}))
 
 # a tab's body: Status here, the others in WB.body; only the one shown is built
 def WB.main.k(status: Bool, +u: U.Ui, +b: BT.Bot, +tab: String) -> D.Node:

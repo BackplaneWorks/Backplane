@@ -1,6 +1,12 @@
 import Base
+import ./json.bend as J
+import ./i18n.bend as I
+import ./msgs.bend as T
+import ./sha256.bend as SHA
+import ./utf8.bend as U8
 import ./locks.bend as LK
 import ./model.bend as M
+import ./governance.bend as GV
 import ./deploy.bend as DP
 import ./bot.bend as BT
 import ./far.bend as FR
@@ -35,52 +41,84 @@ type PMach is Data:
   PMach{name: String, state: String}
 
 type Plane is Data:
-  Plane{need: List<&2, PRow>, run: List<&2, PRow>, bots: List<&2, PRow>, rooms: List<&2, PRow>, routines: List<&2, PRow>, idle: List<&2, PRow>, idle_n: Nat, machines: List<&2, PMach>, locks: List<&2, PRow>}
+  Plane{need: List<&2, PRow>, run: List<&2, PRow>, bots: List<&2, PRow>, rooms: List<&2, PRow>, routines: List<&2, PRow>, idle: List<&2, PRow>, idle_n: Nat, machines: List<&2, PMach>, locks: List<&2, PRow>, governance: List<&2, PRow>}
 
 def Plane.need(p: Plane) -> List<&2, PRow>:
   match p:
-    case Plane{n, _, _, _, _, _, _, _, _}:
+    case Plane{n, _, _, _, _, _, _, _, _, _}:
       n
 
 def Plane.run(p: Plane) -> List<&2, PRow>:
   match p:
-    case Plane{_, r, _, _, _, _, _, _, _}:
+    case Plane{_, r, _, _, _, _, _, _, _, _}:
       r
 
 def Plane.bots(p: Plane) -> List<&2, PRow>:
   match p:
-    case Plane{_, _, b, _, _, _, _, _, _}:
+    case Plane{_, _, b, _, _, _, _, _, _, _}:
       b
 
 def Plane.rooms(p: Plane) -> List<&2, PRow>:
   match p:
-    case Plane{_, _, _, r, _, _, _, _, _}:
+    case Plane{_, _, _, r, _, _, _, _, _, _}:
       r
 
 def Plane.routines(p: Plane) -> List<&2, PRow>:
   match p:
-    case Plane{_, _, _, _, r, _, _, _, _}:
+    case Plane{_, _, _, _, r, _, _, _, _, _}:
       r
 
 def Plane.idle(p: Plane) -> List<&2, PRow>:
   match p:
-    case Plane{_, _, _, _, _, i, _, _, _}:
+    case Plane{_, _, _, _, _, i, _, _, _, _}:
       i
 
 def Plane.idle_n(p: Plane) -> Nat:
   match p:
-    case Plane{_, _, _, _, _, _, n, _, _}:
+    case Plane{_, _, _, _, _, _, n, _, _, _}:
       n
 
 def Plane.machines(p: Plane) -> List<&2, PMach>:
   match p:
-    case Plane{_, _, _, _, _, _, _, m, _}:
+    case Plane{_, _, _, _, _, _, _, m, _, _}:
       m
 
 def Plane.locks(p: Plane) -> List<&2, PRow>:
   match p:
-    case Plane{_, _, _, _, _, _, _, _, ls}:
+    case Plane{_, _, _, _, _, _, _, _, ls, _}:
       ls
+
+def Plane.governance(p: Plane) -> List<&2, PRow>:
+  match p:
+    case Plane{_, _, _, _, _, _, _, _, _, gs}:
+      gs
+
+def Plane.governance.label(+locale: String) -> String:
+  T.T.plane.governance(I.I18n.resolve(locale, "en"))
+
+def Plane.audit.pending.row(+raw: String) -> List<&2, PRow>:
+  +o = Maybe.default(&2, J.Json, J.Json.parse(raw), J.Null{})
+  +id = J.Json.get_str(o, "id", "")
+  Bool.pick(List<&2, PRow>, String.is_empty(id), Nil{},
+    [PRow{"governance", "pending:" ++ id, "", "", "Proposal " ++ id,
+      "Queue " ++ Nat.show(J.Json.get_nat(o, "depth", 0n)) ++ " · " ++ J.Json.get_str(o, "state", "pending") ++ " · "
+        ++ String.take(J.Json.get_str(o, "digest", ""), 12n) ++ " · " ++ J.Json.get_str(o, "votes", "no ballots")
+        ++ Bool.pick(String, Nat.is_gt(J.Json.get_nat(o, "appeal", 0n), 0n), " · second reading " ++ Nat.show(J.Json.get_nat(o, "appeal", 0n)), "")
+        ++ Bool.pick(String, String.is_empty(J.Json.get_str(o, "dissent", "")), "", " · dissent: " ++ J.Json.get_str(o, "dissent", "")),
+      "", J.Json.get_str(o, "state", "pending"), J.Json.get_nat(o, "at", 0n), False{}}])
+
+def Plane.audit.rows(+st: M.State, +pending: String) -> List<&2, PRow>:
+  +raw = M.Setting.get(st, "gov.receipt.latest", "")
+  +o = Maybe.default(&2, J.Json, J.Json.parse(raw), J.Null{})
+  +id = J.Json.get_str(o, "id", "")
+  +receipt = Bool.pick(List<&2, PRow>, String.is_empty(id), Nil{},
+    [PRow{"governance", id, "", "", "Batch " ++ id,
+      J.Json.get_str(o, "protocol", "unknown") ++ " · " ++ Nat.show(J.Json.get_nat(o, "changes", 0n)) ++ " changes · "
+        ++ Nat.show(Nat.add(Nat.add(Bool.pick(Nat, J.Json.get_bool(o, "architecture", False{}), 1n, 0n),
+          Bool.pick(Nat, J.Json.get_bool(o, "reliability", False{}), 1n, 0n)), Bool.pick(Nat, J.Json.get_bool(o, "experience", False{}), 1n, 0n))) ++ "/3 roles · "
+        ++ String.take(J.Json.get_str(o, "digest", ""), 12n),
+      "", J.Json.get_str(o, "policy", "unknown"), J.Json.get_nat(o, "at", 0n), False{}}])
+  List.append(&2, PRow, receipt, Plane.audit.pending.row(pending))
 
 # "held by <thread> 5m ago", or the process outside the hub that holds the flock
 def Plane.lock.who(o: Maybe<&2, LK.LockParty>, +title: String, +p: LK.LockParty, +now: Nat) -> String:
@@ -418,7 +456,8 @@ def Plane.of.i(+idle: List<&2, PRow>, +all: List<&2, PRow>, +u: U.Ui, +ix: U.SIx
     Plane.bot.rows(BU.BU.rows(u), U.Ui.state(u)),
     List.sort(~PRow, ~Plane.newer, Plane.rooms.go(BT.World.rooms(M.State.bots(U.Ui.state(u))), u)),
     List.sort(~PRow, ~Plane.due.before, Plane.routines.go(BT.World.routines.all(M.State.bots(U.Ui.state(u))), u, ix, now)),
-    List.take(&2, PRow, idle, Plane.idle.max()), List.length(&2, PRow, idle), Plane.machines.of(u), Plane.lock.go(M.Locks.names(U.Ui.state(u)), U.Ui.state(u), now)}
+    List.take(&2, PRow, idle, Plane.idle.max()), List.length(&2, PRow, idle), Plane.machines.of(u), Plane.lock.go(M.Locks.names(U.Ui.state(u)), U.Ui.state(u), now),
+    Plane.audit.rows(U.Ui.state(u), Bool.pick(String, String.is_empty(U.Ui.info(u, "governance.queue")), M.Setting.get(U.Ui.state(u), "gov.queue.latest", ""), U.Ui.info(u, "governance.queue")))}
 
 def Plane.of.k(+all: List<&2, PRow>, +u: U.Ui, +ix: U.SIx, +now: Nat) -> Plane:
   Plane.of.i(Plane.sort(Plane.recent(Plane.part(all, 2n), now)), all, u, ix, now)
@@ -837,8 +876,27 @@ def Plane.text(+p: Plane, +pre: String, +name: String, +now: Nat, +idle: Bool) -
     ++ Bool.pick(String, Bool.and(List.is_empty(&2, PRow, Plane.need(p)), List.is_empty(&2, PRow, Plane.run(p))), "Nothing needs you and nothing is running.\n", "")
     ++ Plane.text.sec("Needs you", Plane.need(p), pre, now) ++ Plane.text.sec("Running", Plane.run(p), pre, now)
     ++ Plane.text.sec("Bots", Plane.bots(p), pre, now) ++ Plane.text.sec("Rooms with unread posts", Plane.rooms(p), pre, now)
-    ++ Plane.text.sec("Locks", Plane.locks(p), pre, now) ++ Plane.text.sec("Routines", Plane.routines(p), pre, now) ++ Plane.text.idle.k(idle, Plane.idle_n(p), Plane.idle(p), pre, now)
+    ++ Plane.text.sec("Locks", Plane.locks(p), pre, now) ++ Plane.text.sec("Routines", Plane.routines(p), pre, now)
+    ++ Plane.text.sec("Governance", Plane.governance(p), pre, now) ++ Plane.text.idle.k(idle, Plane.idle_n(p), Plane.idle(p), pre, now)
     ++ Plane.text.machines.k(Nat.is_gt(List.length(&2, PMach, Plane.machines(p)), 1n), Plane.machines(p))
+
+def Plane.hex.nibble(+n: U32) -> String:
+  SCon{J.Json.hex(n), SNil{}}
+
+def Plane.hex.byte(+n: U32) -> String:
+  Plane.hex.nibble(U32.shrn(n, 4n)) ++ Plane.hex.nibble(U32.and(n, 15))
+
+def Plane.hex.bytes(xs: List<&2, U32>, +out: String) -> String:
+  match xs:
+    case Nil{}:
+      out
+    case x <> t:
+      Plane.hex.bytes(t, out ++ Plane.hex.byte(x))
+
+# A deterministic certificate of the complete plane projection, before each
+# client applies its own layout and rasterization.
+def Plane.certificate(+p: Plane, +now: Nat, +idle: Bool) -> String:
+  Plane.hex.bytes(SHA.Sha256.hash(U8.Utf8.encode(GV.Governance.protocol() ++ "\n" ++ Plane.text(p, "", "this machine", now, idle))), "")
 
 # a hub's plane as text: this machine's (pre "") or, for another machine
 # asking, ids made its own with the link

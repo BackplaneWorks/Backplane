@@ -325,9 +325,11 @@ def Change.encode(c: M.Change) -> J.Json:
       Change.obj("CharterSet", [J.KV{"bot", J.Str{bot}}, J.KV{"text", J.Str{text}}, J.KV{"by", J.Str{by}}, J.KV{"at", Codec.nat(at)}])
     case M.DecisionLogged{id, bot, conv, run, text, reason, at}:
       Change.obj("DecisionLogged", [J.KV{"id", J.Str{id}}, J.KV{"bot", J.Str{bot}}, J.KV{"conv", J.Str{conv}}, J.KV{"run", J.Str{run}}, J.KV{"text", J.Str{text}}, J.KV{"reason", J.Str{reason}}, J.KV{"at", Codec.nat(at)}])
+    case M.GovernanceLogged{id, protocol, actor, action, intent, policy, dissent, schema, changes, digest, architecture, reliability, experience, at}:
+      Change.obj("GovernanceLogged", [J.KV{"id", J.Str{id}}, J.KV{"protocol", J.Str{protocol}}, J.KV{"actor", J.Str{actor}}, J.KV{"action", J.Str{action}}, J.KV{"intent", J.Str{intent}}, J.KV{"policy", J.Str{policy}}, J.KV{"dissent", J.Str{dissent}}, J.KV{"schema", Codec.nat(schema)}, J.KV{"changes", Codec.nat(changes)}, J.KV{"digest", J.Str{digest}}, J.KV{"architecture", J.Flag{architecture}}, J.KV{"reliability", J.Flag{reliability}}, J.KV{"experience", J.Flag{experience}}, J.KV{"at", Codec.nat(at)}])
 
 def Change.tags() -> List<&2, String>:
-  ["ProjectCreated", "ProjectRemoved", "ThreadCreated", "ThreadRenamed", "MessagePosted", "TurnChanged", "PendingChanged", "ActivityLogged", "ThreadSettled", "ThreadUnsettled", "ThreadArchived", "ThreadPinned", "ThreadDeleted", "WorktreeSet", "SessionSet", "ModesSet", "TaskDelegated", "TaskStateSet", "TaskDelivered", "SettingSet", "TurnQueued", "QueueTaken", "AskOpened", "AskClosed", "DeviceRegistered", "DeviceDropped", "ThreadSnoozed", "ThreadOrdered", "WorktreeSkipped", "ThreadMerged", "WorktreeRemoved", "ProjectOrdered", "QueueEdited", "QueueRemoved", "QueueMoved", "QueueTakenOne", "ThreadForked", "ProviderSet", "TodosSet", "UsageSet", "BotSet", "BotDeleted", "RoomSet", "RoomDeleted", "RoomPosted", "HookSet", "HookHit", "RoutineSet", "RoutineDeleted", "RoutineFired", "MemorySaved", "MemoryForgot", "SpaceSet", "PeerSet", "BotWoke", "SpacePageSet", "WorkSet", "UberSet", "UberOp", "ThreadLaunched", "WakeSet", "WakeDropped", "LockChanged", "RoutinePlan", "RoutineSlot", "RoutineDone", "Reminded", "TaskSet", "TaskDeleted", "MessageFrom", "ConvSet", "MailPosted", "MailMarked", "MailTagged", "RunSet", "CharterSet", "DecisionLogged"]
+  ["ProjectCreated", "ProjectRemoved", "ThreadCreated", "ThreadRenamed", "MessagePosted", "TurnChanged", "PendingChanged", "ActivityLogged", "ThreadSettled", "ThreadUnsettled", "ThreadArchived", "ThreadPinned", "ThreadDeleted", "WorktreeSet", "SessionSet", "ModesSet", "TaskDelegated", "TaskStateSet", "TaskDelivered", "SettingSet", "TurnQueued", "QueueTaken", "AskOpened", "AskClosed", "DeviceRegistered", "DeviceDropped", "ThreadSnoozed", "ThreadOrdered", "WorktreeSkipped", "ThreadMerged", "WorktreeRemoved", "ProjectOrdered", "QueueEdited", "QueueRemoved", "QueueMoved", "QueueTakenOne", "ThreadForked", "ProviderSet", "TodosSet", "UsageSet", "BotSet", "BotDeleted", "RoomSet", "RoomDeleted", "RoomPosted", "HookSet", "HookHit", "RoutineSet", "RoutineDeleted", "RoutineFired", "MemorySaved", "MemoryForgot", "SpaceSet", "PeerSet", "BotWoke", "SpacePageSet", "WorkSet", "UberSet", "UberOp", "ThreadLaunched", "WakeSet", "WakeDropped", "LockChanged", "RoutinePlan", "RoutineSlot", "RoutineDone", "Reminded", "TaskSet", "TaskDeleted", "MessageFrom", "ConvSet", "MailPosted", "MailMarked", "MailTagged", "RunSet", "CharterSet", "DecisionLogged", "GovernanceLogged"]
 
 def Codec.wake.events(xs: List<&2, J.Json>) -> List<&2, String>:
   match xs:
@@ -492,6 +494,8 @@ def Change.decode.k(i: Nat, +o: J.Json) -> Maybe<&2, M.Change>:
       Some{M.CharterSet{J.Json.get_str(o, "bot", ""), J.Json.get_str(o, "text", ""), J.Json.get_str(o, "by", ""), J.Json.get_nat(o, "at", 0n)}}
     case 76n:
       Some{M.DecisionLogged{J.Json.get_str(o, "id", ""), J.Json.get_str(o, "bot", ""), J.Json.get_str(o, "conv", ""), J.Json.get_str(o, "run", ""), J.Json.get_str(o, "text", ""), J.Json.get_str(o, "reason", ""), J.Json.get_nat(o, "at", 0n)}}
+    case 77n:
+      Some{M.GovernanceLogged{J.Json.get_str(o, "id", ""), J.Json.get_str(o, "protocol", ""), J.Json.get_str(o, "actor", "system"), J.Json.get_str(o, "action", ""), J.Json.get_str(o, "intent", ""), J.Json.get_str(o, "policy", "rejected"), J.Json.get_str(o, "dissent", ""), J.Json.get_nat(o, "schema", 0n), J.Json.get_nat(o, "changes", 0n), J.Json.get_str(o, "digest", ""), J.Json.get_bool(o, "architecture", False{}), J.Json.get_bool(o, "reliability", False{}), J.Json.get_bool(o, "experience", False{}), J.Json.get_nat(o, "at", 0n)}}
     case _:
       None{}
 
@@ -663,6 +667,8 @@ def Change.wire(c: M.Change) -> J.Json:
       Change.encode(M.CharterSet{bot, text, by, at})
     case M.DecisionLogged{id, bot, conv, run, text, reason, at}:
       Change.encode(M.DecisionLogged{id, bot, conv, run, text, reason, at})
+    case M.GovernanceLogged{id, protocol, actor, action, intent, policy, dissent, schema, changes, digest, architecture, reliability, experience, +at}:
+      Change.obj("SettingSet", [J.KV{"key", J.Str{"gov.receipt.latest"}}, J.KV{"value", J.Str{M.Audit.value(M.GovernanceLogged{id, protocol, actor, action, intent, policy, dissent, schema, changes, digest, architecture, reliability, experience, at})}}, J.KV{"at", Codec.nat(at)}])
 
 def Change.private(+tag: String) -> Bool:
   Bool.or(String.eq(tag, "DeviceRegistered"), String.eq(tag, "DeviceDropped"))
@@ -676,4 +682,6 @@ def Change.wire_line.k(private: Bool, +o: J.Json, l: String) -> String:
 
 # a stored line (parsed as o) as clients may see it
 def Change.wire_line(+o: J.Json, l: String) -> String:
-  Change.wire_line.k(Change.private(J.Json.get_str(o, "$", "")), o, l)
+  Bool.pick(String, String.eq(J.Json.get_str(o, "$", ""), "GovernanceLogged"),
+    J.Json.show(Change.wire(Maybe.default(&2, M.Change, Change.decode(o), M.GovernanceLogged{"", "", "system", "", "", "rejected", "", 0n, 0n, "", False{}, False{}, False{}, 0n}))),
+    Change.wire_line.k(Change.private(J.Json.get_str(o, "$", "")), o, l))

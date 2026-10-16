@@ -11,3 +11,4 @@ settings.lang = Language
 settings.lang.auto = Automatic
 settings.lang.en = English
 settings.lang.ja = 日本語
+plane.governance = Governance

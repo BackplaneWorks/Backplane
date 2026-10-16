@@ -20,6 +20,7 @@ import ./src/core/fview.bend as FVW
 import ./src/core/rview.bend as RVW
 import ./src/core/botui.bend as BU
 import ./src/core/model.bend as M
+import ./src/core/governance.bend as GOV
 import ./src/app/viewer.bend as V
 import ./src/app/theme.bend as TH
 import ./src/core/semver.bend as SV
@@ -8745,5 +8746,25 @@ law cjk_terminal_cells:
 
 law cjk_terminal_combining_cells:
   {L.Term.cells("é日", 0) == 3 : U32}
+
+# Governance review is an intentionally unanimous local quorum.
+law governance_quorum_unanimous:
+  for architecture: Bool
+  for reliability: Bool
+  for experience: Bool
+  {GOV.Governance.quorum(architecture, reliability, experience) == Bool.and(architecture, Bool.and(reliability, experience)) : Bool}
+
+law governance_protocol_versioned:
+  {GOV.Governance.protocol() == "BP/GOV/3" : String}
+
+law governance_receipt_digest_matches:
+  {GOV.Governance.digest.matches(GOV.Governance.audit(0n, [M.ProjectRemoved{"p", 1n}])) == True{} : Bool}
+
+law governance_command_omits_payload:
+  {String.contains(GOV.Governance.command.row(GOV.Governance.command(M.MessagePosted{"t", "m", M.User{}, "private", 1n})), "private") == False{} : Bool}
+
+law plane_audit_receipt_visible:
+  {List.length(&2, PLN.PRow, PLN.Plane.governance(PLN.Plane.of.st(M.State.apply(M.State.empty(),
+    M.GovernanceLogged{"gov:1", GOV.Governance.protocol(), "person", "MessagePosted", "persist:MessagePosted", "approved", "", 2n, 1n, "digest", True{}, True{}, True{}, 1n}), 1n))) == 1n : Nat}
 
 # ---- end i18n cjk ----

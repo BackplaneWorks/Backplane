@@ -13,6 +13,7 @@ import ./src/core/bot.bend as BOT
 import ./src/core/botui.bend as BU
 import ./LAWS.bend as Laws
 import ./src/core/model.bend as M
+import ./src/core/governance.bend as GOV
 import ./src/app/viewer.bend as V
 import ./src/core/board.bend as B
 import ./src/core/semver.bend as SV
@@ -10639,6 +10640,21 @@ def Laws.cjk_terminal_cells():
   {==}
 
 def Laws.cjk_terminal_combining_cells():
+  {==}
+
+def Laws.governance_quorum_unanimous(architecture, reliability, experience):
+  {==}
+
+def Laws.governance_protocol_versioned():
+  {==}
+
+def Laws.governance_receipt_digest_matches():
+  {==}
+
+def Laws.governance_command_omits_payload():
+  {==}
+
+def Laws.plane_audit_receipt_visible():
   {==}
 
 # ---- end i18n cjk ----
