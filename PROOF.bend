@@ -2840,7 +2840,7 @@ def fresh_k(tab, look, e, ops, l, base, pk, old2, base2, prx, pry, pn, qn, dy, r
     case False{}:
       {==}
     case True{}:
-      Equal.cong(Image, T.Tile, i => T.Tile{ops, l, base, i}, T.Tiles.seek(pk, T.Tiles.make(pk, e, tab, old2, base2, prx, pry, pn), rx, (ry - dy : U32), 0, 0, qn, e, tab, l, base), T.Tile.draw(e, tab, l, base),
+      Equal.cong(Image, T.Tile, i => T.Tile{ops, l, base, i, T.Keys.ops(l, T.KNil{})}, T.Tiles.seek(pk, T.Tiles.make(pk, e, tab, old2, base2, prx, pry, pn), rx, (ry - dy : U32), 0, 0, qn, e, tab, l, base), T.Tile.draw(e, tab, l, base),
         Laws.seek_made(tab, pk, e, old2, base2, prx, pry, pn, rx, (ry - dy : U32), 0, 0, qn, l, base))
 
 law tile_again_k:
@@ -2954,10 +2954,588 @@ def Laws.tiles_again_exact(tab, k, e, ops, old, base0, base1, rx, ry, n, pk, old
         Laws.tiles_again_exact(tab, j, e, R.Region.keep(ops, rx, ry, rx, (ry + U32.shr(n) : U32), U32.shr(n)), R.Region.keep(old, rx, ry, rx, (ry + U32.shr(n) : U32), U32.shr(n)), T.Img.q(base0, 2n), T.Img.q(base1, 2n), rx, (ry + U32.shr(n) : U32), U32.shr(n), pk, old2, base2, prx, pry, pn, qn, dy),
         Laws.tiles_again_exact(tab, j, e, R.Region.keep(ops, rx, ry, (rx + U32.shr(n) : U32), (ry + U32.shr(n) : U32), U32.shr(n)), R.Region.keep(old, rx, ry, (rx + U32.shr(n) : U32), (ry + U32.shr(n) : U32), U32.shr(n)), T.Img.q(base0, 3n), T.Img.q(base1, 3n), (rx + U32.shr(n) : U32), (ry + U32.shr(n) : U32), U32.shr(n), pk, old2, base2, prx, pry, pn, qn, dy))
 
-def Laws.tile_keep(tab, e, ops, l, base, img, p, rx, ry, n):
-  %Equal.sym(Bool, T.Eq.ops(ops, ops), True{}, eq_ops_refl(ops)) : {T.Tile.again.k(T.Eq.tile.k(_, base, base), e, tab, ops, base, T.Tile{ops, l, base, img}, p, rx, ry, n) == T.Tile{ops, l, base, img} : T.Tile}
-  %Equal.sym(Bool, T.Eq.image(base, base), True{}, eq_image_refl(base)) : {T.Tile.again.k(_, e, tab, ops, base, T.Tile{ops, l, base, img}, p, rx, ry, n) == T.Tile{ops, l, base, img} : T.Tile}
+def Laws.tile_keep(tab, e, ops, l, base, img, keys, p, rx, ry, n):
+  %Equal.sym(Bool, T.Eq.ops(ops, ops), True{}, eq_ops_refl(ops)) : {T.Tile.again.k(T.Eq.tile.k(_, base, base), e, tab, ops, base, T.Tile{ops, l, base, img, keys}, p, rx, ry, n) == T.Tile{ops, l, base, img, keys} : T.Tile}
+  %Equal.sym(Bool, T.Eq.image(base, base), True{}, eq_image_refl(base)) : {T.Tile.again.k(_, e, tab, ops, base, T.Tile{ops, l, base, img, keys}, p, rx, ry, n) == T.Tile{ops, l, base, img, keys} : T.Tile}
   {==}
+
+# ---- glyph delta/key-summary soundness ----
+law glyph_or_false_l:
+  for a: Bool
+  for +b: Bool
+  for +h: {Bool.or(a, b) == False{} : Bool}
+  {a == False{} : Bool}
+
+def glyph_or_false_l(a, b, h):
+  match a:
+    case False{}: {==}
+    case True{}:
+      Empty.absurd({True{} == False{} : Bool}, false_ne_true(Equal.sym(Bool, True{}, False{}, h)))
+
+law glyph_or_false_r:
+  for a: Bool
+  for +b: Bool
+  for +h: {Bool.or(a, b) == False{} : Bool}
+  {b == False{} : Bool}
+
+def glyph_or_false_r(a, b, h):
+  match a:
+    case False{}: h
+    case True{}:
+      Empty.absurd({b == False{} : Bool}, false_ne_true(Equal.sym(Bool, True{}, False{}, h)))
+
+law glyph_not_true:
+  for b: Bool
+  for +h: {Bool.not(b) == True{} : Bool}
+  {b == False{} : Bool}
+
+def glyph_not_true(b, h):
+  match b:
+    case False{}: {==}
+    case True{}:
+      Empty.absurd({True{} == False{} : Bool}, false_ne_true(h))
+
+def glyph_here(s: R.Side) -> Bool:
+  match s:
+    case R.SHere{}: True{}
+    case _: False{}
+
+law glyph_side_here:
+  for eq: Bool
+  for lt: Bool
+  for +h: {R.Tab.side.k(eq, lt) == R.SHere{} : R.Side}
+  {eq == True{} : Bool}
+
+def glyph_side_here(eq, lt, h):
+  match eq lt:
+    case True{} _: {==}
+    case False{} True{}:
+      Empty.absurd({False{} == True{} : Bool}, false_ne_true(Equal.cong(R.Side, Bool, glyph_here, R.SLeft{}, R.SHere{}, h)))
+    case False{} False{}:
+      Empty.absurd({False{} == True{} : Bool}, false_ne_true(Equal.cong(R.Side, Bool, glyph_here, R.SRight{}, R.SHere{}, h)))
+
+law keys_put_old_go:
+  for +t: T.KeySet
+  for si: R.Side
+  for sq: R.Side
+  for +ins: U32
+  for +id: U32
+  for hq: {T.Keys.side(t, id) == sq : R.Side}
+  for +h: {T.Keys.has.go(t, sq, id) == True{} : Bool}
+  {T.Keys.has(T.Keys.put.go(t, si, ins), id) == True{} : Bool}
+
+def keys_put_old_go(t, si, sq, ins, id, hq, h):
+  match t si sq:
+    case T.KNil{} _ _:
+      Empty.absurd({T.Keys.has(T.KNode{ins, T.KNil{}, T.KNil{}}, id) == True{} : Bool}, false_ne_true(h))
+    case T.KNode{+k, +l, +r} R.SHere{} _:
+      %Equal.sym(R.Side, T.Keys.side(T.KNode{k, l, r}, id), sq, hq) : {T.Keys.has.go(T.KNode{k, l, r}, _, id) == True{} : Bool}
+      h
+    case T.KNode{+k, +l, +r} R.SLeft{} R.SHere{}:
+      %Equal.sym(R.Side, T.Keys.side(T.KNode{k, l, r}, id), R.SHere{}, hq) : {T.Keys.has.go(T.KNode{k, T.Keys.put(l, ins), r}, _, id) == True{} : Bool}
+      {==}
+    case T.KNode{+k, +l, +r} R.SRight{} R.SHere{}:
+      %Equal.sym(R.Side, T.Keys.side(T.KNode{k, l, r}, id), R.SHere{}, hq) : {T.Keys.has.go(T.KNode{k, l, T.Keys.put(r, ins)}, _, id) == True{} : Bool}
+      {==}
+    case T.KNode{+k, +l, +r} R.SLeft{} R.SLeft{}:
+      %Equal.sym(R.Side, T.Keys.side(T.KNode{k, l, r}, id), R.SLeft{}, hq) : {T.Keys.has.go(T.KNode{k, T.Keys.put(l, ins), r}, _, id) == True{} : Bool}
+      keys_put_old_go(l, T.Keys.side(l, ins), T.Keys.side(l, id), ins, id, {==}, h)
+    case T.KNode{+k, +l, +r} R.SLeft{} R.SRight{}:
+      %Equal.sym(R.Side, T.Keys.side(T.KNode{k, l, r}, id), R.SRight{}, hq) : {T.Keys.has.go(T.KNode{k, T.Keys.put(l, ins), r}, _, id) == True{} : Bool}
+      h
+    case T.KNode{+k, +l, +r} R.SRight{} R.SLeft{}:
+      %Equal.sym(R.Side, T.Keys.side(T.KNode{k, l, r}, id), R.SLeft{}, hq) : {T.Keys.has.go(T.KNode{k, l, T.Keys.put(r, ins)}, _, id) == True{} : Bool}
+      h
+    case T.KNode{+k, +l, +r} R.SRight{} R.SRight{}:
+      %Equal.sym(R.Side, T.Keys.side(T.KNode{k, l, r}, id), R.SRight{}, hq) : {T.Keys.has.go(T.KNode{k, l, T.Keys.put(r, ins)}, _, id) == True{} : Bool}
+      keys_put_old_go(r, T.Keys.side(r, ins), T.Keys.side(r, id), ins, id, {==}, h)
+
+law keys_put_old_node:
+  for si: R.Side
+  for +k: U32
+  for +l: T.KeySet
+  for +r: T.KeySet
+  for +ins: U32
+  for +id: U32
+  for +h: {T.Keys.has(T.KNode{k, l, r}, id) == True{} : Bool}
+  {T.Keys.has(T.Keys.put.go(T.KNode{k, l, r}, si, ins), id) == True{} : Bool}
+
+def keys_put_old_node(si, k, l, r, ins, id, h):
+  keys_put_old_go(T.KNode{k, l, r}, si, T.Keys.side(T.KNode{k, l, r}, id), ins, id, {==}, h)
+
+law keys_put_old:
+  for +s: T.KeySet
+  for +ins: U32
+  for +id: U32
+  for +h: {T.Keys.has(s, id) == True{} : Bool}
+  {T.Keys.has(T.Keys.put(s, ins), id) == True{} : Bool}
+
+def keys_put_old(s, ins, id, h):
+  match s:
+    case T.KNil{}:
+      Empty.absurd({T.Keys.has(T.Keys.put(T.KNil{}, ins), id) == True{} : Bool}, false_ne_true(h))
+    case T.KNode{+k, +l, +r}:
+      keys_put_old_node(T.Keys.side(T.KNode{k, l, r}, ins), k, l, r, ins, id, h)
+
+law keys_put_hit_go:
+  for +s: T.KeySet
+  for side: R.Side
+  for +id: U32
+  for +hs: {T.Keys.side(s, id) == side : R.Side}
+  {T.Keys.has(T.Keys.put.go(s, side, id), id) == True{} : Bool}
+
+def keys_put_hit_go(s, side, id, hs):
+  match s side:
+    case T.KNil{} _:
+      %Equal.sym(Bool, U32.is_eq(id, id), True{}, u32_eq_refl(id)) : {T.Keys.has.go(T.KNode{id, T.KNil{}, T.KNil{}}, R.Tab.side.k(_, U32.is_lt(id, id)), id) == True{} : Bool}
+      {==}
+    case T.KNode{+k, l, r} R.SHere{}:
+      %Equal.sym(Bool, U32.is_eq(id, k), True{}, glyph_side_here(U32.is_eq(id, k), U32.is_lt(id, k), hs)) : {T.Keys.has.go(T.KNode{k, l, r}, R.Tab.side.k(_, U32.is_lt(id, k)), id) == True{} : Bool}
+      {==}
+    case T.KNode{+k, +l, r} R.SLeft{}:
+      %Equal.sym(R.Side, T.Keys.side(T.KNode{k, l, r}, id), R.SLeft{}, hs) : {T.Keys.has.go(T.KNode{k, T.Keys.put(l, id), r}, _, id) == True{} : Bool}
+      keys_put_hit_go(l, T.Keys.side(l, id), id, {==})
+    case T.KNode{+k, l, +r} R.SRight{}:
+      %Equal.sym(R.Side, T.Keys.side(T.KNode{k, l, r}, id), R.SRight{}, hs) : {T.Keys.has.go(T.KNode{k, l, T.Keys.put(r, id)}, _, id) == True{} : Bool}
+      keys_put_hit_go(r, T.Keys.side(r, id), id, {==})
+
+law keys_put_hit:
+  for +s: T.KeySet
+  for +id: U32
+  {T.Keys.has(T.Keys.put(s, id), id) == True{} : Bool}
+
+def keys_put_hit(s, id):
+  keys_put_hit_go(s, T.Keys.side(s, id), id, {==})
+
+law delta_eq_sound:
+  for +a: Maybe<&2, R.Run>
+  for +b: Maybe<&2, R.Run>
+  for +h: {T.Delta.eq(a, b) == True{} : Bool}
+  {a == b : Maybe<&2, R.Run>}
+
+def delta_eq_sound(a, b, h):
+  match a b:
+    case None{} None{}: {==}
+    case Some{+x} Some{+y}:
+      Equal.cong(R.Run, Maybe<&2, R.Run>, v => Some{v}, x, y, eq_run_sound(x, y, h))
+    case None{} Some{y}:
+      Empty.absurd({None{} == Some{y} : Maybe<&2, R.Run>}, false_ne_true(h))
+    case Some{x} None{}:
+      Empty.absurd({Some{x} == None{} : Maybe<&2, R.Run>}, false_ne_true(h))
+
+law delta_eq_refl:
+  for +a: Maybe<&2, R.Run>
+  {T.Delta.eq(a, a) == True{} : Bool}
+
+def delta_eq_refl(a):
+  match a:
+    case None{}: {==}
+    case Some{x}: eq_run_refl(x)
+
+law delta_add_acc:
+  for same: Bool
+  for +key: U32
+  for +acc: List<&2, U32>
+  for +id: U32
+  for +h: {T.Delta.has(T.Delta.add(same, key, acc), id) == False{} : Bool}
+  {T.Delta.has(acc, id) == False{} : Bool}
+
+def delta_add_acc(same, key, acc, id, h):
+  match same:
+    case True{}: h
+    case False{}:
+      glyph_or_false_r(U32.is_eq(id, key), T.Delta.has(acc, id), h)
+
+law delta_add_present:
+  for same: Bool
+  for +key: U32
+  for +acc: List<&2, U32>
+  for +id: U32
+  for +he: {U32.is_eq(id, key) == True{} : Bool}
+  for +h: {T.Delta.has(T.Delta.add(same, key, acc), id) == False{} : Bool}
+  {same == True{} : Bool}
+
+def delta_add_present(same, key, acc, id, he, h):
+  match same:
+    case True{}: {==}
+    case False{}:
+      hn = glyph_or_false_l(U32.is_eq(id, key), T.Delta.has(acc, id), h)
+      Empty.absurd({False{} == True{} : Bool}, false_ne_true(Equal.trans(Bool, False{}, U32.is_eq(id, key), True{}, Equal.sym(Bool, U32.is_eq(id, key), False{}, hn), he)))
+
+law delta_scan_acc:
+  for +t: R.Tab
+  for +old: R.Tab
+  for +new: R.Tab
+  for +acc: List<&2, U32>
+  for +id: U32
+  for +h: {T.Delta.has(T.Delta.scan(t, old, new, acc), id) == False{} : Bool}
+  {T.Delta.has(acc, id) == False{} : Bool}
+
+def delta_scan_acc(t, old, new, acc, id, h):
+  match t:
+    case R.TNil{}: h
+    case R.TBr{+k, _, _, +l, +r}:
+      +next = T.Delta.add(T.Delta.eq(T.Delta.entry(old, k), T.Delta.entry(new, k)), k, acc)
+      hl = delta_scan_acc(r, old, new, T.Delta.scan(l, old, new, next), id, h)
+      hn = delta_scan_acc(l, old, new, next, id, hl)
+      delta_add_acc(T.Delta.eq(T.Delta.entry(old, k), T.Delta.entry(new, k)), k, acc, id, hn)
+
+law delta_scan_none:
+  for +t: R.Tab
+  for side: R.Side
+  for +old: R.Tab
+  for +new: R.Tab
+  for +acc: List<&2, U32>
+  for +id: U32
+  for +hs: {R.Tab.side(t, id) == side : R.Side}
+  for +h: {T.Delta.has(T.Delta.scan(t, old, new, acc), id) == False{} : Bool}
+  for +hu: {T.Delta.eq(T.Delta.entry(old, id), T.Delta.entry(new, id)) == False{} : Bool}
+  {R.Tab.find(t, side, id) == None{} : Maybe<&2, R.Run>}
+
+def delta_scan_none(t, side, old, new, acc, id, hs, h, hu):
+  match t side:
+    case R.TNil{} _: {==}
+    case R.TBr{+k, +d, +m, +l, +r} R.SHere{}:
+      +next = T.Delta.add(T.Delta.eq(T.Delta.entry(old, k), T.Delta.entry(new, k)), k, acc)
+      hl = delta_scan_acc(r, old, new, T.Delta.scan(l, old, new, next), id, h)
+      hn = delta_scan_acc(l, old, new, next, id, hl)
+      +he = glyph_side_here(U32.is_eq(id, k), U32.is_lt(id, k), hs)
+      hk = delta_add_present(T.Delta.eq(T.Delta.entry(old, k), T.Delta.entry(new, k)), k, acc, id, he, hn)
+      ek = u32_eq_sound(id, k, he)
+      eq = Equal.cong(U32, Bool, v => T.Delta.eq(T.Delta.entry(old, v), T.Delta.entry(new, v)), id, k, ek)
+      hq = Equal.trans(Bool, T.Delta.eq(T.Delta.entry(old, id), T.Delta.entry(new, id)), T.Delta.eq(T.Delta.entry(old, k), T.Delta.entry(new, k)), True{}, eq, hk)
+      Empty.absurd({Some{R.RGlyph{0, 0, 0, 0, id, d, m}} == None{} : Maybe<&2, R.Run>}, false_ne_true(Equal.trans(Bool, False{}, T.Delta.eq(T.Delta.entry(old, id), T.Delta.entry(new, id)), True{}, Equal.sym(Bool, T.Delta.eq(T.Delta.entry(old, id), T.Delta.entry(new, id)), False{}, hu), hq)))
+    case R.TBr{+k, _, _, +l, +r} R.SLeft{}:
+      +next = T.Delta.add(T.Delta.eq(T.Delta.entry(old, k), T.Delta.entry(new, k)), k, acc)
+      hl = delta_scan_acc(r, old, new, T.Delta.scan(l, old, new, next), id, h)
+      delta_scan_none(l, R.Tab.side(l, id), old, new, next, id, {==}, hl, hu)
+    case R.TBr{+k, _, _, +l, +r} R.SRight{}:
+      delta_scan_none(r, R.Tab.side(r, id), old, new, T.Delta.scan(l, old, new, T.Delta.add(T.Delta.eq(T.Delta.entry(old, k), T.Delta.entry(new, k)), k, acc)), id, {==}, h, hu)
+
+law delta_complete_k:
+  for same: Bool
+  for +old: R.Tab
+  for +new: R.Tab
+  for +id: U32
+  for +he: {T.Delta.eq(T.Delta.entry(old, id), T.Delta.entry(new, id)) == same : Bool}
+  for +h: {T.Delta.has(T.Delta.of(old, new), id) == False{} : Bool}
+  {T.Delta.entry(old, id) == T.Delta.entry(new, id) : Maybe<&2, R.Run>}
+
+def delta_complete_k(same, old, new, id, he, h):
+  match same:
+    case True{}:
+      delta_eq_sound(T.Delta.entry(old, id), T.Delta.entry(new, id), he)
+    case False{}:
+      ho = delta_scan_acc(new, old, new, T.Delta.scan(old, old, new, Nil{}), id, h)
+      +eo = delta_scan_none(old, R.Tab.side(old, id), old, new, Nil{}, id, {==}, ho, he)
+      en = delta_scan_none(new, R.Tab.side(new, id), old, new, T.Delta.scan(old, old, new, Nil{}), id, {==}, h, he)
+      Equal.trans(Maybe<&2, R.Run>, T.Delta.entry(old, id), None{}, T.Delta.entry(new, id), eo, Equal.sym(Maybe<&2, R.Run>, T.Delta.entry(new, id), None{}, en))
+
+law keys_distinct_k:
+  for same: Bool
+  for +s: T.KeySet
+  for +id: U32
+  for +k: U32
+  for +he: {U32.is_eq(id, k) == same : Bool}
+  for +hn: {T.Keys.has(s, k) == False{} : Bool}
+  for +hh: {T.Keys.has(s, id) == True{} : Bool}
+  {same == False{} : Bool}
+
+def keys_distinct_k(same, s, id, k, he, hn, hh):
+  match same:
+    case False{}: {==}
+    case True{}:
+      eq = Equal.cong(U32, Bool, v => T.Keys.has(s, v), id, k, u32_eq_sound(id, k, he))
+      hq = Equal.trans(Bool, T.Keys.has(s, id), T.Keys.has(s, k), False{}, eq, hn)
+      Empty.absurd({True{} == False{} : Bool}, false_ne_true(Equal.trans(Bool, False{}, T.Keys.has(s, id), True{}, Equal.sym(Bool, T.Keys.has(s, id), False{}, hq), hh)))
+
+law keys_clear_absent:
+  for +ids: List<&2, U32>
+  for +s: T.KeySet
+  for +id: U32
+  for +hc: {T.Keys.clear(ids, s) == True{} : Bool}
+  for +hh: {T.Keys.has(s, id) == True{} : Bool}
+  {T.Delta.has(ids, id) == False{} : Bool}
+
+def keys_clear_absent(ids, s, id, hc, hh):
+  match ids:
+    case Nil{}: {==}
+    case +k <> +t:
+      hn = glyph_not_true(T.Keys.has(s, k), and_l(Bool.not(T.Keys.has(s, k)), T.Keys.clear(t, s), hc))
+      ht = and_r(Bool.not(T.Keys.has(s, k)), T.Keys.clear(t, s), hc)
+      %Equal.sym(Bool, U32.is_eq(id, k), False{}, keys_distinct_k(U32.is_eq(id, k), s, id, k, {==}, hn, hh)) : {Bool.or(_, T.Delta.has(t, id)) == False{} : Bool}
+      keys_clear_absent(t, s, id, ht, hh)
+
+# Clear summaries remain clear when undoing a key insertion. This uses
+# lookup preservation, without assuming arbitrary KeySets are ordered.
+law keys_put_absent_k:
+  for present: Bool
+  for +s: T.KeySet
+  for +ins: U32
+  for +id: U32
+  for ho: {T.Keys.has(s, id) == present : Bool}
+  for hn: {T.Keys.has(T.Keys.put(s, ins), id) == False{} : Bool}
+  {present == False{} : Bool}
+
+def keys_put_absent_k(present, s, ins, id, ho, hn):
+  match present:
+    case False{}: {==}
+    case True{}:
+      hh = keys_put_old(s, ins, id, ho)
+      Empty.absurd({True{} == False{} : Bool}, false_ne_true(Equal.trans(Bool, False{}, T.Keys.has(T.Keys.put(s, ins), id), True{}, Equal.sym(Bool, T.Keys.has(T.Keys.put(s, ins), id), False{}, hn), hh)))
+
+law keys_clear_put_old:
+  for +ids: List<&2, U32>
+  for +s: T.KeySet
+  for +ins: U32
+  for +hc: {T.Keys.clear(ids, T.Keys.put(s, ins)) == True{} : Bool}
+  {T.Keys.clear(ids, s) == True{} : Bool}
+
+def keys_clear_put_old(ids, s, ins, hc):
+  match ids:
+    case Nil{}: {==}
+    case +id <> +t:
+      hn = glyph_not_true(T.Keys.has(T.Keys.put(s, ins), id), and_l(Bool.not(T.Keys.has(T.Keys.put(s, ins), id)), T.Keys.clear(t, T.Keys.put(s, ins)), hc))
+      ht = and_r(Bool.not(T.Keys.has(T.Keys.put(s, ins), id)), T.Keys.clear(t, T.Keys.put(s, ins)), hc)
+      he = keys_put_absent_k(T.Keys.has(s, id), s, ins, id, {==}, hn)
+      %Equal.sym(Bool, T.Keys.has(s, id), False{}, he) : {Bool.and(Bool.not(_), T.Keys.clear(t, s)) == True{} : Bool}
+      keys_clear_put_old(t, s, ins, ht)
+
+law keys_clear_run_old:
+  for +r: R.Run
+  for +s: T.KeySet
+  for +ids: List<&2, U32>
+  for +hc: {T.Keys.clear(ids, T.Keys.run(r, s)) == True{} : Bool}
+  {T.Keys.clear(ids, s) == True{} : Bool}
+
+def keys_clear_run_old(r, s, ids, hc):
+  match r:
+    case R.RKey{_, _, _, _, id}:
+      keys_clear_put_old(ids, s, id, hc)
+    case R.RPair{_, _, _, _, +a, b}:
+      keys_clear_run_old(a, s, ids, keys_clear_run_old(b, T.Keys.run(a, s), ids, hc))
+    case R.RNone{}: hc
+    case R.RGlyph{_, _, _, _, _, _, _}: hc
+
+law keys_clear_shape_old:
+  for +sh: R.Shape
+  for +s: T.KeySet
+  for +ids: List<&2, U32>
+  for +hc: {T.Keys.clear(ids, T.Keys.shape(sh, s)) == True{} : Bool}
+  {T.Keys.clear(ids, s) == True{} : Bool}
+
+def keys_clear_shape_old(sh, s, ids, hc):
+  match sh:
+    case R.SRun{_, _, r}: keys_clear_run_old(r, s, ids, hc)
+    case R.SRect{}: hc
+    case R.SPoly{_, _}: hc
+    case R.SGlyph{_, _, _}: hc
+    case R.SSeg{_, _, _, _, _}: hc
+    case R.SDisc{_, _, _}: hc
+    case R.STri{_, _, _, _, _, _}: hc
+    case R.SMask{_, _, _, _, _}: hc
+
+law keys_clear_ops_old:
+  for +os: List<&2, R.Op>
+  for +s: T.KeySet
+  for +ids: List<&2, U32>
+  for +hc: {T.Keys.clear(ids, T.Keys.ops(os, s)) == True{} : Bool}
+  {T.Keys.clear(ids, s) == True{} : Bool}
+
+def keys_clear_ops_old(os, s, ids, hc):
+  match os:
+    case Nil{}: hc
+    case R.Op{_, _, _, _, _, _, +sh} <> t:
+      keys_clear_shape_old(sh, s, ids, keys_clear_ops_old(t, T.Keys.shape(sh, s), ids, hc))
+
+law keys_run_agree:
+  for +r: R.Run
+  for +s: T.KeySet
+  for +old: R.Tab
+  for +new: R.Tab
+  for +hc: {T.Keys.clear(T.Delta.of(old, new), T.Keys.run(r, s)) == True{} : Bool}
+  {R.Res.run(r, old) == R.Res.run(r, new) : R.Run}
+
+def keys_run_agree(r, s, old, new, hc):
+  match r:
+    case R.RKey{+x, +y, +w, +h, +id}:
+      e = delta_complete_k(T.Delta.eq(T.Delta.entry(old, id), T.Delta.entry(new, id)), old, new, id, {==}, keys_clear_absent(T.Delta.of(old, new), T.Keys.put(s, id), id, hc, keys_put_hit(s, id)))
+      %e : {R.Res.key(T.Delta.entry(old, id), x, y, w, h, id) == R.Res.key(_, x, y, w, h, id) : R.Run}
+      {==}
+    case R.RPair{+x0, +y0, +x1, +y1, +a, +b}:
+      ea = keys_run_agree(a, s, old, new, keys_clear_run_old(b, T.Keys.run(a, s), T.Delta.of(old, new), hc))
+      eb = keys_run_agree(b, T.Keys.run(a, s), old, new, hc)
+      %ea : {R.RPair{x0, y0, x1, y1, R.Res.run(a, old), R.Res.run(b, old)} == R.RPair{x0, y0, x1, y1, _, R.Res.run(b, new)} : R.Run}
+      %eb : {R.RPair{x0, y0, x1, y1, R.Res.run(a, old), R.Res.run(b, old)} == R.RPair{x0, y0, x1, y1, R.Res.run(a, old), _} : R.Run}
+      {==}
+    case R.RNone{}: {==}
+    case R.RGlyph{_, _, _, _, _, _, _}: {==}
+
+law keys_shape_agree:
+  for +sh: R.Shape
+  for +s: T.KeySet
+  for +old: R.Tab
+  for +new: R.Tab
+  for +hc: {T.Keys.clear(T.Delta.of(old, new), T.Keys.shape(sh, s)) == True{} : Bool}
+  {R.Res.shape(sh, old) == R.Res.shape(sh, new) : R.Shape}
+
+def keys_shape_agree(sh, s, old, new, hc):
+  match sh:
+    case R.SRun{x, y, +r}:
+      Equal.cong(R.Run, R.Shape, v => R.SRun{x, y, v}, R.Res.run(r, old), R.Res.run(r, new), keys_run_agree(r, s, old, new, hc))
+    case R.SRect{}: {==}
+    case R.SPoly{_, _}: {==}
+    case R.SGlyph{_, _, _}: {==}
+    case R.SSeg{_, _, _, _, _}: {==}
+    case R.SDisc{_, _, _}: {==}
+    case R.STri{_, _, _, _, _, _}: {==}
+    case R.SMask{_, _, _, _, _}: {==}
+
+law keys_ops_agree:
+  for +os: List<&2, R.Op>
+  for +s: T.KeySet
+  for +old: R.Tab
+  for +new: R.Tab
+  for +hc: {T.Keys.clear(T.Delta.of(old, new), T.Keys.ops(os, s)) == True{} : Bool}
+  {R.Res.ops(os, old) == R.Res.ops(os, new) : List<&2, R.Op>}
+
+def keys_ops_agree(os, s, old, new, hc):
+  match os:
+    case Nil{}: {==}
+    case R.Op{+x0, +y0, +x1, +y1, +c, +a, +sh} <> +t:
+      eh = keys_shape_agree(sh, s, old, new, keys_clear_ops_old(t, T.Keys.shape(sh, s), T.Delta.of(old, new), hc))
+      et = keys_ops_agree(t, T.Keys.shape(sh, s), old, new, hc)
+      %eh : {R.Op{x0, y0, x1, y1, c, a, R.Res.shape(sh, old)} <> R.Res.ops(t, old) == R.Op{x0, y0, x1, y1, c, a, _} <> R.Res.ops(t, new) : List<&2, R.Op>}
+      %et : {R.Op{x0, y0, x1, y1, c, a, R.Res.shape(sh, old)} <> R.Res.ops(t, old) == R.Op{x0, y0, x1, y1, c, a, R.Res.shape(sh, old)} <> _ : List<&2, R.Op>}
+      {==}
+
+# The optimized predicate implies the original resolved-op agreement.
+def Laws.glyph_delta_agreement(old, new, ops, hc):
+  e = keys_ops_agree(ops, T.KNil{}, old, new, hc)
+  %e : {T.Eq.ops(R.Res.ops(ops, old), _) == True{} : Bool}
+  eq_ops_refl(R.Res.ops(ops, old))
+
+law tiles_delta_agreement:
+  for k: Nat
+  for +e: Nat
+  for +old: R.Tab
+  for +new: R.Tab
+  for +ops: List<&2, R.Op>
+  for +base: Image
+  for +rx: U32
+  for +ry: U32
+  for +n: U32
+  for +h: {T.Tiles.clear(T.Tiles.make(k, e, old, ops, base, rx, ry, n), T.Delta.of(old, new)) == True{} : Bool}
+  {T.Tiles.agrees(T.Tiles.make(k, e, old, ops, base, rx, ry, n), old, new) == True{} : Bool}
+
+def tiles_delta_agreement(k, e, old, new, ops, base, rx, ry, n, h):
+  match k:
+    case 0n:
+      Laws.glyph_delta_agreement(old, new, T.Loc.ops(ops, rx, ry, T.Tile.size(e)), h)
+    case 1n+j0:
+      +j = j0
+      +half = U32.shr(n)
+      +oa = R.Region.keep(ops, rx, ry, rx, ry, half)
+      +ob = R.Region.keep(ops, rx, ry, (rx + half : U32), ry, half)
+      +oc = R.Region.keep(ops, rx, ry, rx, (ry + half : U32), half)
+      +od = R.Region.keep(ops, rx, ry, (rx + half : U32), (ry + half : U32), half)
+      +a = T.Tiles.make(j, e, old, oa, T.Img.q(base, 0n), rx, ry, half)
+      +b = T.Tiles.make(j, e, old, ob, T.Img.q(base, 1n), (rx + half : U32), ry, half)
+      +c = T.Tiles.make(j, e, old, oc, T.Img.q(base, 2n), rx, (ry + half : U32), half)
+      +d = T.Tiles.make(j, e, old, od, T.Img.q(base, 3n), (rx + half : U32), (ry + half : U32), half)
+      +ha = T.Tiles.clear(a, T.Delta.of(old, new))
+      +hb = T.Tiles.clear(b, T.Delta.of(old, new))
+      +hc = T.Tiles.clear(c, T.Delta.of(old, new))
+      +hd = T.Tiles.clear(d, T.Delta.of(old, new))
+      ca = and_l(ha, Bool.and(hb, Bool.and(hc, hd)), h)
+      +rest = and_r(ha, Bool.and(hb, Bool.and(hc, hd)), h)
+      cb = and_l(hb, Bool.and(hc, hd), rest)
+      +tail = and_r(hb, Bool.and(hc, hd), rest)
+      cc = and_l(hc, hd, tail)
+      cd = and_r(hc, hd, tail)
+      ea = tiles_delta_agreement(j, e, old, new, oa, T.Img.q(base, 0n), rx, ry, half, ca)
+      eb = tiles_delta_agreement(j, e, old, new, ob, T.Img.q(base, 1n), (rx + half : U32), ry, half, cb)
+      ec = tiles_delta_agreement(j, e, old, new, oc, T.Img.q(base, 2n), rx, (ry + half : U32), half, cc)
+      ed = tiles_delta_agreement(j, e, old, new, od, T.Img.q(base, 3n), (rx + half : U32), (ry + half : U32), half, cd)
+      %Equal.sym(Bool, T.Tiles.agrees(a, old, new), True{}, ea) : {Bool.and(_, Bool.and(T.Tiles.agrees(b, old, new), Bool.and(T.Tiles.agrees(c, old, new), T.Tiles.agrees(d, old, new)))) == True{} : Bool}
+      %Equal.sym(Bool, T.Tiles.agrees(b, old, new), True{}, eb) : {Bool.and(True{}, Bool.and(_, Bool.and(T.Tiles.agrees(c, old, new), T.Tiles.agrees(d, old, new)))) == True{} : Bool}
+      %Equal.sym(Bool, T.Tiles.agrees(c, old, new), True{}, ec) : {Bool.and(True{}, Bool.and(True{}, Bool.and(_, T.Tiles.agrees(d, old, new)))) == True{} : Bool}
+      %Equal.sym(Bool, T.Tiles.agrees(d, old, new), True{}, ed) : {Bool.and(True{}, Bool.and(True{}, Bool.and(True{}, _))) == True{} : Bool}
+      {==}
+# ---- end glyph delta/key-summary soundness ----
+
+def Laws.glyph_table_agreement(old, new, ops, h):
+  eq_ops_sound(R.Res.ops(ops, old), R.Res.ops(ops, new), h)
+
+law draw_table_agreement:
+  for +e: Nat
+  for +old: R.Tab
+  for +new: R.Tab
+  for +l: List<&2, R.Op>
+  for +base: Image
+  for h: {T.Table.agrees(l, old, new) == True{} : Bool}
+  {T.Tile.draw(e, new, l, base) == T.Tile.draw(e, old, l, base) : Image}
+
+def draw_table_agreement(e, old, new, l, base, h):
+  %Laws.glyph_table_agreement(old, new, l, h) : {T.Tile.draw.r(e, _, base) == T.Tile.draw.r(e, R.Res.ops(l, old), base) : Image}
+  {==}
+
+def Laws.tiles_table_extension_exact(k, e, old, new, ops, base, rx, ry, n, h):
+  match k:
+    case 0n:
+      Equal.cong(Image, T.Tiles, i => T.TLeaf{T.Tile{ops, T.Loc.ops(ops, rx, ry, T.Tile.size(e)), base, i, T.Keys.ops(T.Loc.ops(ops, rx, ry, T.Tile.size(e)), T.KNil{})}},
+        T.Tile.draw(e, new, T.Loc.ops(ops, rx, ry, T.Tile.size(e)), base), T.Tile.draw(e, old, T.Loc.ops(ops, rx, ry, T.Tile.size(e)), base),
+        draw_table_agreement(e, old, new, T.Loc.ops(ops, rx, ry, T.Tile.size(e)), base, h))
+    case 1n+j0:
+      +j = j0
+      +half = U32.shr(n)
+      +oa = R.Region.keep(ops, rx, ry, rx, ry, half)
+      +ob = R.Region.keep(ops, rx, ry, (rx + half : U32), ry, half)
+      +oc = R.Region.keep(ops, rx, ry, rx, (ry + half : U32), half)
+      +od = R.Region.keep(ops, rx, ry, (rx + half : U32), (ry + half : U32), half)
+      +a = T.Tiles.make(j, e, old, oa, T.Img.q(base, 0n), rx, ry, half)
+      +b = T.Tiles.make(j, e, old, ob, T.Img.q(base, 1n), (rx + half : U32), ry, half)
+      +c = T.Tiles.make(j, e, old, oc, T.Img.q(base, 2n), rx, (ry + half : U32), half)
+      +d = T.Tiles.make(j, e, old, od, T.Img.q(base, 3n), (rx + half : U32), (ry + half : U32), half)
+      +aa = T.Tiles.agrees(a, old, new)
+      +ab = T.Tiles.agrees(b, old, new)
+      +ac = T.Tiles.agrees(c, old, new)
+      +ad = T.Tiles.agrees(d, old, new)
+      ha = and_l(aa, Bool.and(ab, Bool.and(ac, ad)), h)
+      +hr = and_r(aa, Bool.and(ab, Bool.and(ac, ad)), h)
+      hb = and_l(ab, Bool.and(ac, ad), hr)
+      +ht = and_r(ab, Bool.and(ac, ad), hr)
+      hc = and_l(ac, ad, ht)
+      hd = and_r(ac, ad, ht)
+      ea = Laws.tiles_table_extension_exact(j, e, old, new, oa, T.Img.q(base, 0n), rx, ry, half, ha)
+      eb = Laws.tiles_table_extension_exact(j, e, old, new, ob, T.Img.q(base, 1n), (rx + half : U32), ry, half, hb)
+      ec = Laws.tiles_table_extension_exact(j, e, old, new, oc, T.Img.q(base, 2n), rx, (ry + half : U32), half, hc)
+      ed = Laws.tiles_table_extension_exact(j, e, old, new, od, T.Img.q(base, 3n), (rx + half : U32), (ry + half : U32), half, hd)
+      tnode_cong(ops, base,
+        T.Tiles.make(j, e, new, oa, T.Img.q(base, 0n), rx, ry, half), a,
+        T.Tiles.make(j, e, new, ob, T.Img.q(base, 1n), (rx + half : U32), ry, half), b,
+        T.Tiles.make(j, e, new, oc, T.Img.q(base, 2n), rx, (ry + half : U32), half), c,
+        T.Tiles.make(j, e, new, od, T.Img.q(base, 3n), (rx + half : U32), (ry + half : U32), half), d, ea, eb, ec, ed)
+
+law frame_table_agreement_k:
+  for s: Bool
+  for +tab: R.Tab
+  for +tab0: R.Tab
+  for +w: U32
+  for +h: U32
+  for +old: List<&2, R.Op>
+  for +base: Image
+  for he: {T.Eq.tab(tab, tab0) == s : Bool}
+  for ht: {T.Frame.agrees(s, tab, tab0, T.Frame.make(w, h, old, base, tab0)) == True{} : Bool}
+  {T.Frame.make(w, h, old, base, tab) == T.Frame.make(w, h, old, base, tab0) : T.Tiles}
+
+def frame_table_agreement_k(s, tab, tab0, w, h, old, base, he, ht):
+  match s:
+    case True{}:
+      %eq_tab_sound(tab, tab0, he) : {T.Frame.make(w, h, old, base, tab) == T.Frame.make(w, h, old, base, _) : T.Tiles}
+      {==}
+    case False{}:
+      Laws.tiles_table_extension_exact(T.Frame.levels(w, h), T.Frame.edge(w, h), tab0, tab, old, base, 0, 0, U32.shln(1, R.Frame.depth(w, h)), tiles_delta_agreement(T.Frame.levels(w, h), T.Frame.edge(w, h), tab0, tab, old, base, 0, 0, U32.shln(1, R.Frame.depth(w, h)), ht))
 
 law frame_again_k:
   for +tab: R.Tab
@@ -2972,7 +3550,7 @@ law frame_again_k:
   for +base0: Image
   for +base: Image
   for +dy: U32
-  for +hs: {T.Frame.same(w, h, tab, w0, h0, tab0) == s : Bool}
+  for +hs: {T.Frame.same(w, h, tab, w0, h0, tab0, T.Frame.make(w0, h0, old, base0, tab0)) == s : Bool}
   {T.Frame.again.k(s, w, h, ops, base, tab, T.Frame.make(w0, h0, old, base0, tab0), dy) == T.Frame.make(w, h, ops, base, tab) : T.Tiles}
 
 def frame_again_k(tab, s, tab0, w0, h0, w, h, ops, old, base0, base, dy, hs):
@@ -2980,19 +3558,19 @@ def frame_again_k(tab, s, tab0, w0, h0, w, h, ops, old, base0, base, dy, hs):
     case False{}:
       {==}
     case True{}:
-      +hz = and_l(Bool.and(U32.is_eq(w0, w), U32.is_eq(h0, h)), T.Eq.tab(tab, tab0), hs)
-      +ht = and_r(Bool.and(U32.is_eq(w0, w), U32.is_eq(h0, h)), T.Eq.tab(tab, tab0), hs)
+      +hz = and_l(Bool.and(U32.is_eq(w0, w), U32.is_eq(h0, h)), T.Frame.agrees(T.Eq.tab(tab, tab0), tab, tab0, T.Frame.make(w0, h0, old, base0, tab0)), hs)
+      +ht = and_r(Bool.and(U32.is_eq(w0, w), U32.is_eq(h0, h)), T.Frame.agrees(T.Eq.tab(tab, tab0), tab, tab0, T.Frame.make(w0, h0, old, base0, tab0)), hs)
       ew = u32_eq_sound(w0, w, and_l(U32.is_eq(w0, w), U32.is_eq(h0, h), hz))
       eh = u32_eq_sound(h0, h, and_r(U32.is_eq(w0, w), U32.is_eq(h0, h), hz))
-      et = eq_tab_sound(tab, tab0, ht)
-      %et : {T.Tiles.again(T.Frame.levels(w, h), T.Frame.edge(w, h), tab, ops, base, T.Frame.make(w0, h0, old, base0, _), T.Past{T.Frame.levels(w, h), T.Frame.make(w0, h0, old, base0, _), U32.shln(1, R.Frame.depth(w, h)), dy}, 0, 0, U32.shln(1, R.Frame.depth(w, h))) == T.Frame.make(w, h, ops, base, tab) : T.Tiles}
+      et = frame_table_agreement_k(T.Eq.tab(tab, tab0), tab, tab0, w0, h0, old, base0, {==}, ht)
+      %et : {T.Tiles.again(T.Frame.levels(w, h), T.Frame.edge(w, h), tab, ops, base, _, T.Past{T.Frame.levels(w, h), _, U32.shln(1, R.Frame.depth(w, h)), dy}, 0, 0, U32.shln(1, R.Frame.depth(w, h))) == T.Frame.make(w, h, ops, base, tab) : T.Tiles}
       %ew : {T.Tiles.again(T.Frame.levels(_, h), T.Frame.edge(_, h), tab, ops, base, T.Frame.make(w0, h0, old, base0, tab), T.Past{T.Frame.levels(_, h), T.Frame.make(w0, h0, old, base0, tab), U32.shln(1, R.Frame.depth(_, h)), dy}, 0, 0, U32.shln(1, R.Frame.depth(_, h))) == T.Frame.make(_, h, ops, base, tab) : T.Tiles}
       %eh : {T.Tiles.again(T.Frame.levels(w0, _), T.Frame.edge(w0, _), tab, ops, base, T.Frame.make(w0, h0, old, base0, tab), T.Past{T.Frame.levels(w0, _), T.Frame.make(w0, h0, old, base0, tab), U32.shln(1, R.Frame.depth(w0, _)), dy}, 0, 0, U32.shln(1, R.Frame.depth(w0, _))) == T.Frame.make(w0, _, ops, base, tab) : T.Tiles}
       Laws.tiles_again_exact(tab, T.Frame.levels(w0, h0), T.Frame.edge(w0, h0), ops, old, base0, base, 0, 0, U32.shln(1, R.Frame.depth(w0, h0)),
         T.Frame.levels(w0, h0), old, base0, 0, 0, U32.shln(1, R.Frame.depth(w0, h0)), U32.shln(1, R.Frame.depth(w0, h0)), dy)
 
 def Laws.frame_again_exact(tab, tab0, w0, h0, w, h, ops, old, base0, base, dy):
-  frame_again_k(tab, T.Frame.same(w, h, tab, w0, h0, tab0), tab0, w0, h0, w, h, ops, old, base0, base, dy, {==})
+  frame_again_k(tab, T.Frame.same(w, h, tab, w0, h0, tab0, T.Frame.make(w0, h0, old, base0, tab0)), tab0, w0, h0, w, h, ops, old, base0, base, dy, {==})
 
 # Drawing in parallel
 # -------------------
@@ -3048,7 +3626,7 @@ law plan_make_fill:
 def plan_make_fill(tab, k, e, ops, base, rx, ry, n, off, t):
   match k:
     case 0n:
-      Equal.cong(Image, T.Tiles, i => T.TLeaf{T.Tile{ops, T.Loc.ops(ops, rx, ry, T.Tile.size(e)), base, i}},
+      Equal.cong(Image, T.Tiles, i => T.TLeaf{T.Tile{ops, T.Loc.ops(ops, rx, ry, T.Tile.size(e)), base, i, T.Keys.ops(T.Loc.ops(ops, rx, ry, T.Tile.size(e)), T.KNil{})}},
         T.Drawn.get(T.Jobs.run(t, e, tab), T.Jobs.path(24n, off), e, tab, T.Loc.ops(ops, rx, ry, T.Tile.size(e)), base), T.Tile.draw(e, tab, T.Loc.ops(ops, rx, ry, T.Tile.size(e)), base),
         Laws.drawn_get_run(tab, t, T.Jobs.path(24n, off), e, T.Loc.ops(ops, rx, ry, T.Tile.size(e)), base))
     case 1n+j0:
@@ -3100,7 +3678,7 @@ law Laws_find:
 
 def Laws_find(tab, k, t, x, y, rx, ry, n, e, l, base):
   match k t:
-    case 0n T.TLeaf{T.Tile{_, +o, +b, +i}}:
+    case 0n T.TLeaf{T.Tile{_, +o, +b, +i, _}}:
       find_k(tab, T.Eq.tile(o, l, b, base), i, e, l, base)
     case 1n+j0 T.TNode{_, _, a, b, c, d}:
       +j = j0
@@ -3123,16 +3701,16 @@ law plan_found:
   for +t: T.Jobs
   for -s: Image
   for h: {s == Seek.from(tab, m, e, l, base) : Image}
-  {T.Plan.fill(T.Tile.plan.found(m, ops, l, base), e, tab, off, T.Jobs.run(t, e, tab)) == T.TLeaf{T.Tile{ops, l, base, s}} : T.Tiles}
+  {T.Plan.fill(T.Tile.plan.found(m, ops, l, base), e, tab, off, T.Jobs.run(t, e, tab)) == T.TLeaf{T.Tile{ops, l, base, s, T.Keys.ops(l, T.KNil{})}} : T.Tiles}
 
 def plan_found(tab, m, e, ops, l, base, off, t, s, h):
   match m:
     case Some{i}:
-      %Equal.sym(Image, s, Seek.from(tab, Some{i}, e, l, base), h) : {T.Plan.fill(T.Tile.plan.found(Some{i}, ops, l, base), e, tab, off, T.Jobs.run(t, e, tab)) == T.TLeaf{T.Tile{ops, l, base, _}} : T.Tiles}
+      %Equal.sym(Image, s, Seek.from(tab, Some{i}, e, l, base), h) : {T.Plan.fill(T.Tile.plan.found(Some{i}, ops, l, base), e, tab, off, T.Jobs.run(t, e, tab)) == T.TLeaf{T.Tile{ops, l, base, _, T.Keys.ops(l, T.KNil{})}} : T.Tiles}
       {==}
     case None{}:
-      %Equal.sym(Image, s, Seek.from(tab, None{}, e, l, base), h) : {T.Plan.fill(T.Tile.plan.found(None{}, ops, l, base), e, tab, off, T.Jobs.run(t, e, tab)) == T.TLeaf{T.Tile{ops, l, base, _}} : T.Tiles}
-      Equal.cong(Image, T.Tiles, i => T.TLeaf{T.Tile{ops, l, base, i}},
+      %Equal.sym(Image, s, Seek.from(tab, None{}, e, l, base), h) : {T.Plan.fill(T.Tile.plan.found(None{}, ops, l, base), e, tab, off, T.Jobs.run(t, e, tab)) == T.TLeaf{T.Tile{ops, l, base, _, T.Keys.ops(l, T.KNil{})}} : T.Tiles}
+      Equal.cong(Image, T.Tiles, i => T.TLeaf{T.Tile{ops, l, base, i, T.Keys.ops(l, T.KNil{})}},
         T.Drawn.get(T.Jobs.run(t, e, tab), T.Jobs.path(24n, off), e, tab, l, base), T.Tile.draw(e, tab, l, base),
         Laws.drawn_get_run(tab, t, T.Jobs.path(24n, off), e, l, base))
 
@@ -3159,7 +3737,7 @@ def plan_fresh_k(tab, look, e, ops, l, base, pk, pt, pn, dy, rx, ry, off, t):
       plan_found(tab, T.Tiles.find(pk, pt, rx, (ry - dy : U32), 0, 0, pn, l, base), e, ops, l, base, off, t,
         T.Tiles.seek(pk, pt, rx, (ry - dy : U32), 0, 0, pn, e, tab, l, base), Laws_find(tab, pk, pt, rx, (ry - dy : U32), 0, 0, pn, e, l, base))
     case False{}:
-      Equal.cong(Image, T.Tiles, i => T.TLeaf{T.Tile{ops, l, base, i}},
+      Equal.cong(Image, T.Tiles, i => T.TLeaf{T.Tile{ops, l, base, i, T.Keys.ops(l, T.KNil{})}},
         T.Drawn.get(T.Jobs.run(t, e, tab), T.Jobs.path(24n, off), e, tab, l, base), T.Tile.draw(e, tab, l, base),
         Laws.drawn_get_run(tab, t, T.Jobs.path(24n, off), e, l, base))
 
@@ -3173,15 +3751,16 @@ law tile_plan_k:
   for +l: List<&2, R.Op>
   for +b: Image
   for +i: Image
+  for +keys: T.KeySet
   for +p: T.Past
   for +rx: U32
   for +ry: U32
   for +n: U32
   for +off: Nat
   for +t: T.Jobs
-  {T.Plan.fill(T.Tile.plan.k(s, e, ops, base, T.Tile{o, l, b, i}, p, rx, ry, n), e, tab, off, T.Jobs.run(t, e, tab)) == T.TLeaf{T.Tile.again.k(s, e, tab, ops, base, T.Tile{o, l, b, i}, p, rx, ry, n)} : T.Tiles}
+  {T.Plan.fill(T.Tile.plan.k(s, e, ops, base, T.Tile{o, l, b, i, keys}, p, rx, ry, n), e, tab, off, T.Jobs.run(t, e, tab)) == T.TLeaf{T.Tile.again.k(s, e, tab, ops, base, T.Tile{o, l, b, i, keys}, p, rx, ry, n)} : T.Tiles}
 
-def tile_plan_k(tab, s, e, ops, base, o, l, b, i, p, rx, ry, n, off, t):
+def tile_plan_k(tab, s, e, ops, base, o, l, b, i, keys, p, rx, ry, n, off, t):
   match s p:
     case True{} _:
       {==}
@@ -3223,8 +3802,8 @@ def plan_node_k(tab, s, j, e, ops, base, o, bs, pa, pb, pc, pd, p, rx, ry, n, of
 
 def Laws.plan_fill_again(tab, k, e, ops, base, prev, p, rx, ry, n, off, t):
   match k prev:
-    case 0n T.TLeaf{T.Tile{+o, +l, +b, +i}}:
-      tile_plan_k(tab, T.Eq.tile(ops, o, base, b), e, ops, base, o, l, b, i, p, rx, ry, n, off, t)
+    case 0n T.TLeaf{T.Tile{+o, +l, +b, +i, +keys}}:
+      tile_plan_k(tab, T.Eq.tile(ops, o, base, b), e, ops, base, o, l, b, i, keys, p, rx, ry, n, off, t)
     case 1n+j0 T.TNode{+o, +bs, +pa, +pb, +pc, +pd}:
       +j = j0
       plan_node_k(tab, T.Eq.tile(ops, o, base, bs), j, e, ops, base, o, bs, pa, pb, pc, pd, p, rx, ry, n, off, t,
@@ -9701,7 +10280,7 @@ def blink_leaf_k(tab, f, e, ops, base, rx, ry, n, on, h):
       {==}
     case False{}:
       el = Laws.caret_loc(ops, on, rx, ry, T.Tile.size(e))
-      %Equal.sym(List<&2, R.Op>, T.Loc.ops(T.Caret.set(ops, on), rx, ry, T.Tile.size(e)), T.Caret.set(T.Loc.ops(ops, rx, ry, T.Tile.size(e)), on), el) : {T.Tile{T.Caret.set(ops, on), T.Caret.set(T.Loc.ops(ops, rx, ry, T.Tile.size(e)), on), base, T.Tile.draw(e, tab, T.Caret.set(T.Loc.ops(ops, rx, ry, T.Tile.size(e)), on), base)} == T.Tile{T.Caret.set(ops, on), _, base, T.Tile.draw(e, tab, _, base)} : T.Tile}
+      %Equal.sym(List<&2, R.Op>, T.Loc.ops(T.Caret.set(ops, on), rx, ry, T.Tile.size(e)), T.Caret.set(T.Loc.ops(ops, rx, ry, T.Tile.size(e)), on), el) : {T.Tile{T.Caret.set(ops, on), T.Caret.set(T.Loc.ops(ops, rx, ry, T.Tile.size(e)), on), base, T.Tile.draw(e, tab, T.Caret.set(T.Loc.ops(ops, rx, ry, T.Tile.size(e)), on), base), T.Keys.ops(T.Caret.set(T.Loc.ops(ops, rx, ry, T.Tile.size(e)), on), T.KNil{})} == T.Tile{T.Caret.set(ops, on), _, base, T.Tile.draw(e, tab, _, base), T.Keys.ops(_, T.KNil{})} : T.Tile}
       {==}
 
 # one quadrant: the law one level down (ih), its ops cut from the
@@ -10259,9 +10838,9 @@ law tile_plan2:
 
 def tile_plan2(e, c, base, t, p, rx, ry, n):
   match t:
-    case T.Tile{+o, +l, +b, +i}:
-      %cut_tile(c, o, base, b) : {T.Tile.plan2.k(T.Cut.tile(c, o, base, b), e, c, base, T.Tile{o, l, b, i}, p, rx, ry, n) == T.Tile.plan.k(_, e, T.Cut.get(c), base, T.Tile{o, l, b, i}, p, rx, ry, n) : T.Plan}
-      tile_plan2_k(T.Cut.tile(c, o, base, b), e, c, base, T.Tile{o, l, b, i}, p, rx, ry, n)
+    case T.Tile{+o, +l, +b, +i, +keys}:
+      %cut_tile(c, o, base, b) : {T.Tile.plan2.k(T.Cut.tile(c, o, base, b), e, c, base, T.Tile{o, l, b, i, keys}, p, rx, ry, n) == T.Tile.plan.k(_, e, T.Cut.get(c), base, T.Tile{o, l, b, i, keys}, p, rx, ry, n) : T.Plan}
+      tile_plan2_k(T.Cut.tile(c, o, base, b), e, c, base, T.Tile{o, l, b, i, keys}, p, rx, ry, n)
 
 law plan2_child:
   for +j: Nat
@@ -10421,7 +11000,7 @@ def Laws.frame_par_exact(tab, w, h, ops, base, prev, dy):
       plan_make_fill(tab, T.Frame.levels(w, h), T.Frame.edge(w, h), ops, base, 0, 0, U32.shln(1, R.Frame.depth(w, h)), 0n,
         T.Jobs.deal(T.Plan.jobs(T.Tiles.plan.make(T.Frame.levels(w, h), T.Frame.edge(w, h), ops, base, 0, 0, U32.shln(1, R.Frame.depth(w, h))), Nil{})))
     case T.FSome{+pw, +ph, +ptab, +pt}:
-      frame_par_k(tab, T.Frame.same(w, h, tab, pw, ph, ptab), w, h, ops, base, pt, dy)
+      frame_par_k(tab, T.Frame.same(w, h, tab, pw, ph, ptab, pt), w, h, ops, base, pt, dy)
 # ---- end gfx-runs ----
 # ---- sent-draft ----
 def Laws.draft_clear_tells_host(u):

@@ -207,13 +207,127 @@ def Loc.ops(ops: List<&2, R.Op>, +ox: U32, +oy: U32, +n: U32) -> List<&2, R.Op>:
     case o <> t:
       Loc.op(o, ox, oy, n) <> Loc.ops(t, ox, oy, n)
 
+# A tile's exact key set. Built only when making/changing the tile; table
+# changes query only their changed ids, without walking ops or glyph runs.
+type KeySet is Data:
+  KNil{}
+  KNode{id: U32, l: KeySet, r: KeySet}
+
+def Keys.side(t: KeySet, +id: U32) -> R.Side:
+  match t:
+    case KNil{}:
+      R.SHere{}
+    case KNode{+k, _, _}:
+      R.Tab.side.k(U32.is_eq(id, k), U32.is_lt(id, k))
+
+def Keys.has.go(t: KeySet, side: R.Side, +id: U32) -> Bool:
+  match t side:
+    case KNil{} _:
+      False{}
+    case KNode{_, _, _} R.SHere{}:
+      True{}
+    case KNode{_, +l, _} R.SLeft{}:
+      Keys.has.go(l, Keys.side(l, id), id)
+    case KNode{_, _, +r} R.SRight{}:
+      Keys.has.go(r, Keys.side(r, id), id)
+
+def Keys.has(+t: KeySet, +id: U32) -> Bool:
+  Keys.has.go(t, Keys.side(t, id), id)
+
+def Keys.put.go(t: KeySet, side: R.Side, +id: U32) -> KeySet:
+  match t side:
+    case KNil{} _:
+      KNode{id, KNil{}, KNil{}}
+    case KNode{k, l, r} R.SHere{}:
+      KNode{k, l, r}
+    case KNode{k, +l, r} R.SLeft{}:
+      KNode{k, Keys.put.go(l, Keys.side(l, id), id), r}
+    case KNode{k, l, +r} R.SRight{}:
+      KNode{k, l, Keys.put.go(r, Keys.side(r, id), id)}
+
+def Keys.put(+t: KeySet, +id: U32) -> KeySet:
+  Keys.put.go(t, Keys.side(t, id), id)
+
+def Keys.run(r: R.Run, s: KeySet) -> KeySet:
+  match r:
+    case R.RKey{_, _, _, _, id}:
+      Keys.put(s, id)
+    case R.RPair{_, _, _, _, a, b}:
+      Keys.run(b, Keys.run(a, s))
+    case _:
+      s
+
+def Keys.shape(sh: R.Shape, s: KeySet) -> KeySet:
+  match sh:
+    case R.SRun{_, _, r}:
+      Keys.run(r, s)
+    case _:
+      s
+
+def Keys.ops(os: List<&2, R.Op>, s: KeySet) -> KeySet:
+  match os:
+    case Nil{}:
+      s
+    case R.Op{_, _, _, _, _, _, sh} <> t:
+      Keys.ops(t, Keys.shape(sh, s))
+
+# Compare the semantic lookup, including a missing glyph. The geometry
+# lives in the op and does not depend on the table.
+def Delta.entry(+t: R.Tab, +id: U32) -> Maybe<&2, R.Run>:
+  R.Tab.find(t, R.Tab.side(t, id), id)
+
+def Delta.eq(a: Maybe<&2, R.Run>, b: Maybe<&2, R.Run>) -> Bool:
+  match a b:
+    case None{} None{}:
+      True{}
+    case Some{x} Some{y}:
+      Eq.run(x, y)
+    case _ _:
+      False{}
+
+def Delta.add(same: Bool, id: U32, acc: List<&2, U32>) -> List<&2, U32>:
+  match same:
+    case True{}:
+      acc
+    case False{}:
+      id <> acc
+
+# Scan both domains, so removed ids and formerly missing ids are covered.
+# Lookup makes this sound even for arbitrary (non-canonical) input trees.
+def Delta.scan(t: R.Tab, +old: R.Tab, +new: R.Tab, acc: List<&2, U32>) -> List<&2, U32>:
+  match t:
+    case R.TNil{}:
+      acc
+    case R.TBr{+id, _, _, l, r}:
+      Delta.scan(r, old, new, Delta.scan(l, old, new, Delta.add(Delta.eq(Delta.entry(old, id), Delta.entry(new, id)), id, acc)))
+
+def Delta.of(+old: R.Tab, +new: R.Tab) -> List<&2, U32>:
+  Delta.scan(new, old, new, Delta.scan(old, old, new, Nil{}))
+
+# Stops as soon as a used id changed. Usually the delta is a handful of
+# glyphs, so this probes that many search paths per tile, not every op.
+def Keys.clear(ids: List<&2, U32>, +s: KeySet) -> Bool:
+  match ids:
+    case Nil{}:
+      True{}
+    case id <> t:
+      Bool.and(Bool.not(Keys.has(s, id)), Keys.clear(t, s))
+
+# Membership is also used by the completeness proof for Delta.of.
+def Delta.has(ids: List<&2, U32>, +id: U32) -> Bool:
+  match ids:
+    case Nil{}:
+      False{}
+    case k <> t:
+      Bool.or(U32.is_eq(id, k), Delta.has(t, id))
+
 # Tiles
 # -----
 
 # ops as they reach the tile, the same in its own coordinates, the base
 # under it and the image
 type Tile is Data:
-  Tile{ops: List<&2, R.Op>, loc: List<&2, R.Op>, base: Image, img: Image}
+  Tile{ops: List<&2, R.Op>, loc: List<&2, R.Op>, base: Image, img: Image, keys: KeySet}
 
 # a node keeps the ops that reached it and the base under it: a node whose
 # ops and base are unchanged is kept whole, its tiles not looked at
@@ -252,7 +366,7 @@ def Tile.draw(+e: Nat, +tab: R.Tab, +l: List<&2, R.Op>, +base: Image) -> Image:
   Tile.draw.r(e, R.Res.ops(l, tab), base)
 
 def Tile.of(+e: Nat, +tab: R.Tab, +ops: List<&2, R.Op>, +l: List<&2, R.Op>, +base: Image) -> Tile:
-  Tile{ops, l, base, Tile.draw(e, tab, l, base)}
+  Tile{ops, l, base, Tile.draw(e, tab, l, base), Keys.ops(l, KNil{})}
 
 # the tile at (rx, ry), 2^e wide, drawn from scratch
 def Tile.make(+e: Nat, +tab: R.Tab, +ops: List<&2, R.Op>, +base: Image, +rx: U32, +ry: U32, +n: U32) -> Tile:
@@ -278,7 +392,7 @@ def Tiles.seek.k(same: Bool, img: Image, +e: Nat, +tab: R.Tab, +l: List<&2, R.Op
 
 def Tiles.seek.leaf(t: Tile, +e: Nat, +tab: R.Tab, +l: List<&2, R.Op>, +base: Image) -> Image:
   match t:
-    case Tile{_, +o, +b, i}:
+    case Tile{_, +o, +b, i, _}:
       Tiles.seek.k(Eq.tile(o, l, b, base), i, e, tab, l, base)
 
 # the image of a tile of local ops l over base: the one the old tile at
@@ -297,9 +411,9 @@ def Tiles.seek(k: Nat, t: Tiles, +x: U32, +y: U32, +rx: U32, +ry: U32, +n: U32, 
 def Tile.fresh.k(look: Bool, +e: Nat, +tab: R.Tab, +ops: List<&2, R.Op>, +l: List<&2, R.Op>, +base: Image, p: Past, +rx: U32, +ry: U32) -> Tile:
   match look p:
     case True{} Past{pk, pt, pn, dy}:
-      Tile{ops, l, base, Tiles.seek(pk, pt, rx, (ry - dy : U32), 0, 0, pn, e, tab, l, base)}
+      Tile{ops, l, base, Tiles.seek(pk, pt, rx, (ry - dy : U32), 0, 0, pn, e, tab, l, base), Keys.ops(l, KNil{})}
     case False{} _:
-      Tile{ops, l, base, Tile.draw(e, tab, l, base)}
+      Tile{ops, l, base, Tile.draw(e, tab, l, base), Keys.ops(l, KNil{})}
 
 # a changed tile: when the view moved, the old tile its content came from
 # may hold it already
@@ -319,8 +433,8 @@ def Tile.again.k(same: Bool, +e: Nat, +tab: R.Tab, +ops: List<&2, R.Op>, +base: 
 # (or found where the view moved it from)
 def Tile.again(+e: Nat, +tab: R.Tab, +ops: List<&2, R.Op>, +base: Image, t: Tile, p: Past, +rx: U32, +ry: U32, +n: U32) -> Tile:
   match t:
-    case Tile{+o, l, +b, i}:
-      Tile.again.k(Eq.tile(ops, o, base, b), e, tab, ops, base, Tile{o, l, b, i}, p, rx, ry, n)
+    case Tile{+o, l, +b, i, keys}:
+      Tile.again.k(Eq.tile(ops, o, base, b), e, tab, ops, base, Tile{o, l, b, i, keys}, p, rx, ry, n)
 
 # the n x n region at (rx, ry) as tiles k levels down; each tile is 2^e
 # wide. ops reach each child as Region.keep cuts them (the parent's
@@ -370,7 +484,7 @@ def Tiles.again(+k: Nat, +e: Nat, +tab: R.Tab, +ops: List<&2, R.Op>, +base: Imag
 # the frame the tiles make
 def Tiles.image(t: Tiles) -> Image:
   match t:
-    case TLeaf{Tile{_, _, _, i}}:
+    case TLeaf{Tile{_, _, _, i, _}}:
       i
     case TNode{_, _, a, b, c, d}:
       Qua{Tiles.image(a), Tiles.image(b), Tiles.image(c), Tiles.image(d)}
@@ -411,9 +525,46 @@ def Frame.again.k(same: Bool, +w: U32, +h: U32, +ops: List<&2, R.Op>, +base: Ima
     case False{}:
       Tiles.make(Frame.levels(w, h), Frame.edge(w, h), tab, ops, base, 0, 0, U32.shln(1, R.Frame.depth(w, h)))
 
-# the same size, drawn with the same glyph table
-def Frame.same(+w: U32, +h: U32, +tab: R.Tab, +pw: U32, +ph: U32, +ptab: R.Tab) -> Bool:
-  Bool.and(Bool.and(U32.is_eq(pw, w), U32.is_eq(ph, h)), Eq.tab(tab, ptab))
+# Tables agree on a tile when every key it used resolves identically.
+# This includes missing keys: adding a formerly missing used key is a
+# change, whereas adding keys unused by the old tiles permits reuse.
+def Table.agrees(+ops: List<&2, R.Op>, +old: R.Tab, +new: R.Tab) -> Bool:
+  Eq.ops(R.Res.ops(ops, old), R.Res.ops(ops, new))
+
+def Tile.agrees(t: Tile, +old: R.Tab, +new: R.Tab) -> Bool:
+  match t:
+    case Tile{_, l, _, _, _}:
+      Table.agrees(l, old, new)
+
+def Tiles.agrees(t: Tiles, +old: R.Tab, +new: R.Tab) -> Bool:
+  match t:
+    case TLeaf{tl}:
+      Tile.agrees(tl, old, new)
+    case TNode{_, _, a, b, c, d}:
+      Bool.and(Tiles.agrees(a, old, new), Bool.and(Tiles.agrees(b, old, new), Bool.and(Tiles.agrees(c, old, new), Tiles.agrees(d, old, new))))
+
+def Tile.clear(t: Tile, +ids: List<&2, U32>) -> Bool:
+  match t:
+    case Tile{_, _, _, _, keys}:
+      Keys.clear(ids, keys)
+
+def Tiles.clear(t: Tiles, +ids: List<&2, U32>) -> Bool:
+  match t:
+    case TLeaf{tl}:
+      Tile.clear(tl, ids)
+    case TNode{_, _, a, b, c, d}:
+      Bool.and(Tiles.clear(a, ids), Bool.and(Tiles.clear(b, ids), Bool.and(Tiles.clear(c, ids), Tiles.clear(d, ids))))
+
+def Frame.agrees(same: Bool, +tab: R.Tab, +ptab: R.Tab, prev: Tiles) -> Bool:
+  match same:
+    case True{}:
+      True{}
+    case False{}:
+      Tiles.clear(prev, Delta.of(ptab, tab))
+
+# The same size and equal resolutions for every glyph the old tiles used.
+def Frame.same(+w: U32, +h: U32, +tab: R.Tab, +pw: U32, +ph: U32, +ptab: R.Tab, prev: Tiles) -> Bool:
+  Bool.and(Bool.and(U32.is_eq(pw, w), U32.is_eq(ph, h)), Frame.agrees(Eq.tab(tab, ptab), tab, ptab, prev))
 
 # a w x h frame of ops (topmost first) over base, reusing the last frame's
 # tiles when it had the same size and glyph table; dy is how far the
@@ -423,8 +574,8 @@ def Frame.again(+w: U32, +h: U32, +ops: List<&2, R.Op>, +base: Image, +tab: R.Ta
   match prev:
     case FNone{}:
       Frame.make(w, h, ops, base, tab)
-    case FSome{+pw, +ph, +ptab, t}:
-      Frame.again.k(Frame.same(w, h, tab, pw, ph, ptab), w, h, ops, base, tab, t, dy)
+    case FSome{+pw, +ph, +ptab, +t}:
+      Frame.again.k(Frame.same(w, h, tab, pw, ph, ptab, t), w, h, ops, base, tab, t, dy)
 
 # Drawing in parallel
 # -------------------
@@ -470,7 +621,7 @@ def Tiles.find.k(same: Bool, img: Image) -> Maybe<&2, Image>:
 
 def Tiles.find.leaf(t: Tile, +l: List<&2, R.Op>, +base: Image) -> Maybe<&2, Image>:
   match t:
-    case Tile{_, +o, +b, i}:
+    case Tile{_, +o, +b, i, _}:
       Tiles.find.k(Eq.tile(o, l, b, base), i)
 
 def Tiles.find(k: Nat, t: Tiles, +x: U32, +y: U32, +rx: U32, +ry: U32, +n: U32, +l: List<&2, R.Op>, +base: Image) -> Maybe<&2, Image>:
@@ -488,7 +639,7 @@ def Tiles.find(k: Nat, t: Tiles, +x: U32, +y: U32, +rx: U32, +ry: U32, +n: U32, 
 def Tile.plan.found(m: Maybe<&2, Image>, +ops: List<&2, R.Op>, +l: List<&2, R.Op>, +base: Image) -> Plan:
   match m:
     case Some{i}:
-      PKeep{Tile{ops, l, base, i}}
+      PKeep{Tile{ops, l, base, i, Keys.ops(l, KNil{})}}
     case None{}:
       PDraw{ops, l, base}
 
@@ -514,8 +665,8 @@ def Tile.plan.k(same: Bool, +e: Nat, +ops: List<&2, R.Op>, +base: Image, t: Tile
 # Tile.again's decision, the drawing left for later
 def Tile.plan(+e: Nat, +ops: List<&2, R.Op>, +base: Image, t: Tile, p: Past, +rx: U32, +ry: U32, +n: U32) -> Plan:
   match t:
-    case Tile{+o, l, +b, i}:
-      Tile.plan.k(Eq.tile(ops, o, base, b), e, ops, base, Tile{o, l, b, i}, p, rx, ry, n)
+    case Tile{+o, l, +b, i, keys}:
+      Tile.plan.k(Eq.tile(ops, o, base, b), e, ops, base, Tile{o, l, b, i, keys}, p, rx, ry, n)
 
 # Tiles.make's plan: every tile to draw
 def Tiles.plan.make(k: Nat, +e: Nat, +ops: List<&2, R.Op>, +base: Image, +rx: U32, +ry: U32, +n: U32) -> Plan:
@@ -681,8 +832,8 @@ def Tile.plan2.k(same: Bool, +e: Nat, c: Cut, +base: Image, t: Tile, p: Past, +r
 # Tile.plan of Cut.get(c)
 def Tile.plan2(+e: Nat, +c: Cut, +base: Image, t: Tile, p: Past, +rx: U32, +ry: U32, +n: U32) -> Plan:
   match t:
-    case Tile{+o, l, +b, i}:
-      Tile.plan2.k(Cut.tile(c, o, base, b), e, c, base, Tile{o, l, b, i}, p, rx, ry, n)
+    case Tile{+o, l, +b, i, keys}:
+      Tile.plan2.k(Cut.tile(c, o, base, b), e, c, base, Tile{o, l, b, i, keys}, p, rx, ry, n)
 
 # Tiles.plan.go of Cut.get(c) (law plan2_go): a changed node builds its ops
 # and hands its children theirs uncut
@@ -809,7 +960,7 @@ def Plan.fill(p: Plan, +e: Nat, +tab: R.Tab, +off: Nat, +d: Drawn) -> Tiles:
     case PKeep{t}:
       TLeaf{t}
     case PDraw{o, +l, +b}:
-      TLeaf{Tile{o, l, b, Drawn.get(d, Jobs.path(24n, off), e, tab, l, b)}}
+      TLeaf{Tile{o, l, b, Drawn.get(d, Jobs.path(24n, off), e, tab, l, b), Keys.ops(l, KNil{})}}
     case PKeepN{t}:
       t
     case PNode{_, o, bs, +a, +b, +c, +dd}:
@@ -839,8 +990,8 @@ def Frame.plan(+w: U32, +h: U32, +ops: List<&2, R.Op>, +base: Image, +tab: R.Tab
   match prev:
     case FNone{}:
       Tiles.plan.make(Frame.levels(w, h), Frame.edge(w, h), ops, base, 0, 0, U32.shln(1, R.Frame.depth(w, h)))
-    case FSome{+pw, +ph, +ptab, t}:
-      Frame.plan.k(Frame.same(w, h, tab, pw, ph, ptab), w, h, ops, base, t, dy)
+    case FSome{+pw, +ph, +ptab, +t}:
+      Frame.plan.k(Frame.same(w, h, tab, pw, ph, ptab, t), w, h, ops, base, t, dy)
 
 # Frame.again, its drawing spread over the cores (law frame_par_exact)
 def Frame.par(+w: U32, +h: U32, +ops: List<&2, R.Op>, +base: Image, +tab: R.Tab, prev: Frames, +dy: U32) -> Tiles:
@@ -911,14 +1062,14 @@ def Tile.blink.k(fresh: Bool, +e: Nat, +tab: R.Tab, t: Tile, +on: Bool) -> Tile:
   match fresh t:
     case True{} _:
       t
-    case False{} Tile{o, l, +b, _}:
+    case False{} Tile{o, l, +b, _, _}:
       +l2 = Caret.set(l, on)
-      Tile{Caret.set(o, on), l2, b, Tile.draw(e, tab, l2, b)}
+      Tile{Caret.set(o, on), l2, b, Tile.draw(e, tab, l2, b), Keys.ops(l2, KNil{})}
 
 def Tile.blink(t: Tile, +e: Nat, +tab: R.Tab, +on: Bool) -> Tile:
   match t:
-    case Tile{+o, l, b, i}:
-      Tile.blink.k(Caret.fresh(o, on), e, tab, Tile{o, l, b, i}, on)
+    case Tile{+o, l, b, i, keys}:
+      Tile.blink.k(Caret.fresh(o, on), e, tab, Tile{o, l, b, i, keys}, on)
 
 # a node's carets are all as on says already (a leaf: Tile.blink looks)
 def Tiles.fresh(t: Tiles, +on: Bool) -> Bool:
@@ -982,7 +1133,7 @@ def Ops.after(cs: List<&2, R.Op>, o: List<&2, R.Op>) -> List<&2, R.Op>:
 
 def Tile.recat(+e: Nat, +tab: R.Tab, +cs: List<&2, R.Op>, +cs2: List<&2, R.Op>, t: Tile, +rx: U32, +ry: U32) -> Tile:
   match t:
-    case Tile{o, _, +b, _}:
+    case Tile{o, _, +b, _, _}:
       +o2 = Ops.cat(cs2, Ops.after(cs, o))
       Tile.of(e, tab, o2, Loc.ops(o2, rx, ry, Tile.size(e)), b)
 

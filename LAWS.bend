@@ -1235,11 +1235,12 @@ law tile_keep:
   for +l: List<&2, R.Op>
   for +base: Image
   for +img: Image
+  for +keys: T.KeySet
   for +p: T.Past
   for +rx: U32
   for +ry: U32
   for +n: U32
-  {T.Tile.again(e, tab, ops, base, T.Tile{ops, l, base, img}, p, rx, ry, n) == T.Tile{ops, l, base, img} : T.Tile}
+  {T.Tile.again(e, tab, ops, base, T.Tile{ops, l, base, img, keys}, p, rx, ry, n) == T.Tile{ops, l, base, img, keys} : T.Tile}
 
 # the same for a whole frame as the window draws it, even when the window
 # was resized in between or the glyph table changed, for any scroll hint
@@ -9140,3 +9141,37 @@ law mv_filter_key_separates:
   {String.eq(MVW.Mv.key(MVW.Filter{"a|b", "", "c", ""}), MVW.Mv.key(MVW.Filter{"a", "|b", "c", ""})) == False{} : Bool}
 
 # ---- end mail view ----
+
+# ---- glyph table extension: unchanged resolutions keep exact old tiles ----
+# Compatibility covers every used glyph, including a formerly missing key.
+law glyph_table_agreement:
+  for +old: R.Tab
+  for +new: R.Tab
+  for +ops: List<&2, R.Op>
+  for h: {T.Table.agrees(ops, old, new) == True{} : Bool}
+  {R.Res.ops(ops, old) == R.Res.ops(ops, new) : List<&2, R.Op>}
+
+# A table extension (or any change agreeing on all used keys) preserves
+# the complete old tiles, not only their displayed pixels.
+law tiles_table_extension_exact:
+  for k: Nat
+  for +e: Nat
+  for +old: R.Tab
+  for +new: R.Tab
+  for +ops: List<&2, R.Op>
+  for +base: Image
+  for +rx: U32
+  for +ry: U32
+  for +n: U32
+  for +h: {T.Tiles.agrees(T.Tiles.make(k, e, old, ops, base, rx, ry, n), old, new) == True{} : Bool}
+  {T.Tiles.make(k, e, new, ops, base, rx, ry, n) == T.Tiles.make(k, e, old, ops, base, rx, ry, n) : T.Tiles}
+# ---- end glyph table extension ----
+
+# ---- glyph delta fast guard ----
+law glyph_delta_agreement:
+  for +old: R.Tab
+  for +new: R.Tab
+  for +ops: List<&2, R.Op>
+  for hc: {T.Keys.clear(T.Delta.of(old, new), T.Keys.ops(ops, T.KNil{})) == True{} : Bool}
+  {T.Table.agrees(ops, old, new) == True{} : Bool}
+# ---- end glyph delta fast guard ----

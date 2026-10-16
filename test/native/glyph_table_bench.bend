@@ -45,7 +45,7 @@ def exact(+c: Map<&2, X.TG>, +f: X.Face, +tab: R.Tab) -> IO(Unit):
 def report(+name: String, +i: Nat, +a: U32, +b: U32, k: Nat) -> IO(Unit):
   IO.print("sample," ++ name ++ "," ++ Nat.show(i) ++ "," ++ U32.show((b - a : U32)) ++ "," ++ Nat.show(k))
 
-def plans(+n: Nat, +os: List<&2, R.Op>, +keyed: List<&2, R.Op>, +tab: R.Tab, +keys: T.Tiles, +masks: T.Tiles) -> IO(Unit):
+def plans(+n: Nat, +os: List<&2, R.Op>, +keyed: List<&2, R.Op>, +tab: R.Tab, +grown: R.Tab, +keys: T.Tiles, +masks: T.Tiles) -> IO(Unit):
   match n:
     case 0n:
       IO.pure(Unit, Unit{})
@@ -58,19 +58,22 @@ def plans(+n: Nat, +os: List<&2, R.Op>, +keyed: List<&2, R.Op>, +tab: R.Tab, +ke
         +d : U32 <- P.Perf.us()
         kp : Nat = T.Plan.count(T.Frame.plan.k(True{}, 1400, 900, keyed, Pix{0}, keys, 0))
         +e : U32 <- P.Perf.us()
-        guard : Nat = Bool.pick(Nat, T.Frame.same(1400, 900, tab, 1400, 900, tab), 1n, 0n)
+        guard : Nat = Bool.pick(Nat, T.Frame.same(1400, 900, tab, 1400, 900, tab, keys), 1n, 0n)
         +g : U32 <- P.Perf.us()
         convert : Nat = Bool.pick(Nat, T.Eq.ops(R.Key.ops(os), keyed), 1n, 0n)
         +h : U32 <- P.Perf.us()
         eq : Nat = Bool.pick(Nat, T.Eq.ops(keyed, keyed), 1n, 0n)
-        j : U32 <- P.Perf.us()
+        +j : U32 <- P.Perf.us()
+        ex : Nat = T.Plan.count(T.Frame.plan(1400, 900, keyed, Pix{0}, grown, T.FSome{1400, 900, tab, keys}, 0))
+        z : U32 <- P.Perf.us()
         report("masks", k, a, b, km)
         report("keys", k, b, d, kk)
         report("prekeyed", k, d, e, kp)
         report("table-guard", k, e, g, guard)
         report("convert-and-eq", k, g, h, convert)
         report("key-eq", k, h, j, eq)
-        plans(k, os, keyed, tab, keys, masks)
+        report("extension-plan", k, j, z, ex)
+        plans(k, os, keyed, tab, grown, keys, masks)
 
 def main() -> IO(Unit):
   do IO<Unit>:
@@ -112,4 +115,5 @@ def main() -> IO(Unit):
     t6 : U32 <- P.Perf.us()
     report("cold-frame", 0n, t5, t6, U32.to_nat(px))
     +masks : T.Tiles = T.Tiles.make(T.Frame.levels(1400, 900), T.Frame.edge(1400, 900), R.TNil{}, os, Pix{0}, 0, 0, 2048)
-    plans(100n, os, R.Key.ops(os), tab, keys, masks)
+    +grown : R.Tab = X.Text.table(Map.set(&2, X.TG, c, X.Text.key(X.Face.id(f), 26412), X.Text.get(c, f, 65)))
+    plans(100n, os, R.Key.ops(os), tab, grown, keys, masks)
