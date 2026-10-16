@@ -289,6 +289,20 @@ type Change is Data:
   RunSet{thread: String, bot: String, conv: String, mail: String, at: Nat}
   CharterSet{bot: String, text: String, by: String, at: Nat}
   DecisionLogged{id: String, bot: String, conv: String, run: String, text: String, reason: String, at: Nat}
+  # A content-free record that the three local governance roles reviewed a
+  # durable batch. It lives in the same atomic log write as the batch.
+  GovernanceLogged{id: String, protocol: String, actor: String, action: String, intent: String, policy: String, dissent: String, schema: Nat, changes: Nat, digest: String, architecture: Bool, reliability: Bool, experience: Bool, at: Nat}
+
+def Audit.value(c: Change) -> String:
+  match c:
+    case GovernanceLogged{id, protocol, actor, action, intent, policy, dissent, schema, changes, digest, architecture, reliability, experience, at}:
+      J.Json.show(J.Json.obj([
+        J.KV{"id", J.Str{id}}, J.KV{"protocol", J.Str{protocol}}, J.KV{"actor", J.Str{actor}}, J.KV{"action", J.Str{action}},
+        J.KV{"intent", J.Str{intent}}, J.KV{"policy", J.Str{policy}}, J.KV{"dissent", J.Str{dissent}},
+        J.KV{"schema", J.Num{Nat.show(schema)}}, J.KV{"changes", J.Num{Nat.show(changes)}}, J.KV{"digest", J.Str{digest}},
+        J.KV{"architecture", J.Flag{architecture}}, J.KV{"reliability", J.Flag{reliability}}, J.KV{"experience", J.Flag{experience}}, J.KV{"at", J.Num{Nat.show(at)}}]))
+    case _:
+      ""
 
 # the later of two times. Base's Nat.max recurses once per unit and
 # overflows at epoch scale; Nat.is_ge compiles to a machine comparison.
@@ -1980,6 +1994,8 @@ def State.apply.go(s: State, e: Change) -> State:
       State.queue((qs => Queue.drop(qs, msg)), s, th)
     case ProjectOrdered{+id, +key, _}:
       State.nav((x => Nav.keyed(x, "active", key)), s, Nav.project(id))
+    case GovernanceLogged{id, protocol, actor, action, intent, policy, dissent, schema, changes, digest, architecture, reliability, experience, at}:
+      State.setting(s, "gov.receipt.latest", Audit.value(GovernanceLogged{id, protocol, actor, action, intent, policy, dissent, schema, changes, digest, architecture, reliability, experience, at}))
 
 # one event folded into the read model; every event bumps the sequence
 def State.apply(s: State, e: Change) -> State:

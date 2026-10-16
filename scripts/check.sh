@@ -27,6 +27,8 @@
 set -eu
 cd "$(dirname "$0")/.."
 python3 scripts/i18n-gen.py --check
+python3 scripts/gen-governance.py --self-test
+python3 scripts/gen-governance.py --check
 # PROOF.bend outgrew the checker's stack (it overflowed at random on main):
 # a 1 GB main-thread stack, and the engine allowed to use 512 MB of it. A
 # concrete size, not "unlimited": with unlimited the engine falls back to a
@@ -150,4 +152,4 @@ fi
 if [ $fail != 0 ]; then exit 1; fi
 # a full pass (type-check and every proof) is recorded for these inputs
 # (scripts/verified.sh); a check or proof alone records nothing
-[ "$mode" = all ] && { scripts/verified.sh mark check "$vkey" || true; }
+if [ "$mode" = all ]; then scripts/verified.sh mark check "$vkey" || true; fi

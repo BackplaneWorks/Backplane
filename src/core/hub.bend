@@ -4807,14 +4807,15 @@ def Pend.fix(+s: M.State, +cs: List<&2, M.Change>) -> List<&2, M.Change>:
 # A commit's lines
 # ----------------
 # A step's changes are written to disk as C.Change.encode and told to
-# clients as C.Change.wire, the same text for every kind but the device
-# ones (wire leaves their tokens out): the disk line is reused, so a change
-# is shown once per commit, not three times (law commit_line_is_wire).
+# clients as C.Change.wire, the same text for every kind but device secrets
+# and governance's legacy SettingSet projection; the disk line is reused.
 def Commit.line(+c: M.Change, +disk: String) -> String:
   match c:
     case M.DeviceRegistered{_, _, _, _, _, _, _}:
       J.Json.show(C.Change.wire(c))
     case M.DeviceDropped{_, _}:
+      J.Json.show(C.Change.wire(c))
+    case M.GovernanceLogged{_, _, _, _, _, _, _, _, _, _, _, _, _, _}:
       J.Json.show(C.Change.wire(c))
     case _:
       disk

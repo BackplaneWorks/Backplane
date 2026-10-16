@@ -185,14 +185,15 @@ def Pl.none.if(on: Bool, +ty: L.Ty, +c: D.Clip, +x: U32, +y: U32) -> L.Out:
     case False{}:
       L.Out.none()
 
-def Pl.main(+p: P.Plane, +ty: L.Ty, +c: D.Clip, +x: U32, +w: U32, +rel: U32, +top: U32, +off: U32, +vh: U32, +now: Nat) -> L.Col:
+def Pl.main(+p: P.Plane, +locale: String, +ty: L.Ty, +c: D.Clip, +x: U32, +w: U32, +rel: U32, +top: U32, +off: U32, +vh: U32, +now: Nat) -> L.Col:
   +quiet = Bool.and(Bool.and(List.is_empty(&2, P.PRow, P.Plane.need(p)), List.is_empty(&2, P.PRow, P.Plane.run(p))), List.is_empty(&2, P.PRow, P.Plane.idle(p)))
   L.Lay.col.cat(Pl.none.if(quiet, ty, c, x, (top + rel - off : U32)),
     L.Lay.col.then(L.Col{L.Out.none(), Bool.pick(U32, quiet, (rel + 40 : U32), rel)}, r1 =>
       L.Lay.col.then(Pl.sect(P.Plane.need(p), "NEEDS YOU", 0n, False{}, ty, c, x, w, r1, top, off, vh, now), r2 =>
         L.Lay.col.then(Pl.sect(P.Plane.run(p), "RUNNING", 0n, False{}, ty, c, x, w, r2, top, off, vh, now), r3 =>
           L.Lay.col.then(Pl.sect(P.Plane.locks(p), "LOCKS", 0n, False{}, ty, c, x, w, r3, top, off, vh, now), r4 =>
-            Pl.sect(P.Plane.idle(p), "IDLE " ++ Nat.show(P.Plane.idle_n(p)), Nat.sub(P.Plane.idle_n(p), Pl.len(P.Plane.idle(p))), False{}, ty, c, x, w, r4, top, off, vh, now))))))
+            L.Lay.col.then(Pl.sect(P.Plane.governance(p), P.Plane.governance.label(locale), 0n, False{}, ty, c, x, w, r4, top, off, vh, now), r5 =>
+              Pl.sect(P.Plane.idle(p), "IDLE " ++ Nat.show(P.Plane.idle_n(p)), Nat.sub(P.Plane.idle_n(p), Pl.len(P.Plane.idle(p))), False{}, ty, c, x, w, r5, top, off, vh, now)))))))
 
 def Pl.side(+p: P.Plane, +ty: L.Ty, +c: D.Clip, +x: U32, +w: U32, +rel: U32, +top: U32, +off: U32, +vh: U32, +now: Nat) -> L.Col:
   L.Lay.col.then(Pl.sect(P.Plane.bots(p), "BOTS", 0n, True{}, ty, c, x, w, rel, top, off, vh, now), r2 =>
@@ -206,16 +207,16 @@ def Pl.side.w() -> U32:
   300
 
 # both columns: the side one right of the main one when wide, else under it
-def Pl.cols(+wide: Bool, +p: P.Plane, +ty: L.Ty, +c: D.Clip, +x: U32, +w: U32, +rel: U32, +top: U32, +off: U32, +vh: U32, +now: Nat) -> L.Col:
+def Pl.cols(+wide: Bool, +p: P.Plane, +locale: String, +ty: L.Ty, +c: D.Clip, +x: U32, +w: U32, +rel: U32, +top: U32, +off: U32, +vh: U32, +now: Nat) -> L.Col:
   +mw = {Bool.pick(U32, wide, (w - Pl.side.w() - 24 : U32), w) : U32}
-  L.Lay.col.then(Pl.main(p, ty, c, x, mw, rel, top, off, vh, now), +y2 =>
+  L.Lay.col.then(Pl.main(p, locale, ty, c, x, mw, rel, top, off, vh, now), +y2 =>
     L.Lay.col.then(Pl.side(p, ty, c, Bool.pick(U32, wide, (x + mw + 24 : U32), x), Bool.pick(U32, wide, Pl.side.w(), w), Bool.pick(U32, wide, rel, (y2 + 4 : U32)), top, off, vh, now), y3 =>
       L.Col{L.Out.none(), U32.max(y3, Bool.pick(U32, wide, y2, 0))}))
 
 # The status plane from top (scrolled up by off) in x..x+w; the column's y
 # is where it ends
-def Pl.draw(+p: P.Plane, +hm: P.PHome, +ty: L.Ty, +c: D.Clip, +x: U32, +w: U32, +top: U32, +off: U32, +vh: U32, +now: Nat) -> L.Col:
+def Pl.draw(+p: P.Plane, +hm: P.PHome, +locale: String, +ty: L.Ty, +c: D.Clip, +x: U32, +w: U32, +top: U32, +off: U32, +vh: U32, +now: Nat) -> L.Col:
   +sh = Pl.strip.h(p, hm)
   L.Lay.col.cat(Pl.strip(p, hm, ty, c, x, 0, top, off, vh),
-    L.Lay.col.then(Pl.cols(U32.is_ge(w, Pl.wide()), p, ty, c, x, w, (sh + 8 : U32), top, off, vh, now), y =>
+    L.Lay.col.then(Pl.cols(U32.is_ge(w, Pl.wide()), p, locale, ty, c, x, w, (sh + 8 : U32), top, off, vh, now), y =>
       L.Col{L.Out.none(), (top + y - off : U32)}))

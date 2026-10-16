@@ -959,7 +959,7 @@ def Hubs.pl.card.k(m: Maybe<&2, BU.BRow>, +p: PL.Plane, +k: String) -> J.Json:
       J.Null{}
 
 def Hubs.pl.fill.p(+p: PL.Plane, +fs: J.Json, +u: U.Ui, +k: String) -> J.Json:
-  J.Obj{Hubs.pl.put(Hubs.pl.put(fs, "plane", MPL.MPlane.with.home(MPL.MPlane.json(p, S.Mob.now(u), U.Ui.state(u)), Hubs.pl.q(MPL.MPlane.home(u), k))), "uber", Hubs.pl.card.k(BU.BU.uber(u), p, k))}
+  J.Obj{Hubs.pl.put(Hubs.pl.put(fs, "plane", MPL.MPlane.with.home(MPL.MPlane.json(p, S.Mob.now(u), U.Ui.state(u), U.Ui.scratch(u, "@lang.tag")), Hubs.pl.q(MPL.MPlane.home(u), k))), "uber", Hubs.pl.card.k(BU.BU.uber(u), p, k))}
 
 # the card alone (no counts: they come from the plane)
 def Hubs.pl.card.n(m: Maybe<&2, BU.BRow>, +k: String) -> J.Json:
