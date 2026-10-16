@@ -25,13 +25,16 @@ type Mask is Data:
   M16{w0: U32, w1: U32, w2: U32, w3: U32, w4: U32, w5: U32, w6: U32, w7: U32, w8: U32, w9: U32, w10: U32, w11: U32, w12: U32, w13: U32, w14: U32, w15: U32}
 
 # a run of glyphs (one line of text in one face and colour) as a tree in
-# string order: a leaf is a glyph's coverage bitmap at (gx, gy), w x h; a
+# string order: a leaf is a glyph's coverage bitmap at (gx, gy), w x h, id
+# naming it in the glyph table (RKey: the glyph by its id alone, as the
+# tiles keep it, Key.ops; drawn once resolved against the table, Res.ops); a
 # pair's glyphs lie in [x0, x1) x [y0, y1). Coordinates are from the run's
 # origin (its SRun's ox, oy, modulo 2^32), so moving the run moves no glyph.
 type Run is Data:
   RNone{}
-  RGlyph{gx: U32, gy: U32, w: U32, h: U32, d: Nat, m: Mask}
+  RGlyph{gx: U32, gy: U32, w: U32, h: U32, id: U32, d: Nat, m: Mask}
   RPair{x0: U32, y0: U32, x1: U32, y1: U32, a: Run, b: Run}
+  RKey{gx: U32, gy: U32, w: U32, h: U32, id: U32}
 
 # SPoly is an even-odd polygon cut to the region at hand: `inside` says
 # whether the region's top-left corner is inside, `edges` are the edges
@@ -232,16 +235,18 @@ def Run.hit(r: Run, +x: U32, +y: U32) -> Bool:
   match r:
     case RNone{}:
       False{}
-    case RGlyph{+gx, +gy, +w, +h, _, _}:
+    case RGlyph{+gx, +gy, +w, +h, _, _, _}:
       Run.inside(gx, gy, (gx + w : U32), (gy + h : U32), x, y)
     case RPair{+x0, +y0, +x1, +y1, _, _}:
       Run.inside(x0, y0, x1, y1, x, y)
+    case RKey{_, _, _, _, _}:
+      False{}
 
 # the most any glyph of the run covers local pixel (x, y) (in: Run.hit;
 # a frame shades a run glyph by glyph, Run.px)
 def Run.cov(r: Run, in: Bool, +x: U32, +y: U32) -> U32:
   match r in:
-    case RGlyph{+gx, +gy, +w, _, d, m} True{}:
+    case RGlyph{+gx, +gy, +w, _, _, d, m} True{}:
       Cov.mask(gx, gy, w, d, m, x, y)
     case RPair{_, _, _, _, +a, +b} True{}:
       U32.max(Run.cov(a, Run.hit(a, x, y), x, y), Run.cov(b, Run.hit(b, x, y), x, y))
@@ -307,7 +312,7 @@ def Shade.k(+cov: U32, +c: U32, +a: U32, +below: U32) -> U32:
 # with the ops whose boxes hold it: Region.node)
 def Run.px(r: Run, in: Bool, +x: U32, +y: U32, +c: U32, +a: U32, below: U32) -> U32:
   match r in:
-    case RGlyph{+gx, +gy, +w, _, d, m} True{}:
+    case RGlyph{+gx, +gy, +w, _, _, d, m} True{}:
       Shade.k(Cov.mask(gx, gy, w, d, m, x, y), c, a, below)
     case RPair{_, _, _, _, +ra, +rb} True{}:
       Run.px(ra, Run.hit(ra, x, y), x, y, c, a, Run.px(rb, Run.hit(rb, x, y), x, y, c, a, below))
@@ -365,7 +370,9 @@ def Region.poly(+inside: Bool, +es: List<&2, Edge>, +px: U32, +py: U32, +rx: U32
 
 def Run.x0(r: Run) -> U32:
   match r:
-    case RGlyph{gx, _, _, _, _, _}:
+    case RGlyph{gx, _, _, _, _, _, _}:
+      gx
+    case RKey{gx, _, _, _, _}:
       gx
     case RPair{x0, _, _, _, _, _}:
       x0
@@ -374,7 +381,9 @@ def Run.x0(r: Run) -> U32:
 
 def Run.y0(r: Run) -> U32:
   match r:
-    case RGlyph{_, gy, _, _, _, _}:
+    case RGlyph{_, gy, _, _, _, _, _}:
+      gy
+    case RKey{_, gy, _, _, _}:
       gy
     case RPair{_, y0, _, _, _, _}:
       y0
@@ -383,7 +392,9 @@ def Run.y0(r: Run) -> U32:
 
 def Run.x1(r: Run) -> U32:
   match r:
-    case RGlyph{gx, _, w, _, _, _}:
+    case RGlyph{gx, _, w, _, _, _, _}:
+      (gx + w : U32)
+    case RKey{gx, _, w, _, _}:
       (gx + w : U32)
     case RPair{_, _, x1, _, _, _}:
       x1
@@ -392,7 +403,9 @@ def Run.x1(r: Run) -> U32:
 
 def Run.y1(r: Run) -> U32:
   match r:
-    case RGlyph{_, gy, _, h, _, _}:
+    case RGlyph{_, gy, _, h, _, _, _}:
+      (gy + h : U32)
+    case RKey{_, gy, _, h, _}:
       (gy + h : U32)
     case RPair{_, _, _, y1, _, _}:
       y1
@@ -457,6 +470,109 @@ def Run.cut(r: Run, pt: Part, +x0: U32, +y0: U32, +x1: U32, +y1: U32) -> Run:
 # own coordinates
 def Run.at(+ox: U32, +oy: U32, +r: Run, +rx: U32, +ry: U32, +n: U32) -> Shape:
   SRun{ox, oy, Run.cut(r, Run.part(r, (rx - ox : U32), (ry - oy : U32), (rx + n - ox : U32), (ry + n - oy : U32)), (rx - ox : U32), (ry - oy : U32), (rx + n - ox : U32), (ry + n - oy : U32))}
+
+# The glyph table
+# ---------------
+# The glyphs' coverage by id (text.bend's Text.table, from the glyph
+# cache), a tree ordered by id. The tiles keep text as RKey leaves
+# (Key.ops: no masks, so comparing frames compares ids, not coverage) and
+# draw a tile from its keys resolved against the table (Res.ops), so the
+# pixels are the ones the cache's masks make.
+
+type Tab is Data:
+  TNil{}
+  TBr{id: U32, d: Nat, m: Mask, l: Tab, r: Tab}
+
+type Side is Data:
+  SHere{}
+  SLeft{}
+  SRight{}
+
+def Tab.side.k(eq: Bool, lt: Bool) -> Side:
+  match eq lt:
+    case True{} _:
+      SHere{}
+    case False{} True{}:
+      SLeft{}
+    case False{} False{}:
+      SRight{}
+
+def Tab.side(t: Tab, +id: U32) -> Side:
+  match t:
+    case TNil{}:
+      SHere{}
+    case TBr{+k, _, _, _, _}:
+      Tab.side.k(U32.is_eq(id, k), U32.is_lt(id, k))
+
+# the glyph with this id (side: Tab.side of t and id)
+def Tab.find(t: Tab, side: Side, +id: U32) -> Maybe<&2, Run>:
+  match t side:
+    case TNil{} _:
+      None{}
+    case TBr{_, +d, +m, _, _} SHere{}:
+      Some{RGlyph{0, 0, 0, 0, id, d, m}}
+    case TBr{_, _, _, +l, _} SLeft{}:
+      Tab.find(l, Tab.side(l, id), id)
+    case TBr{_, _, _, _, +r} SRight{}:
+      Tab.find(r, Tab.side(r, id), id)
+
+def Res.key(g: Maybe<&2, Run>, +gx: U32, +gy: U32, +w: U32, +h: U32, +id: U32) -> Run:
+  match g:
+    case Some{RGlyph{_, _, _, _, _, d, m}}:
+      RGlyph{gx, gy, w, h, id, d, m}
+    case _:
+      RNone{}
+
+# a run with its keys resolved: each RKey the glyph the table has (none:
+# nothing, as a glyph not yet fetched)
+def Res.run(r: Run, +tab: Tab) -> Run:
+  match r:
+    case RKey{+gx, +gy, +w, +h, +id}:
+      Res.key(Tab.find(tab, Tab.side(tab, id), id), gx, gy, w, h, id)
+    case RPair{x0, y0, x1, y1, a, b}:
+      RPair{x0, y0, x1, y1, Res.run(a, tab), Res.run(b, tab)}
+    case _:
+      r
+
+def Res.shape(s: Shape, +tab: Tab) -> Shape:
+  match s:
+    case SRun{ox, oy, r}:
+      SRun{ox, oy, Res.run(r, tab)}
+    case _:
+      s
+
+# ops with their text resolved against the table
+def Res.ops(ops: List<&2, Op>, +tab: Tab) -> List<&2, Op>:
+  match ops:
+    case Nil{}:
+      Nil{}
+    case Op{x0, y0, x1, y1, c, a, s} <> t:
+      Op{x0, y0, x1, y1, c, a, Res.shape(s, tab)} <> Res.ops(t, tab)
+
+# a run by its glyphs' ids alone
+def Key.run(r: Run) -> Run:
+  match r:
+    case RGlyph{gx, gy, w, h, id, _, _}:
+      RKey{gx, gy, w, h, id}
+    case RPair{x0, y0, x1, y1, a, b}:
+      RPair{x0, y0, x1, y1, Key.run(a), Key.run(b)}
+    case _:
+      r
+
+def Key.shape(s: Shape) -> Shape:
+  match s:
+    case SRun{ox, oy, r}:
+      SRun{ox, oy, Key.run(r)}
+    case _:
+      s
+
+# ops with their text kept by ids (what the tiles compare and keep)
+def Key.ops(ops: List<&2, Op>) -> List<&2, Op>:
+  match ops:
+    case Nil{}:
+      Nil{}
+    case Op{x0, y0, x1, y1, c, a, s} <> t:
+      Op{x0, y0, x1, y1, c, a, Key.shape(s)} <> Key.ops(t)
 
 # a polygon with no edges and outside draws nothing here
 def Region.empty(s: Shape) -> Bool:

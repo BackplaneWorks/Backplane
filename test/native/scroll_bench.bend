@@ -104,8 +104,8 @@ def kept_n(k: Kept) -> N.Nui:
     case Kept{n, _, _}:
       n
 
-def same(+w: U32, +h: U32, +os: List<&2, R.Op>, +tiles: TI.Tiles) -> Bool:
-  TI.Eq.image(TI.Tiles.image(tiles), TI.Tiles.image(TI.Frame.make(w, h, os, Pix{T.Th.bg()})))
+def same(+ty: L.Ty, +w: U32, +h: U32, +os: List<&2, R.Op>, +tiles: TI.Tiles) -> Bool:
+  TI.Eq.image(TI.Tiles.image(tiles), TI.Tiles.image(TI.Frame.make(w, h, os, Pix{T.Th.bg()}, L.Ty.tab(ty))))
 
 # one wheel notch (dir 0 up, 1 down) and the frame after it, timed; ok
 # stays true while every frame is exactly the one drawn from scratch
@@ -126,19 +126,19 @@ def notch(n: Nat, +x: U32, +dir: U32, +ty: L.Ty, k: Kept, t: Times, ok: Bool, sh
         +k2 : Nat = List.length(&2, R.Op, ops(o))
         +t3 : Nat <- IO.now()
         +dy : U32 = N.Hits.slide(hits(o), N.Nui.hits(n0))
-        +tiles : TI.Tiles = TI.Frame.par(N.Nui.width(n1), N.Nui.height(n1), ops(o), Pix{T.Th.bg()}, fr0, dy)
+        +tiles : TI.Tiles = TI.Frame.par(N.Nui.width(n1), N.Nui.height(n1), ops(o), Pix{T.Th.bg()}, L.Ty.tab(ty), fr0, dy)
         +img : Image = TI.Tiles.image(tiles)
         +t4 : Nat <- IO.now()
-        notch(rest, x, dir, ty, Kept{with_hits(n1, hits(o), t4), memo, TI.FSome{N.Nui.width(n1), N.Nui.height(n1), tiles}},
+        notch(rest, x, dir, ty, Kept{with_hits(n1, hits(o), t4), memo, TI.FSome{N.Nui.width(n1), N.Nui.height(n1), L.Ty.tab(ty), tiles}},
           Times.add(t, Nat.sub(t1, t0), Nat.sub(t2, t1), Nat.sub(t3, t2), Nat.sub(t4, t3)),
-          Bool.and(ok, same(N.Nui.width(n1), N.Nui.height(n1), ops(o), tiles)), sh ++ " " ++ U32.show(dy))
+          Bool.and(ok, same(ty, N.Nui.width(n1), N.Nui.height(n1), ops(o), tiles)), sh ++ " " ++ U32.show(dy))
 
 # the first frame (everything drawn), then the keys
 def warm(+ty: L.Ty, +n0: N.Nui) -> Kept:
   +n = prepared(n0, 0n)
   +memo = L.Lay.memo(ty, n, L.TL.memo.none())
   +o = L.Lay.frame(ty, memo, n)
-  Kept{with_hits(n, hits(o), 0n), memo, TI.FSome{N.Nui.width(n), N.Nui.height(n), TI.Frame.par(N.Nui.width(n), N.Nui.height(n), ops(o), Pix{T.Th.bg()}, TI.FNone{}, 0)}}
+  Kept{with_hits(n, hits(o), 0n), memo, TI.FSome{N.Nui.width(n), N.Nui.height(n), L.Ty.tab(ty), TI.Frame.par(N.Nui.width(n), N.Nui.height(n), ops(o), Pix{T.Th.bg()}, L.Ty.tab(ty), TI.FNone{}, 0)}}
 
 def report(r: Times & Kept, +label: String) -> IO(Kept):
   (t, k) = r

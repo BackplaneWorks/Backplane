@@ -708,6 +708,95 @@ def Text.run(s: String, +cache: Map<&2, TG>, +f: Face, +c: D.Clip, +x: U32, +pen
       +g = Text.get(cache, f, cp)
       Want.k(TG.missing(g), Face.id(f), cp, Face.miss(f), Text.op(g, c, (x + Text.px(pen) : U32), base, color, Text.run(t, cache, f, c, x, (pen + TG.adv(g) : U32), base, color)))
 
+# a glyph's id in the glyph table: its face and code point (the cache's
+# key, Text.key, as a number)
+def Text.gid(+face: U32, +cp: U32) -> U32:
+  U32.or(U32.shln(face, 21n), U32.and(cp, 2097151))
+
+# The glyph table (raster.bend's Tab): the cache's glyphs by id, made once
+# per fill (layout.bend's Ty), for the tiles to draw text from ids
+
+type GE is Data:
+  GE{id: U32, d: Nat, m: R.Mask}
+
+def Tab.num(s: String, acc: U32) -> U32:
+  match s:
+    case SNil{}:
+      acc
+    case SCon{Chr{+c}, t}:
+      Tab.num(t, ((acc * 10 : U32) + (c - 48 : U32) : U32))
+
+def Tab.digits(s: String) -> Bool:
+  match s:
+    case SNil{}:
+      True{}
+    case SCon{Chr{+c}, t}:
+      Bool.and(Bool.and(U32.is_ge(c, 48), U32.is_le(c, 57)), Tab.digits(t))
+
+def Tab.key.w(empty: Bool, +id: U32, d: Nat, m: R.Mask, rest: List<&2, GE>) -> List<&2, GE>:
+  match empty:
+    case True{}:
+      rest
+    case False{}:
+      GE{id, d, m} <> rest
+
+def Tab.key.k(ok: Bool, +a: String, +b: String, g: TG, rest: List<&2, GE>) -> List<&2, GE>:
+  match ok g:
+    case True{} TG{_, _, _, +w, +h, d, m}:
+      Tab.key.w(U32.is_eq((w * h : U32), 0), Text.gid(Tab.num(a, 0), Tab.num(b, 0)), d, m, rest)
+    case False{} _:
+      rest
+
+def Tab.key.parts(ps: List<&2, String>, g: TG, rest: List<&2, GE>) -> List<&2, GE>:
+  match ps:
+    case +a <> +b <> Nil{}:
+      Tab.key.k(Bool.and(Bool.and(Tab.digits(a), Tab.digits(b)), Bool.and(Bool.not(String.is_empty(a)), Bool.not(String.is_empty(b)))), a, b, g, rest)
+    case _:
+      rest
+
+# the cache's glyphs (keys "face/cp"; others, the icons, are left out)
+def Tab.entries(m: Map<&2, TG>, acc: List<&2, GE>) -> List<&2, GE>:
+  match m:
+    case MTip{}:
+      acc
+    case MLeaf{+k, v}:
+      Tab.key.parts(String.split(k, '/'), v, acc)
+    case MNode{_, lo, hi}:
+      Tab.entries(lo, Tab.entries(hi, acc))
+
+def GE.le(a: GE, b: GE) -> Bool:
+  match a b:
+    case GE{x, _, _} GE{y, _, _}:
+      U32.is_le(x, y)
+
+def Tab.node(mid: List<&2, GE>, l: R.Tab, r: R.Tab) -> R.Tab:
+  match mid:
+    case GE{id, d, m} <> _:
+      R.TBr{id, d, m, l, r}
+    case Nil{}:
+      R.TNil{}
+
+# the first n of the sorted entries as a balanced tree, d levels at most
+# (none: n is 0)
+def Tab.of(d: Nat, none: Bool, +xs: List<&2, GE>, +n: Nat) -> R.Tab:
+  match d none:
+    case 0n _:
+      R.TNil{}
+    case _ True{}:
+      R.TNil{}
+    case 1n+k0 False{}:
+      +k = k0
+      +h = Nat.div(n, 2n)
+      +r = Nat.sub(Nat.sub(n, h), 1n)
+      Tab.node(List.drop(&2, GE, xs, h), Tab.of(k, Nat.is_eq(h, 0n), List.take(&2, GE, xs, h), h), Tab.of(k, Nat.is_eq(r, 0n), List.drop(&2, GE, xs, Nat.add(h, 1n)), r))
+
+def Text.table.k(+xs: List<&2, GE>) -> R.Tab:
+  Tab.of(32n, List.is_empty(&2, GE, xs), xs, List.length(&2, GE, xs))
+
+# the glyph table of the cache
+def Text.table(m: Map<&2, TG>) -> R.Tab:
+  Text.table.k(List.sort(GE, GE.le, Tab.entries(m, Nil{})))
+
 # Runs
 # ----
 # A line of text is one op: its glyphs as an R.Run tree (in string order),
@@ -722,22 +811,31 @@ def Text.run(s: String, +cache: Map<&2, TG>, +f: Face, +c: D.Clip, +x: U32, +pen
 type RAcc is Data:
   RAcc{gs: List<&2, R.Run>, x0: U32, y0: U32, x1: U32, y1: U32, ws: List<&2, R.Op>}
 
-def RAcc.put.k(empty: Bool, +lx: U32, +ly: U32, +w: U32, +h: U32, d: Nat, m: R.Mask, +x: U32, +base: U32, a: RAcc) -> RAcc:
+# Layout keeps ids directly; the mask-bearing path remains a reference
+# for direct raster callers and byte-for-byte rendering checks.
+def RAcc.glyph(keyed: Bool, +lx: U32, +ly: U32, +w: U32, +h: U32, +id: U32, d: Nat, m: R.Mask) -> R.Run:
+  match keyed:
+    case True{}:
+      R.RKey{lx, ly, w, h, id}
+    case False{}:
+      R.RGlyph{lx, ly, w, h, id, d, m}
+
+def RAcc.put.k(keyed: Bool, empty: Bool, +lx: U32, +ly: U32, +w: U32, +h: U32, +id: U32, d: Nat, m: R.Mask, +x: U32, +base: U32, a: RAcc) -> RAcc:
   match empty a:
     case True{} _:
       a
     case False{} RAcc{gs, +x0, +y0, +x1, +y1, ws}:
-      RAcc{R.RGlyph{lx, ly, w, h, d, m} <> gs, U32.min(x0, (x + lx - 32768 : U32)), U32.min(y0, (base + ly - 32768 : U32)),
+      RAcc{RAcc.glyph(keyed, lx, ly, w, h, id, d, m) <> gs, U32.min(x0, (x + lx - 32768 : U32)), U32.min(y0, (base + ly - 32768 : U32)),
         U32.max(x1, (x + lx + w - 32768 : U32)), U32.max(y1, (base + ly + h - 32768 : U32)), ws}
 
 # one glyph, its pen pen pixels from x on the baseline (as Text.op placed
 # it; an empty one, one left of the frame or one above its top draws
 # nothing, as there)
-def RAcc.put(g: TG, +x: U32, +pen: U32, +base: U32, a: RAcc) -> RAcc:
+def RAcc.put(keyed: Bool, g: TG, +id: U32, +x: U32, +pen: U32, +base: U32, a: RAcc) -> RAcc:
   match g:
     case TG{_, +l, +t, +w, +h, d, m}:
-      RAcc.put.k(Bool.or(Bool.or(U32.is_eq((w * h : U32), 0), U32.is_lt((x + pen + l : U32), 32768)), U32.is_lt((base + 32768 : U32), t)),
-        (pen + l : U32), (65536 - t : U32), w, h, d, m, x, base, a)
+      RAcc.put.k(keyed, Bool.or(Bool.or(U32.is_eq((w * h : U32), 0), U32.is_lt((x + pen + l : U32), 32768)), U32.is_lt((base + 32768 : U32), t)),
+        (pen + l : U32), (65536 - t : U32), w, h, id, d, m, x, base, a)
 
 def RAcc.want(+id: U32, +cp: U32, +miss: U32, a: RAcc) -> RAcc:
   match a:
@@ -752,13 +850,13 @@ def RAcc.want.k(missing: Bool, +id: U32, +cp: U32, +miss: U32, a: RAcc) -> RAcc:
       a
 
 # the glyphs of s placed, pen from x (26.6) on the baseline
-def Text.glyphs(s: String, +cache: Map<&2, TG>, +f: Face, +x: U32, +pen: U32, +base: U32, a: RAcc) -> RAcc:
+def Text.glyphs(+keyed: Bool, s: String, +cache: Map<&2, TG>, +f: Face, +x: U32, +pen: U32, +base: U32, a: RAcc) -> RAcc:
   match s:
     case SNil{}:
       a
     case SCon{Chr{+cp}, t}:
       +g = Text.get(cache, f, cp)
-      Text.glyphs(t, cache, f, x, (pen + TG.adv(g) : U32), base, RAcc.put(g, x, Text.px(pen), base, RAcc.want.k(TG.missing(g), Face.id(f), cp, Face.miss(f), a)))
+      Text.glyphs(keyed, t, cache, f, x, (pen + TG.adv(g) : U32), base, RAcc.put(keyed, g, Text.gid(Face.id(f), cp), x, Text.px(pen), base, RAcc.want.k(TG.missing(g), Face.id(f), cp, Face.miss(f), a)))
 
 # a list of runs (last first) paired up, last first still
 def Run.level(xs: List<&2, R.Run>) -> List<&2, R.Run>:
@@ -816,17 +914,25 @@ def Text.wants(ops: List<&2, R.Op>, acc: List<&2, Want>) -> List<&2, Want>:
     case o <> t:
       Text.wants(t, Want.of(o, acc))
 
-def Text.draw.k(ft: Bool, s: String, +cache: Map<&2, TG>, +f: Face, +c: D.Clip, +x: U32, +base: U32, +color: U32) -> List<&2, R.Op>:
+def Text.draw.k(ft: Bool, +keyed: Bool, s: String, +cache: Map<&2, TG>, +f: Face, +c: D.Clip, +x: U32, +base: U32, +color: U32) -> List<&2, R.Op>:
   match ft:
     case True{}:
-      Text.runop(Text.glyphs(s, cache, f, x, 0, base, RAcc{Nil{}, 4294967295, 4294967295, 0, 0, Nil{}}), c, x, base, color)
+      Text.runop(Text.glyphs(keyed, s, cache, f, x, 0, base, RAcc{Nil{}, 4294967295, 4294967295, 0, 0, Nil{}}), c, x, base, color)
     case False{}:
       D.Draw.text(s, c, x, (base - 12 : U32), color)
 
 # one line of text, pen starting at x on the given baseline
 def Text.draw(+cache: Map<&2, TG>, +f: Face, s: String, +c: D.Clip, +x: U32, +base: U32, +color: U32) -> List<&2, R.Op>:
-  Text.draw.k(Face.ft(f), s, cache, f, c, x, base, color)
+  Text.draw.k(Face.ft(f), False{}, s, cache, f, c, x, base, color)
 
 # one line of text in a line box of height lh whose top is y
 def Text.line(+cache: Map<&2, TG>, +f: Face, s: String, +c: D.Clip, +x: U32, +y: U32, +lh: U32, +color: U32) -> List<&2, R.Op>:
   Text.draw(cache, f, s, c, x, Text.baseline(f, y, lh), color)
+
+# The app's line layout stores only glyph ids and geometry, so the tile
+# planner compares it without a per-frame mask-to-key conversion.
+def Text.keydraw(+cache: Map<&2, TG>, +f: Face, s: String, +c: D.Clip, +x: U32, +base: U32, +color: U32) -> List<&2, R.Op>:
+  Text.draw.k(Face.ft(f), True{}, s, cache, f, c, x, base, color)
+
+def Text.keyline(+cache: Map<&2, TG>, +f: Face, s: String, +c: D.Clip, +x: U32, +y: U32, +lh: U32, +color: U32) -> List<&2, R.Op>:
+  Text.keydraw(cache, f, s, c, x, Text.baseline(f, y, lh), color)

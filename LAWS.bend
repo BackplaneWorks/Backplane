@@ -1184,6 +1184,7 @@ law tailnet_link_token:
 # exactly the tile drawn from scratch: an old image is taken only when it
 # drew the same local ops over the same base
 law seek_made:
+  for +tab: R.Tab
   for k: Nat
   for +e: Nat
   for +old: List<&2, R.Op>
@@ -1198,13 +1199,14 @@ law seek_made:
   for +n: U32
   for +l: List<&2, R.Op>
   for +base: Image
-  {T.Tiles.seek(k, T.Tiles.make(k, e, old, b0, mx, my, mn), x, y, rx, ry, n, e, l, base) == T.Tile.draw(e, l, base) : Image}
+  {T.Tiles.seek(k, T.Tiles.make(k, e, tab, old, b0, mx, my, mn), x, y, rx, ry, n, e, tab, l, base) == T.Tile.draw(e, tab, l, base) : Image}
 
 # drawing a frame over the last one's tiles gives exactly the tiles drawn
 # from scratch: a kept tile is never stale, whatever changed (ops, base),
 # and neither is one taken from where a scroll moved it (any past tiles,
 # any shift)
 law tiles_again_exact:
+  for +tab: R.Tab
   for k: Nat
   for +e: Nat
   for +ops: List<&2, R.Op>
@@ -1222,11 +1224,12 @@ law tiles_again_exact:
   for +pn: U32
   for +qn: U32
   for +dy: U32
-  {T.Tiles.again(k, e, ops, base1, T.Tiles.make(k, e, old, base0, rx, ry, n), T.Past{pk, T.Tiles.make(pk, e, old2, base2, prx, pry, pn), qn, dy}, rx, ry, n) == T.Tiles.make(k, e, ops, base1, rx, ry, n) : T.Tiles}
+  {T.Tiles.again(k, e, tab, ops, base1, T.Tiles.make(k, e, tab, old, base0, rx, ry, n), T.Past{pk, T.Tiles.make(pk, e, tab, old2, base2, prx, pry, pn), qn, dy}, rx, ry, n) == T.Tiles.make(k, e, tab, ops, base1, rx, ry, n) : T.Tiles}
 
 # a tile whose ops and base are unchanged is kept as it is, whatever image
 # it holds: it is not drawn again
 law tile_keep:
+  for +tab: R.Tab
   for +e: Nat
   for +ops: List<&2, R.Op>
   for +l: List<&2, R.Op>
@@ -1236,11 +1239,13 @@ law tile_keep:
   for +rx: U32
   for +ry: U32
   for +n: U32
-  {T.Tile.again(e, ops, base, T.Tile{ops, l, base, img}, p, rx, ry, n) == T.Tile{ops, l, base, img} : T.Tile}
+  {T.Tile.again(e, tab, ops, base, T.Tile{ops, l, base, img}, p, rx, ry, n) == T.Tile{ops, l, base, img} : T.Tile}
 
 # the same for a whole frame as the window draws it, even when the window
-# was resized in between, for any scroll hint
+# was resized in between or the glyph table changed, for any scroll hint
 law frame_again_exact:
+  for +tab: R.Tab
+  for +tab0: R.Tab
   for +w0: U32
   for +h0: U32
   for +w: U32
@@ -1250,21 +1255,23 @@ law frame_again_exact:
   for +base0: Image
   for +base: Image
   for +dy: U32
-  {T.Frame.again(w, h, ops, base, T.FSome{w0, h0, T.Frame.make(w0, h0, old, base0)}, dy) == T.Frame.make(w, h, ops, base) : T.Tiles}
+  {T.Frame.again(w, h, ops, base, tab, T.FSome{w0, h0, tab0, T.Frame.make(w0, h0, old, base0, tab0)}, dy) == T.Frame.make(w, h, ops, base, tab) : T.Tiles}
 
 # a tile's image taken from what the parallel jobs drew is the tile drawn
 # here, wherever its path leads in whatever jobs ran
 law drawn_get_run:
+  for +tab: R.Tab
   for t: T.Jobs
   for path: List<&2, Bool>
   for +e: Nat
   for +l: List<&2, R.Op>
   for +base: Image
-  {T.Drawn.get(T.Jobs.run(t, e), path, e, l, base) == T.Tile.draw(e, l, base) : Image}
+  {T.Drawn.get(T.Jobs.run(t, e, tab), path, e, tab, l, base) == T.Tile.draw(e, tab, l, base) : Image}
 
 # a plan filled from any jobs drawn in parallel is exactly the tiles
 # Tiles.again gives, over any last tiles, with any scroll
 law plan_fill_again:
+  for +tab: R.Tab
   for k: Nat
   for +e: Nat
   for +ops: List<&2, R.Op>
@@ -1276,18 +1283,19 @@ law plan_fill_again:
   for +n: U32
   for +off: Nat
   for +t: T.Jobs
-  {T.Plan.fill(T.Tiles.plan(k, e, ops, base, prev, p, rx, ry, n), e, off, T.Jobs.run(t, e)) == T.Tiles.again(k, e, ops, base, prev, p, rx, ry, n) : T.Tiles}
+  {T.Plan.fill(T.Tiles.plan(k, e, ops, base, prev, p, rx, ry, n), e, tab, off, T.Jobs.run(t, e, tab)) == T.Tiles.again(k, e, tab, ops, base, prev, p, rx, ry, n) : T.Tiles}
 
 # the window's frame drawn in parallel is exactly Frame.again's (and so,
 # by frame_again_exact, the frame drawn from scratch)
 law frame_par_exact:
+  for +tab: R.Tab
   for +w: U32
   for +h: U32
   for +ops: List<&2, R.Op>
   for +base: Image
   for prev: T.Frames
   for +dy: U32
-  {T.Frame.par(w, h, ops, base, prev, dy) == T.Frame.again(w, h, ops, base, prev, dy) : T.Tiles}
+  {T.Frame.par(w, h, ops, base, tab, prev, dy) == T.Frame.again(w, h, ops, base, tab, prev, dy) : T.Tiles}
 
 # the timeline's memo brought up to date is exactly the memo made from
 # scratch, for any earlier entries
@@ -8072,6 +8080,7 @@ law caret_fresh:
 # a frame's tiles blinked in place are exactly the tiles drawn from scratch
 # from its ops with the carets so: a blink never leaves a stale tile
 law tiles_blink_exact:
+  for +tab: R.Tab
   for k: Nat
   for +e: Nat
   for +ops: List<&2, R.Op>
@@ -8080,7 +8089,7 @@ law tiles_blink_exact:
   for +ry: U32
   for +n: U32
   for +on: Bool
-  {T.Tiles.blink(T.Tiles.make(k, e, ops, base, rx, ry, n), e, on) == T.Tiles.make(k, e, T.Caret.set(ops, on), base, rx, ry, n) : T.Tiles}
+  {T.Tiles.blink(T.Tiles.make(k, e, tab, ops, base, rx, ry, n), e, tab, on) == T.Tiles.make(k, e, tab, T.Caret.set(ops, on), base, rx, ry, n) : T.Tiles}
 # ---- end win-lean-frame caret blink ----
 
 # ---- perf-lead: phone-lean (src/mobile) ----
@@ -8289,6 +8298,7 @@ law ops_after_cat:
 # exactly the frame drawn from scratch with the new cats: a cat frame
 # never leaves a stale tile
 law tiles_recat_exact:
+  for +tab: R.Tab
   for k: Nat
   for +e: Nat
   for +cs: List<&2, R.Op>
@@ -8298,7 +8308,7 @@ law tiles_recat_exact:
   for +rx: U32
   for +ry: U32
   for +n: U32
-  {T.Tiles.recat(k, e, cs, cs2, T.Tiles.make(k, e, T.Ops.cat(cs, rest), base, rx, ry, n), rx, ry, n) == T.Tiles.make(k, e, T.Ops.cat(cs2, rest), base, rx, ry, n) : T.Tiles}
+  {T.Tiles.recat(k, e, tab, cs, cs2, T.Tiles.make(k, e, tab, T.Ops.cat(cs, rest), base, rx, ry, n), rx, ry, n) == T.Tiles.make(k, e, tab, T.Ops.cat(cs2, rest), base, rx, ry, n) : T.Tiles}
 # ---- end win-lean-frame cat frames ----
 # ---- gfx-runs: tile plans that build only changed nodes' ops ----
 # comparing a child's ops as they reach it, straight from its parent's, is

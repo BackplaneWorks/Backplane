@@ -77,9 +77,9 @@ def Cache.step(+retain: Bool, +ty: L.Ty, +room: String, +text: String, ws: Map<&
     IO.print(name ++ " wrap_ms=" ++ Nat.show(Nat.sub(t1, t0)) ++ " lines=" ++ Nat.show(lines) ++ " kept=" ++ Nat.show(kept))
     return next
 
-def Cache.run(+retain: Bool, +f: X.Face, c: Map<&2, X.TG>, +n: Nat) -> IO(Unit):
+def Cache.run(+retain: Bool, +f: X.Face, +c: Map<&2, X.TG>, +n: Nat) -> IO(Unit):
   do IO<Unit>:
-    +ty : L.Ty = L.Ty{c, f, f, f, f, f}
+    +ty : L.Ty = L.Ty{c, X.Text.table(c), f, f, f, f, f}
     +text : String = word(n, "")
     a : Map<&2, BV.PW> <- Cache.step(retain, ty, "a", text, BV.Bv.wraps.none(), "first A")
     b : Map<&2, BV.PW> <- Cache.step(retain, ty, "b", "A short other conversation", a, "switch B")

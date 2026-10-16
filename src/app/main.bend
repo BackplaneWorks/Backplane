@@ -1981,23 +1981,23 @@ def Vx.pick(x: V.Vx) -> String:
 
 # UI ops over the fading items and the picked item, over the base; tiles
 # the last frame drew the same way are kept (the plan of TI.Frame.par)
-def Shell.image.over(+ops: List<&2, R.Op>, vw: V.Vw, +ww: U32, +hh: U32, +x0: U32, +now: Nat, +flip: U32, +fk: U32, +hs: List<&2, N.Hit>, +pics: Map<&2, BM.Bitmap>, prev: TI.Frames, +dy: U32) -> TI.Plan:
+def Shell.image.over(+ops: List<&2, R.Op>, vw: V.Vw, +ww: U32, +hh: U32, +x0: U32, +now: Nat, +flip: U32, +fk: U32, +hs: List<&2, N.Hit>, +pics: Map<&2, BM.Bitmap>, prev: TI.Frames, +dy: U32, +tab: R.Tab) -> TI.Plan:
   match vw:
     case V.Vw{+ss, +v, _, _, _, _, _, +b, _, +cut, +vx}:
       TI.Frame.plan(ww, hh, List.append(&2, R.Op, L.Theme.ops(V.Look.ui(flip), ops), List.reverse(&2, R.Op,
         List.append(&2, R.Op, Bool.pick(List<&2, R.Op>, U32.is_eq(Vx.kind(vx), 2), Nil{}, V.Ops.scene(ss, v, D.Clip{x0, 52, ww, hh}, now, cut, False{}, U32.or(Vx.kind(vx), fk), flip)),
           V.Ops.picked(ss, Vx.pick(vx), v, D.Clip{x0, 52, ww, hh}, flip)))),
-        Pics.over(hs, pics, Nil{}, ww, hh, b), prev, dy)
+        Pics.over(hs, pics, Nil{}, ww, hh, b), tab, prev, dy)
 
 # the frame: UI ops over the fading items over the base. dy is how far
 # the thread scrolled since the last frame: tiles it moved are taken from
 # there, not drawn again
-def Shell.image(pa: Bool, +ops: List<&2, R.Op>, +vw: V.Vw, +ww: U32, +hh: U32, +x0: U32, +now: Nat, +flip: U32, +fk: U32, +hs: List<&2, N.Hit>, +pics: Map<&2, BM.Bitmap>, prev: TI.Frames, +dy: U32) -> TI.Plan:
+def Shell.image(pa: Bool, +ops: List<&2, R.Op>, +vw: V.Vw, +ww: U32, +hh: U32, +x0: U32, +now: Nat, +flip: U32, +fk: U32, +hs: List<&2, N.Hit>, +pics: Map<&2, BM.Bitmap>, prev: TI.Frames, +dy: U32, +tab: R.Tab) -> TI.Plan:
   match pa:
     case True{}:
-      Shell.image.over(ops, vw, ww, hh, x0, now, flip, fk, hs, pics, prev, dy)
+      Shell.image.over(ops, vw, ww, hh, x0, now, flip, fk, hs, pics, prev, dy, tab)
     case False{}:
-      TI.Frame.plan(ww, hh, L.Theme.ops(V.Look.ui(flip), ops), Pics.over(hs, pics, Nil{}, ww, hh, Pix{L.Theme.ground(flip)}), prev, dy)
+      TI.Frame.plan(ww, hh, L.Theme.ops(V.Look.ui(flip), ops), Pics.over(hs, pics, Nil{}, ww, hh, Pix{L.Theme.ground(flip)}), tab, prev, dy)
 
 def Kept.frames(k: Kept) -> TI.Frames:
   match k:
@@ -2183,7 +2183,7 @@ def Frames.image(f: TI.Frames) -> Image:
   match f:
     case TI.FNone{}:
       Pix{0}
-    case TI.FSome{_, _, t}:
+    case TI.FSome{_, _, _, t}:
       TI.Tiles.image(t)
 
 # carry out the frame's plan (TI.Frame.par one step at a time: the plan,
@@ -2221,9 +2221,9 @@ def Shell.present(+pl: TI.Plan, o: L.Out, +n: N.Nui, w: Window, +q: Chan(ShellMs
         +k : Nat = TI.Plan.count(pl)
         ta : U32 <- PS.Perf.lap("ui.plan", t2)
         PS.Perf.add("ui.drawn", U32.from_nat(k))
-        +d : TI.Drawn = TI.Plan.drawn(pl, TI.Frame.edge(N.Nui.width(n), N.Nui.height(n)))
+        +d : TI.Drawn = TI.Plan.drawn(pl, TI.Frame.edge(N.Nui.width(n), N.Nui.height(n)), L.Ty.tab(Aux.ty(wa)))
         tb : U32 <- PS.Perf.lap("ui.draw", ta)
-        +tiles : TI.Tiles = TI.Plan.fill(pl, TI.Frame.edge(N.Nui.width(n), N.Nui.height(n)), 0n, d)
+        +tiles : TI.Tiles = TI.Plan.fill(pl, TI.Frame.edge(N.Nui.width(n), N.Nui.height(n)), L.Ty.tab(Aux.ty(wa)), 0n, d)
         tc : U32 <- PS.Perf.lap("ui.fill", tb)
         t3 : U32 <- PS.Perf.lap("ui.raster", t2)
         r : Window & Image & Image <- W.Win.show(w, TI.Tiles.image(tiles), Frames.image(Aux.frames(wa)))
@@ -2231,7 +2231,7 @@ def Shell.present(+pl: TI.Plan, o: L.Out, +n: N.Nui, w: Window, +q: Chan(ShellMs
         Shell.timed(t0)
         +s : N.Step = Shell.hits(n, hs, epoch)
         r2 : Window & Image & Image <- Shell.spot(r, hs)
-        Shell.shown.two(r2, Shell.hits.nui(s), q, i, Aux.with_frames(wa, TI.FSome{N.Nui.width(n), N.Nui.height(n), tiles}), Shell.hits.anim(s, Shell.anim(n, ms)), ms)
+        Shell.shown.two(r2, Shell.hits.nui(s), q, i, Aux.with_frames(wa, TI.FSome{N.Nui.width(n), N.Nui.height(n), L.Ty.tab(Aux.ty(wa)), tiles}), Shell.hits.anim(s, Shell.anim(n, ms)), ms)
 
 # The lightbox (nui.bend's Lbx, core/lightbox.bend's Lb): the picture
 # alone on a dark window, zoomed and panned, its full decode once there
@@ -2274,7 +2274,7 @@ def Lbv.draw(+n: N.Nui, +pics: Map<&2, BM.Bitmap>, +ms: Nat) -> Image:
 def Shell.plan.parts(pa: Bool, +ops: List<&2, R.Op>, +n: N.Nui, +hs: List<&2, N.Hit>, +wa: Aux, +ms: Nat, +dy: U32, +t: U32) -> IO(TI.Plan):
   match pa:
     case True{}:
-      IO.pure(TI.Plan, Shell.image.over(ops, N.Nui.vw(n), N.Nui.width(n), N.Nui.height(n), N.Nui.vx0(n), ms, N.Nui.look(n), N.Nui.lfocus.bits(n), hs, Tie.pics(Aux.tie(wa)), Aux.frames(wa), dy))
+      IO.pure(TI.Plan, Shell.image.over(ops, N.Nui.vw(n), N.Nui.width(n), N.Nui.height(n), N.Nui.vx0(n), ms, N.Nui.look(n), N.Nui.lfocus.bits(n), hs, Tie.pics(Aux.tie(wa)), Aux.frames(wa), dy, L.Ty.tab(Aux.ty(wa))))
     case False{}:
       do IO<TI.Plan>:
         +uo : List<&2, R.Op> = L.Theme.ops(V.Look.ui(N.Nui.look(n)), ops)
@@ -2283,7 +2283,7 @@ def Shell.plan.parts(pa: Bool, +ops: List<&2, R.Op>, +n: N.Nui, +hs: List<&2, N.
         +base : Image = Pics.over(hs, Tie.pics(Aux.tie(wa)), Nil{}, N.Nui.width(n), N.Nui.height(n), Pix{L.Theme.ground(N.Nui.look(n))})
         +c0 : U32 = R.Four.top(base)
         tb : U32 <- PS.Perf.lap("ui.p.pics", ta)
-        +pl : TI.Plan = TI.Frame.plan(N.Nui.width(n), N.Nui.height(n), uo, base, Aux.frames(wa), dy)
+        +pl : TI.Plan = TI.Frame.plan(N.Nui.width(n), N.Nui.height(n), uo, base, L.Ty.tab(Aux.ty(wa)), Aux.frames(wa), dy)
         +kp : Nat = TI.Plan.count(pl)
         tc : U32 <- PS.Perf.lap("ui.p.tiles", tb)
         PS.Perf.add("ui.p.k", U32.from_nat(Nat.add(Nat.add(ku, kp), U32.to_nat(U32.and(c0, 0)))))
@@ -2429,13 +2429,26 @@ def FrameM.sm(f: FrameM) -> List<&2, MM.SideM>:
 # them)
 def Shell.paint.again(+ty: L.Ty, +cats: Map<&2, CA.CatF>, +oh: List<&2, N.Hit>, +n: N.Nui, w: Window, +q: Chan(ShellMsg), +i: Chan(S.Msg), +wa: Aux, +epoch: Nat, +ms: Nat, +t0: U32, +t2: U32) -> IO(Shell):
   do IO<Shell>:
+    tf : U32 <- PS.Perf.us()
     +memos : List<&2, L.TLMemo> = Shell.memos.of(ty, n, Nil{})
+    tm : U32 <- PS.Perf.lap("ui.glyphs.memo", tf)
     +wraps : Map<&2, BV.PW> = BV.Bv.wraps.ix(ty, n, BV.Bv.wraps.none(), Aux.ix(wa, n))
+    tw : U32 <- PS.Perf.lap("ui.glyphs.wrap", tm)
     +fm : FrameM = FrameM.lay(Nil{}, Nil{}, Aux.touch(wa), ty, L.TL.memos.now(memos), cats, wraps, N.Imx.display(n), Aux.ix(wa, n), Aux.br(wa, n))
     +o : L.Out = FrameM.out(fm)
     +k : Nat = Lay.nops(o)
+    tl : U32 <- PS.Perf.lap("ui.glyphs.layout", tw)
     +t3 : U32 <- PS.Perf.lap("ui.glyphs", t2)
     Shell.paint.out(o, oh, n, w, q, i, Aux.with_sm(Aux.with_mm(Aux.with_wraps(Aux.with_cats(Aux.with_memos(Aux.with_ty(wa, ty), memos), cats), wraps), FrameM.mm(fm)), FrameM.sm(fm)), epoch, ms, t0, t3)
+
+# The font fetch and table construction, separately from the second
+# measurement/layout pass (ui.glyphs still measures their combined cost).
+def Shell.paint.fill(ws: List<&2, X.Want>, +cats: Map<&2, CA.CatF>, +oh: List<&2, N.Hit>, +n: N.Nui, w: Window, +q: Chan(ShellMsg), +i: Chan(S.Msg), +wa: Aux, +epoch: Nat, +ms: Nat, +t0: U32, +t2: U32) -> IO(Shell):
+  do IO<Shell>:
+    tf : U32 <- PS.Perf.us()
+    +ty : L.Ty <- L.Ty.fill(Aux.ty(wa), ws)
+    tt : U32 <- PS.Perf.lap("ui.glyphs.fill", tf)
+    Shell.paint.again(ty, cats, oh, n, w, q, i, wa, epoch, ms, t0, t2)
 
 # glyphs the layout found missing (text in a script the cache has not
 # seen: Greek, CJK, symbols) are fetched, and the frame laid out again
@@ -2444,7 +2457,7 @@ def Shell.paint.want(ws: List<&2, X.Want>, o: L.Out, mmm: List<&2, MM.MainM>, sm
     case Nil{}:
       Shell.paint.out(o, oh, n, w, q, i, Aux.with_sm(Aux.with_mm(Aux.with_cats(Aux.with_memos(wa, memos), cats), mmm), smm), epoch, ms, t0, t2)
     case +h <> +t:
-      IO.bind(L.Ty, Shell, L.Ty.fill(Aux.ty(wa), h <> t), ty => Shell.paint.again(ty, cats, oh, n, w, q, i, wa, epoch, ms, t0, t2))
+      Shell.paint.fill(h <> t, cats, oh, n, w, q, i, wa, epoch, ms, t0, t2)
 
 # the cats the frame shows are posed into the cache first, and the posts
 # it shows wrapped (kept in wa); the layout is timed from t1 (ui.layout,
@@ -2582,7 +2595,7 @@ def Frames.some(f: TI.Frames) -> Bool:
   match f:
     case TI.FNone{}:
       False{}
-    case TI.FSome{_, _, _}:
+    case TI.FSome{_, _, _, _}:
       True{}
 
 # the caret can blink alone: a frame to blink, no lightbox, and the clock

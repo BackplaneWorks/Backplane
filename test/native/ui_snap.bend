@@ -107,7 +107,7 @@ def go(+as: List<&2, String>) -> IO(Unit):
     +n : S.Nui = S.Nui.init(ui_of(bs, U8.Utf8.decode(ib), arg(as, 2n), arg(as, 3n)), ww, hh)
     +ws : Map<&2, BV.PW> = BV.Bv.wraps(ty, n, BV.Bv.wraps.none())
     +os : List<&2, R.Op> = L.Theme.ops(S.Nui.light(n), ops(BV.Bv.with_cats(BV.Bv.frame.w(ty, L.TL.memos.now(L.Lay.memos(ty, n, Nil{})), CA.Cats.none(), ws, n), CA.Cats.none(), S.Nui.ms_of(n))))
-    +img : Image = R.Frame.render(ww, hh, os, L.Theme.ground(S.Nui.look(n)))
+    +img : Image = R.Frame.render(ww, hh, R.Res.ops(os, L.Ty.tab(ty)), L.Theme.ground(S.Nui.look(n)))
     g : File <- IO.try(File, File.open(arg(as, 4n), "w"))
     w : File & Result<&1, &1, U32 & String, Unit> <- File.write_bytes(g, D.Snap.ppm(img, ww, hh))
     IO.print("wrote " ++ arg(as, 4n))

@@ -133,10 +133,10 @@ def key(cs: String, +ty: L.Ty, +cats: Map<&2, CA.CatF>, k: Kept, t: Times) -> IO
         +o : L.Out = BV.Bv.frame(ty, memo, cats, n1)
         +k2 : Nat = List.length(&2, R.Op, ops(o))
         +t3 : Nat <- IO.now()
-        +tiles : TI.Tiles = TI.Frame.par(N.Nui.width(n1), N.Nui.height(n1), ops(o), Pix{T.Th.bg()}, fr0, N.Hits.slide(hits(o), N.Nui.hits(n0)))
+        +tiles : TI.Tiles = TI.Frame.par(N.Nui.width(n1), N.Nui.height(n1), ops(o), Pix{T.Th.bg()}, L.Ty.tab(ty), fr0, N.Hits.slide(hits(o), N.Nui.hits(n0)))
         +img : Image = TI.Tiles.image(tiles)
         +t4 : Nat <- IO.now()
-        key(rest, ty, cats, Kept{with_hits(n1, hits(o), t4), memo, TI.FSome{N.Nui.width(n1), N.Nui.height(n1), tiles}},
+        key(rest, ty, cats, Kept{with_hits(n1, hits(o), t4), memo, TI.FSome{N.Nui.width(n1), N.Nui.height(n1), L.Ty.tab(ty), tiles}},
           Times.add(t, Nat.sub(t1, t0), Nat.sub(t2, t1), Nat.sub(t3, t2), Nat.sub(t4, t3)))
 
 # cat frames, timed: the cats' clock moves on, they are posed again, the
@@ -151,17 +151,17 @@ def tick(+n: Nat, +ty: L.Ty, cats: Map<&2, CA.CatF>, k: Kept, +acc: Nat) -> IO(N
         +c2 : Map<&2, CA.CatF> = BV.Bv.warm(N.Nui.ui(n0), cats, Nat.mul(1n+j, 33n))
         +o : L.Out = BV.Bv.frame(ty, memo, c2, n0)
         +k2 : Nat = List.length(&2, R.Op, ops(o))
-        +tiles : TI.Tiles = TI.Frame.par(N.Nui.width(n0), N.Nui.height(n0), ops(o), Pix{T.Th.bg()}, fr0, 0)
+        +tiles : TI.Tiles = TI.Frame.par(N.Nui.width(n0), N.Nui.height(n0), ops(o), Pix{T.Th.bg()}, L.Ty.tab(ty), fr0, 0)
         +img : Image = TI.Tiles.image(tiles)
         +t1 : Nat <- IO.now()
-        tick(j, ty, c2, Kept{n0, memo, TI.FSome{N.Nui.width(n0), N.Nui.height(n0), tiles}}, Nat.add(acc, Nat.sub(t1, t0)))
+        tick(j, ty, c2, Kept{n0, memo, TI.FSome{N.Nui.width(n0), N.Nui.height(n0), L.Ty.tab(ty), tiles}}, Nat.add(acc, Nat.sub(t1, t0)))
 
 # the first frame (everything drawn), then the keys
 def warm(+ty: L.Ty, +cats: Map<&2, CA.CatF>, +n0: N.Nui) -> Kept:
   +n = prepared(n0, 0n)
   +memo = L.Lay.memo(ty, n, L.TL.memo.none())
   +o = BV.Bv.frame(ty, memo, cats, n)
-  Kept{with_hits(n, hits(o), 0n), memo, TI.FSome{N.Nui.width(n), N.Nui.height(n), TI.Frame.par(N.Nui.width(n), N.Nui.height(n), ops(o), Pix{T.Th.bg()}, TI.FNone{}, 0)}}
+  Kept{with_hits(n, hits(o), 0n), memo, TI.FSome{N.Nui.width(n), N.Nui.height(n), L.Ty.tab(ty), TI.Frame.par(N.Nui.width(n), N.Nui.height(n), ops(o), Pix{T.Th.bg()}, L.Ty.tab(ty), TI.FNone{}, 0)}}
 
 def text() -> String:
   "hello world, this is a test of typing speed in the composer "
@@ -170,7 +170,7 @@ def some(f: TI.Frames) -> Bool:
   match f:
     case TI.FNone{}:
       False{}
-    case TI.FSome{_, _, _}:
+    case TI.FSome{_, _, _, _}:
       True{}
 
 def nops(o: L.Out) -> Nat:
@@ -198,19 +198,19 @@ def rep.frame(+r: Nat, +ty: L.Ty, +cats: Map<&2, CA.CatF>, +memo: L.TLMemo, +n: 
     case 1n+q:
       Nat.add(nops(BV.Bv.frame(ty, memo, cats, n)), rep.frame(q, ty, cats, memo, n))
 
-def rep.tiles(+r: Nat, +os: List<&2, R.Op>, +prev: TI.Frames) -> Nat:
+def rep.tiles(+r: Nat, +ty: L.Ty, +os: List<&2, R.Op>, +prev: TI.Frames) -> Nat:
   match r:
     case 0n:
       0n
     case 1n+q:
-      Nat.add(Bool.pick(Nat, some(TI.FSome{1400, 900, TI.Frame.par(1400, 900, os, Pix{T.Th.bg()}, prev, 0)}), 1n, 0n), rep.tiles(q, os, prev))
+      Nat.add(Bool.pick(Nat, some(TI.FSome{1400, 900, L.Ty.tab(ty), TI.Frame.par(1400, 900, os, Pix{T.Th.bg()}, L.Ty.tab(ty), prev, 0)}), 1n, 0n), rep.tiles(q, ty, os, prev))
 
-def rep.make(+r: Nat, +os: List<&2, R.Op>) -> Nat:
+def rep.make(+r: Nat, +ty: L.Ty, +os: List<&2, R.Op>) -> Nat:
   match r:
     case 0n:
       0n
     case 1n+q:
-      Nat.add(Bool.pick(Nat, some(TI.FSome{1400, 900, TI.Frame.make(1400, 900, os, Pix{T.Th.bg()})}), 1n, 0n), rep.make(q, os))
+      Nat.add(Bool.pick(Nat, some(TI.FSome{1400, 900, L.Ty.tab(ty), TI.Frame.make(1400, 900, os, Pix{T.Th.bg()}, L.Ty.tab(ty))}), 1n, 0n), rep.make(q, ty, os))
 
 def kept_memo(k: Kept) -> L.TLMemo:
   match k:
@@ -226,7 +226,7 @@ def frames_image(f: TI.Frames) -> Image:
   match f:
     case TI.FNone{}:
       Pix{0}
-    case TI.FSome{_, _, t}:
+    case TI.FSome{_, _, _, t}:
       TI.Tiles.image(t)
 
 # each part of one frame, 50 times over (ms for all 50)
@@ -243,9 +243,9 @@ def parts(+ty: L.Ty, +cats: Map<&2, CA.CatF>, +k: Kept) -> IO(Unit):
     +c : Nat <- IO.now()
     +x3 : Nat = rep.frame(50n, ty, cats, memo, n)
     +d : Nat <- IO.now()
-    +x4 : Nat = rep.tiles(50n, os, kept_frames(k))
+    +x4 : Nat = rep.tiles(50n, ty, os, kept_frames(k))
     +e : Nat <- IO.now()
-    +x5 : Nat = rep.make(10n, os)
+    +x5 : Nat = rep.make(10n, ty, os)
     +f : Nat <- IO.now()
     IO.print("x50 ms: sidebar " ++ Nat.show(Nat.sub(b, a)) ++ "  thread " ++ Nat.show(Nat.sub(c, b)) ++ "  whole layout " ++ Nat.show(Nat.sub(d, c))
       ++ "  tiles (same frame again) " ++ Nat.show(Nat.sub(e, d)) ++ "   x10 tiles from scratch " ++ Nat.show(Nat.sub(f, e)) ++ "  " ++ Nat.show(Nat.add(Nat.add(x1, x2), Nat.add(x3, Nat.add(x4, x5)))))
@@ -334,10 +334,10 @@ def blink(+n: Nat, +ty: L.Ty, +cats: Map<&2, CA.CatF>, k: Kept, +acc: Nat) -> IO
         +n1 : N.Nui = prepared(n0, Nat.mul(1n+j, N.Blink.ms()))
         +memo : L.TLMemo = L.Lay.memo(ty, n1, memo0)
         +o : L.Out = BV.Bv.frame(ty, memo, cats, n1)
-        +tiles : TI.Tiles = TI.Frame.par(N.Nui.width(n1), N.Nui.height(n1), ops(o), Pix{T.Th.bg()}, fr0, 0)
+        +tiles : TI.Tiles = TI.Frame.par(N.Nui.width(n1), N.Nui.height(n1), ops(o), Pix{T.Th.bg()}, L.Ty.tab(ty), fr0, 0)
         +img : Image = TI.Tiles.image(tiles)
         +t1 : Nat <- IO.now()
-        blink(j, ty, cats, Kept{with_hits(n1, hits(o), t1), memo, TI.FSome{N.Nui.width(n1), N.Nui.height(n1), tiles}}, Nat.add(acc, Nat.sub(t1, t0)))
+        blink(j, ty, cats, Kept{with_hits(n1, hits(o), t1), memo, TI.FSome{N.Nui.width(n1), N.Nui.height(n1), L.Ty.tab(ty), tiles}}, Nat.add(acc, Nat.sub(t1, t0)))
 
 # caret blinks as the window makes them now: the last frame's tiles
 # blinked in place (TI.Frames.blink), no layout
@@ -358,7 +358,7 @@ def blink.fast(+n: Nat, f: TI.Frames, +acc: Nat) -> IO(Nat):
 def blink.exact(+ty: L.Ty, +cats: Map<&2, CA.CatF>, +k: Kept) -> String:
   +n = prepared(kept_n(k), N.Blink.ms())
   +o = BV.Bv.frame(ty, L.Lay.memo(ty, n, kept_memo(k)), cats, n)
-  +off = TI.Tiles.image(TI.Frame.make(N.Nui.width(n), N.Nui.height(n), ops(o), Pix{T.Th.bg()}))
+  +off = TI.Tiles.image(TI.Frame.make(N.Nui.width(n), N.Nui.height(n), ops(o), Pix{T.Th.bg()}, L.Ty.tab(ty)))
   +fast = frames_image(TI.Frames.blink(kept_frames(k), False{}))
   +back = frames_image(TI.Frames.blink(TI.Frames.blink(kept_frames(k), False{}), True{}))
   "caret hidden " ++ Bool.pick(String, N.Blink.on(n), "no", "yes") ++ ", blinked = drawn from scratch: " ++ Bool.pick(String, TI.Eq.image(fast, off), "yes", "NO")

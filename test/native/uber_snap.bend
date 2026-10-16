@@ -109,7 +109,7 @@ def shot(+ty: L.Ty, +dir: String, +name: String, +u: U.Ui, +w: U32, +h: U32) -> 
   +n = sized(N.Nui.init(u, w, h), w, h)
   +os = ops(frame(ty, n))
   do IO<Unit>:
-    write(dir ++ "/win-" ++ name ++ ".ppm", w, h, R.Frame.render(w, h, os, T.Th.bg()))
+    write(dir ++ "/win-" ++ name ++ ".ppm", w, h, R.Frame.render(w, h, R.Res.ops(os, L.Ty.tab(ty)), T.Th.bg()))
     IO.print(dir ++ "/win-" ++ name ++ ".ppm")
 
 def arg(xs: List<&2, String>, +i: Nat, d: String) -> String:

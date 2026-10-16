@@ -63,7 +63,7 @@ def phash(img: Image) -> U32:
 def qh(k: Nat, +ops: List<&2, R.Op>, +rx: U32, +ry: U32, +n: U32) -> U32:
   match k:
     case 0n:
-      hash(TI.Tile.draw(6n, TI.Loc.ops(ops, rx, ry, 64), Pix{855826}))
+      hash(TI.Tile.draw(6n, R.TNil{}, TI.Loc.ops(ops, rx, ry, 64), Pix{855826}))
     case 1n+j0:
       +j = j0
       +h = U32.shr(n)
@@ -109,7 +109,7 @@ def qz(k: Nat, +pops: List<&2, R.Op>, +px: U32, +py: U32, +rx: U32, +ry: U32, +n
 def qr(k: Nat, +os: List<&2, R.Op>, +rx: U32, +ry: U32, +n: U32) -> U32:
   match k:
     case 0n:
-      Bool.pick(U32, Bool.and(U32.is_lt(rx, 3440), U32.is_lt(ry, 1400)), hash(TI.Tile.draw(6n, TI.Loc.ops(R.Region.keep(os, 0, 0, rx, ry, 64), rx, ry, 64), Pix{855826})), 0)
+      Bool.pick(U32, Bool.and(U32.is_lt(rx, 3440), U32.is_lt(ry, 1400)), hash(TI.Tile.draw(6n, R.TNil{}, TI.Loc.ops(R.Region.keep(os, 0, 0, rx, ry, 64), rx, ry, 64), Pix{855826})), 0)
     case 1n+j0:
       +j = j0
       +h = U32.shr(n)
@@ -173,7 +173,7 @@ def run(t: JT) -> U32:
     case JNone{}:
       0
     case JOne{Job{_, _, l}}:
-      hash(TI.Tile.draw(6n, l, Pix{855826}))
+      hash(TI.Tile.draw(6n, R.TNil{}, l, Pix{855826}))
     case JTwo{a, b}:
       x y = run(a) run(b)
       (x + y : U32)
@@ -240,7 +240,7 @@ def run.copy(t: JT) -> U32:
     case JNone{}:
       0
     case JOne{Job{_, _, l}}:
-      hash(TI.Tile.draw(6n, Ops.copy(l), Pix{855826}))
+      hash(TI.Tile.draw(6n, R.TNil{}, Ops.copy(l), Pix{855826}))
     case JTwo{a, b}:
       x y = run.copy(a) run.copy(b)
       (x + y : U32)
@@ -250,7 +250,7 @@ def run.copy(t: JT) -> U32:
 def qc(k: Nat, +pops: List<&2, R.Op>, +px: U32, +py: U32, +rx: U32, +ry: U32, +n: U32) -> U32:
   match k:
     case 0n:
-      hash(TI.Tile.draw(6n, TI.Loc.ops(R.Region.keep(pops, px, py, rx, ry, n), rx, ry, 64), Pix{855826}))
+      hash(TI.Tile.draw(6n, R.TNil{}, TI.Loc.ops(R.Region.keep(pops, px, py, rx, ry, n), rx, ry, 64), Pix{855826}))
     case 1n+j0:
       +j = j0
       +h = U32.shr(n)
@@ -264,7 +264,7 @@ def flat.tile(+i: U32, +os: List<&2, R.Op>) -> U32:
   +tx = (U32.mod(i, 64) * 64 : U32)
   +ty = ((i / 64 : U32) * 64 : U32)
   Bool.pick(U32, Bool.and(U32.is_lt(tx, 3440), U32.is_lt(ty, 1400)),
-    hash(TI.Tile.draw(6n, TI.Loc.ops(R.Region.keep(os, 0, 0, tx, ty, 64), tx, ty, 64), Pix{855826})), 0)
+    hash(TI.Tile.draw(6n, R.TNil{}, TI.Loc.ops(R.Region.keep(os, 0, 0, tx, ty, 64), tx, ty, 64), Pix{855826})), 0)
 
 def flat(+d: Nat, +i: U32, +os: List<&2, R.Op>) -> U32:
   match d:
@@ -279,7 +279,7 @@ def main() -> IO(Unit):
     +os : List<&2, R.Op> = ops()
     +k : Nat = List.length(&2, R.Op, os)
     +t0 : Nat <- IO.now()
-    +a : Image = TI.Tiles.image(TI.Frame.make(3440, 1400, os, Pix{855826}))
+    +a : Image = TI.Tiles.image(TI.Frame.make(3440, 1400, os, Pix{855826}, R.TNil{}))
     +ha : U32 = hash(a)
     +t1 : Nat <- IO.now()
     +b : Image = R.Frame.render(3440, 1400, os, 855826)
@@ -287,10 +287,10 @@ def main() -> IO(Unit):
     +t2 : Nat <- IO.now()
     +rs : List<&2, R.Op> = rows(66n)
     +t6 : Nat <- IO.now()
-    +h6 : U32 = phash(TI.Tiles.image(TI.Frame.make(3440, 1400, rs, Pix{855826})))
+    +h6 : U32 = phash(TI.Tiles.image(TI.Frame.make(3440, 1400, rs, Pix{855826}, R.TNil{})))
     +t7 : Nat <- IO.now()
     IO.print("rects " ++ Nat.show(List.length(&2, R.Op, rs)) ++ ": tiles " ++ Nat.show(Nat.sub(t7, t6)) ++ " ms " ++ U32.show(h6))
-    +h4 : U32 = phash(TI.Tiles.image(TI.Frame.make(3440, 1400, os, Pix{855826})))
+    +h4 : U32 = phash(TI.Tiles.image(TI.Frame.make(3440, 1400, os, Pix{855826}, R.TNil{})))
     +t4 : Nat <- IO.now()
     +h5 : U32 = phash(R.Frame.render(3440, 1400, os, 855826))
     +t5 : Nat <- IO.now()

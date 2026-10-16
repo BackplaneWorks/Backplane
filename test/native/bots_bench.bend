@@ -136,7 +136,7 @@ def next(f: Nat, +c: U32, +n: N.Nui) -> N.Nui:
 
 # the frame drawn from scratch: every post wrapped afresh, every tile drawn
 def fresh(+ty: L.Ty, +memo: L.TLMemo, +cats: Map<&2, CA.CatF>, +n: N.Nui) -> Image:
-  TI.Tiles.image(TI.Frame.make(N.Nui.width(n), N.Nui.height(n), ops(BV.Bv.frame(ty, memo, cats, n)), Pix{T.Th.bg()}))
+  TI.Tiles.image(TI.Frame.make(N.Nui.width(n), N.Nui.height(n), ops(BV.Bv.frame(ty, memo, cats, n)), Pix{T.Th.bg()}, L.Ty.tab(ty)))
 
 # one frame as the app makes it, from what the last left (the posts'
 # wraps kept, the tiles reused), checked against the one drawn from scratch
@@ -155,11 +155,11 @@ def frame(+ty: L.Ty, +f: Nat, +c: U32, k: Kept, t: Times, +slide: Bool) -> IO(KT
         +o : L.Out = BV.Bv.frame.w(ty, memo, cats, ws, n1)
         +k2 : Nat = List.length(&2, R.Op, ops(o))
         +t2 : Nat <- IO.now()
-        +tiles : TI.Tiles = TI.Frame.par(N.Nui.width(n1), N.Nui.height(n1), ops(o), Pix{T.Th.bg()}, fr0, Bool.pick(U32, slide, N.Hits.slide(hits(o), N.Nui.hits(np)), 0))
+        +tiles : TI.Tiles = TI.Frame.par(N.Nui.width(n1), N.Nui.height(n1), ops(o), Pix{T.Th.bg()}, L.Ty.tab(ty), fr0, Bool.pick(U32, slide, N.Hits.slide(hits(o), N.Nui.hits(np)), 0))
         +img : Image = TI.Tiles.image(tiles)
         +t3 : Nat <- IO.now()
         +ok : Bool = TI.Eq.image(img, fresh(ty, memo, cats, n1))
-        return KT{Kept{with_hits(n1, hits(o), t3), memo, TI.FSome{N.Nui.width(n1), N.Nui.height(n1), tiles}, cats, ws}, Times.add(t, Nat.sub(t0, te), Nat.sub(t1, t0), Nat.sub(t2, t1), Nat.sub(t3, t2), ok)}
+        return KT{Kept{with_hits(n1, hits(o), t3), memo, TI.FSome{N.Nui.width(n1), N.Nui.height(n1), L.Ty.tab(ty), tiles}, cats, ws}, Times.add(t, Nat.sub(t0, te), Nat.sub(t1, t0), Nat.sub(t2, t1), Nat.sub(t3, t2), ok)}
 
 # keys typed one by one (each a frame)
 def keys(cs: String, +ty: L.Ty, +k: Kept, t: Times) -> IO(KT):
@@ -320,7 +320,7 @@ def parts(+ty: L.Ty, +k: Kept) -> IO(Unit):
 
 def kimg(k: Kept) -> Image:
   match k:
-    case Kept{_, _, TI.FSome{_, _, t}, _, _}:
+    case Kept{_, _, TI.FSome{_, _, _, t}, _, _}:
       TI.Tiles.image(t)
     case Kept{_, _, TI.FNone{}, _, _}:
       Pix{0}

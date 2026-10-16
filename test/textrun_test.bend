@@ -112,8 +112,8 @@ def main() -> IO(Unit):
     +bg : U32 = 4279383126
     +a : Image = R.Frame.render(W(), H(), old, bg)
     +b : Image = R.Frame.render(W(), H(), new, bg)
-    +tb : Image = T.Tiles.image(T.Frame.make(W(), H(), new, Pix{bg}))
-    +ta : Image = T.Tiles.image(T.Frame.make(W(), H(), old, Pix{bg}))
+    +tb : Image = T.Tiles.image(T.Frame.make(W(), H(), new, Pix{bg}, X.Text.table(c)))
+    +ta : Image = T.Tiles.image(T.Frame.make(W(), H(), old, Pix{bg}, X.Text.table(c)))
     C.Check.str("a run draws as its glyphs", Nat.show(diff(U32.to_nat((W() * H() : U32)), a, b, d, W(), 0n)), "0")
     C.Check.str("a run draws as its glyphs in tiles", Nat.show(diff(U32.to_nat((W() * H() : U32)), ta, tb, d, W(), 0n)), "0")
     C.Check.str("tiles draw a run as the frame does", Nat.show(diff(U32.to_nat((W() * H() : U32)), a, tb, d, W(), 0n)), "0")

@@ -122,7 +122,7 @@ def warm(+ty: L.Ty, +cats: Map<&2, CA.CatF>, +n0: N.Nui) -> Kept:
   +n = prepared(n0, 0n)
   +memo = L.Lay.memo(ty, n, L.TL.memo.none())
   +o = BV.Bv.frame(ty, memo, cats, n)
-  Kept{with_hits(n, hits(o), 0n), memo, TI.FSome{N.Nui.width(n), N.Nui.height(n), TI.Frame.par(N.Nui.width(n), N.Nui.height(n), ops(o), Pix{T.Th.bg()}, TI.FNone{}, 0)}}
+  Kept{with_hits(n, hits(o), 0n), memo, TI.FSome{N.Nui.width(n), N.Nui.height(n), L.Ty.tab(ty), TI.Frame.par(N.Nui.width(n), N.Nui.height(n), ops(o), Pix{T.Th.bg()}, L.Ty.tab(ty), TI.FNone{}, 0)}}
 
 # a frame, drawn as the app draws it
 def draw(+ty: L.Ty, +cats: Map<&2, CA.CatF>, k: Kept) -> IO(Kept & Nat):
@@ -133,10 +133,10 @@ def draw(+ty: L.Ty, +cats: Map<&2, CA.CatF>, k: Kept) -> IO(Kept & Nat):
         +n1 : N.Nui = prepared(n0, t0)
         +memo : L.TLMemo = L.Lay.memo(ty, n1, memo0)
         +o : L.Out = BV.Bv.frame(ty, memo, cats, n1)
-        +tiles : TI.Tiles = TI.Frame.par(N.Nui.width(n1), N.Nui.height(n1), ops(o), Pix{T.Th.bg()}, fr0, 0)
+        +tiles : TI.Tiles = TI.Frame.par(N.Nui.width(n1), N.Nui.height(n1), ops(o), Pix{T.Th.bg()}, L.Ty.tab(ty), fr0, 0)
         +img : Image = TI.Tiles.image(tiles)
         +t1 : Nat <- IO.now()
-        return (Kept{with_hits(n1, hits(o), t1), memo, TI.FSome{N.Nui.width(n1), N.Nui.height(n1), tiles}}, Nat.sub(t1, t0))
+        return (Kept{with_hits(n1, hits(o), t1), memo, TI.FSome{N.Nui.width(n1), N.Nui.height(n1), L.Ty.tab(ty), tiles}}, Nat.sub(t1, t0))
 
 def step_of(s: N.Step) -> N.Nui & Bool:
   match s:

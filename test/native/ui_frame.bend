@@ -58,7 +58,7 @@ def go(r: File & Result<&1, &1, U32 & String, List<&2, U32>>, +sel: String, +pat
     +os : List<&2, R.Op> = ops(L.Lay.frame(ty, L.TL.memo.none(), n))
     +k2 : Nat = List.length(&2, R.Op, os)
     +t2 : Nat <- IO.now()
-    +img : Image = R.Frame.render(1400, 860, os, T.Th.bg())
+    +img : Image = R.Frame.render(1400, 860, R.Res.ops(os, L.Ty.tab(ty)), T.Th.bg())
     +lv : Nat = leaves(img)
     t3 : Nat <- IO.now()
     IO.print("setup " ++ Nat.show(Nat.sub(t1, t0)) ++ " ms; layout " ++ Nat.show(Nat.sub(t2, t1)) ++ " ms (" ++ Nat.show(k2) ++ " ops); raster " ++ Nat.show(Nat.sub(t3, t2)) ++ " ms (" ++ Nat.show(lv) ++ " leaves)")

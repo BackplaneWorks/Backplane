@@ -101,7 +101,7 @@ def warm(+ty: L.Ty, +n0: N.Nui) -> Kept:
   +n = prepared(n0, 0n)
   +mm = L.Lay.memos(ty, n, Nil{})
   +o = L.Lay.frame(ty, L.TL.memos.now(mm), n)
-  Kept{with_hits(n, hits(o), 0n), mm, TI.FSome{N.Nui.width(n), N.Nui.height(n), TI.Frame.par(N.Nui.width(n), N.Nui.height(n), ops(o), Pix{T.Th.bg()}, TI.FNone{}, 0)}}
+  Kept{with_hits(n, hits(o), 0n), mm, TI.FSome{N.Nui.width(n), N.Nui.height(n), L.Ty.tab(ty), TI.Frame.par(N.Nui.width(n), N.Nui.height(n), ops(o), Pix{T.Th.bg()}, L.Ty.tab(ty), TI.FNone{}, 0)}}
 
 # one event and the frame after it, timed: event, memo, layout, tiles (ms)
 def step(+what: String, e: W.WinEv, +ty: L.Ty, k: Kept) -> IO(Kept):
@@ -116,12 +116,12 @@ def step(+what: String, e: W.WinEv, +ty: L.Ty, k: Kept) -> IO(Kept):
         +o : L.Out = L.Lay.frame(ty, L.TL.memos.now(mm), n1)
         +k2 : Nat = List.length(&2, R.Op, ops(o))
         +t3 : Nat <- IO.now()
-        +tiles : TI.Tiles = TI.Frame.par(N.Nui.width(n1), N.Nui.height(n1), ops(o), Pix{T.Th.bg()}, fr0, 0)
+        +tiles : TI.Tiles = TI.Frame.par(N.Nui.width(n1), N.Nui.height(n1), ops(o), Pix{T.Th.bg()}, L.Ty.tab(ty), fr0, 0)
         +img : Image = TI.Tiles.image(tiles)
         +t4 : Nat <- IO.now()
         IO.print(what ++ ": event " ++ Nat.show(Nat.sub(t1, t0)) ++ "  memo " ++ Nat.show(Nat.sub(t2, t1)) ++ "  layout " ++ Nat.show(Nat.sub(t3, t2))
           ++ "  tiles " ++ Nat.show(Nat.sub(t4, t3)) ++ "  = " ++ Nat.show(Nat.sub(t4, t0)) ++ " ms (" ++ Nat.show(k2) ++ " ops)")
-        return Kept{with_hits(n1, hits(o), t4), mm, TI.FSome{N.Nui.width(n1), N.Nui.height(n1), tiles}}
+        return Kept{with_hits(n1, hits(o), t4), mm, TI.FSome{N.Nui.width(n1), N.Nui.height(n1), L.Ty.tab(ty), tiles}}
 
 def keys(cs: String, +ty: L.Ty, k: Kept) -> IO(Kept):
   match cs:
@@ -177,12 +177,12 @@ def rep.side(+r: Nat, +ty: L.Ty, +n: N.Nui) -> Nat:
     case 1n+q:
       Nat.add(List.length(&2, R.Op, ops(L.Lay.sidebar(ty, n, 900))), rep.side(q, ty, n))
 
-def rep.tiles(+r: Nat, +os: List<&2, R.Op>, +prev: TI.Frames) -> Nat:
+def rep.tiles(+r: Nat, +ty: L.Ty, +os: List<&2, R.Op>, +prev: TI.Frames) -> Nat:
   match r:
     case 0n:
       0n
     case 1n+q:
-      Nat.add(some(TI.Frame.par(1400, 900, os, Pix{T.Th.bg()}, prev, 0)), rep.tiles(q, os, prev))
+      Nat.add(some(TI.Frame.par(1400, 900, os, Pix{T.Th.bg()}, L.Ty.tab(ty), prev, 0)), rep.tiles(q, ty, os, prev))
 
 # each part of an unchanged frame, 20 times over
 def parts(+ty: L.Ty, k: Kept) -> IO(Unit):
@@ -203,7 +203,7 @@ def parts(+ty: L.Ty, k: Kept) -> IO(Unit):
         +d : Nat <- IO.now()
         +x4 : Nat = rep.side(20n, ty, n)
         +e : Nat <- IO.now()
-        +x5 : Nat = rep.tiles(20n, os, fr)
+        +x5 : Nat = rep.tiles(20n, ty, os, fr)
         +f : Nat <- IO.now()
         IO.print("x20 ms: TL.mine " ++ Nat.show(Nat.sub(b, a)) ++ "  memo (unchanged) " ++ Nat.show(Nat.sub(c, b)) ++ "  layout " ++ Nat.show(Nat.sub(d, c))
           ++ " (sidebar " ++ Nat.show(Nat.sub(e, d)) ++ ")  tiles (unchanged) " ++ Nat.show(Nat.sub(f, e)) ++ "   [" ++ Nat.show(Nat.add(Nat.add(x1, x2), Nat.add(x3, Nat.add(x4, x5)))) ++ "]")
@@ -267,7 +267,7 @@ def main() -> IO(Unit):
     +k : Nat = List.length(&2, R.Op, ops(out))
     +t11 : Nat <- IO.now()
     seen(k, "first layout", t10, t11)
-    +tl : TI.Tiles = TI.Frame.par(1400, 900, ops(out), Pix{T.Th.bg()}, TI.FNone{}, 0)
+    +tl : TI.Tiles = TI.Frame.par(1400, 900, ops(out), Pix{T.Th.bg()}, L.Ty.tab(ty), TI.FNone{}, 0)
     +im : Image = TI.Tiles.image(tl)
     +t12 : Nat <- IO.now()
     seen(some(tl), "first tiles", t11, t12)

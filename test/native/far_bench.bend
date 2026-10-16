@@ -120,7 +120,7 @@ def warm(+ty: L.Ty, +n0: N.Nui) -> Kept:
   +n = prepared(n0, 0n)
   +mm = memos(U.Ui.timeline(N.Nui.ui(n)), ty, n, Nil{})
   +o = frame(ty, mm, n)
-  Kept{with_hits(n, hits(o), 0n), mm, TI.FSome{N.Nui.width(n), N.Nui.height(n), TI.Frame.par(N.Nui.width(n), N.Nui.height(n), ops(o), Pix{T.Th.bg()}, TI.FNone{}, 0)}}
+  Kept{with_hits(n, hits(o), 0n), mm, TI.FSome{N.Nui.width(n), N.Nui.height(n), L.Ty.tab(ty), TI.Frame.par(N.Nui.width(n), N.Nui.height(n), ops(o), Pix{T.Th.bg()}, L.Ty.tab(ty), TI.FNone{}, 0)}}
 
 # one event and the frame after it, timed: event, memo, layout, tiles (ms)
 def step(+what: String, e: W.WinEv, +ty: L.Ty, k: Kept) -> IO(Kept):
@@ -135,12 +135,12 @@ def step(+what: String, e: W.WinEv, +ty: L.Ty, k: Kept) -> IO(Kept):
         +o : L.Out = frame(ty, mm, n1)
         +k2 : Nat = List.length(&2, R.Op, ops(o))
         +t3 : Nat <- IO.now()
-        +tiles : TI.Tiles = TI.Frame.par(N.Nui.width(n1), N.Nui.height(n1), ops(o), Pix{T.Th.bg()}, fr0, 0)
+        +tiles : TI.Tiles = TI.Frame.par(N.Nui.width(n1), N.Nui.height(n1), ops(o), Pix{T.Th.bg()}, L.Ty.tab(ty), fr0, 0)
         +img : Image = TI.Tiles.image(tiles)
         +t4 : Nat <- IO.now()
         IO.print(what ++ ": event " ++ Nat.show(Nat.sub(t1, t0)) ++ "  memo " ++ Nat.show(Nat.sub(t2, t1)) ++ "  layout " ++ Nat.show(Nat.sub(t3, t2))
           ++ "  tiles " ++ Nat.show(Nat.sub(t4, t3)) ++ "  = " ++ Nat.show(Nat.sub(t4, t0)) ++ " ms (" ++ Nat.show(k2) ++ " ops)")
-        return Kept{with_hits(n1, hits(o), t4), mm, TI.FSome{N.Nui.width(n1), N.Nui.height(n1), tiles}}
+        return Kept{with_hits(n1, hits(o), t4), mm, TI.FSome{N.Nui.width(n1), N.Nui.height(n1), L.Ty.tab(ty), tiles}}
 
 
 def first_far(bs: List<&2, BT.Bot>) -> String:
