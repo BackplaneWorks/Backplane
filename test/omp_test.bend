@@ -117,6 +117,8 @@ def main() -> IO(Unit):
     C.Check.str("omp levels", String.join(OMP.Omp.levels(), ","), "off,auto,minimal,low,medium,high,xhigh,max")
     C.Check.str("omp models keeps chat only", String.join(OMP.Omp.models("{\"models\":[{\"kind\":\"chat\",\"selector\":\"a/b\"},{\"kind\":\"embedding\",\"selector\":\"c/d\"}]}"), ","), "a/b")
     C.Check.str("omp models bad json", String.join(OMP.Omp.models("nope"), ","), "")
+    C.Check.str("omp models when omp fails", String.join(OMP.Omp.models(""), ","), "")
+    C.Check.str("omp efforts when omp fails", J.Json.show(J.Json.obj(OMP.Omp.efforts(""))), "{\"default\":[]}")
     C.Check.str("omp efforts per model", J.Json.show(J.Json.obj(OMP.Omp.efforts("{\"models\":[{\"kind\":\"chat\",\"selector\":\"m-think\",\"reasoning\":true,\"thinking\":[\"minimal\",\"low\"]},{\"kind\":\"chat\",\"selector\":\"m-plain\",\"reasoning\":false,\"thinking\":[]}]}"))),
       "{\"default\":[],\"m-think\":[\"off\",\"auto\",\"minimal\",\"low\"],\"m-plain\":[]}")
     C.Check.str("omp install", OMP.Omp.install(), "Install oh-my-pi with `curl -fsSL https://omp.sh/install | sh` or `bun install -g @oh-my-pi/pi-coding-agent`, then sign in with `omp login`.")
