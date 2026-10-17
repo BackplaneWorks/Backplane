@@ -982,16 +982,37 @@ def Mcp.method.pos(+m: String) -> Nat:
 # and the request waits, parked, for the user's answer (Park, then
 # Acp.permit.answer).
 
-def Grok.permit.k(ok: Bool, +ask: String, +now: Nat, +thread: String, +o: J.Json, +tool: String) -> McpOut:
+
+# the ACP permission response is shared; providers supply the card choices
+def Perm.acp.permission.k(ok: Bool, +ask: String, +now: Nat, +thread: String, +o: J.Json, +tool: String, +options: String) -> McpOut:
   match ok:
     case True{}:
       McpOut{AC.Acp.permit.reply(AC.Acp.id(J.Json.get(o, "id")), J.Json.get_obj(o, "params"), "accept"), B.Step.none(), ""}
     case False{}:
-      McpOut{"", B.Step{[M.AskOpened{ask, thread, "approval", tool, AC.Acp.detail(J.Json.get_obj(o, "params")), "", now}], Nil{}}, ask}
+      McpOut{"", B.Step{[M.AskOpened{ask, thread, "approval", tool, AC.Acp.detail(J.Json.get_obj(o, "params")), options, now}], Nil{}}, ask}
+
+def Grok.permit.k(ok: Bool, +ask: String, +now: Nat, +thread: String, +o: J.Json, +tool: String) -> McpOut:
+  Perm.acp.permission.k(ok, ask, now, thread, o, tool, "")
 
 def Grok.permit(+s: M.State, +now: Nat, +thread: String, +o: J.Json) -> McpOut:
   Grok.permit.k(Perm.session_ok(M.Asks.all(s), thread, AC.Acp.tool(J.Json.get_obj(o, "params"))), B.Hub.id("q", now, B.Hub.seq(s)), now, thread, o,
     AC.Acp.tool(J.Json.get_obj(o, "params")))
+
+# OMP's permission requests remain one-shot, even if an older log contains a
+# session answer. The card exposes no session-grant choice.
+def Mcp.omp.permission(+s: M.State, +now: Nat, +thread: String, +o: J.Json) -> McpOut:
+  Perm.acp.permission.k(False{}, B.Hub.id("q", now, B.Hub.seq(s)), now, thread, o,
+    AC.Acp.tool(J.Json.get_obj(o, "params")), "Allow\nDeny")
+
+def Mcp.permission.route.k(omp: Bool, +s: M.State, +now: Nat, +thread: String, +o: J.Json) -> McpOut:
+  match omp:
+    case True{}:
+      Mcp.omp.permission(s, now, thread, o)
+    case False{}:
+      Grok.permit(s, now, thread, o)
+
+def Mcp.permission.route(+s: M.State, +now: Nat, +thread: String, +o: J.Json) -> McpOut:
+  Mcp.permission.route.k(String.eq(M.Thread.provider(M.State.thread.get(s, thread)), "omp"), s, now, thread, o)
 
 # Muse's approvals
 # ----------------
@@ -1019,7 +1040,7 @@ def Muse.permit(+s: M.State, +now: Nat, +thread: String, +o: J.Json) -> McpOut:
 def Elicit.permit.k(approve: Bool, +ask: String, +now: Nat, +thread: String, +o: J.Json, +text: String) -> McpOut:
   match approve:
     case True{}:
-      McpOut{"", B.Step{[M.AskOpened{ask, thread, "approval", AC.Acp.elicit.tool(text), text, "", now}], Nil{}}, ask}
+      McpOut{"", B.Step{[M.AskOpened{ask, thread, "approval", AC.Acp.elicit.tool(text), text, "Allow\nDeny", now}], Nil{}}, ask}
     case False{}:
       McpOut{AC.Acp.elicit.reply(AC.Acp.id(J.Json.get(o, "id")), "decline"), B.Step.none(), ""}
 
@@ -1032,7 +1053,7 @@ def Elicit.permit(+s: M.State, +now: Nat, +thread: String, +o: J.Json) -> McpOut
 def Mcp.handle.k(i: Nat, +s: M.State, +now: Nat, +thread: String, +models: J.Json, +version: String, +o: J.Json) -> McpOut:
   match i:
     case 0n:
-      Grok.permit(s, now, thread, o)
+      Mcp.permission.route(s, now, thread, o)
     case 1n:
       Muse.permit(s, now, thread, o)
     case 2n:

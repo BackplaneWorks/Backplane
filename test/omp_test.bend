@@ -73,6 +73,22 @@ def ap.form(+msg: String, +values: String) -> String:
 def ap.handle(+line: String) -> MC.McpOut:
   MC.Mcp.handle(M.State.empty(), 10n, "t1", J.Json.arr(Nil{}), "1", Maybe.default(&2, J.Json, J.Json.parse(line), J.Null{}))
 
+def ap.handle.provider(+provider: String, +line: String) -> MC.McpOut:
+  +s = M.State.replay([M.ThreadCreated{"t1", "p", "Title", M.Local{}, "", "", provider, "model", 1n}], M.State.empty())
+  MC.Mcp.handle(s, 10n, "t1", J.Json.arr(Nil{}), "1", Maybe.default(&2, J.Json, J.Json.parse(line), J.Null{}))
+
+def ap.handle.provider.session(+provider: String, +line: String) -> MC.McpOut:
+  +s = M.State.replay([
+    M.ThreadCreated{"t1", "p", "Title", M.Local{}, "", "", provider, "model", 1n},
+    M.AskOpened{"old", "t1", "approval", "execute", "previous permission", "", 2n},
+    M.AskClosed{"old", "session", 3n}], M.State.empty())
+  MC.Mcp.handle(s, 10n, "t1", J.Json.arr(Nil{}), "1", Maybe.default(&2, J.Json, J.Json.parse(line), J.Null{}))
+
+
+def ap.permission.request() -> String:
+  "{\"jsonrpc\":\"2.0\",\"id\":\"p1\",\"method\":\"session/request_permission\",\"params\":{\"toolCall\":{\"toolCallId\":\"c1\",\"title\":\"Run command\",\"kind\":\"execute\",\"rawInput\":{\"command\":\"echo hi\"}},\"options\":[{\"optionId\":\"no\",\"kind\":\"reject_once\"},{\"optionId\":\"yes\",\"kind\":\"allow_once\"},{\"optionId\":\"always\",\"kind\":\"allow_always\"}]}}"
+
+
 def ap.cs(o: MC.McpOut) -> List<&2, M.Change>:
   match o:
     case MC.McpOut{_, st, _}:
@@ -86,6 +102,15 @@ def ap.kind(cs: List<&2, M.Change>) -> String:
       k ++ "|" ++ th ++ "|" ++ tool ++ "|" ++ d
     case _ <> t:
       ap.kind(t)
+
+def ap.options(cs: List<&2, M.Change>) -> String:
+  match cs:
+    case Nil{}:
+      ""
+    case M.AskOpened{_, _, _, _, _, +options, _} <> _:
+      options
+    case _ <> rest:
+      ap.options(rest)
 
 def ap.id(cs: List<&2, M.Change>) -> String:
   match cs:
@@ -230,13 +255,23 @@ def main() -> IO(Unit):
     C.Check.str("omp other form never asks", ap.kind(ap.cs(ap.handle(ap.form("Pick one", "[\"Yes\",\"No\"]")))), "")
     # the live omp form (test/fixtures/omp/form.jsonl line 64): the card's tool is the tool, its detail the whole message
     C.Check.str("omp live form card", ap.kind(ap.cs(ap.handle(ap.form("Allow tool: write\\nPath: form-check.txt\\nContent:\\nhello", "[\"Approve\",\"Deny\"]")))), "approval|t1|write|Allow tool: write\nPath: form-check.txt\nContent:\nhello")
-    # the shared card sends "session"; for omp this is one-time, while the
-    # existing ACP approval providers retain their session-wide permission
+    C.Check.str("omp form offers Allow and Deny only", ap.options(ap.cs(ap.handle(ap.form("Approve the tool?", "[\"Approve\",\"Deny\"]")))), "Allow\nDeny")
+    C.Check.str("omp session request permission offers Allow and Deny", ap.options(ap.cs(ap.handle.provider("omp", ap.permission.request()))), "Allow\nDeny")
+    C.Check.str("grok session request permission keeps default card", ap.options(ap.cs(ap.handle.provider("grok", ap.permission.request()))), "")
+    C.Check.str("omp legacy session grant does not suppress permission ask", ap.options(ap.cs(ap.handle.provider.session("omp", ap.permission.request()))), "Allow\nDeny")
+    # Legacy clients may still send "session"; only Grok/Muse store that as a
+    # persistent permission.
     +ompAsk : M.State = ask.state("omp")
     +ompAnswer : B.Step = B.Hub.answer(ompAsk, 3n, 0, "rpc", "q", "session")
-    C.Check.str("omp allow for session is one-time", ask.result(ompAnswer), "accept|accept")
+    C.Check.str("omp legacy session answer is one-time", ask.result(ompAnswer), "accept|accept")
     +ompAfter : M.State = ask.applied(ompAsk, ompAnswer)
-    C.Check.str("omp allow for session does not grant future tools", Bool.show(MC.Perm.session_ok(M.Asks.all(ompAfter), "t", "write")), "False")
+    C.Check.str("omp legacy session answer grants no future tools", Bool.show(MC.Perm.session_ok(M.Asks.all(ompAfter), "t", "write")), "False")
+    +ompAllow : B.Step = B.Hub.answer(ompAsk, 3n, 0, "rpc", "q", "Allow")
+    C.Check.str("omp Allow answers Approve", ask.result(ompAllow), "accept|accept")
+    +ompAllowAfter : M.State = ask.applied(ompAsk, ompAllow)
+    C.Check.str("omp Allow is one-time", Bool.show(MC.Perm.session_ok(M.Asks.all(ompAllowAfter), "t", "write")), "False")
+    +ompDeny : B.Step = B.Hub.answer(ompAsk, 3n, 0, "rpc", "q", "Deny")
+    C.Check.str("omp Deny declines", ask.result(ompDeny), "decline|decline")
     +grokAsk : M.State = ask.state("grok")
     +grokAnswer : B.Step = B.Hub.answer(grokAsk, 3n, 0, "rpc", "q", "session")
     C.Check.str("grok allow for session remains session-wide", ask.result(grokAnswer), "session|session")

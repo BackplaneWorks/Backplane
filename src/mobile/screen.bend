@@ -656,6 +656,14 @@ def Mob.ask.draft(empty: Bool, +id: String, +draft: String) -> J.Json:
     case False{}:
       Mob.btn("Answer with draft", id ++ "|" ++ String.trim(draft), True{})
 
+
+def Mob.ask.approval(empty: Bool, +id: String) -> List<&2, J.Json>:
+  match empty:
+    case True{}:
+      [Mob.btn("Allow", id ++ "|accept", True{}), Mob.btn("Allow for session", id ++ "|session", False{}), Mob.btn("Deny", id ++ "|decline", False{})]
+    case False{}:
+      [Mob.btn("Allow", id ++ "|Allow", True{}), Mob.btn("Deny", id ++ "|Deny", False{})]
+
 def Mob.ask.btns(i: Nat, +id: String, +o: String, +draft: String) -> List<&2, J.Json>:
   match i:
     case 0n:
@@ -663,7 +671,7 @@ def Mob.ask.btns(i: Nat, +id: String, +o: String, +draft: String) -> List<&2, J.
     case 1n:
       List.append(&2, J.Json, Mob.ask.opts(String.split(o, '\n'), id), [Mob.ask.draft(String.is_empty(String.trim(draft)), id, draft)])
     case _:
-      [Mob.btn("Allow", id ++ "|accept", True{}), Mob.btn("Allow for session", id ++ "|session", False{}), Mob.btn("Deny", id ++ "|decline", False{})]
+      Mob.ask.approval(String.is_empty(o), id)
 
 def Mob.ask.body(plan: Bool, +d: String) -> List<&2, J.Json>:
   match plan:

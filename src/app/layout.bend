@@ -2746,12 +2746,20 @@ def Lay.plan.lines(+ty: Ty, ls: List<&2, String>, +x0: U32, +y: U32) -> Out:
       Out.cat(Out.ops(Ty.text(ty, 3n, l, D.Clip.all(), (x0 + 14 : U32), y, 21, T.Th.soft())), Lay.plan.lines(ty, t, x0, (y + 21 : U32)))
 
 # the buttons of an ask, right to left
+
+def Ask.choices.approval(empty: Bool, +id: String, +options: String) -> List<&2, S.Hit>:
+  match empty:
+    case True{}:
+      [S.Hit{0, 0, 0, 0, "Allow", id ++ "|accept"}, S.Hit{0, 0, 0, 0, "Allow for session", id ++ "|session"}, S.Hit{0, 0, 0, 0, "Deny", id ++ "|decline"}]
+    case False{}:
+      Ask.opts(String.split(options, '\n'), id)
+
 def Ask.choices(+k: String, +id: String, +o: String, +draft: String) -> List<&2, S.Hit>:
   Bool.pick(List<&2, S.Hit>, String.eq(k, "plan"), [S.Hit{0, 0, 0, 0, "Implement", id ++ "|implement"}, S.Hit{0, 0, 0, 0, "Dismiss", id ++ "|dismiss"}],
     Bool.pick(List<&2, S.Hit>, String.eq(k, "input"),
       List.append(&2, S.Hit, Bool.pick(List<&2, S.Hit>, String.is_empty(String.trim(draft)), [S.Hit{0, 0, 0, 0, "Dismiss", id ++ "|"}], [S.Hit{0, 0, 0, 0, "Answer with draft", id ++ "|" ++ String.trim(draft)}]),
         List.reverse(&2, S.Hit, Ask.opts(String.split(o, '\n'), id))),
-      [S.Hit{0, 0, 0, 0, "Allow", id ++ "|accept"}, S.Hit{0, 0, 0, 0, "Allow for session", id ++ "|session"}, S.Hit{0, 0, 0, 0, "Deny", id ++ "|decline"}]))
+      Ask.choices.approval(String.is_empty(o), id, o)))
 
 def Ask.text.lines(+ty: Ty, ls: List<&2, String>, +x0: U32, +y: U32) -> Out:
   match ls:

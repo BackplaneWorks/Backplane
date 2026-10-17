@@ -2132,21 +2132,24 @@ def Hub.answer.plan(impl: Bool, +s: M.State, +now: Nat, +client: U32, +id: Strin
     case False{}:
       Step{[M.AskClosed{ask, answer, now}], [Reply.ok(client, id), AskAnswered{ask, answer}]}
 
-# omp's shared card includes "Allow for session", but an elicitation has no
-# persistent permission. Normalize before storing so Perm.session_ok cannot
-# lend an omp answer to a later Grok or Muse request for the same tool.
-def Hub.answer.value.k(once: Bool, +answer: String) -> String:
-  match once:
-    case True{}:
+# The omp card exposes Allow/Deny, not a session grant. Older clients may
+# still send "session"; normalize it before storing the answer.
+def Hub.answer.value.k(omp_approval: Bool, session: Bool, allow: Bool, deny: Bool, +answer: String) -> String:
+  match omp_approval session allow deny:
+    case True{} True{} _ _:
       "accept"
-    case False{}:
+    case True{} _ True{} _:
+      "accept"
+    case True{} _ _ True{}:
+      "decline"
+    case _ _ _ _:
       answer
 
 def Hub.answer.value(a: M.Ask, s: M.State, +answer: String) -> String:
   match a:
     case M.Ask{_, +thread, +kind, _, _, _, _, _}:
-      Hub.answer.value.k(Bool.and(Bool.and(String.eq(M.Thread.provider(Hub.thread(s, thread)), "omp"), String.eq(kind, "approval")),
-        String.eq(answer, "session")), answer)
+      Hub.answer.value.k(Bool.and(String.eq(M.Thread.provider(Hub.thread(s, thread)), "omp"), String.eq(kind, "approval")),
+        String.eq(answer, "session"), String.eq(answer, "Allow"), String.eq(answer, "Deny"), answer)
 
 # the user's answer: the ask closes (once; law ask_closes_once), a parked
 # agent request gets its reply, and implementing a plan leaves plan mode

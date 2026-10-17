@@ -83,7 +83,7 @@ Consequence today: Supervised cannot create files, and AcceptEdits cannot run `e
 
 Decided by the person: option (a). Option (b) was not chosen.
 
-- **(a) Build the approval forms (recommended).** Advertise `elicitation.form`. Answer `elicitation/create` for the Approve/Deny select through the asks card: accept with "Approve", or decline. Decline every other form in v1. The shared card also offers "Allow for session"; omp treats that as Allow once and the hub stores `accept`, not the session-wide marker used by Grok and Muse. This adds one request type to `acp.bend`, its tests, and a second recorded turn that shows a form.
+- **(a) Build the approval forms (recommended).** Advertise `elicitation.form`. Answer `elicitation/create` for the Approve/Deny select through the asks card: `Allow` sends Approve, `Deny` declines. Decline every other form in v1. OMP's form and `session/request_permission` approval cards offer only Allow and Deny. Older clients may send `session`; the hub normalizes it to one-time `accept` before storing, never the session-wide permission marker used by Grok/Muse. This adds one request type to `acp.bend`, its tests, and a second recorded turn that shows a form.
 - **(b) Full access only in v1.** omp is offered in full access, and the other modes come later. Needs a per-provider filter on the mode picker, which is shared across providers today (`codec.bend`). I have not traced the four clients' pickers.
 
 Rejected: mapping Supervised to AcceptEdits. That lets writes run without asking, which the anti-goals rule out.

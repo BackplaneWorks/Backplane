@@ -100,8 +100,9 @@ try {
   send("turn.start", { thread: th, text: "write please", msg: "m-2" });
   const ask = await until(20000, () => asks()[a0]);
   check(!!ask && JSON.stringify(ask).includes("note.txt"), `supervised: a write shows an approval card (${String(ask?.tool ?? "")})`);
+  check(!!ask && ask.options === "Allow\nDeny", "supervised: card offers Allow and Deny only");
   check(!existsSync(file), "supervised: nothing is written before the answer");
-  if (ask) send("ask.answer", { id: ask.id, answer: "accept" });
+  if (ask) send("ask.answer", { id: ask.id, answer: "Allow" });
   await until(20000, () => turns(th).filter((s) => s === "completed").length >= 2 ? true : undefined);
   check(existsSync(file) && readFileSync(file, "utf8") === "hello", "allow: Allow creates the file");
   check(lines().some((l) => l === "ANSWER {\"action\":\"accept\",\"content\":{\"value\":\"Approve\"}}"), "allow: the form reply is Approve");
@@ -113,21 +114,12 @@ try {
   send("turn.start", { thread: th, text: "write again", msg: "m-3" });
   const ask2 = await until(20000, () => asks()[a1]);
   check(!!ask2, "deny: a second write asks again");
-  if (ask2) send("ask.answer", { id: ask2.id, answer: "deny" });
+  if (ask2) send("ask.answer", { id: ask2.id, answer: "Deny" });
   await until(20000, () => turns(th).filter((s) => s === "completed").length >= 3 ? true : undefined);
   check(!existsSync(file), "deny: Deny leaves no file");
   check(turns(th).filter((s) => s === "completed").length >= 3, "deny: the turn still completes");
   check(lines().includes('ANSWER {"action":"decline"}'), "deny: the form is declined");
 
-  // supervised, Allow for session: omp's form cannot remember it, so it writes once
-  rmSync(file, { force: true });
-  const a3 = asks().length;
-  send("turn.start", { thread: th, text: "write for session", msg: "m-5" });
-  const ask3 = await until(20000, () => asks()[a3]);
-  if (ask3) send("ask.answer", { id: ask3.id, answer: "session" });
-  await until(20000, () => turns(th).filter((s) => s === "completed").length >= 4 ? true : undefined);
-  check(existsSync(file) && readFileSync(file, "utf8") === "hello", "session: Allow for session writes the file");
-  check(lines().filter((l) => l === 'ANSWER {"action":"accept","content":{"value":"Approve"}}').length >= 2, "session: the form reply is Approve");
 
   // full access
   send("thread.modes", { thread: th, runtime: "full-access" });
@@ -135,7 +127,7 @@ try {
   rmSync(file, { force: true });
   const a2 = asks().length;
   send("turn.start", { thread: th, text: "write yolo", msg: "m-4" });
-  await until(20000, () => turns(th).filter((s) => s === "completed").length >= 5 ? true : undefined);
+  await until(20000, () => turns(th).filter((s) => s === "completed").length >= 4 ? true : undefined);
   check(asks().length === a2, "full access: no approval card");
   check(existsSync(file) && readFileSync(file, "utf8") === "hello", "full access: the file is written");
 } finally {

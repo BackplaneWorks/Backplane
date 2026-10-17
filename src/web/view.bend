@@ -642,12 +642,20 @@ def View.ask.opts(ls: List<&2, String>, +id: String) -> List<&2, D.Node>:
     case +l <> t:
       D.Dom.button("", "answer", id ++ "|" ++ l, l, l) <> View.ask.opts(t, id)
 
+
+def View.ask.approval(empty: Bool, +id: String) -> List<&2, D.Node>:
+  match empty:
+    case True{}:
+      [D.Dom.button("primary", "answer", id ++ "|accept", "Allow once", "Allow"), D.Dom.button("", "answer", id ++ "|session", "Allow this tool for the session", "Allow for session"), D.Dom.button("", "answer", id ++ "|decline", "Deny", "Deny")]
+    case False{}:
+      [D.Dom.button("primary", "answer", id ++ "|Allow", "Allow", "Allow"), D.Dom.button("", "answer", id ++ "|Deny", "Deny", "Deny")]
+
 def View.ask.btns(+k: String, +id: String, +o: String, +draft: String) -> List<&2, D.Node>:
   Bool.pick(List<&2, D.Node>, String.eq(k, "plan"), [D.Dom.button("primary", "answer", id ++ "|implement", "Implement the plan", "Implement"), D.Dom.button("", "answer", id ++ "|dismiss", "Dismiss", "Dismiss")],
     Bool.pick(List<&2, D.Node>, String.eq(k, "input"),
       List.append(&2, D.Node, View.ask.opts(String.split(o, '\n'), id),
         Bool.pick(List<&2, D.Node>, String.is_empty(String.trim(draft)), [D.Dom.button("", "answer", id ++ "|", "Dismiss", "Dismiss")], [D.Dom.button("primary", "answer", id ++ "|" ++ String.trim(draft), "Answer with your draft", "Answer with draft")])),
-      [D.Dom.button("primary", "answer", id ++ "|accept", "Allow once", "Allow"), D.Dom.button("", "answer", id ++ "|session", "Allow this tool for the session", "Allow for session"), D.Dom.button("", "answer", id ++ "|decline", "Deny", "Deny")]))
+      View.ask.approval(String.is_empty(o), id)))
 
 def View.ask.std(a: M.Ask, +draft: String) -> D.Node:
   match a:
