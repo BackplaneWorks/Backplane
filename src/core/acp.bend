@@ -230,8 +230,8 @@ def Acp.has.str(xs: List<&2, J.Json>, +x: String) -> Bool:
 def Acp.elicit.approve(params: J.Json) -> Bool:
   Acp.has.str(J.Json.elems(J.Json.get_obj(J.Json.get_obj(J.Json.get_obj(J.Json.get_obj(params, "requestedSchema"), "properties"), "value"), "enum")), "Approve")
 
-# the first line of omp's approval form says "Allow tool: <tool>"; any other
-# form's message is the tool itself
+# the first line of omp's approval form says "Allow tool: <tool>"; for any
+# other form, its first line is the tool
 def Acp.elicit.tool.k(allow: Bool, +line: String) -> String:
   match allow:
     case True{}:
