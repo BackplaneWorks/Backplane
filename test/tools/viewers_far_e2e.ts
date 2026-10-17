@@ -48,7 +48,7 @@ if (!existsSync(`${demo}/ecc83-pp.kicad_pcb`)) {
 const root = mkdtempSync(join(tmpdir(), "bp-viewers-e2e-"));
 const fake = join(root, "bin");
 mkdirSync(fake);
-for (const n of ["claude", "codex", "grok", "muse"]) {
+for (const n of ["claude", "codex", "grok", "muse", "omp"]) {
   writeFileSync(join(fake, n), "#!/bin/sh\nexit 1\n");
   chmodSync(join(fake, n), 0o755);
 }

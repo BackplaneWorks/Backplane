@@ -29,7 +29,7 @@ const fake = join(root, "bin"), log = join(root, "claude.log"), home = join(root
 for (const d of [fake, home, proj]) mkdirSync(d);
 writeFileSync(join(fake, "claude"), `#!/bin/sh\nexec ${process.execPath} ${resolve("test/tools/claude_standin.ts")} "$@"\n`);
 chmodSync(join(fake, "claude"), 0o755);
-for (const n of ["codex", "grok", "muse"]) { writeFileSync(join(fake, n), "#!/bin/sh\nexit 1\n"); chmodSync(join(fake, n), 0o755); }
+for (const n of ["codex", "grok", "muse", "omp"]) { writeFileSync(join(fake, n), "#!/bin/sh\nexit 1\n"); chmodSync(join(fake, n), 0o755); }
 writeFileSync(join(home, "events.jsonl"), "");
 const proc = Bun.spawn([resolve(bin), "--home", home, "--port", String(PORT), "--no-tailscale", "--foreground"], {
   env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_PEERS: "", BACKPLANE_GOOGLE_BAKE: "0", FAKE_LOG: log,

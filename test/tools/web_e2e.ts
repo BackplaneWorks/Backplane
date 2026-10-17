@@ -23,8 +23,8 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const root = mkdtempSync(join(tmpdir(), "bp-web-e2e-"));
 const fake = join(root, "bin"); mkdirSync(fake);
 writeFileSync(join(fake, "claude"), `#!/bin/sh\nexec ${process.execPath} ${WT}/test/tools/claude_standin.ts "$@"\n`);
-for (const n of ["codex", "grok", "muse"]) writeFileSync(join(fake, n), "#!/bin/sh\nexit 1\n");
-for (const n of ["claude", "codex", "grok", "muse"]) chmodSync(join(fake, n), 0o755);
+for (const n of ["codex", "grok", "muse", "omp"]) writeFileSync(join(fake, n), "#!/bin/sh\nexit 1\n");
+for (const n of ["claude", "codex", "grok", "muse", "omp"]) chmodSync(join(fake, n), 0o755);
 const user = join(root, "user"); mkdirSync(join(user, "proj"), { recursive: true });
 const s = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } }); const port = s.port; s.stop(true);
 const proc = Bun.spawn([resolve(bin), "--home", join(root, "home"), "--port", String(port), "--no-tailscale", "--headless", "--foreground"], {

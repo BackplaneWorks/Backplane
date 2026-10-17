@@ -24,7 +24,7 @@ const demo = "/usr/share/kicad/demos/ecc83";
 const root = mkdtempSync(join(tmpdir(), "bp-review-"));
 const fake = join(root, "bin");
 mkdirSync(fake);
-for (const n of ["claude", "codex", "grok", "muse"]) {
+for (const n of ["claude", "codex", "grok", "muse", "omp"]) {
   writeFileSync(join(fake, n), "#!/bin/sh\nexit 1\n");
   chmodSync(join(fake, n), 0o755);
 }

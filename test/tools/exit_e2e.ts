@@ -36,6 +36,8 @@ writeFileSync(join(fake, "grok"), "#!/bin/sh\nexit 1\n");
 chmodSync(join(fake, "grok"), 0o755);
 writeFileSync(join(fake, "muse"), "#!/bin/sh\nexit 1\n");
 chmodSync(join(fake, "muse"), 0o755);
+writeFileSync(join(fake, "omp"), "#!/bin/sh\nexit 1\n");
+chmodSync(join(fake, "omp"), 0o755);
 // codex exec --json: the prompt is the last argument
 writeFileSync(join(fake, "codex"), `#!/bin/sh
 for a in "$@"; do last="$a"; done

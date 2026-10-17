@@ -33,7 +33,7 @@ drafts = home / "drafts"
 (root / "project").mkdir()
 (root / "bin").mkdir()
 drafts.mkdir(parents=True)
-for provider in ("claude", "codex", "grok", "muse", "curl"):
+for provider in ("claude", "codex", "grok", "muse", "omp", "curl"):
     p = root / "bin" / provider
     p.write_text("#!/bin/sh\nexit 1\n")
     p.chmod(0o755)

@@ -95,7 +95,7 @@ PY
 done
 `);
 chmodSync(join(fake, "claude"), 0o755);
-for (const n of ["codex", "grok", "muse"]) {
+for (const n of ["codex", "grok", "muse", "omp"]) {
   writeFileSync(join(fake, n), "#!/bin/sh\nexit 1\n");
   chmodSync(join(fake, n), 0o755);
 }

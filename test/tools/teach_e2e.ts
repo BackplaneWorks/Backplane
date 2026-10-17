@@ -77,7 +77,7 @@ const aim = (top: number, w = 300) => ({ x: Math.round(((100 + w / 2) / 1280) * 
 const root = mkdtempSync(join(tmpdir(), "bp-teach-e2e-"));
 const fake = join(root, "bin");
 mkdirSync(fake);
-for (const n of ["claude", "codex", "grok", "muse"]) {
+for (const n of ["claude", "codex", "grok", "muse", "omp"]) {
   writeFileSync(join(fake, n), "#!/bin/sh\nexit 1\n");
   chmodSync(join(fake, n), 0o755);
 }

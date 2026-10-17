@@ -11,7 +11,7 @@ for (const f of readdirSync(wire).filter(x => x.endsWith(".js"))) (0, eval)(read
 const W = (globalThis as any).Wire;
 const root = mkdtempSync(join(tmpdir(), "bp-botdir-"));
 const fakebin = join(root, "bin"); mkdirSync(fakebin);
-for (const n of ["claude", "codex", "grok", "muse"]) { writeFileSync(join(fakebin, n), "#!/bin/sh\nexit 1\n"); chmodSync(join(fakebin, n), 0o755); }
+for (const n of ["claude", "codex", "grok", "muse", "omp"]) { writeFileSync(join(fakebin, n), "#!/bin/sh\nexit 1\n"); chmodSync(join(fakebin, n), 0o755); }
 const sleep = (n: number) => new Promise(r => setTimeout(r, n));
 let failed = false;
 function check(name: string, ok: unknown, got?: unknown) { console.log(`${ok ? "ok" : "FAIL"} ${name}${ok ? "" : ": " + JSON.stringify(got)}`); if (!ok) failed = true; }

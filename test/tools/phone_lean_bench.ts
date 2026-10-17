@@ -201,7 +201,7 @@ async function record() {
   `;
   writeFileSync(join(fake, "claude"), claude);
   chmodSync(join(fake, "claude"), 0o755);
-  for (const n of ["codex", "grok", "muse", "agy", "tailscale", "notify-send", "gh", "git", "kicad-cli", "freecad", "xdg-open", "gio"]) {
+  for (const n of ["codex", "grok", "muse", "omp", "agy", "tailscale", "notify-send", "gh", "git", "kicad-cli", "freecad", "xdg-open", "gio"]) {
     writeFileSync(join(fake, n), "#!/bin/sh\nexit 1\n");
     chmodSync(join(fake, n), 0o755);
   }

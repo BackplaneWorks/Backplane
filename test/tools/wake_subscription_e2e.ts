@@ -14,7 +14,7 @@ for (const d of [home, proj, fake]) mkdirSync(d);
 writeFileSync(join(home, "events.jsonl"), "");
 writeFileSync(join(fake, "claude"), `#!/bin/sh\nexec '${process.execPath}' '${resolve("test/tools/claude_standin.ts")}' "$@"\n`);
 chmodSync(join(fake, "claude"), 0o755);
-for (const n of ["codex", "grok", "muse"]) { writeFileSync(join(fake, n), "#!/bin/sh\nexit 1\n"); chmodSync(join(fake, n), 0o755); }
+for (const n of ["codex", "grok", "muse", "omp"]) { writeFileSync(join(fake, n), "#!/bin/sh\nexit 1\n"); chmodSync(join(fake, n), 0o755); }
 const socket = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } });
 const port = socket.port; socket.stop(true);
 let fail = 0;

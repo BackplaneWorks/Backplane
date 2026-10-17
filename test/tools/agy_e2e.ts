@@ -35,7 +35,7 @@ const root = mkdtempSync(join(tmpdir(), "bp-agy-"));
 const fake = join(root, "bin");
 const log = join(root, "agy.log");
 mkdirSync(fake);
-for (const c of ["claude", "codex", "grok", "muse"]) { writeFileSync(join(fake, c), "#!/bin/sh\nexit 1\n"); chmodSync(join(fake, c), 0o755); }
+for (const c of ["claude", "codex", "grok", "muse", "omp"]) { writeFileSync(join(fake, c), "#!/bin/sh\nexit 1\n"); chmodSync(join(fake, c), 0o755); }
 const home = join(root, "home");
 const proj = join(root, "proj");
 mkdirSync(proj);

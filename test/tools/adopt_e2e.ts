@@ -72,7 +72,7 @@ async function scenario(kind: "on" | "off" | "crash") {
   for (const d of [fake, home, proj, prefix, join(prefix, "web")]) mkdirSync(d);
   writeFileSync(join(fake, "claude"), `#!/bin/sh\nexec ${process.execPath} ${resolve("test/tools/claude_standin.ts")} "$@"\n`);
   chmodSync(join(fake, "claude"), 0o755);
-  for (const n of ["codex", "grok", "muse"]) { writeFileSync(join(fake, n), "#!/bin/sh\nexit 1\n"); chmodSync(join(fake, n), 0o755); }
+  for (const n of ["codex", "grok", "muse", "omp"]) { writeFileSync(join(fake, n), "#!/bin/sh\nexit 1\n"); chmodSync(join(fake, n), 0o755); }
   writeFileSync(join(home, "events.jsonl"), "");
   copyFileSync(resolve(bin), join(prefix, "backplane"));
   chmodSync(join(prefix, "backplane"), 0o755);
