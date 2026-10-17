@@ -1,5 +1,6 @@
 import Base
 import ./json.bend as J
+import ./diff.bend as DF
 
 # Grok over ACP (Agent Client Protocol: JSON-RPC over stdio), one process
 # per turn: initialize, then session/new (or session/load to resume), then
@@ -228,6 +229,19 @@ def Acp.has.str(xs: List<&2, J.Json>, +x: String) -> Bool:
 
 def Acp.elicit.approve(params: J.Json) -> Bool:
   Acp.has.str(J.Json.elems(J.Json.get_obj(J.Json.get_obj(J.Json.get_obj(J.Json.get_obj(params, "requestedSchema"), "properties"), "value"), "enum")), "Approve")
+
+# the first line of omp's approval form says "Allow tool: <tool>"; any other
+# form's message is the tool itself
+def Acp.elicit.tool.k(allow: Bool, +line: String) -> String:
+  match allow:
+    case True{}:
+      String.drop(line, 12n)
+    case False{}:
+      line
+
+# the tool an approval form asks about (only its first line is read)
+def Acp.elicit.tool(+message: String) -> String:
+  Acp.elicit.tool.k(String.starts_with(message, "Allow tool: "), DF.Diff.first(message))
 
 # the response: accept carries Approve, anything else declines
 def Acp.elicit.result(+answer: String) -> String:

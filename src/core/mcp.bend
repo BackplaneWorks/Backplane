@@ -1012,14 +1012,14 @@ def Muse.permit(+s: M.State, +now: Nat, +thread: String, +o: J.Json) -> McpOut:
 # omp's approval forms
 # --------------------
 # An elicitation/create form omp sends for an approval (Acp.elicit.approve)
-# is an approval ask like Grok's, its card showing the form's message; the
-# answer goes back as Approve or decline (Acp.elicit.answer). Any other form
-# is declined at once and never asked.
+# is an approval ask like Grok's: its card names the tool (Acp.elicit.tool)
+# and shows the form's message; the answer goes back as Approve or decline
+# (Acp.elicit.answer). Any other form is declined at once and never asked.
 
 def Elicit.permit.k(approve: Bool, +ask: String, +now: Nat, +thread: String, +o: J.Json, +text: String) -> McpOut:
   match approve:
     case True{}:
-      McpOut{"", B.Step{[M.AskOpened{ask, thread, "approval", text, text, "", now}], Nil{}}, ask}
+      McpOut{"", B.Step{[M.AskOpened{ask, thread, "approval", AC.Acp.elicit.tool(text), text, "", now}], Nil{}}, ask}
     case False{}:
       McpOut{AC.Acp.elicit.reply(AC.Acp.id(J.Json.get(o, "id")), "decline"), B.Step.none(), ""}
 

@@ -197,3 +197,5 @@ def main() -> IO(Unit):
     C.Check.str("omp form decline", MC.Mcp.permission.reply(ap.form("Approve the tool?", "[\"Approve\",\"Deny\"]"), "decline"), "{\"jsonrpc\":\"2.0\",\"id\":\"e1\",\"result\":{\"action\":\"decline\"}}")
     C.Check.str("omp other form declines", ap.reply(ap.handle(ap.form("Pick one", "[\"Yes\",\"No\"]"))), "{\"jsonrpc\":\"2.0\",\"id\":\"e1\",\"result\":{\"action\":\"decline\"}}")
     C.Check.str("omp other form never asks", ap.kind(ap.cs(ap.handle(ap.form("Pick one", "[\"Yes\",\"No\"]")))), "")
+    # the live omp form (test/fixtures/omp/form.jsonl line 64): the card's tool is the tool, its detail the whole message
+    C.Check.str("omp live form card", ap.kind(ap.cs(ap.handle(ap.form("Allow tool: write\\nPath: form-check.txt\\nContent:\\nhello", "[\"Approve\",\"Deny\"]")))), "approval|t1|write|Allow tool: write\nPath: form-check.txt\nContent:\nhello")

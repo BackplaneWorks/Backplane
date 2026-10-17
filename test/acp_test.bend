@@ -107,3 +107,6 @@ def main() -> IO(Unit):
     C.Check.str("acp error default grok", A.Acp.error(J.Json.obj([J.KV{"id", J.Num{"2"}}])), "grok failed")
     C.Check.str("acp error named", A.Acp.error.named(J.Json.obj([J.KV{"id", J.Num{"2"}}]), "omp"), "omp failed")
     C.Check.str("acp error message kept", A.Acp.error.named(J.Json.obj([J.KV{"error", J.Json.obj([J.KV{"message", J.Str{"nope"}}])}]), "omp"), "nope")
+    C.Check.str("acp elicit tool from omp's live form", A.Acp.elicit.tool("Allow tool: write\nPath: form-check.txt\nContent:\nhello"), "write")
+    C.Check.str("acp elicit tool from another form", A.Acp.elicit.tool("Approve the tool?"), "Approve the tool?")
+    C.Check.str("acp elicit tool without a body", A.Acp.elicit.tool("Allow tool: bash"), "bash")
