@@ -243,9 +243,11 @@ def Acp.elicit.tool.k(allow: Bool, +line: String) -> String:
 def Acp.elicit.tool(+message: String) -> String:
   Acp.elicit.tool.k(String.starts_with(message, "Allow tool: "), DF.Diff.first(message))
 
-# the response: accept carries Approve, anything else declines
+# the response: Allow carries Approve, and so does "session" (Allow for
+# session): an omp form cannot remember an approval, so it answers once.
+# Anything else declines.
 def Acp.elicit.result(+answer: String) -> String:
-  Bool.pick(String, String.eq(answer, "accept"), "{\"action\":\"accept\",\"content\":{\"value\":\"Approve\"}}", "{\"action\":\"decline\"}")
+  Bool.pick(String, Bool.or(String.eq(answer, "accept"), String.eq(answer, "session")), "{\"action\":\"accept\",\"content\":{\"value\":\"Approve\"}}", "{\"action\":\"decline\"}")
 
 def Acp.elicit.reply(+id: String, +answer: String) -> String:
   "{\"jsonrpc\":\"2.0\",\"id\":" ++ id ++ ",\"result\":" ++ Acp.elicit.result(answer) ++ "}"
