@@ -1,4 +1,5 @@
 import Base
+import ./src/core/pcb2d.bend as PCB2 # PCB viewer text
 import ./src/app/side_rows.bend as SR
 import ./src/app/side_row_types.bend as SRT
 import ./src/gfx/draw.bend as D
@@ -12338,3 +12339,7 @@ def Laws.mailroom_covers_plane(p):
 def Laws.mail_body_kept_output(k, o, at, due): {==}
 
 def Laws.mail_age_relative_deadline(): {==}
+
+# ---- PCB viewer text ----
+def Laws.pcb2_hidden_text_draws_nothing(at, angle, x, text, up, key, sig, ctx):
+  {==}

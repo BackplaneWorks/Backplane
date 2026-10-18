@@ -17,6 +17,7 @@ import ./theme.bend as T
 import ./viewer.bend as V
 import ../server/plot.bend as PV
 import ../core/board.bend as B
+import ../core/pcb2d.bend as P2
 import ../gfx/draw.bend as D
 import ../server/kicad.bend as K
 import ../gfx/text.bend as X
@@ -1401,7 +1402,7 @@ def Watch.parse.k(sch: Bool, bs: List<&2, U32>) -> Maybe<&2, List<&2, B.Item>>:
     case True{}:
       SC.Sch.items(bs)
     case False{}:
-      B.Board.items(bs)
+      P2.Pcb2.items(bs)
 
 def Watch.parse(+kind: U32, bs: List<&2, U32>) -> Maybe<&2, List<&2, B.Item>>:
   Watch.parse.k(U32.is_eq(kind, 1), bs)

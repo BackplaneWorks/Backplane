@@ -1,4 +1,5 @@
 import Base
+import ./src/core/pcb2d.bend as PCB2 # PCB viewer text
 import ./src/app/side_rows.bend as SR
 import ./src/app/side_row_types.bend as SRT
 import ./src/server/botnet.bend as MPLOG # mail perf runtime count
@@ -10640,3 +10641,15 @@ law mail_body_kept_output:
 
 law mail_age_relative_deadline:
   {MM.BotM.age_due(160n, 101n) == 161n : Nat}
+
+# ---- PCB viewer text ----
+law pcb2_hidden_text_draws_nothing:
+  for +at: B.Pt
+  for +angle: F32
+  for +x: KSEX.Sx
+  for +text: String
+  for +up: Bool
+  for +key: String
+  for +sig: U32
+  for +ctx: String
+  {PCB2.Text.visible.k(True{}, at, angle, x, text, up, key, sig, ctx) == Nil{} : List<&2, B.Item>}
