@@ -1,0 +1,89 @@
+name: Windows build
+
+on:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: Source ref (the caller's commit when empty)
+        type: string
+        default: ''
+      version:
+        description: Release version (a CI commit label when empty)
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  emit:
+    name: Emit windows-x64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      BACKPLANE_VERSION: ${{ inputs.version }}
+      BUN_JSC_forceRAMSize: '4294967296'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: ./.github/actions/setup-bend
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.3'
+      - run: scripts/emit-windows.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64-emitted
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+          path: |
+            build/windows-emitted/
+            build/windows-helpers/
+            dist/web/
+
+  build:
+    name: Build and test windows-x64
+    needs: [emit]
+    runs-on: windows-2022
+    timeout-minutes: 75
+    env:
+      BACKPLANE_VERSION: ${{ inputs.version }}
+      BACKPLANE_JOBS: '2'
+      BACKPLANE_CYGWIN_ROOT: ${{ github.workspace }}\..\backplane-cygwin
+    steps:
+      - name: Keep shell sources as LF
+        shell: pwsh
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-x64-emitted
+          path: .
+      - name: Install native Cygwin compiler and runtime
+        shell: pwsh
+        run: ./scripts/setup-windows.ps1 -Root $env:BACKPLANE_CYGWIN_ROOT -BuildTools
+      - name: Install real Windows provider CLIs (no login)
+        shell: pwsh
+        run: ./scripts/install-windows-providers.ps1
+      - name: Compile, native smoke tests and Windows package
+        shell: pwsh
+        run: |
+          $bin = Join-Path $env:BACKPLANE_CYGWIN_ROOT 'bin'
+          $env:PATH = $bin + ';' + $env:PATH
+          $script = & (Join-Path $bin 'cygpath.exe') -u "$env:GITHUB_WORKSPACE/scripts/ci-windows.sh"
+          if ($LASTEXITCODE -ne 0) { throw 'Cygwin path conversion failed' }
+          & (Join-Path $bin 'bash.exe') --login $script
+          exit $LASTEXITCODE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: backplane-windows-x64
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            dist/backplane-*-windows-x64.zip
+            dist/backplane-*-windows-x64.zip.sha256

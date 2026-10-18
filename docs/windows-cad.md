@@ -70,3 +70,9 @@ BACKPLANE_FREECAD='C:\FreeCAD\FreeCADCmd.exe' python3 test/tools/windows-freecad
 
 The test pads a disposable copy above the native fallback threshold and
 requires the actual FreeCAD GLB generator and the original orange material.
+
+The Windows CI emit job builds these helpers with pinned Bun 1.4.3 and uploads
+their checksum manifest alongside the portable C. The Windows job verifies
+and stages them, tests the actual compiled KiCad Worker, and includes both
+executables, dependency licenses and WINDOWS-HELPERS.json in the app ZIP.
+FreeCAD and the Backplane KiCad runtime are installed separately.
