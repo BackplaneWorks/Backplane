@@ -52,6 +52,7 @@ menu.delete.confirm = Click again to delete
 menu.unpin = Unpin
 menu.pin = Pin
 menu.rename = Rename
+menu.link = Link
 menu.copylink = Copy link
 menu.bringback = Bring back
 menu.archive = Archive

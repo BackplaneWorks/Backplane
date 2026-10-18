@@ -1,4 +1,7 @@
 import Base
+import ./src/core/images.bend as IM
+import ./src/core/chip.bend as CHIP
+import ./src/app/chipx.bend as CX
 import ./src/app/side_rows.bend as SR
 import ./src/app/side_row_types.bend as SRT
 import ./src/gfx/draw.bend as D
@@ -12338,3 +12341,847 @@ def Laws.mailroom_covers_plane(p):
 def Laws.mail_body_kept_output(k, o, at, due): {==}
 
 def Laws.mail_age_relative_deadline(): {==}
+
+# ---- links (window chips) ----
+def Laws.chip_bare_unresolved_text():
+  {==}
+
+def Laws.chip_explicit_unresolved_text():
+  {==}
+
+def Laws.chip_explicit_resolved():
+  {==}
+
+def Laws.chip_text_is_card_line():
+  {==}
+
+def Laws.chip_machine_apart():
+  {==}
+
+def Laws.chip_cut():
+  {==}
+
+def Laws.chip_cut_short():
+  {==}
+
+def Laws.chip_deps():
+  {==}
+
+def Laws.chip_deps_unresolved_bare():
+  {==}
+
+def Laws.chip_deps_unresolved_names_id():
+  {==}
+
+def Laws.chip_enc_cut():
+  {==}
+
+def Laws.chip_same_label_apart():
+  {==}
+
+def Laws.chip_cut_links_only():
+  {==}
+
+def Laws.chip_dirty_message():
+  {==}
+
+def Laws.chip_dirty_rename():
+  {==}
+
+def Laws.chip_dirty_turn():
+  {==}
+
+def Laws.chip_dirty_settle():
+  {==}
+
+def Laws.chip_dirty_delete():
+  {==}
+
+def Laws.chip_dirty_bot():
+  {==}
+
+def Laws.chip_dirty_room():
+  {==}
+
+def Laws.chip_dirty_routine():
+  {==}
+
+def Laws.chip_dirty_setting():
+  {==}
+
+def Laws.chip_dirty_hit_empty(deps):
+  {==}
+
+def Laws.chip_dirty_hit():
+  {==}
+
+def Laws.chip_dirty_miss():
+  {==}
+
+def Laws.chip_dirty_all():
+  {==}
+
+def Laws.chip_dirty_all_plain():
+  {==}
+
+
+def Laws.tl_cm_plain_old(ty, e, st, px, sel, h):
+  %Equal.sym(Bool, L.TL.cm.chip(e, sel), False{}, h) : {L.TL.cm.item.k(_, ty, e, st, px, sel) == L.TL.memo.item(ty, e, px, sel) : L.TLE}
+  {==}
+
+def Laws.tl_cm_plain_item(ty, e, st, st2, px, sel, h):
+  %Equal.sym(L.TLE, L.TL.cm.item(ty, e, st2, px, sel), L.TL.memo.item(ty, e, px, sel), Laws.tl_cm_plain_old(ty, e, st2, px, sel, h)) : {L.TL.cm.item(ty, e, st, px, sel) == _ : L.TLE}
+  Laws.tl_cm_plain_old(ty, e, st, px, sel, h)
+
+def Laws.chip_title_fits():
+  {==}
+
+def Laws.chip_status_whole():
+  {==}
+
+def Laws.chip_title_ellipsis():
+  {==}
+
+def Laws.chip_title_short():
+  {==}
+
+def Laws.chip_title_no_room():
+  {==}
+
+# ---- links (window chips): exactness and soundness ----
+# ---- links (window chips): exactness ----
+law eq_strs_sound:
+  for a: List<&2, String>
+  for b: List<&2, String>
+  for +h: {CHIP.Chip.eq.strs(a, b) == True{} : Bool}
+  {a == b : List<&2, String>}
+
+def eq_strs_sound(a, b, h):
+  match a b:
+    case Nil{} Nil{}:
+      {==}
+    case Nil{} +y <> +yt:
+      Empty.absurd({Nil{} == y <> yt : List<&2, String>}, false_ne_true(h))
+    case +x <> +xt Nil{}:
+      Empty.absurd({x <> xt == Nil{} : List<&2, String>}, false_ne_true(h))
+    case +x <> +xt +y <> +yt:
+      e0 = eq_str_sound(x, y, and_l(Q.Eq.str(x, y), CHIP.Chip.eq.strs(xt, yt), h))
+      e1 = eq_strs_sound(xt, yt, and_r(Q.Eq.str(x, y), CHIP.Chip.eq.strs(xt, yt), h))
+      %e0 : {x <> xt == _ <> yt : List<&2, String>}
+      %e1 : {x <> xt == x <> _ : List<&2, String>}
+      {==}
+
+law eq_cp_sound:
+  for a: L.Cp
+  for b: L.Cp
+  for +h: {CX.Eq.cp(a, b) == True{} : Bool}
+  {a == b : L.Cp}
+
+def eq_cp_sound(a, b, h):
+  match a b:
+    case L.Cp{+a0, +a1, +a2, +a3} L.Cp{+b0, +b1, +b2, +b3}:
+      +hl0 = and_l(Q.Eq.str(a0, b0), Bool.and(Q.Eq.str(a1, b1), Bool.and(Q.Eq.str(a2, b2), CHIP.Chip.eq.strs(a3, b3))), h)
+      +hr0 = and_r(Q.Eq.str(a0, b0), Bool.and(Q.Eq.str(a1, b1), Bool.and(Q.Eq.str(a2, b2), CHIP.Chip.eq.strs(a3, b3))), h)
+      e0 = eq_str_sound(a0, b0, hl0)
+      +hl1 = and_l(Q.Eq.str(a1, b1), Bool.and(Q.Eq.str(a2, b2), CHIP.Chip.eq.strs(a3, b3)), hr0)
+      +hr1 = and_r(Q.Eq.str(a1, b1), Bool.and(Q.Eq.str(a2, b2), CHIP.Chip.eq.strs(a3, b3)), hr0)
+      e1 = eq_str_sound(a1, b1, hl1)
+      +hl2 = and_l(Q.Eq.str(a2, b2), CHIP.Chip.eq.strs(a3, b3), hr1)
+      +hr2 = and_r(Q.Eq.str(a2, b2), CHIP.Chip.eq.strs(a3, b3), hr1)
+      e2 = eq_str_sound(a2, b2, hl2)
+      e3 = eq_strs_sound(a3, b3, hr2)
+      %e0 : {L.Cp{a0, a1, a2, a3} == L.Cp{_, b1, b2, b3} : L.Cp}
+      %e1 : {L.Cp{a0, a1, a2, a3} == L.Cp{a0, _, b2, b3} : L.Cp}
+      %e2 : {L.Cp{a0, a1, a2, a3} == L.Cp{a0, a1, _, b3} : L.Cp}
+      %e3 : {L.Cp{a0, a1, a2, a3} == L.Cp{a0, a1, a2, _} : L.Cp}
+      {==}
+
+law eq_cps_sound:
+  for a: List<&2, L.Cp>
+  for b: List<&2, L.Cp>
+  for +h: {CX.Eq.cps(a, b) == True{} : Bool}
+  {a == b : List<&2, L.Cp>}
+
+def eq_cps_sound(a, b, h):
+  match a b:
+    case Nil{} Nil{}:
+      {==}
+    case Nil{} +y <> +yt:
+      Empty.absurd({Nil{} == y <> yt : List<&2, L.Cp>}, false_ne_true(h))
+    case +x <> +xt Nil{}:
+      Empty.absurd({x <> xt == Nil{} : List<&2, L.Cp>}, false_ne_true(h))
+    case +x <> +xt +y <> +yt:
+      e0 = eq_cp_sound(x, y, and_l(CX.Eq.cp(x, y), CX.Eq.cps(xt, yt), h))
+      e1 = eq_cps_sound(xt, yt, and_r(CX.Eq.cp(x, y), CX.Eq.cps(xt, yt), h))
+      %e0 : {x <> xt == _ <> yt : List<&2, L.Cp>}
+      %e1 : {x <> xt == x <> _ : List<&2, L.Cp>}
+      {==}
+
+law eq_rz_sound:
+  for a: List<&2, List<&2, L.Cp>>
+  for b: List<&2, List<&2, L.Cp>>
+  for +h: {CX.Eq.rz(a, b) == True{} : Bool}
+  {a == b : List<&2, List<&2, L.Cp>>}
+
+def eq_rz_sound(a, b, h):
+  match a b:
+    case Nil{} Nil{}:
+      {==}
+    case Nil{} +y <> +yt:
+      Empty.absurd({Nil{} == y <> yt : List<&2, List<&2, L.Cp>>}, false_ne_true(h))
+    case +x <> +xt Nil{}:
+      Empty.absurd({x <> xt == Nil{} : List<&2, List<&2, L.Cp>>}, false_ne_true(h))
+    case +x <> +xt +y <> +yt:
+      e0 = eq_cps_sound(x, y, and_l(CX.Eq.cps(x, y), CX.Eq.rz(xt, yt), h))
+      e1 = eq_rz_sound(xt, yt, and_r(CX.Eq.cps(x, y), CX.Eq.rz(xt, yt), h))
+      %e0 : {x <> xt == _ <> yt : List<&2, List<&2, L.Cp>>}
+      %e1 : {x <> xt == x <> _ : List<&2, List<&2, L.Cp>>}
+      {==}
+
+# Reusing a paragraph whose resolution is equal keeps exactly its fresh
+# lines. Width, typography and node are fixed by the containing memo.
+law tl_cache_one_k_exact:
+  for hit: Bool
+  for +ty: L.Ty
+  for +n: DM.Node
+  for +before: List<&2, L.Cp>
+  for +after: List<&2, L.Cp>
+  for +px: U32
+  for h: {L.Cp.eqs(before, after) == hit : Bool}
+  {L.TL.cache.one.k(hit, ty, n, after, px, L.TLBlock{before, L.TL.rblock(ty, n, before, px)}) == L.TLBlock{after, L.TL.rblock(ty, n, after, px)} : L.TLBlock}
+
+def tl_cache_one_k_exact(hit, ty, n, before, after, px, h):
+  match hit:
+    case False{}: {==}
+    case True{}:
+      e = eq_cps_sound(before, after, h)
+      %e : {L.TLBlock{before, L.TL.rblock(ty, n, before, px)} == L.TLBlock{_, L.TL.rblock(ty, n, _, px)} : L.TLBlock}
+      {==}
+
+law tl_cache_one_exact:
+  for +ty: L.Ty
+  for +n: DM.Node
+  for +before: List<&2, L.Cp>
+  for +after: List<&2, L.Cp>
+  for +px: U32
+  {L.TL.cache.one(ty, n, after, px, L.TLBlock{before, L.TL.rblock(ty, n, before, px)}) == L.TLBlock{after, L.TL.rblock(ty, n, after, px)} : L.TLBlock}
+
+def tl_cache_one_exact(ty, n, before, after, px):
+  tl_cache_one_k_exact(L.Cp.eqs(before, after), ty, n, before, after, px, {==})
+
+def Laws.tl_cache_again_exact(ns, before, after, ty, px):
+  match ns:
+    case Nil{}: {==}
+    case +n <> +t:
+      +a = L.TL.cache.one(ty, n, L.Rz.head.l(after), px, L.TLBlock{L.Rz.head.l(before), L.TL.rblock(ty, n, L.Rz.head.l(before), px)})
+      +at = L.TL.cache.again(t, L.Rz.tail.l(after), ty, px, L.TL.cache.make(t, L.Rz.tail.l(before), ty, px))
+      +bt = L.TL.cache.make(t, L.Rz.tail.l(after), ty, px)
+      e0 = tl_cache_one_exact(ty, n, L.Rz.head.l(before), L.Rz.head.l(after), px)
+      e1 = Laws.tl_cache_again_exact(t, L.Rz.tail.l(before), L.Rz.tail.l(after), ty, px)
+      %e0 : {a <> at == _ <> bt : List<&2, L.TLBlock>}
+      %e1 : {a <> at == a <> _ : List<&2, L.TLBlock>}
+      {==}
+
+def Laws.tl_cache_lines_exact(ns, rz, ty, px):
+  match ns:
+    case Nil{}: {==}
+    case +n <> +t:
+      match t:
+        case Nil{}: {==}
+        case +h <> +tail:
+          Equal.cong(List<&2, L.TLine>, List<&2, L.TLine>, ls => List.append(&2, L.TLine, L.TL.rblock(ty, n, L.Rz.head.l(rz), px), L.TLine{"", 0, 4, "", 0} <> ls), L.TL.cache.lines(L.TL.cache.make(h <> tail, L.Rz.tail.l(rz), ty, px)), L.TL.rblocks(ty, h <> tail, L.Rz.tail.l(rz), px), Laws.tl_cache_lines_exact(h <> tail, L.Rz.tail.l(rz), ty, px))
+
+# the items made from one entry under two states are the same when the
+# states make the same of its refs
+law tl_cm_item_same_k:
+  for c: Bool
+  for +ty: L.Ty
+  for +e: M.Entry
+  for +st0: M.State
+  for +st: M.State
+  for +px: U32
+  for +sel: String
+  for +h: {Bool.or(Bool.not(c), CX.Same.entry(st0, st, e)) == True{} : Bool}
+  {L.TL.cm.item.k(c, ty, e, st0, px, sel) == L.TL.cm.item.k(c, ty, e, st, px, sel) : L.TLE}
+
+def tl_cm_item_same_k(c, ty, e, st0, st, px, sel, h):
+  match c:
+    case False{}:
+      {==}
+    case True{}:
+      match e:
+        case M.Msg{+a0, +a1, +a2, +a3, +a4}:
+          match a2:
+            case M.User{}:
+              ez = eq_rz_sound(L.Rz.entry(st0, M.Msg{a0, a1, M.User{}, a3, a4}), L.Rz.entry(st, M.Msg{a0, a1, M.User{}, a3, a4}), h)
+              %ez : {L.TLE{M.Msg{a0, a1, M.User{}, a3, a4}, L.TL.part.user.z(ty, a3, [[L.Cp.body(st0, AT.Att.body(a3))]], px)} == L.TLE{M.Msg{a0, a1, M.User{}, a3, a4}, L.TL.part.user.z(ty, a3, _, px)} : L.TLE}
+              {==}
+            case M.Assistant{}:
+              ez = eq_rz_sound(L.Rz.entry(st0, M.Msg{a0, a1, M.Assistant{}, a3, a4}), L.Rz.entry(st, M.Msg{a0, a1, M.Assistant{}, a3, a4}), h)
+              %ez : {L.TLE{M.Msg{a0, a1, M.Assistant{}, a3, a4}, L.TL.part.md.z(ty, a3, DM.Md.render(a3), L.TL.imgs(a3), L.Rz.blocks(st0, DM.Md.render(a3)), px)} == L.TLE{M.Msg{a0, a1, M.Assistant{}, a3, a4}, L.TL.part.md.z(ty, a3, DM.Md.render(a3), L.TL.imgs(a3), _, px)} : L.TLE}
+              {==}
+            case M.System{}:
+              ez = eq_rz_sound(L.Rz.entry(st0, M.Msg{a0, a1, M.System{}, a3, a4}), L.Rz.entry(st, M.Msg{a0, a1, M.System{}, a3, a4}), h)
+              %ez : {L.TLE{M.Msg{a0, a1, M.System{}, a3, a4}, L.TL.part.md.z(ty, a3, DM.Md.render(a3), L.TL.imgs(a3), L.Rz.blocks(st0, DM.Md.render(a3)), px)} == L.TLE{M.Msg{a0, a1, M.System{}, a3, a4}, L.TL.part.md.z(ty, a3, DM.Md.render(a3), L.TL.imgs(a3), _, px)} : L.TLE}
+              {==}
+        case M.Act{+a0, +a1, +a2, +a3, +a4, +a5}:
+          {==}
+
+# a card changed: the item is made again, and is the item made from scratch
+law tl_cm_redo_msg:
+  for +ty: L.Ty
+  for +st0: M.State
+  for +st: M.State
+  for +px: U32
+  for +sel: String
+  for +a0: String
+  for +a1: String
+  for +a2: M.Role
+  for +a3: String
+  for +a4: Nat
+  for +hm: {L.TL.cm.chip(M.Msg{a0, a1, a2, a3, a4}, sel) == True{} : Bool}
+  {L.TL.cm.redo(ty, M.Msg{a0, a1, a2, a3, a4}, st, px, sel, L.TLE{M.Msg{a0, a1, a2, a3, a4}, L.TL.part.own.c(ty, st0, M.Msg{a0, a1, a2, a3, a4}, px)}) == L.TLE{M.Msg{a0, a1, a2, a3, a4}, L.TL.part.own.c(ty, st, M.Msg{a0, a1, a2, a3, a4}, px)} : L.TLE}
+
+def tl_cm_redo_msg(ty, st0, st, px, sel, a0, a1, a2, a3, a4, hm):
+  match a2:
+    case M.User{}:
+      %Equal.sym(Bool, L.TL.mine_of(M.Msg{a0, a1, M.User{}, a3, a4}, sel), True{}, hm) : {L.TL.cm.item.k(_, ty, M.Msg{a0, a1, M.User{}, a3, a4}, st, px, sel) == L.TLE{M.Msg{a0, a1, M.User{}, a3, a4}, L.TL.part.own.c(ty, st, M.Msg{a0, a1, M.User{}, a3, a4}, px)} : L.TLE}
+      {==}
+    case M.Assistant{}:
+      e = Laws.tl_cache_again_exact(DM.Md.render(a3), L.Rz.blocks(st0, DM.Md.render(a3)), L.Rz.blocks(st, DM.Md.render(a3)), ty, px)
+      %e : {L.TLE{M.Msg{a0, a1, M.Assistant{}, a3, a4}, L.TL.part.md.up(ty, st, a3, DM.Md.render(a3), L.TL.imgs(a3), L.TL.cache.make(DM.Md.render(a3), L.Rz.blocks(st0, DM.Md.render(a3)), ty, px), px)} == L.TLE{M.Msg{a0, a1, M.Assistant{}, a3, a4}, L.TL.part.md.b(a3, DM.Md.render(a3), L.TL.imgs(a3), L.Rz.blocks(st, DM.Md.render(a3)), _)} : L.TLE}
+      {==}
+    case M.System{}:
+      e = Laws.tl_cache_again_exact(DM.Md.render(a3), L.Rz.blocks(st0, DM.Md.render(a3)), L.Rz.blocks(st, DM.Md.render(a3)), ty, px)
+      %e : {L.TLE{M.Msg{a0, a1, M.System{}, a3, a4}, L.TL.part.md.up(ty, st, a3, DM.Md.render(a3), L.TL.imgs(a3), L.TL.cache.make(DM.Md.render(a3), L.Rz.blocks(st0, DM.Md.render(a3)), ty, px), px)} == L.TLE{M.Msg{a0, a1, M.System{}, a3, a4}, L.TL.part.md.b(a3, DM.Md.render(a3), L.TL.imgs(a3), L.Rz.blocks(st, DM.Md.render(a3)), _)} : L.TLE}
+      {==}
+
+# the touched ids reach the item: made again; they do not: the same cards
+law tl_cm_one_h:
+  for hh: Bool
+  for +ty: L.Ty
+  for +st0: M.State
+  for +st: M.State
+  for +px: U32
+  for +sel: String
+  for +a0: String
+  for +a1: String
+  for +a2: M.Role
+  for +a3: String
+  for +a4: Nat
+  for +hm: {L.TL.cm.chip(M.Msg{a0, a1, a2, a3, a4}, sel) == True{} : Bool}
+  for +hs: {Bool.or(hh, CX.Same.entry(st0, st, M.Msg{a0, a1, a2, a3, a4})) == True{} : Bool}
+  {L.TL.cm.one.h(hh, ty, M.Msg{a0, a1, a2, a3, a4}, st, px, sel, L.TLE{M.Msg{a0, a1, a2, a3, a4}, L.TL.part.own.c(ty, st0, M.Msg{a0, a1, a2, a3, a4}, px)}) == L.TLE{M.Msg{a0, a1, a2, a3, a4}, L.TL.part.own.c(ty, st, M.Msg{a0, a1, a2, a3, a4}, px)} : L.TLE}
+
+def tl_cm_one_h(hh, ty, st0, st, px, sel, a0, a1, a2, a3, a4, hm, hs):
+  match hh:
+    case True{}:
+      tl_cm_redo_msg(ty, st0, st, px, sel, a0, a1, a2, a3, a4, hm)
+    case False{}:
+      tl_cm_item_same_k(True{}, ty, M.Msg{a0, a1, a2, a3, a4}, st0, st, px, sel, hs)
+
+law tl_cm_one_c_msg:
+  for +ty: L.Ty
+  for +st0: M.State
+  for +st: M.State
+  for +dirty: List<&2, String>
+  for +px: U32
+  for +sel: String
+  for +a0: String
+  for +a1: String
+  for +a2: M.Role
+  for +a3: String
+  for +a4: Nat
+  for +hm: {L.TL.cm.chip(M.Msg{a0, a1, a2, a3, a4}, sel) == True{} : Bool}
+  for +h: {CX.Cov.entry(st0, st, dirty, M.Msg{a0, a1, a2, a3, a4}) == True{} : Bool}
+  {L.TL.cm.one.c(True{}, dirty, ty, M.Msg{a0, a1, a2, a3, a4}, st, px, sel, L.TLE{M.Msg{a0, a1, a2, a3, a4}, L.TL.part.own.c(ty, st0, M.Msg{a0, a1, a2, a3, a4}, px)}) == L.TLE{M.Msg{a0, a1, a2, a3, a4}, L.TL.part.own.c(ty, st, M.Msg{a0, a1, a2, a3, a4}, px)} : L.TLE}
+
+def tl_cm_one_c_msg(ty, st0, st, dirty, px, sel, a0, a1, a2, a3, a4, hm, h):
+  match a2:
+    case M.User{}:
+      tl_cm_one_h(L.TL.dirty.hit(dirty, L.Rz.deps(L.Rz.entry(st0, M.Msg{a0, a1, M.User{}, a3, a4}))), ty, st0, st, px, sel, a0, a1, M.User{}, a3, a4, hm, h)
+    case M.Assistant{}:
+      tl_cm_one_h(L.TL.dirty.hit(dirty, L.Rz.deps(L.Rz.entry(st0, M.Msg{a0, a1, M.Assistant{}, a3, a4}))), ty, st0, st, px, sel, a0, a1, M.Assistant{}, a3, a4, hm, h)
+    case M.System{}:
+      tl_cm_one_h(L.TL.dirty.hit(dirty, L.Rz.deps(L.Rz.entry(st0, M.Msg{a0, a1, M.System{}, a3, a4}))), ty, st0, st, px, sel, a0, a1, M.System{}, a3, a4, hm, h)
+
+law tl_cm_one_c:
+  for c: Bool
+  for +ty: L.Ty
+  for +o: M.Entry
+  for +st0: M.State
+  for +st: M.State
+  for +dirty: List<&2, String>
+  for +px: U32
+  for +sel: String
+  for +hc: {L.TL.cm.chip(o, sel) == c : Bool}
+  for +h: {Bool.or(Bool.not(c), CX.Cov.entry(st0, st, dirty, o)) == True{} : Bool}
+  {L.TL.cm.one.c(c, dirty, ty, o, st, px, sel, L.TL.cm.item.k(c, ty, o, st0, px, sel)) == L.TL.cm.item.k(c, ty, o, st, px, sel) : L.TLE}
+
+def tl_cm_one_c(c, ty, o, st0, st, dirty, px, sel, hc, h):
+  match c:
+    case False{}:
+      {==}
+    case True{}:
+      match o:
+        case M.Msg{+a0, +a1, +a2, +a3, +a4}:
+          tl_cm_one_c_msg(ty, st0, st, dirty, px, sel, a0, a1, a2, a3, a4, hc, h)
+        case M.Act{+a0, +a1, +a2, +a3, +a4, +a5}:
+          Empty.absurd({L.TL.cm.one.c(True{}, dirty, ty, M.Act{a0, a1, a2, a3, a4, a5}, st, px, sel, L.TL.cm.item.k(True{}, ty, M.Act{a0, a1, a2, a3, a4, a5}, st0, px, sel)) == L.TL.cm.item.k(True{}, ty, M.Act{a0, a1, a2, a3, a4, a5}, st, px, sel) : L.TLE}, false_ne_true(hc))
+
+# the item's entry is the entry: the item stays or is made again, and is the
+# item made from scratch
+law tl_cm_one_sk:
+  for s: Bool
+  for c: Bool
+  for +ty: L.Ty
+  for +e: M.Entry
+  for +o: M.Entry
+  for +pp: L.TLPart
+  for +st0: M.State
+  for +st: M.State
+  for +dirty: List<&2, String>
+  for +px: U32
+  for +sel: String
+  for +hs: {Q.Eq.entry(e, o) == s : Bool}
+  for +hc: {L.TL.cm.chip(o, sel) == c : Bool}
+  for +hp: {L.TLE{o, pp} == L.TL.cm.item.k(c, ty, o, st0, px, sel) : L.TLE}
+  for +h: {Bool.or(Bool.not(c), CX.Cov.entry(st0, st, dirty, o)) == True{} : Bool}
+  {L.TL.cm.one.k(s, ty, e, st, dirty, px, sel, o, pp) == L.TL.cm.item(ty, e, st, px, sel) : L.TLE}
+
+def tl_cm_one_sk(s, c, ty, e, o, pp, st0, st, dirty, px, sel, hs, hc, hp, h):
+  match s:
+    case False{}:
+      {==}
+    case True{}:
+      eo = eq_entry_sound(e, o, hs)
+      %Equal.sym(M.Entry, e, o, eo) : {L.TL.cm.one.c(L.TL.cm.chip(o, sel), dirty, ty, o, st, px, sel, L.TLE{o, pp}) == L.TL.cm.item(ty, _, st, px, sel) : L.TLE}
+      %Equal.sym(L.TLE, L.TLE{o, pp}, L.TL.cm.item.k(c, ty, o, st0, px, sel), hp) : {L.TL.cm.one.c(L.TL.cm.chip(o, sel), dirty, ty, o, st, px, sel, _) == L.TL.cm.item(ty, o, st, px, sel) : L.TLE}
+      %Equal.sym(Bool, L.TL.cm.chip(o, sel), c, hc) : {L.TL.cm.one.c(_, dirty, ty, o, st, px, sel, L.TL.cm.item.k(c, ty, o, st0, px, sel)) == L.TL.cm.item.k(_, ty, o, st, px, sel) : L.TLE}
+      tl_cm_one_c(c, ty, o, st0, st, dirty, px, sel, hc, h)
+
+law tl_cm_one_exact:
+  for c: Bool
+  for +ty: L.Ty
+  for +e: M.Entry
+  for +o: M.Entry
+  for +st0: M.State
+  for +st: M.State
+  for +dirty: List<&2, String>
+  for +px: U32
+  for +sel: String
+  for +hc: {L.TL.cm.chip(o, sel) == c : Bool}
+  for +h: {Bool.or(Bool.not(c), CX.Cov.entry(st0, st, dirty, o)) == True{} : Bool}
+  {L.TL.cm.one(ty, e, st, dirty, px, sel, L.TL.cm.item.k(c, ty, o, st0, px, sel)) == L.TL.cm.item(ty, e, st, px, sel) : L.TLE}
+
+def tl_cm_one_exact(c, ty, e, o, st0, st, dirty, px, sel, hc, h):
+  match c:
+    case False{}:
+      tl_cm_one_sk(Q.Eq.entry(e, o), False{}, ty, e, o, L.TL.part(L.TL.mine_of(o, sel), ty, o, px), st0, st, dirty, px, sel, {==}, hc, {==}, h)
+    case True{}:
+      tl_cm_one_sk(Q.Eq.entry(e, o), True{}, ty, e, o, L.TL.part.own.c(ty, st0, o, px), st0, st, dirty, px, sel, {==}, hc, {==}, h)
+
+def Laws.tl_cm_again_exact(ty, es, old, st0, st, dirty, px, sel, h):
+  match es:
+    case Nil{}:
+      {==}
+    case +e <> +t:
+      match old:
+        case Nil{}:
+          {==}
+        case +o <> +ot:
+          +h0 = and_l(Bool.or(Bool.not(L.TL.cm.chip(o, sel)), CX.Cov.entry(st0, st, dirty, o)), CX.Cov.all(st0, st, dirty, sel, ot), h)
+          +h1 = and_r(Bool.or(Bool.not(L.TL.cm.chip(o, sel)), CX.Cov.entry(st0, st, dirty, o)), CX.Cov.all(st0, st, dirty, sel, ot), h)
+          e1 = Equal.sym(L.TLE, L.TL.cm.one(ty, e, st, dirty, px, sel, L.TL.cm.item(ty, o, st0, px, sel)), L.TL.cm.item(ty, e, st, px, sel), tl_cm_one_exact(L.TL.cm.chip(o, sel), ty, e, o, st0, st, dirty, px, sel, {==}, h0))
+          e2 = Equal.sym(List<&2, L.TLE>, L.TL.cm.again(t, ty, st, dirty, px, sel, L.TL.cm.make(ty, ot, st0, px, sel)), L.TL.cm.make(ty, t, st, px, sel), Laws.tl_cm_again_exact(ty, t, ot, st0, st, dirty, px, sel, h1))
+          %e1 : {_ <> L.TL.cm.again(t, ty, st, dirty, px, sel, L.TL.cm.make(ty, ot, st0, px, sel)) == L.TL.cm.item(ty, e, st, px, sel) <> L.TL.cm.make(ty, t, st, px, sel) : List<&2, L.TLE>}
+          %e2 : {L.TL.cm.item(ty, e, st, px, sel) <> _ == L.TL.cm.item(ty, e, st, px, sel) <> L.TL.cm.make(ty, t, st, px, sel) : List<&2, L.TLE>}
+          {==}
+
+law eq_strs_refl:
+  for +a: List<&2, String>
+  {CHIP.Chip.eq.strs(a, a) == True{} : Bool}
+
+def eq_strs_refl(a):
+  match a:
+    case Nil{}:
+      {==}
+    case +x <> +xt:
+      %Equal.sym(Bool, Q.Eq.str(x, x), True{}, eq_str_refl(x)) : {Bool.and(_, CHIP.Chip.eq.strs(xt, xt)) == True{} : Bool}
+      eq_strs_refl(xt)
+
+law eq_cp_refl:
+  for +a: L.Cp
+  {CX.Eq.cp(a, a) == True{} : Bool}
+
+def eq_cp_refl(a):
+  match a:
+    case L.Cp{+a0, +a1, +a2, +a3}:
+      %Equal.sym(Bool, Q.Eq.str(a0, a0), True{}, eq_str_refl(a0)) : {Bool.and(_, Bool.and(Q.Eq.str(a1, a1), Bool.and(Q.Eq.str(a2, a2), CHIP.Chip.eq.strs(a3, a3)))) == True{} : Bool}
+      %Equal.sym(Bool, Q.Eq.str(a1, a1), True{}, eq_str_refl(a1)) : {Bool.and(True{}, Bool.and(_, Bool.and(Q.Eq.str(a2, a2), CHIP.Chip.eq.strs(a3, a3)))) == True{} : Bool}
+      %Equal.sym(Bool, Q.Eq.str(a2, a2), True{}, eq_str_refl(a2)) : {Bool.and(True{}, Bool.and(True{}, Bool.and(_, CHIP.Chip.eq.strs(a3, a3)))) == True{} : Bool}
+      %Equal.sym(Bool, CHIP.Chip.eq.strs(a3, a3), True{}, eq_strs_refl(a3)) : {Bool.and(True{}, Bool.and(True{}, Bool.and(True{}, _))) == True{} : Bool}
+      {==}
+
+law eq_cps_refl:
+  for +a: List<&2, L.Cp>
+  {CX.Eq.cps(a, a) == True{} : Bool}
+
+def eq_cps_refl(a):
+  match a:
+    case Nil{}:
+      {==}
+    case +x <> +xt:
+      %Equal.sym(Bool, CX.Eq.cp(x, x), True{}, eq_cp_refl(x)) : {Bool.and(_, CX.Eq.cps(xt, xt)) == True{} : Bool}
+      eq_cps_refl(xt)
+
+law eq_rz_refl:
+  for +a: List<&2, List<&2, L.Cp>>
+  {CX.Eq.rz(a, a) == True{} : Bool}
+
+def eq_rz_refl(a):
+  match a:
+    case Nil{}:
+      {==}
+    case +x <> +xt:
+      %Equal.sym(Bool, CX.Eq.cps(x, x), True{}, eq_cps_refl(x)) : {Bool.and(_, CX.Eq.rz(xt, xt)) == True{} : Bool}
+      eq_rz_refl(xt)
+
+law cov_entry_refl:
+  for +st: M.State
+  for +dirty: List<&2, String>
+  for +e: M.Entry
+  {CX.Cov.entry(st, st, dirty, e) == True{} : Bool}
+
+def cov_entry_refl(st, dirty, e):
+  %Equal.sym(Bool, CX.Eq.rz(L.Rz.entry(st, e), L.Rz.entry(st, e)), True{}, eq_rz_refl(L.Rz.entry(st, e))) : {Bool.or(L.TL.dirty.hit(dirty, L.Rz.deps(L.Rz.entry(st, e))), _) == True{} : Bool}
+  or_true_r(L.TL.dirty.hit(dirty, L.Rz.deps(L.Rz.entry(st, e))))
+
+# an item made under the state stays or is made again, and is the item made
+# under it
+law tl_cm_one_same_k:
+  for c: Bool
+  for +ty: L.Ty
+  for +e: M.Entry
+  for +st: M.State
+  for +dirty: List<&2, String>
+  for +px: U32
+  for +sel: String
+  for +hc: {L.TL.cm.chip(e, sel) == c : Bool}
+  {L.TL.cm.one(ty, e, st, dirty, px, sel, L.TL.cm.item.k(c, ty, e, st, px, sel)) == L.TL.cm.item(ty, e, st, px, sel) : L.TLE}
+
+def tl_cm_one_same_k(c, ty, e, st, dirty, px, sel, hc):
+  match c:
+    case False{}:
+      tl_cm_one_exact(False{}, ty, e, e, st, st, dirty, px, sel, hc, {==})
+    case True{}:
+      tl_cm_one_exact(True{}, ty, e, e, st, st, dirty, px, sel, hc, cov_entry_refl(st, dirty, e))
+
+law tl_cm_one_same:
+  for +ty: L.Ty
+  for +e: M.Entry
+  for +st: M.State
+  for +dirty: List<&2, String>
+  for +px: U32
+  for +sel: String
+  {L.TL.cm.one(ty, e, st, dirty, px, sel, L.TL.cm.item(ty, e, st, px, sel)) == L.TL.cm.item(ty, e, st, px, sel) : L.TLE}
+
+def tl_cm_one_same(ty, e, st, dirty, px, sel):
+  tl_cm_one_same_k(L.TL.cm.chip(e, sel), ty, e, st, dirty, px, sel, {==})
+
+law tl_cm_skip_make:
+  for d: Nat
+  for +ty: L.Ty
+  for old: List<&2, M.Entry>
+  for +st: M.State
+  for +px: U32
+  for +sel: String
+  {L.TL.skip(d, L.TL.cm.make(ty, old, st, px, sel)) == L.TL.cm.make(ty, L.TL.eskip(d, old), st, px, sel) : List<&2, L.TLE>}
+
+def tl_cm_skip_make(d, ty, old, st, px, sel):
+  match d:
+    case 0n:
+      {==}
+    case 1n+k:
+      match old:
+        case Nil{}:
+          {==}
+        case +e <> +t:
+          tl_cm_skip_make(k, ty, t, st, px, sel)
+
+law cov_all_skip:
+  for d: Nat
+  for +st0: M.State
+  for +st: M.State
+  for +dirty: List<&2, String>
+  for +sel: String
+  for old: List<&2, M.Entry>
+  for +h: {CX.Cov.all(st0, st, dirty, sel, old) == True{} : Bool}
+  {CX.Cov.all(st0, st, dirty, sel, L.TL.eskip(d, old)) == True{} : Bool}
+
+def cov_all_skip(d, st0, st, dirty, sel, old, h):
+  match d:
+    case 0n:
+      h
+    case 1n+k:
+      match old:
+        case Nil{}:
+          {==}
+        case +e <> +t:
+          cov_all_skip(k, st0, st, dirty, sel, t, and_r(Bool.or(Bool.not(L.TL.cm.chip(e, sel)), CX.Cov.entry(st0, st, dirty, e)), CX.Cov.all(st0, st, dirty, sel, t), h))
+
+# the entries taken then the entries left, made, are the entries made
+law tl_cm_make_split:
+  for k: Nat
+  for +ty: L.Ty
+  for es: List<&2, M.Entry>
+  for +st: M.State
+  for +px: U32
+  for +sel: String
+  {L.TL.cat(L.TL.cm.make(ty, L.TL.etake(k, es), st, px, sel), L.TL.cm.make(ty, L.TL.eskip(k, es), st, px, sel)) == L.TL.cm.make(ty, es, st, px, sel) : List<&2, L.TLE>}
+
+def tl_cm_make_split(k, ty, es, st, px, sel):
+  match k:
+    case 0n:
+      {==}
+    case 1n+j:
+      match es:
+        case Nil{}:
+          {==}
+        case +e <> +t:
+          Equal.cong(List<&2, L.TLE>, List<&2, L.TLE>, x => L.TL.cm.item(ty, e, st, px, sel) <> x, L.TL.cat(L.TL.cm.make(ty, L.TL.etake(j, t), st, px, sel), L.TL.cm.make(ty, L.TL.eskip(j, t), st, px, sel)), L.TL.cm.make(ty, t, st, px, sel), tl_cm_make_split(j, ty, t, st, px, sel))
+
+# a memo with new entries in front of it: those are the same, whatever the
+# touched ids
+law tl_cm_again_pad:
+  for k: Nat
+  for +ty: L.Ty
+  for es: List<&2, M.Entry>
+  for +qs: List<&2, L.TLE>
+  for +st: M.State
+  for +dirty: List<&2, String>
+  for +px: U32
+  for +sel: String
+  {L.TL.cm.again(es, ty, st, dirty, px, sel, L.TL.cat(L.TL.cm.make(ty, L.TL.etake(k, es), st, px, sel), qs)) == L.TL.cat(L.TL.cm.make(ty, L.TL.etake(k, es), st, px, sel), L.TL.cm.again(L.TL.eskip(k, es), ty, st, dirty, px, sel, qs)) : List<&2, L.TLE>}
+
+def tl_cm_again_pad(k, ty, es, qs, st, dirty, px, sel):
+  match k:
+    case 0n:
+      {==}
+    case 1n+j:
+      match es:
+        case Nil{}:
+          {==}
+        case +e <> +t:
+          e1 = Equal.sym(L.TLE, L.TL.cm.one(ty, e, st, dirty, px, sel, L.TL.cm.item(ty, e, st, px, sel)), L.TL.cm.item(ty, e, st, px, sel), tl_cm_one_same(ty, e, st, dirty, px, sel))
+          e2 = Equal.sym(List<&2, L.TLE>, L.TL.cm.again(t, ty, st, dirty, px, sel, L.TL.cat(L.TL.cm.make(ty, L.TL.etake(j, t), st, px, sel), qs)), L.TL.cat(L.TL.cm.make(ty, L.TL.etake(j, t), st, px, sel), L.TL.cm.again(L.TL.eskip(j, t), ty, st, dirty, px, sel, qs)), tl_cm_again_pad(j, ty, t, qs, st, dirty, px, sel))
+          %e1 : {_ <> L.TL.cm.again(t, ty, st, dirty, px, sel, L.TL.cat(L.TL.cm.make(ty, L.TL.etake(j, t), st, px, sel), qs)) == L.TL.cm.item(ty, e, st, px, sel) <> L.TL.cat(L.TL.cm.make(ty, L.TL.etake(j, t), st, px, sel), L.TL.cm.again(L.TL.eskip(j, t), ty, st, dirty, px, sel, qs)) : List<&2, L.TLE>}
+          %e2 : {L.TL.cm.item(ty, e, st, px, sel) <> _ == L.TL.cm.item(ty, e, st, px, sel) <> L.TL.cat(L.TL.cm.make(ty, L.TL.etake(j, t), st, px, sel), L.TL.cm.again(L.TL.eskip(j, t), ty, st, dirty, px, sel, qs)) : List<&2, L.TLE>}
+          {==}
+
+def Laws.tl_cm_apply_exact(c, es, old, ty, st0, st, dirty, px, sel, h):
+  match c:
+    case L.TLSame{}:
+      Laws.tl_cm_again_exact(ty, es, old, st0, st, dirty, px, sel, h)
+    case L.TLDrop{+d}:
+      %Equal.sym(List<&2, L.TLE>, L.TL.skip(d, L.TL.cm.make(ty, old, st0, px, sel)), L.TL.cm.make(ty, L.TL.eskip(d, old), st0, px, sel), tl_cm_skip_make(d, ty, old, st0, px, sel)) : {L.TL.cm.again(es, ty, st, dirty, px, sel, _) == L.TL.cm.make(ty, es, st, px, sel) : List<&2, L.TLE>}
+      Laws.tl_cm_again_exact(ty, es, L.TL.eskip(d, old), st0, st, dirty, px, sel, cov_all_skip(d, st0, st, dirty, sel, old, h))
+    case L.TLPad{+k}:
+      p1 = tl_cm_again_pad(k, ty, es, L.TL.cm.make(ty, old, st0, px, sel), st, dirty, px, sel)
+      p2 = Laws.tl_cm_again_exact(ty, L.TL.eskip(k, es), old, st0, st, dirty, px, sel, h)
+      p3 = tl_cm_make_split(k, ty, es, st, px, sel)
+      %Equal.sym(List<&2, L.TLE>, L.TL.cm.again(es, ty, st, dirty, px, sel, L.TL.cat(L.TL.cm.make(ty, L.TL.etake(k, es), st, px, sel), L.TL.cm.make(ty, old, st0, px, sel))), L.TL.cat(L.TL.cm.make(ty, L.TL.etake(k, es), st, px, sel), L.TL.cm.again(L.TL.eskip(k, es), ty, st, dirty, px, sel, L.TL.cm.make(ty, old, st0, px, sel))), p1) : {_ == L.TL.cm.make(ty, es, st, px, sel) : List<&2, L.TLE>}
+      %Equal.sym(List<&2, L.TLE>, L.TL.cm.again(L.TL.eskip(k, es), ty, st, dirty, px, sel, L.TL.cm.make(ty, old, st0, px, sel)), L.TL.cm.make(ty, L.TL.eskip(k, es), st, px, sel), p2) : {L.TL.cat(L.TL.cm.make(ty, L.TL.etake(k, es), st, px, sel), _) == L.TL.cm.make(ty, es, st, px, sel) : List<&2, L.TLE>}
+      p3
+
+law tl_cm_of_k:
+  for s: Bool
+  for +ty: L.Ty
+  for +es: List<&2, M.Entry>
+  for +old: List<&2, M.Entry>
+  for +st0: M.State
+  for +st: M.State
+  for +dirty: List<&2, String>
+  for +px0: U32
+  for +sel0: String
+  for +px: U32
+  for +sel: String
+  for +h: {CX.Cov.all(st0, st, dirty, sel, old) == True{} : Bool}
+  for +hs: {Bool.and(U32.is_eq(px0, px), Q.Eq.str(sel0, sel)) == s : Bool}
+  {L.TL.cm.of.k(s, ty, es, st, dirty, px, sel, L.TL.cm.make(ty, old, st0, px0, sel0)) == L.TLMemo{px, sel, L.TL.cm.make(ty, es, st, px, sel), L.TL.live.none()} : L.TLMemo}
+
+def tl_cm_of_k(s, ty, es, old, st0, st, dirty, px0, sel0, px, sel, h, hs):
+  match s:
+    case False{}:
+      {==}
+    case True{}:
+      ep = u32_eq_sound(px0, px, and_l(U32.is_eq(px0, px), Q.Eq.str(sel0, sel), hs))
+      el = eq_str_sound(sel0, sel, and_r(U32.is_eq(px0, px), Q.Eq.str(sel0, sel), hs))
+      %Equal.sym(U32, px0, px, ep) : {L.TLMemo{px, sel, L.TL.cm.again(es, ty, st, dirty, px, sel, L.TL.cm.aligned(es, ty, st, px, sel, L.TL.cm.make(ty, old, st0, _, sel0))), L.TL.live.none()} == L.TLMemo{px, sel, L.TL.cm.make(ty, es, st, px, sel), L.TL.live.none()} : L.TLMemo}
+      %Equal.sym(String, sel0, sel, el) : {L.TLMemo{px, sel, L.TL.cm.again(es, ty, st, dirty, px, sel, L.TL.cm.aligned(es, ty, st, px, sel, L.TL.cm.make(ty, old, st0, px, _))), L.TL.live.none()} == L.TLMemo{px, sel, L.TL.cm.make(ty, es, st, px, sel), L.TL.live.none()} : L.TLMemo}
+      Equal.cong(List<&2, L.TLE>, L.TLMemo, x => L.TLMemo{px, sel, x, L.TL.live.none()}, L.TL.cm.again(es, ty, st, dirty, px, sel, L.TL.cm.aligned(es, ty, st, px, sel, L.TL.cm.make(ty, old, st0, px, sel))), L.TL.cm.make(ty, es, st, px, sel), Laws.tl_cm_apply_exact(L.TL.align.of(es, L.TL.cm.make(ty, old, st0, px, sel)), es, old, ty, st0, st, dirty, px, sel, h))
+
+def Laws.tl_cm_memo_exact(ty, es, old, st0, st, dirty, px0, sel0, px, sel, h):
+  tl_cm_of_k(Bool.and(U32.is_eq(px0, px), Q.Eq.str(sel0, sel)), ty, es, old, st0, st, dirty, px0, sel0, px, sel, h, {==})
+
+law not_true_false:
+  for +b: Bool
+  for +h: {Bool.not(b) == True{} : Bool}
+  {b == False{} : Bool}
+
+def not_true_false(b, h):
+  match b:
+    case False{}:
+      {==}
+    case True{}:
+      Empty.absurd({True{} == False{} : Bool}, false_ne_true(h))
+
+law cov_all_plain:
+  for +st0: M.State
+  for +st: M.State
+  for +dirty: List<&2, String>
+  for +sel: String
+  for es: List<&2, M.Entry>
+  for +h: {CX.Plain.all(sel, es) == True{} : Bool}
+  {CX.Cov.all(st0, st, dirty, sel, es) == True{} : Bool}
+
+def cov_all_plain(st0, st, dirty, sel, es, h):
+  match es:
+    case Nil{}:
+      {==}
+    case +e <> +t:
+      +hl = and_l(Bool.not(L.TL.cm.chip(e, sel)), CX.Plain.all(sel, t), h)
+      +hr = and_r(Bool.not(L.TL.cm.chip(e, sel)), CX.Plain.all(sel, t), h)
+      %Equal.sym(Bool, Bool.not(L.TL.cm.chip(e, sel)), True{}, hl) : {Bool.and(Bool.or(_, CX.Cov.entry(st0, st, dirty, e)), CX.Cov.all(st0, st, dirty, sel, t)) == True{} : Bool}
+      cov_all_plain(st0, st, dirty, sel, t, hr)
+
+def Laws.tl_cm_plain_make(ty, es, st, px, sel, h):
+  match es:
+    case Nil{}:
+      {==}
+    case +e <> +t:
+      +hl = and_l(Bool.not(L.TL.cm.chip(e, sel)), CX.Plain.all(sel, t), h)
+      +hr = and_r(Bool.not(L.TL.cm.chip(e, sel)), CX.Plain.all(sel, t), h)
+      e1 = Equal.sym(L.TLE, L.TL.cm.item(ty, e, st, px, sel), L.TL.memo.item(ty, e, px, sel), Laws.tl_cm_plain_old(ty, e, st, px, sel, not_true_false(L.TL.cm.chip(e, sel), hl)))
+      e2 = Equal.sym(List<&2, L.TLE>, L.TL.cm.make(ty, t, st, px, sel), L.TL.memo.make(ty, t, px, sel), Laws.tl_cm_plain_make(ty, t, st, px, sel, hr))
+      %e1 : {_ <> L.TL.cm.make(ty, t, st, px, sel) == L.TL.memo.item(ty, e, px, sel) <> L.TL.memo.make(ty, t, px, sel) : List<&2, L.TLE>}
+      %e2 : {L.TL.memo.item(ty, e, px, sel) <> _ == L.TL.memo.item(ty, e, px, sel) <> L.TL.memo.make(ty, t, px, sel) : List<&2, L.TLE>}
+      {==}
+
+def Laws.tl_cm_plain_again(ty, es, old, st, dirty, px, sel, ho, he):
+  %Laws.tl_cm_plain_make(ty, old, st, px, sel, ho) : {L.TL.cm.again(es, ty, st, dirty, px, sel, _) == L.TL.memo.make(ty, es, px, sel) : List<&2, L.TLE>}
+  %Laws.tl_cm_plain_make(ty, es, st, px, sel, he) : {L.TL.cm.again(es, ty, st, dirty, px, sel, L.TL.cm.make(ty, old, st, px, sel)) == _ : List<&2, L.TLE>}
+  Laws.tl_cm_again_exact(ty, es, old, st, st, dirty, px, sel, cov_all_plain(st, st, dirty, sel, old, ho))
+
+def Laws.chip_sound_rename():
+  {==}
+
+def Laws.chip_sound_rename_other():
+  {==}
+
+def Laws.chip_sound_settle():
+  {==}
+
+def Laws.chip_sound_unsettle():
+  {==}
+
+def Laws.chip_sound_archive():
+  {==}
+
+def Laws.chip_sound_pin():
+  {==}
+
+def Laws.chip_sound_delete():
+  {==}
+
+def Laws.chip_sound_turn():
+  {==}
+
+def Laws.chip_sound_bot_turn():
+  {==}
+
+def Laws.chip_sound_pending():
+  {==}
+
+def Laws.chip_sound_message():
+  {==}
+
+def Laws.chip_sound_project():
+  {==}
+
+def Laws.chip_sound_project_removed():
+  {==}
+
+def Laws.chip_sound_bot():
+  {==}
+
+def Laws.chip_sound_bot_deleted():
+  {==}
+
+def Laws.chip_sound_room():
+  {==}
+
+def Laws.chip_sound_room_deleted():
+  {==}
+
+def Laws.chip_sound_routine():
+  {==}
+
+def Laws.chip_sound_routine_deleted():
+  {==}
+
+def Laws.chip_sound_task():
+  {==}
+
+def Laws.chip_sound_setting_other():
+  {==}
+
+def Laws.chip_sound_created():
+  {==}
+
+def Laws.chip_sound_merged():
+  {==}
+
+
+def Laws.tl_cm_memo_rename(ty):
+  Laws.tl_cm_memo_exact(ty, Laws.ChipLaw.entries(), Laws.ChipLaw.entries(), Laws.RefView.state(), Laws.ChipLaw.after(M.ThreadRenamed{"t", "New", 3n}), U.Dirty.of(M.ThreadRenamed{"t", "New", 3n}), 780, "t", 780, "t", {==})
+
+def Laws.tl_cm_memo_settle(ty):
+  Laws.tl_cm_memo_exact(ty, Laws.ChipLaw.entries(), Laws.ChipLaw.entries(), Laws.RefView.state(), Laws.ChipLaw.after(M.ThreadSettled{"t", True{}, 3n}), U.Dirty.of(M.ThreadSettled{"t", True{}, 3n}), 780, "t", 780, "t", {==})
+
+# ---- links (window chips): measure once ----
+def chip_pixels_exact(ft: Bool, +cache: Map<&2, X.TG>, +f: X.Face, +s: String) -> {L.TL.chip.pixels(ft, X.Text.adv(s, cache, f, 0), String.length(s)) == X.Text.width.k(ft, cache, f, s) : U32}:
+  match ft:
+    case True{}:
+      {==}
+    case False{}:
+      {==}
+
+def Laws.tl_chip_measure_record(ty, ch):
+  match ch:
+    case CHIP.Chip{+l, +u, +i, +t, +m}:
+      %Equal.sym(U32, L.TL.chip.pixels(X.Face.ft(L.Ty.face(ty, 3n)), X.Text.adv(l, L.Ty.cache(ty), L.Ty.face(ty, 3n), 0), String.length(l)), L.Ty.width(ty, 3n, l), chip_pixels_exact(X.Face.ft(L.Ty.face(ty, 3n)), L.Ty.cache(ty), L.Ty.face(ty, 3n), l)) : {"c" ++ SCon{Chr{31}, U32.show(_)} ++ SCon{Chr{31}, U32.show(L.Ty.width(ty, 3n, CHIP.Chip.pad()))} ++ SCon{Chr{31}, U32.show(L.Ty.width(ty, 3n, t))} ++ SCon{Chr{31}, u} ++ SCon{Chr{31}, i} ++ SCon{Chr{31}, t} ++ SCon{Chr{31}, m} ++ SCon{Chr{30}, SNil{}} == L.TL.dr.run(ty, CHIP.RChip{CHIP.Chip{l, u, i, t, m}}) : String}
+      {==}
+
+# ---- links (window chips): frame cache ----
+def Laws.chip_cache_clean(deps): {==}
+
+def Laws.chip_cache_plain_fast(): {==}
+
+def Laws.chip_cache_target_invalidates(): {==}
+
+def Laws.chip_cache_summary_conservative(): {==}
+
+def Laws.chip_cache_duplicate_id(): {==}
+
+def Laws.chip_cache_summary_wildcard_stays(id):
+  %Equal.sym(Bool, Bool.or(String.eq("*", id), True{}), True{}, or_true_r(String.eq("*", id))) : {CX.Cache.add.k(CX.Cache.has.go(Nil{}, id, _), id, ["*"]) == ["*"] : List<&2, String>}
+  {==}
+
+def Laws.tl_cm_refs_exact(its, ty, st, dirty, px, sel):
+  match its:
+    case Nil{}: {==}
+    case L.TLE{+e, +p} <> +t:
+      %Equal.sym(Bool, Q.Eq.entry(e, e), True{}, eq_entry_refl(e)) : {L.TL.cm.refs(L.TLE{e, p} <> t, ty, st, dirty, px, sel) == L.TL.cm.one.k(_, ty, e, st, dirty, px, sel, e, p) <> L.TL.cm.again(L.TL.memo.es(t), ty, st, dirty, px, sel, t) : List<&2, L.TLE>}
+      %Laws.tl_cm_refs_exact(t, ty, st, dirty, px, sel) : {L.TL.cm.refs(L.TLE{e, p} <> t, ty, st, dirty, px, sel) == L.TL.cm.one.k(True{}, ty, e, st, dirty, px, sel, e, p) <> _ : List<&2, L.TLE>}
+      {==}

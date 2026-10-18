@@ -1,4 +1,6 @@
 import Base
+import ./src/core/chip.bend as CHIP
+import ./src/app/chipx.bend as CX
 import ./src/app/side_rows.bend as SR
 import ./src/app/side_row_types.bend as SRT
 import ./src/server/botnet.bend as MPLOG # mail perf runtime count
@@ -10640,3 +10642,360 @@ law mail_body_kept_output:
 
 law mail_age_relative_deadline:
   {MM.BotM.age_due(160n, 101n) == 161n : Nat}
+
+# ---- links (window chips) ----
+
+def ChipLaw.entries() -> List<&2, M.Entry>:
+  [M.Msg{"e1", "t", M.Assistant{}, "see backplane://thread/t now", 1n}]
+
+def ChipLaw.after(+ch: M.Change) -> M.State:
+  M.State.apply(RefView.state(), ch)
+
+# an unknown bare id gives back exactly its text
+law chip_bare_unresolved_text:
+  {CHIP.Chip.piece(RefView.state(), LK.PRef{"t9-9", "backplane://thread/t9-9", True{}}) == CHIP.RText{"t9-9"} : CHIP.Run}
+
+# an explicit ref that does not resolve is its label
+law chip_explicit_unresolved_text:
+  {CHIP.Chip.piece(RefView.state(), LK.PRef{"look", "backplane://thread/t9-9", False{}}) == CHIP.RText{"look"} : CHIP.Run}
+
+# a thread URI in a state with that thread is a chip of its card
+law chip_explicit_resolved:
+  {CHIP.Chip.piece(RefView.state(), LK.PRef{"look", "backplane://thread/t", False{}}) == CHIP.Chip.res(RC.Card.of(RefView.state(), REF.Ref.thread("t")), "look") : CHIP.Run}
+
+law chip_text_is_card_line:
+  {CHIP.Chip.of(RC.Card{"backplane://thread/t", "thread", "message-square", "Title", "Project", "idle", ""}) == CHIP.Chip.make("backplane://thread/t", "message-square", "Title · Project · idle", "") : CHIP.Chip}
+
+# the machine tag is apart from the text
+law chip_machine_apart:
+  {CHIP.Chip.of(RC.Card{"backplane://thread/L~t", "thread", "message-square", "Title", "Project", "idle", "desk"}) == CHIP.Chip.make("backplane://thread/L~t", "message-square", "Title · Project · idle", "desk") : CHIP.Chip}
+
+# the text is cut at 48 characters and an ellipsis
+law chip_cut:
+  {String.length(CHIP.Chip.short("0123456789012345678901234567890123456789012345678901234567890123456789")) == 49n : Nat}
+
+law chip_cut_short:
+  {CHIP.Chip.short("a thread") == "a thread" : String}
+
+# an entry's chip deps are those of its refs: resolved or not
+law chip_deps:
+  {CHIP.Chip.deps(RefView.state(), LK.PRef{"look", "backplane://thread/t", False{}}) == RC.Cards.deps(RefView.state(), REF.Ref.thread("t")) : List<&2, String>}
+
+law chip_deps_unresolved_bare:
+  {CHIP.Chip.deps(RefView.state(), LK.PRef{"t9-9", "backplane://thread/t9-9", True{}}) == RC.Cards.deps(RefView.state(), REF.Ref.thread("t9-9")) : List<&2, String>}
+
+law chip_deps_unresolved_names_id:
+  {CHIP.Chip.deps(RefView.state(), LK.PRef{"t9-9", "backplane://thread/t9-9", True{}}) == ["t9-9", ""] : List<&2, String>}
+
+# a chip travels in a line's copy field and is cut from it again, in order
+law chip_enc_cut:
+  {CHIP.Chip.cut(CHIP.Chip.label("A b", "") ++ " x", CHIP.Chip.enc([CHIP.Chip.make("backplane://thread/t", "message-square", "A b", "")])) == [CHIP.RChip{CHIP.Chip.make("backplane://thread/t", "message-square", "A b", "")}, CHIP.RText{" x"}] : List<&2, CHIP.Run>}
+
+# two chips with one label keep their own addresses
+law chip_same_label_apart:
+  {CHIP.Chip.cut(CHIP.Chip.label("A", "") ++ CHIP.Chip.label("A", ""), CHIP.Chip.enc([CHIP.Chip.make("u1", "box", "A", ""), CHIP.Chip.make("u2", "box", "A", "")])) == [CHIP.RChip{CHIP.Chip.make("u1", "box", "A", "")}, CHIP.RChip{CHIP.Chip.make("u2", "box", "A", "")}] : List<&2, CHIP.Run>}
+
+# an old line (links only) is cut as before
+law chip_cut_links_only:
+  {CHIP.Chip.cut("see x now", LK.Link.enc([LK.PLink{"x", "https://x.example"}])) == [CHIP.RText{"see "}, CHIP.RLink{LK.PLink{"x", "https://x.example"}}, CHIP.RText{" now"}] : List<&2, CHIP.Run>}
+
+# the touched objects of a change include every thread it touches
+# a post in the timeline changes no card (card_thread_no_timeline)
+law chip_dirty_message:
+  {U.Dirty.of(M.MessagePosted{"t", "m1", M.User{}, "hi", 2n}) == Nil{} : List<&2, String>}
+
+law chip_dirty_rename:
+  {U.Dirty.of(M.ThreadRenamed{"t", "New", 3n}) == ["t"] : List<&2, String>}
+
+law chip_dirty_turn:
+  {U.Dirty.of(M.TurnChanged{"t", M.Running{}, 3n}) == ["t"] : List<&2, String>}
+
+law chip_dirty_settle:
+  {U.Dirty.of(M.ThreadSettled{"t", True{}, 3n}) == ["t"] : List<&2, String>}
+
+law chip_dirty_delete:
+  {U.Dirty.of(M.ThreadDeleted{"t", 3n}) == ["t"] : List<&2, String>}
+
+law chip_dirty_bot:
+  {U.Dirty.of(M.BotSet{"b", "Bot", "t", 1n, "p", 3n}) == ["b"] : List<&2, String>}
+
+law chip_dirty_room:
+  {U.Dirty.of(M.RoomSet{"r", "Room", "", 3n}) == ["r"] : List<&2, String>}
+
+law chip_dirty_routine:
+  {U.Dirty.of(M.RoutineSet{"o", "b", "Nightly", "* * * * *", "go", True{}, 3n}) == ["o"] : List<&2, String>}
+
+law chip_dirty_setting:
+  {U.Dirty.of(M.SettingSet{"board.k1", "{}", 3n}) == ["k1"] : List<&2, String>}
+
+# nothing touched: no item is made again for it
+law chip_dirty_hit_empty:
+  for +deps: List<&2, String>
+  {L.TL.dirty.hit(Nil{}, deps) == False{} : Bool}
+
+law chip_dirty_hit:
+  {L.TL.dirty.hit(["x", "t"], ["p", "t"]) == True{} : Bool}
+
+law chip_dirty_miss:
+  {L.TL.dirty.hit(["x", "y"], ["p", "t"]) == False{} : Bool}
+
+# everything touched reaches any item that has chips, and none that has not
+law chip_dirty_all:
+  {L.TL.dirty.hit(["*"], ["p"]) == True{} : Bool}
+
+law chip_dirty_all_plain:
+  {L.TL.dirty.hit(["*"], Nil{}) == False{} : Bool}
+
+# An entry no ref can be in is laid out whatever the state: its item is the
+# one made without a state, the old TL.memo.item (the path of every such
+# entry in the window), for any state.
+law tl_cm_plain_old:
+  for +ty: L.Ty
+  for +e: M.Entry
+  for +st: M.State
+  for +px: U32
+  for +sel: String
+  for +h: {L.TL.cm.chip(e, sel) == False{} : Bool}
+  {L.TL.cm.item(ty, e, st, px, sel) == L.TL.memo.item(ty, e, px, sel) : L.TLE}
+
+law tl_cm_plain_item:
+  for +ty: L.Ty
+  for +e: M.Entry
+  for +st: M.State
+  for +st2: M.State
+  for +px: U32
+  for +sel: String
+  for +h: {L.TL.cm.chip(e, sel) == False{} : Bool}
+  {L.TL.cm.item(ty, e, st, px, sel) == L.TL.cm.item(ty, e, st2, px, sel) : L.TLE}
+
+# the title is shortened so the whole line fits 48 characters; sub and
+# status stay whole
+law chip_title_fits:
+  {String.length(CHIP.Chip.fit("a very long title that goes on and on and on forever", " · Project · idle")) == 48n : Nat}
+
+law chip_status_whole:
+  {String.ends_with(CHIP.Chip.fit("a very long title that goes on and on and on forever", " · Project · idle"), " · Project · idle") == True{} : Bool}
+
+law chip_title_ellipsis:
+  {CHIP.Chip.fit("a very long title that goes on and on and on forever", " · Project · idle") == "a very long title that goes on… · Project · idle" : String}
+
+law chip_title_short:
+  {CHIP.Chip.fit("Title", " · P · idle") == "Title · P · idle" : String}
+
+# with no room left for a title the whole line is cut as before
+law chip_title_no_room:
+  {String.length(CHIP.Chip.fit("Title", " · a project with a very long name indeed · and a status that is long")) == 49n : Nat}
+
+# ---- links (window chips): exactness and soundness ----
+law tl_cm_again_exact:
+  for +ty: L.Ty
+  for es: List<&2, M.Entry>
+  for old: List<&2, M.Entry>
+  for +st0: M.State
+  for +st: M.State
+  for +dirty: List<&2, String>
+  for +px: U32
+  for +sel: String
+  for +h: {CX.Cov.all(st0, st, dirty, sel, old) == True{} : Bool}
+  {L.TL.cm.again(es, ty, st, dirty, px, sel, L.TL.cm.make(ty, old, st0, px, sel)) == L.TL.cm.make(ty, es, st, px, sel) : List<&2, L.TLE>}
+
+# a memo lined up with the entries, whatever the guess (the entries in front
+# made now, the ones left out dropped), brought up to date, is the memo made
+# from scratch
+law tl_cm_apply_exact:
+  for c: L.TLAlign
+  for +es: List<&2, M.Entry>
+  for +old: List<&2, M.Entry>
+  for +ty: L.Ty
+  for +st0: M.State
+  for +st: M.State
+  for +dirty: List<&2, String>
+  for +px: U32
+  for +sel: String
+  for +h: {CX.Cov.all(st0, st, dirty, sel, old) == True{} : Bool}
+  {L.TL.cm.again(es, ty, st, dirty, px, sel, L.TL.cm.apply(c, es, L.TL.cm.make(ty, old, st0, px, sel), ty, st, px, sel)) == L.TL.cm.make(ty, es, st, px, sel) : List<&2, L.TLE>}
+
+# the memo brought up to a state and the touched ids is the memo made from
+# scratch under that state, whatever width and thread it was made for, when
+# every card an entry shows that a change may have altered is among them
+law tl_cm_memo_exact:
+  for +ty: L.Ty
+  for +es: List<&2, M.Entry>
+  for +old: List<&2, M.Entry>
+  for +st0: M.State
+  for +st: M.State
+  for +dirty: List<&2, String>
+  for +px0: U32
+  for +sel0: String
+  for +px: U32
+  for +sel: String
+  for +h: {CX.Cov.all(st0, st, dirty, sel, old) == True{} : Bool}
+  {L.TL.cm.of(ty, es, st, dirty, px, sel, L.TLMemo{px0, sel0, L.TL.cm.make(ty, old, st0, px0, sel0), L.TL.live.none()}) == L.TLMemo{px, sel, L.TL.cm.make(ty, es, st, px, sel), L.TL.live.none()} : L.TLMemo}
+
+# the items of entries no ref can be in are those made without a state
+law tl_cm_plain_make:
+  for +ty: L.Ty
+  for es: List<&2, M.Entry>
+  for +st: M.State
+  for +px: U32
+  for +sel: String
+  for +h: {CX.Plain.all(sel, es) == True{} : Bool}
+  {L.TL.cm.make(ty, es, st, px, sel) == L.TL.memo.make(ty, es, px, sel) : List<&2, L.TLE>}
+
+# a memo of entries with no refs, brought up to any state and any touched
+# ids, is the memo made without a state: the old TL.memo.make
+law tl_cm_plain_again:
+  for +ty: L.Ty
+  for +es: List<&2, M.Entry>
+  for +old: List<&2, M.Entry>
+  for +st: M.State
+  for +dirty: List<&2, String>
+  for +px: U32
+  for +sel: String
+  for +ho: {CX.Plain.all(sel, old) == True{} : Bool}
+  for +he: {CX.Plain.all(sel, es) == True{} : Bool}
+  {L.TL.cm.again(es, ty, st, dirty, px, sel, L.TL.memo.make(ty, old, px, sel)) == L.TL.memo.make(ty, es, px, sel) : List<&2, L.TLE>}
+
+# ---- soundness: concrete events ----
+def ChipSnd.state() -> M.State:
+  M.State.replay([M.ProjectCreated{"p", "Proj", "/p", 1n}, M.ThreadCreated{"t", "p", "Title", M.Local{}, "", "", "claude", "", 2n}, M.ThreadCreated{"tb", "p", "Bot thread", M.Local{}, "", "", "claude", "", 2n},
+    M.BotSet{"b", "Bot", "tb", 1n, "", 3n}, M.RoomSet{"r", "Room", "b", 3n}, M.RoutineSet{"o", "b", "Nightly", "* * * * *", "go", True{}, 3n},
+    M.SettingSet{"board.k1", "{\"title\":\"A task\",\"status\":\"doing\",\"thread\":\"t\"}", 3n}], M.State.empty())
+
+def ChipSnd.entry() -> M.Entry:
+  M.Msg{"e", "t", M.Assistant{}, "see backplane://thread/t and backplane://bot/b and backplane://room/r and backplane://routine/o and backplane://project/p and backplane://file/p/README.md and backplane://task/k1 and backplane://pr/o/r/1 and backplane://thread/L~t9-1 and t9-9", 1n}
+
+def ChipSnd.sound(+ch: M.Change) -> Bool:
+  CX.Cov.entry(ChipSnd.state(), M.State.apply(ChipSnd.state(), ch), U.Dirty.of(ch), ChipSnd.entry())
+
+law chip_sound_rename:
+  {ChipSnd.sound(M.ThreadRenamed{"t", "New", 9n}) == True{} : Bool}
+
+law chip_sound_rename_other:
+  {ChipSnd.sound(M.ThreadRenamed{"x", "New", 9n}) == True{} : Bool}
+
+law chip_sound_settle:
+  {ChipSnd.sound(M.ThreadSettled{"t", True{}, 9n}) == True{} : Bool}
+
+law chip_sound_unsettle:
+  {ChipSnd.sound(M.ThreadUnsettled{"t", 9n}) == True{} : Bool}
+
+law chip_sound_archive:
+  {ChipSnd.sound(M.ThreadArchived{"t", True{}, 9n}) == True{} : Bool}
+
+law chip_sound_pin:
+  {ChipSnd.sound(M.ThreadPinned{"t", True{}, 9n}) == True{} : Bool}
+
+law chip_sound_delete:
+  {ChipSnd.sound(M.ThreadDeleted{"t", 9n}) == True{} : Bool}
+
+law chip_sound_turn:
+  {ChipSnd.sound(M.TurnChanged{"t", M.Running{}, 9n}) == True{} : Bool}
+
+law chip_sound_bot_turn:
+  {ChipSnd.sound(M.TurnChanged{"tb", M.Running{}, 9n}) == True{} : Bool}
+
+law chip_sound_pending:
+  {ChipSnd.sound(M.PendingChanged{"t", 1n, 9n}) == True{} : Bool}
+
+law chip_sound_message:
+  {ChipSnd.sound(M.MessagePosted{"t", "m1", M.User{}, "hi", 9n}) == True{} : Bool}
+
+law chip_sound_project:
+  {ChipSnd.sound(M.ProjectCreated{"p", "Renamed", "/p", 9n}) == True{} : Bool}
+
+law chip_sound_project_removed:
+  {ChipSnd.sound(M.ProjectRemoved{"p", 9n}) == True{} : Bool}
+
+law chip_sound_bot:
+  {ChipSnd.sound(M.BotSet{"b", "Bot renamed", "tb", 1n, "", 9n}) == True{} : Bool}
+
+law chip_sound_bot_deleted:
+  {ChipSnd.sound(M.BotDeleted{"b", 9n}) == True{} : Bool}
+
+law chip_sound_room:
+  {ChipSnd.sound(M.RoomSet{"r", "Room renamed", "b", 9n}) == True{} : Bool}
+
+law chip_sound_room_deleted:
+  {ChipSnd.sound(M.RoomDeleted{"r", 9n}) == True{} : Bool}
+
+law chip_sound_routine:
+  {ChipSnd.sound(M.RoutineSet{"o", "b", "Nightly", "* * * * *", "go", False{}, 9n}) == True{} : Bool}
+
+law chip_sound_routine_deleted:
+  {ChipSnd.sound(M.RoutineDeleted{"o", 9n}) == True{} : Bool}
+
+law chip_sound_task:
+  {ChipSnd.sound(M.SettingSet{"board.k1", "{\"title\":\"Renamed\",\"status\":\"done\",\"thread\":\"t\"}", 9n}) == True{} : Bool}
+
+law chip_sound_setting_other:
+  {ChipSnd.sound(M.SettingSet{"ui.theme", "light", 9n}) == True{} : Bool}
+
+law chip_sound_created:
+  {ChipSnd.sound(M.ThreadCreated{"t9-9", "p", "Late", M.Local{}, "", "", "claude", "", 9n}) == True{} : Bool}
+
+law chip_sound_merged:
+  {ChipSnd.sound(M.ThreadMerged{"t", "x", 9n}) == True{} : Bool}
+
+
+# the rename and the settle of a thread an entry names: instances of the law
+# above, whose premise holds by the soundness laws below
+law tl_cm_memo_rename:
+  for +ty: L.Ty
+  {L.TL.cm.of(ty, ChipLaw.entries(), ChipLaw.after(M.ThreadRenamed{"t", "New", 3n}), U.Dirty.of(M.ThreadRenamed{"t", "New", 3n}), 780, "t", L.TLMemo{780, "t", L.TL.cm.make(ty, ChipLaw.entries(), RefView.state(), 780, "t"), L.TL.live.none()}) == L.TLMemo{780, "t", L.TL.cm.make(ty, ChipLaw.entries(), ChipLaw.after(M.ThreadRenamed{"t", "New", 3n}), 780, "t"), L.TL.live.none()} : L.TLMemo}
+
+law tl_cm_memo_settle:
+  for +ty: L.Ty
+  {L.TL.cm.of(ty, ChipLaw.entries(), ChipLaw.after(M.ThreadSettled{"t", True{}, 3n}), U.Dirty.of(M.ThreadSettled{"t", True{}, 3n}), 780, "t", L.TLMemo{780, "t", L.TL.cm.make(ty, ChipLaw.entries(), RefView.state(), 780, "t"), L.TL.live.none()}) == L.TLMemo{780, "t", L.TL.cm.make(ty, ChipLaw.entries(), ChipLaw.after(M.ThreadSettled{"t", True{}, 3n}), 780, "t"), L.TL.live.none()} : L.TLMemo}
+
+# ---- links (window chips): measure once ----
+law tl_chip_measure_record:
+  for +ty: L.Ty
+  for +ch: CHIP.Chip
+  {L.TL.chip.draw(Some{L.TL.chip.measure(ty, ch)}, ty, ch) == L.TL.dr.run(ty, CHIP.RChip{ch}) : String}
+
+# ---- links (window chips): frame cache ----
+law chip_cache_clean:
+  for deps: List<&2, String>
+  {CX.Cache.hit(Nil{}, deps) == False{} : Bool}
+
+law chip_cache_plain_fast:
+  {CX.Cache.same("k", ["k"], ["other"]) == True{} : Bool}
+
+law chip_cache_target_invalidates:
+  {CX.Cache.same("k", ["k", "target"], ["target"]) == False{} : Bool}
+
+law chip_cache_summary_conservative:
+  {CX.Cache.hit(["other"], ["*"]) == True{} : Bool}
+
+law chip_cache_duplicate_id:
+  {CX.Cache.ids(["target", "target"], Nil{}) == ["target"] : List<&2, String>}
+
+law chip_cache_summary_wildcard_stays:
+  for id: String
+  {CX.Cache.ids([id], ["*"]) == ["*"] : List<&2, String>}
+
+# ---- links (window chips): paragraph reuse ----
+law tl_cache_again_exact:
+  for ns: List<&2, DM.Node>
+  for +before: List<&2, List<&2, L.Cp>>
+  for +after: List<&2, List<&2, L.Cp>>
+  for +ty: L.Ty
+  for +px: U32
+  {L.TL.cache.again(ns, after, ty, px, L.TL.cache.make(ns, before, ty, px)) == L.TL.cache.make(ns, after, ty, px) : List<&2, L.TLBlock>}
+
+law tl_cache_lines_exact:
+  for ns: List<&2, DM.Node>
+  for +rz: List<&2, List<&2, L.Cp>>
+  for +ty: L.Ty
+  for +px: U32
+  {L.TL.cache.lines(L.TL.cache.make(ns, rz, ty, px)) == L.TL.rblocks(ty, ns, rz, px) : List<&2, L.TLine>}
+
+law tl_cm_refs_exact:
+  for +its: List<&2, L.TLE>
+  for +ty: L.Ty
+  for +st: M.State
+  for +dirty: List<&2, String>
+  for +px: U32
+  for +sel: String
+  {L.TL.cm.refs(its, ty, st, dirty, px, sel) == L.TL.cm.again(L.TL.memo.es(its), ty, st, dirty, px, sel, its) : List<&2, L.TLE>}

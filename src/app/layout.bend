@@ -3,6 +3,7 @@ import ./side_row_types.bend as ST
 import ../core/title.bend as TTL
 import ../core/i18n.bend as I
 import ../core/cef.bend as CF
+import ../core/cjk.bend as CJK
 import ../core/msgs.bend as MSG
 import ../core/winnote.bend as NT
 import ../core/codec.bend as CC
@@ -52,6 +53,7 @@ import ../core/sched.bend as SCH
 import ../core/tz.bend as TZ
 import ../core/stamp.bend as STP
 import ../core/order.bend as OR
+import ../core/chip.bend as CH
 
 # Nui -> draw ops and hit regions. Ops are gathered bottom-up (paint
 # order) and reversed once into the topmost-first order the rasterizer
@@ -1068,6 +1070,8 @@ def TL.h.k(k: Nat) -> U32:
       20
     case 29n:
       0
+    case 30n:
+      23
     case _:
       10
 
@@ -1484,6 +1488,671 @@ def TL.bubble(+ty: Ty, +ls: List<&2, String>, +text: String) -> List<&2, TLine>:
   +w = {(TL.widest(ty, ls, 0) + 40 : U32) : U32}
   List.concat(&2, TLine, [[TLine{"", 0, 6, "", w}], TL.user(ls, text, True{}, w), [TLine{"", 0, 6, "", w}, TLine{"", 0, 4, "", 0}]])
 
+# Chips (core/chip.bend)
+# ----------------------
+# What a state makes of an entry's refs is the entry's resolution (Rz): its
+# paragraphs, list items and message text with each ref a chip or its
+# label (Cp), one list of Cp for each block. It is the only thing in an
+# entry's lines that depends on the state: the lines are laid out from the
+# entry and its resolution alone (TL.part.md.c, TL.part.user.c), so a memo
+# made under one state is exact under another where the resolution is the
+# same (laws in LAWS.bend, "links (window chips)").
+
+# One inline run's text with the refs resolved. text: what is wrapped;
+# links: LK.Link.enc of the links drawn as links; chips: CH.Chip.enc of the
+# chips, in order; deps: the object ids the chips were decided from.
+type Cp is Data:
+  Cp{text: String, links: String, chips: String, deps: List<&2, String>}
+
+def Cp.eq(+a: Cp, +b: Cp) -> Bool:
+  match a b:
+    case Cp{+a0, +a1, +a2, +a3} Cp{+b0, +b1, +b2, +b3}:
+      Bool.and(Q.Eq.str(a0, b0), Bool.and(Q.Eq.str(a1, b1), Bool.and(Q.Eq.str(a2, b2), CH.Chip.eq.strs(a3, b3))))
+
+def Cp.eqs(a: List<&2, Cp>, b: List<&2, Cp>) -> Bool:
+  match a b:
+    case Nil{} Nil{}: True{}
+    case +x <> +xt +y <> +yt: Bool.and(Cp.eq(x, y), Cp.eqs(xt, yt))
+    case _ _: False{}
+
+def Cp.cat(+a: Cp, +b: Cp) -> Cp:
+  match a b:
+    case Cp{+t, +l, +c, +d} Cp{+t2, +l2, +c2, +d2}:
+      Cp{t ++ t2, l ++ l2, c ++ c2, List.append(&2, String, d, d2)}
+
+def Cp.text(+s: String) -> Cp:
+  Cp{s, "", "", Nil{}}
+
+def Cp.run(+r: CH.Run, +deps: List<&2, String>) -> Cp:
+  match r:
+    case CH.RChip{+c}:
+      Cp{CH.Chip.label.of(c), "", CH.Chip.enc([c]), deps}
+    case CH.RText{+s}:
+      Cp{s, "", "", deps}
+    case CH.RLink{+p}:
+      Cp{LK.Link.plain([p]), LK.Link.enc([p]), "", deps}
+
+def Cp.run.rv(+v: CH.Rv) -> Cp:
+  match v:
+    case CH.Rv{+r, +d}:
+      Cp.run(r, d)
+
+def Cp.piece(+st: M.State, +p: LK.Piece) -> Cp:
+  Cp.run.rv(CH.Chip.resolve(st, p))
+
+def Cp.pieces(+st: M.State, ps: List<&2, LK.Piece>) -> Cp:
+  match ps:
+    case Nil{}:
+      Cp.text("")
+    case +p <> +t:
+      Cp.cat(Cp.piece(st, p), Cp.pieces(st, t))
+
+# a user message's text: its web, file and ref links (resolved)
+def Cp.body(+st: M.State, +body: String) -> Cp:
+  Cp.pieces(st, LK.Link.pieces(body))
+
+def Nd.cp(+st: M.State, ns: List<&2, N.Node>) -> Cp:
+  match ns:
+    case Nil{}:
+      Cp.text("")
+    case N.Txt{+s} <> +t:
+      Cp.cat(Cp.text(s), Nd.cp(st, t))
+    case N.El{"button", _, _, _} <> +t:
+      Nd.cp(st, t)
+    case N.El{"a", _, +at, +ks} <> +t:
+      Cp.cat(Cp.piece(st, Nd.link(Nd.ref(at), at, ks)), Nd.cp(st, t))
+    case N.El{_, _, _, +ks} <> +t:
+      Cp.cat(Nd.cp(st, ks), Nd.cp(st, t))
+
+# Resolution of a reply's markdown: one list of Cp for each block, in
+# order: a paragraph's one, a list's one for each item, none for the rest
+def Rz.items(+st: M.State, ns: List<&2, N.Node>) -> List<&2, Cp>:
+  match ns:
+    case Nil{}:
+      Nil{}
+    case +n <> +t:
+      Nd.cp(st, [n]) <> Rz.items(st, t)
+
+def Rz.nums(+st: M.State, ns: List<&2, N.Node>) -> List<&2, Cp>:
+  match ns:
+    case Nil{}:
+      Nil{}
+    case N.El{_, _, _, +ks} <> +t:
+      Nd.cp(st, ks) <> Rz.nums(st, t)
+    case N.Txt{_} <> +t:
+      Cp.text("") <> Rz.nums(st, t)
+
+def Rz.block(+st: M.State, n: N.Node) -> List<&2, Cp>:
+  match n:
+    case N.El{"p", _, _, +ks}:
+      [Nd.cp(st, ks)]
+    case N.El{"ul", _, _, +ks}:
+      Rz.items(st, ks)
+    case N.El{"ol", _, _, +ks}:
+      Rz.nums(st, ks)
+    case +o:
+      Nil{}
+
+def Rz.blocks(+st: M.State, ns: List<&2, N.Node>) -> List<&2, List<&2, Cp>>:
+  match ns:
+    case Nil{}:
+      Nil{}
+    case +n <> +t:
+      Rz.block(st, n) <> Rz.blocks(st, t)
+
+# an entry's resolution: a message of the person, a reply, or none
+def Rz.entry(+st: M.State, e: M.Entry) -> List<&2, List<&2, Cp>>:
+  match e:
+    case M.Msg{_, _, M.User{}, +text, _}:
+      [[Cp.body(st, AT.Att.body(text))]]
+    case M.Msg{_, _, _, +text, _}:
+      Rz.blocks(st, N.Md.render(text))
+    case M.Act{_, _, _, _, _, _}:
+      Nil{}
+
+def Rz.deps.one(cs: List<&2, Cp>) -> List<&2, String>:
+  match cs:
+    case Nil{}:
+      Nil{}
+    case Cp{_, _, _, +d} <> +t:
+      List.append(&2, String, d, Rz.deps.one(t))
+
+# the object ids a resolution was decided from
+def Rz.deps(rz: List<&2, List<&2, Cp>>) -> List<&2, String>:
+  match rz:
+    case Nil{}:
+      Nil{}
+    case +c <> +t:
+      List.append(&2, String, Rz.deps.one(c), Rz.deps(t))
+
+def Rz.head(cs: List<&2, Cp>) -> Cp:
+  match cs:
+    case Nil{}:
+      Cp.text("")
+    case +c <> _:
+      c
+
+def Rz.tail(cs: List<&2, Cp>) -> List<&2, Cp>:
+  match cs:
+    case Nil{}:
+      Nil{}
+    case _ <> +t:
+      t
+
+def Rz.head.l(rz: List<&2, List<&2, Cp>>) -> List<&2, Cp>:
+  match rz:
+    case Nil{}:
+      Nil{}
+    case +c <> _:
+      c
+
+def Rz.tail.l(rz: List<&2, List<&2, Cp>>) -> List<&2, List<&2, Cp>>:
+  match rz:
+    case Nil{}:
+      Nil{}
+    case _ <> +t:
+      t
+
+# A line with links or chips is kept as its runs, measured when the memo is
+# made (Chip.cut, the widths), so a frame only reads them and draws: GS (a
+# reply's line; a person's line holds them after its own GS), then one
+# record per run, each ended by RS, fields by US: t width text | l width
+# label url | c width slot text-width uri icon text machine.
+def TL.dr.run(+ty: Ty, r: CH.Run) -> String:
+  match r:
+    case CH.RText{+s}:
+      "t" ++ SCon{Chr{31}, U32.show(Ty.width(ty, 3n, s))} ++ SCon{Chr{31}, s} ++ SCon{Chr{30}, SNil{}}
+    case CH.RLink{LK.PLink{+l, +u}}:
+      "l" ++ SCon{Chr{31}, U32.show(Ty.width(ty, 3n, l))} ++ SCon{Chr{31}, l} ++ SCon{Chr{31}, u} ++ SCon{Chr{30}, SNil{}}
+    case CH.RLink{LK.PRef{+l, _, _}}:
+      "t" ++ SCon{Chr{31}, U32.show(Ty.width(ty, 3n, l))} ++ SCon{Chr{31}, l} ++ SCon{Chr{30}, SNil{}}
+    case CH.RLink{LK.PText{+l}}:
+      "t" ++ SCon{Chr{31}, U32.show(Ty.width(ty, 3n, l))} ++ SCon{Chr{31}, l} ++ SCon{Chr{30}, SNil{}}
+    case CH.RChip{CH.Chip{+l, +u, +i, +t, +m}}:
+      "c" ++ SCon{Chr{31}, U32.show(Ty.width(ty, 3n, l))} ++ SCon{Chr{31}, U32.show(Ty.width(ty, 3n, CH.Chip.pad()))} ++ SCon{Chr{31}, U32.show(Ty.width(ty, 3n, t))} ++ SCon{Chr{31}, u} ++ SCon{Chr{31}, i} ++ SCon{Chr{31}, t} ++ SCon{Chr{31}, m} ++ SCon{Chr{30}, SNil{}}
+
+def TL.dr.runs(+ty: Ty, rs: List<&2, CH.Run>) -> String:
+  match rs:
+    case Nil{}:
+      ""
+    case +r <> +t:
+      TL.dr.run(ty, r) ++ TL.dr.runs(ty, t)
+
+# the runs of a wrapped line with the links and chips of its copy field
+def TL.dr.of(+ty: Ty, +line: String, +enc: String) -> String:
+  TL.dr.runs(ty, CH.Chip.cut(line, enc))
+
+# Paragraph-local chip measures. Advances stay in 26.6 pixels for wrapping;
+# the encoded draw record carries the same rounded widths as TL.dr.run.
+# This value is made only on a memo miss and never enters frame work.
+type ChipMeasure is Data:
+  ChipMeasure{label: String, count: Nat, advance: U32, text: String, textwidth: U32, slot: U32}
+
+def TL.chip.pixels(ft: Bool, +adv: U32, +n: Nat) -> U32:
+  match ft:
+    case True{}:
+      X.Text.px(adv)
+    case False{}:
+      (U32.from_nat(n) * 8 : U32)
+
+def TL.chip.measure(+ty: Ty, +ch: CH.Chip) -> ChipMeasure:
+  match ch:
+    case CH.Chip{+l, _, _, +t, _}:
+      +adv = X.Text.adv(l, Ty.cache(ty), Ty.face(ty, 3n), 0)
+      +n = String.length(l)
+      ChipMeasure{l, n, adv, t, Ty.width(ty, 3n, t), Ty.width(ty, 3n, CH.Chip.pad())}
+
+# Stop at the first matching measure. A strict choice over a recursive
+# lookup would scan every remaining chip even after finding its label.
+def TL.chip.at.head(ms: List<&2, ChipMeasure>, +s: String) -> Bool:
+  match ms:
+    case Nil{}:
+      False{}
+    case ChipMeasure{+l, _, _, _, _, _} <> _:
+      String.starts_with(s, l)
+
+def TL.chip.at.go(ms: List<&2, ChipMeasure>, hit: Bool, +s: String) -> Maybe<&2, ChipMeasure>:
+  match ms hit:
+    case Nil{} _:
+      None{}
+    case +m <> +t True{}:
+      Some{m}
+    case +m <> +t False{}:
+      TL.chip.at.go(t, TL.chip.at.head(t, s), s)
+
+def TL.chip.at(+ms: List<&2, ChipMeasure>, +s: String) -> Maybe<&2, ChipMeasure>:
+  TL.chip.at.go(ms, TL.chip.at.head(ms, s), s)
+
+def TL.chip.next(cp: U32, +ms: List<&2, ChipMeasure>, +s: String) -> Maybe<&2, ChipMeasure>:
+  match cp:
+    case 95:
+      TL.chip.at(ms, s)
+    case _:
+      None{}
+
+def TL.chip.count(m: Maybe<&2, ChipMeasure>) -> Nat:
+  match m:
+    case Some{ChipMeasure{_, n, _, _, _, _}}:
+      Nat.sub(n, 1n)
+    case None{}:
+      0n
+
+def TL.chip.adv(m: Maybe<&2, ChipMeasure>, +ty: Ty, +cp: U32) -> U32:
+  match m:
+    case Some{ChipMeasure{_, _, a, _, _, _}}:
+      a
+    case None{}:
+      X.TG.adv(X.Text.get(Ty.cache(ty), Ty.face(ty, 3n), cp))
+
+def TL.chip.advance(s: String, +ty: Ty, +ms: List<&2, ChipMeasure>, skip: Nat, +acc: U32) -> U32:
+  match s skip:
+    case SNil{} _:
+      acc
+    case SCon{_, +t} 1n+k:
+      TL.chip.advance(t, ty, ms, k, acc)
+    case SCon{Chr{+cp}, +t} 0n:
+      +m = TL.chip.next(cp, ms, SCon{Chr{cp}, t})
+      TL.chip.advance(t, ty, ms, TL.chip.count(m), (acc + TL.chip.adv(m, ty, cp) : U32))
+
+# Fitting words go straight to PWrap.put with their saved advance. Only
+# an overlong word takes the existing emergency split path.
+def TL.chip.word(fits: Bool, +w: String, +ww: U32, a: X.PAcc, +ty: Ty, +sp: U32, +px: U32) -> X.PAcc:
+  match fits:
+    case True{}:
+      X.PWrap.put(a, w, ww, sp, (px * 64 : U32))
+    case False{}:
+      X.PWrap.pieces(X.PWrap.chunks(String.is_empty(w), w, Ty.cache(ty), Ty.face(ty, 3n), (px * 64 : U32)), a, Ty.cache(ty), Ty.face(ty, 3n), sp, (px * 64 : U32))
+
+def TL.chip.words(ws: List<&2, String>, a: X.PAcc, +ty: Ty, +ms: List<&2, ChipMeasure>, +sp: U32, +px: U32) -> X.PAcc:
+  match ws:
+    case Nil{}:
+      a
+    case +w <> +t:
+      +ww = TL.chip.advance(w, ty, ms, 0n, 0)
+      TL.chip.words(t, TL.chip.word(U32.is_le(ww, (px * 64 : U32)), w, ww, a, ty, sp, px), ty, ms, sp, px)
+
+def TL.chip.wrap.line(cjk: Bool, +s: String, +ty: Ty, +ms: List<&2, ChipMeasure>, +px: U32) -> List<&2, String>:
+  match cjk:
+    case True{}:
+      Ty.wrap(ty, 3n, s, px)
+    case False{}:
+      X.PWrap.fin(TL.chip.words(String.split(s, ' '), X.PAcc{Nil{}, "", 0, True{}}, ty, ms, X.TG.adv(X.Text.get(Ty.cache(ty), Ty.face(ty, 3n), 32)), px))
+
+def TL.chip.wrap.lines(ls: List<&2, String>, +ty: Ty, +ms: List<&2, ChipMeasure>, +px: U32) -> List<&2, String>:
+  match ls:
+    case Nil{}:
+      Nil{}
+    case +l <> +t:
+      List.append(&2, String, TL.chip.wrap.line(CJK.Cjk.has(l), l, ty, ms, px), TL.chip.wrap.lines(t, ty, ms, px))
+
+# Widths depend on the label and displayed text alone. URI and icon are
+# carried by the run itself, so equal labels never merge link identities.
+def TL.chip.bykey.head(ms: List<&2, ChipMeasure>, +label: String, +text: String) -> Bool:
+  match ms:
+    case Nil{}:
+      False{}
+    case ChipMeasure{+l, _, _, +t, _, _} <> _:
+      Bool.and(String.eq(l, label), String.eq(t, text))
+
+def TL.chip.bykey.go(ms: List<&2, ChipMeasure>, hit: Bool, +label: String, +text: String) -> Maybe<&2, ChipMeasure>:
+  match ms hit:
+    case Nil{} _:
+      None{}
+    case +m <> +t True{}:
+      Some{m}
+    case +m <> +t False{}:
+      TL.chip.bykey.go(t, TL.chip.bykey.head(t, label, text), label, text)
+
+def TL.chip.bykey(+ms: List<&2, ChipMeasure>, +ch: CH.Chip) -> Maybe<&2, ChipMeasure>:
+  match ch:
+    case CH.Chip{+l, _, _, +t, _}:
+      TL.chip.bykey.go(ms, TL.chip.bykey.head(ms, l, t), l, t)
+
+# Repeated references to one card share a measure within the paragraph.
+def TL.chip.measures.add(found: Maybe<&2, ChipMeasure>, +ty: Ty, +c: CH.Chip, ms: List<&2, ChipMeasure>) -> List<&2, ChipMeasure>:
+  match found:
+    case Some{_}:
+      ms
+    case None{}:
+      TL.chip.measure(ty, c) <> ms
+
+def TL.chip.measures.go(cs: List<&2, CH.Chip>, +ty: Ty, +ms: List<&2, ChipMeasure>) -> List<&2, ChipMeasure>:
+  match cs:
+    case Nil{}:
+      ms
+    case +c <> +t:
+      TL.chip.measures.go(t, ty, TL.chip.measures.add(TL.chip.bykey(ms, c), ty, c, ms))
+
+def TL.chip.measures(+ty: Ty, cs: List<&2, CH.Chip>) -> List<&2, ChipMeasure>:
+  TL.chip.measures.go(cs, ty, Nil{})
+
+def TL.chip.draw(m: Maybe<&2, ChipMeasure>, +ty: Ty, +ch: CH.Chip) -> String:
+  match m ch:
+    case Some{ChipMeasure{_, +n, +adv, _, +tw, +slot}} CH.Chip{_, +u, +i, +t, +tag}:
+      "c" ++ SCon{Chr{31}, U32.show(TL.chip.pixels(X.Face.ft(Ty.face(ty, 3n)), adv, n))} ++ SCon{Chr{31}, U32.show(slot)} ++ SCon{Chr{31}, U32.show(tw)} ++ SCon{Chr{31}, u} ++ SCon{Chr{31}, i} ++ SCon{Chr{31}, t} ++ SCon{Chr{31}, tag} ++ SCon{Chr{30}, SNil{}}
+    case None{} _:
+      TL.dr.run(ty, CH.RChip{ch})
+
+def TL.chip.runs(rs: List<&2, CH.Run>, +ty: Ty, +ms: List<&2, ChipMeasure>) -> String:
+  match rs:
+    case Nil{}:
+      ""
+    case CH.RChip{+ch} <> +t:
+      TL.chip.draw(TL.chip.bykey(ms, ch), ty, ch) ++ TL.chip.runs(t, ty, ms)
+    case +r <> +t:
+      TL.dr.run(ty, r) ++ TL.chip.runs(t, ty, ms)
+
+# Both wrapping and run encoding consume the same measures. No reference
+# resolution, measurement or run search is added to drawing.
+def TL.chip.line.k(plain: Bool, +ty: Ty, +ms: List<&2, ChipMeasure>, +l: String, +e: String) -> TLine:
+  match plain:
+    case True{}:
+      TLine{l, T.Th.soft(), 0, "", 0}
+    case False{}:
+      TLine{l, T.Th.soft(), 13, SCon{Chr{29}, TL.chip.runs(CH.Chip.cut(l, e), ty, ms)}, 0}
+
+def TL.chip.line(+ty: Ty, +ms: List<&2, ChipMeasure>, +l: String, +e: String) -> TLine:
+  TL.chip.line.k(String.is_empty(e), ty, ms, l, e)
+
+def TL.chip.lines(ls: List<&2, String>, es: List<&2, String>, +ty: Ty, +ms: List<&2, ChipMeasure>, first: Bool, +p0: String, +p1: String) -> List<&2, TLine>:
+  match ls es:
+    case +l <> +t +e <> +et:
+      TL.chip.line(ty, ms, Bool.pick(String, first, p0, p1) ++ l, e) <> TL.chip.lines(t, et, ty, ms, False{}, p0, p1)
+    case _ _:
+      Nil{}
+
+def TL.chip.line.fk(has: Bool, +ty: Ty, +ms: List<&2, ChipMeasure>, +l: String, +rs: List<&2, CH.Run>) -> TLine:
+  match has:
+    case False{}:
+      TLine{l, T.Th.soft(), 0, "", 0}
+    case True{}:
+      TLine{l, T.Th.soft(), 13, SCon{Chr{29}, TL.chip.runs(rs, ty, ms)}, 0}
+
+def TL.chip.lines.f(ls: List<&2, String>, rss: List<&2, List<&2, CH.Run>>, +ty: Ty, +ms: List<&2, ChipMeasure>) -> List<&2, TLine>:
+  match ls rss:
+    case +l <> +t +rs <> +rt:
+      TL.chip.line.fk(CH.Chip.has(rs), ty, ms, l, rs) <> TL.chip.lines.f(t, rt, ty, ms)
+    case _ _:
+      Nil{}
+
+# each wrapped line with the links and chips it shows in its copy field
+def TL.linked.q(+plain: Bool, +ty: Ty, +l: String, +e: String, +color: U32) -> TLine:
+  match plain:
+    case True{}:
+      TLine{l, color, 0, "", 0}
+    case False{}:
+      TLine{l, color, 13, SCon{Chr{29}, TL.dr.of(ty, l, e)}, 0}
+
+def TL.linked.y(+ty: Ty, +ls: List<&2, String>, +encs: List<&2, String>, +color: U32) -> List<&2, TLine>:
+  match ls encs:
+    case +l <> +t +e <> +et:
+      TL.linked.q(String.is_empty(e), ty, l, e, color) <> TL.linked.y(ty, t, et, color)
+    case _ _:
+      Nil{}
+
+# lines with their runs found by label (core/chip.bend's Chip.lines): a
+# line with a chip keeps its runs (kind 13), any other is plain text
+def TL.linked.fk(+has: Bool, +ty: Ty, +l: String, +rs: List<&2, CH.Run>, +color: U32) -> TLine:
+  match has:
+    case False{}:
+      TLine{l, color, 0, "", 0}
+    case True{}:
+      TLine{l, color, 13, SCon{Chr{29}, TL.dr.runs(ty, rs)}, 0}
+
+def TL.linked.f(+ty: Ty, +ls: List<&2, String>, +rss: List<&2, List<&2, CH.Run>>, +color: U32) -> List<&2, TLine>:
+  match ls rss:
+    case +l <> +t +rs <> +rt:
+      TL.linked.fk(CH.Chip.has(rs), ty, l, rs, color) <> TL.linked.f(ty, t, rt, color)
+    case _ _:
+      Nil{}
+
+def TL.rpara.k(+nolinks: Bool, +ty: Ty, +w: List<&2, String>, +l: String, +c: String) -> List<&2, TLine>:
+  match nolinks:
+    case True{}:
+      TL.linked.f(ty, w, CH.Chip.lines(w, CH.Chip.dec(c)), T.Th.soft())
+    case False{}:
+      TL.linked.y(ty, w, CH.Chip.encs(w, l, CH.Chip.dec(c)), T.Th.soft())
+
+def TL.cmarked.k(+plain: Bool, +ty: Ty, +l: String, +e: String) -> TLine:
+  match plain:
+    case True{}:
+      TLine{l, T.Th.soft(), 0, "", 0}
+    case False{}:
+      TLine{l, T.Th.soft(), 13, SCon{Chr{29}, TL.dr.of(ty, l, e)}, 0}
+
+def TL.cmarked(+ty: Ty, +ls: List<&2, String>, +encs: List<&2, String>, first: Bool, +p0: String, +p1: String) -> List<&2, TLine>:
+  match ls encs:
+    case +l <> +t +e <> +et:
+      TL.cmarked.k(String.is_empty(e), ty, Bool.pick(String, first, p0, p1) ++ l, e) <> TL.cmarked(ty, t, et, False{}, p0, p1)
+    case _ _:
+      Nil{}
+
+# an item's lines with its mark in front (the first with p0, the rest p1)
+def TL.premark(+ls: List<&2, String>, first: Bool, +p0: String, +p1: String) -> List<&2, String>:
+  match ls:
+    case Nil{}:
+      Nil{}
+    case +l <> +t:
+      (Bool.pick(String, first, p0, p1) ++ l) <> TL.premark(t, False{}, p0, p1)
+
+def TL.chip.lines.choose(nolinks: Bool, +ls: List<&2, String>, +links: String, +cs: List<&2, CH.Chip>, +ty: Ty, +ms: List<&2, ChipMeasure>, +p0: String, +p1: String) -> List<&2, TLine>:
+  match nolinks:
+    case True{}:
+      +pw = TL.premark(ls, True{}, p0, p1)
+      TL.chip.lines.f(pw, CH.Chip.lines(pw, cs), ty, ms)
+    case False{}:
+      TL.chip.lines(ls, CH.Chip.encs(ls, links, cs), ty, ms, True{}, p0, p1)
+
+def TL.chip.para(+ty: Ty, +t: String, +links: String, +cs: List<&2, CH.Chip>, +px: U32, +p0: String, +p1: String) -> List<&2, TLine>:
+  +ms = TL.chip.measures(ty, cs)
+  +ls = TL.chip.wrap.lines(String.split(t, '\n'), ty, ms, px)
+  TL.chip.lines.choose(String.is_empty(links), ls, links, cs, ty, ms, p0, p1)
+
+def TL.ritem.z(+ty: Ty, +pw: List<&2, String>, +c: String) -> List<&2, TLine>:
+  TL.linked.f(ty, pw, CH.Chip.lines(pw, CH.Chip.dec(c)), T.Th.soft())
+
+def TL.ritem.k(+nolinks: Bool, +ty: Ty, +w: List<&2, String>, +l: String, +c: String, +p0: String, +p1: String) -> List<&2, TLine>:
+  match nolinks:
+    case True{}:
+      TL.ritem.z(ty, TL.premark(w, True{}, p0, p1), c)
+    case False{}:
+      TL.cmarked(ty, w, CH.Chip.encs(w, l, CH.Chip.dec(c)), True{}, p0, p1)
+
+def TL.chip.para.choose(plain: Bool, +ty: Ty, +t: String, +l: String, +c: String, +px: U32, +p0: String, +p1: String) -> List<&2, TLine>:
+  match plain:
+    case True{}:
+      TL.ritem.k(String.is_empty(l), ty, Ty.wrap(ty, 3n, t, px), l, c, p0, p1)
+    case False{}:
+      TL.chip.para(ty, t, l, CH.Chip.dec(c), px, p0, p1)
+
+def TL.rpara(+ty: Ty, +cp: Cp, +px: U32) -> List<&2, TLine>:
+  match cp:
+    case Cp{+t, +l, +c, _}:
+      TL.chip.para.choose(String.is_empty(c), ty, t, l, c, px, "", "")
+
+def TL.ritem(+ty: Ty, +cp: Cp, +p0: String, +p1: String, +px: U32) -> List<&2, TLine>:
+  match cp:
+    case Cp{+t, +l, +c, _}:
+      TL.chip.para.choose(String.is_empty(c), ty, t, l, c, px, p0, p1)
+
+def TL.ritems(+ty: Ty, cs: List<&2, Cp>, +px: U32) -> List<&2, TLine>:
+  match cs:
+    case Nil{}:
+      Nil{}
+    case +c <> +t:
+      List.append(&2, TLine, TL.ritem(ty, c, "•  ", "   ", (px - 24 : U32)), TL.ritems(ty, t, px))
+
+def TL.rnum(+ty: Ty, n: N.Node, +c: Cp, +px: U32) -> List<&2, TLine>:
+  match n:
+    case N.El{_, _, +at, _}:
+      TL.ritem(ty, c, Nd.value(at) ++ ". ", "    ", (px - 28 : U32))
+    case N.Txt{s}:
+      TL.texts(Ty.wrap(ty, 3n, s, px), T.Th.soft(), 0)
+
+def TL.rnums(+ty: Ty, ns: List<&2, N.Node>, +cs: List<&2, Cp>, +px: U32) -> List<&2, TLine>:
+  match ns:
+    case Nil{}:
+      Nil{}
+    case +n <> +t:
+      List.append(&2, TLine, TL.rnum(ty, n, Rz.head(cs), px), TL.rnums(ty, t, Rz.tail(cs), px))
+
+# TL.block with the paragraphs and lists laid out from their resolution
+def TL.rblock(+ty: Ty, n: N.Node, cs: List<&2, Cp>, +px: U32) -> List<&2, TLine>:
+  match n:
+    case N.El{"p", _, _, _}:
+      TL.rpara(ty, Rz.head(cs), px)
+    case N.El{"ul", _, _, _}:
+      TL.ritems(ty, cs, px)
+    case N.El{"ol", _, _, +ks}:
+      TL.rnums(ty, ks, cs, px)
+    case +o:
+      TL.block(ty, o, px)
+
+def TL.rblocks(+ty: Ty, ns: List<&2, N.Node>, +rz: List<&2, List<&2, Cp>>, +px: U32) -> List<&2, TLine>:
+  match ns:
+    case Nil{}:
+      Nil{}
+    case n <> Nil{}:
+      TL.rblock(ty, n, Rz.head.l(rz), px)
+    case n <> +t:
+      List.append(&2, TLine, TL.rblock(ty, n, Rz.head.l(rz), px), TLine{"", 0, 4, "", 0} <> TL.rblocks(ty, t, Rz.tail.l(rz), px))
+
+# a user line (kind 2) or, with links or chips in it, kind 30: its copy
+# field is the message's text (first line only), then GS, then the line's
+# runs (TL.dr)
+def TL.cuser.k(+plain: Bool, +ty: Ty, +l: String, +e: String, +c: String, +w: U32) -> TLine:
+  match plain:
+    case True{}:
+      TLine{l, T.Th.text(), 2, c, w}
+    case False{}:
+      TLine{l, T.Th.text(), 30, c ++ SCon{Chr{29}, TL.dr.of(ty, l, e)}, w}
+
+def TL.cuser(+ty: Ty, +ls: List<&2, String>, +encs: List<&2, String>, +copy: String, first: Bool, +w: U32) -> List<&2, TLine>:
+  match ls encs:
+    case +l <> +t +e <> +et:
+      TL.cuser.k(String.is_empty(e), ty, l, e, Bool.pick(String, first, copy, ""), w) <> TL.cuser(ty, t, et, copy, False{}, w)
+    case _ _:
+      Nil{}
+
+# the enc of a kind 30 line
+def TL.cuser.fk(+has: Bool, +ty: Ty, +l: String, +rs: List<&2, CH.Run>, +c: String, +w: U32) -> TLine:
+  match has:
+    case False{}:
+      TLine{l, T.Th.text(), 2, c, w}
+    case True{}:
+      TLine{l, T.Th.text(), 30, c ++ SCon{Chr{29}, TL.dr.runs(ty, rs)}, w}
+
+def TL.cuser.f(+ty: Ty, +ls: List<&2, String>, +rss: List<&2, List<&2, CH.Run>>, +copy: String, first: Bool, +w: U32) -> List<&2, TLine>:
+  match ls rss:
+    case +l <> +t +rs <> +rt:
+      TL.cuser.fk(CH.Chip.has(rs), ty, l, rs, Bool.pick(String, first, copy, ""), w) <> TL.cuser.f(ty, t, rt, copy, False{}, w)
+    case _ _:
+      Nil{}
+
+def TL.cuser.enc(+copy: String) -> String:
+  Maybe.default(&2, String, List.last(&2, String, String.split(copy, Chr{29})), "")
+
+def TL.cuser.copy(+copy: String) -> String:
+  Maybe.default(&2, String, List.head(&2, String, String.split(copy, Chr{29})), "")
+
+# Drawing
+# -------
+
+def TL.run.w(+ty: Ty, r: CH.Run) -> U32:
+  match r:
+    case CH.RText{s}:
+      Ty.width(ty, 3n, s)
+    case CH.RLink{p}:
+      TL.link.w(ty, p)
+    case CH.RChip{c}:
+      Ty.width(ty, 3n, CH.Chip.label.of(c))
+
+# a chip: a filled box a step off the page with a line round it, the
+# icon in its slot, the text in the accent, the machine tag muted
+def TL.ch.draw(+ty: Ty, ch: CH.Chip, +c: D.Clip, +x: U32, +y: U32) -> Out:
+  match ch:
+    case CH.Chip{+l, +u, +i, +t, +m}:
+      +w = {Ty.width(ty, 3n, l) : U32}
+      +slot = {Ty.width(ty, 3n, CH.Chip.pad()) : U32}
+      Out{List.concat(&2, R.Op, [[D.Draw.rect(c, x, (y + 1 : U32), w, 21, T.Th.line(), 255), D.Draw.rect(c, (x + 1 : U32), (y + 2 : U32), (w - 2 : U32), 19, T.Th.code(), 255)],
+          Lay.icon(ty, i, c, (x + 4 : U32), (y + 4 : U32), T.Th.accent()), Ty.text(ty, 3n, t, c, (x + slot : U32), y, 23, T.Th.accent()),
+          Ty.text(ty, 3n, Bool.pick(String, String.is_empty(m), "", " @" ++ m), c, (x + slot + Ty.width(ty, 3n, t) : U32), y, 23, T.Th.faint())]),
+        [Lay.hit(x, y, w, 23, "ref-go", u)]}
+
+def TL.run.seg(+ty: Ty, r: CH.Run, +c: D.Clip, +x: U32, +y: U32, +color: U32) -> Out:
+  match r:
+    case CH.RText{s}:
+      Out.ops(Ty.text(ty, 3n, s, c, x, y, 23, color))
+    case CH.RLink{p}:
+      TL.link.seg(ty, p, c, x, y, color)
+    case CH.RChip{ch}:
+      TL.ch.draw(ty, ch, c, x, y)
+
+def TL.run.segs(rs: List<&2, CH.Run>, +ty: Ty, +c: D.Clip, +x: U32, +y: U32, +color: U32) -> Out:
+  match rs:
+    case Nil{}:
+      Out.none()
+    case +r <> t:
+      Out.cat(TL.run.seg(ty, r, c, x, y, color), TL.run.segs(t, ty, c, (x + TL.run.w(ty, r) : U32), y, color))
+
+# a chip from its measures (TL.dr), as TL.ch.draw draws it
+def TL.dr.chip(+ty: Ty, +w: U32, +slot: U32, +tw: U32, +u: String, +i: String, +t: String, +m: String, +c: D.Clip, +x: U32, +y: U32) -> Out:
+  Out{List.concat(&2, R.Op, [[D.Draw.rect(c, x, (y + 1 : U32), w, 21, T.Th.line(), 255), D.Draw.rect(c, (x + 1 : U32), (y + 2 : U32), (w - 2 : U32), 19, T.Th.code(), 255)],
+      Lay.icon(ty, i, c, (x + 4 : U32), (y + 4 : U32), T.Th.accent()), Ty.text(ty, 3n, t, c, (x + slot : U32), y, 23, T.Th.accent()),
+      Ty.text(ty, 3n, Bool.pick(String, String.is_empty(m), "", " @" ++ m), c, (x + slot + tw : U32), y, 23, T.Th.faint())]),
+    [Lay.hit(x, y, w, 23, "ref-go", u)]}
+
+def TL.dr.num(s: String, +acc: U32) -> U32:
+  match s:
+    case SNil{}:
+      acc
+    case SCon{+c, +t}:
+      TL.dr.num(t, (acc * 10 + (LK.Link.code(c) - 48) : U32))
+
+def TL.dr.rec(+ty: Ty, fs: List<&2, String>, +c: D.Clip, +x: U32, +y: U32, +color: U32) -> Out:
+  match fs:
+    case "t" <> +w <> +s <> Nil{}:
+      Out.ops(Ty.text(ty, 3n, s, c, x, y, 23, color))
+    case "l" <> +w <> +l <> +u <> Nil{}:
+      TL.link.seg(ty, LK.PLink{l, u}, c, x, y, color)
+    case "c" <> +w <> +slot <> +tw <> +u <> +i <> +t <> +m <> Nil{}:
+      TL.dr.chip(ty, TL.dr.num(w, 0), TL.dr.num(slot, 0), TL.dr.num(tw, 0), u, i, t, m, c, x, y)
+    case _:
+      Out.none()
+
+def TL.dr.w(fs: List<&2, String>) -> U32:
+  match fs:
+    case _ <> +w <> _:
+      TL.dr.num(w, 0)
+    case _:
+      0
+
+def TL.dr.split(rs: List<&2, String>) -> List<&2, List<&2, String>>:
+  match rs:
+    case Nil{}:
+      Nil{}
+    case +r <> +t:
+      String.split(r, Chr{31}) <> TL.dr.split(t)
+
+def TL.dr.segs(fss: List<&2, List<&2, String>>, +ty: Ty, +c: D.Clip, +x: U32, +y: U32, +color: U32) -> Out:
+  match fss:
+    case Nil{}:
+      Out.none()
+    case +fs <> t:
+      Out.cat(TL.dr.rec(ty, fs, c, x, y, color), TL.dr.segs(t, ty, c, (x + TL.dr.w(fs) : U32), y, color))
+
+# a line's runs from its copy field: after a GS, as TL.dr makes them; a
+# copy without (an entry made without a state, core's Link.enc) is cut here
+def TL.dr.draw.k(+new: Bool, +copy: String, +line: String, +ty: Ty, +c: D.Clip, +x: U32, +y: U32, +color: U32) -> Out:
+  match new:
+    case True{}:
+      TL.dr.segs(TL.dr.split(String.split(String.drop(copy, 1n), Chr{30})), ty, c, x, y, color)
+    case False{}:
+      TL.run.segs(CH.Chip.cut(line, copy), ty, c, x, y, color)
+
+def TL.dr.draw(+copy: String, +line: String, +ty: Ty, +c: D.Clip, +x: U32, +y: U32, +color: U32) -> Out:
+  TL.dr.draw.k(String.starts_with(copy, SCon{Chr{29}, SNil{}}), copy, line, ty, c, x, y, color)
+
 def TL.first_line(+text: String) -> String:
   Maybe.default(&2, String, List.head(&2, String, String.split(text, '\n')), "")
 
@@ -1702,7 +2371,10 @@ def TL.draw.k(+ty: Ty, k: Nat, +text: String, +color: U32, +copy: String, +bw: U
     case 11n:
       Out{Ty.text(ty, 2n, text, c, (x1 - Ty.width(ty, 2n, text) : U32), y, 22, color), [Lay.hit((x1 - Ty.width(ty, 2n, text) : U32), y, Ty.width(ty, 2n, text), 22, "select", copy)]}
     case 13n:
-      TL.link.segs(LK.Link.cut(text, LK.Link.dec(copy)), ty, c, x0, y, color)
+      TL.dr.draw(copy, text, ty, c, x0, y, color)
+    case 30n:
+      Out.all([Out.ops([D.Draw.rect(c, (x1 - bw : U32), y, bw, 23, T.Th.raise(), 255)]), TL.dr.segs(TL.dr.split(String.split(TL.cuser.enc(copy), Chr{30})), ty, (c), (x1 - bw + 20 : U32), y, color),
+        Bool.pick(Out, String.is_empty(TL.cuser.copy(copy)), Out.none(), Out{Nil{}, [Lay.hit((x1 - bw : U32), y, bw, 23, "copy", TL.cuser.copy(copy))]})])
     case 12n:
       TL.img.draw(U32.is_eq(bw, 4096), ty, text, color, copy, bw, c, x0, y)
     case 14n:
@@ -5904,31 +6576,139 @@ def TL.bubble.a(+ty: Ty, +text: String, +px: U32) -> List<&2, TLine>:
   +w = {(TL.widest(ty, List.append(&2, String, ls, TL.chips.texts(ps)), 0) + 40 : U32) : U32}
   List.concat(&2, TLine, [[TLine{"", 0, 6, "", w}], TL.user(ls, AT.Att.body(text), True{}, w), TL.chips(ps, w), [TLine{"", 0, 6, "", w}, TLine{"", 0, 4, "", 0}]])
 
+# a user message from its text resolved (Cp): its links and chips
+def TL.bubble.lines(+nolinks: Bool, +ty: Ty, +ls: List<&2, String>, +lk: String, +cs: String, +body: String, +w: U32) -> List<&2, TLine>:
+  match nolinks:
+    case True{}:
+      TL.cuser.f(ty, ls, CH.Chip.lines(ls, CH.Chip.dec(cs)), body, True{}, w)
+    case False{}:
+      TL.cuser(ty, ls, CH.Chip.encs(ls, lk, CH.Chip.dec(cs)), body, True{}, w)
+
+def TL.chip.user.line(plain: Bool, +l: String, +enc: String, +body: String, +w: U32) -> TLine:
+  match plain:
+    case True{}:
+      TLine{l, T.Th.text(), 2, body, w}
+    case False{}:
+      TLine{l, T.Th.text(), 30, body ++ enc, w}
+
+def TL.chip.user(ls: List<&2, TLine>, +body: String, first: Bool, +w: U32) -> List<&2, TLine>:
+  match ls:
+    case Nil{}:
+      Nil{}
+    case TLine{+l, _, +k, +enc, _} <> +t:
+      TL.chip.user.line(U32.is_eq(k, 0), l, enc, Bool.pick(String, first, body, ""), w) <> TL.chip.user(t, body, False{}, w)
+
+def TL.chip.widest(ls: List<&2, String>, +ty: Ty, +ms: List<&2, ChipMeasure>, +acc: U32) -> U32:
+  match ls:
+    case Nil{}:
+      acc
+    case +l <> +t:
+      TL.chip.widest(t, ty, ms, U32.max(acc, TL.chip.pixels(X.Face.ft(Ty.face(ty, 3n)), TL.chip.advance(l, ty, ms, 0n, 0), String.length(l))))
+
+def TL.chip.bubble(+ty: Ty, +t: String, +lk: String, +cs: List<&2, CH.Chip>, +body: String, +ps: List<&2, String>, +px: U32) -> List<&2, TLine>:
+  +ms = TL.chip.measures(ty, cs)
+  +ls = TL.chip.wrap.lines(String.split(t, '\n'), ty, ms, U32.min((px * 7 / 10 : U32), 560))
+  +w = {(TL.chip.widest(List.append(&2, String, ls, TL.chips.texts(ps)), ty, ms, 0) + 40 : U32) : U32}
+  List.concat(&2, TLine, [[TLine{"", 0, 6, "", w}], TL.chip.user(TL.chip.lines.choose(String.is_empty(lk), ls, lk, cs, ty, ms, "", ""), body, True{}, w), TL.chips(ps, w), [TLine{"", 0, 6, "", w}, TLine{"", 0, 4, "", 0}]])
+
+def TL.chip.bubble.choose(plain: Bool, +ty: Ty, +t: String, +lk: String, +cs: String, +body: String, +ps: List<&2, String>, +px: U32) -> List<&2, TLine>:
+  match plain:
+    case False{}:
+      TL.chip.bubble(ty, t, lk, CH.Chip.dec(cs), body, ps, px)
+    case True{}:
+      +ls = {Ty.wrap(ty, 3n, t, U32.min((px * 7 / 10 : U32), 560)) : List<&2, String>}
+      +w = {(TL.widest(ty, List.append(&2, String, ls, TL.chips.texts(ps)), 0) + 40 : U32) : U32}
+      List.concat(&2, TLine, [[TLine{"", 0, 6, "", w}], TL.bubble.lines(String.is_empty(lk), ty, ls, lk, cs, body, w), TL.chips(ps, w), [TLine{"", 0, 6, "", w}, TLine{"", 0, 4, "", 0}]])
+
+def TL.bubble.b(+ty: Ty, +cp: Cp, +body: String, +ps: List<&2, String>, +px: U32) -> List<&2, TLine>:
+  match cp:
+    case Cp{+t, +lk, +cs, _}:
+      TL.chip.bubble.choose(String.is_empty(cs), ty, t, lk, cs, body, ps, px)
+
 # an entry's own lines in three parts: what depends on the entry and the
 # width alone (the costly part: markdown, wrapping, measuring; kept across
 # frames), the image paths it names, and its footer. The images' lines
 # are made each frame, since their sizes arrive later.
+type TLBlock is Data:
+  TLBlock{resolved: List<&2, Cp>, lines: List<&2, TLine>}
+
+def TL.cache.make(ns: List<&2, N.Node>, +rz: List<&2, List<&2, Cp>>, +ty: Ty, +px: U32) -> List<&2, TLBlock>:
+  match ns:
+    case Nil{}: Nil{}
+    case +n <> t:
+      +cs = Rz.head.l(rz)
+      TLBlock{cs, TL.rblock(ty, n, cs, px)} <> TL.cache.make(t, Rz.tail.l(rz), ty, px)
+
+def TL.cache.one.k(same: Bool, +ty: Ty, +n: N.Node, +cs: List<&2, Cp>, +px: U32, old: TLBlock) -> TLBlock:
+  match same:
+    case True{}: old
+    case False{}: TLBlock{cs, TL.rblock(ty, n, cs, px)}
+
+def TL.cache.one(+ty: Ty, +n: N.Node, +cs: List<&2, Cp>, +px: U32, old: TLBlock) -> TLBlock:
+  match old:
+    case TLBlock{+before, lines}:
+      TL.cache.one.k(Cp.eqs(before, cs), ty, n, cs, px, TLBlock{before, lines})
+
+def TL.cache.again(ns: List<&2, N.Node>, +rz: List<&2, List<&2, Cp>>, +ty: Ty, +px: U32, old: List<&2, TLBlock>) -> List<&2, TLBlock>:
+  match ns old:
+    case Nil{} _: Nil{}
+    case +n <> t h <> rest:
+      TL.cache.one(ty, n, Rz.head.l(rz), px, h) <> TL.cache.again(t, Rz.tail.l(rz), ty, px, rest)
+    case +n <> t Nil{}:
+      TL.cache.make(n <> t, rz, ty, px)
+
+def TL.cache.lines(bs: List<&2, TLBlock>) -> List<&2, TLine>:
+  match bs:
+    case Nil{}: Nil{}
+    case TLBlock{_, lines} <> Nil{}: lines
+    case TLBlock{_, lines} <> t:
+      List.append(&2, TLine, lines, TLine{"", 0, 4, "", 0} <> TL.cache.lines(t))
+
 type TLPart is Data:
-  TLPart{head: List<&2, TLine>, paths: List<&2, String>, tail: List<&2, TLine>}
+  TLPart{head: List<&2, TLine>, paths: List<&2, String>, tail: List<&2, TLine>, deps: List<&2, String>, ns: List<&2, N.Node>, rz: List<&2, List<&2, Cp>>}
+  TLCached{head: List<&2, TLine>, paths: List<&2, String>, tail: List<&2, TLine>, deps: List<&2, String>, ns: List<&2, N.Node>, rz: List<&2, List<&2, Cp>>, blocks: List<&2, TLBlock>}
+
+def TL.part.head(p: TLPart) -> List<&2, TLine>:
+  match p:
+    case TLPart{h, _, _, _, _, _}: h
+    case TLCached{h, _, _, _, _, _, _}: h
+
+def TL.part.deps(p: TLPart) -> List<&2, String>:
+  match p:
+    case TLPart{_, _, _, d, _, _}: d
+    case TLCached{_, _, _, d, _, _, _}: d
+
+# the image paths a text names: a text with no image extension names none
+# (core/images.bend's Img.may is one cheap walk; every path Img.paths finds
+# ends in one), so most replies skip the word split and the path checks
+def TL.imgs.k(+may: Bool, +text: String) -> List<&2, String>:
+  match may:
+    case True{}:
+      IM.Img.paths(text)
+    case False{}:
+      Nil{}
+
+def TL.imgs(+text: String) -> List<&2, String>:
+  TL.imgs.k(IM.Img.may(text), text)
 
 # a tool call or other activity in a line; a design step as a row that
 # shows it in the viewer (kind 16, copy its id)
 def TL.part.act(step: Bool, +ty: Ty, e: M.Entry, +px: U32) -> TLPart:
   match step e:
     case True{} M.Act{+id, _, _, _, _, _}:
-      TLPart{[TLine{Ty.fit(ty, 2n, HS.Hist.row(e), (px - 22 : U32)), T.Th.accent(), 16, id, 0}], Nil{}, Nil{}}
+      TLPart{[TLine{Ty.fit(ty, 2n, HS.Hist.row(e), (px - 22 : U32)), T.Th.accent(), 16, id, 0}], Nil{}, Nil{}, Nil{}, Nil{}, Nil{}}
     case _ M.Act{_, _, +tone, +kind, +summary, _}:
-      Bool.pick(TLPart, String.eq(tone, EM.Emb.tone()), TLPart{Nil{}, Nil{}, Nil{}},
-        TLPart{[TLine{Ty.fit(ty, 2n, RVW.Review.label(tone, kind, summary) ++ "  " ++ RVW.Review.say(tone, kind, summary), px), Bool.pick(U32, String.eq(tone, "error"), T.Th.bad(), T.Th.dim()), 3, "", 0}], Nil{}, Nil{}})
+      Bool.pick(TLPart, String.eq(tone, EM.Emb.tone()), TLPart{Nil{}, Nil{}, Nil{}, Nil{}, Nil{}, Nil{}},
+        TLPart{[TLine{Ty.fit(ty, 2n, RVW.Review.label(tone, kind, summary) ++ "  " ++ RVW.Review.say(tone, kind, summary), px), Bool.pick(U32, String.eq(tone, "error"), T.Th.bad(), T.Th.dim()), 3, "", 0}], Nil{}, Nil{}, Nil{}, Nil{}, Nil{}})
     case _ M.Msg{_, _, _, +text, _}:
-      TLPart{[TLine{Ty.fit(ty, 2n, text, px), T.Th.dim(), 3, "", 0}], Nil{}, Nil{}}
+      TLPart{[TLine{Ty.fit(ty, 2n, text, px), T.Th.dim(), 3, "", 0}], Nil{}, Nil{}, Nil{}, Nil{}, Nil{}}
 
 def TL.part.own(+ty: Ty, e: M.Entry, +px: U32) -> TLPart:
   match e:
     case M.Msg{_, _, M.User{}, +text, _}:
-      TLPart{TL.bubble.a(ty, text, px), Nil{}, Nil{}}
+      TLPart{TL.bubble.a(ty, text, px), Nil{}, Nil{}, Nil{}, Nil{}, Nil{}}
     case M.Msg{_, _, _, +text, _}:
-      TLPart{TL.blocks(ty, N.Md.render(text), px), IM.Img.paths(text), [TLine{"", 0, 7, text, 0}, TLine{"", 0, 4, "", 0}]}
+      TLPart{TL.blocks(ty, N.Md.render(text), px), TL.imgs(text), [TLine{"", 0, 7, text, 0}, TLine{"", 0, 4, "", 0}], Nil{}, Nil{}, Nil{}}
     case M.Act{+id, +th, +tone, +kind, +summary, +at}:
       TL.part.act(String.eq(tone, HS.Step.tone()), ty, M.Act{id, th, tone, kind, summary, at}, px)
 
@@ -5939,11 +6719,44 @@ def TL.part(mine: Bool, +ty: Ty, e: M.Entry, +px: U32) -> TLPart:
     case True{}:
       TL.part.own(ty, e, px)
     case False{}:
-      TLPart{Nil{}, Nil{}, Nil{}}
+      TLPart{Nil{}, Nil{}, Nil{}, Nil{}, Nil{}, Nil{}}
+
+# The same with the refs resolved to chips from the state (core/chip.bend):
+# the path of an entry that may name one (TL.maybe.refs). The markdown and
+# the image paths are kept in the part (ns, paths), so making it again for
+# a changed card does not render the markdown again.
+def TL.part.md.b(+text: String, ns: List<&2, N.Node>, paths: List<&2, String>, +rz: List<&2, List<&2, Cp>>, +bs: List<&2, TLBlock>) -> TLPart:
+  TLCached{TL.cache.lines(bs), paths, [TLine{"", 0, 7, text, 0}, TLine{"", 0, 4, "", 0}], Rz.deps(rz), ns, rz, bs}
+
+def TL.part.md.z(+ty: Ty, +text: String, +ns: List<&2, N.Node>, +paths: List<&2, String>, +rz: List<&2, List<&2, Cp>>, +px: U32) -> TLPart:
+  TL.part.md.b(text, ns, paths, rz, TL.cache.make(ns, rz, ty, px))
+
+def TL.part.md.c(+ty: Ty, +st: M.State, +text: String, +ns: List<&2, N.Node>, +paths: List<&2, String>, +px: U32) -> TLPart:
+  TL.part.md.z(ty, text, ns, paths, Rz.blocks(st, ns), px)
+
+def TL.part.md.up.z(+ty: Ty, text: String, +ns: List<&2, N.Node>, paths: List<&2, String>, +rz: List<&2, List<&2, Cp>>, old: List<&2, TLBlock>, +px: U32) -> TLPart:
+  TL.part.md.b(text, ns, paths, rz, TL.cache.again(ns, rz, ty, px, old))
+
+def TL.part.md.up(+ty: Ty, +st: M.State, text: String, +ns: List<&2, N.Node>, paths: List<&2, String>, old: List<&2, TLBlock>, +px: U32) -> TLPart:
+  TL.part.md.up.z(ty, text, ns, paths, Rz.blocks(st, ns), old, px)
+
+def TL.part.user.z(+ty: Ty, +text: String, +rz: List<&2, List<&2, Cp>>, +px: U32) -> TLPart:
+  TLPart{TL.bubble.b(ty, Rz.head(Rz.head.l(rz)), AT.Att.body(text), AT.Att.paths(text), px), Nil{}, Nil{}, Rz.deps(rz), Nil{}, rz}
+
+def TL.part.own.c(+ty: Ty, +st: M.State, e: M.Entry, +px: U32) -> TLPart:
+  match e:
+    case M.Msg{_, _, M.User{}, +text, _}:
+      TL.part.user.z(ty, text, [[Cp.body(st, AT.Att.body(text))]], px)
+    case M.Msg{_, _, _, +text, _}:
+      TL.part.md.c(ty, st, text, N.Md.render(text), TL.imgs(text), px)
+    case M.Act{+id, +th, +tone, +kind, +summary, +at}:
+      TL.part.act(String.eq(tone, HS.Step.tone()), ty, M.Act{id, th, tone, kind, summary, at}, px)
 
 def TL.part.join(+ty: Ty, p: TLPart, +pics: Map<&2, String>, +px: U32) -> List<&2, TLine>:
   match p:
-    case TLPart{h, ps, t}:
+    case TLPart{h, ps, t, _, _, _}:
+      List.concat(&2, TLine, [h, TL.images(ty, ps, pics, px), t])
+    case TLCached{h, ps, t, _, _, _, _}:
       List.concat(&2, TLine, [h, TL.images(ty, ps, pics, px), t])
 
 def TL.mine_of(+e: M.Entry, +sel: String) -> Bool:
@@ -6487,6 +7300,196 @@ def TL.memo.shown.loc(+ty: Ty, m: TLMemo, +st: M.State, +sel: String, +px: U32, 
 def TL.memo.lines(+ty: Ty, +m: TLMemo, +es: List<&2, M.Entry>, +st: M.State, +sel: String, +px: U32, +pics: Map<&2, String>) -> List<&2, TLine>:
   TL.memo.lines.k(TL.memo.fits(m, px, sel), ty, m, es, st, sel, px, pics)
 
+# Chips in the memo (core/chip.bend)
+# -----------------------------------
+# An entry that may name a ref (TL.maybe.refs) is laid out with its refs
+# resolved from the state; every other entry takes the path above
+# (TL.memo.item: no state, no refs), so a thread without refs is memoized
+# as it was, whatever the state. dirty: the object ids touched since the
+# items were made ("*": any); an item is made again only when one of the
+# ids its chips depend on is among them (TL.dirty.hit).
+
+# a kind letter then a digit, or "://": the shapes of a ref in a text
+def TL.refs.at(+c: Char, +t: String) -> Bool:
+  match t:
+    case SNil{}:
+      False{}
+    case SCon{+d, +r}:
+      Bool.or(Bool.and(Char.is_eq(c, ':'), Bool.and(Char.is_eq(d, '/'), String.starts_with(r, "/"))), Bool.and(Bool.or(Bool.or(Char.is_eq(c, 't'), Char.is_eq(c, 'b')), Bool.or(Bool.or(Char.is_eq(c, 'p'), Char.is_eq(c, 'r')), Char.is_eq(c, 'o'))), Char.is_digit(d)))
+
+def TL.refs.go(+s: String, +found: Bool) -> Bool:
+  match s:
+    case SNil{}:
+      found
+    case SCon{+c, +t}:
+      TL.refs.go(t, Bool.or(found, TL.refs.at(c, t)))
+
+# whether an entry of this thread is laid out with chips: a message of the
+# person (its links too), or a reply whose text has a ref's shape; nothing
+# else is
+def TL.cm.chip(e: M.Entry, +sel: String) -> Bool:
+  match e:
+    case M.Msg{_, _, M.User{}, _, _}:
+      TL.mine_of(e, sel)
+    case M.Msg{_, _, _, +text, _}:
+      Bool.and(TL.mine_of(e, sel), TL.refs.go(text, False{}))
+    case M.Act{_, _, _, _, _, _}:
+      False{}
+
+def TL.cm.item.k(+chip: Bool, +ty: Ty, +e: M.Entry, +st: M.State, +px: U32, +sel: String) -> TLE:
+  match chip:
+    case True{}:
+      TLE{e, TL.part.own.c(ty, st, e, px)}
+    case False{}:
+      TL.memo.item(ty, e, px, sel)
+
+def TL.cm.item(+ty: Ty, +e: M.Entry, +st: M.State, +px: U32, +sel: String) -> TLE:
+  TL.cm.item.k(TL.cm.chip(e, sel), ty, e, st, px, sel)
+
+def TL.cm.make(+ty: Ty, es: List<&2, M.Entry>, +st: M.State, +px: U32, +sel: String) -> List<&2, TLE>:
+  match es:
+    case Nil{}:
+      Nil{}
+    case +e <> t:
+      h r = TL.cm.item(ty, e, st, px, sel) TL.cm.make(ty, t, st, px, sel)
+      h <> r
+
+def TL.dirty.in(+ds: List<&2, String>, +d: String) -> Bool:
+  match ds:
+    case Nil{}:
+      False{}
+    case +x <> +t:
+      Bool.or(Bool.or(String.eq(x, d), String.eq(x, "*")), TL.dirty.in(t, d))
+
+def TL.dirty.any(+deps: List<&2, String>, +ds: List<&2, String>) -> Bool:
+  match deps:
+    case Nil{}:
+      False{}
+    case +d <> +t:
+      Bool.or(TL.dirty.in(ds, d), TL.dirty.any(t, ds))
+
+# does a touched id reach one of an item's ids (nothing touched: no walk)
+def TL.dirty.hit(+dirty: List<&2, String>, +deps: List<&2, String>) -> Bool:
+  match dirty:
+    case Nil{}:
+      False{}
+    case _ <> _:
+      TL.dirty.any(deps, dirty)
+
+def TL.part.deps.of(+it: TLE) -> List<&2, String>:
+  match it:
+    case TLE{_, p}: TL.part.deps(p)
+
+# an item whose entry is the same and a card it shows changed: made again,
+# from the markdown and image paths it kept
+def TL.cm.redo.p(+p: TLPart, +ty: Ty, +e: M.Entry, +st: M.State, +px: U32, +sel: String) -> TLE:
+  match p e:
+    case _ M.Msg{_, _, M.User{}, _, _}:
+      TL.cm.item(ty, e, st, px, sel)
+    case TLPart{_, +paths, _, _, +ns, _} M.Msg{_, _, _, +text, _}:
+      TLE{e, TL.part.md.c(ty, st, text, ns, paths, px)}
+    case TLCached{_, paths, _, _, ns, _, bs} M.Msg{_, _, _, text, _}:
+      TLE{e, TL.part.md.up(ty, st, text, ns, paths, bs, px)}
+    case _ _:
+      TL.cm.item(ty, e, st, px, sel)
+
+def TL.cm.redo(+ty: Ty, +e: M.Entry, +st: M.State, +px: U32, +sel: String, +it: TLE) -> TLE:
+  match it:
+    case TLE{_, +p}:
+      TL.cm.redo.p(p, ty, e, st, px, sel)
+
+def TL.cm.one.h(+hit: Bool, +ty: Ty, +e: M.Entry, +st: M.State, +px: U32, +sel: String, +it: TLE) -> TLE:
+  match hit:
+    case True{}:
+      TL.cm.redo(ty, e, st, px, sel, it)
+    case False{}:
+      it
+
+# the entry is the same: an item made without a state stays; one with
+# chips stays unless a card it shows changed
+def TL.cm.one.c(+chip: Bool, +dirty: List<&2, String>, +ty: Ty, +e: M.Entry, +st: M.State, +px: U32, +sel: String, +it: TLE) -> TLE:
+  match chip:
+    case True{}:
+      TL.cm.one.h(TL.dirty.hit(dirty, TL.part.deps.of(it)), ty, e, st, px, sel, it)
+    case False{}:
+      it
+
+# the entry is the same as the item's (pe): the entry is the item's
+def TL.cm.one.k(same: Bool, +ty: Ty, +e: M.Entry, +st: M.State, +dirty: List<&2, String>, +px: U32, +sel: String, +pe: M.Entry, +pp: TLPart) -> TLE:
+  match same:
+    case True{}:
+      TL.cm.one.c(TL.cm.chip(pe, sel), dirty, ty, pe, st, px, sel, TLE{pe, pp})
+    case False{}:
+      TL.cm.item(ty, e, st, px, sel)
+
+# an entry equal to the one its item was made for keeps the item unless a
+# card it shows changed
+def TL.cm.one(+ty: Ty, +e: M.Entry, +st: M.State, +dirty: List<&2, String>, +px: U32, +sel: String, +it: TLE) -> TLE:
+  match it:
+    case TLE{+pe, +pp}:
+      TL.cm.one.k(Q.Eq.entry(e, pe), ty, e, st, dirty, px, sel, pe, pp)
+
+def TL.cm.again(es: List<&2, M.Entry>, +ty: Ty, +st: M.State, +dirty: List<&2, String>, +px: U32, +sel: String, prev: List<&2, TLE>) -> List<&2, TLE>:
+  match es prev:
+    case Nil{} _:
+      Nil{}
+    case +e <> t +it <> pt:
+      h r = TL.cm.one(ty, e, st, dirty, px, sel, it) TL.cm.again(t, ty, st, dirty, px, sel, pt)
+      h <> r
+    case +e <> t Nil{}:
+      h r = TL.cm.item(ty, e, st, px, sel) TL.cm.make(ty, t, st, px, sel)
+      h <> r
+
+# A matching timeline stamp guarantees these are still the same entries.
+# Refresh their cards without comparing all their text again. Independent
+# affected entries can be laid out in parallel, just like the cold memo.
+def TL.cm.refs(its: List<&2, TLE>, +ty: Ty, +st: M.State, +dirty: List<&2, String>, +px: U32, +sel: String) -> List<&2, TLE>:
+  match its:
+    case Nil{}: Nil{}
+    case TLE{+e, p} <> t:
+      h r = TL.cm.one.k(True{}, ty, e, st, dirty, px, sel, e, p) TL.cm.refs(t, ty, st, dirty, px, sel)
+      h <> r
+
+def TL.cm.apply(c: TLAlign, +es: List<&2, M.Entry>, its: List<&2, TLE>, +ty: Ty, +st: M.State, +px: U32, +sel: String) -> List<&2, TLE>:
+  match c:
+    case TLSame{}:
+      its
+    case TLDrop{d}:
+      TL.skip(d, its)
+    case TLPad{k}:
+      TL.cat(TL.cm.make(ty, TL.etake(k, es), st, px, sel), its)
+
+def TL.cm.aligned(+es: List<&2, M.Entry>, +ty: Ty, +st: M.State, +px: U32, +sel: String, +its: List<&2, TLE>) -> List<&2, TLE>:
+  TL.cm.apply(TL.align.of(es, its), es, its, ty, st, px, sel)
+
+def TL.cm.of.k(same: Bool, +ty: Ty, +es: List<&2, M.Entry>, +st: M.State, +dirty: List<&2, String>, +px: U32, +sel: String, prev: List<&2, TLE>) -> TLMemo:
+  match same:
+    case True{}:
+      TLMemo{px, sel, TL.cm.again(es, ty, st, dirty, px, sel, TL.cm.aligned(es, ty, st, px, sel, prev)), TL.live.none()}
+    case False{}:
+      TLMemo{px, sel, TL.cm.make(ty, es, st, px, sel), TL.live.none()}
+
+def TL.cm.of(+ty: Ty, es: List<&2, M.Entry>, +st: M.State, +dirty: List<&2, String>, +px: U32, +sel: String, prev: TLMemo) -> TLMemo:
+  match prev:
+    case TLMemo{ppx, psel, items, _}:
+      TL.cm.of.k(Bool.and(U32.is_eq(ppx, px), Q.Eq.str(psel, sel)), ty, es, st, dirty, px, sel, items)
+
+# Touched ids, kept by the window since the last timeline it laid out
+# (main.bend's Kept): more than 64 become "*"
+def TL.dirt.add.k(+full: Bool, +ids: List<&2, String>, +ds: List<&2, String>) -> List<&2, String>:
+  match full:
+    case True{}:
+      ["*"]
+    case False{}:
+      List.append(&2, String, ids, ds)
+
+def TL.dirt.add(+ids: List<&2, String>, +ds: List<&2, String>) -> List<&2, String>:
+  match ids:
+    case Nil{}:
+      ds
+    case _ <> _:
+      TL.dirt.add.k(Nat.is_gt(Nat.add(List.length(&2, String, ids), List.length(&2, String, ds)), 64n), ids, ds)
+
 # messages the server has not stored yet, marked as sending
 def TL.sending(+ty: Ty, ps: List<&2, String>, +px: U32) -> List<&2, TLine>:
   match ps:
@@ -6887,17 +7890,58 @@ def TL.memo.locale(+tag: String, +m: TLMemo) -> TLMemo:
 # the memo brought up to this frame: the open thread's entries at its width
 # (only the newest page of a thread, core's Page: a long thread laid out
 # whole cost every frame 15 ms on a real log; "earlier" shows another page)
-def Lay.memo.local(+tag: String, +ty: Ty, +n: S.Nui, +prev: TLMemo) -> TLMemo:
-  TL.memo.with_live(TL.memo.of(ty, Lay.memo.es(String.is_empty(U.Ui.sel(S.Nui.ui(n))), n), Lay.tl.px(n), U.Ui.sel(S.Nui.ui(n)), prev),
+def Lay.memo.local(+tag: String, +ty: Ty, +n: S.Nui, +dirty: List<&2, String>, +prev: TLMemo) -> TLMemo:
+  TL.memo.with_live(TL.cm.of(ty, Lay.memo.es(String.is_empty(U.Ui.sel(S.Nui.ui(n))), n), U.Ui.state(S.Nui.ui(n)), dirty, Lay.tl.px(n), U.Ui.sel(S.Nui.ui(n)), prev),
     TL.live.local(tag, TL.live.get(ty, TL.memo.lv(prev), U.Live.head(U.Ui.live.of(S.Nui.ui(n), U.Ui.sel(S.Nui.ui(n)))), Lay.tl.px(n))))
 
+# dirty: the object ids touched since this memo was last brought up
+def Lay.memo.d(+ty: Ty, +n: S.Nui, +dirty: List<&2, String>, prev: TLMemo) -> TLMemo:
+  Lay.memo.local(TL.locale(S.Nui.ui(n)), ty, n, dirty, TL.memo.locale(TL.locale(S.Nui.ui(n)), prev))
+
+# with nothing known of what changed: every card is looked at again
 def Lay.memo(+ty: Ty, +n: S.Nui, prev: TLMemo) -> TLMemo:
-  Lay.memo.local(TL.locale(S.Nui.ui(n)), ty, n, TL.memo.locale(TL.locale(S.Nui.ui(n)), prev))
+  Lay.memo.d(ty, n, ["*"], prev)
+
+# What was touched is known only for the memo the last frame left in front
+# (it is the one this frame brings up); a memo from further back may have
+# missed any change.
+def TL.memos.dirty.k(same: Bool, +dirty: List<&2, String>) -> List<&2, String>:
+  match same:
+    case True{}:
+      dirty
+    case False{}:
+      ["*"]
+
+def TL.memos.dirty(ms: List<&2, TLMemo>, +sel: String, +dirty: List<&2, String>) -> List<&2, String>:
+  match ms:
+    case Nil{}:
+      ["*"]
+    case m <> _:
+      TL.memos.dirty.k(Q.Eq.str(TL.memo.sel(m), sel), dirty)
 
 # the memos brought up to this frame: the open thread's in front, from the
 # one kept for it
+def Lay.memos.d(+ty: Ty, +n: S.Nui, +dirty: List<&2, String>, +ms: List<&2, TLMemo>) -> List<&2, TLMemo>:
+  TL.memos.keep(Lay.memo.d(ty, n, TL.memos.dirty(ms, U.Ui.sel(S.Nui.ui(n)), dirty), TL.memos.pick(ms, U.Ui.sel(S.Nui.ui(n)))), ms)
+
 def Lay.memos(+ty: Ty, +n: S.Nui, +ms: List<&2, TLMemo>) -> List<&2, TLMemo>:
-  TL.memos.keep(Lay.memo(ty, n, TL.memos.pick(ms, U.Ui.sel(S.Nui.ui(n)))), ms)
+  Lay.memos.d(ty, n, ["*"], ms)
+
+def TL.memo.refs(m: TLMemo, +ty: Ty, st: M.State, dirty: List<&2, String>) -> TLMemo:
+  match m:
+    case TLMemo{+px, +sel, its, lv}:
+      TLMemo{px, sel, TL.cm.refs(its, ty, st, dirty, px, sel), lv}
+
+def Lay.memos.refs.k(hit: Bool, +ty: Ty, +n: S.Nui, +dirty: List<&2, String>, +m: TLMemo, +rest: List<&2, TLMemo>) -> List<&2, TLMemo>:
+  match hit:
+    case True{}: TL.memo.refs(m, ty, U.Ui.state(S.Nui.ui(n)), dirty) <> rest
+    case False{}: Lay.memos.d(ty, n, dirty, m <> rest)
+
+def Lay.memos.refs(+ty: Ty, +n: S.Nui, +dirty: List<&2, String>, ms: List<&2, TLMemo>) -> List<&2, TLMemo>:
+  match ms:
+    case Nil{}: Lay.memos.d(ty, n, dirty, Nil{})
+    case +m <> rest:
+      Lay.memos.refs.k(Bool.and(TL.memo.fits(m, Lay.tl.px(n), U.Ui.sel(S.Nui.ui(n))), String.eq(TL.live.tag(TL.memo.lv(m)), TL.locale(S.Nui.ui(n)))), ty, n, dirty, m, rest)
 
 def TL.memo.size(m: TLMemo) -> Nat:
   match m:

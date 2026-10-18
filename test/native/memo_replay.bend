@@ -1,4 +1,5 @@
 import Base
+import ../../src/app/chipx.bend as CHX
 import ../../src/core/codec.bend as C
 import ../../src/core/client.bend as U
 import ../../src/core/model.bend as M
@@ -151,7 +152,7 @@ def steps(xs: List<&2, J.Json>, +ty: L.Ty, +n0: N.Nui, +memo0: L.TLMemo, +mm: Li
       +o = msg(x)
       +n = prepared(with_ui(n0, U.Ui.tick(U.Ui.recv(N.Nui.ui(n0), o), J.Json.get_nat(x, "at", U.Side.now(N.Nui.ui(n0))))), 0n)
       +tc2 = MM.TouchK.msg(o, tc)
-      +memo = L.Lay.memo(ty, n, memo0)
+      +memo = L.Lay.memo.d(ty, n, U.Dirty.msg(o), memo0)
       +fresh = MM.Mm.lay(ty, memo, n)
       +keep = MM.MainM.keep(MM.Mm.fresh(mm, fresh, n, tc2, memo))
       steps(rest, ty, with_hits(n, hits(fresh), 0n), memo, keep, tc2,
@@ -480,6 +481,177 @@ def ixs.stream(xs: List<&2, J.Json>, +i: Nat, +th: String, +u0: U.Ui, +tc: MM.To
       +k2 = MM.Ix.up([k], tc2, u)
       +over = Bool.pick(Nat, Nat.is_gt(ix.over(Map.to_list(&2, Nat, MM.TouchK.m(tc2)), MM.IxK.n(k)), 0n), 1n, 0n)
       ixs.stream(rest, Nat.add(i, 3n), th, u, tc2, k2, Nat.add(bad, marks), Nat.add(old, over), IxT.add(t, String.eq(Fp.ix(MM.IxK.ix(k2)), Fp.ix(U.Side.ix(U.Ui.state(u)))), String.take(J.Json.show(x), 160n)))
+# Chips (links): a thread of 200 refs in 5 messages, then changes to what
+# they name. After each, the memo (brought up with the objects the change
+# touched) must hold the same lines as a memo made whole.
+def Ch.ref.k(+m: Nat, +i: Nat) -> String:
+  match m:
+    case 0n:
+      "backplane://thread/t1-" ++ Nat.show(Nat.mod(i, 7n))
+    case 1n:
+      "t1-" ++ Nat.show(Nat.mod(i, 7n))
+    case 2n:
+      "backplane://bot/b1"
+    case 3n:
+      "backplane://project/p"
+    case 4n:
+      "backplane://file/p/src/x.bend"
+    case 5n:
+      "backplane://thread/L~t9"
+    case 6n:
+      "t9-99"
+    case _:
+      "https://example.com/x"
+
+def Ch.ref(+i: Nat) -> String:
+  Ch.ref.k(Nat.mod(i, 8n), i)
+
+def Ch.text(+n: Nat, +k: Nat, +i: Nat) -> String:
+  match n:
+    case 0n:
+      ""
+    case 1n+j:
+      "see " ++ Ch.ref(Nat.add(Nat.mul(k, 40n), i)) ++ " and " ++ Ch.text(j, k, 1n+i)
+
+def Ch.msgs(+k: Nat) -> List<&2, M.Change>:
+  match k:
+    case 0n:
+      Nil{}
+    case 1n+j:
+      M.MessagePosted{"c", "m" ++ Nat.show(j), M.Assistant{}, Ch.text(40n, j, 0n), Nat.add(10n, j)} <> Ch.msgs(j)
+
+def Ch.threads(+k: Nat) -> List<&2, M.Change>:
+  match k:
+    case 0n:
+      Nil{}
+    case 1n+j:
+      M.ThreadCreated{"t1-" ++ Nat.show(j), "p", "Thread " ++ Nat.show(j), M.Local{}, "", "", "claude", "", Nat.add(2n, j)} <> Ch.threads(j)
+
+def Ch.setup() -> List<&2, M.Change>:
+  List.concat(&2, M.Change, [[M.ProjectCreated{"p", "Proj", "/p", 1n}, M.ThreadCreated{"c", "p", "Hub", M.Local{}, "", "", "claude", "", 2n}, M.ThreadCreated{"tb", "p", "Bot thread", M.Local{}, "", "", "claude", "", 2n}, M.BotSet{"b1", "Bot", "tb", 1n, "", 3n}],
+    Ch.threads(7n), List.reverse(&2, M.Change, Ch.msgs(5n))])
+
+def Ch.script() -> List<&2, M.Change>:
+  [M.ThreadRenamed{"t1-0", "Renamed zero", 100n}, M.ThreadSettled{"t1-1", True{}, 101n}, M.TurnChanged{"t1-2", M.Running{}, 102n}, M.ThreadCreated{"t9-99", "p", "Late arrival", M.Local{}, "", "", "claude", "", 103n},
+   M.ThreadDeleted{"t1-3", 104n}, M.BotSet{"b1", "Bot renamed", "tb", 1n, "", 105n}, M.ProjectCreated{"p", "Proj renamed", "/p", 106n}, M.ThreadRenamed{"t1-0", "A much longer title that has to be cut at forty-eight characters or so", 107n},
+   M.TurnChanged{"t1-2", M.Completed{}, 108n}, M.ThreadUnsettled{"t1-1", 109n}, M.ThreadRenamed{"t1-5", "Five", 110n}, M.ThreadArchived{"t1-6", True{}, 111n}]
+
+def Ch.json(cs: List<&2, M.Change>) -> List<&2, J.Json>:
+  match cs:
+    case Nil{}:
+      Nil{}
+    case c <> t:
+      C.Change.encode(c) <> Ch.json(t)
+
+def Ch.heads(its: List<&2, L.TLE>) -> List<&2, L.TLine>:
+  match its:
+    case Nil{}:
+      Nil{}
+    case L.TLE{_, p} <> t:
+      List.append(&2, L.TLine, L.TL.part.head(p), Ch.heads(t))
+
+def Ch.same(a: List<&2, L.TLine>, b: List<&2, L.TLine>) -> Bool:
+  match a b:
+    case Nil{} Nil{}:
+      True{}
+    case L.TLine{t0, c0, k0, p0, w0} <> at L.TLine{t1, c1, k1, p1, w1} <> bt:
+      Bool.and(Bool.and(Bool.and(String.eq(t0, t1), U32.is_eq(c0, c1)), Bool.and(U32.is_eq(k0, k1), U32.is_eq(w0, w1))), Bool.and(String.eq(p0, p1), Ch.same(at, bt)))
+    case _ _:
+      False{}
+
+def Ch.items(m: L.TLMemo) -> List<&2, L.TLE>:
+  match m:
+    case L.TLMemo{_, _, its, _}:
+      its
+
+def Ch.chips(ls: List<&2, L.TLine>) -> Nat:
+  match ls:
+    case Nil{}:
+      0n
+    case L.TLine{_, _, k, _, _} <> t:
+      Nat.add(Bool.pick(Nat, U32.is_eq(k, 13), 1n, 0n), Ch.chips(t))
+
+type ChResult is Data:
+  ChResult{steps: Nat, stale: Nat, linked: Nat, why: String}
+
+def Ch.dirty(track: Bool, +o: J.Json) -> List<&2, String>:
+  match track:
+    case True{}:
+      U.Dirty.msg(o)
+    case False{}:
+      Nil{}
+
+def Ch.show(+label: String, r: ChResult) -> String:
+  match r:
+    case ChResult{steps, stale, linked, why}:
+      label ++ ": steps " ++ Nat.show(steps) ++ ", stale memos " ++ Nat.show(stale) ++ ", linked lines " ++ Nat.show(linked) ++ why
+
+def Ch.stale(r: ChResult) -> Nat:
+  match r:
+    case ChResult{_, stale, _, _}:
+      stale
+
+def Ch.assert(ok: Bool) -> IO(Unit):
+  match ok:
+    case True{}:
+      IO.pure(Unit, Unit{})
+    case False{}:
+      IO.die(Unit, 1, "chip replay failed: tracked stale must be zero and no-dirty control stale must be positive")
+
+def Ch.steps(xs: List<&2, J.Json>, +ty: L.Ty, +n0: N.Nui, +memo0: L.TLMemo, steps: Nat, stale: Nat, +why: String, +track: Bool) -> ChResult:
+  match xs:
+    case Nil{}:
+      ChResult{steps, stale, Ch.chips(Ch.heads(Ch.items(memo0))), why}
+    case +x <> rest:
+      +o = msg(x)
+      +n = prepared(with_ui(n0, U.Ui.recv(N.Nui.ui(n0), o)), 0n)
+      +memo = L.Lay.memo.d(ty, n, Ch.dirty(track, o), memo0)
+      +whole = L.TL.cm.make(ty, L.Lay.memo.es(False{}, n), U.Ui.state(N.Nui.ui(n)), L.Lay.tl.px(n), U.Ui.sel(N.Nui.ui(n)))
+      +ok = Ch.same(Ch.heads(Ch.items(memo)), Ch.heads(whole))
+      Ch.steps(rest, ty, n, memo, 1n+steps, Nat.add(stale, Bool.pick(Nat, ok, 0n, 1n)), Bool.pick(String, ok, why, why ++ "\n  " ++ String.take(J.Json.show(x), 120n)), track)
+
+def Ch.run(+ty: L.Ty, +track: Bool) -> ChResult:
+  Ch.steps(Ch.json(Ch.script()), ty, prepared(N.Nui.init(real(Ch.json(Ch.setup()), "c"), 1400, 900), 0n), L.Lay.memo(ty, prepared(N.Nui.init(real(Ch.json(Ch.setup()), "c"), 1400, 900), 0n), L.TL.memo.none()), 0n, 0n, "", track)
+
+# Follow the real frame's stamp fast path and compare rendered output,
+# including chips changed by another thread whose own stamp is unchanged.
+def Ch.frame.refresh(stamp: Bool, +ty: L.Ty, +n: N.Nui, dirty: List<&2, String>, ms: List<&2, L.TLMemo>) -> List<&2, L.TLMemo>:
+  match stamp:
+    case True{}: MM.Mm.memos.live(ty, n, L.Lay.memos.refs(ty, n, dirty, ms))
+    case False{}: L.Lay.memos.d(ty, n, dirty, ms)
+
+def Ch.frame.memos(same: Bool, stamp: Bool, +ty: L.Ty, +n: N.Nui, dirty: List<&2, String>, ms: List<&2, L.TLMemo>) -> List<&2, L.TLMemo>:
+  match same:
+    case True{}: MM.Mm.memos.live(ty, n, ms)
+    case False{}: Ch.frame.refresh(stamp, ty, n, dirty, ms)
+
+def Ch.frame.old(changed: Bool, ms: List<&2, MM.MainM>) -> List<&2, MM.MainM>:
+  match changed:
+    case True{}: Nil{}
+    case False{}: ms
+
+def Ch.frames(xs: List<&2, J.Json>, +ty: L.Ty, +n0: N.Nui, +ms: List<&2, L.TLMemo>, +marks: List<&2, String>, +old: List<&2, MM.MainM>, +tc: MM.TouchK, steps: Nat, bad: Nat, +track: Bool) -> ChResult:
+  match xs:
+    case Nil{}: ChResult{steps, bad, Ch.chips(Ch.heads(Ch.items(L.TL.memos.now(ms)))), ""}
+    case +x <> rest:
+      +o = msg(x)
+      +n = prepared(with_ui(n0, U.Ui.recv(N.Nui.ui(n0), o)), 0n)
+      +next = MM.TouchK.msg(o, tc)
+      +key = MM.Mm.tlkey(n, next)
+      +dirty = Ch.dirty(track, o)
+      +same = CHX.Cache.same(key, marks, dirty)
+      +changed = CHX.Cache.hit(dirty, CHX.Cache.deps(marks))
+      +kept = Ch.frame.memos(same, MM.Mm.tlkey.same(key, marks), ty, n, dirty, ms)
+      +whole = L.Lay.memos(ty, n, Nil{})
+      +drawn = MM.Mm.main(Ch.frame.old(changed, old), ty, L.TL.memos.now(kept), n, next)
+      +ok = Eqh.out(MM.MainM.out([drawn]), MM.Mm.lay(ty, L.TL.memos.now(whole), n))
+      Ch.frames(rest, ty, n, kept, CHX.Cache.marks(True{}, same, key, kept, marks), [drawn], next, 1n+steps, Nat.add(bad, Bool.pick(Nat, ok, 0n, 1n)), track)
+
+def Ch.frame.run(+ty: L.Ty, +track: Bool) -> ChResult:
+  +n = prepared(N.Nui.init(real(Ch.json(Ch.setup()), "c"), 1400, 900), 0n)
+  +ms = L.Lay.memos(ty, n, Nil{})
+  Ch.frames(Ch.json(Ch.script()), ty, n, ms, CHX.Cache.marks(True{}, False{}, MM.Mm.tlkey(n, MM.TouchK.none()), ms, Nil{}), Nil{}, MM.TouchK.none(), 0n, 0n, track)
+
 # The sidebar's memo over the same events: each event as its own hub
 # message, the clock at its time; a kept sidebar used when its key holds is
 # compared with a fresh one
@@ -673,6 +845,16 @@ def replay(+as: List<&2, String>, +ty: L.Ty, +xs: List<&2, J.Json>, +k: Nat, +cu
     +stream : ST = streams(List.drop(&2, J.Json, xs, cut), 0n, ty, with_hits(ns, hits(MM.Mm.lay(ty, ms0, ns)), 0n), ms0, Nil{}, MM.TouchK.none(), ST{0n, 0n, 0n, 0n, 0n, ""})
     IO.print(ST.show(stream))
     exact(ST.ok(stream), "stream")
+    +positive : ChResult = Ch.run(ty, True{})
+    +control : ChResult = Ch.run(ty, False{})
+    IO.print(Ch.show("chips", positive))
+    IO.print(Ch.show("chips control (no dirty)", control))
+    Ch.assert(Bool.and(Nat.is_eq(Ch.stale(positive), 0n), Nat.is_gt(Ch.stale(control), 0n)))
+    +frames : ChResult = Ch.frame.run(ty, True{})
+    +staleFrames : ChResult = Ch.frame.run(ty, False{})
+    IO.print(Ch.show("chip frames", frames))
+    IO.print(Ch.show("chip frames control (no dirty)", staleFrames))
+    Ch.assert(Bool.and(Nat.is_eq(Ch.stale(frames), 0n), Nat.is_gt(Ch.stale(staleFrames), 0n)))
     +streamix : IxT = ixs.stream(List.drop(&2, J.Json, xs, cut), 0n, arg(as, 1n), u, MM.TouchK.none(), MM.Ix.full(u, 0n), 0n, 0n, IxT{0n, 0n, ""})
     IO.print("streaming, " ++ IxT.show(streamix))
     exact(IxT.ok(streamix), "streaming index")

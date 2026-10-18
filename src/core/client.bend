@@ -3550,6 +3550,10 @@ def Menu.ren(+l: I.Loc, +id: String) -> MItem:
 def Menu.ref(+l: I.Loc, r: R.Ref) -> MItem:
   MItem{MSG.T.menu.copylink(l), "ref-copy", R.Ref.uri(r), ""}
 
+# A chip's menu uses the same language as the other context menus.
+def Menu.chip(+l: I.Loc, +uri: String) -> List<&2, MItem>:
+  [MItem{MSG.T.menu.file.open(l), "ref-go", uri, ""}, MItem{MSG.T.menu.copylink(l), "ref-copy", uri, ""}]
+
 def Menu.room(+l: I.Loc, id: String) -> List<&2, MItem>:
   [Menu.ref(l, R.Ref.room(id))]
 
@@ -3638,12 +3642,17 @@ def Menu.file.here.loc(+l: I.Loc, +u: Ui, +path: String) -> List<&2, MItem>:
 def Menu.file.here(+u: Ui, path: String) -> List<&2, MItem>:
   Menu.file.here.loc(Lang.loc(u), u, path)
 
+def Menu.items.r(+l: I.Loc, chip: Bool, +u: Ui, +id: String) -> List<&2, MItem>:
+  match chip:
+    case True{}: Menu.chip(l, id)
+    case False{}: Menu.items.b(l, String.eq(Menu.kind(Menu.open(u)), "b"), u, id)
+
 def Menu.items.t(+l: I.Loc, file: Bool, +u: Ui, +id: String) -> List<&2, MItem>:
   match file:
     case True{}:
       Menu.file.here.loc(l, u, id)
     case False{}:
-      Menu.items.b(l, String.eq(Menu.kind(Menu.open(u)), "b"), u, id)
+      Menu.items.r(l, String.eq(Menu.kind(Menu.open(u)), "r"), u, id)
 
 def Menu.items.k(+l: I.Loc, thread: Bool, +u: Ui, +id: String, rich: Bool) -> List<&2, MItem>:
   match thread:
@@ -3660,10 +3669,18 @@ def Menu.items(+u: Ui, rich: Bool) -> List<&2, MItem>:
   Menu.items.loc(Lang.loc(u), u, rich)
 
 # its heading: the thread's title, the project's name or the file's path
-def Menu.title.loc(+l: I.Loc, +u: Ui) -> String:
+def Menu.title.other.loc(+l: I.Loc, +u: Ui) -> String:
   Bool.pick(String, String.eq(Menu.kind(Menu.open(u)), "t"), TTL.Title.shown(l, Active.title(Ui.thread(Side.st(u), Menu.id(Menu.open(u))))),
     Bool.pick(String, String.eq(Menu.kind(Menu.open(u)), "f"), Menu.id(Menu.open(u)),
       Bool.pick(String, String.eq(Menu.kind(Menu.open(u)), "b"), BT.Bot.name(BT.World.bot(M.State.bots(Side.st(u)), Menu.id(Menu.open(u)))), Ui.project_title(Side.st(u), Menu.id(Menu.open(u))))))
+
+def Menu.title.chip(chip: Bool, +l: I.Loc, +u: Ui) -> String:
+  match chip:
+    case True{}: MSG.T.menu.link(l)
+    case False{}: Menu.title.other.loc(l, u)
+
+def Menu.title.loc(+l: I.Loc, +u: Ui) -> String:
+  Menu.title.chip(String.eq(Menu.kind(Menu.open(u)), "r"), l, u)
 
 def Menu.title(+u: Ui) -> String:
   Menu.title.loc(Lang.loc(u), u)
@@ -3674,7 +3691,7 @@ def Menu.set(+u: Ui, +m: String) -> Ui:
 
 def Menu.actions() -> List<&2, String>:
   ["row-menu", "proj-menu", "menu-close", "row-pin", "row-unpin", "row-archive", "row-unarchive", "side-older", "side-settled",
-   "file-menu", "file-open", "file-reveal", "file-copy", "row-rename", "rename-save", "rename-no", "bot-menu"]
+   "file-menu", "file-open", "file-reveal", "file-copy", "row-rename", "rename-save", "rename-no", "bot-menu", "chip-menu"]
 
 # a file link's path where the hub finds it: in the selected thread's folder
 # when relative (core/links.bend's Link.file.abs)
@@ -3759,6 +3776,8 @@ def Menu.act.k(i: Nat, +u: Ui, +value: String) -> Act:
       Act{Ren.clear(u), Nil{}}
     case 16n:
       Act{Menu.set(u, "b:" ++ value), Nil{}}
+    case 17n:
+      Act{Menu.set(u, "r:" ++ value), Nil{}}
     case _:
       Menu.shut(Ui.rpc(u, "thread.unarchive", [J.KV{"thread", J.Str{value}}]))
 
@@ -10635,7 +10654,7 @@ def Ui.act.e(emb: Bool, +u: Ui, +action: String, +value: String) -> Act:
     case True{}:
       Emb.act(u, action, value)
     case False{}:
-      Emb.sync.sel(Ui.sel(u), Fab.sync(Mpage.sync(Ui.act.m(Nat.is_lt(C.Codec.pos(Menu.actions(), action), 17n), C.Codec.pos(Menu.actions(), action), u, action, value))))
+      Emb.sync.sel(Ui.sel(u), Fab.sync(Mpage.sync(Ui.act.m(Nat.is_lt(C.Codec.pos(Menu.actions(), action), 18n), C.Codec.pos(Menu.actions(), action), u, action, value))))
 
 # the picker's machine row (routed before the action table)
 def Ui.act.p(pick: Bool, +u: Ui, +action: String, +value: String) -> Act:
@@ -11915,3 +11934,50 @@ def Ui.act(+u: Ui, +action: String, +value: String) -> Act:
 
 def Ui.recv_act(u: Ui, +o: J.Json) -> Act:
   Mailv.sync(Ui.recv_act.s(String.eq(J.Json.get_str(o, "t", ""), "shot"), u, o))
+
+# The objects whose cards a change can alter, for the window's chips
+# (layout.bend's TL.cm.*, main.bend's Kept dirt): what the cards read
+# (RE.Cards.touched), less the posts of the timeline, which no card reads
+# (law card_thread_no_timeline): a message in a thread does not change its
+# card, however often agents stream. Everything else Cards.touched names,
+# a card can show. Law cards_touched_covers_touch: every thread Touch.of
+# names for a change that can alter a card is among them.
+def Dirty.of(+c: M.Change) -> List<&2, String>:
+  match c:
+    case M.MessagePosted{_, _, _, _, _}:
+      Nil{}
+    case M.MessageFrom{_, _, _, _, _, _}:
+      Nil{}
+    case _:
+      RE.Cards.touched(c)
+
+# The objects a hub message touched (the window's memos keep them): a
+# change names its objects; the log and another machine's state may change
+# any; nothing else changes a card.
+def Dirty.change(m: Maybe<&2, M.Change>) -> List<&2, String>:
+  match m:
+    case Some{+c}:
+      Dirty.of(c)
+    case None{}:
+      ["*"]
+
+def Dirty.items(xs: List<&2, J.Json>, acc: List<&2, String>) -> List<&2, String>:
+  match xs:
+    case Nil{}:
+      acc
+    case +x <> rest:
+      Dirty.items(rest, List.append(&2, String, Dirty.change(C.Change.decode(x)), acc))
+
+def Dirty.msg.k(i: Nat, +o: J.Json) -> List<&2, String>:
+  match i:
+    case 0n:
+      Dirty.items(J.Json.elems(J.Json.get_obj(o, "items")), Nil{})
+    case 1n:
+      ["*"]
+    case 2n:
+      ["*"]
+    case _:
+      Nil{}
+
+def Dirty.msg(+o: J.Json) -> List<&2, String>:
+  Dirty.msg.k(C.Codec.pos(["changes", "log", "far"], J.Json.get_str(o, "t", "")), o)

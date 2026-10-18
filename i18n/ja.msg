@@ -52,6 +52,7 @@ menu.delete.confirm = もう一度クリックで削除
 menu.unpin = ピン留めを解除
 menu.pin = ピン留め
 menu.rename = 名前を変更
+menu.link = リンク
 menu.copylink = リンクをコピー
 menu.bringback = 元に戻す
 menu.archive = アーカイブ

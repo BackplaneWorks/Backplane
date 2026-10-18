@@ -5,7 +5,7 @@
 //
 //   bun test/tools/perf_load.ts [--bin build/backplane] [--log ~/.backplane-bend/events.jsonl]
 //     [--port 3799] [--display :77] [--xvfb PATH] [--agents 10] [--secs 20]
-//     [--phases normal,idle,bg,fg,type,open,plane,mail] [--out results.json] [--keep] [--shots DIR] [--hold]
+//     [--phases normal,idle,bg,fg,type,open,plane,mail,links] [--out results.json] [--keep] [--shots DIR] [--hold] [--theme light|dark]
 //
 // See docs/perf-bench.md. Nothing here touches the live home: the log is
 // copied (devices, hooks, peers, routines, push and deploy settings stripped,
@@ -21,7 +21,7 @@ import { dirname, join, resolve } from "node:path";
 
 const argv = process.argv.slice(2);
 if (argv.includes("--help")) {
-  console.log("bun test/tools/perf_load.ts --bin BUILD --log SNAPSHOT [--agents 10] [--secs 20] [--phases normal,idle,bg,fg,type,open,plane,mail] [--out results.json] [--shots DIR] [--fail-on-target] [--keep]");
+  console.log("bun test/tools/perf_load.ts --bin BUILD --log SNAPSHOT [--agents 10] [--secs 20] [--phases normal,idle,bg,fg,type,open,plane,mail,links] [--out results.json] [--shots DIR] [--fail-on-target] [--keep]");
   process.exit(0);
 }
 const opt = (name: string, d: string) => {
@@ -44,7 +44,7 @@ const outPath = opt("out", "");
 const keep = argv.includes("--keep");
 const failOnTarget = argv.includes("--fail-on-target");
 const shots = opt("shots", ""); // a folder: a screenshot at the end of each phase (ImageMagick's import)
-const phasesWanted = opt("phases", "normal,idle,bg,fg,type,open,plane").split(",");
+const phasesWanted = opt("phases", "normal,idle,bg,fg,type,open,plane,links").split(",");
 const xpoke = resolve(opt("xpoke", join(here, "build/xpoke")));
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const say = (s: string) => console.error(`[perf_load] ${s}`);
@@ -54,7 +54,7 @@ const say = (s: string) => console.error(`[perf_load] ${s}`);
 if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error("--port must be 1024..65535");
 if (!Number.isInteger(nAgents) || nAgents < 1 || nAgents > 26) throw new Error("--agents must be 1..26");
 if (!Number.isFinite(secs) || secs <= 0) throw new Error("--secs must be positive");
-const knownPhases = ["normal", "idle", "bg", "fg", "type", "open", "plane", "mail"];
+const knownPhases = ["normal", "idle", "bg", "fg", "type", "open", "plane", "mail", "links"];
 if (phasesWanted.some((p) => !knownPhases.includes(p))) throw new Error("unknown --phases value");
 if (port === 3787) throw new Error("3787 is the live hub's port");
 if (!existsSync(bin)) throw new Error(`no binary at ${bin}`);
@@ -151,11 +151,46 @@ openTs.forEach((t, i) => kept.push(JSON.stringify({ $: "ThreadRenamed", id: t.id
 // A synthetic log need not have completed onboarding. The load harness
 // drives the product, not the modal first-run tour.
 kept.push(JSON.stringify({ $: "SettingSet", key: "onboard.done", value: "1", at: now }));
+
+// Phase "links": a thread as people write them: 20 messages, user and reply by
+// turns, a reply with paragraphs and list items, 10 refs each (200 in all),
+// over 31 distinct targets (14 threads of the log, 3 of them also as bare ids,
+// 3 bots, the project, 3 files, a remote thread, 3 ids nothing has, 3 web
+// links), each named by 3 of the messages, so a retitle or a status flip of
+// one target touches 3 of the 20 messages (spec 3c).
+const linkT = "t9000000001-1";
+const linkTargets = real.slice(0, 14);
+if (phasesWanted.includes("links")) {
+  kept.push(JSON.stringify({ $: "ThreadCreated", id: linkT, project: longT.project, title: "zqlinks thread", env: "local", branch: "", worktree: "", provider: "claude", model: "", at: now }));
+  const bots = [...botIds].slice(0, 3);
+  const pr = longT.project;
+  const targets: string[] = [
+    ...linkTargets.map((t) => `backplane://thread/${t.id}`),
+    ...real.slice(14, 17).map((t) => t.id),
+    ...bots.map((b) => `backplane://bot/${b}`),
+    `backplane://project/${pr}`,
+    `backplane://file/${pr}/README.md`, `backplane://file/${pr}/AGENTS.md`, `backplane://file/${pr}/src/app/main.bend`,
+    "backplane://thread/L~t9000000009-9",
+    "t9000000009-1", "t9000000009-2", "t9000000009-3",
+    "https://example.com/a", "https://example.com/b", "https://example.com/c",
+  ];
+  const named = (m: number) => targets.filter((_, k) => m === k % 20 || m === (k + 7) % 20 || m === (k + 13) % 20);
+  for (let m = 0; m < 20; m++) {
+    const ts = named(m).length ? named(m) : [targets[m]];
+    const r = Array.from({ length: 10 }, (_, j) => ts[j % ts.length]);
+    const user = m % 2 === 0;
+    const text = user
+      ? `look at ${r.join(" and ")} please`
+      : `Step ${m}: results.\n\nSee ${r[0]} and ${r[1]}, also ${r[2]}.\n\n- check ${r[3]}\n- compare ${r[4]}\n- ${r[5]} then ${r[6]}\n\nSummary: ${r[7]}, ${r[8]} and ${r[9]}.`;
+    kept.push(JSON.stringify({ $: "MessagePosted", thread: linkT, msg: `m9000000001-${m}`, role: user ? "user" : "assistant", text, at: now + m }));
+  }
+}
 for (const k of openTasks) if (k) {
   kept.push(JSON.stringify({ $: "TaskStateSet", task: k, state: "cancelled", summary: "", at: now }));
   kept.push(JSON.stringify({ $: "TaskDelivered", task: k, at: now }));
 }
 kept.push(JSON.stringify({ $: "SettingSet", key: "restart.continue", value: "off", at: now }));
+if (opt("theme", "")) kept.push(JSON.stringify({ $: "SettingSet", key: "ui.theme", value: opt("theme", ""), at: now }));
 // The person's preferred provider may change between captures. The load
 // protocol always comes from the stand-in, including copied bot threads.
 kept.push(JSON.stringify({ $: "SettingSet", key: "agent.provider", value: "claude", at: now }));
@@ -460,6 +495,7 @@ const MAINX = 264 + (W - 264) / 2, MIDY = H / 2;
 // trace window of the Return alone (the open).
 async function openByTitle(title: string): Promise<[number, number]> {
   const expected = title === "zqlong" ? longT.id
+    : title === "zqlinks" ? linkT
     : /^zqopen[a-j]$/.test(title) ? openTs[title.charCodeAt(title.length - 1) - 97]?.id
     : ours.find((t: any) => t.title.startsWith(title))?.id;
   if (!expected) throw new Error(`no expected thread for ${title}`);
@@ -602,6 +638,17 @@ await phase("open", "streaming; 10 real threads opened one after another (ctrl+k
   for (let i = 0; i < 10; i++) p.marks!.push(await openByTitle(`zqopen${String.fromCharCode(97 + i)}`));
 });
 
+// 200 refs: open the thread, scroll it, retitle threads it names while scrolling
+await phase("links", "streaming; a thread of 20 messages with 200 refs (chips) opened, scrolled, and retitled threads it names while scrolling", async (p) => {
+  p.marks!.push(await openByTitle("zqlinks"));
+  for (let i = 0; i < 6; i++) { await poke("wheel", String(MAINX), String(MIDY), i % 2 ? "down" : "up"); await sleep(250); }
+  for (let i = 0; i < 8; i++) {
+    send("thread.rename", { thread: openTs[i % 4].id, title: `zqopen${String.fromCharCode(97 + (i % 4))} thread retitled ${i}` });
+    for (let j = 0; j < 3; j++) { await poke("wheel", String(MAINX), String(MIDY), j % 2 ? "down" : "up"); await sleep(250); }
+  }
+  await sleep(3000);
+});
+
 // the Status plane: the uberbot's first tab, reached by its sidebar row (see docs/perf-bench.md)
 await phase("plane", "streaming; the uberbot's Status plane on screen, wheel over it", async (p) => {
   const ok = await statusPlane(p);
@@ -712,7 +759,7 @@ const stat = (es: Ev[], name: string | RegExp): Sum => {
 };
 const f1 = (x: number) => (Number.isFinite(x) ? (x >= 100 ? x.toFixed(0) : x.toFixed(1)) : "-");
 const results: any = { bin, mail_reuse_home: mailReuseHome || null, log: logSrc, log_sha256: logSha256, log_bytes: Buffer.byteLength(raw), port, agents: nAgents, secs, rooms: botRooms.length, home: keep ? home : "", phases: [] as any[] };
-const order = ["normal", "idle", "bg", "fg", "type", "open", "plane", "mail"];
+const order = ["normal", "idle", "bg", "fg", "type", "open", "plane", "mail", "links"];
 const rows: string[] = [];
 const verdicts: string[] = [];
 for (const name of order) {

@@ -17,7 +17,7 @@ def nui(+tag: String) -> N.Nui:
 # Deliberately fake cached output makes retaining an old language visible
 # even before translated labels are installed by the localization branch.
 def poison(+tag: String) -> L.TLMemo:
-  L.TLMemo{780, "t", [L.TLE{M.Msg{"e", "t", M.Assistant{}, "body", 1n}, L.TLPart{[L.TLine{"old language", 0, 3, "", 0}], Nil{}, Nil{}}}],
+  L.TLMemo{780, "t", [L.TLE{M.Msg{"e", "t", M.Assistant{}, "body", 1n}, L.TLPart{[L.TLine{"old language", 0, 3, "", 0}], Nil{}, Nil{}, Nil{}, Nil{}, Nil{}}}],
     L.TL.live.local(tag, L.LiveMemo{780, "prefix\n\n", True{}, [L.TLine{"old language", 0, 3, "", 0}]})}
 
 def live.first(lm: L.LiveMemo) -> String:

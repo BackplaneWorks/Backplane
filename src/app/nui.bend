@@ -2980,11 +2980,19 @@ def Rcw.none(on: Bool, +n: Nui, +x: U32, +y: U32) -> Step:
 def Rcw.here(+n: Nui, +x: U32, +y: U32) -> Bool:
   Bool.and(Bool.and(Nui.in_viewer(n, x), U32.is_ge(y, 52)), U32.is_lt(Vw.kind(Nui.vw(n)), 2))
 
+# a right-click on a chip (a hit that goes to a ref) opens its menu
+def Row.menu.r(chip: Bool, +n: Nui, +action: String, +value: String, +x: U32, +y: U32) -> Step:
+  match chip:
+    case True{}:
+      Nui.act(Row.menu.at(n, x, y), "chip-menu", value)
+    case False{}:
+      Row.menu.k(Bool.and(String.eq(action, "select"), U32.is_lt(x, 264)),
+        Bool.and(Bool.or(String.eq(action, "project"), String.eq(action, "look")), U32.is_lt(x, 264)), String.eq(action, "file-open"), n, value, x, y)
+
 def Row.menu(m: Maybe<&2, Hit>, +n: Nui, +x: U32, +y: U32) -> Step:
   match m:
     case Some{Hit{_, _, _, _, +action, +value}}:
-      Row.menu.k(Bool.and(String.eq(action, "select"), U32.is_lt(x, 264)),
-        Bool.and(Bool.or(String.eq(action, "project"), String.eq(action, "look")), U32.is_lt(x, 264)), String.eq(action, "file-open"), n, value, x, y)
+      Row.menu.r(String.eq(action, "ref-go"), n, action, value, x, y)
     case None{}:
       Rcw.none(Rcw.here(n, x, y), n, x, y)
 
@@ -3101,6 +3109,20 @@ def Bb.wheel(none: Bool, +n: Nui, +x: U32, +y: U32, +dir: U32) -> Step:
       Pane.spin(String.is_empty(Hit.value_at(Nui.hits(n), "pane", x, y)), Hit.value_at(Nui.hits(n), "pane", x, y), n, x, y, dir)
     case False{}:
       Nui.act(n, "bb-scroll", Bool.pick(String, U32.is_eq(dir, 0), "-120", "120"))
+
+# alt+left and alt+right go back and forward along the trail of links
+# (alt alone; with another modifier the keys are as they were)
+def Alt.dir(+code: U32, +mods: U32) -> Nat:
+  Bool.pick(Nat, U32.is_ne(U32.and(mods, 7), 4), 0n, Bool.pick(Nat, U32.is_eq(code, 65361), 1n, Bool.pick(Nat, U32.is_eq(code, 65363), 2n, 0n)))
+
+def Alt.key(i: Nat, +n: Nui, +code: U32, +text: U32, +mods: U32) -> Step:
+  match i:
+    case 1n:
+      Nui.act(n, "ref-back", "")
+    case 2n:
+      Nui.act(n, "ref-fwd", "")
+    case _:
+      Hint.key(Hint.down(Hint.get(n), code, mods), n, code, text, mods)
 
 # Input method
 # ------------
@@ -3277,7 +3299,7 @@ def Imx.key(live: Bool, +n: Nui, +code: U32, +text: U32, +mods: U32) -> Step:
     case True{}:
       Imx.key.k(Imx.eats(code), n, code, text, mods)
     case False{}:
-      Hint.key(Hint.down(Hint.get(n), code, mods), n, code, text, mods)
+      Alt.key(Alt.dir(code, mods), n, code, text, mods)
 
 # one window event
 def Nui.event(+n: Nui, e: W.WinEv) -> Step:
@@ -3312,6 +3334,10 @@ def Nui.event(+n: Nui, e: W.WinEv) -> Step:
       Nui.mpress(Nui.in_viewer(n, x), n, x, y)
     case W.WButton{+x, +y, 2, False{}}:
       Nui.view_press(n, x, y, False{})
+    case W.WButton{_, _, 8, True{}}:
+      Nui.act(n, "ref-back", "")
+    case W.WButton{_, _, 9, True{}}:
+      Nui.act(n, "ref-fwd", "")
     case W.WButton{_, _, _, _}:
       Step{n, Nil{}, False{}}
     case W.WMove{+x, +y, +mods}:
