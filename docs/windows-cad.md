@@ -25,8 +25,10 @@ Backplane_KiCad repository; validate a downloaded package before treating
 that platform as supported.
 
 Set `BACKPLANE_FREECAD` to the installed `FreeCADCmd.exe`. For a portable
-FreeCAD archive, select the launcher at the archive root, which initializes
-its bundled environment. The GUI launcher must be beside it. Native Windows
+FreeCAD archive, select the actual `bin/freecadcmd.exe`. The GUI executable
+must be beside it. Some bundles also provide root-level Chocolatey shims;
+the STEP helper prefers the real GUI below `bin` because the shim can return
+before its child starts. Native Windows
 paths and Cygwin paths are accepted for this setting. Restart Backplane after
 changing its environment.
 
@@ -51,3 +53,20 @@ FCStd save/reopen, colored STEP export/reimport and volume. Its generated
 files belong in an isolated acceptance directory. Test the resulting STEP
 with the native helper and `backplane.exe --render ...`, and inspect the
 actual Windows PNGs. Linux output does not establish Windows acceptance.
+
+Run the compiled helper's Windows Worker/error-path check with Cygwin Python:
+
+```sh
+python3 test/tools/windows-kipc.py /path/to/backplane-kipc.exe
+```
+
+This checks the real bundled Worker and a missing-runtime error; it does not
+claim a working KiCad server. After creating the orange FreeCAD STEP fixture,
+exercise the GUI fallback and process/pipe completion with:
+
+```sh
+BACKPLANE_FREECAD='C:\FreeCAD\FreeCADCmd.exe' python3 test/tools/windows-freecad.py /path/to/backplane-step2glb.exe /path/to/native_box.step
+```
+
+The test pads a disposable copy above the native fallback threshold and
+requires the actual FreeCAD GLB generator and the original orange material.

@@ -488,7 +488,10 @@ function freecadGui(): string {
   const fc = freecad();
   const normal = fc.replace(/\\/g, "/");
   const dir = normal.includes("/") ? normal.slice(0, normal.lastIndexOf("/")) : "";
-  const near = [`${dir}/freecad.exe`, `${dir}/FreeCAD.exe`, `${dir}/freecad`, `${dir}/FreeCAD`, dir.replace(/\/Resources\/bin$/, "/MacOS/FreeCAD")];
+  // Portable Windows bundles may put an asynchronous Chocolatey shim at
+  // the root. Wait on the real GUI so its temporary Python script stays alive.
+  const direct = process.platform === "win32" ? [`${dir}/bin/freecad.exe`] : [];
+  const near = [...direct, `${dir}/freecad.exe`, `${dir}/FreeCAD.exe`, `${dir}/freecad`, `${dir}/FreeCAD`, dir.replace(/\/Resources\/bin$/, "/MacOS/FreeCAD")];
   for (const c of [...(dir ? near : []), "freecad", "FreeCAD"]) {
     const path = nativePath(c);
     const p = /[\\/]/.test(path) ? (Bun.file(path).size > 0 ? path : null) : Bun.which(path);
