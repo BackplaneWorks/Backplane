@@ -10280,6 +10280,19 @@ def Teach.driving(+d: String) -> Bool:
 def Teach.input(+u: Ui, +bot: String) -> Bool:
   Teach.driving(Teach.drive(u, bot))
 
+# The visible browser belongs to the bot tab, or to the selected thread.
+def Teach.target.of(+bot: String, page: String) -> String:
+  Bool.pick(String, String.is_empty(bot), page, bot)
+
+def Teach.owner(+u: Ui) -> String:
+  Teach.target.of(Bots.cur(u), Ui.page(u))
+
+def Teach.control.label(+u: Ui, +page: String) -> String:
+  Bool.pick(String, Teach.input(u, page), "Return control", "Take control")
+
+def Teach.control.action(+u: Ui, +page: String) -> String:
+  Bool.pick(String, Teach.input(u, page), "tk-handback", "tk-takeover")
+
 def Teach.part(+t: String, +i: Nat) -> String:
   Maybe.default(&2, String, List.get(&2, String, String.split(t, ' '), i), "")
 
@@ -10807,7 +10820,7 @@ def Teach.target(+i: Nat, +cur: String, +value: String) -> String:
 
 # the tk- and bb- actions act on the bot whose tab is open
 def Teach.act(+u: Ui, +action: String, +value: String) -> Act:
-  Teach.act.k(C.Codec.pos(Teach.actions(), action), u, Teach.target(C.Codec.pos(Teach.actions(), action), Bots.cur(u), value), value)
+  Teach.act.k(C.Codec.pos(Teach.actions(), action), u, Teach.target(C.Codec.pos(Teach.actions(), action), Teach.owner(u), value), value)
 
 # a user action with its value
 def Ui.act.m(menu: Bool, +i: Nat, +u: Ui, +action: String, +value: String) -> Act:

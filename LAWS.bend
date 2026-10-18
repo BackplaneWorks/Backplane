@@ -10766,3 +10766,8 @@ law wt_seed_same_second_next:
 
 law wt_seed_wrap:
   {H.Wt.seed("t4294967296") == 0n : Nat}
+
+# An ordinary thread targets its own browser page.
+law browser_input_thread_target:
+  for +page: String
+  {U.Teach.target.of("", page) == page : String}

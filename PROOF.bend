@@ -12401,3 +12401,6 @@ def Laws.wt_seed_legacy_small(): {==}
 def Laws.wt_seed_large_id(): {==}
 def Laws.wt_seed_same_second_next(): {==}
 def Laws.wt_seed_wrap(): {==}
+
+def Laws.browser_input_thread_target(page):
+  {==}

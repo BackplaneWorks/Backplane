@@ -73,8 +73,9 @@ written to stdout; diagnostics go to stderr.
   on the owner's active tab.
 
 - `op` names the request. Arguments sit beside it (or inside `"args": {}`).
-- `id` is echoed back as given (any JSON value). Requests run concurrently,
-  so replies may come out of order; match them by `id`.
+- `id` is echoed back as given (any JSON value). Page operations execute in
+  arrival order per owner. Different owners, status and cast leases run
+  concurrently, so match replies by `id`.
 - `error` is one line. An unparseable line answers `{"id": null, "ok": false,
   "error": "bad JSON"}`; an unknown op answers `unknown op: X`.
 - EOF on stdin, SIGTERM, or `close` without `page` shuts the browser down
@@ -92,6 +93,7 @@ written to stdout; diagnostics go to stderr.
 | op | arguments | result |
 |---|---|---|
 | `status` | | Status |
+| `input` | `action` (`click`, `mouse`, `type`, `press`, `scroll`, `navigate`, `back`, `reload`) and its arguments | Human viewer input. Coordinates are thousandths of the viewport (0..1000); text is at most 65536 UTF-16 units. Conversion and execution are one ordered operation. |
 | `cast` | `ms?` (default 2500, 0..10000) | `{fps}`. A client shows this owner's page: for `ms` its frames go out at up to `--cast-fps` (a fresh one at once). Clients renew it while they show the page. Protocol version 3. |
 | `open` | `url?`, `width?`, `height?`, `timeoutMs?` | Status. Launches Chromium and the owner's page if needed, sets the owner's viewport, navigates (waits for `load`) when `url` is given. Default viewport 1280x800. |
 | `navigate` | `url`, `readiness?` (`"load"` default, `"domContentLoaded"`, `"none"`), `timeoutMs?` | Status |

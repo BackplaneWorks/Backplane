@@ -6,6 +6,7 @@
 // is dumb).
 
 import App from "./app.bend";
+import { installBrowserInput } from "./browser-input.js";
 import { pairBrowser } from "./auth.js";
 
 // Consume the secret before the generic deeplink handler clears the fragment.
@@ -744,53 +745,8 @@ for (const ev of EVENTS) {
   });
 }
 
-// A page the person drives (the Browser tab, client.bend's Teach): the
-// img names the actions (data-pt, data-wheel, data-keyto, data-type); this
-// only turns DOM events into their values. A click is a place in
-// thousandths of the frame, the wheel a notch's pixels, a key its name
-// (Playwright's), typed characters are sent together.
-let frameText = "";
-let frameTimer = 0;
-function frameFlush(el) {
-  clearTimeout(frameTimer);
-  const t = frameText;
-  frameText = "";
-  const a = el && el.getAttribute("data-type");
-  if (t && a) dispatch(a, t);
-}
-document.addEventListener("click", (e) => {
-  const el = e.target.closest?.("[data-pt]");
-  if (!el || e.button !== 0) return;
-  e.preventDefault();
-  el.focus();
-  const r = el.getBoundingClientRect();
-  const th = (v, size) => Math.max(0, Math.min(1000, Math.round((v / Math.max(size, 1)) * 1000)));
-  frameFlush(el);
-  dispatch(el.getAttribute("data-pt"), th(e.clientX - r.left, r.width) + " " + th(e.clientY - r.top, r.height));
-}, true);
-document.addEventListener("wheel", (e) => {
-  const el = e.target.closest?.("[data-wheel]");
-  if (!el) return;
-  e.preventDefault();
-  frameFlush(el);
-  dispatch(el.getAttribute("data-wheel"), String(Math.round(Math.max(-600, Math.min(600, e.deltaY)))));
-}, { passive: false });
-const FRAME_KEYS = { Enter: 1, Backspace: 1, Tab: 1, Escape: 1, Delete: 1, ArrowLeft: 1, ArrowRight: 1, ArrowUp: 1, ArrowDown: 1, Home: 1, End: 1, PageUp: 1, PageDown: 1 };
-document.addEventListener("keydown", (e) => {
-  const el = e.target.closest?.("[data-keyto]");
-  if (!el || (e.isComposing || e.keyCode === 229) || e.metaKey) return;
-  e.preventDefault();
-  e.stopImmediatePropagation();
-  if (e.key.length === 1 && !e.ctrlKey && !e.altKey) {
-    frameText += e.key;
-    clearTimeout(frameTimer);
-    frameTimer = setTimeout(() => frameFlush(el), 40);
-    return;
-  }
-  frameFlush(el);
-  if (e.key.length === 1 && e.ctrlKey) dispatch(el.getAttribute("data-keyto"), "Control+" + e.key.toLowerCase());
-  else if (FRAME_KEYS[e.key]) dispatch(el.getAttribute("data-keyto"), (e.shiftKey && e.key === "Tab" ? "Shift+" : "") + e.key);
-}, true);
+// Input stays scoped to the displayed owner and current control state.
+installBrowserInput(document, dispatch, () => socket?.readyState === 1 ? App.browser_target(ui) : "");
 
 // keys: the page's own shortcuts (app.bend lists them), then a key field
 // (the terminal) gets every key as "<key>\t<mods>"

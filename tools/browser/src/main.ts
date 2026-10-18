@@ -1060,6 +1060,25 @@ const handlers: Record<string, (a: Json, name: string) => Promise<any>> = {
     }
     return status(name);
   },
+  // Human input is one queued operation, including coordinate conversion.
+  // The hub provides only the bounded UI protocol, never arbitrary evaluation.
+  async input(a, name) {
+    const op = String(a.action ?? "");
+    if (!["click", "mouse", "type", "press", "scroll", "navigate", "back", "reload"].includes(op)) throw new Error("unknown input action");
+    const p = await ensurePage(name);
+    const viewport = p.viewportSize() ?? ownerFor(name).viewport;
+    const point = (v: unknown, size: number) => Math.min(size - 1, Math.max(0, Math.round(Number(v || 0) * size / 1000)));
+    let args: Json = {};
+    if (op === "click" || op === "mouse") args = { x: point(a.x, viewport.width), y: point(a.y, viewport.height), type: a.type };
+    else if (op === "type") {
+      const text = String(a.text ?? "");
+      if (text.length > 65536) throw new Error("input text too long");
+      args = { text };
+    } else if (op === "press") args = { key: String(a.key ?? "") };
+    else if (op === "scroll") args = { dx: Number(a.dx || 0), dy: Number(a.dy || 0) };
+    else if (op === "navigate") args = { url: String(a.url ?? "") };
+    return handlers[op](args, name);
+  },
   async click(a, name) {
     const p = await ensurePage(name);
     quick(name);
@@ -1347,12 +1366,22 @@ const handlers: Record<string, (a: Json, name: string) => Promise<any>> = {
 // Loop
 // ----
 
+// Mutations of one owner's page execute in arrival order. Independent pages
+// still run concurrently, and frame leases/status never wait behind navigation.
+const pageTails = new Map<string, Promise<unknown>>();
+function ordered<T>(name: string, run: () => Promise<T>): Promise<T> {
+  const next = (pageTails.get(name) ?? Promise.resolve()).catch(() => {}).then(run);
+  pageTails.set(name, next);
+  void next.finally(() => { if (pageTails.get(name) === next) pageTails.delete(name); }).catch(() => {});
+  return next;
+}
+
 // requests that change nothing on the page (no still for them)
 const STILL_QUIET = new Set(["cast", "status", "frames", "frame", "close", "close_page", "snapshot", "console", "tabs"]);
 
 // Focus is needed for native hidden-page input, not for idle pages,
 // snapshots or background evaluations. The scope is released even on error.
-const CEF_INPUT = new Set(["click", "mouse", "type", "press", "scroll", "select"]);
+const CEF_INPUT = new Set(["input", "click", "mouse", "type", "press", "scroll", "select"]);
 async function dispatch(op: string, h: (a: Json, name: string) => Promise<any>, args: Json, name: string): Promise<any> {
   if (op !== "engine" && switching) await switching;
   if (engine !== "cef" || !CEF_INPUT.has(op)) return h(args, name);
@@ -1383,7 +1412,8 @@ async function handle(line: string): Promise<void> {
   const h = handlers[op];
   const args = req.args && typeof req.args === "object" ? { ...req, ...req.args } : req;
   try {
-    const result = await dispatch(op, h, args, name);
+    const run = () => dispatch(op, h, args, name);
+    const result = await (["cast", "status", "pages"].includes(op) ? run() : ordered(name, run));
     send({ id, ok: true, result });
   } catch (e: any) {
     send({ id, ok: false, error: String(e?.message ?? e).split("\n")[0] });

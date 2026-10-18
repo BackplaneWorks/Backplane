@@ -1,0 +1,29 @@
+name: Browser input compatibility
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/web/**'
+      - 'tools/browser/**'
+      - '.github/workflows/browser-input.yml'
+  pull_request:
+    paths:
+      - 'src/web/**'
+      - 'tools/browser/**'
+      - '.github/workflows/browser-input.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  input:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --cwd tools/browser --frozen-lockfile
+      - run: bun tools/browser/node_modules/playwright-core/cli.js install --with-deps chromium firefox webkit
+      - run: bun tools/browser/test/input.ts

@@ -98,6 +98,7 @@ private struct DrivenFrame: View {
     let model: AppModel
     let image: UIImage
     let input: Bool
+    var onTap: () -> Void = {}
     @State private var pulled: CGFloat = 0
 
     var body: some View {
@@ -122,6 +123,7 @@ private struct DrivenFrame: View {
                     let x = Int(max(0, min(1000, v.location.x / g.size.width * 1000)))
                     let y = Int(max(0, min(1000, v.location.y / g.size.height * 1000)))
                     model.act("bb-click", "\(x) \(y)")
+                    onTap()
                 })
         }
         .aspectRatio(image.size.width / max(image.size.height, 1), contentMode: .fit)
@@ -208,6 +210,7 @@ struct BrowserTab: View {
     let browser: BotBrowser?
     let name: String
     @State private var image: UIImage?
+    @State private var keyboard = false
 
     private var url: URL? {
         browser.flatMap { model.hubURL($0.url, query: [URLQueryItem(name: "n", value: $0.n)]) }
@@ -236,9 +239,14 @@ struct BrowserTab: View {
                     } else if let b = browser {
                         StripButtons(model: model, buttons: b.btns ?? []).padding(.horizontal, 12)
                     }
-                    if let b = browser, b.input == true { DrivingBar(model: model, browser: b) }
+                    if let b = browser, b.input == true {
+                        DrivingBar(model: model, browser: b).id(b.url)
+                        Button(keyboard ? "Hide keyboard" : "Keyboard") { keyboard.toggle() }.padding(.horizontal)
+                        BrowserTextInput(active: $keyboard) { action, value in model.act(action, value) }
+                            .frame(height: 1).id(b.url)
+                    }
                     if let image {
-                        DrivenFrame(model: model, image: image, input: browser?.input ?? false)
+                        DrivenFrame(model: model, image: image, input: browser?.input ?? false, onTap: { keyboard = true })
                     } else {
                         ContentUnavailableView(NativeMessages.native_browser_empty(lang), systemImage: "globe").frame(maxWidth: .infinity)
                     }
@@ -250,6 +258,8 @@ struct BrowserTab: View {
                     }
                 }
             }
+            .onChange(of: browser?.url) { _, _ in keyboard = false; image = nil }
+            .onChange(of: browser?.input) { _, enabled in if enabled != true { keyboard = false } }
             .task(id: url) {
                 guard let u = url, let (d, r) = try? await URLSession.shared.data(from: u),
                       (r as? HTTPURLResponse)?.statusCode == 200, let i = UIImage(data: d) else { return }
@@ -332,5 +342,85 @@ struct TasksTab: View {
                 }
             }
         }
+    }
+}
+
+// A native text responder supplies committed IME/dictation/paste text. It never
+// holds the remote field value; the image remains the source of truth.
+private struct BrowserTextInput: UIViewRepresentable {
+    @Binding var active: Bool
+    var send: (String, String) -> Void
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+    func makeUIView(context: Context) -> UITextView {
+        let view = RemoteTextView()
+        view.send = send
+        view.delegate = context.coordinator
+        view.text = "\u{200B}"
+        view.selectedRange = NSRange(location: 1, length: 0)
+        view.autocorrectionType = .no
+        view.autocapitalizationType = .none
+        view.smartQuotesType = .no
+        view.smartDashesType = .no
+        view.textColor = .clear
+        view.tintColor = .clear
+        view.backgroundColor = .clear
+        view.accessibilityLabel = "Type into the remote browser"
+        return view
+    }
+    func updateUIView(_ view: UITextView, context: Context) {
+        context.coordinator.parent = self
+        (view as? RemoteTextView)?.send = send
+        if active && !view.isFirstResponder { view.becomeFirstResponder() }
+        if !active && view.isFirstResponder { view.resignFirstResponder() }
+    }
+    final class Coordinator: NSObject, UITextViewDelegate {
+        var parent: BrowserTextInput
+        init(_ parent: BrowserTextInput) { self.parent = parent }
+        func reset(_ view: UITextView) {
+            view.text = "\u{200B}"
+            view.selectedRange = NSRange(location: 1, length: 0)
+        }
+        func textView(_ view: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
+            guard parent.active else { return false }
+            if view.markedTextRange != nil { return true }
+            if text == "\n" { parent.send("bb-key", "Enter"); return false }
+            if text.isEmpty && range.length > 0 {
+                parent.send("bb-key", "Backspace"); reset(view); return false
+            }
+            return true
+        }
+        func textViewDidChange(_ view: UITextView) {
+            guard parent.active, view.markedTextRange == nil else { return }
+            let text = view.text.hasPrefix("\u{200B}") ? String(view.text.dropFirst()) : view.text ?? ""
+            if !text.isEmpty { parent.send("bb-type", text) }
+            reset(view)
+        }
+        func textViewDidEndEditing(_ view: UITextView) { reset(view) }
+    }
+}
+
+private final class RemoteTextView: UITextView {
+    var send: (String, String) -> Void = { _, _ in }
+    override var keyCommands: [UIKeyCommand]? {
+        let keys = [UIKeyCommand.inputLeftArrow, UIKeyCommand.inputRightArrow,
+                    UIKeyCommand.inputUpArrow, UIKeyCommand.inputDownArrow, "\t", "\r", UIKeyCommand.inputEscape]
+        let modifiers: [UIKeyModifierFlags] = [[], .shift, .control, .command, [.control, .shift], [.command, .shift]]
+        var commands = modifiers.flatMap { flags in keys.map { key in
+            UIKeyCommand(input: key, modifierFlags: flags, action: #selector(remoteKey(_:)))
+        } }
+        for flags: UIKeyModifierFlags in [.command, .control, [.command, .shift], [.control, .shift]] {
+            for key in ["a", "z", "y"] { commands.append(UIKeyCommand(input: key, modifierFlags: flags, action: #selector(remoteKey(_:)))) }
+        }
+        for command in commands { command.wantsPriorityOverSystemBehavior = true }
+        return commands
+    }
+    @objc private func remoteKey(_ command: UIKeyCommand) {
+        guard let input = command.input else { return }
+        let names = [UIKeyCommand.inputLeftArrow: "ArrowLeft", UIKeyCommand.inputRightArrow: "ArrowRight",
+                     UIKeyCommand.inputUpArrow: "ArrowUp", UIKeyCommand.inputDownArrow: "ArrowDown",
+                     "\t": "Tab", "\r": "Enter", UIKeyCommand.inputEscape: "Escape"]
+        let primary = !command.modifierFlags.intersection([.command, .control]).isEmpty
+        let mods = (primary ? "ControlOrMeta+" : "") + (command.modifierFlags.contains(.shift) ? "Shift+" : "")
+        send("bb-key", mods + (names[input] ?? input))
     }
 }

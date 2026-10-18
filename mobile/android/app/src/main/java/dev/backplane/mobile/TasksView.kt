@@ -1,6 +1,17 @@
 package dev.backplane.mobile
 
 import android.graphics.BitmapFactory
+import android.view.KeyEvent as AndroidKeyEvent
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.draw.alpha
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -143,7 +154,7 @@ fun BrowserAsk(m: AppModel, a: Ask) {
 // drive: a tap is "x y" in thousandths of the image as drawn, a drag is
 // the page's pixels (about twice the finger's distance)
 @Composable
-private fun Frame(m: AppModel, b: BotBrowser, bot: BotView) {
+private fun Frame(m: AppModel, b: BotBrowser, name: String, onTap: () -> Unit) {
     val lang = LocalBackplaneLanguage.current
     val img = rememberHubImage(m, b.url + "?n=" + b.n)
     if (img == null) {
@@ -161,6 +172,7 @@ private fun Frame(m: AppModel, b: BotBrowser, bot: BotView) {
                 val x = (p.x / size.width * 1000).toInt().coerceIn(0, 1000)
                 val y = (p.y / size.height * 1000).toInt().coerceIn(0, 1000)
                 m.act("bb-click", "$x $y")
+                onTap()
             }
         }
         .pointerInput(b.input) {
@@ -173,7 +185,7 @@ private fun Frame(m: AppModel, b: BotBrowser, bot: BotView) {
                 }
             }
         }
-    Image(img, bot.name + "'s browser", live.then(if (b.input) Modifier.border(2.dp, amber, square) else Modifier), contentScale = ContentScale.FillWidth)
+    Image(img, name + "'s browser", live.then(if (b.input) Modifier.border(2.dp, amber, square) else Modifier), contentScale = ContentScale.FillWidth)
 }
 
 // while the person drives: the address, and the keys the frame cannot send
@@ -181,7 +193,7 @@ private fun Frame(m: AppModel, b: BotBrowser, bot: BotView) {
 @Composable
 private fun Driving(m: AppModel, b: BotBrowser) {
     val lang = LocalBackplaneLanguage.current
-    var text by remember { mutableStateOf("") }
+    var text by remember(b.url) { mutableStateOf("") }
     Column(Modifier.padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
             OutlinedButton(onClick = { m.act("bb-back") }, shape = square) { Text(NativeMessages.tour_back(lang)) }
@@ -232,13 +244,19 @@ private fun SaveSheet(m: AppModel, b: BotBrowser) {
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun BrowserTab(m: AppModel, bot: BotView) {
+    BrowserPanel(m, bot.browser, bot.name)
+}
+
+@Composable
+fun BrowserPanel(m: AppModel, browser: BotBrowser?, name: String) {
+    val b = browser
     val lang = LocalBackplaneLanguage.current
-    val b = bot.browser
     if (b == null) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text(NativeMessages.native_browser_empty(lang), color = MaterialTheme.colorScheme.outline) }
         return
     }
     if (b.mode == 2) { SaveSheet(m, b); return }
+    var keyboard by remember(b.url) { mutableStateOf(0) }
     var sent by remember { mutableStateOf(0) }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         for (a in b.asks) Box(Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) { BrowserAsk(m, a) }
@@ -251,7 +269,11 @@ fun BrowserTab(m: AppModel, bot: BotView) {
             Btns(m, b.btns)
         }
         if (b.input) Driving(m, b)
-        Frame(m, b, bot)
+        if (b.input) {
+            Button(onClick = { keyboard++ }) { Text("Keyboard") }
+            BrowserTextInput(m, keyboard)
+        }
+        Frame(m, b, name) { keyboard++ }
         if (b.mode == 1) Row(Modifier.padding(horizontal = 12.dp).padding(bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically) {
             Field(m, "tknote", b.note, NativeMessages.native_task_note(lang), "go", { m.act("tk-note"); sent++ }, Modifier.weight(1f), sent)
@@ -320,4 +342,45 @@ fun TasksTab(m: AppModel, bot: BotView) {
             }
         }
     }
+}
+
+// Commit only after the IME has finished composing. The sentinel lets software
+// keyboards send Backspace even though remote text is never copied here.
+@Composable
+private fun BrowserTextInput(m: AppModel, request: Int) {
+    val focus = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
+    var value by remember { mutableStateOf(TextFieldValue("\u200B", TextRange(1))) }
+    LaunchedEffect(request) { if (request > 0) { focus.requestFocus(); keyboard?.show() } }
+    BasicTextField(value, { next ->
+        value = next
+        if (next.composition == null) {
+            val text = next.text.removePrefix("\u200B")
+            if (next.text.isEmpty()) m.act("bb-key", "Backspace")
+            else if (text == "\n") m.act("bb-key", "Enter")
+            else if (text.isNotEmpty()) m.act("bb-type", text)
+            value = TextFieldValue("\u200B", TextRange(1))
+        }
+    }, Modifier.size(1.dp).alpha(0.01f).focusRequester(focus).onPreviewKeyEvent { event ->
+        val e = event.nativeKeyEvent
+        val name = when (e.keyCode) {
+            AndroidKeyEvent.KEYCODE_DEL -> "Backspace"
+            AndroidKeyEvent.KEYCODE_FORWARD_DEL -> "Delete"
+            AndroidKeyEvent.KEYCODE_ENTER -> "Enter"
+            AndroidKeyEvent.KEYCODE_TAB -> "Tab"
+            AndroidKeyEvent.KEYCODE_ESCAPE -> "Escape"
+            AndroidKeyEvent.KEYCODE_DPAD_LEFT -> "ArrowLeft"
+            AndroidKeyEvent.KEYCODE_DPAD_RIGHT -> "ArrowRight"
+            AndroidKeyEvent.KEYCODE_DPAD_UP -> "ArrowUp"
+            AndroidKeyEvent.KEYCODE_DPAD_DOWN -> "ArrowDown"
+            else -> if ((e.isCtrlPressed || e.isMetaPressed) && e.keyCode in listOf(AndroidKeyEvent.KEYCODE_A, AndroidKeyEvent.KEYCODE_Z, AndroidKeyEvent.KEYCODE_Y))
+                when (e.keyCode) { AndroidKeyEvent.KEYCODE_A -> "a"; AndroidKeyEvent.KEYCODE_Z -> "z"; else -> "y" } else null
+        }
+        if (name == null || value.composition != null) false else {
+            if (e.action == AndroidKeyEvent.ACTION_DOWN) m.act("bb-key",
+                (if (e.isCtrlPressed || e.isMetaPressed) "ControlOrMeta+" else "") + (if (e.isShiftPressed) "Shift+" else "") + name)
+            true
+        }
+    },
+        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false))
 }

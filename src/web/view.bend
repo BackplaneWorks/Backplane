@@ -2098,7 +2098,7 @@ def View.browser.strip(on: Bool, +u: U.Ui) -> List<&2, D.Node>:
 
 def View.browser.loc(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
   List.append(&2, D.Node, View.browser.strip.loc(lc, U.CefUI.strip_on(u, U.Ui.page(u)), u),
-    [WB.WB.browser.k.loc(lc, String.is_empty(U.Ui.info(u, "shot." ++ U.Ui.page(u))), U.Ui.info(u, "shot." ++ U.Ui.page(u)), U.Ui.page(u), MSG.T.browser.thread(lc))])
+    [WB.WB.div("browser-controls", [D.Dom.button("", U.Teach.control.action(u, U.Ui.page(u)), U.Ui.page(u), "Control this browser", U.Teach.control.label(u, U.Ui.page(u)))]), WB.WB.browser.in.loc(lc, U.Teach.input(u, U.Ui.page(u)), String.is_empty(U.Ui.info(u, "shot." ++ U.Ui.page(u))), U.Ui.info(u, "shot." ++ U.Ui.page(u)), U.Ui.page(u), MSG.T.browser.thread(lc))])
 
 # The Mechanical page (client.bend's Mpage): a chip per part, Open in 3D
 # and Refresh, the part's renders (a click opens one in the lightbox), and

@@ -221,6 +221,13 @@ fun App(m: AppModel) {
             BackHandler { m.back() }
             OpeningDestination(m, s, m.opening!!)
         }
+        s.thread != null && s.thread.viewer.open == "browser" -> {
+            BackHandler { m.act("view", "") }
+            Column(Modifier.fillMaxSize()) {
+                Button(onClick = { m.act("view", "") }) { Text("Done") }
+                key(s.thread.viewer.browser?.url) { BrowserPanel(m, s.thread.viewer.browser, "This thread") }
+            }
+        }
         s.thread != null && s.thread.viewer.open == "files" && s.thread.viewer.files != null -> {
             BackHandler { m.act("view", "") }
             FilesScreen(m, s.thread.viewer, s.thread.viewer.files)

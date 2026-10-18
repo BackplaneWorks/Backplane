@@ -230,7 +230,7 @@ def WB.tabs(+lc: I.Loc, +hd: BI.Head) -> D.Node:
 # a notch's pixels, data-keyto: a key's name, data-type: typed text).
 def WB.frame.loc(+lc: I.Loc, +id: String, +n: String, +name: String) -> D.Node:
   D.El{"img", "bot-frame", [D.At{"src", "/bots/" ++ id ++ "/screen.jpg?n=" ++ n}, D.At{"alt", MSG.T.browser.owner(lc, name)}, D.At{"tabindex", "0"}, D.At{"draggable", "false"},
-    D.At{"data-pt", "bb-click"}, D.At{"data-wheel", "bb-scroll"}, D.At{"data-keyto", "bb-key"}, D.At{"data-type", "bb-type"}], Nil{}}
+    D.At{"data-owner", id}, D.At{"data-pt", "bb-click"}, D.At{"data-wheel", "bb-scroll"}, D.At{"data-keyto", "bb-key"}, D.At{"data-type", "bb-type"}], Nil{}}
 
 def WB.frame(+id: String, +n: String, +name: String) -> D.Node:
   WB.frame.loc(I.En{}, id, n, name)
