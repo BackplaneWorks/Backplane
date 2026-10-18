@@ -283,6 +283,7 @@ struct Viewer: Decodable {
     let files: FilesPage?
     let file: FileView?
     // the Review tab (open "review")
+    let browser: BotBrowser?
     let review: ReviewPage?
     // the review comments of the file on show
     let comments: ReviewComments?

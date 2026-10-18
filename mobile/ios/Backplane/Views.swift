@@ -938,7 +938,13 @@ struct ThreadScreen: View {
         .onChange(of: fileMenu) { _, m in if m == nil { shutFile = nil } }
         .fullScreenCover(isPresented: Binding(get: { !thread.viewer.open.isEmpty }, set: { if !$0 { model.act("view", "") } })) {
             if let v = model.screen?.thread?.viewer {
-                if v.open == "files", let f = v.files { FilesScreen(model: model, viewer: v, page: f) }
+                if v.open == "browser" {
+                    VStack {
+                        HStack { Button("Done") { model.act("view", "") }; Spacer() }.padding()
+                        BrowserTab(model: model, browser: v.browser, name: "This thread").id(v.browser?.url)
+                    }
+                }
+                else if v.open == "files", let f = v.files { FilesScreen(model: model, viewer: v, page: f) }
                 else if v.open == "image" || v.open == "pdf", let f = v.file { FileScreen(model: model, viewer: v, file: f) }
                 else if v.open == "review", let r = v.review { ReviewScreen(model: model, viewer: v, page: r) }
                 else if v.open == "renders", let p = v.mech { MechScreen(model: model, viewer: v, page: p) } else { PlotScreen(model: model, viewer: v) }

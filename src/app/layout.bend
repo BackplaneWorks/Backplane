@@ -4797,7 +4797,8 @@ def Lay.page.if(on: Bool, +ty: Ty, +u: U.Ui, +x0: U32, +x1: U32, +h: U32) -> Out
   match on:
     case True{}:
       Out.cat(Page.strip(U.CefUI.strip_on(u, U.Ui.page(u)), ty, u, x0, x1),
-        Lay.page(ty, u, U.Ui.page(u), MSG.T.viewer.page.empty(Ty.loc(ty)), x0, x1, Bool.pick(U32, U.CefUI.strip_on(u, U.Ui.page(u)), 96, 52), h))
+        Out.cat(Lay.button(ty, D.Clip.all(), (x0 + 24 : U32), Bool.pick(U32, U.CefUI.strip_on(u, U.Ui.page(u)), 100, 58), U.Teach.control.label(u, U.Ui.page(u)), T.Th.soft(), U.Teach.control.action(u, U.Ui.page(u)), ""),
+        Lay.page.in(ty, u, U.Ui.page(u), MSG.T.viewer.page.empty(Ty.loc(ty)), x0, x1, Bool.pick(U32, U.CefUI.strip_on(u, U.Ui.page(u)), 138, 96), h, U.Teach.input(u, U.Ui.page(u)))))
     case False{}:
       Out.none()
 
