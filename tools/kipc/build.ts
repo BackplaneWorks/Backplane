@@ -5,7 +5,7 @@ if (!outfile) throw new Error("usage: bun build.ts OUTFILE");
 
 const result = await Bun.build({
   entrypoints: [`${import.meta.dir}/src/main.ts`, `${import.meta.dir}/src/worker.ts`],
-  compile: { outfile },
+  compile: { outfile, ...(process.env.BUN_TARGET ? { target: process.env.BUN_TARGET } : {}) },
   minify: true,
 });
 if (!result.success) {

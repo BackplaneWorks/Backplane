@@ -8,6 +8,7 @@
 // (Z up, as authored); asset.extras records { unit: "mm", up: "Z" }.
 
 import occtimportjs from "occt-import-js";
+import { nativePath } from "../platform/windows-path.ts";
 // Embedded into the executable by `bun build --compile`; a plain path under `bun run`.
 import wasmPath from "occt-import-js/dist/occt-import-js.wasm" with { type: "file" };
 
@@ -475,7 +476,8 @@ os._exit(0)
 function freecad(): string {
   for (const c of [process.env.BACKPLANE_FREECAD, "freecadcmd", "FreeCADCmd", "freecad.cmd", "/Applications/FreeCAD.app/Contents/Resources/bin/freecadcmd"]) {
     if (!c) continue;
-    const p = c.includes("/") ? (Bun.file(c).size > 0 ? c : null) : Bun.which(c);
+    const path = nativePath(c);
+    const p = /[\\/]/.test(path) ? (Bun.file(path).size > 0 ? path : null) : Bun.which(path);
     if (p) return p;
   }
   return "";
@@ -484,10 +486,12 @@ function freecad(): string {
 // FreeCAD's GUI program: beside its console one, else on PATH
 function freecadGui(): string {
   const fc = freecad();
-  const dir = fc.includes("/") ? fc.slice(0, fc.lastIndexOf("/")) : "";
-  const near = [`${dir}/freecad`, `${dir}/FreeCAD`, dir.replace(/\/Resources\/bin$/, "/MacOS/FreeCAD")];
+  const normal = fc.replace(/\\/g, "/");
+  const dir = normal.includes("/") ? normal.slice(0, normal.lastIndexOf("/")) : "";
+  const near = [`${dir}/freecad.exe`, `${dir}/FreeCAD.exe`, `${dir}/freecad`, `${dir}/FreeCAD`, dir.replace(/\/Resources\/bin$/, "/MacOS/FreeCAD")];
   for (const c of [...(dir ? near : []), "freecad", "FreeCAD"]) {
-    const p = c.includes("/") ? (Bun.file(c).size > 0 ? c : null) : Bun.which(c);
+    const path = nativePath(c);
+    const p = /[\\/]/.test(path) ? (Bun.file(path).size > 0 ? path : null) : Bun.which(path);
     if (p) return p;
   }
   return "";
@@ -531,6 +535,8 @@ async function viaFreecad(input: string, out: string, linear: number): Promise<n
 // ---- main ------------------------------------------------------------------
 
 const args = parseArgs(process.argv.slice(2));
+args.input = nativePath(args.input);
+if (args.output) args.output = nativePath(args.output);
 const t0 = performance.now();
 const said = (how: string, tris: number) =>
   console.error(`step2glb: ${args.input.split(/[\\/]/).pop()} -> ${args.output}: ${tris} triangles by ${how}, ${Math.round(performance.now() - t0)} ms`);
