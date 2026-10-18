@@ -10,10 +10,10 @@ const root = mkdtempSync(join(tmpdir(), 'bp-input-'));
 const child = Bun.spawn(['bun', fileURLToPath(new URL('../src/main.ts', import.meta.url)), '--profile', join(root, 'profile')], {stdin:'pipe', stdout:'pipe', stderr:'inherit', env:{...process.env,BACKPLANE_CHROME:chromium.executablePath()}});
 const pending = new Map<number, (r:any)=>void>(); let id = 0;
 (async()=>{ let rest=''; for await(const bytes of child.stdout) { rest += new TextDecoder().decode(bytes); let i; while((i=rest.indexOf('\n'))>=0) { const r=JSON.parse(rest.slice(0,i)); rest=rest.slice(i+1); pending.get(r.id)?.(r); pending.delete(r.id); } } })();
-function ask(op:string, args:any={}, page='thread-a'):Promise<any> { return new Promise((resolve,reject)=>{
+function ask(op:string, args:any={}, page:string|null='thread-a'):Promise<any> { return new Promise((resolve,reject)=>{
   const n=++id; const timer=setTimeout(()=>reject(new Error('timeout '+op)),20000);
   pending.set(n,r=>{clearTimeout(timer); r.ok ? resolve(r.result) : reject(new Error(r.error));});
-  child.stdin.write(JSON.stringify({id:n,op,page,...args})+'\n');
+  child.stdin.write(JSON.stringify({id:n,op,...(page === null ? {} : {page}),...args})+'\n');
 }); }
 const remote = '<style>body{margin:0}input,textarea{position:absolute;left:10px;width:250px;height:30px}#a{top:10px}#b{top:80px}#c{top:150px}</style><input id=a><input id=b><textarea id=c></textarea>';
 const html = `<!doctype html><div id=root><img id=frame width=640 height=400 tabindex=0 data-owner=thread-a data-pt=bb-click data-wheel=bb-scroll data-keyto=bb-key data-type=bb-type src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='640' height='400'/%3E"></div><script type=module>
@@ -70,4 +70,17 @@ try {
   await ask('input',{action:'type',text:' after error'});
   assert.equal(await ask('evaluate',{expression:'b.value'}),'next after error');
   console.log('ok ordered input and queue recovery after failure');
-} finally { child.kill(); await child.exited; server.stop(); rmSync(root,{recursive:true,force:true}); }
+} finally {
+  try {
+    // No page means close the whole helper and await Chromium's shutdown.
+    // Killing Bun on Windows can leave Chromium holding the profile open.
+    await ask('close', {}, null);
+    await child.exited;
+  } finally {
+    if (child.exitCode === null) { child.kill(); await child.exited; }
+    server.stop(true);
+    // Allow Windows a bounded interval to release recently closed handles.
+    rmSync(root, {recursive:true, force:true, maxRetries:10, retryDelay:100});
+  }
+}
+console.log('ok browser shutdown and temporary profile cleanup');
