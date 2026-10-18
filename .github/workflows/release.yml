@@ -20,6 +20,13 @@ permissions:
   contents: write
 
 jobs:
+  windows:
+    name: Windows
+    uses: ./.github/workflows/windows.yml
+    with:
+      ref: ${{ inputs.tag || github.ref }}
+      version: ${{ inputs.tag || github.ref_name }}
+
   laws:
     name: Check and prove
     runs-on: ubuntu-24.04
@@ -181,7 +188,7 @@ jobs:
 
   publish:
     name: Publish
-    needs: [laws, build, build-darwin, android]
+    needs: [laws, build, build-darwin, android, windows]
     runs-on: ubuntu-24.04
     env:
       TAG: ${{ inputs.tag || github.ref_name }}
@@ -199,7 +206,7 @@ jobs:
         run: |
           set -eu
           cd out
-          sha256sum backplane-*.tar.gz backplane-*.AppImage backplane_*.deb backplane-*.apk > SHA256SUMS
+          sha256sum backplane-*.tar.gz backplane-*.AppImage backplane_*.deb backplane-*.apk backplane-*-windows-x64.zip > SHA256SUMS
           cat SHA256SUMS
           sum() { grep "backplane-$TAG-$1.tar.gz" SHA256SUMS | cut -d' ' -f1; }
           sed -e "s/@VERSION@/$TAG/" \
@@ -224,6 +231,8 @@ jobs:
           # each release's installer installs that release (latest/ never
           # names a prerelease, so a nightly's must be its own)
           notes="Linux (x64, arm64) and macOS (Apple silicon; the hub and web UI at http://127.0.0.1:3787, no native window yet).
+
+          Windows x64: extract the Windows zip, run Install-Runtime.ps1 once, then open Backplane.cmd.
 
           Install: \`curl -fsSL https://github.com/${{ github.repository }}/releases/download/$TAG/install.sh | sh\`"
           if gh release view "$TAG" >/dev/null 2>&1; then
