@@ -1,0 +1,12 @@
+syntax = "proto3";
+package kiapi.backplane;
+
+message GetCapabilities {}
+message GetCapabilitiesResponse {
+  string fork_version = 1;
+  string source_commit = 3;
+  int32 api_version = 4;
+  repeated string capabilities = 5;
+  repeated string commands = 6;
+}
+message Shutdown { bool force = 1; }

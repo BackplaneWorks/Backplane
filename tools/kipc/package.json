@@ -1,0 +1,11 @@
+{
+  "name": "backplane-kipc",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "bun src/main.ts"
+  },
+  "dependencies": {
+    "protobufjs": "7.4.0"
+  }
+}

@@ -331,20 +331,52 @@ def Acp.choose(+answer: String, +os: List<&2, J.Json>) -> String:
     Bool.pick(String, String.eq(answer, "session"), Acp.or(Acp.kind.find(os, "allow_always"), Acp.kind.find(os, "allow_once")),
       Acp.or(Acp.kind.find(os, "reject_once"), Acp.kind.find(os, "reject_always"))))
 
+# OMP's Allow/Deny card cannot choose a session-wide option
+def Acp.choose.once.k(accept: Bool, decline: Bool, +os: List<&2, J.Json>) -> String:
+  match accept decline:
+    case True{} _:
+      Acp.kind.find(os, "allow_once")
+    case False{} True{}:
+      Acp.kind.find(os, "reject_once")
+    case _ _:
+      ""
+
+def Acp.choose.once(+answer: String, +os: List<&2, J.Json>) -> String:
+  Acp.choose.once.k(String.eq(answer, "accept"), String.eq(answer, "decline"), os)
+
+def Acp.choose.mode(once: Bool, +answer: String, +os: List<&2, J.Json>) -> String:
+  match once:
+    case True{}:
+      Acp.choose.once(answer, os)
+    case False{}:
+      Acp.choose(answer, os)
+
 def Acp.outcome(+opt: String) -> J.Json:
   Bool.pick(J.Json, String.is_empty(opt), J.Json.obj([J.KV{"outcome", J.Str{"cancelled"}}]),
     J.Json.obj([J.KV{"outcome", J.Str{"selected"}}, J.KV{"optionId", J.Str{opt}}]))
 
 # the response line for a permission request (id as JSON text)
+def Acp.permit.reply.k(once: Bool, +id: String, +params: J.Json, +answer: String) -> String:
+  "{\"jsonrpc\":\"2.0\",\"id\":" ++ id ++ ",\"result\":" ++ J.Json.show(J.Json.obj([J.KV{"outcome", Acp.outcome(Acp.choose.mode(once, answer, J.Json.elems(J.Json.get_obj(params, "options"))))}])) ++ "}"
+
 def Acp.permit.reply(+id: String, +params: J.Json, +answer: String) -> String:
-  "{\"jsonrpc\":\"2.0\",\"id\":" ++ id ++ ",\"result\":" ++ J.Json.show(J.Json.obj([J.KV{"outcome", Acp.outcome(Acp.choose(answer, J.Json.elems(J.Json.get_obj(params, "options"))))}])) ++ "}"
+  Acp.permit.reply.k(False{}, id, params, answer)
+
+def Acp.permit.reply.once(+id: String, +params: J.Json, +answer: String) -> String:
+  Acp.permit.reply.k(True{}, id, params, answer)
 
 def Acp.permit.answer.k(+o: J.Json, +answer: String) -> String:
   Acp.permit.reply(Acp.id(J.Json.get(o, "id")), J.Json.get_obj(o, "params"), answer)
 
+def Acp.permit.answer.k.once(+o: J.Json, +answer: String) -> String:
+  Acp.permit.reply.once(Acp.id(J.Json.get(o, "id")), J.Json.get_obj(o, "params"), answer)
+
 # the response for a parked request line, once the user answered
 def Acp.permit.answer(+body: String, +answer: String) -> String:
   Acp.permit.answer.k(Maybe.default(&2, J.Json, J.Json.parse(body), J.Null{}), answer)
+
+def Acp.permit.answer.once(+body: String, +answer: String) -> String:
+  Acp.permit.answer.k.once(Maybe.default(&2, J.Json, J.Json.parse(body), J.Null{}), answer)
 
 # the response for a parked elicitation line, once the user answered
 def Acp.elicit.answer.k(+o: J.Json, +answer: String) -> String:

@@ -30,6 +30,8 @@ def Show.go(ps: List<&2, L.Piece>) -> String:
       s ++ Show.go(t)
     case L.PLink{l, u} <> t:
       "<" ++ l ++ "|" ++ u ++ ">" ++ Show.go(t)
+    case L.PRef{l, u, b} <> t:
+      "{" ++ l ++ "|" ++ u ++ "|" ++ Bool.pick(String, b, "1", "0") ++ "}" ++ Show.go(t)
 
 def Show(+s: String) -> String:
   Show.go(L.Link.pieces(s))
@@ -62,3 +64,24 @@ def main() -> IO(Unit):
     C.Check.str("web bare path", Web.shows(D.Md.render("at /tmp/x/y.txt")), "<p>at <a class=link file href=/tmp/x/y.txt title=/tmp/x/y.txt onclick=file-open oncontextmenu=file-menu data-value=/tmp/x/y.txt>/tmp/x/y.txt</a></p>")
     C.Check.str("web reply", Web.shows(D.Md.render("See **this** at https://a.b/c. Or `https://no.link`")), "<p>See <strong>this</strong> at <a class=link href=https://a.b/c target=_blank rel=noopener noreferrer title=https://a.b/c>https://a.b/c</a>. Or <code>https://no.link</code></p>")
     C.Check.str("web markdown link", Web.shows(D.Md.render("- [docs](https://d.e)")), "<ul><li><a class=link href=https://d.e target=_blank rel=noopener noreferrer title=https://d.e>docs</a></li></ul>")
+    C.Check.str("ref uri", Show("see backplane://thread/p1~t17-2#m1, now"), "see {backplane://thread/p1~t17-2#m1|backplane://thread/p1~t17-2#m1|0}, now")
+    C.Check.str("ref web", Show("https://h:3787/#/thread/t1-2"), "{https://h:3787/#/thread/t1-2|backplane://thread/t1-2|0}")
+    C.Check.str("ref markdown", Show("read [thread](backplane://thread/t1-2) now"), "read {thread|backplane://thread/t1-2|0} now")
+    C.Check.str("ref markdown web", Show("[mail](http://h/#/mail/c/m1)"), "{mail|backplane://mail/c/m1|0}")
+    C.Check.str("ref bare", Show("see t1-2 and p1~b3-4-5."), "see {t1-2|backplane://thread/t1-2|1} and {p1~b3-4-5|backplane://task/p1~b3-4-5|1}.")
+    C.Check.str("ref boundaries", Show("t1-2,t3-4:xt1-2 _t1-2 t1-2_ t1-2-x"), "{t1-2|backplane://thread/t1-2|1},{t3-4|backplane://thread/t3-4|1}:xt1-2 _t1-2 t1-2_ t1-2-x")
+    C.Check.str("ref in word", Show("xbackplane://thread/t1-2"), "xbackplane://thread/t1-2")
+    C.Check.str("ref unknown", Show("backplane://nope/x"), "backplane://nope/x")
+    C.Check.str("ref image", Show("![t1-2](backplane://thread/t3-4) ![x](https://h/#/thread/t1-2)"), "![t1-2](backplane://thread/t3-4) ![x](https://h/#/thread/t1-2)")
+    C.Check.str("ref plain", Show("a line with no refs"), "a line with no refs")
+    C.Check.str("ref cut", Show.go(L.Link.cut("see thread and t1-2", L.Link.dec(L.Link.enc(L.Link.pieces("[thread](backplane://thread/t3-4) t1-2"))))), "see {thread|backplane://thread/t3-4|0} and {t1-2|backplane://thread/t1-2|1}")
+    C.Check.str("ref web node", Web.shows(D.Md.render("[thread](backplane://thread/t1-2) t3-4")), "<p><a class=ref href=backplane://thread/t1-2 data-ref=backplane://thread/t1-2 data-bare=0>thread</a> <a class=ref href=backplane://thread/t3-4 data-ref=backplane://thread/t3-4 data-bare=1>t3-4</a></p>")
+    C.Check.str("ref brackets", Show("[t1-2] and (b3-4)."), "[{t1-2|backplane://thread/t1-2|1}] and ({b3-4|backplane://bot/b3-4|1}).")
+    C.Check.str("ref spaced image", Show("![a t1-2 label](backplane://thread/t3-4) t5-6"), "![a t1-2 label](backplane://thread/t3-4) {t5-6|backplane://thread/t5-6|1}")
+    C.Check.str("ref adjacent image", Show("![x](backplane://thread/t3-4)t5-6"), "![x](backplane://thread/t3-4){t5-6|backplane://thread/t5-6|1}")
+    C.Check.str("ref file segments", Show("/tmp/t1-2 src/t1-2.txt"), "</tmp/t1-2|/tmp/t1-2> <src/t1-2.txt|src/t1-2.txt>")
+    C.Check.str("ref canonical pct", Show("backplane://thread/t%3a1"), "{backplane://thread/t%3a1|backplane://thread/t%3A1|0}")
+    C.Check.str("ref direct Dom link", Web.shows([D.Dom.link("thread", "http://h/#/thread/t1-2")]), "<a class=ref href=backplane://thread/t1-2 data-ref=backplane://thread/t1-2 data-bare=0>thread</a>")
+    C.Check.str("ref dotted remote", Show("desk.local~t1-2,b3-4"), "{desk.local~t1-2|backplane://thread/desk.local~t1-2|1},{b3-4|backplane://bot/b3-4|1}")
+    C.Check.str("ref dot boundary", Show("t1-2.t3-4"), "{t1-2|backplane://thread/t1-2|1}.{t3-4|backplane://thread/t3-4|1}")
+    C.Check.str("ref dotted remote sentence", Show("desk.local~t1-2. Next"), "{desk.local~t1-2|backplane://thread/desk.local~t1-2|1}. Next")

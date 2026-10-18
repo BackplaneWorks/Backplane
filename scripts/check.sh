@@ -26,6 +26,7 @@
 # and memory for parallelism when the single check is the bottleneck).
 set -eu
 cd "$(dirname "$0")/.."
+python3 scripts/i18n-gen.py --check
 # PROOF.bend outgrew the checker's stack (it overflowed at random on main):
 # a 1 GB main-thread stack, and the engine allowed to use 512 MB of it. A
 # concrete size, not "unlimited": with unlimited the engine falls back to a
@@ -67,6 +68,9 @@ check_one() {
 
 fail=0
 start=$(date +%s)
+# the inputs' key, taken before anything is checked (scripts/verified.sh)
+vkey=""
+[ "$mode" = all ] && vkey=$(scripts/verified.sh key check 2>/dev/null || true)
 
 # The proof runs after the type-check, not beside it: run together they
 # overflowed the proof's stack (the type-check takes seconds anyway).
@@ -144,3 +148,9 @@ elif [ "$mode" = all ]; then
 fi
 
 if [ $fail != 0 ]; then exit 1; fi
+# a full pass (type-check and every proof) is recorded for these inputs
+# (scripts/verified.sh); a check or proof alone records nothing
+# (an `if`, not `[ ] &&`: as the last command a false test would be the
+# script's status, so `check.sh proof` and `check.sh check` exited 1 on a pass)
+if [ "$mode" = all ]; then scripts/verified.sh mark check "$vkey" || true; fi
+exit 0

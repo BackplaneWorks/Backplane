@@ -1,5 +1,6 @@
 import Base
 import ./check.bend as C
+import ../src/core/i18n.bend as I
 import ../src/gfx/text.bend as X
 import ../src/app/bots.bend as BV
 import ../src/app/layout.bend as L
@@ -7,6 +8,7 @@ import ../src/core/bot.bend as BT
 import ../src/core/botui.bend as BU
 import ../src/core/client.bend as U
 import ../src/core/edit.bend as E
+import ../src/core/cjk.bend as CJ
 import ../src/app/nui.bend as N
 
 # The previous eager implementation, retained only as an output oracle.
@@ -81,14 +83,123 @@ def word(n: Nat, acc: String) -> String:
 def compare(+cache: Map<&2, X.TG>, +f: X.Face, +s: String, +px: U32, name: String) -> IO(Unit):
   C.Check.str(name, show(X.Text.wrap(cache, f, s, px), ""), show(Old.wrap(cache, f, s, px), ""))
 
+def cjk.expected.plain.ja(px: U32) -> List<&2, String>:
+  match px:
+    case 0:
+      ["日", "本", "語", "漢", "字", "か", "な", "カ", "ナ", "日", "本", "語"]
+    case 1:
+      ["日", "本", "語", "漢", "字", "か", "な", "カ", "ナ", "日", "本", "語"]
+    case 7:
+      ["日", "本", "語", "漢", "字", "か", "な", "カ", "ナ", "日", "本", "語"]
+    case 8:
+      ["日", "本", "語", "漢", "字", "か", "な", "カ", "ナ", "日", "本", "語"]
+    case 16:
+      ["日本", "語漢", "字か", "なカ", "ナ", "日本", "語"]
+    case 24:
+      ["日本語", "漢字か", "なカナ", "日本語"]
+    case 97:
+      ["日本語漢字かなカナ 日本", "語"]
+    case 780:
+      ["日本語漢字かなカナ 日本語"]
+    case _:
+      Nil{}
+
+def cjk.expected.plain.emoji(px: U32) -> List<&2, String>:
+  match px:
+    case 0:
+      ["😀", "🚀", "🙂", "👩", "‍", "🔬", "🏳", "️", "‍", "🌈", "👍", "🏽"]
+    case 1:
+      ["😀", "🚀", "🙂", "👩", "‍", "🔬", "🏳", "️", "‍", "🌈", "👍", "🏽"]
+    case 7:
+      ["😀", "🚀", "🙂", "👩", "‍", "🔬", "🏳", "️", "‍", "🌈", "👍", "🏽"]
+    case 8:
+      ["😀", "🚀", "🙂", "👩", "‍", "🔬", "🏳", "️", "‍", "🌈", "👍", "🏽"]
+    case 16:
+      ["😀🚀", "🙂👩", "‍🔬", "🏳", "️‍", "🌈", "👍🏽"]
+    case 24:
+      ["😀🚀🙂", "👩‍🔬", "🏳️‍", "🌈 👍", "🏽"]
+    case 97:
+      ["😀🚀🙂👩‍🔬 🏳️‍🌈", "👍🏽"]
+    case 780:
+      ["😀🚀🙂👩‍🔬 🏳️‍🌈 👍🏽"]
+    case _:
+      Nil{}
+
+def cjk.expected.custom.ja(px: U32) -> List<&2, String>:
+  match px:
+    case 0:
+      ["日", "本", "語", "漢", "字", "か", "な", "カ", "ナ", "日", "本", "語"]
+    case 8:
+      ["日", "本", "語", "漢", "字", "か", "な", "カ", "ナ", "日", "本", "語"]
+    case 24:
+      ["日本", "語漢字", "かなカ", "ナ", "日本", "語"]
+    case 97:
+      ["日本語漢字かなカナ", "日本語"]
+    case _:
+      Nil{}
+
+def cjk.expected.custom.emoji(px: U32) -> List<&2, String>:
+  match px:
+    case 0:
+      ["😀", "🚀", "🙂", "👩", "‍", "🔬", "🏳", "️", "‍", "🌈", "👍", "🏽"]
+    case 8:
+      ["😀", "🚀", "🙂", "👩‍", "🔬", "🏳", "️‍", "🌈", "👍", "🏽"]
+    case 24:
+      ["😀", "🚀🙂👩‍", "🔬 🏳", "️‍🌈", "👍🏽"]
+    case 97:
+      ["😀🚀🙂👩‍🔬 🏳️‍🌈 👍🏽"]
+    case _:
+      Nil{}
+
+def cjk.expected(custom: Bool, +px: U32, emoji: Bool) -> List<&2, String>:
+  match custom emoji:
+    case False{} False{}:
+      cjk.expected.plain.ja(px)
+    case False{} True{}:
+      cjk.expected.plain.emoji(px)
+    case True{} False{}:
+      cjk.expected.custom.ja(px)
+    case True{} True{}:
+      cjk.expected.custom.emoji(px)
+
+def cjk.edge(s: String, prev: U32, first: Bool) -> Bool:
+  match s:
+    case SNil{}:
+      Bool.not(CJ.Cjk.no_end(prev))
+    case SCon{Chr{+cp}, t}:
+      Bool.not(Bool.and(first, CJ.Cjk.no_start(cp))) && cjk.edge(t, cp, False{})
+
+def cjk.edges(ls: List<&2, String>) -> Bool:
+  match ls:
+    case Nil{}:
+      True{}
+    case l <> t:
+      cjk.edge(l, 0, True{}) && cjk.edges(t)
+
+def cjk.restore(ls: List<&2, String>, +source: String, acc: String) -> String:
+  match ls:
+    case Nil{}:
+      acc
+    case +l <> t:
+      +rest = String.drop(source, String.length(l))
+      +gap = E.Edit.gap(rest)
+      cjk.restore(t, String.drop(rest, gap), acc ++ l ++ String.take(rest, gap))
+
+def cjk.sample(+cache: Map<&2, X.TG>, +f: X.Face, +s: String, +px: U32, +emoji: Bool) -> IO(Unit):
+  do IO<Unit>:
+    +ls : List<&2, String> = X.Text.wrap(cache, f, s, px)
+    C.Check.str("CJK/emoji exact boundaries", show(ls, ""), show(cjk.expected(U32.is_eq(X.TG.adv(X.Text.get(cache, f, 26085)), 1024), px, emoji), ""))
+    C.Check.str("CJK/emoji reconstruct break gaps", cjk.restore(ls, s, ""), s)
+    C.Check.str("CJK/emoji kinsoku", Bool.show(cjk.edges(ls)), "True")
+
 def samples(+cache: Map<&2, X.TG>, +f: X.Face, +px: U32) -> IO(Unit):
   do IO<Unit>:
     compare(cache, f, "", px, "empty")
     compare(cache, f, "plain words and a longer sentence", px, "normal")
     compare(cache, f, "  leading  repeated spaces  ", px, "spaces")
     compare(cache, f, "\n\nline one\nline two\n", px, "newlines")
-    compare(cache, f, "日本語漢字かなカナ 日本語", px, "CJK")
-    compare(cache, f, "😀🚀🙂👩‍🔬 🏳️‍🌈 👍🏽", px, "emoji combining and ZWJ")
+    cjk.sample(cache, f, "日本語漢字かなカナ 日本語", px, False{})
+    cjk.sample(cache, f, "😀🚀🙂👩‍🔬 🏳️‍🌈 👍🏽", px, True{})
     compare(cache, f, "aaaa bbb ccc xx a", px, "variable advances")
     compare(cache, f, word(Bool.pick(Nat, U32.is_lt(px, 8), 128n, 2048n), ""), px, "long unbroken oracle")
 
@@ -108,7 +219,7 @@ def metrics() -> Map<&2, X.TG>:
     X.Text.key(0, 128512), X.TG.blank(1280)), X.Text.key(0, 8205), X.TG.blank(0))
 
 def ty(+f: X.Face) -> L.Ty:
-  L.Ty{Map.new(&2, X.TG), f, f, f, f, f}
+  L.Ty{Map.new(&2, X.TG), f, f, f, f, f, I.En{}}
 
 def post(+id: String, +text: String) -> List<&2, BT.Post>:
   [BT.Post{id, "", "you", text, 0n, 1n}]

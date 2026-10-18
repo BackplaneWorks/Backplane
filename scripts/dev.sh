@@ -21,6 +21,9 @@
 #   scripts/dev.sh install --force [h@host]
 #                                  the old way: install and restart now (also
 #                                  what happens when no hub answers)
+#   scripts/dev.sh stage DIR       build the package (as install does) into DIR
+#                                  and stop: no install, no hub asked. The
+#                                  hub's deploy_main runs this (docs/deploy.md)
 #
 # The dev run keeps to itself: its own home (BACKPLANE_DEV_HOME, default
 # ~/.backplane-dev, never ~/.backplane-bend), port 3788 (BACKPLANE_DEV_PORT),
@@ -69,6 +72,13 @@ build_voice() {
   mv -f "$out.new" "$out"
 }
 
+# the KiCad IPC helper (tools/kipc): its dependencies installed, then built
+build_kipc() {
+  out=$(cd "$(dirname "$1")" && pwd)/$(basename "$1")
+  (cd tools/kipc && { bun install --frozen-lockfile >/dev/null 2>&1 || bun install >/dev/null; } && bun build.ts "$out.new" >/dev/null)
+  mv -f "$out.new" "$out"
+}
+
 # the browser helper's source, as one hash (what backplane-browser.stamp holds)
 browser_stamp() {
   cat tools/browser/package.json tools/browser/bun.lock tools/browser/build.ts tools/browser/src/*.ts | sha256sum | cut -c1-16
@@ -94,6 +104,8 @@ build_app() {
   mv -f "$dev/backplane.new" "$dev/backplane"
   rm -f "$dev/backplane-voice"
   build_voice "$dev/backplane-voice"
+  rm -f "$dev/backplane-kipc"
+  build_kipc "$dev/backplane-kipc" || { [ -e "$prefix/backplane-kipc" ] && ln -sf "$prefix/backplane-kipc" "$dev/backplane-kipc"; }
   rm -f "$dev/backplane-browser" "$dev/backplane-browser.stamp"
   build_browser "$dev/backplane-browser" || { [ -e "$prefix/backplane-browser" ] && ln -sf "$prefix/backplane-browser" "$dev/backplane-browser"; }
   [ -e "$prefix/backplane-step2glb" ] && ln -sf "$prefix/backplane-step2glb" "$dev/backplane-step2glb"
@@ -117,28 +129,31 @@ stamp() {
 }
 
 # the app, the server, the web client and the voice helper into dist/,
-# stamped; src/core/version.bend is put back after. The browser helper is
+# stamped with the version (in the emitted C, BACKPLANE_VERSION_STAMP: the
+# source is never rewritten). The browser helper is
 # built only when tools/browser changed since the installed one
 # (build_browser); the step2glb helper is not rebuilt (scripts/build.sh
 # builds both for releases)
 build_dist() {
   ver=$(stamp)
-  keep=$(mktemp)
-  cp src/core/version.bend "$keep"
-  trap 'cp "$keep" src/core/version.bend; rm -f "$keep"' EXIT
-  printf 'import Base\n\n# The running build'"'"'s version (stamped by scripts/build.sh).\n\ndef Version.current() -> String:\n  "%s"\n' "$ver" > src/core/version.bend
-  for f in src/web/app.bend src/server/main.bend src/app/main.bend; do check "$f"; done
+  # scripts/check.sh's full pass on exactly these inputs covers these three
+  # (scripts/verified.sh); else they are checked here
+  if scripts/verified.sh has check; then
+    say "checked already: check.sh passed on these exact inputs"
+  else
+    for f in src/web/app.bend src/server/main.bend src/app/main.bend; do check "$f"; done
+  fi
   rm -rf dist && mkdir -p dist
   bend src/web/index.html -o dist/web >/dev/null
   python3 scripts/js-unmarshal.py ../core/client.Ui dist/web/chunk-*.js
   python3 scripts/js-native.py dist/web/chunk-*.js
   cp src/web/sw.js dist/web/sw.js
   for f in dist/web/*.js dist/web/*.css dist/web/*.html; do gzip -9 -k -n -f "$f"; done
-  scripts/build-app.sh src/server/main.bend dist/backplane-serve
-  scripts/build-app.sh src/app/main.bend dist/backplane
+  BACKPLANE_VERSION_STAMP=$ver scripts/build-app.sh src/server/main.bend dist/backplane-serve
+  BACKPLANE_VERSION_STAMP=$ver scripts/build-app.sh src/app/main.bend dist/backplane
   build_voice dist/backplane-voice
+  build_kipc dist/backplane-kipc || true
   build_browser dist/backplane-browser.tmp && mv -f dist/backplane-browser.tmp dist/backplane-browser && mv -f dist/backplane-browser.tmp.stamp dist/backplane-browser.stamp || true
-  cp "$keep" src/core/version.bend
   say "built $ver"
 }
 
@@ -152,7 +167,7 @@ mkdir -p "$prefix" "$HOME/.local/bin"
 rm -rf "$prefix/web.old"
 [ -d "$prefix/web" ] && mv "$prefix/web" "$prefix/web.old"
 mv "$src/web" "$prefix/web"
-for f in backplane backplane-serve backplane-browser backplane-browser.stamp backplane-step2glb backplane-voice LICENSE; do
+for f in backplane backplane-serve backplane-browser backplane-browser.stamp backplane-step2glb backplane-voice backplane-kipc LICENSE; do
   [ -e "$src/$f" ] && mv -f "$src/$f" "$prefix/$f"
 done
 ln -sf "$prefix/backplane" "$HOME/.local/bin/backplane"
@@ -163,7 +178,7 @@ EOF
 stage() {
   rm -rf build/dev-pkg && mkdir -p build/dev-pkg
   cp -R dist/web build/dev-pkg/web
-  for f in backplane backplane-serve backplane-browser backplane-browser.stamp backplane-step2glb backplane-voice; do
+  for f in backplane backplane-serve backplane-browser backplane-browser.stamp backplane-step2glb backplane-voice backplane-kipc; do
     [ -e "dist/$f" ] && cp "dist/$f" build/dev-pkg/
   done
   [ -e LICENSE ] && cp LICENSE build/dev-pkg/
@@ -247,6 +262,13 @@ case ${1:-run} in
     shift
     if [ "${1:-}" = --force ]; then force=1; shift; fi
     if [ -n "${1:-}" ]; then install_remote "$1"; else install_local; fi ;;
+  stage)
+    [ -n "${2:-}" ] || { say "usage: scripts/dev.sh stage DIR"; exit 1; }
+    build_dist
+    stage
+    rm -rf "$2" && mkdir -p "$2"
+    cp -R build/dev-pkg/. "$2"
+    say "staged $ver in $2" ;;
   *)
     sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'
     exit 1 ;;

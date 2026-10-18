@@ -1,4 +1,6 @@
 import Base
+import ../core/msgs.bend as MSG
+import ../core/i18n.bend as I
 import ../core/client.bend as U
 import ../core/plane.bend as P
 import ../gfx/raster.bend as R
@@ -30,7 +32,7 @@ def Pl.dot(+s: String) -> U32:
 
 # a thread's row: dot, title, its project, then its machine and age at the right
 def Pl.row.thread(+ty: L.Ty, +c: D.Clip, +title: String, +sub: String, +machine: String, +state: String, +at: Nat, +now: Nat, +x: U32, +w: U32, +y: U32) -> List<&2, R.Op>:
-  +age = {U.Time.ago(now, at) : String}
+  +age = {I.I18n.ago(L.Ty.loc(ty), now, at) : String}
   +aw = L.Ty.width(ty, 2n, age)
   +mw = Bool.pick(U32, String.is_empty(machine), 0, (L.Ty.width(ty, 2n, machine) + 14 : U32))
   +avail = L.U32.dim(w, (aw + mw + 40 : U32))
@@ -74,7 +76,7 @@ def Pl.row.kind(lock: Bool, +side: Bool, +title: String, +sub: String, +machine:
 def Pl.row(side: Bool, r: P.PRow, +ty: L.Ty, +c: D.Clip, +x: U32, +w: U32, +y: U32, +now: Nat) -> L.Out:
   match r:
     case P.PRow{+kind, _, +act, +val, +title, +sub, +machine, +state, +at, _}:
-      L.Out{List.append(&2, R.Op, Pl.row.kind(String.eq(kind, "lock"), side, title, sub, machine, state, at, ty, c, x, w, y, now), [D.Draw.rect(c, x, (y + 29 : U32), w, 1, T.Th.line(), 255)]),
+      L.Out{List.append(&2, R.Op, Pl.row.kind(String.eq(kind, "lock"), side, P.Plane.title.shown(L.Ty.loc(ty), kind, title), sub, machine, state, at, ty, c, x, w, y, now), [D.Draw.rect(c, x, (y + 29 : U32), w, 1, T.Th.line(), 255)]),
         [L.Lay.hit(x, y, w, 30, act, val)]}
 
 def Pl.row.if(on: Bool, side: Bool, r: P.PRow, +ty: L.Ty, +c: D.Clip, +x: U32, +w: U32, +y: U32, +now: Nat) -> L.Out:
@@ -102,7 +104,7 @@ def Pl.label.if(on: Bool, +ty: L.Ty, +c: D.Clip, +s: String, +x: U32, +y: U32) -
 def Pl.sect.rows(rs: List<&2, P.PRow>, +label: String, +more: Nat, +side: Bool, +ty: L.Ty, +c: D.Clip, +x: U32, +w: U32, +rel: U32, +top: U32, +off: U32, +vh: U32, +now: Nat) -> L.Col:
   L.Lay.col.cat(Pl.label.if(Pl.vis(rel, 28, off, vh), ty, c, label, x, (top + rel - off : U32)),
     L.Lay.col.then(Pl.rows(rs, side, ty, c, x, w, (rel + 28 : U32), top, off, vh, now), +y2 =>
-      L.Col{Pl.label.if(Bool.and(Nat.is_gt(more, 0n), Pl.vis(y2, 28, off, vh)), ty, c, "+" ++ Nat.show(more) ++ " more", x, (top + y2 - off : U32)),
+      L.Col{Pl.label.if(Bool.and(Nat.is_gt(more, 0n), Pl.vis(y2, 28, off, vh)), ty, c, MSG.T.plane.more(L.Ty.loc(ty), Nat.show(more)), x, (top + y2 - off : U32)),
         (y2 + Bool.pick(U32, Nat.is_gt(more, 0n), 28, 0) + 12 : U32)}))
 
 # a section: nothing at all when it has no rows
@@ -149,12 +151,12 @@ def Pl.strip.h(+p: P.Plane, +h: P.PHome) -> U32:
 def Pl.home.btn(offer: Bool, +ty: L.Ty, +c: D.Clip, +x: U32, +y: U32) -> L.Out:
   match offer:
     case True{}:
-      L.Lay.button(ty, c, x, y, P.Plane.home.label(), T.Th.text(), "uber-home", "")
+      L.Lay.button(ty, c, x, y, P.Plane.home.label(L.Ty.loc(ty)), T.Th.text(), "uber-home", "")
     case False{}:
       L.Out.none()
 
 def Pl.home(+h: P.PHome, +ty: L.Ty, +c: D.Clip, +x: U32, +y: U32) -> L.Out:
-  +line = {P.Plane.home.line(h) : String}
+  +line = {P.Plane.home.line(L.Ty.loc(ty), h) : String}
   L.Out.cat(L.Out.ops(L.Ty.text(ty, 2n, line, c, x, y, 28, T.Th.soft())),
     Pl.home.btn(P.Plane.home.button(h), ty, c, (x + L.Ty.width(ty, 2n, line) + 20 : U32), y))
 
@@ -162,10 +164,10 @@ def Pl.strip.if(on: Bool, +p: P.Plane, +h: P.PHome, +ty: L.Ty, +c: D.Clip, +x: U
   match on:
     case True{}:
       L.Out.all([
-        Pl.cell(ty, c, Pl.len(P.Plane.need(p)), "Need you", True{}, x, y),
-        Pl.cell(ty, c, Pl.len(P.Plane.run(p)), "Running", False{}, (x + 130 : U32), y),
-        Pl.cell(ty, c, P.Plane.working(p), "Bots working", False{}, (x + 260 : U32), y),
-        Pl.cell(ty, c, Pl.len(P.Plane.rooms(p)), "Unread rooms", False{}, (x + 390 : U32), y),
+        Pl.cell(ty, c, Pl.len(P.Plane.need(p)), MSG.T.plane.need(L.Ty.loc(ty)), True{}, x, y),
+        Pl.cell(ty, c, Pl.len(P.Plane.run(p)), MSG.T.plane.running(L.Ty.loc(ty)), False{}, (x + 130 : U32), y),
+        Pl.cell(ty, c, P.Plane.working(p), MSG.T.plane.bots.working(L.Ty.loc(ty)), False{}, (x + 260 : U32), y),
+        Pl.cell(ty, c, Pl.len(P.Plane.rooms(p)), MSG.T.plane.rooms.unread(L.Ty.loc(ty)), False{}, (x + 390 : U32), y),
         L.Out.ops(Pl.machines(P.Plane.machines(p), ty, c, x, (y + 56 : U32))),
         Bool.pick(L.Out, P.PHome.on(h), Pl.home(h, ty, c, x, (y + Pl.strip.mh(p) : U32)), L.Out.none())])
     case False{}:
@@ -181,7 +183,7 @@ def Pl.strip(+p: P.Plane, +h: P.PHome, +ty: L.Ty, +c: D.Clip, +x: U32, +rel: U32
 def Pl.none.if(on: Bool, +ty: L.Ty, +c: D.Clip, +x: U32, +y: U32) -> L.Out:
   match on:
     case True{}:
-      L.Out.ops(L.Ty.text(ty, 0n, "Nothing active", c, x, y, 28, T.Th.faint()))
+      L.Out.ops(L.Ty.text(ty, 0n, MSG.T.sidebar.nothing(L.Ty.loc(ty)), c, x, y, 28, T.Th.faint()))
     case False{}:
       L.Out.none()
 
@@ -189,15 +191,15 @@ def Pl.main(+p: P.Plane, +ty: L.Ty, +c: D.Clip, +x: U32, +w: U32, +rel: U32, +to
   +quiet = Bool.and(Bool.and(List.is_empty(&2, P.PRow, P.Plane.need(p)), List.is_empty(&2, P.PRow, P.Plane.run(p))), List.is_empty(&2, P.PRow, P.Plane.idle(p)))
   L.Lay.col.cat(Pl.none.if(quiet, ty, c, x, (top + rel - off : U32)),
     L.Lay.col.then(L.Col{L.Out.none(), Bool.pick(U32, quiet, (rel + 40 : U32), rel)}, r1 =>
-      L.Lay.col.then(Pl.sect(P.Plane.need(p), "NEEDS YOU", 0n, False{}, ty, c, x, w, r1, top, off, vh, now), r2 =>
-        L.Lay.col.then(Pl.sect(P.Plane.run(p), "RUNNING", 0n, False{}, ty, c, x, w, r2, top, off, vh, now), r3 =>
-          L.Lay.col.then(Pl.sect(P.Plane.locks(p), "LOCKS", 0n, False{}, ty, c, x, w, r3, top, off, vh, now), r4 =>
-            Pl.sect(P.Plane.idle(p), "IDLE " ++ Nat.show(P.Plane.idle_n(p)), Nat.sub(P.Plane.idle_n(p), Pl.len(P.Plane.idle(p))), False{}, ty, c, x, w, r4, top, off, vh, now))))))
+      L.Lay.col.then(Pl.sect(P.Plane.need(p), MSG.T.plane.heading.need(L.Ty.loc(ty)), 0n, False{}, ty, c, x, w, r1, top, off, vh, now), r2 =>
+        L.Lay.col.then(Pl.sect(P.Plane.run(p), MSG.T.plane.heading.running(L.Ty.loc(ty)), 0n, False{}, ty, c, x, w, r2, top, off, vh, now), r3 =>
+          L.Lay.col.then(Pl.sect(P.Plane.locks(p), MSG.T.plane.heading.locks(L.Ty.loc(ty)), 0n, False{}, ty, c, x, w, r3, top, off, vh, now), r4 =>
+            Pl.sect(P.Plane.idle(p), MSG.T.plane.idle(L.Ty.loc(ty), Nat.show(P.Plane.idle_n(p))), Nat.sub(P.Plane.idle_n(p), Pl.len(P.Plane.idle(p))), False{}, ty, c, x, w, r4, top, off, vh, now))))))
 
 def Pl.side(+p: P.Plane, +ty: L.Ty, +c: D.Clip, +x: U32, +w: U32, +rel: U32, +top: U32, +off: U32, +vh: U32, +now: Nat) -> L.Col:
-  L.Lay.col.then(Pl.sect(P.Plane.bots(p), "BOTS", 0n, True{}, ty, c, x, w, rel, top, off, vh, now), r2 =>
-    L.Lay.col.then(Pl.sect(P.Plane.rooms(p), "ROOMS", 0n, True{}, ty, c, x, w, r2, top, off, vh, now), r3 =>
-      Pl.sect(P.Plane.routines(p), "ROUTINES", 0n, True{}, ty, c, x, w, r3, top, off, vh, now)))
+  L.Lay.col.then(Pl.sect(P.Plane.bots(p), MSG.T.plane.heading.bots(L.Ty.loc(ty)), 0n, True{}, ty, c, x, w, rel, top, off, vh, now), r2 =>
+    L.Lay.col.then(Pl.sect(P.Plane.rooms(p), MSG.T.plane.heading.rooms(L.Ty.loc(ty)), 0n, True{}, ty, c, x, w, r2, top, off, vh, now), r3 =>
+      Pl.sect(P.Plane.routines(p), MSG.T.plane.heading.routines(L.Ty.loc(ty)), 0n, True{}, ty, c, x, w, r3, top, off, vh, now)))
 
 def Pl.wide() -> U32:
   760

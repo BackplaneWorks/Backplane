@@ -1,5 +1,6 @@
 import Base
 import ../core/json.bend as J
+import ../core/i18n.bend as I
 import ../core/model.bend as M
 import ../core/client.bend as U
 import ../core/codec.bend as C
@@ -56,21 +57,21 @@ def MBots.nav(+r: B.BRow) -> String:
 def MBots.nav.room(+id: String) -> String:
   "@room:" ++ id
 
-def MBots.row(+r: B.BRow) -> J.Json:
+def MBots.row(+lc: I.Loc, +r: B.BRow) -> J.Json:
   match r:
-    case B.BRow{+i, +n, _, +lk, +m, note, sel, +rem, peer, +l}:
+    case B.BRow{+i, +n, _, +lk, +m, _, sel, +rem, peer, +l}:
       J.Json.obj([J.KV{"id", J.Json.str(i)}, J.KV{"name", J.Json.str(n)}, J.KV{"title", J.Json.str(B.BU.row.title(r))},
         J.KV{"act", J.Json.str(B.BU.act(r))}, J.KV{"look", J.Json.nat(lk)},
-        J.KV{"mood", J.Json.str(m)}, J.KV{"note", J.Json.str(note)}, J.KV{"sel", J.Json.bool(sel)},
+        J.KV{"mood", J.Json.str(m)}, J.KV{"note", J.Json.str(B.Mood.note.loc(lc, m))}, J.KV{"sel", J.Json.bool(sel)},
         J.KV{"remote", J.Json.bool(rem)}, J.KV{"peer", J.Json.str(peer)}, J.KV{"cat", MBots.cat(lk, m)},
         J.KV{"key", J.Json.str(B.BU.key.k(rem, i, n, l))}, J.KV{"link", J.Json.str(l)}, J.KV{"nav", J.Json.str(MBots.nav(r))}])
 
-def MBots.rows(rs: List<&2, B.BRow>) -> List<&2, J.Json>:
+def MBots.rows(+lc: I.Loc, rs: List<&2, B.BRow>) -> List<&2, J.Json>:
   match rs:
     case Nil{}:
       Nil{}
     case r <> t:
-      MBots.row(r) <> MBots.rows(t)
+      MBots.row(lc, r) <> MBots.rows(lc, t)
 
 def MBots.room(r: B.RRow) -> J.Json:
   match r:
@@ -99,18 +100,18 @@ def MBots.providers(ps: List<&2, String>, +cur: String) -> List<&2, J.Json>:
 def MBots.provider(+u: U.Ui) -> String:
   Bool.pick(String, String.is_empty(B.BU.field(u, "provider")), M.Setting.get(U.Ui.state(u), "agent.provider", "claude"), B.BU.field(u, "provider"))
 
-def MBots.new.k(open: Bool, +u: U.Ui) -> J.Json:
+def MBots.new.k(+lc: I.Loc, open: Bool, +u: U.Ui) -> J.Json:
   match open:
     case False{}:
       J.Null{}
     case True{}:
-      J.Json.obj([J.KV{"name", J.Json.str(B.BU.field(u, "name"))}, J.KV{"hint", J.Json.str(U.Bots.name.hint(u))}, J.KV{"persona", J.Json.str(B.BU.field(u, "persona"))},
+      J.Json.obj([J.KV{"name", J.Json.str(B.BU.field(u, "name"))}, J.KV{"hint", J.Json.str(U.Bots.name.hint.loc(lc, u))}, J.KV{"persona", J.Json.str(B.BU.field(u, "persona"))},
         J.KV{"provider", J.Json.str(MBots.provider(u))}, J.KV{"providers", J.Json.arr(MBots.providers(U.Chip.providers(), MBots.provider(u)))}])
 
 # the new bot form ("bot-new" opens it, "bfield" fills it, "bot-create"),
 # or null
-def MBots.new(+u: U.Ui) -> J.Json:
-  MBots.new.k(B.BU.open(u, "@bnew"), u)
+def MBots.new(+lc: I.Loc, +u: U.Ui) -> J.Json:
+  MBots.new.k(lc, B.BU.open(u, "@bnew"), u)
 
 def MBots.picks(ps: List<&2, B.Pick>) -> List<&2, J.Json>:
   match ps:
@@ -134,12 +135,12 @@ def MBots.rnew(+u: U.Ui) -> J.Json:
 # A bot's tabs
 # ------------
 
-def MBots.tabs(ts: List<&2, String>) -> List<&2, J.Json>:
+def MBots.tabs(+lc: I.Loc, ts: List<&2, String>) -> List<&2, J.Json>:
   match ts:
     case Nil{}:
       Nil{}
     case +t <> r:
-      J.Json.obj([J.KV{"id", J.Json.str(t)}, J.KV{"label", J.Json.str(B.BU.tab.label(t))}]) <> MBots.tabs(r)
+      J.Json.obj([J.KV{"id", J.Json.str(t)}, J.KV{"label", J.Json.str(B.BU.tab.label(lc, t))}]) <> MBots.tabs(lc, r)
 
 def MBots.mem(m: BT.Mem, +now: Nat) -> J.Json:
   match m:
@@ -163,22 +164,22 @@ def MBots.routine.row(w: SC.SRow, +r: BT.Routine, +now: Nat) -> J.Json:
         J.KV{"kind", J.Json.str(kind)}, J.KV{"label", J.Json.str(label)}, J.KV{"next", J.Json.str(next)}, J.KV{"rel", J.Json.str(rel)},
         J.KV{"zone", J.Json.str(zone)}, J.KV{"done", J.Json.bool(done)}, J.KV{"doneText", J.Json.str(dtext)}])
 
-def MBots.routine(+u: U.Ui, +r: BT.Routine, +now: Nat) -> J.Json:
-  MBots.routine.row(SC.Sched.row(U.Ui.state(u), r, now, 0n, True{}), r, now)
+def MBots.routine(+lc: I.Loc, +u: U.Ui, +r: BT.Routine, +now: Nat) -> J.Json:
+  MBots.routine.row(SC.Sched.row(lc, U.Ui.state(u), r, now, 0n, True{}), r, now)
 
-def MBots.routines(+u: U.Ui, rs: List<&2, BT.Routine>, +now: Nat) -> List<&2, J.Json>:
+def MBots.routines(+lc: I.Loc, +u: U.Ui, rs: List<&2, BT.Routine>, +now: Nat) -> List<&2, J.Json>:
   match rs:
     case Nil{}:
       Nil{}
     case r <> t:
-      MBots.routine(u, r, now) <> MBots.routines(u, t, now)
+      MBots.routine(lc, u, r, now) <> MBots.routines(lc, u, t, now)
 
 # the routine form: open ("routine-edit" fills it, "routine-save"), its
 # fields ("bfield" oname, ocron, oprompt); id is "" for a new one
-def MBots.routine.form(+u: U.Ui) -> J.Json:
+def MBots.routine.form(+lc: I.Loc, +u: U.Ui) -> J.Json:
   J.Json.obj([J.KV{"open", J.Json.bool(B.BU.open(u, "@onew"))}, J.KV{"id", J.Json.str(B.BU.field(u, "oid"))},
     J.KV{"name", J.Json.str(B.BU.field(u, "oname"))}, J.KV{"cron", J.Json.str(B.BU.field(u, "ocron"))},
-    J.KV{"prompt", J.Json.str(B.BU.field(u, "oprompt"))}, J.KV{"hint", J.Json.str(U.Routine.hint(u))}])
+    J.KV{"prompt", J.Json.str(B.BU.field(u, "oprompt"))}, J.KV{"hint", J.Json.str(U.Routine.hint.loc(lc, u))}])
 
 def MBots.hook(h: BT.Hook, +now: Nat) -> J.Json:
   match h:
@@ -265,13 +266,13 @@ def MBots.srows(rs: List<&2, U.TStepRow>) -> List<&2, J.Json>:
 # "input" is whether the frame takes the person's taps and keys (bb-click
 # "x y" in thousandths, bb-scroll dy, bb-type text, bb-key name, bb-nav with
 # the field "bburl", bb-back, bb-reload)
-def MBots.strip(s: U.TStrip, +u: U.Ui, +id: String) -> List<&2, J.KV>:
+def MBots.strip(+lc: I.Loc, s: U.TStrip, +u: U.Ui, +id: String) -> List<&2, J.KV>:
   match s:
     case U.TStrip{+mode, +title, +clock, +steps, bs}:
       [J.KV{"mode", J.Json.nat(mode)}, J.KV{"title", J.Json.str(title)}, J.KV{"clock", J.Json.str(clock)}, J.KV{"steps", J.Json.nat(steps)},
        J.KV{"btns", J.Json.arr(MBots.tbtns(bs))}, J.KV{"input", J.Json.bool(U.Teach.input(u, id))},
        MBots.str(u, "bburl"), MBots.str(u, "tknote"), MBots.str(u, "tkname"), MBots.str(u, "tkdesc"),
-       J.KV{"rows", J.Json.arr(MBots.srows(U.Teach.rows(u, id)))}]
+       J.KV{"rows", J.Json.arr(MBots.srows(U.Teach.rows.loc(lc, u, id)))}]
 
 # a browser task paused for help (client.bend's Teach.ask): the same card
 # with its screenshot (a hub path, loaded with the pairing token) and the
@@ -297,23 +298,23 @@ def MBots.ask.kind(a: M.Ask) -> String:
     case M.Ask{_, _, +k, _, _, _, _, _}:
       k
 
-def MBots.asks.k(+a: M.Ask, rest: List<&2, J.Json>, +u: U.Ui, +bot: String) -> List<&2, J.Json>:
-  MBots.asks.m(String.eq(MBots.ask.kind(a), "browser"), U.Teach.ask.of(a, u, bot), rest)
+def MBots.asks.k(+lc: I.Loc, +a: M.Ask, rest: List<&2, J.Json>, +u: U.Ui, +bot: String) -> List<&2, J.Json>:
+  MBots.asks.m(String.eq(MBots.ask.kind(a), "browser"), U.Teach.ask.of.loc(lc, a, u, bot), rest)
 
-def MBots.asks.go(as: List<&2, M.Ask>, +u: U.Ui, +bot: String) -> List<&2, J.Json>:
+def MBots.asks.go(+lc: I.Loc, as: List<&2, M.Ask>, +u: U.Ui, +bot: String) -> List<&2, J.Json>:
   match as:
     case Nil{}:
       Nil{}
     case a <> r:
-      MBots.asks.k(a, MBots.asks.go(r, u, bot), u, bot)
+      MBots.asks.k(lc, a, MBots.asks.go(lc, r, u, bot), u, bot)
 
 # the browser's frame: where the hub serves it, and how many it has sent
 # (a new n is a new frame), with the strip
-def MBots.browser(+u: U.Ui, +id: String) -> J.Json:
+def MBots.browser(+lc: I.Loc, +u: U.Ui, +id: String) -> J.Json:
   J.Json.obj(List.append(&2, J.KV, [J.KV{"url", J.Json.str("/bots/" ++ id ++ "/screen.jpg")},
     J.KV{"n", J.Json.str(Bool.pick(String, String.is_empty(U.Ui.info(u, "shot." ++ id)), "0", U.Ui.info(u, "shot." ++ id)))}],
-    List.append(&2, J.KV, MBots.strip(U.Teach.strip(u, id), u, id),
-      [J.KV{"asks", J.Json.arr(MBots.asks.go(U.Asks.open(U.Ui.state(u), BT.Bot.thread(BT.World.bot(M.State.bots(U.Ui.state(u)), id))), u, id))}])))
+    List.append(&2, J.KV, MBots.strip(lc, U.Teach.strip.loc(lc, u, id), u, id),
+      [J.KV{"asks", J.Json.arr(MBots.asks.go(lc, U.Asks.open(U.Ui.state(u), BT.Bot.thread(BT.World.bot(M.State.bots(U.Ui.state(u)), id))), u, id))}])))
 
 # Tasks (client.bend's Teach.tasks): a card each; open, its run form (one
 # field "tkrun.<param>" each, then "tk-run" with the slug) and Delete
@@ -373,18 +374,18 @@ def MBots.space(p: BT.Page, +u: U.Ui, b: BT.Bot, +id: String) -> List<&2, J.KV>:
       MBots.space.k(String.is_empty(html), at, u, b, id)
 
 # what tab i (in B.BU.tabs order) adds; the chat is the screen's thread
-def MBots.tab.k(i: Nat, +u: U.Ui, b: BT.Bot, +id: String, +persona: String, +now: Nat) -> List<&2, J.KV>:
+def MBots.tab.k(+lc: I.Loc, i: Nat, +u: U.Ui, b: BT.Bot, +id: String, +persona: String, +now: Nat) -> List<&2, J.KV>:
   match i:
     case 1n:
       MBots.space(B.BU.page(u, id), u, b, id)
     case 2n:
-      [J.KV{"browser", MBots.browser(u, id)}]
+      [J.KV{"browser", MBots.browser(lc, u, id)}]
     case 3n:
       [J.KV{"tasks", MBots.tasks.tab(u, id)}]
     case 4n:
       [J.KV{"memory", J.Json.arr(MBots.mems(B.BU.mems(u, id), now))}]
     case 5n:
-      [J.KV{"routines", J.Json.arr(MBots.routines(u, B.BU.routines(u, id), now))}, J.KV{"routine", MBots.routine.form(u)}]
+      [J.KV{"routines", J.Json.arr(MBots.routines(lc, u, B.BU.routines(u, id), now))}, J.KV{"routine", MBots.routine.form(lc, u)}]
     case 6n:
       [J.KV{"hooks", J.Json.arr(MBots.hooks(B.BU.hooks(u, id), now))}, J.KV{"secret", J.Json.str(U.Ui.scratch(u, "@hook.secret"))},
        J.KV{"secretFor", J.Json.str(U.Ui.scratch(u, "@hook.id"))}, J.KV{"token", J.Json.str(U.Ui.scratch(u, "@hook.token"))},
@@ -397,21 +398,21 @@ def MBots.tab.k(i: Nat, +u: U.Ui, b: BT.Bot, +id: String, +persona: String, +now
 # a bot's header (BU.head): its name as shown ("title": with its machine
 # when mirrored from a linked machine), its mood, its tabs and the one
 # shown, and whether its memory and routines may be changed here ("edit")
-def MBots.head(+hd: B.Head) -> List<&2, J.KV>:
+def MBots.head(+lc: I.Loc, +hd: B.Head) -> List<&2, J.KV>:
   [J.KV{"title", J.Json.str(B.Head.title(hd))}, J.KV{"mood", J.Json.str(B.Head.mood(hd))},
    J.KV{"note", J.Json.str(B.Head.note(hd))}, J.KV{"look", J.Json.nat(B.Head.look(hd))}, J.KV{"cat", MBots.cat(B.Head.look(hd), B.Head.mood(hd))},
-   J.KV{"tab", J.Json.str(B.Head.tab(hd))}, J.KV{"tabs", J.Json.arr(MBots.tabs(B.Head.tabs(hd)))},
+   J.KV{"tab", J.Json.str(B.Head.tab(hd))}, J.KV{"tabs", J.Json.arr(MBots.tabs(lc, B.Head.tabs(hd)))},
    J.KV{"edit", J.Json.bool(B.Head.owns(hd))}]
 
-def MBots.bot.m(+u: U.Ui, b: BT.Bot, +id: String, +name: String, +persona: String, +hd: B.Head) -> J.Json:
+def MBots.bot.m(+lc: I.Loc, +u: U.Ui, b: BT.Bot, +id: String, +name: String, +persona: String, +hd: B.Head) -> J.Json:
   J.Json.obj(List.append(&2, J.KV,
     [J.KV{"kind", J.Json.str("bot")}, J.KV{"id", J.Json.str(id)}, J.KV{"name", J.Json.str(name)}],
-    List.append(&2, J.KV, MBots.head(hd), MBots.tab.k(C.Codec.pos(B.BU.tabs(), B.Head.tab(hd)), u, b, id, persona, U.Side.now(u)))))
+    List.append(&2, J.KV, MBots.head(lc, hd), MBots.tab.k(lc, C.Codec.pos(B.BU.tabs(), B.Head.tab(hd)), u, b, id, persona, U.Side.now(u)))))
 
-def MBots.bot(+u: U.Ui, b: BT.Bot) -> J.Json:
+def MBots.bot(+lc: I.Loc, +u: U.Ui, b: BT.Bot) -> J.Json:
   match b:
     case BT.Bot{+i, +n, +th, +lk, +pe, +c, +d}:
-      MBots.bot.m(u, BT.Bot{i, n, th, lk, pe, c, d}, i, n, pe, B.BU.head.bot(u, BT.Bot{i, n, th, lk, pe, c, d}))
+      MBots.bot.m(lc, u, BT.Bot{i, n, th, lk, pe, c, d}, i, n, pe, B.BU.head.bot(u, BT.Bot{i, n, th, lk, pe, c, d}))
 
 # Rooms and bots elsewhere
 # ------------------------
@@ -438,31 +439,31 @@ def MBots.room.view(+u: U.Ui, r: BT.Room) -> J.Json:
         J.KV{"posts", J.Json.arr(MBots.posts(B.BU.posts(u, i), u, U.Side.now(u)))},
         J.KV{"draft", J.Json.str(B.BU.field(u, "rpost"))}])
 
-def MBots.far.m(m: B.BRow, +u: U.Ui, +id: String, +hd: B.Head) -> J.Json:
+def MBots.far.m(+lc: I.Loc, m: B.BRow, +u: U.Ui, +id: String, +hd: B.Head) -> J.Json:
   match m:
     case B.BRow{_, n, _, _, _, _, _, _, peer, _}:
       J.Json.obj(List.append(&2, J.KV, [J.KV{"kind", J.Json.str("remote")}, J.KV{"id", J.Json.str(id)}, J.KV{"name", J.Json.str(n)},
         J.KV{"peer", J.Json.str(peer)}, J.KV{"posts", J.Json.arr(MBots.posts(B.BU.remote.posts(u, id), u, U.Side.now(u)))},
-        J.KV{"draft", J.Json.str(B.BU.field(u, "rtext"))}], MBots.head(hd)))
+        J.KV{"draft", J.Json.str(B.BU.field(u, "rtext"))}], MBots.head(lc, hd)))
 
 # a bot only reported by a linked machine: the same header as a bot's
 # (BU.head: "name · machine", Chat alone) over the person's conversation
 # with it ("bfield" rtext, "remote-send")
-def MBots.far(+u: U.Ui, +id: String) -> J.Json:
-  MBots.far.m(B.BU.remote.row(u, id), u, id, B.BU.head(u, B.VRemote{id}))
+def MBots.far(+lc: I.Loc, +u: U.Ui, +id: String) -> J.Json:
+  MBots.far.m(lc, B.BU.remote.row(u, id), u, id, B.BU.head(u, B.VRemote{id}))
 
-def MBots.view(v: B.View, +u: U.Ui) -> J.Json:
+def MBots.view(+lc: I.Loc, v: B.View, +u: U.Ui) -> J.Json:
   match v:
     case B.VThread{}:
       J.Null{}
     case B.VBot{b}:
-      MBots.bot(u, b)
+      MBots.bot(lc, u, b)
     case B.VRoom{r}:
       MBots.room.view(u, r)
     case B.VRemote{id}:
-      MBots.far(u, id)
+      MBots.far(lc, u, id)
 
 # what the main area shows when it is a bot ("kind" bot), a room or a bot
 # elsewhere ("remote"); null for a thread
-def MBots.json(+u: U.Ui) -> J.Json:
-  MBots.view(B.BU.view(u), u)
+def MBots.json(+lc: I.Loc, +u: U.Ui) -> J.Json:
+  MBots.view(lc, B.BU.view(u), u)

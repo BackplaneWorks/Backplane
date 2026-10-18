@@ -1,4 +1,5 @@
 import Base
+import ../core/msgs.bend as MSG
 import ../core/space.bend as SP
 import ../gfx/raster.bend as R
 import ../gfx/draw.bend as D
@@ -125,13 +126,14 @@ def Spv.button(+ty: L.Ty, +l: String, +a: String, +bot: String, +c: D.Clip, +x: 
   L.Col{F.Fm.button(ty, c, x, y, l, T.Th.accent(), "space", Spv.key(bot, a)), (y + 38 : U32)}
 
 def Spv.input(+ty: L.Ty, +f: F.FS, +l: String, +a: String, +p: String, +bot: String, +c: D.Clip, +x: U32, +w: U32, +y: U32) -> L.Col:
+  +label0 = MSG.T.composer.send(L.Ty.loc(ty))
   +ly = {Bool.pick(U32, String.is_empty(l), 0, 22) : U32}
   +pre = Spv.key(bot, a) ++ Spv.sep()
-  +sw = F.Fm.button.w(ty, "Send")
+  +sw = F.Fm.button.w(ty, label0)
   L.Col{L.Out.all([
       L.Out.ops(L.Ty.text(ty, 2n, L.Ty.fit(ty, 2n, l, w), c, x, y, 20, T.Th.dim())),
       F.Fm.field(ty, f, c, x, (y + ly : U32), (w - sw - 8 : U32), "sp." ++ a, "space-input", pre, p),
-      F.Fm.button(ty, c, (x + w - sw : U32), (y + ly : U32), "Send", T.Th.accent(), "space-input", pre ++ F.Fm.text(f, "sp." ++ a))]),
+      F.Fm.button(ty, c, (x + w - sw : U32), (y + ly : U32), label0, T.Th.accent(), "space-input", pre ++ F.Fm.text(f, "sp." ++ a))]),
     (y + ly + 40 : U32)}
 
 # how many columns the widest row has

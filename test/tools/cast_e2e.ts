@@ -2,9 +2,10 @@
 // castio.bend): a headless hub (BINARY, with backplane-browser beside it)
 // opens a page for a thread (preview_open over MCP) and a client counts
 // that page's frames ({"t":"shot"}) a second:
-//   1. an animating page with no client showing it: at most --jpeg-fps (4)
+//   1. an animating page with no client showing it: not cast, a still
+//      every --idle-still-ms (5 s)
 //   2. the client says browser.seen every second: up to --cast-fps (30)
-//   3. it stops: back to at most 4 within a few seconds
+//   3. it stops: not cast again within a few seconds
 //   4. a still page clicked (preview_click) while shown: the frame that
 //      shows the click arrives soon after (input to frame, ms)
 //
@@ -47,7 +48,7 @@ const home = join(root, "home"), proj = join(root, "proj");
 for (const d of [home, proj]) mkdirSync(d);
 writeFileSync(join(home, "events.jsonl"), "");
 const hub = Bun.spawn([resolve(bin), "--home", home, "--port", String(PORT), "--no-tailscale", "--foreground"], {
-  env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_PEERS: "", BACKPLANE_GOOGLE_BAKE: "0", TMPDIR: root },
+  env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "", BACKPLANE_GOOGLE_BAKE: "0", TMPDIR: root },
   stdout: "ignore", stderr: Bun.file(join(root, "hub.err")),
 });
 try {
@@ -92,13 +93,13 @@ try {
     const gaps = ts.slice(1).map((t, i) => t - ts[i]).sort((a, b) => a - b);
     return { fps: (shots.filter((s) => s.page === T).length - n0) / secs, p50: gaps[Math.floor(gaps.length / 2)] ?? 0, p90: gaps[Math.floor(gaps.length * 0.9)] ?? 0 };
   };
-  const a = await rate(5, false);
-  check(a.fps > 1 && a.fps <= 4.6, `not shown: ${a.fps.toFixed(1)} frames a second (interval p50 ${a.p50.toFixed(0)} ms)`);
+  const a = await rate(10, false);
+  check(a.fps > 0 && a.fps <= 0.5, `not shown: not cast, a still every few seconds (${a.fps.toFixed(2)} frames a second)`);
   const b = await rate(6, true);
   check(b.fps >= MIN_FAST, `shown (browser.seen): ${b.fps.toFixed(1)} frames a second (interval p50 ${b.p50.toFixed(0)} ms, p90 ${b.p90.toFixed(0)} ms)`);
   await sleep(4000);
-  const c = await rate(4, false);
-  check(c.fps <= 4.6, `no longer shown: back to ${c.fps.toFixed(1)} a second`);
+  const c = await rate(10, false);
+  check(c.fps <= 0.5, `no longer shown: not cast again (${c.fps.toFixed(2)} a second)`);
   // input to frame on a still page, shown
   await tool("preview_navigate", { url: `http://127.0.0.1:${site.port}/still` });
   await sleep(1500);

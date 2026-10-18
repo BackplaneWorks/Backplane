@@ -12,6 +12,12 @@ import ../core/onboard.bend as OB
 
 # What host.js calls. Everything the page decides happens behind these.
 
+def lang(u: U.Ui) -> String:
+  U.Ui.scratch(u, "@lang.tag")
+
+def lang_preview(u: U.Ui) -> U.Ui:
+  U.Ui.scratch_set(u, "@lang.preview", "1")
+
 def init(now: Nat, cid: String) -> U.Ui:
   U.Ui.set_cid(U.Ui.init(now), cid)
 
@@ -88,6 +94,11 @@ def Rv.focus(on: Bool, a: U.Act) -> U.Act:
 def act(u: U.Ui, +action: String, value: String) -> U.Act:
   U.Solid.sync(Rv.focus(Bool.or(String.eq(action, "view-layer-pick"), String.eq(action, "view-layer-mode")), U.Ui.act(u, action, value)))
 
+# a timeline gap px from its end is at the end and follows; further up it
+# holds what is read (client.bend's Hold; host.js's held)
+def hold_at_end(gap: Nat) -> Bool:
+  U.Hold.at_end(gap)
+
 def view(u: U.Ui) -> D.Node:
   V.View.page(u)
 
@@ -126,8 +137,8 @@ def origin(u: U.Ui) -> String:
 def composer(u: U.Ui) -> D.Node:
   V.View.composer.u(u)
 
-def asks(u: U.Ui) -> D.Node:
-  V.View.asks.u(u)
+def asks(+u: U.Ui) -> D.Node:
+  V.View.asks.u(U.Lang.loc(u), u)
 
 # A value of each Json constructor, for wire.js: bend 2.0.36 tags a module's
 # constructors with their file ("../core/json.Str"), so the JavaScript that

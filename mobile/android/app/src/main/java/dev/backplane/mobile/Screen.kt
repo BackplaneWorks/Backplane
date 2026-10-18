@@ -116,6 +116,8 @@ data class SubRow(
     val live: Boolean, val open: Boolean, val n: Int, val steps: List<SubStep>, val act: String, val value: String,
     // the action a Stop sends with the row's id ("" for no Stop)
     val cancel: String = "",
+    // the state as shown, when it differs from the token (Japanese)
+    val stateLabel: String = "",
 )
 // word: "3 at work" or "3 done"; open: the rows show (done, it folds to its
 // head); a tap on the head sends act with value
@@ -318,6 +320,8 @@ data class ThreadView(
     val embs: List<Emb> = emptyList(),
     // the phase the working line's dot shows (as a row's status)
     val phase: String = "",
+    // the thread's Boat chip ("Boat · large · running"; "" for none), a tap opens Settings
+    val boat: String = "",
 )
 
 data class Btw(val q: String, val a: String)
@@ -419,6 +423,8 @@ data class Screen(
     val settings: Settings? = null, val find: Find? = null,
     // a project remove to confirm ("proj-remove" id, or "proj-keep")
     val removing: Deleting? = null, val search: Search? = null,
+    // shared language labels and choices for this device
+    val lang: Settings? = null,
     // the hub's theme ("light", "dark"; "" follows the phone's)
     val theme: String = "",
     // "projects" (sections) or "active" (one flat list of rows, active)
@@ -511,7 +517,7 @@ private fun thread(o: JSONObject) = threadOf(o).copy(
             SubRow(it.optString("id"), it.optBoolean("agent"), it.optString("title"), it.optString("who"), it.optString("state"),
                 it.optString("doing"), it.optBoolean("live"), it.optBoolean("open"), it.optInt("n"),
                 it.optJSONArray("steps").map { st -> SubStep(st.optString("kind"), st.optString("text")) }, it.optString("act"), it.optString("value"),
-                it.optString("cancel"))
+                it.optString("cancel"), it.optString("stateLabel"))
         }, u.optString("word"), u.optBoolean("open", true), u.optString("act"), u.optString("value"))
     },
     asks = o.optJSONArray("asks").map(::askOf),
@@ -533,6 +539,7 @@ private fun thread(o: JSONObject) = threadOf(o).copy(
             it.optBoolean("live"), it.optBoolean("pinned"), it.optString("restart"), it.optJSONObject("term")?.let(::term))
     },
     phase = o.optString("phase"),
+    boat = o.optString("boat"),
 )
 
 private fun threadOf(o: JSONObject) = ThreadView(
@@ -723,7 +730,8 @@ fun parseScreen(o: JSONObject) = Screen(
         Deleting(it.optString("id"), it.optString("title"), it.optString("body"), it.optString("yes"), it.optString("no"))
     },
     o.optJSONObject("search")?.let { Search(it.optBoolean("open"), it.optString("query"), it.optString("hint")) },
-    o.optString("theme"),
+    lang = o.optJSONObject("lang")?.let(::parseSettings),
+    theme = o.optString("theme"),
     view = o.optString("view").ifEmpty { "projects" },
     making = o.optBoolean("making"),
     tabs = o.optJSONObject("tabs")?.let(::parseTabs) ?: Tabs(),

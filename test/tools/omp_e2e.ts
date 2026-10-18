@@ -2,7 +2,7 @@
 // answering as `omp acp` does; no model, no omp login). A headless hub on a
 // temporary home, with the stand-in as `omp` first on PATH:
 //   stream       an omp thread's turn streams its reply and completes
-//   supervised   a write in always-ask asks first: Allow creates the file
+//   supervised   form Allow writes; ACP Allow cannot select allow_always
 //   deny         Deny leaves no file, and the turn completes
 //   full access  a write in yolo asks nothing and creates the file
 //
@@ -120,15 +120,28 @@ try {
   check(turns(th).filter((s) => s === "completed").length >= 3, "deny: the turn still completes");
   check(lines().includes('ANSWER {"action":"decline"}'), "deny: the form is declined");
 
+  // a one-time OMP permission must not select allow_always when allow_once is absent
+  const a2 = asks().length;
+  send("turn.start", { thread: th, text: "write ACP permission", msg: "m-4" });
+  const ask3 = await until(20000, () => asks()[a2]);
+  check(!!ask3 && ask3.options === "Allow\nDeny", "permission: the ACP request uses the one-time Allow/Deny card");
+  check(!existsSync(file), "permission: no write happens before the answer");
+  if (ask3) send("ask.answer", { id: ask3.id, answer: "Allow" });
+  await until(20000, () => turns(th).filter((s) => s === "completed").length >= 4 ? true : undefined);
+  check(!existsSync(file), "permission: Allow cannot select allow_always");
+  check(lines().includes('PERMISSION {"outcome":{"outcome":"cancelled"}}'), "permission: the request is cancelled without allow_once");
+  check(turns(th).at(-1) === "completed", `permission: the turn completes (${turns(th).join(",")})`);
+
+
 
   // full access
   send("thread.modes", { thread: th, runtime: "full-access" });
   await sleep(300);
   rmSync(file, { force: true });
-  const a2 = asks().length;
-  send("turn.start", { thread: th, text: "write yolo", msg: "m-4" });
-  await until(20000, () => turns(th).filter((s) => s === "completed").length >= 4 ? true : undefined);
-  check(asks().length === a2, "full access: no approval card");
+  const a3 = asks().length;
+  send("turn.start", { thread: th, text: "write yolo", msg: "m-5" });
+  await until(20000, () => turns(th).filter((s) => s === "completed").length >= 5 ? true : undefined);
+  check(asks().length === a3, "full access: no approval card");
   check(existsSync(file) && readFileSync(file, "utf8") === "hello", "full access: the file is written");
 } finally {
   proc.kill();

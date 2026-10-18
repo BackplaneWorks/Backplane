@@ -1,5 +1,6 @@
 import Base
 import ../core/json.bend as J
+import ../core/i18n.bend as I
 import ../core/model.bend as M
 import ../core/client.bend as U
 import ../core/codec.bend as C
@@ -60,6 +61,28 @@ def Hub.key(h: Hub) -> String:
   match h:
     case Hub{k, _}:
       k
+
+# the device's language: every hub's Ui holds it after Hubs.local, so the
+# hub in focus (else the first) answers for all, once a screen
+def Hubs.loc.pick(hit: Bool, u: U.Ui, fallback: U.Ui) -> U.Ui:
+  match hit:
+    case True{}: u
+    case False{}: fallback
+
+def Hubs.loc.go(hs: List<&2, Hub>, +cur: String, fallback: U.Ui) -> U.Ui:
+  match hs:
+    case Nil{}: fallback
+    case Hub{+k, u} <> t:
+      Hubs.loc.pick(String.eq(k, cur), u, Hubs.loc.go(t, cur, fallback))
+
+def Hubs.loc.first(hs: List<&2, Hub>) -> U.Ui:
+  match hs:
+    case Nil{}: U.Ui.init(0n)
+    case Hub{_, u} <> _: u
+
+def Hubs.loc(hs: Hubs) -> I.Loc:
+  match hs:
+    case Hubs{_, _, cur, +list}: U.Lang.loc(Hubs.loc.go(list, cur, Hubs.loc.first(list)))
 
 def Hubs.init(now: Nat, +cid: String) -> Hubs:
   Hubs{cid, now, "", Nil{}}
@@ -335,7 +358,7 @@ type Did is Data:
 def One.got.k(+seen: List<&2, N.Seen>, a: U.Act) -> Did:
   match a:
     case U.Act{+u, cmds}:
-      Did{U.Act{u, cmds}, N.Note.alerts.st(U.Ui.threads(S.Mob.st(u)), seen, S.Mob.st(u), U.Ui.info(u, "desk"))}
+      Did{U.Act{u, cmds}, N.Note.alerts.st.loc(U.Ui.threads(S.Mob.st(u)), seen, S.Mob.st(u), U.Ui.info(u, "desk"), U.Lang.loc(u))}
 
 def Did.alerts(d: Did) -> List<&2, J.Json>:
   match d:
@@ -415,7 +438,7 @@ def One.got(+u: U.Ui, +o: J.Json) -> Did:
 def One.pol.k(+seen: List<&2, N.RSeen>, a: U.Act) -> Did:
   match a:
     case U.Act{+u, cmds}:
-      Did{U.Act{u, cmds}, N.Note.ralerts(U.Ui.threads(S.Mob.st(u)), seen, S.Mob.st(u), U.Ui.info(u, "desk"))}
+      Did{U.Act{u, cmds}, N.Note.ralerts.loc(U.Ui.threads(S.Mob.st(u)), seen, S.Mob.st(u), U.Ui.info(u, "desk"), U.Lang.loc(u))}
 
 def One.pol.b(booting: Bool, +seen: List<&2, N.RSeen>, +a: U.Act) -> Did:
   match booting:
@@ -565,19 +588,25 @@ def Hubs.find(hs: List<&2, Hub>, +key: String) -> Maybe<&2, Hub>:
     case +h <> t:
       Bool.pick(Maybe<&2, Hub>, String.eq(Hub.key(h), key), Some{h}, Hubs.find(t, key))
 
-def Hubs.made(+m: Maybe<&2, Hub>, +k: String, +cid: String, +now: Nat) -> Hub:
+def Hubs.lang.inherit(old: List<&2, Hub>, u: U.Ui) -> U.Ui:
+  match old:
+    case Nil{}: u
+    case Hub{_, +from} <> _:
+      U.Lang.apply(U.Ui.scratch_set(u, "@lang.preview", U.Ui.scratch(from, "@lang.preview")), U.Lang.choice(from), U.Ui.scratch(from, "@lang.os"))
+
+def Hubs.made(+m: Maybe<&2, Hub>, +k: String, +cid: String, +now: Nat, +old: List<&2, Hub>) -> Hub:
   match m:
     case Some{h}:
       h
     case None{}:
-      Hub{k, U.Ui.info_set(U.Ui.set_cid(U.Ui.init(now), cid), "local.fixed", "1")}
+      Hub{k, Hubs.lang.inherit(old, U.Ui.info_set(U.Ui.set_cid(U.Ui.init(now), cid), "local.fixed", "1"))}
 
 def Hubs.set.go(ks: List<&2, String>, +old: List<&2, Hub>, +cid: String, +now: Nat) -> List<&2, Hub>:
   match ks:
     case Nil{}:
       Nil{}
     case +k <> t:
-      Hubs.made(Hubs.find(old, k), k, cid, now) <> Hubs.set.go(t, old, cid, now)
+      Hubs.made(Hubs.find(old, k), k, cid, now, old) <> Hubs.set.go(t, old, cid, now)
 
 def Hubs.first(hs: List<&2, Hub>) -> String:
   match hs:
@@ -585,6 +614,7 @@ def Hubs.first(hs: List<&2, Hub>) -> String:
       ""
     case h <> _:
       Hub.key(h)
+
 
 def Hubs.set.k(+cid: String, +now: Nat, +cur: String, +hs: List<&2, Hub>) -> Hubs:
   Hubs{cid, now, Bool.pick(String, Hubs.has(hs, cur), cur, Hubs.first(hs)), hs}
@@ -601,7 +631,7 @@ def Hubs.set(hs: Hubs, ks: List<&2, String>) -> Hubs:
 def Hubs.ui(hs: Hubs, +key: String) -> U.Ui:
   match hs:
     case Hubs{+cid, +now, _, +list}:
-      Hub.ui(Hubs.made(Hubs.find(list, key), key, cid, now))
+      Hub.ui(Hubs.made(Hubs.find(list, key), key, cid, now, list))
 
 def Hubs.recv(hs: Hubs, +key: String, o: J.Json) -> HAct:
   Hubs.step(hs, False{}, key, Got{o})
@@ -661,12 +691,19 @@ def Hubs.now(hs: Hubs, now: Nat) -> Hubs:
 # tabs): left in every hub's scratch as @local.<key>, where the screen reads it
 # (screen.bend's Mob.view). The apps send it after load/start, after pairing
 # and on every change, so a hub added later has it at once.
+def Hubs.local.ui(k: Nat, +u: U.Ui, key: String, +value: String) -> U.Ui:
+  match k:
+    case 0n: U.Lang.apply(u, value, U.Ui.scratch(u, "@lang.os"))
+    case 1n: U.Lang.apply(u, U.Lang.choice(u), value)
+    case 2n: U.Lang.apply(U.Ui.scratch_set(u, "@lang.preview", value), U.Lang.choice(u), U.Ui.scratch(u, "@lang.os"))
+    case _: U.Ui.scratch_set(u, "@local." ++ key, value)
+
 def Hubs.local.go(hs: List<&2, Hub>, +key: String, +value: String) -> List<&2, Hub>:
   match hs:
     case Nil{}:
       Nil{}
     case Hub{+k, u} <> t:
-      Hub{k, U.Ui.scratch_set(u, "@local." ++ key, value)} <> Hubs.local.go(t, key, value)
+      Hub{k, Hubs.local.ui(C.Codec.pos(["lang", "lang-os", "lang-preview"], key), u, key, value)} <> Hubs.local.go(t, key, value)
 
 def Hubs.local(hs: Hubs, +key: String, +value: String) -> Hubs:
   match hs:
@@ -696,13 +733,13 @@ def Hubs.register.at(hs: Hubs, +key: String, p: String, t: String, k: String, th
 def Hubs.routed(+action: String) -> Nat:
   C.Codec.pos(["select", "new-thread", "picker-open", "bot", "room", "remote", "uber", "uber-bot", "bot-new", "room-new", "proj-go", "hub-settings",
     "row-settle", "row-unsettle", "row-snooze", "row-delete", "toggle-settled", "add-project", "proj-remove",
-    "row-menu", "proj-menu", "row-pin", "row-unpin", "row-archive", "row-unarchive", "hist-tick", "row-rename", "rename-save", "uber-promote", "uber-home", "deploy-cancel"], action)
+    "row-menu", "proj-menu", "row-pin", "row-unpin", "row-archive", "row-unarchive", "hist-tick", "row-rename", "rename-save", "uber-promote", "uber-home", "fab-open", "fab-edit", "buy", "fab-hide", "fab-show", "deploy-cancel"], action)
 
 def Hubs.moves() -> Nat:
   12n
 
 def Hubs.routes() -> Nat:
-  30n
+  35n
 
 # answers to what any hub may be showing (its error, a delete or remove
 # to confirm); the project search is every hub's at once, since the list
@@ -951,53 +988,53 @@ def Hubs.pl.null(j: J.Json) -> Bool:
       False{}
 
 # the uberbot's card with the counts of the plane, when this hub has one
-def Hubs.pl.card.k(m: Maybe<&2, BU.BRow>, +p: PL.Plane, +k: String) -> J.Json:
+def Hubs.pl.card.k(+lc: I.Loc, m: Maybe<&2, BU.BRow>, +p: PL.Plane, +k: String) -> J.Json:
   match m:
     case Some{r}:
-      Hubs.pl.q(MPL.MPlane.card(r, p), k)
+      Hubs.pl.q(MPL.MPlane.card(lc, r, p), k)
     case None{}:
       J.Null{}
 
-def Hubs.pl.fill.p(+p: PL.Plane, +fs: J.Json, +u: U.Ui, +k: String) -> J.Json:
-  J.Obj{Hubs.pl.put(Hubs.pl.put(fs, "plane", MPL.MPlane.with.home(MPL.MPlane.json(p, S.Mob.now(u), U.Ui.state(u)), Hubs.pl.q(MPL.MPlane.home(u), k))), "uber", Hubs.pl.card.k(BU.BU.uber(u), p, k))}
+def Hubs.pl.fill.p(+lc: I.Loc, +p: PL.Plane, +fs: J.Json, +u: U.Ui, +k: String) -> J.Json:
+  J.Obj{Hubs.pl.put(Hubs.pl.put(fs, "plane", MPL.MPlane.with.home(MPL.MPlane.json.loc(lc, p, S.Mob.now(u), U.Ui.state(u)), Hubs.pl.q(MPL.MPlane.home(lc, u), k))), "uber", Hubs.pl.card.k(lc, BU.BU.uber(u), p, k))}
 
 # the card alone (no counts: they come from the plane)
-def Hubs.pl.card.n(m: Maybe<&2, BU.BRow>, +k: String) -> J.Json:
+def Hubs.pl.card.n(+lc: I.Loc, m: Maybe<&2, BU.BRow>, +k: String) -> J.Json:
   match m:
     case Some{r}:
-      Hubs.pl.q(MPL.MPlane.bare(r), k)
+      Hubs.pl.q(MPL.MPlane.bare(lc, r), k)
     case None{}:
       J.Null{}
 
-def Hubs.pl.fill.n(+fs: J.Json, +u: U.Ui, +k: String) -> J.Json:
-  J.Obj{Hubs.pl.put(fs, "uber", Hubs.pl.card.n(BU.BU.uber(u), k))}
+def Hubs.pl.fill.n(+lc: I.Loc, +fs: J.Json, +u: U.Ui, +k: String) -> J.Json:
+  J.Obj{Hubs.pl.put(fs, "uber", Hubs.pl.card.n(lc, BU.BU.uber(u), k))}
 
 # The list of a phone with one hub draws the plane without its idle threads,
 # made from the index and rows the screen has made (core's Plane.of.l); the
 # Status tab and several hubs get the whole plane.
-def Hubs.pl.fill.l(lite: Bool, +fs: J.Json, +u: U.Ui, +k: String, +idle: Bool, +ix: U.SIx, +rows: List<&2, U.SRow>) -> J.Json:
+def Hubs.pl.fill.l(+lc: I.Loc, lite: Bool, +fs: J.Json, +u: U.Ui, +k: String, +idle: Bool, +ix: U.SIx, +rows: List<&2, U.SRow>) -> J.Json:
   match lite:
     case True{}:
-      Hubs.pl.fill.p(PL.Plane.of.l(u, ix, rows, S.Mob.now(u)), fs, u, k)
+      Hubs.pl.fill.p(lc, PL.Plane.of.l(u, ix, rows, S.Mob.now(u)), fs, u, k)
     case False{}:
-      Hubs.pl.fill.p(PL.Plane.of.f(u, ix, S.Mob.now(u), idle), fs, u, k)
+      Hubs.pl.fill.p(lc, PL.Plane.of.f(u, ix, S.Mob.now(u), idle), fs, u, k)
 
-def Hubs.pl.fill.w(want: Bool, +fs: J.Json, +u: U.Ui, +k: String, +idle: Bool, +lite: Bool, +ix: U.SIx, +rows: List<&2, U.SRow>) -> J.Json:
+def Hubs.pl.fill.w(+lc: I.Loc, want: Bool, +fs: J.Json, +u: U.Ui, +k: String, +idle: Bool, +lite: Bool, +ix: U.SIx, +rows: List<&2, U.SRow>) -> J.Json:
   match want:
     case True{}:
-      Hubs.pl.fill.l(lite, fs, u, k, idle, ix, rows)
+      Hubs.pl.fill.l(lc, lite, fs, u, k, idle, ix, rows)
     case False{}:
-      Hubs.pl.fill.n(fs, u, k)
+      Hubs.pl.fill.n(lc, fs, u, k)
 
-def Hubs.pl.fill.k(any: Bool, +want: Bool, +j: J.Json, +u: U.Ui, +k: String, +idle: Bool, +lite: Bool, +ix: U.SIx, +rows: List<&2, U.SRow>) -> J.Json:
+def Hubs.pl.fill.k(+lc: I.Loc, any: Bool, +want: Bool, +j: J.Json, +u: U.Ui, +k: String, +idle: Bool, +lite: Bool, +ix: U.SIx, +rows: List<&2, U.SRow>) -> J.Json:
   match any j:
     case True{} J.Obj{+fs}:
-      Hubs.pl.fill.w(want, fs, u, k, idle, lite, ix, rows)
+      Hubs.pl.fill.w(lc, want, fs, u, k, idle, lite, ix, rows)
     case _ x:
       x
 
-def Hubs.pl.fill(+any: Bool, +want: Bool, +j: J.Json, +u: U.Ui, +k: String, +idle: Bool, +lite: Bool, +ix: U.SIx, +rows: List<&2, U.SRow>) -> J.Json:
-  Hubs.pl.fill.k(any, want, j, u, k, idle, lite, ix, rows)
+def Hubs.pl.fill(+lc: I.Loc, +any: Bool, +want: Bool, +j: J.Json, +u: U.Ui, +k: String, +idle: Bool, +lite: Bool, +ix: U.SIx, +rows: List<&2, U.SRow>) -> J.Json:
+  Hubs.pl.fill.k(lc, any, want, j, u, k, idle, lite, ix, rows)
 
 # whether the plane is on screen: the focused hub shows its list (nothing
 # selected) or the uberbot's Status tab. Every other screen (a thread, a room,
@@ -1049,27 +1086,27 @@ type Shown is Data:
 # reads those from the hub in focus only)
 # (the index of the state and the sidebar's rows are made once and shared by
 # the screen and the plane)
-def Hubs.shown.r(+k: String, +u: U.Ui, +cur: String, +any: Bool, +want: Bool, +idle: Bool, +lite: Bool, +ix: U.SIx, +rows: List<&2, U.SRow>) -> J.Json:
-  Hubs.tabs.put(Hubs.pl.fill(any, want, Q.all(S.Mob.screen.ixr(String.eq(k, cur), u, ix, rows), k), u, k, idle, lite, ix, rows), MT.MTab.json(u, ix, rows))
+def Hubs.shown.r(+lc: I.Loc, +k: String, +u: U.Ui, +cur: String, +any: Bool, +want: Bool, +idle: Bool, +lite: Bool, +ix: U.SIx, +rows: List<&2, U.SRow>) -> J.Json:
+  Hubs.tabs.put(Hubs.pl.fill(lc, any, want, Q.all(S.Mob.screen.ixr(lc, String.eq(k, cur), u, ix, rows), k), u, k, idle, lite, ix, rows), MT.MTab.json(lc, u, ix, rows))
 
-def Hubs.shown.ix(+k: String, +u: U.Ui, +cur: String, +any: Bool, +want: Bool, +idle: Bool, +lite: Bool, +ix: U.SIx) -> J.Json:
-  Hubs.shown.r(k, u, cur, any, want, idle, lite, ix, U.Side.rows.ix(U.Ui.state(u), ix, S.Mob.now(u)))
+def Hubs.shown.ix(+lc: I.Loc, +k: String, +u: U.Ui, +cur: String, +any: Bool, +want: Bool, +idle: Bool, +lite: Bool, +ix: U.SIx) -> J.Json:
+  Hubs.shown.r(lc, k, u, cur, any, want, idle, lite, ix, U.Side.rows.ix(U.Ui.state(u), ix, S.Mob.now(u)))
 
-def Hubs.shown.go(hs: List<&2, Hub>, +cur: String, +any: Bool, +want: Bool, +idle: Bool, +lite: Bool) -> List<&2, Shown>:
+def Hubs.shown.go(+lc: I.Loc, hs: List<&2, Hub>, +cur: String, +any: Bool, +want: Bool, +idle: Bool, +lite: Bool) -> List<&2, Shown>:
   match hs:
     case Nil{}:
       Nil{}
     case Hub{+k, +u} <> t:
-      Shown{k, Hubs.name(k, u), Hubs.shown.ix(k, u, cur, any, want, idle, lite, U.Side.ix(U.Ui.state(u)))} <> Hubs.shown.go(t, cur, any, want, idle, lite)
+      Shown{k, Hubs.name(k, u), Hubs.shown.ix(lc, k, u, cur, any, want, idle, lite, U.Side.ix(U.Ui.state(u)))} <> Hubs.shown.go(lc, t, cur, any, want, idle, lite)
 
-def Hubs.shown.l(+hs: List<&2, Hub>, +cur: String, +want: Bool, +idle: Bool) -> List<&2, Shown>:
-  Hubs.shown.go(hs, cur, Hubs.pl.any(hs), want, idle, Bool.and(Bool.not(idle), Nat.is_eq(List.length(&2, Hub, hs), 1n)))
+def Hubs.shown.l(+lc: I.Loc, +hs: List<&2, Hub>, +cur: String, +want: Bool, +idle: Bool) -> List<&2, Shown>:
+  Hubs.shown.go(lc, hs, cur, Hubs.pl.any(hs), want, idle, Bool.and(Bool.not(idle), Nat.is_eq(List.length(&2, Hub, hs), 1n)))
 
-def Hubs.shown.w(+hs: List<&2, Hub>, +cur: String, +want: Bool) -> List<&2, Shown>:
-  Hubs.shown.l(hs, cur, want, Hubs.pl.status(hs, cur))
+def Hubs.shown.w(+lc: I.Loc, +hs: List<&2, Hub>, +cur: String, +want: Bool) -> List<&2, Shown>:
+  Hubs.shown.l(lc, hs, cur, want, Hubs.pl.status(hs, cur))
 
-def Hubs.shown(+hs: List<&2, Hub>, +cur: String) -> List<&2, Shown>:
-  Hubs.shown.w(hs, cur, Hubs.pl.want(hs, cur))
+def Hubs.shown(+lc: I.Loc, +hs: List<&2, Hub>, +cur: String) -> List<&2, Shown>:
+  Hubs.shown.w(lc, hs, cur, Hubs.pl.want(hs, cur))
 
 def Hubs.named(ss: List<&2, Shown>, +n: String) -> Nat:
   match ss:
@@ -1843,8 +1880,8 @@ def Hubs.pl.working(rs: List<&2, J.Json>) -> Nat:
     case +r <> t:
       Hubs.pl.working.k(Bool.or(String.eq(J.Json.get_str(r, "state", ""), "work"), String.eq(J.Json.get_str(r, "state", ""), "talk")), Hubs.pl.working(t))
 
-def Hubs.pl.json(+need: List<&2, J.Json>, +run: List<&2, J.Json>, +idle: List<&2, J.Json>, +idle_n: Nat, +ss: List<&2, Shown>, +hs: List<&2, Hub>, +many: Bool, +uber: J.Json) -> MPL.MUber:
-  MPL.MUber{MPL.MPlane.card.k(uber, PL.Plane.counts.join(PL.Plane.counts.part(List.length(&2, J.Json, need), "need you"), PL.Plane.counts.part(List.length(&2, J.Json, run), "running"))),
+def Hubs.pl.json(+lc: I.Loc, +need: List<&2, J.Json>, +run: List<&2, J.Json>, +idle: List<&2, J.Json>, +idle_n: Nat, +ss: List<&2, Shown>, +hs: List<&2, Hub>, +many: Bool, +uber: J.Json) -> MPL.MUber:
+  MPL.MUber{MPL.MPlane.card.k(uber, PL.Plane.counts.join(PL.Plane.counts.need(lc, List.length(&2, J.Json, need)), PL.Plane.counts.run(lc, List.length(&2, J.Json, run)))),
     J.Json.obj([J.KV{"need", J.Json.arr(need)}, J.KV{"run", J.Json.arr(run)}, J.KV{"idle", J.Json.arr(List.take(&2, J.Json, idle, PL.Plane.idle.max()))},
       J.KV{"idleN", J.Json.nat(idle_n)},
       J.KV{"working", J.Json.nat(Hubs.pl.working(Hubs.pl.once(Hubs.pl.all(ss, hs, "bots", many))))},
@@ -1856,13 +1893,13 @@ def Hubs.pl.json(+need: List<&2, J.Json>, +run: List<&2, J.Json>, +idle: List<&2
       J.KV{"home", J.Json.get_obj(J.Json.get_obj(Hubs.of(ss, Hubs.key_of(J.Json.get_str(uber, "id", ""))), "plane"), "home")}])}
 
 # (the idle count lost to dropped mirrors comes off the hubs' own counts)
-def Hubs.pl.idle.k(+idle: List<&2, J.Json>, +ss: List<&2, Shown>, +hs: List<&2, Hub>, +many: Bool, +uber: J.Json) -> MPL.MUber:
-  Hubs.pl.json(Hubs.pl.once(List.sort(~J.Json, ~Hubs.pl.need.before, Hubs.pl.all(ss, hs, "need", many))),
+def Hubs.pl.idle.k(+lc: I.Loc, +idle: List<&2, J.Json>, +ss: List<&2, Shown>, +hs: List<&2, Hub>, +many: Bool, +uber: J.Json) -> MPL.MUber:
+  Hubs.pl.json(lc, Hubs.pl.once(List.sort(~J.Json, ~Hubs.pl.need.before, Hubs.pl.all(ss, hs, "need", many))),
     Hubs.pl.once(List.sort(~J.Json, ~Hubs.pl.newer, Hubs.pl.all(ss, hs, "run", many))), idle,
     Nat.sub(Hubs.pl.idle.n(ss, "idleN", 0n), Nat.sub(Hubs.pl.len(ss, "idle", 0n), List.length(&2, J.Json, idle))), ss, hs, many, uber)
 
-def Hubs.pl.build(+ss: List<&2, Shown>, +hs: List<&2, Hub>, +many: Bool, +uber: J.Json) -> MPL.MUber:
-  Hubs.pl.idle.k(Hubs.pl.once(List.sort(~J.Json, ~Hubs.pl.newer, Hubs.pl.all(ss, hs, "idle", many))), ss, hs, many, uber)
+def Hubs.pl.build(+lc: I.Loc, +ss: List<&2, Shown>, +hs: List<&2, Hub>, +many: Bool, +uber: J.Json) -> MPL.MUber:
+  Hubs.pl.idle.k(lc, Hubs.pl.once(List.sort(~J.Json, ~Hubs.pl.newer, Hubs.pl.all(ss, hs, "idle", many))), ss, hs, many, uber)
 
 # One paired hub: its plane is the plane (core keeps each row once and in
 # order, and no other hub is there to mirror a row), and only its ids need
@@ -1890,30 +1927,30 @@ def Hubs.pl.one(+ss: List<&2, Shown>, +uber: J.Json) -> MPL.MUber:
     case Nil{}:
       MPL.MUber{J.Null{}, J.Null{}}
 
-def Hubs.pl.of.m(many: Bool, +ss: List<&2, Shown>, +hs: List<&2, Hub>, +uber: J.Json) -> MPL.MUber:
+def Hubs.pl.of.m(+lc: I.Loc, many: Bool, +ss: List<&2, Shown>, +hs: List<&2, Hub>, +uber: J.Json) -> MPL.MUber:
   match many:
     case True{}:
-      Hubs.pl.build(ss, hs, True{}, uber)
+      Hubs.pl.build(lc, ss, hs, True{}, uber)
     case False{}:
       Hubs.pl.one(ss, uber)
 
-def Hubs.pl.of.w(want: Bool, +ss: List<&2, Shown>, +hs: List<&2, Hub>, +uber: J.Json) -> MPL.MUber:
+def Hubs.pl.of.w(+lc: I.Loc, want: Bool, +ss: List<&2, Shown>, +hs: List<&2, Hub>, +uber: J.Json) -> MPL.MUber:
   match want:
     case True{}:
-      Hubs.pl.of.m(Nat.is_gt(List.length(&2, Shown, ss), 1n), ss, hs, uber)
+      Hubs.pl.of.m(lc, Nat.is_gt(List.length(&2, Shown, ss), 1n), ss, hs, uber)
     case False{}:
       MPL.MUber{uber, J.Null{}}
 
-def Hubs.pl.of.k(up: Bool, +want: Bool, +ss: List<&2, Shown>, +hs: List<&2, Hub>, +many: Bool, +uber: J.Json) -> MPL.MUber:
+def Hubs.pl.of.k(+lc: I.Loc, up: Bool, +want: Bool, +ss: List<&2, Shown>, +hs: List<&2, Hub>, +many: Bool, +uber: J.Json) -> MPL.MUber:
   match up:
     case True{}:
-      Hubs.pl.of.w(want, ss, hs, uber)
+      Hubs.pl.of.w(lc, want, ss, hs, uber)
     case False{}:
       MPL.MUber{J.Null{}, J.Null{}}
 
 # the card and the plane, both null while no hub has an uberbot
-def Hubs.pl.of(+ss: List<&2, Shown>, +hs: List<&2, Hub>, +cur: String, +many: Bool, +want: Bool) -> MPL.MUber:
-  Hubs.pl.of.k(Hubs.nonnull(Hubs.pl.uber(ss, cur)), want, ss, hs, many, Hubs.pl.uber(ss, cur))
+def Hubs.pl.of(+lc: I.Loc, +ss: List<&2, Shown>, +hs: List<&2, Hub>, +cur: String, +many: Bool, +want: Bool) -> MPL.MUber:
+  Hubs.pl.of.k(lc, Hubs.nonnull(Hubs.pl.uber(ss, cur)), want, ss, hs, many, Hubs.pl.uber(ss, cur))
 
 def Hubs.peer(skip: Bool, +p: J.Json, rest: List<&2, J.Json>) -> List<&2, J.Json>:
   match skip:
@@ -1997,6 +2034,7 @@ def Hubs.screen.p(+pl: MPL.MUber, +ss: List<&2, Shown>, +cur: String, +list: Lis
     J.KV{"error", J.Json.str(Hubs.said(ss, "error"))}, J.KV{"note", J.Json.str(Hubs.said(ss, "note"))},
     J.KV{"sel", J.Json.str(J.Json.get_str(Hubs.of(ss, cur), "sel", ""))},
     J.KV{"making", J.Json.bool(J.Json.get_bool(Hubs.of(ss, cur), "making", False{}))},
+    J.KV{"lang", J.Json.get_obj(Hubs.of(ss, cur), "lang")},
     J.KV{"theme", J.Json.str(J.Json.get_str(Hubs.of(ss, cur), "theme", ""))},
     J.KV{"empty", J.Json.str(Hubs.empty(List.length(&2, J.Json, Hubs.projects(ss, False{})), List.length(&2, Shown, ss), J.Json.get_bool(Hubs.first_obj(ss, "search"), "open", False{})))},
     J.KV{"projects", J.Json.arr(Hubs.origin.projects(Hubs.projects(ss, Nat.is_gt(List.length(&2, Shown, ss), 1n)), ss, cur))},
@@ -2027,14 +2065,17 @@ def Hubs.screen.p(+pl: MPL.MUber, +ss: List<&2, Shown>, +cur: String, +list: Lis
     J.KV{"found", J.Json.arr(Hubs.found(list))},
     J.KV{"tabs", Hubs.tabs(ss, list, Nat.is_gt(List.length(&2, Shown, ss), 1n))}]))
 
-def Hubs.screen.k(+ss: List<&2, Shown>, +cur: String, +list: List<&2, Hub>, +want: Bool) -> J.Json:
-  Hubs.screen.p(Hubs.pl.of(ss, list, cur, Nat.is_gt(List.length(&2, Shown, ss), 1n), want), ss, cur, list)
+def Hubs.screen.k(+lc: I.Loc, +ss: List<&2, Shown>, +cur: String, +list: List<&2, Hub>, +want: Bool) -> J.Json:
+  Hubs.screen.p(Hubs.pl.of(lc, ss, list, cur, Nat.is_gt(List.length(&2, Shown, ss), 1n), want), ss, cur, list)
 
 # the whole screen: every hub's in one
-def Hubs.screen(hs: Hubs) -> J.Json:
+def Hubs.screen.l(+lc: I.Loc, hs: Hubs) -> J.Json:
   match hs:
     case Hubs{_, _, +cur, +list}:
-      Hubs.screen.k(Hubs.relabel(Hubs.catalog.shown(Hubs.shown.w(list, cur, Hubs.pl.want(list, cur)), list)), cur, list, Hubs.pl.want(list, cur))
+      Hubs.screen.k(lc, Hubs.relabel(Hubs.catalog.shown(Hubs.shown.w(lc, list, cur, Hubs.pl.want(list, cur)), list)), cur, list, Hubs.pl.want(list, cur))
+
+def Hubs.screen(+hs: Hubs) -> J.Json:
+  Hubs.screen.l(Hubs.loc(hs), hs)
 
 # The screen in two halves, for the bridge (bridge.js keeps the first and
 # builds it again only when what it is made of changed)
@@ -2085,10 +2126,13 @@ def Hubs.catalog.if(many: Bool, ss: List<&2, Shown>, +hs: List<&2, Hub>) -> List
     case False{}:
       ss
 
-def Hubs.screen.fast(hs: Hubs) -> J.Json:
+def Hubs.screen.fast.l(+lc: I.Loc, hs: Hubs) -> J.Json:
   match hs:
     case Hubs{_, _, +cur, +list}:
-      Hubs.screen.k(Hubs.relabel(Hubs.catalog.if(Nat.is_gt(List.length(&2, Hub, list), 1n), Hubs.shown.w(list, cur, Hubs.pl.want(list, cur)), list)), cur, list, Hubs.pl.want(list, cur))
+      Hubs.screen.k(lc, Hubs.relabel(Hubs.catalog.if(Nat.is_gt(List.length(&2, Hub, list), 1n), Hubs.shown.w(lc, list, cur, Hubs.pl.want(list, cur)), list)), cur, list, Hubs.pl.want(list, cur))
+
+def Hubs.screen.fast(+hs: Hubs) -> J.Json:
+  Hubs.screen.fast.l(Hubs.loc(hs), hs)
 
 def Hubs.opened.on(u: U.Ui) -> Bool:
   match u:
@@ -2098,26 +2142,29 @@ def Hubs.opened.on(u: U.Ui) -> Bool:
 # what Hubs.screen's "thread" reads of a hub's screen (Hubs.origin.focus):
 # whether it is online, and for the hub in focus its open thread, its ids
 # made the hub's (Q.all)
-def Hubs.opened.j(focus: Bool, +k: String, +u: U.Ui) -> J.Json:
+def Hubs.opened.j(+lc: I.Loc, focus: Bool, +k: String, +u: U.Ui) -> J.Json:
   match focus:
     case True{}:
-      J.Json.obj([J.KV{"online", J.Json.bool(Hubs.opened.on(u))}, J.KV{"thread", Q.all(S.Mob.focus.thread.r(True{}, u, U.Ui.sel(u), False{}), k)}])
+      J.Json.obj([J.KV{"online", J.Json.bool(Hubs.opened.on(u))}, J.KV{"thread", Q.all(S.Mob.focus.thread.r(lc, True{}, u, U.Ui.sel(u), False{}), k)}])
     case False{}:
       J.Json.obj([J.KV{"online", J.Json.bool(Hubs.opened.on(u))}])
 
-def Hubs.opened.shown(hs: List<&2, Hub>, +cur: String) -> List<&2, Shown>:
+def Hubs.opened.shown(+lc: I.Loc, hs: List<&2, Hub>, +cur: String) -> List<&2, Shown>:
   match hs:
     case Nil{}:
       Nil{}
     case Hub{+k, +u} <> t:
-      Shown{k, Hubs.name(k, u), Hubs.opened.j(String.eq(k, cur), k, u)} <> Hubs.opened.shown(t, cur)
+      Shown{k, Hubs.name(k, u), Hubs.opened.j(lc, String.eq(k, cur), k, u)} <> Hubs.opened.shown(lc, t, cur)
 
 # the screen's "thread", but its streamed reply ("live": [], which
 # bridge.js fills from Hubs.live.text with S.Mob.live.nodes)
-def Hubs.opened(hs: Hubs) -> J.Json:
+def Hubs.opened.l(+lc: I.Loc, hs: Hubs) -> J.Json:
   match hs:
     case Hubs{_, _, +cur, +list}:
-      Hubs.origin.focus(Hubs.relabel(Hubs.opened.shown(list, cur)), cur, "thread")
+      Hubs.origin.focus(Hubs.relabel(Hubs.opened.shown(lc, list, cur)), cur, "thread")
+
+def Hubs.opened(+hs: Hubs) -> J.Json:
+  Hubs.opened.l(Hubs.loc(hs), hs)
 
 # the streamed reply of the thread open on the hub in focus
 def Hubs.live.text(+hs: Hubs) -> String:

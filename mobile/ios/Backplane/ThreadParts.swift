@@ -330,7 +330,7 @@ struct SubsView: View {
                                     if let c = r.cancel, !c.isEmpty {
                                         Button(c == "wake-cancel" ? "Cancel" : "Stop") { model.act(c, r.id) }.font(.caption2).foregroundStyle(PhaseColor.warn).buttonStyle(.plain)
                                     }
-                                    Text(r.state).font(.caption2).foregroundStyle(subColor(r.state))
+                                    Text(r.stateLabel ?? r.state).font(.caption2).foregroundStyle(subColor(r.state))
                                 }
                                 if !r.doing.isEmpty {
                                     Text(r.doing).font(.caption2).foregroundStyle(PhaseColor.accent).lineLimit(1).padding(.leading, 16)

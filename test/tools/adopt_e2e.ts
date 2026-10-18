@@ -84,7 +84,7 @@ async function scenario(kind: "on" | "off" | "crash") {
   writeFileSync(join(stage, "LICENSE"), "new");
   const N = 260, MS = 100; // a 26 s turn
   const hubEnv = () => ({
-      ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_PEERS: "", BACKPLANE_GOOGLE_BAKE: "0", FAKE_LOG: log,
+      ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "", BACKPLANE_GOOGLE_BAKE: "0", FAKE_LOG: log,
       BP_EOF_FINISH: "1", BP_STREAM_N: String(N), BP_STREAM_MS: String(MS), BP_DEPLOY_ARGS: JSON.stringify({ stage, note: "adopt e2e" }),
       BACKPLANE_WAKE_TICK_MS: "2000", BACKPLANE_DEPLOY_LOCKS: join(root, "none.lock"), BACKPLANE_LOCK_DIR: join(root, "locks"), BACKPLANE_ADOPT: adopt ? "" : "0",
       PATH: `${fake}:${process.env.PATH}`, TMPDIR: root });

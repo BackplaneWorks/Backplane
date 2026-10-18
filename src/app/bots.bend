@@ -1,4 +1,6 @@
 import Base
+import ../core/i18n.bend as I
+import ../core/msgs.bend as MSG
 import ../core/model.bend as M
 import ../core/client.bend as U
 import ../core/bot.bend as BT
@@ -276,7 +278,8 @@ def Bv.cat(+look: Nat, +mood: String, +c: D.Clip, +x: U32, +y: U32, +px: U32) ->
 # its mood; choosing it does what BU.act says
 def Bv.row(+ty: L.Ty, +cats: Map<&2, CA.CatF>, +ms: Nat, +r: BU.BRow, +c: D.Clip, +y: U32) -> L.Out:
   match r:
-    case BU.BRow{+id, _, _, +look, +mood, +note, +sel, _, _, _}:
+    case BU.BRow{+id, _, _, +look, +mood, _, +sel, _, _, _}:
+      +note = {BU.Mood.note.loc(L.Ty.loc(ty), mood) : String}
       +nw = L.Ty.width(ty, 2n, note)
       L.Out{List.concat(&2, R.Op, [
           Bool.pick(List<&2, R.Op>, sel, [D.Draw.rect(c, 6, (y + 1 : U32), 252, 34, T.Th.raise(), 255), D.Draw.rect(c, 6, (y + 1 : U32), 2, 34, T.Th.accent(), 255)], Nil{}),
@@ -308,10 +311,10 @@ def Bv.bform(open: Bool, +ty: L.Ty, +f: F.FS, +c: D.Clip, +y: U32) -> L.Col:
   match open:
     case True{}:
       L.Col{L.Out.all([
-          F.Fm.field(ty, f, c, 12, y, 240, "name", "bot-create", "", U.Bots.name.hint(F.FS.ui(f))),
-          F.Fm.area(ty, f, c, 12, (y + 34 : U32), 240, 3n, "persona", "bot-create", "", "Who it is, what it does"),
+          F.Fm.field(ty, f, c, 12, y, 240, "name", "bot-create", "", U.Bots.name.hint.loc(L.Ty.loc(ty), F.FS.ui(f))),
+          F.Fm.area(ty, f, c, 12, (y + 34 : U32), 240, 3n, "persona", "bot-create", "", MSG.T.bots.persona.placeholder(L.Ty.loc(ty))),
           Bv.provs(["claude", "codex", "grok", "muse", "antigravity", "omp"], ty, Bv.prov(F.FS.ui(f)), c, 12, (y + 112 : U32)),
-          F.Fm.button(ty, c, 12, (y + 146 : U32), "Create", T.Th.accent(), "bot-create", "")]),
+          F.Fm.button(ty, c, 12, (y + 146 : U32), MSG.T.common.create(L.Ty.loc(ty)), T.Th.accent(), "bot-create", "")]),
         (y + 182 : U32)}
     case False{}:
       L.Col{L.Out.none(), y}
@@ -331,9 +334,9 @@ def Bv.picks(ps: List<&2, BU.Pick>, +ty: L.Ty, +c: D.Clip, +x: U32, +y: U32) -> 
 def Bv.rform(open: Bool, +ty: L.Ty, +f: F.FS, +c: D.Clip, +y: U32) -> L.Col:
   match open:
     case True{}:
-      L.Lay.col.cat(F.Fm.field(ty, f, c, 12, y, 240, "rname", "room-save", "", "Room name"),
+      L.Lay.col.cat(F.Fm.field(ty, f, c, 12, y, 240, "rname", "room-save", "", MSG.T.bots.room.name(L.Ty.loc(ty))),
         L.Lay.col.then(Bv.picks(BU.BU.picks(F.FS.ui(f)), ty, c, 12, (y + 34 : U32)), +y2 =>
-          L.Col{F.Fm.button(ty, c, 12, y2, "Save", T.Th.accent(), "room-save", ""), (y2 + 36 : U32)}))
+          L.Col{F.Fm.button(ty, c, 12, y2, MSG.T.common.save(L.Ty.loc(ty)), T.Th.accent(), "room-save", ""), (y2 + 36 : U32)}))
     case False{}:
       L.Col{L.Out.none(), y}
 
@@ -383,10 +386,10 @@ def Bv.sd(+ty: L.Ty, +cats: Map<&2, CA.CatF>, +n: S.Nui) -> Sd:
   Sd{ty, cats, F.Fm.fs(n), S.Nui.ms_of(n), BU.BU.open(S.Nui.ui(n), "@bnew"), BU.BU.open(S.Nui.ui(n), "@rnew"), BU.BU.rows(S.Nui.ui(n)), BU.BU.rooms(S.Nui.ui(n)), BU.BU.uber(S.Nui.ui(n)), ""}
 
 def Bv.side.k(+ty: L.Ty, +cats: Map<&2, CA.CatF>, +f: F.FS, +ms: Nat, +bn: Bool, +rn: Bool, rows: List<&2, BU.BRow>, rooms: List<&2, BU.RRow>, +c: D.Clip, +y: U32) -> L.Col:
-  L.Lay.col.cat(L.Out.cat(L.Out.ops([D.Draw.rect(c, 12, (y + 4 : U32), 240, 1, T.Th.line(), 255)]), Bv.head(ty, c, "Bots", "bot-new", bn, (y + 10 : U32))),
+  L.Lay.col.cat(L.Out.cat(L.Out.ops([D.Draw.rect(c, 12, (y + 4 : U32), 240, 1, T.Th.line(), 255)]), Bv.head(ty, c, MSG.T.tour.title.bots(L.Ty.loc(ty)), "bot-new", bn, (y + 10 : U32))),
     L.Lay.col.then(Bv.bform(bn, ty, f, c, (y + 40 : U32)), y1 =>
       L.Lay.col.then(Bv.rows(rows, ty, cats, ms, c, y1), +y2 =>
-        L.Lay.col.cat(Bv.head(ty, c, "Rooms", "room-new", rn, (y2 + 8 : U32)),
+        L.Lay.col.cat(Bv.head(ty, c, MSG.T.bots.rooms(L.Ty.loc(ty)), "room-new", rn, (y2 + 8 : U32)),
           L.Lay.col.then(Bv.rform(rn, ty, f, c, (y2 + 38 : U32)), y3 =>
             Bv.rrows(rooms, ty, c, y3))))))
 
@@ -411,7 +414,7 @@ def Bv.uber.row(+ty: L.Ty, +cats: Map<&2, CA.CatF>, +ms: Nat, r: BU.BRow, +cn: S
           Bool.pick(List<&2, R.Op>, sel, [D.Draw.rect(c, 6, 54, 252, 42, T.Th.raise(), 255), D.Draw.rect(c, 6, 54, 2, 42, T.Th.accent(), 255)], Nil{}),
           Spot.anchor(c, 14, 60, 28) <> Nil{},
           L.Ty.text(ty, 0n, L.Ty.fit(ty, 0n, BU.BU.row.title(r), 192), c, 50, 54, 24, Bool.pick(U32, sel, T.Th.text(), T.Th.soft())),
-          L.Ty.text(ty, 2n, L.Ty.fit(ty, 2n, Bool.pick(String, String.is_empty(cn), "Nothing needs you", cn), 192), c, 50, 74, 20, Bool.pick(U32, String.is_empty(cn), T.Th.faint(), T.Th.dim()))]),
+          L.Ty.text(ty, 2n, L.Ty.fit(ty, 2n, Bool.pick(String, String.is_empty(cn), MSG.T.bots.nothing(L.Ty.loc(ty)), cn), 192), c, 50, 74, 20, Bool.pick(U32, String.is_empty(cn), T.Th.faint(), T.Th.dim()))]),
         [L.Lay.hit(0, 52, 264, 44, "uber", ""), Spot.hit(look, mood, c, 14, 60, 28)]}
 
 def Bv.uber.out(sd: Sd) -> L.Out:
@@ -579,8 +582,9 @@ def Bv.when(on: Bool, o: L.Out) -> L.Out:
 def Bv.mem(+ty: L.Ty, m: BT.Mem, +own: Bool, +c: D.Clip, +x: U32, +w: U32, +y: U32) -> L.Col:
   match m:
     case BT.Mem{_, +key, +kind, +text, +tags, _, _}:
+      +label0 = MSG.T.bots.memory.forget(L.Ty.loc(ty))
       +kw = L.Ty.width(ty, 2n, kind)
-      +fw = {Bool.pick(U32, own, L.Lay.button.w(ty, "Forget"), 0) : U32}
+      +fw = {Bool.pick(U32, own, L.Lay.button.w(ty, label0), 0) : U32}
       +ls = L.Ty.wrap(ty, 3n, text, (w - 24 : U32))
       +th = {Bool.pick(U32, String.is_empty(tags), 0, 20) : U32}
       +h = {(48 + Bv.nl(ls) * 22 + th : U32) : U32}
@@ -588,7 +592,7 @@ def Bv.mem(+ty: L.Ty, m: BT.Mem, +own: Bool, +c: D.Clip, +x: U32, +w: U32, +y: U
           L.Out.ops(L.Lay.box(c, x, y, w, h, 0, T.Th.panel(), T.Th.line())),
           L.Out.ops(L.Ty.text(ty, 0n, L.Ty.fit(ty, 0n, key, L.U32.dim(w, (kw + fw + 48 : U32))), c, (x + 12 : U32), (y + 6 : U32), 28, T.Th.text())),
           L.Out.ops(L.Ty.text(ty, 2n, kind, c, (x + w - fw - 20 - kw : U32), (y + 6 : U32), 28, T.Th.accent())),
-          Bv.when(own, F.Fm.button(ty, c, (x + w - fw - 8 : U32), (y + 6 : U32), "Forget", T.Th.soft(), "mem-forget", key)),
+          Bv.when(own, F.Fm.button(ty, c, (x + w - fw - 8 : U32), (y + 6 : U32), label0, T.Th.soft(), "mem-forget", key)),
           L.Out.ops(Bv.lines(ls, ty, c, (x + 12 : U32), (y + 38 : U32), T.Th.soft())),
           Bv.faint(ty, c, tags, (x + 12 : U32), (w - 24 : U32), (y + 40 + Bv.nl(ls) * 22 : U32))]),
         (y + h + 8 : U32)}
@@ -602,20 +606,23 @@ def Bv.mems(ms: List<&2, BT.Mem>, +ty: L.Ty, +own: Bool, +c: D.Clip, +x: U32, +w
 
 def Bv.memory(+ty: L.Ty, +u: U.Ui, +bot: String, +c: D.Clip, +x: U32, +w: U32, +y: U32) -> L.Col:
   +ms = BU.BU.mems(u, bot)
-  L.Lay.col.cat(L.Out.cat(Bv.h2(ty, c, "Memory", x, y),
-      Bv.faint(ty, c, Bool.pick(String, List.is_empty(&2, BT.Mem, ms), "Nothing remembered yet. It keeps what it learns about you, your preferences, facts and how-tos here.",
-        Nat.show(List.length(&2, BT.Mem, ms)) ++ " items. The ones about you and your preferences go into every turn."), x, w, (y + 30 : U32))),
+  L.Lay.col.cat(L.Out.cat(Bv.h2(ty, c, MSG.T.bots.tab.memory(L.Ty.loc(ty)), x, y),
+      Bv.faint(ty, c, Bool.pick(String, List.is_empty(&2, BT.Mem, ms), MSG.T.bots.memory.empty(L.Ty.loc(ty)),
+        MSG.T.bots.memory.count(L.Ty.loc(ty), Nat.show(List.length(&2, BT.Mem, ms)))), x, w, (y + 30 : U32))),
     Bv.mems(ms, ty, BU.BU.owns(bot), c, x, w, (y + 60 : U32)))
 
 # Routines
 # --------
 
-def Bv.onoff(+on: Bool) -> String:
-  Bool.pick(String, on, "On", "Off")
+def Bv.onoff.loc(+l: I.Loc, +on: Bool) -> String:
+  Bool.pick(String, on, MSG.T.settings.lang.on(l), MSG.T.settings.lang.off(l))
 
 # a routine's card: its name and buttons, a kind chip (a bell for a
 # reminder) with when it runs, when it is next (in the person's zone) or when
 # it was done, and the prompt
+
+def Bv.onoff(+on: Bool) -> String:
+  Bv.onoff.loc(I.En{}, on)
 def Bv.kind.chip(+ty: L.Ty, +c: D.Clip, +x: U32, +y: U32, +kind: String, +label: String, +dim: Bool) -> L.Out:
   +bell = {String.eq(kind, "reminder") : Bool}
   +cw = {(L.Lay.button.w(ty, label) + Bool.pick(U32, bell, 18, 0) : U32) : U32}
@@ -627,12 +634,15 @@ def Bv.chip.w(+ty: L.Ty, +kind: String, +label: String) -> U32:
   (L.Lay.button.w(ty, label) + Bool.pick(U32, String.eq(kind, "reminder"), 18, 0) : U32)
 
 # the next line: "Next Wed 14 Oct 09:30 EEST · in 3h", the zone when it is not yours; "Done · ..." when done
-def Bv.next.text(+next: String, +rel: String, +zone: String, +done: Bool, +dtext: String, +on: Bool) -> String:
-  Bool.pick(String, done, dtext, Bool.pick(String, String.is_empty(next), Bool.pick(String, on, "", "Off"),
-    "Next " ++ next ++ Bool.pick(String, String.is_empty(rel), "", " · " ++ rel) ++ Bool.pick(String, String.eq(zone, "your time"), "", " · " ++ zone)))
+def Bv.next.text.loc(+l: I.Loc, +next: String, +rel: String, +zone: String, +done: Bool, +dtext: String, +on: Bool) -> String:
+  Bool.pick(String, done, dtext, Bool.pick(String, String.is_empty(next), Bool.pick(String, on, "", MSG.T.settings.lang.off(l)),
+    MSG.T.routine.next(l, next, Bool.pick(String, String.is_empty(rel), "none", "some"), rel, Bool.pick(String, String.eq(zone, MSG.T.sched.zone.you(l)), "none", "some"), zone)))
 
 # the line under the chip: a repeating routine's next time, Off, or Done;
 # none for a pending one-time routine, whose time is on the chip's line
+
+def Bv.next.text(+next: String, +rel: String, +zone: String, +done: Bool, +dtext: String, +on: Bool) -> String:
+  Bv.next.text.loc(I.En{}, next, rel, zone, done, dtext, on)
 def Bv.routine.gap(w0: SC.SRow, +on: Bool) -> U32:
   match w0:
     case SC.SRow{_, _, _, +next, _, _, +done, _}:
@@ -644,19 +654,24 @@ def Bv.routine.lines(+ty: L.Ty, w0: SC.SRow, +prompt: String, +on: Bool, +gap: U
       +dim = {Bool.or(done, Bool.not(on)) : Bool}
       L.Out.all([Bv.kind.chip(ty, c, (x + 12 : U32), (y + 34 : U32), kind, label, dim),
         Bv.faint(ty, c, when, (x + 12 + Bv.chip.w(ty, kind, label) + 8 : U32), (w - 24 - Bv.chip.w(ty, kind, label) - 8 : U32), (y + 36 : U32)),
-        Bv.faint(ty, c, Bv.next.text(next, rel, zone, done, dtext, on), (x + 12 : U32), (w - 24 : U32), (y + 60 : U32)),
+        Bv.faint(ty, c, Bv.next.text.loc(L.Ty.loc(ty), next, rel, zone, done, dtext, on), (x + 12 : U32), (w - 24 : U32), (y + 60 : U32)),
         L.Out.ops(L.Ty.text(ty, 2n, L.Ty.fit(ty, 2n, prompt, (w - 24 : U32)), c, (x + 12 : U32), (y + 60 + gap : U32), 20, T.Th.soft()))])
 
 def Bv.routine.btns(+ty: L.Ty, +done: Bool, +on: Bool, +c: D.Clip, +x: U32, +w: U32, +y: U32, +id: String) -> L.Out:
   match done:
     case True{}:
-      F.Fm.button(ty, c, (x + w - 12 - L.Lay.button.w(ty, "Delete") : U32), (y + 8 : U32), "Delete", T.Th.soft(), "routine-delete", id)
+      +label0 = MSG.T.common.delete(L.Ty.loc(ty))
+      F.Fm.button(ty, c, (x + w - 12 - L.Lay.button.w(ty, label0) : U32), (y + 8 : U32), label0, T.Th.soft(), "routine-delete", id)
     case False{}:
+      +label0 = MSG.T.common.delete(L.Ty.loc(ty))
+      +label1 = MSG.T.queue.edit(L.Ty.loc(ty))
+      +label2 = MSG.T.routine.run(L.Ty.loc(ty))
+      +label3 = Bv.onoff.loc(L.Ty.loc(ty), on)
       L.Out.all([
-          F.Fm.chip(ty, c, (x + w - 12 - L.Lay.button.w(ty, "Delete") - L.Lay.button.w(ty, "Edit") - L.Lay.button.w(ty, "Run now") - L.Lay.button.w(ty, Bv.onoff(on)) - 18 : U32), (y + 8 : U32), Bv.onoff(on), on, "routine-toggle", id),
-          F.Fm.button(ty, c, (x + w - 12 - L.Lay.button.w(ty, "Delete") - L.Lay.button.w(ty, "Edit") - L.Lay.button.w(ty, "Run now") - 12 : U32), (y + 8 : U32), "Run now", T.Th.soft(), "routine-run", id),
-          F.Fm.button(ty, c, (x + w - 12 - L.Lay.button.w(ty, "Delete") - L.Lay.button.w(ty, "Edit") - 6 : U32), (y + 8 : U32), "Edit", T.Th.soft(), "routine-edit", id),
-          F.Fm.button(ty, c, (x + w - 12 - L.Lay.button.w(ty, "Delete") : U32), (y + 8 : U32), "Delete", T.Th.soft(), "routine-delete", id)])
+          F.Fm.chip(ty, c, (x + w - 12 - L.Lay.button.w(ty, label0) - L.Lay.button.w(ty, label1) - L.Lay.button.w(ty, label2) - L.Lay.button.w(ty, label3) - 18 : U32), (y + 8 : U32), label3, on, "routine-toggle", id),
+          F.Fm.button(ty, c, (x + w - 12 - L.Lay.button.w(ty, label0) - L.Lay.button.w(ty, label1) - L.Lay.button.w(ty, label2) - 12 : U32), (y + 8 : U32), label2, T.Th.soft(), "routine-run", id),
+          F.Fm.button(ty, c, (x + w - 12 - L.Lay.button.w(ty, label0) - L.Lay.button.w(ty, label1) - 6 : U32), (y + 8 : U32), label1, T.Th.soft(), "routine-edit", id),
+          F.Fm.button(ty, c, (x + w - 12 - L.Lay.button.w(ty, label0) : U32), (y + 8 : U32), label0, T.Th.soft(), "routine-delete", id)])
 
 # buttons: all for a bot here; a bot elsewhere's hub runs it on asking, nothing more
 def Bv.routine.own(own: Bool, +ty: L.Ty, +done: Bool, +on: Bool, +c: D.Clip, +x: U32, +w: U32, +y: U32, +id: String) -> L.Out:
@@ -664,7 +679,8 @@ def Bv.routine.own(own: Bool, +ty: L.Ty, +done: Bool, +on: Bool, +c: D.Clip, +x:
     case True{}:
       Bv.routine.btns(ty, done, on, c, x, w, y, id)
     case False{}:
-      F.Fm.button(ty, c, (x + w - 12 - L.Lay.button.w(ty, "Run now") : U32), (y + 8 : U32), "Run now", T.Th.soft(), "routine-run", id)
+      +label0 = MSG.T.routine.run(L.Ty.loc(ty))
+      F.Fm.button(ty, c, (x + w - 12 - L.Lay.button.w(ty, label0) : U32), (y + 8 : U32), label0, T.Th.soft(), "routine-run", id)
 
 def Bv.routine.card.k(+ty: L.Ty, +w0: SC.SRow, +r: BT.Routine, +own: Bool, +gap: U32, +c: D.Clip, +x: U32, +w: U32, +y: U32) -> L.Col:
   L.Col{L.Out.all([
@@ -678,7 +694,7 @@ def Bv.routine.card(+ty: L.Ty, +w0: SC.SRow, +r: BT.Routine, +own: Bool, +c: D.C
   Bv.routine.card.k(ty, w0, r, own, Bv.routine.gap(w0, BT.Routine.on(r)), c, x, w, y)
 
 def Bv.routine.k(own: Bool, +ty: L.Ty, +u: U.Ui, +r: BT.Routine, +now: Nat, +c: D.Clip, +x: U32, +w: U32, +y: U32) -> L.Col:
-  Bv.routine.card(ty, SC.Sched.row(U.Ui.state(u), r, now, 0n, True{}), r, own, c, x, w, y)
+  Bv.routine.card(ty, SC.Sched.row(L.Ty.loc(ty), U.Ui.state(u), r, now, 0n, True{}), r, own, c, x, w, y)
 
 def Bv.routines(rs: List<&2, BT.Routine>, +ty: L.Ty, +u: U.Ui, +own: Bool, +now: Nat, +c: D.Clip, +x: U32, +w: U32, +y: U32) -> L.Col:
   match rs:
@@ -689,12 +705,12 @@ def Bv.routines(rs: List<&2, BT.Routine>, +ty: L.Ty, +u: U.Ui, +own: Bool, +now:
 
 def Bv.oform(+ty: L.Ty, +f: F.FS, +editing: Bool, +c: D.Clip, +x: U32, +w: U32, +y: U32) -> L.Col:
   L.Col{L.Out.all([
-      L.Out.ops(L.Ty.text(ty, 0n, Bool.pick(String, editing, "Change routine", "New routine"), c, x, y, 28, T.Th.soft())),
-      F.Fm.field(ty, f, c, x, (y + 32 : U32), U32.min(w, 280), "oname", "routine-save", "", "Name"),
-      F.Fm.field(ty, f, c, (x + U32.min(w, 280) + 8 : U32), (y + 32 : U32), L.U32.dim(w, (U32.min(w, 280) + 8 : U32)), "ocron", "routine-save", "", "When: daily 09:30, in 2h, tomorrow 9am"),
-      Bv.faint(ty, c, U.Routine.hint(F.FS.ui(f)), x, w, (y + 62 : U32)),
-      F.Fm.area(ty, f, c, x, (y + 86 : U32), w, 4n, "oprompt", "routine-save", "", "What it should do each time"),
-      F.Fm.button(ty, c, x, (y + 186 : U32), Bool.pick(String, editing, "Save", "Add routine"), T.Th.accent(), "routine-save", "")]),
+      L.Out.ops(L.Ty.text(ty, 0n, Bool.pick(String, editing, MSG.T.routine.change(L.Ty.loc(ty)), MSG.T.routine.new(L.Ty.loc(ty))), c, x, y, 28, T.Th.soft())),
+      F.Fm.field(ty, f, c, x, (y + 32 : U32), U32.min(w, 280), "oname", "routine-save", "", MSG.T.bots.name(L.Ty.loc(ty))),
+      F.Fm.field(ty, f, c, (x + U32.min(w, 280) + 8 : U32), (y + 32 : U32), L.U32.dim(w, (U32.min(w, 280) + 8 : U32)), "ocron", "routine-save", "", MSG.T.routine.time.placeholder(L.Ty.loc(ty))),
+      Bv.faint(ty, c, U.Routine.hint.loc(L.Ty.loc(ty), F.FS.ui(f)), x, w, (y + 62 : U32)),
+      F.Fm.area(ty, f, c, x, (y + 86 : U32), w, 4n, "oprompt", "routine-save", "", MSG.T.routine.prompt(L.Ty.loc(ty))),
+      F.Fm.button(ty, c, x, (y + 186 : U32), Bool.pick(String, editing, MSG.T.common.save(L.Ty.loc(ty)), MSG.T.routine.add(L.Ty.loc(ty))), T.Th.accent(), "routine-save", "")]),
     (y + 230 : U32)}
 
 # the new routine form, for a bot here
@@ -707,9 +723,9 @@ def Bv.oform.if(own: Bool, +ty: L.Ty, +f: F.FS, +editing: Bool, +c: D.Clip, +x: 
 
 def Bv.rtab(+ty: L.Ty, +f: F.FS, +bot: String, +c: D.Clip, +x: U32, +w: U32, +y: U32) -> L.Col:
   +rs = BU.BU.routines(F.FS.ui(f), bot)
-  L.Lay.col.cat(L.Out.cat(Bv.h2(ty, c, "Routines", x, y),
-      Bv.faint(ty, c, Bool.pick(String, List.is_empty(&2, BT.Routine, rs), "None yet. A routine gives it a prompt on a schedule, or once, in your time (" ++ SC.Zone.person(U.Ui.state(F.FS.ui(f))) ++ ").",
-        "Times are your time (" ++ SC.Zone.person(U.Ui.state(F.FS.ui(f))) ++ "). Each runs once when due, even after the hub was off."), x, w, (y + 30 : U32))),
+  L.Lay.col.cat(L.Out.cat(Bv.h2(ty, c, MSG.T.bots.tab.routines(L.Ty.loc(ty)), x, y),
+      Bv.faint(ty, c, Bool.pick(String, List.is_empty(&2, BT.Routine, rs), MSG.T.routine.empty(L.Ty.loc(ty), SC.Zone.person(U.Ui.state(F.FS.ui(f)))),
+        MSG.T.routine.note(L.Ty.loc(ty), SC.Zone.person(U.Ui.state(F.FS.ui(f))))), x, w, (y + 30 : U32))),
     L.Lay.col.then(Bv.routines(rs, ty, F.FS.ui(f), BU.BU.owns(bot), U.Side.now(F.FS.ui(f)), c, x, w, (y + 60 : U32)), y2 =>
       Bv.oform.if(BU.BU.owns(bot), ty, f, BU.BU.open(F.FS.ui(f), "@onew"), c, x, w, (y2 + 12 : U32))))
 
@@ -719,15 +735,17 @@ def Bv.rtab(+ty: L.Ty, +f: F.FS, +bot: String, +c: D.Clip, +x: U32, +w: U32, +y:
 def Bv.hook(+ty: L.Ty, h: BT.Hook, +now: Nat, +c: D.Clip, +x: U32, +w: U32, +y: U32) -> L.Col:
   match h:
     case BT.Hook{+id, _, +name, _, +revoked, +last, +k}:
-      +rw = (L.Lay.button.w(ty, "Revoke") + L.Lay.button.w(ty, "Token") + 8 : U32)
-      +tw = L.Lay.button.w(ty, "Token")
+      +label0 = MSG.T.hooks.revoke(L.Ty.loc(ty))
+      +label1 = MSG.T.hooks.token(L.Ty.loc(ty))
+      +rw = (L.Lay.button.w(ty, label0) + L.Lay.button.w(ty, label1) + 8 : U32)
+      +tw = L.Lay.button.w(ty, label1)
       L.Col{L.Out.all([
           L.Out.ops(L.Lay.box(c, x, y, w, 66, 0, T.Th.panel(), T.Th.line())),
           L.Out.ops(L.Ty.text(ty, 0n, L.Ty.fit(ty, 0n, name, (w - rw - 40 : U32)), c, (x + 12 : U32), (y + 6 : U32), 28, Bool.pick(U32, revoked, T.Th.dim(), T.Th.text()))),
-          Bv.faint(ty, c, "POST /hook/" ++ id ++ " · " ++ Bool.pick(String, revoked, "revoked", Bool.pick(String, Nat.is_eq(k, 0n), "never called", Nat.show(k) ++ " calls, last " ++ U.Time.ago(now, last) ++ " ago")),
+          Bv.faint(ty, c, MSG.T.hooks.status(L.Ty.loc(ty), id, Bool.pick(String, revoked, "revoked", Bool.pick(String, Nat.is_eq(k, 0n), "never", "called")), Nat.show(k), I.I18n.ago(L.Ty.loc(ty), now, last)),
             (x + 12 : U32), (w - rw - 40 : U32), (y + 36 : U32)),
-          Bool.pick(L.Out, revoked, L.Out.none(), F.Fm.button(ty, c, (x + w - rw - 12 : U32), (y + 19 : U32), "Token", T.Th.soft(), "hook-token", id)),
-          Bool.pick(L.Out, revoked, L.Out.none(), F.Fm.button(ty, c, (x + w - rw + tw - 4 : U32), (y + 19 : U32), "Revoke", T.Th.soft(), "hook-revoke", id))]),
+          Bool.pick(L.Out, revoked, L.Out.none(), F.Fm.button(ty, c, (x + w - rw - 12 : U32), (y + 19 : U32), label1, T.Th.soft(), "hook-token", id)),
+          Bool.pick(L.Out, revoked, L.Out.none(), F.Fm.button(ty, c, (x + w - rw + tw - 4 : U32), (y + 19 : U32), label0, T.Th.soft(), "hook-revoke", id))]),
         (y + 74 : U32)}
 
 def Bv.hooks(hs: List<&2, BT.Hook>, +ty: L.Ty, +now: Nat, +c: D.Clip, +x: U32, +w: U32, +y: U32) -> L.Col:
@@ -743,23 +761,26 @@ def Bv.secret.k(none: Bool, +ty: L.Ty, +label: String, +s: String, +c: D.Clip, +
     case True{}:
       L.Col{L.Out.none(), y}
     case False{}:
-      +cw = L.Lay.button.w(ty, "Copy")
+      +label0 = MSG.T.common.copy(L.Ty.loc(ty))
+      +cw = L.Lay.button.w(ty, label0)
       L.Col{L.Out.all([
           L.Out.ops(L.Lay.box(c, x, y, w, 72, 0, T.Th.sel(), T.Th.accent())),
           L.Out.ops(L.Ty.text(ty, 2n, L.Ty.fit(ty, 2n, label, (w - cw - 36 : U32)), c, (x + 12 : U32), (y + 6 : U32), 24, T.Th.accent())),
           L.Out.ops(L.Ty.text(ty, 4n, L.Ty.fit(ty, 4n, s, (w - cw - 36 : U32)), c, (x + 12 : U32), (y + 34 : U32), 28, T.Th.text())),
-          F.Fm.button(ty, c, (x + w - cw - 12 : U32), (y + 34 : U32), "Copy", T.Th.accent(), "copy", s)]),
+          F.Fm.button(ty, c, (x + w - cw - 12 : U32), (y + 34 : U32), label0, T.Th.accent(), "copy", s)]),
         (y + 84 : U32)}
 
 def Bv.secret(+ty: L.Ty, +label: String, +s: String, +c: D.Clip, +x: U32, +w: U32, +y: U32) -> L.Col:
   Bv.secret.k(String.is_empty(s), ty, label, s, c, x, w, y)
 
 def Bv.token.btns(+ty: L.Ty, +hid: String, +c: D.Clip, +x: U32, +y: U32) -> L.Col:
-  +nw = L.Lay.button.w(ty, "New token")
-  +ow = L.Lay.button.w(ty, "Turn off")
-  L.Col{L.Out.all([F.Fm.button(ty, c, x, y, "New token", T.Th.soft(), "hook-retoken", hid),
-      F.Fm.button(ty, c, (x + nw + 8 : U32), y, "Turn off", T.Th.soft(), "hook-untoken", hid),
-      F.Fm.button(ty, c, (x + nw + ow + 16 : U32), y, "Done", T.Th.soft(), "hook-done", "")]),
+  +label0 = MSG.T.hooks.token.new(L.Ty.loc(ty))
+  +label1 = MSG.T.hooks.off(L.Ty.loc(ty))
+  +nw = L.Lay.button.w(ty, label0)
+  +ow = L.Lay.button.w(ty, label1)
+  L.Col{L.Out.all([F.Fm.button(ty, c, x, y, label0, T.Th.soft(), "hook-retoken", hid),
+      F.Fm.button(ty, c, (x + nw + 8 : U32), y, label1, T.Th.soft(), "hook-untoken", hid),
+      F.Fm.button(ty, c, (x + nw + ow + 16 : U32), y, MSG.T.tour.done(L.Ty.loc(ty)), T.Th.soft(), "hook-done", "")]),
     (y + 40 : U32)}
 
 # a webhook's bearer token (for senders that cannot sign, like a Pebble
@@ -769,9 +790,9 @@ def Bv.token.k(none: Bool, +ty: L.Ty, +url: String, +tok: String, +hid: String, 
     case True{}:
       L.Col{L.Out.none(), y}
     case False{}:
-      L.Lay.col.then(Bv.secret(ty, Bool.pick(String, String.starts_with(url, "https://"), "Post to", "Post to (plain HTTP: the ring's app wants HTTPS, see tailscale serve)"), url, c, x, w, y), y2 =>
-        L.Lay.col.then(Bv.secret(ty, "Header for the Pebble app (Index 01 settings, Webhook); send Transcription", "Authorization: Bearer " ++ tok, c, x, w, y2), y3 =>
-          L.Lay.col.then(Bv.secret(ty, "Bearer token", tok, c, x, w, y3), y4 => Bv.token.btns(ty, hid, c, x, y4))))
+      L.Lay.col.then(Bv.secret(ty, Bool.pick(String, String.starts_with(url, "https://"), MSG.T.hooks.post(L.Ty.loc(ty)), MSG.T.hooks.post.http(L.Ty.loc(ty))), url, c, x, w, y), y2 =>
+        L.Lay.col.then(Bv.secret(ty, MSG.T.hooks.pebble.header(L.Ty.loc(ty)), "Authorization: Bearer " ++ tok, c, x, w, y2), y3 =>
+          L.Lay.col.then(Bv.secret(ty, MSG.T.hooks.bearer(L.Ty.loc(ty)), tok, c, x, w, y3), y4 => Bv.token.btns(ty, hid, c, x, y4))))
 
 def Bv.token(+ty: L.Ty, +u: U.Ui, +bot: String, +c: D.Clip, +x: U32, +w: U32, +y: U32) -> L.Col:
   Bv.token.k(Bool.or(String.is_empty(U.Ui.scratch(u, "@hook.token")),
@@ -779,14 +800,15 @@ def Bv.token(+ty: L.Ty, +u: U.Ui, +bot: String, +c: D.Clip, +x: U32, +w: U32, +y
     ty, U.Ui.scratch(u, "@hook.tokurl"), U.Ui.scratch(u, "@hook.token"), U.Ui.scratch(u, "@hook.tokfor"), c, x, w, y)
 
 def Bv.htab(+ty: L.Ty, +f: F.FS, +bot: String, +c: D.Clip, +x: U32, +w: U32, +y: U32) -> L.Col:
+  +label0 = MSG.T.hooks.new(L.Ty.loc(ty))
   +u = F.FS.ui(f)
   +hs = BU.BU.hooks(u, bot)
-  +nw = L.Lay.button.w(ty, "New webhook")
-  L.Lay.col.cat(L.Out.all([Bv.h2(ty, c, "Webhooks", x, y),
-      Bv.faint(ty, c, "Signed POSTs, or ones with the hook's bearer token, start a turn; the body reaches it as data, never as instructions.", x, w, (y + 30 : U32)),
-      F.Fm.field(ty, f, c, x, (y + 58 : U32), (w - nw - 8 : U32), "hname", "hook-new", "", "Name, e.g. GitHub pushes"),
-      F.Fm.button(ty, c, (x + w - nw : U32), (y + 58 : U32), "New webhook", T.Th.accent(), "hook-new", "")]),
-    L.Lay.col.then(Bv.secret(ty, "Secret for /hook/" ++ U.Ui.scratch(u, "@hook.id") ++ ", shown once. Sign with HMAC-SHA256.", U.Ui.scratch(u, "@hook.secret"), c, x, w, (y + 98 : U32)), y2 =>
+  +nw = L.Lay.button.w(ty, label0)
+  L.Lay.col.cat(L.Out.all([Bv.h2(ty, c, MSG.T.bots.tab.hooks(L.Ty.loc(ty)), x, y),
+      Bv.faint(ty, c, MSG.T.hooks.note(L.Ty.loc(ty)), x, w, (y + 30 : U32)),
+      F.Fm.field(ty, f, c, x, (y + 58 : U32), (w - nw - 8 : U32), "hname", "hook-new", "", MSG.T.hooks.name(L.Ty.loc(ty))),
+      F.Fm.button(ty, c, (x + w - nw : U32), (y + 58 : U32), label0, T.Th.accent(), "hook-new", "")]),
+    L.Lay.col.then(Bv.secret(ty, MSG.T.hooks.secret(L.Ty.loc(ty), U.Ui.scratch(u, "@hook.id")), U.Ui.scratch(u, "@hook.secret"), c, x, w, (y + 98 : U32)), y2 =>
       L.Lay.col.then(Bv.token(ty, u, bot, c, x, w, y2), y3 => Bv.hooks(hs, ty, U.Side.now(u), c, x, w, y3))))
 
 # Settings
@@ -795,19 +817,21 @@ def Bv.htab(+ty: L.Ty, +f: F.FS, +bot: String, +c: D.Clip, +x: U32, +w: U32, +y:
 def Bv.del(armed: Bool, +ty: L.Ty, +name: String, +id: String, +c: D.Clip, +x: U32, +y: U32) -> L.Out:
   match armed:
     case True{}:
-      L.Out.cat(F.Fm.button(ty, c, x, y, "Delete " ++ name, T.Th.bad(), "bot-delete", id),
-        F.Fm.button(ty, c, (x + L.Lay.button.w(ty, "Delete " ++ name) + 8 : U32), y, "Cancel", T.Th.soft(), "bfield", "delask" ++ Bv.sep()))
+      +label = MSG.T.bots.delete.named(L.Ty.loc(ty), name)
+      L.Out.cat(F.Fm.button(ty, c, x, y, label, T.Th.bad(), "bot-delete", id),
+        F.Fm.button(ty, c, (x + L.Lay.button.w(ty, label) + 8 : U32), y, MSG.T.common.cancel(L.Ty.loc(ty)), T.Th.soft(), "bfield", "delask" ++ Bv.sep()))
     case False{}:
-      F.Fm.button(ty, c, x, y, "Delete bot", T.Th.soft(), "bfield", "delask" ++ Bv.sep() ++ "1")
+      F.Fm.button(ty, c, x, y, MSG.T.bots.delete(L.Ty.loc(ty)), T.Th.soft(), "bfield", "delask" ++ Bv.sep() ++ "1")
 
 def Bv.peer(+ty: L.Ty, p: BT.Peer, +c: D.Clip, +x: U32, +w: U32, +y: U32) -> L.Col:
   match p:
     case BT.Peer{+id, +name, +url, _, +revoked}:
-      +rw = L.Lay.button.w(ty, "Revoke")
+      +label0 = MSG.T.hooks.revoke(L.Ty.loc(ty))
+      +rw = L.Lay.button.w(ty, label0)
       L.Col{L.Out.all([
           L.Out.ops(L.Ty.text(ty, 0n, L.Ty.fit(ty, 0n, name, (w - rw - 16 : U32)), c, x, y, 28, Bool.pick(U32, revoked, T.Th.dim(), T.Th.text()))),
           Bv.faint(ty, c, Bool.pick(String, revoked, "revoked", url), x, (w - rw - 16 : U32), (y + 26 : U32)),
-          Bool.pick(L.Out, revoked, L.Out.none(), F.Fm.button(ty, c, (x + w - rw : U32), (y + 8 : U32), "Revoke", T.Th.soft(), "peer-revoke", id))]),
+          Bool.pick(L.Out, revoked, L.Out.none(), F.Fm.button(ty, c, (x + w - rw : U32), (y + 8 : U32), label0, T.Th.soft(), "peer-revoke", id))]),
         (y + 54 : U32)}
 
 def Bv.peers(ps: List<&2, BT.Peer>, +ty: L.Ty, +c: D.Clip, +x: U32, +w: U32, +y: U32) -> L.Col:
@@ -823,11 +847,11 @@ def Bv.row2(+ty: L.Ty, +f: F.FS, +name: String, +action: String, +ph: String, +l
 
 def Bv.machines(+ty: L.Ty, +f: F.FS, +c: D.Clip, +x: U32, +w: U32, +y: U32) -> L.Col:
   +u = F.FS.ui(f)
-  L.Lay.col.cat(L.Out.all([Bv.h2(ty, c, "Machines", x, y),
-      Bv.faint(ty, c, "Bots here and on linked hubs can talk. An invite links one hub to another.", x, w, (y + 30 : U32)),
-      Bv.row2(ty, f, "purl", "peer-invite", "This hub's address as the other reaches it", "Make invite", "", c, x, w, (y + 58 : U32)),
-      Bv.row2(ty, f, "invite", "peer-join", "Paste an invite (bp1:...)", "Join", "", c, x, w, (y + 94 : U32))]),
-    L.Lay.col.then(Bv.secret(ty, "Invite, shown once: paste it on the other hub", U.Ui.scratch(u, "@peer.invite"), c, x, w, (y + 134 : U32)), y2 =>
+  L.Lay.col.cat(L.Out.all([Bv.h2(ty, c, MSG.T.bots.machines(L.Ty.loc(ty)), x, y),
+      Bv.faint(ty, c, MSG.T.bots.machines.note(L.Ty.loc(ty)), x, w, (y + 30 : U32)),
+      Bv.row2(ty, f, "purl", "peer-invite", MSG.T.bots.invite.address(L.Ty.loc(ty)), MSG.T.bots.invite.make(L.Ty.loc(ty)), "", c, x, w, (y + 58 : U32)),
+      Bv.row2(ty, f, "invite", "peer-join", MSG.T.bots.invite.paste(L.Ty.loc(ty)), MSG.T.bots.invite.join(L.Ty.loc(ty)), "", c, x, w, (y + 94 : U32))]),
+    L.Lay.col.then(Bv.secret(ty, MSG.T.bots.invite.once(L.Ty.loc(ty)), U.Ui.scratch(u, "@peer.invite"), c, x, w, (y + 134 : U32)), y2 =>
       Bv.peers(BU.BU.peers(u), ty, c, x, w, y2)))
 
 def Bv.gurl.k(none: Bool, +ty: L.Ty, +s: String, +c: D.Clip, +x: U32, +w: U32, +y: U32) -> L.Col:
@@ -835,12 +859,14 @@ def Bv.gurl.k(none: Bool, +ty: L.Ty, +s: String, +c: D.Clip, +x: U32, +w: U32, +
     case True{}:
       L.Col{L.Out.none(), y}
     case False{}:
-      +ow = L.Lay.button.w(ty, "Open")
-      +cw = L.Lay.button.w(ty, "Copy")
+      +label0 = MSG.T.menu.file.open(L.Ty.loc(ty))
+      +label1 = MSG.T.common.copy(L.Ty.loc(ty))
+      +ow = L.Lay.button.w(ty, label0)
+      +cw = L.Lay.button.w(ty, label1)
       L.Col{L.Out.all([
           L.Out.ops(L.Ty.text(ty, 2n, L.Ty.fit(ty, 2n, s, (w - ow - cw - 20 : U32)), c, x, y, 28, T.Th.accent())),
-          F.Fm.button(ty, c, (x + w - ow - cw - 8 : U32), y, "Open", T.Th.accent(), "open-url", s),
-          F.Fm.button(ty, c, (x + w - cw : U32), y, "Copy", T.Th.soft(), "copy", s)]),
+          F.Fm.button(ty, c, (x + w - ow - cw - 8 : U32), y, label0, T.Th.accent(), "open-url", s),
+          F.Fm.button(ty, c, (x + w - cw : U32), y, label1, T.Th.soft(), "copy", s)]),
         (y + 36 : U32)}
 
 # the user's own OAuth client, shown on asking
@@ -849,12 +875,13 @@ def Bv.gown(open: Bool, +ty: L.Ty, +f: F.FS, +c: D.Clip, +x: U32, +w: U32, +y: U
     case False{}:
       L.Col{L.Out.none(), y}
     case True{}:
+      +label0 = MSG.T.google.client.save(L.Ty.loc(ty))
       +hw = U32.shr((w - 8 : U32))
       L.Col{L.Out.all([
-          F.Fm.field(ty, f, c, x, y, hw, "gid", "google", "connect", "Client id (Desktop app)"),
-          F.Fm.field(ty, f, c, (x + hw + 8 : U32), y, hw, "gsecret", "google", "connect", "Client secret"),
-          F.Fm.button(ty, c, x, (y + 36 : U32), "Save client", T.Th.soft(), "google", "config"),
-          F.Fm.button(ty, c, (x + L.Lay.button.w(ty, "Save client") + 8 : U32), (y + 36 : U32), "Hide", T.Th.soft(), "bfield", "gown" ++ Bv.sep())]),
+          F.Fm.field(ty, f, c, x, y, hw, "gid", "google", "connect", MSG.T.google.client.id(L.Ty.loc(ty))),
+          F.Fm.field(ty, f, c, (x + hw + 8 : U32), y, hw, "gsecret", "google", "connect", MSG.T.google.client.secret(L.Ty.loc(ty))),
+          F.Fm.button(ty, c, x, (y + 36 : U32), label0, T.Th.soft(), "google", "config"),
+          F.Fm.button(ty, c, (x + L.Lay.button.w(ty, label0) + 8 : U32), (y + 36 : U32), MSG.T.common.hide(L.Ty.loc(ty)), T.Th.soft(), "bfield", "gown" ++ Bv.sep())]),
         (y + 74 : U32)}
 
 # the signature editor under an account (client.bend's Bots.sig)
@@ -863,21 +890,24 @@ def Bv.gsig(editing: Bool, +ty: L.Ty, +f: F.FS, +e: String, +c: D.Clip, +x: U32,
     case False{}:
       L.Col{L.Out.none(), y}
     case True{}:
+      +label0 = MSG.T.common.save(L.Ty.loc(ty))
       +ah = F.Fm.area.h(3n)
       L.Col{L.Out.all([
-          F.Fm.area(ty, f, c, x, y, w, 3n, "gsig", "google", "", "— Sent by Backplane on behalf of " ++ e),
-          F.Fm.button(ty, c, x, (y + ah + 6 : U32), "Save", T.Th.accent(), "google", "sig-save"),
-          F.Fm.button(ty, c, (x + L.Lay.button.w(ty, "Save") + 8 : U32), (y + ah + 6 : U32), "Cancel", T.Th.soft(), "google", "sig-cancel")]),
+          F.Fm.area(ty, f, c, x, y, w, 3n, "gsig", "google", "", MSG.T.google.signature.placeholder(L.Ty.loc(ty), e)),
+          F.Fm.button(ty, c, x, (y + ah + 6 : U32), label0, T.Th.accent(), "google", "sig-save"),
+          F.Fm.button(ty, c, (x + L.Lay.button.w(ty, label0) + 8 : U32), (y + ah + 6 : U32), MSG.T.common.cancel(L.Ty.loc(ty)), T.Th.soft(), "google", "sig-cancel")]),
         (y + ah + 48 : U32)}
 
 # one signed-in account, its signature (what mail sent from it ends with) and its own sign-out
 def Bv.gacct(+ty: L.Ty, +f: F.FS, +e: String, +c: D.Clip, +x: U32, +w: U32, +y: U32) -> L.Col:
-  +bw = L.Lay.button.w(ty, "Sign out")
-  +sw = L.Lay.button.w(ty, "Signature")
+  +label0 = MSG.T.agy.signout(L.Ty.loc(ty))
+  +label1 = MSG.T.google.signature(L.Ty.loc(ty))
+  +bw = L.Lay.button.w(ty, label0)
+  +sw = L.Lay.button.w(ty, label1)
   L.Lay.col.then(L.Col{L.Out.all([
       L.Out.ops(L.Ty.text(ty, 2n, L.Ty.fit(ty, 2n, e, (w - bw - sw - 24 : U32)), c, x, y, 28, T.Th.text())),
-      F.Fm.button(ty, c, (x + w - bw - sw - 8 : U32), y, "Signature", T.Th.soft(), "google", "sig-edit:" ++ e),
-      F.Fm.button(ty, c, (x + w - bw : U32), y, "Sign out", T.Th.soft(), "google", "signout:" ++ e)]),
+      F.Fm.button(ty, c, (x + w - bw - sw - 8 : U32), y, label1, T.Th.soft(), "google", "sig-edit:" ++ e),
+      F.Fm.button(ty, c, (x + w - bw : U32), y, label0, T.Th.soft(), "google", "signout:" ++ e)]),
     (y + 36 : U32)}, y2 => Bv.gsig(String.eq(U.Bots.sig.editing(F.FS.ui(f)), e), ty, f, e, c, x, w, y2))
 
 def Bv.gaccts(xs: List<&2, String>, +ty: L.Ty, +f: F.FS, +c: D.Clip, +x: U32, +w: U32, +y: U32) -> L.Col:
@@ -892,28 +922,30 @@ def Bv.gaccts(xs: List<&2, String>, +ty: L.Ty, +f: F.FS, +c: D.Clip, +x: U32, +w
 def Bv.google(+ty: L.Ty, +f: F.FS, +c: D.Clip, +x: U32, +w: U32, +y: U32) -> L.Col:
   +u = F.FS.ui(f)
   +st = U.Ui.scratch(u, "@google")
-  +add = Bool.pick(String, List.is_empty(&2, String, U.Bots.google.accts(u)), "Connect Google", "Add account")
+  +add = Bool.pick(String, List.is_empty(&2, String, U.Bots.google.accts(u)), MSG.T.google.connect(L.Ty.loc(ty)), MSG.T.agy.account.add(L.Ty.loc(ty)))
   +cw = L.Lay.button.w(ty, add)
   L.Lay.col.then(L.Col{L.Out.all([Bv.h2(ty, c, "Google", x, y),
-      Bv.faint(ty, c, Bool.pick(String, String.is_empty(st), "Gmail and Calendar for bots: connect, then allow access. Connect again for another account.", st), x, w, (y + 30 : U32)),
+      Bv.faint(ty, c, Bool.pick(String, String.is_empty(st), MSG.T.google.note(L.Ty.loc(ty)), st), x, w, (y + 30 : U32)),
       F.Fm.button(ty, c, x, (y + 58 : U32), add, T.Th.accent(), "google", "connect"),
-      F.Fm.button(ty, c, (x + cw + 8 : U32), (y + 58 : U32), "Own client", T.Th.soft(), "bfield", "gown" ++ Bv.sep() ++ "1")]), (y + 96 : U32)}, +y0 =>
+      F.Fm.button(ty, c, (x + cw + 8 : U32), (y + 58 : U32), MSG.T.google.client.own(L.Ty.loc(ty)), T.Th.soft(), "bfield", "gown" ++ Bv.sep() ++ "1")]), (y + 96 : U32)}, +y0 =>
     L.Lay.col.then(Bv.gaccts(U.Bots.google.accts(u), ty, f, c, x, w, y0), +y1 =>
     L.Lay.col.then(Bv.gown(String.eq(F.Fm.text(f, "gown"), "1"), ty, f, c, x, w, y1), +y2 =>
       L.Lay.col.then(Bv.gurl.k(String.is_empty(U.Ui.scratch(u, "@google.url")), ty, U.Ui.scratch(u, "@google.url"), c, x, w, y2), +y3 =>
-        L.Col{Bv.row2(ty, f, "gpaste", "google", "Browser on another device? Paste where it landed", "Finish", "paste", c, x, w, y3), (y3 + 40 : U32)}))))
+        L.Col{Bv.row2(ty, f, "gpaste", "google", MSG.T.google.callback(L.Ty.loc(ty)), MSG.T.common.finish(L.Ty.loc(ty)), "paste", c, x, w, y3), (y3 + 40 : U32)}))))
 
 def Bv.stab(+ty: L.Ty, +f: F.FS, b: BT.Bot, +c: D.Clip, +x: U32, +w: U32, +y: U32) -> L.Col:
   match b:
     case BT.Bot{+id, +name, _, +look, _, _, _}:
-      +fw = L.Lay.button.w(ty, "New face")
+      +label0 = MSG.T.bots.face.new(L.Ty.loc(ty))
+      +label1 = MSG.T.common.save(L.Ty.loc(ty))
+      +fw = L.Lay.button.w(ty, label0)
       L.Lay.col.then(L.Col{L.Out.all([
-          Bv.h2(ty, c, "Persona", x, y),
-          Bv.faint(ty, c, "Who " ++ name ++ " is and how it works. It reads this at the start of every turn.", x, w, (y + 30 : U32)),
-          F.Fm.area(ty, f, c, x, (y + 58 : U32), w, 8n, "persona", "bot-edit", "", "A helpful cat"),
-          F.Fm.button(ty, c, x, (y + 234 : U32), "Save", T.Th.accent(), "bot-edit", ""),
-          F.Fm.button(ty, c, (x + L.Lay.button.w(ty, "Save") + 8 : U32), (y + 234 : U32), "New face", T.Th.soft(), "bot-look", Nat.show(Nat.mod(1n+look, CT.Cat.looks()))),
-          Bv.del(String.eq(F.Fm.text(f, "delask"), "1"), ty, name, id, c, (x + L.Lay.button.w(ty, "Save") + fw + 16 : U32), (y + 234 : U32))]), (y + 290 : U32)}, y2 =>
+          Bv.h2(ty, c, MSG.T.bots.persona(L.Ty.loc(ty)), x, y),
+          Bv.faint(ty, c, MSG.T.bots.persona.note(L.Ty.loc(ty), name), x, w, (y + 30 : U32)),
+          F.Fm.area(ty, f, c, x, (y + 58 : U32), w, 8n, "persona", "bot-edit", "", MSG.T.bots.persona.example(L.Ty.loc(ty))),
+          F.Fm.button(ty, c, x, (y + 234 : U32), label1, T.Th.accent(), "bot-edit", ""),
+          F.Fm.button(ty, c, (x + L.Lay.button.w(ty, label1) + 8 : U32), (y + 234 : U32), label0, T.Th.soft(), "bot-look", Nat.show(Nat.mod(1n+look, CT.Cat.looks()))),
+          Bv.del(String.eq(F.Fm.text(f, "delask"), "1"), ty, name, id, c, (x + L.Lay.button.w(ty, label1) + fw + 16 : U32), (y + 234 : U32))]), (y + 290 : U32)}, y2 =>
         L.Lay.col.then(Bv.machines(ty, f, c, x, w, y2), y3 =>
           Bv.google(ty, f, c, x, w, (y3 + 16 : U32))))
 
@@ -936,17 +968,19 @@ def Bv.tbtns(bs: List<&2, U.TBtn>, +ty: L.Ty, +c: D.Clip, +y: U32, +x1: U32) -> 
         Bv.tbtns(t, ty, c, y, (x1 - w - 8 : U32)))
 
 def Bv.urlbar(+ty: L.Ty, +f: F.FS, +c: D.Clip, +x: U32, +w: U32, +y: U32) -> L.Out:
-  +bw = F.Fm.button.w(ty, "Back")
-  +rw = F.Fm.button.w(ty, "Reload")
-  L.Out.all([F.Fm.button(ty, c, x, y, "Back", T.Th.soft(), "bb-back", ""),
-    F.Fm.button(ty, c, (x + bw + 8 : U32), y, "Reload", T.Th.soft(), "bb-reload", ""),
-    Bv.row2(ty, f, "bburl", "bb-nav", "Address", "Go", "", c, (x + bw + rw + 16 : U32), (w - bw - rw - 16 : U32), y)])
+  +label0 = MSG.T.tour.back(L.Ty.loc(ty))
+  +label1 = MSG.T.common.reload(L.Ty.loc(ty))
+  +bw = F.Fm.button.w(ty, label0)
+  +rw = F.Fm.button.w(ty, label1)
+  L.Out.all([F.Fm.button(ty, c, x, y, label0, T.Th.soft(), "bb-back", ""),
+    F.Fm.button(ty, c, (x + bw + 8 : U32), y, label1, T.Th.soft(), "bb-reload", ""),
+    Bv.row2(ty, f, "bburl", "bb-nav", MSG.T.browser.address(L.Ty.loc(ty)), MSG.T.common.go(L.Ty.loc(ty)), "", c, (x + bw + rw + 16 : U32), (w - bw - rw - 16 : U32), y)])
 
 def Bv.strip.k(s: U.TStrip, +ty: L.Ty, +f: F.FS, +input: Bool, +c: D.Clip, +x: U32, +w: U32, +y: U32) -> L.Col:
   match s:
     case U.TStrip{+mode, +title, +clock, +steps, bs}:
       +rec = {Nat.is_eq(mode, 1n) : Bool}
-      +meta = {Bool.pick(String, rec, clock ++ " · " ++ Nat.show(steps) ++ Bool.pick(String, Nat.is_eq(steps, 1n), " step", " steps"), "") : String}
+      +meta = {Bool.pick(String, rec, MSG.T.teach.steps(L.Ty.loc(ty), clock, Nat.show(steps), Bool.pick(String, Nat.is_eq(steps, 1n), "one", "other")), "") : String}
       +ub = {Bool.pick(U32, input, 40, 0) : U32}
       +nb = {Bool.pick(U32, rec, 40, 0) : U32}
       L.Col{L.Out.all([
@@ -954,7 +988,7 @@ def Bv.strip.k(s: U.TStrip, +ty: L.Ty, +f: F.FS, +input: Bool, +c: D.Clip, +x: U
           L.Out.ops(L.Ty.text(ty, 2n, meta, c, (x + L.Ty.width(ty, 1n, title) + 12 : U32), y, 30, T.Th.faint())),
           Bv.tbtns(List.reverse(&2, U.TBtn, bs), ty, c, y, (x + w : U32)),
           Bv.when(input, Bv.urlbar(ty, f, c, x, w, (y + 40 : U32))),
-          Bv.when(rec, Bv.row2(ty, f, "tknote", "tk-note", "Tell it what matters, e.g. use the second tab", "Add note", "", c, x, w, (y + 40 + ub : U32)))]),
+          Bv.when(rec, Bv.row2(ty, f, "tknote", "tk-note", MSG.T.teach.note.placeholder(L.Ty.loc(ty)), MSG.T.teach.note.add(L.Ty.loc(ty)), "", c, x, w, (y + 40 + ub : U32)))]),
         (y + 44 + ub + nb : U32)}
 
 # the page under its strip
@@ -962,8 +996,8 @@ def Bv.live(+ty: L.Ty, +f: F.FS, +b: BT.Bot, +x0: U32, +x1: U32, +top: U32, +h: 
   +u = F.FS.ui(f)
   +id = BT.Bot.id(b)
   +input = {U.Teach.input(u, id) : Bool}
-  L.Lay.col.out(L.Lay.col.then(Bv.strip.k(U.Teach.strip(u, id), ty, f, input, D.Clip.all(), (x0 + 24 : U32), (x1 - x0 - 48 : U32), top), +y2 =>
-    L.Col{L.Lay.page.in(ty, u, id, "No page yet. Ask " ++ BT.Bot.name(b) ++ " to open one.", x0, x1, y2, h, input), y2}))
+  L.Lay.col.out(L.Lay.col.then(Bv.strip.k(U.Teach.strip.loc(L.Ty.loc(ty), u, id), ty, f, input, D.Clip.all(), (x0 + 24 : U32), (x1 - x0 - 48 : U32), top), +y2 =>
+    L.Col{L.Lay.page.in(ty, u, id, MSG.T.bots.page.empty(L.Ty.loc(ty), BT.Bot.name(b)), x0, x1, y2, h, input), y2}))
 
 # one recorded step in the save sheet: what it did, its typed value as a
 # chip (a secret shows none: it is never kept), and once marked a parameter
@@ -989,13 +1023,14 @@ def Bv.srows(rs: List<&2, U.TStepRow>, +ty: L.Ty, +f: F.FS, +c: D.Clip, +x: U32,
       L.Lay.col.then(Bv.srow(r, ty, f, c, x, w, y), y2 => Bv.srows(t, ty, f, c, x, w, y2))
 
 def Bv.sheet(+ty: L.Ty, +f: F.FS, +b: BT.Bot, +c: D.Clip, +x: U32, +w: U32, +y: U32) -> L.Col:
-  L.Lay.col.cat(L.Out.all([Bv.h2(ty, c, "Save this task", x, y),
-      Bv.faint(ty, c, "Name it. Mark a value you typed to ask for it each time the task runs.", x, w, (y + 30 : U32)),
-      F.Fm.field(ty, f, c, x, (y + 58 : U32), w, "tkname", "tk-save", "", "Name"),
-      F.Fm.field(ty, f, c, x, (y + 98 : U32), w, "tkdesc", "tk-save", "", "What it does (optional)")]),
-    L.Lay.col.then(Bv.srows(U.Teach.rows(F.FS.ui(f), BT.Bot.id(b)), ty, f, c, x, w, (y + 148 : U32)), +y2 =>
-      L.Col{L.Out.all([F.Fm.button(ty, c, x, (y2 + 8 : U32), "Save", T.Th.accent(), "tk-save", ""),
-          F.Fm.button(ty, c, (x + F.Fm.button.w(ty, "Save") + 8 : U32), (y2 + 8 : U32), "Discard", T.Th.soft(), "tk-discard", "")]), (y2 + 56 : U32)}))
+  +label0 = MSG.T.common.save(L.Ty.loc(ty))
+  L.Lay.col.cat(L.Out.all([Bv.h2(ty, c, MSG.T.teach.save(L.Ty.loc(ty)), x, y),
+      Bv.faint(ty, c, MSG.T.teach.name.note(L.Ty.loc(ty)), x, w, (y + 30 : U32)),
+      F.Fm.field(ty, f, c, x, (y + 58 : U32), w, "tkname", "tk-save", "", MSG.T.bots.name(L.Ty.loc(ty))),
+      F.Fm.field(ty, f, c, x, (y + 98 : U32), w, "tkdesc", "tk-save", "", MSG.T.teach.description(L.Ty.loc(ty)))]),
+    L.Lay.col.then(Bv.srows(U.Teach.rows.loc(L.Ty.loc(ty), F.FS.ui(f), BT.Bot.id(b)), ty, f, c, x, w, (y + 148 : U32)), +y2 =>
+      L.Col{L.Out.all([F.Fm.button(ty, c, x, (y2 + 8 : U32), label0, T.Th.accent(), "tk-save", ""),
+          F.Fm.button(ty, c, (x + F.Fm.button.w(ty, label0) + 8 : U32), (y2 + 8 : U32), MSG.T.teach.discard(L.Ty.loc(ty)), T.Th.soft(), "tk-discard", "")]), (y2 + 56 : U32)}))
 
 def Bv.browser.k(sheet: Bool, +ty: L.Ty, +f: F.FS, +b: BT.Bot, +x0: U32, +x1: U32, +h: U32) -> L.Out:
   match sheet:
@@ -1029,6 +1064,7 @@ def Bv.pfields(ps: List<&2, TK.TkParam>, +ty: L.Ty, +f: F.FS, +c: D.Clip, +x: U3
 def Bv.task(t: U.TTask, +ty: L.Ty, +f: F.FS, +c: D.Clip, +x: U32, +w: U32, +y: U32) -> L.Col:
   match t:
     case U.TTask{+slug, +name, +desc, +ps, +open, +asking, +last}:
+      +label0 = MSG.T.common.run(L.Ty.loc(ty))
       +lw = {L.Ty.width(ty, 2n, last) : U32}
       +np = {U32.from_nat(List.length(&2, TK.TkParam, ps)) : U32}
       +h = {Bool.pick(U32, open, (56 + np * 40 + 44 : U32), 56) : U32}
@@ -1040,8 +1076,8 @@ def Bv.task(t: U.TTask, +ty: L.Ty, +f: F.FS, +c: D.Clip, +x: U32, +w: U32, +y: U
       L.Lay.col.cat(head,
         L.Lay.col.cat(Bv.when(open, L.Out.all([
             L.Lay.col.out(Bv.pfields(ps, ty, f, c, (x + 12 : U32), (w - 24 : U32), (y + 60 : U32))),
-            F.Fm.button(ty, c, (x + 12 : U32), (y + h - 40 : U32), "Run", T.Th.accent(), "tk-run", slug),
-            F.Fm.button(ty, c, (x + 20 + F.Fm.button.w(ty, "Run") : U32), (y + h - 40 : U32), Bool.pick(String, asking, "Click again to delete", "Delete"), Bool.pick(U32, asking, T.Th.bad(), T.Th.soft()), "tk-del", slug)])),
+            F.Fm.button(ty, c, (x + 12 : U32), (y + h - 40 : U32), label0, T.Th.accent(), "tk-run", slug),
+            F.Fm.button(ty, c, (x + 20 + F.Fm.button.w(ty, label0) : U32), (y + h - 40 : U32), Bool.pick(String, asking, MSG.T.menu.delete.confirm(L.Ty.loc(ty)), MSG.T.common.delete(L.Ty.loc(ty))), Bool.pick(U32, asking, T.Th.bad(), T.Th.soft()), "tk-del", slug)])),
           L.Col{L.Out{Nil{}, [L.Lay.hit(x, y, w, h, "tk-open", slug)]}, (y + h + 8 : U32)}))
 
 def Bv.tasks(ts: List<&2, U.TTask>, +ty: L.Ty, +f: F.FS, +c: D.Clip, +x: U32, +w: U32, +y: U32) -> L.Col:
@@ -1083,7 +1119,7 @@ def Bv.runs(rs: List<&2, U.TRun>, +ty: L.Ty, +u: U.Ui, +c: D.Clip, +x: U32, +w: 
 def Bv.runs.head(some: Bool, +ty: L.Ty, +c: D.Clip, +x: U32, +y: U32) -> L.Out:
   match some:
     case True{}:
-      Bv.h2(ty, c, "Recent runs", x, y)
+      Bv.h2(ty, c, MSG.T.teach.runs(L.Ty.loc(ty)), x, y)
     case False{}:
       L.Out.none()
 
@@ -1091,8 +1127,8 @@ def Bv.ttab(+ty: L.Ty, +f: F.FS, +bot: String, +c: D.Clip, +x: U32, +w: U32, +y:
   +u = F.FS.ui(f)
   +ts = U.Teach.tasks(u, bot)
   +rs = List.take(&2, U.TRun, U.Teach.runs.shown(u, bot), 8n)
-  L.Lay.col.cat(L.Out.cat(Bv.h2(ty, c, "Tasks", x, y),
-      Bv.faint(ty, c, Bool.pick(String, List.is_empty(&2, U.TTask, ts), "None yet. Teach one in the Browser tab, or tell it in chat.", "Open one to run it. A routine can run it too."), x, w, (y + 30 : U32))),
+  L.Lay.col.cat(L.Out.cat(Bv.h2(ty, c, MSG.T.bots.tab.tasks(L.Ty.loc(ty)), x, y),
+      Bv.faint(ty, c, Bool.pick(String, List.is_empty(&2, U.TTask, ts), MSG.T.teach.empty(L.Ty.loc(ty)), MSG.T.teach.run.note(L.Ty.loc(ty))), x, w, (y + 30 : U32))),
     L.Lay.col.then(Bv.tasks(ts, ty, f, c, x, w, (y + 60 : U32)), +y2 =>
       L.Lay.col.cat(Bv.runs.head(Bool.not(List.is_empty(&2, U.TRun, rs)), ty, c, x, (y2 + 12 : U32)),
         Bv.runs(rs, ty, u, c, x, w, (y2 + 52 : U32)))))
@@ -1105,8 +1141,9 @@ def Bv.tabs(ts: List<&2, String>, +ty: L.Ty, +cur: String, +x: U32, +y: U32) -> 
     case Nil{}:
       L.Out.none()
     case +t <> rest:
-      L.Out.cat(F.Fm.chip(ty, D.Clip.all(), x, y, BU.BU.tab.label(t), String.eq(t, cur), "bot-tab", t),
-        Bv.tabs(rest, ty, cur, (x + L.Lay.button.w(ty, BU.BU.tab.label(t)) + 6 : U32), y))
+      +label = BU.BU.tab.label(L.Ty.loc(ty), t)
+      L.Out.cat(F.Fm.chip(ty, D.Clip.all(), x, y, label, String.eq(t, cur), "bot-tab", t),
+        Bv.tabs(rest, ty, cur, (x + L.Lay.button.w(ty, label) + 6 : U32), y))
 
 def Bv.busy(s: M.Status) -> Bool:
   match s:
@@ -1121,13 +1158,14 @@ def Bv.busy(s: M.Status) -> Bool:
 def Bv.stop(on: Bool, +ty: L.Ty, +x1: U32) -> L.Out:
   match on:
     case True{}:
-      F.Fm.button(ty, D.Clip.all(), (x1 - 16 - L.Lay.button.w(ty, "Stop") : U32), 12, "Stop", T.Th.soft(), "interrupt", "")
+      +label0 = MSG.T.composer.stop(L.Ty.loc(ty))
+      F.Fm.button(ty, D.Clip.all(), (x1 - 16 - L.Lay.button.w(ty, label0) : U32), 12, label0, T.Th.soft(), "interrupt", "")
     case False{}:
       L.Out.none()
 
 # where the header's right side ends before the Viewer chip (when shown)
 def Bv.right(+viewer: Bool, +ty: L.Ty, +x1: U32) -> U32:
-  Bool.pick(U32, viewer, (x1 - 8 - L.Lay.button.w(ty, "Viewer") : U32), x1)
+  Bool.pick(U32, viewer, (x1 - 8 - L.Lay.button.w(ty, MSG.T.thread.viewer(L.Ty.loc(ty))) : U32), x1)
 
 # a bot's header (BU.head, the same for a bot here, one mirrored from a
 # linked machine and one only reported by one): its cat (64 px), its name
@@ -1137,6 +1175,7 @@ def Bv.right(+viewer: Bool, +ty: L.Ty, +x1: U32) -> U32:
 def Bv.header(+ty: L.Ty, +cats: Map<&2, CA.CatF>, +u: U.Ui, +ms: Nat, hd: BU.Head, +sub: String, right: L.Out, +x0: U32, +x1: U32) -> L.Out:
   match hd:
     case BU.Head{+title, +look, +mood, +note, ts, +tab, +viewer, _}:
+      +label0 = MSG.T.thread.viewer(L.Ty.loc(ty))
       +nw = L.Ty.width(ty, 1n, title)
       L.Out.all([
         L.Out{[D.Draw.rect(D.Clip.all(), x0, 0, (x1 - x0 : U32), Bv.hy(), T.Th.bg(), 255), D.Draw.rect(D.Clip.all(), x0, (Bv.hy() - 1 : U32), (x1 - x0 : U32), 1, T.Th.line(), 255)],
@@ -1145,7 +1184,7 @@ def Bv.header(+ty: L.Ty, +cats: Map<&2, CA.CatF>, +u: U.Ui, +ms: Nat, hd: BU.Hea
         L.Out.ops(L.Ty.text(ty, 1n, title, D.Clip.all(), (x0 + 100 : U32), 10, 30, T.Th.text())),
         L.Out.ops(L.Ty.text(ty, 2n, note ++ sub, D.Clip.all(), (x0 + 112 + nw : U32), 10, 30, Bv.note.color(mood))),
         right,
-        Bv.when(viewer, F.Fm.chip(ty, D.Clip.all(), (x1 - 16 - L.Lay.button.w(ty, "Viewer") : U32), 12, "Viewer", U.Ui.panel(u), "panel", "")),
+        Bv.when(viewer, F.Fm.chip(ty, D.Clip.all(), (x1 - 16 - L.Lay.button.w(ty, label0) : U32), 12, label0, U.Ui.panel(u), "panel", "")),
         Bv.tabs(ts, ty, tab, (x0 + 100 : U32), 48)])
 
 def Bv.tab.n(+t: String) -> Nat:
@@ -1303,7 +1342,7 @@ def Bv.posts.l(ps: List<&2, BT.Post>, +ws: Map<&2, PW>, +ty: L.Ty, +u: U.Ui, +no
     case Nil{}:
       Nil{}
     case BT.Post{+id, _, +from, +text, _, +at} <> t:
-      PostL{id, BU.BU.member(u, from), U.Time.ago(now, at), Bv.wrap(ws, ty, id, text, w)} <> Bv.posts.l(t, ws, ty, u, now, w)
+      PostL{id, BU.BU.member(u, from), I.I18n.ago(L.Ty.loc(ty), now, at), Bv.wrap(ws, ty, id, text, w)} <> Bv.posts.l(t, ws, ty, u, now, w)
 
 def Bv.posts.h(ps: List<&2, PostL>, +acc: U32) -> U32:
   match ps:
@@ -1369,7 +1408,7 @@ def Bv.say(+ty: L.Ty, +f: F.FS, +name: String, +action: String, +ph: String, +x0
   +w = Bv.pane.w(x0, x1)
   +x = Bv.pane.x(x0, x1)
   L.Out.cat(L.Out.ops([D.Draw.rect(D.Clip.all(), x0, (h - 60 : U32), (x1 - x0 : U32), 1, T.Th.line(), 255)]),
-    Bv.row2(ty, f, name, action, ph, "Send", "", D.Clip.all(), x, w, (h - 44 : U32)))
+    Bv.row2(ty, f, name, action, ph, MSG.T.composer.send(L.Ty.loc(ty)), "", D.Clip.all(), x, w, (h - 44 : U32)))
 
 def Bv.top(+ty: L.Ty, +title: String, +sub: String, +x0: U32, +x1: U32, right: L.Out) -> L.Out:
   +tw = L.Ty.width(ty, 1n, title)
@@ -1381,14 +1420,15 @@ def Bv.top(+ty: L.Ty, +title: String, +sub: String, +x0: U32, +x1: U32, right: L
 def Bv.room(+ty: L.Ty, +ws: Map<&2, PW>, +n: S.Nui, r: BT.Room, +x0: U32, +x1: U32) -> L.Out:
   match r:
     case BT.Room{+id, +name, ms, cr, de}:
+      +label0 = MSG.T.room.delete(L.Ty.loc(ty))
       +u = S.Nui.ui(n)
       +h = S.Nui.height(n)
-      +dw = L.Lay.button.w(ty, "Delete room")
+      +dw = L.Lay.button.w(ty, label0)
       L.Out.all([
-        Bv.chat(ty, Bv.wraps.group(ws, id, Bv.pane.w(x0, x1)), BU.BU.posts(u, id), u, "Nothing said here yet. Every bot in the room hears what is posted.", x0, x1, 52, (h - 60 : U32)),
-        Bv.say(ty, F.Fm.fs(n), "rpost", "room-post", "Write to the room", x0, x1, h),
+        Bv.chat(ty, Bv.wraps.group(ws, id, Bv.pane.w(x0, x1)), BU.BU.posts(u, id), u, MSG.T.room.empty(L.Ty.loc(ty)), x0, x1, 52, (h - 60 : U32)),
+        Bv.say(ty, F.Fm.fs(n), "rpost", "room-post", MSG.T.room.write(L.Ty.loc(ty)), x0, x1, h),
         Bv.top(ty, "# " ++ name, BU.BU.members(u, BT.Room{id, name, ms, cr, de}), x0, x1,
-          F.Fm.button(ty, D.Clip.all(), (x1 - 16 - dw : U32), 12, "Delete room", T.Th.soft(), "room-delete", id))])
+          F.Fm.button(ty, D.Clip.all(), (x1 - 16 - dw : U32), 12, label0, T.Th.soft(), "room-delete", id))])
 
 # a bot only reported by a linked machine: the bot's view (BU.head: its
 # cat, "name · machine", its mood, Chat alone) over the person's
@@ -1397,8 +1437,8 @@ def Bv.remote(+ty: L.Ty, +ws: Map<&2, PW>, +cats: Map<&2, CA.CatF>, +n: S.Nui, +
   +u = S.Nui.ui(n)
   +h = S.Nui.height(n)
   L.Out.all([
-    Bv.chat(ty, Bv.wraps.group(ws, BT.Room.dm("you", id), Bv.pane.w(x0, x1)), BU.BU.remote.posts(u, id), u, "Write to " ++ id ++ ". It answers from its own machine.", x0, x1, Bv.hy(), (h - 60 : U32)),
-    Bv.say(ty, F.Fm.fs(n), "rtext", "remote-send", "Write to " ++ id, x0, x1, h),
+    Bv.chat(ty, Bv.wraps.group(ws, BT.Room.dm("you", id), Bv.pane.w(x0, x1)), BU.BU.remote.posts(u, id), u, MSG.T.bots.remote.empty(L.Ty.loc(ty), id), x0, x1, Bv.hy(), (h - 60 : U32)),
+    Bv.say(ty, F.Fm.fs(n), "rtext", "remote-send", MSG.T.bots.remote.write(L.Ty.loc(ty), id), x0, x1, h),
     Bv.header(ty, cats, u, S.Nui.ms_of(n), BU.BU.head(u, BU.VRemote{id}), "", L.Out.none(), x0, x1)])
 
 # The main area and the frame

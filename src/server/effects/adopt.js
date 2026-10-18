@@ -8,6 +8,10 @@ function adopt_keep(thread, pid, socket) {
   return socket;
 }
 
+function adopt_note(thread, pid) {
+  return { $: "Unit" };
+}
+
 function adopt_drop(thread, pid) {
   return { $: "Unit" };
 }
@@ -31,6 +35,7 @@ function adopt_reap() {
 io_eff(CID(Adopt.record), adopt_record);
 io_eff(CID(Adopt.reap), adopt_reap);
 io_eff(CID(Adopt.keep), adopt_keep);
+io_eff(CID(Adopt.note), adopt_note);
 io_eff(CID(Adopt.drop), adopt_drop);
 io_eff(CID(Adopt.ident), adopt_ident);
 io_eff(CID(Adopt.take), adopt_take);

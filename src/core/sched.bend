@@ -1,4 +1,6 @@
 import Base
+import ./i18n.bend as I
+import ./msgs.bend as MSG
 import ./model.bend as M
 import ./bot.bend as BT
 import ./cron.bend as CR
@@ -363,6 +365,20 @@ def Sched.rel.k(none: Bool, past: Bool, +d: Nat) -> String:
 def Sched.rel(+now: Nat, +t: Nat) -> String:
   Sched.rel.k(Nat.is_eq(t, 0n), Nat.is_le(t, now), Nat.sub(t, now))
 
+# the same, in the device language (the old helpers above stay for what
+# is not a screen)
+def Sched.rel.l.k(+l: I.Loc, none: Bool, past: Bool, +d: Nat) -> String:
+  match none past:
+    case True{} _:
+      ""
+    case False{} True{}:
+      I.I18n.due(l)
+    case False{} False{}:
+      I.I18n.until(l, d)
+
+def Sched.rel.l(+l: I.Loc, +now: Nat, +t: Nat) -> String:
+  Sched.rel.l.k(l, Nat.is_eq(t, 0n), Nat.is_le(t, now), Nat.sub(t, now))
+
 def Sched.next.text(rule: TZ.TzRule, +t: Nat) -> String:
   Bool.pick(String, Nat.is_eq(t, 0n), "", TZ.Tz.show(rule, t))
 
@@ -377,45 +393,79 @@ def Sched.zone.t(wz: Maybe<&2, TZ.TzRule>, +nx: Nat, mine: String) -> String:
     case None{}:
       ""
 
-def Sched.zone.k(legacy: Bool, person: Bool, +tz: String, +nx: Nat, wz: Maybe<&2, TZ.TzRule>, mine: String) -> String:
+def Sched.zone.k(+l: I.Loc, legacy: Bool, person: Bool, +tz: String, +nx: Nat, wz: Maybe<&2, TZ.TzRule>, mine: String) -> String:
   match legacy person:
     case True{} _:
-      "this machine's time"
+      MSG.T.sched.zone.machine(l)
     case False{} True{}:
-      "your time"
+      MSG.T.sched.zone.you(l)
     case False{} False{}:
       Bool.pick(String, Nat.is_eq(nx, 0n), tz, tz ++ Sched.zone.t(wz, nx, mine))
 
-def Sched.zone.name(+s: M.State, +tz: String, +mo: Nat, +me: Bool, +nx: Nat, wz: Maybe<&2, TZ.TzRule>) -> String:
-  Sched.zone.k(String.is_empty(tz), String.eq(tz, "person"), tz, nx, wz, TZ.Tz.show.time(Sched.person(s, mo, me), nx))
+def Sched.zone.name(+l: I.Loc, +s: M.State, +tz: String, +mo: Nat, +me: Bool, +nx: Nat, wz: Maybe<&2, TZ.TzRule>) -> String:
+  Sched.zone.k(l, String.is_empty(tz), String.eq(tz, "person"), tz, nx, wz, TZ.Tz.show.time(Sched.person(s, mo, me), nx))
 
 def Sched.kind(kind: String, +once: Nat) -> String:
   Bool.pick(String, String.eq(kind, "remind"), "reminder", Bool.pick(String, Nat.is_gt(once, 0n), "once", "routine"))
 
-def Sched.label(+k: String) -> String:
-  Bool.pick(String, String.eq(k, "reminder"), "Reminder", Bool.pick(String, String.eq(k, "once"), "Once", "Repeats"))
+def Sched.label(+l: I.Loc, +k: String) -> String:
+  Bool.pick(String, String.eq(k, "reminder"), MSG.T.sched.kind.reminder(l), Bool.pick(String, String.eq(k, "once"), MSG.T.sched.kind.once(l), MSG.T.sched.kind.repeat(l)))
 
-def Sched.when.cron(+cron: String) -> String:
-  Bool.pick(String, String.is_empty(CR.Cron.describe(cron)), cron, CR.Cron.describe(cron))
+# A schedule's words where a client shows them (cron.bend's Cron.describe,
+# in a language; the tools and the agents keep Cron.describe's English)
+def Sched.cron.each(+l: I.Loc, minute: Bool, +n: Nat) -> String:
+  match minute:
+    case True{}: Bool.pick(String, Nat.is_eq(n, 1n), MSG.T.sched.every.minute(l), MSG.T.sched.every.minutes(l, Nat.show(n)))
+    case False{}: Bool.pick(String, Nat.is_eq(n, 1n), MSG.T.sched.every.hour(l), MSG.T.sched.every.hours(l, Nat.show(n)))
 
-def Sched.when(cron: String, +once: Nat, rule: TZ.TzRule) -> String:
-  Bool.pick(String, Nat.is_gt(once, 0n), TZ.Tz.show(rule, once), Sched.when.cron(cron))
+def Sched.cron.hourly(+l: I.Loc, +m: Nat) -> String:
+  Bool.pick(String, Nat.is_eq(m, 0n), MSG.T.sched.hourly(l), MSG.T.sched.hourly.at(l, CR.Cron.pad2(m)))
 
-def Sched.done.text(done: Bool, rule: TZ.TzRule, +last: Nat) -> String:
-  Bool.pick(String, done, "Done · " ++ TZ.Tz.show.nz(rule, last), "")
+def Sched.cron.parts(+l: I.Loc, c: CR.Cron) -> Maybe<&2, String>:
+  match c:
+    case CR.Cron{+mi, +ho, +dm, +mo, +dw, +da, +wa}:
+      +all = Bool.and(Bool.and(da, wa), Nat.is_eq(List.length(&2, Nat, mo), 12n))
+      +allh = Nat.is_eq(List.length(&2, Nat, ho), 24n)
+      +n = CR.Cron.gap(mi)
+      +k = CR.Cron.gap(ho)
+      +m = CR.Cron.head(mi)
+      +h = CR.Cron.head(ho)
+      CR.Cron.or(CR.Cron.when(Bool.and(Bool.and(all, allh), Bool.and(Nat.is_eq(Nat.mod(60n, n), 0n), CR.Cron.same(mi, CR.Cron.vals([CR.CRng{0n, 59n, n}], 0n, 59n)))), Sched.cron.each(l, True{}, n)),
+        CR.Cron.or(CR.Cron.when(Bool.and(Bool.and(all, allh), CR.Cron.one.of(mi)), Sched.cron.hourly(l, m)),
+          CR.Cron.or(CR.Cron.when(Bool.and(Bool.and(all, CR.Cron.same(mi, [0n])), Bool.and(Nat.is_eq(Nat.mod(24n, k), 0n), CR.Cron.same(ho, CR.Cron.vals([CR.CRng{0n, 23n, k}], 0n, 23n)))), Sched.cron.each(l, False{}, k)),
+            CR.Cron.or(CR.Cron.when(Bool.and(all, Bool.and(CR.Cron.one.of(mi), CR.Cron.one.of(ho))), MSG.T.sched.daily(l, CR.Cron.hm(h, m))),
+              CR.Cron.when(Bool.and(Bool.and(Bool.and(da, Bool.not(wa)), Nat.is_eq(List.length(&2, Nat, mo), 12n)), Bool.and(CR.Cron.same(dw, [1n, 2n, 3n, 4n, 5n]), Bool.and(CR.Cron.one.of(mi), CR.Cron.one.of(ho)))), MSG.T.sched.weekdays(l, CR.Cron.hm(h, m)))))))
 
-def Sched.row.k(+kind: String, +once: Nat, cron: String, +tz: String, +done: Bool, +last: Nat, +nx: Nat, +now: Nat, +s: M.State, +mo: Nat, +me: Bool) -> SRow:
-  SRow{Sched.kind(kind, once), Sched.label(Sched.kind(kind, once)),
-    Sched.when(cron, once, Sched.person(s, mo, me)) ++ Bool.pick(String, Bool.or(done, Bool.or(Nat.is_eq(once, 0n), Nat.is_eq(nx, 0n))), "", " · " ++ Sched.rel(now, nx)),
-    Bool.pick(String, Bool.or(done, Nat.is_gt(once, 0n)), "", Sched.next.text(Sched.person(s, mo, me), nx)), Bool.pick(String, done, "", Sched.rel(now, nx)),
-    Sched.zone.name(s, tz, mo, me, nx, Zone.rule.of(s, tz)), done, Sched.done.text(done, Sched.person(s, mo, me), last)}
+def Sched.cron.parsed(+l: I.Loc, m: Maybe<&2, CR.Cron>, line: String) -> String:
+  match m:
+    case None{}: ""
+    case Some{c}: Maybe.default(&2, String, Sched.cron.parts(l, c), line)
+
+# the words for a cron line, else the line itself; "" when invalid
+def Sched.cron(+l: I.Loc, +text: String) -> String:
+  Sched.cron.parsed(l, CR.Cron.parse(text), CR.Cron.text(text))
+
+def Sched.when.cron(+l: I.Loc, +cron: String) -> String:
+  Bool.pick(String, String.is_empty(Sched.cron(l, cron)), cron, Sched.cron(l, cron))
+
+def Sched.when(+l: I.Loc, cron: String, +once: Nat, rule: TZ.TzRule) -> String:
+  Bool.pick(String, Nat.is_gt(once, 0n), TZ.Tz.show(rule, once), Sched.when.cron(l, cron))
+
+def Sched.done.text(+l: I.Loc, done: Bool, rule: TZ.TzRule, +last: Nat) -> String:
+  Bool.pick(String, done, MSG.T.sched.done(l, TZ.Tz.show.nz(rule, last)), "")
+
+def Sched.row.k(+l: I.Loc, +kind: String, +once: Nat, cron: String, +tz: String, +done: Bool, +last: Nat, +nx: Nat, +now: Nat, +s: M.State, +mo: Nat, +me: Bool) -> SRow:
+  SRow{Sched.kind(kind, once), Sched.label(l, Sched.kind(kind, once)),
+    Sched.when(l, cron, once, Sched.person(s, mo, me)) ++ Bool.pick(String, Bool.or(done, Bool.or(Nat.is_eq(once, 0n), Nat.is_eq(nx, 0n))), "", " · " ++ Sched.rel.l(l, now, nx)),
+    Bool.pick(String, Bool.or(done, Nat.is_gt(once, 0n)), "", Sched.next.text(Sched.person(s, mo, me), nx)), Bool.pick(String, done, "", Sched.rel.l(l, now, nx)),
+    Sched.zone.name(l, s, tz, mo, me, nx, Zone.rule.of(s, tz)), done, Sched.done.text(l, done, Sched.person(s, mo, me), last)}
 
 # a routine as a client's row (a one-time one's time is its `when`, with
 # how long until it; `next` is only a repeating one's)
-def Sched.row(+s: M.State, r: BT.Routine, +now: Nat, +mo: Nat, +me: Bool) -> SRow:
+def Sched.row(+l: I.Loc, +s: M.State, r: BT.Routine, +now: Nat, +mo: Nat, +me: Bool) -> SRow:
   match r:
     case BT.Routine{_, _, _, +cron, _, _, +last, _, _, +once, +tz, +kind, +done, _}:
-      Sched.row.k(kind, once, cron, tz, done, last, Sched.next(s, r, now, mo, me), now, s, mo, me)
+      Sched.row.k(l, kind, once, cron, tz, done, last, Sched.next(s, r, now, mo, me), now, s, mo, me)
 
 # Order
 # -----
@@ -504,30 +554,42 @@ def Sched.hint.next(m: Maybe<&2, CR.Cron>, +rule: TZ.TzRule, +now: Nat) -> Nat:
     case None{}:
       0n
 
-def Sched.hint.next.text(+t: Nat, rule: TZ.TzRule) -> String:
-  Bool.pick(String, Nat.is_eq(t, 0n), "", " · next " ++ TZ.Tz.show(rule, t))
+def Sched.hint.cron.k(+l: I.Loc, +text: String, +t: Nat, rule: TZ.TzRule) -> String:
+  Bool.pick(String, Nat.is_eq(t, 0n), Sched.cron(l, text), MSG.T.sched.hint.next(l, Sched.cron(l, text), TZ.Tz.show(rule, t)))
 
-def Sched.hint.cron(+text: String, +rule: TZ.TzRule, +now: Nat) -> String:
-  CR.Cron.describe(text) ++ Sched.hint.next.text(Sched.hint.next(CR.Cron.parse(text), rule, now), rule)
+def Sched.hint.cron(+l: I.Loc, +text: String, +rule: TZ.TzRule, +now: Nat) -> String:
+  Sched.hint.cron.k(l, text, Sched.hint.next(CR.Cron.parse(text), rule, now), rule)
 
-def Sched.hint.once(m: Maybe<&2, Nat>, rule: TZ.TzRule, blank: Bool) -> String:
+def Sched.hint.once(+l: I.Loc, m: Maybe<&2, Nat>, rule: TZ.TzRule, blank: Bool) -> String:
   match m:
     case Some{t}:
-      "once · " ++ TZ.Tz.show(rule, t)
+      MSG.T.sched.hint.once(l, TZ.Tz.show(rule, t))
     case None{}:
-      Bool.pick(String, blank, "", WH.When.text())
+      Bool.pick(String, blank, "", MSG.T.sched.help.time(l))
 
-def Sched.hint.k(ok: Bool, +text: String, +rule: TZ.TzRule, +now: Nat) -> String:
+def Sched.hint.k(+l: I.Loc, ok: Bool, +text: String, +rule: TZ.TzRule, +now: Nat) -> String:
   match ok:
     case True{}:
-      Sched.hint.cron(text, rule, now)
+      Sched.hint.cron(l, text, rule, now)
     case False{}:
-      Sched.hint.once(WH.When.parse(text, now, rule), rule, String.is_empty(String.trim(text)))
+      Sched.hint.once(l, WH.When.parse(text, now, rule), rule, String.is_empty(String.trim(text)))
 
 # what a schedule or a one-time phrase means, in the person's zone: the
 # live hint under a routine form's When field
-def Sched.hint(+s: M.State, +text: String, +now: Nat, +mo: Nat, +me: Bool) -> String:
-  Sched.hint.k(BT.Maybe.is(CR.Cron, CR.Cron.parse(text)), text, Sched.person(s, mo, me), now)
+def Sched.hint(+l: I.Loc, +s: M.State, +text: String, +now: Nat, +mo: Nat, +me: Bool) -> String:
+  Sched.hint.k(l, BT.Maybe.is(CR.Cron, CR.Cron.parse(text)), text, Sched.person(s, mo, me), now)
+
+# whether the text is neither a schedule nor a time (the hint then says
+# what it can read); blank is not
+def Sched.hint.bad.k(cron: Bool, +text: String, +now: Nat, rule: TZ.TzRule) -> Bool:
+  match cron:
+    case True{}:
+      False{}
+    case False{}:
+      Bool.and(Bool.not(String.is_empty(String.trim(text))), Bool.not(BT.Maybe.is(Nat, WH.When.parse(text, now, rule))))
+
+def Sched.hint.bad(+s: M.State, +text: String, +now: Nat, +mo: Nat, +me: Bool) -> Bool:
+  Sched.hint.bad.k(BT.Maybe.is(CR.Cron, CR.Cron.parse(text)), text, now, Sched.person(s, mo, me))
 
 # the sentence a tool says after saving: "once, Tue 14 Oct 09:00 EEST (in 17h 56m)"
 def Sched.zone.phrase(+s: M.State, +tz: String) -> String:
@@ -547,7 +609,7 @@ def Sched.saved.row(w: SRow, +once: Nat, zone: String, onceat: String) -> String
       Sched.saved.k(Nat.is_gt(once, 0n), kind, when, rel, zone, Bool.pick(String, Nat.is_gt(once, 0n), onceat, next))
 
 def Sched.saved(+s: M.State, +r: BT.Routine, +now: Nat, +mo: Nat, +me: Bool) -> String:
-  Sched.saved.row(Sched.row(s, r, now, mo, me), BT.Routine.once(r), Sched.zone.phrase(s, BT.Routine.tz(r)), TZ.Tz.show(Sched.person(s, mo, me), BT.Routine.once(r)))
+  Sched.saved.row(Sched.row(I.En{}, s, r, now, mo, me), BT.Routine.once(r), Sched.zone.phrase(s, BT.Routine.tz(r)), TZ.Tz.show(Sched.person(s, mo, me), BT.Routine.once(r)))
 
 # The alert a delivered reminder raises: notice.bend's alert record for a
 # reminder the person scheduled (key remind-<id>, never held by a desk;

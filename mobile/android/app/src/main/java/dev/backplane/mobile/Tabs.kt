@@ -256,6 +256,7 @@ private fun AppSettingsPage(m: AppModel, s: Screen, onPair: () -> Unit, state: L
     // ask the hub for its settings in the background (a select, on a tab change, closes it)
     val askHub = s.hubs.firstOrNull { it.key == s.hub }?.key ?: s.hubs.firstOrNull()?.key
     LaunchedEffect(askHub) { if (askHub != null) m.act("hub-settings", "$askHub|on") }
+    LaunchedEffect(Unit) { m.want("settings.lang") }
     val about = remember {
         runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).let { "${it.versionName} (${it.longVersionCode})" } }.getOrDefault("?")
     }
@@ -263,6 +264,15 @@ private fun AppSettingsPage(m: AppModel, s: Screen, onPair: () -> Unit, state: L
         LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = pad) {
             item { Header("Appearance") }
             item { Choice(listOf("system" to "System", "light" to "Light", "dark" to "Dark"), AppSettings.appearance) { AppSettings.putAppearance(it) } }
+            s.lang?.rows?.firstOrNull()?.let { row ->
+                item { Text(m.t("settings.lang", "Language"), Modifier.padding(horizontal = 16.dp)) }
+                item { Choice(row.buttons.map { it.value to it.label }, AppSettings.lang) { m.language(it) } }
+            }
+            s.lang?.rows?.drop(1)?.firstOrNull()?.let { row ->
+                row.buttons.firstOrNull()?.let { button ->
+                    item { ListItem(headlineContent = { Text(row.label) }, trailingContent = { Switch(button.on, { m.act(button.action, button.value) }) }) }
+                }
+            }
             item { Header("Behaviour") }
             item { Choice(listOf("projects" to "Projects", "active" to "Active"), list) { m.threadList(it) } }
             item {

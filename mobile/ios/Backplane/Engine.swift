@@ -175,6 +175,8 @@ final class Engine: @unchecked Sendable {
     // a hub marked offline with no screen of its own (after load())
     func offline(_ key: String) async -> Out? { await out("online", [key, false, true], screen: false) }
     func tick(_ now: Int) async -> Out? { await out("tick", [now]) }
+    // a catalog text by key, in the device's language
+    func t(_ key: String) async -> String { await call("t", [key], person: true) { $0 } }
     // a cat's rig for its key ("look:mood")
     func cat(_ key: String) async -> String { await call("cat", [key], person: true) { $0 } }
 }

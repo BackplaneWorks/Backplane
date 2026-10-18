@@ -3,7 +3,7 @@
 #   dist/backplane        the app: native window + hub + web server
 #   dist/backplane-serve  hub + web server only (no X11 needed)
 #   dist/web/             the web client (for other devices)
-#   dist/backplane-browser, dist/backplane-step2glb, dist/backplane-voice
+#   dist/backplane-browser, dist/backplane-step2glb, dist/backplane-voice, dist/backplane-kipc
 #                         host helpers (with bun)
 # X11 headers: /usr/include (libx11-dev), or BACKPLANE_X11=<prefix> holding
 # include/ and lib/libX11.so (see AGENTS.md).
@@ -34,9 +34,10 @@ if [ -n "${BACKPLANE_X11:-}" ]; then
   export CPATH="$BACKPLANE_X11/include${CPATH:+:$CPATH}"
   export LIBRARY_PATH="$BACKPLANE_X11/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
 fi
-# a release build stamps its version (BACKPLANE_VERSION=v1.2.3)
+# a release build stamps its version (BACKPLANE_VERSION=v1.2.3) into the
+# native binaries' emitted C (scripts/build-app.sh, BACKPLANE_VERSION_STAMP)
 if [ -n "${BACKPLANE_VERSION:-}" ]; then
-  printf 'import Base\n\n# The running build'"'"'s version (stamped by scripts/build.sh).\n\ndef Version.current() -> String:\n  "%s"\n' "${BACKPLANE_VERSION#v}" > src/core/version.bend
+  export BACKPLANE_VERSION_STAMP="${BACKPLANE_VERSION#v}"
 fi
 if [ "$pre" = 1 ]; then
   [ -f dist/web/index.html ] || { echo "BACKPLANE_PREBUILT: no dist/web (scripts/build.sh emit)"; exit 1; }
@@ -77,7 +78,8 @@ if command -v bun >/dev/null 2>&1 || [ -x "$HOME/.bun/bin/bun" ]; then
   PATH="$HOME/.bun/bin:$PATH" scripts/build-browser.sh
   PATH="$HOME/.bun/bin:$PATH" scripts/build-step2glb.sh
   PATH="$HOME/.bun/bin:$PATH" scripts/build-voice.sh
+  PATH="$HOME/.bun/bin:$PATH" scripts/build-kipc.sh
 else
-  echo "bun not found: skipping backplane-browser, backplane-step2glb and backplane-voice"
+  echo "bun not found: skipping backplane-browser, backplane-step2glb, backplane-voice and backplane-kipc"
 fi
 ls -la dist

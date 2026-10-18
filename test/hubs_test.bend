@@ -180,6 +180,11 @@ def main() -> IO(Unit):
     C.Check.str("a thread's action goes to the current hub",
       cmds(H.Hubs.cmds(H.Hubs.act(H.Hubs.after(H.Hubs.act(two(), "select", "box:3787|t2")), "pin", ""))), "send@box:3787 ")
     C.Check.str("a row's action goes to its hub", cmds(H.Hubs.cmds(H.Hubs.act(two(), "row-settle", "box:3787|t2"))), "send@box:3787 ")
+    C.Check.str("the Ready row's × goes to its thread's hub", cmds(H.Hubs.cmds(H.Hubs.act(two(), "fab-hide", "box:3787|t2"))), "send@box:3787 ")
+    C.Check.str("and puts the bar away for its project there",
+      M.Setting.get(U.Ui.state.of(H.Hubs.ui(H.Hubs.after(H.Hubs.act(two(), "fab-hide", "box:3787|t2")), "box:3787")), "fab.min.p2", ""), "1")
+    C.Check.str("the menu's Buy it brings it back",
+      M.Setting.get(U.Ui.state.of(H.Hubs.ui(H.Hubs.after(H.Hubs.act(H.Hubs.after(H.Hubs.act(two(), "fab-hide", "box:3787|t2")), "fab-show", "box:3787|t2")), "box:3787")), "fab.min.p2", ""), "0")
     C.Check.str("a row's action keeps the current hub", H.Hubs.cur(H.Hubs.after(H.Hubs.act(two(), "row-settle", "box:3787|t2"))), "100.1.1.1:3787")
     C.Check.str("unknown hub: the current", cmds(H.Hubs.cmds(H.Hubs.act(two(), "add-project", "/some/path"))), "send@100.1.1.1:3787 ")
     C.Check.str("add a project on a hub", cmds(H.Hubs.cmds(H.Hubs.act(two(), "add-project", "box:3787|/some/path"))), "send@box:3787 ")

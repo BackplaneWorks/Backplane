@@ -15,6 +15,9 @@
 //                seconds anyway (every provider is supervised)
 //   cx-nonl      a codex turn's last line, turn.completed, has no newline:
 //                it is read at the end of the stream, the turn completes
+//   cx-err       a codex process writes an error to stderr and exits 2: the
+//                failure says "(exit 2)" and the error, its token dropped
+// (exit-now's stand-in writes to stderr too: its failure carries that)
 //
 //   bun test/tools/exit_e2e.ts [BINARY] [WIREDIR]
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
@@ -44,6 +47,7 @@ for a in "$@"; do last="$a"; done
 printf '%s\\n' '{"type":"thread.started","thread_id":"cx-1"}'
 case "$last" in
   *cx-held*) sleep 30 & printf '%s\\n' '{"type":"item.completed","item":{"id":"i1","type":"agent_message","text":"working"}}'; exit 3 ;;
+  *cx-err*) printf '%s\\n' 'Error: the config broke (token=SECRET123)' >&2; exit 2 ;;
   *cx-nonl*) printf '%s\\n' '{"type":"item.completed","item":{"id":"i1","type":"agent_message","text":"DONE"}}'; printf '%s' '{"type":"turn.completed","usage":{}}' ;;
 esac
 `);
@@ -78,7 +82,7 @@ const check = (ok: boolean, what: string) => {
 
 const port = freePort();
 const proc = Bun.spawn([resolve(bin), "--home", home, "--port", String(port), "--no-tailscale", "--foreground"], {
-  env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_PEERS: "", BACKPLANE_GOOGLE_BAKE: "0", FAKE_LOG: log,
+  env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "", BACKPLANE_GOOGLE_BAKE: "0", FAKE_LOG: log,
     BP_WORK_MS: "300", PATH: `${fake}:${process.env.PATH}` },
   stdout: "ignore",
   stderr: "ignore",
@@ -141,6 +145,8 @@ try {
   await until(10000, () => exitAt(4));
   await sleep(4000);
   check(turns(t4).at(-1) === "failed" && exits(t4) === 1, `exit-now: handled once (${turns(t4).join(",")}; ${exits(t4)} exit)`);
+  const why4 = String(changes().find((x) => x.$ === "ActivityLogged" && x.thread === t4 && x.kind === "exit")?.summary ?? "");
+  check(why4.includes("(exit 3)") && why4.includes("the stand-in quits here") && !why4.includes("hunter2"), `exit-now: the failure carries the exit code and stderr, secret dropped (${why4})`);
 
   // replaced
   const t5 = await made("replaced");
@@ -166,6 +172,13 @@ try {
   await until(8000, () => turns(t7).at(-1) === "completed" ? true : undefined);
   await sleep(500);
   check(turns(t7).at(-1) === "completed" && !turns(t7).includes("failed"), `cx-nonl: a codex turn's last line without a newline completes it (${turns(t7).join(",")})`);
+
+  // cx-err: stderr and the exit code reach the failure
+  const t8 = await made("cx-err", "codex");
+  send("turn.start", { thread: t8, text: "cx-err go", msg: "x-9" });
+  await until(8000, () => turns(t8).at(-1) === "failed" ? true : undefined);
+  const why8 = String(changes().find((x) => x.$ === "ActivityLogged" && x.thread === t8 && x.tone === "error")?.summary ?? "");
+  check(turns(t8).at(-1) === "failed" && why8.includes("(exit 2)") && why8.includes("the config broke") && !why8.includes("SECRET123"), `cx-err: the failure says the exit code and stderr, token dropped (${why8})`);
 } finally {
   proc.kill(9);
   await proc.exited;

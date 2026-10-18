@@ -21,6 +21,10 @@ import ../core/utf8.bend as U
 
 type BMsg is Data:
   BCall{op: String, args: J.Json, reply: Chan(String)}
+  # the engine the helper runs (core/cef.bend): the flags a restarted helper
+  # starts with, the engine request, and whether to start the helper for it
+  # (not to go back to chrome when it is not running)
+  BEngine{argv: List<&2, String>, args: J.Json, start: Bool, reply: Chan(String)}
   BLine{text: String}
   BDead{}
 
@@ -28,13 +32,14 @@ type Pend is Data:
   Pend{id: String, reply: Chan(String)}
 
 # the helper's input (None until it runs), the requests waiting for a
-# reply, the next id, the helper's path and Backplane's home
+# reply, the next id, the helper's path and Backplane's home, and the flags
+# it is started with besides its own (the embedded engine's)
 type Br is Data:
-  Br{input: Maybe<&2, Chan(String)>, pend: List<&2, Pend>, next: Nat, exe: String, home: String}
+  Br{input: Maybe<&2, Chan(String)>, pend: List<&2, Pend>, next: Nat, exe: String, home: String, argv: List<&2, String>}
 
 # the browser of the Backplane at this home
 def Br.at(+exe: String, +home: String) -> Br:
-  Br{None{}, Nil{}, 1n, exe, home}
+  Br{None{}, Nil{}, 1n, exe, home, Nil{}}
 
 # the Chrome profile, the JPEG frames
 def Br.profile(+home: String) -> String:
@@ -168,19 +173,19 @@ def Browser.spawned(r: Result<&1, &1, U32 & String, U32 & Socket>, +q: Chan(BMsg
     case Fail{_}:
       IO.pure(Maybe<&2, Chan(String)>, None{})
 
-def Browser.start(+exe: String, +home: String, +q: Chan(BMsg)) -> IO(Maybe<&2, Chan(String)>):
+def Browser.start(+exe: String, +home: String, +q: Chan(BMsg), av: List<&2, String>) -> IO(Maybe<&2, Chan(String)>):
   do IO<Maybe<&2, Chan(String)>>:
     mk : Result<&1, &1, U32 & String, Unit> <- H.FS.mkdirs(Br.shots(home))
-    r : Result<&1, &1, U32 & String, U32 & Socket> <- H.Proc.spawn(exe, ["--profile", Br.profile(home), "--jpeg-dir", Br.shots(home)], "/", 0)
+    r : Result<&1, &1, U32 & String, U32 & Socket> <- H.Proc.spawn(exe, List.append(&2, String, ["--profile", Br.profile(home), "--jpeg-dir", Br.shots(home)], av), "/", 0)
     Browser.spawned(r, q)
 
 # the running helper's input, starting it if needed
-def Browser.ensure(m: Maybe<&2, Chan(String)>, +exe: String, +home: String, +q: Chan(BMsg)) -> IO(Maybe<&2, Chan(String)>):
+def Browser.ensure(m: Maybe<&2, Chan(String)>, +exe: String, +home: String, +q: Chan(BMsg), av: List<&2, String>) -> IO(Maybe<&2, Chan(String)>):
   match m:
     case Some{c}:
       IO.pure(Maybe<&2, Chan(String)>, Some{c})
     case None{}:
-      Browser.start(exe, home, q)
+      Browser.start(exe, home, q, av)
 
 # The actor
 # ---------
@@ -195,20 +200,20 @@ def Browser.request(+id: Nat, +op: String, args: J.Json) -> String:
 
 def Browser.sent(m: Maybe<&2, Chan(String)>, +line: String, +id: Nat, +reply: Chan(String), b: Br) -> IO(Br):
   match m b:
-    case Some{+c} Br{_, ps, n, exe, home}:
+    case Some{+c} Br{_, ps, n, exe, home, av}:
       do IO<Br>:
         ok : Result<&1, &1, String, Unit> <- Chan.send(String, c, line)
-        return Br{Some{c}, Pend{Nat.show(id), reply} <> ps, n, exe, home}
-    case None{} Br{_, ps, n, exe, home}:
+        return Br{Some{c}, Pend{Nat.show(id), reply} <> ps, n, exe, home, av}
+    case None{} Br{_, ps, n, exe, home, av}:
       do IO<Br>:
         Browser.say(reply, Browser.fail("the Backplane browser could not start (is backplane-browser installed next to Backplane?)"))
-        return Br{None{}, ps, n, exe, home}
+        return Br{None{}, ps, n, exe, home, av}
 
 def Browser.call(b: Br, +q: Chan(BMsg), +op: String, args: J.Json, +reply: Chan(String)) -> IO(Br):
   match b:
-    case Br{m, ps, +n, +exe, +home}:
-      IO.bind(Maybe<&2, Chan(String)>, Br, Browser.ensure(m, exe, home, q),
-        m2 => Browser.sent(m2, Browser.request(n, op, args), n, reply, Br{None{}, ps, 1n+n, exe, home}))
+    case Br{m, ps, +n, +exe, +home, +av}:
+      IO.bind(Maybe<&2, Chan(String)>, Br, Browser.ensure(m, exe, home, q, av),
+        m2 => Browser.sent(m2, Browser.request(n, op, args), n, reply, Br{None{}, ps, 1n+n, exe, home, av}))
 
 type Took is Data:
   Took{reply: Maybe<&2, Chan(String)>, rest: List<&2, Pend>}
@@ -262,10 +267,14 @@ def Browser.is_shot(+o: J.Json) -> Bool:
   Bool.and(String.eq(J.Json.get_str(o, "event", ""), "frame"), Browser.has_page(J.Json.get(o, "page")))
 
 # a helper line about an owner's page that the hub hears: its JPEG frame, a
-# step the recorder saw (record), a navigation or a load (docs/teach.md)
+# step the recorder saw (record), a navigation or a load (docs/teach.md), a
+# press on the embedded page's shield (shield-click); and the helper's
+# engine event (the embedded browser started, or failed)
 def Browser.is_page_event(+o: J.Json) -> Bool:
-  Bool.and(Browser.has_page(J.Json.get(o, "page")), Bool.or(String.eq(J.Json.get_str(o, "event", ""), "frame"),
-    Bool.or(String.eq(J.Json.get_str(o, "event", ""), "record"), Bool.or(String.eq(J.Json.get_str(o, "event", ""), "navigated"), String.eq(J.Json.get_str(o, "event", ""), "load")))))
+  Bool.or(Bool.and(Browser.has_page(J.Json.get(o, "page")), Bool.or(String.eq(J.Json.get_str(o, "event", ""), "frame"),
+    Bool.or(String.eq(J.Json.get_str(o, "event", ""), "record"), Bool.or(String.eq(J.Json.get_str(o, "event", ""), "navigated"),
+      Bool.or(String.eq(J.Json.get_str(o, "event", ""), "load"), String.eq(J.Json.get_str(o, "event", ""), "shield-click")))))),
+    String.eq(J.Json.get_str(o, "event", ""), "engine"))
 
 # a page-frame event to the event channel, sent off the actor's thread so
 # a slow reader never holds the browser up
@@ -278,11 +287,11 @@ def Browser.event(hit: Bool, +ev: Chan(String), +text: String) -> IO(Unit):
 
 def Browser.line.k(b: Br, +ev: Chan(String), +text: String, +o: J.Json) -> IO(Br):
   match b:
-    case Br{m, ps, n, exe, home}:
+    case Br{m, ps, n, exe, home, av}:
       do IO<Br>:
         Browser.event(Browser.is_page_event(o), ev, text)
         ps2 : List<&2, Pend> <- Browser.deliver(ps, J.Json.as_raw(J.Json.get(o, "id"), ""), text)
-        return Br{m, ps2, n, exe, home}
+        return Br{m, ps2, n, exe, home, av}
 
 # a line from the helper: a reply (by id), a page's frame event (to the
 # event channel), a record, navigated or load event of a page (the same), or another event (ignored here)
@@ -298,22 +307,52 @@ def Browser.fail_all(ps: List<&2, Pend>) -> IO(Unit):
         Browser.say(reply, Browser.fail("the browser exited"))
         Browser.fail_all(t)
 
-# the helper went away: fail what waits; the next request starts it again
-def Browser.dead(b: Br) -> IO(Br):
+# the helper went away: fail what waits and tell the hub (helper-exit:
+# it shows the placed page again, which starts the helper with the same
+# engine flags); the next request starts it again
+def Browser.dead(b: Br, +ev: Chan(String)) -> IO(Br):
   match b:
-    case Br{_, ps, n, exe, home}:
+    case Br{_, ps, n, exe, home, av}:
       do IO<Br>:
+        Browser.event(True{}, ev, "{\"event\":\"helper-exit\"}")
         Browser.fail_all(ps)
-        return Br{None{}, Nil{}, n, exe, home}
+        return Br{None{}, Nil{}, n, exe, home, av}
+
+# the helper runs
+def Browser.up(m: Maybe<&2, Chan(String)>) -> Bool:
+  match m:
+    case Some{_}:
+      True{}
+    case None{}:
+      False{}
+
+# the engine request: the flags are kept for a restarted helper; the helper
+# is asked (and started for it) when `start`, or when it already runs;
+# otherwise there is nothing to switch and the request is answered at once
+def Browser.engine.k(go: Bool, b: Br, +q: Chan(BMsg), args: J.Json, +reply: Chan(String)) -> IO(Br):
+  match go:
+    case True{}:
+      Browser.call(b, q, "engine", args, reply)
+    case False{}:
+      do IO<Br>:
+        Browser.say(reply, J.Json.show(J.Json.obj([J.KV{"ok", J.Flag{True{}}}, J.KV{"result", J.Json.obj(Nil{})}])))
+        return b
+
+def Browser.engine(b: Br, +q: Chan(BMsg), av: List<&2, String>, args: J.Json, start: Bool, +reply: Chan(String)) -> IO(Br):
+  match b:
+    case Br{+m, ps, n, exe, home, _}:
+      Browser.engine.k(Bool.or(start, Browser.up(m)), Br{m, ps, n, exe, home, av}, q, args, reply)
 
 def Browser.step(m: Maybe<&1, BMsg>, b: Br, +q: Chan(BMsg), +ev: Chan(String), k: Br -> IO(Unit)) -> IO(Unit):
   match m:
     case Some{BCall{op, args, reply}}:
       IO.bind(Br, Unit, Browser.call(b, q, op, args, reply), k)
+    case Some{BEngine{av, args, start, reply}}:
+      IO.bind(Br, Unit, Browser.engine(b, q, av, args, start, reply), k)
     case Some{BLine{t}}:
       IO.bind(Br, Unit, Browser.line(b, ev, t), k)
     case Some{BDead{}}:
-      IO.bind(Br, Unit, Browser.dead(b), k)
+      IO.bind(Br, Unit, Browser.dead(b, ev), k)
     case None{}:
       IO.pure(Unit, Unit{})
 
@@ -374,6 +413,16 @@ def Browser.ask_on(+q: Chan(BMsg), +page: String, +op: String, args: J.Json) -> 
   do IO<String>:
     +reply : Chan(String) <- Chan.new(String, 1)
     ok : Result<&1, &1, BMsg, Unit> <- Chan.send(BMsg, q, BCall{op, Browser.paged(page, args), reply})
+    m : Maybe<&1, String> <- Chan.recv(String, reply)
+    return Maybe.default(&1, String, m, Browser.fail("no reply"))
+
+# the engine the helper runs: `av` are the flags a restarted helper starts
+# with, `args` the engine request, `start` whether to start the helper for
+# it; answers the helper's reply line
+def Browser.engine_ask(+q: Chan(BMsg), av: List<&2, String>, args: J.Json, start: Bool) -> IO(String):
+  do IO<String>:
+    +reply : Chan(String) <- Chan.new(String, 1)
+    ok : Result<&1, &1, BMsg, Unit> <- Chan.send(BMsg, q, BEngine{av, args, start, reply})
     m : Maybe<&1, String> <- Chan.recv(String, reply)
     return Maybe.default(&1, String, m, Browser.fail("no reply"))
 

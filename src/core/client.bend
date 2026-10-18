@@ -1,8 +1,19 @@
 import Base
+import ./title.bend as TTL
+import ./mailrun.bend as RUN
+import ./cef.bend as CF
+import ./ref.bend as R
+import ./refview.bend as RE
+import ./i18n.bend as I
+import ./msgs.bend as MSG
+import ./kihealth.bend as KH
+import ./kserve.bend as KSV
+import ./kexport.bend as KEX
 import ./deploy.bend as DP
 import ./live.bend as LV
 import ./json.bend as J
 import ./model.bend as M
+import ./usage.bend as UZ
 import ./codec.bend as C
 import ./vt.bend as VT
 import ./emb.bend as EM
@@ -39,6 +50,8 @@ import ./tz.bend as TZ
 import ./when.bend as WH
 import ./sched.bend as SC
 import ./task.bend as TK
+import ./order.bend as OR
+import ./tools.bend as TO
 
 # The client state, Elm-style, shared by the native window and the web
 # page: a host feeds server messages to Ui.recv and user actions to Ui.act,
@@ -89,7 +102,11 @@ type Act is Data:
   Act{ui: Ui, cmds: List<&2, Cmd>}
 
 # The machine marker for projects, sidebar rows and timeline headers.
-def Label.title(+st: M.State, +id: String, title: String) -> String:
+# a thread's title as shown (title.bend; the laws read it here)
+def Title.shown(l: I.Loc, +title: String) -> String:
+  TTL.Title.shown(l, title)
+
+def Label.title(+st: M.State, +id: String, +title: String) -> String:
   FR.Fr.title(st, id, title)
 
 # a project elsewhere still catching up: listed, faded, "(syncing)"
@@ -133,6 +150,15 @@ def Str.get.k(r: Map<&2, String> & String) -> String:
 def Str.get(m: Map<&2, String>, +k: String) -> String:
   Str.get.k(Map.get(String, "", m, k))
 
+def Ui.scratch(u: Ui, +k: String) -> String:
+  match u:
+    case Ui{_, _, dr, _, _, _, _, _, _, _, _, _, _, _, _, _, _}:
+      Str.get(dr, k)
+
+# the device language, read once per screen and passed to what builds text
+def Lang.loc(u: Ui) -> I.Loc:
+  I.I18n.of_tag(Ui.scratch(u, "@lang.tag"))
+
 def Flag.get.k(r: Map<&2, Bool> & Bool) -> Bool:
   (_, v) = r
   v
@@ -140,10 +166,21 @@ def Flag.get.k(r: Map<&2, Bool> & Bool) -> Bool:
 def Flag.get(m: Map<&2, Bool>, +k: String) -> Bool:
   Flag.get.k(Map.get(Bool, False{}, m, k))
 
-def Ui.threads(s: M.State) -> List<&2, M.Thread>:
+# ---- mail 2c: list filtering (Mailv belongs to spec 5w) ----
+def Runs.add(hidden: Bool, +t: M.Thread, +rest: List<&2, M.Thread>) -> List<&2, M.Thread>:
+  match hidden:
+    case True{}: rest
+    case False{}: t <> rest
+
+def Runs.keep(+ts: List<&2, M.Thread>, +s: M.State) -> List<&2, M.Thread>:
+  match ts:
+    case Nil{}: Nil{}
+    case +t <> +rest: Runs.add(RUN.Run.is(s, M.Thread.id(t)), t, Runs.keep(rest, s))
+
+def Ui.threads(+s: M.State) -> List<&2, M.Thread>:
   match s:
     case M.State{_, ts, _, _, _, _, _, _, _, _, _}:
-      Map.values(&2, M.Thread, ts)
+      Runs.keep(Map.values(&2, M.Thread, ts), s)
 
 def Ui.projects(s: M.State) -> List<&2, M.Project>:
   match s:
@@ -310,7 +347,7 @@ def Local.keep(+old: Map<&2, String>, m: Map<&2, String>) -> Map<&2, String>:
 # machine's log keeps none of them (Local.keep runs on a switch too)
 # (laws reset_keeps_viewer, reset_new_origin_drops_viewer)
 def Reset.prefixes() -> List<&2, String>:
-  ["subs:", "view.", "panel:", "panel.hand:", "diff:", "fold:", "hist.at:", "hist.back:", "hist.diff:", "cmp.a:", "cmp.b:", "cmp.al", "cmp.bl", "fm.want:"]
+  ["subs:", "view.", "panel:", "panel.hand:", "diff:", "fold:", "hist.at:", "hist.back:", "hist.diff:", "cmp.a:", "cmp.b:", "cmp.al", "cmp.bl", "fm.want:", "fab."]
 
 def Reset.hit(ps: List<&2, String>, +k: String, found: Bool) -> Bool:
   match ps found:
@@ -370,8 +407,8 @@ def Machines.peers(ps: List<&2, J.Json>, +me: String, +cur: String) -> List<&2, 
     case +p <> t:
       Machines.peer(String.eq(J.Json.get_str(p, "url", ""), me), J.Json.get_str(p, "name", ""), J.Json.get_str(p, "url", ""), cur, Machines.peers(t, me, cur))
 
-def Machines.of(+j: J.Json, +cur: String) -> List<&2, MRow>:
-  MRow{Bool.pick(String, String.is_empty(J.Json.get_str(J.Json.get_obj(j, "self"), "name", "")), "This machine", J.Json.get_str(J.Json.get_obj(j, "self"), "name", "")), "", String.is_empty(cur)}
+def Machines.of(+l: I.Loc, +j: J.Json, +cur: String) -> List<&2, MRow>:
+  MRow{Bool.pick(String, String.is_empty(J.Json.get_str(J.Json.get_obj(j, "self"), "name", "")), MSG.T.machines.self(l), J.Json.get_str(J.Json.get_obj(j, "self"), "name", "")), "", String.is_empty(cur)}
     <> Machines.peers(J.Json.elems(J.Json.get_obj(j, "peers")), J.Json.get_str(J.Json.get_obj(j, "self"), "url", ""), cur)
 
 # the name of the machine shown
@@ -381,6 +418,10 @@ def Machines.current(rs: List<&2, MRow>) -> String:
       ""
     case MRow{+n, _, +on} <> t:
       Bool.pick(String, on, n, Machines.current(t))
+
+# Exactly these device inputs and the resolved tag survive a hub switch.
+def Lang.key(+k: String) -> Bool:
+  Bool.or(String.eq(k, "@lang"), Bool.or(String.eq(k, "@lang.os"), Bool.or(String.eq(k, "@lang.tag"), String.eq(k, "@lang.preview"))))
 
 def Machine.draft(scratch: Bool, +k: String, dr: Map<&2, String>, out: Map<&2, String>) -> Map<&2, String>:
   match scratch:
@@ -396,7 +437,7 @@ def Machine.drafts(ks: List<&2, String>, +dr: Map<&2, String>, out: Map<&2, Stri
     case Nil{}:
       out
     case +k <> t:
-      Machine.drafts(t, dr, Machine.draft(String.starts_with(k, "@"), k, dr, out))
+      Machine.drafts(t, dr, Machine.draft(Bool.and(String.starts_with(k, "@"), Bool.not(Lang.key(k))), k, dr, out))
 
 # The window assigns the actual connection tag when it opens the link.
 # The transition itself also advances the generation, before any message
@@ -428,7 +469,7 @@ def Ui.reset(u: Ui, +o: J.Json) -> Ui:
   match u:
     case Ui{st, sel, dr, live, op, _, now, ad, pa, _, rid, w, er, note, +nf, ob, tr}:
       Ui.fold.items(J.Json.elems(J.Json.get_obj(o, "items")),
-        Ui{Ui.base(Nat.is_gt(J.Json.get_nat(o, "since", 0n), 0n), st), sel, Map.set(&2, String, dr, "@sync", "1"), live, op, True{}, now, ad, pa, J.Json.get_str(o, "version", ""), rid, w, er, note,
+        Ui{Ui.base(Nat.is_gt(J.Json.get_nat(o, "since", 0n), 0n), st), sel, Map.set(&2, String, Map.set(&2, String, dr, "@sync", "1"), "@fab.at", ""), live, op, True{}, now, ad, pa, J.Json.get_str(o, "version", ""), rid, w, er, note,
           Machines.home(Ui.reset.keep(String.eq(J.Json.get_str(o, "origin", ""), Str.get(nf, "origin")), nf,
             Local.keep(nf, Map.set(&2, String, Map.set(&2, String, Info.of(J.Json.get_obj(o, "info")), "cid", Str.get(nf, "cid")), "origin", J.Json.get_str(o, "origin", ""))))), ob, tr})
 
@@ -538,10 +579,13 @@ def Ui.delta(u: Ui, +thread: String, text: String) -> Ui:
       Ui{st, sel, dr, Map.set(&2, String, live, thread, Str.get(live, thread) ++ text), op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}
 
 # a failed request shows its error, or the text of a failed git step
-def Ui.reply.err(+o: J.Json) -> String:
+def Ui.reply.err.std(+o: J.Json) -> String:
   Bool.pick(String, J.Json.get_bool(o, "ok", True{}), "", J.Json.get_str(o, "error", J.Json.get_str(J.Json.get_obj(o, "result"), "error", String.take(J.Json.get_str(J.Json.get_obj(o, "result"), "text", "failed"), 200n))))
 
 # an answer: its request leaves the outbox
+def Ui.reply.err(+o: J.Json) -> String:
+  Bool.pick(String, String.is_empty(J.Json.get_str(J.Json.get_obj(o, "result"), "kicad", "")), Ui.reply.err.std(o), "")
+
 def Ui.reply.k(u: Ui, +o: J.Json) -> Ui:
   match u:
     case Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w, _, note, nf, ob, tr}:
@@ -655,26 +699,26 @@ def Tail.told(+nf: Map<&2, String>) -> String:
     Bool.pick(String, String.eq(Str.get(nf, "tailnet"), "off"), "off", Bool.pick(String, String.is_empty(Pair.link(nf)), "unavailable", "reachable")),
     Str.get(nf, "tailscale"))
 
-def Tail.state.of(+t: String, +nf: Map<&2, String>) -> String:
-  Bool.pick(String, String.eq(t, "reachable"), Str.get(nf, "tailnet"), Bool.pick(String, String.eq(t, "unavailable"), "not connected", t))
+def Tail.state.of(+l: I.Loc, +t: String, +nf: Map<&2, String>) -> String:
+  Bool.pick(String, String.eq(t, "reachable"), Str.get(nf, "tailnet"), Bool.pick(String, String.eq(t, "unavailable"), MSG.T.settings.tailscale.notconnected(l), t))
 
-def Tail.state(+nf: Map<&2, String>) -> String:
-  Tail.state.of(Tail.told(nf), nf)
+def Tail.state(+l: I.Loc, +nf: Map<&2, String>) -> String:
+  Tail.state.of(l, Tail.told(nf), nf)
 
-def Tail.label(+nf: Map<&2, String>) -> String:
-  "Tailscale: " ++ Tail.state(nf)
+def Tail.label(+l: I.Loc, +nf: Map<&2, String>) -> String:
+  MSG.T.settings.tailscale.label(l, Tail.state(l, nf))
 
-def Tail.note.of(+t: String, +nf: Map<&2, String>) -> String:
-  Bool.pick(String, String.eq(t, "off"), "Listening on " ++ Str.get(nf, "listen") ++ " only: started with --no-tailscale.",
-    Bool.pick(String, String.eq(t, "reachable"), "Also on your tailnet: your own devices get in, others need the pairing token.",
-      Bool.pick(String, String.eq(t, "unavailable"), "Listening on " ++ Str.get(nf, "listen") ++ " only. Sign in to Tailscale, then restart Backplane.",
-        "Looking for Tailscale.")))
+def Tail.note.of(+l: I.Loc, +t: String, +nf: Map<&2, String>) -> String:
+  Bool.pick(String, String.eq(t, "off"), MSG.T.settings.tailscale.off.note(l, Str.get(nf, "listen")),
+    Bool.pick(String, String.eq(t, "reachable"), MSG.T.settings.tailscale.reachable.note(l),
+      Bool.pick(String, String.eq(t, "unavailable"), MSG.T.settings.tailscale.unavailable.note(l, Str.get(nf, "listen")),
+        MSG.T.settings.tailscale.looking(l))))
 
-def Tail.note(+nf: Map<&2, String>) -> String:
-  Tail.note.of(Tail.told(nf), nf)
+def Tail.note(+l: I.Loc, +nf: Map<&2, String>) -> String:
+  Tail.note.of(l, Tail.told(nf), nf)
 
-def Pair.note(+link: String) -> String:
-  Bool.pick(String, String.is_empty(link), "Shown once Backplane listens on your tailnet.", link)
+def Pair.note(+l: I.Loc, +link: String) -> String:
+  Bool.pick(String, String.is_empty(link), MSG.T.settings.pair.none(l), link)
 
 def Pair.rows(+s: String) -> List<&2, String>:
   Bool.pick(List<&2, String>, String.is_empty(s), Nil{}, String.split(s, '\n'))
@@ -687,62 +731,122 @@ def Pair.qr(+nf: Map<&2, String>) -> List<&2, String>:
 def Pair.qr.ready(+nf: Map<&2, String>) -> Bool:
   Bool.not(String.is_empty(Str.get(nf, "pair.qr")))
 
-def Pair.qr.note() -> String:
-  "Scan with the Backplane app, or the phone's camera."
+def Pair.qr.note(+l: I.Loc) -> String:
+  MSG.T.settings.pair.qr(l)
 
 # KiCad itself: the hub's kicad-cli (info "kicad.cli", "" when there is
 # none on the machine), which ERC, DRC, exports and the 3D model need
 def KiCad.found(+nf: Map<&2, String>) -> Bool:
   Bool.not(String.is_empty(Str.get(nf, "kicad.cli")))
 
-def KiCad.cli.label(+nf: Map<&2, String>) -> String:
-  Bool.pick(String, KiCad.found(nf), "KiCad CLI", "KiCad CLI: not found")
+def KiCad.cli.label.loc(+l: I.Loc, +nf: Map<&2, String>) -> String:
+  Bool.pick(String, KiCad.found(nf), "KiCad CLI", MSG.T.settings.kicad.cli.missing(l))
 
-def KiCad.cli.note(+nf: Map<&2, String>) -> String:
-  Bool.pick(String, KiCad.found(nf), Str.get(nf, "kicad.cli"), "Install KiCad from kicad.org/download, or Backplane KiCad")
+def KiCad.cli.label(nf: Map<&2, String>) -> String:
+  KiCad.cli.label.loc(I.En{}, nf)
+
+def KiCad.cli.note(+l: I.Loc, +nf: Map<&2, String>) -> String:
+  Bool.pick(String, KiCad.found(nf), Str.get(nf, "kicad.cli"), MSG.T.settings.kicad.cli.install(l))
+
+# One health notice model shared by every surface and client.
+# a headless server that stopped for good is a notice too, once the runtime
+# itself has none
+def KN.ipc(n: Maybe<&2, KH.KNote>, +servers: String) -> Maybe<&2, KH.KNote>:
+  match n:
+    case Some{x}: Some{x}
+    case None{}: KH.KH.ipc.notice(KSV.KS.failed.project(servers), KSV.KS.name(KSV.KS.failed.project(servers)), KSV.KS.failed.why(servers))
+
+def KN.of(+info: Map<&2, String>, +st: M.State) -> Maybe<&2, KH.KNote>:
+  KN.ipc(KH.KH.notice(Str.get(info, "kicad.status"), Str.get(info, "kicad.cli"), Str.get(info, "kicad.version"), Str.get(info, "kicad.why"), String.eq(Str.get(info, "kicad.can_install"), "1")), Str.get(info, "kicad.ipc.servers"))
+
+def KN.visible.k(n: Maybe<&2, KH.KNote>, +st: M.State) -> Maybe<&2, KH.KNote>:
+  match n:
+    case Some{KH.KNote{+key, title, body, acts}}:
+      Bool.pick(Maybe<&2, KH.KNote>, KH.KH.dismissed(st, key), None{}, Some{KH.KNote{key, title, body, acts}})
+    case None{}: None{}
+
+def KN.visible(+info: Map<&2, String>, +st: M.State) -> Maybe<&2, KH.KNote>:
+  KN.visible.k(KN.of(info, st), st)
+
+def KN.thread.k(shown: Bool, +info: Map<&2, String>, +st: M.State) -> Maybe<&2, KH.KNote>:
+  match shown:
+    case True{}: KN.visible(info, st)
+    case False{}: None{}
+
+def KN.thread(+info: Map<&2, String>, +st: M.State, +sel: String) -> Maybe<&2, KH.KNote>:
+  KN.thread.k(String.eq(Str.get(info, "kn:" ++ sel), "1"), info, st)
+
+def KN.action(+a: String) -> String:
+  Bool.pick(String, String.eq(a, "link"), "open-url", a)
+
+def KN.summary.k(+status: String, +v: String, +api: String, +source: String) -> String:
+  match status:
+    case "ok": "Backplane KiCad " ++ v ++ ", API " ++ api ++ ", from " ++ source
+    case "stock": "KiCad " ++ v ++ ", from " ++ source ++ " · stock KiCad"
+    case "old": "Backplane KiCad " ++ v ++ ", API " ++ api ++ ", from " ++ source ++ " · update needed"
+    case "broken": "KiCad from " ++ source ++ " · doesn't run"
+    case "missing": "KiCad isn't installed · from " ++ source
+    case _: "Checking KiCad"
+
+def KN.summary(+nf: Map<&2, String>) -> String:
+  KN.summary.k(Str.get(nf, "kicad.status"), Str.get(nf, "kicad.version"), Str.get(nf, "kicad.api"), Str.get(nf, "kicad.source"))
 
 # FreeCAD, which agents model parts with (info "freecad": its command on
 # the hub's machine, "" when there is none); Backplane never bundles it
 def FreeCAD.found(+nf: Map<&2, String>) -> Bool:
   Bool.not(String.is_empty(Str.get(nf, "freecad")))
 
-def FreeCAD.label(+nf: Map<&2, String>) -> String:
-  Bool.pick(String, FreeCAD.found(nf), "FreeCAD", "FreeCAD: not found")
+def FreeCAD.label.loc(+l: I.Loc, +nf: Map<&2, String>) -> String:
+  Bool.pick(String, FreeCAD.found(nf), "FreeCAD", MSG.T.settings.freecad.missing(l))
 
-def FreeCAD.note(+nf: Map<&2, String>) -> String:
-  Bool.pick(String, FreeCAD.found(nf), Str.get(nf, "freecad"), "Agents model mechanical parts with it: get it from freecad.org/downloads")
+def FreeCAD.label(nf: Map<&2, String>) -> String:
+  FreeCAD.label.loc(I.En{}, nf)
+
+def FreeCAD.note(+l: I.Loc, +nf: Map<&2, String>) -> String:
+  Bool.pick(String, FreeCAD.found(nf), Str.get(nf, "freecad"), MSG.T.settings.freecad.install(l))
 
 # KiCad IPC is the Backplane fork's api-server: without the fork the
 # setting has nothing to turn on, so Settings says where to get it instead
 # of offering it (info "kicad.fork": the fork's version, "" for none)
 def KiCad.ipc.ready(+nf: Map<&2, String>) -> Bool:
-  Bool.not(String.is_empty(Str.get(nf, "kicad.fork")))
+  String.eq(Str.get(nf, "kicad.status"), "ok")
 
-def KiCad.ipc.label(+nf: Map<&2, String>) -> String:
-  Bool.pick(String, KiCad.ipc.ready(nf), "KiCad IPC", "KiCad IPC: needs Backplane KiCad")
+def KiCad.ipc.label(+l: I.Loc, +nf: Map<&2, String>) -> String:
+  Bool.pick(String, KiCad.ipc.ready(nf), "KiCad IPC", MSG.T.settings.kicad.ipc.missing(l))
 
-def KiCad.ipc.note(+nf: Map<&2, String>) -> String:
-  Bool.pick(String, KiCad.ipc.ready(nf), "Agents may drive KiCad through the fork's api-server (NNG/protobuf).",
-    "Install it with the button above (Linux x86-64) or from github.com/i2cjak/Backplane_KiCad")
+# with Backplane KiCad: what the hub's headless server for the project is
+# doing ("KiCad server: ready for <name>", or why it is not), else what
+# the setting does
+def KiCad.ipc.on(+l: I.Loc, +servers: String) -> String:
+  Bool.pick(String, String.is_empty(servers), MSG.T.settings.kicad.ipc.on(l), KSV.KS.note(servers))
 
-def Update.line(+nf: Map<&2, String>, +note: String) -> String:
-  Bool.pick(String, Update.packaged(nf), "Updated by its package.", Bool.pick(String, String.is_empty(note), "Up to date, checked hourly.", note))
+def KiCad.ipc.note(+l: I.Loc, +nf: Map<&2, String>) -> String:
+  Bool.pick(String, KiCad.ipc.ready(nf), KiCad.ipc.on(l, Str.get(nf, "kicad.ipc.servers")),
+    MSG.T.settings.kicad.ipc.install(l))
+
+# the stored note ("update <version>" offers one; the hub's own progress
+# words stay as it sent them) as shown
+def Update.note.shown(+l: I.Loc, +note: String) -> String:
+  Bool.pick(String, String.starts_with(note, "update "), MSG.T.settings.update.available(l, String.drop(note, 7n)), note)
+
+def Update.line(+l: I.Loc, +nf: Map<&2, String>, +note: String) -> String:
+  Bool.pick(String, Update.packaged(nf), MSG.T.settings.update.packaged(l), Bool.pick(String, String.is_empty(note), MSG.T.settings.update.current(l), Update.note.shown(l, note)))
 
 # an update the hub holds back while threads work (hub.bend's Update.*):
 # how many it waits for (0: none, or not waiting)
 def Update.waits(+st: M.State) -> Nat:
   Bool.pick(Nat, Bool.and(String.is_empty(M.Setting.get(st, "update.wait", "")), String.is_empty(M.Setting.get(st, "update.restart", ""))), 0n, M.Work.threads(st))
 
-def Update.waits.line(+n: Nat, +nf: Map<&2, String>, +note: String) -> String:
-  Bool.pick(String, Nat.is_eq(n, 0n), Update.line(nf, note), "Update waits for " ++ Nat.show(n) ++ Bool.pick(String, Nat.is_eq(n, 1n), " thread", " threads") ++ " to finish their work.")
+def Update.waits.line(+l: I.Loc, +n: Nat, +nf: Map<&2, String>, +note: String) -> String:
+  Bool.pick(String, Nat.is_eq(n, 0n), Update.line(l, nf, note), MSG.T.settings.update.waits(l, Nat.show(n), Bool.pick(String, Nat.is_eq(n, 1n), "one", "other")))
 
 # a deploy waiting for a safe point (core/deploy.bend) shows in its place
-def Update.line.d(+row: String, +n: Nat, +nf: Map<&2, String>, +note: String) -> String:
-  Bool.pick(String, String.is_empty(row), Update.waits.line(n, nf, note), row)
+def Update.line.d(+l: I.Loc, +row: String, +n: Nat, +nf: Map<&2, String>, +note: String) -> String:
+  Bool.pick(String, String.is_empty(row), Update.waits.line(l, n, nf, note), row)
 
 # the version row's line, with the wait
-def Update.line.w(+st: M.State, +nf: Map<&2, String>, +note: String) -> String:
-  Update.line.d(DP.Deploy.row(st), Update.waits(st), nf, note)
+def Update.line.w(+l: I.Loc, +st: M.State, +nf: Map<&2, String>, +note: String) -> String:
+  Update.line.d(l, DP.Deploy.row(st), Update.waits(st), nf, note)
 
 # which button the version row shows: 0 none (a packaged install),
 # 1 install an update offered, 2 check now, 3 update now (one waiting)
@@ -1091,15 +1195,15 @@ def Follow.mode(+setting: String, +provider: String, alt: Bool) -> String:
   "steer"
 
 # what the send button says: Send, or while a turn runs Steer
-def Follow.label.k(run: Bool) -> String:
+def Follow.label.k(+l: I.Loc, run: Bool) -> String:
   match run:
     case True{}:
-      "Steer"
+      MSG.T.composer.steer(l)
     case False{}:
-      "Send"
+      MSG.T.composer.send(l)
 
-def Follow.label(+st: M.State, +sel: String, run: Bool) -> String:
-  Follow.label.k(run)
+def Follow.label(+l: I.Loc, +st: M.State, +sel: String, run: Bool) -> String:
+  Follow.label.k(l, run)
 
 # While a turn runs and nothing is typed or attached, the send button is
 # Stop: sending would do nothing there (laws follow_stop_*)
@@ -1129,15 +1233,15 @@ def Give.is(+draft: String) -> Bool:
   Bool.or(String.eq(String.trim(draft), "/give"), Bool.or(String.starts_with(draft, "/give "), String.starts_with(draft, "/give\n")))
 
 # what the send button says, and what it does
-def Follow.button.k(stop: Bool, +label: String) -> String:
+def Follow.button.k(+l: I.Loc, stop: Bool, +label: String) -> String:
   match stop:
     case True{}:
-      "Stop"
+      MSG.T.composer.stop(l)
     case False{}:
       label
 
-def Follow.button(+st: M.State, +sel: String, run: Bool, stop: Bool, +draft: String) -> String:
-  Follow.button.k(stop, Bool.pick(String, Btw.is(draft), "Ask", Bool.pick(String, Give.is(draft), "Give", Follow.label(st, sel, run))))
+def Follow.button(+l: I.Loc, +st: M.State, +sel: String, run: Bool, stop: Bool, +draft: String) -> String:
+  Follow.button.k(l, stop, Bool.pick(String, Btw.is(draft), MSG.T.composer.ask(l), Bool.pick(String, Give.is(draft), MSG.T.composer.give(l), Bool.pick(String, OR.Intent.is(draft), MSG.T.common.save(l), Follow.label(l, st, sel, run)))))
 
 def Follow.act(stop: Bool) -> String:
   match stop:
@@ -1238,12 +1342,15 @@ def Ui.info(u: Ui, +k: String) -> String:
       Str.get(nf, k)
 
 # the switcher: this machine first, then the others ("on" marks the one shown)
+def Machines.rows.loc(+l: I.Loc, +u: Ui) -> List<&2, MRow>:
+  Machines.of(l, Maybe.default(&2, J.Json, J.Json.parse(Ui.info(u, "local.machines")), J.Null{}), Ui.info(u, "local.machine"))
+
 def Machines.rows(+u: Ui) -> List<&2, MRow>:
-  Machines.of(Maybe.default(&2, J.Json, J.Json.parse(Ui.info(u, "local.machines")), J.Null{}), Ui.info(u, "local.machine"))
+  Machines.rows.loc(Lang.loc(u), u)
 
 # only worth showing when there is somewhere else to go
 def Machines.any(+u: Ui) -> Bool:
-  Nat.is_gt(List.length(&2, MRow, Machines.rows(u)), 1n)
+  Nat.is_gt(List.length(&2, MRow, Machines.rows.loc(Lang.loc(u), u)), 1n)
 
 def Ui.flag(u: Ui, +k: String) -> Bool:
   match u:
@@ -1285,7 +1392,7 @@ def Ui.actions() -> List<&2, String>:
    "attach-up", "attach-end",
    "hist-go", "hist-prev", "hist-next", "hist-first", "hist-last", "hist-play", "hist-tick", "hist-diff", "hist-live", "hist-jump",
    "hist-show", "cmp", "cmp-pick", "cmp-close", "cmp-side", "cmp-shut", "key-add", "key-del", "fm", "fm-cd", "fm-up", "fm-open", "pdf-page", "fm-page", "update-now", "work-cancel", "task-cancel",
-   "view-layer-pick", "view-layer-mode", "skill-close", "wake-cancel", "deploy-cancel", "lock-release", "lock-cancel"]
+   "view-layer-pick", "view-layer-mode", "skill-close", "wake-cancel", "deploy-cancel", "lock-release", "lock-cancel", "ref-go", "ref-back", "ref-fwd", "ref-copy", "ref-copy-web", "kicad-retry", "kicad-path", "kicad-path-save"]
 
 # Reading the client state
 # ------------------------
@@ -1576,6 +1683,21 @@ def Tasks.parent(+st: M.State, +thread: String) -> String:
   match st:
     case M.State{_, _, _, _, tk, _, _, _, _, _, _}:
       Tasks.parent.find(Map.values(&2, M.Task, tk), thread)
+
+# A subagent row's state word as shown: the word stays the row's token
+# (colours, order, cancel), and Japanese shows its own word for it
+def StateWord.ja(+w: String) -> String:
+  Bool.pick(String, String.eq(w, "running"), MSG.T.state.running(I.Ja{}), Bool.pick(String, String.eq(w, "starting"), MSG.T.state.starting(I.Ja{}),
+    Bool.pick(String, String.eq(w, "done"), MSG.T.state.done(I.Ja{}), Bool.pick(String, String.eq(w, "failed"), MSG.T.state.failed(I.Ja{}),
+      Bool.pick(String, String.eq(w, "cancelled"), MSG.T.state.cancelled(I.Ja{}), Bool.pick(String, String.eq(w, "stopped"), MSG.T.state.stopped(I.Ja{}),
+        Bool.pick(String, String.eq(w, "idle"), MSG.T.state.idle(I.Ja{}), Bool.pick(String, String.eq(w, "needs you"), MSG.T.state.needsyou(I.Ja{}),
+          Bool.pick(String, String.eq(w, "reporting"), MSG.T.state.reporting(I.Ja{}), Bool.pick(String, String.eq(w, "waiting"), MSG.T.state.waiting(I.Ja{}),
+            Bool.pick(String, String.eq(w, "waiting on"), MSG.T.state.waitingon(I.Ja{}), Bool.pick(String, String.eq(w, "held"), MSG.T.state.held(I.Ja{}), w))))))))))))
+
+def StateWord.label(l: I.Loc, +w: String) -> String:
+  match l:
+    case I.En{}: w
+    case I.Ja{}: StateWord.ja(w)
 
 def Task.word(s: M.TaskState) -> String:
   match s:
@@ -2499,7 +2621,8 @@ def Usage.text(+used: Nat, +window: Nat) -> String:
       " · ctx " ++ Nat.show(Nat.div(Nat.mul(used, 100n), window)) ++ "% of " ++ Usage.tokens(window)))
 
 def Usage.tail(+st: M.State, +th: String) -> String:
-  Usage.text(M.Usage.used(M.Setting.get(st, M.Usage.key(th), "")), M.Usage.window(M.Setting.get(st, M.Usage.key(th), "")))
+  UZ.Use.tail(M.Thread.provider(Ui.thread(st, th)), M.Usage.used(M.Setting.get(st, M.Usage.key(th), "")),
+    Usage.text(M.Usage.used(M.Setting.get(st, M.Usage.key(th), "")), M.Usage.window(M.Setting.get(st, M.Usage.key(th), ""))))
 
 # the model chip's label with the thread's effort
 def Effort.label(+label: String, +e: String) -> String:
@@ -2701,20 +2824,20 @@ def Palette.set(u: Ui, +q: String, +i: Nat) -> Ui:
     case Ui{st, sel, +dr, live, op, on, now, ad, pa, ve, rid, w, er, note, nf, ob, tr}:
       Ui{st, sel, Map.set(&2, String, Map.set(&2, String, dr, "@palette", q), "@palette.i", Nat.show(i)), live, op, on, now, ad, pa, ve, rid, w, er, note, nf, ob, tr}
 
-def Palette.threads(ts: List<&2, M.Thread>) -> List<&2, PItem>:
+def Palette.threads(+l: I.Loc, ts: List<&2, M.Thread>) -> List<&2, PItem>:
   match ts:
     case Nil{}:
       Nil{}
     case M.Thread{id, _, ti, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _} <> t:
-      PItem{ti, "select", id} <> Palette.threads(t)
+      PItem{TTL.Title.shown(l, ti), "select", id} <> Palette.threads(l, t)
 
-def Palette.actions(+pid: String) -> List<&2, PItem>:
-  [PItem{"New thread", "new-thread", pid}, PItem{"Diff: what this thread changed", "diff", ""}, PItem{"Terminal", "key:term", ""},
-   PItem{"Attach a file", "key:attach", ""}, PItem{"Commit & push", "git", "commit_push"}, PItem{"Open pull request", "git", "commit_push_pr"}, PItem{"Revert thread", "revert", "0"},
-   PItem{"Settle thread", "settle", ""}, PItem{"Pin thread", "pin", ""}, PItem{"Archive thread", "archive", ""}, PItem{"Unarchive thread", "unarchive", ""}, PItem{"Delete thread", "delete", ""},
-   PItem{"Snooze 1 hour", "snooze", "1h"}, PItem{"Snooze until tomorrow 9:00", "snooze", "tomorrow"}, PItem{"Snooze 1 week", "snooze", "1w"}, PItem{"Unsnooze", "snooze", "off"},
-   PItem{"Search threads", "key:search", ""}, PItem{"Find file", "key:files", ""},
-   PItem{"Viewer: board, schematic, 3D, Mech, files, diff, browser", "panel", ""}, PItem{"Open in KiCad", "kicad-open", ""}, PItem{"Settings", "flag", "settings"}, PItem{"Update Backplane", "update", ""}]
+def Palette.actions(+l: I.Loc, +pid: String) -> List<&2, PItem>:
+  [PItem{MSG.T.palette.newthread(l), "new-thread", pid}, PItem{MSG.T.palette.diff(l), "diff", ""}, PItem{MSG.T.palette.terminal(l), "key:term", ""},
+   PItem{MSG.T.palette.attach(l), "key:attach", ""}, PItem{MSG.T.palette.commit(l), "git", "commit_push"}, PItem{MSG.T.palette.pr(l), "git", "commit_push_pr"}, PItem{MSG.T.palette.revert(l), "revert", "0"},
+   PItem{MSG.T.palette.settle(l), "settle", ""}, PItem{MSG.T.palette.pin(l), "pin", ""}, PItem{MSG.T.palette.archive(l), "archive", ""}, PItem{MSG.T.palette.unarchive(l), "unarchive", ""}, PItem{MSG.T.palette.delete(l), "delete", ""},
+   PItem{MSG.T.palette.snooze.hour(l), "snooze", "1h"}, PItem{MSG.T.palette.snooze.tomorrow(l), "snooze", "tomorrow"}, PItem{MSG.T.palette.snooze.week(l), "snooze", "1w"}, PItem{MSG.T.palette.unsnooze(l), "snooze", "off"},
+   PItem{MSG.T.palette.search(l), "key:search", ""}, PItem{MSG.T.palette.findfile(l), "key:files", ""},
+   PItem{MSG.T.palette.viewer(l), "panel", ""}, PItem{MSG.T.palette.kicad(l), "kicad-open", ""}, PItem{MSG.T.palette.kicad10(l), "kicad-export10", ""}, PItem{MSG.T.palette.settings(l), "flag", "settings"}, PItem{MSG.T.palette.update(l), "update", ""}]
 
 def Palette.words(ws: List<&2, String>, +l: String) -> Bool:
   match ws:
@@ -2742,9 +2865,12 @@ def Palette.filter(ps: List<&2, PItem>, +q: String) -> List<&2, PItem>:
       Palette.filter.k(Palette.hit(q, l), PItem{l, a, v}, Palette.filter(t, q))
 
 # what the command palette offers for this query, actions first
+def Palette.cmds.loc(+l: I.Loc, +u: Ui) -> List<&2, PItem>:
+  Palette.filter(List.append(&2, PItem, Palette.actions(l, Ui.thread_project(Ui.thread(Ui.state(u), Ui.sel(u)))),
+    Palette.threads(l, Kids.keep(Ui.threads(Ui.state(u)), Kids.set(Ui.state(u))))), Palette.query(u))
+
 def Palette.cmds(+u: Ui) -> List<&2, PItem>:
-  Palette.filter(List.append(&2, PItem, Palette.actions(Ui.thread_project(Ui.thread(Ui.state(u), Ui.sel(u)))),
-    Palette.threads(Kids.keep(Ui.threads(Ui.state(u)), Kids.set(Ui.state(u))))), Palette.query(u))
+  Palette.cmds.loc(Lang.loc(u), u)
 
 def Palette.at(ps: List<&2, PItem>, i: Nat) -> PItem:
   match ps i:
@@ -2789,35 +2915,35 @@ def Search.snips(es: List<&2, M.Entry>, +q: String, m: Map<&2, String>) -> Map<&
     case M.Act{_, _, _, _, _, _} <> t:
       Search.snips(t, q, m)
 
-def Search.one(t: M.Thread, +q: String, +snips: Map<&2, String>, +rest: List<&2, PItem>) -> List<&2, PItem>:
+def Search.one(+l: I.Loc, t: M.Thread, +q: String, +snips: Map<&2, String>, +rest: List<&2, PItem>) -> List<&2, PItem>:
   match t:
     case M.Thread{+id, _, +ti, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, +de}:
       Bool.pick(List<&2, PItem>, de, rest,
-        Bool.pick(List<&2, PItem>, Nat.is_gt(FZ.Fuzzy.score(ti, q), 0n), PItem{ti, "select", id} <> rest,
-          Bool.pick(List<&2, PItem>, String.is_empty(Str.get(snips, id)), rest, PItem{ti ++ "  ·  " ++ Str.get(snips, id), "select", id} <> rest)))
+        Bool.pick(List<&2, PItem>, Nat.is_gt(FZ.Fuzzy.score(ti, q), 0n), PItem{TTL.Title.shown(l, ti), "select", id} <> rest,
+          Bool.pick(List<&2, PItem>, String.is_empty(Str.get(snips, id)), rest, PItem{TTL.Title.shown(l, ti) ++ "  ·  " ++ Str.get(snips, id), "select", id} <> rest)))
 
-def Search.all(ts: List<&2, M.Thread>, +q: String, +snips: Map<&2, String>) -> List<&2, PItem>:
+def Search.all(+l: I.Loc, ts: List<&2, M.Thread>, +q: String, +snips: Map<&2, String>) -> List<&2, PItem>:
   match ts:
     case Nil{}:
       Nil{}
     case t <> rest:
-      Search.one(t, q, snips, Search.all(rest, q, snips))
+      Search.one(l, t, q, snips, Search.all(l, rest, q, snips))
 
 def Search.newer(a: M.Thread, b: M.Thread) -> Bool:
   match a b:
     case M.Thread{_, _, _, _, +x, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _} M.Thread{_, _, _, _, +y, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _}:
       Nat.is_ge(x, y)
 
-def Search.items.k(empty: Bool, +q: String, +st: M.State) -> List<&2, PItem>:
+def Search.items.k(+l: I.Loc, empty: Bool, +q: String, +st: M.State) -> List<&2, PItem>:
   match empty:
     case True{}:
       Nil{}
     case False{}:
-      Search.all(List.sort(~M.Thread, ~Search.newer, Ui.threads(st)), q, Search.snips(Ui.entries(st), q, Map.new(&2, String)))
+      Search.all(l, List.sort(~M.Thread, ~Search.newer, Ui.threads(st)), q, Search.snips(Ui.entries(st), q, Map.new(&2, String)))
 
 # threads whose title or messages hold every word of the query, newest first
-def Search.items(+u: Ui) -> List<&2, PItem>:
-  Search.items.k(String.is_empty(String.trim(Palette.query(u))), Palette.query(u), Ui.state(u))
+def Search.items(+l: I.Loc, +u: Ui) -> List<&2, PItem>:
+  Search.items.k(l, String.is_empty(String.trim(Palette.query(u))), Palette.query(u), Ui.state(u))
 
 # File picker (ctrl+p)
 # --------------------
@@ -2864,17 +2990,20 @@ def Files.items(+u: Ui) -> List<&2, PItem>:
   Files.items.k(String.eq(Ui.info(u, "files.thread"), Ui.sel(u)), Ui.info(u, "files"), Palette.query(u))
 
 # what the palette offers in its mode
-def Palette.items.k(i: Nat, +u: Ui) -> List<&2, PItem>:
+def Palette.items.k(+l: I.Loc, i: Nat, +u: Ui) -> List<&2, PItem>:
   match i:
     case 0n:
-      Search.items(u)
+      Search.items(l, u)
     case 1n:
       Files.items(u)
     case _:
-      Palette.cmds(u)
+      Palette.cmds.loc(l, u)
+
+def Palette.items.loc(+l: I.Loc, +u: Ui) -> List<&2, PItem>:
+  Palette.items.k(l, Keys.pos(["search", "files"], Palette.mode(u)), u)
 
 def Palette.items(+u: Ui) -> List<&2, PItem>:
-  Palette.items.k(Keys.pos(["search", "files"], Palette.mode(u)), u)
+  Palette.items.loc(Lang.loc(u), u)
 
 # the kind of a row, shown at its right
 def Palette.kind(+a: String) -> String:
@@ -2887,14 +3016,23 @@ def Palette.kind(+a: String) -> String:
 # for gmail_send ("Send this draft?" when its detail starts with "Draft:"),
 # "Create/Change/Delete this event?" for calendar_create/update/delete,
 # "Allow <tool>?" for any other tool
-def Ask.head.tool(+tool: String, +d: String) -> String:
-  Bool.pick(String, String.eq(tool, "gmail_send"), Bool.pick(String, String.starts_with(d, "Draft:"), "Send this draft?", "Send this email?"),
-    Bool.pick(String, String.eq(tool, "calendar_create"), "Create this event?",
-      Bool.pick(String, String.eq(tool, "calendar_update"), "Change this event?",
-        Bool.pick(String, String.eq(tool, "calendar_delete"), "Delete this event?", "Allow " ++ tool ++ "?"))))
+def Ask.head.tool(+l: I.Loc, +tool: String, +d: String) -> String:
+  Bool.pick(String, String.eq(tool, "gmail_send"), Bool.pick(String, String.starts_with(d, "Draft:"), MSG.T.ask.send.draft(l), MSG.T.ask.send.email(l)),
+    Bool.pick(String, String.eq(tool, "calendar_create"), MSG.T.ask.event.create(l),
+      Bool.pick(String, String.eq(tool, "calendar_update"), MSG.T.ask.event.change(l),
+        Bool.pick(String, String.eq(tool, "calendar_delete"), MSG.T.ask.event.delete(l),
+          Bool.pick(String, String.eq(tool, "order_quote"), "Send these files for a quote?", MSG.T.ask.allow(l, tool))))))
 
-def Ask.head(+k: String, +tool: String, +d: String) -> String:
-  Bool.pick(String, String.eq(k, "plan"), "Proposed plan", Bool.pick(String, String.eq(k, "input"), "The agent asks", Ask.head.tool(tool, d)))
+# the kind an ask's buttons follow: an approval to send an order's files
+# reads Send / Not now (accept / decline) instead of Allow / Deny
+def Ask.bkind(+k: String, +tool: String) -> String:
+  Bool.pick(String, Bool.and(String.eq(k, "approval"), String.eq(tool, "order_quote")), "send", k)
+
+def Ask.head.loc(+l: I.Loc, +k: String, +tool: String, +d: String) -> String:
+  Bool.pick(String, String.eq(k, "plan"), MSG.T.ask.plan(l), Bool.pick(String, String.eq(k, "input"), MSG.T.ask.input(l), Ask.head.tool(l, tool, d)))
+
+def Ask.head(k: String, tool: String, d: String) -> String:
+  Ask.head.loc(I.En{}, k, tool, d)
 
 def Asks.kind(as: List<&2, M.Ask>, +k: String) -> Bool:
   match as:
@@ -2966,15 +3104,85 @@ def Side.until(+st: M.State, +id: String) -> Nat:
 # Small client-only values (a drag in progress) kept in the drafts map
 # under "@" keys, which no thread id takes.
 
-def Ui.scratch(u: Ui, +k: String) -> String:
-  match u:
-    case Ui{_, _, dr, _, _, _, _, _, _, _, _, _, _, _, _, _, _}:
-      Str.get(dr, k)
-
 def Ui.scratch_set(u: Ui, +k: String, v: String) -> Ui:
   match u:
     case Ui{st, sel, dr, live, op, on, now, ad, pa, ve, rid, w, er, note, nf, ob, tr}:
       Ui{st, sel, Map.set(&2, String, dr, k, v), live, op, on, now, ad, pa, ve, rid, w, er, note, nf, ob, tr}
+
+# Device language. Only apply writes the resolved tag; hosts call on input changes.
+def Lang.ready() -> Bool:
+  False{}
+
+def Lang.normalize.k(en: Bool, ja: Bool) -> String:
+  match en ja:
+    case True{} _: "en"
+    case False{} True{}: "ja"
+    case False{} False{}: "auto"
+
+def Lang.normalize(+s: String) -> String:
+  Lang.normalize.k(String.eq(s, "en"), String.eq(s, "ja"))
+
+def Lang.resolve.k(+l: I.Loc, allow: Bool) -> String:
+  match l allow:
+    case I.Ja{} True{}: "ja"
+    case _ _: "en"
+
+def Lang.resolve(setting: String, os: String, preview: Bool) -> String:
+  Lang.resolve.k(I.I18n.resolve(setting, os), Bool.or(Lang.ready(), preview))
+
+def Lang.choice(+u: Ui) -> String:
+  Lang.normalize(Ui.scratch(u, "@lang"))
+
+def Lang.preview(+u: Ui) -> Bool:
+  String.eq(Ui.scratch(u, "@lang.preview"), "1")
+
+def Lang.apply(+u: Ui, +setting: String, +os: String) -> Ui:
+  Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(u, "@lang", Lang.normalize(setting)), "@lang.os", os),
+    "@lang.tag", Lang.resolve(Lang.normalize(setting), os, Lang.preview(u)))
+
+def Lang.offered.k(allow: Bool) -> List<&2, String>:
+  match allow:
+    case True{}: ["auto", "en", "ja"]
+    case False{}: ["auto", "en"]
+
+def Lang.offered(+u: Ui) -> List<&2, String>:
+  Lang.offered.k(Bool.or(Lang.ready(), Lang.preview(u)))
+
+def Lang.label.k(k: Nat, +l: I.Loc) -> String:
+  match k:
+    case 0n: MSG.T.settings.lang.en(l)
+    case 1n: MSG.T.settings.lang.ja(l)
+    case _: MSG.T.settings.lang.auto(l)
+
+def Lang.label(+l: I.Loc, v: String) -> String:
+  Lang.label.k(C.Codec.pos(["en", "ja"], v), l)
+
+def Lang.agent.on(u: Ui) -> Bool:
+  +s = M.Setting.get(Ui.state(u), "agent.lang", "off")
+  Bool.or(String.eq(s, "en"), String.eq(s, "ja"))
+
+def Lang.agent.value(on: Bool, u: Ui) -> String:
+  match on:
+    case True{}: I.I18n.tag(Lang.loc(u))
+    case False{}: "off"
+
+def Lang.follow.add(a: Act, cs: List<&2, Cmd>) -> Act:
+  match a:
+    case Act{u, cs2}: Act{u, List.append(&2, Cmd, cs, cs2)}
+
+# "Agents reply in my language" follows this device's language: when the
+# person changes it while the setting is on, agent.lang moves to the new tag
+def Lang.follow(on: Bool, a: Act) -> Act:
+  match on a:
+    case True{} Act{+u, cs}: Lang.follow.add(Ui.setting(u, "agent.lang=" ++ Ui.scratch(u, "@lang.tag")), cs)
+    case False{} a: a
+
+def Lang.act(k: Nat, +u: Ui, +value: String) -> Act:
+  match k:
+    case 0n:
+      Lang.follow(Lang.agent.on(u), Act{Lang.apply(u, value, Ui.scratch(u, "@lang.os")), [Keep{"@lang", Lang.normalize(value)}]})
+    case _:
+      Act{Lang.apply(u, Lang.choice(u), value), Nil{}}
 
 # Creating a thread
 # -----------------
@@ -3006,9 +3214,49 @@ def Ui.cast.k(on: Bool, +u: Ui, +page: String) -> Act:
     case False{}:
       Act{u, Nil{}}
 
+# the page on show: the selected thread's Browser tab's, else a bot's
+# Browser tab's (the bot's own page)
+def Ui.shown.page.k(bot: Bool, +u: Ui) -> String:
+  match bot:
+    case True{}:
+      Ui.scratch(u, "@bot")
+    case False{}:
+      Ui.cast.page(u)
+
+def Ui.shown.page(+u: Ui) -> String:
+  Ui.shown.page.k(Bool.and(String.eq(Ui.scratch(u, "@btab"), "browser"), Bool.not(String.is_empty(Ui.scratch(u, "@bot")))), u)
+
+# the native window shows its own hub's pages itself (core/cef.bend), so
+# it takes no frames of them
+def Ui.cast.allowed(+u: Ui) -> Bool:
+  CF.Cef.cast(Bool.and(String.eq(Ui.scratch(u, "@cef.window"), "1"), CF.Cef.page_local(Ui.shown.page(u))), Ui.info(u, "browser.engine.live"), Ui.info(u, "local.remote.url"))
+
 # a frame of page heard ({"t":"shot"}): said seen when the tab shows it
 def Ui.cast.seen(+u: Ui, +page: String) -> Act:
-  Ui.cast.k(Bool.and(Bool.not(String.is_empty(page)), String.eq(page, Ui.cast.page(u))), u, page)
+  Ui.cast.k(Bool.and(Ui.cast.allowed(u), Bool.and(Bool.not(String.is_empty(page)), String.eq(page, Ui.shown.page(u)))), u, page)
+
+# An unwatched page is not cast at all (the helper stops its screencast and
+# keeps a still every few seconds), so a client cannot wait for a frame to
+# say it shows one: an action that brings a page on show says so at once
+def Ui.cast.add(a: Act, cs: List<&2, Cmd>) -> Act:
+  match a:
+    case Act{u, c2}:
+      Act{u, List.append(&2, Cmd, cs, c2)}
+
+def Ui.cast.now.k(go: Bool, a: Act, +page: String) -> Act:
+  match go a:
+    case True{} Act{+u, cs}:
+      Ui.cast.add(Ui.rpc(Ui.scratch_set(u, "@cast.n", "1"), "browser.seen", [J.KV{"page", J.Str{page}}]), cs)
+    case False{} _:
+      a
+
+def Ui.cast.now.p(+before: String, a: Act) -> Act:
+  match a:
+    case Act{+u, cs}:
+      Ui.cast.now.k(Bool.and(Ui.cast.allowed(u), Bool.and(Bool.not(String.is_empty(Ui.shown.page(u))), Bool.not(String.eq(Ui.shown.page(u), before)))), Act{u, cs}, Ui.shown.page(u))
+
+def Ui.cast.now(+u: Ui, a: Act) -> Act:
+  Ui.cast.now.p(Ui.shown.page(u), a)
 
 def Made.at(+u: Ui) -> String:
   Ui.info(u, "local.machine") ++ "|" ++ Ui.info(u, "local.generation")
@@ -3283,57 +3531,72 @@ def Active.faded_n(p: AParts) -> Nat:
 type MItem is Data:
   MItem{label: String, action: String, value: String, tone: String}
 
-def Menu.snoozes(+id: String) -> List<&2, MItem>:
-  [MItem{"Snooze 1 hour", "row-snooze", id ++ "|1h", ""}, MItem{"Snooze until tomorrow", "row-snooze", id ++ "|tomorrow", ""},
-   MItem{"Snooze 1 week", "row-snooze", id ++ "|1w", ""}]
+def Menu.snoozes(+l: I.Loc, +id: String) -> List<&2, MItem>:
+  [MItem{MSG.T.menu.snooze.hour(l), "row-snooze", id ++ "|1h", ""}, MItem{MSG.T.menu.snooze.tomorrow(l), "row-snooze", id ++ "|tomorrow", ""},
+   MItem{MSG.T.menu.snooze.week(l), "row-snooze", id ++ "|1w", ""}]
 
-def Menu.del(+id: String, armed: Bool) -> MItem:
-  MItem{Bool.pick(String, armed, "Click again to delete", "Delete"), "row-delete", id, "danger"}
+def Menu.del(+l: I.Loc, +id: String, armed: Bool) -> MItem:
+  MItem{Bool.pick(String, armed, MSG.T.menu.delete.confirm(l), MSG.T.common.delete(l)), "row-delete", id, "danger"}
 
-def Menu.pin(pinned: Bool, +id: String) -> MItem:
+def Menu.pin(+l: I.Loc, pinned: Bool, +id: String) -> MItem:
   match pinned:
     case True{}:
-      MItem{"Unpin", "row-unpin", id, ""}
+      MItem{MSG.T.menu.unpin(l), "row-unpin", id, ""}
     case False{}:
-      MItem{"Pin", "row-pin", id, ""}
+      MItem{MSG.T.menu.pin(l), "row-pin", id, ""}
 
 # every thread can be renamed (Ren.*)
-def Menu.ren(+id: String) -> MItem:
-  MItem{"Rename", "row-rename", id, ""}
+def Menu.ren(+l: I.Loc, +id: String) -> MItem:
+  MItem{MSG.T.menu.rename(l), "row-rename", id, ""}
 
-def Menu.thread.k(sh: M.Shelf, pinned: Bool, +id: String, armed: Bool) -> List<&2, MItem>:
+def Menu.ref(+l: I.Loc, r: R.Ref) -> MItem:
+  MItem{MSG.T.menu.copylink(l), "ref-copy", R.Ref.uri(r), ""}
+
+def Menu.room(+l: I.Loc, id: String) -> List<&2, MItem>:
+  [Menu.ref(l, R.Ref.room(id))]
+
+def Menu.msg(+l: I.Loc, thread: String, msg: String) -> List<&2, MItem>:
+  [Menu.ref(l, R.Ref.msg(thread, msg))]
+
+def Menu.thread.k.loc(+l: I.Loc, sh: M.Shelf, pinned: Bool, +id: String, armed: Bool) -> List<&2, MItem>:
   match sh:
     case M.Settled{}:
-      [MItem{"Bring back", "row-unsettle", id, ""}, Menu.ren(id), MItem{"Archive", "row-archive", id, ""}, Menu.del(id, armed)]
+      [MItem{MSG.T.menu.bringback(l), "row-unsettle", id, ""}, Menu.ren(l, id), MItem{MSG.T.menu.archive(l), "row-archive", id, ""}, Menu.del(l, id, armed)]
     case M.Snoozed{}:
-      [MItem{"Wake", "row-snooze", id ++ "|off", ""}, MItem{"Settle", "row-settle", id, ""}, Menu.ren(id), MItem{"Archive", "row-archive", id, ""}, Menu.del(id, armed)]
+      [MItem{MSG.T.menu.wake(l), "row-snooze", id ++ "|off", ""}, MItem{MSG.T.menu.settle(l), "row-settle", id, ""}, Menu.ren(l, id), MItem{MSG.T.menu.archive(l), "row-archive", id, ""}, Menu.del(l, id, armed)]
     case M.Hidden{}:
-      [MItem{"Unarchive", "row-unarchive", id, ""}, Menu.ren(id), Menu.del(id, armed)]
+      [MItem{MSG.T.menu.unarchive(l), "row-unarchive", id, ""}, Menu.ren(l, id), Menu.del(l, id, armed)]
     case _:
-      List.concat(&2, MItem, [[Menu.pin(pinned, id), Menu.ren(id), MItem{"Settle", "row-settle", id, ""}], Menu.snoozes(id),
-        [MItem{"Archive", "row-archive", id, ""}, Menu.del(id, armed)]])
+      List.concat(&2, MItem, [[Menu.pin(l, pinned, id), Menu.ren(l, id), MItem{MSG.T.menu.settle(l), "row-settle", id, ""}], Menu.snoozes(l, id),
+        [MItem{MSG.T.menu.archive(l), "row-archive", id, ""}, Menu.del(l, id, armed)]])
+
+def Menu.thread.k(sh: M.Shelf, pinned: Bool, id: String, armed: Bool) -> List<&2, MItem>:
+  Menu.thread.k.loc(I.En{}, sh, pinned, id, armed)
 
 # a thread's menu (armed: its Delete was picked once)
-def Menu.thread(+st: M.State, +now: Nat, +id: String, armed: Bool) -> List<&2, MItem>:
-  Menu.thread.k(M.Shelf.at(Ui.thread(st, id), Side.until(st, id), now), Active.pinned(Ui.thread(st, id)), id, armed)
+def Menu.thread(+l: I.Loc, +st: M.State, +now: Nat, +id: String, armed: Bool) -> List<&2, MItem>:
+  List.append(&2, MItem, Menu.thread.k.loc(l, M.Shelf.at(Ui.thread(st, id), Side.until(st, id), now), Active.pinned(Ui.thread(st, id)), id, armed), [Menu.ref(l, R.Ref.thread(id))])
 
-def Menu.look(rich: Bool, +id: String) -> List<&2, MItem>:
+def Menu.look(+l: I.Loc, rich: Bool, +id: String) -> List<&2, MItem>:
   match rich:
     case True{}:
-      [MItem{"Colour and icon", "look", id, ""}]
+      [MItem{MSG.T.menu.look(l), "look", id, ""}]
     case False{}:
       Nil{}
 
 # a project's menu (rich: the window and the web, which have the badge
 # editor; armed: Remove was picked once)
-def Menu.project(+id: String, armed: Bool, rich: Bool) -> List<&2, MItem>:
-  List.concat(&2, MItem, [[MItem{"New thread", "new-thread", id, ""}], Menu.look(rich, id),
-    [MItem{Bool.pick(String, armed, "Click again to remove", "Remove project"), "proj-remove", id, "danger"}]])
+def Menu.project(+l: I.Loc, +id: String, armed: Bool, rich: Bool) -> List<&2, MItem>:
+  List.concat(&2, MItem, [[MItem{MSG.T.thread.new(l), "new-thread", id, ""}], Menu.look(l, rich, id),
+    [MItem{Bool.pick(String, armed, MSG.T.menu.remove.confirm(l), MSG.T.menu.project.remove(l)), "proj-remove", id, "danger"}, Menu.ref(l, R.Ref.project(id))]])
 
 # a file link's menu ("file-menu path", kept as "f:<path>"; a click on the
 # link is its Open). The path goes as written; Flink.* resolves it
-def Menu.file(+path: String) -> List<&2, MItem>:
-  [MItem{"Open", "file-open", path, ""}, MItem{"Show in folder", "file-reveal", path, ""}, MItem{"Copy path", "file-copy", path, ""}]
+def Menu.file.loc(+l: I.Loc, +path: String) -> List<&2, MItem>:
+  [MItem{MSG.T.menu.file.open(l), "file-open", path, ""}, MItem{MSG.T.menu.file.reveal(l), "file-reveal", path, ""}, MItem{MSG.T.menu.file.copy(l), "file-copy", path, ""}]
+
+def Menu.file(path: String) -> List<&2, MItem>:
+  Menu.file.loc(I.En{}, path)
 
 # the menu open ("" for none), its kind ("t", "p" or "f") and its id
 def Menu.open(+u: Ui) -> String:
@@ -3347,40 +3610,65 @@ def Menu.id(+m: String) -> String:
 
 # a bot's menu ("bot-menu id", kept as "b:<id>"): the person makes a bot
 # of this machine the uberbot, or not (core/uber.bend)
-def Menu.bot(+st: M.State, +id: String) -> List<&2, MItem>:
-  Bool.pick(List<&2, MItem>, UB.Uber.is(st, id), [MItem{"Not uberbot", "uber-demote", "", ""}],
-    Bool.pick(List<&2, MItem>, UB.Uber.live(st, id), [MItem{"Make uberbot", "uber-promote", id, ""}], Nil{}))
+def Menu.bot(+l: I.Loc, +st: M.State, +id: String) -> List<&2, MItem>:
+  List.append(&2, MItem, Bool.pick(List<&2, MItem>, UB.Uber.is(st, id), [MItem{MSG.T.menu.uber.demote(l), "uber-demote", "", ""}],
+    Bool.pick(List<&2, MItem>, UB.Uber.live(st, id), [MItem{MSG.T.menu.uber.promote(l), "uber-promote", id, ""}], Nil{})), [Menu.ref(l, R.Ref.bot(id))])
 
-def Menu.items.b(bot: Bool, +u: Ui, +id: String) -> List<&2, MItem>:
+def Menu.items.b(+l: I.Loc, bot: Bool, +u: Ui, +id: String) -> List<&2, MItem>:
   match bot:
     case True{}:
-      Menu.bot(Side.st(u), id)
+      Menu.bot(l, Side.st(u), id)
     case False{}:
-      Menu.thread(Side.st(u), Side.now(u), id, String.eq(Ui.scratch(u, "@del"), id))
+      Menu.thread(l, Side.st(u), Side.now(u), id, String.eq(Ui.scratch(u, "@del"), id))
 
-def Menu.items.t(file: Bool, +u: Ui, +id: String) -> List<&2, MItem>:
+# A file URI carries a project-relative path. Files outside the selected
+# project's root keep the ordinary file menu.
+def Menu.file.here.k(+l: I.Loc, +pid: String, +path: String, rel: String) -> List<&2, MItem>:
+  match rel:
+    case SNil{}: Menu.file.loc(l, path)
+    case SCon{h, t}: List.append(&2, MItem, Menu.file.loc(l, path), [Menu.ref(l, R.Ref.file(pid, R.Ref.split(LK.Link.file.path(SCon{h, t}), '/')))])
+
+def Menu.file.here.pid(+l: I.Loc, +pid: String, +u: Ui, +path: String) -> List<&2, MItem>:
+  match pid:
+    case SNil{}: Menu.file.loc(l, path)
+    case SCon{+h, +t}:
+      Menu.file.here.k(l, SCon{h, t}, path, Bool.pick(String, String.starts_with(path, "/"), FM.Fm.rel(Ui.project_root(Side.st(u), SCon{h, t}), path), path))
+
+def Menu.file.here.loc(+l: I.Loc, +u: Ui, +path: String) -> List<&2, MItem>:
+  Menu.file.here.pid(l, Ui.thread_project(Ui.thread(Side.st(u), Ui.sel(u))), u, path)
+
+def Menu.file.here(+u: Ui, path: String) -> List<&2, MItem>:
+  Menu.file.here.loc(Lang.loc(u), u, path)
+
+def Menu.items.t(+l: I.Loc, file: Bool, +u: Ui, +id: String) -> List<&2, MItem>:
   match file:
     case True{}:
-      Menu.file(id)
+      Menu.file.here.loc(l, u, id)
     case False{}:
-      Menu.items.b(String.eq(Menu.kind(Menu.open(u)), "b"), u, id)
+      Menu.items.b(l, String.eq(Menu.kind(Menu.open(u)), "b"), u, id)
 
-def Menu.items.k(thread: Bool, +u: Ui, +id: String, rich: Bool) -> List<&2, MItem>:
+def Menu.items.k(+l: I.Loc, thread: Bool, +u: Ui, +id: String, rich: Bool) -> List<&2, MItem>:
   match thread:
     case True{}:
-      Menu.items.t(String.eq(Menu.kind(Menu.open(u)), "f"), u, id)
+      Menu.items.t(l, String.eq(Menu.kind(Menu.open(u)), "f"), u, id)
     case False{}:
-      Menu.project(id, String.eq(Ui.scratch(u, "@rm"), id), rich)
+      Menu.project(l, id, String.eq(Ui.scratch(u, "@rm"), id), rich)
 
 # the open menu's items (none while shut)
+def Menu.items.loc(+l: I.Loc, +u: Ui, rich: Bool) -> List<&2, MItem>:
+  Bool.pick(List<&2, MItem>, String.is_empty(Menu.open(u)), Nil{}, Menu.items.k(l, Bool.not(String.eq(Menu.kind(Menu.open(u)), "p")), u, Menu.id(Menu.open(u)), rich))
+
 def Menu.items(+u: Ui, rich: Bool) -> List<&2, MItem>:
-  Bool.pick(List<&2, MItem>, String.is_empty(Menu.open(u)), Nil{}, Menu.items.k(Bool.not(String.eq(Menu.kind(Menu.open(u)), "p")), u, Menu.id(Menu.open(u)), rich))
+  Menu.items.loc(Lang.loc(u), u, rich)
 
 # its heading: the thread's title, the project's name or the file's path
-def Menu.title(+u: Ui) -> String:
-  Bool.pick(String, String.eq(Menu.kind(Menu.open(u)), "t"), Active.title(Ui.thread(Side.st(u), Menu.id(Menu.open(u)))),
+def Menu.title.loc(+l: I.Loc, +u: Ui) -> String:
+  Bool.pick(String, String.eq(Menu.kind(Menu.open(u)), "t"), TTL.Title.shown(l, Active.title(Ui.thread(Side.st(u), Menu.id(Menu.open(u))))),
     Bool.pick(String, String.eq(Menu.kind(Menu.open(u)), "f"), Menu.id(Menu.open(u)),
       Bool.pick(String, String.eq(Menu.kind(Menu.open(u)), "b"), BT.Bot.name(BT.World.bot(M.State.bots(Side.st(u)), Menu.id(Menu.open(u)))), Ui.project_title(Side.st(u), Menu.id(Menu.open(u))))))
+
+def Menu.title(+u: Ui) -> String:
+  Menu.title.loc(Lang.loc(u), u)
 
 # opening one disarms any delete or remove; the same again shuts it
 def Menu.set(+u: Ui, +m: String) -> Ui:
@@ -3646,8 +3934,10 @@ def Btw.question(+u: Ui) -> String:
 def Btw.reply.of(+u: Ui) -> String:
   Ui.scratch(u, "@btw.a:" ++ Ui.sel(u))
 
-def Btw.text(+a: String) -> String:
-  Bool.pick(String, String.is_empty(a), "Thinking…", a)
+# (the answer is kept as it came; no answer is kept as Btw.answer's English
+# words, said in the language where it shows)
+def Btw.text(+l: I.Loc, +a: String) -> String:
+  Bool.pick(String, String.is_empty(a), MSG.T.btw.thinking(l), Bool.pick(String, String.eq(a, Btw.answer("")), MSG.T.btw.none(l), a))
 
 # the composer keeps the keyboard (the web draws the page again)
 def Skills.close(+u: Ui) -> Act:
@@ -3808,8 +4098,11 @@ def Proj.on.name(+u: Ui) -> String:
 
 # the picker's row naming the machine it works on: shown only when the
 # owner has other machines up; a tap goes to the next
+def Proj.machine.row.loc(+l: I.Loc, +u: Ui) -> List<&2, PItem>:
+  Bool.pick(List<&2, PItem>, List.is_empty(&2, String, Proj.machines(u)), Nil{}, [PItem{MSG.T.proj.on(l, Proj.on.name(u)), "proj-on", Proj.next(u)}])
+
 def Proj.machine.row(+u: Ui) -> List<&2, PItem>:
-  Bool.pick(List<&2, PItem>, List.is_empty(&2, String, Proj.machines(u)), Nil{}, [PItem{"On " ++ Proj.on.name(u) ++ " (change)", "proj-on", Proj.next(u)}])
+  Proj.machine.row.loc(Lang.loc(u), u)
 
 def Proj.query(u: Ui) -> String:
   match u:
@@ -4061,34 +4354,34 @@ def Proj.is_project(ps: List<&2, M.Project>, +root: String) -> Bool:
       Bool.or(Bool.and(String.eq(r, root), Bool.not(rm)), Proj.is_project(t, root))
 
 # the listed folder as a project (once)
-def Proj.add(+u: Ui, +dir: String) -> List<&2, PItem>:
-  Bool.pick(List<&2, PItem>, Proj.is_project(Proj.ps(u), dir), [PItem{dir ++ " is already a project", "", ""}], [PItem{"Add " ++ dir ++ " as a project", "proj-add", dir}])
+def Proj.add(+l: I.Loc, +u: Ui, +dir: String) -> List<&2, PItem>:
+  Bool.pick(List<&2, PItem>, Proj.is_project(Proj.ps(u), dir), [PItem{MSG.T.proj.exists(l, dir), "", ""}], [PItem{MSG.T.proj.add(l, dir), "proj-add", dir}])
 
 # (a match, not Bool.pick: only the list shown is made)
-def Proj.items.q(empty: Bool, +u: Ui, +q: String, +dir: String, +ns: List<&2, String>) -> List<&2, PItem>:
+def Proj.items.q(+l: I.Loc, empty: Bool, +u: Ui, +q: String, +dir: String, +ns: List<&2, String>) -> List<&2, PItem>:
   match empty:
     case True{}:
-      List.concat(&2, PItem, [Proj.add(u, dir), Bool.pick(List<&2, PItem>, String.eq(dir, "/"), Nil{}, [PItem{"..", "proj-cd", Proj.parent(dir)}]),
+      List.concat(&2, PItem, [Proj.add(l, u, dir), Bool.pick(List<&2, PItem>, String.eq(dir, "/"), Nil{}, [PItem{"..", "proj-cd", Proj.parent(dir)}]),
         Proj.rows(Proj.scored(ns, q), dir)])
     case False{}:
       List.concat(&2, PItem, [Proj.rows(List.sort(~Scored, ~Scored.before, Proj.scored(ns, q)), dir),
         Bool.pick(List<&2, PItem>, Bool.and(Proj.name_ok(q), Bool.not(Proj.exact(ns, String.trim(q)))),
-          [PItem{"Create project '" ++ String.trim(q) ++ "' here", "proj-new", Proj.join(dir, String.trim(q))}, PItem{"Create folder '" ++ String.trim(q) ++ "' here", "proj-mkdir", Proj.join(dir, String.trim(q))}], Nil{}),
-        Proj.add(u, dir)])
+          [PItem{MSG.T.proj.create(l, String.trim(q)), "proj-new", Proj.join(dir, String.trim(q))}, PItem{MSG.T.proj.mkdir(l, String.trim(q)), "proj-mkdir", Proj.join(dir, String.trim(q))}], Nil{}),
+        Proj.add(l, u, dir)])
 
-def Proj.items.k(path: Bool, +u: Ui, +q: String, +dir: String, +ns: List<&2, String>) -> List<&2, PItem>:
+def Proj.items.k(+l: I.Loc, path: Bool, +u: Ui, +q: String, +dir: String, +ns: List<&2, String>) -> List<&2, PItem>:
   match path:
     case True{}:
-      [PItem{"Go to " ++ q, "proj-cd", q}, PItem{"Add " ++ q ++ " as a project", "proj-add", q}, PItem{"Create project " ++ q, "proj-new", q}]
+      [PItem{MSG.T.proj.goto(l, q), "proj-cd", q}, PItem{MSG.T.proj.add(l, q), "proj-add", q}, PItem{MSG.T.proj.createat(l, q), "proj-new", q}]
     case False{}:
-      Proj.items.q(String.is_empty(q), u, q, dir, ns)
+      Proj.items.q(l, String.is_empty(q), u, q, dir, ns)
 
 # the folder browser's rows. No filter: add the listed folder (once), the
 # parent, the subfolders. A filter: matching subfolders best first, then
 # creating the typed name (only when no folder has it), then adding. A
 # typed path (/..., ~...) goes there instead
-def Proj.folders(+u: Ui) -> List<&2, PItem>:
-  Proj.items.k(Bool.or(String.starts_with(Proj.query(u), "/"), String.starts_with(Proj.query(u), "~")), u, Proj.query(u), Proj.dir(u), Proj.entries(u))
+def Proj.folders(+l: I.Loc, +u: Ui) -> List<&2, PItem>:
+  Proj.items.k(l, Bool.or(String.starts_with(Proj.query(u), "/"), String.starts_with(Proj.query(u), "~")), u, Proj.query(u), Proj.dir(u), Proj.entries(u))
 
 # a path under home written with ~ (as is when home is not known)
 def Proj.tilde(+home: String, +p: String) -> String:
@@ -4168,46 +4461,52 @@ def Proj.rank(cs: List<&2, PCand>, +q: String) -> List<&2, PCand>:
     case PCand{r, +ti, a, ro} <> t:
       Proj.rank.k(FZ.Fuzzy.score(ti, q), r, ti, a, ro, Proj.rank(t, q))
 
-def Proj.cand.row(+a: String, +ti: String) -> String:
-  Bool.pick(String, String.eq(a, "proj-pick"), ti, "Add " ++ ti)
+def Proj.cand.row(+l: I.Loc, +a: String, +ti: String) -> String:
+  Bool.pick(String, String.eq(a, "proj-pick"), ti, MSG.T.proj.addcand(l, ti))
 
-def Proj.list.rows(cs: List<&2, PCand>) -> List<&2, PItem>:
+def Proj.list.rows(+l: I.Loc, cs: List<&2, PCand>) -> List<&2, PItem>:
   match cs:
     case Nil{}:
       Nil{}
     case PCand{_, ti, +a, ro} <> t:
-      PItem{Proj.cand.row(a, ti), a, ro} <> Proj.list.rows(t)
+      PItem{Proj.cand.row(l, a, ti), a, ro} <> Proj.list.rows(l, t)
 
 # the projects matching the filter, best first (live first for a tie)
-def Proj.list(+u: Ui, +q: String) -> List<&2, PItem>:
-  Proj.list.rows(List.sort(~PCand, ~PCand.before, Proj.rank(Proj.cands(u), q)))
+def Proj.list.loc(+l: I.Loc, +u: Ui, +q: String) -> List<&2, PItem>:
+  Proj.list.rows(l, List.sort(~PCand, ~PCand.before, Proj.rank(Proj.cands(u), q)))
 
-def Proj.browse.row() -> PItem:
-  PItem{"Add a project from a folder", "proj-browse", ""}
+def Proj.list(+u: Ui, q: String) -> List<&2, PItem>:
+  Proj.list.loc(Lang.loc(u), u, q)
+
+def Proj.browse.row(+l: I.Loc) -> PItem:
+  PItem{MSG.T.proj.browse(l), "proj-browse", ""}
 
 # (a match, not Bool.pick: only the list shown is made)
-def Proj.items.p(path: Bool, empty: Bool, +u: Ui, +q: String) -> List<&2, PItem>:
+def Proj.items.p(+l: I.Loc, path: Bool, empty: Bool, +u: Ui, +q: String) -> List<&2, PItem>:
   match path empty:
     case True{} _:
-      Proj.items.k(True{}, u, q, "", Nil{})
+      Proj.items.k(l, True{}, u, q, "", Nil{})
     case False{} True{}:
-      Proj.browse.row() <> Proj.list(u, q)
+      Proj.browse.row(l) <> Proj.list.loc(l, u, q)
     case False{} False{}:
-      List.append(&2, PItem, Proj.list(u, q), [Proj.browse.row()])
+      List.append(&2, PItem, Proj.list.loc(l, u, q), [Proj.browse.row(l)])
 
-def Proj.items.m(dir: Bool, +u: Ui) -> List<&2, PItem>:
+def Proj.items.m(+l: I.Loc, dir: Bool, +u: Ui) -> List<&2, PItem>:
   match dir:
     case True{}:
-      Proj.folders(u)
+      Proj.folders(l, u)
     case False{}:
-      Proj.items.p(Bool.or(String.starts_with(Proj.query(u), "/"), String.starts_with(Proj.query(u), "~")), String.is_empty(Proj.query(u)), u, Proj.query(u))
+      Proj.items.p(l, Bool.or(String.starts_with(Proj.query(u), "/"), String.starts_with(Proj.query(u), "~")), String.is_empty(Proj.query(u)), u, Proj.query(u))
 
 # what the picker offers. The projects: adding from a folder first, then
 # every project (with a filter: those matching, best first, then adding
 # from a folder). A typed path goes there, adds it, or creates it. The
 # folders: Proj.folders
+def Proj.items.loc(+l: I.Loc, +u: Ui) -> List<&2, PItem>:
+  List.append(&2, PItem, Proj.items.m(l, Proj.browsing(u), u), Proj.machine.row.loc(l, u))
+
 def Proj.items(+u: Ui) -> List<&2, PItem>:
-  List.append(&2, PItem, Proj.items.m(Proj.browsing(u), u), Proj.machine.row(u))
+  Proj.items.loc(Lang.loc(u), u)
 
 # the path a row of the projects list stands for, as it is shown beside it
 def Proj.detail(+u: Ui, it: PItem) -> String:
@@ -4322,8 +4621,11 @@ def Proj.run(it: PItem, u: Ui) -> Act:
       Proj.run.k(Proj.pos(Proj.acts(), a, 0n), u, v)
 
 # Enter runs the selected row
-def Proj.enter(+u: Ui) -> Act:
-  Proj.run(Palette.at(Proj.items(u), Proj.index(u)), u)
+def Proj.enter(+l: I.Loc, +u: Ui) -> Act:
+  Proj.run(Palette.at(Proj.items.loc(l, u), Proj.index(u)), u)
+
+def Proj.enter.u(+u: Ui) -> Act:
+  Proj.enter(Lang.loc(u), u)
 
 # Attachments
 # -----------
@@ -4669,8 +4971,11 @@ def Fm.trail.go(ps: List<&2, String>, +at: String) -> List<&2, PItem>:
       PItem{p, "fm-cd", FM.Fm.join(at, p)} <> Fm.trail.go(t, FM.Fm.join(at, p))
 
 # where the folder is: the project, then each folder down to it
+def Fm.trail.loc(+l: I.Loc, +u: Ui) -> List<&2, PItem>:
+  PItem{MSG.T.fm.root(l), "fm-cd", ""} <> Fm.trail.go(Bool.pick(List<&2, String>, String.is_empty(Fm.dir(u)), Nil{}, String.split(Fm.dir(u), '/')), "")
+
 def Fm.trail(+u: Ui) -> List<&2, PItem>:
-  PItem{"Project", "fm-cd", ""} <> Fm.trail.go(Bool.pick(List<&2, String>, String.is_empty(Fm.dir(u)), Nil{}, String.split(Fm.dir(u), '/')), "")
+  Fm.trail.loc(Lang.loc(u), u)
 
 # a row's icon (core/icons.bend), the same on every client
 def Fm.icon(+kind: String) -> String:
@@ -4790,8 +5095,11 @@ def Mpage.shots.k(m: Maybe<&2, MC.MPart>) -> Bool:
       False{}
 
 # what the render button says: its pictures drawn, again, or at work
+def Mpage.render.label.loc(+l: I.Loc, +u: Ui) -> String:
+  Bool.pick(String, Bool.not(String.is_empty(Mpage.busy(u))), MSG.T.mech.rendering(l), Bool.pick(String, Mpage.shots.k(Mpage.cur(u)), MSG.T.mech.again(l), MSG.T.mech.create(l)))
+
 def Mpage.render.label(+u: Ui) -> String:
-  Bool.pick(String, Bool.not(String.is_empty(Mpage.busy(u))), "Rendering…", Bool.pick(String, Mpage.shots.k(Mpage.cur(u)), "Render again", "Create renders"))
+  Mpage.render.label.loc(Lang.loc(u), u)
 
 def Mpage.open.k(known: Bool, +u: Ui, +path: String) -> Ui:
   match known:
@@ -4858,6 +5166,67 @@ def Ui.view_pick.p(u: Ui, +kind: String, +path: String) -> Ui:
 def Ui.view_pick.back(+u: Ui, +kind: String) -> Ui:
   Ui.view_pick.p(u, kind, Rv.back(u, kind))
 
+# The project's boards (the card's board files, from its folder, kept as
+# "fab.boards:<t>"): with more than one, the viewer's Board, Schematic and
+# 3D tabs offer each by its folder's name (chips on the web and in the
+# window, the Sheet menu on phones); "board-pick" shows one (laws bd_*)
+def Bd.files(+u: Ui) -> List<&2, String>:
+  Att.nonblank(String.lines(Ui.info(u, "fab.boards:" ++ Ui.sel(u))))
+
+def Bd.many(+u: Ui) -> Bool:
+  Nat.is_gt(List.length(&2, String, Bd.files(u)), 1n)
+
+def Bd.name(+rel: String) -> String:
+  Bool.pick(String, String.is_empty(MC.Mech.parent(rel)), MC.Mech.stem(rel), MC.Mech.last(MC.Mech.parent(rel)))
+
+# what a kind shows of a board: its schematic beside it, else the board
+def Bd.path(+kind: String, +rel: String) -> String:
+  Bool.pick(String, String.eq(kind, "schematic"), MC.Mech.in(MC.Mech.parent(rel), MC.Mech.stem(rel) ++ ".kicad_sch"), rel)
+
+# the board on show: the viewer's file is in its folder (or is it)
+def Bd.on(+path: String, +rel: String) -> Bool:
+  Bool.pick(Bool, String.is_empty(MC.Mech.parent(rel)), String.ends_with(path, "/" ++ rel),
+    String.contains(path, "/" ++ MC.Mech.parent(rel) ++ "/"))
+
+# the board on show: the one whose folder holds the viewer's file ("" for
+# none), and what another tab shows of it (Bd.keep: switching between
+# Board, Schematic and 3D stays on the board picked; "" when the project
+# has one board or the viewer is on none of them, for the project's own)
+def Bd.cur(fs: List<&2, String>, +path: String) -> String:
+  match fs:
+    case Nil{}:
+      ""
+    case +f <> t:
+      Bool.pick(String, Bd.on(path, f), f, Bd.cur(t, path))
+
+def Bd.keep.k(+cur: String, +kind: String, +root: String) -> String:
+  Bool.pick(String, Bool.and(Bool.not(String.is_empty(cur)), Bool.or(String.eq(kind, "board"), Bool.or(String.eq(kind, "schematic"), String.eq(kind, "3d")))),
+    FM.Fm.abs(root, Bd.path(kind, cur)), "")
+
+def Bd.keep(+u: Ui, +kind: String, +path: String) -> String:
+  Bd.keep.k(Bool.pick(String, Bd.many(u), Bd.cur(Bd.files(u), path), ""), kind, Ui.root(u))
+
+def Bd.or(+a: String, +b: String) -> String:
+  Bool.pick(String, String.is_empty(a), b, a)
+
+# the file the viewer shows: the one picked, else the project's own board
+# (the card's board_default, "fab.board:<t>"), so its chip is lit too
+def Bd.shown.k(+path: String, +root: String, +own: String) -> String:
+  Bd.or(path, Bool.pick(String, Bool.or(String.is_empty(own), String.is_empty(root)), "", FM.Fm.abs(root, own)))
+
+def Bd.shown(+u: Ui, +path: String) -> String:
+  Bd.shown.k(path, Ui.root(u), Ui.info(u, "fab.board:" ++ Ui.sel(u)))
+
+# the window's tab picked: a comparison kept (Rv.back), else the board picked
+def Ui.view_pick.bd(+u: Ui, +kind: String) -> Ui:
+  Ui.view_pick.p(u, kind, Bd.or(Rv.back(u, kind), Bd.keep(u, kind, Bd.shown(u, Ui.view_get(u, "view.path")))))
+
+def Bd.kind(+k: String) -> String:
+  Bool.pick(String, Bool.or(String.eq(k, "schematic"), String.eq(k, "3d")), k, "board")
+
+def Bd.pick(+u: Ui, +rel: String) -> Act:
+  Act{Ui.view_put(u, Bd.kind(Ui.view_get(u, "view.kind")), FM.Fm.abs(Ui.root(u), Bd.path(Bd.kind(Ui.view_get(u, "view.kind")), rel))), Nil{}}
+
 # "mech" opens Mech (the part in 3D), "mech-part" shows another part,
 # "mech-3d" a part in 3D, "mech-refresh" asks for the parts again,
 # "mech-renders" shows a part's pictures, "mech-render" asks the hub to
@@ -4881,7 +5250,7 @@ def Mpage.act(i: Nat, +u: Ui, +value: String) -> Act:
       Ui.rpc(Ui.scratch_set(Ui.scratch_set(u, "@mech.busy:" ++ Ui.sel(u), value), "@mech.err:" ++ Ui.sel(u), ""), "mech.render",
         [J.KV{"thread", J.Str{Ui.sel(u)}}, J.KV{"path", J.Str{value}}])
     case 6n:
-      Act{Ui.view_put(u, value, Rv.back(u, value)), Nil{}}
+      Act{Ui.view_put(u, value, Bd.or(Rv.back(u, value), Bd.keep(u, value, Bd.shown(u, Ui.view_get(u, "view.path"))))), Nil{}}
     case 7n:
       Act{Ui.view_put(u, "schematic", Rv.sheet(Ui.view_get(u, "view.path"), value)), Nil{}}
     case 8n:
@@ -5087,8 +5456,11 @@ def Solid.sync(a: Act) -> Act:
 
 # what the page says under its parts: where to get FreeCAD when the hub
 # has none, else nothing
+def Mpage.note.loc(+l: I.Loc, +u: Ui) -> String:
+  Bool.pick(String, Bool.not(String.is_empty(Ui.info(u, "freecad"))), "", MSG.T.mech.nofreecad(l))
+
 def Mpage.note(+u: Ui) -> String:
-  Bool.pick(String, Bool.not(String.is_empty(Ui.info(u, "freecad"))), "", "FreeCAD is not installed on this hub's machine, and agents need it to model parts: get it from freecad.org/downloads.")
+  Mpage.note.loc(Lang.loc(u), u)
 
 def Ui.error_set(u: Ui, e: String) -> Ui:
   match u:
@@ -5335,29 +5707,32 @@ def Qu.index(qs: List<&2, M.QItem>, +msg: String) -> Nat:
 type QBtn is Data:
   QBtn{label: String, action: String, value: String}
 
-def Qu.first(+first: Bool, +run: Bool) -> List<&2, QBtn>:
-  Bool.pick(List<&2, QBtn>, Bool.and(first, Bool.not(run)), [QBtn{"Resume", "q-resume", ""}], Nil{})
+def Qu.first(+l: I.Loc, +first: Bool, +run: Bool) -> List<&2, QBtn>:
+  Bool.pick(List<&2, QBtn>, Bool.and(first, Bool.not(run)), [QBtn{MSG.T.queue.resume(l), "q-resume", ""}], Nil{})
 
 # a queued row's buttons, left to right: while the turn runs, Steer sends
 # it into the turn; while none runs (the queue is held, after a stop or a
 # restart), Send starts it alone and the first row can resume them all
 # (laws queue_row_*)
-def Qu.buttons(+run: Bool, +first: Bool, +msg: String) -> List<&2, QBtn>:
-  List.append(&2, QBtn, Qu.first(first, run),
-    [QBtn{Bool.pick(String, run, "Steer", "Send"), "q-steer", msg}, QBtn{"Edit", "q-edit", msg}, QBtn{"Up", "q-up", msg}, QBtn{"Remove", "q-remove", msg}])
+def Qu.buttons.loc(+l: I.Loc, +run: Bool, +first: Bool, +msg: String) -> List<&2, QBtn>:
+  List.append(&2, QBtn, Qu.first(l, first, run),
+    [QBtn{Bool.pick(String, run, MSG.T.composer.steer(l), MSG.T.composer.send(l)), "q-steer", msg}, QBtn{MSG.T.queue.edit(l), "q-edit", msg}, QBtn{MSG.T.queue.up(l), "q-up", msg}, QBtn{MSG.T.queue.remove(l), "q-remove", msg}])
+
+def Qu.buttons(run: Bool, first: Bool, msg: String) -> List<&2, QBtn>:
+  Qu.buttons.loc(I.En{}, run, first, msg)
 
 # a queued row as shown: handed-over context (a fork's start, a fork
 # brought back, a provider switch) can only be removed; it goes with the
 # next message
-def Qu.row_buttons(+run: Bool, +first: Bool, +msg: String) -> List<&2, QBtn>:
-  Bool.pick(List<&2, QBtn>, String.starts_with(msg, "handoff:"), [QBtn{"Remove", "q-remove", msg}], Qu.buttons(run, first, msg))
+def Qu.row_buttons(+l: I.Loc, +run: Bool, +first: Bool, +msg: String) -> List<&2, QBtn>:
+  Bool.pick(List<&2, QBtn>, String.starts_with(msg, "handoff:"), [QBtn{MSG.T.queue.remove(l), "q-remove", msg}], Qu.buttons.loc(l, run, first, msg))
 
-def Qu.tag(+run: Bool, +msg: String) -> String:
-  Bool.pick(String, String.starts_with(msg, "handoff:"), "Context", Bool.pick(String, run, "Queued", "Held"))
+def Qu.tag(+l: I.Loc, +run: Bool, +msg: String) -> String:
+  Bool.pick(String, String.starts_with(msg, "handoff:"), MSG.T.queue.context(l), Bool.pick(String, run, MSG.T.queue.queued(l), MSG.T.queue.held(l)))
 
 # a queued row's text: context says what it is, a message itself
-def Qu.label(+msg: String, +text: String) -> String:
-  Bool.pick(String, String.starts_with(msg, "handoff:"), DF.Diff.first(String.drop(text, 12n)) ++ " (goes with the next message)", text)
+def Qu.label(+l: I.Loc, +msg: String, +text: String) -> String:
+  Bool.pick(String, String.starts_with(msg, "handoff:"), MSG.T.queue.handoff(l, DF.Diff.first(String.drop(text, 12n))), text)
 
 # a thread's todo list as it shows (TD.Todo.shown): empty when hidden
 def Todos.of(+st: M.State, +th: String) -> List<&2, TD.Todo>:
@@ -5398,8 +5773,8 @@ def Todos.more.ask(+all: Bool, +th: String) -> String:
   FO.Fold.ask(all, Todos.all.key(th))
 
 # the last line's words: "Show all 24" or "Show fewer", "" when the list fits
-def Todos.more(+all: Bool, +ts: List<&2, TD.Todo>) -> String:
-  Bool.pick(String, Nat.is_gt(List.length(&2, TD.Todo, ts), TD.Todo.fit()), Bool.pick(String, all, "Show fewer", "Show all " ++ Nat.show(List.length(&2, TD.Todo, ts))), "")
+def Todos.more(+l: I.Loc, +all: Bool, +ts: List<&2, TD.Todo>) -> String:
+  Bool.pick(String, Nat.is_gt(List.length(&2, TD.Todo, ts), TD.Todo.fit()), Bool.pick(String, all, MSG.T.todos.fewer(l), MSG.T.todos.all(l, Nat.show(List.length(&2, TD.Todo, ts)))), "")
 
 def Todos.rows.all(+cap: Nat, +ts: List<&2, TD.Todo>) -> List<&2, TD.TRow>:
   TD.Todo.rows.k(Nat.is_gt(List.length(&2, TD.Todo, ts), cap), ts, List.length(&2, TD.Todo, ts), cap, TD.Todo.open(ts))
@@ -5494,6 +5869,251 @@ def Bots.say.k(a: Act, +bot: String, text: String) -> Act:
 def Bots.say(u: Ui, +bot: String, text: String) -> Act:
   Bots.say.k(Draft.sent(u), bot, text)
 
+# The project card (core/order.bend)
+# ----------------------------------
+# Above a project thread every client shows the intent's goal (opened: the
+# whole intent), Edit (the composer gets "/intent" and the text; sending
+# it writes .backplane/intent.md) and "Buy it · from $X" (order.buy: a buy
+# thread, gone to at once). The hub answers fab.look with the card, kept
+# as info fab:<thread>; it is asked when a thread is chosen and whenever
+# its turn ends (Fab.sync after every action and message; "@fab.at" is
+# what was asked last).
+
+# Settings' rows on every client: Ordering (order.enabled, off until the
+# person turns it on: no Buy it, nothing sent to the order server) and,
+# with it on, the estimates sent or not (order.estimates)
+def Fab.enabled(+st: M.State) -> Bool:
+  OR.Order.enabled(M.Setting.get(st, "order.enabled", "off"))
+
+def Fab.set.enabled(+st: M.State) -> String:
+  Bool.pick(String, Fab.enabled(st), "on", "off")
+
+def Fab.set.order.label() -> String:
+  "Ordering"
+
+def Fab.set.order.note() -> String:
+  "Order boards and parts from Backplane. Off: no prices or uploads."
+
+def Fab.set.label() -> String:
+  "Price estimates"
+
+def Fab.set.note.k(on: Bool) -> String:
+  match on:
+    case True{}:
+      "Buy it shows a price from each part's size and options. No files are sent."
+    case False{}:
+      "Comes with Ordering."
+
+def Fab.set.on(+st: M.State) -> String:
+  Bool.pick(String, String.eq(M.Setting.get(st, "order.estimates", "on"), "off"), "off", "on")
+
+def Fab.th(+u: Ui, +value: String) -> String:
+  Bool.pick(String, String.is_empty(value), Ui.sel(u), value)
+
+# the card's fields, kept apart when it arrives (Fab.reply) so no client
+# parses it per frame: "fab.line:<t>" the goal (or a nudge), "fab.intent:<t>",
+# "fab.buy:<t>" the button's words, "fab.shown:<t>" "1" when there is a card,
+# and "fab.open:<t>" "1" while the person has it open
+def Fab.line(+u: Ui) -> String:
+  Ui.info(u, "fab.line:" ++ Ui.sel(u))
+
+def Fab.intent(+u: Ui, +th: String) -> String:
+  Ui.info(u, "fab.intent:" ++ th)
+
+def Fab.open(+u: Ui) -> Bool:
+  String.eq(Ui.info(u, "fab.open:" ++ Ui.sel(u)), "1")
+
+def Fab.buying(+st: M.State, +th: String) -> Bool:
+  Bool.not(String.is_empty(M.Setting.get(st, OR.Order.buy.key(th), "")))
+
+# the Buy button's words ("" for none: ordering off, or a buy thread,
+# which has none of its own; laws fab_buy_*)
+def Fab.buy.k(off: Bool, +label: String) -> String:
+  Bool.pick(String, off, "", label)
+
+def Fab.buy.of(+st: M.State, +nf: Map<&2, String>, +th: String) -> String:
+  Fab.buy.k(Bool.or(Fab.buying(st, th), Bool.not(Fab.enabled(st))), Str.get(nf, "fab.buy:" ++ th))
+
+def Fab.buy(+u: Ui) -> String:
+  Fab.buy.k(Bool.or(Fab.buying(Ui.state.of(u), Ui.sel(u)), Bool.not(Fab.enabled(Ui.state.of(u)))), Ui.info(u, "fab.buy:" ++ Ui.sel(u)))
+
+def Fab.shown(+u: Ui) -> Bool:
+  String.eq(Ui.info(u, "fab.shown:" ++ Ui.sel(u)), "1")
+
+# the line above the message box once there is something to buy (with
+# Buy it beside it): "Ready to order · LED board · Lamp shade", "" for none
+# (no Buy it, or a buy thread); "fab.ready:<t>" is kept by Fab.reply
+def Fab.turn(t: M.Thread) -> String:
+  match t:
+    case M.Thread{_, +project, _, _, _, turn, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _}:
+      Bool.pick(String, String.is_empty(project), "", C.Turn.name(turn))
+
+# (and none while the agent works: it is ready once the turn is over)
+def Fab.ready.k(+buy: String, +line: String, run: Bool) -> String:
+  Bool.pick(String, Bool.or(run, String.is_empty(buy)), "", Bool.pick(String, String.is_empty(line), "Ready to order", line))
+
+# the bar's button: Buy it with its price, or Buy again once ordered
+def Fab.ready.btn.k(again: Bool, +buy: String) -> String:
+  Bool.pick(String, Bool.or(Bool.not(again), String.is_empty(buy)), buy, "Buy again")
+
+def Fab.ready.btn.of(+st: M.State, +nf: Map<&2, String>, +th: String) -> String:
+  Fab.ready.btn.k(String.eq(Str.get(nf, "fab.again:" ++ th), "1"), Fab.buy.of(st, nf, th))
+
+def Fab.ready.btn(+u: Ui) -> String:
+  Fab.ready.btn.k(String.eq(Ui.info(u, "fab.again:" ++ Ui.sel(u)), "1"), Fab.buy(u))
+
+# The bar can be put away (its ×) and comes back from a small Buy it in the
+# thread's header: the setting fab.min.<project> "1", one per project and
+# kept like any setting, so every device follows (laws fab_min_*)
+def Fab.min.key(+project: String) -> String:
+  "fab.min." ++ project
+
+def Fab.project(t: M.Thread) -> String:
+  match t:
+    case M.Thread{_, +project, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _}:
+      project
+
+def Fab.min.of(+st: M.State, +th: String) -> Bool:
+  String.eq(M.Setting.get(st, Fab.min.key(Fab.project(Ui.thread(st, th))), ""), "1")
+
+# the bar's line once put away: none
+def Fab.ready.shown.k(min: Bool, +line: String) -> String:
+  Bool.pick(String, min, "", line)
+
+# the header's Buy it: while the bar is put away and has something to show
+def Fab.mini.k(min: Bool, +line: String) -> Bool:
+  Bool.and(min, Bool.not(String.is_empty(line)))
+
+def Fab.mini.label(again: Bool) -> String:
+  Bool.pick(String, again, "Ordered", "Buy it")
+
+def Fab.mini.tools.k(show: Bool, again: Bool, +th: String) -> List<&2, TO.Tool>:
+  match show:
+    case True{}:
+      [TO.Tool{"box", Fab.mini.label(again), "Show the Ready to order bar again", "fab-show", th, False{}, False{}, False{}}]
+    case False{}:
+      Nil{}
+
+def Fab.ready.all(+u: Ui) -> String:
+  Fab.ready.k(Fab.buy(u), Ui.info(u, "fab.ready:" ++ Ui.sel(u)), String.eq(Fab.turn(Ui.thread(Ui.state.of(u), Ui.sel(u))), "running"))
+
+def Fab.ready(+u: Ui) -> String:
+  Fab.ready.shown.k(Fab.min.of(Ui.state.of(u), Ui.sel(u)), Fab.ready.all(u))
+
+# the header's tools for the open thread ([] or its Buy it)
+def Fab.mini.tools(+u: Ui) -> List<&2, TO.Tool>:
+  Fab.mini.tools.k(Fab.mini.k(Fab.min.of(Ui.state.of(u), Ui.sel(u)), Fab.ready.all(u)), String.eq(Ui.info(u, "fab.again:" ++ Ui.sel(u)), "1"), Ui.sel(u))
+
+# the same from the state and the info a window or phone frame has
+def Fab.mini.tools.of(+st: M.State, +nf: Map<&2, String>, +th: String, run: Bool) -> List<&2, TO.Tool>:
+  Fab.mini.tools.k(Fab.mini.k(Fab.min.of(st, th), Fab.ready.k(Fab.buy.of(st, nf, th), Str.get(nf, "fab.ready:" ++ th), run)), String.eq(Str.get(nf, "fab.again:" ++ th), "1"), th)
+
+# (nothing for a thread with no project: no fab.min. without one)
+def Fab.min.set.k(none: Bool, +u: Ui, +project: String, +v: String) -> Act:
+  match none:
+    case True{}:
+      Act{u, Nil{}}
+    case False{}:
+      Ui.setting(u, Fab.min.key(project) ++ "=" ++ v)
+
+def Fab.min.set(+u: Ui, +th: String, +v: String) -> Act:
+  Fab.min.set.k(String.is_empty(Fab.project(Ui.thread(Ui.state.of(u), th))), u, Fab.project(Ui.thread(Ui.state.of(u), th)), v)
+
+def Fab.act.k(i: Nat, +u: Ui, +th: String) -> Act:
+  match i:
+    # the card opened or shut
+    case 0n:
+      Act{Ui.info_set(u, "fab.open:" ++ th, Bool.pick(String, String.eq(Ui.info(u, "fab.open:" ++ th), "1"), "", "1")), Nil{}}
+    # the intent into the composer, to change and send
+    case 1n:
+      Ui.draft(u, OR.Intent.edit(Fab.intent(u, th)))
+    # Buy it: the hub makes the buy thread and this client goes to it
+    case 2n:
+      Ui.rpc(Made.want(u), "order.buy", [J.KV{"thread", J.Str{th}}])
+    # the bar's ×: put away for the project; the header's Buy it: back
+    case 4n:
+      Fab.min.set(u, th, "1")
+    case 5n:
+      Fab.min.set(u, th, "0")
+    case _:
+      Act{u, Nil{}}
+
+def Fab.actions() -> List<&2, String>:
+  ["fab-open", "fab-edit", "buy", "board-pick", "fab-hide", "fab-show"]
+
+def Fab.is(+action: String) -> Bool:
+  Nat.is_lt(C.Codec.pos(Fab.actions(), action), 6n)
+
+def Fab.act.v(+i: Nat, +u: Ui, +value: String) -> Act:
+  match i:
+    case 3n:
+      Bd.pick(u, value)
+    case _:
+      Fab.act.k(i, u, Fab.th(u, value))
+
+def Fab.act(+u: Ui, +action: String, +value: String) -> Act:
+  Fab.act.v(C.Codec.pos(Fab.actions(), action), u, value)
+
+# what was last asked for: the thread and where its turn stands
+def Fab.at(+u: Ui) -> String:
+  Fab.set.enabled(Ui.state.of(u)) ++ Fab.set.on(Ui.state.of(u)) ++ "#" ++ Ui.sel(u) ++ "#" ++ Fab.turn(Ui.thread(Ui.state.of(u), Ui.sel(u)))
+
+# asked again when the turn moves on; while it runs only if this thread has
+# no card yet (a thread opened mid-turn), since its files are changing;
+# never for a thread elsewhere (its hub has the files)
+def Fab.want(+u: Ui) -> Bool:
+  Bool.and(Bool.and(Bool.and(Bool.not(String.is_empty(Ui.sel(u))), Bool.not(FR.Fr.is(Ui.sel(u)))), Bool.not(String.eq(Fab.at(u), Ui.scratch(u, "@fab.at")))),
+    Bool.and(Bool.not(String.ends_with(Fab.at(u), "#")),
+      Bool.or(Bool.not(String.ends_with(Fab.at(u), "#running")), String.is_empty(Ui.info(u, "fab.line:" ++ Ui.sel(u))))))
+
+# (after the action's own commands: a setting it changed, Ordering's say,
+# must reach the hub before the look it asks for)
+def Fab.sync.k(want: Bool, +u: Ui, cmds: List<&2, Cmd>) -> Act:
+  match want:
+    case True{}:
+      Ui.first(cmds, Ui.rpc(Ui.scratch_set(u, "@fab.at", Fab.at(u)), "fab.look", [J.KV{"thread", J.Str{Ui.sel(u)}}]))
+    case False{}:
+      Act{u, cmds}
+
+def Fab.sync(a: Act) -> Act:
+  match a:
+    case Act{+u, cmds}:
+      Fab.sync.k(Fab.want(u), u, cmds)
+
+# the hub's card for a thread
+def Fab.has(+o: J.Json) -> Bool:
+  Bool.not(String.eq(J.Json.show(Maybe.default(&2, J.Json, J.Json.get(J.Json.get_obj(o, "result"), "goal"), J.Null{})), "null"))
+
+def Fab.keep(u: Ui, +th: String, +c: OR.Card) -> Ui:
+  Ui.info_set(Ui.info_set(Ui.info_set(Ui.info_set(u, "fab.line:" ++ th, OR.Card.line(c)), "fab.intent:" ++ th, OR.Card.intent(c)),
+    "fab.buy:" ++ th, OR.Card.buy(c)), "fab.shown:" ++ th, Bool.pick(String, OR.Card.shown(c), "1", ""))
+
+def Fab.reply.r(u: Ui, +th: String, +r: J.Json) -> Ui:
+  Fab.keep(Ui.info_set(Ui.info_set(Ui.info_set(Ui.info_set(u, "fab.ready:" ++ th, OR.Card.ready.or(OR.Card.ready.j(r), J.Json.get_str(r, "order", ""))), "fab.boards:" ++ th, OR.Card.boards.j(r)),
+    "fab.board:" ++ th, J.Json.get_str(r, "board_default", "")), "fab.again:" ++ th, Bool.pick(String, OR.Order.ordered(J.Json.get_str(r, "order", "")), "1", "")), th, OR.Card.of.j(r))
+
+def Fab.reply(has: Bool, u: Ui, +o: J.Json) -> Ui:
+  match has:
+    case True{}:
+      Fab.reply.r(u, J.Json.get_str(J.Json.get_obj(o, "result"), "thread", ""), J.Json.get_obj(o, "result"))
+    case False{}:
+      u
+
+# "/intent <text>" sent: the project's intent is that text (the hub writes
+# it and answers with the card)
+def Intent.send.go(u: Ui, +text: String) -> Act:
+  match u:
+    case Ui{st, +sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}:
+      Ui.rpc(Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}, "fab.intent", [J.KV{"thread", J.Str{sel}}, J.KV{"text", J.Str{text}}])
+
+def Intent.send.d(a: Act, +text: String) -> Act:
+  match a:
+    case Act{u, cs}:
+      Ui.first(cs, Intent.send.go(u, text))
+
+def Intent.send(+u: Ui) -> Act:
+  Intent.send.d(Draft.clear(u), OR.Intent.body(Ui.draft_text(u)))
+
 def Ui.send.b(empty: Bool, b: Maybe<&2, BT.Bot>, u: Ui, text: String, +mode: String) -> Act:
   match empty b:
     case True{} _:
@@ -5543,8 +6163,15 @@ def Ui.send.give(give: Bool, +u: Ui, alt: Bool) -> Act:
     case False{}:
       Ui.send.btw(Btw.is(Ui.draft_text(u)), u, alt)
 
+def Ui.send.intent(intent: Bool, +u: Ui, alt: Bool) -> Act:
+  match intent:
+    case True{}:
+      Intent.send(u)
+    case False{}:
+      Ui.send.give(Give.is(Ui.draft_text(u)), u, alt)
+
 def Ui.send(+u: Ui, alt: Bool) -> Act:
-  Ui.send.give(Give.is(Ui.draft_text(u)), u, alt)
+  Ui.send.intent(OR.Intent.is(Ui.draft_text(u)), u, alt)
 
 def Bots.sel.set(u: Ui, +th: String) -> Ui:
   match u:
@@ -5654,17 +6281,20 @@ type NotifyRow is Data:
 def Notify.row(+st: M.State, name: String, note: String, +kind: String) -> NotifyRow:
   NotifyRow{name, note, Bool.pick(String, NO.Policy.on(st, kind), "on", "off"), "notify." ++ kind}
 
-def Notify.rows(+st: M.State) -> List<&2, NotifyRow>:
-  [Notify.row(st, "Needs me", "Approvals, questions and anything an agent is blocked on until you act.", "needs"),
-   Notify.row(st, "Settled", "Work you gave a thread is finished, failed, or its branch merged. Once per piece of work.", "settled"),
-   Notify.row(st, "Reminders", "Reminders and digests you scheduled.", "reminders"),
-   Notify.row(st, "Everything", "Also every turn end and room exchange, as before.", "all")]
+def Notify.rows.loc(+l: I.Loc, +st: M.State) -> List<&2, NotifyRow>:
+  [Notify.row(st, MSG.T.notify.needs(l), MSG.T.notify.needs.note(l), "needs"),
+   Notify.row(st, MSG.T.notify.settled(l), MSG.T.notify.settled.note(l), "settled"),
+   Notify.row(st, MSG.T.notify.reminders(l), MSG.T.notify.reminders.note(l), "reminders"),
+   Notify.row(st, MSG.T.notify.all(l), MSG.T.notify.all.note(l), "all")]
 
-def Notify.title() -> String:
-  "Notify me for"
+def Notify.rows(st: M.State) -> List<&2, NotifyRow>:
+  Notify.rows.loc(I.En{}, st)
 
-def Notify.lead() -> String:
-  "Phone and desktop alerts. The rest stays in the app as unread."
+def Notify.title(+l: I.Loc) -> String:
+  MSG.T.notify.title(l)
+
+def Notify.lead(+l: I.Loc) -> String:
+  MSG.T.notify.lead(l)
 
 # Pairing the owner's machines (Mate.*)
 # ----------------------------
@@ -5772,54 +6402,59 @@ def Mate.behind(ps: List<&2, M.Project>, +s: M.State, +link: String, +acc: Nat) 
     case M.Project{+id, _, _, _, _} <> t:
       Mate.behind(t, s, link, Bool.pick(Nat, Bool.and(String.eq(FR.Fr.link(id), link), FR.Fr.syncing(s, id)), 1n+acc, acc))
 
-def Mate.note.linked(+n: Nat, away: Bool) -> String:
+def Mate.note.linked(+l: I.Loc, +n: Nat, away: Bool) -> String:
   match away:
     case True{}:
-      "Away: its projects stay listed and readable until it answers."
+      MSG.T.machines.away(l)
     case False{}:
-      Bool.pick(String, Nat.is_eq(n, 0n), "In sync. Its projects and threads show here as they change.",
-        "Catching up: " ++ Nat.show(n) ++ Bool.pick(String, Nat.is_eq(n, 1n), " project", " projects") ++ " still loading. The rest are ready.")
+      Bool.pick(String, Nat.is_eq(n, 0n), MSG.T.machines.sync(l), MSG.T.machines.behind(l, Nat.show(n), Bool.pick(String, Nat.is_eq(n, 1n), "one", "other")))
 
-def Mate.note.k(off: Bool, +link: String, +u: Ui) -> String:
+def Mate.note.k(+l: I.Loc, off: Bool, +link: String, +u: Ui) -> String:
   match off:
     case True{}:
-      "Off. Nothing syncs with it."
+      MSG.T.machines.off(l)
     case False{}:
-      Bool.pick(String, String.is_empty(link), "Linking. Its projects will appear here within a minute or two.",
-        Mate.note.linked(Mate.behind(Ui.projects(Ui.state(u)), Ui.state(u), link, 0n), String.eq(Ui.info(u, "far.away." ++ link), "1")))
+      Bool.pick(String, String.is_empty(link), MSG.T.machines.linking(l),
+        Mate.note.linked(l, Mate.behind(Ui.projects(Ui.state(u)), Ui.state(u), link, 0n), String.eq(Ui.info(u, "far.away." ++ link), "1")))
 
-def Mate.row(+n: String, +url: String, +domain: String, +u: Ui) -> MateRow:
-  MateRow{n, Mate.note.k(Mate.off(Ui.state(u), n), Mate.link(BT.World.peers(M.State.bots(Ui.state(u))), n, url, domain), u),
+def Mate.row(+l: I.Loc, +n: String, +url: String, +domain: String, +u: Ui) -> MateRow:
+  MateRow{n, Mate.note.k(l, Mate.off(Ui.state(u), n), Mate.link(BT.World.peers(M.State.bots(Ui.state(u))), n, url, domain), u),
     Bool.pick(String, Mate.off(Ui.state(u), n), "off", "on"), Mate.key(n)}
 
-def Mate.rows.k(skip: Bool, +m: J.Json, +domain: String, +u: Ui, rest: List<&2, MateRow>) -> List<&2, MateRow>:
+def Mate.rows.k(+l: I.Loc, skip: Bool, +m: J.Json, +domain: String, +u: Ui, rest: List<&2, MateRow>) -> List<&2, MateRow>:
   match skip:
     case True{}:
       rest
     case False{}:
-      Mate.row(J.Json.get_str(m, "name", ""), J.Json.get_str(m, "url", ""), domain, u) <> rest
+      Mate.row(l, J.Json.get_str(m, "name", ""), J.Json.get_str(m, "url", ""), domain, u) <> rest
 
-def Mate.rows.go(ms: List<&2, J.Json>, +me: String, +domain: String, +u: Ui) -> List<&2, MateRow>:
+def Mate.rows.go(+l: I.Loc, ms: List<&2, J.Json>, +me: String, +domain: String, +u: Ui) -> List<&2, MateRow>:
   match ms:
     case Nil{}:
       Nil{}
     case +m <> t:
-      Mate.rows.k(Bool.or(String.is_empty(J.Json.get_str(m, "url", "")), String.eq(J.Json.get_str(m, "url", ""), me)), m, domain, u, Mate.rows.go(t, me, domain, u))
+      Mate.rows.k(l, Bool.or(String.is_empty(J.Json.get_str(m, "url", "")), String.eq(J.Json.get_str(m, "url", ""), me)), m, domain, u, Mate.rows.go(l, t, me, domain, u))
 
-def Mate.rows.of(+j: J.Json, +u: Ui) -> List<&2, MateRow>:
-  Mate.rows.go(J.Json.elems(J.Json.get_obj(j, "peers")), J.Json.get_str(J.Json.get_obj(j, "self"), "url", ""), J.Json.get_str(J.Json.get_obj(j, "self"), "domain", ""), u)
+def Mate.rows.of(+l: I.Loc, +j: J.Json, +u: Ui) -> List<&2, MateRow>:
+  Mate.rows.go(l, J.Json.elems(J.Json.get_obj(j, "peers")), J.Json.get_str(J.Json.get_obj(j, "self"), "url", ""), J.Json.get_str(J.Json.get_obj(j, "self"), "domain", ""), u)
 
 # (the home hub's list: the machines it found)
-def Mate.rows(+u: Ui) -> List<&2, MateRow>:
-  Mate.rows.of(Maybe.default(&2, J.Json, J.Json.parse(Ui.info(u, "machines")), J.Null{}), u)
+def Mate.rows.loc(+l: I.Loc, +u: Ui) -> List<&2, MateRow>:
+  Mate.rows.of(l, Maybe.default(&2, J.Json, J.Json.parse(Ui.info(u, "machines")), J.Null{}), u)
 
-def Mate.title() -> String:
-  "Your machines"
+def Mate.rows(+u: Ui) -> List<&2, MateRow>:
+  Mate.rows.loc(Lang.loc(u), u)
+
+def Mate.title(+l: I.Loc) -> String:
+  MSG.T.machines.title(l)
+
+def Mate.lead.loc(+l: I.Loc, +u: Ui) -> String:
+  Bool.pick(String, List.is_empty(&2, MateRow, Mate.rows.loc(l, u)),
+    MSG.T.machines.lead.none(l),
+    MSG.T.machines.lead(l))
 
 def Mate.lead(+u: Ui) -> String:
-  Bool.pick(String, List.is_empty(&2, MateRow, Mate.rows(u)),
-    "Other machines of yours on Tailscale that run Backplane show here. Their projects and threads sync into this sidebar by themselves.",
-    "Projects and threads on these machines sync into this sidebar in the background, so you never have to switch. Turn one off to keep it apart.")
+  Mate.lead.loc(Lang.loc(u), u)
 
 def Far.chat(u: Ui, +id: String) -> Act:
   Act{Bots.views(u, "", "", id), [Focus{"remote-send"}, ScrollEnd{}]}
@@ -5850,8 +6485,11 @@ def Bots.create(+u: Ui) -> Act:
      J.KV{"model", J.Str{Bots.field(u, "model")}}], Bots.uber.new(u)))
 
 # the form's name field hint
+def Bots.name.hint.loc(+l: I.Loc, +u: Ui) -> String:
+  Bool.pick(String, String.eq(Ui.scratch(u, "@uber.new"), "1"), MSG.T.bots.name.uber(l), MSG.T.bots.name(l))
+
 def Bots.name.hint(+u: Ui) -> String:
-  Bool.pick(String, String.eq(Ui.scratch(u, "@uber.new"), "1"), "Name your uberbot", "Name")
+  Bots.name.hint.loc(Lang.loc(u), u)
 
 def Bots.cur(+u: Ui) -> String:
   Ui.scratch(u, "@bot")
@@ -5977,8 +6615,15 @@ def Bots.space.link(u: Ui, +v: String) -> Act:
 
 # What the form's When field says, in the person's zone: a schedule, a
 # one-time phrase, or what is wrong with it (core/sched.bend's Sched.hint)
+def Routine.hint.loc(+l: I.Loc, +u: Ui) -> String:
+  SC.Sched.hint(l, Ui.state.of(u), Bots.field(u, "ocron"), Side.now(u), 0n, True{})
+
 def Routine.hint(+u: Ui) -> String:
-  SC.Sched.hint(Ui.state.of(u), Bots.field(u, "ocron"), Side.now(u), 0n, True{})
+  Routine.hint.loc(Lang.loc(u), u)
+
+# whether the routine form's When field reads as nothing (Sched.hint.bad)
+def Routine.hint.bad(+u: Ui) -> Bool:
+  SC.Sched.hint.bad(Ui.state.of(u), Bots.field(u, "ocron"), Side.now(u), 0n, True{})
 
 # the key the text goes under: a schedule is `cron`, a time `at`
 def Routine.key.k(cron: Bool, at: Bool) -> String:
@@ -6633,12 +7278,25 @@ def Hs.refs(+u: Ui) -> J.Json:
 def Hs.row.value(+side: String, +commit: String, +label: String, +git: String, +top: String) -> String:
   side ++ "\t" ++ commit ++ "\t" ++ label ++ "\t" ++ git ++ "\t" ++ top
 
-def Hs.row.steps(ss: List<&2, HI.Step>, +side: String, +es: List<&2, M.Entry>, +i: Nat, acc: List<&2, HRow>) -> List<&2, HRow>:
+# A side's label is kept as the menu's value says it, in English ("Step
+# 3", "Turn 2", "Branch point · main", "Working copy": the scratch holds
+# it); Hs.label.shown says it in a language where it shows.
+def Hs.label.k(+l: I.Loc, +s: String, step: Bool, turn: Bool, base: Bool) -> String:
+  match step turn base:
+    case True{} _ _: MSG.T.history.step(l, String.drop(s, 5n))
+    case False{} True{} _: MSG.T.history.turn(l, String.drop(s, 5n))
+    case False{} False{} True{}: MSG.T.history.branchpoint(l, String.drop(s, 15n))
+    case False{} False{} False{}: Bool.pick(String, String.eq(s, "Working copy"), MSG.T.history.workingcopy(l), s)
+
+def Hs.label.shown(+l: I.Loc, +s: String) -> String:
+  Hs.label.k(l, s, String.starts_with(s, "Step "), String.starts_with(s, "Turn "), String.starts_with(s, "Branch point · "))
+
+def Hs.row.steps(ss: List<&2, HI.Step>, +l: I.Loc, +side: String, +es: List<&2, M.Entry>, +i: Nat, acc: List<&2, HRow>) -> List<&2, HRow>:
   match ss:
     case Nil{}:
       acc
     case HI.Step{+id, _, +c, _, +g, +top, _, _} <> t:
-      Hs.row.steps(t, side, es, 1n+i, HRow{"Step " ++ Nat.show(i), HI.Hist.label(es, HI.Hist.anchor(es, HI.Step{id, "", c, "", g, top, Nil{}, 0n})), Hs.row.value(side, c, "Step " ++ Nat.show(i), g, top)} <> acc)
+      Hs.row.steps(t, l, side, es, 1n+i, HRow{MSG.T.history.step(l, Nat.show(i)), HI.Hist.label(es, HI.Hist.anchor(es, HI.Step{id, "", c, "", g, top, Nil{}, 0n})), Hs.row.value(side, c, "Step " ++ Nat.show(i), g, top)} <> acc)
 
 def Hs.ref.label(+r: HI.Ref) -> String:
   match r:
@@ -6648,20 +7306,23 @@ def Hs.ref.label(+r: HI.Ref) -> String:
 
 # (a base is where the checked-out branch left the main one: compared with
 # it, a pull request's whole change; a tag is a release)
-def Hs.ref.kind(+k: String) -> String:
-  Bool.pick(String, String.eq(k, "head"), "the commit checked out", Bool.pick(String, String.eq(k, "branch"), "branch", Bool.pick(String, String.eq(k, "turn"), "this thread, at the end of a turn",
-    Bool.pick(String, String.eq(k, "tag"), "tag", Bool.pick(String, String.eq(k, "base"), "where this branch left it", "commit")))))
+def Hs.ref.kind.loc(+l: I.Loc, +k: String) -> String:
+  Bool.pick(String, String.eq(k, "head"), MSG.T.history.ref.head(l), Bool.pick(String, String.eq(k, "branch"), MSG.T.history.ref.branch(l), Bool.pick(String, String.eq(k, "turn"), MSG.T.history.ref.turn(l),
+    Bool.pick(String, String.eq(k, "tag"), MSG.T.history.ref.tag(l), Bool.pick(String, String.eq(k, "base"), MSG.T.history.ref.base(l), MSG.T.history.ref.commit(l))))))
+
+def Hs.ref.kind(k: String) -> String:
+  Hs.ref.kind.loc(I.En{}, k)
 
 # (turn 0 is the thread before it began)
-def Hs.ref.sub(+k: String, +label: String) -> String:
-  Bool.pick(String, String.eq(label, "Turn 0"), "this thread, before it began", Hs.ref.kind(k))
+def Hs.ref.sub(+l: I.Loc, +k: String, +label: String) -> String:
+  Bool.pick(String, String.eq(label, "Turn 0"), MSG.T.history.ref.start(l), Hs.ref.kind.loc(l, k))
 
-def Hs.row.refs(rs: List<&2, HI.Ref>, +side: String, +git: String, +top: String) -> List<&2, HRow>:
+def Hs.row.refs(rs: List<&2, HI.Ref>, +l: I.Loc, +side: String, +git: String, +top: String) -> List<&2, HRow>:
   match rs:
     case Nil{}:
       Nil{}
-    case HI.Ref{+k, +l, +c} <> t:
-      HRow{Hs.ref.label(HI.Ref{k, l, c}), Hs.ref.sub(k, Hs.ref.label(HI.Ref{k, l, c})), Hs.row.value(side, c, Hs.ref.label(HI.Ref{k, l, c}), git, top)} <> Hs.row.refs(t, side, git, top)
+    case HI.Ref{+k, +n, +c} <> t:
+      HRow{Hs.label.shown(l, Hs.ref.label(HI.Ref{k, n, c})), Hs.ref.sub(l, k, Hs.ref.label(HI.Ref{k, n, c})), Hs.row.value(side, c, Hs.ref.label(HI.Ref{k, n, c}), git, top)} <> Hs.row.refs(t, l, side, git, top)
 
 # the newest steps the menu lists (older ones are on the scrubber), so
 # the branches and commits after them stay in reach
@@ -6669,12 +7330,15 @@ def Hs.menu.steps() -> Nat:
   8n
 
 # the menu's rows for a side ("a" the old version, "b" the new)
-def Hs.menu(+u: Ui, +side: String) -> List<&2, HRow>:
+def Hs.menu.loc(+l: I.Loc, +u: Ui, +side: String) -> List<&2, HRow>:
   +r = Hs.refs(u)
   +es = M.State.mine(Ui.state(u), Ui.sel(u))
-  List.append(&2, HRow, [HRow{"Working copy", "the files as they are now", Hs.row.value(side, "", "Working copy", "", "")}],
-    List.append(&2, HRow, List.take(&2, HRow, Hs.row.steps(Hs.track(u), side, es, 1n, Nil{}), Hs.menu.steps()),
-      Hs.row.refs(HI.Hist.refs(J.Json.get_str(r, "refs", "")), side, J.Json.get_str(r, "git", ""), J.Json.get_str(r, "top", ""))))
+  List.append(&2, HRow, [HRow{MSG.T.history.workingcopy(l), MSG.T.history.workingcopy.note(l), Hs.row.value(side, "", "Working copy", "", "")}],
+    List.append(&2, HRow, List.take(&2, HRow, Hs.row.steps(Hs.track(u), l, side, es, 1n, Nil{}), Hs.menu.steps()),
+      Hs.row.refs(HI.Hist.refs(J.Json.get_str(r, "refs", "")), l, side, J.Json.get_str(r, "git", ""), J.Json.get_str(r, "top", ""))))
+
+def Hs.menu(+u: Ui, side: String) -> List<&2, HRow>:
+  Hs.menu.loc(Lang.loc(u), u, side)
 
 # the live file compared: the one on show, else the project's (the hub's
 # answer names its board and schematic)
@@ -6718,7 +7382,7 @@ def Hs.cmp.fill(+u: Ui) -> Ui:
 def Hs.pick.k(bad: Bool, +u: Ui, +side: String, +spec: String, +label: String) -> Ui:
   match bad:
     case True{}:
-      Ui.error_set(u, "This file is not in the repository, so it cannot be compared.")
+      Ui.error_set(u, MSG.T.history.notinrepo(Lang.loc(u)))
     case False{}:
       Hs.cmp.show(Hs.cmp.fill(Hs.set(Hs.set(Hs.set(Hs.set(Hs.set(Hs.cmp.fresh(Hs.keep.live(u)), "hist.at", ""), "hist.play", ""), "cmp." ++ side, spec), "cmp." ++ side ++ "l", label), "cmp.as", "")))
 
@@ -7024,8 +7688,8 @@ def Rc.actions() -> List<&2, String>:
 def Rp.pages() -> List<&2, String>:
   ["bom", "checks", "comments", "release"]
 
-def Rp.label(+page: String) -> String:
-  Bool.pick(String, String.eq(page, "bom"), "BOM", Bool.pick(String, String.eq(page, "checks"), "Checks", Bool.pick(String, String.eq(page, "comments"), "Comments", Bool.pick(String, String.eq(page, "release"), "Release", page))))
+def Rp.label(+l: I.Loc, +page: String) -> String:
+  Bool.pick(String, String.eq(page, "bom"), MSG.T.review.bom(l), Bool.pick(String, String.eq(page, "checks"), MSG.T.review.checks(l), Bool.pick(String, String.eq(page, "comments"), MSG.T.review.comments(l), Bool.pick(String, String.eq(page, "release"), MSG.T.review.release(l), page))))
 
 # the page on show ("" when the tab is not)
 def Rp.page(+u: Ui) -> String:
@@ -7038,10 +7702,13 @@ def Rp.key(+u: Ui, +k: String, +page: String) -> String:
 def Rp.compared(+u: Ui) -> Bool:
   Bool.not(String.is_empty(Hs.get(u, "cmp.a")))
 
-def Rp.bom.title(+u: Ui) -> String:
+def Rp.bom.title.l(+l: I.Loc, +u: Ui) -> String:
   Bool.pick(String, Rp.compared(u),
-    "BOM change · " ++ Hs.get(u, "cmp.al") ++ " → " ++ Bool.pick(String, String.is_empty(Hs.get(u, "cmp.bl")), "Working copy", Hs.get(u, "cmp.bl")),
-    "BOM · Working copy")
+    MSG.T.review.bom.change(l, Hs.label.shown(l, Hs.get(u, "cmp.al")), Hs.label.shown(l, Bool.pick(String, String.is_empty(Hs.get(u, "cmp.bl")), "Working copy", Hs.get(u, "cmp.bl")))),
+    MSG.T.review.bom.working(l))
+
+def Rp.bom.title(+u: Ui) -> String:
+  Rp.bom.title.l(Lang.loc(u), u)
 
 def Rp.ask.bom(+u: Ui) -> Act:
   Ui.rpc(Ui.info_set(Ui.scratch_set(u, "@rp.busy:" ++ Ui.sel(u), "bom"), Rp.key(u, "rp.title", "bom"), Rp.bom.title(u)), "review.bom",
@@ -7052,8 +7719,11 @@ def Rp.ask.bom(+u: Ui) -> Act:
 def Rp.commit(+u: Ui) -> String:
   Bool.pick(String, Nat.is_eq(HI.Hist.kind(Hs.get(u, "cmp.b")), 1n), HI.Hist.git.commit(Hs.get(u, "cmp.b")), "")
 
+def Rp.checks.title.l(+l: I.Loc, +u: Ui) -> String:
+  MSG.T.review.checks.of(l, Hs.label.shown(l, Bool.pick(String, String.is_empty(Rp.commit(u)), "Working copy", Hs.get(u, "cmp.bl"))))
+
 def Rp.checks.title(+u: Ui) -> String:
-  "Checks · " ++ Bool.pick(String, String.is_empty(Rp.commit(u)), "Working copy", Hs.get(u, "cmp.bl"))
+  Rp.checks.title.l(Lang.loc(u), u)
 
 def Rp.ask.checks(+u: Ui) -> Act:
   Ui.rpc(Ui.info_set(Ui.scratch_set(u, "@rp.busy:" ++ Ui.sel(u), "checks"), Rp.key(u, "rp.title", "checks"), Rp.checks.title(u)), "review.checks",
@@ -7177,24 +7847,27 @@ type RpTab is Data:
 type RpView is Data:
   RpView{page: String, tabs: List<&2, RpTab>, title: String, md: String, err: String, busy: Bool}
 
-def Rp.tabs(ps: List<&2, String>, +cur: String) -> List<&2, RpTab>:
+def Rp.tabs(ps: List<&2, String>, +l: I.Loc, +cur: String) -> List<&2, RpTab>:
   match ps:
     case Nil{}:
       Nil{}
     case +p <> t:
-      RpTab{p, Rp.label(p), String.eq(p, cur)} <> Rp.tabs(t, cur)
+      RpTab{p, Rp.label(l, p), String.eq(p, cur)} <> Rp.tabs(t, l, cur)
 
 # (the Comments page is the thread's own: no hub report)
-def Rp.view.k(comments: Bool, +u: Ui, +page: String) -> RpView:
+def Rp.view.k(+l: I.Loc, comments: Bool, +u: Ui, +page: String) -> RpView:
   match comments:
     case True{}:
-      RpView{page, Rp.tabs(Rp.pages(), page), "Comments · " ++ Nat.show(Rc.count(u)) ++ " open", RVW.Review.md(Rc.all(u)), "", False{}}
+      RpView{page, Rp.tabs(Rp.pages(), l, page), MSG.T.review.comments.open(l, Nat.show(Rc.count(u))), RVW.Review.md(Rc.all(u)), "", False{}}
     case False{}:
-      RpView{page, Rp.tabs(Rp.pages(), page), Bool.pick(String, String.eq(page, "release"), "Tag " ++ Rl.tag(u), Ui.info(u, Rp.key(u, "rp.title", page))), Ui.info(u, Rp.key(u, "rp.md", page)), Ui.info(u, Rp.key(u, "rp.err", page)),
+      RpView{page, Rp.tabs(Rp.pages(), l, page), Bool.pick(String, String.eq(page, "release"), MSG.T.review.tag(l, Rl.tag(u)), Ui.info(u, Rp.key(u, "rp.title", page))), Ui.info(u, Rp.key(u, "rp.md", page)), Ui.info(u, Rp.key(u, "rp.err", page)),
         String.eq(Ui.scratch(u, "@rp.busy:" ++ Ui.sel(u)), page)}
 
+def Rp.view.loc(+l: I.Loc, +u: Ui) -> RpView:
+  Rp.view.k(l, String.eq(Rp.page(u), "comments"), u, Rp.page(u))
+
 def Rp.view(+u: Ui) -> RpView:
-  Rp.view.k(String.eq(Rp.page(u), "comments"), u, Rp.page(u))
+  Rp.view.loc(I.En{}, u)
 
 def RpView.page(v: RpView) -> String:
   match v:
@@ -7227,10 +7900,13 @@ def RpView.tabs(v: RpView) -> List<&2, RpTab>:
       ts
 
 # what the page says while it has nothing to show
+def RpView.note.loc(+l: I.Loc, +v: RpView) -> String:
+  Bool.pick(String, RpView.busy(v), MSG.T.review.reading(l),
+    Bool.pick(String, String.is_empty(RpView.err(v)), Bool.pick(String, String.is_empty(RpView.md(v)), Bool.pick(String, String.eq(RpView.page(v), "comments"), MSG.T.review.comments.none(l),
+      Bool.pick(String, String.eq(RpView.page(v), "release"), MSG.T.review.release.note(l), MSG.T.review.empty(l))), ""), RpView.err(v)))
+
 def RpView.note(+v: RpView) -> String:
-  Bool.pick(String, RpView.busy(v), "Reading the design…",
-    Bool.pick(String, String.is_empty(RpView.err(v)), Bool.pick(String, String.is_empty(RpView.md(v)), Bool.pick(String, String.eq(RpView.page(v), "comments"), "No comments yet. Right-click a place on the board or schematic (long-press on a phone) to comment there.",
-      Bool.pick(String, String.eq(RpView.page(v), "release"), "Tag this design and make its fabrication outputs: Gerbers, drill, CPL, BOM, PDFs and STEP, in .backplane/releases.", "Nothing yet.")), ""), RpView.err(v)))
+  RpView.note.loc(I.En{}, v)
 
 def Rv.act.k(i: Nat, +u: Ui, +value: String) -> Act:
   match i:
@@ -7282,21 +7958,29 @@ type HBar is Data:
   HBar{on: Bool, n: Nat, at: Nat, title: String, entry: String, label: String, said: String, playing: Bool, diff: Bool, cmp: Bool, a: String, b: String, menu: String}
 
 # what the bar says while the live file shows, every client the same
+def Hs.live.said.loc(+l: I.Loc, +n: Nat) -> String:
+  Bool.pick(String, Nat.is_eq(n, 0n), MSG.T.history.live.note(l), MSG.T.history.live.ticks(l))
+
 def Hs.live.said(+n: Nat) -> String:
-  Bool.pick(String, Nat.is_eq(n, 0n), "The live file. Compare it with any commit, branch or tag.", "The live file. Each tick is a change the agent made; play to watch them.")
+  Hs.live.said.loc(I.En{}, n)
 
 def Hs.said.line(+s: String) -> String:
   HI.Hist.line(s)
 
-def Hs.bar.k(m: Maybe<&2, HI.Step>, +u: Ui, +n: Nat, +at: Nat, +es: List<&2, M.Entry>) -> HBar:
+def Hs.bar.pos(+l: I.Loc, first: Bool, +at: Nat, +n: Nat) -> String:
+  match first:
+    case True{}: MSG.T.history.position.first(l, Nat.show(at), Nat.show(n))
+    case False{}: MSG.T.history.position(l, Nat.show(at), Nat.show(n))
+
+def Hs.bar.k(+l: I.Loc, m: Maybe<&2, HI.Step>, +u: Ui, +n: Nat, +at: Nat, +es: List<&2, M.Entry>) -> HBar:
   match m:
     case Some{+s}:
-      HBar{True{}, n, at, "Step " ++ Nat.show(at) ++ " of " ++ Nat.show(n) ++ Bool.pick(String, HI.Step.first(s), " · before the agent's edits", ""),
+      HBar{True{}, n, at, Hs.bar.pos(l, HI.Step.first(s), at, n),
         HI.Hist.anchor(es, s), HI.Hist.label(es, HI.Hist.anchor(es, s)), Hs.said.line(HI.Hist.said(es, HI.Hist.anchor(es, s))),
         Hs.playing(u), Hs.diff(u), False{}, "", "", Ui.scratch(u, "@cmp.menu")}
     case None{}:
-      HBar{True{}, n, 0n, Bool.pick(String, Hs.cmp(u), "Comparing", Bool.pick(String, Nat.is_eq(n, 0n), "Live", "Live · " ++ Nat.show(n) ++ Bool.pick(String, Nat.is_eq(n, 1n), " step", " steps"))),
-        "", "", "", Hs.playing(u), Hs.diff(u), Hs.cmp(u), Hs.get(u, "cmp.al"), Bool.pick(String, String.is_empty(Hs.get(u, "cmp.bl")), "Working copy", Hs.get(u, "cmp.bl")), Ui.scratch(u, "@cmp.menu")}
+      HBar{True{}, n, 0n, Bool.pick(String, Hs.cmp(u), MSG.T.history.comparing(l), Bool.pick(String, Nat.is_eq(n, 0n), MSG.T.history.live(l), MSG.T.history.live.steps(l, Nat.show(n), Bool.pick(String, Nat.is_eq(n, 1n), "one", "other")))),
+        "", "", "", Hs.playing(u), Hs.diff(u), Hs.cmp(u), Hs.label.shown(l, Hs.get(u, "cmp.al")), Hs.label.shown(l, Bool.pick(String, String.is_empty(Hs.get(u, "cmp.bl")), "Working copy", Hs.get(u, "cmp.bl"))), Ui.scratch(u, "@cmp.menu")}
 
 def HBar.on(b: HBar) -> Bool:
   match b:
@@ -7318,21 +8002,27 @@ def HBar.h(+b: HBar) -> U32:
 def Hs.fade() -> Nat:
   220n
 
-def Hs.bar.on(on: Bool, +u: Ui) -> HBar:
+def Hs.bar.on(+l: I.Loc, on: Bool, +u: Ui) -> HBar:
   match on:
     case True{}:
-      Hs.bar.k(HI.Hist.nth(Hs.track(u), Hs.at(u, Hs.track(u))), u, Hs.n(Hs.track(u)), Hs.at(u, Hs.track(u)), M.State.mine(Ui.state(u), Ui.sel(u)))
+      Hs.bar.k(l, HI.Hist.nth(Hs.track(u), Hs.at(u, Hs.track(u))), u, Hs.n(Hs.track(u)), Hs.at(u, Hs.track(u)), M.State.mine(Ui.state(u), Ui.sel(u)))
     case False{}:
       HBar{False{}, 0n, 0n, "", "", "", "", False{}, False{}, False{}, "", "", ""}
 
 # the bar for the selected thread's viewer when it shows (on): off unless
 # a board or a schematic shows
-def Hs.bar.for(+u: Ui, on: Bool) -> HBar:
-  Hs.bar.on(Bool.and(on, Bool.and(Nat.is_lt(Hs.kind(u), 2n), Bool.not(String.is_empty(Ui.sel(u))))), u)
+def Hs.bar.for.loc(+l: I.Loc, +u: Ui, on: Bool) -> HBar:
+  Hs.bar.on(l, Bool.and(on, Bool.and(Nat.is_lt(Hs.kind(u), 2n), Bool.not(String.is_empty(Ui.sel(u))))), u)
 
 # (the window's and the web's: while the panel is open)
+def Hs.bar.for(+u: Ui, on: Bool) -> HBar:
+  Hs.bar.for.loc(Lang.loc(u), u, on)
+
+def Hs.bar.loc(+l: I.Loc, +u: Ui) -> HBar:
+  Hs.bar.for.loc(l, u, Ui.panel(u))
+
 def Hs.bar(+u: Ui) -> HBar:
-  Hs.bar.for(u, Ui.panel(u))
+  Hs.bar.loc(Lang.loc(u), u)
 
 # Actions (Ui.actions from "hist-go")
 def Hs.act(i: Nat, +u: Ui, +value: String) -> Act:
@@ -7389,12 +8079,15 @@ def ApiKeys.del(+u: Ui, +name: String) -> Act:
   Voice.rpc(u, "api-del", [J.KV{"name", J.Str{name}}])
 
 # what Settings says about them (every client)
-def ApiKeys.note(+u: Ui) -> String:
-  Bool.pick(String, List.is_empty(&2, String, ApiKeys.names(u)), "Keys for the services agents use, kept in this machine's secrets. Agents use them without ever reading them. None yet.",
-    "Agents use these without ever reading them: " ++ Nat.show(List.length(&2, String, ApiKeys.names(u))) ++ " kept.")
+def ApiKeys.note.loc(+l: I.Loc, +u: Ui) -> String:
+  Bool.pick(String, List.is_empty(&2, String, ApiKeys.names(u)), MSG.T.apikeys.none(l),
+    MSG.T.apikeys.kept(l, Nat.show(List.length(&2, String, ApiKeys.names(u)))))
 
-def ApiKeys.form.note() -> String:
-  "Agents find a key by its name, e.g. OPENAI_API_KEY. It is never shown again."
+def ApiKeys.note(+u: Ui) -> String:
+  ApiKeys.note.loc(Lang.loc(u), u)
+
+def ApiKeys.form.note(+l: I.Loc) -> String:
+  MSG.T.apikeys.form(l)
 
 # a secret as it shows while typed: a dot a character
 def ApiKeys.dots(s: String) -> String:
@@ -7462,17 +8155,17 @@ def Agv.have(+u: Ui) -> String:
   J.Json.get_str(Agv.info(u), "have", "")
 
 # what Settings says about the agent itself
-def Agv.install.note(+u: Ui) -> String:
+def Agv.install.note(+l: I.Loc, +u: Ui) -> String:
   Bool.pick(String, Agv.busy(u, "install"), J.Json.get_str(Agv.job(u), "msg", ""),
     Bool.pick(String, String.eq(J.Json.get_str(Agv.job(u), "what", ""), "install"), J.Json.get_str(Agv.job(u), "msg", "") ++ " ", "")
-      ++ Bool.pick(String, Bool.not(String.is_empty(Agv.have(u))), "Google's own agent, Antigravity " ++ Agv.have(u) ++ ", installed. Backplane runs it; it signs in by itself.",
-        Bool.pick(String, Bool.not(String.is_empty(J.Json.get_str(Agv.info(u), "old", ""))), "Antigravity " ++ J.Json.get_str(Agv.info(u), "old", "") ++ " is installed; Backplane now pins " ++ AGY.Agy.version() ++ ".",
-          Bool.pick(String, J.Json.get_bool(Agv.info(u), "plat", True{}), "Not installed. Backplane downloads Google's agent (agy_acp_server " ++ AGY.Agy.version() ++ ", from the ACP registry, a few hundred MB) and checks its pinned SHA-256.",
-            "Google has no Antigravity build for this machine."))))
+      ++ Bool.pick(String, Bool.not(String.is_empty(Agv.have(u))), MSG.T.agy.installed(l, Agv.have(u)),
+        Bool.pick(String, Bool.not(String.is_empty(J.Json.get_str(Agv.info(u), "old", ""))), MSG.T.agy.old(l, J.Json.get_str(Agv.info(u), "old", ""), AGY.Agy.version()),
+          Bool.pick(String, J.Json.get_bool(Agv.info(u), "plat", True{}), MSG.T.agy.download(l, AGY.Agy.version()),
+            MSG.T.agy.unsupported(l)))))
 
-def Agv.install.btns(+u: Ui) -> List<&2, AgBtn>:
+def Agv.install.btns(+l: I.Loc, +u: Ui) -> List<&2, AgBtn>:
   Bool.pick(List<&2, AgBtn>, Bool.or(Agv.busy(u, "install"), Bool.not(J.Json.get_bool(Agv.info(u), "plat", True{}))), Nil{},
-    [AgBtn{Bool.pick(String, String.is_empty(Agv.have(u)), Bool.pick(String, String.is_empty(J.Json.get_str(Agv.info(u), "old", "")), "Install", "Update to " ++ AGY.Agy.version()), "Reinstall"),
+    [AgBtn{Bool.pick(String, String.is_empty(Agv.have(u)), Bool.pick(String, String.is_empty(J.Json.get_str(Agv.info(u), "old", "")), MSG.T.agy.install(l), MSG.T.agy.update(l, AGY.Agy.version())), MSG.T.agy.reinstall(l)),
       "agy-install", "", String.is_empty(Agv.have(u))}])
 
 def Agv.methods(ms: List<&2, String>, +cur: String) -> List<&2, AgBtn>:
@@ -7483,21 +8176,21 @@ def Agv.methods(ms: List<&2, String>, +cur: String) -> List<&2, AgBtn>:
       AgBtn{AGY.Agy.label(m), "setting", "agy.auth=" ++ m, String.eq(m, cur)} <> Agv.methods(t, cur)
 
 # the key the method reads, from the API keys (names only)
-def Agv.key.row(+u: Ui) -> List<&2, AgRow>:
+def Agv.key.row(+l: I.Loc, +u: Ui) -> List<&2, AgRow>:
   Bool.pick(List<&2, AgRow>, String.is_empty(AGY.Agy.key(Agv.method(u))), Nil{},
-    [AgRow{AGY.Agy.key(Agv.method(u)), Bool.pick(String, Agv.has(ApiKeys.names(u), AGY.Agy.key(Agv.method(u))), "Saved in API keys. Check it to list the models it offers.",
-        "Not saved yet. It goes to this machine's API keys file; no client shows it again."),
-      [AgField{"agykey", "Paste the key", True{}, Ui.scratch(u, "@f.agykey"), "agy-key"}],
-      [AgBtn{"Save key", "agy-key", "", False{}}, AgBtn{"Check", "agy-signin", "", True{}}]}])
+    [AgRow{AGY.Agy.key(Agv.method(u)), Bool.pick(String, Agv.has(ApiKeys.names(u), AGY.Agy.key(Agv.method(u))), MSG.T.agy.key.saved(l),
+        MSG.T.agy.key.unsaved(l)),
+      [AgField{"agykey", MSG.T.agy.key.paste(l), True{}, Ui.scratch(u, "@f.agykey"), "agy-key"}],
+      [AgBtn{MSG.T.agy.key.save(l), "agy-key", "", False{}}, AgBtn{MSG.T.agy.key.check(l), "agy-signin", "", True{}}]}])
 
-def Agv.gcp.note(+p: String, +l: String) -> String:
-  Bool.pick(String, Bool.and(String.is_empty(p), String.is_empty(l)), "Not set.", "Project " ++ AGY.Agy.or(p, "not set") ++ ", location " ++ AGY.Agy.or(l, "not set") ++ ".")
+def Agv.gcp.note(+lc: I.Loc, +p: String, +l: String) -> String:
+  Bool.pick(String, Bool.and(String.is_empty(p), String.is_empty(l)), MSG.T.agy.gcp.unset(lc), MSG.T.agy.gcp.set(lc, AGY.Agy.or(p, MSG.T.agy.gcp.none(lc)), AGY.Agy.or(l, MSG.T.agy.gcp.none(lc))))
 
-def Agv.gcp.row(+u: Ui) -> List<&2, AgRow>:
+def Agv.gcp.row(+l: I.Loc, +u: Ui) -> List<&2, AgRow>:
   Bool.pick(List<&2, AgRow>, Bool.not(AGY.Agy.gcp(Agv.method(u))), Nil{},
-    [AgRow{"Google Cloud project", Agv.gcp.note(M.Setting.get(Ui.state.of(u), "agy.gcp.project", ""), M.Setting.get(Ui.state.of(u), "agy.gcp.location", "")),
-      [AgField{"agyproj", "Project ID", False{}, Ui.scratch(u, "@f.agyproj"), "agy-gcp"}, AgField{"agyloc", "Location, e.g. us-central1", False{}, Ui.scratch(u, "@f.agyloc"), "agy-gcp"}],
-      [AgBtn{"Save", "agy-gcp", "", False{}}]}])
+    [AgRow{MSG.T.agy.gcp(l), Agv.gcp.note(l, M.Setting.get(Ui.state.of(u), "agy.gcp.project", ""), M.Setting.get(Ui.state.of(u), "agy.gcp.location", "")),
+      [AgField{"agyproj", MSG.T.agy.gcp.project(l), False{}, Ui.scratch(u, "@f.agyproj"), "agy-gcp"}, AgField{"agyloc", MSG.T.agy.gcp.location(l), False{}, Ui.scratch(u, "@f.agyloc"), "agy-gcp"}],
+      [AgBtn{MSG.T.common.save(l), "agy-gcp", "", False{}}]}])
 
 def Agv.acct.btns(xs: List<&2, String>, +cur: String) -> List<&2, AgBtn>:
   match xs:
@@ -7509,40 +8202,48 @@ def Agv.acct.btns(xs: List<&2, String>, +cur: String) -> List<&2, AgBtn>:
 def Agv.accts.shown(+u: Ui) -> List<&2, String>:
   Bool.pick(List<&2, String>, Agv.has(Agv.accts(u), Agv.acct(u)), Agv.accts(u), List.append(&2, String, Agv.accts(u), [Agv.acct(u)]))
 
-def Agv.google.row(+u: Ui) -> List<&2, AgRow>:
-  Bool.pick(List<&2, AgRow>, Bool.not(AGY.Agy.browser(Agv.method(u))), Nil{},
-    [AgRow{"Account", Agv.acct(u) ++ Bool.pick(String, Agv.signed(u), ": signed in. The agent keeps its own sign-in; Backplane never sees it.", ": not signed in."),
-      [AgField{"agyacct", "Another account's name", False{}, Ui.scratch(u, "@f.agyacct"), "agy-acct"}],
-      List.concat(&2, AgBtn, [Agv.acct.btns(Agv.accts.shown(u), Agv.acct(u)), [AgBtn{"Add account", "agy-acct", "", False{}}, AgBtn{"Sign in with Google", "agy-signin", "", True{}}],
-        Bool.pick(List<&2, AgBtn>, Agv.signed(u), [AgBtn{"Sign out", "agy-signout", Agv.acct(u), False{}}], Nil{}),
-        Bool.pick(List<&2, AgBtn>, Agv.has(Agv.accts(u), Agv.acct(u)), [AgBtn{"Remove", "agy-forget", Agv.acct(u), False{}}], Nil{})])}])
+def Agv.google.note(+l: I.Loc, signed: Bool, +acct: String) -> String:
+  match signed:
+    case True{}: MSG.T.agy.account.signedin(l, acct)
+    case False{}: MSG.T.agy.account.signedout(l, acct)
 
-def Agv.job.k(i: Nat, +u: Ui, +j: J.Json) -> List<&2, AgRow>:
+def Agv.google.row(+l: I.Loc, +u: Ui) -> List<&2, AgRow>:
+  Bool.pick(List<&2, AgRow>, Bool.not(AGY.Agy.browser(Agv.method(u))), Nil{},
+    [AgRow{MSG.T.agy.account(l), Agv.google.note(l, Agv.signed(u), Agv.acct(u)),
+      [AgField{"agyacct", MSG.T.agy.account.other(l), False{}, Ui.scratch(u, "@f.agyacct"), "agy-acct"}],
+      List.concat(&2, AgBtn, [Agv.acct.btns(Agv.accts.shown(u), Agv.acct(u)), [AgBtn{MSG.T.agy.account.add(l), "agy-acct", "", False{}}, AgBtn{MSG.T.agy.google.signin(l), "agy-signin", "", True{}}],
+        Bool.pick(List<&2, AgBtn>, Agv.signed(u), [AgBtn{MSG.T.agy.signout(l), "agy-signout", Agv.acct(u), False{}}], Nil{}),
+        Bool.pick(List<&2, AgBtn>, Agv.has(Agv.accts(u), Agv.acct(u)), [AgBtn{MSG.T.common.remove(l), "agy-forget", Agv.acct(u), False{}}], Nil{})])}])
+
+def Agv.job.k(i: Nat, +l: I.Loc, +u: Ui, +j: J.Json) -> List<&2, AgRow>:
   match i:
     case 0n:
-      [AgRow{"Sign-in", J.Json.get_str(j, "msg", ""), Nil{}, [AgBtn{"Cancel", "agy-cancel", "", False{}}]}]
+      [AgRow{MSG.T.agy.signin(l), J.Json.get_str(j, "msg", ""), Nil{}, [AgBtn{MSG.T.common.cancel(l), "agy-cancel", "", False{}}]}]
     case 1n:
-      [AgRow{"Sign-in", J.Json.get_str(j, "msg", ""), [AgField{"agyback", "Paste the address Google sent you to", False{}, Ui.scratch(u, "@f.agyback"), "agy-back"}],
-        [AgBtn{"Open Google's sign-in", "open-url", J.Json.get_str(j, "url", ""), True{}}, AgBtn{"Continue", "agy-back", "", False{}}, AgBtn{"Cancel", "agy-cancel", "", False{}}]}]
+      [AgRow{MSG.T.agy.signin(l), J.Json.get_str(j, "msg", ""), [AgField{"agyback", MSG.T.agy.signin.back(l), False{}, Ui.scratch(u, "@f.agyback"), "agy-back"}],
+        [AgBtn{MSG.T.agy.signin.open(l), "open-url", J.Json.get_str(j, "url", ""), True{}}, AgBtn{MSG.T.agy.signin.next(l), "agy-back", "", False{}}, AgBtn{MSG.T.common.cancel(l), "agy-cancel", "", False{}}]}]
     case 2n:
-      [AgRow{"Sign-in", J.Json.get_str(j, "msg", ""), Nil{}, Nil{}}]
+      [AgRow{MSG.T.agy.signin(l), J.Json.get_str(j, "msg", ""), Nil{}, Nil{}}]
     case 3n:
-      [AgRow{"Sign-in failed", J.Json.get_str(j, "msg", ""), Nil{}, Nil{}}]
+      [AgRow{MSG.T.agy.signin.failed(l), J.Json.get_str(j, "msg", ""), Nil{}, Nil{}}]
     case _:
       Nil{}
 
 # the sign-in in progress (or just finished): what it says, its link and
 # the field for Google's way back
-def Agv.job.row(+u: Ui) -> List<&2, AgRow>:
+def Agv.job.row(+l: I.Loc, +u: Ui) -> List<&2, AgRow>:
   Bool.pick(List<&2, AgRow>, Bool.or(String.eq(J.Json.get_str(Agv.job(u), "what", ""), "signin"), String.eq(J.Json.get_str(Agv.job(u), "what", ""), "signout")),
-    Agv.job.k(C.Codec.pos(["running", "waiting", "done", "failed"], J.Json.get_str(Agv.job(u), "state", "")), u, Agv.job(u)), Nil{})
+    Agv.job.k(C.Codec.pos(["running", "waiting", "done", "failed"], J.Json.get_str(Agv.job(u), "state", "")), l, u, Agv.job(u)), Nil{})
 
 # every row, in order
-def Agv.rows(+u: Ui) -> List<&2, AgRow>:
+def Agv.rows.loc(+l: I.Loc, +u: Ui) -> List<&2, AgRow>:
   List.concat(&2, AgRow, [
-    [AgRow{"Antigravity", Agv.install.note(u), Nil{}, Agv.install.btns(u)},
-     AgRow{"Sign in with", AGY.Agy.note(Agv.method(u)), Nil{}, Agv.methods(AGY.Agy.methods(), Agv.method(u))}],
-    Agv.key.row(u), Agv.gcp.row(u), Agv.google.row(u), Agv.job.row(u)])
+    [AgRow{"Antigravity", Agv.install.note(l, u), Nil{}, Agv.install.btns(l, u)},
+     AgRow{MSG.T.agy.method(l), AGY.Agy.note(Agv.method(u)), Nil{}, Agv.methods(AGY.Agy.methods(), Agv.method(u))}],
+    Agv.key.row(l, u), Agv.gcp.row(l, u), Agv.google.row(l, u), Agv.job.row(l, u)])
+
+def Agv.rows(+u: Ui) -> List<&2, AgRow>:
+  Agv.rows.loc(Lang.loc(u), u)
 
 def Agv.rpc(u: Ui, +what: String, kvs: List<&2, J.KV>) -> Act:
   Voice.rpc(u, "agy", J.KV{"do", J.Str{what}} <> kvs)
@@ -7681,12 +8382,28 @@ def Voice.act(i: Nat, +u: Ui, +value: String) -> Act:
     case _:
       Voice.act.tail(i, u, value)
 
-# opening Settings asks for the voice settings; opening or closing it
-# puts the pairing code away
+def KN.prefill(+u: Ui) -> Ui:
+  Ui.scratch_set(u, "@f.kpath", M.Setting.get(Ui.state.of(u), "kicad.path", ""))
+
+# Settings > Usage's Boat side: the hub reads Boat's CLI (src/core/usage.bend's
+# Bj: "read" when it is due, "refresh" from the Refresh button) and answers
+# with info "boat.usage"
+def Usage.ask.k(cs: List<&2, Cmd>, b: Act) -> Act:
+  match b:
+    case Act{u, more}:
+      Act{u, List.append(&2, Cmd, cs, more)}
+
+def Usage.ask(a: Act, +what: String) -> Act:
+  match a:
+    case Act{u, cs}:
+      Usage.ask.k(cs, Voice.rpc(u, "usage", [J.KV{"do", J.Str{what}}]))
+
+# opening Settings asks for the voice settings and Boat's usage; opening or
+# closing it puts the pairing code away
 def Voice.flag.k(ask: Bool, a: Act) -> Act:
   match ask a:
     case True{} Act{u, cs}:
-      Ui.also(Voice.rpc(Ui.flag_off(u, "pairqr"), "status", Nil{}), cs)
+      Usage.ask(Ui.also(Voice.rpc(KN.prefill(Ui.flag_off(u, "pairqr")), "status", Nil{}), cs), "read")
     case False{} _:
       a
 
@@ -7808,8 +8525,55 @@ def Made.made(+t: String, +th: String) -> J.Json:
   Seq.demo(t, [C.Change.encode(M.ThreadCreated{th, "p1", "New thread", M.Local{}, "", "", "claude", "", 1n})])
 
 # an answer: its request leaves the outbox; a diff opens the diff view
+def KN.reply.k(has: Bool, +u: Ui, +o: J.Json) -> Ui:
+  match has:
+    case True{}:
+      Ui.info_set(u, "kn:" ++ J.Json.get_str(J.Json.get_obj(o, "result"), "thread", Ui.sel(u)), "1")
+    case False{}: u
+
+def KN.reply(+u: Ui, +o: J.Json) -> Ui:
+  KN.reply.k(Bool.not(String.is_empty(J.Json.get_str(J.Json.get_obj(o, "result"), "kicad", ""))), u, o)
+
+def KX.result(+nf: Map<&2, String>, +th: String) -> J.Json:
+  Maybe.default(&2, J.Json, J.Json.parse(Str.get(nf, "kx:" ++ th)), J.Null{})
+
+def KX.pending(+nf: Map<&2, String>, +th: String) -> Bool:
+  Bool.not(String.is_empty(J.Json.get_str(KX.result(nf, th), "export10", "")))
+
+def KX.offset(+nf: Map<&2, String>, +th: String) -> Nat:
+  KH.KH.num(Str.get(nf, "kx.page:" ++ th), 0n)
+
+def KX.next(next: Bool, +th: String) -> List<&2, KH.KAct>:
+  match next:
+    case True{}: [KH.KAct{"Next page", "kicad-export10-next", th}]
+    case False{}: Nil{}
+
+def KX.buttons(confirm: Bool, +nf: Map<&2, String>, +th: String, +n: Nat) -> List<&2, KH.KAct>:
+  match confirm:
+    case True{}: List.append(&2, KH.KAct, [KH.KAct{"Export anyway", "kicad-export10-anyway", th}, KH.KAct{"Cancel", "kicad-export10-cancel", th}], KX.next(Nat.is_gt(n, 8n), th))
+    case False{}: List.append(&2, KH.KAct, [KH.KAct{"Close", "kicad-export10-cancel", th}], KX.next(Nat.is_gt(n, 8n), th))
+
+def KX.note.k(present: Bool, +nf: Map<&2, String>, +th: String, +r: J.Json) -> Maybe<&2, KH.KNote>:
+  match present:
+    case False{}: None{}
+    case True{}:
+      +ls = KEX.KX.lines(KEX.KX.report(J.Json.get_obj(r, "report")))
+      +page = List.take(&2, String, List.drop(&2, String, ls, KX.offset(nf, th)), 8n)
+      Some{KH.KNote{"export10", "KiCad 10 exported copy", J.Json.get_str(r, "text", "") ++ "\n" ++ String.join(page, "\n"), KX.buttons(String.eq(J.Json.get_str(r, "export10", ""), "confirm"), nf, th, List.length(&2, String, ls))}}
+
+def KX.note(+nf: Map<&2, String>, +th: String) -> Maybe<&2, KH.KNote>:
+  KX.note.k(KX.pending(nf, th), nf, th, KX.result(nf, th))
+
+def KX.reply.k(has: Bool, +u: Ui, +r: J.Json) -> Ui:
+  match has:
+    case False{}: u
+    case True{}: Ui.info_set(Ui.info_set(u, "kx:" ++ J.Json.get_str(r, "thread", Ui.sel(u)), J.Json.show(r)), "kx.page:" ++ J.Json.get_str(r, "thread", Ui.sel(u)), "0")
+
+def KX.reply(+u: Ui, +o: J.Json) -> Ui:
+  KX.reply.k(Bool.not(String.is_empty(J.Json.get_str(J.Json.get_obj(o, "result"), "export10", ""))), u, J.Json.get_obj(o, "result"))
+
 def Ui.reply(u: Ui, +o: J.Json) -> Ui:
-  Made.reply(o, Bots.reply(o, Proj.reply(o, Btw.reply(Ui.reply.skills(u, o), o))))
+  KX.reply(KN.reply(Made.reply(o, Bots.reply(o, Proj.reply(o, Btw.reply(Fab.reply(Fab.has(o), Ui.reply.skills(u, o), o), o)))), o), o)
 
 # A link's threads and bots (far.bend): its batch folded into the read
 # model under this hub's ids, and whether it answered ("far.away.<link>")
@@ -8255,6 +9019,138 @@ def Page.earlier.k(+u: Ui, +thread: String) -> Ui:
 def Page.earlier(+u: Ui, +value: String) -> Ui:
   Page.earlier.k(u, Bool.pick(String, String.is_empty(value), Ui.sel.of(u), value))
 
+# Reading while a thread grows (all four clients)
+# ------------------------------------------------
+# A reader scrolled up the timeline keeps what they read where it is: new
+# entries, streamed text and panels changing move nothing on screen; only
+# a view at its end (within Hold.slack() px) follows. Each client keeps
+# its own place (the window: nui.bend's Hold, layout.bend's TL.hold; the
+# web: host.js's held; the phones: their lists) and says here when its
+# view leaves the end ("hold-away") and comes back ("hold-end"), the value
+# the thread ("" the selected one). Away, the thread's newest entry then
+# is kept as "@away.<thread>", and what came after it is the "N new"
+# pill that jumps back down (Hold.label).
+
+def Hold.slack() -> Nat:
+  4n
+
+# a view this far from its end is at the end, and follows
+def Hold.at_end(+gap: Nat) -> Bool:
+  Nat.is_le(gap, Hold.slack())
+
+def Hold.key(+u: Ui, +value: String) -> String:
+  "@away." ++ Bool.pick(String, String.is_empty(value), Ui.sel.of(u), value)
+
+# the newest entry's id ("-" for none: anything later is new)
+def Hold.newest(es: List<&2, M.Entry>) -> String:
+  match es:
+    case Nil{}:
+      "-"
+    case e <> _:
+      M.Idx.id(e)
+
+def Hold.mark.k(has: Bool, +u: Ui, +k: String, +th: String) -> Ui:
+  match has:
+    case True{}:
+      u
+    case False{}:
+      Ui.scratch_set(u, k, Hold.newest(M.State.mine(Ui.state.of(u), th)))
+
+def Hold.thread(+u: Ui, +value: String) -> String:
+  Bool.pick(String, String.is_empty(value), Ui.sel.of(u), value)
+
+# away: the newest entry is kept (being away again keeps the first mark)
+def Hold.away(+u: Ui, +value: String) -> Ui:
+  Hold.mark.k(Bool.not(String.is_empty(Ui.scratch(u, Hold.key(u, value)))), u, Hold.key(u, value), Hold.thread(u, value))
+
+def Hold.end(+u: Ui, +value: String) -> Ui:
+  Ui.scratch_set(u, Hold.key(u, value), "")
+
+def Hold.is_away(+u: Ui, +th: String) -> Bool:
+  Bool.not(String.is_empty(Ui.scratch(u, "@away." ++ th)))
+
+# where the window's timeline starts reading once its top moved from t0
+# to t1 (a panel above it grew or shrank), from off pixels hidden above:
+# what was read stays where it was on screen (law hold_off_still), at most
+# over (the timeline's end)
+def Hold.off(+off: Nat, +t0: Nat, +t1: Nat, +over: Nat) -> Nat:
+  Bool.pick(Nat, Nat.is_le(Nat.sub(Nat.add(off, t1), t0), over), Nat.sub(Nat.add(off, t1), t0), over)
+
+def Hold.most() -> Nat:
+  99n
+
+def Hold.msg(e: M.Entry) -> Nat:
+  match e:
+    case M.Msg{_, _, _, _, _}:
+      1n
+    case M.Act{_, _, _, _, _, _}:
+      0n
+
+def Hold.stop(es: List<&2, M.Entry>, +seen: String, +n: Nat) -> Bool:
+  match es:
+    case Nil{}:
+      True{}
+    case e <> _:
+      Bool.or(String.eq(M.Idx.id(e), seen), Nat.is_ge(n, Hold.most()))
+
+# the messages after the entry seen (newest first: the walk stops at it,
+# and at Hold.most())
+def Hold.fresh(es: List<&2, M.Entry>, stop: Bool, +seen: String, +n: Nat) -> Nat:
+  match es stop:
+    case +_ True{}:
+      n
+    case Nil{} False{}:
+      n
+    case +e <> t False{}:
+      Hold.fresh(t, Hold.stop(t, seen, Nat.add(n, Hold.msg(e))), seen, Nat.add(n, Hold.msg(e)))
+
+def Hold.count.k(+es: List<&2, M.Entry>, +seen: String) -> Nat:
+  Hold.fresh(es, Hold.stop(es, seen, 0n), seen, 0n)
+
+# something is new: an entry after the one seen, or a reply streaming in
+def Hold.any.k(+es: List<&2, M.Entry>, +seen: String, +live: String) -> Bool:
+  Bool.or(Bool.not(String.eq(Hold.newest(es), seen)), Bool.not(String.is_empty(live)))
+
+# "3 new ↓" (messages), "New ↓" (other entries, or a reply streaming in),
+# "" for nothing new
+def Hold.label(+n: Nat, any: Bool) -> String:
+  Bool.pick(String, Nat.is_gt(n, 0n), Bool.pick(String, Nat.is_ge(n, Hold.most()), "99+ new ↓", Nat.show(n) ++ " new ↓"), Bool.pick(String, any, "New ↓", ""))
+
+def Hold.pill.k(away: Bool, +u: Ui, +th: String) -> String:
+  match away:
+    case True{}:
+      Hold.label(Hold.count.k(M.State.mine(Ui.state.of(u), th), Ui.scratch(u, "@away." ++ th)),
+        Hold.any.k(M.State.mine(Ui.state.of(u), th), Ui.scratch(u, "@away." ++ th), Ui.live.of(u, th)))
+    case False{}:
+      ""
+
+# the pill a thread's view shows while away ("" at the end)
+def Hold.pill(+u: Ui, +th: String) -> String:
+  Hold.pill.k(Hold.is_away(u, th), u, th)
+
+# Extra entries received since the reader left the end. The page grows
+# by these entries so its old first entry cannot be evicted underneath it.
+def Hold.arrived(es: List<&2, M.Entry>, stop: Bool, +seen: String, +n: Nat) -> Nat:
+  match es stop:
+    case _ True{}:
+      n
+    case Nil{} False{}:
+      n
+    case e <> +t False{}:
+      Hold.arrived(t, String.eq(Hold.newest(t), seen), seen, 1n+n)
+
+def Hold.page(+es: List<&2, M.Entry>, +seen: String, +base: Nat) -> Nat:
+  match seen:
+    case SNil{}:
+      base
+    case SCon{_, _}:
+      Nat.add(base, Hold.arrived(es, String.eq(Hold.newest(es), seen), seen, 0n))
+
+def Hold.act(+u: Ui, +action: String, +value: String) -> Act:
+  Bool.pick(Act, String.eq(action, "hold-away"), Act{Hold.away(u, value), Nil{}},
+    Bool.pick(Act, String.eq(action, "hold-end"), Act{Hold.end(u, value), Nil{}},
+      Bool.pick(Act, String.eq(action, "hold-bottom"), Act{Hold.end(u, value), [ScrollEnd{}]}, Act{u, Nil{}})))
+
 def Bots.tab.with(a: Act) -> Act:
   match a:
     case Act{u, cs}:
@@ -8346,7 +9242,244 @@ def Bots.act(i: Nat, +u: Ui, +value: String) -> Act:
     case _:
       Voice.act(Nat.sub(i, 36n), u, value)
 
-def Ui.act.k(i: Nat, u: Ui, +value: String) -> Act:
+# ---- links (cards, trail) ----
+# Scratch storage avoids changing Ui's native representation.
+def Trail.read.list(+s: String) -> List<&2, String>:
+  Bool.pick(List<&2, String>, String.is_empty(s), Nil{}, R.Ref.split(s, '\n'))
+
+def Trail.read(u: Ui) -> RE.Trail:
+  match u:
+    case Ui{_, _, +dr, _, _, _, _, _, _, _, _, _, _, _, _, _, _}:
+      RE.Trail{Trail.read.list(Str.get(dr, "@trail.b")), Str.get(dr, "@trail.c"), Trail.read.list(Str.get(dr, "@trail.f"))}
+
+def Trail.store(+u: Ui, +t: RE.Trail) -> Ui:
+  match t:
+    case RE.Trail{+bs, +c, +fs}: Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(u, "@trail.b", String.join(bs, "\n")), "@trail.c", c), "@trail.f", String.join(fs, "\n"))
+
+def Here.choose(+bot: String, +room: String, +remote: String, +th: String, +project: String) -> String:
+  match bot room remote th project:
+    case SCon{+h, +t} _ _ _ _: R.Ref.uri(R.Ref.bot(SCon{h, t}))
+    case SNil{} SCon{+h, +t} _ _ _: R.Ref.uri(R.Ref.room(SCon{h, t}))
+    case SNil{} SNil{} SCon{+h, +t} _ _: R.Ref.uri(R.Ref.bot(SCon{h, t}))
+    case SNil{} SNil{} SNil{} SCon{+h, +t} _: R.Ref.uri(R.Ref.thread(SCon{h, t}))
+    case SNil{} SNil{} SNil{} SNil{} SCon{+h, +t}: R.Ref.uri(R.Ref.project(SCon{h, t}))
+    case _ _ _ _ _: ""
+
+def Here.ref(u: Ui) -> String:
+  match u:
+    case Ui{+st, +sel, +dr, _, _, _, _, _, _, _, _, _, _, _, _, _, _}:
+      Here.choose(Str.get(dr, "@bot"), Str.get(dr, "@room"), Str.get(dr, "@remote"), sel,
+        Bool.pick(String, String.is_empty(sel), "", Ui.thread_project(Ui.thread(st, sel))))
+
+def RefNav.note(+u: Ui, +text: String) -> Act:
+  match u:
+    case Ui{+st, +sel, +dr, +live, +op, +on, +now, +ad, +pa, +v, +rid, +w, +er, _, +nf, +ob, +tr}:
+      Act{Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w, er, text, nf, ob, tr}, Nil{}}
+
+def RefNav.jump(+a: Act, +frag: String) -> Act:
+  match a:
+    case Act{+u, +cs}: Act{u, List.append(&2, Cmd, cs, Bool.pick(List<&2, Cmd>, String.is_empty(frag), Nil{}, [Jump{frag}]))}
+
+def RefNav.routine(+a: Act) -> Act:
+  match a:
+    case Act{+u, +cs}: Act{Ui.scratch_set(u, "@btab", "routines"), cs}
+
+def RefNav.activity(+t: M.Thread) -> Nat:
+  match t:
+    case M.Thread{_, _, _, _, +at, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _}: at
+
+def RefNav.newer.k(+yes: Bool, +t: M.Thread, +best: M.Thread) -> M.Thread:
+  match yes:
+    case True{}: t
+    case False{}: best
+
+# One walk on click; retain the current project thread, otherwise choose
+# the most recently active live thread. No timeline or sidebar scan.
+def RefNav.newer(+t: M.Thread, +best: M.Thread, +pid: String) -> M.Thread:
+  match t:
+    case M.Thread{_, +p, _, _, +at, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, +gone}:
+      RefNav.newer.k(Bool.and(Bool.and(String.eq(p, pid), Bool.not(gone)), Nat.is_ge(at, RefNav.activity(best))), t, best)
+
+def RefNav.latest(+ts: List<&2, M.Thread>, +pid: String, +best: M.Thread) -> String:
+  match ts:
+    case Nil{}: Bool.pick(String, RE.Card.thread.live(best), M.Thread.id(best), "")
+    case +t <> +rest: RefNav.latest(rest, pid, RefNav.newer(t, best, pid))
+
+def RefNav.home.choose(here: Bool, st: M.State, sel: String, pid: String) -> String:
+  match here:
+    case True{}: sel
+    case False{}: RefNav.latest(Ui.threads(st), pid, M.Thread.blank(""))
+
+def RefNav.home(u: Ui, +pid: String) -> String:
+  match u:
+    case Ui{+st, +sel, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _}:
+      RefNav.home.choose(String.eq(Ui.thread_project(Ui.thread(st, sel)), pid), st, sel, pid)
+
+def RefNav.file.open(+a: Act, +path: String) -> Act:
+  match a:
+    case Act{+u, +cs}: Ui.also(Fm.open.k(Bool.pick(Nat, String.eq(FM.Fm.kind(path), "pdf"), 1n, 0n), u, FM.Fm.kind(path), path), cs)
+
+def RefNav.file.k(+view: Bool, +u: Ui, +pid: String, +path: String) -> Act:
+  match view:
+    case True{}: RefNav.file.open(Ui.select(u, RefNav.home(u, pid)), path)
+    case False{}: Flink.open(u, path, "open")
+
+def RefNav.file(+u: Ui, +pid: String, +xs: List<&2, String>) -> Act:
+  +path = FM.Fm.abs(RE.Card.project.root(Side.st(u), pid), String.join(xs, "/"))
+  RefNav.file.k(Bool.not(String.is_empty(FM.Fm.kind(path))), u, pid, path)
+
+def RefNav.task.thread(+u: Ui, +th: String) -> Act:
+  match th:
+    case SNil{}: RefNav.note(u, MSG.T.nav.task.none(Lang.loc(u)))
+    case SCon{+h, +t}: Ui.select(u, SCon{h, t})
+
+def RefNav.task.json(+u: Ui, +j: J.Json) -> Act:
+  RefNav.task.thread(u, J.Json.get_str(j, "thread", ""))
+
+def RefNav.task(+u: Ui, +id: String) -> Act:
+  RefNav.task.json(u, Maybe.default(&2, J.Json, J.Json.parse(M.Setting.get(Side.st(u), "board." ++ id, "")), J.Null{}))
+
+def RefNav.pr(+ok: Bool, +u: Ui, +repo: String, +n: String) -> Act:
+  match ok:
+    case True{}:
+      # The existing file.open system opener accepts URLs too. No new
+      # Cmd variant (which would break every client's exhaustive match).
+      Ui.rpc(u, "file.open", [J.KV{"path", J.Str{"https://github.com/" ++ repo ++ "/pull/" ++ n}}, J.KV{"how", J.Str{"open"}}])
+    case False{}: RefNav.note(u, MSG.T.nav.pr.norepo(Lang.loc(u)))
+
+def RefNav.machine.go(+rs: List<&2, MRow>, +id: String, +found: String) -> String:
+  match rs:
+    case Nil{}: found
+    case MRow{+name, +url, _} <> +t:
+      RefNav.machine.go(t, id, Bool.pick(String, Bool.or(String.eq(name, id), String.eq(url, id)), url, found))
+
+def RefNav.machine(+rs: List<&2, MRow>, +id: String) -> String:
+  RefNav.machine.go(rs, id, id)
+
+def RefNav.machine.named(+u: Ui, name: String) -> Act:
+  Ui.machine(u, RefNav.machine(Machines.rows.loc(Lang.loc(u), u), name))
+
+def RefNav.machine.visit(+u: Ui, id: String) -> Act:
+  RefNav.machine.named(u, FR.Fr.name(Side.st(u), id ++ "~x"))
+
+# Shared destination helper: history traversal calls this directly,
+# never recursively dispatching Ui.act.
+def RefNav.visit(+u: Ui, +r: R.Ref) -> Act:
+  match r:
+    case R.Ref{"thread", +id <> +tail, +frag}: RefNav.jump(Ui.select(u, id), frag)
+    case R.Ref{"bot", +id <> +tail, _}: Bots.select(u, id)
+    case R.Ref{"room", +id <> +tail, _}: Bots.room.select(u, id)
+    case R.Ref{"project", +id <> +tail, _}: Find.go(u, id)
+    case R.Ref{"machine", +id <> +tail, _}: RefNav.machine.visit(u, id)
+    case R.Ref{"routine", +id <> +tail, _}: RefNav.routine(Bots.select(u, BT.Routine.bot(BT.World.routine(M.State.bots(Side.st(u)), id))))
+    case R.Ref{"file", +id <> +path, _}: RefNav.file(u, id, path)
+    case R.Ref{"work", +id <> +tail, _}: Ui.select(u, RE.Card.work.thread(id))
+    case R.Ref{"task", +id <> +tail, _}: RefNav.task(u, id)
+    case R.Ref{"pr", +repo <> +n <> +tail, _}: RefNav.pr(String.contains(repo, "/"), u, repo, n)
+    case R.Ref{"mailroom", +id <> +tail, _}: Bots.select(u, id)
+    case _: Act{u, Nil{}}
+
+def RefNav.keep(+a: Act, +trail: RE.Trail) -> Act:
+  match a:
+    case Act{+u, +cs}: Act{Trail.store(u, trail), cs}
+
+def RefNav.seed.k(empty: Bool, +u: Ui, +t: RE.Trail) -> RE.Trail:
+  match empty t:
+    case True{} RE.Trail{bs, _, fs}: RE.Trail{bs, Here.ref(u), fs}
+    case False{} _: RE.Trail.go(t, Here.ref(u))
+
+def RefNav.seed.from(u: Ui, +t: RE.Trail) -> RE.Trail:
+  RefNav.seed.k(String.is_empty(RE.Trail.cur(t)), u, t)
+
+def RefNav.seed(+u: Ui) -> RE.Trail:
+  RefNav.seed.from(u, Trail.read(u))
+
+def RefNav.go.resolved(+m: Maybe<&2, RE.Card>, +u: Ui, +r: R.Ref) -> Act:
+  match m:
+    case None{}: Act{u, Nil{}}
+    case Some{_}: RefNav.keep(RefNav.visit(u, r), RE.Trail.go(RefNav.seed(u), R.Ref.uri(r)))
+
+def RefNav.go.parsed(+m: Maybe<&2, R.Ref>, +u: Ui) -> Act:
+  match m:
+    case None{}: Act{u, Nil{}}
+    case Some{+r}: RefNav.go.resolved(RE.Card.of(Side.st(u), r), u, r)
+
+def RefNav.go(+u: Ui, +uri: String) -> Act:
+  RefNav.go.parsed(R.Ref.parse(uri), u)
+
+def RefNav.move.resolved(m: Maybe<&2, RE.Card>, u: Ui, r: R.Ref, t: RE.Trail) -> Act:
+  match m:
+    case None{}: Act{u, Nil{}}
+    case Some{_}: RefNav.keep(RefNav.visit(u, r), t)
+
+def RefNav.move.parsed(+m: Maybe<&2, R.Ref>, +u: Ui, +t: RE.Trail) -> Act:
+  match m:
+    case None{}: Act{u, Nil{}}
+    case Some{+r}: RefNav.move.resolved(RE.Card.of(Side.st(u), r), u, r, t)
+
+def RefNav.move(+u: Ui, +t: RE.Trail) -> Act:
+  RefNav.move.parsed(R.Ref.parse(RE.Trail.cur(t)), u, t)
+
+def RefNav.copy.base(u: Ui, r: R.Ref, +base: String) -> Act:
+  Act{u, [Copy{R.Ref.web(Bool.pick(String, String.is_empty(base), "http://127.0.0.1:3787", base), r)}]}
+
+def RefNav.copy.web(m: Maybe<&2, R.Ref>, +u: Ui) -> Act:
+  match m:
+    case None{}: Act{u, Nil{}}
+    case Some{r}: RefNav.copy.base(u, r, Ui.info(u, "hub.base"))
+
+def RefNav.step(ok: Bool, u: Ui, t: RE.Trail) -> Act:
+  match ok:
+    case True{}: RefNav.move(u, t)
+    case False{}: Act{u, Nil{}}
+
+def RefNav.back.from(u: Ui, +t: RE.Trail) -> Act:
+  RefNav.step(RE.Trail.can_back(t), u, RE.Trail.back(t))
+
+def RefNav.back(+u: Ui) -> Act:
+  RefNav.back.from(u, Trail.read(u))
+
+def RefNav.fwd.from(u: Ui, +t: RE.Trail) -> Act:
+  RefNav.step(RE.Trail.can_fwd(t), u, RE.Trail.fwd(t))
+
+def RefNav.fwd(+u: Ui) -> Act:
+  RefNav.fwd.from(u, Trail.read(u))
+
+# the link actions (178 on: ref-go, ref-back, ref-fwd, ref-copy,
+# ref-copy-web), reached by a native compare, never by peeling 178 cases
+def RefNav.act(i: Nat, +u: Ui, +value: String) -> Act:
+  match i:
+    case 0n: RefNav.go(u, value)
+    case 1n: RefNav.back(u)
+    case 2n: RefNav.fwd(u)
+    case 3n: Act{u, [Copy{value}]}
+    case _: RefNav.copy.web(R.Ref.parse(value), u)
+
+def KN.path(+u: Ui) -> Act:
+  Act{Ui.scratch_set(Ui.scratch_set(Ui.flag_on(u, "settings"), "@f.kpath", M.Setting.get(Ui.state.of(u), "kicad.path", "")), "@set.sc", "850"), [Focus{"kicad-path"}]}
+
+def KN.save(+u: Ui) -> Act:
+  Ui.setting(u, "kicad.path=" ++ Ui.scratch(u, "@f.kpath"))
+
+# the KiCad notice's actions (183 on: kicad-retry, kicad-path, kicad-path-save)
+def KN.act(i: Nat, +u: Ui) -> Act:
+  match i:
+    case 0n: Ui.rpc(u, "kicad.retry", Nil{})
+    case 1n: KN.path(u)
+    case 2n: KN.save(u)
+    case _: Act{u, Nil{}}
+
+def Ui.act.ref(kn: Bool, +i: Nat, u: Ui, +value: String) -> Act:
+  match kn:
+    case True{}: KN.act(Nat.sub(i, 183n), u)
+    case False{}: RefNav.act(Nat.sub(i, 178n), u, value)
+
+def Ui.act.far(far: Bool, +i: Nat, u: Ui, +value: String) -> Act:
+  match far:
+    case True{}: Ui.act.ref(Nat.is_ge(i, 183n), i, u, value)
+    case False{}: Bots.act(Nat.sub(i, 77n), u, value)
+
+def Ui.act.k(+i: Nat, +u: Ui, +value: String) -> Act:
   match i:
     case 0n:
       Ui.select(u, value)
@@ -8413,7 +9546,7 @@ def Ui.act.k(i: Nat, u: Ui, +value: String) -> Act:
     case 31n:
       Act{Ui.flag_off(u, "proj"), Nil{}}
     case 32n:
-      Proj.enter(u)
+      Proj.enter.u(u)
     case 33n:
       Ui.effort.set(String.starts_with(value, "@"), u, value)
     case 34n:
@@ -8477,7 +9610,7 @@ def Ui.act.k(i: Nat, u: Ui, +value: String) -> Act:
     case 64n:
       Ui.row_toggle(u, value)
     case 65n:
-      Ui.on_thread(u, "kicad.open")
+      Ui.on_row(u, Bool.pick(String, String.is_empty(value), Ui.sel(u), value), "kicad.open")
     case 66n:
       Ui.reorder_project(u, value)
     case 67n:
@@ -8501,7 +9634,7 @@ def Ui.act.k(i: Nat, u: Ui, +value: String) -> Act:
     case 76n:
       Ui.on_thread(u, "thread.back")
     case _:
-      Bots.act(Nat.sub(i, 77n), u, value)
+      Ui.act.far(Nat.is_ge(i, 178n), i, u, value)
 
 def Emb.has.k(r: Map<&2, VT.Vt> & Bool) -> Bool:
   (_, b) = r
@@ -8616,10 +9749,19 @@ def Ui.recv_act.n(notify: Bool, u: Ui, +o: J.Json) -> Act:
     case True{}:
       Act{u, [Notify{J.Json.get_str(o, "thread", ""), J.Json.get_str(o, "title", ""), J.Json.get_str(o, "body", ""), J.Json.get_str(o, "key", "")}]}
     case False{}:
-      Emb.sync.if(C.Codec.pos(["log", "changes", "view"], J.Json.get_str(o, "t", "")), Mpage.sync(Ui.recv_act.go(u, o)))
+      Emb.sync.if(C.Codec.pos(["log", "changes", "view"], J.Json.get_str(o, "t", "")), Fab.sync(Mpage.sync(Ui.recv_act.go(u, o))))
+
+# a frame of a page ({"t":"shot","bot":page,"n":n}) where the client keeps
+# it (the phones): its number as info "shot.<page>", seen when on show
+def Ui.recv_act.s(shot: Bool, u: Ui, +o: J.Json) -> Act:
+  match shot:
+    case True{}:
+      Ui.cast.seen(Ui.info_set(u, "shot." ++ J.Json.get_str(o, "bot", ""), J.Json.as_raw(J.Json.get(o, "n"), "0")), J.Json.get_str(o, "bot", ""))
+    case False{}:
+      Ui.recv_act.n(String.eq(J.Json.get_str(o, "t", ""), "notify"), u, o)
 
 def Ui.recv_act(u: Ui, +o: J.Json) -> Act:
-  Ui.recv_act.n(String.eq(J.Json.get_str(o, "t", ""), "notify"), u, o)
+  Ui.recv_act.s(String.eq(J.Json.get_str(o, "t", ""), "shot"), u, o)
 
 # after an action that chose another thread
 def Emb.sync.sel.k(moved: Bool, a: Act) -> Act:
@@ -8717,8 +9859,11 @@ def Tour.at(+u: Ui) -> Nat:
   Tour.at.k(OB.Ob.at(Tour.ready(u), Tour.done(Ui.state(u)), Ui.scratch(u, "@tour")), Tour.single(u))
 
 # what the card says: no "10 of 10" for a step asked alone
+def Tour.counter.loc(+l: I.Loc, +u: Ui) -> String:
+  Bool.pick(String, Tour.single(u), "", OB.Ob.counter(l, Tour.at(u)))
+
 def Tour.counter(+u: Ui) -> String:
-  Bool.pick(String, Tour.single(u), "", OB.Ob.counter(Tour.at(u)))
+  Tour.counter.loc(Lang.loc(u), u)
 
 # whether the card has a Back (not the first step, not a step alone)
 def Tour.back(+u: Ui) -> Bool:
@@ -8779,34 +9924,37 @@ def Tour.uber.name(+u: Ui) -> String:
 type TChoice is Data:
   TChoice{label: String, action: String, value: String}
 
-def Tour.pick.one(first: Bool, +b: BT.Bot) -> TChoice:
-  TChoice{Bool.pick(String, first, "Make " ++ BT.Bot.name(b) ++ " my uberbot", "Make " ++ BT.Bot.name(b)), "uber-promote", BT.Bot.id(b)}
+def Tour.pick.one(+l: I.Loc, first: Bool, +b: BT.Bot) -> TChoice:
+  TChoice{Bool.pick(String, first, MSG.T.tour.uber.first(l, BT.Bot.name(b)), MSG.T.tour.uber.make(l, BT.Bot.name(b))), "uber-promote", BT.Bot.id(b)}
 
-def Tour.picks(us: List<&2, Used>, first: Bool) -> List<&2, TChoice>:
+def Tour.picks(+l: I.Loc, us: List<&2, Used>, first: Bool) -> List<&2, TChoice>:
   match us:
     case Nil{}:
       Nil{}
     case Used{_, b} <> t:
-      Tour.pick.one(first, b) <> Tour.picks(t, False{})
+      Tour.pick.one(l, first, b) <> Tour.picks(l, t, False{})
 
-def Tour.choices.k(+uc: String, +st: M.State) -> List<&2, TChoice>:
-  Bool.pick(List<&2, TChoice>, String.eq(uc, "none"), [TChoice{"Create my uberbot", "uber-new", ""}],
-    Bool.pick(List<&2, TChoice>, String.eq(uc, "pick"), List.append(&2, TChoice, Tour.picks(List.take(&2, Used, Tour.ranked(st), 3n), True{}), [TChoice{"Create a new one", "uber-new", ""}]), Nil{}))
+def Tour.choices.k(+l: I.Loc, +uc: String, +st: M.State) -> List<&2, TChoice>:
+  Bool.pick(List<&2, TChoice>, String.eq(uc, "none"), [TChoice{MSG.T.tour.uber.create(l), "uber-new", ""}],
+    Bool.pick(List<&2, TChoice>, String.eq(uc, "pick"), List.append(&2, TChoice, Tour.picks(l, List.take(&2, Used, Tour.ranked(st), 3n), True{}), [TChoice{MSG.T.tour.uber.new(l), "uber-new", ""}]), Nil{}))
 
 # the buttons under the uberbot step's words (none on other steps)
-def Tour.choices.on(on: Bool, +u: Ui) -> List<&2, TChoice>:
+def Tour.choices.on(+l: I.Loc, on: Bool, +u: Ui) -> List<&2, TChoice>:
   match on:
     case True{}:
-      Tour.choices.k(Tour.uber.case(u), Ui.state.of(u))
+      Tour.choices.k(l, Tour.uber.case(u), Ui.state.of(u))
     case False{}:
       Nil{}
 
 def Tour.choices(+u: Ui) -> List<&2, TChoice>:
-  Tour.choices.on(Nat.is_eq(Tour.at(u), OB.Ob.uber()), u)
+  Tour.choices.on(Lang.loc(u), Nat.is_eq(Tour.at(u), OB.Ob.uber()), u)
 
 # the step's words for a kind of client (0 window, 1 web, 2 phone)
-def Tour.body(+k: Nat, +u: Ui) -> String:
-  OB.Ob.body.uber(k, Tour.days(u), Tour.uber.case(u), Tour.uber.name(u), Tour.at(u))
+def Tour.body.loc(+l: I.Loc, +k: Nat, +u: Ui) -> String:
+  OB.Ob.body.uber(l, k, Tour.days(u), Tour.uber.case(u), Tour.uber.name(u), Tour.at(u))
+
+def Tour.body(k: Nat, +u: Ui) -> String:
+  Tour.body.loc(Lang.loc(u), k, u)
 
 def Tour.target.k(+g: String, open: Bool) -> String:
   Bool.pick(String, Bool.and(String.eq(g, "head"), Bool.not(open)), "", g)
@@ -9045,50 +10193,54 @@ def Teach.elapsed(+u: Ui, +bot: String) -> Nat:
   +start = {M.Switch.num(Teach.part(Teach.info(u, bot), 1n), 0n) : Nat}
   Bool.pick(Nat, Nat.is_eq(start, 0n), 0n, Nat.sub(Side.now(u), start))
 
-def Teach.title(+mode: Nat, +name: String) -> String:
+def Teach.title(+l: I.Loc, +mode: Nat, +name: String) -> String:
   match mode:
     case 0n:
       ""
     case 1n:
-      name ++ " is watching and learning"
+      MSG.T.teach.watching(l, name)
     case 2n:
-      "Save this task"
+      MSG.T.teach.save(l)
     case _:
-      "You have the browser"
+      MSG.T.teach.youhave(l)
 
-def Teach.btns(mode: Nat) -> List<&2, TBtn>:
+def Teach.btns(+l: I.Loc, mode: Nat) -> List<&2, TBtn>:
   match mode:
     case 0n:
-      [TBtn{"Teach a task", "tk-teach", "", True{}}, TBtn{"Take over", "tk-takeover", "", False{}}]
+      [TBtn{MSG.T.teach.teach(l), "tk-teach", "", True{}}, TBtn{MSG.T.teach.takeover(l), "tk-takeover", "", False{}}]
     case 1n:
-      [TBtn{"Stop & save", "tk-stop", "", True{}}, TBtn{"Discard", "tk-discard", "", False{}}]
+      [TBtn{MSG.T.teach.stopsave(l), "tk-stop", "", True{}}, TBtn{MSG.T.teach.discard(l), "tk-discard", "", False{}}]
     case 2n:
-      [TBtn{"Save", "tk-save", "", True{}}, TBtn{"Discard", "tk-discard", "", False{}}]
+      [TBtn{MSG.T.common.save(l), "tk-save", "", True{}}, TBtn{MSG.T.teach.discard(l), "tk-discard", "", False{}}]
     case _:
-      [TBtn{"Hand back", "tk-handback", "", True{}}]
+      [TBtn{MSG.T.teach.handback(l), "tk-handback", "", True{}}]
 
-def Teach.strip.k(+mode: Nat, +name: String, +clock: String, steps: Nat) -> TStrip:
-  TStrip{mode, Teach.title(mode, name), Bool.pick(String, Nat.is_eq(mode, 1n), clock, ""), steps, Teach.btns(mode)}
+def Teach.strip.k(+l: I.Loc, +mode: Nat, +name: String, +clock: String, steps: Nat) -> TStrip:
+  TStrip{mode, Teach.title(l, mode, name), Bool.pick(String, Nat.is_eq(mode, 1n), clock, ""), steps, Teach.btns(l, mode)}
 
 def Teach.bot.name(+u: Ui, +bot: String) -> String:
   BT.Bot.name(BT.World.bot(M.State.bots(Ui.state(u)), bot))
 
 # the strip above the bot's page
-def Teach.strip(+u: Ui, +bot: String) -> TStrip:
-  Teach.strip.k(Teach.mode(u, bot), Teach.bot.name(u, bot), Teach.clock(Teach.elapsed(u, bot)), Teach.count(u, bot))
+def Teach.strip.loc(+l: I.Loc, +u: Ui, +bot: String) -> TStrip:
+  Teach.strip.k(l, Teach.mode(u, bot), Teach.bot.name(u, bot), Teach.clock(Teach.elapsed(u, bot)), Teach.count(u, bot))
+
+def Teach.strip(+u: Ui, bot: String) -> TStrip:
+  Teach.strip.loc(Lang.loc(u), u, bot)
 
 # The save sheet
 # --------------
 
-def Teach.verb(+act: String) -> String:
-  Bool.pick(String, String.eq(act, "navigate"), "Go to ",
-    Bool.pick(String, String.eq(act, "click"), "Click ",
-      Bool.pick(String, String.eq(act, "type"), "Type in ",
-        Bool.pick(String, String.eq(act, "select"), "Choose in ",
-          Bool.pick(String, String.eq(act, "press"), "Press ",
-            Bool.pick(String, String.eq(act, "scroll"), "Scroll ",
-              Bool.pick(String, String.eq(act, "wait"), "Wait for ",
-                Bool.pick(String, String.eq(act, "check"), "Check ", ""))))))))
+# a step in words, a whole sentence round its target
+def Teach.step.k(+l: I.Loc, +act: String, +t: String) -> String:
+  Bool.pick(String, String.eq(act, "navigate"), MSG.T.teach.step.navigate(l, t),
+    Bool.pick(String, String.eq(act, "click"), MSG.T.teach.step.click(l, t),
+      Bool.pick(String, String.eq(act, "type"), MSG.T.teach.step.typein(l, t),
+        Bool.pick(String, String.eq(act, "select"), MSG.T.teach.step.select(l, t),
+          Bool.pick(String, String.eq(act, "press"), MSG.T.teach.step.press(l, t),
+            Bool.pick(String, String.eq(act, "scroll"), MSG.T.teach.step.scroll(l, t),
+              Bool.pick(String, String.eq(act, "wait"), MSG.T.teach.step.wait(l, t),
+                Bool.pick(String, String.eq(act, "check"), MSG.T.teach.step.check(l, t), t))))))))
 
 def Teach.chip(+act: String, v: TK.TkValue) -> String:
   match v:
@@ -9104,10 +10256,9 @@ def Teach.secret(v: TK.TkValue) -> Bool:
     case _:
       False{}
 
-def Teach.what(+act: String, +target: TK.TkTarget, +url: String, +note: String) -> String:
+def Teach.what(+l: I.Loc, +act: String, +target: TK.TkTarget, +url: String, +note: String) -> String:
   Bool.pick(String, String.eq(act, "note"), note,
-    Bool.pick(String, String.eq(act, "navigate"), Teach.verb(act) ++ url,
-      Teach.verb(act) ++ Teach.label(target)))
+    Teach.step.k(l, act, Bool.pick(String, String.eq(act, "navigate"), url, Teach.label(target))))
 
 # a parameter's default name: the field's label, else value<n>
 def Teach.pdflt(+label: String, +n: Nat) -> String:
@@ -9117,22 +10268,25 @@ def Teach.pname(+u: Ui, +label: String, +n: Nat) -> String:
   +f = {String.trim(Ui.scratch(u, "@f.tkp." ++ Nat.show(n))) : String}
   Bool.pick(String, String.is_empty(f), Teach.pdflt(label, n), f)
 
-def Teach.row(+u: Ui, s: TK.TkStep) -> TStepRow:
+def Teach.row(+l: I.Loc, +u: Ui, s: TK.TkStep) -> TStepRow:
   match s:
     case TK.TkStep{+n, +act, +target, +value, _, _, +url, _, +note}:
       +label = {Teach.label(target) : String}
-      TStepRow{n, Teach.what(act, target, url, note), label, Teach.chip(act, value), Teach.secret(value), String.eq(Ui.scratch(u, "@tkm." ++ Nat.show(n)), "1"), Teach.pname(u, label, n)}
+      TStepRow{n, Teach.what(l, act, target, url, note), label, Teach.chip(act, value), Teach.secret(value), String.eq(Ui.scratch(u, "@tkm." ++ Nat.show(n)), "1"), Teach.pname(u, label, n)}
 
-def Teach.rows.go(ss: List<&2, TK.TkStep>, +u: Ui) -> List<&2, TStepRow>:
+def Teach.rows.go(+l: I.Loc, ss: List<&2, TK.TkStep>, +u: Ui) -> List<&2, TStepRow>:
   match ss:
     case Nil{}:
       Nil{}
     case s <> t:
-      Teach.row(u, s) <> Teach.rows.go(t, u)
+      Teach.row(l, u, s) <> Teach.rows.go(l, t, u)
 
 # every draft step as a row
-def Teach.rows(+u: Ui, +bot: String) -> List<&2, TStepRow>:
-  Teach.rows.go(Teach.draft(u, bot), u)
+def Teach.rows.loc(+l: I.Loc, +u: Ui, +bot: String) -> List<&2, TStepRow>:
+  Teach.rows.go(l, Teach.draft(u, bot), u)
+
+def Teach.rows(+u: Ui, bot: String) -> List<&2, TStepRow>:
+  Teach.rows.loc(Lang.loc(u), u, bot)
 
 # the chips: the typed values that are no secret
 def Teach.chip.ok(r: TStepRow) -> Bool:
@@ -9303,11 +10457,11 @@ def Teach.pfield(+name: String) -> String:
 # The stuck card
 # --------------
 
-def Teach.choice.label(+c: String) -> String:
-  Bool.pick(String, String.eq(c, "confirm"), "Confirm",
-    Bool.pick(String, String.eq(c, "continue"), "Continue",
-      Bool.pick(String, String.eq(c, "skip"), "Skip this step",
-        Bool.pick(String, String.eq(c, "stop"), "Stop task", c))))
+def Teach.choice.label(+l: I.Loc, +c: String) -> String:
+  Bool.pick(String, String.eq(c, "confirm"), MSG.T.teach.choice.confirm(l),
+    Bool.pick(String, String.eq(c, "continue"), MSG.T.teach.choice.continue(l),
+      Bool.pick(String, String.eq(c, "skip"), MSG.T.teach.choice.skip(l),
+        Bool.pick(String, String.eq(c, "stop"), MSG.T.teach.choice.stop(l), c))))
 
 # a risky step goes on only by Confirm, never Continue
 def Teach.choice.safe(+risky: Bool, +c: String) -> String:
@@ -9318,25 +10472,28 @@ def Teach.choices(+o: String, +risky: Bool) -> List<&2, String>:
     Bool.pick(List<&2, String>, risky, ["confirm", "skip", "stop"], ["continue", "skip", "stop"]),
     String.split(o, '\n'))
 
-def Teach.ask.btns(cs: List<&2, String>, +id: String, +risky: Bool) -> List<&2, TBtn>:
+def Teach.ask.btns.loc(+l: I.Loc, cs: List<&2, String>, +id: String, +risky: Bool) -> List<&2, TBtn>:
   match cs:
     case Nil{}:
       Nil{}
     case +c <> t:
-      TBtn{Teach.choice.label(Teach.choice.safe(risky, c)), "answer", id ++ "|" ++ Teach.choice.safe(risky, c), Bool.not(String.eq(c, "stop"))} <> Teach.ask.btns(t, id, risky)
+      TBtn{Teach.choice.label(l, Teach.choice.safe(risky, c)), "answer", id ++ "|" ++ Teach.choice.safe(risky, c), Bool.not(String.eq(c, "stop"))} <> Teach.ask.btns.loc(l, t, id, risky)
+
+def Teach.ask.btns(cs: List<&2, String>, id: String, risky: Bool) -> List<&2, TBtn>:
+  Teach.ask.btns.loc(I.En{}, cs, id, risky)
 
 # Take over is offered while the bot has the browser
-def Teach.ask.take(drive: Bool) -> List<&2, TBtn>:
-  Bool.pick(List<&2, TBtn>, drive, Nil{}, [TBtn{"Take over", "tk-takeover", "", False{}}])
+def Teach.ask.take(+l: I.Loc, drive: Bool) -> List<&2, TBtn>:
+  Bool.pick(List<&2, TBtn>, drive, Nil{}, [TBtn{MSG.T.teach.takeover(l), "tk-takeover", "", False{}}])
 
 # the card of an open ask of kind "browser" (its detail is a JSON object)
-def Teach.ask(a: M.Ask, +drive: String) -> TAsk:
+def Teach.ask(+l: I.Loc, a: M.Ask, +drive: String) -> TAsk:
   match a:
     case M.Ask{+id, _, _, _, +d, +o, _, _}:
       +j = {Maybe.default(&2, J.Json, J.Json.parse(d), J.Null{}) : J.Json}
       +risky = {J.Json.get_bool(j, "risky", False{}) : Bool}
       TAsk{id, J.Json.get_str(j, "run", ""), J.Json.get_str(j, "slug", ""), J.Json.get_nat(j, "n", 0n), J.Json.get_str(j, "kind", ""), J.Json.get_str(j, "question", ""), risky, J.Json.get_str(j, "shot", ""),
-        List.append(&2, TBtn, Teach.ask.btns(Teach.choices(o, risky), id, risky), Teach.ask.take(Bool.not(String.is_empty(drive))))}
+        List.append(&2, TBtn, Teach.ask.btns.loc(l, Teach.choices(o, risky), id, risky), Teach.ask.take(l, Bool.not(String.is_empty(drive))))}
 
 # the bot an ask is about (its detail's "bot")
 def Teach.ask.bot(a: M.Ask) -> String:
@@ -9345,12 +10502,18 @@ def Teach.ask.bot(a: M.Ask) -> String:
       J.Json.get_str(Maybe.default(&2, J.Json, J.Json.parse(d), J.Null{}), "bot", "")
 
 # the card of a browser ask, with the drive info from the info map
-def Teach.ask.from(+a: M.Ask, nf: Map<&2, String>) -> TAsk:
-  Teach.ask(a, Str.get(nf, "drive." ++ Teach.ask.bot(a)))
+def Teach.ask.from.loc(+l: I.Loc, +a: M.Ask, nf: Map<&2, String>) -> TAsk:
+  Teach.ask(l, a, Str.get(nf, "drive." ++ Teach.ask.bot(a)))
+
+def Teach.ask.from(a: M.Ask, nf: Map<&2, String>) -> TAsk:
+  Teach.ask.from.loc(I.En{}, a, nf)
 
 # the person's choices for a browser ask whose detail is `d`
-def Teach.ask.of(a: M.Ask, +u: Ui, +bot: String) -> TAsk:
-  Teach.ask(a, Teach.drive(u, bot))
+def Teach.ask.of.loc(+l: I.Loc, a: M.Ask, +u: Ui, +bot: String) -> TAsk:
+  Teach.ask(l, a, Teach.drive(u, bot))
+
+def Teach.ask.of(a: M.Ask, +u: Ui, bot: String) -> TAsk:
+  Teach.ask.of.loc(Lang.loc(u), a, u, bot)
 
 # The Browser tab's actions
 # -------------------------
@@ -9367,7 +10530,7 @@ def Teach.marks.go(rs: List<&2, TStepRow>, u: Ui) -> Ui:
 
 # the save sheet's marks and fields forgotten
 def Teach.clear(+u: Ui, +bot: String) -> Ui:
-  Bots.fields.clear(Teach.marks.go(Teach.rows(u, bot), u), ["tkname", "tkdesc", "tknote"])
+  Bots.fields.clear(Teach.marks.go(Teach.rows.loc(Lang.loc(u), u, bot), u), ["tkname", "tkdesc", "tknote"])
 
 def Teach.teach(+u: Ui, +bot: String, +op: String) -> Act:
   Ui.rpc(u, "bots.teach", [J.KV{"bot", J.Str{bot}}, J.KV{"op", J.Str{op}}])
@@ -9392,7 +10555,7 @@ def Teach.save.k(none: Bool, +u: Ui, +bot: String, +name: String) -> Act:
       Act{u, Nil{}}
     case False{}:
       Ui.rpc(Teach.clear(u, bot), "bots.teach", [J.KV{"bot", J.Str{bot}}, J.KV{"op", J.Str{"save"}}, J.KV{"name", J.Str{name}},
-        J.KV{"description", J.Str{String.trim(Bots.field(u, "tkdesc"))}}, J.KV{"params", J.Json.arr(Teach.params.go(Teach.rows(u, bot)))}])
+        J.KV{"description", J.Str{String.trim(Bots.field(u, "tkdesc"))}}, J.KV{"params", J.Json.arr(Teach.params.go(Teach.rows.loc(Lang.loc(u), u, bot)))}])
 
 def Teach.save(+u: Ui, +bot: String) -> Act:
   +name = {String.trim(Bots.field(u, "tkname")) : String}
@@ -9522,9 +10685,15 @@ def Teach.actions() -> List<&2, String>:
   ["tk-teach", "tk-note", "tk-stop", "tk-discard", "tk-save", "tk-mark", "tk-takeover", "tk-handback", "tk-run", "tk-del", "tk-open",
    "bb-click", "bb-type", "bb-key", "bb-scroll", "bb-nav", "bb-back", "bb-reload"]
 
+# the page a tk- or bb- action acts on: the bot whose tab is open, but take
+# over and hand back (6, 7) carrying a page id in their value act on that
+# page, a thread's own (its Browser pane's strip)
+def Teach.target(+i: Nat, +cur: String, +value: String) -> String:
+  Bool.pick(String, Bool.and(Bool.or(Nat.is_eq(i, 6n), Nat.is_eq(i, 7n)), Bool.not(String.is_empty(value))), value, cur)
+
 # the tk- and bb- actions act on the bot whose tab is open
 def Teach.act(+u: Ui, +action: String, +value: String) -> Act:
-  Teach.act.k(C.Codec.pos(Teach.actions(), action), u, Bots.cur(u), value)
+  Teach.act.k(C.Codec.pos(Teach.actions(), action), u, Teach.target(C.Codec.pos(Teach.actions(), action), Bots.cur(u), value), value)
 
 # a user action with its value
 def Ui.act.m(menu: Bool, +i: Nat, +u: Ui, +action: String, +value: String) -> Act:
@@ -9539,7 +10708,7 @@ def Ui.act.e(emb: Bool, +u: Ui, +action: String, +value: String) -> Act:
     case True{}:
       Emb.act(u, action, value)
     case False{}:
-      Emb.sync.sel(Ui.sel(u), Mpage.sync(Ui.act.m(Nat.is_lt(C.Codec.pos(Menu.actions(), action), 17n), C.Codec.pos(Menu.actions(), action), u, action, value)))
+      Emb.sync.sel(Ui.sel(u), Fab.sync(Mpage.sync(Ui.act.m(Nat.is_lt(C.Codec.pos(Menu.actions(), action), 17n), C.Codec.pos(Menu.actions(), action), u, action, value))))
 
 # the picker's machine row (routed before the action table)
 def Ui.act.p(pick: Bool, +u: Ui, +action: String, +value: String) -> Act:
@@ -9582,13 +10751,35 @@ def Ui.act.u(pick: Bool, +u: Ui, +action: String, +value: String) -> Act:
     case False{}:
       Ui.act.c(False{}, u, action, value)
 
+# Export actions bypass the positional table, preserving its stable indices.
+def KX.act.k(action: String, +u: Ui, +th: String) -> Act:
+  match action:
+    case "menu-close": Act{Ui.info_set(u, "kx:" ++ th, ""), Nil{}}
+    case "kicad-export10-read": Act{u, Nil{}}
+    case "kicad-export10-cancel": Act{Ui.info_set(u, "kx:" ++ th, ""), Nil{}}
+    case "kicad-export10-next":
+      +ls = KEX.KX.lines(KEX.KX.report(J.Json.get_obj(KX.result(Ui.infos(u), th), "report")))
+      +off = Nat.add(KX.offset(Ui.infos(u), th), 8n)
+      Act{Ui.info_set(u, "kx.page:" ++ th, Nat.show(Bool.pick(Nat, Nat.is_ge(off, List.length(&2, String, ls)), 0n, off))), Nil{}}
+    case "kicad-export10-anyway":
+      Ui.rpc(Ui.info_set(u, "kx:" ++ th, ""), "kicad.export10", [J.KV{"thread", J.Str{th}}, J.KV{"anyway", J.Flag{True{}}}, J.KV{"report", J.Str{J.Json.show(J.Json.get_obj(KX.result(Ui.infos(u), th), "report"))}}])
+    case _: Ui.rpc(Ui.info_set(u, "kx:" ++ th, ""), "kicad.export10", [J.KV{"thread", J.Str{th}}])
+
+def KX.act(+u: Ui, action: String, +value: String) -> Act:
+  KX.act.k(action, Ui.scratch_set(u, "@menu", ""), Bool.pick(String, String.is_empty(value), Ui.sel(u), value))
+
+def Ui.act.kx(kx: Bool, +u: Ui, +action: String, +value: String) -> Act:
+  match kx:
+    case True{}: KX.act(u, action, value)
+    case False{}: Ui.act.u(Nat.is_lt(C.Codec.pos(["uber-promote", "uber-new"], action), 2n), u, action, value)
+
 # (design review's "rv-" actions route before the rest: Rv.act)
 def Ui.act.r(rv: Bool, +u: Ui, +action: String, +value: String) -> Act:
   match rv:
     case True{}:
       Rv.act(u, action, value)
     case False{}:
-      Ui.act.u(Nat.is_lt(C.Codec.pos(["uber-promote", "uber-new"], action), 2n), u, action, value)
+      Ui.act.kx(Bool.or(String.starts_with(action, "kicad-export10"), Bool.and(String.eq(action, "menu-close"), KX.pending(Ui.infos(u), Ui.sel(u)))), u, action, value)
 
 # (Antigravity's "agy-" actions route before the rest too: Agv.act)
 def Ui.act.g(agy: Bool, +u: Ui, +action: String, +value: String) -> Act:
@@ -9627,15 +10818,18 @@ def Tzs.er(u: Ui) -> String:
     case Ui{_, _, _, _, _, _, _, _, _, _, _, _, er, _, _, _, _}:
       er
 
-def Tzs.source(+s: String) -> String:
-  Bool.pick(String, String.eq(s, "set"), "set", Bool.pick(String, String.eq(s, "phone"), "from your phone", Bool.pick(String, String.eq(s, "machine"), "this machine", "nothing reported yet")))
+def Tzs.source(+l: I.Loc, +s: String) -> String:
+  Bool.pick(String, String.eq(s, "set"), MSG.T.tz.source.set(l), Bool.pick(String, String.eq(s, "phone"), MSG.T.tz.source.phone(l), Bool.pick(String, String.eq(s, "machine"), MSG.T.tz.source.machine(l), MSG.T.tz.source.none(l))))
 
 def Tzs.off(+u: Ui) -> TZ.TzOff:
   TZ.Tz.off(SC.Sched.person(Ui.state.of(u), 0n, True{}), Side.now(u))
 
 # "Europe/Helsinki · EEST +03:00 · from your phone"
+def Tzs.line.loc(+l: I.Loc, +u: Ui) -> String:
+  SC.Zone.person(Ui.state.of(u)) ++ " · " ++ TZ.Tz.abbr(Tzs.off(u)) ++ " " ++ TZ.Tz.offset.text(Tzs.off(u)) ++ " · " ++ Tzs.source(l, SC.Zone.source(Ui.state.of(u)))
+
 def Tzs.line(+u: Ui) -> String:
-  SC.Zone.person(Ui.state.of(u)) ++ " · " ++ TZ.Tz.abbr(Tzs.off(u)) ++ " " ++ TZ.Tz.offset.text(Tzs.off(u)) ++ " · " ++ Tzs.source(SC.Zone.source(Ui.state.of(u)))
+  Tzs.line.loc(Lang.loc(u), u)
 
 def Tzs.auto(+u: Ui) -> Bool:
   Bool.not(String.is_empty(M.Setting.get(Ui.state.of(u), "person.tz", "")))
@@ -9651,7 +10845,7 @@ def Tzs.set.k(ok: Bool, +u: Ui, +zone: String) -> Act:
     case True{}:
       Ui.rpc(Ui.scratch_set(u, "@tz.try", zone), "zone.set", [J.KV{"zone", J.Str{zone}}])
     case False{}:
-      Act{Ui.error_set(Ui.scratch_set(u, "@tz.try", Bool.pick(String, String.is_empty(zone), "?", zone)), "That is not a time zone name (like Europe/Helsinki)"), Nil{}}
+      Act{Ui.error_set(Ui.scratch_set(u, "@tz.try", Bool.pick(String, String.is_empty(zone), "?", zone)), MSG.T.tz.invalid(Lang.loc(u))), Nil{}}
 
 def Tzs.set(+u: Ui) -> Act:
   Tzs.set.k(SC.Zone.valid(String.trim(Bots.field(u, "tzname"))), u, String.trim(Bots.field(u, "tzname")))
@@ -9670,12 +10864,45 @@ def Tzs.act.k(i: Nat, +u: Ui, +value: String) -> Act:
 def Tzs.act(+u: Ui, +action: String, +value: String) -> Act:
   Tzs.act.k(C.Codec.pos(["tz-set", "tz-auto", "tz-report"], action), u, value)
 
+# Settings > Usage (src/core/usage.bend): the model side from the log, Boat's
+# from the hub's info "boat.usage"; every client draws these rows
+def Usage.rows(+u: Ui) -> List<&2, UZ.URow>:
+  List.concat(&2, UZ.URow, [UZ.Use.rows(Ui.state.of(u), Ui.threads(Ui.state.of(u))),
+    UZ.Tk.rows(Ui.state.of(u), Ui.threads(Ui.state.of(u)), Ui.projects(Ui.state.of(u)), Side.now(u)), UZ.Bj.rows(Ui.state.of(u), Ui.info(u, "boat.usage"), Side.now(u))])
+
+# a thread's Boat chip opens Settings (Usage is in it), as its button does
+def Usage.open(open: Bool, +u: Ui) -> Act:
+  match open:
+    case True{}:
+      Act{u, Nil{}}
+    case False{}:
+      Voice.flag("settings", Act{Ui.flag_on(u, "settings"), Nil{}})
+
+# (Settings > Usage's "usage-refresh": Boat's CLI read again now;
+# "usage-open": a thread's Boat chip)
+def Ui.act.us(i: Nat, +u: Ui, +action: String, +value: String) -> Act:
+  match i:
+    case 0n:
+      Usage.ask(Act{u, Nil{}}, "refresh")
+    case 1n:
+      Usage.open(Ui.flag(u, "settings"), u)
+    case _:
+      Ui.act.s(String.eq(action, "skill-close"), u, action, value)
+
+# (the project card's fab-open, fab-edit and buy: Fab.act)
+def Ui.act.fab(fab: Bool, +u: Ui, +action: String, +value: String) -> Act:
+  match fab:
+    case True{}:
+      Fab.act(u, action, value)
+    case False{}:
+      Ui.act.us(C.Codec.pos(["usage-refresh", "usage-open"], action), u, action, value)
+
 def Ui.act.z(tz: Bool, +u: Ui, +action: String, +value: String) -> Act:
   match tz:
     case True{}:
       Tzs.act(u, action, value)
     case False{}:
-      Ui.act.s(String.eq(action, "skill-close"), u, action, value)
+      Ui.act.fab(Fab.is(action), u, action, value)
 
 # Only inspect the thread prefix, leaving the potentially long key snapshot alone.
 def Ui.subs.thread(s: String, acc: String) -> String:
@@ -9701,8 +10928,23 @@ def Ui.act.subs(shut: Bool, open: Bool, +u: Ui, +action: String, +value: String)
     case False{} False{}:
       Ui.act.z(String.starts_with(action, "tz-"), u, action, value)
 
+# Hold actions share the ordinary route; language actions keep their own
+# dispatch and the review sync still wraps the ordinary route.
+def Ui.act.hold(hold: Bool, +u: Ui, +action: String, +value: String) -> Act:
+  match hold:
+    case True{}:
+      Hold.act(u, action, value)
+    case False{}:
+      Ui.act.subs(String.eq(action, "subs-shut"), String.eq(action, "subs-open"), u, action, value)
+
+def Lang.dispatch(k: Nat, +u: Ui, +action: String, +value: String) -> Act:
+  match k:
+    case 0n: Lang.act(0n, u, value)
+    case 1n: Lang.act(1n, u, value)
+    case _: Rc.sync.of(Ui.act.hold(String.starts_with(action, "hold-"), u, action, value))
+
 def Ui.act(+u: Ui, +action: String, +value: String) -> Act:
-  Rc.sync.of(Ui.act.subs(String.eq(action, "subs-shut"), String.eq(action, "subs-open"), u, action, value))
+  Ui.cast.now(u, Lang.dispatch(C.Codec.pos(["lang", "lang-os"], action), u, action, value))
 
 # the newest n of a list (oldest first), and how many are left out
 type Win is Data:
@@ -9828,7 +11070,6 @@ def Page.since.k(t: M.Thread) -> Nat:
 
 def Page.since(s: M.State, +th: String) -> Nat:
   Page.since.k(Ui.thread(s, th))
-
 
 # The window's memos (main.bend's Mm): which threads a change touches,
 # for keys that say whether a thread's view can have changed. Every change
@@ -9997,6 +11238,12 @@ def Touch.raw(c: M.Change) -> List<&2, String>:
       ["@mail"]
     case M.DecisionLogged{_, _, _, _, _, _, _}:
       ["@mail"]
+    case M.TurnUsage{+thread, _, _, _, _, _, _, _, _, _, _, _, _}:
+      [thread]
+    case M.DeployAsked{_, _, _, _, _}:
+      ["*", "!"]
+    case M.DeployBuilt{_, _, _, _, _}:
+      ["*", "!"]
 
 # a thread id as touched: a subagent's log ("@sub:<thread>", model.bend's
 # Bg.log) is its thread's; any other name with "@" is no plain thread, so
@@ -10013,3 +11260,20 @@ def Touch.ids(ids: List<&2, String>) -> List<&2, String>:
 
 def Touch.of(c: M.Change) -> List<&2, String>:
   Touch.ids(Touch.raw(c))
+
+# Native content can only be embedded in this machine's own window
+# (core/cef.bend): the page given (a thread's, or a bot's in its tab) shows
+# natively when this window's hub is its own and runs cef.
+def CefUI.native(+u: Ui, +page: String) -> Bool:
+  Bool.and(CF.Cef.native(Ui.info(u, "browser.engine.live"), Ui.info(u, "local.remote.url")), CF.Cef.page_local(page))
+
+# an overlay drawn over the main area is open (a toast is not one)
+def CefUI.covered(+u: Ui) -> Bool:
+  CF.Cef.covered(Ui.flag(u, "palette"), Ui.flag(u, "proj"), Bool.not(String.is_empty(Menu.open(u))), Bool.not(String.is_empty(Ui.scratch(u, "@look"))),
+    Ui.flag(u, "models"), Tour.on(u), Ui.flag(u, "perf"), Bool.not(String.is_empty(Ui.scratch(u, "@lb"))))
+
+def CefUI.strip(+u: Ui, +id: String) -> String:
+  CF.Cef.drive_text(Teach.drive(u, id), Bool.and(String.eq(Ui.scratch(u, "@cef.window"), "1"), CefUI.native(u, id)))
+
+def CefUI.strip_on(+u: Ui, +id: String) -> Bool:
+  CF.Cef.strip_on(Ui.info(u, "browser.engine.live"), Teach.drive(u, id))

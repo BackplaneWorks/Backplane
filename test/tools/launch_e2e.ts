@@ -63,7 +63,7 @@ let launchArgs = "{}";
 let childPrompt = "mode:plain child work";
 const start = async (): Promise<Hub> => {
   const proc = Bun.spawn([resolve(bin), "--home", home, "--port", String(port), "--no-tailscale", "--foreground"], {
-    env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_PEERS: "", BACKPLANE_GOOGLE_BAKE: "0", FAKE_LOG: log,
+    env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "", BACKPLANE_GOOGLE_BAKE: "0", FAKE_LOG: log,
       BP_WORK_MS: "300", BP_CHILD_PROMPT: childPrompt, BP_LAUNCH_ARGS: launchArgs, BP_LAUNCH_HOLD_MS: process.env.HOLD ?? "0", PATH: `${fake}:${process.env.PATH}` },
     stdout: "ignore",
     stderr: "ignore",

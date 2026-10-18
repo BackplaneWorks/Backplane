@@ -29,7 +29,8 @@
 //   plain        each command: init, an answer, its result
 //   stream       each command streams BP_STREAM_N (40) text deltas
 //                "<tag>0 <tag>1 ..." (tag: the message's last word),
-//                BP_STREAM_MS (150) apart, then posts them whole
+//                BP_STREAM_MS (150) apart, then posts them whole (each
+//                followed by BP_STREAM_SEP, " "; "\n\n" makes lines)
 //   delegate     the first command calls the hub's delegate_task (its MCP
 //                URL from --mcp-config) for a child "mode:plain child
 //                work", then ends; later commands as plain
@@ -173,6 +174,7 @@ async function run(c: Cmd, firstOne: boolean) {
   }
   if (firstOne && mode === "exit-now") {
     log(`EXIT ${process.pid}`);
+    process.stderr.write("exit-now: the stand-in quits here (api key=hunter2)\n");
     process.exit(3);
   }
   if (firstOne && mode === "bg-exit") {
@@ -309,7 +311,7 @@ async function run(c: Cmd, firstOne: boolean) {
     let full = "";
     emit({ type: "stream_event", event: { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
     for (let i = 0; i < n; i++) {
-      const piece = `${tag}${i} `;
+      const piece = `${tag}${i}${process.env.BP_STREAM_SEP ?? " "}`;
       full += piece;
       emit({ type: "stream_event", event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: piece } }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
       if (await waitOrInterrupt(ms)) break;

@@ -57,7 +57,7 @@ type Client = { ws: WebSocket; seen: any[]; replies: Map<number, any>; n: number
 
 function spawn(h: Hub) {
   h.proc = Bun.spawn([resolve(bin), "--home", h.home, "--port", String(h.port), "--no-tailscale"], {
-    env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NAME: h.name, BACKPLANE_NO_UPDATE: "1", BACKPLANE_PEERS: h.peers, BACKPLANE_UBER_GRACE: "30", PATH: `${fake}:/usr/bin:/bin` },
+    env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NAME: h.name, BACKPLANE_NO_UPDATE: "1", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: h.peers, BACKPLANE_UBER_GRACE: "30", PATH: `${fake}:/usr/bin:/bin` },
     stdout: "ignore",
     stderr: "ignore",
   });

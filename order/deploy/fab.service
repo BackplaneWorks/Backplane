@@ -1,0 +1,41 @@
+[Unit]
+Description=Backplane order server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=fab
+Group=fab
+EnvironmentFile=/etc/fab/env
+WorkingDirectory=/srv/fab/app
+ExecStart=/srv/fab/venv/bin/uvicorn fabsrv.app:app --host 127.0.0.1 --port 8090 --workers 1 --no-access-log --proxy-headers --forwarded-allow-ips 127.0.0.1
+Restart=on-failure
+RestartSec=3
+# quotes are worked out in child processes with their own limits (quoting.py);
+# the service as a whole stays well inside the machine
+MemoryMax=2500M
+TasksMax=256
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/srv/fab/data
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

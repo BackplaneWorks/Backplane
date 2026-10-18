@@ -113,6 +113,93 @@ def sc(n: N.Nui) -> U32:
     case N.Nui{_, _, _, _, _, _, s, _, _, _, _, _, _}:
       s
 
+# Reading while the thread grows (client.bend's Hold): a frame as main.bend
+# draws it, its place taken after (nui.bend's Hold.take)
+def held(+ty: L.Ty, +n: N.Nui) -> N.Nui:
+  N.Hold.take(again(ty, n))
+
+def hwheel(k: Nat, +ty: L.Ty, +dir: U32, +n: N.Nui) -> N.Nui:
+  match k:
+    case 0n:
+      n
+    case 1n+j:
+      hwheel(j, ty, dir, held(ty, ev(n, W.WWheel{800, 400, dir})))
+
+# new messages k..k+n, oldest first
+def news(n: Nat, +k: Nat, +at: Nat) -> List<&2, M.Change>:
+  match n:
+    case 0n:
+      Nil{}
+    case 1n+j:
+      msg(k, "t0", at) <> news(j, 1n+k, at)
+
+def grow(+ty: L.Ty, +n: N.Nui, cs: List<&2, M.Change>) -> N.Nui:
+  held(ty, N.Nui.with_ui(n, U.Ui.fold(cs, N.Nui.ui(n))))
+
+def stream(+ty: L.Ty, +n: N.Nui, +text: String) -> N.Nui:
+  held(ty, N.Nui.with_ui(n, U.Ui.delta(N.Nui.ui(n), "t0", text)))
+
+# 200 lines streamed in, a frame after every 20
+def lines(n: Nat, +i: Nat) -> String:
+  match n:
+    case 0n:
+      ""
+    case 1n+k:
+      "line " ++ Nat.show(i) ++ " of the stream\n\n" ++ lines(k, 1n+i)
+
+def streams(k: Nat, +ty: L.Ty, +i: Nat, +n: N.Nui) -> N.Nui:
+  match k:
+    case 0n:
+      n
+    case 1n+j:
+      streams(j, ty, Nat.add(i, 20n), stream(ty, n, lines(20n, i)))
+
+def first.go(hs: List<&2, N.Hit>) -> String:
+  match hs:
+    case Nil{}:
+      "none"
+    case N.Hit{_, +y0, _, _, +a, +v} <> t:
+      Bool.pick(String, String.eq(a, "tl-line"), v ++ "@" ++ U32.show(y0), first.go(t))
+
+# the first thread line on screen: its number and where it is
+def first(+n: N.Nui) -> String:
+  first.go(N.Nui.hits(n))
+
+# where line v is now ("gone" when off screen)
+def line.at(hs: List<&2, N.Hit>, +v: String) -> String:
+  match hs:
+    case Nil{}:
+      "gone"
+    case N.Hit{_, +y0, _, _, +a, +hv} <> t:
+      Bool.pick(String, Bool.and(String.eq(a, "tl-line"), String.eq(hv, v)), v ++ "@" ++ U32.show(y0), line.at(t, v))
+
+def first.v(+s: String) -> String:
+  Maybe.default(&2, String, List.head(&2, String, String.split(s, '@')), "")
+
+# the last thread line's bottom (the end follows: it sits at the foot)
+def last.go(hs: List<&2, N.Hit>, +acc: U32) -> U32:
+  match hs:
+    case Nil{}:
+      acc
+    case N.Hit{_, _, _, +y1, +a, _} <> t:
+      last.go(t, Bool.pick(U32, Bool.and(String.eq(a, "tl-line"), U32.is_gt(y1, acc)), y1, acc))
+
+# Real entry rows with an image before the view. Only its decoded size
+# changes between frames; downstream entry ids and their text stay put.
+def lines.list(k: Nat) -> List<&2, String>:
+  match k:
+    case 0n:
+      Nil{}
+    case 1n+j:
+      "below" <> lines.list(j)
+
+def image.rows(+ty: L.Ty, +size: String) -> List<&2, L.TLine>:
+  List.concat(&2, L.TLine, [[L.TLine{"", 0, 29, "image", 0}], L.TL.img(ty, size, "/tmp/hold.png", 780),
+    [L.TLine{"", 0, 29, "reading", 0}, L.TLine{"still reading", 0, 0, "", 0}], L.TL.texts(lines.list(80n), 0, 0)])
+
+def image.frame(+ty: L.Ty, +size: String, +hold: String, +sc: U32, +top: U32) -> List<&2, N.Hit>:
+  hits(L.Lay.timeline(ty, image.rows(ty, size), 300, 1080, top, 900, sc, L.TSel.none(), hold, "image", L.Out.none()))
+
 def main() -> IO(Unit):
   do IO<Unit>:
     +ty : L.Ty <- L.Ty.load()
@@ -135,3 +222,40 @@ def main() -> IO(Unit):
     +t2 : N.Nui = wheel(200n, ty, 800, 1, t1)
     C.Check.str("back at the bottom", U32.show(sc(t2)), "0")
     C.Check.str("they go again", Nat.show(U.Page.more(N.Nui.ui(t2), "t0")), "0")
+    # An image above the view changes from its loading row to 400px.
+    # The initial offset 30 sits ten pixels inside the reading entry.
+    +ih0 : List<&2, N.Hit> = image.frame(ty, "", "", 1153, 52)
+    +ia0 : String = N.Hit.value(ih0, "tl-at")
+    +ih1 : List<&2, N.Hit> = image.frame(ty, "200x400", ia0, Maybe.default(&2, U32, U32.read(N.Hold.part(ia0, 0n)), 0), 52)
+    C.Check.str("image growth above the view keeps its entry", N.Hold.part(N.Hit.value(ih1, "tl-at"), 4n), "reading")
+    C.Check.str("image growth keeps the intra-entry offset", N.Hold.part(N.Hit.value(ih1, "tl-at"), 1n), "430")
+    +ih2 : List<&2, N.Hit> = image.frame(ty, "200x400", N.Hit.value(ih1, "tl-at"), Maybe.default(&2, U32, U32.read(N.Hold.part(N.Hit.value(ih1, "tl-at"), 0n)), 0), 100)
+    C.Check.str("panel expansion compensates in the same frame", N.Hold.part(N.Hit.value(ih2, "tl-at"), 1n), "478")
+    +ih3 : List<&2, N.Hit> = image.frame(ty, "", N.Hit.value(ih1, "tl-at"), Maybe.default(&2, U32, U32.read(N.Hold.part(N.Hit.value(ih1, "tl-at"), 0n)), 0), 52)
+    C.Check.str("image shrink keeps the reading offset", N.Hold.part(N.Hit.value(ih3, "tl-at"), 1n), "30")
+    C.Check.str("entry boundary takes no height", U32.show(L.TL.h(29)), "0")
+    C.Check.str("entry boundary has no selectable text", Bool.show(L.TL.textual(29n)), "False")
+    C.Check.str("held page keeps room for every new entry", Nat.show(U.Hold.page(entries(140n, 0n), "m120", 60n)), "180")
+    C.Check.str("unheld page keeps its limit", Nat.show(U.Hold.page(entries(140n, 0n), "", 60n)), "60")
+    # reading mid-thread: new messages and a streamed reply move nothing
+    +r0 : N.Nui = hwheel(6n, ty, 0, held(ty, n))
+    +f0 : String = first(r0)
+    C.Check.str("scrolled up", Bool.show(U32.is_gt(sc(r0), 0)), "True")
+    +r1 : N.Nui = grow(ty, r0, news(12n, 300n, 1790000000n))
+    C.Check.str("new messages below move nothing read", line.at(N.Nui.hits(r1), first.v(f0)), f0)
+    C.Check.str("the pill counts them", U.Hold.pill(N.Nui.ui(r1), "t0"), "12 new ↓")
+    +r2 : N.Nui = streams(10n, ty, 0n, r1)
+    C.Check.str("200 streamed lines move nothing read", line.at(N.Nui.hits(r2), first.v(f0)), f0)
+    +r3 : N.Nui = grow(ty, r2, news(70n, 400n, 1790000000n))
+    C.Check.str("nor does a page's worth more (the page holds)", line.at(N.Nui.hits(r3), first.v(f0)), f0)
+    C.Check.str("the pill is a click back down", Bool.show(N.Hit.has(N.Nui.hits(r3), "vw-bottom")), "True")
+    C.Check.str("the click's own frame has no pill", U.Hold.pill(N.Nui.ui(step_nui(N.Hold.bottom(r3))), "t0"), "")
+    +b0 : N.Nui = held(ty, step_nui(N.Hold.bottom(r3)))
+    C.Check.str("back at the end", U32.show(sc(b0)), "0")
+    C.Check.str("no pill there", U.Hold.pill(N.Nui.ui(b0), "t0"), "")
+    C.Check.str("the page is the newest again", U.Ui.scratch(N.Nui.ui(b0), "@tl.pin.t0"), "")
+    # at the end the thread follows
+    +e0 : U32 = last.go(N.Nui.hits(b0), 0)
+    +e1 : N.Nui = streams(5n, ty, 500n, grow(ty, b0, news(5n, 600n, 1790000000n)))
+    C.Check.str("at the end it follows", U32.show(sc(e1)), "0")
+    C.Check.str("its last line at the foot", U32.show(last.go(N.Nui.hits(e1), 0)), U32.show(e0))

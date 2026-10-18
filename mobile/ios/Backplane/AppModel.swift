@@ -166,17 +166,25 @@ final class AppModel {
         NotificationCenter.default.addObserver(forName: .NSSystemTimeZoneDidChange, object: nil, queue: .main) { [weak self] _ in
             self?.act("tz-report", TimeZone.current.identifier)
         }
+        NotificationCenter.default.addObserver(forName: NSLocale.currentLocaleDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                await self.languageLocal(self.engine)
+            }
+        }
         notifier.viewing = { [weak self] id in self?.active == true && self?.tab != .settings && self?.screen?.sel == id }
         if let d = try? Data(contentsOf: kept.settingsFile), let m = try? JSONDecoder().decode([String: Settings].self, from: d) { hubSettings = m }
         let e = engine
         Task {
             apply(await e.start(Self.cid, UserDefaults.standard.string(forKey: "drafts") ?? "{}"))
             apply(await e.local("view", settings.threadList))
+            await languageLocal(e)
             // the state kept at the last launch: the screen shows at once, and
             // each hub then sends only what came since
             if let text = kept.load() {
                 apply(await e.load(text))
                 apply(await e.local("view", settings.threadList))
+                await languageLocal(e)
                 for l in links { if let k = Pairing.key(l) { apply(await e.offline(k)) } }
             }
             ready = true
@@ -253,6 +261,7 @@ final class AppModel {
         Task {
             apply(await e.hubs(keys))
             apply(await e.local("view", settings.threadList))
+            await languageLocal(e)
             for (k, l) in keyed where hubs[k] == nil { open(k, l) }
             // a hub paired later learns this phone's push tokens too
             if fresh {
@@ -475,6 +484,25 @@ final class AppModel {
     private(set) var cats: [String: [CatPart]] = [:]
     @ObservationIgnored private var asked: Set<String> = []
 
+    // catalog texts for native parts, by key (spec 4.1); read again when the
+    // language changes, which shows in the screen's language row
+    private(set) var texts: [String: String] = [:]
+    @ObservationIgnored private var wanted: Set<String> = []
+    @ObservationIgnored private var langLabel: String?
+
+    // the text for a key; its English (fallback) until the bridge answers
+    func t(_ key: String, _ fallback: String) -> String { texts[key] ?? fallback }
+
+    func want(_ key: String) async {
+        wanted.insert(key)
+        texts[key] = await engine.t(key)
+    }
+
+    private func refreshTexts() {
+        let keys = wanted
+        Task { for k in keys { texts[k] = await engine.t(k) } }
+    }
+
     func cat(_ key: String) async {
         guard !key.isEmpty, !asked.contains(key) else { return }
         asked.insert(key)
@@ -633,6 +661,17 @@ final class AppModel {
     }
 
     // the thread list's view, for Bend to draw (the device's own choice)
+    private func languageLocal(_ e: Engine) async {
+        apply(await e.local("lang-preview", settings.langPreview ? "1" : ""))
+        apply(await e.local("lang", settings.lang))
+        apply(await e.local("lang-os", Locale.preferredLanguages.first ?? ""))
+    }
+
+    func language(_ v: String) {
+        settings.lang = v
+        Task { await languageLocal(engine) }
+    }
+
     func threadList(_ v: String) {
         settings.threadList = v
         run { await $0.local("view", v) }
@@ -652,6 +691,8 @@ final class AppModel {
         if let s = o.screen {
             if typing == 0 { composer = s.thread?.draft ?? "" }
             screen = s
+            let label = s.lang?.rows.first?.label
+            if label != langLabel { langLabel = label; refreshTexts() }
             if s.uber == nil { lastUber = nil; lastPlane = nil } else if s.plane != nil { lastUber = s.uber; lastPlane = s.plane }
             if let t = s.thread, !s.sel.isEmpty { remember(s.sel, t) }
             if s.hub != shownHub {

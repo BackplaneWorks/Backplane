@@ -6,6 +6,7 @@ import ../core/sha1.bend as SH
 import ./hubs.bend as H
 import ./screen.bend as S
 import ./bots.bend as MB
+import ../core/msgs.bend as MSG
 
 # What bridge.js calls. The phone apps see only strings: server messages
 # in (binary CBOR frames, carried as base64, decoded by bridge.js) from
@@ -58,22 +59,14 @@ def alerts(a: H.HAct) -> String:
     case H.HAct{_, _, als}:
       J.Json.show(J.Json.arr(als))
 
-# a bot's browser has a new frame ({"t":"shot","bot":id,"n":n}): kept as
-# the client's info "shot.<bot>", which the bot's Browser tab shows as n
-# (the apps fetch the frame again when it changes)
-def shot(hit: Bool, +o: J.Json) -> J.Json:
-  match hit:
-    case True{}:
-      J.Json.obj([J.KV{"t", J.Json.str("info")},
-        J.KV{"info", J.Json.obj([J.KV{"shot." ++ J.Json.get_str(o, "bot", ""), J.Json.str(Nat.show(J.Json.get_nat(o, "n", 0n)))}])}])
-    case False{}:
-      o
 
-# a frame from hub `key`, already decoded: bridge.js reads the base64 and
+# a frame from hub `key` (a bot's browser frame, {"t":"shot"}, is kept as
+# info "shot.<bot>", which its Browser tab shows as n, and said seen while
+# on show: client.bend's Ui.recv_act.s), already decoded: bridge.js reads the base64 and
 # CBOR natively (Cbor.decode here took 17x as long on a phone's
 # JavaScriptCore, which has no JIT), with these dictionaries
 def recv(+hs: H.Hubs, +key: String, +o: J.Json) -> H.HAct:
-  H.Hubs.recv(hs, key, shot(String.eq(J.Json.get_str(o, "t", ""), "shot"), o))
+  H.Hubs.recv(hs, key, o)
 
 # whether that frame can change the screen (Hubs.redraw): the bridge
 # builds none for another thread's streamed text, and one for anything
@@ -85,6 +78,16 @@ def shows(+hs: H.Hubs, +key: String, +o: J.Json) -> Bool:
 # ("look:mood"); the apps ask once per key and keep it
 def cat(+look: Nat, +mood: String) -> String:
   J.Json.show(MB.MBots.rig(look, mood))
+
+# a catalog text for a native screen part (Swift, Kotlin): the key itself
+# when the catalog has none, so a missing key shows
+def t.k(m: Maybe<&2, String>, key: String) -> String:
+  match m:
+    case Some{s}: s
+    case None{}: key
+
+def t(hs: H.Hubs, +key: String) -> String:
+  t.k(MSG.T.plain(H.Hubs.loc(hs), key), key)
 
 # A value of each Json constructor, for wire.js: bend 2.0.36 tags a module's
 # constructors with their file ("../core/json.Str"), so the JavaScript that

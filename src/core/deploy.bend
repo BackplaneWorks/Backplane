@@ -1,6 +1,7 @@
 import Base
 import ./json.bend as J
 import ./model.bend as M
+import ./ship.bend as SH
 
 # Safe deploy and restart (docs/deploy.md; the steps are hub.bend's Deploy.*).
 # Restarting is fine: the hub resumes every cut turn. What must not be cut
@@ -88,7 +89,8 @@ def Deploy.in(+line: String, +id: String) -> Bool:
 # ToolShut, ToolsGone at a turn's end) and keeps the open ones in memory,
 # never in the log: a list of "thread<TAB>call" entries (Open.*). A thread
 # between two calls has none open, so a deploy goes then, however long its
-# turn. The requester's own deploy_* call is never opened (Tools.opens).
+# turn. The requester's own deploy_* call is never opened (Tools.opens,
+# Open.mcp).
 
 def Open.key(+th: String, +call: String) -> String:
   th ++ "\t" ++ call
@@ -129,13 +131,45 @@ def Open.shut(xs: List<&2, String>, +th: String, +call: String) -> List<&2, Stri
     case +x <> t:
       Open.keep(String.eq(x, Open.key(th, call)), x, Open.shut(t, th, call))
 
-# every call of a thread ends (its turn ended, its agent went)
+# every call of a thread ends (its turn ended, its agent went); a request
+# still on the MCP route stays open until its answer is written
 def Open.gone(xs: List<&2, String>, +th: String) -> List<&2, String>:
   match xs:
     case Nil{}:
       Nil{}
     case +x <> t:
-      Open.keep(String.starts_with(x, th ++ "\t"), x, Open.gone(t, th))
+      Open.keep(Bool.and(String.starts_with(x, th ++ "\t"), Bool.not(String.starts_with(x, th ++ "\tmcp:"))), x, Open.gone(t, th))
+
+# Backplane's own MCP calls, every provider's: the hub sees each request on
+# its MCP route from the moment it arrives until its answer is written
+# (server.bend's Mcp.ask.raw), so it opens there and shuts there, under
+# "mcp:<n>". The caller's own deploy_* call is never counted: a thread
+# asking for a deploy, or how it goes, would wait for itself (laws
+# deploy_mcp_*).
+def Open.mcp.tool(+o: J.Json) -> Bool:
+  Bool.and(String.eq(J.Json.get_str(o, "method", ""), "tools/call"), Bool.not(String.starts_with(J.Json.get_str(J.Json.get_obj(o, "params"), "name", ""), "deploy_")))
+
+# whether an MCP request counts as a tool call in flight
+def Open.mcp.counts(+body: String) -> Bool:
+  Open.mcp.tool(Maybe.default(&2, J.Json, J.Json.parse(body), J.Null{}))
+
+def Open.mcp.key(+call: String) -> String:
+  "mcp:" ++ call
+
+def Open.mcp.k(go: Bool, +xs: List<&2, String>, +th: String, +call: String) -> List<&2, String>:
+  match go:
+    case True{}:
+      Open.add(xs, th, Open.mcp.key(call))
+    case False{}:
+      xs
+
+# a request on the MCP route opens (when it counts)
+def Open.mcp(+xs: List<&2, String>, +th: String, +call: String, +body: String) -> List<&2, String>:
+  Open.mcp.k(Open.mcp.counts(body), xs, th, call)
+
+# its answer was written
+def Open.mcp.shut(xs: List<&2, String>, +th: String, +call: String) -> List<&2, String>:
+  Open.shut(xs, th, Open.mcp.key(call))
 
 def Open.count(xs: List<&2, String>) -> Nat:
   List.length(&2, String, xs)
@@ -224,11 +258,15 @@ def Deploy.suffix(+s: M.State, +to: String) -> String:
 def Deploy.with(+line: String, noted: Bool, locked: Bool, +open: String) -> String:
   Deploy.line.o(Deploy.by(line), Deploy.note(line), Deploy.stage(line), Deploy.from(line), Deploy.since(line), noted, locked, Deploy.cut(line), open)
 
-def Deploy.status.k(+line: String) -> J.Json:
+def Deploy.status.k(+line: String, main: J.Json) -> J.Json:
   J.Json.obj([J.KV{"waiting", J.Flag{Bool.not(String.is_empty(line))}}, J.KV{"by", J.Str{Deploy.by(line)}}, J.KV{"note", J.Str{Deploy.note(line)}},
     J.KV{"since", J.Str{Nat.show(Deploy.since(line))}}, J.KV{"inflight", J.Num{Nat.show(Deploy.count(line))}},
-    J.KV{"threads", J.Str{Deploy.open(line)}}, J.KV{"buildLock", J.Flag{Deploy.locked(line)}}, J.KV{"text", J.Str{Deploy.row.k(line)}}])
+    J.KV{"threads", J.Str{Deploy.open(line)}}, J.KV{"buildLock", J.Flag{Deploy.locked(line)}}, J.KV{"text", J.Str{Deploy.row.k(line)}}, J.KV{"main", main}])
+
+# deploy_main's part (core/ship.bend)
+def Deploy.main(+s: M.State) -> J.Json:
+  SH.Ship.status(SH.Ship.read(M.Setting.get(s, "deploy.ship", "")), SH.Ship.follow.on(M.Setting.get(s, "deploy.follow", "")), M.Setting.get(s, "deploy.repo", ""))
 
 # what deploy.status and the deploy_status tool answer
 def Deploy.status(+s: M.State) -> J.Json:
-  Deploy.status.k(Deploy.wait(s))
+  Deploy.status.k(Deploy.wait(s), Deploy.main(s))

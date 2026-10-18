@@ -8,6 +8,7 @@ import ../src/core/msp.bend as MS
 import ../src/core/json.bend as J
 import ../src/core/hub.bend as B
 import ../src/core/mcp.bend as MC
+import ../src/server/park.bend as PK
 
 # oh-my-pi (core/omp.bend): the mapping, the install line, the models, the
 # runner's Proto, and the turn replayed from test/fixtures/omp/turn.jsonl
@@ -87,6 +88,12 @@ def ap.handle.provider.session(+provider: String, +line: String) -> MC.McpOut:
 
 def ap.permission.request() -> String:
   "{\"jsonrpc\":\"2.0\",\"id\":\"p1\",\"method\":\"session/request_permission\",\"params\":{\"toolCall\":{\"toolCallId\":\"c1\",\"title\":\"Run command\",\"kind\":\"execute\",\"rawInput\":{\"command\":\"echo hi\"}},\"options\":[{\"optionId\":\"no\",\"kind\":\"reject_once\"},{\"optionId\":\"yes\",\"kind\":\"allow_once\"},{\"optionId\":\"always\",\"kind\":\"allow_always\"}]}}"
+def ap.permission.allow.always.only() -> String:
+  "{\"jsonrpc\":\"2.0\",\"id\":\"p2\",\"method\":\"session/request_permission\",\"params\":{\"options\":[{\"optionId\":\"always\",\"kind\":\"allow_always\"}]}}"
+
+def ap.permission.reject.always.only() -> String:
+  "{\"jsonrpc\":\"2.0\",\"id\":\"p3\",\"method\":\"session/request_permission\",\"params\":{\"options\":[{\"optionId\":\"never\",\"kind\":\"reject_always\"}]}}"
+
 
 
 def ap.cs(o: MC.McpOut) -> List<&2, M.Change>:
@@ -259,6 +266,12 @@ def main() -> IO(Unit):
     C.Check.str("omp session request permission offers Allow and Deny", ap.options(ap.cs(ap.handle.provider("omp", ap.permission.request()))), "Allow\nDeny")
     C.Check.str("grok session request permission keeps default card", ap.options(ap.cs(ap.handle.provider("grok", ap.permission.request()))), "")
     C.Check.str("omp legacy session grant does not suppress permission ask", ap.options(ap.cs(ap.handle.provider.session("omp", ap.permission.request()))), "Allow\nDeny")
+    C.Check.str("parked OMP allow cannot choose allow_always", PK.Park.reply(True{}, ap.permission.allow.always.only(), "accept"), "{\"jsonrpc\":\"2.0\",\"id\":\"p2\",\"result\":{\"outcome\":{\"outcome\":\"cancelled\"}}}")
+    C.Check.str("parked OMP deny cannot choose reject_always", PK.Park.reply(True{}, ap.permission.reject.always.only(), "decline"), "{\"jsonrpc\":\"2.0\",\"id\":\"p3\",\"result\":{\"outcome\":{\"outcome\":\"cancelled\"}}}")
+    C.Check.str("parked OMP allow chooses allow_once when offered", PK.Park.reply(True{}, ap.permission.request(), "accept"), "{\"jsonrpc\":\"2.0\",\"id\":\"p1\",\"result\":{\"outcome\":{\"outcome\":\"selected\",\"optionId\":\"yes\"}}}")
+    C.Check.str("parked Grok session grant still selects allow_always", PK.Park.reply(False{}, ap.permission.request(), "session"), "{\"jsonrpc\":\"2.0\",\"id\":\"p1\",\"result\":{\"outcome\":{\"outcome\":\"selected\",\"optionId\":\"always\"}}}")
+    C.Check.str("generic ACP session grant still selects allow_always", MC.Mcp.permission.reply(ap.permission.request(), "session"), "{\"jsonrpc\":\"2.0\",\"id\":\"p1\",\"result\":{\"outcome\":{\"outcome\":\"selected\",\"optionId\":\"always\"}}}")
+    C.Check.str("parked OMP session answer cannot choose allow_always", PK.Park.reply(True{}, ap.permission.request(), "session"), "{\"jsonrpc\":\"2.0\",\"id\":\"p1\",\"result\":{\"outcome\":{\"outcome\":\"cancelled\"}}}")
     # Legacy clients may still send "session"; only Grok/Muse store that as a
     # persistent permission.
     +ompAsk : M.State = ask.state("omp")

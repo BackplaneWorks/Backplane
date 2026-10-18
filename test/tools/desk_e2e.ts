@@ -88,7 +88,7 @@ const proj = join(root, "proj");
 mkdirSync(proj, { recursive: true });
 const port = freePort();
 const proc = Bun.spawn([resolve(bin), "--home", home, "--port", String(port), "--no-tailscale"], {
-  env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_PEERS: "", PATH: `${fake}:${process.env.PATH}` },
+  env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "", PATH: `${fake}:${process.env.PATH}` },
   stdout: "ignore",
   stderr: "ignore",
 });

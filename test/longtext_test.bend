@@ -1,4 +1,5 @@
 import Base
+import ../src/core/i18n.bend as I
 import ./check.bend as C
 import ../src/core/client.bend as U
 import ../src/core/diff.bend as DF
@@ -25,7 +26,7 @@ def main() -> IO(Unit):
     C.Check.str("first line", DF.Diff.first("one\ntwo"), "one")
     C.Check.str("first line, no break", DF.Diff.first("one"), "one")
     C.Check.str("first line, empty", DF.Diff.first(""), "")
-    C.Check.str("a fork's context labels its first line", U.Qu.label("handoff:t1", "[Backplane] This thread is a fork of Board bringup\n" ++ Long.go(16n, "earlier conversation. ")), "This thread is a fork of Board bringup (goes with the next message)")
+    C.Check.str("a fork's context labels its first line", U.Qu.label(I.En{}, "handoff:t1", "[Backplane] This thread is a fork of Board bringup\n" ++ Long.go(16n, "earlier conversation. ")), "This thread is a fork of Board bringup (goes with the next message)")
     C.Check.str("a long text's first line", Nat.show(String.length(DF.Diff.first(Long.go(16n, "x") ++ "\nnext"))), "65536")
     C.Check.str("a long text's lines", Nat.show(String.length(String.join(DF.Diff.lines(Long.go(16n, "word ") ++ "\n" ++ Long.go(16n, "more ")), "|"))), "655361")
     # a pasted log in a message or a draft: its body, the word being typed,

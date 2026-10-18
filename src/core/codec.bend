@@ -325,9 +325,17 @@ def Change.encode(c: M.Change) -> J.Json:
       Change.obj("CharterSet", [J.KV{"bot", J.Str{bot}}, J.KV{"text", J.Str{text}}, J.KV{"by", J.Str{by}}, J.KV{"at", Codec.nat(at)}])
     case M.DecisionLogged{id, bot, conv, run, text, reason, at}:
       Change.obj("DecisionLogged", [J.KV{"id", J.Str{id}}, J.KV{"bot", J.Str{bot}}, J.KV{"conv", J.Str{conv}}, J.KV{"run", J.Str{run}}, J.KV{"text", J.Str{text}}, J.KV{"reason", J.Str{reason}}, J.KV{"at", Codec.nat(at)}])
+    case M.TurnUsage{thread, provider, model, key, input, cread, cwrite, output, reasoning, cost, known, basis, at}:
+      Change.obj("TurnUsage", [J.KV{"thread", J.Str{thread}}, J.KV{"provider", J.Str{provider}}, J.KV{"model", J.Str{model}}, J.KV{"key", J.Str{key}},
+        J.KV{"input", Codec.nat(input)}, J.KV{"cread", Codec.nat(cread)}, J.KV{"cwrite", Codec.nat(cwrite)}, J.KV{"output", Codec.nat(output)},
+        J.KV{"reasoning", Codec.nat(reasoning)}, J.KV{"cost", Codec.nat(cost)}, J.KV{"known", J.Str{known}}, J.KV{"basis", J.Str{basis}}, J.KV{"at", Codec.nat(at)}])
+    case M.DeployAsked{by, note, commit, cover, at}:
+      Change.obj("DeployAsked", [J.KV{"by", J.Str{by}}, J.KV{"note", J.Str{note}}, J.KV{"commit", J.Str{commit}}, J.KV{"cover", J.Str{cover}}, J.KV{"at", Codec.nat(at)}])
+    case M.DeployBuilt{commit, state, version, detail, at}:
+      Change.obj("DeployBuilt", [J.KV{"commit", J.Str{commit}}, J.KV{"state", J.Str{state}}, J.KV{"version", J.Str{version}}, J.KV{"detail", J.Str{detail}}, J.KV{"at", Codec.nat(at)}])
 
 def Change.tags() -> List<&2, String>:
-  ["ProjectCreated", "ProjectRemoved", "ThreadCreated", "ThreadRenamed", "MessagePosted", "TurnChanged", "PendingChanged", "ActivityLogged", "ThreadSettled", "ThreadUnsettled", "ThreadArchived", "ThreadPinned", "ThreadDeleted", "WorktreeSet", "SessionSet", "ModesSet", "TaskDelegated", "TaskStateSet", "TaskDelivered", "SettingSet", "TurnQueued", "QueueTaken", "AskOpened", "AskClosed", "DeviceRegistered", "DeviceDropped", "ThreadSnoozed", "ThreadOrdered", "WorktreeSkipped", "ThreadMerged", "WorktreeRemoved", "ProjectOrdered", "QueueEdited", "QueueRemoved", "QueueMoved", "QueueTakenOne", "ThreadForked", "ProviderSet", "TodosSet", "UsageSet", "BotSet", "BotDeleted", "RoomSet", "RoomDeleted", "RoomPosted", "HookSet", "HookHit", "RoutineSet", "RoutineDeleted", "RoutineFired", "MemorySaved", "MemoryForgot", "SpaceSet", "PeerSet", "BotWoke", "SpacePageSet", "WorkSet", "UberSet", "UberOp", "ThreadLaunched", "WakeSet", "WakeDropped", "LockChanged", "RoutinePlan", "RoutineSlot", "RoutineDone", "Reminded", "TaskSet", "TaskDeleted", "MessageFrom", "ConvSet", "MailPosted", "MailMarked", "MailTagged", "RunSet", "CharterSet", "DecisionLogged"]
+  ["ProjectCreated", "ProjectRemoved", "ThreadCreated", "ThreadRenamed", "MessagePosted", "TurnChanged", "PendingChanged", "ActivityLogged", "ThreadSettled", "ThreadUnsettled", "ThreadArchived", "ThreadPinned", "ThreadDeleted", "WorktreeSet", "SessionSet", "ModesSet", "TaskDelegated", "TaskStateSet", "TaskDelivered", "SettingSet", "TurnQueued", "QueueTaken", "AskOpened", "AskClosed", "DeviceRegistered", "DeviceDropped", "ThreadSnoozed", "ThreadOrdered", "WorktreeSkipped", "ThreadMerged", "WorktreeRemoved", "ProjectOrdered", "QueueEdited", "QueueRemoved", "QueueMoved", "QueueTakenOne", "ThreadForked", "ProviderSet", "TodosSet", "UsageSet", "BotSet", "BotDeleted", "RoomSet", "RoomDeleted", "RoomPosted", "HookSet", "HookHit", "RoutineSet", "RoutineDeleted", "RoutineFired", "MemorySaved", "MemoryForgot", "SpaceSet", "PeerSet", "BotWoke", "SpacePageSet", "WorkSet", "UberSet", "UberOp", "ThreadLaunched", "WakeSet", "WakeDropped", "LockChanged", "RoutinePlan", "RoutineSlot", "RoutineDone", "Reminded", "TaskSet", "TaskDeleted", "MessageFrom", "ConvSet", "MailPosted", "MailMarked", "MailTagged", "RunSet", "CharterSet", "DecisionLogged", "TurnUsage", "DeployAsked", "DeployBuilt"]
 
 def Codec.wake.events(xs: List<&2, J.Json>) -> List<&2, String>:
   match xs:
@@ -492,6 +500,14 @@ def Change.decode.k(i: Nat, +o: J.Json) -> Maybe<&2, M.Change>:
       Some{M.CharterSet{J.Json.get_str(o, "bot", ""), J.Json.get_str(o, "text", ""), J.Json.get_str(o, "by", ""), J.Json.get_nat(o, "at", 0n)}}
     case 76n:
       Some{M.DecisionLogged{J.Json.get_str(o, "id", ""), J.Json.get_str(o, "bot", ""), J.Json.get_str(o, "conv", ""), J.Json.get_str(o, "run", ""), J.Json.get_str(o, "text", ""), J.Json.get_str(o, "reason", ""), J.Json.get_nat(o, "at", 0n)}}
+    case 77n:
+      Some{M.TurnUsage{J.Json.get_str(o, "thread", ""), J.Json.get_str(o, "provider", ""), J.Json.get_str(o, "model", ""), J.Json.get_str(o, "key", ""),
+        J.Json.get_nat(o, "input", 0n), J.Json.get_nat(o, "cread", 0n), J.Json.get_nat(o, "cwrite", 0n), J.Json.get_nat(o, "output", 0n),
+        J.Json.get_nat(o, "reasoning", 0n), J.Json.get_nat(o, "cost", 0n), J.Json.get_str(o, "known", ""), J.Json.get_str(o, "basis", ""), J.Json.get_nat(o, "at", 0n)}}
+    case 78n:
+      Some{M.DeployAsked{J.Json.get_str(o, "by", ""), J.Json.get_str(o, "note", ""), J.Json.get_str(o, "commit", ""), J.Json.get_str(o, "cover", ""), J.Json.get_nat(o, "at", 0n)}}
+    case 79n:
+      Some{M.DeployBuilt{J.Json.get_str(o, "commit", ""), J.Json.get_str(o, "state", ""), J.Json.get_str(o, "version", ""), J.Json.get_str(o, "detail", ""), J.Json.get_nat(o, "at", 0n)}}
     case _:
       None{}
 
@@ -663,6 +679,12 @@ def Change.wire(c: M.Change) -> J.Json:
       Change.encode(M.CharterSet{bot, text, by, at})
     case M.DecisionLogged{id, bot, conv, run, text, reason, at}:
       Change.encode(M.DecisionLogged{id, bot, conv, run, text, reason, at})
+    case M.TurnUsage{thread, provider, model, key, input, cread, cwrite, output, reasoning, cost, known, basis, at}:
+      Change.encode(M.TurnUsage{thread, provider, model, key, input, cread, cwrite, output, reasoning, cost, known, basis, at})
+    case M.DeployAsked{by, note, commit, cover, at}:
+      Change.encode(M.DeployAsked{by, note, commit, cover, at})
+    case M.DeployBuilt{commit, state, version, detail, at}:
+      Change.encode(M.DeployBuilt{commit, state, version, detail, at})
 
 def Change.private(+tag: String) -> Bool:
   Bool.or(String.eq(tag, "DeviceRegistered"), String.eq(tag, "DeviceDropped"))

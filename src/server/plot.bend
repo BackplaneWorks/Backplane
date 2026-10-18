@@ -385,7 +385,7 @@ def Pv.home() -> IO(String):
 
 def Pv.cli.k(rt: K.Rt) -> String:
   match rt:
-    case K.Rt{cli, _, _, _}:
+    case K.Rt{cli, _, _, _, _}:
       cli
 
 # the kicad-cli the hub uses (K.Rt.resolve)
@@ -394,7 +394,8 @@ def Pv.cli() -> IO(String):
     +home : String <- Pv.home()
     e : Result<&1, &1, U32 & String, String> <- IO.get_env("BACKPLANE_KICAD_CLI")
     exe : String <- H.Sys.exe_dir()
-    rt : K.Rt <- K.Rt.resolve(Result.default(&1, &1, U32 & String, String, e, ""), exe, home ++ "/.backplane-bend")
+    +data : String <- K.Rt.env("BACKPLANE_HOME")
+    rt : K.Rt <- K.Rt.resolve(Result.default(&1, &1, U32 & String, String, e, ""), exe, Bool.pick(String, String.is_empty(data), home ++ "/.backplane-bend", data))
     return Pv.cli.k(rt)
 
 def Pv.step2glb() -> IO(String):

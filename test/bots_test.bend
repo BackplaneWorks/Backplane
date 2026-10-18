@@ -207,14 +207,15 @@ def main() -> IO(Unit):
     C.Check.str("reply in the same room", yes(String.starts_with(st.tags(call.step(rq, 1005n, th.of(rq, "Tofu"), "bot_send", "{\"to\":\"Miso\",\"topic\":\"bom review\",\"text\":\"done\"}")), "RoomPosted ")), "yes")
     C.Check.str("new topic new room", yes(String.starts_with(st.tags(call.step(rq, 1005n, th.of(rq, "Miso"), "bot_send", "{\"to\":\"Tofu\",\"topic\":\"stencil\",\"text\":\"order\"}")), "RoomSet ")), "yes")
     C.Check.str("no topic: both names", yes(BT.Room.live(room.of(run(s, call.step(s, 1004n, th.of(s, "Tofu"), "bot_send", "{\"to\":\"Miso\",\"text\":\"hi\"}")), "miso + tofu"))), "yes")
-    C.Check.str("person's post reaches both", (st.tags(ask(rq, 1006n, "bots.post", "{\"room\":\"" ++ BT.Room.id(room.of(rq, "BOM review")) ++ "\",\"text\":\"thanks\"}"))), "RoomPosted BotWoke MessagePosted MessageFrom TurnChanged BotWoke MessagePosted MessageFrom ActivityLogged TurnChanged | send:reply out out out out out out ")
+    # (Tofu's Codex turn runs: the post rides its next tool result, hub.bend's Ride)
+    C.Check.str("person's post reaches both", (st.tags(ask(rq, 1006n, "bots.post", "{\"room\":\"" ++ BT.Room.id(room.of(rq, "BOM review")) ++ "\",\"text\":\"thanks\"}"))), "RoomPosted BotWoke MessagePosted MessageFrom TurnChanged BotWoke MessagePosted MessageFrom SettingSet | send:reply out out out out ")
     # a request sent again (same msg) is answered and does nothing twice
     +sy : String = "{\"bot\":\"" ++ id.of(s, "Miso") ++ "\",\"text\":\"again\",\"msg\":\"cx1-1\"}"
     C.Check.str("say with msg first time", st.tags(ask(s, 1003n, "bots.say", sy)), "BotWoke MessagePosted TurnChanged | send:reply out out out out ")
     C.Check.str("say with msg again", st.tags(ask(made(s, 1003n, "bots.say", sy), 1004n, "bots.say", sy)), "| send:reply ")
     C.Check.str("say with another msg", st.tags(ask(made(s, 1003n, "bots.say", sy), 1004n, "bots.say", "{\"bot\":\"" ++ id.of(s, "Miso") ++ "\",\"text\":\"again\",\"msg\":\"cx1-2\"}")), "BotWoke MessagePosted TurnChanged | send:reply out out out out ")
     +rp : String = "{\"room\":\"" ++ BT.Room.id(room.of(rq, "BOM review")) ++ "\",\"text\":\"thanks\",\"msg\":\"cx1-3\"}"
-    C.Check.str("post with msg first time", st.tags(ask(rq, 1006n, "bots.post", rp)), "RoomPosted BotWoke MessagePosted MessageFrom TurnChanged BotWoke MessagePosted MessageFrom ActivityLogged TurnChanged | send:reply out out out out out out ")
+    C.Check.str("post with msg first time", st.tags(ask(rq, 1006n, "bots.post", rp)), "RoomPosted BotWoke MessagePosted MessageFrom TurnChanged BotWoke MessagePosted MessageFrom SettingSet | send:reply out out out out ")
     C.Check.str("post with msg again", st.tags(ask(made(rq, 1006n, "bots.post", rp), 1007n, "bots.post", rp)), "| send:reply ")
     # a private message only when asked for
     C.Check.str("send direct", st.tags(call.step(s, 1004n, th.of(s, "Miso"), "bot_send", "{\"to\":\"Tofu\",\"text\":\"psst\",\"direct\":true}")), "RoomPosted BotWoke MessagePosted MessageFrom TurnChanged | out out out ")

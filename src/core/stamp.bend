@@ -1,4 +1,6 @@
 import Base
+import ./i18n.bend as I
+import ./msgs.bend as MSG
 import ./model.bend as M
 import ./cron.bend as CR
 import ./tz.bend as TZ
@@ -81,28 +83,31 @@ def Stamp.clock(+r: TZ.TzRule, +today: Nat, +at: Nat) -> String:
   +w = TZ.Tz.wall(r, at)
   Stamp.clock.k(Nat.is_eq(Nat.div(w, 86400n), today), w)
 
-def Stamp.done.k(known: Bool, +clock: String, +start: Nat, +at: Nat) -> String:
+def Stamp.done.k(+l: I.Loc, known: Bool, +clock: String, +start: Nat, +at: Nat) -> String:
   match known:
     case True{}:
-      "Finished " ++ clock ++ " · " ++ M.Time.took(Nat.sub(at, start))
+      MSG.T.stamp.finished.took(l, clock, I.I18n.took(l, Nat.sub(at, start)))
     case False{}:
-      "Finished " ++ clock
+      MSG.T.stamp.finished(l, clock)
 
 # a reply: when it came, and for a turn's last one when the turn finished
 # (start 0: not the last)
-def Stamp.reply(+start: Nat, +clock: String, +at: Nat) -> String:
-  Bool.pick(String, Nat.is_eq(start, 0n), clock, Stamp.done.k(Nat.is_gt(start, 1n), clock, start, at))
+def Stamp.reply(+l: I.Loc, +start: Nat, +clock: String, +at: Nat) -> String:
+  Bool.pick(String, Nat.is_eq(start, 0n), clock, Stamp.done.k(l, Nat.is_gt(start, 1n), clock, start, at))
 
 def Stamp.start(r: Map<&2, Nat> & Nat) -> Nat:
   (_, v) = r
   v
 
 # what shows under an entry: a message's time, nothing for the rest
-def Stamp.text(+s: Stamps, e: M.Entry) -> String:
+def Stamp.text.loc(+l: I.Loc, +s: Stamps, e: M.Entry) -> String:
   match s e:
     case Stamps{+r, +today, _} M.Msg{_, _, M.User{}, _, +at}:
       Stamp.clock(r, today, at)
     case Stamps{+r, +today, +ends} M.Msg{+id, _, M.Assistant{}, _, +at}:
-      Stamp.reply(Stamp.start(Map.get(Nat, 0n, ends, id)), Stamp.clock(r, today, at), at)
+      Stamp.reply(l, Stamp.start(Map.get(Nat, 0n, ends, id)), Stamp.clock(r, today, at), at)
     case _ _:
       ""
+
+def Stamp.text(+s: Stamps, e: M.Entry) -> String:
+  Stamp.text.loc(I.En{}, s, e)

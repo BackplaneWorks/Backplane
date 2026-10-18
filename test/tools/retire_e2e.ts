@@ -7,8 +7,10 @@
 // Checks:
 // - Stop answers the parked request exactly once with a deny, closes the
 //   ask, and the thread stays Interrupted after the late result: no
-//   Completed, no late delta, and the message queued meanwhile does not
-//   start (hub.bend's Retire.stop, Claude.result.if, Claude.stream.if);
+//   Completed, no late delta, and nothing starts it again; a message sent
+//   meanwhile (an older client's "queue" mode) is posted at once and
+//   goes into the running turn, never held (hub.bend's Retire.stop,
+//   Claude.result.if, Claude.stream.if; law deliver_never_waits);
 // - archive of a running thread interrupts it, and after unarchive it is
 //   not running (Retire.archive);
 // - after a model switch the old process's late result is not heard
@@ -91,7 +93,7 @@ const check = (ok: boolean, what: string) => {
 
 const port = freePort();
 const proc = Bun.spawn([resolve(bin), "--home", home, "--port", String(port), "--no-tailscale"], {
-  env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_PEERS: "", BACKPLANE_GOOGLE_BAKE: "0", FAKE_LOG: log, FAKE_PERM: perm, PATH: `${fake}:${process.env.PATH}` },
+  env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "", BACKPLANE_GOOGLE_BAKE: "0", FAKE_LOG: log, FAKE_PERM: perm, PATH: `${fake}:${process.env.PATH}` },
   stdout: "ignore",
   stderr: "ignore",
 });
@@ -138,8 +140,12 @@ try {
   send("turn.start", { thread: t1, text: "please approve this", msg: "c-e2e-1" });
   const ask = await until(15000, () => seen.find((c) => c.$ === "AskOpened" && c.thread === t1));
   check(!!ask, "the permission prompt opened an ask");
-  send("turn.start", { thread: t1, text: "queued for later", msg: "c-e2e-2", mode: "queue" });
-  check(!!(await until(5000, () => seen.find((c) => c.$ === "TurnQueued" && c.thread === t1))), "a message waits in the queue");
+  // nothing is queued (law deliver_never_waits): an older client's "queue"
+  // message is posted at once and goes into Claude's running turn
+  send("turn.start", { thread: t1, text: "sent meanwhile", msg: "c-e2e-2", mode: "queue" });
+  check(!!(await until(5000, () => seen.find((c) => c.$ === "MessagePosted" && c.thread === t1 && String(c.text) === "sent meanwhile"))), "a message sent meanwhile is posted at once");
+  check(!!(await until(5000, () => lines().some((l) => l.startsWith("USER") && l.includes("sent meanwhile")) ? true : undefined)), "and Claude's running turn takes it");
+  check(!seen.some((c) => c.$ === "TurnQueued" && c.thread === t1), "nothing waits in a queue");
   const users0 = lines().filter((l) => l.startsWith("USER")).length;
   send("turn.interrupt", { thread: t1 });
   check(!!(await until(10000, () => lines().some((l) => l.startsWith("PERMDONE")))), "the parked request was answered");
@@ -151,7 +157,7 @@ try {
   check(/Interrupted/i.test(last(t1)), `the thread stays interrupted after the late result (${turns(t1).join(",")})`);
   check(!turns(t1).some((t) => /Completed/i.test(String(t))), "no Completed from the stopped turn's result");
   check(!deltas.some((d) => d.includes("LATEDELTA")), "the stopped turn's late delta streams nowhere");
-  check(lines().filter((l) => l.startsWith("USER")).length === users0, "the queue was not started");
+  check(lines().filter((l) => l.startsWith("USER")).length === users0, "nothing starts the stopped thread again");
 
   // 2. archive a running thread, then unarchive it
   const t2 = await newThread("archive");

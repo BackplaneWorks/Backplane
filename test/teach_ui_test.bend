@@ -1,4 +1,5 @@
 import Base
+import ../src/core/i18n.bend as I
 import ./check.bend as C
 import ../src/core/model.bend as M
 import ../src/core/client.bend as U
@@ -114,7 +115,7 @@ def ask.k(as: List<&2, M.Ask>, +u: U.Ui) -> U.TAsk:
     case a <> _:
       U.Teach.ask.of(a, u, "b1")
     case Nil{}:
-      U.Teach.ask(M.Ask{"", "", "", "", "", "", False{}, ""}, "")
+      U.Teach.ask(I.En{}, M.Ask{"", "", "", "", "", "", False{}, ""}, "")
 
 def ask(+u: U.Ui) -> U.TAsk:
   ask.k(U.Asks.open(U.Ui.state(u), "bt1"), u)
@@ -147,7 +148,7 @@ def askvalues(a: U.TAsk) -> String:
 def main() -> IO(Unit):
   do IO<Unit>:
     C.Check.str("tab after browser", String.join(BU.BU.tabs(), ","), "chat,space,browser,tasks,memory,routines,hooks,settings")
-    C.Check.str("tab label", BU.BU.tab.label("tasks"), "Tasks")
+    C.Check.str("tab label", BU.BU.tab.label(I.En{}, "tasks"), "Tasks")
     C.Check.str("far bot has no tasks", String.join(BU.BU.tabs.of("p1~b1"), ","), "chat,space,memory,routines")
     C.Check.str("idle strip", strip(plain()), "0|||0|Teach a task,Take over,")
     C.Check.str("idle frame takes no input", Bool.show(U.Teach.input(plain(), "b1")), "False")

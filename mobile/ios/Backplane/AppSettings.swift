@@ -39,6 +39,8 @@ final class AppSettings {
 
     // "system", "light" or "dark"
     var appearance: String { didSet { d.set(appearance, forKey: "app.appearance") } }
+    var lang: String { didSet { d.set(lang, forKey: "app.lang") } }
+    @ObservationIgnored let langPreview: Bool
     // "projects" or "active"; empty until the hub's choice was carried over
     var threadList: String { didSet { d.set(threadList, forKey: "app.threadList") } }
     // a tab's raw value, or empty: Home with an uberbot, else Threads
@@ -50,6 +52,9 @@ final class AppSettings {
     }
 
     private init() {
+        let forced = d.string(forKey: "BackplaneLang")
+        langPreview = forced == "ja" || forced == "en"
+        lang = langPreview ? forced! : (d.string(forKey: "app.lang") ?? "auto")
         appearance = d.string(forKey: "app.appearance") ?? "system"
         threadList = d.string(forKey: "app.threadList") ?? ""
         defaultTab = d.string(forKey: "app.defaultTab") ?? ""

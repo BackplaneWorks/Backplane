@@ -180,6 +180,10 @@ function proc_wait(pid) {
   return 255;
 }
 
+function proc_errtail(pid) {
+  return "";
+}
+
 function proc_exited(pid) {
   return 4294967295;
 }
@@ -453,6 +457,7 @@ io_eff(CID(Proc.spawn), proc_spawn);
 io_eff(CID(Proc.wait), proc_wait);
 io_eff(CID(Proc.kill), proc_kill);
 io_eff(CID(Proc.exited), proc_exited);
+io_eff(CID(Proc.errtail), proc_errtail);
 io_eff(CID(Sock.shut_read), sock_shut_read);
 io_eff(CID(Sock.raw), sock_raw);
 io_eff(CID(Fd.shut), fd_shut);

@@ -5,11 +5,13 @@
 // directory (see README.md). Only protocol lines are written to stdout;
 // logs go to stderr.
 
-import { existsSync, mkdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, extname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
-import { chromium, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
+import { chromium } from "./playwright.ts";
+import type { BrowserContext, CDPSession, Locator, Page } from "playwright-core";
+import { CefEngine, findCef, type CefOptions } from "./cef.ts";
 
 import { findChromium, installChrome, INSTALL_HINT } from "./chromium.ts";
 import { decodePng } from "./png.ts";
@@ -36,12 +38,13 @@ function argValue(name: string): string | null {
 
 if (process.argv.includes("--help") || process.argv.includes("-h")) {
   process.stderr.write(
-    "usage: backplane-browser [--frames FILE] [--profile DIR] [--jpeg-dir DIR] [--jpeg-fps N] [--chromium PATH] [--headed]\n" +
+    "usage: backplane-browser [--frames FILE] [--profile DIR] [--jpeg-dir DIR] [--jpeg-fps N] [--chromium PATH] [--headed] [--engine chrome|cef] [--cef PATH] [--parent XID] [--display DISPLAY] [--cache DIR]\n" +
       "  newline-delimited JSON requests on stdin, replies and events on stdout.\n" +
       "  raw RGB frames of the shared page are written to FILE (atomically, via rename).\n" +
       "  --profile DIR keeps one Chrome profile (logins, cookies) across pages and runs.\n" +
       "  --jpeg-dir DIR writes every page's frames to DIR/<owner>.jpg.\n" +
-      "  --jpeg-fps N (4) frames a second at most; --cast-fps N (30) while a client shows the page (op cast).\n",
+      "  --jpeg-fps N (4) frames a second at most; --cast-fps N (30) while a client shows the page (op cast);\n" +
+      "  a page no client shows is not cast: a still every --idle-still-ms N (5000).\n",
   );
   process.exit(0);
 }
@@ -54,6 +57,10 @@ const JPEG_FPS = Math.max(1, Math.min(30, Number(argValue("--jpeg-fps") ?? 4) ||
 // while some client shows a page (the cast op leases it), its frames go out
 // at up to CAST_FPS a second instead of JPEG_FPS
 const CAST_FPS = Math.max(1, Math.min(60, Number(argValue("--cast-fps") ?? 30) || 30));
+// a page no client shows is not cast at all (no screencast: Chrome encodes
+// nothing for it); a still is taken every IDLE_STILL_MS instead, and once
+// after each request for the page, for whoever opens it next
+const IDLE_STILL_MS = Math.max(1000, Number(argValue("--idle-still-ms") ?? 5000) || 5000);
 const CHROMIUM_ARG = argValue("--chromium");
 const HEADED = process.argv.includes("--headed");
 const DEBUG = Boolean(process.env.BACKPLANE_BROWSER_DEBUG);
@@ -95,6 +102,12 @@ type Shot = {
   lastHash: bigint;
   pending: Buffer | null;
   timer: ReturnType<typeof setTimeout> | null;
+  // the screencast runs (only while some client shows the page)
+  casting: boolean;
+  // when the last idle still was taken (performance.now ms)
+  still: number;
+  // fires when the cast lease runs out
+  lease: ReturnType<typeof setTimeout> | null;
 };
 
 // an owner's tabs (its page and the popups it opened), the one it drives,
@@ -124,7 +137,7 @@ function ownerFor(name: string): Owner {
       active: null,
       viewport: { ...DEFAULT_VIEWPORT },
       console: [],
-      shot: { cdp: null, seq: 0, last: 0, fast: 0, lastAll: 0, lastHash: 0n, pending: null, timer: null },
+      shot: { cdp: null, seq: 0, last: 0, fast: 0, lastAll: 0, lastHash: 0n, pending: null, timer: null, casting: false, still: 0, lease: null },
       opening: null,
       recording: false,
       lastNav: "",
@@ -142,6 +155,18 @@ function pushLog(o: Owner, entry: Json): void {
 // State
 // -----
 
+let engine = argValue("--engine") ?? "chrome";
+if (engine !== "chrome" && engine !== "cef") throw new Error("engine must be chrome or cef");
+let cefOptions: CefOptions = {
+  parent: Number(argValue("--parent") ?? 0), display: argValue("--display") ?? process.env.DISPLAY ?? "",
+  cef: argValue("--cef"), cache: argValue("--cache") ?? resolve(PROFILE ?? join(tmpdir(), `bp-browser-${process.pid}`, "profile"), "..", "cef-profile"),
+};
+let cef: CefEngine | null = null;
+// The native rectangle belongs to an owner, and follows that owner's active tab.
+let cefPlacement: { owner: string; x: number; y: number; w: number; h: number } | null = null;
+let cefShield = false;
+let tabNumber = 0;
+const cefOwners = new Map<string, Owner>();
 let context: BrowserContext | null = null;
 let launching: Promise<BrowserContext> | null = null;
 let executable: string | null = null;
@@ -183,6 +208,7 @@ async function ensureContext(): Promise<BrowserContext> {
 }
 
 async function launch(): Promise<BrowserContext> {
+  if (engine === "cef") return launchCef();
   executable = CHROMIUM_ARG ?? findChromium();
   if (!executable) {
     try {
@@ -222,6 +248,130 @@ async function launch(): Promise<BrowserContext> {
   return ctx;
 }
 
+// CEF creates native children; CDP only adopts them.
+async function launchCef(): Promise<BrowserContext> {
+  if (!Number.isSafeInteger(cefOptions.parent) || cefOptions.parent <= 0 || !cefOptions.display)
+    throw new Error("cef needs parent (X window id) and display");
+  if (PROFILE && resolve(cefOptions.cache) === resolve(PROFILE))
+    throw new Error("CEF cache must differ from the Chrome profile");
+  const host = new CefEngine(cefOptions);
+  cef = host;
+  host.on("host", (e) => {
+    if (e.event === "closed") cefOwners.delete(e.key);
+    if (e.event === "popup") {
+      const o = cefOwners.get(e.opener) ?? cefOwners.get(String(e.opener).split("~")[0]);
+      if (o) cefOwners.set(e.key, o);
+    }
+    if (e.event === "shield-click" || e.event === "focus") {
+      const o = cefOwners.get(e.key) ?? cefOwners.get(String(e.key).split("~")[0]);
+      // shield-click x, y: device pixels of the shown page, as the host reports them
+      if (o) send({ event: e.event, page: o.name, ...(e.event === "shield-click" ? { x: e.x, y: e.y } : {}) });
+    }
+  });
+  host.on("exit", (code) => {
+    if (cef !== host) return;
+    cef = null;
+    context = null;
+    spare = [];
+    cefOwners.clear();
+    frames.cdp = null; frames.page = null;
+    for (const o of owners.values()) {
+      o.tabs = []; o.active = null; o.recording = false; clearShot(o);
+    }
+    send({ event: "closed" });
+    if (!host.stopping) send({ event: "engine", engine: "cef", ok: false, error: `CEF host exited (${code})` });
+  });
+  try {
+    const ctx = await host.start();
+    await ctx.exposeBinding("__bpRec", (source, ev) => onRecord(source, ev));
+    await ctx.addInitScript(RECORDER_SCRIPT);
+    executable = host.executable;
+    context = ctx;
+    send({ event: "engine", engine: "cef", ok: true });
+    return ctx;
+  } catch (e) {
+    await host.stop();
+    if (cef === host) cef = null;
+    send({ event: "engine", engine: "cef", ok: false, error: String(e instanceof Error ? e.message : e) });
+    throw e;
+  }
+}
+// CEF pages: the host places and sizes X windows in device pixels; agents,
+// status and the viewport speak CSS pixels (the same on a scale-1 screen)
+async function dpr(p: Page): Promise<number> {
+  return (await p.evaluate(() => devicePixelRatio).catch(() => 1)) || 1;
+}
+// the page's CSS size once the X resize has reached the renderer (both are
+// asynchronous); a pixel of rounding either way counts
+async function sized(p: Page, width: number, height: number): Promise<void> {
+  await p.waitForFunction(({ width, height }) => Math.abs(innerWidth - width) <= 1 && Math.abs(innerHeight - height) <= 1, { width, height }, { timeout: DEFAULT_TIMEOUT });
+}
+async function sizePage(o: Owner, p: Page): Promise<void> {
+  if (engine === "cef") {
+    const r = await dpr(p);
+    await cef!.command("size", await cef!.key(p), `${Math.round(o.viewport.width * r)} ${Math.round(o.viewport.height * r)}`);
+    await sized(p, o.viewport.width, o.viewport.height);
+  } else await p.setViewportSize(o.viewport);
+}
+async function closeTab(p: Page): Promise<void> {
+  if (engine === "cef") {
+    if (!p.isClosed()) {
+      const closed = p.waitForEvent("close");
+      await cef!.close(p); await closed;
+    }
+  } else await p.close();
+}
+async function stopEngine(): Promise<void> {
+  for (const o of owners.values()) { o.recording = false; await stopShots(o); clearShot(o); }
+  await stopScreencast();
+  const ctx = context;
+  context = null;
+  if (cef) await cef.stop();
+  else await ctx?.close();
+  spare = [];
+  for (const o of owners.values()) { o.tabs = []; o.active = null; }
+}
+async function switchEngine(a: Json, name: string): Promise<Json> {
+  if (a.engine !== "chrome" && a.engine !== "cef") throw new Error("engine must be chrome or cef");
+  const next: CefOptions = { ...cefOptions };
+  if (a.engine === "cef") {
+    next.parent = a.parent ?? next.parent; next.display = a.display ?? next.display;
+    next.cef = a.cef ?? next.cef; next.cache = a.cache ?? next.cache;
+    if (!Number.isSafeInteger(next.parent) || next.parent <= 0 || typeof next.display !== "string" || !next.display)
+      throw new Error("cef needs parent (X window id) and display");
+    if (PROFILE && resolve(next.cache) === resolve(PROFILE)) throw new Error("CEF cache must differ from the Chrome profile");
+    // Resolve before shutting down the working engine.
+    if (!findCef(next.cef)) {
+      const { installCef } = await import("./cef.ts"); next.cef = await installCef();
+    }
+  }
+  if (a.engine === engine && context && (engine === "chrome" || JSON.stringify(next) === JSON.stringify(cefOptions))) return status(name);
+  const urls = [...owners.values()].filter((o) => o.active && !o.active.isClosed()).map((o) => ({ name: o.name, url: o.active!.url() }));
+  const oldContext = context, oldCef = cef;
+  cefPlacement = null; cefShield = false;
+  // CEF's singleton profile lock prevents overlapping hosts using one cache.
+  // Engine changes between Chrome and CEF can overlap as specified; reconfiguring
+  // a live CEF host with the same cache must release that lock first.
+  const sameCefCache = oldCef && a.engine === "cef" && resolve(oldCef.options.cache) === resolve(next.cache);
+  // Keep the old engine alive until the replacement pages have been opened.
+  context = null; cef = null; spare = [];
+  for (const o of owners.values()) { o.recording = false; await stopShots(o); clearShot(o); o.tabs = []; o.active = null; }
+  await stopScreencast();
+  engine = a.engine; cefOptions = next;
+  try {
+    if (sameCefCache) await oldCef!.stop();
+    await ensureContext();
+    for (const u of urls) {
+      try { await (await ensurePage(u.name)).goto(u.url, { waitUntil: "load", timeout: DEFAULT_TIMEOUT }); }
+      catch (e) { log(`engine reopen ${u.name}: ${e}`); }
+    }
+  } finally {
+    if (oldCef) await oldCef.stop();
+    else await oldContext?.close();
+  }
+  return status(name);
+}
+
 // the page an owner drives, made on first use
 async function ensurePage(name: string): Promise<Page> {
   const o = ownerFor(name);
@@ -234,13 +384,19 @@ async function newTab(o: Owner): Promise<Page> {
   const ctx = await ensureContext();
   let p = spare.pop();
   while (p && p.isClosed()) p = spare.pop();
-  if (!p) p = await ctx.newPage();
+  if (engine === "cef") {
+    const key = `${safeOwner(o.name).slice(0, 48)}-${++tabNumber}`;
+    cefOwners.set(key, o);
+    p = await cef!.create(key);
+  } else if (!p) p = await ctx.newPage();
   await adopt(o, p);
   await activate(o, p);
   return p;
 }
 
 async function adopt(o: Owner, p: Page): Promise<void> {
+  if (ownerOf.has(p)) return;
+  if (engine === "cef") cefOwners.set(await cef!.key(p), o);
   ownerOf.set(p, o);
   o.tabs.push(p);
   p.setDefaultTimeout(DEFAULT_TIMEOUT);
@@ -266,7 +422,8 @@ async function adopt(o: Owner, p: Page): Promise<void> {
     if (next) void activate(o, next).catch((e) => log(`tab: ${e}`));
     else clearShot(o);
   });
-  await p.setViewportSize(o.viewport).catch(() => {});
+  if (engine === "cef") await sizePage(o, p);
+  else await p.setViewportSize(o.viewport).catch(() => {});
   // a tab adopted while recording (a popup) was told "no" on its first load
   if (o.recording) await recorderSet(o, true);
 }
@@ -331,6 +488,15 @@ async function activate(o: Owner, p: Page): Promise<void> {
   o.active = p;
   await startShots(o);
   if (o.name === "" && frames.on) await startScreencast();
+  const at = cefPlacement, host = cef;
+  if (engine === "cef" && host && at?.owner === o.name) {
+    const key = await host.key(p);
+    // A hide or another owner's show while adoption awaited its CDP target wins.
+    const current = () => cef === host && cefPlacement === at && o.active === p;
+    if (current()) await host.command("show", key, `${at.x} ${at.y} ${at.w} ${at.h}`);
+    if (current()) await host.command("shield", "", cefShield ? "1" : "0");
+    if (current() && !cefShield) await host.command("focus", key);
+  }
 }
 
 function tabOf(name: string): Page | null {
@@ -341,8 +507,11 @@ function tabOf(name: string): Page | null {
 async function status(name: string): Promise<Json> {
   const o = ownerFor(name);
   const p = tabOf(name);
+  if (engine === "cef" && p) o.viewport = await p.evaluate(() => ({ width: innerWidth, height: innerHeight }));
   return {
     version: VERSION,
+    engine,
+    ...(cef ? { port: cef.port, hostPid: cef.proc?.pid, cache: cef.options.cache } : {}),
     page: name,
     open: p !== null,
     chromium: executable ?? CHROMIUM_ARG ?? findChromium(),
@@ -464,13 +633,44 @@ async function startShots(o: Owner): Promise<void> {
     o.shot.pending = Buffer.from(e.data, "base64");
     scheduleShot(o);
   });
-  await s.send("Page.startScreencast", { format: "jpeg", quality: 70, maxWidth: 1280, maxHeight: 2048, everyNthFrame: 1 });
+  o.shot.casting = false;
+  await castCheck(o);
 }
+
+// whether a client shows the page (its cast lease holds)
+function watched(o: Owner): boolean {
+  return performance.now() < o.shot.fast;
+}
+
+// the screencast runs exactly while the page is watched
+async function castCheck(o: Owner): Promise<void> {
+  const s = o.shot.cdp;
+  if (!s) return;
+  const want = watched(o);
+  if (want === o.shot.casting) return;
+  o.shot.casting = want;
+  if (want) await s.send("Page.startScreencast", { format: "jpeg", quality: 70, maxWidth: 1280, maxHeight: 2048, everyNthFrame: 1 }).catch(() => {});
+  else await s.send("Page.stopScreencast").catch(() => {});
+}
+
+// once a second: leases that ran out stop their screencast; an unwatched
+// page gets a still every IDLE_STILL_MS (written only when it changed)
+setInterval(() => {
+  const now = performance.now();
+  for (const o of owners.values()) {
+    void castCheck(o);
+    if (!watched(o) && o.shot.cdp && now - o.shot.still >= IDLE_STILL_MS) {
+      o.shot.still = now;
+      void shotNow(o.name);
+    }
+  }
+}, 1000).unref();
 
 async function stopShots(o: Owner): Promise<void> {
   const s = o.shot.cdp;
   o.shot.cdp = null;
   o.shot.pending = null;
+  o.shot.casting = false;
   if (s) {
     await s.send("Page.stopScreencast").catch(() => {});
     await s.detach().catch(() => {});
@@ -480,6 +680,7 @@ async function stopShots(o: Owner): Promise<void> {
 function clearShot(o: Owner): void {
   o.shot.cdp = null;
   o.shot.pending = null;
+  o.shot.casting = false;
   if (o.shot.timer) clearTimeout(o.shot.timer);
   o.shot.timer = null;
 }
@@ -585,7 +786,7 @@ async function closeOwner(name: string): Promise<void> {
   await stopShots(o);
   clearShot(o);
   if (name === "") await stopScreencast();
-  for (const t of o.tabs) await t.close().catch(() => {});
+  for (const t of [...o.tabs]) await closeTab(t).catch(() => {});
   const path = shotPath(name);
   if (path) rmSync(path, { force: true });
 }
@@ -650,11 +851,43 @@ function quick(name: string): void {
 
 // every handler gets the request's arguments and the owner it acts for
 const handlers: Record<string, (a: Json, name: string) => Promise<any>> = {
+  async engine(a, name) { return switchEngine(a, name); },
+  async show(a, name) {
+    if (engine !== "cef") throw new Error("show needs the cef engine");
+    if (![a.x, a.y, a.w, a.h].every(Number.isInteger) || a.w < 1 || a.h < 1)
+      throw new Error("show needs integer x,y,w,h with positive w,h");
+    const p = await ensurePage(name);
+    // x, y, w, h are the parent window's (device) pixels
+    const r = await dpr(p);
+    const o = ownerFor(name); o.viewport = { width: Math.round(a.w / r), height: Math.round(a.h / r) };
+    // Publish the viewport before mapping. A concurrent open can finish
+    // creating this same page, and must size it to the pane rather than
+    // restore the owner's initial 1280x800 viewport after show completes.
+    cefPlacement = { owner: name, x: a.x, y: a.y, w: a.w, h: a.h };
+    await cef!.command("show", await cef!.key(p), `${a.x} ${a.y} ${a.w} ${a.h}`);
+    await sized(p, o.viewport.width, o.viewport.height);
+    return {};
+  },
+  async hide() {
+    if (engine !== "cef") throw new Error("hide needs the cef engine");
+    cefPlacement = null;
+    await ensureContext(); await cef!.command("hide"); return {};
+  },
+  async shield(a) {
+    if (engine !== "cef") throw new Error("shield needs the cef engine");
+    if (typeof a.on !== "boolean") throw new Error("shield needs on (bool)");
+    cefShield = a.on;
+    await ensureContext(); await cef!.command("shield", "", a.on ? "1" : "0"); return {};
+  },
+  async focus(_a, name) {
+    if (engine !== "cef") throw new Error("focus needs the cef engine");
+    const p = await ensurePage(name); await cef!.command("focus", await cef!.key(p)); return {};
+  },
   async open(a, name) {
     const o = ownerFor(name);
     if (a.width && a.height) o.viewport = { width: Math.round(a.width), height: Math.round(a.height) };
     const p = await ensurePage(name);
-    await p.setViewportSize(o.viewport);
+    await sizePage(o, p);
     if (a.url) await p.goto(normalizeUrl(a.url), { waitUntil: "load", timeout: timeoutOf(a) });
     await shotNow(name);
     return status(name);
@@ -685,7 +918,7 @@ const handlers: Record<string, (a: Json, name: string) => Promise<any>> = {
     const o = ownerFor(name);
     o.viewport = { width, height };
     const p = await ensurePage(name);
-    await p.setViewportSize(o.viewport);
+    await sizePage(o, p);
     if (name === "" && frames.on) {
       await startScreencast();
       await captureNow(true);
@@ -840,6 +1073,15 @@ const handlers: Record<string, (a: Json, name: string) => Promise<any>> = {
     const timeout = timeoutOf(a, 30_000);
     const t = targetOf(p, a);
     if (!t && !a.url) throw new Error("download needs a target to click or a url");
+    if (engine === "cef") {
+      const d = await cef!.download(p, async () => {
+        if (t) await t.click({ timeout });
+        else void p.goto(normalizeUrl(a.url), { timeout }).catch(() => {});
+      }, timeout);
+      const path = freeName(dir, d.suggestedFilename);
+      copyFileSync(d.file, path); rmSync(d.file, { force: true });
+      return { path, url: d.url, suggestedFilename: d.suggestedFilename, bytes: statSync(path).size };
+    }
     const waiting = p.waitForEvent("download", { timeout });
     if (t) await t.click({ timeout });
     // navigating to a file fails with "Download is starting"; the event is what counts
@@ -862,6 +1104,7 @@ const handlers: Record<string, (a: Json, name: string) => Promise<any>> = {
     return { path, bytes: statSync(path).size };
   },
   async pdf(a, name) {
+    if (engine === "cef") throw new Error("pdf needs the headless engine");
     const p = await ensurePage(name);
     const path = needPath(a, "pdf");
     mkdirSync(join(path, ".."), { recursive: true });
@@ -878,10 +1121,8 @@ const handlers: Record<string, (a: Json, name: string) => Promise<any>> = {
     const o = ownerFor(name);
     await ensurePage(name);
     if (a.new !== undefined && a.new !== false) {
-      const ctx = await ensureContext();
-      const p = await ctx.newPage();
-      await adopt(o, p);
-      await activate(o, p);
+      const p = engine === "cef" ? await newTab(o) : await (await ensureContext()).newPage();
+      if (engine !== "cef") { await adopt(o, p); await activate(o, p); }
       const url = typeof a.new === "string" ? a.new : a.url;
       if (url) await p.goto(normalizeUrl(url), { waitUntil: "load", timeout: timeoutOf(a) });
     } else if (a.select !== undefined) {
@@ -891,7 +1132,7 @@ const handlers: Record<string, (a: Json, name: string) => Promise<any>> = {
     } else if (a.close !== undefined) {
       const p = o.tabs[Number(a.close)];
       if (!p) throw new Error(`no tab ${a.close}`);
-      await p.close();
+      await closeTab(p);
       if (!o.tabs.length) await ensurePage(name);
     }
     return tabList(o);
@@ -940,12 +1181,17 @@ const handlers: Record<string, (a: Json, name: string) => Promise<any>> = {
     const ev = await captureNow(true);
     return ev ?? { seq: frames.seq, path: FRAMES_PATH };
   },
-  // a client shows this page: its frames go out at CAST_FPS for ms (2500)
+  // a client shows this page: it is cast, its frames going out at CAST_FPS,
+  // for ms (2500); without it the page is not cast (IDLE_STILL_MS)
   async cast(a, name) {
     const o = ownerFor(name);
     const ms = Math.max(0, Math.min(10_000, Number(a.ms ?? 2500) || 0));
     const was = performance.now() < o.shot.fast;
     o.shot.fast = performance.now() + ms;
+    // the screencast stops the moment the lease runs out, not at the next tick
+    if (o.shot.lease) clearTimeout(o.shot.lease);
+    o.shot.lease = setTimeout(() => { o.shot.lease = null; void castCheck(o); }, ms + 5);
+    await castCheck(o);
     if (!was && ms > 0) void shotNow(name);
     return { fps: shotFps(o) };
   },
@@ -965,6 +1211,9 @@ const handlers: Record<string, (a: Json, name: string) => Promise<any>> = {
 
 // Loop
 // ----
+
+// requests that change nothing on the page (no still for them)
+const STILL_QUIET = new Set(["cast", "status", "frames", "frame", "close", "close_page", "snapshot", "console", "tabs"]);
 
 async function handle(line: string): Promise<void> {
   if (!line.trim()) return;
@@ -994,6 +1243,9 @@ async function handle(line: string): Promise<void> {
   } catch (e: any) {
     send({ id, ok: false, error: String(e?.message ?? e).split("\n")[0] });
   }
+  // what a request did to an unwatched page shows in a still soon after
+  const o = owners.get(name);
+  if (o && !watched(o) && !STILL_QUIET.has(op)) o.shot.still = Math.min(o.shot.still, performance.now() - IDLE_STILL_MS + 300);
   if (op === "close") process.exit(0);
 }
 
@@ -1001,14 +1253,11 @@ let closing = false;
 async function shutdown(exit: boolean): Promise<void> {
   if (closing) return;
   closing = true;
+  cefPlacement = null;
   if (frames.timer) clearInterval(frames.timer);
   frames.on = false;
   for (const o of owners.values()) clearShot(o);
-  const ctx = context;
-  context = null;
-  try {
-    await ctx?.close();
-  } catch {}
+  try { await stopEngine(); } catch {}
   if (!FRAMES_ARG) rmSync(FRAMES_PATH, { force: true });
   rmSync(FRAMES_PATH + ".tmp", { force: true });
   if (exit) process.exit(0);

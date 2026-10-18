@@ -858,6 +858,9 @@ fun ThreadScreen(m: AppModel, s: Screen, t: ThreadView, below: (@Composable () -
                         Text(t.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         if (t.branch.isNotEmpty()) Text(t.branch, style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.outline, maxLines = 1)
+                        // the thread's Boat chip: a tap opens Settings (Usage)
+                        if (t.boat.isNotEmpty()) Text(t.boat, style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary, maxLines = 1, modifier = Modifier.clickable { m.act("usage-open") })
                     }
                 },
                 actions = {

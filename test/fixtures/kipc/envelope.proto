@@ -1,0 +1,23 @@
+// A small stand-in for the KiCad runtime's API schema (test only). The
+// envelope is KiCad's; the commands are the few the stub server answers.
+syntax = "proto3";
+package kiapi.common;
+import "google/protobuf/any.proto";
+
+enum ApiStatusCode {
+  AS_UNKNOWN = 0;
+  AS_OK = 1;
+  AS_TIMEOUT = 2;
+  AS_BAD_REQUEST = 3;
+  AS_NOT_READY = 4;
+  AS_UNHANDLED = 5;
+  AS_TOKEN_MISMATCH = 6;
+  AS_BUSY = 7;
+  AS_UNIMPLEMENTED = 8;
+  AS_INTERNAL_ERROR = 9;
+}
+message ApiRequestHeader { string kicad_token = 1; string client_name = 2; }
+message ApiRequest { ApiRequestHeader header = 1; google.protobuf.Any message = 2; }
+message ApiResponseHeader { string kicad_token = 1; }
+message ApiResponse { ApiResponseHeader header = 1; ApiResponseStatus status = 2; google.protobuf.Any message = 3; }
+message ApiResponseStatus { ApiStatusCode status = 1; string error_message = 2; }

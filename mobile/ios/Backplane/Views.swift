@@ -939,11 +939,17 @@ struct ThreadScreen: View {
             if let t = model.screen?.thread?.term { TermSheet(model: model, term: t).presentationDetents([.large]) }
         }
         .toolbar {
-            if !thread.branch.isEmpty {
+            if !thread.branch.isEmpty || !(thread.boat ?? "").isEmpty {
                 ToolbarItem(placement: .principal) {
                     VStack(spacing: 0) {
                         Text(thread.title).font(.headline).lineLimit(1)
-                        Text(thread.branch).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                        if !thread.branch.isEmpty {
+                            Text(thread.branch).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                        // the thread's Boat chip: a tap opens Settings (Usage)
+                        if let b = thread.boat, !b.isEmpty {
+                            Button(b) { model.act("usage-open") }.font(.caption2).lineLimit(1)
+                        }
                     }
                 }
             }
@@ -1046,6 +1052,7 @@ struct ThreadScreen: View {
         case "search": "doc.text.magnifyingglass"
         case "stop": "stop.fill"
         case "x": "xmark"
+        case "box": "cart"
         default: "circle"
         }
     }

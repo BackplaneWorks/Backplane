@@ -219,6 +219,12 @@ const KEYS = listOf(App.cbor_keys());
 const WORDS = listOf(App.cbor_words());
 
 let ui = App.page(App.init(now(), cid), location.origin);
+const forcedLang = new URLSearchParams(location.search).get("lang");
+if (forcedLang === "ja" || forcedLang === "en") ui = App.lang_preview(ui);
+ui = App.act(ui, "lang", forcedLang === "ja" || forcedLang === "en" ? forcedLang : (localStorage.getItem("backplane-lang") || "auto")).ui;
+ui = App.act(ui, "lang-os", navigator.languages?.[0] || navigator.language || "").ui;
+document.documentElement.lang = App.lang(ui);
+window.addEventListener("languagechange", () => dispatch("lang-os", navigator.languages?.[0] || navigator.language || ""));
 // opened from another hub to show one of this machine's bots ("#bot=<name>")
 if (location.hash) {
   try { ui = App.wanted(ui, decodeURIComponent(location.hash)); } catch {}
@@ -253,23 +259,86 @@ let focus = null;
 let jump = null;
 let earlierAsked = false;
 
-// the entry at the top of the timeline's view, and how far into the view
-// it sits: kept there across a render while the reader is not at the end
+// the entry at the top of the timeline's view, and where it is in the
+// window (so a header or panel above the timeline growing moves it not)
 function anchorOf(tl) {
   const top = tl.getBoundingClientRect().top;
   for (const el of tl.querySelectorAll("[data-id]")) {
     const r = el.getBoundingClientRect();
-    if (r.bottom > top + 1) return { id: el.getAttribute("data-id"), off: r.top - top };
+    if (r.bottom > top + 1) return { id: el.getAttribute("data-id"), off: r.top };
   }
   return null;
 }
 
+// Reading while the thread grows (client.bend's Hold): only a timeline at
+// its end (App.hold_at_end: within a few px) follows. Scrolled up, the
+// entry at the view's top and its offset are held, and whatever changes
+// size (a render, the streaming row, an image loading, the subagents or
+// todo panels, the asks and composer below) is made good before the page
+// paints, so nothing read moves. Leaving the end and coming back are told
+// to the client ("hold-away"/"hold-end": the "N new" pill).
+let held = null;
+let away = "";
+// where the last of our own corrections left the timeline: its scroll
+// event is ours, not the person's, and keeps the offset held (no drift)
+let fixedAt = -1;
+let heldSize = null;
+function holdSize(tl) {
+  return { tl, height: tl.scrollHeight, view: tl.clientHeight, width: tl.clientWidth };
+}
+function holdEnd(tl) {
+  return App.hold_at_end(BigInt(Math.max(0, Math.round(tl.scrollHeight - tl.scrollTop - tl.clientHeight))));
+}
+function holdFix(tl) {
+  if (!tl || tl.id !== "timeline") return;
+  heldSize = holdSize(tl);
+  if (!held) {
+    const end = tl.scrollHeight - tl.clientHeight;
+    if (tl.scrollTop < end) { tl.scrollTop = end; fixedAt = tl.scrollTop; }
+    return;
+  }
+  const el = tl.querySelector(`[data-id="${CSS.escape(held.id)}"]`);
+  if (!el) return;
+  const d = el.getBoundingClientRect().top - held.off;
+  if (d) { tl.scrollTop += d; fixedAt = tl.scrollTop; }
+}
+// tell the client once each way; the thread is the one the view was away in
+function holdSay(now) {
+  if (now === away) return;
+  const was = away;
+  away = now;
+  queueMicrotask(() => dispatch(now ? "hold-away" : "hold-end", now || was));
+}
+// the person scrolled the timeline: the end follows, elsewhere holds
+function holdRead(tl) {
+  if (!tl || tl.id !== "timeline") return;
+  if (tl.scrollTop === fixedAt) return;
+  // Shrinking content can clamp scrollTop and queue a scroll event before
+  // ResizeObserver runs. It belongs to the changed layout, so repair the
+  // original anchor before deciding whether the reader reached the end.
+  const size = holdSize(tl);
+  if (held && heldSize?.tl === tl && (size.height !== heldSize.height || size.view !== heldSize.view || size.width !== heldSize.width)) {
+    holdFix(tl);
+    return;
+  }
+  heldSize = size;
+  fixedAt = -1;
+  held = holdEnd(tl) ? null : anchorOf(tl);
+  holdSay(held ? App.sel(ui) : "");
+}
+const holdSizes = typeof ResizeObserver === "function" ? new ResizeObserver(() => holdFix(document.getElementById("timeline"))) : null;
+function holdWatch(tl) {
+  if (!holdSizes) return;
+  holdSizes.disconnect();
+  if (!tl) return;
+  holdSizes.observe(tl);
+  for (const c of tl.children) holdSizes.observe(c);
+}
+document.addEventListener("scroll", (e) => holdRead(e.target), true);
+
 function render() {
   queued = false;
   const tl = document.getElementById("timeline");
-  const pinned = tl ? tl.scrollHeight - tl.scrollTop - tl.clientHeight < 40 : true;
-  const anchor = tl && !pinned ? anchorOf(tl) : null;
-  const fromEnd = tl ? tl.scrollHeight - tl.scrollTop : 0;
   const t0 = PERF ? pnow() : 0;
   const page = App.view(ui);
   const t1 = PERF ? pnow() : 0;
@@ -277,14 +346,13 @@ function render() {
   if (PERF) PERF.render.push([t1 - t0, pnow() - t1]);
   memoSweep();
   const tl2 = document.getElementById("timeline");
-  if (tl2 && (scroll || pinned)) tl2.scrollTop = tl2.scrollHeight;
-  // read further up, the view stays on what is read: text streaming in
-  // below and earlier entries added above move nothing on screen
-  else if (tl2 && tl === tl2) {
-    const el = anchor && tl2.querySelector(`[data-id="${CSS.escape(anchor.id)}"]`);
-    if (el) tl2.scrollTop += el.getBoundingClientRect().top - tl2.getBoundingClientRect().top - anchor.off;
-    else tl2.scrollTop = tl2.scrollHeight - fromEnd;
+  // another timeline (or a send, a new thread: ScrollEnd) starts at its end
+  if (scroll || tl !== tl2) {
+    held = null;
+    holdSay("");
   }
+  holdFix(tl2);
+  holdWatch(tl2);
   scroll = false;
   // an entry the history went back to (Jump): brought into view, flashed
   if (jump && tl2) {
@@ -354,10 +422,11 @@ function laterLive() {
     const v = expand(App.live(ui));
     const hit = tl && tl.__kids && is(v, "El") ? tl.__kids.find((p) => is(p.v, "El") && p.v.key === v.key && p.v.tag === v.tag) : null;
     if (!hit) { render(); return; }
-    const pinned = tl.scrollHeight - tl.scrollTop - tl.clientHeight < 40;
+    // away, the pill comes with the first of it (a page render, once)
+    if (held && !tl.querySelector(".hold-pill")) { render(); return; }
     patch(hit.node, v);
     hit.v = v;
-    if (pinned) tl.scrollTop = tl.scrollHeight;
+    holdFix(tl);
     if (PERF) PERF.live.push(pnow() - t0);
   });
 }
@@ -400,7 +469,8 @@ function run(cmds) {
     } else if (is(c, "Keep")) {
       // written at once: a crash or a closed tab loses nothing typed
       try {
-        if (c.text) localStorage.setItem(DRAFT + c.thread, c.text);
+        if (c.thread === "@lang") localStorage.setItem("backplane-lang", c.text);
+        else if (c.text) localStorage.setItem(DRAFT + c.thread, c.text);
         else localStorage.removeItem(DRAFT + c.thread);
       } catch {}
     }
@@ -452,6 +522,7 @@ function dispatch(action, value, timer) {
   const r = App.act(ui, action, value);
   if (PERF) PERF.act.push([pnow() - t0, action]);
   ui = r.ui;
+  if (action === "lang" || action === "lang-os") document.documentElement.lang = App.lang(ui);
   if (action === "subs-shut" || action === "subs-open") {
     try {
       const sep = value.indexOf("\t");
@@ -650,6 +721,8 @@ document.addEventListener("input", (e) => {
   el.value = "";
   dispatch(el.getAttribute("data-text"), forKey(el) + v);
 });
+
+document.addEventListener("click", (e) => { if (e.target.closest?.("a.ref")) e.preventDefault(); });
 
 for (const ev of EVENTS) {
   document.addEventListener(ev, (e) => {

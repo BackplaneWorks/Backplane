@@ -1,6 +1,6 @@
 // Agents kept through a restart in place (src/server/adopt.bend; the
-// decisions are src/core/adopt.bend's). A record of every Claude process
-// the hub started: thread, pid, start identity (boot id and the process's
+// decisions are src/core/adopt.bend's). A record of every agent process
+// the hub started (Claude's with a descriptor, the per-turn ones without): thread, pid, start identity (boot id and the process's
 // start time, /proc/<pid>/stat field 22, so a pid reused by another
 // process never matches) and a descriptor on its socket, kept in memory
 // and written to the record file on each change. Before an exec the
@@ -30,7 +30,7 @@ static void bp_inherited_drop(unsigned pid) {
 
 #endif
 
-#if defined(CID(Adopt.record)) || defined(CID(Adopt.keep)) || defined(CID(Adopt.drop)) || defined(CID(Adopt.ident)) || defined(CID(Adopt.take)) || defined(CID(Adopt.stop))
+#if defined(CID(Adopt.record)) || defined(CID(Adopt.keep)) || defined(CID(Adopt.note)) || defined(CID(Adopt.drop)) || defined(CID(Adopt.ident)) || defined(CID(Adopt.take)) || defined(CID(Adopt.stop))
 
 typedef struct bp_adopt { char *thread; unsigned pid; char ident[96]; int fd; struct bp_adopt *next; } bp_adopt;
 static bp_adopt *bp_adopts;
@@ -102,7 +102,7 @@ static void bp_adopt_remove(const char *thread, unsigned pid, int any) {
 // exec that failed (keep 0) they are close-on-exec again. host.c calls it
 // through a weak reference, so a program without this file still links.
 void bp_adopt_exec(int keep) {
-#if defined(CID(Adopt.record)) || defined(CID(Adopt.keep)) || defined(CID(Adopt.drop)) || defined(CID(Adopt.ident)) || defined(CID(Adopt.take)) || defined(CID(Adopt.stop))
+#if defined(CID(Adopt.record)) || defined(CID(Adopt.keep)) || defined(CID(Adopt.note)) || defined(CID(Adopt.drop)) || defined(CID(Adopt.ident)) || defined(CID(Adopt.take)) || defined(CID(Adopt.stop))
   for (bp_adopt *a = bp_adopts; a; a = a->next) {
     if (a->fd > 2) fcntl(a->fd, F_SETFD, keep ? 0 : FD_CLOEXEC);
   }
@@ -155,6 +155,33 @@ Term adopt_keep_run(Env e, Term* f, IoWork* w) {
   return io_hand(fd);
 }
 static void __attribute__((constructor)) adopt_keep_use(void) { io_eff(CID(Adopt.keep), adopt_keep_run); }
+#endif
+
+#ifdef CID(Adopt.note)
+// a per-turn process (Codex, Grok, Muse, Antigravity), recorded with no
+// descriptor: it is never adopted, so the next image (after an exec or a
+// crash) stops it if it still runs, before its thread starts again
+Term adopt_note_run(Env e, Term* f, IoWork* w) {
+  u64 len = 0;
+  char *thread = io_cstr(e, f[0], &len);
+  unsigned pid = (unsigned)(uint32_t)f[1];
+  bp_adopt_remove(thread, 0, 1);
+  bp_adopt *a = calloc(1, sizeof *a);
+  if (a && pid > 1) {
+    a->thread = thread;
+    a->pid = pid;
+    a->fd = -1;
+    bp_adopt_ident(pid, a->ident, sizeof a->ident);
+    a->next = bp_adopts;
+    bp_adopts = a;
+  } else {
+    free(a);
+    free(thread);
+  }
+  bp_adopt_write();
+  return term_pak(CID_UNIT, 0);
+}
+static void __attribute__((constructor)) adopt_note_use(void) { io_eff(CID(Adopt.note), adopt_note_run); }
 #endif
 
 #ifdef CID(Adopt.drop)

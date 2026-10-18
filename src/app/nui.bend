@@ -1,5 +1,6 @@
 import Base
 import ../core/client.bend as U
+import ../core/winnote.bend as NT
 import ./win.bend as W
 import ../core/json.bend as J
 import ./viewer.bend as V
@@ -14,6 +15,7 @@ import ../core/attach.bend as AT
 import ../core/links.bend as LK
 import ../core/lightbox.bend as LB
 import ../core/edit.bend as ED
+import ../core/ime.bend as IM
 import ../core/model.bend as M
 import ../core/bot.bend as BT
 import ../core/perf.bend as PF
@@ -151,14 +153,15 @@ def Fld.id(+name: String, +action: String, +pre: String) -> String:
   "f:" ++ name ++ Fld.sep() ++ action ++ Fld.sep() ++ pre
 
 def Fld.alias(+id: String) -> String:
-  Bool.pick(String, String.eq(id, "bot-name"), Fld.id("name", "bot-create", ""),
+  Bool.pick(String, String.eq(id, "kicad-path"), Fld.id("kpath", "setting", "kicad.path="),
+    Bool.pick(String, String.eq(id, "bot-name"), Fld.id("name", "bot-create", ""),
     Bool.pick(String, String.eq(id, "room-name"), Fld.id("rname", "room-save", ""),
       Bool.pick(String, String.eq(id, "room-post"), Fld.id("rpost", "room-post", ""),
         Bool.pick(String, String.eq(id, "remote-send"), Fld.id("rtext", "remote-send", ""),
           Bool.pick(String, String.eq(id, "routine-name"), Fld.id("oname", "routine-save", ""),
             Bool.pick(String, String.eq(id, "voice-fix"), Fld.id("vfix", "voice-fixed", ""),
               Bool.pick(String, String.eq(id, "proj-find"), Fld.id("pq", "proj-go", ""),
-                Bool.pick(String, String.eq(id, "thread-title"), Fld.id("title", "rename-save", ""), id))))))))
+                Bool.pick(String, String.eq(id, "thread-title"), Fld.id("title", "rename-save", ""), id)))))))))
 
 # Focus and scroll requests from the client state apply here
 def Nui.effects(cs: List<&2, U.Cmd>, n: Nui) -> Nui:
@@ -168,7 +171,7 @@ def Nui.effects(cs: List<&2, U.Cmd>, n: Nui) -> Nui:
     case U.Focus{+id} <> t Nui{u, w, h, mx, my, sd, sc, ca, _, pa, hi, ms, vw}:
       Nui.effects(t, Nui{u, w, h, mx, my, sd, sc, ca, Fld.alias(id), pa, hi, ms, vw})
     case U.ScrollEnd{} <> t Nui{u, w, h, mx, my, sd, _, ca, fo, pa, hi, ms, vw}:
-      Nui.effects(t, Nui{u, w, h, mx, my, sd, 0, ca, fo, pa, hi, ms, vw})
+      Nui.effects(t, Nui{U.Hold.end(u, ""), w, h, mx, my, sd, 0, ca, fo, pa, hi, ms, vw})
     case U.Jump{_} <> t Nui{u, w, h, mx, my, sd, sc, ca, fo, pa, hi, ms, vw}:
       Nui.effects(t, Nui{U.Ui.scratch_set(u, "@jump.go", "1"), w, h, mx, my, sd, sc, ca, fo, pa, hi, ms, vw})
     case _ <> t _:
@@ -631,13 +634,14 @@ def Tl.up(near: Bool, +n: Nui) -> Step:
       Step{n, Nil{}, True{}}
 
 # a notch down the thread: back at the bottom, the pages the wheel added
-# go (a frame lays out only the newest page again)
+# go (a frame lays out only the newest page again), and so does the pill
+# (client.bend's Hold), in this very frame
 def Tl.down(above: Bool, n: Nui) -> Step:
   match above n:
     case True{} _:
       Step{n, Nil{}, True{}}
     case False{} Nui{+u, w, h, mx, my, sd, sc, ca, fo, pa, hi, ms, vw}:
-      Step{Nui{U.Ui.scratch_set(u, "@more." ++ U.Ui.sel(u), ""), w, h, mx, my, sd, sc, ca, fo, pa, hi, ms, vw}, Nil{}, True{}}
+      Step{Nui{U.Hold.end(U.Ui.scratch_set(u, "@more." ++ U.Ui.sel(u), ""), ""), w, h, mx, my, sd, sc, ca, fo, pa, hi, ms, vw}, Nil{}, True{}}
 
 def Nui.wheel.k(side: Bool, up: Bool, down: Bool, n: Nui, +sd: U32, +sc: U32, +most: U32, +tmost: U32, +more: Bool) -> Step:
   match side up down n:
@@ -701,6 +705,49 @@ def Nui.ui(n: Nui) -> U.Ui:
   match n:
     case Nui{u, _, _, _, _, _, _, _, _, _, _, _, vw}:
       u
+
+# Reading while the thread grows (client.bend's Hold, layout.bend's
+# TL.hold): after each frame the timeline's place ("tl-at": sc answered,
+# off, top, the page's first entry, visible entry and its content top) is kept as "@tl.at" with the thread,
+# the window's sc becomes what is now below the view, and away from the
+# end the page is pinned at its first entry ("@tl.pin.<thread>") and the
+# client is told (U.Hold.away / U.Hold.end: the "N new" pill)
+
+def Hold.part(+v: String, +i: Nat) -> String:
+  Maybe.default(&2, String, List.get(&2, String, String.split(v, '|'), i), "")
+
+# the kept place, for the thread on show ("" when it was another's)
+def Hold.of(+n: Nui) -> String:
+  Bool.pick(String, String.eq(Hold.part(U.Ui.scratch(Nui.ui(n), "@tl.at"), 6n), U.Ui.sel(Nui.ui(n))), U.Ui.scratch(Nui.ui(n), "@tl.at"), "")
+
+def Hold.pin(+u: U.Ui, +away: Bool, +first: String) -> U.Ui:
+  U.Ui.scratch_set(u, "@tl.pin." ++ U.Ui.sel(u), Bool.pick(String, away, Bool.pick(String, String.is_empty(U.Ui.scratch(u, "@tl.pin." ++ U.Ui.sel(u))), first, U.Ui.scratch(u, "@tl.pin." ++ U.Ui.sel(u))), ""))
+
+def Hold.side(away: Bool, +u: U.Ui) -> U.Ui:
+  match away:
+    case True{}:
+      U.Hold.away(u, "")
+    case False{}:
+      U.Hold.end(u, "")
+
+def Hold.ui(+u: U.Ui, +v: String, +sc: U32) -> U.Ui:
+  Hold.pin(U.Ui.scratch_set(Hold.side(U32.is_ne(sc, 0), u), "@tl.at", v ++ "|" ++ U.Ui.sel(u)), U32.is_ne(sc, 0), Hold.part(v, 3n))
+
+def Hold.take.k(has: Bool, +v: String, n: Nui) -> Nui:
+  match has n:
+    case True{} Nui{u, w, h, mx, my, sd, _, ca, fo, pa, hi, ms, vw}:
+      Nui{Hold.ui(u, v, Maybe.default(&2, U32, U32.read(Hold.part(v, 0n)), 0)), w, h, mx, my, sd, Maybe.default(&2, U32, U32.read(Hold.part(v, 0n)), 0), ca, fo, pa, hi, ms, vw}
+    case False{} _:
+      n
+
+def Hold.take(+n: Nui) -> Nui:
+  Hold.take.k(Bool.not(String.is_empty(Hit.value(Nui.hits(n), "tl-at"))), Hit.value(Nui.hits(n), "tl-at"), n)
+
+# the pill's click: back to the end (the pages the wheel added go too)
+def Hold.bottom(n: Nui) -> Step:
+  match n:
+    case Nui{u, w, h, mx, my, sd, _, ca, fo, pa, hi, ms, vw}:
+      Tl.down(False{}, Nui{u, w, h, mx, my, sd, 0, ca, fo, pa, hi, ms, vw})
 
 def Nui.recv.act(+n: Nui, +o: J.Json) -> U.Act:
   Nui.recv.act.k(U.Ui.recv_act(Nui.ui(n), o), o)
@@ -1577,7 +1624,7 @@ def Nui.source(+n: Nui) -> String:
 def Vw.asked(v: V.Vw, +key: String) -> V.Vw:
   match v:
     case V.Vw{s, vi, f, r, d, lx, ly, b, fr, cu, V.Vx{+k, p, t, c, _, _, px, py, pa, se, bm}}:
-      V.Vw{s, vi, f, r, d, lx, ly, b, fr, cu, V.Vx{k, p, t, c, key, Bool.pick(String, U32.is_eq(k, 2), "Exporting 3D model…", Bool.pick(String, U32.is_eq(k, 3), "The agents' browser shows here when they open a page.", "Loading…")), px, py, pa, se, bm}}
+      V.Vw{s, vi, f, r, d, lx, ly, b, fr, cu, V.Vx{k, p, t, c, key, Bool.pick(String, U32.is_eq(k, 2), NT.Notice.make("exporting", ""), Bool.pick(String, U32.is_eq(k, 3), NT.Notice.make("browser", ""), NT.Notice.make("loading", ""))), px, py, pa, se, bm}}
 
 # the viewer asked for a source (the shell starts reading it)
 def Nui.asked(+n: Nui, +key: String) -> Nui:
@@ -2575,13 +2622,16 @@ def Nui.vw_act.more(i: Nat, +n: Nui, +value: String) -> Step:
     # the list's All, Dim, Only
     case 9n:
       Nui.lfocus.set(n, LY.Lyr.set(Nui.look.kind(n), Nui.lfocus(n), LY.Lyr.num(value, 0)))
+    # the "N new" pill over the timeline's foot (layout.bend's TL.pill)
+    case 10n:
+      Hold.bottom(n)
     case _:
       Step{n, Nil{}, False{}}
 
 def Nui.vw_act.k(i: Nat, +n: Nui, +value: String) -> Step:
   match i:
     case 0n:
-      Step{Nui.with_ui(n, U.Ui.view_pick.back(Nui.ui(n), View.name(Maybe.default(&2, U32, U32.read(value), 0)))), Nil{}, True{}}
+      Step{Nui.with_ui(n, U.Ui.view_pick.bd(Nui.ui(n), View.name(Maybe.default(&2, U32, U32.read(value), 0)))), Nil{}, True{}}
     case 1n:
       Step{Nui.with_vw(n, Vw.pick_set(Nui.vw(n), "")), Nil{}, True{}}
     case 2n:
@@ -2601,7 +2651,7 @@ def Nui.vw_act.k(i: Nat, +n: Nui, +value: String) -> Step:
 
 # the window's own actions (they never reach the client state)
 def Nui.vw_act(+n: Nui, +action: String, +value: String) -> Step:
-  Nui.vw_act.k(Nui.pos(["vw-kind", "vw-unpick", "vw-pal", "vw-palx", "vw-proj", "vw-projx", "vw-projo", "vw-find", "vw-layers", "vw-layer", "vw-layers-reset", "vw-sheet", "vw-open", "vw-up", "vw-light", "vw-key", "vw-layer-pick", "vw-layer-mode"], action, 0n), n, value)
+  Nui.vw_act.k(Nui.pos(["vw-kind", "vw-unpick", "vw-pal", "vw-palx", "vw-proj", "vw-projx", "vw-projo", "vw-find", "vw-layers", "vw-layer", "vw-layers-reset", "vw-sheet", "vw-open", "vw-up", "vw-light", "vw-key", "vw-layer-pick", "vw-layer-mode", "vw-bottom"], action, 0n), n, value)
 
 # a link in a message: only a web address is ever opened (law link_no_script)
 def Nui.click.url(url: Bool, +n: Nui, +action: String, +value: String) -> Step:
@@ -3052,17 +3102,206 @@ def Bb.wheel(none: Bool, +n: Nui, +x: U32, +y: U32, +dir: U32) -> Step:
     case False{}:
       Nui.act(n, "bb-scroll", Bool.pick(String, U32.is_eq(dir, 0), "-120", "120"))
 
+# Input method
+# ------------
+# What the input method composes (core/ime.bend) is kept in the scratch as
+# "@ime" and is owned by the field that had the keys when it began (the
+# thread and the focus id). It is drawn at that field's caret (layout.bend)
+# and is never in the field's text, the draft sent to the hub, the undo
+# history or the clipboard. The method's commit is typed text: it goes in at
+# the field's selection as one undo step, whatever it looks like (a path or
+# a URI is text, never an attachment).
+
+def Imx.get(+n: Nui) -> IM.Ime:
+  IM.Ime.read(U.Ui.scratch(Nui.ui(n), "@ime"))
+
+def Imx.put(+n: Nui, +i: IM.Ime) -> Nui:
+  Nui.with_ui(n, U.Ui.scratch_set(Nui.ui(n), "@ime", IM.Ime.show(i)))
+
+# whether a composition is showing
+def Imx.live(+n: Nui) -> Bool:
+  Bool.not(String.is_empty(U.Ui.scratch(Nui.ui(n), "@ime")))
+
+# who owns a composition begun now
+def Imx.owner(+n: Nui) -> String:
+  U.Ui.sel(Nui.ui(n)) ++ "|" ++ Nui.focus_of(n)
+
+# a field that takes text has the keys
+def Imx.field(+n: Nui) -> Bool:
+  Bool.or(Bool.or(String.eq(Nui.focus_of(n), "composer"), Nui.in_path(n)), Fld.on(Nui.focus_of(n)))
+
+# the composition ends (cancelled, committed, or its field lost the keys)
+def Imx.drop(+n: Nui) -> Nui:
+  Nui.with_ui(n, U.Ui.scratch_set(Nui.ui(n), "@ime", ""))
+
+# the composition is not the focused field's any more
+def Imx.stale(+n: Nui) -> Bool:
+  Bool.and(Imx.live(n), Bool.not(String.eq(IM.Ime.owner(Imx.get(n)), Imx.owner(n))))
+
+# the preedit changed: characters [first, first + len) became text, or
+# only their feedback changed; the caret is inside the preedit
+def Imx.draw.k(field: Bool, +only: Bool, +n: Nui, +first: U32, +len: U32, +text: String, +fb: String, +caret: U32) -> Step:
+  match field:
+    case True{}:
+      Step{Imx.put(n, IM.Ime.at(Bool.pick(IM.Ime, only, IM.Ime.mark(IM.Ime.sync(Imx.get(n), Imx.owner(n)), U32.to_nat(first), U32.to_nat(len), fb),
+        IM.Ime.draw(Imx.get(n), Imx.owner(n), U32.to_nat(first), U32.to_nat(len), text, fb)), U32.to_nat(caret))), Nil{}, True{}}
+    case False{}:
+      Step{n, Nil{}, False{}}
+
+def Imx.draw(+n: Nui, +first: U32, +len: U32, text: String, fb: String, +caret: U32, only: Bool) -> Step:
+  Imx.draw.k(Imx.field(n), only, n, first, len, text, fb, caret)
+
+def Imx.caret(+n: Nui, +pos: U32) -> Step:
+  Step{Imx.put(n, IM.Ime.at(Imx.get(n), U32.to_nat(pos))), Nil{}, Imx.live(n)}
+
+# the composition ended with nothing committed
+def Imx.end(+n: Nui) -> Step:
+  Step{Imx.drop(n), Nil{}, Imx.live(n)}
+
+# committed text typed in at the focused field
+def Imx.type.k(comp: Bool, path: Bool, n: Nui, +m: Nat, +text: String) -> Step:
+  match comp path n:
+    case True{} _ Nui{+u, w, h, mx, my, sd, sc, +ca, fo, pa, hi, ms, vw}:
+      Nui.composer.k(Ed.insert(U.Ui.draft_text(u), ca, m, text), Nui{u, w, h, mx, my, sd, sc, ca, fo, pa, hi, ms, vw}, False{})
+    case False{} True{} Nui{u, w, h, mx, my, sd, sc, +ca, fo, +pa, hi, ms, vw}:
+      Nui.path.k(Ed.insert(pa, ca, m, text), Nui{u, w, h, mx, my, sd, sc, ca, fo, pa, hi, ms, vw})
+    case _ _ +n2:
+      Fld.paste(Fld.on(Nui.focus_of(n2)), n2, m, text)
+
+def Imx.commit(+n: Nui, +text: String) -> Step:
+  Imx.type.k(String.eq(Nui.focus_of(n), "composer"), Nui.in_path(n), Imx.drop(n), Nui.mark(n), text)
+
+# The composer shows the composition in its draft at the caret (the near
+# end of a selection, which is hidden meanwhile); the other fields are
+# shown the same way by laying the frame out over Imx.display.
+def Imx.mine(+n: Nui) -> Bool:
+  Bool.and(Imx.live(n), Bool.and(String.eq(Nui.focus_of(n), "composer"), String.eq(IM.Ime.owner(Imx.get(n)), Imx.owner(n))))
+
+def Imx.lo(+n: Nui) -> Nat:
+  ED.Edit.lo(Nui.caret_of(n), Nui.mark(n))
+
+def Imx.draft.k(mine: Bool, +n: Nui) -> String:
+  match mine:
+    case True{}:
+      IM.Ime.shown(Imx.get(n), U.Ui.draft_text(Nui.ui(n)), Imx.lo(n))
+    case False{}:
+      U.Ui.draft_text(Nui.ui(n))
+
+def Imx.draft(+n: Nui) -> String:
+  Imx.draft.k(Imx.mine(n), n)
+
+def Imx.at.k(mine: Bool, +n: Nui) -> Nat:
+  match mine:
+    case True{}:
+      IM.Ime.caret(Imx.get(n), Imx.lo(n))
+    case False{}:
+      Nui.caret_of(n)
+
+def Imx.at(+n: Nui) -> Nat:
+  Imx.at.k(Imx.mine(n), n)
+
+def Imx.mk.k(mine: Bool, +n: Nui) -> Nat:
+  match mine:
+    case True{}:
+      IM.Ime.caret(Imx.get(n), Imx.lo(n))
+    case False{}:
+      Nui.mark(n)
+
+def Imx.mk(+n: Nui) -> Nat:
+  Imx.mk.k(Imx.mine(n), n)
+
+def Imx.runs.k(mine: Bool, +n: Nui) -> List<&2, IM.Run>:
+  match mine:
+    case True{}:
+      IM.Ime.runs(Imx.get(n), Imx.lo(n))
+    case False{}:
+      Nil{}
+
+def Imx.runs(+n: Nui) -> List<&2, IM.Run>:
+  Imx.runs.k(Imx.mine(n), n)
+
+# a single-line field (not the composer) has the composition
+def Imx.other(+n: Nui) -> Bool:
+  Bool.and(Imx.live(n), Bool.and(Bool.not(String.eq(Nui.focus_of(n), "composer")), String.eq(IM.Ime.owner(Imx.get(n)), Imx.owner(n))))
+
+def Imx.path_text(+n: Nui) -> String:
+  match n:
+    case Nui{_, _, _, _, _, _, _, _, _, pa, _, _, _}:
+      pa
+
+# the focused field's text as it is when laid out over Imx.display
+def Imx.field_shown(+n: Nui) -> String:
+  Bool.pick(String, Nui.in_path(n), Imx.path_text(n), Fld.text(n))
+
+# where the composition sits in it: the caret was moved into it
+def Imx.field_runs(+n: Nui) -> List<&2, IM.Run>:
+  IM.Ime.runs(Imx.get(n), Nat.sub(Nui.caret_of(n), IM.Ime.caret(Imx.get(n), 0n)))
+
+# the window as the frame is laid out: another field showing the
+# composition in its text, the caret inside it (nothing of this is kept)
+def Imx.display.t(path: Bool, +n: Nui) -> Nui:
+  match path:
+    case True{}:
+      +c = IM.Ime.caret(Imx.get(n), Imx.lo(n))
+      Mark.save(Nui.with_path(n, IM.Ime.shown(Imx.get(n), Imx.path_text(n), Imx.lo(n)), c), c)
+    case False{}:
+      +c = IM.Ime.caret(Imx.get(n), Imx.lo(n))
+      Mark.save(Nui.with_caret(Fld.set(n, IM.Ime.shown(Imx.get(n), Fld.text(n), Imx.lo(n))), c), c)
+
+def Imx.display.k(go: Bool, +n: Nui) -> Nui:
+  match go:
+    case True{}:
+      Imx.display.t(Nui.in_path(n), n)
+    case False{}:
+      n
+
+def Imx.display(+n: Nui) -> Nui:
+  Imx.display.k(Bool.and(Imx.other(n), Bool.or(Nui.in_path(n), Fld.on(Nui.focus_of(n)))), n)
+
+# keys that reach the app while a composition shows are not the app's:
+# Enter does not send, and the arrows, Tab and Escape do nothing (Escape
+# ends the composition)
+def Imx.eats(+code: U32) -> Bool:
+  Bool.or(Bool.or(Bool.or(U32.is_eq(code, Key.enter()), U32.is_eq(code, Key.kp_enter())), Bool.or(U32.is_eq(code, Key.up()), U32.is_eq(code, Key.down()))),
+    Bool.or(U32.is_eq(code, Key.tab()), U32.is_eq(code, Key.escape())))
+
+def Imx.key.k(eats: Bool, +n: Nui, +code: U32, +text: U32, +mods: U32) -> Step:
+  match eats:
+    case True{}:
+      Step{Bool.pick(Nui, U32.is_eq(code, Key.escape()), Imx.drop(n), n), Nil{}, True{}}
+    case False{}:
+      Hint.key(Hint.down(Hint.get(n), code, mods), n, code, text, mods)
+
+def Imx.key(live: Bool, +n: Nui, +code: U32, +text: U32, +mods: U32) -> Step:
+  match live:
+    case True{}:
+      Imx.key.k(Imx.eats(code), n, code, text, mods)
+    case False{}:
+      Hint.key(Hint.down(Hint.get(n), code, mods), n, code, text, mods)
+
 # one window event
 def Nui.event(+n: Nui, e: W.WinEv) -> Step:
   match e:
     case W.WKey{+code, text, +mods, True{}, _}:
-      Hint.key(Hint.down(Hint.get(n), code, mods), n, code, text, mods)
+      Imx.key(Imx.live(n), n, code, text, mods)
     case W.WKey{+code, _, _, False{}, _}:
       Hint.up(code, n)
     case W.WBlur{}:
-      Hint.blur(n)
+      Hint.blur(Imx.drop(n))
     case W.WFocus{}:
       Nui.focused(n)
+    case W.WCommit{_, t}:
+      Imx.commit(n, t)
+    case W.WPreedit{+first, +len, _, t, f, +caret, only}:
+      Imx.draw(n, first, len, t, f, caret, only)
+    case W.WPreCaret{+pos}:
+      Imx.caret(n, pos)
+    case W.WPreStart{}:
+      Step{Imx.drop(n), Nil{}, False{}}
+    case W.WPreEnd{}:
+      Imx.end(n)
+    case W.WJunk{}:
+      Step{n, Nil{}, False{}}
     case W.WButton{+x, +y, 1, True{}}:
       Nui.press(Nui.in_viewer(n, x), Menu.press(Hit.find(Nui.hits(n), x, y), n), x, y)
     case W.WButton{+x, +y, 1, False{}}:

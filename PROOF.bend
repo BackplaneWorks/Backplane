@@ -1,6 +1,18 @@
 import Base
+import ./src/server/server.bend as MPCREDIT # mail perf
+import ./src/core/charter.bend as CH # mail 2c
+import ./src/core/mailrun.bend as MRUN # mail 2c
+import ./src/server/mailstore.bend as MIX # mail index
+import ./src/app/mm.bend as MM # window memos
+import ./src/core/kexport.bend as KEX
+import ./src/core/i18n.bend as I18
+import ./test/fixtures/i18n_fallback.bend as I18F
 import ./src/core/mail.bend as ML # mail 1
+import ./src/core/mailbody.bend as MB # mail 2a
+import ./src/core/mailview.bend as MVW # mail view
+import ./src/core/ref.bend as MREF # mail 2b
 import ./src/core/stamp.bend as STP
+import ./src/core/kihealth.bend as KH
 import ./src/core/tz.bend as TZ
 import ./src/core/when.bend as WH
 import ./src/core/sched.bend as SCH
@@ -16,10 +28,12 @@ import ./src/core/board.bend as B
 import ./src/core/semver.bend as SV
 import ./src/app/nui.bend as N
 import ./src/core/hub.bend as H
+import ./src/core/ship.bend as SHP # deploy main
 import ./src/core/refs.bend as RF
 import ./src/core/todo.bend as TD
 import ./src/core/acp.bend as AC
 import ./src/core/mcp.bend as MC
+import ./src/core/ride.bend as RD
 import ./src/core/handoff.bend as HD
 import ./src/core/agent.bend as AG
 import ./src/core/fuzzy.bend as FZ
@@ -657,19 +671,75 @@ def Laws.deliver_held_steer(b1, b2, th, id, now):
     case False{} False{}:
       {==}
 
+def Laws.deliver_held_restart(b1, b2, b3, th, id, now, v, r):
+  match b1 b2 b3:
+    case True{} True{} True{}:
+      {==}
+    case True{} True{} False{}:
+      {==}
+    case True{} False{} True{}:
+      {==}
+    case True{} False{} False{}:
+      {==}
+    case False{} True{} True{}:
+      {==}
+    case False{} True{} False{}:
+      {==}
+    case False{} False{} True{}:
+      {==}
+    case False{} False{} False{}:
+      {==}
+
+# a running non-Claude turn: the message rides (nothing held), or, with an
+# older log's queue, the turn restarts (Laws.deliver_held_restart)
+law ride_held_k:
+  for q: Bool
+  for +s: M.State
+  for +now: Nat
+  for +th: String
+  for +msg: String
+  for role: M.Role
+  for +text: String
+  {H.Deliver.held(H.Queue.changes(H.Hub.deliver.ride(q, s, now, th, msg, role, text))) == False{} : Bool}
+
+def ride_held_k(q, s, now, th, msg, role, text):
+  match q:
+    case True{}:
+      {==}
+    case False{}:
+      Laws.deliver_held_restart(String.is_empty(M.Queue.of(s, th)), String.eq(H.Hub.provider(H.Hub.thread(s, th)), "claude"), String.is_empty(H.Ride.of(s, th)), th, H.Hub.id("s", now, H.Hub.seq(s)), now, H.Ride.of(s, th), "with the steer")
+
+# an idle thread: the turn starts, with whatever rode (nothing held)
+law ride_post_held:
+  for e: Bool
+  for +s: M.State
+  for +now: Nat
+  for +th: String
+  for +msg: String
+  for role: M.Role
+  for +text: String
+  {H.Deliver.held(H.Queue.changes(H.Ride.post(e, s, now, th, msg, role, text))) == False{} : Bool}
+
+def ride_post_held(e, s, now, th, msg, role, text):
+  match e:
+    case True{}:
+      Laws.deliver_held_go(String.is_empty(M.Queue.of(s, th)), th, now)
+    case False{}:
+      Laws.deliver_held_go(String.is_empty(M.Queue.join(M.Queue.of(s, th), RD.Ride.input(H.Ride.of(s, th)))), th, now)
+
 def Laws.deliver_held_steer_k(c, s, now, th, msg, role, text):
   match c:
     case True{}:
       Laws.deliver_held_go(String.is_empty(M.Queue.of(s, th)), th, now)
     case False{}:
-      Laws.deliver_held_steer(String.is_empty(M.Queue.of(s, th)), String.eq(H.Hub.provider(H.Hub.thread(s, th)), "claude"), th, H.Hub.id("s", now, H.Hub.seq(s)), now)
+      ride_held_k(String.is_empty(M.Queue.of(s, th)), s, now, th, msg, role, text)
 
 def Laws.deliver_never_waits(run, s, now, th, msg, role, text):
   match run:
     case True{}:
       Laws.deliver_held_steer_k(String.eq(H.Hub.provider(H.Hub.thread(s, th)), "claude"), s, now, th, msg, role, text)
     case False{}:
-      Laws.deliver_held_go(String.is_empty(M.Queue.of(s, th)), th, now)
+      ride_post_held(String.is_empty(H.Ride.of(s, th)), s, now, th, msg, role, text)
 
 def Laws.deliver_claude_running():
   {==}
@@ -3227,10 +3297,10 @@ def tl_entries_roles(ty, es, rs, st, sel, px, pics, sp):
     case +e <> +t:
       match rs:
         case Nil{}:
-          Equal.cong(List<&2, L.TLine>, List<&2, L.TLine>, x => List.append(&2, L.TLine, L.TL.entry(ty, e, st, sel, px, pics, sp), x),
+          Equal.cong(List<&2, L.TLine>, List<&2, L.TLine>, x => List.append(&2, L.TLine, L.TL.entry.bound(e, L.TL.entry(ty, e, st, sel, px, pics, sp)), x),
             L.TL.entries.mr(ty, L.TL.memo.make(ty, t, px, sel), Nil{}, st, sel, px, pics, sp), L.TL.entries.r(ty, t, Nil{}, st, sel, px, pics, sp), tl_entries_roles(ty, t, Nil{}, st, sel, px, pics, sp))
         case +r <> +rt:
-          Equal.cong(List<&2, L.TLine>, List<&2, L.TLine>, x => List.append(&2, L.TLine, L.TL.mark(String.eq(M.Idx.id(e), U.Str.get(pics, "hist.jump")), L.TL.role(r, ty, L.TL.entry(ty, e, st, sel, px, pics, sp), px)), x),
+          Equal.cong(List<&2, L.TLine>, List<&2, L.TLine>, x => List.append(&2, L.TLine, L.TL.entry.bound(e, L.TL.mark(String.eq(M.Idx.id(e), U.Str.get(pics, "hist.jump")), L.TL.role(r, ty, L.TL.entry(ty, e, st, sel, px, pics, sp), px))), x),
             L.TL.entries.mr(ty, L.TL.memo.make(ty, t, px, sel), rt, st, sel, px, pics, sp), L.TL.entries.r(ty, t, rt, st, sel, px, pics, sp), tl_entries_roles(ty, t, rt, st, sel, px, pics, sp))
 
 def tl_entries_memo(ty, es, st, sel, px, pics):
@@ -4414,6 +4484,12 @@ def Laws.ui_seq_log_counts_unknown():
   {==}
 
 def Laws.reset_keeps_viewer():
+  {==}
+
+def Laws.reset_keeps_card():
+  {==}
+
+def Laws.reset_asks_card_again():
   {==}
 
 def Laws.reset_keeps_hand():
@@ -9348,10 +9424,10 @@ def Laws.teach_recording_not_early():
 def Laws.teach_draft_secret_no_value():
   {==}
 
-def Laws.mobile_browser_ask_card(a, d, nf):
+def Laws.mobile_browser_ask_card(lc, st, a, d, nf):
   {==}
 
-def Laws.mobile_other_ask_standard(a, d, nf):
+def Laws.mobile_other_ask_standard(lc, st, a, d, nf):
   {==}
 
 def Laws.mobile_browser_card_only_browser(t, rest):
@@ -10370,3 +10446,1556 @@ def Laws.omp_yolo_only_full():
   {==}
 
 # ---- end omp ----
+# ---- links (ref) ----
+
+def Laws.ref_uri_parse_thread():
+  {==}
+
+def Laws.ref_uri_parse_bot():
+  {==}
+
+def Laws.ref_uri_parse_room():
+  {==}
+
+def Laws.ref_uri_parse_person():
+  {==}
+
+def Laws.ref_uri_parse_project():
+  {==}
+
+def Laws.ref_uri_parse_routine():
+  {==}
+
+def Laws.ref_uri_parse_task():
+  {==}
+
+def Laws.ref_uri_parse_pr():
+  {==}
+
+def Laws.ref_uri_parse_work():
+  {==}
+
+def Laws.ref_uri_parse_file():
+  {==}
+
+def Laws.ref_uri_parse_machine():
+  {==}
+
+def Laws.ref_uri_parse_conv():
+  {==}
+
+def Laws.ref_uri_parse_mail():
+  {==}
+
+def Laws.ref_uri_parse_mailroom():
+  {==}
+
+def Laws.ref_uri_parse_decision():
+  {==}
+
+def Laws.ref_uri_parse_charter():
+  {==}
+
+def Laws.ref_web_parse():
+  {==}
+
+def Laws.ref_web_parse_slash():
+  {==}
+
+def Laws.ref_addr_roundtrip_thread():
+  {==}
+
+def Laws.ref_addr_roundtrip_bot():
+  {==}
+
+def Laws.ref_addr_roundtrip_room():
+  {==}
+
+def Laws.ref_addr_roundtrip_person():
+  {==}
+
+def Laws.ref_addr_roundtrip_mail():
+  {==}
+
+def Laws.ref_addr_roundtrip_conv():
+  {==}
+
+def Laws.ref_thread_addr(id):
+  {==}
+
+def Laws.ref_pct_safe():
+  {==}
+
+def Laws.ref_pct_bytes():
+  {==}
+
+def Laws.ref_pct_three():
+  {==}
+
+def Laws.ref_pct_four():
+  {==}
+
+def Laws.ref_pct_encoding():
+  {==}
+
+def Laws.ref_pct_malformed():
+  {==}
+
+def Laws.ref_unknown_kind():
+  {==}
+
+def Laws.ref_no_script(s):
+  {==}
+
+def Laws.ref_legacy_open():
+  {==}
+
+def Laws.ref_bare_thread():
+  {==}
+
+def Laws.ref_bare_bot():
+  {==}
+
+def Laws.ref_bare_task():
+  {==}
+
+def Laws.ref_bare_project():
+  {==}
+
+def Laws.ref_bare_room():
+  {==}
+
+def Laws.ref_bare_routine():
+  {==}
+
+def Laws.ref_bare_remote():
+  {==}
+
+def Laws.ref_bare_not_short():
+  {==}
+
+def Laws.ref_bare_not_word():
+  {==}
+
+def Laws.ref_bare_not_incomplete():
+  {==}
+
+def Laws.ref_bare_not_unknown():
+  {==}
+
+def Laws.link_ref_uri():
+  {==}
+
+def Laws.link_ref_bare():
+  {==}
+
+def Laws.link_ref_md():
+  {==}
+
+def Laws.link_ref_plain_unchanged():
+  {==}
+
+# ---- i18n ----
+
+law i18n_ago_same_k:
+  for m: Bool
+  for h: Bool
+  for d: Bool
+  for +s: Nat
+  {I18.I18n.ago.en(m, h, d, s) == M.Time.ago.k(m, h, d, s) : String}
+
+def i18n_ago_same_k(m, h, d, s):
+  match m h d:
+    case True{} _ _: {==}
+    case False{} True{} _: {==}
+    case False{} False{} True{}: {==}
+    case False{} False{} False{}: {==}
+
+law i18n_took_same_k:
+  for m: Bool
+  for h: Bool
+  for +s: Nat
+  {I18.I18n.took.en(m, h, s) == M.Time.took.k(m, h, s) : String}
+
+def i18n_took_same_k(m, h, s):
+  match m h:
+    case True{} _: {==}
+    case False{} True{}: {==}
+    case False{} False{}: {==}
+
+def Laws.i18n_plural_ja_other(n):
+  {==}
+
+def Laws.i18n_plural_en_one():
+  {==}
+
+def Laws.i18n_plural_en_zero():
+  {==}
+
+def Laws.i18n_plural_en_many(k):
+  {==}
+
+def Laws.i18n_resolve_override_en(os):
+  {==}
+
+def Laws.i18n_resolve_override_ja(os):
+  {==}
+
+def Laws.i18n_resolve_auto(os):
+  {==}
+
+def Laws.i18n_of_tag_posix():
+  {==}
+
+def Laws.i18n_of_tag_c():
+  {==}
+
+def Laws.i18n_of_tag_empty():
+  {==}
+
+def Laws.i18n_of_tag_bcp():
+  {==}
+
+def Laws.i18n_ago_en_same(now, at):
+  i18n_ago_same_k(Nat.is_lt(Nat.sub(now, at), 60n), Nat.is_lt(Nat.sub(now, at), 3600n), Nat.is_lt(Nat.sub(now, at), 86400n), Nat.sub(now, at))
+
+def Laws.i18n_took_en_same(s):
+  i18n_took_same_k(Nat.is_lt(s, 60n), Nat.is_lt(s, 3600n), s)
+
+
+def Laws.i18n_fallback_fixture_save():
+  {==}
+
+def Laws.i18n_fallback_fixture_plural(n):
+  {==}
+# ---- end i18n ----
+# ---- usage-screen ----
+def Laws.usage_tail_na():
+  {==}
+
+def Laws.usage_tail_claude_waits():
+  {==}
+
+def Laws.usage_tail_reading(p, t):
+  {==}
+
+def Laws.usage_note_held():
+  {==}
+
+def Laws.usage_note_no_window():
+  {==}
+
+def Laws.usage_pct_no_window(u):
+  {==}
+
+def Laws.usage_boat_due_never_read(now):
+  {==}
+
+def Laws.usage_boat_usd_exact():
+  {==}
+
+# ---- links (cards, trail) ----
+def Laws.cards_get_fresh():
+  {==}
+
+def Laws.cards_get_fresh_settle():
+  {==}
+
+def Laws.cards_get_fresh_start():
+  {==}
+
+def Laws.cards_get_fresh_end():
+  {==}
+
+def Laws.cards_get_fresh_delete():
+  {==}
+
+def Laws.cards_get_fresh_project():
+  {==}
+
+def Laws.cards_peek_after_get():
+  {==}
+
+def Laws.cards_drop_other_kept():
+  {==}
+
+def Laws.trail_cap():
+  {==}
+
+def Laws.card_file_kind_shared():
+  {==}
+
+def Laws.trail_go_back(bs, fs):
+  {==}
+
+def Laws.trail_back_fwd(bs, b, c, fs):
+  {==}
+
+def Laws.trail_go_same(bs, fs):
+  {==}
+
+def Laws.trail_go_clears_fwd(bs, fs):
+  {==}
+
+def Laws.card_thread_no_timeline(es):
+  {==}
+
+def Laws.card_github_pr_no_state(st):
+  {==}
+
+def Laws.card_person_no_state(st):
+  {==}
+# ---- i18n cjk ----
+def Laws.cjk_segs_lossless():
+  {==}
+
+def Laws.cjk_segs_lossless_mixed():
+  {==}
+
+def Laws.cjk_segs_lossless_spaces():
+  {==}
+
+def Laws.cjk_segs_lossless_empty():
+  {==}
+
+def Laws.cjk_no_start_stop():
+  {==}
+
+def Laws.cjk_no_end_quote():
+  {==}
+
+def Laws.cjk_kana_break():
+  {==}
+
+def Laws.cjk_ascii_no_break():
+  {==}
+
+def Laws.cjk_terminal_cells():
+  {==}
+
+def Laws.cjk_terminal_combining_cells():
+  {==}
+
+# ---- end i18n cjk ----
+
+# ---- usage-tokens ----
+def Laws.tok_claude_seen_nothing():
+  {==}
+
+def Laws.tok_rise_rose():
+  {==}
+
+def Laws.tok_rise_restarted():
+  {==}
+
+def Laws.tok_codex_restart_whole(was, i, v):
+  {==}
+
+def Laws.tok_add_one_turn():
+  {==}
+
+def Laws.tok_add_no_cost():
+  {==}
+
+def Laws.card_task_status_agrees():
+  {==}
+
+# ---- mail 2a ----
+
+# Reversing onto a suffix is exactly reverse followed by append. The
+# implementation may therefore emit its final newline without Base's ++.
+def MailProof.reverse_suffix(+s: String, +acc: String, +rest: String) -> {String.reverse.go(s, acc ++ rest) == String.reverse.go(s, acc) ++ rest : String}:
+  match s:
+    case SNil{}: {==}
+    case SCon{h, t}: MailProof.reverse_suffix(t, SCon{h, acc}, rest)
+
+def Laws.body_line_terminated(b):
+  MailProof.reverse_suffix(J.Json.emit.rev(MB.Body.encode(b), True{}, SNil{}), "", "\n")
+
+def Laws.body_header_omits_text(c, m, a, b):
+  {==}
+
+def Laws.recover_seen_empty(b, box, seen):
+  %Equal.sym(Bool, ML.Box.has(box, ML.Mail.id(MB.Body.mail(b))), True{}, seen) : {MB.Body.recover.guard(_, b, box) == Nil{} : List<&2, M.Change>}
+  {==}
+
+def Laws.recover_missing_header(c, m, text):
+  {==}
+
+def Laws.body_path_encoded_segment(home, conv):
+  {==}
+
+# ---- usage-boat-cap ----
+def Laws.usage_boat_no_cap_nothing():
+  {==}
+# ---- agent failures: stderr ----
+def Laws.errtail_scrub_token():
+  {==}
+
+def Laws.errtail_scrub_words():
+  {==}
+
+def Laws.errtail_say_exit():
+  {==}
+
+def Laws.errtail_say_signal():
+  {==}
+# ---- end agent failures: stderr ----
+# ---- agent failures: the login keyring ----
+def Laws.keyring_locked_never_starts():
+  {==}
+
+def Laws.keyring_unknown_or_open_starts():
+  {==}
+
+def Laws.keyring_answers():
+  {==}
+
+def Laws.keyring_hint_only_locked():
+  {==}
+# ---- end agent failures: the login keyring ----
+# ---- riding mail ----
+def Laws.ride_running_no_restart():
+  {==}
+
+def Laws.ride_posted_at_once():
+  {==}
+
+def Laws.ride_kept():
+  {==}
+
+def Laws.ride_carries_block():
+  {==}
+
+def Laws.ride_taken_empties():
+  {==}
+
+def Laws.ride_nothing_waiting_same(o, s, now, th, h):
+  %Equal.sym(String, H.Ride.of(s, th), "", h) : {BHS.Ride.mcp.k(Bool.and(Bool.not(String.is_empty(_)), H.Hub.running(H.Hub.thread(s, th))), o, s, now, th) == o : MC.McpOut}
+  {==}
+
+def Laws.ride_turn_end_starts():
+  {==}
+
+def Laws.ride_interrupted_starts():
+  {==}
+
+def Laws.ride_turn_end_empties():
+  {==}
+
+def Laws.ride_after_running_same(s, now, th, os):
+  {==}
+
+# ---- end riding mail ----
+# ---- resume after a restart ----
+def Laws.resume_turn_process_stopped():
+  {==}
+
+def Laws.resume_turn_process_not_kept():
+  {==}
+
+def Laws.resume_carry_tells_cut():
+  {==}
+# ---- end resume after a restart ----
+# ---- deploy waits for MCP calls ----
+def Laws.deploy_mcp_call_waits():
+  {==}
+
+def Laws.deploy_mcp_answered_goes():
+  {==}
+
+def Laws.deploy_mcp_own_call_not_counted():
+  {==}
+
+def Laws.deploy_mcp_outlives_turn_end():
+  {==}
+# ---- end deploy waits for MCP calls ----
+# ---- i18n ime ----
+
+def Laws.ime_preedit_not_in_draft():
+  {==}
+
+def Laws.ime_shown_at_caret():
+  {==}
+
+def Laws.ime_range_replace_chars():
+  {==}
+
+def Laws.ime_delete_range():
+  {==}
+
+def Laws.ime_wide_counts_once():
+  {==}
+
+def Laws.ime_clear_is_off():
+  {==}
+
+def Laws.ime_focus_change_drops():
+  {==}
+
+def Laws.ime_owner_keeps():
+  {==}
+
+def Laws.ime_other_owner_never_merges():
+  {==}
+
+def Laws.ime_unknown_event_not_quit():
+  {==}
+
+def Laws.ime_unknown_event_is_junk():
+  {==}
+
+def Laws.ime_quit_is_quit():
+  {==}
+
+def Laws.ime_commit_event_id():
+  {==}
+
+# ---- end i18n ime ----
+
+# ---- ordering ----
+
+def Laws.order_buy_needs_parts():
+  {==}
+
+def Laws.order_buy_priced():
+  {==}
+
+def Laws.order_buy_unreachable_hidden():
+  {==}
+
+def Laws.order_buy_estimates_off():
+  {==}
+
+def Laws.intent_edit_round_trip():
+  {==}
+
+def Laws.intent_edit_is_intent():
+  {==}
+
+def Laws.order_tools_buy_only():
+  {==}
+
+def Laws.order_ready_names():
+  {==}
+
+def Laws.order_ready_board():
+  {==}
+
+def Laws.order_ready_nothing():
+  {==}
+
+def Laws.fab_ready_running_hidden(line):
+  {==}
+
+def Laws.fab_ready_needs_buy(line):
+  {==}
+
+def Laws.order_review_none():
+  {==}
+
+def Laws.order_review_current():
+  {==}
+
+def Laws.order_review_stale():
+  {==}
+
+def Laws.order_review_verdict_closed():
+  {==}
+
+def Laws.bd_name_folder():
+  {==}
+
+def Laws.bd_name_root():
+  {==}
+
+def Laws.bd_schematic_beside():
+  {==}
+
+def Laws.bd_board_itself():
+  {==}
+
+def Laws.bd_on_sheet():
+  {==}
+
+def Laws.bd_off_other():
+  {==}
+
+def Laws.bd_keep_schematic():
+  {==}
+
+def Laws.bd_keep_none(kind):
+  {==}
+
+def Laws.bd_shown_default():
+  {==}
+
+def Laws.bd_shown_picked(root, own):
+  {==}
+
+def Laws.buy_title_first(t):
+  {==}
+
+def Laws.buy_title_second():
+  {==}
+
+def Laws.order_ordered_paid():
+  {==}
+
+def Laws.order_ordered_quote_only(line):
+  {==}
+
+def Laws.fab_buy_again():
+  {==}
+
+def Laws.fab_buy_again_off():
+  {==}
+
+def Laws.fab_min_key():
+  {==}
+
+def Laws.fab_min_hides_bar(line):
+  {==}
+
+def Laws.fab_min_keeps_bar(line):
+  {==}
+
+def Laws.fab_min_header():
+  {==}
+
+def Laws.fab_min_header_shown_bar(line):
+  {==}
+
+def Laws.fab_min_header_nothing():
+  {==}
+
+def Laws.fab_min_header_ordered():
+  {==}
+
+def Laws.buy_server_default():
+  {==}
+
+def Laws.buy_server_set():
+  {==}
+
+def Laws.order_note_shipped():
+  {==}
+
+def Laws.order_note_expired(t):
+  {==}
+
+def Laws.order_state_cancelled(q):
+  {==}
+
+def Laws.order_state_paid():
+  {==}
+
+def Laws.fab_buy_off_hidden(label):
+  {==}
+
+def Laws.order_off_no_tools(buy):
+  {==}
+
+def Laws.order_off_by_default():
+  {==}
+
+def Laws.order_review_issues_kept():
+  {==}
+
+def Laws.order_review_issues_at_most():
+  {==}
+
+def Laws.order_ask_survives_retire():
+  {==}
+
+def Laws.order_approval_retired():
+  {==}
+
+def Laws.order_gate_passed():
+  {==}
+
+def Laws.order_gate_stale(v):
+  {==}
+
+def Laws.order_gate_none(v):
+  {==}
+
+def Laws.order_gate_issues():
+  {==}
+
+def Laws.order_pilot_paid():
+  {==}
+
+def Laws.order_pilot_off(st):
+  {==}
+
+def Laws.order_pilot_done():
+  {==}
+
+def Laws.order_pilot_said():
+  {==}
+
+def Laws.order_pilot_quiet():
+  {==}
+
+def Laws.order_gate_lists_issues():
+  {==}
+
+def Laws.order_gate_cuts_summary():
+  {==}
+
+def Laws.order_ask_alert_plain(q):
+  {==}
+
+def Laws.tool_summary_question():
+  {==}
+
+def Laws.order_off_says_where():
+  {==}
+
+def Laws.order_buy_board_only():
+  {==}
+
+def Laws.order_buy_board_unreachable():
+  {==}
+
+# ---- i18n lang ----
+def Laws.lang_default_auto():
+  {==}
+def Laws.lang_default_unknown():
+  {==}
+def Laws.lang_gate(os):
+  {==}
+def Laws.lang_gate_preview(os):
+  {==}
+def Laws.lang_auto_preview():
+  {==}
+def Laws.lang_override_en(os, p):
+  {==}
+def Laws.prompt_lang_off():
+  {==}
+def Laws.prompt_lang_unknown():
+  {==}
+# ---- end i18n lang ----
+
+# ---- mail view ----
+def Laws.mv_visible_bounds(total, scroll, view):
+  Laws.menu_scroll_in_list(MVW.Mv.first_raw(scroll), total, MVW.Mv.count(total, scroll, view), le_ge(MVW.Mv.count(total, scroll, view), total, min_le_k(Nat.is_le(MVW.Mv.want(scroll, view), total), MVW.Mv.want(scroll, view), total, {==})))
+
+def Laws.mv_merge_no_dup():
+  {==}
+
+def Laws.mv_rows_stable():
+  {==}
+
+def Laws.mv_filter_key_separates():
+  {==}
+
+# ---- end mail view ----
+
+# ---- usage-baseline ----
+def Laws.tok_cost_unknown_without_start():
+  {==}
+
+def Laws.tok_cost_known_at_start(b):
+  {==}
+
+def Laws.tok_codex_start_zero():
+  {==}
+
+def Laws.tok_epoch_once():
+  {==}
+
+def Laws.tok_pre_epoch():
+  {==}
+# ---- mail index ----
+def Laws.mail_index_wrong_position():
+  {==}
+
+def Laws.mail_index_forward_chain_rejected():
+  {==}
+
+def Laws.mail_index_overflow_rejected():
+  {==}
+
+def Laws.mail_index_hash_empty(h):
+  {==}
+# ---- end mail index ----
+# ---- scroll-stable: reading while a thread grows ----
+def Laws.hold_at_end_zero():
+  {==}
+
+def Laws.hold_label_nothing():
+  {==}
+
+def Laws.hold_fresh_seen(e, t, n):
+  %Equal.sym(Bool, String.eq(M.Idx.id(e), M.Idx.id(e)), True{}, Laws.string_eq_refl(M.Idx.id(e))) : {U.Hold.fresh(e <> t, Bool.or(_, Nat.is_ge(n, U.Hold.most())), M.Idx.id(e), n) == n : Nat}
+  {==}
+
+def Laws.hold_off_still(off, t0, t1, over, h):
+  %Equal.sym(Bool, Nat.is_le(Nat.sub(Nat.add(off, t1), t0), over), True{}, h) : {Bool.pick(Nat, _, Nat.sub(Nat.add(off, t1), t0), over) == Nat.sub(Nat.add(off, t1), t0) : Nat}
+  {==}
+
+def Laws.hold_end_follows(hold, off, top, over):
+  {==}
+# ---- end scroll-stable ----
+
+def Laws.hold_boundary_zero():
+  {==}
+
+def Laws.hold_entry_moves(off, y0, y1, t0, t1, over, h):
+  Laws.hold_off_still(Nat.add(Nat.sub(off, y0), y1), t0, t1, over, h)
+
+def Laws.hold_page_free(es, base):
+  {==}
+
+# ---- usage-claude-resume ----
+def Laws.tok_claude_start_zero():
+  {==}
+
+def Laws.tok_claude_same_session_keeps(s):
+  {==}
+
+def Laws.tok_recount_once():
+  {==}
+
+# ---- usage-boat-chip ----
+def Laws.chip_none(now):
+  {==}
+
+def Laws.chip_running():
+  {==}
+
+def Laws.chip_warm_gone():
+  {==}
+
+def Laws.chip_warm_not_stale(gen, now):
+  {==}
+
+# ---- deploy main ----
+def Laws.ship_covered_never_builds(c, cs, busy):
+  match busy:
+    case True{}:
+      {==}
+    case False{}:
+      {==}
+
+def Laws.ship_busy_never_builds(cover):
+  {==}
+
+def Laws.ship_building_is_busy():
+  {==}
+
+def Laws.ship_coalesce_at_most_one(sh, state, commit):
+  match sh:
+    case SHP.Ship{p, c, s, l, j, a, n, m}:
+      match m:
+        case True{}:
+          {==}
+        case False{}:
+          {==}
+
+def Laws.ship_coalesce_three():
+  {==}
+
+def Laws.ship_coalesce_askers():
+  {==}
+
+def Laws.ship_told_each_once():
+  {==}
+
+def Laws.ship_told_cleared():
+  {==}
+
+def Laws.ship_told_next_cleared(sh, state, commit):
+  match sh:
+    case SHP.Ship{p, c, s, l, j, a, n, m}:
+      match m:
+        case True{}:
+          {==}
+        case False{}:
+          {==}
+
+def Laws.ship_covered_joins_build():
+  {==}
+
+def Laws.ship_follow_off_default():
+  {==}
+
+def Laws.ship_gone_not_ok():
+  {==}
+# ---- end deploy main ----
+# ---- kicad-ipc ----
+def Laws.kicad_status_missing(r, f, v, a):
+  {==}
+
+def Laws.kicad_status_broken(f, v, a):
+  {==}
+
+def Laws.kicad_status_stock(v, a):
+  {==}
+
+def Laws.kicad_notice_ok_none(c, v, w, i):
+  {==}
+
+def Laws.kicad_notice_checking_none(c, v, w, i):
+  {==}
+
+def Laws.kicad_notice_has_retry_missing(c, v, w, i):
+  {==}
+
+def Laws.kicad_notice_install_iff_missing(c, v, w, i):
+  match i:
+    case True{}: {==}
+    case False{}: {==}
+
+def Laws.kicad_notice_has_retry_stock(c, v, w, i):
+  {==}
+
+def Laws.kicad_notice_install_iff_stock(c, v, w, i):
+  match i:
+    case True{}: {==}
+    case False{}: {==}
+
+def Laws.kicad_notice_has_retry_old(c, v, w, i):
+  {==}
+
+def Laws.kicad_notice_install_iff_old(c, v, w, i):
+  match i:
+    case True{}: {==}
+    case False{}: {==}
+
+def Laws.kicad_notice_has_retry_broken(c, v, w, i):
+  {==}
+
+def Laws.kicad_notice_install_iff_broken(c, v, w, i):
+  match i:
+    case True{}: {==}
+    case False{}: {==}
+
+def Laws.prompt_kicad_ipc_only_ok_missing(i):
+  match i:
+    case True{}: {==}
+    case False{}: {==}
+
+def Laws.prompt_kicad_ipc_only_ok_stock(i):
+  match i:
+    case True{}: {==}
+    case False{}: {==}
+
+def Laws.prompt_kicad_ipc_only_ok_old(i):
+  match i:
+    case True{}: {==}
+    case False{}: {==}
+
+def Laws.prompt_kicad_ipc_only_ok_broken(i):
+  match i:
+    case True{}: {==}
+    case False{}: {==}
+
+def Laws.prompt_kicad_ipc_only_ok_checking(i):
+  match i:
+    case True{}: {==}
+    case False{}: {==}
+
+def Laws.mm_late_misses(key, ms, now, h):
+  %Equal.sym(Bool, Nat.is_ge(now, MM.MainM.due(ms)), True{}, h) : {MM.Mm.use.k(_, MM.MainM.same(key, ms)) == False{} : Bool}
+  {==}
+# ---- mail 2b ----
+law MailProof.append_nil:
+  for +cs: List<&2, M.Change>
+  {List.append(&2, M.Change, cs, Nil{}) == cs : List<&2, M.Change>}
+
+def MailProof.append_nil(cs):
+  match cs:
+    case Nil{}: {==}
+    case h <> t:
+      %MailProof.append_nil(t) : {h <> List.append(&2, M.Change, t, Nil{}) == h <> _ : List<&2, M.Change>}
+      {==}
+
+law MailProof.keeps:
+  for on: Bool
+  for +st: H.Step
+  for s: M.State
+  for now: Nat
+  for o: ML.Origin
+  for to: String
+  for text: String
+  for msg: String
+  {H.Queue.changes(H.Mail.tee.on(on, st, s, now, o, to, text, msg)) == H.Queue.changes(st) : List<&2, M.Change>}
+
+def MailProof.keeps(on, st, s, now, o, to, text, msg):
+  match on st:
+    case False{} _: {==}
+    case True{} H.Step{cs, os}: MailProof.append_nil(cs)
+
+law MailProof.pending_one:
+  for missing: Bool
+  for c: ML.Conv
+  for m: ML.Mail
+  for text: String
+  {H.Mail.pending.count(H.Mail.pending(missing, MB.Body{c, m, text})) == 1n : Nat}
+
+def MailProof.pending_one(missing, c, m, text):
+  match missing c m:
+    case True{} ML.Conv{_, _, _, _, _, _, _, _, _} ML.Mail{_, _, _, _, _, _, _, _, _, _}: {==}
+    case False{} _ ML.Mail{_, _, _, _, _, _, _, _, _, _}: {==}
+
+def Laws.mail_off_unchanged(st, s, now, o, to, text, msg, off):
+  %Equal.sym(String, M.Setting.get(s, "mail.on", "off"), "off", off) : {H.Mail.tee.on(Bool.and(String.eq(_, "on"), Bool.not(String.eq(ML.Origin.kind(o), "person"))), st, s, now, o, to, text, msg) == st : H.Step}
+  {==}
+
+def Laws.mail_file_never_waits(s, now, o, to, text, msg):
+  {==}
+
+def Laws.mail_tee_keeps_delivery(st, s, now, o, to, text, msg):
+  MailProof.keeps(Bool.and(String.eq(M.Setting.get(s, "mail.on", "off"), "on"), Bool.not(String.eq(ML.Origin.kind(o), "person"))), st, s, now, o, to, text, msg)
+
+law MailProof.pending_route:
+  for missing: Bool
+  for c: ML.Conv
+  for +m: ML.Mail
+  for text: String
+  {H.Mail.pending.conv(H.Mail.pending(missing, MB.Body{c, m, text})) == ML.Mail.conv(m) : String}
+
+def MailProof.pending_route(missing, c, m, text):
+  match missing c m:
+    case True{} ML.Conv{_, _, _, _, _, _, _, _, _} ML.Mail{_, _, _, _, _, _, _, _, _, _}: {==}
+    case False{} _ ML.Mail{_, _, _, _, _, _, _, _, _, _}: {==}
+
+def Laws.mail_file_one_conv(s, now, o, to, text, msg):
+  +body = H.Mail.body(s, now, o, to, text, msg, ML.Mail.route(o, to), H.Mail.subject(String.eq(ML.Origin.kind(o), "launch"), s, o, to), "")
+  +missing = String.is_empty(ML.Conv.id(ML.Box.conv(M.State.mail(s), ML.Mail.conv(MB.Body.mail(body)))))
+  Equal.trans(String, H.Mail.pending.conv(H.Mail.pending(missing, body)), ML.Mail.conv(MB.Body.mail(body)), ML.Mail.route(o, to),
+    MailProof.pending_route(missing, MB.Body.conv(body), MB.Body.mail(body), MB.Body.text(body)), {==})
+
+def Laws.mail_room_once(s, now, from, room, text, msg, parts, subject):
+  MailProof.pending_one(String.is_empty(ML.Conv.id(ML.Box.conv(M.State.mail(s), ML.Mail.route(ML.Origin{from, "room", room}, MREF.Ref.addr(MREF.Ref.room(room)))))),
+    ML.Conv{ML.Mail.route(ML.Origin{from, "room", room}, MREF.Ref.addr(MREF.Ref.room(room))), subject, ML.Conv.mail_kind(ML.Mail.route(ML.Origin{from, "room", room}, MREF.Ref.addr(MREF.Ref.room(room))), "room"), parts, "", Nil{}, now, now, 0n},
+    ML.Mail{msg, ML.Mail.route(ML.Origin{from, "room", room}, MREF.Ref.addr(MREF.Ref.room(room))), from, MREF.Ref.addr(MREF.Ref.room(room)), "room", room, "fyi", ML.Mail.head(text), H.Mail.bytes(text, 0n), now}, text)
+# ---- i18n core ui ----
+def Laws.title_shown_ja_new():
+  {==}
+def Laws.title_shown_en_new():
+  {==}
+def Laws.title_shown_other():
+  {==}
+def Laws.tl_entries_locale(ty, es, st, sel, px, pics):
+  %Equal.sym(List<&2, M.Entry>, L.TL.memo.es(L.TL.memo.make(ty, es, px, sel)), es, tl_memo_es(ty, es, px, sel))
+    : {L.TL.entries.mr(ty, L.TL.memo.make(ty, es, px, sel), L.TL.roles.loc(L.Ty.loc(ty), _, st, sel, pics), st, sel, px, pics, L.TL.stamps(_, st, sel, pics)) == L.TL.entries.loc(ty, es, st, sel, px, pics) : List<&2, L.TLine>}
+  tl_entries_roles(ty, es, L.TL.roles.loc(L.Ty.loc(ty), es, st, sel, pics), st, sel, px, pics, L.TL.stamps(es, st, sel, pics))
+# ---- end i18n core ui ----
+# ---- kicad-ipc 2 ----
+def Laws.kserve_argv_parent_pid_with_idle():
+  {==}
+
+def Laws.kserve_argv_parent_pid_without_idle():
+  {==}
+
+def Laws.kserve_argv_socket_in_dir():
+  {==}
+
+def Laws.kserve_argv_idle_with_cap():
+  {==}
+
+def Laws.kserve_argv_no_idle_without_cap():
+  {==}
+
+def Laws.kserve_ready_line():
+  {==}
+
+def Laws.kserve_ready_other_line():
+  {==}
+
+def Laws.kserve_version_ok_exact():
+  {==}
+
+def Laws.kserve_version_ok_describe():
+  {==}
+
+def Laws.kserve_version_other_build():
+  {==}
+
+def Laws.kserve_version_longer_build():
+  {==}
+
+def Laws.kserve_version_not_fork():
+  {==}
+
+def Laws.kserve_retry_first():
+  {==}
+
+def Laws.kserve_retry_second():
+  {==}
+
+def Laws.kserve_retry_third():
+  {==}
+
+def Laws.kserve_retry_gives_up():
+  {==}
+
+def Laws.kserve_retry_old_failures_forgotten():
+  {==}
+
+def Laws.kserve_clean_exit_not_a_failure():
+  {==}
+
+def Laws.kserve_crash_is_a_failure():
+  {==}
+
+def Laws.kserve_clean_exit_stops():
+  {==}
+
+def Laws.kserve_three_crashes_restart():
+  {==}
+
+def Laws.kserve_fourth_crash_fails():
+  {==}
+
+def Laws.kserve_evict_least_recent():
+  {==}
+
+def Laws.kserve_no_evict_with_room():
+  {==}
+
+def Laws.kserve_third_project_evicts():
+  {==}
+
+def Laws.kserve_third_project_busy_without_shutdown():
+  {==}
+
+def Laws.kserve_running_server_is_used():
+  {==}
+
+def Laws.kserve_refused_selection():
+  {==}
+
+def Laws.kserve_refused_view():
+  {==}
+
+def Laws.kserve_refused_run_action():
+  {==}
+
+def Laws.kserve_get_items_allowed():
+  {==}
+
+def Laws.kserve_eighteen_refused():
+  {==}
+
+def Laws.kserve_gate_off():
+  {==}
+
+def Laws.kserve_gate_ok():
+  {==}
+
+def Laws.kserve_unavailable_names_fallback():
+  {==}
+
+def Laws.kicad_min_version():
+  {==}
+
+def Laws.kicad_old_runtime_is_old():
+  {==}
+
+def Laws.kicad_new_runtime_is_ok():
+  {==}
+
+def Laws.prompt_kicad_ok_names_kicad_ipc():
+  {==}
+
+def Laws.prompt_kicad_ok_no_pcbnew_import():
+  {==}
+
+def Laws.prompt_kicad_ok_starts_no_server():
+  {==}
+
+def Laws.prompt_kicad_off_names_fallback():
+  {==}
+
+def Laws.kserve_desc_needs_cap(root): {==}
+def Laws.kserve_desc_with_cap(root): {==}
+
+def Laws.kserve_idle_needs_api2(xs): {==}
+
+# ---- end kicad-ipc 2 ----
+# ---- kicad-ipc 3 ----
+
+def Laws.kexport_no_unmarked_clear(base): {==}
+def Laws.kexport_no_unconsented_force(report): {==}
+def Laws.kexport_block_force(): {==}
+def Laws.kexport_lossy_force(): {==}
+def Laws.kexport_no_outside_clear(): {==}
+
+def Laws.kexport_no_foreign_base(base, marker): {==}
+
+# ---- mail 2c ----
+def Laws.foh_clean(cs):
+  match cs:
+    case Nil{}: {==}
+    case M.ProjectCreated{_, _, _, _} <> +t: Laws.foh_clean(t)
+    case M.ProjectRemoved{_, _} <> +t: Laws.foh_clean(t)
+    case M.ThreadCreated{_, _, _, _, _, _, _, _, _} <> +t: Laws.foh_clean(t)
+    case M.ThreadRenamed{_, _, _} <> +t: Laws.foh_clean(t)
+    case M.MessagePosted{_, _, _, _, _} <> +t: Laws.foh_clean(t)
+    case M.TurnChanged{_, _, _} <> +t: Laws.foh_clean(t)
+    case M.PendingChanged{_, _, _} <> +t: Laws.foh_clean(t)
+    case M.ActivityLogged{_, _, _, _, _, _} <> +t: Laws.foh_clean(t)
+    case M.ThreadSettled{_, _, _} <> +t: Laws.foh_clean(t)
+    case M.ThreadUnsettled{_, _} <> +t: Laws.foh_clean(t)
+    case M.ThreadArchived{_, _, _} <> +t: Laws.foh_clean(t)
+    case M.ThreadPinned{_, _, _} <> +t: Laws.foh_clean(t)
+    case M.ThreadDeleted{_, _} <> +t: Laws.foh_clean(t)
+    case M.WorktreeSet{_, _, _, _} <> +t: Laws.foh_clean(t)
+    case M.SessionSet{_, _, _} <> +t: Laws.foh_clean(t)
+    case M.ModesSet{_, _, _, _, _} <> +t: Laws.foh_clean(t)
+    case M.TaskDelegated{_, _, _, _, _, _, _} <> +t: Laws.foh_clean(t)
+    case M.TaskStateSet{_, _, _, _} <> +t: Laws.foh_clean(t)
+    case M.TaskDelivered{_, _} <> +t: Laws.foh_clean(t)
+    case M.SettingSet{_, _, _} <> +t: Laws.foh_clean(t)
+    case M.TurnQueued{_, _, _, _} <> +t: Laws.foh_clean(t)
+    case M.QueueTaken{_, _} <> +t: Laws.foh_clean(t)
+    case M.AskOpened{_, _, _, _, _, _, _} <> +t: Laws.foh_clean(t)
+    case M.AskClosed{_, _, _} <> +t: Laws.foh_clean(t)
+    case M.DeviceRegistered{_, _, _, _, _, _, _} <> +t: Laws.foh_clean(t)
+    case M.DeviceDropped{_, _} <> +t: Laws.foh_clean(t)
+    case M.ThreadSnoozed{_, _, _} <> +t: Laws.foh_clean(t)
+    case M.ThreadOrdered{_, _, _, _} <> +t: Laws.foh_clean(t)
+    case M.WorktreeSkipped{_, _} <> +t: Laws.foh_clean(t)
+    case M.ThreadMerged{_, _, _} <> +t: Laws.foh_clean(t)
+    case M.WorktreeRemoved{_, _} <> +t: Laws.foh_clean(t)
+    case M.ProjectOrdered{_, _, _} <> +t: Laws.foh_clean(t)
+    case M.QueueEdited{_, _, _, _} <> +t: Laws.foh_clean(t)
+    case M.QueueRemoved{_, _, _} <> +t: Laws.foh_clean(t)
+    case M.QueueMoved{_, _, _, _} <> +t: Laws.foh_clean(t)
+    case M.QueueTakenOne{_, _, _} <> +t: Laws.foh_clean(t)
+    case M.ThreadForked{_, _, _} <> +t: Laws.foh_clean(t)
+    case M.ProviderSet{_, _, _, _} <> +t: Laws.foh_clean(t)
+    case M.TodosSet{_, _, _} <> +t: Laws.foh_clean(t)
+    case M.UsageSet{_, _, _, _} <> +t: Laws.foh_clean(t)
+    case M.BotSet{_, _, _, _, _, _} <> +t: Laws.foh_clean(t)
+    case M.BotDeleted{_, _} <> +t: Laws.foh_clean(t)
+    case M.RoomSet{_, _, _, _} <> +t: Laws.foh_clean(t)
+    case M.RoomDeleted{_, _} <> +t: Laws.foh_clean(t)
+    case M.RoomPosted{_, _, _, _, _, _} <> +t: Laws.foh_clean(t)
+    case M.HookSet{_, _, _, _, _} <> +t: Laws.foh_clean(t)
+    case M.HookHit{_, _} <> +t: Laws.foh_clean(t)
+    case M.RoutineSet{_, _, _, _, _, _, _} <> +t: Laws.foh_clean(t)
+    case M.RoutineDeleted{_, _} <> +t: Laws.foh_clean(t)
+    case M.RoutineFired{_, _} <> +t: Laws.foh_clean(t)
+    case M.MemorySaved{_, _, _, _, _, _} <> +t: Laws.foh_clean(t)
+    case M.MemoryForgot{_, _, _} <> +t: Laws.foh_clean(t)
+    case M.SpaceSet{_, _, _} <> +t: Laws.foh_clean(t)
+    case M.PeerSet{_, _, _, _, _} <> +t: Laws.foh_clean(t)
+    case M.BotWoke{_, _, _} <> +t: Laws.foh_clean(t)
+    case M.SpacePageSet{_, _, _} <> +t: Laws.foh_clean(t)
+    case M.WorkSet{_, _, _, _} <> +t: Laws.foh_clean(t)
+    case M.UberSet{_, _, _} <> +t: Laws.foh_clean(t)
+    case M.UberOp{_, _, _, _, _, _} <> +t: Laws.foh_clean(t)
+    case M.ThreadLaunched{_, _, _, _} <> +t: Laws.foh_clean(t)
+    case M.WakeSet{_, _, _, _, _, _, _, _} <> +t: Laws.foh_clean(t)
+    case M.WakeDropped{_, _} <> +t: Laws.foh_clean(t)
+    case M.LockChanged{_, _, _} <> +t: Laws.foh_clean(t)
+    case M.RoutinePlan{_, _, _, _, _} <> +t: Laws.foh_clean(t)
+    case M.RoutineSlot{_, _, _} <> +t: Laws.foh_clean(t)
+    case M.RoutineDone{_, _} <> +t: Laws.foh_clean(t)
+    case M.Reminded{_, _, _, _, _} <> +t: Laws.foh_clean(t)
+    case M.TaskSet{_, _, _, _} <> +t: Laws.foh_clean(t)
+    case M.TaskDeleted{_, _, _} <> +t: Laws.foh_clean(t)
+    case M.MessageFrom{_, _, _, _, _, _} <> +t: Laws.foh_clean(t)
+    case M.ConvSet{_, _, _, _, _, _, _} <> +t: Laws.foh_clean(t)
+    case M.MailPosted{_, _, _, _, _, _, _, _, _, _} <> +t: Laws.foh_clean(t)
+    case M.MailMarked{_, _, _, _, _, _} <> +t: Laws.foh_clean(t)
+    case M.MailTagged{_, _, _, _} <> +t: Laws.foh_clean(t)
+    case M.RunSet{_, _, _, _, _} <> +t: Laws.foh_clean(t)
+    case M.CharterSet{_, _, _, _} <> +t: Laws.foh_clean(t)
+    case M.DecisionLogged{_, _, _, _, _, _, _} <> +t: Laws.foh_clean(t)
+    case M.TurnUsage{_, _, _, _, _, _, _, _, _, _, _, _, _} <> +t: Laws.foh_clean(t)
+    case M.DeployAsked{_, _, _, _, _} <> +t: Laws.foh_clean(t)
+    case M.DeployBuilt{_, _, _, _, _} <> +t: Laws.foh_clean(t)
+
+def Laws.fyi_never_spawns(live): {==}
+
+def Laws.act_one_run(live):
+  match live:
+    case SNil{}: {==}
+    case SCon{_, _}: {==}
+
+def Laws.run_fresh(th, cwd, provider, model, session, runtime, interaction): {==}
+
+def Laws.run_one_live_per_conv(): {==}
+
+def Laws.escalate_only_path(cs, os): Laws.foh_clean(cs)
+
+def Laws.charter_gate_denies(text, tool, input, risky, unlisted):
+  %Equal.sym(Bool, CH.Charter.risky(tool, input), True{}, risky) : {Bool.or(Bool.not(_), CH.Charter.allows(text, tool, input)) == False{} : Bool}
+  %Equal.sym(Bool, CH.Charter.allows(text, tool, input), False{}, unlisted) : {Bool.or(Bool.not(True{}), _) == False{} : Bool}
+  {==}
+
+def Laws.charter_gate_allows_listed(text, tool, input, listed):
+  %Equal.sym(Bool, CH.Charter.allows(text, tool, input), True{}, listed) : {Bool.or(Bool.not(CH.Charter.risky(tool, input)), _) == True{} : Bool}
+  or_true_r(Bool.not(CH.Charter.risky(tool, input)))
+
+def Laws.charter_risky_fixed(): {==}
+# ---- i18n window ----
+def Laws.window_notice_english():
+  {==}
+def Laws.window_notice_words_kept():
+  {==}
+def Laws.window_tools_english(h, sa, sv, ta, tv):
+  {==}
+def Laws.window_picker_default():
+  {==}
+def Laws.window_provider_missing():
+  {==}
+# ---- end i18n window ----
+
+# --- browser-cef ---
+def Laws.cef_engine_needs_setting(known, ok):
+  {==}
+
+def Laws.cef_engine_needs_embed(ok):
+  {==}
+
+def Laws.cef_engine_needs_runtime(known):
+  match known:
+    case True{}:
+      {==}
+    case False{}:
+      {==}
+
+def Laws.cef_engine_on():
+  {==}
+
+def Laws.cef_embed_window_here():
+  {==}
+
+def Laws.cef_embed_loopback_link():
+  {==}
+
+def Laws.cef_embed_remote_refused():
+  {==}
+
+def Laws.cef_loopback_v4():
+  {==}
+
+def Laws.cef_loopback_v6():
+  {==}
+
+def Laws.cef_tailnet_not_loopback():
+  {==}
+
+def Laws.cef_leave_clears_embed():
+  {==}
+
+def Laws.cef_leave_other_keeps_embed():
+  {==}
+
+def Laws.cef_embed_bad_xid_unknown():
+  {==}
+
+def Laws.cef_embed_once_per_join():
+  {==}
+
+def Laws.cef_embed_new_join():
+  {==}
+
+def Laws.cef_embed_not_remote():
+  {==}
+
+def Laws.cef_embed_needs_xid():
+  {==}
+
+def Laws.cef_shield_agent_drives():
+  {==}
+
+def Laws.cef_shield_takeover_off():
+  {==}
+
+def Laws.cef_shield_teach_off():
+  {==}
+
+def Laws.cef_shield_focus_opposite(d):
+  {==}
+
+def Laws.cef_shield_take_from_agent():
+  {==}
+
+def Laws.cef_shield_take_not_from_person():
+  {==}
+
+def Laws.cef_shield_due_same():
+  {==}
+
+def Laws.cef_shield_due_first():
+  {==}
+
+def Laws.cef_shield_due_person():
+  {==}
+
+def Laws.cef_covered_none():
+  {==}
+
+def Laws.cef_covered_palette():
+  {==}
+
+def Laws.cef_covered_picker():
+  {==}
+
+def Laws.cef_covered_menu():
+  {==}
+
+def Laws.cef_covered_look():
+  {==}
+
+def Laws.cef_covered_models():
+  {==}
+
+def Laws.cef_covered_tour():
+  {==}
+
+def Laws.cef_covered_perf():
+  {==}
+
+def Laws.cef_covered_lightbox():
+  {==}
+
+def Laws.cef_shows_needs_live(covered):
+  {==}
+
+def Laws.cef_shows_not_covered():
+  {==}
+
+def Laws.cef_place_same_nothing():
+  {==}
+
+def Laws.cef_place_hidden_nothing():
+  {==}
+
+def Laws.cef_place_new_shows():
+  {==}
+
+def Laws.cef_place_moved_shows():
+  {==}
+
+def Laws.cef_place_gone_hides():
+  {==}
+
+def Laws.cef_post_chrome_idle():
+  {==}
+
+def Laws.cef_post_chrome_forgets():
+  {==}
+
+def Laws.cef_post_native_places():
+  {==}
+
+def Laws.cef_pane_extent():
+  {==}
+
+def Laws.cef_extent_never_wraps():
+  {==}
+
+def Laws.cef_native_local_only():
+  {==}
+
+def Laws.cef_native_local_cef():
+  {==}
+
+def Laws.cef_native_chrome():
+  {==}
+
+def Laws.cef_native_skips_cast():
+  {==}
+
+def Laws.cef_web_keeps_cast():
+  {==}
+
+def Laws.cef_remote_keeps_cast():
+  {==}
+
+def Laws.cef_page_here_native():
+  {==}
+
+def Laws.cef_page_elsewhere_jpeg():
+  {==}
+
+def Laws.cef_fallback_keeps_handback():
+  {==}
+
+def Laws.cef_chrome_idle_strip_off():
+  {==}
+
+def Laws.cef_note_quiet():
+  {==}
+
+def Laws.cef_old_engine_reply_ignored():
+  {==}
+
+def Laws.cef_current_engine_reply_used():
+  {==}
+
+def Laws.cef_want_key_chrome(x, d):
+  {==}
+
+def Laws.cef_after_rpc():
+  {==}
+
+def Laws.cef_after_helper():
+  {==}
+
+def Laws.cef_not_after_agent_line():
+  {==}
+
+def Laws.cef_revive_first():
+  {==}
+
+def Laws.cef_revive_bounded():
+  {==}
+
+def Laws.cef_revive_not_chrome(placed):
+  {==}
+
+def Laws.cef_unknown_refused():
+  {==}
+
+def Laws.cef_thread_owner():
+  {==}
+
+def Laws.cef_empty_owner_refused(t, b):
+  {==}
+
+def Laws.cef_handback_names_page():
+  {==}
+
+def Laws.cef_handback_default_bot():
+  {==}
+
+def Laws.cef_takeover_names_page():
+  {==}
+
+def Laws.cef_other_actions_keep_bot():
+  {==}
+# --- end browser-cef ---
+
+# --- browser-cef local window guard ---
+def Laws.cef_web_origin_refused(proxy):
+  match proxy:
+    case SNil{}: {==}
+    case SCon{_, _}: {==}
+
+def Laws.cef_native_link_allowed():
+  {==}
+# --- end browser-cef local window guard ---
+# ---- mail perf ----
+
+def Laws.mail_credit_carried(text, charge): {==}
+
+def Laws.mail_credit_native_kept(w, charge):
+  match w:
+    case MPCREDIT.WText{_}: {==}
+    case MPCREDIT.WCharged{_, _}: {==}
+    case MPCREDIT.WPong{_}: {==}
+    case MPCREDIT.WBin{_}: {==}
+    case MPCREDIT.WClose{}: {==}
+    case MPCREDIT.WState{_, _}: {==}
+    case MPCREDIT.WItems{_, _, _, _, _, _}: {==}

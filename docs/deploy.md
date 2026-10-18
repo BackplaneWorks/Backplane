@@ -62,3 +62,66 @@ requester once. A thread the restart cut gets the words appended to its
 continue message instead (`Deploy.suffix` in `Carry.k`), so no thread gets two.
 
 Laws `deploy_*`, `tool_*`; tests `test/deploy_test.bend`, `bun test/tools/deploy_e2e.ts`.
+
+## Deploying origin/main
+
+Restarting into a new build is the hub's job, not any one agent's. The
+`deploy_main {note?}` MCP tool (and `POST /mcp/deploy` from loopback, which is
+the person) asks this hub to build origin/main and restart into it through
+the safe path above. Pure logic: `src/core/ship.bend`; steps: hub.bend's
+`Ship.*`; IO: server.bend's `ShipJob.*`.
+
+Settings (all off or empty by default):
+
+- `deploy.repo`: the source checkout to build from. Unset, the tool answers
+  "not configured" and nothing runs.
+- `deploy.wrap`: a command prefix the build runs under, e.g.
+  `~/Documents/i2cjak/bp-coord/bin/bp-admit.sh --mem 14 --cores 4 -- systemd-run --user --scope -q -p MemoryMax=16G --`.
+  Resource policy lives there, never in the hub. Empty means
+  `systemd-run --user --scope -q --` when the user's systemd answers, else
+  nothing.
+- `deploy.follow`: `on` makes the hub read origin/main once every 5 minutes
+  (the minute's tick, when nothing is under way) and deploy when it moved.
+  Off, it does no work at all.
+
+What happens:
+
+1. The server fetches origin/main in `deploy.repo` (off the hub loop) and asks
+   git which of the commits being built, staged (while its deploy still
+   waits) and live contain it (`merge-base --is-ancestor`).
+2. The tool answers at once: **skipped** when one of them covers it (the answer
+   names the commit and whether it is building, staged or live), **queued**
+   otherwise. One build runs at a time. Requests that a running build does
+   not cover make one follow-up build, of the newest origin/main then, however
+   many came.
+3. The build is a job of its own under `<home>/deploy/<commit>/`: a temporary
+   detached worktree of the repo (`wt`, removed after), `scripts/dev.sh stage
+   <dir>/pkg` (the build and stage steps of `dev.sh install`, nothing
+   installed and no hub asked), the log `out`, the exit status `code`. It is
+   started with `setsid`, inside `deploy.wrap` (or the default scope), so a hub
+   OOM or the restart it leads to never cuts it. Its pid and start time are
+   recorded (`DeployBuilt` state `pid`). Stale worktrees of ended builds are
+   removed at the next launch.
+4. The hub looks at the job every 5 s. Exit 0 with a package: staged, and the
+   hub asks for the safe restart itself (`deploy.wait`, note
+   `deploy_main <commit>`, by the person). A deploy does not wait for a
+   deploy_main build: the build runs in its own scope with `BP_BUILD_LOCKED=1`
+   (it holds no build lock), so a restart never cuts it, and the next hub
+   re-adopts it (step 6). Anything else: failed, with the log's last lines.
+5. Everyone who asked since the last report is told once, with the commit,
+   the version and the result: a thread the way watched work reaches it (it
+   wakes, or the note waits behind its turn); the person with an alert
+   (record `alert.deploy`). Skipped requests covered by the build under way
+   are told at its end.
+6. At start, a build that was under way is watched again: its job outlived the
+   hub, and its exit status is read when it ends. It is "lost" (failed) only
+   when its process is gone and it left no exit status. A follow-up still
+   wanted is asked for again. The restart a staged build asked for makes it
+   live.
+
+State: the events `DeployAsked{by, note, commit, cover}` and
+`DeployBuilt{commit, state, version, detail}` (states building, pid, staged,
+failed, skipped, live), folded into the setting `deploy.ship`.
+`deploy_status` (and the `deploy.status` request) answer it under `main`.
+
+Laws `ship_*`; tests `test/ship_test.bend`, `bun test/tools/deploy_main_e2e.ts BINARY`.

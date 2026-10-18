@@ -1,4 +1,5 @@
 import Base
+import ../src/core/i18n.bend as I
 import ./check.bend as C
 import ../src/core/model.bend as M
 import ../src/core/bot.bend as BT
@@ -52,7 +53,7 @@ def row.show(w: S.SRow) -> String:
       kind ++ "|" ++ label ++ "|" ++ when ++ "|" ++ next ++ "|" ++ rel ++ "|" ++ zone ++ "|" ++ Bool.show(done) ++ "|" ++ dt
 
 def row.s(+st: M.State, +id: String, +now: Nat) -> String:
-  row.show(S.Sched.row(st, rt(st, id), now, 0n, True{}))
+  row.show(S.Sched.row(I.En{}, st, rt(st, id), now, 0n, True{}))
 
 def row(cs: List<&2, M.Change>, +id: String, +now: Nat) -> String:
   row.s(world(cs), id, now)
@@ -61,7 +62,7 @@ def zone.str(+st: M.State) -> String:
   S.Zone.person(st) ++ "/" ++ S.Zone.source(st)
 
 def hint(+t: String, +now: Nat) -> String:
-  S.Sched.hint(world(Nil{}), t, now, 0n, True{})
+  S.Sched.hint(I.En{}, world(Nil{}), t, now, 0n, True{})
 
 def order.ids(rs: List<&2, BT.Routine>) -> String:
   match rs:

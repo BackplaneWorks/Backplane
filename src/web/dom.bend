@@ -1,4 +1,5 @@
 import Base
+import ../core/ref.bend as R
 import ../core/links.bend as LK
 import ../core/diff.bend as DF
 
@@ -86,9 +87,18 @@ def Dom.link.k(web: Bool, +label: String, +url: String) -> Node:
     case False{}:
       Dom.file(url, [Txt{label}])
 
-# a web link, opening in a new tab; any other link is a file's
+# Refs carry navigation metadata but display as plain text in spec 1.
+def Dom.ref(+label: String, +uri: String, bare: Bool) -> Node:
+  El{"a", "", [At{"class", "ref"}, At{"href", uri}, At{"data-ref", uri}, At{"data-bare", Bool.pick(String, bare, "1", "0")}], [Txt{label}]}
+
+def Dom.link.ref(m: Maybe<&2, R.Ref>, label: String, +url: String) -> Node:
+  match m:
+    case Some{r}: Dom.ref(label, R.Ref.uri(r), False{})
+    case None{}: Dom.link.k(LK.Link.is_web(url), label, url)
+
+# A ref stays plain; a web link opens a new tab, a file opens on the hub.
 def Dom.link(+label: String, +url: String) -> Node:
-  Dom.link.k(LK.Link.is_web(url), label, url)
+  Dom.link.ref(R.Ref.parse(url), label, url)
 
 # text with its links (LK.Link.pieces) as nodes, onto out (reversed)
 def Dom.pieces(ps: List<&2, LK.Piece>, out: List<&2, Node>) -> List<&2, Node>:
@@ -99,6 +109,8 @@ def Dom.pieces(ps: List<&2, LK.Piece>, out: List<&2, Node>) -> List<&2, Node>:
       Dom.pieces(t, Txt{s} <> out)
     case LK.PLink{l, u} <> t:
       Dom.pieces(t, Dom.link(l, u) <> out)
+    case LK.PRef{l, u, b} <> t:
+      Dom.pieces(t, Dom.ref(l, u, b) <> out)
 
 # text as nodes, its links clickable
 def Dom.linked(+s: String) -> List<&2, Node>:

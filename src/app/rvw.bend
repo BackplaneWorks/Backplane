@@ -6,6 +6,7 @@ import ../server/farview.bend as FVS
 import ../core/json.bend as J
 import ../core/fview.bend as FV
 import ../core/rview.bend as RV
+import ../core/winnote.bend as NT
 
 # The window on another machine's hub (core/rview.bend): the files its
 # viewers draw come from that hub's /view/* (read only, let in as the
@@ -101,7 +102,7 @@ def Rvw.bring(+url: String, +thread: String, +root: String, +cache: String, +fil
     return Got{True{}, Bool.pick(String, Nat.is_eq(failed, 0n), ver, ""), Bool.not(String.eq(ver, have)), ""}
 
 def Rvw.res.k(+cache: String, +ver: String, +files: String, +url: String, +thread: String, +root: String, +have: String) -> IO(Got):
-  Bool.pick(IO(Got), String.is_empty(cache), IO.pure(Got, Rvw.fail("that folder cannot be kept here")),
+  Bool.pick(IO(Got), String.is_empty(cache), IO.pure(Got, Rvw.fail(NT.Notice.make("keep", ""))),
     Bool.pick(IO(Got), Bool.and(String.eq(ver, have), Bool.not(String.is_empty(have))), IO.pure(Got, Got{True{}, ver, False{}, ""}),
       Rvw.bring(url, thread, root, cache, files, ver, have)))
 
@@ -112,14 +113,14 @@ def Rvw.body(m: Maybe<&2, J.Json>, +url: String, +pre: String, +thread: String, 
   match m:
     case Some{+o}:
       Bool.pick(IO(Got), J.Json.get_bool(o, "ok", False{}), Rvw.res(J.Json.get_obj(o, "result"), url, pre, thread, root, have),
-        IO.pure(Got, Rvw.fail(J.Json.get_str(o, "error", "that machine did not take it"))))
+        IO.pure(Got, Rvw.fail(J.Json.get_str(o, "error", NT.Notice.make("notaken", "")))))
     case None{}:
-      IO.pure(Got, Rvw.fail("invalid reply from that machine"))
+      IO.pure(Got, Rvw.fail(NT.Notice.make("badreply", "")))
 
 def Rvw.fail.of(+r: BN.Resp) -> Got:
   match r:
     case BN.Resp{+c, +b}:
-      Rvw.fail(Bool.pick(String, Nat.is_eq(c, 0n), "that machine is away", "that machine did not take it: " ++ String.take(b, 120n)))
+      Rvw.fail(Bool.pick(String, Nat.is_eq(c, 0n), NT.Notice.make("away", ""), NT.Notice.make("refused", String.take(b, 120n))))
 
 def Rvw.got(+r: BN.Resp, +url: String, +pre: String, +thread: String, +root: String, +have: String) -> IO(Got):
   Bool.pick(IO(Got), Nat.is_eq(FVS.Fvs.code(r), 200n), Rvw.body(J.Json.parse(FVS.Fvs.body(r)), url, pre, thread, root, have), IO.pure(Got, Rvw.fail.of(r)))

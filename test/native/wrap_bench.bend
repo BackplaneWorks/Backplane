@@ -1,5 +1,6 @@
 import Base
 import ../../src/gfx/text.bend as X
+import ../../src/core/i18n.bend as I
 import ../../src/app/bots.bend as BV
 import ../../src/app/layout.bend as L
 import ../../src/core/bot.bend as BT
@@ -79,7 +80,7 @@ def Cache.step(+retain: Bool, +ty: L.Ty, +room: String, +text: String, ws: Map<&
 
 def Cache.run(+retain: Bool, +f: X.Face, c: Map<&2, X.TG>, +n: Nat) -> IO(Unit):
   do IO<Unit>:
-    +ty : L.Ty = L.Ty{c, f, f, f, f, f}
+    +ty : L.Ty = L.Ty{c, f, f, f, f, f, I.En{}}
     +text : String = word(n, "")
     a : Map<&2, BV.PW> <- Cache.step(retain, ty, "a", text, BV.Bv.wraps.none(), "first A")
     b : Map<&2, BV.PW> <- Cache.step(retain, ty, "b", "A short other conversation", a, "switch B")

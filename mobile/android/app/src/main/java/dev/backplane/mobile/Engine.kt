@@ -332,6 +332,8 @@ class Engine(private val app: android.content.Context, private val source: Strin
     // a hub marked offline with no screen of its own (after load())
     suspend fun offline(key: String) = out("Backplane.online(${q(key)}, false, true)", screen = false)
     suspend fun tick(now: Long) = out("Backplane.tick($now)")
+    // a catalog text by key, in the device's language
+    suspend fun t(key: String) = call("Backplane.t(${q(key)})", person = true)
     // a cat's rig (JSON text) for its key ("look:mood")
     suspend fun cat(key: String) = call("Backplane.cat(${q(key)})", person = true)
 }

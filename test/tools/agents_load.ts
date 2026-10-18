@@ -134,7 +134,7 @@ async function run(n: number): Promise<Result> {
   const port = freePort();
   const proc = Bun.spawn([resolve(bin), "--home", home, "--port", String(port), "--no-tailscale"], {
     env: {
-      ...process.env, DISPLAY: process.env.LOAD_DISPLAY ?? "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_PEERS: "",
+      ...process.env, DISPLAY: process.env.LOAD_DISPLAY ?? "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "",
       FAKE_SECS: String(secs), ...(progress ? { FAKE_PROG: "1" } : {}), FAKE_PER: String(Math.max(1, Math.round(hz / 10))), FAKE_CYCLE: String(cycle),
       PATH: `${fake}:${process.env.PATH}`,
     },

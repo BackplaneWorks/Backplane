@@ -107,7 +107,7 @@ def main() -> IO(Unit):
     C.Check.str("idle", U.Ui.scratch(recv(live(), "{\"t\":\"voice\",\"thread\":\"t1\",\"ev\":\"idle\"}"), "@voice"), "")
     C.Check.str("error kept", U.Ui.scratch(recv(live(), "{\"t\":\"voice\",\"thread\":\"t1\",\"ev\":\"error\",\"error\":\"no key\"}"), "@voice.err"), "no key")
     C.Check.str("error closed", U.Ui.scratch(act(recv(live(), "{\"t\":\"voice\",\"thread\":\"t1\",\"ev\":\"error\",\"error\":\"no key\"}"), "voice-err", ""), "@voice.err"), "")
-    C.Check.str("settings ask", sent(U.Ui.act(start(), "flag", "settings")), "{\"id\":0,\"m\":\"bots.voice\",\"p\":{\"op\":\"status\"}}\n")
+    C.Check.str("settings ask", sent(U.Ui.act(start(), "flag", "settings")), "{\"id\":0,\"m\":\"bots.voice\",\"p\":{\"op\":\"status\"}}\n{\"id\":1,\"m\":\"bots.voice\",\"p\":{\"op\":\"usage\",\"do\":\"read\"}}\n")
     C.Check.str("key masked", U.Ui.scratch(status(), "@voice.key"), "sk-…abcd")
     C.Check.str("dictionary", Nat.show(List.length(&2, String, U.Voice.dict(status()))), "2")
     C.Check.str("microphones", Nat.show(List.length(&2, U.VDev, U.Voice.devices(status()))), "2")

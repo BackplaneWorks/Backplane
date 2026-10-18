@@ -6,14 +6,15 @@
 //   set_config_option  acks with the updated configOptions
 //   session/prompt     "ECHO: <text>" as a chunk. The words after Backplane's
 //                      instructions that say "write" make a write tool call
-//                      (note.txt, "hello"). In always-ask with the
-//                      client's form elicitation, an elicitation/create asks first:
-//                      accept with value Approve writes, anything else fails the
-//                      call with "Tool call denied by user: write". In always-ask
-//                      without the form, the call is refused at once. In yolo the
-//                      write goes straight through. Then end_turn.
-// The approval form mirrors test/fixtures/omp/form.jsonl, line 64. Every request
-// goes to $OMP_LOG.
+//                      (note.txt, "hello"). In always-ask, "ACP permission"
+//                      sends a session/request_permission with only
+//                      allow_always/reject_always; its Allow must be cancelled.
+//                      Otherwise, with form elicitation, an elicitation/create
+//                      asks first: Approve writes, anything else fails the call.
+//                      Without the form, the call is refused. In yolo it goes
+//                      straight through. Then end_turn.
+// The form mirrors test/fixtures/omp/form.jsonl, line 64. Every request goes to
+// $OMP_LOG.
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -29,7 +30,7 @@ interface Rpc {
     prompt?: { text?: string }[];
     clientCapabilities?: { elicitation?: { form?: boolean } };
   };
-  result?: { action?: string; content?: { value?: string } };
+  result?: { action?: string; content?: { value?: string }; outcome?: { outcome?: string; optionId?: string } };
 }
 
 const log = process.env.OMP_LOG ?? "/dev/null";
@@ -62,6 +63,24 @@ function doWrite(session: string, id: string) {
   note("WROTE note.txt");
   finish(session, id, true, "Wrote note.txt");
 }
+async function requestPermission(session: string, id: string) {
+  const rid = nextId++;
+  const { promise, resolve } = Promise.withResolvers<Rpc["result"]>();
+  waiting.set(rid, resolve);
+  say({
+    id: rid,
+    method: "session/request_permission",
+    params: {
+      sessionId: session,
+      toolCall: { toolCallId: id, title: "Write note.txt", kind: "execute", rawInput: { command: "write note.txt" } },
+      options: [{ optionId: "always", kind: "allow_always" }, { optionId: "never", kind: "reject_always" }],
+    },
+  });
+  const reply = await promise;
+  note("PERMISSION " + JSON.stringify(reply));
+  if (reply?.outcome?.outcome === "selected" && reply.outcome.optionId === "always") doWrite(session, id);
+  else finish(session, id, false, "Tool call denied by user: write");
+}
 
 async function prompt(id: number, session: string, text: string) {
   note(`PROMPT ${JSON.stringify(text.slice(0, 80))} mode=${mode}`);
@@ -76,6 +95,8 @@ async function prompt(id: number, session: string, text: string) {
     update(session, { sessionUpdate: "tool_call", toolCallId: tool, title: "Writing note.txt", kind: "edit", status: "pending", rawInput: { path: "note.txt", content: "hello" } });
     if (mode === "yolo") {
       doWrite(session, tool);
+    } else if (asked.includes("ACP permission")) {
+      await requestPermission(session, tool);
     } else if (!form) {
       note("REFUSED no form capability");
       finish(session, tool, false, "Tool call denied by user: write");

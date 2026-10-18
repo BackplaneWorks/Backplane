@@ -1,4 +1,6 @@
 import Base
+import ../core/i18n.bend as I
+import ../core/msgs.bend as MSG
 import ../core/json.bend as J
 import ../core/client.bend as U
 
@@ -118,40 +120,40 @@ def MPick.rows(xs: List<&2, U.Scored>, +home: String, +dir: String) -> List<&2, 
       MPick.row(n, "picker-type", MPick.field(home, U.Proj.join(dir, n)), "dir") <> MPick.rows(t, home, dir)
 
 # the listed folder as a project (once)
-def MPick.add(+u: U.Ui, +home: String, +dir: String) -> List<&2, J.Json>:
+def MPick.add(+l: I.Loc, +u: U.Ui, +home: String, +dir: String) -> List<&2, J.Json>:
   Bool.pick(List<&2, J.Json>, U.Proj.is_project(U.Proj.ps(u), dir),
-    [MPick.row(MPick.tilde(home, dir) ++ " is already a project", "", "", "off")],
-    [MPick.row("Add " ++ MPick.tilde(home, dir) ++ " as a project", "proj-add", dir, "add")])
+    [MPick.row(MSG.T.proj.exists(l, MPick.tilde(home, dir)), "", "", "off")],
+    [MPick.row(MSG.T.proj.add(l, MPick.tilde(home, dir)), "proj-add", dir, "add")])
 
 def MPick.up(+home: String, +dir: String) -> List<&2, J.Json>:
   Bool.pick(List<&2, J.Json>, String.eq(dir, "/"), Nil{}, [MPick.row("..", "picker-type", MPick.field(home, U.Proj.parent(dir)), "up")])
 
-def MPick.create(+q: String, +dir: String, +ns: List<&2, String>) -> List<&2, J.Json>:
+def MPick.create(+l: I.Loc, +q: String, +dir: String, +ns: List<&2, String>) -> List<&2, J.Json>:
   Bool.pick(List<&2, J.Json>, Bool.and(U.Proj.name_ok(q), Bool.not(U.Proj.exact(ns, String.trim(q)))),
-    [MPick.row("Create project '" ++ String.trim(q) ++ "' here", "proj-new", U.Proj.join(dir, String.trim(q)), "new"),
-     MPick.row("Create folder '" ++ String.trim(q) ++ "' here", "picker-mkdir", U.Proj.join(dir, String.trim(q)), "mkdir")], Nil{})
+    [MPick.row(MSG.T.proj.create(l, String.trim(q)), "proj-new", U.Proj.join(dir, String.trim(q)), "new"),
+     MPick.row(MSG.T.proj.mkdir(l, String.trim(q)), "picker-mkdir", U.Proj.join(dir, String.trim(q)), "mkdir")], Nil{})
 
 # (a match, not Bool.pick: only the list shown is made)
-def MPick.items.q(empty: Bool, +u: U.Ui, +home: String, +q: String, +dir: String, +ns: List<&2, String>) -> List<&2, J.Json>:
+def MPick.items.q(empty: Bool, +l: I.Loc, +u: U.Ui, +home: String, +q: String, +dir: String, +ns: List<&2, String>) -> List<&2, J.Json>:
   match empty:
     case True{}:
-      List.concat(&2, J.Json, [MPick.add(u, home, dir), MPick.up(home, dir), MPick.rows(U.Proj.scored(ns, q), home, dir)])
+      List.concat(&2, J.Json, [MPick.add(l, u, home, dir), MPick.up(home, dir), MPick.rows(U.Proj.scored(ns, q), home, dir)])
     case False{}:
-      List.concat(&2, J.Json, [MPick.rows(List.sort(~U.Scored, ~U.Scored.before, U.Proj.scored(ns, q)), home, dir), MPick.create(q, dir, ns), MPick.add(u, home, dir)])
+      List.concat(&2, J.Json, [MPick.rows(List.sort(~U.Scored, ~U.Scored.before, U.Proj.scored(ns, q)), home, dir), MPick.create(l, q, dir, ns), MPick.add(l, u, home, dir)])
 
 # no rows before the first listing, nor while the typed folder fails
-def MPick.items.k(none: Bool, +u: U.Ui, +q: String) -> List<&2, J.Json>:
+def MPick.items.k(none: Bool, +l: I.Loc, +u: U.Ui, +q: String) -> List<&2, J.Json>:
   match none:
     case True{}:
       Nil{}
     case False{}:
-      MPick.items.q(String.is_empty(q), u, U.Ui.info(u, "proj.home"), q, U.Proj.dir(u), U.Proj.entries(u))
+      MPick.items.q(String.is_empty(q), l, u, U.Ui.info(u, "proj.home"), q, U.Proj.dir(u), U.Proj.entries(u))
 
 # the folders. No filter: add the listed folder (once), its parent, its
 # subfolders. A filter: matching subfolders best first, then creating the
 # typed name (only when no folder has it), then adding
-def MPick.folders(+u: U.Ui) -> List<&2, J.Json>:
-  MPick.items.k(Bool.or(String.is_empty(U.Proj.dir(u)), Bool.not(String.is_empty(U.Ui.info(u, "proj.err")))), u, MPick.filter(U.Ui.scratch(u, "@mpick")))
+def MPick.folders(+l: I.Loc, +u: U.Ui) -> List<&2, J.Json>:
+  MPick.items.k(Bool.or(String.is_empty(U.Proj.dir(u)), Bool.not(String.is_empty(U.Ui.info(u, "proj.err")))), l, u, MPick.filter(U.Ui.scratch(u, "@mpick")))
 
 def MPick.proj.rows(ps: List<&2, U.PItem>) -> List<&2, J.Json>:
   match ps:
@@ -160,22 +162,22 @@ def MPick.proj.rows(ps: List<&2, U.PItem>) -> List<&2, J.Json>:
     case U.PItem{l, +a, v} <> t:
       MPick.row(l, a, v, Bool.pick(String, String.eq(a, "proj-pick"), "dir", "add")) <> MPick.proj.rows(t)
 
-def MPick.browse() -> J.Json:
-  MPick.row("Add a project from a folder", "picker-type", "~/", "dir")
+def MPick.browse(+l: I.Loc) -> J.Json:
+  MPick.row(MSG.T.proj.browse(l), "picker-type", "~/", "dir")
 
-def MPick.projects.k(empty: Bool, +u: U.Ui, +q: String) -> List<&2, J.Json>:
+def MPick.projects.k(empty: Bool, +l: I.Loc, +u: U.Ui, +q: String) -> List<&2, J.Json>:
   match empty:
     case True{}:
-      MPick.browse() <> MPick.proj.rows(U.Proj.list(u, q))
+      MPick.browse(l) <> MPick.proj.rows(U.Proj.list.loc(l, u, q))
     case False{}:
-      List.append(&2, J.Json, MPick.proj.rows(U.Proj.list(u, q)), [MPick.browse()])
+      List.append(&2, J.Json, MPick.proj.rows(U.Proj.list.loc(l, u, q)), [MPick.browse(l)])
 
-def MPick.items.m(path: Bool, +u: U.Ui, +text: String) -> List<&2, J.Json>:
+def MPick.items.m(path: Bool, +l: I.Loc, +u: U.Ui, +text: String) -> List<&2, J.Json>:
   match path:
     case True{}:
-      MPick.folders(u)
+      MPick.folders(l, u)
     case False{}:
-      MPick.projects.k(String.is_empty(String.trim(text)), u, String.trim(text))
+      MPick.projects.k(String.is_empty(String.trim(text)), l, u, String.trim(text))
 
 # a field that starts a path browses folders
 def MPick.is_path(+text: String) -> Bool:
@@ -183,21 +185,27 @@ def MPick.is_path(+text: String) -> Bool:
 
 # what the picker offers: the projects (adding from a folder first, or
 # last under a filter), or for a path the folders (MPick.folders)
-def MPick.machine(+u: U.Ui) -> List<&2, J.Json>:
+def MPick.machine(+l: I.Loc, +u: U.Ui) -> List<&2, J.Json>:
   Bool.pick(List<&2, J.Json>, List.is_empty(&2, String, U.Proj.machines(u)), Nil{},
-    [MPick.row("On " ++ U.Proj.on.name(u) ++ " (change)", "proj-on", U.Proj.next(u), "machine")])
+    [MPick.row(MSG.T.proj.on(l, U.Proj.on.name(u)), "proj-on", U.Proj.next(u), "machine")])
 
-def MPick.items(+u: U.Ui) -> List<&2, J.Json>:
-  List.append(&2, J.Json, MPick.items.m(MPick.is_path(U.Ui.scratch(u, "@mpick")), u, U.Ui.scratch(u, "@mpick")), MPick.machine(u))
+def MPick.items(+l: I.Loc, +u: U.Ui) -> List<&2, J.Json>:
+  List.append(&2, J.Json, MPick.items.m(MPick.is_path(U.Ui.scratch(u, "@mpick")), l, u, U.Ui.scratch(u, "@mpick")), MPick.machine(l, u))
 
-def MPick.json.k(open: Bool, +u: U.Ui) -> J.Json:
+def MPick.json.l(open: Bool, +l: I.Loc, +u: U.Ui) -> J.Json:
   match open:
     case True{}:
-      J.Json.obj([J.KV{"text", J.Json.str(U.Ui.scratch(u, "@mpick"))}, J.KV{"hint", J.Json.str(Bool.pick(String, MPick.is_path(U.Ui.scratch(u, "@mpick")), "~/path, or a name to filter or create", "A project, or ~/path to add a folder"))},
-        J.KV{"error", J.Json.str(U.Ui.info(u, "proj.err"))}, J.KV{"items", J.Json.arr(MPick.items(u))}])
+      J.Json.obj([J.KV{"text", J.Json.str(U.Ui.scratch(u, "@mpick"))}, J.KV{"hint", J.Json.str(Bool.pick(String, MPick.is_path(U.Ui.scratch(u, "@mpick")), MSG.T.picker.hint.path(l), MSG.T.picker.hint.find(l)))},
+        J.KV{"error", J.Json.str(U.Ui.info(u, "proj.err"))}, J.KV{"items", J.Json.arr(MPick.items(l, u))}])
     case False{}:
       J.Null{}
 
-# the picker as the phone draws it (null while closed)
+def MPick.json.k(open: Bool, +u: U.Ui) -> J.Json:
+  MPick.json.l(open, U.Lang.loc(u), u)
+
+# the picker as the phone draws it (null while closed), in the screen's language
+def MPick.json.loc(+l: I.Loc, +u: U.Ui) -> J.Json:
+  MPick.json.l(U.Ui.flag(u, "proj"), l, u)
+
 def MPick.json(+u: U.Ui) -> J.Json:
   MPick.json.k(U.Ui.flag(u, "proj"), u)

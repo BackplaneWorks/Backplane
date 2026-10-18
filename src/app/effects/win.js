@@ -49,3 +49,27 @@ function win_pasted_image(win) {
   return io_tup(win, io_tup("", io_tup(0, "")));
 }
 io_eff(CID(Win.pasted_image), win_pasted_image);
+
+function win_ime(win) {
+  return io_tup(win, 0);
+}
+function win_ime_reset(win) {
+  return win;
+}
+function win_ime_spot(win, x, y) {
+  return win;
+}
+function win_ime_inject(win, kind, text) {
+  return win;
+}
+io_eff(CID(Win.ime), win_ime);
+io_eff(CID(Win.ime_reset), win_ime_reset);
+io_eff(CID(Win.ime_spot), win_ime_spot);
+io_eff(CID(Win.ime_inject), win_ime_inject);
+function win_payload(win, id) {
+  return io_tup(win, io_tup("", ""));
+}
+io_eff(CID(Win.payload), win_payload);
+
+function win_xid(win) { return io_tup(win, 0); }
+io_eff(CID(Win.xid), win_xid);

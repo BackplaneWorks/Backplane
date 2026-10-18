@@ -140,7 +140,7 @@ def main() -> IO(Unit):
     C.Check.str("hub settings: shut again", sets(go(go(one(box()), "hub-settings", "box:3787|on"), "hub-settings", "box:3787|off")), "shut")
     C.Check.str("hub settings: the focus follows the named hub", H.Hubs.cur(go(two(), "hub-settings", "lap:3787|on")), "lap:3787")
     C.Check.str("hub settings: Notify me for rows are marked notify", notifyrows(go(one(box()), "hub-settings", "box:3787|on")), "Notify me for;Needs me;Settled;Reminders;Everything;")
-    C.Check.str("hub settings: Theme and Thread list are marked local", localrows(go(one(box()), "hub-settings", "box:3787|on")), "Theme;Thread list;Tour;")
+    C.Check.str("hub settings: device tab rows stay off the hub page", localrows(go(one(box()), "hub-settings", "box:3787|on")), "Theme;Language;Agents reply in my language;Thread list;Tour;")
     C.Check.str("routines: a recurring and a one-time reminder", routines(one(reminded()), "title"), "Dentist;Digest;")
     C.Check.str("routines: the one-time one is a reminder", routines(one(reminded()), "state"), "reminder;idle;")
     C.Check.str("routines: Sched's kind", routines(one(reminded()), "sched"), "reminder;routine;")

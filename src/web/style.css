@@ -111,6 +111,8 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .thread-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
 .thread-head .title { font-weight: 600; }
 .thread-head .meta { color: var(--faint); flex: 1; font-family: var(--mono); font-size: 12px; }
+/* a thread's Boat chip (core/usage.bend's Chip): small, square, opens Settings */
+.thread-head .boat-chip { color: var(--accent); background: none; border: 1px solid var(--line); border-radius: 0; font-family: var(--mono); font-size: 12px; padding: 2px 6px; white-space: nowrap; }
 .thread-head .tools { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; margin-left: auto; }
 .thread-head .title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .thread-head .title-box { display: flex; align-items: center; gap: 6px; min-width: 0; }
@@ -118,6 +120,8 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .thread-head .title.rename:hover { text-decoration: underline dotted var(--faint); }
 .thread-head .title-box .field { width: min(420px, 50vw); }
 .timeline { flex: 1; overflow-y: auto; overflow-anchor: none; padding: 16px 16px 8px; display: flex; flex-direction: column; gap: 10px; }
+/* away from the end with something new below (client.bend's Hold.pill) */
+.hold-pill { position: sticky; bottom: 8px; align-self: center; z-index: 4; flex: none; background: var(--raise); color: var(--text); border: 1px solid var(--accent); border-radius: 0; padding: 4px 12px; font-size: 13px; cursor: pointer; }
 .msg { position: relative; max-width: 860px; width: 100%; }
 .msg .copy { position: absolute; top: 4px; right: 4px; opacity: 0; font-size: 11px; padding: 1px 6px; }
 .msg:hover > .copy { opacity: 1; }
@@ -442,6 +446,8 @@ button.chip:hover { border-color: var(--bad); color: var(--bad); }
 
 .msg a.link { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; overflow-wrap: anywhere; border: 0; padding: 0; font-size: inherit; white-space: normal; max-width: none; }
 .msg a.link.file code { color: inherit; }
+/* a quote's Buy now (the order server's /q/ link, server.bend's Od.quoted): a button, not a link */
+.msg a.link[href*="/q/q_"] { display: inline-block; margin-top: 4px; padding: 6px 16px; background: var(--accent); color: var(--on-accent, #fff); text-decoration: none; font-weight: 600; white-space: nowrap; }
 .ico { flex: none; display: block; }
 button.icon { display: inline-flex; align-items: center; justify-content: center; }
 .shelf, .settings-link, .model-chip { display: flex; align-items: center; gap: 6px; }
@@ -774,3 +780,38 @@ button.dim { opacity: 0.5; pointer-events: none; }
 .tk-shots { display: flex; gap: 6px; flex-wrap: wrap; flex-basis: 100%; }
 .tk-shot img { display: block; width: 120px; height: 80px; object-fit: cover; border: 1px solid var(--line); }
 .ask.browser .tk-shot img { width: auto; height: auto; max-width: 100%; max-height: 220px; object-fit: contain; }
+
+/* Spec 1: refs remain plain labels until navigation is implemented. */
+a.ref { color: inherit; text-decoration: none; cursor: text; overflow-wrap: anywhere; }
+/* the project card (view.bend's View.fab): goal, Edit, Buy it */
+.fab-card { align-self: stretch; margin: 0 0 8px; border: 1px solid var(--line); background: var(--raise); font-size: 13px; position: sticky; top: 0; z-index: 4; box-shadow: 0 6px 14px rgba(0,0,0,.18); }
+.fab-row { display: flex; gap: 6px; align-items: center; padding: 4px 6px 4px 10px; }
+.fab-goal { flex: 1; min-width: 0; text-align: left; background: none; border: 0; padding: 4px 0; color: inherit; cursor: pointer; font-size: inherit; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fab-card.open .fab-goal { white-space: normal; }
+.fab-edit { font-size: 12px; padding: 3px 10px; }
+.fab-buy { font-size: 12px; padding: 3px 12px; background: var(--accent); border-color: var(--accent); color: var(--on-accent, #fff); font-weight: 600; white-space: nowrap; }
+.fab-intent { border-top: 1px solid var(--line); padding: 6px 12px 8px; max-height: 40vh; overflow-y: auto; }
+.fab-intent h1, .fab-intent h2, .fab-intent h3 { font-size: 12px; margin: 8px 0 2px; color: var(--faint); text-transform: uppercase; letter-spacing: .04em; }
+/* the subagents and pins stick just under the project card */
+.fab-card ~ .work { top: 40px; }
+/* Ready to order (View.ready): the parts and Buy it above the message box
+   once the agent's turn is over; it glows once as it comes */
+.fab-ready { display: flex; align-items: center; gap: 10px; margin: 0 16px 8px; padding: 6px 6px 6px 12px; border: 1px solid var(--accent); background: var(--raise); font-size: 13px; }
+.fab-ready-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fab-ready .fab-buy { font-size: 13px; padding: 5px 14px; }
+.fab-ready .fab-x { padding: 2px 8px; border: none; background: none; color: var(--faint); font-size: 16px; line-height: 1; }
+.fab-ready .fab-x:hover { color: var(--text); }
+.fab-ready { animation: fab-ping 1.6s ease-out 1; }
+@keyframes fab-ping { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 70%, transparent); } 100% { box-shadow: 0 0 0 14px transparent; } }
+.kicad-notice { position: relative; border: 1px solid var(--warn); border-radius: 0; padding: 16px; margin: 12px 0; text-align: left; width: 100%; max-width: 720px; box-sizing: border-box; overflow-wrap: anywhere; }
+.kicad-notice strong { display: block; padding-right: 30px; }
+.kicad-notice p { color: var(--dim); margin: 8px 0 12px; }
+.kn-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.kn-actions button, .kn-actions a { border-radius: 0; }
+.kn-close { position: absolute; top: 4px; right: 4px; }
+.empty { flex-direction: column; gap: 16px; }
+#kicad-path { min-width: 0; width: 100%; }
+
+.kicad-export ul { margin: 12px 0; padding-left: 20px; max-height: 40vh; overflow: auto; }
+.kicad-export li { margin: 6px 0; white-space: pre-wrap; }
+.kicad-export .kn-actions { display: flex; gap: 8px; flex-wrap: wrap; }

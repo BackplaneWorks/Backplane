@@ -167,7 +167,7 @@ type Hub = { port: number; proc: ReturnType<typeof Bun.spawn>; ws: WebSocket; se
 async function start(name: string, env: Record<string, string>): Promise<Hub> {
   const port = freePort();
   const proc = Bun.spawn([resolve(bin), "--home", join(root, name), "--port", String(port), "--no-tailscale", "--headless", "--foreground"], {
-    env: { ...process.env, HOME: join(root, "user"), DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_PEERS: "",
+    env: { ...process.env, HOME: join(root, "user"), DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "",
       BACKPLANE_GOOGLE_OAUTH: G, BACKPLANE_GOOGLE_API: G, PATH: `${fake}:${process.env.PATH}`, ...env },
     stdout: "pipe",
     stderr: "pipe",

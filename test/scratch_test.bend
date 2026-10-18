@@ -1,4 +1,5 @@
 import Base
+import ../src/core/i18n.bend as I
 import ./check.bend as C
 import ../src/core/model.bend as M
 import ../src/core/codec.bend as K
@@ -100,4 +101,4 @@ def main() -> IO(Unit):
     C.Check.str("give to a bot wakes it", tags(gb), "BotWoke MessagePosted MessageFrom TurnChanged ActivityLogged")
     C.Check.str("naming nothing is refused", outs(give(base(), "/give nothing")), "err")
     C.Check.str("never to itself", outs(give(base(), "/give >idea")), "err")
-    C.Check.str("button says Give", U.Follow.button(state(base()), "t1", False{}, False{}, "/give >board"), "Give")
+    C.Check.str("button says Give", U.Follow.button(I.En{}, state(base()), "t1", False{}, False{}, "/give >board"), "Give")

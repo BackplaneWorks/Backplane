@@ -10,7 +10,7 @@ dir="dist/pkg/backplane-$plat"
 rm -rf dist/pkg && mkdir -p "$dir"
 cp dist/backplane dist/backplane-serve LICENSE "$dir/"
 cp -R dist/web "$dir/web"
-for h in backplane-browser backplane-step2glb backplane-voice; do
+for h in backplane-browser backplane-step2glb backplane-voice backplane-kipc; do
   [ -f "dist/$h" ] && cp "dist/$h" "$dir/"
 done
 [ -d dist/licenses ] && cp -R dist/licenses "$dir/licenses"

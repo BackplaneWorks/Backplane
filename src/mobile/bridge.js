@@ -20,6 +20,9 @@ function* each(list) {
   for (let xs = list; xs && is(xs, "Con"); xs = xs.tail) yield xs.head;
 }
 
+const deviceLocal = new Map();
+function restoreLocal() { for (const [key, value] of deviceLocal) hubs = App.local(hubs, key, value); }
+
 const secs = (n) => BigInt(Math.floor(Number(n)));
 
 const listed = (list) => Array.from(each(list));
@@ -271,12 +274,14 @@ globalThis.Backplane = {
   // the hubs paired, as their keys (host:port) in order
   hubs(keys) {
     hubs = App.hubs(hubs, JSON.stringify(keys));
+    restoreLocal();
     restore();
     return out(null);
   },
   // a choice that belongs to this device, not the hub (the thread list's
   // "view": "projects" or "active"; "" leaves it to the hub's setting)
   local(key, value) {
+    deviceLocal.set(key, value);
     hubs = App.local(hubs, key, value);
     return out(null);
   },
@@ -297,6 +302,10 @@ globalThis.Backplane = {
   cat(key) {
     const i = String(key).indexOf(":");
     return App.cat(BigInt(Number(String(key).slice(0, i)) || 0), String(key).slice(i + 1));
+  },
+  // a catalog text for a key in the device's language (the key itself if unknown)
+  t(key) {
+    return App.t(hubs, String(key));
   },
   // a binary frame from hub k, as base64
   // quiet: more frames wait behind this one, so no screen is built for it
@@ -324,6 +333,7 @@ globalThis.Backplane = {
   load(text) {
     try {
       hubs = App.stale(unflat(text));
+      restoreLocal();
     } catch {
       return "";
     }

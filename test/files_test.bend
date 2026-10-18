@@ -57,17 +57,18 @@ def labels(rs: List<&2, U.FmRow>) -> List<&2, String>:
 
 def main() -> IO(Unit):
   do IO<Unit>:
-    C.Check.str("Files asks for the folder", sent(U.Ui.act(base(), "fm", "")), "{\"id\":0,\"m\":\"files.dir\",\"p\":{\"thread\":\"t1\",\"path\":\"\"}}")
+    # (the first action on a thread also asks for its card, Fab.sync: one request id before it)
+    C.Check.str("Files asks for the folder", sent(U.Ui.act(base(), "fm", "")), "{\"id\":1,\"m\":\"files.dir\",\"p\":{\"thread\":\"t1\",\"path\":\"\"}}")
     C.Check.str("the viewer shows Files", U.Ui.view_get(act(base(), "fm", ""), "view.kind"), "files")
     C.Check.str("not ready before the hub answers", Bool.show(U.Fm.ready(act(base(), "fm", ""))), "False")
     C.Check.str("the rows, folders first", String.join(labels(U.Fm.rows(listed(act(base(), "fm", ""), "", "d\t0\thw\nf\t2048\tboard.kicad_pcb\nf\t5\tnotes.txt\n"))), "|"),
       "hw:fm-cd:folder:|board.kicad_pcb:fm-open:board:2 KB|notes.txt:::5 B")
-    C.Check.str("a folder below", sent(U.Ui.act(act(base(), "fm", ""), "fm-cd", "hw/main")), "{\"id\":1,\"m\":\"files.dir\",\"p\":{\"thread\":\"t1\",\"path\":\"hw/main\"}}")
+    C.Check.str("a folder below", sent(U.Ui.act(act(base(), "fm", ""), "fm-cd", "hw/main")), "{\"id\":2,\"m\":\"files.dir\",\"p\":{\"thread\":\"t1\",\"path\":\"hw/main\"}}")
     C.Check.str("an old answer is not shown", Bool.show(U.Fm.ready(listed(act(act(base(), "fm", ""), "fm-cd", "hw"), "", "d\t0\thw\n"))), "False")
-    C.Check.str("up from a folder", sent(U.Ui.act(act(act(base(), "fm", ""), "fm-cd", "hw/main"), "fm-up", "")), "{\"id\":2,\"m\":\"files.dir\",\"p\":{\"thread\":\"t1\",\"path\":\"hw\"}}")
+    C.Check.str("up from a folder", sent(U.Ui.act(act(act(base(), "fm", ""), "fm-cd", "hw/main"), "fm-up", "")), "{\"id\":3,\"m\":\"files.dir\",\"p\":{\"thread\":\"t1\",\"path\":\"hw\"}}")
     C.Check.str("the trail", String.join(crumbs(U.Fm.trail(act(act(base(), "fm", ""), "fm-cd", "hw/main"))), "|"), "Project|hw|main")
     C.Check.str("a board opens in the board viewer", U.Ui.view_get(act(base(), "fm-open", "hw/x.kicad_pcb"), "view.kind") ++ " " ++ U.Ui.view_get(act(base(), "fm-open", "hw/x.kicad_pcb"), "view.path"), "board /w/board/hw/x.kicad_pcb")
     C.Check.str("a model opens in 3D", U.Ui.view_get(act(base(), "fm-open", "mech/case.step"), "view.kind"), "3d")
-    C.Check.str("a PDF asks for its first page", sent(U.Ui.act(base(), "fm-open", "docs/ds.pdf")), "{\"id\":0,\"m\":\"pdf.page\",\"p\":{\"path\":\"/w/board/docs/ds.pdf\",\"page\":\"1\"}}")
+    C.Check.str("a PDF asks for its first page", sent(U.Ui.act(base(), "fm-open", "docs/ds.pdf")), "{\"id\":1,\"m\":\"pdf.page\",\"p\":{\"path\":\"/w/board/docs/ds.pdf\",\"page\":\"1\"}}")
     C.Check.str("a file only listed opens nothing", U.Ui.view_get(act(base(), "fm-open", "notes.txt"), "view.kind"), "")
     C.Check.str("sizes", String.join([FM.Fm.size(0n), FM.Fm.size(1500n), FM.Fm.size(3500000n), FM.Fm.size(2147483648n)], "|"), "0 B|1 KB|3.3 MB|2.0 GB")

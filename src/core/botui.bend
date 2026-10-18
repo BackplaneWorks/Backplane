@@ -1,4 +1,6 @@
 import Base
+import ./i18n.bend as I
+import ./msgs.bend as MSG
 import ./json.bend as J
 import ./model.bend as M
 import ./client.bend as U
@@ -59,14 +61,17 @@ def Mood.of.name(+state: String) -> String:
 def Mood.moving(+m: String) -> Bool:
   Bool.or(Bool.or(String.eq(m, "work"), String.eq(m, "think")), Bool.or(String.eq(m, "wait"), String.eq(m, "talk")))
 
-def Mood.note(+m: String) -> String:
-  Bool.pick(String, String.eq(m, "sleep"), "asleep",
-    Bool.pick(String, String.eq(m, "idle"), "ready",
-      Bool.pick(String, String.eq(m, "work"), "working",
-        Bool.pick(String, String.eq(m, "think"), "thinking",
-          Bool.pick(String, String.eq(m, "wait"), "needs you",
-            Bool.pick(String, String.eq(m, "talk"), "talking",
-              Bool.pick(String, String.eq(m, "error"), "failed", "away")))))))
+def Mood.note.loc(+l: I.Loc, +m: String) -> String:
+  Bool.pick(String, String.eq(m, "sleep"), MSG.T.bots.mood.sleep(l),
+    Bool.pick(String, String.eq(m, "idle"), MSG.T.bots.mood.idle(l),
+      Bool.pick(String, String.eq(m, "work"), MSG.T.bots.mood.work(l),
+        Bool.pick(String, String.eq(m, "think"), MSG.T.bots.mood.think(l),
+          Bool.pick(String, String.eq(m, "wait"), MSG.T.bots.mood.wait(l),
+            Bool.pick(String, String.eq(m, "talk"), MSG.T.bots.mood.talk(l),
+              Bool.pick(String, String.eq(m, "error"), MSG.T.bots.mood.error(l), MSG.T.bots.mood.away(l))))))))
+
+def Mood.note(m: String) -> String:
+  Mood.note.loc(I.En{}, m)
 
 def Mood.rest() -> Nat:
   900n
@@ -371,14 +376,14 @@ def BU.tabs.of(+id: String) -> List<&2, String>:
 def BU.tabs.for(+u: U.Ui, +id: String) -> List<&2, String>:
   Bool.pick(List<&2, String>, UB.Uber.is(U.Ui.state(u), id), "status" <> BU.tabs.of(id), BU.tabs.of(id))
 
-def BU.tab.label(+t: String) -> String:
-  Bool.pick(String, String.eq(t, "chat"), "Chat",
-    Bool.pick(String, String.eq(t, "space"), "Space",
-      Bool.pick(String, String.eq(t, "browser"), "Browser",
-        Bool.pick(String, String.eq(t, "tasks"), "Tasks",
-        Bool.pick(String, String.eq(t, "memory"), "Memory",
-          Bool.pick(String, String.eq(t, "routines"), "Routines",
-            Bool.pick(String, String.eq(t, "hooks"), "Webhooks", Bool.pick(String, String.eq(t, "status"), "Status", "Settings"))))))))
+def BU.tab.label(+l: I.Loc, +t: String) -> String:
+  Bool.pick(String, String.eq(t, "chat"), MSG.T.bots.tab.chat(l),
+    Bool.pick(String, String.eq(t, "space"), MSG.T.bots.tab.space(l),
+      Bool.pick(String, String.eq(t, "browser"), MSG.T.bots.tab.browser(l),
+        Bool.pick(String, String.eq(t, "tasks"), MSG.T.bots.tab.tasks(l),
+        Bool.pick(String, String.eq(t, "memory"), MSG.T.bots.tab.memory(l),
+          Bool.pick(String, String.eq(t, "routines"), MSG.T.bots.tab.routines(l),
+            Bool.pick(String, String.eq(t, "hooks"), MSG.T.bots.tab.hooks(l), Bool.pick(String, String.eq(t, "status"), MSG.T.bots.tab.status(l), MSG.T.bots.tab.settings(l)))))))))
 
 def BU.tab.has(ts: List<&2, String>, +t: String) -> Bool:
   match ts:
@@ -745,12 +750,15 @@ def Head.note(h: Head) -> String:
 
 # a bot's header: a bot with a thread (remote False), or one only reported
 # by a linked machine (remote True: Chat alone)
-def BU.head.m(remote: Bool, +u: U.Ui, +id: String, +title: String, +look: Nat, +mood: String) -> Head:
+def BU.head.m.loc(+l: I.Loc, remote: Bool, +u: U.Ui, +id: String, +title: String, +look: Nat, +mood: String) -> Head:
   match remote:
     case True{}:
-      Head{title, look, mood, Mood.note(mood), ["chat"], "chat", False{}, False{}}
+      Head{title, look, mood, Mood.note.loc(l, mood), ["chat"], "chat", False{}, False{}}
     case False{}:
-      Head{title, look, mood, Mood.note(mood), BU.tabs.for(u, id), BU.tab.of(u, id), BU.viewer.of(id), BU.owns(id)}
+      Head{title, look, mood, Mood.note.loc(l, mood), BU.tabs.for(u, id), BU.tab.of(u, id), BU.viewer.of(id), BU.owns(id)}
+
+def BU.head.m(remote: Bool, u: U.Ui, id: String, title: String, look: Nat, mood: String) -> Head:
+  BU.head.m.loc(I.En{}, remote, u, id, title, look, mood)
 
 # the row a linked machine reports for a bot elsewhere (away, named by its
 # id, while none does)
@@ -775,12 +783,12 @@ def BRow.mood(r: BRow) -> String:
       m
 
 def BU.head.remote(+r: BRow, +u: U.Ui, +id: String) -> Head:
-  BU.head.m(True{}, u, id, BU.row.title(r), BRow.look(r), BRow.mood(r))
+  BU.head.m.loc(U.Lang.loc(u), True{}, u, id, BU.row.title(r), BRow.look(r), BRow.mood(r))
 
 def BU.head.bot(+u: U.Ui, b: BT.Bot) -> Head:
   match b:
     case BT.Bot{+i, +n, +th, +lk, +pe, +c, +d}:
-      BU.head.m(False{}, u, i, U.Ui.far.title(u, i, n), lk, BU.mood(u, BT.Bot{i, n, th, lk, pe, c, d}))
+      BU.head.m.loc(U.Lang.loc(u), False{}, u, i, U.Ui.far.title(u, i, n), lk, BU.mood(u, BT.Bot{i, n, th, lk, pe, c, d}))
 
 # what a bot's view shows above its tab (a room or the thread: nothing)
 def BU.head(+u: U.Ui, v: View) -> Head:
@@ -790,4 +798,4 @@ def BU.head(+u: U.Ui, v: View) -> Head:
     case VRemote{+id}:
       BU.head.remote(BU.remote.row(u, id), u, id)
     case _:
-      Head{"", 0n, "away", Mood.note("away"), Nil{}, "chat", False{}, False{}}
+      Head{"", 0n, "away", Mood.note.loc(U.Lang.loc(u), "away"), Nil{}, "chat", False{}, False{}}

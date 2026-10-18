@@ -4,6 +4,7 @@ import ./json.bend as J
 import ./ubop.bend as UO
 import ./locks.bend as LK
 import ./mail.bend as ML
+import ./ship.bend as SH
 
 # The product's state, event-sourced. Every change is a Change appended to
 # the log; the read model is `replay(log)`. Events are persisted forever:
@@ -289,6 +290,15 @@ type Change is Data:
   RunSet{thread: String, bot: String, conv: String, mail: String, at: Nat}
   CharterSet{bot: String, text: String, by: String, at: Nat}
   DecisionLogged{id: String, bot: String, conv: String, run: String, text: String, reason: String, at: Nat}
+  # a turn's usage as its provider reported it (Tokens, below)
+  TurnUsage{thread: String, provider: String, model: String, key: String, input: Nat, cread: Nat, cwrite: Nat, output: Nat, reasoning: Nat, cost: Nat, known: String, basis: String, at: Nat}
+  # deploy_main (core/ship.bend): `by` (a thread, or "-" for the person)
+  # asked for origin/main at `commit`; `cover` what already held it
+  # ("building", "staged", "live") or "" (a build was wanted). DeployBuilt:
+  # a build's step, `state` building, pid (detail "<pid> <ident>"), staged,
+  # failed, skipped or live. Both fold into the setting deploy.ship
+  DeployAsked{by: String, note: String, commit: String, cover: String, at: Nat}
+  DeployBuilt{commit: String, state: String, version: String, detail: String, at: Nat}
 
 # the later of two times. Base's Nat.max recurses once per unit and
 # overflows at epoch scale; Nat.is_ge compiles to a machine comparison.
@@ -1449,6 +1459,103 @@ def Usage.merge(+old: String, +used: Nat, +window: Nat) -> String:
 def State.usage(+s: State, +th: String, +used: Nat, +window: Nat) -> State:
   State.setting(s, Usage.key(th), Usage.merge(Setting.get(s, Usage.key(th), ""), used, window))
 
+# Tokens
+# ------
+# Each turn's usage as its provider reported it (TurnUsage, laws tok_*):
+# uncached input, cache read, cache write, output and the part of it that
+# was reasoning, and the cost in nano-dollars. `known` names the parts the
+# provider gave (i r w o t c): a part it did not give is unknown, never 0.
+# Totals are settings "n/i/r/w/o/t/c/cn" (turns, the parts, cost, turns that
+# reported a cost): per thread tok.t.<thread>, per UTC day tok.d.<YYYY-MM-DD>,
+# per month tok.m.<YYYY-MM>, per month and model tok.mm.<YYYY-MM>|<provider>|<model>
+# (that month's models, a line each, in tok.ml.<YYYY-MM>), per project and
+# month tok.p.<project>|<YYYY-MM>. tok.since is the first turn counted
+# (nothing before it was recorded); tok.key.<thread> and tok.basis.<thread>
+# are the hub's: the last turn's key (a line seen again is not counted
+# twice) and the provider's running totals it took the turn's share from.
+
+def Tok.pad2(+n: Nat) -> String:
+  Bool.pick(String, Nat.is_lt(n, 10n), "0" ++ Nat.show(n), Nat.show(n))
+
+def Tok.civil.m(+y: Nat, +mp: Nat, +doy: Nat) -> String:
+  Nat.show(y) ++ "-" ++ Tok.pad2(Bool.pick(Nat, Nat.is_lt(mp, 10n), Nat.add(mp, 3n), Nat.sub(mp, 9n))) ++ "-" ++
+    Tok.pad2(Nat.add(Nat.sub(doy, Nat.div(Nat.add(Nat.mul(153n, mp), 2n), 5n)), 1n))
+
+# a day number (days since 1970-01-01) as a civil date (H. Hinnant's
+# days_from_civil, inverted), year-month-day
+def Tok.civil.k(+y: Nat, +doy: Nat) -> String:
+  Tok.civil.m(Nat.add(y, Bool.pick(Nat, Nat.is_ge(Nat.div(Nat.add(Nat.mul(5n, doy), 2n), 153n), 10n), 1n, 0n)),
+    Nat.div(Nat.add(Nat.mul(5n, doy), 2n), 153n), doy)
+
+def Tok.civil.e(+era: Nat, +doe: Nat, +yoe: Nat) -> String:
+  Tok.civil.k(Nat.add(yoe, Nat.mul(era, 400n)), Nat.sub(doe, Nat.sub(Nat.add(Nat.mul(365n, yoe), Nat.div(yoe, 4n)), Nat.div(yoe, 100n))))
+
+def Tok.civil.d(+era: Nat, +doe: Nat) -> String:
+  Tok.civil.e(era, doe, Nat.div(Nat.sub(Nat.add(Nat.sub(doe, Nat.div(doe, 1460n)), Nat.div(doe, 36524n)), Nat.div(doe, 146096n)), 365n))
+
+def Tok.civil.z(+z: Nat) -> String:
+  Tok.civil.d(Nat.div(z, 146097n), Nat.mod(z, 146097n))
+
+# the UTC day of a moment ("2026-10-15") and its month ("2026-10")
+def Tok.day(+at: Nat) -> String:
+  Tok.civil.z(Nat.add(Nat.div(at, 86400n), 719468n))
+
+def Tok.month(+at: Nat) -> String:
+  String.take(Tok.day(at), 7n)
+
+def Tok.part(+v: String, +i: Nat) -> Nat:
+  Usage.part(String.split(v, '/'), i)
+
+def Tok.add(+old: String, +i: Nat, +r: Nat, +w: Nat, +o: Nat, +t: Nat, +c: Nat, ck: Bool) -> String:
+  String.join([Nat.show(Nat.add(Tok.part(old, 0n), 1n)), Nat.show(Nat.add(Tok.part(old, 1n), i)), Nat.show(Nat.add(Tok.part(old, 2n), r)),
+    Nat.show(Nat.add(Tok.part(old, 3n), w)), Nat.show(Nat.add(Tok.part(old, 4n), o)), Nat.show(Nat.add(Tok.part(old, 5n), t)),
+    Nat.show(Nat.add(Tok.part(old, 6n), c)), Nat.show(Nat.add(Tok.part(old, 7n), Bool.pick(Nat, ck, 1n, 0n)))], "/")
+
+def Tok.has(xs: List<&2, String>, +l: String) -> Bool:
+  match xs:
+    case Nil{}:
+      False{}
+    case x <> t:
+      Bool.or(String.eq(x, l), Tok.has(t, l))
+
+# a line added to a list of lines, once
+def Tok.once(+ls: String, +l: String) -> String:
+  Bool.pick(String, Tok.has(String.split(ls, '\n'), l), ls, Bool.pick(String, String.is_empty(ls), l, ls ++ "\n" ++ l))
+
+# a total with its ninth part: the turns whose tokens the provider gave (a
+# turn whose share could not be told, its session's start unseen, counts
+# as a turn with its tokens unknown)
+def Tok.add2(+old: String, +i: Nat, +r: Nat, +w: Nat, +o: Nat, +t: Nat, +c: Nat, ck: Bool, kk: Bool) -> String:
+  Tok.add(old, i, r, w, o, t, c, ck) ++ "/" ++ Nat.show(Nat.add(Tok.part(old, 8n), Bool.pick(Nat, kk, 1n, 0n)))
+
+def Tok.sum(+s: State, +k: String, +i: Nat, +r: Nat, +w: Nat, +o: Nat, +t: Nat, +c: Nat, +ck: Bool, +kk: Bool) -> State:
+  State.setting(s, k, Tok.add2(Setting.get(s, k, ""), i, r, w, o, t, c, ck, kk))
+
+# Totals are kept under the count's epoch (the setting tok.epoch, set once
+# by the hub when it starts counting again): "tok." then "<epoch>." when one
+# is set. Totals of an earlier count stay in the log and are never shown.
+def Tok.pre.k(+e: String) -> String:
+  Bool.pick(String, String.is_empty(e), "tok.", "tok." ++ e ++ ".")
+
+def Tok.pre(+s: State) -> String:
+  Tok.pre.k(Setting.get(s, "tok.epoch", "") ++ Setting.get(s, "tok.recount", ""))
+
+def Tok.project(t: Thread) -> String:
+  match t:
+    case Thread{_, p, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _}:
+      p
+
+def State.tokens.k(+s: State, +x: String, +th: String, +pj: String, +pm: String, +i: Nat, +r: Nat, +w: Nat, +o: Nat, +t: Nat, +c: Nat, +ck: Bool, +kk: Bool, +key: String, +basis: String, +at: Nat) -> State:
+  +s1 = Tok.sum(Tok.sum(Tok.sum(s, x ++ "t." ++ th, i, r, w, o, t, c, ck, kk), x ++ "d." ++ Tok.day(at), i, r, w, o, t, c, ck, kk), x ++ "m." ++ Tok.month(at), i, r, w, o, t, c, ck, kk)
+  +s2 = Tok.sum(Tok.sum(s1, x ++ "mm." ++ Tok.month(at) ++ "|" ++ pm, i, r, w, o, t, c, ck, kk), x ++ "p." ++ pj ++ "|" ++ Tok.month(at), i, r, w, o, t, c, ck, kk)
+  +s3 = State.setting(s2, x ++ "ml." ++ Tok.month(at), Tok.once(Setting.get(s2, x ++ "ml." ++ Tok.month(at), ""), pm))
+  +s4 = State.setting(s3, x ++ "since", Bool.pick(String, String.is_empty(Setting.get(s3, x ++ "since", "")), Nat.show(at), Setting.get(s3, x ++ "since", "")))
+  State.setting(State.setting(s4, "tok.key." ++ th, key), "tok.basis." ++ th, basis)
+
+def State.tokens(+s: State, +th: String, +pv: String, +mo: String, +i: Nat, +r: Nat, +w: Nat, +o: Nat, +t: Nat, +c: Nat, +known: String, +key: String, +basis: String, +at: Nat) -> State:
+  State.tokens.k(s, Tok.pre(s), th, Tok.project(State.thread.get(s, th)), pv ++ "|" ++ Bool.pick(String, String.is_empty(mo), "default", mo), i, r, w, o, t, c,
+    String.contains(known, "c"), String.contains(known, "o"), key, basis, at)
+
 # Launched threads
 # ----------------
 # A thread started by another (thread_launch) remembers who started it, as
@@ -1509,6 +1616,13 @@ def Locks.names(s: State) -> List<&2, String>:
 
 def Locks.get(s: State, +name: String) -> LK.NamedLock:
   LK.Lock.read(Maybe.default(&2, J.Json, J.Json.parse(Setting.get(s, "lock." ++ name, "")), J.Null{}))
+
+# deploy_main's state, one JSON line (core/ship.bend)
+def Ship.fold.asked(+s: State, +by: String, +cover: String) -> State:
+  State.setting(s, "deploy.ship", SH.Ship.show(SH.Ship.asked(SH.Ship.read(Setting.get(s, "deploy.ship", "")), by, cover)))
+
+def Ship.fold.built(+s: State, +commit: String, +state: String, +detail: String) -> State:
+  State.setting(s, "deploy.ship", SH.Ship.show(SH.Ship.built(SH.Ship.read(Setting.get(s, "deploy.ship", "")), commit, state, detail)))
 
 def Locks.fold(+s: State, +name: String, l: LK.NamedLock) -> State:
   State.setting(State.setting(s, "lock." ++ name, J.Json.show(LK.Lock.json(l))), "locks.names", Launch.add(Setting.get(s, "locks.names", ""), name))
@@ -1820,9 +1934,14 @@ def MailRoom.post(+b: ML.Box, +id: String, +room: String, +from: String, +text: 
   ML.Box.mail(MailRoom.dm_seed(Bool.and(String.starts_with(room, "dm:"), String.is_empty(ML.Conv.id(ML.Box.conv(b, "room:" ++ room)))), b, room, at),
     ML.Mail{id, "room:" ++ room, ML.Box.sender(b, from), "room:" ++ room, "room", room, "fyi", ML.Mail.head(text), ML.Mail.text_size(text), at})
 
+def State.mail_post.box(+on: Bool, +s: State, +id: String, +room: String, +from: String, +text: String, +at: Nat) -> State:
+  match on:
+    case True{}: s
+    case False{}: State.with_mail((b => MailRoom.post(b, id, room, from, text, at)), s)
+
 def State.mail_post(+s: State, +id: String, +room: String, +from: String, +text: String, +hop: Nat, +at: Nat) -> State:
   State.world((w => BT.World.posted(w, BT.Post{id, room, from, text, hop, at})),
-    State.with_mail((b => MailRoom.post(b, id, room, from, text, at)), s))
+    State.mail_post.box(String.eq(Setting.get(s, "mail.on", "off"), "on"), s, id, room, from, text, at))
 
 def State.apply.go(s: State, e: Change) -> State:
   match e:
@@ -1890,6 +2009,12 @@ def State.apply.go(s: State, e: Change) -> State:
       State.thread((t => Thread.unrooted(t)), s, id)
     case UsageSet{+th, used, window, _}:
       State.usage(s, th, used, window)
+    case TurnUsage{+th, pv, mo, key, i, r, w, o, t, c, known, basis, at}:
+      State.tokens(s, th, pv, mo, i, r, w, o, t, c, known, key, basis, at)
+    case DeployAsked{+by, _, _, +cover, _}:
+      Ship.fold.asked(s, by, cover)
+    case DeployBuilt{+commit, +state, _, +detail, _}:
+      Ship.fold.built(s, commit, state, detail)
     case BotSet{+id, +name, thread, look, persona, at}:
       State.world((w => BT.World.bot_set(w, id, name, thread, look, persona, at)), State.with_mail((b => ML.Box.bot_named(b, id, name)), s))
     case BotDeleted{+id, _}:

@@ -22,7 +22,7 @@ type Hub = { name: string; home: string; port: number; proc: ReturnType<typeof B
 async function start(name: string, port = freePort()): Promise<Hub> {
   const home = join(root, name); const started = Date.now();
   const proc = Bun.spawn([resolve(bin), "--home", home, "--port", String(port), "--no-tailscale"], {
-    env: { ...process.env, HOME: root, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NAME: name, BACKPLANE_NO_UPDATE: "1", BACKPLANE_PEERS: "", PATH: `${fakebin}:${process.env.PATH}` }, stdout: "ignore", stderr: "pipe" });
+    env: { ...process.env, HOME: root, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NAME: name, BACKPLANE_NO_UPDATE: "1", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "", PATH: `${fakebin}:${process.env.PATH}` }, stdout: "ignore", stderr: "pipe" });
   procs.push(proc);
   const h: Hub = { name, home, port, proc, ws: null as any, n: 0, replies: new Map(), info: null, seen: [], started, infoAt: 0, log: "" };
   void (async () => { for await (const b of proc.stderr as any) h.log += new TextDecoder().decode(b); })();

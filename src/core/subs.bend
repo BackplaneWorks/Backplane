@@ -296,13 +296,16 @@ def Subs.agents(+st: M.State, +info: Map<&2, String>, +th: String, +now: Nat) ->
   +ls = M.Bg.of(st, th)
   List.concat(&2, SubRow, [Subs.bg.rows(ls, as, info), Subs.watch.rows(M.Work.watch(st, th), info), Subs.done(as, Subs.calls(ls), info, now)])
 
-# what a thread did last: its newest entry's first line
+# what a thread did last: its newest entry's first line (a design-history
+# step is skipped: its text is the hub's own record, not words)
 def Subs.latest.of(es: List<&2, M.Entry>) -> String:
   match es:
     case Nil{}:
       ""
     case M.Msg{_, _, _, +text, _} <> _:
       Subs.line(text)
+    case M.Act{_, _, "step", _, _, _} <> t:
+      Subs.latest.of(t)
     case M.Act{_, _, _, +kind, +text, _} <> _:
       kind ++ "  " ++ Subs.line(text)
 

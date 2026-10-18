@@ -6,6 +6,7 @@ import ../core/utf8.bend as U
 import ../core/json.bend as J
 import ../core/cbor.bend as CB
 import ../core/desk.bend as DK
+import ../core/winnote.bend as NT
 
 # Resolution and TCP connect share a bounded deadline. The byte poll
 # keeps any binary frame that arrives with the HTTP upgrade head intact.
@@ -152,7 +153,7 @@ def Link.got(r: Socket & Result<&1, &1, U32 & String, Maybe<&2, List<&2, U32>>>,
     case Done{None{}}:
       do IO<Unit>:
         Socket.close(s)
-        Link.down(out, "no word from that machine for 40 seconds: reconnecting")
+        Link.down(out, NT.Notice.make("silent", ""))
     case Fail{_}:
       do IO<Unit>:
         Socket.close(s)
@@ -218,7 +219,7 @@ def Link.open(ok: Bool, s: Socket, +rest: List<&2, U32>, +inbox: Chan(S.Msg), +o
       do IO<Unit>:
         Socket.close(s)
         IO.spawn(Unit, Link.drain(Link.fuel(), inbox))
-        Link.down(out, "that machine did not let this one in (is it the same owner on the tailnet?)")
+        Link.down(out, NT.Notice.make("denied", ""))
 
 # Connecting
 # ----------
@@ -234,7 +235,7 @@ def Link.unreachable(s: Socket, +inbox: Chan(S.Msg), +out: Chan(S.Wire)) -> IO(U
   do IO<Unit>:
     Socket.close(s)
     IO.spawn(Unit, Link.drain(Link.fuel(), inbox))
-    Link.down(out, "unreachable: no handshake from that machine within 5 seconds")
+    Link.down(out, NT.Notice.make("nohandshake", ""))
 
 def Link.head.got(r: Socket & Result<&1, &1, U32 & String, Maybe<&2, List<&2, U32>>>, +inbox: Chan(S.Msg), +out: Chan(S.Wire), k: Socket -> List<&2, U32> -> IO(Unit)) -> IO(Unit):
   (s, res) = r
@@ -274,7 +275,7 @@ def Link.connected(r: Result<&1, &1, U32 & String, Socket>, +url: String, since:
     case Fail{_}:
       do IO<Unit>:
         IO.spawn(Unit, Link.drain(Link.fuel(), inbox))
-        Link.down(out, "unreachable: cannot resolve or reach " ++ Link.host(url))
+        Link.down(out, NT.Notice.make("nohost", Link.host(url)))
 
 def Link.joined(m: Maybe<&1, S.Msg>, +url: String, +inbox: Chan(S.Msg)) -> IO(Unit):
   match m:

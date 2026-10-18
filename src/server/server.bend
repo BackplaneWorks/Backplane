@@ -1,4 +1,10 @@
 import Base
+import ../core/charter.bend as CH
+import ../core/mailrun.bend as RUN
+import ../core/kihealth.bend as KH
+import ../core/kserve.bend as KSC
+import ./kserve.bend as KSV
+import ../core/cef.bend as CF
 import ../core/exe.bend as EX
 import ./lockio.bend as LG
 import ../core/locks.bend as LCK
@@ -11,17 +17,23 @@ import ../core/model.bend as M
 import ../core/codec.bend as C
 import ../core/hub.bend as B
 import ../core/deploy.bend as DP
+import ../core/ship.bend as SHP
 import ../core/prompt.bend as Q
 import ../core/mcp.bend as MC
 import ./update.bend as UP
 import ../core/version.bend as VR
 import ./kicad.bend as K
+import ./kexport.bend as KEX
+import ../core/kexport.bend as KXP
 import ./browser.bend as BR
 import ../core/acp.bend as AC
 import ../core/msp.bend as MS
 import ../core/omp.bend as OM
 import ../core/agy.bend as AGY
 import ./agyio.bend as AGX
+import ./mailstore.bend as MST
+import ../core/mailbody.bend as MB
+import ../core/mail.bend as ML
 import ../core/cbor.bend as CB
 import ./push.bend as PU
 import ./park.bend as PK
@@ -70,6 +82,8 @@ import ../core/hist.bend as HI
 import ../core/emb.bend as EM
 import ./review.bend as RVS
 import ../core/cmds.bend as CM
+import ../core/errtail.bend as ER
+import ../core/keyring.bend as KR
 import ../core/adopt.bend as AD
 import ./adoptio.bend as AIO
 import ./castio.bend as CST
@@ -77,6 +91,8 @@ import ../core/outbox.bend as OB
 import ../core/live.bend as LV
 import ../core/farlive.bend as FLV
 import ../core/qr.bend as QR
+import ../core/order.bend as OR
+import ./orderio.bend as ODI
 import ../core/uber.bend as UB
 import ../core/ubersync.bend as UBS
 import ../core/ubop.bend as UBO
@@ -85,6 +101,7 @@ import ../core/tz.bend as TZN
 import ../core/rules.bend as RLS
 import ../core/task.bend as TKS
 import ../core/teach.bend as TE
+import ../core/usage.bend as UZ
 
 # The server. One hub computation owns the read model and the event log;
 # every connection and agent process is its own computation and talks to
@@ -94,6 +111,9 @@ import ../core/teach.bend as TE
 # what a connection's writer sends
 type Wire is Data:
   WText{text: String}
+  # Socket-only text with its original offered credit. Native/link readers
+  # keep WText; compression and batching never redefine this charge.
+  WCharged{text: String, charge: Nat}
   WPong{payload: List<&2, U32>}
   # a message already encoded (a board's plot: never parsed again)
   WBin{cbor: List<&2, U32>}
@@ -106,6 +126,8 @@ type Wire is Data:
   WItems{head: String, plain: String, split: String, items: List<&2, String>, tail: String, ends: Bool}
 
 type Msg is Data:
+  MailRouted{body: MB.Body}
+  RunReady{thread: String, head: String, bodies: List<&2, MB.Body>}
   # n: how many probes since the lock was asked for (the guard is tried
   # each 100 ms; who holds it outside is asked every LockJob.every())
   LockProbe{name: String, holder: String, n: Nat}
@@ -114,6 +136,10 @@ type Msg is Data:
   LockHttp{op: String, body: String, reply: Chan(String)}
   Announce{text: String}
   Mcp{thread: String, body: String, reply: Chan(String)}
+  # a request on the MCP route arrived, its answer was written (the open
+  # calls a deploy waits for: core/deploy.bend's Open.mcp)
+  McpOpen{thread: String, call: String, body: String}
+  McpShut{thread: String, call: String}
   # gen: the connection's generation (a socket's id; the window's client 0
   # joins again under a new one); sock: a raw descriptor on its socket (0
   # for none), shut at once when it falls too far behind (core/outbox.bend)
@@ -158,6 +184,17 @@ type Msg is Data:
   # and a failed swap of its staged package (core/deploy.bend, hub.bend's Deploy.*)
   DeployLocks{free: Bool}
   DeployFailed{err: String}
+  # deploy_main (Ship*): origin/main read for a call (out: the look's
+  # lines), for a follow-up or deploy.follow; a build's job started (out:
+  # "PID <pid> <ident>"), ended or gone (out: its STATUS, VERSION, STAGE, log tail)
+  ShipAsked{thread: String, body: String, reply: Chan(String), out: String}
+  ShipNewest{why: String, out: String}
+  ShipPid{commit: String, out: String}
+  ShipDone{commit: String, out: String}
+  KProbe{force: Bool}
+  KFound{setting: String, rt: K.Rt}
+  # the headless KiCad servers' lines changed (core/kserve.bend's KS.lines)
+  KiServers{text: String}
   ModelsFound{models: String, text: String}
   MachinesFound{machines: String}
   # the tailnet listener is up: the pairing link clients show in Settings
@@ -173,6 +210,16 @@ type Msg is Data:
   Reexec{path: String, args: List<&2, String>}
   # changes a job off the hub made (a bot's home folder, a linked machine)
   Commit{changes: List<&2, M.Change>}
+  # an order's progress: posted in its buy thread, and a note alert to the
+  # person's devices when there is one (Hub.order.note)
+  OrderNote{thread: String, id: String, text: String, note: String}
+  # what an order tool learned once the person acted (the files sent and
+  # the quote posted, or not sent): told to the buy thread's agent, which
+  # starts its turn (order_quote and order_ask never wait on the person)
+  OrderWake{thread: String, text: String}
+  # the review gate's verdict (core/order.bend's Order.gate): what the hub
+  # posts and asks in the buy thread
+  OrderGate{thread: String, kind: Nat, md: String}
   # the uberbot's sync (core/ubersync.bend): a step touched its log or
   # promoted a bot ("kick": sync now; "init": log a new uberbot's first
   # ops, then sync); another machine's answer to our uber.sync request
@@ -203,6 +250,9 @@ type Msg is Data:
   # the browser back; a task run asks the person (task_pause)
   TeachReq{client: U32, id: String, m: String, p: String}
   BrowserEv{line: String}
+  CefDone{request: String, live: String, err: String}
+  # a websocket from this machine (loopback, not proxied): it may embed
+  Near{client: U32}
   TeachBack{bot: String}
   TaskPaused{thread: String, bot: String, run: String, slug: String, n: Nat, kind: String, question: String, risky: Bool, rid: String, reply: Chan(String)}
   # a bot's new project, approved by the person, its folder made and
@@ -263,11 +313,14 @@ type Msg is Data:
   # a message from the hub's own inbox (agents' lines, jobs, its own
   # posts), passed on by Bulk.fwd behind a token (Bulk.*)
   Bulk{m: Msg}
+  # Boat's status.json, read again because it changed: the threads' Boat
+  # chips (core/usage.bend's Chip)
+  BoatThreads{status: String}
 
 # remote access: also listen on the tailnet, serve HTTPS through
 # `tailscale serve`, and the token remote clients must present
 type Net is Data:
-  Net{tailnet: Bool, https: Bool, token: String, models: String, mtext: String, rt: K.Rt, br: Maybe<&2, Chan(BR.BMsg)>, pk: Maybe<&2, Chan(PK.PMsg)>, tm: Maybe<&2, Chan(TM.TMsg)>, machines: String, pv: Maybe<&2, Chan(PV.PMsg)>, bn: BN.Bn, managed: Bool, link: String, freecad: String}
+  Net{tailnet: Bool, https: Bool, token: String, models: String, mtext: String, rt: K.Rt, br: Maybe<&2, Chan(BR.BMsg)>, pk: Maybe<&2, Chan(PK.PMsg)>, tm: Maybe<&2, Chan(TM.TMsg)>, machines: String, pv: Maybe<&2, Chan(PV.PMsg)>, bn: BN.Bn, managed: Bool, link: String, freecad: String, ks: Maybe<&2, Chan(KSV.KMsg)>}
 
 type Cfg is Data:
   Cfg{home: String, web: String, host: String, port: U32, prompt: String, dirs: List<&2, String>, version: String, net: Net}
@@ -565,12 +618,19 @@ def Wire.kept(over: Bool, c: Client) -> IO(Maybe<&2, Client>):
     case False{}:
       IO.pure(Maybe<&2, Client>, Some{c})
 
+def Wire.charged(native: Bool, w: Wire, n: Nat) -> Wire:
+  match native w:
+    case False{} WText{t}: WCharged{t, n}
+    case False{} WCharged{t, _}: WCharged{t, n}
+    case _ _: w
+
 def Wire.offer.k(c: Client, w: Wire, +n: Nat) -> IO(Maybe<&2, Client>):
   match c:
     case Client{i, +o, l, +r, k}:
       do IO<Maybe<&2, Client>>:
-        ok : Result<&1, &1, Wire, Unit> <- Chan.send(Wire, o, w)
-        +r2 : OB.Cr = OB.Cr.offer(r, Bool.pick(Nat, OB.Cr.native(r), 0n, n))
+        +charge : Nat = Bool.pick(Nat, OB.Cr.native(r), 0n, n)
+        ok : Result<&1, &1, Wire, Unit> <- Chan.send(Wire, o, Wire.charged(OB.Cr.native(r), w, charge))
+        +r2 : OB.Cr = OB.Cr.offer(r, charge)
         Wire.kept(OB.Cr.over(r2), Client{i, o, l, r2, k})
 
 # one frame of n bytes for a client: kept, or None when it was dropped
@@ -586,12 +646,15 @@ def Wire.offer.bs(c: Client, +bs: List<&2, U32>) -> IO(Maybe<&2, Client>):
   Wire.offer(c, WBin{bs}, List.length(&2, U32, bs))
 
 # (a message for one client is encoded by its writer, off the hub)
+def Wire.text.charge(+text: String) -> Nat:
+  String.length(text)
+
 def Wire.text.k(native: Bool, c: Client, +text: String) -> IO(Maybe<&2, Client>):
   match native:
     case True{}:
       Wire.offer(c, WText{text}, 0n)
     case False{}:
-      Wire.offer(c, WText{text}, String.length(text))
+      Wire.offer(c, WText{text}, Wire.text.charge(text))
 
 # a message (JSON text) for one client
 def Wire.text(+c: Client, +text: String) -> IO(Maybe<&2, Client>):
@@ -785,6 +848,59 @@ def Wire.changes(+cs: List<&2, Client>, +text: String, +log: List<&2, String>, +
 # Agent processes
 # ---------------
 
+# Is the desktop's login keyring locked (core/keyring.bend)? Asked of the
+# Secret Service, read only, 2 s at most; BACKPLANE_KEYRING_LOCKED=1/0
+# answers for tests. No bus or no service: unknown (0), never an error.
+def Keyring.asked(r: P.Ran) -> Nat:
+  match r:
+    case P.Ran{0, +out}:
+      KR.Keyring.of(out)
+    case _:
+      0n
+
+def Keyring.probe.k(+set: Nat) -> IO(Nat):
+  Bool.pick(IO(Nat), Nat.is_lt(set, 3n), IO.pure(Nat, set),
+    IO.bind(P.Ran, Nat, P.Proc.run("sh", PT.Port.timeout(["2", "busctl", "--user", "get-property", "org.freedesktop.secrets", "/org/freedesktop/secrets/collection/login", "org.freedesktop.Secret.Collection", "Locked"]), "/"),
+      r => IO.pure(Nat, Keyring.asked(r))))
+
+def Keyring.env.of(r: Result<&1, &1, U32 & String, String>) -> Nat:
+  match r:
+    case Done{+v}:
+      KR.Keyring.env(v)
+    case Fail{_}:
+      3n
+
+def Keyring.probe() -> IO(Nat):
+  IO.bind(Result<&1, &1, U32 & String, String>, Nat, IO.get_env("BACKPLANE_KEYRING_LOCKED"), r => Keyring.probe.k(Keyring.env.of(r)))
+
+# (only when it may matter: an agent that ended with an error)
+def Keyring.probe.if(go: Bool) -> IO(Nat):
+  match go:
+    case True{}:
+      Keyring.probe()
+    case False{}:
+      IO.pure(Nat, 0n)
+
+# a provider that needs the keyring is only started while it is not
+# locked (law keyring_locked_never_starts); start runs it, refuse fails the
+# turn with the words; one that does not need it never asks
+def Keyring.gate.k(go: Bool, start: IO(Unit), refuse: IO(Unit)) -> IO(Unit):
+  match go:
+    case True{}:
+      start
+    case False{}:
+      refuse
+
+def Keyring.gate.n(needs: Bool, +provider: String, start: IO(Unit), refuse: IO(Unit)) -> IO(Unit):
+  match needs:
+    case True{}:
+      IO.bind(Nat, Unit, Keyring.probe(), k => Keyring.gate.k(KR.Keyring.start(provider, k), start, refuse))
+    case False{}:
+      start
+
+def Keyring.gate(+provider: String, start: IO(Unit), refuse: IO(Unit)) -> IO(Unit):
+  Keyring.gate.n(KR.Keyring.needs(provider), provider, start, refuse)
+
 # lines from the agent's stdout go to the hub; EOF reports the exit
 def Agent.lines(ls: List<&2, String>, +thread: String, +inbox: Chan(Msg)) -> IO(Unit):
   match ls:
@@ -800,7 +916,9 @@ def Agent.end(s: Socket, +pid: U32, +thread: String, +gen: String, +inbox: Chan(
     Socket.close(s)
     +code : U32 <- H.Proc.wait(pid)
     AIO.Adopt.drop(thread, pid)
-    +why : String = B.Exit.why(code)
+    +tail : String <- H.Proc.errtail(pid)
+    +k : Nat <- Keyring.probe.if(U32.is_ne(code, 0))
+    +why : String = KR.Keyring.say(ER.Exit.say("agent exited", B.Exit.why(code), code, tail), k)
     ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, AgentGone{thread, code, pid, why})
     return Unit{}
 
@@ -932,9 +1050,15 @@ def Conn.sent.k(r: Socket & Result<&1, &1, U32 & String, Unit>, +out: Chan(Wire)
 def Conn.out(s: Socket, bs: List<&2, U32>, +out: Chan(Wire), k: Socket -> IO(Unit)) -> IO(Unit):
   IO.bind(Socket & Result<&1, &1, U32 & String, Unit>, Unit, H.Sock.send_until(s, bs, Conn.deadline()), r => Conn.sent.k(r, out, k))
 
+def Conn.written(s: Socket, size: Nat, credit: Nat, k: Socket -> Nat -> IO(Unit)) -> IO(Unit):
+  do IO<Unit>:
+    PS.Perf.add("net.write.bytes", U32.from_nat(size))
+    k(s, credit)
+
 # a frame out, then k with its size in bytes
 def Conn.put(s: Socket, +bs: List<&2, U32>, +out: Chan(Wire), k: Socket -> Nat -> IO(Unit)) -> IO(Unit):
-  Conn.out(s, bs, out, s2 => k(s2, List.length(&2, U32, bs)))
+  +n = List.length(&2, U32, bs)
+  Conn.out(s, bs, out, s2 => Conn.written(s2, n, n, k))
 
 # a join chunk's frames (OB.Items.texts: each within the byte bound), put
 # out one by one; to the writer's count they are one frame of no bytes, as
@@ -963,6 +1087,14 @@ def Conn.write(m: Maybe<&1, Wire>, s: Socket, +out: Chan(Wire), k: Socket -> Nat
   match m:
     case Some{WText{t}}:
       Conn.put(s, Conn.frame.out(t), out, k)
+    case Some{WCharged{t, charge}}:
+      # Credit is in the units offered by Wire.text.k. CBOR compression
+      # changes the wire size; refunding that size leaves phantom backlog
+      # after enough RPCs, so catch-up and streamed deltas stop forever.
+      # A failed/cancelled write never calls k: Conn.sent.k closes/drains
+      # the connection and Leave retires its credit, as before.
+      +bs = Conn.frame.out(t)
+      Conn.out(s, bs, out, s2 => Conn.written(s2, List.length(&2, U32, bs), charge, k))
     case Some{WPong{p}}:
       Conn.put(s, W.Ws.encode(10, p), out, k)
     case Some{WBin{bs}}:
@@ -1164,10 +1296,35 @@ def Conn.allowed(+trusted: Bool, +hs: List<&2, W.Header>, +path: String, +token:
   Bool.or(Bool.and(trusted, String.is_empty(W.Http.header_of(hs, "tailscale-user-login"))),
     Bool.and(Bool.not(String.is_empty(token)), Bool.or(String.contains(path, "token=" ++ token), String.contains(W.Http.header_of(hs, "cookie"), "bp_token=" ++ token))))
 
-def Conn.gate(ok: Bool, s: Socket, +key: String, rest: List<&2, U32>, +id: U32, +inbox: Chan(Msg), +since: Nat, +origin: String) -> IO(Unit):
+# a websocket from this machine's loopback, not proxied by tailscale serve,
+# is marked for the hub: only such a window (or the one in this process)
+# may embed the browser (core/cef.bend's Cef.from)
+def Conn.near.say(near: Bool, +id: U32, +inbox: Chan(Msg)) -> IO(Unit):
+  match near:
+    case True{}:
+      do IO<Unit>:
+        ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, Near{id})
+        return Unit{}
+    case False{}:
+      IO.pure(Unit, Unit{})
+
+def Conn.near.k(r: Socket & String, +key: String, rest: List<&2, U32>, +id: U32, +inbox: Chan(Msg), +since: Nat, +origin: String) -> IO(Unit):
+  (s, +ip) = r
+  do IO<Unit>:
+    Conn.near.say(CF.Cef.loopback(ip), id, inbox)
+    Conn.ws(s, key, rest, id, inbox, since, origin)
+
+def Conn.near(plain: Bool, s: Socket, +key: String, rest: List<&2, U32>, +id: U32, +inbox: Chan(Msg), +since: Nat, +origin: String) -> IO(Unit):
+  match plain:
+    case True{}:
+      IO.bind(Socket & String, Unit, H.Sock.peer(s), r => Conn.near.k(r, key, rest, id, inbox, since, origin))
+    case False{}:
+      Conn.ws(s, key, rest, id, inbox, since, origin)
+
+def Conn.gate(ok: Bool, plain: Bool, s: Socket, +key: String, rest: List<&2, U32>, +id: U32, +inbox: Chan(Msg), +since: Nat, +origin: String) -> IO(Unit):
   match ok:
     case True{}:
-      Conn.ws(s, key, rest, id, inbox, since, origin)
+      Conn.near(plain, s, key, rest, id, inbox, since, origin)
     case False{}:
       Conn.finish(s, W.Http.text("401 Unauthorized", "this Backplane needs its pairing token"))
 
@@ -1205,12 +1362,19 @@ def Mcp.answer(m: Maybe<&1, String>, s: Socket) -> IO(Unit):
     case None{}:
       Conn.finish(s, W.Http.text("503 Service Unavailable", "the hub is gone"))
 
+# the call counts as in flight (for a safe deploy) from its arrival until
+# its answer is written
 def Mcp.ask.raw(s: Socket, +body: String, +thread: String, +inbox: Chan(Msg)) -> IO(Unit):
   do IO<Unit>:
+    +t0 : U32 <- PS.Perf.us()
+    +call : String = U32.show(t0) ++ "." ++ Nat.show(String.length(body))
+    ok0 : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, McpOpen{thread, call, body})
     +reply : Chan(String) <- Chan.new(String, 1)
     ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, Mcp{thread, body, reply})
     m : Maybe<&1, String> <- Chan.recv(String, reply)
     Mcp.answer(m, s)
+    ok2 : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, McpShut{thread, call})
+    return Unit{}
 
 def Mcp.ask(s: Socket, +body: String, +thread: String, +inbox: Chan(Msg)) -> IO(Unit):
   Mcp.ask.raw(s, body, thread, inbox)
@@ -1263,8 +1427,14 @@ def Hub.changes_msg(ls: List<&2, String>) -> String:
 
 def Info.kicad(rt: K.Rt) -> List<&2, J.KV>:
   match rt:
-    case K.Rt{cli, fork, v, c}:
-      [J.KV{"kicad.cli", J.Str{cli}}, J.KV{"kicad.fork", J.Str{Bool.pick(String, fork, v, "")}}, J.KV{"kicad.commit", J.Str{c}}]
+    case K.Rt{cli, +fork, +v, c, +h}:
+      [J.KV{"kicad.cli", J.Str{cli}}, J.KV{"kicad.fork", J.Str{Bool.pick(String, fork, v, "")}}, J.KV{"kicad.commit", J.Str{c}},
+       J.KV{"kicad.status", J.Str{J.Json.get_str(h, "status", "checking")}}, J.KV{"kicad.source", J.Str{J.Json.get_str(h, "source", "")}},
+       J.KV{"kicad.version", J.Str{v}}, J.KV{"kicad.api", J.Str{Nat.show(J.Json.get_nat(h, "api", 0n))}},
+       J.KV{"kicad.caps", J.Str{String.join(KH.KH.strings(J.Json.elems(J.Json.get_obj(h, "caps"))), ",")}},
+       J.KV{"kicad.why", J.Str{J.Json.get_str(h, "why", "")}}, J.KV{"kicad.min", J.Str{KH.KH.min_version()}},
+       J.KV{"kicad.can_install", J.Str{Bool.pick(String, J.Json.get_bool(h, "can_install", False{}), "1", "")}},
+       J.KV{"kicad.ipc.servers", J.Str{J.Json.get_str(h, "ipc", "")}}]
 
 # the pairing link as a QR code's rows (core/qr.bend), for Settings
 def Info.qr(+lk: String) -> String:
@@ -1278,12 +1448,12 @@ def Info.tailscale(tn: Bool, +st: String) -> String:
 # the bots' browsers: who drives, what is being taught (core/teach.bend)
 def Info.tch(n: Net) -> List<&2, J.KV>:
   match n:
-    case Net{_, _, _, _, _, _, _, _, _, _, _, bnx, _, _, _}:
-      TE.Teach.info(BN.Bn.tch(bnx))
+    case Net{_, _, _, _, _, _, _, _, _, _, _, +bnx, _, _, _, _}:
+      List.append(&2, J.KV, TE.Teach.info(BN.Bn.tch(bnx)), List.append(&2, J.KV, CF.Cef.session.info(BN.Bn.cef(bnx)), CF.Cef.pages.info(CF.Cef.session.pages(BN.Bn.cef(bnx)))))
 
 def Info.net(n: Net) -> List<&2, J.KV>:
   match n:
-    case Net{+tn, hs, _, ms, _, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, +lk, fc}:
+    case Net{+tn, hs, _, ms, _, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, +lk, fc, ksx}:
       List.append(&2, J.KV, [J.KV{"models", J.Str{ms}}, J.KV{"machines", J.Str{mc}}, J.KV{"bots.remote", J.Str{BN.Bn.dir(bnx)}}, J.KV{"tailnet", J.Str{Bool.pick(String, tn, Bool.pick(String, hs, "https", "on"), "off")}},
         J.KV{"update", J.Str{Bool.pick(String, mgd, "package", "releases")}}, J.KV{"pair", J.Str{TN.Tailnet.report.link(lk)}}, J.KV{"pair.qr", J.Str{Info.qr(TN.Tailnet.report.link(lk))}}, J.KV{"tailscale", J.Str{Info.tailscale(tn, TN.Tailnet.report.state(lk))}}, J.KV{"freecad", J.Str{fc}}], Info.kicad(rt))
 
@@ -2257,15 +2427,56 @@ def Ticker.loop(fuel: Nat, +inbox: Chan(Msg)) -> IO(Unit):
         IO.sleep(WK.Wake.tick.ms(delay))
         Ticker.loop(f, inbox)
 
-# open the thread's KiCad project in the bundled KiCad
+def KiCadJob.selected(ok: Bool, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +rt: K.Rt) -> IO(Unit):
+  match ok:
+    case False{}:
+      GitJob.reply(inbox, client, id, False{}, J.Json.obj([J.KV{"kicad", J.Str{K.Rt.status(rt)}}, J.KV{"thread", J.Str{thread}}]))
+    case True{}:
+      do IO<Unit>:
+        fs : K.Files <- K.Files.read(cwd)
+        +err : String <- K.KiCad.open(rt, fs)
+        GitJob.reply(inbox, client, id, String.is_empty(err), J.Json.obj([J.KV{"text", J.Str{err}}, J.KV{"thread", J.Str{thread}}]))
+
+# Compatibility for non-hub jobs; normal Open uses the hub's cached Rt.
 def KiCadJob.run(+inbox: Chan(Msg), +client: U32, +id: String, +cwd: String, +home: String) -> IO(Unit):
   do IO<Unit>:
-    explicit : String <- Env.get("BACKPLANE_KICAD_CLI", "")
-    exe : String <- H.Sys.exe_dir()
-    rt : K.Rt <- K.Rt.resolve(explicit, exe, home)
+    text : String <- K.Io.text(home ++ "/kicad-health.json")
+    +rt : K.Rt = K.Rt.cached(Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{}))
+    KiCadJob.selected(String.eq(K.Rt.status(rt), "ok"), inbox, client, id, "", cwd, rt)
+
+def KiCadJob.route(kicad: Bool, +inbox: Chan(Msg), client: U32, id: String, thread: String, cwd: String, +rt: K.Rt, other: IO(Unit)) -> IO(Unit):
+  match kicad:
+    case True{}: IO.spawn(Unit, KiCadJob.selected(String.eq(K.Rt.status(rt), "ok"), inbox, client, id, thread, cwd, rt))
+    case False{}: other
+
+# Export jobs use the hub's cached health and run outside the event loop.
+def KExportJob.activity(done: Bool, +inbox: Chan(Msg), +thread: String, request: String, +result: J.Json) -> IO(Unit):
+  match done:
+    case False{}: IO.pure(Unit, Unit{})
+    case True{}:
+      do IO<Unit>:
+        +now : Nat <- Now.nat()
+        sent : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, Commit{[M.ActivityLogged{thread, "export10:" ++ request ++ ":" ++ Nat.show(now), "info", "kicad.export10", J.Json.get_str(result, "text", ""), now}]})
+        return Unit{}
+
+def KExportJob.pro(fs: K.Files) -> String:
+  match fs:
+    case K.Files{pro, _, _, _}: pro
+
+def KExportJob.run(+inbox: Chan(Msg), +client: U32, +id: String, +thread: String, cwd: String, +home: String, rt: K.Rt, +a: String) -> IO(Unit):
+  do IO<Unit>:
     fs : K.Files <- K.Files.read(cwd)
-    +err : String <- K.KiCad.open(rt, fs)
-    GitJob.reply(inbox, client, id, String.is_empty(err), J.Json.obj([J.KV{"text", J.Str{err}}]))
+    +pro : String = KExportJob.pro(fs)
+    +args : J.Json = Maybe.default(&2, J.Json, J.Json.parse(a), J.Null{})
+    +r : J.Json <- KEX.KExport.export(rt, home, pro, J.Json.get_bool(args, "anyway", False{}), J.Json.get_str(args, "report", ""), False{})
+    +opened : J.Json <- KEX.KExport.open(String.eq(J.Json.get_str(r, "export10", ""), "done"), r, pro)
+    KExportJob.activity(String.eq(J.Json.get_str(r, "export10", ""), "done"), inbox, thread, U32.show(client) ++ ":" ++ id, r)
+    GitJob.reply(inbox, client, id, Bool.not(String.eq(J.Json.get_str(r, "export10", ""), "error")), KH.KH.put.obj(opened, "thread", J.Str{thread}))
+
+def KExportJob.route(exporting: Bool, +inbox: Chan(Msg), client: U32, id: String, thread: String, cwd: String, home: String, rt: K.Rt, a: String, other: IO(Unit)) -> IO(Unit):
+  match exporting:
+    case True{}: IO.spawn(Unit, KExportJob.run(inbox, client, id, thread, cwd, home, rt, a))
+    case False{}: other
 
 # Design steps (core/hist.bend): after a tool call, the thread's KiCad
 # files snapshot (Git.step.capture); a change is logged in the thread as
@@ -2387,6 +2598,11 @@ def GitJob.run.k(i: Nat, +tx: AG.Tx, +job: String, +inbox: Chan(Msg), +client: U
       DirJob.run(inbox, client, id, thread, cwd, a)
     case 15n:
       PdfJob.run(inbox, client, id, home, a, b)
+    # the project card (core/order.bend): a = "on|off\n<server>", b = the intent the person wrote
+    case 16n:
+      IO.bind(J.Json, Unit, ODI.Od.look(home, cwd, thread, a), r => GitJob.reply(inbox, client, id, True{}, r))
+    case 17n:
+      IO.bind(J.Json, Unit, ODI.Od.intent(home, cwd, thread, a, b), r => GitJob.reply(inbox, client, id, True{}, r))
     case _:
       GitJob.run.git(tx, job, inbox, client, id, thread, cwd, a, b, home)
 
@@ -2401,7 +2617,7 @@ def GitJob.run.r(rv: Bool, +tx: AG.Tx, +job: String, +inbox: Chan(Msg), +client:
     case True{}:
       IO.bind(RVS.Res, Unit, RVS.RvJob.run(job, thread, cwd, a, b, home), r => RvJob.reply(r, inbox, client, id))
     case False{}:
-      GitJob.run.k(C.Codec.pos(["files", "snooze", "worktree", "merged", "wt_remove", "kicad", "title", "btw", "summary", "mech", "render", "step", "refs", "open", "dir", "pdf"], job), tx, job, inbox, client, id, thread, cwd, a, b, home)
+      GitJob.run.k(C.Codec.pos(["files", "snooze", "worktree", "merged", "wt_remove", "kicad", "title", "btw", "summary", "mech", "render", "step", "refs", "open", "dir", "pdf", "fab", "intent"], job), tx, job, inbox, client, id, thread, cwd, a, b, home)
 
 # a job the hub asked for: a git job, or one of the sidebar's
 def GitJob.run(+tx: AG.Tx, +job: String, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +a: String, +b: String, +home: String) -> IO(Unit):
@@ -2536,19 +2752,24 @@ def Turn.end(s: Socket, +pid: U32, +tag: String, +gen: String, +inbox: Chan(Msg)
   do IO<Unit>:
     Socket.close(s)
     code : U32 <- H.Proc.wait(pid)
+    AIO.Adopt.drop(B.Tag.thread(tag), pid)
+    tail : String <- H.Proc.errtail(pid)
     ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, TurnDone{tag})
     return Unit{}
 
 # a per-turn process that ended before its turn did: reaped, and a signal
 # asks its scope why (an out-of-memory kill says so, with the limit; the
 # scope is reset), here in the reader and never on the hub. The words for
-# the failed turn: the scope's, else dflt.
+# the failed turn: the scope's, else dflt, with the exit code or signal and
+# the end of what it wrote to stderr, secrets dropped (core/errtail.bend)
 def Turn.close(s: Socket, +pid: U32, +tag: String, +gen: String, +dflt: String) -> IO(String):
   do IO<String>:
     Socket.close(s)
     +code : U32 <- H.Proc.wait(pid)
-    +why : String = B.Exit.why(code)
-    return Bool.pick(String, String.is_empty(why), dflt, why)
+    AIO.Adopt.drop(B.Tag.thread(tag), pid)
+    +tail : String <- H.Proc.errtail(pid)
+    +k : Nat <- Keyring.probe()
+    return KR.Keyring.say(ER.Exit.say(dflt, B.Exit.why(code), code, tail), k)
 
 def Turn.failed(s: Socket, +pid: U32, +tag: String, +gen: String, +dflt: String, +inbox: Chan(Msg)) -> IO(Unit):
   do IO<Unit>:
@@ -2598,6 +2819,7 @@ def Codex.read(started: U32 & Socket, +thread: String, +gen: String, +inbox: Cha
     s2 : Socket <- H.Sock.shutdown(s)
     +input : Chan(String) <- Chan.new(String, 1)
     ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, TurnPid{thread, pid, input, gen})
+    AIO.Adopt.note(thread, pid)
     s3 : Socket <- IO.bind(Socket & Result<&1, &1, U32 & String, Socket>, Socket, H.Sock.dup(s2), d => Agent.watch.start(d, pid, thread, gen, inbox))
     Codex.reader(Fuel.forever(), s3, U.Lines.new(), False{}, pid, B.Tag.of(thread, pid), gen, inbox)
 
@@ -2608,8 +2830,14 @@ def Codex.started(r: Result<&1, &1, U32 & String, U32 & Socket>, +thread: String
     case Fail{e}:
       Codex.failed(e, thread, gen, inbox)
 
+def Codex.refuse(+thread: String, +gen: String, +inbox: Chan(Msg)) -> IO(Unit):
+  do IO<Unit>:
+    ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, SpawnFailed{thread, gen, "{\"type\":\"turn.failed\",\"message\":" ++ J.Json.show(J.Str{KR.Keyring.refusal("codex")}) ++ "}"})
+    return Unit{}
+
 def Codex.run(+args: List<&2, String>, +cwd: String, +thread: String, +gen: String, +inbox: Chan(Msg)) -> IO(Unit):
-  IO.bind(Result<&1, &1, U32 & String, U32 & Socket>, Unit, H.Proc.spawn("codex", args, cwd, 0), r => Codex.started(r, thread, gen, inbox))
+  Keyring.gate("codex", IO.bind(Result<&1, &1, U32 & String, U32 & Socket>, Unit, H.Proc.spawn("codex", args, cwd, 3), r => Codex.started(r, thread, gen, inbox)),
+    Codex.refuse(thread, gen, inbox))
 
 def Grok.stop(s: Socket, +pid: U32, +thread: String, +gen: String, +inbox: Chan(Msg)) -> IO(Unit):
   do IO<Unit>:
@@ -2691,6 +2919,7 @@ def Grok.duped(r: Socket & Result<&1, &1, U32 & String, Socket>, +pid: U32, +t: 
         +input : Chan(String) <- Chan.new(String, 64)
         IO.spawn(Unit, Agent.writer(Fuel.forever(), wr, input))
         ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, TurnPid{thread, pid, input, gen})
+        AIO.Adopt.note(thread, pid)
         ok2 : Result<&1, &1, String, Unit> <- Chan.send(String, input, MS.Proto.init(t))
         rd2 : Socket <- IO.bind(Socket & Result<&1, &1, U32 & String, Socket>, Socket, H.Sock.dup(rd), d => Agent.watch.start(d, pid, thread, gen, inbox))
         Grok.reader(Fuel.forever(), rd2, U.Lines.new(), AC.Acp.new(), t, pid, B.Tag.of(thread, pid), gen, input, inbox)
@@ -2714,8 +2943,14 @@ def Grok.started(r: Result<&1, &1, U32 & String, U32 & Socket>, +t: MS.Proto, +t
     case Fail{e}:
       Grok.failed(e, t, thread, gen, inbox)
 
+def Grok.refuse(+t: MS.Proto, +thread: String, +gen: String, +inbox: Chan(Msg)) -> IO(Unit):
+  do IO<Unit>:
+    ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, SpawnFailed{thread, gen, AC.Acp.failed(KR.Keyring.refusal(MS.Proto.name(t)))})
+    return Unit{}
+
 def Grok.run(+args: List<&2, String>, +t: MS.Proto, +cwd: String, +thread: String, +gen: String, +inbox: Chan(Msg)) -> IO(Unit):
-  IO.bind(Result<&1, &1, U32 & String, U32 & Socket>, Unit, H.Proc.spawn(MS.Proto.cmd(t), args, cwd, 0), r => Grok.started(r, t, thread, gen, inbox))
+  Keyring.gate(MS.Proto.name(t), IO.bind(Result<&1, &1, U32 & String, U32 & Socket>, Unit, H.Proc.spawn(MS.Proto.cmd(t), args, cwd, 3), r => Grok.started(r, t, thread, gen, inbox)),
+    Grok.refuse(t, thread, gen, inbox))
 
 # Updates
 # -------
@@ -2788,13 +3023,13 @@ def Cfg.port(c: Cfg) -> U32:
 
 def Net.token(n: Net) -> String:
   match n:
-    case Net{_, _, t, _, _, _, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc}:
+    case Net{_, _, t, _, _, _, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}:
       t
 
 # updates come from a package (SV.Chan.managed): the updater stays off
 def Net.managed(n: Net) -> Bool:
   match n:
-    case Net{_, _, _, _, _, _, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc}:
+    case Net{_, _, _, _, _, _, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}:
       mgd
 
 # Effects
@@ -2812,18 +3047,18 @@ def Hub.mcp_url(+cfg: Cfg, +thread: String) -> String:
 
 def Cfg.mtext(c: Cfg) -> String:
   match c:
-    case Cfg{_, _, _, _, _, _, _, Net{_, _, _, _, mt, _, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc}}:
+    case Cfg{_, _, _, _, _, _, _, Net{_, _, _, _, mt, _, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}}:
       mt
 
 def Cfg.rt(c: Cfg) -> K.Rt:
   match c:
-    case Cfg{_, _, _, _, _, _, _, Net{_, _, _, _, _, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc}}:
+    case Cfg{_, _, _, _, _, _, _, Net{_, _, _, _, _, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}}:
       rt
 
 def Hub.prompt.kicad(rt: K.Rt, ipc: Bool) -> String:
   match rt:
-    case K.Rt{+cli, fork, +v, +c}:
-      Q.Prompt.kicad(cli, fork, v, c, ipc)
+    case K.Rt{+cli, _, +v, +c, +h}:
+      Q.Prompt.kicad.health(J.Json.get_str(h, "status", "checking"), cli, v, c, J.Json.get_str(h, "why", ""), ipc)
 
 def Hub.prompt.files(+cwd: String, fs: K.Files) -> String:
   match fs:
@@ -2835,7 +3070,7 @@ def Hub.prompt.files(+cwd: String, fs: K.Files) -> String:
 # (keys: the API keys' block, server/apikeys.bend's Ak.prompt, "" for none)
 def Cfg.bn(c: Cfg) -> BN.Bn:
   match c:
-    case Cfg{_, _, _, _, _, _, _, Net{_, _, _, _, _, _, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc}}:
+    case Cfg{_, _, _, _, _, _, _, Net{_, _, _, _, _, _, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}}:
       bnx
 
 def Hub.prompt.machines.k(+m: String) -> String:
@@ -2844,17 +3079,33 @@ def Hub.prompt.machines.k(+m: String) -> String:
 def Hub.prompt.machines(+cfg: Cfg) -> String:
   Hub.prompt.machines.k(FM.Fm.prompt(FR.Fh.ins(BN.Bn.far(Cfg.bn(cfg)))))
 
-def Hub.prompt(+cfg: Cfg, +st: M.State, +thread: String, +cwd: String, fs: K.Files, +keys: String) -> String:
+# a buy thread's own instructions (Buy it made it: setting buy.<thread>)
+def Hub.prompt.buy(+st: M.State, +thread: String) -> String:
+  Bool.pick(String, BH.Bots.buy.is(st, thread), "\n\n" ++ OR.Order.prompt.buy(), "")
+
+# everything but the language line (agent.lang)
+def Hub.prompt.base(+cfg: Cfg, +st: M.State, +thread: String, +cwd: String, fs: K.Files, +keys: String) -> String:
   String.join([Cfg.prompt(cfg),
     Hub.prompt.kicad(Cfg.rt(cfg), Bool.not(String.eq(M.Setting.get(st, "kicad.ipc", "on"), "off"))),
     Hub.prompt.files(cwd, fs),
-    Q.Prompt.orchestration(M.Task.may_delegate(B.Task.depth(st, thread)), Cfg.mtext(cfg)), Q.Prompt.background()], "\n\n") ++ Bool.pick(String, String.is_empty(keys), "", "\n\n" ++ keys) ++ Hub.prompt.machines(cfg) ++ BH.Bots.prompt(st, thread, Cfg.home(cfg))
+    Q.Prompt.orchestration(M.Task.may_delegate(B.Task.depth(st, thread)), Cfg.mtext(cfg)), Q.Prompt.background(), OR.Order.prompt.project.k(OR.Order.enabled(M.Setting.get(st, "order.enabled", "off")))], "\n\n") ++ Bool.pick(String, String.is_empty(keys), "", "\n\n" ++ keys) ++ Hub.prompt.machines(cfg) ++ BH.Bots.prompt.k(RUN.Run.bot(st, thread), st, Cfg.home(cfg)) ++ Hub.prompt.buy(st, thread)
+
+def Hub.prompt(+cfg: Cfg, +st: M.State, +thread: String, +cwd: String, fs: K.Files, +keys: String) -> String:
+  Q.Prompt.lang.add(Hub.prompt.base(cfg, st, thread, cwd, fs, keys), M.Setting.get(st, "agent.lang", "off"))
+
+# pcbparts (a free parts-search MCP over the fab's and distributors' stock,
+# by manufacturer part number), given to every agent beside Backplane's own
+def Parts.mcp.url() -> String:
+  "https://pcbparts.dev/mcp"
+
+def Parts.mcp.claude() -> String:
+  "\"pcbparts\":{\"type\":\"http\",\"url\":\"" ++ Parts.mcp.url() ++ "\"}"
 
 def Hub.agent_args(+cfg: Cfg, +thread: String, +model: String, +session: String, +r: M.RuntimeMode, +i: M.InteractionMode, prompt: String, +effort: String, +gen: String) -> List<&2, String>:
   match cfg:
     case Cfg{+home, _, _, _, _, +dirs, _, _}:
       List.append(&2, String, Q.Claude.args(model, session, r, i, prompt, List.append(&2, String, dirs, [home ++ "/attachments"])), List.append(&2, String, AG.Effort.args("claude", effort), List.append(&2, String, Q.Claude.plugins(dirs),
-        ["--mcp-config", "{\"mcpServers\":{\"backplane\":{\"type\":\"http\",\"url\":\"" ++ Hub.mcp_url.g(cfg, thread, gen) ++ "\"}}}"])))
+        ["--mcp-config", "{\"mcpServers\":{\"backplane\":{\"type\":\"http\",\"url\":\"" ++ Hub.mcp_url.g(cfg, thread, gen) ++ "\"}," ++ Parts.mcp.claude() ++ "}}"])))
 
 # what a Claude process was started with; a turn asking for something else
 # (another model, mode or effort) restarts it
@@ -2904,7 +3155,7 @@ def Agent.is(m: Maybe<&2, Agent>) -> Bool:
 # Backplane instructions (the same runtime block Claude gets)
 def Codex.args(+cfg: Cfg, +thread: String, +model: String, +session: String, r: M.RuntimeMode, +text: String, prompt: String, +effort: String, +gen: String) -> List<&2, String>:
   List.concat(&2, String, [Codex.head.k(String.is_empty(session), session), Codex.sandbox(r), Codex.opt("-m", model), AG.Effort.args("codex", effort), AT.Att.codex(text),
-    ["-c", "mcp_servers.backplane.url=\"" ++ Hub.mcp_url.g(cfg, thread, gen) ++ "\"",
+    ["-c", "mcp_servers.backplane.url=\"" ++ Hub.mcp_url.g(cfg, thread, gen) ++ "\"", "-c", "mcp_servers.pcbparts.url=\"" ++ Parts.mcp.url() ++ "\"",
      "-c", "developer_instructions=" ++ J.Json.show(J.Str{prompt}), text]])
 
 # what a tailscale command printed ("" when it failed)
@@ -3007,13 +3258,13 @@ def Token.load(+home: String) -> IO(String):
 
 def Cfg.with_token(c: Cfg, +t: String) -> Cfg:
   match c:
-    case Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, _, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc}}:
-      Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc}}
+    case Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, _, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}}:
+      Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}}
 
 def Cfg.with_managed(c: Cfg, m: Bool) -> Cfg:
   match c:
-    case Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, _, lk, fc}}:
-      Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, m, lk, fc}}
+    case Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, _, lk, fc, ksx}}:
+      Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, m, lk, fc, ksx}}
 
 # Startup
 # -------
@@ -3067,7 +3318,7 @@ def Deploy.probe(+inbox: Chan(Msg)) -> IO(Unit):
   IO.bind(String, Unit, Env.get("BACKPLANE_DEPLOY_LOCKS", "/tmp/bp-bend.lock:/tmp/bp-wt-build.lock"), l => Deploy.probe.l(l, inbox))
 
 def Deploy.swap.sh() -> String:
-  "set -eu; src=$1; prefix=$2; [ -d \"$src\" ] || { echo \"no staged package at $src\"; exit 1; }; mkdir -p \"$prefix\"; if [ -d \"$src/web\" ]; then rm -rf \"$prefix/web.old\"; [ -d \"$prefix/web\" ] && mv \"$prefix/web\" \"$prefix/web.old\"; mv \"$src/web\" \"$prefix/web\"; fi; for f in backplane backplane-serve backplane-browser backplane-browser.stamp backplane-step2glb backplane-voice LICENSE; do if [ -e \"$src/$f\" ]; then mv -f \"$src/$f\" \"$prefix/$f\"; fi; done; rmdir \"$src\" 2>/dev/null || true; exit 0"
+  "set -eu; src=$1; prefix=$2; [ -d \"$src\" ] || { echo \"no staged package at $src\"; exit 1; }; mkdir -p \"$prefix\"; if [ -d \"$src/web\" ]; then rm -rf \"$prefix/web.old\"; [ -d \"$prefix/web\" ] && mv \"$prefix/web\" \"$prefix/web.old\"; mv \"$src/web\" \"$prefix/web\"; fi; for f in backplane backplane-serve backplane-browser backplane-browser.stamp backplane-step2glb backplane-voice backplane-kipc LICENSE; do if [ -e \"$src/$f\" ]; then mv -f \"$src/$f\" \"$prefix/$f\"; fi; done; rmdir \"$src\" 2>/dev/null || true; exit 0"
 
 def Deploy.swapped(ok: Bool, +out: String, +path: String, +inbox: Chan(Msg)) -> IO(Unit):
   match ok:
@@ -3100,6 +3351,97 @@ def Deploy.go.p(+stage: String, +exe: String, +inbox: Chan(Msg)) -> IO(Unit):
 
 def Deploy.go(+stage: String, +inbox: Chan(Msg)) -> IO(Unit):
   IO.bind(String, Unit, H.Sys.exe_dir(), exe => Deploy.go.p(stage, exe, inbox))
+
+# Deploying origin/main (hub.bend's Ship.*, core/ship.bend, docs/deploy.md)
+# -------------------------------------------------------------------------
+# Off the hub: git reads origin/main (Ship.look.sh: its commit, and which
+# candidate commits contain it); a build runs as a job of its own under
+# <home>/deploy/<commit>/ (run.sh, its log out, pkg the staged package, code
+# its exit status), started with setsid inside deploy.wrap (a command
+# prefix, default empty: then `systemd-run --user --scope` when the user's
+# systemd answers), so neither a hub OOM nor the restart it asks for cuts
+# it. The hub only watches it (Ship.check.sh every 5 s), also after its own
+# restart; a job is lost only when it is gone without an exit status.
+
+def Ship.look.sh() -> String:
+  "export GIT_TERMINAL_PROMPT=0\ncd \"$1\" 2>/dev/null || { echo \"ERR no checkout at $1\"; exit 0; }\ne=$(git fetch -q origin main 2>&1) || { echo \"ERR git fetch origin main: $(printf '%s' \"$e\" | tail -n 1)\"; exit 0; }\nt=$(git rev-parse --verify -q origin/main) || { echo \"ERR no origin/main in $1\"; exit 0; }\necho \"HEAD $t\"\nfor c in $(printf '%s' \"$2\" | tr ',' ' '); do git merge-base --is-ancestor \"$t\" \"$c\" 2>/dev/null && echo \"IN $c\"; done\nexit 0\n"
+
+def Ship.run.sh() -> String:
+  "pid_id() { q=$1; if [ -r \"/proc/$q/stat\" ]; then b=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null); st=$(sed 's/^.*) //' \"/proc/$q/stat\" | cut -d' ' -f20); echo \"$b:$st\"; elif ps -p \"$q\" >/dev/null 2>&1; then ps -o lstart= -p \"$q\" | tr -s ' ' '_'; fi; }\nalive() { p=$(cat \"$1/$2\" 2>/dev/null); [ -n \"$p\" ] && [ \"$p\" -gt 1 ] 2>/dev/null && [ -n \"$(pid_id \"$p\")\" ] && [ \"$(pid_id \"$p\")\" = \"$(cat \"$1/$2id\" 2>/dev/null)\" ]; }\nd=$1; repo=$2; c=$3\necho $$ > \"$d/pid\"; pid_id $$ > \"$d/pidid\"\nlog=$d/out; : > \"$log\"\nrm -rf \"$d/wt\" \"$d/pkg\"\nrc=0\ngit -C \"$repo\" worktree add -q --detach \"$d/wt\" \"$c\" >>\"$log\" 2>&1 || rc=$?\nif [ \"$rc\" = 0 ]; then (cd \"$d/wt\" && BP_BUILD_LOCKED=1 exec scripts/dev.sh stage \"$d/pkg\") >>\"$log\" 2>&1 </dev/null || rc=$?; fi\ngit -C \"$repo\" worktree remove --force \"$d/wt\" >>\"$log\" 2>&1; rm -rf \"$d/wt\"; git -C \"$repo\" worktree prune >/dev/null 2>&1\nif [ \"$rc\" = 0 ] && [ ! -d \"$d/pkg\" ]; then echo \"no package was staged in $d/pkg\" >>\"$log\"; rc=1; fi\nif [ \"$rc\" = 0 ]; then for x in \"$d\"/../*/pkg; do [ -d \"$x\" ] && [ ! \"$x\" -ef \"$d/pkg\" ] && rm -rf \"$x\"; done; fi\necho \"$rc\" > \"$d/code.tmp\" && mv \"$d/code.tmp\" \"$d/code\"\n"
+
+def Ship.launch.sh() -> String:
+  "pid_id() { q=$1; if [ -r \"/proc/$q/stat\" ]; then b=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null); st=$(sed 's/^.*) //' \"/proc/$q/stat\" | cut -d' ' -f20); echo \"$b:$st\"; elif ps -p \"$q\" >/dev/null 2>&1; then ps -o lstart= -p \"$q\" | tr -s ' ' '_'; fi; }\nalive() { p=$(cat \"$1/$2\" 2>/dev/null); [ -n \"$p\" ] && [ \"$p\" -gt 1 ] 2>/dev/null && [ -n \"$(pid_id \"$p\")\" ] && [ \"$(pid_id \"$p\")\" = \"$(cat \"$1/$2id\" 2>/dev/null)\" ]; }\nb=$1; repo=$2; c=$3; wrap=$4; run=$5\nd=$b/$(printf '%s' \"$c\" | cut -c1-12)\nmkdir -p \"$d\" || { echo \"ERR cannot make $d\"; exit 0; }\nif [ -e \"$d/started\" ]; then echo \"RUNNING\"; exit 0; fi\nfor x in \"$b\"/*; do [ \"$x\" = \"$d\" ] && continue; [ -d \"$x/wt\" ] || continue; if [ -e \"$x/code\" ] || { ! alive \"$x\" pid && ! alive \"$x\" gpid; }; then git -C \"$repo\" worktree remove --force \"$x/wt\" >/dev/null 2>&1; rm -rf \"$x/wt\"; fi; done\ngit -C \"$repo\" worktree prune >/dev/null 2>&1\nif [ -z \"$wrap\" ] && command -v systemd-run >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1; then wrap=\"systemd-run --user --scope -q --\"; fi\nprintf '%s\\n' \"$run\" > \"$d/run.sh\"\nprintf '%s sh \"%s/run.sh\" \"%s\" \"%s\" \"%s\"\\n' \"$wrap\" \"$d\" \"$d\" \"$repo\" \"$c\" > \"$d/go.sh\"\n: > \"$d/started\"\nif command -v setsid >/dev/null 2>&1; then setsid nohup sh \"$d/go.sh\" > \"$d/launch.out\" 2>&1 < /dev/null &\nelse nohup sh \"$d/go.sh\" > \"$d/launch.out\" 2>&1 < /dev/null &\nfi\ng=$!\necho \"$g\" > \"$d/gpid\"; pid_id \"$g\" > \"$d/gpidid\"\necho \"PID $g $(cat \"$d/gpidid\")\"\n"
+
+def Ship.check.sh() -> String:
+  "pid_id() { q=$1; if [ -r \"/proc/$q/stat\" ]; then b=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null); st=$(sed 's/^.*) //' \"/proc/$q/stat\" | cut -d' ' -f20); echo \"$b:$st\"; elif ps -p \"$q\" >/dev/null 2>&1; then ps -o lstart= -p \"$q\" | tr -s ' ' '_'; fi; }\nalive() { p=$(cat \"$1/$2\" 2>/dev/null); [ -n \"$p\" ] && [ \"$p\" -gt 1 ] 2>/dev/null && [ -n \"$(pid_id \"$p\")\" ] && [ \"$(pid_id \"$p\")\" = \"$(cat \"$1/$2id\" 2>/dev/null)\" ]; }\nd=$1\nst() { echo \"VERSION $(sed -n 's/.*built \\([^ ]*\\).*/\\1/p' \"$d/out\" 2>/dev/null | tail -n 1)\"; echo \"STAGE $d/pkg\"; tail -n 15 \"$d/out\" 2>/dev/null | sed 's/\\x1b\\[[0-9;]*m//g'; }\n[ -e \"$d/code\" ] && { echo \"STATUS done $(cat \"$d/code\")\"; st; exit 0; }\nif alive \"$d\" pid || alive \"$d\" gpid; then echo \"STATUS running\"; exit 0; fi\n[ -e \"$d/code\" ] && { echo \"STATUS done $(cat \"$d/code\")\"; st; exit 0; }\necho \"STATUS gone\"; st\n"
+
+def Ship.base(+home: String) -> String:
+  home ++ "/deploy"
+
+def Ship.dir(+home: String, +commit: String) -> String:
+  Ship.base(home) ++ "/" ++ String.take(commit, 12n)
+
+def ShipJob.say(+inbox: Chan(Msg), m: Msg) -> IO(Unit):
+  do IO<Unit>:
+    ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, m)
+    return Unit{}
+
+def ShipJob.out(r: P.Ran) -> String:
+  match r:
+    case P.Ran{_, out}:
+      out
+
+# origin/main read for a deploy_main call, which the hub then answers
+def ShipJob.ask(+repo: String, +cands: String, +thread: String, +body: String, +reply: Chan(String), +inbox: Chan(Msg)) -> IO(Unit):
+  do IO<Unit>:
+    r : P.Ran <- P.Proc.run("sh", ["-c", Ship.look.sh(), "sh", repo, cands], "/")
+    ShipJob.say(inbox, ShipAsked{thread, body, reply, ShipJob.out(r)})
+
+# origin/main read again (why: next, follow)
+def ShipJob.next(+repo: String, +cands: String, +why: String, +inbox: Chan(Msg)) -> IO(Unit):
+  do IO<Unit>:
+    r : P.Ran <- P.Proc.run("sh", ["-c", Ship.look.sh(), "sh", repo, cands], "/")
+    ShipJob.say(inbox, ShipNewest{why, ShipJob.out(r)})
+
+def ShipJob.got.k(run: Bool, +out: String, +commit: String, +inbox: Chan(Msg), k: Unit -> IO(Unit)) -> IO(Unit):
+  match run:
+    case True{}:
+      k(Unit{})
+    case False{}:
+      ShipJob.say(inbox, ShipDone{commit, out})
+
+def ShipJob.got(r: P.Ran, +commit: String, +inbox: Chan(Msg), k: Unit -> IO(Unit)) -> IO(Unit):
+  match r:
+    case P.Ran{_, +out}:
+      ShipJob.got.k(String.eq(SHP.Ran.status(out), "running"), out, commit, inbox, k)
+
+# the build's job looked at every 5 s until it ends or is gone
+def ShipJob.loop(fuel: Nat, +d: String, +commit: String, +inbox: Chan(Msg)) -> IO(Unit):
+  match fuel:
+    case 0n:
+      IO.pure(Unit, Unit{})
+    case 1n+f:
+      do IO<Unit>:
+        r : P.Ran <- P.Proc.run("sh", ["-c", Ship.check.sh(), "sh", d], "/")
+        ShipJob.got(r, commit, inbox, u => IO.bind(Unit, Unit, IO.sleep(5000), v => ShipJob.loop(f, d, commit, inbox)))
+
+def ShipJob.pid.k(+out: String, +commit: String, +inbox: Chan(Msg)) -> IO(Unit):
+  match out:
+    case SNil{}:
+      IO.pure(Unit, Unit{})
+    case SCon{_, _}:
+      ShipJob.say(inbox, ShipPid{commit, out})
+
+# launched now: the hub records its pid (ShipPid); launched before (a
+# restart) or not at all, nothing is recorded and the look tells
+def ShipJob.launched(+out: String, +commit: String, +inbox: Chan(Msg)) -> IO(Unit):
+  ShipJob.pid.k(SHP.Look.pick(String.lines(out), "PID "), commit, inbox)
+
+def ShipJob.run(+repo: String, +wrap: String, +home: String, +commit: String, +inbox: Chan(Msg)) -> IO(Unit):
+  do IO<Unit>:
+    r : P.Ran <- P.Proc.run("sh", ["-c", Ship.launch.sh(), "sh", Ship.base(home), repo, commit, wrap, Ship.run.sh()], "/")
+    ShipJob.launched(ShipJob.out(r), commit, inbox)
+    ShipJob.loop(Fuel.forever(), Ship.dir(home, commit), commit, inbox)
 
 def Upgrade.done.k(ok: Bool, force: Bool, +err: String, +inbox: Chan(Msg)) -> IO(Unit):
   match ok:
@@ -3144,12 +3486,12 @@ def Agent.pid_is(m: Maybe<&2, Agent>, +pid: U32) -> Bool:
 
 def Cfg.models(c: Cfg) -> String:
   match c:
-    case Cfg{_, _, _, _, _, _, _, Net{_, _, _, ms, _, _, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc}}:
+    case Cfg{_, _, _, _, _, _, _, Net{_, _, _, ms, _, _, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}}:
       ms
 
 def Cfg.pk(c: Cfg) -> Maybe<&2, Chan(PK.PMsg)>:
   match c:
-    case Cfg{_, _, _, _, _, _, _, Net{_, _, _, _, _, _, _, pk, tmx, mc, pvx, bnx, mgd, lk, fc}}:
+    case Cfg{_, _, _, _, _, _, _, Net{_, _, _, _, _, _, _, pk, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}}:
       pk
 
 def Park.put(m: Maybe<&2, Chan(PK.PMsg)>, +msg: PK.PMsg) -> IO(Unit):
@@ -3284,10 +3626,20 @@ def ZoneJob.each(xs: List<&2, String>, +now: Nat, acc: List<&2, M.Change>) -> IO
 def ZoneJob.machine.log(+z: String, +old: String, +now: Nat) -> List<&2, M.Change>:
   Bool.pick(List<&2, M.Change>, Bool.or(String.is_empty(z), String.eq(z, old)), Nil{}, [M.SettingSet{"tz.machine", z, now}])
 
+# a newly found machine zone comes with its rule, so a routine in the
+# person's zone (which falls back to the machine's) is due from the next
+# tick on, not one tick after the rule is looked up
+def ZoneJob.machine.rule(same: Bool, +z: String, +old: String, +now: Nat) -> IO(List<&2, M.Change>):
+  match same:
+    case True{}:
+      IO.pure(List<&2, M.Change>, Nil{})
+    case False{}:
+      IO.bind(String, List<&2, M.Change>, ZoneJob.rule(z), rule => IO.pure(List<&2, M.Change>, List.append(&2, M.Change, ZoneJob.machine.log(z, old, now), ZoneJob.log(z, rule, "", now))))
+
 def ZoneJob.machine.log.go(detect: Bool, +old: String, +now: Nat) -> IO(List<&2, M.Change>):
   match detect:
     case True{}:
-      IO.bind(String, List<&2, M.Change>, ZoneJob.machine(), z => IO.pure(List<&2, M.Change>, ZoneJob.machine.log(z, old, now)))
+      IO.bind(String, List<&2, M.Change>, ZoneJob.machine(), +z => ZoneJob.machine.rule(Bool.or(String.is_empty(z), String.eq(z, old)), z, old, now))
     case False{}:
       IO.pure(List<&2, M.Change>, Nil{})
 
@@ -3336,10 +3688,10 @@ def Desk.tell(seen: Bool, +cl: List<&2, Client>, +st: M.State, +thread: String, 
 
 # the reply now, or (for a request that waits on the user) parked until
 # the ask it opened is answered
-def Hub.mcp.send(later: Bool, +park: String, +body: String, +text: String, +reply: Chan(String), +cfg: Cfg) -> IO(Unit):
+def Hub.mcp.send(later: Bool, omp: Bool, +park: String, +body: String, +text: String, +reply: Chan(String), +cfg: Cfg) -> IO(Unit):
   match later:
     case True{}:
-      Park.put(Cfg.pk(cfg), PK.PPark{park, body, reply})
+      Park.put(Cfg.pk(cfg), PK.PPark{park, body, reply, omp})
     case False{}:
       do IO<Unit>:
         ok : Result<&1, &1, String, Unit> <- Chan.send(String, reply, text)
@@ -3347,27 +3699,37 @@ def Hub.mcp.send(later: Bool, +park: String, +body: String, +text: String, +repl
 
 def Net.with_br(n: Net, q: Chan(BR.BMsg)) -> Net:
   match n:
-    case Net{a, b, c, d, e, f, _, g, i, mc, pvx, bnx, mgd, lk, fc}:
-      Net{a, b, c, d, e, f, Some{q}, g, i, mc, pvx, bnx, mgd, lk, fc}
+    case Net{a, b, c, d, e, f, _, g, i, mc, pvx, bnx, mgd, lk, fc, ksx}:
+      Net{a, b, c, d, e, f, Some{q}, g, i, mc, pvx, bnx, mgd, lk, fc, ksx}
+
+def Net.with_ks(n: Net, q: Chan(KSV.KMsg)) -> Net:
+  match n:
+    case Net{a, b, c, d, e, f, g, h, i, mc, pvx, bnx, mgd, lk, fc, _}:
+      Net{a, b, c, d, e, f, g, h, i, mc, pvx, bnx, mgd, lk, fc, Some{q}}
+
+def Cfg.ks(c: Cfg) -> Maybe<&2, Chan(KSV.KMsg)>:
+  match c:
+    case Cfg{_, _, _, _, _, _, _, Net{_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, x}}:
+      x
 
 def Net.with_tm(n: Net, q: Chan(TM.TMsg)) -> Net:
   match n:
-    case Net{a, b, c, d, e, f, g, h, _, mc, pvx, bnx, mgd, lk, fc}:
-      Net{a, b, c, d, e, f, g, h, Some{q}, mc, pvx, bnx, mgd, lk, fc}
+    case Net{a, b, c, d, e, f, g, h, _, mc, pvx, bnx, mgd, lk, fc, ksx}:
+      Net{a, b, c, d, e, f, g, h, Some{q}, mc, pvx, bnx, mgd, lk, fc, ksx}
 
 def Net.with_pv(n: Net, q: Chan(PV.PMsg)) -> Net:
   match n:
-    case Net{a, b, c, d, e, f, g, h, i, mc, _, bnx, mgd, lk, fc}:
-      Net{a, b, c, d, e, f, g, h, i, mc, Some{q}, bnx, mgd, lk, fc}
+    case Net{a, b, c, d, e, f, g, h, i, mc, _, bnx, mgd, lk, fc, ksx}:
+      Net{a, b, c, d, e, f, g, h, i, mc, Some{q}, bnx, mgd, lk, fc, ksx}
 
 def Cfg.pv(c: Cfg) -> Maybe<&2, Chan(PV.PMsg)>:
   match c:
-    case Cfg{_, _, _, _, _, _, _, Net{_, _, _, _, _, _, _, _, _, _, pv, bnx, mgd, lk, fc}}:
+    case Cfg{_, _, _, _, _, _, _, Net{_, _, _, _, _, _, _, _, _, _, pv, bnx, mgd, lk, fc, ksx}}:
       pv
 
 def Cfg.tm(c: Cfg) -> Maybe<&2, Chan(TM.TMsg)>:
   match c:
-    case Cfg{_, _, _, _, _, _, _, Net{_, _, _, _, _, _, _, _, tm, mc, pvx, bnx, mgd, lk, fc}}:
+    case Cfg{_, _, _, _, _, _, _, Net{_, _, _, _, _, _, _, _, tm, mc, pvx, bnx, mgd, lk, fc, ksx}}:
       tm
 
 # a shell's output, to the hub (which sends it to every client)
@@ -3433,6 +3795,12 @@ def Plot.put(m: Maybe<&2, Chan(PV.PMsg)>, +msg: PV.PMsg) -> IO(Unit):
     case None{}:
       IO.pure(Unit, Unit{})
 
+def CefCfg.depart(c: Cfg, +client: U32) -> Cfg:
+  match c:
+    case Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, +bnx, mgd, lk, fc, ksx}}:
+      Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx,
+        BN.Bn.with_cef(bnx, CF.Cef.session.leave(BN.Bn.cef(bnx), client)), mgd, lk, fc, ksx}}
+
 def Hub.leave(h: Hub, +client: U32, +now: Nat) -> IO(Hub):
   match h:
     case Hub{st, f, ls, +cl, as, inbox, +cfg, note}:
@@ -3441,7 +3809,7 @@ def Hub.leave(h: Hub, +client: U32, +now: Nat) -> IO(Hub):
         Plot.put(Cfg.pv(cfg), PV.PStop{client})
         +cl2 : List<&2, Client> = Clients.drop(cl, client)
         cl3 : List<&2, Client> <- Desk.say(DK.Desk.text(Clients.looks(cl), now), cl2, now)
-        return Hub{st, f, ls, cl3, as, inbox, cfg, note}
+        return Hub{st, f, ls, cl3, as, inbox, CefCfg.depart(cfg, client), note}
 
 # kicad.watch: kind "board", "schematic", "3d", "3d-bare" or "3d-full"
 # shows it, anything else stops
@@ -3777,8 +4145,8 @@ def Term.json(+thread: String, bs: List<&2, U32>) -> String:
 
 def Net.with_pk(n: Net, q: Chan(PK.PMsg)) -> Net:
   match n:
-    case Net{a, b, c, d, e, f, g, _, i, mc, pvx, bnx, mgd, lk, fc}:
-      Net{a, b, c, d, e, f, g, Some{q}, i, mc, pvx, bnx, mgd, lk, fc}
+    case Net{a, b, c, d, e, f, g, _, i, mc, pvx, bnx, mgd, lk, fc, ksx}:
+      Net{a, b, c, d, e, f, g, Some{q}, i, mc, pvx, bnx, mgd, lk, fc, ksx}
 
 def Browser.exe() -> IO(String):
   do IO<String>:
@@ -3788,7 +4156,7 @@ def Browser.exe() -> IO(String):
 
 def Cfg.br(c: Cfg) -> Maybe<&2, Chan(BR.BMsg)>:
   match c:
-    case Cfg{_, _, _, _, _, _, _, Net{_, _, _, _, _, _, br, pkx, tmx, mc, pvx, bnx, mgd, lk, fc}}:
+    case Cfg{_, _, _, _, _, _, _, Net{_, _, _, _, _, _, br, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}}:
       br
 
 def Preview.shot(+o: J.Json) -> List<&2, J.Json>:
@@ -3881,10 +4249,15 @@ def Hub.term_to(h: Hub, +client: U32, +key: String, +cols: U32, +rows: U32, data
         cl2 : List<&2, Client> <- Hub.term_to.k(U32.is_eq(client, TM.Et.all()), cl, client, Term.json.reset(key, cols, rows, data))
         return Hub{st, f, ls, cl2, as, inbox, cfg, note}
 
+def Cfg.with_rt(c: Cfg, rt: K.Rt) -> Cfg:
+  match c:
+    case Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, _, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}}:
+      Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}}
+
 def Cfg.with_models(c: Cfg, +ms: String, +mt: String) -> Cfg:
   match c:
-    case Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, _, _, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc}}:
-      Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc}}
+    case Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, _, _, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}}:
+      Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}}
 
 def Hub.models.k(h: Hub) -> IO(Hub):
   match h:
@@ -3893,15 +4266,272 @@ def Hub.models.k(h: Hub) -> IO(Hub):
         cl2 : List<&2, Client> <- Wire.all(cl, "{\"t\":\"info\",\"info\":" ++ J.Json.show(Hub.info(cfg)) ++ "}")
         return Hub{st, f, ls, cl2, as, inbox, cfg, note}
 
+# One check at a time. A retry while busy is remembered; an answer for
+# an old path is discarded and immediately checked with the new setting.
+def KJob.run(+inbox: Chan(Msg), +home: String, +setting: String, force: Bool, +last: K.Rt) -> IO(Unit):
+  do IO<Unit>:
+    exe : String <- H.Sys.exe_dir()
+    rt : K.Rt <- K.Rt.refresh(home, setting, exe, force, last)
+    ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, KFound{setting, rt})
+    return Unit{}
+
+def Hub.kcheck.k(busy: Bool, h: Hub, force: Bool) -> IO(Hub):
+  match busy h:
+    case True{} Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      IO.pure(Hub, Hub{st, f, ls, cl, as, inbox, Cfg.with_rt(cfg, K.Rt.set(Cfg.rt(cfg), "again", J.Flag{Bool.or(force, J.Json.get_bool(K.Rt.health(Cfg.rt(cfg)), "again", False{}))})), note})
+    case False{} Hub{+st, f, ls, cl, as, +inbox, +cfg, note}:
+      do IO<Hub>:
+        IO.spawn(Unit, KJob.run(inbox, Cfg.home(cfg), M.Setting.get(st, "kicad.path", ""), force, Cfg.rt(cfg)))
+        return Hub{st, f, ls, cl, as, inbox, Cfg.with_rt(cfg, K.Rt.set(Cfg.rt(cfg), "busy", J.Flag{True{}})), note}
+
+def Hub.kcheck.before(changed: Bool, busy: Bool, h: Hub, force: Bool) -> IO(Hub):
+  match changed:
+    case True{}: IO.bind(Hub, Hub, Hub.models.k(h), h2 => Hub.kcheck.k(busy, h2, force))
+    case False{}: Hub.kcheck.k(busy, h, force)
+
+def Hub.kcheck(h: Hub, force: Bool) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
+      +changed = Bool.and(Bool.not(String.eq(M.Setting.get(st, "kicad.path", ""), J.Json.get_str(K.Rt.health(Cfg.rt(cfg)), "setting", ""))), Bool.not(String.eq(K.Rt.status(Cfg.rt(cfg)), "checking")))
+      Hub.kcheck.before(changed, J.Json.get_bool(K.Rt.health(Cfg.rt(cfg)), "busy", False{}),
+        Hub{st, f, ls, cl, as, inbox, Cfg.with_rt(cfg, K.Rt.set(Cfg.rt(cfg), "status", J.Str{Bool.pick(String, changed, "checking", K.Rt.status(Cfg.rt(cfg)))})), note}, force)
+
+def KJob.again(again: Bool, +inbox: Chan(Msg)) -> IO(Unit):
+  match again:
+    case True{}: Self.post(inbox, KProbe{True{}})
+    case False{}: IO.pure(Unit, Unit{})
+
+def Hub.kfound.k(current: Bool, +again: Bool, h: Hub, +rt: K.Rt) -> IO(Hub):
+  match current h:
+    case False{} Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      Hub.kcheck(Hub{st, f, ls, cl, as, inbox, Cfg.with_rt(cfg, K.Rt.set(Cfg.rt(cfg), "busy", J.Flag{False{}})), note}, True{})
+    case True{} Hub{st, f, ls, cl, as, +inbox, +cfg, note}:
+      do IO<Hub>:
+        K.Rt.save(Cfg.home(cfg), K.Rt.set(K.Rt.set(rt, "busy", J.Flag{False{}}), "again", J.Flag{False{}}))
+        KJob.again(again, inbox)
+        Hub.models.k(Hub{st, f, ls, cl, as, inbox, Cfg.with_rt(cfg, K.Rt.set(K.Rt.set(rt, "busy", J.Flag{False{}}), "again", J.Flag{False{}})), note})
+
+# A probe does not broadcast if only the file fingerprint changed.
+def Hub.kfound.same(same: Bool, h: Hub, +setting: String, +rt: K.Rt) -> IO(Hub):
+  match same h:
+    case True{} Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      do IO<Hub>:
+        K.Rt.save(Cfg.home(cfg), K.Rt.set(K.Rt.set(rt, "busy", J.Flag{False{}}), "again", J.Flag{False{}}))
+        return Hub{st, f, ls, cl, as, inbox, Cfg.with_rt(cfg, K.Rt.set(K.Rt.set(rt, "busy", J.Flag{False{}}), "again", J.Flag{False{}})), note}
+    case False{} Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
+      Hub.kfound.k(String.eq(setting, M.Setting.get(st, "kicad.path", "")), J.Json.get_bool(K.Rt.health(Cfg.rt(cfg)), "again", False{}), Hub{st, f, ls, cl, as, inbox, cfg, note}, rt)
+
+# kicad_ipc and kicad_ipc_status
+# ------------------------------
+# A command for a project's headless KiCad (src/server/kserve.bend). It is
+# answered off the hub's thread: the project is found from the path, the
+# runtime's health and the kicad.ipc setting say whether IPC may be used
+# (core/kserve.bend's KS.gate), commands a headless KiCad cannot answer are
+# refused at once, and anything else goes to the project's server. When IPC
+# is unavailable the error says why and names the fallback, and the thread
+# gets an activity line "KiCad: fell back to files: <why>".
+
+def KIpc.is(+o: J.Json) -> Bool:
+  Bool.and(String.eq(J.Json.get_str(o, "method", ""), "tools/call"), String.starts_with(J.Json.get_str(J.Json.get_obj(o, "params"), "name", ""), "kicad_ipc"))
+
+def KIpc.args(+o: J.Json) -> J.Json:
+  J.Json.get_obj(J.Json.get_obj(o, "params"), "arguments")
+
+def KIpc.is_status(+o: J.Json) -> Bool:
+  String.eq(J.Json.get_str(J.Json.get_obj(o, "params"), "name", ""), "kicad_ipc_status")
+
+def KIpc.id(+o: J.Json) -> String:
+  J.Json.as_raw(J.Json.get(o, "id"), "null")
+
+# the command: kicad_ipc_status asks for the runtime's capabilities
+def KIpc.type(+o: J.Json) -> String:
+  Bool.pick(String, KIpc.is_status(o), "kiapi.backplane.GetCapabilities", J.Json.get_str(KIpc.args(o), "type", ""))
+
+def KIpc.path(+o: J.Json) -> String:
+  J.Json.get_str(KIpc.args(o), "path", "")
+
+# the command's fields (a missing message is {})
+def KIpc.msg(m: J.Json) -> J.Json:
+  match m:
+    case J.Obj{fs}:
+      J.Obj{fs}
+    case _:
+      J.Json.obj(Nil{})
+
+def KIpc.reply(+id: String, ok: Bool, body: J.Json) -> String:
+  "{\"jsonrpc\":\"2.0\",\"id\":" ++ id ++ ",\"result\":" ++ J.Json.show(MC.Mcp.content(ok, body)) ++ "}"
+
+def KIpc.send(+reply: Chan(String), +id: String, ok: Bool, body: J.Json) -> IO(Unit):
+  BR.Browser.say(reply, KIpc.reply(id, ok, body))
+
+def KIpc.fail(+reply: Chan(String), +id: String, +text: String) -> IO(Unit):
+  KIpc.send(reply, id, False{}, MC.Mcp.fail(text))
+
+def KIpc.log(+inbox: Chan(Msg), +thread: String, +id: String, +why: String) -> IO(Unit):
+  do IO<Unit>:
+    +now : Nat <- Now.nat()
+    ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, Commit{[M.ActivityLogged{thread, "kicad-ipc:" ++ Nat.show(now) ++ ":" ++ id, "info", "kicad", KSC.KS.activity(why), now}]})
+    return Unit{}
+
+# IPC is unavailable: the error names the fallback, the thread is told
+def KIpc.fallback(+inbox: Chan(Msg), +thread: String, +reply: Chan(String), +id: String, +why: String, +cli: String) -> IO(Unit):
+  do IO<Unit>:
+    KIpc.log(inbox, thread, id, why)
+    KIpc.fail(reply, id, KSC.KS.unavailable(why, cli))
+
+def KIpc.pro.of(fs: K.Files) -> String:
+  match fs:
+    case K.Files{pro, _, _, _}:
+      pro
+
+def KIpc.pro.dir(+dir: String) -> IO(String):
+  IO.bind(K.Files, String, K.Files.read(dir), fs => IO.pure(String, KIpc.pro.of(fs)))
+
+def KIpc.pro.k(pro: Bool, absolute: Bool, +path: String) -> IO(String):
+  match pro absolute:
+    case True{} _:
+      IO.pure(String, path)
+    case False{} True{}:
+      KIpc.pro.dir(K.Files.dir(path))
+    case False{} False{}:
+      IO.pure(String, "")
+
+# the project of a path: the .kicad_pro itself, or the one beside a board or schematic ("" for none)
+def KIpc.pro(+path: String) -> IO(String):
+  KIpc.pro.k(String.ends_with(path, ".kicad_pro"), String.starts_with(path, "/"), path)
+
+def KIpc.env(rt: K.Rt) -> KSV.KEnv:
+  match rt:
+    case K.Rt{+cli, _, v, _, +h}:
+      KSV.KEnv{cli, K.Rt.root(cli), KSC.KS.caps.safe(KH.KH.strings(J.Json.elems(J.Json.get_obj(h, "caps"))), J.Json.get_nat(h, "api", 0n)), v}
+
+# why IPC cannot be used right now ("" when it can)
+def KIpc.gate(rt: K.Rt, +setting: String) -> String:
+  match rt:
+    case K.Rt{_, _, +v, _, +h}:
+      KSC.KS.gate(J.Json.get_str(h, "status", "checking"), v, J.Json.get_str(h, "why", ""), setting)
+
+# what is wrong with the request itself ("" when nothing)
+def KIpc.check(+ty: String, +path: String, +pro: String) -> String:
+  Bool.pick(String, String.is_empty(ty), "type is required: the protobuf command, e.g. kiapi.board.commands.GetItems",
+    Bool.pick(String, Bool.not(String.starts_with(path, "/")), "path must be the absolute path of the project's .kicad_pro, .kicad_pcb or .kicad_sch",
+      Bool.pick(String, String.is_empty(pro), "no KiCad project (.kicad_pro) found for " ++ path,
+        Bool.pick(String, KSC.KS.headless_refused(ty), KSC.KS.refusal(), ""))))
+
+def KIpc.body(+o: J.Json) -> J.Json:
+  J.Json.obj([J.KV{"type", J.Str{J.Json.get_str(o, "type", "")}}, J.KV{"message", J.Json.get_obj(o, "message")}])
+
+# KiCad's own error, with its status
+def KIpc.err(+o: J.Json) -> String:
+  Bool.pick(String, String.is_empty(J.Json.get_str(o, "status", "")), J.Json.get_str(o, "error", "KiCad did not answer"),
+    "KiCad answered " ++ J.Json.get_str(o, "status", "") ++ ": " ++ J.Json.get_str(o, "error", ""))
+
+def KIpc.fin.plain(ok: Bool, +o: J.Json, +reply: Chan(String), +id: String) -> IO(Unit):
+  match ok:
+    case True{}:
+      KIpc.send(reply, id, True{}, KIpc.body(o))
+    case False{}:
+      KIpc.fail(reply, id, KIpc.err(o))
+
+def KIpc.fin.ok(status: Bool, ok: Bool, +o: J.Json, +reply: Chan(String), +id: String, +lines: String) -> IO(Unit):
+  match status:
+    case True{}:
+      KIpc.send(reply, id, True{}, J.Json.obj([J.KV{"server", J.Str{KSC.KS.note(lines)}}, J.KV{"servers", J.Str{lines}}, J.KV{"capabilities", J.Json.get_obj(o, "message")},
+        J.KV{"detail", J.Str{Bool.pick(String, ok, "", KIpc.err(o))}}]))
+    case False{}:
+      KIpc.fin.plain(ok, o, reply, id)
+
+def KIpc.fin.k(fallback: Bool, ok: Bool, +o: J.Json, +inbox: Chan(Msg), +thread: String, +reply: Chan(String), +id: String, status: Bool, +lines: String) -> IO(Unit):
+  match fallback:
+    case True{}:
+      do IO<Unit>:
+        KIpc.log(inbox, thread, id, J.Json.get_str(o, "why", ""))
+        KIpc.fail(reply, id, J.Json.get_str(o, "error", ""))
+    case False{}:
+      KIpc.fin.ok(status, ok, o, reply, id, lines)
+
+# the project's server is asked, and the answer goes back
+def KIpc.run(+q: Chan(KSV.KMsg), +pro: String, env: KSV.KEnv, +ty: String, msg: J.Json, status: Bool, +inbox: Chan(Msg), +thread: String, +reply: Chan(String), +id: String) -> IO(Unit):
+  do IO<Unit>:
+    +line : String <- KSV.KServe.ask_on(q, pro, env, ty, msg)
+    +lines : String <- KSV.KServe.info_on(q)
+    +o : J.Json = KSV.KServe.parse(line)
+    KIpc.fin.k(J.Json.get_bool(o, "fallback", False{}), J.Json.get_bool(o, "ok", False{}), o, inbox, thread, reply, id, status, lines)
+
+def KIpc.go.run(m: Maybe<&2, Chan(KSV.KMsg)>, +rt: K.Rt, +inbox: Chan(Msg), +thread: String, +o: J.Json, +reply: Chan(String), +pro: String) -> IO(Unit):
+  match m:
+    case Some{q}:
+      KIpc.run(q, pro, KIpc.env(rt), KIpc.type(o), KIpc.msg(J.Json.get_obj(KIpc.args(o), "message")), KIpc.is_status(o), inbox, thread, reply, KIpc.id(o))
+    case None{}:
+      KIpc.fallback(inbox, thread, reply, KIpc.id(o), "this Backplane has no KiCad IPC helper", K.Rt.cli(rt))
+
+def KIpc.go.gate(free: Bool, +gate: String, m: Maybe<&2, Chan(KSV.KMsg)>, +rt: K.Rt, +inbox: Chan(Msg), +thread: String, +o: J.Json, +reply: Chan(String), +pro: String) -> IO(Unit):
+  match free:
+    case False{}:
+      KIpc.fallback(inbox, thread, reply, KIpc.id(o), gate, K.Rt.cli(rt))
+    case True{}:
+      KIpc.go.run(m, rt, inbox, thread, o, reply, pro)
+
+def KIpc.go.k(fine: Bool, +plain: String, +gate: String, m: Maybe<&2, Chan(KSV.KMsg)>, +rt: K.Rt, +inbox: Chan(Msg), +thread: String, +o: J.Json, +reply: Chan(String), +pro: String) -> IO(Unit):
+  match fine:
+    case False{}:
+      KIpc.fail(reply, KIpc.id(o), plain)
+    case True{}:
+      KIpc.go.gate(String.is_empty(gate), gate, m, rt, inbox, thread, o, reply, pro)
+
+def KIpc.go(m: Maybe<&2, Chan(KSV.KMsg)>, +rt: K.Rt, +setting: String, +inbox: Chan(Msg), +thread: String, +o: J.Json, +reply: Chan(String), +pro: String) -> IO(Unit):
+  +plain = KIpc.check(KIpc.type(o), KIpc.path(o), pro)
+  KIpc.go.k(String.is_empty(plain), plain, KIpc.gate(rt, setting), m, rt, inbox, thread, o, reply, pro)
+
+def KIpc.job(m: Maybe<&2, Chan(KSV.KMsg)>, +rt: K.Rt, +setting: String, +inbox: Chan(Msg), +thread: String, +o: J.Json, +reply: Chan(String)) -> IO(Unit):
+  IO.bind(String, Unit, KIpc.pro(KIpc.path(o)), pro => KIpc.go(m, rt, setting, inbox, thread, o, reply, pro))
+
+# Retry
+def KIpc.clear(m: Maybe<&2, Chan(KSV.KMsg)>) -> IO(Unit):
+  match m:
+    case Some{q}:
+      KSV.KServe.clear_on(q)
+    case None{}:
+      IO.pure(Unit, Unit{})
+
+def Hub.kicad_ipc(h: Hub, +thread: String, +o: J.Json, +reply: Chan(String)) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, +inbox, +cfg, note}:
+      do IO<Hub>:
+        IO.spawn(Unit, KIpc.job(Cfg.ks(cfg), Cfg.rt(cfg), M.Setting.get(st, "kicad.ipc", "on"), inbox, thread, o, reply))
+        return Hub{st, f, ls, cl, as, inbox, cfg, note}
+
+# (a check's answer keeps the headless servers' lines the hub holds)
+def Hub.kfound(h: Hub, +setting: String, +rt0: K.Rt) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
+      +rt = K.Rt.set(rt0, "ipc", J.Str{J.Json.get_str(K.Rt.health(Cfg.rt(cfg)), "ipc", "")})
+      Hub.kfound.same(Bool.and(String.eq(setting, M.Setting.get(st, "kicad.path", "")), Bool.and(Bool.not(J.Json.get_bool(K.Rt.health(Cfg.rt(cfg)), "again", False{})),
+        String.eq(J.Json.show(J.Json.obj(Info.kicad(rt))), J.Json.show(J.Json.obj(Info.kicad(Cfg.rt(cfg))))))), Hub{st, f, ls, cl, as, inbox, cfg, note}, setting, rt)
+
+# the headless KiCad servers' lines changed: every client hears them with the info
+def Hub.kiservers(h: Hub, +text: String) -> IO(Hub):
+  match h:
+    case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      Hub.models.k(Hub{st, f, ls, cl, as, inbox, Cfg.with_rt(cfg, K.Rt.set(Cfg.rt(cfg), "ipc", J.Str{text})), note})
+
+# Retry: the failed servers are forgotten, and KiCad is checked again
+def Hub.kretry(h: Hub) -> IO(Hub):
+  match h:
+    case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      do IO<Hub>:
+        KIpc.clear(Cfg.ks(cfg))
+        Hub.kcheck(Hub{st, f, ls, cl, as, inbox, cfg, note}, True{})
+
 def Cfg.with_machines(c: Cfg, +mc: String) -> Cfg:
   match c:
-    case Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, _, pvx, bnx, mgd, lk, fc}}:
-      Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc}}
+    case Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, _, pvx, bnx, mgd, lk, fc, ksx}}:
+      Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}}
 
 def Cfg.with_link(c: Cfg, +lk: String) -> Cfg:
   match c:
-    case Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, _, fc}}:
-      Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc}}
+    case Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, _, fc, ksx}}:
+      Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}}
 
 # the tailnet listener is up: every client hears the pairing link. Each
 # one either is the owner's own device or came in with the token already,
@@ -3994,12 +4624,12 @@ def Main.args(xs: List<String>, c: Cfg) -> Cfg:
       Main.args(t, Cfg{h, x, ho, po, pr, ds, v, nt})
     case "--home" <> x <> t Cfg{_, w, ho, po, pr, ds, v, nt}:
       Main.args(t, Cfg{x, w, ho, po, pr, ds, v, nt})
-    case "--no-tailscale" <> t Cfg{h, w, ho, po, pr, ds, v, Net{_, _, tok, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc}}:
-      Main.args(t, Cfg{h, w, ho, po, pr, ds, v, Net{False{}, False{}, tok, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc}})
-    case "--tailscale" <> t Cfg{h, w, ho, po, pr, ds, v, Net{_, https, tok, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc}}:
-      Main.args(t, Cfg{h, w, ho, po, pr, ds, v, Net{True{}, https, tok, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc}})
-    case "--tailscale-https" <> t Cfg{h, w, ho, po, pr, ds, v, Net{_, _, tok, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc}}:
-      Main.args(t, Cfg{h, w, ho, po, pr, ds, v, Net{True{}, True{}, tok, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc}})
+    case "--no-tailscale" <> t Cfg{h, w, ho, po, pr, ds, v, Net{_, _, tok, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}}:
+      Main.args(t, Cfg{h, w, ho, po, pr, ds, v, Net{False{}, False{}, tok, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}})
+    case "--tailscale" <> t Cfg{h, w, ho, po, pr, ds, v, Net{_, https, tok, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}}:
+      Main.args(t, Cfg{h, w, ho, po, pr, ds, v, Net{True{}, https, tok, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}})
+    case "--tailscale-https" <> t Cfg{h, w, ho, po, pr, ds, v, Net{_, _, tok, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}}:
+      Main.args(t, Cfg{h, w, ho, po, pr, ds, v, Net{True{}, True{}, tok, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}})
     case _ <> t _:
       Main.args(t, c)
     case Nil{} _:
@@ -4019,7 +4649,7 @@ def Models.cache(+home: String) -> String:
 
 def Net.models(n: Net) -> String:
   match n:
-    case Net{_, _, _, ms, _, _, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc}:
+    case Net{_, _, _, ms, _, _, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}:
       ms
 
 # Machines
@@ -4423,7 +5053,7 @@ def Conn.get.k(i: Nat, s: Socket, +web: String, +p: String, gz: Bool, +allowed: 
 def Conn.route.k(ws: Bool, s: Socket, req: W.Request, rest: List<&2, U32>, +web: String, +id: U32, +inbox: Chan(Msg), +trusted: Bool, +token: String) -> IO(Unit):
   match ws req:
     case True{} W.Request{_, +p, +hs}:
-      Conn.gate(Conn.allowed(trusted, hs, p, token), s, W.Http.header_of(hs, "sec-websocket-key"), rest, id, inbox,
+      Conn.gate(Conn.allowed(trusted, hs, p, token), CF.Cef.link(W.Http.header_of(hs, "tailscale-user-login"), W.Http.header_of(hs, "origin")), s, W.Http.header_of(hs, "sec-websocket-key"), rest, id, inbox,
         Maybe.default(&2, Nat, Nat.read(W.Http.param(p, "since")), 0n), W.Http.param(p, "origin"))
     case False{} W.Request{_, +p, +hs}:
       Conn.get.k(Conn.pos(["/hello", "/img", "/debug/perf", "/debug/perf.json", "/debug/log"], W.Http.route(p), 0n), s, web, p, String.contains(W.Http.header_of(hs, "accept-encoding"), "gzip"), Conn.allowed(trusted, hs, p, token))
@@ -4774,9 +5404,34 @@ def Refresh.loop(fuel: Nat, +inbox: Chan(Msg), +user: String, +home: String, +ca
         IO.sleep(60000)
         Refresh.loop(f, inbox, user, home, cache, now, here, Bool.pick(Nat, due, Nat.sub(Nat.div(U32.to_nat(Models.every()), 60000n), 1n), Nat.sub(left, 1n)))
 
+# Boat's status.json (a local file the Boat runner rewrites; no network)
+# every 30 s; the hub hears of it when it changed, and every 2 minutes
+# anyway, so a runner that stopped writing turns its chips stale (BoatThreads)
+def Chips.post(same: Bool, +inbox: Chan(Msg), +text: String) -> IO(Unit):
+  match same:
+    case True{}:
+      IO.pure(Unit, Unit{})
+    case False{}:
+      do IO<Unit>:
+        ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, BoatThreads{text})
+        return Unit{}
+
+def Chips.loop(+fuel: Nat, +inbox: Chan(Msg), +path: String, +last: String) -> IO(Unit):
+  match fuel:
+    case 0n:
+      IO.pure(Unit, Unit{})
+    case 1n+f:
+      do IO<Unit>:
+        +text : String <- K.Io.text(path)
+        Chips.post(Bool.and(String.eq(text, last), Bool.not(Nat.is_eq(Nat.mod(f, 4n), 0n))), inbox, text)
+        IO.sleep(30000)
+        Chips.loop(f, inbox, path, text)
+
 def Refresh.start(+inbox: Chan(Msg), +cfg: Cfg) -> IO(Unit):
   do IO<Unit>:
-    user : String <- Env.get("HOME", "")
+    +user : String <- Env.get("HOME", "")
+    xs : String <- Env.get("XDG_STATE_HOME", "")
+    IO.spawn(Unit, Chips.loop(Fuel.forever(), inbox, UZ.Chip.path(xs, user), ""))
     IO.spawn(Unit, Refresh.loop(Fuel.forever(), inbox, user, Cfg.home(cfg), Models.cache(Cfg.home(cfg)), Net.models(Cfg.net(cfg)), "?", 0n))
 
 def Main.prepare(+user: String, +exe: String) -> IO(Boot):
@@ -4785,15 +5440,14 @@ def Main.prepare(+user: String, +exe: String) -> IO(Boot):
     rev : String <- K.KiStack.current(user)
     ks : String & List<&2, Q.Skill> <- Skills.kistack.dir(K.KiStack.base(user) ++ "/" ++ rev)
     IO.spawn(Unit, K.KiStack.refresh(user))
-    explicit : String <- Env.get("BACKPLANE_KICAD_CLI", "")
-    rt : K.Rt <- K.Rt.resolve(explicit, exe, user ++ "/.backplane-bend")
+    +rt : K.Rt = K.Rt.empty()
     +fc : String <- FC.FreeCAD.find()
     return Models.boot(ks, rt, Found{"", ""}, fc)
 
 def Main.config(+user: String, +exe: String, args: List<String>, b: Boot) -> Cfg:
   Boot{kdir, skills, rt, ms, mt, +fc} = b
   Main.args(args, Cfg{user ++ "/.backplane-bend", exe ++ "/web", "127.0.0.1", 3787,
-    Q.Prompt.runtime("Backplane") ++ "\n\n" ++ Q.Prompt.mech(fc, exe ++ "/backplane"), [kdir], Main.version(), Net{True{}, False{}, "", ms, mt, rt, None{}, None{}, None{}, "", None{}, BN.Bn.empty(), False{}, "", fc}})
+    Q.Prompt.runtime("Backplane") ++ "\n\n" ++ Q.Prompt.mech(fc, exe ++ "/backplane"), [kdir], Main.version(), Net{True{}, False{}, "", ms, mt, rt, None{}, None{}, None{}, "", None{}, BN.Bn.empty(), False{}, "", fc, None{}}})
 
 def Sys.exe_dir.io() -> IO(String):
   H.Sys.exe_dir()
@@ -5091,7 +5745,7 @@ def Hub.turn_done(h: Hub, +tag: String) -> IO(Hub):
 
 def Cfg.machines(c: Cfg) -> String:
   match c:
-    case Cfg{_, _, _, _, _, _, _, Net{_, _, _, _, _, _, _, _, _, mc, _, _, _, _, _}}:
+    case Cfg{_, _, _, _, _, _, _, Net{_, _, _, _, _, _, _, _, _, mc, _, _, _, _, _, _}}:
       mc
 
 def Live.of(+cfg: Cfg) -> List<&2, LV.Buf>:
@@ -5099,8 +5753,14 @@ def Live.of(+cfg: Cfg) -> List<&2, LV.Buf>:
 
 def Cfg.with_bn(c: Cfg, b: BN.Bn) -> Cfg:
   match c:
-    case Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, _, mgd, lk, fc}}:
-      Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, b, mgd, lk, fc}}
+    case Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, _, mgd, lk, fc, ksx}}:
+      Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, b, mgd, lk, fc, ksx}}
+
+def Cfg.cef(c: Cfg) -> CF.CefSession:
+  BN.Bn.cef(Cfg.bn(c))
+
+def Cfg.with_cef(+c: Cfg, cp: CF.CefSession) -> Cfg:
+  Cfg.with_bn(c, BN.Bn.with_cef(Cfg.bn(c), cp))
 
 def Cfg.tch(c: Cfg) -> TE.TeachSt:
   BN.Bn.tch(Cfg.bn(c))
@@ -5225,7 +5885,7 @@ def Cfg.host(c: Cfg) -> String:
 
 def Cfg.tailnet(c: Cfg) -> Bool:
   match c:
-    case Cfg{_, _, _, _, _, _, _, Net{tn, _, _, _, _, _, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc}}:
+    case Cfg{_, _, _, _, _, _, _, Net{tn, _, _, _, _, _, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}}:
       tn
 
 def Hub.broadcast(h: Hub, +text: String) -> IO(Hub):
@@ -5271,7 +5931,7 @@ def Hub.preview(h: Hub, +thread: String, +o: J.Json, +reply: Chan(String)) -> IO
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
       do IO<Hub>:
         IO.spawn(Unit, Preview.go(TE.Teach.bot_may(Cfg.tch(cfg), Bot.page(st, thread)), cfg, Bot.page(st, thread), o, reply))
-        cl2 : List<&2, Client> <- Hub.auto.k(Bool.not(Bool.and(Bool.not(Bot.is_bot(BO.World.of_thread(M.State.bots(st), thread))), Preview.shows(o))), cl, Preview.view(thread))
+        cl2 : List<&2, Client> <- Hub.auto.k(Bool.not(Bool.and(Bool.not(Bot.is_bot(RUN.Run.bot(st, thread))), Preview.shows(o))), cl, Preview.view(thread))
         return Hub{st, f, ls, cl2, as, inbox, cfg, note}
 
 # requests: "bots.*" to the bots' decider, the rest to the hub's
@@ -5992,6 +6652,39 @@ def AgyJob.op(i: Nat, +p: J.Json, +client: U32, +id: String, +inbox: Chan(Msg), 
 def AgyJob.go(+p: J.Json, +inbox: Chan(Msg), +home: String, +client: U32, +id: String) -> IO(Unit):
   AgyJob.op(C.Codec.pos(["status", "install", "signin", "back", "cancel", "signout", "forget"], J.Json.get_str(p, "do", "")), p, client, id, inbox, home)
 
+# Settings > Usage, Boat side (core/usage.bend's Bj): Boat's CLI read
+# (read-only, `boat limits --json --no-update`, 20 s at most) only when it
+# is due, its answer kept in <home>/boat-usage.json with the last good one
+# on a failure; the Boat lead's job status read from its state folder; both
+# go to the client that asked as info "boat.usage". Never `boat dashboard`
+# (its link carries a sign-in token), login or anything that changes the
+# account.
+def BoatUse.read(due: Bool, +home: String, +old: String, +now: Nat) -> IO(String):
+  match due:
+    case True{}:
+      do IO<String>:
+        r : P.Ran <- P.Proc.run("sh", ["-c", PT.Port.tmo() ++ "tmo 20 boat limits --json --no-update 2>/dev/null"], "/")
+        +c : String = UZ.Bj.cache.next(old, Path.out(r), now)
+        w : String <- Token.save(home ++ "/boat-usage.json", c)
+        return c
+    case False{}:
+      IO.pure(String, old)
+
+def BoatUse.state(+xs: String, +user: String) -> String:
+  Bool.pick(String, String.is_empty(xs), user ++ "/.local/state", xs) ++ "/backplane/boat/status.json"
+
+def BoatUse.go(+p: J.Json, +inbox: Chan(Msg), +home: String, +client: U32, +id: String) -> IO(Unit):
+  do IO<Unit>:
+    BotJob.reply(inbox, client, id, True{}, Nil{})
+    +now : Nat <- Now.nat()
+    +old : String <- K.Io.text(home ++ "/boat-usage.json")
+    +cache : String <- BoatUse.read(UZ.Bj.due(old, String.eq(J.Json.get_str(p, "do", ""), "refresh"), now), home, old, now)
+    user : String <- Env.get("HOME", "")
+    xs : String <- Env.get("XDG_STATE_HOME", "")
+    +status : String <- K.Io.text(BoatUse.state(xs, user))
+    sent : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, Push{client, J.Json.show(J.Json.obj([J.KV{"t", J.Str{"info"}}, J.KV{"info", J.Json.obj([J.KV{"boat.usage", J.Str{UZ.Bj.info(cache, status)}}])}]))})
+    return Unit{}
+
 def VoiceJob.op(i: Nat, +inbox: Chan(Msg), +home: String, +p: J.Json, +client: U32, +id: String) -> IO(Unit):
   match i:
     case 0n:
@@ -6018,11 +6711,14 @@ def VoiceJob.op(i: Nat, +inbox: Chan(Msg), +home: String, +p: J.Json, +client: U
     # Settings' Antigravity (AgyJob)
     case 10n:
       AgyJob.go(p, inbox, home, client, id)
+    # Settings > Usage's Boat side (BoatUse)
+    case 11n:
+      BoatUse.go(p, inbox, home, client, id)
     case _:
       BotJob.fail(inbox, client, id, "unknown voice request")
 
 def VoiceJob.go(+p: J.Json, +inbox: Chan(Msg), +home: String, +client: U32, +id: String) -> IO(Unit):
-  VoiceJob.op(C.Codec.pos(["status", "key", "unkey", "dict", "add", "start", "stop", "devices", "api-add", "api-del", "agy"], J.Json.get_str(p, "op", "")), inbox, home, p, client, id)
+  VoiceJob.op(C.Codec.pos(["status", "key", "unkey", "dict", "add", "start", "stop", "devices", "api-add", "api-del", "agy", "usage"], J.Json.get_str(p, "op", "")), inbox, home, p, client, id)
 
 def VoiceJob.run(+inbox: Chan(Msg), +home: String, +params: String, +client: U32, +id: String) -> IO(Unit):
   VoiceJob.go(Maybe.default(&2, J.Json, J.Json.parse(params), J.Null{}), inbox, home, client, id)
@@ -7451,8 +8147,8 @@ def Claude.job(+cfg: Cfg, +st: M.State, +thread: String, +cwd: String, +model: S
     +fs : K.Files <- K.Files.read(cwd)
     ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, AutoView{thread, fs})
     +keys : String <- AKS.Ak.prompt(Cfg.home(cfg))
-    res : Result<&1, &1, U32 & String, U32 & Socket> <- H.Proc.spawn("env", "MCP_TOOL_TIMEOUT=86400000" <> "CLAUDE_CODE_ENABLE_TODO_TOOLS=1" <> "claude" <> Hub.agent_args(cfg, thread, model, session, r, i, Hub.prompt(cfg, st, thread, cwd, fs, keys), effort, gen), cwd, 0)
-    Claude.started(res, thread, gen, input, inbox)
+    Keyring.gate("claude", IO.bind(Result<&1, &1, U32 & String, U32 & Socket>, Unit, H.Proc.spawn("env", "MCP_TOOL_TIMEOUT=86400000" <> "CLAUDE_CODE_ENABLE_TODO_TOOLS=1" <> "claude" <> Hub.agent_args(cfg, thread, model, session, r, i, Hub.prompt(cfg, st, thread, cwd, fs, keys), effort, gen), cwd, 3),
+      res => Claude.started(res, thread, gen, input, inbox)), Claude.fail(thread, gen, KR.Keyring.refusal("claude"), inbox))
 
 def Agents.pid.k(same: Bool, a: Agent, +pid: U32) -> Agent:
   match same a:
@@ -7697,8 +8393,137 @@ def WakeJob.files(xs: List<&2, String>, +inbox: Chan(Msg)) -> IO(Unit):
         Self.post(inbox, WakeSeen{"file", h, stamp})
         WakeJob.files(t, inbox)
 
+# ---- mail 2b ----
+# Appends and their normal event commits are serialized by Hub.outs.
+# A header already present skips body IO, preventing conflicting retry
+# records when the conversation metadata changed after the first append.
+def MailJob.failed(+reason: String) -> IO(Unit):
+  do IO<Unit>:
+    PS.Perf.add("mail.append_fail", 1)
+    PS.Log.error("mail", reason)
+    return Unit{}
+
+def MailJob.append.failed(h: Hub, reason: String) -> IO(Hub):
+  do IO<Hub>:
+    MailJob.failed(reason)
+    return h
+
+# ---- mail 2c: body IO, then the same Hub.post as thread_launch ----
+def MailJob.routed(h: Hub, +body: MB.Body) -> IO(Hub):
+  match h:
+    case Hub{st, f, ls, cl, as, +inbox, cfg, note}:
+      do IO<Hub>:
+        Self.post(inbox, MailRouted{body})
+        return Hub{st, f, ls, cl, as, inbox, cfg, note}
+
+def MailJob.route(h: Hub, cs: List<&2, M.Change>, fresh: List<&2, String>, from: Nat, body: MB.Body) -> IO(Hub):
+  IO.bind(Hub, Hub, Far.push(h, cs, fresh, from), h2 => MailJob.routed(h2, body))
+
+def MailJob.append.committed(r: Hub & Wrote, +cs: List<&2, M.Change>, +from: Nat, +body: MB.Body) -> IO(Hub):
+  (h, w) = r
+  match w:
+    case Wrote{+fresh, True{}, _}:
+      IO.bind(Hub, Hub, Hub.announce((h, fresh)), h2 => MailJob.route(h2, cs, fresh, from, body))
+    case Wrote{_, False{}, err}:
+      do IO<Hub>:
+        PS.Log.error("mail", "header commit failed: " ++ err)
+        PS.Perf.add("hub.write_fail", 1)
+        return h
+
+def MailJob.append.result(r: MST.StoreResult<Bool>, +changes: List<&2, M.Change>, +from: Nat, +body: MB.Body, h: Hub) -> IO(Hub):
+  match r:
+    case MST.Stored{_}: IO.bind(Hub & Wrote, Hub, Hub.commit.w(changes, h), got => MailJob.append.committed(got, changes, from, body))
+    case MST.Missing{path}: MailJob.append.failed(h, "append missing: " ++ path)
+    case MST.StoreError{path, reason}: MailJob.append.failed(h, path ++ ": " ++ reason)
+
+def MailJob.append.fresh(seen: Bool, +body: MB.Body, home: String, changes: List<&2, M.Change>, from: Nat, h: Hub) -> IO(Hub):
+  match seen:
+    case True{}: IO.pure(Hub, h)
+    case False{}:
+      do IO<Hub>:
+        r : MST.StoreResult<Bool> <- MST.MailStore.append(home, body)
+        MailJob.append.result(r, changes, from, body, h)
+
+def MailJob.append.parsed(body: Maybe<&2, MB.Body>, +home: String, changes: List<&2, M.Change>, h: Hub) -> IO(Hub):
+  match body h:
+    case None{} kept: MailJob.append.failed(kept, "invalid MailAppend body")
+    case Some{+body} Hub{+st, f, ls, cl, as, inbox, cfg, note}:
+      MailJob.append.fresh(ML.Box.has(M.State.mail(st), ML.Mail.id(MB.Body.mail(body))), body, home, changes, M.State.seq(st), Hub{st, f, ls, cl, as, inbox, cfg, note})
+
+def MailJob.recover.result(+r: MST.StoreResult<List<&2, M.Change>>, +inbox: Chan(Msg)) -> IO(Unit):
+  match r:
+    case MST.Stored{+changes}: Self.post(inbox, Commit{changes})
+    case MST.Missing{_}: IO.pure(Unit, Unit{})
+    case MST.StoreError{+path, +reason}: PS.Log.error("mail.recover", path ++ ": " ++ reason)
+
+def MailJob.recover(+home: String, +box: ML.Box, +inbox: Chan(Msg)) -> IO(Unit):
+  do IO<Unit>:
+    r : MST.StoreResult<List<&2, M.Change>> <- MST.MailStore.recover(home, box)
+    MailJob.recover.result(r, inbox)
+
+def MailJob.page.more(+r: MST.StoreResult<List<&2, MB.Body>>, +s: M.State, +conv: String, +bot: String, +bs: List<&2, MB.Body>) -> MST.StoreResult<J.Json>:
+  match r:
+    case MST.Stored{+extra}: MST.Stored{B.Mail.read.json(s, conv, bot, bs, Bool.not(List.is_empty(&2, MB.Body, extra)))}
+    case MST.Missing{_}: MST.Stored{B.Mail.read.json(s, conv, bot, bs, False{})}
+    case MST.StoreError{+p, +e}: MST.StoreError{p, e}
+
+def MailJob.page.full(+full: Bool, +home: String, +s: M.State, +conv: String, +bot: String, +bs: List<&2, MB.Body>) -> IO(MST.StoreResult<J.Json>):
+  match full:
+    case False{}: IO.pure(MST.StoreResult<J.Json>, MST.Stored{B.Mail.read.json(s, conv, bot, bs, False{})})
+    case True{}:
+      do IO<MST.StoreResult<J.Json>>:
+        +last : MB.Body = Maybe.default(&2, MB.Body, List.last(&2, MB.Body, bs), MB.Body{ML.Conv.empty(), ML.Box.newest(ML.Box.empty(), ""), ""})
+        r : MST.StoreResult<List<&2, MB.Body>> <- MST.MailStore.read(home, conv, ML.Mail.id(MB.Body.mail(last)), 1n)
+        return MailJob.page.more(r, s, conv, bot, bs)
+
+def MailJob.page.result(+r: MST.StoreResult<List<&2, MB.Body>>, +home: String, +s: M.State, +conv: String, +bot: String, +n: Nat) -> IO(MST.StoreResult<J.Json>):
+  match r:
+    case MST.Stored{+bs}: MailJob.page.full(Bool.and(Nat.is_gt(n, 0n), Nat.is_eq(List.length(&2, MB.Body, bs), n)), home, s, conv, bot, bs)
+    case MST.Missing{_}: IO.pure(MST.StoreResult<J.Json>, MST.Stored{B.Mail.read.json(s, conv, bot, Nil{}, False{})})
+    case MST.StoreError{+p, +e}: IO.pure(MST.StoreResult<J.Json>, MST.StoreError{p, e})
+
+def MailJob.page(+home: String, +s: M.State, +conv: String, +bot: String, +before: String, +n: Nat) -> IO(MST.StoreResult<J.Json>):
+  do IO<MST.StoreResult<J.Json>>:
+    r : MST.StoreResult<List<&2, MB.Body>> <- MST.MailStore.read(home, conv, before, n)
+    MailJob.page.result(r, home, s, conv, bot, n)
+
+def MailJob.read.reply(+r: MST.StoreResult<J.Json>, +client: U32, +id: String) -> B.Out:
+  match r:
+    case MST.Stored{+j}: B.Reply.data(client, id, j)
+    case MST.Missing{+p}: B.Reply.err(client, id, "missing " ++ p)
+    case MST.StoreError{+p, +e}: B.Reply.err(client, id, p ++ ": " ++ e)
+
+def MailJob.read.text(out: B.Out) -> String:
+  match out:
+    case B.Send{_, +text}: text
+    case _: ""
+
+def RunJob.start(r: MST.StoreResult<List<&2, MB.Body>>, +inbox: Chan(Msg), +s: M.State, +now: Nat, +th: String, +head: String) -> IO(Unit):
+  match r:
+    case MST.Stored{bs}: Self.post(inbox, RunReady{th, head, bs})
+    case MST.Missing{_}: Self.post(inbox, RunReady{th, head, Nil{}})
+    case MST.StoreError{+path, +err}: Self.post(inbox, Commit{[M.ActivityLogged{th, B.Hub.id("run-read", now, M.State.seq(s)), "error", "mail", path ++ ": " ++ err, now}, M.TurnChanged{th, M.Failed{}, now}, M.ThreadSettled{th, False{}, now}]})
+
 def Hub.out(h: Hub, o: B.Out) -> IO(Hub):
   match h o:
+    case Hub{+st, f, ls, cl, as, inbox, cfg, note} B.RunStart{+thread, conv, head}:
+      do IO<Hub>:
+        r : MST.StoreResult<List<&2, MB.Body>> <- MST.MailStore.read(Cfg.home(cfg), conv, "", 20n)
+        +now : Nat <- Now.nat()
+        RunJob.start(r, inbox, st, now, thread, head)
+        return Hub{st, f, ls, cl, as, inbox, cfg, note}
+    case Hub{st, f, ls, cl, as, inbox, cfg, note} B.CharterWrite{path, text}:
+      do IO<Hub>:
+        fout : Result<&1, &1, U32 & String, File> <- File.open(path, "w")
+        Token.write(fout, text)
+        return Hub{st, f, ls, cl, as, inbox, cfg, note}
+    case Hub{st, f, ls, cl, as, inbox, +cfg, note} B.MailAppend{line, _, changes}:
+      MailJob.append.parsed(MB.Body.parse(line), Cfg.home(cfg), changes, Hub{st, f, ls, cl, as, inbox, cfg, note})
+    case Hub{+st, f, ls, cl, as, inbox, +cfg, note} B.MailRead{+client, +id, conv, before, n}:
+      do IO<Hub>:
+        r : MST.StoreResult<J.Json> <- MailJob.page(Cfg.home(cfg), st, conv, "*", before, n)
+        cl2 : List<&2, Client> <- Wire.to(cl, client, MailJob.read.text(MailJob.read.reply(r, client, id)))
+        return Hub{st, f, ls, cl2, as, inbox, cfg, note}
     case Hub{st, f, ls, cl, as, inbox, cfg, note} B.Send{+client, +text}:
       do IO<Hub>:
         cl2 : List<&2, Client> <- Wire.to(cl, client, text)
@@ -7719,7 +8544,7 @@ def Hub.out(h: Hub, o: B.Out) -> IO(Hub):
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note} B.AgentSend{+thread, +line}:
       do IO<Hub>:
         +now : Nat <- Now.nat()
-        +l1 : String = Bot.line(Bool.or(BO.World.is_bot_thread(M.State.bots(st), thread), RF.Refs.maybe(line)), cfg, st, now, thread, line)
+        +l1 : String = Bot.line(Bool.or(Bool.or(RUN.Run.is(st, thread), BO.World.is_bot_thread(M.State.bots(st), thread)), RF.Refs.maybe(line)), cfg, st, now, thread, line)
         +l2 : String <- EmbNote.claude(EmbNote.user(l1), cfg, st, thread, l1)
         Line.skills(String.contains(l2, "$"), Hub{st, f, ls, cl, as, inbox, cfg, note}, thread, l2, B.Hub.cwd(st, B.Hub.thread(st, thread)))
     case Hub{st, f, ls, cl, +as, inbox, +cfg, note} B.AgentStop{+thread}:
@@ -7747,6 +8572,8 @@ def Hub.out(h: Hub, o: B.Out) -> IO(Hub):
         +g : String = Hub.gen(st, now)
         IO.spawn(Unit, IO.bind(String, Unit, EmbNote.take(cfg, st, thread), n => Codex.go(cfg, st, thread, cwd, model, session, r, t2 ++ n, g, inbox)))
         Hub.placeholder(Hub{st, f, ls, cl, as, inbox, cfg, note}, thread, g)
+    case Hub{st, f, ls, cl, as, inbox, cfg, note} B.KiCadRetry{}:
+      Hub.kretry(Hub{st, f, ls, cl, as, inbox, cfg, note})
     case Hub{st, f, ls, cl, as, +inbox, +cfg, note} B.KiCadInstall{}:
       do IO<Hub>:
         IO.spawn(Unit, Install.go(Cfg.home(cfg), inbox))
@@ -7805,6 +8632,7 @@ def Hub.out(h: Hub, o: B.Out) -> IO(Hub):
     case Hub{+st, f, ls, cl, as, +inbox, +cfg, note} B.TurnEnded{+thread, _}:
       do IO<Hub>:
         IO.spawn(Unit, Hub.phone(Cfg.home(cfg), st, thread, inbox))
+        Self.post(inbox, KProbe{False{}})
         Self.post(inbox, Release{})
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
     # an alert record was written: the phones' push, the desk used last and
@@ -7861,7 +8689,7 @@ def Hub.out(h: Hub, o: B.Out) -> IO(Hub):
     case Hub{+st, f, ls, cl, +as, +inbox, +cfg, note} B.Git{+client, +id, +job, +thread, +cwd, +a, +b}:
       do IO<Hub>:
         +now : Nat <- Now.nat()
-        Media.run(AG.Text.of(st), job, inbox, client, id, thread, cwd, Bot.attach(String.eq(job, "attach.claude"), cfg, st, now, thread, a), b, Cfg.home(cfg), Net.managed(Cfg.net(cfg)), Agents.gen(as, thread))
+        KExportJob.route(String.eq(job, "kexport"), inbox, client, id, thread, cwd, Cfg.home(cfg), Cfg.rt(cfg), a, KiCadJob.route(String.eq(job, "kicad"), inbox, client, id, thread, cwd, Cfg.rt(cfg), Media.run(AG.Text.of(st), job, inbox, client, id, thread, cwd, Bot.attach(String.eq(job, "attach.claude"), cfg, st, now, thread, a), b, Cfg.home(cfg), Net.managed(Cfg.net(cfg)), Agents.gen(as, thread))))
         return Claude.prep(Bool.and(String.eq(job, "attach.claude"), Bool.not(String.is_empty(b))), Hub{st, f, ls, cl, as, inbox, cfg, note}, thread, b)
     case Hub{st, f, ls, cl, as, inbox, +cfg, note} B.AskAnswered{+ask, +answer}:
       do IO<Hub>:
@@ -7878,6 +8706,14 @@ def Hub.out(h: Hub, o: B.Out) -> IO(Hub):
     case Hub{st, f, ls, cl, as, +inbox, cfg, note} B.DeployGo{+stage}:
       do IO<Hub>:
         IO.spawn(Unit, Deploy.go(stage, inbox))
+        return Hub{st, f, ls, cl, as, inbox, cfg, note}
+    case Hub{+st, f, ls, cl, as, +inbox, +cfg, note} B.ShipRun{+commit}:
+      do IO<Hub>:
+        IO.spawn(Unit, ShipJob.run(B.Ship.repo(st), B.Ship.wrap(st), Cfg.home(cfg), commit, inbox))
+        return Hub{st, f, ls, cl, as, inbox, cfg, note}
+    case Hub{+st, f, ls, cl, as, +inbox, cfg, note} B.ShipNext{+why}:
+      do IO<Hub>:
+        IO.spawn(Unit, ShipJob.next(B.Ship.repo(st), B.Ship.cands(st), why, inbox))
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
     case Hub{st, f, ls, cl, as, +inbox, cfg, note} B.Restart{}:
       do IO<Hub>:
@@ -8267,7 +9103,9 @@ def Hub.step.b(st: M.State, h: Hub, +cs: List<&2, M.Change>, os: List<&2, B.Out>
 def Hub.step.a(+st: M.State, h: Hub, cs: List<&2, M.Change>, os: List<&2, B.Out>) -> IO(Hub & Bool):
   Hub.step.b(st, h, B.Alerts.changes(st, cs), os)
 
-# the step's wakes (hub.bend's Wake.after) first, so their messages get
+# the step's wakes (hub.bend's Wake.after) and riding mail (Ride.after: a
+# turn that ended with mail waiting starts the next) first, so their
+# messages get
 # alert records like any other change
 def Hub.step.wakes(step: B.Step, +st: M.State, h: Hub) -> IO(Hub & Bool):
   match step:
@@ -8276,7 +9114,7 @@ def Hub.step.wakes(step: B.Step, +st: M.State, h: Hub) -> IO(Hub & Bool):
 
 def Hub.step.k(p: M.State & Hub, cs: List<&2, M.Change>, os: List<&2, B.Out>) -> IO(Hub & Bool):
   (+st, h) = p
-  IO.bind(Nat, Hub & Bool, Now.nat(), now => Hub.step.wakes(B.Locks.after(st, now, B.Wake.after(st, B.Step{cs, os})), st, h))
+  IO.bind(Nat, Hub & Bool, Now.nat(), +now => Hub.step.wakes(B.Locks.after(st, now, B.Ride.after(st, now, B.Wake.after(st, B.Step{cs, os}))), st, h))
 
 # a step's changes are stored (with the pending counts they move), then
 # its effects run; answers whether it was stored
@@ -8298,12 +9136,143 @@ def Hub.step(h: Hub, s: B.Step) -> IO(Hub):
 # keeps each bot's driver and draft in its Cfg (core/teach.bend) and tells
 # every client the info keys drive.<bot>, teach.<bot>, teach.draft.<bot>.
 
+# The embedded browser (core/cef.bend, tools/cef)
+# -----------------------------------------------
+# The window says its X window (browser.embed); with the setting
+# browser.engine "cef" the hub moves the helper to the CEF engine, whose
+# pages are native children of that window. The window says where the
+# shown page goes (browser.place). Every native operation runs in order on
+# one worker (CefQueue): shield on, show, then the shield the page's drive
+# calls for; engine replies carry a generation, and stale ones are dropped.
+# The state is in memory (botnet.bend's Bn.cef).
+
+# a page id names a real thread or a live bot
+def Cef.page.ok(+st: M.State, +page: String) -> Bool:
+  CF.Cef.owner(page, B.Hub.owns(st, page), BO.Bot.live(BO.World.bot(M.State.bots(st), page)))
+
+def CefJob.ask(m: Maybe<&2, Chan(BR.BMsg)>, +op: String, +args: J.Json) -> IO(String):
+  match m:
+    case Some{q}: BR.Browser.ask_on(q, J.Json.get_str(args, "page", ""), op, args)
+    case None{}: IO.pure(String, BR.Browser.fail("no browser helper"))
+
+# the engine request; the helper keeps its flags, so a restarted helper runs
+# the same engine (cef starts the helper; chrome does not)
+def CefJob.engine_ask(m: Maybe<&2, Chan(BR.BMsg)>, +on: Bool, +args: J.Json) -> IO(String):
+  match m:
+    case Some{q}: BR.Browser.engine_ask(q, CF.Cef.argv(on, U32.from_nat(J.Json.get_nat(args, "parent", 0n)), J.Json.get_str(args, "display", "")), args, on)
+    case None{}: IO.pure(String, BR.Browser.fail("no browser helper"))
+
+def CefJob.focus(on: Bool, +m: Maybe<&2, Chan(BR.BMsg)>, +page: String) -> IO(Unit):
+  match on:
+    case True{}:
+      IO.bind(String, Unit, CefJob.ask(m, "focus", J.Json.obj([J.KV{"page", J.Str{page}}])), r => IO.pure(Unit, Unit{}))
+    case False{}: IO.pure(Unit, Unit{})
+
+def CefJob.shield(+m: Maybe<&2, Chan(BR.BMsg)>, +page: String, +drive: String) -> IO(Unit):
+  do IO<Unit>:
+    r : String <- CefJob.ask(m, "shield", J.Json.obj([J.KV{"on", J.Flag{CF.Cef.shield(drive)}}]))
+    CefJob.focus(CF.Cef.shield.focus(drive), m, page)
+
+def CefJob.place(show: Bool, +m: Maybe<&2, Chan(BR.BMsg)>, +p: J.Json, drive: String) -> IO(Unit):
+  match show:
+    case True{}:
+      do IO<Unit>:
+        # Shield first, so a freshly mapped agent page cannot take a stray click.
+        r : String <- CefJob.ask(m, "shield", J.Json.obj([J.KV{"on", J.Flag{True{}}}]))
+        shown : String <- CefJob.ask(m, "show", p)
+        CefJob.shield(m, J.Json.get_str(p, "page", ""), drive)
+    case False{}:
+      IO.bind(String, Unit, CefJob.ask(m, "hide", J.Null{}), r => IO.pure(Unit, Unit{}))
+
+def CefJob.done(+inbox: Chan(Msg), request: String, live: String, err: String) -> IO(Unit):
+  do IO<Unit>:
+    ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, CefDone{request, live, err})
+    return Unit{}
+
+def CefJob.switched(ok: Bool, +m: Maybe<&2, Chan(BR.BMsg)>, +inbox: Chan(Msg), +request: String, +args: J.Json, +err: String) -> IO(Unit):
+  match ok:
+    case True{}: CefJob.done(inbox, request, J.Json.get_str(args, "engine", "chrome"), "")
+    case False{}:
+      do IO<Unit>:
+        r : String <- CefJob.engine_ask(m, False{}, CF.Cef.args(False{}, 0, ""))
+        CefJob.done(inbox, request, "chrome", err)
+
+def CefJob.reply(+r: J.Json, +m: Maybe<&2, Chan(BR.BMsg)>, +inbox: Chan(Msg), request: String, args: J.Json) -> IO(Unit):
+  CefJob.switched(J.Json.get_bool(r, "ok", False{}), m, inbox, request, args, J.Json.get_str(r, "error", "CEF host failed"))
+
+def CefJob.engine(+m: Maybe<&2, Chan(BR.BMsg)>, +inbox: Chan(Msg), +args: J.Json, token: String) -> IO(Unit):
+  do IO<Unit>:
+    r : String <- CefJob.engine_ask(m, String.eq(J.Json.get_str(args, "engine", ""), "cef"), args)
+    CefJob.reply(Maybe.default(&2, J.Json, J.Json.parse(r), J.Null{}), m, inbox, token, args)
+
+# A whole native operation finishes before the next begins. In particular,
+# hide cannot overtake show's shield step, and stale engine replies are ignored.
+def CefQueue.submit(m: Maybe<&2, Chan(CF.CefWork)>, w: CF.CefWork) -> IO(Unit):
+  match m:
+    case Some{q}:
+      do IO<Unit>:
+        ok : Result<&1, &1, CF.CefWork, Unit> <- Chan.send(CF.CefWork, q, w)
+        return Unit{}
+    case None{}: IO.pure(Unit, Unit{})
+
+def CefQueue.act(op: Nat, +m: Maybe<&2, Chan(BR.BMsg)>, +inbox: Chan(Msg), +args: J.Json, drive: String, token: String) -> IO(Unit):
+  match op:
+    case 0n: CefJob.engine(m, inbox, args, token)
+    case 1n: CefJob.place(CF.Cef.visible(args), m, args, drive)
+    case 2n: CefJob.shield(m, J.Json.get_str(args, "page", ""), drive)
+    case _: CefJob.switched(False{}, m, inbox, token, J.Null{}, J.Json.get_str(args, "error", "CEF host exited"))
+
+def CefQueue.run(w: CF.CefWork, m: Maybe<&2, Chan(BR.BMsg)>, inbox: Chan(Msg)) -> IO(Unit):
+  match w:
+    case CF.CefWork{op, args, drive, token}:
+      CefQueue.act(C.Codec.pos(["engine", "place", "shield"], op), m, inbox, args, drive, token)
+
+def CefQueue.got(w: Maybe<&1, CF.CefWork>, +m: Maybe<&2, Chan(BR.BMsg)>, +inbox: Chan(Msg), k: Unit -> IO(Unit)) -> IO(Unit):
+  match w:
+    case Some{work}: IO.bind(Unit, Unit, CefQueue.run(work, m, inbox), k)
+    case None{}: IO.pure(Unit, Unit{})
+
+def CefQueue.loop(fuel: Nat, +q: Chan(CF.CefWork), +m: Maybe<&2, Chan(BR.BMsg)>, +inbox: Chan(Msg)) -> IO(Unit):
+  match fuel:
+    case 0n: IO.pure(Unit, Unit{})
+    case 1n+f:
+      IO.bind(Maybe<&1, CF.CefWork>, Unit, Chan.recv(CF.CefWork, q), w => CefQueue.got(w, m, inbox, u => CefQueue.loop(f, q, m, inbox)))
+
+def Hub.cef.queue.ensure(known: Bool, h: Hub) -> IO(Hub):
+  match known h:
+    case True{} _: IO.pure(Hub, h)
+    case False{} Hub{st, f, ls, cl, as, +inbox, +cfg, note}:
+      do IO<Hub>:
+        +q : Chan(CF.CefWork) <- Chan.new(CF.CefWork, 256)
+        IO.spawn(Unit, CefQueue.loop(Fuel.forever(), q, Cfg.br(cfg), inbox))
+        return Hub{st, f, ls, cl, as, inbox, Cfg.with_cef(cfg, CF.Cef.session.queued(Cfg.cef(cfg), q)), note}
+
+def CefQueue.known(m: Maybe<&2, Chan(CF.CefWork)>) -> Bool:
+  match m:
+    case Some{_}: True{}
+    case None{}: False{}
+
+# the placed page's shield follows its drive, sent only when it changed
+def Hub.cef.shield.go(due: Bool, h: Hub, +drive: String) -> IO(Hub):
+  match due h:
+    case True{} Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      do IO<Hub>:
+        CefQueue.submit(CF.Cef.session.queue(Cfg.cef(cfg)), CF.CefWork{"shield", CF.Cef.session.place(Cfg.cef(cfg)), drive, ""})
+        return Hub{st, f, ls, cl, as, inbox, Cfg.with_cef(cfg, CF.Cef.session.shield_set(Cfg.cef(cfg), CF.Cef.shield.val(drive))), note}
+    case False{} _: IO.pure(Hub, h)
+
+def Hub.cef.driven(h: Hub, +b: TE.TeachBot) -> IO(Hub):
+  match h:
+    case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      Hub.cef.shield.go(Bool.and(Bool.and(String.eq(CF.Cef.session.live(Cfg.cef(cfg)), "cef"), String.eq(TE.Teach.bot.id(b), CF.Cef.session.page(Cfg.cef(cfg)))),
+        CF.Cef.shield.due(CF.Cef.session.shield(Cfg.cef(cfg)), TE.Teach.bot.drive(b))), Hub{st, f, ls, cl, as, inbox, cfg, note}, TE.Teach.bot.drive(b))
+
 def Hub.tch.put(h: Hub, +b: TE.TeachBot) -> IO(Hub):
   match h:
     case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
       do IO<Hub>:
         cl2 : List<&2, Client> <- Wire.all(cl, TE.Teach.msg(b))
-        return Hub{st, f, ls, cl2, as, inbox, Cfg.with_tch(cfg, TE.Teach.put(Cfg.tch(cfg), b)), note}
+        Hub.cef.driven(Hub{st, f, ls, cl2, as, inbox, Cfg.with_tch(cfg, TE.Teach.put(Cfg.tch(cfg), b)), note}, b)
 
 def Hub.tch.ok(h: Hub, +client: U32, +id: String) -> IO(Hub):
   Hub.out(h, B.Reply.ok(client, id))
@@ -8352,11 +9321,21 @@ def Hub.browser.k(i: Nat, h: Hub, +client: U32, +id: String, +o: J.Json, +b: TE.
       Hub.browser.input(String.is_empty(TE.Teach.bot.drive(b)), h, client, id, o)
 
 # bots.browser {bot, op, ...}
-def Hub.browser(h: Hub, +client: U32, +id: String, +o: J.Json) -> IO(Hub):
+def Hub.browser.valid(h: Hub, +client: U32, +id: String, +o: J.Json) -> IO(Hub):
   match h:
     case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
       Hub.browser.k(C.Codec.pos(["takeover", "handback"], J.Json.get_str(o, "op", "")), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, id, o,
         TE.Teach.get(Cfg.tch(cfg), J.Json.get_str(o, "bot", "")))
+
+def Hub.browser.known(ok: Bool, h: Hub, +client: U32, +id: String, +o: J.Json) -> IO(Hub):
+  match ok:
+    case True{}: Hub.browser.valid(h, client, id, o)
+    case False{}: Hub.tch.err(h, client, id, "unknown browser owner")
+
+def Hub.browser(h: Hub, +client: U32, +id: String, +o: J.Json) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
+      Hub.browser.known(Cef.page.ok(st, J.Json.get_str(o, "bot", "")), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, id, o)
 
 def Hub.teach.start(h: Hub, +client: U32, +id: String, +bot: String, +now: Nat) -> IO(Hub):
   match h:
@@ -8467,8 +9446,91 @@ def Hub.browser_ev.k(rec: Bool, h: Hub, +bot: String, +step: J.Json) -> IO(Hub):
     case False{}:
       IO.pure(Hub, h)
 
-def Hub.browser_ev.o(h: Hub, +o: J.Json) -> IO(Hub):
+def Hub.browser_ev.record(h: Hub, +o: J.Json) -> IO(Hub):
   Hub.browser_ev.k(String.eq(J.Json.get_str(o, "event", ""), "record"), h, J.Json.get_str(o, "page", ""), J.Json.get_obj(o, "step"))
+
+# a press on a page's shield: the person takes the page over (the shield
+# then comes off and the page is focused: Hub.tch.put); no reply goes out
+def Hub.cef.click.k(take: Bool, h: Hub, +b: TE.TeachBot) -> IO(Hub):
+  match take:
+    case True{}:
+      Hub.tch.put(h, TE.Teach.takeover(b))
+    case False{}:
+      IO.pure(Hub, h)
+
+def Hub.cef.click(real: Bool, h: Hub, +page: String) -> IO(Hub):
+  match real h:
+    case True{} Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      Hub.cef.click.k(CF.Cef.shield.take(TE.Teach.bot.drive(TE.Teach.get(Cfg.tch(cfg), page))), Hub{st, f, ls, cl, as, inbox, cfg, note}, TE.Teach.get(Cfg.tch(cfg), page))
+    case False{} _:
+      IO.pure(Hub, h)
+
+def Hub.cef.click.o(h: Hub, +o: J.Json) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
+      Hub.cef.click(Cef.page.ok(st, J.Json.get_str(o, "page", "")), Hub{st, f, ls, cl, as, inbox, cfg, note}, J.Json.get_str(o, "page", ""))
+
+# the CEF host failed while live: back to chrome, through the queue
+def Hub.cef.hostdead(failed: Bool, h: Hub, +o: J.Json) -> IO(Hub):
+  match failed h:
+    case True{} Hub{st, f, ls, cl, as, +inbox, +cfg, note}:
+      do IO<Hub>:
+        CefQueue.submit(CF.Cef.session.queue(Cfg.cef(cfg)), CF.CefWork{"failed", o, "", CF.Cef.session.token(Cfg.cef(cfg))})
+        return Hub{st, f, ls, cl, as, inbox, cfg, note}
+    case False{} _: IO.pure(Hub, h)
+
+def Hub.cef.engine_ev(h: Hub, +o: J.Json) -> IO(Hub):
+  match h:
+    case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      Hub.cef.hostdead(Bool.and(String.eq(CF.Cef.session.live(Cfg.cef(cfg)), "cef"), Bool.not(J.Json.get_bool(o, "ok", True{}))),
+        Hub{st, f, ls, cl, as, inbox, cfg, note}, o)
+
+# the helper exited: it is started again (with the engine's flags) by
+# showing the placed page and its shield again, a few times at most
+def Hub.cef.revive(go: Bool, h: Hub) -> IO(Hub):
+  match go h:
+    case True{} Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      do IO<Hub>:
+        CefQueue.submit(CF.Cef.session.queue(Cfg.cef(cfg)), CF.CefWork{"place", CF.Cef.session.place(Cfg.cef(cfg)),
+          TE.Teach.bot.drive(TE.Teach.get(Cfg.tch(cfg), CF.Cef.session.page(Cfg.cef(cfg)))), ""})
+        return Hub{st, f, ls, cl, as, inbox, Cfg.with_cef(cfg, CF.Cef.session.tried(Cfg.cef(cfg))), note}
+    case False{} _: IO.pure(Hub, h)
+
+def Hub.cef.exited(h: Hub) -> IO(Hub):
+  match h:
+    case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      Hub.cef.revive(CF.Cef.revive(String.eq(CF.Cef.session.live(Cfg.cef(cfg)), "cef"), CF.Cef.visible(CF.Cef.session.place(Cfg.cef(cfg))), CF.Cef.session.tries(Cfg.cef(cfg))),
+        Hub{st, f, ls, cl, as, inbox, cfg, note})
+
+# a page navigated: it exists; every client hears its one key (and the
+# key of the oldest, if it was pushed out)
+def Hub.cef.seen.k(new: Bool, h: Hub, +page: String) -> IO(Hub):
+  match new h:
+    case True{} Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      do IO<Hub>:
+        cl2 : List<&2, Client> <- Wire.all(cl, J.Json.show(J.Json.obj([J.KV{"t", J.Str{"info"}}, J.KV{"info", J.Json.obj(CF.Cef.pages.told(page, CF.Cef.pages.out(CF.Cef.session.pages(Cfg.cef(cfg)))))}])))
+        return Hub{st, f, ls, cl2, as, inbox, Cfg.with_cef(cfg, CF.Cef.session.pages_set(Cfg.cef(cfg), CF.Cef.pages.add(CF.Cef.session.pages(Cfg.cef(cfg)), page))), note}
+    case False{} _:
+      IO.pure(Hub, h)
+
+def Hub.cef.seen.o(h: Hub, +o: J.Json) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
+      Hub.cef.seen.k(Bool.and(Cef.page.ok(st, J.Json.get_str(o, "page", "")), Bool.not(CF.Cef.pages.has(CF.Cef.session.pages(Cfg.cef(cfg)), J.Json.get_str(o, "page", "")))),
+        Hub{st, f, ls, cl, as, inbox, cfg, note}, J.Json.get_str(o, "page", ""))
+
+def Hub.browser_ev.c(i: Nat, h: Hub, +o: J.Json) -> IO(Hub):
+  match i:
+    case 0n: Hub.browser_ev.record(h, o)
+    case 1n: Hub.cef.engine_ev(h, o)
+    case 2n: Hub.cef.click.o(h, o)
+    case 3n: Hub.cef.exited(h)
+    case 4n: Hub.cef.seen.o(h, o)
+    case 5n: Hub.cef.seen.o(h, o)
+    case _: IO.pure(Hub, h)
+
+def Hub.browser_ev.o(h: Hub, +o: J.Json) -> IO(Hub):
+  Hub.browser_ev.c(C.Codec.pos(["record", "engine", "shield-click", "helper-exit", "navigated", "load"], J.Json.get_str(o, "event", "")), h, o)
 
 # a helper event about a bot's page: a recorder step (navigations and loads
 # need nothing here: the recorder reports the person's own navigations)
@@ -8697,8 +9759,109 @@ def Hub.rpc.c(seen: Bool, h: Hub, +client: U32, +text: String, +now: Nat) -> IO(
     case False{}:
       Hub.rpc.g(String.contains(text, "bots.give"), h, client, text, now)
 
+def Hub.cef.say(+cp: CF.CefSession) -> String:
+  J.Json.show(J.Json.obj([J.KV{"t", J.Str{"info"}}, J.KV{"info", J.Json.obj(CF.Cef.session.info(cp))}]))
+
+def Hub.cef.done(current: Bool, h: Hub, +live: String, +err: String) -> IO(Hub):
+  match current h:
+    case True{} Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      do IO<Hub>:
+        +cp : CF.CefSession = CF.Cef.session.done(Cfg.cef(cfg), live, err)
+        cl2 : List<&2, Client> <- Wire.all(cl, Hub.cef.say(cp))
+        return Hub{st, f, ls, cl2, as, inbox, Cfg.with_cef(cfg, cp), note}
+    case False{} _: IO.pure(Hub, h)
+
+def Hub.cef.finished(h: Hub, +request: String, live: String, err: String) -> IO(Hub):
+  match h:
+    case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      Hub.cef.done(CF.Cef.current(Cfg.cef(cfg), request), Hub{st, f, ls, cl, as, inbox, cfg, note}, live, err)
+
+# the engine the setting and the window's embed call for, asked of the
+# helper when it differs from what was last asked (a short key compared)
+def Hub.cef.reconcile.queue(h: Hub, +on: Bool, +key: String) -> IO(Hub):
+  match h:
+    case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      do IO<Hub>:
+        +cp : CF.CefSession = CF.Cef.session.done(CF.Cef.session.request_set(Cfg.cef(cfg), key), "chrome", "")
+        CefQueue.submit(CF.Cef.session.queue(cp), CF.CefWork{"engine", CF.Cef.args(on, CF.Cef.session.xid(cp), CF.Cef.session.display(cp)), "", CF.Cef.session.token(cp)})
+        cl2 : List<&2, Client> <- Wire.all(cl, Hub.cef.say(cp))
+        return Hub{st, f, ls, cl2, as, inbox, Cfg.with_cef(cfg, cp), note}
+
+def Hub.cef.reconcile.k(changed: Bool, h: Hub, +on: Bool, +key: String) -> IO(Hub):
+  match changed h:
+    case True{} Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      IO.bind(Hub, Hub, Hub.cef.queue.ensure(CefQueue.known(CF.Cef.session.queue(Cfg.cef(cfg))), Hub{st, f, ls, cl, as, inbox, cfg, note}), h2 => Hub.cef.reconcile.queue(h2, on, key))
+    case False{} _: IO.pure(Hub, h)
+
+def Hub.cef.reconcile.on(h: Hub, +on: Bool) -> IO(Hub):
+  match h:
+    case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      Hub.cef.reconcile.k(Bool.not(String.eq(CF.Cef.session.request(Cfg.cef(cfg)), CF.Cef.want.key(on, CF.Cef.session.xid(Cfg.cef(cfg)), CF.Cef.session.display(Cfg.cef(cfg))))),
+        Hub{st, f, ls, cl, as, inbox, cfg, note}, on, CF.Cef.want.key(on, CF.Cef.session.xid(Cfg.cef(cfg)), CF.Cef.session.display(Cfg.cef(cfg))))
+
+def Hub.cef.reconcile(h: Hub) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
+      Hub.cef.reconcile.on(Hub{st, f, ls, cl, as, inbox, cfg, note}, CF.Cef.engine(M.Setting.get(st, "browser.engine", "chrome"), CF.Cef.session.known(Cfg.cef(cfg)), True{}))
+
+# only after the messages that can change the engine (Cef.after)
+def Hub.cef.after(go: Bool, h: Hub) -> IO(Hub):
+  match go:
+    case True{}: Hub.cef.reconcile(h)
+    case False{}: IO.pure(Hub, h)
+
+def Hub.cef.near(h: Hub, +client: U32) -> IO(Hub):
+  match h:
+    case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      IO.pure(Hub, Hub{st, f, ls, cl, as, inbox, Cfg.with_cef(cfg, CF.Cef.session.near(Cfg.cef(cfg), client)), note})
+
+def Hub.cef.place(ok: Bool, h: Hub, +client: U32, +id: String, +p: J.Json) -> IO(Hub):
+  match ok h:
+    case True{} Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      do IO<Hub>:
+        +drive : String = TE.Teach.bot.drive(TE.Teach.get(Cfg.tch(cfg), J.Json.get_str(p, "page", "")))
+        CefQueue.submit(CF.Cef.session.queue(Cfg.cef(cfg)), CF.CefWork{"place", p, drive, ""})
+        Hub.tch.ok(Hub{st, f, ls, cl, as, inbox, Cfg.with_cef(cfg, CF.Cef.session.place_set(Cfg.cef(cfg), p, CF.Cef.shield.val(drive))), note}, client, id)
+    case False{} _: Hub.tch.err(h, client, id, "not the embedded browser window or unknown page")
+
+def Hub.cef.embed(ok: Bool, h: Hub, +client: U32, +id: String, +p: J.Json) -> IO(Hub):
+  match ok h:
+    case True{} Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      Hub.tch.ok(Hub{st, f, ls, cl, as, inbox, Cfg.with_cef(cfg, CF.Cef.session.embed_set(Cfg.cef(cfg), client, U32.from_nat(J.Json.get_nat(p, "xid", 0n)), J.Json.get_str(p, "display", ""))), note}, client, id)
+    case False{} _: Hub.tch.err(h, client, id, "only this machine's window can embed the browser")
+
+# browser.embed {xid, display} and browser.place {page, x, y, w, h} or {}:
+# only from this machine's window (Cef.from); a place only from the window
+# that embedded, only while cef runs, and only for a real page
+def Hub.cef.rpc.k(embed: Bool, h: Hub, +client: U32, +id: String, +p: J.Json) -> IO(Hub):
+  match embed h:
+    case True{} Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      Hub.cef.embed(CF.Cef.from(client, CF.Cef.session.is_local(Cfg.cef(cfg), client)), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, id, p)
+    case False{} Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
+      Hub.cef.place(Bool.and(Bool.and(CF.Cef.from(client, CF.Cef.session.is_local(Cfg.cef(cfg), client)), U32.is_eq(client, CF.Cef.session.client(Cfg.cef(cfg)))),
+        Bool.and(String.eq(CF.Cef.session.live(Cfg.cef(cfg)), "cef"), Bool.or(Bool.not(CF.Cef.visible(p)), Cef.page.ok(st, J.Json.get_str(p, "page", ""))))),
+        Hub{st, f, ls, cl, as, inbox, cfg, note}, client, id, p)
+
+def Hub.cef.rpc(cef: Bool, h: Hub, +client: U32, +text: String, +now: Nat, +o: J.Json) -> IO(Hub):
+  match cef:
+    case True{}: Hub.cef.rpc.k(String.eq(J.Json.get_str(o, "m", ""), "browser.embed"), h, client, J.Json.as_raw(J.Json.get(o, "id"), "0"), J.Json.get_obj(o, "p"))
+    case False{}: Hub.rpc.c(String.eq(J.Json.get_str(o, "m", ""), "browser.seen"), h, client, text, now)
+
+def Hub.rpc.ocef(h: Hub, +client: U32, +text: String, +now: Nat, +o: J.Json) -> IO(Hub):
+  Hub.cef.rpc(Bool.or(String.eq(J.Json.get_str(o, "m", ""), "browser.embed"), String.eq(J.Json.get_str(o, "m", ""), "browser.place")), h, client, text, now, o)
+
+def Hub.rpc.cefroute(cef: Bool, h: Hub, +client: U32, +text: String, +now: Nat) -> IO(Hub):
+  match cef:
+    case True{}: Hub.rpc.ocef(h, client, text, now, Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{}))
+    case False{}: Hub.rpc.c(String.contains(text, "\"browser.seen\""), h, client, text, now)
+
 def Hub.rpc(h: Hub, +client: U32, +text: String, +now: Nat) -> IO(Hub):
-  Hub.rpc.c(String.contains(text, "\"browser.seen\""), h, client, text, now)
+  Hub.rpc.cefroute(Bool.or(String.contains(text, "\"browser.embed\""), String.contains(text, "\"browser.place\"")), h, client, text, now)
+
+# the threads' Boat chips that Boat's status changes (logged only then)
+def Hub.chips(p: M.State & Hub, +status: String, +now: Nat) -> IO(Hub):
+  (st, h) = p
+  Hub.step(h, B.Step{UZ.Chip.changes(st, status, now), Nil{}})
 
 def Hub.line.k(p: M.State & Hub, +thread: String, +line: String, +now: Nat) -> IO(Hub):
   (st, h) = p
@@ -8769,6 +9932,7 @@ def Hub.tick(h: Hub, +now: Nat) -> IO(Hub):
         # for (effects/adopt.c), so none stays a zombie
         left : U32 <- AIO.Adopt.reap()
         PS.Perf.set("hub.inherited", left)
+        Self.post(inbox, KProbe{False{}})
         Self.post(inbox, Release{})
         Self.post(inbox, Silence{})
         Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, B.Hub.tick(st, now))
@@ -8778,29 +9942,45 @@ def Hub.tick(h: Hub, +now: Nat) -> IO(Hub):
 def Hub.mcp.fail(+body: String) -> String:
   MC.Mcp.error(Maybe.default(&2, J.Json, J.Json.get(Maybe.default(&2, J.Json, J.Json.parse(body), J.Null{}), "id"), J.Null{}), "-32000", "Backplane could not record this (the log write failed); nothing was done")
 
-def Hub.mcp.after(r: Hub & Bool, +park: String, +body: String, +text: String, +reply: Chan(String)) -> IO(Hub):
+def Hub.mcp.after(r: Hub & Bool, +park: String, +body: String, +text: String, +reply: Chan(String), omp: Bool) -> IO(Hub):
   (h, ok) = r
   match h ok:
     case Hub{hs, f, ls, cl, as, inbox, +cfg, note} True{}:
       do IO<Hub>:
-        Hub.mcp.send(Bool.not(String.is_empty(park)), park, body, text, reply, cfg)
+        Hub.mcp.send(Bool.not(String.is_empty(park)), omp, park, body, text, reply, cfg)
         return Hub{hs, f, ls, cl, as, inbox, cfg, note}
     case Hub{hs, f, ls, cl, as, inbox, +cfg, note} False{}:
       do IO<Hub>:
-        Hub.mcp.send(False{}, "", body, Hub.mcp.fail(body), reply, cfg)
+        Hub.mcp.send(False{}, omp, "", body, Hub.mcp.fail(body), reply, cfg)
         return Hub{hs, f, ls, cl, as, inbox, cfg, note}
 
-def Hub.mcp.k(o: MC.McpOut, h: Hub, +reply: Chan(String), +body: String) -> IO(Hub):
+def MailJob.mcp.json(+r: MST.StoreResult<J.Json>, +id: J.Json) -> String:
+  match r:
+    case MST.Stored{+j}: MC.Mcp.result(id, MC.Mcp.content(True{}, j))
+    case MST.Missing{+p}: MC.Mcp.result(id, MC.Mcp.content(False{}, MC.Mcp.fail("missing " ++ p)))
+    case MST.StoreError{+p, +e}: MC.Mcp.result(id, MC.Mcp.content(False{}, MC.Mcp.fail(p ++ ": " ++ e)))
+
+def Hub.mail.mcp.read(h: Hub, +cs: List<&2, M.Change>, +conv: String, +before: String, +n: Nat, +reply: Chan(String), +body: String) -> IO(Hub):
+  match h:
+    case Hub{+st, f, +ls, +cl, +as, +inbox, +cfg, +note}:
+      do IO<Hub>:
+        r : MST.StoreResult<J.Json> <- MailJob.page(Cfg.home(cfg), st, conv, "*", before, n)
+        IO.bind(Hub & Bool, Hub, Hub.step.ok(Hub{st, f, ls, cl, as, inbox, cfg, note}, B.Step{cs, Nil{}}), got => Hub.mcp.after(got, "", body, MailJob.mcp.json(r, J.Json.get_obj(Maybe.default(&2, J.Json, J.Json.parse(body), J.Null{}), "id")), reply, False{}))
+
+def Hub.mcp.k(o: MC.McpOut, h: Hub, +reply: Chan(String), +body: String, omp: Bool) -> IO(Hub):
   match o:
+    case MC.McpOut{_, B.Step{cs, B.MailRead{_, _, conv, before, n} <> Nil{}}, _}:
+      Hub.mail.mcp.read(h, cs, conv, before, n, reply, body)
     case MC.McpOut{+text, st, +park}:
-      IO.bind(Hub & Bool, Hub, Hub.step.ok(h, st), r => Hub.mcp.after(r, park, body, text, reply))
+      IO.bind(Hub & Bool, Hub, Hub.step.ok(h, st), r => Hub.mcp.after(r, park, body, text, reply, omp))
 
 def Hub.mcp.hub.normal(h: Hub, +thread: String, +body: String, +reply: Chan(String), +now: Nat) -> IO(Hub):
   match h:
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
-      Hub.mcp.k(BH.Bots.mcp(st, now, thread, Maybe.default(&2, J.Json, J.Json.parse(Cfg.models(cfg)), J.Null{}), Cfg.version(cfg),
-          Maybe.default(&2, J.Json, J.Json.parse(BN.Bn.dir(Cfg.bn(cfg))), J.Json.arr(Nil{})), GG.Google.tool_defs(), body),
-        Hub{st, f, ls, cl, as, inbox, cfg, note}, reply, body)
+      Hub.mcp.k(BH.Ride.mcp(BH.Bots.mcp(st, now, thread, Maybe.default(&2, J.Json, J.Json.parse(Cfg.models(cfg)), J.Null{}), Cfg.version(cfg),
+          Maybe.default(&2, J.Json, J.Json.parse(BN.Bn.dir(Cfg.bn(cfg))), J.Json.arr(Nil{})), GG.Google.tool_defs(), body), st, now, thread),
+        Hub{st, f, ls, cl, as, inbox, cfg, note}, reply, body,
+        String.eq(M.Thread.provider(M.State.thread.get(st, thread)), "omp"))
 
 def LockTool.preflight(free: Bool, +name: String, +holder: String, +home: String) -> IO(Bool):
   match free:
@@ -8918,16 +10098,35 @@ def Hub.mcp.file.k(file: Bool, h: Hub, +thread: String, +o: J.Json, +body: Strin
     case False{}:
       Hub.mcp.hub.pr(h, thread, body, reply, now)
 
-def Hub.mcp.hub(h: Hub, +thread: String, +body: String, +reply: Chan(String), +now: Nat) -> IO(Hub):
+def Hub.mcp.hub.w(h: Hub, +thread: String, +body: String, +reply: Chan(String), +now: Nat) -> IO(Hub):
   +o = Maybe.default(&2, J.Json, J.Json.parse(body), J.Null{})
   Hub.mcp.file.k(Bool.and(String.eq(J.Json.get_str(J.Json.get_obj(o, "params"), "name", ""), "wake_on"), String.eq(J.Json.get_str(J.Json.get_obj(J.Json.get_obj(o, "params"), "arguments"), "kind", ""), "file")), h, thread, o, body, reply, now)
+
+# deploy_main with deploy.repo set: origin/main is read off the hub first
+# (ShipJob.ask), then the call is answered (Hub.ship.asked)
+def Hub.mcp.ship(go: Bool, h: Hub, +thread: String, +body: String, +reply: Chan(String), +now: Nat) -> IO(Hub):
+  match go h:
+    case True{} Hub{+st, f, ls, cl, as, +inbox, cfg, note}:
+      do IO<Hub>:
+        IO.spawn(Unit, ShipJob.ask(B.Ship.repo(st), B.Ship.cands(st), thread, body, reply, inbox))
+        return Hub{st, f, ls, cl, as, inbox, cfg, note}
+    case False{} _:
+      Hub.mcp.hub.w(h, thread, body, reply, now)
+
+def Hub.mcp.ship.is(+body: String) -> Bool:
+  String.eq(J.Json.get_str(J.Json.get_obj(Maybe.default(&2, J.Json, J.Json.parse(body), J.Null{}), "params"), "name", ""), "deploy_main")
+
+def Hub.mcp.hub(h: Hub, +thread: String, +body: String, +reply: Chan(String), +now: Nat) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
+      Hub.mcp.ship(Bool.and(Hub.mcp.ship.is(body), Bool.not(String.is_empty(B.Ship.repo(st)))), Hub{st, f, ls, cl, as, inbox, cfg, note}, thread, body, reply, now)
 
 # the approved folder, resolved: added (or found) and the tool answered
 def Hub.newproj.made(h: Hub, +root: String, +name: String, +id: String, +reply: Chan(String), +now: Nat) -> IO(Hub):
   match h:
     case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
       Hub.mcp.k(MC.Mcp.reply(Maybe.default(&2, J.Json, J.Json.parse(id), J.Null{}), BH.Bots.newproj.made(st, now, root, name)),
-        Hub{st, f, ls, cl, as, inbox, cfg, note}, reply, "")
+        Hub{st, f, ls, cl, as, inbox, cfg, note}, reply, "", False{})
 
 def Hub.mcp.w(+secs: Nat, h: Hub, +thread: String, +o: J.Json, body: String, +reply: Chan(String), +now: Nat) -> IO(Hub):
   match secs h:
@@ -9123,8 +10322,21 @@ def Hub.adopt(h: Hub, +now: Nat) -> IO(Hub):
         +off : String <- Env.get("BACKPLANE_ADOPT", "")
         Hub.adopt.es(AD.Adopt.entries(rec, hand), Hub{st, f, ls, cl, as, inbox, cfg, note}, Bool.not(String.eq(off, "0")), now)
 
+def Hub.mail.recover.on(+on: Bool, h: Hub) -> IO(Hub):
+  match on h:
+    case False{} kept: IO.pure(Hub, kept)
+    case True{} Hub{+st, f, +ls, +cl, +as, +inbox, +cfg, +note}:
+      do IO<Hub>:
+        IO.spawn(Unit, MailJob.recover(Cfg.home(cfg), M.State.mail(st), inbox))
+        return Hub{st, f, ls, cl, as, inbox, cfg, note}
+
+def Hub.mail.recover.start(h: Hub) -> IO(Hub):
+  match h:
+    case Hub{+st, f, +ls, +cl, +as, +inbox, +cfg, +note}:
+      Hub.mail.recover.on(String.eq(M.Setting.get(st, "mail.on", "off"), "on"), Hub{st, f, ls, cl, as, inbox, cfg, note})
+
 def Hub.recover(h: Hub, +now: Nat) -> IO(Hub):
-  IO.bind(Hub, Hub, Far.start(h), h2 => Hub.recover.stale(h2, now))
+  IO.bind(Hub, Hub, Hub.mail.recover.start(h), h0 => IO.bind(Hub, Hub, Far.start(h0), h2 => Hub.recover.stale(h2, now)))
 
 # The minute
 # ----------
@@ -9538,7 +10750,7 @@ def Hub.bot_tick(h: Hub, +tz: String, +now: Nat) -> IO(Hub):
 # returning peer, and never bounce every successful directory request.
 def Bot.dir.machines(n: Net) -> String:
   match n:
-    case Net{_, _, _, _, _, _, _, _, _, mc, _, _, _, _, _}:
+    case Net{_, _, _, _, _, _, _, _, _, mc, _, _, _, _, _, _}:
       mc
 
 def Hub.dir.returned(h: Hub, +mc: String) -> IO(Hub):
@@ -10662,13 +11874,13 @@ def Tailnet.listen.k(none: Bool, +host: String, +ip: String, +port: U32, +web: S
 # serve HTTPS through `tailscale serve` when asked
 def Tailnet.start(n: Net, +host: String, +port: U32, +web: String, +inbox: Chan(Msg)) -> IO(Unit):
   match n:
-    case Net{True{}, https, +token, _, _, _, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc}:
+    case Net{True{}, https, +token, _, _, _, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}:
       do IO<Unit>:
         r : P.Ran <- P.Proc.run("tailscale", ["ip", "-4"], "")
         +ip : String = Tailnet.first(r)
         Tailnet.listen.k(String.is_empty(ip), host, ip, port, web, inbox, token)
         Tailnet.https(https, port, token, inbox)
-    case Net{False{}, _, _, _, _, _, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc}:
+    case Net{False{}, _, _, _, _, _, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}:
       IO.pure(Unit, Unit{})
 
 # Google's tools for bots
@@ -10755,7 +11967,7 @@ def Hub.cal.ask(ask: Bool, h: Hub, +thread: String, +tool: String, +args: J.Json
       do IO<Hub>:
         +ask : String = B.Hub.id("q", now, B.Hub.seq(st))
         +r2 : Chan(String) <- Chan.new(String, 1)
-        Park.put(Cfg.pk(cfg), PK.PPark{ask, "", r2})
+        Park.put(Cfg.pk(cfg), PK.PPark{ask, "", r2, False{}})
         IO.spawn(Unit, Gg.wait(r2, Cfg.home(cfg), tool, args, id, reply))
         Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, B.Step{[M.AskOpened{ask, thread, "approval", tool, detail, "", now}], Nil{}})
 
@@ -10769,7 +11981,7 @@ def Hub.google.k(ask: Bool, h: Hub, +thread: String, +o: J.Json, +reply: Chan(St
       do IO<Hub>:
         +ask : String = B.Hub.id("q", now, B.Hub.seq(st))
         +r2 : Chan(String) <- Chan.new(String, 1)
-        Park.put(Cfg.pk(cfg), PK.PPark{ask, "", r2})
+        Park.put(Cfg.pk(cfg), PK.PPark{ask, "", r2, False{}})
         IO.spawn(Unit, Gg.wait(r2, Cfg.home(cfg), Gg.tool(o), Gg.args(o), J.Json.get_obj(o, "id"), reply))
         Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, B.Step{[M.AskOpened{ask, thread, "approval", Gg.tool(o), Gg.detail(o), "", now}], Nil{}})
 
@@ -10786,7 +11998,7 @@ def Hub.google.ok(h: Hub, +thread: String, +o: J.Json, +reply: Chan(String), +no
   match h:
     case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
       Hub.google.p(Bool.or(String.eq(Gg.tool(o), "calendar_update"), String.eq(Gg.tool(o), "calendar_delete")),
-        Bool.and(GG.Google.asks(Gg.tool(o)), Bool.not(MC.Perm.session_ok(M.Asks.all(st), thread, Gg.tool(o)))), Hub{st, f, ls, cl, as, inbox, cfg, note}, thread, o, reply, now)
+        Bool.and(GG.Google.asks(Gg.tool(o)), Bool.not(Bool.or(MC.Perm.session_ok(M.Asks.all(st), thread, Gg.tool(o)), MC.Perm.run.google(st, thread, Gg.tool(o))))), Hub{st, f, ls, cl, as, inbox, cfg, note}, thread, o, reply, now)
 
 # the hub's settings gmail.sig.<address> as a JSON object (not secrets)
 def Gg.sigs.go(ks: List<&2, String>, +st: M.State, +acc: List<&2, J.KV>) -> List<&2, J.KV>:
@@ -10849,7 +12061,7 @@ def Hub.gmail.k(ask: Bool, h: Hub, +thread: String, +tool: String, +detail: Stri
       do IO<Hub>:
         +ask : String = B.Hub.id("q", now, B.Hub.seq(st))
         +r2 : Chan(String) <- Chan.new(String, 1)
-        Park.put(Cfg.pk(cfg), PK.PPark{ask, "", r2})
+        Park.put(Cfg.pk(cfg), PK.PPark{ask, "", r2, False{}})
         IO.spawn(Unit, Gg.gwait(r2, Cfg.home(cfg), plan, id, reply))
         Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, B.Step{[M.AskOpened{ask, thread, "approval", tool, detail, "", now}], Nil{}})
 
@@ -10857,7 +12069,7 @@ def Hub.gmail.k(ask: Bool, h: Hub, +thread: String, +tool: String, +detail: Stri
 def Hub.gmail.ask(h: Hub, +thread: String, +tool: String, +detail: String, +plan: String, +idtxt: String, +reply: Chan(String), +now: Nat) -> IO(Hub):
   match h:
     case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
-      Hub.gmail.k(Bool.and(GG.Google.asks(tool), Bool.not(MC.Perm.session_ok(M.Asks.all(st), thread, tool))), Hub{st, f, ls, cl, as, inbox, cfg, note}, thread, tool, detail, plan,
+      Hub.gmail.k(Bool.and(GG.Google.asks(tool), Bool.not(Bool.or(MC.Perm.session_ok(M.Asks.all(st), thread, tool), MC.Perm.run.google(st, thread, tool)))), Hub{st, f, ls, cl, as, inbox, cfg, note}, thread, tool, detail, plan,
         Maybe.default(&2, J.Json, J.Json.parse(idtxt), J.Null{}), reply, now)
 
 def Hub.gmail.start(h: Hub, +thread: String, +o: J.Json, +reply: Chan(String)) -> IO(Hub):
@@ -10938,7 +12150,7 @@ def Hub.newproj.k(ask: Bool, h: Hub, +thread: String, +o: J.Json, +reply: Chan(S
       do IO<Hub>:
         +ask : String = B.Hub.id("q", now, B.Hub.seq(st))
         +r2 : Chan(String) <- Chan.new(String, 1)
-        Park.put(Cfg.pk(cfg), PK.PPark{ask, "", r2})
+        Park.put(Cfg.pk(cfg), PK.PPark{ask, "", r2, False{}})
         IO.spawn(Unit, Np.wait(r2, inbox, thread, Gg.args(o), J.Json.get_obj(o, "id"), reply))
         Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, B.Step{[M.AskOpened{ask, thread, "approval", "project_create", BH.Bots.newproj.detail(Gg.args(o)), "", now}], Nil{}})
 
@@ -11090,7 +12302,7 @@ def Hub.task.paused(h: Hub, +thread: String, +bot: String, +run: String, +slug: 
       do IO<Hub>:
         +ask : String = B.Hub.id("q", now, B.Hub.seq(st))
         +r2 : Chan(String) <- Chan.new(String, 1)
-        Park.put(Cfg.pk(cfg), PK.PPark{ask, "", r2})
+        Park.put(Cfg.pk(cfg), PK.PPark{ask, "", r2, False{}})
         IO.spawn(Unit, Tk.wait(r2, inbox, bot, rid, reply))
         Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note},
           B.Step{[M.AskOpened{ask, thread, "browser", "task_pause", TE.Pause.detail(bot, run, slug, n, kind, question, risky), TE.Pause.options(risky), now}], Nil{}})
@@ -11184,19 +12396,333 @@ def Hub.mcp.gg(g: Bool, h: Hub, +thread: String, +o: J.Json, body: String, +repl
     case False{} _:
       Hub.mcp.np(BH.Bots.newproj.is(o), h, thread, o, body, reply, now)
 
+def KExportMcp.run(+rt: K.Rt, +home: String, +o: J.Json, +reply: Chan(String)) -> IO(Unit):
+  do IO<Unit>:
+    +args : J.Json = J.Json.get_obj(J.Json.get_obj(o, "params"), "arguments")
+    +r : J.Json <- KEX.KExport.export(rt, home, J.Json.get_str(args, "path", ""), J.Json.get_bool(args, "force", False{}), "", True{})
+    sent : Result<&1, &1, String, Unit> <- Chan.send(String, reply, MC.Mcp.result(Maybe.default(&2, J.Json, J.Json.get(o, "id"), J.Null{}), MC.Mcp.content(Bool.or(String.eq(J.Json.get_str(r, "export10", ""), "done"), String.eq(J.Json.get_str(r, "export10", ""), "confirm")), r)))
+    return Unit{}
+
+def Hub.mcp.kexport(exporting: Bool, h: Hub, +thread: String, +o: J.Json, body: String, +reply: Chan(String), +now: Nat) -> IO(Hub):
+  match exporting h:
+    case True{} Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      do IO<Hub>:
+        IO.spawn(Unit, KExportMcp.run(Cfg.rt(cfg), Cfg.home(cfg), o, reply))
+        return Hub{st, f, ls, cl, as, inbox, cfg, note}
+    case False{} _:
+      Hub.mcp.gg(Gg.is(o), h, thread, o, body, reply, now)
+
+# Ordering: a buy thread's tools (core/order.bend, server/orderio.bend)
+# ---------------------------------------------------------------------
+# order_quote reads the order's manifest, asks the person (an approval
+# card listing every file) and only then uploads, waits for the quote and
+# posts it with its Buy now link; the record in <home>/orders keeps the token,
+# and a watcher follows the order (Od.watch), resumed at start.
+
+def Od.server(+st: M.State) -> String:
+  B.Buy.server(st)
+
+def Od.post(+inbox: Chan(Msg), +thread: String, +id: String, text: String) -> IO(Unit):
+  do IO<Unit>:
+    +now : Nat <- Now.nat()
+    ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, Commit{[M.MessagePosted{thread, id, M.Assistant{}, text, now}]})
+    return Unit{}
+
+def Od.wake(+inbox: Chan(Msg), +thread: String, +text: String) -> IO(Unit):
+  do IO<Unit>:
+    ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, OrderWake{thread, text})
+    return Unit{}
+
+# an order's progress in its thread, with its note alert (Hub.order.note)
+def Od.progress(+inbox: Chan(Msg), +thread: String, +id: String, +text: String, +note: String) -> IO(Unit):
+  do IO<Unit>:
+    ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, OrderNote{thread, id, text, note})
+    return Unit{}
+
+def Od.status.k(+st: String, +last: String, +q: J.Json, +inbox: Chan(Msg), +thread: String, +qid: String) -> IO(Unit):
+  Bool.pick(IO(Unit), Bool.or(String.eq(st, last), String.is_empty(OR.Order.status.text(st, J.Json.get_str(J.Json.get_obj(q, "order"), "tracking", "")))),
+    IO.pure(Unit, Unit{}), Od.progress(inbox, thread, "o:" ++ qid ++ ":" ++ st, OR.Order.status.text(st, J.Json.get_str(J.Json.get_obj(q, "order"), "tracking", "")),
+      OR.Order.status.note(st, J.Json.get_str(J.Json.get_obj(q, "order"), "tracking", ""))))
+
+def Od.watch.next(+st: String, +last: String, again: String -> IO(Unit)) -> IO(Unit):
+  Bool.pick(IO(Unit), OR.Order.done(st), IO.pure(Unit, Unit{}), again(Bool.pick(String, String.is_empty(st), last, st)))
+
+# one look at a quote's order every minute while it is unpaid, every ten
+# after; a change is said in the buy thread and kept in the record
+def Od.watch(n: Nat, +inbox: Chan(Msg), +home: String, +server: String, +qid: String, +token: String, +thread: String, +last: String) -> IO(Unit):
+  match n:
+    case 0n:
+      IO.pure(Unit, Unit{})
+    case 1n+m:
+      do IO<Unit>:
+        IO.sleep(OR.Order.every(last))
+        +install : String <- ODI.Od.install(home)
+        +q : J.Json <- ODI.Od.get(home, server, install, qid, token)
+        +st : String = OR.Order.state(q)
+        Od.status.k(st, last, q, inbox, thread, qid)
+        ODI.Od.keep(home, qid, token, thread, server, Bool.pick(String, String.is_empty(st), last, st))
+        Od.watch.next(st, last, l => Od.watch(m, inbox, home, server, qid, token, thread, l))
+
+def Od.resume.one(+inbox: Chan(Msg), +home: String, +j: J.Json) -> IO(Unit):
+  Bool.pick(IO(Unit), Bool.or(OR.Order.done(J.Json.get_str(j, "status", "")), String.is_empty(J.Json.get_str(j, "token", ""))), IO.pure(Unit, Unit{}),
+    Od.watch(9000n, inbox, home, J.Json.get_str(j, "server", ""), J.Json.get_str(j, "id", ""), J.Json.get_str(j, "token", ""), J.Json.get_str(j, "thread", ""), J.Json.get_str(j, "status", "")))
+
+def Od.resume.all(ps: List<&2, String>, +inbox: Chan(Msg), +home: String) -> IO(Unit):
+  match ps:
+    case Nil{}:
+      IO.pure(Unit, Unit{})
+    case +p <> t:
+      do IO<Unit>:
+        text : String <- GS.Gf.text(ODI.Od.orders(home) ++ "/" ++ p)
+        IO.spawn(Unit, Od.resume.one(inbox, home, Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{})))
+        Od.resume.all(t, inbox, home)
+
+# at start: follow every order not yet delivered
+def Od.resume(+inbox: Chan(Msg), +home: String) -> IO(Unit):
+  do IO<Unit>:
+    r : P.Ran <- P.Proc.run("sh", ["-c", "ls -1 2>/dev/null | grep '^q_.*\\.json$' | head -n 200"], ODI.Od.orders(home))
+    Od.resume.all(String.lines(ODI.Od.ran(r)), inbox, home)
+
+def Od.quoted.k(ok: Bool, +q: J.Json, +inbox: Chan(Msg), +home: String, +server: String, +qid: String, +token: String, +thread: String) -> IO(Unit):
+  match ok:
+    case True{}:
+      do IO<Unit>:
+        Od.post(inbox, thread, "q:" ++ qid, OR.Order.quote.md(J.Json.get_str(J.Json.get_obj(q, "quote"), "markdown", ""), ODI.Od.pay(server, qid, token),
+          J.Json.get_str(J.Json.get_obj(q, "quote"), "pay_label", "Buy now"), OR.Order.payable(q)))
+        ODI.Od.keep(home, qid, token, thread, server, "quoted")
+        Od.wake(inbox, thread, "The quote is posted in this thread. " ++ OR.Order.said(q))
+        Od.watch(9000n, inbox, home, server, qid, token, thread, "quoted")
+    case False{}:
+      Od.wake(inbox, thread, "The quote could not be worked out: " ++ J.Json.get_str(q, "error", "no answer from the order server") ++ ".")
+
+def Od.quoted(+q: J.Json, +inbox: Chan(Msg), +home: String, +server: String, +qid: String, +token: String, +thread: String) -> IO(Unit):
+  Od.quoted.k(Bool.not(String.is_empty(J.Json.get_str(q, "status", ""))), q, inbox, home, server, qid, token, thread)
+
+def Od.sent(+up: J.Json, +inbox: Chan(Msg), +home: String, +server: String, +install: String, +thread: String) -> IO(Unit):
+  Bool.pick(IO(Unit), String.is_empty(J.Json.get_str(up, "token", "")),
+    Od.wake(inbox, thread, "The files were not taken: " ++ J.Json.get_str(up, "error", "no answer") ++ "."),
+    IO.bind(J.Json, Unit, ODI.Od.poll(60n, home, server, install, J.Json.get_str(up, "id", ""), J.Json.get_str(up, "token", "")),
+      q => Od.quoted(q, inbox, home, server, J.Json.get_str(up, "id", ""), J.Json.get_str(up, "token", ""), thread)))
+
+# the person said yes: upload, wait, post, and tell the agent
+def Od.go(+inbox: Chan(Msg), +home: String, +server: String, +dir: String, ps: List<&2, String>, +thread: String) -> IO(Unit):
+  do IO<Unit>:
+    +install : String <- ODI.Od.install(home)
+    +up : J.Json <- ODI.Od.upload(home, server, install, dir, ps)
+    ODI.Od.keep(home, J.Json.get_str(up, "id", "none"), J.Json.get_str(up, "token", ""), thread, server, "quoting")
+    Od.sent(up, inbox, home, server, install, thread)
+
+# Send (or allowed for the session): upload; Not now: the agent is told;
+# the empty answer (the run was retired: Stop, archive, delete) tells no one
+def Od.wait.a(i: Nat, +inbox: Chan(Msg), +home: String, +server: String, +dir: String, ps: List<&2, String>, +thread: String) -> IO(Unit):
+  match i:
+    case 0n:
+      Od.go(inbox, home, server, dir, ps, thread)
+    case 1n:
+      Od.go(inbox, home, server, dir, ps, thread)
+    case 2n:
+      Od.wake(inbox, thread, OR.Order.quote.declined())
+    case _:
+      IO.pure(Unit, Unit{})
+
+def Od.wait.k(m: Maybe<&1, String>, +inbox: Chan(Msg), +home: String, +server: String, +dir: String, ps: List<&2, String>, +thread: String) -> IO(Unit):
+  match m:
+    case Some{+answer}:
+      Od.wait.a(C.Codec.pos(["accept", "session", "decline"], answer), inbox, home, server, dir, ps, thread)
+    case None{}:
+      IO.pure(Unit, Unit{})
+
+def Od.wait(+r2: Chan(String), +inbox: Chan(Msg), +home: String, +server: String, +dir: String, ps: List<&2, String>, +thread: String) -> IO(Unit):
+  IO.bind(Maybe<&1, String>, Unit, Chan.recv(String, r2), m => Od.wait.k(m, inbox, home, server, dir, ps, thread))
+
+def Od.ask(ok: Bool, h: Hub, +thread: String, +dir: String, +abs: String, +m: J.Json, +ps: List<&2, String>, +rid: J.Json, +reply: Chan(String), +now: Nat) -> IO(Hub):
+  match ok h:
+    case False{} _:
+      do IO<Hub>:
+        Gg.say(reply, rid, False{}, "no manifest.json with files to send in " ++ dir ++ " (paths must stay inside the folder, plain characters only, and the folder must hold plain files, no links)")
+        return h
+    case True{} Hub{+st, f, ls, cl, as, +inbox, +cfg, note}:
+      do IO<Hub>:
+        +ask : String = B.Hub.id("q", now, B.Hub.seq(st))
+        +r2 : Chan(String) <- Chan.new(String, 1)
+        Park.put(Cfg.pk(cfg), PK.PPark{ask, "", r2, False{}})
+        IO.spawn(Unit, Od.wait(r2, inbox, Cfg.home(cfg), Od.server(st), abs, ps, thread))
+        # (the agent hears at once and ends its turn; the person's Send may
+        # come any time, Od.wait)
+        Gg.say(reply, rid, True{}, OR.Order.quote.asked())
+        Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, B.Step{[M.AskOpened{ask, thread, "approval", "order_quote", OR.Order.ask.detail(dir, m, ps), "", now}], Nil{}})
+
+# (a folder holding links is refused: a link named like a design file could
+# carry any file of the person's out, under a name they would approve)
+def Od.quote(h: Hub, +thread: String, +o: J.Json, +reply: Chan(String), +now: Nat) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
+      do IO<Hub>:
+        +dir : String = String.trim(J.Json.get_str(Gg.args(o), "dir", ""))
+        +abs : String = B.Hub.cwd(st, B.Hub.thread(st, thread)) ++ "/" ++ dir
+        text : String <- GS.Gf.text(abs ++ "/manifest.json")
+        links : P.Ran <- P.Proc.run("sh", ["-c", "find . -type l 2>/dev/null | head -n 1"], abs)
+        +m : J.Json = Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{})
+        +ps : List<&2, String> = ODI.Od.files(m)
+        Od.ask(Bool.and(Bool.and(Bool.and(ODI.Od.safe(dir), ODI.Od.all.safe(ps)), Bool.not(List.is_empty(&2, String, ps))), String.is_empty(String.trim(ODI.Od.ran(links)))),
+          Hub{st, f, ls, cl, as, inbox, cfg, note}, thread, dir, abs, m, ps, J.Json.get_obj(o, "id"), reply, now)
+
+def Od.status.said(none: Bool, +j: J.Json, +home: String, +install: String, +rid: J.Json, +reply: Chan(String)) -> IO(Unit):
+  match none:
+    case True{}:
+      Gg.say(reply, rid, True{}, "no quote yet in this thread")
+    case False{}:
+      IO.bind(J.Json, Unit, ODI.Od.get(home, J.Json.get_str(j, "server", ""), install, J.Json.get_str(j, "id", ""), J.Json.get_str(j, "token", "")),
+        q => Gg.say(reply, rid, True{}, OR.Order.said(q)))
+
+# order_status: the newest record of this thread's, asked again
+def Od.status.ask(+home: String, +thread: String, +rid: J.Json, +reply: Chan(String)) -> IO(Unit):
+  do IO<Unit>:
+    r : P.Ran <- P.Proc.run("sh", ["-c", "grep -l '\"thread\":\"" ++ thread ++ "\"' q_*.json 2>/dev/null | xargs ls -t 2>/dev/null | head -n 1"], ODI.Od.orders(home))
+    text : String <- GS.Gf.text(ODI.Od.orders(home) ++ "/" ++ String.trim(ODI.Od.ran(r)))
+    +j : J.Json = Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{})
+    +install : String <- ODI.Od.install(home)
+    Od.status.said(String.is_empty(J.Json.get_str(j, "token", "")), j, home, install, rid, reply)
+
+# order_ask: a question card with the choices as buttons (the person may
+# type instead); the answer goes back to the agent as it is
+def Od.choices(xs: List<&2, J.Json>) -> List<&2, String>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case J.Str{+x} <> t:
+      x <> Od.choices(t)
+    case _ <> t:
+      Od.choices(t)
+
+# (it parks nothing: the answer is posted in the thread as the person's
+# message, hub.bend's Hub.answer.order, however long they take)
+def Od.question(h: Hub, +thread: String, +o: J.Json, +reply: Chan(String), +now: Nat) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
+      do IO<Hub>:
+        +ask : String = B.Hub.id("q", now, B.Hub.seq(st))
+        Gg.say(reply, J.Json.get_obj(o, "id"), True{}, OR.Order.ask.asked())
+        Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, B.Step{[M.AskOpened{ask, thread, "input", "order_ask",
+          J.Json.get_str(Gg.args(o), "question", ""), String.join(Od.choices(J.Json.elems(J.Json.get_obj(Gg.args(o), "options"))), "\n"), now}], Nil{}})
+
+def Od.gate.said(+said: J.Json, +inbox: Chan(Msg), +thread: String, +rid: J.Json, +reply: Chan(String)) -> IO(Unit):
+  do IO<Unit>:
+    ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, OrderGate{thread, OR.Order.gate(said), OR.Order.gate.md(J.Json.get_str(said, "summary", ""), J.Json.elems(J.Json.get_obj(said, "issues")))})
+    Gg.say(reply, rid, True{}, OR.Order.gate.said(OR.Order.gate(said)))
+
+def Od.gate.go(+cwd: String, +inbox: Chan(Msg), +thread: String, +rid: J.Json, +reply: Chan(String), +now: Nat) -> IO(Unit):
+  IO.bind(J.Json, Unit, ODI.Od.review(cwd, J.Json.obj([J.KV{"action", J.Str{"check"}}]), now), said => Od.gate.said(said, inbox, thread, rid, reply))
+
+# order_review: checked or recorded in the thread's folder, the answer as JSON
+def Od.review.go(+cwd: String, +args: J.Json, +rid: J.Json, +reply: Chan(String), +now: Nat) -> IO(Unit):
+  IO.bind(J.Json, Unit, ODI.Od.review(cwd, args, now), r => Gg.say(reply, rid, True{}, J.Json.show(r)))
+
+def Od.review.or.gate(gate: Bool, +cwd: String, +inbox: Chan(Msg), +thread: String, +o: J.Json, +reply: Chan(String), +now: Nat) -> IO(Unit):
+  match gate:
+    case True{}:
+      Od.gate.go(cwd, inbox, thread, J.Json.get_obj(o, "id"), reply, now)
+    case False{}:
+      Od.review.go(cwd, Gg.args(o), J.Json.get_obj(o, "id"), reply, now)
+
+def Hub.order.t(i: Nat, h: Hub, +thread: String, +o: J.Json, +reply: Chan(String), +now: Nat) -> IO(Hub):
+  match i h:
+    case 0n h2:
+      Od.quote(h2, thread, o, reply, now)
+    case 2n h2:
+      Od.question(h2, thread, o, reply, now)
+    case 3n Hub{+st, f, ls, cl, as, +inbox, cfg, note}:
+      do IO<Hub>:
+        IO.spawn(Unit, Od.review.or.gate(String.eq(J.Json.get_str(Gg.args(o), "action", ""), "gate"), B.Hub.cwd(st, B.Hub.thread(st, thread)), inbox, thread, o, reply, now))
+        return Hub{st, f, ls, cl, as, inbox, cfg, note}
+    case _ Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      do IO<Hub>:
+        IO.spawn(Unit, Od.status.ask(Cfg.home(cfg), thread, J.Json.get_obj(o, "id"), reply))
+        return Hub{st, f, ls, cl, as, inbox, cfg, note}
+
+def Hub.order.k(buy: Bool, h: Hub, +thread: String, +o: J.Json, +reply: Chan(String), +now: Nat) -> IO(Hub):
+  match buy h:
+    case False{} _:
+      do IO<Hub>:
+        Gg.say(reply, J.Json.get_obj(o, "id"), False{}, "only a buy thread has this tool")
+        return h
+    case True{} Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      Hub.order.t(C.Codec.pos(OR.Order.names(), Gg.tool(o)), Hub{st, f, ls, cl, as, inbox, cfg, note}, thread, o, reply, now)
+
+# an order's progress posted in the thread, and with a note the person's
+# devices are told (a "note" alert, notice.bend's Alert.set: push, desks,
+# phones) unless they turned off alerts for settled work (notify.settled),
+# keyed by the progress so each says it once
+def Hub.order.ping(on: Bool, +st: M.State, +now: Nat, +thread: String, +id: String, +ping: String) -> List<&2, M.Change>:
+  match on:
+    case True{}:
+      [NO.Alert.set(st, now, thread, "note", id, NO.Alert.memory(st, thread), NO.Alert.text(ping, 300n))]
+    case False{}:
+      []
+
+def Hub.order.note(h: Hub, +thread: String, +id: String, +text: String, +ping: String, +now: Nat) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
+      Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, B.Step{M.MessagePosted{thread, id, M.Assistant{}, text, now} <>
+        Hub.order.ping(Bool.and(Bool.not(String.is_empty(ping)), NO.Policy.on(st, "settled")), st, now, thread, id, ping), Nil{}})
+
+def Hub.order.wake(h: Hub, +thread: String, +text: String, +now: Nat) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
+      Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, B.Hub.post(st, now, thread, B.Hub.id("m", now, B.Hub.seq(st)), M.System{}, "[Backplane] " ++ text))
+
+# the review gate in the buy thread: nothing when passed; else the
+# question (an order_ask: the person's answer comes as their message), after
+# the issues when there are some
+def Hub.order.gate(kind: Nat, h: Hub, +thread: String, +md: String, +now: Nat) -> IO(Hub):
+  match kind h:
+    case 0n _:
+      IO.pure(Hub, h)
+    case 1n Hub{+st, f, ls, cl, as, inbox, cfg, note}:
+      Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, B.Step{[M.AskOpened{B.Hub.id("q", now, B.Hub.seq(st)), thread, "input", "order_ask",
+        OR.Order.gate.review.q(), "Review for manufacturing\nOrder without a review", now}], Nil{}})
+    case _ Hub{+st, f, ls, cl, as, inbox, cfg, note}:
+      Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, B.Step{[M.MessagePosted{thread, "gate:" ++ B.Hub.id("q", now, B.Hub.seq(st)), M.Assistant{}, md, now},
+        M.AskOpened{B.Hub.id("q", now, B.Hub.seq(st)), thread, "input", "order_ask", OR.Order.gate.fix.q(), "Fix them first\nOrder anyway", now}], Nil{}})
+
+# (with ordering off nothing is sent or recorded, even by an agent that
+# remembers the tools from before it was turned off)
+def Hub.order.on(on: Bool, buy: Bool, h: Hub, +thread: String, +o: J.Json, +reply: Chan(String), +now: Nat) -> IO(Hub):
+  match on:
+    case True{}:
+      Hub.order.k(buy, h, thread, o, reply, now)
+    case False{}:
+      do IO<Hub>:
+        Gg.say(reply, J.Json.get_obj(o, "id"), False{}, "Ordering is off; the person can turn it on in Settings")
+        return h
+
+def Hub.mcp.od(od: Bool, h: Hub, +thread: String, +o: J.Json, body: String, +reply: Chan(String), +now: Nat) -> IO(Hub):
+  match od h:
+    case True{} Hub{+st, f, ls, cl, as, inbox, cfg, note}:
+      Hub.order.on(OR.Order.enabled(M.Setting.get(st, "order.enabled", "off")), Bool.or(BH.Bots.buy.is(st, thread), String.eq(Gg.tool(o), "order_review")), Hub{st, f, ls, cl, as, inbox, cfg, note}, thread, o, reply, now)
+    case False{} _:
+      Hub.mcp.kexport(Bool.and(String.eq(J.Json.get_str(o, "method", ""), "tools/call"), String.eq(J.Json.get_str(J.Json.get_obj(o, "params"), "name", ""), "kicad_export10")), h, thread, o, body, reply, now)
+
 def Hub.mcp.route(pv: Bool, h: Hub, +thread: String, +o: J.Json, body: String, +reply: Chan(String), +now: Nat) -> IO(Hub):
   match pv:
     case True{}:
       Hub.preview(h, thread, o, reply)
     case False{}:
-      Hub.mcp.gg(Gg.is(o), h, thread, o, body, reply, now)
+      Hub.mcp.od(OR.Order.is(o), h, thread, o, body, reply, now)
+
+def Hub.mcp.ki(ki: Bool, h: Hub, +thread: String, +o: J.Json, body: String, +reply: Chan(String), +now: Nat) -> IO(Hub):
+  match ki:
+    case True{}:
+      Hub.kicad_ipc(h, thread, o, reply)
+    case False{}:
+      Hub.mcp.route(Preview.is(o), h, thread, o, body, reply, now)
 
 def Hub.mcp.tr(tr: Bool, h: Hub, +thread: String, +o: J.Json, body: String, +reply: Chan(String), +now: Nat) -> IO(Hub):
   match tr:
     case True{}:
       Hub.term_read(h, thread, o, reply)
     case False{}:
-      Hub.mcp.route(Preview.is(o), h, thread, o, body, reply, now)
+      Hub.mcp.ki(KIpc.is(o), h, thread, o, body, reply, now)
 
 # thread_read on a thread on another of the owner's machines: read from
 # this hub's mirror of it (xref.bend)
@@ -11217,7 +12743,7 @@ def Hub.mcp.far(own: Bool, h: Hub, +link: String, +rq: String, +o: J.Json, body:
         IO.spawn(Unit, Far.mcp.job(Maybe.default(&2, J.Json, J.Json.get(o, "id"), J.Null{}), link, rq, Cfg.home(cfg), Bot.peer.url(st, link), reply))
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
     case False{} _:
-      Hub.mcp.k(MC.Mcp.reply(Maybe.default(&2, J.Json, J.Json.get(o, "id"), J.Null{}), MC.Res.fail("sync with that machine is off here")), h, reply, body)
+      Hub.mcp.k(MC.Mcp.reply(Maybe.default(&2, J.Json, J.Json.get(o, "id"), J.Null{}), MC.Res.fail("sync with that machine is off here")), h, reply, body, False{})
 
 # a tool call for a machine of the owner's goes there (fmcp.bend); machine_list
 # is answered here; any other runs as before
@@ -11226,7 +12752,7 @@ def Hub.mcp.f(p: FM.Plan, h: Hub, +thread: String, +o: J.Json, body: String, +re
     case FM.PHere{} _:
       Hub.mcp.x(XR.Xref.read.is(o), h, thread, o, body, reply, now)
     case FM.PAnswer{r} _:
-      Hub.mcp.k(MC.Mcp.reply(Maybe.default(&2, J.Json, J.Json.get(o, "id"), J.Null{}), r), h, reply, body)
+      Hub.mcp.k(MC.Mcp.reply(Maybe.default(&2, J.Json, J.Json.get(o, "id"), J.Null{}), r), h, reply, body, False{})
     case FM.PFar{+link, +rq} Hub{+st, f, ls, cl, as, +inbox, +cfg, note}:
       Hub.mcp.far(Far.own.id(st, cfg, link), Hub{st, f, ls, cl, as, inbox, cfg, note}, link, rq, o, body, reply)
 
@@ -11256,8 +12782,20 @@ def Msg.kind(m: Msg) -> String:
       "deploy_locks"
     case DeployFailed{_}:
       "deploy_failed"
+    case ShipAsked{_, _, _, _}:
+      "ship_asked"
+    case ShipNewest{_, _}:
+      "ship_newest"
+    case ShipPid{_, _}:
+      "ship_pid"
+    case ShipDone{_, _}:
+      "ship_done"
     case Mcp{_, _, _}:
       "mcp"
+    case McpOpen{_, _, _}:
+      "mcp_open"
+    case McpShut{_, _}:
+      "mcp_shut"
     case Announce{_}:
       "announce"
     case Join{_, _, _, _, _, _}:
@@ -11296,6 +12834,9 @@ def Msg.kind(m: Msg) -> String:
       "term_out"
     case TermTo{_, _, _, _, _}:
       "term_to"
+    case KProbe{_}: "kicad_probe"
+    case KFound{_, _}: "kicad_health"
+    case KiServers{_}: "kicad_servers"
     case ModelsFound{_, _}:
       "models"
     case MachinesFound{_}:
@@ -11310,8 +12851,18 @@ def Msg.kind(m: Msg) -> String:
       "recover"
     case Reexec{_, _}:
       "reexec"
+    case MailRouted{_}: "mail-route"
+    case RunReady{_, _, _}: "run-ready"
     case Commit{_}:
       "commit"
+    case OrderNote{_, _, _, _}:
+      "order_note"
+    case OrderWake{_, _}:
+      "order_wake"
+    case OrderGate{_, _, _}:
+      "order_gate"
+    case BoatThreads{_}:
+      "boat_threads"
     case UberDo{_}:
       "uber_do"
     case UberAnswer{_, _, _}:
@@ -11334,6 +12885,10 @@ def Msg.kind(m: Msg) -> String:
       "teach_req"
     case BrowserEv{_}:
       "browser_ev"
+    case CefDone{_, _, _}:
+      "cef_done"
+    case Near{_}:
+      "cef_near"
     case TeachBack{_}:
       "teach_back"
     case TaskPaused{_, _, _, _, _, _, _, _, _, _}:
@@ -11409,12 +12964,37 @@ def Hub.mcp.stale(+body: String) -> String:
   MC.McpOut.reply(MC.Mcp.reply(Maybe.default(&2, J.Json, J.Json.get(Maybe.default(&2, J.Json, J.Json.parse(body), J.Null{}), "id"), J.Null{}),
     MC.Res.fail("stale process: this agent process is no longer the thread's, so it may read but not change anything")))
 
+def Hub.mcp.charter.allowed(ok: Bool, +s: M.State, +r: ML.Run, h: Hub, +thread: String, +body: String, +reply: Chan(String), +now: Nat, +o: J.Json) -> IO(Hub):
+  match ok:
+    case False{}: Hub.mcp.k(MC.Mcp.reply(J.Json.get_obj(o, "id"), MC.Res{False{}, J.Str{"Outside the charter; escalated"}, B.Run.escalate(s, now, ML.Run.bot(r), ML.Run.conv(r), "bot", "Outside the charter: " ++ J.Json.get_str(J.Json.get_obj(o, "params"), "name", ""))}), h, reply, body, False{})
+    case True{}:
+      IO.bind(Hub, Hub, Hub.step(h, MC.Mcp.run.decide(s, now, r, J.Json.get_str(J.Json.get_obj(o, "params"), "name", ""), "charter: " ++ CH.Charter.line(ML.Box.charter(M.State.mail(s), ML.Run.bot(r)), J.Json.get_str(J.Json.get_obj(o, "params"), "name", ""), J.Json.get_obj(J.Json.get_obj(o, "params"), "arguments")))), h2 => Hub.mcp(h2, thread, body, reply, now))
+
+# Check direct MCP tools too: Gmail, deploy and work_run must not bypass
+# the run's policy simply because they execute in the hub rather than a
+# provider's shell. permission_prompt itself goes through Perm.run.
+def Hub.mcp.charter.risky(risky: Bool, +s: M.State, +r: ML.Run, h: Hub, +thread: String, +body: String, +reply: Chan(String), +now: Nat, +o: J.Json) -> IO(Hub):
+  match risky:
+    case False{}: Hub.mcp(h, thread, body, reply, now)
+    case True{}: Hub.mcp.charter.allowed(CH.Charter.allows(ML.Box.charter(M.State.mail(s), ML.Run.bot(r)), J.Json.get_str(J.Json.get_obj(o, "params"), "name", ""), J.Json.get_obj(J.Json.get_obj(o, "params"), "arguments")), s, r, h, thread, body, reply, now, o)
+
+def Hub.mcp.charter.got(r: Maybe<&2, ML.Run>, +s: M.State, h: Hub, +thread: String, +body: String, +reply: Chan(String), +now: Nat) -> IO(Hub):
+  match r:
+    case None{}: Hub.mcp(h, thread, body, reply, now)
+    case Some{+r}:
+      +o = Maybe.default(&2, J.Json, J.Json.parse(body), J.Null{})
+      Hub.mcp.charter.risky(Bool.and(String.eq(J.Json.get_str(o, "method", ""), "tools/call"), CH.Charter.risky(J.Json.get_str(J.Json.get_obj(o, "params"), "name", ""), J.Json.get_obj(J.Json.get_obj(o, "params"), "arguments"))), s, r, h, thread, body, reply, now, o)
+
+def Hub.mcp.charter(h: Hub, +thread: String, +body: String, +reply: Chan(String), +now: Nat) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, cfg, note}: Hub.mcp.charter.got(RUN.Run.of(st, thread), st, Hub{st, f, ls, cl, as, inbox, cfg, note}, thread, body, reply, now)
+
 # a standing rule that refuses the call (rules.bend's Rules.gate) answers
 # it here, at once, before any tool runs
 def Hub.mcp.rules.k(none: Bool, +msg: String, h: Hub, +thread: String, +body: String, +reply: Chan(String), +now: Nat) -> IO(Hub):
   match none:
     case True{}:
-      Hub.mcp(h, thread, body, reply, now)
+      Hub.mcp.charter(h, thread, body, reply, now)
     case False{}:
       do IO<Hub>:
         ok : Result<&1, &1, String, Unit> <- Chan.send(String, reply, msg)
@@ -11440,6 +13020,16 @@ def Hub.mcp.gate(refused: Bool, h: Hub, +thread: String, +body: String, +reply: 
 # an MCP call names its thread and the process's generation
 # ("<thread>.<gen>", B.Gen.*): one from a process the thread no longer
 # runs may read, never change anything (law mcp_stale_gen_refused)
+def Hub.mcp.open(h: Hub, +thread: String, +call: String, +body: String) -> IO(Hub):
+  match h:
+    case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      IO.pure(Hub, Hub{st, f, ls, cl, as, inbox, Tools.with(cfg, DP.Open.mcp(Tools.of(cfg), thread, call, body)), note})
+
+def Hub.mcp.shut(h: Hub, +thread: String, +call: String) -> IO(Hub):
+  match h:
+    case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      IO.pure(Hub, Hub{st, f, ls, cl, as, inbox, Tools.with(cfg, DP.Open.mcp.shut(Tools.of(cfg), thread, call)), note})
+
 def Hub.mcp.g(h: Hub, +tag: String, +body: String, +reply: Chan(String), +now: Nat) -> IO(Hub):
   match h:
     case Hub{st, f, ls, cl, +as, inbox, cfg, note}:
@@ -11708,6 +13298,35 @@ def Hub.deploy_failed.k(p: M.State & Hub, +err: String, +now: Nat) -> IO(Hub):
 def Hub.deploy_failed(h: Hub, err: String, +now: Nat) -> IO(Hub):
   Hub.deploy_failed.k(Hub.state(h), err, now)
 
+# deploy_main (hub.bend's Ship.*): the call answered with origin/main read
+def Hub.ship.asked(h: Hub, +thread: String, +body: String, +reply: Chan(String), +out: String, +now: Nat) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
+      Hub.mcp.k(MC.Mcp.reply(Maybe.default(&2, J.Json, J.Json.get(Maybe.default(&2, J.Json, J.Json.parse(body), J.Null{}), "id"), J.Null{}),
+          MC.Mcp.ship(st, now, thread, J.Json.get_obj(J.Json.get_obj(Maybe.default(&2, J.Json, J.Json.parse(body), J.Null{}), "params"), "arguments"), out)),
+        Hub{st, f, ls, cl, as, inbox, cfg, note}, reply, body, False{})
+
+def Hub.ship.newest.k(p: M.State & Hub, +why: String, +out: String, +now: Nat) -> IO(Hub):
+  (st, h) = p
+  Hub.step(h, B.Ship.newest(st, now, why, out))
+
+def Hub.ship.newest(h: Hub, +why: String, +out: String, +now: Nat) -> IO(Hub):
+  Hub.ship.newest.k(Hub.state(h), why, out, now)
+
+def Hub.ship.pid.k(p: M.State & Hub, +commit: String, +out: String, +now: Nat) -> IO(Hub):
+  (st, h) = p
+  Hub.step(h, B.Ship.pid(st, now, commit, out))
+
+def Hub.ship.pid(h: Hub, +commit: String, +out: String, +now: Nat) -> IO(Hub):
+  Hub.ship.pid.k(Hub.state(h), commit, out, now)
+
+def Hub.ship.done.k(p: M.State & Hub, +commit: String, +out: String, +now: Nat) -> IO(Hub):
+  (st, h) = p
+  Hub.step(h, B.Ship.done(st, now, commit, out))
+
+def Hub.ship.done(h: Hub, +commit: String, +out: String, +now: Nat) -> IO(Hub):
+  Hub.ship.done.k(Hub.state(h), commit, out, now)
+
 def Hub.launch.sent(p: M.State & Hub, +key: String, +now: Nat) -> IO(Hub):
   (st, h) = p
   Hub.step(h, B.Lr.far.sent(st, now, key))
@@ -11789,6 +13408,14 @@ def Hub.lock.http(h: Hub, +op: String, +body: String, +reply: Chan(String), +now
   +a = Maybe.default(&2, J.Json, J.Json.parse(body), J.Null{})
   Hub.lock.http.valid(Bool.and(LCK.Lock.name.valid(J.Json.get_str(a, "name", "")), Bool.and(String.starts_with(J.Json.get_str(a, "holder", ""), "pid:"), M.Launch.has(["acquire", "renew", "release", "cancel", "status"], op))), h, op, a, reply, now)
 
+def Hub.mail.routed(h: Hub, body: MB.Body, +now: Nat) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, cfg, note}: Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, B.Mail.route(st, now, body))
+
+def Hub.run.ready(h: Hub, +th: String, head: String, bs: List<&2, MB.Body>, +now: Nat) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, cfg, note}: Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, B.Run.start.on(B.Run.ready(st, th), st, now, th, head, bs))
+
 def Hub.handle(h: Hub, m: Msg, +now: Nat) -> IO(Hub):
   match m:
     case LockProbe{name, holder, n}:
@@ -11807,8 +13434,20 @@ def Hub.handle(h: Hub, m: Msg, +now: Nat) -> IO(Hub):
       Hub.deploy_locks(h, free, now)
     case DeployFailed{err}:
       Hub.deploy_failed(h, err, now)
+    case ShipAsked{thread, body, reply, out}:
+      Hub.ship.asked(h, thread, body, reply, out, now)
+    case ShipNewest{why, out}:
+      Hub.ship.newest(h, why, out, now)
+    case ShipPid{commit, out}:
+      Hub.ship.pid(h, commit, out, now)
+    case ShipDone{commit, out}:
+      Hub.ship.done(h, commit, out, now)
     case Mcp{thread, body, reply}:
       Hub.mcp.g(h, B.Tag.thread(thread), body, reply, now)
+    case McpOpen{thread, call, body}:
+      Hub.mcp.open(h, B.Gen.thread(B.Tag.thread(thread)), call, body)
+    case McpShut{thread, call}:
+      Hub.mcp.shut(h, B.Gen.thread(B.Tag.thread(thread)), call)
     case Announce{text}:
       Hub.note(h, text)
     case Join{client, out, since, origin, gen, sock}:
@@ -11855,14 +13494,27 @@ def Hub.handle(h: Hub, m: Msg, +now: Nat) -> IO(Hub):
       Hub.term_out(h, thread, data)
     case TermTo{c, key, co, ro, data}:
       Hub.term_to(h, c, key, co, ro, data)
+    case KProbe{force}: Hub.kcheck(h, force)
+    case KFound{setting, rt}: Hub.kfound(h, setting, rt)
+    case KiServers{text}: Hub.kiservers(h, text)
     case ModelsFound{ms, mt}:
       Hub.models(h, ms, mt)
     case MachinesFound{mc}:
       Hub.dir.returned(h, mc)
     case LinkFound{lk}:
       Hub.link(h, lk)
+    case MailRouted{body}: Hub.mail.routed(h, body, now)
+    case RunReady{thread, head, bs}: Hub.run.ready(h, thread, head, bs, now)
     case Commit{cs}:
       Hub.step(h, B.Step{cs, Nil{}})
+    case OrderNote{thread, id, text, +ping}:
+      Hub.order.note(h, thread, id, text, ping, now)
+    case OrderWake{+thread, +text}:
+      Hub.order.wake(h, thread, text, now)
+    case OrderGate{+thread, kind, +md}:
+      Hub.order.gate(kind, h, thread, md, now)
+    case BoatThreads{status}:
+      Hub.chips(Hub.state(h), status, now)
     case UberDo{what}:
       Hub.uber.do(h, what, now)
     case UberAnswer{link, code, body}:
@@ -11891,6 +13543,10 @@ def Hub.handle(h: Hub, m: Msg, +now: Nat) -> IO(Hub):
       Hub.teach(h, client, id, m, p, now)
     case BrowserEv{line}:
       Hub.browser_ev(h, line)
+    case CefDone{request, live, err}:
+      Hub.cef.finished(h, request, live, err)
+    case Near{client}:
+      Hub.cef.near(h, client)
     case TeachBack{bot}:
       Hub.back(h, bot)
     case TaskPaused{thread, bot, run, slug, n, kind, question, risky, rid, reply}:
@@ -11997,7 +13653,8 @@ def Hub.got.one(+msg: Msg, h: Hub, k: Hub -> IO(Unit)) -> IO(Unit):
   do IO<Unit>:
     now : Nat <- Now.nat()
     t0 : U32 <- PS.Perf.us()
-    h2 : Hub <- Hub.handle(h, msg, now)
+    h1 : Hub <- Hub.handle(h, msg, now)
+    h2 : Hub <- Hub.cef.after(CF.Cef.after(Msg.kind(msg)), h1)
     t1 : U32 <- PS.Perf.lap("hub." ++ Msg.kind(msg), t0)
     k(h2)
 
@@ -12052,6 +13709,8 @@ def Main.headless(h: Hub, +inbox: Chan(Msg), +cfg: Cfg, +tok: Chan(Unit), front:
     IO.spawn(Unit, Beat.loop(Fuel.forever(), inbox))
     IO.spawn(Unit, Heart.loop(Fuel.forever(), inbox))
     Refresh.start(inbox, cfg)
+    IO.spawn(Unit, Od.resume(inbox, Cfg.home(cfg)))
+    Self.post(inbox, KProbe{True{}})
     IO.spawn(Unit, Hub.loop(Fuel.forever(), h, inbox, tok))
     Upgrade.start(cfg, inbox)
     front(inbox)
@@ -12064,6 +13723,8 @@ def Main.serve(l: Listener, h: Hub, +web: String, +inbox: Chan(Msg), +cfg: Cfg, 
     IO.spawn(Unit, Beat.loop(Fuel.forever(), inbox))
     IO.spawn(Unit, Heart.loop(Fuel.forever(), inbox))
     Refresh.start(inbox, cfg)
+    IO.spawn(Unit, Od.resume(inbox, Cfg.home(cfg)))
+    Self.post(inbox, KProbe{True{}})
     Machines.start(inbox, Cfg.port(cfg))
     IO.spawn(Unit, Hub.loop(Fuel.forever(), h, inbox, tok))
     Upgrade.start(cfg, inbox)
@@ -12162,6 +13823,23 @@ def Shot.fwd(fuel: Nat, +ev: Chan(String), +inbox: Chan(Msg)) -> IO(Unit):
     case 1n+f:
       IO.bind(Maybe<&1, String>, Unit, Chan.recv(String, ev), m => Shot.fwd.got(m, inbox, u => Shot.fwd(f, ev, inbox)))
 
+def KiSrv.fwd.got(m: Maybe<&1, String>, +inbox: Chan(Msg), k: Unit -> IO(Unit)) -> IO(Unit):
+  match m:
+    case Some{+text}:
+      do IO<Unit>:
+        ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, KiServers{text})
+        k(Unit{})
+    case None{}:
+      IO.pure(Unit, Unit{})
+
+# the headless KiCad servers' lines, to the hub
+def KiSrv.fwd(fuel: Nat, +ev: Chan(String), +inbox: Chan(Msg)) -> IO(Unit):
+  match fuel:
+    case 0n:
+      IO.pure(Unit, Unit{})
+    case 1n+f:
+      IO.bind(Maybe<&1, String>, Unit, Chan.recv(String, ev), m => KiSrv.fwd.got(m, inbox, u => KiSrv.fwd(f, ev, inbox)))
+
 def Main.opened(r: Result<&1, &1, U32 & String, File>, st: M.State, ls: List<&2, String>, cfg: Cfg, need: Bool, front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
   match r cfg:
     case Done{f} Cfg{+home, +web, +host, +port, +pr, +ds, +v, nt0}:
@@ -12179,6 +13857,12 @@ def Main.opened(r: Result<&1, &1, U32 & String, File>, st: M.State, ls: List<&2,
         +bev : Chan(String) <- Chan.new(String, 256)
         IO.spawn(Unit, Shot.fwd(Fuel.forever(), bev, inbox))
         IO.spawn(Unit, BR.Browser.loop(Fuel.forever(), bq, bev, BR.Br.at(bexe, home)))
+        # the headless KiCad servers (src/server/kserve.bend): their lines go to the hub as KiServers
+        +kq : Chan(KSV.KMsg) <- Chan.new(KSV.KMsg, 256)
+        +kev : Chan(String) <- Chan.new(String, 64)
+        kexe : String <- KSV.KServe.exe()
+        IO.spawn(Unit, KiSrv.fwd(Fuel.forever(), kev, inbox))
+        IO.spawn(Unit, KSV.KServe.run(kq, kev, kexe, home))
         +pq : Chan(PK.PMsg) <- Chan.new(PK.PMsg, 256)
         IO.spawn(Unit, PK.Park.loop(Fuel.forever(), pq, Nil{}))
         +tq : Chan(TM.TMsg) <- Chan.new(TM.TMsg, 1024)
@@ -12190,7 +13874,7 @@ def Main.opened(r: Result<&1, &1, U32 & String, File>, st: M.State, ls: List<&2,
         +vo : Chan(PV.POut) <- Chan.new(PV.POut, 1024)
         IO.spawn(Unit, PV.Pv.loop(Fuel.forever(), vq, PV.Pv.empty(), vo, home ++ "/plot"))
         IO.spawn(Unit, Plot.fwd(Fuel.forever(), vo, inbox))
-        +nt : Net = Net.with_pv(Net.with_tm(Net.with_pk(Net.with_br(nt0, bq), pq), tq), vq)
+        +nt : Net = Net.with_ks(Net.with_pv(Net.with_tm(Net.with_pk(Net.with_br(nt0, bq), pq), tq), vq), kq)
         # the agents a restart in place handed off are kept before anything
         # else can reach the hub (adopt.bend); recovery then leaves them be
         +now : Nat <- Now.nat()
@@ -12230,6 +13914,7 @@ def Main.boot(cfg: Cfg, need: Bool, front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
   match cfg:
     case Cfg{+home, w, h, p, pr, ds, v, nt}:
       do IO<Unit>:
+        H.Env.put("BACKPLANE_HOME", home)
         mk : Result<&1, &1, U32 & String, Unit> <- H.FS.mkdirs(home)
         t0 : U32 <- PS.Perf.us()
         +bs : List<&2, U32> <- Files.read(Store.path(home))
@@ -12244,6 +13929,9 @@ def Main.boot(cfg: Cfg, need: Bool, front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
         tok : String <- Token.load(home)
         +mc : String <- Files.text(Models.cache(home))
         +bc : String <- BN.Bf.text(BN.Bn.cache(home))
+        exe : String <- H.Sys.exe_dir()
+        rt0 : K.Rt <- K.Rt.boot(home, M.Setting.get(st, "kicad.path", ""), exe)
+        +rt : K.Rt = K.Rt.set(rt0, "ipc", J.Str{""})
         +off : String <- Env.get("BACKPLANE_NO_UPDATE", "")
         +ai : String <- Env.get("APPIMAGE", "")
-        Main.opened(f, st, ls, Cfg.with_managed(Cfg.with_models(Cfg.with_bn(Cfg.with_token(Cfg{home, w, h, p, pr, ds, v, nt}, tok), BN.Bn.with_dir(BN.Bn.empty(), BN.Bn.cache.load(bc, BO.World.peers(M.State.bots(st))))), BT.Cache.json(mc), BT.Cache.text(mc)), SV.Chan.managed(off, ai)), need, front)
+        Main.opened(f, st, ls, Cfg.with_managed(Cfg.with_models(Cfg.with_bn(Cfg.with_token(Cfg.with_rt(Cfg{home, w, h, p, pr, ds, v, nt}, rt), tok), BN.Bn.with_dir(BN.Bn.empty(), BN.Bn.cache.load(bc, BO.World.peers(M.State.bots(st))))), BT.Cache.json(mc), BT.Cache.text(mc)), SV.Chan.managed(off, ai)), need, front)

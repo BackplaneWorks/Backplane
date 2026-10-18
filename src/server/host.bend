@@ -84,9 +84,16 @@ def Sock.shutdown(sock: Socket) -> IO(Socket):
   import "./effects/host.js"
 
 # start cmd in cwd; stdin+stdout are the returned socket. err: 0 drop
-# stderr, 1 merge it into stdout, 2 inherit
+# stderr, 1 merge it into stdout, 2 inherit, 3 to a file of its own that
+# Proc.errtail reads back
 def Proc.spawn(cmd: String, args: List<&2, String>, cwd: String, err: U32) ->
   IO(Result<&1, &1, U32 & String, U32 & Socket>):
+  import "./effects/host.c"
+  import "./effects/host.js"
+
+# the last 2048 bytes a process started with err 3 wrote to stderr ("" when
+# none); its file is removed (call it once the process is reaped)
+def Proc.errtail(pid: U32) -> IO(String):
   import "./effects/host.c"
   import "./effects/host.js"
 

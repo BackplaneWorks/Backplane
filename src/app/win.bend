@@ -23,6 +23,17 @@ type WinEv is Data:
   WBlur{}
   # the window has the keyboard again
   WFocus{}
+  # text the input method committed (one event owns its own text)
+  WCommit{id: U32, text: String}
+  # the preedit: characters [first, first + len) replaced by text (feedback
+  # one char per char, '0' + bits); only: just the feedback changed; caret
+  # in the preedit after the update
+  WPreedit{first: U32, len: U32, id: U32, text: String, fb: String, caret: U32, only: Bool}
+  WPreCaret{pos: U32}
+  WPreStart{}
+  WPreEnd{}
+  # an event kind this build does not know (never a quit)
+  WJunk{}
 
 def Win.open(title: String, w: U32, h: U32) -> IO(Result<&1, &1, U32 & String, Window>):
   import "./effects/win.c"
@@ -82,6 +93,33 @@ def Win.title(win: Window, title: String) -> IO(Window):
   import "./effects/win.c"
   import "./effects/win.js"
 
+# how the input method is used: 0 plain keys, 1 preedit drawn by the app,
+# 2 drawn by the method
+def Win.ime(win: Window) -> IO(Window & U32):
+  import "./effects/win.c"
+  import "./effects/win.js"
+
+# drop a composition in the method (the field with the keys changed)
+def Win.ime_reset(win: Window) -> IO(Window):
+  import "./effects/win.c"
+  import "./effects/win.js"
+
+# the caret's place in the window, for the method's candidate window
+def Win.ime_spot(win: Window, x: U32, y: U32) -> IO(Window):
+  import "./effects/win.c"
+  import "./effects/win.js"
+
+# the text of a WCommit or WPreedit (by its id, once) and its feedback
+def Win.payload(win: Window, id: U32) -> IO(Window & String & String):
+  import "./effects/win.c"
+  import "./effects/win.js"
+
+# queue what the method would, for tests: kind 0 a commit, 1 a preedit,
+# 2 the preedit done
+def Win.ime_inject(win: Window, kind: U32, text: String) -> IO(Window):
+  import "./effects/win.c"
+  import "./effects/win.js"
+
 def Win.ev.k(k: Nat, +a: U32, +b: U32, +c: U32, +d: U32) -> WinEv:
   match k:
     case 0n:
@@ -110,8 +148,20 @@ def Win.ev.k(k: Nat, +a: U32, +b: U32, +c: U32, +d: U32) -> WinEv:
       WFocus{}
     case 13n:
       WImage{}
-    case _:
+    case 14n:
+      WCommit{a, ""}
+    case 15n:
+      WPreedit{a, b, c, "", "", U32.and(d, 2147483647), U32.is_ne(U32.shrn(d, 31n), 0)}
+    case 6n:
       WQuit{}
+    case 16n:
+      WPreCaret{a}
+    case 17n:
+      WPreStart{}
+    case 18n:
+      WPreEnd{}
+    case _:
+      WJunk{}
 
 def Win.ev(+k: U32, +a: U32, +b: U32, +c: U32, +d: U32) -> WinEv:
   Win.ev.k(U32.to_nat(k), a, b, c, d)
@@ -123,3 +173,23 @@ def Win.decode(ws: List<&2, U32>) -> List<&2, WinEv>:
       Win.ev(k, a, b, c, d) <> Win.decode(t)
     case _:
       Nil{}
+
+# an event kind this build does not know
+def Win.junk(e: WinEv) -> Bool:
+  match e:
+    case WJunk{}:
+      True{}
+    case _:
+      False{}
+
+def Win.quit(e: WinEv) -> Bool:
+  match e:
+    case WQuit{}:
+      True{}
+    case _:
+      False{}
+
+# X11 parent id for the helper's native content children.
+def Win.xid(win: Window) -> IO(Window & U32):
+  import "./effects/win.c"
+  import "./effects/win.js"

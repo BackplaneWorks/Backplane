@@ -1,4 +1,5 @@
 import Base
+import ../src/core/i18n.bend as I
 import ./check.bend as C
 import ../src/core/model.bend as M
 import ../src/core/board.bend as B
@@ -197,7 +198,7 @@ def main() -> IO(Unit):
     C.Check.str("look: the rest dimmed", U32.show(LO.Look.alpha.of(LO.Look.of(U32.or(0, LO.Look.diff()), 3))), U32.show((LO.Look.alpha.of(LO.Look.of(0, 3)) / 3 : U32)))
     C.Check.str("look: plain kinds unchanged", U32.show(LO.Look.alpha.of(LO.Look.of(0, 3))), "200")
     C.Check.str("names with marks", Show.strs(List.drop(&2, String, LO.Look.names(U32.or(1, LO.Look.diff()), ["x"]), 26n)), "Removed,Changed,Added")
-    C.Check.str("fold label with steps", F.Fold.label([M.Act{"a", "t", "tool", "Bash", "x", 0n}, step("s", "", 1n)]), "1 tool call · Bash · 1 design change")
-    C.Check.str("fold label steps only", F.Fold.label([step("s", "", 1n), step("s2", "", 1n)]), "2 design changes")
+    C.Check.str("fold label with steps", F.Fold.label(I.En{}, [M.Act{"a", "t", "tool", "Bash", "x", 0n}, step("s", "", 1n)]), "1 tool call · Bash · 1 design change")
+    C.Check.str("fold label steps only", F.Fold.label(I.En{}, [step("s", "", 1n), step("s2", "", 1n)]), "2 design changes")
     C.Check.str("reveal: every key of its run", Show.strs(F.Fold.reveal(es(), "a1")), "fold:a1,fold:step:c2,fold:a2,fold:step:c3")
     C.Check.str("refs", Nat.show(List.length(&2, H.Ref, H.Hist.refs("head\tHEAD\tabc\nbranch\tmain\tdef\n\nbad line\n"))), "2")

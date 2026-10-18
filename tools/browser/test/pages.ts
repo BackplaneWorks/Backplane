@@ -96,9 +96,16 @@ async function ok(p: Promise<any>, what: string) {
   check("per-owner viewport", s0.width === 640 && s1.width === 800, [s0.width, s1.width]);
 
   const byPage = (p: string) => events.filter((e) => e.event === "frame" && e.page === p);
-  check("bot-1 jpeg events", byPage("bot-1").length >= 3, byPage("bot-1").length);
+  // no client shows it: not cast, a frame after open (and a still every 5 s)
+  const n0 = byPage("bot-1").length;
+  check("bot-1 unwatched: a frame, not a cast", n0 >= 1 && n0 <= 2, n0);
+  await ok(call("cast", { page: "bot-1", ms: 2500 }), "bot-1 cast");
+  await Bun.sleep(1500);
+  check("bot-1 cast: jpeg events", byPage("bot-1").length - n0 >= 3, byPage("bot-1").length - n0);
+  await Bun.sleep(4000);
   const n1 = byPage("bot-1").length;
-  check("bot-1 jpeg rate <= 4/s", n1 <= 8, n1);
+  await Bun.sleep(2000);
+  check("bot-1 lease over: not cast again", byPage("bot-1").length - n1 <= 1, byPage("bot-1").length - n1);
   check("shared jpeg event", byPage("").length >= 1, byPage(""));
   check("a.b/c jpeg event", byPage("a.b/c").length >= 1);
   check("raw frame events have no page", events.some((e) => e.event === "frame" && e.page === undefined && e.w === 640));

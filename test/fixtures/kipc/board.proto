@@ -1,0 +1,8 @@
+syntax = "proto3";
+package kiapi.board.commands;
+import "google/protobuf/any.proto";
+
+message KIID { string value = 1; }
+message Track { KIID id = 1; string net = 2; int64 width = 3; }
+message GetItems { repeated string types = 1; }
+message GetItemsResponse { repeated google.protobuf.Any items = 1; }

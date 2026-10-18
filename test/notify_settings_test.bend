@@ -1,4 +1,5 @@
 import Base
+import ../src/core/i18n.bend as I
 import ./check.bend as C
 import ../src/core/model.bend as M
 import ../src/core/client.bend as U
@@ -151,6 +152,6 @@ def main() -> IO(Unit):
     +web : DOM.Node = W.View.settings(u, s, Map.new(&2, String), "test", "")
     +phone : String = J.Json.show(P.Mob.settings.of(u, s, Map.new(&2, String), "test", "", Nil{}))
     names(texts([web]), phone, glyphs(ops(out)), ["Notify me for", "Needs me", "Settled", "Reminders", "Everything"])
-    C.Check.str("web lead", Bool.show(String.contains(texts([web]), U.Notify.lead())), "True")
-    C.Check.str("phone lead", Bool.show(String.contains(phone, U.Notify.lead())), "True")
+    C.Check.str("web lead", Bool.show(String.contains(texts([web]), U.Notify.lead(I.En{}))), "True")
+    C.Check.str("phone lead", Bool.show(String.contains(phone, U.Notify.lead(I.En{}))), "True")
     controls(["notify.needs", "notify.settled", "notify.reminders", "notify.all"], out, web, phone)

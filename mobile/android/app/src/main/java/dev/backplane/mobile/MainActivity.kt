@@ -26,6 +26,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        intent?.getStringExtra("lang")?.let { model.forceLanguage(it) }
         pairFrom(intent)
         if (savedInstanceState == null) threadFrom(intent)
         setContent {
@@ -37,6 +38,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        intent.getStringExtra("lang")?.let { model.forceLanguage(it) }
         pairFrom(intent)
         threadFrom(intent)
     }

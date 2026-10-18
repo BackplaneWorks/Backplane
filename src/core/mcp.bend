@@ -1,4 +1,6 @@
 import Base
+import ./mailrun.bend as RUN
+import ./charter.bend as CH
 import ./locks.bend as LK
 import ./json.bend as J
 import ./model.bend as M
@@ -6,6 +8,7 @@ import ./review.bend as RVW
 import ./codec.bend as C
 import ./hub.bend as B
 import ./deploy.bend as DP
+import ./ship.bend as SH
 import ./acp.bend as AC
 import ./msp.bend as MS
 import ./handoff.bend as HD
@@ -13,6 +16,11 @@ import ./bot.bend as BT
 import ./emb.bend as EM
 import ./utf8.bend as U8
 import ./wake.bend as WK
+import ./when.bend as WH
+import ./sched.bend as SC
+import ./tz.bend as TZ
+import ./mail.bend as ML
+import ./uber.bend as UBM
 
 # The Backplane MCP server, as a decider. Each agent session gets its own
 # endpoint (/mcp/<thread>), so every call knows which thread is asking. A
@@ -88,84 +96,14 @@ def Mcp.preview_tools() -> List<&2, J.Json>:
    Tool.def("preview_resize", "Resize the browser viewport.", [Tool.prop("width", "number", "Width."), Tool.prop("height", "number", "Height.")], ["width", "height"]),
    Tool.def("preview_status", "The browser's state: open, URL, title, viewport.", Nil{}, Nil{})]
 
-def Mcp.tools() -> J.Json:
-  J.Json.obj([J.KV{"tools", J.Json.arr(List.append(&2, J.Json, [
-    Tool.def("orchestrator_capabilities",
-      "List the providers and models this Backplane can run, the delegation depth limit, and this thread's own provider, model and depth.",
-      Nil{}, Nil{}),
-    Tool.def("delegate_task",
-      "Delegate one task to a child agent of THIS thread, on any provider/model (see orchestrator_capabilities). The child sees only `prompt` (no conversation history) and works in this thread's directory. Its result arrives in this thread as a message when it finishes, so end your turn instead of polling; use task_status only when you need it mid-turn. Delegation is limited in depth; children of children are allowed up to the limit.",
-      [Tool.prop("prompt", "string", "The complete task for the child, with every detail it needs."),
-       Tool.prop("provider", "string", "claude, codex, grok, muse, antigravity or omp (default: this thread's)."),
-       Tool.prop("model", "string", "Model for the child (default: this thread's)."),
-       Tool.prop("title", "string", "Short title for the child thread."),
-       Tool.prop("project", "string", "Bots only, and required for them: the project's name or id (project_list); the child is a thread of its own there that the person can follow.")], ["prompt"]),
-    Tool.def("task_status", "Read a delegated task: state (queued, running, done, failed, cancelled), the child's thread, and its result summary once finished.",
-      [Tool.prop("taskId", "string", "The task id delegate_task returned.")], ["taskId"]),
-    Tool.def("task_cancel", "Cancel a running delegated task (stops its child agent). Finished tasks keep their result.",
-      [Tool.prop("taskId", "string", "The task id.")], ["taskId"]),
-    Tool.def("thread_list", "List the threads of this thread's project (id, title, provider, model, turn state), newest activity first. With `machine` (machine_list shows them), the threads of that other machine of the person's, whose ids work in the thread tools here; `project` narrows it to one project there.",
-      [Tool.prop("machine", "string", "Another machine's name (or link id): list its threads."), Tool.prop("project", "string", "With machine: a project there, by name or id.")], Nil{}),
-    Tool.def("machine_list", "List the person's machines linked to this one (this one first), whether each is here or away, and each one's projects with ids you can give thread_launch. A thread elsewhere has an id like <link>~<id>; thread_send, thread_read, thread_wait, thread_interrupt and thread_update take it, so you can work with a thread on any of their machines.", Nil{}, Nil{}),
-    Tool.def("thread_read", "Read a thread's timeline in this project (or on another machine, by its <link>~<id>): messages and tool activity, oldest first (the last `limit` entries).",
-      [Tool.prop("threadId", "string", "The thread to read."), Tool.prop("limit", "number", "How many entries (default 40).")], ["threadId"]),
-    Tool.def("thread_send", "Send a message to another thread in this project, or on another machine by its <link>~<id>. It is delivered at once: an idle thread starts a turn with it, a running turn takes it (Codex, Grok and Muse restart the turn with it).",
-      [Tool.prop("threadId", "string", "The thread."), Tool.prop("text", "string", "The message.")], ["threadId", "text"]),
-    Tool.def("thread_launch", "Start a new top-level thread in this project, or in `project` (not a child of this one: the user sees it in the sidebar like their own) with a first message, on any provider/model. Bots must name the project. Answers its threadId. Its reports come to you by themselves, as a message that wakes you: each time its turn ends (completed, failed or interrupted, with its last reply), and at once when it asks the person something; so end your turn instead of polling, and answer it with thread_send. report false launches it without reports; thread_update turns them off or on later. With `machine`, it starts on that other machine of the person's, in its project named by `project` (machine_list).",
-      [Tool.prop("prompt", "string", "The first message, complete."), Tool.prop("title", "string", "A short title (default: from the prompt)."), Tool.prop("report", "boolean", "Whether its turn ends and asks are reported to you (default true)."),
-       Tool.prop("provider", "string", "claude, codex, grok, muse, antigravity or omp (default: the user's default)."), Tool.prop("model", "string", "Model (default: the provider's default)."),
-       Tool.prop("project", "string", "The project's name or id (default: this thread's; bots must give one); on another machine its <link>~<id> from machine_list."),
-       Tool.prop("machine", "string", "Start it on another machine of the person's, in its project of that name (machine_list).")], ["prompt"]),
-    Tool.def("thread_update", "Rename a thread in this project (this one by default), or with no title have its title written again from its first message. With report (and no title), turn the reports of a thread you launched off (false) or on again (true).",
-      [Tool.prop("threadId", "string", "The thread (default: this one)."), Tool.prop("title", "string", "The new title; empty to regenerate it."), Tool.prop("report", "boolean", "For a thread you launched: whether its reports come to you.")], Nil{}),
-    Tool.def("thread_wait", "Wait until a thread in this project has finished its turn, or until timeoutMs passes. Answers its state, whether it is done, and its last reply. For anything longer than a few minutes use wake_on instead and end your turn.",
-      [Tool.prop("threadId", "string", "The thread."), Tool.prop("timeoutMs", "number", "How long to wait at most (default 30000, at most 600000).")], ["threadId"]),
-    Tool.def("thread_interrupt", "Stop the running turn of a thread in this project.",
-      [Tool.prop("threadId", "string", "The thread.")], ["threadId"]),
-    Tool.def("deploy_restart", "Restart the Backplane hub into a new build safely. Answers at once: the restart waits until no thread is inside a tool call (a build, an edit) and the build lock (/tmp/bp-bend.lock) is free, then goes; every turn it cuts resumes by itself. With stage, a directory holding the built package (backplane, backplane-serve, web/ ...) is swapped into the install first. You are woken after the restart with the new version: end your turn, do not wait.",
-      [Tool.prop("stage", "string", "Absolute path of a staged package to install first (default: the files are already in place)."), Tool.prop("note", "string", "Why, shown to the person.")], Nil{}),
-    Tool.def("deploy_status", "Whether a deploy_restart waits, who asked, and what it still waits for (tool calls in flight, the build lock).", Nil{}, Nil{}),
-    Tool.def("deploy_cancel", "Cancel a waiting deploy_restart.", Nil{}, Nil{}),
-    Tool.def("viewer_show",
-      "Show a file in the user's Backplane viewer panel: a .kicad_pcb on the Board tab (kind 3d: the board in 3D), a .kicad_sch on the Schematic tab, and any .step/.stp or .glb on the Mech tab, the 3D design tab (the model turned in 3D, the project's parts in mech/ beside it, their renders a tap away), wherever the file is. Use it after changing a design so the user sees the result; the viewer also follows the file live.",
-      [Tool.prop("path", "string", "Absolute path of the file."), Tool.prop("kind", "string", "board, schematic, 3d (a board in 3D) or mech (a STEP or GLB); default from the extension.")], ["path"]),
-    Tool.def("terminal_open",
-      "Open a terminal in this chat that runs a command (through the user's shell, in this thread's folder) and that the user sees and types into right in the conversation. Use it to hand the user a small tool: a TUI, a picker, an interactive script, a live monitor, a REPL. It answers the terminal's id at once; when the command ends the terminal stays open at the user's shell. Read its screen with terminal_read; what it shows when the user next writes to you comes with their message. It stops (and greys out, a click restarts it) when the user sends another message, unless they pin it.",
-      [Tool.prop("command", "string", "The command line, e.g. python3 tools/pick.py or htop."), Tool.prop("title", "string", "A short title shown above it."),
-       Tool.prop("cols", "number", "Columns (default 80, 20 to 200)."), Tool.prop("rows", "number", "Rows (default 24, 3 to 60).")], ["command"]),
-    Tool.def("terminal_read", "Read a terminal of this chat: its state (running: the command runs; done N: it ended with status N and the shell is open; stopped or exited N: the terminal is closed) and the text on its screen. waitMs waits until the command ends, up to that long, for a script you want the result of.",
-      [Tool.prop("id", "string", "The id terminal_open answered."), Tool.prop("waitMs", "number", "Wait for the command to end, at most this long (default 0, at most 120000).")], ["id"]),
-    Tool.def("terminal_send", "Type into a terminal of this chat, as the user would: text is sent as is (\\r is Enter, \\u0003 is ctrl+c, \\u001b[A is Up).",
-      [Tool.prop("id", "string", "The terminal's id."), Tool.prop("text", "string", "The bytes to send, as text.")], ["id", "text"]),
-    Tool.def("terminal_close", "Stop a terminal of this chat (its program is hung up; the user can start it again).",
-      [Tool.prop("id", "string", "The terminal's id.")], ["id"]),
-    Tool.def("wake_on", "Subscribe to a local thread, work id, PR or absolute file path. A matching event posts a message in your thread and wakes you; end your turn instead of polling. Thread targets elsewhere are not supported yet.",
-      [Tool.prop("kind", "string", "thread, work, pr or file."), Tool.prop("target", "string", "Thread/work id, owner/repo#N (or #N in a project), or absolute path."),
-       J.KV{"events", J.Json.obj([J.KV{"type", J.Str{"array"}}, J.KV{"items", J.Json.obj([J.KV{"type", J.Str{"string"}}])}])}, Tool.prop("once", "boolean", "Drop after delivery (default true)."), Tool.prop("note", "string", "Include this reminder in the wake message.")], ["kind", "target"]),
-    Tool.def("wake_list", "List your wake subscriptions.", Nil{}, Nil{}),
-    Tool.def("wake_cancel", "Cancel one of your wake subscriptions.", [Tool.prop("id", "string", "The subscription id.")], ["id"]),
-    Tool.def("work_run", "Start long or detached work (a build, a test run, a job on another machine) so Backplane owns it: when it ends you are woken with its exit code and the end of its output; if a restart of Backplane cuts it off you are told it was lost and can start it again. Use this instead of `&`, nohup or disown, then end your turn; never poll or sleep-wait.",
-      [Tool.prop("command", "string", "The shell command, run in this thread's folder."), Tool.prop("lock", "string", "Optional named FIFO lock, held until work ends."), Tool.prop("note", "string", "What it is, in a few words."), Tool.prop("timeoutSec", "number", "Give up watching after this long (the work keeps running; the outcome is then unknown).")], ["command"]),
-    Tool.def("work_watch", "Have Backplane watch work that is already running and wake you when it ends: kind pid (a process) or file (a file that will contain the token this call returns). Then end your turn.",
-      [Tool.prop("kind", "string", "pid or file."), Tool.prop("target", "string", "The pid, or the file's path."), Tool.prop("note", "string", "What it is."), Tool.prop("timeoutSec", "number", "Give up watching after this long.")], ["kind", "target"]),
-    Tool.def("lock_acquire", "Acquire a named FIFO lock without blocking; if queued, end your turn and wait for the grant message.", [Tool.prop("name", "string", "Lock name"), Tool.prop("note", "string", "Purpose")], ["name"]),
-    Tool.def("lock_release", "Release your named lock, granting the next waiter.", [Tool.prop("name", "string", "Lock name")], ["name"]),
-    Tool.def("lock_cancel", "Leave a named lock queue.", [Tool.prop("name", "string", "Lock name")], ["name"]),
-    Tool.def("lock_list", "List named lock holders, timestamps, notes and FIFO waiters.", Nil{}, Nil{}),
-    Tool.def("work_list", "List the work Backplane watches for this thread (work_run and work_watch), with each one's state.", Nil{}, Nil{}),
-    Tool.def("work_cancel", "Stop work started with work_run (or a watched unit or pid). It shows as cancelling until its end is confirmed.",
-      [Tool.prop("id", "string", "The work's id.")], ["id"]),
-    Tool.def("work_unwatch", "Stop watching work without stopping it: it may still run, and you will not be told when it ends.",
-      [Tool.prop("id", "string", "The work's id.")], ["id"]),
-    Tool.def("review_comments", "The design review comments on this thread's design (a person's or an agent's, pinned to a place on a board layer or a schematic sheet): the open ones with their replies, and how many are resolved.",
-      Nil{}, Nil{}),
-    Tool.def("review_comment", "Comment on the design, pinned to a place (op add: file, x, y in mm in the file's own coordinates, layer for a board, text), or answer (op add with parent), resolve, reopen, edit or drop a comment by its id. The person sees it pinned in the viewer.",
-      [Tool.prop("op", "string", "add, resolve, reopen, edit or drop."), Tool.prop("id", "string", "The comment (resolve, reopen, edit, drop)."),
-       Tool.prop("parent", "string", "The comment answered (an add that is a reply)."), Tool.prop("file", "string", "The board or schematic, from this thread's folder."),
-       Tool.prop("x", "number", "X in mm."), Tool.prop("y", "number", "Y in mm."), Tool.prop("layer", "string", "A board's layer (F.Cu, B.Silkscreen...)."),
-       Tool.prop("text", "string", "What the comment says.")], ["op"])]
-    , List.append(&2, J.Json, Mcp.preview_tools(), [Tool.def("permission_prompt", "Internal to Backplane: asks the user before a tool runs. Do not call it yourself.",
-      [Tool.prop("tool_name", "string", "The tool."), Tool.prop("input", "object", "Its input."), Tool.prop("tool_use_id", "string", "The call.")], ["tool_name", "input"])])))}])
+# KiCad's IPC API through the headless KiCad Backplane runs for the project
+# (the server starts on the first call); src/server/server.bend's KIpc.*
+def Mcp.kicad_tools() -> List<&2, J.Json>:
+  [Tool.def("kicad_ipc", "Send one command to the project's headless KiCad over its IPC API (Backplane starts one KiCad per project). path is the project's .kicad_pro, .kicad_pcb or .kicad_sch (absolute); type is the fully-qualified protobuf command, e.g. kiapi.board.commands.GetItems, kiapi.common.commands.BeginCommit, kiapi.backplane.SketchRoute; message is the command's fields as JSON. The answer is the response as JSON. Headless KiCad has no selection or view state: always pass explicit item IDs (the KIIDs GetItems returns), wrap edits in BeginCommit/EndCommit, then SaveDocument (the viewers follow the saved files). Unsaved work is undone with EndCommit CMA_DROP. Selection, view and RunAction commands are refused at once. When IPC is unavailable the error says why and names the fallback (edit the file directly or use kicad-cli, then re-read the file).",
+     [Tool.prop("path", "string", "Absolute path of the project's .kicad_pro, .kicad_pcb or .kicad_sch."), Tool.prop("type", "string", "The protobuf command, fully qualified (kiapi.board.commands.GetItems)."),
+      J.KV{"message", J.Json.obj([J.KV{"type", J.Str{"object"}}, J.KV{"description", J.Str{"The command's fields as JSON (default {})."}}])}], ["path", "type"]),
+   Tool.def("kicad_ipc_status", "The project's headless KiCad: its server's state (starting, ready, failed or stopped), its version, and the capabilities and commands it has (kiapi.backplane.GetCapabilities). Starts the server if it is not running. Headless KiCad has no selection or view state: always pass explicit item IDs (KIIDs from GetItems) in kicad_ipc, wrap edits in BeginCommit/EndCommit, then SaveDocument.",
+     [Tool.prop("path", "string", "Absolute path of the project's .kicad_pro, .kicad_pcb or .kicad_sch.")], ["path"])]
 
 def Mcp.thread_json(t: M.Thread) -> J.Json:
   match t:
@@ -283,10 +221,33 @@ def Mcp.threads(ts: List<&2, M.Thread>, +project: String) -> List<&2, J.Json>:
 def Mcp.scope(+s: M.State, +thread: String) -> String:
   Bool.pick(String, Mcp.bot(s, thread), "*", Mcp.project_of(B.Hub.thread(s, thread)))
 
+def Mcp.mail.bot(b: Maybe<&2, BT.Bot>, +thread: String) -> String:
+  match b:
+    case Some{+bot}: BT.Bot.id(bot)
+    case None{}: "thread:" ++ thread
+
+def Mcp.mail.scope(+s: M.State, +thread: String) -> String:
+  Mcp.mail.bot(RUN.Run.bot(s, thread), thread)
+
+def Mcp.run.visible(r: Maybe<&2, ML.Run>, +s: M.State, +caller: String) -> Bool:
+  match r:
+    case None{}: True{}
+    case Some{+r}: Bool.and(RUN.Run.is(s, caller), Bool.and(ML.Run.live(r), String.eq(ML.Run.bot(r), Mcp.mail.scope(s, caller))))
+
+def Mcp.run.keep(ok: Bool, +t: M.Thread, +rest: List<&2, M.Thread>) -> List<&2, M.Thread>:
+  match ok:
+    case True{}: t <> rest
+    case False{}: rest
+
+def Mcp.run.threads(+ts: List<&2, M.Thread>, +s: M.State, +caller: String) -> List<&2, M.Thread>:
+  match ts:
+    case Nil{}: Nil{}
+    case +t <> +rest: Mcp.run.keep(Mcp.run.visible(RUN.Run.of(s, M.Thread.id(t)), s, caller), t, Mcp.run.threads(rest, s, caller))
+
 def Mcp.list(+s: M.State, +thread: String) -> Res:
   match s:
     case M.State{_, ts, _, _, _, _, _, _, _, _, _}:
-      Res.ok(J.Json.obj([J.KV{"threads", J.Json.arr(Mcp.threads(Map.values(&2, M.Thread, ts), Mcp.scope(s, thread)))}]))
+      Res.ok(J.Json.obj([J.KV{"threads", J.Json.arr(Mcp.threads(Mcp.run.threads(Map.values(&2, M.Thread, ts), s, thread), Mcp.scope(s, thread)))}]))
 
 def Mcp.entry(e: M.Entry) -> J.Json:
   match e:
@@ -617,7 +578,7 @@ def Mcp.send.m(auto: Bool, +s: M.State, +now: Nat, +thread: String, +target: Str
     case True{}:
       B.Hub.inbox(s, now, thread, target, M.User{}, text)
     case False{}:
-      B.Hub.post.mode(mode, s, now, target, M.Link.id(thread, B.Hub.id("m", now, B.Hub.seq(s))), M.User{}, text)
+      B.Mail.funnel(B.Hub.post.mode(mode, s, now, target, M.Link.id(thread, B.Hub.id("m", now, B.Hub.seq(s))), M.User{}, text), s, now, ML.Origin{B.Mail.addr(s, thread), "thread", ""}, B.Mail.addr(s, target), text, M.Link.id(thread, B.Hub.id("m", now, B.Hub.seq(s))))
 
 def Mcp.send.k(ok: Bool, +s: M.State, +now: Nat, +thread: String, +target: String, +text: String, +mode: String) -> Res:
   match ok:
@@ -629,7 +590,7 @@ def Mcp.send.k(ok: Bool, +s: M.State, +now: Nat, +thread: String, +target: Strin
 
 def Mcp.names() -> List<&2, String>:
   ["orchestrator_capabilities", "delegate_task", "task_status", "task_cancel", "thread_list", "thread_read", "thread_send", "viewer_show",
-   "thread_launch", "thread_update", "thread_wait", "thread_interrupt", "thread_wait_now", "terminal_open", "terminal_send", "terminal_close", "work_run", "work_watch", "work_list", "work_cancel", "work_unwatch", "review_comments", "review_comment", "wake_on", "wake_list", "wake_cancel", "deploy_restart", "deploy_status", "deploy_cancel", "lock_acquire", "lock_release", "lock_list", "lock_cancel"]
+   "thread_launch", "thread_update", "thread_wait", "thread_interrupt", "thread_wait_now", "terminal_open", "terminal_send", "terminal_close", "work_run", "work_watch", "work_list", "work_cancel", "work_unwatch", "review_comments", "review_comment", "wake_on", "wake_list", "wake_cancel", "deploy_restart", "deploy_status", "deploy_cancel", "lock_acquire", "lock_release", "lock_list", "lock_cancel", "deploy_main", "mail", "mail_list", "mail_read", "mail_search", "mail_tag", "mail_snooze", "mail_done", "decide", "escalate", "charter_set"]
 
 def Mcp.lock.acquire(ok: Bool, +s: M.State, +now: Nat, +thread: String, +a: J.Json) -> Res:
   match ok:
@@ -756,6 +717,208 @@ def Mcp.deploy.restart(ok: Bool, +s: M.State, +now: Nat, +thread: String, +a: J.
     case False{}:
       Res.fail("stage must be an absolute path")
 
+# ---- mail 2b ----
+def Mcp.mail.tools() -> List<&2, J.Json>:
+  [Tool.def("mail", "Send mail to an address, delivered at once and filed in its conversation.",
+    [Tool.prop("to", "string", "thread:<id>, bot:<id> or room:<id>."), Tool.prop("text", "string", "The message."), Tool.prop("conv", "string", "Continue this conversation."), Tool.prop("subject", "string", "Subject for a new conversation."), Tool.prop("want", "string", "fyi or act.")], ["text"]),
+   Tool.def("mail_list", "List your mail conversations, newest first, optionally by status or project.", [Tool.prop("bot", "string", "Bot id; * for all mail (bots only)."), Tool.prop("status", "string", "unread, open, snoozed or done."), Tool.prop("project", "string", "Project id."), Tool.prop("n", "number", "Page size."), Tool.prop("skip", "number", "Rows to skip.")], Nil{}),
+   Tool.def("mail_read", "Read a conversation's message bodies and mark it seen.", [Tool.prop("conv", "string", "Conversation id."), Tool.prop("before", "string", "Mail id cursor."), Tool.prop("n", "number", "Page size (default 50).")], ["conv"]),
+   Tool.def("mail_search", "Search mail subjects, participants, tags and newest headers.", [Tool.prop("q", "string", "Query."), Tool.prop("bot", "string", "Bot id or *."), Tool.prop("n", "number", "Maximum results.")], ["q"]),
+   Tool.def("mail_tag", "Set your conversation's tags.", [Tool.prop("conv", "string", "Conversation id."), J.KV{"tags", J.Json.obj([J.KV{"type", J.Str{"array"}}, J.KV{"items", J.Json.obj([J.KV{"type", J.Str{"string"}}])}])}], ["conv", "tags"]),
+   Tool.def("mail_snooze", "Snooze a conversation until a time; the minute tick reopens it unread.", [Tool.prop("conv", "string", "Conversation id."), Tool.prop("until", "number", "Unix time in seconds."), Tool.prop("in", "string", "Relative time, e.g. 20m or 2h.")], ["conv"]),
+   Tool.def("mail_done", "Mark a conversation done.", [Tool.prop("conv", "string", "Conversation id.")], ["conv"])]
+
+def Mcp.tools() -> J.Json:
+  J.Json.obj([J.KV{"tools", J.Json.arr(List.append(&2, J.Json, [
+    Tool.def("orchestrator_capabilities",
+      "List the providers and models this Backplane can run, the delegation depth limit, and this thread's own provider, model and depth.",
+      Nil{}, Nil{}),
+    Tool.def("delegate_task",
+      "Delegate one task to a child agent of THIS thread, on any provider/model (see orchestrator_capabilities). The child sees only `prompt` (no conversation history) and works in this thread's directory. Its result arrives in this thread as a message when it finishes, so end your turn instead of polling; use task_status only when you need it mid-turn. Delegation is limited in depth; children of children are allowed up to the limit.",
+      [Tool.prop("prompt", "string", "The complete task for the child, with every detail it needs."),
+       Tool.prop("provider", "string", "claude, codex, grok, muse, antigravity or omp (default: this thread's)."),
+       Tool.prop("model", "string", "Model for the child (default: this thread's)."),
+       Tool.prop("title", "string", "Short title for the child thread."),
+       Tool.prop("project", "string", "Bots only, and required for them: the project's name or id (project_list); the child is a thread of its own there that the person can follow.")], ["prompt"]),
+    Tool.def("task_status", "Read a delegated task: state (queued, running, done, failed, cancelled), the child's thread, and its result summary once finished.",
+      [Tool.prop("taskId", "string", "The task id delegate_task returned.")], ["taskId"]),
+    Tool.def("task_cancel", "Cancel a running delegated task (stops its child agent). Finished tasks keep their result.",
+      [Tool.prop("taskId", "string", "The task id.")], ["taskId"]),
+    Tool.def("thread_list", "List the threads of this thread's project (id, title, provider, model, turn state), newest activity first. With `machine` (machine_list shows them), the threads of that other machine of the person's, whose ids work in the thread tools here; `project` narrows it to one project there.",
+      [Tool.prop("machine", "string", "Another machine's name (or link id): list its threads."), Tool.prop("project", "string", "With machine: a project there, by name or id.")], Nil{}),
+    Tool.def("machine_list", "List the person's machines linked to this one (this one first), whether each is here or away, and each one's projects with ids you can give thread_launch. A thread elsewhere has an id like <link>~<id>; thread_send, thread_read, thread_wait, thread_interrupt and thread_update take it, so you can work with a thread on any of their machines.", Nil{}, Nil{}),
+    Tool.def("thread_read", "Read a thread's timeline in this project (or on another machine, by its <link>~<id>): messages and tool activity, oldest first (the last `limit` entries).",
+      [Tool.prop("threadId", "string", "The thread to read."), Tool.prop("limit", "number", "How many entries (default 40).")], ["threadId"]),
+    Tool.def("thread_send", "Send a message to another thread in this project, or on another machine by its <link>~<id>. It is delivered at once: an idle thread starts a turn with it, a running turn takes it (Claude at once; Codex, Grok and Muse with their next Backplane tool result, or as a new turn if theirs ends first).",
+      [Tool.prop("threadId", "string", "The thread."), Tool.prop("text", "string", "The message.")], ["threadId", "text"]),
+    Tool.def("thread_launch", "Start a new top-level thread in this project, or in `project` (not a child of this one: the user sees it in the sidebar like their own) with a first message, on any provider/model. Bots must name the project. Answers its threadId. Its reports come to you by themselves, as a message that wakes you: each time its turn ends (completed, failed or interrupted, with its last reply), and at once when it asks the person something; so end your turn instead of polling, and answer it with thread_send. report false launches it without reports; thread_update turns them off or on later. With `machine`, it starts on that other machine of the person's, in its project named by `project` (machine_list).",
+      [Tool.prop("prompt", "string", "The first message, complete."), Tool.prop("title", "string", "A short title (default: from the prompt)."), Tool.prop("report", "boolean", "Whether its turn ends and asks are reported to you (default true)."),
+       Tool.prop("provider", "string", "claude, codex, grok, muse, antigravity or omp (default: the user's default)."),
+       Tool.prop("project", "string", "The project's name or id (default: this thread's; bots must give one); on another machine its <link>~<id> from machine_list."),
+       Tool.prop("machine", "string", "Start it on another machine of the person's, in its project of that name (machine_list).")], ["prompt"]),
+    Tool.def("thread_update", "Rename a thread in this project (this one by default), or with no title have its title written again from its first message. With report (and no title), turn the reports of a thread you launched off (false) or on again (true).",
+      [Tool.prop("threadId", "string", "The thread (default: this one)."), Tool.prop("title", "string", "The new title; empty to regenerate it."), Tool.prop("report", "boolean", "For a thread you launched: whether its reports come to you.")], Nil{}),
+    Tool.def("thread_wait", "Wait until a thread in this project has finished its turn, or until timeoutMs passes. Answers its state, whether it is done, and its last reply. For anything longer than a few minutes use wake_on instead and end your turn.",
+      [Tool.prop("threadId", "string", "The thread."), Tool.prop("timeoutMs", "number", "How long to wait at most (default 30000, at most 600000).")], ["threadId"]),
+    Tool.def("thread_interrupt", "Stop the running turn of a thread in this project.",
+      [Tool.prop("threadId", "string", "The thread.")], ["threadId"]),
+    Tool.def("deploy_restart", "Restart the Backplane hub into a new build safely. Answers at once: the restart waits until no thread is inside a tool call (a build, an edit) and the build lock (/tmp/bp-bend.lock) is free, then goes; every turn it cuts resumes by itself. With stage, a directory holding the built package (backplane, backplane-serve, web/ ...) is swapped into the install first. You are woken after the restart with the new version: end your turn, do not wait.",
+      [Tool.prop("stage", "string", "Absolute path of a staged package to install first (default: the files are already in place)."), Tool.prop("note", "string", "Why, shown to the person.")], Nil{}),
+    Tool.def("deploy_status", "Whether a deploy_restart waits, who asked, and what it still waits for (tool calls in flight, the build lock); under main, deploy_main's state (the commit building, staged, live).", Nil{}, Nil{}),
+    Tool.def("deploy_main", "Deploy origin/main to this machine's hub: the hub fetches it in its source checkout (setting deploy.repo), builds it in a job of its own and restarts into it safely (as deploy_restart). Answers at once: queued, skipped (origin/main is already in the commit being built, staged or live: the answer names it) or not configured. One build runs at a time; requests during it make one more build of the newest origin/main. When the build ends you are told (commit, version, result): end your turn, do not wait or poll.",
+      [Tool.prop("note", "string", "Why, shown with the request.")], Nil{}),
+    Tool.def("deploy_cancel", "Cancel a waiting deploy_restart.", Nil{}, Nil{}),
+    Tool.def("viewer_show",
+      "Show a file in the user's Backplane viewer panel: a .kicad_pcb on the Board tab (kind 3d: the board in 3D), a .kicad_sch on the Schematic tab, and any .step/.stp or .glb on the Mech tab, the 3D design tab (the model turned in 3D, the project's parts in mech/ beside it, their renders a tap away), wherever the file is. Use it after changing a design so the user sees the result; the viewer also follows the file live.",
+      [Tool.prop("path", "string", "Absolute path of the file."), Tool.prop("kind", "string", "board, schematic, 3d (a board in 3D) or mech (a STEP or GLB); default from the extension.")], ["path"]),
+    Tool.def("kicad_export10", "Export an outside-project KiCad 10 copy. First returns a compatibility report; force accepts the reported changes. Never opens a GUI.", [Tool.prop("path", "string", "Absolute .kicad_pro path."), Tool.prop("force", "boolean", "Accept changes, including dropping blocked approximations (default false).")], ["path"]),
+    Tool.def("terminal_open",
+      "Open a terminal in this chat that runs a command (through the user's shell, in this thread's folder) and that the user sees and types into right in the conversation. Use it to hand the user a small tool: a TUI, a picker, an interactive script, a live monitor, a REPL. It answers the terminal's id at once; when the command ends the terminal stays open at the user's shell. Read its screen with terminal_read; what it shows when the user next writes to you comes with their message. It stops (and greys out, a click restarts it) when the user sends another message, unless they pin it.",
+      [Tool.prop("command", "string", "The command line, e.g. python3 tools/pick.py or htop."), Tool.prop("title", "string", "A short title shown above it."),
+       Tool.prop("cols", "number", "Columns (default 80, 20 to 200)."), Tool.prop("rows", "number", "Rows (default 24, 3 to 60).")], ["command"]),
+    Tool.def("terminal_read", "Read a terminal of this chat: its state (running: the command runs; done N: it ended with status N and the shell is open; stopped or exited N: the terminal is closed) and the text on its screen. waitMs waits until the command ends, up to that long, for a script you want the result of.",
+      [Tool.prop("id", "string", "The id terminal_open answered."), Tool.prop("waitMs", "number", "Wait for the command to end, at most this long (default 0, at most 120000).")], ["id"]),
+    Tool.def("terminal_send", "Type into a terminal of this chat, as the user would: text is sent as is (\\r is Enter, \\u0003 is ctrl+c, \\u001b[A is Up).",
+      [Tool.prop("id", "string", "The terminal's id."), Tool.prop("text", "string", "The bytes to send, as text.")], ["id", "text"]),
+    Tool.def("terminal_close", "Stop a terminal of this chat (its program is hung up; the user can start it again).",
+      [Tool.prop("id", "string", "The terminal's id.")], ["id"]),
+    Tool.def("wake_on", "Subscribe to a local thread, work id, PR or absolute file path. A matching event posts a message in your thread and wakes you; end your turn instead of polling. Thread targets elsewhere are not supported yet.",
+      [Tool.prop("kind", "string", "thread, work, pr or file."), Tool.prop("target", "string", "Thread/work id, owner/repo#N (or #N in a project), or absolute path."),
+       J.KV{"events", J.Json.obj([J.KV{"type", J.Str{"array"}}, J.KV{"items", J.Json.obj([J.KV{"type", J.Str{"string"}}])}])}, Tool.prop("once", "boolean", "Drop after delivery (default true)."), Tool.prop("note", "string", "Include this reminder in the wake message.")], ["kind", "target"]),
+    Tool.def("wake_list", "List your wake subscriptions.", Nil{}, Nil{}),
+    Tool.def("wake_cancel", "Cancel one of your wake subscriptions.", [Tool.prop("id", "string", "The subscription id.")], ["id"]),
+    Tool.def("work_run", "Start long or detached work (a build, a test run, a job on another machine) so Backplane owns it: when it ends you are woken with its exit code and the end of its output; if a restart of Backplane cuts it off you are told it was lost and can start it again. Use this instead of `&`, nohup or disown, then end your turn; never poll or sleep-wait.",
+      [Tool.prop("command", "string", "The shell command, run in this thread's folder."), Tool.prop("lock", "string", "Optional named FIFO lock, held until work ends."), Tool.prop("note", "string", "What it is, in a few words."), Tool.prop("timeoutSec", "number", "Give up watching after this long (the work keeps running; the outcome is then unknown).")], ["command"]),
+    Tool.def("work_watch", "Have Backplane watch work that is already running and wake you when it ends: kind pid (a process) or file (a file that will contain the token this call returns). Then end your turn.",
+      [Tool.prop("kind", "string", "pid or file."), Tool.prop("target", "string", "The pid, or the file's path."), Tool.prop("note", "string", "What it is."), Tool.prop("timeoutSec", "number", "Give up watching after this long.")], ["kind", "target"]),
+    Tool.def("lock_acquire", "Acquire a named FIFO lock without blocking; if queued, end your turn and wait for the grant message.", [Tool.prop("name", "string", "Lock name"), Tool.prop("note", "string", "Purpose")], ["name"]),
+    Tool.def("lock_release", "Release your named lock, granting the next waiter.", [Tool.prop("name", "string", "Lock name")], ["name"]),
+    Tool.def("lock_cancel", "Leave a named lock queue.", [Tool.prop("name", "string", "Lock name")], ["name"]),
+    Tool.def("lock_list", "List named lock holders, timestamps, notes and FIFO waiters.", Nil{}, Nil{}),
+    Tool.def("work_list", "List the work Backplane watches for this thread (work_run and work_watch), with each one's state.", Nil{}, Nil{}),
+    Tool.def("work_cancel", "Stop work started with work_run (or a watched unit or pid). It shows as cancelling until its end is confirmed.",
+      [Tool.prop("id", "string", "The work's id.")], ["id"]),
+    Tool.def("work_unwatch", "Stop watching work without stopping it: it may still run, and you will not be told when it ends.",
+      [Tool.prop("id", "string", "The work's id.")], ["id"]),
+    Tool.def("review_comments", "The design review comments on this thread's design (a person's or an agent's, pinned to a place on a board layer or a schematic sheet): the open ones with their replies, and how many are resolved.",
+      Nil{}, Nil{}),
+    Tool.def("review_comment", "Comment on the design, pinned to a place (op add: file, x, y in mm in the file's own coordinates, layer for a board, text), or answer (op add with parent), resolve, reopen, edit or drop a comment by its id. The person sees it pinned in the viewer.",
+      [Tool.prop("op", "string", "add, resolve, reopen, edit or drop."), Tool.prop("id", "string", "The comment (resolve, reopen, edit, drop)."),
+       Tool.prop("parent", "string", "The comment answered (an add that is a reply)."), Tool.prop("file", "string", "The board or schematic, from this thread's folder."),
+       Tool.prop("x", "number", "X in mm."), Tool.prop("y", "number", "Y in mm."), Tool.prop("layer", "string", "A board's layer (F.Cu, B.Silkscreen...)."),
+       Tool.prop("text", "string", "What the comment says.")], ["op"])]
+    , List.append(&2, J.Json, Mcp.preview_tools(), List.append(&2, J.Json, Mcp.kicad_tools(), [Tool.def("permission_prompt", "Internal to Backplane: asks the user before a tool runs. Do not call it yourself.",
+      [Tool.prop("tool_name", "string", "The tool."), Tool.prop("input", "object", "Its input."), Tool.prop("tool_use_id", "string", "The call.")], ["tool_name", "input"])]))))}])
+
+def Mcp.mail.uber(+s: M.State, +thread: String) -> Bool:
+  UBM.Uber.is(s, Mcp.mail.scope(s, thread))
+
+def Mcp.mail.params(+s: M.State, +thread: String, +a: J.Json) -> J.Json:
+  # only the uberbot may look at another bot's mailroom or all of them ("*")
+  J.Json.obj([J.KV{"bot", J.Str{Bool.pick(String, Mcp.mail.uber(s, thread), J.Json.get_str(a, "bot", Mcp.mail.scope(s, thread)), Mcp.mail.scope(s, thread))}},
+    J.KV{"status", J.Str{J.Json.get_str(a, "status", "")}}, J.KV{"project", J.Str{J.Json.get_str(a, "project", "")}}, J.KV{"q", J.Str{J.Json.get_str(a, "q", "")}},
+    J.KV{"skip", J.Json.nat(J.Json.get_nat(a, "skip", 0n))}, J.KV{"n", J.Json.nat(J.Json.get_nat(a, "n", J.Json.get_nat(a, "limit", 50n)))},
+    J.KV{"conv", J.Str{J.Json.get_str(a, "conv", "")}}, J.KV{"before", J.Str{J.Json.get_str(a, "before", "")}}, J.KV{"tags", J.Json.get_obj(a, "tags")}])
+
+def Mcp.mail.allowed(+s: M.State, +thread: String, +conv: String) -> Bool:
+  +scope = Mcp.mail.scope(s, thread)
+  Bool.or(Mcp.mail.uber(s, thread),
+    ML.Parts.has(ML.Conv.parts(ML.Box.conv(M.State.mail(s), conv)), Bool.pick(String, String.starts_with(scope, "thread:"), scope, "bot:" ++ scope), False{}))
+
+def Mcp.mail.until(+s: M.State, +now: Nat, +a: J.Json) -> Nat:
+  Bool.pick(Nat, Nat.is_gt(J.Json.get_nat(a, "until", 0n), 0n), J.Json.get_nat(a, "until", 0n),
+    Maybe.default(&2, Nat, WH.When.parse("in " ++ J.Json.get_str(a, "in", ""), now, SC.Sched.person(s, 0n, False{})), 0n))
+
+def Mcp.mail.change(+s: M.State, +now: Nat, +thread: String, +a: J.Json, +snooze: Bool) -> Res:
+  +p = J.Json.obj([J.KV{"bot", J.Str{Mcp.mail.scope(s, thread)}}, J.KV{"conv", J.Str{J.Json.get_str(a, "conv", "")}},
+    J.KV{"status", J.Str{Bool.pick(String, snooze, "snoozed", "done")}}, J.KV{"until", J.Json.nat(Mcp.mail.until(s, now, a))}])
+  Res{True{}, J.Json.obj([J.KV{"ok", J.Flag{True{}}}]), B.Step{B.Mail.mark(s, now, p), Nil{}}}
+
+def Mcp.run.reply.part(+ps: List<&2, String>, +bot: String, +th: String) -> String:
+  match ps:
+    case Nil{}: ""
+    case +h <> +t: Bool.pick(String, Bool.or(String.eq(h, "bot:" ++ bot), String.eq(h, "thread:" ++ th)), Mcp.run.reply.part(t, bot, th), h)
+
+def Mcp.run.mail.got(r: Maybe<&2, ML.Run>, +s: M.State, +a: J.Json) -> J.Json:
+  match r:
+    case None{}: a
+    case Some{+r}: J.Json.obj([J.KV{"to", J.Str{J.Json.get_str(a, "to", Mcp.run.reply.part(ML.Conv.parts(ML.Box.conv(M.State.mail(s), ML.Run.conv(r))), ML.Run.bot(r), ML.Run.thread(r))) }},
+      J.KV{"text", J.Str{J.Json.get_str(a, "text", "")}}, J.KV{"conv", J.Str{J.Json.get_str(a, "conv", ML.Run.conv(r))}}, J.KV{"subject", J.Str{J.Json.get_str(a, "subject", "")}}, J.KV{"want", J.Str{J.Json.get_str(a, "want", "")}}])
+
+def Mcp.mail.call.on(+ok: Bool, +i: Nat, +s: M.State, +now: Nat, +thread: String, +a: J.Json) -> Res:
+  match ok i:
+    case False{} _: Res.fail("mail is off or the conversation is not yours")
+    case True{} 34n:
+      Res{True{}, J.Json.obj([J.KV{"ok", J.Flag{True{}}}]), B.Mail.send(s, now, thread, Mcp.run.mail.got(ML.Box.run_of(M.State.mail(s), thread), s, a))}
+    case True{} 35n: Res.ok(B.Mail.list(s, Mcp.mail.params(s, thread, a)))
+    case True{} 36n: Res{True{}, J.Null{}, B.Mail.read(s, now, 0, "0", Mcp.mail.params(s, thread, a))}
+    case True{} 37n: Res.ok(B.Mail.find(s, Mcp.mail.params(s, thread, a)))
+    case True{} 38n: Res{True{}, J.Json.obj([J.KV{"ok", J.Flag{True{}}}]), B.Step{B.Mail.tag(now, Mcp.mail.params(s, thread, a)), Nil{}}}
+    case True{} 39n: Mcp.mail.change(s, now, thread, a, True{})
+    case True{} _: Mcp.mail.change(s, now, thread, a, False{})
+
+def Mcp.mail.call(+i: Nat, +s: M.State, +now: Nat, +thread: String, +a: J.Json) -> Res:
+  Mcp.mail.call.on(Bool.and(String.eq(M.Setting.get(s, "mail.on", "off"), "on"), Bool.or(ML.Parts.has(["34", "35", "37"], Nat.show(i), False{}), Mcp.mail.allowed(s, thread, J.Json.get_str(a, "conv", "")))), i, s, now, thread, a)
+
+# deploy_main (core/ship.bend, hub.bend's Ship.*). The server reads
+# origin/main first (server.bend's Ship.look) and answers through Mcp.ship;
+# reaching the decider unread means no deploy.repo is set.
+def Mcp.ship.none(empty: Bool) -> Res:
+  match empty:
+    case True{}:
+      Res.ok(J.Json.obj([J.KV{"state", J.Str{"not configured"}}, J.KV{"next", J.Str{"deploy_main is off on this hub: the setting deploy.repo (the source checkout to build) is not set. Tell the person; do not deploy by hand."}}]))
+    case False{}:
+      Res.fail("deploy_main: origin/main was not read; try again")
+
+def Mcp.ship.answer(+cover: String, start: Bool, +sh: SH.Ship, +head: String) -> J.Json:
+  Bool.pick(J.Json, Bool.not(String.is_empty(cover)),
+    J.Json.obj([J.KV{"state", J.Str{"skipped"}}, J.KV{"head", J.Str{head}}, J.KV{"commit", J.Str{SH.Ship.by(sh, cover)}}, J.KV{"covered", J.Str{cover}},
+      J.KV{"next", J.Str{Bool.pick(String, String.eq(cover, "building"), "origin/main is in the build under way; you will be told when it ends. End your turn.", "origin/main is already " ++ cover ++ " here; nothing to do.")}}]),
+    Bool.pick(J.Json, start,
+      J.Json.obj([J.KV{"state", J.Str{"queued"}}, J.KV{"commit", J.Str{head}}, J.KV{"next", J.Str{"Building it. You will be told when the build ends (commit, version, result). End your turn."}}]),
+      J.Json.obj([J.KV{"state", J.Str{"queued"}}, J.KV{"head", J.Str{head}}, J.KV{"after", J.Str{SH.Ship.commit(sh)}},
+        J.KV{"next", J.Str{"A build is under way; one more of the newest origin/main follows it. You will be told when that ends. End your turn."}}])))
+
+def Mcp.ship.k(ok: Bool, +s: M.State, +now: Nat, +by: String, +note: String, +out: String) -> Res:
+  match ok:
+    case True{}:
+      Res{True{}, Mcp.ship.answer(SH.Ship.cover(B.Ship.eff(s), SH.Look.head(out), SH.Look.within(out)), SH.Ship.start(B.Ship.eff(s), SH.Look.head(out), SH.Look.within(out)), B.Ship.eff(s), SH.Look.head(out)),
+        B.Ship.ask(s, now, by, note, SH.Look.head(out), SH.Look.within(out))}
+    case False{}:
+      Res.fail("deploy_main could not read origin/main in " ++ B.Ship.repo(s) ++ ": " ++ SH.Look.err(out))
+
+# deploy_main with origin/main read (out: the look's lines)
+def Mcp.ship(+s: M.State, +now: Nat, +thread: String, +a: J.Json, +out: String) -> Res:
+  Mcp.ship.k(String.is_empty(SH.Look.err(out)), s, now, B.Ship.by(thread), J.Json.get_str(a, "note", ""), out)
+
+def Mcp.run.decide(+s: M.State, +now: Nat, +r: ML.Run, +text: String, +reason: String) -> B.Step:
+  B.Step{[M.DecisionLogged{B.Hub.id("decision", now, B.Hub.seq(s)), ML.Run.bot(r), ML.Run.conv(r), ML.Run.thread(r), text, reason, now}], Nil{}}
+
+def Mcp.run.escalate(ok: Bool, +s: M.State, +now: Nat, +r: ML.Run, +a: J.Json) -> Res:
+  match ok:
+    case False{}: Res.fail("to must be bot or person")
+    case True{}: Res{True{}, J.Json.obj([J.KV{"ok", J.Flag{True{}}}]), B.Run.escalate(s, now, ML.Run.bot(r), ML.Run.conv(r), J.Json.get_str(a, "to", "bot"), J.Json.get_str(a, "text", ""))}
+
+def Mcp.run.call.got(r: Maybe<&2, ML.Run>, +i: Nat, +s: M.State, +now: Nat, +a: J.Json) -> Res:
+  match r i:
+    case Some{+r} 41n: Res{True{}, J.Json.obj([J.KV{"ok", J.Flag{True{}}}]), Mcp.run.decide(s, now, r, J.Json.get_str(a, "text", ""), J.Json.get_str(a, "reason", ""))}
+    case Some{+r} 42n: Mcp.run.escalate(ML.Parts.has(["bot", "person"], J.Json.get_str(a, "to", ""), False{}), s, now, r, a)
+    case _ _: Res.fail("This tool is only available in a mailroom run")
+
+def Mcp.charter.got(b: Maybe<&2, BT.Bot>, +s: M.State, +now: Nat, +a: J.Json) -> Res:
+  match b:
+    case None{}: Res.fail("charter_set is for the front of house bot only")
+    case Some{+b}:
+      Res{True{}, J.Json.obj([J.KV{"ok", J.Flag{True{}}}]), B.Step{[M.CharterSet{BT.Bot.id(b), J.Json.get_str(a, "text", ""), "bot", now},
+        M.ActivityLogged{BT.Bot.thread(b), B.Hub.id("charter", now, B.Hub.seq(s)), "info", "charter", J.Json.get_str(a, "reason", ""), now}],
+        [B.CharterWrite{B.Hub.cwd(s, B.Hub.thread(s, BT.Bot.thread(b))) ++ "/CHARTER.md", J.Json.get_str(a, "text", "")}]}}
+
+def Mcp.run.call(on: Bool, +i: Nat, +s: M.State, +now: Nat, +thread: String, +a: J.Json) -> Res:
+  match on i:
+    case False{} _: Res.fail("mail is off")
+    case True{} 43n: Mcp.charter.got(BT.World.of_thread(M.State.bots(s), thread), s, now, a)
+    case True{} _: Mcp.run.call.got(ML.Box.run_of(M.State.mail(s), thread), i, s, now, a)
+
 def Mcp.call.k(i: Nat, +s: M.State, +now: Nat, +thread: String, +models: J.Json, +a: J.Json) -> Res:
   match i:
     case 0n:
@@ -825,6 +988,18 @@ def Mcp.call.k(i: Nat, +s: M.State, +now: Nat, +thread: String, +models: J.Json,
       Res.ok(DP.Deploy.status(s))
     case 28n:
       Res{True{}, J.Json.obj([J.KV{"state", J.Str{"cancelled"}}]), B.Deploy.cancel(s, now)}
+    case 33n:
+      Mcp.ship.none(String.is_empty(B.Ship.repo(s)))
+    case 34n: Mcp.mail.call(i, s, now, thread, a)
+    case 35n: Mcp.mail.call(i, s, now, thread, a)
+    case 36n: Mcp.mail.call(i, s, now, thread, a)
+    case 37n: Mcp.mail.call(i, s, now, thread, a)
+    case 38n: Mcp.mail.call(i, s, now, thread, a)
+    case 39n: Mcp.mail.call(i, s, now, thread, a)
+    case 40n: Mcp.mail.call(i, s, now, thread, a)
+    case 41n: Mcp.run.call(String.eq(M.Setting.get(s, "mail.on", "off"), "on"), i, s, now, thread, a)
+    case 42n: Mcp.run.call(String.eq(M.Setting.get(s, "mail.on", "off"), "on"), i, s, now, thread, a)
+    case 43n: Mcp.run.call(String.eq(M.Setting.get(s, "mail.on", "off"), "on"), i, s, now, thread, a)
     case _:
       Res.fail("unknown tool")
 
@@ -893,8 +1068,26 @@ def Perm.k(i: Nat, +ask: String, +s: M.State, +now: Nat, +thread: String, +id: J
     case _:
       Perm.approve(Perm.session_ok(M.Asks.all(s), thread, tool), ask, s, now, thread, id, tool, input)
 
-def Mcp.permit(+s: M.State, +now: Nat, +thread: String, +id: J.Json, +a: J.Json) -> McpOut:
+def Mcp.permit.old(+s: M.State, +now: Nat, +thread: String, +id: J.Json, +a: J.Json) -> McpOut:
   Perm.k(C.Codec.pos(["AskUserQuestion", "ExitPlanMode"], J.Json.get_str(a, "tool_name", "")), B.Hub.id("q", now, B.Hub.seq(s)), s, now, thread, id, J.Json.get_str(a, "tool_name", ""), J.Json.get_obj(a, "input"))
+
+def Perm.run.verdict(ok: Bool, +s: M.State, +now: Nat, +r: ML.Run, +id: J.Json, +tool: String, +input: J.Json) -> McpOut:
+  match ok:
+    case False{}: McpOut{Mcp.result(id, Perm.text(Perm.deny("Outside the charter; escalated"))), B.Run.escalate(s, now, ML.Run.bot(r), ML.Run.conv(r), "bot", "Outside the charter: " ++ tool ++ " " ++ String.take(J.Json.show(input), 1000n)), ""}
+    case True{}: McpOut{Mcp.result(id, Perm.text(Perm.allow(input))), Mcp.run.decide(s, now, r, tool ++ " " ++ String.take(J.Json.show(input), 1000n), "charter: " ++ CH.Charter.line(ML.Box.charter(M.State.mail(s), ML.Run.bot(r)), tool, input)), ""}
+
+def Perm.run.risky(risky: Bool, +s: M.State, +now: Nat, +r: ML.Run, +id: J.Json, +tool: String, +input: J.Json) -> McpOut:
+  match risky:
+    case False{}: McpOut{Mcp.result(id, Perm.text(Perm.allow(input))), B.Step.none(), ""}
+    case True{}: Perm.run.verdict(CH.Charter.allows(ML.Box.charter(M.State.mail(s), ML.Run.bot(r)), tool, input), s, now, r, id, tool, input)
+
+def Perm.run.got(r: Maybe<&2, ML.Run>, +s: M.State, +now: Nat, +thread: String, +id: J.Json, +a: J.Json) -> McpOut:
+  match r:
+    case None{}: Mcp.permit.old(s, now, thread, id, a)
+    case Some{+r}: Perm.run.risky(CH.Charter.risky(J.Json.get_str(a, "tool_name", ""), J.Json.get_obj(a, "input")), s, now, r, id, J.Json.get_str(a, "tool_name", ""), J.Json.get_obj(a, "input"))
+
+def Mcp.permit(+s: M.State, +now: Nat, +thread: String, +id: J.Json, +a: J.Json) -> McpOut:
+  Perm.run.got(RUN.Run.of(s, thread), s, now, thread, id, a)
 
 def Perm.answers.k(input: J.Json, extra: J.Json) -> J.Json:
   match input extra:
@@ -917,23 +1110,32 @@ def Mcp.permission.reply.k(+o: J.Json, +answer: String) -> String:
   Mcp.result(J.Json.get_obj(o, "id"), Perm.text(Perm.verdict.k(C.Codec.pos(["AskUserQuestion"], J.Json.get_str(J.Json.get_obj(J.Json.get_obj(o, "params"), "arguments"), "tool_name", "")),
     J.Json.get_str(J.Json.get_obj(J.Json.get_obj(o, "params"), "arguments"), "tool_name", ""), J.Json.get_obj(J.Json.get_obj(J.Json.get_obj(o, "params"), "arguments"), "input"), answer)))
 
-def Mcp.permission.reply.acp(i: Nat, +o: J.Json, +body: String, +answer: String) -> String:
-  match i:
-    case 0n:
+def Mcp.permission.reply.acp(i: Nat, omp: Bool, +o: J.Json, +body: String, +answer: String) -> String:
+  match i omp:
+    case 0n True{}:
+      AC.Acp.permit.answer.once(body, answer)
+    case 0n False{}:
       AC.Acp.permit.answer(body, answer)
-    case 1n:
+    case 1n _:
       MS.Msp.decide(body, answer)
-    case 2n:
+    case 2n _:
       AC.Acp.elicit.answer(body, answer)
-    case _:
+    case _ _:
       Mcp.permission.reply.k(o, answer)
 
-# the parked reply for a request body, once the user answered: an MCP
-# permission_prompt result, the ACP response to a Grok request, or Muse's
-# approval/decide, or the answer to an omp approval form (Acp.elicit.answer)
+def Mcp.permission.reply.mode.o(omp: Bool, +o: J.Json, +body: String, +answer: String) -> String:
+  Mcp.permission.reply.acp(C.Codec.pos(["session/request_permission", "approval/request", "elicitation/create"], J.Json.get_str(o, "method", "")), omp, o, body, answer)
+
+def Mcp.permission.reply.mode(omp: Bool, +body: String, +answer: String) -> String:
+  Mcp.permission.reply.mode.o(omp, Maybe.default(&2, J.Json, J.Json.parse(body), J.Null{}), body, answer)
+
+# the parked reply for a request body, once the user answered
 def Mcp.permission.reply(+body: String, +answer: String) -> String:
-  Mcp.permission.reply.acp(C.Codec.pos(["session/request_permission", "approval/request", "elicitation/create"], J.Json.get_str(Maybe.default(&2, J.Json, J.Json.parse(body), J.Null{}), "method", "")),
-    Maybe.default(&2, J.Json, J.Json.parse(body), J.Null{}), body, answer)
+  Mcp.permission.reply.mode(False{}, body, answer)
+
+# OMP's permission card is always a one-time approval
+def Mcp.permission.reply.once(+body: String, +answer: String) -> String:
+  Mcp.permission.reply.mode(True{}, body, answer)
 
 def Mcp.reply(+id: J.Json, r: Res) -> McpOut:
   match r:
@@ -946,23 +1148,6 @@ def Mcp.call.route(perm: Bool, +s: M.State, +now: Nat, +thread: String, +models:
       Mcp.permit(s, now, thread, id, J.Json.get_obj(p, "arguments"))
     case False{}:
       Mcp.reply(id, Mcp.call.k(C.Codec.pos(Mcp.names(), J.Json.get_str(p, "name", "")), s, now, thread, models, J.Json.get_obj(p, "arguments")))
-
-def Mcp.method.k(i: Nat, +s: M.State, +now: Nat, +thread: String, +models: J.Json, +version: String, +id: J.Json, +p: J.Json) -> McpOut:
-  match i:
-    case 0n:
-      McpOut{Mcp.result(id, J.Json.obj([J.KV{"protocolVersion", J.Str{Mcp.or(J.Json.get_str(p, "protocolVersion", ""), "2025-06-18")}},
-        J.KV{"capabilities", J.Json.obj([J.KV{"tools", J.Json.obj(Nil{})}])},
-        J.KV{"serverInfo", J.Json.obj([J.KV{"name", J.Str{"backplane"}}, J.KV{"version", J.Str{version}}])}])), B.Step.none(), ""}
-    case 1n:
-      McpOut{Mcp.result(id, Mcp.tools()), B.Step.none(), ""}
-    case 2n:
-      Mcp.call.route(String.eq(J.Json.get_str(p, "name", ""), "permission_prompt"), s, now, thread, models, id, p)
-    case 3n:
-      McpOut{Mcp.result(id, J.Json.obj(Nil{})), B.Step.none(), ""}
-    case 4n:
-      McpOut{"", B.Step.none(), ""}
-    case _:
-      McpOut{Mcp.error(id, "-32601", "method not found"), B.Step.none(), ""}
 
 def Mcp.method.pos.k(note: Bool, +m: String) -> Nat:
   match note:
@@ -1030,13 +1215,8 @@ def Muse.permit(+s: M.State, +now: Nat, +thread: String, +o: J.Json) -> McpOut:
   Muse.permit.k(Perm.session_ok(M.Asks.all(s), thread, MS.Msp.tool(J.Json.get_obj(o, "params"))), B.Hub.id("q", now, B.Hub.seq(s)), now, thread, o,
     MS.Msp.tool(J.Json.get_obj(o, "params")))
 
-# omp's approval forms
-# --------------------
-# An elicitation/create form omp sends for an approval (Acp.elicit.approve)
-# is an approval ask like Grok's: its card names the tool (Acp.elicit.tool)
-# and shows the form's message; the answer goes back as Approve or decline
-# (Acp.elicit.answer). Any other form is declined at once and never asked.
-
+# omp elicitation/create approval forms: accepted forms are shown as an
+# approval ask; unsupported forms are declined immediately.
 def Elicit.permit.k(approve: Bool, +ask: String, +now: Nat, +thread: String, +o: J.Json, +text: String) -> McpOut:
   match approve:
     case True{}:
@@ -1044,36 +1224,11 @@ def Elicit.permit.k(approve: Bool, +ask: String, +now: Nat, +thread: String, +o:
     case False{}:
       McpOut{AC.Acp.elicit.reply(AC.Acp.id(J.Json.get(o, "id")), "decline"), B.Step.none(), ""}
 
-# only asks that were parked reach here: full access's auto-accept is decided
-# in Acp.line / Acp.request.k (case 2n) before anything parks
 def Elicit.permit(+s: M.State, +now: Nat, +thread: String, +o: J.Json) -> McpOut:
   Elicit.permit.k(AC.Acp.elicit.approve(J.Json.get_obj(o, "params")), B.Hub.id("q", now, B.Hub.seq(s)), now, thread, o,
     J.Json.get_str(J.Json.get_obj(o, "params"), "message", ""))
 
-def Mcp.handle.k(i: Nat, +s: M.State, +now: Nat, +thread: String, +models: J.Json, +version: String, +o: J.Json) -> McpOut:
-  match i:
-    case 0n:
-      Mcp.permission.route(s, now, thread, o)
-    case 1n:
-      Muse.permit(s, now, thread, o)
-    case 2n:
-      Elicit.permit(s, now, thread, o)
-    case _:
-      Mcp.method.k(Mcp.method.pos(J.Json.get_str(o, "method", "")), s, now, thread, models, version, J.Json.get_obj(o, "id"), J.Json.get_obj(o, "params"))
 
-# one JSON-RPC message from an agent of `thread` ("" reply: a notification)
-def Mcp.handle(+s: M.State, +now: Nat, +thread: String, +models: J.Json, +version: String, +o: J.Json) -> McpOut:
-  Mcp.handle.k(C.Codec.pos(["session/request_permission", "approval/request", "elicitation/create"], J.Json.get_str(o, "method", "")), s, now, thread, models, version, o)
-
-def Mcp.text.k(m: Maybe<&2, J.Json>, +s: M.State, +now: Nat, +thread: String, +models: J.Json, +version: String) -> McpOut:
-  match m:
-    case Some{+o}:
-      Mcp.handle(s, now, thread, models, version, o)
-    case None{}:
-      McpOut{Mcp.error(J.Null{}, "-32700", "parse error"), B.Step.none(), ""}
-
-def Mcp.text(+s: M.State, +now: Nat, +thread: String, +models: J.Json, +version: String, body: String) -> McpOut:
-  Mcp.text.k(J.Json.parse(body), s, now, thread, models, version)
 
 # Waiting (thread_wait)
 # --------------------
@@ -1119,3 +1274,67 @@ def Res.good(r: Res) -> Bool:
   match r:
     case Res{ok, _, _}:
       ok
+
+# ---- mail 2c ----
+def Mcp.run.tools() -> List<&2, J.Json>:
+  [Tool.def("decide", "Record a decision and its reason in this run's conversation.", [Tool.prop("text", "string", "The decision."), Tool.prop("reason", "string", "Why.")], ["text", "reason"]),
+   Tool.def("escalate", "Ask the front of house bot or person about something outside the charter.", [Tool.prop("to", "string", "bot or person."), Tool.prop("text", "string", "What needs deciding.")], ["to", "text"]),
+   Tool.def("charter_set", "Front of house only: replace your mailroom charter.", [Tool.prop("text", "string", "The full charter."), Tool.prop("reason", "string", "Why it changed.")], ["text", "reason"])]
+
+# Keep the old advertised tool payload exactly while mail is off.
+def Mcp.tools.on(on: Bool) -> J.Json:
+  match on:
+    case False{}: Mcp.tools()
+    case True{}: J.Json.obj([J.KV{"tools", J.Json.arr(List.append(&2, J.Json, J.Json.elems(J.Json.get_obj(Mcp.tools(), "tools")), List.append(&2, J.Json, Mcp.mail.tools(), Mcp.run.tools())) )}])
+
+def Mcp.method.k(i: Nat, +s: M.State, +now: Nat, +thread: String, +models: J.Json, +version: String, +id: J.Json, +p: J.Json) -> McpOut:
+  match i:
+    case 0n:
+      McpOut{Mcp.result(id, J.Json.obj([J.KV{"protocolVersion", J.Str{Mcp.or(J.Json.get_str(p, "protocolVersion", ""), "2025-06-18")}},
+        J.KV{"capabilities", J.Json.obj([J.KV{"tools", J.Json.obj(Nil{})}])},
+        J.KV{"serverInfo", J.Json.obj([J.KV{"name", J.Str{"backplane"}}, J.KV{"version", J.Str{version}}])}])), B.Step.none(), ""}
+    case 1n:
+      McpOut{Mcp.result(id, Mcp.tools.on(String.eq(M.Setting.get(s, "mail.on", "off"), "on"))), B.Step.none(), ""}
+    case 2n:
+      Mcp.call.route(String.eq(J.Json.get_str(p, "name", ""), "permission_prompt"), s, now, thread, models, id, p)
+    case 3n:
+      McpOut{Mcp.result(id, J.Json.obj(Nil{})), B.Step.none(), ""}
+    case 4n:
+      McpOut{"", B.Step.none(), ""}
+    case _:
+      McpOut{Mcp.error(id, "-32601", "method not found"), B.Step.none(), ""}
+
+def Mcp.handle.k(i: Nat, +s: M.State, +now: Nat, +thread: String, +models: J.Json, +version: String, +o: J.Json) -> McpOut:
+  match i:
+    case 0n:
+      Mcp.permission.route(s, now, thread, o)
+    case 1n:
+      Muse.permit(s, now, thread, o)
+    case 2n:
+      Elicit.permit(s, now, thread, o)
+    case _:
+      Mcp.method.k(Mcp.method.pos(J.Json.get_str(o, "method", "")), s, now, thread, models, version, J.Json.get_obj(o, "id"), J.Json.get_obj(o, "params"))
+
+# one JSON-RPC message from an agent of `thread` ("" reply: a notification)
+def Mcp.handle(+s: M.State, +now: Nat, +thread: String, +models: J.Json, +version: String, +o: J.Json) -> McpOut:
+  Mcp.handle.k(C.Codec.pos(["session/request_permission", "approval/request", "elicitation/create"], J.Json.get_str(o, "method", "")), s, now, thread, models, version, o)
+
+def Mcp.text.k(m: Maybe<&2, J.Json>, +s: M.State, +now: Nat, +thread: String, +models: J.Json, +version: String) -> McpOut:
+  match m:
+    case Some{+o}:
+      Mcp.handle(s, now, thread, models, version, o)
+    case None{}:
+      McpOut{Mcp.error(J.Null{}, "-32700", "parse error"), B.Step.none(), ""}
+
+def Mcp.text(+s: M.State, +now: Nat, +thread: String, +models: J.Json, +version: String, body: String) -> McpOut:
+  Mcp.text.k(J.Json.parse(body), s, now, thread, models, version)
+
+# Direct hub tools have passed the charter guard. Reuse that grant when
+# Google's prepared operation returns, rather than opening a second ask.
+def Perm.run.google.got(r: Maybe<&2, ML.Run>, +s: M.State, +tool: String) -> Bool:
+  match r:
+    case None{}: False{}
+    case Some{+r}: CH.Charter.gate(ML.Box.charter(M.State.mail(s), ML.Run.bot(r)), tool, J.Null{})
+
+def Perm.run.google(+s: M.State, +thread: String, +tool: String) -> Bool:
+  Perm.run.google.got(RUN.Run.of(s, thread), s, tool)

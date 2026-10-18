@@ -13,6 +13,12 @@
 //   6 quit   7 paste (text via Win.pasted)
 //   8 drag over (x, y)   9 drag left   10 drop (text/uri-list via Win.dropped)
 //   11 focus lost   12 focus gained   13 image paste (Win.pasted_image)
+//   14 ime commit (id)   15 ime preedit draw (first, length, id,
+//   caret | only << 31)   16 ime preedit caret (position)
+//   17 ime preedit start   18 ime preedit done
+// The text of 14 and 15 is not in the event: each owns a payload under its
+// serial id (Win.payload hands it over once), so events queued before the
+// app drains them never share a buffer.
 // mods: 1 shift, 2 ctrl, 4 alt, 8 super.
 
 #if defined(__linux__)
@@ -20,12 +26,17 @@
 #include <dlfcn.h>
 #include <pthread.h>
 #include <time.h>
+#include <locale.h>
+#include <langinfo.h>
+#include <wchar.h>
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include <X11/Xatom.h>
 #include <X11/keysym.h>
 
 #define WIN_FNS(X) \
+  X(XGetInputFocus, int, (Display*, Window*, int*)) \
+  X(XSetInputFocus, int, (Display*, Window, int, Time)) \
   X(XOpenDisplay, Display*, (const char*)) \
   X(XCloseDisplay, int, (Display*)) \
   X(XCreateSimpleWindow, Window, (Display*, Window, int, int, unsigned, unsigned, unsigned, unsigned long, unsigned long)) \
@@ -50,6 +61,7 @@
   X(XChangeProperty, int, (Display*, Window, Atom, Atom, int, int, const unsigned char*, int)) \
   X(XSendEvent, Status, (Display*, Window, Bool, long, XEvent*)) \
   X(XFree, int, (void*)) \
+  X(XGetWindowAttributes, Status, (Display*, Window, XWindowAttributes*)) \
   X(XDeleteProperty, int, (Display*, Window, Atom)) \
   X(XTranslateCoordinates, Bool, (Display*, Window, Window, int, int, int*, int*, Window*))
 
@@ -61,6 +73,32 @@ WIN_FNS(WIN_PTR)
 // press of the same key at the same time for each repeat (win_pump asks the
 // server whether the key is still down and, if so, drops the release)
 static Bool (*x_detect_repeat)(Display*, Bool, Bool*);
+
+// Input methods (XIM) are optional: a libX11 without them, or any symbol
+// missing, leaves the plain keyboard working (win_ime_ok stays 0).
+#define IME_FNS(X) \
+  X(XSetLocaleModifiers, char*, (const char*)) \
+  X(XSupportsLocale, Bool, (void)) \
+  X(XOpenIM, XIM, (Display*, void*, char*, char*)) \
+  X(XCloseIM, Status, (XIM)) \
+  X(XGetIMValues, char*, (XIM, ...)) \
+  X(XCreateIC, XIC, (XIM, ...)) \
+  X(XDestroyIC, void, (XIC)) \
+  X(XSetICFocus, void, (XIC)) \
+  X(XUnsetICFocus, void, (XIC)) \
+  X(XGetICValues, char*, (XIC, ...)) \
+  X(XSetICValues, char*, (XIC, ...)) \
+  X(XFilterEvent, Bool, (XEvent*, Window)) \
+  X(Xutf8LookupString, int, (XIC, XKeyPressedEvent*, char*, int, KeySym*, Status*)) \
+  X(Xutf8ResetIC, char*, (XIC)) \
+  X(XSetIMValues, char*, (XIM, ...)) \
+  X(XVaCreateNestedList, XVaNestedList, (int, ...))
+
+#define IME_PTR(name, ret, args) static ret (*x_##name) args;
+IME_FNS(IME_PTR)
+static int win_ime_ok = 0;
+static Status (*x_InitThreads)(void);
+static Bool (*x_RegisterIMInstantiate)(Display*, void*, char*, char*, void (*)(Display*, XPointer, XPointer), XPointer);
 
 static int win_load(void) {
   static int state = 0;
@@ -76,6 +114,12 @@ static int win_load(void) {
   if ((x_##name = (ret (*) args)dlsym(lib, #name)) == NULL) { return 0; }
   WIN_FNS(WIN_SYM)
   x_detect_repeat = (Bool (*)(Display*, Bool, Bool*))dlsym(lib, "XkbSetDetectableAutoRepeat");
+  x_InitThreads = (Status (*)(void))dlsym(lib, "XInitThreads");
+  x_RegisterIMInstantiate = (Bool (*)(Display*, void*, char*, char*, void (*)(Display*, XPointer, XPointer), XPointer))dlsym(lib, "XRegisterIMInstantiateCallback");
+  win_ime_ok = 1;
+#define IME_SYM(name, ret, args) \
+  if ((x_##name = (ret (*) args)dlsym(lib, #name)) == NULL) { win_ime_ok = 0; }
+  IME_FNS(IME_SYM)
   state = 1;
   return 1;
 }
@@ -114,16 +158,113 @@ typedef struct {
   // each key (by keycode) went down as (0: up), so its release says the same
   int       detect;
   KeySym    down[256];
+  // input method: the method and context (NULL: none, plain keys), how
+  // preedit is shown (0 none, 1 drawn by the app through callbacks, 2 the
+  // method draws it), the style and filter mask asked for, and the length
+  // and caret of the preedit the callbacks have built so far
+  XIM       xim;
+  XIC       xic;
+  int       ime_mode;
+  XIMStyle  ime_style;
+  XIMCallback pe_cb[4];
+  XIMCallback ds_cb;
+  u32       pe_len, pe_caret;
+  int       spot_x, spot_y;
 } AppWin;
 
-static void win_push(AppWin* a, u32 kind, u32 p, u32 q, u32 r, u32 s) {
-  if (a->n == a->cap) {
+// events are queued by the pump (and by calls from other threads)
+static pthread_mutex_t win_qlock = PTHREAD_MUTEX_INITIALIZER;
+
+// n words (a multiple of five: whole events) onto the queue
+static void win_put_words(AppWin* a, const u32* ws, size_t n) {
+  pthread_mutex_lock(&win_qlock);
+  while ((size_t)a->n * 5 + n > (size_t)a->cap * 5) {
     a->cap = a->cap == 0 ? 64 : a->cap * 2;
     a->evs = io_mem(realloc(a->evs, (size_t)a->cap * 20));
   }
+  memcpy(a->evs + (size_t)a->n * 5, ws, n * 4);
+  a->n += (u32)(n / 5);
+  pthread_mutex_unlock(&win_qlock);
+}
+
+static void win_push(AppWin* a, u32 kind, u32 p, u32 q, u32 r, u32 s) {
   u32 ev[5] = { kind, p, q, r, s };
-  memcpy(a->evs + (size_t)a->n * 5, ev, sizeof ev);
-  a->n += 1;
+  win_put_words(a, ev, 5);
+}
+
+// A payload: the text of one ime event (code points, and for a preedit
+// one feedback value per character), kept under its serial id until the
+// app takes it. Events are queued whole, so a later one never changes an
+// earlier one's text.
+typedef struct WinPayload {
+  u32 id;
+  size_t n;
+  u32* cps;
+  u8* fb;
+  struct WinPayload* next;
+} WinPayload;
+
+static WinPayload* win_pl = NULL;
+static u32 win_pl_next = 1;
+
+static u32 win_payload(const u32* cps, const u8* fb, size_t n) {
+  WinPayload* p = io_mem(calloc(1, sizeof *p));
+  p->n = n;
+  p->cps = io_mem(malloc((n ? n : 1) * 4));
+  p->fb = io_mem(malloc(n ? n : 1));
+  if (n) {
+    memcpy(p->cps, cps, n * 4);
+    if (fb) memcpy(p->fb, fb, n); else memset(p->fb, 0, n);
+  }
+  pthread_mutex_lock(&win_qlock);
+  p->id = win_pl_next++;
+  p->next = win_pl;
+  win_pl = p;
+  pthread_mutex_unlock(&win_qlock);
+  return p->id;
+}
+
+// take the payload of id out of the store (NULL: none, e.g. taken already)
+static WinPayload* win_payload_take(u32 id) {
+  pthread_mutex_lock(&win_qlock);
+  WinPayload** pp = &win_pl;
+  while (*pp != NULL && (*pp)->id != id) pp = &(*pp)->next;
+  WinPayload* p = *pp;
+  if (p != NULL) *pp = p->next;
+  pthread_mutex_unlock(&win_qlock);
+  return p;
+}
+
+// UTF-8 to code points (invalid bytes become U+FFFD); answers the count
+static size_t win_utf8(const char* s, size_t len, u32* out) {
+  size_t n = 0;
+  for (size_t i = 0; i < len;) {
+    unsigned char c = (unsigned char)s[i];
+    u32 cp = 0xfffd;
+    size_t k = 1;
+    if (c < 0x80) { cp = c; }
+    else if (c >= 0xc2 && c < 0xe0 && i + 1 < len && (s[i + 1] & 0xc0) == 0x80) {
+      cp = ((u32)(c & 0x1f) << 6) | (s[i + 1] & 0x3f); k = 2;
+    } else if (c >= 0xe0 && c < 0xf0 && i + 2 < len && (s[i + 1] & 0xc0) == 0x80 && (s[i + 2] & 0xc0) == 0x80) {
+      cp = ((u32)(c & 0x0f) << 12) | ((u32)(s[i + 1] & 0x3f) << 6) | (s[i + 2] & 0x3f); k = 3;
+      if (cp < 0x800 || (cp >= 0xd800 && cp < 0xe000)) cp = 0xfffd;
+    } else if (c >= 0xf0 && c < 0xf5 && i + 3 < len && (s[i + 1] & 0xc0) == 0x80 && (s[i + 2] & 0xc0) == 0x80 && (s[i + 3] & 0xc0) == 0x80) {
+      cp = ((u32)(c & 0x07) << 18) | ((u32)(s[i + 1] & 0x3f) << 12) | ((u32)(s[i + 2] & 0x3f) << 6) | (s[i + 3] & 0x3f); k = 4;
+      if (cp < 0x10000 || cp > 0x10ffff) cp = 0xfffd;
+    }
+    if (out) out[n] = cp;
+    n += 1;
+    i += k;
+  }
+  return n;
+}
+
+// text the input method committed: one event that owns its characters
+static void win_commit(AppWin* a, const char* s, size_t len) {
+  u32* cps = io_mem(malloc((len ? len : 1) * 4));
+  size_t n = win_utf8(s, len, cps);
+  if (n > 0) win_push(a, 14, win_payload(cps, NULL, n), 0, 0, 0);
+  free(cps);
 }
 
 static u32 win_mods(unsigned state) {
@@ -494,10 +635,235 @@ static void win_keys_missed(AppWin* a) {
   }
 }
 
+// Input method
+// ------------
+// The method (ibus, fcitx, Xlib's own compose) is asked for preedit through
+// callbacks, so the app draws the text being composed itself: the callbacks
+// turn into events 17-18 (start, done), 15 (draw: replace a range of the
+// preedit, or change only its feedback) and 16 (caret), and what the method
+// commits is event 14. All of it runs on the pump's thread, inside
+// XFilterEvent. A method that cannot do callbacks is used with its own
+// preedit window (mode 2), and a missing or lost method leaves plain keys
+// (mode 0); BACKPLANE_IME=debug says which on stderr.
+
+static u32 win_cp(u32 c) {
+  return (c > 0x10ffff || (c >= 0xd800 && c < 0xe000) || c == 0) ? 0xfffd : c;
+}
+
+static int win_pe_start(XIC ic, XPointer client, XPointer call) {
+  AppWin* a = (AppWin*)client;
+  a->pe_len = 0;
+  a->pe_caret = 0;
+  win_push(a, 17, 0, 0, 0, 0);
+  return -1;
+}
+
+static void win_pe_done(XIC ic, XPointer client, XPointer call) {
+  AppWin* a = (AppWin*)client;
+  a->pe_len = 0;
+  a->pe_caret = 0;
+  win_push(a, 18, 0, 0, 0, 0);
+}
+
+// a draw: characters [chg_first, chg_first + chg_length) become the text
+// (NULL: they are deleted); a text with no string only changes feedback
+static void win_pe_draw(XIC ic, XPointer client, XIMPreeditDrawCallbackStruct* d) {
+  AppWin* a = (AppWin*)client;
+  XIMText* t = d->text;
+  u32 first = d->chg_first < 0 ? 0 : (u32)d->chg_first;
+  u32 len = d->chg_length < 0 ? 0 : (u32)d->chg_length;
+  u32* cps = NULL;
+  u8* fbs = NULL;
+  size_t n = 0;
+  u32 only = 0;
+  if (t != NULL && t->length > 0) {
+    n = (size_t)t->length;
+    cps = io_mem(calloc(n + 1, 4));
+    fbs = io_mem(calloc(n + 1, 1));
+    int has = t->encoding_is_wchar ? t->string.wide_char != NULL : t->string.multi_byte != NULL;
+    only = has ? 0 : 1;
+    if (has && t->encoding_is_wchar) {
+      for (size_t i = 0; i < n; i++) cps[i] = win_cp((u32)t->string.wide_char[i]);
+    } else if (has) {
+      // the multibyte text is in the (UTF-8) locale's encoding
+      size_t bl = strlen(t->string.multi_byte);
+      u32* tmp = io_mem(calloc(bl + 1, 4));
+      size_t m = win_utf8(t->string.multi_byte, bl, tmp);
+      memcpy(cps, tmp, (m < n ? m : n) * 4);
+      if (m < n) n = m;
+      free(tmp);
+    }
+    for (size_t i = 0; i < n; i++) {
+      fbs[i] = t->feedback ? (u8)((u32)t->feedback[i] & 63) : 2;
+    }
+  }
+  if (!only) {
+    u32 total = a->pe_len;
+    u32 cut = first > total ? total : first;
+    u32 end = cut + len > total ? total : cut + len;
+    a->pe_len = total - (end - cut) + (u32)n;
+  }
+  a->pe_caret = d->caret < 0 ? 0 : (u32)d->caret;
+  win_push(a, 15, first, len, win_payload(cps, fbs, n), (a->pe_caret & 0x7fffffffu) | (only << 31));
+  free(cps);
+  free(fbs);
+}
+
+static void win_pe_caret(XIC ic, XPointer client, XIMPreeditCaretCallbackStruct* c) {
+  AppWin* a = (AppWin*)client;
+  long pos = c->position;
+  switch (c->direction) {
+    case XIMForwardChar: pos = (long)a->pe_caret + 1; break;
+    case XIMBackwardChar: pos = (long)a->pe_caret - 1; break;
+    case XIMAbsolutePosition: break;
+    default: pos = (long)a->pe_caret; break;
+  }
+  if (pos < 0) pos = 0;
+  if (pos > (long)a->pe_len) pos = (long)a->pe_len;
+  a->pe_caret = (u32)pos;
+  c->position = (int)pos;
+  win_push(a, 16, a->pe_caret, 0, 0, 0);
+}
+
+static void win_ime_open(AppWin* a);
+static void win_ime_watch(AppWin* a);
+
+// a method started after the window (or came back): open it
+static void win_ime_back(Display* dpy, XPointer client, XPointer call) {
+  AppWin* a = (AppWin*)client;
+  if (a->xic == NULL) {
+    win_ime_open(a);
+  }
+}
+
+static void win_ime_watch(AppWin* a) {
+  if (x_RegisterIMInstantiate && a->xic == NULL) {
+    x_RegisterIMInstantiate(a->dpy, NULL, NULL, NULL, win_ime_back, (XPointer)a);
+  }
+}
+
+// the method went away (its server died): no context or method is left to
+// free; typing goes on plainly and a running composition is dropped
+static void win_ime_lost(XIM im, XPointer client, XPointer call) {
+  AppWin* a = (AppWin*)client;
+  a->xic = NULL;
+  a->xim = NULL;
+  a->ime_mode = 0;
+  a->pe_len = 0;
+  a->pe_caret = 0;
+  win_push(a, 18, 0, 0, 0, 0);
+  if (getenv("BACKPLANE_IME") != NULL) fprintf(stderr, "backplane: input method lost, plain keys\n");
+  win_ime_watch(a);
+}
+
+static const XIMStyle win_styles[] = {
+  XIMPreeditCallbacks | XIMStatusNothing, XIMPreeditCallbacks | XIMStatusNone,
+  XIMPreeditNothing | XIMStatusNothing, XIMPreeditNothing | XIMStatusNone,
+  XIMPreeditNone | XIMStatusNone, XIMPreeditNone | XIMStatusNothing
+};
+
+// open the method and a context on the window; on any failure leave mode 0
+static void win_ime_open(AppWin* a) {
+  const char* dbg = getenv("BACKPLANE_IME");
+  a->xim = NULL;
+  a->xic = NULL;
+  a->ime_mode = 0;
+  if (!win_ime_ok || getenv("BACKPLANE_NO_IME") != NULL) {
+    return;
+  }
+  // the locale from the environment; the text the method sends is UTF-8,
+  // so a locale of another encoding is replaced for characters only
+  setlocale(LC_CTYPE, "");
+  if (strcmp(nl_langinfo(CODESET), "UTF-8") != 0 || !x_XSupportsLocale()) {
+    if (setlocale(LC_CTYPE, "C.UTF-8") == NULL) setlocale(LC_CTYPE, "en_US.UTF-8");
+  }
+  if (!x_XSupportsLocale()) {
+    if (dbg) fprintf(stderr, "backplane: input method: locale not supported by Xlib, plain keys\n");
+    return;
+  }
+  x_XSetLocaleModifiers("");
+  XIM xim = x_XOpenIM(a->dpy, NULL, NULL, NULL);
+  if (xim == NULL) {
+    if (dbg) fprintf(stderr, "backplane: input method: none running, plain keys\n");
+    win_ime_watch(a);
+    return;
+  }
+  XIMStyles* styles = NULL;
+  if (x_XGetIMValues(xim, XNQueryInputStyle, &styles, NULL) != NULL || styles == NULL) {
+    x_XCloseIM(xim);
+    return;
+  }
+  XIMStyle want = 0;
+  for (size_t k = 0; k < sizeof win_styles / sizeof win_styles[0] && want == 0; k++) {
+    for (unsigned i = 0; i < styles->count_styles; i++) {
+      if (styles->supported_styles[i] == win_styles[k]) { want = win_styles[k]; break; }
+    }
+  }
+  x_XFree(styles);
+  if (want == 0) {
+    x_XCloseIM(xim);
+    if (dbg) fprintf(stderr, "backplane: input method: no usable style, plain keys\n");
+    return;
+  }
+  XIC ic;
+  if (want & XIMPreeditCallbacks) {
+    a->pe_cb[0] = (XIMCallback){ (XPointer)a, (XIMProc)win_pe_start };
+    a->pe_cb[1] = (XIMCallback){ (XPointer)a, (XIMProc)win_pe_done };
+    a->pe_cb[2] = (XIMCallback){ (XPointer)a, (XIMProc)win_pe_draw };
+    a->pe_cb[3] = (XIMCallback){ (XPointer)a, (XIMProc)win_pe_caret };
+    XVaNestedList nl = x_XVaCreateNestedList(0, XNPreeditStartCallback, &a->pe_cb[0],
+      XNPreeditDoneCallback, &a->pe_cb[1], XNPreeditDrawCallback, &a->pe_cb[2],
+      XNPreeditCaretCallback, &a->pe_cb[3], NULL);
+    ic = x_XCreateIC(xim, XNInputStyle, want, XNClientWindow, a->win, XNFocusWindow, a->win,
+      XNPreeditAttributes, nl, NULL);
+    x_XFree(nl);
+  } else {
+    ic = x_XCreateIC(xim, XNInputStyle, want, XNClientWindow, a->win, XNFocusWindow, a->win, NULL);
+  }
+  if (ic == NULL) {
+    x_XCloseIM(xim);
+    if (dbg) fprintf(stderr, "backplane: input method: no context, plain keys\n");
+    return;
+  }
+  a->xim = xim;
+  a->xic = ic;
+  a->ime_style = want;
+  a->ime_mode = (want & XIMPreeditCallbacks) ? 1 : 2;
+  // the events the method wants besides the keys
+  unsigned long mask = 0;
+  if (x_XGetICValues(ic, XNFilterEvents, &mask, NULL) == NULL && mask != 0) {
+    XWindowAttributes wa;
+    if (x_XGetWindowAttributes(a->dpy, a->win, &wa)) {
+      x_XSelectInput(a->dpy, a->win, wa.your_event_mask | (long)mask);
+    }
+  }
+  a->ds_cb = (XIMCallback){ (XPointer)a, (XIMProc)win_ime_lost };
+  x_XSetIMValues(xim, XNDestroyCallback, &a->ds_cb, NULL);
+  x_XSetICFocus(ic);
+  if (dbg) {
+    fprintf(stderr, "backplane: input method: %s\n", a->ime_mode == 1
+      ? "preedit drawn by the app (callbacks)"
+      : "preedit drawn by the method (no callbacks; fallback)");
+  }
+}
+
 static void win_pump(AppWin* a) {
   while (x_XPending(a->dpy) > 0) {
     XEvent ev;
     x_XNextEvent(a->dpy, &ev);
+    // the input method sees every event first; one it takes (a key of a
+    // composition, its own protocol messages) is not the app's. A release
+    // of a key the app saw go down is still reported, or it would stay down.
+    if (a->xic != NULL && x_XFilterEvent(&ev, None)) {
+      if (ev.type == KeyRelease) {
+        unsigned fk = ev.xkey.keycode & 255;
+        if (a->down[fk] != 0 && (a->detect || !win_key_down(a, fk))) {
+          win_push(a, 0, (u32)a->down[fk], 0, win_mods(ev.xkey.state), fk << 1);
+          a->down[fk] = 0;
+        }
+      }
+      continue;
+    }
     switch (ev.type) {
       case KeyPress:
       case KeyRelease: {
@@ -509,6 +875,38 @@ static void win_pump(AppWin* a) {
           break;
         }
         u32 text = win_text(&ev.xkey, &sym);
+        if (ev.type == KeyPress && a->xic != NULL) {
+          // what the method (or a compose sequence) made of the key: text
+          // from the method itself (keycode 0) or of several characters is
+          // a commit; one character is what the key typed
+          int plain = kc != 0 && !(ev.xkey.state & (ControlMask | Mod1Mask | Mod4Mask));
+          if (kc == 0 || plain) {
+            char sb[64];
+            char* buf = sb;
+            int cap = (int)sizeof sb;
+            Status st = 0;
+            KeySym ks = 0;
+            int n = x_Xutf8LookupString(a->xic, &ev.xkey, buf, cap, &ks, &st);
+            if (st == XBufferOverflow) {
+              cap = n + 1;
+              buf = io_mem(malloc((size_t)cap));
+              n = x_Xutf8LookupString(a->xic, &ev.xkey, buf, cap, &ks, &st);
+            }
+            if ((st == XLookupChars || st == XLookupBoth) && n > 0) {
+              size_t nc = win_utf8(buf, (size_t)n, NULL);
+              u32 one = 0;
+              if (nc == 1) win_utf8(buf, (size_t)n, &one);
+              if (kc == 0 || nc > 1) {
+                win_commit(a, buf, (size_t)n);
+                if (buf != sb) free(buf);
+                break;
+              }
+              if (one >= 32 && one != 127) text = one;
+            }
+            if (buf != sb) free(buf);
+            if (kc == 0) break;
+          }
+        }
         if (ev.type == KeyPress) {
           a->down[kc] = sym;
         } else if (a->down[kc] != 0) {
@@ -521,6 +919,11 @@ static void win_pump(AppWin* a) {
       }
       case ButtonPress:
       case ButtonRelease: {
+        if (ev.type == ButtonPress) {
+          Window focus; int revert;
+          x_XGetInputFocus(a->dpy, &focus, &revert);
+          if (focus != a->win) x_XSetInputFocus(a->dpy, a->win, RevertToParent, CurrentTime);
+        }
         u32 b = ev.xbutton.button;
         u32 x = ev.xbutton.x < 0 ? 0 : (u32)ev.xbutton.x;
         u32 y = ev.xbutton.y < 0 ? 0 : (u32)ev.xbutton.y;
@@ -538,9 +941,22 @@ static void win_pump(AppWin* a) {
           ev.xmotion.y < 0 ? 0 : (u32)ev.xmotion.y, win_mods(ev.xmotion.state), 0);
         break;
       case FocusOut:
+        if (a->xic != NULL) {
+          // a composition does not outlive the focus: the method drops it
+          // (what it would have committed is thrown away)
+          x_XUnsetICFocus(a->xic);
+          char* left = x_Xutf8ResetIC(a->xic);
+          if (left != NULL) x_XFree(left);
+          a->pe_len = 0;
+          a->pe_caret = 0;
+        }
         win_push(a, 11, 0, 0, 0, 0);
         break;
       case FocusIn:
+        // (a method that was not there when the window opened, or went away,
+        // is looked for again whenever the window gets the focus)
+        if (a->xic != NULL) x_XSetICFocus(a->xic);
+        else win_ime_open(a);
         win_keys_missed(a);
         win_push(a, 12, 0, 0, 0, 0);
         break;
@@ -628,11 +1044,13 @@ static void win_nudge(AppWin* a) {
 #ifdef CID(Win.words)
 static Term win_list(Env e, AppWin* a) {
   Term list = term_pak(CID_NIL, 0);
+  pthread_mutex_lock(&win_qlock);
   for (u64 i = (u64)a->n * 5; i > 0;) {
     i -= 1;
     list = io_node(e, CID_CON, (Term)a->evs[i], list);
   }
   a->n = 0;
+  pthread_mutex_unlock(&win_qlock);
   return list;
 }
 #endif
@@ -650,7 +1068,9 @@ Term win_open_run(Env e, Term* f, IoWork* w) {
   if (!win_load()) {
     code = ENOTSUP;
     why = "the window needs libX11 (install libx11-6)";
-  } else if ((dpy = x_XOpenDisplay(NULL)) == NULL) {
+  } else if ((dpy = (x_InitThreads != NULL ? (void)x_InitThreads() : (void)0, x_XOpenDisplay(NULL))) == NULL) {
+    // (Xlib is made thread-safe first: the pump and the presenting thread
+    // and the input method's callbacks all call it)
     code = ENOTSUP;
     why = "no display: run Backplane from a desktop session, or use `backplane serve`";
   } else {
@@ -696,6 +1116,7 @@ Term win_open_run(Env e, Term* f, IoWork* w) {
       | ButtonReleaseMask | PointerMotionMask | StructureNotifyMask | ExposureMask
       | FocusChangeMask | PropertyChangeMask);
     x_XMapRaised(dpy, a->win);
+    win_ime_open(a);
     x_XFlush(dpy);
   }
   free(title);
@@ -716,7 +1137,10 @@ static void __attribute__((constructor)) win_open_use(void) {
 static Term win_words_more(Env e, IoWork* w) {
   AppWin* a = (AppWin*)w->hand;
   win_pump(a);
-  if (a->n == 0) {
+  pthread_mutex_lock(&win_qlock);
+  u32 pending = a->n;
+  pthread_mutex_unlock(&win_qlock);
+  if (pending == 0) {
     // the nudge can still lose a race with the presenting thread (an event
     // read into Xlib's queue after it looked); a short deadline re-checks
     // the queue, so no key waits for the next one to show
@@ -1226,6 +1650,133 @@ static void __attribute__((constructor)) win_twin_use(void) {
 
 #endif
 
+#ifdef CID(Win.ime)
+
+// how the input method is used: 0 plain keys, 1 preedit drawn by the app,
+// 2 preedit drawn by the method
+Term win_ime_run(Env e, Term* f, IoWork* w) {
+  AppWin* a = (AppWin*)io_hand_v(f[0]);
+  return io_tup(e, f[0], (Term)(u32)a->ime_mode);
+}
+
+static void __attribute__((constructor)) win_ime_use(void) {
+  io_eff(CID(Win.ime), win_ime_run);
+}
+
+#endif
+
+#ifdef CID(Win.payload)
+
+// the text of an ime event (and its feedback, '0' + bits a character), once
+Term win_payload_run(Env e, Term* f, IoWork* w) {
+  AppWin* a = (AppWin*)io_hand_v(f[0]);
+  WinPayload* p = win_payload_take((u32)f[1]);
+  size_t n = p ? p->n : 0;
+  char* out = io_mem(malloc(n * 4 + 1));
+  char* fb = io_mem(malloc(n + 1));
+  size_t k = 0;
+  for (size_t i = 0; i < n; i++) {
+    u32 c = p->cps[i];
+    if (c < 0x80) { out[k++] = (char)c; }
+    else if (c < 0x800) { out[k++] = (char)(0xc0 | (c >> 6)); out[k++] = (char)(0x80 | (c & 63)); }
+    else if (c < 0x10000) { out[k++] = (char)(0xe0 | (c >> 12)); out[k++] = (char)(0x80 | ((c >> 6) & 63)); out[k++] = (char)(0x80 | (c & 63)); }
+    else { out[k++] = (char)(0xf0 | (c >> 18)); out[k++] = (char)(0x80 | ((c >> 12) & 63)); out[k++] = (char)(0x80 | ((c >> 6) & 63)); out[k++] = (char)(0x80 | (c & 63)); }
+    fb[i] = (char)('0' + (p->fb[i] & 63));
+  }
+  Term r = io_tup(e, f[0], io_tup(e, io_str(e, out, k), io_str(e, fb, n)));
+  if (p) { free(p->cps); free(p->fb); free(p); }
+  free(out);
+  free(fb);
+  return r;
+}
+
+static void __attribute__((constructor)) win_payload_use(void) {
+  io_eff(CID(Win.payload), win_payload_run);
+}
+
+#endif
+
+#ifdef CID(Win.ime_reset)
+
+// the field with the keys changed: a composition in the method is dropped,
+// whatever it would have committed is thrown away
+Term win_ime_reset_run(Env e, Term* f, IoWork* w) {
+  AppWin* a = (AppWin*)io_hand_v(f[0]);
+  if (a->xic != NULL) {
+    char* left = x_Xutf8ResetIC(a->xic);
+    if (left != NULL) x_XFree(left);
+    a->pe_len = 0;
+    a->pe_caret = 0;
+    x_XFlush(a->dpy);
+    win_nudge(a);
+  }
+  return f[0];
+}
+
+static void __attribute__((constructor)) win_ime_reset_use(void) {
+  io_eff(CID(Win.ime_reset), win_ime_reset_run);
+}
+
+#endif
+
+#ifdef CID(Win.ime_spot)
+
+// where the caret is (window pixels), for the method's candidate window
+Term win_ime_spot_run(Env e, Term* f, IoWork* w) {
+  AppWin* a = (AppWin*)io_hand_v(f[0]);
+  if (a->xic != NULL && ((int)(u32)f[1] != a->spot_x || (int)(u32)f[2] != a->spot_y)) {
+    a->spot_x = (int)(u32)f[1];
+    a->spot_y = (int)(u32)f[2];
+    XPoint pt = { (short)(u32)f[1], (short)(u32)f[2] };
+    XVaNestedList nl = x_XVaCreateNestedList(0, XNSpotLocation, &pt, NULL);
+    x_XSetICValues(a->xic, XNPreeditAttributes, nl, NULL);
+    x_XFree(nl);
+    x_XFlush(a->dpy);
+    win_nudge(a);
+  }
+  return f[0];
+}
+
+static void __attribute__((constructor)) win_ime_spot_use(void) {
+  io_eff(CID(Win.ime_spot), win_ime_spot_run);
+}
+
+#endif
+
+#ifdef CID(Win.ime_inject)
+
+// queue what the input method would (tests): kind 0 a commit of the text,
+// 1 a preedit replaced whole by it (underlined), 2 the preedit done
+Term win_ime_inject_run(Env e, Term* f, IoWork* w) {
+  AppWin* a = (AppWin*)io_hand_v(f[0]);
+  u64 len = 0;
+  char* t = io_cstr(e, f[2], &len);
+  u32 kind = (u32)f[1];
+  if (kind == 0) {
+    win_commit(a, t, (size_t)len);
+  } else if (kind == 1) {
+    u32* cps = io_mem(malloc((len ? len : 1) * 4));
+    u8* fbs = io_mem(malloc((len ? len : 1)));
+    size_t n = win_utf8(t, (size_t)len, cps);
+    memset(fbs, 2, n);
+    win_push(a, 15, 0, a->pe_len, win_payload(cps, fbs, n), (u32)n);
+    a->pe_len = (u32)n;
+    free(cps);
+    free(fbs);
+  } else {
+    a->pe_len = 0;
+    win_push(a, 18, 0, 0, 0, 0);
+  }
+  free(t);
+  return f[0];
+}
+
+static void __attribute__((constructor)) win_ime_inject_use(void) {
+  io_eff(CID(Win.ime_inject), win_ime_inject_run);
+}
+
+#endif
+
 #ifdef CID(Win.title)
 
 Term win_title_run(Env e, Term* f, IoWork* w) {
@@ -1258,4 +1809,18 @@ static void __attribute__((constructor)) win_open_use(void) {
 }
 #endif
 
+#endif
+
+#ifdef CID(Win.xid)
+Term win_xid_run(Env e, Term* f, IoWork* w) {
+#if defined(__linux__)
+  AppWin* a = (AppWin*)io_hand_v(f[0]);
+  return io_tup(e, f[0], (Term)(u32)a->win);
+#else
+  return io_tup(e, f[0], (Term)0);
+#endif
+}
+static void __attribute__((constructor)) win_xid_use(void) {
+  io_eff(CID(Win.xid), win_xid_run);
+}
 #endif

@@ -145,6 +145,8 @@ struct SubStep: Decodable, Hashable {
 
 struct SubRow: Decodable, Identifiable {
     let id, title, who, state, doing, act, value: String
+    // the state as shown, when it differs from the token (Japanese)
+    let stateLabel: String?
     let agent, live, open: Bool
     let n: Int
     let steps: [SubStep]
@@ -476,6 +478,8 @@ struct QueueRow: Decodable {
 
 struct ThreadView: Decodable {
     let id, title, branch, state: String
+    // the thread's Boat chip ("Boat · large · running"; "" for none), a tap opens Settings
+    let boat: String?
     let tools: [Tool]
     let entries: [Entry]
     // sent, not yet stored by the hub; and a message waiting for this turn
@@ -793,6 +797,7 @@ struct Screen: Decodable {
     let found: [Found]
     let projects: [Project]
     // "projects" (sections) or "active" (one flat list of rows, active)
+    let lang: Settings?
     let view: String?
     // a thread this phone asked for is still to come (its page opens at once)
     let making: Bool?
@@ -934,7 +939,7 @@ extension KeyedDecodingContainer {
 // costs that field, never the whole screen (a blank app).
 extension Screen {
     private enum K: String, CodingKey {
-        case online, version, error, note, sel, empty, hub, hubs, found, projects, view, making, active, older, settled,
+        case online, version, error, note, sel, empty, hub, hubs, found, projects, lang, view, making, active, older, settled,
              rowMenu, bots, rooms, uber, plane, newBot, newRoom, bot, deleting, removing, renaming, tour, search,
              folders, settings, find, island, islands, thread, theme, tabs
     }
@@ -951,6 +956,7 @@ extension Screen {
         hubs = c.lossyList(.hubs)
         found = c.lossyList(.found)
         projects = c.lossyList(.projects)
+        lang = c.lossy(.lang)
         view = c.lossy(.view)
         making = c.lossy(.making)
         active = c.lossy(.active).map { (l: [Lossy<Row>]) in l.compactMap(\.value) }

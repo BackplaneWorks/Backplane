@@ -1,4 +1,7 @@
 import Base
+import ../core/msgs.bend as MSG
+import ../core/winnote.bend as NT
+import ../core/i18n.bend as I18
 import ../core/attach.bend as AT
 import ../core/exe.bend as EX
 import ../server/server.bend as S
@@ -46,6 +49,7 @@ import ./rvw.bend as RW
 import ../core/rview.bend as RV
 import ../server/git.bend as GT
 import ../server/review.bend as RVC
+import ../core/cef.bend as CF
 
 # `backplane`: the hub, the web server (for other devices), and the native
 # window as client 0. Window events and hub messages meet in one queue; a
@@ -294,7 +298,7 @@ def Shell.later(a: Shell) -> IO(Shell):
 def Shell.hits(n: N.Nui, hs: List<&2, N.Hit>, +now: Nat) -> N.Step:
   match n:
     case N.Nui{u, w, h, mx, my, sd, sc, ca, fo, pa, _, ms, vw}:
-      N.Jump.settle(N.Hover.again(N.Nui{U.Ui.tick(u, now), w, h, mx, my, sd, sc, ca, fo, pa, hs, ms, vw}))
+      N.Jump.settle(N.Hover.again(N.Hold.take(N.Nui{U.Ui.tick(u, now), w, h, mx, my, sd, sc, ca, fo, pa, hs, ms, vw})))
 
 def Shell.hits.nui(s: N.Step) -> N.Nui:
   match s:
@@ -447,7 +451,7 @@ def Pics.fetched(r: P.Ran, +q: Chan(ShellMsg), +tag: String, +path: String) -> I
         return Unit{}
     case P.Ran{_, _}:
       do IO<Unit>:
-        ok : Result<&1, &1, ShellMsg, Unit> <- Chan.send(ShellMsg, q, PicErr{tag, path, "that machine did not send it"})
+        ok : Result<&1, &1, ShellMsg, Unit> <- Chan.send(ShellMsg, q, PicErr{tag, path, NT.Notice.make("nosend", "")})
         return Unit{}
 
 # the file an image key names on this machine
@@ -597,7 +601,7 @@ def Pics.store(a: Shell, +path: String, +note: String, m: Maybe<&2, BM.Bitmap>) 
   match a:
     case Shell{+n, w, _, qd, q, +i, Aux{ws, ty, Tie{home, +url, tag, k, +ks}, fr}}:
       do IO<Shell>:
-        u2 : U.Ui <- Shot.seen(Bool.and(Shot.ok(path, note), String.is_empty(url)), Pics.noted(N.Nui.ui(n), path, note), i, Shot.bot(path))
+        u2 : U.Ui <- Shot.seen(Bool.and(Bool.and(Shot.ok(path, note), String.is_empty(url)), Bool.not(U.CefUI.native(N.Nui.ui(n), Shot.bot(path)))), Pics.noted(N.Nui.ui(n), path, note), i, Shot.bot(path))
         Shell.later(Shell{N.Nui.with_ui(n, u2), w, True{}, qd, q, i,
           Aux{ws, ty, Tie{home, url, tag, k, TieKeep.with_pics(ks, Shot.keep(Shot.ok(path, note), m, TieKeep.pics(ks), path))}, fr}})
 
@@ -897,6 +901,12 @@ def Shell.notified(r: P.Ran, +q: Chan(ShellMsg), thread: String) -> IO(Unit):
     case P.Ran{_, +out}:
       Shell.notified.k(String.eq(String.trim(out), "open"), q, thread)
 
+def Shell.notify.script() -> String:
+  "command -v notify-send >/dev/null 2>&1 || exit 0; notify-send -a Backplane -i backplane -A \"open=$3\" -w -- \"$1\" \"$2\" 2>/dev/null || notify-send -a Backplane -i backplane -- \"$1\" \"$2\" 2>/dev/null"
+
+def Shell.notify.loc(+l: I18.Loc, +q: Chan(ShellMsg), thread: String, +title: String, +body: String) -> IO(Unit):
+  IO.bind(P.Ran, Unit, P.Proc.run("sh", ["-c", Shell.notify.script(), "sh", title, body, MSG.T.menu.file.open(l)], "/"), r => Shell.notified(r, q, thread))
+
 def Shell.notify(+q: Chan(ShellMsg), thread: String, +title: String, +body: String) -> IO(Unit):
   IO.bind(P.Ran, Unit, P.Proc.run("sh", ["-c", Shell.notify.sh(), "sh", title, body], "/"), r => Shell.notified(r, q, thread))
 
@@ -934,19 +944,40 @@ def Drafts.put(empty: Bool, +text: String, +path: String) -> IO(Unit):
 def Drafts.write(+dir: String, +id: String, +text: String) -> IO(Unit):
   Bool.pick(IO(Unit), String.is_empty(dir), IO.pure(Unit, Unit{}), Drafts.put(String.is_empty(text), text, dir ++ "/" ++ id))
 
+def Lang.restore.k(lang: Bool, +u: U.Ui, name: String, t: String) -> U.Ui:
+  match lang:
+    case True{}: U.Lang.apply(u, t, U.Ui.scratch(u, "@lang.os"))
+    case False{}: U.Ui.restore(u, name, t)
+
+def Lang.restore(+u: U.Ui, +name: String, t: String) -> U.Ui:
+  Lang.restore.k(String.eq(name, "@lang"), u, name, t)
+
+def Lang.start.k(forced: Bool, +u: U.Ui, force: String, os: String) -> U.Ui:
+  match forced:
+    case True{}: U.Lang.apply(U.Ui.scratch_set(u, "@lang.preview", "1"), force, os)
+    case False{}: U.Lang.apply(u, U.Lang.choice(u), os)
+
+def Lang.start(+u: U.Ui) -> IO(U.Ui):
+  do IO<U.Ui>:
+    +all : String <- S.Env.get("LC_ALL", "")
+    messages : String <- S.Env.get("LC_MESSAGES", "")
+    lang : String <- S.Env.get("LANG", "")
+    +force : String <- S.Env.get("BACKPLANE_LANG", "")
+    return Lang.start.k(Bool.or(String.eq(force, "ja"), String.eq(force, "en")), u, force, I18.I18n.os(all, messages, lang))
+
 def Drafts.one(skip: Bool, u: U.Ui, +dir: String, +name: String) -> IO(U.Ui):
   match skip:
     case True{}:
       IO.pure(U.Ui, u)
     case False{}:
-      IO.bind(String, U.Ui, S.Files.text(dir ++ "/" ++ name), t => IO.pure(U.Ui, U.Ui.restore(u, name, t)))
+      IO.bind(String, U.Ui, S.Files.text(dir ++ "/" ++ name), t => IO.pure(U.Ui, Lang.restore(u, name, t)))
 
 def Drafts.each(ns: List<String>, u: U.Ui, +dir: String) -> IO(U.Ui):
   match ns:
     case Nil{}:
       IO.pure(U.Ui, u)
     case +n <> t:
-      IO.bind(U.Ui, U.Ui, Drafts.one(Bool.not(U.Draft.safe(n)), u, dir, n), u2 => Drafts.each(t, u2, dir))
+      IO.bind(U.Ui, U.Ui, Drafts.one(Bool.not(Bool.or(U.Draft.safe(n), String.eq(n, "@lang"))), u, dir, n), u2 => Drafts.each(t, u2, dir))
 
 def Drafts.listed(r: Result<&1, &1, U32 & String, List<String>>, u: U.Ui, +dir: String) -> IO(U.Ui):
   match r:
@@ -995,9 +1026,9 @@ def Shell.cmd(a: Shell, c: N.NCmd) -> IO(Shell):
       do IO<Shell>:
         Drafts.write(U.Ui.info(N.Nui.ui(n), "local.drafts"), id, t)
         return Shell{n, w, d, qd, q, i, wa}
-    case Shell{n, w, d, qd, +q, i, wa} N.NNotify{th, ti, b}:
+    case Shell{n, w, d, qd, +q, i, +wa} N.NNotify{th, ti, b}:
       do IO<Shell>:
-        IO.spawn(Unit, Shell.notify(q, th, ti, b))
+        IO.spawn(Unit, Shell.notify.loc(L.Ty.loc(Aux.ty(wa)), q, th, ti, b))
         return Shell{n, w, d, qd, q, i, wa}
     case Shell{n, w, d, qd, +q, i, wa} N.NLater{ms, action, value}:
       do IO<Shell>:
@@ -1038,8 +1069,22 @@ def Shell.step.go(a: Shell, s: N.Step) -> IO(Shell):
     case Shell{_, w, d, qd, q, i, wa} N.Step{n, cs, dirty}:
       IO.bind(Shell, Shell, Shell.cmds(cs, Shell{n, w, Bool.or(d, dirty), qd, q, i, wa}), Shell.dirty)
 
+# a composition whose field lost the keys (another field, another thread) is
+# dropped, in the app and in the input method: nothing is inserted anywhere
+def Shell.ime.sync.k(stale: Bool, a: Shell) -> IO(Shell):
+  match stale a:
+    case True{} Shell{+n, w, d, qd, q, i, wa}:
+      IO.bind(Window, Shell, W.Win.ime_reset(w), w2 => IO.pure(Shell, Shell{N.Imx.drop(n), w2, True{}, qd, q, i, wa}))
+    case False{} _:
+      IO.pure(Shell, a)
+
+def Shell.ime.sync(a: Shell) -> IO(Shell):
+  match a:
+    case Shell{+n, w, d, qd, q, i, wa}:
+      Shell.ime.sync.k(N.Imx.stale(n), Shell{n, w, d, qd, q, i, wa})
+
 def Shell.step(a: Shell, s: N.Step) -> IO(Shell):
-  Shell.step.go(Shell.remember(a), s)
+  IO.bind(Shell, Shell, Shell.step.go(Shell.remember(a), s), Shell.ime.sync)
 
 # the log's head read as usual, then the hub's read model in place of
 # the (empty) replay, and the outbox sent again (N.Nui.adopt.step)
@@ -1153,10 +1198,22 @@ def Shell.recv.o(a: Shell, +o: J.Json, own: Bool) -> IO(Shell):
       IO.bind(Unit, Shell, PS.Perf.add("ui.hub.t." ++ J.Json.get_str(o, "t", ""), 1), _ =>
         IO.bind(Shell, Shell, Shell.step(Shell{n, w, d, qd, q, i, wa}, N.Nui.hear(n, o)), a2 => Shot.pre(o, Shot.calm(String.eq(J.Json.get_str(o, "t", ""), "shot"), d, Shell.touched(o, Hubf.mark(d, Bool.or(own, Hubf.own(n, o)), a2))))))
 
+# a link's own notice (link.bend's Link.down: why it went down) in the
+# frame's language; every other message passes as it came
+def Down.shown.k(code: Bool, +l: I18.Loc, +o: J.Json) -> J.Json:
+  match code:
+    case True{}:
+      J.Json.obj([J.KV{"t", J.Str{"update"}}, J.KV{"state", J.Str{NT.Notice.shown(l, J.Json.get_str(o, "state", ""))}}, J.KV{"error", J.Str{NT.Notice.shown(l, J.Json.get_str(o, "error", ""))}}])
+    case False{}:
+      o
+
+def Down.shown(+l: I18.Loc, +o: J.Json) -> J.Json:
+  Down.shown.k(Bool.and(String.eq(J.Json.get_str(o, "t", ""), "update"), NT.Notice.is(J.Json.get_str(o, "state", ""))), l, o)
+
 def Shell.recv.n(a: Shell, +text: String) -> IO(Shell):
   match a:
-    case Shell{+n, w, d, qd, q, i, wa}:
-      Shell.recv.o(Shell{n, w, d, qd, q, i, wa}, Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{}), Hubf.names(n, text))
+    case Shell{+n, w, d, qd, q, i, +wa}:
+      Shell.recv.o(Shell{n, w, d, qd, q, i, wa}, Down.shown(L.Ty.loc(Aux.ty(wa)), Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{})), Hubf.names(n, text))
 
 def Shell.recv(a: Shell, +text: String) -> IO(Shell):
   Shell.recv.n(a, text)
@@ -1210,8 +1267,27 @@ def Shell.pasted_image(r: Window & String & U32 & String, +n: N.Nui, d: Bool, qd
     key : U32 <- IO.try(U32, IO.random_u32())
     Shell.step(Shell{n, w, d, qd, q, i, wa}, N.Nui.image.m(U.Tour.on(N.Nui.ui(n)), n, mime, U32.to_nat(size), data, AT.Att.paste.key(key)))
 
+def Shell.ime.fill(e: W.WinEv, +t: String, +f: String) -> W.WinEv:
+  match e:
+    case W.WCommit{id, _}:
+      W.WCommit{id, t}
+    case W.WPreedit{first, len, id, _, _, caret, only}:
+      W.WPreedit{first, len, id, t, f, caret, only}
+    case _:
+      e
+
+# an ime event's text arrives by its id (it is the event's own, never a
+# shared buffer), then the event goes on as any other
+def Shell.ime.step(r: Window & String & String, e: W.WinEv, +n: N.Nui, d: Bool, qd: Bool, +q: Chan(ShellMsg), +i: Chan(S.Msg), wa: Aux) -> IO(Shell):
+  (w, (t, f)) = r
+  Shell.step(Shell{n, w, d, qd, q, i, wa}, N.Nui.event(n, Shell.ime.fill(e, t, f)))
+
 def Shell.event(a: Shell, e: W.WinEv) -> IO(Shell):
   match a e:
+    case Shell{n, w, d, qd, q, i, wa} W.WCommit{+id, _}:
+      IO.bind(Window & String & String, Shell, W.Win.payload(w, id), r => Shell.ime.step(r, e, n, d, qd, q, i, wa))
+    case Shell{n, w, d, qd, q, i, wa} W.WPreedit{_, _, +id, _, _, _, _}:
+      IO.bind(Window & String & String, Shell, W.Win.payload(w, id), r => Shell.ime.step(r, e, n, d, qd, q, i, wa))
     case Shell{n, w, d, qd, q, i, wa} W.WPaste{_}:
       IO.bind(Window & String, Shell, W.Win.pasted(w), r => Shell.pasted(r, n, d, qd, q, i, wa))
     case Shell{n, w, d, qd, q, i, wa} W.WImage{}:
@@ -1338,7 +1414,7 @@ def Watch.safe(s: String) -> String:
 
 def Watch.cli.k(rt: K.Rt) -> String:
   match rt:
-    case K.Rt{cli, _, _, _}:
+    case K.Rt{cli, _, _, _, _}:
       cli
 
 def Watch.cli() -> IO(String):
@@ -1346,7 +1422,8 @@ def Watch.cli() -> IO(String):
     +home : String <- S.Env.get("HOME", "/tmp")
     explicit : String <- S.Env.get("BACKPLANE_KICAD_CLI", "")
     exe : String <- S.Sys.exe_dir.io()
-    rt : K.Rt <- K.Rt.resolve(explicit, exe, home ++ "/.backplane-bend")
+    data : String <- S.Env.get("BACKPLANE_HOME", home ++ "/.backplane-bend")
+    rt : K.Rt <- K.Rt.resolve(explicit, exe, data)
     return Watch.cli.k(rt)
 
 def Watch.step2glb() -> IO(String):
@@ -1382,12 +1459,12 @@ def Watch.glb.done(r: P.Ran, +glb: String, +key: String, +q: Chan(ShellMsg)) -> 
         ok : Result<&1, &1, ShellMsg, Unit> <- Chan.send(ShellMsg, q, Mesh3{key, FA.Scene3.of_model(MS.Model.of(Watch.glb.up(MC.Mech.is_step(Src.at(key, 2n)), G.Mesh.tris(G.Glb.parse(bs)))))})
         return Unit{}
     case P.Ran{_, out}:
-      Watch.say(key, "3D export failed: " ++ String.take(String.trim(out), 160n), q)
+      Watch.say(key, NT.Notice.make("export", String.take(String.trim(out), 160n)), q)
 
 # a STEP's GLB from the models cache (converted once per version, shared
 # with `backplane --render` and the phones' view)
 def Watch.stepfile.got(+glb: String, +key: String, +q: Chan(ShellMsg)) -> IO(Unit):
-  Bool.pick(IO(Unit), String.is_empty(glb), Watch.say(key, "Could not mesh this STEP file (installing FreeCAD lets Backplane mesh large ones)", q), Watch.glb.done(P.Ran{0, ""}, glb, key, q))
+  Bool.pick(IO(Unit), String.is_empty(glb), Watch.say(key, NT.Notice.make("nomesh", ""), q), Watch.glb.done(P.Ran{0, ""}, glb, key, q))
 
 def Watch.stepfile(+path: String, +key: String, +q: Chan(ShellMsg)) -> IO(Unit):
   do IO<Unit>:
@@ -1598,7 +1675,7 @@ def Watch.sent.v(m: Maybe<&2, List<&2, B.Item>>, fixed: Bool, +key: String, +q: 
     case None{} True{}:
       do IO<Unit>:
         Watch.sent(Some{Nil{}}, key, q)
-        Watch.say(key, PV.Pv.unread(), q)
+        Watch.say(key, NT.Notice.make("unread", ""), q)
     case _ _:
       Watch.sent(m, key, q)
 
@@ -1679,7 +1756,7 @@ def Watch.loop(fuel: Nat, +key: String, +path: String, +sz: U32, +mt: U32, re: N
         Watch.step(st, sz, mt, Bool.pick(Nat, U32.is_eq(Src.kind(key), 2), 0n, re), key, path, q, s2 => m2 => r2 => Watch.loop(f, key, path, s2, m2, r2, q))
 
 def Watch.none(+key: String) -> String:
-  Bool.pick(String, U32.is_eq(Src.kind(key), 1), "No schematic in this project yet", "No board in this project yet")
+  Bool.pick(String, U32.is_eq(Src.kind(key), 1), NT.Notice.make("noschematic", ""), NT.Notice.make("noboard", ""))
 
 def Watch.go.k(none: Bool, once: Bool, +key: String, +path: String, +q: Chan(ShellMsg)) -> IO(Unit):
   match none once:
@@ -2132,6 +2209,140 @@ def Frames.image(f: TI.Frames) -> Image:
       TI.Tiles.image(t)
 
 # carry out the frame's plan (TI.Frame.par one step at a time: the plan,
+# where the focused field's caret is, for the input method's candidate
+# window (the "ime-spot" hit layout leaves there; the window sends it only
+# when it moved)
+def Shell.spot.at(hs: List<&2, N.Hit>) -> Maybe<&2, N.Hit>:
+  match hs:
+    case Nil{}:
+      None{}
+    case N.Hit{+x, +y, +w, +h, +a, +v} <> t:
+      Bool.pick(Maybe<&2, N.Hit>, String.eq(a, "ime-spot"), Some{N.Hit{x, y, w, h, a, v}}, Shell.spot.at(t))
+
+def Shell.spot.go(r: Window & Image & Image, +x: U32, +y: U32) -> IO(Window & Image & Image):
+  (w, (i1, i2)) = r
+  IO.bind(Window, Window & Image & Image, W.Win.ime_spot(w, x, y), w2 => IO.pure(Window & Image & Image, (w2, (i1, i2))))
+
+def Shell.spot.k(m: Maybe<&2, N.Hit>, r: Window & Image & Image) -> IO(Window & Image & Image):
+  match m:
+    case Some{N.Hit{+x, _, _, +h, _, _}}:
+      Shell.spot.go(r, x, h)
+    case None{}:
+      IO.pure(Window & Image & Image, r)
+
+def Shell.spot(r: Window & Image & Image, +hs: List<&2, N.Hit>) -> IO(Window & Image & Image):
+  Shell.spot.k(Shell.spot.at(hs), r)
+
+# The caret is laid out shown, always, and hidden in the frame's tiles
+# when it should be (TI.Tiles.blink, as a blink alone does: law
+# tiles_blink_exact), so the caret's phase never makes the memos' keys
+# differ: the phase goes to "caret.real" for Caret.show
+def Caret.lay(+n: N.Nui) -> N.Nui:
+  N.Nui.with_ui(n, U.Ui.info_set(U.Ui.info_set(N.Nui.ui(n), "caret.real", U.Ui.info(N.Nui.ui(n), "caret.on")), "caret.on", "1"))
+
+def Caret.show(on: Bool, +t: TI.Tiles, +e: Nat) -> TI.Tiles:
+  match on:
+    case True{}:
+      t
+    case False{}:
+      TI.Tiles.blink(t, e, False{})
+
+# The embedded browser (core/cef.bend, layout.bend's Page.cef)
+# ------------------------------------------------------------
+# A window whose hub is this machine's tells it its X window (kept in the
+# scratch once at start, Cef.start) once the log has come, and again at
+# every join (browser.embed). After each frame in cef mode the "cef" hit
+# layout left for the shown page is compared with what was last sent
+# (scratch "@cef.at"): a new one is placed (browser.place), none where
+# there was one hides it. A window not in cef mode scans no hits and writes
+# nothing, except to forget a place once when the hub went back to chrome.
+
+def CefWin.say(+i: Chan(S.Msg), +method: String, p: J.Json) -> IO(Unit):
+  do IO<Unit>:
+    ok : Result<&1, &1, S.Msg, Unit> <- Chan.send(S.Msg, i, S.Rpc{0, CF.Cef.rpc(method, p)})
+    return Unit{}
+
+# a new embed places the page again (the hub forgot the old place)
+def CefWin.embed(due: Bool, +u: U.Ui, +i: Chan(S.Msg), +tag: String) -> IO(U.Ui):
+  match due:
+    case True{}:
+      do IO<U.Ui>:
+        CefWin.say(i, "browser.embed", CF.Cef.embed(U32.from_nat(CF.Cef.num(U.Ui.scratch(u, "@cef.xid"), 0n)), U.Ui.scratch(u, "@cef.display")))
+        return U.Ui.scratch_set(U.Ui.scratch_set(u, "@cef.emb", tag), "@cef.at", "")
+    case False{}:
+      IO.pure(U.Ui, u)
+
+# the first "cef" hit's place key ("" none); stops at the first
+def CefWin.hit.head(hs: List<&2, N.Hit>) -> Bool:
+  match hs:
+    case N.Hit{_, _, _, _, a, _} <> _: String.eq(a, "cef")
+    case Nil{}: False{}
+
+def CefWin.hit.go(hs: List<&2, N.Hit>, hit: Bool) -> String:
+  match hs hit:
+    case N.Hit{x0, y0, x1, y1, _, page} <> +rest True{}: CF.Cef.at.hit(page, x0, y0, x1, y1)
+    case _ <> +t False{}: CefWin.hit.go(t, CefWin.hit.head(t))
+    case Nil{} _: ""
+
+def CefWin.now(native: Bool, +hs: List<&2, N.Hit>) -> String:
+  match native:
+    case True{}: CefWin.hit.go(hs, CefWin.hit.head(hs))
+    case False{}: ""
+
+def CefWin.place(step: Nat, +u: U.Ui, +i: Chan(S.Msg), +key: String) -> IO(U.Ui):
+  match step:
+    case 0n:
+      IO.pure(U.Ui, u)
+    case 1n:
+      do IO<U.Ui>:
+        CefWin.say(i, "browser.place", CF.Cef.place.of(key))
+        return U.Ui.scratch_set(u, "@cef.at", key)
+    case 2n:
+      do IO<U.Ui>:
+        CefWin.say(i, "browser.place", CF.Cef.place.of(""))
+        return U.Ui.scratch_set(u, "@cef.at", "")
+    case _:
+      IO.pure(U.Ui, U.Ui.scratch_set(u, "@cef.at", ""))
+
+def CefWin.post.go(act: Bool, due: Bool, +step: Nat, +n: N.Nui, +i: Chan(S.Msg), +tag: String, +key: String) -> IO(N.Nui):
+  match act:
+    case True{}:
+      do IO<N.Nui>:
+        u1 : U.Ui <- CefWin.embed(due, N.Nui.ui(n), i, tag)
+        u2 : U.Ui <- CefWin.place(step, u1, i, key)
+        return N.Nui.with_ui(n, u2)
+    case False{}:
+      IO.pure(N.Nui, n)
+
+def CefWin.post.step(+due: Bool, +step: Nat, +n: N.Nui, +i: Chan(S.Msg), +tag: String, +key: String) -> IO(N.Nui):
+  CefWin.post.go(Bool.or(due, Bool.not(Nat.is_eq(step, 0n))), due, step, n, i, tag, key)
+
+def CefWin.post.key(+due: Bool, native: Bool, +key: String, +n: N.Nui, +i: Chan(S.Msg), +tag: String) -> IO(N.Nui):
+  CefWin.post.step(due, CF.Cef.post.step(native, Bool.pick(String, due, "", U.Ui.scratch(N.Nui.ui(n), "@cef.at")), key), n, i, tag, key)
+
+def CefWin.post.k(due: Bool, +native: Bool, +n: N.Nui, +hs: List<&2, N.Hit>, +i: Chan(S.Msg), +tag: String) -> IO(N.Nui):
+  CefWin.post.key(due, native, CefWin.now(native, hs), n, i, tag)
+
+# after a frame: the embed (once per join), the page's place
+def CefWin.post(+n: N.Nui, +hs: List<&2, N.Hit>, +i: Chan(S.Msg), +tag: String, +url: String) -> IO(N.Nui):
+  CefWin.post.k(CF.Cef.embed.due(U.Ui.scratch(N.Nui.ui(n), "@cef.xid"), url, U.Ui.info(N.Nui.ui(n), "origin"), U.Ui.scratch(N.Nui.ui(n), "@cef.emb"), tag),
+    CF.Cef.native(U.Ui.info(N.Nui.ui(n), "browser.engine.live"), url), n, hs, i, tag)
+
+# the window's X id and the display, kept once for the embed request
+def CefWin.seed(+u: U.Ui, +x: U32, +d: String) -> U.Ui:
+  U.Ui.scratch_set(U.Ui.scratch_set(U.Ui.scratch_set(u, "@cef.xid", CF.Cef.xid.text(x)), "@cef.display", d), "@cef.window", Bool.pick(String, U32.is_eq(x, 0), "", "1"))
+
+def CefWin.start(+u: U.Ui, +x: U32) -> IO(U.Ui):
+  IO.bind(String, U.Ui, S.Env.get("DISPLAY", ""), d => IO.pure(U.Ui, CefWin.seed(u, x, d)))
+
+# Shell.shown.two / Shell.shown after the embed and place step (kept out of
+# the long frame functions: their do-blocks are near the compiler's arity)
+def CefWin.shown.two(r: Window & Image & Image, +n: N.Nui, +hs: List<&2, N.Hit>, +q: Chan(ShellMsg), +i: Chan(S.Msg), +wa: Aux, anim: Bool, +ms: Nat) -> IO(Shell):
+  IO.bind(N.Nui, Shell, CefWin.post(n, hs, i, Tie.tag(Aux.tie(wa)), Tie.url(Aux.tie(wa))), n2 => Shell.shown.two(r, n2, q, i, wa, anim, ms))
+
+def CefWin.shown(r: Window & Image, +n: N.Nui, +hs: List<&2, N.Hit>, +q: Chan(ShellMsg), +i: Chan(S.Msg), +wa: Aux, anim: Bool, +ms: Nat) -> IO(Shell):
+  IO.bind(N.Nui, Shell, CefWin.post(n, hs, i, Tie.tag(Aux.tie(wa)), Tie.url(Aux.tie(wa))), n2 => Shell.shown(r, n2, q, i, wa, anim, ms))
+
 # the tiles to draw drawn in parallel, the tiles filled in), present them
 # and keep them for the next frame; the window fills only what differs
 # from the last one
@@ -2144,14 +2355,15 @@ def Shell.present(+pl: TI.Plan, o: L.Out, +n: N.Nui, w: Window, +q: Chan(ShellMs
         PS.Perf.add("ui.drawn", U32.from_nat(k))
         +d : TI.Drawn = TI.Plan.drawn(pl, TI.Frame.edge(N.Nui.width(n), N.Nui.height(n)))
         tb : U32 <- PS.Perf.lap("ui.draw", ta)
-        +tiles : TI.Tiles = TI.Plan.fill(pl, TI.Frame.edge(N.Nui.width(n), N.Nui.height(n)), 0n, d)
+        +tiles : TI.Tiles = Caret.show(String.eq(U.Ui.info(N.Nui.ui(n), "caret.real"), "1"), TI.Plan.fill(pl, TI.Frame.edge(N.Nui.width(n), N.Nui.height(n)), 0n, d), TI.Frame.edge(N.Nui.width(n), N.Nui.height(n)))
         tc : U32 <- PS.Perf.lap("ui.fill", tb)
         t3 : U32 <- PS.Perf.lap("ui.raster", t2)
         r : Window & Image & Image <- W.Win.show(w, TI.Tiles.image(tiles), Frames.image(Aux.frames(wa)))
         t4 : U32 <- PS.Perf.lap("ui.present", tc)
         Shell.timed(t0)
         +s : N.Step = Shell.hits(n, hs, epoch)
-        Shell.shown.two(r, Shell.hits.nui(s), q, i, Aux.with_frames(wa, TI.FSome{N.Nui.width(n), N.Nui.height(n), tiles}), Shell.hits.anim(s, Shell.anim(n, ms)), ms)
+        r2 : Window & Image & Image <- Shell.spot(r, hs)
+        CefWin.shown.two(r2, Shell.hits.nui(s), hs, q, i, Aux.with_frames(wa, TI.FSome{N.Nui.width(n), N.Nui.height(n), tiles}), Shell.hits.anim(s, Shell.anim(n, ms)), ms)
 
 # The lightbox (nui.bend's Lbx, core/lightbox.bend's Lb): the picture
 # alone on a dark window, zoomed and panned, its full decode once there
@@ -2228,7 +2440,7 @@ def Lbv.paint(on: Bool, +ops: List<&2, R.Op>, +hs: List<&2, N.Hit>, +oh: List<&2
         t3 : U32 <- PS.Perf.lap("ui.lightbox", t2)
         Shell.timed(t0)
         +s : N.Step = Shell.hits(n, hs, epoch)
-        Shell.shown(r, Shell.hits.nui(s), q, i, wa, Shell.hits.anim(s, Shell.anim(n, ms)), ms)
+        CefWin.shown(r, Shell.hits.nui(s), hs, q, i, wa, Shell.hits.anim(s, Shell.anim(n, ms)), ms)
     case False{}:
       Shell.plan.timed(ops, hs, oh, n, w, q, i, wa, epoch, ms, t0, t2)
 
@@ -2311,12 +2523,12 @@ def Part.of(bm: Maybe<&2, L.Out>, +mm: List<&2, MM.MainM>, +tc: MM.TouchK, +ty: 
     case None{}:
       PMain{MM.Mm.main(mm, ty, tlm, n, tc)}
 
-def FrameM.join(p: Part, sd: MM.SideM, mm: List<&2, MM.MainM>, +ty: L.Ty, +tlm: L.TLMemo, +n: N.Nui) -> FrameM:
+def FrameM.join(p: Part, sd: MM.SideM, +mm: List<&2, MM.MainM>, +ty: L.Ty, +tlm: L.TLMemo, +n: N.Nui) -> FrameM:
   match p sd:
     case PBot{o} MM.SideM{+sk, +so}:
       FrameM{BV.Bv.frame.given(ty, tlm, n, Some{o}, so), Nil{}, 0n, [MM.SideM{sk, so}]}
-    case PMain{MM.MainM{+k, rk, rs, +o}} MM.SideM{+sk, +so}:
-      FrameM{BV.Bv.frame.given(ty, tlm, n, Some{o}, so), MM.MainM.keep(MM.MainM{k, rk, rs, o}), Bool.pick(Nat, MM.MainM.same(k, mm), 1n, 0n), [MM.SideM{sk, so}]}
+    case PMain{MM.MainM{+k, rk, rs, +o, +d}} MM.SideM{+sk, +so}:
+      FrameM{BV.Bv.frame.given(ty, tlm, n, Some{o}, so), MM.MainM.keep(MM.MainM{k, rk, rs, o, d}), Bool.pick(Nat, Bool.and(MM.MainM.same(k, mm), Nat.is_eq(d, MM.MainM.due(mm))), 1n, 0n), [MM.SideM{sk, so}]}
 
 # the main area and the sidebar's body at once (as Lay.frame.u lays them
 # out), each from its memo when its key holds
@@ -2351,7 +2563,7 @@ def Shell.paint.again(+ty: L.Ty, +cats: Map<&2, CA.CatF>, +oh: List<&2, N.Hit>, 
   do IO<Shell>:
     +memos : List<&2, L.TLMemo> = Shell.memos.of(ty, n, Nil{})
     +wraps : Map<&2, BV.PW> = BV.Bv.wraps.ix(ty, n, BV.Bv.wraps.none(), Aux.ix(wa, n))
-    +fm : FrameM = FrameM.lay(Nil{}, Nil{}, Aux.touch(wa), ty, L.TL.memos.now(memos), cats, wraps, n, Aux.ix(wa, n), Aux.br(wa, n))
+    +fm : FrameM = FrameM.lay(Nil{}, Nil{}, Aux.touch(wa), ty, L.TL.memos.now(memos), cats, wraps, N.Imx.display(n), Aux.ix(wa, n), Aux.br(wa, n))
     +o : L.Out = FrameM.out(fm)
     +k : Nat = Lay.nops(o)
     +t3 : U32 <- PS.Perf.lap("ui.glyphs", t2)
@@ -2371,7 +2583,7 @@ def Shell.paint.want(ws: List<&2, X.Want>, o: L.Out, mmm: List<&2, MM.MainM>, sm
 # with the ops it made as ui.ops)
 def Shell.paint.c(+cats: Map<&2, CA.CatF>, +memos: List<&2, L.TLMemo>, +oh: List<&2, N.Hit>, +n: N.Nui, w: Window, +q: Chan(ShellMsg), +i: Chan(S.Msg), +wa: Aux, +epoch: Nat, +ms: Nat, +t0: U32, +t1: U32) -> IO(Shell):
   do IO<Shell>:
-    +fm : FrameM = FrameM.lay(Aux.mm(wa), Aux.sm(wa), Aux.touch(wa), Aux.ty(wa), L.TL.memos.now(memos), cats, Aux.wraps(wa), n, Aux.ix(wa, n), Aux.br(wa, n))
+    +fm : FrameM = FrameM.lay(Aux.mm(wa), Aux.sm(wa), Aux.touch(wa), Aux.ty(wa), L.TL.memos.now(memos), cats, Aux.wraps(wa), N.Imx.display(n), Aux.ix(wa, n), Aux.br(wa, n))
     +o : L.Out = FrameM.out(fm)
     +k : Nat = Lay.nops(o)
     +t2 : U32 <- PS.Perf.lap("ui.layout", t1)
@@ -2389,18 +2601,19 @@ def Shell.paint.m(+memos: List<&2, L.TLMemo>, +oh: List<&2, N.Hit>, +n: N.Nui, w
 def Shell.paint.go(+oh: List<&2, N.Hit>, +n: N.Nui, w: Window, +q: Chan(ShellMsg), +i: Chan(S.Msg), +wa: Aux, +epoch: Nat, +ms: Nat) -> IO(Shell):
   do IO<Shell>:
     +t0 : U32 <- PS.Perf.us()
-    +memos : List<&2, L.TLMemo> = Shell.memos.of(Aux.ty(wa), n, Aux.memos(wa))
-    +ixk : MM.IxK = MM.Ix.up(Aux.ixs(wa), Aux.touch(wa), N.Nui.ui(n))
+    +wl : Aux = Aux.with_ty(wa, L.Ty.with_loc(Aux.ty(wa), U.Lang.loc(N.Nui.ui(n))))
+    +memos : List<&2, L.TLMemo> = Shell.memos.of(Aux.ty(wl), n, Aux.memos(wl))
+    +ixk : MM.IxK = MM.Ix.up(Aux.ixs(wl), Aux.touch(wl), N.Nui.ui(n))
     +ixn : Nat = MM.IxK.force(ixk)
     PS.Perf.add("ui.ix.n", U32.from_nat(Nat.mod(ixn, 1000000n)))
     +t1 : U32 <- PS.Perf.lap("ui.memo", t0)
-    Shell.paint.m(memos, oh, n, w, q, i, Aux.with_ixs(wa, [ixk]), epoch, ms, t0, t1)
+    Shell.paint.m(memos, oh, n, w, q, i, Aux.with_ixs(wl, [ixk]), epoch, ms, t0, t1)
 
 def Shell.paint.k(+n0: N.Nui, w: Window, +q: Chan(ShellMsg), +i: Chan(S.Msg), wa: Aux, +epoch: Nat, +ms: Nat) -> IO(Shell):
   match n0:
     case N.Nui{u, +ww, +hh, mx, my, sd, sc, ca, fo, pa, oh, _, vw0}:
-      Shell.paint.go(oh, N.Nui{u, ww, hh, mx, my, sd, sc, ca, fo, pa, Nil{}, ms,
-        Shell.vw.if(N.Nui.panel(n0), vw0, ww, hh, N.Nui.vx0(n0), ms, N.Nui.look(n0), N.Nui.lfocus.bits(n0))}, w, q, i, wa, epoch, ms)
+      Shell.paint.go(oh, Caret.lay(N.Nui{u, ww, hh, mx, my, sd, sc, ca, fo, pa, Nil{}, ms,
+        Shell.vw.if(N.Nui.panel(n0), vw0, ww, hh, N.Nui.vx0(n0), ms, N.Nui.look(n0), N.Nui.lfocus.bits(n0))}), w, q, i, wa, epoch, ms)
 
 # what a frame notes before it is laid out: the hover's and the caret's
 # starts, the lightbox's ease, the cats' clock
@@ -2755,8 +2968,8 @@ def Shell.fonts(m: Maybe<&1, L.Ty>) -> IO(L.Ty):
 def Shell.join.first(+inbox: Chan(S.Msg), +out: Chan(S.Wire), +lo: String, +gen: U32) -> IO(Result<&1, &1, S.Msg, Unit>):
   Bool.pick(IO(Result<&1, &1, S.Msg, Unit>), String.is_empty(lo), Chan.send(S.Msg, inbox, S.JoinHere{0, out, gen}), Chan.send(S.Msg, inbox, S.Join{0, out, 0n, "", gen, 0}))
 
-def Shell.twin(r: Window & Window, +inbox: Chan(S.Msg), +drafts: String, +fq: Chan(L.Ty), +lo: String) -> IO(Unit):
-  (ev, pw) = r
+def Shell.twin.go(ev: Window, x: Window & U32, +inbox: Chan(S.Msg), +drafts: String, +fq: Chan(L.Ty), +lo: String) -> IO(Unit):
+  (pw, +xid) = x
   do IO<Unit>:
     +q : Chan(ShellMsg) <- Chan.new(ShellMsg, 8192)
     +out : Chan(S.Wire) <- Chan.new(S.Wire, 8192)
@@ -2767,9 +2980,16 @@ def Shell.twin(r: Window & Window, +inbox: Chan(S.Msg), +drafts: String, +fq: Ch
     IO.spawn(Unit, Fwd.loop(S.Fuel.forever(), out, q, "#0", inbox, gen, 0n))
     got : Maybe<&1, L.Ty> <- Chan.recv(L.Ty, fq)
     ty : L.Ty <- Shell.fonts(got)
-    ui : U.Ui <- Drafts.load(U.Ui.info_set(U.Ui.init(U32.to_nat(t)), "local.hub", lo), drafts)
+    saved : U.Ui <- Drafts.load(U.Ui.info_set(U.Ui.init(U32.to_nat(t)), "local.hub", lo), drafts)
+    seeded : U.Ui <- CefWin.start(saved, xid)
+    ui : U.Ui <- Lang.start(seeded)
     a : Shell <- Shell.later(Shell{N.Nui.init(ui, 1400, 900), pw, True{}, False{}, q, inbox, Aux{Nil{}, [ty], Tie{inbox, "", "#0", 1n, TieKeep.empty()}, [Kept.none()]}})
     Shell.loop(S.Fuel.forever(), a)
+
+# the window's X id, read once (an embedded page is made its child)
+def Shell.twin(r: Window & Window, +inbox: Chan(S.Msg), +drafts: String, +fq: Chan(L.Ty), +lo: String) -> IO(Unit):
+  (ev, pw) = r
+  IO.bind(Window & U32, Unit, W.Win.xid(pw), x => Shell.twin.go(ev, x, inbox, drafts, fq, lo))
 
 def Shell.opened(r: Result<&1, &1, U32 & String, Window>, +inbox: Chan(S.Msg), +drafts: String, +fq: Chan(L.Ty), +lo: String) -> IO(Unit):
   match r:

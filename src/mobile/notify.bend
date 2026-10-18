@@ -1,4 +1,6 @@
 import Base
+import ../core/i18n.bend as I
+import ../core/title.bend as TITLE
 import ../core/json.bend as J
 import ../core/model.bend as M
 import ../core/notice.bend as NO
@@ -161,74 +163,101 @@ def Note.shot.of(as: List<&2, M.Ask>) -> String:
     case M.Ask{_, _, +k, _, +d, _, _, _} <> t:
       Note.shot.k(String.eq(k, "browser"), d, Note.shot.of(t))
 
-def Note.alert.k(+kind: String, +key: String, +id: String, +title: String, +said: String, +image: String, +rest: List<&2, J.Json>) -> List<&2, J.Json>:
-  J.Json.obj([J.KV{"thread", J.Json.str(id)}, J.KV{"title", J.Json.str(title)}, J.KV{"kind", J.Json.str(kind)},
+def Note.alert.k.loc(+kind: String, +key: String, +id: String, +title: String, +said: String, +image: String, +rest: List<&2, J.Json>, +loc: I.Loc) -> List<&2, J.Json>:
+  J.Json.obj([J.KV{"thread", J.Json.str(id)}, J.KV{"title", J.Json.str(TITLE.Title.shown(loc, title))}, J.KV{"kind", J.Json.str(kind)},
     J.KV{"body", J.Json.str(Note.body(kind, said))}, J.KV{"key", J.Json.str(key)}, J.KV{"image", J.Json.str(image)}]) <> rest
+
+def Note.alert.k(+kind: String, +key: String, +id: String, +title: String, +said: String, +image: String, +rest: List<&2, J.Json>) -> List<&2, J.Json>:
+  Note.alert.k.loc(kind, key, id, title, said, image, rest, I.En{})
 
 # a turn that ended: core/notice.bend says whether it is news (a room
 # exchange alerts once, on whichever paired hub's bot answered first) and
 # under which key the apps show it; what the thread last said is read only
 # for a thread that alerts
-def Note.alert.n.k(quiet: Bool, +st: M.State, +kind: String, +key: String, +id: String, +title: String, +es: List<&2, M.Entry>, +rest: List<&2, J.Json>) -> List<&2, J.Json>:
+def Note.alert.n.k.loc(quiet: Bool, +st: M.State, +kind: String, +key: String, +id: String, +title: String, +es: List<&2, M.Entry>, +rest: List<&2, J.Json>, +loc: I.Loc) -> List<&2, J.Json>:
   match quiet:
     case True{}:
       rest
     case False{}:
-      Note.alert.k(kind, key, id, title, Note.said(es, id, False{}, ""), Note.shot.of(U.Asks.open(st, id)), rest)
+      Note.alert.k.loc(kind, key, id, title, Note.said(es, id, False{}, ""), Note.shot.of(U.Asks.open(st, id)), rest, loc)
 
-def Note.alert.n(n: NO.Notice, +st: M.State, +id: String, +title: String, +es: List<&2, M.Entry>, +rest: List<&2, J.Json>) -> List<&2, J.Json>:
+def Note.alert.n.k(quiet: Bool, +st: M.State, +kind: String, +key: String, +id: String, +title: String, +es: List<&2, M.Entry>, +rest: List<&2, J.Json>) -> List<&2, J.Json>:
+  Note.alert.n.k.loc(quiet, st, kind, key, id, title, es, rest, I.En{})
+
+def Note.alert.n.loc(n: NO.Notice, +st: M.State, +id: String, +title: String, +es: List<&2, M.Entry>, +rest: List<&2, J.Json>, +loc: I.Loc) -> List<&2, J.Json>:
   match n:
     case NO.Notice{+kind, +key}:
-      Note.alert.n.k(String.is_empty(kind), st, kind, key, id, title, es, rest)
+      Note.alert.n.k.loc(String.is_empty(kind), st, kind, key, id, title, es, rest, loc)
+
+def Note.alert.n(n: NO.Notice, +st: M.State, +id: String, +title: String, +es: List<&2, M.Entry>, +rest: List<&2, J.Json>) -> List<&2, J.Json>:
+  Note.alert.n.loc(n, st, id, title, es, rest, I.En{})
 
 # a thread a desk (the window, a web page) is watching raises no alert
 # here: the person is looking at it (core/desk.bend; law alert_watched_quiet)
-def Note.alert.w(watched: Bool, +kind: String, +id: String, +title: String, +st: M.State, +es: List<&2, M.Entry>, +rest: List<&2, J.Json>) -> List<&2, J.Json>:
+def Note.alert.w.loc(watched: Bool, +kind: String, +id: String, +title: String, +st: M.State, +es: List<&2, M.Entry>, +rest: List<&2, J.Json>, +loc: I.Loc) -> List<&2, J.Json>:
   match watched:
     case True{}:
       rest
     case False{}:
-      Note.alert.n(NO.Notice.of(st, id, String.eq(kind, "fail"), False{}), st, id, title, es, rest)
+      Note.alert.n.loc(NO.Notice.of(st, id, String.eq(kind, "fail"), False{}), st, id, title, es, rest, loc)
 
-def Note.alert.q(none: Bool, +kind: String, +id: String, +title: String, +st: M.State, +es: List<&2, M.Entry>, +desk: String, +rest: List<&2, J.Json>) -> List<&2, J.Json>:
+def Note.alert.w(watched: Bool, +kind: String, +id: String, +title: String, +st: M.State, +es: List<&2, M.Entry>, +rest: List<&2, J.Json>) -> List<&2, J.Json>:
+  Note.alert.w.loc(watched, kind, id, title, st, es, rest, I.En{})
+
+def Note.alert.q.loc(none: Bool, +kind: String, +id: String, +title: String, +st: M.State, +es: List<&2, M.Entry>, +desk: String, +rest: List<&2, J.Json>, +loc: I.Loc) -> List<&2, J.Json>:
   match none:
     case True{}:
       rest
     case False{}:
-      Note.alert.w(DK.Desk.watched(desk, id), kind, id, title, st, es, rest)
+      Note.alert.w.loc(DK.Desk.watched(desk, id), kind, id, title, st, es, rest, loc)
+
+def Note.alert.q(none: Bool, +kind: String, +id: String, +title: String, +st: M.State, +es: List<&2, M.Entry>, +desk: String, +rest: List<&2, J.Json>) -> List<&2, J.Json>:
+  Note.alert.q.loc(none, kind, id, title, st, es, desk, rest, I.En{})
+
+def Note.alert.loc(+kind: String, +id: String, +title: String, +st: M.State, +es: List<&2, M.Entry>, +desk: String, +rest: List<&2, J.Json>, +loc: I.Loc) -> List<&2, J.Json>:
+  Note.alert.q.loc(String.is_empty(kind), kind, id, title, st, es, desk, rest, loc)
 
 def Note.alert(+kind: String, +id: String, +title: String, +st: M.State, +es: List<&2, M.Entry>, +desk: String, +rest: List<&2, J.Json>) -> List<&2, J.Json>:
-  Note.alert.q(String.is_empty(kind), kind, id, title, st, es, desk, rest)
+  Note.alert.loc(kind, id, title, st, es, desk, rest, I.En{})
 
 # the alerts a server message raised: every thread seen running before it
 # that has now finished or failed, and is news (st is the hub's state;
 # desk the threads a desk watches, the hub's info "desk")
-def Note.alerts(ts: List<&2, M.Thread>, +seen: List<&2, Seen>, +st: M.State, +es: List<&2, M.Entry>, +desk: String) -> List<&2, J.Json>:
+def Note.alerts.loc(ts: List<&2, M.Thread>, +seen: List<&2, Seen>, +st: M.State, +es: List<&2, M.Entry>, +desk: String, +loc: I.Loc) -> List<&2, J.Json>:
   match ts:
     case Nil{}:
       Nil{}
     case M.Thread{+id, _, title, _, _, turn, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _} <> t:
-      Note.alert(Note.kind(Note.was(seen, id), turn), id, title, st, es, desk, Note.alerts(t, seen, st, es, desk))
+      Note.alert.loc(Note.kind(Note.was(seen, id), turn), id, title, st, es, desk, Note.alerts.loc(t, seen, st, es, desk, loc), loc)
+
+def Note.alerts(ts: List<&2, M.Thread>, +seen: List<&2, Seen>, +st: M.State, +es: List<&2, M.Entry>, +desk: String) -> List<&2, J.Json>:
+  Note.alerts.loc(ts, seen, st, es, desk, I.En{})
 
 def Note.doing.line(+d: String) -> String:
   Note.line(Bool.pick(String, String.is_empty(d), "Working", d), 80n)
 
 # one running thread's island line; an idle thread reads no entries
-def Note.one(running: Bool, +id: String, +title: String, +es: List<&2, M.Entry>) -> List<&2, J.Json>:
+def Note.one.loc(running: Bool, +id: String, +title: String, +es: List<&2, M.Entry>, +loc: I.Loc) -> List<&2, J.Json>:
   match running:
     case True{}:
-      [J.Json.obj([J.KV{"thread", J.Json.str(id)}, J.KV{"title", J.Json.str(Note.line(title, 60n))},
+      [J.Json.obj([J.KV{"thread", J.Json.str(id)}, J.KV{"title", J.Json.str(Note.line(TITLE.Title.shown(loc, title), 60n))},
         J.KV{"doing", J.Json.str(Note.doing.line(Note.doing(es, id, False{}, "")))}])]
     case False{}:
       Nil{}
 
+def Note.one(running: Bool, +id: String, +title: String, +es: List<&2, M.Entry>) -> List<&2, J.Json>:
+  Note.one.loc(running, id, title, es, I.En{})
+
 # the island: every running thread with what it is doing now
-def Note.lines(ts: List<&2, M.Thread>, +es: List<&2, M.Entry>) -> List<&2, J.Json>:
+def Note.lines.loc(ts: List<&2, M.Thread>, +es: List<&2, M.Entry>, +loc: I.Loc) -> List<&2, J.Json>:
   match ts:
     case Nil{}:
       Nil{}
     case M.Thread{+id, _, title, _, _, turn, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _} <> t:
-      List.append(&2, J.Json, Note.one(Note.running(turn), id, title, es), Note.lines(t, es))
+      List.append(&2, J.Json, Note.one.loc(Note.running(turn), id, title, es, loc), Note.lines.loc(t, es, loc))
+
+def Note.lines(ts: List<&2, M.Thread>, +es: List<&2, M.Entry>) -> List<&2, J.Json>:
+  Note.lines.loc(ts, es, I.En{})
 
 def Note.headline(n: Nat, +first: String) -> String:
   match n:
@@ -258,29 +287,41 @@ def Note.island.k.named(+ls: List<&2, J.Json>, +name: String) -> J.Json:
     J.KV{"headline", J.Json.str(Note.named(Note.headline(List.length(&2, J.Json, ls), Note.first(ls)), name))},
     J.KV{"lines", J.Json.arr(List.take(&2, J.Json, ls, NO.Notice.island.max()))}])
 
+def Note.island.loc(ts: List<&2, M.Thread>, +es: List<&2, M.Entry>, +loc: I.Loc) -> J.Json:
+  Note.island.k(Note.lines.loc(ts, es, loc))
+
 def Note.island(ts: List<&2, M.Thread>, +es: List<&2, M.Entry>) -> J.Json:
-  Note.island.k(Note.lines(ts, es))
+  Note.island.loc(ts, es, I.En{})
 
 # The same from the read model: each thread's own entries (M.State.mine),
 # never the whole log per thread. Its entries include what it sent other
 # threads, and the walks keep their thread check, so the text is the same
 # (law island_doing_mine_same)
-def Note.lines.st(ts: List<&2, M.Thread>, +st: M.State) -> List<&2, J.Json>:
+def Note.lines.st.loc(ts: List<&2, M.Thread>, +st: M.State, +loc: I.Loc) -> List<&2, J.Json>:
   match ts:
     case Nil{}:
       Nil{}
     case M.Thread{+id, _, title, _, _, turn, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _} <> t:
-      List.append(&2, J.Json, Note.one(Note.running(turn), id, title, M.State.mine(st, id)), Note.lines.st(t, st))
+      List.append(&2, J.Json, Note.one.loc(Note.running(turn), id, title, M.State.mine(st, id), loc), Note.lines.st.loc(t, st, loc))
+
+def Note.lines.st(ts: List<&2, M.Thread>, +st: M.State) -> List<&2, J.Json>:
+  Note.lines.st.loc(ts, st, I.En{})
+
+def Note.island.st.loc(ts: List<&2, M.Thread>, +st: M.State, +loc: I.Loc) -> J.Json:
+  Note.island.k(Note.lines.st.loc(ts, st, loc))
 
 def Note.island.st(ts: List<&2, M.Thread>, +st: M.State) -> J.Json:
-  Note.island.k(Note.lines.st(ts, st))
+  Note.island.st.loc(ts, st, I.En{})
 
-def Note.alerts.st(ts: List<&2, M.Thread>, +seen: List<&2, Seen>, +st: M.State, +desk: String) -> List<&2, J.Json>:
+def Note.alerts.st.loc(ts: List<&2, M.Thread>, +seen: List<&2, Seen>, +st: M.State, +desk: String, +loc: I.Loc) -> List<&2, J.Json>:
   match ts:
     case Nil{}:
       Nil{}
     case M.Thread{+id, _, title, _, _, turn, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _} <> t:
-      Note.alert(Note.kind(Note.was(seen, id), turn), id, title, st, M.State.mine(st, id), desk, Note.alerts.st(t, seen, st, desk))
+      Note.alert.loc(Note.kind(Note.was(seen, id), turn), id, title, st, M.State.mine(st, id), desk, Note.alerts.st.loc(t, seen, st, desk, loc), loc)
+
+def Note.alerts.st(ts: List<&2, M.Thread>, +seen: List<&2, Seen>, +st: M.State, +desk: String) -> List<&2, J.Json>:
+  Note.alerts.st.loc(ts, seen, st, desk, I.En{})
 
 # The island with the work threads wait on (model.bend's Work.busy): a
 # thread whose turn ended with a subagent, background shell or watched
@@ -291,37 +332,52 @@ def Note.alerts.st(ts: List<&2, M.Thread>, +seen: List<&2, Seen>, +st: M.State, 
 def Note.waiting(+n: Nat) -> String:
   "waiting on " ++ Nat.show(n)
 
-def Note.one.w(running: Bool, +busy: Nat, +id: String, +title: String, +es: List<&2, M.Entry>) -> List<&2, J.Json>:
+def Note.one.w.loc(running: Bool, +busy: Nat, +id: String, +title: String, +es: List<&2, M.Entry>, +loc: I.Loc) -> List<&2, J.Json>:
   match running:
     case True{}:
-      Note.one(True{}, id, title, es)
+      Note.one.loc(True{}, id, title, es, loc)
     case False{}:
       Bool.pick(List<&2, J.Json>, Nat.is_gt(busy, 0n),
-        [J.Json.obj([J.KV{"thread", J.Json.str(id)}, J.KV{"title", J.Json.str(Note.line(title, 60n))}, J.KV{"doing", J.Json.str(Note.waiting(busy))}])], Nil{})
+        [J.Json.obj([J.KV{"thread", J.Json.str(id)}, J.KV{"title", J.Json.str(Note.line(TITLE.Title.shown(loc, title), 60n))}, J.KV{"doing", J.Json.str(Note.waiting(busy))}])], Nil{})
+
+def Note.one.w(running: Bool, +busy: Nat, +id: String, +title: String, +es: List<&2, M.Entry>) -> List<&2, J.Json>:
+  Note.one.w.loc(running, busy, id, title, es, I.En{})
 
 # an archived or deleted thread is never on the island (law
 # island_gone_hidden), as on the hub's pushed one (push.bend's Island.keep)
-def Note.one.g(gone: Bool, running: Bool, +kids: Map<&2, Nat>, +rows: Map<&2, Nat>, +st: M.State, +id: String, +title: String) -> List<&2, J.Json>:
+def Note.one.g.loc(gone: Bool, running: Bool, +kids: Map<&2, Nat>, +rows: Map<&2, Nat>, +st: M.State, +id: String, +title: String, +loc: I.Loc) -> List<&2, J.Json>:
   match gone:
     case True{}:
       Nil{}
     case False{}:
-      Note.one.w(running, M.Work.busy.m(kids, rows, id), id, title, M.State.mine(st, id))
+      Note.one.w.loc(running, M.Work.busy.m(kids, rows, id), id, title, M.State.mine(st, id), loc)
+
+def Note.one.g(gone: Bool, running: Bool, +kids: Map<&2, Nat>, +rows: Map<&2, Nat>, +st: M.State, +id: String, +title: String) -> List<&2, J.Json>:
+  Note.one.g.loc(gone, running, kids, rows, st, id, title, I.En{})
 
 # (kids: M.Work.kids.map, the child tasks counted once per screen)
 # (rows: M.Work.rows.map, every thread's own rows found in one pass)
-def Note.lines.r(ts: List<&2, M.Thread>, +kids: Map<&2, Nat>, +rows: Map<&2, Nat>, +st: M.State) -> List<&2, J.Json>:
+def Note.lines.r.loc(ts: List<&2, M.Thread>, +kids: Map<&2, Nat>, +rows: Map<&2, Nat>, +st: M.State, +loc: I.Loc) -> List<&2, J.Json>:
   match ts:
     case Nil{}:
       Nil{}
     case M.Thread{+id, _, title, _, _, turn, _, ar, _, _, _, _, _, _, _, _, _, _, _, _, de} <> t:
-      List.append(&2, J.Json, Note.one.g(Bool.or(ar, de), Note.running(turn), kids, rows, st, id, title), Note.lines.r(t, kids, rows, st))
+      List.append(&2, J.Json, Note.one.g.loc(Bool.or(ar, de), Note.running(turn), kids, rows, st, id, title, loc), Note.lines.r.loc(t, kids, rows, st, loc))
+
+def Note.lines.r(ts: List<&2, M.Thread>, +kids: Map<&2, Nat>, +rows: Map<&2, Nat>, +st: M.State) -> List<&2, J.Json>:
+  Note.lines.r.loc(ts, kids, rows, st, I.En{})
+
+def Note.lines.w.loc(ts: List<&2, M.Thread>, +kids: Map<&2, Nat>, +st: M.State, +loc: I.Loc) -> List<&2, J.Json>:
+  Note.lines.r.loc(ts, kids, M.Work.rows.map(st), st, loc)
 
 def Note.lines.w(ts: List<&2, M.Thread>, +kids: Map<&2, Nat>, +st: M.State) -> List<&2, J.Json>:
-  Note.lines.r(ts, kids, M.Work.rows.map(st), st)
+  Note.lines.w.loc(ts, kids, st, I.En{})
+
+def Note.island.w.loc(ts: List<&2, M.Thread>, +st: M.State, +loc: I.Loc) -> J.Json:
+  Note.island.k(Note.lines.r.loc(ts, M.Work.kids.map(st), M.Work.rows.map(st), st, loc))
 
 def Note.island.w(ts: List<&2, M.Thread>, +st: M.State) -> J.Json:
-  Note.island.k(Note.lines.r(ts, M.Work.kids.map(st), M.Work.rows.map(st), st))
+  Note.island.w.loc(ts, st, I.En{})
 
 # A hub the phone no longer reaches keeps its last state in the phone, and
 # a thread running then reads running forever (a hub stopped, or paired at
@@ -341,12 +397,15 @@ def Note.heard.in(online: Bool, +now: Nat, +heard: Nat, +fresh: Nat) -> Bool:
 def Note.heard(online: Bool, +now: Nat, +heard: Nat) -> Bool:
   Note.heard.in(online, now, heard, Note.fresh())
 
-def Note.island.h(heard: Bool, ts: List<&2, M.Thread>, +st: M.State) -> J.Json:
+def Note.island.h.loc(heard: Bool, ts: List<&2, M.Thread>, +st: M.State, +loc: I.Loc) -> J.Json:
   match heard:
     case True{}:
-      Note.island.w(ts, st)
+      Note.island.w.loc(ts, st, loc)
     case False{}:
       Note.island.k(Nil{})
+
+def Note.island.h(heard: Bool, ts: List<&2, M.Thread>, +st: M.State) -> J.Json:
+  Note.island.h.loc(heard, ts, st, I.En{})
 
 def Note.busy.k(running: Bool, +busy: Nat) -> Bool:
   match running:
@@ -410,23 +469,32 @@ def Note.rbody.k(none: Bool, +own: String, +kind: String, +es: List<&2, M.Entry>
 def Note.rbody(+rec: NO.AlertRec, +es: List<&2, M.Entry>, +id: String) -> String:
   Note.rbody.k(String.is_empty(NO.Alert.body(rec)), NO.Alert.body(rec), NO.Alert.kind(rec), es, id)
 
-def Note.ralert.r(quiet: Bool, +rec: NO.AlertRec, +id: String, +title: String, +es: List<&2, M.Entry>, +rest: List<&2, J.Json>) -> List<&2, J.Json>:
+def Note.ralert.r.loc(quiet: Bool, +rec: NO.AlertRec, +id: String, +title: String, +es: List<&2, M.Entry>, +rest: List<&2, J.Json>, +loc: I.Loc) -> List<&2, J.Json>:
   match quiet:
     case True{}:
       rest
     case False{}:
-      J.Json.obj([J.KV{"thread", J.Json.str(id)}, J.KV{"title", J.Json.str(title)}, J.KV{"kind", J.Json.str(NO.Alert.kind(rec))},
+      J.Json.obj([J.KV{"thread", J.Json.str(id)}, J.KV{"title", J.Json.str(TITLE.Title.shown(loc, title))}, J.KV{"kind", J.Json.str(NO.Alert.kind(rec))},
         J.KV{"body", J.Json.str(Note.rbody(rec, es, id))}, J.KV{"key", J.Json.str(NO.Alert.rkey(rec))}]) <> rest
 
-def Note.ralert.q(+rec: NO.AlertRec, +id: String, +title: String, +es: List<&2, M.Entry>, +desk: String, +rest: List<&2, J.Json>) -> List<&2, J.Json>:
-  Note.ralert.r(Bool.or(String.is_empty(NO.Alert.kind(rec)), Bool.and(DK.Desk.watched(desk, id), NO.Alert.holds(NO.Alert.kind(rec)))), rec, id, title, es, rest)
+def Note.ralert.r(quiet: Bool, +rec: NO.AlertRec, +id: String, +title: String, +es: List<&2, M.Entry>, +rest: List<&2, J.Json>) -> List<&2, J.Json>:
+  Note.ralert.r.loc(quiet, rec, id, title, es, rest, I.En{})
 
-def Note.ralert.k(changed: Bool, +cur: String, +id: String, +title: String, +es: List<&2, M.Entry>, +desk: String, +rest: List<&2, J.Json>) -> List<&2, J.Json>:
+def Note.ralert.q.loc(+rec: NO.AlertRec, +id: String, +title: String, +es: List<&2, M.Entry>, +desk: String, +rest: List<&2, J.Json>, +loc: I.Loc) -> List<&2, J.Json>:
+  Note.ralert.r.loc(Bool.or(String.is_empty(NO.Alert.kind(rec)), Bool.and(DK.Desk.watched(desk, id), NO.Alert.holds(NO.Alert.kind(rec)))), rec, id, title, es, rest, loc)
+
+def Note.ralert.q(+rec: NO.AlertRec, +id: String, +title: String, +es: List<&2, M.Entry>, +desk: String, +rest: List<&2, J.Json>) -> List<&2, J.Json>:
+  Note.ralert.q.loc(rec, id, title, es, desk, rest, I.En{})
+
+def Note.ralert.k.loc(changed: Bool, +cur: String, +id: String, +title: String, +es: List<&2, M.Entry>, +desk: String, +rest: List<&2, J.Json>, +loc: I.Loc) -> List<&2, J.Json>:
   match changed:
     case False{}:
       rest
     case True{}:
-      Note.ralert.q(NO.Alert.parse(cur), id, title, es, desk, rest)
+      Note.ralert.q.loc(NO.Alert.parse(cur), id, title, es, desk, rest, loc)
+
+def Note.ralert.k(changed: Bool, +cur: String, +id: String, +title: String, +es: List<&2, M.Entry>, +desk: String, +rest: List<&2, J.Json>) -> List<&2, J.Json>:
+  Note.ralert.k.loc(changed, cur, id, title, es, desk, rest, I.En{})
 
 # whether a thread was seen before the frame (only those can have changed)
 def Note.rin(ss: List<&2, RSeen>, +id: String) -> Bool:
@@ -439,20 +507,26 @@ def Note.rin(ss: List<&2, RSeen>, +id: String) -> Bool:
 # (a thread the frame did not touch is passed by without reading its
 # record or its entries: a phone's frame of changes touches one or two
 # threads, and reading every thread's took 7 ms of each with no JIT)
-def Note.ralerts.if(seen: Bool, +id: String, title: String, +ss: List<&2, RSeen>, +st: M.State, +desk: String, rest: List<&2, J.Json>) -> List<&2, J.Json>:
+def Note.ralerts.if.loc(seen: Bool, +id: String, title: String, +ss: List<&2, RSeen>, +st: M.State, +desk: String, rest: List<&2, J.Json>, +loc: I.Loc) -> List<&2, J.Json>:
   match seen:
     case True{}:
-      Note.ralert.k(Note.rchg(ss, id, M.Setting.get(st, NO.Alert.key(id), ""), False{}, False{}), M.Setting.get(st, NO.Alert.key(id), ""), id, title, M.State.mine(st, id), desk, rest)
+      Note.ralert.k.loc(Note.rchg(ss, id, M.Setting.get(st, NO.Alert.key(id), ""), False{}, False{}), M.Setting.get(st, NO.Alert.key(id), ""), id, title, M.State.mine(st, id), desk, rest, loc)
     case False{}:
       rest
 
+def Note.ralerts.if(seen: Bool, +id: String, title: String, +ss: List<&2, RSeen>, +st: M.State, +desk: String, rest: List<&2, J.Json>) -> List<&2, J.Json>:
+  Note.ralerts.if.loc(seen, id, title, ss, st, desk, rest, I.En{})
+
 # the alerts a server message raised, from the records it changed
-def Note.ralerts(ts: List<&2, M.Thread>, +seen: List<&2, RSeen>, +st: M.State, +desk: String) -> List<&2, J.Json>:
+def Note.ralerts.loc(ts: List<&2, M.Thread>, +seen: List<&2, RSeen>, +st: M.State, +desk: String, +loc: I.Loc) -> List<&2, J.Json>:
   match ts:
     case Nil{}:
       Nil{}
     case M.Thread{+id, _, title, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _} <> t:
-      Note.ralerts.if(Note.rin(seen, id), id, title, seen, st, desk, Note.ralerts(t, seen, st, desk))
+      Note.ralerts.if.loc(Note.rin(seen, id), id, title, seen, st, desk, Note.ralerts.loc(t, seen, st, desk, loc), loc)
+
+def Note.ralerts(ts: List<&2, M.Thread>, +seen: List<&2, RSeen>, +st: M.State, +desk: String) -> List<&2, J.Json>:
+  Note.ralerts.loc(ts, seen, st, desk, I.En{})
 
 # the policy's examples (for the laws)
 def Note.demo.rec(+kind: String) -> String:

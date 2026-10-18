@@ -18,6 +18,10 @@ object AppSettings {
     // "system", "light" or "dark"
     var appearance by mutableStateOf("system")
         private set
+    var lang by mutableStateOf("auto")
+        private set
+    var langPreview by mutableStateOf(false)
+        private set
     // "projects" or "active"; empty until the hub's choice was carried over
     var threadList by mutableStateOf("")
         private set
@@ -30,12 +34,15 @@ object AppSettings {
     fun init(c: Context) {
         if (ctx != null) return
         ctx = c.applicationContext
+        lang = prefs.getString("app.lang", "auto") ?: "auto"
         appearance = prefs.getString("app.appearance", "system") ?: "system"
         threadList = prefs.getString("app.threadList", "") ?: ""
         defaultTab = prefs.getString("app.defaultTab", "") ?: ""
         haptics = prefs.getBoolean("app.haptics", true)
     }
 
+    fun putLang(v: String) { lang = v; prefs.edit().putString("app.lang", v).apply() }
+    fun forceLang(v: String) { if (v == "ja" || v == "en") { langPreview = true; lang = v } }
     fun putAppearance(v: String) { appearance = v; prefs.edit().putString("app.appearance", v).apply() }
     fun putThreadList(v: String) { threadList = v; prefs.edit().putString("app.threadList", v).apply() }
     fun putDefaultTab(v: String) { defaultTab = v; prefs.edit().putString("app.defaultTab", v).apply() }

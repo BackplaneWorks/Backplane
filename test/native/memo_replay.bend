@@ -72,7 +72,7 @@ def arg(+xs: List<&2, String>, +i: Nat) -> String:
 
 # The main area's memo checked on a real log: the log less its last K
 # events gives the window's state, then each of the K comes as a hub
-# message of its own. At each step the main area is laid out from scratch
+# message of its own, the client's clock moved to its time. At each step the main area is laid out from scratch
 # and, when the memo's key says nothing it shows changed, compared with the
 # memo's: they must be the same, op for op and hit for hit.
 #   scripts/build-app.sh test/native/memo_replay.bend build/memo_replay
@@ -137,11 +137,11 @@ def steps(xs: List<&2, J.Json>, +ty: L.Ty, +n0: N.Nui, +memo0: L.TLMemo, +mm: Li
       t
     case +x <> rest:
       +o = msg(x)
-      +n = prepared(with_ui(n0, U.Ui.recv(N.Nui.ui(n0), o)), 0n)
+      +n = prepared(with_ui(n0, U.Ui.tick(U.Ui.recv(N.Nui.ui(n0), o), J.Json.get_nat(x, "at", U.Side.now(N.Nui.ui(n0))))), 0n)
       +tc2 = MM.TouchK.msg(o, tc)
       +memo = L.Lay.memo(ty, n, memo0)
       +fresh = MM.Mm.lay(ty, memo, n)
-      +keep = MM.MainM.keep(MM.Mm.fresh(mm, fresh, n, tc2))
+      +keep = MM.MainM.keep(MM.Mm.fresh(mm, fresh, n, tc2, memo))
       steps(rest, ty, with_hits(n, hits(fresh), 0n), memo, keep, tc2,
         Tally.add(t, MM.Mm.hits(mm, n, tc2), Eqh.out(MM.MainM.out(mm), fresh), List.is_empty(&2, MM.MainM, keep), String.take(J.Json.show(x), 160n)))
 
@@ -271,6 +271,184 @@ def ixsteps(xs: List<&2, J.Json>, +u0: U.Ui, +tc: MM.TouchK, +k: MM.IxK, t: IxT)
       +k2 = MM.Ix.up([k], tc2, u)
       ixsteps(rest, u, tc2, k2, IxT.add(t, String.eq(Fp.ix(MM.IxK.ix(k2)), Fp.ix(U.Side.ix(U.Ui.state(u)))), String.take(J.Json.show(x), 160n)))
 
+# Why the main area's key changes: each event as its own hub message, the
+# clock moved to the event's time (as the client's tick does), and the
+# key compared with the last; the first part that differs is counted (for
+# the info map, the key that changed; for the touches, whose)
+def Why.name(+x: String) -> String:
+  String.take(Maybe.default(&2, String, List.head(&2, String, String.split(x, '\u{1f}')), ""), 24n)
+
+def Why.ents.k(same: Bool, +x: String, +y: String, rest: String) -> String:
+  match same:
+    case True{}:
+      rest
+    case False{}:
+      Why.name(x) ++ "/" ++ Why.name(y)
+
+def Why.ents(xs: List<&2, String>, ys: List<&2, String>) -> String:
+  match xs ys:
+    case Nil{} Nil{}:
+      "same"
+    case +x <> xt +y <> yt:
+      Why.ents.k(String.eq(x, y), x, y, Why.ents(xt, yt))
+    case _ _:
+      "count"
+
+def Why.seg.k(same: Bool, +x: String, +y: String, rest: String) -> String:
+  match same:
+    case True{}:
+      rest
+    case False{}:
+      Bool.pick(String, String.starts_with(y, "i"), "info:" ++ Why.ents(String.split(x, '\u{1e}'), String.split(y, '\u{1e}')), String.take(y, 6n))
+
+def Why.segs(xs: List<&2, String>, ys: List<&2, String>) -> String:
+  match xs ys:
+    case Nil{} Nil{}:
+      "same"
+    case +x <> xt +y <> yt:
+      Why.seg.k(String.eq(x, y), x, y, Why.segs(xt, yt))
+    case _ _:
+      "parts"
+
+def Why.of(+a: String, +b: String) -> String:
+  Why.segs(String.split(a, '|'), String.split(b, '|'))
+
+def Why.bump.k(r: Map<&2, Nat> & Nat, +k: String) -> Map<&2, Nat>:
+  (m, v) = r
+  Map.set(&2, Nat, m, k, 1n+v)
+
+def Why.bump(m: Map<&2, Nat>, +k: String) -> Map<&2, Nat>:
+  Why.bump.k(Map.get(Nat, 0n, m, k), k)
+
+def Why.show(xs: List<&2, Sigma<&2, &2, String, _ => Nat>>) -> String:
+  match xs:
+    case Nil{}:
+      ""
+    case (+k, v) <> t:
+      "\n  " ++ Nat.show(v) ++ "  " ++ k ++ Why.show(t)
+
+def Why.key(+n: N.Nui, +t: MM.TouchK) -> String:
+  MM.Mm.key(n, t, MM.Mm.rels.of(n))
+
+def why(xs: List<&2, J.Json>, +n0: N.Nui, +tc: MM.TouchK, +k0: String, m: Map<&2, Nat>) -> Map<&2, Nat>:
+  match xs:
+    case Nil{}:
+      m
+    case +x <> rest:
+      +o = msg(x)
+      +n = prepared(with_ui(n0, U.Ui.tick(U.Ui.recv(N.Nui.ui(n0), o), J.Json.get_nat(x, "at", U.Side.now(N.Nui.ui(n0))))), 0n)
+      +tc2 = MM.TouchK.msg(o, tc)
+      +k = Why.key(n, tc2)
+      why(rest, n, tc2, k, Why.bump(m, J.Json.get_str(x, "$", "") ++ " -> " ++ Why.of(k0, k)))
+
+# Streamed text: after each event, a piece of the open thread's reply
+# streams in, then a piece of another thread's, each as the hub sends it
+# ({"t":"delta"}); the window's main area (MM.Mm.main, its memo kept from
+# the frame before) is compared with one laid out afresh at every step.
+# Another thread's text must leave the memo in use.
+type ST is Data:
+  ST{steps: Nat, own: Nat, other: Nat, others: Nat, bad: Nat, why: String}
+
+def ST.add(t: ST, +kind: Nat, +hit: Bool, +ok: Bool, +what: String) -> ST:
+  match t:
+    case ST{s, o, h, hs, b, +w}:
+      ST{1n+s, Nat.add(o, Bool.pick(Nat, Bool.and(Nat.is_eq(kind, 1n), hit), 1n, 0n)), Nat.add(h, Bool.pick(Nat, Bool.and(Nat.is_eq(kind, 2n), hit), 1n, 0n)),
+        Nat.add(hs, Bool.pick(Nat, Nat.is_eq(kind, 2n), 1n, 0n)), Nat.add(b, Bool.pick(Nat, ok, 0n, 1n)), Bool.pick(String, ok, w, w ++ "\n  " ++ what)}
+
+def ST.show(t: ST) -> String:
+  match t:
+    case ST{s, o, h, hs, b, w}:
+      "streaming: steps " ++ Nat.show(s) ++ ", own text kept the memo " ++ Nat.show(o) ++ ", another thread's text kept it " ++ Nat.show(h) ++ " of " ++ Nat.show(hs)
+        ++ ", main area unlike a fresh one " ++ Nat.show(b) ++ w
+
+def piece(+i: Nat) -> String:
+  match i:
+    case 0n:
+      "The regulator's enable pin is pulled up "
+    case 1n:
+      "through R12 to VBAT, so the output\n\n"
+    case 2n:
+      "- one item with `code`\n"
+    case _:
+      "and **C7** stays.\n\n```\nfence\n"
+
+def delta(+th: String, +i: Nat) -> J.Json:
+  J.Json.obj([J.KV{"t", J.Str{"delta"}}, J.KV{"thread", J.Str{th}}, J.KV{"text", J.Str{piece(Nat.mod(i, 4n))}}])
+
+def ss.recv(+n: N.Nui, +o: J.Json, +tick: Nat) -> N.Nui:
+  prepared(with_ui(n, U.Ui.tick(U.Ui.recv(N.Nui.ui(n), o), tick)), 0n)
+
+def ss.check.k(+kind: Nat, +ty: L.Ty, +pm0: List<&2, MM.MainM>, +n: N.Nui, +memo: L.TLMemo, +pm: List<&2, MM.MainM>, +what: String, t: ST) -> ST:
+  ST.add(t, kind, MM.MainM.same(MM.MainM.key.of(pm), pm0), Eqh.out(MM.MainM.out(pm), MM.Mm.lay(ty, memo, n)), what)
+
+def ss.main(+ty: L.Ty, +n: N.Nui, +memo: L.TLMemo, +pm: List<&2, MM.MainM>, +tc: MM.TouchK) -> List<&2, MM.MainM>:
+  MM.MainM.keep(MM.Mm.main(pm, ty, memo, n, tc))
+
+def streams(xs: List<&2, J.Json>, +i: Nat, +ty: L.Ty, +n0: N.Nui, memo0: L.TLMemo, +pm0: List<&2, MM.MainM>, +tc0: MM.TouchK, t: ST) -> ST:
+  match xs:
+    case Nil{}:
+      t
+    case +x <> rest:
+      +o = msg(x)
+      +what = String.take(J.Json.show(x), 120n)
+      +n1 = ss.recv(n0, o, J.Json.get_nat(x, "at", U.Side.now(N.Nui.ui(n0))))
+      +tc1 = MM.TouchK.msg(o, tc0)
+      +m1 = L.Lay.memo(ty, n1, memo0)
+      +p1 = ss.main(ty, n1, m1, pm0, tc1)
+      +t1 = ss.check.k(0n, ty, pm0, n1, m1, p1, what, t)
+      +d2 = delta(U.Ui.sel(N.Nui.ui(n1)), i)
+      +n2 = ss.recv(n1, d2, U.Side.now(N.Nui.ui(n1)))
+      +tc2 = MM.TouchK.msg(d2, tc1)
+      +m2 = L.Lay.memo(ty, n2, m1)
+      +p2 = ss.main(ty, n2, m2, p1, tc2)
+      +t2 = ss.check.k(1n, ty, p1, n2, m2, p2, "own text after " ++ what, t1)
+      +d3 = delta("t-elsewhere", i)
+      +n3 = ss.recv(n2, d3, U.Side.now(N.Nui.ui(n2)))
+      +tc3 = MM.TouchK.msg(d3, tc2)
+      +m3 = L.Lay.memo(ty, n3, m2)
+      +p3 = ss.main(ty, n3, m3, p2, tc3)
+      +t3 = ss.check.k(2n, ty, p2, n3, m3, p3, "other text after " ++ what, t2)
+      streams(rest, 1n+i, ty, with_hits(n3, hits(MM.MainM.out(p3)), 0n), m3, p3, tc3, t3)
+
+# The index again with the open thread streaming three pieces after each
+# event: its count of pieces soon passes the count of changes, and no step
+# may take it for a touched thread (MM.Ix.since), which would rebuild the
+# index whole; the kept index stays Side.ix
+def ix.marked(ks: List<&2, String>) -> Nat:
+  match ks:
+    case Nil{}:
+      0n
+    case +k <> t:
+      Nat.add(Bool.pick(Nat, MM.Ix.mark(k), 1n, 0n), ix.marked(t))
+
+# the counts the old rule took for a thread: a mark above the changes
+def ix.over(xs: List<&2, Sigma<&2, &2, String, _ => Nat>>, +n0: Nat) -> Nat:
+  match xs:
+    case Nil{}:
+      0n
+    case (+k, +v) <> t:
+      Nat.add(Bool.pick(Nat, Bool.and(MM.Ix.mark(k), Nat.is_gt(v, n0)), 1n, 0n), ix.over(t, n0))
+
+def ix.d(+u: U.Ui, +tc: MM.TouchK, +th: String, +i: Nat) -> U.Ui:
+  U.Ui.recv(u, delta(th, i))
+
+def ix.dt(+tc: MM.TouchK, +th: String, +i: Nat) -> MM.TouchK:
+  MM.TouchK.msg(delta(th, i), tc)
+
+def ixs.stream(xs: List<&2, J.Json>, +i: Nat, +th: String, +u0: U.Ui, +tc: MM.TouchK, +k: MM.IxK, +bad: Nat, +old: Nat, t: IxT) -> String:
+  match xs:
+    case Nil{}:
+      IxT.show(t) ++ ", steps that took a count of pieces for a thread " ++ Nat.show(bad) ++ " (the rule before took one in " ++ Nat.show(old) ++ ")"
+    case +x <> rest:
+      +o = msg(x)
+      +u1 = U.Ui.recv(u0, o)
+      +u = ix.d(ix.d(ix.d(u1, tc, th, i), tc, th, 1n+i), tc, th, Nat.add(i, 2n))
+      +tc2 = ix.dt(ix.dt(ix.dt(MM.TouchK.msg(o, tc), th, i), th, 1n+i), th, Nat.add(i, 2n))
+      +marks = ix.marked(MM.Ix.since(Map.to_list(&2, Nat, MM.TouchK.m(tc2)), MM.IxK.n(k)))
+      +k2 = MM.Ix.up([k], tc2, u)
+      +over = Bool.pick(Nat, Nat.is_gt(ix.over(Map.to_list(&2, Nat, MM.TouchK.m(tc2)), MM.IxK.n(k)), 0n), 1n, 0n)
+      ixs.stream(rest, Nat.add(i, 3n), th, u, tc2, k2, Nat.add(bad, marks), Nat.add(old, over), IxT.add(t, String.eq(Fp.ix(MM.IxK.ix(k2)), Fp.ix(U.Side.ix(U.Ui.state(u)))), String.take(J.Json.show(x), 160n)))
+
 def main() -> IO(Unit):
   do IO<Unit>:
     args : List<String> <- AV.Argv.args()
@@ -283,8 +461,13 @@ def main() -> IO(Unit):
     +u : U.Ui = real(List.take(&2, J.Json, xs, cut), arg(as, 1n))
     +n : N.Nui = prepared(N.Nui.init(u, 1400, 900), 0n)
     +memo : L.TLMemo = L.Lay.memo(ty, n, L.TL.memo.none())
+    IO.print("why the key changed (event -> first part that differs):" ++ Why.show(Map.to_list(&2, Nat, why(List.drop(&2, J.Json, xs, cut), n, MM.TouchK.none(), Why.key(n, MM.TouchK.none()), Map.new(&2, Nat)))))
     +t : Tally = steps(List.drop(&2, J.Json, xs, cut), ty, with_hits(n, hits(MM.Mm.lay(ty, memo, n)), 0n), memo, Nil{}, MM.TouchK.none(), Tally{0n, 0n, 0n, 0n, ""})
     IO.print(Tally.show(t))
+    +ns : N.Nui = prepared(N.Nui.init(u, 1400, 900), 0n)
+    +ms0 : L.TLMemo = L.Lay.memo(ty, ns, L.TL.memo.none())
+    IO.print(ST.show(streams(List.drop(&2, J.Json, xs, cut), 0n, ty, with_hits(ns, hits(MM.Mm.lay(ty, ms0, ns)), 0n), ms0, Nil{}, MM.TouchK.none(), ST{0n, 0n, 0n, 0n, 0n, ""})))
+    IO.print("streaming, " ++ ixs.stream(List.drop(&2, J.Json, xs, cut), 0n, arg(as, 1n), u, MM.TouchK.none(), MM.Ix.full(u, 0n), 0n, 0n, IxT{0n, 0n, ""}))
     IO.print(IxT.show(ixsteps(List.drop(&2, J.Json, xs, cut), u, MM.TouchK.none(), MM.Ix.full(u, 0n), IxT{0n, 0n, ""})))
     +n2 : N.Nui = prepared(N.Nui.init(u, 1400, 900), 0n)
     IO.print(Side.show(typing("typing into the composer, and the pointer moving about", ty, n2, MM.TouchK.none(), [MM.SideM{MM.Sm.key(n2, MM.TouchK.none()), side.fresh(ty, n2)}], Side{0n, 0n, 0n})))

@@ -1,4 +1,5 @@
 import Base
+import ../src/core/i18n.bend as I
 import ./check.bend as C
 import ../src/core/model.bend as M
 import ../src/core/codec.bend as K
@@ -114,7 +115,7 @@ def main() -> IO(Unit):
     C.Check.str("the plane's line", DP.Deploy.row(busyo), "Restart pending · waiting for 2 tool calls")
     C.Check.str("two calls and the lock", DP.Deploy.blocking(2n, True{}), "waiting for 2 tool calls and the build lock")
     C.Check.str("no row when nothing waits", DP.Deploy.row(M.State.replay([M.SettingSet{"deploy.wait", "", 7n}], busy)), "")
-    C.Check.str("the plane row", Nat.show(List.length(&2, PLN.PRow, PLN.Plane.deploy.rows(busyo))), "1")
+    C.Check.str("the plane row", Nat.show(List.length(&2, PLN.PRow, PLN.Plane.deploy.rows(I.En{}, busyo))), "1")
     # MCP
     C.Check.str("the tools are named", Bool.show(Nat.is_lt(tool.pos("deploy_cancel"), 100n)), "True")
     +r : MC.Res = MC.Mcp.call.k(tool.pos("deploy_restart"), clear, 20n, "t0", J.Null{}, Maybe.default(&2, J.Json, J.Json.parse("{\"note\":\"ship\",\"stage\":\"/tmp/x\"}"), J.Null{}))

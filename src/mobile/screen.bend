@@ -1,7 +1,13 @@
 import Base
+import ../core/title.bend as TTL
+import ../core/msgs.bend as MSG
+import ../core/kexport.bend as KEX
+import ../core/kihealth.bend as KH
+import ../core/i18n.bend as I
 import ../core/json.bend as J
 import ../core/model.bend as M
 import ../core/client.bend as U
+import ../core/usage.bend as UZ
 import ../web/dom.bend as D
 import ../web/view.bend as V
 import ./notify.bend as N
@@ -87,33 +93,33 @@ def Mob.when(shelf: Nat, +st: M.State, +id: String, +a: Nat, +now: Nat) -> Strin
     case _:
       U.Time.ago(now, a)
 
-def Mob.row(t: M.Thread, +status: String, +ix: U.SIx, +st: M.State, +now: Nat, +shelf: Nat) -> J.Json:
+def Mob.row(+lc: I.Loc, t: M.Thread, +status: String, +ix: U.SIx, +st: M.State, +now: Nat, +shelf: Nat) -> J.Json:
   match t:
     case M.Thread{+id, _, title, _, +a, turn, _, _, _, _, _, pinned, _, _, _, _, _, _, _, _, _}:
-      J.Json.obj([J.KV{"id", J.Json.str(id)}, J.KV{"title", J.Json.str(U.Label.title(st, id, title))}, J.KV{"state", J.Json.str(Mob.state(turn))},
+      J.Json.obj([J.KV{"id", J.Json.str(id)}, J.KV{"title", J.Json.str(U.Label.title(st, id, TTL.Title.shown(lc, title)))}, J.KV{"state", J.Json.str(Mob.state(turn))},
         J.KV{"ago", J.Json.str(Mob.when(shelf, st, id, a, now))}, J.KV{"agents", J.Json.str(SB.Subs.badge(SB.Subs.count.ix(ix, st, id)))}, J.KV{"pinned", J.Json.bool(pinned)},
         J.KV{"status", J.Json.str(status)}, J.KV{"lead", J.Json.arr(Mob.lead(shelf, id))}, J.KV{"trail", J.Json.arr(Mob.trail(id))}])
 
-def Mob.rows(ts: List<&2, M.Thread>, +ix: U.SIx, +st: M.State, +now: Nat, +shelf: Nat) -> List<&2, J.Json>:
+def Mob.rows(+lc: I.Loc, ts: List<&2, M.Thread>, +ix: U.SIx, +st: M.State, +now: Nat, +shelf: Nat) -> List<&2, J.Json>:
   match ts:
     case Nil{}:
       Nil{}
     case +t <> rest:
-      Mob.row(t, M.Phase.name(U.Side.phase.ix(ix, st, t)), ix, st, now, shelf) <> Mob.rows(rest, ix, st, now, shelf)
+      Mob.row(lc, t, M.Phase.name(U.Side.phase.ix(ix, st, t)), ix, st, now, shelf) <> Mob.rows(lc, rest, ix, st, now, shelf)
 
 # snoozed threads sit on their own shelf, soonest to wake first
-def Mob.project(r: U.SRow, +open: Map<&2, Bool>, +ix: U.SIx, +st: M.State, +now: Nat) -> J.Json:
+def Mob.project(+lc: I.Loc, r: U.SRow, +open: Map<&2, Bool>, +ix: U.SIx, +st: M.State, +now: Nat) -> J.Json:
   match r:
     case U.SRow{_, M.Project{+id, title, root, _, _}, M.Shelves{pinned, active, +settled, hidden, snoozed}}:
       J.Json.obj([J.KV{"id", J.Json.str(id)}, J.KV{"title", J.Json.str(U.Label.title(st, id, title))}, J.KV{"root", J.Json.str(root)},
         J.KV{"open", J.Json.bool(U.Flag.get(open, id))},
-        J.KV{"threads", J.Json.arr(Mob.rows(List.append(&2, M.Thread, pinned, active), ix, st, now, 0n))},
+        J.KV{"threads", J.Json.arr(Mob.rows(lc, List.append(&2, M.Thread, pinned, active), ix, st, now, 0n))},
         J.KV{"snoozedShelf", J.Json.str("Snoozed")},
-        J.KV{"snoozed", J.Json.arr(Mob.rows(snoozed, ix, st, now, 2n))},
+        J.KV{"snoozed", J.Json.arr(Mob.rows(lc, snoozed, ix, st, now, 2n))},
         J.KV{"shelf", J.Json.str("Settled " ++ Nat.show(List.length(&2, M.Thread, settled)))},
-        J.KV{"settled", J.Json.arr(Mob.rows(settled, ix, st, now, 1n))},
+        J.KV{"settled", J.Json.arr(Mob.rows(lc, settled, ix, st, now, 1n))},
         J.KV{"value", J.Json.str("arch:" ++ id)}, J.KV{"archOpen", J.Json.bool(U.Flag.get(open, "arch:" ++ id))},
-        J.KV{"archived", J.Json.arr(Mob.rows(M.Archive.of(hidden), ix, st, now, 3n))}])
+        J.KV{"archived", J.Json.arr(Mob.rows(lc, M.Archive.of(hidden), ix, st, now, 3n))}])
 
 def Mob.quiet(p: J.Json, q: Bool) -> J.Json:
   match p:
@@ -128,28 +134,28 @@ def Mob.syncing(r: U.SRow, +st: M.State) -> Bool:
     case U.SRow{_, M.Project{+id, _, _, _, _}, _}:
       U.Label.syncing(st, id)
 
-def Mob.projects(rs: List<&2, U.SRow>, +open: Map<&2, Bool>, +ix: U.SIx, +st: M.State, +now: Nat, +q: Bool) -> List<&2, J.Json>:
+def Mob.projects(+lc: I.Loc, rs: List<&2, U.SRow>, +open: Map<&2, Bool>, +ix: U.SIx, +st: M.State, +now: Nat, +q: Bool) -> List<&2, J.Json>:
   match rs:
     case Nil{}:
       Nil{}
     case +r <> t:
-      Mob.quiet(Mob.project(r, open, ix, st, now), Bool.or(q, Mob.syncing(r, st))) <> Mob.projects(t, open, ix, st, now, q)
+      Mob.quiet(Mob.project(lc, r, open, ix, st, now), Bool.or(q, Mob.syncing(r, st))) <> Mob.projects(lc, t, open, ix, st, now, q)
 
 # the projects as the sidebar groups them (core's Side.groups): live ones,
 # then the quiet ones ("quiet": shown faded), then the older ones, only
 # while their shelf is open or a search is on
-def Mob.older.k(show: Bool, rs: List<&2, U.SRow>, +open: Map<&2, Bool>, +ix: U.SIx, +st: M.State, +now: Nat) -> List<&2, J.Json>:
+def Mob.older.k(+lc: I.Loc, show: Bool, rs: List<&2, U.SRow>, +open: Map<&2, Bool>, +ix: U.SIx, +st: M.State, +now: Nat) -> List<&2, J.Json>:
   match show:
     case True{}:
-      Mob.projects(rs, open, ix, st, now, True{})
+      Mob.projects(lc, rs, open, ix, st, now, True{})
     case False{}:
       Nil{}
 
-def Mob.grouped(g: U.SGroups, +open: Map<&2, Bool>, +ix: U.SIx, +st: M.State, +now: Nat, +q: String) -> List<&2, J.Json>:
+def Mob.grouped(+lc: I.Loc, g: U.SGroups, +open: Map<&2, Bool>, +ix: U.SIx, +st: M.State, +now: Nat, +q: String) -> List<&2, J.Json>:
   match g:
     case U.SGroups{l, qs, o}:
-      List.concat(&2, J.Json, [Mob.projects(l, open, ix, st, now, False{}), Mob.projects(qs, open, ix, st, now, True{}),
-        Mob.older.k(Bool.or(U.Flag.get(open, "old-projects"), Bool.not(String.is_empty(q))), o, open, ix, st, now)])
+      List.concat(&2, J.Json, [Mob.projects(lc, l, open, ix, st, now, False{}), Mob.projects(lc, qs, open, ix, st, now, True{}),
+        Mob.older.k(lc, Bool.or(U.Flag.get(open, "old-projects"), Bool.not(String.is_empty(q))), o, open, ix, st, now)])
 
 # the folded shelf of older projects: how many and whether it is open
 # ("side-older" flips it); null while there are none or a search shows them
@@ -172,23 +178,23 @@ def Mob.arow.k(j: J.Json, +urg: Nat, +at: Nat, +pt: String, +faded: Bool) -> J.J
     case x:
       x
 
-def Mob.arow(r: U.ARow, +ix: U.SIx, +st: M.State, +now: Nat) -> J.Json:
+def Mob.arow(+lc: I.Loc, r: U.ARow, +ix: U.SIx, +st: M.State, +now: Nat) -> J.Json:
   match r:
     case U.ARow{+urg, +at, +t, _, +pt, +faded}:
-      Mob.arow.k(Mob.row(t, M.Phase.name(U.Side.phase.ix(ix, st, t)), ix, st, now, Bool.pick(Nat, faded, 1n, 0n)), urg, at, pt, faded)
+      Mob.arow.k(Mob.row(lc, t, M.Phase.name(U.Side.phase.ix(ix, st, t)), ix, st, now, Bool.pick(Nat, faded, 1n, 0n)), urg, at, pt, faded)
 
-def Mob.arows(rs: List<&2, U.ARow>, +ix: U.SIx, +st: M.State, +now: Nat) -> List<&2, J.Json>:
+def Mob.arows(+lc: I.Loc, rs: List<&2, U.ARow>, +ix: U.SIx, +st: M.State, +now: Nat) -> List<&2, J.Json>:
   match rs:
     case Nil{}:
       Nil{}
     case r <> t:
-      Mob.arow(r, ix, st, now) <> Mob.arows(t, ix, st, now)
+      Mob.arow(lc, r, ix, st, now) <> Mob.arows(lc, t, ix, st, now)
 
 # the settled rows only while their fold is open or a search is on
-def Mob.active(on: Bool, +st: M.State, +now: Nat, +q: String, +o: Map<&2, Bool>) -> List<&2, J.Json>:
+def Mob.active(+lc: I.Loc, on: Bool, +st: M.State, +now: Nat, +q: String, +o: Map<&2, Bool>) -> List<&2, J.Json>:
   match on:
     case True{}:
-      Mob.arows(U.Active.folded(U.Active.open(o, q), U.Active.parts(U.Active.rows(st, now, q))), U.Side.ix(st), st, now)
+      Mob.arows(lc, U.Active.folded(U.Active.open(o, q), U.Active.parts(U.Active.rows(st, now, q))), U.Side.ix(st), st, now)
     case False{}:
       Nil{}
 
@@ -210,13 +216,13 @@ def Mob.settled.if(on: Bool, +st: M.State, +now: Nat, +q: String, +o: Map<&2, Bo
 type MSide is Data:
   MSide{rows: List<&2, J.Json>, settled: J.Json}
 
-def Mob.side.k(+p: U.AParts, +ix: U.SIx, +st: M.State, +now: Nat, +q: String, +o: Map<&2, Bool>) -> MSide:
-  MSide{Mob.arows(U.Active.folded(U.Active.open(o, q), p), ix, st, now), Mob.older.j(U.Active.faded_n(p), U.Flag.get(o, "active-settled"), q)}
+def Mob.side.k(+lc: I.Loc, +p: U.AParts, +ix: U.SIx, +st: M.State, +now: Nat, +q: String, +o: Map<&2, Bool>) -> MSide:
+  MSide{Mob.arows(lc, U.Active.folded(U.Active.open(o, q), p), ix, st, now), Mob.older.j(U.Active.faded_n(p), U.Flag.get(o, "active-settled"), q)}
 
-def Mob.side(on: Bool, +ix: U.SIx, +st: M.State, +now: Nat, +q: String, +o: Map<&2, Bool>) -> MSide:
+def Mob.side(+lc: I.Loc, on: Bool, +ix: U.SIx, +st: M.State, +now: Nat, +q: String, +o: Map<&2, Bool>) -> MSide:
   match on:
     case True{}:
-      Mob.side.k(U.Active.parts(U.Active.rows.ix(st, ix, now, q)), ix, st, now, q, o)
+      Mob.side.k(lc, U.Active.parts(U.Active.rows.ix(st, ix, now, q)), ix, st, now, q, o)
     case False{}:
       MSide{Nil{}, J.Null{}}
 
@@ -240,15 +246,36 @@ def Mob.mitems(xs: List<&2, U.MItem>) -> List<&2, J.Json>:
     case U.MItem{l, a, v, t} <> r:
       J.Json.obj([J.KV{"label", J.Json.str(l)}, J.KV{"action", J.Json.str(a)}, J.KV{"value", J.Json.str(v)}, J.KV{"tone", J.Json.str(t)}]) <> Mob.mitems(r)
 
-def Mob.rmenu.k(none: Bool, +u: U.Ui) -> J.Json:
+def Mob.rmenu.k(+lc: I.Loc, none: Bool, +u: U.Ui) -> J.Json:
   match none:
     case True{}:
       J.Null{}
     case False{}:
-      J.Json.obj([J.KV{"title", J.Json.str(U.Menu.title(u))}, J.KV{"kind", J.Json.str(U.Menu.kind(U.Menu.open(u)))}, J.KV{"items", J.Json.arr(Mob.mitems(U.Menu.items(u, False{})))}])
+      J.Json.obj([J.KV{"title", J.Json.str(U.Menu.title.loc(lc, u))}, J.KV{"kind", J.Json.str(U.Menu.kind(U.Menu.open(u)))}, J.KV{"items", J.Json.arr(Mob.mitems(U.Menu.items.loc(lc, u, False{})))}])
 
-def Mob.rmenu(+u: U.Ui) -> J.Json:
-  Mob.rmenu.k(Bool.or(String.is_empty(U.Menu.open(u)), Bool.not(String.is_empty(U.Ui.scratch(u, "@del") ++ U.Ui.scratch(u, "@rm")))), u)
+def Mob.kx.items(ls: List<&2, String>, +th: String) -> List<&2, J.Json>:
+  match ls:
+    case Nil{}: Nil{}
+    case l <> t: J.Json.obj([J.KV{"label", J.Str{l}}, J.KV{"action", J.Str{"kicad-export10-read"}}, J.KV{"value", J.Str{th}}, J.KV{"tone", J.Str{""}}]) <> Mob.kx.items(t, th)
+
+def Mob.kx.actions(as: List<&2, KH.KAct>) -> List<&2, J.Json>:
+  match as:
+    case Nil{}: Nil{}
+    case KH.KAct{l, a, v} <> t: J.Json.obj([J.KV{"label", J.Str{l}}, J.KV{"action", J.Str{a}}, J.KV{"value", J.Str{v}}, J.KV{"tone", J.Str{""}}]) <> Mob.kx.actions(t)
+
+def Mob.kx.menu(n: Maybe<&2, KH.KNote>) -> J.Json:
+  match n:
+    case None{}: J.Null{}
+    case Some{KH.KNote{_, title, body, acts}}:
+      J.Json.obj([J.KV{"title", J.Str{title}}, J.KV{"kind", J.Str{"kx"}}, J.KV{"items", J.Json.arr(List.append(&2, J.Json, Mob.kx.items(String.lines(body), ""), Mob.kx.actions(acts)))}])
+
+def Mob.rmenu.export(pending: Bool, +lc: I.Loc, +u: U.Ui) -> J.Json:
+  match pending:
+    case True{}: Mob.kx.menu(U.KX.note(U.Ui.infos(u), U.Ui.sel(u)))
+    case False{}: Mob.rmenu.k(lc, Bool.or(String.is_empty(U.Menu.open(u)), Bool.not(String.is_empty(U.Ui.scratch(u, "@del") ++ U.Ui.scratch(u, "@rm")))), u)
+
+def Mob.rmenu(+lc: I.Loc, +u: U.Ui) -> J.Json:
+  Mob.rmenu.export(U.KX.pending(U.Ui.infos(u), U.Ui.sel(u)), lc, u)
 
 # markdown blocks from the same Md.render the web page uses; built onto a
 # reversed accumulator so a long reply's many blocks cost no stack (only
@@ -263,14 +290,35 @@ def Mob.num(n: Bool, +v: String, rest: List<&2, J.KV>) -> List<&2, J.KV>:
     case False{}:
       rest
 
-def Mob.href(as: List<&2, D.Attr>) -> List<&2, J.KV>:
+def Mob.href.attrs(as: List<&2, D.Attr>) -> List<&2, J.KV>:
   match as:
     case Nil{}:
       Nil{}
     case D.At{+k, +v} <> t:
-      Bool.pick(List<&2, J.KV>, String.eq(k, "href"), [J.KV{"href", J.Json.str(v)}, J.KV{"file", J.Json.bool(Bool.not(LK.Link.is_web(v)))}], Mob.num(String.eq(k, "value"), v, Mob.href(t)))
+      Bool.pick(List<&2, J.KV>, String.eq(k, "href"), [J.KV{"href", J.Json.str(v)}, J.KV{"file", J.Json.bool(Bool.not(LK.Link.is_web(v)))}], Mob.num(String.eq(k, "value"), v, Mob.href.attrs(t)))
     case _ <> t:
-      Mob.href(t)
+      Mob.href.attrs(t)
+
+# An anchor without href already falls through to plain text on both phones.
+def Mob.ref.uri(xs: List<&2, D.Attr>) -> String:
+  match xs:
+    case Nil{}: ""
+    case D.At{"data-ref", v} <> _: v
+    case _ <> t: Mob.ref.uri(t)
+
+def Mob.ref.bare(xs: List<&2, D.Attr>) -> Bool:
+  match xs:
+    case Nil{}: False{}
+    case D.At{"data-bare", v} <> _: String.eq(v, "1")
+    case _ <> t: Mob.ref.bare(t)
+
+def Mob.href.ref(ref: String, +attrs: List<&2, D.Attr>) -> List<&2, J.KV>:
+  match ref:
+    case SNil{}: Mob.href.attrs(attrs)
+    case SCon{h, t}: [J.KV{"ref", J.Json.str(SCon{h, t})}, J.KV{"bare", J.Json.bool(Mob.ref.bare(attrs))}]
+
+def Mob.href(+attrs: List<&2, D.Attr>) -> List<&2, J.KV>:
+  Mob.href.ref(Mob.ref.uri(attrs), attrs)
 
 def Mob.nodes.go(ns: List<&2, D.Node>, acc: List<&2, J.Json>) -> List<&2, J.Json>:
   match ns:
@@ -415,8 +463,8 @@ def Mob.own.s(e: M.Entry, +dr: Map<&2, String>, +stamp: String) -> J.Json:
 
 # with the time under a message (core/stamp.bend; "stamp", empty for the
 # rest)
-def Mob.own(+e: M.Entry, +dr: Map<&2, String>, +sp: STP.Stamps) -> J.Json:
-  Mob.own.s(e, dr, STP.Stamp.text(sp, e))
+def Mob.own(+lc: I.Loc, +e: M.Entry, +dr: Map<&2, String>, +sp: STP.Stamps) -> J.Json:
+  Mob.own.s(e, dr, STP.Stamp.text.loc(lc, sp, e))
 
 # a row that opens another thread (value: its id)
 def Mob.link(+id: String, +text: String, +to: String) -> J.Json:
@@ -446,28 +494,28 @@ def Mob.remind(e: M.Entry, +st: M.State) -> J.Json:
     case _:
       J.Json.obj([J.KV{"kind", J.Json.str("act")}])
 
-def Mob.entry.r(rem: Bool, +e: M.Entry, +st: M.State, +dr: Map<&2, String>, +sp: STP.Stamps) -> List<&2, J.Json>:
+def Mob.entry.r(+lc: I.Loc, rem: Bool, +e: M.Entry, +st: M.State, +dr: Map<&2, String>, +sp: STP.Stamps) -> List<&2, J.Json>:
   match rem:
     case True{}:
       [Mob.remind(e, st)]
     case False{}:
-      [Mob.own(e, dr, sp)]
+      [Mob.own(lc, e, dr, sp)]
 
 # what an entry shows as, as the web's View.entry.k: this thread's own
 # (headed by the thread that sent it), or a message it sent to another
-def Mob.entry.k(mine: Bool, +e: M.Entry, +st: M.State, +dr: Map<&2, String>, +sp: STP.Stamps) -> List<&2, J.Json>:
+def Mob.entry.k(+lc: I.Loc, mine: Bool, +e: M.Entry, +st: M.State, +dr: Map<&2, String>, +sp: STP.Stamps) -> List<&2, J.Json>:
   match mine e:
     case True{} M.Msg{+id, t, r, x, at}:
-      List.append(&2, J.Json, Mob.from(String.is_empty(M.Link.from(id)), id, M.Link.from(id), st), [Mob.own(M.Msg{id, t, r, x, at}, dr, sp)])
+      List.append(&2, J.Json, Mob.from(String.is_empty(M.Link.from(id)), id, M.Link.from(id), st), [Mob.own(lc, M.Msg{id, t, r, x, at}, dr, sp)])
     case True{} _:
-      Mob.entry.r(Mob.remind.is(e), e, st, dr, sp)
+      Mob.entry.r(lc, Mob.remind.is(e), e, st, dr, sp)
     case False{} M.Msg{+id, +t, _, x, _}:
       [Mob.link(id, "→ " ++ U.Tasks.title(st, t) ++ ": " ++ DF.Diff.first(x), t)]
     case False{} _:
       Nil{}
 
-def Mob.entry(+e: M.Entry, +st: M.State, +sel: String, +dr: Map<&2, String>, +sp: STP.Stamps) -> List<&2, J.Json>:
-  Mob.entry.k(String.eq(V.View.entry_thread(e), sel), e, st, dr, sp)
+def Mob.entry(+lc: I.Loc, +e: M.Entry, +st: M.State, +sel: String, +dr: Map<&2, String>, +sp: STP.Stamps) -> List<&2, J.Json>:
+  Mob.entry.k(lc, String.eq(V.View.entry_thread(e), sel), e, st, dr, sp)
 
 # a run of tool calls as one row; "fold" with its value opens or shuts it
 def Mob.fold(+id: String, +label: String, +open: Bool) -> J.Json:
@@ -506,20 +554,20 @@ def Mob.role(r: FO.Role, xs: List<&2, J.Json>, acc: List<&2, J.Json>) -> List<&2
           Mob.fold(id, label, False{}) <> acc
 
 # a thread's entries, tail-recursive (a thread can hold thousands)
-def Mob.entries.go(es: List<&2, M.Entry>, rs: List<&2, FO.Role>, +st: M.State, +sel: String, +dr: Map<&2, String>, +sp: STP.Stamps, acc: List<&2, J.Json>) -> List<&2, J.Json>:
+def Mob.entries.go(+lc: I.Loc, es: List<&2, M.Entry>, rs: List<&2, FO.Role>, +st: M.State, +sel: String, +dr: Map<&2, String>, +sp: STP.Stamps, acc: List<&2, J.Json>) -> List<&2, J.Json>:
   match es rs:
     case Nil{} _:
       acc
     case e <> t r <> rt:
-      Mob.entries.go(t, rt, st, sel, dr, sp, Mob.role(r, Mob.entry(e, st, sel, dr, sp), acc))
+      Mob.entries.go(lc, t, rt, st, sel, dr, sp, Mob.role(r, Mob.entry(lc, e, st, sel, dr, sp), acc))
     case e <> t Nil{}:
-      Mob.entries.go(t, Nil{}, st, sel, dr, sp, Mob.onto(Mob.entry(e, st, sel, dr, sp), acc))
+      Mob.entries.go(lc, t, Nil{}, st, sel, dr, sp, Mob.onto(Mob.entry(lc, e, st, sel, dr, sp), acc))
 
 # oldest first, runs of tool calls folded (the last stays open while its
 # turn runs); a reply's images are the ones found when it came
 # (Mob.imgs.seen)
-def Mob.entries(+es: List<&2, M.Entry>, +st: M.State, +sel: String, +info: Map<&2, String>, +dr: Map<&2, String>, +running: Bool) -> List<&2, J.Json>:
-  List.reverse(&2, J.Json, Mob.entries.go(es, FO.Fold.roles(es, info, running), st, sel, dr, STP.Stamps.of(es, st, FO.Fold.now(info), running), Nil{}))
+def Mob.entries(+lc: I.Loc, +es: List<&2, M.Entry>, +st: M.State, +sel: String, +info: Map<&2, String>, +dr: Map<&2, String>, +running: Bool) -> List<&2, J.Json>:
+  List.reverse(&2, J.Json, Mob.entries.go(lc, es, FO.Fold.roles.loc(lc, es, info, running), st, sel, dr, STP.Stamps.of(es, st, FO.Fold.now(info), running), Nil{}))
 
 # a toolbar button (core/tools.bend): its icon, what it says, what it does
 # (tip) and the action it sends
@@ -610,13 +658,13 @@ def Mob.qbtns(bs: List<&2, U.QBtn>) -> List<&2, J.Json>:
 
 # context handed over, above the composer (M.Queue.context), with its
 # buttons (U.Qu.row_buttons)
-def Mob.queue(qs: List<&2, M.QItem>, +first: Bool, +run: Bool) -> List<&2, J.Json>:
+def Mob.queue(+lc: I.Loc, qs: List<&2, M.QItem>, +first: Bool, +run: Bool) -> List<&2, J.Json>:
   match qs:
     case Nil{}:
       Nil{}
     case M.QItem{+msg, +text} <> t:
-      J.Json.obj([J.KV{"msg", J.Json.str(msg)}, J.KV{"text", J.Json.str(U.Qu.label(msg, text))}, J.KV{"tag", J.Json.str(U.Qu.tag(run, msg))},
-        J.KV{"buttons", J.Json.arr(Mob.qbtns(U.Qu.row_buttons(run, first, msg)))}]) <> Mob.queue(t, False{}, run)
+      J.Json.obj([J.KV{"msg", J.Json.str(msg)}, J.KV{"text", J.Json.str(U.Qu.label(lc, msg, text))}, J.KV{"tag", J.Json.str(U.Qu.tag(lc, run, msg))},
+        J.KV{"buttons", J.Json.arr(Mob.qbtns(U.Qu.row_buttons(lc, run, first, msg)))}]) <> Mob.queue(lc, t, False{}, run)
 
 def Mob.tdlines(rs: List<&2, TD.TRow>) -> List<&2, J.Json>:
   match rs:
@@ -629,13 +677,13 @@ def Mob.tdlines(rs: List<&2, TD.TRow>) -> List<&2, J.Json>:
 # whether it is open and what a tap on the head sends (fold, with toggle),
 # its lines (every step once shown all: the app scrolls them), and a long
 # list's last line ("Show all 24", "Show fewer"; "" when it fits) and its value
-def Mob.todos.k(+open: Bool, +all: Bool, +th: String, +ts: List<&2, TD.Todo>, +info: Map<&2, String>) -> J.Json:
+def Mob.todos.k(+lc: I.Loc, +open: Bool, +all: Bool, +th: String, +ts: List<&2, TD.Todo>, +info: Map<&2, String>) -> J.Json:
   J.Json.obj([J.KV{"head", J.Json.str(TD.Todo.head(ts))}, J.KV{"open", J.Json.bool(open)}, J.KV{"toggle", J.Json.str(U.Todos.toggle(open, th))},
     J.KV{"lines", J.Json.arr(Mob.tdlines(U.Todos.rows(info, th, U.Todos.cap.all(), ts)))},
-    J.KV{"more", J.Json.str(Bool.pick(String, open, U.Todos.more(all, ts), ""))}, J.KV{"moreValue", J.Json.str(U.Todos.more.ask(all, th))}])
+    J.KV{"more", J.Json.str(Bool.pick(String, open, U.Todos.more(lc, all, ts), ""))}, J.KV{"moreValue", J.Json.str(U.Todos.more.ask(all, th))}])
 
-def Mob.todos(+info: Map<&2, String>, +th: String, +ts: List<&2, TD.Todo>) -> J.Json:
-  Bool.pick(J.Json, List.is_empty(&2, TD.Todo, ts), J.Null{}, Mob.todos.k(U.Todos.open(info, th), U.Todos.all(info, th), th, ts, info))
+def Mob.todos(+lc: I.Loc, +info: Map<&2, String>, +th: String, +ts: List<&2, TD.Todo>) -> J.Json:
+  Bool.pick(J.Json, List.is_empty(&2, TD.Todo, ts), J.Null{}, Mob.todos.k(lc, U.Todos.open(info, th), U.Todos.all(info, th), th, ts, info))
 
 # Asks: what the agent waits on the user for. Each button sends "answer"
 # with its value; "primary" marks the one to lead with
@@ -657,21 +705,25 @@ def Mob.ask.draft(empty: Bool, +id: String, +draft: String) -> J.Json:
       Mob.btn("Answer with draft", id ++ "|" ++ String.trim(draft), True{})
 
 
-def Mob.ask.approval(empty: Bool, +id: String) -> List<&2, J.Json>:
-  match empty:
-    case True{}:
-      [Mob.btn("Allow", id ++ "|accept", True{}), Mob.btn("Allow for session", id ++ "|session", False{}), Mob.btn("Deny", id ++ "|decline", False{})]
-    case False{}:
-      [Mob.btn("Allow", id ++ "|Allow", True{}), Mob.btn("Deny", id ++ "|Deny", False{})]
+def Mob.ask.approval(empty: Bool, omp: Bool, +lc: I.Loc, +id: String) -> List<&2, J.Json>:
+  match empty omp:
+    case _ True{}:
+      [Mob.btn(MSG.T.approval.allow(lc), id ++ "|accept", True{}), Mob.btn(MSG.T.approval.deny(lc), id ++ "|decline", False{})]
+    case True{} False{}:
+      [Mob.btn(MSG.T.approval.allow(lc), id ++ "|accept", True{}), Mob.btn(MSG.T.approval.session(lc), id ++ "|session", False{}), Mob.btn(MSG.T.approval.deny(lc), id ++ "|decline", False{})]
+    case False{} False{}:
+      [Mob.btn(MSG.T.approval.allow(lc), id ++ "|Allow", True{}), Mob.btn(MSG.T.approval.deny(lc), id ++ "|Deny", False{})]
 
-def Mob.ask.btns(i: Nat, +id: String, +o: String, +draft: String) -> List<&2, J.Json>:
+def Mob.ask.btns(+lc: I.Loc, omp: Bool, i: Nat, +id: String, +o: String, +draft: String) -> List<&2, J.Json>:
   match i:
     case 0n:
       [Mob.btn("Implement", id ++ "|implement", True{}), Mob.btn("Dismiss", id ++ "|dismiss", False{})]
     case 1n:
       List.append(&2, J.Json, Mob.ask.opts(String.split(o, '\n'), id), [Mob.ask.draft(String.is_empty(String.trim(draft)), id, draft)])
+    case 2n:
+      [Mob.btn("Send", id ++ "|accept", True{}), Mob.btn("Not now", id ++ "|decline", False{})]
     case _:
-      Mob.ask.approval(String.is_empty(o), id)
+      Mob.ask.approval(String.is_empty(o), omp, lc, id)
 
 def Mob.ask.body(plan: Bool, +d: String) -> List<&2, J.Json>:
   match plan:
@@ -680,31 +732,39 @@ def Mob.ask.body(plan: Bool, +d: String) -> List<&2, J.Json>:
     case False{}:
       Nil{}
 
-def Mob.ask.std(a: M.Ask, +draft: String) -> J.Json:
+def Mob.ask.std.loc(+lc: I.Loc, st: M.State, a: M.Ask, +draft: String) -> J.Json:
   match a:
-    case M.Ask{+id, _, +k, +tool, +d, +o, _, _}:
+    case M.Ask{+id, +thread, +k, +tool, +d, +o, _, _}:
+      +omp = String.eq(M.Thread.provider(U.Ui.thread(st, thread)), "omp")
       J.Json.obj([J.KV{"id", J.Json.str(id)}, J.KV{"kind", J.Json.str(k)},
-        J.KV{"head", J.Json.str(U.Ask.head(k, tool, d))},
+        J.KV{"head", J.Json.str(U.Ask.head.loc(lc, k, tool, d))},
         J.KV{"detail", J.Json.str(Bool.pick(String, String.eq(k, "plan"), "", d))},
         J.KV{"blocks", J.Json.arr(Mob.ask.body(String.eq(k, "plan"), d))},
-        J.KV{"buttons", J.Json.arr(Mob.ask.btns(C.Codec.pos(["plan", "input"], k), id, o, draft))}])
+        J.KV{"buttons", J.Json.arr(Mob.ask.btns(lc, omp, C.Codec.pos(["plan", "input", "send"], U.Ask.bkind(k, tool)), id, o, draft))}])
 
-def Mob.ask.k(web: Bool, a: M.Ask, +draft: String, nf: Map<&2, String>) -> J.Json:
+def Mob.ask.std(st: M.State, a: M.Ask, draft: String) -> J.Json:
+  Mob.ask.std.loc(I.En{}, st, a, draft)
+
+def Mob.ask.k.loc(+lc: I.Loc, st: M.State, web: Bool, a: M.Ask, +draft: String, nf: Map<&2, String>) -> J.Json:
   match web:
     case True{}:
-      MB.MBots.ask(U.Teach.ask.from(a, nf))
+      MB.MBots.ask(U.Teach.ask.from.loc(lc, a, nf))
     case False{}:
-      Mob.ask.std(a, draft)
+      Mob.ask.std.loc(lc, st, a, draft)
 
-def Mob.ask(+a: M.Ask, +draft: String, nf: Map<&2, String>) -> J.Json:
-  Mob.ask.k(String.eq(MB.MBots.ask.kind(a), "browser"), a, draft, nf)
+def Mob.ask.k(st: M.State, web: Bool, a: M.Ask, draft: String, nf: Map<&2, String>) -> J.Json:
+  Mob.ask.k.loc(I.En{}, st, web, a, draft, nf)
+def Mob.ask(+lc: I.Loc, st: M.State, +a: M.Ask, +draft: String, nf: Map<&2, String>) -> J.Json:
+  match a:
+    case M.Ask{_, _, +k, _, _, _, _, _}:
+      Mob.ask.k.loc(lc, st, String.eq(MB.MBots.ask.kind(a), "browser"), a, draft, nf)
 
-def Mob.asks(as: List<&2, M.Ask>, +draft: String, +nf: Map<&2, String>) -> List<&2, J.Json>:
+def Mob.asks(+lc: I.Loc, +st: M.State, as: List<&2, M.Ask>, +draft: String, +nf: Map<&2, String>) -> List<&2, J.Json>:
   match as:
     case Nil{}:
       Nil{}
     case a <> t:
-      Mob.ask(a, draft, nf) <> Mob.asks(t, draft, nf)
+      Mob.ask(lc, st, a, draft, nf) <> Mob.asks(lc, st, t, draft, nf)
 
 # Subagents (core/subs.bend): what this thread delegated ("select" with
 # the row's key opens its thread) and the agent's own ("fold" with its
@@ -721,32 +781,45 @@ def Mob.sub.steps(ss: List<&2, SB.SubStep>) -> List<&2, J.Json>:
     case s <> t:
       Mob.sub.step(s) <> Mob.sub.steps(t)
 
-def Mob.sub(r: SB.SubRow) -> J.Json:
+# a row's state as shown, beside its token "state" (English adds nothing:
+# the apps show the token when there is no label)
+def Mob.sub.label(lc: I.Loc, +word: String) -> List<&2, J.KV>:
+  match lc:
+    case I.En{}: Nil{}
+    case I.Ja{}: [J.KV{"stateLabel", J.Json.str(U.StateWord.label(I.Ja{}, word))}]
+
+def Mob.sub.loc(+lc: I.Loc, r: SB.SubRow) -> J.Json:
   match r:
     case SB.SubRow{+key, +agent, +title, +who, +word, +doing, +live, +open, n, ss}:
-      J.Json.obj([J.KV{"id", J.Json.str(key)}, J.KV{"agent", J.Json.bool(agent)}, J.KV{"title", J.Json.str(title)}, J.KV{"who", J.Json.str(who)},
+      J.Json.obj(List.append(&2, J.KV, Mob.sub.label(lc, word), [J.KV{"id", J.Json.str(key)}, J.KV{"agent", J.Json.bool(agent)}, J.KV{"title", J.Json.str(TTL.Title.shown(lc, title))}, J.KV{"who", J.Json.str(who)},
         J.KV{"state", J.Json.str(word)}, J.KV{"doing", J.Json.str(doing)}, J.KV{"live", J.Json.bool(live)}, J.KV{"open", J.Json.bool(open)},
         J.KV{"n", J.Json.nat(n)}, J.KV{"steps", J.Json.arr(Mob.sub.steps(ss))},
         J.KV{"act", J.Json.str(Bool.pick(String, agent, "fold", "select"))}, J.KV{"value", J.Json.str(Bool.pick(String, agent, SB.Subs.ask(open, key), key))},
-        J.KV{"cancel", J.Json.str(SB.Subs.cancel(SB.SubRow{key, agent, title, who, word, doing, live, open, 0n, Nil{}}))}])
+        J.KV{"cancel", J.Json.str(SB.Subs.cancel(SB.SubRow{key, agent, title, who, word, doing, live, open, 0n, Nil{}}))}]))
 
-def Mob.subs.go(rs: List<&2, SB.SubRow>) -> List<&2, J.Json>:
+def Mob.sub(r: SB.SubRow) -> J.Json:
+  Mob.sub.loc(I.En{}, r)
+
+def Mob.subs.go(+lc: I.Loc, rs: List<&2, SB.SubRow>) -> List<&2, J.Json>:
   match rs:
     case Nil{}:
       Nil{}
     case r <> rest:
-      Mob.sub(r) <> Mob.subs.go(rest)
+      Mob.sub.loc(lc, r) <> Mob.subs.go(lc, rest)
 
 # the panel: how many are at work ("" with none), its word ("3 at work",
 # "3 done"), whether it is open, the head's tap (the "fold" action with
 # value), and its rows, none while shut (subs.bend's panel: done, it folds)
-def Mob.subs.k(+open: Bool, +th: String, +rs: List<&2, SB.SubRow>) -> J.Json:
+def Mob.subs.k(+lc: I.Loc, +open: Bool, +th: String, +rs: List<&2, SB.SubRow>) -> J.Json:
   J.Json.obj([J.KV{"busy", J.Json.str(SB.Subs.busy(SB.Subs.live(rs)))}, J.KV{"word", J.Json.str(SB.Subs.panel.word(rs))},
     J.KV{"open", J.Json.bool(open)}, J.KV{"act", J.Json.str(SB.Subs.panel.action(open))}, J.KV{"value", J.Json.str(SB.Subs.panel.ask(open, th, rs))},
-    J.KV{"rows", J.Json.arr(Mob.subs.go(SB.Subs.panel.rows(open, rs)))}])
+    J.KV{"rows", J.Json.arr(Mob.subs.go(lc, SB.Subs.panel.rows(open, rs)))}])
 
-def Mob.subs(+info: Map<&2, String>, +th: String, +rs: List<&2, SB.SubRow>) -> J.Json:
-  Bool.pick(J.Json, List.is_empty(&2, SB.SubRow, rs), J.Null{}, Mob.subs.k(SB.Subs.panel.open(info, th, rs), th, rs))
+def Mob.subs.loc(+lc: I.Loc, +info: Map<&2, String>, +th: String, +rs: List<&2, SB.SubRow>) -> J.Json:
+  Bool.pick(J.Json, List.is_empty(&2, SB.SubRow, rs), J.Null{}, Mob.subs.k(lc, SB.Subs.panel.open(info, th, rs), th, rs))
+
+def Mob.subs(info: Map<&2, String>, th: String, rs: List<&2, SB.SubRow>) -> J.Json:
+  Mob.subs.loc(I.En{}, info, th, rs)
 
 def Mob.parent(none: Bool, +st: M.State, +thread: String, +p: String) -> J.Json:
   match none:
@@ -879,10 +952,18 @@ def Mob.snooze(snoozed: Bool) -> J.Json:
     case False{}:
       Mob.item("clock", "Snooze", "snooze", "", False{}, False{}, [Mob.opt("1 hour", "1h"), Mob.opt("Tomorrow", "tomorrow"), Mob.opt("1 week", "1w")])
 
-def Mob.menu(+id: String, snoozed: Bool) -> List<&2, J.Json>:
-  [Mob.item("diff", "Diff", "diff", "", False{}, False{}, Nil{}), Mob.item("terminal", "Terminal", "term-toggle", "", False{}, False{}, Nil{}),
+# the put-away Ready row's Buy it (client.bend's Fab.mini.tools), first
+def Mob.menu.tools(ts: List<&2, TO.Tool>) -> List<&2, J.Json>:
+  match ts:
+    case Nil{}:
+      Nil{}
+    case TO.Tool{+icon, +label, _, +action, +value, _, _, _} <> r:
+      Mob.item(icon, label, action, value, False{}, False{}, Nil{}) <> Mob.menu.tools(r)
+
+def Mob.menu(+id: String, snoozed: Bool, mini: List<&2, TO.Tool>) -> List<&2, J.Json>:
+  List.append(&2, J.Json, Mob.menu.tools(mini), [Mob.item("diff", "Diff", "diff", "", False{}, False{}, Nil{}), Mob.item("terminal", "Terminal", "term-toggle", "", False{}, False{}, Nil{}),
    Mob.item("search", "Find file", "find-open", "files", False{}, False{}, Nil{}), Mob.snooze(snoozed),
-   Mob.item("trash", "Delete", "row-delete", id, False{}, True{}, Nil{})]
+   Mob.item("trash", "Delete", "row-delete", id, False{}, True{}, Nil{})])
 
 # a phone opens a thread on its newest 20 entries (a screen shows about
 # ten, and each reply's markdown is laid out in the phone's JS engine,
@@ -896,13 +977,13 @@ def Mob.count(+more: Nat) -> Nat:
 def Mob.page(+drafts: Map<&2, String>, +id: String, +st: M.State) -> U.Win:
   U.Page.newest.from(M.State.mine(st, id), id, U.Page.since(st, id), Mob.count(Maybe.default(&2, Nat, Nat.read(U.Str.get(drafts, "@more." ++ id)), 0n)))
 
-def Mob.paged.es(w: U.Win, +st: M.State, +sel: String, +info: Map<&2, String>, +dr: Map<&2, String>, +running: Bool) -> List<&2, J.Json>:
-  Mob.entries(U.Win.shown(w), st, sel, info, dr, running)
+def Mob.paged.es(+lc: I.Loc, w: U.Win, +st: M.State, +sel: String, +info: Map<&2, String>, +dr: Map<&2, String>, +running: Bool) -> List<&2, J.Json>:
+  Mob.entries(lc, U.Win.shown(w), st, sel, info, dr, running)
 
 # a side question (/btw) and its answer, over the composer until closed
-def Mob.btw(+u: U.Ui) -> J.Json:
+def Mob.btw(+lc: I.Loc, +u: U.Ui) -> J.Json:
   Bool.pick(J.Json, String.is_empty(U.Btw.question(u)), J.Null{},
-    J.Json.obj([J.KV{"q", J.Json.str(U.Btw.question(u))}, J.KV{"a", J.Json.str(U.Btw.text(U.Btw.reply.of(u)))}]))
+    J.Json.obj([J.KV{"q", J.Json.str(U.Btw.question(u))}, J.KV{"a", J.Json.str(U.Btw.text(lc, U.Btw.reply.of(u)))}]))
 
 # a streamed reply as the thread shows it (markdown nodes)
 def Mob.live.nodes(+text: String) -> J.Json:
@@ -918,28 +999,65 @@ def Mob.live.k(render: Bool, +text: String) -> J.Json:
     case False{}:
       J.Json.arr(Nil{})
 
-def Mob.thread(render: Bool, u: U.Ui, t: M.Thread, pend: List<&2, String>, vw: J.Json, +atts: List<&2, String>, +up: String, term: J.Json, skills: List<&2, J.Json>, +ph: M.Phase, btw: J.Json, embs: J.Json) -> J.Json:
+# The project card (client.bend's Fab.*), as the first row above the
+# composer: the goal, Edit and Buy it (a row of the queue's kind, which
+# both apps draw with its buttons)
+def Mob.fab.buy(+buy: String, +id: String) -> List<&2, J.Json>:
+  Bool.pick(List<&2, J.Json>, String.is_empty(buy), Nil{}, [J.Json.obj([J.KV{"label", J.Json.str(buy)}, J.KV{"action", J.Json.str("buy")}, J.KV{"value", J.Json.str(id)}]),
+    # its ×: put away (client.bend's Fab.min), Buy it stays in the menu
+    J.Json.obj([J.KV{"label", J.Json.str("×")}, J.KV{"action", J.Json.str("fab-hide")}, J.KV{"value", J.Json.str(id)}])])
+
+# the project card (Goal, Edit) and, once the turn is over and there is
+# something to buy, Ready to order with Buy it (U.Fab.ready), as queue rows
+# above the message box
+# (the row's tag says Ready, or Ordered once something is paid for: the
+# text is what there is to order, or how the order stands)
+def Mob.fab.ready.text(+line: String) -> String:
+  Bool.pick(String, String.starts_with(line, "Ready to order · "), String.drop(line, 17n),
+    Bool.pick(String, String.starts_with(line, "Ordered · "), String.drop(line, 10n), line))
+
+def Mob.fab.ready.tag(+line: String) -> String:
+  Bool.pick(String, String.starts_with(line, "Ordered"), "Ordered", "Ready")
+
+def Mob.fab.ready(+line: String, +buy: String, +id: String) -> List<&2, J.Json>:
+  Bool.pick(List<&2, J.Json>, String.is_empty(line), Nil{},
+    [J.Json.obj([J.KV{"msg", J.Json.str("ready:" ++ id)}, J.KV{"text", J.Json.str(Mob.fab.ready.text(line))}, J.KV{"tag", J.Json.str(Mob.fab.ready.tag(line))}, J.KV{"buttons", J.Json.arr(Mob.fab.buy(buy, id))}])])
+
+def Mob.fab.k(shown: Bool, +st: M.State, +nf: Map<&2, String>, +id: String, run: Bool) -> List<&2, J.Json>:
+  match shown:
+    case True{}:
+      J.Json.obj([J.KV{"msg", J.Json.str("fab:" ++ id)}, J.KV{"text", J.Json.str(U.Str.get(nf, "fab.line:" ++ id))}, J.KV{"tag", J.Json.str("Goal")},
+        J.KV{"buttons", J.Json.arr([J.Json.obj([J.KV{"label", J.Json.str("Edit")}, J.KV{"action", J.Json.str("fab-edit")}, J.KV{"value", J.Json.str(id)}])])}])
+        <> Mob.fab.ready(U.Fab.ready.shown.k(U.Fab.min.of(st, id), U.Fab.ready.k(U.Fab.buy.of(st, nf, id), U.Str.get(nf, "fab.ready:" ++ id), run)), U.Fab.ready.btn.of(st, nf, id), id)
+    case False{}:
+      Nil{}
+
+def Mob.fab(+st: M.State, +nf: Map<&2, String>, +id: String, run: Bool) -> List<&2, J.Json>:
+  Mob.fab.k(String.eq(U.Str.get(nf, "fab.shown:" ++ id), "1"), st, nf, id, run)
+
+def Mob.thread(+lc: I.Loc, render: Bool, u: U.Ui, t: M.Thread, pend: List<&2, String>, vw: J.Json, +atts: List<&2, String>, +up: String, term: J.Json, skills: List<&2, J.Json>, +ph: M.Phase, btw: J.Json, embs: J.Json) -> J.Json:
   match u t:
     case U.Ui{+st, +sel, +drafts, +live, _, _, +now, _, pa, _, _, _, _, _, +nf, _, _} M.Thread{+id, _, title, _, _, +turn, _, archived, o, +sa, +ua, pinned, _, branch, _, +pr, +mo, _, _, _, _}:
       +pg = Mob.page(drafts, id, st)
-      J.Json.obj([J.KV{"id", J.Json.str(id)}, J.KV{"title", J.Json.str(U.Label.title(st, id, title))}, J.KV{"branch", J.Json.str(branch)},
+      J.Json.obj([J.KV{"id", J.Json.str(id)}, J.KV{"title", J.Json.str(U.Label.title(st, id, TTL.Title.shown(lc, title)))}, J.KV{"branch", J.Json.str(branch)},
+        J.KV{"boat", J.Json.str(UZ.Chip.of(st, id, now))},
         J.KV{"state", J.Json.str(Mob.state(turn))},
         J.KV{"tools", J.Json.arr(Mob.head(V.View.running(turn), pinned, TO.Tools.settled(o, Nat.is_gt(sa, ua)), archived, Bool.not(String.is_empty(M.Fork.source(st, id)))))},
-        J.KV{"menu", J.Json.arr(Mob.menu(id, M.Snooze.on(now, U.Side.until(st, id))))},
+        J.KV{"menu", J.Json.arr(Mob.menu(id, M.Snooze.on(now, U.Side.until(st, id)), U.Fab.mini.tools.of(st, nf, id, V.View.running(turn))))},
         J.KV{"parent", Mob.parent(String.is_empty(U.Tasks.up(st, id)), st, id, U.Tasks.up(st, id))},
-        J.KV{"subs", Mob.subs(nf, id, SB.Subs.rows(st, nf, id, now))},
-        J.KV{"entries", J.Json.arr(Mob.paged.es(pg, st, id, nf, drafts, V.View.running(turn)))},
+        J.KV{"subs", Mob.subs.loc(lc, nf, id, SB.Subs.rows(st, nf, id, now))},
+        J.KV{"entries", J.Json.arr(Mob.paged.es(lc, pg, st, id, nf, drafts, V.View.running(turn)))},
         J.KV{"earlier", J.Json.nat(U.Win.hidden(pg))},
         J.KV{"sending", J.Json.arr(Mob.strs(pend))},
-        J.KV{"asks", J.Json.arr(Mob.asks(U.Asks.open(st, id), U.Str.get(drafts, sel), nf))},
+        J.KV{"asks", J.Json.arr(Mob.asks(lc, st, U.Asks.open(st, id), U.Str.get(drafts, sel), nf))},
         J.KV{"queued", J.Json.str("")},
-        J.KV{"queue", J.Json.arr(Mob.queue(M.Queue.context(M.Queue.items(st, id)), True{}, V.View.running(turn)))},
-        J.KV{"todos", Mob.todos(nf, id, U.Todos.shown(st, id, V.View.running(turn)))},
+        J.KV{"queue", J.Json.arr(List.append(&2, J.Json, Mob.fab(st, nf, id, V.View.running(turn)), Mob.queue(lc, M.Queue.context(M.Queue.items(st, id)), True{}, V.View.running(turn))))},
+        J.KV{"todos", Mob.todos(lc, nf, id, U.Todos.shown(st, id, V.View.running(turn)))},
         J.KV{"live", Mob.live.k(render, U.Str.get(live, id))},
         J.KV{"working", J.Json.str(Bool.pick(String, String.is_empty(U.Str.get(live, id)), M.Phase.label(ph), ""))},
         J.KV{"phase", J.Json.str(M.Phase.name(ph))},
         J.KV{"draft", J.Json.str(U.Str.get(drafts, sel))},
-        J.KV{"send", J.Json.str(U.Follow.button(st, sel, V.View.running(turn), U.Follow.stop(V.View.running(turn), U.Str.get(drafts, sel), atts), U.Str.get(drafts, sel)))},
+        J.KV{"send", J.Json.str(U.Follow.button(lc, st, sel, V.View.running(turn), U.Follow.stop(V.View.running(turn), U.Str.get(drafts, sel), atts), U.Str.get(drafts, sel)))},
         J.KV{"sendAct", J.Json.str(U.Follow.act(U.Follow.stop(V.View.running(turn), U.Str.get(drafts, sel), atts)))},
         J.KV{"picker", Mob.picker.ctx(U.Str.get(nf, "models"), pr, mo, U.Effort.of(st, sel), U.Usage.tail(st, sel))},
         J.KV{"skills", J.Json.arr(skills)}, J.KV{"btw", btw},
@@ -951,16 +1069,16 @@ def Mob.thread(render: Bool, u: U.Ui, t: M.Thread, pend: List<&2, String>, vw: J
         J.KV{"embs", embs},
         J.KV{"viewer", vw}])
 
-def Mob.main.r(none: Bool, +u: U.Ui, +sel: String, render: Bool) -> J.Json:
+def Mob.main.r(+lc: I.Loc, none: Bool, +u: U.Ui, +sel: String, render: Bool) -> J.Json:
   match none:
     case True{}:
       J.Null{}
     case False{}:
-      Mob.thread(render, u, U.Ui.thread(Mob.st(u), sel), U.Ui.pending(u, sel), VW.View.json(u, Mob.review(String.eq(VW.View.kind(u), "review"), u)), U.Ui.atts(u, sel), U.Ui.uploading(u, sel),
-        Mob.term(U.Ui.flag(u, "term"), u, sel), Mob.skills(U.Ui.skills(u)), U.Side.phase(Mob.st(u), U.Ui.thread(Mob.st(u), sel)), Mob.btw(u), J.Json.arr(Mob.embs(U.Emb.views(u, sel), u, sel)))
+      Mob.thread(lc, render, u, U.Ui.thread(Mob.st(u), sel), U.Ui.pending(u, sel), VW.View.json(lc, u, Mob.review(String.eq(VW.View.kind(u), "review"), u)), U.Ui.atts(u, sel), U.Ui.uploading(u, sel),
+        Mob.term(U.Ui.flag(u, "term"), u, sel), Mob.skills(U.Ui.skills(u)), U.Side.phase(Mob.st(u), U.Ui.thread(Mob.st(u), sel)), Mob.btw(lc, u), J.Json.arr(Mob.embs(U.Emb.views(u, sel), u, sel)))
 
-def Mob.main(none: Bool, +u: U.Ui, +sel: String) -> J.Json:
-  Mob.main.r(none, u, sel, True{})
+def Mob.main(+lc: I.Loc, none: Bool, +u: U.Ui, +sel: String) -> J.Json:
+  Mob.main.r(lc, none, u, sel, True{})
 
 def Mob.empty(n: Nat) -> String:
   Bool.pick(String, Nat.is_eq(n, 0n), "Add a project to start.", "Pick a thread, or start one in a project.")
@@ -972,27 +1090,27 @@ def Mob.title(t: M.Thread) -> String:
 
 # a delete a row asked for, to confirm: its thread, what to ask, the
 # buttons (the yes button sends "row-delete id" again, the no "delete-no")
-def Mob.deleting.k(none: Bool, +st: M.State, +id: String) -> J.Json:
+def Mob.deleting.k(none: Bool, +lc: I.Loc, +st: M.State, +id: String) -> J.Json:
   match none:
     case True{}:
       J.Null{}
     case False{}:
-      J.Json.obj([J.KV{"id", J.Json.str(id)}, J.KV{"title", J.Json.str("Delete thread?")},
-        J.KV{"body", J.Json.str(Mob.title(U.Ui.thread(st, id)))}, J.KV{"yes", J.Json.str("Delete")}, J.KV{"no", J.Json.str("Cancel")}])
+      J.Json.obj([J.KV{"id", J.Json.str(id)}, J.KV{"title", J.Json.str(MSG.T.sheet.delete(lc))},
+        J.KV{"body", J.Json.str(TTL.Title.shown(lc, Mob.title(U.Ui.thread(st, id))))}, J.KV{"yes", J.Json.str(MSG.T.common.delete(lc))}, J.KV{"no", J.Json.str(MSG.T.common.cancel(lc))}])
 
 # a thread being renamed (client.bend's Ren): its id, what to ask, the title
 # so far ("text": a phone makes every "value" an id of its hub); the yes
 # button sends "rename-save" with "id\u001ftitle", the no "rename-no"
-def Mob.renaming.k(none: Bool, +id: String, +value: String) -> J.Json:
+def Mob.renaming.k(none: Bool, +lc: I.Loc, +id: String, +value: String) -> J.Json:
   match none:
     case True{}:
       J.Null{}
     case False{}:
-      J.Json.obj([J.KV{"id", J.Json.str(id)}, J.KV{"title", J.Json.str("Rename thread")}, J.KV{"text", J.Json.str(value)},
-        J.KV{"yes", J.Json.str("Rename")}, J.KV{"no", J.Json.str("Cancel")}])
+      J.Json.obj([J.KV{"id", J.Json.str(id)}, J.KV{"title", J.Json.str(MSG.T.sheet.rename(lc))}, J.KV{"text", J.Json.str(value)},
+        J.KV{"yes", J.Json.str(MSG.T.menu.rename(lc))}, J.KV{"no", J.Json.str(MSG.T.common.cancel(lc))}])
 
-def Mob.renaming(+u: U.Ui) -> J.Json:
-  Mob.renaming.k(String.is_empty(U.Ren.on(u)), U.Ren.on(u), U.Ui.scratch(u, "@f.title"))
+def Mob.renaming(+lc: I.Loc, +u: U.Ui) -> J.Json:
+  Mob.renaming.k(String.is_empty(U.Ren.on(u)), lc, U.Ren.on(u), U.Ui.scratch(u, "@f.title"))
 
 # the first-run tour (core/onboard.bend), while a step is on screen: its
 # number, count and counter, its title and text, and the buttons (actions
@@ -1005,37 +1123,37 @@ def Mob.tour.choices(cs: List<&2, U.TChoice>) -> List<&2, J.Json>:
     case U.TChoice{l, a, v} <> t:
       J.Json.obj([J.KV{"label", J.Json.str(l)}, J.KV{"action", J.Json.str(a)}, J.KV{"value", J.Json.str(v)}]) <> Mob.tour.choices(t)
 
-def Mob.tour.k(+i: Nat, +u: U.Ui) -> J.Json:
-  J.Json.obj([J.KV{"step", J.Json.nat(i)}, J.KV{"count", J.Json.nat(OB.Ob.count())}, J.KV{"counter", J.Json.str(U.Tour.counter(u))},
-    J.KV{"title", J.Json.str(OB.Ob.title(i))}, J.KV{"body", J.Json.str(U.Tour.body(2n, u))}, J.KV{"first", J.Json.bool(Bool.not(U.Tour.back(u)))},
-    J.KV{"next", J.Json.str(OB.Ob.forward(i))}, J.KV{"back", J.Json.str("Back")}, J.KV{"skip", J.Json.str("Skip")},
+def Mob.tour.k(+lc: I.Loc, +i: Nat, +u: U.Ui) -> J.Json:
+  J.Json.obj([J.KV{"step", J.Json.nat(i)}, J.KV{"count", J.Json.nat(OB.Ob.count())}, J.KV{"counter", J.Json.str(U.Tour.counter.loc(lc, u))},
+    J.KV{"title", J.Json.str(OB.Ob.title(lc, i))}, J.KV{"body", J.Json.str(U.Tour.body.loc(lc, 2n, u))}, J.KV{"first", J.Json.bool(Bool.not(U.Tour.back(u)))},
+    J.KV{"next", J.Json.str(OB.Ob.forward(lc, i))}, J.KV{"back", J.Json.str(MSG.T.tour.back(lc))}, J.KV{"skip", J.Json.str(MSG.T.tour.skip(lc))},
     J.KV{"choices", J.Json.arr(Mob.tour.choices(U.Tour.choices(u)))}])
 
-def Mob.tour.at(live: Bool, +i: Nat, +u: U.Ui) -> J.Json:
+def Mob.tour.at(+lc: I.Loc, live: Bool, +i: Nat, +u: U.Ui) -> J.Json:
   match live:
     case True{}:
-      Mob.tour.k(i, u)
+      Mob.tour.k(lc, i, u)
     case False{}:
       J.Null{}
 
-def Mob.tour(+u: U.Ui) -> J.Json:
-  Mob.tour.at(U.Tour.on(u), U.Tour.at(u), u)
+def Mob.tour(+lc: I.Loc, +u: U.Ui) -> J.Json:
+  Mob.tour.at(lc, U.Tour.on(u), U.Tour.at(u), u)
 
-def Mob.deleting(+u: U.Ui) -> J.Json:
-  Mob.deleting.k(String.is_empty(U.Ui.row_deleting(u)), Mob.st(u), U.Ui.row_deleting(u))
+def Mob.deleting(+lc: I.Loc, +u: U.Ui) -> J.Json:
+  Mob.deleting.k(String.is_empty(U.Ui.row_deleting(u)), lc, Mob.st(u), U.Ui.row_deleting(u))
 
 # a project remove to confirm ("proj-remove" armed it; "proj-remove" with
 # id removes it, "proj-keep" cancels): the phones' second click
-def Mob.removing.k(none: Bool, +st: M.State, +id: String) -> J.Json:
+def Mob.removing.k(none: Bool, +lc: I.Loc, +st: M.State, +id: String) -> J.Json:
   match none:
     case True{}:
       J.Null{}
     case False{}:
-      J.Json.obj([J.KV{"id", J.Json.str(id)}, J.KV{"title", J.Json.str("Remove " ++ U.Ui.project_title(st, id) ++ "?")},
-        J.KV{"body", J.Json.str("Its threads are kept. Adding its folder again brings it back.")}, J.KV{"yes", J.Json.str("Remove")}, J.KV{"no", J.Json.str("Cancel")}])
+      J.Json.obj([J.KV{"id", J.Json.str(id)}, J.KV{"title", J.Json.str(MSG.T.sheet.remove(lc, U.Ui.project_title(st, id)))},
+        J.KV{"body", J.Json.str(MSG.T.sheet.remove.note(lc))}, J.KV{"yes", J.Json.str(MSG.T.common.remove(lc))}, J.KV{"no", J.Json.str(MSG.T.common.cancel(lc))}])
 
-def Mob.removing(+u: U.Ui) -> J.Json:
-  Mob.removing.k(String.is_empty(U.Ui.scratch(u, "@rm")), Mob.st(u), U.Ui.scratch(u, "@rm"))
+def Mob.removing(+lc: I.Loc, +u: U.Ui) -> J.Json:
+  Mob.removing.k(String.is_empty(U.Ui.scratch(u, "@rm")), lc, Mob.st(u), U.Ui.scratch(u, "@rm"))
 
 # the list's search: always shown at the top of the list (open stays true
 # for older apps), its query ("proj-find-q"); it finds projects, or in the
@@ -1092,24 +1210,24 @@ def Mob.keys.list(open: Bool, +u: U.Ui) -> List<&2, J.Json>:
     case False{}:
       Nil{}
 
-def Mob.keys.form(open: Bool, +u: U.Ui) -> List<&2, J.Json>:
+def Mob.keys.form(+lc: I.Loc, open: Bool, +u: U.Ui) -> List<&2, J.Json>:
   match open:
     case True{}:
-      [Mob.set.row.f("New API key", U.ApiKeys.form.note(), [Mob.set.field("kname", "Name", False{}, U.Ui.scratch(u, "@f.kname")), Mob.set.field("kval", "Key", True{}, "")],
+      [Mob.set.row.f("New API key", U.ApiKeys.form.note(lc), [Mob.set.field("kname", "Name", False{}, U.Ui.scratch(u, "@f.kname")), Mob.set.field("kval", "Key", True{}, "")],
         [Mob.set.btn("Save", "key-add", "", True{})])]
     case False{}:
       Nil{}
 
 # the time zone (client.bend's Tzs): the row shows it; a field and Set; Automatic
 # while one is set; an error from the hub under it
-def Mob.tz(+u: U.Ui) -> List<&2, J.Json>:
-  [Mob.set.row.f("Time zone", U.Tzs.line(u), [Mob.set.field("tzname", "Europe/Helsinki", False{}, U.Ui.scratch(u, "@f.tzname"))],
+def Mob.tz(+lc: I.Loc, +u: U.Ui) -> List<&2, J.Json>:
+  [Mob.set.row.f("Time zone", U.Tzs.line.loc(lc, u), [Mob.set.field("tzname", "Europe/Helsinki", False{}, U.Ui.scratch(u, "@f.tzname"))],
      List.append(&2, J.Json, [Mob.set.btn("Set", "tz-set", "", True{})], Bool.pick(List<&2, J.Json>, U.Tzs.auto(u), [Mob.set.btn("Automatic", "tz-auto", "", False{})], Nil{}))),
    Mob.set.row("", U.Tzs.err(u), Nil{})]
 
-def Mob.keys(+u: U.Ui) -> List<&2, J.Json>:
-  List.concat(&2, J.Json, [[Mob.set.row("API keys", U.ApiKeys.note(u), [Mob.set.btn("Add API key", "flag", "keyform", U.Ui.flag(u, "keyform")), Mob.set.btn("View API keys", "flag", "keys", U.Ui.flag(u, "keys"))])],
-    Mob.keys.form(U.Ui.flag(u, "keyform"), u), Mob.keys.list(U.Ui.flag(u, "keys"), u)])
+def Mob.keys(+lc: I.Loc, +u: U.Ui) -> List<&2, J.Json>:
+  List.concat(&2, J.Json, [[Mob.set.row("API keys", U.ApiKeys.note.loc(lc, u), [Mob.set.btn("Add API key", "flag", "keyform", U.Ui.flag(u, "keyform")), Mob.set.btn("View API keys", "flag", "keys", U.Ui.flag(u, "keys"))])],
+    Mob.keys.form(lc, U.Ui.flag(u, "keyform"), u), Mob.keys.list(U.Ui.flag(u, "keys"), u)])
 
 def Mob.set.days(+d: String) -> List<&2, J.Json>:
   +n = {Maybe.default(&2, Nat, Nat.read(d), 3n) : Nat}
@@ -1139,20 +1257,20 @@ def Mob.set.strs(xs: List<&2, String>) -> List<&2, J.Json>:
     case x <> t:
       J.Json.str(x) <> Mob.set.strs(t)
 
-def Mob.set.pair.k(on: Bool, +btns: List<&2, J.Json>, +nf: Map<&2, String>) -> J.Json:
+def Mob.set.pair.k(+lc: I.Loc, on: Bool, +btns: List<&2, J.Json>, +nf: Map<&2, String>) -> J.Json:
   match on:
     case True{}:
-      J.Json.obj([J.KV{"label", J.Json.str("Pairing link")}, J.KV{"note", J.Json.str(U.Pair.note(U.Pair.link(nf)))}, J.KV{"buttons", J.Json.arr(btns)},
-        J.KV{"qr", J.Json.arr(Mob.set.strs(U.Pair.qr(nf)))}, J.KV{"qrnote", J.Json.str(U.Pair.qr.note())}])
+      J.Json.obj([J.KV{"label", J.Json.str("Pairing link")}, J.KV{"note", J.Json.str(U.Pair.note(lc, U.Pair.link(nf)))}, J.KV{"buttons", J.Json.arr(btns)},
+        J.KV{"qr", J.Json.arr(Mob.set.strs(U.Pair.qr(nf)))}, J.KV{"qrnote", J.Json.str(U.Pair.qr.note(lc))}])
     case False{}:
-      Mob.set.row("Pairing link", U.Pair.note(U.Pair.link(nf)), btns)
+      Mob.set.row("Pairing link", U.Pair.note(lc, U.Pair.link(nf)), btns)
 
 # the pairing link with Copy and QR code; while "pairqr" is on the row
 # carries the code's rows ("qr": '1' dark), drawn under it
-def Mob.set.pair(+on: Bool, +nf: Map<&2, String>) -> J.Json:
+def Mob.set.pair(+lc: I.Loc, +on: Bool, +nf: Map<&2, String>) -> J.Json:
   +btns = {List.append(&2, J.Json, Bool.pick(List<&2, J.Json>, U.Pair.qr.ready(nf), [Mob.set.btn("QR code", "flag", "pairqr", on)], Nil{}),
     Bool.pick(List<&2, J.Json>, String.is_empty(U.Pair.link(nf)), Nil{}, [Mob.set.btn("Copy", "copy", U.Pair.link(nf), False{})])) : List<&2, J.Json>}
-  Mob.set.pair.k(on, btns, nf)
+  Mob.set.pair.k(lc, on, btns, nf)
 
 # Your machines (U.Mate.rows): each of the owner's other machines, how its
 # sync goes, and On/Off ("sync.<name>")
@@ -1163,8 +1281,8 @@ def Mob.mates.go(rs: List<&2, U.MateRow>) -> List<&2, J.Json>:
     case U.MateRow{+nm, +note, +on, +key} <> t:
       Mob.set.row(nm, note, Mob.set.chips(["on", "off"], on, key)) <> Mob.mates.go(t)
 
-def Mob.mates(+u: U.Ui) -> List<&2, J.Json>:
-  Mob.set.row(U.Mate.title(), U.Mate.lead(u), Nil{}) <> Mob.mates.go(U.Mate.rows(u))
+def Mob.mates(+lc: I.Loc, +u: U.Ui) -> List<&2, J.Json>:
+  Mob.set.row(U.Mate.title(lc), U.Mate.lead.loc(lc, u), Nil{}) <> Mob.mates.go(U.Mate.rows.loc(lc, u))
 
 # Notification policy rows, shared with the window and web.
 def Mob.notify.rows(rs: List<&2, U.NotifyRow>) -> List<&2, J.Json>:
@@ -1174,27 +1292,93 @@ def Mob.notify.rows(rs: List<&2, U.NotifyRow>) -> List<&2, J.Json>:
     case U.NotifyRow{nm, note, on, key} <> t:
       Mob.set.row.n(nm, note, Mob.set.chips(["on", "off"], on, key)) <> Mob.notify.rows(t)
 
-def Mob.notify(st: M.State) -> List<&2, J.Json>:
-  Mob.set.row.n(U.Notify.title(), U.Notify.lead(), Nil{}) <> Mob.notify.rows(U.Notify.rows(st))
+def Mob.notify(+lc: I.Loc, st: M.State) -> List<&2, J.Json>:
+  Mob.set.row.n(U.Notify.title(lc), U.Notify.lead(lc), Nil{}) <> Mob.notify.rows(U.Notify.rows.loc(lc, st))
 
-def Mob.settings.of(+u: U.Ui, +st: M.State, +nf: Map<&2, String>, +v: String, +note: String, more: List<&2, J.Json>) -> J.Json:
+# Settings > Usage (src/core/usage.bend), the first row titled "Usage: ...";
+# a row with an action has its Refresh button
+def Mob.usage.btn(none: Bool, +act: String) -> List<&2, J.Json>:
+  match none:
+    case True{}:
+      Nil{}
+    case False{}:
+      [Mob.set.btn("Refresh", act, "", False{})]
+
+def Mob.usage.row(+label: String, +r: UZ.URow) -> J.Json:
+  Mob.set.row(label, UZ.URow.note(r), Mob.usage.btn(String.is_empty(UZ.URow.act(r)), UZ.URow.act(r)))
+
+def Mob.usage.go(rs: List<&2, UZ.URow>) -> List<&2, J.Json>:
+  match rs:
+    case Nil{}:
+      Nil{}
+    case +r <> t:
+      Mob.usage.row(UZ.URow.label(r), r) <> Mob.usage.go(t)
+
+def Mob.usage.rows(rs: List<&2, UZ.URow>) -> List<&2, J.Json>:
+  match rs:
+    case Nil{}:
+      Nil{}
+    case +r <> t:
+      Mob.usage.row("Usage: " ++ UZ.URow.label(r), r) <> Mob.usage.go(t)
+
+def Mob.kn.acts(as: List<&2, KH.KAct>) -> List<&2, J.Json>:
+  match as:
+    case Nil{}: Nil{}
+    case KH.KAct{l, a, v} <> t: Mob.set.btn(l, U.KN.action(a), v, False{}) <> Mob.kn.acts(t)
+
+def Mob.kn(n: Maybe<&2, KH.KNote>) -> List<&2, J.Json>:
+  match n:
+    case None{}: Nil{}
+    case Some{KH.KNote{_, title, body, acts}}: [Mob.set.row(title, body, Mob.kn.acts(acts))]
+
+def Mob.lang.chips(+lc: I.Loc, vs: List<&2, String>, +u: U.Ui) -> List<&2, J.Json>:
+  match vs:
+    case Nil{}: Nil{}
+    case +v <> t:
+      Mob.set.btn(U.Lang.label(lc, v), "lang", v, String.eq(v, U.Lang.choice(u))) <> Mob.lang.chips(lc, t, u)
+
+def Mob.lang.rows(+lc: I.Loc, +u: U.Ui) -> List<&2, J.Json>:
+  [Mob.set.row.l(MSG.T.settings.lang(lc), "", Mob.lang.chips(lc, U.Lang.offered(u), u)),
+    Mob.set.row.l(MSG.T.settings.agent.lang(lc), "", [Mob.set.btn(
+      Bool.pick(String, U.Lang.agent.on(u), MSG.T.settings.lang.on(lc), MSG.T.settings.lang.off(lc)),
+      "setting", "agent.lang=" ++ U.Lang.agent.value(Bool.not(U.Lang.agent.on(u)), u), U.Lang.agent.on(u))])]
+
+def Mob.lang.loc(+lc: I.Loc, u: U.Ui) -> J.Json:
+  J.Json.obj([J.KV{"rows", J.Json.arr(Mob.lang.rows(lc, u))}])
+def Mob.kx.rows(ls: List<&2, String>) -> List<&2, J.Json>:
+  match ls:
+    case Nil{}: Nil{}
+    case l <> t: Mob.set.row(l, "", Nil{}) <> Mob.kx.rows(t)
+
+def Mob.kx.settings(+u: U.Ui) -> List<&2, J.Json>:
+  Mob.kx.rows(KEX.KX.lines(KEX.KX.report(J.Json.get_obj(U.KX.result(U.Ui.infos(u), U.Ui.sel(u)), "report"))))
+
+def Mob.lang(+u: U.Ui) -> J.Json:
+  Mob.lang.loc(U.Lang.loc(u), u)
+
+def Mob.settings.of.loc(+lc: I.Loc, +u: U.Ui, +st: M.State, +nf: Map<&2, String>, +v: String, +note: String, more: List<&2, J.Json>) -> J.Json:
   +prov = M.Setting.get(st, "agent.provider", "claude")
   +models = U.Str.get(nf, "models")
   +model = M.Setting.get(st, "agent.model", "")
   J.Json.obj([J.KV{"rows", J.Json.arr(List.append(&2, J.Json, List.append(&2, J.Json, List.concat(&2, J.Json, [[
     Mob.set.row(Mob.set.days.label(M.Setting.get(st, "settle.days", "3")), "Threads idle this long move to Settled. They stay saved.", Mob.set.days(M.Setting.get(st, "settle.days", "3"))),
-    Mob.set.row("Continue after a restart", "Turns a restart cuts short go on by themselves.", Mob.set.chips(["on", "off"], Bool.pick(String, M.Carry.on(st), "on", "off"), "restart.continue"))], Mob.notify(st), [
+    Mob.set.row("Continue after a restart", "Turns a restart cuts short go on by themselves.", Mob.set.chips(["on", "off"], Bool.pick(String, M.Carry.on(st), "on", "off"), "restart.continue"))], Mob.notify(lc, st), [
     Mob.set.row("Provider for new threads", Bool.pick(String, String.is_empty(U.Models.cli(models, prov)), prov ++ " is not installed", U.Models.cli(models, prov)), Mob.set.chips(["claude", "codex", "grok", "muse", "antigravity", "omp"], prov, "agent.provider")),
     Mob.set.row("Model for new threads", Bool.pick(String, String.is_empty(model), "default", model) ++ ": " ++ U.Models.label_of(models, prov, model), Mob.set.chips("" <> U.Models.list(models, prov), model, "agent.model")),
-    Mob.set.row(U.KiCad.cli.label(nf), U.KiCad.cli.note(nf), Bool.pick(List<&2, J.Json>, String.is_empty(U.Str.get(nf, "kicad.fork")), [Mob.set.btn("Install Backplane KiCad", "kicad-install", "", False{})], Nil{})),
-    Mob.set.row(U.FreeCAD.label(nf), U.FreeCAD.note(nf), Nil{}),
-    Mob.set.row(U.KiCad.ipc.label(nf), U.KiCad.ipc.note(nf), Bool.pick(List<&2, J.Json>, U.KiCad.ipc.ready(nf), Mob.set.chips(["on", "off"], M.Setting.get(st, "kicad.ipc", "on"), "kicad.ipc"), Nil{})),
-    Mob.set.row.l("Theme", "Unset, the phone follows its own system.", Mob.set.chips(["dark", "light"], M.Setting.get(st, "ui.theme", ""), "ui.theme")),
+    Mob.set.row.f("KiCad", U.KN.summary(nf) ++ " · " ++ U.Str.get(nf, "kicad.cli"), [Mob.set.field("kpath", "Runtime root or kicad-cli path", False{}, U.Ui.scratch(u, "@f.kpath"))], [Mob.set.btn("Save path", "kicad-path-save", "", False{})])], Mob.kn(U.KN.of(nf, st)), [
+    Mob.set.row(U.FreeCAD.label.loc(lc, nf), U.FreeCAD.note(lc, nf), Nil{}),
+    Mob.set.row(U.KiCad.ipc.label(lc, nf), U.KiCad.ipc.note(lc, nf), Bool.pick(List<&2, J.Json>, U.KiCad.ipc.ready(nf), Mob.set.chips(["on", "off"], M.Setting.get(st, "kicad.ipc", "on"), "kicad.ipc"), Nil{})),
+    Mob.set.row(U.Fab.set.order.label(), U.Fab.set.order.note(), Mob.set.chips(["on", "off"], U.Fab.set.enabled(st), "order.enabled")),
+    Mob.set.row(U.Fab.set.label(), U.Fab.set.note.k(U.Fab.enabled(st)), Bool.pick(List<&2, J.Json>, U.Fab.enabled(st), Mob.set.chips(["on", "off"], U.Fab.set.on(st), "order.estimates"), Nil{})),
+    Mob.set.row.l("Theme", "Unset, the phone follows its own system.", Mob.set.chips(["dark", "light"], M.Setting.get(st, "ui.theme", ""), "ui.theme"))], Mob.lang.rows(lc, u), [
     Mob.set.row.l("Thread list", "Projects groups threads by project; active lists what is going on, what needs you first.", Mob.set.chips(["projects", "active"], U.Side.view(st), "sidebar.view")),
-    Mob.set.row(U.Tail.label(nf), U.Tail.note(nf), Nil{})]]), List.append(&2, J.Json, Mob.mates(u), [
-    Mob.set.pair(U.Ui.flag(u, "pairqr"), nf),
+    Mob.set.row(U.Tail.label(lc, nf), U.Tail.note(lc, nf), Nil{})]]), List.append(&2, J.Json, Mob.mates(lc, u), [
+    Mob.set.pair(lc, U.Ui.flag(u, "pairqr"), nf),
     Mob.set.row("Update channel", "Stable takes releases; nightly also takes the daily builds.", Mob.set.chips(["stable", "nightly"], M.Setting.get(st, "update.channel", "stable"), "update.channel")),
-    Mob.set.row("Backplane " ++ v, U.Update.line.w(st, nf, note), Mob.update.btn(U.Update.btn(st, nf, note)))])), more))}])
+    Mob.set.row("Backplane " ++ v, U.Update.line.w(lc, st, nf, note), Mob.update.btn(U.Update.btn(st, nf, note)))])), List.append(&2, J.Json, Mob.usage.rows(U.Usage.rows(u)), more)))}])
+
+def Mob.settings.of(+u: U.Ui, st: M.State, nf: Map<&2, String>, v: String, note: String, more: List<&2, J.Json>) -> J.Json:
+  Mob.settings.of.loc(U.Lang.loc(u), u, st, nf, v, note, more)
 
 # Antigravity (client.bend's Agv.rows), as every client draws them: a
 # button "open-url" the app opens in the browser itself
@@ -1219,19 +1403,19 @@ def Mob.agy.rows(rs: List<&2, U.AgRow>) -> List<&2, J.Json>:
     case U.AgRow{+l, +n, fs, bs} <> t:
       Mob.set.row.f(l, n, Mob.agy.fields(fs), Mob.agy.btns(bs)) <> Mob.agy.rows(t)
 
-def Mob.agy(+u: U.Ui) -> List<&2, J.Json>:
-  Mob.agy.rows(U.Agv.rows(u))
+def Mob.agy(+lc: I.Loc, +u: U.Ui) -> List<&2, J.Json>:
+  Mob.agy.rows(U.Agv.rows.loc(lc, u))
 
-def Mob.settings.k(+u: U.Ui, more: List<&2, J.Json>) -> J.Json:
+def Mob.settings.k(+lc: I.Loc, +u: U.Ui, more: List<&2, J.Json>) -> J.Json:
   match u:
     case U.Ui{+st, _, _, _, _, _, _, _, _, +v, _, _, _, +note, +nf, _, _}:
-      Mob.settings.of(u, st, nf, v, note, more)
+      Mob.settings.of.loc(lc, u, st, nf, v, note, more)
 
 # shown while "flag settings" has it open (the API keys' rows last)
-def Mob.settings(open: Bool, +u: U.Ui) -> J.Json:
+def Mob.settings(+lc: I.Loc, open: Bool, +u: U.Ui) -> J.Json:
   match open:
     case True{}:
-      Mob.settings.k(u, List.concat(&2, J.Json, [Mob.keys(u), Mob.agy(u), Mob.tz(u), [Mob.set.row.l("Tour", "The short walk through projects, threads, bots, your agents and your machines.", [Mob.set.btn("Show the tour", "ob-open", "", False{})])]]))
+      Mob.settings.k(lc, u, List.concat(&2, J.Json, [Mob.kx.settings(u), Mob.keys(lc, u), Mob.agy(lc, u), Mob.tz(lc, u), [Mob.set.row.l("Tour", "The short walk through projects, threads, bots, your agents and your machines.", [Mob.set.btn("Show the tour", "ob-open", "", False{})])]]))
     case False{}:
       J.Null{}
 
@@ -1245,28 +1429,28 @@ def Mob.items(ps: List<&2, U.PItem>) -> List<&2, J.Json>:
       J.Json.obj([J.KV{"label", J.Json.str(l)}, J.KV{"action", J.Json.str(a)}, J.KV{"value", J.Json.str(v)}, J.KV{"kind", J.Json.str(U.Palette.kind(a))}]) <> Mob.items(t)
 
 # thread search or the file picker ("find-open" search/files), while open
-def Mob.find(open: Bool, +u: U.Ui) -> J.Json:
+def Mob.find(+lc: I.Loc, open: Bool, +u: U.Ui) -> J.Json:
   match open:
     case True{}:
       J.Json.obj([J.KV{"mode", J.Json.str(U.Palette.mode(u))}, J.KV{"query", J.Json.str(U.Palette.query(u))},
-        J.KV{"rows", J.Json.arr(Mob.items(List.take(&2, U.PItem, U.Palette.items(u), 100n)))}])
+        J.KV{"rows", J.Json.arr(Mob.items(List.take(&2, U.PItem, U.Palette.items.loc(lc, u), 100n)))}])
     case False{}:
       J.Null{}
 
-def Mob.focus.thread.r(focus: Bool, +u: U.Ui, +sel: String, render: Bool) -> J.Json:
+def Mob.focus.thread.r(+lc: I.Loc, focus: Bool, +u: U.Ui, +sel: String, render: Bool) -> J.Json:
   match focus:
     case True{}:
-      Mob.main.r(String.is_empty(sel), u, sel, render)
+      Mob.main.r(lc, String.is_empty(sel), u, sel, render)
     case False{}:
       J.Null{}
 
-def Mob.focus.thread(focus: Bool, +u: U.Ui, +sel: String) -> J.Json:
-  Mob.focus.thread.r(focus, u, sel, True{})
+def Mob.focus.thread(+lc: I.Loc, focus: Bool, +u: U.Ui, +sel: String) -> J.Json:
+  Mob.focus.thread.r(lc, focus, u, sel, True{})
 
-def Mob.focus.bot(focus: Bool, +u: U.Ui) -> J.Json:
+def Mob.focus.bot(+lc: I.Loc, focus: Bool, +u: U.Ui) -> J.Json:
   match focus:
     case True{}:
-      MB.MBots.json(u)
+      MB.MBots.json(lc, u)
     case False{}:
       J.Null{}
 
@@ -1342,32 +1526,32 @@ def Mob.covered.any(js: List<&2, J.Json>) -> Bool:
 def Mob.covered(+e: String, +ups: List<&2, J.Json>, +th: J.Json, +bot: J.Json) -> Bool:
   Bool.or(Bool.or(Bool.not(String.is_empty(e)), Mob.covered.any(ups)), Mob.covered.thread(th, bot))
 
-def Mob.tour.gate(covered: Bool, +u: U.Ui) -> J.Json:
+def Mob.tour.gate(+lc: I.Loc, covered: Bool, +u: U.Ui) -> J.Json:
   match covered:
     case True{}:
       J.Null{}
     case False{}:
-      Mob.tour(u)
+      Mob.tour(lc, u)
 
-def Mob.screen.go(+focus: Bool, +u: U.Ui, +ix: U.SIx, +g: U.SGroups, +side: MSide) -> J.Json:
+def Mob.screen.go(+lc: I.Loc, +focus: Bool, +u: U.Ui, +ix: U.SIx, +g: U.SGroups, +side: MSide) -> J.Json:
   match u:
     case U.Ui{+st, +sel, +dr, _, +o, +on, +now, _, _, +v, _, _, +e, +note, _, _, _}:
       +compact = N.Note.compact.of(N.Note.heard(on, now, Mob.heard(u)), U.Ui.threads(st), st)
-      +rmenu = Mob.rmenu(u)
-      +deleting = Mob.deleting(u)
-      +renaming = Mob.renaming(u)
-      +removing = Mob.removing(u)
-      +settings = Mob.settings(U.Ui.flag(u, "settings"), u)
-      +find = Mob.find(U.Ui.flag(u, "palette"), u)
-      +folders = PK.MPick.json(u)
-      +newbot = MB.MBots.new(u)
+      +rmenu = Mob.rmenu(lc, u)
+      +deleting = Mob.deleting(lc, u)
+      +renaming = Mob.renaming(lc, u)
+      +removing = Mob.removing(lc, u)
+      +settings = Mob.settings(lc, U.Ui.flag(u, "settings"), u)
+      +find = Mob.find(lc, U.Ui.flag(u, "palette"), u)
+      +folders = PK.MPick.json.loc(lc, u)
+      +newbot = MB.MBots.new(lc, u)
       +newroom = MB.MBots.rnew(u)
-      +thread = Mob.focus.thread(focus, u, sel)
-      +bot = Mob.focus.bot(focus, u)
+      +thread = Mob.focus.thread(lc, focus, u, sel)
+      +bot = Mob.focus.bot(lc, focus, u)
       J.Json.obj([J.KV{"online", J.Json.bool(on)}, J.KV{"version", J.Json.str(v)}, J.KV{"seq", J.Json.nat(U.Ui.seq(u))}, J.KV{"error", J.Json.str(e)},
-        J.KV{"note", J.Json.str(note)}, J.KV{"sel", J.Json.str(sel)}, J.KV{"making", J.Json.bool(U.Made.waiting(u))}, J.KV{"theme", J.Json.str(M.Setting.get(st, "ui.theme", ""))},
+        J.KV{"lang", Mob.lang.loc(lc, u)}, J.KV{"note", J.Json.str(note)}, J.KV{"sel", J.Json.str(sel)}, J.KV{"making", J.Json.bool(U.Made.waiting(u))}, J.KV{"theme", J.Json.str(M.Setting.get(st, "ui.theme", ""))},
         J.KV{"empty", J.Json.str(Mob.empty(List.length(&2, M.Project, U.Ui.projects(st))))},
-        J.KV{"projects", J.Json.arr(Mob.grouped(g, o, ix, st, now, U.Find.q(o, dr)))},
+        J.KV{"projects", J.Json.arr(Mob.grouped(lc, g, o, ix, st, now, U.Find.q(o, dr)))},
         J.KV{"older", Mob.older(g, o, U.Find.q(o, dr))},
         J.KV{"view", J.Json.str(Mob.view(u))},
         J.KV{"active", J.Json.arr(MSide.rows(side))},
@@ -1377,7 +1561,7 @@ def Mob.screen.go(+focus: Bool, +u: U.Ui, +ix: U.SIx, +g: U.SGroups, +side: MSid
         J.KV{"deleting", deleting},
         J.KV{"renaming", renaming},
         J.KV{"removing", removing},
-        J.KV{"tour", Mob.tour.gate(Mob.covered(e, [rmenu, deleting, renaming, removing, settings, find, folders, newbot, newroom], thread, bot), u)},
+        J.KV{"tour", Mob.tour.gate(lc, Mob.covered(e, [rmenu, deleting, renaming, removing, settings, find, folders, newbot, newroom], thread, bot), u)},
         J.KV{"settings", settings},
         J.KV{"find", find},
         J.KV{"folders", folders},
@@ -1386,24 +1570,24 @@ def Mob.screen.go(+focus: Bool, +u: U.Ui, +ix: U.SIx, +g: U.SGroups, +side: MSid
         J.KV{"thread", thread},
         J.KV{"uber", J.Null{}},
         J.KV{"plane", J.Null{}},
-        J.KV{"bots", J.Json.arr(MB.MBots.rows(B.BU.rows(u)))},
+        J.KV{"bots", J.Json.arr(MB.MBots.rows(lc, B.BU.rows(u)))},
         J.KV{"rooms", J.Json.arr(MB.MBots.rooms(B.BU.rooms(u)))},
         J.KV{"newBot", newbot},
         J.KV{"newRoom", newroom},
         J.KV{"bot", bot}])
 
 # (the sidebar's rows, Side.rows.ix, made by the caller when it needs them too)
-def Mob.screen.ixr(+focus: Bool, +u: U.Ui, +ix: U.SIx, +rows: List<&2, U.SRow>) -> J.Json:
-  Mob.screen.go(focus, u, ix, U.Side.groups(U.Find.rows(rows, U.Find.q(Mob.open(u), Mob.scratch(u))), Mob.now(u)),
-    Mob.side(String.eq(Mob.view(u), "active"), ix, U.Ui.state.of(u), Mob.now(u), U.Find.q(Mob.open(u), Mob.scratch(u)), Mob.open(u)))
+def Mob.screen.ixr(+lc: I.Loc, +focus: Bool, +u: U.Ui, +ix: U.SIx, +rows: List<&2, U.SRow>) -> J.Json:
+  Mob.screen.go(lc, focus, u, ix, U.Side.groups(U.Find.rows(rows, U.Find.q(Mob.open(u), Mob.scratch(u))), Mob.now(u)),
+    Mob.side(lc, String.eq(Mob.view(u), "active"), ix, U.Ui.state.of(u), Mob.now(u), U.Find.q(Mob.open(u), Mob.scratch(u)), Mob.open(u)))
 
-def Mob.screen.ix(+focus: Bool, +u: U.Ui, +ix: U.SIx) -> J.Json:
-  Mob.screen.ixr(focus, u, ix, U.Side.rows.ix(U.Ui.state.of(u), ix, Mob.now(u)))
+def Mob.screen.ix(+lc: I.Loc, +focus: Bool, +u: U.Ui, +ix: U.SIx) -> J.Json:
+  Mob.screen.ixr(lc, focus, u, ix, U.Side.rows.ix(U.Ui.state.of(u), ix, Mob.now(u)))
 
 # (what every row asks of the whole state is gathered once a screen:
 # core's Side.ix)
 def Mob.screen.f(focus: Bool, +u: U.Ui) -> J.Json:
-  Mob.screen.ix(focus, u, U.Side.ix(U.Ui.state.of(u)))
+  Mob.screen.ix(U.Lang.loc(u), focus, u, U.Side.ix(U.Ui.state.of(u)))
 
 def Mob.screen(+u: U.Ui) -> J.Json:
   Mob.screen.f(True{}, u)

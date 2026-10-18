@@ -1,5 +1,28 @@
 import Base
+import ./src/server/server.bend as MPCREDIT # mail perf
+import ./src/core/charter.bend as CH # mail 2c
+import ./src/core/mailrun.bend as MRUN # mail 2c
+import ./src/server/mailstore.bend as MIX # mail index
+import ./src/app/mm.bend as MM # window memos
+import ./src/core/kexport.bend as KEX
+import ./src/core/i18n.bend as I18
+import ./test/fixtures/i18n_fallback.bend as I18F
+import ./src/core/usage.bend as UZ
+import ./src/core/refview.bend as RC # links (cards, trail)
+import ./src/core/order.bend as ORD # ordering (project card, buy threads)
 import ./src/core/mail.bend as ML # mail 1
+import ./src/core/mailbody.bend as MB # mail 2a
+import ./src/core/mailview.bend as MVW # mail view
+import ./src/core/ref.bend as REF
+# ---- i18n cjk ----
+import ./src/core/cjk.bend as CJK
+# ---- end i18n cjk ----
+# ---- i18n ime ----
+import ./src/core/ime.bend as IMEL
+import ./src/app/win.bend as WINL
+# ---- end i18n ime ----
+import ./src/core/kihealth.bend as KH
+import ./src/core/kserve.bend as KSL
 import ./src/core/tz.bend as TZ
 import ./src/core/when.bend as WH
 import ./src/core/sched.bend as SCH
@@ -22,7 +45,11 @@ import ./src/app/bots.bend as BV
 import ./src/core/board.bend as B
 import ./src/core/hub.bend as H
 import ./src/core/deploy.bend as DP
+import ./src/core/ship.bend as SHP # deploy main
 import ./src/core/cmds.bend as CM
+import ./src/core/errtail.bend as ERT
+import ./src/core/keyring.bend as KRG
+import ./src/core/ride.bend as RD
 import ./src/core/adopt.bend as AD
 import ./src/core/utf8.bend as UT
 import ./src/core/refs.bend as RF
@@ -115,6 +142,7 @@ import ./src/core/rules.bend as RLS
 import ./src/core/tboard.bend as TBD
 import ./src/core/task.bend as TSK
 import ./src/core/teach.bend as TCH
+import ./src/core/cef.bend as CEF # browser-cef
 import ./src/mobile/bots.bend as MBT
 
 # Backplane's rules, stated over the real code. `bend PROOF.bend` proves each
@@ -2246,6 +2274,14 @@ law reset_keeps_hand:
 
 law reset_new_origin_drops_viewer:
   {U.Ui.info(U.Ui.reset(U.Ui.info_set(U.Ui.reset(U.Ui.init(0n), U.Reset.demo("O")), "view.kind:t1", "board"), U.Reset.demo("P")), "view.kind:t1") == "" : String}
+
+# the project card survives a reconnect to the same hub, and is asked for
+# again after any reconnect (the scratch's last ask is forgotten)
+law reset_keeps_card:
+  {U.Ui.info(U.Ui.reset(U.Ui.info_set(U.Ui.reset(U.Ui.init(0n), U.Reset.demo("O")), "fab.line:t1", "A lamp"), U.Reset.demo("O")), "fab.line:t1") == "A lamp" : String}
+
+law reset_asks_card_again:
+  {U.Ui.scratch(U.Ui.reset(U.Ui.scratch_set(U.Ui.reset(U.Ui.init(0n), U.Reset.demo("O")), "@fab.at", "on#t1#idle"), U.Reset.demo("O")), "@fab.at") == "" : String}
 
 law reset_drops_results:
   {U.Ui.info(U.Ui.reset(U.Ui.info_set(U.Ui.reset(U.Ui.init(0n), U.Reset.demo("O")), "fm.list:t1", "x"), U.Reset.demo("O")), "fm.list:t1") == "" : String}
@@ -7955,16 +7991,20 @@ law teach_draft_secret_no_value:
 # a pause is the browser card (its picture and the person's choices);
 # every other ask keeps the standard card
 law mobile_browser_ask_card:
+  for +lc: I18.Loc
+  for +st: M.State
   for +a: M.Ask
   for +d: String
   for +nf: Map<&2, String>
-  {MSC.Mob.ask.k(True{}, a, d, nf) == MBT.MBots.ask(U.Teach.ask.from(a, nf)) : J.Json}
+  {MSC.Mob.ask.k.loc(lc, st, True{}, a, d, nf) == MBT.MBots.ask(U.Teach.ask.from.loc(lc, a, nf)) : J.Json}
 
 law mobile_other_ask_standard:
+  for +lc: I18.Loc
+  for +st: M.State
   for +a: M.Ask
   for +d: String
   for +nf: Map<&2, String>
-  {MSC.Mob.ask.k(False{}, a, d, nf) == MSC.Mob.ask.std(a, d) : J.Json}
+  {MSC.Mob.ask.k.loc(lc, st, False{}, a, d, nf) == MSC.Mob.ask.std.loc(lc, st, a, d) : J.Json}
 
 # a card on the Browser tab is added only for a browser ask
 law mobile_browser_card_only_browser:
@@ -8474,3 +8514,1821 @@ law omp_yolo_only_full:
   {Bool.and(Bool.and(Bool.not(String.eq(OMP.Omp.approval(M.Supervised{}), "yolo")), Bool.not(String.eq(OMP.Omp.approval(M.AcceptEdits{}), "yolo"))), Bool.not(String.eq(OMP.Omp.approval(M.AutoMode{}), "yolo"))) == True{} : Bool}
 
 # ---- end omp ----
+# ---- links (ref) ----
+
+law ref_uri_parse_thread:
+  {REF.Ref.parse(REF.Ref.uri(REF.Ref.msg("p1~t17-2", "m:é"))) == Some{REF.Ref.msg("p1~t17-2", "m:é")} : Maybe<&2, REF.Ref>}
+
+law ref_uri_parse_bot:
+  {REF.Ref.parse(REF.Ref.uri(REF.Ref.bot("b1-2"))) == Some{REF.Ref.bot("b1-2")} : Maybe<&2, REF.Ref>}
+
+law ref_uri_parse_room:
+  {REF.Ref.parse(REF.Ref.uri(REF.Ref.room("r1-2"))) == Some{REF.Ref.room("r1-2")} : Maybe<&2, REF.Ref>}
+
+law ref_uri_parse_person:
+  {REF.Ref.parse(REF.Ref.uri(REF.Ref.person())) == Some{REF.Ref.person()} : Maybe<&2, REF.Ref>}
+
+law ref_uri_parse_project:
+  {REF.Ref.parse(REF.Ref.uri(REF.Ref.project("p1-2"))) == Some{REF.Ref.project("p1-2")} : Maybe<&2, REF.Ref>}
+
+law ref_uri_parse_routine:
+  {REF.Ref.parse(REF.Ref.uri(REF.Ref.routine("o1-2"))) == Some{REF.Ref.routine("o1-2")} : Maybe<&2, REF.Ref>}
+
+law ref_uri_parse_task:
+  {REF.Ref.parse(REF.Ref.uri(REF.Ref.task("b1-2-3"))) == Some{REF.Ref.task("b1-2-3")} : Maybe<&2, REF.Ref>}
+
+law ref_uri_parse_pr:
+  {REF.Ref.parse(REF.Ref.uri(REF.Ref.pr("p1-2", "42"))) == Some{REF.Ref.pr("p1-2", "42")} : Maybe<&2, REF.Ref>}
+
+law ref_uri_parse_work:
+  {REF.Ref.parse(REF.Ref.uri(REF.Ref.work("w1"))) == Some{REF.Ref.work("w1")} : Maybe<&2, REF.Ref>}
+
+law ref_uri_parse_file:
+  {REF.Ref.parse(REF.Ref.uri(REF.Ref.file("p1-2", ["dir name", "a/b", "é.txt"]))) == Some{REF.Ref.file("p1-2", ["dir name", "a/b", "é.txt"])} : Maybe<&2, REF.Ref>}
+
+law ref_uri_parse_machine:
+  {REF.Ref.parse(REF.Ref.uri(REF.Ref.machine("p1"))) == Some{REF.Ref.machine("p1")} : Maybe<&2, REF.Ref>}
+
+law ref_uri_parse_conv:
+  {REF.Ref.parse(REF.Ref.uri(REF.Ref.conv("pair:bot:b1|thread:t2"))) == Some{REF.Ref.conv("pair:bot:b1|thread:t2")} : Maybe<&2, REF.Ref>}
+
+law ref_uri_parse_mail:
+  {REF.Ref.parse(REF.Ref.uri(REF.Ref.mail("pair:bot:b1|thread:t2", "m5"))) == Some{REF.Ref.mail("pair:bot:b1|thread:t2", "m5")} : Maybe<&2, REF.Ref>}
+
+law ref_uri_parse_mailroom:
+  {REF.Ref.parse(REF.Ref.uri(REF.Ref.mailroom("*"))) == Some{REF.Ref.mailroom("*")} : Maybe<&2, REF.Ref>}
+
+law ref_uri_parse_decision:
+  {REF.Ref.parse(REF.Ref.uri(REF.Ref.decision("b1", "d:é"))) == Some{REF.Ref.decision("b1", "d:é")} : Maybe<&2, REF.Ref>}
+
+law ref_uri_parse_charter:
+  {REF.Ref.parse(REF.Ref.uri(REF.Ref.charter("b1"))) == Some{REF.Ref.charter("b1")} : Maybe<&2, REF.Ref>}
+
+law ref_web_parse:
+  {REF.Ref.parse(REF.Ref.web("http://h:3787", REF.Ref.msg("p1~t17-2", "m:é"))) == Some{REF.Ref.msg("p1~t17-2", "m:é")} : Maybe<&2, REF.Ref>}
+
+law ref_web_parse_slash:
+  {REF.Ref.parse(REF.Ref.web("http://h:3787/", REF.Ref.msg("p1~t17-2", "m:é"))) == Some{REF.Ref.msg("p1~t17-2", "m:é")} : Maybe<&2, REF.Ref>}
+
+law ref_addr_roundtrip_thread:
+  {REF.Ref.of_addr(REF.Ref.addr(REF.Ref.thread("p1~t17-2"))) == Some{REF.Ref.thread("p1~t17-2")} : Maybe<&2, REF.Ref>}
+
+law ref_addr_roundtrip_bot:
+  {REF.Ref.of_addr(REF.Ref.addr(REF.Ref.bot("b1-2"))) == Some{REF.Ref.bot("b1-2")} : Maybe<&2, REF.Ref>}
+
+law ref_addr_roundtrip_room:
+  {REF.Ref.of_addr(REF.Ref.addr(REF.Ref.room("r1-2"))) == Some{REF.Ref.room("r1-2")} : Maybe<&2, REF.Ref>}
+
+law ref_addr_roundtrip_person:
+  {REF.Ref.of_addr(REF.Ref.addr(REF.Ref.person())) == Some{REF.Ref.person()} : Maybe<&2, REF.Ref>}
+
+law ref_addr_roundtrip_mail:
+  {REF.Ref.of_addr(REF.Ref.addr(REF.Ref.mail("pair:bot:b1|thread:t2", "m5"))) == Some{REF.Ref.mail("pair:bot:b1|thread:t2", "m5")} : Maybe<&2, REF.Ref>}
+
+law ref_addr_roundtrip_conv:
+  {REF.Ref.of_addr(REF.Ref.addr(REF.Ref.conv("pair:bot:b1|thread:t2"))) == Some{REF.Ref.conv("pair:bot:b1|thread:t2")} : Maybe<&2, REF.Ref>}
+
+law ref_thread_addr:
+  for id: String
+  {REF.Ref.addr(REF.Ref.thread(id)) == "thread:" ++ id : String}
+
+law ref_pct_safe:
+  {REF.Ref.unpct(REF.Ref.pct("AZaz09-._~")) == "AZaz09-._~" : String}
+
+law ref_pct_bytes:
+  {REF.Ref.unpct(REF.Ref.pct(":|/ é%")) == ":|/ é%" : String}
+
+law ref_pct_three:
+  {REF.Ref.unpct(REF.Ref.pct("€")) == "€" : String}
+
+law ref_pct_four:
+  {REF.Ref.unpct(REF.Ref.pct("😀")) == "😀" : String}
+
+law ref_pct_encoding:
+  {REF.Ref.pct(":|/ é%") == "%3A%7C%2F%20%C3%A9%25" : String}
+
+law ref_pct_malformed:
+  {REF.Ref.unpct("%zz % %A %2z %%41") == "%zz % %A %2z %A" : String}
+
+law ref_unknown_kind:
+  {REF.Ref.parse("backplane://nope/x") == None{} : Maybe<&2, REF.Ref>}
+
+law ref_no_script:
+  for s: String
+  {REF.Ref.parse("javascript:" ++ s) == None{} : Maybe<&2, REF.Ref>}
+
+law ref_legacy_open:
+  {REF.Ref.parse("backplane://open?thread=p1~t17-2") == Some{REF.Ref.thread("p1~t17-2")} : Maybe<&2, REF.Ref>}
+
+law ref_bare_thread:
+  {REF.Ref.bare("t1-2") == Some{REF.Ref.thread("t1-2")} : Maybe<&2, REF.Ref>}
+
+law ref_bare_bot:
+  {REF.Ref.bare("b1-2") == Some{REF.Ref.bot("b1-2")} : Maybe<&2, REF.Ref>}
+
+law ref_bare_task:
+  {REF.Ref.bare("b1-2-3") == Some{REF.Ref.task("b1-2-3")} : Maybe<&2, REF.Ref>}
+
+law ref_bare_project:
+  {REF.Ref.bare("p1-2") == Some{REF.Ref.project("p1-2")} : Maybe<&2, REF.Ref>}
+
+law ref_bare_room:
+  {REF.Ref.bare("r1-2") == Some{REF.Ref.room("r1-2")} : Maybe<&2, REF.Ref>}
+
+law ref_bare_routine:
+  {REF.Ref.bare("o1-2") == Some{REF.Ref.routine("o1-2")} : Maybe<&2, REF.Ref>}
+
+law ref_bare_remote:
+  {REF.Ref.bare("p1~t17-2") == Some{REF.Ref.thread("p1~t17-2")} : Maybe<&2, REF.Ref>}
+
+law ref_bare_not_short:
+  {REF.Ref.bare("t12") == None{} : Maybe<&2, REF.Ref>}
+
+law ref_bare_not_word:
+  {REF.Ref.bare("the") == None{} : Maybe<&2, REF.Ref>}
+
+law ref_bare_not_incomplete:
+  {REF.Ref.bare("t1-") == None{} : Maybe<&2, REF.Ref>}
+
+law ref_bare_not_unknown:
+  {REF.Ref.bare("x1-2") == None{} : Maybe<&2, REF.Ref>}
+
+law link_ref_uri:
+  {LK.Link.pieces("see backplane://thread/t1-2 now") == [LK.PText{"see "}, LK.PRef{"backplane://thread/t1-2", "backplane://thread/t1-2", False{}}, LK.PText{" now"}] : List<&2, LK.Piece>}
+
+law link_ref_bare:
+  {LK.Link.pieces("see t1-2 now") == [LK.PText{"see "}, LK.PRef{"t1-2", "backplane://thread/t1-2", True{}}, LK.PText{" now"}] : List<&2, LK.Piece>}
+
+law link_ref_md:
+  {LK.Link.pieces("[thread](backplane://thread/t1-2)") == [LK.PRef{"thread", "backplane://thread/t1-2", False{}}] : List<&2, LK.Piece>}
+
+law link_ref_plain_unchanged:
+  {LK.Link.pieces("a line with no refs") == [LK.PText{"a line with no refs"}] : List<&2, LK.Piece>}
+
+# ---- i18n ----
+
+law i18n_plural_ja_other:
+  for n: Nat
+  {I18.I18n.plural(I18.Ja{}, n) == I18.POther{} : I18.Plural}
+
+law i18n_plural_en_one:
+  {I18.I18n.plural(I18.En{}, 1n) == I18.POne{} : I18.Plural}
+
+law i18n_plural_en_zero:
+  {I18.I18n.plural(I18.En{}, 0n) == I18.POther{} : I18.Plural}
+
+law i18n_plural_en_many:
+  for k: Nat
+  {I18.I18n.plural(I18.En{}, 1n+1n+k) == I18.POther{} : I18.Plural}
+
+law i18n_resolve_override_en:
+  for os: String
+  {I18.I18n.resolve("en", os) == I18.En{} : I18.Loc}
+
+law i18n_resolve_override_ja:
+  for os: String
+  {I18.I18n.resolve("ja", os) == I18.Ja{} : I18.Loc}
+
+law i18n_resolve_auto:
+  for os: String
+  {I18.I18n.resolve("auto", os) == I18.I18n.of_tag(os) : I18.Loc}
+
+law i18n_of_tag_posix:
+  {I18.I18n.of_tag("ja_JP.UTF-8") == I18.Ja{} : I18.Loc}
+
+law i18n_of_tag_c:
+  {I18.I18n.of_tag("C") == I18.En{} : I18.Loc}
+
+law i18n_of_tag_empty:
+  {I18.I18n.of_tag("") == I18.En{} : I18.Loc}
+
+law i18n_of_tag_bcp:
+  {I18.I18n.of_tag("ja-JP") == I18.Ja{} : I18.Loc}
+
+law i18n_ago_en_same:
+  for +now: Nat
+  for +at: Nat
+  {I18.I18n.ago(I18.En{}, now, at) == M.Time.ago(now, at) : String}
+
+law i18n_took_en_same:
+  for +s: Nat
+  {I18.I18n.took(I18.En{}, s) == M.Time.took(s) : String}
+
+
+law i18n_fallback_fixture_save:
+  {I18F.T.common.save(I18.Ja{}) == I18F.T.common.save(I18.En{}) : String}
+
+law i18n_fallback_fixture_plural:
+  for +n: Nat
+  {I18F.T.files.count(I18.Ja{}, n) == I18F.T.files.count(I18.En{}, n) : String}
+# ---- end i18n ----
+# ---- usage-screen ----
+# The model chip's context tail and Settings > Usage (src/core/usage.bend)
+
+# a provider that never reports its context says so instead of nothing
+law usage_tail_na:
+  {UZ.Use.tail("codex", 0n, "") == " · ctx n/a" : String}
+
+# Claude shows nothing until its first reading
+law usage_tail_claude_waits:
+  {UZ.Use.tail("claude", 0n, "") == "" : String}
+
+# a reading's text is shown as it is, whatever the provider
+law usage_tail_reading:
+  for +p: String
+  for +t: String
+  {UZ.Use.tail(p, 5n, t) == t : String}
+
+# a reading is what a session holds, said as held, with its share (small
+# values: the large ones of a real session are in test/usage_test.bend)
+law usage_note_held:
+  {UZ.Use.held.note(50n, 200n) == "50 of 200 held (25%)" : String}
+
+law usage_note_no_window:
+  {UZ.Use.held.note(5n, 0n) == "5 held, window unknown" : String}
+
+# without a window there is no share, whatever is held
+law usage_pct_no_window:
+  for +u: Nat
+  {UZ.Use.pct(u, 0n) == 0n : Nat}
+
+# Boat's CLI is asked at once when it never was, whenever that is
+law usage_boat_due_never_read:
+  for +now: Nat
+  {UZ.Bj.due("", True{}, now) == True{} : Bool}
+
+# credit-seconds are shown as exact dollars, never rounded
+law usage_boat_usd_exact:
+  {UZ.Bj.usd(158n) == "$0.00158" : String}
+# ---- i18n cjk ----
+law cjk_segs_lossless:
+  {CJK.Cjk.join(CJK.Cjk.segs("日本語。")) == "日本語。" : String}
+
+law cjk_segs_lossless_mixed:
+  {CJK.Cjk.join(CJK.Cjk.segs("PRを開いた。")) == "PRを開いた。" : String}
+
+law cjk_segs_lossless_spaces:
+  {CJK.Cjk.join(CJK.Cjk.segs("  あ  い  ")) == "  あ  い  " : String}
+
+law cjk_segs_lossless_empty:
+  {CJK.Cjk.join(CJK.Cjk.segs("")) == "" : String}
+
+law cjk_no_start_stop:
+  {CJK.Cjk.can_break(12354, 12290) == False{} : Bool}
+
+law cjk_no_end_quote:
+  {CJK.Cjk.can_break(12300, 12354) == False{} : Bool}
+
+law cjk_kana_break:
+  {CJK.Cjk.can_break(12354, 12356) == True{} : Bool}
+
+law cjk_ascii_no_break:
+  {CJK.Cjk.can_break(65, 66) == False{} : Bool}
+
+law cjk_terminal_cells:
+  {L.Term.cells("A日本B", 0) == 6 : U32}
+
+law cjk_terminal_combining_cells:
+  {L.Term.cells("é日", 0) == 3 : U32}
+
+# ---- end i18n cjk ----
+
+# ---- usage-tokens ----
+# Turn usage (model.bend's Tokens, hub.bend's Turn and Lim)
+
+# a result line seen again is not counted twice
+law tok_claude_seen_nothing:
+  {H.Turn.claude(M.State.replay([M.TurnUsage{"t1", "claude", "m", "r1", 0n, 0n, 0n, 1n, 0n, 0n, "irwo", "", 1n}], M.State.empty()), "t1", 2n,
+    J.Json.obj([J.KV{"uuid", J.Str{"r1"}}, J.KV{"usage", J.Json.obj([J.KV{"output_tokens", J.Num{"1"}}])}])) == [] : List<&2, M.Change>}
+
+# a running total that rose gives the rise; one that went down started again
+law tok_rise_rose:
+  {H.Turn.rise(5n, 3n) == 2n : Nat}
+
+law tok_rise_restarted:
+  {H.Turn.rise(3n, 5n) == 3n : Nat}
+
+# a Codex session that started again counts its totals as they are
+law tok_codex_restart_whole:
+  for +was: List<&2, String>
+  for +i: Nat
+  for +v: Nat
+  {H.Turn.codex.d(False{}, was, i, v) == v : Nat}
+
+# every turn adds one turn to a total, whatever it used
+law tok_add_one_turn:
+  {M.Tok.part(M.Tok.add("2/0/0/0/0/0/0/0", 1n, 0n, 0n, 1n, 0n, 0n, False{}), 0n) == 3n : Nat}
+
+# a turn with no cost reported adds nothing to the turns with a cost
+law tok_add_no_cost:
+  {M.Tok.part(M.Tok.add("", 1n, 0n, 0n, 1n, 0n, 0n, False{}), 7n) == 0n : Nat}
+
+# ---- usage-boat-cap ----
+# without a shared cap in the status, the spend row says nothing about one
+law usage_boat_no_cap_nothing:
+  {UZ.Bj.cap.of(J.Json.obj([])) == "" : String}
+# ---- agent failures: stderr ----
+# an agent that ends before its turn did is reported with its exit code or
+# signal and the end of its stderr, with anything secret-shaped dropped
+law errtail_scrub_token:
+  {ERT.Err.scrub("GET http://h/mcp/t1?token=ab12cd done") == "GET http://h/mcp/t1?token=… done" : String}
+
+law errtail_scrub_words:
+  {ERT.Err.scrub("auth sk-AB12cd and task-list ghp_x9 Bearer q.w") == "auth sk-… and task-list ghp_… Bearer …" : String}
+
+law errtail_say_exit:
+  {ERT.Exit.say("codex exited before the turn ended", "", 1, "Error: boom\n") == "codex exited before the turn ended (exit 1): Error: boom" : String}
+
+law errtail_say_signal:
+  {ERT.Exit.say("x", "", 143, "  ") == "x (signal 15)" : String}
+# ---- end agent failures: stderr ----
+# ---- agent failures: the login keyring ----
+# a provider that reads credentials from the login keyring is never started
+# while it is locked; unknown (no bus) or unlocked starts it; one that does
+# not need it always starts; a failure while it is locked says so
+law keyring_locked_never_starts:
+  {KRG.Keyring.start("codex", 2n) == False{} : Bool}
+
+law keyring_unknown_or_open_starts:
+  {Bool.and(Bool.and(KRG.Keyring.start("codex", 0n), KRG.Keyring.start("codex", 1n)), KRG.Keyring.start("claude", 2n)) == True{} : Bool}
+
+law keyring_answers:
+  {Bool.and(Bool.and(Nat.is_eq(KRG.Keyring.of("b true\n"), 2n), Nat.is_eq(KRG.Keyring.of("b false"), 1n)), Nat.is_eq(KRG.Keyring.of(""), 0n)) == True{} : Bool}
+
+law keyring_hint_only_locked:
+  {Bool.and(String.contains(KRG.Keyring.say("x", 2n), "keyring is locked"), String.eq(KRG.Keyring.say("x", 1n), "x")) == True{} : Bool}
+# ---- end agent failures: the login keyring ----
+# ---- riding mail ----
+# a message for a running Codex turn is posted at once (nothing waits in
+# the UI) and rides the turn's next tool result: the turn is not stopped
+law ride_running_no_restart:
+  {H.Step.outs_of(H.Hub.post(H.Demo.state("codex", M.Running{}), 5n, "t1", "m1", M.User{}, "hi")) == [] : List<&2, H.Out>}
+
+law ride_posted_at_once:
+  {List.head(&2, M.Change, H.Queue.changes(H.Hub.post(H.Demo.state("codex", M.Running{}), 5n, "t1", "m1", M.User{}, "hi"))) == Some{M.MessagePosted{"t1", "m1", M.User{}, "hi", 5n}} : Maybe<&2, M.Change>}
+
+# what waits is a setting in the log, so a restart finds it again
+law ride_kept:
+  {RD.Ride.input(H.Ride.of(H.Ride.demo(), "t1")) == "hi" : String}
+
+# a tool result carries what waits, and the same step empties it, so it is
+# delivered at most once: a result for a thread with nothing waiting is
+# left as it was
+law ride_carries_block:
+  {String.contains(MC.McpOut.reply(BHS.Ride.mcp(MC.McpOut{"{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}", H.Step.none(), ""}, H.Ride.demo(), 6n, "t1")), "Incoming messages") == True{} : Bool}
+
+law ride_taken_empties:
+  {H.Ride.of(M.State.replay(H.Ride.taken(H.Ride.demo(), 6n, "t1"), H.Ride.demo()), "t1") == "" : String}
+
+law ride_nothing_waiting_same:
+  for o: MC.McpOut
+  for +s: M.State
+  for +now: Nat
+  for +th: String
+  for h: {H.Ride.of(s, th) == "" : String}
+  {BHS.Ride.mcp(o, s, now, th) == o : MC.McpOut}
+
+# never lost: a turn that ends (done, failed, stopped, or cut short by a
+# restart) with mail waiting starts the next at once with it, emptying it
+law ride_turn_end_starts:
+  {List.last(&2, M.Change, H.Queue.changes(H.Ride.after(H.Ride.demo(), 6n, H.Step{[M.TurnChanged{"t1", M.Completed{}, 6n}], Nil{}}))) == Some{M.TurnChanged{"t1", M.Running{}, 6n}} : Maybe<&2, M.Change>}
+
+law ride_interrupted_starts:
+  {List.last(&2, M.Change, H.Queue.changes(H.Ride.after(H.Ride.demo(), 6n, H.Step{[M.TurnChanged{"t1", M.Interrupted{}, 6n}], Nil{}}))) == Some{M.TurnChanged{"t1", M.Running{}, 6n}} : Maybe<&2, M.Change>}
+
+law ride_turn_end_empties:
+  {H.Ride.of(M.State.replay(H.Queue.changes(H.Ride.after(H.Ride.demo(), 6n, H.Step{[M.TurnChanged{"t1", M.Failed{}, 6n}], Nil{}})), H.Ride.demo()), "t1") == "" : String}
+
+# a step that ends no turn starts nothing
+law ride_after_running_same:
+  for +s: M.State
+  for +now: Nat
+  for +th: String
+  for os: List<&2, H.Out>
+  {H.Ride.after(s, now, H.Step{[M.TurnChanged{th, M.Running{}, now}], os}) == H.Step{[M.TurnChanged{th, M.Running{}, now}], os} : H.Step}
+
+# delivery holds nothing back on the restart (steer) path either
+law deliver_held_restart:
+  for b1: Bool
+  for b2: Bool
+  for b3: Bool
+  for +th: String
+  for +id: String
+  for +now: Nat
+  for +v: String
+  for +r: String
+  {H.Deliver.held(List.append(&2, M.Change, List.append(&2, M.Change, Bool.pick(List<&2, M.Change>, b1, [], [M.QueueTaken{th, now}]), Bool.pick(List<&2, M.Change>, b3, [], H.Ride.done(v, now, th, r))), List.append(&2, M.Change, Bool.pick(List<&2, M.Change>, b2, [], [M.ActivityLogged{th, id, "info", "steer", "Steered: the turn starts again with this message", now}]), [M.TurnChanged{th, M.Running{}, now}]))) == False{} : Bool}
+# ---- end riding mail ----
+# ---- resume after a restart ----
+# a per-turn process (Codex, Grok, Muse, Antigravity: recorded with no
+# descriptor, "-1" read as 0, never handed off) that still runs after a
+# restart is stopped, never adopted, whatever adoption allows, so its
+# thread never has two processes on one session
+law resume_turn_process_stopped:
+  {AD.Adopt.stopped(AD.Adopt.decide([AD.AEntry{"t", 42n, "b:1", 0n, False{}, "", "", CM.Cmds.new()}], ["b:1"], True{})) == [42n] : List<&2, Nat>}
+
+law resume_turn_process_not_kept:
+  {AD.Adopt.kept(AD.Adopt.decide([AD.AEntry{"t", 42n, "b:1", 0n, False{}, "", "", CM.Cmds.new()}], ["b:1"], True{})) == [] : List<&2, String>}
+
+# the cut turn is told that a tool call in flight lost its result, and the
+# words are still the continue message (a turn that brings the hub down
+# never loops: Carry.is)
+law resume_carry_tells_cut:
+  {Bool.and(H.Carry.is(M.Carry.text() ++ " " ++ H.Carry.cut()), String.contains(H.Carry.cut(), "its result was lost")) == True{} : Bool}
+# ---- end resume after a restart ----
+# ---- deploy waits for MCP calls ----
+# a request on the MCP route (any provider's) is a tool call in flight: a
+# deploy never restarts while one is open, goes once its answer is written,
+# and the caller's own deploy_* call never holds it (no self-deadlock)
+law deploy_mcp_call_waits:
+  {H.Deploy.demo.go(H.Deploy.check(H.Deploy.demo(False{}, H.Deploy.demo.line("t0")), 9n, True{}, DP.Open.mcp(Nil{}, "t1", "c1", "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"thread_wait\",\"arguments\":{}}}"))) == 0n : Nat}
+
+law deploy_mcp_answered_goes:
+  {H.Deploy.demo.go(H.Deploy.check(H.Deploy.demo(False{}, H.Deploy.demo.line("t0")), 9n, True{}, DP.Open.mcp.shut(DP.Open.mcp(Nil{}, "t1", "c1", "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"thread_wait\",\"arguments\":{}}}"), "t1", "c1"))) == 1n : Nat}
+
+law deploy_mcp_own_call_not_counted:
+  {H.Deploy.demo.go(H.Deploy.check(H.Deploy.demo(False{}, H.Deploy.demo.line("t0")), 9n, True{}, DP.Open.mcp(Nil{}, "t0", "c1", "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"deploy_restart\",\"arguments\":{}}}"))) == 1n : Nat}
+
+# a turn's end does not shut a request still waiting for its answer
+law deploy_mcp_outlives_turn_end:
+  {DP.Open.count(DP.Open.gone(DP.Open.mcp(DP.Open.add(Nil{}, "t1", "x"), "t1", "c1", "{\"method\":\"tools/call\",\"params\":{\"name\":\"thread_wait\"}}"), "t1")) == 1n : Nat}
+# ---- end deploy waits for MCP calls ----
+# ---- i18n ime ----
+
+law ime_preedit_not_in_draft:
+  {IMEL.Ime.shown(IMEL.Ime.none(), "ab", 1n) == "ab" : String}
+
+law ime_shown_at_caret:
+  {IMEL.Ime.shown(IMEL.Ime.draw(IMEL.Ime.none(), "o", 0n, 0n, "にほんご", "2222"), "abcd", 2n) == "abにほんごcd" : String}
+
+law ime_range_replace_chars:
+  {IMEL.Ime.text(IMEL.Ime.draw(IMEL.Ime.draw(IMEL.Ime.none(), "o", 0n, 0n, "にほんご", "2222"), "o", 1n, 2n, "ホン", "11")) == "にホンご" : String}
+
+law ime_delete_range:
+  {IMEL.Ime.text(IMEL.Ime.draw(IMEL.Ime.draw(IMEL.Ime.none(), "o", 0n, 0n, "にほんご", "2222"), "o", 1n, 2n, "", "")) == "にご" : String}
+
+law ime_wide_counts_once:
+  {IMEL.Ime.len(IMEL.Ime.draw(IMEL.Ime.none(), "o", 0n, 0n, "a😀日", "012")) == 3n : Nat}
+
+law ime_clear_is_off:
+  {IMEL.Ime.on(IMEL.Ime.clear(IMEL.Ime.draw(IMEL.Ime.none(), "o", 0n, 0n, "か", "2"))) == False{} : Bool}
+
+law ime_focus_change_drops:
+  {IMEL.Ime.on(IMEL.Ime.sync(IMEL.Ime.draw(IMEL.Ime.none(), "t:composer", 0n, 0n, "か", "2"), "t:other")) == False{} : Bool}
+
+law ime_owner_keeps:
+  {IMEL.Ime.on(IMEL.Ime.sync(IMEL.Ime.draw(IMEL.Ime.none(), "t:composer", 0n, 0n, "か", "2"), "t:composer")) == True{} : Bool}
+
+law ime_other_owner_never_merges:
+  {IMEL.Ime.text(IMEL.Ime.draw(IMEL.Ime.draw(IMEL.Ime.none(), "a", 0n, 0n, "か", "2"), "b", 1n, 0n, "き", "2")) == "き" : String}
+
+law ime_unknown_event_not_quit:
+  {WINL.Win.quit(WINL.Win.ev(99, 0, 0, 0, 0)) == False{} : Bool}
+
+law ime_unknown_event_is_junk:
+  {WINL.Win.junk(WINL.Win.ev(99, 0, 0, 0, 0)) == True{} : Bool}
+
+law ime_quit_is_quit:
+  {WINL.Win.quit(WINL.Win.ev(6, 0, 0, 0, 0)) == True{} : Bool}
+
+law ime_commit_event_id:
+  {WINL.Win.junk(WINL.Win.ev(14, 7, 0, 0, 0)) == False{} : Bool}
+
+# ---- end i18n ime ----
+# ---- mail 2a ----
+
+# JSON escaping's no-interior-newline property is exercised on long,
+# adversarial strings in mailbody_test; this law fixes framing exactly.
+law body_line_terminated:
+  for +b: MB.Body
+  {MB.Body.line(b) == J.Json.show(MB.Body.encode(b)) ++ "\n" : String}
+
+# A useful structural no-body property: changing text cannot change any
+# metadata/header Change, for arbitrary conversation, header and texts.
+law body_header_omits_text:
+  for +c: ML.Conv
+  for +m: ML.Mail
+  for a: String
+  for b: String
+  {MB.Body.changes(MB.Body{c, m, a}) == MB.Body.changes(MB.Body{c, m, b}) : List<&2, M.Change>}
+
+law recover_seen_empty:
+  for +b: MB.Body
+  for +box: ML.Box
+  for seen: {ML.Box.has(box, ML.Mail.id(MB.Body.mail(b))) == True{} : Bool}
+  {MB.Body.recover(b, box) == Nil{} : List<&2, M.Change>}
+
+law recover_missing_header:
+  for +c: ML.Conv
+  for +m: ML.Mail
+  for text: String
+  {MB.Body.recover.new(True{}, MB.Body{c, m, text}) == [MB.Body.metadata(c), MB.Body.header(m)] : List<&2, M.Change>}
+
+law body_path_encoded_segment:
+  for +home: String
+  for +conv: String
+  {MB.Body.path(home, conv) == home ++ "/mail/" ++ REF.Ref.pct(conv) ++ ".jsonl" : String}
+# ---- links (cards, trail) ----
+
+def RefView.state() -> M.State:
+  M.State.replay([M.ProjectCreated{"p", "Project", "/p", 1n}, M.ThreadCreated{"t", "p", "Title", M.Local{}, "", "", "claude", "", 2n}], M.State.empty())
+
+def RefView.cached() -> RC.Cards:
+  RC.Cards.result.cards(RC.Cards.get(RC.Cards.empty(), RefView.state(), "backplane://thread/t"))
+
+def RefView.fresh(+ch: M.Change) -> Maybe<&2, RC.Card>:
+  RC.Cards.result.value(RC.Cards.get(RC.Cards.drop(RefView.cached(), RC.Cards.touched(ch)), M.State.apply(RefView.state(), ch), "backplane://thread/t"))
+
+law cards_get_fresh:
+  {RefView.fresh(M.ThreadRenamed{"t", "New", 3n}) == RC.Card.of(M.State.apply(RefView.state(), M.ThreadRenamed{"t", "New", 3n}), REF.Ref.thread("t")) : Maybe<&2, RC.Card>}
+
+law cards_get_fresh_settle:
+  {RefView.fresh(M.ThreadSettled{"t", True{}, 3n}) == RC.Card.of(M.State.apply(RefView.state(), M.ThreadSettled{"t", True{}, 3n}), REF.Ref.thread("t")) : Maybe<&2, RC.Card>}
+
+law cards_get_fresh_start:
+  {RefView.fresh(M.TurnChanged{"t", M.Running{}, 3n}) == RC.Card.of(M.State.apply(RefView.state(), M.TurnChanged{"t", M.Running{}, 3n}), REF.Ref.thread("t")) : Maybe<&2, RC.Card>}
+
+law cards_get_fresh_end:
+  {RefView.fresh(M.TurnChanged{"t", M.Completed{}, 3n}) == RC.Card.of(M.State.apply(RefView.state(), M.TurnChanged{"t", M.Completed{}, 3n}), REF.Ref.thread("t")) : Maybe<&2, RC.Card>}
+
+law cards_get_fresh_delete:
+  {RefView.fresh(M.ThreadDeleted{"t", 3n}) == None{} : Maybe<&2, RC.Card>}
+
+law cards_get_fresh_project:
+  {RefView.fresh(M.ProjectCreated{"p", "Renamed", "/p", 3n}) == RC.Card.of(M.State.apply(RefView.state(), M.ProjectCreated{"p", "Renamed", "/p", 3n}), REF.Ref.thread("t")) : Maybe<&2, RC.Card>}
+
+law cards_peek_after_get:
+  {RC.Cards.peek(RefView.cached(), "backplane://thread/t") == RC.Card.of(RefView.state(), REF.Ref.thread("t")) : Maybe<&2, RC.Card>}
+
+law cards_drop_other_kept:
+  {RC.Cards.peek(RC.Cards.drop(RefView.cached(), ["other"]), "backplane://thread/t") == RC.Cards.peek(RefView.cached(), "backplane://thread/t") : Maybe<&2, RC.Card>}
+
+law trail_go_back:
+  for +bs: List<&2, String>
+  for +fs: List<&2, String>
+  {RC.Trail.back(RC.Trail.go(RC.Trail{bs, "a", fs}, "b")) == RC.Trail{List.take(&2, String, bs, 49n), "a", ["b"]} : RC.Trail}
+
+law trail_back_fwd:
+  for +bs: List<&2, String>
+  for +b: String
+  for +c: String
+  for +fs: List<&2, String>
+  {RC.Trail.fwd(RC.Trail.back(RC.Trail{b <> bs, c, fs})) == RC.Trail{b <> bs, c, fs} : RC.Trail}
+
+law trail_go_same:
+  for +bs: List<&2, String>
+  for +fs: List<&2, String>
+  {RC.Trail.go(RC.Trail{bs, "a", fs}, "a") == RC.Trail{bs, "a", fs} : RC.Trail}
+
+law trail_go_clears_fwd:
+  for +bs: List<&2, String>
+  for fs: List<&2, String>
+  {RC.Trail.go(RC.Trail{bs, "a", fs}, "b") == RC.Trail{List.take(&2, String, "a" <> bs, 50n), "b", Nil{}} : RC.Trail}
+
+def RefView.repeat(n: Nat) -> List<&2, String>:
+  match n:
+    case 0n: Nil{}
+    case 1n+k: "x" <> RefView.repeat(k)
+
+def RefView.back_count(t: RC.Trail) -> Nat:
+  match t:
+    case RC.Trail{bs, _, _}: List.length(&2, String, bs)
+
+law trail_cap:
+  {RefView.back_count(RC.Trail.go(RC.Trail{RefView.repeat(75n), "a", ["z"]}, "b")) == 50n : Nat}
+
+law card_file_kind_shared:
+  {RC.Card.of(RefView.state(), REF.Ref.file("p", ["x.kicad_pcb"])) == Some{RC.Card{"backplane://file/p/x.kicad_pcb", "file", "file", "x.kicad_pcb", "Project", "board", ""}} : Maybe<&2, RC.Card>}
+
+def RefView.entries(es: List<&2, M.Entry>, st: M.State) -> M.State:
+  match st:
+    case M.State{ps, ts, _, n, tk, sg, qu, ak, dv, nv, bw}: M.State{ps, ts, es, n, tk, sg, qu, ak, dv, nv, bw}
+
+law card_thread_no_timeline:
+  for es: List<&2, M.Entry>
+  {RC.Card.of(RefView.entries(es, RefView.state()), REF.Ref.thread("t")) == RC.Card.of(RefView.state(), REF.Ref.thread("t")) : Maybe<&2, RC.Card>}
+
+law card_github_pr_no_state:
+  for st: M.State
+  {RC.Card.of(st, REF.Ref.pr("i2cjak/Backplane", "128")) == Some{RC.Card{REF.Ref.uri(REF.Ref.pr("i2cjak/Backplane", "128")), "pr", "git-fork", "PR #128", "i2cjak/Backplane", "", ""}} : Maybe<&2, RC.Card>}
+
+law card_person_no_state:
+  for st: M.State
+  {RC.Card.of(st, REF.Ref.person()) == Some{RC.Card{"backplane://person", "person", "circle-check", "You", "", "", ""}} : Maybe<&2, RC.Card>}
+
+# a task card's status reads as the board's own
+law card_task_status_agrees:
+  {String.join([RC.Card.task.status(" Doing"), RC.Card.task.status("blocked"), RC.Card.task.status("todo"), RC.Card.task.status("DONE "), RC.Card.task.status("dropped"), RC.Card.task.status("later"), RC.Card.task.status("")], ",")
+    == String.join([TBD.Tb.status.norm(" Doing"), TBD.Tb.status.norm("blocked"), TBD.Tb.status.norm("todo"), TBD.Tb.status.norm("DONE "), TBD.Tb.status.norm("dropped"), TBD.Tb.status.norm("later"), TBD.Tb.status.norm("")], ",") : String}
+
+# Ordering (core/order.bend): Buy it shows only when there is something
+# to order and the order server answered (or estimates are off); its
+# words carry the price; an intent sent back from Edit is the text edited
+law order_buy_needs_parts:
+  {ORD.Card.buy(ORD.Card{"g", "i", "from $5.00", 0n, 0n, "", True{}}) == "" : String}
+
+law order_buy_priced:
+  {ORD.Card.buy(ORD.Card{"g", "", "from $5.00", 2n, 0n, "", True{}}) == "Buy it · from $5.00" : String}
+
+law order_buy_unreachable_hidden:
+  {ORD.Card.buy(ORD.Card{"g", "", "", 2n, 0n, "the order server is not reachable", True{}}) == "" : String}
+
+law order_buy_estimates_off:
+  {ORD.Card.buy(ORD.Card{"", "", "", 1n, 0n, "", False{}}) == "Buy it" : String}
+
+# a project with a board but no fab files yet can still be bought (the buy
+# thread writes them), unless the order server is out of reach
+law order_buy_board_only:
+  {ORD.Card.buy(ORD.Card{"", "", "", 0n, 1n, "", True{}}) == "Buy it" : String}
+
+law order_buy_board_unreachable:
+  {ORD.Card.buy(ORD.Card{"", "", "", 0n, 1n, "the order server is not reachable", True{}}) == "" : String}
+
+law intent_edit_round_trip:
+  {ORD.Intent.body(ORD.Intent.edit("# Goal\nA lamp")) == "# Goal\nA lamp" : String}
+
+law intent_edit_is_intent:
+  {ORD.Intent.is(ORD.Intent.edit("")) == True{} : Bool}
+
+# only a buy thread's agent has the order tools
+law order_tools_buy_only:
+  {BHS.Bots.buy.tools(False{}) == [] : List<&2, J.Json>}
+
+# the line beside Buy it above the message box names what there is to order,
+# says "the board" for a board with no fab files yet, and is not there
+# while the agent works
+law order_ready_names:
+  {ORD.Card.ready.k("LED board · Lamp shade", 0n) == "Ready to order · LED board · Lamp shade" : String}
+
+law order_ready_board:
+  {ORD.Card.ready.k("", 1n) == "Ready to order · the board" : String}
+
+law order_ready_nothing:
+  {ORD.Card.ready.k("", 0n) == "" : String}
+
+law fab_ready_running_hidden:
+  for line: String
+  {U.Fab.ready.k("Buy it", line, True{}) == "" : String}
+
+law fab_ready_needs_buy:
+  for line: String
+  {U.Fab.ready.k("", line, False{}) == "" : String}
+
+# a manufacturing review is current only for the design it was recorded
+# with (its fingerprint); a verdict is ok or issues, nothing else
+law order_review_none:
+  {ORD.Order.review.state("f1", J.Json.obj([])) == "none" : String}
+
+law order_review_current:
+  {ORD.Order.review.state("f1", ORD.Order.review.rec("f1", "ok", "fine", 5n)) == "current" : String}
+
+law order_review_stale:
+  {ORD.Order.review.state("f2", ORD.Order.review.rec("f1", "ok", "fine", 5n)) == "stale" : String}
+
+law order_review_verdict_closed:
+  {ORD.Order.review.verdict("looks great") == "issues" : String}
+
+# the viewer's board picker (client.bend's Bd): a board is named by its
+# folder, its schematic is beside it, and it is lit while the viewer shows
+# a file in its folder
+law bd_name_folder:
+  {U.Bd.name("boards/led-board/led-board.kicad_pcb") == "led-board" : String}
+
+law bd_name_root:
+  {U.Bd.name("main.kicad_pcb") == "main" : String}
+
+law bd_schematic_beside:
+  {U.Bd.path("schematic", "boards/a/a.kicad_pcb") == "boards/a/a.kicad_sch" : String}
+
+law bd_board_itself:
+  {U.Bd.path("board", "boards/a/a.kicad_pcb") == "boards/a/a.kicad_pcb" : String}
+
+law bd_on_sheet:
+  {U.Bd.on("/p/boards/a/power.kicad_sch", "boards/a/a.kicad_pcb") == True{} : Bool}
+
+law bd_off_other:
+  {U.Bd.on("/p/boards/b/b.kicad_pcb", "boards/a/a.kicad_pcb") == False{} : Bool}
+
+# another tab stays on the board picked (its schematic beside it); with
+# none picked, the project's own
+law bd_keep_schematic:
+  {U.Bd.keep.k("boards/a/a.kicad_pcb", "schematic", "/p") == "/p/boards/a/a.kicad_sch" : String}
+
+law bd_keep_none:
+  for kind: String
+  {U.Bd.keep.k("", kind, "/p") == "" : String}
+
+# with none picked, the project's own board's chip is the one lit
+law bd_shown_default:
+  {U.Bd.shown.k("", "/p", "boards/a/a.kicad_pcb") == "/p/boards/a/a.kicad_pcb" : String}
+
+law bd_shown_picked:
+  for root: String
+  for own: String
+  {U.Bd.shown.k("/x.kicad_pcb", root, own) == "/x.kicad_pcb" : String}
+
+# a project's second buy thread is numbered, the first is not
+law buy_title_first:
+  for t: String
+  {H.Buy.title.k(t, 0n) == t : String}
+
+law buy_title_second:
+  {H.Buy.title.k("Buy: lamp", 1n) == "Buy: lamp · 2" : String}
+
+# once something of the project is paid for, the Ready bar says so and its
+# button reads Buy again (a quote alone changes nothing)
+law order_ordered_paid:
+  {ORD.Card.ready.or("Ready to order · Lamp", "paid") == "Ordered · paid, being placed" : String}
+
+law order_ordered_quote_only:
+  for line: String
+  {ORD.Card.ready.or(line, "ready") == line : String}
+
+law fab_buy_again:
+  {U.Fab.ready.btn.k(True{}, "Buy it · from $5.00") == "Buy again" : String}
+
+law fab_buy_again_off:
+  {U.Fab.ready.btn.k(True{}, "") == "" : String}
+
+# the Ready bar's ×: put away per project (setting fab.min.<project>), and
+# then a Buy it in the header (or Ordered, once paid) brings it back
+law fab_min_key:
+  {U.Fab.min.key("p1") == "fab.min.p1" : String}
+
+law fab_min_hides_bar:
+  for line: String
+  {U.Fab.ready.shown.k(True{}, line) == "" : String}
+
+law fab_min_keeps_bar:
+  for line: String
+  {U.Fab.ready.shown.k(False{}, line) == line : String}
+
+law fab_min_header:
+  {U.Fab.mini.k(True{}, "Ready to order · Lamp") == True{} : Bool}
+
+law fab_min_header_shown_bar:
+  for line: String
+  {U.Fab.mini.k(False{}, line) == False{} : Bool}
+
+law fab_min_header_nothing:
+  {U.Fab.mini.k(True{}, "") == False{} : Bool}
+
+law fab_min_header_ordered:
+  {U.Fab.mini.label(True{}) == "Ordered" : String}
+
+# the order server: the setting when given, the default when it is empty
+law buy_server_default:
+  {H.Buy.server.k("") == ORD.Order.server() : String}
+
+law buy_server_set:
+  {H.Buy.server.k(" https://fab.example ") == "https://fab.example" : String}
+
+# an order's progress alerts the person in plain words: shipped with its
+# tracking, and nothing for an expired quote
+law order_note_shipped:
+  {ORD.Order.status.note("shipped", "1Z999") == "Shipped. Tracking: 1Z999" : String}
+
+law order_note_expired:
+  for t: String
+  {ORD.Order.status.note("expired", t) == "" : String}
+
+# a Stripe checkout that expired unpaid leaves the quote as it was: still
+# payable, then expired (not an order the watcher follows for ever)
+law order_state_cancelled:
+  for q: String
+  {ORD.Order.state.k("cancelled", q) == q : String}
+
+law order_state_paid:
+  {ORD.Order.state.k("paid", "ready") == "paid" : String}
+
+# ordering is off until the person turns it on (order.enabled): no Buy it
+# anywhere, no order tools for any agent, even in a buy thread
+law fab_buy_off_hidden:
+  for label: String
+  {U.Fab.buy.k(True{}, label) == "" : String}
+
+law order_off_no_tools:
+  for buy: Bool
+  {BHS.Bots.order.tools(False{}, buy) == [] : List<&2, J.Json>}
+
+law order_off_by_default:
+  {ORD.Order.enabled("") == False{} : Bool}
+
+# a review's issues: their lines trimmed, blank ones and non-strings left out
+law order_review_issues_kept:
+  {ORD.Order.review.lines([J.Str{" Shade: walls 0.6 mm "}, J.Str{"  "}, J.Num{"1"}, J.Str{"Base: hole too small"}], 8n) == [J.Str{"Shade: walls 0.6 mm"}, J.Str{"Base: hole too small"}] : List<&2, J.Json>}
+
+law order_review_issues_at_most:
+  {List.length(&2, J.Json, ORD.Order.review.lines([J.Str{"a"}, J.Str{"b"}, J.Str{"c"}], 2n)) == 2n : Nat}
+
+# an order's question parks nothing, so a Stop or a crash leaves it open
+# (its answer starts the agent again); an order's approval still closes
+law order_ask_survives_retire:
+  {H.Retire.hit(M.Ask{"a3", "t1", "input", "order_ask", "Fix these?", "", True{}, ""}, "t1") == False{} : Bool}
+
+law order_approval_retired:
+  {H.Retire.hit(M.Ask{"a4", "t1", "approval", "order_quote", "Send?", "", True{}, ""}, "t1") == True{} : Bool}
+
+# the review gate: a current, passed review goes on; none or stale asks for
+# a review; current with issues shows them and asks whether to fix them
+law order_gate_passed:
+  {ORD.Order.gate.k("current", "ok") == 0n : Nat}
+
+law order_gate_stale:
+  for v: String
+  {ORD.Order.gate.k("stale", v) == 1n : Nat}
+
+law order_gate_none:
+  for v: String
+  {ORD.Order.gate.k("none", v) == 1n : Nat}
+
+law order_gate_issues:
+  {ORD.Order.gate.k("current", "issues") == 2n : Nat}
+
+# the pilot: a paid test checkout is "pilot", said as such, and not watched
+law order_pilot_paid:
+  {ORD.Order.state.pilot(True{}, "paid") == "pilot" : String}
+
+law order_pilot_off:
+  for st: String
+  {ORD.Order.state.pilot(False{}, st) == st : String}
+
+law order_pilot_done:
+  {ORD.Order.done("pilot") == True{} : Bool}
+
+law order_pilot_said:
+  {String.contains(ORD.Order.status.text("pilot", ""), "your card was not charged") == True{} : Bool}
+
+law order_pilot_quiet:
+  {ORD.Order.status.note("pilot", "") == "" : String}
+
+# the issues as bullets with the review's link: the recorded ones, else the
+# summary cut at its semicolons
+law order_gate_lists_issues:
+  {ORD.Order.gate.md("x", [J.Str{"Shade: walls 0.6 mm"}, J.Str{"Knob: bore too tight."}]) == "**The manufacturing review found what to fix before ordering:**\n\n- Shade: walls 0.6 mm\n- Knob: bore too tight\n\nDetails: `.backplane/review.md`" : String}
+
+law order_gate_cuts_summary:
+  {ORD.Order.gate.md("8 BOM lines lack part numbers; knob bore too tight.", []) == "**The manufacturing review found what to fix before ordering:**\n\n- 8 BOM lines lack part numbers\n- knob bore too tight\n\nDetails: `.backplane/review.md`" : String}
+
+# an order's question alerts in its own words, without the tool's name
+law order_ask_alert_plain:
+  for q: String
+  {NO.Alert.ask.say("order_ask", q) == q : String}
+
+# a tool call with only a question (order_ask) is summed up by it, not by
+# its name again (the phone's running line: "<tool> <summary>")
+law tool_summary_question:
+  {H.Claude.tool_summary("mcp__backplane__order_ask", J.Json.obj([J.KV{"question", J.Str{"Ship where?"}}])) == "Ship where?" : String}
+
+# with ordering off, an agent asked to order points to the setting
+law order_off_says_where:
+  {String.contains(ORD.Order.prompt.project.k(False{}), "Settings → Ordering") == True{} : Bool}
+
+# ---- i18n lang ----
+law lang_default_auto:
+  {U.Lang.resolve("", "en_US.UTF-8", False{}) == "en" : String}
+law lang_default_unknown:
+  {U.Lang.resolve("garbage", "en_US.UTF-8", False{}) == "en" : String}
+law lang_gate:
+  for os: String
+  {U.Lang.resolve("ja", os, False{}) == "en" : String}
+law lang_gate_preview:
+  for os: String
+  {U.Lang.resolve("ja", os, True{}) == "ja" : String}
+law lang_auto_preview:
+  {U.Lang.resolve("auto", "ja_JP.UTF-8", True{}) == "ja" : String}
+law lang_override_en:
+  for os: String
+  for p: Bool
+  {U.Lang.resolve("en", os, p) == "en" : String}
+law prompt_lang_off:
+  {PM.Prompt.lang("off") == "" : String}
+law prompt_lang_unknown:
+  {PM.Prompt.lang("x") == "" : String}
+# ---- end i18n lang ----
+
+# ---- mail view ----
+# the rows built for the visible window never run past the list
+law mv_visible_bounds:
+  for +total: Nat
+  for +scroll: Nat
+  for +view: Nat
+  {Nat.is_ge(total, Nat.add(MVW.Mv.count(total, scroll, view), MVW.Mv.first(total, scroll, view))) == True{} : Bool}
+
+# merging full-text hits into local ones never repeats a conversation
+# (a closed case: local and server both repeat an id, and share one)
+law mv_merge_no_dup:
+  {MVW.Mv.unique(MVW.Mv.merge_hits([MVW.Mv.stub("a", 9n), MVW.Mv.stub("b", 7n), MVW.Mv.stub("a", 9n)], [MVW.Mv.stub("b", 8n), MVW.Mv.stub("d", 6n), MVW.Mv.stub("a", 9n)])) == True{} : Bool}
+
+# a newer page for the same slots leaves the ids of rows it did not change
+law mv_rows_stable:
+  {MVW.Mv.ids(MVW.Mv.rows(MVW.Mv.put_page(MVW.Mv.put_page(MVW.Mv.cache(), MVW.Mv.filter(), 0n, 3n, [MVW.Mv.stub("a", 9n), MVW.Mv.stub("b", 7n), MVW.Mv.stub("c", 5n)]), MVW.Mv.filter(), 0n, 3n, [MVW.Mv.stub("a", 9n), MVW.Mv.stub("b", 11n), MVW.Mv.stub("c", 5n)]), MVW.Mv.key(MVW.Mv.filter()), 0n, 3n)) == "a,b,c," : String}
+
+# two chips that differ never share a cache key, even with a "|" in a name
+law mv_filter_key_separates:
+  {String.eq(MVW.Mv.key(MVW.Filter{"a|b", "", "c", ""}), MVW.Mv.key(MVW.Filter{"a", "|b", "c", ""})) == False{} : Bool}
+
+# ---- end mail view ----
+
+# ---- usage-baseline ----
+# a turn is never charged with what its process or session did before the
+# hub saw it start
+
+# a Claude process already running when its thread was first seen: cost unknown
+law tok_cost_unknown_without_start:
+  {H.Turn.cost.known(True{}, False{}, "") == False{} : Bool}
+
+# a turn that starts its process is charged from 0, whatever came before
+law tok_cost_known_at_start:
+  for +b: String
+  {H.Turn.cost.known(True{}, True{}, b) == True{} : Bool}
+
+# a Codex session the hub sees start counts from 0
+law tok_codex_start_zero:
+  {H.Turn.codex.start(False{}, "t", "s", 1n) == [M.SettingSet{"tok.basis.t", "x:s:0/0/0/0/0", 1n}] : List<&2, M.Change>}
+
+# counting starts again only once
+law tok_epoch_once:
+  {H.Turn.epoch(M.State.replay([M.SettingSet{"tok.epoch", "1", 1n}], M.State.empty()), 2n) == [] : List<&2, M.Change>}
+
+# totals of a count live under its epoch
+law tok_pre_epoch:
+  {M.Tok.pre.k("1") == "tok.1." : String}
+# ---- mail index ----
+# Position participates in validation, independently of the ID fingerprint.
+law mail_index_wrong_position:
+  {MIX.MI.row.ok(MIX.MIndexRow{0, 16, 0, 0, 65536, 0, 65536}, 65600) == False{} : Bool}
+
+law mail_index_forward_chain_rejected:
+  {MIX.MI.row.ok(MIX.MIndexRow{0, 16, 0, 65664, 65536, 0, 65600}, 65600) == False{} : Bool}
+
+law mail_index_overflow_rejected:
+  {MIX.MI.row.ok(MIX.MIndexRow{4294967290, 16, 0, 0, 65536, 0, 65536}, 65536) == False{} : Bool}
+
+law mail_index_hash_empty:
+  for h: U32
+  {MIX.MI.hash("", h) == h : U32}
+# ---- end mail index ----
+# ---- scroll-stable: reading while a thread grows ----
+# a view at its very end follows it
+law hold_at_end_zero:
+  {U.Hold.at_end(0n) == True{} : Bool}
+
+# nothing new: no pill
+law hold_label_nothing:
+  {U.Hold.label(0n, False{}) == "" : String}
+
+# the entry seen is the newest: nothing is counted as new
+law hold_fresh_seen:
+  for +e: M.Entry
+  for +t: List<&2, M.Entry>
+  for +n: Nat
+  {U.Hold.fresh(e <> t, U.Hold.stop(e <> t, M.Idx.id(e), n), M.Idx.id(e), n) == n : Nat}
+
+# a panel above the window's timeline moving its top from t0 to t1 moves
+# what is read by as much (off + t1 - t0), so nothing read moves on screen
+law hold_off_still:
+  for +off: Nat
+  for +t0: Nat
+  for +t1: Nat
+  for +over: Nat
+  for h: {Nat.is_le(Nat.sub(Nat.add(off, t1), t0), over) == True{} : Bool}
+  {U.Hold.off(off, t0, t1, over) == Nat.sub(Nat.add(off, t1), t0) : Nat}
+
+# the window's timeline at its end (sc 0) never holds: it follows
+law hold_end_follows:
+  for +hold: String
+  for +off: U32
+  for +top: U32
+  for +over: U32
+  {L.TL.hold.off(hold, 0, off, top, over) == off : U32}
+# ---- end scroll-stable ----
+
+# Entry boundaries carry identity without moving any pixels.
+law hold_boundary_zero:
+  {L.TL.h(29) == 0 : U32}
+
+# Correct for growth above the anchor as well as movement of the panel.
+law hold_entry_moves:
+  for +off: Nat
+  for +y0: Nat
+  for +y1: Nat
+  for +t0: Nat
+  for +t1: Nat
+  for +over: Nat
+  for h: {Nat.is_le(Nat.sub(Nat.add(Nat.add(Nat.sub(off, y0), y1), t1), t0), over) == True{} : Bool}
+  {L.TL.hold.move(off, y0, y1, t0, t1, over) == Nat.sub(Nat.add(Nat.add(Nat.sub(off, y0), y1), t1), t0) : Nat}
+
+# At the end there is no held page: the ordinary page limit applies.
+law hold_page_free:
+  for +es: List<&2, M.Entry>
+  for +base: Nat
+  {U.Hold.page(es, "", base) == base : Nat}
+
+# ---- usage-claude-resume ----
+# a Claude session the hub sees start is charged from 0; a resumed one keeps
+# its baseline (result_index 0 does not mean 0)
+law tok_claude_start_zero:
+  {H.Turn.claude.start(False{}, "t", "s", 1n) == [M.SettingSet{"tok.basis.t", "c:0", 1n}] : List<&2, M.Change>}
+
+law tok_claude_same_session_keeps:
+  for +s: String
+  {H.Turn.claude.start(True{}, "t", s, 1n) == [] : List<&2, M.Change>}
+
+# the recount happens once
+law tok_recount_once:
+  {H.Turn.recount(M.State.replay([M.SettingSet{"tok.recount", "b", 1n}], M.State.empty()), 2n) == [] : List<&2, M.Change>}
+# ---- usage-boat-chip ----
+# a thread with no Boat sandbox shows no chip
+law chip_none:
+  for +now: Nat
+  {UZ.Chip.text("", now) == "" : String}
+
+# a running sandbox says its size
+law chip_running:
+  {UZ.Chip.text("running/large/1/0", 5n) == "Boat · large · running" : String}
+
+# a warm sandbox past its idle time is gone: no chip, never "0m"
+law chip_warm_gone:
+  {UZ.Chip.text("warm/default/0/10", 20n) == "" : String}
+
+# a warm sandbox is never stale (it goes quiet by right)
+law chip_warm_not_stale:
+  for +gen: Nat
+  for +now: Nat
+  {UZ.Chip.stale("warm", gen, now) == False{} : Bool}
+
+# ---- deploy main ----
+# deploy_main (core/ship.bend): a request something covers (the commit
+# being built, staged or live already holds origin/main) never starts a build
+law ship_covered_never_builds:
+  for c: Char
+  for cs: String
+  for busy: Bool
+  {SHP.Ship.start.k(SCon{c, cs}, busy) == False{} : Bool}
+
+# at most one build at a time: while one is on its way none starts
+law ship_busy_never_builds:
+  for +cover: String
+  {SHP.Ship.start.k(cover, True{}) == False{} : Bool}
+
+law ship_building_is_busy:
+  {SHP.Ship.busy(SHP.Ship.demo.building()) == True{} : Bool}
+
+# requests during a build yield at most one further build: whatever came,
+# the end leaves no second follow-up wanted
+law ship_coalesce_at_most_one:
+  for sh: SHP.Ship
+  for +state: String
+  for +commit: String
+  {SHP.Ship.more(SHP.Ship.end(sh, state, commit)) == False{} : Bool}
+
+# three requests (t2 twice, t3) during the build of c1: one follow-up, for
+# t2 and t3
+law ship_coalesce_three:
+  {SHP.Ship.phase(SHP.Ship.end(SHP.Ship.demo.queued(), "staged", "c1")) == "asked" : String}
+
+law ship_coalesce_askers:
+  {SHP.Ship.askers(SHP.Ship.end(SHP.Ship.demo.queued(), "staged", "c1")) == ["t2", "t3"] : List<&2, String>}
+
+# every asker since the last report is told once: one who asks twice is
+# listed once, and after the report no one is left to tell again
+law ship_told_each_once:
+  {SHP.Ship.told(SHP.Ship.asked(SHP.Ship.asked(SHP.Ship.demo.building(), "t1", "building"), "t4", "building")) == ["t1", "t4"] : List<&2, String>}
+
+law ship_told_cleared:
+  {SHP.Ship.told(SHP.Ship.end(SHP.Ship.demo.building(), "failed", "c1")) == [] : List<&2, String>}
+
+law ship_told_next_cleared:
+  for sh: SHP.Ship
+  for +state: String
+  for +commit: String
+  {SHP.Ship.next(SHP.Ship.end(sh, state, commit)) == [] : List<&2, String>}
+
+# a request a covered build holds is told at its end, not queued again
+law ship_covered_joins_build:
+  {SHP.Ship.more(SHP.Ship.asked(SHP.Ship.demo.building(), "t2", "building")) == False{} : Bool}
+
+# deploy.follow is off unless set "on"
+law ship_follow_off_default:
+  {SHP.Ship.follow.on("") == False{} : Bool}
+
+# a build gone without an exit status is never success
+law ship_gone_not_ok:
+  {SHP.Ran.ok("STATUS gone\nVERSION \n") == False{} : Bool}
+# ---- end deploy main ----
+# ---- kicad-ipc ----
+law kicad_status_missing:
+  for +r: Bool
+  for +f: Bool
+  for +v: String
+  for +a: Nat
+  {KH.KH.status(False{}, r, f, v, a) == "missing" : String}
+
+law kicad_status_broken:
+  for +f: Bool
+  for +v: String
+  for +a: Nat
+  {KH.KH.status(True{}, False{}, f, v, a) == "broken" : String}
+
+law kicad_status_stock:
+  for +v: String
+  for +a: Nat
+  {KH.KH.status(True{}, True{}, False{}, v, a) == "stock" : String}
+
+law kicad_notice_ok_none:
+  for +c: String
+  for +v: String
+  for +w: String
+  for +i: Bool
+  {KH.KH.notice("ok", c, v, w, i) == None{} : Maybe<&2, KH.KNote>}
+
+law kicad_notice_checking_none:
+  for +c: String
+  for +v: String
+  for +w: String
+  for +i: Bool
+  {KH.KH.notice("checking", c, v, w, i) == None{} : Maybe<&2, KH.KNote>}
+
+law kicad_notice_has_retry_missing:
+  for +c: String
+  for +v: String
+  for +w: String
+  for +i: Bool
+  {KH.KH.retry(KH.KH.notice("missing", c, v, w, i)) == True{} : Bool}
+
+law kicad_notice_install_iff_missing:
+  for +c: String
+  for +v: String
+  for +w: String
+  for +i: Bool
+  {KH.KH.has_install(KH.KH.notice("missing", c, v, w, i)) == i : Bool}
+
+law kicad_notice_has_retry_stock:
+  for +c: String
+  for +v: String
+  for +w: String
+  for +i: Bool
+  {KH.KH.retry(KH.KH.notice("stock", c, v, w, i)) == True{} : Bool}
+
+law kicad_notice_install_iff_stock:
+  for +c: String
+  for +v: String
+  for +w: String
+  for +i: Bool
+  {KH.KH.has_install(KH.KH.notice("stock", c, v, w, i)) == i : Bool}
+
+law kicad_notice_has_retry_old:
+  for +c: String
+  for +v: String
+  for +w: String
+  for +i: Bool
+  {KH.KH.retry(KH.KH.notice("old", c, v, w, i)) == True{} : Bool}
+
+law kicad_notice_install_iff_old:
+  for +c: String
+  for +v: String
+  for +w: String
+  for +i: Bool
+  {KH.KH.has_install(KH.KH.notice("old", c, v, w, i)) == i : Bool}
+
+law kicad_notice_has_retry_broken:
+  for +c: String
+  for +v: String
+  for +w: String
+  for +i: Bool
+  {KH.KH.retry(KH.KH.notice("broken", c, v, w, i)) == True{} : Bool}
+
+law kicad_notice_install_iff_broken:
+  for +c: String
+  for +v: String
+  for +w: String
+  for +i: Bool
+  {KH.KH.has_install(KH.KH.notice("broken", c, v, w, i)) == i : Bool}
+
+law prompt_kicad_ipc_only_ok_missing:
+  for +i: Bool
+  {String.contains(PM.Prompt.kicad.health("missing", "/c", "10.0.6", "rev", "failed", i), "api-server") == False{} : Bool}
+
+law prompt_kicad_ipc_only_ok_stock:
+  for +i: Bool
+  {String.contains(PM.Prompt.kicad.health("stock", "/c", "10.0.6", "rev", "failed", i), "api-server") == False{} : Bool}
+
+law prompt_kicad_ipc_only_ok_old:
+  for +i: Bool
+  {String.contains(PM.Prompt.kicad.health("old", "/c", "10.0.6", "rev", "failed", i), "api-server") == False{} : Bool}
+
+law prompt_kicad_ipc_only_ok_broken:
+  for +i: Bool
+  {String.contains(PM.Prompt.kicad.health("broken", "/c", "10.0.6", "rev", "failed", i), "api-server") == False{} : Bool}
+
+law prompt_kicad_ipc_only_ok_checking:
+  for +i: Bool
+  {String.contains(PM.Prompt.kicad.health("checking", "/c", "10.0.6", "rev", "failed", i), "api-server") == False{} : Bool}
+
+# --- window memos (area b): mm_* ---
+# the main area's memo is never used at or after its due time: by then the
+# clock alone may have changed what it shows (mm.bend's Mm.due)
+law mm_late_misses:
+  for +key: String
+  for +ms: List<&2, MM.MainM>
+  for +now: Nat
+  for h: {Nat.is_ge(now, MM.MainM.due(ms)) == True{} : Bool}
+  {MM.Mm.use(key, ms, now) == False{} : Bool}
+# ---- mail 2b ----
+law mail_off_unchanged:
+  for +st: H.Step
+  for +s: M.State
+  for +now: Nat
+  for +o: ML.Origin
+  for +to: String
+  for +text: String
+  for +msg: String
+  for +off: {M.Setting.get(s, "mail.on", "off") == "off" : String}
+  {H.Mail.tee(st, s, now, o, to, text, msg) == st : H.Step}
+
+law mail_file_never_waits:
+  for +s: M.State
+  for +now: Nat
+  for +o: ML.Origin
+  for +to: String
+  for +text: String
+  for +msg: String
+  {H.Mail.file.waits(H.Mail.file(s, now, o, to, text, msg)) == False{} : Bool}
+
+law mail_tee_keeps_delivery:
+  for +st: H.Step
+  for +s: M.State
+  for +now: Nat
+  for +o: ML.Origin
+  for +to: String
+  for +text: String
+  for +msg: String
+  {H.Queue.changes(H.Mail.tee(st, s, now, o, to, text, msg)) == H.Queue.changes(st) : List<&2, M.Change>}
+
+law mail_file_one_conv:
+  for +s: M.State
+  for +now: Nat
+  for +o: ML.Origin
+  for +to: String
+  for +text: String
+  for +msg: String
+  {H.Mail.file.route(H.Mail.file(s, now, o, to, text, msg)) == ML.Mail.route(o, to) : String}
+
+law mail_room_once:
+  for +s: M.State
+  for +now: Nat
+  for +from: String
+  for +room: String
+  for +text: String
+  for +msg: String
+  for +parts: List<&2, String>
+  for +subject: String
+  {H.Mail.file.count(H.Mail.room.file(s, now, from, room, text, msg, parts, subject)) == 1n : Nat}
+# ---- i18n core ui ----
+law title_shown_ja_new:
+  {U.Title.shown(I18.Ja{}, "New thread") == "新しいスレッド" : String}
+law title_shown_en_new:
+  {U.Title.shown(I18.En{}, "New thread") == "New thread" : String}
+law title_shown_other:
+  {U.Title.shown(I18.Ja{}, "x") == "x" : String}
+# the localized memo has exactly the lines of a fresh localized layout
+law tl_entries_locale:
+  for +ty: L.Ty
+  for +es: List<&2, M.Entry>
+  for +st: M.State
+  for +sel: String
+  for +px: U32
+  for +pics: Map<&2, String>
+  {L.TL.entries.m.loc(ty, L.TL.memo.make(ty, es, px, sel), st, sel, px, pics) == L.TL.entries.loc(ty, es, st, sel, px, pics) : List<&2, L.TLine>}
+# ---- end i18n core ui ----
+# ---- kicad-ipc 2 ----
+# every server is started with --parent-pid, so it ends with the hub
+law kserve_argv_parent_pid_with_idle:
+  {KSL.KS.has(KSL.KS.argv("c", "/p/a.kicad_pro", "/d", 0, ["idle-exit"]), "--parent-pid") == True{} : Bool}
+
+law kserve_argv_parent_pid_without_idle:
+  {KSL.KS.has(KSL.KS.argv("c", "/p/a.kicad_pro", "/d", 0, Nil{}), "--parent-pid") == True{} : Bool}
+
+# the socket is inside the project's own directory
+law kserve_argv_socket_in_dir:
+  {String.starts_with(KSL.KS.nth(KSL.KS.argv("c", "/p/a.kicad_pro", "/d/x", 0, Nil{}), 4n), "/d/x/") == True{} : Bool}
+
+law kserve_argv_idle_with_cap:
+  {KSL.KS.has(KSL.KS.argv("c", "/p/a.kicad_pro", "/d", 0, ["idle-exit"]), "--idle-exit") == True{} : Bool}
+
+# a runtime without idle-exit is not given the flag
+law kserve_argv_no_idle_without_cap:
+  {KSL.KS.has(KSL.KS.argv("c", "/p/a.kicad_pro", "/d", 0, Nil{}), "--idle-exit") == False{} : Bool}
+
+# the socket comes from the ready line (it may be api-<pid>.sock)
+law kserve_ready_line:
+  {KSL.KS.ready("KiCad API server listening at /d/api-7.sock") == Some{"/d/api-7.sock"} : Maybe<&2, String>}
+
+law kserve_ready_other_line:
+  {KSL.KS.ready("loading the project") == None{} : Maybe<&2, String>}
+
+law kserve_version_ok_exact:
+  {KSL.KS.version_ok("10.99.0-bp.1", "10.99.0-bp.1") == True{} : Bool}
+
+# a git-describe part before the suffix is fine
+law kserve_version_ok_describe:
+  {KSL.KS.version_ok("10.99.0-unknown-bp.1", "10.99.0-bp.1") == True{} : Bool}
+
+law kserve_version_other_build:
+  {KSL.KS.version_ok("10.99.0-bp.2", "10.99.0-bp.1") == False{} : Bool}
+
+law kserve_version_longer_build:
+  {KSL.KS.version_ok("10.99.0-bp.11", "10.99.0-bp.1") == False{} : Bool}
+
+law kserve_version_not_fork:
+  {KSL.KS.version_ok("10.99.0", "10.99.0-bp.1") == False{} : Bool}
+
+# the restart schedule: 1, 5, 30 seconds, then give up
+law kserve_retry_first:
+  {KSL.KS.retry([100n], 110n) == Some{1n} : Maybe<&2, Nat>}
+
+law kserve_retry_second:
+  {KSL.KS.retry([101n, 100n], 110n) == Some{5n} : Maybe<&2, Nat>}
+
+law kserve_retry_third:
+  {KSL.KS.retry([102n, 101n, 100n], 110n) == Some{30n} : Maybe<&2, Nat>}
+
+# never more than three restarts in 300 s
+law kserve_retry_gives_up:
+  {KSL.KS.retry([103n, 102n, 101n, 100n], 110n) == None{} : Maybe<&2, Nat>}
+
+law kserve_retry_old_failures_forgotten:
+  {KSL.KS.retry([990n, 102n, 101n, 100n], 1000n) == Some{1n} : Maybe<&2, Nat>}
+
+# a clean exit (idle-exit, Shutdown) is never a failure
+law kserve_clean_exit_not_a_failure:
+  {KSL.KS.fails.add(0, [5n], 10n) == [5n] : List<&2, Nat>}
+
+law kserve_crash_is_a_failure:
+  {KSL.KS.fails.add(1, [5n], 10n) == [10n, 5n] : List<&2, Nat>}
+
+# and it is stopped, not restarted
+law kserve_clean_exit_stops:
+  {KSL.KS.state(KSL.KS.exited(KSL.KS.up(KSL.KS.new("A", 1n), "/s/A", "v", 5n), 0, 20n, "")) == "stopped" : String}
+
+law kserve_three_crashes_restart:
+  {KSL.KS.state(KSL.KS.exited(KSL.KS.exited(KSL.KS.exited(KSL.KS.new("A", 1n), 1, 100n, "x"), 1, 110n, "x"), 1, 120n, "x")) == "starting" : String}
+
+law kserve_fourth_crash_fails:
+  {KSL.KS.state(KSL.KS.exited(KSL.KS.exited(KSL.KS.exited(KSL.KS.exited(KSL.KS.new("A", 1n), 1, 100n, "x"), 1, 110n, "x"), 1, 120n, "x"), 1, 130n, "x")) == "failed" : String}
+
+# a third project retires the least recently used ready server
+law kserve_evict_least_recent:
+  {KSL.KS.evict([KSL.KS.up(KSL.KS.new("A", 1n), "/s/A", "v", 5n), KSL.KS.up(KSL.KS.new("B", 1n), "/s/B", "v", 3n)]) == "B" : String}
+
+law kserve_no_evict_with_room:
+  {KSL.KS.evict([KSL.KS.up(KSL.KS.new("A", 1n), "/s/A", "v", 5n)]) == "" : String}
+
+# never more than two servers starting or ready
+law kserve_third_project_evicts:
+  {KSL.KS.plan([KSL.KS.up(KSL.KS.new("A", 1n), "/s/A", "v", 5n), KSL.KS.up(KSL.KS.new("B", 1n), "/s/B", "v", 3n)], "C", ["shutdown"]) == "evict:B" : String}
+
+law kserve_third_project_busy_without_shutdown:
+  {KSL.KS.plan([KSL.KS.up(KSL.KS.new("A", 1n), "/s/A", "v", 5n), KSL.KS.up(KSL.KS.new("B", 1n), "/s/B", "v", 3n)], "C", Nil{}) == "busy" : String}
+
+law kserve_running_server_is_used:
+  {KSL.KS.plan([KSL.KS.up(KSL.KS.new("A", 1n), "/s/A", "v", 5n), KSL.KS.up(KSL.KS.new("B", 1n), "/s/B", "v", 3n)], "A", Nil{}) == "ready" : String}
+
+# headless KiCad has no editor state: these are answered without a round trip
+law kserve_refused_selection:
+  {KSL.KS.headless_refused("kiapi.common.commands.GetSelection") == True{} : Bool}
+
+law kserve_refused_view:
+  {KSL.KS.headless_refused("kiapi.board.commands.SetVisibleLayers") == True{} : Bool}
+
+law kserve_refused_run_action:
+  {KSL.KS.headless_refused("kiapi.common.commands.RunAction") == True{} : Bool}
+
+law kserve_get_items_allowed:
+  {KSL.KS.headless_refused("kiapi.board.commands.GetItems") == False{} : Bool}
+
+law kserve_eighteen_refused:
+  {List.length(&2, String, KSL.KS.refused()) == 18n : Nat}
+
+law kserve_gate_off:
+  {KSL.KS.gate("ok", "10.99.0-bp.1", "", "off") == "IPC is turned off in Settings" : String}
+
+law kserve_gate_ok:
+  {KSL.KS.gate("ok", "10.99.0-bp.1", "", "on") == "" : String}
+
+# an unavailable IPC always names the way round
+law kserve_unavailable_names_fallback:
+  {String.contains(KSL.KS.unavailable("x", "c"), "Fallback: edit the file directly") == True{} : Bool}
+
+# Backplane KiCad 10.99 with API 1 is the least that serves IPC
+law kicad_min_version:
+  {KH.KH.min_version() == "10.99.0" : String}
+
+law kicad_old_runtime_is_old:
+  {KH.KH.status(True{}, True{}, True{}, "10.0.6", 1n) == "old" : String}
+
+law kicad_new_runtime_is_ok:
+  {KH.KH.status(True{}, True{}, True{}, "10.99.0-bp.1", 1n) == "ok" : String}
+
+# with IPC on, agents edit through the kicad_ipc tool
+law prompt_kicad_ok_names_kicad_ipc:
+  {String.contains(PM.Prompt.kicad.health("ok", "/c", "10.99.0-bp.1", "rev", "", True{}), "`kicad_ipc`") == True{} : Bool}
+
+law prompt_kicad_ok_no_pcbnew_import:
+  {String.contains(PM.Prompt.kicad.health("ok", "/c", "10.99.0-bp.1", "rev", "", True{}), "import pcbnew") == False{} : Bool}
+
+law prompt_kicad_ok_starts_no_server:
+  {String.contains(PM.Prompt.kicad.health("ok", "/c", "10.99.0-bp.1", "rev", "", True{}), "api-server") == False{} : Bool}
+
+law prompt_kicad_off_names_fallback:
+  {String.contains(PM.Prompt.kicad.health("ok", "/c", "10.99.0-bp.1", "rev", "", False{}), "answer with the fallback") == True{} : Bool}
+
+law kserve_desc_needs_cap:
+  for +root: String
+  {KSL.KS.desc(root, Nil{}) == "" : String}
+
+law kserve_desc_with_cap:
+  for +root: String
+  {KSL.KS.desc.k(True{}, root) == root ++ "/share/backplane/api.desc" : String}
+
+law kserve_idle_needs_api2:
+  for xs: List<&2, String>
+  {KSL.KS.caps.safe(xs, 1n) == KSL.KS.drop(xs, "idle-exit") : List<&2, String>}
+
+# ---- end kicad-ipc 2 ----
+# ---- kicad-ipc 3 ----
+
+law kexport_no_unmarked_clear:
+  for +base: String
+  {KEX.KX.may_clear(base, False{}) == False{} : Bool}
+
+law kexport_no_unconsented_force:
+  for +report: KEX.KReport
+  {KEX.KX.flags(report, False{}) == Nil{} : List<&2, String>}
+
+law kexport_block_force:
+  {KEX.KX.flags(KEX.KReport{Nil{}, Nil{}, ["blocked"], Nil{}}, True{}) == ["--force", "--drop-approximations"] : List<&2, String>}
+
+law kexport_lossy_force:
+  {KEX.KX.flags(KEX.KReport{["changed"], ["removed"], Nil{}, Nil{}}, True{}) == ["--force"] : List<&2, String>}
+
+law kexport_no_outside_clear:
+  {KEX.KX.may_clear("/tmp/design", True{}) == False{} : Bool}
+
+# A path not under this home's exports is never cleared, marker or not.
+law kexport_no_foreign_base:
+  for +base: String
+  for +marker: Bool
+  {KEX.KX.clear.allowed(False{}, base, marker) == False{} : Bool}
+
+# ---- mail 2c ----
+law foh_clean:
+  for +cs: List<&2, M.Change>
+  {MRUN.Run.posts(H.Mail.foh.cs(cs)) == 0n : Nat}
+
+law fyi_never_spawns:
+  for +live: String
+  {MRUN.Run.plan("fyi", live) == MRUN.FileOnly{} : MRUN.MailRunPlan}
+
+law act_one_run:
+  for +live: String
+  {MRUN.Run.actions(MRUN.Run.plan("act", live)) == 1n : Nat}
+
+law run_fresh:
+  for th: String
+  for cwd: String
+  for provider: String
+  for model: String
+  for session: String
+  for runtime: M.RuntimeMode
+  for interaction: M.InteractionMode
+  {H.Run.fresh.out(H.AgentStart{th, cwd, provider, model, session, runtime, interaction}) == H.AgentStart{th, cwd, provider, model, "", runtime, interaction} : H.Out}
+
+law run_one_live_per_conv:
+  {ML.Box.live_n(ML.Box.run_set(ML.Box.run_set(ML.Box.empty(), "r1", "b", "c", "m1", 1n), "r2", "b", "c", "m2", 2n), "b") == 1n : Nat}
+
+law escalate_only_path:
+  for +cs: List<&2, M.Change>
+  for os: List<&2, H.Out>
+  {MRUN.Run.posts(H.Queue.changes(H.Mail.foh(H.Step{cs, os}))) == 0n : Nat}
+
+law charter_gate_denies:
+  for +text: String
+  for +tool: String
+  for +input: J.Json
+  for risky: {CH.Charter.risky(tool, input) == True{} : Bool}
+  for unlisted: {CH.Charter.allows(text, tool, input) == False{} : Bool}
+  {CH.Charter.gate(text, tool, input) == False{} : Bool}
+
+law charter_gate_allows_listed:
+  for +text: String
+  for +tool: String
+  for +input: J.Json
+  for listed: {CH.Charter.allows(text, tool, input) == True{} : Bool}
+  {CH.Charter.gate(text, tool, input) == True{} : Bool}
+
+law charter_risky_fixed:
+  {Bool.and(CH.Charter.risky("gmail_send", J.Null{}), Bool.and(CH.Charter.risky("deploy_restart", J.Null{}), CH.Charter.risky("Bash", J.Json.obj([J.KV{"command", J.Str{"cd /tmp && git push origin main"}}])))) == True{} : Bool}
+# ---- i18n window ----
+law window_notice_english:
+  {L.Lay.notice(I18.En{}, "\u{1}noboard\u{1f}") == "No board in this project yet" : String}
+law window_notice_words_kept:
+  {L.Lay.notice(I18.Ja{}, "disk full") == "disk full" : String}
+law window_tools_english:
+  for +h: TOOL.Head
+  for +sa: String
+  for +sv: String
+  for +ta: String
+  for +tv: String
+  {TOOL.Tools.head(h, sa, sv, ta, tv) == TOOL.Tools.head.loc(I18.En{}, h, sa, sv, ta, tv) : List<&2, TOOL.Tool>}
+law window_picker_default:
+  {L.Picker.name.loc(I18.Ja{}, "") == "既定" : String}
+law window_provider_missing:
+  {L.Set.cli.loc(I18.En{}, "", "codex") == "codex is not installed" : String}
+# ---- end i18n window ----
+
+# --- browser-cef ---
+# The embedded Chromium (core/cef.bend): the hub moves the helper to the CEF
+# engine only for the setting "cef", with a window's embed known and no
+# runtime failure; only this machine's window may embed; the shield is on
+# exactly while the agent drives; a page is placed natively only when no
+# overlay covers it, and only what changed is sent.
+
+law cef_engine_needs_setting:
+  for known: Bool
+  for ok: Bool
+  {CEF.Cef.engine("chrome", known, ok) == False{} : Bool}
+
+law cef_engine_needs_embed:
+  for ok: Bool
+  {CEF.Cef.engine("cef", False{}, ok) == False{} : Bool}
+
+law cef_engine_needs_runtime:
+  for known: Bool
+  {CEF.Cef.engine("cef", known, False{}) == False{} : Bool}
+
+law cef_engine_on:
+  {CEF.Cef.engine("cef", True{}, True{}) == True{} : Bool}
+
+# only the window in this process or one linked over loopback embeds
+law cef_embed_window_here:
+  {CEF.Cef.from(0, False{}) == True{} : Bool}
+
+law cef_embed_loopback_link:
+  {CEF.Cef.from(5, True{}) == True{} : Bool}
+
+law cef_embed_remote_refused:
+  {CEF.Cef.from(2147483649, False{}) == False{} : Bool}
+
+law cef_loopback_v4:
+  {CEF.Cef.loopback("127.0.0.1") == True{} : Bool}
+
+law cef_loopback_v6:
+  {CEF.Cef.loopback("::1") == True{} : Bool}
+
+law cef_tailnet_not_loopback:
+  {CEF.Cef.loopback("100.64.0.7") == False{} : Bool}
+
+# a window that leaves takes its embed with it, another's leaving does not
+law cef_leave_clears_embed:
+  {CEF.Cef.session.known(CEF.Cef.session.leave(CEF.Cef.session.embed_set(CEF.Cef.empty(), 7, 12, ":9"), 7)) == False{} : Bool}
+
+law cef_leave_other_keeps_embed:
+  {CEF.Cef.session.known(CEF.Cef.session.leave(CEF.Cef.session.embed_set(CEF.Cef.empty(), 7, 12, ":9"), 8)) == True{} : Bool}
+
+law cef_embed_bad_xid_unknown:
+  {CEF.Cef.known(0, ":9") == False{} : Bool}
+
+# the window says its X window once per connection, after the log came
+law cef_embed_once_per_join:
+  {CEF.Cef.embed.due("12", "", "o1", "#1", "#1") == False{} : Bool}
+
+law cef_embed_new_join:
+  {CEF.Cef.embed.due("12", "", "o1", "#1", "#2") == True{} : Bool}
+
+law cef_embed_not_remote:
+  {CEF.Cef.embed.due("12", "http://x:3787", "o1", "", "#2") == False{} : Bool}
+
+law cef_embed_needs_xid:
+  {CEF.Cef.embed.due("", "", "o1", "", "#2") == False{} : Bool}
+
+# the shield: on while the agent drives, off while the person holds the page
+law cef_shield_agent_drives:
+  {CEF.Cef.shield("") == True{} : Bool}
+
+law cef_shield_takeover_off:
+  {CEF.Cef.shield("takeover") == False{} : Bool}
+
+law cef_shield_teach_off:
+  {CEF.Cef.shield("teach") == False{} : Bool}
+
+law cef_shield_focus_opposite:
+  for +d: String
+  {CEF.Cef.shield.focus(d) == Bool.not(CEF.Cef.shield(d)) : Bool}
+
+# a click on the shield takes the page over only from the agent
+law cef_shield_take_from_agent:
+  {CEF.Cef.shield.take("") == True{} : Bool}
+
+law cef_shield_take_not_from_person:
+  {CEF.Cef.shield.take("takeover") == False{} : Bool}
+
+# the shield is sent again only when it changed
+law cef_shield_due_same:
+  {CEF.Cef.shield.due("1", "") == False{} : Bool}
+
+law cef_shield_due_first:
+  {CEF.Cef.shield.due("", "") == True{} : Bool}
+
+law cef_shield_due_person:
+  {CEF.Cef.shield.due("1", "takeover") == True{} : Bool}
+
+# a page is placed natively only while no overlay is over it
+law cef_covered_none:
+  {CEF.Cef.covered(False{}, False{}, False{}, False{}, False{}, False{}, False{}, False{}) == False{} : Bool}
+
+law cef_covered_palette:
+  {CEF.Cef.covered(True{}, False{}, False{}, False{}, False{}, False{}, False{}, False{}) == True{} : Bool}
+
+law cef_covered_picker:
+  {CEF.Cef.covered(False{}, True{}, False{}, False{}, False{}, False{}, False{}, False{}) == True{} : Bool}
+
+law cef_covered_menu:
+  {CEF.Cef.covered(False{}, False{}, True{}, False{}, False{}, False{}, False{}, False{}) == True{} : Bool}
+
+law cef_covered_look:
+  {CEF.Cef.covered(False{}, False{}, False{}, True{}, False{}, False{}, False{}, False{}) == True{} : Bool}
+
+law cef_covered_models:
+  {CEF.Cef.covered(False{}, False{}, False{}, False{}, True{}, False{}, False{}, False{}) == True{} : Bool}
+
+law cef_covered_tour:
+  {CEF.Cef.covered(False{}, False{}, False{}, False{}, False{}, True{}, False{}, False{}) == True{} : Bool}
+
+law cef_covered_perf:
+  {CEF.Cef.covered(False{}, False{}, False{}, False{}, False{}, False{}, True{}, False{}) == True{} : Bool}
+
+law cef_covered_lightbox:
+  {CEF.Cef.covered(False{}, False{}, False{}, False{}, False{}, False{}, False{}, True{}) == True{} : Bool}
+
+law cef_shows_needs_live:
+  for covered: Bool
+  {CEF.Cef.shows(False{}, covered) == False{} : Bool}
+
+law cef_shows_not_covered:
+  {CEF.Cef.shows(True{}, True{}) == False{} : Bool}
+
+# placement: nothing is sent while the frame leaves what was sent; a new
+# rectangle is placed; none where one was hides
+law cef_place_same_nothing:
+  {CEF.Cef.place.step("t1 0 52 600 400", "t1 0 52 600 400") == 0n : Nat}
+
+law cef_place_hidden_nothing:
+  {CEF.Cef.place.step("", "") == 0n : Nat}
+
+law cef_place_new_shows:
+  {CEF.Cef.place.step("", "t1 0 52 600 400") == 1n : Nat}
+
+law cef_place_moved_shows:
+  {CEF.Cef.place.step("t1 0 52 600 400", "t1 0 52 700 400") == 1n : Nat}
+
+law cef_place_gone_hides:
+  {CEF.Cef.place.step("t1 0 52 600 400", "") == 2n : Nat}
+
+# out of cef mode the window sends nothing: it forgets a place once
+law cef_post_chrome_idle:
+  {CEF.Cef.post.step(False{}, "", "") == 0n : Nat}
+
+law cef_post_chrome_forgets:
+  {CEF.Cef.post.step(False{}, "t1 0 52 600 400", "") == 3n : Nat}
+
+law cef_post_native_places:
+  {CEF.Cef.post.step(True{}, "", "t1 0 52 600 400") == 1n : Nat}
+
+# a hit's corners become the pane's extent
+law cef_pane_extent:
+  {CEF.Cef.extent(832, 1400) == 568 : U32}
+
+law cef_extent_never_wraps:
+  {CEF.Cef.extent(900, 96) == 0 : U32}
+
+# a window on another machine's hub never shows pages natively
+law cef_native_local_only:
+  {CEF.Cef.native("cef", "http://x:3787") == False{} : Bool}
+
+law cef_native_local_cef:
+  {CEF.Cef.native("cef", "") == True{} : Bool}
+
+law cef_native_chrome:
+  {CEF.Cef.native("chrome", "") == False{} : Bool}
+
+# only the native local viewer stops the JPEG cast; others keep it
+law cef_native_skips_cast:
+  {CEF.Cef.cast(True{}, "cef", "") == False{} : Bool}
+
+law cef_web_keeps_cast:
+  {CEF.Cef.cast(False{}, "cef", "") == True{} : Bool}
+
+law cef_remote_keeps_cast:
+  {CEF.Cef.cast(True{}, "cef", "http://other") == True{} : Bool}
+
+law cef_page_here_native:
+  {CEF.Cef.page_local("t1") == True{} : Bool}
+
+law cef_page_elsewhere_jpeg:
+  {CEF.Cef.page_local("peer~t1") == False{} : Bool}
+
+# a fallback to chrome still lets the person hand a held page back
+law cef_fallback_keeps_handback:
+  {CEF.Cef.strip_on("chrome", "takeover") == True{} : Bool}
+
+law cef_chrome_idle_strip_off:
+  {CEF.Cef.strip_on("chrome", "") == False{} : Bool}
+
+# the settings row's note is only the reason Embedded cannot run
+law cef_note_quiet:
+  {CEF.Cef.note("") == "" : String}
+
+# engine replies: only the newest request's counts
+law cef_old_engine_reply_ignored:
+  {CEF.Cef.current(CEF.Cef.session.request_set(CEF.Cef.session.request_set(CEF.Cef.empty(), "cef 1 :9"), "chrome"), "1") == False{} : Bool}
+
+law cef_current_engine_reply_used:
+  {CEF.Cef.current(CEF.Cef.session.request_set(CEF.Cef.session.request_set(CEF.Cef.empty(), "cef 1 :9"), "chrome"), "2") == True{} : Bool}
+
+# the engine is compared as a short key: the same embed asks nothing again
+law cef_want_key_chrome:
+  for x: U32
+  for +d: String
+  {CEF.Cef.want.key(False{}, x, d) == "chrome" : String}
+
+# the hub reconsiders the engine after requests, leaves, engine answers and
+# helper events, never after an agent's streamed line
+law cef_after_rpc:
+  {CEF.Cef.after("rpc") == True{} : Bool}
+
+law cef_after_helper:
+  {CEF.Cef.after("browser_ev") == True{} : Bool}
+
+law cef_not_after_agent_line:
+  {CEF.Cef.after("agent_line") == False{} : Bool}
+
+# a helper restart re-shows the page a few times at most
+law cef_revive_first:
+  {CEF.Cef.revive(True{}, True{}, 0n) == True{} : Bool}
+
+law cef_revive_bounded:
+  {CEF.Cef.revive(True{}, True{}, 3n) == False{} : Bool}
+
+law cef_revive_not_chrome:
+  for placed: Bool
+  {CEF.Cef.revive(False{}, placed, 0n) == False{} : Bool}
+
+# page ids: an unknown one is refused, a thread's or bot's accepted
+law cef_unknown_refused:
+  {CEF.Cef.owner("unknown", False{}, False{}) == False{} : Bool}
+
+law cef_thread_owner:
+  {CEF.Cef.owner("t1", True{}, False{}) == True{} : Bool}
+
+law cef_empty_owner_refused:
+  for t: Bool
+  for b: Bool
+  {CEF.Cef.owner("", t, b) == False{} : Bool}
+
+# take over and hand back act on the page their value names (a thread's
+# page: its Browser pane's strip); without one, on the bot whose tab is open
+law cef_handback_names_page:
+  {U.Teach.target(7n, "b1", "t9") == "t9" : String}
+
+law cef_handback_default_bot:
+  {U.Teach.target(7n, "b1", "") == "b1" : String}
+
+law cef_takeover_names_page:
+  {U.Teach.target(6n, "b1", "t9") == "t9" : String}
+
+law cef_other_actions_keep_bot:
+  {U.Teach.target(11n, "b1", "t9") == "b1" : String}
+# --- end browser-cef ---
+
+# --- browser-cef local window guard ---
+law cef_web_origin_refused:
+  for proxy: String
+  {CEF.Cef.link(proxy, "http://localhost") == False{} : Bool}
+
+law cef_native_link_allowed:
+  {CEF.Cef.link("", "") == True{} : Bool}
+# --- end browser-cef local window guard ---
+# ---- mail perf ----
+
+# Credit travels with the message, independently of its encoding and size.
+law mail_credit_carried:
+  for text: String
+  for charge: Nat
+  {MPCREDIT.Wire.charged(False{}, MPCREDIT.WText{text}, charge) == MPCREDIT.WCharged{text, charge} : MPCREDIT.Wire}
+
+law mail_credit_native_kept:
+  for w: MPCREDIT.Wire
+  for charge: Nat
+  {MPCREDIT.Wire.charged(True{}, w, charge) == w : MPCREDIT.Wire}

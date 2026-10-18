@@ -1,0 +1,6 @@
+fastapi==0.120.4
+uvicorn==0.38.0
+python-multipart==0.0.32
+httpx==0.28.1
+cadquery-ocp==8.0.1.1.0
+pytest==9.1.1

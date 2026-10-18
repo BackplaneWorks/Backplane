@@ -1,4 +1,6 @@
 import Base
+import ./i18n.bend as I
+import ./msgs.bend as MSG
 import ./model.bend as M
 
 # Tool calls folded
@@ -168,21 +170,21 @@ def Fold.first(k: Nat, xs: List<&2, String>) -> List<&2, String>:
     case 1n+j Nil{}:
       Nil{}
 
-def Fold.calls.label(+n: Nat, +ks: List<&2, String>) -> String:
-  Nat.show(n) ++ Bool.pick(String, Nat.is_eq(n, 1n), " tool call", " tool calls")
+def Fold.calls.label(+l: I.Loc, +n: Nat, +ks: List<&2, String>) -> String:
+  MSG.T.fold.calls(l, Nat.show(n), Bool.pick(String, Nat.is_eq(n, 1n), "one", "other"))
     ++ Bool.pick(String, List.is_empty(&2, String, ks), "", " · " ++ String.join(Fold.first(3n, ks), ", ")
-    ++ Bool.pick(String, Nat.is_gt(List.length(&2, String, ks), 3n), ", …", ""))
+    ++ Bool.pick(String, Nat.is_gt(List.length(&2, String, ks), 3n), MSG.T.fold.more(l), ""))
 
-def Fold.steps.label(+n: Nat) -> String:
-  Nat.show(n) ++ Bool.pick(String, Nat.is_eq(n, 1n), " design change", " design changes")
+def Fold.steps.label(+l: I.Loc, +n: Nat) -> String:
+  MSG.T.fold.steps(l, Nat.show(n), Bool.pick(String, Nat.is_eq(n, 1n), "one", "other"))
 
 # "6 tool calls · shell, edit, read" (three kinds at most), and how many
 # design changes they made
-def Fold.label(+es: List<&2, M.Entry>) -> String:
+def Fold.label(+l: I.Loc, +es: List<&2, M.Entry>) -> String:
   +n = List.length(&2, M.Entry, Fold.calls(es))
   +d = Fold.steps(es)
-  Bool.pick(String, Nat.is_eq(n, 0n), Fold.steps.label(d),
-    Fold.calls.label(n, Fold.kinds(Fold.calls(es), Nil{})) ++ Bool.pick(String, Nat.is_eq(d, 0n), "", " · " ++ Fold.steps.label(d)))
+  Bool.pick(String, Nat.is_eq(n, 0n), Fold.steps.label(l, d),
+    Fold.calls.label(l, n, Fold.kinds(Fold.calls(es), Nil{})) ++ Bool.pick(String, Nat.is_eq(d, 0n), "", " · " ++ Fold.steps.label(l, d)))
 
 # the run's id: its first entry's
 def Fold.run_id(es: List<&2, M.Entry>) -> String:
@@ -236,12 +238,12 @@ def Fold.ins(es: List<&2, M.Entry>, +open: Bool) -> List<&2, Role>:
     case _ <> t:
       RIn{open} <> Fold.ins(t, open)
 
-def Fold.run.roles(+es: List<&2, M.Entry>, +open: Bool) -> List<&2, Role>:
+def Fold.run.roles(+l: I.Loc, +es: List<&2, M.Entry>, +open: Bool) -> List<&2, Role>:
   match es:
     case Nil{}:
       Nil{}
     case _ <> t:
-      RHead{Fold.run_id(es), Fold.label(es), open} <> Fold.ins(t, open)
+      RHead{Fold.run_id(es), Fold.label(l, es), open} <> Fold.ins(t, open)
 
 def Fold.last(gs: List<&2, Grp>) -> Bool:
   match gs:
@@ -250,19 +252,19 @@ def Fold.last(gs: List<&2, Grp>) -> Bool:
     case _ <> _:
       False{}
 
-def Fold.grp.roles(g: Grp, last: Bool, +info: Map<&2, String>, +running: Bool) -> List<&2, Role>:
+def Fold.grp.roles(+l: I.Loc, g: Grp, last: Bool, +info: Map<&2, String>, +running: Bool) -> List<&2, Role>:
   match g:
     case GOne{_}:
       [RShow{}]
     case GRun{+xs}:
-      Fold.run.roles(xs, Fold.open(Fold.user(info, Fold.run_id(xs)), Bool.and(last, running)))
+      Fold.run.roles(l, xs, Fold.open(Fold.user(info, Fold.run_id(xs)), Bool.and(last, running)))
 
-def Fold.roles.go(gs: List<&2, Grp>, +info: Map<&2, String>, +running: Bool) -> List<&2, Role>:
+def Fold.roles.go(+l: I.Loc, gs: List<&2, Grp>, +info: Map<&2, String>, +running: Bool) -> List<&2, Role>:
   match gs:
     case Nil{}:
       Nil{}
     case g <> +t:
-      List.append(&2, Role, Fold.grp.roles(g, Fold.last(t), info, running), Fold.roles.go(t, info, running))
+      List.append(&2, Role, Fold.grp.roles(l, g, Fold.last(t), info, running), Fold.roles.go(l, t, info, running))
 
 # Turns
 # -----
@@ -357,6 +359,14 @@ def Work.block(xs: List<&2, M.Entry>, +id: String, +label: String, +open: Bool) 
 def Work.ago(+a: String) -> String:
   Bool.pick(String, String.eq(a, "now"), "just now", a ++ " ago")
 
+# the same in a language: English exactly as Work.ago always read
+def Work.ago.loc(l: I.Loc, +now: Nat, +at: Nat) -> String:
+  match l:
+    case I.En{}:
+      Work.ago(M.Time.ago(now, at))
+    case I.Ja{}:
+      I.I18n.ago.long(I.Ja{}, now, at)
+
 def Work.id(+u: M.Entry) -> String:
   "work:" ++ Fold.id(u)
 
@@ -370,28 +380,31 @@ def Work.end(m: Maybe<&2, M.Entry>, +d: Nat) -> Nat:
 
 # a finished turn: the work before its last reply folds (a turn with no
 # reply, stopped or failed, shows all of it)
-def Work.done(+m: Maybe<&2, Nat>, +b: List<&2, M.Entry>, +u: M.Entry, +info: Map<&2, String>, +now: Nat) -> List<&2, WRole>:
+def Work.done(+l: I.Loc, +m: Maybe<&2, Nat>, +b: List<&2, M.Entry>, +u: M.Entry, +info: Map<&2, String>, +now: Nat) -> List<&2, WRole>:
   match m:
     case Some{1n+j}:
       +end = Work.end(List.head(&2, M.Entry, List.drop(&2, M.Entry, b, 1n+j)), Work.at(u))
       List.append(&2, WRole, Work.block(List.take(&2, M.Entry, b, 1n+j), Work.id(u),
-          "Worked for " ++ M.Time.took(Nat.sub(end, Work.at(u))) ++ " · " ++ Work.ago(M.Time.ago(now, end)), Fold.open(Fold.user(info, Work.id(u)), False{})),
+          MSG.T.fold.worked(l, I.I18n.took(l, Nat.sub(end, Work.at(u))), Work.ago.loc(l, now, end)), Fold.open(Fold.user(info, Work.id(u)), False{})),
         Work.plain(List.drop(&2, M.Entry, b, 1n+j)))
     case _:
       Work.plain(b)
 
 # the turn still running: all of it is work, open unless shut
-def Work.turn(live: Bool, +u: M.Entry, +b: List<&2, M.Entry>, +info: Map<&2, String>, +now: Nat) -> List<&2, WRole>:
+def Work.turn.loc(+l: I.Loc, live: Bool, +u: M.Entry, +b: List<&2, M.Entry>, +info: Map<&2, String>, +now: Nat) -> List<&2, WRole>:
   match live:
     case True{}:
-      WPlain{} <> Work.block(b, Work.id(u), "Working · started " ++ Work.ago(M.Time.ago(now, Work.at(u))), Fold.open(Fold.user(info, Work.id(u)), True{}))
+      WPlain{} <> Work.block(b, Work.id(u), MSG.T.fold.working(l, Work.ago.loc(l, now, Work.at(u))), Fold.open(Fold.user(info, Work.id(u)), True{}))
     case False{}:
-      WPlain{} <> Work.done(Work.last(b, 0n, None{}), b, u, info, now)
+      WPlain{} <> Work.done(l, Work.last(b, 0n, None{}), b, u, info, now)
 
-def Work.seg(s: Seg, live: Bool, +info: Map<&2, String>, +now: Nat) -> List<&2, WRole>:
+def Work.turn(live: Bool, u: M.Entry, b: List<&2, M.Entry>, info: Map<&2, String>, now: Nat) -> List<&2, WRole>:
+  Work.turn.loc(I.En{}, live, u, b, info, now)
+
+def Work.seg(+l: I.Loc, s: Seg, live: Bool, +info: Map<&2, String>, +now: Nat) -> List<&2, WRole>:
   match s:
     case Seg{+u <> _, +b}:
-      Work.turn(live, u, b, info, now)
+      Work.turn.loc(l, live, u, b, info, now)
     case Seg{Nil{}, +b}:
       Work.plain(b)
 
@@ -402,12 +415,12 @@ def Work.lastseg(ss: List<&2, Seg>) -> Bool:
     case _ <> _:
       False{}
 
-def Work.roles.go(ss: List<&2, Seg>, +info: Map<&2, String>, +running: Bool, +now: Nat) -> List<&2, WRole>:
+def Work.roles.go(+l: I.Loc, ss: List<&2, Seg>, +info: Map<&2, String>, +running: Bool, +now: Nat) -> List<&2, WRole>:
   match ss:
     case Nil{}:
       Nil{}
     case s <> +t:
-      List.append(&2, WRole, Work.seg(s, Bool.and(Work.lastseg(t), running), info, now), Work.roles.go(t, info, running, now))
+      List.append(&2, WRole, Work.seg(l, s, Bool.and(Work.lastseg(t), running), info, now), Work.roles.go(l, t, info, running, now))
 
 def Work.hide(open: Bool, r: Role) -> Role:
   match open:
@@ -441,8 +454,11 @@ def Fold.now(m: Map<&2, String>) -> Nat:
 
 # the roles of a thread's entries, with the client's info map and whether
 # its turn runs: tool runs fold, nothing else does
-def Fold.roles(+es: List<&2, M.Entry>, +info: Map<&2, String>, +running: Bool) -> List<&2, Role>:
-  Fold.roles.go(Fold.groups(es), info, running)
+def Fold.roles.loc(+l: I.Loc, +es: List<&2, M.Entry>, +info: Map<&2, String>, +running: Bool) -> List<&2, Role>:
+  Fold.roles.go(l, Fold.groups(es), info, running)
+
+def Fold.roles(es: List<&2, M.Entry>, info: Map<&2, String>, running: Bool) -> List<&2, Role>:
+  Fold.roles.loc(I.En{}, es, info, running)
 
 # Revealing an entry
 # ------------------

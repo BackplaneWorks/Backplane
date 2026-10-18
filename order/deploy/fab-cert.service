@@ -1,0 +1,7 @@
+[Unit]
+Description=Renew the order server's certificate (Let's Encrypt, short-lived)
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/fab/cert.env
+ExecStart=/bin/sh -c 'lego --accept-tos --disable-cn --path /etc/lego --domains "$FAB_HOST" --http --http.webroot /var/www/acme renew --dynamic --profile shortlived --renew-hook "systemctl reload nginx"'

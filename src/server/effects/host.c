@@ -424,9 +424,61 @@ static char** host_argv(Env e, Term cmd, Term xs, int* ok) {
 
 #ifdef CID(Proc.spawn)
 
+// Where an agent's stderr goes (err 3): ${BACKPLANE_ERR_DIR:-${TMPDIR:-/tmp}/backplane-err-<uid>}/<pid>.err
+static int host_err_dir(char* out, size_t n) {
+  const char* d = getenv("BACKPLANE_ERR_DIR");
+  int k;
+  if (d && *d) {
+    k = snprintf(out, n, "%s", d);
+  } else {
+    const char* t = getenv("TMPDIR");
+    k = snprintf(out, n, "%s/backplane-err-%u", t && *t ? t : "/tmp", (unsigned)getuid());
+  }
+  if (k <= 0 || (size_t)k >= n) return 0;
+  mkdir(out, 0700);
+  return 1;
+}
+
+static int host_err_path(char* out, size_t n, unsigned pid) {
+  char d[4096];
+  if (!host_err_dir(d, sizeof d)) return 0;
+  int k = snprintf(out, n, "%s/%u.err", d, pid);
+  return k > 0 && (size_t)k < n;
+}
+
+// files of processes that ended unread (their hub was killed) go, once per
+// hub: those whose pid no longer runs
+static void host_err_sweep(const char* d) {
+  DIR* dir = opendir(d);
+  if (dir == NULL) return;
+  struct dirent* ent;
+  while ((ent = readdir(dir)) != NULL) {
+    char* end = NULL;
+    unsigned long pid = strtoul(ent->d_name, &end, 10);
+    if (end == NULL || strcmp(end, ".err") != 0 || pid <= 1) continue;
+    if (kill((pid_t)pid, 0) != 0 && errno == ESRCH) {
+      char at[4200];
+      snprintf(at, sizeof at, "%s/%s", d, ent->d_name);
+      unlink(at);
+    }
+  }
+  closedir(dir);
+}
+
+static int host_err_open(char* tmp, size_t n) {
+  static unsigned seq = 0;
+  char d[4096];
+  if (!host_err_dir(d, sizeof d)) return -1;
+  if (seq == 0) host_err_sweep(d);
+  int k = snprintf(tmp, n, "%s/spawn.%u.%u", d, (unsigned)getpid(), ++seq);
+  if (k <= 0 || (size_t)k >= n) return -1;
+  return open(tmp, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+}
+
 // Starts cmd (searched on PATH) in cwd. Its stdin and stdout are one end of
 // a socketpair; we keep the other, non-blocking. stderr: 0 discards it, 1
-// joins it to stdout, 2 inherits ours. Answers (pid, socket).
+// joins it to stdout, 2 inherits ours, 3 goes to a file read back by
+// Proc.errtail. Answers (pid, socket).
 Term proc_spawn_run(Env e, Term* f, IoWork* w) {
   int   ok   = 1;
   u64   clen = 0;
@@ -436,6 +488,8 @@ Term proc_spawn_run(Env e, Term* f, IoWork* w) {
   int   sv[2] = { -1, -1 };
   int   code = 0;
   pid_t pid  = 0;
+  int   errfd = -1;
+  char  errtmp[4200];
   if (!ok || io_nul(cwd, clen)) {
     code = EILSEQ;
   } else if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv) < 0) {
@@ -452,6 +506,15 @@ Term proc_spawn_run(Env e, Term* f, IoWork* w) {
       posix_spawn_file_actions_addopen(&fa, 2, "/dev/null", O_WRONLY, 0);
     } else if (err == 1) {
       posix_spawn_file_actions_adddup2(&fa, sv[1], 2);
+    } else if (err == 3) {
+      // stderr to a file of its own, named for the pid once it is known
+      // (Proc.errtail reads its end and removes it)
+      errfd = host_err_open(errtmp, sizeof errtmp);
+      if (errfd >= 0) {
+        posix_spawn_file_actions_adddup2(&fa, errfd, 2);
+      } else {
+        posix_spawn_file_actions_addopen(&fa, 2, "/dev/null", O_WRONLY, 0);
+      }
     }
     posix_spawn_file_actions_addclose(&fa, sv[0]);
     // the child keeps only the copies on 0-2: left open, a process it puts
@@ -470,6 +533,12 @@ Term proc_spawn_run(Env e, Term* f, IoWork* w) {
     posix_spawn_file_actions_destroy(&fa);
     posix_spawnattr_destroy(&at);
     close(sv[1]);
+    if (errfd >= 0) {
+      close(errfd);
+      char at[4200];
+      if (code == 0 && host_err_path(at, sizeof at, (unsigned)pid)) rename(errtmp, at);
+      else unlink(errtmp);
+    }
     if (code != 0) {
       close(sv[0]);
     } else {
@@ -490,6 +559,36 @@ Term proc_spawn_run(Env e, Term* f, IoWork* w) {
 
 static void __attribute__((constructor)) proc_spawn_use(void) {
   io_eff(CID(Proc.spawn), proc_spawn_run);
+}
+
+#endif
+
+#if defined(CID(Proc.errtail)) && defined(CID(Proc.spawn))
+
+// The last 2048 bytes a process started with err 3 wrote to stderr ("" when
+// none); its file is removed.
+Term proc_errtail_run(Env e, Term* f, IoWork* w) {
+  char path[4200];
+  char buf[2048];
+  ssize_t got = 0;
+  if (host_err_path(path, sizeof path, (unsigned)(uint32_t)f[0])) {
+    int fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd >= 0) {
+      off_t end = lseek(fd, 0, SEEK_END);
+      off_t at = end > (off_t)sizeof buf ? end - (off_t)sizeof buf : 0;
+      if (end > 0 && lseek(fd, at, SEEK_SET) >= 0) {
+        got = read(fd, buf, sizeof buf);
+        if (got < 0) got = 0;
+      }
+      close(fd);
+      unlink(path);
+    }
+  }
+  return io_str(e, buf, (u64)got);
+}
+
+static void __attribute__((constructor)) proc_errtail_use(void) {
+  io_eff(CID(Proc.errtail), proc_errtail_run);
 }
 
 #endif

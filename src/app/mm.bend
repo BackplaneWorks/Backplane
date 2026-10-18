@@ -6,6 +6,8 @@ import ../core/client.bend as U
 import ../core/vt.bend as VT
 import ./nui.bend as N
 import ./layout.bend as L
+import ../core/emb.bend as EM
+import ../core/subs.bend as SB
 
 # The main area's memo. A frame lays the main area (the open thread, its
 # Subagents panel, composer...) out again only when something it shows may
@@ -79,12 +81,22 @@ def TouchK.items(xs: List<&2, J.Json>, t: TouchK) -> TouchK:
     case x <> rest:
       TouchK.items(rest, TouchK.change(C.Change.decode(x), t))
 
+# a thread's streamed text grew: its count of pieces ("~<thread>")
+def TouchK.live.k(r: Map<&2, Nat> & Nat, +th: String, +n: Nat, +g: Nat, +rr: Nat) -> TouchK:
+  (m, v) = r
+  TouchK{n, g, rr, Map.set(&2, Nat, m, "~" ++ th, 1n+v)}
+
+def TouchK.live(+th: String, t: TouchK) -> TouchK:
+  match t:
+    case TouchK{+n, +g, +r, m}:
+      TouchK.live.k(Map.get(Nat, 0n, m, "~" ++ th), th, n, g, r)
+
 def TouchK.msg.k(i: Nat, +o: J.Json, t: TouchK) -> TouchK:
   match i:
     case 0n:
       TouchK.items(J.Json.elems(J.Json.get_obj(o, "items")), TouchK.tick(t))
     case 1n:
-      t
+      TouchK.live(J.Json.get_str(o, "thread", ""), t)
     case 2n:
       t
     case 3n:
@@ -92,10 +104,10 @@ def TouchK.msg.k(i: Nat, +o: J.Json, t: TouchK) -> TouchK:
     case _:
       TouchK.all(t)
 
-# a hub message: its changes touch what they touch; another thread's
-# streamed text, its end (which the client does not read) and a heartbeat
-# touch nothing (the open thread's own text
-# is in the key); anything else touches all
+# a hub message: its changes touch what they touch; a thread's streamed
+# text counts one more piece of it (TouchK.live: the open thread's count
+# is in the key); its end (which the client does not read) and a heartbeat
+# touch nothing; anything else touches all
 def TouchK.msg(+o: J.Json, t: TouchK) -> TouchK:
   TouchK.msg.k(C.Codec.pos(["changes", "delta", "hb", "delta_end"], J.Json.get_str(o, "t", "")), o, t)
 
@@ -160,7 +172,7 @@ def Mm.flags(xs: List<&2, Sigma<&2, &2, String, _ => Bool>>) -> String:
 # and the performance overlay (both drawn over the whole frame), a page's
 # frames (shown only in the viewer and a bot's view: neither is kept)
 def Mm.volatile(+k: String) -> Bool:
-  Bool.or(Nat.is_lt(C.Codec.pos(["clock", "act.at", "cat.due", "cat.clock", "caret.due", "caret.at", "caret.sig", "frame.hub", "frame.late", "hover", "perf.hud"], k), 11n),
+  Bool.or(Nat.is_lt(C.Codec.pos(["clock", "act.at", "cat.due", "cat.clock", "caret.due", "caret.at", "caret.sig", "frame.hub", "frame.late", "hover", "perf.hud", "caret.real"], k), 12n),
     Bool.or(String.starts_with(k, "img:shot:"), String.starts_with(k, "shot.")))
 
 def Mm.info.k(skip: Bool, +k: String, +v: String, +rest: String) -> String:
@@ -193,16 +205,70 @@ def Mm.x1(+pa: Bool, +w: U32) -> U32:
 def Mm.x1.of(+n: N.Nui) -> U32:
   Mm.x1(U.Ui.panel(N.Nui.ui(n)), N.Nui.width(n))
 
-# The clock in the main area: a subagent's row hides a day after it ends
-# (to the second), and the header says whether the thread is snoozed; else
-# nothing there moves with it. So the second counts while the thread has
-# children or its own background rows, else the minute and the snooze.
-def Mm.subs(+st: M.State, +sel: String, rels: List<&2, String>) -> Bool:
-  Bool.or(Bool.not(List.is_empty(&2, String, rels)), Bool.or(Bool.not(String.is_empty(M.Setting.get(st, "bg." ++ sel, ""))), Bool.not(String.is_empty(M.Setting.get(st, "watch." ++ sel, "")))))
+# The clock in the main area is not in the key: what it moves is found
+# once, when the main area is laid out, as the first time anything there
+# would be drawn differently by the clock alone (Mm.due), and the memo is
+# used only before then. That is the next minute (the timeline's dates,
+# anything shown to the minute), the day after which a child's, a
+# launch's or a run's row hides (core/subs.bend's Subs.old), the end of
+# the thread's snooze (the header), and when a terminal in the chat goes
+# inactive (core/emb.bend's Emb.live). (Before, the key held the second
+# for every thread: the parent's place, "" for none, counted as a child,
+# so each tick missed.)
 
-def Mm.when(+st: M.State, +sel: String, +now: Nat, +rels: List<&2, String>) -> String:
-  Bool.pick(String, Mm.subs(st, sel, rels), "s" ++ Nat.show(now), "m" ++ Nat.show(Nat.div(now, 60n)))
-    ++ Bool.pick(String, M.Snooze.on(now, U.Side.until(st, sel)), "z", "")
+# the earlier of two times (0: none)
+def Mm.first(+a: Nat, +b: Nat) -> Nat:
+  Bool.pick(Nat, Nat.is_eq(a, 0n), b, Bool.pick(Nat, Nat.is_eq(b, 0n), a, Bool.pick(Nat, Nat.is_lt(a, b), a, b)))
+
+# a time still ahead of now, else none
+def Mm.ahead(+at: Nat, +now: Nat) -> Nat:
+  Bool.pick(Nat, Nat.is_gt(at, now), at, 0n)
+
+# a row of one that ended at `at` (0: unknown, never hidden) hides once
+# now - at > Subs.age()
+def Mm.hides(+at: Nat, +now: Nat) -> Nat:
+  Bool.pick(Nat, Nat.is_eq(at, 0n), 0n, Mm.ahead(Nat.add(Nat.add(at, SB.Subs.age()), 1n), now))
+
+def Mm.due.ends(rs: List<&2, String>, +st: M.State, +now: Nat) -> Nat:
+  match rs:
+    case Nil{}:
+      0n
+    case +r <> t:
+      Mm.first(Mm.hides(SB.Subs.end(st, r), now), Mm.due.ends(t, st, now))
+
+def Mm.due.aggs(as: List<&2, SB.SubAgg>, +now: Nat) -> Nat:
+  match as:
+    case Nil{}:
+      0n
+    case SB.SubAgg{_, _, _, _, _, _, +at} <> t:
+      Mm.first(Mm.hides(at, now), Mm.due.aggs(t, now))
+
+def Mm.due.term(term: Bool, e: M.Entry, +st: M.State, +now: Nat) -> Nat:
+  match term e:
+    case True{} M.Act{+id, +th, _, _, _, +at}:
+      Mm.ahead(Nat.add(EM.Emb.touched(st, EM.Emb.key(th, id), at), EM.Emb.idle()), now)
+    case _ _:
+      0n
+
+def Mm.due.terms(es: List<&2, M.Entry>, +st: M.State, +now: Nat) -> Nat:
+  match es:
+    case Nil{}:
+      0n
+    case +e <> t:
+      Mm.first(Mm.due.term(EM.Emb.is(e), e, st, now), Mm.due.terms(t, st, now))
+
+def Mm.memo.its(m: L.TLMemo) -> List<&2, L.TLE>:
+  match m:
+    case L.TLMemo{_, _, its, _}:
+      its
+
+# the first time the main area would be drawn differently by the clock
+# alone, after now (never 0: the next minute bounds it)
+def Mm.due(+n: N.Nui, +rels: List<&2, String>, +memo: L.TLMemo) -> Nat:
+  match n:
+    case N.Nui{U.Ui{+st, +sel, _, _, _, _, +now, _, _, _, _, _, _, _, _, _, _}, _, _, _, _, _, _, _, _, _, _, _, _}:
+      Mm.first(Mm.first(Nat.mul(Nat.add(Nat.div(now, 60n), 1n), 60n), Mm.ahead(U.Side.until(st, sel), now)),
+        Mm.first(Mm.first(Mm.due.ends(rels, st, now), Mm.due.aggs(SB.Subs.aggs(st, sel), now)), Mm.due.terms(L.TL.memo.es(Mm.memo.its(memo)), st, now)))
 
 # the main area is memoized only for a thread's view: not the settings,
 # not the empty window, not with a terminal anywhere (embedded screens read
@@ -212,13 +278,13 @@ def Mm.memo.ok(+op: Map<&2, Bool>, +sel: String, +tr: Map<&2, VT.Vt>) -> Bool:
 
 def Mm.key.go(+n: N.Nui, +t: TouchK, +rels: List<&2, String>) -> String:
   match n:
-    case N.Nui{U.Ui{+st, +sel, +dr, +live, +op, on, +now, ad, pa, v, rid, w, er, note, +nf, +ob, _}, +ww, +hh, _, _, _, sc, ca, fo, path, +hi, _, _}:
-      "s" ++ Mm.stamps(sel <> rels, t)
-        ++ "|g" ++ Nat.show(TouchK.g(t)) ++ "|t" ++ Mm.when(st, sel, now, rels) ++ "|w" ++ U32.show(ww) ++ "," ++ U32.show(hh) ++ "," ++ U32.show(sc) ++ "," ++ Nat.show(ca) ++ "," ++ fo ++ "," ++ path
+    case N.Nui{U.Ui{_, +sel, +dr, _, +op, on, _, ad, pa, v, rid, w, er, note, +nf, +ob, _}, +ww, +hh, _, _, _, sc, ca, fo, path, +hi, _, _}:
+      "s" ++ Mm.stamps(sel <> rels, t) ++ "|lang" ++ L.TL.locale(N.Nui.ui(n))
+        ++ "|g" ++ Nat.show(TouchK.g(t)) ++ "|w" ++ U32.show(ww) ++ "," ++ U32.show(hh) ++ "," ++ U32.show(sc) ++ "," ++ Nat.show(ca) ++ "," ++ fo ++ "," ++ path
         ++ "|x" ++ U32.show(Mm.x1(pa, ww)) ++ "|cs" ++ N.Cs.region(hi) ++ "|ch" ++ Mm.hit(L.Comp.hit(hi))
         ++ "|u" ++ Mm.b(on) ++ Mm.b(ad) ++ Mm.b(pa) ++ Mm.b(w) ++ "," ++ v ++ "," ++ Nat.show(rid) ++ "," ++ er ++ "," ++ note
         ++ "|f" ++ Mm.flags(Map.to_list(&2, Bool, op)) ++ "|d" ++ Mm.strs(Map.to_list(&2, String, dr)) ++ "|o" ++ Mm.strs(Map.to_list(&2, String, ob))
-        ++ "|l" ++ U.Str.get(live, sel) ++ "|i" ++ Mm.info(Map.to_list(&2, String, nf))
+        ++ "|l" ++ Nat.show(TouchK.at(t, "~" ++ sel)) ++ "|i" ++ Mm.info(Map.to_list(&2, String, nf)) ++ "|m" ++ U.Ui.scratch(N.Nui.ui(n), "@ime")
 
 def Mm.key.k(ok: Bool, +n: N.Nui, +t: TouchK, +rels: List<&2, String>) -> String:
   match ok:
@@ -239,10 +305,11 @@ def Mm.key(+n: N.Nui, +t: TouchK, +rels: List<&2, String>) -> String:
 # key: the main area's; rk: the open thread with its own last touch and
 # the last change to whose parent or child any thread is otherwise (r):
 # a delegation or a launch touches both ends, so rels, found by walking
-# every task, is found again only when rk changes
+# every task, is found again only when rk changes; due: the first time
+# the clock alone would change it (Mm.due), until which it may be used
 
 type MainM is Data:
-  MainM{key: String, rk: String, rels: List<&2, String>, out: L.Out}
+  MainM{key: String, rk: String, rels: List<&2, String>, out: L.Out, due: Nat}
 
 def Mm.rk(+n: N.Nui, +t: TouchK) -> String:
   U.Ui.sel(N.Nui.ui(n)) ++ "|" ++ Nat.show(TouchK.at(t, U.Ui.sel(N.Nui.ui(n)))) ++ "|" ++ Nat.show(TouchK.r(t))
@@ -254,7 +321,7 @@ def Mm.rels.of(+n: N.Nui) -> List<&2, String>:
 
 def Mm.rels.k(same: Bool, ms: List<&2, MainM>, +n: N.Nui) -> List<&2, String>:
   match same ms:
-    case True{} MainM{_, _, rs, _} <> _:
+    case True{} MainM{_, _, rs, _, _} <> _:
       rs
     case _ _:
       Mm.rels.of(n)
@@ -263,7 +330,7 @@ def MainM.rk.is(+rk: String, ms: List<&2, MainM>) -> Bool:
   match ms:
     case Nil{}:
       False{}
-    case MainM{_, +k, _, _} <> _:
+    case MainM{_, +k, _, _, _} <> _:
       String.eq(k, rk)
 
 # the open thread's parent and children, the memo's while rk holds
@@ -274,29 +341,48 @@ def MainM.same(+key: String, ms: List<&2, MainM>) -> Bool:
   match ms:
     case Nil{}:
       False{}
-    case MainM{+k, _, _, _} <> _:
+    case MainM{+k, _, _, _, _} <> _:
       Bool.and(Bool.not(String.is_empty(key)), String.eq(k, key))
+
+def MainM.due(ms: List<&2, MainM>) -> Nat:
+  match ms:
+    case Nil{}:
+      0n
+    case MainM{_, _, _, _, d} <> _:
+      d
+
+# a memo is used only before its due time, and for the same key (law
+# mm_late_misses)
+def Mm.use.k(late: Bool, +same: Bool) -> Bool:
+  match late:
+    case True{}:
+      False{}
+    case False{}:
+      same
+
+def Mm.use(+key: String, +ms: List<&2, MainM>, +now: Nat) -> Bool:
+  Mm.use.k(Nat.is_ge(now, MainM.due(ms)), MainM.same(key, ms))
 
 def MainM.out(ms: List<&2, MainM>) -> L.Out:
   match ms:
     case Nil{}:
       L.Out.none()
-    case MainM{_, _, _, o} <> _:
+    case MainM{_, _, _, o, _} <> _:
       o
 
 # the main area as Lay.frame.u lays it out (Lay.main.m with none given)
 def Mm.lay(+ty: L.Ty, +memo: L.TLMemo, +n: N.Nui) -> L.Out:
   L.Lay.main(ty, memo, L.Lay.shrink(n, L.Lay.term_h(n)), 264, Mm.x1.of(n))
 
-def Mm.main.k(hit: Bool, +key: String, +rk: String, +rels: List<&2, String>, ms: List<&2, MainM>, +ty: L.Ty, +memo: L.TLMemo, +n: N.Nui) -> MainM:
+def Mm.main.k(hit: Bool, +key: String, +rk: String, +rels: List<&2, String>, +ms: List<&2, MainM>, +ty: L.Ty, +memo: L.TLMemo, +n: N.Nui) -> MainM:
   match hit:
     case True{}:
-      MainM{key, rk, rels, MainM.out(ms)}
+      MainM{key, rk, rels, MainM.out(ms), MainM.due(ms)}
     case False{}:
-      MainM{key, rk, rels, Mm.lay(ty, memo, n)}
+      MainM{key, rk, rels, Mm.lay(ty, memo, n), Mm.due(n, rels, memo)}
 
 def Mm.main.s(+key: String, +rk: String, +rels: List<&2, String>, +ms: List<&2, MainM>, +ty: L.Ty, +memo: L.TLMemo, +n: N.Nui) -> MainM:
-  Mm.main.k(MainM.same(key, ms), key, rk, rels, ms, ty, memo, n)
+  Mm.main.k(Mm.use(key, ms, U.Side.now(N.Nui.ui(n))), key, rk, rels, ms, ty, memo, n)
 
 def Mm.main.r(+rk: String, +rels: List<&2, String>, +ms: List<&2, MainM>, +ty: L.Ty, +memo: L.TLMemo, +n: N.Nui, +t: TouchK) -> MainM:
   Mm.main.s(Mm.key(n, t, rels), rk, rels, ms, ty, memo, n)
@@ -309,22 +395,29 @@ def Mm.main(+ms: List<&2, MainM>, +ty: L.Ty, +memo: L.TLMemo, +n: N.Nui, +t: Tou
   Mm.main.q(Mm.rk(n, t), ms, ty, memo, n, t)
 
 # a fresh main area kept as the memo (memo_replay)
-def Mm.fresh(+ms: List<&2, MainM>, o: L.Out, +n: N.Nui, +t: TouchK) -> MainM:
-  MainM{Mm.key(n, t, Mm.rels(Mm.rk(n, t), ms, n)), Mm.rk(n, t), Mm.rels(Mm.rk(n, t), ms, n), o}
+def Mm.fresh(+ms: List<&2, MainM>, o: L.Out, +n: N.Nui, +t: TouchK, +memo: L.TLMemo) -> MainM:
+  MainM{Mm.key(n, t, Mm.rels(Mm.rk(n, t), ms, n)), Mm.rk(n, t), Mm.rels(Mm.rk(n, t), ms, n), o, Mm.due(n, Mm.rels(Mm.rk(n, t), ms, n), memo)}
 
 # the memo says the main area is unchanged
 def Mm.hits(+ms: List<&2, MainM>, +n: N.Nui, +t: TouchK) -> Bool:
-  MainM.same(Mm.key(n, t, Mm.rels(Mm.rk(n, t), ms, n)), ms)
+  Mm.use(Mm.key(n, t, Mm.rels(Mm.rk(n, t), ms, n)), ms, U.Side.now(N.Nui.ui(n)))
 
 def MainM.key(m: MainM) -> String:
   match m:
-    case MainM{k, _, _, _}:
+    case MainM{k, _, _, _, _}:
+      k
+
+def MainM.key.of(ms: List<&2, MainM>) -> String:
+  match ms:
+    case Nil{}:
+      ""
+    case MainM{k, _, _, _, _} <> _:
       k
 
 def MainM.keep(m: MainM) -> List<&2, MainM>:
   match m:
-    case MainM{+k, rk, rs, o}:
-      Bool.pick(List<&2, MainM>, String.is_empty(k), Nil{}, [MainM{k, rk, rs, o}])
+    case MainM{+k, rk, rs, o, d}:
+      Bool.pick(List<&2, MainM>, String.is_empty(k), Nil{}, [MainM{k, rk, rs, o, d}])
 
 # The sidebar's memo
 # ------------------
@@ -349,7 +442,7 @@ def Sm.caret(+fo: String, +ca: Nat) -> String:
 def Sm.key(+n: N.Nui, +t: TouchK) -> String:
   match n:
     case N.Nui{U.Ui{_, +sel, _, _, +op, on, now, ad, pa, v, rid, w, er, note, +nf, +ob, _}, +ww, +hh, _, _, sd, _, ca, +fo, path, _, _, _}:
-      "n" ++ Nat.show(TouchK.n(t)) ++ "|" ++ sel ++ "|t" ++ Nat.show(now) ++ "|w" ++ U32.show(ww) ++ "," ++ U32.show(hh) ++ "," ++ U32.show(sd) ++ "," ++ Sm.caret(fo, ca) ++ "," ++ fo ++ "," ++ path
+      "n" ++ Nat.show(TouchK.n(t)) ++ "|" ++ sel ++ "|lang" ++ L.TL.locale(N.Nui.ui(n)) ++ "|t" ++ Nat.show(now) ++ "|w" ++ U32.show(ww) ++ "," ++ U32.show(hh) ++ "," ++ U32.show(sd) ++ "," ++ Sm.caret(fo, ca) ++ "," ++ fo ++ "," ++ path
         ++ "|u" ++ Mm.b(on) ++ Mm.b(ad) ++ Mm.b(pa) ++ Mm.b(w) ++ "," ++ v ++ "," ++ Nat.show(rid) ++ "," ++ er ++ "," ++ note
         ++ "|f" ++ Mm.flags(Map.to_list(&2, Bool, op)) ++ "|o" ++ Mm.strs(Map.to_list(&2, String, ob))
         ++ "|i" ++ Mm.info(Map.to_list(&2, String, nf))
@@ -410,12 +503,19 @@ def Ix.keep.a(keep: Bool, a: M.Ask, rest: List<&2, M.Ask>) -> List<&2, M.Ask>:
       rest
 
 # the threads touched after message n0
+# (the counts kept beside the threads' touches, "~<thread>" a thread's
+# streamed pieces and "#..." stamps, name no thread: one taken for a
+# thread found no record and rebuilt the index whole, every frame once a
+# thread had streamed more pieces than there were changes)
+def Ix.mark(+k: String) -> Bool:
+  Bool.or(String.starts_with(k, "~"), String.starts_with(k, "#"))
+
 def Ix.since(xs: List<&2, Sigma<&2, &2, String, _ => Nat>>, +n0: Nat) -> List<&2, String>:
   match xs:
     case Nil{}:
       Nil{}
     case (+k, +v) <> +t:
-      Ix.keep.s(Nat.is_gt(v, n0), k, Ix.since(t, n0))
+      Ix.keep.s(Bool.and(Nat.is_gt(v, n0), Bool.not(Ix.mark(k))), k, Ix.since(t, n0))
 
 def Ix.has(ts: List<&2, M.Thread>, +id: String) -> Bool:
   match ts:

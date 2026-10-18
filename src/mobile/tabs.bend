@@ -1,4 +1,5 @@
 import Base
+import ../core/i18n.bend as I
 import ../core/json.bend as J
 import ../core/model.bend as M
 import ../core/client.bend as U
@@ -59,23 +60,23 @@ def MTab.routine.w(w: SC.SRow, +r: BT.Routine, +u: U.Ui, +now: Nat) -> J.Json:
         J.KV{"machine", J.Json.str(U.Ui.far.name(u, BT.Routine.bot(r)))}, J.KV{"away", J.Json.bool(U.Ui.far.away(u, BT.Routine.bot(r)))},
         J.KV{"nav", J.Json.str(MPL.MPlane.nav("routine", BT.Routine.id(r), BT.Routine.bot(r) ++ "|routines", U.Ui.state(u)))}])
 
-def MTab.routine(+r: BT.Routine, +u: U.Ui, +now: Nat) -> J.Json:
-  MTab.routine.w(SC.Sched.row(U.Ui.state(u), r, now, 0n, True{}), r, u, now)
+def MTab.routine(+lc: I.Loc, +r: BT.Routine, +u: U.Ui, +now: Nat) -> J.Json:
+  MTab.routine.w(SC.Sched.row(lc, U.Ui.state(u), r, now, 0n, True{}), r, u, now)
 
-def MTab.routines(rs: List<&2, BT.Routine>, +u: U.Ui, +now: Nat) -> List<&2, J.Json>:
+def MTab.routines(+lc: I.Loc, rs: List<&2, BT.Routine>, +u: U.Ui, +now: Nat) -> List<&2, J.Json>:
   match rs:
     case Nil{}:
       Nil{}
     case +r <> t:
-      MTab.routine(r, u, now) <> MTab.routines(t, u, now)
+      MTab.routine(lc, r, u, now) <> MTab.routines(lc, t, u, now)
 
 def MTab.badge(+n: Nat) -> J.Json:
   J.Json.obj([J.KV{"badge", J.Json.nat(n)}])
 
 # one hub's tabs: the need-you count of the list's own tally (Plane.tally,
 # the sidebar's count), rooms with unread, every bot's routines
-def MTab.json(+u: U.Ui, +ix: U.SIx, +rows: List<&2, U.SRow>) -> J.Json:
+def MTab.json(+lc: I.Loc, +u: U.Ui, +ix: U.SIx, +rows: List<&2, U.SRow>) -> J.Json:
   J.Json.obj([J.KV{"home", MTab.badge(PL.PTally.need(PL.Plane.tally(u, ix, rows)))},
     J.KV{"bots", MTab.badge(MTab.rooms.unread(B.BU.rooms(u), u, 0n))},
     J.KV{"routines", J.Json.obj([J.KV{"badge", J.Json.nat(0n)},
-      J.KV{"rows", J.Json.arr(MTab.routines(BT.World.routines.all(M.State.bots(U.Ui.state(u))), u, S.Mob.now(u)))}])}])
+      J.KV{"rows", J.Json.arr(MTab.routines(lc, BT.World.routines.all(M.State.bots(U.Ui.state(u))), u, S.Mob.now(u)))}])}])

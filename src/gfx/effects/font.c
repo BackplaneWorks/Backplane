@@ -326,6 +326,7 @@ typedef struct {
   FxFace* face;
   u32     px;
   long    style;
+  FxFace* primary; // fixed/proportional policy, cell and line-box metrics
 } FxFallback;
 
 static FxFallback fx_fb[FX_FB_MAX];
@@ -340,7 +341,52 @@ static unsigned fx_has(FxFace* f, u32 cp) {
   return gi;
 }
 
-static FxFace* fx_fb_open(void* pat, u32 cp, u32 px, long style) {
+// Read preference once. Locale precedence follows LC_ALL, LC_MESSAGES,
+// LANG; a non-CJK locale deliberately defaults to Japanese glyph forms.
+static const char* fx_cjk_lang(void) {
+  static const char* lang = NULL;
+  if (lang != NULL) return lang;
+  const char* override = getenv("BACKPLANE_CJK_LANG");
+  const char* loc = override;
+  char tag[64];
+  for (int attempt = 0; attempt < 2; attempt += 1) {
+    if (attempt || loc == NULL || !*loc) {
+      loc = getenv("LC_ALL");
+      if (loc == NULL || !*loc) loc = getenv("LC_MESSAGES");
+      if (loc == NULL || !*loc) loc = getenv("LANG");
+    }
+    unsigned i = 0;
+    while (loc && loc[i] && loc[i] != '.' && loc[i] != '@' && i < sizeof(tag) - 1) {
+      char ch = loc[i];
+      tag[i++] = ch == '_' ? '-' : (ch >= 'A' && ch <= 'Z' ? ch + 'a' - 'A' : ch);
+    }
+    tag[i] = 0;
+    if (override && *override && !attempt) {
+      if (!strcmp(tag, "ja") || !strcmp(tag, "zh-cn") || !strcmp(tag, "zh-tw") || !strcmp(tag, "ko")) break;
+    } else break;
+  }
+  lang = "ja";
+  if (!strncmp(tag, "ko", 2) && (!tag[2] || tag[2] == '-')) lang = "ko";
+  if (!strncmp(tag, "zh", 2) && (!tag[2] || tag[2] == '-')) {
+    lang = strstr(tag, "-tw") || strstr(tag, "-hk") || strstr(tag, "-mo") || strstr(tag, "-hant") ? "zh-tw" : "zh-cn";
+  }
+  return lang;
+}
+
+// Same ranges as core/cjk.bend and Vt.wide (no Unicode library needed).
+static int fx_cjk_wide(u32 cp) {
+  static const u32 ranges[][2] = {
+    {4352,4447}, {11904,12350}, {12353,13311}, {13312,19903},
+    {19968,40959}, {40960,42191}, {44032,55203}, {63744,64255},
+    {65072,65103}, {65280,65376}, {65504,65510}, {127744,128591},
+    {128640,128767}, {129280,129535}, {131072,262141}
+  };
+  for (unsigned i = 0; i < sizeof(ranges) / sizeof(ranges[0]); i += 1)
+    if (cp >= ranges[i][0] && cp <= ranges[i][1]) return 1;
+  return 0;
+}
+
+static FxFace* fx_fb_open(void* pat, u32 cp, u32 px, long style, FxFace* primary) {
   unsigned char* file = NULL;
   int index = 0;
   int color = 0;
@@ -365,6 +411,7 @@ static FxFace* fx_fb_open(void* pat, u32 cp, u32 px, long style) {
   fx_fb[fx_nfb].face = f;
   fx_fb[fx_nfb].px = px;
   fx_fb[fx_nfb].style = style;
+  fx_fb[fx_nfb].primary = primary;
   fx_nfb += 1;
   return f;
 }
@@ -374,7 +421,7 @@ static FxFace* fx_fallback(FxFace* face, u32 cp) {
   u32 px = face->size->metrics.y_ppem;
   long style = face->style_flags & (FX_STYLE_ITALIC | FX_STYLE_BOLD);
   for (u32 i = 0; i < fx_nfb; i += 1) {
-    if (fx_fb[i].px == px && fx_fb[i].style == style && fx_has(fx_fb[i].face, cp) != 0) {
+    if (fx_fb[i].primary == face && fx_fb[i].px == px && fx_fb[i].style == style && fx_has(fx_fb[i].face, cp) != 0) {
       return fx_fb[i].face;
     }
   }
@@ -394,6 +441,7 @@ static FxFace* fx_fallback(FxFace* face, u32 cp) {
     return NULL;
   }
   fx_FcCharSetAddChar(cs, cp);
+  fx_FcPatternAddString(p, "lang", (const unsigned char*)fx_cjk_lang());
   fx_FcPatternAddCharSet(p, "charset", cs);
   fx_FcPatternAddString(p, "family", (const unsigned char*)((face->face_flags & FX_FACE_FIXED_WIDTH) ? "monospace" : "sans-serif"));
   if (style & FX_STYLE_BOLD) {
@@ -409,7 +457,7 @@ static FxFace* fx_fallback(FxFace* face, u32 cp) {
   FxFace* found = NULL;
   if (fs != NULL) {
     for (int i = 0; i < fs->nfont && i < 24 && found == NULL; i += 1) {
-      found = fx_fb_open(fs->fonts[i], cp, px, style);
+      found = fx_fb_open(fs->fonts[i], cp, px, style, face);
     }
     fx_FcFontSetDestroy(fs);
   }
@@ -434,13 +482,28 @@ Term font_glyph_run(Env e, Term* f, IoWork* w) {
   if (face == NULL) {
     return fx_list(e, NULL, 0);
   }
+  FxFace* primary = face;
+  long cell = 0;
   unsigned gi = fx_FT_Get_Char_Index(face, cp);
+  if (gi == 0 && (primary->face_flags & FX_FACE_FIXED_WIDTH)) {
+    unsigned zero = fx_FT_Get_Char_Index(primary, '0');
+    if (zero && fx_FT_Load_Glyph(primary, zero, FX_LOAD_TARGET_LIGHT | FX_LOAD_NO_BITMAP) == 0)
+      cell = primary->glyph->advance.x;
+  }
   if (gi == 0 && cp >= 128) {
     FxFace* fb = fx_fallback(face, cp);
     if (fb != NULL) {
       face = fb;
       gi = fx_FT_Get_Char_Index(face, cp);
     }
+  }
+  if (gi == 0 && fx_cjk_wide(cp)) {
+    static int warned = 0;
+    if (!warned) {
+      fprintf(stderr, "no CJK font: install fonts-noto-cjk\n");
+      warned = 1;
+    }
+    return fx_list(e, NULL, 0);
   }
   if (fx_FT_Load_Glyph(face, gi, FX_LOAD_TARGET_LIGHT | FX_LOAD_NO_BITMAP) != 0
     || fx_FT_Render_Glyph(face->glyph, FX_RENDER_MODE_NORMAL) != 0) {
@@ -456,6 +519,15 @@ Term font_glyph_run(Env e, Term* f, IoWork* w) {
   ws[0] = gi != 0;
   ws[1] = (u32)s->advance.x;
   ws[2] = (u32)(s->bitmap_left + FX_BIAS);
+  if (face != primary && cell > 0) {
+    long advance = cell * (fx_cjk_wide(cp) ? 2 : 1);
+    ws[1] = (u32)advance;
+    // Centre the advance box, preserving the font's own bearing. CJK
+    // punctuation intentionally sits at an edge of its em box.
+    long delta = advance - s->advance.x;
+    long shift = delta >= 0 ? (delta + 64) / 128 : -((-delta + 64) / 128);
+    ws[2] = (u32)(s->bitmap_left + shift + FX_BIAS);
+  }
   ws[3] = (u32)(s->bitmap_top + FX_BIAS);
   ws[4] = bw;
   ws[5] = bh;

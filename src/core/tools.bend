@@ -1,6 +1,8 @@
 import Base
 import ./model.bend as M
 import ./icons.bend as I
+import ./i18n.bend as LC
+import ./msgs.bend as MSG
 
 # The thread header's buttons, one list for every client (the window, the
 # web, the phones): each an icon (core/icons.bend), a word or two, what it
@@ -25,77 +27,112 @@ def Tools.settled(o: M.Override, auto: Bool) -> Bool:
     case _ _:
       False{}
 
-def Tools.stop(running: Bool) -> List<&2, Tool>:
+# Each in the device language (.loc); the plain names are English, for
+# the laws, the web and the phones until they pass a language
+def Tools.stop.loc(+l: LC.Loc, running: Bool) -> List<&2, Tool>:
   match running:
     case True{}:
-      [Tool{"stop", "Stop", "Stop the running turn", "interrupt", "", False{}, True{}, False{}}]
+      [Tool{"stop", MSG.T.composer.stop(l), "Stop the running turn", "interrupt", "", False{}, True{}, False{}}]
     case False{}:
       Nil{}
 
-def Tools.pin(p: Bool) -> Tool:
+def Tools.stop(running: Bool) -> List<&2, Tool>:
+  Tools.stop.loc(LC.En{}, running)
+
+def Tools.pin.loc(+l: LC.Loc, p: Bool) -> Tool:
   match p:
     case True{}:
-      Tool{"pin", "Pinned", "Unpin: it sorts with the rest again", "unpin", "", True{}, False{}, True{}}
+      Tool{"pin", MSG.T.tools.pinned(l), "Unpin: it sorts with the rest again", "unpin", "", True{}, False{}, True{}}
     case False{}:
-      Tool{"pin", "Pin", "Keep it at the top of the list", "pin", "", False{}, False{}, True{}}
+      Tool{"pin", MSG.T.menu.pin(l), "Keep it at the top of the list", "pin", "", False{}, False{}, True{}}
 
-def Tools.settle(s: Bool) -> Tool:
+def Tools.pin(p: Bool) -> Tool:
+  Tools.pin.loc(LC.En{}, p)
+
+def Tools.settle.loc(+l: LC.Loc, s: Bool) -> Tool:
   match s:
     case True{}:
-      Tool{"circle-check", "Settled", "Bring it back to the active threads", "unsettle", "", True{}, False{}, False{}}
+      Tool{"circle-check", MSG.T.notify.settled(l), "Bring it back to the active threads", "unsettle", "", True{}, False{}, False{}}
     case False{}:
-      Tool{"circle-check", "Settle", "Done for now: it leaves the active threads", "settle", "", False{}, False{}, False{}}
+      Tool{"circle-check", MSG.T.menu.settle(l), "Done for now: it leaves the active threads", "settle", "", False{}, False{}, False{}}
+
+def Tools.settle(s: Bool) -> Tool:
+  Tools.settle.loc(LC.En{}, s)
 
 # snoozed: it wakes; else it offers the snooze choices, through the
 # client's own action (a, v)
-def Tools.snooze(s: Bool, a: String, v: String) -> Tool:
+def Tools.snooze.loc(+l: LC.Loc, s: Bool, a: String, v: String) -> Tool:
   match s:
     case True{}:
-      Tool{"clock", "Snoozed", "Wake it now", "snooze", "off", True{}, False{}, False{}}
+      Tool{"clock", MSG.T.sidebar.snoozed(l), "Wake it now", "snooze", "off", True{}, False{}, False{}}
     case False{}:
-      Tool{"clock", "Snooze", "Hide it until later", a, v, False{}, False{}, False{}}
+      Tool{"clock", MSG.T.tools.snooze(l), "Hide it until later", a, v, False{}, False{}, False{}}
 
-def Tools.archive(a: Bool) -> Tool:
+def Tools.snooze(s: Bool, a: String, v: String) -> Tool:
+  Tools.snooze.loc(LC.En{}, s, a, v)
+
+def Tools.archive.loc(+l: LC.Loc, a: Bool) -> Tool:
   match a:
     case True{}:
-      Tool{"archive", "Archived", "Bring it back from the archive", "unarchive", "", True{}, False{}, False{}}
+      Tool{"archive", MSG.T.sidebar.archived(l), "Bring it back from the archive", "unarchive", "", True{}, False{}, False{}}
     case False{}:
-      Tool{"archive", "Archive", "Put it away in the archive", "archive", "", False{}, False{}, False{}}
+      Tool{"archive", MSG.T.menu.archive(l), "Put it away in the archive", "archive", "", False{}, False{}, False{}}
+
+def Tools.archive(a: Bool) -> Tool:
+  Tools.archive.loc(LC.En{}, a)
 
 # Delete asks first: once armed it reads "Delete thread" beside Cancel
-def Tools.del(on: Bool) -> List<&2, Tool>:
+def Tools.del.loc(+l: LC.Loc, on: Bool) -> List<&2, Tool>:
   match on:
     case True{}:
-      [Tool{"trash", "Delete thread", "Delete it for good", "delete", "", False{}, True{}, False{}},
-       Tool{"x", "Cancel", "Keep it", "delete-no", "", False{}, False{}, False{}}]
+      [Tool{"trash", MSG.T.palette.delete(l), "Delete it for good", "delete", "", False{}, True{}, False{}},
+       Tool{"x", MSG.T.common.cancel(l), "Keep it", "delete-no", "", False{}, False{}, False{}}]
     case False{}:
-      [Tool{"trash", "Delete", "Delete this thread (asks first)", "delete", "", False{}, False{}, False{}}]
+      [Tool{"trash", MSG.T.common.delete(l), "Delete this thread (asks first)", "delete", "", False{}, False{}, False{}}]
+
+def Tools.del(on: Bool) -> List<&2, Tool>:
+  Tools.del.loc(LC.En{}, on)
+
+def Tools.fork.loc(+l: LC.Loc) -> Tool:
+  Tool{"git-fork", MSG.T.tools.forkthread(l), "A new thread that goes on from here", "fork", "", False{}, False{}, True{}}
 
 def Tools.fork() -> Tool:
-  Tool{"git-fork", "Fork thread", "A new thread that goes on from here", "fork", "", False{}, False{}, True{}}
+  Tools.fork.loc(LC.En{})
 
-def Tools.back(forked: Bool) -> List<&2, Tool>:
+def Tools.back.loc(+l: LC.Loc, forked: Bool) -> List<&2, Tool>:
   match forked:
     case True{}:
-      [Tool{"undo", "Bring back", "Send what this fork did to the thread it came from, with its next message", "back", "", False{}, False{}, False{}}]
+      [Tool{"undo", MSG.T.menu.bringback(l), "Send what this fork did to the thread it came from, with its next message", "back", "", False{}, False{}, False{}}]
     case False{}:
       Nil{}
 
+def Tools.back(forked: Bool) -> List<&2, Tool>:
+  Tools.back.loc(LC.En{}, forked)
+
+def Tools.term.loc(+l: LC.Loc, on: Bool, a: String, v: String) -> Tool:
+  Tool{"terminal", MSG.T.palette.terminal(l), "A shell in the thread's folder (ctrl+j)", a, v, on, False{}, True{}}
+
 def Tools.term(on: Bool, a: String, v: String) -> Tool:
-  Tool{"terminal", "Terminal", "A shell in the thread's folder (ctrl+j)", a, v, on, False{}, True{}}
+  Tools.term.loc(LC.En{}, on, a, v)
+
+def Tools.panel.loc(+l: LC.Loc, on: Bool) -> Tool:
+  Tool{"panel-right", MSG.T.thread.viewer(l), "Board, schematic, 3D, Mech, files, diff and browser beside the thread", "panel", "", on, False{}, False{}}
 
 def Tools.panel(on: Bool) -> Tool:
-  Tool{"panel-right", "Viewer", "Board, schematic, 3D, Mech, files, diff and browser beside the thread", "panel", "", on, False{}, False{}}
+  Tools.panel.loc(LC.En{}, on)
 
 # the header's buttons, left to right; (sa, sv) opens the client's snooze
 # choices and (ta, tv) its terminal
-def Tools.head(h: Head, sa: String, sv: String, ta: String, tv: String) -> List<&2, Tool>:
+def Tools.head.loc(+l: LC.Loc, h: Head, sa: String, sv: String, ta: String, tv: String) -> List<&2, Tool>:
   match h:
     case Head{running, settled, pinned, snoozed, archived, del, forked, term, panel}:
-      List.concat(&2, Tool, [Tools.stop(running),
-        [Tools.pin(pinned), Tools.settle(settled), Tools.snooze(snoozed, sa, sv), Tools.archive(archived)], Tools.del(del),
-        [Tools.fork()], Tools.back(forked),
-        [Tools.term(term, ta, tv), Tools.panel(panel)]])
+      List.concat(&2, Tool, [Tools.stop.loc(l, running),
+        [Tools.pin.loc(l, pinned), Tools.settle.loc(l, settled), Tools.snooze.loc(l, snoozed, sa, sv), Tools.archive.loc(l, archived)], Tools.del.loc(l, del),
+        [Tools.fork.loc(l)], Tools.back.loc(l, forked),
+        [Tools.term.loc(l, term, ta, tv), Tools.panel.loc(l, panel)]])
+
+def Tools.head(h: Head, sa: String, sv: String, ta: String, tv: String) -> List<&2, Tool>:
+  Tools.head.loc(LC.En{}, h, sa, sv, ta, tv)
 
 # a button's label, which the first-run tour names it by
 def Tools.label(t: Tool) -> String:

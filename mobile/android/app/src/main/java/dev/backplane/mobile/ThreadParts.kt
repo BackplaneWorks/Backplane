@@ -61,6 +61,7 @@ import androidx.compose.material.icons.automirrored.filled.CallSplit
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.VerticalSplit
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.Chat
@@ -476,7 +477,7 @@ fun SubsView(m: AppModel, subs: Subs) {
                     Text(r.title, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     if (r.cancel.isNotEmpty()) Text(if (r.cancel == "wake-cancel") "Cancel" else "Stop", Modifier.clickable { m.act(r.cancel, r.id) }.padding(horizontal = 4.dp),
                         style = MaterialTheme.typography.labelSmall, color = PhaseColor.warn)
-                    Text(r.state, style = MaterialTheme.typography.labelSmall, color = subColor(r.state))
+                    Text(r.stateLabel.ifEmpty { r.state }, style = MaterialTheme.typography.labelSmall, color = subColor(r.state))
                 }
                 if (r.doing.isNotEmpty()) Text(r.doing, Modifier.padding(start = 16.dp), style = MaterialTheme.typography.labelSmall,
                     color = PhaseColor.accent, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -1027,5 +1028,6 @@ fun toolIcon(name: String) = when (name) {
     "search" -> Icons.Filled.FindInPage
     "stop" -> Icons.Filled.Stop
     "x" -> Icons.Filled.Close
+    "box" -> Icons.Filled.ShoppingCart
     else -> null
 }

@@ -143,7 +143,7 @@ def Rvc.env(r: Result<&1, &1, U32 & String, String>) -> String:
 
 def Rvc.rt.cli(r: K.Rt) -> String:
   match r:
-    case K.Rt{+c, _, _, _}:
+    case K.Rt{+c, _, _, _, _}:
       c
 
 def Rvc.cli(+home: String) -> IO(String):

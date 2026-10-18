@@ -1,6 +1,6 @@
 import Base
 
-# The record of Claude processes the hub started, kept through a restart
+# The record of agent processes the hub started, kept through a restart
 # in place (effects/adopt.c; the decisions are core/adopt.bend's).
 
 # the record's file; the record starts empty
@@ -10,6 +10,12 @@ def Adopt.record(path: String) -> IO(Unit):
 
 # a process started for a thread, with its socket (answered back)
 def Adopt.keep(thread: String, pid: U32, s: Socket) -> IO(Socket):
+  import "./effects/adopt.c"
+  import "./effects/adopt.js"
+
+# a per-turn process started for a thread, recorded with no descriptor:
+# never adopted, stopped by the next image if it still runs
+def Adopt.note(thread: String, pid: U32) -> IO(Unit):
   import "./effects/adopt.c"
   import "./effects/adopt.js"
 

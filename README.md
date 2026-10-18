@@ -6,15 +6,14 @@ Agentic hardware development. Claude Code, Codex, Grok, Muse Code and Google's A
 
 ## Why
 
-- **Agents that know KiCad.** Each one is told the exact `kicad-cli` and the project's canonical files, and gets the [KiStack](https://github.com/American-Embedded/KiStack) skills: schematics, symbols, footprints, layout, BOM, Gerbers, panelizing and product renders, kept up to date.
+- **Agents that know KiCad.** Each one is told the exact `kicad-cli` and the project's canonical files, and gets the [KiStack](https://github.com/American-Embedded/KiStack) skills: schematics, symbols, footprints, layout, BOM, Gerbers, panelizing and product renders, kept up to date. With Backplane KiCad installed, they edit through a headless KiCad over its IPC API instead of rewriting files.
 - **You see what the agent changed.** A board file is text no one can review by reading it. Here the board, schematic and 3D model redraw as the agent saves, every step is kept, and any two versions compare like a diff.
 - **Mechanical in the same loop.** Agents model enclosures and brackets in FreeCAD from the board's real outline and parts, and the Mech tab shows them in 3D beside the board.
 - **Your machine, your tools.** It runs locally with your KiCad, your FreeCAD, your files and your agent subscriptions: Claude Code, Codex, Grok, Muse Code or Google's Antigravity.
-- **Away from the desk.** The browser and the phone apps reach it over Tailscale: follow a turn, answer its questions and review the board from anywhere.
 
 ## Web and phone, the same work
 
-The hub runs on your machine. The browser and the native Android and iOS apps reach it over your tailnet and show the same threads, live: start a turn at your desk, then follow it, answer its questions and review the board from your phone. The phone apps are not a reduced view: threads, the board, schematic, 3D model, Mech parts, files and the design history with Compare are all there, drawn natively, with a notification when a turn ends or an agent needs you. Several machines show as one list.
+The hub runs on your machine. The browser and the native Android and iOS apps reach it over your tailnet and show the same threads, live. The phone apps are not a reduced view: threads, the board, schematic, 3D model, Mech parts, files and the design history with Compare are all there, drawn natively, with a notification when a turn ends or an agent needs you. Several machines show as one list.
 
 | | | | |
 |---|---|---|---|
@@ -26,7 +25,7 @@ The hub runs on your machine. The browser and the native Android and iOS apps re
 
 ![The power sheet of the schematic beside the thread](docs/media/web-schematic.png)
 
-**Mechanical parts.** Agents model enclosures and brackets in FreeCAD, headless. The Mech tab turns any STEP in 3D, with the project's other parts beside it, and draws standard views on request.
+**Mechanical parts.** The Mech tab turns any STEP in 3D, with the project's other parts beside it, and draws standard views on request.
 
 ![The case, exploded, on the Mech tab](docs/media/web-mech.png)
 
@@ -34,17 +33,25 @@ The hub runs on your machine. The browser and the native Android and iOS apps re
 
 ![Compare: the tracks the agent widened](docs/media/web-compare.png)
 
-**Threads per project.** Each thread is an agent session with its own model and provider. Tool calls fold into one line, todo lists and tables render as they should, and threads settle on their own when you stop touching them. Fork a thread, rename it, pin it, or hand it to another.
+**Design review.** The Review tab lists the BOM and what changed in it, runs ERC and DRC against a checklist, keeps comments pinned to a spot on the board or schematic, and cuts tagged releases with their outputs.
+
+![The Review tab's checks](docs/media/web-review.png)
+
+**Threads per project.** Each thread is an agent session with its own model and provider. Tool calls fold into one line, and threads settle on their own when you stop touching them. Fork a thread, rename it, pin it, or hand it to another.
 
 | The board | Datasheets and files |
 |---|---|
 | ![](docs/media/web-board.png) | ![](docs/media/web-files.png) |
 
+**Ordering (pilot).** Turn it on in Settings and a finished design shows Ready to order with a price. Buy it starts a thread that gets the design reviewed for manufacturing, asks what's missing, exports the files and quotes them; Buy now opens Stripe. During the pilot no card is charged, and the exported files can go to any fabricator.
+
+![Ready to order](docs/media/web-order.png)
+
 **A native window.** The desktop app is the same client drawn by Bend itself, with its own board and 3D renderer.
 
 ![The native window](docs/media/window-3d.png)
 
-**And more.** A Chrome the agents drive while you watch; agents delegating work to other models; API keys the agents can use without ever reading them; voice input; a terminal per thread. Bots are persistent agents with a face, memory, routines and webhooks, which talk in rooms, across your machines and other people's.
+**And more.** A Chrome the agents drive while you watch, embedded in the Linux window; agents delegating work to other models; API keys the agents can use without ever reading them; voice input; a terminal per thread. Bots are persistent agents with a face, memory, routines and webhooks, which talk in rooms, across your machines and other people's; one can be your uberbot, the main interface to everything. The interface speaks English and Japanese.
 
 <img src="docs/media/cats.png" width="420" alt="Bots and their moods">
 
@@ -62,7 +69,7 @@ curl -fsSL https://github.com/i2cjak/Backplane/releases/latest/download/install.
 backplane
 ```
 
-Linux (x64, arm64) and macOS (Apple silicon). It installs into `~/.local/share/backplane` and keeps itself up to date (`BACKPLANE_NO_UPDATE=1` turns that off). Releases also carry an AppImage, a `.deb`, an AUR `PKGBUILD` and the Android APK. You need at least one agent CLI (`claude`, `codex` or `grok`) and KiCad; FreeCAD for mechanical work. `backplane --headless` runs it without a window. To pair a phone, scan the QR code in Settings (Pairing link, QR code) with the app, or paste the pairing link.
+Linux (x64, arm64) and macOS (Apple silicon). It installs into `~/.local/share/backplane` and keeps itself up to date (`BACKPLANE_NO_UPDATE=1` turns that off). Releases also carry an AppImage, a `.deb`, an AUR `PKGBUILD` and the Android APK. You need at least one agent CLI (`claude`, `codex`, `grok` or `muse`; Antigravity installs from Settings) and KiCad; FreeCAD for mechanical work. `backplane --headless` runs it without a window. To pair a phone, scan the QR code in Settings (Pairing link, QR code) with the app, or paste the pairing link.
 
 On a Mac there is no native window yet: `backplane` runs the hub and you use it in the browser at http://127.0.0.1:3787 (and from your phone, as anywhere). Add `~/.local/bin` to your `PATH` if the installer says so.
 

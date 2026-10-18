@@ -1,5 +1,6 @@
 import Base
 import ../core/model.bend as M
+import ../core/i18n.bend as I
 import ./dom.bend as D
 import ./icon.bend as WI
 import ./cat.bend as WC
@@ -78,18 +79,18 @@ def WB.keep(-A: Data, hit: Bool, x: A, rest: List<&2, A>) -> List<&2, A>:
 
 # a bot: its cat, its name and its mood; a bot elsewhere shows its
 # machine (BU.row.title); a click does what BU.act says
-def WB.row(+r: BI.BRow) -> D.Node:
+def WB.row(+lc: I.Loc, +r: BI.BRow) -> D.Node:
   match r:
-    case BI.BRow{+id, _, _, +look, +mood, note, sel, _, _, _}:
+    case BI.BRow{+id, _, _, +look, +mood, _, sel, _, _, _}:
       D.El{"div", "bot:" ++ id, [D.At{"class", Bool.pick(String, sel, "bot-row on", "bot-row")}, D.At{"title", id}, D.At{"data-value", id}, D.On{"click", BI.BU.act(r)}],
-        [WC.WCat.img(look, mood, 28), WB.div("bot-text", [D.Dom.span("bot-name", BI.BU.row.title(r)), D.Dom.span(WB.mood.cls(mood), note)])]}
+        [WC.WCat.img(look, mood, 28), WB.div("bot-text", [D.Dom.span("bot-name", BI.BU.row.title(r)), D.Dom.span(WB.mood.cls(mood), BI.Mood.note.loc(lc, mood))])]}
 
-def WB.rows(rs: List<&2, BI.BRow>) -> List<&2, D.Node>:
+def WB.rows(+lc: I.Loc, rs: List<&2, BI.BRow>) -> List<&2, D.Node>:
   match rs:
     case Nil{}:
       Nil{}
     case r <> t:
-      WB.row(r) <> WB.rows(t)
+      WB.row(lc, r) <> WB.rows(lc, t)
 
 def WB.rrow(r: BI.RRow) -> D.Node:
   match r:
@@ -115,11 +116,11 @@ def WB.prov(+u: U.Ui) -> String:
   Bool.pick(String, String.is_empty(BI.BU.field(u, "provider")), M.Setting.get(U.Ui.state(u), "agent.provider", "claude"), BI.BU.field(u, "provider"))
 
 # the new bot: a name, a persona, a provider
-def WB.bot.form(open: Bool, +u: U.Ui) -> List<&2, D.Node>:
+def WB.bot.form(+lc: I.Loc, open: Bool, +u: U.Ui) -> List<&2, D.Node>:
   match open:
     case True{}:
       [WB.div("bform", [
-        WB.input("bot-name", "name", BI.BU.field(u, "name"), U.Bots.name.hint(u), "bot-create"),
+        WB.input("bot-name", "name", BI.BU.field(u, "name"), U.Bots.name.hint.loc(lc, u), "bot-create"),
         WB.area("bot-persona", "persona", BI.BU.field(u, "persona"), "Persona: who it is, what it does"),
         WB.div("chips-row", WB.pchips(["claude", "codex", "grok", "muse", "antigravity", "omp"], WB.prov(u))),
         WB.btns([D.Dom.button("primary", "bot-create", "", "Make the bot", "Create"), D.Dom.button("", "bot-new", "", "Cancel", "Cancel")])])]
@@ -148,11 +149,11 @@ def WB.shead(+label: String, +act: String, +title: String) -> D.Node:
   D.El{"div", "", [D.At{"class", "project-head bots-head"}], [D.Dom.span("name", label), WI.WIcon.button("icon", act, "", title, "plus", 16, "")]}
 
 # the sidebar's bots and rooms (below the projects)
-def WB.side(+u: U.Ui) -> List<&2, D.Node>:
+def WB.side(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
   [D.El{"section", "bots", [D.At{"class", "bots"}], List.concat(&2, D.Node, [
     [WB.shead("Bots", "bot-new", "New bot")],
-    WB.bot.form(BI.BU.open(u, "@bnew"), u),
-    WB.rows(BI.BU.rows(u)),
+    WB.bot.form(lc, BI.BU.open(u, "@bnew"), u),
+    WB.rows(lc, BI.BU.rows(u)),
     [WB.shead("Rooms", "room-new", "New room")],
     WB.room.form(BI.BU.open(u, "@rnew"), u),
     WB.rrows(BI.BU.rooms(u))])}]
@@ -189,16 +190,16 @@ def WB.head.t(t: M.Thread, hd: BI.Head) -> D.Node:
 def WB.head(+u: U.Ui, +b: BT.Bot, hd: BI.Head) -> D.Node:
   WB.head.t(U.Ui.thread(U.Ui.state(u), BT.Bot.thread(b)), hd)
 
-def WB.tabs.go(ts: List<&2, String>, +cur: String) -> List<&2, D.Node>:
+def WB.tabs.go(+lc: I.Loc, ts: List<&2, String>, +cur: String) -> List<&2, D.Node>:
   match ts:
     case Nil{}:
       Nil{}
     case +t <> r:
-      D.Dom.button(Bool.pick(String, String.eq(t, cur), "tab on", "tab"), "bot-tab", t, BI.BU.tab.label(t), BI.BU.tab.label(t)) <> WB.tabs.go(r, cur)
+      D.Dom.button(Bool.pick(String, String.eq(t, cur), "tab on", "tab"), "bot-tab", t, BI.BU.tab.label(lc, t), BI.BU.tab.label(lc, t)) <> WB.tabs.go(lc, r, cur)
 
 # the tabs a bot has (BU.head), the one shown on
-def WB.tabs(+hd: BI.Head) -> D.Node:
-  D.El{"nav", "", [D.At{"class", "bot-tabs"}], WB.tabs.go(BI.Head.tabs(hd), BI.Head.tab(hd))}
+def WB.tabs(+lc: I.Loc, +hd: BI.Head) -> D.Node:
+  D.El{"nav", "", [D.At{"class", "bot-tabs"}], WB.tabs.go(lc, BI.Head.tabs(hd), BI.Head.tab(hd))}
 
 # Browser: the bot's page, a frame the hub serves (the pairing cookie
 # carries the token, as for /img); n changes with each "shot" message.
@@ -263,26 +264,26 @@ def WB.srows(rs: List<&2, U.TStepRow>, +u: U.Ui) -> List<&2, D.Node>:
     case r <> t:
       WB.srow(r, u) <> WB.srows(t, u)
 
-def WB.sheet(+u: U.Ui, +b: BT.Bot) -> D.Node:
+def WB.sheet(+lc: I.Loc, +u: U.Ui, +b: BT.Bot) -> D.Node:
   WB.div("bot-list tk-sheet", D.Dom.cat([D.Dom.span("tk-title", "Save this task"),
       WB.note("Name it. Mark a value you typed to ask for it each time the task runs."),
       WB.input("tk-name", "tkname", BI.BU.field(u, "tkname"), "Name", "tk-save"),
       WB.input("tk-desc", "tkdesc", BI.BU.field(u, "tkdesc"), "What it does (optional)", "")],
-    D.Dom.cat(WB.srows(U.Teach.rows(u, BT.Bot.id(b)), u),
+    D.Dom.cat(WB.srows(U.Teach.rows.loc(lc, u, BT.Bot.id(b)), u),
       [WB.btns([D.Dom.button("primary", "tk-save", "", "Save the task", "Save"), D.Dom.button("", "tk-discard", "", "Throw the recording away", "Discard")])])))
 
-def WB.browser.m(sheet: Bool, +u: U.Ui, +b: BT.Bot) -> D.Node:
+def WB.browser.m(+lc: I.Loc, sheet: Bool, +u: U.Ui, +b: BT.Bot) -> D.Node:
   match sheet:
     case True{}:
-      WB.sheet(u, b)
+      WB.sheet(lc, u, b)
     case False{}:
       +id = BT.Bot.id(b)
       +input = {U.Teach.input(u, id) : Bool}
-      WB.div("tk-live", [WB.strip.k(U.Teach.strip(u, id), u, input),
+      WB.div("tk-live", [WB.strip.k(U.Teach.strip.loc(lc, u, id), u, input),
         WB.browser.in(input, String.is_empty(U.Ui.info(u, "shot." ++ id)), U.Ui.info(u, "shot." ++ id), id, BT.Bot.name(b))])
 
-def WB.browser(+u: U.Ui, +b: BT.Bot) -> D.Node:
-  WB.browser.m(Nat.is_eq(U.Teach.mode(u, BT.Bot.id(b)), 2n), u, b)
+def WB.browser(+lc: I.Loc, +u: U.Ui, +b: BT.Bot) -> D.Node:
+  WB.browser.m(lc, Nat.is_eq(U.Teach.mode(u, BT.Bot.id(b)), 2n), u, b)
 
 # Tasks: what the bot has learned, each opened for its run form, then its
 # recent runs with their screenshots
@@ -435,15 +436,15 @@ def WB.routine.row(w: SC.SRow, +id: String, name: String, prompt: String, +on: B
           D.Dom.span("item-next", WB.next.text(next, rel, zone, done, dtext, on)), D.Dom.span("item-text", prompt)]),
         WB.div("item-btns", WB.routine.btns.d(done, own, id, on))]}
 
-def WB.routine(+u: U.Ui, +r: BT.Routine, +own: Bool, +now: Nat) -> D.Node:
-  WB.routine.row(SC.Sched.row(U.Ui.state(u), r, now, 0n, True{}), BT.Routine.id(r), BT.Routine.name(r), BT.Routine.prompt(r), BT.Routine.on(r), own)
+def WB.routine(+lc: I.Loc, +u: U.Ui, +r: BT.Routine, +own: Bool, +now: Nat) -> D.Node:
+  WB.routine.row(SC.Sched.row(lc, U.Ui.state(u), r, now, 0n, True{}), BT.Routine.id(r), BT.Routine.name(r), BT.Routine.prompt(r), BT.Routine.on(r), own)
 
-def WB.routines.go(rs: List<&2, BT.Routine>, +u: U.Ui, +own: Bool, +now: Nat) -> List<&2, D.Node>:
+def WB.routines.go(+lc: I.Loc, rs: List<&2, BT.Routine>, +u: U.Ui, +own: Bool, +now: Nat) -> List<&2, D.Node>:
   match rs:
     case Nil{}:
       Nil{}
     case r <> t:
-      WB.routine(u, r, own, now) <> WB.routines.go(t, u, own, now)
+      WB.routine(lc, u, r, own, now) <> WB.routines.go(lc, t, u, own, now)
 
 def WB.cron.hint.k(empty: Bool, bad: Bool, +d: String) -> List<&2, D.Node>:
   match empty bad:
@@ -456,20 +457,20 @@ def WB.cron.hint.k(empty: Bool, bad: Bool, +d: String) -> List<&2, D.Node>:
 
 # what the schedule or time being typed means, in your zone (U.Routine.hint);
 # an error when it is neither
-def WB.cron.hint(+u: U.Ui) -> List<&2, D.Node>:
-  WB.cron.hint.k(String.is_empty(String.trim(BI.BU.field(u, "ocron"))), String.starts_with(U.Routine.hint(u), "I can read"), U.Routine.hint(u))
+def WB.cron.hint(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
+  WB.cron.hint.k(String.is_empty(String.trim(BI.BU.field(u, "ocron"))), U.Routine.hint.bad(u), U.Routine.hint.loc(lc, u))
 
-def WB.rform(+u: U.Ui) -> D.Node:
+def WB.rform(+lc: I.Loc, +u: U.Ui) -> D.Node:
   WB.div("bform wide", D.Dom.cat([
     WB.input("routine-name", "oname", BI.BU.field(u, "oname"), "Name", ""),
     WB.input("routine-cron", "ocron", BI.BU.field(u, "ocron"), "every 15m · daily 09:30 · tomorrow 9am · in 2h · cron", "")],
-    D.Dom.cat(WB.cron.hint(u), [
+    D.Dom.cat(WB.cron.hint(lc, u), [
     WB.area("routine-prompt", "oprompt", BI.BU.field(u, "oprompt"), "What to do each time"),
     WB.btns([D.Dom.button("primary", "routine-save", "", "Save the routine", Bool.pick(String, String.is_empty(BI.BU.field(u, "oid")), "Add routine", "Save routine")),
       D.Dom.button("", "routine-edit", "", "Clear the form", "Clear")])])))
 
-def WB.routines(+u: U.Ui, +b: BT.Bot) -> D.Node:
-  WB.div("bot-list", List.append(&2, D.Node, WB.routines.go(BI.BU.routines(u, BT.Bot.id(b)), u, BI.BU.owns(BT.Bot.id(b)), U.Side.now(u)), D.Dom.when(BI.BU.owns(BT.Bot.id(b)), WB.rform(u))))
+def WB.routines(+lc: I.Loc, +u: U.Ui, +b: BT.Bot) -> D.Node:
+  WB.div("bot-list", List.append(&2, D.Node, WB.routines.go(lc, BI.BU.routines(u, BT.Bot.id(b)), u, BI.BU.owns(BT.Bot.id(b)), U.Side.now(u)), D.Dom.when(BI.BU.owns(BT.Bot.id(b)), WB.rform(lc, u))))
 
 # Webhooks
 def WB.page(+u: U.Ui) -> String:
@@ -669,50 +670,50 @@ def WB.pos(xs: List<&2, String>, +s: String, +i: Nat) -> Nat:
     case +x <> t:
       Bool.pick(Nat, String.eq(x, s), i, WB.pos(t, s, 1n+i))
 
-def WB.body.k(i: Nat, +u: U.Ui, +b: BT.Bot) -> D.Node:
+def WB.body.k(+lc: I.Loc, i: Nat, +u: U.Ui, +b: BT.Bot) -> D.Node:
   match i:
     case 0n:
       WS.WSpace.view(BI.BU.space(u, b), BT.Bot.id(b))
     case 1n:
-      WB.browser(u, b)
+      WB.browser(lc, u, b)
     case 2n:
       WB.tasks(u, b)
     case 3n:
       WB.memory(u, b)
     case 4n:
-      WB.routines(u, b)
+      WB.routines(lc, u, b)
     case 5n:
       WB.hooks(u, b)
     case _:
       WB.settings(u, b)
 
 # a tab other than Chat
-def WB.body(+u: U.Ui, +b: BT.Bot, +tab: String) -> D.Node:
-  D.El{"div", "bot-body:" ++ tab, [D.At{"class", "bot-body"}], [WB.body.k(WB.pos(["space", "browser", "tasks", "memory", "routines", "hooks"], tab, 0n), u, b)]}
+def WB.body(+lc: I.Loc, +u: U.Ui, +b: BT.Bot, +tab: String) -> D.Node:
+  D.El{"div", "bot-body:" ++ tab, [D.At{"class", "bot-body"}], [WB.body.k(lc, WB.pos(["space", "browser", "tasks", "memory", "routines", "hooks"], tab, 0n), u, b)]}
 
 # The uberbot (docs/uber.md)
 # --------------------------
 
 # its sidebar row, pinned above the search: its cat, its name and what
 # waits on the person (Plane.counts); a click does action "uber"
-def WB.uber.k(r: BI.BRow, +counts: String) -> D.Node:
+def WB.uber.k(+lc: I.Loc, r: BI.BRow, +counts: String) -> D.Node:
   match r:
     case BI.BRow{+id, +name, _, +look, +mood, _, sel, _, _, _}:
       D.El{"div", "uber:" ++ id, [D.At{"class", Bool.pick(String, sel, "bot-row uber-row on", "bot-row uber-row")}, D.At{"title", id}, D.At{"data-value", id}, D.On{"click", "uber"}],
-        [WC.WCat.img(look, mood, 28), WB.div("bot-text", [D.Dom.span("bot-name", name), D.Dom.span("uber-counts", Bool.pick(String, String.is_empty(counts), BI.Mood.note(mood), counts))])]}
+        [WC.WCat.img(look, mood, 28), WB.div("bot-text", [D.Dom.span("bot-name", name), D.Dom.span("uber-counts", Bool.pick(String, String.is_empty(counts), BI.Mood.note.loc(lc, mood), counts))])]}
 
 # (the counts are Plane.tally.words with the sidebar's index, made once a
 # frame for both)
-def WB.uber.m(m: Maybe<&2, BI.BRow>, +u: U.Ui, +ix: U.SIx) -> List<&2, D.Node>:
+def WB.uber.m(+lc: I.Loc, m: Maybe<&2, BI.BRow>, +u: U.Ui, +ix: U.SIx) -> List<&2, D.Node>:
   match m:
     case Some{r}:
-      [WB.uber.k(r, PL.Plane.counts.t(PL.Plane.tally(u, ix, U.Side.rows.ix(U.Ui.state(u), ix, U.Side.now(u)))))]
+      [WB.uber.k(lc, r, PL.Plane.counts.t(lc, PL.Plane.tally(u, ix, U.Side.rows.ix(U.Ui.state(u), ix, U.Side.now(u)))))]
     case None{}:
       Nil{}
 
 # no uberbot, no row
-def WB.uber(+u: U.Ui, +ix: U.SIx) -> List<&2, D.Node>:
-  WB.uber.m(BI.BU.uber(u), u, ix)
+def WB.uber(+lc: I.Loc, +u: U.Ui, +ix: U.SIx) -> List<&2, D.Node>:
+  WB.uber.m(lc, BI.BU.uber(u), u, ix)
 
 # the dot of a row: thread states and bot moods alike
 def WB.pdot(+s: String) -> String:
@@ -731,26 +732,26 @@ def WB.pmark(+state: String) -> D.Node:
   Bool.pick(D.Node, String.eq(state, "reminder"), D.El{"span", "", [D.At{"class", "pbell"}], [WI.WIcon.svg("bell", 12)]}, D.Dom.span(WB.pdot(state), ""))
 
 # one row: a button for what a click sends (act, val), a fixed height
-def WB.prow(r: PL.PRow, +now: Nat) -> D.Node:
+def WB.prow(+lc: I.Loc, r: PL.PRow, +now: Nat) -> D.Node:
   match r:
     case PL.PRow{+kind, +id, +act, +val, +title, +sub, +machine, +state, +at, away}:
       D.El{"button", kind ++ ":" ++ id, [D.At{"class", Bool.pick(String, away, "plane-row away", "plane-row")}, D.At{"title", title}, D.At{"data-value", val}, D.On{"click", act}],
-        [WB.pmark(state), D.Dom.span("title", title), D.Dom.span("sub", sub), D.Dom.span("mach", machine), D.Dom.span("ago", WB.pago(kind, now, at))]}
+        [WB.pmark(state), D.Dom.span("title", PL.Plane.title.shown(lc, kind, title)), D.Dom.span("sub", sub), D.Dom.span("mach", machine), D.Dom.span("ago", WB.pago(kind, now, at))]}
 
-def WB.prows(rs: List<&2, PL.PRow>, +now: Nat) -> List<&2, D.Node>:
+def WB.prows(+lc: I.Loc, rs: List<&2, PL.PRow>, +now: Nat) -> List<&2, D.Node>:
   match rs:
     case Nil{}:
       Nil{}
     case r <> t:
-      WB.prow(r, now) <> WB.prows(t, now)
+      WB.prow(lc, r, now) <> WB.prows(lc, t, now)
 
 # a labelled section; none of it when it is empty
-def WB.psec(+label: String, rs: List<&2, PL.PRow>, +more: Nat, +now: Nat) -> List<&2, D.Node>:
+def WB.psec(+lc: I.Loc, +label: String, rs: List<&2, PL.PRow>, +more: Nat, +now: Nat) -> List<&2, D.Node>:
   match rs:
     case Nil{}:
       Nil{}
     case _ <> _:
-      [WB.div("plane-sec", D.Dom.span("plane-label", label) <> List.append(&2, D.Node, WB.prows(rs, now), D.Dom.when(Nat.is_gt(more, 0n), D.Dom.span("plane-more", "+" ++ Nat.show(more) ++ " more"))))]
+      [WB.div("plane-sec", D.Dom.span("plane-label", label) <> List.append(&2, D.Node, WB.prows(lc, rs, now), D.Dom.when(Nat.is_gt(more, 0n), D.Dom.span("plane-more", "+" ++ Nat.show(more) ++ " more"))))]
 
 def WB.pcount(+label: String, +n: Nat) -> D.Node:
   WB.div(Bool.pick(String, Nat.is_eq(n, 0n), "plane-count", "plane-count on"), [D.Dom.span("n", Nat.show(n)), D.Dom.span("l", label)])
@@ -770,19 +771,19 @@ def WB.pmachs(ms: List<&2, PL.PMach>) -> List<&2, D.Node>:
 # the strip: the counters and the machines
 # where the conversation is held, and the offer to make this machine the
 # home (core's Plane.home decides)
-def WB.phome(+h: PL.PHome) -> List<&2, D.Node>:
+def WB.phome(+lc: I.Loc, +h: PL.PHome) -> List<&2, D.Node>:
   Bool.pick(List<&2, D.Node>, PL.PHome.on(h),
-    [WB.div("plane-home", List.concat(&2, D.Node, [[D.Dom.span("", PL.Plane.home.line(h))],
-      Bool.pick(List<&2, D.Node>, PL.Plane.home.button(h), [D.Dom.button("plane-home-btn", "uber-home", "", PL.Plane.home.label(), PL.Plane.home.label())], Nil{})]))],
+    [WB.div("plane-home", List.concat(&2, D.Node, [[D.Dom.span("", PL.Plane.home.line(lc, h))],
+      Bool.pick(List<&2, D.Node>, PL.Plane.home.button(h), [D.Dom.button("plane-home-btn", "uber-home", "", PL.Plane.home.label(lc), PL.Plane.home.label(lc))], Nil{})]))],
     Nil{})
 
-def WB.pstrip(+p: PL.Plane, +h: PL.PHome) -> D.Node:
+def WB.pstrip(+lc: I.Loc, +p: PL.Plane, +h: PL.PHome) -> D.Node:
   WB.div("plane-strip", List.concat(&2, D.Node, [[
     WB.pcount("Need you", List.length(&2, PL.PRow, PL.Plane.need(p))),
     WB.pcount("Running", List.length(&2, PL.PRow, PL.Plane.run(p))),
     WB.pcount("Bots working", PL.Plane.working(p)),
     WB.pcount("Unread rooms", List.length(&2, PL.PRow, PL.Plane.rooms(p))),
-    WB.div("plane-machs", WB.pmachs(PL.Plane.machines(p)))], WB.phome(h)]))
+    WB.div("plane-machs", WB.pmachs(PL.Plane.machines(p)))], WB.phome(lc, h)]))
 
 def WB.pidle.more(+shown: Nat, +n: Nat) -> Nat:
   Bool.pick(Nat, Nat.is_gt(n, shown), Nat.sub(n, shown), 0n)
@@ -790,34 +791,34 @@ def WB.pidle.more(+shown: Nat, +n: Nat) -> Nat:
 def WB.pempty(+p: PL.Plane) -> Bool:
   Bool.and(List.is_empty(&2, PL.PRow, PL.Plane.need(p)), Bool.and(List.is_empty(&2, PL.PRow, PL.Plane.run(p)), List.is_empty(&2, PL.PRow, PL.Plane.idle(p))))
 
-def WB.plane.k(+p: PL.Plane, +h: PL.PHome, +now: Nat) -> D.Node:
+def WB.plane.k(+lc: I.Loc, +p: PL.Plane, +h: PL.PHome, +now: Nat) -> D.Node:
   WB.div("plane", [
-    WB.pstrip(p, h),
+    WB.pstrip(lc, p, h),
     WB.div("plane-grid", [
       WB.div("plane-main", List.concat(&2, D.Node, [
-        WB.psec("Needs you", PL.Plane.need(p), 0n, now),
-        WB.psec("Running", PL.Plane.run(p), 0n, now),
-        WB.psec("Idle", PL.Plane.idle(p), WB.pidle.more(List.length(&2, PL.PRow, PL.Plane.idle(p)), PL.Plane.idle_n(p)), now),
+        WB.psec(lc, "Needs you", PL.Plane.need(p), 0n, now),
+        WB.psec(lc, "Running", PL.Plane.run(p), 0n, now),
+        WB.psec(lc, "Idle", PL.Plane.idle(p), WB.pidle.more(List.length(&2, PL.PRow, PL.Plane.idle(p)), PL.Plane.idle_n(p)), now),
         D.Dom.when(WB.pempty(p), WB.note("Nothing active"))])),
       WB.div("plane-side", List.concat(&2, D.Node, [
-        WB.psec("Bots", PL.Plane.bots(p), 0n, now),
-        WB.psec("Rooms", PL.Plane.rooms(p), 0n, now),
-        WB.psec("Locks", PL.Plane.locks(p), 0n, now), WB.psec("Routines", PL.Plane.routines(p), 0n, now)]))])])
+        WB.psec(lc, "Bots", PL.Plane.bots(p), 0n, now),
+        WB.psec(lc, "Rooms", PL.Plane.rooms(p), 0n, now),
+        WB.psec(lc, "Locks", PL.Plane.locks(p), 0n, now), WB.psec(lc, "Routines", PL.Plane.routines(p), 0n, now)]))])])
 
 # the Status tab's body
-def WB.plane(+u: U.Ui) -> D.Node:
-  WB.plane.k(PL.Plane.of(u, U.Side.now(u)), PL.Plane.home(u), U.Side.now(u))
+def WB.plane(+lc: I.Loc, +u: U.Ui) -> D.Node:
+  WB.plane.k(lc, PL.Plane.of(u, U.Side.now(u)), PL.Plane.home(u), U.Side.now(u))
 
 # a tab's body: Status here, the others in WB.body; only the one shown is built
-def WB.main.k(status: Bool, +u: U.Ui, +b: BT.Bot, +tab: String) -> D.Node:
+def WB.main.k(+lc: I.Loc, status: Bool, +u: U.Ui, +b: BT.Bot, +tab: String) -> D.Node:
   match status:
     case True{}:
-      D.El{"div", "bot-body:status", [D.At{"class", "bot-body"}], [WB.plane(u)]}
+      D.El{"div", "bot-body:status", [D.At{"class", "bot-body"}], [WB.plane(lc, u)]}
     case False{}:
-      WB.body(u, b, tab)
+      WB.body(lc, u, b, tab)
 
-def WB.main(+u: U.Ui, +b: BT.Bot, +tab: String) -> D.Node:
-  WB.main.k(String.eq(tab, "status"), u, b, tab)
+def WB.main(+lc: I.Loc, +u: U.Ui, +b: BT.Bot, +tab: String) -> D.Node:
+  WB.main.k(lc, String.eq(tab, "status"), u, b, tab)
 
 # Rooms and bots elsewhere
 # ------------------------
@@ -883,12 +884,12 @@ def WB.room(+u: U.Ui, r: BT.Room) -> D.Node:
 # a bot only reported by a linked machine: the bot's view (BU.head: its
 # cat, "name · machine", its mood, Chat alone) over the person's
 # conversation with it, and a line to it
-def WB.remote.h(+u: U.Ui, +id: String, +hd: BI.Head) -> D.Node:
+def WB.remote.h(+lc: I.Loc, +u: U.Ui, +id: String, +hd: BI.Head) -> D.Node:
   D.El{"main", "remote", [D.At{"class", "thread-view bot-view room-view"}], [
     WB.header(hd, Nil{}, Nil{}),
-    WB.tabs(hd),
+    WB.tabs(lc, hd),
     WB.timeline(Bool.pick(List<&2, D.Node>, List.is_empty(&2, BT.Post, BI.BU.remote.posts(u, id)), [WB.note("Nothing said yet.")], WB.posts(BI.BU.remote.posts(u, id), u, BI.Head.look(hd), BI.Head.mood(hd)))),
     WB.compose("remote-send", "rtext", BI.BU.field(u, "rtext"), "Write to " ++ id, "remote-send")]}
 
-def WB.remote(+u: U.Ui, +id: String) -> D.Node:
-  WB.remote.h(u, id, BI.BU.head(u, BI.VRemote{id}))
+def WB.remote(+lc: I.Loc, +u: U.Ui, +id: String) -> D.Node:
+  WB.remote.h(lc, u, id, BI.BU.head(u, BI.VRemote{id}))

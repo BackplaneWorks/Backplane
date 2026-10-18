@@ -3,6 +3,7 @@ import ./font.bend as F
 import ./raster.bend as R
 import ./draw.bend as D
 import ./fontfx.bend as FX
+import ../core/cjk.bend as C
 
 # System-font text: faces found by fontconfig and rasterized by FreeType
 # (fontfx.bend), glyphs cached in Bend state, and draw ops for anti-aliased
@@ -491,10 +492,119 @@ def PWrap.fin(a: PAcc) -> List<&2, String>:
     case PAcc{ls, cur, _, _}:
       List.reverse(&2, String, cur <> ls)
 
+# CJK boundaries drop nothing. A space used as a line break is dropped,
+# exactly as in PWrap, so Edit.starts can recover each source position.
+# Reverse the current line to avoid copying it as each character arrives.
+type JAcc is Data:
+  JAcc{lines: List<&2, String>, rev: String, len: U32, first: Bool}
+
+def JWrap.put.k(first: Bool, fits: Bool, a: JAcc, +w: String, +ww: U32, +gap: Bool, +sp: U32) -> JAcc:
+  match first fits a:
+    case True{} _ JAcc{ls, _, _, _}:
+      JAcc{ls, C.Cjk.rev(w, ""), ww, False{}}
+    case False{} True{} JAcc{ls, +rev, +len, _}:
+      JAcc{ls, C.Cjk.rev(w, Bool.pick(String, gap, SCon{' ', rev}, rev)), (len + sp + ww : U32), False{}}
+    case False{} False{} JAcc{ls, rev, _, _}:
+      JAcc{C.Cjk.rev(rev, "") <> ls, C.Cjk.rev(w, ""), ww, False{}}
+
+def JWrap.put(a: JAcc, +w: String, +gap: Bool, +cache: Map<&2, TG>, +f: Face, +max: U32) -> JAcc:
+  match a:
+    case JAcc{ls, rev, +len, +first}:
+      +ww = Text.adv(w, cache, f, 0)
+      +sp = Bool.pick(U32, gap, TG.adv(Text.get(cache, f, 32)), 0)
+      JWrap.put.k(first, U32.is_le((len + sp + ww : U32), max), JAcc{ls, rev, len, first}, w, ww, gap, sp)
+
+def JWrap.pieces(ps: List<&2, String>, a: JAcc, +gap: Bool, +cache: Map<&2, TG>, +f: Face, +max: U32) -> JAcc:
+  match ps:
+    case Nil{}:
+      a
+    case p <> t:
+      JWrap.pieces(t, JWrap.put(a, p, gap, cache, f, max), False{}, cache, f, max)
+
+# An overlong Latin word can share a segment with its surrounding CJK
+# brackets. Emergency cuts may split that word, but still keep brackets
+# with their contents. If no legal cut fits, allow the smallest group to
+# overhang rather than orphaning punctuation.
+def JFit.best(legal: Bool, before: Bool, best: Nat, n: Nat) -> Nat:
+  match legal before:
+    case True{} True{}:
+      n
+    case _ _:
+      best
+
+def JFit.done.k(have: Bool, legal: Bool, best: Nat, n: Nat) -> Maybe<&2, Nat>:
+  match have legal:
+    case True{} _:
+      Some{best}
+    case False{} True{}:
+      Some{n}
+    case False{} False{}:
+      None{}
+
+def JFit.done(reached: Bool, legal: Bool, +best: Nat, n: Nat) -> Maybe<&2, Nat>:
+  match reached:
+    case False{}:
+      None{}
+    case True{}:
+      JFit.done.k(Nat.is_ne(best, 0n), legal, best, n)
+
+def JFit.scan(s: String, done: Maybe<&2, Nat>, +limit: Nat, +best: Nat, +n: Nat, +prev: U32) -> Nat:
+  match s done:
+    case _ Some{k}:
+      k
+    case SNil{} None{}:
+      n
+    case SCon{Chr{+cp}, t} None{}:
+      +legal = Bool.and(Bool.not(C.Cjk.no_end(prev)), Bool.not(C.Cjk.no_start(cp)))
+      +b2 = JFit.best(legal, Nat.is_le(n, limit), best, n)
+      JFit.scan(t, JFit.done(Nat.is_ge(n, limit), legal, b2, n), limit, b2, 1n+n, cp)
+
+def JFit.take(s: String, +limit: Nat) -> Nat:
+  match s:
+    case SNil{}:
+      0n
+    case SCon{Chr{cp}, t}:
+      JFit.scan(t, None{}, limit, 0n, 1n, cp)
+
+def JFit.chunk(n: Nat, empty: Bool, +s: String, +cache: Map<&2, TG>, +f: Face, +max: U32, acc: List<&2, String>) -> List<&2, String>:
+  match n empty:
+    case 1n+m False{}:
+      +k = JFit.take(s, Fit.atleast(Fit.count(s, cache, f, max, 0)))
+      +rest = String.drop(s, k)
+      JFit.chunk(m, String.is_empty(rest), rest, cache, f, max, String.take(s, k) <> acc)
+    case _ _:
+      List.reverse(&2, String, acc)
+
+def JWrap.chunks(empty: Bool, +w: String, +cache: Map<&2, TG>, +f: Face, +max: U32) -> List<&2, String>:
+  match empty:
+    case True{}:
+      [""]
+    case False{}:
+      JFit.chunk(1n+String.length(w), False{}, w, cache, f, max, Nil{})
+
+def JWrap.segs(ss: List<&2, C.Seg>, a: JAcc, +cache: Map<&2, TG>, +f: Face, +max: U32) -> JAcc:
+  match ss:
+    case Nil{}:
+      a
+    case C.Seg{+w, gap} <> t:
+      JWrap.segs(t, JWrap.pieces(JWrap.chunks(String.is_empty(w), w, cache, f, max), a, gap, cache, f, max), cache, f, max)
+
+def JWrap.fin(a: JAcc) -> List<&2, String>:
+  match a:
+    case JAcc{ls, rev, _, _}:
+      List.reverse(&2, String, C.Cjk.rev(rev, "") <> ls)
+
+def Text.wrap.line.k(cjk: Bool, s: String, +cache: Map<&2, TG>, +f: Face, +px: U32) -> List<&2, String>:
+  match cjk:
+    case True{}:
+      JWrap.fin(JWrap.segs(C.Cjk.segs(s), JAcc{Nil{}, "", 0, True{}}, cache, f, (px * 64 : U32)))
+    case False{}:
+      PWrap.fin(PWrap.words(String.split(s, ' '), PAcc{Nil{}, "", 0, True{}}, cache, f, TG.adv(Text.get(cache, f, 32)), (px * 64 : U32)))
+
 # one paragraph line (no newlines) wrapped to px pixels; "" stays one
 # blank line
-def Text.wrap.line(s: String, +cache: Map<&2, TG>, +f: Face, +px: U32) -> List<&2, String>:
-  PWrap.fin(PWrap.words(String.split(s, ' '), PAcc{Nil{}, "", 0, True{}}, cache, f, TG.adv(Text.get(cache, f, 32)), (px * 64 : U32)))
+def Text.wrap.line(+s: String, +cache: Map<&2, TG>, +f: Face, +px: U32) -> List<&2, String>:
+  Text.wrap.line.k(C.Cjk.has(s), s, cache, f, px)
 
 def Text.wrap.lines(ls: List<&2, String>, +cache: Map<&2, TG>, +f: Face, +px: U32) -> List<&2, String>:
   match ls:
@@ -508,12 +618,39 @@ def Text.wrap.lines(ls: List<&2, String>, +cache: Map<&2, TG>, +f: Face, +px: U3
 def Text.wrap(+cache: Map<&2, TG>, +f: Face, s: String, +px: U32) -> List<&2, String>:
   Text.wrap.lines(String.split(s, '\n'), cache, f, px)
 
+# Drop opening punctuation from an ellipsized prefix. Walk its reversed
+# suffix only; the fit already counted complete code points.
+def Fit.close.head(s: String) -> Bool:
+  match s:
+    case SNil{}:
+      False{}
+    case SCon{Chr{cp}, _}:
+      C.Cjk.no_end(cp)
+
+def Fit.close.go(s: String, open: Bool) -> String:
+  match s open:
+    case SNil{} _:
+      ""
+    case SCon{_, +t} True{}:
+      Fit.close.go(t, Fit.close.head(t))
+    case s False{}:
+      C.Cjk.rev(s, "")
+
+def Fit.close.rev(+s: String) -> String:
+  Fit.close.go(s, Fit.close.head(s))
+
+def Fit.close(s: String) -> String:
+  Fit.close.rev(C.Cjk.rev(s, ""))
+
+def Fit.budget(+max: U32, +need: U32) -> U32:
+  Bool.pick(U32, U32.is_ge(max, need), (max - need : U32), 0)
+
 def Text.fit.k(fits: Bool, +cache: Map<&2, TG>, +f: Face, +s: String, +px: U32) -> String:
   match fits:
     case True{}:
       s
     case False{}:
-      String.take(s, Fit.count(s, cache, f, ((px * 64 : U32) - TG.adv(Text.get(cache, f, 8230)) : U32), 0)) ++ "…"
+      Fit.close(String.take(s, Fit.count(s, cache, f, Fit.budget((px * 64 : U32), TG.adv(Text.get(cache, f, 8230))), 0))) ++ "…"
 
 # s cut with an ellipsis to fit px pixels
 def Text.fit(+cache: Map<&2, TG>, +f: Face, +s: String, +px: U32) -> String:

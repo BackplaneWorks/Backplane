@@ -47,6 +47,8 @@ now_ms() {
   esac
 }
 
+# the inputs' key, taken before any test runs (scripts/verified.sh)
+vkey=$(scripts/verified.sh key test 2>/dev/null || true)
 work=$(mktemp -d .bend-test.XXXXXX)
 trap 'rm -rf "$work"' 0 1 2 15
 
@@ -107,4 +109,6 @@ for t in $tests; do
   fi
   i=$(( i + 1 ))
 done
+# every test passed, unsharded: recorded for these inputs (scripts/verified.sh)
+if [ $status = 0 ] && [ "${TEST_SHARD_COUNT:-1}" -le 1 ]; then scripts/verified.sh mark test "$vkey" || true; fi
 exit $status

@@ -1,14 +1,17 @@
 import Base
+import ./ref.bend as R
 
 # Links in a thread. A web address (http:// or https://) in a message, bare
 # or as a markdown link `[label](url)`, is a link both clients draw and open
 # (the web in a new tab, the window with the system's opener). A path to a
 # file is a link too (Files below): it opens on the hub's machine. What
 # counts as a link, and where it ends, is decided here, once, for all.
+# Backplane refs use core/ref.bend; clients show their labels as plain text.
 
 type Piece is Data:
   PText{text: String}
   PLink{label: String, url: String}
+  PRef{label: String, uri: String, bare: Bool}
 
 # only web addresses open (never javascript:, file:, ...)
 def Link.is_web(+s: String) -> Bool:
@@ -199,9 +202,15 @@ def Link.word(acc: String) -> Bool:
     case SCon{+h, _}:
       Bool.or(Char.is_alpha(h), Char.is_digit(h))
 
-# an address starts here: an "h" (already read) then "ttp://" or "ttps://"
+# An address starts at h + ttp(s):// or b + ackplane://. Only inspect
+# the reversed text boundary once a scheme prefix actually matches.
+def Link.starts.k(prefix: Bool, acc: String) -> Bool:
+  match prefix:
+    case True{}: Bool.not(Link.word(acc))
+    case False{}: False{}
+
 def Link.starts(+acc: String, +t: String) -> Bool:
-  Bool.and(Bool.not(Link.word(acc)), Bool.or(String.starts_with(t, "ttp://"), String.starts_with(t, "ttps://")))
+  Link.starts.k(Bool.or(Bool.or(String.starts_with(t, "ttp://"), String.starts_with(t, "ttps://")), String.starts_with(t, "ackplane://")), acc)
 
 def Link.text.k(k: Nat, acc: String, out: List<&2, Piece>, +c: Char) -> Sc:
   match k:
@@ -212,10 +221,7 @@ def Link.text.k(k: Nat, acc: String, out: List<&2, Piece>, +c: Char) -> Sc:
     case _:
       Sc{SText{SCon{c, acc}}, out}
 
-# (asked only at an "h": Link.word reads the text so far, which in the JS
-# build is a string grown a char at a time, and reading its first char
-# copied all of it, at every char of a streamed reply: the most of a phone's
-# thread screen)
+# Asked only at h or b; Link.starts checks the cheap prefix first.
 def Link.text.h(h: Bool, +acc: String, +t: String) -> Bool:
   match h:
     case True{}:
@@ -224,7 +230,7 @@ def Link.text.h(h: Bool, +acc: String, +t: String) -> Bool:
       False{}
 
 def Link.text.step(+acc: String, out: List<&2, Piece>, +c: Char, +t: String) -> Sc:
-  Link.text.k(Bool.pick(Nat, Link.text.h(U32.is_eq(Link.code(c), 104), acc, t), 1n, Bool.pick(Nat, U32.is_eq(Link.code(c), 91), 2n, 0n)), acc, out, c)
+  Link.text.k(Bool.pick(Nat, Link.text.h(Bool.or(U32.is_eq(Link.code(c), 104), U32.is_eq(Link.code(c), 98)), acc, t), 1n, Bool.pick(Nat, U32.is_eq(Link.code(c), 91), 2n, 0n)), acc, out, c)
 
 # what ends a bare address: space, < > " `
 def Link.stops(+c: Char) -> Bool:
@@ -277,17 +283,22 @@ def Link.tr(u: String, +st: Tr) -> Tr:
     case SCon{+h, +t}:
       Link.tr(t, Link.tr.k(Link.tr.cut(Link.tr.done(st), h, SCon{h, t}), h, st))
 
+def Link.piece(m: Maybe<&2, R.Ref>, label: String, url: String) -> Piece:
+  match m:
+    case Some{r}: PRef{label, R.Ref.uri(r), False{}}
+    case None{}: PLink{label, url}
+
 def Link.url_end.v(ok: Bool, +url: String, acc: String, moved: String, out: List<&2, Piece>) -> Sc:
   match ok:
     case True{}:
-      Sc{SText{moved}, PLink{url, url} <> Link.text(acc, out)}
+      Sc{SText{moved}, Link.piece(R.Ref.parse(url), url, url) <> Link.text(acc, out)}
     case False{}:
       Sc{SText{String.append(moved, String.append(String.reverse(url), acc))}, out}
 
 def Link.url_end.k(tr: Tr, acc: String, out: List<&2, Piece>) -> Sc:
   match tr:
     case Tr{_, +url, moved}:
-      Link.url_end.v(Link.valid(url), url, acc, moved, out)
+      Link.url_end.v(Bool.or(Link.valid(url), Maybe.is_some(&2, R.Ref, R.Ref.parse(url))), url, acc, moved, out)
 
 # a bare address ended (u reversed)
 def Link.url_end(acc: String, u: String, out: List<&2, Piece>) -> Sc:
@@ -344,13 +355,18 @@ def Link.bang(acc: String) -> Bool:
       U32.is_eq(Link.code(h), 33)
 
 # a markdown link's target: a web address, or a file (not an image's)
+def Link.href.ref(ref: Bool, +u: String, +acc: String) -> Bool:
+  match ref:
+    case True{}: Bool.not(Link.bang(acc))
+    case False{}: Bool.or(Link.valid(u), Bool.and(Bool.not(Link.bang(acc)), Link.ref(Link.target(u), True{})))
+
 def Link.href.ok(+u: String, +acc: String) -> Bool:
-  Bool.or(Link.valid(u), Bool.and(Bool.not(Link.bang(acc)), Link.ref(Link.target(u), True{})))
+  Link.href.ref(Maybe.is_some(&2, R.Ref, R.Ref.parse(u)), u, acc)
 
 def Link.close(ok: Bool, +acc: String, +l: String, +u: String, out: List<&2, Piece>) -> Sc:
   match ok:
     case True{}:
-      Sc{SText{SNil{}}, PLink{Link.label(l, u), Link.target(String.reverse(u))} <> Link.text(acc, out)}
+      Sc{SText{SNil{}}, Link.piece(R.Ref.parse(String.reverse(u)), Link.label(l, u), Link.target(String.reverse(u))) <> Link.text(acc, out)}
     case False{}:
       Sc{SText{SCon{')', Link.href.raw(acc, l, u)}}, out}
 
@@ -403,15 +419,15 @@ def Link.go(s: String, sc: Sc) -> List<&2, Piece>:
     case SCon{+c, +t}:
       Link.go(t, Link.step(sc, c, t))
 
-# Bare paths
-# ----------
+# Bare paths and ids
+# ------------------
 # After the scan, each run of text is cut into words at spaces; a word
 # that is a path (Link.is_path) once what wraps it is dropped (a leading
 # ( [ " ' * < ` and a trailing . , ; : ! ? ' " ) ] * >) becomes a link.
 # Text so far (txt), the word being read and the pieces are kept reversed.
 
 type Bw is Data:
-  Bw{txt: String, word: String, out: List<&2, Piece>}
+  Bw{txt: String, word: String, out: List<&2, Piece>, image: Nat, bang: Bool}
 
 def Link.wrap(+u: U32) -> Bool:
   Bool.or(Bool.or(Bool.or(U32.is_eq(u, 40), U32.is_eq(u, 91)), Bool.or(U32.is_eq(u, 34), U32.is_eq(u, 39))),
@@ -439,76 +455,163 @@ def Link.tail(s: String, +n: Nat, +on: Bool) -> Nat:
 def Link.mid(+w: String, +lead: Nat, +trail: Nat) -> String:
   String.take(String.drop(w, lead), Nat.sub(Nat.sub(String.length(w), lead), trail))
 
-def Link.bare.hit(ok: Bool, +w: String, +lead: Nat, +core: String, txt: String, out: List<&2, Piece>) -> Bw:
+# The existing bare-word pass also recognises ids. Each whitespace word
+# is checked as a file first; its remaining id words use exact boundaries.
+# Image state crosses whitespace words, so alt text and targets stay text.
+def Link.idchar(+c: Char) -> Bool:
+  Bool.or(Bool.or(Char.is_alpha(c), Char.is_digit(c)), Bool.or(U32.is_eq(Link.code(c), 46), Bool.or(U32.is_eq(Link.code(c), 95), Bool.or(U32.is_eq(Link.code(c), 45), U32.is_eq(Link.code(c), 126)))))
+
+def Link.ids.part(m: Maybe<&2, R.Ref>, txt: String, +w: String, out: List<&2, Piece>, image: Nat, bang: Bool) -> Bw:
+  match m:
+    case Some{r}: Bw{"", "", PRef{String.reverse(w), R.Ref.uri(r), True{}} <> Link.text(txt, out), image, bang}
+    case None{}: Bw{String.append(w, txt), "", out, image, bang}
+
+def Link.ids.part.flush(st: Bw) -> Bw:
+  match st:
+    case Bw{txt, SNil{}, out, image, bang}: Bw{txt, "", out, image, bang}
+    case Bw{txt, +w, out, image, bang}: Link.ids.part(R.Ref.bare(String.reverse(w)), txt, w, out, image, bang)
+
+def Link.ids.dot.push(st: Bw) -> Bw:
+  match st:
+    case Bw{txt, w, out, image, bang}: Bw{SCon{'.', txt}, w, out, image, bang}
+
+def Link.ids.dot.step(dot: Bool, st: Bw, c: Char) -> Bw:
+  match dot st:
+    case True{} _: Link.ids.dot.push(Link.ids.part.flush(st))
+    case False{} Bw{txt, w, out, image, bang}: Bw{txt, SCon{c, w}, out, image, bang}
+
+def Link.ids.dot.go(s: String, st: Bw) -> Bw:
+  match s:
+    case SNil{}: Link.ids.part.flush(st)
+    case SCon{+c, t}: Link.ids.dot.go(t, Link.ids.dot.step(Char.is_eq(c, '.'), st, c))
+
+def Link.ids.retry(dot: Bool, txt: String, w: String, out: List<&2, Piece>, image: Nat, bang: Bool) -> Bw:
+  match dot:
+    case True{}: Link.ids.dot.go(String.reverse(w), Bw{txt, "", out, image, bang})
+    case False{}: Bw{String.append(w, txt), "", out, image, bang}
+
+def Link.ids.edge(m: Maybe<&2, R.Ref>, txt: String, +w: String, out: List<&2, Piece>, image: Nat, bang: Bool, +trail: Nat) -> Bw:
+  match m:
+    case Some{r}: Bw{String.take(w, trail), "", PRef{String.reverse(String.drop(w, trail)), R.Ref.uri(r), True{}} <> Link.text(txt, out), image, bang}
+    case None{}: Link.ids.retry(True{}, txt, w, out, image, bang)
+
+def Link.ids.miss(dot: Bool, txt: String, +w: String, out: List<&2, Piece>, image: Nat, bang: Bool) -> Bw:
+  match dot:
+    case True{}: Link.ids.edge(R.Ref.bare(String.reverse(String.drop(w, Link.tail(w, 0n, True{})))), txt, w, out, image, bang, Link.tail(w, 0n, True{}))
+    case False{}: Bw{String.append(w, txt), "", out, image, bang}
+
+# A dot can belong to a machine prefix. Try the complete candidate first,
+# then without sentence punctuation, before splitting internal dots.
+def Link.ids.end(m: Maybe<&2, R.Ref>, txt: String, +w: String, out: List<&2, Piece>, image: Nat, bang: Bool) -> Bw:
+  match m:
+    case Some{r}: Bw{"", "", PRef{String.reverse(w), R.Ref.uri(r), True{}} <> Link.text(txt, out), image, bang}
+    case None{}: Link.ids.miss(String.contains(w, "."), txt, w, out, image, bang)
+
+def Link.ids.test(muted: Bool, txt: String, +w: String, out: List<&2, Piece>, image: Nat, bang: Bool) -> Bw:
+  match muted:
+    case True{}: Bw{String.append(w, txt), "", out, image, bang}
+    case False{}: Link.ids.end(R.Ref.bare(String.reverse(w)), txt, w, out, image, bang)
+
+def Link.ids.flush(st: Bw, muted: Bool) -> Bw:
+  match st:
+    case Bw{txt, SNil{}, out, image, bang}: Bw{txt, "", out, image, bang}
+    case Bw{txt, SCon{h, t}, out, image, bang}: Link.ids.test(muted, txt, SCon{h, t}, out, image, bang)
+
+def Link.ids.delim(st: Bw, +c: Char) -> Bw:
+  match st:
+    case Bw{txt, w, out, image, bang}:
+      Bw{SCon{c, txt}, w, out, Bool.pick(Nat, Bool.and(bang, U32.is_eq(Link.code(c), 91)), 1n, image), U32.is_eq(Link.code(c), 33)}
+
+def Link.ids.normal(word: Bool, st: Bw, +c: Char, muted: Bool) -> Bw:
+  match word st:
+    case True{} Bw{txt, w, out, image, _}: Bw{txt, SCon{c, w}, out, image, False{}}
+    case False{} _: Link.ids.delim(Link.ids.flush(st, muted), c)
+
+def Link.ids.image(st: Bw, c: Char, image: Nat) -> Bw:
+  match st:
+    case Bw{txt, w, out, _, _}: Bw{SCon{c, txt}, w, out, image, False{}}
+
+def Link.ids.after(open: Bool, st: Bw, +c: Char, muted: Bool) -> Bw:
+  match open st:
+    case True{} _: Link.ids.image(st, c, 3n)
+    case False{} Bw{txt, w, out, _, b}: Link.ids.normal(Link.idchar(c), Bw{txt, w, out, 0n, b}, c, muted)
+
+def Link.ids.step(st: Bw, +c: Char, muted: Bool) -> Bw:
+  match st:
+    case Bw{txt, w, out, 0n, b}: Link.ids.normal(Link.idchar(c), Bw{txt, w, out, 0n, b}, c, muted)
+    case Bw{txt, w, out, 1n, b}: Link.ids.image(Bw{txt, w, out, 1n, b}, c, Bool.pick(Nat, U32.is_eq(Link.code(c), 93), 2n, 1n))
+    case Bw{txt, w, out, 2n, b}: Link.ids.after(U32.is_eq(Link.code(c), 40), Bw{txt, w, out, 2n, b}, c, muted)
+    case Bw{txt, w, out, +n, b}: Link.ids.image(Bw{txt, w, out, n, b}, c, Bool.pick(Nat, U32.is_eq(Link.code(c), 41), 0n, n))
+
+def Link.ids.go(s: String, st: Bw, +muted: Bool) -> Bw:
+  match s:
+    case SNil{}: Link.ids.flush(st, muted)
+    case SCon{+c, t}: Link.ids.go(t, Link.ids.step(st, c, muted), muted)
+
+def Link.bare.hit(ok: Bool, +w: String, +lead: Nat, +core: String, txt: String, out: List<&2, Piece>, +image: Nat, bang: Bool) -> Bw:
   match ok:
     case True{}:
-      Bw{String.reverse(String.drop(w, Nat.add(lead, String.length(core)))), SNil{}, PLink{core, core} <> Link.text(String.append(String.reverse(String.take(w, lead)), txt), out)}
+      Bw{String.reverse(String.drop(w, Nat.add(lead, String.length(core)))), SNil{}, PLink{core, core} <> Link.text(String.append(String.reverse(String.take(w, lead)), txt), out), image, False{}}
     case False{}:
-      Bw{String.append(String.reverse(w), txt), SNil{}, out}
+      Link.ids.go(w, Bw{txt, "", out, image, bang}, Bool.and(String.contains(w, "://"), Bool.and(Nat.is_eq(image, 0n), Bool.not(String.contains(w, "![")))))
 
-def Link.bare.core(+w: String, +lead: Nat, +trail: Nat, txt: String, out: List<&2, Piece>) -> Bw:
-  Link.bare.hit(Link.is_path(Link.mid(w, lead, trail)), w, lead, Link.mid(w, lead, trail), txt, out)
+def Link.bare.core(+w: String, +lead: Nat, +trail: Nat, txt: String, out: List<&2, Piece>, +image: Nat, bang: Bool) -> Bw:
+  Link.bare.hit(Link.is_path(Link.mid(w, lead, trail)), w, lead, Link.mid(w, lead, trail), txt, out, image, bang)
 
-def Link.bare.word(+rev: String, txt: String, out: List<&2, Piece>) -> Bw:
-  Link.bare.core(String.reverse(rev), Link.lead(String.reverse(rev), 0n, True{}), Link.tail(rev, 0n, True{}), txt, out)
+def Link.bare.word.k(slash: Bool, +rev: String, txt: String, out: List<&2, Piece>, image: Nat, bang: Bool) -> Bw:
+  match slash:
+    case True{}: Link.bare.core(String.reverse(rev), Link.lead(String.reverse(rev), 0n, True{}), Link.tail(rev, 0n, True{}), txt, out, image, bang)
+    case False{}: Link.bare.hit(False{}, String.reverse(rev), 0n, "", txt, out, image, bang)
 
-def Link.bare.flush(txt: String, word: String, out: List<&2, Piece>) -> Bw:
+def Link.bare.word(+rev: String, txt: String, out: List<&2, Piece>, image: Nat, bang: Bool) -> Bw:
+  Link.bare.word.k(String.contains(rev, "/"), rev, txt, out, image, bang)
+
+def Link.bare.flush(txt: String, word: String, out: List<&2, Piece>, image: Nat, bang: Bool) -> Bw:
   match word:
-    case SNil{}:
-      Bw{txt, SNil{}, out}
-    case SCon{h, t}:
-      Link.bare.word(SCon{h, t}, txt, out)
+    case SNil{}: Bw{txt, "", out, image, bang}
+    case SCon{h, t}: Link.bare.word(SCon{h, t}, txt, out, image, bang)
 
 def Link.bare.push(b: Bw, +c: Char) -> Bw:
   match b:
-    case Bw{txt, w, out}:
-      Bw{SCon{c, txt}, w, out}
+    case Bw{txt, w, out, +image, _}: Bw{SCon{c, txt}, w, out, Bool.pick(Nat, Nat.is_eq(image, 2n), 0n, image), False{}}
 
-def Link.bare.k(sp: Bool, +c: Char, txt: String, word: String, out: List<&2, Piece>) -> Bw:
+def Link.bare.k(sp: Bool, +c: Char, txt: String, word: String, out: List<&2, Piece>, image: Nat, bang: Bool) -> Bw:
   match sp:
-    case True{}:
-      Link.bare.push(Link.bare.flush(txt, word, out), c)
-    case False{}:
-      Bw{txt, SCon{c, word}, out}
+    case True{}: Link.bare.push(Link.bare.flush(txt, word, out, image, bang), c)
+    case False{}: Bw{txt, SCon{c, word}, out, image, bang}
 
 def Link.bare.step(st: Bw, +c: Char) -> Bw:
   match st:
-    case Bw{txt, word, out}:
-      Link.bare.k(Char.is_space(c), c, txt, word, out)
+    case Bw{txt, word, out, image, bang}: Link.bare.k(Char.is_space(c), c, txt, word, out, image, bang)
 
 def Link.bare.go(s: String, st: Bw) -> Bw:
   match s:
-    case SNil{}:
-      st
-    case SCon{+c, t}:
-      Link.bare.go(t, Link.bare.step(st, c))
+    case SNil{}: st
+    case SCon{+c, t}: Link.bare.go(t, Link.bare.step(st, c))
 
 def Link.bare.end(b: Bw) -> List<&2, Piece>:
   match b:
-    case Bw{txt, _, out}:
-      List.reverse(&2, Piece, Link.text(txt, out))
+    case Bw{txt, _, out, _, _}: List.reverse(&2, Piece, Link.text(txt, out))
 
 def Link.bare.fin(st: Bw) -> List<&2, Piece>:
   match st:
-    case Bw{txt, word, out}:
-      Link.bare.end(Link.bare.flush(txt, word, out))
+    case Bw{txt, word, out, image, bang}: Link.bare.end(Link.bare.flush(txt, word, out, image, bang))
 
-# a run of text with its bare paths as links (a run with no / has none)
-def Link.bare.text.k(slash: Bool, +s: String) -> List<&2, Piece>:
-  match slash:
-    case True{}:
-      Link.bare.fin(Link.bare.go(s, Bw{SNil{}, SNil{}, Nil{}}))
-    case False{}:
-      [PText{s}]
+def Link.bare.text.k(scan: Bool, +s: String) -> List<&2, Piece>:
+  match scan:
+    case True{}: Link.bare.fin(Link.bare.go(s, Bw{"", "", Nil{}, 0n, False{}}))
+    case False{}: [PText{s}]
+
+def Link.files.go(ps: List<&2, Piece>, acc: List<&2, Piece>) -> List<&2, Piece>:
+  match ps:
+    case Nil{}: List.reverse(&2, Piece, acc)
+    case PText{+s} <> t:
+      Link.files.go(t, List.reverse.go(&2, Piece, Link.bare.text.k(Bool.or(String.contains(s, "/"), String.contains(s, "-")), s), acc))
+    case PLink{l, u} <> t: Link.files.go(t, PLink{l, u} <> acc)
+    case PRef{l, u, b} <> t: Link.files.go(t, PRef{l, u, b} <> acc)
 
 def Link.files(ps: List<&2, Piece>) -> List<&2, Piece>:
-  match ps:
-    case Nil{}:
-      Nil{}
-    case PText{+s} <> t:
-      List.append(&2, Piece, Link.bare.text.k(String.contains(s, "/"), s), Link.files(t))
-    case PLink{l, u} <> t:
-      PLink{l, u} <> Link.files(t)
+  Link.files.go(ps, Nil{})
 
 # text as runs of plain text and links, in order
 def Link.pieces(+s: String) -> List<&2, Piece>:
@@ -523,6 +626,8 @@ def Link.plain(ps: List<&2, Piece>) -> String:
       s ++ Link.plain(t)
     case PLink{l, _} <> t:
       l ++ Link.plain(t)
+    case PRef{l, _, _} <> t:
+      l ++ Link.plain(t)
 
 # the addresses, in order
 def Link.urls(ps: List<&2, Piece>) -> List<&2, String>:
@@ -532,6 +637,8 @@ def Link.urls(ps: List<&2, Piece>) -> List<&2, String>:
     case PText{_} <> t:
       Link.urls(t)
     case PLink{_, u} <> t:
+      u <> Link.urls(t)
+    case PRef{_, u, _} <> t:
       u <> Link.urls(t)
 
 # Lines
@@ -547,6 +654,8 @@ def Link.at(ls: List<&2, Piece>, +s: String) -> Maybe<&2, Piece>:
       None{}
     case PText{_} <> t:
       Link.at(t, s)
+    case PRef{+l, +u, +b} <> t:
+      Bool.pick(Maybe<&2, Piece>, Bool.and(Bool.not(String.is_empty(l)), String.starts_with(s, l)), Some{PRef{l, u, b}}, Link.at(t, s))
     case PLink{+l, +u} <> t:
       Bool.pick(Maybe<&2, Piece>, Bool.and(Bool.not(String.is_empty(l)), String.starts_with(s, l)), Some{PLink{l, u}}, Link.at(t, s))
 
@@ -555,6 +664,8 @@ type Ct is Data:
 
 def Link.cut.hit(m: Maybe<&2, Piece>, +c: Char, st: Ct) -> Ct:
   match m st:
+    case Some{PRef{+l, u, b}} Ct{acc, _, out}:
+      Ct{SNil{}, Nat.sub(String.length(l), 1n), PRef{l, u, b} <> Link.text(acc, out)}
     case Some{PLink{+l, u}} Ct{acc, _, out}:
       Ct{SNil{}, Nat.sub(String.length(l), 1n), PLink{l, u} <> Link.text(acc, out)}
     case _ Ct{acc, k, out}:
@@ -592,8 +703,8 @@ def Link.cut(+line: String, ls: List<&2, Piece>) -> List<&2, Piece>:
     case +h <> t:
       Link.cut.go(line, h <> t, Ct{SNil{}, 0n, Nil{}})
 
-# links carried in a string (a laid-out line's spare field): label US url,
-# joined by RS
+# Links carried in a line's spare field: label US url, joined by RS.
+# A ref adds a third US field (1 bare, 0 explicit); old links keep two.
 def Link.enc(ls: List<&2, Piece>) -> String:
   match ls:
     case Nil{}:
@@ -602,10 +713,24 @@ def Link.enc(ls: List<&2, Piece>) -> String:
       Link.enc(t)
     case PLink{l, u} <> t:
       l ++ SCon{Chr{31}, u} ++ SCon{Chr{30}, Link.enc(t)}
+    case PRef{l, u, b} <> t:
+      l ++ SCon{Chr{31}, u} ++ SCon{Chr{31}, Bool.pick(String, b, "1", "0")} ++ SCon{Chr{30}, Link.enc(t)}
+
+def Link.dec.parts(xs: List<&2, String>) -> List<&2, Piece>:
+  match xs:
+    case l <> u <> b <> Nil{}: [PRef{l, u, String.eq(b, "1")}]
+    case l <> u <> Nil{}: [PLink{l, u}]
+    case l <> Nil{}: [PLink{l, ""}]
+    case Nil{}: Nil{}
+    case _: Nil{}
+
+def Link.dec.one.k(empty: Bool, s: String) -> List<&2, Piece>:
+  match empty:
+    case True{}: Nil{}
+    case False{}: Link.dec.parts(String.split(s, Chr{31}))
 
 def Link.dec.one(+s: String) -> List<&2, Piece>:
-  Bool.pick(List<&2, Piece>, String.is_empty(s), Nil{},
-    [PLink{Maybe.default(&2, String, List.get(&2, String, String.split(s, Chr{31}), 0n), ""), Maybe.default(&2, String, List.get(&2, String, String.split(s, Chr{31}), 1n), "")}])
+  Link.dec.one.k(String.is_empty(s), s)
 
 def Link.dec.all(xs: List<&2, String>) -> List<&2, Piece>:
   match xs:

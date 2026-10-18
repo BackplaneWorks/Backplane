@@ -4,6 +4,8 @@
 // to the build machine's node_modules: a release binary then fails on start
 // with "Cannot find module /home/runner/.../package.json". The plugin makes
 // those requires static, so the JSON is bundled into the binary.
+import { patchCore } from "./src/bunws.ts";
+
 const outfile = process.argv[2];
 if (!outfile) throw new Error("usage: bun build.ts OUTFILE");
 
@@ -18,7 +20,9 @@ const result = await Bun.build({
     name: "playwright-json",
     setup(build) {
       build.onLoad({ filter: /playwright-core[\\/]lib[\\/][^\\/]+\.js$/ }, async ({ path }) => ({
-        contents: (await Bun.file(path).text()).replace(lookup, 'require("../$1.json")'),
+        contents: path.endsWith("coreBundle.js")
+          ? patchCore((await Bun.file(path).text()).replace(lookup, 'require("../$1.json")'))
+          : (await Bun.file(path).text()).replace(lookup, 'require("../$1.json")'),
         loader: "js",
       }));
     },

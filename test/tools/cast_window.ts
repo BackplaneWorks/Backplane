@@ -5,7 +5,9 @@
 // forward), then SECS seconds read from the app's trace: each picture's
 // handling (ui.msg.pic), the frames drawn (ui.frame, and their interval),
 // the frames that reach the hub ({"t":"shot"} on a socket), and the CPU of
-// the app and of the browser helper with its Chrome.
+// the app and of the browser helper with its Chrome; then another thread
+// is selected (the tab left): when the cast ends, and the rate and CPU
+// after.
 //
 //   bun test/tools/cast_window.ts BINARY DISPLAY [SECS] [WIREDIR] [XPOKE]
 //   (backplane-browser beside BINARY; port 3796; never the live hub)
@@ -51,7 +53,7 @@ const home = join(root, "home"), proj = join(root, "proj"), trace = join(root, "
 for (const d of [home, proj]) mkdirSync(d);
 writeFileSync(join(home, "events.jsonl"), "");
 const app = Bun.spawn([bin, "--home", home, "--port", String(PORT), "--no-tailscale"], {
-  env: { ...process.env, DISPLAY: display, WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_PEERS: "", BACKPLANE_GOOGLE_BAKE: "0", BACKPLANE_TRACE: trace, TMPDIR: root },
+  env: { ...process.env, DISPLAY: display, WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "", BACKPLANE_GOOGLE_BAKE: "0", BACKPLANE_TRACE: trace, TMPDIR: root },
   stdout: "ignore", stderr: Bun.file(join(root, "app.err")),
 });
 try {
@@ -122,6 +124,28 @@ try {
   console.log(`  ui.msg.pic: n ${pic.n} (${(pic.n / wall).toFixed(1)} a second), mean ${pic.mean.toFixed(1)} ms, max ${pic.max.toFixed(1)} ms`);
   console.log(`  ui.frame: n ${frame.n} (${(frame.n / wall).toFixed(1)} a second), mean ${frame.mean.toFixed(1)} ms; interval p50 ${q(0.5)} ms, p90 ${q(0.9)} ms`);
   console.log(`  cpu: app ${appCpu.toFixed(0)}%, browser helper + Chrome ${helperCpu.toFixed(0)}%`);
+  // leaving the tab (another thread selected): the window stops saying
+  // seen, the lease runs out, and the page is no longer cast
+  send("thread.create", { project: pc.id, title: "zqother", env: "local", provider: "claude" });
+  await until(10000, () => seen.find((x) => x.$ === "ThreadCreated" && x.title === "zqother"));
+  await sleep(1000);
+  await poke("ctrl", "k"); await sleep(400);
+  await poke("type", "zqother"); await sleep(400);
+  const tLeave = performance.now();
+  await poke("key", "Return");
+  const pics0 = row(await pf(), "ui.msg.pic").n;
+  await sleep(4000);
+  const h1 = procs().filter((p) => p !== app.pid).reduce((a, p) => a + ticks(p), 0);
+  const s1 = shots.length, t1 = performance.now();
+  await sleep(10000);
+  const wall2 = (performance.now() - t1) / 1000;
+  const helperIdle = (procs().filter((p) => p !== app.pid).reduce((a, p) => a + ticks(p), 0) - h1) / hz / wall2 * 100;
+  // the cast's end: the last frame that came less than a second after the one before it
+  const after2 = shots.filter((t) => t >= tLeave);
+  let end = tLeave;
+  for (let i = 1; i < after2.length; i++) if (after2[i] - after2[i - 1] < 1000) end = after2[i];
+  console.log(`  tab left: the cast ended ${((end - tLeave) / 1000).toFixed(1)} s after; then ${((shots.length - s1) / wall2).toFixed(2)} frames a second, browser helper + Chrome ${helperIdle.toFixed(0)}%`);
+  console.log(`  (window pictures from the leave on: ${row(await pf(), "ui.msg.pic").n - pics0})`);
 } finally {
   try { process.kill(app.pid, "SIGTERM"); } catch {}
   await Promise.race([app.exited, sleep(5000)]);

@@ -1,4 +1,6 @@
 import Base
+import ./i18n.bend as I
+import ./msgs.bend as MSG
 
 # The first-run tour, for every client (the window, the web, the phones):
 # a short list of steps, each a title, a few sentences and the part of the
@@ -21,28 +23,28 @@ import Base
 def Ob.count() -> Nat:
   10n
 
-def Ob.title(i: Nat) -> String:
+def Ob.title(+l: I.Loc, i: Nat) -> String:
   match i:
     case 0n:
-      "Welcome to Backplane"
+      MSG.T.tour.title.welcome(l)
     case 1n:
-      "Projects"
+      MSG.T.tour.title.projects(l)
     case 2n:
-      "Threads"
+      MSG.T.tour.title.threads(l)
     case 3n:
-      "The thread's buttons"
+      MSG.T.tour.title.buttons(l)
     case 4n:
-      "Bots"
+      MSG.T.tour.title.bots(l)
     case 5n:
-      "Your agents"
+      MSG.T.tour.title.agents(l)
     case 6n:
-      "Keys and voice"
+      MSG.T.tour.title.keys(l)
     case 7n:
-      "Other machines"
+      MSG.T.tour.title.machines(l)
     case 8n:
-      "Phones and browsers"
+      MSG.T.tour.title.phones(l)
     case 9n:
-      "Your uberbot"
+      MSG.T.tour.title.uber(l)
     case _:
       ""
 
@@ -94,36 +96,32 @@ def Ob.phone(+k: Nat) -> Bool:
 # Backplane starts and Settings says which of on, not connected or off, as the hub reports it
 # (client.bend's Tail.*). The thread buttons are tools.bend's, named by
 # their labels (test/onboard_test.bend ties them).
-def Ob.body.s0(+k: Nat) -> String:
+def Ob.body.s0(+l: I.Loc, +k: Nat) -> String:
   match k:
     case 2n:
-      "A short tour of what is where. Skip it any time; More, Settings shows it again."
+      MSG.T.tour.body.welcome.phone(l)
     case 1n:
-      "A short tour of what is where. Enter goes on (on a focused button it presses that button), Esc skips it, and Settings shows it again."
+      MSG.T.tour.body.welcome.web(l)
     case _:
-      "A short tour of what is where. Enter goes on, Esc skips it, and Settings shows it again."
+      MSG.T.tour.body.welcome.window(l)
 
-def Ob.body.s1(+k: Nat, +d: String) -> String:
-  "A project is a folder, usually a KiCad project. Add one with " ++ Bool.pick(String, Ob.phone(k), "the folder-plus button on the project list", "+ at the top of the sidebar")
-    ++ ". Scratch holds chats with no project. It is temporary: a thread left alone for " ++ d ++ " days is deleted with its folder, unless pinned."
+def Ob.body.s1(+l: I.Loc, +k: Nat, +d: String) -> String:
+  Bool.pick(String, Ob.phone(k), MSG.T.tour.body.projects.phone(l, d), MSG.T.tour.body.projects.desktop(l, d))
 
-def Ob.body.s2() -> String:
-  "A thread is a conversation with an agent working on a project. Git projects use separate worktrees by default; without git, or in local mode, threads share the project folder. Runs of tool calls fold into one row, and delegated work shows under Subagents."
+def Ob.body.s2(+l: I.Loc) -> String:
+  MSG.T.tour.body.threads(l)
 
-def Ob.body.s3(+k: Nat) -> String:
-  Bool.pick(String, Ob.phone(k), "In a thread's toolbar menu, Settle takes it out of the active list. Snooze hides it until later. Fork starts a new thread from it. The viewer shows the board, schematic, 3D and files. Pin, archive and delete are there too.",
-    "Settle takes a thread out of the active list. Snooze hides it until later. Fork starts a new thread from this one. Viewer opens the board, schematic, 3D and files beside it. Pin, archive and delete are there too.")
+def Ob.body.s3(+l: I.Loc, +k: Nat) -> String:
+  Bool.pick(String, Ob.phone(k), MSG.T.tour.body.buttons.phone(l), MSG.T.tour.body.buttons.desktop(l))
 
-def Ob.body.s4(+k: Nat) -> String:
-  "A bot is an agent that stays between chats, with a name, a cat and a memory. Add one under Bots in the " ++ Bool.pick(String, Ob.phone(k), "list", "sidebar")
-    ++ ", then mention it in any message: @scout look at the BOM."
+def Ob.body.s4(+l: I.Loc, +k: Nat) -> String:
+  Bool.pick(String, Ob.phone(k), MSG.T.tour.body.bots.phone(l), MSG.T.tour.body.bots.desktop(l))
 
-def Ob.body.s5() -> String:
-  "Backplane runs the Claude Code, Codex, Grok, Muse Code or oh-my-pi command-line program: install one and sign in to it on the machine that runs this hub. Settings shows whether each is found, not whether you are signed in. Google's Antigravity agent installs and signs in from Settings. Choose the provider and model in a thread's composer, or in Settings for new threads."
+def Ob.body.s5(+l: I.Loc) -> String:
+  MSG.T.tour.body.agents(l)
 
-def Ob.body.s6(+k: Nat) -> String:
-  "API keys for other services are kept in a file on the hub's machine that agents running there could read. They are told not to print them; nothing enforces it. "
-    ++ Bool.pick(String, Ob.phone(k), "Dictation's OpenAI key is set in Settings on a computer or the web page.", "Dictation needs an OpenAI key, set under Voice in Settings.")
+def Ob.body.s6(+l: I.Loc, +k: Nat) -> String:
+  Bool.pick(String, Ob.phone(k), MSG.T.tour.body.keys.phone(l), MSG.T.tour.body.keys.desktop(l))
 
 # How other machines are found and kept in sync (server.bend's Machines.*
 # every two minutes: tailscale status, then GET /hello on each online
@@ -131,15 +129,11 @@ def Ob.body.s6(+k: Nat) -> String:
 # asks the other to link, which only your own devices may, and the two
 # then mirror each other's projects and threads: far.bend). Settings' row
 # is client.bend's Mate.title().
-def Ob.body.s7(+k: Nat) -> String:
-  Bool.pick(String, Ob.phone(k),
-    "Each home folder runs one hub. Hubs on your computers find each other over Tailscale and sync each other's projects and threads in the background, so any one of them shows them all. A project still loading is faded and says syncing. In a message, >desktop: names a thread on the machine called desktop. The Hubs button lists the hubs this phone is paired with; this phone needs Tailscale on the same tailnet.",
-    "Each home folder runs one hub. With Tailscale signed in when Backplane starts, the hub listens on your tailnet and every two minutes asks your other online machines whether Backplane runs there. Tailscale vouches that they are yours, so the hubs link by themselves and sync each other's projects and threads into this sidebar in the background: no switching. A project still loading is faded and says syncing; the rest work meanwhile. In a message, >desktop: names a thread on the machine called desktop. Settings, Your machines shows each one and turns sync off for any of them. Settings also says Tailscale: on, not connected (sign in, then restart Backplane) or off (started with --no-tailscale).")
+def Ob.body.s7(+l: I.Loc, +k: Nat) -> String:
+  Bool.pick(String, Ob.phone(k), MSG.T.tour.body.machines.phone(l), MSG.T.tour.body.machines.desktop(l))
 
-def Ob.body.s8(+k: Nat) -> String:
-  Bool.pick(String, Ob.phone(k),
-    "On the hub's computer open Settings, Pairing link, QR code. Here, Hubs, Scan QR code pairs it. This phone needs Tailscale on the same tailnet. A browser can open a hub's web address too.",
-    "To pair a phone, install Tailscale on it and join the same tailnet. Then open Settings, Pairing link, QR code and scan it with the Backplane app or the phone's camera. Settings shows the link when Backplane has one. A browser on a tailnet device can open this hub's web address too.")
+def Ob.body.s8(+l: I.Loc, +k: Nat) -> String:
+  Bool.pick(String, Ob.phone(k), MSG.T.tour.body.phones.phone(l), MSG.T.tour.body.phones.desktop(l))
 
 # The last step is the uberbot (core/uber.bend): the bot the person makes
 # their main interface. Its words depend on the case client.bend's
@@ -149,43 +143,40 @@ def Ob.body.s8(+k: Nat) -> String:
 def Ob.uber() -> Nat:
   9n
 
-def Ob.body.s9.lead() -> String:
-  "Your uberbot is the cat you talk to first: it sees every project, thread, bot and machine, and its Status tab shows what runs and what waits on you."
+def Ob.body.s9(+l: I.Loc, +k: Nat, +uc: String, +name: String) -> String:
+  Bool.pick(String, String.eq(uc, "have"), Bool.pick(String, Ob.phone(k), MSG.T.tour.body.uber.have.phone(l, name), MSG.T.tour.body.uber.have.desktop(l, name)),
+    Bool.pick(String, String.eq(uc, "join"), MSG.T.tour.body.uber.join(l, name),
+      Bool.pick(String, String.eq(uc, "pick"), MSG.T.tour.body.uber.pick(l, name),
+        MSG.T.tour.body.uber.none(l))))
 
-def Ob.body.s9(+k: Nat, +uc: String, +name: String) -> String:
-  Bool.pick(String, String.eq(uc, "have"), name ++ " is your uberbot. Click it at the top of the " ++ Bool.pick(String, Ob.phone(k), "list", "sidebar") ++ " for the Status of everything.",
-    Bool.pick(String, String.eq(uc, "join"), "Another of your machines has an uberbot, " ++ name ++ ".",
-      Bool.pick(String, String.eq(uc, "pick"), Ob.body.s9.lead() ++ " Make one of your bots the uberbot: " ++ name ++ " is the one you use most. You can change it later.",
-        Ob.body.s9.lead() ++ " Create it now; you can rename it later.")))
-
-def Ob.body(+k: Nat, +d: String, i: Nat) -> String:
+def Ob.body(+l: I.Loc, +k: Nat, +d: String, i: Nat) -> String:
   match i:
     case 0n:
-      Ob.body.s0(k)
+      Ob.body.s0(l, k)
     case 1n:
-      Ob.body.s1(k, d)
+      Ob.body.s1(l, k, d)
     case 2n:
-      Ob.body.s2()
+      Ob.body.s2(l)
     case 3n:
-      Ob.body.s3(k)
+      Ob.body.s3(l, k)
     case 4n:
-      Ob.body.s4(k)
+      Ob.body.s4(l, k)
     case 5n:
-      Ob.body.s5()
+      Ob.body.s5(l)
     case 6n:
-      Ob.body.s6(k)
+      Ob.body.s6(l, k)
     case 7n:
-      Ob.body.s7(k)
+      Ob.body.s7(l, k)
     case 8n:
-      Ob.body.s8(k)
+      Ob.body.s8(l, k)
     case 9n:
-      Ob.body.s9(k, "none", "")
+      Ob.body.s9(l, k, "none", "")
     case _:
       ""
 
 # the words of step i for a case of the uberbot step; other steps ignore it
-def Ob.body.uber(+k: Nat, +d: String, +uc: String, +name: String, +i: Nat) -> String:
-  Bool.pick(String, Nat.is_eq(i, Ob.uber()), Ob.body.s9(k, uc, name), Ob.body(k, d, i))
+def Ob.body.uber(+l: I.Loc, +k: Nat, +d: String, +uc: String, +name: String, +i: Nat) -> String:
+  Bool.pick(String, Nat.is_eq(i, Ob.uber()), Ob.body.s9(l, k, uc, name), Ob.body(l, k, d, i))
 
 # digits in a client's text (anything else, the "m", is skipped)
 def Ob.num(s: String, +acc: Nat) -> Nat:
@@ -260,12 +251,12 @@ def Ob.raw(manual: Bool, i: Nat) -> String:
 def Ob.last(i: Nat) -> Bool:
   Nat.is_eq(1n+i, Ob.count())
 
-def Ob.forward(i: Nat) -> String:
-  Bool.pick(String, Ob.last(i), "Done", "Next")
+def Ob.forward(+l: I.Loc, i: Nat) -> String:
+  Bool.pick(String, Ob.last(i), MSG.T.tour.done(l), MSG.T.tour.next(l))
 
 # "3 of 9"
-def Ob.counter(i: Nat) -> String:
-  Nat.show(1n+i) ++ " of " ++ Nat.show(Ob.count())
+def Ob.counter(+l: I.Loc, i: Nat) -> String:
+  MSG.T.tour.counter(l, Nat.show(1n+i), Nat.show(Ob.count()))
 
 # The keys, one policy for every client: a browser's key name, or an X
 # keysym (the window), to the tour's action ("" for any other key).
@@ -279,19 +270,20 @@ def Ob.sym(+code: U32) -> String:
 
 # Every step has a title, a known target and words for every kind of
 # client (checked for the first n steps, counting down)
-def Ob.sound.i(+i: Nat) -> Bool:
-  Bool.and(Bool.and(Bool.not(String.is_empty(Ob.title(i))), Ob.known(Ob.target.d(i))),
-    Bool.and(Bool.and(Bool.not(String.is_empty(Ob.body(0n, "7", i))), Bool.not(String.is_empty(Ob.body(1n, "7", i)))), Bool.not(String.is_empty(Ob.body(2n, "7", i)))))
+def Ob.sound.i(+l: I.Loc, +i: Nat) -> Bool:
+  Bool.and(Bool.and(Bool.not(String.is_empty(Ob.title(l, i))), Ob.known(Ob.target.d(i))),
+    Bool.and(Bool.and(Bool.not(String.is_empty(Ob.body(l, 0n, "7", i))), Bool.not(String.is_empty(Ob.body(l, 1n, "7", i)))), Bool.not(String.is_empty(Ob.body(l, 2n, "7", i)))))
 
-def Ob.sound.go(+n: Nat) -> Bool:
+def Ob.sound.go(+l: I.Loc, +n: Nat) -> Bool:
   match n:
     case 0n:
       True{}
     case 1n+m:
-      Bool.and(Ob.sound.i(m), Ob.sound.go(m))
+      Bool.and(Ob.sound.i(l, m), Ob.sound.go(l, m))
 
+# (for every locale)
 def Ob.sound() -> Bool:
-  Ob.sound.go(Ob.count())
+  Bool.and(Ob.sound.go(I.En{}, Ob.count()), Ob.sound.go(I.Ja{}, Ob.count()))
 
 # the moves keep to the steps, for every number from 0 to n (past the end
 # they clamp): next and back stay within 0..count, a step on screen has a

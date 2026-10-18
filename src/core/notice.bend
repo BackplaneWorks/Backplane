@@ -672,16 +672,18 @@ def Policy.end(+post: M.State, +now: Nat, +thread: String, +state: String) -> Li
   Policy.end.p(Policy.person(post, thread), post, now, thread, state)
 
 # what an ask's alert says: a paused browser task (core/teach.bend's pause,
-# tool task_pause) its one-line question, any other its tool and detail
-def Alert.ask.say.k(pause: Bool, +tool: String, +detail: String) -> String:
+# tool task_pause) its one-line question, an order's question or approval
+# (core/order.bend's order_ask, order_quote: plain words already) its
+# detail, any other its tool and detail
+def Alert.ask.say.k(pause: Bool, plain: Bool, +tool: String, +detail: String) -> String:
   match pause:
     case True{}:
       J.Json.get_str(Maybe.default(&2, J.Json, J.Json.parse(detail), J.Null{}), "question", "")
     case False{}:
-      Bool.pick(String, String.is_empty(tool), detail, tool ++ " " ++ detail)
+      Bool.pick(String, Bool.or(plain, String.is_empty(tool)), detail, tool ++ " " ++ detail)
 
 def Alert.ask.say(+tool: String, +detail: String) -> String:
-  Alert.ask.say.k(String.eq(tool, "task_pause"), tool, detail)
+  Alert.ask.say.k(String.eq(tool, "task_pause"), Bool.or(String.eq(tool, "order_ask"), String.eq(tool, "order_quote")), tool, detail)
 
 def Policy.ask.k(on: Bool, +post: M.State, +now: Nat, +thread: String, +tool: String, +detail: String) -> List<&2, M.Change>:
   match on:

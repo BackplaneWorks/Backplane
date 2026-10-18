@@ -27,11 +27,17 @@ if [ -n "$dir" ] && [ $secret = 0 ]; then
   rm -f "$o.i"
   key=$(printf '%s\n%s\n%s\n' "${BP_CC_ID:-}" "${BP_CFLAGS:-}" "$pre" | $sum | cut -c1-40)
   if [ -f "$dir/$key.o" ]; then
-    cp "$dir/$key.o" "$o" && touch "$dir/$key.o" && { echo "hit  $c" >&2; exit 0; }
+    cp "$dir/$key.o" "$o" && touch "$dir/$key.o" && { echo hit >"$o.how"; echo "hit  $c" >&2; exit 0; }
   fi
 fi
 # shellcheck disable=SC2086
-"$CC" -std=c11 $BP_CFLAGS -w -c "$c" -o "$o" || { echo "cc failed: $c" >&2; exit 255; }
+# (its peak RSS, KB, beside the object when /usr/bin/time is there)
+if [ -x /usr/bin/time ]; then
+  /usr/bin/time -f %M -o "$o.rss" "$CC" -std=c11 $BP_CFLAGS -w -c "$c" -o "$o" || { echo "cc failed: $c" >&2; exit 255; }
+else
+  "$CC" -std=c11 $BP_CFLAGS -w -c "$c" -o "$o" || { echo "cc failed: $c" >&2; exit 255; }
+fi
+echo cc >"$o.how"
 if [ -n "$key" ]; then
   mkdir -p "$dir"
   cp "$o" "$dir/$key.o.$$" && mv "$dir/$key.o.$$" "$dir/$key.o"
