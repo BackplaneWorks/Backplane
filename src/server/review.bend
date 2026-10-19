@@ -339,12 +339,33 @@ def Rvr.prep.sh() -> String:
     "git archive --format=tar \"$2\" | tar -x -C \"$t\"",
     "printf '%s\\n%s\\n%s\\n%s\\n%s\\n%s\\n%s\\n' \"$t\" \"$t/$p\" \"$gd\" \"$top\" \"$c\" \"$prev\" \"$pc\""], "\n")
 
-def Rvr.run(ss: List<&2, REL.Step>, +dir: String) -> IO(List<&2, String>):
+def Rvr.run.next(+err: String, go: Unit -> IO(String)) -> IO(String):
+  match err:
+    case SNil{}:
+      go(Unit{})
+    case +why:
+      IO.pure(String, why)
+
+def Rvr.run.ran(r: P.Ran, +label: String) -> String:
+  match r:
+    case P.Ran{code, +output}:
+      REL.Release.command_error(label, code, output)
+
+def Rvr.run.cmd(argv: List<&2, String>, +label: String) -> IO(String):
+  match argv:
+    case Nil{}:
+      IO.pure(String, label ++ " failed: no export command")
+    case +c <> +rest:
+      IO.bind(P.Ran, String, K.KiCad.run(c, rest), r => IO.pure(String, Rvr.run.ran(r, label)))
+
+# Stop on the first failed export. A partial output is never a successful
+# release, and later commands must not hide the original failure.
+def Rvr.run(ss: List<&2, REL.Step>, +dir: String) -> IO(String):
   match ss:
     case Nil{}:
-      IO.pure(List<&2, String>, Nil{})
-    case REL.Step{+id, _, +argv} <> t:
-      IO.bind(List<&2, CHK.Finding>, List<&2, String>, Rvc.chk.k(argv, id, "", dir), fs => Rvr.run(t, dir))
+      IO.pure(String, "")
+    case REL.Step{+id, +name, +argv} <> t:
+      IO.bind(String, String, Rvr.run.cmd(argv, name ++ " (" ++ id ++ ")"), err => Rvr.run.next(err, _ => Rvr.run(t, dir)))
 
 def Rvr.files.sh() -> String:
   "cd \"$1\" && find . -type f ! -name notes.md ! -name manifest.json | sed 's|^\\./||' | sort"
@@ -395,15 +416,8 @@ def Rvr.out(r: P.Ran) -> String:
     case P.Ran{_, +o}:
       o
 
-def Rvr.in(+ls: List<&2, String>, +repo: String, +tag: String, +home: String) -> IO(String):
+def Rvr.outputs.done(+ls: List<&2, String>, +tag: String, +dir: String, +sch: String) -> IO(String):
   do IO<String>:
-    cli : String <- Rvc.cli(home)
-    +f : K.Files <- K.Files.read(HI.Hist.at(ls, 1n))
-    +sch : String = Rvc.sch(f)
-    +plan : REL.Plan = Rvr.plan(repo, tag, cli, Rvc.pcb(f), sch)
-    +dir : String = Rvr.plan.dir(plan)
-    made : P.Ran <- P.Proc.run("mkdir", ["-p", dir ++ "/gerbers"], "/")
-    outs : List<&2, String> <- Rvr.run(Rvr.plan.steps(plan), dir)
     +top : String = HI.Hist.at(ls, 3n)
     +rel : String = String.drop(sch, 1n+String.length(HI.Hist.at(ls, 1n)))
     +prefix : String = String.drop(HI.Hist.at(ls, 1n), 1n+String.length(HI.Hist.at(ls, 0n)))
@@ -416,8 +430,27 @@ def Rvr.in(+ls: List<&2, String>, +repo: String, +tag: String, +home: String) ->
     w1 : Bool <- Rvc.write(dir ++ "/notes.md", notes)
     when : P.Ran <- P.Proc.run("date", ["-u", "+%Y-%m-%dT%H:%M:%SZ"], "/")
     w2 : Bool <- Rvc.write(dir ++ "/manifest.json", REL.Release.manifest(tag, HI.Hist.at(ls, 4n), String.trim(Rvr.out(when)), files))
-    gone : P.Ran <- P.Proc.run("rm", ["-rf", HI.Hist.at(ls, 0n)], "/")
     return J.Json.show(J.Json.obj([J.KV{"dir", J.Str{dir}}, J.KV{"files", J.Json.arr(Rvr.strs(files))}, J.KV{"notes", J.Str{notes}}, J.KV{"prev", J.Str{HI.Hist.at(ls, 5n)}}]))
+
+def Rvr.outputs(+err: String, +ls: List<&2, String>, +tag: String, +dir: String, +sch: String) -> IO(String):
+  match err:
+    case SNil{}:
+      Rvr.outputs.done(ls, tag, dir, sch)
+    case +why:
+      IO.pure(String, J.Json.show(J.Json.obj([J.KV{"err", J.Str{why}}])))
+
+def Rvr.in(+ls: List<&2, String>, +repo: String, +tag: String, +home: String) -> IO(String):
+  do IO<String>:
+    cli : String <- Rvc.cli(home)
+    +f : K.Files <- K.Files.read(HI.Hist.at(ls, 1n))
+    +sch : String = Rvc.sch(f)
+    +plan : REL.Plan = Rvr.plan(repo, tag, cli, Rvc.pcb(f), sch)
+    +dir : String = Rvr.plan.dir(plan)
+    made : P.Ran <- P.Proc.run("mkdir", ["-p", dir ++ "/gerbers"], "/")
+    err : String <- Rvr.run(Rvr.plan.steps(plan), dir)
+    text : String <- Rvr.outputs(err, ls, tag, dir, sch)
+    gone : P.Ran <- P.Proc.run("rm", ["-rf", HI.Hist.at(ls, 0n)], "/")
+    return text
 
 def Rvr.go(+ls: List<&2, String>, +repo: String, +tag: String, +home: String) -> IO(Unit):
   IO.bind(String, Unit, Rvr.in(ls, repo, tag, home), text => IO.print(text))

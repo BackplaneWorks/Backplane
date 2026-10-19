@@ -73,3 +73,7 @@ def main() -> IO(Unit):
     C.Check.str("notes", R.Release.notes("v1.3", "v1.2", "abc123", "| Ref | Change |\n|---|---|\n| R1 | 10k -> 22k |", "ERC 0; DRC 0"), "# v1.3\n\nCommit `abc123`. Changes since v1.2.\n\n## Checks\n\nERC 0; DRC 0\n\n## BOM changes\n\n| Ref | Change |\n|---|---|\n| R1 | 10k -> 22k |\n")
     C.Check.str("notes, first, no sections", R.Release.notes("v1", "", "abc123", "", "  "), "# v1\n\nCommit `abc123`. First release.\n")
     C.Check.str("gh", argv(R.Release.gh("v1.3", "/r/.backplane/releases/v1.3/NOTES.md", ["/r/x/a.zip", "/r/x/b.csv"])), "gh|release|create|v1.3|--title|v1.3|--notes-file|/r/.backplane/releases/v1.3/NOTES.md|--verify-tag|/r/x/a.zip|/r/x/b.csv")
+    C.Check.str("export command success", R.Release.command_error("Gerbers (gerbers)", 0, "tool output"), "")
+    C.Check.str("export command failure", R.Release.command_error("Gerbers (gerbers)", 23, "  export failed\n"), "Gerbers (gerbers) failed (exit 23): export failed")
+    C.Check.str("export command failure without output", R.Release.command_error("STEP (step)", 1, " \n"), "STEP (step) failed (exit 1)")
+    C.Check.str("export diagnostic bounded", R.Release.command_error("PDF", 2, String.repeat("x", 400n)), "PDF failed (exit 2): " ++ String.repeat("x", 300n))
