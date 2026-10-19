@@ -25,7 +25,7 @@ The hub runs on your machine. The browser and the native Android and iOS apps re
 
 ![The power sheet of the schematic beside the thread](docs/media/web-schematic.png)
 
-**Mechanical parts.** The Mech tab turns any STEP in 3D, with the project's other parts beside it, and draws standard views on request.
+**Mechanical parts.** The Mech tab turns STEP and GLB models in 3D, with the project's other parts beside them, and draws standard views on request. Mechanical-only projects work too; see the [mechanical quickstart](docs/mechanical.md).
 
 ![The case, exploded, on the Mech tab](docs/media/web-mech.png)
 
@@ -57,7 +57,7 @@ The hub runs on your machine. The browser and the native Android and iOS apps re
 
 ## How you use it
 
-1. Add a project: any folder with a KiCad project in it (several, or one below the root, are fine).
+1. Add a project folder. For board work, it can contain one or several KiCad projects, including below the root. For mechanical work, no KiCad project is required.
 2. Start a thread and ask: "the SSD rails look thin, check them and widen what falls short".
 3. Watch the board change as the agent works. Scrub the history bar, open Compare, ask for changes.
 4. Leave. Answer its questions or start the next thread from your phone.
@@ -69,7 +69,7 @@ curl -fsSL https://github.com/i2cjak/Backplane/releases/latest/download/install.
 backplane
 ```
 
-Linux (x64, arm64) and macOS (Apple silicon). It installs into `~/.local/share/backplane` and keeps itself up to date (`BACKPLANE_NO_UPDATE=1` turns that off). Releases also carry an AppImage, a `.deb`, an AUR `PKGBUILD` and the Android APK. You need at least one agent CLI (`claude`, `codex`, `grok` or `muse`; Antigravity installs from Settings) and KiCad; FreeCAD for mechanical work. `backplane --headless` runs it without a window. To pair a phone, scan the QR code in Settings (Pairing link, QR code) with the app, or paste the pairing link.
+Linux (x64, arm64) and macOS (Apple silicon). It installs into `~/.local/share/backplane` and keeps itself up to date (`BACKPLANE_NO_UPDATE=1` turns that off). Releases also carry an AppImage, a `.deb`, an AUR `PKGBUILD` and the Android APK. You need at least one agent CLI (`claude`, `codex`, `grok` or `muse`; Antigravity installs from Settings). Install KiCad for board and schematic work, and FreeCAD for modelling or exporting mechanical parts. Existing STEP models can be viewed without FreeCAD. `backplane --headless` runs it without a window. To pair a phone, scan the QR code in Settings (Pairing link, QR code) with the app, or paste the pairing link.
 
 Treat pairing links and QR codes as credentials. Browser pairing exchanges the fragment for an HttpOnly, SameSite=Strict cookie (Secure over HTTPS), then removes the fragment; existing browser tokens migrate out of local storage after a successful exchange. Native phone clients retain their pairing-link protocol. Remote clients need the pairing credential; a browser cannot inherit localhost access through a foreign origin or rebound hostname. Local programs running as your user remain trusted. Full Access runs agent tools with your user’s access; choose a more restrictive thread permission mode when wanted. Pairing controls access to the hub, and does not provide OS isolation for a Full Access agent.
 
