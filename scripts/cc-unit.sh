@@ -32,7 +32,9 @@ if [ -n "$dir" ] && [ $secret = 0 ]; then
 fi
 # shellcheck disable=SC2086
 # (its peak RSS, KB, beside the object when /usr/bin/time is there)
-if [ -x /usr/bin/time ]; then
+if [ "$(uname -s)" = Darwin ]; then
+  scripts/mac-rss.sh "$o.rss" "$CC" -std=c11 $BP_CFLAGS -w -c "$c" -o "$o" || { echo "cc failed: $c" >&2; exit 255; }
+elif [ -x /usr/bin/time ]; then
   /usr/bin/time -f %M -o "$o.rss" "$CC" -std=c11 $BP_CFLAGS -w -c "$c" -o "$o" || { echo "cc failed: $c" >&2; exit 255; }
 else
   "$CC" -std=c11 $BP_CFLAGS -w -c "$c" -o "$o" || { echo "cc failed: $c" >&2; exit 255; }
