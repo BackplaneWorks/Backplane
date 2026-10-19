@@ -556,6 +556,12 @@ def Laws.semver_nightly_next_day(a, b, c, d, n, m):
 # Attachment lemmas and laws
 # --------------------------
 
+def Laws.file_bytes_success(bs):
+  {==}
+
+def Laws.file_bytes_failure(code, why):
+  {==}
+
 law attach_chr_ok:
   for b: Bool
   for +c: U32

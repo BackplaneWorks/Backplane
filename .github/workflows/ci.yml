@@ -107,11 +107,21 @@ jobs:
           path: ~/.cache/backplane-bend/obj
           key: objs-${{ matrix.target }}-${{ github.sha }}
           restore-keys: objs-${{ matrix.target }}-
+      - name: Check attachment read failures before the application build
+        run: |
+          mkdir -p build
+          bend test/native/file_bytes.bend -o build/file-bytes
+          bun test/tools/file_bytes.ts build/file-bytes
+          bend test/native/attachment_copy.bend -o build/attachment-copy
+          bun test/tools/attachment_copy.ts build/attachment-copy
+        env:
+          BUN_JSC_forceRAMSize: "4294967296"
       - run: clang --version
       - run: scripts/build.sh
         env:
           BACKPLANE_SKIP_CHECK: "1" # the laws job checks every file
       - run: scripts/smoke.sh
+      - run: bun test/tools/attachment_copy.ts dist/backplane --hub
       - uses: actions/upload-artifact@v4
         with:
           name: backplane-${{ matrix.target }}

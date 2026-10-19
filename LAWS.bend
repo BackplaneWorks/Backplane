@@ -1,4 +1,5 @@
 import Base
+import ./src/server/filebytes.bend as FBY
 import ./src/core/auth.bend as AUTH
 import ./src/core/http.bend as HTTPAUTH
 import ./src/core/pcb2d.bend as PCB2 # PCB viewer text
@@ -529,6 +530,16 @@ law semver_nightly_next_day:
 
 # Attachments
 # -----------
+
+# Whole-file reads keep valid empty files distinct from read failures.
+law file_bytes_success:
+  for bs: List<&2, U32>
+  {FBY.FileBytes.result(Done{bs}) == Done{bs} : Result<&2, &2, String, List<&2, U32>>}
+
+law file_bytes_failure:
+  for code: U32
+  for why: String
+  {FBY.FileBytes.result(Fail{(code, why)}) == Fail{why} : Result<&2, &2, String, List<&2, U32>>}
 
 # a stored attachment's name uses only letters, digits, '.', '_' and '-',
 # so no name can reach outside its thread's directory
