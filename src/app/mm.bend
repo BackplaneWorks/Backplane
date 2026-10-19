@@ -54,15 +54,29 @@ def TouchK.tick(t: TouchK) -> TouchK:
     case TouchK{n, g, r, m, l}:
       TouchK{1n+n, g, r, m, l}
 
+# The timeline/main area still need every global touch. The sidebar index
+# separately tracks global changes to its inputs: a rename only replaces
+# one record, while linked titles elsewhere still invalidate globally.
+# Keep this internal stamp in the existing reserved map, not a new native
+# record field; old/manual TouchK values fall back conservatively to g.
+def TouchK.index.value(r: Map<&2, Nat> & Nat) -> Nat:
+  (_, v) = r
+  v
+
+def TouchK.index_g(t: TouchK) -> Nat:
+  match t:
+    case TouchK{_, g, _, m, _}:
+      TouchK.index.value(Map.get(Nat, g, m, "#ix.g"))
+
 def TouchK.all(t: TouchK) -> TouchK:
   match t:
     case TouchK{+n, _, _, m, l}:
-      TouchK{1n+n, 1n+n, 1n+n, m, l}
+      TouchK{1n+n, 1n+n, 1n+n, Map.set(&2, Nat, m, "#ix.g", 1n+n), l}
 
 def TouchK.one.k(i: Nat, +id: String, t: TouchK) -> TouchK:
   match i t:
     case 0n TouchK{+n, _, r, m, l}:
-      TouchK{n, n, r, m, l}
+      TouchK{n, n, r, Map.set(&2, Nat, m, "#ix.g", n), l}
     case 1n TouchK{+n, g, _, m, l}:
       TouchK{n, g, n, m, l}
     case _ TouchK{+n, g, r, m, l}:
@@ -96,11 +110,26 @@ def TouchK.side.k(blind: Bool, t: TouchK) -> TouchK:
     case False{} TouchK{+n, g, r, m, l}:
       TouchK{n, g, r, Map.set(&2, Nat, m, "#side", n), l}
 
+def TouchK.rename.with(+id: String, t: TouchK, ig: Nat) -> TouchK:
+  match t:
+    case TouchK{+n, _, r, m, l}:
+      TouchK{n, n, r, Map.set(&2, Nat, Map.set(&2, Nat, m, "#ix.g", ig), id, n), TkE{id, n} <> l}
+
+def TouchK.rename(+id: String, +t: TouchK) -> TouchK:
+  TouchK.rename.with(id, t, TouchK.index_g(t))
+
+def TouchK.change.known(+c: M.Change, t: TouchK) -> TouchK:
+  match c:
+    case M.ThreadRenamed{id, _, _}:
+      TouchK.side.k(False{}, TouchK.rename(id, t))
+    case _:
+      TouchK.side.k(Sm.blind(c), TouchK.ids(U.Touch.of(c), t))
+
 # a change folded (one the client cannot read touches all)
 def TouchK.change(m: Maybe<&2, M.Change>, t: TouchK) -> TouchK:
   match m:
     case Some{+c}:
-      TouchK.side.k(Sm.blind(c), TouchK.ids(U.Touch.of(c), t))
+      TouchK.change.known(c, t)
     case None{}:
       TouchK.ids(["*", "!"], t)
 
@@ -862,7 +891,7 @@ def Ix.up.k(i: Nat, k: IxK, +t: TouchK, +u: U.Ui) -> IxK:
 
 def Ix.mode(+n0: Nat, +lt0: String, +t: TouchK, +u: U.Ui) -> Nat:
   Bool.pick(Nat, Bool.not(String.eq(lt0, U.Ui.info(u, "local.touch"))), 1n,
-    Bool.pick(Nat, Bool.or(Nat.is_gt(TouchK.g(t), n0), Nat.is_gt(TouchK.r(t), n0)), 1n,
+    Bool.pick(Nat, Bool.or(Nat.is_gt(TouchK.index_g(t), n0), Nat.is_gt(TouchK.r(t), n0)), 1n,
       Bool.pick(Nat, Nat.is_eq(TouchK.n(t), n0), 0n, 2n)))
 
 def IxK.n(k: IxK) -> Nat:

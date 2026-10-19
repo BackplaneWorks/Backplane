@@ -10710,3 +10710,22 @@ law cef_fallback_keeps_error:
   for +err: String
   {CEF.Cef.reason("cef", "chrome", err) == Bool.pick(String, String.is_empty(err), "native Linux X11 window/runtime is not active", err) : String}
 # --- end browser-cef fallback ---
+
+# ---- Sidebar index rename invalidation ----
+# Rename still invalidates every linked title and retains relationship debt.
+law ix_rename_global_invalidation_retained:
+  for id: String
+  for +t: MM.TouchK
+  {MM.TouchK.g(MM.TouchK.rename(id, t)) == MM.TouchK.n(t) : Nat}
+
+law ix_rename_relationship_invalidation_retained:
+  for id: String
+  for +t: MM.TouchK
+  {MM.TouchK.r(MM.TouchK.rename(id, t)) == MM.TouchK.r(t) : Nat}
+
+law ix_old_touch_global_fallback:
+  for n: Nat
+  for +g: Nat
+  for r: Nat
+  for l: List<&2, MM.TkE>
+  {MM.TouchK.index_g(MM.TouchK{n, g, r, Map.new(&2, Nat), l}) == g : Nat}
