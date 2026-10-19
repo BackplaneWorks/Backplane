@@ -19,6 +19,9 @@ def manifest(package, assets):
         # Jammy's builder invokes the removed appstream-compose binary.
         # Compose with the SDK's modern tool explicitly instead.
         "appstream-compose": False,
+        # The helpers contain Bun's embedded payload. Preserve the shipped
+        # executables instead of running the SDK's debug/strip pipeline.
+        "build-options": {"strip": False, "no-debuginfo": True},
         "finish-args": [
             "--share=network", "--share=ipc", "--socket=x11", "--device=dri",
             "--socket=pulseaudio", "--filesystem=host", "--filesystem=/tmp",

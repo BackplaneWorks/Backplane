@@ -155,6 +155,12 @@ jobs:
           python3 scripts/package-flatpak.py v0.0.0-ci linux-x64
           flatpak --user install -y --noninteractive dist/backplane-v0.0.0-ci-linux-x64.flatpak
           flatpak run io.github.i2cjak.Backplane --version
+          for binary in backplane backplane-serve backplane-browser backplane-step2glb backplane-voice backplane-kipc; do
+            expected=$(sha256sum "dist/$binary" | cut -d' ' -f1)
+            actual=$(flatpak run --command=sha256sum io.github.i2cjak.Backplane "/app/lib/backplane/$binary" | cut -d' ' -f1)
+            test "$actual" = "$expected"
+          done
+          flatpak run --command=/app/lib/backplane/backplane-step2glb io.github.i2cjak.Backplane --version
           # A disposable home and foreground process; never start on live data.
           scratch=$(mktemp -d)
           DISPLAY= flatpak run io.github.i2cjak.Backplane --headless --foreground --no-tailscale --home "$scratch" --port 3799 > "$scratch/log" 2>&1 &
