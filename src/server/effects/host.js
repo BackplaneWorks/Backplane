@@ -473,3 +473,6 @@ io_eff(CID(Env.put), env_put);
 io_eff(CID(Sys.exe_dir), sys_exe_dir);
 io_eff(CID(Sys.exec), sys_exec);
 io_eff(CID(Sys.exe_path), sys_exe_path);
+
+io_eff(CID(Sys.native_pid), () => process.pid >>> 0);
+io_eff(CID(Sys.native_path), (path) => path);

@@ -1203,7 +1203,7 @@ def Mob.tour.choices(cs: List<&2, U.TChoice>) -> List<&2, J.Json>:
 def Mob.tour.k(+lc: I.Loc, +i: Nat, +u: U.Ui) -> J.Json:
   J.Json.obj([J.KV{"step", J.Json.nat(i)}, J.KV{"count", J.Json.nat(OB.Ob.count())}, J.KV{"counter", J.Json.str(U.Tour.counter.loc(lc, u))},
     J.KV{"title", J.Json.str(OB.Ob.title(lc, i))}, J.KV{"body", J.Json.str(U.Tour.body.loc(lc, 2n, u))}, J.KV{"first", J.Json.bool(Bool.not(U.Tour.back(u)))},
-    J.KV{"next", J.Json.str(OB.Ob.forward(lc, i))}, J.KV{"back", J.Json.str(MSG.T.tour.back(lc))}, J.KV{"skip", J.Json.str(MSG.T.tour.skip(lc))},
+    J.KV{"next", J.Json.str(U.Tour.forward(u))}, J.KV{"back", J.Json.str(MSG.T.tour.back(lc))}, J.KV{"skip", J.Json.str(MSG.T.tour.skip(lc))},
     J.KV{"choices", J.Json.arr(Mob.tour.choices(U.Tour.choices(u)))}])
 
 def Mob.tour.at(+lc: I.Loc, live: Bool, +i: Nat, +u: U.Ui) -> J.Json:
@@ -1513,7 +1513,7 @@ def Mob.settings.of.loc(+lc: I.Loc, +u: U.Ui, +st: M.State, +nf: Map<&2, String>
   +model = M.Setting.get(st, "agent.model", "")
   J.Json.obj([J.KV{"rows", J.Json.arr(List.append(&2, J.Json, List.append(&2, J.Json, List.concat(&2, J.Json, [[
     Mob.set.row(Mob.set.days.label.loc(lc, M.Setting.get(st, "settle.days", "3")), MSG.T.settings.settle.note(lc), Mob.set.days(M.Setting.get(st, "settle.days", "3"))),
-    Mob.set.row(MSG.T.settings.restart(lc), MSG.T.settings.restart.note(lc), Mob.set.chips.loc(lc, ["on", "off"], Bool.pick(String, M.Carry.on(st), "on", "off"), "restart.continue"))], Mob.notify(lc, st), Mob.agy.rows(U.Fallbackv.rows(u)), [
+    Mob.set.row(MSG.T.settings.restart(lc), MSG.T.settings.restart.note(lc), Mob.set.chips.loc(lc, ["on", "off"], Bool.pick(String, M.Carry.on(st), "on", "off"), "restart.continue"))], Mob.notify(lc, st), Mob.agy.rows(U.Share.rows(u)), Mob.agy.rows(U.Fallbackv.rows(u)), [
     Mob.set.row(MSG.T.settings.provider(lc), Bool.pick(String, String.is_empty(U.Models.cli(models, prov)), MSG.T.settings.provider.missing(lc, prov), U.Models.cli(models, prov)), Mob.set.chips.loc(lc, ["claude", "codex", "grok", "muse", "antigravity", "opencode"], prov, "agent.provider")),
     Mob.set.row(MSG.T.settings.model(lc), Bool.pick(String, String.is_empty(model), MSG.T.common.default(lc), model) ++ ": " ++ U.Models.label_of(U.Models.of(nf, prov), prov, model),
       Mob.set.chips.loc(lc, U.Models.settings(U.Models.of(nf, prov), prov, U.Ui.scratch(u, "@f.mq"), model), model, "agent.model"))], Mob.set.find(lc, u, nf, prov), [

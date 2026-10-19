@@ -184,3 +184,13 @@ def Sys.exec(path: String, args: List<&2, String>) -> IO(Result<&1, &1, U32 & St
 def Sys.exe_path() -> IO(String):
   import "./effects/host.c"
   import "./effects/host.js"
+
+# Native OS process ID (Win32 on Cygwin), for native child supervision.
+def Sys.native_pid() -> IO(U32):
+  import "./effects/host.c"
+  import "./effects/host.js"
+
+# A filesystem argument for a native OS tool (Win32 paths on Cygwin).
+def Sys.native_path(path: String) -> IO(String):
+  import "./effects/host.c"
+  import "./effects/host.js"

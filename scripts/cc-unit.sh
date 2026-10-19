@@ -17,7 +17,7 @@ o=${c%.c}.o
 dir=${BP_OBJ_CACHE:-}
 key=""
 secret=0
-grep -q 'bp_google\.h\|BP_GOOGLE' "$c" && secret=1
+grep -q 'bp_google\.h\|BP_GOOGLE\|bp_telemetry\.h\|BP_TELEMETRY' "$c" && secret=1
 case "${BP_CFLAGS:-}" in *BP_GOOGLE*) secret=1 ;; esac
 if [ -n "$dir" ] && [ $secret = 0 ]; then
   if command -v sha256sum >/dev/null 2>&1; then sum="sha256sum"; else sum="shasum -a 256"; fi

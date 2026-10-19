@@ -20,6 +20,14 @@ permissions:
   contents: write
 
 jobs:
+  windows:
+    name: Windows
+    uses: ./.github/workflows/windows.yml
+    secrets: inherit
+    with:
+      ref: ${{ inputs.tag || github.ref }}
+      version: ${{ inputs.tag || github.ref_name }}
+
   laws:
     name: Check and prove
     runs-on: ubuntu-24.04
@@ -91,6 +99,10 @@ jobs:
           # the Google client "Connect Google" signs in with (scripts/build-app.sh)
           BACKPLANE_GOOGLE_CLIENT_ID: ${{ secrets.BACKPLANE_GOOGLE_CLIENT_ID }}
           BACKPLANE_GOOGLE_CLIENT_SECRET: ${{ secrets.BACKPLANE_GOOGLE_CLIENT_SECRET }}
+          BACKPLANE_TELEMETRY_BAKE: "1"
+          BACKPLANE_TELEMETRY_URL: ${{ vars.BACKPLANE_TELEMETRY_URL }}
+          BACKPLANE_TELEMETRY_KID: ${{ secrets.BACKPLANE_TELEMETRY_KID }}
+          BACKPLANE_TELEMETRY_KEY: ${{ secrets.BACKPLANE_TELEMETRY_KEY }}
       - run: scripts/smoke.sh
       - run: scripts/package.sh "$TAG" "${{ matrix.target }}"
       - run: scripts/package-linux.sh "$TAG" "${{ matrix.target }}"
@@ -148,6 +160,10 @@ jobs:
         env:
           BACKPLANE_GOOGLE_CLIENT_ID: ${{ secrets.BACKPLANE_GOOGLE_CLIENT_ID }}
           BACKPLANE_GOOGLE_CLIENT_SECRET: ${{ secrets.BACKPLANE_GOOGLE_CLIENT_SECRET }}
+          BACKPLANE_TELEMETRY_BAKE: "1"
+          BACKPLANE_TELEMETRY_URL: ${{ vars.BACKPLANE_TELEMETRY_URL }}
+          BACKPLANE_TELEMETRY_KID: ${{ secrets.BACKPLANE_TELEMETRY_KID }}
+          BACKPLANE_TELEMETRY_KEY: ${{ secrets.BACKPLANE_TELEMETRY_KEY }}
       - run: scripts/smoke.sh
       - run: scripts/package.sh "$TAG" darwin-arm64
       - uses: actions/upload-artifact@v4
@@ -181,7 +197,7 @@ jobs:
 
   publish:
     name: Publish
-    needs: [laws, build, build-darwin, android]
+    needs: [laws, build, build-darwin, android, windows]
     runs-on: ubuntu-24.04
     env:
       TAG: ${{ inputs.tag || github.ref_name }}
@@ -199,7 +215,7 @@ jobs:
         run: |
           set -eu
           cd out
-          sha256sum backplane-*.tar.gz backplane-*.AppImage backplane_*.deb backplane-*.apk > SHA256SUMS
+          sha256sum backplane-*.tar.gz backplane-*.AppImage backplane_*.deb backplane-*.apk backplane-*-windows-x64.zip > SHA256SUMS
           cat SHA256SUMS
           sum() { grep "backplane-$TAG-$1.tar.gz" SHA256SUMS | cut -d' ' -f1; }
           sed -e "s/@VERSION@/$TAG/" \
@@ -224,6 +240,8 @@ jobs:
           # each release's installer installs that release (latest/ never
           # names a prerelease, so a nightly's must be its own)
           notes="Linux (x64, arm64) and macOS (Apple silicon; the hub and web UI at http://127.0.0.1:3787, no native window yet).
+
+          Windows x64: extract the Windows zip, run Install-Runtime.ps1 once, then open Backplane.cmd.
 
           Install: \`curl -fsSL https://github.com/${{ github.repository }}/releases/download/$TAG/install.sh | sh\`"
           if gh release view "$TAG" >/dev/null 2>&1; then

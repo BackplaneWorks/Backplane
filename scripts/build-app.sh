@@ -156,6 +156,8 @@ fi
 n=$(nice -n 19 python3 scripts/cc-split.py "$work/all.c" "$work" "$units")
 rm -f "$work"/u*.o "$work"/u*.o.rss "$work"/u*.o.how
 t_split=$(now_ms)
+trap 'rm -f "$work/bp_telemetry.h"' EXIT
+python3 scripts/telemetry-header.py "$work/bp_telemetry.h"
 # the baked Google client, read from .env without running it
 envval() {
   for f in .env "$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)/../.env"; do
@@ -189,7 +191,7 @@ me=$$
   done ) &
 sampler=$!
 # (stopped however the build ends; it is this script's own child)
-trap 'kill "$sampler" 2>/dev/null || true' EXIT
+trap 'kill "$sampler" 2>/dev/null || true; rm -f "$work/bp_telemetry.h"' EXIT
 rm -f "$work/cc.peak"
 ls -S "$work"/u*.c | nice -n 19 $pin xargs -P "$jobs" -I{} scripts/cc-unit.sh {}
 kill "$sampler" 2>/dev/null || true

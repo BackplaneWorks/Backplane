@@ -12162,12 +12162,12 @@ def Laws.mail_global_primary(): {==}
 
 def Laws.mail_log_count_set(c, n):
   match c:
-    case MPCREDIT.Cfg{home, web, host, port, prompt, dirs, version, MPCREDIT.Net{tailnet, https, token, models, mtext, rt, br, pk, tm, machines, pv, MPLOG.Bn{dir, seen, work, far, live, broken, fl, tools, tch, cef, wire_n}, managed, link, freecad, ks}}:
+    case MPCREDIT.Cfg{home, web, host, port, prompt, dirs, version, MPCREDIT.Net{tailnet, https, token, models, mtext, rt, br, pk, tm, machines, pv, MPLOG.Bn{dir, seen, work, far, live, broken, fl, tools, tch, cef, wire_n}, managed, link, freecad, ks}, telemetry}:
       {==}
 
 def Laws.mail_log_count_committed(c, fresh):
   match c:
-    case MPCREDIT.Cfg{home, web, host, port, prompt, dirs, version, MPCREDIT.Net{tailnet, https, token, models, mtext, rt, br, pk, tm, machines, pv, MPLOG.Bn{dir, seen, work, far, live, broken, fl, tools, tch, cef, wire_n}, managed, link, freecad, ks}}:
+    case MPCREDIT.Cfg{home, web, host, port, prompt, dirs, version, MPCREDIT.Net{tailnet, https, token, models, mtext, rt, br, pk, tm, machines, pv, MPLOG.Bn{dir, seen, work, far, live, broken, fl, tools, tch, cef, wire_n}, managed, link, freecad, ks}, telemetry}:
       {==}
 
 # ---- native phone i18n ----
@@ -12401,3 +12401,51 @@ def Laws.wt_seed_legacy_small(): {==}
 def Laws.wt_seed_large_id(): {==}
 def Laws.wt_seed_same_second_next(): {==}
 def Laws.wt_seed_wrap(): {==}
+# telemetry
+
+def Laws.tm_optout_no_id():
+  {==}
+def Laws.tm_unasked_no_id():
+  {==}
+def Laws.tm_sandbox_never(se, tm, dnt, ci, url, kid, key):
+  {==}
+def Laws.tm_gate_no_key():
+  {==}
+def Laws.tm_clean_drops_path():
+  {==}
+def Laws.tm_clean_drops_email():
+  {==}
+def Laws.tm_clean_drops_name():
+  {==}
+def Laws.tm_active_once_a_day():
+  {==}
+def Laws.tm_queue_cap():
+  {==}
+def Laws.tm_sent_202_drops():
+  {==}
+def Laws.tm_sent_500_keeps():
+  {==}
+def Laws.tm_state_roundtrip():
+  {==}
+def Laws.share_on_sets_asked():
+  {==}
+def Laws.share_step_before_uber():
+  {==}
+def Laws.bug_url_only_version():
+  {==}
+
+def Laws.tm_reset_invalidates_worker():
+  {==}
+def Laws.tm_optout_invalidates_worker():
+  {==}
+def Laws.tm_loopback_rejects_userinfo():
+  {==}
+def Laws.tm_package_nightly_channel():
+  {==}
+
+def Laws.tm_new_usage_marker():
+  {==}
+def Laws.tm_cached_uber_step_kept():
+  {==}
+def Laws.tm_marked_usage_step_kept():
+  {==}

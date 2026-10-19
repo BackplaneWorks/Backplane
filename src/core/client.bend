@@ -42,6 +42,7 @@ import ./agy.bend as AGY
 import ./diff.bend as DF
 import ./fm.bend as FM
 import ./onboard.bend as OB
+import ./telemetry.bend as TLM
 import ./layers.bend as LY
 import ./slash.bend as SL
 import ./uber.bend as UB
@@ -9952,6 +9953,60 @@ def Tour.done(+st: M.State) -> Bool:
 def Tour.ready(+u: Ui) -> Bool:
   Bool.and(Bool.and(Nat.is_gt(Ui.seq(u), 0n), String.eq(Ui.scratch(u, "@sync"), "1")), String.is_empty(Ui.scratch(u, "@boot")))
 
+# Anonymous usage counts (Settings, the tour's "Anonymous usage" step;
+# core/telemetry.bend, docs/telemetry.md). The hub-held settings: telemetry.share
+# ("on", "off"; unset is on), telemetry.asked ("1" once the person answered
+# or touched the row), telemetry.reset (a counter: a new id), and, written by
+# the hub, telemetry.live ("1" when this build can send at all) and
+# hub.platform (e.g. "linux-x64", for the bug report link). The install id
+# is never shown or sent to a client.
+def Share.on(+st: M.State) -> Bool:
+  TLM.Tm.share(st)
+
+def Share.asked(+st: M.State) -> Bool:
+  TLM.Tm.asked(st)
+
+def Share.live(+u: Ui) -> Bool:
+  String.eq(Ui.info(u, "telemetry.live"), "1")
+
+# the question is worth asking (a build that can send) and not yet answered
+def Share.pending(+u: Ui) -> Bool:
+  Bool.and(Share.live(u), Bool.not(Share.asked(Ui.state.of(u))))
+
+def Share.privacy() -> String:
+  "https://backplane.works/privacy"
+
+def Share.note() -> String:
+  "A random id, the version and OS, once a day. Nothing else."
+
+# the note ends with the install id the hub reported (info telemetry.id), which
+# the privacy page asks people to quote when they ask for their data to go
+def Share.note.id(+id: String) -> String:
+  Bool.pick(String, String.is_empty(id), Share.note(), Share.note() ++ " Install id: " ++ id)
+
+def Share.title() -> String:
+  "Usage"
+
+def Share.ver(u: Ui) -> String:
+  match u:
+    case Ui{_, _, _, _, _, _, _, _, _, v, _, _, _, _, _, _, _}:
+      v
+
+# the issue form with the version, OS and architecture the hub reported
+def Share.bug(+u: Ui) -> String:
+  TLM.Bug.url(Share.ver(u), Ui.info(u, "os"), Ui.info(u, "arch"))
+
+def Share.rows.k(+on: Bool, +bug: String, +note: String) -> List<&2, AgRow>:
+  [AgRow{"Share anonymous usage", note, Nil{}, [AgBtn{"On", "share", "on", on}, AgBtn{"Off", "share", "off", Bool.not(on)}, AgBtn{"Reset id", "share-reset", "", False{}},
+    AgBtn{"Privacy", "open-url", Share.privacy(), False{}}, AgBtn{"Report an issue", "open-url", bug, False{}}]}]
+
+# the Settings section, drawn by every client as it draws Antigravity's rows
+def Share.id(+u: Ui) -> String:
+  Bool.pick(String, Share.on(Ui.state.of(u)), Ui.info(u, "telemetry.id"), "")
+
+def Share.rows(+u: Ui) -> List<&2, AgRow>:
+  Share.rows.k(Share.on(Ui.state.of(u)), Share.bug(u), Share.note.id(Share.id(u)))
+
 # The uberbot step alone: an install that finished the tour before it had
 # that step (or demoted its uberbot) is asked once more, until the step has
 # been answered (the hub setting "onboard.uber": Done, Skip or a choice, in
@@ -9960,17 +10015,32 @@ def Tour.ready(+u: Ui) -> Bool:
 def Tour.answered(+st: M.State) -> Bool:
   String.eq(M.Setting.get(st, "onboard.uber", ""), "1")
 
-def Tour.single.k(+st: M.State, +raw: String) -> Bool:
-  Bool.and(Bool.and(Tour.done(st), Bool.not(Tour.answered(st))), Bool.and(String.is_empty(UB.Uber.bot(st)), Bool.not(OB.Ob.manual(raw))))
+def Tour.uber.due(+st: M.State) -> Bool:
+  Bool.and(Bool.not(Tour.answered(st)), String.is_empty(UB.Uber.bot(st)))
+
+# Steps asked alone, once each, for an install that finished the tour before
+# they existed: the usage question first (while this build can send), then
+# the uberbot
+def Tour.single.k(+st: M.State, +raw: String, pending: Bool) -> Bool:
+  Bool.and(Bool.and(Tour.done(st), Bool.not(OB.Ob.manual(raw))), Bool.or(Tour.uber.due(st), pending))
 
 def Tour.single(+u: Ui) -> Bool:
-  Bool.and(Tour.ready(u), Tour.single.k(Ui.state.of(u), Ui.scratch(u, "@tour")))
+  Bool.and(Tour.ready(u), Tour.single.k(Ui.state.of(u), Ui.scratch(u, "@tour"), Share.pending(u)))
 
-def Tour.at.k(+i: Nat, up: Bool) -> Nat:
-  Bool.pick(Nat, Bool.and(Nat.is_eq(i, OB.Ob.count()), up), OB.Ob.uber(), i)
+def Tour.at.k(+i: Nat, up: Bool, share: Bool) -> Nat:
+  Bool.pick(Nat, Bool.and(Nat.is_eq(i, OB.Ob.count()), up), Bool.pick(Nat, share, OB.Ob.share(), OB.Ob.uber()), i)
+
+# Step 9 used to be the uberbot. A cached old tour keeps that meaning;
+# newly reached usage steps carry an explicit s marker (m still means manual).
+def Tour.legacy(+raw: String, +i: Nat) -> Nat:
+  Bool.pick(Nat, Bool.and(Nat.is_eq(i, OB.Ob.share()), Bool.not(String.contains(raw, "s"))), OB.Ob.uber(), i)
 
 def Tour.at(+u: Ui) -> Nat:
-  Tour.at.k(OB.Ob.at(Tour.ready(u), Tour.done(Ui.state(u)), Ui.scratch(u, "@tour")), Tour.single(u))
+  Tour.at.k(Tour.legacy(Ui.scratch(u, "@tour"), OB.Ob.at(Tour.ready(u), Tour.done(Ui.state.of(u)), Ui.scratch(u, "@tour"))), Tour.single(u), Share.pending(u))
+
+# the forward button: a step asked alone is answered with Done
+def Tour.forward(+u: Ui) -> String:
+  Bool.pick(String, Tour.single(u), "Done", OB.Ob.forward(Lang.loc(u), Tour.at(u)))
 
 # what the card says: no "10 of 10" for a step asked alone
 def Tour.counter.loc(+l: I.Loc, +u: Ui) -> String:
@@ -10060,12 +10130,35 @@ def Tour.choices.on(+l: I.Loc, on: Bool, +u: Ui) -> List<&2, TChoice>:
     case False{}:
       Nil{}
 
+# The first step and the usage step asked alone offer the bug report link;
+# the usage step answers or reads the policy ("open-url" never moves the tour)
+def Tour.report(+u: Ui) -> TChoice:
+  TChoice{"Report an issue", "open-url", Share.bug(u)}
+
+def Tour.share.choices(single: Bool, +u: Ui) -> List<&2, TChoice>:
+  List.append(&2, TChoice, [TChoice{"Keep sharing", "share", "on"}, TChoice{"Opt out", "share", "off"}, TChoice{"Privacy policy", "open-url", Share.privacy()}],
+    Bool.pick(List<&2, TChoice>, single, [Tour.report(u)], Nil{}))
+
+def Tour.choices.at(i: Nat, single: Bool, +u: Ui) -> List<&2, TChoice>:
+  match i:
+    case 0n:
+      [Tour.report(u)]
+    case 9n:
+      Tour.share.choices(single, u)
+    case 10n:
+      Tour.choices.k(Lang.loc(u), Tour.uber.case(u), Ui.state.of(u))
+    case _:
+      Nil{}
+
 def Tour.choices(+u: Ui) -> List<&2, TChoice>:
-  Tour.choices.on(Lang.loc(u), Nat.is_eq(Tour.at(u), OB.Ob.uber()), u)
+  Tour.choices.at(Tour.at(u), Tour.single(u), u)
+
+def Tour.body.k(alone: Bool, +words: String) -> String:
+  Bool.pick(String, alone, words ++ " " ++ OB.Ob.beta(), words)
 
 # the step's words for a kind of client (0 window, 1 web, 2 phone)
 def Tour.body.loc(+l: I.Loc, +k: Nat, +u: Ui) -> String:
-  OB.Ob.body.uber(l, k, Tour.days(u), Tour.uber.case(u), Tour.uber.name(u), Tour.at(u))
+  Tour.body.k(Bool.and(Tour.single(u), Nat.is_eq(Tour.at(u), OB.Ob.share())), OB.Ob.body.uber(l, k, Tour.days(u), Tour.uber.case(u), Tour.uber.name(u), Tour.at(u)))
 
 def Tour.body(k: Nat, +u: Ui) -> String:
   Tour.body.loc(Lang.loc(u), k, u)
@@ -10125,10 +10218,13 @@ def Tour.finish(+u: Ui) -> Act:
   Tour.leave(Tour.finish.both(Ui.setting(Ui.scratch_set(u, "@tour", ""), "onboard.done=1")), Tour.focus(u))
 
 # to step i (by hand or not as the tour was), or (past the last) the end
+def Tour.raw(manual: Bool, +i: Nat) -> String:
+  Bool.pick(String, manual, "m", "") ++ Bool.pick(String, Nat.is_eq(i, OB.Ob.share()), "s", "") ++ Nat.show(i)
+
 def Tour.go.k(live: Bool, +i: Nat, +u: Ui) -> Act:
   match live:
     case True{}:
-      Act{Ui.scratch_set(Ui.scratch_set(u, "@tour", OB.Ob.raw(OB.Ob.manual(Ui.scratch(u, "@tour")), i)), "@tour.sc", ""), Nil{}}
+      Act{Ui.scratch_set(Ui.scratch_set(u, "@tour", Tour.raw(OB.Ob.manual(Ui.scratch(u, "@tour")), i)), "@tour.sc", ""), Nil{}}
     case False{}:
       Tour.finish(u)
 
@@ -10170,8 +10266,78 @@ def Tour.act.on(on: Bool, +u: Ui, +action: String) -> Act:
     case False{}:
       Tour.act.k(Bool.pick(Nat, String.eq(action, "ob-open"), 3n, 9n), u)
 
-def Tour.act(+u: Ui, +action: String) -> Act:
+def Tour.act.base(+u: Ui, +action: String) -> Act:
   Tour.act.on(Tour.on(u), u, action)
+
+# Anonymous usage: the choices, Settings' row and the tour's usage step
+# set telemetry.share and telemetry.asked together ("share on|off"); Next
+# or Skip on the step set telemetry.asked too (keeping the default, sharing).
+# On the step, a choice moves on (asked alone: the card closes); "share-reset"
+# makes a new id and "open-url" is the client's own and never gets here.
+def Share.then(a: Act) -> Act:
+  match a:
+    case Act{u, cs}:
+      Tour.finish.cat(Ui.setting(u, "telemetry.asked=1"), cs)
+
+def Share.val(+v: String) -> String:
+  Bool.pick(String, String.eq(v, "off"), "off", "on")
+
+def Share.set(+u: Ui, +value: String) -> Act:
+  Share.then(Ui.setting(Ui.info_set(u, "telemetry.id", ""), "telemetry.share=" ++ Share.val(value)))
+
+def Share.close(a: Act) -> Act:
+  match a:
+    case Act{+u, cs}:
+      Tour.leave(Act{Ui.scratch_set(u, "@tour", ""), cs}, Tour.focus(u))
+
+def Share.step(single: Bool, a: Act) -> Act:
+  match single:
+    case True{}:
+      Share.close(a)
+    case False{}:
+      match a:
+        case Act{u, cs}:
+          Tour.finish.cat(Tour.go(OB.Ob.next(OB.Ob.share()), u), cs)
+
+def Share.act.k(onstep: Bool, single: Bool, +u: Ui, +value: String) -> Act:
+  match onstep:
+    case True{}:
+      Share.step(single, Share.set(u, value))
+    case False{}:
+      Share.set(u, value)
+
+def Share.act(+u: Ui, +value: String) -> Act:
+  Share.act.k(Nat.is_eq(Tour.at(u), OB.Ob.share()), Tour.single(u), u, value)
+
+def Share.reset(+u: Ui) -> Act:
+  Share.then(Ui.setting(Ui.info_set(u, "telemetry.id", ""), "telemetry.reset=" ++ Nat.show(Nat.add(OB.Ob.num(M.Setting.get(Ui.state.of(u), "telemetry.reset", ""), 0n), 1n))))
+
+def Share.route(isshare: Bool, +u: Ui, +value: String) -> Act:
+  match isshare:
+    case True{}:
+      Share.act(u, value)
+    case False{}:
+      Share.reset(u)
+
+def Share.is(+action: String) -> Bool:
+  Bool.or(String.eq(action, "share"), String.eq(action, "share-reset"))
+
+def Tour.act.q(single: Bool, +u: Ui, +action: String) -> Act:
+  match single:
+    case True{}:
+      Share.close(Share.then(Act{u, Nil{}}))
+    case False{}:
+      Share.then(Tour.act.base(u, action))
+
+def Tour.act.m(moves: Bool, single: Bool, +u: Ui, +action: String) -> Act:
+  match moves:
+    case True{}:
+      Tour.act.q(single, u, action)
+    case False{}:
+      Tour.act.base(u, action)
+
+def Tour.act(+u: Ui, +action: String) -> Act:
+  Tour.act.m(Bool.and(Nat.is_eq(Tour.at(u), OB.Ob.share()), Bool.or(String.eq(action, "ob-next"), String.eq(action, "ob-skip"))), Tour.single(u), u, action)
 
 # The uberbot (core/uber.bend, docs/uber.md): "uber" shows its Status tab,
 # "uber-promote <bot>" and "uber-demote" ask the hub (bots.uber), which backs
@@ -10882,10 +11048,15 @@ def KX.act.k(action: String, +u: Ui, +th: String) -> Act:
 def KX.act(+u: Ui, action: String, +value: String) -> Act:
   KX.act.k(action, Ui.scratch_set(u, "@menu", ""), Bool.pick(String, String.is_empty(value), Ui.sel(u), value))
 
+def Ui.act.share(share: Bool, +u: Ui, +action: String, +value: String) -> Act:
+  match share:
+    case True{}: Share.route(String.eq(action, "share"), u, value)
+    case False{}: Ui.act.u(Nat.is_lt(C.Codec.pos(["uber-promote", "uber-new"], action), 2n), u, action, value)
+
 def Ui.act.kx(kx: Bool, +u: Ui, +action: String, +value: String) -> Act:
   match kx:
     case True{}: KX.act(u, action, value)
-    case False{}: Ui.act.u(Nat.is_lt(C.Codec.pos(["uber-promote", "uber-new"], action), 2n), u, action, value)
+    case False{}: Ui.act.share(Share.is(action), u, action, value)
 
 # (design review's "rv-" actions route before the rest: Rv.act)
 def Ui.act.r(rv: Bool, +u: Ui, +action: String, +value: String) -> Act:

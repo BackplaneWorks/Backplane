@@ -23,9 +23,28 @@ type Files is Data:
 def KiCad.missing() -> String:
   "KiCad is not installed on this machine (no kicad-cli): get it from kicad.org/download or its package manager"
 
+# Convert filesystem arguments at the native tool boundary. Other arguments
+# (flags, commands and model text) retain their bytes; POSIX is unchanged.
+def KiCad.native_args(args: List<&2, String>) -> IO(List<&2, String>):
+  match args:
+    case Nil{}: IO.pure(List<&2, String>, Nil{})
+    case h <> t:
+      do IO<List<&2, String>>:
+        head : String <- H.Sys.native_path(h)
+        tail : List<&2, String> <- KiCad.native_args(t)
+        return head <> tail
+
+def KiCad.run.k(empty: Bool, cli: String, args: List<&2, String>) -> IO(P.Ran):
+  match empty:
+    case True{}: IO.pure(P.Ran, P.Ran{127, KiCad.missing()})
+    case False{}:
+      do IO<P.Ran>:
+        native : List<&2, String> <- KiCad.native_args(args)
+        P.Proc.run(cli, native, "/")
+
 # a KiCad command's result, or KiCad.missing() without a kicad-cli
 def KiCad.run(+cli: String, args: List<&2, String>) -> IO(P.Ran):
-  Bool.pick(IO(P.Ran), String.is_empty(cli), IO.pure(P.Ran, P.Ran{127, KiCad.missing()}), P.Proc.run(cli, args, "/"))
+  KiCad.run.k(String.is_empty(cli), cli, args)
 
 def KiCad.version() -> String:
   "10.99.0-bp.4"
@@ -152,13 +171,21 @@ def Rt.empty() -> Rt:
 # A CLI path or runtime root. Missing explicit roots stay explicit.
 def Rt.candidate(+p: String) -> String:
   Bool.pick(String, String.ends_with(p, ".app"), p ++ "/Contents/MacOS/kicad-cli",
-    Bool.pick(String, String.ends_with(p, "kicad-cli"), p, p ++ "/bin/kicad-cli"))
+    Bool.pick(String, Bool.or(String.ends_with(p, "kicad-cli"), String.ends_with(p, "kicad-cli.exe")), p, p ++ "/bin/kicad-cli"))
 
-def Rt.root(+cli: String) -> String:
+def Rt.root.stem(+cli: String) -> String:
   Bool.pick(String, String.ends_with(cli, "/Contents/MacOS/kicad-cli"),
     String.take(cli, Nat.sub(String.length(cli), String.length("/Contents/MacOS/kicad-cli"))),
     Bool.pick(String, String.ends_with(cli, "/bin/kicad-cli"), String.take(cli, Nat.sub(String.length(cli), String.length("/bin/kicad-cli"))),
       String.take(cli, Nat.sub(String.length(cli), 1n+String.length(Maybe.default(&2, String, List.last(&2, String, String.split(cli, '/')), cli))))))
+
+
+# Windows runtime metadata is beside bin/, including when the CLI has .exe.
+def Rt.root.normal(+cli: String) -> String:
+  Rt.root.stem(Bool.pick(String, String.ends_with(cli, ".exe"), String.take(cli, Nat.sub(String.length(cli), 4n)), cli))
+
+def Rt.root(cli: String) -> String:
+  Rt.root.normal(String.join(String.split(cli, '\\'), "/"))
 
 def Rt.env(name: String) -> IO(String):
   do IO<String>:

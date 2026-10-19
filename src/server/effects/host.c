@@ -39,6 +39,7 @@ static __attribute__((unused)) Term host_unit(void) {
   return term_pak(CID_UNIT, 0);
 }
 
+#if defined(CID(Sock.recv_bytes)) || defined(CID(Json.cbor_frame)) || defined(CID(Json.items_frames))
 static __attribute__((unused)) Term host_bytes(Env e, const uint8_t* p, u64 n) {
   Term xs = term_pak(CID_NIL, 0);
   for (u64 i = n; i > 0; i -= 1) {
@@ -46,6 +47,7 @@ static __attribute__((unused)) Term host_bytes(Env e, const uint8_t* p, u64 n) {
   }
   return xs;
 }
+#endif
 
 // Socket handles may also wrap a pty master (see pty.c): recv and send
 // answer ENOTSOCK there, so they fall back to read and write. A pty whose
@@ -1341,6 +1343,8 @@ static int jc_frame(const char* text, size_t n, const char* ks, size_t kn, const
 // are read once here: in Bend each was measured three times and joined, a
 // character at a time, for every frame.
 
+#if defined(CID(Sock.send_items)) || defined(CID(Json.items_frames))
+
 typedef struct { char* p; u64 n; u64 cps; } JiLine;
 
 static u64 ji_cps(const char* p, u64 n) {
@@ -1425,6 +1429,8 @@ static int ji_run(Env e, Term* f, JcBuf* out) {
   free(ls); free(hd); free(pl); free(sp); free(tl); free(k); free(ws);
   return ok;
 }
+
+#endif
 
 #ifdef CID(Json.cbor_frame)
 
@@ -1547,4 +1553,60 @@ static void __attribute__((constructor)) sock_send_items_use(void) {
   io_eff(CID(Sock.send_items), sock_send_items_run);
 }
 
+#endif
+
+#ifdef CID(Sys.native_pid)
+#ifdef __CYGWIN__
+#include <windows.h>
+#endif
+
+Term sys_native_pid_run(Env e, Term* f, IoWork* w) {
+#ifdef __CYGWIN__
+  return (Term)(uint32_t)GetCurrentProcessId();
+#else
+  return (Term)(uint32_t)getpid();
+#endif
+}
+
+static void __attribute__((constructor)) sys_native_pid_use(void) {
+  io_eff(CID(Sys.native_pid), sys_native_pid_run);
+}
+#endif
+
+#ifdef CID(Sys.native_path)
+#ifdef __CYGWIN__
+#include <windows.h>
+#include <sys/cygwin.h>
+#endif
+
+Term sys_native_path_run(Env e, Term* f, IoWork* w) {
+  u64 len = 0;
+  char* path = io_cstr(e, f[0], &len);
+  Term result;
+#ifdef __CYGWIN__
+  if (len && path[0] == '/' && !io_nul(path, len)) {
+    wchar_t* wide = cygwin_create_path(CCP_POSIX_TO_WIN_W, path);
+    if (wide) {
+      int n = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, wide, -1, NULL, 0, NULL, NULL);
+      char* native = n > 0 ? malloc((size_t)n) : NULL;
+      if (native && WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, wide, -1, native, n, NULL, NULL) == n) {
+        result = io_str(e, native, (u64)n - 1);
+        free(native);
+        free(wide);
+        free(path);
+        return result;
+      }
+      free(native);
+      free(wide);
+    }
+  }
+#endif
+  result = io_str(e, path, len);
+  free(path);
+  return result;
+}
+
+static void __attribute__((constructor)) sys_native_path_use(void) {
+  io_eff(CID(Sys.native_path), sys_native_path_run);
+}
 #endif

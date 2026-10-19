@@ -16,14 +16,15 @@ import { createInterface } from "node:readline";
 import { spawn } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
+import { nativePath, hubPath } from "../../platform/windows-path.ts";
 
 const args = process.argv.slice(2);
 const opt = (n: string) => {
   const i = args.indexOf(n);
   return i >= 0 ? (args[i + 1] ?? "") : "";
 };
-const defLib = opt("--lib");
-const defDesc = opt("--desc");
+const defLib = nativePath(opt("--lib"));
+const defDesc = nativePath(opt("--desc"));
 const client = `backplane-${process.pid}`;
 
 type Slot = { w: Worker; token: string; pending: Map<string, (m: { bytes?: Uint8Array; error?: string }) => void> };
@@ -32,7 +33,7 @@ const socks = new Map<string, Slot>();
 function slot(sock: string): Slot {
   let s = socks.get(sock);
   if (s) return s;
-  const w = new Worker(Bun.main.startsWith("/$bunfs") ? "./worker.ts" : new URL("./worker.ts", import.meta.url));
+  const w = new Worker(/(?:^|[\\/])\$bunfs(?:[\\/]|$)/.test(Bun.main) ? "./worker.ts" : new URL("./worker.ts", import.meta.url));
   const pending = new Map<string, (m: { bytes?: Uint8Array; error?: string }) => void>();
   w.onmessage = (ev: MessageEvent) => {
     const d = ev.data as { op: string; id?: string; bytes?: Uint8Array; error?: string };
@@ -79,7 +80,7 @@ function socketsAt(requested: string): Map<string, string> {
 }
 
 function startServer(key: string, argv0: string[], memory?: string) {
-  const argv = wrap(argv0, memory);
+  const argv = wrap(argv0.map(nativePath), memory);
   const tail: string[] = [];
   const keep = (l: string) => {
     tail.push(l);
@@ -117,7 +118,8 @@ function startServer(key: string, argv0: string[], memory?: string) {
     const ready = l.startsWith("KiCad API server listening at ");
     if (ready && said) return;
     if (ready) said = true;
-    out({ event: "line", key, text: l });
+    const text = ready ? "KiCad API server listening at " + hubPath(l.slice("KiCad API server listening at ".length)) : l;
+    out({ event: "line", key, text });
   });
   createInterface({ input: child.stderr! }).on("line", keep);
   child.on("close", (code, signal) => end(code ?? (signal ? 128 : 1)));
@@ -149,19 +151,24 @@ async function handle(line: string) {
     return out({ id, ok: true });
   }
   if (!r.type) return fail(id, "no type");
-  const schema = load(r.desc ?? defDesc);
+  const schema = load(nativePath(r.desc ?? defDesc));
   if (!schema.knows(r.type)) return fail(id, NO_SCHEMA);
   const s = slot(r.sock!);
   let bytes: Uint8Array;
   try {
-    bytes = encodeRequest(schema, r.type, r.message, s.token, client);
+    let message = r.message;
+    if (process.platform === "win32" && /\.(OpenDocument|CreateDocument)$/.test(r.type) &&
+        message && typeof message === "object" && typeof (message as { path?: unknown }).path === "string") {
+      message = { ...message, path: nativePath((message as { path: string }).path) };
+    }
+    bytes = encodeRequest(schema, r.type, message, s.token, client);
   } catch (e) {
     return fail(id, `bad message for ${r.type}: ${(e as Error).message}`, "AS_BAD_REQUEST");
   }
   const key = String(++seq);
   const got = await new Promise<{ bytes?: Uint8Array; error?: string }>((res) => {
     s.pending.set(key, res);
-    s.w.postMessage({ op: "req", id: key, sock: r.sock!, lib: r.lib ?? defLib, bytes, timeout: r.timeout ?? 30000 });
+    s.w.postMessage({ op: "req", id: key, sock: nativePath(r.sock!), lib: nativePath(r.lib ?? defLib), bytes, timeout: r.timeout ?? 30000 });
   });
   if (got.error !== undefined || !got.bytes) return fail(id, got.error ?? "no reply");
   try {

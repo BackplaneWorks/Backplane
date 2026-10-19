@@ -3,7 +3,37 @@
 Backplane's Windows target is a 64-bit Windows executable with a Win32 window.
 It uses Cygwin's POSIX runtime for Bend's scheduler, files, sockets and child
 processes. It does not use WSL, a Linux kernel, an X server or a browser window.
-This target is being validated in a Windows 11 Pro QEMU/KVM guest.
+This target has been validated in a Windows 11 Pro QEMU/KVM guest.
+
+CI builds a Windows zip on every pull request and push to main. Download the
+`backplane-windows-x64` artifact from the GitHub Actions CI run, extract the
+whole zip, run `Install-Runtime.ps1` once, then open `Backplane.cmd`. The
+installer needs no administrator rights and puts Cygwin under
+`%LOCALAPPDATA%\Backplane\cygwin64`; an existing `C:\cygwin64` can also be used.
+Keep the executable, launchers and `web` directory together. The zip has a
+SHA256 sidecar and `BUILD.json` records the source commit and file hashes.
+Normal release/nightly builds attach the Windows zip beside the other assets.
+
+The reusable `.github/workflows/windows.yml` workflow emits C with the pinned
+Bend compiler on Linux, then compiles and tests the PE on `windows-2022`. It
+checks runtime Unicode and randomness, child exits, binary duplex stdio/EOF,
+lock handover, CLI validation, `/hello` and duplicate-hub exclusion in a
+temporary profile. It also installs the real native Claude and Codex CLIs and
+checks discovery and `--version` through Backplane's native process transport.
+These checks do not authenticate or run a model turn. The installed CLI
+versions are printed in the build log. Provider login and an authenticated
+turn require a separate manual check; Codex has worked in the Windows guest
+after the user logged in. Automated CI does not claim desktop input/rendering
+or authenticated provider coverage. The native window and an offline provider
+tool roundtrip were verified separately in the guest.
+
+The package contains Backplane and its web files; third-party Cygwin binaries
+and provider CLIs are installed separately. To reproduce the CI build, run
+`scripts/emit-windows.sh` on a pinned-Bend builder, copy
+`build/windows-emitted` and `dist/web` with the source to Windows, install
+`scripts/setup-windows.ps1 -BuildTools` and
+`scripts/install-windows-providers.ps1`, then run `scripts/ci-windows.sh` from
+the Cygwin login shell. `BACKPLANE_VERSION` supplies an optional package version.
 
 Install the x86-64 Cygwin distribution from https://cygwin.com/ with `clang`
 (19 or later), `python3`, `git`, `make`, `libfreetype6`, `fontconfig` and

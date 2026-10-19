@@ -1250,7 +1250,8 @@ def View.settings.loc(+lc: I.Loc, +u: U.Ui, +st: M.State, +nf: Map<&2, String>, 
     D.El{"div", "", [D.At{"class", "settings"}], List.concat(&2, D.Node, [[
       View.setrow(MSG.T.settings.settle(lc), MSG.T.settings.settle.note(lc), View.days.loc(lc, M.Setting.get(st, "settle.days", "3"))),
       View.setrow(MSG.T.settings.restart(lc), MSG.T.settings.restart.note(lc), View.chips.loc(lc, ["on", "off"], Bool.pick(String, M.Carry.on(st), "on", "off"), "restart.continue"))],
-      View.notify(lc, st), View.agy.rows(U.Fallbackv.rows(u)),
+      View.notify(lc, st),
+      View.agy.rows(U.Share.rows(u)), View.agy.rows(U.Fallbackv.rows(u)),
       [View.setrow(MSG.T.settings.provider(lc), MSG.T.settings.agents.note(lc, Bool.pick(String, String.is_empty(U.Models.cli(U.Str.get(nf, "models"), prov)), MSG.T.settings.provider.missing(lc, prov), U.Models.cli(U.Str.get(nf, "models"), prov))), View.chips.loc(lc, ["claude", "codex", "grok", "muse", "antigravity", "opencode"], prov, "agent.provider")),
       View.setrow(MSG.T.settings.model(lc), Bool.pick(String, String.is_empty(M.Setting.get(st, "agent.model", "")), MSG.T.common.default(lc), M.Setting.get(st, "agent.model", "")) ++ ": " ++ U.Models.label_of(U.Models.of(nf, prov), prov, M.Setting.get(st, "agent.model", "")),
         D.Dom.cat(View.menu.find(lc, U.Models.search(U.Models.menu(U.Models.of(nf, prov), prov)), U.Ui.scratch(u, "@f.mq")),
@@ -2794,12 +2795,18 @@ def View.aside.if(+lc: I.Loc, open: Bool, +kind: String, +u: U.Ui) -> List<&2, D
 # stays in the dialog, and the keys go through app.bend's tour_key (Enter
 # and the right arrow next, the left arrow back, Esc skip).
 # the uberbot step's choices (client.bend's Tour.choices): one button each
+# a choice is a button, or (the policy, the issue form) a link to a new tab
+def View.tour.choice(+l: String, +a: String, +v: String) -> D.Node:
+  Bool.pick(D.Node, String.eq(a, "open-url"),
+    D.El{"a", "", [D.At{"class", "btn"}, D.At{"href", v}, D.At{"target", "_blank"}, D.At{"rel", "noopener noreferrer"}], [D.Txt{l}]},
+    D.Dom.button("", a, v, l, l))
+
 def View.tour.choices(cs: List<&2, U.TChoice>) -> List<&2, D.Node>:
   match cs:
     case Nil{}:
       Nil{}
-    case U.TChoice{+l, a, v} <> t:
-      D.Dom.button("", a, v, l, l) <> View.tour.choices(t)
+    case U.TChoice{+l, +a, +v} <> t:
+      View.tour.choice(l, a, v) <> View.tour.choices(t)
 
 def View.tour.back.loc(+lc: I.Loc, on: Bool) -> D.Node:
   match on:
@@ -2811,7 +2818,7 @@ def View.tour.back.loc(+lc: I.Loc, on: Bool) -> D.Node:
 def View.tour.back(on: Bool) -> D.Node:
   View.tour.back.loc(I.En{}, on)
 
-def View.tour.card(+lc: I.Loc, +i: Nat, +body: String, cs: List<&2, U.TChoice>, +counter: String, back: Bool) -> List<&2, D.Node>:
+def View.tour.card(+lc: I.Loc, +i: Nat, +body: String, cs: List<&2, U.TChoice>, +counter: String, back: Bool, fwd: String) -> List<&2, D.Node>:
   [D.El{"div", "", [D.At{"class", "tour-back"}], Nil{}},
     D.El{"div", "tour", [D.At{"class", "tour"}, D.At{"role", "dialog"}, D.At{"aria-modal", "true"}, D.At{"aria-labelledby", "tour-title"}], [
       D.Dom.span("count", counter),
@@ -2822,12 +2829,12 @@ def View.tour.card(+lc: I.Loc, +i: Nat, +body: String, cs: List<&2, U.TChoice>, 
         D.Dom.button("", "ob-skip", "", MSG.T.tour.end.tip(lc), MSG.T.tour.skip(lc)),
         D.Dom.span("gap", ""),
         View.tour.back.loc(lc, back),
-        D.Dom.button("primary", "ob-next", "", MSG.T.tour.next.tip(lc), OB.Ob.forward(lc, i))]}]}]
+        D.Dom.button("primary", "ob-next", "", MSG.T.tour.next.tip(lc), fwd)]}]}]
 
 def View.tour.k(+lc: I.Loc, on: Bool, +i: Nat, +u: U.Ui) -> List<&2, D.Node>:
   match on:
     case True{}:
-      View.tour.card(lc, i, U.Tour.body.loc(lc, 1n, u), U.Tour.choices(u), U.Tour.counter.loc(lc, u), U.Tour.back(u))
+      View.tour.card(lc, i, U.Tour.body.loc(lc, 1n, u), U.Tour.choices(u), U.Tour.counter.loc(lc, u), U.Tour.back(u), U.Tour.forward(u))
     case False{}:
       Nil{}
 

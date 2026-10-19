@@ -2590,7 +2590,6 @@ def Nui.layers.set(+n: Nui, +flip: U32) -> Step:
 def Nui.layers.reset(+n: Nui) -> Step:
   Rvw.reset(Nui.layers.set(Nui.with_ui(n, U.Ui.scratch_set(Nui.ui(n), Nui.lfocus.key(n), "")), 0))
 
-
 # the viewer's sun/moon button: its own light or dark ground, whatever
 # the window's theme; the scene is drawn again on it
 def Nui.vlight.flip(+n: Nui) -> Step:
@@ -3479,10 +3478,27 @@ def Nui.event.lb(open: Bool, +n: Nui, e: W.WinEv) -> Step:
 def Tour.key(+name: String, +n: Nui) -> Step:
   Bool.pick(Step, String.is_empty(name), Step{n, Nil{}, False{}}, Nui.act(n, name, ""))
 
+def Tour.press.link(link: Bool, +n: Nui, +a: String, +v: String) -> Step:
+  match link:
+    case True{}:
+      Nui.click.url(True{}, n, a, v)
+    case False{}:
+      Step{n, Nil{}, False{}}
+
+# a card's button: the tour's own actions, the usage choices and the uberbot's
+# go to the client; a link (the policy, the issue form) is opened and the tour
+# stays
+def Tour.press.go(act: Bool, link: Bool, +n: Nui, +a: String, +v: String) -> Step:
+  match act:
+    case True{}:
+      Nui.act(n, a, v)
+    case False{}:
+      Tour.press.link(link, n, a, v)
+
 def Tour.press(m: Maybe<&2, Hit>, +n: Nui) -> Step:
   match m:
     case Some{Hit{_, _, _, _, +a, +v}}:
-      Bool.pick(Step, Bool.or(Bool.and(String.starts_with(a, "ob-"), Bool.not(String.eq(a, "ob-scroll"))), String.starts_with(a, "uber-")), Nui.act(n, a, v), Step{n, Nil{}, False{}})
+      Tour.press.go(Bool.or(Bool.and(String.starts_with(a, "ob-"), Bool.not(String.eq(a, "ob-scroll"))), Bool.or(String.starts_with(a, "uber-"), String.eq(a, "share"))), String.eq(a, "open-url"), n, a, v)
     case None{}:
       Step{n, Nil{}, False{}}
 
