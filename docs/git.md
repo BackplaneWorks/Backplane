@@ -128,7 +128,7 @@ refs/backplane/checkpoints/<b64url(thread_id)>/turn/<n>
   - it is pointed to only by its hidden ref, so no branch moves and no commit lands on the user's branch.
 
 How a capture works:
-- The work tree is staged into the thread's own index file, `<git-dir>/backplane-<b64url(thread_id)>.index`. Git runs as `env GIT_INDEX_FILE=<idx> git add -A`, which picks up tracked and untracked files but respects `.gitignore`.
+- The real index is copied to the thread's own index file, `<git-dir>/backplane-<b64url(thread_id)>.index`, before each capture. Git runs as `env GIT_INDEX_FILE=<idx> git add -A`, which records the current working contents of tracked files (including tracked files that match ignore rules) and non-ignored untracked files. An unborn repository with no index starts with an empty private index. The real index and its staged contents are never changed.
 - `git write-tree` turns that index into a tree.
 - `git commit-tree` makes the commit, and `git update-ref` points the hidden ref at it.
 - In a worktree, `<git-dir>` is that worktree's private git directory.
@@ -136,9 +136,9 @@ How a capture works:
 `diff_worktree` snapshots the current files the same way and diffs the checkpoint against that tree, so untracked new files show up.
 
 How a revert works:
-1. It syncs the thread index with the current files (`add -A`).
+1. It seeds the thread index from the real index, then syncs it with the current files (`add -A`).
 2. It runs `read-tree -u --reset <checkpoint tree>`. Files that differ are restored. Files the checkpoint lacks are deleted if they are tracked, or untracked and not ignored.
-- Ignored files are never in that index, so they are never touched.
+- Ignored untracked files stay outside that index and are left alone. Ignored tracked files are restored like other tracked files.
 - HEAD, the branch and the real index do not move.
 
 All diffs use `-c core.quotepath=false diff --no-color --no-ext-diff --src-prefix=a/ --dst-prefix=b/ -M`.
