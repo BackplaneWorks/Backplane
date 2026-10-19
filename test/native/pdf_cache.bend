@@ -5,14 +5,17 @@ import ../../src/server/host.bend as H
 import ../../src/server/argv.bend as A
 
 # Run the same command as PdfJob, with temporary inputs supplied by the test.
+def finish(code: U32) -> IO(Unit):
+  match code:
+    case 0: IO.pure(Unit, Unit{})
+    case _: IO.die(Unit, code, "PDF render failed")
+
 def done(r: P.Ran) -> IO(Unit):
   match r:
     case P.Ran{code, out}:
       do IO<Unit>:
         IO.print(out)
-        match code:
-          case 0: IO.pure(Unit, ())
-          case _: IO.die(Unit, code, "PDF render failed")
+        finish(code)
 
 def run(args: List<&1, String>) -> IO(Unit):
   match args:
@@ -21,13 +24,17 @@ def run(args: List<&1, String>) -> IO(Unit):
     case _:
       IO.die(Unit, 2, "usage: pdf_cache PATH PAGE CACHE")
 
+def ready(count: Nat) -> IO(Unit):
+  match count:
+    case 3n:
+      do IO<Unit>:
+        args : List<&1, String> <- A.Argv.args()
+        run(args)
+    case _:
+      IO.die(Unit, 1, "CBOR fixture setup failed")
+
 def main() -> IO(Unit):
   do IO<Unit>:
     # host.c's socket helpers also use its native CBOR buffer implementation.
     frame : List<&2, U32> <- H.Json.cbor_frame("null", "", "")
-    match List.length(&2, U32, frame):
-      case 3n:
-        args : List<&1, String> <- A.Argv.args()
-        run(args)
-      case _:
-        IO.die(Unit, 1, "CBOR fixture setup failed")
+    ready(List.length(&2, U32, frame))
