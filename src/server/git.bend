@@ -526,7 +526,7 @@ def Git.index.seed.sh() -> String:
     "export GIT_INDEX_FILE=\"$1\"",
     "rm -f \"$1\"",
     "git read-tree --empty",
-    "git update-index -z --index-info < \"$paths\""
+    "git -c core.ignorestat=false update-index -z --index-info < \"$paths\""
   ], "\n")
 
 def Git.index.seed(cwd: String, idx: String) -> IO(P.Ran):
