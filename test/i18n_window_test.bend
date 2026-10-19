@@ -89,6 +89,11 @@ def thread() -> L.Out:
   +n = N.Nui.init(ui.of(ja()), 1400, 900)
   L.Lay.thread(font, L.Lay.memo(font, n, L.TL.memo.none()), n, 264, 1400)
 
+def upload.error.frame(+l: I.Loc) -> L.Out:
+  +font = ty(l)
+  +n = N.Nui.init(U.Ui.error_set(ui.of(ja()), NT.Notice.make("upload.network", "")), 1400, 900)
+  L.Lay.frame(font, L.Lay.memo(font, n, L.TL.memo.none()), n)
+
 def main() -> IO(Unit):
   do IO<Unit>:
     C.Check.str("settings en", MSG.T.settings.restart(I.En{}), "Continue after a restart")
@@ -158,3 +163,5 @@ def main() -> IO(Unit):
     C.Check.str("thread retains message", has(text(thread()), "Leave this message alone"), "True")
     C.Check.str("thread header translated", has(text(thread()), MSG.T.thread.viewer(I.Ja{})), "True")
     C.Check.str("thread send hit", Bool.show(U32.is_gt(right.go(hits(thread()), "send", ""), 0)), "True")
+    C.Check.str("window upload toast en", has(text(L.Lay.rev(upload.error.frame(I.En{}))), "the upload did not reach the hub"), "True")
+    C.Check.str("window upload toast ja", has(text(L.Lay.rev(upload.error.frame(I.Ja{}))), "アップロードがハブに届きませんでした"), "True")

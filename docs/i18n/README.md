@@ -124,3 +124,10 @@ ICU interpolation or selection.
 The Bend in-app language override does not change that OS preference. Japanese
 permission resources can therefore follow iOS language independently of the
 in-app preview gate; live prompt/device verification remains pending.
+
+Known upload failures carry transient `uiError`/`uiDetail` fields. The hub also
+keeps an English `text` fallback for older clients. Unknown error IDs/text pass
+through unchanged. The client's held error uses the existing stable notice
+encoding and becomes words at the window, web or mobile screen projection, so
+switching language updates an already-visible error. No English-text matching
+or persisted event/schema change is involved.

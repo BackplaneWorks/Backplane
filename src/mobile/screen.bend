@@ -1678,7 +1678,7 @@ def Mob.screen.go(+lc: I.Loc, +focus: Bool, +u: U.Ui, +ix: U.SIx, +g: U.SGroups,
       +newroom = MB.MBots.rnew(u)
       +thread = Mob.focus.thread(lc, focus, u, sel)
       +bot = Mob.focus.bot(lc, focus, u)
-      J.Json.obj([J.KV{"online", J.Json.bool(on)}, J.KV{"version", J.Json.str(v)}, J.KV{"seq", J.Json.nat(U.Ui.seq(u))}, J.KV{"error", J.Json.str(e)},
+      J.Json.obj([J.KV{"online", J.Json.bool(on)}, J.KV{"version", J.Json.str(v)}, J.KV{"seq", J.Json.nat(U.Ui.seq(u))}, J.KV{"error", J.Json.str(U.Ui.error.shown(lc, e))},
         J.KV{"lang", Mob.lang.loc(lc, u)}, J.KV{"note", J.Json.str(note)}, J.KV{"sel", J.Json.str(sel)}, J.KV{"making", J.Json.bool(U.Made.waiting(u))}, J.KV{"theme", J.Json.str(M.Setting.get(st, "ui.theme", ""))},
         J.KV{"empty", J.Json.str(Mob.empty.loc(lc, List.length(&2, M.Project, U.Ui.projects(st))))},
         J.KV{"projects", J.Json.arr(Mob.grouped(lc, g, o, ix, st, now, U.Find.q(o, dr)))},

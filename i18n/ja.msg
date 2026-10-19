@@ -1236,3 +1236,9 @@ native.notify.channel.live = 稼働中のエージェント
 
 # iOS system camera permission purpose
 native.permission.camera = コンピューターに表示されたペアリングコードを読み取り、接続します。
+
+# Upload failure messages resolved at the client
+upload.network = アップロードがハブに届きませんでした
+upload.failed = アップロードに失敗しました
+upload.incomplete = アップロードが途中で途切れました
+upload.cap = 添付ファイルは{mb} MBまでです

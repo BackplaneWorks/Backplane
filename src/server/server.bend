@@ -1,4 +1,5 @@
 import Base
+import ../core/winnote.bend as NT
 import ../core/charter.bend as CH
 import ../core/mailrun.bend as RUN
 import ../core/kihealth.bend as KH
@@ -11845,6 +11846,9 @@ def Upload.json(+status: String, +ok: Bool, +thread: String, +v: String) -> List
     [J.KV{"attached", J.Str{v}}, J.KV{"thread", J.Str{thread}}],
     [J.KV{"text", J.Str{v}}, J.KV{"thread", J.Str{thread}}, J.KV{"upload", J.Flag{True{}}}])))), "")
 
+def Upload.failure(status: String, thread: String, id: String, detail: String) -> List<&2, U32>:
+  W.Http.response(status, "application/json", U.Utf8.encode(J.Json.show(NT.Notice.upload.reply(thread, id, detail))), "")
+
 def Upload.saved(r: Socket & Result<&1, &1, U32 & String, Unit>, +thread: String, +path: String) -> IO(Unit):
   (s, res) = r
   match res:
@@ -11853,7 +11857,7 @@ def Upload.saved(r: Socket & Result<&1, &1, U32 & String, Unit>, +thread: String
     case Fail{_}:
       do IO<Unit>:
         rm : Result<&1, &1, U32 & String, Unit> <- H.FS.remove(path)
-        Conn.finish(s, Upload.json("400 Bad Request", False{}, thread, "the upload did not arrive whole"))
+        Conn.finish(s, Upload.failure("400 Bad Request", thread, "upload.incomplete", ""))
 
 # the head's leftover (the body's start) is written; the rest is copied
 # (a body that came whole with the head has nothing left to copy: the copy
@@ -11901,7 +11905,7 @@ def Upload.gate(ok: Bool, big: Bool, s: Socket, +cont: Bool, +thread: String, +n
     case False{} _:
       Conn.finish(s, W.Http.text("401 Unauthorized", "this Backplane needs its pairing token"))
     case True{} True{}:
-      Conn.finish(s, Upload.json("413 Payload Too Large", False{}, thread, "attachments are limited to " ++ Nat.show(Nat.div(AT.Att.cap(), 1048576n)) ++ " MB"))
+      Conn.finish(s, Upload.failure("413 Payload Too Large", thread, "upload.cap", Nat.show(Nat.div(AT.Att.cap(), 1048576n))))
     case True{} False{}:
       do IO<Unit>:
         +reply : Chan(String) <- Chan.new(String, 1)

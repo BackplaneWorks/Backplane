@@ -370,7 +370,7 @@ final class AppModel {
             }
             let answered = (try? JSONSerialization.jsonObject(with: Data(answer.utf8))) is [String: Any]
             if !answered {
-                let o: [String: Any] = ["text": "the upload did not reach the hub", "thread": thread, "upload": true]
+                let o: [String: Any] = ["uiError": "upload.network", "thread": thread, "upload": true]
                 answer = (try? JSONSerialization.data(withJSONObject: o)).flatMap { String(data: $0, encoding: .utf8) } ?? ""
             }
             act("attach-end", answer)
