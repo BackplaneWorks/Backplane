@@ -112,6 +112,9 @@ jobs:
         env:
           BACKPLANE_SKIP_CHECK: "1" # the laws job checks every file
       - run: scripts/smoke.sh
+      - run: bun test/tools/mech_primary_e2e.ts dist/backplane build/wire
+      - run: scripts/build-mobile.sh --js
+        if: matrix.target == 'linux-x64'
       - uses: actions/upload-artifact@v4
         with:
           name: backplane-${{ matrix.target }}

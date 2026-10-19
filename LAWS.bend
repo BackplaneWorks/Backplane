@@ -1742,6 +1742,18 @@ law mech_default_assembly:
 law mech_default_first:
   {MCH.Mech.part.path(Maybe.default(&2, MCH.MPart, MCH.Mech.default(MCH.Mech.parts("1 9 mech/bracket.step\n3 9 mech/lid.step")), MCH.MPart{"", "", Nil{}})) == "mech/bracket.step" : String}
 
+# a configured model takes precedence over the filename-based default
+law mech_configured_primary:
+  {MCH.Mech.part.path(Maybe.default(&2, MCH.MPart, MCH.Mech.preferred(MCH.Mech.parts("1 9 mech/assembly.step\n2 9 mech/lid.step"), MCH.Mech.config("{\"mech\":\"mech/lid.step\"}")), MCH.MPart{"", "", Nil{}})) == "mech/lid.step" : String}
+
+# a missing configured model cannot hide the project's other parts
+law mech_primary_missing:
+  {MCH.Mech.preferred(MCH.Mech.parts("1 9 mech/assembly.step\n2 9 mech/lid.step"), "mech/missing.step") == MCH.Mech.default(MCH.Mech.parts("1 9 mech/assembly.step\n2 9 mech/lid.step")) : Maybe<&2, MCH.MPart>}
+
+# choosing a part explicitly always takes precedence over the configuration
+law mech_primary_selection:
+  {MCH.Mech.part.path(Maybe.default(&2, MCH.MPart, MCH.Mech.choose(MCH.Mech.parts("1 9 mech/assembly.step\n2 9 mech/lid.step"), "/p/mech/assembly.step", "/p", "mech/lid.step"), MCH.MPart{"", "", Nil{}})) == "mech/assembly.step" : String}
+
 # agents are pointed at FreeCAD's GUI beside its console build (the only
 # one that writes a STEP's colours), on Linux and in the macOS app
 law mech_gui_linux:
