@@ -10080,6 +10080,66 @@ def keep_step(hit, x0, y0, x1, y1, c, a, s, px, py, rx, ry, n, rest, ys):
     case False{}:
       {==}
 
+law keep_step_k_exact:
+  for k: Bool
+  for +x0: U32
+  for +y0: U32
+  for +x1: U32
+  for +y1: U32
+  for +c: U32
+  for +a: U32
+  for +s: R.Shape
+  for +ys: List<&2, R.Op>
+  {T.Keep.step.k(k, x0, y0, x1, y1, c, a, s, ys) == T.KStep{T.Keep.ys.k(k, ys), T.Keep.ok.k(k, x0, y0, x1, y1, c, a, s, ys)} : T.KeepStep}
+
+def keep_step_k_exact(k, x0, y0, x1, y1, c, a, s, ys):
+  match k:
+    case True{}: {==}
+    case False{}: {==}
+
+law keep_step_h_exact:
+  for hit: Bool
+  for +x0: U32
+  for +y0: U32
+  for +x1: U32
+  for +y1: U32
+  for +c: U32
+  for +a: U32
+  for +s: R.Shape
+  for +px: U32
+  for +py: U32
+  for +rx: U32
+  for +ry: U32
+  for +n: U32
+  for +ys: List<&2, R.Op>
+  {T.Keep.step.h(hit, x0, y0, x1, y1, c, a, s, px, py, rx, ry, n, ys) == T.KStep{T.Keep.ys.h(hit, s, px, py, rx, ry, n, ys), T.Keep.ok.h(hit, x0, y0, x1, y1, c, a, s, px, py, rx, ry, n, ys)} : T.KeepStep}
+
+def keep_step_h_exact(hit, x0, y0, x1, y1, c, a, s, px, py, rx, ry, n, ys):
+  match hit:
+    case True{}:
+      keep_step_k_exact(Bool.not(R.Region.empty(R.Region.move(s, px, py, rx, ry, n))), x0, y0, x1, y1, c, a, R.Region.move(s, px, py, rx, ry, n), ys)
+    case False{}: {==}
+
+def Laws.keep_step_exact(o, px, py, rx, ry, n, ys):
+  match o:
+    case R.Op{+x0, +y0, +x1, +y1, +c, +a, +s}:
+      keep_step_h_exact(R.Region.hits(x0, y0, x1, y1, rx, ry, n), x0, y0, x1, y1, c, a, s, px, py, rx, ry, n, ys)
+
+law keep_eq_cons:
+  for +o: R.Op
+  for +t: List<&2, R.Op>
+  for +px: U32
+  for +py: U32
+  for +rx: U32
+  for +ry: U32
+  for +n: U32
+  for +ys: List<&2, R.Op>
+  {T.Keep.eq(o <> t, px, py, rx, ry, n, ys, True{}) == T.Keep.eq(t, px, py, rx, ry, n, T.Keep.ys(o, px, py, rx, ry, n, ys), T.Keep.ok(o, px, py, rx, ry, n, ys)) : Bool}
+
+def keep_eq_cons(o, t, px, py, rx, ry, n, ys):
+  Equal.cong(T.KeepStep, Bool, +p => T.Keep.eq(t, px, py, rx, ry, n, T.Keep.step.ys(p), T.Keep.step.same(p)),
+    T.Keep.step(o, px, py, rx, ry, n, ys), T.KStep{T.Keep.ys(o, px, py, rx, ry, n, ys), T.Keep.ok(o, px, py, rx, ry, n, ys)}, Laws.keep_step_exact(o, px, py, rx, ry, n, ys))
+
 def Laws.keep_eq(ops, px, py, rx, ry, n, ys, ok):
   match ops ok:
     case Nil{} False{}:
@@ -10089,6 +10149,9 @@ def Laws.keep_eq(ops, px, py, rx, ry, n, ys, ok):
     case Nil{} True{}:
       {==}
     case R.Op{+x0, +y0, +x1, +y1, +c, +a, +s} <> +t True{}:
+      %Equal.sym(Bool, T.Keep.eq(R.Op{x0, y0, x1, y1, c, a, s} <> t, px, py, rx, ry, n, ys, True{}),
+        T.Keep.eq(t, px, py, rx, ry, n, T.Keep.ys.h(R.Region.hits(x0, y0, x1, y1, rx, ry, n), s, px, py, rx, ry, n, ys), T.Keep.ok.h(R.Region.hits(x0, y0, x1, y1, rx, ry, n), x0, y0, x1, y1, c, a, s, px, py, rx, ry, n, ys)),
+        keep_eq_cons(R.Op{x0, y0, x1, y1, c, a, s}, t, px, py, rx, ry, n, ys)) : {_ == T.Eq.ops.go(R.Region.keep(R.Op{x0, y0, x1, y1, c, a, s} <> t, px, py, rx, ry, n), ys, True{}) : Bool}
       Equal.trans(Bool, T.Keep.eq(t, px, py, rx, ry, n, T.Keep.ys.h(R.Region.hits(x0, y0, x1, y1, rx, ry, n), s, px, py, rx, ry, n, ys), T.Keep.ok.h(R.Region.hits(x0, y0, x1, y1, rx, ry, n), x0, y0, x1, y1, c, a, s, px, py, rx, ry, n, ys)),
         T.Eq.ops.go(R.Region.keep(t, px, py, rx, ry, n), T.Keep.ys.h(R.Region.hits(x0, y0, x1, y1, rx, ry, n), s, px, py, rx, ry, n, ys), T.Keep.ok.h(R.Region.hits(x0, y0, x1, y1, rx, ry, n), x0, y0, x1, y1, c, a, s, px, py, rx, ry, n, ys)),
         T.Eq.ops.go(R.Region.keep.op(R.Region.hits(x0, y0, x1, y1, rx, ry, n), R.Op{x0, y0, x1, y1, c, a, s}, px, py, rx, ry, n, R.Region.keep(t, px, py, rx, ry, n)), ys, True{}),
