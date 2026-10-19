@@ -178,7 +178,27 @@ class View {
       if (placed && Number.isFinite(x) && Number.isFinite(y)) placed(`${x.toFixed(4)}\t${y.toFixed(4)}\t\t`);
     });
     // a new size refits the view, unless the user has moved it
-    new ResizeObserver(() => { if (!this.fitted || !this.touched) this.fit(); else this.later(); }).observe(canvas);
+    this.resize = new ResizeObserver(() => { if (!this.fitted || !this.touched) this.fit(); else this.later(); });
+    this.resize.observe(canvas);
+    this.dprChanged = () => { this.watchDpr(); this.later(); };
+    this.watchDpr();
+  }
+
+  watchDpr() {
+    this.dprQuery?.removeEventListener("change", this.dprChanged);
+    this.dprQuery = window.matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`);
+    this.dprQuery.addEventListener("change", this.dprChanged);
+  }
+
+  dispose() {
+    this.disposed = true;
+    this.resize.disconnect();
+    this.dprQuery.removeEventListener("change", this.dprChanged);
+    cancelAnimationFrame(this.frame);
+    clearInterval(this.tick);
+    clearTimeout(this.baking);
+    clearTimeout(this.resting);
+    if (this.idling) cancelIdleCallback(this.idling);
   }
 
   // the whole plot in view, centred, with a margin
@@ -203,9 +223,9 @@ class View {
   }
 
   later() {
-    if (this.queued) return;
+    if (this.queued || this.disposed) return;
     this.queued = true;
-    requestAnimationFrame(() => { this.queued = false; this.draw(); });
+    this.frame = requestAnimationFrame(() => { this.queued = false; this.draw(); });
   }
 
   // review comments' pins and the note form sit on the stage at their place
@@ -251,22 +271,25 @@ class View {
     // it until the view rests a moment, then it is drawn again. A view that
     // has not moved (a new plot, a fade, a layer turned off) draws the
     // layers straight onto the page, and the bitmap follows when idle.
-    const look = `${this.off} ${this.dim} ${this.lift} ${w} ${h} ${dpr}`;
+    const look = `${this.off} ${this.dim} ${this.lift} ${this.fade} ${this.bg} ${w} ${h} ${dpr}`;
+    this.look = look;
     const view = `${this.scale} ${this.ox} ${this.oy}`;
     const moved = this.shown !== undefined && view !== this.shown;
     this.shown = view;
     let b = this.cache;
     if (b && (b.plot !== p || b.look !== look)) b = null;
-    const placed = b && b.scale === this.scale && Math.abs((this.ox - b.ox) * dpr) <= b.m && Math.abs((this.oy - b.oy) * dpr) <= b.m;
-    if (b && !placed && !this.rest) {
+    // Even a pan inside the margin needs a fresh rested frame: a bitmap
+    // shifted by a fraction of a pixel cannot reproduce vector antialiasing.
+    if (moved && !this.rest) {
+      this.moving = true;
+      clearTimeout(this.resting);
+      this.resting = setTimeout(() => { this.rest = true; this.later(); }, 120);
+    }
+    if (this.rest) this.moving = false;
+    if (b && this.moving) {
       const f = this.scale / b.scale;
       g.setTransform(f, 0, 0, f, this.ox * dpr - f * (b.ox * dpr + b.m), this.oy * dpr - f * (b.oy * dpr + b.m));
       g.drawImage(b.canvas, 0, 0);
-      clearTimeout(this.resting);
-      this.resting = setTimeout(() => { this.rest = true; this.later(); }, 120);
-    } else if (placed || ((b || moved || this.prebake) && !this.fading)) {
-      if (!placed) b = this.bake(p, look, w, h, dpr);
-      g.drawImage(b.canvas, Math.round(this.ox * dpr - (b.ox * dpr + b.m)), Math.round(this.oy * dpr - (b.oy * dpr + b.m)));
     } else {
       const t = performance.now();
       this.fading = this.paint(g, dpr, 0);
@@ -276,7 +299,6 @@ class View {
       else this.idle();
     }
     this.rest = false;
-    this.prebake = false;
     // how it came and how long the layers took to draw, small in a corner
     const st = stats.get(this.key);
     if (st) {
@@ -314,9 +336,17 @@ class View {
   // first pan or zoom finds it ready
   idle() {
     clearTimeout(this.baking);
+    if (this.idling) cancelIdleCallback(this.idling);
     this.baking = setTimeout(() => {
-      const go = () => { if (!this.fading && this.plot && this.plot.chunks) { this.prebake = true; this.later(); } };
-      if (window.requestIdleCallback) requestIdleCallback(go, { timeout: 1000 }); else go();
+      // Baking never replaces the rested canvas. Even an integer margin
+      // can change Canvas2D's clipping/antialiasing by a few pixels.
+      const go = () => {
+        if (!this.disposed && !this.fading && !this.moving && this.plot && this.plot.chunks) {
+          const dpr = window.devicePixelRatio || 1;
+          this.bake(this.plot, this.look, this.canvas.width, this.canvas.height, dpr);
+        }
+      };
+      if (window.requestIdleCallback) this.idling = requestIdleCallback(go, { timeout: 1000 }); else go();
     }, 150);
   }
 
@@ -369,8 +399,8 @@ function present(p) {
 // after each render: the canvas on the page (if any) shows the source its
 // data-key names, once the hub has sent it
 export function mount(canvas) {
-  if (!canvas) { view = null; return; }
-  if (!view || view.canvas !== canvas) view = new View(canvas, canvas.dataset.bg || "#0d0f12");
+  if (!canvas) { view?.dispose(); view = null; return; }
+  if (!view || view.canvas !== canvas) { view?.dispose(); view = new View(canvas, canvas.dataset.bg || "#0d0f12"); }
   const off = Number(canvas.dataset.off || 0), dim = Number(canvas.dataset.dim || 0), lift = Number(canvas.dataset.lift ?? 255);
   if (off !== view.off || dim !== view.dim || lift !== view.lift) { view.off = off; view.dim = dim; view.lift = lift; view.later(); }
   present(view.plot);
