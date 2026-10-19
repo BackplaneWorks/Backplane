@@ -1,6 +1,7 @@
 import Base
 import ./sexpr.bend as S
 import ./schematic.bend as SC
+import ./diff.bend as DF
 
 # A hierarchical schematic as a tree of sheets. Each .kicad_sch lists its
 # child sheets (name and file, the file relative to the parent's folder).
@@ -294,15 +295,26 @@ def Hier.field(+fs: List<&2, String>, +i: Nat) -> String:
 def Hier.read.row(+fs: List<&2, String>) -> Row:
   Row{Maybe.default(&2, Nat, Nat.read(Hier.field(fs, 0n)), 0n), Hier.field(fs, 2n), Hier.field(fs, 3n), String.eq(Hier.field(fs, 1n), "1")}
 
+# a line's row ahead of the rest (a blank line has none); the rest is read
+# once and passed in, as Bool.pick would read it in both of its arms
+def Hier.read.keep(empty: Bool, +l: String, rest: List<&2, Row>) -> List<&2, Row>:
+  match empty:
+    case True{}:
+      rest
+    case False{}:
+      Hier.read.row(String.split(l, '\t')) <> rest
+
 def Hier.read.go(ls: List<&2, String>) -> List<&2, Row>:
   match ls:
     case Nil{}:
       Nil{}
     case +l <> +t:
-      Bool.pick(List<&2, Row>, String.is_empty(l), Hier.read.go(t), Hier.read.row(String.split(l, '\t')) <> Hier.read.go(t))
+      Hier.read.keep(String.is_empty(l), l, Hier.read.go(t))
 
 def Hier.read(+s: String) -> List<&2, Row>:
-  Hier.read.go(String.split(s, '\n'))
+  # Base's split recurses once per character on the JS target. The shared
+  # tail-recursive line reader also handles large sheet tables on phones.
+  Hier.read.go(DF.Diff.lines(s))
 
 def Hier.kids.sheets(k: Kids) -> List<&2, Sheet>:
   match k:

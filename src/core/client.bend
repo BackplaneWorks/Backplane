@@ -7328,12 +7328,15 @@ def Hs.menu.steps() -> Nat:
   8n
 
 # the menu's rows for a side ("a" the old version, "b" the new)
-def Hs.menu.loc(+l: I.Loc, +u: Ui, +side: String) -> List<&2, HRow>:
+def Hs.menu.track.loc(+l: I.Loc, +ss: List<&2, HI.Step>, +u: Ui, +side: String) -> List<&2, HRow>:
   +r = Hs.refs(u)
   +es = M.State.mine(Ui.state(u), Ui.sel(u))
   List.append(&2, HRow, [HRow{MSG.T.history.workingcopy(l), MSG.T.history.workingcopy.note(l), Hs.row.value(side, "", "Working copy", "", "")}],
-    List.append(&2, HRow, List.take(&2, HRow, Hs.row.steps(Hs.track(u), l, side, es, 1n, Nil{}), Hs.menu.steps()),
+    List.append(&2, HRow, List.take(&2, HRow, Hs.row.steps(ss, l, side, es, 1n, Nil{}), Hs.menu.steps()),
       Hs.row.refs(HI.Hist.refs(J.Json.get_str(r, "refs", "")), l, side, J.Json.get_str(r, "git", ""), J.Json.get_str(r, "top", ""))))
+
+def Hs.menu.loc(+l: I.Loc, +u: Ui, +side: String) -> List<&2, HRow>:
+  Hs.menu.track.loc(l, Hs.track(u), u, side)
 
 def Hs.menu(+u: Ui, side: String) -> List<&2, HRow>:
   Hs.menu.loc(Lang.loc(u), u, side)
@@ -8000,12 +8003,29 @@ def HBar.h(+b: HBar) -> U32:
 def Hs.fade() -> Nat:
   220n
 
+# the bar and its position from one parse of the thread's steps
+def Hs.bar.at(+l: I.Loc, +ss: List<&2, HI.Step>, +at: Nat, +u: Ui) -> HBar:
+  Hs.bar.k(l, HI.Hist.nth(ss, at), u, Hs.n(ss), at, M.State.mine(Ui.state(u), Ui.sel(u)))
+
+def Hs.bar.track(+l: I.Loc, +ss: List<&2, HI.Step>, +u: Ui) -> HBar:
+  Hs.bar.at(l, ss, Hs.at(u, ss), u)
+
+def Hs.bar.off() -> HBar:
+  HBar{False{}, 0n, 0n, "", "", "", "", False{}, False{}, False{}, "", "", ""}
+
 def Hs.bar.on(+l: I.Loc, on: Bool, +u: Ui) -> HBar:
   match on:
     case True{}:
-      Hs.bar.k(l, HI.Hist.nth(Hs.track(u), Hs.at(u, Hs.track(u))), u, Hs.n(Hs.track(u)), Hs.at(u, Hs.track(u)), M.State.mine(Ui.state(u), Ui.sel(u)))
+      Hs.bar.track(l, Hs.track(u), u)
     case False{}:
-      HBar{False{}, 0n, 0n, "", "", "", "", False{}, False{}, False{}, "", "", ""}
+      Hs.bar.off()
+
+def Hs.bar.on.with(+l: I.Loc, on: Bool, +ss: List<&2, HI.Step>, +u: Ui) -> HBar:
+  match on:
+    case True{}:
+      Hs.bar.track(l, ss, u)
+    case False{}:
+      Hs.bar.off()
 
 # the bar for the selected thread's viewer when it shows (on): off unless
 # a board or a schematic shows
@@ -8021,6 +8041,11 @@ def Hs.bar.loc(+l: I.Loc, +u: Ui) -> HBar:
 
 def Hs.bar(+u: Ui) -> HBar:
   Hs.bar.loc(Lang.loc(u), u)
+
+# Hs.bar for a track already read (the web's viewer reads it once a render,
+# for the bar and its ticks)
+def Hs.bar.with(+l: I.Loc, +ss: List<&2, HI.Step>, +u: Ui) -> HBar:
+  Hs.bar.on.with(l, Bool.and(Ui.panel(u), Bool.and(Nat.is_lt(Hs.kind(u), 2n), Bool.not(String.is_empty(Ui.sel(u))))), ss, u)
 
 # Actions (Ui.actions from "hist-go")
 def Hs.act(i: Nat, +u: Ui, +value: String) -> Act:

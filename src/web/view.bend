@@ -2178,10 +2178,13 @@ def View.boards(+u: U.Ui, +what: String) -> List<&2, D.Node>:
 def View.sheet.chips(rs: List<&2, HI.Row>, +i: Nat, +cur: String) -> List<&2, D.Node>:
   View.sheet.chips.loc(I.En{}, rs, i, cur)
 
-def View.sheets.loc(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
+def View.sheets.of(+lc: I.Loc, +rs: List<&2, HI.Row>, +u: U.Ui) -> List<&2, D.Node>:
+  Bool.pick(List<&2, D.Node>, Nat.is_gt(List.length(&2, HI.Row, rs), 1n),
+    View.sheet.chips.loc(lc, rs, 0n, U.Ui.view_get(u, "view.path")), [D.Dom.span("what", MSG.T.viewer.schematic.tip(lc))])
 
-  Bool.pick(List<&2, D.Node>, Nat.is_gt(List.length(&2, HI.Row, HI.Hier.read(U.Ui.info(u, "sheets:" ++ U.Ui.root(u)))), 1n),
-    View.sheet.chips.loc(lc, HI.Hier.read(U.Ui.info(u, "sheets:" ++ U.Ui.root(u))), 0n, U.Ui.view_get(u, "view.path")), [D.Dom.span("what", MSG.T.viewer.schematic.tip(lc))])
+# the project's sheets, read once per render
+def View.sheets.loc(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
+  View.sheets.of(lc, HI.Hier.read(U.Ui.info(u, "sheets:" ++ U.Ui.root(u))), u)
 
 # the Layers menu (core/layers.bend): each layer shown by default, in
 # KiCad's order (plot2d.js hides those the file has nothing on), a row of
@@ -2311,7 +2314,7 @@ def View.hist.said.loc(+lc: I.Loc, live: Bool, +text: String) -> List<&2, D.Node
 def View.hist.said(live: Bool, +text: String) -> List<&2, D.Node>:
   View.hist.said.loc(I.En{}, live, text)
 
-def View.hist.walk(+lc: I.Loc, b: U.HBar, +u: U.Ui) -> D.Node:
+def View.hist.walk(+lc: I.Loc, b: U.HBar, +ss: List<&2, HS.Step>, +u: U.Ui) -> D.Node:
   match b:
     case U.HBar{_, +n, +at, +title, _, +label, +said, +pl, +df, _, _, _, _}:
       D.El{"div", "", [D.At{"class", "hist"}], [
@@ -2324,7 +2327,7 @@ def View.hist.walk(+lc: I.Loc, b: U.HBar, +u: U.Ui) -> D.Node:
           D.Dom.span("title", title), D.Dom.span("grow", ""),
           D.Dom.button(Bool.pick(String, df, "hbtn on", "hbtn"), "hist-diff", "", MSG.T.history.changes.tip(lc), MSG.T.viewer.history.changes(lc)),
           D.Dom.button("hbtn", "cmp", "a", MSG.T.history.compare.tip(lc), MSG.T.viewer.history.compare(lc))], View.hist.live.loc(lc, at))},
-        D.El{"div", "", [D.At{"class", "hist-scrub"}], View.hist.ticks.loc(lc, U.Hs.track(u), 0n, n, at)},
+        D.El{"div", "", [D.At{"class", "hist-scrub"}], View.hist.ticks.loc(lc, ss, 0n, n, at)},
         D.El{"div", "", [D.At{"class", "hist-said"}], View.hist.said.loc(lc, Nat.is_eq(at, 0n), Bool.pick(String, Nat.is_eq(at, 0n), U.Hs.live.said.loc(lc, n), Bool.pick(String, String.is_empty(said), label, said)))}]}
 
 def View.hist.key(+layer: U32, +label: String) -> D.Node:
@@ -2362,17 +2365,21 @@ def View.hist.cmp.loc(+lc: I.Loc, b: U.HBar, +u: U.Ui) -> D.Node:
 def View.hist.cmp(b: U.HBar, +u: U.Ui) -> D.Node:
   View.hist.cmp.loc(I.En{}, b, u)
 
-def View.hist.k(+lc: I.Loc, on: Bool, cmp: Bool, b: U.HBar, +u: U.Ui) -> List<&2, D.Node>:
+def View.hist.k(+lc: I.Loc, on: Bool, cmp: Bool, b: U.HBar, +ss: List<&2, HS.Step>, +u: U.Ui) -> List<&2, D.Node>:
   match on cmp:
     case False{} _:
       Nil{}
     case True{} True{}:
       [View.hist.cmp.loc(lc, b, u)]
     case True{} False{}:
-      [View.hist.walk(lc, b, u)]
+      [View.hist.walk(lc, b, ss, u)]
 
-def View.hist(+lc: I.Loc, +b: U.HBar, +u: U.Ui) -> List<&2, D.Node>:
-  View.hist.k(lc, U.HBar.on(b), U.HBar.cmp(b), b, u)
+def View.hist(+lc: I.Loc, +b: U.HBar, +ss: List<&2, HS.Step>, +u: U.Ui) -> List<&2, D.Node>:
+  View.hist.k(lc, U.HBar.on(b), U.HBar.cmp(b), b, ss, u)
+
+# the bar and its ticks share a single history parse, including localization
+def View.hist.of(+lc: I.Loc, +ss: List<&2, HS.Step>, +u: U.Ui) -> List<&2, D.Node>:
+  View.hist(lc, U.Hs.bar.with(lc, ss, u), ss, u)
 
 # the menu of versions over the stage, a row each; a press outside shuts it
 def View.hist.rows(rs: List<&2, U.HRow>) -> List<&2, D.Node>:
@@ -2390,16 +2397,16 @@ def View.hist.ref.loc(+lc: I.Loc, +side: String) -> D.Node:
 def View.hist.ref(+side: String) -> D.Node:
   View.hist.ref.loc(I.En{}, side)
 
-def View.hist.menu.k(+lc: I.Loc, open: Bool, +u: U.Ui, +side: String) -> List<&2, D.Node>:
+def View.hist.menu.k(+lc: I.Loc, open: Bool, +ss: List<&2, HS.Step>, +u: U.Ui, +side: String) -> List<&2, D.Node>:
   match open:
     case True{}:
       [D.El{"div", "", [D.At{"class", "hist-scrim"}, D.At{"data-value", ""}, D.On{"click", "cmp-shut"}], Nil{}},
-       D.El{"div", "", [D.At{"class", "hist-menu"}], D.Dom.span("head", Bool.pick(String, String.eq(side, "b"), MSG.T.viewer.history.compare.new(lc), MSG.T.viewer.history.compare.old(lc))) <> (View.hist.ref.loc(lc, side) <> View.hist.rows(U.Hs.menu.loc(lc, u, side)))}]
+       D.El{"div", "", [D.At{"class", "hist-menu"}], D.Dom.span("head", Bool.pick(String, String.eq(side, "b"), MSG.T.viewer.history.compare.new(lc), MSG.T.viewer.history.compare.old(lc))) <> (View.hist.ref.loc(lc, side) <> View.hist.rows(U.Hs.menu.track.loc(lc, ss, u, side)))}]
     case False{}:
       Nil{}
 
-def View.hist.menu(+lc: I.Loc, +u: U.Ui) -> D.Node:
-  D.El{"div", "", [D.At{"class", "hist-over"}], View.hist.menu.k(lc, Bool.not(String.is_empty(U.Ui.scratch(u, "@cmp.menu"))), u, U.Ui.scratch(u, "@cmp.menu"))}
+def View.hist.menu(+lc: I.Loc, +ss: List<&2, HS.Step>, +u: U.Ui) -> D.Node:
+  D.El{"div", "", [D.At{"class", "hist-over"}], View.hist.menu.k(lc, Bool.not(String.is_empty(U.Ui.scratch(u, "@cmp.menu"))), ss, u, U.Ui.scratch(u, "@cmp.menu"))}
 
 # Review comments (client.bend's Rc), over the canvas: a pin at each place
 # (plot2d.js puts them where the plot's own transform says: data-x, data-y in
@@ -2523,13 +2530,16 @@ def View.rc.checks.loc(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
 def View.rc.checks(+u: U.Ui) -> List<&2, D.Node>:
   View.rc.checks.loc(I.En{}, u)
 
-def View.plot(+lc: I.Loc, +u: U.Ui, +what: List<&2, D.Node>) -> List<&2, D.Node>:
+def View.plot.track(+lc: I.Loc, +ss: List<&2, HS.Step>, +u: U.Ui, +what: List<&2, D.Node>) -> List<&2, D.Node>:
   View.bar.loc(lc, List.append(&2, D.Node, what, [View.layers.loc(lc, String.eq(U.Solid.kind(u), "schematic"), Nat.is_eq(HS.Hist.kind(U.Ui.view_get(u, "view.path")), 2n), U.Solid.off(u), U.Lfocus.of(u))]), MSG.T.viewer.pan.tip(lc))
    <> D.El{"div", "", [D.At{"class", "viewer-stage"}], D.El{"canvas", "plot", [D.At{"id", "plot"}, D.At{"data-key", U.Solid.want(u)},
         D.At{"data-off", U32.show(LY.Masks.off(LY.Lyr.masks(U.Lfocus.kind(u), U.Solid.off(u), U.Lfocus.of(u))))},
         D.At{"data-dim", U32.show(LY.Masks.dim(LY.Lyr.masks(U.Lfocus.kind(u), U.Solid.off(u), U.Lfocus.of(u))))}, D.At{"data-lift", U32.show(LY.Lyr.top(U.Lfocus.of(u)))},
-        D.At{"data-fade", Nat.show(U.Hs.fade())}, D.At{"data-fam", HS.Hist.key.family(U.Solid.want(u))}], Nil{}} <> (View.hist.menu(lc, u) <> View.rc.loc(lc, u))}
-   <> View.hist(lc, U.Hs.bar.loc(lc, u), u)
+        D.At{"data-fade", Nat.show(U.Hs.fade())}, D.At{"data-fam", HS.Hist.key.family(U.Solid.want(u))}], Nil{}} <> (View.hist.menu(lc, ss, u) <> View.rc.loc(lc, u))}
+   <> View.hist.of(lc, ss, u)
+
+def View.plot(+lc: I.Loc, +u: U.Ui, +what: List<&2, D.Node>) -> List<&2, D.Node>:
+  View.plot.track(lc, U.Hs.track(u), u, what)
 
 # over a part in 3D: the thread's parts and Renders; the board: its name
 # after the parts: Renders for one of them, or the name of another model
