@@ -12729,6 +12729,24 @@ def tl_cm_one_c(c, ty, o, st0, st, dirty, px, sel, hc, h):
         case M.Act{+a0, +a1, +a2, +a3, +a4, +a5}:
           Empty.absurd({L.TL.cm.one.c(True{}, dirty, ty, M.Act{a0, a1, a2, a3, a4, a5}, st, px, sel, L.TL.cm.item.k(True{}, ty, M.Act{a0, a1, a2, a3, a4, a5}, st0, px, sel)) == L.TL.cm.item.k(True{}, ty, M.Act{a0, a1, a2, a3, a4, a5}, st, px, sel) : L.TLE}, false_ne_true(hc))
 
+# Dependency-first reuse has exactly the same behavior as the previous
+# chip-first decision, for arbitrary entries and saved parts.
+def tl_cm_reuse_skip(c: Bool, +dirty: List<&2, String>, +ty: L.Ty, +e: M.Entry, +st: M.State, +px: U32, +sel: String, +it: L.TLE, h: {L.TL.dirty.hit(dirty, L.TL.part.deps.of(it)) == False{} : Bool}) -> {L.TL.cm.one.c(c, dirty, ty, e, st, px, sel, it) == it : L.TLE}:
+  match c:
+    case False{}: {==}
+    case True{}:
+      %Equal.sym(Bool, L.TL.dirty.hit(dirty, L.TL.part.deps.of(it)), False{}, h) : {L.TL.cm.one.h(_, ty, e, st, px, sel, it) == it : L.TLE}
+      {==}
+
+def tl_cm_reuse_exact_k(hit: Bool, +ty: L.Ty, +e: M.Entry, +st: M.State, +dirty: List<&2, String>, +px: U32, +sel: String, +it: L.TLE, h: {L.TL.dirty.hit(dirty, L.TL.part.deps.of(it)) == hit : Bool}) -> {L.TL.cm.reuse.k(hit, ty, e, st, dirty, px, sel, it) == L.TL.cm.one.c(L.TL.cm.chip(e, sel), dirty, ty, e, st, px, sel, it) : L.TLE}:
+  match hit:
+    case True{}: {==}
+    case False{}:
+      Equal.sym(L.TLE, L.TL.cm.one.c(L.TL.cm.chip(e, sel), dirty, ty, e, st, px, sel, it), it, tl_cm_reuse_skip(L.TL.cm.chip(e, sel), dirty, ty, e, st, px, sel, it, h))
+
+def Laws.tl_cm_reuse_exact(ty, e, st, dirty, px, sel, it):
+  tl_cm_reuse_exact_k(L.TL.dirty.hit(dirty, L.TL.part.deps.of(it)), ty, e, st, dirty, px, sel, it, {==})
+
 # the item's entry is the entry: the item stays or is made again, and is the
 # item made from scratch
 law tl_cm_one_sk:
@@ -12754,6 +12772,7 @@ def tl_cm_one_sk(s, c, ty, e, o, pp, st0, st, dirty, px, sel, hs, hc, hp, h):
     case False{}:
       {==}
     case True{}:
+      %Equal.sym(L.TLE, L.TL.cm.reuse(ty, o, st, dirty, px, sel, L.TLE{o, pp}), L.TL.cm.one.c(L.TL.cm.chip(o, sel), dirty, ty, o, st, px, sel, L.TLE{o, pp}), Laws.tl_cm_reuse_exact(ty, o, st, dirty, px, sel, L.TLE{o, pp})) : {_ == L.TL.cm.item(ty, e, st, px, sel) : L.TLE}
       eo = eq_entry_sound(e, o, hs)
       %Equal.sym(M.Entry, e, o, eo) : {L.TL.cm.one.c(L.TL.cm.chip(o, sel), dirty, ty, o, st, px, sel, L.TLE{o, pp}) == L.TL.cm.item(ty, _, st, px, sel) : L.TLE}
       %Equal.sym(L.TLE, L.TLE{o, pp}, L.TL.cm.item.k(c, ty, o, st0, px, sel), hp) : {L.TL.cm.one.c(L.TL.cm.chip(o, sel), dirty, ty, o, st, px, sel, _) == L.TL.cm.item(ty, o, st, px, sel) : L.TLE}

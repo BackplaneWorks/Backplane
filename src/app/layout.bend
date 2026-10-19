@@ -7414,11 +7414,21 @@ def TL.cm.one.c(+chip: Bool, +dirty: List<&2, String>, +ty: Ty, +e: M.Entry, +st
     case False{}:
       it
 
+# Check the saved dependencies before inspecting an unchanged entry's text.
+# A miss keeps the item even when its message is long and contains refs.
+def TL.cm.reuse.k(hit: Bool, +ty: Ty, +e: M.Entry, +st: M.State, +dirty: List<&2, String>, +px: U32, +sel: String, +it: TLE) -> TLE:
+  match hit:
+    case False{}: it
+    case True{}: TL.cm.one.c(TL.cm.chip(e, sel), dirty, ty, e, st, px, sel, it)
+
+def TL.cm.reuse(+ty: Ty, +e: M.Entry, +st: M.State, +dirty: List<&2, String>, +px: U32, +sel: String, +it: TLE) -> TLE:
+  TL.cm.reuse.k(TL.dirty.hit(dirty, TL.part.deps.of(it)), ty, e, st, dirty, px, sel, it)
+
 # the entry is the same as the item's (pe): the entry is the item's
 def TL.cm.one.k(same: Bool, +ty: Ty, +e: M.Entry, +st: M.State, +dirty: List<&2, String>, +px: U32, +sel: String, +pe: M.Entry, +pp: TLPart) -> TLE:
   match same:
     case True{}:
-      TL.cm.one.c(TL.cm.chip(pe, sel), dirty, ty, pe, st, px, sel, TLE{pe, pp})
+      TL.cm.reuse(ty, pe, st, dirty, px, sel, TLE{pe, pp})
     case False{}:
       TL.cm.item(ty, e, st, px, sel)
 

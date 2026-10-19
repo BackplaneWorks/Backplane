@@ -10999,3 +10999,14 @@ law tl_cm_refs_exact:
   for +px: U32
   for +sel: String
   {L.TL.cm.refs(its, ty, st, dirty, px, sel) == L.TL.cm.again(L.TL.memo.es(its), ty, st, dirty, px, sel, its) : List<&2, L.TLE>}
+
+# Inspecting dependencies first must preserve the exact chip decision.
+law tl_cm_reuse_exact:
+  for +ty: L.Ty
+  for +e: M.Entry
+  for +st: M.State
+  for +dirty: List<&2, String>
+  for +px: U32
+  for +sel: String
+  for +it: L.TLE
+  {L.TL.cm.reuse(ty, e, st, dirty, px, sel, it) == L.TL.cm.one.c(L.TL.cm.chip(e, sel), dirty, ty, e, st, px, sel, it) : L.TLE}
