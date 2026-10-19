@@ -180,6 +180,77 @@ def Checks.parses(+text: String) -> Bool:
 def Checks.finding(source: String, severity: String, kind: String, text: String, place: String) -> Finding:
   Finding{source, severity, kind, text, place, 0.0, 0.0, False{}}
 
+# Report validation is separate from design findings: a failed tool or a
+# malformed report can never be interpreted as a clean design.
+def Report.string(v: Maybe<&2, J.Json>) -> Bool:
+  match v:
+    case Some{J.Str{_}}:
+      True{}
+    case _:
+      False{}
+
+def Report.array(v: Maybe<&2, J.Json>) -> Bool:
+  match v:
+    case Some{J.Arr{_}}:
+      True{}
+    case _:
+      False{}
+
+def Report.violation(+v: J.Json) -> Bool:
+  +sev = J.Json.get_str(v, "severity", "")
+  Bool.and(Bool.or(String.eq(sev, "error"), Bool.or(String.eq(sev, "warning"), String.eq(sev, "exclusion"))), Bool.and(Report.string(J.Json.get(v, "type")), Bool.and(Report.string(J.Json.get(v, "description")), Report.array(J.Json.get(v, "items")))))
+
+def Report.violations(vs: List<&2, J.Json>, valid: Bool) -> Bool:
+  match vs valid:
+    case _ False{}:
+      False{}
+    case Nil{} True{}:
+      True{}
+    case +v <> t True{}:
+      Report.violations(t, Report.violation(v))
+
+def Report.list(+o: J.Json, +key: String) -> Bool:
+  Report.violations(J.Json.elems(J.Json.get_obj(o, key)), Report.array(J.Json.get(o, key)))
+
+def Report.sheets(ss: List<&2, J.Json>, valid: Bool) -> Bool:
+  match ss valid:
+    case _ False{}:
+      False{}
+    case Nil{} True{}:
+      True{}
+    case +s <> t True{}:
+      Report.sheets(t, Bool.and(Report.string(J.Json.get(s, "path")), Report.list(s, "violations")))
+
+def Report.shape(+id: String, +o: J.Json) -> Bool:
+  match id:
+    case "erc":
+      Report.sheets(J.Json.elems(J.Json.get_obj(o, "sheets")), Report.array(J.Json.get(o, "sheets")))
+    case "drc":
+      Bool.and(Report.list(o, "violations"), Bool.and(Report.list(o, "unconnected_items"), Report.list(o, "schematic_parity")))
+    case _:
+      False{}
+
+def Report.parsed(m: Maybe<&2, J.Json>, +id: String) -> Bool:
+  match m:
+    case Some{o}:
+      Report.shape(id, o)
+    case None{}:
+      False{}
+
+def Checks.report_valid(+id: String, +text: String) -> Bool:
+  Report.parsed(J.Json.parse(text), id)
+
+# Execution failures retain the failing check's identity, distinct from ERC
+# and DRC design findings and independent of their configured thresholds.
+def Checks.execution(fs: List<&2, Finding>) -> String:
+  match fs:
+    case Nil{}:
+      ""
+    case Finding{"execution", _, +kind, +text, _, _, _, _} <> t:
+      kind ++ ": " ++ text ++ "\n" ++ Checks.execution(t)
+    case _ <> t:
+      Checks.execution(t)
+
 # Counting
 # --------
 

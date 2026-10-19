@@ -31,6 +31,16 @@ def Rel.has(+s: String, +p: String) -> Bool:
 def Release.valid(+t: String) -> Bool:
   Bool.and(Bool.and(Bool.and(Bool.not(String.is_empty(t)), Rel.clean(t, True{})), Bool.and(Bool.not(Rel.has(t, "..")), Bool.not(Rel.has(t, "@{")))), Bool.and(Bool.and(Bool.not(Rel.has(t, "//")), Bool.not(Rel.has(t, "/."))), Bool.and(Bool.and(Bool.not(String.eq(t, "@")), Bool.not(String.starts_with(t, "-"))), Bool.and(Bool.and(Bool.not(String.starts_with(t, "/")), Bool.not(String.starts_with(t, "."))), Bool.and(Bool.not(String.ends_with(t, ".lock")), Bool.and(Bool.not(String.ends_with(t, ".")), Bool.not(String.ends_with(t, "/"))))))))
 
+# Full Git object ids only; an empty refspec would delete a remote tag.
+def Rel.object_chars(s: String, valid: Bool) -> Bool:
+  match s:
+    case SNil{}: valid
+    case SCon{Chr{+c}, t}:
+      Rel.object_chars(t, Bool.and(valid, Bool.or(Bool.and(U32.is_ge(c, 48), U32.is_le(c, 57)), Bool.and(U32.is_ge(c, 97), U32.is_le(c, 102)))))
+
+def Release.object_valid(+s: String) -> Bool:
+  Bool.and(Bool.or(Nat.is_eq(String.length(s), 40n), Nat.is_eq(String.length(s), 64n)), Rel.object_chars(s, True{}))
+
 # Next tag
 # --------
 
@@ -379,6 +389,12 @@ def Release.plan(t: C.Tool, ids: List<&2, String>, +repo: String, +tag: String, 
     case C.Tool{_, _, _, _, os}:
       Rel.plan.k(os, ids, tag, Release.dir(repo, tag), cli, pcb, sch)
 
+# A transaction can build the same plan in a private staging directory.
+def Release.plan_at(t: C.Tool, ids: List<&2, String>, +out: String, +tag: String, +cli: String, +pcb: String, +sch: String) -> Plan:
+  match t:
+    case C.Tool{_, _, _, _, os}:
+      Rel.plan.k(os, ids, tag, out, cli, pcb, sch)
+
 # The manifest
 # ------------
 
@@ -427,3 +443,12 @@ def Release.notes(+tag: String, +prev: String, +commit: String, +bom: String, +c
 # exist on the remote (--verify-tag); files are attached
 def Release.gh(+tag: String, +notes: String, files: List<&2, String>) -> List<&2, String>:
   List.append(&2, String, ["gh", "release", "create", tag, "--title", tag, "--notes-file", notes, "--verify-tag"], files)
+
+# An export is complete only when its command succeeded. Keep the step's
+# name and a bounded diagnostic for the release report.
+def Release.command_error(+label: String, code: U32, +output: String) -> String:
+  match code:
+    case 0:
+      ""
+    case +other:
+      label ++ " failed (exit " ++ U32.show(other) ++ ")" ++ Bool.pick(String, String.is_empty(String.trim(output)), "", ": " ++ String.trim(String.take(output, 300n)))

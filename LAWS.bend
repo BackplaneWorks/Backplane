@@ -10676,3 +10676,25 @@ law pcb2_hidden_text_draws_nothing:
   for +sig: U32
   for +ctx: String
   {PCB2.Text.visible.k(True{}, at, angle, x, text, up, key, sig, ctx) == Nil{} : List<&2, B.Item>}
+
+# A successful export has no failure, even when the tool prints a diagnostic.
+law release_command_success:
+  for label: String
+  for output: String
+  {REL.Release.command_error(label, 0, output) == "" : String}
+
+law release_command_failure:
+  {REL.Release.command_error("Gerbers (gerbers)", 23, " export failed\n") == "Gerbers (gerbers) failed (exit 23): export failed" : String}
+
+# A syntactically valid JSON object without the expected report schema is
+# not evidence that ERC or DRC ran successfully.
+law checks_report_missing_erc:
+  {CHK.Checks.report_valid("erc", "{}") == False{} : Bool}
+
+law checks_report_missing_drc:
+  {CHK.Checks.report_valid("drc", "{}") == False{} : Bool}
+
+law checks_execution_keeps_identity:
+  for +kind: String
+  for +why: String
+  {CHK.Checks.execution([CHK.Checks.finding("execution", "error", kind, why, "")]) == kind ++ ": " ++ why ++ "\n" : String}
