@@ -136,6 +136,7 @@ jobs:
           bun test/tools/logread_e2e.ts dist/backplane build/wire build/log_read
       - name: Reconnect request ordering
         run: |
+          set -o pipefail
           bend test/fixtures/outbox/index.html -o build/outbox-client
           bun test/tools/outbox_e2e.ts dist/backplane build/outbox-client
           scripts/build-app.sh test/outbox_test.bend build/outbox_test
