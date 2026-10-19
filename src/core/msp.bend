@@ -374,14 +374,16 @@ def Msp.mode.k(i: Nat) -> String:
 
 # The protocol a runner speaks
 # ----------------------------
-# Grok over ACP, Muse over MSP or Google's Antigravity agent over ACP
-# (agy.bend, through its runner script): the same process handling, its
-# own lines, command and words.
+# Grok over ACP, Muse over MSP, Google's Antigravity agent over ACP
+# (agy.bend, through its runner script) or opencode over ACP (through
+# `env`, its config in OPENCODE_CONFIG_CONTENT): the same process
+# handling, its own lines, command and words.
 
 type Proto is Data:
   PAcp{t: AC.AcpTurn}
   PMsp{t: MspTurn}
   PAgy{t: AG.AgyTurn}
+  POc{t: AC.AcpTurn}
 
 def Proto.line(a: AC.Acp, +p: Proto, line: String) -> AC.AcpOut:
   match p:
@@ -391,6 +393,8 @@ def Proto.line(a: AC.Acp, +p: Proto, line: String) -> AC.AcpOut:
       Msp.line(a, t, line)
     case PAgy{t}:
       AG.Agy.line(a, t, line)
+    case POc{t}:
+      AC.Acp.line(a, t, line)
 
 def Proto.init(p: Proto) -> String:
   match p:
@@ -400,6 +404,8 @@ def Proto.init(p: Proto) -> String:
       Msp.init()
     case PAgy{_}:
       AG.Agy.init()
+    case POc{_}:
+      AC.Acp.init()
 
 # the program it runs (Antigravity's runner is a script, agy.bend)
 def Proto.cmd(p: Proto) -> String:
@@ -410,6 +416,8 @@ def Proto.cmd(p: Proto) -> String:
       "muse"
     case PAgy{_}:
       "sh"
+    case POc{_}:
+      "env"
 
 # its name in what the person reads
 def Proto.name(p: Proto) -> String:
@@ -420,6 +428,8 @@ def Proto.name(p: Proto) -> String:
       "muse"
     case PAgy{_}:
       "antigravity"
+    case POc{_}:
+      "opencode"
 
 def Proto.install(p: Proto) -> String:
   match p:
@@ -429,6 +439,8 @@ def Proto.install(p: Proto) -> String:
       "Install Muse Code, then sign in with `muse login`."
     case PAgy{_}:
       "Install it under Settings › Antigravity."
+    case POc{_}:
+      "Install opencode (https://opencode.ai), then sign in with `opencode auth login`."
 
 # why a process that ended before its turn did may have
 def Proto.gone(p: Proto) -> String:
@@ -439,3 +451,5 @@ def Proto.gone(p: Proto) -> String:
       "muse exited before the turn ended (is it signed in? run `muse login`)"
     case PAgy{_}:
       "antigravity exited before the turn ended (is it installed and signed in? see Settings › Antigravity)"
+    case POc{_}:
+      "opencode exited before the turn ended (is it signed in? run `opencode auth login`)"

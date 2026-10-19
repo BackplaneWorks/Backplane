@@ -756,13 +756,21 @@ def Fr.ext.spec(+bw: List<&2, M.Ext>, +prefix: String, es: List<&2, M.Entry>) ->
 # The index without the link's entries, without walking the rest. An entry
 # is filed (M.Idx.post) under its thread, under its sender's key when
 # another thread sent it, under the links when a message, and under
-# "@steps:<thread>" when a step; only those lists can hold a removed entry,
+# "@steps:<thread>" when a step ("@terms:<thread>" when a terminal); only
+# those lists can hold a removed entry,
 # so only they are cut (each at most once), and a list left empty goes
 # (law far_forget_equiv, against Fr.forget.spec's rebuild).
 def Fr.keys.step(step: Bool, +th: String, +m: Map<&2, Bool>) -> Map<&2, Bool>:
   match step:
     case True{}:
       Map.set(&2, Bool, m, M.Idx.steps.key(th), True{})
+    case False{}:
+      m
+
+def Fr.keys.term(term: Bool, +th: String, +m: Map<&2, Bool>) -> Map<&2, Bool>:
+  match term:
+    case True{}:
+      Map.set(&2, Bool, m, M.Idx.terms.key(th), True{})
     case False{}:
       m
 
@@ -784,8 +792,8 @@ def Fr.keys.sent(sent: Bool, msg: Bool, +from: String, +m: Map<&2, Bool>) -> Map
 def Fr.keys.of(+e: M.Entry, +m: Map<&2, Bool>) -> Map<&2, Bool>:
   +th = M.Idx.thread(e)
   +from = M.Link.from(M.Idx.id(e))
-  Fr.keys.step(M.Idx.is_step(e), th,
-    Fr.keys.sent(Bool.and(Bool.not(String.is_empty(from)), Bool.not(String.eq(from, th))), M.Idx.is_msg(e), from, Map.set(&2, Bool, m, th, True{})))
+  Fr.keys.term(M.Idx.is_term(e), th, Fr.keys.step(M.Idx.is_step(e), th,
+    Fr.keys.sent(Bool.and(Bool.not(String.is_empty(from)), Bool.not(String.eq(from, th))), M.Idx.is_msg(e), from, Map.set(&2, Bool, m, th, True{}))))
 
 def Fr.keys.one(hit: Bool, +e: M.Entry, +m: Map<&2, Bool>) -> Map<&2, Bool>:
   match hit:

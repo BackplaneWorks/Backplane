@@ -745,8 +745,17 @@ def Hist.rows(rs: List<&2, U.HRow>) -> List<&2, J.Json>:
     case U.HRow{+l, +sub, +v} <> t:
       J.Json.obj([J.KV{"label", J.Str{l}}, J.KV{"sub", J.Str{sub}}, J.KV{"value", J.Str{v}}]) <> Hist.rows(t)
 
+# (made only while the compare menu is open: Bool.pick made it, every
+# design step's row, on every screen of a thread with history)
+def Hist.menu.k(shut: Bool, +lc: I.Loc, +side: String, +u: U.Ui) -> J.Json:
+  match shut:
+    case True{}:
+      J.Null{}
+    case False{}:
+      J.Json.arr(Hist.rows(U.Hs.menu.loc(lc, u, side)))
+
 def Hist.menu(+lc: I.Loc, +side: String, +u: U.Ui) -> J.Json:
-  Bool.pick(J.Json, String.is_empty(side), J.Null{}, J.Json.arr(Hist.rows(U.Hs.menu.loc(lc, u, side))))
+  Hist.menu.k(String.is_empty(side), lc, side, u)
 
 def Hist.json.k(+lc: I.Loc, b: U.HBar, +u: U.Ui) -> J.Json:
   match b:
@@ -757,8 +766,17 @@ def Hist.json.k(+lc: I.Loc, b: U.HBar, +u: U.Ui) -> J.Json:
         J.KV{"ticks", J.Json.arr(Hist.ticks(U.Hs.track(u), 0n, at))}, J.KV{"menu", Hist.menu(lc, menu, u)},
         J.KV{"keys", J.Json.arr([J.Num{U32.show(LO.Look.mark.color(False{}, 26))}, J.Num{U32.show(LO.Look.mark.color(False{}, 27))}, J.Num{U32.show(LO.Look.mark.color(False{}, 28))}])}])
 
+# (made only when the bar shows: Bool.pick made it, every step parsed for
+# its ticks, on every screen)
+def Hist.json.on(on: Bool, +lc: I.Loc, +b: U.HBar, +u: U.Ui) -> J.Json:
+  match on:
+    case True{}:
+      Hist.json.k(lc, b, u)
+    case False{}:
+      J.Null{}
+
 def Hist.json(+lc: I.Loc, +b: U.HBar, +u: U.Ui) -> J.Json:
-  Bool.pick(J.Json, U.HBar.on(b), Hist.json.k(lc, b, u), J.Null{})
+  Hist.json.on(U.HBar.on(b), lc, b, u)
 
 # what the phone's viewer needs: the source open ("" closed), its key and
 # the key of the plot it draws layers from, the choices, and how to draw:
@@ -887,7 +905,7 @@ def View.json(+lc: I.Loc, +u: U.Ui, +rb: J.Json) -> J.Json:
     J.KV{"review", Rv.json(lc, String.eq(View.kind(u), "review"), u, rb)},
     J.KV{"files", Files.json(lc, String.eq(View.kind(u), "files"), u)}, J.KV{"file", File.json(Bool.or(String.eq(View.kind(u), "image"), String.eq(View.kind(u), "pdf")), u)},
     J.KV{"layers", J.Str{Bool.pick(String, View.mech(u), "", View.layers.at(View.kind(u), U.Ui.root(u), View.src(u)))}},
-    J.KV{"hist", Hist.json(lc, U.Hs.bar.for.loc(lc, View.as_client(u), Nat.is_lt(View.hist.num(View.kind(u)), 2n)), View.as_client(u))},
+    J.KV{"hist", Hist.json(lc, U.Hs.bar.for.loc(lc, View.as_client(u), Bool.and(Bool.not(String.is_empty(View.want(u))), Nat.is_lt(View.hist.num(View.kind(u)), 2n))), View.as_client(u))},
     J.KV{"mech", Mech.json(lc, View.mech(u), u)},
     J.KV{"sheets", J.Json.arr(List.append(&2, J.Json, View.board.list(u), View.sheet.list(u)))}, J.KV{"layerList", J.Json.arr(View.layer.list(u))},
     J.KV{"off", J.Num{U32.show(LY.Masks.off(View.masks(u)))}}, J.KV{"dim", J.Num{U32.show(LY.Masks.dim(View.masks(u)))}}, J.KV{"lift", J.Num{U32.show(LY.Lyr.top(View.focus(u)))}},

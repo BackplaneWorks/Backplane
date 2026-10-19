@@ -1,7 +1,9 @@
 # Native hidden-page scheduling, October 18
 
-Chrome remains the default. This fixes an opt-in CEF background CPU regression;
-it does not complete desktop acceptance.
+At this October 18 measurement, Chrome was the default and CEF was opt-in.
+The later Linux X11 default and desktop-input acceptance are documented in
+[the native browser guide](../../docs/browser-native.md); the measurements
+and their version/workload limits below are retained unchanged.
 
 Unmapping CEF's outer X window did not mark its inner Chromium widget hidden.
 The host now updates `_NET_WM_STATE_HIDDEN` on create/hide/show, preserving other

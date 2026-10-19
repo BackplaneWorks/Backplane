@@ -2557,12 +2557,12 @@ type Part is Data:
   PBot{o: L.Out, body_hit: Nat}
   PMain{m: MM.MainM}
 
-def Part.of(bm: Maybe<&2, L.Out>, body_hit: Nat, +mm: List<&2, MM.MainM>, +tc: MM.TouchK, +ty: L.Ty, +tlm: L.TLMemo, +n: N.Nui) -> Part:
+def Part.of(bm: Maybe<&2, L.Out>, body_hit: Nat, +mm: List<&2, MM.MainM>, +tc: MM.TouchK, +ty: L.Ty, +tlm: L.TLMemo, +n: N.Nui, +inf: String) -> Part:
   match bm:
     case Some{o}:
       PBot{o, body_hit}
     case None{}:
-      PMain{MM.Mm.main(mm, ty, tlm, n, tc)}
+      PMain{MM.Mm.main.i(mm, ty, tlm, n, tc, inf)}
 
 def FrameM.join(p: Part, +sd: MM.SideM, +mm: List<&2, MM.MainM>, +ty: L.Ty, +tlm: L.TLMemo, +n: N.Nui) -> FrameM:
   match p:
@@ -2573,9 +2573,13 @@ def FrameM.join(p: Part, +sd: MM.SideM, +mm: List<&2, MM.MainM>, +ty: L.Ty, +tlm
 
 # the main area and the sidebar's body at once (as Lay.frame.u lays them
 # out), each from its memo when its key holds
-def FrameM.lay(+mm: List<&2, MM.MainM>, sm: List<&2, MM.SideM>, +tc: MM.TouchK, +ty: L.Ty, +tlm: L.TLMemo, +cats: Map<&2, CA.CatF>, +wraps: Map<&2, BV.PW>, +n: N.Nui, +ix: U.SIx, +br: BV.BRows) -> FrameM:
-  p sd = Part.of(BV.Bv.main.w(ty, tlm, cats, wraps, n), BV.Bv.mail.hit(wraps, n), mm, tc, ty, tlm, n) SideK.go(MM.Sm.key(n, tc), sm, ty, cats, wraps, n, ix, br)
+def FrameM.lay.i(+mm: List<&2, MM.MainM>, sm: List<&2, MM.SideM>, +tc: MM.TouchK, +ty: L.Ty, +tlm: L.TLMemo, +cats: Map<&2, CA.CatF>, +wraps: Map<&2, BV.PW>, +n: N.Nui, +ix: U.SIx, +br: BV.BRows, +inf: String) -> FrameM:
+  p sd = Part.of(BV.Bv.main.w(ty, tlm, cats, wraps, n), BV.Bv.mail.hit(wraps, n), mm, tc, ty, tlm, n, inf) SideK.go(MM.Sm.key.i(n, tc, inf), sm, ty, cats, wraps, n, ix, br)
   FrameM.join(p, sd, mm, ty, tlm, n)
+
+# (the info part of both memos' keys made once: MM.Mm.info.of)
+def FrameM.lay(+mm: List<&2, MM.MainM>, sm: List<&2, MM.SideM>, +tc: MM.TouchK, +ty: L.Ty, +tlm: L.TLMemo, +cats: Map<&2, CA.CatF>, +wraps: Map<&2, BV.PW>, +n: N.Nui, +ix: U.SIx, +br: BV.BRows) -> FrameM:
+  FrameM.lay.i(mm, sm, tc, ty, tlm, cats, wraps, n, ix, br, MM.Mm.info.of(n))
 
 def FrameM.out(f: FrameM) -> L.Out:
   match f:
@@ -2717,12 +2721,56 @@ def Shell.frame.k(wait: Bool, +n: N.Nui, w: Window, +q: Chan(ShellMsg), +i: Chan
     case False{}:
       Shell.frame.draw(n, w, q, i, wa, ms)
 
+# While a join's chunks come in (U.Boot.on: the hub sends a long log a
+# chunk at a time) the window keeps its last frame instead of drawing each
+# chunk's state: the threads used to appear and go as history replayed, on
+# every start. The frame comes once the last chunk is in, or Boot.most() ms
+# after the hold began (a join that never ends cannot freeze the window;
+# a timer wakes it then). The first frame is always drawn.
+def Boot.most() -> Nat:
+  8000n
+
+def Boot.drawn(f: TI.Frames) -> Bool:
+  match f:
+    case TI.FNone{}:
+      False{}
+    case TI.FSome{_, _, _}:
+      True{}
+
+# when the hold began ("" none)
+def Boot.since(+n: N.Nui) -> String:
+  U.Ui.info(N.Nui.ui(n), "boot.held")
+
+def Boot.hold(+n: N.Nui, +drawn: Bool, +ms: Nat) -> Bool:
+  Bool.and(Bool.and(U.Boot.on(N.Nui.ui(n)), drawn),
+    Bool.or(String.is_empty(Boot.since(n)), Nat.is_lt(Nat.sub(ms, Maybe.default(&2, Nat, Nat.read(Boot.since(n)), 0n)), Boot.most())))
+
+def Boot.held.k(fresh: Bool, +n: N.Nui, w: Window, +q: Chan(ShellMsg), +i: Chan(S.Msg), wa: Aux, +ms: Nat) -> IO(Shell):
+  match fresh:
+    case True{}:
+      do IO<Shell>:
+        IO.spawn(Unit, Timer.once(q, Boot.most()))
+        return Shell{N.Nui.with_ui(n, U.Ui.info_set(N.Nui.ui(n), "boot.held", Nat.show(ms))), w, True{}, False{}, q, i, wa}
+    case False{}:
+      IO.pure(Shell, Shell{n, w, True{}, False{}, q, i, wa})
+
+# (once the join is over, the hold's mark goes)
+def Boot.clear(+n: N.Nui) -> N.Nui:
+  Bool.pick(N.Nui, Bool.or(U.Boot.on(N.Nui.ui(n)), String.is_empty(Boot.since(n))), n, N.Nui.with_ui(n, U.Ui.info_set(N.Nui.ui(n), "boot.held", "")))
+
+def Shell.frame.h(hold: Bool, +n: N.Nui, w: Window, +q: Chan(ShellMsg), +i: Chan(S.Msg), wa: Aux, +ms: Nat) -> IO(Shell):
+  match hold:
+    case True{}:
+      Boot.held.k(String.is_empty(Boot.since(n)), n, w, q, i, wa, ms)
+    case False{}:
+      Shell.frame.k(Hubf.wait(n, ms), Boot.clear(n), w, q, i, wa, ms)
+
 def Shell.frame(a: Shell) -> IO(Shell):
   match a:
-    case Shell{+n, w, True{}, _, q, i, wa}:
+    case Shell{+n, w, True{}, _, q, i, +wa}:
       do IO<Shell>:
         +ms : Nat <- IO.now()
-        Shell.frame.k(Hubf.wait(n, ms), n, w, q, i, wa, ms)
+        Shell.frame.h(Boot.hold(n, Boot.drawn(Aux.frames(wa)), ms), n, w, q, i, wa, ms)
     case Shell{n, w, False{}, _, q, i, wa}:
       IO.pure(Shell, Shell{n, w, False{}, False{}, q, i, wa})
 

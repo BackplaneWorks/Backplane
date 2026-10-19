@@ -18,6 +18,13 @@ jobs:
     name: Windows
     uses: ./.github/workflows/windows.yml
 
+  desktop-install:
+    name: Linux desktop installer
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 test/tools/desktop_install_test.py
+
   check:
     name: Type-check
     runs-on: ubuntu-24.04

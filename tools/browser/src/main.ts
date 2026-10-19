@@ -12,6 +12,7 @@ import { createInterface } from "node:readline";
 import { chromium } from "./playwright.ts";
 import type { BrowserContext, CDPSession, Locator, Page } from "playwright-core";
 import { CefEngine, findCef, type CefOptions } from "./cef.ts";
+import { defaultEngine, saveTab, restoreTab } from "./session.ts";
 
 import { findChromium, installChrome, INSTALL_HINT } from "./chromium.ts";
 import { decodePng } from "./png.ts";
@@ -157,8 +158,11 @@ function pushLog(o: Owner, entry: Json): void {
 // State
 // -----
 
-let engine = argValue("--engine") ?? "chrome";
-if (engine !== "chrome" && engine !== "cef") throw new Error("engine must be chrome or cef");
+const engineArg = argValue("--engine");
+let requestedEngine = engineArg ?? "cef";
+let fallbackReason = "";
+let allowStartupFallback = engineArg === null;
+let engine = defaultEngine(engineArg, Number(argValue("--parent") ?? 0), argValue("--display") ?? process.env.DISPLAY ?? "");
 let cefOptions: CefOptions = {
   parent: Number(argValue("--parent") ?? 0), display: argValue("--display") ?? process.env.DISPLAY ?? "",
   cef: argValue("--cef"), cache: argValue("--cache") ?? resolve(PROFILE ?? join(tmpdir(), `bp-browser-${process.pid}`, "profile"), "..", "cef-profile"),
@@ -171,6 +175,8 @@ let tabNumber = 0;
 const cefOwners = new Map<string, Owner>();
 let context: BrowserContext | null = null;
 let launching: Promise<BrowserContext> | null = null;
+let switching: Promise<Json> | null = null;
+let inheritedCookies: Awaited<ReturnType<BrowserContext["cookies"]>> | null = null;
 let executable: string | null = null;
 // blank pages Chrome opened at launch, handed to the first owners
 let spare: Page[] = [];
@@ -211,7 +217,17 @@ async function ensureContext(): Promise<BrowserContext> {
 }
 
 async function launch(): Promise<BrowserContext> {
-  if (engine === "cef") return launchCef();
+  if (engine === "cef") {
+    try { return await launchCef(); }
+    catch (e) {
+      if (!allowStartupFallback) throw e;
+      fallbackReason = `Native CEF unavailable: ${e instanceof Error ? e.message : String(e)}`;
+      engine = "chrome";
+      log(`${fallbackReason}; using Chrome frames`);
+    }
+  } else if (requestedEngine === "cef" && !fallbackReason) {
+    fallbackReason = "Native CEF needs a Linux X11 window; this client uses Chrome frames";
+  }
   executable = CHROMIUM_ARG ?? findChromium();
   if (!executable) {
     try {
@@ -290,6 +306,26 @@ async function launchCef(): Promise<BrowserContext> {
   });
   try {
     const ctx = await host.start();
+    // On the first native use, retain logins from the existing Chrome profile.
+    // A live handoff supplies its current cookies directly. A helper restarted
+    // for this default rollout can read them through Chrome's own profile API,
+    // after the old helper closed, without copying/decrypting profile files.
+    const marker = join(cefOptions.cache, ".backplane-chrome-import-v1");
+    let cookies = inheritedCookies;
+    if (!cookies && PROFILE && !existsSync(marker) &&
+        ["Cookies", "Network/Cookies"].some(f => existsSync(join(PROFILE, "Default", f)))) {
+      const source = await chromium.launchPersistentContext(PROFILE, {
+        executablePath: CHROMIUM_ARG ?? findChromium() ?? undefined,
+        headless: true, viewport: DEFAULT_VIEWPORT,
+      });
+      try { cookies = await source.cookies(); }
+      finally { await source.close(); }
+    }
+    if (cookies) {
+      await ctx.addCookies(cookies);
+      mkdirSync(cefOptions.cache, { recursive: true });
+      writeFileSync(marker, "Chrome cookies imported through the browser API\n", { mode: 0o600 });
+    }
     await ctx.exposeBinding("__bpRec", (source, ev) => onRecord(source, ev));
     await ctx.addInitScript(RECORDER_SCRIPT);
     executable = host.executable;
@@ -338,9 +374,17 @@ async function stopEngine(): Promise<void> {
   spare = [];
   for (const o of owners.values()) { o.tabs = []; o.active = null; }
 }
-async function switchEngine(a: Json, name: string): Promise<Json> {
+function switchEngine(a: Json, name: string): Promise<Json> {
+  const task = (switching ?? Promise.resolve()).catch(() => {}).then(() => switchEngineNow(a, name));
+  switching = task;
+  return task.finally(() => { if (switching === task) switching = null; });
+}
+async function switchEngineNow(a: Json, name: string): Promise<Json> {
   if (a.engine !== "chrome" && a.engine !== "cef") throw new Error("engine must be chrome or cef");
   const next: CefOptions = { ...cefOptions };
+  requestedEngine = a.engine;
+  allowStartupFallback = false;
+  fallbackReason = "";
   if (a.engine === "cef") {
     next.parent = a.parent ?? next.parent; next.display = a.display ?? next.display;
     next.cef = a.cef ?? next.cef; next.cache = a.cache ?? next.cache;
@@ -353,29 +397,61 @@ async function switchEngine(a: Json, name: string): Promise<Json> {
     }
   }
   if (a.engine === engine && context && (engine === "chrome" || JSON.stringify(next) === JSON.stringify(cefOptions))) return status(name);
-  const urls = [...owners.values()].filter((o) => o.active && !o.active.isClosed()).map((o) => ({ name: o.name, url: o.active!.url() }));
-  const oldContext = context, oldCef = cef;
+  const saved = await Promise.all([...owners.values()].map(async o => ({
+    owner: o, tabs: [...o.tabs], active: o.active, recording: o.recording,
+    states: await Promise.all(o.tabs.filter(p => !p.isClosed()).map(saveTab)),
+    selected: o.active ? o.tabs.filter(p => !p.isClosed()).indexOf(o.active) : -1,
+  })));
+  const oldContext = context, oldCef = cef, oldEngine = engine, oldOptions = cefOptions;
+  const oldOwners = new Map(cefOwners);
+  inheritedCookies = oldContext ? await oldContext.cookies() : null;
   cefPlacement = null; cefShield = false;
   // CEF's singleton profile lock prevents overlapping hosts using one cache.
   // Engine changes between Chrome and CEF can overlap as specified; reconfiguring
   // a live CEF host with the same cache must release that lock first.
   const sameCefCache = oldCef && a.engine === "cef" && resolve(oldCef.options.cache) === resolve(next.cache);
   // Keep the old engine alive until the replacement pages have been opened.
-  context = null; cef = null; spare = [];
   for (const o of owners.values()) { o.recording = false; await stopShots(o); clearShot(o); o.tabs = []; o.active = null; }
   await stopScreencast();
+  context = null; cef = null; spare = [];
+  cefOwners.clear();
   engine = a.engine; cefOptions = next;
   try {
     if (sameCefCache) await oldCef!.stop();
     await ensureContext();
-    for (const u of urls) {
-      try { await (await ensurePage(u.name)).goto(u.url, { waitUntil: "load", timeout: DEFAULT_TIMEOUT }); }
-      catch (e) { log(`engine reopen ${u.name}: ${e}`); }
+    if (inheritedCookies && engine === "chrome") await context!.addCookies(inheritedCookies);
+    for (const item of saved) {
+      const o = item.owner;
+      for (const state of item.states) await restoreTab(await newTab(o), state, DEFAULT_TIMEOUT);
+      if (item.selected >= 0 && o.tabs[item.selected]) await activate(o, o.tabs[item.selected]);
+      if (item.recording) { o.recording = true; await recorderSet(o, true); }
     }
-  } finally {
-    if (oldCef) await oldCef.stop();
-    else await oldContext?.close();
-  }
+  } catch (e) {
+    // A failed replacement must not close the user's working browser.
+    await stopEngine();
+    engine = oldEngine; cefOptions = oldOptions;
+    if (sameCefCache) {
+      // Reconfiguration released CEF's profile lock: reopen the saved session
+      // with the previous configuration instead of leaving an empty helper.
+      await ensureContext();
+      for (const item of saved) {
+        for (const state of item.states) await restoreTab(await newTab(item.owner), state, DEFAULT_TIMEOUT);
+        if (item.selected >= 0 && item.owner.tabs[item.selected]) await activate(item.owner, item.owner.tabs[item.selected]);
+        item.owner.recording = item.recording;
+        if (item.recording) await recorderSet(item.owner, true);
+      }
+    } else if (oldContext) {
+      context = oldContext; cef = oldCef;
+      cefOwners.clear(); for (const [k, v] of oldOwners) cefOwners.set(k, v);
+      for (const item of saved) {
+        item.owner.tabs = item.tabs; item.owner.active = item.active; item.owner.recording = item.recording;
+        await startShots(item.owner);
+      }
+    }
+    throw e;
+  } finally { inheritedCookies = null; }
+  if (oldCef) await oldCef.stop();
+  else await oldContext?.close();
   return status(name);
 }
 
@@ -518,6 +594,8 @@ async function status(name: string): Promise<Json> {
   return {
     version: VERSION,
     engine,
+    requestedEngine,
+    ...(fallbackReason ? { fallback: fallbackReason } : {}),
     ...(cef ? { port: cef.port, hostPid: cef.proc?.pid, cache: cef.options.cache } : {}),
     page: name,
     open: p !== null,
@@ -899,6 +977,16 @@ function quick(name: string): void {
 // every handler gets the request's arguments and the owner it acts for
 const handlers: Record<string, (a: Json, name: string) => Promise<any>> = {
   async engine(a, name) { return switchEngine(a, name); },
+  // Per-owner restoration for an upgrade from the previous helper protocol.
+  // Context cookies remain private and migrate through the browser API.
+  async restore(a, name) {
+    const s = a.state;
+    if (!s || typeof s.url !== "string" || typeof s.origin !== "string" ||
+        !Array.isArray(s.local) || !Array.isArray(s.session) || !Array.isArray(s.fields) ||
+        !Array.isArray(s.scroll) || s.scroll.length !== 2) throw new Error("restore needs a tab state");
+    await restoreTab(await ensurePage(name), s, timeoutOf(a));
+    return status(name);
+  },
   async show(a, name) {
     if (engine !== "cef") throw new Error("show needs the cef engine");
     if (![a.x, a.y, a.w, a.h].every(Number.isInteger) || a.w < 1 || a.h < 1)
@@ -1266,6 +1354,7 @@ const STILL_QUIET = new Set(["cast", "status", "frames", "frame", "close", "clos
 // snapshots or background evaluations. The scope is released even on error.
 const CEF_INPUT = new Set(["click", "mouse", "type", "press", "scroll", "select"]);
 async function dispatch(op: string, h: (a: Json, name: string) => Promise<any>, args: Json, name: string): Promise<any> {
+  if (op !== "engine" && switching) await switching;
   if (engine !== "cef" || !CEF_INPUT.has(op)) return h(args, name);
   const p = await ensurePage(name);
   return cef!.input(p, () => h(args, name));

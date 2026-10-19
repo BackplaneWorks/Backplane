@@ -1,5 +1,5 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { Readable } from "node:stream";
@@ -46,9 +46,15 @@ export async function privateDisplay() {
   if (!display) throw new Error(`no free private Xvfb display (${choices.join(" ")})`);
   const root = mkdtempSync(join(tmpdir(), "bp-cef-test-"));
   const env = { ...process.env, DISPLAY: `:${display}` };
-  const xvfb = Bun.spawn(["/tmp/xvfb-root/usr/bin/Xvfb", env.DISPLAY, "-screen", "0", "1600x1000x24", "-nolisten", "tcp"], { stdout: "ignore", stderr: "inherit" });
+  const xvfbPath = process.env.XVFB ?? (Bun.which("Xvfb") || join(homedir(), ".local/xvfb-root/usr/bin/Xvfb"));
+  const xvfb = Bun.spawn([xvfbPath, env.DISPLAY, "-screen", "0", "1600x1000x24", "-nolisten", "tcp"], { stdout: "ignore", stderr: "inherit" });
   let parent: ReturnType<typeof jsonProcess> | null = null;
+  let native: ReturnType<typeof jsonProcess> | null = null;
+  let nativeXid = 0;
   async function cleanup() {
+    if (native && native.proc.exitCode === null && parent) {
+      parent.write(`close ${nativeXid}`); await native.proc.exited;
+    }
     if (parent) { parent.proc.stdin.end(); await parent.proc.exited; }
     // The only signalled process is this private Xvfb PID, created above.
     if (xvfb.exitCode === null) xvfb.kill("SIGTERM");
@@ -71,6 +77,11 @@ export async function privateDisplay() {
       parent!.write(command);
       return until(() => parent!.lines[before], command);
     }
-    return { root, env, parent: p.parent as number, x, cleanup };
+    if (process.env.CEF_NATIVE_PARENT) {
+      native = jsonProcess([process.env.CEF_NATIVE_PARENT], env);
+      nativeXid = (await until(() => native!.lines.find(v => v.parent), "real Win.open parent")).parent;
+      await x(`target ${nativeXid}`);
+    }
+    return { root, env, parent: nativeXid || p.parent as number, nativeEvents: native?.lines ?? [], x, cleanup };
   } catch (e) { await cleanup(); throw e; }
 }

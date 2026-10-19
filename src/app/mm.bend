@@ -229,13 +229,19 @@ def Mm.flags(xs: List<&2, Sigma<&2, &2, String, _ => Bool>>) -> String:
     case (+k, +v) <> t:
       k ++ Bool.pick(String, v, "+", "-") ++ Mm.flags(t)
 
+# ("models" and "models.oc": the hub's models, tens of KB; only client.bend's
+# Info.put.models writes them, and it moves "models.v", which the keys keep)
+# (hover.at: when the hover's highlight began, for its fade-in; the
+# highlight is drawn over the whole frame, Lay.hover, so neither memo needs
+# it: in the key, each item the pointer crossed laid the open thread out
+# again, 75 ms a move in a long thread)
 # info the main area never reads, or reads only as part of the key
 # otherwise: the clock (now is in the key), the caret's timing (its phase,
 # caret.on, is kept), the cats', the frame's own bookkeeping, the hover
 # and the performance overlay (both drawn over the whole frame), a page's
 # frames (shown only in the viewer and a bot's view: neither is kept)
 def Mm.volatile(+k: String) -> Bool:
-  Bool.or(Nat.is_lt(C.Codec.pos(["clock", "act.at", "cat.due", "cat.clock", "caret.due", "caret.at", "caret.sig", "frame.hub", "frame.late", "hover", "perf.hud", "caret.real"], k), 12n),
+  Bool.or(Nat.is_lt(C.Codec.pos(["clock", "act.at", "cat.due", "cat.clock", "caret.due", "caret.at", "caret.sig", "frame.hub", "frame.late", "hover", "perf.hud", "caret.real", "hover.at", "models", "models.oc"], k), 15n),
     Bool.or(String.starts_with(k, "img:shot:"), String.starts_with(k, "shot.")))
 
 def Mm.info.k(skip: Bool, +k: String, +v: String, +rest: String) -> String:
@@ -339,7 +345,7 @@ def Mm.due(+n: N.Nui, +rels: List<&2, String>, +memo: L.TLMemo) -> Nat:
 def Mm.memo.ok(+op: Map<&2, Bool>, +sel: String, +tr: Map<&2, VT.Vt>) -> Bool:
   Bool.and(Bool.and(Bool.not(U.Flag.get(op, "settings")), Bool.not(String.is_empty(sel))), List.is_empty(&2, String, Map.keys(&2, VT.Vt, tr)))
 
-def Mm.key.go(+n: N.Nui, +t: TouchK, +rels: List<&2, String>) -> String:
+def Mm.key.go(+n: N.Nui, +t: TouchK, +rels: List<&2, String>, +inf: String) -> String:
   match n:
     case N.Nui{U.Ui{_, +sel, +dr, _, +op, on, _, ad, pa, v, rid, w, er, note, +nf, +ob, _}, +ww, +hh, _, _, _, sc, ca, fo, path, +hi, _, _}:
       "s" ++ Mm.stamps(sel <> rels, t) ++ "|lang" ++ L.TL.locale(N.Nui.ui(n))
@@ -347,21 +353,32 @@ def Mm.key.go(+n: N.Nui, +t: TouchK, +rels: List<&2, String>) -> String:
         ++ "|x" ++ U32.show(Mm.x1(pa, ww)) ++ "|cs" ++ N.Cs.region(hi) ++ "|ch" ++ Mm.hit(L.Comp.hit(hi))
         ++ "|u" ++ Mm.b(on) ++ Mm.b(ad) ++ Mm.b(pa) ++ Mm.b(w) ++ "," ++ v ++ "," ++ Nat.show(rid) ++ "," ++ er ++ "," ++ note
         ++ "|f" ++ Mm.flags(Map.to_list(&2, Bool, op)) ++ "|d" ++ Mm.strs(Map.to_list(&2, String, dr)) ++ "|o" ++ Mm.strs(Map.to_list(&2, String, ob))
-        ++ "|l" ++ Nat.show(TouchK.at(t, "~" ++ sel)) ++ "|i" ++ Mm.info(Map.to_list(&2, String, nf)) ++ "|m" ++ U.Ui.scratch(N.Nui.ui(n), "@ime")
+        ++ "|l" ++ Nat.show(TouchK.at(t, "~" ++ sel)) ++ "|i" ++ inf ++ "|m" ++ U.Ui.scratch(N.Nui.ui(n), "@ime")
 
-def Mm.key.k(ok: Bool, +n: N.Nui, +t: TouchK, +rels: List<&2, String>) -> String:
+def Mm.key.k(ok: Bool, +n: N.Nui, +t: TouchK, +rels: List<&2, String>, +inf: String) -> String:
   match ok:
     case False{}:
       ""
     case True{}:
-      Mm.key.go(n, t, rels)
+      Mm.key.go(n, t, rels, inf)
+
+# the info part of both keys (the main area's and the sidebar's): made once
+# a frame (FrameM.lay) and given to both, since the info holds the hub's
+# models, KiCad and usage reports, over 100 KB of text to join
+def Mm.info.of(+n: N.Nui) -> String:
+  match n:
+    case N.Nui{U.Ui{_, _, _, _, _, _, _, _, _, _, _, _, _, _, +nf, _, _}, _, _, _, _, _, _, _, _, _, _, _, _}:
+      Mm.info(Map.to_list(&2, String, nf))
 
 # the main area's key ("": not memoized); rels: the open thread's parent
-# and children (Mm.rels)
-def Mm.key(+n: N.Nui, +t: TouchK, +rels: List<&2, String>) -> String:
+# and children (Mm.rels); inf: Mm.info.of
+def Mm.key.i(+n: N.Nui, +t: TouchK, +rels: List<&2, String>, +inf: String) -> String:
   match n:
     case N.Nui{U.Ui{_, +sel, _, _, +op, _, _, _, _, _, _, _, _, _, _, _, +tr}, _, _, _, _, _, _, _, _, _, _, _, _}:
-      Mm.key.k(Mm.memo.ok(op, sel, U.MailvLocal.terms(tr)), n, t, rels)
+      Mm.key.k(Mm.memo.ok(op, sel, U.MailvLocal.terms(tr)), n, t, rels, inf)
+
+def Mm.key(+n: N.Nui, +t: TouchK, +rels: List<&2, String>) -> String:
+  Mm.key.i(n, t, rels, Mm.info.of(n))
 
 # The memo
 # --------
@@ -447,15 +464,19 @@ def Mm.main.k(hit: Bool, +key: String, +rk: String, +rels: List<&2, String>, +ms
 def Mm.main.s(+key: String, +rk: String, +rels: List<&2, String>, +ms: List<&2, MainM>, +ty: L.Ty, +memo: L.TLMemo, +n: N.Nui) -> MainM:
   Mm.main.k(Mm.use(key, ms, U.Side.now(N.Nui.ui(n))), key, rk, rels, ms, ty, memo, n)
 
-def Mm.main.r(+rk: String, +rels: List<&2, String>, +ms: List<&2, MainM>, +ty: L.Ty, +memo: L.TLMemo, +n: N.Nui, +t: TouchK) -> MainM:
-  Mm.main.s(Mm.key(n, t, rels), rk, rels, ms, ty, memo, n)
+def Mm.main.r(+rk: String, +rels: List<&2, String>, +ms: List<&2, MainM>, +ty: L.Ty, +memo: L.TLMemo, +n: N.Nui, +t: TouchK, +inf: String) -> MainM:
+  Mm.main.s(Mm.key.i(n, t, rels, inf), rk, rels, ms, ty, memo, n)
 
-def Mm.main.q(+rk: String, +ms: List<&2, MainM>, +ty: L.Ty, +memo: L.TLMemo, +n: N.Nui, +t: TouchK) -> MainM:
-  Mm.main.r(rk, Mm.rels(rk, ms, n), ms, ty, memo, n, t)
+def Mm.main.q(+rk: String, +ms: List<&2, MainM>, +ty: L.Ty, +memo: L.TLMemo, +n: N.Nui, +t: TouchK, +inf: String) -> MainM:
+  Mm.main.r(rk, Mm.rels(rk, ms, n), ms, ty, memo, n, t, inf)
 
 # the main area: the memo's when its key is this frame's, else laid out
+# (inf: Mm.info.of, made once for both memos)
+def Mm.main.i(+ms: List<&2, MainM>, +ty: L.Ty, +memo: L.TLMemo, +n: N.Nui, +t: TouchK, +inf: String) -> MainM:
+  Mm.main.q(Mm.rk(n, t), ms, ty, memo, n, t, inf)
+
 def Mm.main(+ms: List<&2, MainM>, +ty: L.Ty, +memo: L.TLMemo, +n: N.Nui, +t: TouchK) -> MainM:
-  Mm.main.q(Mm.rk(n, t), ms, ty, memo, n, t)
+  Mm.main.i(ms, ty, memo, n, t, Mm.info.of(n))
 
 # a fresh main area kept as the memo (memo_replay)
 def Mm.fresh(+ms: List<&2, MainM>, o: L.Out, +n: N.Nui, +t: TouchK, +memo: L.TLMemo) -> MainM:
@@ -546,13 +567,17 @@ def TouchK.n(+t: TouchK) -> Nat:
 def Sm.caret(+fo: String, +ca: Nat) -> String:
   Bool.pick(String, String.eq(fo, "composer"), "-", Nat.show(ca))
 
-def Sm.key(+n: N.Nui, +t: TouchK) -> String:
+# (inf: Mm.info.of, made once for both memos)
+def Sm.key.i(+n: N.Nui, +t: TouchK, +inf: String) -> String:
   match n:
     case N.Nui{U.Ui{_, +sel, _, _, +op, on, now, ad, pa, v, rid, w, er, note, +nf, +ob, _}, +ww, +hh, _, _, sd, _, ca, +fo, path, _, _, _}:
       "s" ++ Nat.show(TouchK.at(t, "#side")) ++ "," ++ Nat.show(TouchK.g(t)) ++ "|" ++ sel ++ "|lang" ++ L.TL.locale(N.Nui.ui(n)) ++ "|t" ++ Nat.show(now) ++ "|w" ++ U32.show(ww) ++ "," ++ U32.show(hh) ++ "," ++ U32.show(sd) ++ "," ++ Sm.caret(fo, ca) ++ "," ++ fo ++ "," ++ path
         ++ "|u" ++ Mm.b(on) ++ Mm.b(ad) ++ Mm.b(pa) ++ Mm.b(w) ++ "," ++ v ++ "," ++ Nat.show(rid) ++ "," ++ er ++ "," ++ note
         ++ "|f" ++ Mm.flags(Map.to_list(&2, Bool, op)) ++ "|o" ++ Mm.strs(Map.to_list(&2, String, ob))
-        ++ "|i" ++ Mm.info(Map.to_list(&2, String, nf))
+        ++ "|i" ++ inf
+
+def Sm.key(+n: N.Nui, +t: TouchK) -> String:
+  Sm.key.i(n, t, Mm.info.of(n))
 
 type SideM is Data:
   SideM{key: String, out: L.Out, rows: Map<&2, ST.SideRowM>}

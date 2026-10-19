@@ -310,10 +310,66 @@ def Ui.skip(u: Ui, n: Nat) -> Ui:
 def Seq.demo(+t: String, xs: List<&2, J.Json>) -> J.Json:
   J.Json.obj([J.KV{"t", J.Str{t}}, J.KV{"items", J.Json.arr(xs)}])
 
+# A provider with hundreds of models (opencode signed in to a few) would
+# make the models info every client parses, often per frame, many times
+# larger: its list and labels are kept apart, under "models.oc", and only
+# its picker and Settings read them (Models.of). "models" keeps its first
+# few, so it still counts as installed.
+def Info.drop.k(skip: Bool, +k: String, v: J.Json, rest: List<&2, J.KV>) -> List<&2, J.KV>:
+  match skip:
+    case True{}:
+      rest
+    case False{}:
+      J.KV{k, v} <> rest
+
+def Info.drop.go(fs: J.Json, +key: String) -> List<&2, J.KV>:
+  match fs:
+    case J.Field{+k, v, t}:
+      Info.drop.k(String.eq(k, key), k, v, Info.drop.go(t, key))
+    case _:
+      Nil{}
+
+# an object's fields but `key`'s
+def Info.drop(o: J.Json, +key: String) -> List<&2, J.KV>:
+  match o:
+    case J.Obj{fs}:
+      Info.drop.go(fs, key)
+    case _:
+      Nil{}
+
+def Info.drop.obj(+j: J.Json, +key: String) -> J.Json:
+  J.Json.obj(Info.drop(j, key))
+
+def Info.models.small.j(+j: J.Json) -> String:
+  J.Json.show(J.Json.obj(List.append(&2, J.KV, Info.drop(Info.drop.obj(j, "about"), "opencode"),
+    [J.KV{"opencode", J.Json.arr(List.take(&2, J.Json, J.Json.elems(J.Json.get_obj(j, "opencode")), 12n))},
+     J.KV{"about", J.Json.obj(List.append(&2, J.KV, Info.drop(J.Json.get_obj(j, "about"), "opencode"),
+       [J.KV{"opencode", J.Json.obj([J.KV{"cli", J.Json.get_obj(J.Json.get_obj(J.Json.get_obj(j, "about"), "opencode"), "cli")}])}]))}])))
+
+def Info.models.oc.j(+j: J.Json) -> String:
+  J.Json.show(J.Json.obj([J.KV{"opencode", J.Json.get_obj(j, "opencode")},
+    J.KV{"about", J.Json.obj([J.KV{"opencode", J.Json.get_obj(J.Json.get_obj(j, "about"), "opencode")}])}]))
+
+# (and "models.v" counts the times: the window's memos key on it, not on
+# the lists, tens of KB to join every frame; mm.bend's Mm.volatile)
+def Info.put.models(+m: Map<&2, String>, +j: J.Json) -> Map<&2, String>:
+  Map.set(&2, String, Map.set(&2, String, Map.set(&2, String, m, "models", Info.models.small.j(j)), "models.oc", Info.models.oc.j(j)),
+    "models.v", Nat.show(1n+Maybe.default(&2, Nat, Nat.read(Str.get(m, "models.v")), 0n)))
+
+def Info.put.k(models: Bool, +m: Map<&2, String>, +k: String, +v: String) -> Map<&2, String>:
+  match models:
+    case True{}:
+      Info.put.models(m, Maybe.default(&2, J.Json, J.Json.parse(v), J.Null{}))
+    case False{}:
+      Map.set(&2, String, m, k, v)
+
+def Info.put(m: Map<&2, String>, +k: String, +v: String) -> Map<&2, String>:
+  Info.put.k(String.eq(k, "models"), m, k, v)
+
 def Info.fields(fs: J.Json, m: Map<&2, String>) -> Map<&2, String>:
   match fs:
-    case J.Field{k, J.Str{v}, t}:
-      Info.fields(t, Map.set(&2, String, m, k, v))
+    case J.Field{+k, J.Str{+v}, t}:
+      Info.fields(t, Info.put(m, k, v))
     case J.Field{_, _, t}:
       Info.fields(t, m)
     case _:
@@ -1592,6 +1648,10 @@ def Models.strs(xs: List<&2, J.Json>) -> List<&2, String>:
       s <> Models.strs(t)
     case _ <> t:
       Models.strs(t)
+
+# the models info a provider's picker reads (opencode's is apart: Info.put)
+def Models.of(+nf: Map<&2, String>, +prov: String) -> String:
+  Str.get(nf, Bool.pick(String, String.eq(prov, "opencode"), "models.oc", "models"))
 
 def Models.list(+info: String, +provider: String) -> List<&2, String>:
   Models.strs(J.Json.elems(J.Json.get_obj(Maybe.default(&2, J.Json, J.Json.parse(info), J.Null{}), provider)))
@@ -3993,7 +4053,7 @@ def Effort.chips(+info: String, +provider: String, +model: String) -> List<&2, S
 # clients: a chip's value starting with "@" is a provider.
 
 def Chip.providers() -> List<&2, String>:
-  ["@claude", "@codex", "@grok", "@muse", "@antigravity"]
+  ["@claude", "@codex", "@grok", "@muse", "@antigravity", "@opencode"]
 
 def Chip.all(+info: String, +provider: String, +model: String) -> List<&2, String>:
   List.append(&2, String, Chip.providers(), Effort.chips(info, provider, model))
@@ -4011,6 +4071,122 @@ def Models.cli(+info: String, +provider: String) -> String:
 # "opus" -> "Opus 5.5 · claude-opus-5-5" ("" when unknown)
 def Models.label_of(+info: String, +provider: String, +model: String) -> String:
   J.Json.get_str(J.Json.get_obj(Models.about(info, provider), "labels"), Bool.pick(String, String.is_empty(model), "default", model), "")
+
+# The model picker's search (field "mq", scratch "@f.mq"): a model shows
+# when every word of the query is in its id or its label, case aside. The
+# field shows once a provider offers more than Models.searchable() models
+# (opencode, signed in to a few providers, lists hundreds).
+def Models.searchable() -> Nat:
+  12n
+
+def Models.search(+ms: List<&2, String>) -> Bool:
+  Nat.is_gt(List.length(&2, String, ms), Models.searchable())
+
+def Models.words.all(ws: List<&2, String>, +hay: String) -> Bool:
+  match ws:
+    case Nil{}:
+      True{}
+    case +w <> t:
+      Bool.and(Bool.or(String.is_empty(w), String.contains(hay, w)), Models.words.all(t, hay))
+
+def Models.find.go(ms: List<&2, String>, +ws: List<&2, String>, +labels: J.Json) -> List<&2, String>:
+  match ms:
+    case Nil{}:
+      Nil{}
+    case +m <> t:
+      Models.menu.k(Bool.not(Models.words.all(ws, String.to_lower(m ++ " " ++ J.Json.get_str(labels, Bool.pick(String, String.is_empty(m), "default", m), "")))), m, Models.find.go(t, ws, labels))
+
+def Models.find.k(all: Bool, +ms: List<&2, String>, +q: String, +info: String, +prov: String) -> List<&2, String>:
+  match all:
+    case True{}:
+      ms
+    case False{}:
+      Models.find.go(ms, String.split(String.to_lower(String.trim(q)), ' '), J.Json.get_obj(Models.about(info, prov), "labels"))
+
+def Models.find(+ms: List<&2, String>, +q: String, +info: String, +prov: String) -> List<&2, String>:
+  Models.find.k(String.is_empty(String.trim(q)), ms, q, info, prov)
+
+# what the picker lists: the provider's models, those the search finds,
+# at most Models.cap() (the search narrows the rest), so a frame draws and
+# labels no more than that
+def Models.cap() -> Nat:
+  50n
+
+def Models.shown(+info: String, +prov: String, +q: String) -> List<&2, String>:
+  List.take(&2, String, Models.find(Models.menu(info, prov), q, info, prov), Models.cap())
+
+# Settings' model chips: the default, the chosen model and what the search
+# finds, a dozen at most
+def Models.with(+cur: String, +ms: List<&2, String>) -> List<&2, String>:
+  Bool.pick(List<&2, String>, Bool.or(String.is_empty(cur), List.contains(~String, ~String.eq, ms, cur)), ms, List.append(&2, String, ms, [cur]))
+
+def Models.settings.k(many: Bool, +info: String, +prov: String, +q: String, +cur: String) -> List<&2, String>:
+  match many:
+    case True{}:
+      Models.with(cur, List.take(&2, String, Models.find(Models.menu(info, prov), q, info, prov), 12n))
+    case False{}:
+      Models.menu(info, prov)
+
+def Models.settings(+info: String, +prov: String, +q: String, +cur: String) -> List<&2, String>:
+  Models.settings.k(Models.search(Models.menu(info, prov)), info, prov, q, cur)
+
+def Models.view.strs(ms: List<&2, String>) -> List<&2, J.Json>:
+  match ms:
+    case Nil{}:
+      Nil{}
+    case +m <> t:
+      J.Str{m} <> Models.view.strs(t)
+
+def Models.view.go(ms: List<&2, String>, +labels: J.Json) -> List<&2, J.KV>:
+  match ms:
+    case Nil{}:
+      Nil{}
+    case +m <> t:
+      J.KV{Bool.pick(String, String.is_empty(m), "default", m), J.Str{J.Json.get_str(labels, Bool.pick(String, String.is_empty(m), "default", m), "")}} <> Models.view.go(t, labels)
+
+# the models info cut to the models shown, for the picker's rows, which
+# look up each one's label in it: a few KB to read, not all of them
+def Models.view(+info: String, +prov: String, +ms: List<&2, String>) -> String:
+  J.Json.show(J.Json.obj([J.KV{prov, J.Json.arr(Models.view.strs(ms))},
+    J.KV{"about", J.Json.obj([J.KV{prov, J.Json.obj([J.KV{"labels", J.Json.obj(Models.view.go(ms, J.Json.get_obj(Models.about(info, prov), "labels")))}])}])}]))
+
+# what a phone's picker gets: opencode's models cut to those its search
+# finds (the phones draw every row they are sent); others' info as is
+def Models.phone.k(oc: Bool, +nf: Map<&2, String>, +prov: String, +q: String) -> String:
+  match oc:
+    case True{}:
+      Models.view(Models.of(nf, prov), prov, Models.shown(Models.of(nf, prov), prov, q))
+    case False{}:
+      Str.get(nf, "models")
+
+def Models.phone(+nf: Map<&2, String>, +prov: String, +q: String) -> String:
+  Models.phone.k(String.eq(prov, "opencode"), nf, prov, q)
+
+# The picker opening empties its search; on opencode it also has the hub
+# read opencode's models again (models.refresh: about a second, so a
+# provider signed in to since shows its models at once)
+def Models.opened.k(open: Bool, oc: Bool, +u: Ui, cs: List<&2, Cmd>) -> Act:
+  match open oc:
+    case True{} True{}:
+      Ui.also(Ui.rpc(Ui.scratch_set(u, "@f.mq", ""), "models.refresh", Nil{}), List.append(&2, Cmd, cs, [Focus{"model-q"}]))
+    case True{} False{}:
+      Act{Ui.scratch_set(u, "@f.mq", ""), cs}
+    case False{} _:
+      Act{u, cs}
+
+# (shut, the keys go back to the composer, not a search no longer shown)
+def Models.shut.k(shut: Bool, a: Act) -> Act:
+  match shut:
+    case True{}:
+      Ui.also(a, [Focus{"composer"}])
+    case False{}:
+      a
+
+def Models.opened(+value: String, a: Act) -> Act:
+  match a:
+    case Act{+u, cs}:
+      Models.shut.k(Bool.and(String.eq(value, "models"), Bool.not(Ui.flag(u, "models"))),
+        Models.opened.k(Bool.and(String.eq(value, "models"), Ui.flag(u, "models")), String.eq(M.Thread.provider(Ui.thread(Ui.state(u), Ui.sel(u))), "opencode"), u, cs))
 
 # Project picker
 # --------------
@@ -7328,11 +7504,18 @@ def Hs.menu.steps() -> Nat:
   8n
 
 # the menu's rows for a side ("a" the old version, "b" the new)
+# the menu's step rows: the newest Hs.menu.steps(), newest first, as
+# taking them from every step's row gives (each row's label walks the
+# thread's entries: made for every step, a thread with a long history
+# took seconds a screen on the phones)
+def Hs.row.last(+ss: List<&2, HI.Step>, +l: I.Loc, +side: String, +es: List<&2, M.Entry>) -> List<&2, HRow>:
+  Hs.row.steps(List.drop(&2, HI.Step, ss, Nat.sub(List.length(&2, HI.Step, ss), Hs.menu.steps())), l, side, es, 1n+Nat.sub(List.length(&2, HI.Step, ss), Hs.menu.steps()), Nil{})
+
 def Hs.menu.loc(+l: I.Loc, +u: Ui, +side: String) -> List<&2, HRow>:
   +r = Hs.refs(u)
   +es = M.State.mine(Ui.state(u), Ui.sel(u))
   List.append(&2, HRow, [HRow{MSG.T.history.workingcopy(l), MSG.T.history.workingcopy.note(l), Hs.row.value(side, "", "Working copy", "", "")}],
-    List.append(&2, HRow, List.take(&2, HRow, Hs.row.steps(Hs.track(u), l, side, es, 1n, Nil{}), Hs.menu.steps()),
+    List.append(&2, HRow, Hs.row.last(Hs.track(u), l, side, es),
       Hs.row.refs(HI.Hist.refs(J.Json.get_str(r, "refs", "")), l, side, J.Json.get_str(r, "git", ""), J.Json.get_str(r, "top", ""))))
 
 def Hs.menu(+u: Ui, side: String) -> List<&2, HRow>:
@@ -8000,10 +8183,14 @@ def HBar.h(+b: HBar) -> U32:
 def Hs.fade() -> Nat:
   220n
 
+# (the track made once: each Hs.track parses every step's record)
+def Hs.bar.t(+l: I.Loc, +tr: List<&2, HI.Step>, +u: Ui) -> HBar:
+  Hs.bar.k(l, HI.Hist.nth(tr, Hs.at(u, tr)), u, Hs.n(tr), Hs.at(u, tr), M.State.mine(Ui.state(u), Ui.sel(u)))
+
 def Hs.bar.on(+l: I.Loc, on: Bool, +u: Ui) -> HBar:
   match on:
     case True{}:
-      Hs.bar.k(l, HI.Hist.nth(Hs.track(u), Hs.at(u, Hs.track(u))), u, Hs.n(Hs.track(u)), Hs.at(u, Hs.track(u)), M.State.mine(Ui.state(u), Ui.sel(u)))
+      Hs.bar.t(l, Hs.track(u), u)
     case False{}:
       HBar{False{}, 0n, 0n, "", "", "", "", False{}, False{}, False{}, "", "", ""}
 
@@ -9465,11 +9652,11 @@ def Ui.act.k(+i: Nat, +u: Ui, +value: String) -> Act:
     case 17n:
       Ui.rpc(u, "app.update", Nil{})
     case 18n:
-      Voice.flag(value, Ui.toggle_settled(u, value))
+      Models.opened(value, Voice.flag(value, Ui.toggle_settled(u, value)))
     case 19n:
       Ui.setting(u, value)
     case 20n:
-      Ui.model(u, value)
+      Ui.also(Ui.model(u, value), [Focus{"composer"}])
     case 21n:
       Ui.rpc(u, "kicad.install", Nil{})
     case 22n:
@@ -9616,7 +9803,7 @@ def Ec.view(+ec: Ec, +st: M.State, +e: M.Entry) -> EM.EV:
 def Ec.pins(+ec: Ec, +st: M.State, +th: String) -> List<&2, EM.EV>:
   match ec:
     case Ec{_, +last, +now}:
-      EM.Emb.pins.go(M.State.mine(st, th), st, last, now)
+      EM.Emb.pins.go(M.State.terms(st, th), st, last, now)
 
 # Terminals in the chat (core/emb.bend)
 # -------------------------------------
@@ -11257,7 +11444,7 @@ def Fallbackv.add(+u: Ui, +caps: J.Json) -> List<&2, AgRow>:
   +p = M.Setting.get(s, "fallback.add.provider", "codex")
   +m = M.Setting.get(s, "fallback.add.model", "gpt-6.1-sol")
   +target = {FB.Target{p, m} : FB.Target}
-  [AgRow{"Add a provider", "Choose an installed provider and model, then add it to the end.", Nil{}, Fallbackv.providers(["claude", "codex", "grok", "muse", "antigravity"], caps, p)},
+  [AgRow{"Add a provider", "Choose an installed provider and model, then add it to the end.", Nil{}, Fallbackv.providers(["claude", "codex", "grok", "muse", "antigravity", "opencode"], caps, p)},
    AgRow{"Add a model", "Only installed models can be saved. Duplicate entries are not allowed.", Nil{}, Fallbackv.models(Models.list(Ui.info(u, "models"), p), m)},
    AgRow{FB.Target.key(target), "", Nil{}, Fallbackv.add.k(Bool.and(FB.Caps.valid(caps, target), Bool.not(FB.Chain.has(Fallbackv.chain(u), FB.Target.key(target)))), Fallbackv.chain(u), target)}]
 
@@ -11284,7 +11471,7 @@ def Fallbackv.rows(+u: Ui) -> List<&2, AgRow>:
     [AgBtn{"Enabled", "setting", "fallback.on=on", FB.Chain.on(s)}, AgBtn{"Disabled", "setting", "fallback.on=off", Bool.not(FB.Chain.on(s))}]}],
     Fallbackv.order(all, all, caps, s, 1n), Fallbackv.add(u, caps),
     [AgRow{"Fallback notifications", "One alert per outage, with an audit row in each affected thread. If the whole chain is unavailable, work pauses and asks for attention. A limit without a reset stays held until cleared here.", Nil{}, Nil{}}],
-    Fallbackv.outages(List.append(&2, String, ["claude", "codex", "grok", "muse", "antigravity"], Fallbackv.scopes(all)), s, Side.now(u))])
+    Fallbackv.outages(List.append(&2, String, ["claude", "codex", "grok", "muse", "antigravity", "opencode"], Fallbackv.scopes(all)), s, Side.now(u))])
 
 def Mailv.put(u: Ui, m: MailvData) -> Ui:
   match u:

@@ -901,8 +901,28 @@ def Idx.review(rv: Bool, ix: Map<&2, List<&2, Entry>>, +e: Entry) -> Map<&2, Lis
     case False{}:
       ix
 
+# a terminal (an Act of tone "term", core/emb.bend) is filed under
+# "@terms:<thread>" as well, so its pinned ones are found without walking
+# the thread (Emb.pins walked every entry each layout: 8 ms in a long one)
+def Idx.terms.key(+th: String) -> String:
+  "@terms:" ++ th
+
+def Idx.is_term(e: Entry) -> Bool:
+  match e:
+    case Msg{_, _, _, _, _}:
+      False{}
+    case Act{_, _, +tone, _, _, _}:
+      String.eq(tone, "term")
+
+def Idx.term(term: Bool, ix: Map<&2, List<&2, Entry>>, +e: Entry) -> Map<&2, List<&2, Entry>>:
+  match term:
+    case True{}:
+      Idx.put(ix, Idx.terms.key(Idx.thread(e)), e)
+    case False{}:
+      ix
+
 def Idx.post(ix: Map<&2, List<&2, Entry>>, +e: Entry) -> Map<&2, List<&2, Entry>>:
-  Idx.review(Idx.is_review(e), Idx.step(Idx.is_step(e), Idx.post.k(ix, Idx.thread(e), Link.from(Idx.id(e)), e), e), e)
+  Idx.term(Idx.is_term(e), Idx.review(Idx.is_review(e), Idx.step(Idx.is_step(e), Idx.post.k(ix, Idx.thread(e), Link.from(Idx.id(e)), e), e), e), e)
 
 # Projection
 # ----------
@@ -1016,6 +1036,12 @@ def State.steps(s: State, +th: String) -> List<&2, Entry>:
   match s:
     case State{_, _, _, _, _, _, _, _, _, _, bw}:
       Idx.get(Ext.by(Ext.of(bw)), Idx.steps.key(th))
+
+# a thread's terminals (Acts of tone "term"), newest first
+def State.terms(s: State, +th: String) -> List<&2, Entry>:
+  match s:
+    case State{_, _, _, _, _, _, _, _, _, _, bw}:
+      Idx.get(Ext.by(Ext.of(bw)), Idx.terms.key(th))
 
 # a thread's design review ops (Acts of tone "review"), newest first
 def State.reviews(s: State, +th: String) -> List<&2, Entry>:

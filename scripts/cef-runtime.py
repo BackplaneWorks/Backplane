@@ -74,6 +74,15 @@ def assemble(dest, runtime, host, helper, stamp, revision):
         dest.mkdir(parents=True)
         shutil.copytree(runtime, dest / 'cef', symlinks=False)
         shutil.copy2(host, dest / 'cef' / HOST)
+        # Fresh packages inherit pinned upstream notices from the newly built
+        # host directory, even when the existing runtime predates notice files.
+        # Legacy snapshots stay byte-for-byte eligible for rollback.
+        if revision != 'legacy':
+            for notice in ('LICENSE.txt', 'CEF-README.txt'):
+                source = host.parent / notice
+                if not source.is_file():
+                    raise ValueError('CEF host output missing notice: ' + notice)
+                shutil.copy2(source, dest / 'cef' / notice)
         shutil.copy2(helper, dest / HELPER)
         shutil.copy2(stamp, dest / STAMP)
         seal(dest, revision)

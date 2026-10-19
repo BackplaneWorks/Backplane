@@ -1,0 +1,9 @@
+# a thread goes on with another between turns, V2's provider switch),
+# then the efforts its model takes. One chip row and one action for all
+# clients: a chip's value starting with "@" is a provider.
+
+def Chip.providers() -> List<&2, String>:
+  ["@claude", "@codex", "@grok", "@muse", "@antigravity", "@opencode"]
+
+def Chip.all(+info: String, +provider: String, +model: String) -> List<&2, String>:
+  List.append(&2, String, Chip.providers(), Effort.chips(info, provider, model))

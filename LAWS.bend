@@ -10689,3 +10689,55 @@ law viewer_reopen_schematic_keeps_scene:
   for +now: Nat
   {N.Vw.kind_set(N.Vw.board.k(False{}, N.Vw.kind_set.k(True{}, V.Vw.init(), 1, "/p/a.kicad_sch"), "1|/p|/p/a.kicad_sch", items, now), 1, "/p/a.kicad_sch") ==
    N.Vw.board.k(False{}, N.Vw.kind_set.k(True{}, V.Vw.init(), 1, "/p/a.kicad_sch"), "1|/p|/p/a.kicad_sch", items, now) : V.Vw}
+
+# --- browser-cef default (October19) ---
+law cef_default_request:
+  {CEF.Cef.default() == "cef" : String}
+law cef_unset_request:
+  {CEF.Cef.requested("") == CEF.Cef.default() : String}
+law cef_explicit_chrome_request:
+  {CEF.Cef.requested("chrome") == "chrome" : String}
+law cef_explicit_cef_request:
+  {CEF.Cef.requested("cef") == "cef" : String}
+# --- end browser-cef default ---
+
+# --- browser-cef fallback (October19) ---
+law cef_unavailable_default_is_explained:
+  {CEF.Cef.reason("cef", "chrome", "") == "native Linux X11 window/runtime is not active" : String}
+law cef_explicit_chrome_has_no_warning:
+  {CEF.Cef.reason("chrome", "chrome", "") == "" : String}
+law cef_fallback_keeps_error:
+  for +err: String
+  {CEF.Cef.reason("cef", "chrome", err) == Bool.pick(String, String.is_empty(err), "native Linux X11 window/runtime is not active", err) : String}
+# --- end browser-cef fallback ---
+
+# Mailroom runs select a model for the provider they actually inherit.
+law run_model_codex_unset_inherits:
+  for uber: Bool
+  {H.Run.model.pick("codex", "gpt-6.1-sol", "", uber) == "gpt-6.1-sol" : String}
+
+law run_model_codex_stale_claude_uses_default:
+  for +parent: String
+  for uber: Bool
+  {H.Run.model.pick("codex", parent, "opus", uber) == H.Run.model.default(False{}, "codex", parent, uber) : String}
+
+law run_model_codex_compatible_override_kept:
+  for +parent: String
+  for uber: Bool
+  {H.Run.model.pick("codex", parent, "gpt-6-astra", uber) == "gpt-6-astra" : String}
+
+law run_model_muse_keeps_exact_full_selector:
+  for uber: Bool
+  {H.Run.model.pick("muse", "muse-wonder-full-1.0", "sonnet", uber) == "muse-wonder-full-1.0" : String}
+
+law run_model_claude_uber_default_kept:
+  for +parent: String
+  {H.Run.model.pick("claude", parent, "", True{}) == "opus" : String}
+
+law run_model_claude_worker_default_kept:
+  for +parent: String
+  {H.Run.model.pick("claude", parent, "gpt-6.1-sol", False{}) == "sonnet" : String}
+
+law run_model_codex_stale_parent_uses_cli_default:
+  for uber: Bool
+  {H.Run.model.pick("codex", "opus", "sonnet", uber) == "" : String}

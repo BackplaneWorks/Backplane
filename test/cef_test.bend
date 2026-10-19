@@ -39,7 +39,14 @@ def keys(kv: List<&2, J.KV>) -> String:
 
 def main() -> IO(Unit):
   do IO<Unit>:
-    C.Check.str("default engine", yes(CF.Cef.engine("chrome", True{}, True{})), "no")
+    C.Check.str("fallback explained", CF.Cef.reason("cef", "chrome", ""), "native Linux X11 window/runtime is not active")
+    C.Check.str("explicit Chrome quiet", CF.Cef.reason("chrome", "chrome", ""), "")
+    C.Check.str("runtime error retained", CF.Cef.reason("cef", "chrome", "missing runtime"), "missing runtime")
+    C.Check.str("default engine request", CF.Cef.default(), "cef")
+    C.Check.str("unset engine request", CF.Cef.requested(""), "cef")
+    C.Check.str("explicit Chrome request", CF.Cef.requested("chrome"), "chrome")
+    C.Check.str("explicit Chrome stays off", yes(CF.Cef.engine(CF.Cef.requested("chrome"), True{}, True{})), "no")
+    C.Check.str("default embeds when available", yes(CF.Cef.engine(CF.Cef.default(), True{}, True{})), "yes")
     C.Check.str("embedded requires parent", yes(CF.Cef.engine("cef", False{}, True{})), "no")
     C.Check.str("embedded requires runtime", yes(CF.Cef.engine("cef", True{}, False{})), "no")
     C.Check.str("embedded enabled", yes(CF.Cef.engine("cef", True{}, True{})), "yes")
@@ -106,7 +113,7 @@ def main() -> IO(Unit):
     C.Check.str("web drive hint", CF.Cef.drive_text("", False{}), "Agent drives · view only")
     C.Check.str("held drive hint", CF.Cef.drive_text("takeover", True{}), "You drive")
     C.Check.str("settings note quiet", CF.Cef.note(""), "")
-    C.Check.str("settings note error", CF.Cef.note("no runtime"), "Embedded (unavailable: no runtime)")
+    C.Check.str("settings note error", CF.Cef.note("no runtime"), "Chrome fallback (CEF unavailable: no runtime)")
     C.Check.str("engine generation advances", CF.Cef.session.token(CF.Cef.session.request_set(CF.Cef.empty(), "cef 1 :9")), "1")
     C.Check.str("old engine reply ignored", yes(CF.Cef.current(CF.Cef.session.request_set(CF.Cef.session.request_set(CF.Cef.empty(), "a"), "b"), "1")), "no")
     C.Check.str("current engine reply used", yes(CF.Cef.current(CF.Cef.session.request_set(CF.Cef.session.request_set(CF.Cef.empty(), "a"), "b"), "2")), "yes")

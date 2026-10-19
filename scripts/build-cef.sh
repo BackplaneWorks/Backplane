@@ -33,6 +33,10 @@ cmake -S "$ROOT/tools/cef" -B "$OUT" -G Ninja -DCMAKE_BUILD_TYPE=Release -DPROJE
 nice -n 19 ninja -C "$OUT" -j "${BACKPLANE_JOBS:-2}" backplane-cef
 # the distribution ships libcef.so with debug info (1.4 GB); stripped ~0.25 GB
 strip --strip-unneeded "$OUT/Release/libcef.so" "$OUT/Release/backplane-cef"
+# Binary redistribution must retain upstream terms as well as the notice page
+# inside resources.pak (about:credits). Keep these with every host output.
+cp -p "$CEF_ROOT/LICENSE.txt" "$OUT/Release/LICENSE.txt"
+cp -p "$CEF_ROOT/README.txt" "$OUT/Release/CEF-README.txt"
 echo "$OUT/Release/backplane-cef"
 
 
@@ -41,7 +45,7 @@ if [ -n "$PACKAGE" ]; then
   STAGE=$(mktemp -d "${TMPDIR:-/tmp}/bp-cef-pkg-XXXXXX")
   trap 'rm -rf "$STAGE"' EXIT
   # (chrome-sandbox is left out: the host runs with no_sandbox)
-  for f in backplane-cef libcef.so icudtl.dat v8_context_snapshot.bin snapshot_blob.bin \
+  for f in backplane-cef LICENSE.txt CEF-README.txt libcef.so icudtl.dat v8_context_snapshot.bin snapshot_blob.bin \
            libvk_swiftshader.so vk_swiftshader_icd.json libvulkan.so.1 libEGL.so libGLESv2.so; do
     [ -e "$R/$f" ] && cp -p "$R/$f" "$STAGE/"
   done

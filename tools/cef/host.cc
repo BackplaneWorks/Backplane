@@ -50,8 +50,9 @@ struct Opts {
 } opts;
 Display* dpy = nullptr;
 Window parent = 0, shield = 0;
+Window original_dnd_proxy = None;
 int xi_opcode = 0;
-bool shield_on = false;
+std::atomic<bool> shield_on{false};
 std::string shown;
 std::atomic<bool> quitting{false};
 struct Entry { CefRefPtr<CefBrowser> browser; int x = 0, y = 0, w = 1280, h = 800; bool hidden = false; };
@@ -62,6 +63,55 @@ int pending_browsers = 0;
 std::map<std::pair<std::string, int>, std::string> pending_popups;
 
 std::string fields(const std::string& key) { return ",\"key\":" + js(key); }
+// CEF's native Show() installs an XdndProxy once. We map/unmap multiple
+// browser wrappers directly, so restore the proxy for the active child on
+// each transition. The app relays XDND control messages because the embedded
+// widget and the top level have different source/reply identities.
+Window native_child(Window wrapper) {
+  Window root, par, *kids = nullptr; unsigned count = 0;
+  Window child = None;
+  if (XQueryTree(dpy, wrapper, &root, &par, &kids, &count) && count == 1) child = kids[0];
+  if (kids) XFree(kids);
+  return child;
+}
+Window dnd_proxy(Window win) {
+  Atom type; int format; unsigned long count, after; unsigned char* data = nullptr;
+  Window proxy = None;
+  if (XGetWindowProperty(dpy, win, XInternAtom(dpy, "XdndProxy", False),
+      0, 1, False, XA_WINDOW, &type, &format, &count, &after, &data) == Success &&
+      type == XA_WINDOW && format == 32 && count && data) proxy = *reinterpret_cast<Window*>(data);
+  if (data) XFree(data);
+  return proxy;
+}
+Atom drop_owner_atom() {
+  return XInternAtom(dpy, ("_BACKPLANE_CEF_DND_" + std::to_string(parent)).c_str(), False);
+}
+void route_drop() {
+  Atom property = XInternAtom(dpy, "_BACKPLANE_CEF_DND_TARGET", False);
+  auto it = pages.find(shown);
+  Window proxy = original_dnd_proxy;
+  if (it != pages.end()) {
+    const auto& e = it->second;
+    Window child = shield_on ? shield : native_child(e.browser->GetHost()->GetWindowHandle());
+    if (child) {
+      unsigned long values[] = {child, static_cast<unsigned long>(e.x), static_cast<unsigned long>(e.y),
+                                static_cast<unsigned long>(e.w), static_cast<unsigned long>(e.h)};
+      XSetSelectionOwner(dpy, drop_owner_atom(), child, CurrentTime);
+      XChangeProperty(dpy, parent, property, XA_CARDINAL, 32, PropModeReplace,
+                      reinterpret_cast<unsigned char*>(values), 5);
+      // Keep the application as the stable XDND target. Its control-message
+      // relay translates source/reply identities for the embedded widget.
+      proxy = parent;
+    }
+  } else {
+    XDeleteProperty(dpy, parent, property);
+    XSetSelectionOwner(dpy, drop_owner_atom(), None, CurrentTime);
+  }
+  Atom proxy_atom = XInternAtom(dpy, "XdndProxy", False);
+  if (proxy) XChangeProperty(dpy, parent, proxy_atom, XA_WINDOW, 32, PropModeReplace,
+                            reinterpret_cast<unsigned char*>(&proxy), 1);
+  else XDeleteProperty(dpy, parent, proxy_atom);
+}
 void shield_place() {
   auto it = pages.find(shown);
   if (!shield_on || it == pages.end()) XUnmapWindow(dpy, shield);
@@ -70,6 +120,7 @@ void shield_place() {
     XMoveResizeWindow(dpy, shield, e.x, e.y, e.w, e.h);
     XMapRaised(dpy, shield);
   }
+  route_drop();
   XFlush(dpy);
 }
 // The native Linux CEF wrapper forwards _NET_WM_STATE to its Chromium
@@ -106,9 +157,15 @@ void hide_all(const std::string& keep = "") {
 }
 void focus(CefRefPtr<CefBrowser> b, const std::string& key) {
   if (shown != key) return; // XSetInputFocus requires a viewable window.
+  // Match CefWindowX11::Focus: focus the native Chromium input widget,
+  // not its wrapper. Returning to an already-shown owner otherwise leaves
+  // X keyboard/IME focus on the wrapper after CEF's own focus callbacks.
+  Window target = b->GetHost()->GetWindowHandle();
   XWindowAttributes a;
-  if (!XGetWindowAttributes(dpy, b->GetHost()->GetWindowHandle(), &a) || a.map_state != IsViewable) return;
-  XSetInputFocus(dpy, b->GetHost()->GetWindowHandle(), RevertToParent, CurrentTime);
+  if (!XGetWindowAttributes(dpy, target, &a) || a.map_state != IsViewable) return;
+  Window child = native_child(target);
+  if (child && XGetWindowAttributes(dpy, child, &a) && a.map_state == IsViewable) target = child;
+  XSetInputFocus(dpy, target, RevertToParent, CurrentTime);
   XFlush(dpy);
 }
 
@@ -154,7 +211,8 @@ class Client : public CefClient, public CefLifeSpanHandler, public CefLoadHandle
     }
     pages[key] = {b, initial_x, initial_y, opts.w, opts.h};
     set_hidden(pages[key], true);
-    XUnmapWindow(dpy, b->GetHost()->GetWindowHandle()); XFlush(dpy);
+    XUnmapWindow(dpy, b->GetHost()->GetWindowHandle());
+    route_drop(); XFlush(dpy);
     observer = b->GetHost()->AddDevToolsMessageObserver(this);
     b->GetHost()->ExecuteDevToolsMethod(1, "Target.getTargetInfo", nullptr);
     if (quitting) b->GetHost()->CloseBrowser(true);
@@ -180,7 +238,8 @@ class Client : public CefClient, public CefLifeSpanHandler, public CefLoadHandle
   void OnBeforeClose(CefRefPtr<CefBrowser>) override {
     observer = nullptr;
     pages.erase(key); reserved.erase(key);
-    if (shown == key) { shown.clear(); shield_place(); }
+    if (shown == key) shown.clear();
+    shield_place();
     emit("\"event\":\"closed\"" + fields(key) + ",\"why\":" + js(why) +
          (why == "command" ? ",\"cmd\":\"close\"" : ""));
     if (quitting && pages.empty() && pending_browsers == 0) CefQuitMessageLoop();
@@ -311,6 +370,22 @@ bool watch_clicks() {
 void x_loop() {
   while (!quitting) {
     XEvent ev; XNextEvent(dpy, &ev);
+    // A drag routed to the takeover shield is explicitly rejected. It must
+    // neither reach the page nor fall through to the app's attachment target.
+    if (ev.type == ClientMessage && shield_on) {
+      const auto& message = ev.xclient;
+      Atom position = XInternAtom(dpy, "XdndPosition", False);
+      Atom drop = XInternAtom(dpy, "XdndDrop", False);
+      if (message.message_type == position || message.message_type == drop) {
+        XEvent reply{}; reply.xclient.type = ClientMessage;
+        reply.xclient.display = dpy; reply.xclient.window = message.data.l[0];
+        reply.xclient.format = 32;
+        reply.xclient.message_type = XInternAtom(dpy, message.message_type == position ? "XdndStatus" : "XdndFinished", False);
+        reply.xclient.data.l[0] = shield;
+        reply.xclient.data.l[1] = message.message_type == position ? 2 : 0;
+        XSendEvent(dpy, message.data.l[0], False, NoEventMask, &reply); XFlush(dpy);
+      }
+    }
     if (ev.type == ButtonPress && ev.xbutton.window == shield)
       CefPostTask(TID_UI, base::BindOnce(&shield_event, ev.xbutton.x, ev.xbutton.y));
     if (ev.type == GenericEvent && ev.xcookie.extension == xi_opcode && ev.xcookie.evtype == XI_RawButtonPress) {
@@ -365,9 +440,13 @@ __attribute__((no_stack_protector)) int main(int argc, char** argv) {
     parent = XCreateSimpleWindow(dpy, DefaultRootWindow(dpy), 0, 0, opts.w, opts.h, 0, 0, 0xffffff);
     XStoreName(dpy, parent, "backplane-cef test"); XMapWindow(dpy, parent);
   }
+  original_dnd_proxy = dnd_proxy(parent);
   XSetWindowAttributes attr{};
   attr.event_mask = ButtonPressMask | ButtonReleaseMask | PointerMotionMask;
   shield = XCreateWindow(dpy, parent, 0, 0, 1, 1, 0, 0, InputOnly, CopyFromParent, CWEventMask, &attr);
+  unsigned long dnd_version = 5;
+  XChangeProperty(dpy, shield, XInternAtom(dpy, "XdndAware", False), XA_ATOM,
+                  32, PropModeReplace, reinterpret_cast<unsigned char*>(&dnd_version), 1);
   if (!watch_clicks()) { fprintf(stderr, "backplane-cef: XInput2 unavailable\n"); return 1; }
   XSync(dpy, False);
   CefSettings st;

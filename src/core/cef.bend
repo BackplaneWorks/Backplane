@@ -13,8 +13,15 @@ import ./json.bend as J
 # The engine
 # ----------
 
-# cef only when the setting says so, a window's embed is known and the
-# runtime has not failed
+# Native embedding is the default request. An explicit Chrome choice remains
+# authoritative; the live engine still depends on an embed and usable runtime.
+def Cef.default() -> String:
+  "cef"
+
+def Cef.requested(+setting: String) -> String:
+  Bool.pick(String, String.eq(setting, "chrome"), "chrome", Cef.default())
+
+# cef when requested, a window's embed is known and the runtime has not failed
 def Cef.engine(+setting: String, known: Bool, runtime_ok: Bool) -> Bool:
   Bool.and(String.eq(setting, "cef"), Bool.and(known, runtime_ok))
 
@@ -213,9 +220,15 @@ def Cef.drive_text(+drive: String, clickable: Bool) -> String:
   Bool.pick(String, String.is_empty(drive),
     Bool.pick(String, clickable, "Agent drives · click the page to take over", "Agent drives · view only"), "You drive")
 
+# A requested native browser must never look like an unexplained Chrome
+# default on headless/unsupported clients or while the native runtime waits.
+def Cef.reason(requested: String, live: String, +err: String) -> String:
+  Bool.pick(String, Bool.and(String.is_empty(err), Bool.and(String.eq(requested, "cef"), String.eq(live, "chrome"))),
+    "native Linux X11 window/runtime is not active", err)
+
 # the settings row's note: only why Embedded cannot run
 def Cef.note(+err: String) -> String:
-  Bool.pick(String, String.is_empty(err), "", "Embedded (unavailable: " ++ err ++ ")")
+  Bool.pick(String, String.is_empty(err), "", "Chrome fallback (CEF unavailable: " ++ err ++ ")")
 
 # Pages that exist
 # ----------------

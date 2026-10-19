@@ -293,9 +293,13 @@ phone clients (two screencasts on one page, one per CDP session).
 
 ## Embedded CEF engine (Linux X11)
 
-The default `--engine chrome` keeps the existing persistent headless Chrome
-engine. `--engine cef` drives native Chromium children in a supplied X11
-parent. Set `--parent XID --display :NN --cef /path/to/backplane-cef`
+Backplane defaults to embedded CEF on Linux X11 once its local native window
+is attached. The explicit `browser.engine=chrome` setting remains available.
+The helper also defaults to CEF when supplied a native Linux X11 parent;
+headless, remote-only and unsupported native clients use Chrome frames. If
+native startup fails, automatic selection reports the reason in `status.fallback`
+and uses Chrome; explicit `--engine cef` failures remain errors for the hub to
+report. Set `--parent XID --display :NN --cef /path/to/backplane-cef`
 (`--display` defaults to DISPLAY, `--cef` to BACKPLANE_CEF). `--cache DIR`
 overrides the CEF profile; by default it is `<--profile>/../cef-profile`,
 separate from Chrome's profile. Without `--profile`, it is a temporary
@@ -312,23 +316,28 @@ children, adopted as the opener's active tab. CEF never calls
 | op | arguments | result |
 |---|---|---|
 | `engine` | `engine:"chrome"` or `"cef"`; for cef `parent` (numeric XID), `display`, `cef?` (host path), `cache?` | status including `engine`; start/switch engine at runtime |
+| `restore` | owner `page`, `state` with url/origin/local/session/fields/scroll as saved during a handoff | status; restore this owner's active tab after an older-helper upgrade; context cookies are never exported |
 | `show` | owner `page`, `x`, `y`, `w`, `h` in parent pixels | `{}`; show that owner's active tab, hiding all others; cef only |
 | `hide` | none | `{}`; hide all native browsers; cef only |
 | `shield` | `on` (bool) | `{}`; block person's pointer and wheel over the shown child; cef only |
 | `focus` | owner `page` | `{}`; focus its active native child; cef only |
 
-Switching engines stops recording, reopens each owner's active URL in the
-new engine (best effort), then closes the previous engine. Reconfiguring a
-live CEF host with the same cache closes it first, because CEF locks that
-profile against concurrent hosts. Other tabs and
-in-page state are not transferred. Chrome closes its persistent context;
+Switching engines reloads all owned tabs, retaining their selected tab, cookies,
+local/session storage, non-password editable form values and scroll position,
+and resumes recording when active. JavaScript heaps, history, passwords and
+file selections cannot transfer between processes. The previous engine stays
+open until replacement succeeds; failed replacement restores it. Reconfiguring
+a live CEF host with the same cache first releases its singleton profile lock.
+On first CEF use after an upgrade, the helper imports Chrome cookies through
+Chrome's profile API once, retaining the separate original Chrome profile.
+Chrome closes its persistent context;
 CEF receives `quit` and the helper waits for its exit. `close` without page
 and stdin EOF likewise quit and wait for the host before the helper exits.
 Closing an owner closes only its tabs. The host stays alive even after the
 last browser closes. On host death, `closed` is emitted, owners' tabs are
 cleared, and the next page request starts a new host.
 
-`status` adds `engine` in both modes; cef also includes `port`, `hostPid`,
+`status` adds `engine`, `requestedEngine` and any automatic `fallback` reason; cef also includes `port`, `hostPid`,
 and `cache`. CEF width/height are the page's real innerWidth/innerHeight.
 `open {width,height}` and `resize` resize the native child, including hidden
 ones, without viewport emulation. `show` also updates the real viewport.
