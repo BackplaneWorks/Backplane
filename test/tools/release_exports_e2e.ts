@@ -34,6 +34,11 @@ try {
   writeFileSync(join(fake, "gh"), '#!/bin/sh\necho gh >> "$RELEASE_PUBLICATION_LOG"\nexit 91\n');
   writeFileSync(join(fake, "kicad-cli"), `#!/bin/sh
 set -eu
+# Metadata probes are resolver traffic, not release export steps.
+case "\${1:-}" in
+  version|--version) printf '10.0.6\\n'; exit 0 ;;
+  api-server) exit 2 ;;
+esac
 printf '%s\\n' "$*" >> "$RELEASE_CALLS"
 n=$(wc -l < "$RELEASE_CALLS" | tr -d ' ')
 if [ "$n" = "$RELEASE_FAIL_AT" ]; then

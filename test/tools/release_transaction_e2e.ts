@@ -50,7 +50,8 @@ exec ${quote(git)} "$@"
   writeFileSync(join(fake, "kicad-cli"), `#!${node}
 const fs = require('fs'), cp = require('child_process'), path = require('path');
 const args = process.argv.slice(2), mode = process.env.RELEASE_MODE;
-if (args.includes('--version')) { console.log('10.0.6'); process.exit(0); }
+if (args[0] === 'version' || args.includes('--version')) { console.log('10.0.6'); process.exit(0); }
+if (args[0] === 'api-server') process.exit(2);
 const out = args[args.indexOf('-o')+1], input = args.at(-1);
 const data = fs.readFileSync(input, 'utf8');
 const checking = args[1] === 'erc' || args[1] === 'drc';
