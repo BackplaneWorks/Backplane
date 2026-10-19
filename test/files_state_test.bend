@@ -76,8 +76,12 @@ def got(u: U.Ui, id: Nat, thread: String, path: String, entries: String) -> U.Ui
 def requests(a: U.Act) -> String:
   J.Json.show(J.Json.arr(files(a)))
 
+def key.got(r: Map<&2, String> & Bool) -> String:
+  (_, found) = r
+  Bool.show(found)
+
 def key(u: U.Ui, name: String) -> String:
-  Bool.show(Map.has(&2, String, U.Ui.infos(u), name))
+  key.got(Map.has(&2, String, U.Ui.infos(u), name))
 
 def main() -> IO(Unit):
   +root = ask(base(), "")
