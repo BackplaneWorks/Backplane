@@ -1,0 +1,34 @@
+{
+  "app": "/home/h/.local/share/backplane/backplane",
+  "app_sha256": "17e717c9104a77b185016196d1e367303690ea3bea1a68e50bd08254e1db8911",
+  "installed_commit_label": "e6f8c9a48194d79cf71a9304fb12c57b82bff58b",
+  "installed_version_label": "0.11.2-dev.20261013.1838",
+  "captured_at": "2026-10-19T16:38:02Z",
+  "home": "/tmp/backplane-orchestration-d6awvcc3",
+  "port": 41029,
+  "display": 90,
+  "native_viewports": [
+    [
+      1600,
+      1000
+    ],
+    [
+      3200,
+      2000
+    ]
+  ],
+  "browser_viewport": [
+    1000,
+    720
+  ],
+  "browser_device_scale_factor": 2,
+  "events_sha256": "bb6377de55af6cb95e68c284f62be010aaf2f2242a60e735ab54862c9a71a6cb",
+  "browser_exit_code": 0,
+  "web_assets": {
+    "chunk-3hk1rdr5.css": "5c2ce6cd604641f5a798949783f98af5b59383f87aeadd08d637589c11bd264c",
+    "chunk-sw8hmkqp.js": "fea95eb76460bc516bc51324bfa330d425b17369a6a53113e249374ebf61811d",
+    "sw.js": "2d726573774359cdfa9c891db3cbab7918efcafe1c56fa9d4da5d6fc06eb1244",
+    "index.html": "e5f073c6935d3240450040b884857c3fac0fbdad1181b9290ee1d861ffaf3581"
+  },
+  "demo_only": true
+}

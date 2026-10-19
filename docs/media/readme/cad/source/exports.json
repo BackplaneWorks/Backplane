@@ -1,0 +1,245 @@
+[
+  {
+    "file": "pad-mentioned-200.png",
+    "source": "source/pad-mentioned-native.png",
+    "source_sha256": "fdb13e33426ae222092c01ed80e60bd31f47c436e77c2cc953993c0dc2223fd9",
+    "native_size": [
+      1600,
+      1000
+    ],
+    "crop": null,
+    "output_size": [
+      3200,
+      2000
+    ],
+    "method": "crop and Lanczos resample only; no content edits",
+    "sha256": "c27c383b0fced7ca90fc36fe40e86968bb66203bc6f859b74c1d207a6f43dd8a"
+  },
+  {
+    "file": "pad-selected-200.png",
+    "source": "source/pad-selected-native.png",
+    "source_sha256": "48df2286815092a8a36656f4ff00e903d9816a260e5e513baf4f13e361118708",
+    "native_size": [
+      1600,
+      1000
+    ],
+    "crop": null,
+    "output_size": [
+      3200,
+      2000
+    ],
+    "method": "crop and Lanczos resample only; no content edits",
+    "sha256": "e75f716e0ed6c6eebddc710f6ab281dd318344211953dee98a3192bd1b0ae874"
+  },
+  {
+    "file": "pad-workbar-detail-200.png",
+    "source": "source/pad-mentioned-native.png",
+    "source_sha256": "fdb13e33426ae222092c01ed80e60bd31f47c436e77c2cc953993c0dc2223fd9",
+    "native_size": [
+      1600,
+      1000
+    ],
+    "crop": [
+      295,
+      660,
+      1368,
+      980
+    ],
+    "output_size": [
+      2146,
+      640
+    ],
+    "method": "crop and Lanczos resample only; no content edits",
+    "sha256": "fe102d1a04b13c2afbab860664dca323058cb943a0a81aaf1c77473d10bc9ca2"
+  },
+  {
+    "file": "pad-mention-compact-200.png",
+    "source": "source/pad-mentioned-native.png",
+    "source_sha256": "fdb13e33426ae222092c01ed80e60bd31f47c436e77c2cc953993c0dc2223fd9",
+    "native_size": [
+      1600,
+      1000
+    ],
+    "crop_rectangles": [
+      [
+        296,
+        759,
+        900,
+        980
+      ],
+      [
+        948,
+        668,
+        1368,
+        889
+      ]
+    ],
+    "join": "horizontal",
+    "output_size": [
+      2048,
+      442
+    ],
+    "method": "same-frame native crops joined to remove empty space, then 200% Lanczos; no UI drawing or text changes",
+    "sha256": "e891f4186820e0b12b292c2122993f9c142e945580cbf0812fcce43c2e0fd749"
+  },
+  {
+    "file": "kicad-freecad-setup-200.png",
+    "source": "source/kicad-freecad-settings-native.png",
+    "source_sha256": "c5e8f26afaf4bef1aab0ecde897922dd9ab8fcaf0a69c48b987c6b1fc130d491",
+    "native_size": [
+      1600,
+      1000
+    ],
+    "crop": [
+      295,
+      305,
+      901,
+      638
+    ],
+    "output_size": [
+      1212,
+      666
+    ],
+    "method": "crop and Lanczos resample only; no content edits",
+    "sha256": "255acbaac88125b33df4b7bef852ac94e8419b3c08f2cccb5db7787f5fb03748"
+  },
+  {
+    "file": "enclosure-mech-full-200.png",
+    "source": "source/enclosure-mech-native.png",
+    "source_sha256": "666a5844870212b7cbfae68f428d5e52a23e20cfc01b3f94858dc7006cffffe8",
+    "native_size": [
+      1600,
+      1000
+    ],
+    "crop": null,
+    "output_size": [
+      3200,
+      2000
+    ],
+    "method": "crop and Lanczos resample only; no content edits",
+    "sha256": "821ad1616bb816d61d29158f9d221bdd8403d34f1f1312798c46ab79d2340ec4"
+  },
+  {
+    "file": "enclosure-mech-200.png",
+    "source": "source/enclosure-mech-native.png",
+    "source_sha256": "666a5844870212b7cbfae68f428d5e52a23e20cfc01b3f94858dc7006cffffe8",
+    "native_size": [
+      1600,
+      1000
+    ],
+    "crop": [
+      933,
+      0,
+      1600,
+      1000
+    ],
+    "output_size": [
+      1334,
+      2000
+    ],
+    "method": "crop and Lanczos resample only; no content edits",
+    "sha256": "80408e0805209580f365eb1ebb57666f9b3c556c2b9df634e1987ebcd20aae6a"
+  },
+  {
+    "file": "enclosure-mech-landscape-200.png",
+    "source": "source/enclosure-mech-native.png",
+    "source_sha256": "666a5844870212b7cbfae68f428d5e52a23e20cfc01b3f94858dc7006cffffe8",
+    "native_size": [
+      1600,
+      1000
+    ],
+    "crop_rectangles": [
+      [
+        933,
+        0,
+        1600,
+        95
+      ],
+      [
+        933,
+        312,
+        1600,
+        713
+      ]
+    ],
+    "join": "vertical",
+    "output_size": [
+      1334,
+      992
+    ],
+    "method": "same-frame native crops joined to remove empty space, then 200% Lanczos; no UI drawing or text changes",
+    "sha256": "3fc3c49f07161d901863135890ad31b7d28fdd42697fce9cf5c2a63896dcf158"
+  },
+  {
+    "file": "cm5-mech-200.png",
+    "source": "source/web-mech-existing.png",
+    "source_sha256": "74dffa23d7dbc3b8453d4463cc097fe785f301a35bdd6e46ffeacb58a68cd8bb",
+    "native_size": [
+      2160,
+      1350
+    ],
+    "crop": null,
+    "output_size": [
+      4320,
+      2700
+    ],
+    "method": "crop and Lanczos resample only; no content edits",
+    "sha256": "2dedf1cffff65227ab380e961bedc4f67f0d720a3f2f290715fd3ffc601089f4"
+  },
+  {
+    "file": "cm5-mech-detail-200.png",
+    "source": "source/web-mech-existing.png",
+    "source_sha256": "74dffa23d7dbc3b8453d4463cc097fe785f301a35bdd6e46ffeacb58a68cd8bb",
+    "native_size": [
+      2160,
+      1350
+    ],
+    "crop": [
+      1237,
+      0,
+      2160,
+      1350
+    ],
+    "output_size": [
+      1846,
+      2700
+    ],
+    "method": "crop and Lanczos resample only; no content edits",
+    "sha256": "16e5296f188d009978c520871576cded19c9d128951e6e68c196cd3f9c7c5eac"
+  },
+  {
+    "file": "cats-footer-200.png",
+    "source": "source/cats-original.png",
+    "source_sha256": "bc3c3150eabcc9e6399b72c0231f0050fd8aa72799f81ad6d90c031d56bcffc5",
+    "crop_cells": [
+      [
+        0,
+        0,
+        230,
+        234
+      ],
+      [
+        460,
+        0,
+        690,
+        234
+      ],
+      [
+        690,
+        0,
+        920,
+        234
+      ]
+    ],
+    "output_size": [
+      432,
+      144
+    ],
+    "display_size": [
+      216,
+      72
+    ],
+    "background": "#111111",
+    "method": "three original cat cells, cropped and downsampled; no redrawing"
+  }
+]

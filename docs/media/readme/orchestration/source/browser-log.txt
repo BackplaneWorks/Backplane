@@ -1,0 +1,1865 @@
+
+=== web-initial ===
+Backplane
+0.11.2-dev.20261018.2043
+Mochi
+ready
+SENSOR NODE
+Coordinate rev C
+1m
+GATEWAY
+BLE handoff
+1m
+SCRATCH
+BOTS
+Tofu
+ready
+Pixel
+ready
+ROOMS
+Settings
+Pick a thread, or start one with + next to a project.
+[
+  {
+    tag: "BUTTON",
+    text: "",
+    action: "proj-open",
+    value: "",
+  }, {
+    tag: "DIV",
+    text: "Mochi\nready",
+    action: "uber",
+    value: "mochi",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "look",
+    value: "sensor",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "new-thread",
+    value: "sensor",
+  }, {
+    tag: "DIV",
+    text: "Coordinate rev C\n1m",
+    action: "select",
+    value: "release",
+  }, {
+    tag: "BUTTON",
+    text: "↑",
+    action: "move",
+    value: "release|up",
+  }, {
+    tag: "BUTTON",
+    text: "↓",
+    action: "move",
+    value: "release|down",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "look",
+    value: "gateway",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "new-thread",
+    value: "gateway",
+  }, {
+    tag: "DIV",
+    text: "BLE handoff\n1m",
+    action: "select",
+    value: "firmware",
+  }, {
+    tag: "BUTTON",
+    text: "↑",
+    action: "move",
+    value: "firmware|up",
+  }, {
+    tag: "BUTTON",
+    text: "↓",
+    action: "move",
+    value: "firmware|down",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "look",
+    value: "scratch",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "new-thread",
+    value: "scratch",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "bot-new",
+    value: "",
+  }, {
+    tag: "DIV",
+    text: "Tofu\nready",
+    action: "bot",
+    value: "tofu",
+  }, {
+    tag: "DIV",
+    text: "Pixel\nready",
+    action: "bot",
+    value: "pixel",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "room-new",
+    value: "",
+  }, {
+    tag: "BUTTON",
+    text: "Settings",
+    action: "flag",
+    value: "settings",
+  }
+]
+
+=== uberbot-overview ===
+Backplane
+0.11.2-dev.20261018.2043
+Mochi
+ready
+SENSOR NODE
+Coordinate rev C
+1m
+GATEWAY
+BLE handoff
+1m
+SCRATCH
+BOTS
+Tofu
+ready
+Pixel
+ready
+ROOMS
+Settings
+Mochi
+ready
+claude · claude-sonnet-5
+Status
+Chat
+Space
+Browser
+Tasks
+Memory
+Routines
+Webhooks
+Settings
+0
+NEED YOU
+0
+RUNNING
+0
+BOTS WORKING
+0
+UNREAD ROOMS
+desktop
+Home: desktop
+IDLE
+BLE handoff
+Gateway
+1m
+Coordinate rev C
+Sensor node
+1m
+BOTS
+Tofu
+2m
+Pixel
+2m
+[
+  {
+    tag: "BUTTON",
+    text: "",
+    action: "proj-open",
+    value: "",
+  }, {
+    tag: "DIV",
+    text: "Mochi\nready",
+    action: "uber",
+    value: "mochi",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "look",
+    value: "sensor",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "new-thread",
+    value: "sensor",
+  }, {
+    tag: "DIV",
+    text: "Coordinate rev C\n1m",
+    action: "select",
+    value: "release",
+  }, {
+    tag: "BUTTON",
+    text: "↑",
+    action: "move",
+    value: "release|up",
+  }, {
+    tag: "BUTTON",
+    text: "↓",
+    action: "move",
+    value: "release|down",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "look",
+    value: "gateway",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "new-thread",
+    value: "gateway",
+  }, {
+    tag: "DIV",
+    text: "BLE handoff\n1m",
+    action: "select",
+    value: "firmware",
+  }, {
+    tag: "BUTTON",
+    text: "↑",
+    action: "move",
+    value: "firmware|up",
+  }, {
+    tag: "BUTTON",
+    text: "↓",
+    action: "move",
+    value: "firmware|down",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "look",
+    value: "scratch",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "new-thread",
+    value: "scratch",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "bot-new",
+    value: "",
+  }, {
+    tag: "DIV",
+    text: "Tofu\nready",
+    action: "bot",
+    value: "tofu",
+  }, {
+    tag: "DIV",
+    text: "Pixel\nready",
+    action: "bot",
+    value: "pixel",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "room-new",
+    value: "",
+  }, {
+    tag: "BUTTON",
+    text: "Settings",
+    action: "flag",
+    value: "settings",
+  }, {
+    tag: "BUTTON",
+    text: "‹",
+    action: "select",
+    value: "",
+  }, {
+    tag: "BUTTON",
+    text: "Status",
+    action: "bot-tab",
+    value: "status",
+  }, {
+    tag: "BUTTON",
+    text: "Chat",
+    action: "bot-tab",
+    value: "chat",
+  }, {
+    tag: "BUTTON",
+    text: "Space",
+    action: "bot-tab",
+    value: "space",
+  }, {
+    tag: "BUTTON",
+    text: "Browser",
+    action: "bot-tab",
+    value: "browser",
+  }, {
+    tag: "BUTTON",
+    text: "Tasks",
+    action: "bot-tab",
+    value: "tasks",
+  }, {
+    tag: "BUTTON",
+    text: "Memory",
+    action: "bot-tab",
+    value: "memory",
+  }, {
+    tag: "BUTTON",
+    text: "Routines",
+    action: "bot-tab",
+    value: "routines",
+  }, {
+    tag: "BUTTON",
+    text: "Webhooks",
+    action: "bot-tab",
+    value: "hooks",
+  }, {
+    tag: "BUTTON",
+    text: "Settings",
+    action: "bot-tab",
+    value: "settings",
+  }, {
+    tag: "BUTTON",
+    text: "BLE handoff\nGateway\n1m",
+    action: "select",
+    value: "firmware",
+  }, {
+    tag: "BUTTON",
+    text: "Coordinate rev C\nSensor node\n1m",
+    action: "select",
+    value: "release",
+  }, {
+    tag: "BUTTON",
+    text: "Tofu\n2m",
+    action: "bot",
+    value: "tofu",
+  }, {
+    tag: "BUTTON",
+    text: "Pixel\n2m",
+    action: "bot",
+    value: "pixel",
+  }
+]
+
+=== delegated-thread ===
+Backplane
+0.11.2-dev.20261018.2043
+Mochi
+ready
+SENSOR NODE
+Coordinate rev C
+↑
+↓
+1m
+GATEWAY
+BLE handoff
+1m
+SCRATCH
+BOTS
+Tofu
+ready
+Pixel
+ready
+ROOMS
+Settings
+Coordinate rev C
+Pin
+Settle
+Snooze
+Archive
+Delete
+Fork thread
+Terminal
+Viewer
+Subagents · 2 done
+Coordinate the sensor rev C review. Delegate the power and layout checks, then collect the results here.
+12:35
+Copy
+
+I split the review between Claude and Grok. Each task has its own thread; results return here when they finish.
+
+12:35
+Copy
+
+Both reviews are back. Power budget: 18 months at the stated duty cycle. Layout: antenna keepout and connector orientation checked. Tofu has the handoff in its Mailbox.
+
+Finished 12:35 · 8s
+Copy
+Complete
+codex · gpt-6.1-sol · ctx n/a
+Send
+[
+  {
+    tag: "BUTTON",
+    text: "",
+    action: "proj-open",
+    value: "",
+  }, {
+    tag: "DIV",
+    text: "Mochi\nready",
+    action: "uber",
+    value: "mochi",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "look",
+    value: "sensor",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "new-thread",
+    value: "sensor",
+  }, {
+    tag: "DIV",
+    text: "Coordinate rev C\n↑\n↓\n1m",
+    action: "select",
+    value: "release",
+  }, {
+    tag: "BUTTON",
+    text: "↑",
+    action: "move",
+    value: "release|up",
+  }, {
+    tag: "BUTTON",
+    text: "↓",
+    action: "move",
+    value: "release|down",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "look",
+    value: "gateway",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "new-thread",
+    value: "gateway",
+  }, {
+    tag: "DIV",
+    text: "BLE handoff\n1m",
+    action: "select",
+    value: "firmware",
+  }, {
+    tag: "BUTTON",
+    text: "↑",
+    action: "move",
+    value: "firmware|up",
+  }, {
+    tag: "BUTTON",
+    text: "↓",
+    action: "move",
+    value: "firmware|down",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "look",
+    value: "scratch",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "new-thread",
+    value: "scratch",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "bot-new",
+    value: "",
+  }, {
+    tag: "DIV",
+    text: "Tofu\nready",
+    action: "bot",
+    value: "tofu",
+  }, {
+    tag: "DIV",
+    text: "Pixel\nready",
+    action: "bot",
+    value: "pixel",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "room-new",
+    value: "",
+  }, {
+    tag: "BUTTON",
+    text: "Settings",
+    action: "flag",
+    value: "settings",
+  }, {
+    tag: "BUTTON",
+    text: "‹",
+    action: "select",
+    value: "",
+  }, {
+    tag: "SPAN",
+    text: "Coordinate rev C",
+    action: "row-rename",
+    value: "release",
+  }, {
+    tag: "BUTTON",
+    text: "Pin",
+    action: "pin",
+    value: "",
+  }, {
+    tag: "BUTTON",
+    text: "Settle",
+    action: "settle",
+    value: "",
+  }, {
+    tag: "BUTTON",
+    text: "Snooze",
+    action: "flag",
+    value: "snooze",
+  }, {
+    tag: "BUTTON",
+    text: "Archive",
+    action: "archive",
+    value: "",
+  }, {
+    tag: "BUTTON",
+    text: "Delete",
+    action: "delete",
+    value: "",
+  }, {
+    tag: "BUTTON",
+    text: "Fork thread",
+    action: "fork",
+    value: "",
+  }, {
+    tag: "BUTTON",
+    text: "Terminal",
+    action: "term-toggle",
+    value: "@term-size",
+  }, {
+    tag: "BUTTON",
+    text: "Viewer",
+    action: "panel",
+    value: "",
+  }, {
+    tag: "BUTTON",
+    text: "Subagents · 2 done",
+    action: "subs-open",
+    value: "release",
+  }, {
+    tag: "BUTTON",
+    text: "Copy",
+    action: "copy",
+    value: "Coordinate the sensor rev C review. Delegate the power and layout checks, then collect the results here.",
+  },
+  {
+    tag: "BUTTON",
+    text: "Copy",
+    action: "copy",
+    value: "I split the review between Claude and Grok. Each task has its own thread; results return here when they finish.",
+  },
+  {
+    tag: "BUTTON",
+    text: "Copy",
+    action: "copy",
+    value: "Both reviews are back. Power budget: 18 months at the stated duty cycle. Layout: antenna keepout and connector orientation checked. Tofu has the handoff in its Mailbox.",
+  },
+  {
+    tag: "BUTTON",
+    text: "codex · gpt-6.1-sol · ctx n/a",
+    action: "flag",
+    value: "models",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "voice",
+    value: "",
+  }, {
+    tag: "BUTTON",
+    text: "Send",
+    action: "send",
+    value: "",
+  }
+]
+
+=== subagent-panel ===
+Backplane
+0.11.2-dev.20261018.2043
+Mochi
+ready
+SENSOR NODE
+Coordinate rev C
+1m
+GATEWAY
+BLE handoff
+1m
+SCRATCH
+BOTS
+Tofu
+ready
+Pixel
+ready
+ROOMS
+Settings
+Coordinate rev C
+Pin
+Settle
+Snooze
+Archive
+Delete
+Fork thread
+Terminal
+Viewer
+Subagents · 2 done
+▾
+2 done
+grok · grok-4.7
+Layout review
+done
+sonnet
+Power budget review
+done
+Coordinate the sensor rev C review. Delegate the power and layout checks, then collect the results here.
+12:35
+Copy
+
+I split the review between Claude and Grok. Each task has its own thread; results return here when they finish.
+
+12:35
+Copy
+
+Both reviews are back. Power budget: 18 months at the stated duty cycle. Layout: antenna keepout and connector orientation checked. Tofu has the handoff in its Mailbox.
+
+Finished 12:35 · 8s
+Copy
+Complete
+codex · gpt-6.1-sol · ctx n/a
+Send
+[
+  {
+    tag: "BUTTON",
+    text: "",
+    action: "proj-open",
+    value: "",
+  }, {
+    tag: "DIV",
+    text: "Mochi\nready",
+    action: "uber",
+    value: "mochi",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "look",
+    value: "sensor",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "new-thread",
+    value: "sensor",
+  }, {
+    tag: "DIV",
+    text: "Coordinate rev C\n1m",
+    action: "select",
+    value: "release",
+  }, {
+    tag: "BUTTON",
+    text: "↑",
+    action: "move",
+    value: "release|up",
+  }, {
+    tag: "BUTTON",
+    text: "↓",
+    action: "move",
+    value: "release|down",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "look",
+    value: "gateway",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "new-thread",
+    value: "gateway",
+  }, {
+    tag: "DIV",
+    text: "BLE handoff\n1m",
+    action: "select",
+    value: "firmware",
+  }, {
+    tag: "BUTTON",
+    text: "↑",
+    action: "move",
+    value: "firmware|up",
+  }, {
+    tag: "BUTTON",
+    text: "↓",
+    action: "move",
+    value: "firmware|down",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "look",
+    value: "scratch",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "new-thread",
+    value: "scratch",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "bot-new",
+    value: "",
+  }, {
+    tag: "DIV",
+    text: "Tofu\nready",
+    action: "bot",
+    value: "tofu",
+  }, {
+    tag: "DIV",
+    text: "Pixel\nready",
+    action: "bot",
+    value: "pixel",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "room-new",
+    value: "",
+  }, {
+    tag: "BUTTON",
+    text: "Settings",
+    action: "flag",
+    value: "settings",
+  }, {
+    tag: "BUTTON",
+    text: "‹",
+    action: "select",
+    value: "",
+  }, {
+    tag: "SPAN",
+    text: "Coordinate rev C",
+    action: "row-rename",
+    value: "release",
+  }, {
+    tag: "BUTTON",
+    text: "Pin",
+    action: "pin",
+    value: "",
+  }, {
+    tag: "BUTTON",
+    text: "Settle",
+    action: "settle",
+    value: "",
+  }, {
+    tag: "BUTTON",
+    text: "Snooze",
+    action: "flag",
+    value: "snooze",
+  }, {
+    tag: "BUTTON",
+    text: "Archive",
+    action: "archive",
+    value: "",
+  }, {
+    tag: "BUTTON",
+    text: "Delete",
+    action: "delete",
+    value: "",
+  }, {
+    tag: "BUTTON",
+    text: "Fork thread",
+    action: "fork",
+    value: "",
+  }, {
+    tag: "BUTTON",
+    text: "Terminal",
+    action: "term-toggle",
+    value: "@term-size",
+  }, {
+    tag: "BUTTON",
+    text: "Viewer",
+    action: "panel",
+    value: "",
+  }, {
+    tag: "BUTTON",
+    text: "Subagents · 2 done",
+    action: "subs-shut",
+    value: "release\t",
+  }, {
+    tag: "DIV",
+    text: "▾\n2 done",
+    action: "fold",
+    value: "0subs.done:release",
+  }, {
+    tag: "DIV",
+    text: "grok · grok-4.7\nLayout review\ndone",
+    action: "select",
+    value: "layout",
+  }, {
+    tag: "DIV",
+    text: "sonnet\nPower budget review\ndone",
+    action: "select",
+    value: "power",
+  }, {
+    tag: "BUTTON",
+    text: "Copy",
+    action: "copy",
+    value: "Coordinate the sensor rev C review. Delegate the power and layout checks, then collect the results here.",
+  },
+  {
+    tag: "BUTTON",
+    text: "Copy",
+    action: "copy",
+    value: "I split the review between Claude and Grok. Each task has its own thread; results return here when they finish.",
+  },
+  {
+    tag: "BUTTON",
+    text: "Copy",
+    action: "copy",
+    value: "Both reviews are back. Power budget: 18 months at the stated duty cycle. Layout: antenna keepout and connector orientation checked. Tofu has the handoff in its Mailbox.",
+  },
+  {
+    tag: "BUTTON",
+    text: "codex · gpt-6.1-sol · ctx n/a",
+    action: "flag",
+    value: "models",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "voice",
+    value: "",
+  }, {
+    tag: "BUTTON",
+    text: "Send",
+    action: "send",
+    value: "",
+  }
+]
+
+=== subagents-mobile ===
+‹
+Coordinate rev C
+Pin
+Settle
+Snooze
+Archive
+Delete
+Fork thread
+Terminal
+Viewer
+Subagents · 2 done
+▾
+2 done
+grok · grok-4.7
+Layout review
+done
+sonnet
+Power budget review
+done
+Coordinate the sensor rev C review. Delegate the power and layout checks, then collect the results here.
+12:35
+Copy
+
+I split the review between Claude and Grok. Each task has its own thread; results return here when they finish.
+
+12:35
+Copy
+
+Both reviews are back. Power budget: 18 months at the stated duty cycle. Layout: antenna keepout and connector orientation checked. Tofu has the handoff in its Mailbox.
+
+Finished 12:35 · 8s
+Copy
+Complete
+codex · gpt-6.1-sol · ctx n/a
+Send
+[
+  {
+    tag: "BUTTON",
+    text: "",
+    action: "proj-open",
+    value: "",
+  }, {
+    tag: "DIV",
+    text: "Mochiready",
+    action: "uber",
+    value: "mochi",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "look",
+    value: "sensor",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "new-thread",
+    value: "sensor",
+  }, {
+    tag: "DIV",
+    text: "Coordinate rev C↑↓1m",
+    action: "select",
+    value: "release",
+  }, {
+    tag: "BUTTON",
+    text: "↑",
+    action: "move",
+    value: "release|up",
+  }, {
+    tag: "BUTTON",
+    text: "↓",
+    action: "move",
+    value: "release|down",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "look",
+    value: "gateway",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "new-thread",
+    value: "gateway",
+  }, {
+    tag: "DIV",
+    text: "BLE handoff↑↓1m",
+    action: "select",
+    value: "firmware",
+  }, {
+    tag: "BUTTON",
+    text: "↑",
+    action: "move",
+    value: "firmware|up",
+  }, {
+    tag: "BUTTON",
+    text: "↓",
+    action: "move",
+    value: "firmware|down",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "look",
+    value: "scratch",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "new-thread",
+    value: "scratch",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "bot-new",
+    value: "",
+  }, {
+    tag: "DIV",
+    text: "Tofuready",
+    action: "bot",
+    value: "tofu",
+  }, {
+    tag: "DIV",
+    text: "Pixelready",
+    action: "bot",
+    value: "pixel",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "room-new",
+    value: "",
+  }, {
+    tag: "BUTTON",
+    text: "Settings",
+    action: "flag",
+    value: "settings",
+  }, {
+    tag: "BUTTON",
+    text: "‹",
+    action: "select",
+    value: "",
+  }, {
+    tag: "SPAN",
+    text: "Coordinate rev C",
+    action: "row-rename",
+    value: "release",
+  }, {
+    tag: "BUTTON",
+    text: "Pin",
+    action: "pin",
+    value: "",
+  }, {
+    tag: "BUTTON",
+    text: "Settle",
+    action: "settle",
+    value: "",
+  }, {
+    tag: "BUTTON",
+    text: "Snooze",
+    action: "flag",
+    value: "snooze",
+  }, {
+    tag: "BUTTON",
+    text: "Archive",
+    action: "archive",
+    value: "",
+  }, {
+    tag: "BUTTON",
+    text: "Delete",
+    action: "delete",
+    value: "",
+  }, {
+    tag: "BUTTON",
+    text: "Fork thread",
+    action: "fork",
+    value: "",
+  }, {
+    tag: "BUTTON",
+    text: "Terminal",
+    action: "term-toggle",
+    value: "@term-size",
+  }, {
+    tag: "BUTTON",
+    text: "Viewer",
+    action: "panel",
+    value: "",
+  }, {
+    tag: "BUTTON",
+    text: "Subagents · 2 done",
+    action: "subs-shut",
+    value: "release\t",
+  }, {
+    tag: "DIV",
+    text: "▾\n2 done",
+    action: "fold",
+    value: "0subs.done:release",
+  }, {
+    tag: "DIV",
+    text: "grok · grok-4.7\nLayout review\ndone",
+    action: "select",
+    value: "layout",
+  }, {
+    tag: "DIV",
+    text: "sonnet\nPower budget review\ndone",
+    action: "select",
+    value: "power",
+  }, {
+    tag: "BUTTON",
+    text: "Copy",
+    action: "copy",
+    value: "Coordinate the sensor rev C review. Delegate the power and layout checks, then collect the results here.",
+  },
+  {
+    tag: "BUTTON",
+    text: "Copy",
+    action: "copy",
+    value: "I split the review between Claude and Grok. Each task has its own thread; results return here when they finish.",
+  },
+  {
+    tag: "BUTTON",
+    text: "Copy",
+    action: "copy",
+    value: "Both reviews are back. Power budget: 18 months at the stated duty cycle. Layout: antenna keepout and connector orientation checked. Tofu has the handoff in its Mailbox.",
+  },
+  {
+    tag: "BUTTON",
+    text: "codex · gpt-6.1-sol · ctx n/a",
+    action: "flag",
+    value: "models",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "voice",
+    value: "",
+  }, {
+    tag: "BUTTON",
+    text: "Send",
+    action: "send",
+    value: "",
+  }
+]
+
+=== catbot-chat ===
+Backplane
+0.11.2-dev.20261018.2043
+Mochi
+ready
+SENSOR NODE
+Coordinate rev C
+1m
+GATEWAY
+BLE handoff
+1m
+SCRATCH
+BOTS
+Tofu
+ready
+Pixel
+ready
+ROOMS
+Settings
+Tofu
+ready
+claude · claude-sonnet-5
+Chat
+Space
+Browser
+Tasks
+Memory
+Routines
+Webhooks
+Settings
+claude · claude-sonnet-5
+Send
+[
+  {
+    tag: "BUTTON",
+    text: "",
+    action: "proj-open",
+    value: "",
+  }, {
+    tag: "DIV",
+    text: "Mochi\nready",
+    action: "uber",
+    value: "mochi",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "look",
+    value: "sensor",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "new-thread",
+    value: "sensor",
+  }, {
+    tag: "DIV",
+    text: "Coordinate rev C\n1m",
+    action: "select",
+    value: "release",
+  }, {
+    tag: "BUTTON",
+    text: "↑",
+    action: "move",
+    value: "release|up",
+  }, {
+    tag: "BUTTON",
+    text: "↓",
+    action: "move",
+    value: "release|down",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "look",
+    value: "gateway",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "new-thread",
+    value: "gateway",
+  }, {
+    tag: "DIV",
+    text: "BLE handoff\n1m",
+    action: "select",
+    value: "firmware",
+  }, {
+    tag: "BUTTON",
+    text: "↑",
+    action: "move",
+    value: "firmware|up",
+  }, {
+    tag: "BUTTON",
+    text: "↓",
+    action: "move",
+    value: "firmware|down",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "look",
+    value: "scratch",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "new-thread",
+    value: "scratch",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "bot-new",
+    value: "",
+  }, {
+    tag: "DIV",
+    text: "Tofu\nready",
+    action: "bot",
+    value: "tofu",
+  }, {
+    tag: "DIV",
+    text: "Pixel\nready",
+    action: "bot",
+    value: "pixel",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "room-new",
+    value: "",
+  }, {
+    tag: "BUTTON",
+    text: "Settings",
+    action: "flag",
+    value: "settings",
+  }, {
+    tag: "BUTTON",
+    text: "‹",
+    action: "select",
+    value: "",
+  }, {
+    tag: "BUTTON",
+    text: "Chat",
+    action: "bot-tab",
+    value: "chat",
+  }, {
+    tag: "BUTTON",
+    text: "Space",
+    action: "bot-tab",
+    value: "space",
+  }, {
+    tag: "BUTTON",
+    text: "Browser",
+    action: "bot-tab",
+    value: "browser",
+  }, {
+    tag: "BUTTON",
+    text: "Tasks",
+    action: "bot-tab",
+    value: "tasks",
+  }, {
+    tag: "BUTTON",
+    text: "Memory",
+    action: "bot-tab",
+    value: "memory",
+  }, {
+    tag: "BUTTON",
+    text: "Routines",
+    action: "bot-tab",
+    value: "routines",
+  }, {
+    tag: "BUTTON",
+    text: "Webhooks",
+    action: "bot-tab",
+    value: "hooks",
+  }, {
+    tag: "BUTTON",
+    text: "Settings",
+    action: "bot-tab",
+    value: "settings",
+  }, {
+    tag: "BUTTON",
+    text: "claude · claude-sonnet-5",
+    action: "flag",
+    value: "models",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "voice",
+    value: "",
+  }, {
+    tag: "BUTTON",
+    text: "Send",
+    action: "send",
+    value: "",
+  }
+]
+tabs: [ "chat", "space", "browser", "tasks", "memory", "routines", "hooks", "settings" ]
+
+=== catbot-webhooks ===
+Backplane
+0.11.2-dev.20261018.2043
+Mochi
+ready
+SENSOR NODE
+Coordinate rev C
+1m
+GATEWAY
+BLE handoff
+1m
+SCRATCH
+BOTS
+Tofu
+ready
+Pixel
+ready
+ROOMS
+Settings
+Tofu
+ready
+claude · claude-sonnet-5
+Chat
+Space
+Browser
+Tasks
+Memory
+Routines
+Webhooks
+Settings
+Review handoffs
+http://127.0.0.1:41029/hook/demo-review-hook
+0 calls
+Copy
+Token
+Revoke
+New webhook
+[
+  {
+    tag: "BUTTON",
+    text: "",
+    action: "proj-open",
+    value: "",
+  }, {
+    tag: "DIV",
+    text: "Mochi\nready",
+    action: "uber",
+    value: "mochi",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "look",
+    value: "sensor",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "new-thread",
+    value: "sensor",
+  }, {
+    tag: "DIV",
+    text: "Coordinate rev C\n1m",
+    action: "select",
+    value: "release",
+  }, {
+    tag: "BUTTON",
+    text: "↑",
+    action: "move",
+    value: "release|up",
+  }, {
+    tag: "BUTTON",
+    text: "↓",
+    action: "move",
+    value: "release|down",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "look",
+    value: "gateway",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "new-thread",
+    value: "gateway",
+  }, {
+    tag: "DIV",
+    text: "BLE handoff\n1m",
+    action: "select",
+    value: "firmware",
+  }, {
+    tag: "BUTTON",
+    text: "↑",
+    action: "move",
+    value: "firmware|up",
+  }, {
+    tag: "BUTTON",
+    text: "↓",
+    action: "move",
+    value: "firmware|down",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "look",
+    value: "scratch",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "new-thread",
+    value: "scratch",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "bot-new",
+    value: "",
+  }, {
+    tag: "DIV",
+    text: "Tofu\nready",
+    action: "bot",
+    value: "tofu",
+  }, {
+    tag: "DIV",
+    text: "Pixel\nready",
+    action: "bot",
+    value: "pixel",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "room-new",
+    value: "",
+  }, {
+    tag: "BUTTON",
+    text: "Settings",
+    action: "flag",
+    value: "settings",
+  }, {
+    tag: "BUTTON",
+    text: "‹",
+    action: "select",
+    value: "",
+  }, {
+    tag: "BUTTON",
+    text: "Chat",
+    action: "bot-tab",
+    value: "chat",
+  }, {
+    tag: "BUTTON",
+    text: "Space",
+    action: "bot-tab",
+    value: "space",
+  }, {
+    tag: "BUTTON",
+    text: "Browser",
+    action: "bot-tab",
+    value: "browser",
+  }, {
+    tag: "BUTTON",
+    text: "Tasks",
+    action: "bot-tab",
+    value: "tasks",
+  }, {
+    tag: "BUTTON",
+    text: "Memory",
+    action: "bot-tab",
+    value: "memory",
+  }, {
+    tag: "BUTTON",
+    text: "Routines",
+    action: "bot-tab",
+    value: "routines",
+  }, {
+    tag: "BUTTON",
+    text: "Webhooks",
+    action: "bot-tab",
+    value: "hooks",
+  }, {
+    tag: "BUTTON",
+    text: "Settings",
+    action: "bot-tab",
+    value: "settings",
+  }, {
+    tag: "BUTTON",
+    text: "Copy",
+    action: "copy",
+    value: "http://127.0.0.1:41029/hook/demo-review-hook",
+  }, {
+    tag: "BUTTON",
+    text: "Token",
+    action: "hook-token",
+    value: "demo-review-hook",
+  }, {
+    tag: "BUTTON",
+    text: "Revoke",
+    action: "hook-revoke",
+    value: "demo-review-hook",
+  }, {
+    tag: "BUTTON",
+    text: "New webhook",
+    action: "hook-new",
+    value: "",
+  }
+]
+
+=== catbot-space ===
+Backplane
+0.11.2-dev.20261018.2043
+Mochi
+ready
+SENSOR NODE
+Coordinate rev C
+1m
+GATEWAY
+BLE handoff
+1m
+SCRATCH
+BOTS
+Tofu
+ready
+Pixel
+ready
+ROOMS
+Settings
+Pixel
+ready
+claude · claude-sonnet-5
+Chat
+Space
+Browser
+Tasks
+Memory
+Routines
+Webhooks
+Settings
+Rev C control desk
+SENSOR NODE / REV C
+Review checks
+2 / 2
+Power + layout
+Handoffs
+Ready
+Sensor → gateway
+Review completion
+100%
+Work	Harness	State
+Power budget	Claude	Reviewed
+Layout	Grok	Reviewed
+BLE handoff	Muse	Ready
+
+A persistent project desk, kept by Pixel. Demo data for the README.
+
+Ready for integration
+[
+  {
+    tag: "BUTTON",
+    text: "",
+    action: "proj-open",
+    value: "",
+  }, {
+    tag: "DIV",
+    text: "Mochi\nready",
+    action: "uber",
+    value: "mochi",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "look",
+    value: "sensor",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "new-thread",
+    value: "sensor",
+  }, {
+    tag: "DIV",
+    text: "Coordinate rev C\n1m",
+    action: "select",
+    value: "release",
+  }, {
+    tag: "BUTTON",
+    text: "↑",
+    action: "move",
+    value: "release|up",
+  }, {
+    tag: "BUTTON",
+    text: "↓",
+    action: "move",
+    value: "release|down",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "look",
+    value: "gateway",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "new-thread",
+    value: "gateway",
+  }, {
+    tag: "DIV",
+    text: "BLE handoff\n1m",
+    action: "select",
+    value: "firmware",
+  }, {
+    tag: "BUTTON",
+    text: "↑",
+    action: "move",
+    value: "firmware|up",
+  }, {
+    tag: "BUTTON",
+    text: "↓",
+    action: "move",
+    value: "firmware|down",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "look",
+    value: "scratch",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "new-thread",
+    value: "scratch",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "bot-new",
+    value: "",
+  }, {
+    tag: "DIV",
+    text: "Tofu\nready",
+    action: "bot",
+    value: "tofu",
+  }, {
+    tag: "DIV",
+    text: "Pixel\nready",
+    action: "bot",
+    value: "pixel",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "room-new",
+    value: "",
+  }, {
+    tag: "BUTTON",
+    text: "Settings",
+    action: "flag",
+    value: "settings",
+  }, {
+    tag: "BUTTON",
+    text: "‹",
+    action: "select",
+    value: "",
+  }, {
+    tag: "BUTTON",
+    text: "Chat",
+    action: "bot-tab",
+    value: "chat",
+  }, {
+    tag: "BUTTON",
+    text: "Space",
+    action: "bot-tab",
+    value: "space",
+  }, {
+    tag: "BUTTON",
+    text: "Browser",
+    action: "bot-tab",
+    value: "browser",
+  }, {
+    tag: "BUTTON",
+    text: "Tasks",
+    action: "bot-tab",
+    value: "tasks",
+  }, {
+    tag: "BUTTON",
+    text: "Memory",
+    action: "bot-tab",
+    value: "memory",
+  }, {
+    tag: "BUTTON",
+    text: "Routines",
+    action: "bot-tab",
+    value: "routines",
+  }, {
+    tag: "BUTTON",
+    text: "Webhooks",
+    action: "bot-tab",
+    value: "hooks",
+  }, {
+    tag: "BUTTON",
+    text: "Settings",
+    action: "bot-tab",
+    value: "settings",
+  }
+]
+
+=== space-mobile ===
+‹
+Pixel
+ready
+claude · claude-sonnet-5
+Chat
+Space
+Browser
+Tasks
+Memory
+Routines
+Webhooks
+Settings
+Rev C control desk
+SENSOR NODE / REV C
+Review checks
+2 / 2
+Power + layout
+Handoffs
+Ready
+Sensor → gateway
+Review completion
+100%
+Work	Harness	State
+Power budget	Claude	Reviewed
+Layout	Grok	Reviewed
+BLE handoff	Muse	Ready
+
+A persistent project desk, kept by Pixel. Demo data for the README.
+
+Ready for integration
+[
+  {
+    tag: "BUTTON",
+    text: "",
+    action: "proj-open",
+    value: "",
+  }, {
+    tag: "DIV",
+    text: "Mochiready",
+    action: "uber",
+    value: "mochi",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "look",
+    value: "sensor",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "new-thread",
+    value: "sensor",
+  }, {
+    tag: "DIV",
+    text: "Coordinate rev C↑↓1m",
+    action: "select",
+    value: "release",
+  }, {
+    tag: "BUTTON",
+    text: "↑",
+    action: "move",
+    value: "release|up",
+  }, {
+    tag: "BUTTON",
+    text: "↓",
+    action: "move",
+    value: "release|down",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "look",
+    value: "gateway",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "new-thread",
+    value: "gateway",
+  }, {
+    tag: "DIV",
+    text: "BLE handoff↑↓1m",
+    action: "select",
+    value: "firmware",
+  }, {
+    tag: "BUTTON",
+    text: "↑",
+    action: "move",
+    value: "firmware|up",
+  }, {
+    tag: "BUTTON",
+    text: "↓",
+    action: "move",
+    value: "firmware|down",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "look",
+    value: "scratch",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "new-thread",
+    value: "scratch",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "bot-new",
+    value: "",
+  }, {
+    tag: "DIV",
+    text: "Tofuready",
+    action: "bot",
+    value: "tofu",
+  }, {
+    tag: "DIV",
+    text: "Pixelready",
+    action: "bot",
+    value: "pixel",
+  }, {
+    tag: "BUTTON",
+    text: "",
+    action: "room-new",
+    value: "",
+  }, {
+    tag: "BUTTON",
+    text: "Settings",
+    action: "flag",
+    value: "settings",
+  }, {
+    tag: "BUTTON",
+    text: "‹",
+    action: "select",
+    value: "",
+  }, {
+    tag: "BUTTON",
+    text: "Chat",
+    action: "bot-tab",
+    value: "chat",
+  }, {
+    tag: "BUTTON",
+    text: "Space",
+    action: "bot-tab",
+    value: "space",
+  }, {
+    tag: "BUTTON",
+    text: "Browser",
+    action: "bot-tab",
+    value: "browser",
+  }, {
+    tag: "BUTTON",
+    text: "Tasks",
+    action: "bot-tab",
+    value: "tasks",
+  }, {
+    tag: "BUTTON",
+    text: "Memory",
+    action: "bot-tab",
+    value: "memory",
+  }, {
+    tag: "BUTTON",
+    text: "Routines",
+    action: "bot-tab",
+    value: "routines",
+  }, {
+    tag: "BUTTON",
+    text: "Webhooks",
+    action: "bot-tab",
+    value: "hooks",
+  }, {
+    tag: "BUTTON",
+    text: "Settings",
+    action: "bot-tab",
+    value: "settings",
+  }
+]
+SPACE PAGE STATUS 200
+
+=== space-webapp ===
+PIXEL / PERSISTENT SPACE · DEMO
+Rev C control desk
+REVIEW CHECKS
+2 / 2
+Power budget + layout
+NEXT HANDOFF
+Ready
+Sensor node → gateway
+WORK	HARNESS	STATE
+Power budget	Claude	Reviewed
+Layout	Grok	Reviewed
+BLE handoff	Muse	Ready
+Reviews are back. Tofu keeps the handoff in its Mailbox; this desk keeps the project state visible between sessions.
+
+Fictional README fixture. No agent turns or live integrations.
+[]
+
+=== space-webapp-mobile ===
+PIXEL / PERSISTENT SPACE · DEMO
+Rev C control desk
+REVIEW CHECKS
+2 / 2
+Power budget + layout
+NEXT HANDOFF
+Ready
+Sensor node → gateway
+WORK	HARNESS	STATE
+Power budget	Claude	Reviewed
+Layout	Grok	Reviewed
+BLE handoff	Muse	Ready
+Reviews are back. Tofu keeps the handoff in its Mailbox; this desk keeps the project state visible between sessions.
+
+Fictional README fixture. No agent turns or live integrations.
+[]

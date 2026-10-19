@@ -1,0 +1,4 @@
+backplane 16:37:32 info hub: replayed 49 changes from /tmp/backplane-orchestration-d6awvcc3/events.jsonl
+Backplane listening on http://127.0.0.1:41029
+backplane 16:37:45 warn slow: ui.frame took 103.1 ms
+backplane 16:37:45 warn slow: ui.msg.frame took 107.6 ms

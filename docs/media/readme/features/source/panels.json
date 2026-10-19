@@ -1,0 +1,129 @@
+{
+  "reference-thread": {
+    "source": "raw/reference-thread.png",
+    "crop": [
+      530,
+      772,
+      1334,
+      990
+    ],
+    "native_size": [
+      804,
+      218
+    ],
+    "2x": "Nearest-neighbor enlargement of actual native pixels; not a higher-resolution rerender."
+  },
+  "reference-room": {
+    "source": "raw/reference-room.png",
+    "crop": [
+      530,
+      772,
+      1334,
+      990
+    ],
+    "native_size": [
+      804,
+      218
+    ],
+    "2x": "Nearest-neighbor enlargement of actual native pixels; not a higher-resolution rerender."
+  },
+  "reference-project": {
+    "source": "raw/reference-project.png",
+    "crop": [
+      530,
+      772,
+      1334,
+      990
+    ],
+    "native_size": [
+      804,
+      218
+    ],
+    "2x": "Nearest-neighbor enlargement of actual native pixels; not a higher-resolution rerender."
+  },
+  "reference-bot": {
+    "source": "raw/reference-bot.png",
+    "crop": [
+      530,
+      772,
+      1334,
+      990
+    ],
+    "native_size": [
+      804,
+      218
+    ],
+    "2x": "Nearest-neighbor enlargement of actual native pixels; not a higher-resolution rerender."
+  },
+  "btw-autocomplete": {
+    "source": "raw/btw-autocomplete.png",
+    "crop": [
+      530,
+      830,
+      1334,
+      990
+    ],
+    "native_size": [
+      804,
+      160
+    ],
+    "2x": "Nearest-neighbor enlargement of actual native pixels; not a higher-resolution rerender."
+  },
+  "btw-draft": {
+    "source": "raw/btw-draft.png",
+    "crop": [
+      530,
+      865,
+      1334,
+      990
+    ],
+    "native_size": [
+      804,
+      125
+    ],
+    "2x": "Nearest-neighbor enlargement of actual native pixels; not a higher-resolution rerender."
+  },
+  "inline-terminal": {
+    "source": "raw/inline-terminal.png",
+    "crop": [
+      530,
+      348,
+      1285,
+      677
+    ],
+    "native_size": [
+      755,
+      329
+    ],
+    "2x": "Nearest-neighbor enlargement of actual native pixels; not a higher-resolution rerender."
+  },
+  "model-picker": {
+    "source": "raw/model-picker.png",
+    "crop": [
+      530,
+      748,
+      1334,
+      990
+    ],
+    "native_size": [
+      804,
+      242
+    ],
+    "2x": "Nearest-neighbor enlargement of actual native pixels; not a higher-resolution rerender."
+  },
+  "link-cards": {
+    "source": "links/raw/link-cards.png",
+    "crop": [
+      530,
+      136,
+      1030,
+      289
+    ],
+    "native_size": [
+      500,
+      153
+    ],
+    "runtime": "Existing run3 candidate binary; see links/source/capture.json. Render appearance only; activation not tested.",
+    "2x": "Nearest-neighbor enlargement of actual native pixels; not a higher-resolution rerender."
+  }
+}

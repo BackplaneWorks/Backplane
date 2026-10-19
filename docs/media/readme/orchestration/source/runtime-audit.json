@@ -1,0 +1,94 @@
+{
+  "appended_events": [
+    {
+      "$": "ProjectCreated",
+      "id": "scratch",
+      "title": "Scratch",
+      "root": "/tmp/backplane-orchestration-d6awvcc3/scratch",
+      "at": 1792427852
+    },
+    {
+      "$": "AskClosed",
+      "id": "demo-question",
+      "answer": "",
+      "at": 1792427852
+    },
+    {
+      "$": "ActivityLogged",
+      "thread": "firmware",
+      "act": "r1792427852-49",
+      "tone": "error",
+      "kind": "restart",
+      "summary": "Backplane restarted: this request can no longer be answered",
+      "at": 1792427852
+    },
+    {
+      "$": "PendingChanged",
+      "thread": "firmware",
+      "count": 0,
+      "at": 1792427852
+    },
+    {
+      "$": "SettingSet",
+      "key": "machine.id",
+      "value": "m9ecd423eb1e6f45597d5547384301be6574caf746a249984",
+      "at": 1792427852
+    },
+    {
+      "$": "UberOp",
+      "uid": "demo-mochi",
+      "origin": "m9ecd423eb1e6f45597d5547384301be6574caf746a249984",
+      "n": 1,
+      "stamp": "1792427852.000000.m9ecd423eb1e6f45597d5547384301be6574caf746a249984",
+      "op": "{\"k\":\"who\",\"name\":\"Mochi\",\"look\":3,\"persona\":\"Coordinates projects, bots and threads.\"}",
+      "at": 1792427852
+    },
+    {
+      "$": "UberOp",
+      "uid": "demo-mochi",
+      "origin": "m9ecd423eb1e6f45597d5547384301be6574caf746a249984",
+      "n": 2,
+      "stamp": "1792427852.000001.m9ecd423eb1e6f45597d5547384301be6574caf746a249984",
+      "op": "{\"k\":\"lease\",\"holder\":\"m9ecd423eb1e6f45597d5547384301be6574caf746a249984\",\"term\":1}",
+      "at": 1792427852
+    },
+    {
+      "$": "UberOp",
+      "uid": "demo-mochi",
+      "origin": "m9ecd423eb1e6f45597d5547384301be6574caf746a249984",
+      "n": 3,
+      "stamp": "1792427852.000002.m9ecd423eb1e6f45597d5547384301be6574caf746a249984",
+      "op": "{\"k\":\"bind\",\"machine\":\"m9ecd423eb1e6f45597d5547384301be6574caf746a249984\",\"bot\":\"mochi\",\"thread\":\"bt-mochi\",\"name\":\"Mochi\"}",
+      "at": 1792427852
+    },
+    {
+      "$": "SettingSet",
+      "key": "tz.machine",
+      "value": "America/New_York",
+      "at": 1792427852
+    },
+    {
+      "$": "SettingSet",
+      "key": "tz.rule.America/New_York",
+      "value": "EST5EDT,M3.2.0,M11.1.0",
+      "at": 1792427852
+    },
+    {
+      "$": "SettingSet",
+      "key": "tz.checked",
+      "value": "1792427852",
+      "at": 1792427852
+    },
+    {
+      "$": "MailMarked",
+      "bot": "tofu",
+      "conv": "demo-mail-2",
+      "status": "open",
+      "seen": 1792427779,
+      "until": 0,
+      "at": 1792427863
+    }
+  ],
+  "forbidden_agent_events": [],
+  "blocked_agent_invocations": "grok models\nclaude -p\nclaude --version\ncodex --version\ngrok --version\nmuse serve\nmuse --version\n"
+}

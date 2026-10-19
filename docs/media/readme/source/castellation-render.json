@@ -1,0 +1,17 @@
+{
+  "renderer_commit": "f7b0d954a",
+  "renderer_worktree": "/home/h/Documents/i2cjak/bp-castellation-render",
+  "renderer_binary": "build/pcb3d_frame",
+  "capture_wrapper": "build/capture-royalblue.sh",
+  "source_frame": "build/royalblue-enig-0-fine.png",
+  "asset_sha256": "748653bb25dee846f387591e2964bcdd9f1b0c64a46b2f14b0e6d9e93df7c04a",
+  "board": "/home/h/Documents/Backplane/Backplane_KiCad/demos/royalblue54L_feather/RoyalBlue54L-Feather.kicad_pcb",
+  "board_sha256": "535dbe212f43a8bab12b23277e176a94ac9694177258af2981c0e7b08e4b7252",
+  "capture": "direct native 3D and 2D board frames, composed below their original native tab bars",
+  "implementation_status": "isolated renderer fix; no installation, deployment or merge",
+  "verification_status": "Verified exposed flat ENIG lands, complete inner annuli and plated castellation half-barrels in top and oblique closeups. All 50 test programs, 18 finish checks, seven native pixel checks and the law proof pass.",
+  "source_2d_frame": "build/royalblue-enig-board2d.png",
+  "source_closeup": "build/royalblue-enig-closeup-0.png",
+  "asset_2d_sha256": "89ce30fa4e7dc62d34bb6d0044d8157d0634e61cf719781e2f93dd2966d12f38",
+  "tests": "/home/h/Documents/i2cjak/bp-castellation-render/build/{all-tests-enig,pad-finish-test-enig,pad-finish-probe-enig,proof-enig}.log"
+}

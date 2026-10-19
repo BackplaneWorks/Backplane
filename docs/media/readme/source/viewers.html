@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RoyalBlue54L viewer composition</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: #0b0d10; }
+  #composition { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 430px 580px; gap: 12px; width: 1280px; height: 1046px; padding: 12px; }
+  .panel { --s: .85; --cy: 480; --cx: 1267; --iw: 1600; background: #08090a; border: 1px solid #2a3038; overflow: hidden; }
+  .primary { --s: .62; --cx: 800; --cy: 500; }
+  .pcb { --s: .45; --cx: 720; --cy: 450; --iw: 1400; }
+  .schematic { grid-column: span 2; --s: 1; --cx: 2466; --cy: 978; --iw: 3200; }
+  .bar { position: relative; height: 51px; overflow: hidden; }
+  .bar img { position: absolute; left: -933px; top: 0; width: 1600px; max-width: none; }
+  .viewport { position: relative; overflow: hidden; height: calc(100% - 51px); }
+  .viewport img { position: absolute; max-width: none; width: calc(var(--iw) * 1px * var(--s)); left: calc(50% - var(--cx) * 1px * var(--s)); top: calc(50% - var(--cy) * 1px * var(--s)); }
+</style>
+<div id="composition">
+  <div class="panel primary">
+    <div class="bar"><img src="../royalblue-3d.png" alt=""></div>
+    <div class="viewport"><img src="../royalblue-3d-corrected.png" alt="RoyalBlue54L rendered by Backplane with clipped castellated pads"></div>
+  </div>
+  <div class="panel pcb">
+    <div class="bar"><img src="../royalblue-board.png" alt=""></div>
+    <div class="viewport"><img src="../royalblue-board-corrected.png" alt="RoyalBlue54L in Backplane's PCB viewer"></div>
+  </div>
+  <div class="panel schematic">
+    <div class="bar"><img src="../royalblue-schematic.png" alt=""></div>
+    <div class="viewport"><img src="../royalblue-schematic-detail.png" alt="RoyalBlue54L nRF54L15 schematic in Backplane"></div>
+  </div>
+</div>
+<script>
+  const scale = Number(new URLSearchParams(location.search).get('scale') || 100) / 100;
+  document.querySelector('#composition').style.zoom = scale;
+</script>
+</html>

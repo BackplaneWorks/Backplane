@@ -1,0 +1,172 @@
+[
+  {
+    "readme": "README.md",
+    "path": "docs/media/readme/language-ja.svg",
+    "sha256": "b2424331b243c7727490ed94e5a872b240b35ffdcf8b0ad81d4a348d7374ede6"
+  },
+  {
+    "readme": "README.md",
+    "path": "docs/media/readme/royalblue-viewers-200.png",
+    "sha256": "7b57d9e6a9fae41af24f6e5f3d2b7323d044d7f7531d7078b75db8e9fe066535"
+  },
+  {
+    "readme": "README.md",
+    "path": "docs/media/readme/agent-setup-200.png",
+    "sha256": "40a564522cd90e125c5453065fe509188e7ad88ba543d88905501fda12c9ba77"
+  },
+  {
+    "readme": "README.md",
+    "path": "docs/media/readme/cad/pad-workbar-detail-200.png",
+    "sha256": "fe102d1a04b13c2afbab860664dca323058cb943a0a81aaf1c77473d10bc9ca2"
+  },
+  {
+    "readme": "README.md",
+    "path": "docs/media/readme/cad/cm5-mech-200.png",
+    "sha256": "2dedf1cffff65227ab380e961bedc4f67f0d720a3f2f290715fd3ffc601089f4"
+  },
+  {
+    "readme": "README.md",
+    "path": "docs/media/readme/cad/kicad-freecad-setup-200.png",
+    "sha256": "255acbaac88125b33df4b7bef852ac94e8419b3c08f2cccb5db7787f5fb03748"
+  },
+  {
+    "readme": "README.md",
+    "path": "docs/media/readme/orchestration/overview.png",
+    "sha256": "63f19b0b0a714760832cb18147516db04c8cd1051ff77172f95129371cfe9320"
+  },
+  {
+    "readme": "README.md",
+    "path": "docs/media/readme/orchestration/delegation.png",
+    "sha256": "19502548a20e4b43b942f5be745f10b34eb07ea4bfdd148fa7ec9c35cd25f970"
+  },
+  {
+    "readme": "README.md",
+    "path": "docs/media/readme/orchestration/webhooks.png",
+    "sha256": "11f4a1f0c7f9e420189c752f07bd923f0ceeb82c6ee66a7a152da4aaab3b824b"
+  },
+  {
+    "readme": "README.md",
+    "path": "docs/media/readme/mailroom-200.png",
+    "sha256": "01e4fe9ffc2b3e77be43c3aafb464e96a3a3abec7fbdf477b326f6108b9e1465"
+  },
+  {
+    "readme": "README.md",
+    "path": "docs/media/readme/orchestration/space.png",
+    "sha256": "419d8fde49652008b988e6cb751d6909cdeaedcbb5a1bd02a4b17fad360e47e4"
+  },
+  {
+    "readme": "README.md",
+    "path": "docs/media/readme/orchestration/space-webapp.png",
+    "sha256": "36d0c4ea69ed3917f78f1c5d0cc560e87cc7226c0a4d86a2df766dae355c5e56"
+  },
+  {
+    "readme": "README.md",
+    "path": "docs/media/readme/features/link-cards-2x.png",
+    "sha256": "85255d37b0404890463d884c24e6cdecf7cf1e2cc20edacdd92d6becb654e2a6"
+  },
+  {
+    "readme": "README.md",
+    "path": "docs/media/readme/reference-menus-200.png",
+    "sha256": "049d602f67cbda13e30a030c194c68720ed4eb9b3951cb0373a9fc60b2cb3b64"
+  },
+  {
+    "readme": "README.md",
+    "path": "docs/media/readme/features/inline-terminal-2x.png",
+    "sha256": "9979cf2ef7fd2ea3fda239a9ec4edc125b47952f7825efa84624cb359e1dfad2"
+  },
+  {
+    "readme": "README.md",
+    "path": "docs/media/readme/features/btw-autocomplete-2x.png",
+    "sha256": "83f3156618ffe0a0e3fe2960fddae312f7a32da9452a7d1f1529ee9d5c972093"
+  },
+  {
+    "readme": "README.md",
+    "path": "docs/media/readme/cad/cats-footer-200.png",
+    "sha256": "c71a12d44c78129a92787cce8ae00f0332935a1092aa20efa691a40c588b0b57"
+  },
+  {
+    "readme": "README.jp.md",
+    "path": "docs/media/readme/language-en.svg",
+    "sha256": "6a1a07ea714eba4c81f9af7e8b95edf41e7ca51858ab90daaa69711e8baec66a"
+  },
+  {
+    "readme": "README.jp.md",
+    "path": "docs/media/readme/royalblue-viewers-200.png",
+    "sha256": "7b57d9e6a9fae41af24f6e5f3d2b7323d044d7f7531d7078b75db8e9fe066535"
+  },
+  {
+    "readme": "README.jp.md",
+    "path": "docs/media/readme/agent-setup-200.png",
+    "sha256": "40a564522cd90e125c5453065fe509188e7ad88ba543d88905501fda12c9ba77"
+  },
+  {
+    "readme": "README.jp.md",
+    "path": "docs/media/readme/cad/pad-workbar-detail-200.png",
+    "sha256": "fe102d1a04b13c2afbab860664dca323058cb943a0a81aaf1c77473d10bc9ca2"
+  },
+  {
+    "readme": "README.jp.md",
+    "path": "docs/media/readme/cad/cm5-mech-200.png",
+    "sha256": "2dedf1cffff65227ab380e961bedc4f67f0d720a3f2f290715fd3ffc601089f4"
+  },
+  {
+    "readme": "README.jp.md",
+    "path": "docs/media/readme/cad/kicad-freecad-setup-200.png",
+    "sha256": "255acbaac88125b33df4b7bef852ac94e8419b3c08f2cccb5db7787f5fb03748"
+  },
+  {
+    "readme": "README.jp.md",
+    "path": "docs/media/readme/orchestration/overview.png",
+    "sha256": "63f19b0b0a714760832cb18147516db04c8cd1051ff77172f95129371cfe9320"
+  },
+  {
+    "readme": "README.jp.md",
+    "path": "docs/media/readme/orchestration/delegation.png",
+    "sha256": "19502548a20e4b43b942f5be745f10b34eb07ea4bfdd148fa7ec9c35cd25f970"
+  },
+  {
+    "readme": "README.jp.md",
+    "path": "docs/media/readme/orchestration/webhooks.png",
+    "sha256": "11f4a1f0c7f9e420189c752f07bd923f0ceeb82c6ee66a7a152da4aaab3b824b"
+  },
+  {
+    "readme": "README.jp.md",
+    "path": "docs/media/readme/mailroom-200.png",
+    "sha256": "01e4fe9ffc2b3e77be43c3aafb464e96a3a3abec7fbdf477b326f6108b9e1465"
+  },
+  {
+    "readme": "README.jp.md",
+    "path": "docs/media/readme/orchestration/space.png",
+    "sha256": "419d8fde49652008b988e6cb751d6909cdeaedcbb5a1bd02a4b17fad360e47e4"
+  },
+  {
+    "readme": "README.jp.md",
+    "path": "docs/media/readme/orchestration/space-webapp.png",
+    "sha256": "36d0c4ea69ed3917f78f1c5d0cc560e87cc7226c0a4d86a2df766dae355c5e56"
+  },
+  {
+    "readme": "README.jp.md",
+    "path": "docs/media/readme/features/link-cards-2x.png",
+    "sha256": "85255d37b0404890463d884c24e6cdecf7cf1e2cc20edacdd92d6becb654e2a6"
+  },
+  {
+    "readme": "README.jp.md",
+    "path": "docs/media/readme/reference-menus-200.png",
+    "sha256": "049d602f67cbda13e30a030c194c68720ed4eb9b3951cb0373a9fc60b2cb3b64"
+  },
+  {
+    "readme": "README.jp.md",
+    "path": "docs/media/readme/features/inline-terminal-2x.png",
+    "sha256": "9979cf2ef7fd2ea3fda239a9ec4edc125b47952f7825efa84624cb359e1dfad2"
+  },
+  {
+    "readme": "README.jp.md",
+    "path": "docs/media/readme/features/btw-autocomplete-2x.png",
+    "sha256": "83f3156618ffe0a0e3fe2960fddae312f7a32da9452a7d1f1529ee9d5c972093"
+  },
+  {
+    "readme": "README.jp.md",
+    "path": "docs/media/readme/cad/cats-footer-200.png",
+    "sha256": "c71a12d44c78129a92787cce8ae00f0332935a1092aa20efa691a40c588b0b57"
+  }
+]

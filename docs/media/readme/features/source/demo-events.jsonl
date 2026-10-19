@@ -1,0 +1,13 @@
+{"$": "SettingSet", "key": "onboarded", "value": "1", "at": 1792427618}
+{"$": "ProjectCreated", "id": "demo-board", "title": "Sensor Board", "root": "/tmp/bp-readme-features-0qrwb32o/demo-project", "at": 1792427618}
+{"$": "ThreadCreated", "id": "demo-main", "project": "demo-board", "title": "Review the sensor board", "env": "local", "branch": "", "worktree": "", "provider": "codex", "model": "gpt-6.1-sol", "at": 1792427618}
+{"$": "ThreadCreated", "id": "demo-layout", "project": "demo-board", "title": "Layout review", "env": "local", "branch": "", "worktree": "", "provider": "codex", "model": "gpt-6.1-sol", "at": 1792427618}
+{"$": "ThreadCreated", "id": "demo-power", "project": "demo-board", "title": "Power budget", "env": "local", "branch": "", "worktree": "", "provider": "codex", "model": "gpt-6.1-sol", "at": 1792427618}
+{"$": "ThreadCreated", "id": "demo-bot-thread", "project": "demo-board", "title": "Miso", "env": "local", "branch": "", "worktree": "", "provider": "codex", "model": "gpt-6.1-sol", "at": 1792427618}
+{"$": "BotSet", "id": "demo-miso", "name": "Miso", "thread": "demo-bot-thread", "look": 2, "persona": "Helps review circuits and check design decisions.", "at": 1792427618}
+{"$": "RoomSet", "id": "demo-hardware", "name": "Hardware review", "members": ["demo-miso"], "at": 1792427618}
+{"$": "SettingSet", "key": "summary.demo-layout", "value": "Placement, routing, and connector access.", "at": 1792427618}
+{"$": "SettingSet", "key": "summary.demo-power", "value": "Sleep current and battery life.", "at": 1792427618}
+{"$": "SettingSet", "key": "summary.demo-board", "value": "A small battery powered environmental sensor.", "at": 1792427618}
+{"$": "MessagePosted", "thread": "demo-main", "msg": "demo-m1", "role": "user", "text": "Keep the design review connected across threads, projects, and bots.", "at": 1792427618}
+{"$": "MessagePosted", "thread": "demo-main", "msg": "demo-m2", "role": "assistant", "text": "The review is organized here:\n\n[Layout review](backplane://thread/demo-layout)\n\n[Miso](backplane://bot/demo-miso)\n\n[Sensor Board](backplane://project/demo-board)\n\nUse references in the composer to bring the right context into the conversation.", "at": 1792427618}

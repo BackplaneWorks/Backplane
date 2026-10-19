@@ -1,0 +1,211 @@
+{
+  "created": "2026-10-19",
+  "scope": "Only docs/media/readme/cad/ written. README, shared render helpers, app code, source CAD and approved RoyalBlue montage untouched.",
+  "capture": {
+    "application": "/home/h/.local/share/backplane/backplane",
+    "app_sha256": "17e717c9104a77b185016196d1e367303690ea3bea1a68e50bd08254e1db8911",
+    "isolation": "Each run used a new /tmp/backplane-readme-* BACKPLANE_HOME, private Xvfb, random localhost port, --no-tailscale and BACKPLANE_NO_UPDATE=1. Only captured PIDs were terminated.",
+    "native_viewport": [
+      1600,
+      1000
+    ],
+    "source_script": "source/capture-interactions.py",
+    "replay_interaction": "uv run --no-project --python /usr/bin/python3 python docs/media/readme/cad/source/capture-interactions.py",
+    "replay_mech": "README_CAPTURE_KIND=mech uv run --no-project --python /usr/bin/python3 python docs/media/readme/cad/source/capture-interactions.py",
+    "board_actions": [
+      "viewer_show(kind=board, original RoyalBlue board path)",
+      "click native pixel 1237,378: J2 pad 1, +BATT",
+      "click native pixel 1040,862: Mention in chat",
+      "capture with selected pad inspector and generated metadata still in unsent composer"
+    ],
+    "no_agent_run": true,
+    "no_source_cad_edits": true,
+    "setup_capture": "source/kicad-freecad-settings-native.png is the actual Settings view from /tmp/backplane-readme-h9_t0d39, after 34 downward wheel notches. Shows Backplane KiCad 10.99.0-bp.4, API 2 from env; KiCad IPC On; configured FreeCAD path.",
+    "mech_source": "/home/h/Documents/Backplane/Backplane_Demos/phaser_1248/mechanical/sources/1590BB_STEP/1590BB.stp",
+    "mech_source_sha256": "81c092d862b550f61da4f679fae6d13706336464871895cc4b03258079952291"
+  },
+  "archival_mech": {
+    "original": "/home/h/Documents/i2cjak/bp-coord/boat/wt-a/docs/media/web-mech.png",
+    "original_sha256": "74dffa23d7dbc3b8453d4463cc097fe785f301a35bdd6e46ffeacb58a68cd8bb",
+    "last_commit_touching_original": "a65d61a3fb639246fc026c8491b2da3eda012d9e",
+    "source_copy": "source/web-mech-existing.png",
+    "description": "Existing Backplane web UI screenshot showing the CM5 case assembly on Mech, with its existing thread. Reused without rewriting UI text or the transcript. This session did not regenerate that design or run the pictured agent turn."
+  },
+  "cats": {
+    "original": "docs/media/cats.png",
+    "source_copy": "source/cats-original.png",
+    "original_sha256": "bc3c3150eabcc9e6399b72c0231f0050fd8aa72799f81ad6d90c031d56bcffc5",
+    "last_commit_touching_original": "bc026e6d7ca5f648f2b00c7420a8f9328fe98dac",
+    "description": "Three actual Backplane cats from the original top row: idle ginger, working ginger with laptop, thinking ginger. Solid original #111111 background, no invented art. Export 432x144; suggested display 216x72.",
+    "implementation_references": [
+      "src/core/cat.bend",
+      "src/web/cat.bend"
+    ]
+  },
+  "export": {
+    "script": "source/export-assets.py",
+    "recipe": "source/exports.json",
+    "scale": "200% means twice the source crop dimensions for UI captures, using Lanczos. These are raster exports, not a claim of native HiDPI capture. Footer is rendered from higher resolution original cells at twice its suggested display size.",
+    "content_edits": "No UI retouching, fabricated text, AI-generated pixels or CAD geometry edits. Cropping, explicitly recorded same-frame crop joins, and resampling only."
+  },
+  "limitations": [
+    "The large existing Phaser 1590BB_proposed_assembly.step failed to mesh in the installed app. Diagnostic preserved in source/phaser-mesh-limit.png and source/capture-phaser-mesh-limit.json. It is not a successful showcase image.",
+    "The successful fresh Mech capture shows the existing vendor Hammond 1590BB STEP from the Phaser demo. The more elaborate CM5 exploded assembly screenshot is archival.",
+    "The setup image shows installed integration configuration. It does not demonstrate a schematic IPC command or a CAD skill invocation.",
+    "The pad mention is an unsent draft. No agent answer or agent step was staged for these captures.",
+    "No installed-app 3D board screenshot was captured; the approved RoyalBlue montage remains unchanged."
+  ],
+  "recommended_assets": [
+    "pad-mention-compact-200.png",
+    "enclosure-mech-landscape-200.png",
+    "cm5-mech-detail-200.png",
+    "kicad-freecad-setup-200.png",
+    "cats-footer-200.png"
+  ],
+  "files": [
+    {
+      "path": "cats-footer-200.png",
+      "bytes": 43388,
+      "sha256": "c71a12d44c78129a92787cce8ae00f0332935a1092aa20efa691a40c588b0b57"
+    },
+    {
+      "path": "cm5-mech-200.png",
+      "bytes": 1936225,
+      "sha256": "2dedf1cffff65227ab380e961bedc4f67f0d720a3f2f290715fd3ffc601089f4"
+    },
+    {
+      "path": "cm5-mech-detail-200.png",
+      "bytes": 690835,
+      "sha256": "16e5296f188d009978c520871576cded19c9d128951e6e68c196cd3f9c7c5eac"
+    },
+    {
+      "path": "enclosure-mech-200.png",
+      "bytes": 105126,
+      "sha256": "80408e0805209580f365eb1ebb57666f9b3c556c2b9df634e1987ebcd20aae6a"
+    },
+    {
+      "path": "enclosure-mech-full-200.png",
+      "bytes": 306722,
+      "sha256": "821ad1616bb816d61d29158f9d221bdd8403d34f1f1312798c46ab79d2340ec4"
+    },
+    {
+      "path": "enclosure-mech-landscape-200.png",
+      "bytes": 97523,
+      "sha256": "3fc3c49f07161d901863135890ad31b7d28fdd42697fce9cf5c2a63896dcf158"
+    },
+    {
+      "path": "kicad-freecad-setup-200.png",
+      "bytes": 118588,
+      "sha256": "255acbaac88125b33df4b7bef852ac94e8419b3c08f2cccb5db7787f5fb03748"
+    },
+    {
+      "path": "pad-mention-compact-200.png",
+      "bytes": 182735,
+      "sha256": "e891f4186820e0b12b292c2122993f9c142e945580cbf0812fcce43c2e0fd749"
+    },
+    {
+      "path": "pad-mentioned-200.png",
+      "bytes": 1067754,
+      "sha256": "c27c383b0fced7ca90fc36fe40e86968bb66203bc6f859b74c1d207a6f43dd8a"
+    },
+    {
+      "path": "pad-selected-200.png",
+      "bytes": 1007883,
+      "sha256": "e75f716e0ed6c6eebddc710f6ab281dd318344211953dee98a3192bd1b0ae874"
+    },
+    {
+      "path": "pad-workbar-detail-200.png",
+      "bytes": 205243,
+      "sha256": "fe102d1a04b13c2afbab860664dca323058cb943a0a81aaf1c77473d10bc9ca2"
+    },
+    {
+      "path": "source/board-loaded-native.png",
+      "bytes": 208248,
+      "sha256": "1f17c323451958cc9773a77f0e0e3007c6ebd10c098da575db94fc9502f1da32"
+    },
+    {
+      "path": "source/capture-interaction.json",
+      "bytes": 1185,
+      "sha256": "21d89308f9ca6ba139b4cf31be5168ec93e534eb7fcc1c37143779fb8f65cdd1"
+    },
+    {
+      "path": "source/capture-interactions.py",
+      "bytes": 6123,
+      "sha256": "96fd9f99a2bab291342feb3f9e125c000cc254bc0cb18f1822c5fd774ac53387"
+    },
+    {
+      "path": "source/capture-mech.json",
+      "bytes": 1344,
+      "sha256": "833b4146689e78961342d0aa49a59fa043ff0e4a50825652388005d5509f4bae"
+    },
+    {
+      "path": "source/capture-phaser-mesh-limit.json",
+      "bytes": 1354,
+      "sha256": "d4c1bcd5bcb2ef35355e9a3aeced99669115d70974fcefdb96473e6719963789"
+    },
+    {
+      "path": "source/cats-original.png",
+      "bytes": 216746,
+      "sha256": "bc3c3150eabcc9e6399b72c0231f0050fd8aa72799f81ad6d90c031d56bcffc5"
+    },
+    {
+      "path": "source/enclosure-mech-native.png",
+      "bytes": 57280,
+      "sha256": "666a5844870212b7cbfae68f428d5e52a23e20cfc01b3f94858dc7006cffffe8"
+    },
+    {
+      "path": "source/export-assets.py",
+      "bytes": 4333,
+      "sha256": "893107c20efcd7688341444b87dd33515a933f1fa3a66d6eb14c31fe67ba81a9"
+    },
+    {
+      "path": "source/exports.json",
+      "bytes": 5791,
+      "sha256": "64499134e557648d06426453a1a9cbea8444a429c6d699f8824fc15316a4b03b"
+    },
+    {
+      "path": "source/kicad-freecad-settings-native.png",
+      "bytes": 104135,
+      "sha256": "c5e8f26afaf4bef1aab0ecde897922dd9ab8fcaf0a69c48b987c6b1fc130d491"
+    },
+    {
+      "path": "source/pad-mentioned-native.png",
+      "bytes": 229172,
+      "sha256": "fdb13e33426ae222092c01ed80e60bd31f47c436e77c2cc953993c0dc2223fd9"
+    },
+    {
+      "path": "source/pad-selected-native.png",
+      "bytes": 220799,
+      "sha256": "48df2286815092a8a36656f4ff00e903d9816a260e5e513baf4f13e361118708"
+    },
+    {
+      "path": "source/phaser-mesh-limit.png",
+      "bytes": 52628,
+      "sha256": "a5247554204f92ef6bc2dc8ad2fc134a568b7fc928ff5eceb5ad86314e75bc3f"
+    },
+    {
+      "path": "source/viewer-show-board.json",
+      "bytes": 206,
+      "sha256": "dc2fa93d9c5057a78c400243bacb55878e1baa31a444efe727ca305169b41c07"
+    },
+    {
+      "path": "source/viewer-show-mech.json",
+      "bytes": 202,
+      "sha256": "88186f7f2e70e0a8e7e84bd3e7f5dabce731bf4ca7cbb7c2a123143293af19ba"
+    },
+    {
+      "path": "source/web-mech-existing.png",
+      "bytes": 577009,
+      "sha256": "74dffa23d7dbc3b8453d4463cc097fe785f301a35bdd6e46ffeacb58a68cd8bb"
+    }
+  ],
+  "revision_notes": [
+    "Added pad-mention-compact-200.png (2048x442): two rectangles from the same actual frame, composer and selected-pad inspector, joined horizontally to remove empty space.",
+    "Added enclosure-mech-landscape-200.png (1334x992): native Mech tabs/file strip joined directly above the model crop from the same frame, removing the empty vertical gap.",
+    "These compact images are explicitly cropped compositions, not contiguous full-window captures. Every pre-resample pixel comes from the recorded native frame; no UI was redrawn.",
+    "Existing exports, source captures, footer and approved RoyalBlue montage preserved.",
+    "No new demo conversation was copied or generated. Fixtures remain the three initial settings/project/thread events. The archival CM5 image comes from an already committed documentation asset; the detail export excludes its conversation.",
+    "Future capture runs select private Xvfb displays only in 110-119. No application restart or new capture was needed for this revision.",
+    "Latest source reference supplied by parent: /home/h/Documents/i2cjak/bp-coord/release-prep/worktree at ac2b41fd2. This crop-only revision does not depend on event schema changes."
+  ]
+}

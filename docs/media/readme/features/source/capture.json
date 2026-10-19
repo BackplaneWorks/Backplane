@@ -1,0 +1,26 @@
+{
+  "app": "/home/h/.local/share/backplane/backplane",
+  "app_sha256": "17e717c9104a77b185016196d1e367303690ea3bea1a68e50bd08254e1db8911",
+  "installed_commit_file": "e6f8c9a48194d79cf71a9304fb12c57b82bff58b",
+  "viewport": [
+    1600,
+    1000
+  ],
+  "temporary_home": "/tmp/bp-readme-features-0qrwb32o",
+  "display": ":100",
+  "captures": [
+    "startup",
+    "selected",
+    "reference-thread",
+    "reference-room",
+    "reference-project",
+    "reference-bot",
+    "reference-caret",
+    "btw-autocomplete",
+    "btw-draft",
+    "link-cards",
+    "inline-terminal",
+    "model-picker"
+  ],
+  "capture": "Actual native app pixels; seeded documented event fixture; no agent turns or sent chat messages; loopback terminal_open launches local vi only."
+}

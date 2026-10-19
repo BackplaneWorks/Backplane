@@ -1,0 +1,162 @@
+[
+  {
+    "path": "overview.png",
+    "raw": "raw/uberbot-overview.png",
+    "raw_size": [
+      2000,
+      1440
+    ],
+    "crop_pixels": [
+      0,
+      0,
+      2000,
+      1050
+    ],
+    "size": [
+      2000,
+      1050
+    ],
+    "sha256": "63f19b0b0a714760832cb18147516db04c8cd1051ff77172f95129371cfe9320",
+    "note": "Uberbot, projects, threads and persistent bots; installed web client at 2x."
+  },
+  {
+    "path": "delegation.png",
+    "raw": "raw/subagent-panel.png",
+    "raw_size": [
+      2000,
+      1440
+    ],
+    "crop_pixels": [
+      528,
+      0,
+      2000,
+      1020
+    ],
+    "size": [
+      1472,
+      1020
+    ],
+    "sha256": "19502548a20e4b43b942f5be745f10b34eb07ea4bfdd148fa7ec9c35cd25f970",
+    "note": "Actual expanded Subagents panel, Claude and Grok tasks under a Codex parent; installed web client at 2x."
+  },
+  {
+    "path": "space.png",
+    "raw": "raw/catbot-space.png",
+    "raw_size": [
+      2000,
+      1440
+    ],
+    "crop_pixels": [
+      528,
+      0,
+      2000,
+      1050
+    ],
+    "size": [
+      1472,
+      1050
+    ],
+    "sha256": "419d8fde49652008b988e6cb751d6909cdeaedcbb5a1bd02a4b17fad360e47e4",
+    "note": "Persistent structured Space dashboard in the real bot tab; installed web client at 2x."
+  },
+  {
+    "path": "mailroom.png",
+    "raw": "raw/native-mail-conversation.png",
+    "raw_size": [
+      1600,
+      1000
+    ],
+    "crop_pixels": [
+      264,
+      0,
+      1600,
+      440
+    ],
+    "size": [
+      1336,
+      440
+    ],
+    "sha256": "881840bcacdd96e2281fcd4119766a3eb8185fd1c0d0177da96c1cedbbeff475",
+    "note": "Native Mailroom: seeded conversations and one open body. Exact 1x pixels; no scaling."
+  },
+  {
+    "path": "webhooks.png",
+    "raw": "raw/catbot-webhooks.png",
+    "raw_size": [
+      2000,
+      1440
+    ],
+    "crop_pixels": [
+      528,
+      0,
+      2000,
+      460
+    ],
+    "size": [
+      1472,
+      460
+    ],
+    "sha256": "11f4a1f0c7f9e420189c752f07bd923f0ceeb82c6ee66a7a152da4aaab3b824b",
+    "note": "Actual Webhooks tab, fictional localhost hook; installed web client at 2x."
+  },
+  {
+    "path": "space-webapp.png",
+    "raw": "raw/space-webapp-mobile.png",
+    "raw_size": [
+      960,
+      1440
+    ],
+    "crop_pixels": [
+      0,
+      0,
+      960,
+      1440
+    ],
+    "size": [
+      960,
+      1440
+    ],
+    "sha256": "36d0c4ea69ed3917f78f1c5d0cc560e87cc7226c0a4d86a2df766dae355c5e56",
+    "note": "Real HTML Space endpoint, responsive demo webapp at 480 CSS pixels and 2x device density."
+  },
+  {
+    "path": "delegation-mobile.png",
+    "raw": "raw/subagents-mobile.png",
+    "raw_size": [
+      960,
+      1440
+    ],
+    "crop_pixels": [
+      0,
+      0,
+      960,
+      1440
+    ],
+    "size": [
+      960,
+      1440
+    ],
+    "sha256": "8f898f29e8fb9a0c4f023366beb6a3410bc7bc58871418025e11c68ce5be4dc8",
+    "note": "Actual responsive thread/subagent UI at 480 CSS pixels and 2x device density."
+  },
+  {
+    "path": "space-mobile.png",
+    "raw": "raw/space-mobile.png",
+    "raw_size": [
+      960,
+      1440
+    ],
+    "crop_pixels": [
+      0,
+      0,
+      960,
+      1440
+    ],
+    "size": [
+      960,
+      1440
+    ],
+    "sha256": "422090591ea1503abcde5025df0a9ced243c788f3d88fb07228713720cbdf599",
+    "note": "Actual responsive structured Space tab at 480 CSS pixels and 2x device density."
+  }
+]
