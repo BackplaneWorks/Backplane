@@ -108,6 +108,32 @@ class Lifecycle(unittest.TestCase):
         self.assertIn('helper-old', (self.prefix / runtime.HELPER).read_text())
         self.assertFalse((self.prefix / 'browser-current').exists())
 
+    def test_public_install_opts_in_clean_prefix_and_keeps_previous_pair(self):
+        shutil.rmtree(self.old)
+        (self.prefix / runtime.HELPER).unlink()
+        # The staged runtime still comes from a separately prepared build.
+        self.old.mkdir(parents=True)
+        for name in ('backplane-cef', 'libcef.so', 'icudtl.dat'):
+            (self.old / name).write_text('runtime fixture')
+        first = self.package('public-first')
+        shutil.rmtree(self.old)
+        runtime.install(first, self.prefix, enable=True)
+        self.assertIn('helper-public-first', self.pair()[0])
+        self.assertIn('host-public-first', self.pair()[1])
+        self.assertFalse((self.prefix / 'browser-previous').exists())
+        # A second matched public payload retains a rollback pair.
+        first_payload = (self.prefix / 'browser-current').resolve()
+        second = self.root / 'public-second'
+        second.mkdir()
+        shutil.copytree(first_payload, second / 'browser-runtime')
+        (second / 'browser-runtime' / runtime.HELPER).write_text('#!/bin/sh\necho second\n')
+        (second / 'browser-runtime' / 'manifest.json').unlink()
+        runtime.seal(second / 'browser-runtime', 'public-second')
+        runtime.install(second, self.prefix, enable=True)
+        self.assertEqual((self.prefix / 'browser-previous').resolve(), first_payload)
+        runtime.rollback(self.prefix)
+        self.assertIn('helper-public-first', self.pair()[0])
+
     def test_corruption_and_mismatched_helper_leave_current_pair(self):
         runtime.install(self.package('first'), self.prefix)
         before = self.pair()

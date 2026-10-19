@@ -88,4 +88,7 @@ if command -v bun >/dev/null 2>&1 || [ -x "$HOME/.bun/bin/bun" ]; then
 else
   echo "bun not found: skipping backplane-browser, backplane-step2glb, backplane-voice and backplane-kipc"
 fi
+if [ "${BACKPLANE_CEF_RELEASE:-0}" = 1 ]; then
+  scripts/stage-cef-release.sh
+fi
 ls -la dist

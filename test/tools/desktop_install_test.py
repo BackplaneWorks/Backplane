@@ -30,6 +30,7 @@ class DesktopInstallTest(unittest.TestCase):
             path = package / name
             path.write_text(executable)
             path.chmod(0o755)
+        shutil.copy2(ROOT / "scripts/install-release.sh", package)
         shutil.copy2(ROOT / "deploy/backplane.desktop", package)
         (package / "icon").mkdir()
         for name in ["backplane-desktop.svg", "backplane-desktop-256.png"]:

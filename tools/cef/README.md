@@ -145,3 +145,18 @@ and CEF_NATIVE_PARENT pointing to built `test/native/cef_parent.bend`).
 `CEF_PRIVATE_IME_BUS=1 dbus-run-session -- bun tools/browser/test/native-ime.ts`
 checks installed Mozc on an independent bus/display and saves candidate
 screenshots when CEF_IME_SHOTS names a retained artifact directory.
+
+## Public delivery
+
+Linux x64 releases use `BACKPLANE_CEF_RELEASE=1 scripts/build.sh`, which builds
+the small host against the pinned prebuilt distribution and stages a matched
+helper/host/runtime manifest with licenses. `scripts/package.sh` checks this
+payload and emits `linux-x64-cef.tar.gz`; AppImage/deb layouts keep it too.
+The public installer and `Update.swap` share `scripts/install-release.sh` and
+the manifest verifier. Old public updaters refuse the new archive suffix;
+install.sh bootstraps once. CEF installation/self-update needs Python 3.
+
+`tools/browser/test/popup-cef.ts` reproduces the script-popup CDP deadlock in
+the pinned runtime (upstream CEF4308). It remains a release gate. Passing
+popup-link, IME, DnD and delivery checks does not waive this failure. Neither
+failed attachment workaround is retained; no Chromium source build is used.

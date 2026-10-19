@@ -4,6 +4,7 @@ import ./proc.bend as P
 import ../core/json.bend as J
 import ../core/semver.bend as SV
 import ../core/version.bend as VR
+import ../core/cef.bend as CF
 
 # Updates from GitHub releases. A check lists the recent releases, takes
 # the newest one the update channel allows (SV.Chan.pick: `stable` only full
@@ -200,18 +201,13 @@ def Update.swap.one(+from: String, +to: String) -> IO(String):
     r : Result<&1, &1, U32 & String, Unit> <- H.FS.rename(from, to)
     return Update.swap.k(r, to)
 
-# the binaries and web client must swap; the helpers (browser, STEP, voice) swap
-# when the release carries them
+# Old updaters cannot promote the pair; the CEF suffix makes them refuse safely.
+def Update.archive(+plat: String) -> String:
+  CF.Cef.archive(plat)
+
+# Shared installer validates/promotes the complete pair before replacing app.
 def Update.swap(+src: String, +exe: String, +tag: String) -> IO(String):
-  do IO<String>:
-    e1 : String <- Update.swap.one(src ++ "/backplane", exe ++ "/backplane")
-    e2 : String <- Update.swap.one(src ++ "/backplane-serve", exe ++ "/backplane-serve")
-    o : Result<&1, &1, U32 & String, Unit> <- H.FS.rename(exe ++ "/web", exe ++ "/web.old-" ++ tag)
-    e3 : String <- Update.swap.one(src ++ "/web", exe ++ "/web")
-    hb : Result<&1, &1, U32 & String, Unit> <- H.FS.rename(src ++ "/backplane-browser", exe ++ "/backplane-browser")
-    hs : Result<&1, &1, U32 & String, Unit> <- H.FS.rename(src ++ "/backplane-step2glb", exe ++ "/backplane-step2glb")
-    hv : Result<&1, &1, U32 & String, Unit> <- H.FS.rename(src ++ "/backplane-voice", exe ++ "/backplane-voice")
-    return e1 ++ e2 ++ e3
+  Update.run("sh", [src ++ "/install-release.sh", src, exe], "install release " ++ tag)
 
 def Update.install.go(+tag: String, +plat: String, +tn: String, +tu: String, +su: String, +exe: String, +dir: String) -> IO(String):
   do IO<String>:
@@ -240,7 +236,7 @@ def Update.apply.assets(t: Maybe<&2, Asset>, s: Maybe<&2, Asset>, +tag: String, 
 def Update.apply.k(r: Maybe<&2, Release>, +plat: String, +exe: String, +home: String) -> IO(String):
   match r:
     case Some{Release{+tag, +assets}}:
-      Update.apply.assets(Update.find(assets, plat ++ ".tar.gz"), Update.find(assets, "SHA256SUMS"), tag, plat, exe, home)
+      Update.apply.assets(Update.find(assets, Update.archive(plat)), Update.find(assets, "SHA256SUMS"), tag, plat, exe, home)
     case None{}:
       IO.pure(String, "no release found")
 
