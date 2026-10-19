@@ -10,16 +10,17 @@
 //
 // BINARY defaults to build/backplane, WIREDIR to build/wire (bend
 // test/wire/index.html -o build/wire). Needs git, kicad-cli and the demo
-// (/usr/share/kicad/demos/ecc83). KEEP=1 keeps the temp folder.
+// (BACKPLANE_CAD_FIXTURE overrides its location). KEEP=1 keeps the temp folder.
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { createHash } from "node:crypto";
 
 const [bin = "build/backplane", wire = "build/wire"] = process.argv.slice(2);
 for (const f of readdirSync(wire).filter((f) => f.endsWith(".js"))) (0, eval)(readFileSync(`${wire}/${f}`, "utf8"));
 const W = (globalThis as any).Wire;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const demo = "/usr/share/kicad/demos/ecc83";
+const demo = resolve(process.env.BACKPLANE_CAD_FIXTURE ?? "build/fixtures/ecc83");
 
 const root = mkdtempSync(join(tmpdir(), "bp-review-"));
 const fake = join(root, "bin");
@@ -29,12 +30,19 @@ for (const n of ["claude", "codex", "grok", "muse"]) {
   chmodSync(join(fake, n), 0o755);
 }
 const home = join(root, "home");
-const git = (cwd: string, ...a: string[]) => Bun.spawnSync(["git", "-c", "user.name=t", "-c", "user.email=t@t", ...a], { cwd }).stdout.toString();
+const git = (cwd: string, ...a: string[]) => {
+  const result = Bun.spawnSync(["git", "-c", "user.name=t", "-c", "user.email=t@t", ...a], { cwd });
+  if (result.exitCode !== 0) throw new Error(`fixture git ${a.join(" ")} failed: ${result.stderr.toString()}`);
+  return result.stdout.toString();
+};
 
 const proj = join(root, "board");
 mkdirSync(proj);
 for (const f of ["ecc83-pp.kicad_pcb", "ecc83-pp.kicad_sch", "ecc83-pp.kicad_pro"]) cpSync(join(demo, f), join(proj, f));
+writeFileSync(join(proj, ".gitignore"), "*.kicad_prl\n");
 git(proj, "init", "-q", "-b", "main");
+git(proj, "config", "user.name", "CAD fixture");
+git(proj, "config", "user.email", "cad-fixture@example.invalid");
 git(proj, "add", ".");
 git(proj, "commit", "-qm", "rev A");
 git(proj, "tag", "-a", "v1", "-m", "v1");
@@ -97,10 +105,10 @@ try {
   const ask = async (m: string, p: object, ms = 60000) => { const q = send(m, p); return await until(ms, () => replies.get(q)); };
 
   send("project.add", { path: proj });
-  const pc = await until(10000, () => seen.find((c) => c.$ === "ProjectCreated"));
+  const pc = await until(10000, () => seen.find((c) => c.$ === "ProjectCreated" && c.root === proj));
   if (!pc) throw new Error("no project");
   send("thread.create", { project: pc.id, title: "review", env: "local" });
-  const th = await until(10000, () => seen.find((c) => c.$ === "ThreadCreated"));
+  const th = await until(10000, () => seen.find((c) => c.$ === "ThreadCreated" && c.project === pc.id && c.title === "review"));
   if (!th) throw new Error("no thread");
 
   // versions as the clients name them: the thread's git folder and top
@@ -169,7 +177,16 @@ try {
   const after = await mcp("review_comments", {});
   check(after.includes("No open comments") && after.includes("resolved") && after.includes(":1"), "and the agent sees none open", after.slice(0, 300));
 
-  // a release: the checks gate it, forced it is made, never published unasked
+  // Even force cannot release an intentionally uncommitted fixture note.
+  // KiCad's generated local-view file is ignored in this synthetic repository.
+  writeFileSync(join(top, "release-note.txt"), "Reviewed the synthetic CAD fixture.\n");
+  const dirty = (await ask("review.release", { thread: th.id, tag: "v2", publish: false, force: true }))?.result?.report;
+  check(!!dirty && dirty.err.startsWith("No release: commit or stash working changes"), "dirty snapshot is refused even with force", JSON.stringify(dirty));
+  check(!git(top, "tag", "--list", "v2").includes("v2") && !existsSync(join(top, ".backplane/releases/v2")), "dirty refusal creates no tag or release outputs");
+  git(top, "add", "--", "release-note.txt");
+  git(top, "commit", "-qm", "fixture: save the reviewed release note");
+
+  // A committed release: checks gate it, forced it is made, never published.
   const gated = (await ask("review.release", { thread: th.id, tag: "v2", publish: false, force: false }, 180000))?.result?.report;
   check(!!gated && gated.err.startsWith("No release: the checks fail"), "a release is refused while the checks fail", JSON.stringify(gated)?.slice(0, 300));
   check(!git(top, "tag", "--list", "v2").includes("v2"), "and makes no tag");
@@ -187,10 +204,13 @@ try {
   const notes = has("notes.md") ? readFileSync(join(rdir, "notes.md"), "utf8") : "";
   check(notes.startsWith("# v2") && notes.includes("Changes since v1") && notes.includes("R4"), "notes name the tag before and the BOM change", notes.slice(0, 400));
   check(!!rel && rel.md.includes("**Files**") && !rel.md.includes("Published"), "and nothing is published", rel?.md?.slice(-300));
+  const outputSnapshot = () => JSON.stringify(Bun.spawnSync(["find", rdir, "-type", "f"]).stdout.toString().trim().split("\n").filter(Boolean).sort().map(file => [file, createHash("sha256").update(readFileSync(file)).digest("hex")]));
+  const complete = outputSnapshot(), tagObject = git(top, "rev-parse", "v2").trim();
   const again = (await ask("review.release", { thread: th.id, tag: "v2", publish: false, force: true }, 60000))?.result?.report;
-  check(!!again && again.err.includes("tag could not be made"), "a tag that exists is refused", JSON.stringify(again)?.slice(0, 300));
+  check(!!again && again.err.includes("release outputs already exist"), "a completed release is refused without replacing its outputs", JSON.stringify(again)?.slice(0, 300));
+  check(outputSnapshot() === complete && git(top, "rev-parse", "v2").trim() === tagObject, "completed release preserves every output byte and its tag object");
   const badtag = (await ask("review.release", { thread: th.id, tag: "v 3..", publish: false, force: true }))?.result?.report;
-  check(!!badtag && badtag.err.includes("not a tag name"), "a bad tag name is refused", JSON.stringify(badtag));
+  check(!!badtag && badtag.err === "invalid release tag or project folder", "a bad tag name is refused", JSON.stringify(badtag));
 
   // a ref typed in that is not there
   const bad = await ask("review.checks", { thread: th.id, commit: "-x", trigger: "manual" });
