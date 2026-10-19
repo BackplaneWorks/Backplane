@@ -27,7 +27,7 @@ def chk(name: String, +got: String, +want: String) -> IO(Bool):
     return String.eq(got, want)
 
 def shell(cwd: String, name: String, script: String) -> IO(Bool):
-  IO.bind(P.Ran, Bool, sh(cwd, script), r => chk(name, code(r) ++ out(r), "0"))
+  IO.bind(P.Ran, Bool, sh(cwd, script), +r => chk(name, code(r) ++ out(r), "0"))
 
 def all(bs: List<&2, Bool>) -> Bool:
   match bs:
