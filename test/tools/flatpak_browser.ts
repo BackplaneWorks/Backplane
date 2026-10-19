@@ -23,6 +23,19 @@ const endpointGone = async (port: number) => {
   catch { return true; }
 };
 try {
+  const absent = jsonProcess([process.env.BACKPLANE_BROWSER, "--profile", join(d.root, "no-cef-profile")], { ...d.env, BACKPLANE_CEF: "" });
+  try {
+    await absent.call("open", { url });
+    let error = "";
+    try { await absent.call("engine", { engine: "cef", parent: d.parent, display }); }
+    catch (e) { error = String(e); }
+    check("missing optional CEF runtime reports an actionable error", error.includes("no CEF runtime: set BACKPLANE_CEF"), error);
+    check("missing CEF leaves Chrome working", (await absent.call("snapshot")).title === "Flatpak CEF" && (await absent.call("status")).engine === "chrome");
+    await absent.call("close");
+    check("Chrome fallback helper exits cleanly", await absent.proc.exited === 0);
+  } finally {
+    if (absent.proc.exitCode === null) { absent.proc.stdin.end(); await absent.proc.exited; }
+  }
   const started = await call("engine", { engine: "cef", parent: d.parent, display });
   check("Flatpak CEF starts CDP", started.engine === "cef" && started.port > 0, started);
   await call("open", { page: "a", url });

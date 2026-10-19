@@ -127,7 +127,7 @@ class Client : public CefClient, public CefLifeSpanHandler, public CefLoadHandle
   CefRefPtr<CefFocusHandler> GetFocusHandler() override { return this; }
   CefRefPtr<CefRequestHandler> GetRequestHandler() override { return this; }
   bool OnBeforePopup(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>, int popup_id,
-      const CefString& url, const CefString&, WindowOpenDisposition, bool,
+      const CefString& url, const CefString&, CefLifeSpanHandler::WindowOpenDisposition, bool,
       const CefPopupFeatures&, CefWindowInfo& wi, CefRefPtr<CefClient>& client,
       CefBrowserSettings&, CefRefPtr<CefDictionaryValue>&, bool*) override {
     if (quitting) return true;
