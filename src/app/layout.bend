@@ -7391,19 +7391,41 @@ def TL.cm.make(+ty: Ty, es: List<&2, M.Entry>, +st: M.State, +px: U32, +sel: Str
       h r = TL.cm.item(ty, e, st, px, sel) TL.cm.make(ty, t, st, px, sel)
       h <> r
 
-def TL.dirty.in(+ds: List<&2, String>, +d: String) -> Bool:
+def TL.dirty.in.full(+ds: List<&2, String>, +d: String) -> Bool:
   match ds:
     case Nil{}:
       False{}
     case +x <> +t:
-      Bool.or(Bool.or(String.eq(x, d), String.eq(x, "*")), TL.dirty.in(t, d))
+      Bool.or(Bool.or(String.eq(x, d), String.eq(x, "*")), TL.dirty.in.full(t, d))
 
-def TL.dirty.any(+deps: List<&2, String>, +ds: List<&2, String>) -> Bool:
+def TL.dirty.any.full(+deps: List<&2, String>, +ds: List<&2, String>) -> Bool:
   match deps:
     case Nil{}:
       False{}
     case +d <> +t:
-      Bool.or(TL.dirty.in(ds, d), TL.dirty.any(t, ds))
+      Bool.or(TL.dirty.in.full(ds, d), TL.dirty.any.full(t, ds))
+
+# Keep the strict decisions as specifications. The runtime membership
+# checks stop at the first hit, including a leading wildcard.
+def TL.dirty.in.go(ds: List<&2, String>, +d: String, found: Bool) -> Bool:
+  match ds found:
+    case _ True{}: True{}
+    case Nil{} False{}: False{}
+    case +x <> t False{}:
+      TL.dirty.in.go(t, d, Bool.or(String.eq(x, d), String.eq(x, "*")))
+
+def TL.dirty.in(ds: List<&2, String>, d: String) -> Bool:
+  TL.dirty.in.go(ds, d, False{})
+
+def TL.dirty.any.go(deps: List<&2, String>, +ds: List<&2, String>, found: Bool) -> Bool:
+  match deps found:
+    case _ True{}: True{}
+    case Nil{} False{}: False{}
+    case d <> t False{}:
+      TL.dirty.any.go(t, ds, TL.dirty.in(ds, d))
+
+def TL.dirty.any(deps: List<&2, String>, ds: List<&2, String>) -> Bool:
+  TL.dirty.any.go(deps, ds, False{})
 
 # does a touched id reach one of an item's ids (nothing touched: no walk)
 def TL.dirty.hit(+dirty: List<&2, String>, +deps: List<&2, String>) -> Bool:

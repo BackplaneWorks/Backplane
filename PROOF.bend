@@ -13275,3 +13275,31 @@ def Laws.tl_cm_refs_exact(its, ty, st, dirty, px, sel):
       %Equal.sym(Bool, Q.Eq.entry(e, e), True{}, eq_entry_refl(e)) : {L.TL.cm.refs(L.TLE{e, p} <> t, ty, st, dirty, px, sel) == L.TL.cm.one.k(_, ty, e, st, dirty, px, sel, e, p) <> L.TL.cm.again(L.TL.memo.es(t), ty, st, dirty, px, sel, t) : List<&2, L.TLE>}
       %Laws.tl_cm_refs_exact(t, ty, st, dirty, px, sel) : {L.TL.cm.refs(L.TLE{e, p} <> t, ty, st, dirty, px, sel) == L.TL.cm.one.k(True{}, ty, e, st, dirty, px, sel, e, p) <> _ : List<&2, L.TLE>}
       {==}
+
+def tl_dirty_in_go_exact(ds: List<&2, String>, +d: String, found: Bool) -> {L.TL.dirty.in.go(ds, d, found) == Bool.or(found, L.TL.dirty.in.full(ds, d)) : Bool}:
+  match ds found:
+    case Nil{} True{}: {==}
+    case +x <> +t True{}: {==}
+    case Nil{} False{}: {==}
+    case +x <> +t False{}:
+      tl_dirty_in_go_exact(t, d, Bool.or(String.eq(x, d), String.eq(x, "*")))
+
+def Laws.tl_dirty_in_exact(ds, d):
+  tl_dirty_in_go_exact(ds, d, False{})
+
+def tl_dirty_any_go_exact(deps: List<&2, String>, +ds: List<&2, String>, found: Bool) -> {L.TL.dirty.any.go(deps, ds, found) == Bool.or(found, L.TL.dirty.any.full(deps, ds)) : Bool}:
+  match deps found:
+    case Nil{} True{}: {==}
+    case +d <> +t True{}: {==}
+    case Nil{} False{}: {==}
+    case +d <> +t False{}:
+      %Laws.tl_dirty_in_exact(ds, d) : {L.TL.dirty.any.go(t, ds, L.TL.dirty.in(ds, d)) == Bool.or(_, L.TL.dirty.any.full(t, ds)) : Bool}
+      tl_dirty_any_go_exact(t, ds, L.TL.dirty.in(ds, d))
+
+def Laws.tl_dirty_any_exact(deps, ds):
+  tl_dirty_any_go_exact(deps, ds, False{})
+
+def Laws.chip_cache_shared_hit_exact(key, marks, dirty):
+  match marks:
+    case Nil{}: {==}
+    case +h <> +t: {==}

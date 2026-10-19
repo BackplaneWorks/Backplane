@@ -66,6 +66,14 @@ def Cache.hit(dirty: List<&2, String>, +deps: List<&2, String>) -> Bool:
     case Nil{}: False{}
     case h <> t: Cache.hit.k(L.TL.dirty.in(deps, "*"), h <> t, deps)
 
+# The frame already needs the target-hit verdict to invalidate its render
+# cache. Reuse that verdict instead of walking the same ids twice.
+def Cache.same.hit(+key: String, marks: List<&2, String>, changed: Bool) -> Bool:
+  match marks:
+    case Nil{}: False{}
+    case +old <> _:
+      Bool.and(Bool.and(Bool.not(String.is_empty(key)), String.eq(key, old)), Bool.not(changed))
+
 def Cache.same(+key: String, marks: List<&2, String>, +dirty: List<&2, String>) -> Bool:
   match marks:
     case Nil{}: False{}

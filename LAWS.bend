@@ -11026,3 +11026,20 @@ law cp_eqs_fast_exact:
   for +a: List<&2, L.Cp>
   for +b: List<&2, L.Cp>
   {L.Cp.eqs.fast(a, b) == L.Cp.eqs(a, b) : Bool}
+
+# Membership and shared guard evaluation preserve the previous decisions.
+law tl_dirty_in_exact:
+  for +ds: List<&2, String>
+  for +d: String
+  {L.TL.dirty.in(ds, d) == L.TL.dirty.in.full(ds, d) : Bool}
+
+law tl_dirty_any_exact:
+  for +deps: List<&2, String>
+  for +ds: List<&2, String>
+  {L.TL.dirty.any(deps, ds) == L.TL.dirty.any.full(deps, ds) : Bool}
+
+law chip_cache_shared_hit_exact:
+  for +key: String
+  for +marks: List<&2, String>
+  for +dirty: List<&2, String>
+  {CX.Cache.same.hit(key, marks, CX.Cache.hit(dirty, CX.Cache.deps(marks))) == CX.Cache.same(key, marks, dirty) : Bool}
