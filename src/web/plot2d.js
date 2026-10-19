@@ -409,7 +409,8 @@ export function mount(canvas) {
   const note = document.querySelector(".rc-note input");
   if (note && !noteSeen) note.focus();
   noteSeen = !!note;
-  view.fade = Number(canvas.dataset.fade || 0);
+  const fade = Number(canvas.dataset.fade || 0);
+  if (fade !== view.fade) { view.fade = fade; view.later(); }
   const key = canvas.dataset.key || "";
   if (key !== view.key) {
     // another version of the same file keeps its view, and the last one
