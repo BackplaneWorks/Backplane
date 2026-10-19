@@ -84,3 +84,41 @@ path plus a new alternate, and an occupied path with no new socket.
 When the pinned managed install is absent, discovery retains other installed versions as newest-first fallbacks.
 An old install therefore reports old and offers Update; the pinned directory appearing invalidates the health cache
 and takes precedence.
+
+Managed discovery and installation are platform aware. The pinned bp.4
+release publishes only a Linux x86-64 runtime; a known Apple-silicon bundle
+layout does not imply an available Mac download. On macOS the installer
+reports that missing asset and preserves the selected runtime. A local
+KiCad.app remains available for checks and exports; stock KiCad does not
+provide Backplane's patched IPC API. Managed manifests must match the host;
+legacy manifests without a platform are treated as Linux x86-64 only.
+Apple-silicon managed directories use a `-macos-arm64` suffix. A managed
+runtime that fails its version probe falls through to working local copies;
+an explicit path remains selected so its failure is visible.
+
+Downloads are checked using `sha256sum` or macOS's `shasum -a 256`, then
+extracted and smoke-tested inside the per-destination lock. The version
+command identifies upstream KiCad (`10.99.0` for bp.4); the manifest and live
+`api-server --describe` identify the fork (`10.99.0-bp.4`). Bend parses both
+JSON objects, requiring the pinned fork version, matching source commit,
+upstream core, platform, API 2, descriptor path and headless capabilities. The previous
+runtime is moved only after validation, restored if promotion fails, and a
+per-destination lock rejects concurrent installers. Failed downloads,
+checksums, extraction, version checks, and promotion preserve the prior
+runtime's bytes. The IPC helper must be installed beside Backplane and
+answer `--describe` with protocol version 1 and runtime API 2; incompatible
+or missing helpers fail visibly before receiving persistent requests.
+
+Offline regression validation uses the production Bend selector and shell
+transaction with synthetic runtimes, archives, checksums, and fault tools:
+
+```sh
+bend test/kicadcli_test.bend
+bend test/kipc_protocol_test.bend
+BACKPLANE_LOW_MEM=1 BACKPLANE_JOBS=1 scripts/build-app.sh test/native/kicad_platform.bend build/kicad_platform
+bun test/tools/kicad_platform_e2e.ts build/kicad_platform
+```
+
+These fixtures simulate platform responses; they do not certify a Mac
+launch, board export/view, or IPC session. Actual macOS acceptance still
+requires an accessible Mac and a compatible published or locally built fork.

@@ -7,6 +7,7 @@ import ../core/json.bend as J
 import ../core/utf8.bend as U
 import ../core/kserve.bend as KS
 import ../core/kihealth.bend as KH
+import ../core/port.bend as PORT
 
 # The hub's headless KiCad servers (core/kserve.bend is the policy). One
 # actor owns a record per project and one backplane-kipc helper
@@ -261,8 +262,22 @@ def KServe.spawned(r: Result<&1, &1, U32 & String, U32 & Socket>, +q: Chan(KMsg)
     case Fail{_}:
       IO.pure(Maybe<&2, Chan(String)>, None{})
 
+def KServe.protocol(r: P.Ran) -> Bool:
+  match r:
+    case P.Ran{0, out}:
+      +o = KServe.parse(out)
+      Bool.and(String.eq(J.Json.get_str(o, "name", ""), "backplane-kipc"),
+        Bool.and(Nat.is_eq(J.Json.get_nat(o, "protocolVersion", 0n), 1n), Nat.is_eq(J.Json.get_nat(o, "runtimeApi", 0n), KH.KH.min_api())))
+    case _: False{}
+
+def KServe.start.k(compatible: Bool, +exe: String, +q: Chan(KMsg)) -> IO(Maybe<&2, Chan(String)>):
+  match compatible:
+    case True{}:
+      IO.bind(Result<&1, &1, U32 & String, U32 & Socket>, Maybe<&2, Chan(String)>, H.Proc.spawn(exe, Nil{}, "/", 0), r => KServe.spawned(r, q))
+    case False{}: IO.pure(Maybe<&2, Chan(String)>, None{})
+
 def KServe.start(+exe: String, +q: Chan(KMsg)) -> IO(Maybe<&2, Chan(String)>):
-  IO.bind(Result<&1, &1, U32 & String, U32 & Socket>, Maybe<&2, Chan(String)>, H.Proc.spawn(exe, Nil{}, "/", 0), r => KServe.spawned(r, q))
+  IO.bind(P.Ran, Maybe<&2, Chan(String)>, P.Proc.run("sh", PORT.Port.timeout(["5", exe, "--describe"]), "/"), r => KServe.start.k(KServe.protocol(r), exe, q))
 
 # the running helper's input, starting it if needed
 def KServe.ensure(m: Maybe<&2, Chan(String)>, +exe: String, +q: Chan(KMsg)) -> IO(Maybe<&2, Chan(String)>):
@@ -281,7 +296,7 @@ def KServe.sent(m: Maybe<&2, Chan(String)>, +fields: List<&2, J.KV>, +id: Nat, +
         return Hp{Some{c}, BR.Pend{Nat.show(id), reply} <> ps, n, exe}
     case None{} Hp{_, ps, n, exe}:
       do IO<Hp>:
-        BR.Browser.say(reply, KServe.failed("the KiCad IPC helper could not start (is backplane-kipc installed next to Backplane?)"))
+        BR.Browser.say(reply, KServe.failed("the KiCad IPC helper is missing, incompatible, or could not start (install the matching backplane-kipc next to Backplane)"))
         return Hp{None{}, ps, n, exe}
 
 def KServe.call(hp: Hp, +q: Chan(KMsg), +fields: List<&2, J.KV>, +reply: Chan(String)) -> IO(Hp):

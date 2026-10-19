@@ -105,6 +105,7 @@ import ./src/web/dom.bend as DM
 import ./src/core/client.bend as U
 import ./src/mobile/screen.bend as MSC
 import ./src/core/gh.bend as GH
+import ./src/core/kicadcli.bend as KCL
 import ./src/gfx/text.bend as X
 import ./src/core/fold.bend as FO
 import ./src/core/subs.bend as SB
@@ -10676,3 +10677,57 @@ law pcb2_hidden_text_draws_nothing:
   for +sig: U32
   for +ctx: String
   {PCB2.Text.visible.k(True{}, at, angle, x, text, up, key, sig, ctx) == Nil{} : List<&2, B.Item>}
+
+# KiCad's CLI
+# -----------
+
+# Known fork platform layouts; publication is a separate pinned decision.
+law kicad_cli_asset_linux_x64:
+  {KCL.Cli.asset("Linux x86_64\n") == "linux-x86_64" : String}
+
+law kicad_cli_asset_mac:
+  {KCL.Cli.asset("Darwin arm64") == "macos-arm64" : String}
+
+law kicad_cli_no_fork_intel_mac:
+  {KCL.Cli.fork_runs("Darwin x86_64") == False{} : Bool}
+
+law kicad_cli_no_fork_arm_linux:
+  {KCL.Cli.fork_runs("Linux aarch64") == False{} : Bool}
+
+# each build has its own folder: a Mac never picks the Linux one (and Linux
+# keeps the folder its installs have always used)
+law kicad_cli_dir_linux:
+  for +data: String
+  for +ver: String
+  {KCL.Cli.dir(data, ver, "linux-x86_64") == data ++ "/kicad/" ++ ver : String}
+
+law kicad_cli_dir_mac:
+  {KCL.Cli.dir("/u/.backplane-bend", "10.0.6", "macos-arm64") == "/u/.backplane-bend/kicad/10.0.6-macos-arm64" : String}
+
+# a Mac tries the fork (its own build), then KiCad.app, then the system's
+law kicad_cli_mac_order:
+  {KCL.Cli.candidates("Darwin arm64\n", "/opt/bp", "/u/.backplane-bend", "10.0.6", "/u") == ["/opt/bp/kicad/bin/kicad-cli", "/u/.backplane-bend/kicad/10.0.6-macos-arm64/bin/kicad-cli", "/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli", "/u/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli", "/usr/bin/kicad-cli", "/usr/local/bin/kicad-cli"] : List<&2, String>}
+
+# an Intel Mac has no fork: KiCad.app, then the system's
+law kicad_cli_intel_mac_app:
+  {KCL.Cli.candidates("Darwin x86_64", "/opt/bp", "/u/.backplane-bend", "10.0.6", "/u") == ["/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli", "/u/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli", "/usr/bin/kicad-cli", "/usr/local/bin/kicad-cli"] : List<&2, String>}
+
+# Linux x86-64 is unchanged: the fork, then the system's
+law kicad_cli_linux_order:
+  {KCL.Cli.candidates("Linux x86_64", "/opt/bp", "/h/.backplane-bend", "10.0.6", "/h") == ["/opt/bp/kicad/bin/kicad-cli", "/h/.backplane-bend/kicad/10.0.6/bin/kicad-cli", "/usr/bin/kicad-cli", "/usr/local/bin/kicad-cli"] : List<&2, String>}
+
+law kicad_cli_mac_not_published:
+  {KCL.Cli.published("Darwin arm64") == False{} : Bool}
+
+law kicad_cli_legacy_incompatible_on_mac:
+  {KCL.Cli.compatible("Darwin arm64", "") == False{} : Bool}
+
+law kicad_cli_linux_rejects_mac:
+  {KCL.Cli.compatible("Linux x86_64", "macos-arm64") == False{} : Bool}
+
+
+law kicad_cli_api_number:
+  {KCL.Cli.api(J.Num{"2"}) == True{} : Bool}
+
+law kicad_cli_api_string_rejected:
+  {KCL.Cli.api(J.Str{"2"}) == False{} : Bool}

@@ -18,6 +18,12 @@ import { existsSync, readdirSync, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 
 const args = process.argv.slice(2);
+// Probed before the hub starts a persistent helper. A missing/older helper
+// fails visibly instead of accepting an incompatible NDJSON protocol.
+if (args.includes("--describe")) {
+  console.log(JSON.stringify({ name: "backplane-kipc", protocolVersion: 1, runtimeApi: 2 }));
+  process.exit(0);
+}
 const opt = (n: string) => {
   const i = args.indexOf(n);
   return i >= 0 ? (args[i + 1] ?? "") : "";
