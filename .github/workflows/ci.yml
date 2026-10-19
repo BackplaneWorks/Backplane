@@ -116,6 +116,11 @@ jobs:
           build/files-state-test | tee build/files-state-test.log
           ! grep -q '^FAIL ' build/files-state-test.log
           test "$(grep -c '^ok ' build/files-state-test.log)" = 38
+          bend_check test/files_native_test.bend
+          scripts/build-app.sh test/files_native_test.bend build/files-native-test
+          build/files-native-test | tee build/files-native-test.log
+          ! grep -q '^FAIL ' build/files-native-test.log
+          test "$(grep -c '^ok ' build/files-native-test.log)" = 14
       - run: clang --version
       - run: scripts/build.sh
         env:
