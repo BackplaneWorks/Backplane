@@ -28,9 +28,13 @@ function check(name: string, condition: unknown) {
   console.log(`ok ${name}`); checks++;
 }
 function script(path: string, text: string) { mkdirSync(dirname(path), {recursive: true}); writeFileSync(path, `#!/bin/sh\n${text}\n`); chmodSync(path, 0o755); }
-function which(name: string) { const p = spawnSync("sh", ["-c", 'command -v "$1"', "sh", name], {encoding: "utf8"}).stdout.trim(); if (!p) throw new Error(`missing fixture tool ${name}`); return p; }
-const real = Object.fromEntries(["sh", "awk", "tar", "cp", "mv", "rm", "rmdir", "mkdir", "mktemp", "timeout", "sha256sum", "shasum", "perl", "cat", "sleep", "cut", "gzip"].map(n => [n, which(n)]));
+function available(name: string) { return spawnSync("sh", ["-c", 'command -v "$1"', "sh", name], {encoding: "utf8"}).stdout.trim(); }
+function which(name: string) { const p = available(name); if (!p) throw new Error(`missing fixture tool ${name}`); return p; }
+const real = Object.fromEntries(["sh", "awk", "tar", "cp", "mv", "rm", "rmdir", "mkdir", "mktemp", "perl", "cat", "sleep", "cut", "gzip"].map(n => [n, which(n)]));
+for (const name of ["timeout", "gtimeout", "sha256sum", "shasum"]) { const p=available(name); if (p) real[name]=p; }
+if (!real.sha256sum && !real.shasum) throw new Error("missing fixture checksum tool: sha256sum or shasum");
 for (const [name, target] of Object.entries(real)) symlinkSync(target, join(bin, name));
+console.log(`fixture production tools: timeout=${real.timeout ? "timeout" : real.gtimeout ? "gtimeout" : "perl"}, checksum=${real.sha256sum ? "sha256sum" : "shasum"}`);
 script(join(bin, "uname"), 'printf "%s\\n" "$TEST_PLATFORM"');
 rmSync(join(bin, "mv")); script(join(bin, "mv"), `case "$1" in
   *.install-lock/stage/runtime) [ "\${FAIL_PROMOTE:-0}" != 1 ] || { echo 'injected rename failure' >&2; exit 42; };;
@@ -146,9 +150,9 @@ try {
   }
   const bad=run(args.map((a,i)=>i===4?"0".repeat(64):a),fixture);
   check("checksum mismatch fails visibly",bad.status!==0 && (bad.stdout+bad.stderr).includes("checksum mismatch")); check("checksum failure preserves prior runtime bytes",snapshot(final)===prior);
-  rmSync(join(bin,"sha256sum"));
-  const shasum=run(args,fixture); if (shasum.status !== 0) console.error(shasum); check("portable shasum fallback installs successfully",shasum.status===0); check("successful transaction publishes new complete runtime",!existsSync(join(final,"user-marker")) && existsSync(join(final,"share/backplane/api.desc")));
-  symlinkSync(real.sha256sum,join(bin,"sha256sum"));
+  if (real.shasum) rmSync(join(bin,"sha256sum"),{force:true});
+  const shasum=run(args,fixture); if (shasum.status !== 0) console.error(shasum); check(real.shasum ? "portable shasum fallback installs successfully" : "available GNU checksum path installs successfully",shasum.status===0); check("successful transaction publishes new complete runtime",!existsSync(join(final,"user-marker")) && existsSync(join(final,"share/backplane/api.desc")));
+  if (real.shasum && real.sha256sum) symlinkSync(real.sha256sum,join(bin,"sha256sum"));
   const current=snapshot(final);
   mkdirSync(`${final}.install-lock`);
   const locked=run(args,fixture); check("concurrent installer refused",locked.status!==0 && (locked.stdout+locked.stderr).includes("in progress")); check("lock refusal preserves runtime",snapshot(final)===current); rmSync(`${final}.install-lock`,{recursive:true});
@@ -157,7 +161,18 @@ try {
   check("baseline installer source found",!!match);
   writeFileSync(join(final,"bin/kicad-cli"),"old runtime bytes\n");
   const baselineBefore=snapshot(final);
-  const old=spawnSync(real.sh,["-c",JSON.parse(match![0]),"sh",final,"https://fixture.invalid/",name,sha],{env:{...env,...fixture,FAIL_TAR:"1"},encoding:"utf8"});
+  const baselineEnv={...env,...fixture,FAIL_TAR:"1"};
+  if (!real.sha256sum) {
+    // Only the historical installer hardcodes GNU sha256sum. Adapt that old
+    // control in a separate PATH; the production Mac path above uses real
+    // shasum and Perl without adding a GNU tool or checksum shim.
+    const oldTools=join(root,"baseline-tools");
+    const quote=(value:string)=>"'"+value.replaceAll("'","'\\''")+"'";
+    script(join(oldTools,"sha256sum"),`exec ${quote(real.shasum)} -a 256 "$@"`);
+    baselineEnv.PATH=`${oldTools}:${bin}`;
+    console.log("fixture baseline-only checksum adapter: real shasum -a 256; production PATH unchanged");
+  }
+  const old=spawnSync(real.sh,["-c",JSON.parse(match![0]),"sh",final,"https://fixture.invalid/",name,sha],{env:baselineEnv,encoding:"utf8"});
   check("baseline partial extraction fails",old.status!==0);
   check("baseline reproduces overwrite of selected runtime",snapshot(final)!==baselineBefore && readFileSync(join(final,"bin/kicad-cli"),"utf8").startsWith("#!/bin/sh"));
   console.log(`${checks} assertions passed`);
