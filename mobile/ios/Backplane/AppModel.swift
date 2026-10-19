@@ -657,17 +657,19 @@ final class AppModel {
         }
     }
 
-    // a URL the app was opened with: a pairing link, or a thread to show
-    func open(_ url: URL) {
-        guard url.scheme == "backplane" else { return }
-        if url.host == "open" {
-            let q = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
-            let id = q.first { $0.name == "thread" }?.value ?? ""
-            // (an older Live Activity's "pick=1" opens the app as it was)
-            if !id.isEmpty { act("select", id) }
-        } else if url.host != "google" {
-            // (backplane://google ends a Google sign-in: GoogleLoop)
-            pair(url.absoluteString)
+    // Both external URL entry and links tapped in a message use shared Bend
+    // reference resolution, with the message's hub kept outside the URI.
+    @discardableResult
+    func open(_ url: URL, sourceHub: String? = nil) -> Bool {
+        switch InternalURLRoute.route(url) {
+        case let .reference(uri, origin):
+            act("ref-open", InternalURLRoute.request(uri, origin: origin, sourceHub: sourceHub))
+            return true
+        case let .pair(link):
+            pair(link)
+            return true
+        case .ignored: return true
+        case .external: return false
         }
     }
 

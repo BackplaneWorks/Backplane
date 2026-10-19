@@ -328,5 +328,22 @@ def Session.target.k(qualified: Bool, cur: String, +value: String) -> String:
     case True{}: H.Hubs.key_of(value)
     case False{}: cur
 
+def Session.target.ref.known(known: Bool, cur: String, key: String) -> String:
+  match known:
+    case True{}: key
+    case False{}: cur
+
+# Recent-first sessions have no canonical history yet. Send an explicit
+# source/origin to that paired hub, where the same resolver checks existence.
+# Unknown explicit hubs remain in the payload and fail resolution there.
+def Session.target.ref.json(+hs: H.Hubs, +cur: String, +j: J.Json) -> String:
+  Session.target.ref.known(H.Hubs.has(H.Hubs.list(hs), J.Json.get_str(j, "hub", "")), cur, J.Json.get_str(j, "hub", ""))
+
+def Session.target.ref(internal: Bool, +hs: H.Hubs, cur: String, +action: String, +value: String) -> String:
+  match internal:
+    case True{}: Session.target.ref.json(hs, cur, Maybe.default(&2, J.Json, J.Json.parse(value), J.Null{}))
+    case False{}:
+      Session.target.k(Bool.and(Bool.or(String.eq(action, "usage-refresh"), Nat.is_lt(H.Hubs.routed(action), H.Hubs.routes())), H.Hubs.has(H.Hubs.list(hs), H.Hubs.key_of(value))), cur, value)
+
 def Session.target(+hs: H.Hubs, cur: String, +action: String, +value: String) -> String:
-  Session.target.k(Bool.and(Bool.or(String.eq(action, "usage-refresh"), Nat.is_lt(H.Hubs.routed(action), H.Hubs.routes())), H.Hubs.has(H.Hubs.list(hs), H.Hubs.key_of(value))), cur, value)
+  Session.target.ref(String.eq(action, "ref-open"), hs, cur, action, value)

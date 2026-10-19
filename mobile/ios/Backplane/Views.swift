@@ -956,6 +956,7 @@ struct ThreadScreen: View {
         // a file link tapped in a message asks for its menu (Open and Show
         // in folder act on the hub's machine, Copy path here)
         .environment(\.openURL, OpenURLAction { url in
+            if model.open(url, sourceHub: model.screen?.hub) { return .handled }
             guard let p = FileLink.path(url) else { return .systemAction }
             model.act("file-menu", p)
             return .handled

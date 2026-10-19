@@ -25,7 +25,7 @@ struct BackplaneApp: App {
             RootView(model: model)
                 // this device's appearance (App settings); the hub's theme is not read
                 .preferredColorScheme(model.settings.colorScheme)
-                // backplane://pair?url=... pairs; backplane://open?thread=... shows a thread
+                // Canonical references and legacy notification links share message-tap routing.
                 .onOpenURL { model.open($0) }
                 .onAppear { delegate.model = model }
         }

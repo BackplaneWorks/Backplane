@@ -37,13 +37,15 @@ private func inline(_ bs: [Block]) -> AttributedString {
             part.font = .body.weight(.semibold)
         case "em":
             part.font = .body.italic()
-        // a link opens in the browser (Text follows .link on a tap); a
-        // file's goes through FileLink to the thread's openURL
+        // Explicit references go through the same OpenURLAction as external
+        // links; bare IDs retain the existing plain-text phone presentation.
         case "a":
-            if let h = b.href, let u = b.file == true ? FileLink.url(h) : URL(string: h) {
+            if let ref = b.ref {
+                if b.bare != true { part.link = URL(string: ref) }
+            } else if let h = b.href, let u = b.file == true ? FileLink.url(h) : URL(string: h) {
                 part.link = u
-                part.underlineStyle = .single
             }
+            if part.link != nil { part.underlineStyle = .single }
         default:
             break
         }

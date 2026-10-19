@@ -10694,3 +10694,15 @@ law ios_session_keeps_cursor:
   for +u: U.Ui
   for +o: J.Json
   {U.Ui.seq(IOSSESSION.Session.adopt(u, o)) == U.Ui.seq(u) : Nat}
+
+# A failed native-link resolution cannot move focus or issue any command.
+law ios_ref_unresolved_no_effect:
+  for +hs: Hb.Hubs
+  for key: String
+  for r: REF.Ref
+  {Hb.RefOpen.go.known(False{}, hs, key, r) == Hb.HAct{hs, Nil{}, Nil{}} : Hb.HAct}
+
+law ios_ref_invalid_no_effect:
+  for +hs: Hb.Hubs
+  for key: String
+  {Hb.RefOpen.parsed(None{}, hs, key) == Hb.HAct{hs, Nil{}, Nil{}} : Hb.HAct}
