@@ -1725,6 +1725,24 @@ law runtime_no_kistack_block:
   {String.contains(PM.Prompt.runtime("Backplane"), "<kistack_skills>") == False{} : Bool}
 
 # a part's render from a view goes to renders/ beside it, named by view
+# Converted models must be nonempty regular files before publication.
+law model_cache_missing_rejected:
+  for code: U32
+  for text: String
+  {MCACHE.ModelCache.nonempty(Fail{(code, text)}) == False{} : Bool}
+
+law model_cache_empty_rejected:
+  for modified: U32
+  {MCACHE.ModelCache.nonempty(Done{(0, (0, modified))}) == False{} : Bool}
+
+law model_cache_directory_rejected:
+  for size: U32
+  for modified: U32
+  {MCACHE.ModelCache.nonempty(Done{(1, (size, modified))}) == False{} : Bool}
+
+law model_cache_file_accepted:
+  {MCACHE.ModelCache.nonempty(Done{(0, (20, 0))}) == True{} : Bool}
+
 law mech_render_path:
   {MCH.Mech.render("mech/bracket.step", "iso") == "mech/renders/bracket.iso.png" : String}
 
@@ -10677,13 +10695,3 @@ law pcb2_hidden_text_draws_nothing:
   for +sig: U32
   for +ctx: String
   {PCB2.Text.visible.k(True{}, at, angle, x, text, up, key, sig, ctx) == Nil{} : List<&2, B.Item>}
-
-# Converted models must be nonempty regular files before publication.
-law model_cache_empty_rejected:
-  {MCACHE.ModelCache.nonempty(Done{(0, (0, 0))}) == False{} : Bool}
-
-law model_cache_directory_rejected(size: U32, modified: U32):
-  {MCACHE.ModelCache.nonempty(Done{(1, (size, modified))}) == False{} : Bool}
-
-law model_cache_file_accepted:
-  {MCACHE.ModelCache.nonempty(Done{(0, (20, 0))}) == True{} : Bool}
