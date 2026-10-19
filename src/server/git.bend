@@ -511,24 +511,22 @@ def Git.checkpoint.prev(thread_id: String, n: Nat) -> String:
 def Git.index_path(gd: String, thread_id: String) -> String:
   gd ++ "/backplane-" ++ Git.b64url(thread_id) ++ ".index"
 
-# Seed from the real index every time: an empty or stale private index does
-# not know that an ignored path is tracked. Copying also preserves split
-# index references (both indexes live in the same git directory). Clear the
-# private copy's optimization flags so every current working file is read. An unborn
-# repository may not have an index yet; discard any old private one then.
+# Seed tracked paths and staged blobs from the real index every time.
+# A fresh private index omits cached stat data and optimization flags: its
+# add -A must read today's working files, including ignored tracked paths.
+# Git reads split indexes itself; the source index is never rewritten.
 def Git.index.seed.sh() -> String:
   String.join([
     "set -eu",
     "src=$(git rev-parse --path-format=absolute --git-path index)",
     "if [ ! -f \"$src\" ]; then rm -f \"$1\"; exit 0; fi",
-    "cp \"$src\" \"$1\"",
-    "export GIT_INDEX_FILE=\"$1\"",
-    "cd \"$(git rev-parse --show-toplevel)\"",
     "paths=$(mktemp \"$1.paths.XXXXXX\")",
     "trap 'rm -f \"$paths\"' 0",
-    "git ls-files -z > \"$paths\"",
-    "git update-index --no-assume-unchanged -z --stdin < \"$paths\"",
-    "git update-index --no-skip-worktree -z --stdin < \"$paths\""
+    "git ls-files --full-name --stage -z -- :/ > \"$paths\"",
+    "export GIT_INDEX_FILE=\"$1\"",
+    "rm -f \"$1\"",
+    "git read-tree --empty",
+    "git update-index -z --index-info < \"$paths\""
   ], "\n")
 
 def Git.index.seed(cwd: String, idx: String) -> IO(P.Ran):

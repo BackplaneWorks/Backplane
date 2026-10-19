@@ -104,7 +104,7 @@ jobs:
           scripts/build-app.sh test/native/checkpoint_ignored_test.bend build/checkpoint_ignored_test
           build/checkpoint_ignored_test | tee build/checkpoint-ignored.log
           if grep -q '^FAIL ' build/checkpoint-ignored.log; then exit 1; fi
-          test "$(grep -c '^ok ' build/checkpoint-ignored.log)" -eq 46
+          test "$(grep -c '^ok ' build/checkpoint-ignored.log)" -eq 53
       - name: Object cache
         # the compiled C units, by hash of their text (scripts/cc-unit.sh): an
         # unchanged unit is not compiled again. Never holds the Google client
