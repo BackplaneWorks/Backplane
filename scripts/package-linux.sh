@@ -32,8 +32,8 @@ app="$work/AppDir"
 mkdir -p "$app/usr/lib" "$app/usr/share/icons/hicolor/256x256/apps"
 cp -R "$src" "$app/usr/lib/backplane"
 cp deploy/backplane.desktop "$app/backplane.desktop"
-cp assets/icon/backplane-256.png "$app/backplane.png"
-cp assets/icon/backplane-256.png "$app/usr/share/icons/hicolor/256x256/apps/backplane.png"
+cp assets/icon/backplane-desktop-256.png "$app/backplane-desktop.png"
+cp assets/icon/backplane-desktop-256.png "$app/usr/share/icons/hicolor/256x256/apps/backplane-desktop.png"
 cat > "$app/AppRun" <<'EOF'
 #!/bin/sh
 here=$(dirname "$(readlink -f "$0")")
@@ -58,10 +58,10 @@ for b in backplane backplane-serve; do
   chmod 755 "$root/usr/bin/$b"
 done
 cp deploy/backplane.desktop "$root/usr/share/applications/"
-cp assets/icon/backplane.svg "$root/usr/share/icons/hicolor/scalable/apps/"
+cp assets/icon/backplane-desktop.svg "$root/usr/share/icons/hicolor/scalable/apps/"
 for s in 64 128 256 512; do
   mkdir -p "$root/usr/share/icons/hicolor/${s}x$s/apps"
-  cp "assets/icon/backplane-$s.png" "$root/usr/share/icons/hicolor/${s}x$s/apps/backplane.png"
+  cp "assets/icon/backplane-desktop-$s.png" "$root/usr/share/icons/hicolor/${s}x$s/apps/backplane-desktop.png"
 done
 mkdir -p "$work/control"
 cat > "$work/control/control" <<EOF

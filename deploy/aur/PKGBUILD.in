@@ -33,7 +33,7 @@ package() {
     chmod 755 "$pkgdir/usr/bin/$b"
   done
   install -Dm644 backplane.desktop "$pkgdir/usr/share/applications/backplane.desktop"
-  install -Dm644 icon/backplane.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/backplane.svg"
-  install -Dm644 icon/backplane-256.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/backplane.png"
+  install -Dm644 icon/backplane-desktop.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/backplane-desktop.svg"
+  install -Dm644 icon/backplane-desktop-256.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/backplane-desktop.png"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }
