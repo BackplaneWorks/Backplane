@@ -895,7 +895,11 @@ def Ui.outbox(u: Ui) -> List<&2, Cmd>:
       Out.resend(RPO.RpcOut.values(ob))
 
 def Ui.recv_act.k(connected: Bool, +u: Ui) -> Act:
-  Act{u, Bool.pick(List<&2, Cmd>, connected, Ui.outbox(u), Nil{})}
+  match connected:
+    case True{}:
+      Act{u, Ui.outbox(u)}
+    case False{}:
+      Act{u, Nil{}}
 
 # the client's own id (a host sets it once at start)
 def Ui.set_cid(u: Ui, +cid: String) -> Ui:
