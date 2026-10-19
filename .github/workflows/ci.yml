@@ -105,6 +105,11 @@ jobs:
           build/worktree_carry_test | tee build/worktree-carry.log
           ! grep -q '^FAIL ' build/worktree-carry.log
           test "$(grep -c '^ok ' build/worktree-carry.log)" -eq 37
+      - name: Preserve carried work throughout thread lifecycle
+        run: |
+          set -euo pipefail
+          scripts/build-app.sh test/native/worktree_lifecycle_test.bend build/worktree_lifecycle_test
+          build/worktree_lifecycle_test
       - name: Preserve ignored tracked files in checkpoints
         run: |
           set -euo pipefail

@@ -174,3 +174,5 @@ Git.act(cwd, action, message, title, body) -> IO(String)
 - **commit**: runs `git add -A`, then `git commit -m <message>`. The default message is "Update from Backplane". The step answers `commit: <short sha> <subject>`, or `commit: nothing to commit`. Nothing to commit is not a failure, so a later push still runs.
 - **push**: runs `git push` when the branch has an upstream. Otherwise it runs `git push -u origin <branch>`. It answers `push: <branch>[ -> origin/<branch>]`. A detached HEAD is an error.
 - **create_pr**: runs `gh pr create --title T --body B --head <branch>`, or `--fill` when the title is empty. It answers `pr: <url>`, taken from the last line of gh's output.
+
+Carrying work into a thread retains newly tracked paths as intent-to-add in the destination, so newly tracked ignored files remain part of later checkpoints. The source index remains byte-for-byte unchanged; the destination has no staged content. A failed copy, extraction, deletion or tracking update returns an error and leaves source work intact.

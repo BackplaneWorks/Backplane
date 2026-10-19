@@ -399,15 +399,29 @@ def Git.exclude(+cwd: String) -> IO(String):
   Git.seq(Git.run(cwd, ["rev-parse", "--path-format=absolute", "--git-common-dir"]),
     dir => Git.seq(P.Proc.run("sh", ["-c", Git.exclude.sh(), "sh", dir], cwd), _ => Git.done("")))
 
-# Copy the folder's uncommitted work (changed and untracked files, not
-# ignored ones) into a new worktree, and delete there what is deleted here.
-# Compare tracked paths with HEAD so staged edits count too. Disabling
-# rename detection carries a rename as deleting its old path and copying
-# its new one; the destination's index stays at the base commit.
-# KiCad's own droppings (backups, locks, autosaves, the footprint cache)
-# stay behind.
+# Copy working contents while leaving the source index and branch untouched.
+# Materialize the copy list and archive so every command failure is visible.
+# Newly tracked paths use intent-to-add in the destination: no staged content,
+# but checkpoint snapshots retain newly tracked ignored files after a carry.
+# KiCad backups, locks, autosaves and footprint cache stay behind.
 def Git.carry.sh() -> String:
-  "cd \"$1\" || exit 1; { git diff --no-renames --name-only -z --diff-filter=d HEAD --; git ls-files -z -o --exclude-standard; } | grep -zv -e '-backups/' -e '\\.lck$' -e 'fp-info-cache$' -e '_autosave-' | tar -c --null -T - -f - 2>/dev/null | tar -x -f - -C \"$2\" 2>/dev/null; git diff --no-renames --name-only -z --diff-filter=D HEAD -- | xargs -0 -r sh -c 'd=$1; shift; for p do [ -e \"$p\" ] || [ -L \"$p\" ] || rm -f -- \"$d/$p\"; done' sh \"$2\"; exit 0"
+  String.join([
+    "set -eu",
+    "export GIT_OPTIONAL_LOCKS=0",
+    "cd \"$1\"",
+    "test -d \"$2\"",
+    "d=$(mktemp -d \"${TMPDIR:-/tmp}/bp-carry.XXXXXX\")",
+    "trap 'rm -rf \"$d\"' 0",
+    "git diff --no-renames --name-only -z --diff-filter=d HEAD -- > \"$d/changed\"",
+    "git ls-files -z -o --exclude-standard >> \"$d/changed\"",
+    "perl -0ne 'chomp; print \"$_\\0\" unless m{-backups/|\\.lck$|fp-info-cache$|_autosave-}' \"$d/changed\" > \"$d/copy\"",
+    "if [ -s \"$d/copy\" ]; then tar -c --null -T \"$d/copy\" -f \"$d/files.tar\"; tar -x -f \"$d/files.tar\" -C \"$2\"; fi",
+    "git diff --no-renames --name-only -z --diff-filter=D HEAD -- > \"$d/deleted\"",
+    "xargs -0 sh -c 'd=$1; shift; for p do if [ ! -e \"$p\" ] && [ ! -L \"$p\" ]; then rm -f -- \"$d/$p\" || exit; fi; done' sh \"$2\" < \"$d/deleted\"",
+    "git diff --no-renames --name-only -z --diff-filter=A HEAD -- > \"$d/added\"",
+    "perl -0ne 'chomp; print \"$_\\0\" unless m{-backups/|\\.lck$|fp-info-cache$|_autosave-}' \"$d/added\" > \"$d/track\"",
+    "xargs -0 sh -c 'd=$1; shift; for p do if [ -e \"$d/$p\" ] || [ -L \"$d/$p\" ]; then git -C \"$d\" add -N -f -- \"$p\" || exit; fi; done' sh \"$2\" < \"$d/track\""
+  ], "\n")
 
 def Git.carry(+top: String, +path: String) -> IO(String):
   Git.seq(P.Proc.run("sh", ["-c", Git.carry.sh(), "sh", top, path], top), _ => Git.done(""))
