@@ -31,10 +31,17 @@ const fake = join(root, "bin");
 const log = join(root, "claude.log");
 const perm = join(root, "perm.out");
 mkdirSync(fake);
+const fixtureBun = "'" + process.execPath.replaceAll("'", "'\\''") + "'";
 writeFileSync(join(fake, "claude"), `#!/bin/sh
 # stopped (a model switch, archive), it still writes a result as it goes
 trap 'echo "EOF $$" >> "$FAKE_LOG"; printf "%s\\n" "{\\"type\\":\\"result\\",\\"subtype\\":\\"success\\",\\"is_error\\":false,\\"result\\":\\"from the old process\\",\\"session_id\\":\\"x\\"}"; exit 0' TERM
-url=$(printf '%s' "$*" | sed -n 's/.*"url":"\\([^"]*\\)".*/\\1/p')
+url=$(${fixtureBun} -e '
+const i = process.argv.indexOf("--mcp-config");
+if (i < 0) throw new Error("missing fixture MCP configuration");
+const url = JSON.parse(process.argv[i + 1]).mcpServers.backplane.url;
+if (new URL(url).origin !== process.env.FAKE_MCP_ORIGIN) throw new Error("fixture MCP endpoint must be the owned hub");
+process.stdout.write(url);
+' -- "$@") || exit 2
 echo "START $$" >> "$FAKE_LOG"
 init='{"type":"system","subtype":"init","session_id":"sess-'$$'","cwd":"/tmp","tools":["Bash"],"model":"fake","permissionMode":"default"}'
 while IFS= read -r line; do
@@ -93,7 +100,7 @@ const check = (ok: boolean, what: string) => {
 
 const port = freePort();
 const proc = Bun.spawn([resolve(bin), "--home", home, "--port", String(port), "--no-tailscale"], {
-  env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "", BACKPLANE_GOOGLE_BAKE: "0", FAKE_LOG: log, FAKE_PERM: perm, BACKPLANE_AGENTS: fake, PATH: `${fake}:${process.env.PATH}` },
+  env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "", BACKPLANE_GOOGLE_BAKE: "0", FAKE_LOG: log, FAKE_PERM: perm, FAKE_MCP_ORIGIN: `http://127.0.0.1:${port}`, BACKPLANE_AGENTS: fake, PATH: `${fake}:${process.env.PATH}` },
   stdout: "ignore",
   stderr: "ignore",
 });
