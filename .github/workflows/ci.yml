@@ -4,16 +4,28 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      native_run:
+        description: Existing CI run containing backplane-linux-x64 (package only)
+        type: string
+        default: ""
+      flatpak_run:
+        description: Existing CI run containing backplane-flatpak-linux-x64 (browser tests only)
+        type: string
+        default: ""
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.ref }}-${{ inputs.flatpak_run || inputs.native_run || 'full' }}
   cancel-in-progress: true
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   check:
+    if: ${{ !inputs.native_run && !inputs.flatpak_run }}
     name: Type-check
     runs-on: ubuntu-24.04
     steps:
@@ -22,6 +34,7 @@ jobs:
       - run: CHECK_JOBS=$(nproc) scripts/check.sh check
 
   proof:
+    if: ${{ !inputs.native_run && !inputs.flatpak_run }}
     name: Prove laws
     runs-on: ubuntu-24.04
     steps:
@@ -40,6 +53,7 @@ jobs:
       - run: echo "type-check and proof both passed"
 
   test:
+    if: ${{ !inputs.native_run && !inputs.flatpak_run }}
     name: Tests ${{ matrix.shard }}/4
     runs-on: ubuntu-24.04
     strategy:
@@ -56,6 +70,7 @@ jobs:
       - run: TEST_JOBS=$(nproc) scripts/test.sh
 
   build:
+    if: ${{ !inputs.native_run && !inputs.flatpak_run }}
     name: Build ${{ matrix.target }}
     # runs beside "laws" (which checks every file); nothing is published here
     strategy:
@@ -116,4 +131,95 @@ jobs:
         with:
           name: backplane-${{ matrix.target }}
           path: dist/
+          retention-days: 7
+
+  flatpak:
+    if: ${{ !cancelled() && (needs.build.result == 'success' || inputs.native_run != '') }}
+    name: Package and run Flatpak
+    needs: [build]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: backplane-linux-x64
+          path: dist
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.native_run || github.run_id }}
+      - run: chmod +x dist/backplane*
+      - run: python3 -m unittest discover -s test/tools -p flatpak_package_test.py
+      - run: sudo apt-get update && sudo apt-get install -y flatpak flatpak-builder dbus-x11
+      - name: Build and run the bundle
+        run: |
+          scripts/package.sh v0.0.0-ci linux-x64
+          dbus-run-session -- bash -eu <<'SH'
+          flatpak --user remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          flatpak --user install -y --noninteractive --no-related flathub org.freedesktop.Platform//25.08 org.freedesktop.Sdk//25.08
+          python3 scripts/package-flatpak.py v0.0.0-ci linux-x64
+          flatpak --user install -y --noninteractive dist/backplane-v0.0.0-ci-linux-x64.flatpak
+          flatpak run io.github.i2cjak.Backplane --version
+          for binary in backplane backplane-serve backplane-browser backplane-step2glb backplane-voice backplane-kipc; do
+            expected=$(sha256sum "dist/$binary" | cut -d' ' -f1)
+            actual=$(flatpak run --command=sha256sum io.github.i2cjak.Backplane "/app/lib/backplane/$binary" | cut -d' ' -f1)
+            test "$actual" = "$expected"
+          done
+          flatpak run --command=/app/lib/backplane/backplane-step2glb io.github.i2cjak.Backplane --version
+          # A disposable home and foreground process; never start on live data.
+          scratch=$(mktemp -d)
+          DISPLAY= flatpak run io.github.i2cjak.Backplane --headless --foreground --no-tailscale --home "$scratch" --port 3799 > "$scratch/log" 2>&1 &
+          pid=$!
+          trap 'kill "$pid" 2>/dev/null || true; rm -rf "$scratch"' EXIT
+          for i in {1..100}; do
+            curl -fsS -D "$scratch/hello.headers" -o "$scratch/hello.cbor" http://127.0.0.1:3799/hello && break
+            sleep 0.2
+          done
+          python3 -c 'from pathlib import Path; import sys; headers=Path(sys.argv[1]).read_text().lower(); body=Path(sys.argv[2]).read_bytes(); assert "content-type: application/cbor" in headers and body and body[0] >> 5 == 5' "$scratch/hello.headers" "$scratch/hello.cbor"
+          echo 'Flatpak hub answered /hello with a CBOR map'
+          # Exercise the real Flatpak -> host -> KiCad Flatpak boundary.
+          flatpak --user install -y --noninteractive --no-related flathub org.kicad.KiCad
+          flatpak run --command=kicad-cli io.github.i2cjak.Backplane version
+          cp test/fixtures/flatpak/minimal.kicad_pcb "$scratch/test board.kicad_pcb"
+          flatpak run --command=kicad-cli io.github.i2cjak.Backplane pcb export svg --mode-multi --layers Edge.Cuts -o "$scratch/out dir" "$scratch/test board.kicad_pcb"
+          find "$scratch/out dir" -name '*.svg' | grep -q .
+          SH
+      - uses: actions/upload-artifact@v4
+        with:
+          name: backplane-flatpak-linux-x64
+          path: dist/*.flatpak
+          retention-days: 7
+
+  flatpak-browser:
+    if: ${{ !cancelled() && (needs.flatpak.result == 'success' || inputs.flatpak_run != '') }}
+    name: Flatpak Chrome and CEF
+    needs: [flatpak]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: ./.github/actions/setup-bend
+      - uses: actions/download-artifact@v4
+        with:
+          name: backplane-flatpak-linux-x64
+          path: dist
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.flatpak_run || github.run_id }}
+      - run: sudo apt-get update && sudo apt-get install -y flatpak dbus-x11 xvfb libx11-dev libxtst6 x11-utils imagemagick
+      - name: Test installed browser engines on a private display
+        run: |
+          dbus-run-session -- bash -eu <<'SH'
+          flatpak --user remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          flatpak --user install -y --noninteractive --no-related flathub org.freedesktop.Platform//25.08 org.freedesktop.Sdk//25.08
+          flatpak --user install -y --noninteractive dist/*.flatpak
+          bash scripts/test-flatpak-browser.sh
+          SH
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: flatpak-browser-diagnostics
+          path: |
+            build/flatpak-browser-shots
+            build/flatpak-browser-logs
+          if-no-files-found: ignore
           retention-days: 7

@@ -46,7 +46,7 @@ export async function privateDisplay() {
   if (!display) throw new Error(`no free private Xvfb display (${choices.join(" ")})`);
   const root = mkdtempSync(join(tmpdir(), "bp-cef-test-"));
   const env = { ...process.env, DISPLAY: `:${display}` };
-  const xvfb = Bun.spawn(["/tmp/xvfb-root/usr/bin/Xvfb", env.DISPLAY, "-screen", "0", "1600x1000x24", "-nolisten", "tcp"], { stdout: "ignore", stderr: "inherit" });
+  const xvfb = Bun.spawn([Bun.which("Xvfb") ?? "/tmp/xvfb-root/usr/bin/Xvfb", env.DISPLAY, "-screen", "0", "1600x1000x24", "-nolisten", "tcp"], { stdout: "ignore", stderr: "inherit" });
   let parent: ReturnType<typeof jsonProcess> | null = null;
   async function cleanup() {
     if (parent) { parent.proc.stdin.end(); await parent.proc.exited; }

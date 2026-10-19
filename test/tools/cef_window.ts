@@ -1,7 +1,7 @@
 // The real native window and CEF, on a private display and an empty home.
 // Run only inside bp-admit --mem 6 --cores 2. Requires build/backplane,
 // build/wire and the 2a BACKPLANE_CEF runtime. No live hub or display is used.
-import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, readlinkSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { check, until, privateDisplay } from "../../tools/cef/test/harness.ts";
 
@@ -71,8 +71,13 @@ async function evalPage(port: number, path: string, expression: string) {
 }
 function processTree(pid: number): number[] {
   try {
-    const kids = readFileSync(`/proc/${pid}/task/${pid}/children`, "utf8").trim().split(/\s+/).filter(Boolean).map(Number);
-    return [pid, ...kids.flatMap(processTree)];
+    // children belongs to a task, not the whole thread group. The hub's
+    // worker threads can launch the helper, so inspect every owned task.
+    const kids = new Set(readdirSync(`/proc/${pid}/task`).flatMap(task => {
+      try { return readFileSync(`/proc/${pid}/task/${task}/children`, "utf8").trim().split(/\s+/).filter(Boolean).map(Number); }
+      catch { return []; }
+    }));
+    return [pid, ...[...kids].flatMap(processTree)];
   } catch { return []; }
 }
 const shotDir = process.env.CEF_SHOTS ?? resolve("cef-window-shots");
@@ -216,9 +221,9 @@ try {
   // Choose that row so this is the actual bot UI, rather than its plain thread.
   await poke("click", "100", "74"); await poke("type", "zzno-project-match");
   await poke("click", "100", "154");
-  // Select the bot's Browser tab (Space, Browser, Tasks...) while it has no page.
+  // Select Browser after Chat, Mail room and Space while it has no page.
   const before = (await children()).length;
-  await poke("click", "520", "62"); await Bun.sleep(1500);
+  await poke("click", "595", "62"); await Bun.sleep(1500);
   check("the bot's empty Browser tab creates no CEF browser", (await children()).length === before && !info[`browser.page.${bot.id}`], await children());
   await mcp(bot.thread, "preview_open", { url: `http://127.0.0.1:${site.port}/bot` });
   await poke("click", "820", "24"); // close the duplicate right-hand Viewer pane
@@ -238,7 +243,20 @@ try {
   await until(() => (info[`teach.draft.${bot.id}`] ?? "").includes("click"), "native click recorded");
   check("native bot teach records person input", true);
   await rpc("bots.teach", { bot: bot.id, op: "discard" });
-  const cefPids = processTree(status.hostPid);
+  // status.hostPid is local to the helper's PID namespace in Flatpak. Follow
+  // our own app's descendants on the host so this also checks sandboxed CEF.
+  const appPids = processTree(app.pid);
+  const command = (pid: number) => {
+    try { return readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0")[0]; }
+    catch { return ""; }
+  };
+  const cefBinary = realpathSync(process.env.BACKPLANE_CEF!);
+  const cefPids = appPids.filter(pid => {
+    // CEF overwrites argv[0] with a full process title, including arguments.
+    try { return readlinkSync(`/proc/${pid}/exe`) === cefBinary; }
+    catch { const title = command(pid); return title === cefBinary || title.startsWith(cefBinary + " "); }
+  });
+  check("owned CEF process tree exists", cefPids.length > 0, appPids.map(pid => ({ pid, command: command(pid) })));
   const beforeChromePics = await picCount();
   await rpc("setting.set", { key: "browser.engine", value: "chrome" });
   await until(() => info["browser.engine.live"] === "chrome", "Chrome restored", 60000);
