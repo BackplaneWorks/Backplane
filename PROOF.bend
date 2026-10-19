@@ -62,6 +62,7 @@ import ./src/gfx/font.bend as F
 import ./src/app/layout.bend as L
 import ./src/core/eq.bend as Q
 import ./src/core/gh.bend as GH
+import ./src/core/kicadcli.bend as KCL
 import ./src/core/fold.bend as FO
 import ./src/core/subs.bend as SB
 import ./src/core/plot.bend as PL
@@ -12356,4 +12357,47 @@ def Laws.auth_cookie_prefix_denied():
 
 # ---- PCB viewer text ----
 def Laws.pcb2_hidden_text_draws_nothing(at, angle, x, text, up, key, sig, ctx):
+  {==}
+
+def Laws.kicad_cli_asset_linux_x64():
+  {==}
+
+def Laws.kicad_cli_asset_mac():
+  {==}
+
+def Laws.kicad_cli_no_fork_intel_mac():
+  {==}
+
+def Laws.kicad_cli_no_fork_arm_linux():
+  {==}
+
+def Laws.kicad_cli_dir_linux(data, ver):
+  {==}
+
+def Laws.kicad_cli_dir_mac():
+  {==}
+
+def Laws.kicad_cli_mac_order():
+  {==}
+
+def Laws.kicad_cli_intel_mac_app():
+  {==}
+
+def Laws.kicad_cli_linux_order():
+  {==}
+
+def Laws.kicad_cli_mac_not_published():
+  {==}
+
+def Laws.kicad_cli_legacy_incompatible_on_mac():
+  {==}
+
+def Laws.kicad_cli_linux_rejects_mac():
+  {==}
+
+
+def Laws.kicad_cli_api_number():
+  {==}
+
+def Laws.kicad_cli_api_string_rejected():
   {==}
