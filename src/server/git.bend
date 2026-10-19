@@ -551,11 +551,36 @@ def Git.checkpoint.prev(thread_id: String, n: Nat) -> String:
 def Git.index_path(gd: String, thread_id: String) -> String:
   gd ++ "/backplane-" ++ Git.b64url(thread_id) ++ ".index"
 
-# the whole work tree (tracked and untracked, less ignored files) as a tree
-# object, staged through the thread's own index file; answers the tree id
+# Seed from the real index every time: an empty or stale private index does
+# not know that an ignored path is tracked. Copying also preserves split
+# index references (both indexes live in the same git directory). Clear the
+# private copy's optimization flags so every current working file is read. An unborn
+# repository may not have an index yet; discard any old private one then.
+def Git.index.seed.sh() -> String:
+  String.join([
+    "set -eu",
+    "src=$(git rev-parse --path-format=absolute --git-path index)",
+    "if [ ! -f \"$src\" ]; then rm -f \"$1\"; exit 0; fi",
+    "cp \"$src\" \"$1\"",
+    "export GIT_INDEX_FILE=\"$1\"",
+    "cd \"$(git rev-parse --show-toplevel)\"",
+    "paths=$(mktemp \"$1.paths.XXXXXX\")",
+    "trap 'rm -f \"$paths\"' 0",
+    "git ls-files -z > \"$paths\"",
+    "git update-index --no-assume-unchanged -z --stdin < \"$paths\"",
+    "git update-index --no-skip-worktree -z --stdin < \"$paths\""
+  ], "\n")
+
+def Git.index.seed(cwd: String, idx: String) -> IO(P.Ran):
+  P.Proc.run("sh", ["-c", Git.index.seed.sh(), "sh", idx], cwd)
+
+# the whole work tree (tracked, including ignored tracked files, and
+# untracked non-ignored files) as a tree object; answers the tree id
+# without changing the real index or its staged contents.
 def Git.snapshot.k(+cwd: String, +idx: String) -> IO(String):
-  Git.seq(Git.run.idx(cwd, idx, ["add", "-A"]), _ =>
-    Git.seq(Git.run.idx(cwd, idx, ["write-tree"]), Git.done))
+  Git.seq(Git.index.seed(cwd, idx), _ =>
+    Git.seq(Git.run.idx(cwd, idx, ["add", "-A"]), _ =>
+      Git.seq(Git.run.idx(cwd, idx, ["write-tree"]), Git.done)))
 
 def Git.snapshot(+cwd: String, thread_id: String) -> IO(String):
   Git.seq(Git.run(cwd, ["rev-parse", "--absolute-git-dir"]), gd => Git.snapshot.k(cwd, Git.index_path(gd, thread_id)))
@@ -596,11 +621,12 @@ def Git.checkpoint.diff_worktree(+cwd: String, +thread_id: String, n: Nat) -> IO
 
 def Git.revert.k(+cwd: String, +idx: String, r: String) -> IO(String):
   Git.seq(Git.run(cwd, ["rev-parse", "--verify", r ++ "^{tree}"]), tree =>
-    Git.seq(Git.run.idx(cwd, idx, ["add", "-A"]), _ =>
-      Git.seq(Git.run.idx(cwd, idx, ["read-tree", "-u", "--reset", tree]), _ => Git.done(""))))
+    Git.seq(Git.index.seed(cwd, idx), _ =>
+      Git.seq(Git.run.idx(cwd, idx, ["add", "-A"]), _ =>
+        Git.seq(Git.run.idx(cwd, idx, ["read-tree", "-u", "--reset", tree]), _ => Git.done("")))))
 
 # put the work tree back exactly as checkpoint n had it: changed files are
-# restored, files it did not have are removed, ignored files are left alone.
+# restored, files it did not have are removed; ignored untracked files stay.
 # HEAD, the branch and the real index do not move. "" when done.
 def Git.checkpoint.revert(+cwd: String, +thread_id: String, n: Nat) -> IO(String):
   Git.seq(Git.run(cwd, ["rev-parse", "--absolute-git-dir"]), gd =>
