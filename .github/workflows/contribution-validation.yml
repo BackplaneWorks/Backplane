@@ -25,30 +25,35 @@ concurrency:
 
 jobs:
   native:
-    name: Native effects and browser acceptance
+    name: Linux renderer, native effects and browser acceptance
     needs: phone
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 90
     env:
       BACKPLANE_SKIP_CHECK: '1'
       BACKPLANE_LOW_MEM: '1'
       BACKPLANE_JOBS: '2'
+      BACKPLANE_GOOGLE_BAKE: '0'
+      BUN_JSC_forceRAMSize: '4294967296'
       BACKPLANE_TEST_BROWSERS: chromium
       BACKPLANE_CHROME: /usr/bin/google-chrome
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - name: Fetch exact native negative-control baseline
+        run: git fetch --no-tags --depth=1 origin 30884966ef59c383581bcd1b7653f8f739cf009e
       - uses: ./.github/actions/setup-bend
       - uses: oven-sh/setup-bun@v2
       - name: Native dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-19 libx11-dev xvfb
+          sudo apt-get install -y clang-19 libx11-dev xvfb fonts-noto-cjk fonts-dejavu-core fontconfig libfreetype6
           sudo ln -sf /usr/bin/clang-19 /usr/local/bin/clang
       - name: Validate acceptance tooling
         run: |
           python3 test/tools/validation_evidence_test.py
+          python3 test/tools/validation_renderer_test.py
           python3 test/tools/build_lock_test.py
           python3 test/tools/build_clock_test.py
           python3 test/tools/ios_simulator_smoke_test.py
@@ -56,6 +61,22 @@ jobs:
         with:
           name: contribution-bridge
           path: mobile/build/assets
+      - name: Bounded temporary swap for Bend emission
+        run: |
+          dir="$RUNNER_TEMP"
+          free_gb=$(df -BG --output=avail "$dir" | tail -1 | tr -dc 0-9)
+          size=$(( free_gb - 8 )); [ "$size" -le 16 ] || size=16
+          if [ "$size" -ge 2 ]; then
+            sudo fallocate -l "${size}G" "$dir/swap-build"
+            sudo chmod 600 "$dir/swap-build"
+            sudo mkswap "$dir/swap-build"
+            sudo swapon "$dir/swap-build"
+          fi
+          free -h
+      # Requires the final native-glyph harness (62fa318 or its integrated
+      # successor). Missing harness files or assertions fail this required lane.
+      - name: Required Linux native renderer and X11 readback
+        run: scripts/validate-contribution.sh renderer
       - name: Build exact candidate
         run: scripts/validate-contribution.sh build
       - run: scripts/build-wire.sh
@@ -83,12 +104,27 @@ jobs:
     env:
       BACKPLANE_SKIP_CHECK: '1'
       BACKPLANE_LOW_MEM: '1'
+      BACKPLANE_JOBS: '2'
+      BACKPLANE_GOOGLE_BAKE: '0'
+      BUN_JSC_forceRAMSize: '4294967296'
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-bend
       - uses: oven-sh/setup-bun@v2
+      - name: Bounded temporary swap for Bend emission
+        run: |
+          dir="$RUNNER_TEMP"
+          free_gb=$(df -BG --output=avail "$dir" | tail -1 | tr -dc 0-9)
+          size=$(( free_gb - 8 )); [ "$size" -le 16 ] || size=16
+          if [ "$size" -ge 2 ]; then
+            sudo fallocate -l "${size}G" "$dir/swap-build"
+            sudo chmod 600 "$dir/swap-build"
+            sudo mkswap "$dir/swap-build"
+            sudo swapon "$dir/swap-build"
+          fi
+          free -h
       - run: scripts/validate-contribution.sh emit
       - uses: actions/upload-artifact@v4
         with:
@@ -112,6 +148,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - name: Fetch exact native negative-control baseline
+        run: git fetch --no-tags --depth=1 origin 30884966ef59c383581bcd1b7653f8f739cf009e
       - uses: ./.github/actions/setup-bend
       - uses: oven-sh/setup-bun@v2
       - uses: actions/download-artifact@v4

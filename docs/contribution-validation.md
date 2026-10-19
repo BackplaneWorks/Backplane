@@ -15,6 +15,7 @@ is diagnostic data, not a signature or a required upstream GitHub check.
 | `build` | Current-source native window/hub, web and helpers via `scripts/build.sh` |
 | `emit` | Current-source server C, web and wire inputs for compilation on a Mac |
 | `native` | Synthetic release transactions, platform installer, integrated worktree preservation, event-log failure, reconnect and retirement effects |
+| `renderer` | Linux native font/glyph and i18n fixtures, display settling/comparison controls and actual Xvfb pixel readback |
 | `browser` | Synthetic pages through the real helper and hub; ownership and credential boundaries |
 | `phone` | Production bridge, recent-history/replay regressions at the phone's no-JIT stack, live bridge tests and sanitized current-type Worker state |
 | `real-cad` | Explicitly selected KiCad integration using the pinned, verified fixture |
@@ -29,8 +30,48 @@ its resolved path and hash appear in both `consumed` and `artifacts`. An old,
 missing, failed or mismatched receipt fails the lane before tests start.
 Changing the binary during validation also fails the lane.
 
+The required Linux `renderer` lane depends on the final native-glyph harness
+at `62fa318989b092aa8712825a4c75f1e4f0c6bcbf` or its integrated successor;
+this tooling branch alone does not contain that feature. Missing source or tools
+fail before execution. It requires all seven settling controls, 29 independent
+display comparisons, X11-linked `xpoke` and presentation observer compilation,
+and exact red/green RGB readback from an owned Xvfb fixture. It then uses
+`scripts/build-app.sh` to compile the actual glyph and i18n fixtures, requires
+all seven glyph assertions (including exact original RGlyph bytes and fresh
+cold-to-warm pixels), all 705 uniquely indexed samples through the existing
+strict parser, and all nine native i18n assertions. Missing assertions, samples,
+compiled outputs or a skipped check fail even when a command exits zero.
+
+Install clang, X11 development libraries, Xvfb, `fonts-noto-cjk`,
+`fonts-dejavu-core`, `fontconfig` and `libfreetype6`. The lane records the selected
+compiler, Bend/Bun/Xvfb/fontconfig executable hashes and an actual Japanese-capable
+font's hash/languages. `CC`, `BACKPLANE_X11` and `BACKPLANE_TEST_XVFB` may explicitly
+select local dependencies. Fixture processes use a fresh private HOME,
+XDG_CACHE_HOME and BACKPLANE_HOME; compiler processes retain their toolchain HOME.
+Prebuilt and emit-only shortcuts are disabled for these fixture builds. Each
+compiled fixture is hashed before use and checked again at the end; emitted C,
+binaries, raw logs and the 705-sample summary are retained under the lane's
+evidence directory. Source changes invalidate the receipt as in every lane.
+
+The Linux workflow requires this focused lane. It does not repeat
+`scripts/check.sh all` or all unit shards, which remain separate CI gates.
+The Mac target is the hub and does not run this Linux window-renderer lane.
+These correctness checks and raw microbenchmarks do not establish whole-app
+input/display performance budgets or physical-device performance.
+The Linux native and Mac-emission jobs use `BACKPLANE_LOW_MEM=1`, two compile
+workers, no baked Google credentials and a 4 GiB Bun heap-sizing hint. Before
+emission they provision temporary runner swap only when at least 8 GiB of free
+disk remains, capped at 16 GiB. The heap hint is not a memory limit; swap and
+the recorded build flags are part of the reproducible CI configuration.
+
 Run `build`, `phone`, and `scripts/build-wire.sh` first;
 `native` requires that exact production phone bridge for reconnect/save/load coverage.
+Its KiCad negative control also requires the historical source object at
+`30884966ef59c383581bcd1b7653f8f739cf009e:src/server/kicad.bend`.
+The runner checks this before compiling fixtures. For a shallow checkout, run
+`git fetch --no-tags --depth=1 origin 30884966ef59c383581bcd1b7653f8f739cf009e`;
+the Linux and Mac jobs fetch exactly that commit without importing tags or
+unrelated history that could affect build version metadata.
 Native and phone evidence records the bridge hash when consumed and checks
 that its bytes remain unchanged for the rest of the lane.
 The log-reader fixture is built and passed explicitly, so Unicode, large-file and

@@ -5,6 +5,7 @@ import hashlib
 import os
 from pathlib import Path
 import shutil
+import shlex
 import subprocess
 import tempfile
 
@@ -42,6 +43,14 @@ chmod +x "$2"
 ''')
     (root/'scripts/fetch-cad-fixture.py').write_text("print('ok fixture CAD')\n")
     script('bin/kicad-cli', 'printf "%s\\n" "${EVIDENCE_KICAD_VERSION:-10.0.6}"\nexit "${EVIDENCE_KICAD_STATUS:-0}"\n')
+    # Tiny repositories cannot contain the production baseline commit. Only
+    # its existence probe is synthetic; all source/receipt Git work stays real.
+    script('bin/git', '''
+if [ "$#" = 3 ] && [ "$1" = cat-file ] && [ "$2" = -e ] && [ "$3" = 30884966ef59c383581bcd1b7653f8f739cf009e:src/server/kicad.bend ]; then
+  exit "${EVIDENCE_MISSING_NATIVE_BASE:-0}"
+fi
+exec '''+shlex.quote(shutil.which('git'))+''' "$@"
+''')
     for name in ['bun','bend','clang']:
         script(f'bin/{name}', '''
 if [ "$(basename "$0")" = bend ]; then
@@ -140,12 +149,15 @@ echo 'ok fixture tool'
     code,e=run('browser');assert code and not e['steps'] and 'Bend version probe' in e['provenance']['error']
     build_receipt.write_bytes(saved_receipt)
     print('ok failed/malformed producers and failed or wrong-argv Bend metadata fail before consumer tests')
+    code,e=run('native',extra_env={'EVIDENCE_MISSING_NATIVE_BASE':'1'})
+    assert code and not e['steps'] and 'git fetch --no-tags --depth=1 origin 30884966' in e['provenance']['error']
+    assert e['provenance']['native_baseline']['status']==1
     code,e=run('native')
     assert code==0 and e['consumed']['phone_bridge']['sha256']==hashlib.sha256(bridge.read_bytes()).hexdigest()
     code,e=run('native',extra_env={'EVIDENCE_MUTATE_BRIDGE':'1'})
     assert code and 'consumed phone_bridge changed' in e['provenance']['error']
     bridge.write_text('fixture bridge\n')
-    print('ok the exact reconnect bridge is recorded and mutation invalidates acceptance')
+    print('ok missing native baseline fails before compilation; exact reconnect bridge mutation invalidates acceptance')
     external.write_bytes((root/'dist/backplane').read_bytes())
     code,e=run('browser','--binary',external,extra_env={'EVIDENCE_MUTATE_BINARY':'1'})
     assert code and 'consumed hub_binary changed' in e['provenance']['error']

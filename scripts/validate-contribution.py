@@ -11,12 +11,13 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parent.parent
 os.chdir(ROOT)
 parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument('lane', choices=['pure', 'native', 'browser', 'phone', 'real-cad', 'build', 'emit'])
+parser.add_argument('lane', choices=['pure', 'native', 'renderer', 'browser', 'phone', 'real-cad', 'build', 'emit'])
 parser.add_argument('--out', type=Path, default=Path('build/validation'))
 parser.add_argument('--binary', default='dist/backplane')
 parser.add_argument('--build-receipt', type=Path, help='passing build/result.json for the consumed hub binary')
@@ -29,9 +30,9 @@ args.build_receipt = (args.build_receipt or output_root/'build/result.json').res
 args.out = output_root / args.lane
 args.out.mkdir(parents=True, exist_ok=True)
 
-def capture(command):
+def capture(command, env=None):
     try:
-        r = subprocess.run(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=20)
+        r = subprocess.run(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=20, env=env)
         return {'command': command, 'status': r.returncode, 'output': r.stdout.strip()}
     except (OSError, subprocess.TimeoutExpired) as e:
         return {'command': command, 'status': 'unavailable', 'output': str(e)}
@@ -105,11 +106,15 @@ lanes = {
  ],
  'build': [['scripts/build.sh']],
  'emit': [['scripts/build.sh', 'emit']],
+ 'renderer': [],  # Filled after checking the required Linux harness inputs.
 }
+renderer_steps = []
+renderer_home = None
+renderer_outputs = {}
 report = {'schema':2,'lane':args.lane,'started':datetime.now(timezone.utc).isoformat(),
           'source':source(),'host':{'platform':platform.platform(),'machine':platform.machine()},
           'toolchain':[capture(c) for c in [['bend','version'],['bun','--version'],['clang','--version'],['git','--version'],['python3','--version']]],
-          'flags':{k:os.environ.get(k) for k in ['CC','BACKPLANE_CFLAGS','BACKPLANE_LOW_MEM','BACKPLANE_JOBS','BACKPLANE_CPUS','BACKPLANE_PREBUILT','BACKPLANE_GOOGLE_BAKE','BACKPLANE_KICAD_CLI','BUN_JSC_forceRAMSize','BUN_JSC_useJIT','BACKPLANE_CHROME','BACKPLANE_TEST_BROWSERS']},
+          'flags':{k:os.environ.get(k) for k in ['CC','BACKPLANE_CFLAGS','BACKPLANE_LOW_MEM','BACKPLANE_JOBS','BACKPLANE_CPUS','BACKPLANE_PREBUILT','BACKPLANE_GOOGLE_BAKE','BACKPLANE_KICAD_CLI','BUN_JSC_forceRAMSize','BUN_JSC_useJIT','BACKPLANE_CHROME','BACKPLANE_TEST_BROWSERS','BACKPLANE_X11','BACKPLANE_TEST_XVFB']},
           'steps':[], 'artifacts':[], 'consumed':{}, 'provenance':{}, 'result':'running'}
 report_path = args.out/'result.json'
 
@@ -209,16 +214,104 @@ def validate_cad():
     # checked, instead of another managed installation found before PATH.
     os.environ['BACKPLANE_KICAD_CLI'] = binary['resolved_path']
 
+def prepare_renderer():
+    global renderer_home
+    if platform.system() != 'Linux':
+        raise ValueError('renderer requires Linux/X11; the Mac hub lane does not cover window rendering')
+    required = [
+        'test/tools/native_display.ts', 'test/tools/native_display_test.ts',
+        'test/tools/native_display_compare.ts', 'test/tools/native_display_compare_test.ts',
+        'test/tools/native_display_readback_test.ts', 'test/tools/xpoke.c',
+        'test/tools/present_observer_fixture.c', 'test/tools/glyph_bench_report.py',
+        'test/native/glyph_table_bench.bend', 'test/native/i18n_smoke.bend',
+        'scripts/build-app.sh',
+    ]
+    dependency = 'native-glyph 62fa318989b092aa8712825a4c75f1e4f0c6bcbf (or its integrated successor)'
+    report['provenance']['renderer'] = {'required_dependency': dependency, 'inputs': []}
+    missing = [name for name in required if not (ROOT/name).is_file()]
+    if missing:
+        raise ValueError(f'renderer requires {dependency}; missing: {", ".join(missing)}')
+    report['provenance']['renderer']['inputs'] = [artifact(name, 'renderer_source') for name in required]
+    tools = {'renderer_cc': os.environ.get('CC') or 'clang',
+             'renderer_xvfb': os.environ.get('BACKPLANE_TEST_XVFB') or 'Xvfb',
+             'renderer_bun': 'bun', 'renderer_bend': 'bend', 'renderer_fontconfig': 'fc-match'}
+    for name, selected in tools.items():
+        executable = shutil.which(selected)
+        if not executable:
+            raise ValueError(f'renderer requires executable {selected}')
+        consume(name, executable)
+    cc = report['consumed']['renderer_cc']['resolved_path']
+    compiler = capture([cc, '--version'])
+    report['toolchain'].append(compiler)
+    if compiler['status'] != 0 or not compiler['output']:
+        raise ValueError('renderer compiler version probe failed')
+    renderer_home = tempfile.TemporaryDirectory(prefix='bp-renderer-home-')
+    isolated = {'HOME': renderer_home.name, 'XDG_CACHE_HOME': renderer_home.name+'/cache',
+                'BACKPLANE_HOME': renderer_home.name+'/backplane'}
+    font = capture([report['consumed']['renderer_fontconfig']['resolved_path'], '-f', '%{file}\n%{lang}\n', ':lang=ja'],
+                   env=dict(os.environ, **isolated))
+    report['provenance']['renderer']['japanese_font'] = font
+    lines = font['output'].splitlines()
+    if font['status'] != 0 or len(lines) != 2 or not re.search(r'(?:^|\|)ja(?:\||$)', lines[1]):
+        raise ValueError('renderer requires a Japanese-capable font; install fonts-noto-cjk and fontconfig')
+    consume('renderer_japanese_font', lines[0])
+    build_env = {'CC': cc, 'BACKPLANE_PREBUILT': '0', 'BACKPLANE_EMIT_ONLY': '0', 'BACKPLANE_GOOGLE_BAKE': '0'}
+    x11 = os.environ.get('BACKPLANE_X11')
+    includes = ['-I'+x11+'/include', '-L'+x11+'/lib/x86_64-linux-gnu'] if x11 else []
+    for name in ['xpoke', 'present_observer_fixture', 'glyph_table_bench', 'i18n_native_smoke']:
+        renderer_outputs[name] = str(args.out/name)
+    def step(command, **details):
+        renderer_steps.append(dict(command=command, **details))
+    step(['bun', 'test/tools/native_display_test.ts'], required_lines=[
+        'native display demand: changed target accepted; stale, wrong, indistinguishable and late content rejected',
+        'composer observer: caret blink ignored; missing/corrupt glyph pixels and wrong region size distinguished',
+        'calibration: delayed/transient frames settle; unchanged, wrong-empty, oscillating and late pixels rejected (7 controls)'])
+    step(['bun', 'test/tools/native_display_compare_test.ts'], required_lines=['29 independent native display comparison controls passed'])
+    for name, source_path in [('xpoke', 'test/tools/xpoke.c'), ('present_observer_fixture', 'test/tools/present_observer_fixture.c')]:
+        step([cc, '-O2', *includes, source_path, '-o', renderer_outputs[name], '-lX11'], produces=[name])
+    step(['bun', 'test/tools/native_display_readback_test.ts', renderer_outputs['xpoke'],
+          renderer_outputs['present_observer_fixture'], report['consumed']['renderer_xvfb']['resolved_path']],
+         env=isolated, consumes=['xpoke', 'present_observer_fixture'], required_lines=[
+             'xpoke pixels independently read exact red/green RGB bytes from X-server fixture'])
+    step(['scripts/build-app.sh', 'test/native/glyph_table_bench.bend', renderer_outputs['glyph_table_bench']],
+         env=build_env, produces=['glyph_table_bench'], emitted_c='build/cc/glyph_table_bench/all.c',
+         remove=['build/cc/glyph_table_bench/all.c'])
+    step([renderer_outputs['glyph_table_bench']], env=isolated, consumes=['glyph_table_bench'], required_lines=[
+        'ok '+name for name in ['native font loaded', 'native cold stream has wants',
+        'native nonASCII fill drains wants', 'native layout emits keys directly',
+        'native table resolves original masks', 'native keyed pixels equal original RGlyph bytes',
+        'native cold to warm frame is fresh']])
+    glyph_log = args.out/f'{len(renderer_steps)-1:02d}.log'
+    step(['python3', 'test/tools/glyph_bench_report.py', str(glyph_log), str(args.out/'glyph-summary.json')],
+         remove=[str(args.out/'glyph-summary.json')], required_lines=['705 complete native glyph samples summarized'])
+    step(['scripts/build-app.sh', 'test/native/i18n_smoke.bend', renderer_outputs['i18n_native_smoke']],
+         env=build_env, produces=['i18n_native_smoke'], emitted_c='build/cc/i18n_native_smoke/all.c',
+         remove=['build/cc/i18n_native_smoke/all.c'])
+    step([renderer_outputs['i18n_native_smoke']], env=isolated, consumes=['i18n_native_smoke'], required_lines=[
+        'ok native '+name for name in ['Japanese literal', 'Japanese save', 'English plural',
+        'Japanese count', 'exact plural', 'select', 'interpolation', 'literal fallback', 'plural fallback']])
+    lanes['renderer'] = [item['command'] for item in renderer_steps]
+    report['provenance']['renderer']['scope'] = 'Native rendering correctness and raw microbenchmarks; whole-app display budgets are separate.'
+
 def prepare_inputs():
     report['provenance']['bend_version'] = bend_version(report['toolchain'])
     if args.lane in ['native', 'browser', 'real-cad']:
         validate_binary()
     if args.lane == 'native':
         consume('phone_bridge', 'mobile/build/assets/bridge.js')
+        base = '30884966ef59c383581bcd1b7653f8f739cf009e'
+        path = 'src/server/kicad.bend'
+        probe = capture(['git', 'cat-file', '-e', base+':'+path])
+        report['provenance']['native_baseline'] = dict(probe, commit=base, path=path)
+        if probe['status'] != 0:
+            raise ValueError('native KiCad negative control requires the exact baseline object; run '
+                             f'git fetch --no-tags --depth=1 origin {base} before native acceptance')
     if args.lane == 'real-cad':
         validate_cad()
     if args.lane == 'build' and os.environ.get('BACKPLANE_PREBUILT') == '1':
         validate_prebuilt()
+    if args.lane == 'renderer':
+        prepare_renderer()
 
 def save():
     temp=report_path.with_suffix('.pending')
@@ -234,28 +327,49 @@ except (OSError, ValueError, KeyError, TypeError) as error:
     print(f'FAIL provenance: {error}', flush=True)
 save()
 for index, command in enumerate([] if failed else lanes[args.lane]):
+    details = renderer_steps[index] if args.lane == 'renderer' else {}
     start=time.monotonic()
     log=args.out/f'{index:02d}.log'
     print('+ '+ ' '.join(command), flush=True)
     status='fail'; code=None; reason=''
     try:
+        for name in details.get('consumes', []):
+            consume('renderer_'+name, renderer_outputs[name])
+        for path in details.get('remove', []) + [renderer_outputs[name] for name in details.get('produces', [])]:
+            Path(path).unlink(missing_ok=True)
         if args.binary in command and args.lane in ['native', 'browser', 'real-cad']:
             consume('hub_binary', args.binary)
         if 'mobile/build/assets/bridge.js' in command:
             consume('phone_bridge', 'mobile/build/assets/bridge.js')
         with log.open('wb') as stream:
-            r=subprocess.run(command,stdout=stream,stderr=subprocess.STDOUT,timeout=3600)
+            r=subprocess.run(command,stdout=stream,stderr=subprocess.STDOUT,timeout=3600,
+                             env=dict(os.environ, **details.get('env', {})))
         code=r.returncode
         text=log.read_text(errors='replace')
         if code == 0 and not re.search(r'^(?:FAIL\b|skip(?:ped)?\b)',text,re.M|re.I):
             status='pass'
         elif re.search(r'^skip(?:ped)?\b',text,re.M|re.I):
             status='skip';reason='required lane reported skipped coverage'
+        if status == 'pass' and args.lane == 'renderer':
+            missing = [line for line in details.get('required_lines', []) if line not in text.splitlines()]
+            if missing or re.search(r'^Error:', text, re.M):
+                status='fail';reason='required renderer assertions missing or failed: '+', '.join(missing)
+            else:
+                for name in details.get('produces', []):
+                    consume('renderer_'+name, renderer_outputs[name])
+                if details.get('emitted_c'):
+                    name = details['produces'][0]
+                    consume('renderer_'+name+'_emitted_c', details['emitted_c'])
+                    copied = args.out/(name+'.c')
+                    shutil.copy2(details['emitted_c'], copied)
+                    consume('renderer_'+name+'_emitted_c_evidence', copied)
+                    report['artifacts'].append(artifact(copied, 'renderer_emitted_c'))
     except (OSError, ValueError, subprocess.TimeoutExpired) as e:
-        reason=str(e)
+        status='fail';reason=str(e)
     if status != 'pass':
         failed=True
-    report['steps'].append({'command':command,'result':status,'exit_code':code,'seconds':time.monotonic()-start,'reason':reason,'log':log.name,'log_sha256':hashlib.sha256(log.read_bytes()).hexdigest() if log.exists() else None})
+    report['steps'].append({'command':command,'result':status,'exit_code':code,'seconds':time.monotonic()-start,'reason':reason,'log':log.name,'log_sha256':hashlib.sha256(log.read_bytes()).hexdigest() if log.exists() else None,
+                            **({'environment':details['env']} if details.get('env') else {})})
     save()
     if failed:
         break
@@ -293,10 +407,20 @@ try:
         if not isinstance(metadata, dict) or metadata.get('bridgeSha256') != report['consumed'].get('phone_bridge', {}).get('sha256') or metadata.get('stateSha256') != state['sha256'] or metadata.get('rpcExecution') is not False:
             raise ValueError('sanitized Worker state does not match the exact bridge/state identities')
         report['artifacts'] += [state, artifact(metadata_path, 'sanitized_phone_state_metadata')]
+    if args.lane == 'renderer' and not failed:
+        summary_path = args.out/'glyph-summary.json'
+        summary = json.loads(summary_path.read_text())
+        expected = dict.fromkeys(['masks', 'keys', 'prekeyed', 'table-guard', 'convert-and-eq', 'key-eq', 'extension-plan'], 100)
+        expected.update(dict.fromkeys(['font-open', 'ascii-fill-table', 'nonASCII-fill-table', 'fill-redraw-and-byte-check', 'cold-frame'], 1))
+        if not isinstance(summary, dict) or not isinstance(summary.get('samples'), dict) or {name:item.get('n') for name,item in summary['samples'].items() if isinstance(item,dict)} != expected:
+            raise ValueError('renderer requires the complete 705-sample native glyph summary')
+        report['artifacts'].append(artifact(summary_path, 'renderer_glyph_summary'))
 except (OSError, ValueError) as error:
     failed=True;report['provenance']['error']=str(error)
 report['result']='fail' if failed else 'pass'
 report['finished']=datetime.now(timezone.utc).isoformat()
+if renderer_home:
+    renderer_home.cleanup()
 save()
 print(f"{report['result']}: {report_path}")
 sys.exit(1 if failed else 0)
