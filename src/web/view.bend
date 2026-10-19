@@ -2397,16 +2397,16 @@ def View.hist.ref.loc(+lc: I.Loc, +side: String) -> D.Node:
 def View.hist.ref(+side: String) -> D.Node:
   View.hist.ref.loc(I.En{}, side)
 
-def View.hist.menu.k(+lc: I.Loc, open: Bool, +u: U.Ui, +side: String) -> List<&2, D.Node>:
+def View.hist.menu.k(+lc: I.Loc, open: Bool, +ss: List<&2, HS.Step>, +u: U.Ui, +side: String) -> List<&2, D.Node>:
   match open:
     case True{}:
       [D.El{"div", "", [D.At{"class", "hist-scrim"}, D.At{"data-value", ""}, D.On{"click", "cmp-shut"}], Nil{}},
-       D.El{"div", "", [D.At{"class", "hist-menu"}], D.Dom.span("head", Bool.pick(String, String.eq(side, "b"), MSG.T.viewer.history.compare.new(lc), MSG.T.viewer.history.compare.old(lc))) <> (View.hist.ref.loc(lc, side) <> View.hist.rows(U.Hs.menu.loc(lc, u, side)))}]
+       D.El{"div", "", [D.At{"class", "hist-menu"}], D.Dom.span("head", Bool.pick(String, String.eq(side, "b"), MSG.T.viewer.history.compare.new(lc), MSG.T.viewer.history.compare.old(lc))) <> (View.hist.ref.loc(lc, side) <> View.hist.rows(U.Hs.menu.track.loc(lc, ss, u, side)))}]
     case False{}:
       Nil{}
 
-def View.hist.menu(+lc: I.Loc, +u: U.Ui) -> D.Node:
-  D.El{"div", "", [D.At{"class", "hist-over"}], View.hist.menu.k(lc, Bool.not(String.is_empty(U.Ui.scratch(u, "@cmp.menu"))), u, U.Ui.scratch(u, "@cmp.menu"))}
+def View.hist.menu(+lc: I.Loc, +ss: List<&2, HS.Step>, +u: U.Ui) -> D.Node:
+  D.El{"div", "", [D.At{"class", "hist-over"}], View.hist.menu.k(lc, Bool.not(String.is_empty(U.Ui.scratch(u, "@cmp.menu"))), ss, u, U.Ui.scratch(u, "@cmp.menu"))}
 
 # Review comments (client.bend's Rc), over the canvas: a pin at each place
 # (plot2d.js puts them where the plot's own transform says: data-x, data-y in
@@ -2530,13 +2530,16 @@ def View.rc.checks.loc(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
 def View.rc.checks(+u: U.Ui) -> List<&2, D.Node>:
   View.rc.checks.loc(I.En{}, u)
 
-def View.plot(+lc: I.Loc, +u: U.Ui, +what: List<&2, D.Node>) -> List<&2, D.Node>:
+def View.plot.track(+lc: I.Loc, +ss: List<&2, HS.Step>, +u: U.Ui, +what: List<&2, D.Node>) -> List<&2, D.Node>:
   View.bar.loc(lc, List.append(&2, D.Node, what, [View.layers.loc(lc, String.eq(U.Solid.kind(u), "schematic"), Nat.is_eq(HS.Hist.kind(U.Ui.view_get(u, "view.path")), 2n), U.Solid.off(u), U.Lfocus.of(u))]), MSG.T.viewer.pan.tip(lc))
    <> D.El{"div", "", [D.At{"class", "viewer-stage"}], D.El{"canvas", "plot", [D.At{"id", "plot"}, D.At{"data-key", U.Solid.want(u)},
         D.At{"data-off", U32.show(LY.Masks.off(LY.Lyr.masks(U.Lfocus.kind(u), U.Solid.off(u), U.Lfocus.of(u))))},
         D.At{"data-dim", U32.show(LY.Masks.dim(LY.Lyr.masks(U.Lfocus.kind(u), U.Solid.off(u), U.Lfocus.of(u))))}, D.At{"data-lift", U32.show(LY.Lyr.top(U.Lfocus.of(u)))},
-        D.At{"data-fade", Nat.show(U.Hs.fade())}, D.At{"data-fam", HS.Hist.key.family(U.Solid.want(u))}], Nil{}} <> (View.hist.menu(lc, u) <> View.rc.loc(lc, u))}
-   <> View.hist.of(lc, U.Hs.track(u), u)
+        D.At{"data-fade", Nat.show(U.Hs.fade())}, D.At{"data-fam", HS.Hist.key.family(U.Solid.want(u))}], Nil{}} <> (View.hist.menu(lc, ss, u) <> View.rc.loc(lc, u))}
+   <> View.hist.of(lc, ss, u)
+
+def View.plot(+lc: I.Loc, +u: U.Ui, +what: List<&2, D.Node>) -> List<&2, D.Node>:
+  View.plot.track(lc, U.Hs.track(u), u, what)
 
 # over a part in 3D: the thread's parts and Renders; the board: its name
 # after the parts: Renders for one of them, or the name of another model
