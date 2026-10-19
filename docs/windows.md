@@ -138,3 +138,13 @@ Known initial scope: this backend handles committed text through `WM_CHAR`;
 custom preedit payload injection and clipboard images are not implemented yet.
 The embedded browser and other optional platform helpers require their own
 Windows builds. Do not treat a successful Linux build as Windows validation.
+
+The shared Google desktop client is supplied only to the native Windows
+compile step through `BACKPLANE_GOOGLE_CLIENT_ID` and
+`BACKPLANE_GOOGLE_CLIENT_SECRET`. `scripts/google-header.py` writes a mode0600
+header beside the compile units; `build-windows.sh` includes it explicitly
+and removes it on exit, alongside the separate telemetry header. Neither
+header belongs in the portable C, shared emitted artifacts or ZIP. An absent
+pair leaves the shared client empty; a partial or malformed pair fails.
+`BACKPLANE_GOOGLE_BAKE=0` explicitly disables this bake. The native workflow
+uses the same GitHub secret names as the Linux and Darwin release jobs.
