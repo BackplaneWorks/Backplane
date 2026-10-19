@@ -6,6 +6,18 @@ import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
+const BASE = "30884966ef59c383581bcd1b7653f8f739cf009e";
+function baselineSource(): string {
+  const result = spawnSync("git", ["show", `${BASE}:src/server/kicad.bend`], {encoding:"utf8"});
+  if (result.error || result.status !== 0) {
+    const detail = result.error?.message ?? (result.stderr.trim() || `exit ${result.status}, signal ${result.signal}`);
+    throw new Error(`Pinned KiCad baseline ${BASE} is unavailable: ${detail}\nFetch the exact fixture input before running acceptance: git fetch --no-tags --depth=1 origin ${BASE}`);
+  }
+  return result.stdout;
+}
+// Fail before running native fixtures when a shallow checkout lacks the pinned
+// regression input. A failed git command's stdout is never accepted as source.
+const baseline = baselineSource();
 const binary = resolve(process.argv[2] ?? "build/kicad_platform");
 const root = mkdtempSync(join(tmpdir(), "bp-kicad-platform-"));
 const bin = join(root, "bin"), data = join(root, "data"), user = join(root, "user"), exe = join(root, "app");
@@ -141,7 +153,6 @@ try {
   mkdirSync(`${final}.install-lock`);
   const locked=run(args,fixture); check("concurrent installer refused",locked.status!==0 && (locked.stdout+locked.stderr).includes("in progress")); check("lock refusal preserves runtime",snapshot(final)===current); rmSync(`${final}.install-lock`,{recursive:true});
   // Reproduce baseline's partial-overwrite defect using its exact shell body.
-  const baseline=spawnSync("git",["show","30884966ef59c383581bcd1b7653f8f739cf009e:src/server/kicad.bend"],{encoding:"utf8"}).stdout;
   const match=baseline.match(/"set -e; cd .*?"(?=,\n\s+"sh", dir, base, name, KiCad.sha256\(\))/);
   check("baseline installer source found",!!match);
   writeFileSync(join(final,"bin/kicad-cli"),"old runtime bytes\n");
