@@ -11010,3 +11010,19 @@ law tl_cm_reuse_exact:
   for +sel: String
   for +it: L.TLE
   {L.TL.cm.reuse(ty, e, st, dirty, px, sel, it) == L.TL.cm.one.c(L.TL.cm.chip(e, sel), dirty, ty, e, st, px, sel, it) : L.TLE}
+
+# Short-circuiting cache equality is exactly the existing strict equality.
+law cp_str_fast_exact:
+  for +a: String
+  for +b: String
+  {L.Cp.str.fast(a, b) == Q.Eq.str(a, b) : Bool}
+
+law cp_eq_fast_exact:
+  for +a: L.Cp
+  for +b: L.Cp
+  {L.Cp.eq.fast(a, b) == L.Cp.eq(a, b) : Bool}
+
+law cp_eqs_fast_exact:
+  for +a: List<&2, L.Cp>
+  for +b: List<&2, L.Cp>
+  {L.Cp.eqs.fast(a, b) == L.Cp.eqs(a, b) : Bool}

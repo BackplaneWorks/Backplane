@@ -1515,6 +1515,43 @@ def Cp.eqs(a: List<&2, Cp>, b: List<&2, Cp>) -> Bool:
     case +x <> +xt +y <> +yt: Bool.and(Cp.eq(x, y), Cp.eqs(xt, yt))
     case _ _: False{}
 
+# Cache comparisons stop at the first mismatch. The existing strict
+# equality stays as the specification; exactness laws connect both paths.
+def Cp.str.fast.go(a: String, b: String, same: Bool) -> Bool:
+  match a b same:
+    case _ _ False{}: False{}
+    case SNil{} SNil{} True{}: True{}
+    case SCon{x, xt} SCon{y, yt} True{}:
+      Cp.str.fast.go(xt, yt, Q.Eq.chr(x, y))
+    case _ _ True{}: False{}
+
+def Cp.str.fast(a: String, b: String) -> Bool:
+  Cp.str.fast.go(a, b, True{})
+
+def Cp.strs.fast.go(a: List<&2, String>, b: List<&2, String>, same: Bool) -> Bool:
+  match a b same:
+    case _ _ False{}: False{}
+    case Nil{} Nil{} True{}: True{}
+    case x <> xt y <> yt True{}:
+      Cp.strs.fast.go(xt, yt, Cp.str.fast(x, y))
+    case _ _ True{}: False{}
+
+def Cp.eq.fast(a: Cp, b: Cp) -> Bool:
+  match a b:
+    case Cp{a0, a1, a2, a3} Cp{b0, b1, b2, b3}:
+      Cp.strs.fast.go(a0 <> a1 <> a2 <> a3, b0 <> b1 <> b2 <> b3, True{})
+
+def Cp.eqs.fast.go(a: List<&2, Cp>, b: List<&2, Cp>, same: Bool) -> Bool:
+  match a b same:
+    case _ _ False{}: False{}
+    case Nil{} Nil{} True{}: True{}
+    case x <> xt y <> yt True{}:
+      Cp.eqs.fast.go(xt, yt, Cp.eq.fast(x, y))
+    case _ _ True{}: False{}
+
+def Cp.eqs.fast(a: List<&2, Cp>, b: List<&2, Cp>) -> Bool:
+  Cp.eqs.fast.go(a, b, True{})
+
 def Cp.cat(+a: Cp, +b: Cp) -> Cp:
   match a b:
     case Cp{+t, +l, +c, +d} Cp{+t2, +l2, +c2, +d2}:
@@ -6647,7 +6684,7 @@ def TL.cache.one.k(same: Bool, +ty: Ty, +n: N.Node, +cs: List<&2, Cp>, +px: U32,
 def TL.cache.one(+ty: Ty, +n: N.Node, +cs: List<&2, Cp>, +px: U32, old: TLBlock) -> TLBlock:
   match old:
     case TLBlock{+before, lines}:
-      TL.cache.one.k(Cp.eqs(before, cs), ty, n, cs, px, TLBlock{before, lines})
+      TL.cache.one.k(Cp.eqs.fast(before, cs), ty, n, cs, px, TLBlock{before, lines})
 
 def TL.cache.again(ns: List<&2, N.Node>, +rz: List<&2, List<&2, Cp>>, +ty: Ty, +px: U32, old: List<&2, TLBlock>) -> List<&2, TLBlock>:
   match ns old:

@@ -12558,6 +12558,76 @@ def tl_cache_one_k_exact(hit, ty, n, before, after, px, h):
       %e : {L.TLBlock{before, L.TL.rblock(ty, n, before, px)} == L.TLBlock{_, L.TL.rblock(ty, n, _, px)} : L.TLBlock}
       {==}
 
+def cp_str_fast_go_exact(a: String, b: String, same: Bool) -> {L.Cp.str.fast.go(a, b, same) == Bool.and(same, Q.Eq.str(a, b)) : Bool}:
+  match a b same:
+    case SNil{} SNil{} False{}:
+      {==}
+    case SNil{} SCon{+y, +yt} False{}:
+      {==}
+    case SCon{+x, +xt} SNil{} False{}:
+      {==}
+    case SCon{+x, +xt} SCon{+y, +yt} False{}:
+      {==}
+    case SNil{} SNil{} True{}:
+      {==}
+    case SNil{} SCon{+y, +yt} True{}:
+      {==}
+    case SCon{+x, +xt} SNil{} True{}:
+      {==}
+    case SCon{+x, +xt} SCon{+y, +yt} True{}:
+      cp_str_fast_go_exact(xt, yt, Q.Eq.chr(x, y))
+
+def Laws.cp_str_fast_exact(a, b):
+  cp_str_fast_go_exact(a, b, True{})
+
+def cp_strs_fast_go_exact(a: List<&2, String>, b: List<&2, String>, same: Bool) -> {L.Cp.strs.fast.go(a, b, same) == Bool.and(same, CHIP.Chip.eq.strs(a, b)) : Bool}:
+  match a b same:
+    case Nil{} Nil{} False{}:
+      {==}
+    case Nil{} +y <> +yt False{}:
+      {==}
+    case +x <> +xt Nil{} False{}:
+      {==}
+    case +x <> +xt +y <> +yt False{}:
+      {==}
+    case Nil{} Nil{} True{}:
+      {==}
+    case Nil{} +y <> +yt True{}:
+      {==}
+    case +x <> +xt Nil{} True{}:
+      {==}
+    case +x <> +xt +y <> +yt True{}:
+      %Laws.cp_str_fast_exact(x, y) : {L.Cp.strs.fast.go(xt, yt, L.Cp.str.fast(x, y)) == Bool.and(_, CHIP.Chip.eq.strs(xt, yt)) : Bool}
+      cp_strs_fast_go_exact(xt, yt, L.Cp.str.fast(x, y))
+
+def Laws.cp_eq_fast_exact(a, b):
+  match a b:
+    case L.Cp{+a0, +a1, +a2, +a3} L.Cp{+b0, +b1, +b2, +b3}:
+      cp_strs_fast_go_exact(a0 <> a1 <> a2 <> a3, b0 <> b1 <> b2 <> b3, True{})
+
+def cp_eqs_fast_go_exact(a: List<&2, L.Cp>, b: List<&2, L.Cp>, same: Bool) -> {L.Cp.eqs.fast.go(a, b, same) == Bool.and(same, L.Cp.eqs(a, b)) : Bool}:
+  match a b same:
+    case Nil{} Nil{} False{}:
+      {==}
+    case Nil{} +y <> +yt False{}:
+      {==}
+    case +x <> +xt Nil{} False{}:
+      {==}
+    case +x <> +xt +y <> +yt False{}:
+      {==}
+    case Nil{} Nil{} True{}:
+      {==}
+    case Nil{} +y <> +yt True{}:
+      {==}
+    case +x <> +xt Nil{} True{}:
+      {==}
+    case +x <> +xt +y <> +yt True{}:
+      %Laws.cp_eq_fast_exact(x, y) : {L.Cp.eqs.fast.go(xt, yt, L.Cp.eq.fast(x, y)) == Bool.and(_, L.Cp.eqs(xt, yt)) : Bool}
+      cp_eqs_fast_go_exact(xt, yt, L.Cp.eq.fast(x, y))
+
+def Laws.cp_eqs_fast_exact(a, b):
+  cp_eqs_fast_go_exact(a, b, True{})
+
 law tl_cache_one_exact:
   for +ty: L.Ty
   for +n: DM.Node
@@ -12567,6 +12637,7 @@ law tl_cache_one_exact:
   {L.TL.cache.one(ty, n, after, px, L.TLBlock{before, L.TL.rblock(ty, n, before, px)}) == L.TLBlock{after, L.TL.rblock(ty, n, after, px)} : L.TLBlock}
 
 def tl_cache_one_exact(ty, n, before, after, px):
+  %Equal.sym(Bool, L.Cp.eqs.fast(before, after), L.Cp.eqs(before, after), Laws.cp_eqs_fast_exact(before, after)) : {L.TL.cache.one.k(_, ty, n, after, px, L.TLBlock{before, L.TL.rblock(ty, n, before, px)}) == L.TLBlock{after, L.TL.rblock(ty, n, after, px)} : L.TLBlock}
   tl_cache_one_k_exact(L.Cp.eqs(before, after), ty, n, before, after, px, {==})
 
 def Laws.tl_cache_again_exact(ns, before, after, ty, px):
