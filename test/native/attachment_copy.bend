@@ -25,12 +25,12 @@ def args(xs: List<String>) -> IO(Unit):
     case _:
       IO.die(Unit, 2, "usage: attachment-copy SOURCE HOME")
 
-def linked(frame: List<&2, U32>) -> IO(Unit):
-  match Nat.is_eq(List.length(&2, U32, frame), 3n):
+def linked(ok: Bool) -> IO(Unit):
+  match ok:
     case True{}:
       IO.bind(List<String>, Unit, A.Argv.args(), args)
     case False{}:
       IO.die(Unit, 1, "host linkage failed")
 
 def main() -> IO(Unit):
-  IO.bind(List<&2, U32>, Unit, H.Json.cbor_frame("null", "", ""), linked)
+  IO.bind(List<&2, U32>, Unit, H.Json.cbor_frame("null", "", ""), frame => linked(Nat.is_eq(List.length(&2, U32, frame), 3n)))
