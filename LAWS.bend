@@ -10678,7 +10678,9 @@ law pcb2_hidden_text_draws_nothing:
   {PCB2.Text.visible.k(True{}, at, angle, x, text, up, key, sig, ctx) == Nil{} : List<&2, B.Item>}
 
 # A successful export has no failure, even when the tool prints a diagnostic.
-law release_command_success(label: String, output: String):
+law release_command_success:
+  for label: String
+  for output: String
   {REL.Release.command_error(label, 0, output) == "" : String}
 
 law release_command_failure:
