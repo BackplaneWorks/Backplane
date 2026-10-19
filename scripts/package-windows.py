@@ -1,12 +1,19 @@
 #!/usr/bin/env python3
 """Package our PE, web files and launchers; Cygwin is installed separately."""
 from pathlib import Path
-import hashlib, json, re, subprocess, sys, zipfile
+import hashlib, json, re, sys, zipfile
+from runpy import run_path
 
 root = Path(__file__).resolve().parent.parent
 version = sys.argv[1]
 if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.+_-]*", version):
     sys.exit("package-windows: invalid version")
+source_api = run_path(str(root / 'scripts/windows-source.py'))
+source = source_api['check_receipt']()
+if source['telemetry_channel'] != source_api['channel_for'](version):
+    sys.exit('package-windows: package channel does not match emitted source')
+if source['version'] and source['version'].removeprefix('v') != version.removeprefix('v'):
+    sys.exit('package-windows: package version does not match emitted source')
 exe = root / "dist/backplane.exe"
 if exe.read_bytes()[:2] != b"MZ":
     sys.exit("package-windows: expected a Windows PE executable")
@@ -30,7 +37,8 @@ if not (licenses/'bun/LICENSE.md').is_file() or not (licenses/'step2glb/license.
 files += [(p,'licenses/'+p.relative_to(licenses).as_posix()) for p in sorted(licenses.rglob('*')) if p.is_file()]
 files += [(p, p.name) for p in sorted((root / "deploy/windows").iterdir()) if p.is_file()]
 files += [(p, "web/" + p.relative_to(web).as_posix()) for p in sorted(web.rglob("*")) if p.is_file()]
-manifest = {"version": version, "commit": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip(), "target": "windows-x64",
+manifest = {"version": version, "commit": source['commit'], "target": "windows-x64",
+            "telemetryChannel": source['telemetry_channel'],
             "runtime": "Cygwin (installed separately)",
             "sha256": {name: hashlib.sha256(p.read_bytes()).hexdigest() for p, name in files}}
 with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as z:
