@@ -6,7 +6,8 @@ choice remains available. When no native window or usable runtime exists,
 Chrome frames continue with a visible fallback reason. Web clients, phones, and windows viewing a
 remote hub receive JPEG frames through the existing watcher leases.
 
-The native runtime is optional in the package. To supply it from a source build:
+Linux x86_64 release builds include the native runtime. Other platforms keep
+Chrome frames. To supply CEF from a source build:
 
 1. Build the prebuilt CEF distribution with `scripts/build-cef.sh`, under the
    coordinator's normal resource admission. This builds the small CEF host;
@@ -19,12 +20,18 @@ The native runtime is optional in the package. To supply it from a source build:
    non-password form drafts and scroll. Profiles remain separate. JavaScript
    heaps, history and file selections cannot transfer between processes.
 
-The runtime is separate from the base installer. Runtime discovery also
-accepts `cef/backplane-cef` beside the browser helper or a verified runtime
-under `$XDG_CACHE_HOME/backplane/cef-runtime/<version>/`. Download/install
-support is implemented; the release URL and checksum are not published in
-the base installer. Without an installed runtime, Embedded reports the
-error and Chrome continues to work.
+The Linux x64 public archive has suffix `linux-x64-cef.tar.gz`. Its installer
+verifies and promotes an immutable matched helper/host/runtime bundle with
+notices. Existing explicit Chrome settings and browser profiles are retained.
+Older public self-updaters cannot install the bundle: they safely find no
+matching old archive name. Run the new release's `install.sh` once to bootstrap;
+subsequent self-updates use the same matched installer. These install/update
+operations require Python 3; running the installed browser does not. The .deb
+declares CEF library dependencies; tar/AppImage users need those system libraries.
+
+Runtime discovery also accepts `cef/backplane-cef` beside the browser helper
+or a runtime under `$XDG_CACHE_HOME/backplane/cef-runtime/<version>/`. Without
+a usable runtime, Embedded reports the error and Chrome continues to work.
 
 The page initially belongs to the agent. Clicking it consumes that first
 click, takes control, and focuses Chromium. Hand back restores agent control;
@@ -59,14 +66,20 @@ as solved when the user requested the default change.
 The normal hub deployment updates the optional host and helper together on
 machines with CEF installed, using a verified immutable bundle; it leaves
 Chrome-only installations alone. Explicit `BACKPLANE_CEF` overrides still need
-a matching updated host. Script-created
-`window.open` also needs a regression check; popup-link adoption is covered.
+a matching updated host. Script-created `window.open` stalls under browser-level
+CDP attachment in the pinned runtime: a button's opening script/automation can
+hang, affecting popup login flows. Popup links are covered and pass. The
+[upstream CEF issue](https://github.com/chromiumembedded/cef/issues/4308) matches
+the reproduced stall; its proposed fix remains an unvalidated draft. The release
+workflow runs `tools/browser/test/popup-cef.ts` as a required functional gate;
+this remains a release blocker, with no waiver or Chromium source build.
 macOS, Windows, and native Wayland embedding are later work.
 
-The generic public release archive/installer currently does not deliver this
-optional runtime to a clean machine, and the release self-updater needs the
-matched-pair installation hook before publishing such an archive. These are
-release follow-up gates, not capabilities proven by the local default change.
-The supported local deploy includes pinned `LICENSE.txt`, the upstream CEF
-redistribution README, and `resources.pak` containing `about:credits`; prior
-immutable bundles remain readable for rollback.
+Build a Linux x64 release with `BACKPLANE_CEF_RELEASE=1 scripts/build.sh`,
+then `scripts/package.sh VERSION linux-x64`. The package refuses missing or
+unmatched CEF payloads. AppImage/deb layouts also retain the adjacent runtime.
+`scripts/install-release.sh` serves the public installer and native updater;
+`scripts/cef-runtime.py` validates files before promotion and keeps the previous
+pair for rollback. Local dev deployments retain their optional-runtime policy.
+Bundles include pinned `LICENSE.txt`, the upstream CEF redistribution README,
+and `resources.pak` containing `about:credits`.

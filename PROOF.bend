@@ -12386,3 +12386,10 @@ def Laws.cef_fallback_keeps_error(err):
     case SNil{}: {==}
     case SCon{_, _}: {==}
 # --- end browser-cef fallback ---
+
+# --- browser-cef release archive (October19) ---
+def Laws.cef_release_uses_paired_archive(): {==}
+def Laws.cef_release_arm_archive_unchanged(): {==}
+def Laws.cef_release_mac_archive_unchanged(): {==}
+def Laws.cef_release_old_updater_cannot_match(): {==}
+# --- end browser-cef release archive ---

@@ -10710,3 +10710,14 @@ law cef_fallback_keeps_error:
   for +err: String
   {CEF.Cef.reason("cef", "chrome", err) == Bool.pick(String, String.is_empty(err), "native Linux X11 window/runtime is not active", err) : String}
 # --- end browser-cef fallback ---
+
+# --- browser-cef release archive (October19) ---
+law cef_release_uses_paired_archive:
+  {CEF.Cef.archive("linux-x64") == "linux-x64-cef.tar.gz" : String}
+law cef_release_arm_archive_unchanged:
+  {CEF.Cef.archive("linux-arm64") == "linux-arm64.tar.gz" : String}
+law cef_release_mac_archive_unchanged:
+  {CEF.Cef.archive("darwin-arm64") == "darwin-arm64.tar.gz" : String}
+law cef_release_old_updater_cannot_match:
+  {String.ends_with("backplane-v1-linux-x64-cef.tar.gz", "linux-x64.tar.gz") == False{} : Bool}
+# --- end browser-cef release archive ---

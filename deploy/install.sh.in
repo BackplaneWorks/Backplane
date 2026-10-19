@@ -36,7 +36,9 @@ esac
 
 prefix=${BACKPLANE_PREFIX:-$HOME/.local/share/backplane}
 bin=${BACKPLANE_BIN:-$HOME/.local/bin}
-name="backplane-$VER-$os-$arch.tar.gz"
+archive_plat=$os-$arch
+[ "$archive_plat" != linux-x64 ] || archive_plat=linux-x64-cef
+name="backplane-$VER-$archive_plat.tar.gz"
 url="https://github.com/$REPO/releases/download/$VER/$name"
 mkdir -p "$prefix" "$bin"
 tmp=$(mktemp -d)
@@ -49,16 +51,7 @@ else
   echo "$sum  $tmp/$name" | shasum -a 256 -c - >/dev/null 2>&1 || fail "$name does not match its sha256; not installed"
 fi
 tar -xzf "$tmp/$name" -C "$tmp"
-rm -rf "$prefix/web.old"
-[ -d "$prefix/web" ] && mv "$prefix/web" "$prefix/web.old"
-mv -f "$tmp/backplane-$os-$arch/backplane" "$tmp/backplane-$os-$arch/backplane-serve" "$prefix/"
-mv "$tmp/backplane-$os-$arch/web" "$prefix/web"
-for h in backplane-browser backplane-step2glb backplane-voice LICENSE; do
-  [ -e "$tmp/backplane-$os-$arch/$h" ] && mv -f "$tmp/backplane-$os-$arch/$h" "$prefix/"
-done
-if [ -d "$tmp/backplane-$os-$arch/licenses" ]; then
-  rm -rf "$prefix/licenses" && mv "$tmp/backplane-$os-$arch/licenses" "$prefix/licenses"
-fi
+sh "$tmp/backplane-$os-$arch/install-release.sh" "$tmp/backplane-$os-$arch" "$prefix"
 ln -sf "$prefix/backplane" "$bin/backplane"
 ln -sf "$prefix/backplane-serve" "$bin/backplane-serve"
 # the applications menu entry and its icon (BACKPLANE_NO_DESKTOP=1 skips

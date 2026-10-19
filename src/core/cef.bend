@@ -18,6 +18,10 @@ import ./json.bend as J
 def Cef.default() -> String:
   "cef"
 
+# Public CEF archives cannot be installed by the old helper-only updater.
+def Cef.archive(+plat: String) -> String:
+  Bool.pick(String, String.eq(plat, "linux-x64"), "linux-x64-cef", plat) ++ ".tar.gz"
+
 def Cef.requested(+setting: String) -> String:
   Bool.pick(String, String.eq(setting, "chrome"), "chrome", Cef.default())
 

@@ -43,6 +43,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       TAG: ${{ inputs.tag || github.ref_name }}
+      BACKPLANE_CEF_RELEASE: ${{ matrix.target == 'linux-x64' && '1' || '0' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -74,7 +75,10 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-19 libx11-dev
+          sudo apt-get install -y clang-19 libx11-dev cmake ninja-build
+          if [ "${{ matrix.target }}" = linux-x64 ]; then
+            sudo apt-get install -y xvfb libxtst6 libnss3 libatk-bridge2.0-0t64 libcups2t64 libasound2t64
+          fi
           sudo ln -sf /usr/bin/clang-19 /usr/local/bin/clang
       - name: Object cache
         # the compiled C units, by hash of their text (scripts/cc-unit.sh): an
@@ -92,6 +96,11 @@ jobs:
           BACKPLANE_GOOGLE_CLIENT_ID: ${{ secrets.BACKPLANE_GOOGLE_CLIENT_ID }}
           BACKPLANE_GOOGLE_CLIENT_SECRET: ${{ secrets.BACKPLANE_GOOGLE_CLIENT_SECRET }}
       - run: scripts/smoke.sh
+      - name: Native CEF popup acceptance
+        if: matrix.target == 'linux-x64'
+        # Remains a release gate while upstream CEF4308 is unresolved. Software
+        # Xvfb verifies functional behavior; it makes no GPU or FPS claim.
+        run: BACKPLANE_CEF_NO_GPU=1 BACKPLANE_CEF="$PWD/dist/browser-runtime/cef/backplane-cef" BACKPLANE_BROWSER="$PWD/dist/backplane-browser" bun tools/browser/test/popup-cef.ts
       - run: scripts/package.sh "$TAG" "${{ matrix.target }}"
       - run: scripts/package-linux.sh "$TAG" "${{ matrix.target }}"
       - uses: actions/upload-artifact@v4
@@ -201,7 +210,7 @@ jobs:
           cd out
           sha256sum backplane-*.tar.gz backplane-*.AppImage backplane_*.deb backplane-*.apk > SHA256SUMS
           cat SHA256SUMS
-          sum() { grep "backplane-$TAG-$1.tar.gz" SHA256SUMS | cut -d' ' -f1; }
+          sum() { p=$1; [ "$p" != linux-x64 ] || p=linux-x64-cef; grep "backplane-$TAG-$p.tar.gz" SHA256SUMS | cut -d' ' -f1; }
           sed -e "s/@VERSION@/$TAG/" \
               -e "s/@SHA_LINUX_X64@/$(sum linux-x64)/" \
               -e "s/@SHA_LINUX_ARM64@/$(sum linux-arm64)/" \
@@ -223,7 +232,9 @@ jobs:
           case "$TAG" in *-*) pre="--prerelease" ;; esac
           # each release's installer installs that release (latest/ never
           # names a prerelease, so a nightly's must be its own)
-          notes="Linux (x64, arm64) and macOS (Apple silicon; the hub and web UI at http://127.0.0.1:3787, no native window yet).
+          notes="Linux (x64 with native CEF on X11; arm64 uses Chrome frames) and macOS (Apple silicon; hub and web UI, no native CEF).
+
+          Older Linux x64 self-updaters need install.sh once to install the matched CEF runtime. Later updates keep host and helper together. The tar installer and CEF self-updater require python3. GPU acceleration and FPS acceptance are separate gates.
 
           Install: \`curl -fsSL https://github.com/${{ github.repository }}/releases/download/$TAG/install.sh | sh\`"
           if gh release view "$TAG" >/dev/null 2>&1; then

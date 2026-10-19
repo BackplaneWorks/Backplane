@@ -20,7 +20,14 @@ esac
 v=${ver#v}
 dv=$(printf '%s' "$v" | tr '-' '~')
 # the newest glibc the binaries ask for
-glibc=$(objdump -T "$src/backplane" "$src/backplane-serve" | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)
+objects="$src/backplane $src/backplane-serve"
+cef_deps=
+if [ "$plat" = linux-x64 ]; then
+  [ -f "$src/browser-runtime/cef/libcef.so" ] || { echo 'Linux x64 package is missing CEF' >&2; exit 1; }
+  objects="$objects $src/browser-runtime/cef/libcef.so $src/browser-runtime/cef/backplane-cef"
+  cef_deps=', libstdc++6, libglib2.0-0t64 | libglib2.0-0, libnspr4, libnss3, libatk1.0-0t64 | libatk1.0-0, libatk-bridge2.0-0t64 | libatk-bridge2.0-0, libdbus-1-3, libcups2t64 | libcups2, libxcomposite1, libxdamage1, libxext6, libxfixes3, libxrandr2, libxi6, libgbm1, libexpat1, libxcb1, libxkbcommon0, libcairo2, libpango-1.0-0, libudev1, libasound2t64 | libasound2, libatspi2.0-0t64 | libatspi2.0-0'
+fi
+glibc=$(objdump -T $objects | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)
 glibc=${glibc#GLIBC_}
 work=build/pkg-linux
 rm -rf "$work"
@@ -70,7 +77,7 @@ Version: $dv
 Architecture: $deb
 Maintainer: i2cjak <i2cjak@users.noreply.github.com>
 Installed-Size: $(du -sk "$root" | cut -f1)
-Depends: libc6 (>= $glibc), libx11-6
+Depends: libc6 (>= $glibc), libx11-6$cef_deps
 Recommends: git, kicad, tailscale
 Homepage: https://github.com/i2cjak/Backplane
 Section: devel

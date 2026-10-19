@@ -92,6 +92,18 @@ def assemble(dest, runtime, host, helper, stamp, revision):
         raise
 
 
+def check_release(package):
+    payload = package / 'browser-runtime'
+    identity = verify(payload)
+    for notice in ('LICENSE.txt', 'CEF-README.txt'):
+        if not (payload / 'cef' / notice).is_file():
+            raise ValueError('CEF release missing notice: ' + notice)
+    for name in (HELPER, STAMP):
+        if not (package / name).is_file() or sha(package / name) != sha(payload / name):
+            raise ValueError('release helper differs from CEF manifest: ' + name)
+    return identity
+
+
 def pointer(path, target):
     temp = path.with_name(path.name + '.new')
     if temp.exists() or temp.is_symlink():
@@ -119,13 +131,13 @@ def store(payload, prefix):
     return final
 
 
-def install(package, prefix):
+def install(package, prefix, enable=False):
     payload = package / 'browser-runtime'
     if not payload.exists():
         return
-    # A package built elsewhere must not opt a new machine into CEF.
+    # Dev deploys preserve optional installation. Public CEF installs opt in.
     runtime = discover(prefix)
-    if runtime is None:
+    if runtime is None and not enable:
         return
     # Refuse incompatible aliases before making any changes to the live pair.
     for name in (HELPER, STAMP, 'cef'):
@@ -136,7 +148,7 @@ def install(package, prefix):
     current = prefix / 'browser-current'
     previous = current.readlink() if current.is_symlink() else None
     # Retain the previously installed pair, including pre-manifest installations.
-    if previous is None and (prefix / HELPER).is_file():
+    if previous is None and runtime is not None and (prefix / HELPER).is_file():
         snapshot = Path(tempfile.mkdtemp(prefix='.legacy-', dir=prefix)) / 'payload'
         try:
             stamp = prefix / STAMP
@@ -191,6 +203,11 @@ def main():
         shutil.copy2(__file__, Path(package) / 'cef-runtime.py')
     elif command == 'install':
         install(*map(Path, args))
+    elif command == 'install-release':
+        check_release(Path(args[0]))
+        install(*map(Path, args), enable=True)
+    elif command == 'check-release':
+        print(check_release(Path(args[0])))
     elif command == 'rollback':
         rollback(Path(args[0]))
     elif command == 'verify':
