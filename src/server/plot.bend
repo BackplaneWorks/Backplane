@@ -4,6 +4,7 @@ import ./host.bend as H
 import ./kicad.bend as K
 import ../core/mech.bend as MC
 import ./proc.bend as PR
+import ./modelcache.bend as CP
 import ../core/board.bend as B
 import ../core/pcb2d.bend as P2
 import ../core/schematic.bend as SC
@@ -418,10 +419,10 @@ def Pv.glb.flags(+bare: Bool, +full: Bool, +out: String, +path: String) -> List<
   List.append(&2, String, ["pcb", "export", "glb"], List.append(&2, String, Bool.pick(List<&2, String>, bare, ["--no-components"], ["--subst-models"]),
     ["--include-pads", "--include-soldermask", "--include-silkscreen", "-f", "-o", out, path]))
 
-# a STEP's GLB is written beside and moved in whole: a reader never meets
-# half of one
+# A model's GLB is moved into the cache only after a successful export.
+# A failed converter may have written an incomplete staging file.
 def Pv.step.ran.to(r: PR.Ran, +from: String, +out: String) -> IO(PR.Ran):
-  IO.bind(Result<&1, &1, U32 & String, Unit>, PR.Ran, H.FS.rename(from, out), m => IO.pure(PR.Ran, r))
+  CP.ModelCache.publish(r, from, out)
 
 def Pv.step.ran(r: PR.Ran, +out: String) -> IO(PR.Ran):
   Pv.step.ran.to(r, out ++ ".part", out)
@@ -510,7 +511,7 @@ def Pv.step.out(+path: String) -> IO(String):
   do IO<String>:
     +dir : String <- Pv.cache()
     st : Result<&1, &1, U32 & String, U32 & U32 & U32> <- H.FS.stat(path)
-    return dir ++ "/" ++ U32.show(P.Key.hash(path ++ "|" ++ Pv.ver(st), 2166136261)) ++ ".glb"
+    return dir ++ "/" ++ U32.show(P.Key.hash("step1|" ++ path ++ "|" ++ Pv.ver(st), 2166136261)) ++ ".glb"
 
 # a board's model, cached per version of the board file (its size and
 # time) and per export (with its parts or bare): KiCad's export takes half a

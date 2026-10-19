@@ -3,6 +3,7 @@ import ../server/server.bend as S
 import ../server/host.bend as H
 import ../server/kicad.bend as K
 import ../server/proc.bend as P
+import ../server/modelcache.bend as CP
 import ../core/board.bend as B
 import ../core/pcb3d.bend as P3
 
@@ -174,6 +175,11 @@ def Parts.size(r: Result<&1, &1, U32 & String, U32 & U32 & U32>) -> String:
     case Fail{_}:
       "0"
 
+def Parts.conv.done(r: P.Ran, out: String) -> String:
+  match r:
+    case P.Ran{0, _}: out
+    case P.Ran{_, _}: ""
+
 def Parts.conv(have: Bool, +src: String, +out: String, +step: String) -> IO(String):
   match have:
     case True{}:
@@ -181,15 +187,14 @@ def Parts.conv(have: Bool, +src: String, +out: String, +step: String) -> IO(Stri
     case False{}:
       do IO<String>:
         r : P.Ran <- P.Proc.run(step, [src, out ++ ".part"], "/")
-        mv : Result<&1, &1, U32 & String, Unit> <- H.FS.rename(out ++ ".part", out)
-        ok : Bool <- K.Io.is_file(out)
-        return Bool.pick(String, ok, out, "")
+        published : P.Ran <- CP.ModelCache.publish(r, out ++ ".part", out)
+        return Parts.conv.done(published, out)
 
 # where the model's GLB is kept (a .glb is its own)
 def Parts.out(+src: String, +cache: String) -> IO(String):
   do IO<String>:
     st : Result<&1, &1, U32 & String, U32 & U32 & U32> <- H.FS.stat(src)
-    return Bool.pick(String, String.ends_with(src, ".glb"), src, cache ++ "/" ++ U32.show(Str.hash(src ++ "|" ++ Parts.size(st), 2166136261)) ++ ".glb")
+    return Bool.pick(String, String.ends_with(src, ".glb"), src, cache ++ "/" ++ U32.show(Str.hash("step1|" ++ src ++ "|" ++ Parts.size(st), 2166136261)) ++ ".glb")
 
 # the model's GLB when it is ready to read, else ""
 def Parts.cached(+src: String, +cache: String) -> IO(String):
