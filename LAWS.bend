@@ -10676,3 +10676,7 @@ law pcb2_hidden_text_draws_nothing:
   for +sig: U32
   for +ctx: String
   {PCB2.Text.visible.k(True{}, at, angle, x, text, up, key, sig, ctx) == Nil{} : List<&2, B.Item>}
+# An ordinary thread targets its own browser page.
+law browser_input_thread_target:
+  for +page: String
+  {U.Teach.target.of("", page) == page : String}

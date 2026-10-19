@@ -1,3 +1,5 @@
+import ../src/core/i18n.bend as I
+import ../src/mobile/view.bend as MV
 import Base
 import ./check.bend as C
 import ../src/core/client.bend as U
@@ -72,3 +74,9 @@ def main() -> IO(Unit):
     C.Check.str("closed stays closed for its thread", Bool.show(U.Ui.panel(on(on(ui(U.Ui.act(shown, "panel", "")), "c"), "a"))), "False")
     C.Check.str("a request waits open in its thread", Bool.show(U.Ui.panel(on(other, "b"))), "True")
     C.Check.str("each thread has its own page", U.Ui.page(on(a, "b")), "b")
+    C.Check.str("thread input targets its own page", U.Teach.owner(on(a, "b")), "b")
+    C.Check.str("thread takeover uses that page", J.Json.get_str(J.Json.get_obj(json(sends(U.Ui.act(on(a, "b"), "tk-takeover", ""))), "p"), "bot", ""), "b")
+    C.Check.str("thread typing uses that page", J.Json.get_str(J.Json.get_obj(json(sends(U.Ui.act(on(a, "b"), "bb-type", "hello"))), "p"), "bot", ""), "b")
+    C.Check.str("bot input keeps bot ownership", U.Teach.owner(U.Ui.scratch_set(a, "@bot", "bot-x")), "bot-x")
+    C.Check.str("phone browser is visible", J.Json.get_str(MV.View.json(I.En{}, ui(MV.View.open.k(on(a, "b"), "browser")), J.Null{}), "open", ""), "browser")
+    C.Check.str("phone browser targets thread", J.Json.get_str(J.Json.get_obj(MV.View.json(I.En{}, ui(MV.View.open.k(on(a, "b"), "browser")), J.Null{}), "browser"), "url", ""), "/bots/b/screen.jpg")

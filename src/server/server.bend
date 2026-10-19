@@ -253,6 +253,7 @@ type Msg is Data:
   # about a page (a recorder step); the person's answer to a pause handed
   # the browser back; a task run asks the person (task_pause)
   TeachReq{client: U32, id: String, m: String, p: String}
+  BrowserInputDone{client: U32, id: String, line: String}
   BrowserEv{line: String}
   CefDone{request: String, live: String, err: String}
   # a websocket from this machine (loopback, not proxied): it may embed
@@ -9338,12 +9339,42 @@ def Hub.tch.stop(h: Hub, +b: TE.TeachBot) -> IO(Hub):
         IO.spawn(Unit, Tk.record(Cfg.br(cfg), TE.Teach.bot.id(b), False{}))
         Hub.tch.put(Hub{st, f, ls, cl, as, inbox, cfg, note}, TE.Teach.stop(b))
 
+# Enqueue before leaving the hub turn: click and typing retain arrival order.
+# Waiting for Chromium happens off the hub, and its failure reaches the client.
+def BrowserInput.wait(+reply: Chan(String), +inbox: Chan(Msg), +client: U32, +id: String) -> IO(Unit):
+  do IO<Unit>:
+    line : Maybe<&1, String> <- Chan.recv(String, reply)
+    Self.post(inbox, BrowserInputDone{client, id, Maybe.default(&1, String, line, BR.Browser.fail("browser disconnected"))})
+
+def Hub.browser.queue(m: Maybe<&2, Chan(BR.BMsg)>, h: Hub, +client: U32, +id: String, +o: J.Json) -> IO(Hub):
+  match m h:
+    case Some{+q} Hub{st, f, ls, cl, as, +inbox, cfg, note}:
+      do IO<Hub>:
+        +reply : Chan(String) <- Chan.new(String, 1)
+        ok : Result<&1, &1, BR.BMsg, Unit> <- Chan.send(BR.BMsg, q, BR.BCall{"input",
+          BR.Browser.paged(J.Json.get_str(o, "bot", ""), J.Json.obj([
+            J.KV{"action", J.Str{J.Json.get_str(o, "op", "")}},
+            J.KV{"x", J.Num{Nat.show(J.Json.get_nat(o, "x", 0n))}}, J.KV{"y", J.Num{Nat.show(J.Json.get_nat(o, "y", 0n))}},
+            J.KV{"text", J.Str{J.Json.get_str(o, "text", "")}}, J.KV{"key", J.Str{J.Json.get_str(o, "key", "")}},
+            J.KV{"type", J.Str{Tk.mouse.type(J.Json.get_str(o, "type", "move"))}},
+            J.KV{"dy", J.Num{J.Json.as_raw(J.Json.get(o, "dy"), "0")}}, J.KV{"dx", J.Num{J.Json.as_raw(J.Json.get(o, "dx"), "0")}},
+            J.KV{"url", J.Str{J.Json.get_str(o, "url", "")}}])), reply})
+        IO.spawn(Unit, BrowserInput.wait(reply, inbox, client, id))
+        return Hub{st, f, ls, cl, as, inbox, cfg, note}
+    case None{} h2:
+      Hub.tch.err(h2, client, id, "browser unavailable")
+
 def Hub.browser.go(h: Hub, +client: U32, +id: String, +o: J.Json) -> IO(Hub):
   match h:
     case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
-      do IO<Hub>:
-        IO.spawn(Unit, Tk.input(Cfg.br(cfg), J.Json.get_str(o, "bot", ""), o))
-        Hub.tch.ok(Hub{st, f, ls, cl, as, inbox, cfg, note}, client, id)
+      Hub.browser.queue(Cfg.br(cfg), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, id, o)
+
+def Hub.browser.done(ok: Bool, h: Hub, +client: U32, +id: String, +o: J.Json) -> IO(Hub):
+  match ok:
+    case True{}:
+      Hub.tch.ok(h, client, id)
+    case False{}:
+      Hub.tch.err(h, client, id, J.Json.get_str(o, "error", "browser input failed"))
 
 # the person's input goes through only while they have the browser
 def Hub.browser.input(idle: Bool, h: Hub, +client: U32, +id: String, +o: J.Json) -> IO(Hub):
@@ -12945,6 +12976,8 @@ def Msg.kind(m: Msg) -> String:
       "shot"
     case TeachReq{_, _, _, _}:
       "teach_req"
+    case BrowserInputDone{_, _, _}:
+      "browser_input_done"
     case BrowserEv{_}:
       "browser_ev"
     case CefDone{_, _, _}:
@@ -13757,6 +13790,8 @@ def Hub.handle(h: Hub, m: Msg, +now: Nat) -> IO(Hub):
       Hub.shot.to(h, text, page)
     case TeachReq{client, id, m, p}:
       Hub.teach(h, client, id, m, p, now)
+    case BrowserInputDone{client, id, +line}:
+      Hub.browser.done(J.Json.get_bool(Maybe.default(&2, J.Json, J.Json.parse(line), J.Null{}), "ok", False{}), h, client, id, Maybe.default(&2, J.Json, J.Json.parse(line), J.Null{}))
     case BrowserEv{line}:
       Hub.browser_ev(h, line)
     case CefDone{request, live, err}:

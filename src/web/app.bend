@@ -273,6 +273,10 @@ def lb_css(lb: LB.Lb, b: LB.LbBox, now: Nat) -> String:
 def tour_key(key: String) -> String:
   OB.Ob.dom(key)
 
+# A stale DOM frame must never send input to a newly selected page.
+def browser_target(+u: U.Ui) -> String:
+  Bool.pick(String, U.Teach.input(u, U.Teach.owner(u)), U.Teach.owner(u), "")
+
 # The host passes the frame's already resolved language tag.
 def lb_node_in(tag: String, url: String) -> D.Node:
   lb_node.loc(I.I18n.of_tag(tag), url)

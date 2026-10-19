@@ -221,6 +221,7 @@ data class Viewer(
     val files: FilesPage? = null, val file: FileView? = null,
     // the Review tab (open "review")
     val review: ReviewPage? = null,
+    val browser: BotBrowser? = null,
     val comments: ReviewComments? = null,
     // the layer focus (core/layers.bend): the layers drawn dimmed (a bit
     // each), the one drawn last (255 none), the list's All/Dim/Only (0-2)
@@ -597,6 +598,7 @@ private fun viewer(o: JSONObject) = Viewer(
             f.optBoolean("ready"))
     },
     file = o.optJSONObject("file")?.let { FileView(it.optString("name"), it.optString("kind"), it.optString("url")) },
+    browser = o.optJSONObject("browser")?.let(::botBrowser),
     review = o.optJSONObject("review")?.let { r ->
         ReviewPage(r.optJSONArray("tabs").map { ReviewTab(it.optString("page"), it.optString("label"), it.optBoolean("on")) },
             r.optString("title"), r.optString("note"), r.optBoolean("busy"), blocks(r.optJSONArray("blocks")),

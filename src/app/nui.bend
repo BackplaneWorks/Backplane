@@ -2431,8 +2431,15 @@ def Nui.paste.e(none: Bool, +key: String, +n: Nui, text: String) -> Step:
     case False{}:
       Nui.act.k(U.Ui.emb_keys(Nui.ui(n), key, VT.Vt.paste(U.Ui.term(Nui.ui(n), key), text)), n)
 
+def Nui.paste.browser(on: Bool, +n: Nui, text: String) -> Step:
+  match on:
+    case True{}:
+      Nui.act(n, "bb-type", text)
+    case False{}:
+      Nui.paste.e(String.is_empty(EM.Emb.focused(Nui.focus_of(n))), EM.Emb.focused(Nui.focus_of(n)), n, text)
+
 def Nui.paste(+n: Nui, text: String) -> Step:
-  Nui.paste.e(String.is_empty(EM.Emb.focused(Nui.focus_of(n))), EM.Emb.focused(Nui.focus_of(n)), n, text)
+  Nui.paste.browser(Bool.and(String.eq(Nui.focus_of(n), "bb-frame"), Bool.and(U.Teach.input(Nui.ui(n), U.Teach.owner(Nui.ui(n))), String.eq(U.Ui.scratch(Nui.ui(n), "@bb.page"), U.Teach.owner(Nui.ui(n))))), n, text)
 
 def Nui.key.view3.k(none: Bool, +n: Nui, +a: U32) -> Step:
   match none:
@@ -2718,10 +2725,17 @@ def Bb.keyname(+code: U32) -> String:
 def Bb.char(+text: U32) -> String:
   SCon{Chr{text}, SNil{}}
 
+def Bb.chord(paste: Bool, +n: Nui, +text: U32) -> Step:
+  match paste:
+    case True{}:
+      Step{n, [NPaste{}], False{}}
+    case False{}:
+      Nui.act(n, "bb-key", "ControlOrMeta+" ++ Bb.char(U32.or(text, 32)))
+
 def Bb.key.c(chord: Bool, +n: Nui, +text: U32) -> Step:
   match chord:
     case True{}:
-      Nui.act(n, "bb-key", "Control+" ++ Bb.char(U32.or(text, 32)))
+      Bb.chord(String.eq(Bb.char(U32.or(text, 32)), "v"), n, text)
     case False{}:
       Step{n, Nil{}, False{}}
 
@@ -2735,7 +2749,7 @@ def Bb.key.t(plain: Bool, +n: Nui, +code: U32, +text: U32, +mods: U32) -> Step:
 def Bb.key.k(named: Bool, +n: Nui, +name: String, +code: U32, +text: U32, +mods: U32) -> Step:
   match named:
     case True{}:
-      Nui.act(n, "bb-key", Bool.pick(String, Bool.and(Keys.shift(mods), String.eq(name, "Tab")), "Shift+Tab", name))
+      Nui.act(n, "bb-key", Bool.pick(String, Keys.ctrl(mods), "Control+", "") ++ Bool.pick(String, Keys.shift(mods), "Shift+", "") ++ name)
     case False{}:
       Bb.key.t(Bool.and(U32.is_ne(text, 0), U32.is_eq(U32.and(mods, 6), 0)), n, code, text, mods)
 
@@ -2744,7 +2758,7 @@ def Bb.key(+n: Nui, +code: U32, +text: U32, +mods: U32) -> Step:
 
 # the frame has the keyboard while the person drives the page
 def Bb.keys(+n: Nui) -> Bool:
-  Bool.and(String.eq(Nui.focus_of(n), "bb-frame"), U.Teach.input(Nui.ui(n), U.Bots.cur(Nui.ui(n))))
+  Bool.and(String.eq(Nui.focus_of(n), "bb-frame"), Bool.and(U.Teach.input(Nui.ui(n), U.Teach.owner(Nui.ui(n))), String.eq(U.Ui.scratch(Nui.ui(n), "@bb.page"), U.Teach.owner(Nui.ui(n)))))
 
 def Nui.key.bb(on: Bool, +n: Nui, +code: U32, +text: U32, +mods: U32) -> Step:
   match on:
@@ -2900,7 +2914,7 @@ def Bb.at(+v: String, +x: U32, +y: U32) -> String:
   U32.show(Bb.thou(x, Bb.part(v, 0n), Bb.part(v, 2n))) ++ " " ++ U32.show(Bb.thou(y, Bb.part(v, 1n), Bb.part(v, 3n)))
 
 def Bb.press(+n: Nui, +v: String, +x: U32, +y: U32) -> Step:
-  Nui.focus.step(Nui.act(n, "bb-click", Bb.at(v, x, y)), "bb-frame")
+  Nui.focus.step(Nui.act(Nui.with_ui(n, U.Ui.scratch_set(Nui.ui(n), "@bb.page", U.Teach.owner(Nui.ui(n)))), "bb-click", Bb.at(v, x, y)), "bb-frame")
 
 def Row.press.b(frame: Bool, +n: Nui, +action: String, +value: String, +x: U32, +y: U32) -> Step:
   match frame:

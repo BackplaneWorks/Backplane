@@ -147,6 +147,32 @@ try {
   const thread: string = set?.thread ?? "";
   check("a bot to teach", !!bot && !!thread, created);
 
+  // Ordinary thread viewers use the same control path, scoped to their page.
+  await rpc("project.add", { path: root });
+  const project = await change("ProjectCreated", c => c.root === root || c.path === root);
+  // Different model versions name the path differently; use this test's only project.
+  const projectId = project?.id ?? seen.find(c => c.$ === "ProjectCreated")?.id;
+  await rpc("thread.create", { project: projectId, title: "Browser input" });
+  const ordinary = await change("ThreadCreated", c => c.title === "Browser input");
+  const owner = ordinary?.id ?? "";
+  check("ordinary browser thread created", !!owner);
+  await mcp(owner, "preview_open", { url: siteUrl });
+  check("ordinary thread takes control", (await rpc("bots.browser", {bot:owner,op:"takeover"}))?.ok === true);
+  check("ordinary agent cannot race user input", (await mcp(owner,"preview_evaluate",{expression:"1"}))?.result?.isError === true);
+  const orderedInput = await Promise.all([
+    rpc("bots.browser", {bot:owner,op:"click",...aim(100)}),
+    rpc("bots.browser", {bot:owner,op:"type",text:"first"}),
+    rpc("bots.browser", {bot:owner,op:"press",key:"Tab"}),
+    rpc("bots.browser", {bot:owner,op:"type",text:"second"}),
+  ]);
+  check("ordinary input acknowledges execution", orderedInput.every(r=>r?.ok === true), orderedInput);
+  const badInput = await rpc("bots.browser", {bot:owner,op:"press",key:"NotARealKey"});
+  check("input failures reach the viewer", badInput?.ok === false, badInput);
+  await rpc("bots.browser", {bot:owner,op:"handback"});
+  const values = text(await mcp(owner,"preview_evaluate",{expression:"[document.getElementById('q').value,document.getElementById('pw').value]"}));
+  check("click typing and Tab stay ordered", values.includes("first") && values.includes("second"), values);
+  check("handback disables ordinary input", (await rpc("bots.browser",{bot:owner,op:"type",text:"late"}))?.ok === false);
+
   const tools = await fetch(`${base}/mcp/${thread}`, {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
   }).then((r) => r.json());
