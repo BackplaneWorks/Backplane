@@ -167,11 +167,11 @@ jobs:
           pid=$!
           trap 'kill "$pid" 2>/dev/null || true; rm -rf "$scratch"' EXIT
           for i in {1..100}; do
-            curl -fsS http://127.0.0.1:3799/hello > "$scratch/hello.json" && break
+            curl -fsS -D "$scratch/hello.headers" -o "$scratch/hello.cbor" http://127.0.0.1:3799/hello && break
             sleep 0.2
           done
-          python3 -c 'import json, sys; assert json.load(open(sys.argv[1]))' "$scratch/hello.json"
-          cat "$scratch/hello.json"
+          python3 -c 'from pathlib import Path; import sys; headers=Path(sys.argv[1]).read_text().lower(); body=Path(sys.argv[2]).read_bytes(); assert "content-type: application/cbor" in headers and body and body[0] >> 5 == 5' "$scratch/hello.headers" "$scratch/hello.cbor"
+          echo 'Flatpak hub answered /hello with a CBOR map'
           # Exercise the real Flatpak -> host -> KiCad Flatpak boundary.
           flatpak --user install -y --noninteractive --no-related flathub org.kicad.KiCad
           flatpak run --command=kicad-cli io.github.i2cjak.Backplane version
