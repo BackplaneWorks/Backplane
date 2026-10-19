@@ -1,6 +1,7 @@
 import Base
 import ./glb.bend as G
 import ./images.bend as IM
+import ./json.bend as J
 
 # Mechanical parts (pure). Agents model parts in FreeCAD and keep them in
 # the project's `mech/` folder as STEP (or GLB); `backplane --render
@@ -13,6 +14,11 @@ import ./images.bend as IM
 # the folder a project keeps its parts in
 def Mech.dir() -> String:
   "mech"
+
+# .backplane.json can name the default model by its project-relative path.
+# Missing, malformed or non-string settings leave the usual default alone.
+def Mech.config(+text: String) -> String:
+  J.Json.get_str(Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{}), "mech", "")
 
 # a camera direction by name (yaw and pitch as the 3D viewer's standard
 # views take them, nui.bend's Cam.key), on a part stood Z up (Mech.upright)
@@ -224,6 +230,29 @@ def Mech.pick.k(ps: List<&2, MPart>, +want: String) -> Maybe<&2, MPart>:
       None{}
     case MPart{+p, +n, +s} <> t:
       Bool.pick(Maybe<&2, MPart>, String.eq(p, want), Some{MPart{p, n, s}}, Mech.pick.k(t, want))
+
+def Mech.preferred.k(m: Maybe<&2, MPart>, +ps: List<&2, MPart>) -> Maybe<&2, MPart>:
+  match m:
+    case Some{p}:
+      Some{p}
+    case None{}:
+      Mech.default(ps)
+
+# Only a model in the current parts list can be the configured default.
+# Stale paths (and paths outside mech/) fall back to assembly, then first.
+def Mech.preferred(+ps: List<&2, MPart>, +primary: String) -> Maybe<&2, MPart>:
+  Mech.preferred.k(Mech.pick.k(ps, primary), ps)
+
+def Mech.choose.k(m: Maybe<&2, MPart>, +ps: List<&2, MPart>, +primary: String) -> Maybe<&2, MPart>:
+  match m:
+    case Some{p}:
+      Some{p}
+    case None{}:
+      Mech.preferred(ps, primary)
+
+# An explicit selection wins over the project's preferred model.
+def Mech.choose(+ps: List<&2, MPart>, +want: String, +root: String, +primary: String) -> Maybe<&2, MPart>:
+  Mech.choose.k(Mech.pick.k(ps, Bool.pick(String, String.starts_with(want, root ++ "/"), String.drop(want, 1n+String.length(root)), want)), ps, primary)
 
 def Mech.pick.or(m: Maybe<&2, MPart>, +ps: List<&2, MPart>) -> Maybe<&2, MPart>:
   match m:

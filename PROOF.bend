@@ -4760,6 +4760,15 @@ def Laws.mech_default_assembly():
 def Laws.mech_default_first():
   {==}
 
+def Laws.mech_configured_primary():
+  {==}
+
+def Laws.mech_primary_missing():
+  {==}
+
+def Laws.mech_primary_selection():
+  {==}
+
 def Laws.mech_gui_linux():
   {==}
 

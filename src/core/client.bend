@@ -4764,7 +4764,9 @@ def Mpage.has(+o: J.Json) -> Bool:
   Bool.not(String.eq(J.Json.show(Maybe.default(&2, J.Json, J.Json.get(J.Json.get_obj(o, "result"), "mech"), J.Null{})), "null"))
 
 def Mpage.store(u: Ui, +r: J.Json) -> Ui:
-  Ui.info_set(Ui.info_set(u, "mech:" ++ J.Json.get_str(r, "thread", ""), J.Json.get_str(r, "mech", "")), "mech.root:" ++ J.Json.get_str(r, "thread", ""), J.Json.get_str(r, "root", ""))
+  Ui.info_set(Ui.info_set(Ui.info_set(u, "mech:" ++ J.Json.get_str(r, "thread", ""), J.Json.get_str(r, "mech", "")),
+    "mech.root:" ++ J.Json.get_str(r, "thread", ""), J.Json.get_str(r, "root", "")),
+    "mech.primary:" ++ J.Json.get_str(r, "thread", ""), J.Json.get_str(r, "primary", ""))
 
 # a render job's answer: the part is no longer busy; why it failed, if it did
 def Mpage.done.k(job: Bool, u: Ui, +th: String, +err: String) -> Ui:
@@ -5000,9 +5002,9 @@ def Mpage.first.k(m: Maybe<&2, MC.MPart>, +root: String) -> String:
     case None{}:
       ""
 
-# the part Mech opens on: the assembly, else the first (MC.Mech.default)
-def Mpage.first(+ps: List<&2, MC.MPart>, +root: String) -> String:
-  Mpage.first.k(MC.Mech.default(ps), root)
+# the part Mech opens on: configured model, assembly, then first
+def Mpage.first(+ps: List<&2, MC.MPart>, +root: String, +primary: String) -> String:
+  Mpage.first.k(MC.Mech.preferred(ps, primary), root)
 
 # Mech opened before the parts were known: once they are, the first shows
 # in 3D ("@mech.to3d:<t>"); with none, the page says so
@@ -5013,9 +5015,17 @@ def Mpage.to3d.k(go: Bool, u: Ui, +th: String, +path: String) -> Ui:
     case False{}:
       u
 
+# A listing can arrive after a person or agent has chosen a different view.
+# Only fill the empty Mech view that is still waiting for its first model.
+def Mpage.waiting(+u: Ui, +th: String) -> Bool:
+  Bool.and(String.eq(Ui.scratch(u, "@mech.to3d:" ++ th), "1"),
+    Bool.and(String.eq(Ui.info(u, "view.kind:" ++ th), "mech"), String.is_empty(Ui.info(u, "view.path:" ++ th))))
+
+def Mpage.to3d.path(+u: Ui, +th: String, +path: String) -> Ui:
+  Mpage.to3d.k(Bool.and(Mpage.waiting(u, th), Bool.not(String.is_empty(path))), u, th, path)
+
 def Mpage.to3d(+u: Ui, +th: String) -> Ui:
-  Mpage.to3d.k(Bool.and(String.eq(Ui.scratch(u, "@mech.to3d:" ++ th), "1"), Bool.not(String.is_empty(Mpage.first(MC.Mech.parts(Ui.info(u, "mech:" ++ th)), Ui.info(u, "mech.root:" ++ th))))),
-    u, th, Mpage.first(MC.Mech.parts(Ui.info(u, "mech:" ++ th)), Ui.info(u, "mech.root:" ++ th)))
+  Mpage.to3d.path(u, th, Mpage.first(MC.Mech.parts(Ui.info(u, "mech:" ++ th)), Ui.info(u, "mech.root:" ++ th), Ui.info(u, "mech.primary:" ++ th)))
 
 def Mpage.got(u: Ui, +r: J.Json) -> Ui:
   Mpage.to3d(Mpage.done.k(Bool.not(String.is_empty(J.Json.get_str(r, "rendered", ""))), Mpage.store(u, r), J.Json.get_str(r, "thread", ""), J.Json.get_str(r, "error", "")), J.Json.get_str(r, "thread", ""))
@@ -5043,7 +5053,7 @@ def Mpage.parts(+u: Ui) -> List<&2, MC.MPart>:
 
 # the part on show
 def Mpage.cur(+u: Ui) -> Maybe<&2, MC.MPart>:
-  MC.Mech.pick(Mpage.parts(u), Ui.view_get(u, "view.path"), Mpage.root(u))
+  MC.Mech.choose(Mpage.parts(u), Ui.view_get(u, "view.path"), Mpage.root(u), Ui.info(u, "mech.primary:" ++ Ui.sel(u)))
 
 # 0 while the parts are asked for, 1 when there are none, 2 with parts
 def Mpage.state(+u: Ui) -> Nat:

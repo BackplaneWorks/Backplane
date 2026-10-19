@@ -29,6 +29,8 @@ The hub runs on your machine. The browser and the native Android and iOS apps re
 
 ![The case, exploded, on the Mech tab](docs/media/web-mech.png)
 
+Set a [primary mechanical model](docs/mechanical-model.md) in `.backplane.json` to choose which part or assembly the Mech tab opens by default.
+
 **Design history.** Backplane snapshots the KiCad files after every tool call. Step through what the agent did, play it back, jump to the tool call behind a step, or compare any two versions (steps, turns, commits, branches): removed, changed and added items are coloured and the rest dims.
 
 ![Compare: the tracks the agent widened](docs/media/web-compare.png)
