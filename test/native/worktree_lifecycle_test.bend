@@ -58,9 +58,21 @@ def run(+root: String) -> IO(Unit):
     removed : P.Ran <- P.Proc.run("rm", ["-rf", root], "/tmp")
     T.finish(Bool.and(linked, ok))
 
+def physical(+root: String, r: P.Ran) -> IO(Unit):
+  match r:
+    case P.Ran{0, path}: run(String.trim(path))
+    case P.Ran{_, error}:
+      do IO<Unit>:
+        removed : P.Ran <- P.Proc.run("rm", ["-rf", root], "/tmp")
+        IO.die(Unit, 1, "cannot resolve physical test directory: " ++ error)
+
 def created(r: P.Ran) -> IO(Unit):
   match r:
-    case P.Ran{0, root}: run(String.trim(root))
+    case P.Ran{0, root}:
+      +dir = String.trim(root)
+      # Exercise a real symlink even on Linux. Git returns physical roots;
+      # Darwin's /tmp also aliases /private/tmp. Keep every exact assertion.
+      IO.bind(P.Ran, Unit, P.Proc.run("sh", ["-c", "set -e\nln -s \"$1\" \"$1/fixture-root\"\ncd \"$1/fixture-root\"\npwd -P", "physical-root", dir], "/tmp"), physical(dir))
     case P.Ran{_, error}: IO.die(Unit, 1, "cannot create test directory: " ++ error)
 
 def main() -> IO(Unit):
