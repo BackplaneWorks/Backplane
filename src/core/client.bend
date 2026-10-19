@@ -10903,6 +10903,65 @@ def Ui.act.g(agy: Bool, +u: Ui, +action: String, +value: String) -> Act:
     case False{}:
       Ui.act.r(String.starts_with(action, "rv-"), u, action, value)
 
+# Browser chrome belongs to the same owner as its native page/remote frame.
+def Browse.owner(+u: Ui) -> String:
+  Ui.shown.page(u)
+
+def Browse.data(+u: Ui, +page: String) -> J.Json:
+  Maybe.default(&2, J.Json, J.Json.parse(Ui.info(u, "browser.tabs." ++ page)), J.Null{})
+
+def Browse.tabs(+u: Ui, +page: String) -> List<&2, J.Json>:
+  J.Json.elems(J.Json.get_obj(Browse.data(u, page), "tabs"))
+
+def Browse.url(+u: Ui, +page: String) -> String:
+  J.Json.get_str(Browse.data(u, page), "url", "")
+
+def Browse.field(+page: String) -> String:
+  "brurl:" ++ page
+
+def Browse.address(+u: Ui, +page: String) -> String:
+  Bool.pick(String, String.eq(Ui.scratch(u, "@browse.edit"), Browse.field(page)), Bots.field(u, Browse.field(page)), Browse.url(u, page))
+
+def Browse.edit(+u: Ui, +page: String) -> Ui:
+  Ui.scratch_set(Ui.scratch_set(u, "@f." ++ Browse.field(page), Browse.address(u, page)), "@browse.edit", Browse.field(page))
+
+def Browse.send(+u: Ui, +op: String, ps: List<&2, J.KV>) -> Act:
+  Teach.browser(Ui.scratch_set(u, "@browse.edit", ""), Browse.owner(u), "toolbar", J.KV{"command", J.Str{op}} <> ps)
+
+def Browse.nav.k(empty: Bool, +u: Ui, +url: String) -> Act:
+  match empty:
+    case True{}: Act{Ui.update(u, J.Json.obj([J.KV{"error", J.Str{"Enter an http(s) address, hostname, or local host:port."}}])), Nil{}}
+    case False{}: Browse.send(u, "navigate", [J.KV{"url", J.Str{url}}])
+
+def Browse.nav(+u: Ui) -> Act:
+  +url = CF.Cef.url(Browse.address(u, Browse.owner(u)))
+  Browse.nav.k(String.is_empty(url), u, url)
+
+def Browse.offset.k(+at: Nat, +count: Nat) -> Nat:
+  Bool.pick(Nat, Nat.is_lt(at, count), at, Nat.sub(count, 1n))
+
+def Browse.offset(+u: Ui, +page: String) -> Nat:
+  Browse.offset.k(M.Switch.num(Ui.scratch(u, "@browse.tabs." ++ page), 0n), List.length(&2, J.Json, Browse.tabs(u, page)))
+
+def Browse.move(+u: Ui, +next: Bool) -> Act:
+  +page = Browse.owner(u)
+  +at = Browse.offset(u, page)
+  Act{Ui.scratch_set(u, "@browse.tabs." ++ page, Nat.show(Bool.pick(Nat, next,
+    Bool.pick(Nat, Nat.is_lt(1n+at, List.length(&2, J.Json, Browse.tabs(u, page))), 1n+at, at), Nat.sub(at, 1n)))), Nil{}}
+
+def Browse.act.k(i: Nat, +u: Ui, +value: String) -> Act:
+  match i:
+    case 0n: Browse.nav(u)
+    case 1n: Browse.send(u, "back", Nil{})
+    case 2n: Browse.send(u, "forward", Nil{})
+    case 3n: Browse.send(u, "reload", Nil{})
+    case 4n: Browse.send(Ui.scratch_set(u, "@browse.tabs." ++ Browse.owner(u), Nat.show(List.length(&2, J.Json, Browse.tabs(u, Browse.owner(u))))), "tabs", [J.KV{"new", J.Flag{True{}}}])
+    case 5n: Browse.send(u, "tabs", [J.KV{"selectId", J.Str{value}}])
+    case 6n: Browse.send(u, "tabs", [J.KV{"closeId", J.Str{value}}])
+    case 7n: Browse.move(u, False{})
+    case 8n: Browse.move(u, True{})
+    case _: Act{u, Nil{}}
+
 # (browser tasks' "tk-" and "bb-" actions: Teach.act)
 def Ui.act.tk(tk: Bool, +u: Ui, +action: String, +value: String) -> Act:
   match tk:
@@ -12097,8 +12156,19 @@ def Mailv.sync(a: Act) -> Act:
 def Ui.desk(+u: Ui, +focused: Bool, +now: Nat) -> Act:
   Mailv.sync(Ui.desk.k(DK.Desk.due(Ui.scratch(u, "@desk"), Ui.scratch(u, "@desk.at"), Ui.sel(u), focused, now), u, Ui.sel(u), focused, now))
 
+def Browse.dispatch(browser: Bool, +u: Ui, +action: String, +value: String) -> Act:
+  match browser:
+    case True{}: Browse.act.k(C.Codec.pos(["br-go", "br-back", "br-forward", "br-reload", "br-new", "br-select", "br-close", "br-prev", "br-next"], action), u, value)
+    case False{}: Mailv.dispatch(String.starts_with(action, "mail-"), u, action, value)
+
+def Browse.field.change(edit: Bool, +u: Ui, +value: String) -> Ui:
+  match edit:
+    case True{}: Ui.scratch_set(u, "@browse.edit", Maybe.default(&2, String, List.head(&2, String, String.split(value, '\u{1f}')), ""))
+    case False{}: u
+
 def Ui.act(+u: Ui, +action: String, +value: String) -> Act:
-  Mailv.sync(Ui.cast.now(u, Mailv.dispatch(String.starts_with(action, "mail-"), u, action, value)))
+  Mailv.sync(Ui.cast.now(u, Browse.dispatch(String.starts_with(action, "br-"),
+    Browse.field.change(Bool.and(String.eq(action, "bfield"), String.starts_with(value, "brurl:")), u, value), action, value)))
 
 def Ui.recv_act(u: Ui, +o: J.Json) -> Act:
   Mailv.sync(Ui.recv_act.s(String.eq(J.Json.get_str(o, "t", ""), "shot"), u, o))

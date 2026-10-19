@@ -419,3 +419,62 @@ def Cef.session.leave.k(owns: Bool, s: CefSession) -> CefSession:
 def Cef.session.leave(+s: CefSession, +client: U32) -> CefSession:
   Cef.session.local_set(Cef.session.leave.k(Bool.and(Cef.session.known(s), U32.is_eq(client, Cef.session.client(s))), s),
     Cef.ids.drop(Cef.session.local(s), client))
+
+# Browser controls: URL intent is shared by the window and web clients.
+def Cef.url.local(+s: String) -> Bool:
+  +host = String.to_lower(Maybe.default(&2, String, List.head(&2, String, String.split(Maybe.default(&2, String, List.head(&2, String, String.split(s, '/')), ""), ':')), ""))
+  Bool.or(Bool.or(String.eq(host, "localhost"), String.ends_with(host, ".localhost")),
+    Bool.or(String.starts_with(s, "127."), Bool.or(String.starts_with(s, "[::1]"), String.eq(host, "0.0.0.0"))))
+
+def Cef.url.port(s: String) -> Bool:
+  match s:
+    case SNil{}: True{}
+    case SCon{Chr{+c}, t}:
+      Bool.and(Bool.and(U32.is_ge(c, 48), U32.is_le(c, 57)), Cef.url.port(t))
+
+def Cef.url.hostport(+s: String) -> Bool:
+  +authority = Maybe.default(&2, String, List.head(&2, String, String.split(s, '/')), "")
+  +port = Maybe.default(&2, String, List.get(&2, String, String.split(authority, ':'), 1n), "")
+  Bool.and(Bool.not(String.is_empty(port)), Cef.url.port(port))
+
+def Cef.url.bare(ok: Bool, +s: String) -> String:
+  match ok:
+    case True{}: Bool.pick(String, Bool.or(Cef.url.local(s), Cef.url.hostport(s)), "http://", "https://") ++ s
+    case False{}: ""
+
+def Cef.url.explicit(ok: Bool, +s: String) -> String:
+  match ok:
+    case True{}: s
+    case False{}: Cef.url.bare(Bool.and(Bool.not(String.is_empty(s)), Bool.and(Bool.not(String.contains(s, " ")),
+      Bool.or(Bool.not(String.contains(s, ":")), Bool.or(Cef.url.local(s), Cef.url.hostport(s))))), s)
+
+def Cef.url(+s: String) -> String:
+  +t = String.trim(s)
+  +lower = String.to_lower(t)
+  Cef.url.explicit(Bool.or(Bool.or(String.starts_with(lower, "http://"), String.starts_with(lower, "https://")),
+    Bool.or(String.eq(t, "about:blank"), String.eq(t, "about:credits"))), t)
+
+def Cef.toolbar.allowed(+op: String) -> Bool:
+  Bool.or(Bool.or(String.eq(op, "navigate"), String.eq(op, "back")), Bool.or(Bool.or(String.eq(op, "forward"), String.eq(op, "reload")), String.eq(op, "tabs")))
+
+def Cef.toolbar.tab.close(+o: J.Json) -> J.Json:
+  J.Json.obj([J.KV{"closeId", J.Str{J.Json.get_str(o, "closeId", "")}}])
+
+def Cef.toolbar.tab.select(has: Bool, +o: J.Json) -> J.Json:
+  match has:
+    case True{}: J.Json.obj([J.KV{"selectId", J.Str{J.Json.get_str(o, "selectId", "")}}])
+    case False{}: Cef.toolbar.tab.close(o)
+
+def Cef.toolbar.tab(new: Bool, +o: J.Json) -> J.Json:
+  match new:
+    case True{}: J.Json.obj([J.KV{"new", J.Flag{True{}}}])
+    case False{}: Cef.toolbar.tab.select(Bool.not(String.is_empty(J.Json.get_str(o, "selectId", ""))), o)
+
+def Cef.toolbar.args.k(nav: Bool, tabs: Bool, +o: J.Json) -> J.Json:
+  match nav tabs:
+    case True{} _: J.Json.obj([J.KV{"url", J.Str{Cef.url(J.Json.get_str(o, "url", ""))}}])
+    case False{} True{}: Cef.toolbar.tab(J.Json.get_bool(o, "new", False{}), o)
+    case _ _: J.Json.obj(Nil{})
+
+def Cef.toolbar.args(+o: J.Json) -> J.Json:
+  Cef.toolbar.args.k(String.eq(J.Json.get_str(o, "command", ""), "navigate"), String.eq(J.Json.get_str(o, "command", ""), "tabs"), o)

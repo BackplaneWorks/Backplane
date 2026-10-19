@@ -2662,10 +2662,15 @@ def Nui.click.url(url: Bool, +n: Nui, +action: String, +value: String) -> Step:
     case False{}:
       Nui.act(n, action, value)
 
+def Browse.focus(edit: Bool, +n: Nui, +value: String) -> Step:
+  match edit:
+    case True{}: Fld.end(Nui.focus(Nui.with_ui(n, U.Browse.edit(Nui.ui(n), U.Browse.owner(Nui.ui(n)))), value))
+    case False{}: Fld.end(Nui.focus(n, value))
+
 def Nui.focus.at(field: Bool, +n: Nui, +value: String) -> Step:
   match field:
     case True{}:
-      Fld.end(Nui.focus(n, value))
+      Browse.focus(String.starts_with(Fld.part(value, 0n), "brurl:"), n, value)
     case False{}:
       Nui.focus(n, value)
 

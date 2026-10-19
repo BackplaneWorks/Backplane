@@ -821,3 +821,10 @@ html:lang(ja) { line-break: strict; word-break: normal; }
 html:lang(ja) :is(.body, .set-label, .set-note, .bot-note, .ask-head, .ask-detail, .tour-body, .fm-note, .secret-line, .item-text) { overflow-wrap: anywhere; }
 html:lang(ja) :is(.set-text, .set-ctl) { min-width: 0; }
 .model-menu .find { padding: 2px 2px 8px; border-bottom: none; }
+
+.browser-tabs { display:flex; gap:4px; overflow-x:auto; align-items:center; padding:6px; flex-shrink:0; }
+.browser-tab { display:flex; flex-shrink:0; border:1px solid var(--line); max-width:220px; }
+.browser-tab.on { background:var(--raise); border-color:var(--accent); }
+.browser-tab-title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:60px; }
+.browser-address { display:flex; gap:4px; padding:6px; flex-shrink:0; }
+.browser-address input { flex:1; min-width:40px; }

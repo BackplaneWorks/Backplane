@@ -408,3 +408,13 @@ adopted popup and the previous tab when that popup closes. `hide` clears that
 placement, so a later tab activation cannot map a browser over a window overlay.
 The active tab inherits the current shield and receives focus only when the
 person drives. Engine changes clear native placement.
+
+The Browser panel has an address bar (Enter or Go), back/forward/reload and
+new, select and close tab controls, for both native CEF and Chrome frames.
+Toolbar actions take over that owner's page; Hand back returns it to the agent.
+Plain hostnames use HTTPS; localhost, loopback and explicit host:port use HTTP.
+Tab titles and the current URL follow navigation, including agent navigation.
+Tab IDs returned by `tabs` are stable within a helper lifetime; `selectId` and
+`closeId` avoid index shifts. A `tabs` event reports the owner's current URL and
+tabs after changes and when a viewer starts watching. Existing index-based
+`select` and `close` remain available to automation.

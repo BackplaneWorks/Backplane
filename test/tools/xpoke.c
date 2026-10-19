@@ -144,8 +144,8 @@ int main(int argc, char** argv) {
       char name[2] = { *c, 0 };
       KeySym ks = *c == ' ' ? XK_space : *c == '.' ? XK_period : *c == ',' ? XK_comma
         : *c == '?' ? XK_question : *c == '!' ? XK_exclam : *c == '/' ? XK_slash
-        : *c == '-' ? XK_minus : XStringToKeysym(name);
-      unsigned shift = (*c >= 'A' && *c <= 'Z') || *c == '?' || *c == '!' ? ShiftMask : 0;
+        : *c == '-' ? XK_minus : *c == ':' ? XK_colon : XStringToKeysym(name);
+      unsigned shift = (*c >= 'A' && *c <= 'Z') || *c == '?' || *c == '!' || *c == ':' ? ShiftMask : 0;
       key(d, w, ks, shift);
     }
   } else if ((!strcmp(argv[1], "hold") || !strcmp(argv[1], "holdx")) && argc == 4) {

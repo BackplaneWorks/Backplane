@@ -12394,3 +12394,12 @@ def Laws.run_model_muse_keeps_exact_full_selector(uber): {==}
 def Laws.run_model_claude_uber_default_kept(parent): {==}
 def Laws.run_model_claude_worker_default_kept(parent): {==}
 def Laws.run_model_codex_stale_parent_uses_cli_default(uber): {==}
+
+# --- browser controls (CEF owner) ---
+def Laws.browser_url_hostname(): {==}
+def Laws.browser_url_localhost(): {==}
+def Laws.browser_url_explicit(path): {==}
+def Laws.browser_url_no_script(): {==}
+def Laws.browser_toolbar_no_eval(): {==}
+def Laws.browser_toolbar_tabs_allowed(): {==}
+# --- end browser controls ---
