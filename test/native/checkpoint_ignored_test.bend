@@ -96,13 +96,33 @@ def Cases.split(+root: String) -> IO(Bool):
     return all([a, b, b0, b3, b6])
 
 def Cases.flags(+root: String) -> IO(Bool):
-  +repo = root ++ "/flags"
+  +repo = root ++ "/flags\n"
   do IO<Bool>:
     a : Bool <- shell(repo, "optimization flags fixture initializes", "git init -q -b main .\ngit config user.email checkpoint@example.invalid\ngit config user.name Checkpoint\ngit config commit.gpgsign false\nmkdir sub\nprintf 'v1' > ordinary.txt\nprintf 'v1' > sub/skipped.txt\nprintf 'v1' > 'line\nbreak.txt'\ngit add -A\ngit commit -qm initial\ngit update-index --assume-unchanged ordinary.txt 'line\nbreak.txt'\ngit update-index --skip-worktree sub/skipped.txt\nprintf 'v2' > ordinary.txt\nprintf 'v2' > sub/skipped.txt\nprintf 'v2' > 'line\nbreak.txt'\ncp .git/index ../flags.index")
     snap : String <- G.Git.checkpoint.capture(repo ++ "/sub", "flags", 0n)
     b : Bool <- chk("subfolder flagged snapshot succeeds", Bool.show(G.Git.failed(snap)), "False")
     c : Bool <- shell(repo, "private index refreshes flags throughout repository", "test \"$(git show refs/backplane/checkpoints/ZmxhZ3M/turn/0:ordinary.txt)\" = v2\ntest \"$(git show refs/backplane/checkpoints/ZmxhZ3M/turn/0:sub/skipped.txt)\" = v2\ntest \"$(git show 'refs/backplane/checkpoints/ZmxhZ3M/turn/0:line\nbreak.txt')\" = v2")
     d : Bool <- shell(repo, "snapshot leaves real flags and index bytes unchanged", "cmp .git/index ../flags.index\ngit ls-files -v ordinary.txt | grep -q '^h ' \ngit ls-files -v sub/skipped.txt | grep -q '^S '")
+    return all([a, b, c, d])
+
+
+def Cases.stat(+root: String) -> IO(Bool):
+  +repo = root ++ "/stat"
+  do IO<Bool>:
+    a : Bool <- shell(repo, "same-stat fixture initializes", "git init -q -b main .\ngit config user.email checkpoint@example.invalid\ngit config user.name Checkpoint\ngit config commit.gpgsign false\ngit config core.trustctime false\nprintf '*.log\\n' > .gitignore\nprintf 'v1' > board.log\ngit add .gitignore\ngit add -f board.log\ngit commit -qm initial\ntouch -r board.log ../stat.time\nprintf 'v2' > board.log\ntouch -r ../stat.time board.log\ntouch -t 203001010000 .git/index\ncp .git/index ../stat.index")
+    snap : String <- G.Git.checkpoint.capture(repo, "stat", 0n)
+    b : Bool <- chk("same-stat checkpoint succeeds", Bool.show(G.Git.failed(snap)), "False")
+    c : Bool <- shell(repo, "same-stat working contents are always read", "test \"$(git show refs/backplane/checkpoints/c3RhdA/turn/0:board.log)\" = v2\ncmp .git/index ../stat.index")
+    return all([a, b, c])
+
+def Cases.records(+root: String) -> IO(Bool):
+  +repo = root ++ "/records"
+  do IO<Bool>:
+    a : Bool <- shell(repo, "index records fixture initializes", "git init -q -b main .\ngit config user.email checkpoint@example.invalid\ngit config user.name Checkpoint\ngit config commit.gpgsign false\nprintf original > conflict.txt\nprintf '#!/bin/sh\\n' > executable.sh\nchmod +x executable.sh\nln -s executable.sh link\ngit add -A\ngit commit -qm initial\nmkdir vendor\ngit -C vendor init -q -b main .\ngit -C vendor config user.email checkpoint@example.invalid\ngit -C vendor config user.name Checkpoint\ngit -C vendor config commit.gpgsign false\nprintf vendored > vendor/part.txt\ngit -C vendor add -A\ngit -C vendor commit -qm vendor\ngit add vendor 2>/dev/null\ngit update-index --force-remove conflict.txt\none=$(printf original | git hash-object -w --stdin)\ntwo=$(printf ours | git hash-object -w --stdin)\nthree=$(printf theirs | git hash-object -w --stdin)\nprintf '100644 %s 1\\tconflict.txt\\n100644 %s 2\\tconflict.txt\\n100644 %s 3\\tconflict.txt\\n' \"$one\" \"$two\" \"$three\" | git update-index --index-info\nprintf resolved > conflict.txt\ncp .git/index ../records.index")
+    snap : String <- G.Git.checkpoint.capture(repo, "records", 0n)
+    b : Bool <- chk("unmerged and gitlink index snapshot succeeds", Bool.show(G.Git.failed(snap)), "False")
+    c : Bool <- shell(repo, "private snapshot resolves only its conflict records", "test \"$(git show refs/backplane/checkpoints/cmVjb3Jkcw/turn/0:conflict.txt)\" = resolved\ntest \"$(git ls-files -u | wc -l | tr -d ' ')\" = 3\ncmp .git/index ../records.index")
+    d : Bool <- shell(repo, "gitlink and file modes survive checkpoint seeding", "ref=refs/backplane/checkpoints/cmVjb3Jkcw/turn/0\ntest \"$(git ls-tree \"$ref\" vendor | cut -c1-6)\" = 160000\ntest \"$(git ls-tree \"$ref\" executable.sh | cut -c1-6)\" = 100755\ntest \"$(git ls-tree \"$ref\" link | cut -c1-6)\" = 120000\ntest \"$(git show \"$ref:link\")\" = executable.sh")
     return all([a, b, c, d])
 
 def Cases.lifecycle(+root: String) -> IO(Bool):
@@ -126,7 +146,7 @@ def Cases.lifecycle(+root: String) -> IO(Bool):
 
 def run(+root: String) -> IO(Unit):
   do IO<Unit>:
-    dirs : P.Ran <- P.Proc.run("mkdir", ["-p", root ++ "/user", root ++ "/empty-templates", root ++ "/capture", root ++ "/unborn", root ++ "/split", root ++ "/lifecycle", root ++ "/flags"], "/tmp")
+    dirs : P.Ran <- P.Proc.run("mkdir", ["-p", root ++ "/user", root ++ "/empty-templates", root ++ "/capture", root ++ "/unborn", root ++ "/split", root ++ "/lifecycle", root ++ "/flags\n", root ++ "/stat", root ++ "/records"], "/tmp")
     H.Env.put("HOME", root ++ "/user")
     H.Env.put("BACKPLANE_HOME", root ++ "/backplane")
     H.Env.put("GIT_CONFIG_NOSYSTEM", "1")
@@ -143,8 +163,10 @@ def run(+root: String) -> IO(Unit):
     c : Bool <- Cases.split(root)
     d : Bool <- Cases.lifecycle(root)
     e : Bool <- Cases.flags(root)
+    f : Bool <- Cases.stat(root)
+    g : Bool <- Cases.records(root)
     removed : P.Ran <- P.Proc.run("rm", ["-rf", root], "/tmp")
-    finish(all([linked, a, b, c, d, e]))
+    finish(all([linked, a, b, c, d, e, f, g]))
 
 def created(r: P.Ran) -> IO(Unit):
   match r:
