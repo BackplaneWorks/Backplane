@@ -12,6 +12,15 @@ final class AppModel {
     private let engine = Engine()
     // the client's state, kept for the next launch (StateStore)
     private let kept = StateStore()
+    @ObservationIgnored private let recentScreen = ScreenCache()
+    @ObservationIgnored private var cachedPresentation = false
+    @ObservationIgnored private var cacheGeneration: UInt64 = 0
+    @ObservationIgnored private var cacheTask: Task<Void, Never>?
+    @ObservationIgnored private var lastScreenJSON: String?
+    @ObservationIgnored private var earlyActions: [(String, String)] = []
+    @ObservationIgnored private var wantsUsage = false
+    @ObservationIgnored private var readingPages: [String: (seen: String, count: Int, away: Bool)] = [:]
+    var contentReady: Bool { ready && !cachedPresentation }
     // something changed since the state was last kept
     @ObservationIgnored private var dirty = false
     @ObservationIgnored private var hubs: [String: Hub] = [:]
@@ -48,7 +57,9 @@ final class AppModel {
     // and pages first), and how many more screens it waits
     @ObservationIgnored private var jumping: (id: String, left: Int)?
     // each hub's socket as this phone sees it (HubsView, the list's pill)
-    private(set) var conn: [String: HubConn] = [:]
+    let conn = HubConnections()
+    private(set) var sendFailure: String?
+    @ObservationIgnored private var requestDeadline: Double?
     // the last screen of each thread shown, by its id: a thread tapped
     // again shows at once while its fresh screen is made
     private(set) var seen: [String: ThreadView] = [:]
@@ -162,6 +173,15 @@ final class AppModel {
         #if DEBUG
         if let l = ProcessInfo.processInfo.environment["BACKPLANE_LINK"] { links = l.split(separator: " ").map(String.init) }
         #endif
+        if let data = recentScreen.load(links: links), let cached = try? JSONDecoder().decode(Screen.self, from: data) {
+            screen = cached
+            cachedPresentation = true
+            lastUber = cached.uber
+            lastPlane = cached.plane
+            if let thread = cached.thread, !cached.sel.isEmpty { remember(cached.sel, thread) }
+            if let tab = AppTab(rawValue: settings.defaultTab), tab != .settings { self.tab = tab }
+            else { tab = cached.uber == nil ? .threads : .home }
+        }
         notifier.open = { [weak self] id in self?.act("select", id) }
         NotificationCenter.default.addObserver(forName: .NSSystemTimeZoneDidChange, object: nil, queue: .main) { [weak self] _ in
             self?.act("tz-report", TimeZone.current.identifier)
@@ -217,6 +237,8 @@ final class AppModel {
     }
 
     func unpair(_ key: String) {
+        cacheGeneration += 1
+        recentScreen.clear(through: cacheGeneration)
         links = links.filter { Pairing.key($0) != key }
         save()
         connect()
@@ -262,6 +284,10 @@ final class AppModel {
             apply(await e.hubs(keys))
             apply(await e.local("view", settings.threadList))
             await languageLocal(e)
+            apply(await e.local("usage", wantsUsage ? "1" : ""))
+            for (thread, page) in readingPages {
+                apply(await e.reading(thread, seen: page.seen, count: page.count, away: page.away))
+            }
             for (k, l) in keyed where hubs[k] == nil { open(k, l) }
             // a hub paired later learns this phone's push tokens too
             if fresh {
@@ -273,17 +299,22 @@ final class AppModel {
 
     private func open(_ key: String, _ link: String) {
         let e = engine
-        let h = Hub(url: {
+        let h = Hub(url: { [weak self] in
+                guard let self else { return nil }
+                let epoch = String(self.conn[key]?.epoch ?? 0)
+                self.apply(await e.connection(key, epoch))
                 let r = try? JSONDecoder().decode(Resume.self, from: Data(await e.resume(key).utf8))
                 return Pairing.socket(link, since: r?.since ?? "0", origin: r?.origin ?? "")
             },
             onConnecting: { [weak self] in
                 self?.conn[key, default: HubConn()].phase = .connecting
+                self?.conn[key, default: HubConn()].epoch += 1
             },
             onOpen: { [weak self] in
                 if self?.shownHub == key { self?.plots.reset() }
                 self?.conn[key, default: HubConn()].phase = .syncing
-                self?.run { await $0.online(key, true) }
+                let epoch = String(self?.conn[key]?.epoch ?? 0)
+                self?.run { await $0.online(key, true, epoch: epoch) }
                 // where the person is: every hub keeps the phone's zone (routines follow it)
                 self?.act("tz-report", TimeZone.current.identifier)
             },
@@ -298,7 +329,8 @@ final class AppModel {
             },
             onClose: { [weak self] in
                 self?.conn[key, default: HubConn()].phase = .offline
-                self?.run { await $0.online(key, false) }
+                let epoch = String(self?.conn[key]?.epoch ?? 0)
+                self?.run { await $0.online(key, false, epoch: epoch) }
             })
         hubs[key] = h
         h.start()
@@ -308,15 +340,14 @@ final class AppModel {
     // phone missed, and the hub is up to date once it is folded in
     private func received(_ key: String, _ d: Data) {
         dirty = true
-        var c = conn[key, default: HubConn()]
-        c.heard = Date()
-        let catching = c.phase != .online
-        if catching { c.bytes = d.count }
-        conn[key] = c
+        conn.received(key, bytes: d.count, at: Date())
         let e = engine
+        let person = e.priorityFrame(d)
+        let epoch = conn[key]?.epoch ?? 0
         Task {
-            apply(await e.recv(key, d.base64EncodedString()))
-            if catching, conn[key]?.phase == .syncing { conn[key]?.phase = .online }
+            let result = await e.recv(key, d.base64EncodedString(), epoch: String(epoch), person: person)
+            guard conn[key]?.epoch == epoch else { return }
+            apply(result)
         }
     }
 
@@ -330,6 +361,10 @@ final class AppModel {
         // opened in the browser here, never sent to the engine
         if action == "open-url" {
             if let u = URL(string: value), u.scheme == "https" || u.scheme == "http" { UIApplication.shared.open(u) }
+            return
+        }
+        if !ready || cachedPresentation {
+            earlyActions.append((action, value))
             return
         }
         if Self.opens.contains(action) { tapped = value }
@@ -370,7 +405,7 @@ final class AppModel {
             }
             let answered = (try? JSONSerialization.jsonObject(with: Data(answer.utf8))) is [String: Any]
             if !answered {
-                let o: [String: Any] = ["text": "the upload did not reach the hub", "thread": thread, "upload": true]
+                let o: [String: Any] = ["uiError": "upload.network", "thread": thread, "upload": true]
                 answer = (try? JSONSerialization.data(withJSONObject: o)).flatMap { String(data: $0, encoding: .utf8) } ?? ""
             }
             act("attach-end", answer)
@@ -596,6 +631,8 @@ final class AppModel {
     // composer empties; the client's answer carries it on (its own sending
     // row, then the hub's message)
     func send(_ action: String = "send") {
+        guard contentReady else { return }
+        sendFailure = nil
         let text = composer.trimmingCharacters(in: .whitespacesAndNewlines)
         let thread = screen?.thread?.id ?? ""
         if !text.isEmpty { outgoing.append(Outgoing(thread: thread, text: text)) }
@@ -637,6 +674,10 @@ final class AppModel {
     // the state written down when it changed (the app may be ended at any
     // time once in the background)
     func keep() {
+        if let text = lastScreenJSON, !cleared {
+            let generation = cacheGeneration, links = self.links, store = recentScreen
+            Task.detached(priority: .utility) { store.save(text, links: links, generation: generation) }
+        }
         guard dirty, ready, !cleared else { return }
         dirty = false
         let e = engine, k = kept
@@ -651,10 +692,14 @@ final class AppModel {
 
     // App settings, Cache: the kept state's size, and forgetting it (the next
     // launch fetches each hub's log again; nothing is written again before)
-    func cacheSize() -> Int { kept.size() + ((try? Data(contentsOf: kept.settingsFile).count) ?? 0) }
+    func cacheSize() -> Int { kept.size() + recentScreen.size() + ((try? Data(contentsOf: kept.settingsFile).count) ?? 0) }
 
     func clearCache() {
         cleared = true
+        cacheTask?.cancel()
+        lastScreenJSON = nil
+        cacheGeneration += 1
+        recentScreen.clear(through: cacheGeneration)
         kept.clear()
         try? FileManager.default.removeItem(at: kept.settingsFile)
         hubSettings = [:]
@@ -670,6 +715,21 @@ final class AppModel {
     func language(_ v: String) {
         settings.lang = v
         Task { await languageLocal(engine) }
+    }
+
+    func hold(_ away: Bool, thread: ThreadView) {
+        let page = readingPages[thread.id]
+        let seen = away && page?.away == true ? page!.seen : (thread.readingSeen ?? "-")
+        let count = away && page?.away == true ? page!.count : thread.entries.count
+        readingPages[thread.id] = (seen, count, away)
+        guard ready else { return }
+        run { await $0.reading(thread.id, seen: seen, count: count, away: away) }
+    }
+
+    func usage(_ visible: Bool) {
+        wantsUsage = visible
+        guard ready else { return }
+        run { await $0.local("usage", visible ? "1" : "") }
     }
 
     func threadList(_ v: String) {
@@ -688,9 +748,42 @@ final class AppModel {
             if let t = sent, let i = outgoing.firstIndex(where: { $0.text == t }) { outgoing.remove(at: i) }
             return
         }
-        if let s = o.screen {
+        for update in o.sync ?? [] {
+            var status = conn[update.hub, default: HubConn()]
+            status.stage = update.phase
+            status.detail = update.detail
+            if update.phase == "live" { status.phase = .online }
+            else if update.phase == "failed" { status.phase = .offline }
+            else { status.phase = .syncing }
+            if conn[update.hub] != status { conn[update.hub] = status }
+        }
+        if requestDeadline != o.deadline {
+            requestDeadline = o.deadline
+            if let deadline = o.deadline {
+                let delay = max(0, deadline / 1000 - Date().timeIntervalSince1970) + 0.01
+                Task { [weak self] in
+                    try? await Task.sleep(for: .seconds(delay))
+                    guard let self, self.requestDeadline == deadline else { return }
+                    self.apply(await self.engine.pulse())
+                }
+            }
+        }
+        let fresh = o.sync?.contains { $0.phase == "history" || $0.phase == "live" } == true
+        if let s = o.screen, !cachedPresentation || fresh {
+            cachedPresentation = false
             if typing == 0 { composer = s.thread?.draft ?? "" }
             screen = s
+            if let text = o.screenJSON, !cleared {
+                lastScreenJSON = text
+                cacheGeneration += 1
+                let generation = cacheGeneration, links = self.links, store = recentScreen
+                cacheTask?.cancel()
+                cacheTask = Task {
+                    try? await Task.sleep(for: .milliseconds(300))
+                    guard !Task.isCancelled else { return }
+                    await Task.detached(priority: .utility) { store.save(text, links: links, generation: generation) }.value
+                }
+            }
             let label = s.lang?.rows.first?.label
             if label != langLabel { langLabel = label; refreshTexts() }
             if s.uber == nil { lastUber = nil; lastPlane = nil } else if s.plane != nil { lastUber = s.uber; lastPlane = s.plane }
@@ -809,7 +902,7 @@ final class AppModel {
             }
             #endif
         }
-        if let t = sent, let i = outgoing.firstIndex(where: { $0.text == t }) { outgoing.remove(at: i) }
+        if o.screen != nil, let t = sent, let i = outgoing.firstIndex(where: { $0.text == t }) { outgoing.remove(at: i) }
         for c in o.cmds {
             switch c.type {
             case "send": if let d = Data(base64Encoded: c.data ?? "") { hubs[c.hub ?? ""]?.send(d) }
@@ -826,10 +919,25 @@ final class AppModel {
                 }
             case "jump": if let id = c.id, !id.isEmpty { jumping = (id, 4) }
             case "keep": Self.keep(c.thread ?? "", c.text ?? "")
+            case "send-issued":
+                if let i = outgoing.firstIndex(where: { $0.thread == c.thread && $0.text == c.text }) { outgoing.remove(at: i) }
+            case "send-failed":
+                if let i = outgoing.firstIndex(where: { $0.thread == c.thread && $0.text == c.text }) { outgoing.remove(at: i) }
+                let thread = c.thread ?? "", text = c.text ?? ""
+                sendFailure = thread
+                if screen?.thread?.id != thread || composer.isEmpty {
+                    Self.keep(thread, text)
+                    if screen?.thread?.id == thread { composer = text }
+                }
             // while asleep the hub's push carries the alert instead
             case "notify": if active { notifier.post(thread: c.thread ?? "", key: c.key ?? "", title: c.title ?? "", body: c.body ?? "") }
             default: break
             }
+        }
+        if fresh, contentReady, !earlyActions.isEmpty {
+            let actions = earlyActions
+            earlyActions.removeAll()
+            for (action, value) in actions { act(action, value) }
         }
         if let j = jumping, let t = screen?.thread {
             if let e = t.entries.first(where: { $0.id == j.id || $0.id.hasSuffix("|" + j.id) }) {
@@ -845,16 +953,6 @@ final class AppModel {
 struct Jump: Equatable {
     let id: String
     let n: Int
-}
-
-// a hub's socket: connecting (or trying again), offline between tries,
-// syncing while what it missed comes in and is folded, then online
-struct HubConn: Equatable {
-    enum Phase { case connecting, offline, syncing, online }
-    var phase: Phase = .connecting
-    var heard: Date?
-    // the size of the frame that caught this phone up
-    var bytes = 0
 }
 
 struct Outgoing: Identifiable, Equatable {

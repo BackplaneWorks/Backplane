@@ -1049,6 +1049,21 @@ enum NativeMessages {
     tag == "ja" ? ("ハブ") : ("the hub")
   }
 
+  // native.thread.latest
+  static func native_thread_latest(_ tag: String) -> String {
+    tag == "ja" ? ("最新") : ("Latest")
+  }
+
+  // native.thread.loading.older
+  static func native_thread_loading_older(_ tag: String) -> String {
+    tag == "ja" ? ("過去のメッセージを読み込み中…") : ("Loading older messages…")
+  }
+
+  // native.thread.loading.recent
+  static func native_thread_loading_recent(_ tag: String) -> String {
+    tag == "ja" ? ("最近のメッセージを読み込み中…") : ("Loading recent messages…")
+  }
+
   // native.thread.menu
   static func native_thread_menu(_ tag: String) -> String {
     tag == "ja" ? ("メニュー") : ("Menu")
@@ -1064,9 +1079,44 @@ enum NativeMessages {
     tag == "ja" ? ("モデル・思考量：" + arg0) : ("Model and effort: " + arg0)
   }
 
+  // native.thread.new
+  static func native_thread_new(_ tag: String, _ arg0: String) -> String {
+    tag == "ja" ? ("新着" + arg0 + "件") : (arg0 + " new")
+  }
+
   // native.thread.online
   static func native_thread_online(_ tag: String, _ arg0: String) -> String {
     tag == "ja" ? ((arg0 == "online" ? "接続済み" : "接続中…")) : ((arg0 == "online" ? "Connected" : "Connecting…"))
+  }
+
+  // native.thread.permissions
+  static func native_thread_permissions(_ tag: String) -> String {
+    tag == "ja" ? ("権限") : ("Permissions")
+  }
+
+  // native.thread.permissions.approval
+  static func native_thread_permissions_approval(_ tag: String) -> String {
+    tag == "ja" ? ("承認が必要") : ("Approval required")
+  }
+
+  // native.thread.permissions.auto
+  static func native_thread_permissions_auto(_ tag: String) -> String {
+    tag == "ja" ? ("自動") : ("Auto")
+  }
+
+  // native.thread.permissions.current
+  static func native_thread_permissions_current(_ tag: String, _ arg0: String) -> String {
+    tag == "ja" ? ("権限：" + arg0) : ("Permissions: " + arg0)
+  }
+
+  // native.thread.permissions.edits
+  static func native_thread_permissions_edits(_ tag: String) -> String {
+    tag == "ja" ? ("編集を自動承認") : ("Auto-accept edits")
+  }
+
+  // native.thread.permissions.full
+  static func native_thread_permissions_full(_ tag: String) -> String {
+    tag == "ja" ? ("フルアクセス") : ("Full access")
   }
 
   // native.thread.provider.item
@@ -1077,6 +1127,11 @@ enum NativeMessages {
   // native.thread.search.clear
   static func native_thread_search_clear(_ tag: String) -> String {
     tag == "ja" ? ("検索をクリア") : ("Clear search")
+  }
+
+  // native.thread.send.failed
+  static func native_thread_send_failed(_ tag: String) -> String {
+    tag == "ja" ? ("送信できませんでした") : ("Could not send")
   }
 
   // native.thread.sending
@@ -1092,6 +1147,11 @@ enum NativeMessages {
   // native.thread.waiting
   static func native_thread_waiting(_ tag: String, _ arg0: String) -> String {
     tag == "ja" ? (arg0 + "を待機中…") : ("Waiting for " + arg0 + "…")
+  }
+
+  // native.usage.machines
+  static func native_usage_machines(_ tag: String) -> String {
+    tag == "ja" ? ("マシン別の使用量") : ("Usage by machine")
   }
 
   // native.viewer.ground.dark

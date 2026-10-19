@@ -1,4 +1,5 @@
 import Base
+import ../core/winnote.bend as NT
 import ../core/charter.bend as CH
 import ../core/mailrun.bend as RUN
 import ../core/kihealth.bend as KH
@@ -62,6 +63,7 @@ import ./farview.bend as FVS
 import ../core/xref.bend as XR
 import ../core/fmcp.bend as FM
 import ../core/client.bend as UC
+import ../mobile/session.bend as MSE
 import ../core/bothub.bend as BH
 import ../core/bot.bend as BO
 import ../core/space.bend as SPC
@@ -147,6 +149,8 @@ type Msg is Data:
   # gen: the connection's generation (a socket's id; the window's client 0
   # joins again under a new one); sock: a raw descriptor on its socket (0
   # for none), shut at once when it falls too far behind (core/outbox.bend)
+  MobileJoin{client: U32, out: Chan(Wire), since: Nat, origin: String, gen: U32, sock: U32}
+  MobileTimeout{client: U32, gen: U32}
   Join{client: U32, out: Chan(Wire), since: Nat, origin: String, gen: U32, sock: U32}
   # the window in this process: it takes the read model, not the log
   JoinHere{client: U32, out: Chan(Wire), gen: U32}
@@ -351,11 +355,14 @@ def LogCount.init(c: Cfg, ls: List<&2, String>) -> Cfg:
 def LogCount.committed(+c: Cfg, fresh: List<&2, String>) -> Cfg:
   LogCount.set(c, Nat.add(LogCount.n(c), List.length(&2, String, fresh)))
 
+type MobileStart is Data:
+  MobileStart{since: Nat, origin: String}
+
 type Client is Data:
   # look: what the client last said it shows (desk.look; core/desk.bend);
   # cr: what it was offered and has taken, and whether it still takes its
   # log (core/outbox.bend); sock: a raw descriptor on its socket (0: none)
-  Client{id: U32, out: Chan(Wire), look: DK.Look, cr: OB.Cr, sock: U32}
+  Client{id: U32, out: Chan(Wire), look: DK.Look, cr: OB.Cr, sock: U32, mobile: List<&2, MobileStart>}
 
 # what the hub keeps about a Claude process's work (a one-element list; a
 # Codex or Grok turn's process has none): its command ledger
@@ -452,7 +459,7 @@ def Store.path(+home: String) -> String:
 
 def Clients.hit(cs: List<&2, Client>, +id: U32) -> Bool:
   match cs:
-    case Client{i, _, _, _, _} <> _:
+    case Client{i, _, _, _, _, +mb} <> _:
       U32.is_eq(i, id)
     case Nil{}:
       False{}
@@ -480,13 +487,13 @@ def Clients.drop(cs: List<&2, Client>, +id: U32) -> List<&2, Client>:
   match cs:
     case Nil{}:
       Nil{}
-    case Client{+i, o, l, r, k} <> t:
-      Clients.drop.k(U32.is_eq(i, id), Client{i, o, l, r, k}, Clients.drop(t, id))
+    case Client{+i, o, l, r, k, +mb} <> t:
+      Clients.drop.k(U32.is_eq(i, id), Client{i, o, l, r, k, mb}, Clients.drop(t, id))
 
 def Clients.look.k(same: Bool, c: Client, +look: DK.Look) -> Client:
   match same c:
-    case True{} Client{i, o, _, r, k}:
-      Client{i, o, look, r, k}
+    case True{} Client{i, o, _, r, k, +mb}:
+      Client{i, o, look, r, k, mb}
     case False{} _:
       c
 
@@ -495,20 +502,20 @@ def Clients.look(cs: List<&2, Client>, +id: U32, +look: DK.Look) -> List<&2, Cli
   match cs:
     case Nil{}:
       Nil{}
-    case Client{+i, o, l, r, k} <> t:
-      Clients.look.k(U32.is_eq(i, id), Client{i, o, l, r, k}, look) <> Clients.look(t, id, look)
+    case Client{+i, o, l, r, k, +mb} <> t:
+      Clients.look.k(U32.is_eq(i, id), Client{i, o, l, r, k, mb}, look) <> Clients.look(t, id, look)
 
 def Clients.looks(cs: List<&2, Client>) -> List<&2, DK.At>:
   match cs:
     case Nil{}:
       Nil{}
-    case Client{i, _, l, _, _} <> t:
+    case Client{i, _, l, _, _, +mb} <> t:
       DK.At{i, l} <> Clients.looks(t)
 
 def Clients.cr.k(same: Bool, c: Client, +gen: U32, +n: Nat, +b: Nat) -> Client:
   match same c:
-    case True{} Client{i, o, l, r, k}:
-      Client{i, o, l, OB.Cr.drained(r, gen, n, b), k}
+    case True{} Client{i, o, l, r, k, +mb}:
+      Client{i, o, l, OB.Cr.drained(r, gen, n, b), k, mb}
     case False{} _:
       c
 
@@ -517,14 +524,14 @@ def Clients.cr(cs: List<&2, Client>, +id: U32, +gen: U32, +n: Nat, +b: Nat) -> L
   match cs:
     case Nil{}:
       Nil{}
-    case Client{+i, o, l, r, k} <> t:
-      Clients.cr.k(U32.is_eq(i, id), Client{i, o, l, r, k}, gen, n, b) <> Clients.cr(t, id, gen, n, b)
+    case Client{+i, o, l, r, k, +mb} <> t:
+      Clients.cr.k(U32.is_eq(i, id), Client{i, o, l, r, k, mb}, gen, n, b) <> Clients.cr(t, id, gen, n, b)
 
 def Clients.sockets(cs: List<&2, Client>) -> Nat:
   match cs:
     case Nil{}:
       0n
-    case Client{_, _, _, r, _} <> t:
+    case Client{_, _, _, r, _, +mb} <> t:
       Nat.add(Bool.pick(Nat, OB.Cr.native(r), 0n, 1n), Clients.sockets(t))
 
 # whether a broadcast is worth encoding once on the hub (two or more
@@ -630,7 +637,7 @@ def Agents.with(as: List<&2, Agent>, +th: String, +r: ARun) -> List<&2, Agent>:
 
 def Wire.cut(c: Client) -> IO(Unit):
   match c:
-    case Client{i, o, _, _, k}:
+    case Client{i, o, _, _, k, +mb}:
       do IO<Unit>:
         PS.Perf.add("hub.client_drop", 1)
         Log.info("client " ++ U32.show(i) ++ " fell too far behind: dropped (it reconnects from its sequence)")
@@ -652,12 +659,12 @@ def Wire.charged(native: Bool, w: Wire, n: Nat) -> Wire:
 
 def Wire.offer.k(c: Client, w: Wire, +n: Nat) -> IO(Maybe<&2, Client>):
   match c:
-    case Client{i, +o, l, +r, k}:
+    case Client{i, +o, l, +r, k, +mb}:
       do IO<Maybe<&2, Client>>:
         +charge : Nat = Bool.pick(Nat, OB.Cr.native(r), 0n, n)
         ok : Result<&1, &1, Wire, Unit> <- Chan.send(Wire, o, Wire.charged(OB.Cr.native(r), w, charge))
         +r2 : OB.Cr = OB.Cr.offer(r, charge)
-        Wire.kept(OB.Cr.over(r2), Client{i, o, l, r2, k})
+        Wire.kept(OB.Cr.over(r2), Client{i, o, l, r2, k, mb})
 
 # one frame of n bytes for a client: kept, or None when it was dropped
 def Wire.offer(c: Client, w: Wire, +n: Nat) -> IO(Maybe<&2, Client>):
@@ -665,7 +672,7 @@ def Wire.offer(c: Client, w: Wire, +n: Nat) -> IO(Maybe<&2, Client>):
 
 def Wire.native(c: Client) -> Bool:
   match c:
-    case Client{_, _, _, r, _}:
+    case Client{_, _, _, r, _, +mb}:
       OB.Cr.native(r)
 
 def Wire.offer.bs(c: Client, +bs: List<&2, U32>) -> IO(Maybe<&2, Client>):
@@ -703,7 +710,7 @@ def Wire.text.if(empty: Bool, m: Maybe<&2, Client>, +text: String) -> IO(Maybe<&
 
 def Client.is(c: Client, +id: U32) -> Bool:
   match c:
-    case Client{i, _, _, _, _}:
+    case Client{i, _, _, _, _, +mb}:
       U32.is_eq(i, id)
 
 def Wire.to.one(hit: Bool, text: Bool, c: Client, w: Wire, +n: Nat, +t: String) -> IO(Maybe<&2, Client>):
@@ -751,12 +758,12 @@ def Wire.all.as(native: Bool, c: Client, +text: String, +bs: List<&2, U32>, +n: 
 
 def Wire.booting(c: Client) -> Bool:
   match c:
-    case Client{_, _, _, r, _}:
+    case Client{_, _, _, r, _, +mb}:
       OB.Cr.boot(r)
 
 def Wire.behind(c: Client) -> Bool:
   match c:
-    case Client{_, _, _, r, _}:
+    case Client{_, _, _, r, _, +mb}:
       OB.Cr.behind(r)
 
 # how a message goes to every client: kind 0 to all; 1 log changes (a
@@ -805,10 +812,10 @@ def Wire.post(qs: List<&2, Chan(Msg)>, +m: Msg) -> IO(Unit):
 
 def Wire.catch(c: Client, +a: All) -> IO(Maybe<&2, Client>):
   match c a:
-    case Client{+i, o, l, +r, k} All{_, +log, +fresh, +fl, +qs}:
+    case Client{+i, o, l, +r, k, +mb} All{_, +log, +fresh, +fl, +qs}:
       do IO<Maybe<&2, Client>>:
         Wire.post(qs, JoinMore{i, OB.Cr.gen(r)})
-        return Some{Client{i, o, l, OB.Cr.wait.set(OB.Cr.catch(r, All.at(log, fresh), fl), True{}), k}}
+        return Some{Client{i, o, l, OB.Cr.wait.set(OB.Cr.catch(r, All.at(log, fresh), fl), True{}), k, mb}}
 
 def Wire.all.k3(behind: Bool, +c: Client, +a: All, +text: String, +bs: List<&2, U32>, +n: Nat) -> IO(Maybe<&2, Client>):
   match behind:
@@ -1282,27 +1289,33 @@ def Conn.reader(fuel: Nat, s: Socket, buf: List<&2, U32>, +id: U32, +inbox: Chan
       Conn.scanned(Conn.scan(65536n, Scan{None{}, buf, False{}}, last, now), s, id, inbox, last, now,
         s2 => b2 => l2 => n2 => Conn.reader(f, s2, b2, id, inbox, l2, n2))
 
-def Conn.raw(r: Socket & U32, rd: Socket, rest: List<&2, U32>, +id: U32, +inbox: Chan(Msg), +since: Nat, +origin: String) -> IO(Unit):
+# An untrusted presentation preference, used only after Conn.gate passed.
+def Conn.join(mobile: Bool, +id: U32, out: Chan(Wire), since: Nat, origin: String, fd: U32) -> Msg:
+  match mobile:
+    case True{}: MobileJoin{id, out, since, origin, id, fd}
+    case False{}: Join{id, out, since, origin, id, fd}
+
+def Conn.raw(r: Socket & U32, rd: Socket, rest: List<&2, U32>, +id: U32, +inbox: Chan(Msg), +since: Nat, +origin: String, +mobile: Bool) -> IO(Unit):
   (wr, +fd) = r
   do IO<Unit>:
     +out : Chan(Wire) <- Chan.new(Wire, 1024)
     IO.spawn(Unit, Conn.writer(Fuel.forever(), wr, out, OB.Wr.new(), id, id, inbox))
-    ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, Join{id, out, since, origin, id, fd})
+    ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, Conn.join(mobile, id, out, since, origin, fd))
     Conn.reader(Fuel.forever(), rd, rest, id, inbox, 0n, 0n)
 
-def Conn.ws.dup(r: Socket & Result<&1, &1, U32 & String, Socket>, rest: List<&2, U32>, +id: U32, +inbox: Chan(Msg), +since: Nat, +origin: String) -> IO(Unit):
+def Conn.ws.dup(r: Socket & Result<&1, &1, U32 & String, Socket>, rest: List<&2, U32>, +id: U32, +inbox: Chan(Msg), +since: Nat, +origin: String, +mobile: Bool) -> IO(Unit):
   (rd, res) = r
   match res:
     case Done{wr}:
-      IO.bind(Socket & U32, Unit, H.Sock.raw(wr), x => Conn.raw(x, rd, rest, id, inbox, since, origin))
+      IO.bind(Socket & U32, Unit, H.Sock.raw(wr), x => Conn.raw(x, rd, rest, id, inbox, since, origin, mobile))
     case Fail{_}:
       Socket.close(rd)
 
-def Conn.ws(s: Socket, key: String, rest: List<&2, U32>, +id: U32, +inbox: Chan(Msg), +since: Nat, +origin: String) -> IO(Unit):
+def Conn.ws(s: Socket, key: String, rest: List<&2, U32>, +id: U32, +inbox: Chan(Msg), +since: Nat, +origin: String, +mobile: Bool) -> IO(Unit):
   do IO<Unit>:
     s2 : Socket <- Conn.send(s, W.Ws.accept(key))
     r : Socket & Result<&1, &1, U32 & String, Socket> <- H.Sock.dup(s2)
-    Conn.ws.dup(r, rest, id, inbox, since, origin)
+    Conn.ws.dup(r, rest, id, inbox, since, origin, mobile)
 
 def Conn.safe(+p: String) -> Bool:
   Bool.and(Bool.not(String.contains(p, "..")), String.starts_with(p, "/"))
@@ -1331,23 +1344,23 @@ def Conn.near.say(near: Bool, +id: U32, +inbox: Chan(Msg)) -> IO(Unit):
     case False{}:
       IO.pure(Unit, Unit{})
 
-def Conn.near.k(r: Socket & String, +key: String, rest: List<&2, U32>, +id: U32, +inbox: Chan(Msg), +since: Nat, +origin: String) -> IO(Unit):
+def Conn.near.k(r: Socket & String, +key: String, rest: List<&2, U32>, +id: U32, +inbox: Chan(Msg), +since: Nat, +origin: String, +mobile: Bool) -> IO(Unit):
   (s, +ip) = r
   do IO<Unit>:
     Conn.near.say(CF.Cef.loopback(ip), id, inbox)
-    Conn.ws(s, key, rest, id, inbox, since, origin)
+    Conn.ws(s, key, rest, id, inbox, since, origin, mobile)
 
-def Conn.near(plain: Bool, s: Socket, +key: String, rest: List<&2, U32>, +id: U32, +inbox: Chan(Msg), +since: Nat, +origin: String) -> IO(Unit):
+def Conn.near(plain: Bool, s: Socket, +key: String, rest: List<&2, U32>, +id: U32, +inbox: Chan(Msg), +since: Nat, +origin: String, +mobile: Bool) -> IO(Unit):
   match plain:
     case True{}:
-      IO.bind(Socket & String, Unit, H.Sock.peer(s), r => Conn.near.k(r, key, rest, id, inbox, since, origin))
+      IO.bind(Socket & String, Unit, H.Sock.peer(s), r => Conn.near.k(r, key, rest, id, inbox, since, origin, mobile))
     case False{}:
-      Conn.ws(s, key, rest, id, inbox, since, origin)
+      Conn.ws(s, key, rest, id, inbox, since, origin, mobile)
 
-def Conn.gate(ok: Bool, plain: Bool, s: Socket, +key: String, rest: List<&2, U32>, +id: U32, +inbox: Chan(Msg), +since: Nat, +origin: String) -> IO(Unit):
+def Conn.gate(ok: Bool, plain: Bool, s: Socket, +key: String, rest: List<&2, U32>, +id: U32, +inbox: Chan(Msg), +since: Nat, +origin: String, path: String) -> IO(Unit):
   match ok:
     case True{}:
-      Conn.near(plain, s, key, rest, id, inbox, since, origin)
+      Conn.near(plain, s, key, rest, id, inbox, since, origin, String.eq(W.Http.param(path, "view"), "mobile"))
     case False{}:
       Conn.finish(s, W.Http.text("401 Unauthorized", "this Backplane needs its pairing token"))
 
@@ -1739,7 +1752,7 @@ def Hub.desk(h: Hub, +client: U32, +thread: String, +focused: Bool) -> IO(Hub):
 
 def Hub.leave.close(m: Maybe<&2, Client>) -> IO(Unit):
   match m:
-    case Some{Client{_, c, _, _, k}}:
+    case Some{Client{_, c, _, _, k, +mb}}:
       do IO<Unit>:
         Chan.close(Wire, c)
         H.Fd.close(k)
@@ -5089,7 +5102,7 @@ def Conn.route.k(ws: Bool, s: Socket, req: W.Request, rest: List<&2, U32>, +web:
   match ws req:
     case True{} W.Request{_, +p, +hs}:
       Conn.gate(Conn.allowed(trusted, hs, p, token), CF.Cef.link(W.Http.header_of(hs, "tailscale-user-login"), W.Http.header_of(hs, "origin")), s, W.Http.header_of(hs, "sec-websocket-key"), rest, id, inbox,
-        Maybe.default(&2, Nat, Nat.read(W.Http.param(p, "since")), 0n), W.Http.param(p, "origin"))
+        Maybe.default(&2, Nat, Nat.read(W.Http.param(p, "since")), 0n), W.Http.param(p, "origin"), p)
     case False{} W.Request{_, +p, +hs}:
       Conn.get.k(Conn.pos(["/hello", "/img", "/debug/perf", "/debug/perf.json", "/debug/log"], W.Http.route(p), 0n), s, web, p, String.contains(W.Http.header_of(hs, "accept-encoding"), "gzip"), Conn.allowed(trusted, hs, p, token))
 
@@ -8772,7 +8785,7 @@ def Hub.join.here(h: Hub, +client: U32, +out: Chan(Wire), +gen: U32, +now: Nat) 
   match h:
     case Hub{+st, f, +ls, +cl, as, inbox, +cfg, +note}:
       do IO<Hub>:
-        m : Maybe<&2, Client> <- Hub.join.state(Client{client, out, DK.Look.none(), OB.Cr.new(gen, True{}, False{}, 0n), 0}, WState{M.State.private(st), Hub.log_msg.k(0n, ls, cfg, 0n)})
+        m : Maybe<&2, Client> <- Hub.join.state(Client{client, out, DK.Look.none(), OB.Cr.new(gen, True{}, False{}, 0n), 0, Nil{}}, WState{M.State.private(st), Hub.log_msg.k(0n, ls, cfg, 0n)})
         m1 : Maybe<&2, Client> <- Far.join.here(Far.mirrors(cfg), m)
         m2 : Maybe<&2, Client> <- Wire.text.m(m1, LV.Live.msg(Live.of(cfg)))
         m3 : Maybe<&2, Client> <- Hub.join.notes(m2, note, Desk.join(DK.Desk.text(Clients.looks(cl), now)))
@@ -8799,7 +8812,7 @@ def Hub.join.k(+n: Nat, +s0: Nat, +xs: List<&2, String>, h: Hub, +client: U32, +
       +k = List.length(&2, String, OB.Join.next(xs))
       +more = Bool.or(Nat.is_lt(Nat.add(s0, k), n), Bool.not(List.is_empty(&2, FR.In, Far.mirrors(cfg))))
       do IO<Hub>:
-        m : Maybe<&2, Client> <- Wire.offer(Client{client, out, DK.Look.none(), OB.Cr.rest.set(OB.Cr.wait.set(OB.Cr.new(gen, U32.is_eq(client, 0), more, Nat.add(s0, k)), more), OB.Join.from(ls, n, Nat.add(s0, k))), sock},
+        m : Maybe<&2, Client> <- Wire.offer(Client{client, out, DK.Look.none(), OB.Cr.rest.set(OB.Cr.wait.set(OB.Cr.new(gen, U32.is_eq(client, 0), more, Nat.add(s0, k)), more), OB.Join.from(ls, n, Nat.add(s0, k))), sock, Nil{}},
           Hub.log_items(origin, cfg, s0, List.take(&2, String, xs, k), more), 0n)
         m1 : Maybe<&2, Client> <- Hub.join.live(more, m, cfg)
         m2 : Maybe<&2, Client> <- Hub.join.notes(m1, note, Desk.join(DK.Desk.text(Clients.looks(cl), now)))
@@ -8843,17 +8856,17 @@ def Clients.swap(cs: List<&2, Client>, +id: U32, +m: Maybe<&2, Client>) -> List<
 
 def Boot.due(c: Client, +gen: U32) -> Bool:
   match c:
-    case Client{_, _, _, +r, _}:
+    case Client{_, _, _, +r, _, +mb}:
       Bool.and(Bool.and(OB.Cr.boot(r), U32.is_eq(OB.Cr.gen(r), gen)), OB.Cr.room(r))
 
 def Boot.cr(c: Client, +r: OB.Cr) -> Client:
   match c:
-    case Client{i, o, l, _, k}:
-      Client{i, o, l, r, k}
+    case Client{i, o, l, _, k, +mb}:
+      Client{i, o, l, r, k, mb}
 
 def Boot.r(c: Client) -> OB.Cr:
   match c:
-    case Client{_, _, _, r, _}:
+    case Client{_, _, _, r, _, +mb}:
       r
 
 def Boot.next(more: Bool, h: Hub, k: Hub -> IO(Hub)) -> IO(Hub):
@@ -8868,18 +8881,22 @@ def Boot.next(more: Bool, h: Hub, k: Hub -> IO(Hub)) -> IO(Hub):
 # message it reads and anything else waits behind at most a few
 def Kick.k(go: Bool, c: Client, +inbox: Chan(Msg)) -> IO(Client):
   match go c:
-    case True{} Client{+i, o, l, +r, k}:
+    case True{} Client{+i, o, l, +r, k, +mb}:
       do IO<Client>:
         Self.post.later(inbox, JoinMore{i, OB.Cr.gen(r)})
-        return Client{i, o, l, OB.Cr.wait.set(r, True{}), k}
+        return Client{i, o, l, OB.Cr.wait.set(r, True{}), k, mb}
     case False{} _:
       IO.pure(Client, c)
 
 def Kick.due(+r: OB.Cr) -> Bool:
   Bool.and(Bool.and(OB.Cr.boot(r), Bool.not(OB.Cr.wait(r))), OB.Cr.room(r))
 
+def Client.mobile.pending(c: Client) -> Bool:
+  match c:
+    case Client{_, _, _, _, _, mb}: Bool.not(List.is_empty(&2, MobileStart, mb))
+
 def Kick.one(+c: Client, +id: U32, +inbox: Chan(Msg)) -> IO(Client):
-  Kick.k(Bool.and(Client.is(c, id), Kick.due(Boot.r(c))), c, inbox)
+  Kick.k(Bool.and(Bool.not(Client.mobile.pending(c)), Bool.and(Client.is(c, id), Kick.due(Boot.r(c)))), c, inbox)
 
 def Kick.go(cs: List<&2, Client>, +id: U32, +inbox: Chan(Msg)) -> IO(List<&2, Client>):
   match cs:
@@ -8985,8 +9002,8 @@ def Boot.m(m: Maybe<&2, Client>, h: Hub, +id: U32, +gen: U32) -> IO(Hub):
 
 def Boot.unwait.k(same: Bool, c: Client) -> Client:
   match same c:
-    case True{} Client{i, o, l, r, k}:
-      Client{i, o, l, OB.Cr.wait.set(r, False{}), k}
+    case True{} Client{i, o, l, r, k, +mb}:
+      Client{i, o, l, OB.Cr.wait.set(r, False{}), k, mb}
     case False{} _:
       c
 
@@ -9897,8 +9914,107 @@ def Hub.rpc.cefroute(cef: Bool, h: Hub, +client: U32, +text: String, +now: Nat) 
     case True{}: Hub.rpc.ocef(h, client, text, now, Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{}))
     case False{}: Hub.rpc.c(String.contains(text, "\"browser.seen\""), h, client, text, now)
 
+# A mobile connection asks for a recent presentation before starting its
+# canonical log. It is an ordinary remote client: it never takes the trusted
+# in-process WState/JoinHere path. The timeout falls back to the old join.
+def Hub.mobile.join(h: Hub, +client: U32, out: Chan(Wire), since: Nat, origin: String, +gen: U32, sock: U32) -> IO(Hub):
+  match h:
+    case Hub{st, f, ls, cl, as, +inbox, cfg, note}:
+      do IO<Hub>:
+        m : Maybe<&2, Client> <- Wire.text(Client{client, out, DK.Look.none(), OB.Cr.wait.set(OB.Cr.new(gen, False{}, True{}, 0n), True{}), sock, [MobileStart{since, origin}]},
+          J.Json.show(J.Json.obj([J.KV{"t", J.Json.str("mobile")}, J.KV{"generation", J.Json.str(U32.show(gen))}])) )
+        IO.spawn(Unit, Self.post.wait(inbox, MobileTimeout{client, gen}, 8000))
+        return Hub{st, f, ls, Clients.add(m, cl), as, inbox, cfg, note}
+
+# Preserve the writer's exact accumulated credit across the handshake.
+# Reusing Hub.join's new-credit constructor would reset sent/acked totals
+# while the same writer still reports the presentation frames it sent.
+def Hub.mobile.history.begin(+n: Nat, +s0: Nat, +origin: String, +xs: List<&2, String>, h: Hub, c: Client) -> IO(Hub):
+  match h c:
+    case Hub{st, f, +ls, cl, as, +inbox, +cfg, note} Client{+id, out, look, +cr, sock, _}:
+      +k = List.length(&2, String, OB.Join.next(xs))
+      +more = Bool.or(Nat.is_lt(Nat.add(s0, k), n), Bool.not(List.is_empty(&2, FR.In, Far.mirrors(cfg))))
+      do IO<Hub>:
+        m : Maybe<&2, Client> <- Wire.offer(Client{id, out, look,
+          OB.Cr.rest.set(OB.Cr.wait.set(OB.Cr.at.set(OB.Cr.catch(cr, s0, 0n), Nat.add(s0, k)), more), OB.Join.from(ls, n, Nat.add(s0, k))), sock, Nil{}},
+          Hub.log_items(origin, cfg, s0, List.take(&2, String, xs, k), more), 0n)
+        m1 : Maybe<&2, Client> <- Hub.join.live(more, m, cfg)
+        Hub.join.more(more, inbox, id, OB.Cr.gen(cr))
+        return Hub{st, f, ls, Clients.swap(cl, id, m1), as, inbox, cfg, note}
+
+def Hub.mobile.history.window(+n: Nat, +origin: String, +since: Nat, oldOrigin: String, +ls: List<&2, String>, h: Hub, c: Client) -> IO(Hub):
+  +s0 = Bool.pick(Nat, Bool.and(String.eq(oldOrigin, origin), Nat.is_le(since, n)), since, 0n)
+  Hub.mobile.history.begin(n, s0, origin, OB.Join.window(ls, n, s0), h, c)
+
+def Hub.mobile.history.start(h: Hub, c: Client) -> IO(Hub):
+  match h c:
+    case Hub{st, f, +ls, cl, as, inbox, +cfg, note} Client{id, out, look, cr, sock, MobileStart{since, origin} <> _}:
+      Hub.mobile.history.window(LogCount.n(cfg), Hub.origin(ls), since, origin, ls,
+        Hub{st, f, ls, cl, as, inbox, cfg, note}, Client{id, out, look, cr, sock, Nil{}})
+    case _ _:
+      IO.pure(Hub, h)
+
+def Hub.mobile.timeout.live(same: Bool, h: Hub, c: Client) -> IO(Hub):
+  match same:
+    case True{}: Hub.mobile.history.start(h, c)
+    case False{}: IO.pure(Hub, h)
+
+def Hub.mobile.timeout.k(m: Maybe<&2, Client>, h: Hub, gen: U32) -> IO(Hub):
+  match m:
+    case Some{+c}:
+      Hub.mobile.timeout.live(U32.is_eq(OB.Cr.gen(Boot.r(c)), gen), h, c)
+    case None{}:
+      IO.pure(Hub, h)
+
+def Hub.mobile.timeout(h: Hub, +client: U32, gen: U32) -> IO(Hub):
+  match h:
+    case Hub{st, f, ls, +cl, as, inbox, cfg, note}:
+      Hub.mobile.timeout.k(Clients.get(cl, client), Hub{st, f, ls, cl, as, inbox, cfg, note}, gen)
+
+def Hub.mobile.rpc.action(history: Bool, h: Hub, +client: U32, +id: String, +p: J.Json, now: Nat, c: Client) -> IO(Hub):
+  match history h:
+    case True{} _:
+      IO.bind(Hub, Hub, Hub.mobile.history.start(h, c), h2 => Hub.tch.ok(h2, client, id))
+    case False{} Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
+      Hub.out(Hub{st, f, ls, cl, as, inbox, cfg, note}, B.Reply.data(client, id,
+        MSE.Session.render(st, Hub.info(cfg), J.Json.obj([J.KV{"t", J.Json.str("live")}, J.KV{"items", J.Json.arr(LV.Live.items(Live.of(cfg)))}]), now, p)))
+
+def Hub.mobile.rpc.generation(same: Bool, history: Bool, h: Hub, +client: U32, +id: String, p: J.Json, now: Nat, c: Client) -> IO(Hub):
+  match same:
+    case True{}: Hub.mobile.rpc.action(history, h, client, id, p, now, c)
+    case False{}: Hub.tch.err(h, client, id, "the mobile connection changed; reconnect")
+
+def Hub.mobile.rpc.have(history: Bool, h: Hub, +client: U32, +id: String, +p: J.Json, +now: Nat, m: Maybe<&2, Client>) -> IO(Hub):
+  match m:
+    case Some{+c}:
+      Hub.mobile.rpc.generation(String.eq(J.Json.get_str(p, "generation", ""), U32.show(OB.Cr.gen(Boot.r(c)))), history, h, client, id, p, now, c)
+    case None{}:
+      Hub.tch.err(h, client, id, "the mobile connection is no longer open")
+
+def Hub.mobile.rpc(history: Bool, h: Hub, +client: U32, +id: String, p: J.Json, now: Nat) -> IO(Hub):
+  match h:
+    case Hub{st, f, ls, +cl, as, inbox, cfg, note}:
+      Hub.mobile.rpc.have(history, Hub{st, f, ls, cl, as, inbox, cfg, note}, client, id, p, now, Clients.get(cl, client))
+
+def Hub.rpc.mobile.k(i: Nat, +o: J.Json, h: Hub, +client: U32, +text: String, +now: Nat) -> IO(Hub):
+  match i:
+    case 0n:
+      Hub.mobile.rpc(False{}, h, client, J.Json.as_raw(J.Json.get(o, "id"), "0"), J.Json.get_obj(o, "p"), now)
+    case 1n:
+      Hub.mobile.rpc(True{}, h, client, J.Json.as_raw(J.Json.get(o, "id"), "0"), J.Json.get_obj(o, "p"), now)
+    case _:
+      Hub.rpc.cefroute(Bool.or(String.contains(text, "\"browser.embed\""), String.contains(text, "\"browser.place\"")), h, client, text, now)
+
+def Hub.rpc.mobile.o(+o: J.Json, h: Hub, +client: U32, +text: String, +now: Nat) -> IO(Hub):
+  Hub.rpc.mobile.k(C.Codec.pos(["mobile.screen", "mobile.history"], J.Json.get_str(o, "m", "")), o, h, client, text, now)
+
+def Hub.rpc.mobile(hit: Bool, h: Hub, +client: U32, +text: String, +now: Nat) -> IO(Hub):
+  match hit:
+    case True{}: Hub.rpc.mobile.o(Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{}), h, client, text, now)
+    case False{}: Hub.rpc.cefroute(Bool.or(String.contains(text, "\"browser.embed\""), String.contains(text, "\"browser.place\"")), h, client, text, now)
+
 def Hub.rpc(h: Hub, +client: U32, +text: String, +now: Nat) -> IO(Hub):
-  Hub.rpc.cefroute(Bool.or(String.contains(text, "\"browser.embed\""), String.contains(text, "\"browser.place\"")), h, client, text, now)
+  Hub.rpc.mobile(String.contains(text, "\"mobile."), h, client, text, now)
 
 # the threads' Boat chips that Boat's status changes (logged only then)
 def Hub.chips(p: M.State & Hub, +status: String, +now: Nat) -> IO(Hub):
@@ -11719,6 +11835,9 @@ def Upload.json(+status: String, +ok: Bool, +thread: String, +v: String) -> List
     [J.KV{"attached", J.Str{v}}, J.KV{"thread", J.Str{thread}}],
     [J.KV{"text", J.Str{v}}, J.KV{"thread", J.Str{thread}}, J.KV{"upload", J.Flag{True{}}}])))), "")
 
+def Upload.failure(status: String, thread: String, id: String, detail: String) -> List<&2, U32>:
+  W.Http.response(status, "application/json", U.Utf8.encode(J.Json.show(NT.Notice.upload.reply(thread, id, detail))), "")
+
 def Upload.saved(r: Socket & Result<&1, &1, U32 & String, Unit>, +thread: String, +path: String) -> IO(Unit):
   (s, res) = r
   match res:
@@ -11727,7 +11846,7 @@ def Upload.saved(r: Socket & Result<&1, &1, U32 & String, Unit>, +thread: String
     case Fail{_}:
       do IO<Unit>:
         rm : Result<&1, &1, U32 & String, Unit> <- H.FS.remove(path)
-        Conn.finish(s, Upload.json("400 Bad Request", False{}, thread, "the upload did not arrive whole"))
+        Conn.finish(s, Upload.failure("400 Bad Request", thread, "upload.incomplete", ""))
 
 # the head's leftover (the body's start) is written; the rest is copied
 # (a body that came whole with the head has nothing left to copy: the copy
@@ -11775,7 +11894,7 @@ def Upload.gate(ok: Bool, big: Bool, s: Socket, +cont: Bool, +thread: String, +n
     case False{} _:
       Conn.finish(s, W.Http.text("401 Unauthorized", "this Backplane needs its pairing token"))
     case True{} True{}:
-      Conn.finish(s, Upload.json("413 Payload Too Large", False{}, thread, "attachments are limited to " ++ Nat.show(Nat.div(AT.Att.cap(), 1048576n)) ++ " MB"))
+      Conn.finish(s, Upload.failure("413 Payload Too Large", thread, "upload.cap", Nat.show(Nat.div(AT.Att.cap(), 1048576n))))
     case True{} False{}:
       do IO<Unit>:
         +reply : Chan(String) <- Chan.new(String, 1)
@@ -12860,6 +12979,10 @@ def Msg.kind(m: Msg) -> String:
       "mcp_shut"
     case Announce{_}:
       "announce"
+    case MobileJoin{_, _, _, _, _, _}:
+      "mobile_join"
+    case MobileTimeout{_, _}:
+      "mobile_timeout"
     case Join{_, _, _, _, _, _}:
       "join"
     case JoinHere{_, _, _}:
@@ -13666,6 +13789,10 @@ def Hub.handle(h: Hub, m: Msg, +now: Nat) -> IO(Hub):
       Hub.mcp.shut(h, B.Gen.thread(B.Tag.thread(thread)), call)
     case Announce{text}:
       Hub.note(h, text)
+    case MobileJoin{client, out, since, origin, gen, sock}:
+      Hub.mobile.join(h, client, out, since, origin, gen, sock)
+    case MobileTimeout{client, gen}:
+      Hub.mobile.timeout(h, client, gen)
     case Join{client, out, since, origin, gen, sock}:
       Hub.join(h, client, out, since, origin, gen, sock, now)
     case JoinHere{client, out, gen}:

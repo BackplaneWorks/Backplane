@@ -312,6 +312,30 @@ struct AppSettingsTab: View {
             } footer: {
                 if screen.hubs.count > 1, let h = notifyHub { Text(NativeMessages.native_settings_notify_hub(tag, h.name)) }
             }
+            Section(NativeMessages.native_usage_machines(tag)) {
+                ForEach(screen.usageMachines ?? []) { machine in
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text(machine.name).font(.headline)
+                            Spacer()
+                            Text(HubDot.word(model.conn[machine.key]?.phase ?? (machine.online ? .online : .offline), tag))
+                                .foregroundStyle(.secondary)
+                        }
+                        Text(machine.key).font(.caption).foregroundStyle(.secondary)
+                        ForEach(Array(machine.rows.enumerated()), id: \.offset) { _, row in
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(row.label)
+                                if !row.note.isEmpty { Text(row.note).font(.caption).foregroundStyle(.secondary) }
+                                ForEach(row.buttons, id: \.self) { button in
+                                    Button(button.label) { model.act(button.action, machine.key + "|" + button.value) }
+                                        .disabled(model.conn[machine.key].map { $0.phase == .offline || $0.phase == .connecting } ?? !machine.online)
+                                }
+                            }
+                        }
+                    }
+                    .accessibilityIdentifier("usage.machine." + machine.key)
+                }
+            }
             Section(NativeMessages.native_settings_hubs(tag)) {
                 NavigationLink(value: "@hubs") {
                     HStack {
@@ -352,11 +376,13 @@ struct AppSettingsTab: View {
         .navigationTitle(NativeMessages.palette_settings(tag))
         .task { notifications = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus }
         .onAppear {
+            model.usage(true)
             cacheBytes = model.cacheSize()
             // ask the hub for its settings in the background; the rows above
             // show the last ones meanwhile, and a select (a tab change) closes it
             if let h = notifyHub { model.act("hub-settings", h.key + "|on") }
         }
+        .onDisappear { model.usage(false) }
         .confirmationDialog(NativeMessages.native_settings_cache_ask(tag), isPresented: $confirmClear, titleVisibility: .visible) {
             Button(NativeMessages.native_settings_cache_clear(tag), role: .destructive) { model.clearCache(); cacheBytes = 0 }
             Button(NativeMessages.common_cancel(tag), role: .cancel) {}

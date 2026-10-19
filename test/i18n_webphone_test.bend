@@ -73,6 +73,9 @@ def model.about() -> J.Json:
 def model.picker() -> J.Json:
   S.Mob.picker.j.loc(I.Ja{}, J.Null{}, model.about(), "claude", "", "", "")
 
+def upload.error(tag: String) -> U.Ui:
+  F.Fixture.go(F.Fixture.thread(tag), "attach-end", "{\"uiError\":\"upload.network\",\"thread\":\"t43\",\"upload\":true}")
+
 def main() -> IO(Unit):
   +en = web("en")
   +ja = web("ja")
@@ -148,3 +151,7 @@ def main() -> IO(Unit):
     C.Check.str("phone upload action preserved", J.Json.get_str(first(S.Mob.ask.btns.loc(I.Ja{}, 2n, "a", "", "")), "value", "?"), "a|accept")
     C.Check.str("phone minimized order route preserved", J.Json.get_str(first(S.Mob.menu.loc(I.Ja{}, "t", False{}, [TO.Tool{"shopping-bag", "Buy it", "", "fab-show", "t", False{}, False{}, False{}}])), "action", "?"), "fab-show")
     C.Check.str("ordering toggle localized", W.VLabel.option(I.Ja{}, "order.enabled", "off"), "オフ")
+    C.Check.str("web upload error en", seen(words(W.View.page(upload.error("en"))), "the upload did not reach the hub"), "the upload did not reach the hub")
+    C.Check.str("web upload error ja", seen(words(W.View.page(upload.error("ja"))), "アップロードがハブに届きませんでした"), "アップロードがハブに届きませんでした")
+    C.Check.str("phone upload error en", J.Json.get_str(S.Mob.screen(upload.error("en")), "error", ""), "the upload did not reach the hub")
+    C.Check.str("phone upload error ja", J.Json.get_str(S.Mob.screen(upload.error("ja")), "error", ""), "アップロードがハブに届きませんでした")

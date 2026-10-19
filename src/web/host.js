@@ -604,7 +604,7 @@ async function upload(action, file) {
     answer = await r.text();
     JSON.parse(answer);
   } catch {
-    answer = JSON.stringify({ text: "the upload did not reach the hub", thread, upload: true });
+    answer = JSON.stringify({ uiError: "upload.network", thread, upload: true });
   }
   dispatch("attach-end", answer);
 }

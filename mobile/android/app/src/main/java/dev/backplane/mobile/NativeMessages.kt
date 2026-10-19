@@ -836,6 +836,18 @@ object NativeMessages {
   fun native_thread_hub(tag: String): String =
     if (tag == "ja") ("ハブ") else ("the hub")
 
+  // native.thread.latest
+  fun native_thread_latest(tag: String): String =
+    if (tag == "ja") ("最新") else ("Latest")
+
+  // native.thread.loading.older
+  fun native_thread_loading_older(tag: String): String =
+    if (tag == "ja") ("過去のメッセージを読み込み中…") else ("Loading older messages…")
+
+  // native.thread.loading.recent
+  fun native_thread_loading_recent(tag: String): String =
+    if (tag == "ja") ("最近のメッセージを読み込み中…") else ("Loading recent messages…")
+
   // native.thread.menu
   fun native_thread_menu(tag: String): String =
     if (tag == "ja") ("メニュー") else ("Menu")
@@ -848,9 +860,37 @@ object NativeMessages {
   fun native_thread_model_effort(tag: String, arg0: String): String =
     if (tag == "ja") ("モデル・思考量：" + arg0) else ("Model and effort: " + arg0)
 
+  // native.thread.new
+  fun native_thread_new(tag: String, arg0: String): String =
+    if (tag == "ja") ("新着" + arg0 + "件") else (arg0 + " new")
+
   // native.thread.online
   fun native_thread_online(tag: String, arg0: String): String =
     if (tag == "ja") ((if (arg0 == "online") "接続済み" else "接続中…")) else ((if (arg0 == "online") "Connected" else "Connecting…"))
+
+  // native.thread.permissions
+  fun native_thread_permissions(tag: String): String =
+    if (tag == "ja") ("権限") else ("Permissions")
+
+  // native.thread.permissions.approval
+  fun native_thread_permissions_approval(tag: String): String =
+    if (tag == "ja") ("承認が必要") else ("Approval required")
+
+  // native.thread.permissions.auto
+  fun native_thread_permissions_auto(tag: String): String =
+    if (tag == "ja") ("自動") else ("Auto")
+
+  // native.thread.permissions.current
+  fun native_thread_permissions_current(tag: String, arg0: String): String =
+    if (tag == "ja") ("権限：" + arg0) else ("Permissions: " + arg0)
+
+  // native.thread.permissions.edits
+  fun native_thread_permissions_edits(tag: String): String =
+    if (tag == "ja") ("編集を自動承認") else ("Auto-accept edits")
+
+  // native.thread.permissions.full
+  fun native_thread_permissions_full(tag: String): String =
+    if (tag == "ja") ("フルアクセス") else ("Full access")
 
   // native.thread.provider.item
   fun native_thread_provider_item(tag: String, arg0: String): String =
@@ -859,6 +899,10 @@ object NativeMessages {
   // native.thread.search.clear
   fun native_thread_search_clear(tag: String): String =
     if (tag == "ja") ("検索をクリア") else ("Clear search")
+
+  // native.thread.send.failed
+  fun native_thread_send_failed(tag: String): String =
+    if (tag == "ja") ("送信できませんでした") else ("Could not send")
 
   // native.thread.sending
   fun native_thread_sending(tag: String): String =
@@ -871,6 +915,10 @@ object NativeMessages {
   // native.thread.waiting
   fun native_thread_waiting(tag: String, arg0: String): String =
     if (tag == "ja") (arg0 + "を待機中…") else ("Waiting for " + arg0 + "…")
+
+  // native.usage.machines
+  fun native_usage_machines(tag: String): String =
+    if (tag == "ja") ("マシン別の使用量") else ("Usage by machine")
 
   // native.viewer.ground.dark
   fun native_viewer_ground_dark(tag: String): String =
