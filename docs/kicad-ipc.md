@@ -84,3 +84,6 @@ path plus a new alternate, and an occupied path with no new socket.
 When the pinned managed install is absent, discovery retains other installed versions as newest-first fallbacks.
 An old install therefore reports old and offers Update; the pinned directory appearing invalidates the health cache
 and takes precedence.
+
+Stock KiCad 10 installed with Flatpak can use the [CLI adapter](kicad-flatpak.md)
+for file-based checks and exports; it does not provide the fork's headless IPC server.

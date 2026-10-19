@@ -117,3 +117,11 @@ jobs:
           name: backplane-${{ matrix.target }}
           path: dist/
           retention-days: 7
+
+  kicad-flatpak-adapter:
+    name: KiCad Flatpak adapter
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sh -n scripts/kicad-flatpak.sh
+      - run: python3 -m unittest discover -s test/tools -p kicad_flatpak_test.py
