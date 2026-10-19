@@ -12363,3 +12363,12 @@ def Laws.release_command_success(label, output):
 
 def Laws.release_command_failure():
   {==}
+
+def Laws.checks_report_missing_erc():
+  {==}
+
+def Laws.checks_report_missing_drc():
+  {==}
+
+def Laws.checks_execution_keeps_identity(kind, why):
+  {==}

@@ -168,26 +168,38 @@ def Rvc.prep.sh() -> String:
   String.join([
     "set -e",
     "t=$(mktemp -d \"${TMPDIR:-/tmp}/bp-review.XXXXXX\")",
+    "trap 'rm -rf \"$t\"' 0",
     "if [ -n \"$2\" ]; then",
     "  cd \"$1\"",
     "  p=$(git rev-parse --show-prefix 2>/dev/null || true)",
     "  mkdir \"$t/src\"",
-    "  git archive --format=tar \"$2\" | tar -x -C \"$t/src\"",
-    "  printf '%s\\n%s\\n' \"$t\" \"$t/src/$p\"",
+    "  git archive --format=tar \"$2\" -o \"$t/source.tar\"",
+    "  tar -xf \"$t/source.tar\" -C \"$t/src\"",
+    "  links=$(find \"$t/src\" -type l -print)",
+    "  [ -z \"$links\" ] || { echo 'snapshot contains symlinks; release inputs must be committed regular files'; exit 1; }",
+    "  printf '%s\\n%s\\n%s\\n' \"$t\" \"$t/src/$p\" \"$t/src\"",
     "else",
     "  printf '%s\\n%s\\n' \"$t\" \"$1\"",
-    "fi"], "\n")
+    "fi",
+    "trap - 0"], "\n")
 
 def Rvc.vars(+cli: String, +pcb: String, +sch: String, +out: String) -> List<&2, CAD.Var>:
   [CAD.Var{"cli", cli}, CAD.Var{"pcb", pcb}, CAD.Var{"sch", sch}, CAD.Var{"out", out}]
 
-# one KiCad check: its findings, or why it could not run
+# one KiCad check: its findings, or an explicit execution failure.
+def Rvc.chk.valid(valid: Bool, +id: String, +text: String) -> List<&2, CHK.Finding>:
+  match valid:
+    case True{}:
+      Bool.pick(List<&2, CHK.Finding>, String.eq(id, "erc"), CHK.Checks.erc(text), CHK.Checks.drc(text))
+    case False{}:
+      [CHK.Checks.finding("execution", "error", id, "missing or malformed check report", "")]
+
 def Rvc.chk.read(r: P.Ran, +id: String, +text: String) -> List<&2, CHK.Finding>:
   match r:
     case P.Ran{0, _}:
-      Bool.pick(List<&2, CHK.Finding>, String.eq(id, "erc"), CHK.Checks.erc(text), CHK.Checks.drc(text))
-    case P.Ran{_, +out}:
-      [CHK.Checks.finding(id, "warning", "not_run", String.trim(String.take(out, 300n)), "")]
+      Rvc.chk.valid(CHK.Checks.report_valid(id, text), id, text)
+    case P.Ran{code, +out}:
+      [CHK.Checks.finding("execution", "error", id, "check command failed (exit " ++ U32.show(code) ++ "): " ++ String.trim(String.take(out, 300n)), "")]
 
 def Rvc.chk.k(+argv: List<&2, String>, +id: String, +report: String, +dir: String) -> IO(List<&2, CHK.Finding>):
   match argv:
@@ -255,16 +267,69 @@ def Rvc.tasks(ts: List<&2, CHK.Task>) -> List<&2, J.Json>:
       Rvc.task(x) <> Rvc.tasks(t)
 
 def Rvc.checks.out(+fs: List<&2, CHK.Finding>, +tasks: List<&2, CHK.Task>, +runs: List<&2, CHK.Run>, +g: CHK.Gate) -> String:
-  J.Json.show(J.Json.obj([J.KV{"md", J.Str{CHK.Checks.md(fs, Nil{}, runs)}}, J.KV{"gate", J.Str{CHK.Checks.gate.all(fs, tasks, runs, g)}},
+  J.Json.show(J.Json.obj([J.KV{"err", J.Str{CHK.Checks.execution(fs)}}, J.KV{"md", J.Str{CHK.Checks.md(fs, Nil{}, runs)}}, J.KV{"gate", J.Str{CHK.Checks.gate.all(fs, tasks, runs, g)}},
     J.KV{"line", J.Str{CHK.Checks.line(fs)}}, J.KV{"tasks", J.Json.arr(Rvc.tasks(tasks))}]))
 
 def Rvc.or(+text: String, +d: String) -> String:
   Bool.pick(String, String.is_empty(String.trim(text)), d, text)
 
-def Rvc.checks.in(+out: String, +dir: String, +home: String, +trigger: String) -> IO(String):
+def Rvc.bound.sh() -> String:
+  String.join([
+    "set -eu",
+    "root=$(cd \"$1\" && pwd -P)",
+    "shift",
+    "for file do",
+    "  [ -n \"$file\" ] || continue",
+    "  [ -f \"$file\" ] && [ ! -L \"$file\" ] || { echo \"release input missing or linked: $file\"; exit 1; }",
+    "  parent=$(cd \"$(dirname \"$file\")\" && pwd -P)",
+    "  case \"$parent/$(basename \"$file\")\" in \"$root\"/*) ;; *) echo \"release input escapes committed snapshot: $file\"; exit 1;; esac",
+    "done"], "\n")
+
+def Rvc.bound.one(+root: String, +file: String) -> IO(P.Ran):
+  P.Proc.run("sh", ["-c", Rvc.bound.sh(), "sh", root, file], "/")
+
+def Rvc.bound.end(todo: List<&2, String>) -> String:
+  match todo:
+    case Nil{}: ""
+    case _: "release schematic hierarchy exceeds 64 files"
+
+def Rvc.bound.checked(r: P.Ran, +p: String, +rest: List<&2, String>, +tab: List<&2, HR.Kids>, k: List<&2, HR.Kids> -> List<&2, String> -> IO(String)) -> IO(String):
+  match r:
+    case P.Ran{0, _}:
+      do IO<String>:
+        +bs : List<&2, U32> <- GT.Git.version(p)
+        +kd : HR.Kids = HR.Hier.kids(p, bs)
+        k(kd <> tab, HR.Hier.todo(HR.Hier.kids.sheets(kd), kd <> tab, rest))
+    case P.Ran{_, +why}:
+      IO.pure(String, String.trim(why))
+
+def Rvc.bound.next(todo: List<&2, String>, +tab: List<&2, HR.Kids>, +root: String, k: List<&2, HR.Kids> -> List<&2, String> -> IO(String)) -> IO(String):
+  match todo:
+    case Nil{}: IO.pure(String, "")
+    case +p <> rest:
+      IO.bind(P.Ran, String, Rvc.bound.one(root, p), r => Rvc.bound.checked(r, p, rest, tab, k))
+
+def Rvc.bound.load(fuel: Nat, +todo: List<&2, String>, +tab: List<&2, HR.Kids>, +root: String) -> IO(String):
+  match fuel:
+    case 0n: IO.pure(String, Rvc.bound.end(todo))
+    case 1n+f:
+      Rvc.bound.next(todo, tab, root, t => d => Rvc.bound.load(f, d, t, root))
+
+def Rvc.bound.files(r: P.Ran, +root: String, +sch: String) -> IO(String):
+  match r:
+    case P.Ran{0, _}:
+      Bool.pick(IO(String), String.is_empty(sch), IO.pure(String, ""), Rvc.bound.load(64n, [sch], Nil{}, root))
+    case P.Ran{_, +why}: IO.pure(String, String.trim(why))
+
+def Rvc.bound(+root: String, f: K.Files) -> IO(String):
+  match root f:
+    case SNil{} _: IO.pure(String, "")
+    case _ K.Files{+pro, +pcb, +sch, _}:
+      IO.bind(P.Ran, String, P.Proc.run("sh", ["-c", Rvc.bound.sh(), "sh", root, pro, pcb, sch], "/"), r => Rvc.bound.files(r, root, sch))
+
+def Rvc.checks.inputs(+out: String, +dir: String, +home: String, +trigger: String, +f: K.Files) -> IO(String):
   do IO<String>:
     cli : String <- Rvc.cli(home)
-    +f : K.Files <- K.Files.read(dir)
     +pcb : String = Rvc.pcb(f)
     +sch : String = Rvc.sch(f)
     kc : List<&2, CHK.Finding> <- Rvc.chks(CAD.Cad.kicad.checks(), Rvc.vars(cli, pcb, sch, out), out, pcb, sch, dir, Nil{})
@@ -275,6 +340,17 @@ def Rvc.checks.in(+out: String, +dir: String, +home: String, +trigger: String) -
     runs : List<&2, CHK.Run> <- Rvc.runs(CHK.Checks.for(Rvc.cfg(cfg), trigger), dir, Nil{})
     return Rvc.checks.out(List.append(&2, CHK.Finding, kc, Rvc.bomf(BM.Bom.rules(ps))), CHK.Checklist.parse(Rvc.or(cl, CHK.Checklist.default())), runs, Rvc.gate(cfg))
 
+def Rvc.checks.bound(+why: String, +out: String, +dir: String, +home: String, +trigger: String, +f: K.Files) -> IO(String):
+  match why:
+    case SNil{}: Rvc.checks.inputs(out, dir, home, trigger, f)
+    case _: IO.pure(String, J.Json.show(J.Json.obj([J.KV{"err", J.Str{why}}])))
+
+def Rvc.checks.in(+out: String, +dir: String, +home: String, +trigger: String, +root: String) -> IO(String):
+  do IO<String>:
+    +f : K.Files <- K.Files.read(dir)
+    why : String <- Rvc.bound(root, f)
+    Rvc.checks.bound(why, out, dir, home, trigger, f)
+
 def Rvc.checks.done(+text: String, +tmp: String) -> IO(Unit):
   do IO<Unit>:
     IO.print(text)
@@ -282,7 +358,7 @@ def Rvc.checks.done(+text: String, +tmp: String) -> IO(Unit):
     return Unit{}
 
 def Rvc.checks.go(+ls: List<&2, String>, +home: String, +trigger: String) -> IO(Unit):
-  IO.bind(String, Unit, Rvc.checks.in(HI.Hist.at(ls, 0n), HI.Hist.at(ls, 1n), home, trigger), text => Rvc.checks.done(text, HI.Hist.at(ls, 0n)))
+  IO.bind(String, Unit, Rvc.checks.in(HI.Hist.at(ls, 0n), HI.Hist.at(ls, 1n), home, trigger, HI.Hist.at(ls, 2n)), text => Rvc.checks.done(text, HI.Hist.at(ls, 0n)))
 
 def Rvc.checks.k(r: P.Ran, +home: String, +trigger: String) -> IO(Unit):
   match r:
@@ -327,17 +403,33 @@ def Rvc.write(+path: String, text: String) -> IO(Bool):
 
 def Rvr.prep.sh() -> String:
   String.join([
-    "set -e",
+    "set -eu",
     "cd \"$1\"",
+    "repo=$(pwd)",
     "top=$(git rev-parse --show-toplevel)",
     "gd=$(cd \"$(git rev-parse --git-common-dir)\" && pwd)",
-    "p=$(git rev-parse --show-prefix || true)",
-    "c=$(git rev-parse --verify --quiet \"$2^{commit}\")",
-    "prev=$(git describe --tags --abbrev=0 \"$2^\" 2>/dev/null || true)",
+    "p=$(git rev-parse --show-prefix)",
+    "c=$(git rev-parse --verify --quiet \"${3:-$2}^{commit}\")",
+    "object=$(git rev-parse --verify \"refs/tags/$2\")",
+    "[ \"$(git rev-parse --verify --quiet \"$object^{commit}\")\" = \"$c\" ] || { echo 'release tag moved; retry validation'; exit 1; }",
+    "prev=$(git describe --tags --abbrev=0 \"$c^\" 2>/dev/null || true)",
     "pc=$( [ -n \"$prev\" ] && git rev-parse --verify --quiet \"$prev^{commit}\" || true)",
+    "final=\"$repo/.backplane/releases/$2\"",
+    "mkdir -p \"$(dirname \"$final\")\"",
+    "lock=\"$final.lock\"",
+    "mkdir \"$lock\" || { echo \"release is already running; retry after it completes (or inspect the stale lock: $lock)\"; exit 1; }",
+    "t=\"\"; stage=\"\"",
+    "trap '[ -z \"$t\" ] || rm -rf \"$t\"; [ -z \"$stage\" ] || rm -rf \"$stage\"; rmdir \"$lock\"' 0",
+    "[ ! -e \"$final\" ] || { echo \"release outputs already exist; preserved unchanged, choose a new tag\"; exit 1; }",
     "t=$(mktemp -d \"${TMPDIR:-/tmp}/bp-release.XXXXXX\")",
-    "git archive --format=tar \"$2\" | tar -x -C \"$t\"",
-    "printf '%s\\n%s\\n%s\\n%s\\n%s\\n%s\\n%s\\n' \"$t\" \"$t/$p\" \"$gd\" \"$top\" \"$c\" \"$prev\" \"$pc\""], "\n")
+    "stage=$(mktemp -d \"$final.pending.XXXXXX\")",
+    "git archive --format=tar \"$c\" -o \"$t/source.tar\"",
+    "mkdir \"$t/src\"",
+    "tar -xf \"$t/source.tar\" -C \"$t/src\"",
+    "links=$(find \"$t/src\" -type l -print)",
+    "[ -z \"$links\" ] || { echo 'snapshot contains symlinks; release inputs must be committed regular files'; exit 1; }",
+    "printf '%s\\n%s\\n%s\\n%s\\n%s\\n%s\\n%s\\n%s\\n%s\\n%s\\n%s\\n' \"$t\" \"$t/src/$p\" \"$gd\" \"$top\" \"$c\" \"$prev\" \"$pc\" \"$final\" \"$stage\" \"$lock\" \"$object\"",
+    "trap - 0"], "\n")
 
 def Rvr.run.next(+err: String, go: Unit -> IO(String)) -> IO(String):
   match err:
@@ -351,12 +443,48 @@ def Rvr.run.ran(r: P.Ran, +label: String) -> String:
     case P.Ran{code, +output}:
       REL.Release.command_error(label, code, output)
 
-def Rvr.run.cmd(argv: List<&2, String>, +label: String) -> IO(String):
+def Rvr.output.sh() -> String:
+  String.join([
+    "set -eu",
+    "list=$(mktemp)",
+    "trap 'rm -f \"$list\"' 0",
+    "if command -v sha256sum >/dev/null 2>&1; then sum=sha256sum; else sum=\"shasum -a 256\"; fi",
+    "if [ -d \"$1\" ]; then",
+    "  find \"$1\" -type f -size +0c -exec $sum {} + > \"$list\"",
+    "elif [ -s \"$1\" ]; then",
+    "  $sum \"$1\" > \"$list\"",
+    "fi",
+    "LC_ALL=C sort \"$list\""], "\n")
+
+def Rvr.output.path(xs: List<&2, String>) -> String:
+  match xs:
+    case "-o" <> path <> _: path
+    case _ <> t: Rvr.output.path(t)
+    case Nil{}: ""
+
+def Rvr.output.done(r: P.Ran, +before: String, +label: String) -> String:
+  match r:
+    case P.Ran{0, +after}:
+      Bool.pick(String, Bool.or(String.is_empty(String.trim(after)), String.eq(before, after)), label ++ " produced no new nonempty output", "")
+    case P.Ran{code, out}: REL.Release.command_error(label ++ " output inspection", code, out)
+
+def Rvr.output.ran(r: P.Ran, +path: String, +before: String, +label: String) -> IO(String):
+  match r:
+    case P.Ran{0, _}:
+      IO.bind(P.Ran, String, P.Proc.run("sh", ["-c", Rvr.output.sh(), "sh", path], "/"), after => IO.pure(String, Rvr.output.done(after, before, label)))
+    case P.Ran{code, out}: IO.pure(String, REL.Release.command_error(label, code, out))
+
+def Rvr.output.before(r: P.Ran, +c: String, +rest: List<&2, String>, +path: String, +label: String) -> IO(String):
+  match r:
+    case P.Ran{0, +before}:
+      IO.bind(P.Ran, String, K.KiCad.run(c, rest), ran => Rvr.output.ran(ran, path, before, label))
+    case P.Ran{code, out}: IO.pure(String, REL.Release.command_error(label ++ " output inspection", code, out))
+
+def Rvr.run.cmd(+argv: List<&2, String>, +label: String) -> IO(String):
   match argv:
-    case Nil{}:
-      IO.pure(String, label ++ " failed: no export command")
+    case Nil{}: IO.pure(String, label ++ " failed: no export command")
     case +c <> +rest:
-      IO.bind(P.Ran, String, K.KiCad.run(c, rest), r => IO.pure(String, Rvr.run.ran(r, label)))
+      IO.bind(P.Ran, String, P.Proc.run("sh", ["-c", Rvr.output.sh(), "sh", Rvr.output.path(argv)], "/"), before => Rvr.output.before(before, c, rest, Rvr.output.path(argv), label))
 
 # Stop on the first failed export. A partial output is never a successful
 # release, and later commands must not hide the original failure.
@@ -368,7 +496,16 @@ def Rvr.run(ss: List<&2, REL.Step>, +dir: String) -> IO(String):
       IO.bind(String, String, Rvr.run.cmd(argv, name ++ " (" ++ id ++ ")"), err => Rvr.run.next(err, _ => Rvr.run(t, dir)))
 
 def Rvr.files.sh() -> String:
-  "cd \"$1\" && find . -type f ! -name notes.md ! -name manifest.json | sed 's|^\\./||' | sort"
+  String.join([
+    "set -eu",
+    "cd \"$1\"",
+    "list=$(mktemp)",
+    "trap 'rm -f \"$list\" \"$list.sorted\"' 0",
+    "links=$(find . -type l -print)",
+    "[ -z \"$links\" ] || { echo 'linked release outputs are not complete regular files'; exit 1; }",
+    "find . -type f ! -name notes.md ! -name manifest.json > \"$list\"",
+    "LC_ALL=C sort \"$list\" > \"$list.sorted\"",
+    "sed 's|^\\./||' \"$list.sorted\""], "\n")
 
 def Rvr.keep(blank: Bool, +x: String, rest: List<&2, String>) -> List<&2, String>:
   match blank:
@@ -399,7 +536,7 @@ def Rvr.strs(xs: List<&2, String>) -> List<&2, J.Json>:
       J.Str{x} <> Rvr.strs(t)
 
 def Rvr.plan(+repo: String, +tag: String, +cli: String, +pcb: String, +sch: String) -> REL.Plan:
-  REL.Release.plan(CAD.Cad.kicad(), REL.Release.defaults(CAD.Cad.kicad()), repo, tag, cli, pcb, sch)
+  REL.Release.plan_at(CAD.Cad.kicad(), REL.Release.defaults(CAD.Cad.kicad()), repo, tag, cli, pcb, sch)
 
 def Rvr.plan.dir(p: REL.Plan) -> String:
   match p:
@@ -416,40 +553,97 @@ def Rvr.out(r: P.Ran) -> String:
     case P.Ran{_, +o}:
       o
 
+def Rvr.error(+why: String) -> String:
+  J.Json.show(J.Json.obj([J.KV{"err", J.Str{why}}]))
+
+# Rename only a complete staging directory; the per-tag lock excludes other
+# release children. A previous complete release is never removed or replaced.
+def Rvr.commit.sh() -> String:
+  "set -eu\n[ \"$(git --git-dir=\"$3\" rev-parse --verify --quiet \"refs/tags/$4^{commit}\")\" = \"$5\" ] || { echo 'tag moved during export; no outputs published'; exit 1; }\n[ ! -e \"$2\" ] || { echo 'outputs already exist; preserved unchanged'; exit 1; }\nmv \"$1\" \"$2\""
+
+def Rvr.committed(r: P.Ran, +ls: List<&2, String>, +files: List<&2, String>, +notes: String) -> String:
+  match r:
+    case P.Ran{0, _}:
+      J.Json.show(J.Json.obj([J.KV{"dir", J.Str{HI.Hist.at(ls, 7n)}}, J.KV{"files", J.Json.arr(Rvr.strs(files))}, J.KV{"notes", J.Str{notes}}, J.KV{"prev", J.Str{HI.Hist.at(ls, 5n)}}, J.KV{"commit", J.Str{HI.Hist.at(ls, 4n)}}, J.KV{"tagObject", J.Str{HI.Hist.at(ls, 10n)}}]))
+    case P.Ran{code, out}:
+      Rvr.error(REL.Release.command_error("publish output directory", code, out))
+
+def Rvr.metadata.done(ok: Bool, +ls: List<&2, String>, +tag: String, +files: List<&2, String>, +notes: String) -> IO(String):
+  match ok:
+    case True{}:
+      IO.bind(P.Ran, String, P.Proc.run("sh", ["-c", Rvr.commit.sh(), "sh", HI.Hist.at(ls, 8n), HI.Hist.at(ls, 7n), HI.Hist.at(ls, 2n), tag, HI.Hist.at(ls, 4n)], "/"), r => IO.pure(String, Rvr.committed(r, ls, files, notes)))
+    case False{}:
+      IO.pure(String, Rvr.error("release metadata could not be written; no outputs published, retry the same tag"))
+
+def Rvr.metadata(when: P.Ran, +ls: List<&2, String>, +tag: String, +files: List<&2, String>, +notes: String) -> IO(String):
+  match when:
+    case P.Ran{0, +date}:
+      do IO<String>:
+        w1 : Bool <- Rvc.write(HI.Hist.at(ls, 8n) ++ "/notes.md", notes)
+        w2 : Bool <- Rvc.write(HI.Hist.at(ls, 8n) ++ "/manifest.json", REL.Release.manifest(tag, HI.Hist.at(ls, 4n), String.trim(date), files))
+        Rvr.metadata.done(Bool.and(w1, w2), ls, tag, files, notes)
+    case P.Ran{code, out}:
+      IO.pure(String, Rvr.error(REL.Release.command_error("release timestamp", code, out)))
+
+def Rvr.listed(lst: P.Ran, +ls: List<&2, String>, +tag: String, +notes: String) -> IO(String):
+  match lst:
+    case P.Ran{0, +out}:
+      IO.bind(P.Ran, String, P.Proc.run("date", ["-u", "+%Y-%m-%dT%H:%M:%SZ"], "/"), when => Rvr.metadata(when, ls, tag, Rvr.nonblank(String.split(String.trim(out), '\n')), notes))
+    case P.Ran{code, out}:
+      IO.pure(String, Rvr.error(REL.Release.command_error("list release outputs", code, out)))
+
 def Rvr.outputs.done(+ls: List<&2, String>, +tag: String, +dir: String, +sch: String) -> IO(String):
   do IO<String>:
     +top : String = HI.Hist.at(ls, 3n)
     +rel : String = String.drop(sch, 1n+String.length(HI.Hist.at(ls, 1n)))
-    +prefix : String = String.drop(HI.Hist.at(ls, 1n), 1n+String.length(HI.Hist.at(ls, 0n)))
+    +prefix : String = String.drop(HI.Hist.at(ls, 1n), 5n+String.length(HI.Hist.at(ls, 0n)))
     +now : String = HI.Hist.git(HI.Hist.at(ls, 2n), HI.Hist.at(ls, 4n), top, prefix ++ rel)
     +was : String = Bool.pick(String, String.is_empty(HI.Hist.at(ls, 6n)), "", HI.Hist.git(HI.Hist.at(ls, 2n), HI.Hist.at(ls, 6n), top, prefix ++ rel))
     bom : String <- Rvc.bom.k(String.is_empty(was), was, now)
-    lst : P.Ran <- P.Proc.run("sh", ["-c", Rvr.files.sh(), "sh", dir], "/")
-    +files : List<&2, String> = Rvr.lines(lst)
     +notes : String = REL.Release.notes(tag, HI.Hist.at(ls, 5n), HI.Hist.at(ls, 4n), Bool.pick(String, String.is_empty(was), "", bom), "")
-    w1 : Bool <- Rvc.write(dir ++ "/notes.md", notes)
-    when : P.Ran <- P.Proc.run("date", ["-u", "+%Y-%m-%dT%H:%M:%SZ"], "/")
-    w2 : Bool <- Rvc.write(dir ++ "/manifest.json", REL.Release.manifest(tag, HI.Hist.at(ls, 4n), String.trim(Rvr.out(when)), files))
-    return J.Json.show(J.Json.obj([J.KV{"dir", J.Str{dir}}, J.KV{"files", J.Json.arr(Rvr.strs(files))}, J.KV{"notes", J.Str{notes}}, J.KV{"prev", J.Str{HI.Hist.at(ls, 5n)}}]))
+    lst : P.Ran <- P.Proc.run("sh", ["-c", Rvr.files.sh(), "sh", dir], "/")
+    Rvr.listed(lst, ls, tag, notes)
 
 def Rvr.outputs(+err: String, +ls: List<&2, String>, +tag: String, +dir: String, +sch: String) -> IO(String):
   match err:
     case SNil{}:
       Rvr.outputs.done(ls, tag, dir, sch)
     case +why:
-      IO.pure(String, J.Json.show(J.Json.obj([J.KV{"err", J.Str{why}}])))
+      IO.pure(String, Rvr.error(why ++ "; no outputs published, retry the same tag"))
+
+def Rvr.steps.present(ss: List<&2, REL.Step>) -> Bool:
+  match ss:
+    case Nil{}: False{}
+    case _ <> _: True{}
+
+def Rvr.created.valid(on: Bool, +ls: List<&2, String>, +tag: String, +plan: REL.Plan, +sch: String) -> IO(String):
+  match on:
+    case True{}: IO.bind(String, String, Rvr.run(Rvr.plan.steps(plan), Rvr.plan.dir(plan)), err => Rvr.outputs(err, ls, tag, Rvr.plan.dir(plan), sch))
+    case False{}: IO.pure(String, Rvr.error("no supported design files or export steps; no outputs published"))
+
+def Rvr.created(made: P.Ran, +ls: List<&2, String>, +tag: String, +plan: REL.Plan, +sch: String) -> IO(String):
+  match made:
+    case P.Ran{0, _}:
+      Rvr.created.valid(Rvr.steps.present(Rvr.plan.steps(plan)), ls, tag, plan, sch)
+    case P.Ran{code, out}:
+      IO.pure(String, Rvr.error(REL.Release.command_error("create export directory", code, out)))
+
+def Rvr.input.bound(+why: String, made: P.Ran, +ls: List<&2, String>, +tag: String, +plan: REL.Plan, +sch: String) -> IO(String):
+  match why:
+    case SNil{}: Rvr.created(made, ls, tag, plan, sch)
+    case _: IO.pure(String, Rvr.error(why))
 
 def Rvr.in(+ls: List<&2, String>, +repo: String, +tag: String, +home: String) -> IO(String):
   do IO<String>:
     cli : String <- Rvc.cli(home)
     +f : K.Files <- K.Files.read(HI.Hist.at(ls, 1n))
     +sch : String = Rvc.sch(f)
-    +plan : REL.Plan = Rvr.plan(repo, tag, cli, Rvc.pcb(f), sch)
-    +dir : String = Rvr.plan.dir(plan)
-    made : P.Ran <- P.Proc.run("mkdir", ["-p", dir ++ "/gerbers"], "/")
-    err : String <- Rvr.run(Rvr.plan.steps(plan), dir)
-    text : String <- Rvr.outputs(err, ls, tag, dir, sch)
-    gone : P.Ran <- P.Proc.run("rm", ["-rf", HI.Hist.at(ls, 0n)], "/")
+    +plan : REL.Plan = Rvr.plan(HI.Hist.at(ls, 8n), tag, cli, Rvc.pcb(f), sch)
+    why : String <- Rvc.bound(HI.Hist.at(ls, 0n) ++ "/src", f)
+    made : P.Ran <- P.Proc.run("mkdir", ["-p", Rvr.plan.dir(plan) ++ "/gerbers"], "/")
+    text : String <- Rvr.input.bound(why, made, ls, tag, plan, sch)
+    gone : P.Ran <- P.Proc.run("rm", ["-rf", HI.Hist.at(ls, 0n), HI.Hist.at(ls, 8n)], "/")
+    unlocked : P.Ran <- P.Proc.run("rmdir", [HI.Hist.at(ls, 9n)], "/")
     return text
 
 def Rvr.go(+ls: List<&2, String>, +repo: String, +tag: String, +home: String) -> IO(Unit):
@@ -462,8 +656,11 @@ def Rvr.k(r: P.Ran, +repo: String, +tag: String, +home: String) -> IO(Unit):
     case P.Ran{_, +out}:
       IO.print(J.Json.show(J.Json.obj([J.KV{"err", J.Str{Rvc.or(String.trim(out), "could not take out that tag")}}])))
 
+def Rvr.child.at(+dir: String, +tag: String, +home: String, +commit: String) -> IO(Unit):
+  IO.bind(P.Ran, Unit, P.Proc.run("sh", ["-c", Rvr.prep.sh(), "sh", dir, tag, commit], "/"), r => Rvr.k(r, dir, tag, home))
+
 def Rvr.child(+dir: String, +tag: String, +home: String) -> IO(Unit):
-  IO.bind(P.Ran, Unit, P.Proc.run("sh", ["-c", Rvr.prep.sh(), "sh", dir, tag], "/"), r => Rvr.k(r, dir, tag, home))
+  Rvr.child.at(dir, tag, home, tag)
 
 def Rvc.args.copy(xs: List<String>) -> List<&2, String>:
   match xs:
@@ -485,7 +682,9 @@ def Rvc.main.k(xs: List<&2, String>, go: List<String> -> IO(Unit)) -> IO(Unit):
       Rvc.bom(a, b)
     case "--review" <> "checks" <> d <> c <> h <> t <> _:
       Rvc.check.run(d, c, h, t)
-    case "--review" <> "release" <> d <> t <> h <> _:
+    case "--review" <> "release" <> d <> t <> h <> c <> _:
+      Rvr.child.at(d, t, h, c)
+    case "--review" <> "release" <> d <> t <> h <> Nil{}:
       Rvr.child(d, t, h)
     case +x:
       go(Rvc.args.back(x))
@@ -560,10 +759,12 @@ def RvJob.tick(+thread: String, +cwd: String, +index: String) -> IO(Res):
     return RvJob.tick.k(ok, thread, text)
 
 # review.release {thread, tag, publish, force}: a release of the thread's
-# folder as it is committed. The tag must be a good one and not there yet;
-# the design checks gate it (trigger "release": ERC, DRC, the custom
-# checks) unless forced; the annotated tag is made at HEAD, the outputs in
-# a child (Rvr.child), and only when asked (publish, the person's click)
+# folder at a resolved immutable commit. Working changes are refused. HEAD
+# movement during validation is refused; later movement cannot change the
+# checks, annotated tag, exported source or manifest. Retrying a failed
+# transaction may reuse its tag only at the same commit. Design findings
+# honor the gate/force settings; infrastructure errors always stop it.
+# The outputs are staged in a child (Rvr.child), and only when asked (publish, the person's click)
 # the tag is pushed and a GitHub release made with the files attached.
 
 def Rvr.report(+thread: String, +md: String, +err: String) -> Res:
@@ -571,8 +772,10 @@ def Rvr.report(+thread: String, +md: String, +err: String) -> Res:
 
 def Rvr.json(r: P.Ran) -> J.Json:
   match r:
-    case P.Ran{_, +out}:
+    case P.Ran{0, +out}:
       Maybe.default(&2, J.Json, J.Json.parse(String.trim(out)), J.Json.obj([J.KV{"err", J.Str{Rvc.or(String.trim(String.take(out, 300n)), "no answer")}}]))
+    case P.Ran{code, +out}:
+      J.Json.obj([J.KV{"err", J.Str{"review child failed (exit " ++ U32.show(code) ++ "): " ++ String.trim(String.take(out, 300n))}}])
 
 def Rvr.str(x: J.Json) -> String:
   match x:
@@ -613,45 +816,116 @@ def Rvr.pub.said(r: P.Ran) -> String:
     case P.Ran{_, +out}:
       "Not published on GitHub: " ++ String.trim(String.take(out, 300n))
 
+def Rvr.pub.matches(r: P.Ran, +o: J.Json) -> Bool:
+  match r:
+    case P.Ran{0, +out}: String.eq(HI.Hist.at(String.split(String.trim(out), '\t'), 0n), J.Json.get_str(o, "tagObject", ""))
+    case _: False{}
+
+def Rvr.pub.finished(r: P.Ran, +made: P.Ran, +o: J.Json) -> String:
+  Bool.pick(String, Rvr.pub.matches(r, o), Rvr.pub.said(made), "Publication no longer matches the validated release object; review the remote tag and release")
+
+def Rvr.pub.created(+made: P.Ran, +cwd: String, +tag: String, +o: J.Json) -> IO(String):
+  match made:
+    case P.Ran{0, _}:
+      IO.bind(P.Ran, String, GH.GhRun.push(cwd, ["ls-remote", "--refs", "--tags", "origin", "refs/tags/" ++ tag]), r => IO.pure(String, Rvr.pub.finished(r, made, o)))
+    case _: IO.pure(String, Rvr.pub.said(made))
+
+def Rvr.pub.remote(+r: P.Ran, +cwd: String, +tag: String, +o: J.Json) -> IO(String):
+  match r:
+    case P.Ran{0, +out}:
+      Bool.pick(IO(String), String.eq(HI.Hist.at(String.split(String.trim(out), '\t'), 0n), J.Json.get_str(o, "tagObject", "")),
+        IO.bind(P.Ran, String, GH.GhRun.gh(cwd, List.drop(&2, String, REL.Release.gh(tag, J.Json.get_str(o, "dir", "") ++ "/notes.md", Rvr.abs(Rvr.list(J.Json.elems(J.Json.get_obj(o, "files"))), J.Json.get_str(o, "dir", ""))), 1n)), done => Rvr.pub.created(done, cwd, tag, o)),
+        IO.pure(String, "Not published: remote tag does not match the validated release object"))
+    case P.Ran{_, +out}: IO.pure(String, "Not published: remote tag could not be verified: " ++ String.trim(String.take(out, 300n)))
+
 def Rvr.pub.k(pushed: P.Ran, +cwd: String, +tag: String, +o: J.Json) -> IO(String):
   match pushed:
     case P.Ran{0, _}:
-      IO.bind(P.Ran, String, GH.GhRun.gh(cwd, List.drop(&2, String, REL.Release.gh(tag, J.Json.get_str(o, "dir", "") ++ "/notes.md",
-        Rvr.abs(Rvr.list(J.Json.elems(J.Json.get_obj(o, "files"))), J.Json.get_str(o, "dir", ""))), 1n)), r => IO.pure(String, Rvr.pub.said(r)))
-    case P.Ran{_, +out}:
-      IO.pure(String, "Not published: the tag could not be pushed: " ++ String.trim(String.take(out, 300n)))
+      IO.bind(P.Ran, String, GH.GhRun.push(cwd, ["ls-remote", "--refs", "--tags", "origin", "refs/tags/" ++ tag]), r => Rvr.pub.remote(r, cwd, tag, o))
+    case P.Ran{_, +out}: IO.pure(String, "Not published: the tag could not be pushed: " ++ String.trim(String.take(out, 300n)))
 
 def Rvr.pub(publish: Bool, +cwd: String, +tag: String, +o: J.Json) -> IO(String):
   match publish:
     case True{}:
-      IO.bind(P.Ran, String, GH.GhRun.push(cwd, ["push", "origin", tag]), r => Rvr.pub.k(r, cwd, tag, o))
-    case False{}:
-      IO.pure(String, "")
+      IO.bind(P.Ran, String, GH.GhRun.push(cwd, ["push", "origin", J.Json.get_str(o, "tagObject", "") ++ ":refs/tags/" ++ tag]), r => Rvr.pub.k(r, cwd, tag, o))
+    case False{}: IO.pure(String, "")
+
+def Rvr.output.error(+o: J.Json) -> String:
+  +err = J.Json.get_str(o, "err", "")
+  Bool.pick(String, String.is_empty(err), Bool.pick(String, Bool.and(CHK.Report.string(J.Json.get(o, "dir")), Bool.and(CHK.Report.string(J.Json.get(o, "notes")), Bool.and(CHK.Report.array(J.Json.get(o, "files")), REL.Release.object_valid(J.Json.get_str(o, "tagObject", ""))))), "", "release child returned no complete output manifest"), err)
+
+def Rvr.published(+said: String, +thread: String, +o: J.Json) -> Res:
+  Rvr.report(thread, Rvr.done.md(o, said), Bool.pick(String, Bool.or(String.starts_with(said, "Not published"), String.starts_with(said, "Publication no longer")), said, ""))
 
 def Rvr.made(+o: J.Json, +thread: String, +cwd: String, +tag: String, publish: Bool) -> IO(Res):
-  Bool.pick(IO(Res), String.is_empty(J.Json.get_str(o, "err", "")),
-    IO.bind(String, Res, Rvr.pub(publish, cwd, tag, o), said => IO.pure(Res, Rvr.report(thread, Rvr.done.md(o, said), ""))),
-    IO.pure(Res, Rvr.report(thread, "", "The tag " ++ tag ++ " was made, but its outputs were not: " ++ J.Json.get_str(o, "err", ""))))
+  Bool.pick(IO(Res), String.is_empty(Rvr.output.error(o)),
+    IO.bind(String, Res, Rvr.pub(publish, cwd, tag, o), said => IO.pure(Res, Rvr.published(said, thread, o))),
+    IO.pure(Res, Rvr.report(thread, "", "The tag " ++ tag ++ " exists, but its outputs were not published: " ++ Rvr.output.error(o))))
 
-def Rvr.tagged(r: P.Ran, +thread: String, +cwd: String, +tag: String, +home: String, publish: Bool) -> IO(Res):
+def Rvr.tagged(r: P.Ran, +thread: String, +cwd: String, +tag: String, +home: String, +commit: String, publish: Bool) -> IO(Res):
   match r:
     case P.Ran{0, _}:
-      IO.bind(P.Ran, Res, Rvc.run(["--review", "release", cwd, tag, home]), c => Rvr.made(Rvr.json(c), thread, cwd, tag, publish))
+      IO.bind(P.Ran, Res, Rvc.run(["--review", "release", cwd, tag, home, commit]), c => Rvr.made(Rvr.json(c), thread, cwd, tag, publish))
     case P.Ran{_, +out}:
       IO.pure(Res, Rvr.report(thread, "", "No release: the tag could not be made: " ++ String.trim(String.take(out, 300n))))
 
-def Rvr.gated(+gate: String, +thread: String, +cwd: String, +tag: String, +home: String, publish: Bool, force: Bool) -> IO(Res):
+def Rvr.source.sh() -> String:
+  String.join([
+    "set -eu",
+    "cd \"$1\"",
+    "c=$(git rev-parse --verify HEAD^{commit})",
+    "top=$(git rev-parse --show-toplevel)",
+    "cd \"$top\"",
+    "git diff --quiet && git diff --cached --quiet || { echo 'commit or stash working changes before releasing; checks and exports use a single committed snapshot'; exit 1; }",
+    "dirty=$(git status --porcelain --untracked-files=all -- . \":(exclude).backplane/releases\" \":(glob,exclude)**/.backplane/releases/**\" \":(exclude).backplane/worktrees\" \":(glob,exclude)**/.backplane/worktrees/**\" \":(exclude).backplane/history.git\" \":(glob,exclude)**/.backplane/history.git/**\")",
+    "[ -z \"$dirty\" ] || { echo \"commit or stash working changes before releasing; checks and exports use a single committed snapshot\"; exit 1; }",
+    "printf '%s\\n' \"$c\""], "\n")
+
+def Rvr.tag.sh() -> String:
+  String.join([
+    "set -eu",
+    "cd \"$1\"",
+    "[ \"$(git rev-parse HEAD)\" = \"$3\" ] || { echo \"HEAD moved during validation; no tag made, retry to validate the new commit\"; exit 1; }",
+    "if git show-ref --verify --quiet \"refs/tags/$2\"; then",
+    "  [ \"$(git rev-parse \"$2^{commit}\")\" = \"$3\" ] || { echo \"tag already names a different commit\"; exit 1; }",
+    "else",
+    "  git tag -a \"$2\" \"$3\" -m \"Release $2\"",
+    "fi"], "\n")
+
+# An explicit empty gate is a successful check. Missing/wrong-typed gates,
+# child errors and infrastructure failures are never bypassed by force.
+def Rvr.check.error(+o: J.Json) -> String:
+  +err = J.Json.get_str(o, "err", "")
+  Bool.pick(String, String.is_empty(err), Bool.pick(String, CHK.Report.string(J.Json.get(o, "gate")), "", "checks returned no valid gate"), err)
+
+def Rvr.gated(+gate: String, +thread: String, +cwd: String, +tag: String, +home: String, +commit: String, publish: Bool, force: Bool) -> IO(Res):
   Bool.pick(IO(Res), Bool.and(Bool.not(String.is_empty(gate)), Bool.not(force)),
     IO.pure(Res, Rvr.report(thread, "", "No release: the checks fail (" ++ gate ++ "). Fix them, or release anyway.")),
-    IO.bind(P.Ran, Res, P.Proc.run("git", ["tag", "-a", tag, "-m", "Release " ++ tag], cwd), r => Rvr.tagged(r, thread, cwd, tag, home, publish)))
+    IO.bind(P.Ran, Res, P.Proc.run("sh", ["-c", Rvr.tag.sh(), "sh", cwd, tag, commit], "/"), r => Rvr.tagged(r, thread, cwd, tag, home, commit, publish)))
+
+def Rvr.checked(+err: String, +o: J.Json, +thread: String, +cwd: String, +tag: String, +flags: String, +home: String, +commit: String) -> IO(Res):
+  match err:
+    case SNil{}:
+      Rvr.gated(J.Json.get_str(o, "gate", ""), thread, cwd, tag, home, commit, String.contains(flags, "p"), String.contains(flags, "f"))
+    case +why:
+      IO.pure(Res, Rvr.report(thread, "", "No release: checks could not complete: " ++ why))
+
+def Rvr.checked.json(+o: J.Json, +thread: String, +cwd: String, +tag: String, +flags: String, +home: String, +commit: String) -> IO(Res):
+  Rvr.checked(Rvr.check.error(o), o, thread, cwd, tag, flags, home, commit)
+
+def Rvr.source(r: P.Ran, +thread: String, +cwd: String, +tag: String, +flags: String, +home: String) -> IO(Res):
+  match r:
+    case P.Ran{0, +out}:
+      IO.bind(P.Ran, Res, Rvc.run(["--review", "checks", cwd, String.trim(out), home, "release"]), c => Rvr.checked.json(Rvr.json(c), thread, cwd, tag, flags, home, String.trim(out)))
+    case P.Ran{_, +why}:
+      IO.pure(Res, Rvr.report(thread, "", "No release: " ++ String.trim(why)))
 
 def RvJob.release.k(ok: Bool, +thread: String, +cwd: String, +tag: String, +flags: String, +home: String) -> IO(Res):
   match ok:
     case True{}:
-      IO.bind(P.Ran, Res, Rvc.run(["--review", "checks", cwd, "", home, "release"]),
-        c => Rvr.gated(J.Json.get_str(Rvr.json(c), "gate", ""), thread, cwd, tag, home, String.contains(flags, "p"), String.contains(flags, "f")))
+      IO.bind(P.Ran, Res, P.Proc.run("sh", ["-c", Rvr.source.sh(), "sh", cwd], "/"), r => Rvr.source(r, thread, cwd, tag, flags, home))
     case False{}:
-      IO.pure(Res, Rvr.report(thread, "", "\"" ++ tag ++ "\" is not a tag name git takes."))
+      IO.pure(Res, Rvr.report(thread, "", "invalid release tag or project folder"))
 
 def RvJob.release(+thread: String, +cwd: String, +tag: String, +flags: String, +home: String) -> IO(Res):
   RvJob.release.k(Bool.and(REL.Release.valid(tag), Bool.not(String.is_empty(cwd))), thread, cwd, tag, flags, home)

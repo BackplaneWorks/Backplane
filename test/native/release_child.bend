@@ -1,6 +1,9 @@
 import Base
 import ../../src/core/json.bend as J
+import ../../src/core/checks.bend as CHK
+import ../../src/server/kicad.bend as K
 import ../../src/server/host.bend as H
+import ../../src/server/proc.bend as P
 import ../../src/server/review.bend as R
 
 # The real release child, without starting a hub or publishing anything.
@@ -10,8 +13,19 @@ def report(r: R.Res) -> IO(Unit):
     case R.Res{_, +o}:
       IO.print(J.Json.show(o))
 
+def bound_report(r: P.Ran) -> IO(Unit):
+  match r:
+    case P.Ran{0, _}: IO.print("bound")
+    case P.Ran{_, +why}: IO.die(Unit, 1, why)
+
 def args(xs: List<String>) -> IO(Unit):
   match xs:
+    case "--report-valid" <> kind <> path <> Nil{}:
+      IO.bind(String, Unit, K.Io.text(path), text => IO.print(Bool.show(CHK.Checks.report_valid(kind, text))))
+    case "--bound" <> root <> path <> Nil{}:
+      IO.bind(P.Ran, Unit, P.Proc.run("sh", ["-c", R.Rvc.bound.sh(), "sh", root, path], "/"), bound_report)
+    case "--release-job" <> cwd <> tag <> home <> flags <> Nil{}:
+      IO.bind(R.Res, Unit, R.RvJob.release("t", cwd, tag, flags, home), report)
     case "--failed-report" <> cwd <> Nil{}:
       IO.bind(R.Res, Unit, R.Rvr.made(J.Json.obj([J.KV{"err", J.Str{"synthetic export failure"}}]), "t", cwd, "fixture-tag", True{}), report)
     case _:

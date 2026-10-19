@@ -10685,3 +10685,16 @@ law release_command_success:
 
 law release_command_failure:
   {REL.Release.command_error("Gerbers (gerbers)", 23, " export failed\n") == "Gerbers (gerbers) failed (exit 23): export failed" : String}
+
+# A syntactically valid JSON object without the expected report schema is
+# not evidence that ERC or DRC ran successfully.
+law checks_report_missing_erc:
+  {CHK.Checks.report_valid("erc", "{}") == False{} : Bool}
+
+law checks_report_missing_drc:
+  {CHK.Checks.report_valid("drc", "{}") == False{} : Bool}
+
+law checks_execution_keeps_identity:
+  for +kind: String
+  for +why: String
+  {CHK.Checks.execution([CHK.Checks.finding("execution", "error", kind, why, "")]) == kind ++ ": " ++ why ++ "\n" : String}
