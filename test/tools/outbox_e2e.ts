@@ -42,7 +42,9 @@ if (clientOnly) args.shift();
 const binary = resolve(clientOnly ? "build/backplane" : (args.shift() ?? "build/backplane"));
 const client = resolve(args.shift() ?? "build/outbox-client");
 const bridge = args.shift();
-for (const file of readdirSync(client).filter(f => f.endsWith(".js")).sort()) (0, eval)(readFileSync(join(client, file), "utf8"));
+// Keep compiler-generated declarations local; only the fixture exports
+// belong on globalThis (a generated name can coincide with a JS global).
+for (const file of readdirSync(client).filter(f => f.endsWith(".js")).sort()) new Function(readFileSync(join(client, file), "utf8"))();
 const W = (globalThis as any).Wire;
 const F = (globalThis as any).OutboxFixture;
 if (!W || !F) throw new Error("build test/fixtures/outbox/index.html first");
