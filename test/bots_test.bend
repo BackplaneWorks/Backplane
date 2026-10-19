@@ -159,6 +159,21 @@ def st.body(st: B.Step) -> String:
     case B.Step{_, os}:
       fx.body(os)
 
+# Error replies are Send outputs; BotFx bodies contain task/provider payloads.
+def fx.reply(os: List<&2, B.Out>) -> String:
+  match os:
+    case Nil{}:
+      ""
+    case B.Send{_, text} <> _:
+      text
+    case _ <> t:
+      fx.reply(t)
+
+def st.reply(st: B.Step) -> String:
+  match st:
+    case B.Step{_, os}:
+      fx.reply(os)
+
 def json(+t: String) -> J.Json:
   Maybe.default(&2, J.Json, J.Json.parse(t), J.Null{})
 
@@ -398,7 +413,12 @@ def main() -> IO(Unit):
     C.Check.str("task delete request", st.tags(ask(tk, 1308n, "bots.task", "{\"bot\":\"" ++ id.of(tk, "Miso") ++ "\",\"op\":\"delete\",\"slug\":\"order-status\"}")), "TaskDeleted | send:reply fx:task-gone ")
     +browserThread : M.State = M.State.replay([M.ThreadCreated{"ordinary", "", "Thread", M.Local{}, "", "", "claude", "", 100n}], M.State.empty())
     C.Check.str("ordinary thread browser request", st.tags(ask(browserThread, 1309n, "bots.browser", "{\"bot\":\"ordinary\",\"op\":\"takeover\"}")), "| out ")
-    C.Check.str("missing browser owner rejected", yes(String.contains(st.body(ask(browserThread, 1309n, "bots.browser", "{\"bot\":\"missing\",\"op\":\"takeover\"}")), "no such bot")), "yes")
+    +missingBrowser : B.Step = ask(browserThread, 1309n, "bots.browser", "{\"bot\":\"missing\",\"op\":\"takeover\"}")
+    C.Check.str("missing browser owner has no events or action", st.tags(missingBrowser), "| send:reply ")
+    +missingReply : J.Json = json(st.reply(ask(browserThread, 1309n, "bots.browser", "{\"bot\":\"missing\",\"op\":\"takeover\"}")))
+    C.Check.str("missing browser owner rejected", J.Json.get_str(missingReply, "error", ""), "no such bot")
+    C.Check.str("missing browser owner reply is failure", Bool.show(J.Json.get_bool(json(st.reply(ask(browserThread, 1309n, "bots.browser", "{\"bot\":\"missing\",\"op\":\"takeover\"}"))), "ok", True{})), "False")
+    C.Check.str("empty browser owner has no action", st.tags(ask(browserThread, 1309n, "bots.browser", "{\"bot\":\"\",\"op\":\"takeover\"}")), "| send:reply ")
     C.Check.str("browser request", st.tags(ask(s, 1309n, "bots.browser", "{\"bot\":\"" ++ id.of(s, "Miso") ++ "\",\"op\":\"click\"}")), "| out ")
     C.Check.str("teach request", st.tags(ask(s, 1309n, "bots.teach", "{\"bot\":\"" ++ id.of(s, "Miso") ++ "\",\"op\":\"start\"}")), "| out ")
     C.Check.str("teach unknown bot", st.tags(ask(s, 1309n, "bots.teach", "{\"bot\":\"nobody\",\"op\":\"start\"}")), "| send:reply ")
