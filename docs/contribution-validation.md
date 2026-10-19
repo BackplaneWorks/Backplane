@@ -15,7 +15,7 @@ is diagnostic data, not a signature or a required upstream GitHub check.
 | `build` | Current-source native window/hub, web and helpers via `scripts/build.sh` |
 | `emit` | Current-source server C, web and wire inputs for compilation on a Mac |
 | `native` | Synthetic release transactions, platform installer, integrated worktree preservation, event-log failure, reconnect and retirement effects |
-| `renderer` | Linux native font/glyph and i18n fixtures, display settling/comparison controls and actual Xvfb pixel readback |
+| `renderer` | Explicit native renderer profile plus i18n fixtures, display settling/comparison controls and actual Xvfb pixel readback |
 | `browser` | Synthetic pages through the real helper and hub; ownership and credential boundaries |
 | `phone` | Production bridge, recent-history/replay regressions at the phone's no-JIT stack, live bridge tests and sanitized current-type Worker state |
 | `real-cad` | Explicitly selected KiCad integration using the pinned, verified fixture |
@@ -30,16 +30,27 @@ its resolved path and hash appear in both `consumed` and `artifacts`. An old,
 missing, failed or mismatched receipt fails the lane before tests start.
 Changing the binary during validation also fails the lane.
 
-The required Linux `renderer` lane depends on the final native-glyph harness
-at `62fa318989b092aa8712825a4c75f1e4f0c6bcbf` or its integrated successor;
-this tooling branch alone does not contain that feature. Missing source or tools
-fail before execution. It requires all seven settling controls, 29 independent
+The required Linux `renderer` lane records its selected `renderer_profile`
+in the schema-2 receipt and provenance. Selection is explicit via
+`--renderer-profile`; the default remains `glyph-cache`. It never chooses a
+profile from the available files or falls back when a required fixture is absent.
+This tooling branch alone does not contain either native feature. Missing source
+or tools fail before execution. Both profiles require all seven settling controls, 29 independent
 display comparisons, X11-linked `xpoke` and presentation observer compilation,
-and exact red/green RGB readback from an owned Xvfb fixture. It then uses
-`scripts/build-app.sh` to compile the actual glyph and i18n fixtures, requires
-all seven glyph assertions (including exact original RGlyph bytes and fresh
-cold-to-warm pixels), all 705 uniquely indexed samples through the existing
-strict parser, and all nine native i18n assertions. Missing assertions, samples,
+exact red/green RGB readback from an owned Xvfb fixture, and all nine native
+i18n assertions. `scripts/build-app.sh` compiles actual native fixtures.
+
+| Profile | Additional required native coverage | Source dependency |
+|---|---|---|
+| `glyph-cache` (default) | Seven glyph assertions, including original RGlyph bytes and fresh cold-to-warm pixels; 705 uniquely indexed samples through its strict parser | Original native-glyph candidate `62fa318989b092aa8712825a4c75f1e4f0c6bcbf` or an integrated successor with that glyph fixture |
+| `keep-plan` | All 49 named region/pixel/whole-plan assertions in `keep_plan_bench.bend` and its `keep_step_test.bend` import; exactly 100 uniquely indexed plan samples with nonnegative timings/counts and equal reference/current tile counts | The main-only Keep.step native candidate, retaining independent display observer tests |
+
+The workflow explicitly invokes
+`scripts/validate-contribution.sh renderer --renderer-profile keep-plan`.
+That profile does not require or claim the experimental glyph cache or its
+705 samples. Its parser retains original sample indices, counts and raw timing
+summaries; those observations impose no whole-app performance threshold.
+Missing named assertions, malformed/duplicate/incomplete samples, unequal plan counts,
 compiled outputs or a skipped check fail even when a command exits zero.
 
 Install clang, X11 development libraries, Xvfb, `fonts-noto-cjk`,
@@ -50,7 +61,7 @@ select local dependencies. Fixture processes use a fresh private HOME,
 XDG_CACHE_HOME and BACKPLANE_HOME; compiler processes retain their toolchain HOME.
 Prebuilt and emit-only shortcuts are disabled for these fixture builds. Each
 compiled fixture is hashed before use and checked again at the end; emitted C,
-binaries, raw logs and the 705-sample summary are retained under the lane's
+binaries, raw logs and the selected profile's summary are retained under the lane's
 evidence directory. Source changes invalidate the receipt as in every lane.
 
 The Linux workflow requires this focused lane. It does not repeat

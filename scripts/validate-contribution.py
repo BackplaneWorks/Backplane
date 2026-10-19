@@ -22,7 +22,12 @@ parser.add_argument('--out', type=Path, default=Path('build/validation'))
 parser.add_argument('--binary', default='dist/backplane')
 parser.add_argument('--build-receipt', type=Path, help='passing build/result.json for the consumed hub binary')
 parser.add_argument('--prebuilt-receipt', type=Path, help='passing emit/result.json for BACKPLANE_PREBUILT=1')
+parser.add_argument('--renderer-profile', choices=['glyph-cache', 'keep-plan'],
+                    help='explicit renderer coverage contract (default: glyph-cache); never inferred from files')
 args = parser.parse_args()
+if args.renderer_profile and args.lane != 'renderer':
+    parser.error('--renderer-profile is only valid for the renderer lane')
+args.renderer_profile = args.renderer_profile or 'glyph-cache'
 output_root = args.out.resolve()
 if output_root == ROOT or output_root in ROOT.parents:
     parser.error('--out must not contain the source checkout')
@@ -117,6 +122,8 @@ report = {'schema':2,'lane':args.lane,'started':datetime.now(timezone.utc).isofo
           'flags':{k:os.environ.get(k) for k in ['CC','BACKPLANE_CFLAGS','BACKPLANE_LOW_MEM','BACKPLANE_JOBS','BACKPLANE_CPUS','BACKPLANE_PREBUILT','BACKPLANE_GOOGLE_BAKE','BACKPLANE_KICAD_CLI','BUN_JSC_forceRAMSize','BUN_JSC_useJIT','BACKPLANE_CHROME','BACKPLANE_TEST_BROWSERS','BACKPLANE_X11','BACKPLANE_TEST_XVFB']},
           'steps':[], 'artifacts':[], 'consumed':{}, 'provenance':{}, 'result':'running'}
 report_path = args.out/'result.json'
+if args.lane == 'renderer':
+    report['renderer_profile'] = args.renderer_profile
 
 def bend_version(toolchain):
     probes = [item for item in toolchain if isinstance(item, dict) and item.get('command') == ['bend', 'version']]
@@ -222,12 +229,16 @@ def prepare_renderer():
         'test/tools/native_display.ts', 'test/tools/native_display_test.ts',
         'test/tools/native_display_compare.ts', 'test/tools/native_display_compare_test.ts',
         'test/tools/native_display_readback_test.ts', 'test/tools/xpoke.c',
-        'test/tools/present_observer_fixture.c', 'test/tools/glyph_bench_report.py',
-        'test/native/glyph_table_bench.bend', 'test/native/i18n_smoke.bend',
-        'scripts/build-app.sh',
+        'test/tools/present_observer_fixture.c', 'test/native/i18n_smoke.bend', 'scripts/build-app.sh',
     ]
-    dependency = 'native-glyph 62fa318989b092aa8712825a4c75f1e4f0c6bcbf (or its integrated successor)'
-    report['provenance']['renderer'] = {'required_dependency': dependency, 'inputs': []}
+    profile = args.renderer_profile
+    if profile == 'glyph-cache':
+        required += ['test/tools/glyph_bench_report.py', 'test/native/glyph_table_bench.bend']
+        dependency = 'native-glyph 62fa318989b092aa8712825a4c75f1e4f0c6bcbf (or its integrated successor)'
+    else:
+        required += ['test/tools/keep_plan_report.py', 'test/native/keep_plan_bench.bend', 'test/keep_step_test.bend']
+        dependency = 'main-only Keep.step native candidate with independent display observer harness'
+    report['provenance']['renderer'] = {'profile': profile, 'required_dependency': dependency, 'inputs': []}
     missing = [name for name in required if not (ROOT/name).is_file()]
     if missing:
         raise ValueError(f'renderer requires {dependency}; missing: {", ".join(missing)}')
@@ -258,7 +269,8 @@ def prepare_renderer():
     build_env = {'CC': cc, 'BACKPLANE_PREBUILT': '0', 'BACKPLANE_EMIT_ONLY': '0', 'BACKPLANE_GOOGLE_BAKE': '0'}
     x11 = os.environ.get('BACKPLANE_X11')
     includes = ['-I'+x11+'/include', '-L'+x11+'/lib/x86_64-linux-gnu'] if x11 else []
-    for name in ['xpoke', 'present_observer_fixture', 'glyph_table_bench', 'i18n_native_smoke']:
+    fixture = 'glyph_table_bench' if profile == 'glyph-cache' else 'keep_plan_bench'
+    for name in ['xpoke', 'present_observer_fixture', fixture, 'i18n_native_smoke']:
         renderer_outputs[name] = str(args.out/name)
     def step(command, **details):
         renderer_steps.append(dict(command=command, **details))
@@ -273,17 +285,28 @@ def prepare_renderer():
           renderer_outputs['present_observer_fixture'], report['consumed']['renderer_xvfb']['resolved_path']],
          env=isolated, consumes=['xpoke', 'present_observer_fixture'], required_lines=[
              'xpoke pixels independently read exact red/green RGB bytes from X-server fixture'])
-    step(['scripts/build-app.sh', 'test/native/glyph_table_bench.bend', renderer_outputs['glyph_table_bench']],
-         env=build_env, produces=['glyph_table_bench'], emitted_c='build/cc/glyph_table_bench/all.c',
-         remove=['build/cc/glyph_table_bench/all.c'])
-    step([renderer_outputs['glyph_table_bench']], env=isolated, consumes=['glyph_table_bench'], required_lines=[
-        'ok '+name for name in ['native font loaded', 'native cold stream has wants',
-        'native nonASCII fill drains wants', 'native layout emits keys directly',
-        'native table resolves original masks', 'native keyed pixels equal original RGlyph bytes',
-        'native cold to warm frame is fresh']])
-    glyph_log = args.out/f'{len(renderer_steps)-1:02d}.log'
-    step(['python3', 'test/tools/glyph_bench_report.py', str(glyph_log), str(args.out/'glyph-summary.json')],
-         remove=[str(args.out/'glyph-summary.json')], required_lines=['705 complete native glyph samples summarized'])
+    if profile == 'glyph-cache':
+        assertions = ['native font loaded', 'native cold stream has wants',
+            'native nonASCII fill drains wants', 'native layout emits keys directly',
+            'native table resolves original masks', 'native keyed pixels equal original RGlyph bytes',
+            'native cold to warm frame is fresh']
+        summary_name, summary_script = 'glyph-summary.json', 'glyph_bench_report.py'
+        summary_line = '705 complete native glyph samples summarized'
+    else:
+        assertions = [f'{x},{y},{n} {case}{flag}' for x,y,n in [(0,0,128),(0,0,64),(64,0,64),(16,16,16),(256,256,32)]
+                      for case in ['equal','removed','inserted','reordered'] for flag in ['', ' false flag']]
+        assertions += ['unchanged exact pixels', 'changed run exact pixels', 'reordered ops exact pixels',
+                       'changed base exact pixels', 'scroll hint still exact pixels', 'changed polygon exact pixels',
+                       'changed polygon negative control', 'changed run negative control', 'whole plan exact image']
+        summary_name, summary_script = 'keep-plan-summary.json', 'keep_plan_report.py'
+        summary_line = '100 complete native keep-plan samples summarized'
+    emitted_c = f'build/cc/{fixture}/all.c'
+    step(['scripts/build-app.sh', f'test/native/{fixture}.bend', renderer_outputs[fixture]],
+         env=build_env, produces=[fixture], emitted_c=emitted_c, remove=[emitted_c])
+    step([renderer_outputs[fixture]], env=isolated, consumes=[fixture], required_lines=['ok '+name for name in assertions])
+    fixture_log = args.out/f'{len(renderer_steps)-1:02d}.log'
+    step(['python3', 'test/tools/'+summary_script, str(fixture_log), str(args.out/summary_name)],
+         remove=[str(args.out/summary_name)], required_lines=[summary_line])
     step(['scripts/build-app.sh', 'test/native/i18n_smoke.bend', renderer_outputs['i18n_native_smoke']],
          env=build_env, produces=['i18n_native_smoke'], emitted_c='build/cc/i18n_native_smoke/all.c',
          remove=['build/cc/i18n_native_smoke/all.c'])
@@ -291,7 +314,7 @@ def prepare_renderer():
         'ok native '+name for name in ['Japanese literal', 'Japanese save', 'English plural',
         'Japanese count', 'exact plural', 'select', 'interpolation', 'literal fallback', 'plural fallback']])
     lanes['renderer'] = [item['command'] for item in renderer_steps]
-    report['provenance']['renderer']['scope'] = 'Native rendering correctness and raw microbenchmarks; whole-app display budgets are separate.'
+    report['provenance']['renderer']['scope'] = f'Native {profile} correctness and raw microbenchmarks; whole-app display budgets are separate.'
 
 def prepare_inputs():
     report['provenance']['bend_version'] = bend_version(report['toolchain'])
@@ -408,13 +431,16 @@ try:
             raise ValueError('sanitized Worker state does not match the exact bridge/state identities')
         report['artifacts'] += [state, artifact(metadata_path, 'sanitized_phone_state_metadata')]
     if args.lane == 'renderer' and not failed:
-        summary_path = args.out/'glyph-summary.json'
+        summary_path = args.out/('glyph-summary.json' if args.renderer_profile == 'glyph-cache' else 'keep-plan-summary.json')
         summary = json.loads(summary_path.read_text())
-        expected = dict.fromkeys(['masks', 'keys', 'prekeyed', 'table-guard', 'convert-and-eq', 'key-eq', 'extension-plan'], 100)
-        expected.update(dict.fromkeys(['font-open', 'ascii-fill-table', 'nonASCII-fill-table', 'fill-redraw-and-byte-check', 'cold-frame'], 1))
-        if not isinstance(summary, dict) or not isinstance(summary.get('samples'), dict) or {name:item.get('n') for name,item in summary['samples'].items() if isinstance(item,dict)} != expected:
-            raise ValueError('renderer requires the complete 705-sample native glyph summary')
-        report['artifacts'].append(artifact(summary_path, 'renderer_glyph_summary'))
+        if args.renderer_profile == 'glyph-cache':
+            expected = dict.fromkeys(['masks', 'keys', 'prekeyed', 'table-guard', 'convert-and-eq', 'key-eq', 'extension-plan'], 100)
+            expected.update(dict.fromkeys(['font-open', 'ascii-fill-table', 'nonASCII-fill-table', 'fill-redraw-and-byte-check', 'cold-frame'], 1))
+            if not isinstance(summary, dict) or not isinstance(summary.get('samples'), dict) or {name:item.get('n') for name,item in summary['samples'].items() if isinstance(item,dict)} != expected:
+                raise ValueError('renderer requires the complete 705-sample native glyph summary')
+        elif not isinstance(summary, dict) or summary.get('n') != 100 or summary.get('indices') != list(range(100)) or summary.get('equal_plan_counts') is not True:
+            raise ValueError('renderer requires 100 complete native keep-plan samples with equal reference/current plan counts')
+        report['artifacts'].append(artifact(summary_path, 'renderer_glyph_summary' if args.renderer_profile == 'glyph-cache' else 'renderer_keep_plan_summary'))
 except (OSError, ValueError) as error:
     failed=True;report['provenance']['error']=str(error)
 report['result']='fail' if failed else 'pass'

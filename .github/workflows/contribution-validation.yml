@@ -54,6 +54,7 @@ jobs:
         run: |
           python3 test/tools/validation_evidence_test.py
           python3 test/tools/validation_renderer_test.py
+          python3 test/tools/keep_plan_report_test.py
           python3 test/tools/build_lock_test.py
           python3 test/tools/build_clock_test.py
           python3 test/tools/test_runner_signal_test.py
@@ -74,10 +75,10 @@ jobs:
             sudo swapon "$dir/swap-build"
           fi
           free -h
-      # Requires the final native-glyph harness (62fa318 or its integrated
-      # successor). Missing harness files or assertions fail this required lane.
+      # The main-only Keep.step candidate retains independent display observers;
+      # this explicit profile does not claim glyph-cache/705-sample coverage.
       - name: Required Linux native renderer and X11 readback
-        run: scripts/validate-contribution.sh renderer
+        run: scripts/validate-contribution.sh renderer --renderer-profile keep-plan
       - name: Build exact candidate
         run: scripts/validate-contribution.sh build
       - run: scripts/build-wire.sh
