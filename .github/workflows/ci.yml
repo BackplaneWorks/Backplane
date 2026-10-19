@@ -112,6 +112,15 @@ jobs:
         env:
           BACKPLANE_SKIP_CHECK: "1" # the laws job checks every file
       - run: scripts/smoke.sh
+      - name: Verify native Files navigation state
+        run: |
+          set -o pipefail
+          . scripts/bendok.sh
+          bend_check test/files_state_test.bend
+          scripts/build-app.sh test/files_state_test.bend build/files-state-test
+          build/files-state-test | tee build/files-state-test.log
+          ! grep -q '^FAIL ' build/files-state-test.log
+          test "$(grep -c '^ok ' build/files-state-test.log)" = 38
       - uses: actions/upload-artifact@v4
         with:
           name: backplane-${{ matrix.target }}

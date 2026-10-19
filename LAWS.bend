@@ -4695,6 +4695,26 @@ law fm_parent_down:
 law fm_join_root:
   {FMG.Fm.join("", "hw") == "hw" : String}
 
+# Listing completion is independent of its contents. Only the requested
+# generation and folder count, and a retained root is re-listed too.
+law fm_empty_root_ready:
+  {U.Fm.ready.for("0", "0", "", "") == True{} : Bool}
+
+law fm_unanswered_root_waits:
+  {U.Fm.ready.for("", "0", "", "") == False{} : Bool}
+
+law fm_previous_request_waits:
+  {U.Fm.ready.for("0", "1", "", "") == False{} : Bool}
+
+law fm_other_folder_waits:
+  {U.Fm.ready.for("1", "1", "old", "new") == False{} : Bool}
+
+law fm_previous_reply_rejected:
+  {U.Fm.reply.same("0", "1") == False{} : Bool}
+
+law fm_root_reconnect_requested:
+  {U.Fm.again.want("fm.want:t1") == True{} : Bool}
+
 # Terminals in the chat (core/emb.bend)
 # -------------------------------------
 
