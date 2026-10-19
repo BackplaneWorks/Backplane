@@ -29,3 +29,24 @@ def ModelCache.publish(r: P.Ran, +from: String, +out: String) -> IO(P.Ran):
       IO.bind(Result<&1, &1, U32 & String, U32 & U32 & U32>, P.Ran, H.FS.stat(from), st => ModelCache.ready(ModelCache.nonempty(st), P.Ran{0, log}, from, out))
     case P.Ran{code, log}:
       IO.bind(Result<&1, &1, U32 & String, Unit>, P.Ran, H.FS.remove(from), _ => IO.pure(P.Ran, P.Ran{code, log}))
+
+# Each attempt owns its staging directory. Two callers converting the same
+# model cannot rename or remove each other's incomplete bytes.
+def ModelCache.staged(+dir: String, +out: String, run: String -> IO(P.Ran)) -> IO(P.Ran):
+  do IO<P.Ran>:
+    +from : String = dir ++ "/model.glb"
+    converted : P.Ran <- run(from)
+    published : P.Ran <- ModelCache.publish(converted, from, out)
+    file : Result<&1, &1, U32 & String, Unit> <- H.FS.remove(from)
+    folder : Result<&1, &1, U32 & String, Unit> <- H.FS.remove(dir)
+    return published
+
+def ModelCache.created(r: P.Ran, +out: String, run: String -> IO(P.Ran)) -> IO(P.Ran):
+  match r:
+    case P.Ran{0, dir}:
+      ModelCache.staged(String.trim(dir), out, run)
+    case P.Ran{_, log}:
+      IO.pure(P.Ran, P.Ran{1, "Could not stage 3D model: " ++ log})
+
+def ModelCache.convert(+out: String, run: String -> IO(P.Ran)) -> IO(P.Ran):
+  IO.bind(P.Ran, P.Ran, P.Proc.run("mktemp", ["-d", out ++ ".part.XXXXXX"], "/"), r => ModelCache.created(r, out, run))

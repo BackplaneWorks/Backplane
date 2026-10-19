@@ -1,4 +1,5 @@
 import Base
+import ./src/server/modelcache.bend as MCACHE
 import ./src/core/auth.bend as AUTH
 import ./src/core/http.bend as HTTPAUTH
 import ./src/core/pcb2d.bend as PCB2 # PCB viewer text
@@ -10676,3 +10677,13 @@ law pcb2_hidden_text_draws_nothing:
   for +sig: U32
   for +ctx: String
   {PCB2.Text.visible.k(True{}, at, angle, x, text, up, key, sig, ctx) == Nil{} : List<&2, B.Item>}
+
+# Converted models must be nonempty regular files before publication.
+law model_cache_empty_rejected:
+  {MCACHE.ModelCache.nonempty(Done{(0, (0, 0))}) == False{} : Bool}
+
+law model_cache_directory_rejected(size: U32, modified: U32):
+  {MCACHE.ModelCache.nonempty(Done{(1, (size, modified))}) == False{} : Bool}
+
+law model_cache_file_accepted:
+  {MCACHE.ModelCache.nonempty(Done{(0, (20, 0))}) == True{} : Bool}

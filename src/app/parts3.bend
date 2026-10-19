@@ -186,8 +186,7 @@ def Parts.conv(have: Bool, +src: String, +out: String, +step: String) -> IO(Stri
       IO.pure(String, out)
     case False{}:
       do IO<String>:
-        r : P.Ran <- P.Proc.run(step, [src, out ++ ".part"], "/")
-        published : P.Ran <- CP.ModelCache.publish(r, out ++ ".part", out)
+        published : P.Ran <- CP.ModelCache.convert(out, from => P.Proc.run(step, [src, from], "/"))
         return Parts.conv.done(published, out)
 
 # where the model's GLB is kept (a .glb is its own)

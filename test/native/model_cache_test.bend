@@ -66,6 +66,19 @@ def Cases.rename(+root: String) -> IO(Bool):
     h : Bool <- shell(root, "empty converter output cannot poison the cache", "test ! -e empty.glb\ntest ! -e empty.part")
     return all([a, b, c, d, e, f, g, h])
 
+def Cases.staging(+root: String) -> IO(Bool):
+  do IO<Bool>:
+    first : P.Ran <- M.ModelCache.convert(root ++ "/stage.glb", from => P.Proc.run("sh", ["-c", "printf complete > \"$1\"; printf converted", "sh", from], root))
+    a : Bool <- check("private staging converts successfully", result(first), "0:converted")
+    b : Bool <- shell(root, "private staging publishes bytes and removes its directory", "test \"$(cat stage.glb)\" = complete\nfor p in stage.glb.part.*; do test ! -e \"$p\"; done")
+    failed : P.Ran <- M.ModelCache.convert(root ++ "/stage.glb", from => P.Proc.run("sh", ["-c", "printf partial > \"$1\"; exit 23", "sh", from], root))
+    c : Bool <- check("failed private staging returns converter status", result(failed), "23:")
+    d : Bool <- shell(root, "failed private staging keeps complete cache and removes its directory", "test \"$(cat stage.glb)\" = complete\nfor p in stage.glb.part.*; do test ! -e \"$p\"; done")
+    blocked : P.Ran <- M.ModelCache.convert(root ++ "/no-folder/stage.glb", from => P.Proc.run("touch", [root ++ "/called", from], root))
+    e : Bool <- check("staging creation failure reports failure", String.take(result(blocked), 1n), "1")
+    f : Bool <- shell(root, "staging creation failure does not run converter", "test ! -e called")
+    return all([a, b, c, d, e, f])
+
 def run(+root: String) -> IO(Unit):
   do IO<Unit>:
     H.Env.put("HOME", root)
@@ -75,8 +88,9 @@ def run(+root: String) -> IO(Unit):
     a : Bool <- Cases.failed(root)
     b : Bool <- Cases.success(root)
     c : Bool <- Cases.rename(root)
+    d : Bool <- Cases.staging(root)
     removed : P.Ran <- P.Proc.run("rm", ["-rf", root], "/tmp")
-    finish(all([linked, a, b, c]))
+    finish(all([linked, a, b, c, d]))
 
 def created(r: P.Ran) -> IO(Unit):
   match r:

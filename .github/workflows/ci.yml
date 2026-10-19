@@ -104,7 +104,7 @@ jobs:
           scripts/build-app.sh test/native/model_cache_test.bend build/model_cache_test
           build/model_cache_test | tee build/model-cache.log
           if grep -q '^FAIL ' build/model-cache.log; then exit 1; fi
-          test "$(grep -c '^ok ' build/model-cache.log)" -eq 21
+          test "$(grep -c '^ok ' build/model-cache.log)" -eq 27
       - name: Object cache
         # the compiled C units, by hash of their text (scripts/cc-unit.sh): an
         # unchanged unit is not compiled again. Never holds the Google client

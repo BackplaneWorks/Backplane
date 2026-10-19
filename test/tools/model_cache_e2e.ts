@@ -47,7 +47,7 @@ function model(): Buffer {
   return glb;
 }
 
-type Mode = "fail" | "success" | "missing" | "empty";
+type Mode = "fail" | "success" | "missing" | "empty" | "race-a" | "race-b";
 function fixture(name: string) {
   const folder = join(root, name); mkdirSync(folder, { recursive: true });
   const path = join(folder, "part.step"), home = join(folder, "home"), calls = join(folder, "calls");
@@ -65,7 +65,7 @@ async function run(name: string, f: Fixture, mode: Mode, render = false) {
     ...process.env, HOME: f.home, BACKPLANE_HOME: join(f.home, "backplane"), DISPLAY: "", WAYLAND_DISPLAY: "",
     XDG_CACHE_HOME: join(f.home, "cache"), XDG_CONFIG_HOME: join(f.home, "config"), XDG_DATA_HOME: join(f.home, "data"),
     BACKPLANE_NO_UPDATE: "1", BACKPLANE_GOOGLE_BAKE: "0", MODEL_CACHE_MODE: mode, MODEL_CACHE_CALLS: f.calls,
-    MODEL_CACHE_BYTES: join(root, "complete.glb"),
+    MODEL_CACHE_BYTES: join(root, "complete.glb"), MODEL_CACHE_SYNC: f.folder,
   };
   const args = render ? ["--render", f.path, "--size", "64x48"] : ["--plot", "2", f.path];
   const proc = Bun.spawn([join(prefix, name), ...args], { cwd: f.folder, env, stdout: "pipe", stderr: "pipe" });
@@ -99,19 +99,22 @@ async function checks(name: string) {
   check(`${name} recovered cache has complete GLB bytes`, cache.length === 1 && readFileSync(join(plot.cache, cache[0])).equals(model()), cache);
   const again = await run(name, plot, "fail");
   check(`${name} complete plot cache avoids converter`, again.code === 0 && again.stdout === recovered.stdout && count(plot) === 3, { again, count: count(plot) });
-  await run(name, plot, "fail", true);
-  check(`${name} native renderer shares the completed plot cache`, count(plot) === 3 && shots(plot).every(png), { count: count(plot), shots: shots(plot) });
+  // The app entry owns --render. A hub-only entry is exercised through --plot.
+  if (name === "backplane") {
+    await run(name, plot, "fail", true);
+    check(`${name} native renderer shares the completed plot cache`, count(plot) === 3 && shots(plot).every(png), { count: count(plot), shots: shots(plot) });
 
-  const native = fixture(`${name}-native-failure`);
-  for (let n = 1; n <= 2; n++) {
-    const r = await run(name, native, "fail", true);
-    check(`${name} native failure attempt ${n} produces no render`, shots(native).every((p) => !existsSync(p)) && r.stderr.includes("could not mesh"), r);
-    check(`${name} native failure attempt ${n} publishes no cache`, cached(native).length === 0 && count(native) === n, { files: cached(native), count: count(native) });
+    const native = fixture(`${name}-native-failure`);
+    for (let n = 1; n <= 2; n++) {
+      const r = await run(name, native, "fail", true);
+      check(`${name} native failure attempt ${n} produces no render`, shots(native).every((p) => !existsSync(p)) && r.stderr.includes("could not mesh"), r);
+      check(`${name} native failure attempt ${n} publishes no cache`, cached(native).length === 0 && count(native) === n, { files: cached(native), count: count(native) });
+    }
+    await run(name, native, "success", true);
+    check(`${name} native retry recovers with complete model`, count(native) === 3 && shots(native).every(png), { count: count(native), files: cached(native) });
+    const fromNative = await run(name, native, "fail");
+    check(`${name} plot shares native renderer cache`, fromNative.code === 0 && count(native) === 3, fromNative);
   }
-  await run(name, native, "success", true);
-  check(`${name} native retry recovers with complete model`, count(native) === 3 && shots(native).every(png), { count: count(native), files: cached(native) });
-  const fromNative = await run(name, native, "fail");
-  check(`${name} plot shares native renderer cache`, fromNative.code === 0 && count(native) === 3, fromNative);
 
   const missing = fixture(`${name}-missing-output`);
   const absent = await run(name, missing, "missing");
@@ -130,22 +133,59 @@ async function checks(name: string) {
   check(`${name} legacy entry does not share the new cache key`, cached(legacy).length === 2 && readFileSync(old, "utf8") === "truncated-glb-fixture", cached(legacy));
 }
 
+async function concurrent(name: string, nativeFirst: boolean) {
+  const label = nativeFirst ? "native and plot" : "two plot requests";
+  const f = fixture(`${name}-concurrent-${nativeFirst ? "native" : "plot"}`);
+  const a = run(name, f, "race-a", nativeFirst);
+  const b = run(name, f, "race-b");
+  try {
+    const first = await a;
+    check(`${name} ${label} successful attempt reads its own model`, first.code === 0 && (nativeFirst ? shots(f).every(png) : !first.stdout.includes("2147483647")), first);
+    const files = cached(f);
+    check(`${name} ${label} publishes only complete bytes while second attempt runs`, files.length === 1 && readFileSync(join(f.cache, files[0])).equals(model()), files);
+    const staging = readFileSync(f.calls, "utf8").trim().split("\n");
+    check(`${name} ${label} uses different staging paths`, staging.length === 2 && staging[0] !== staging[1], staging);
+  } finally { writeFileSync(join(f.folder, "release-b"), ""); }
+  const second = await b;
+  check(`${name} ${label} failed attempt reports failure`, second.code === 3, second);
+  const final = cached(f);
+  check(`${name} ${label} failed attempt preserves complete cached model`, final.length === 1 && readFileSync(join(f.cache, final[0])).equals(model()), final);
+  check(`${name} ${label} removes both staging directories`, !readdirSync(f.cache).some((p) => p.includes(".part.")), readdirSync(f.cache));
+  const again = await run(name, f, "fail");
+  check(`${name} ${label} cache remains reusable`, again.code === 0 && !again.stdout.includes("2147483647") && count(f) === 2, again);
+}
+
 try {
   mkdirSync(prefix); writeFileSync(join(root, "complete.glb"), model());
   for (const name of ["backplane", "backplane-serve"]) { copyFileSync(resolve(binary), join(prefix, name)); chmodSync(join(prefix, name), 0o755); }
   const converter = join(prefix, "backplane-step2glb");
   writeFileSync(converter, `#!/bin/sh
 set -eu
-printf 'called\n' >> "$MODEL_CACHE_CALLS"
+printf '%s\\n' "$2" >> "$MODEL_CACHE_CALLS"
 case "$MODEL_CACHE_MODE" in
   fail) printf truncated-glb-fixture > "$2"; printf 'synthetic converter failure\n' >&2; exit 23 ;;
   success) cp "$MODEL_CACHE_BYTES" "$2" ;;
   missing) exit 0 ;;
   empty) : > "$2" ;;
+  race-a)
+    cp "$MODEL_CACHE_BYTES" "$2"
+    : > "$MODEL_CACHE_SYNC/a-ready"
+    n=0
+    while [ ! -f "$MODEL_CACHE_SYNC/b-ready" ]; do n=$((n+1)); [ "$n" -le 400 ] || exit 24; sleep .01; done
+    ;;
+  race-b)
+    n=0
+    while [ ! -f "$MODEL_CACHE_SYNC/a-ready" ]; do n=$((n+1)); [ "$n" -le 400 ] || exit 24; sleep .01; done
+    printf truncated-by-failed-attempt > "$2"
+    : > "$MODEL_CACHE_SYNC/b-ready"
+    n=0
+    while [ ! -f "$MODEL_CACHE_SYNC/release-b" ]; do n=$((n+1)); [ "$n" -le 400 ] || exit 24; sleep .01; done
+    exit 23
+    ;;
 esac
 `); chmodSync(converter, 0o755);
   for (const name of ["backplane", "backplane-serve"]) {
-    try { await checks(name); } catch (error) { check(`${name} model cache scenarios complete`, false, String(error)); }
+    try { await checks(name); await concurrent(name, false); if (name === "backplane") await concurrent(name, true); } catch (error) { check(`${name} model cache scenarios complete`, false, String(error)); }
   }
 } finally {
   for (const proc of children) check("captured model child stops", await stop(proc));
