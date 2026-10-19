@@ -4,6 +4,7 @@ cd "$(dirname "$0")/.."
 export PATH=/usr/bin:/bin:$PATH LC_ALL=C.UTF-8
 export BACKPLANE_JOBS=${BACKPLANE_JOBS:-2} BACKPLANE_UNITS=32
 mkdir -p build/windows-input dist
+python3 test/tools/windows_source_test.py
 python3 scripts/windows-source.py check
 (cd build/windows-emitted && sha256sum -c SHA256SUMS)
 gzip -dc build/windows-emitted/backplane.c.gz > build/windows-input/backplane.c
