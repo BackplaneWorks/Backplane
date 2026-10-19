@@ -57,6 +57,8 @@ function fixture(name: string) {
 }
 type Fixture = ReturnType<typeof fixture>;
 function count(f: Fixture) { return existsSync(f.calls) ? readFileSync(f.calls, "utf8").trim().split("\n").length : 0; }
+// A 3D-only plot has intentionally empty 2D bounds; its m line carries triangles.
+function solid(stdout: string) { return /^m4(?: [0-9]+){7} /m.test(stdout); }
 function cached(f: Fixture) { return readdirSync(f.cache).filter((path) => path.endsWith(".glb")); }
 function shots(f: Fixture) { return ["iso", "front", "top", "right"].map((view) => join(dirname(f.path), "renders", `${basename(f.path, ".step")}.${view}.png`)); }
 function png(path: string) { return existsSync(path) && readFileSync(path).subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])); }
@@ -93,7 +95,7 @@ async function checks(name: string) {
     check(`${name} failed plot attempt ${n} cleans partial output`, !readdirSync(plot.cache).some((path) => path.endsWith(".part")), readdirSync(plot.cache));
   }
   const recovered = await run(name, plot, "success");
-  check(`${name} recovered plot produces a nonempty model`, recovered.code === 0 && recovered.stdout.startsWith("b") && !recovered.stdout.includes("2147483647"), recovered);
+  check(`${name} recovered plot produces a nonempty model`, recovered.code === 0 && solid(recovered.stdout), recovered);
   check(`${name} recovered plot retries converter`, count(plot) === 3, count(plot));
   const cache = cached(plot);
   check(`${name} recovered cache has complete GLB bytes`, cache.length === 1 && readFileSync(join(plot.cache, cache[0])).equals(model()), cache);
@@ -129,7 +131,7 @@ async function checks(name: string) {
   const legacy = fixture(`${name}-legacy-cache`);
   const old = oldKey(legacy); writeFileSync(old, "truncated-glb-fixture");
   const renewed = await run(name, legacy, "success");
-  check(`${name} legacy failed cache is bypassed`, renewed.code === 0 && count(legacy) === 1 && !renewed.stdout.includes("2147483647"), renewed);
+  check(`${name} legacy failed cache is bypassed`, renewed.code === 0 && count(legacy) === 1 && solid(renewed.stdout), renewed);
   check(`${name} legacy entry does not share the new cache key`, cached(legacy).length === 2 && readFileSync(old, "utf8") === "truncated-glb-fixture", cached(legacy));
 }
 
@@ -140,7 +142,7 @@ async function concurrent(name: string, nativeFirst: boolean) {
   const b = run(name, f, "race-b");
   try {
     const first = await a;
-    check(`${name} ${label} successful attempt reads its own model`, first.code === 0 && (nativeFirst ? shots(f).every(png) : !first.stdout.includes("2147483647")), first);
+    check(`${name} ${label} successful attempt reads its own model`, first.code === 0 && (nativeFirst ? shots(f).every(png) : solid(first.stdout)), first);
     const files = cached(f);
     check(`${name} ${label} publishes only complete bytes while second attempt runs`, files.length === 1 && readFileSync(join(f.cache, files[0])).equals(model()), files);
     const staging = readFileSync(f.calls, "utf8").trim().split("\n");
@@ -152,7 +154,7 @@ async function concurrent(name: string, nativeFirst: boolean) {
   check(`${name} ${label} failed attempt preserves complete cached model`, final.length === 1 && readFileSync(join(f.cache, final[0])).equals(model()), final);
   check(`${name} ${label} removes both staging directories`, !readdirSync(f.cache).some((p) => p.includes(".part.")), readdirSync(f.cache));
   const again = await run(name, f, "fail");
-  check(`${name} ${label} cache remains reusable`, again.code === 0 && !again.stdout.includes("2147483647") && count(f) === 2, again);
+  check(`${name} ${label} cache remains reusable`, again.code === 0 && solid(again.stdout) && count(f) === 2, again);
 }
 
 try {
