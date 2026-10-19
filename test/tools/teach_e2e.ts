@@ -136,7 +136,7 @@ try {
   const mcp = (th: string, name: string, args: object) =>
     fetch(`${base}/mcp/${th}`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
       body: JSON.stringify({ jsonrpc: "2.0", id: 9, method: "tools/call", params: { name, arguments: args } }),
     }).then((r) => r.json());
   const text = (r: any) => String(r?.result?.content?.[0]?.text ?? "");
@@ -174,7 +174,7 @@ try {
   check("handback disables ordinary input", (await rpc("bots.browser",{bot:owner,op:"type",text:"late"}))?.ok === false);
 
   const tools = await fetch(`${base}/mcp/${thread}`, {
-    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+    method: "POST", headers: { "content-type": "application/json", accept: "application/json, text/event-stream" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
   }).then((r) => r.json());
   const names = (tools?.result?.tools ?? []).map((t: any) => t.name);
   check("the bot sees the task tools", ["task_list", "task_get", "task_save", "task_delete", "task_run", "task_step", "task_pause", "task_end"].every((t) => names.includes(t)), names);
