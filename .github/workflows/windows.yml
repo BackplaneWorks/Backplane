@@ -1,10 +1,6 @@
 name: Windows build
 
 on:
-  # Validate the native Windows package before this new workflow reaches main.
-  # This branch trigger runs only this workflow, without the CI Linux matrix.
-  push:
-    branches: [windows/cad-tools]
   workflow_dispatch:
   workflow_call:
     inputs:
@@ -25,13 +21,18 @@ jobs:
     name: Emit windows-x64
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    outputs:
+      commit: ${{ steps.source.outputs.commit }}
     env:
       BACKPLANE_VERSION: ${{ inputs.version }}
       BUN_JSC_forceRAMSize: '4294967296'
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.ref || github.ref }}
+          ref: ${{ inputs.ref || github.sha }}
+      - name: Freeze source commit for native checkout
+        id: source
+        run: echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - uses: ./.github/actions/setup-bend
       - uses: oven-sh/setup-bun@v2
         with:
@@ -63,7 +64,7 @@ jobs:
         run: git config --global core.autocrlf false
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.ref || github.ref }}
+          ref: ${{ needs.emit.outputs.commit }}
       - uses: actions/download-artifact@v4
         with:
           name: windows-x64-emitted

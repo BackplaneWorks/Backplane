@@ -109,19 +109,18 @@ try {
     if (o.t === "reply") replies.set(Number(o.id), o);
   };
   await new Promise<void>((r, j) => { ws!.onopen = () => r(); ws!.onerror = j; });
-  await until(() => info["browser.engine.live"] === "chrome", "initial Chrome info");
+  await until(() => info["browser.engine.live"] === "cef", "default native CEF info", 60000);
   await rpc("setting.set", { key: "onboard.done", value: "1" });
   await rpc("setting.set", { key: "onboard.uber", value: "1" });
   await poke("key", "Escape");
-  check("default is Chrome", info["browser.engine.live"] === "chrome", info);
+  check("unset engine defaults to native CEF", info["browser.engine.live"] === "cef", info);
   await rpc("project.add", { path: proj });
   const project = await until(() => changes.find(c => c.$ === "ProjectCreated" && c.path === proj) ?? changes.find(c => c.$ === "ProjectCreated" && c.id !== "scratch"), "project");
   for (const title of ["zqcefalpha", "zqcefbeta"]) await rpc("thread.create", { project: project.id, title, env: "local" });
   const a = await until(() => changes.find(c => c.$ === "ThreadCreated" && c.title === "zqcefalpha"), "thread A");
   const b = await until(() => changes.find(c => c.$ === "ThreadCreated" && c.title === "zqcefbeta"), "thread B");
   check("unknown browser owner refused", !(await rpc("bots.browser", { bot: "invented", op: "takeover" })).ok);
-  await rpc("setting.set", { key: "browser.engine", value: "cef" });
-  await until(() => info["browser.engine.live"] === "cef", "CEF engine live", 60000);
+  check("default needs no browser.engine setting", !changes.some(c => c.$ === "SettingSet" && c.key === "browser.engine"));
   // An empty Browser tab makes no page: thread B has none yet.
   await select("zqcefbeta"); await Bun.sleep(1500);
   check("an empty Browser tab creates no CEF browser", (await children()).length === 0 && !info[`browser.page.${b.id}`], await children());
@@ -218,7 +217,7 @@ try {
   await poke("click", "100", "154");
   // Select the bot's Browser tab (Space, Browser, Tasks...) while it has no page.
   const before = (await children()).length;
-  await poke("click", "520", "62"); await Bun.sleep(1500);
+  await poke("click", "594", "62"); await Bun.sleep(1500);
   check("the bot's empty Browser tab creates no CEF browser", (await children()).length === before && !info[`browser.page.${bot.id}`], await children());
   await mcp(bot.thread, "preview_open", { url: `http://127.0.0.1:${site.port}/bot` });
   await poke("click", "820", "24"); // close the duplicate right-hand Viewer pane

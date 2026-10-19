@@ -1,0 +1,21 @@
+# the kind a sigil names: "bot" '@', "thread" '>', "project" '%', "room" '#'
+def Refs.kind.c(+c: U32) -> String:
+  Bool.pick(String, U32.is_eq(c, 64), "bot", Bool.pick(String, U32.is_eq(c, 62), "thread",
+    Bool.pick(String, U32.is_eq(c, 37), "project", Bool.pick(String, U32.is_eq(c, 35), "room", ""))))
+
+# the kind a word's sigil names ("" for none)
+def Refs.kind(s: String) -> String:
+  match s:
+    case SNil{}:
+      ""
+    case SCon{Chr{+c}, _}:
+      Refs.kind.c(c)
+
+def Refs.sigil(+kind: String) -> String:
+  Bool.pick(String, String.eq(kind, "bot"), "@", Bool.pick(String, String.eq(kind, "thread"), ">",
+    Bool.pick(String, String.eq(kind, "project"), "%", Bool.pick(String, String.eq(kind, "room"), "#", ""))))
+
+# the draft's last word
+# Words, walked once and tail-recursively (String.lines and String.split
+# recurse once per character: a long pasted draft overflowed the web's
+# stack at every key)

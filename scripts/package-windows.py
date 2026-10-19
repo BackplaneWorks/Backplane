@@ -16,6 +16,7 @@ if not (web / "index.html").is_file():
 target = root / f"dist/backplane-{version}-windows-x64.zip"
 prefix = "backplane-windows-x64/"
 files = [(exe, "backplane.exe"), (root / "LICENSE", "LICENSE"),
+         (root / "build/windows-emitted/SOURCE.json", "SOURCE.json"),
          (root / "scripts/setup-windows.ps1", "Install-Runtime.ps1"),
          (root / "scripts/install-windows-providers.ps1", "Install-Providers.ps1")]
 for name in ['backplane-kipc.exe','backplane-step2glb.exe']:

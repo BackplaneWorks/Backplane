@@ -31,6 +31,8 @@ class Lifecycle(unittest.TestCase):
         (self.old / runtime.HOST).chmod(0o755)
         self.helper(self.prefix / runtime.HELPER, 'helper-old')
         (self.prefix / runtime.STAMP).write_text('old\n')
+        (self.root / 'LICENSE.txt').write_text('pinned CEF license fixture')
+        (self.root / 'CEF-README.txt').write_text('upstream redistribution instructions fixture')
 
     def tearDown(self):
         self.env.stop()
@@ -73,6 +75,23 @@ class Lifecycle(unittest.TestCase):
         self.assertEqual((self.prefix / 'browser-current').resolve(), first_dir)
         self.assertIn('host-first', self.pair()[1])
         self.assertFalse((second / runtime.HELPER).exists())
+
+    def test_fresh_bundle_keeps_notices_when_existing_runtime_lacks_them(self):
+        package = self.package('notices')
+        payload = package / 'browser-runtime'
+        runtime.verify(payload)
+        self.assertEqual((payload / 'cef/LICENSE.txt').read_text(), 'pinned CEF license fixture')
+        self.assertTrue((payload / 'cef/CEF-README.txt').is_file())
+        manifest = json.loads((payload / 'manifest.json').read_text())
+        self.assertIn('cef/LICENSE.txt', manifest['files'])
+        self.assertIn('cef/CEF-README.txt', manifest['files'])
+
+    def test_missing_notice_refuses_fresh_stage_without_partial_payload(self):
+        (self.root / 'LICENSE.txt').unlink()
+        with self.assertRaisesRegex(ValueError, 'missing notice'):
+            self.package('missing-notice')
+        self.assertFalse((self.root / 'missing-notice/browser-runtime').exists())
+        self.assertIn('helper-old', (self.prefix / runtime.HELPER).read_text())
 
     def test_no_runtime_does_not_opt_in(self):
         package = self.package('first')

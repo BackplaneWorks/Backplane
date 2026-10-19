@@ -117,14 +117,18 @@ def Agg.fresh(done: Bool, +call: String, +kind: String, +text: String, +at: Nat)
     case False{}:
       [Agg.upd(Agg.kind(kind), SubAgg{call, "", "", "", 0n, Nil{}, 0n}, kind, text, at)]
 
-# an entry of call's put to its subagent, or a new one last
+# an entry of call's put to its subagent, or a new one last; once put, the
+# rest is as it was (it was walked and rebuilt cell by cell: for each of
+# up to Subs.window() entries, every subagent of the thread, every layout)
 def Agg.put(as: List<&2, SubAgg>, +call: String, +kind: String, +text: String, +at: Nat, +done: Bool) -> List<&2, SubAgg>:
-  match as:
-    case Nil{}:
-      Agg.fresh(done, call, kind, text, at)
-    case +a <> t:
-      +hit = Bool.and(Bool.not(done), String.eq(Agg.call(a), call))
-      Agg.upd.if(hit, a, kind, text, at) <> Agg.put(t, call, kind, text, at, Bool.or(done, hit))
+  match as done:
+    case _ True{}:
+      as
+    case Nil{} False{}:
+      Agg.fresh(False{}, call, kind, text, at)
+    case +a <> t False{}:
+      +hit = String.eq(Agg.call(a), call)
+      Agg.upd.if(hit, a, kind, text, at) <> Agg.put(t, call, kind, text, at, hit)
 
 def Agg.entry(e: M.Entry, as: List<&2, SubAgg>) -> List<&2, SubAgg>:
   match e:
@@ -142,9 +146,74 @@ def Agg.walk(k: Nat, es: List<&2, M.Entry>, as: List<&2, SubAgg>) -> List<&2, Su
     case 1n+j e <> t:
       Agg.walk(j, t, Agg.entry(e, as))
 
+# The same walk with each subagent found by its call in a map, and the
+# calls kept in the order first met (the list walk compared every entry's
+# call with every subagent's: 15 ms a layout for a thread with 141
+# subagents); Subs.aggs's answer is the same, in the same order
+type AggS is Data:
+  AggS{m: Map<&2, SubAgg>, order: List<&2, String>}
+
+def Agg.blank(+call: String) -> SubAgg:
+  SubAgg{call, "", "", "", 0n, Nil{}, 0n}
+
+def Agg.or.k(fresh: Bool, +call: String, a: SubAgg) -> SubAgg:
+  match fresh:
+    case True{}:
+      Agg.blank(call)
+    case False{}:
+      a
+
+def Agg.order.k(fresh: Bool, +call: String, order: List<&2, String>) -> List<&2, String>:
+  match fresh:
+    case True{}:
+      call <> order
+    case False{}:
+      order
+
+def Agg.got(r: Map<&2, SubAgg> & SubAgg, order: List<&2, String>, +call: String, +kind: String, +text: String, +at: Nat) -> AggS:
+  (m, +a) = r
+  AggS{Map.set(&2, SubAgg, m, call, Agg.upd(Agg.kind(kind), Agg.or.k(String.is_empty(Agg.call(a)), call, a), kind, text, at)), Agg.order.k(String.is_empty(Agg.call(a)), call, order)}
+
+def Agg.met.a(s: AggS, +call: String, +kind: String, +text: String, +at: Nat) -> AggS:
+  match s:
+    case AggS{m, order}:
+      Agg.got(Map.get(SubAgg, Agg.blank(""), m, call), order, call, kind, text, at)
+
+def Agg.met(e: M.Entry, s: AggS) -> AggS:
+  match e:
+    case M.Act{_, _, +call, +kind, +text, +at}:
+      Agg.met.a(s, call, kind, text, at)
+    case M.Msg{_, _, _, _, _}:
+      s
+
+def Agg.find.m(r: Map<&2, SubAgg> & SubAgg) -> SubAgg:
+  (_, a) = r
+  a
+
+def Agg.list(cs: List<&2, String>, +m: Map<&2, SubAgg>, acc: List<&2, SubAgg>) -> List<&2, SubAgg>:
+  match cs:
+    case Nil{}:
+      acc
+    case +c <> t:
+      Agg.list(t, m, Agg.find.m(Map.get(SubAgg, Agg.blank(c), m, c)) <> acc)
+
+def Agg.out(s: AggS) -> List<&2, SubAgg>:
+  match s:
+    case AggS{+m, order}:
+      Agg.list(order, m, Nil{})
+
+def Agg.walk.m(k: Nat, es: List<&2, M.Entry>, s: AggS) -> List<&2, SubAgg>:
+  match k es:
+    case 0n _:
+      Agg.out(s)
+    case 1n+_ Nil{}:
+      Agg.out(s)
+    case 1n+j e <> t:
+      Agg.walk.m(j, t, Agg.met(e, s))
+
 # a thread's subagents from their log, the most recently busy first
 def Subs.aggs(+st: M.State, +th: String) -> List<&2, SubAgg>:
-  Agg.walk(Subs.window(), M.State.mine(st, M.Bg.log(th)), Nil{})
+  Agg.walk.m(Subs.window(), M.State.mine(st, M.Bg.log(th)), AggS{Map.new(&2, SubAgg), Nil{}})
 
 # the word for how a subagent ended
 def Subs.ended(+status: String) -> String:

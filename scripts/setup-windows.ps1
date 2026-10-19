@@ -1,5 +1,5 @@
 param(
-    [string]$Root = (Join-Path $env:LOCALAPPDATA 'Backplane\cygwin64'),
+    [string]$Root = $(if ($env:BACKPLANE_CYGWIN_ROOT) { $env:BACKPLANE_CYGWIN_ROOT } else { Join-Path $env:LOCALAPPDATA 'Backplane\cygwin64' }),
     [switch]$BuildTools
 )
 $ErrorActionPreference = 'Stop'
@@ -18,5 +18,7 @@ $options = @('-q','-n','-N','-B','-O','-R',$Root,'-l',$cache,
 $quoted = $options | ForEach-Object { '"' + $_ + '"' }
 $p = Start-Process $setup -ArgumentList $quoted -PassThru -Wait
 if ($p.ExitCode -ne 0) { throw "Cygwin setup failed: $($p.ExitCode)" }
-if (!(Test-Path (Join-Path $Root 'bin\bash.exe'))) { throw 'Cygwin shell missing' }
+foreach ($name in @('bash.exe','cygpath.exe','cygwin1.dll','cygfontconfig-1.dll','cygfreetype-6.dll')) {
+    if (!(Test-Path (Join-Path $Root ('bin\' + $name)))) { throw "Cygwin runtime missing $name" }
+}
 Write-Output "BACKPLANE_CYGWIN_ROOT=$Root"

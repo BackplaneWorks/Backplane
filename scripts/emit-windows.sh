@@ -23,3 +23,4 @@ for f in dist/web/*.js dist/web/*.css dist/web/*.html; do gzip -9knf "$f"; done
 (cd build/windows-emitted && sha256sum *.gz > SHA256SUMS)
 
 scripts/build-windows-helpers.sh
+python3 scripts/windows-source.py record

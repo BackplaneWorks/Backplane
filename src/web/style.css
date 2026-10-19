@@ -820,3 +820,4 @@ a.ref { color: inherit; text-decoration: none; cursor: text; overflow-wrap: anyw
 html:lang(ja) { line-break: strict; word-break: normal; }
 html:lang(ja) :is(.body, .set-label, .set-note, .bot-note, .ask-head, .ask-detail, .tour-body, .fm-note, .secret-line, .item-text) { overflow-wrap: anywhere; }
 html:lang(ja) :is(.set-text, .set-ctl) { min-width: 0; }
+.model-menu .find { padding: 2px 2px 8px; border-bottom: none; }

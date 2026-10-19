@@ -61,8 +61,48 @@ if [ -d "$tmp/backplane-$os-$arch/licenses" ]; then
 fi
 ln -sf "$prefix/backplane" "$bin/backplane"
 ln -sf "$prefix/backplane-serve" "$bin/backplane-serve"
+# the applications menu entry and its icon (BACKPLANE_NO_DESKTOP=1 skips
+# them); Exec names the link itself, since a desktop session's PATH often
+# lacks ~/.local/bin
+menu=
+pkg="$tmp/backplane-$os-$arch"
+if [ "$os" = linux ] && [ -z "${BACKPLANE_NO_DESKTOP:-}" ] && [ -f "$pkg/backplane.desktop" ]; then
+  data=${XDG_DATA_HOME:-$HOME/.local/share}
+  mkdir -p "$data/applications" "$data/icons/hicolor/scalable/apps" "$data/icons/hicolor/256x256/apps"
+  # Exec has desktop-string escaping followed by quoting and percent expansion.
+  # Pass the path as an argument to a fixed exec command, never as shell code
+  # or a sed replacement. GIO checks the command before expanding literal %%,
+  # so a percent-bearing installation path cannot be the first Exec token.
+  BACKPLANE_DESKTOP_EXEC="$bin/backplane" awk '
+    function quote(path, quoted, i, c) {
+      quoted = "\""
+      for (i = 1; i <= length(path); i++) {
+        c = substr(path, i, 1)
+        if (c == "\\") quoted = quoted "\\\\\\\\"
+        else if (c == "\"" || c == "$" || c == sprintf("%c", 96)) quoted = quoted "\\\\" c
+        else if (c == "%") quoted = quoted "%%"
+        else if (c == "\n") quoted = quoted "\\n"
+        else if (c == "\r") quoted = quoted "\\r"
+        else if (c == "\t") quoted = quoted "\\t"
+        else quoted = quoted c
+      }
+      return quoted "\""
+    }
+    /^Exec=/ {
+      print "Exec=/bin/sh -c " quote("exec \"$0\"") " " quote(ENVIRON["BACKPLANE_DESKTOP_EXEC"])
+      next
+    }
+    { print }
+  ' "$pkg/backplane.desktop" > "$data/applications/backplane.desktop"
+  [ -f "$pkg/icon/backplane-desktop.svg" ] && cp -f "$pkg/icon/backplane-desktop.svg" "$data/icons/hicolor/scalable/apps/"
+  [ -f "$pkg/icon/backplane-desktop-256.png" ] && cp -f "$pkg/icon/backplane-desktop-256.png" "$data/icons/hicolor/256x256/apps/backplane-desktop.png"
+  command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$data/applications" >/dev/null 2>&1 || true
+  command -v gtk-update-icon-cache >/dev/null 2>&1 && gtk-update-icon-cache -q -t "$data/icons/hicolor" >/dev/null 2>&1 || true
+  menu=1
+fi
 echo
 echo "  Backplane $VER is installed. Run: backplane"
+[ -n "$menu" ] && echo "  It is also in your applications menu."
 case ":$PATH:" in
   *":$bin:"*) ;;
   *) echo "  (add $bin to your PATH)" ;;

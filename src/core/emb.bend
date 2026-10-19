@@ -252,13 +252,21 @@ def Emb.user.at(e: M.Entry) -> Nat:
     case _:
       0n
 
-# the newest message the person sent among es
-def Emb.last_user(es: List<&2, M.Entry>, +acc: Nat) -> Nat:
-  match es:
-    case Nil{}:
+# the newest message the person sent among es: entries are newest first
+# (model.bend's Idx), so the walk stops at the first of the person's
+# (it went through every entry, twice a frame and once more per terminal:
+# 6000 entries each time in a long thread)
+def Emb.last_user.go(es: List<&2, M.Entry>, done: Bool, +acc: Nat) -> Nat:
+  match es done:
+    case Nil{} _:
       acc
-    case e <> t:
-      Emb.last_user(t, M.Time.max(acc, Emb.user.at(e)))
+    case +e <> +t True{}:
+      acc
+    case +e <> t False{}:
+      Emb.last_user.go(t, Nat.is_gt(Emb.user.at(e), 0n), M.Time.max(acc, Emb.user.at(e)))
+
+def Emb.last_user(es: List<&2, M.Entry>, +acc: Nat) -> Nat:
+  Emb.last_user.go(es, False{}, acc)
 
 def Emb.live.k(pinned: Bool, +touched: Nat, +last: Nat, +now: Nat) -> Bool:
   match pinned:
@@ -319,7 +327,7 @@ def Emb.pins.go(es: List<&2, M.Entry>, +s: M.State, +last: Nat, +now: Nat) -> Li
 
 # a thread's pinned terminals
 def Emb.pins(+s: M.State, +th: String, +now: Nat) -> List<&2, EV>:
-  Emb.pins.go(M.State.mine(s, th), s, Emb.last_user(M.State.mine(s, th), 0n), now)
+  Emb.pins.go(M.State.terms(s, th), s, Emb.last_user(M.State.mine(s, th), 0n), now)
 
 def Emb.ekey(+e: M.Entry) -> String:
   match e:

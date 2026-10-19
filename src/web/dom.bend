@@ -92,16 +92,20 @@ def Dom.link.k(web: Bool, +label: String, +url: String) -> Node:
     case False{}:
       Dom.file(url, [Txt{label}])
 
-# Refs carry navigation metadata but display as plain text in spec 1.
+# Explicit references navigate through the shared resolver. Bare ids stay
+# text until an object-aware renderer can resolve them.
 def Dom.ref(+label: String, +uri: String, bare: Bool) -> Node:
-  El{"a", "", [At{"class", "ref"}, At{"href", uri}, At{"data-ref", uri}, At{"data-bare", Bool.pick(String, bare, "1", "0")}], [Txt{label}]}
+  match bare:
+    case True{}: Txt{label}
+    case False{}:
+      El{"a", "", [At{"class", "ref"}, At{"href", uri}, At{"data-ref", uri}, At{"data-bare", "0"}, At{"data-value", uri}, On{"click", "ref-go"}], [Txt{label}]}
 
 def Dom.link.ref(m: Maybe<&2, R.Ref>, label: String, +url: String) -> Node:
   match m:
     case Some{r}: Dom.ref(label, R.Ref.uri(r), False{})
     case None{}: Dom.link.k(LK.Link.is_web(url), label, url)
 
-# A ref stays plain; a web link opens a new tab, a file opens on the hub.
+# An explicit ref navigates in place; web and file links keep their openers.
 def Dom.link(+label: String, +url: String) -> Node:
   Dom.link.ref(R.Ref.parse(url), label, url)
 

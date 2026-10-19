@@ -120,3 +120,28 @@ The zygote changes its stack canary after fork, so `main()` has no stack
 protector. See [SPIKE.md](SPIKE.md) for the established performance results
 and [bench/](bench/) for the original spike's one-browser benchmark (its old
 stdin protocol predates this multi-browser host).
+
+## Default and desktop input
+
+The Linux X11 desktop requests CEF by default; Settings → Browser → Chrome
+explicitly selects the headless helper. A missing/failed optional runtime
+produces a visible Chrome fallback reason. macOS, Windows, native Wayland
+and remote-only clients continue using frames until their native backend exists.
+
+CEF handles native IME and Xdnd through its own Chromium child widget. The
+host publishes its active native target and bounds; the parent window relays
+Xdnd control messages with source/reply identity translation. Selection data
+travels directly between desktop clients. Hide/close restores the original
+routing, outside-panel attachments keep the app path, stale targets are
+ignored, and the agent's takeover shield rejects drops. Japanese conversion requires an installed desktop
+input engine (e.g. IBus Mozc); UTF-8 typing or clipboard paste alone does not
+verify conversion/preedit/candidate behavior. GPU acceleration and Japanese
+IME acceptance must be reported separately from the default setting.
+
+Focused gates: `bun tools/browser/test/default.ts`, `session-cef.ts`,
+`native-routing.ts`, and `native-drag.ts` (the latter three require
+BACKPLANE_CEF and private Xvfb; drag additionally needs system GTK4 Python GI
+and CEF_NATIVE_PARENT pointing to built `test/native/cef_parent.bend`).
+`CEF_PRIVATE_IME_BUS=1 dbus-run-session -- bun tools/browser/test/native-ime.ts`
+checks installed Mozc on an independent bus/display and saves candidate
+screenshots when CEF_IME_SHOTS names a retained artifact directory.

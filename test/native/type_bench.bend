@@ -12,6 +12,9 @@ import ../../src/app/cats.bend as CA
 import ../../src/core/json.bend as J
 import ../../src/core/utf8.bend as U8
 import ../../src/server/argv.bend as AV
+import ../../src/core/subs.bend as SB
+import ../../src/app/mm.bend as MM
+import ../../src/core/emb.bend as EMB
 
 # Typing in the window, timed: each key goes through the same steps as in
 # the app (the event, the timeline memo, layout, the tiles redrawn) with
@@ -250,6 +253,124 @@ def parts(+ty: L.Ty, +cats: Map<&2, CA.CatF>, +k: Kept) -> IO(Unit):
     IO.print("x50 ms: sidebar " ++ Nat.show(Nat.sub(b, a)) ++ "  thread " ++ Nat.show(Nat.sub(c, b)) ++ "  whole layout " ++ Nat.show(Nat.sub(d, c))
       ++ "  tiles (same frame again) " ++ Nat.show(Nat.sub(e, d)) ++ "   x10 tiles from scratch " ++ Nat.show(Nat.sub(f, e)) ++ "  " ++ Nat.show(Nat.add(Nat.add(x1, x2), Nat.add(x3, Nat.add(x4, x5)))))
 
+# the thread view's parts, each 20 times over (ms for all 20), to find
+# what a long thread's layout spends its time on
+def nf_of(u: U.Ui) -> Map<&2, String>:
+  match u:
+    case U.Ui{_, _, _, _, _, _, _, _, _, _, _, _, _, _, nf, _, _}:
+      nf
+
+def rep.subs(+r: Nat, +st: M.State, +nf: Map<&2, String>, +sel: String, +now: Nat) -> Nat:
+  match r:
+    case 0n:
+      0n
+    case 1n+q:
+      Nat.add(List.length(&2, SB.SubRow, SB.Subs.rows(st, nf, sel, now)), rep.subs(q, st, nf, sel, now))
+
+def rep.ec(+r: Nat, +u: U.Ui, +st: M.State, +sel: String) -> Nat:
+  match r:
+    case 0n:
+      0n
+    case 1n+q:
+      Nat.add(List.length(&2, EMB.EV, U.Ec.pins(U.Ec.of(u, sel), st, sel)), rep.ec(q, u, st, sel))
+
+def rep.tl(+r: Nat, +ty: L.Ty, +memo: L.TLMemo, +st: M.State, +sel: String, +nf: Map<&2, String>) -> Nat:
+  match r:
+    case 0n:
+      0n
+    case 1n+q:
+      Nat.add(List.length(&2, L.TLine, L.TL.memo.shown.loc(ty, memo, st, sel, 780, nf)), rep.tl(q, ty, memo, st, sel, nf))
+
+def rep.info(+r: Nat, +n: N.Nui) -> Nat:
+  match r:
+    case 0n:
+      0n
+    case 1n+q:
+      Nat.add(String.length(MM.Mm.info.of(n)), rep.info(q, n))
+
+def rep.key(+r: Nat, +n: N.Nui) -> Nat:
+  match r:
+    case 0n:
+      0n
+    case 1n+q:
+      Nat.add(String.length(MM.Mm.key(n, MM.TouchK.none(), MM.Mm.rels.of(n))), rep.key(q, n))
+
+def rep.misc(+r: Nat, +st: M.State, +sel: String) -> Nat:
+  match r:
+    case 0n:
+      0n
+    case 1n+q:
+      Nat.add(Nat.add(List.length(&2, M.Ask, U.Asks.open(st, sel)), String.length(U.Tasks.up(st, sel))), rep.misc(q, st, sel))
+
+def rep.tasks(+r: Nat, +st: M.State, +sel: String) -> Nat:
+  match r:
+    case 0n:
+      0n
+    case 1n+q:
+      Nat.add(List.length(&2, M.Task, U.Tasks.of(st, sel)), rep.tasks(q, st, sel))
+
+def rep.aggs(+r: Nat, +st: M.State, +sel: String) -> Nat:
+  match r:
+    case 0n:
+      0n
+    case 1n+q:
+      Nat.add(List.length(&2, SB.SubAgg, SB.Subs.aggs(st, sel)), rep.aggs(q, st, sel))
+
+def rep.agents(+r: Nat, +st: M.State, +nf: Map<&2, String>, +sel: String, +now: Nat) -> Nat:
+  match r:
+    case 0n:
+      0n
+    case 1n+q:
+      Nat.add(List.length(&2, SB.SubRow, SB.Subs.agents(st, nf, sel, now)), rep.agents(q, st, nf, sel, now))
+
+def rep.wl(+r: Nat, +st: M.State, +sel: String) -> Nat:
+  match r:
+    case 0n:
+      0n
+    case 1n+q:
+      Nat.add(Nat.add(List.length(&2, SB.SubRow, SB.Subs.wakes(st, sel)), List.length(&2, SB.SubRow, SB.Subs.locks.go(M.Locks.names(st), st, sel))), rep.wl(q, st, sel))
+
+def pieces2(+st: M.State, +nf: Map<&2, String>, +sel: String, +now: Nat) -> IO(Unit):
+  do IO<Unit>:
+    +a : Nat <- IO.now()
+    +x1 : Nat = rep.tasks(20n, st, sel)
+    +b : Nat <- IO.now()
+    +x2 : Nat = rep.aggs(20n, st, sel)
+    +c : Nat <- IO.now()
+    +x3 : Nat = rep.agents(20n, st, nf, sel, now)
+    +d : Nat <- IO.now()
+    +x4 : Nat = rep.wl(20n, st, sel)
+    +e : Nat <- IO.now()
+    IO.print("x20 ms, subs' parts: tasks " ++ Nat.show(Nat.sub(b, a)) ++ " (" ++ Nat.show(Nat.div(x1, 20n)) ++ ")  aggs " ++ Nat.show(Nat.sub(c, b)) ++ " (" ++ Nat.show(Nat.div(x2, 20n)) ++ ")  agents " ++ Nat.show(Nat.sub(d, c)) ++ "  wakes+locks " ++ Nat.show(Nat.sub(e, d)) ++ " " ++ Nat.show(Nat.add(x3, x4)))
+
+def pieces(+ty: L.Ty, +k: Kept) -> IO(Unit):
+  +n = prepared(kept_n(k), 5n)
+  +u = N.Nui.ui(n)
+  +st = U.Ui.state(u)
+  +sel = U.Ui.sel(u)
+  +nf = nf_of(u)
+  +memo = kept_memo(k)
+  do IO<Unit>:
+    +a : Nat <- IO.now()
+    +x1 : Nat = rep.subs(20n, st, nf, sel, U.Side.now(u))
+    +b : Nat <- IO.now()
+    +x2 : Nat = rep.ec(20n, u, st, sel)
+    +c : Nat <- IO.now()
+    +x3 : Nat = rep.tl(20n, ty, memo, st, sel, nf)
+    +d : Nat <- IO.now()
+    +x4 : Nat = rep.info(20n, n)
+    +e : Nat <- IO.now()
+    +x5 : Nat = rep.key(20n, n)
+    +f : Nat <- IO.now()
+    +x6 : Nat = rep.misc(20n, st, sel)
+    +g : Nat <- IO.now()
+    +x7 : Nat = rep.thread(20n, ty, memo, n)
+    +h : Nat <- IO.now()
+    IO.print("x20 ms: subs " ++ Nat.show(Nat.sub(b, a)) ++ "  terminals " ++ Nat.show(Nat.sub(c, b)) ++ "  timeline lines " ++ Nat.show(Nat.sub(d, c))
+      ++ "  info key part " ++ Nat.show(Nat.sub(e, d)) ++ " (" ++ Nat.show(Nat.div(x4, 20n)) ++ " chars)  main key " ++ Nat.show(Nat.sub(f, e)) ++ "  asks+parent " ++ Nat.show(Nat.sub(g, f))
+      ++ "  whole thread " ++ Nat.show(Nat.sub(h, g)) ++ "  " ++ Nat.show(Nat.add(Nat.add(x1, x2), Nat.add(x3, Nat.add(x5, Nat.add(x6, x7))))))
+    pieces2(st, nf, sel, U.Side.now(u))
+
 # the first timeline line region of the last frame (its line and y)
 def first_line(hs: List<&2, N.Hit>) -> U32:
   match hs:
@@ -388,6 +509,7 @@ def main() -> IO(Unit):
     +b : Nat <- IO.now()
     IO.print("state and first frame: " ++ Nat.show(Nat.sub(b, a)) ++ " ms")
     parts(ty, cats, k)
+    pieces(ty, k)
     IO.print("selected: [" ++ select(ty, cats, k) ++ "]")
     t : Times <- key(text(), ty, cats, k, Times{0n, 0n, 0n, 0n, 0n, ""})
     IO.print(Times.show(t, String.length(text())))

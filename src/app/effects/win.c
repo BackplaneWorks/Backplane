@@ -152,6 +152,12 @@ typedef struct {
             dnd_finished, dnd_sel, dnd_copy, dnd_uri, dnd_types, dnd_prop;
   Window    dnd_src;
   int       dnd_ok;
+  // Embedded CEF owns the native widget, while this top level stays the
+  // stable XDND target for GTK and other desktop sources.
+  Atom      cef_dnd_target, cef_dnd_owner, cef_dnd_actions;
+  Window    cef_dnd_source, cef_dnd_child;
+  XClientMessageEvent cef_dnd_enter;
+  int       cef_dnd_has_enter;
   char*     drop;
   u64       drop_len;
   // keys: whether the server sends repeats as bare presses, and the keysym
@@ -594,6 +600,98 @@ static int win_dnd(AppWin* a, XClientMessageEvent* m) {
   return 1;
 }
 
+// Native browser XDND control relay. The selection payload still travels
+// directly from its real owner to Chromium (including files/INCR).
+static Window win_cef_dnd_target(AppWin* a, int rx, int ry) {
+  Atom type; int fmt; unsigned long n = 0, left = 0; unsigned char* data = NULL;
+  Window target = None;
+  if (x_XGetWindowProperty(a->dpy, a->win, a->cef_dnd_target, 0, 5, False,
+      XA_CARDINAL, &type, &fmt, &n, &left, &data) == Success && data &&
+      type == XA_CARDINAL && fmt == 32 && n == 5 && left == 0) {
+    unsigned long* v = (unsigned long*)data;
+    // Selection ownership vanishes if the host/widget dies: stale properties
+    // cannot divert attachment drops or send messages to a dead window.
+    if (v[0] > 1 && v[1] <= 32768 && v[2] <= 32768 && v[3] > 0 && v[3] <= 32768 && v[4] > 0 && v[4] <= 32768 &&
+        x_XGetSelectionOwner(a->dpy, a->cef_dnd_owner) == (Window)v[0]) {
+      int x, y; Window child;
+      x_XTranslateCoordinates(a->dpy, DefaultRootWindow(a->dpy), a->win, rx, ry, &x, &y, &child);
+      if (x >= (int)v[1] && y >= (int)v[2] && x < (int)(v[1]+v[3]) && y < (int)(v[2]+v[4])) target = (Window)v[0];
+    }
+  }
+  if (data) x_XFree(data);
+  return target;
+}
+static void win_cef_dnd_atoms(AppWin* a, Atom property) {
+  Atom type; int fmt; unsigned long n = 0, left = 0; unsigned char* data = NULL;
+  if (x_XGetWindowProperty(a->dpy, a->cef_dnd_source, property, 0, 1024, False,
+      XA_ATOM, &type, &fmt, &n, &left, &data) == Success && data && type == XA_ATOM && fmt == 32 && left == 0) {
+    x_XChangeProperty(a->dpy, a->win, property, XA_ATOM, 32, PropModeReplace, data, n);
+  } else x_XDeleteProperty(a->dpy, a->win, property);
+  if (data) x_XFree(data);
+}
+static void win_cef_dnd_forward(AppWin* a, XClientMessageEvent* message) {
+  XEvent event = {0}; event.xclient = *message;
+  event.xclient.window = a->cef_dnd_child;
+  event.xclient.data.l[0] = a->win;
+  x_XSendEvent(a->dpy, a->cef_dnd_child, False, NoEventMask, &event);
+  x_XFlush(a->dpy);
+}
+static int win_cef_dnd(AppWin* a, XClientMessageEvent* m) {
+  Atom type = m->message_type;
+  if (type == a->dnd_status || type == a->dnd_finished) {
+    if (!a->cef_dnd_source || !a->cef_dnd_child || (Window)m->data.l[0] != a->cef_dnd_child) return 0;
+    XEvent reply = {0}; reply.xclient = *m;
+    reply.xclient.window = a->cef_dnd_source;
+    reply.xclient.data.l[0] = a->win;
+    if (type == a->dnd_status) {
+      // Always see positions so moving between browser and attachment areas
+      // cannot get stuck inside a child's advertised no-update rectangle.
+      reply.xclient.data.l[1] |= 2; reply.xclient.data.l[2] = 0; reply.xclient.data.l[3] = 0;
+    }
+    x_XSendEvent(a->dpy, a->cef_dnd_source, False, NoEventMask, &reply); x_XFlush(a->dpy);
+    if (type == a->dnd_finished) { a->cef_dnd_child = None; a->cef_dnd_source = None; a->cef_dnd_has_enter = 0; }
+    return 1;
+  }
+  if (type == a->dnd_enter) {
+    a->cef_dnd_enter = *m; a->cef_dnd_source = (Window)m->data.l[0];
+    a->cef_dnd_child = None; a->cef_dnd_has_enter = 1;
+    return 0; // Prime the normal attachment offer, without accepting a drop.
+  }
+  if (!a->cef_dnd_has_enter || (Window)m->data.l[0] != a->cef_dnd_source) return 0;
+  if (type == a->dnd_position) {
+    int rx = (short)((unsigned long)m->data.l[2] >> 16), ry = (short)m->data.l[2];
+    Window target = win_cef_dnd_target(a, rx, ry);
+    if (target != a->cef_dnd_child) {
+      if (a->cef_dnd_child && x_XGetSelectionOwner(a->dpy, a->cef_dnd_owner) == a->cef_dnd_child) {
+        XClientMessageEvent leave = *m; leave.message_type = a->dnd_leave;
+        win_cef_dnd_forward(a, &leave);
+      }
+      if (a->dnd_ok) win_push(a, 9, 0, 0, 0, 0);
+      a->cef_dnd_child = target;
+      if (target) {
+        win_cef_dnd_atoms(a, a->dnd_types); win_cef_dnd_atoms(a, a->cef_dnd_actions);
+        a->dnd_ok = 0;
+        win_cef_dnd_forward(a, &a->cef_dnd_enter);
+      } else win_dnd(a, &a->cef_dnd_enter);
+    }
+    if (!target) return 0;
+    win_cef_dnd_atoms(a, a->cef_dnd_actions);
+    win_cef_dnd_forward(a, m); return 1;
+  }
+  if (type == a->dnd_drop && a->cef_dnd_child) {
+    if (x_XGetSelectionOwner(a->dpy, a->cef_dnd_owner) == a->cef_dnd_child) win_cef_dnd_forward(a, m);
+    else { win_dnd_send(a, a->dnd_finished, 0, 0, 0, 0); a->cef_dnd_child = None; a->cef_dnd_source = None; }
+    a->cef_dnd_has_enter = 0; return 1;
+  }
+  if (type == a->dnd_leave) {
+    int native = a->cef_dnd_child != None;
+    if (native && x_XGetSelectionOwner(a->dpy, a->cef_dnd_owner) == a->cef_dnd_child) win_cef_dnd_forward(a, m);
+    a->cef_dnd_child = None; a->cef_dnd_source = None; a->cef_dnd_has_enter = 0;
+    return native;
+  }
+  return 0;
+}
+
 // the dropped list arrived (or the source could not give it)
 static void win_dropped(AppWin* a, Atom prop) {
   Atom type;
@@ -974,7 +1072,7 @@ static void win_pump(AppWin* a) {
         }
         break;
       case ClientMessage:
-        if (win_dnd(a, &ev.xclient)) {
+        if (win_cef_dnd(a, &ev.xclient) || win_dnd(a, &ev.xclient)) {
           break;
         }
         if ((Atom)ev.xclient.data.l[0] == a->del) {
@@ -1099,6 +1197,10 @@ Term win_open_run(Env e, Term* f, IoWork* w) {
     a->dnd_copy     = x_XInternAtom(dpy, "XdndActionCopy", False);
     a->dnd_uri      = x_XInternAtom(dpy, "text/uri-list", False);
     a->dnd_types    = x_XInternAtom(dpy, "XdndTypeList", False);
+    a->cef_dnd_target = x_XInternAtom(dpy, "_BACKPLANE_CEF_DND_TARGET", False);
+    a->cef_dnd_actions = x_XInternAtom(dpy, "XdndActionList", False);
+    char cef_owner[80]; snprintf(cef_owner, sizeof cef_owner, "_BACKPLANE_CEF_DND_%lu", a->win);
+    a->cef_dnd_owner = x_XInternAtom(dpy, cef_owner, False);
     a->dnd_prop     = x_XInternAtom(dpy, "BACKPLANE_DROP", False);
     Atom xdnd_version = 5;
     x_XChangeProperty(dpy, a->win, a->dnd_aware, XA_ATOM, 32, PropModeReplace,

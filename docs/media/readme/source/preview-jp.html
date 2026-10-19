@@ -1,0 +1,83 @@
+<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>README.jp.md preview</title><style>
+  *{box-sizing:border-box}body{margin:0;background:#0d1117;color:#e6edf3;font:16px/1.5 system-ui,sans-serif}nav{position:sticky;top:0;display:flex;justify-content:center;gap:8px;padding:12px;background:#010409;border-bottom:1px solid #30363d;z-index:1}button{color:inherit;background:#161b22;border:1px solid #30363d;padding:6px 12px;cursor:pointer}button[aria-pressed=true]{border-color:#58a6ff}article{margin:24px auto;padding:24px;width:min(94%,1000px);border:1px solid #30363d}li+li{margin-top:4px}a{color:#58a6ff}p{margin:24px 0}img{max-width:100%;height:auto}pre{background:#161b22;padding:16px;overflow-x:auto;font:13px/1.6 ui-monospace,monospace}@media(max-width:600px){article{padding:12px;margin:12px auto}ol{padding-left:24px}pre{font-size:11px}}
+  </style><nav aria-label="Preview scale"><button data-scale="150" aria-pressed="false">150%</button><button data-scale="175" aria-pressed="false">175%</button><button data-scale="200" aria-pressed="false">200%</button></nav><article><p align="right">
+  <a href="../../../../README.md"><img src="../language-en.svg" alt="English" width="92" height="28"></a>
+</p>
+<ol>
+<li>Backplaneは、エージェントによるハードウェア開発のための、完全にオープンソースのワークスペースです。</li>
+<li>Backplaneは<a href="https://github.com/i2cjak/Backplane_KiCad">KiCadのフォーク</a>です。</li>
+<li>Backplaneは、実際の電気エンジニアが開発・保守しています。</li>
+</ol>
+<p align="center">
+  <img src="../royalblue-viewers-200.png" alt="Backplaneの3D・PCB・回路図ビューアに表示されたRoyalBlue54L">
+</p>
+<pre><code class="language-sh">curl -fsSL https://github.com/i2cjak/backplane-bend/releases/latest/download/install.sh | sh
+backplane
+</code></pre>
+<p align="center">
+  <img src="../agent-setup-200.png" alt="Backplaneのプロバイダー・モデル・推論レベルの選択メニュー">
+</p>
+<p>Backplaneの本当の価値は、KiCadとFreeCADのビューアにあります。エージェントの作業を一つひとつ確認し、特定の部品をクリックして、ワークバーで参照できます。Backplaneには、CAD専用スキル一式と、LLMからの操作を支援する機能を追加したKiCadフォークが付属しています（たとえば、回路図用のIPC API）。</p>
+<p align="center">
+  <img src="../cad/pad-workbar-detail-200.png" alt="RoyalBlue54Lのパッドを選択し、その詳細をワークバーで参照">
+</p>
+<p align="center">
+  <img src="../cad/cm5-mech-200.png" alt="エージェントの作業と並んで、Backplaneの機械設計ビューアに表示されたケースのアセンブリ">
+</p>
+<p align="center">
+  <img src="../cad/kicad-freecad-setup-200.png" alt="KiCad IPCとFreeCAD連携の設定">
+</p>
+<p>Backplaneには、エージェントハーネスを連携させるための便利な基本機能があります。プロジェクトにはスレッドがあり（なんて斬新なアイデアでしょう）、ボットと、ボット・プロジェクト・スレッドをまとめる「uberbot」があります。どのハーネスからでも、別のハーネスのサブエージェントを作成でき、すべてのハーネスがスレッド間でメッセージを送れます。</p>
+<p align="center">
+  <img src="../orchestration/overview.png" alt="プロジェクト・スレッド・常駐ボットを一覧できるuberbot">
+</p>
+<p align="center">
+  <img src="../orchestration/delegation.png" alt="ClaudeとGrokのサブエージェントを連携させるスレッド">
+</p>
+<p>特定の仕事を担当する常駐エージェント（catbots）も付属しています。Webhookなど、期待する機能はひと通りあります。それに加えて、やり取りのための便利なメールボックスと、ボットが永続的なWebアプリを作成できる「Space」もあります。</p>
+<p align="center">
+  <img src="../orchestration/webhooks.png" alt="catbotのWebhooksタブ">
+</p>
+<p align="center">
+  <img src="../mailroom-200.png" alt="会話の一覧とメッセージを表示したcatbotのMailroom">
+</p>
+<p align="center">
+  <img src="../orchestration/space.png" alt="catbotのSpaceに保存されたコントロールデスク">
+</p>
+<p align="center">
+  <img src="../orchestration/space-webapp.png" alt="catbotの永続的なSpaceから配信されるWebアプリ" width="480">
+</p>
+<h2>その他の機能</h2>
+<ul>
+<li>
+<p>スレッド・ボット・プロジェクトをつなぐ、クリック可能なリンク。</p>
+<p align="center">
+  <img src="../features/link-cards-2x.png" alt="スレッド・ボット・プロジェクトへのリンクチップ">
+</p>
+</li>
+<li>
+<p><code>&gt;</code>、<code>#</code>、<code>%</code>、<code>@</code>で、ほかのBackplane項目を参照。</p>
+<p align="center">
+  <img src="../reference-menus-200.png" alt="スレッド・ルーム・プロジェクト・ボットの参照メニュー">
+</p>
+</li>
+<li>
+<p>TUI用のインラインターミナル。</p>
+<p align="center">
+  <img src="../features/inline-terminal-2x.png" alt="インラインターミナルで実行中のvi">
+</p>
+</li>
+<li>
+<p><code>/btw</code>。</p>
+<p align="center">
+  <img src="../features/btw-autocomplete-2x.png" alt="入力欄に表示された、別の質問をするためのbtwコマンド">
+</p>
+</li>
+</ul>
+<p>Backplaneでは、好きなエージェントを使えます。Grokでも、Codexでも、Claudeでも、Antigravityでも、Museでも、何でもどうぞ。OpenCodeにも対応しています！</p>
+<h2>ライセンス</h2>
+<p>MIT。<a href="../../../../LICENSE">LICENSE</a>をご覧ください。<a href="https://github.com/i2cjak/Backplane_KiCad">KiCadフォーク</a>には、KiCadのライセンスが引き続き適用されます。STEPコンバーターには、OpenCascadeと<code>occt-import-js</code>（LGPL-2.1）が含まれています。<a href="../../../../tools/step2glb/README.md#license">サードパーティーのライセンス</a>をご覧ください。</p>
+<p align="center">
+  <img src="../cad/cats-footer-200.png" alt="Backplaneの猫たち" width="216" height="72">
+</p>
+</article><script>const article=document.querySelector('article');for(const b of document.querySelectorAll('button'))b.onclick=()=>{article.style.zoom=Number(b.dataset.scale)/100;for(const c of document.querySelectorAll('button'))c.setAttribute('aria-pressed',String(c===b));};document.querySelector('button[data-scale="200"]').click();</script></html>

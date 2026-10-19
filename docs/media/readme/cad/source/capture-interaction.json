@@ -1,0 +1,42 @@
+{
+  "app": "/home/h/.local/share/backplane/backplane",
+  "app_sha256": "17e717c9104a77b185016196d1e367303690ea3bea1a68e50bd08254e1db8911",
+  "board": "/home/h/Documents/Backplane/Backplane_KiCad/demos/royalblue54L_feather/RoyalBlue54L-Feather.kicad_pcb",
+  "board_sha256": "535dbe212f43a8bab12b23277e176a94ac9694177258af2981c0e7b08e4b7252",
+  "viewport": [
+    1600,
+    1000
+  ],
+  "temporary_home": "/tmp/backplane-readme-qy841td_",
+  "events": [
+    {
+      "$": "SettingSet",
+      "key": "onboarded",
+      "value": "1",
+      "at": 1792427604
+    },
+    {
+      "$": "ProjectCreated",
+      "id": "royalblue",
+      "title": "RoyalBlue54L",
+      "root": "/home/h/Documents/Backplane/Backplane_KiCad/demos/royalblue54L_feather",
+      "at": 1792427604
+    },
+    {
+      "$": "ThreadCreated",
+      "id": "viewer-demo",
+      "project": "royalblue",
+      "title": "RoyalBlue54L",
+      "env": "local",
+      "branch": "",
+      "worktree": "",
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "at": 1792427604
+    }
+  ],
+  "capture": "native Backplane on private Xvfb; no CAD edits or agent turns",
+  "mode": "interaction",
+  "step": null,
+  "step_sha256": null
+}

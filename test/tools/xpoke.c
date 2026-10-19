@@ -6,6 +6,8 @@
 //   xpoke ctrl KEY         ctrl+key (an upper-case letter adds shift)
 //   xpoke wheel X Y up|down
 //   xpoke drag X Y X2 Y2   press at X Y, move to X2 Y2, release there
+//   xpoke move X Y         move the pointer there (no button: a hover)
+//   xpoke sweep X Y X2 Y2 N MS  N moves from X Y to X2 Y2, MS ms apart
 //   xpoke size W H         resize the window
 //   xpoke hold KEY MS      hold a key for MS ms as a keyboard does: a press, then
 //                          repeats (presses with no release between), a release
@@ -106,6 +108,14 @@ static void drag(Display* d, Window w, int x, int y, int x2, int y2) {
   e.type = ButtonRelease; XSendEvent(d, w, True, ButtonReleaseMask, (XEvent*)&e);
 }
 
+static void move(Display* d, Window w, int x, int y) {
+  XMotionEvent m = { 0 };
+  m.display = d; m.window = w; m.root = DefaultRootWindow(d);
+  m.same_screen = True; m.x = x; m.y = y;
+  m.type = MotionNotify; XSendEvent(d, w, True, PointerMotionMask, (XEvent*)&m);
+  XFlush(d);
+}
+
 int main(int argc, char** argv) {
   Display* d = XOpenDisplay(NULL);
   if (!d || argc < 2) return 1;
@@ -117,6 +127,14 @@ int main(int argc, char** argv) {
     button(d, w, atoi(argv[2]), atoi(argv[3]), 1);
   } else if (!strcmp(argv[1], "rclick") && argc == 4) {
     button(d, w, atoi(argv[2]), atoi(argv[3]), 3);
+  } else if (!strcmp(argv[1], "move") && argc == 4) {
+    move(d, w, atoi(argv[2]), atoi(argv[3]));
+  } else if (!strcmp(argv[1], "sweep") && argc == 8) {
+    int x = atoi(argv[2]), y = atoi(argv[3]), x2 = atoi(argv[4]), y2 = atoi(argv[5]), n = atoi(argv[6]), ms = atoi(argv[7]);
+    for (int i = 0; i <= n; i++) {
+      move(d, w, x + (x2 - x) * i / (n ? n : 1), y + (y2 - y) * i / (n ? n : 1));
+      usleep(ms * 1000);
+    }
   } else if (!strcmp(argv[1], "drag") && argc == 6) {
     drag(d, w, atoi(argv[2]), atoi(argv[3]), atoi(argv[4]), atoi(argv[5]));
   } else if (!strcmp(argv[1], "wheel") && argc == 5) {

@@ -97,7 +97,12 @@ work="build/cc/$(basename "$out")"
 mkdir -p "$work"
 # stage clocks (ms) and peak RSS (KB) via /usr/bin/time when it is there
 now_ms() { echo $(( $(date +%s%N) / 1000000 )); }
-rss_cmd() { f=$1; shift; if [ -x /usr/bin/time ]; then /usr/bin/time -f %M -o "$f" "$@"; else "$@"; fi; }
+rss_cmd() {
+  f=$1; shift
+  if [ "$(uname -s)" = Darwin ]; then scripts/mac-rss.sh "$f" "$@"
+  elif [ -x /usr/bin/time ]; then /usr/bin/time -f %M -o "$f" "$@"
+  else "$@"; fi
+}
 t_start=$(now_ms)
 rm -f "$work/emit.rss"
 # bend's own emit runs on every core; keep it polite too. Its C is the

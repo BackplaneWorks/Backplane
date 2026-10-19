@@ -1,0 +1,98 @@
+[
+  {
+    "v": 1,
+    "conv": {
+      "id": "demo-mail-0",
+      "subject": "Rev C power review",
+      "kind": "dm",
+      "parts": [
+        "bot:mochi",
+        "bot:tofu"
+      ],
+      "project": "sensor",
+      "tags": [
+        "rev-c"
+      ],
+      "made": 1792427761,
+      "last": 1792427761,
+      "n": 1
+    },
+    "mail": {
+      "id": "demo-message-0",
+      "conv": "demo-mail-0",
+      "from": "bot:mochi",
+      "to": "bot:tofu",
+      "kind": "message",
+      "ref": "",
+      "want": "act",
+      "head": "Power and layout reviews are back. Please keep the sensor review handoff together for the gateway integration.",
+      "size": 110,
+      "at": 1792427761
+    },
+    "text": "Power and layout reviews are back. Please keep the sensor review handoff together for the gateway integration."
+  },
+  {
+    "v": 1,
+    "conv": {
+      "id": "demo-mail-1",
+      "subject": "Layout review complete",
+      "kind": "dm",
+      "parts": [
+        "bot:pixel",
+        "bot:tofu"
+      ],
+      "project": "sensor",
+      "tags": [
+        "rev-c"
+      ],
+      "made": 1792427762,
+      "last": 1792427762,
+      "n": 1
+    },
+    "mail": {
+      "id": "demo-message-1",
+      "conv": "demo-mail-1",
+      "from": "bot:pixel",
+      "to": "bot:tofu",
+      "kind": "message",
+      "ref": "",
+      "want": "fyi",
+      "head": "Antenna keepout and connector orientation checked. The control desk has the latest review state.",
+      "size": 96,
+      "at": 1792427762
+    },
+    "text": "Antenna keepout and connector orientation checked. The control desk has the latest review state."
+  },
+  {
+    "v": 1,
+    "conv": {
+      "id": "demo-mail-2",
+      "subject": "Gateway handoff",
+      "kind": "dm",
+      "parts": [
+        "bot:mochi",
+        "bot:tofu"
+      ],
+      "project": "sensor",
+      "tags": [
+        "rev-c"
+      ],
+      "made": 1792427763,
+      "last": 1792427763,
+      "n": 1
+    },
+    "mail": {
+      "id": "demo-message-2",
+      "conv": "demo-mail-2",
+      "from": "bot:mochi",
+      "to": "bot:tofu",
+      "kind": "message",
+      "ref": "",
+      "want": "fyi",
+      "head": "The BLE handoff is ready. Link the sensor findings before the next integration session.",
+      "size": 87,
+      "at": 1792427763
+    },
+    "text": "The BLE handoff is ready. Link the sensor findings before the next integration session."
+  }
+]

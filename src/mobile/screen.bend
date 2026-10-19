@@ -1133,7 +1133,7 @@ def Mob.thread(+lc: I.Loc, render: Bool, u: U.Ui, t: M.Thread, pend: List<&2, St
         J.KV{"draft", J.Json.str(U.Str.get(drafts, sel))},
         J.KV{"send", J.Json.str(U.Follow.button(lc, st, sel, V.View.running(turn), U.Follow.stop(V.View.running(turn), U.Str.get(drafts, sel), atts), U.Str.get(drafts, sel)))},
         J.KV{"sendAct", J.Json.str(U.Follow.act(U.Follow.stop(V.View.running(turn), U.Str.get(drafts, sel), atts)))},
-        J.KV{"picker", Mob.picker.ctx.loc(lc, U.Str.get(nf, "models"), pr, mo, U.Effort.of(st, sel), U.Usage.tail(st, sel))},
+        J.KV{"picker", Mob.picker.ctx.loc(lc, U.Models.phone(nf, pr, U.Str.get(drafts, "@f.mq")), pr, mo, U.Effort.of(st, sel), U.Usage.tail(st, sel))},
         J.KV{"skills", J.Json.arr(skills)}, J.KV{"btw", btw},
         J.KV{"attaching", J.Json.arr(Mob.chips(atts))}, J.KV{"uploading", J.Json.str(up)},
         J.KV{"chunk", J.Json.nat(AT.Att.chunk())},
@@ -1277,6 +1277,18 @@ def Mob.set.field(+name: String, +hint: String, secret: Bool, +value: String) ->
 
 def Mob.set.row.f(+label: String, +note: String, fs: List<&2, J.Json>, btns: List<&2, J.Json>) -> J.Json:
   J.Json.obj([J.KV{"label", J.Json.str(label)}, J.KV{"note", J.Json.str(note)}, J.KV{"fields", J.Json.arr(fs)}, J.KV{"buttons", J.Json.arr(btns)}])
+
+# Settings' model search (the picker's "mq"; it narrows the composer's
+# picker too), once the provider lists many models
+def Mob.set.find.k(many: Bool, +lc: I.Loc, +q: String) -> List<&2, J.Json>:
+  match many:
+    case True{}:
+      [Mob.set.row.f(MSG.T.common.search(lc), "", [Mob.set.field("mq", MSG.T.common.search(lc), False{}, q)], Nil{})]
+    case False{}:
+      Nil{}
+
+def Mob.set.find(+lc: I.Loc, u: U.Ui, +nf: Map<&2, String>, +prov: String) -> List<&2, J.Json>:
+  Mob.set.find.k(U.Models.search(U.Models.menu(U.Models.of(nf, prov), prov)), lc, U.Ui.scratch(u, "@f.mq"))
 
 # API keys (client.bend's ApiKeys), as on the web: Add and View, the form,
 # the names each with Delete
@@ -1502,8 +1514,9 @@ def Mob.settings.of.loc(+lc: I.Loc, +u: U.Ui, +st: M.State, +nf: Map<&2, String>
   J.Json.obj([J.KV{"rows", J.Json.arr(List.append(&2, J.Json, List.append(&2, J.Json, List.concat(&2, J.Json, [[
     Mob.set.row(Mob.set.days.label.loc(lc, M.Setting.get(st, "settle.days", "3")), MSG.T.settings.settle.note(lc), Mob.set.days(M.Setting.get(st, "settle.days", "3"))),
     Mob.set.row(MSG.T.settings.restart(lc), MSG.T.settings.restart.note(lc), Mob.set.chips.loc(lc, ["on", "off"], Bool.pick(String, M.Carry.on(st), "on", "off"), "restart.continue"))], Mob.notify(lc, st), Mob.agy.rows(U.Fallbackv.rows(u)), [
-    Mob.set.row(MSG.T.settings.provider(lc), Bool.pick(String, String.is_empty(U.Models.cli(models, prov)), MSG.T.settings.provider.missing(lc, prov), U.Models.cli(models, prov)), Mob.set.chips.loc(lc, ["claude", "codex", "grok", "muse", "antigravity"], prov, "agent.provider")),
-    Mob.set.row(MSG.T.settings.model(lc), Bool.pick(String, String.is_empty(model), MSG.T.common.default(lc), model) ++ ": " ++ U.Models.label_of(models, prov, model), Mob.set.chips.loc(lc, "" <> U.Models.list(models, prov), model, "agent.model")),
+    Mob.set.row(MSG.T.settings.provider(lc), Bool.pick(String, String.is_empty(U.Models.cli(models, prov)), MSG.T.settings.provider.missing(lc, prov), U.Models.cli(models, prov)), Mob.set.chips.loc(lc, ["claude", "codex", "grok", "muse", "antigravity", "opencode"], prov, "agent.provider")),
+    Mob.set.row(MSG.T.settings.model(lc), Bool.pick(String, String.is_empty(model), MSG.T.common.default(lc), model) ++ ": " ++ U.Models.label_of(U.Models.of(nf, prov), prov, model),
+      Mob.set.chips.loc(lc, U.Models.settings(U.Models.of(nf, prov), prov, U.Ui.scratch(u, "@f.mq"), model), model, "agent.model"))], Mob.set.find(lc, u, nf, prov), [
     Mob.set.row.f("KiCad", U.KN.summary(nf) ++ " · " ++ U.Str.get(nf, "kicad.cli"), [Mob.set.field("kpath", MSG.T.settings.kicad.path(lc), False{}, U.Ui.scratch(u, "@f.kpath"))], [Mob.set.btn(MSG.T.settings.kicad.path.save(lc), "kicad-path-save", "", False{})])], Mob.kn(U.KN.of(nf, st)), [
     Mob.set.row(U.FreeCAD.label.loc(lc, nf), U.FreeCAD.note(lc, nf), Nil{}),
     Mob.set.row(U.KiCad.ipc.label(lc, nf), U.KiCad.ipc.note(lc, nf), Bool.pick(List<&2, J.Json>, U.KiCad.ipc.ready(nf), Mob.set.chips.loc(lc, ["on", "off"], M.Setting.get(st, "kicad.ipc", "on"), "kicad.ipc"), Nil{})),
