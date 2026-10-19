@@ -82,6 +82,7 @@ import ./src/core/hier.bend as HI
 
 import ./src/core/boot.bend as BT
 import ./src/core/store.bend as ST
+import ./src/server/logread.bend as LOGREAD
 import ./src/core/sign.bend as SG
 import ./src/core/cron.bend as CR
 import ./src/core/google.bend as GO
@@ -7148,6 +7149,15 @@ def Laws.store_torn_tail_newline():
   {==}
 
 def Laws.store_fail_names_repair():
+  {==}
+
+def Laws.log_read_missing_only():
+  {==}
+
+def Laws.log_read_complete_only():
+  {==}
+
+def Laws.log_read_native_capacity():
   {==}
 
 def Laws.task_repair_finishes_ended_child():

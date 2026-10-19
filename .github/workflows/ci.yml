@@ -112,6 +112,10 @@ jobs:
         env:
           BACKPLANE_SKIP_CHECK: "1" # the laws job checks every file
       - run: scripts/smoke.sh
+      - name: Test event log startup
+        run: |
+          BACKPLANE_SKIP_CHECK=1 scripts/build-app.sh test/native/log_read.bend build/log_read
+          bun test/tools/logread_e2e.ts dist/backplane build/wire build/log_read
       - uses: actions/upload-artifact@v4
         with:
           name: backplane-${{ matrix.target }}
