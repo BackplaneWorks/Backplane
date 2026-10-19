@@ -11,10 +11,11 @@ export BACKPLANE_BROWSER="$scratch/browser"
 export BACKPLANE_TEST_CACHE="$scratch/cache"
 cat > "$BACKPLANE_BROWSER" <<'SH'
 #!/bin/sh
-exec flatpak run --nofilesystem=host --filesystem="$PWD:ro" --env="BACKPLANE_CEF=$BACKPLANE_CEF" --env="XDG_CACHE_HOME=$BACKPLANE_TEST_CACHE" --command=/app/lib/backplane/backplane-browser io.github.i2cjak.Backplane "$@"
+exec flatpak run --nofilesystem=host --filesystem="$PWD:ro" --env="BACKPLANE_CEF=$BACKPLANE_CEF" --env="BACKPLANE_TEST_CACHE=$BACKPLANE_TEST_CACHE" --command=sh io.github.i2cjak.Backplane -c 'export XDG_CACHE_HOME="$BACKPLANE_TEST_CACHE"; exec /app/lib/backplane/backplane-browser "$@"' sh "$@"
 SH
 chmod +x "$BACKPLANE_BROWSER"
-flatpak run --nofilesystem=host --env="XDG_CACHE_HOME=$BACKPLANE_TEST_CACHE" --command=sh "$app" -c 'printf "Sandbox cache: %s\n" "$XDG_CACHE_HOME"; test ! -e /opt/google/chrome/chrome'
+# Flatpak sets XDG_CACHE_HOME after applying --env, so isolate it in the shell.
+flatpak run --nofilesystem=host --command=sh "$app" -c 'test ! -e /opt/google/chrome/chrome'
 # Exercise first-use Chrome download, owner isolation, input, uploads/downloads,
 # JPEG/RGB frames, screenshots, PDF and profile persistence in the actual app.
 timeout 240 bun tools/browser/test/pages.ts
@@ -24,7 +25,7 @@ flatpak run --share=network --filesystem=host --filesystem=/tmp --command=sh org
 timeout 240 bun test/tools/flatpak_browser.ts
 cat > "$scratch/app" <<'SH'
 #!/bin/sh
-exec flatpak run --nofilesystem=host --filesystem="$PWD:ro" --env="BACKPLANE_CEF=$BACKPLANE_CEF" --env="XDG_CACHE_HOME=$BACKPLANE_TEST_CACHE" io.github.i2cjak.Backplane "$@"
+exec flatpak run --nofilesystem=host --filesystem="$PWD:ro" --env="BACKPLANE_CEF=$BACKPLANE_CEF" --env="BACKPLANE_TEST_CACHE=$BACKPLANE_TEST_CACHE" --command=sh io.github.i2cjak.Backplane -c 'export XDG_CACHE_HOME="$BACKPLANE_TEST_CACHE"; exec /app/bin/backplane "$@"' sh "$@"
 SH
 chmod +x "$scratch/app"
 bend test/wire/index.html -o "$scratch/wire" >/dev/null
