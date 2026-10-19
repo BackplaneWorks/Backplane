@@ -71,8 +71,13 @@ async function evalPage(port: number, path: string, expression: string) {
 }
 function processTree(pid: number): number[] {
   try {
-    const kids = readFileSync(`/proc/${pid}/task/${pid}/children`, "utf8").trim().split(/\s+/).filter(Boolean).map(Number);
-    return [pid, ...kids.flatMap(processTree)];
+    // children belongs to a task, not the whole thread group. The hub's
+    // worker threads can launch the helper, so inspect every owned task.
+    const kids = new Set(readdirSync(`/proc/${pid}/task`).flatMap(task => {
+      try { return readFileSync(`/proc/${pid}/task/${task}/children`, "utf8").trim().split(/\s+/).filter(Boolean).map(Number); }
+      catch { return []; }
+    }));
+    return [pid, ...[...kids].flatMap(processTree)];
   } catch { return []; }
 }
 const shotDir = process.env.CEF_SHOTS ?? resolve("cef-window-shots");
@@ -240,11 +245,16 @@ try {
   await rpc("bots.teach", { bot: bot.id, op: "discard" });
   // status.hostPid is local to the helper's PID namespace in Flatpak. Follow
   // our own app's descendants on the host so this also checks sandboxed CEF.
-  const cefPids = processTree(app.pid).filter(pid => {
-    try { return readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0")[0].endsWith("/backplane-cef"); }
+  const appPids = processTree(app.pid);
+  const command = (pid: number) => {
+    try { return readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0")[0]; }
+    catch { return ""; }
+  };
+  const cefPids = appPids.filter(pid => {
+    try { return command(pid).split("/").at(-1) === "backplane-cef"; }
     catch { return false; }
   });
-  check("owned CEF process tree exists", cefPids.length > 0);
+  check("owned CEF process tree exists", cefPids.length > 0, appPids.map(pid => ({ pid, command: command(pid) })));
   const beforeChromePics = await picCount();
   await rpc("setting.set", { key: "browser.engine", value: "chrome" });
   await until(() => info["browser.engine.live"] === "chrome", "Chrome restored", 60000);
