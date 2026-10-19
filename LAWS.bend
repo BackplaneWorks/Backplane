@@ -127,6 +127,7 @@ import ./src/core/hier.bend as HI
 
 import ./src/core/boot.bend as BT
 import ./src/core/store.bend as ST
+import ./src/server/logread.bend as LOGREAD
 import ./src/core/sign.bend as SG
 import ./src/core/ring.bend as RG
 import ./src/core/cron.bend as CR
@@ -5102,6 +5103,16 @@ law store_torn_tail_newline:
 
 law store_fail_names_repair:
   {ST.Store.fail.msg("disk full", True{}) ++ "|" ++ ST.Store.fail.msg("disk full", False{}) == "disk full|disk full; the log's tail could not be repaired" : String}
+
+# An existing history must not be replayed as empty after an IO failure.
+law log_read_missing_only:
+  {[LOGREAD.LogRead.missing(2), LOGREAD.LogRead.missing(0), LOGREAD.LogRead.missing(5), LOGREAD.LogRead.missing(13)] == [True{}, False{}, False{}, False{}] : List<&2, Bool>}
+
+law log_read_complete_only:
+  {[LOGREAD.LogRead.complete(0, 0n), LOGREAD.LogRead.complete(3, 3n), LOGREAD.LogRead.complete(3, 2n), LOGREAD.LogRead.complete(3, 4n)] == [True{}, True{}, False{}, False{}] : List<&2, Bool>}
+
+law log_read_native_capacity:
+  {[LOGREAD.LogRead.supported(0), LOGREAD.LogRead.supported(2147483647), LOGREAD.LogRead.supported(2147483648), LOGREAD.LogRead.supported(4294967295)] == [True{}, True{}, False{}, False{}] : List<&2, Bool>}
 
 # torn before the task's state: the child's turn ended, so its task ends
 law task_repair_finishes_ended_child:

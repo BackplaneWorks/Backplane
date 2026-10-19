@@ -130,6 +130,10 @@ jobs:
         run: |
           scripts/build-app.sh test/native/git_test.bend build/git_test
           build/git_test
+      - name: Test event log startup
+        run: |
+          BACKPLANE_SKIP_CHECK=1 scripts/build-app.sh test/native/log_read.bend build/log_read
+          bun test/tools/logread_e2e.ts dist/backplane build/wire build/log_read
       - uses: actions/upload-artifact@v4
         with:
           name: backplane-${{ matrix.target }}

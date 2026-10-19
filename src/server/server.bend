@@ -54,6 +54,7 @@ import ../core/attach.bend as AT
 import ../core/sha1.bend as SH
 import ../core/boot.bend as BT
 import ../core/store.bend as ST
+import ./logread.bend as LOG
 import ./botnet.bend as BN
 import ../core/far.bend as FR
 import ../core/fview.bend as FV
@@ -14133,7 +14134,7 @@ def Main.boot(cfg: Cfg, need: Bool, front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
         H.Env.put("BACKPLANE_HOME", home)
         Agents.only(home)
         t0 : U32 <- PS.Perf.us()
-        +bs : List<&2, U32> <- Files.read(Store.path(home))
+        +bs : List<&2, U32> <- LOG.LogRead.bytes(Store.path(home))
         t1 : U32 <- PS.Perf.span("boot.read", t0)
         +ld : ST.Loaded = ST.Store.load(Store.lines(bs), ST.Loaded{M.State.empty(), Nil{}})
         +st : M.State = ST.Loaded.st(ld)
