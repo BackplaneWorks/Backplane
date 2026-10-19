@@ -77,9 +77,10 @@ Git.skipped(s) -> Bool
 ```
 
 - Every new thread gets a worktree of its project's repository on a fresh `backplane/<8 hex>` branch from upstream: origin's default branch (`origin/main`), fetched first (30 s at most; offline, the last fetched one), with no tracking so a push never goes to main. Without an origin it starts from HEAD (the thread setting `thread.env`: `auto`, the default, or `worktree`; `local` works in the folder). The first message names the branch.
+- For a project inside a repository, if its relative path is not a directory in the upstream commit but is a directory in HEAD, the new worktree starts from HEAD instead. For example, a checked-out feature branch may add `mechanical/fixture/` before that folder reaches `origin/main`; a thread for that project then has a working directory at the same relative path. Repository-root projects and folders already present upstream keep the usual upstream base. This exception selects the starting commit; the uncommitted-work rules below still apply.
 - The worktree lives in the repository, under `.backplane/worktrees/`, listed in `info/exclude` (not `.gitignore`), so the folder's status, file list and checkpoints never see it. A project that is a folder inside a bigger repository works at the same place in its worktree.
 - No repository, or no commit yet: the thread works in the project folder (`WorktreeSkipped`). Until the worktree exists (at most two minutes), the thread's messages wait in its queue.
-- A hardware project (KiCad files in the project folder) brings its uncommitted work into the new worktree: changed and untracked files (not ignored ones, KiCad backups, locks, autosaves or the footprint cache), and deletions. Such a worktree starts from HEAD instead of upstream, since the carried files were made against it. A software project starts clean from upstream.
+- A hardware project (KiCad files in the project folder) brings its uncommitted work into the new worktree: staged and unstaged changes, untracked files (not ignored ones, KiCad backups, locks, autosaves or the footprint cache), and deletions. The new worktree gets the files' current contents; the source's index is unchanged. Such a worktree starts from HEAD instead of upstream, since the carried files were made against it. A software project starts clean from upstream.
 - The viewer shows the selected thread's worktree, so it shows the board that thread edits.
 
 Removal (`M.Worktree.drop`, laws `worktree_kept_*`, `worktree_dropped_*`):
@@ -128,7 +129,7 @@ refs/backplane/checkpoints/<b64url(thread_id)>/turn/<n>
   - it is pointed to only by its hidden ref, so no branch moves and no commit lands on the user's branch.
 
 How a capture works:
-- The work tree is staged into the thread's own index file, `<git-dir>/backplane-<b64url(thread_id)>.index`. Git runs as `env GIT_INDEX_FILE=<idx> git add -A`, which picks up tracked and untracked files but respects `.gitignore`.
+- The real index's staged path records seed a fresh private index file, `<git-dir>/backplane-<b64url(thread_id)>.index`, before each capture. Git runs as `env GIT_INDEX_FILE=<idx> git add -A`, which records the current working contents of tracked files (including tracked files that match ignore rules) and non-ignored untracked files. An unborn repository with no index starts with an empty private index. Cached file metadata and optimization flags are omitted so working contents are always read. The real index and its staged contents are never changed.
 - `git write-tree` turns that index into a tree.
 - `git commit-tree` makes the commit, and `git update-ref` points the hidden ref at it.
 - In a worktree, `<git-dir>` is that worktree's private git directory.
@@ -136,9 +137,9 @@ How a capture works:
 `diff_worktree` snapshots the current files the same way and diffs the checkpoint against that tree, so untracked new files show up.
 
 How a revert works:
-1. It syncs the thread index with the current files (`add -A`).
+1. It seeds the thread index from the real index, then syncs it with the current files (`add -A`).
 2. It runs `read-tree -u --reset <checkpoint tree>`. Files that differ are restored. Files the checkpoint lacks are deleted if they are tracked, or untracked and not ignored.
-- Ignored files are never in that index, so they are never touched.
+- Ignored untracked files stay outside that index and are left alone. Ignored tracked files are restored like other tracked files.
 - HEAD, the branch and the real index do not move.
 
 All diffs use `-c core.quotepath=false diff --no-color --no-ext-diff --src-prefix=a/ --dst-prefix=b/ -M`.
@@ -173,3 +174,5 @@ Git.act(cwd, action, message, title, body) -> IO(String)
 - **commit**: runs `git add -A`, then `git commit -m <message>`. The default message is "Update from Backplane". The step answers `commit: <short sha> <subject>`, or `commit: nothing to commit`. Nothing to commit is not a failure, so a later push still runs.
 - **push**: runs `git push` when the branch has an upstream. Otherwise it runs `git push -u origin <branch>`. It answers `push: <branch>[ -> origin/<branch>]`. A detached HEAD is an error.
 - **create_pr**: runs `gh pr create --title T --body B --head <branch>`, or `--fill` when the title is empty. It answers `pr: <url>`, taken from the last line of gh's output.
+
+Carrying work into a thread retains newly tracked paths as intent-to-add in the destination, so newly tracked ignored files remain part of later checkpoints. The source index remains byte-for-byte unchanged; the destination has no staged content. A failed copy, extraction, deletion or tracking update returns an error and leaves source work intact.

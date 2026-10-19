@@ -77,11 +77,13 @@ import ./src/mobile/hubs.bend as Hb
 import ./src/mobile/bots.bend as MBN
 import ./src/core/space.bend as SPC
 import ./src/core/client.bend as U
+import ./src/core/rpcout.bend as RPO
 import ./src/core/menu.bend as MN
 import ./src/core/hier.bend as HI
 
 import ./src/core/boot.bend as BT
 import ./src/core/store.bend as ST
+import ./src/server/logread.bend as LOGREAD
 import ./src/core/sign.bend as SG
 import ./src/core/cron.bend as CR
 import ./src/core/google.bend as GO
@@ -4510,6 +4512,19 @@ def Laws.reset_new_origin_drops_viewer():
 def Laws.reset_drops_results():
   {==}
 
+def Laws.client_outbox_numeric_order():
+  {==}
+
+def Laws.client_outbox_legacy_empty():
+  {==}
+
+def Laws.client_outbox_payload_exact(request):
+  match request:
+    case SNil{}:
+      {==}
+    case SCon{c, t}:
+      {==}
+
 def Laws.far_feed_after_stops():
   {==}
 
@@ -7148,6 +7163,15 @@ def Laws.store_torn_tail_newline():
   {==}
 
 def Laws.store_fail_names_repair():
+  {==}
+
+def Laws.log_read_missing_only():
+  {==}
+
+def Laws.log_read_complete_only():
+  {==}
+
+def Laws.log_read_native_capacity():
   {==}
 
 def Laws.task_repair_finishes_ended_child():

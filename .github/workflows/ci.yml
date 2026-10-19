@@ -98,6 +98,25 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang-19 libx11-dev
           sudo ln -sf /usr/bin/clang-19 /usr/local/bin/clang
+      - name: Carry staged work into thread worktrees
+        run: |
+          set -euo pipefail
+          scripts/build-app.sh test/native/worktree_carry_test.bend build/worktree_carry_test
+          build/worktree_carry_test | tee build/worktree-carry.log
+          ! grep -q '^FAIL ' build/worktree-carry.log
+          test "$(grep -c '^ok ' build/worktree-carry.log)" -eq 37
+      - name: Preserve carried work throughout thread lifecycle
+        run: |
+          set -euo pipefail
+          scripts/build-app.sh test/native/worktree_lifecycle_test.bend build/worktree_lifecycle_test
+          build/worktree_lifecycle_test
+      - name: Preserve ignored tracked files in checkpoints
+        run: |
+          set -euo pipefail
+          scripts/build-app.sh test/native/checkpoint_ignored_test.bend build/checkpoint_ignored_test
+          build/checkpoint_ignored_test | tee build/checkpoint-ignored.log
+          if grep -q '^FAIL ' build/checkpoint-ignored.log; then exit 1; fi
+          test "$(grep -c '^ok ' build/checkpoint-ignored.log)" -eq 53
       - name: Object cache
         # the compiled C units, by hash of their text (scripts/cc-unit.sh): an
         # unchanged unit is not compiled again. Never holds the Google client
@@ -108,10 +127,30 @@ jobs:
           key: objs-${{ matrix.target }}-${{ github.sha }}
           restore-keys: objs-${{ matrix.target }}-
       - run: clang --version
+      - name: Native reconnect state
+        run: |
+          set -o pipefail
+          scripts/build-app.sh test/outbox_test.bend build/outbox_test
+          build/outbox_test | tee build/outbox-native.log
+          ! grep -q '^FAIL ' build/outbox-native.log
+          test "$(grep -c '^ok ' build/outbox-native.log)" -eq 42
       - run: scripts/build.sh
         env:
           BACKPLANE_SKIP_CHECK: "1" # the laws job checks every file
       - run: scripts/smoke.sh
+      - name: Test Git worktrees
+        run: |
+          scripts/build-app.sh test/native/git_test.bend build/git_test
+          build/git_test
+      - name: Test event log startup
+        run: |
+          BACKPLANE_SKIP_CHECK=1 scripts/build-app.sh test/native/log_read.bend build/log_read
+          bun test/tools/logread_e2e.ts dist/backplane build/wire build/log_read
+      - name: Reconnect request ordering
+        run: |
+          set -o pipefail
+          bend test/fixtures/outbox/index.html -o build/outbox-client
+          bun test/tools/outbox_e2e.ts dist/backplane build/outbox-client
       - uses: actions/upload-artifact@v4
         with:
           name: backplane-${{ matrix.target }}
