@@ -1,5 +1,19 @@
 import Base
 
+# A Linux package builds the app once and installs the same executable at
+# both names. Only this exact basename selects the server's entry point.
+# Inspect argv[0], rather than /proc/self/exe: callers may use PATH, and a
+# running executable may have been replaced before it restarts.
+def Exe.serve(+name: String) -> Bool:
+  Bool.or(String.eq(name, "backplane-serve"), String.ends_with(name, "/backplane-serve"))
+
+def Exe.server(args: List<String>) -> Bool:
+  match args:
+    case Nil{}:
+      False{}
+    case name <> _:
+      Exe.serve(name)
+
 # Where the hub's own binary is. Linux reports /proc/self/exe as
 # "<path> (deleted)" once an install or update has replaced the file by
 # rename while the hub keeps running.

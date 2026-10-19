@@ -28,68 +28,68 @@ import ../core/teach.bend as TE
 # threads elsewhere (far.bend: mirrors, pushes, this hub's feed), and each
 # thread's streamed text since its last message (core/live.bend)
 type Bn is Data:
-  Bn{dir: String, seen: SG.Seen, work: BH.DirWork, far: FR.Fh, live: List<&2, LV.Buf>, broken: String, fl: List<&2, FL.LQ>, tools: List<&2, String>, tch: TE.TeachSt, cef: List<&2, CF.CefSession>}
+  Bn{dir: String, seen: SG.Seen, work: BH.DirWork, far: FR.Fh, live: List<&2, LV.Buf>, broken: String, fl: List<&2, FL.LQ>, tools: List<&2, String>, tch: TE.TeachSt, cef: List<&2, CF.CefSession>, wire_n: Nat}
 
 def Bn.empty() -> Bn:
-  Bn{"[]", SG.Seen.empty(), BH.DirWork.empty(), FR.Fh.empty(), Nil{}, "", Nil{}, Nil{}, TE.Teach.empty(), [CF.Cef.empty()]}
+  Bn{"[]", SG.Seen.empty(), BH.DirWork.empty(), FR.Fh.empty(), Nil{}, "", Nil{}, Nil{}, TE.Teach.empty(), [CF.Cef.empty()], 0n}
 
 def Bn.dir(b: Bn) -> String:
   match b:
-    case Bn{d, _, _, _, lv, _, _, _, _, cp}:
+    case Bn{d, _, _, _, lv, _, _, _, _, cp, wn}:
       d
 
 def Bn.far(b: Bn) -> FR.Fh:
   match b:
-    case Bn{_, _, _, f, lv, _, _, _, _, cp}:
+    case Bn{_, _, _, f, lv, _, _, _, _, cp, wn}:
       f
 
 def Bn.live(b: Bn) -> List<&2, LV.Buf>:
   match b:
-    case Bn{_, _, _, _, lv, _, _, _, _, cp}:
+    case Bn{_, _, _, _, lv, _, _, _, _, cp, wn}:
       lv
 
 # the open tool calls (core/deploy.bend's Open.*): in memory only
 def Bn.tools(b: Bn) -> List<&2, String>:
   match b:
-    case Bn{_, _, _, _, _, _, _, tl, _, cp}:
+    case Bn{_, _, _, _, _, _, _, tl, _, cp, wn}:
       tl
 
 def Bn.with_tools(b: Bn, tl: List<&2, String>) -> Bn:
   match b:
-    case Bn{d, s, w, f, lv, bk, fl, _, tc, cp}:
-      Bn{d, s, w, f, lv, bk, fl, tl, tc, cp}
+    case Bn{d, s, w, f, lv, bk, fl, _, tc, cp, wn}:
+      Bn{d, s, w, f, lv, bk, fl, tl, tc, cp, wn}
 
 def Bn.fl(b: Bn) -> List<&2, FL.LQ>:
   match b:
-    case Bn{_, _, _, _, _, _, q, _, _, cp}:
+    case Bn{_, _, _, _, _, _, q, _, _, cp, wn}:
       q
 
 def Bn.with_fl(b: Bn, q: List<&2, FL.LQ>) -> Bn:
   match b:
-    case Bn{d, s, w, f, lv, bk, _, tl, tc, cp}:
-      Bn{d, s, w, f, lv, bk, q, tl, tc, cp}
+    case Bn{d, s, w, f, lv, bk, _, tl, tc, cp, wn}:
+      Bn{d, s, w, f, lv, bk, q, tl, tc, cp, wn}
 
 def Bn.with_live(b: Bn, lv: List<&2, LV.Buf>) -> Bn:
   match b:
-    case Bn{d, s, w, f, _, bk, fl, tl, tc, cp}:
-      Bn{d, s, w, f, lv, bk, fl, tl, tc, cp}
+    case Bn{d, s, w, f, _, bk, fl, tl, tc, cp, wn}:
+      Bn{d, s, w, f, lv, bk, fl, tl, tc, cp, wn}
 
 # why the log can no longer be appended to ("" while it can): a failed
 # write could not be taken back, so nothing more is committed until it is
 def Bn.broken(b: Bn) -> String:
   match b:
-    case Bn{_, _, _, _, _, bk, _, _, _, cp}:
+    case Bn{_, _, _, _, _, bk, _, _, _, cp, wn}:
       bk
 
 def Bn.with_broken(b: Bn, +bk: String) -> Bn:
   match b:
-    case Bn{d, s, w, f, lv, _, fl, tl, tc, cp}:
-      Bn{d, s, w, f, lv, bk, fl, tl, tc, cp}
+    case Bn{d, s, w, f, lv, _, fl, tl, tc, cp, wn}:
+      Bn{d, s, w, f, lv, bk, fl, tl, tc, cp, wn}
 
 def Bn.with_far(b: Bn, f: FR.Fh) -> Bn:
   match b:
-    case Bn{d, s, w, _, lv, bk, fl, tl, tc, cp}:
-      Bn{d, s, w, f, lv, bk, fl, tl, tc, cp}
+    case Bn{d, s, w, _, lv, bk, fl, tl, tc, cp, wn}:
+      Bn{d, s, w, f, lv, bk, fl, tl, tc, cp, wn}
 
 # Files
 # -----
@@ -477,18 +477,18 @@ def Bn.seen.k(had: Bool, s: SG.Seen, +key: String, +now: Nat) -> Maybe<&2, SG.Se
 
 def Bn.accept(+b: Bn, +key: String, +now: Nat) -> Maybe<&2, SG.Seen>:
   match b:
-    case Bn{_, +s, _, _, lv, _, _, _, _, cp}:
+    case Bn{_, +s, _, _, lv, _, _, _, _, cp, wn}:
       Bn.seen.k(SG.Seen.has(s, key), s, key, now)
 
 def Bn.with_seen(b: Bn, s: SG.Seen) -> Bn:
   match b:
-    case Bn{d, _, w, f, lv, bk, fl, tl, tc, cp}:
-      Bn{d, s, w, f, lv, bk, fl, tl, tc, cp}
+    case Bn{d, _, w, f, lv, bk, fl, tl, tc, cp, wn}:
+      Bn{d, s, w, f, lv, bk, fl, tl, tc, cp, wn}
 
 def Bn.with_dir(b: Bn, d: String) -> Bn:
   match b:
-    case Bn{_, s, w, f, lv, bk, fl, tl, tc, cp}:
-      Bn{d, s, w, f, lv, bk, fl, tl, tc, cp}
+    case Bn{_, s, w, f, lv, bk, fl, tl, tc, cp, wn}:
+      Bn{d, s, w, f, lv, bk, fl, tl, tc, cp, wn}
 
 # Signed requests out
 # -------------------
@@ -740,13 +740,13 @@ def Bn.fetched(r: Resp, +peer: String, +pname: String, +now: Nat) -> Maybe<&2, L
 
 def Bn.work(b: Bn) -> BH.DirWork:
   match b:
-    case Bn{_, _, w, _, lv, _, _, _, _, cp}:
+    case Bn{_, _, w, _, lv, _, _, _, _, cp, wn}:
       w
 
 def Bn.with_work(b: Bn, w: BH.DirWork) -> Bn:
   match b:
-    case Bn{d, s, _, f, lv, bk, fl, tl, tc, cp}:
-      Bn{d, s, w, f, lv, bk, fl, tl, tc, cp}
+    case Bn{d, s, _, f, lv, bk, fl, tl, tc, cp, wn}:
+      Bn{d, s, w, f, lv, bk, fl, tl, tc, cp, wn}
 
 def Bn.cache(home: String) -> String:
   home ++ "/bots.cache"
@@ -775,13 +775,13 @@ def Bf.append(+path: String, text: String) -> IO(Bool):
 
 def Bn.tch(b: Bn) -> TE.TeachSt:
   match b:
-    case Bn{_, _, _, _, _, _, _, _, t, cp}:
+    case Bn{_, _, _, _, _, _, _, _, t, cp, wn}:
       t
 
 def Bn.with_tch(b: Bn, t: TE.TeachSt) -> Bn:
   match b:
-    case Bn{d, s, w, f, lv, bk, fl, tl, _, cp}:
-      Bn{d, s, w, f, lv, bk, fl, tl, t, cp}
+    case Bn{d, s, w, f, lv, bk, fl, tl, _, cp, wn}:
+      Bn{d, s, w, f, lv, bk, fl, tl, t, cp, wn}
 
 def Bn.cef.head(cs: List<&2, CF.CefSession>) -> CF.CefSession:
   match cs:
@@ -790,9 +790,19 @@ def Bn.cef.head(cs: List<&2, CF.CefSession>) -> CF.CefSession:
 
 def Bn.cef(b: Bn) -> CF.CefSession:
   match b:
-    case Bn{_, _, _, _, _, _, _, _, _, c}: Bn.cef.head(c)
+    case Bn{_, _, _, _, _, _, _, _, _, c, wn}: Bn.cef.head(c)
 
 def Bn.with_cef(b: Bn, c: CF.CefSession) -> Bn:
   match b:
-    case Bn{d, s, w, f, lv, bk, fl, tl, tc, _}:
-      Bn{d, s, w, f, lv, bk, fl, tl, tc, [c]}
+    case Bn{d, s, w, f, lv, bk, fl, tl, tc, _, wn}:
+      Bn{d, s, w, f, lv, bk, fl, tl, tc, [c], wn}
+
+# Local wire-log line count, independent of state sequence and far mirrors.
+# This runtime value is initialized once after replay, never persisted.
+def Bn.wire_n(b: Bn) -> Nat:
+  match b:
+    case Bn{_, _, _, _, _, _, _, _, _, _, n}: n
+
+def Bn.with_wire_n(b: Bn, n: Nat) -> Bn:
+  match b:
+    case Bn{d, s, w, f, lv, bk, fl, tl, tc, cp, _}: Bn{d, s, w, f, lv, bk, fl, tl, tc, cp, n}

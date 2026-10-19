@@ -24,7 +24,7 @@ const until = async <T>(ms: number, f: () => T | undefined, label = "condition")
   for (;;) { const v = f(); if (v) return v; if (Date.now() > end) throw new Error(`timed out: ${label}`); await sleep(50); }
 };
 const hub = Bun.spawn([resolve(bin), "--home", home, "--port", String(port), "--no-tailscale", "--foreground"], {
-  env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "", BACKPLANE_GOOGLE_BAKE: "0", BACKPLANE_WAKE_TICK_MS: "1000", BP_WORK_MS: "200", FAKE_LOG: log, PATH: `${fake}:${process.env.PATH}` }, stdout: "ignore", stderr: Bun.file(join(root, "hub.log")),
+  env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "", BACKPLANE_GOOGLE_BAKE: "0", BACKPLANE_WAKE_TICK_MS: "1000", BP_WORK_MS: "200", FAKE_LOG: log, BACKPLANE_AGENTS: fake, PATH: `${fake}:${process.env.PATH}` }, stdout: "ignore", stderr: Bun.file(join(root, "hub.log")),
 });
 let ws: WebSocket | undefined;
 const seen: any[] = [];

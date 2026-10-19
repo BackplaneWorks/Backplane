@@ -1,0 +1,1 @@
+{"t": "info", "info": {"models": "{\"claude\": [\"sonnet\"], \"codex\": [\"gpt-6.1-sol\"], \"grok\": [], \"muse\": [], \"antigravity\": [], \"about\": {\"claude\": {\"cli\": \"Claude test CLI\"}, \"codex\": {\"cli\": \"Codex test CLI\"}}}"}}

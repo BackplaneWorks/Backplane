@@ -49,7 +49,7 @@ struct AppTabs: View {
         TabView(selection: Binding(get: { model.tab }, set: { model.switchTab($0) })) {
             ForEach(AppTab.allCases) { t in
                 stack(t)
-                    .tabItem { Label(t.title, systemImage: t.icon) }
+                    .tabItem { Label(t.title(screen.locale ?? "en"), systemImage: t.icon) }
                     .badge(badge(t))
                     .tag(t)
             }
@@ -78,6 +78,7 @@ struct AppTabs: View {
 // ----
 
 struct BotsTab: View {
+    @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let screen: Screen
     @State private var part = "bots"
@@ -85,9 +86,9 @@ struct BotsTab: View {
     var body: some View {
         List {
             Section {
-                Picker("Show", selection: $part) {
-                    Text("Bots").tag("bots")
-                    Text("Rooms").tag("rooms")
+                Picker(NativeMessages.common_show(lang), selection: $part) {
+                    Text(NativeMessages.tour_title_bots(lang)).tag("bots")
+                    Text(NativeMessages.bots_rooms(lang)).tag("rooms")
                 }
                 .pickerStyle(.segmented)
                 .listRowBackground(Color.clear)
@@ -137,12 +138,12 @@ struct BotsTab: View {
         }
         .overlay {
             if part == "bots" && screen.bots.isEmpty {
-                ContentUnavailableView("No bots yet", systemImage: "pawprint", description: Text("Make one with the plus button."))
+                ContentUnavailableView(NativeMessages.native_bot_empty(lang), systemImage: "pawprint", description: Text(NativeMessages.native_bot_create_hint(lang)))
             } else if part == "rooms" && screen.rooms.isEmpty {
-                ContentUnavailableView("No rooms yet", systemImage: "bubble.left.and.bubble.right", description: Text("Make one with the plus button."))
+                ContentUnavailableView(NativeMessages.native_room_empty(lang), systemImage: "bubble.left.and.bubble.right", description: Text(NativeMessages.native_bot_create_hint(lang)))
             }
         }
-        .navigationTitle("Bots")
+        .navigationTitle(NativeMessages.tour_title_bots(lang))
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
@@ -150,18 +151,18 @@ struct BotsTab: View {
                     if screen.hubs.count > 1 {
                         ForEach(screen.hubs, id: \.key) { h in
                             Menu(h.name) {
-                                Button("New bot", systemImage: "cat") { model.act("bot-new", h.key + "|") }
-                                Button("New room", systemImage: "bubble.left.and.bubble.right") { model.act("room-new", h.key + "|") }
+                                Button(NativeMessages.bots_new(lang), systemImage: "cat") { model.act("bot-new", h.key + "|") }
+                                Button(NativeMessages.rooms_new(lang), systemImage: "bubble.left.and.bubble.right") { model.act("room-new", h.key + "|") }
                             }
                         }
                     } else {
-                        Button("New bot", systemImage: "cat") { model.act("bot-new") }
-                        Button("New room", systemImage: "bubble.left.and.bubble.right") { model.act("room-new") }
+                        Button(NativeMessages.bots_new(lang), systemImage: "cat") { model.act("bot-new") }
+                        Button(NativeMessages.rooms_new(lang), systemImage: "bubble.left.and.bubble.right") { model.act("room-new") }
                     }
                 } label: {
                     Image(systemName: "plus")
                 }
-                .accessibilityLabel("New bot or room")
+                .accessibilityLabel(NativeMessages.native_bot_create_menu(lang))
             }
         }
     }
@@ -171,6 +172,7 @@ struct BotsTab: View {
 // --------
 
 struct RoutinesPage: View {
+    @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let screen: Screen
 
@@ -184,7 +186,7 @@ struct RoutinesPage: View {
     }
 
     private func when(_ r: RoutineRow) -> String {
-        [r.state == "done" ? (r.doneText ?? "") : r.sub, r.zone ?? "", r.ago.isEmpty ? "" : "last " + r.ago + " ago"].filter { !$0.isEmpty }.joined(separator: " · ")
+        [r.state == "done" ? (r.doneText ?? "") : r.sub, r.zone ?? "", r.ago.isEmpty ? "" : NativeMessages.native_routine_last(lang, r.ago)].filter { !$0.isEmpty }.joined(separator: " · ")
     }
 
     var body: some View {
@@ -211,10 +213,10 @@ struct RoutinesPage: View {
         }
         .overlay {
             if rows.isEmpty {
-                ContentUnavailableView("No routines", systemImage: "clock.arrow.circlepath", description: Text("A bot's Routines tab makes them."))
+                ContentUnavailableView(NativeMessages.native_routines_empty(lang), systemImage: "clock.arrow.circlepath", description: Text(NativeMessages.native_routines_note(lang)))
             }
         }
-        .navigationTitle("Routines")
+        .navigationTitle(NativeMessages.bots_tab_routines(lang))
     }
 }
 
@@ -231,6 +233,8 @@ struct AppSettingsTab: View {
     @State private var cacheBytes = 0
     @State private var confirmClear = false
 
+    private var tag: String { screen.locale ?? "en" }
+
     private var listBinding: Binding<String> {
         Binding(get: { settings.threadList.isEmpty ? (screen.view ?? "projects") : settings.threadList }, set: { model.threadList($0) })
     }
@@ -246,9 +250,9 @@ struct AppSettingsTab: View {
 
     private var notificationWord: String {
         switch notifications {
-        case .authorized, .provisional, .ephemeral: "On"
-        case .denied: "Off"
-        default: "Not asked"
+        case .authorized, .provisional, .ephemeral: NativeMessages.settings_lang_on(tag)
+        case .denied: NativeMessages.settings_lang_off(tag)
+        default: NativeMessages.native_settings_notasked(tag)
         }
     }
 
@@ -259,86 +263,85 @@ struct AppSettingsTab: View {
 
     var body: some View {
         Form {
-            Section("Appearance") {
-                Picker("Appearance", selection: $settings.appearance) {
-                    Text("System").tag("system")
-                    Text("Light").tag("light")
-                    Text("Dark").tag("dark")
+            Section(NativeMessages.settings_appearance(tag)) {
+                Picker(NativeMessages.settings_appearance(tag), selection: $settings.appearance) {
+                    Text(NativeMessages.native_settings_system(tag)).tag("system")
+                    Text(NativeMessages.settings_theme_light(tag)).tag("light")
+                    Text(NativeMessages.settings_theme_dark(tag)).tag("dark")
                 }
                 .pickerStyle(.segmented)
                 if let row = screen.lang?.rows.first {
-                    Picker(model.t("settings.lang", "Language"), selection: Binding(get: { settings.lang }, set: { model.language($0) })) {
+                    Picker(NativeMessages.settings_lang(tag), selection: Binding(get: { settings.lang }, set: { model.language($0) })) {
                         ForEach(row.buttons, id: \.value) { Text($0.label).tag($0.value) }
                     }
                     .pickerStyle(.segmented)
-                    .task { await model.want("settings.lang") }
                 }
                 if let row = screen.lang?.rows.dropFirst().first, let button = row.buttons.first {
                     Toggle(row.label, isOn: Binding(get: { button.on }, set: { _ in model.act(button.action, button.value) }))
                 }
             }
             Section {
-                Picker("Thread list", selection: listBinding) {
-                    Text("Projects").tag("projects")
-                    Text("Active").tag("active")
+                Picker(NativeMessages.settings_sidebar(tag), selection: listBinding) {
+                    Text(NativeMessages.tour_title_projects(tag)).tag("projects")
+                    Text(NativeMessages.settings_sidebar_active(tag)).tag("active")
                 }
                 .pickerStyle(.segmented)
-                Picker("Opens on", selection: $settings.defaultTab) {
-                    Text("Automatic").tag("")
-                    ForEach(AppTab.allCases.filter { $0 != .settings }) { Text($0.title).tag($0.rawValue) }
+                Picker(NativeMessages.native_settings_opens(tag), selection: $settings.defaultTab) {
+                    Text(NativeMessages.settings_lang_auto(tag)).tag("")
+                    ForEach(AppTab.allCases.filter { $0 != .settings }) { Text($0.title(tag)).tag($0.rawValue) }
                 }
-                Toggle("Haptics", isOn: $settings.haptics)
+                Toggle(NativeMessages.native_settings_haptics(tag), isOn: $settings.haptics)
             } header: {
-                Text("Behaviour")
+                Text(NativeMessages.native_settings_behaviour(tag))
             } footer: {
-                Text("Projects groups threads by project; Active lists what is going on, what needs you first. Automatic opens on Home with an uberbot, else Threads.")
+                Text(NativeMessages.native_settings_behaviour_ios(tag))
             }
             Section {
                 HStack {
-                    Text("Notifications")
+                    Text(NativeMessages.native_settings_notifications(tag))
                     Spacer()
                     Text(notificationWord).foregroundStyle(.secondary)
                 }
-                Button("Open system settings") {
+                Button(NativeMessages.native_settings_system_open(tag)) {
                     if let u = URL(string: UIApplication.openNotificationSettingsURLString) { UIApplication.shared.open(u) }
                 }
                 // what the hub alerts for: its settings, from the last screen that carried them
                 if let r = notifyRows { HubSettingsRows(model: model, rows: r, notify: true) }
             } header: {
-                Text("Notifications")
+                Text(NativeMessages.native_settings_notifications(tag))
             } footer: {
-                if screen.hubs.count > 1, let h = notifyHub { Text("Notify me for is a setting on \(h.name).") }
+                if screen.hubs.count > 1, let h = notifyHub { Text(NativeMessages.native_settings_notify_hub(tag, h.name)) }
             }
-            Section("Hubs") {
+            Section(NativeMessages.native_settings_hubs(tag)) {
                 NavigationLink(value: "@hubs") {
                     HStack {
-                        Text("Hubs")
+                        Text(NativeMessages.native_settings_hubs(tag))
                         Spacer()
                         Text("\(screen.hubs.count)").foregroundStyle(.secondary)
                     }
                 }
                 ForEach(screen.hubs, id: \.key) { h in
                     NavigationLink(value: "@hub:" + h.key) {
-                        Text(screen.hubs.count > 1 ? "Hub settings · \(h.name)" : "Hub settings")
+                        Text(screen.hubs.count > 1 ? NativeMessages.native_settings_hub_named(tag, h.name) : NativeMessages.native_settings_hub(tag))
                     }
                 }
             }
             Section {
                 HStack {
-                    Text("Kept state")
+                    Text(NativeMessages.native_settings_kept(tag))
                     Spacer()
                     Text(ByteCountFormatter.string(fromByteCount: Int64(cacheBytes), countStyle: .file)).foregroundStyle(.secondary)
                 }
-                Button("Clear cached state", role: .destructive) { confirmClear = true }
+                Button(NativeMessages.native_settings_cache_clear(tag), role: .destructive) { confirmClear = true }
             } header: {
-                Text("Cache")
+                Text(NativeMessages.native_settings_cache(tag))
             } footer: {
-                Text("The next launch fetches each hub's history again.")
+                Text(NativeMessages.native_settings_cache_next(tag))
             }
-            Section("Tour") {
-                Button("Show the tour") { model.act("ob-open") }
+            Section(NativeMessages.settings_tour(tag)) {
+                Button(NativeMessages.settings_tour_show(tag)) { model.act("ob-open") }
             }
-            Section("About") {
+            Section(NativeMessages.native_settings_about(tag)) {
                 HStack {
                     Text("Backplane")
                     Spacer()
@@ -346,7 +349,7 @@ struct AppSettingsTab: View {
                 }
             }
         }
-        .navigationTitle("Settings")
+        .navigationTitle(NativeMessages.palette_settings(tag))
         .task { notifications = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus }
         .onAppear {
             cacheBytes = model.cacheSize()
@@ -354,9 +357,9 @@ struct AppSettingsTab: View {
             // show the last ones meanwhile, and a select (a tab change) closes it
             if let h = notifyHub { model.act("hub-settings", h.key + "|on") }
         }
-        .confirmationDialog("Clear the cached state?", isPresented: $confirmClear, titleVisibility: .visible) {
-            Button("Clear cached state", role: .destructive) { model.clearCache(); cacheBytes = 0 }
-            Button("Cancel", role: .cancel) {}
+        .confirmationDialog(NativeMessages.native_settings_cache_ask(tag), isPresented: $confirmClear, titleVisibility: .visible) {
+            Button(NativeMessages.native_settings_cache_clear(tag), role: .destructive) { model.clearCache(); cacheBytes = 0 }
+            Button(NativeMessages.common_cancel(tag), role: .cancel) {}
         }
     }
 }
@@ -366,6 +369,7 @@ struct AppSettingsTab: View {
 // in the background and takes the fresh rows in place; with none yet, the
 // page's shape as placeholders. Leaving it closes the hub's Settings.
 struct HubSettingsPage: View {
+    @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let key: String
 
@@ -386,9 +390,9 @@ struct HubSettingsPage: View {
                 ForEach(0..<7, id: \.self) { _ in
                     Section {
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("Setting name")
-                            Text("A line of what the setting does for this hub.").font(.footnote)
-                            HStack { Text("Option"); Text("Option"); Text("Option") }
+                            Text(NativeMessages.native_settings_placeholder_name(lang))
+                            Text(NativeMessages.native_settings_placeholder_hint(lang)).font(.footnote)
+                            HStack { Text(NativeMessages.native_settings_placeholder_option(lang)); Text(NativeMessages.native_settings_placeholder_option(lang)); Text(NativeMessages.native_settings_placeholder_option(lang)) }
                         }
                         .padding(.vertical, 4)
                     }
@@ -397,7 +401,7 @@ struct HubSettingsPage: View {
                 .allowsHitTesting(false)
             }
         }
-        .navigationTitle("Hub settings · \(name)")
+        .navigationTitle(NativeMessages.native_settings_hub_named(lang, name))
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { model.act("hub-settings", key + "|on") }
         .onDisappear { model.act("hub-settings", key + "|off") }

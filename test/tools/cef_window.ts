@@ -20,7 +20,7 @@ writeFileSync(join(fake, "backplane-browser"), `#!/bin/sh\nexec bun '${resolve("
 chmodSync(join(fake, "backplane-browser"), 0o755);
 const listen = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } });
 const port = listen.port; listen.stop(true);
-const env = { ...d.env, PATH: `${fake}:${process.env.PATH}`, BACKPLANE_NO_UPDATE: "1", BACKPLANE_PEERS: "", WAYLAND_DISPLAY: "", BACKPLANE_CEF_NO_GPU: "1" };
+const env = { ...d.env, PATH: `${fake}:${process.env.PATH}`, BACKPLANE_AGENTS: fake, BACKPLANE_NO_UPDATE: "1", BACKPLANE_PEERS: "", WAYLAND_DISPLAY: "", BACKPLANE_CEF_NO_GPU: "1" };
 const app = Bun.spawn([resolve(binary), "--home", home, "--port", String(port), "--no-tailscale", "--foreground"], { env, stdout: Bun.file(join(d.root, "app.out")), stderr: Bun.file(join(d.root, "app.err")) });
 let win = 0, ws: WebSocket | undefined;
 const info: Record<string, string> = {}, changes: any[] = [], messages: any[] = [], replies = new Map<number, any>();

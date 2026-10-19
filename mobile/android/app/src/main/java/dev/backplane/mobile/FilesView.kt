@@ -83,14 +83,16 @@ private fun fileIcon(name: String): ImageVector = when (name) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ViewerChoices(m: AppModel, v: Viewer) {
+    val lang = LocalBackplaneLanguage.current
     Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         ChoiceRow(v.choices, v.choices.firstOrNull { it.on }?.value ?: v.open, Modifier.weight(1f)) { m.act("view", it) }
-        IconButton(onClick = { m.act("view", "") }) { Icon(Icons.Filled.Close, "Close") }
+        IconButton(onClick = { m.act("view", "") }) { Icon(Icons.Filled.Close, NativeMessages.common_close(lang)) }
     }
 }
 
 @Composable
 fun FilesScreen(m: AppModel, v: Viewer, f: FilesPage) {
+    val lang = LocalBackplaneLanguage.current
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface).statusBarsPadding().navigationBarsPadding()) {
         ViewerChoices(m, v)
         LazyRow(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -103,7 +105,7 @@ fun FilesScreen(m: AppModel, v: Viewer, f: FilesPage) {
         HorizontalDivider()
         when {
             !f.ready -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-            f.rows.isEmpty() -> Text("This folder is empty", Modifier.padding(16.dp), color = MaterialTheme.colorScheme.outline)
+            f.rows.isEmpty() -> Text(NativeMessages.viewer_files_empty(lang), Modifier.padding(16.dp), color = MaterialTheme.colorScheme.outline)
             else -> LazyColumn(Modifier.fillMaxSize()) {
                 items(f.rows, key = { it.value }) { r ->
                     val on = r.action.isNotEmpty()
@@ -126,11 +128,12 @@ fun FilesScreen(m: AppModel, v: Viewer, f: FilesPage) {
 // an image or a PDF opened from the Files tab, under its name and a way back
 @Composable
 fun FileScreen(m: AppModel, v: Viewer, f: FileView) {
+    val lang = LocalBackplaneLanguage.current
     var shown by remember { mutableStateOf<String?>(null) }
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface).statusBarsPadding().navigationBarsPadding()) {
         ViewerChoices(m, v)
         Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = { m.act("fm") }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back to the folder") }
+            IconButton(onClick = { m.act("fm") }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, NativeMessages.files_back_tip(lang)) }
             Text(f.name, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         HorizontalDivider()
@@ -165,7 +168,7 @@ private class Pdf(file: File) {
 }
 
 private sealed interface PdfGot {
-    data class Failed(val why: String) : PdfGot
+    data class Failed(val kind: String, val code: String = "") : PdfGot
     data class Ok(val pdf: Pdf) : PdfGot
 }
 
@@ -174,7 +177,7 @@ private fun fetchPdf(url: String, into: File): PdfGot = try {
     c.connectTimeout = 5000
     c.readTimeout = 60000
     try {
-        if (c.responseCode != 200) PdfGot.Failed(if (c.responseCode == 404) "The hub could not send this PDF (it may be over 12 MB)" else "The hub answered ${c.responseCode}")
+        if (c.responseCode != 200) PdfGot.Failed(if (c.responseCode == 404) "send" else "http", c.responseCode.toString())
         else {
             c.inputStream.use { i -> into.outputStream().use { i.copyTo(it) } }
             PdfGot.Ok(Pdf(into))
@@ -183,11 +186,12 @@ private fun fetchPdf(url: String, into: File): PdfGot = try {
         c.disconnect()
     }
 } catch (e: Exception) {
-    PdfGot.Failed("This PDF cannot be shown here")
+    PdfGot.Failed("show")
 }
 
 @Composable
 private fun PdfPages(m: AppModel, path: String) {
+    val lang = LocalBackplaneLanguage.current
     val ctx = LocalContext.current
     val url = m.web(path) ?: return
     val got = produceState<PdfGot?>(null, url) {
@@ -196,7 +200,7 @@ private fun PdfPages(m: AppModel, path: String) {
     DisposableEffect(got) { onDispose { (got as? PdfGot.Ok)?.pdf?.close() } }
     when (got) {
         null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-        is PdfGot.Failed -> Text(got.why, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.outline)
+        is PdfGot.Failed -> Text(NativeMessages.native_file_pdf_error(lang, got.kind, got.code), Modifier.padding(16.dp), color = MaterialTheme.colorScheme.outline)
         is PdfGot.Ok -> LazyColumn(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceVariant),
             verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(got.pdf.pages) { i ->
@@ -205,7 +209,7 @@ private fun PdfPages(m: AppModel, path: String) {
                 }.value
                 Box(Modifier.fillMaxWidth().aspectRatio(b?.let { it.width.toFloat() / it.height } ?: 0.707f), contentAlignment = Alignment.Center) {
                     if (b == null) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                    else Image(b.asImageBitmap(), "Page ${i + 1}", Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+                    else Image(b.asImageBitmap(), NativeMessages.native_file_page(lang, (i + 1).toString()), Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
                 }
             }
         }

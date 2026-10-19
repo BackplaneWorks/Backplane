@@ -96,7 +96,7 @@ private fun Screen.badge(t: Tab) = when (t) {
 @Composable
 private fun TabIcon(s: Screen, t: Tab) {
     val n = s.badge(t)
-    if (n > 0) BadgedBox(badge = { Badge { Text("$n") } }) { Icon(t.icon(), t.title) } else Icon(t.icon(), t.title)
+    if (n > 0) BadgedBox(badge = { Badge { Text("$n") } }) { Icon(t.icon(), t.title(s.locale)) } else Icon(t.icon(), t.title(s.locale))
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -114,7 +114,7 @@ fun Tabs(m: AppModel, s: Screen, onPair: () -> Unit) {
         val content: @Composable (androidx.compose.foundation.layout.PaddingValues) -> Unit = { pad ->
             Box(Modifier.fillMaxSize().padding(pad)) {
                 when (tab) {
-                    Tab.Home -> Scaffold(topBar = { TopAppBar(title = { Text("Home") }) }) { p ->
+                    Tab.Home -> Scaffold(topBar = { TopAppBar(title = { Text(NativeMessages.native_tab_home(s.locale)) }) }) { p ->
                         Box(Modifier.padding(p)) { HomeTab(m, s, states.getValue(Tab.Home)) }
                     }
                     Tab.Threads -> Projects(m, s, onPair, states.getValue(Tab.Threads))
@@ -126,14 +126,14 @@ fun Tabs(m: AppModel, s: Screen, onPair: () -> Unit) {
         }
         if (wide) Row(Modifier.fillMaxSize()) {
             NavigationRail {
-                for (t in Tab.entries) NavigationRailItem(selected = t == tab, onClick = { m.selectTab(t) }, icon = { TabIcon(s, t) }, label = { Text(t.title) })
+                for (t in Tab.entries) NavigationRailItem(selected = t == tab, onClick = { m.selectTab(t) }, icon = { TabIcon(s, t) }, label = { Text(t.title(s.locale)) })
             }
             Box(Modifier.weight(1f)) { content(androidx.compose.foundation.layout.PaddingValues(0.dp)) }
         } else Scaffold(
             contentWindowInsets = WindowInsets(0, 0, 0, 0),
             bottomBar = {
                 NavigationBar {
-                    for (t in Tab.entries) NavigationBarItem(selected = t == tab, onClick = { m.selectTab(t) }, icon = { TabIcon(s, t) }, label = { Text(t.title) })
+                    for (t in Tab.entries) NavigationBarItem(selected = t == tab, onClick = { m.selectTab(t) }, icon = { TabIcon(s, t) }, label = { Text(t.title(s.locale)) })
                 }
             },
         ) { pad -> content(pad) }
@@ -148,20 +148,21 @@ fun Tabs(m: AppModel, s: Screen, onPair: () -> Unit) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun BotsPage(m: AppModel, s: Screen, state: LazyListState) {
+    val lang = s.locale
     var part by rememberSaveable { mutableStateOf("bots") }
     var menu by remember { mutableStateOf(false) }
     Scaffold(topBar = {
-        TopAppBar(title = { Text("Bots") }, actions = {
+        TopAppBar(title = { Text(NativeMessages.tour_title_bots(lang)) }, actions = {
             Box {
-                IconButton(onClick = { menu = true }) { Icon(Icons.Filled.Add, "New bot or room") }
+                IconButton(onClick = { menu = true }) { Icon(Icons.Filled.Add, NativeMessages.native_bot_create_menu(lang)) }
                 DropdownMenu(menu, { menu = false }) {
                     // with several hubs, a bot or room is made on the one chosen
                     val many = s.hubs.size > 1
                     for (h in if (many) s.hubs else s.hubs.take(1)) {
                         val v = if (many) h.key + "|" else ""
-                        val on = if (many) " on " + h.name else ""
-                        DropdownMenuItem(text = { Text("New bot$on") }, onClick = { menu = false; m.act("bot-new", v) })
-                        DropdownMenuItem(text = { Text("New room$on") }, onClick = { menu = false; m.act("room-new", v) })
+                        val place = if (many) "hub" else "none"
+                        DropdownMenuItem(text = { Text(NativeMessages.native_bot_createon(lang, "bot", place, h.name)) }, onClick = { menu = false; m.act("bot-new", v) })
+                        DropdownMenuItem(text = { Text(NativeMessages.native_bot_createon(lang, "room", place, h.name)) }, onClick = { menu = false; m.act("room-new", v) })
                     }
                 }
             }
@@ -170,12 +171,12 @@ private fun BotsPage(m: AppModel, s: Screen, state: LazyListState) {
         LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = pad) {
             item(key = "seg") {
                 SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(16.dp, 8.dp)) {
-                    SegmentedButton(part == "bots", { part = "bots" }, SegmentedButtonDefaults.itemShape(0, 2)) { Text("Bots") }
-                    SegmentedButton(part == "rooms", { part = "rooms" }, SegmentedButtonDefaults.itemShape(1, 2)) { Text("Rooms") }
+                    SegmentedButton(part == "bots", { part = "bots" }, SegmentedButtonDefaults.itemShape(0, 2)) { Text(NativeMessages.tour_title_bots(lang)) }
+                    SegmentedButton(part == "rooms", { part = "rooms" }, SegmentedButtonDefaults.itemShape(1, 2)) { Text(NativeMessages.bots_rooms(lang)) }
                 }
             }
             if (part == "bots") {
-                if (s.bots.isEmpty()) item(key = "none") { Empty("No bots yet") }
+                if (s.bots.isEmpty()) item(key = "none") { Empty(NativeMessages.native_bot_empty(lang)) }
                 items(s.bots, key = { "b:" + it.id }) { b ->
                     ListItem(
                         headlineContent = { Text(b.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
@@ -191,7 +192,7 @@ private fun BotsPage(m: AppModel, s: Screen, state: LazyListState) {
                     )
                 }
             } else {
-                if (s.rooms.isEmpty()) item(key = "none") { Empty("No rooms yet") }
+                if (s.rooms.isEmpty()) item(key = "none") { Empty(NativeMessages.native_room_empty(lang)) }
                 items(s.rooms, key = { "r:" + it.id }) { r ->
                     ListItem(
                         headlineContent = { Text(r.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
@@ -218,9 +219,10 @@ private fun Empty(text: String) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun RoutinesPage(m: AppModel, s: Screen, state: LazyListState) {
-    Scaffold(topBar = { TopAppBar(title = { Text("Routines") }) }) { pad ->
+    val lang = s.locale
+    Scaffold(topBar = { TopAppBar(title = { Text(NativeMessages.bots_tab_routines(lang)) }) }) { pad ->
         LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = pad) {
-            if (s.tabs.routineRows.isEmpty()) item(key = "none") { Empty("No routines") }
+            if (s.tabs.routineRows.isEmpty()) item(key = "none") { Empty(NativeMessages.native_routines_empty(lang)) }
             items(s.tabs.routineRows, key = { "r:" + it.id }) { r ->
                 val off = r.state == "off"
                 ListItem(
@@ -228,7 +230,7 @@ private fun RoutinesPage(m: AppModel, s: Screen, state: LazyListState) {
                     supportingContent = {
                         Column {
                             Text(listOf(r.bot, r.machine).filter { it.isNotEmpty() }.joinToString(" · "), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text(listOf(if (r.state == "done") r.doneText else r.sub, r.zone, if (r.ago.isEmpty()) "" else "last ${r.ago} ago").filter { it.isNotEmpty() }.joinToString(" · "), maxLines = 2)
+                            Text(listOf(if (r.state == "done") r.doneText else r.sub, r.zone, if (r.ago.isEmpty()) "" else NativeMessages.native_routine_last(lang, r.ago)).filter { it.isNotEmpty() }.joinToString(" · "), maxLines = 2)
                         }
                     },
                     leadingContent = { Icon(when (r.state) { "reminder" -> Icons.Filled.Notifications; "done" -> Icons.Filled.CheckCircle; else -> Icons.Filled.Schedule }, null) },
@@ -248,6 +250,7 @@ private fun RoutinesPage(m: AppModel, s: Screen, state: LazyListState) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AppSettingsPage(m: AppModel, s: Screen, onPair: () -> Unit, state: LazyListState, hub: (String) -> Unit) {
+    val tag = s.locale
     val ctx = LocalContext.current
     var bytes by remember { mutableStateOf(m.cacheSize()) }
     var confirm by remember { mutableStateOf(false) }
@@ -256,16 +259,15 @@ private fun AppSettingsPage(m: AppModel, s: Screen, onPair: () -> Unit, state: L
     // ask the hub for its settings in the background (a select, on a tab change, closes it)
     val askHub = s.hubs.firstOrNull { it.key == s.hub }?.key ?: s.hubs.firstOrNull()?.key
     LaunchedEffect(askHub) { if (askHub != null) m.act("hub-settings", "$askHub|on") }
-    LaunchedEffect(Unit) { m.want("settings.lang") }
     val about = remember {
         runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).let { "${it.versionName} (${it.longVersionCode})" } }.getOrDefault("?")
     }
-    Scaffold(topBar = { TopAppBar(title = { Text("Settings") }) }) { pad ->
+    Scaffold(topBar = { TopAppBar(title = { Text(NativeMessages.palette_settings(tag)) }) }) { pad ->
         LazyColumn(Modifier.fillMaxSize(), state = state, contentPadding = pad) {
-            item { Header("Appearance") }
-            item { Choice(listOf("system" to "System", "light" to "Light", "dark" to "Dark"), AppSettings.appearance) { AppSettings.putAppearance(it) } }
+            item { Header(NativeMessages.settings_appearance(tag)) }
+            item { Choice(listOf("system" to NativeMessages.native_settings_system(tag), "light" to NativeMessages.settings_theme_light(tag), "dark" to NativeMessages.settings_theme_dark(tag)), AppSettings.appearance) { AppSettings.putAppearance(it) } }
             s.lang?.rows?.firstOrNull()?.let { row ->
-                item { Text(m.t("settings.lang", "Language"), Modifier.padding(horizontal = 16.dp)) }
+                item { Text(NativeMessages.settings_lang(tag), Modifier.padding(horizontal = 16.dp)) }
                 item { Choice(row.buttons.map { it.value to it.label }, AppSettings.lang) { m.language(it) } }
             }
             s.lang?.rows?.drop(1)?.firstOrNull()?.let { row ->
@@ -273,33 +275,33 @@ private fun AppSettingsPage(m: AppModel, s: Screen, onPair: () -> Unit, state: L
                     item { ListItem(headlineContent = { Text(row.label) }, trailingContent = { Switch(button.on, { m.act(button.action, button.value) }) }) }
                 }
             }
-            item { Header("Behaviour") }
-            item { Choice(listOf("projects" to "Projects", "active" to "Active"), list) { m.threadList(it) } }
+            item { Header(NativeMessages.native_settings_behaviour(tag)) }
+            item { Choice(listOf("projects" to NativeMessages.tour_title_projects(tag), "active" to NativeMessages.settings_sidebar_active(tag)), list) { m.threadList(it) } }
             item {
-                Text("Projects groups threads by project; Active lists what is going on, what needs you first.",
+                Text(NativeMessages.native_settings_behaviour_android(tag),
                     Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
             }
             item {
                 var open by remember { mutableStateOf(false) }
-                val name = Tab.entries.firstOrNull { it.name == AppSettings.defaultTab }?.title ?: "Automatic"
+                val name = Tab.entries.firstOrNull { it.name == AppSettings.defaultTab }?.title(tag) ?: NativeMessages.settings_lang_auto(tag)
                 Box {
-                    ListItem(headlineContent = { Text("Opens on") }, supportingContent = { Text(name) }, modifier = Modifier.clickable { open = true })
+                    ListItem(headlineContent = { Text(NativeMessages.native_settings_opens(tag)) }, supportingContent = { Text(name) }, modifier = Modifier.clickable { open = true })
                     DropdownMenu(open, { open = false }) {
-                        DropdownMenuItem(text = { Text("Automatic") }, onClick = { open = false; AppSettings.putDefaultTab("") })
-                        for (t in Tab.entries.filter { it != Tab.Settings }) DropdownMenuItem(text = { Text(t.title) }, onClick = { open = false; AppSettings.putDefaultTab(t.name) })
+                        DropdownMenuItem(text = { Text(NativeMessages.settings_lang_auto(tag)) }, onClick = { open = false; AppSettings.putDefaultTab("") })
+                        for (t in Tab.entries.filter { it != Tab.Settings }) DropdownMenuItem(text = { Text(t.title(tag)) }, onClick = { open = false; AppSettings.putDefaultTab(t.name) })
                     }
                 }
             }
             item {
-                ListItem(headlineContent = { Text("Haptics") }, trailingContent = { Switch(AppSettings.haptics, { AppSettings.putHaptics(it) }) })
+                ListItem(headlineContent = { Text(NativeMessages.native_settings_haptics(tag)) }, trailingContent = { Switch(AppSettings.haptics, { AppSettings.putHaptics(it) }) })
             }
-            item { Header("Notifications") }
+            item { Header(NativeMessages.native_settings_notifications(tag)) }
             item {
-                ListItem(headlineContent = { Text("Notifications") }, supportingContent = { Text(if (allowed) "On" else "Off") },
+                ListItem(headlineContent = { Text(NativeMessages.native_settings_notifications(tag)) }, supportingContent = { Text(if (allowed) NativeMessages.settings_lang_on(tag) else NativeMessages.settings_lang_off(tag)) },
                     trailingContent = {
                         OutlinedButton(onClick = {
                             ctx.startActivity(Intent(AndroidSettings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(AndroidSettings.EXTRA_APP_PACKAGE, ctx.packageName).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                        }) { Text("System settings") }
+                        }) { Text(NativeMessages.native_settings_system_settings(tag)) }
                     })
             }
             // what the hub alerts for: its settings, from the last screen that carried them
@@ -307,30 +309,30 @@ private fun AppSettingsPage(m: AppModel, s: Screen, onPair: () -> Unit, state: L
             val nrows = nh?.let { h -> (if (s.hub == h.key) s.settings?.rows else null) ?: m.hubSettings[h.key]?.rows }
             if (nrows != null) hubSettingsRows(m, nrows, notify = true)
             if (s.hubs.size > 1 && nh != null) item {
-                Text("Notify me for is a setting on ${nh.name}.", Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
+                Text(NativeMessages.native_settings_notify_hub(tag, nh.name), Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
             }
-            item { Header("Hubs") }
-            item { ListItem(headlineContent = { Text("Hubs") }, supportingContent = { Text("${s.hubs.size} paired") }, modifier = Modifier.clickable(onClick = onPair)) }
+            item { Header(NativeMessages.native_settings_hubs(tag)) }
+            item { ListItem(headlineContent = { Text(NativeMessages.native_settings_hubs(tag)) }, supportingContent = { Text(NativeMessages.native_settings_paired(tag, s.hubs.size.toString())) }, modifier = Modifier.clickable(onClick = onPair)) }
             items(s.hubs, key = { "hs:" + it.key }) { h ->
-                ListItem(headlineContent = { Text(if (s.hubs.size > 1) "Hub settings · ${h.name}" else "Hub settings") }, modifier = Modifier.clickable { hub(h.key) })
+                ListItem(headlineContent = { Text(if (s.hubs.size > 1) NativeMessages.native_settings_hub_named(tag, h.name) else NativeMessages.native_settings_hub(tag)) }, modifier = Modifier.clickable { hub(h.key) })
             }
-            item { Header("Cache") }
+            item { Header(NativeMessages.native_settings_cache(tag)) }
             item {
-                ListItem(headlineContent = { Text("Kept state") }, supportingContent = { Text(android.text.format.Formatter.formatShortFileSize(ctx, bytes)) },
-                    trailingContent = { OutlinedButton(onClick = { confirm = true }) { Text("Clear cached state") } })
+                ListItem(headlineContent = { Text(NativeMessages.native_settings_kept(tag)) }, supportingContent = { Text(android.text.format.Formatter.formatShortFileSize(ctx, bytes)) },
+                    trailingContent = { OutlinedButton(onClick = { confirm = true }) { Text(NativeMessages.native_settings_cache_clear(tag)) } })
             }
-            item { Header("Tour") }
-            item { ListItem(headlineContent = { Text("Show the tour") }, modifier = Modifier.clickable { m.act("ob-open") }) }
-            item { Header("About") }
+            item { Header(NativeMessages.settings_tour(tag)) }
+            item { ListItem(headlineContent = { Text(NativeMessages.settings_tour_show(tag)) }, modifier = Modifier.clickable { m.act("ob-open") }) }
+            item { Header(NativeMessages.native_settings_about(tag)) }
             item { ListItem(headlineContent = { Text("Backplane") }, supportingContent = { Text(about) }) }
         }
     }
     if (confirm) AlertDialog(
         onDismissRequest = { confirm = false },
-        title = { Text("Clear the cached state?") },
-        text = { Text("The next launch fetches each hub's history again.") },
-        confirmButton = { TextButton(onClick = { confirm = false; m.clearCache(); bytes = 0 }) { Text("Clear", color = MaterialTheme.colorScheme.error) } },
-        dismissButton = { TextButton(onClick = { confirm = false }) { Text("Cancel") } },
+        title = { Text(NativeMessages.native_settings_cache_ask(tag)) },
+        text = { Text(NativeMessages.native_settings_cache_next(tag)) },
+        confirmButton = { TextButton(onClick = { confirm = false; m.clearCache(); bytes = 0 }) { Text(NativeMessages.common_clear(tag), color = MaterialTheme.colorScheme.error) } },
+        dismissButton = { TextButton(onClick = { confirm = false }) { Text(NativeMessages.common_cancel(tag)) } },
     )
 }
 
@@ -355,6 +357,7 @@ private fun Choice(options: List<Pair<String, String>>, current: String, pick: (
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun HubSettingsPage(m: AppModel, s: Screen, key: String, back: () -> Unit) {
+    val lang = LocalBackplaneLanguage.current
     DisposableEffect(key) {
         m.act("hub-settings", "$key|on")
         onDispose { m.act("hub-settings", "$key|off") }
@@ -362,8 +365,8 @@ private fun HubSettingsPage(m: AppModel, s: Screen, key: String, back: () -> Uni
     val rows = (if (s.hub == key) s.settings?.rows else null) ?: m.hubSettings[key]?.rows
     val name = s.hubs.firstOrNull { it.key == key }?.name ?: key
     Scaffold(topBar = {
-        TopAppBar(title = { Text("Hub settings · $name", maxLines = 1, overflow = TextOverflow.Ellipsis) }, navigationIcon = {
-            IconButton(onClick = back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
+        TopAppBar(title = { Text(NativeMessages.native_settings_hub_named(lang, name), maxLines = 1, overflow = TextOverflow.Ellipsis) }, navigationIcon = {
+            IconButton(onClick = back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, NativeMessages.tour_back(lang)) }
         })
     }) { pad ->
         LazyColumn(Modifier.fillMaxSize(), contentPadding = pad) {

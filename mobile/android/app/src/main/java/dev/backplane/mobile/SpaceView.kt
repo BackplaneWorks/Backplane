@@ -191,6 +191,7 @@ private fun SpaceTable(head: List<String>, rows: List<List<String>>) {
 
 @Composable
 private fun SpaceInput(b: SpaceBlock, act: (String, String) -> Unit) {
+    val lang = LocalBackplaneLanguage.current
     var text by rememberSaveable(b.key) { mutableStateOf("") }
     val send = {
         val t = text.trim()
@@ -208,7 +209,7 @@ private fun SpaceInput(b: SpaceBlock, act: (String, String) -> Unit) {
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                 keyboardActions = KeyboardActions(onSend = { send() }),
             )
-            TextButton(onClick = send, enabled = text.isNotBlank()) { Text("Send") }
+            TextButton(onClick = send, enabled = text.isNotBlank()) { Text(NativeMessages.composer_send(lang)) }
         }
     }
 }

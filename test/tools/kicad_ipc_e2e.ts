@@ -62,7 +62,7 @@ chmodSync(join(fake, "backplane-kipc"), 0o755);
 
 const manifest = {
   manifestVersion: 2, sourceRepository: "https://github.com/i2cjak/Backplane_KiCad", sourceCommit: "abc", upstreamCommit: "up",
-  version: "10.99.0-bp.1", kicadVersion: "10.99.0", apiVersion: 2, apiDescriptor: "share/backplane/api.desc",
+  version: "10.99.0-bp.4", kicadVersion: "10.99.0", apiVersion: 2, apiDescriptor: "share/backplane/api.desc",
   capabilities: ["api-server", "parent-pid", "idle-exit", "shutdown", "api-descriptor"],
 };
 function runtime(name: string, fork: boolean) {
@@ -70,7 +70,7 @@ function runtime(name: string, fork: boolean) {
   mkdirSync(join(dir, "bin"), { recursive: true });
   mkdirSync(join(dir, "share/backplane"), { recursive: true });
   copyFileSync(join(repo, "test/fixtures/kipc/api.desc"), join(dir, "share/backplane/api.desc"));
-  const version = fork ? "10.99.0-bp.1" : "10.0.6";
+  const version = fork ? "10.99.0-bp.4" : "10.0.6";
   writeFileSync(join(dir, "bin/kicad-cli"), `#!/bin/sh
 case "$1" in
   version) echo ${version}; exit 0;;
@@ -105,7 +105,7 @@ async function start(name: string, rt: string, extra: Record<string, string> = {
   // `timeout` ends the hub by itself after the test's own limit
   const proc = Bun.spawn(["timeout", "420", resolve(binary), "--home", home, "--port", String(port), "--no-tailscale"], {
     env: {
-      ...process.env, HOME: home, XDG_CACHE_HOME: join(home, ".cache"), XDG_RUNTIME_DIR: xdg, PATH: `${fake}:${dirname(bun)}:/usr/bin:/bin`,
+      ...process.env, HOME: home, XDG_CACHE_HOME: join(home, ".cache"), XDG_RUNTIME_DIR: xdg, BACKPLANE_AGENTS: fake, PATH: `${fake}:${dirname(bun)}:/usr/bin:/bin`,
       DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_HOME: home, BACKPLANE_KICAD: rt, BACKPLANE_KICAD_CLI: "", BACKPLANE_PEERS: "", BACKPLANE_NO_UPDATE: "1",
       BACKPLANE_LOCK_DIR: join(home, "locks"), KIPC_DESC: join(rt, "share/backplane/api.desc"), KIPC_LOG: log, ...extra,
     },
@@ -188,6 +188,23 @@ try {
   const st = await h.tool(th, "kicad_ipc_status", { path: join(pa, "x.kicad_pcb") });
   check("status names the server", !st.error && String(st.body?.server).includes("ready for x"), st);
   check("status lists the commands", JSON.stringify(st.body?.capabilities).includes("kiapi.board.commands.GetItems"), st);
+
+  // argv: the launcher, with --parent-pid and --idle-exit (apiVersion 2)
+  const argv = String(st.body?.argv ?? "");
+  check("status shows the start argv with the launcher, --parent-pid and --idle-exit", argv.startsWith(`${rt}/bin/kicad-cli api-server `) && argv.includes(" --parent-pid ") && argv.includes(" --idle-exit 600"), argv);
+
+  // the bp.3 guards: refused by the hub, the stub never hears them
+  const beforeGuard = stubLog(h).length;
+  const bare = await h.tool(th, "kicad_ipc", { path: join(pa, "x.kicad_pcb"), type: "kiapi.common.commands.UpdateItems",
+    message: { items: [{ "@type": "type.googleapis.com/kiapi.board.types.FootprintInstance", id: { value: "00000000-0000-0000-0000-000000000001" } }] } });
+  check("a footprint update without its definition is refused", bare.error && bare.text.includes("send the full FootprintInstance from GetItems with only the fields you change"), bare);
+  const hollow = await h.tool(th, "kicad_ipc", { path: join(pa, "x.kicad_pcb"), type: "kiapi.common.commands.CreateItems",
+    message: { items: [{ "@type": "type.googleapis.com/kiapi.schematic.types.SchematicSymbolInstance", lib_id: { library_nickname: "Device", entry_name: "R" } }] } });
+  check("a symbol from a library id alone is refused", hollow.error && hollow.text.includes("PlaceSymbolFromLibrary"), hollow);
+  const nestedId = await h.tool(th, "kicad_ipc", { path: join(pa, "x.kicad_pcb"), type: "kiapi.common.commands.CreateItems",
+    message: { items: [{ "@type": "type.googleapis.com/kiapi.schematic.types.SchematicSymbolInstance", definition: { id: { library_nickname: "Device", entry_name: "R" } } }] } });
+  check("a symbol with only definition.id is refused without the fix capability", nestedId.error && nestedId.text.includes("PlaceSymbolFromLibrary"), nestedId);
+  check("the stub heard no guarded requests", stubLog(h).length === beforeGuard, stubLog(h));
 
   // eviction
   await sleep(1100);

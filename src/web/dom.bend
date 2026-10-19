@@ -1,4 +1,6 @@
 import Base
+import ../core/i18n.bend as I
+import ../core/msgs.bend as MSG
 import ../core/ref.bend as R
 import ../core/links.bend as LK
 import ../core/diff.bend as DF
@@ -29,8 +31,11 @@ def Dom.span(cls: String, text: String) -> Node:
 def Dom.button(cls: String, action: String, value: String, title: String, label: String) -> Node:
   El{"button", "", [At{"class", cls}, At{"title", title}, At{"data-value", value}, On{"click", action}], [Txt{label}]}
 
+def Dom.copy.loc(+lc: I.Loc, text: String) -> Node:
+  El{"button", "", [At{"class", "copy"}, At{"title", MSG.T.common.copy(lc)}, At{"data-value", text}, On{"click", "copy"}], [Txt{MSG.T.common.copy(lc)}]}
+
 def Dom.copy(text: String) -> Node:
-  El{"button", "", [At{"class", "copy"}, At{"title", "Copy"}, At{"data-value", text}, On{"click", "copy"}], [Txt{"Copy"}]}
+  Dom.copy.loc(I.En{}, text)
 
 def Dom.when(b: Bool, n: Node) -> List<&2, Node>:
   match b:
@@ -453,19 +458,23 @@ def Md.headed(rs: List<&2, Row>) -> List<&2, Row>:
     case _:
       rs
 
-def Md.codeblock(ls: List<&2, String>) -> Node:
+def Md.codeblock.loc(+lc: I.Loc, ls: List<&2, String>) -> Node:
   +text = Md.unlines(ls)
-  El{"div", "", [At{"class", "codeblock"}], [Dom.copy(text), El{"pre", "", Nil{}, [El{"code", "", Nil{}, [Txt{text}]}]}]}
+  El{"div", "", [At{"class", "codeblock"}], [Dom.copy.loc(lc, text), El{"pre", "", Nil{}, [El{"code", "", Nil{}, [Txt{text}]}]}]}
 
 # the node a finished block contributes
-def Md.close(b: Blk, out: List<&2, Node>) -> List<&2, Node>:
+
+def Md.codeblock(ls: List<&2, String>) -> Node:
+  Md.codeblock.loc(I.En{}, ls)
+
+def Md.close.loc(+lc: I.Loc, b: Blk, out: List<&2, Node>) -> List<&2, Node>:
   match b:
     case BNone{}:
       out
     case BPara{ls}:
       Md.para(ls) <> out
     case BCode{ls}:
-      Md.codeblock(ls) <> out
+      Md.codeblock.loc(lc, ls) <> out
     case BList{xs}:
       El{"ul", "", Nil{}, Md.lis(List.reverse(&2, String, xs))} <> out
     case BOl{xs}:
@@ -474,6 +483,9 @@ def Md.close(b: Blk, out: List<&2, Node>) -> List<&2, Node>:
       El{"blockquote", "", Nil{}, Md.inline(Md.unlines(ls))} <> out
     case BTable{rs}:
       El{"table", "", Nil{}, Md.trs(List.reverse(&2, Row, rs))} <> out
+
+def Md.close(b: Blk, out: List<&2, Node>) -> List<&2, Node>:
+  Md.close.loc(I.En{}, b, out)
 
 def Md.head(n: Nat, t: String) -> Node:
   match n:
@@ -484,64 +496,80 @@ def Md.head(n: Nat, t: String) -> Node:
     case _:
       El{"h5", "", Nil{}, Md.inline(t)}
 
-def Md.bstep(b: Blk, ln: Line, +raw: String, out: List<&2, Node>) -> Blk & List<&2, Node>:
+def Md.bstep.loc(+lc: I.Loc, b: Blk, ln: Line, +raw: String, out: List<&2, Node>) -> Blk & List<&2, Node>:
   match b ln:
     case BCode{ls} LFence{}:
-      (BNone{}, Md.codeblock(ls) <> out)
+      (BNone{}, Md.codeblock.loc(lc, ls) <> out)
     case BCode{ls} _:
       (BCode{raw <> ls}, out)
     case _ LFence{}:
-      (BCode{Nil{}}, Md.close(b, out))
+      (BCode{Nil{}}, Md.close.loc(lc, b, out))
     case _ LHead{n, t}:
-      (BNone{}, Md.head(n, t) <> Md.close(b, out))
+      (BNone{}, Md.head(n, t) <> Md.close.loc(lc, b, out))
     case BList{xs} LItem{t}:
       (BList{t <> xs}, out)
     case _ LItem{t}:
-      (BList{[t]}, Md.close(b, out))
+      (BList{[t]}, Md.close.loc(lc, b, out))
     case BOl{xs} LNum{n, t}:
       (BOl{OItem{n, t} <> xs}, out)
     case _ LNum{n, t}:
-      (BOl{[OItem{n, t}]}, Md.close(b, out))
+      (BOl{[OItem{n, t}]}, Md.close.loc(lc, b, out))
     case BQuote{ls} LQuote{t}:
       (BQuote{t <> ls}, out)
     case _ LQuote{t}:
-      (BQuote{[t]}, Md.close(b, out))
+      (BQuote{[t]}, Md.close.loc(lc, b, out))
     case BTable{rs} LRow{cs}:
       (BTable{RBody{cs} <> rs}, out)
     case _ LRow{cs}:
-      (BTable{[RBody{cs}]}, Md.close(b, out))
+      (BTable{[RBody{cs}]}, Md.close.loc(lc, b, out))
     case BTable{rs} LSep{_}:
       (BTable{Md.headed(rs)}, out)
     case BPara{ls} LSep{t}:
       (BPara{t <> ls}, out)
     case _ LSep{t}:
-      (BPara{[t]}, Md.close(b, out))
+      (BPara{[t]}, Md.close.loc(lc, b, out))
     case _ LHr{}:
-      (BNone{}, El{"hr", "", Nil{}, Nil{}} <> Md.close(b, out))
+      (BNone{}, El{"hr", "", Nil{}, Nil{}} <> Md.close.loc(lc, b, out))
     case _ LBlank{}:
-      (BNone{}, Md.close(b, out))
+      (BNone{}, Md.close.loc(lc, b, out))
     case BPara{ls} LText{t}:
       (BPara{t <> ls}, out)
     case _ LText{t}:
-      (BPara{[t]}, Md.close(b, out))
+      (BPara{[t]}, Md.close.loc(lc, b, out))
+
+def Md.bstep(b: Blk, ln: Line, +raw: String, out: List<&2, Node>) -> Blk & List<&2, Node>:
+  Md.bstep.loc(I.En{}, b, ln, raw, out)
+
+def Md.bstep.pair.loc(+lc: I.Loc, +l: String, r: Blk & List<&2, Node>) -> Blk & List<&2, Node>:
+  (b, out) = r
+  Md.bstep.loc(lc, b, Md.line(l), l, out)
 
 def Md.bstep.pair(+l: String, r: Blk & List<&2, Node>) -> Blk & List<&2, Node>:
+  Md.bstep.pair.loc(I.En{}, l, r)
+
+def Md.bfin.loc(+lc: I.Loc, r: Blk & List<&2, Node>) -> List<&2, Node>:
   (b, out) = r
-  Md.bstep(b, Md.line(l), l, out)
+  List.reverse(&2, Node, Md.close.loc(lc, b, out))
 
 def Md.bfin(r: Blk & List<&2, Node>) -> List<&2, Node>:
-  (b, out) = r
-  List.reverse(&2, Node, Md.close(b, out))
+  Md.bfin.loc(I.En{}, r)
 
-def Md.bgo(ls: List<&2, String>, r: Blk & List<&2, Node>) -> List<&2, Node>:
+def Md.bgo.loc(+lc: I.Loc, ls: List<&2, String>, r: Blk & List<&2, Node>) -> List<&2, Node>:
   match ls:
     case Nil{}:
-      Md.bfin(r)
+      Md.bfin.loc(lc, r)
     case +l <> t:
-      Md.bgo(t, Md.bstep.pair(l, r))
+      Md.bgo.loc(lc, t, Md.bstep.pair.loc(lc, l, r))
 
 # markdown text as nodes. Lines come from the tail-recursive Diff.lines:
 # String.lines recurses once per character, and a long reply overflowed
 # the phone's JavaScriptCore stack
+
+def Md.bgo(ls: List<&2, String>, r: Blk & List<&2, Node>) -> List<&2, Node>:
+  Md.bgo.loc(I.En{}, ls, r)
+
+def Md.render.loc(+lc: I.Loc, s: String) -> List<&2, Node>:
+  Md.bgo.loc(lc, DF.Diff.lines(s), (BNone{}, Nil{}))
+
 def Md.render(s: String) -> List<&2, Node>:
-  Md.bgo(DF.Diff.lines(s), (BNone{}, Nil{}))
+  Md.render.loc(I.En{}, s)

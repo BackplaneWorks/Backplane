@@ -122,6 +122,18 @@ def Tally.show(t: Tally) -> String:
     case Tally{s, h, b, o, w}:
       "steps " ++ Nat.show(s) ++ ", memo hits " ++ Nat.show(h) ++ ", memo hits unlike a fresh layout " ++ Nat.show(b) ++ ", steps not memoized " ++ Nat.show(o) ++ w
 
+def exact(ok: Bool, label: String) -> IO(Unit):
+  match ok:
+    case True{}:
+      IO.pure(Unit, Unit{})
+    case False{}:
+      IO.die(Unit, 1, "memo_replay failed: " ++ label)
+
+def Tally.ok(t: Tally) -> Bool:
+  match t:
+    case Tally{_, _, bad, _, _}:
+      Nat.is_eq(bad, 0n)
+
 def with_ui(n: N.Nui, u: U.Ui) -> N.Nui:
   match n:
     case N.Nui{_, w, h, mx, my, sd, sc, ca, fo, pa, hi, ms, vw}:
@@ -159,6 +171,11 @@ def Side.add(t: Side, +hit: Bool, +ok: Bool) -> Side:
     case Side{s, h, b}:
       Side{1n+s, Nat.add(h, Bool.pick(Nat, hit, 1n, 0n)), Nat.add(b, Bool.pick(Nat, Bool.and(hit, Bool.not(ok)), 1n, 0n))}
 
+def Side.ok(t: Side) -> Bool:
+  match t:
+    case Side{_, _, bad}:
+      Nat.is_eq(bad, 0n)
+
 def Side.show(t: Side) -> String:
   match t:
     case Side{s, h, b}:
@@ -182,7 +199,7 @@ def typing(cs: String, +ty: L.Ty, +n0: N.Nui, +tc: MM.TouchK, +ms: List<&2, MM.S
       +n = prepared(step_nui(N.Nui.event(n0, side.ev(c, Nat.mod(U32.to_nat(c), 4n)))), 0n)
       +key = MM.Sm.key(n, tc)
       +fresh = side.fresh(ty, n)
-      typing(rest, ty, n, tc, [MM.SideM{key, fresh}], Side.add(t, MM.SideM.same(key, ms), Eqh.out(MM.SideM.out(ms), fresh)))
+      typing(rest, ty, n, tc, [MM.SideM.fresh(key, fresh)], Side.add(t, MM.SideM.same(key, ms), Eqh.out(MM.SideM.out(ms), fresh)))
 
 
 # The sidebar's index brought up to date (MM.Ix.up) against Side.ix made
@@ -255,6 +272,11 @@ def IxT.add(t: IxT, +ok: Bool, +what: String) -> IxT:
     case IxT{s, b, +w}:
       IxT{1n+s, Nat.add(b, Bool.pick(Nat, ok, 0n, 1n)), Bool.pick(String, ok, w, w ++ "\n  " ++ what)}
 
+def IxT.ok(t: IxT) -> Bool:
+  match t:
+    case IxT{_, bad, _}:
+      Nat.is_eq(bad, 0n)
+
 def IxT.show(t: IxT) -> String:
   match t:
     case IxT{s, b, w}:
@@ -269,7 +291,7 @@ def ixsteps(xs: List<&2, J.Json>, +u0: U.Ui, +tc: MM.TouchK, +k: MM.IxK, t: IxT)
       +u = U.Ui.recv(u0, o)
       +tc2 = MM.TouchK.msg(o, tc)
       +k2 = MM.Ix.up([k], tc2, u)
-      ixsteps(rest, u, tc2, k2, IxT.add(t, String.eq(Fp.ix(MM.IxK.ix(k2)), Fp.ix(U.Side.ix(U.Ui.state(u)))), String.take(J.Json.show(x), 160n)))
+      ixsteps(rest, u, MM.TouchK.consumed(tc2, [MM.IxK.n(k2)]), k2, IxT.add(t, String.eq(Fp.ix(MM.IxK.ix(k2)), Fp.ix(U.Side.ix(U.Ui.state(u)))), String.take(J.Json.show(x), 160n)))
 
 # Why the main area's key changes: each event as its own hub message, the
 # clock moved to the event's time (as the client's tick does), and the
@@ -355,6 +377,11 @@ def ST.add(t: ST, +kind: Nat, +hit: Bool, +ok: Bool, +what: String) -> ST:
       ST{1n+s, Nat.add(o, Bool.pick(Nat, Bool.and(Nat.is_eq(kind, 1n), hit), 1n, 0n)), Nat.add(h, Bool.pick(Nat, Bool.and(Nat.is_eq(kind, 2n), hit), 1n, 0n)),
         Nat.add(hs, Bool.pick(Nat, Nat.is_eq(kind, 2n), 1n, 0n)), Nat.add(b, Bool.pick(Nat, ok, 0n, 1n)), Bool.pick(String, ok, w, w ++ "\n  " ++ what)}
 
+def ST.ok(t: ST) -> Bool:
+  match t:
+    case ST{_, _, _, _, bad, _}:
+      Nat.is_eq(bad, 0n)
+
 def ST.show(t: ST) -> String:
   match t:
     case ST{s, o, h, hs, b, w}:
@@ -435,10 +462,15 @@ def ix.d(+u: U.Ui, +tc: MM.TouchK, +th: String, +i: Nat) -> U.Ui:
 def ix.dt(+tc: MM.TouchK, +th: String, +i: Nat) -> MM.TouchK:
   MM.TouchK.msg(delta(th, i), tc)
 
-def ixs.stream(xs: List<&2, J.Json>, +i: Nat, +th: String, +u0: U.Ui, +tc: MM.TouchK, +k: MM.IxK, +bad: Nat, +old: Nat, t: IxT) -> String:
+def ixs.done(t: IxT, +bad: Nat, old: Nat) -> IxT:
+  match t:
+    case IxT{steps, wrong, why}:
+      IxT{steps, Nat.add(wrong, bad), why ++ ", steps that took a count of pieces for a thread " ++ Nat.show(bad) ++ " (the rule before took one in " ++ Nat.show(old) ++ ")"}
+
+def ixs.stream(xs: List<&2, J.Json>, +i: Nat, +th: String, +u0: U.Ui, +tc: MM.TouchK, +k: MM.IxK, +bad: Nat, +old: Nat, t: IxT) -> IxT:
   match xs:
     case Nil{}:
-      IxT.show(t) ++ ", steps that took a count of pieces for a thread " ++ Nat.show(bad) ++ " (the rule before took one in " ++ Nat.show(old) ++ ")"
+      ixs.done(t, bad, old)
     case +x <> rest:
       +o = msg(x)
       +u1 = U.Ui.recv(u0, o)
@@ -448,6 +480,243 @@ def ixs.stream(xs: List<&2, J.Json>, +i: Nat, +th: String, +u0: U.Ui, +tc: MM.To
       +k2 = MM.Ix.up([k], tc2, u)
       +over = Bool.pick(Nat, Nat.is_gt(ix.over(Map.to_list(&2, Nat, MM.TouchK.m(tc2)), MM.IxK.n(k)), 0n), 1n, 0n)
       ixs.stream(rest, Nat.add(i, 3n), th, u, tc2, k2, Nat.add(bad, marks), Nat.add(old, over), IxT.add(t, String.eq(Fp.ix(MM.IxK.ix(k2)), Fp.ix(U.Side.ix(U.Ui.state(u)))), String.take(J.Json.show(x), 160n)))
+# The sidebar's memo over the same events: each event as its own hub
+# message, the clock at its time; a kept sidebar used when its key holds is
+# compared with a fresh one
+def sides(xs: List<&2, J.Json>, +ty: L.Ty, +n0: N.Nui, +tc: MM.TouchK, +ms: List<&2, MM.SideM>, t: Side) -> Side:
+  match xs:
+    case Nil{}:
+      t
+    case +x <> rest:
+      +o = msg(x)
+      +n = prepared(with_ui(n0, U.Ui.tick(U.Ui.recv(N.Nui.ui(n0), o), J.Json.get_nat(x, "at", U.Side.now(N.Nui.ui(n0))))), 0n)
+      +tc2 = MM.TouchK.msg(o, tc)
+      +key = MM.Sm.key(n, tc2)
+      +fresh = side.fresh(ty, n)
+      sides(rest, ty, n, tc2, [MM.SideM.fresh(key, fresh)], Side.add(t, MM.SideM.same(key, ms), Eqh.out(MM.SideM.out(ms), fresh)))
+
+# The timeline's memos as the window brings them up (only the streamed
+# reply's part while MM.Mm.tlkey holds) against memos brought up in full,
+# over every event and a piece of the open thread's text after each: the
+# main areas laid out from each must be the same
+type TlT is Data:
+  TlT{steps: Nat, kept: Nat, bad: Nat, why: String}
+
+def TlT.add(t: TlT, +kept: Bool, +ok: Bool, +what: String) -> TlT:
+  match t:
+    case TlT{s, k, b, +w}:
+      TlT{1n+s, Nat.add(k, Bool.pick(Nat, kept, 1n, 0n)), Nat.add(b, Bool.pick(Nat, ok, 0n, 1n)), Bool.pick(String, ok, w, w ++ "\n  " ++ what)}
+
+def TlT.ok(t: TlT) -> Bool:
+  match t:
+    case TlT{_, _, bad, _}:
+      Nat.is_eq(bad, 0n)
+
+def TlT.show(t: TlT) -> String:
+  match t:
+    case TlT{s, k, b, w}:
+      "timeline memos: steps " ++ Nat.show(s) ++ ", brought up only for the streamed text " ++ Nat.show(k) ++ ", main area unlike one from full memos " ++ Nat.show(b) ++ w
+
+def tl.win(same: Bool, +ty: L.Ty, +n: N.Nui, ms: List<&2, L.TLMemo>) -> List<&2, L.TLMemo>:
+  match same:
+    case True{}:
+      MM.Mm.memos.live(ty, n, ms)
+    case False{}:
+      L.Lay.memos(ty, n, ms)
+
+# the events, each followed by a piece of the open thread's text
+def tl.msgs(xs: List<&2, J.Json>, +sel: String, +i: Nat) -> List<&2, J.Json>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case x <> rest:
+      msg(x) <> delta(sel, i) <> tl.msgs(rest, sel, 1n+i)
+
+def tl.check(+ty: L.Ty, +n: N.Nui, +w: List<&2, L.TLMemo>, +f: L.TLMemo, +kept: Bool, +what: String, t: TlT) -> TlT:
+  TlT.add(t, kept, Eqh.out(MM.Mm.lay(ty, L.TL.memos.now(w), n), MM.Mm.lay(ty, f, n)), what)
+
+def tls(os: List<&2, J.Json>, +ty: L.Ty, +n0: N.Nui, +wm0: List<&2, L.TLMemo>, +mk0: String, f0: L.TLMemo, +tc0: MM.TouchK, t: TlT) -> TlT:
+  match os:
+    case Nil{}:
+      t
+    case +o <> rest:
+      +n1 = ss.recv(n0, o, Nat.add(U.Side.now(N.Nui.ui(n0)), 1n))
+      +tc1 = MM.TouchK.msg(o, tc0)
+      +k1 = MM.Mm.tlkey(n1, tc1)
+      +same = MM.Mm.tlkey.same(k1, [mk0])
+      +w1 = tl.win(same, ty, n1, wm0)
+      +f1 = L.Lay.memo(ty, n1, f0)
+      tls(rest, ty, n1, w1, k1, f1, tc1, tl.check(ty, n1, w1, f1, same, String.take(J.Json.show(o), 120n), t))
+
+# The open thread's parent and children as the main area's memo keeps them
+# (MM.Mm.rels: found again only when its rk changes) against found afresh,
+# at every event
+def rels.k(same: Bool, +rs: List<&2, String>, +n: N.Nui) -> List<&2, String>:
+  match same:
+    case True{}:
+      rs
+    case False{}:
+      MM.Mm.rels.of(n)
+
+def rels.go(xs: List<&2, J.Json>, +n0: N.Nui, +tc0: MM.TouchK, +rk0: String, +rs0: List<&2, String>, t: IxT) -> IxT:
+  match xs:
+    case Nil{}:
+      t
+    case +x <> rest:
+      +o = msg(x)
+      +n = ss.recv(n0, o, J.Json.get_nat(x, "at", U.Side.now(N.Nui.ui(n0))))
+      +tc = MM.TouchK.msg(o, tc0)
+      +rk = MM.Mm.rk(n, tc)
+      +rs = rels.k(String.eq(rk, rk0), rs0, n)
+      rels.go(rest, n, tc, rk, rs, IxT.add(t, String.eq(String.join(rs, ","), String.join(MM.Mm.rels.of(n), ",")), String.take(J.Json.show(x), 120n)))
+
+# ui.memo timed over the events as the window does it before each frame
+# (the timeline's memos brought up, the sidebar's index brought up and
+# forced), each event followed by one piece of the open thread's text
+def mt.win(same: Bool, +ty: L.Ty, +n: N.Nui, ms: List<&2, L.TLMemo>) -> List<&2, L.TLMemo>:
+  match same:
+    case True{}:
+      MM.Mm.memos.live(ty, n, ms)
+    case False{}:
+      L.Lay.memos(ty, n, ms)
+
+# Baseline uses the existing pre-PR2 operations: the full timeline memo
+# walk and Ix.since over the touch map. Both modes share the event stream,
+# state, force/checksum, clock and timer boundaries. This is a measurement
+# switch in the replay harness, not a second window implementation.
+def mt.memos(baseline: Bool, same: Bool, +ty: L.Ty, +n: N.Nui, ms: List<&2, L.TLMemo>) -> List<&2, L.TLMemo>:
+  match baseline:
+    case True{}:
+      L.Lay.memos(ty, n, ms)
+    case False{}:
+      mt.win(same, ty, n, ms)
+
+def mt.ix.old(mode: Nat, +k: MM.IxK, +tc: MM.TouchK, +u: U.Ui) -> MM.IxK:
+  match mode:
+    case 0n:
+      k
+    case 1n:
+      MM.Ix.full(u, MM.TouchK.n(tc))
+    case _:
+      MM.Ix.inc(MM.IxK.ix(k), MM.Ix.since(Map.to_list(&2, Nat, MM.TouchK.m(tc)), MM.IxK.n(k)), u, MM.TouchK.n(tc), MM.IxK.lt(k))
+
+def mt.ix(baseline: Bool, +k: MM.IxK, +tc: MM.TouchK, +u: U.Ui) -> MM.IxK:
+  match baseline:
+    case True{}:
+      mt.ix.old(MM.Ix.mode(MM.IxK.n(k), MM.IxK.lt(k), tc, u), k, tc, u)
+    case False{}:
+      MM.Ix.up([k], tc, u)
+
+def mt.touch(baseline: Bool, tc: MM.TouchK, n: Nat) -> MM.TouchK:
+  match baseline:
+    case True{}:
+      tc
+    case False{}:
+      MM.TouchK.consumed(tc, [n])
+
+def mt.done(+acc: Nat, cs: Nat) -> IO(Nat):
+  do IO<Nat>:
+    IO.print("ui.memo parts over the events: " ++ Nat.show(acc) ++ " ms in all (check " ++ Nat.show(cs) ++ ")")
+    return acc
+
+def mt.key(baseline: Bool, +n: N.Nui, tc: MM.TouchK, mk0: String) -> String:
+  match baseline:
+    case True{}:
+      mk0
+    case False{}:
+      MM.Mm.tlkey(n, tc)
+
+def mt.step(+baseline: Bool, +ty: L.Ty, +o: J.Json, +n0: N.Nui, +ms0: List<&2, L.TLMemo>, +mk0: String, +k0: MM.IxK, +tc0: MM.TouchK, +acc: Nat, +cs: Nat, rest: List<&2, J.Json>, go: List<&2, J.Json> -> N.Nui -> List<&2, L.TLMemo> -> String -> MM.IxK -> MM.TouchK -> Nat -> Nat -> IO(Nat)) -> IO(Nat):
+  do IO<Nat>:
+    +n : N.Nui = ss.recv(n0, o, Nat.add(U.Side.now(N.Nui.ui(n0)), 1n))
+    +tc : MM.TouchK = MM.TouchK.msg(o, tc0)
+    +a : Nat <- IO.now()
+    +mk : String = mt.key(baseline, n, tc, mk0)
+    +ms : List<&2, L.TLMemo> = mt.memos(baseline, MM.Mm.tlkey.same(mk, [mk0]), ty, n, ms0)
+    +z : Nat = L.TL.memo.size(L.TL.memos.now(ms))
+    +k : MM.IxK = mt.ix(baseline, k0, tc, N.Nui.ui(n))
+    +f : Nat = MM.IxK.force(k)
+    +b : Nat <- IO.now()
+    go(rest, n, ms, mk, k, mt.touch(baseline, tc, MM.IxK.n(k)), Nat.add(acc, Nat.sub(b, a)), Nat.mod(Nat.add(cs, Nat.add(z, f)), 1000000n))
+
+def mt.go(fuel: Nat, +baseline: Bool, os: List<&2, J.Json>, +ty: L.Ty, +n0: N.Nui, +ms0: List<&2, L.TLMemo>, +mk0: String, +k0: MM.IxK, +tc0: MM.TouchK, +acc: Nat, +cs: Nat) -> IO(Nat):
+  match fuel os:
+    case 0n _:
+      mt.done(acc, cs)
+    case 1n+_ Nil{}:
+      mt.done(acc, cs)
+    case 1n+f +o <> rest:
+      mt.step(baseline, ty, o, n0, ms0, mk0, k0, tc0, acc, cs, rest, r => n => ms => mk => k => tc => a => c => mt.go(f, baseline, r, ty, n, ms, mk, k, tc, a, c))
+
+# Clear only after all readers have caught up, including a deliberately
+# lagging second reader. Repeated IDs at the same message stamp stay new.
+def log.checks() -> IO(Unit):
+  do IO<Unit>:
+    +tc : MM.TouchK = MM.TouchK{10n, 0n, 0n, Map.new(&2, Nat), [MM.TkE{"a", 10n}, MM.TkE{"b", 10n}, MM.TkE{"a", 8n}, MM.TkE{"old", 2n}]}
+    exact(String.eq(String.join(MM.Ix.since.lg(MM.TouchK.lg(tc), 8n), ","), "a,b"), "new-first cutoff")
+    exact(Bool.not(List.is_empty(&2, MM.TkE, MM.TouchK.lg(MM.TouchK.consumed(tc, [10n, 8n])))), "lagging reader retains log")
+    exact(Bool.not(List.is_empty(&2, MM.TkE, MM.TouchK.lg(MM.TouchK.consumed(tc, Nil{})))), "no reader retains log")
+    exact(List.is_empty(&2, MM.TkE, MM.TouchK.lg(MM.TouchK.consumed(tc, [10n, 10n]))), "all readers consumed log")
+    IO.print("change log: cutoff and reader retention exact")
+
+def replay(+as: List<&2, String>, +ty: L.Ty, +xs: List<&2, J.Json>, +k: Nat, +cut: Nat, +u: U.Ui) -> IO(Unit):
+  do IO<Unit>:
+    log.checks()
+    +n : N.Nui = prepared(N.Nui.init(u, 1400, 900), 0n)
+    +memo : L.TLMemo = L.Lay.memo(ty, n, L.TL.memo.none())
+    IO.print("why the key changed (event -> first part that differs):" ++ Why.show(Map.to_list(&2, Nat, why(List.drop(&2, J.Json, xs, cut), n, MM.TouchK.none(), Why.key(n, MM.TouchK.none()), Map.new(&2, Nat)))))
+    +t : Tally = steps(List.drop(&2, J.Json, xs, cut), ty, with_hits(n, hits(MM.Mm.lay(ty, memo, n)), 0n), memo, Nil{}, MM.TouchK.none(), Tally{0n, 0n, 0n, 0n, ""})
+    IO.print(Tally.show(t))
+    exact(Tally.ok(t), "main area")
+    +ns : N.Nui = prepared(N.Nui.init(u, 1400, 900), 0n)
+    +ms0 : L.TLMemo = L.Lay.memo(ty, ns, L.TL.memo.none())
+    +stream : ST = streams(List.drop(&2, J.Json, xs, cut), 0n, ty, with_hits(ns, hits(MM.Mm.lay(ty, ms0, ns)), 0n), ms0, Nil{}, MM.TouchK.none(), ST{0n, 0n, 0n, 0n, 0n, ""})
+    IO.print(ST.show(stream))
+    exact(ST.ok(stream), "stream")
+    +streamix : IxT = ixs.stream(List.drop(&2, J.Json, xs, cut), 0n, arg(as, 1n), u, MM.TouchK.none(), MM.Ix.full(u, 0n), 0n, 0n, IxT{0n, 0n, ""})
+    IO.print("streaming, " ++ IxT.show(streamix))
+    exact(IxT.ok(streamix), "streaming index")
+    +nt : N.Nui = prepared(N.Nui.init(u, 1400, 900), 0n)
+    +mt : L.TLMemo = L.Lay.memo(ty, nt, L.TL.memo.none())
+    +timeline : TlT = tls(tl.msgs(List.drop(&2, J.Json, xs, cut), arg(as, 1n), 0n), ty, nt, [mt], "", mt, MM.TouchK.none(), TlT{0n, 0n, 0n, ""})
+    IO.print(TlT.show(timeline))
+    exact(TlT.ok(timeline), "timeline")
+    +nr : N.Nui = prepared(N.Nui.init(u, 1400, 900), 0n)
+    +relations : IxT = rels.go(List.drop(&2, J.Json, xs, cut), nr, MM.TouchK.none(), "", Nil{}, IxT{0n, 0n, ""})
+    IO.print("relations, " ++ IxT.show(relations))
+    exact(IxT.ok(relations), "relations")
+    +nm : N.Nui = prepared(N.Nui.init(u, 1400, 900), 0n)
+    +mm0 : L.TLMemo = L.Lay.memo(ty, nm, L.TL.memo.none())
+    tm : Nat <- mt.go(Nat.mul(2n, k), False{}, tl.msgs(List.drop(&2, J.Json, xs, cut), arg(as, 1n), 0n), ty, nm, [mm0], "", MM.Ix.full(u, 0n), MM.TouchK.none(), 0n, 0n)
+    +index : IxT = ixsteps(List.drop(&2, J.Json, xs, cut), u, MM.TouchK.none(), MM.Ix.full(u, 0n), IxT{0n, 0n, ""})
+    IO.print(IxT.show(index))
+    exact(IxT.ok(index), "index")
+    +n2 : N.Nui = prepared(N.Nui.init(u, 1400, 900), 0n)
+    +n3 : N.Nui = prepared(N.Nui.init(u, 1400, 900), 0n)
+    +sidebar : Side = sides(List.drop(&2, J.Json, xs, cut), ty, n3, MM.TouchK.none(), Nil{}, Side{0n, 0n, 0n})
+    IO.print(Side.show(sidebar))
+    exact(Side.ok(sidebar), "sidebar")
+    +typed : Side = typing("typing into the composer, and the pointer moving about", ty, n2, MM.TouchK.none(), [MM.SideM.fresh(MM.Sm.key(n2, MM.TouchK.none()), side.fresh(ty, n2))], Side{0n, 0n, 0n})
+    IO.print(Side.show(typed))
+    exact(Side.ok(typed), "typed")
+
+# Optional fourth argument selects timing only; correctness remains the
+# default. A/B runs use one binary and alternate baseline/current modes.
+def timed(baseline: Bool, +ty: L.Ty, +xs: List<&2, J.Json>, +k: Nat, +u: U.Ui) -> IO(Unit):
+  do IO<Unit>:
+    +n : N.Nui = prepared(N.Nui.init(u, 1400, 900), 0n)
+    +memo : L.TLMemo = L.Lay.memo(ty, n, L.TL.memo.none())
+    tm : Nat <- mt.go(Nat.mul(2n, k), baseline, tl.msgs(xs, U.Ui.sel(u), 0n), ty, n, [memo], "", MM.Ix.full(u, 0n), MM.TouchK.none(), 0n, 0n)
+    return Unit{}
+
+def run(mode: String, +as: List<&2, String>, +ty: L.Ty, +xs: List<&2, J.Json>, +k: Nat, +cut: Nat, +u: U.Ui) -> IO(Unit):
+  match mode:
+    case "baseline":
+      timed(True{}, ty, List.drop(&2, J.Json, xs, cut), k, u)
+    case "current":
+      timed(False{}, ty, List.drop(&2, J.Json, xs, cut), k, u)
+    case _:
+      replay(as, ty, xs, k, cut, u)
 
 def main() -> IO(Unit):
   do IO<Unit>:
@@ -459,15 +728,4 @@ def main() -> IO(Unit):
     +k : Nat = Maybe.default(&2, Nat, Nat.read(arg(as, 2n)), 300n)
     +cut : Nat = Nat.sub(List.length(&2, J.Json, xs), k)
     +u : U.Ui = real(List.take(&2, J.Json, xs, cut), arg(as, 1n))
-    +n : N.Nui = prepared(N.Nui.init(u, 1400, 900), 0n)
-    +memo : L.TLMemo = L.Lay.memo(ty, n, L.TL.memo.none())
-    IO.print("why the key changed (event -> first part that differs):" ++ Why.show(Map.to_list(&2, Nat, why(List.drop(&2, J.Json, xs, cut), n, MM.TouchK.none(), Why.key(n, MM.TouchK.none()), Map.new(&2, Nat)))))
-    +t : Tally = steps(List.drop(&2, J.Json, xs, cut), ty, with_hits(n, hits(MM.Mm.lay(ty, memo, n)), 0n), memo, Nil{}, MM.TouchK.none(), Tally{0n, 0n, 0n, 0n, ""})
-    IO.print(Tally.show(t))
-    +ns : N.Nui = prepared(N.Nui.init(u, 1400, 900), 0n)
-    +ms0 : L.TLMemo = L.Lay.memo(ty, ns, L.TL.memo.none())
-    IO.print(ST.show(streams(List.drop(&2, J.Json, xs, cut), 0n, ty, with_hits(ns, hits(MM.Mm.lay(ty, ms0, ns)), 0n), ms0, Nil{}, MM.TouchK.none(), ST{0n, 0n, 0n, 0n, 0n, ""})))
-    IO.print("streaming, " ++ ixs.stream(List.drop(&2, J.Json, xs, cut), 0n, arg(as, 1n), u, MM.TouchK.none(), MM.Ix.full(u, 0n), 0n, 0n, IxT{0n, 0n, ""}))
-    IO.print(IxT.show(ixsteps(List.drop(&2, J.Json, xs, cut), u, MM.TouchK.none(), MM.Ix.full(u, 0n), IxT{0n, 0n, ""})))
-    +n2 : N.Nui = prepared(N.Nui.init(u, 1400, 900), 0n)
-    IO.print(Side.show(typing("typing into the composer, and the pointer moving about", ty, n2, MM.TouchK.none(), [MM.SideM{MM.Sm.key(n2, MM.TouchK.none()), side.fresh(ty, n2)}], Side{0n, 0n, 0n})))
+    run(arg(as, 3n), as, ty, xs, k, cut, u)

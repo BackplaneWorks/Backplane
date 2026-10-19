@@ -20,7 +20,7 @@ if (!sock) process.exit(2);
 const parent = Number(opt("--parent-pid") || 0);
 // KIPC_IDLE (seconds) overrides --idle-exit, so a test need not wait ten minutes
 const idle = Number(process.env.KIPC_IDLE || opt("--idle-exit") || 0);
-const version = process.env.KIPC_VERSION ?? "10.99.0-bp.1";
+const version = process.env.KIPC_VERSION ?? "10.99.0-bp.4";
 // KIPC_DIRTY: a project path part whose server has unsaved changes, so it
 // refuses Shutdown without force (CONTRACT "B1 amended") and stays up
 const dirty = !!process.env.KIPC_DIRTY && args.join(" ").includes(process.env.KIPC_DIRTY);

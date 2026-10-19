@@ -1,3 +1,5 @@
+import App from "./app.bend";
+
 // A part in 3D on the web page.
 //
 // The hub sends a part's model as it does to the phones: a CBOR "plot"
@@ -410,12 +412,12 @@ class View {
 // the seconds; when it comes, its size; once drawn, a line says how it came
 View.prototype.waiting = function () {
   const s = this.asked ? Math.floor((performance.now() - this.asked) / 1000) : 0;
-  return `Preparing the model on the hub · ${s} s` + (s >= 15 ? " (a board with its parts or a large assembly takes a while the first time; after that it is cached)" : "");
+  return App.solid_waiting(document.documentElement.lang, BigInt(s));
 };
 
 View.prototype.statLine = function (st) {
   const k = st.tris >= 1000 ? `${Math.round(st.tris / 1000)}k` : `${st.tris}`;
-  return `${mb(st.bytes)} · ${k} triangles` + (st.waited > 0.5 ? ` · came after ${st.waited.toFixed(1)} s` : "") + ` · built in ${st.build.toFixed(1)} s`;
+  return App.solid_stats(document.documentElement.lang, mb(st.bytes), k, st.waited.toFixed(1), st.build.toFixed(1), st.waited > 0.5);
 };
 
 View.prototype.say = function (text) {

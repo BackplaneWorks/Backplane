@@ -21,6 +21,11 @@ function* each(list) {
 }
 
 const deviceLocal = new Map();
+let nativeLocale = App.native_locale("auto", "", "");
+function refreshNativeLocale() {
+  const tag = App.native_locale(deviceLocal.get("lang") || "auto", deviceLocal.get("lang-os") || "", deviceLocal.get("lang-preview") || "");
+  if (nativeLocale !== tag) { nativeLocale = tag; half = null; focusOf = null; }
+}
 function restoreLocal() { for (const [key, value] of deviceLocal) hubs = App.local(hubs, key, value); }
 
 const secs = (n) => BigInt(Math.floor(Number(n)));
@@ -210,7 +215,7 @@ let focusText = "null";
 function screenText() {
   const lean = App.lean(hubs);
   if (half === null || !same(lean, half.lean)) {
-    const o = plain(App.screen_list(lean));
+    const o = plain(App.screen_list_in(lean, nativeLocale));
     delete o.thread;
     const t = JSON.stringify(o);
     half = { lean, head: t.slice(0, -1) };
@@ -221,7 +226,7 @@ function screenText() {
     focusText = JSON.stringify(th);
     focusOf = hubs;
   }
-  return half.head + (half.head === "{" ? "" : ",") + '"thread":' + focusText + "}";
+  return half.head + (half.head === "{" ? "" : ",") + '"locale":' + JSON.stringify(nativeLocale) + ',"thread":' + focusText + "}";
 }
 
 // a frame that could change the screen came while more waited behind it
@@ -282,6 +287,7 @@ globalThis.Backplane = {
   // "view": "projects" or "active"; "" leaves it to the hub's setting)
   local(key, value) {
     deviceLocal.set(key, value);
+    refreshNativeLocale();
     hubs = App.local(hubs, key, value);
     return out(null);
   },

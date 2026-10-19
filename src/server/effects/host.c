@@ -16,10 +16,18 @@
 #include <sys/wait.h>
 #include <time.h>
 
+#if defined(__CYGWIN__) && defined(CID(Proc.exited))
+#include "windows-child.h"
+#endif
+
 extern char** environ;
 
 #ifndef MSG_NOSIGNAL
 #define MSG_NOSIGNAL 0
+#endif
+
+#if defined(__CYGWIN__) && defined(CID(Proc.spawn))
+#include "windows-stdio.h"
 #endif
 
 // A peer that hangs up must not kill the server.
@@ -486,13 +494,20 @@ Term proc_spawn_run(Env e, Term* f, IoWork* w) {
   char* cwd  = io_cstr(e, f[2], &clen);
   u32   err  = (u32)f[3];
   int   sv[2] = { -1, -1 };
+#ifdef __CYGWIN__
+  int   stdio[2] = { -1, -1 };
+#endif
   int   code = 0;
   pid_t pid  = 0;
   int   errfd = -1;
   char  errtmp[4200];
   if (!ok || io_nul(cwd, clen)) {
     code = EILSEQ;
+#ifdef __CYGWIN__
+  } else if (bp_stdio_pair(sv, stdio) < 0) {
+#else
   } else if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv) < 0) {
+#endif
     code = errno;
   } else {
     posix_spawn_file_actions_t fa;
@@ -500,12 +515,16 @@ Term proc_spawn_run(Env e, Term* f, IoWork* w) {
     if (clen > 0) {
       posix_spawn_file_actions_addchdir_np(&fa, cwd);
     }
-    posix_spawn_file_actions_adddup2(&fa, sv[1], 0);
-    posix_spawn_file_actions_adddup2(&fa, sv[1], 1);
+    int input = sv[1], output = sv[1];
+#ifdef __CYGWIN__
+    input = stdio[0]; output = stdio[1];
+#endif
+    posix_spawn_file_actions_adddup2(&fa, input, 0);
+    posix_spawn_file_actions_adddup2(&fa, output, 1);
     if (err == 0) {
       posix_spawn_file_actions_addopen(&fa, 2, "/dev/null", O_WRONLY, 0);
     } else if (err == 1) {
-      posix_spawn_file_actions_adddup2(&fa, sv[1], 2);
+      posix_spawn_file_actions_adddup2(&fa, output, 2);
     } else if (err == 3) {
       // stderr to a file of its own, named for the pid once it is known
       // (Proc.errtail reads its end and removes it)
@@ -522,6 +541,10 @@ Term proc_spawn_run(Env e, Term* f, IoWork* w) {
     if (sv[1] > 2) {
       posix_spawn_file_actions_addclose(&fa, sv[1]);
     }
+#ifdef __CYGWIN__
+    if (input > 2) posix_spawn_file_actions_addclose(&fa, input);
+    if (output > 2) posix_spawn_file_actions_addclose(&fa, output);
+#endif
     posix_spawnattr_t at;
     posix_spawnattr_init(&at);
     sigset_t def;
@@ -529,10 +552,20 @@ Term proc_spawn_run(Env e, Term* f, IoWork* w) {
     sigaddset(&def, SIGPIPE);
     posix_spawnattr_setsigdefault(&at, &def);
     posix_spawnattr_setflags(&at, POSIX_SPAWN_SETSIGDEF);
+#if defined(__CYGWIN__) && defined(CID(Proc.exited))
+    unsigned serial = bp_child_begin();
+#endif
     code = posix_spawnp(&pid, argv[0], &fa, &at, argv, environ);
+#if defined(__CYGWIN__) && defined(CID(Proc.exited))
+    if (code == 0) bp_child_started(pid, serial);
+#endif
     posix_spawn_file_actions_destroy(&fa);
     posix_spawnattr_destroy(&at);
+#ifdef __CYGWIN__
+    close(input); close(output);
+#else
     close(sv[1]);
+#endif
     if (errfd >= 0) {
       close(errfd);
       char at[4200];
@@ -625,6 +658,9 @@ static void __attribute__((constructor)) proc_wait_use(void) {
 // Proc.exited: the exit code of a child that has exited (left unreaped:
 // WNOWAIT), 4294967295 while it runs; one already reaped reads 255.
 Term proc_exited_run(Env e, Term* f, IoWork* w) {
+#ifdef __CYGWIN__
+  return (Term)bp_child_exited((pid_t)(uint32_t)f[0]);
+#else
   siginfo_t si;
   memset(&si, 0, sizeof si);
   int r = waitid(P_PID, (id_t)(uint32_t)f[0], &si, WEXITED | WNOHANG | WNOWAIT);
@@ -637,6 +673,7 @@ Term proc_exited_run(Env e, Term* f, IoWork* w) {
     code = si.si_code == CLD_EXITED ? (uint32_t)si.si_status : 128u + (uint32_t)si.si_status;
   }
   return (Term)code;
+#endif
 }
 
 static void __attribute__((constructor)) proc_exited_use(void) {
@@ -998,6 +1035,8 @@ static void __attribute__((constructor)) sys_exe_dir_use(void) {
 // on failure.
 // the agents kept through the exec (effects/adopt.c, when linked)
 extern void bp_adopt_exec(int keep) __attribute__((weak));
+// the hub's lock on its home, kept through the exec (effects/hublock.c)
+extern void bp_hublock_exec(int keep) __attribute__((weak));
 
 Term sys_exec_run(Env e, Term* f, IoWork* w) {
   int ok = 1;
@@ -1005,8 +1044,10 @@ Term sys_exec_run(Env e, Term* f, IoWork* w) {
   int code = ok ? 0 : EILSEQ;
   if (ok) {
     if (bp_adopt_exec) bp_adopt_exec(1);
+    if (bp_hublock_exec) bp_hublock_exec(1);
     execv(argv[0], argv);
     code = errno;
+    if (bp_hublock_exec) bp_hublock_exec(0);
     if (bp_adopt_exec) bp_adopt_exec(0);
   }
   for (char** a = argv; *a != NULL; a += 1) {

@@ -17,15 +17,37 @@ def T.files.count(l: I.Loc, +arg0: Nat) -> String:
     case I.Ja{}:
       I.I18n.pick(I.I18n.plural(I.En{}, arg0), I.I18n.num(I.En{}, arg0) ++ " files", I.I18n.num(I.En{}, arg0) ++ " file", I.I18n.num(I.En{}, arg0) ++ " files", I.I18n.num(I.En{}, arg0) ++ " files", I.I18n.num(I.En{}, arg0) ++ " files", I.I18n.num(I.En{}, arg0) ++ " files")
 
-def T.keys() -> List<&2, String>:
+def T.catalog.rev(xs: List<&2, String>, onto: List<&2, String>) -> List<&2, String>:
+  match xs:
+    case []: onto
+    case h <> t: T.catalog.rev(t, h <> onto)
+
+def T.catalog.join(parts: List<&2, List<&2, String>>, rev: List<&2, String>) -> List<&2, String>:
+  match parts:
+    case []: T.catalog.rev(rev, [])
+    case h <> t: T.catalog.join(t, T.catalog.rev(h, rev))
+
+def T.keys.part0() -> List<&2, String>:
   ["common.save", "files.count"]
+
+def T.keys() -> List<&2, String>:
+  T.catalog.join([T.keys.part0()], [])
+
+def T.catalog.missing.en() -> List<&2, String>:
+  []
+
+def T.catalog.missing.ja.part0() -> List<&2, String>:
+  ["common.save", "files.count"]
+
+def T.catalog.missing.ja() -> List<&2, String>:
+  T.catalog.join([T.catalog.missing.ja.part0()], [])
 
 def T.missing(l: I.Loc) -> List<&2, String>:
   match l:
     case I.En{}:
-      []
+      T.catalog.missing.en()
     case I.Ja{}:
-      ["common.save", "files.count"]
+      T.catalog.missing.ja()
 
 def T.plain.n.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r

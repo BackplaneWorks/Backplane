@@ -45,7 +45,7 @@ printf '%s\\n' '{"type":"turn.completed","usage":{}}'
   if (port === 3787) throw new Error("refusing the live port");
   const proc = Bun.spawn([resolve(bin), "--home", home, "--port", String(port), "--no-tailscale", "--foreground"], {
     env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_PEERS: "", BACKPLANE_GOOGLE_BAKE: "0", FAKE_LOG: log,
-      BACKPLANE_KEYRING_LOCKED: locked ? "1" : "0", PATH: `${fake}:${process.env.PATH}`, TMPDIR: root },
+      BACKPLANE_KEYRING_LOCKED: locked ? "1" : "0", BACKPLANE_AGENTS: fake, PATH: `${fake}:${process.env.PATH}`, TMPDIR: root },
     stdout: "ignore", stderr: Bun.file(join(root, "hub.err")),
   });
   try {

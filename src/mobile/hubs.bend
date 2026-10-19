@@ -1,4 +1,5 @@
 import Base
+import ../core/msgs.bend as MSG
 import ../core/json.bend as J
 import ../core/i18n.bend as I
 import ../core/model.bend as M
@@ -1464,17 +1465,20 @@ def Hubs.compact.pick(hit: Bool, ls: List<&2, J.Json>, at: Nat, old: List<&2, J.
     case False{}:
       HCompact{old, stamp}
 
-def Hubs.compact.go(ss: List<&2, Shown>, +n: Nat, +ls: List<&2, J.Json>, +stamp: Nat) -> J.Json:
+def Hubs.compact.go.loc(+lc: I.Loc, ss: List<&2, Shown>, +n: Nat, +ls: List<&2, J.Json>, +stamp: Nat) -> J.Json:
   match ss:
     case Nil{}:
-      J.Json.obj([J.KV{"running", J.Json.nat(n)}, J.KV{"headline", J.Json.str(NO.Island.compact.headline(n))}, J.KV{"lines", J.Json.arr(ls)}])
+      J.Json.obj([J.KV{"running", J.Json.nat(n)}, J.KV{"headline", J.Json.str(N.Note.compact.head(lc, n))}, J.KV{"lines", J.Json.arr(ls)}])
     case Shown{_, _, +j} <> t:
       +i = J.Json.get_obj(j, "island")
       +next = J.Json.elems(J.Json.get_obj(i, "lines"))
       +at = J.Json.get_nat(j, "islandAt", 0n)
       +picked = Hubs.compact.pick(NO.Island.compact.newer(J.Json.get_str(Maybe.default(&2, J.Json, List.head(&2, J.Json, next), J.Null{}), "thread", ""), at,
         J.Json.get_str(Maybe.default(&2, J.Json, List.head(&2, J.Json, ls), J.Null{}), "thread", ""), stamp), next, at, ls, stamp)
-      Hubs.compact.go(t, Nat.add(n, J.Json.get_nat(i, "running", 0n)), Hubs.compact.lines(picked), Hubs.compact.at(picked))
+      Hubs.compact.go.loc(lc, t, Nat.add(n, J.Json.get_nat(i, "running", 0n)), Hubs.compact.lines(picked), Hubs.compact.at(picked))
+
+def Hubs.compact.go(ss: List<&2, Shown>, +n: Nat, +ls: List<&2, J.Json>, +stamp: Nat) -> J.Json:
+  Hubs.compact.go.loc(I.En{}, ss, n, ls, stamp)
 
 def Hubs.island.named(+many: Bool, +name: String, +i: J.Json) -> J.Json:
   J.Json.obj([J.KV{"running", J.Json.get_obj(i, "running")},
@@ -1994,11 +1998,15 @@ def Hubs.keys(hs: List<&2, Hub>) -> List<&2, String>:
 def Hubs.found(+hs: List<&2, Hub>) -> List<&2, J.Json>:
   Hubs.peers(Hubs.peer_lists(hs), Hubs.keys(hs))
 
-def Hubs.empty(+n: Nat, +m: Nat, +finding: Bool) -> String:
-  Bool.pick(String, Nat.is_eq(m, 0n), "Pair with a hub to start.",
-    Bool.pick(String, Bool.and(finding, Nat.is_eq(n, 0n)), "No project matches.", S.Mob.empty(n)))
+def Hubs.empty.loc(+lc: I.Loc, +n: Nat, +m: Nat, +finding: Bool) -> String:
+  Bool.pick(String, Nat.is_eq(m, 0n), MSG.T.home.pair(lc),
+    Bool.pick(String, Bool.and(finding, Nat.is_eq(n, 0n)), MSG.T.home.no.results(lc), S.Mob.empty.loc(lc, n)))
 
 # the plane is left out (absent, not null) off the list and the Status tab
+
+def Hubs.empty(+n: Nat, +m: Nat, +finding: Bool) -> String:
+  Hubs.empty.loc(I.En{}, n, m, finding)
+
 def Hubs.pl.kv(plane: J.Json) -> List<&2, J.KV>:
   match plane:
     case J.Null{}:
@@ -2029,14 +2037,14 @@ def Hubs.tabs(+ss: List<&2, Shown>, +hs: List<&2, Hub>, +many: Bool) -> J.Json:
     J.KV{"routines", J.Json.obj([J.KV{"badge", J.Json.nat(Hubs.tabs.sum(ss, "routines", 0n))},
       J.KV{"rows", J.Json.arr(Hubs.pl.once(List.sort(~J.Json, ~Hubs.pl.due.before, Hubs.tabs.rows(ss, hs, many))))}])}])
 
-def Hubs.screen.p(+pl: MPL.MUber, +ss: List<&2, Shown>, +cur: String, +list: List<&2, Hub>) -> J.Json:
+def Hubs.screen.p.loc(+lc: I.Loc, +pl: MPL.MUber, +ss: List<&2, Shown>, +cur: String, +list: List<&2, Hub>) -> J.Json:
   J.Json.obj(List.append(&2, J.KV, Hubs.pl.kv(MPL.MUber.plane(pl)), [J.KV{"online", J.Json.bool(Hubs.all_on(ss))}, J.KV{"version", J.Json.str(J.Json.get_str(Hubs.of(ss, cur), "version", ""))},
     J.KV{"error", J.Json.str(Hubs.said(ss, "error"))}, J.KV{"note", J.Json.str(Hubs.said(ss, "note"))},
     J.KV{"sel", J.Json.str(J.Json.get_str(Hubs.of(ss, cur), "sel", ""))},
     J.KV{"making", J.Json.bool(J.Json.get_bool(Hubs.of(ss, cur), "making", False{}))},
     J.KV{"lang", J.Json.get_obj(Hubs.of(ss, cur), "lang")},
     J.KV{"theme", J.Json.str(J.Json.get_str(Hubs.of(ss, cur), "theme", ""))},
-    J.KV{"empty", J.Json.str(Hubs.empty(List.length(&2, J.Json, Hubs.projects(ss, False{})), List.length(&2, Shown, ss), J.Json.get_bool(Hubs.first_obj(ss, "search"), "open", False{})))},
+    J.KV{"empty", J.Json.str(Hubs.empty.loc(lc, List.length(&2, J.Json, Hubs.projects(ss, False{})), List.length(&2, Shown, ss), J.Json.get_bool(Hubs.first_obj(ss, "search"), "open", False{})))},
     J.KV{"projects", J.Json.arr(Hubs.origin.projects(Hubs.projects(ss, Nat.is_gt(List.length(&2, Shown, ss), 1n)), ss, cur))},
     J.KV{"older", Hubs.older(ss, "older")},
     J.KV{"settled", Hubs.older(ss, "settled")},
@@ -2051,7 +2059,7 @@ def Hubs.screen.p(+pl: MPL.MUber, +ss: List<&2, Shown>, +cur: String, +list: Lis
     J.KV{"settings", J.Json.get_obj(Hubs.of(ss, cur), "settings")},
     J.KV{"tour", J.Json.get_obj(Hubs.of(ss, cur), "tour")},
     J.KV{"find", J.Json.get_obj(Hubs.of(ss, cur), "find")},
-    J.KV{"island", Hubs.compact.go(ss, 0n, [], 0n)},
+    J.KV{"island", Hubs.compact.go.loc(lc, ss, 0n, [], 0n)},
     J.KV{"islands", J.Json.arr(Hubs.islands(ss))},
     J.KV{"thread", Hubs.origin.focus(ss, cur, "thread")},
     J.KV{"uber", MPL.MUber.uber(pl)},
@@ -2065,8 +2073,11 @@ def Hubs.screen.p(+pl: MPL.MUber, +ss: List<&2, Shown>, +cur: String, +list: Lis
     J.KV{"found", J.Json.arr(Hubs.found(list))},
     J.KV{"tabs", Hubs.tabs(ss, list, Nat.is_gt(List.length(&2, Shown, ss), 1n))}]))
 
+def Hubs.screen.p(+pl: MPL.MUber, +ss: List<&2, Shown>, +cur: String, +list: List<&2, Hub>) -> J.Json:
+  Hubs.screen.p.loc(I.En{}, pl, ss, cur, list)
+
 def Hubs.screen.k(+lc: I.Loc, +ss: List<&2, Shown>, +cur: String, +list: List<&2, Hub>, +want: Bool) -> J.Json:
-  Hubs.screen.p(Hubs.pl.of(lc, ss, list, cur, Nat.is_gt(List.length(&2, Shown, ss), 1n), want), ss, cur, list)
+  Hubs.screen.p.loc(lc, Hubs.pl.of(lc, ss, list, cur, Nat.is_gt(List.length(&2, Shown, ss), 1n), want), ss, cur, list)
 
 # the whole screen: every hub's in one
 def Hubs.screen.l(+lc: I.Loc, hs: Hubs) -> J.Json:

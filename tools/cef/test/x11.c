@@ -28,7 +28,7 @@ int main(void) {
   btn_f btn = (btn_f)dlsym(xt, "XTestFakeButtonEvent");
   mot_f mot = (mot_f)dlsym(xt, "XTestFakeMotionEvent");
   printf("{\"parent\":%lu}\n", parent); fflush(stdout);
-  char line[256], cmd[64], word[64];
+  char line[256], cmd[64], word[64], mod[64];
   while (fgets(line, sizeof line, stdin)) {
     unsigned long win; int x, y, button;
     if (sscanf(line, "%63s", cmd) != 1) continue;
@@ -67,6 +67,16 @@ int main(void) {
     } else if (!strcmp(cmd, "key") && sscanf(line, "%*s %63s", word) == 1) {
       unsigned kc = XKeysymToKeycode(d, XStringToKeysym(word));
       key(d, kc, True, 0); key(d, kc, False, 0); XSync(d, False); printf("{}");
+    } else if (!strcmp(cmd, "chord") && sscanf(line, "%*s %63s %63s", mod, word) == 2) {
+      unsigned mk = XKeysymToKeycode(d, XStringToKeysym(mod));
+      unsigned kc = XKeysymToKeycode(d, XStringToKeysym(word));
+      if (!mk || !kc) { printf("{\"error\":true}"); }
+      else { key(d, mk, True, 0); key(d, kc, True, 0); key(d, kc, False, 0); key(d, mk, False, 0); XSync(d, False); printf("{}"); }
+    } else if (!strcmp(cmd, "clipboard")) {
+      printf("{\"owner\":%lu}", XGetSelectionOwner(d, XInternAtom(d, "CLIPBOARD", False)));
+    } else if (!strcmp(cmd, "clearclip")) {
+      XSetSelectionOwner(d, XInternAtom(d, "CLIPBOARD", False), None, CurrentTime);
+      XSync(d, False); printf("{}");
     } else if (!strcmp(cmd, "close") && sscanf(line, "%*s %lu", &win) == 1) {
       XEvent e = {0}; e.xclient.type = ClientMessage; e.xclient.window = win;
       e.xclient.message_type = XInternAtom(d, "WM_PROTOCOLS", False); e.xclient.format = 32;

@@ -162,10 +162,11 @@ import kotlinx.coroutines.flow.first
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun OpeningDestination(m: AppModel, s: Screen, o: Core.Opening) {
+    val lang = s.locale
     val page = m.seenPages[o.nav]
     Scaffold(topBar = {
         TopAppBar(title = { Text(o.title) }, navigationIcon = {
-            IconButton(onClick = { m.back() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
+            IconButton(onClick = { m.back() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, NativeMessages.tour_back(lang)) }
         })
     }) { padding ->
         Box(Modifier.fillMaxSize().padding(padding).clearAndSetSemantics { }) {
@@ -203,8 +204,8 @@ fun App(m: AppModel) {
     var leftNew by remember { mutableStateOf(false) }
     LaunchedEffect(s?.making) { if (s?.making != true) leftNew = false }
     // a file link tapped in a message asks for its menu
-    CompositionLocalProvider(LocalFileTap provides { p: String -> m.act("file-menu", p) }) { when {
-        m.links.isEmpty() -> Pair("", cancel = null) { m.pair(it) }
+    CompositionLocalProvider(LocalBackplaneLanguage provides (s?.locale ?: "en"), LocalFileTap provides { p: String -> m.act("file-menu", p) }) { when {
+        m.links.isEmpty() -> Pair(s?.locale ?: "en", "", cancel = null) { m.pair(it) }
         s == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         pairing -> {
             BackHandler { pairing = false }
@@ -340,6 +341,7 @@ fun App(m: AppModel) {
 // shown ("proj-go"), the x empties it
 @Composable
 private fun SearchField(m: AppModel, f: Search, first: String?) {
+    val lang = LocalBackplaneLanguage.current
     var text by remember { mutableStateOf(f.query) }
     // what was typed here: a screen still echoing it never overwrites the field
     val typed = remember { mutableSetOf<String>() }
@@ -352,7 +354,7 @@ private fun SearchField(m: AppModel, f: Search, first: String?) {
         leadingIcon = { Icon(Icons.Filled.Search, null) },
         trailingIcon = {
             if (text.isNotEmpty()) IconButton(onClick = { text = ""; typed.clear(); m.act("proj-find-q", "") }) {
-                Icon(Icons.Filled.Close, "Clear search")
+                Icon(Icons.Filled.Close, NativeMessages.native_thread_search_clear(lang))
             }
         },
         keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false, imeAction = ImeAction.Go),
@@ -361,24 +363,24 @@ private fun SearchField(m: AppModel, f: Search, first: String?) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun Pair(link: String, cancel: (() -> Unit)?, done: (String) -> Unit) {
+private fun Pair(tag: String, link: String, cancel: (() -> Unit)?, done: (String) -> Unit) {
     var text by rememberSaveable { mutableStateOf(link) }
     Scaffold(topBar = {
-        TopAppBar(title = { Text("Pair with a hub") }, navigationIcon = {
-            if (cancel != null) IconButton(onClick = cancel) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
+        TopAppBar(title = { Text(NativeMessages.native_pair_title(tag)) }, navigationIcon = {
+            if (cancel != null) IconButton(onClick = cancel) { Icon(Icons.AutoMirrored.Filled.ArrowBack, NativeMessages.tour_back(tag)) }
         })
     }) { pad ->
         Column(Modifier.padding(pad).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             val ctx = LocalContext.current
-            Button(onClick = { scanPairing(ctx, done) }) {
+            Button(onClick = { scanPairing(ctx, tag, done) }) {
                 Icon(Icons.Filled.QrCodeScanner, null)
-                Text("Scan QR code", Modifier.padding(start = 8.dp))
+                Text(NativeMessages.native_pair_scan(tag), Modifier.padding(start = 8.dp))
             }
-            Text("On your computer: Backplane, Settings, Pairing link, QR code. Or paste the link:",
+            Text(NativeMessages.native_pair_computer_android(tag),
                 style = MaterialTheme.typography.bodyMedium)
             OutlinedTextField(text, { text = it }, Modifier.fillMaxWidth(), singleLine = true,
-                label = { Text("Pairing link") }, placeholder = { Text("http://host:3787/#token=…") })
-            Button(onClick = { done(text) }, enabled = text.isNotBlank()) { Text("Connect") }
+                label = { Text(NativeMessages.settings_pair(tag)) }, placeholder = { Text("http://host:3787/#token=…") })
+            Button(onClick = { done(text) }, enabled = text.isNotBlank()) { Text(NativeMessages.native_pair_connect(tag)) }
         }
     }
 }
@@ -388,10 +390,11 @@ private fun Pair(link: String, cancel: (() -> Unit)?, done: (String) -> Unit) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun Hubs(m: AppModel, s: Screen, back: () -> Unit) {
+    val tag = s.locale
     var text by rememberSaveable { mutableStateOf("") }
     Scaffold(topBar = {
-        TopAppBar(title = { Text("Hubs") }, navigationIcon = {
-            IconButton(onClick = back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
+        TopAppBar(title = { Text(NativeMessages.native_settings_hubs(tag)) }, navigationIcon = {
+            IconButton(onClick = back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, NativeMessages.tour_back(tag)) }
         })
     }) { pad ->
         LazyColumn(Modifier.fillMaxSize(), contentPadding = pad) {
@@ -400,34 +403,34 @@ private fun Hubs(m: AppModel, s: Screen, back: () -> Unit) {
                     headlineContent = { Text(h.name) },
                     supportingContent = { Text(h.key) },
                     leadingContent = { Status(if (h.online) "idle" else "stop") },
-                    trailingContent = { IconButton(onClick = { m.unpair(h.key) }) { Icon(Icons.Filled.Close, "Unpair") } },
+                    trailingContent = { IconButton(onClick = { m.unpair(h.key) }) { Icon(Icons.Filled.Close, NativeMessages.native_pair_unpair(tag)) } },
                 )
             }
             if (s.found.isNotEmpty()) {
                 item(key = "found") {
-                    Text("On your tailnet", Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    Text(NativeMessages.native_pair_tailnet(tag), Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                         style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.outline)
                 }
                 items(s.found, key = { "f:" + it.url }) { f ->
                     ListItem(
                         headlineContent = { Text(f.name) },
                         supportingContent = { Text(f.url) },
-                        trailingContent = { IconButton(onClick = { m.pair(f.url) }) { Icon(Icons.Filled.Add, "Pair") } },
+                        trailingContent = { IconButton(onClick = { m.pair(f.url) }) { Icon(Icons.Filled.Add, NativeMessages.native_pair_action(tag)) } },
                     )
                 }
             }
             item(key = "add") {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Scan the code, or paste the tailnet link Backplane shows in Settings (Pairing link).",
+                    Text(NativeMessages.native_pair_instructions(tag),
                         style = MaterialTheme.typography.bodyMedium)
                     OutlinedTextField(text, { text = it }, Modifier.fillMaxWidth(), singleLine = true,
-                        label = { Text("Pairing link") }, placeholder = { Text("http://host:3787/#token=…") })
+                        label = { Text(NativeMessages.settings_pair(tag)) }, placeholder = { Text("http://host:3787/#token=…") })
                     val ctx = LocalContext.current
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { m.pair(text); text = "" }, enabled = text.isNotBlank()) { Text("Add hub") }
-                        OutlinedButton(onClick = { scanPairing(ctx) { m.pair(it) } }) {
+                        Button(onClick = { m.pair(text); text = "" }, enabled = text.isNotBlank()) { Text(NativeMessages.native_pair_add(tag)) }
+                        OutlinedButton(onClick = { scanPairing(ctx, tag) { m.pair(it) } }) {
                             Icon(Icons.Filled.QrCodeScanner, null)
-                            Text("Scan QR code", Modifier.padding(start = 8.dp))
+                            Text(NativeMessages.native_pair_scan(tag), Modifier.padding(start = 8.dp))
                         }
                     }
                 }
@@ -438,9 +441,10 @@ private fun Hubs(m: AppModel, s: Screen, back: () -> Unit) {
 
 @Composable
 private fun Errors(m: AppModel, s: Screen, host: SnackbarHostState) {
-    LaunchedEffect(s.error) {
+    val lang = s.locale
+    LaunchedEffect(s.error, lang) {
         if (s.error.isNotEmpty()) {
-            val r = host.showSnackbar(s.error, actionLabel = "Dismiss", withDismissAction = false)
+            val r = host.showSnackbar(s.error, actionLabel = NativeMessages.approval_dismiss(lang), withDismissAction = false)
             if (r == SnackbarResult.ActionPerformed || r == SnackbarResult.Dismissed) m.act("dismiss")
         }
     }
@@ -474,6 +478,7 @@ private fun swipeColor(s: Swipe?): Color = when (s?.tone) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ThreadRow(m: AppModel, r: Row) {
+    val lang = LocalBackplaneLanguage.current
     var menu by remember { mutableStateOf(false) }
     val haptic = LocalHapticFeedback.current
     val lead = r.lead.firstOrNull()
@@ -507,7 +512,7 @@ private fun ThreadRow(m: AppModel, r: Row) {
                 leadingContent = { StatusDot(r.state, r.status) },
                 trailingContent = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (r.pinned) Icon(Icons.Filled.PushPin, "Pinned", Modifier.size(16.dp).padding(end = 4.dp))
+                        if (r.pinned) Icon(Icons.Filled.PushPin, NativeMessages.tools_pinned(lang), Modifier.size(16.dp).padding(end = 4.dp))
                         if (r.agents.isNotEmpty()) Text(r.agents, style = MaterialTheme.typography.labelMedium, color = PhaseColor.accent)
                         else Text(r.ago, style = MaterialTheme.typography.labelMedium)
                     }
@@ -544,6 +549,7 @@ internal fun Modifier.combinedClickableCompat(onLong: (() -> Unit)? = null, onCl
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun Projects(m: AppModel, s: Screen, onPair: () -> Unit, state: LazyListState = rememberLazyListState()) {
+    val lang = s.locale
     val snacks = remember { SnackbarHostState() }
     var choosing by remember { mutableStateOf(false) }
     var more by remember { mutableStateOf(false) }
@@ -553,8 +559,8 @@ internal fun Projects(m: AppModel, s: Screen, onPair: () -> Unit, state: LazyLis
             TopAppBar(
                 title = {
                     Column {
-                        Text("Threads")
-                        Text(if (s.online) "Connected" else "Connecting…",
+                        Text(NativeMessages.tour_title_threads(lang))
+                        Text(NativeMessages.native_thread_online(lang, if (s.online) "online" else "connecting"),
                             style = MaterialTheme.typography.labelMedium,
                             color = if (s.online) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline)
                     }
@@ -563,7 +569,7 @@ internal fun Projects(m: AppModel, s: Screen, onPair: () -> Unit, state: LazyLis
                     // with several hubs, the picker opens on the one chosen
                     Box {
                         IconButton(onClick = { if (s.hubs.size > 1) choosing = true else m.act("picker-open") }) {
-                            Icon(Icons.Filled.CreateNewFolder, "Add project")
+                            Icon(Icons.Filled.CreateNewFolder, NativeMessages.sidebar_add_project(lang))
                         }
                         DropdownMenu(choosing, { choosing = false }) {
                             for (h in s.hubs) DropdownMenuItem(text = { Text(h.name) }, onClick = {
@@ -572,13 +578,13 @@ internal fun Projects(m: AppModel, s: Screen, onPair: () -> Unit, state: LazyLis
                             })
                         }
                     }
-                    IconButton(onClick = onPair) { Icon(Icons.Filled.Link, "Hubs") }
+                    IconButton(onClick = onPair) { Icon(Icons.Filled.Link, NativeMessages.native_settings_hubs(lang)) }
                     Box {
-                        IconButton(onClick = { more = true }) { Icon(Icons.Filled.MoreVert, "More") }
+                        IconButton(onClick = { more = true }) { Icon(Icons.Filled.MoreVert, NativeMessages.common_more(lang)) }
                         DropdownMenu(more, { more = false }) {
-                            DropdownMenuItem(text = { Text("Search threads") }, leadingIcon = { Icon(Icons.Filled.Search, null) },
+                            DropdownMenuItem(text = { Text(NativeMessages.palette_search(lang)) }, leadingIcon = { Icon(Icons.Filled.Search, null) },
                                 onClick = { more = false; m.act("find-open", "search") })
-                            DropdownMenuItem(text = { Text("Settings") }, leadingIcon = { Icon(Icons.Filled.Settings, null) },
+                            DropdownMenuItem(text = { Text(NativeMessages.palette_settings(lang)) }, leadingIcon = { Icon(Icons.Filled.Settings, null) },
                                 onClick = { more = false; m.selectTab(Tab.Settings) })
                         }
                     }
@@ -600,7 +606,7 @@ internal fun Projects(m: AppModel, s: Screen, onPair: () -> Unit, state: LazyLis
                 if (s.active.isEmpty() && s.settled == null) {
                     if (s.projects.isNotEmpty() && s.search?.query.isNullOrEmpty()) item(key = "none") {
                         Box(Modifier.fillMaxWidth().padding(vertical = 48.dp), contentAlignment = Alignment.Center) {
-                            Text("Nothing active", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.outline)
+                            Text(NativeMessages.sidebar_nothing(lang), style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.outline)
                         }
                     }
                 } else {
@@ -610,7 +616,7 @@ internal fun Projects(m: AppModel, s: Screen, onPair: () -> Unit, state: LazyLis
                     s.settled?.let { o ->
                         item(key = "settled") {
                             ListItem(
-                                headlineContent = { Text("Settled ${o.count}", style = MaterialTheme.typography.labelLarge) },
+                                headlineContent = { Text(NativeMessages.sidebar_settled_count(lang, o.count.toString()), style = MaterialTheme.typography.labelLarge) },
                                 trailingContent = { Icon(if (o.open) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, null) },
                                 modifier = Modifier.combinedClickableCompat { m.act("side-settled", "") },
                             )
@@ -630,7 +636,7 @@ internal fun Projects(m: AppModel, s: Screen, onPair: () -> Unit, state: LazyLis
                                     maxLines = 1, overflow = TextOverflow.Ellipsis)
                             },
                             trailingContent = {
-                                IconButton(onClick = { m.act("new-thread", p.id) }) { Icon(Icons.Filled.Add, "New thread") }
+                                IconButton(onClick = { m.act("new-thread", p.id) }) { Icon(Icons.Filled.Add, NativeMessages.thread_new(lang)) }
                             },
                             modifier = Modifier.combinedClickableCompat(onLong = {
                                 if (AppSettings.haptics) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -665,7 +671,7 @@ internal fun Projects(m: AppModel, s: Screen, onPair: () -> Unit, state: LazyLis
                     if (p.archived.isNotEmpty() && p.value.isNotEmpty()) {
                         item(key = "a:" + p.id) {
                             ListItem(
-                                headlineContent = { Text("Archived ${p.archived.size}", style = MaterialTheme.typography.labelLarge) },
+                                headlineContent = { Text(NativeMessages.native_thread_archived(lang, p.archived.size.toString()), style = MaterialTheme.typography.labelLarge) },
                                 trailingContent = {
                                     Icon(if (p.archOpen) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, null)
                                 },
@@ -680,7 +686,7 @@ internal fun Projects(m: AppModel, s: Screen, onPair: () -> Unit, state: LazyLis
                 s.older?.let { o ->
                     item(key = "older") {
                         ListItem(
-                            headlineContent = { Text("Older ${o.count}", style = MaterialTheme.typography.labelLarge) },
+                            headlineContent = { Text(NativeMessages.sidebar_older(lang, o.count.toString()), style = MaterialTheme.typography.labelLarge) },
                             trailingContent = { Icon(if (o.open) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, null) },
                             modifier = Modifier.combinedClickableCompat { m.act("side-older", "") },
                         )
@@ -720,6 +726,7 @@ private fun RowMenuSheet(m: AppModel, menu: RowMenu) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun FolderPicker(m: AppModel, p: Folders) {
+    val lang = LocalBackplaneLanguage.current
     var text by remember { mutableStateOf(p.text) }
     // what was typed here: a screen still echoing it never overwrites the field
     val typed = remember { mutableSetOf<String>() }
@@ -730,8 +737,8 @@ private fun FolderPicker(m: AppModel, p: Folders) {
         Scaffold(
             topBar = {
                 TopAppBar(
-                    title = { Text("Add project") },
-                    navigationIcon = { IconButton(onClick = { m.act("proj-close") }) { Icon(Icons.Filled.Close, "Cancel") } },
+                    title = { Text(NativeMessages.sidebar_add_project(lang)) },
+                    navigationIcon = { IconButton(onClick = { m.act("proj-close") }) { Icon(Icons.Filled.Close, NativeMessages.common_cancel(lang)) } },
                 )
             },
         ) { pad ->
@@ -772,10 +779,11 @@ private fun FolderPicker(m: AppModel, p: Folders) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun MakingScreen(back: () -> Unit) {
+    val lang = LocalBackplaneLanguage.current
     Scaffold(topBar = {
         TopAppBar(
-            navigationIcon = { IconButton(onClick = back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
-            title = { Text("New thread") },
+            navigationIcon = { IconButton(onClick = back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, NativeMessages.tour_back(lang)) } },
+            title = { Text(NativeMessages.thread_new(lang)) },
         )
     }) { pad ->
         Box(Modifier.fillMaxSize().padding(pad), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
@@ -785,6 +793,7 @@ private fun MakingScreen(back: () -> Unit) {
 // a message the hub has not stored yet
 @Composable
 private fun SendingView(text: String) {
+    val lang = LocalBackplaneLanguage.current
     Column(Modifier.fillMaxWidth().alpha(0.55f), horizontalAlignment = Alignment.End,
         verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(Modifier.fillMaxWidth()) {
@@ -793,7 +802,7 @@ private fun SendingView(text: String) {
                 Text(text, Modifier.padding(horizontal = 14.dp, vertical = 10.dp), style = MaterialTheme.typography.bodyLarge)
             }
         }
-        Text("Sending…", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+        Text(NativeMessages.native_thread_sending(lang), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
     }
 }
 
@@ -801,6 +810,7 @@ private fun SendingView(text: String) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ThreadScreen(m: AppModel, s: Screen, t: ThreadView, below: (@Composable () -> Unit)? = null) {
+    val lang = s.locale
     val snacks = remember { SnackbarHostState() }
     val list = rememberLazyListState()
     var menu by remember { mutableStateOf(false) }
@@ -852,7 +862,7 @@ fun ThreadScreen(m: AppModel, s: Screen, t: ThreadView, below: (@Composable () -
         // opaque, so the entries scrolled under it (a bot's cat and tabs) never show through
         topBar = { Column(Modifier.background(MaterialTheme.colorScheme.surface)) {
             TopAppBar(
-                navigationIcon = { IconButton(onClick = { m.back() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
+                navigationIcon = { IconButton(onClick = { m.back() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, NativeMessages.tour_back(lang)) } },
                 title = {
                     Column {
                         Text(t.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -868,7 +878,7 @@ fun ThreadScreen(m: AppModel, s: Screen, t: ThreadView, below: (@Composable () -
                     // they never cover the thread
                     t.subs?.let { u ->
                         TextButton(onClick = { subs = true }) {
-                            Icon(Icons.Filled.Group, "Subagents: " + u.word.ifEmpty { u.busy },
+                            Icon(Icons.Filled.Group, NativeMessages.native_thread_subagents(lang, u.word.ifEmpty { u.busy }),
                                 tint = if (u.busy.isNotEmpty()) PhaseColor.accent else MaterialTheme.colorScheme.outline)
                             Text(u.word.ifEmpty { u.busy }.takeWhile { it.isDigit() }, Modifier.padding(start = 2.dp),
                                 style = MaterialTheme.typography.labelMedium,
@@ -877,7 +887,7 @@ fun ThreadScreen(m: AppModel, s: Screen, t: ThreadView, below: (@Composable () -
                     }
                     if (t.viewer.choices.isNotEmpty()) Box {
                         var boards by remember { mutableStateOf(false) }
-                        IconButton(onClick = { boards = true }) { Icon(Icons.Filled.Memory, "Board viewer") }
+                        IconButton(onClick = { boards = true }) { Icon(Icons.Filled.Memory, NativeMessages.native_thread_board(lang)) }
                         DropdownMenu(boards, { boards = false }) {
                             for (c in t.viewer.choices) DropdownMenuItem(
                                 text = { Text(c.label) },
@@ -888,7 +898,7 @@ fun ThreadScreen(m: AppModel, s: Screen, t: ThreadView, below: (@Composable () -
                     for (tool in t.tools) if (tool.action == "interrupt")
                         IconButton(onClick = { m.act(tool.action) }) { Icon(Icons.Filled.Stop, tool.label) }
                     Box {
-                        IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, "More") }
+                        IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, NativeMessages.common_more(lang)) }
                         DropdownMenu(menu, { menu = false }) {
                             for (tool in t.tools) if (tool.action != "interrupt") DropdownMenuItem(
                                 text = { Text(tool.label) },
@@ -972,7 +982,7 @@ fun ThreadScreen(m: AppModel, s: Screen, t: ThreadView, below: (@Composable () -
                         TextButton(onClick = { models = true }) {
                             Text(t.picker.label, style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.outline, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Icon(Icons.Filled.ExpandMore, "Choose the model and effort", Modifier.size(16.dp),
+                            Icon(Icons.Filled.ExpandMore, NativeMessages.composer_model_tip(lang), Modifier.size(16.dp),
                                 tint = MaterialTheme.colorScheme.outline)
                         }
                         DropdownMenu(models, { models = false }) {
@@ -984,7 +994,7 @@ fun ThreadScreen(m: AppModel, s: Screen, t: ThreadView, below: (@Composable () -
                             if (t.picker.efforts.isNotEmpty()) {
                                 HorizontalDivider()
                                 for (c in t.picker.efforts) DropdownMenuItem(
-                                    text = { Text("Effort: ${c.label}") },
+                                    text = { Text(NativeMessages.native_thread_effort_item(lang, c.label)) },
                                     leadingIcon = { if (c.on) Icon(Icons.Filled.Check, null) else Spacer(Modifier.width(24.dp)) },
                                     onClick = { models = false; m.act("effort", c.value) },
                                 )
@@ -993,7 +1003,7 @@ fun ThreadScreen(m: AppModel, s: Screen, t: ThreadView, below: (@Composable () -
                             if (t.picker.providers.isNotEmpty()) {
                                 HorizontalDivider()
                                 for (c in t.picker.providers) DropdownMenuItem(
-                                    text = { Text("Provider: ${c.label}") },
+                                    text = { Text(NativeMessages.native_thread_provider_item(lang, c.label)) },
                                     leadingIcon = { if (c.on) Icon(Icons.Filled.Check, null) else Spacer(Modifier.width(24.dp)) },
                                     onClick = { models = false; m.act("effort", c.value) },
                                 )
@@ -1067,6 +1077,7 @@ fun ThreadScreen(m: AppModel, s: Screen, t: ThreadView, below: (@Composable () -
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun PlotScreen(m: AppModel, v: Viewer) {
+    val lang = LocalBackplaneLanguage.current
     // a plot for any other source is stale (a switch in flight), except,
     // while the design history shows, the last version of this kind and
     // project: it stays until the next arrives (no blank between steps)
@@ -1118,7 +1129,7 @@ private fun PlotScreen(m: AppModel, v: Viewer) {
         Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically) {
             ChoiceRow(v.choices, v.open, Modifier.weight(1f)) { m.act("view", it) }
-            IconButton(onClick = { m.act("view", "") }) { Icon(Icons.Filled.Close, "Close", tint = if (v.light) Color.Black else Color.White) }
+            IconButton(onClick = { m.act("view", "") }) { Icon(Icons.Filled.Close, NativeMessages.common_close(lang), tint = if (v.light) Color.Black else Color.White) }
         }
         ViewerControls(m, v, f?.chunks?.map { it.layer }?.toSet() ?: emptySet(), Modifier.align(Alignment.TopStart).statusBarsPadding().padding(top = 56.dp))
         if (v.open == "mech") v.mech?.let { p -> MechBar(m, p, v.light, Modifier.align(Alignment.TopStart).statusBarsPadding().padding(top = 108.dp)) }
@@ -1143,6 +1154,7 @@ private fun plotHead(k: String) = k.split("|", limit = 3).take(2).joinToString("
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun HistoryBar(m: AppModel, h: HistBar, light: Boolean) {
+    val lang = LocalBackplaneLanguage.current
     val fg = if (light) Color.Black else Color.White
     val dim = fg.copy(alpha = 0.6f)
     val accent = MaterialTheme.colorScheme.primary
@@ -1152,22 +1164,22 @@ private fun HistoryBar(m: AppModel, h: HistBar, light: Boolean) {
         if (h.cmp) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    HistChip("Old: ${h.a}", h.side == "a", fg, accent, Modifier.weight(1f, fill = false)) { m.act("cmp-side", "a") }
-                    HistChip("New: ${h.b}", h.side == "b", fg, accent, Modifier.weight(1f, fill = false)) { m.act("cmp-side", "b") }
+                    HistChip(NativeMessages.history_old_label(lang, h.a), h.side == "a", fg, accent, Modifier.weight(1f, fill = false)) { m.act("cmp-side", "a") }
+                    HistChip(NativeMessages.history_new_label(lang, h.b), h.side == "b", fg, accent, Modifier.weight(1f, fill = false)) { m.act("cmp-side", "b") }
                 }
-                HistChip("BOM", false, fg, accent) { m.act("rv-bom", "") }
-                HistChip("Close", false, fg, accent) { m.act("cmp-close", "") }
+                HistChip(NativeMessages.review_bom(lang), false, fg, accent) { m.act("rv-bom", "") }
+                HistChip(NativeMessages.common_close(lang), false, fg, accent) { m.act("cmp-close", "") }
             }
             val shown = h.showing.ifEmpty { "diff" }
             SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                val ways = listOf("old" to "Old", "diff" to "Diff", "new" to "New")
+                val ways = listOf("old" to NativeMessages.viewer_history_old(lang), "diff" to NativeMessages.viewer_diff(lang), "new" to NativeMessages.viewer_history_new(lang))
                 ways.forEachIndexed { i, w ->
                     SegmentedButton(selected = shown == w.first, onClick = { m.act("rv-as", w.first) },
                         shape = SegmentedButtonDefaults.itemShape(i, ways.size), icon = {}) { Text(w.second, maxLines = 1, style = MaterialTheme.typography.labelMedium) }
                 }
             }
             if (shown == "diff") Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                val names = listOf("Removed", "Changed", "Added")
+                val names = listOf(NativeMessages.viewer_history_removed(lang), NativeMessages.viewer_history_changed(lang), NativeMessages.viewer_history_added(lang))
                 for (i in 0 until minOf(names.size, h.keys.size)) Row(verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     Box(Modifier.size(10.dp).background(Color(0xFF000000.toInt() or h.keys[i])))
@@ -1178,17 +1190,17 @@ private fun HistoryBar(m: AppModel, h: HistBar, light: Boolean) {
             // one row when the title fits, else the chips go under it
             FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Row(Modifier.align(Alignment.CenterVertically), verticalAlignment = Alignment.CenterVertically) {
-                    HistIcon(Icons.Filled.SkipPrevious, "First step", fg) { m.act("hist-first", "") }
-                    HistIcon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Previous step", fg) { m.act("hist-prev", "") }
-                    HistIcon(if (h.playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, if (h.playing) "Pause" else "Play", fg) { m.act("hist-play", "") }
-                    HistIcon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "Next step", fg) { m.act("hist-next", "") }
-                    HistIcon(Icons.Filled.SkipNext, "Last step", fg) { m.act("hist-last", "") }
+                    HistIcon(Icons.Filled.SkipPrevious, NativeMessages.native_history_first(lang), fg) { m.act("hist-first", "") }
+                    HistIcon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, NativeMessages.native_history_previous(lang), fg) { m.act("hist-prev", "") }
+                    HistIcon(if (h.playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, if (h.playing) NativeMessages.history_pause(lang) else NativeMessages.native_history_play(lang), fg) { m.act("hist-play", "") }
+                    HistIcon(Icons.AutoMirrored.Filled.KeyboardArrowRight, NativeMessages.native_history_next(lang), fg) { m.act("hist-next", "") }
+                    HistIcon(Icons.Filled.SkipNext, NativeMessages.native_history_last(lang), fg) { m.act("hist-last", "") }
                     Text(h.title, Modifier.padding(start = 4.dp), style = MaterialTheme.typography.labelMedium, color = fg,
                         maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
-                HistChip("Changes", h.diff, fg, accent, Modifier.align(Alignment.CenterVertically)) { m.act("hist-diff", "") }
-                HistChip("Compare", false, fg, accent, Modifier.align(Alignment.CenterVertically)) { m.act("cmp", "a") }
-                if (h.at > 0) HistChip("Live", false, fg, accent, Modifier.align(Alignment.CenterVertically)) { m.act("hist-live", "") }
+                HistChip(NativeMessages.viewer_history_changes(lang), h.diff, fg, accent, Modifier.align(Alignment.CenterVertically)) { m.act("hist-diff", "") }
+                HistChip(NativeMessages.viewer_history_compare(lang), false, fg, accent, Modifier.align(Alignment.CenterVertically)) { m.act("cmp", "a") }
+                if (h.at > 0) HistChip(NativeMessages.history_live(lang), false, fg, accent, Modifier.align(Alignment.CenterVertically)) { m.act("hist-live", "") }
             }
             // a tick per step, then the live file; a tap shows that one
             Box(Modifier.fillMaxWidth().height(28.dp), contentAlignment = Alignment.Center) {
@@ -1197,7 +1209,7 @@ private fun HistoryBar(m: AppModel, h: HistBar, light: Boolean) {
                     h.ticks.forEachIndexed { i, tk ->
                         Box(Modifier.weight(1f).fillMaxHeight()
                             .semantics {
-                                contentDescription = if (tk.id.isEmpty()) "Live file" else "Step ${i + 1}"
+                                contentDescription = if (tk.id.isEmpty()) NativeMessages.native_history_livefile(lang) else NativeMessages.history_step_label(lang, (i + 1).toString())
                                 role = Role.Button
                                 selected = tk.on
                             }
@@ -1211,7 +1223,7 @@ private fun HistoryBar(m: AppModel, h: HistBar, light: Boolean) {
             }
             if (h.at > 0) Row(Modifier.fillMaxWidth().clickable { m.act("hist-jump", "") }.padding(vertical = 2.dp),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Icon(Icons.AutoMirrored.Filled.Chat, "Show in the thread", Modifier.size(16.dp), tint = accent)
+                Icon(Icons.AutoMirrored.Filled.Chat, NativeMessages.native_history_thread_short(lang), Modifier.size(16.dp), tint = accent)
                 Text(h.said, style = MaterialTheme.typography.labelMedium, color = fg, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
             else Text(h.said, style = MaterialTheme.typography.labelMedium, color = dim, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -1242,14 +1254,15 @@ private fun HistChip(label: String, on: Boolean, fg: Color, accent: Color, modif
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun HistMenu(m: AppModel, side: String, rows: List<HistRow>) {
+    val lang = LocalBackplaneLanguage.current
     ModalBottomSheet(onDismissRequest = { m.act("cmp-shut", "") }, sheetState = rememberModalBottomSheetState(),
         shape = androidx.compose.ui.graphics.RectangleShape) {
-        Text(if (side == "a") "Compare from (old)" else "Compare with (new)", Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+        Text(if (side == "a") NativeMessages.viewer_history_compare_old(lang) else NativeMessages.viewer_history_compare_new(lang), Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
             style = MaterialTheme.typography.titleMedium)
         // any commit, branch or tag (rv-ref "<side>\t<text>")
         var ref by remember { mutableStateOf("") }
         OutlinedTextField(ref, { ref = it }, Modifier.fillMaxWidth().padding(horizontal = 16.dp), singleLine = true,
-            placeholder = { Text("Commit, branch or tag") },
+            placeholder = { Text(NativeMessages.viewer_history_ref(lang)) },
             shape = androidx.compose.ui.graphics.RectangleShape,
             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false, imeAction = ImeAction.Go),
             keyboardActions = KeyboardActions(onGo = { if (ref.isNotBlank()) m.act("rv-ref", side + "\t" + ref) }))
@@ -1271,11 +1284,12 @@ private fun HistMenu(m: AppModel, side: String, rows: List<HistRow>) {
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun MechBar(m: AppModel, p: MechPage, light: Boolean, modifier: Modifier) {
+    val lang = LocalBackplaneLanguage.current
     val fg = if (light) Color.Black else Color.White
     FlowRow(modifier.padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         for (c in p.parts) FilterChip(c.on, onClick = { m.act("mech-part", c.value) },
             label = { Text(c.label, color = if (c.on) MaterialTheme.colorScheme.onSecondaryContainer else fg) })
-        OutlinedButton(onClick = { m.act("mech-renders", p.rel) }) { Text("Renders", color = fg) }
+        OutlinedButton(onClick = { m.act("mech-renders", p.rel) }) { Text(NativeMessages.viewer_mech_renders(lang), color = fg) }
     }
 }
 
@@ -1285,6 +1299,7 @@ private fun MechBar(m: AppModel, p: MechPage, light: Boolean, modifier: Modifier
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 private fun MechScreen(m: AppModel, v: Viewer, p: MechPage) {
+    val lang = LocalBackplaneLanguage.current
     var shown by remember { mutableStateOf<String?>(null) }
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface).statusBarsPadding().navigationBarsPadding()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1294,7 +1309,7 @@ private fun MechScreen(m: AppModel, v: Viewer, p: MechPage) {
                         shape = SegmentedButtonDefaults.itemShape(i, v.choices.size), icon = {}) { Text(c.label, maxLines = 1, style = MaterialTheme.typography.labelMedium) }
                 }
             }
-            IconButton(onClick = { m.act("view", "") }) { Icon(Icons.Filled.Close, "Close") }
+            IconButton(onClick = { m.act("view", "") }) { Icon(Icons.Filled.Close, NativeMessages.common_close(lang)) }
         }
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -1304,15 +1319,15 @@ private fun MechScreen(m: AppModel, v: Viewer, p: MechPage) {
                     for (c in p.parts) FilterChip(c.on, onClick = { m.act("mech-part", c.value) }, label = { Text(c.label) })
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedButton(onClick = { m.act("mech-3d", p.path) }, enabled = p.path.isNotEmpty()) { Text("3D") }
+                    OutlinedButton(onClick = { m.act("mech-3d", p.path) }, enabled = p.path.isNotEmpty()) { Text(NativeMessages.viewer_solid(lang)) }
                     // the render job: queued on the hub, its pictures in when done
                     Button(onClick = { m.act("mech-render", p.rel) }, enabled = !p.busy && p.rel.isNotEmpty()) {
                         if (p.busy) CircularProgressIndicator(Modifier.size(16.dp).padding(end = 6.dp), strokeWidth = 2.dp)
                         Text(p.render)
                     }
-                    OutlinedButton(onClick = { m.act("mech-refresh") }) { Text("Refresh") }
+                    OutlinedButton(onClick = { m.act("mech-refresh") }) { Text(NativeMessages.common_refresh(lang)) }
                 }
-                if (p.err.isNotEmpty()) Text("Rendering failed: ${p.err}", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelMedium)
+                if (p.err.isNotEmpty()) Text(NativeMessages.native_mech_failed(lang, p.err), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelMedium)
             }
             if (p.empty.isNotEmpty()) Text(p.empty, color = MaterialTheme.colorScheme.outline)
             for (s in p.shots) Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -1330,18 +1345,19 @@ private fun MechScreen(m: AppModel, v: Viewer, p: MechPage) {
 // the 3D model's parts
 @Composable
 private fun ViewerControls(m: AppModel, v: Viewer, present: Set<Int>, modifier: Modifier) {
+    val lang = LocalBackplaneLanguage.current
     // only the layers this board or sheet has
     val layers = v.layerList.filter { it.layer in present }
     val fg = if (v.light) Color.Black else Color.White
     Row(modifier.padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
         // the viewer's own light or dark ground
         IconButton(onClick = { m.act("vw-light") }) {
-            Icon(if (v.light) Icons.Filled.DarkMode else Icons.Filled.LightMode, if (v.light) "Dark ground" else "Light ground", tint = fg)
+            Icon(if (v.light) Icons.Filled.DarkMode else Icons.Filled.LightMode, if (v.light) NativeMessages.native_viewer_ground_dark(lang) else NativeMessages.native_viewer_ground_light(lang), tint = fg)
         }
         if (v.sheets.isNotEmpty()) Box {
             var open by remember { mutableStateOf(false) }
             OutlinedButton(onClick = { open = true }) {
-                Text(v.sheets.firstOrNull { it.on }?.label?.trim() ?: "Sheet", color = fg, maxLines = 1)
+                Text(v.sheets.firstOrNull { it.on }?.label?.trim() ?: NativeMessages.native_viewer_sheet(lang), color = fg, maxLines = 1)
                 Icon(Icons.Filled.ExpandMore, null, tint = fg)
             }
             DropdownMenu(open, { open = false }) {
@@ -1362,7 +1378,7 @@ private fun ViewerControls(m: AppModel, v: Viewer, present: Set<Int>, modifier: 
             // the others show (core/layers.bend)
             DropdownMenu(open, { open = false }) {
                 if (v.layerModes) Row(Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
-                    for ((i, label) in listOf("All", "Dim", "Only").withIndex())
+                    for ((i, label) in listOf(NativeMessages.viewer_layers_all(lang), NativeMessages.viewer_layers_dim(lang), NativeMessages.viewer_layers_only(lang)).withIndex())
                         FilterChip(v.layerMode == i, { m.act("view-layer-mode", i.toString()) }, label = { Text(label) },
                             modifier = Modifier.padding(end = 6.dp))
                 }
@@ -1372,7 +1388,7 @@ private fun ViewerControls(m: AppModel, v: Viewer, present: Set<Int>, modifier: 
                     onClick = { m.act("view-layer-pick", l.layer.toString()) })
             }
         }
-        if (v.open == "3d" && v.layers.isNotEmpty()) FilterChip(v.parts, { m.act("view-parts") }, label = { Text("Parts", color = fg) },
+        if (v.open == "3d" && v.layers.isNotEmpty()) FilterChip(v.parts, { m.act("view-parts") }, label = { Text(NativeMessages.native_viewer_parts(lang), color = fg) },
             leadingIcon = { if (v.parts) Icon(Icons.Filled.Check, null, tint = fg) })
     }
 }
@@ -1380,17 +1396,18 @@ private fun ViewerControls(m: AppModel, v: Viewer, present: Set<Int>, modifier: 
 // what a tapped item is, as the window's inspector shows it
 @Composable
 private fun PlotCard(m: AppModel, c: Card, modifier: Modifier) {
+    val lang = LocalBackplaneLanguage.current
     Surface(modifier.fillMaxWidth().navigationBarsPadding().padding(12.dp), tonalElevation = 6.dp) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(c.title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                IconButton(onClick = { m.act("view-unpick") }) { Icon(Icons.Filled.Close, "Close") }
+                IconButton(onClick = { m.act("view-unpick") }) { Icon(Icons.Filled.Close, NativeMessages.common_close(lang)) }
             }
             for ((k, value) in c.rows) Row {
                 Text(k, Modifier.width(92.dp), color = MaterialTheme.colorScheme.outline, style = MaterialTheme.typography.bodyMedium)
                 Text(value, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
-            Button(onClick = { m.act("view-mention", c.info) }) { Text("Mention in chat") }
+            Button(onClick = { m.act("view-mention", c.info) }) { Text(NativeMessages.viewer_mention(lang)) }
         }
     }
 }
@@ -1400,6 +1417,7 @@ private fun PlotCard(m: AppModel, c: Card, modifier: Modifier) {
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ImageComposer(m: AppModel, modifier: Modifier = Modifier) {
+    val lang = LocalBackplaneLanguage.current
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val field = rememberTextFieldState(m.composer)
@@ -1434,7 +1452,7 @@ private fun ImageComposer(m: AppModel, modifier: Modifier = Modifier) {
         lineLimits = TextFieldLineLimits.MultiLine(maxHeightInLines = 6),
         decorator = { inner ->
             Box {
-                if (field.text.isEmpty()) Text("Ask the agent", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (field.text.isEmpty()) Text(NativeMessages.native_thread_composer(lang), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 inner()
             }
         },

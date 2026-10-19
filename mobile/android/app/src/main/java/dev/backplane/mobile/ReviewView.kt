@@ -64,6 +64,7 @@ import kotlin.math.roundToInt
 // Refresh sits at the bottom, under the thumb.
 @Composable
 fun ReviewScreen(m: AppModel, v: Viewer, r: ReviewPage) {
+    val lang = LocalBackplaneLanguage.current
     // a Surface, so text with no colour of its own follows the theme (it was black on the dark surface)
     androidx.compose.material3.Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface, contentColor = MaterialTheme.colorScheme.onSurface) {
     Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
@@ -100,7 +101,7 @@ fun ReviewScreen(m: AppModel, v: Viewer, r: ReviewPage) {
             HorizontalDivider()
             Button(onClick = { m.act("rv-run", "") }, enabled = !r.busy, modifier = Modifier.fillMaxWidth().padding(12.dp)) {
                 Icon(Icons.Filled.Refresh, null)
-                Text("  Refresh")
+                Text("  " + NativeMessages.common_refresh(lang))
             }
         }
     }
@@ -113,6 +114,7 @@ fun ReviewScreen(m: AppModel, v: Viewer, r: ReviewPage) {
 // the field "rltag" while it is typed.
 @Composable
 fun ReleaseBox(m: AppModel, f: ReleaseForm, busy: Boolean) {
+    val lang = LocalBackplaneLanguage.current
     var text by remember { mutableStateOf(f.text) }
     Column(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         OutlinedTextField(text, onValueChange = { text = it; m.field("rltag", it) }, placeholder = { Text(f.next) },
@@ -120,17 +122,17 @@ fun ReleaseBox(m: AppModel, f: ReleaseForm, busy: Boolean) {
             keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Go),
             keyboardActions = androidx.compose.foundation.text.KeyboardActions(onGo = { if (!busy) m.act("rv-release", "") }))
         Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Publish on GitHub", Modifier.weight(1f))
+            Text(NativeMessages.review_publish(lang), Modifier.weight(1f))
             Switch(f.publish, onCheckedChange = { m.act("rv-release-pub", "") }, modifier = Modifier.testTag("release-pub"))
         }
         Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Release even if checks fail", Modifier.weight(1f))
+            Text(NativeMessages.review_force(lang), Modifier.weight(1f))
             Switch(f.force, onCheckedChange = { m.act("rv-release-force", "") }, modifier = Modifier.testTag("release-force"))
         }
         // the field is typed without a new screen, so the label follows the text here
         val tag = text.trim().ifEmpty { f.tag }
         Button(onClick = { m.act("rv-release", "") }, enabled = !busy && tag.isNotEmpty(),
-            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("release-make")) { Text("Make release " + tag) }
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("release-make")) { Text(NativeMessages.review_release_make(lang, tag)) }
     }
 }
 
@@ -163,9 +165,10 @@ fun ChoiceRow(choices: List<Choice>, picked: String, modifier: Modifier = Modifi
 // boxes, so a box shows what the hub says.
 @Composable
 fun ChecksBoxes(m: AppModel, c: ReviewChecks) {
+    val lang = LocalBackplaneLanguage.current
     val pass = c.gate.isEmpty()
     Column(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
-        Text(if (pass) "Passes" else "Fails: " + c.gate, color = if (pass) Color(0xFF2E9E4F) else Color(0xFFD93025),
+        Text(if (pass) NativeMessages.review_passes(lang) else NativeMessages.review_fails(lang, c.gate), color = if (pass) Color(0xFF2E9E4F) else Color(0xFFD93025),
             style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(bottom = 8.dp).testTag("checks-gate"))
         var last: String? = null
         for (t in c.tasks) {
@@ -209,21 +212,22 @@ fun PinLayer(m: AppModel, pins: List<ReviewPin>, cam: FloatArray) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NoteSheet(m: AppModel, at: String) {
+    val lang = LocalBackplaneLanguage.current
     var text by remember { mutableStateOf("") }
     val parts = at.split("\t")
-    val place = if (parts.size >= 2) "at %.2f, %.2f mm".format(java.util.Locale.ROOT, parts[0].toFloatOrNull() ?: 0f, parts[1].toFloatOrNull() ?: 0f) else ""
+    val place = if (parts.size >= 2) NativeMessages.native_review_place(lang, "%.2f".format(java.util.Locale.ROOT, parts[0].toFloatOrNull() ?: 0f), "%.2f".format(java.util.Locale.ROOT, parts[1].toFloatOrNull() ?: 0f)) else ""
     val focus = remember { FocusRequester() }
     ModalBottomSheet(onDismissRequest = { m.act("rv-note-shut", "") }, sheetState = rememberModalBottomSheetState(),
         scrimColor = Color.Transparent, modifier = Modifier.imePadding()) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Comment", style = MaterialTheme.typography.titleMedium)
+                Text(NativeMessages.native_review_comment(lang), style = MaterialTheme.typography.titleMedium)
                 Text("  " + place, color = MaterialTheme.colorScheme.outline, style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f))
-                TextButton(onClick = { m.act("rv-note-shut", "") }) { Text("Cancel") }
+                TextButton(onClick = { m.act("rv-note-shut", "") }) { Text(NativeMessages.common_cancel(lang)) }
             }
-            OutlinedTextField(text, onValueChange = { text = it; m.field("rcnote", it) }, placeholder = { Text("Write a note") },
+            OutlinedTextField(text, onValueChange = { text = it; m.field("rcnote", it) }, placeholder = { Text(NativeMessages.native_review_write(lang)) },
                 modifier = Modifier.fillMaxWidth().focusRequester(focus).testTag("note-field"), maxLines = 4)
-            Button(onClick = { m.act("rv-note-send", "") }, enabled = text.isNotBlank(), modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("note-send")) { Text("Send") }
+            Button(onClick = { m.act("rv-note-send", "") }, enabled = text.isNotBlank(), modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("note-send")) { Text(NativeMessages.composer_send(lang)) }
         }
     }
     LaunchedEffect(Unit) { focus.requestFocus() }
@@ -234,15 +238,16 @@ fun NoteSheet(m: AppModel, at: String) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CommentSheet(m: AppModel, o: ReviewOpen) {
+    val lang = LocalBackplaneLanguage.current
     var text by remember(o.id) { mutableStateOf("") }
     ModalBottomSheet(onDismissRequest = { m.act("rv-pin", "") }, sheetState = rememberModalBottomSheetState(),
         scrimColor = Color.Transparent, modifier = Modifier.imePadding()) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(o.by, style = MaterialTheme.typography.titleMedium)
-                if (o.resolved) Text("  Resolved", color = Color(0xFF2E9E4F), style = MaterialTheme.typography.labelMedium)
+                if (o.resolved) Text("  " + NativeMessages.native_review_resolved(lang), color = Color(0xFF2E9E4F), style = MaterialTheme.typography.labelMedium)
                 Spacer(Modifier.weight(1f))
-                TextButton(onClick = { m.act("rv-pin", "") }) { Text("Close") }
+                TextButton(onClick = { m.act("rv-pin", "") }) { Text(NativeMessages.common_close(lang)) }
             }
             if (o.place.isNotEmpty()) Text(o.place, color = MaterialTheme.colorScheme.outline, style = MaterialTheme.typography.labelMedium)
             Column(Modifier.heightIn(max = 220.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -253,12 +258,12 @@ fun CommentSheet(m: AppModel, o: ReviewOpen) {
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(text, onValueChange = { text = it; m.field("rcreply", it) }, placeholder = { Text("Reply") },
+                OutlinedTextField(text, onValueChange = { text = it; m.field("rcreply", it) }, placeholder = { Text(NativeMessages.review_reply(lang)) },
                     modifier = Modifier.weight(1f).testTag("reply-field"), maxLines = 3)
-                Button(onClick = { m.act("rv-reply-send", ""); text = "" }, enabled = text.isNotBlank(), modifier = Modifier.heightIn(min = 48.dp).testTag("reply-send")) { Text("Reply") }
+                Button(onClick = { m.act("rv-reply-send", ""); text = "" }, enabled = text.isNotBlank(), modifier = Modifier.heightIn(min = 48.dp).testTag("reply-send")) { Text(NativeMessages.review_reply(lang)) }
             }
             OutlinedButton(onClick = { m.act(if (o.resolved) "rv-reopen" else "rv-resolve", o.id) }, modifier = Modifier.heightIn(min = 48.dp).testTag("resolve")) {
-                Text(if (o.resolved) "Reopen" else "Resolve")
+                Text(if (o.resolved) NativeMessages.review_reopen(lang) else NativeMessages.review_resolve(lang))
             }
         }
     }

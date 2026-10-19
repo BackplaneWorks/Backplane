@@ -54,7 +54,7 @@ const args = [bin, "--home", home, "--port", String(port), "--no-tailscale", "--
 if (web) args.push("--web", resolve(web));
 const proc = Bun.spawn(args, {
   env: { ...process.env, DISPLAY: display, WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_PEERS: "", BACKPLANE_GOOGLE_BAKE: "0",
-    BP_STANDIN_MODE: "stream", BP_STREAM_N: "200", BP_STREAM_MS: "15", BP_STREAM_SEP: "\n\n", PATH: `${fake}:/usr/bin:/bin` },
+    BP_STANDIN_MODE: "stream", BP_STREAM_N: "200", BP_STREAM_MS: "15", BP_STREAM_SEP: "\n\n", BACKPLANE_AGENTS: fake, PATH: `${fake}:/usr/bin:/bin` },
   stdout: "ignore",
   stderr: "ignore",
 });

@@ -118,12 +118,13 @@ private fun line(r: PlaneRow) = listOf(r.sub, r.machine).filter { it.isNotEmpty(
 
 @Composable
 fun UberCardRow(m: AppModel, c: UberCard) {
+    val lang = LocalBackplaneLanguage.current
     ListItem(
         headlineContent = { Text(c.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         supportingContent = {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 MoodDot(c.mood)
-                Text(c.counts.ifEmpty { "Nothing waiting" }, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(c.counts.ifEmpty { NativeMessages.native_plane_waiting(lang) }, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         },
         leadingContent = { BotCat(m, c.cat, 48.dp) },
@@ -194,13 +195,13 @@ private fun LazyListScope.planeSection(m: AppModel, key: String, name: String, r
 // the plane as list items. On the home list (full false) it is what waits
 // and what runs, then the bots, rooms and routines; on the Status tab
 // (full true) the idle threads follow too, behind their fold.
-fun LazyListScope.planeSections(m: AppModel, p: PlaneModel, full: Boolean, idleOpen: Boolean = true, onIdle: () -> Unit = {}) {
-    planeSection(m, "need", "Needs you", p.need)
-    planeSection(m, "run", "Running", p.run)
+fun LazyListScope.planeSections(m: AppModel, p: PlaneModel, full: Boolean, lang: String, idleOpen: Boolean = true, onIdle: () -> Unit = {}) {
+    planeSection(m, "need", NativeMessages.plane_needs(lang), p.need)
+    planeSection(m, "run", NativeMessages.plane_running(lang), p.run)
     if (full && p.idleN > 0) {
         item(key = "pl:idle") {
             Row(Modifier.fillMaxWidth().clickable(onClick = onIdle), verticalAlignment = Alignment.CenterVertically) {
-                PlaneLabel("Idle", p.idleN, Modifier.weight(1f))
+                PlaneLabel(NativeMessages.web_plane_idle(lang), p.idleN, Modifier.weight(1f))
                 Icon(if (idleOpen) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, null, Modifier.padding(end = 16.dp).size(18.dp),
                     tint = MaterialTheme.colorScheme.outline)
             }
@@ -208,19 +209,19 @@ fun LazyListScope.planeSections(m: AppModel, p: PlaneModel, full: Boolean, idleO
         if (idleOpen) {
             items(p.idle, key = { "pl:idle:${it.kind}:${it.id}" }) { PlaneItem(m, it) }
             if (p.idleN > p.idle.size) item(key = "pl:idle:more") {
-                Text("${p.idleN - p.idle.size} more", Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                Text(NativeMessages.native_plane_more(lang, (p.idleN - p.idle.size).toString()), Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
             }
         }
     }
     // the home list has its own Bots section (the cats)
-    if (full) planeSection(m, "bots", "Bots", p.bots, true)
-    planeSection(m, "rooms", "Rooms", p.rooms)
-    planeSection(m, "locks", "Locks", p.locks)
-    planeSection(m, "routines", "Routines", p.routines)
+    if (full) planeSection(m, "bots", NativeMessages.tour_title_bots(lang), p.bots, true)
+    planeSection(m, "rooms", NativeMessages.bots_rooms(lang), p.rooms)
+    planeSection(m, "locks", NativeMessages.plane_locks(lang), p.locks)
+    planeSection(m, "routines", NativeMessages.bots_tab_routines(lang), p.routines)
     if (full && p.need.isEmpty() && p.run.isEmpty() && p.idleN == 0 && p.bots.isEmpty() && p.rooms.isEmpty() && p.routines.isEmpty()) {
         item(key = "pl:none") {
-            Text("Nothing active", Modifier.padding(16.dp), style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.outline)
+            Text(NativeMessages.sidebar_nothing(lang), Modifier.padding(16.dp), style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.outline)
         }
     }
 }
@@ -239,12 +240,13 @@ private fun Counter(n: Int, label: String, tint: Color, modifier: Modifier) {
 
 @Composable
 private fun PlaneStrip(m: AppModel, p: PlaneModel) {
+    val lang = LocalBackplaneLanguage.current
     Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Counter(p.need.size, "Need you", PhaseColor.warn, Modifier.weight(1f))
-            Counter(p.run.size, "Running", PhaseColor.accent, Modifier.weight(1f))
-            Counter(p.working, "Bots working", PhaseColor.ok, Modifier.weight(1f))
-            Counter(p.rooms.size, "Unread", PhaseColor.input, Modifier.weight(1f))
+            Counter(p.need.size, NativeMessages.plane_need(lang), PhaseColor.warn, Modifier.weight(1f))
+            Counter(p.run.size, NativeMessages.plane_running(lang), PhaseColor.accent, Modifier.weight(1f))
+            Counter(p.working, NativeMessages.plane_bots_working(lang), PhaseColor.ok, Modifier.weight(1f))
+            Counter(p.rooms.size, NativeMessages.native_plane_unread(lang), PhaseColor.input, Modifier.weight(1f))
         }
         if (p.machines.size > 1) {
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -272,6 +274,7 @@ private fun PlaneStrip(m: AppModel, p: PlaneModel) {
 
 @Composable
 fun StatusTab(m: AppModel, p: PlaneModel?) {
+    val lang = LocalBackplaneLanguage.current
     var idleOpen by remember { mutableStateOf(true) }
     if (p == null) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
@@ -279,7 +282,7 @@ fun StatusTab(m: AppModel, p: PlaneModel?) {
     }
     LazyColumn(Modifier.fillMaxSize()) {
         item(key = "pl:strip") { PlaneStrip(m, p) }
-        planeSections(m, p, true, idleOpen) { idleOpen = !idleOpen }
+        planeSections(m, p, true, lang, idleOpen) { idleOpen = !idleOpen }
     }
 }
 
@@ -288,6 +291,7 @@ fun StatusTab(m: AppModel, p: PlaneModel?) {
 // uberbot there is no plane: the tab offers to make one.
 @Composable
 fun HomeTab(m: AppModel, s: Screen, state: androidx.compose.foundation.lazy.LazyListState) {
+    val lang = LocalBackplaneLanguage.current
     var idleOpen by remember { mutableStateOf(true) }
     val card = m.uber(s)
     val plane = m.plane(s)
@@ -295,10 +299,10 @@ fun HomeTab(m: AppModel, s: Screen, state: androidx.compose.foundation.lazy.Lazy
         Column(Modifier.fillMaxSize().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
             if (s.projects.isEmpty() && s.bots.isEmpty()) CircularProgressIndicator()
             else {
-                Text("No uberbot", style = MaterialTheme.typography.titleMedium)
-                Text("Your uberbot keeps the whole picture: what needs you, what runs, your bots and routines.",
+                Text(NativeMessages.native_home_none(lang), style = MaterialTheme.typography.titleMedium)
+                Text(NativeMessages.native_home_hint(lang),
                     Modifier.padding(vertical = 12.dp), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.outline)
-                androidx.compose.material3.Button(onClick = { m.act("uber-new") }) { Text("Make an uberbot") }
+                androidx.compose.material3.Button(onClick = { m.act("uber-new") }) { Text(NativeMessages.native_home_make(lang)) }
             }
         }
         return
@@ -308,7 +312,7 @@ fun HomeTab(m: AppModel, s: Screen, state: androidx.compose.foundation.lazy.Lazy
         if (plane == null) item(key = "pl:wait") { Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() } }
         else {
             item(key = "pl:strip") { PlaneStrip(m, plane) }
-            planeSections(m, plane, true, idleOpen) { idleOpen = !idleOpen }
+            planeSections(m, plane, true, lang, idleOpen) { idleOpen = !idleOpen }
         }
     }
 }

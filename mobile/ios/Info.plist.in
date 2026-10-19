@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- the hub is reached over the tailnet (WireGuard), as plain ws:// -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
+	<!-- pairing by QR code: the camera reads the code Settings shows -->
+	<key>NSCameraUsageDescription</key>
+	<string>@NSCameraUsageDescription@</string>
+	<!-- a pairing link: backplane://pair?url=http://host:3787/%23token=... -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>dev.backplane.mobile</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>backplane</string>
+			</array>
+		</dict>
+	</array>
+	<!-- ProMotion: the board viewer draws at up to 120 Hz -->
+	<key>CADisableMinimumFrameDurationOnPhone</key>
+	<true/>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+</dict>
+</plist>

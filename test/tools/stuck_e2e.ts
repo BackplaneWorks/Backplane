@@ -33,7 +33,7 @@ for (const n of ["codex", "grok", "muse", "omp"]) { writeFileSync(join(fake, n),
 writeFileSync(join(home, "events.jsonl"), "");
 const proc = Bun.spawn([resolve(bin), "--home", home, "--port", String(PORT), "--no-tailscale", "--foreground"], {
   env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "", BACKPLANE_GOOGLE_BAKE: "0", FAKE_LOG: log,
-    BACKPLANE_STUCK_S: "4", BACKPLANE_WAKE_TICK_MS: "2000", PATH: `${fake}:${process.env.PATH}`, TMPDIR: root },
+    BACKPLANE_STUCK_S: "4", BACKPLANE_WAKE_TICK_MS: "2000", BACKPLANE_AGENTS: fake, PATH: `${fake}:${process.env.PATH}`, TMPDIR: root },
   stdout: "ignore", stderr: Bun.file(join(root, "hub.err")),
 });
 try {

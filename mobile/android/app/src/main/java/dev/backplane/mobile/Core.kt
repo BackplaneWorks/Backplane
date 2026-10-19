@@ -497,6 +497,8 @@ class Core(private val app: Application) : Application.ActivityLifecycleCallback
             if (typing == 0) composer = next.thread?.draft ?: ""
             val was = screen?.sel
             val wasNav = screen?.let { nav(it) } ?: ""
+            // Channel IDs and preferences persist; only their displayed names follow locale.
+            if (screen?.locale != next.locale) Notes.channels(app, next.locale)
             screen = next
             val label = next.lang?.rows?.firstOrNull()?.label
             if (label != langLabel) { langLabel = label; refreshTexts() }

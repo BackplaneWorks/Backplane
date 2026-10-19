@@ -80,6 +80,7 @@ struct Thumb: View {
 
 // pinch to zoom, drag to pan, double-tap to zoom in or back, tap Done to close
 struct Lightbox: View {
+    @Environment(\.backplaneLanguage) private var lang
     let shown: Shown
     let close: () -> Void
     @State private var scale: CGFloat = 1
@@ -116,7 +117,7 @@ struct Lightbox: View {
                 }
             }
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) { Button("Done", action: close) }
+                ToolbarItem(placement: .confirmationAction) { Button(NativeMessages.tour_done(lang), action: close) }
                 ToolbarItem(placement: .topBarLeading) { ShareLink(item: shown.url) }
             }
             .toolbarBackground(.black, for: .navigationBar)
@@ -166,6 +167,7 @@ private struct SelectableText: UIViewRepresentable {
 }
 
 struct SelectSheet: View {
+    @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let text: String
     @Environment(\.dismiss) private var dismiss
@@ -173,25 +175,26 @@ struct SelectSheet: View {
     var body: some View {
         NavigationStack {
             SelectableText(text: text)
-                .navigationTitle("Select Text")
+                .navigationTitle(NativeMessages.native_text_select_title(lang))
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
-                    ToolbarItem(placement: .cancellationAction) { Button("Copy All") { model.act("copy", text) } }
-                    ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+                    ToolbarItem(placement: .cancellationAction) { Button(NativeMessages.native_text_copyall_title(lang)) { model.act("copy", text) } }
+                    ToolbarItem(placement: .confirmationAction) { Button(NativeMessages.tour_done(lang)) { dismiss() } }
                 }
         }
     }
 }
 
 struct EntryRow: View {
+    @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let entry: Entry
     let show: (Shown) -> Void
     @State private var selecting = false
 
     @ViewBuilder private var menu: some View {
-        Button("Copy", systemImage: "doc.on.doc") { model.act("copy", entry.text) }
-        Button("Select Text", systemImage: "selection.pin.in.out") { selecting = true }
+        Button(NativeMessages.common_copy(lang), systemImage: "doc.on.doc") { model.act("copy", entry.text) }
+        Button(NativeMessages.native_text_select_title(lang), systemImage: "selection.pin.in.out") { selecting = true }
     }
 
     var body: some View {
@@ -239,7 +242,7 @@ struct EntryRow: View {
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel((entry.open == true ? "Hide " : "Show ") + entry.text)
+            .accessibilityLabel(NativeMessages.native_entry_fold(lang, entry.open == true ? "open" : "closed", entry.text))
         case "link":
             Button { model.act("select", entry.value ?? "") } label: {
                 Text(entry.text).lineLimit(1).font(.callout)
@@ -249,7 +252,7 @@ struct EntryRow: View {
         case "reminder":
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Image(systemName: "bell")
-                Text("Reminder").foregroundStyle(.tertiary)
+                Text(NativeMessages.sched_kind_reminder(lang)).foregroundStyle(.tertiary)
                 Text(entry.text)
                 Spacer()
                 Text(entry.when ?? "").foregroundStyle(.tertiary)
@@ -270,7 +273,7 @@ struct EntryRow: View {
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Show in the viewer: " + entry.text)
+            .accessibilityLabel(NativeMessages.native_entry_viewer(lang, entry.text))
         default:
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(entry.label ?? "").foregroundStyle(.tertiary)
@@ -299,6 +302,7 @@ private func subColor(_ state: String) -> Color {
 // and the agent's own (a tap opens or shuts its steps); outlined in the
 // accent while any are at work
 struct SubsView: View {
+    @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let subs: Subs
 
@@ -308,7 +312,7 @@ struct SubsView: View {
             // the head opens and shuts the panel; done, it is folded to this line
             Button { if let a = subs.act, !a.isEmpty { model.act(a, subs.value ?? "") } } label: {
                 HStack {
-                    Text("Subagents").font(.caption.bold()).foregroundStyle(busy ? .primary : .secondary)
+                    Text(NativeMessages.thread_subagents(lang)).font(.caption.bold()).foregroundStyle(busy ? .primary : .secondary)
                     Spacer(minLength: 0)
                     Text(subs.word ?? subs.busy).font(.caption).foregroundStyle(busy ? PhaseColor.accent : .secondary)
                     Image(systemName: (subs.open ?? true) ? "chevron.down" : "chevron.right").font(.caption).foregroundStyle(.secondary)
@@ -328,7 +332,7 @@ struct SubsView: View {
                                     Text(r.title).lineLimit(1)
                                     Spacer(minLength: 0)
                                     if let c = r.cancel, !c.isEmpty {
-                                        Button(c == "wake-cancel" ? "Cancel" : "Stop") { model.act(c, r.id) }.font(.caption2).foregroundStyle(PhaseColor.warn).buttonStyle(.plain)
+                                        Button(c == "wake-cancel" ? NativeMessages.common_cancel(lang) : NativeMessages.composer_stop(lang)) { model.act(c, r.id) }.font(.caption2).foregroundStyle(PhaseColor.warn).buttonStyle(.plain)
                                     }
                                     Text(r.stateLabel ?? r.state).font(.caption2).foregroundStyle(subColor(r.state))
                                 }
@@ -362,6 +366,7 @@ struct SubsView: View {
 // the subagents over the thread, from the top bar's button: the panel
 // opened (its rows folded away once all are done) and kept up to date
 struct SubsSheet: View {
+    @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     @Environment(\.dismiss) private var dismiss
 
@@ -370,9 +375,9 @@ struct SubsSheet: View {
             ScrollView {
                 if let u = model.screen?.thread?.subs { SubsView(model: model, subs: u).padding() }
             }
-            .navigationTitle("Subagents")
+            .navigationTitle(NativeMessages.thread_subagents(lang))
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button(NativeMessages.tour_done(lang)) { dismiss() } } }
         }
         .presentationDetents([.medium, .large])
         .onAppear {
@@ -438,6 +443,7 @@ struct FlowButtons: View {
 // and what the word being typed completes to: a `$` skill, an `@` bot,
 // a `>` thread, a `%` project or a `#` room, each with its summary
 struct ComposerExtras: View {
+    @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let thread: ThreadView
     // an iPhone on its side: little room above the keyboard
@@ -450,7 +456,7 @@ struct ComposerExtras: View {
         if let b = thread.btw {
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
-                    Text("btw · " + b.q).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    Text(NativeMessages.native_composer_btw(lang, b.q)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     Spacer()
                     Button { model.act("btw-close") } label: { Image(systemName: "xmark") }.buttonStyle(.borderless)
                 }
@@ -506,7 +512,7 @@ struct ComposerExtras: View {
                         .frame(width: 44, height: 44).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Close suggestions")
+                .accessibilityLabel(NativeMessages.native_composer_suggestions_close(lang))
             }
             .background(Color(.secondarySystemBackground))
         }
@@ -519,7 +525,7 @@ struct ComposerExtras: View {
                             Image(systemName: "xmark").font(.caption2)
                         }
                         .buttonStyle(.bordered)
-                        .accessibilityLabel("Remove " + c.label)
+                        .accessibilityLabel(NativeMessages.native_composer_remove(lang, c.label))
                     }
                     if !up.isEmpty {
                         HStack(spacing: 4) {
@@ -539,6 +545,7 @@ struct ComposerExtras: View {
 
 // the paperclip: photos or files, each sent up in pieces
 struct AttachButton: View {
+    @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     @State private var photos: [PhotosPickerItem] = []
     @State private var picking = false
@@ -547,10 +554,10 @@ struct AttachButton: View {
 
     var body: some View {
         Menu {
-            Button("Photos", systemImage: "photo.on.rectangle") { picking = true }
-            Button("Files", systemImage: "folder") { importing = true }
+            Button(NativeMessages.native_attach_photos(lang), systemImage: "photo.on.rectangle") { picking = true }
+            Button(NativeMessages.viewer_files(lang), systemImage: "folder") { importing = true }
             if hasImages {
-                Button("Paste image", systemImage: "doc.on.clipboard") {
+                Button(NativeMessages.native_attach_paste(lang), systemImage: "doc.on.clipboard") {
                     // Read only after the person chooses Paste; use the same
                     // upload and size check as the photo picker.
                     for (i, image) in (UIPasteboard.general.images ?? []).enumerated() {
@@ -563,7 +570,7 @@ struct AttachButton: View {
         } label: {
             Image(systemName: "paperclip").font(.system(size: 20)).padding(.bottom, 6)
         }
-        .accessibilityLabel("Attach")
+        .accessibilityLabel(NativeMessages.composer_attach(lang))
         .onAppear { hasImages = UIPasteboard.general.hasImages }
         .onReceive(NotificationCenter.default.publisher(for: UIPasteboard.changedNotification)) { _ in
             hasImages = UIPasteboard.general.hasImages
@@ -601,6 +608,7 @@ struct AttachButton: View {
 
 // what the thread changed, with the git actions
 struct DiffSheet: View {
+    @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let diff: Diff
     @State private var reverting = false
@@ -624,22 +632,22 @@ struct DiffSheet: View {
             }
             .listStyle(.plain)
             .environment(\.defaultMinListRowHeight, 14)
-            .navigationTitle("Diff")
+            .navigationTitle(NativeMessages.viewer_diff(lang))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Close") { model.act("panel") } }
+                ToolbarItem(placement: .cancellationAction) { Button(NativeMessages.common_close(lang)) { model.act("panel") } }
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
-                        Button("Commit & push", systemImage: "arrow.up.circle") { model.act("git", "commit_push") }
-                        Button("Open PR", systemImage: "arrow.triangle.pull") { model.act("git", "commit_push_pr") }
-                        Button("Revert thread", systemImage: "arrow.uturn.backward", role: .destructive) { reverting = true }
+                        Button(NativeMessages.palette_commit(lang), systemImage: "arrow.up.circle") { model.act("git", "commit_push") }
+                        Button(NativeMessages.viewer_diff_pr(lang), systemImage: "arrow.triangle.pull") { model.act("git", "commit_push_pr") }
+                        Button(NativeMessages.palette_revert(lang), systemImage: "arrow.uturn.backward", role: .destructive) { reverting = true }
                     } label: {
                         Text("Git")
                     }
                 }
             }
-            .confirmationDialog("Put the files back as they were when this thread began?", isPresented: $reverting, titleVisibility: .visible) {
-                Button("Revert thread", role: .destructive) { model.act("revert", "0") }
+            .confirmationDialog(NativeMessages.native_diff_revert_ask(lang), isPresented: $reverting, titleVisibility: .visible) {
+                Button(NativeMessages.palette_revert(lang), role: .destructive) { model.act("revert", "0") }
             }
         }
     }
@@ -780,6 +788,7 @@ struct TermKeys: View {
 // the thread's shell: the screen the hub's emulator keeps, keys typed in a
 // hidden field, and a row of keys a phone keyboard lacks
 struct TermSheet: View {
+    @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let term: Term
     @FocusState private var typing: Bool
@@ -808,13 +817,13 @@ struct TermSheet: View {
                 TermField(typing: $typing, key: { key($0, $1) }, paste: { model.act("term-paste", $0) })
                 TermKeys(typing: $typing, key: { key($0, $1) })
             }
-            .navigationTitle(term.title.isEmpty ? "Terminal" : term.title)
+            .navigationTitle(term.title.isEmpty ? NativeMessages.palette_terminal(lang) : term.title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbarBackground(termColor(term.bg), for: .navigationBar)
             .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Close") { model.act("term-toggle") } }
+                ToolbarItem(placement: .cancellationAction) { Button(NativeMessages.common_close(lang)) { model.act("term-toggle") } }
             }
             .onAppear { typing = true }
         }
@@ -827,6 +836,7 @@ struct TermSheet: View {
 // key first). At the top of the thread (pinned) the pin is in the accent
 // and the screen is held to a height, kept at the bottom.
 struct EmbView: View {
+    @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let emb: Emb
     var top = false
@@ -849,7 +859,7 @@ struct EmbView: View {
                         .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(emb.pinned ? "Unpin" : "Pin to the top")
+                .accessibilityLabel(emb.pinned ? NativeMessages.menu_unpin(lang) : NativeMessages.terminal_pin(lang))
             }
             .font(.caption)
             .padding(.leading, 8)
@@ -883,6 +893,7 @@ struct EmbView: View {
 // a terminal's row in the timeline: live, its screen; pinned, a faint row
 // that unpins it; else a gray row that starts it again
 struct EmbRow: View {
+    @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let entry: Entry
     let emb: Emb?
@@ -900,12 +911,12 @@ struct EmbRow: View {
 
     var body: some View {
         if let e = emb, e.pinned {
-            Button { model.act("emb-pin", e.key) } label: { line("pin", e.title + " · pinned at the top") }
+            Button { model.act("emb-pin", e.key) } label: { line("pin", NativeMessages.web_terminal_pinned(lang, e.title)) }
                 .buttonStyle(.plain)
         } else if let e = emb, e.live {
             EmbView(model: model, emb: e)
         } else if let e = emb {
-            Button { model.act("emb-restart", e.restart) } label: { line("play.fill", e.title + " · inactive, tap to restart") }
+            Button { model.act("emb-restart", e.restart) } label: { line("play.fill", NativeMessages.native_term_inactive(lang, e.title)) }
                 .buttonStyle(.plain)
         } else {
             line("terminal", entry.text)
@@ -916,6 +927,7 @@ struct EmbRow: View {
 // thread search or the file picker: a field over the rows; a row sends its
 // action with its value, then the sheet closes
 struct FindSheet: View {
+    @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let find: Find
     @State private var text = ""
@@ -937,12 +949,12 @@ struct FindSheet: View {
             }
             .overlay {
                 if find.rows.isEmpty {
-                    ContentUnavailableView(find.query.isEmpty ? (find.mode == "files" ? "Type to find a file" : "Type to search threads") : "Nothing found",
+                    ContentUnavailableView(find.query.isEmpty ? (find.mode == "files" ? NativeMessages.native_find_file_hint(lang) : NativeMessages.native_find_threads_hint(lang)) : NativeMessages.native_find_empty(lang),
                                            systemImage: "magnifyingglass")
                 }
             }
             .safeAreaInset(edge: .top) {
-                TextField(find.mode == "files" ? "File name" : "Titles and messages", text: $text)
+                TextField(find.mode == "files" ? NativeMessages.native_find_file_label(lang) : NativeMessages.native_find_threads_label(lang), text: $text)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .focused($focused)
@@ -952,10 +964,10 @@ struct FindSheet: View {
                     .background(.bar)
                     .onChange(of: text) { _, t in model.act("find-q", t) }
             }
-            .navigationTitle(find.mode == "files" ? "Find file" : "Search threads")
+            .navigationTitle(find.mode == "files" ? NativeMessages.palette_findfile(lang) : NativeMessages.palette_search(lang))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { model.act("find-close") } }
+                ToolbarItem(placement: .cancellationAction) { Button(NativeMessages.common_cancel(lang)) { model.act("find-close") } }
             }
             .onAppear { text = find.query; focused = true }
         }

@@ -3,9 +3,12 @@
 import argparse
 from dataclasses import dataclass
 import json
+import plistlib
 from pathlib import Path
 import re
 import sys
+from xml.parsers.expat import ExpatError
+from xml.sax.saxutils import escape as xml_escape
 
 ROOT = Path(__file__).resolve().parent.parent
 KEY = re.compile(r'[a-z][a-z0-9]*(?:\.[a-z0-9]+)*\Z')
@@ -13,6 +16,7 @@ NAME = re.compile(r'[A-Za-z_][A-Za-z0-9_]*\Z')
 KEYWORDS = set('match case def type is where if else return import as law do with use let fork for when switch true false'.split())
 CATEGORIES = ('zero', 'one', 'two', 'few', 'many', 'other')
 LOCALES = (('en', 'En'), ('ja', 'Ja'))
+IOS_INFO_KEYS = {'NSCameraUsageDescription': 'native.permission.camera'}
 
 
 class CatalogError(ValueError):
@@ -291,6 +295,36 @@ def require_complete(catalogs):
         raise CatalogError('missing translations: ' + ', '.join(missing))
 
 
+def metadata_lists(lists):
+    # A flat list literal eventually overflows the HTML backend's JS stack.
+    # Bound each literal and flatten chunks with tail calls, preserving order.
+    names = ['T.catalog.rev', 'T.catalog.join']
+    lines = [
+        'def T.catalog.rev(xs: List<&2, String>, onto: List<&2, String>) -> List<&2, String>:',
+        '  match xs:',
+        '    case []: onto',
+        '    case h <> t: T.catalog.rev(t, h <> onto)',
+        '',
+        'def T.catalog.join(parts: List<&2, List<&2, String>>, rev: List<&2, String>) -> List<&2, String>:',
+        '  match parts:',
+        '    case []: T.catalog.rev(rev, [])',
+        '    case h <> t: T.catalog.join(t, T.catalog.rev(h, rev))',
+        '',
+    ]
+    for name, values in lists.items():
+        parts = []
+        for start in range(0, len(values), 64):
+            part = f'{name}.part{start // 64}'
+            parts.append(part + '()')
+            names.append(part)
+            lines.extend([f'def {part}() -> List<&2, String>:',
+                          '  [' + ', '.join(map(literal, values[start:start + 64])) + ']', ''])
+        names.append(name)
+        lines.extend([f'def {name}() -> List<&2, String>:',
+                      '  T.catalog.join([' + ', '.join(parts) + '], [])' if parts else '  []', ''])
+    return names, lines
+
+
 def generate(catalogs, i18n_import='./i18n.bend'):
     signatures = validate(catalogs)
     keys = sorted(catalogs['en'])
@@ -313,11 +347,14 @@ def generate(catalogs, i18n_import='./i18n.bend'):
         for variant, expr in arms:
             lines.extend([f'    case I.{variant}{{}}:', '      ' + expr])
         lines.append('')
-    names.extend(['T.keys', 'T.missing', 'T.plain'])
-    lines.extend(['def T.keys() -> List<&2, String>:', '  [' + ', '.join(map(literal, keys)) + ']', '', 'def T.missing(l: I.Loc) -> List<&2, String>:', '  match l:'])
+    metadata = {'T.keys': keys}
     for tag, variant in LOCALES:
-        missing = [k for k in keys if k not in catalogs[tag]]
-        lines.extend([f'    case I.{variant}{{}}:', '      [' + ', '.join(map(literal, missing)) + ']'])
+        metadata[f'T.catalog.missing.{tag}'] = [k for k in keys if k not in catalogs[tag]]
+    extra_names, extra_lines = metadata_lists(metadata)
+    names.extend(extra_names + ['T.missing', 'T.plain'])
+    lines.extend(extra_lines + ['def T.missing(l: I.Loc) -> List<&2, String>:', '  match l:'])
+    for tag, variant in LOCALES:
+        lines.extend([f'    case I.{variant}{{}}:', f'      T.catalog.missing.{tag}()'])
     lines.append('')
     plain = [k for k in keys if not signatures[k]]
 
@@ -337,6 +374,125 @@ def generate(catalogs, i18n_import='./i18n.bend'):
     lines.extend(['def T.plain(l: I.Loc, key: String) -> Maybe<&2, String>:', f'  {root}(l, key)' if root else '  None{}', ''])
     collision_check(names)
     return '\n'.join(lines)
+
+
+def native_keys(text):
+    keys = [line.split('#', 1)[0].strip() for line in text.splitlines()]
+    keys = [key for key in keys if key]
+    if len(keys) != len(set(keys)) or any(not KEY.fullmatch(key) for key in keys):
+        raise CatalogError('native.keys: invalid or duplicate key')
+    collision_check(keys)
+    return sorted(keys)
+
+
+def native_literal(text, swift):
+    value = literal(text)
+    return value if swift else value.replace('$', r'\$')
+
+
+def native_nodes(nodes, params, signature, ja, swift):
+    pieces = []
+    def choose(condition, yes, no):
+        return f'({condition} ? {yes} : {no})' if swift else f'(if ({condition}) {yes} else {no})'
+    for node in nodes:
+        if isinstance(node, Text):
+            pieces.append(native_literal(node.value, swift))
+        elif isinstance(node, (Value, Pound)):
+            arg = params[node.name]
+            pieces.append(f'number({arg})' if signature[node.name] == 'Nat' else arg)
+        else:
+            arms = {k: native_nodes(v, params, signature, ja, swift) for k, v in node.arms.items()}
+            expr = arms['other']
+            arg = params[node.name]
+            if node.kind == 'plural':
+                if not ja and 'one' in arms:
+                    expr = choose(f'{arg} == ' + ('1' if swift else '1uL'), arms['one'], expr)
+                for key in reversed(list(arms)):
+                    if key.startswith('='):
+                        n = int(key[1:])
+                        if n > 18446744073709551615:
+                            raise CatalogError('native plural exact value exceeds UInt64')
+                        expr = choose(f'{arg} == {n}' + ('' if swift else 'uL'), arms[key], expr)
+            else:
+                for key in reversed(list(arms)):
+                    if key != 'other':
+                        expr = choose(f'{arg} == {native_literal(key, swift)}', arms[key], expr)
+            pieces.append(expr)
+    return ' + '.join(pieces) or '""'
+
+
+def generate_native(catalogs, keys, swift):
+    signatures = validate(catalogs)
+    missing = set(keys) - set(catalogs['en'])
+    if missing:
+        raise CatalogError('native.keys: unknown keys: ' + ', '.join(sorted(missing)))
+    lines = ['// Generated by scripts/i18n-gen.py from i18n/*.msg and native.keys. Do not edit.']
+    if swift:
+        lines += ['enum NativeMessages {', '  private static func number(_ n: UInt64) -> String {',
+                  '    var result = ""', '    for (i, c) in String(n).reversed().enumerated() {',
+                  '      if i > 0 && i % 3 == 0 { result.append(",") }',
+                  '      result.append(c)', '    }', '    return String(result.reversed())', '  }']
+    else:
+        lines += ['package dev.backplane.mobile', '', 'object NativeMessages {',
+                  '  private fun number(n: ULong): String = n.toString().reversed().chunked(3).joinToString(",").reversed()']
+    for key in keys:
+        sig = signatures[key]
+        params = {arg: f'arg{i}' for i, arg in enumerate(sig)}
+        name = key.replace('.', '_')
+        args = []
+        for arg, kind in sig.items():
+            native_type = ('UInt64' if swift else 'ULong') if kind == 'Nat' else 'String'
+            args.append(('_ ' if swift else '') + params[arg] + ': ' + native_type)
+        tail = ''.join(', ' + arg for arg in args)
+        en = native_nodes(catalogs['en'][key], params, sig, False, swift)
+        ja = native_nodes(catalogs['ja'].get(key, catalogs['en'][key]), params, sig, key in catalogs['ja'], swift)
+        lines.append('')
+        lines.append('  // ' + key)
+        if swift:
+            lines += [f'  static func {name}(_ tag: String{tail}) -> String {{',
+                      f'    tag == "ja" ? ({ja}) : ({en})', '  }']
+        else:
+            lines += [f'  fun {name}(tag: String{tail}): String =',
+                      f'    if (tag == "ja") ({ja}) else ({en})']
+    return '\n'.join(lines + ['}', ''])
+
+
+def generate_ios_resources(catalogs, template):
+    """OS permission resources have no runtime interpolation or locale policy."""
+    markers = re.findall(r'@([A-Za-z0-9]+)@', template)
+    if sorted(markers) != sorted(IOS_INFO_KEYS):
+        raise CatalogError('Info.plist.in: expected exactly one marker per iOS info key')
+    values = {}
+    for locale, _ in LOCALES:
+        entries = {}
+        for name, key in IOS_INFO_KEYS.items():
+            if key not in catalogs['en']:
+                raise CatalogError(f'iOS info key has no source message: {key}')
+            nodes = catalogs[locale].get(key, catalogs['en'][key])
+            if not all(isinstance(node, Text) for node in nodes):
+                raise CatalogError(f'iOS info key must be a literal message: {key}')
+            entries[name] = ''.join(node.value for node in nodes)
+            if not entries[name].strip():
+                raise CatalogError(f'iOS info key must not be empty: {key}')
+        values[locale] = entries
+    header = '<!-- Generated by scripts/i18n-gen.py. Do not edit. -->\n'
+    outputs = {}
+    for locale, _ in LOCALES:
+        text = plistlib.dumps(values[locale], sort_keys=True).decode('utf-8')
+        text = text.replace('\n', '\n' + header, 1)
+        outputs[f'mobile/ios/Backplane/{locale}.lproj/InfoPlist.strings'] = text
+    fallback = template
+    for name, value in values['en'].items():
+        fallback = fallback.replace('@' + name + '@', xml_escape(value))
+    # Check the actual XML as well as the template marker contract.
+    try:
+        parsed = plistlib.loads(fallback.encode('utf-8'))
+    except (ValueError, ExpatError) as exc:
+        raise CatalogError(f'Info.plist.in: invalid property list: {exc}') from exc
+    if any(parsed.get(key) != value for key, value in values['en'].items()):
+        raise CatalogError('Info.plist.in: localized markers must be top-level string values')
+    outputs['mobile/ios/Info.plist'] = fallback.replace('\n', '\n' + header, 1)
+    return outputs
 
 
 def fallback_fixture():
@@ -430,6 +586,10 @@ def main():
             ROOT / 'src/core/msgs.bend': output,
             ROOT / 'test/fixtures/i18n_fallback.bend': fallback_fixture(),
         }
+        selected = native_keys((ROOT / 'i18n/native.keys').read_text(encoding='utf-8'))
+        outputs[ROOT / 'mobile/ios/Shared/NativeMessages.swift'] = generate_native(catalogs, selected, True)
+        outputs[ROOT / 'mobile/android/app/src/main/java/dev/backplane/mobile/NativeMessages.kt'] = generate_native(catalogs, selected, False)
+        outputs.update({ROOT / path: text for path, text in generate_ios_resources(catalogs, (ROOT / 'mobile/ios/Info.plist.in').read_text(encoding='utf-8')).items()})
         for target, text in outputs.items():
             if args.check:
                 if not target.exists() or target.read_bytes() != text.encode('utf-8'):

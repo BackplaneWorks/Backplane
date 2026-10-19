@@ -169,6 +169,58 @@ export class CefEngine extends EventEmitter {
     }
     throw new Error(`CEF target ${e.target} did not attach`);
   }
+  // Native hidden pages have no permanent synthetic focus/capture handle.
+  // A live remote viewer or an input action temporarily needs rendering.
+  // Each lease owns a separate CDP connection, so overlapping users cannot
+  // release each other's handles. Disconnect releases it on error as well.
+  async capture(p: Page): Promise<() => Promise<void>> {
+    const key = await this.key(p);
+    const targetId = [...this.targets].find(([, v]) => v.key === key)?.[0];
+    const targets = await (await fetch(`http://127.0.0.1:${this.port}/json/list`, { signal: AbortSignal.timeout(5000) })).json();
+    const target = targets.find((v: any) => v.id === targetId);
+    if (!target) throw new Error("CEF capture target closed");
+    const socket = new WebSocket(target.webSocketDebuggerUrl);
+    let sequence = 0;
+    const waiting = new Map<number, { done: (v: any) => void; fail: (e: Error) => void }>();
+    socket.onmessage = e => {
+      const reply = JSON.parse(String(e.data));
+      waiting.get(reply.id)?.done(reply); waiting.delete(reply.id);
+    };
+    socket.onclose = () => {
+      for (const w of waiting.values()) w.fail(new Error("CEF capture connection closed"));
+      waiting.clear();
+    };
+    const focus = (enabled: boolean) => new Promise<void>((resolve, reject) => {
+      const id = ++sequence;
+      const timer = setTimeout(() => { waiting.delete(id); reject(new Error("CEF capture focus timed out")); }, 5000);
+      const fail = (e: Error) => { clearTimeout(timer); waiting.delete(id); reject(e); };
+      waiting.set(id, { fail, done: v => { clearTimeout(timer); v.error ? reject(new Error(v.error.message)) : resolve(); } });
+      try { socket.send(JSON.stringify({ id, method: "Emulation.setFocusEmulationEnabled", params: { enabled } })); }
+      catch (e) { fail(e as Error); }
+    });
+    let released = false;
+    const release = async () => {
+      if (released) return;
+      released = true;
+      try { if (socket.readyState === WebSocket.OPEN) await focus(false).catch(() => {}); }
+      finally { socket.close(); }
+    };
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const fail = (message: string) => { clearTimeout(timer); reject(new Error(message)); };
+        const timer = setTimeout(() => fail("CEF capture connection timed out"), 5000);
+        socket.onopen = () => { clearTimeout(timer); resolve(); };
+        socket.onerror = () => fail("CEF capture connection failed");
+      });
+      await focus(true);
+      return release;
+    } catch (e) { await release(); throw e; }
+  }
+  async input<T>(p: Page, action: () => Promise<T>): Promise<T> {
+    const release = await this.capture(p);
+    try { return await action(); }
+    finally { await release(); }
+  }
   async close(p: Page): Promise<void> { await this.command("close", await this.key(p)); }
   async download(p: Page, trigger: () => Promise<unknown>, timeout: number): Promise<{ file: string; url: string; suggestedFilename: string }> {
     if (this.downloadError || !this.downloadSession) throw new Error(this.downloadError || "download unavailable in CEF");

@@ -45,7 +45,7 @@ def MTab.bot.name(m: Maybe<&2, BT.Bot>) -> String:
 def MTab.state(+done: Bool, +on: Bool, +kind: String) -> String:
   Bool.pick(String, done, "done", Bool.pick(String, on, Bool.pick(String, String.eq(kind, "remind"), "reminder", "idle"), "off"))
 
-def MTab.routine.w(w: SC.SRow, +r: BT.Routine, +u: U.Ui, +now: Nat) -> J.Json:
+def MTab.routine.w.loc(+lc: I.Loc, w: SC.SRow, +r: BT.Routine, +u: U.Ui, +now: Nat) -> J.Json:
   match w:
     case SC.SRow{+kind, +label, +when, +next, +rel, +zone, +done, +dtext}:
       J.Json.obj([J.KV{"kind", J.Json.str("routine")}, J.KV{"id", J.Json.str(BT.Routine.id(r))}, J.KV{"act", J.Json.str("uber-bot")},
@@ -56,12 +56,15 @@ def MTab.routine.w(w: SC.SRow, +r: BT.Routine, +u: U.Ui, +now: Nat) -> J.Json:
         J.KV{"bot", J.Json.str(MTab.bot.name(BT.World.find.id(BT.World.bot(M.State.bots(U.Ui.state(u)), BT.Routine.bot(r)))))},
         J.KV{"state", J.Json.str(MTab.state(done, BT.Routine.on(r), BT.Routine.kind(r)))},
         J.KV{"at", J.Json.nat(SC.Sched.next(U.Ui.state(u), r, now, 0n, True{}))},
-        J.KV{"ago", J.Json.str(Bool.pick(String, Nat.is_eq(BT.Routine.last(r), 0n), "", U.Time.ago(now, BT.Routine.last(r))))},
+        J.KV{"ago", J.Json.str(Bool.pick(String, Nat.is_eq(BT.Routine.last(r), 0n), "", I.I18n.ago(lc, now, BT.Routine.last(r))))},
         J.KV{"machine", J.Json.str(U.Ui.far.name(u, BT.Routine.bot(r)))}, J.KV{"away", J.Json.bool(U.Ui.far.away(u, BT.Routine.bot(r)))},
         J.KV{"nav", J.Json.str(MPL.MPlane.nav("routine", BT.Routine.id(r), BT.Routine.bot(r) ++ "|routines", U.Ui.state(u)))}])
 
+def MTab.routine.w(w: SC.SRow, +r: BT.Routine, +u: U.Ui, +now: Nat) -> J.Json:
+  MTab.routine.w.loc(I.En{}, w, r, u, now)
+
 def MTab.routine(+lc: I.Loc, +r: BT.Routine, +u: U.Ui, +now: Nat) -> J.Json:
-  MTab.routine.w(SC.Sched.row(lc, U.Ui.state(u), r, now, 0n, True{}), r, u, now)
+  MTab.routine.w.loc(lc, SC.Sched.row(lc, U.Ui.state(u), r, now, 0n, True{}), r, u, now)
 
 def MTab.routines(+lc: I.Loc, rs: List<&2, BT.Routine>, +u: U.Ui, +now: Nat) -> List<&2, J.Json>:
   match rs:

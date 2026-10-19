@@ -896,10 +896,19 @@ def Dnp.k(dnp: Bool, +body: List<&2, B.Item>, +key: String, +sig: U32, +info: St
     case False{}:
       List.append(&2, B.Item, body, rest)
 
+# KiCad 10.99 may give each cached definition its own name while lib_id
+# still names the source library. An explicit lib_name is authoritative;
+# old files without it use lib_id for the embedded cache as before.
+def Sch.cache.name(+name: String, id: String) -> String:
+  Bool.pick(String, String.is_empty(name), id, name)
+
+def Sch.cache.id(+x: S.Sx) -> String:
+  Sch.cache.name(S.Sx.attr(x, "lib_name"), S.Sx.attr(x, "lib_id"))
+
 # a placed symbol: its unit's drawing and pins, and its fields
 def Sch.symbol(+x: S.Sx, +key: String, +sig: U32, +lib: List<&2, Lib>) -> List<&2, B.Item>:
   +id = S.Sx.attr(x, "lib_id")
-  +m = Lib.find(lib, id)
+  +m = Lib.find(lib, Sch.cache.id(x))
   +t = Sym.xf(S.Sx.get(x, "at"), Sym.mirror(S.Sx.attr(x, "mirror")))
   +unit = Sym.num(x, "unit")
   +style = F32.to_u32(Sch.or.f(S.Sx.f(S.Sx.get(x, "body_style"), 0n), Sch.or.f(S.Sx.f(S.Sx.get(x, "convert"), 0n), 1.0)))

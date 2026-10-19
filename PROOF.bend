@@ -1,7 +1,16 @@
 import Base
+import ./src/core/auth.bend as AUTH
+import ./src/core/http.bend as HTTPAUTH
+import ./src/core/pcb2d.bend as PCB2 # PCB viewer text
+import ./src/app/side_rows.bend as SR
+import ./src/app/side_row_types.bend as SRT
+import ./src/gfx/draw.bend as D
+import ./src/server/botnet.bend as MPLOG # mail perf runtime count
 import ./src/server/server.bend as MPCREDIT # mail perf
+import ./src/core/schematic.bend as SC # kicad fork viewers
 import ./src/core/charter.bend as CH # mail 2c
 import ./src/core/mailrun.bend as MRUN # mail 2c
+import ./src/app/mailroom.bend as MRUI # mail ui
 import ./src/server/mailstore.bend as MIX # mail index
 import ./src/app/mm.bend as MM # window memos
 import ./src/core/kexport.bend as KEX
@@ -11999,3 +12008,360 @@ def Laws.mail_credit_native_kept(w, charge):
     case MPCREDIT.WClose{}: {==}
     case MPCREDIT.WState{_, _}: {==}
     case MPCREDIT.WItems{_, _, _, _, _, _}: {==}
+# ---- i18n web phone ----
+def Laws.webphone_option_english(): {==}
+def Laws.webphone_model_name_kept(): {==}
+def Laws.webphone_count_ungrouped(): {==}
+def Laws.webphone_count_japanese(): {==}
+def Laws.webphone_idle_japanese(): {==}
+# ---- end i18n web phone ----
+# ---- one-hub ----
+def Laws.cli_unknown_never_runs(xs):
+  match xs:
+    case Nil{}:
+      {==}
+    case +h <> t:
+      {==}
+
+def Laws.cli_unknown_after_flags_never_runs(xs):
+  match xs:
+    case Nil{}:
+      {==}
+    case +h <> t:
+      {==}
+
+def Laws.cli_word_never_runs(xs):
+  match xs:
+    case Nil{}:
+      {==}
+    case +h <> t:
+      {==}
+
+def Laws.cli_version_never_runs(xs):
+  match xs:
+    case Nil{}:
+      {==}
+    case +h <> t:
+      {==}
+
+def Laws.cli_version_after_flags(xs):
+  match xs:
+    case Nil{}:
+      {==}
+    case +h <> t:
+      {==}
+
+def Laws.cli_help_never_runs(xs):
+  match xs:
+    case Nil{}:
+      {==}
+    case +h <> t:
+      {==}
+
+def Laws.cli_h_never_runs(xs):
+  match xs:
+    case Nil{}:
+      {==}
+    case +h <> t:
+      {==}
+
+def Laws.cli_missing_value():
+  {==}
+
+def Laws.cli_value_not_a_flag(xs):
+  match xs:
+    case Nil{}:
+      {==}
+    case +h <> t:
+      {==}
+
+def Laws.cli_test_hub_runs():
+  {==}
+
+def Laws.onehub_ours():
+  {==}
+
+def Laws.onehub_held():
+  {==}
+
+def Laws.onehub_says():
+  {==}
+
+def Laws.standin_path_first():
+  {==}
+
+def Laws.standin_merge_behind():
+  {==}
+# ---- end one-hub ----
+# ---- kicad-ipc 4 ----
+def Laws.kicad4_bp1_old(): {==}
+
+def Laws.kicad4_bp2_old(): {==}
+
+def Laws.kicad4_bp3_old(): {==}
+
+def Laws.kicad4_bp4_ok(): {==}
+
+def Laws.kicad4_bp10_ok(): {==}
+
+def Laws.kicad4_describe_part_reads_bp(): {==}
+
+def Laws.kicad4_no_suffix_is_bp0(): {==}
+
+def Laws.kicad4_bp3_needs_api2(): {==}
+
+def Laws.kicad4_bp2_before_bp3(): {==}
+
+def Laws.kicad4_bp10_after_bp3(): {==}
+
+def Laws.kicad4_min_api(): {==}
+
+def Laws.kicad4_pinned_version_is_min(): {==}
+
+def Laws.kserve4_launcher_never_real(): {==}
+
+def Laws.kserve4_launcher_kept(): {==}
+
+def Laws.kserve4_argv_launcher(): {==}
+
+def Laws.kserve4_bare_footprint_refused(): {==}
+
+def Laws.kserve4_refusal_names_full_instance(): {==}
+
+def Laws.kserve4_full_footprint_passes(): {==}
+
+def Laws.kserve4_footprint_cap_lifts(): {==}
+
+def Laws.kserve4_other_item_passes(): {==}
+
+def Laws.kserve4_other_command_passes(): {==}
+
+def Laws.kserve4_bare_symbol_refused(): {==}
+
+def Laws.kserve4_symbol_advice(): {==}
+
+def Laws.kserve4_symbol_with_definition_passes(): {==}
+
+def Laws.kserve4_symbol_cap_lifts(): {==}
+
+def Laws.kserve4_no_items_passes(): {==}
+
+def Laws.prompt4_kicad_ok_names_the_rules(): {==}
+
+def Laws.kserve4_nested_symbol_library_id_refused(): {==}
+
+def Laws.kserve4_nested_symbol_cap_lifts(): {==}
+
+# ---- end kicad-ipc 4 ----
+# ---- kicad fork viewers ----
+def Laws.fork_cache_legacy(id):
+  {==}
+def Laws.fork_cache_alias(id):
+  {==}
+# ---- end kicad fork viewers ----
+
+# ---- kicad fork footprint placement ----
+def Laws.fork_footprint_legacy_at(x):
+  {==}
+# ---- end kicad fork footprint placement ----
+
+def Laws.mail_plain_count(b, bot): {==}
+
+def Laws.mail_global_primary(): {==}
+
+def Laws.mail_log_count_set(c, n):
+  match c:
+    case MPCREDIT.Cfg{home, web, host, port, prompt, dirs, version, MPCREDIT.Net{tailnet, https, token, models, mtext, rt, br, pk, tm, machines, pv, MPLOG.Bn{dir, seen, work, far, live, broken, fl, tools, tch, cef, wire_n}, managed, link, freecad, ks}}:
+      {==}
+
+def Laws.mail_log_count_committed(c, fresh):
+  match c:
+    case MPCREDIT.Cfg{home, web, host, port, prompt, dirs, version, MPCREDIT.Net{tailnet, https, token, models, mtext, rt, br, pk, tm, machines, pv, MPLOG.Bn{dir, seen, work, far, live, broken, fl, tools, tch, cef, wire_n}, managed, link, freecad, ks}}:
+      {==}
+
+# ---- native phone i18n ----
+def Laws.native_language_english(): {==}
+def Laws.native_language_preview(): {==}
+def Laws.native_language_system(): {==}
+def Laws.native_language_fallback(): {==}
+# ---- end native phone i18n ----
+# ---- build-speed: one executable, exact entry selection ----
+def Laws.exe_server_name():
+  {==}
+
+def Laws.exe_server_path():
+  {==}
+
+def Laws.exe_app_name():
+  {==}
+
+def Laws.exe_server_exact():
+  {==}
+# ---- end build-speed ----
+
+# ---- global provider fallback ----
+def Laws.fallback_empty_exhausted(s, caps, now):
+  {==}
+
+def Laws.fallback_never_wraps():
+  {==}
+
+def Laws.fallback_auth_is_not_quota():
+  {==}
+
+def Laws.fallback_unknown_reset_held():
+  {==}
+
+def Laws.fallback_reset_boundary():
+  {==}
+
+def Laws.fallback_no_recovery_while_locked(s, now):
+  {==}
+# ---- end global provider fallback ----
+
+# Sidebar row memos compare exact resolved inputs with the same typography.
+law sr_clip_sound:
+  for a: D.Clip
+  for b: D.Clip
+  for +h: {SR.Key.clip(a, b) == True{} : Bool}
+  {a == b : D.Clip}
+
+def sr_clip_sound(a, b, h):
+  match a b:
+    case D.Clip{+a0, +a1, +a2, +a3} D.Clip{+b0, +b1, +b2, +b3}:
+      e0 = u32_eq_sound(a0, b0, and_l(U32.is_eq(a0, b0), Bool.and(U32.is_eq(a1, b1), Bool.and(U32.is_eq(a2, b2), U32.is_eq(a3, b3))), h))
+      +hc1 = and_r(U32.is_eq(a0, b0), Bool.and(U32.is_eq(a1, b1), Bool.and(U32.is_eq(a2, b2), U32.is_eq(a3, b3))), h)
+      e1 = u32_eq_sound(a1, b1, and_l(U32.is_eq(a1, b1), Bool.and(U32.is_eq(a2, b2), U32.is_eq(a3, b3)), hc1))
+      +hc2 = and_r(U32.is_eq(a1, b1), Bool.and(U32.is_eq(a2, b2), U32.is_eq(a3, b3)), hc1)
+      e2 = u32_eq_sound(a2, b2, and_l(U32.is_eq(a2, b2), U32.is_eq(a3, b3), hc2))
+      +hc3 = and_r(U32.is_eq(a2, b2), U32.is_eq(a3, b3), hc2)
+      e3 = u32_eq_sound(a3, b3, hc3)
+      %e0 : {D.Clip{a0, a1, a2, a3} == D.Clip{_, b1, b2, b3} : D.Clip}
+      %e1 : {D.Clip{a0, a1, a2, a3} == D.Clip{a0, _, b2, b3} : D.Clip}
+      %e2 : {D.Clip{a0, a1, a2, a3} == D.Clip{a0, a1, _, b3} : D.Clip}
+      %e3 : {D.Clip{a0, a1, a2, a3} == D.Clip{a0, a1, a2, _} : D.Clip}
+      {==}
+
+law sr_words_k:
+  for ok: Bool
+  for a: SRT.SideRowK
+  for b: SRT.SideRowK
+  for h: {SR.Key.same.text(ok, a, b) == True{} : Bool}
+  {ok == True{} : Bool}
+
+def sr_words_k(ok, a, b, h):
+  match ok:
+    case False{}: Empty.absurd({False{} == True{} : Bool}, false_ne_true(h))
+    case True{}: {==}
+
+law sr_text_k:
+  for ok: Bool
+  for a: SRT.SideRowK
+  for b: SRT.SideRowK
+  for h: {SR.Key.same.text(ok, a, b) == True{} : Bool}
+  {SR.Key.same.text(True{}, a, b) == True{} : Bool}
+
+def sr_text_k(ok, a, b, h):
+  match ok:
+    case False{}: Empty.absurd({SR.Key.same.text(True{}, a, b) == True{} : Bool}, false_ne_true(h))
+    case True{}: h
+
+
+def Laws.sidebar_row_key_sound(a, b, h):
+  match a b:
+    case SRT.SideRowK{+a0, +a1, +a2, +a3, +a4, +a5, +a6, +a7, +a8, +a9, +a10, +a11, +a12, +a13} SRT.SideRowK{+b0, +b1, +b2, +b3, +b4, +b5, +b6, +b7, +b8, +b9, +b10, +b11, +b12, +b13}:
+      +ka = {SRT.SideRowK{a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13} : SRT.SideRowK}
+      +kb = {SRT.SideRowK{b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13} : SRT.SideRowK}
+      +hw = sr_words_k(SR.Key.same.words(ka, kb), ka, kb, h)
+      +ht = sr_text_k(SR.Key.same.words(ka, kb), ka, kb, h)
+      e0 = bool_eq_sound(a0, b0, and_l(Q.Eq.bool(a0, b0), Bool.and(Q.Eq.bool(a1, b1), Bool.and(Q.Eq.bool(a6, b6), Bool.and(U32.is_eq(a7, b7), Bool.and(U32.is_eq(a8, b8), Bool.and(U32.is_eq(a9, b9), Bool.and(SR.Key.clip(a10, b10), Bool.and(U32.is_eq(a11, b11), Nat.is_eq(a13, b13)))))))), hw))
+      +hw1 = and_r(Q.Eq.bool(a0, b0), Bool.and(Q.Eq.bool(a1, b1), Bool.and(Q.Eq.bool(a6, b6), Bool.and(U32.is_eq(a7, b7), Bool.and(U32.is_eq(a8, b8), Bool.and(U32.is_eq(a9, b9), Bool.and(SR.Key.clip(a10, b10), Bool.and(U32.is_eq(a11, b11), Nat.is_eq(a13, b13)))))))), hw)
+      e1 = bool_eq_sound(a1, b1, and_l(Q.Eq.bool(a1, b1), Bool.and(Q.Eq.bool(a6, b6), Bool.and(U32.is_eq(a7, b7), Bool.and(U32.is_eq(a8, b8), Bool.and(U32.is_eq(a9, b9), Bool.and(SR.Key.clip(a10, b10), Bool.and(U32.is_eq(a11, b11), Nat.is_eq(a13, b13))))))), hw1))
+      +hw2 = and_r(Q.Eq.bool(a1, b1), Bool.and(Q.Eq.bool(a6, b6), Bool.and(U32.is_eq(a7, b7), Bool.and(U32.is_eq(a8, b8), Bool.and(U32.is_eq(a9, b9), Bool.and(SR.Key.clip(a10, b10), Bool.and(U32.is_eq(a11, b11), Nat.is_eq(a13, b13))))))), hw1)
+      e6 = bool_eq_sound(a6, b6, and_l(Q.Eq.bool(a6, b6), Bool.and(U32.is_eq(a7, b7), Bool.and(U32.is_eq(a8, b8), Bool.and(U32.is_eq(a9, b9), Bool.and(SR.Key.clip(a10, b10), Bool.and(U32.is_eq(a11, b11), Nat.is_eq(a13, b13)))))), hw2))
+      +hw3 = and_r(Q.Eq.bool(a6, b6), Bool.and(U32.is_eq(a7, b7), Bool.and(U32.is_eq(a8, b8), Bool.and(U32.is_eq(a9, b9), Bool.and(SR.Key.clip(a10, b10), Bool.and(U32.is_eq(a11, b11), Nat.is_eq(a13, b13)))))), hw2)
+      e7 = u32_eq_sound(a7, b7, and_l(U32.is_eq(a7, b7), Bool.and(U32.is_eq(a8, b8), Bool.and(U32.is_eq(a9, b9), Bool.and(SR.Key.clip(a10, b10), Bool.and(U32.is_eq(a11, b11), Nat.is_eq(a13, b13))))), hw3))
+      +hw4 = and_r(U32.is_eq(a7, b7), Bool.and(U32.is_eq(a8, b8), Bool.and(U32.is_eq(a9, b9), Bool.and(SR.Key.clip(a10, b10), Bool.and(U32.is_eq(a11, b11), Nat.is_eq(a13, b13))))), hw3)
+      e8 = u32_eq_sound(a8, b8, and_l(U32.is_eq(a8, b8), Bool.and(U32.is_eq(a9, b9), Bool.and(SR.Key.clip(a10, b10), Bool.and(U32.is_eq(a11, b11), Nat.is_eq(a13, b13)))), hw4))
+      +hw5 = and_r(U32.is_eq(a8, b8), Bool.and(U32.is_eq(a9, b9), Bool.and(SR.Key.clip(a10, b10), Bool.and(U32.is_eq(a11, b11), Nat.is_eq(a13, b13)))), hw4)
+      e9 = u32_eq_sound(a9, b9, and_l(U32.is_eq(a9, b9), Bool.and(SR.Key.clip(a10, b10), Bool.and(U32.is_eq(a11, b11), Nat.is_eq(a13, b13))), hw5))
+      +hw6 = and_r(U32.is_eq(a9, b9), Bool.and(SR.Key.clip(a10, b10), Bool.and(U32.is_eq(a11, b11), Nat.is_eq(a13, b13))), hw5)
+      e10 = sr_clip_sound(a10, b10, and_l(SR.Key.clip(a10, b10), Bool.and(U32.is_eq(a11, b11), Nat.is_eq(a13, b13)), hw6))
+      +hw7 = and_r(SR.Key.clip(a10, b10), Bool.and(U32.is_eq(a11, b11), Nat.is_eq(a13, b13)), hw6)
+      e11 = u32_eq_sound(a11, b11, and_l(U32.is_eq(a11, b11), Nat.is_eq(a13, b13), hw7))
+      +hw8 = and_r(U32.is_eq(a11, b11), Nat.is_eq(a13, b13), hw7)
+      e13 = nat_eq_sound(a13, b13, hw8)
+      e2 = eq_str_sound(a2, b2, and_l(Q.Eq.str(a2, b2), Bool.and(Q.Eq.str(a3, b3), Bool.and(Q.Eq.str(a4, b4), Bool.and(Q.Eq.str(a5, b5), Q.Eq.str(a12, b12)))), ht))
+      +ht1 = and_r(Q.Eq.str(a2, b2), Bool.and(Q.Eq.str(a3, b3), Bool.and(Q.Eq.str(a4, b4), Bool.and(Q.Eq.str(a5, b5), Q.Eq.str(a12, b12)))), ht)
+      e3 = eq_str_sound(a3, b3, and_l(Q.Eq.str(a3, b3), Bool.and(Q.Eq.str(a4, b4), Bool.and(Q.Eq.str(a5, b5), Q.Eq.str(a12, b12))), ht1))
+      +ht2 = and_r(Q.Eq.str(a3, b3), Bool.and(Q.Eq.str(a4, b4), Bool.and(Q.Eq.str(a5, b5), Q.Eq.str(a12, b12))), ht1)
+      e4 = eq_str_sound(a4, b4, and_l(Q.Eq.str(a4, b4), Bool.and(Q.Eq.str(a5, b5), Q.Eq.str(a12, b12)), ht2))
+      +ht3 = and_r(Q.Eq.str(a4, b4), Bool.and(Q.Eq.str(a5, b5), Q.Eq.str(a12, b12)), ht2)
+      e5 = eq_str_sound(a5, b5, and_l(Q.Eq.str(a5, b5), Q.Eq.str(a12, b12), ht3))
+      +ht4 = and_r(Q.Eq.str(a5, b5), Q.Eq.str(a12, b12), ht3)
+      e12 = eq_str_sound(a12, b12, ht4)
+      %e0 : {ka == SRT.SideRowK{_, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13} : SRT.SideRowK}
+      %e1 : {ka == SRT.SideRowK{a0, _, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13} : SRT.SideRowK}
+      %e2 : {ka == SRT.SideRowK{a0, a1, _, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13} : SRT.SideRowK}
+      %e3 : {ka == SRT.SideRowK{a0, a1, a2, _, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13} : SRT.SideRowK}
+      %e4 : {ka == SRT.SideRowK{a0, a1, a2, a3, _, b5, b6, b7, b8, b9, b10, b11, b12, b13} : SRT.SideRowK}
+      %e5 : {ka == SRT.SideRowK{a0, a1, a2, a3, a4, _, b6, b7, b8, b9, b10, b11, b12, b13} : SRT.SideRowK}
+      %e6 : {ka == SRT.SideRowK{a0, a1, a2, a3, a4, a5, _, b7, b8, b9, b10, b11, b12, b13} : SRT.SideRowK}
+      %e7 : {ka == SRT.SideRowK{a0, a1, a2, a3, a4, a5, a6, _, b8, b9, b10, b11, b12, b13} : SRT.SideRowK}
+      %e8 : {ka == SRT.SideRowK{a0, a1, a2, a3, a4, a5, a6, a7, _, b9, b10, b11, b12, b13} : SRT.SideRowK}
+      %e9 : {ka == SRT.SideRowK{a0, a1, a2, a3, a4, a5, a6, a7, a8, _, b10, b11, b12, b13} : SRT.SideRowK}
+      %e10 : {ka == SRT.SideRowK{a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, _, b11, b12, b13} : SRT.SideRowK}
+      %e11 : {ka == SRT.SideRowK{a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, _, b12, b13} : SRT.SideRowK}
+      %e12 : {ka == SRT.SideRowK{a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, _, b13} : SRT.SideRowK}
+      %e13 : {ka == SRT.SideRowK{a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, _} : SRT.SideRowK}
+      {==}
+
+
+def Laws.sidebar_row_paint_exact(ty, a, b, h):
+  %Laws.sidebar_row_key_sound(a, b, h) : {SR.Key.paint(ty, a) == SR.Key.paint(ty, _) : L.Out}
+  {==}
+
+def Laws.visible_cats_empty_preserves_cache(c, clock):
+  {==}
+
+def Laws.visible_sleep_cat_posed_once(clock):
+  {==}
+# ---- mail ui ----
+def Laws.mailroom_tab_after_chat():
+  {==}
+
+def Laws.mailroom_uber_default(u, id):
+  {==}
+
+def Laws.mailroom_run_collapsed_default(now):
+  {==}
+
+def Laws.mailroom_chip_filters(f, bot):
+  match f:
+    case MVW.Filter{_, _, _, _}: {==}
+
+def Laws.mailroom_chip_keeps_selection(u, bot):
+  match u:
+    case U.Ui{_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _}: {==}
+
+def Laws.mailroom_covers_plane(p):
+  {==}
+
+def Laws.mail_body_kept_output(k, o, at, due): {==}
+
+def Laws.mail_age_relative_deadline(): {==}
+
+def Laws.mail_plane_indexed_build(u): {==}
+
+def Laws.mail_plane_indexed_hidden(u, ix): {==}
+def Laws.auth_foreign_origin_denied(trusted, path, token):
+  {==}
+
+def Laws.auth_empty_remote_token_denied():
+  {==}
+
+def Laws.auth_cookie_prefix_denied():
+  {==}
+# ---- PCB viewer text ----
+def Laws.pcb2_hidden_text_draws_nothing(at, angle, x, text, up, key, sig, ctx):
+  {==}

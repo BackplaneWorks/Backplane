@@ -6,7 +6,17 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 
 // The tabs of the app, in the order of the bar.
-enum class Tab(val title: String) { Home("Home"), Threads("Threads"), Bots("Bots"), Routines("Routines"), Settings("Settings") }
+enum class Tab {
+    Home, Threads, Bots, Routines, Settings;
+    val title: String get() = title("en")
+    fun title(tag: String): String = when (this) {
+        Home -> NativeMessages.native_tab_home(tag)
+        Threads -> NativeMessages.tour_title_threads(tag)
+        Bots -> NativeMessages.tour_title_bots(tag)
+        Routines -> NativeMessages.bots_tab_routines(tag)
+        Settings -> NativeMessages.palette_settings(tag)
+    }
+}
 
 // Settings about this device: kept in SharedPreferences, applied at once,
 // never a round trip to a hub. The thread list's view also goes to Bend

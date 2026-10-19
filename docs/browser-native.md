@@ -43,8 +43,11 @@ engine switching. See `test/tools/cef_window.ts`; helper checks live under
 Before enabling CEF by default, verify Japanese IME composition, clipboard
 interoperation, drag and drop, and real GPU rendering on the desktop. Measure
 several background agent pages as well as the visible page and remote
-watchers: the initial spike found higher CPU for a hidden animated CEF page
-than for an unwatched headless page. Do not claim that cost is resolved from
-the single-page measurements in `tools/cef/SPIKE.md`. Script-created
+watchers. The five-page [visibility study](../tools/cef/VISIBILITY.md) fixes
+hidden scheduling and validates watcher animation, but CEF PSS remains higher.
+The normal hub deployment updates the optional host and helper together on
+machines with CEF installed, using a verified immutable bundle; it leaves
+Chrome-only installations alone. Explicit `BACKPLANE_CEF` overrides still need
+a matching updated host. Script-created
 `window.open` also needs a regression check; popup-link adoption is covered.
 macOS, Windows, and native Wayland embedding are later work.

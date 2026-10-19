@@ -104,6 +104,8 @@ type Shot = {
   timer: ReturnType<typeof setTimeout> | null;
   // the screencast runs (only while some client shows the page)
   casting: boolean;
+  capture: (() => Promise<void>) | null;
+  castTask: Promise<void> | null;
   // when the last idle still was taken (performance.now ms)
   still: number;
   // fires when the cast lease runs out
@@ -137,7 +139,7 @@ function ownerFor(name: string): Owner {
       active: null,
       viewport: { ...DEFAULT_VIEWPORT },
       console: [],
-      shot: { cdp: null, seq: 0, last: 0, fast: 0, lastAll: 0, lastHash: 0n, pending: null, timer: null, casting: false, still: 0, lease: null },
+      shot: { cdp: null, seq: 0, last: 0, fast: 0, lastAll: 0, lastHash: 0n, pending: null, timer: null, casting: false, capture: null, castTask: null, still: 0, lease: null },
       opening: null,
       recording: false,
       lastNav: "",
@@ -183,6 +185,7 @@ const frames = {
   timer: null as ReturnType<typeof setInterval> | null,
   cdp: null as CDPSession | null,
   page: null as Page | null,
+  capture: null as (() => Promise<void>) | null,
   busy: false,
 };
 
@@ -235,6 +238,8 @@ async function launch(): Promise<BrowserContext> {
     spare = [];
     frames.cdp = null;
     frames.page = null;
+    const release = frames.capture; frames.capture = null;
+    if (release) void release();
     for (const o of owners.values()) {
       o.tabs = [];
       o.active = null;
@@ -275,6 +280,8 @@ async function launchCef(): Promise<BrowserContext> {
     spare = [];
     cefOwners.clear();
     frames.cdp = null; frames.page = null;
+    const release = frames.capture; frames.capture = null;
+    if (release) void release();
     for (const o of owners.values()) {
       o.tabs = []; o.active = null; o.recording = false; clearShot(o);
     }
@@ -546,6 +553,13 @@ async function startScreencast(): Promise<void> {
     frames.cdp = s;
     frames.page = p;
   }
+  if (engine === "cef" && !frames.capture) {
+    const s = frames.cdp;
+    const release = await cef!.capture(p);
+    if (frames.cdp !== s || !frames.on) { await release(); return; }
+    // A concurrent restart may have acquired its own lease meanwhile.
+    if (frames.capture) await release(); else frames.capture = release;
+  }
   const vp = ownerFor("").viewport;
   await frames.cdp!.send("Page.startScreencast", {
     format: "png",
@@ -559,6 +573,8 @@ async function stopScreencast(): Promise<void> {
   const s = frames.cdp;
   frames.cdp = null;
   frames.page = null;
+  const release = frames.capture; frames.capture = null;
+  if (release) await release();
   if (s) {
     await s.send("Page.stopScreencast").catch(() => {});
     await s.detach().catch(() => {});
@@ -643,14 +659,41 @@ function watched(o: Owner): boolean {
 }
 
 // the screencast runs exactly while the page is watched
-async function castCheck(o: Owner): Promise<void> {
-  const s = o.shot.cdp;
-  if (!s) return;
-  const want = watched(o);
-  if (want === o.shot.casting) return;
-  o.shot.casting = want;
-  if (want) await s.send("Page.startScreencast", { format: "jpeg", quality: 70, maxWidth: 1280, maxHeight: 2048, everyNthFrame: 1 }).catch(() => {});
-  else await s.send("Page.stopScreencast").catch(() => {});
+function castCheck(o: Owner): Promise<void> {
+  // Start/stop can overlap lease expiry, tab adoption or helper teardown.
+  // Serialize each owner's transitions and discard leases acquired for an
+  // obsolete target; a late acquisition must never keep a hidden tab busy.
+  const task = (o.shot.castTask ?? Promise.resolve()).catch(() => {}).then(async () => {
+    const s = o.shot.cdp;
+    if (!s) return;
+    const want = watched(o);
+    if (want === o.shot.casting) return;
+    if (want) {
+      let release: (() => Promise<void>) | null = null;
+      try {
+        if (engine === "cef" && o.active) release = await cef!.capture(o.active);
+        if (o.shot.cdp !== s || !watched(o)) { if (release) await release(); return; }
+        o.shot.capture = release;
+        await s.send("Page.startScreencast", { format: "jpeg", quality: 70, maxWidth: 1280, maxHeight: 2048, everyNthFrame: 1 });
+        if (o.shot.cdp === s) o.shot.casting = true;
+      } catch (e) {
+        if (o.shot.capture === release) o.shot.capture = null;
+        if (release) await release();
+        throw e;
+      }
+    } else {
+      o.shot.casting = false;
+      const release = o.shot.capture; o.shot.capture = null;
+      await s.send("Page.stopScreencast").catch(() => {});
+      if (release) await release();
+    }
+  });
+  o.shot.castTask = task;
+  return task.finally(() => { if (o.shot.castTask === task) o.shot.castTask = null; });
+}
+
+function castQuiet(o: Owner): void {
+  void castCheck(o).catch(e => log(`cast: ${e}`));
 }
 
 // once a second: leases that ran out stop their screencast; an unwatched
@@ -658,7 +701,7 @@ async function castCheck(o: Owner): Promise<void> {
 setInterval(() => {
   const now = performance.now();
   for (const o of owners.values()) {
-    void castCheck(o);
+    castQuiet(o);
     if (!watched(o) && o.shot.cdp && now - o.shot.still >= IDLE_STILL_MS) {
       o.shot.still = now;
       void shotNow(o.name);
@@ -671,6 +714,8 @@ async function stopShots(o: Owner): Promise<void> {
   o.shot.cdp = null;
   o.shot.pending = null;
   o.shot.casting = false;
+  const release = o.shot.capture; o.shot.capture = null;
+  if (release) await release();
   if (s) {
     await s.send("Page.stopScreencast").catch(() => {});
     await s.detach().catch(() => {});
@@ -681,6 +726,8 @@ function clearShot(o: Owner): void {
   o.shot.cdp = null;
   o.shot.pending = null;
   o.shot.casting = false;
+  const release = o.shot.capture; o.shot.capture = null;
+  if (release) void release();
   if (o.shot.timer) clearTimeout(o.shot.timer);
   o.shot.timer = null;
 }
@@ -1190,7 +1237,7 @@ const handlers: Record<string, (a: Json, name: string) => Promise<any>> = {
     o.shot.fast = performance.now() + ms;
     // the screencast stops the moment the lease runs out, not at the next tick
     if (o.shot.lease) clearTimeout(o.shot.lease);
-    o.shot.lease = setTimeout(() => { o.shot.lease = null; void castCheck(o); }, ms + 5);
+    o.shot.lease = setTimeout(() => { o.shot.lease = null; castQuiet(o); }, ms + 5);
     await castCheck(o);
     if (!was && ms > 0) void shotNow(name);
     return { fps: shotFps(o) };
@@ -1215,6 +1262,15 @@ const handlers: Record<string, (a: Json, name: string) => Promise<any>> = {
 // requests that change nothing on the page (no still for them)
 const STILL_QUIET = new Set(["cast", "status", "frames", "frame", "close", "close_page", "snapshot", "console", "tabs"]);
 
+// Focus is needed for native hidden-page input, not for idle pages,
+// snapshots or background evaluations. The scope is released even on error.
+const CEF_INPUT = new Set(["click", "mouse", "type", "press", "scroll", "select"]);
+async function dispatch(op: string, h: (a: Json, name: string) => Promise<any>, args: Json, name: string): Promise<any> {
+  if (engine !== "cef" || !CEF_INPUT.has(op)) return h(args, name);
+  const p = await ensurePage(name);
+  return cef!.input(p, () => h(args, name));
+}
+
 async function handle(line: string): Promise<void> {
   if (!line.trim()) return;
   let req: Json;
@@ -1238,7 +1294,7 @@ async function handle(line: string): Promise<void> {
   const h = handlers[op];
   const args = req.args && typeof req.args === "object" ? { ...req, ...req.args } : req;
   try {
-    const result = await h(args, name);
+    const result = await dispatch(op, h, args, name);
     send({ id, ok: true, result });
   } catch (e: any) {
     send({ id, ok: false, error: String(e?.message ?? e).split("\n")[0] });

@@ -193,6 +193,10 @@ t_cc=$(now_ms)
 libs=""
 grep -q '#include <X11/' "$work/all.c" && libs="$libs -lX11"
 grep -q '#include <alsa/' "$work/all.c" && libs="$libs -lasound"
+# The app opens X11 with dlopen. Keep libraries only when the program has
+# real symbol references, so its server entry also runs without libX11.
+# Other programs using Base's direct X11 calls still retain that library.
+[ "$(uname -s)" != Linux ] || libs="-Wl,--as-needed $libs"
 nice -n 19 $pin "$CC" $cflags "$work"/u*.o -o "$out" -lpthread -lm $libs
 t_link=$(now_ms)
 hits=$(cat "$work"/u*.o.how 2>/dev/null | grep -c '^hit$' || true)

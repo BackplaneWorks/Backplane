@@ -131,6 +131,7 @@ private struct DrivenFrame: View {
 
 // while the person drives: the address, and the keys the frame cannot send
 private struct DrivingBar: View {
+    @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let browser: BotBrowser
     @State private var typed = ""
@@ -138,20 +139,20 @@ private struct DrivingBar: View {
     var body: some View {
         VStack(spacing: 6) {
             HStack(spacing: 6) {
-                Button("Back") { model.act("bb-back") }.buttonStyle(.bordered).buttonBorderShape(.roundedRectangle(radius: 3))
-                Button("Reload") { model.act("bb-reload") }.buttonStyle(.bordered).buttonBorderShape(.roundedRectangle(radius: 3))
-                TaskField(model: model, name: "bburl", value: browser.bburl ?? "", label: "Address") { model.act("bb-nav") }
-                Button("Go") { model.act("bb-nav") }.buttonStyle(.borderedProminent).buttonBorderShape(.roundedRectangle(radius: 3))
+                Button(NativeMessages.tour_back(lang)) { model.act("bb-back") }.buttonStyle(.bordered).buttonBorderShape(.roundedRectangle(radius: 3))
+                Button(NativeMessages.common_reload(lang)) { model.act("bb-reload") }.buttonStyle(.bordered).buttonBorderShape(.roundedRectangle(radius: 3))
+                TaskField(model: model, name: "bburl", value: browser.bburl ?? "", label: NativeMessages.browser_address(lang)) { model.act("bb-nav") }
+                Button(NativeMessages.common_go(lang)) { model.act("bb-nav") }.buttonStyle(.borderedProminent).buttonBorderShape(.roundedRectangle(radius: 3))
             }
             HStack(spacing: 6) {
-                TextField("Type into the page", text: $typed).textFieldStyle(.roundedBorder)
+                TextField(NativeMessages.native_browser_typing(lang), text: $typed).textFieldStyle(.roundedBorder)
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
-                Button("Send") {
+                Button(NativeMessages.composer_send(lang)) {
                     if !typed.isEmpty { model.act("bb-type", typed); typed = "" }
                 }.buttonStyle(.borderedProminent).buttonBorderShape(.roundedRectangle(radius: 3))
             }
             HStack(spacing: 6) {
-                ForEach([("Enter", "Enter"), ("Tab", "Tab"), ("\u{232B}", "Backspace"), ("Esc", "Escape")], id: \.0) { k in
+                ForEach([(NativeMessages.native_key_enter(lang), "Enter"), (NativeMessages.native_key_tab(lang), "Tab"), ("\u{232B}", "Backspace"), (NativeMessages.native_key_esc(lang), "Escape")], id: \.0) { k in
                     Button(k.0) { model.act("bb-key", k.1) }.buttonStyle(.bordered).buttonBorderShape(.roundedRectangle(radius: 3))
                 }
                 Spacer(minLength: 0)
@@ -163,24 +164,25 @@ private struct DrivingBar: View {
 
 // a recording stopped: name it, mark typed values as parameters
 private struct SaveSheet: View {
+    @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let browser: BotBrowser
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 10) {
-                Text(browser.title ?? "Save this task").font(.headline)
-                Text("Name it. Mark a value you typed to ask for it each time the task runs.")
+                Text(browser.title ?? NativeMessages.teach_save(lang)).font(.headline)
+                Text(NativeMessages.teach_name_note(lang))
                     .font(.footnote).foregroundStyle(.secondary)
-                TaskField(model: model, name: "tkname", value: browser.tkname ?? "", label: "Name")
-                TaskField(model: model, name: "tkdesc", value: browser.tkdesc ?? "", label: "What it does (optional)")
+                TaskField(model: model, name: "tkname", value: browser.tkname ?? "", label: NativeMessages.bots_name(lang))
+                TaskField(model: model, name: "tkdesc", value: browser.tkdesc ?? "", label: NativeMessages.teach_description(lang))
                 ForEach(browser.rows ?? []) { r in
                     VStack(alignment: .leading, spacing: 4) {
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
                             Text("\(r.n).").font(.callout.monospaced()).foregroundStyle(.secondary)
                             Text(r.text).font(.callout)
                             Spacer(minLength: 0)
-                            if r.secret { Text("private").font(.caption2).foregroundStyle(.secondary) }
+                            if r.secret { Text(NativeMessages.native_task_private(lang)).font(.caption2).foregroundStyle(.secondary) }
                         }
                         if !r.chip.isEmpty {
                             Button { model.act("tk-mark", String(r.n)) } label: {
@@ -201,6 +203,7 @@ private struct SaveSheet: View {
 
 // Browser: the strip, then the page; a paused run's card leads
 struct BrowserTab: View {
+    @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let browser: BotBrowser?
     let name: String
@@ -225,7 +228,7 @@ struct BrowserTab: View {
                                 Text(t).font(.subheadline.bold())
                                 if b.mode == 1 {
                                     let n = b.steps ?? 0
-                                    Text("\(b.clock ?? "") \u{00B7} \(n) \(n == 1 ? "step" : "steps")").font(.caption).foregroundStyle(.secondary)
+                                    Text(NativeMessages.teach_steps(lang, b.clock ?? "", String(n), n == 1 ? "one" : "other")).font(.caption).foregroundStyle(.secondary)
                                 }
                             }
                             StripButtons(model: model, buttons: b.btns ?? [])
@@ -237,12 +240,12 @@ struct BrowserTab: View {
                     if let image {
                         DrivenFrame(model: model, image: image, input: browser?.input ?? false)
                     } else {
-                        ContentUnavailableView("No page yet", systemImage: "globe").frame(maxWidth: .infinity)
+                        ContentUnavailableView(NativeMessages.native_browser_empty(lang), systemImage: "globe").frame(maxWidth: .infinity)
                     }
                     if let b = browser, b.mode == 1 {
                         HStack(spacing: 6) {
-                            TaskField(model: model, name: "tknote", value: b.tknote ?? "", label: "Tell it what matters") { model.act("tk-note") }
-                            Button("Add note") { model.act("tk-note") }.buttonStyle(.bordered).buttonBorderShape(.roundedRectangle(radius: 3))
+                            TaskField(model: model, name: "tknote", value: b.tknote ?? "", label: NativeMessages.native_task_note(lang)) { model.act("tk-note") }
+                            Button(NativeMessages.teach_note_add(lang)) { model.act("tk-note") }.buttonStyle(.bordered).buttonBorderShape(.roundedRectangle(radius: 3))
                         }.padding(.horizontal, 12).padding(.bottom, 12)
                     }
                 }
@@ -267,6 +270,7 @@ private func statusColor(_ s: String) -> Color {
 // Tasks: what the bot has learned, each opened for its run form, then the
 // recent runs with their screenshots
 struct TasksTab: View {
+    @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let tasks: BotTasks?
 
@@ -274,7 +278,7 @@ struct TasksTab: View {
         let items = tasks?.items ?? []
         let runs = tasks?.runs ?? []
         List {
-            Text(items.isEmpty ? "None yet. Teach one in the Browser tab, or tell it in chat." : "Open one to run it. A routine can run it too.")
+            Text(items.isEmpty ? NativeMessages.teach_empty(lang) : NativeMessages.teach_run_note(lang))
                 .font(.footnote).foregroundStyle(.secondary)
             ForEach(items) { t in
                 VStack(alignment: .leading, spacing: 8) {
@@ -288,24 +292,24 @@ struct TasksTab: View {
                                 }
                             }
                             Spacer(minLength: 0)
-                            if !t.last.isEmpty { Text(t.last).font(.caption).foregroundStyle(statusColor(t.last)) }
+                            if !t.last.isEmpty { Text(NativeMessages.native_task_state(lang, t.last)).font(.caption).foregroundStyle(statusColor(t.last)) }
                         }
                         .contentShape(Rectangle())
                     }.buttonStyle(.plain)
                     if t.open {
                         ForEach(t.params, id: \.field) { p in
-                            TaskField(model: model, name: p.field, value: p.value, label: p.label + (p.example.isEmpty ? "" : " (\(p.example))"))
+                            TaskField(model: model, name: p.field, value: p.value, label: p.example.isEmpty ? p.label : NativeMessages.native_task_parameter(lang, p.label, p.example))
                         }
                         HStack(spacing: 8) {
-                            Button("Run") { model.act("tk-run", t.slug) }.buttonStyle(.borderedProminent).buttonBorderShape(.roundedRectangle(radius: 3))
-                            Button(t.asking ? "Delete this task?" : "Delete", role: .destructive) { model.act("tk-del", t.slug) }
+                            Button(NativeMessages.common_run(lang)) { model.act("tk-run", t.slug) }.buttonStyle(.borderedProminent).buttonBorderShape(.roundedRectangle(radius: 3))
+                            Button(t.asking ? NativeMessages.native_task_delete_ask(lang) : NativeMessages.common_delete(lang), role: .destructive) { model.act("tk-del", t.slug) }
                                 .buttonStyle(.bordered).buttonBorderShape(.roundedRectangle(radius: 3))
                         }
                     }
                 }
             }
             if !runs.isEmpty {
-                Section("Recent runs") {
+                Section(NativeMessages.teach_runs(lang)) {
                     ForEach(runs) { r in
                         VStack(alignment: .leading, spacing: 6) {
                             HStack(alignment: .firstTextBaseline) {
@@ -314,7 +318,7 @@ struct TasksTab: View {
                                     if !r.summary.isEmpty { Text(r.summary).font(.caption).foregroundStyle(.secondary) }
                                 }
                                 Spacer(minLength: 0)
-                                Text(r.status).font(.caption).foregroundStyle(statusColor(r.status))
+                                Text(NativeMessages.native_task_state(lang, r.status)).font(.caption).foregroundStyle(statusColor(r.status))
                             }
                             if !r.shots.isEmpty {
                                 ScrollView(.horizontal, showsIndicators: false) {

@@ -87,7 +87,7 @@ async function scenario(kind: "on" | "off" | "crash") {
       ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "", BACKPLANE_GOOGLE_BAKE: "0", FAKE_LOG: log,
       BP_EOF_FINISH: "1", BP_STREAM_N: String(N), BP_STREAM_MS: String(MS), BP_DEPLOY_ARGS: JSON.stringify({ stage, note: "adopt e2e" }),
       BACKPLANE_WAKE_TICK_MS: "2000", BACKPLANE_DEPLOY_LOCKS: join(root, "none.lock"), BACKPLANE_LOCK_DIR: join(root, "locks"), BACKPLANE_ADOPT: adopt ? "" : "0",
-      PATH: `${fake}:${process.env.PATH}`, TMPDIR: root });
+      BACKPLANE_AGENTS: fake, PATH: `${fake}:${process.env.PATH}`, TMPDIR: root });
   const spawnHub = (n: number) => Bun.spawn([join(prefix, "backplane"), "--home", home, "--port", String(PORT), "--no-tailscale", "--foreground"],
     { env: hubEnv(), stdout: "ignore", stderr: Bun.file(join(root, `hub${n}.err`)) });
   let proc = spawnHub(1);

@@ -1,4 +1,5 @@
 import Base
+import ./fallback.bend as FB
 import ./title.bend as TTL
 import ./mailrun.bend as RUN
 import ./cef.bend as CF
@@ -52,12 +53,36 @@ import ./sched.bend as SC
 import ./task.bend as TK
 import ./order.bend as OR
 import ./tools.bend as TO
+import ./mailview.bend as MV
+import ./mail.bend as ML
 
 # The client state, Elm-style, shared by the native window and the web
 # page: a host feeds server messages to Ui.recv and user actions to Ui.act,
 # then draws the result. The read model is folded by the same State.apply
 # the server uses (law replay_snoc), so what a client shows is exactly what
 # the server stored.
+
+type MailvIndex is Data:
+  MailvIndex{wanted: Map<&2, ML.Order>, old: Map<&2, ML.Conv>, act: Map<&2, Nat>}
+
+type MailvData is Data:
+  MailvData{cache: MV.Cache, find: MV.Find, bubbles: List<&2, MV.Bub>, targets: List<&2, MV.Opt>, rev: Nat, touch: Nat, index: MailvIndex}
+
+# Typed local stores share the old final Ui slot: ordinary Ui copies stay cheap.
+# The mail record is behind a List to bound native record flattening.
+type MailvLocal is Data:
+  MailvLocal{terms: Map<&2, VT.Vt>, mail: List<&2, MailvData>}
+
+def MailvLocal.empty() -> MailvLocal:
+  MailvLocal{Map.new(&2, VT.Vt), Nil{}}
+
+def MailvLocal.terms(s: MailvLocal) -> Map<&2, VT.Vt>:
+  match s:
+    case MailvLocal{t, _}: t
+
+def MailvLocal.with_terms(s: MailvLocal, t: Map<&2, VT.Vt>) -> MailvLocal:
+  match s:
+    case MailvLocal{_, m}: MailvLocal{t, m}
 
 type Ui is Data:
   Ui{
@@ -77,7 +102,7 @@ type Ui is Data:
     note: String,
     info: Map<&2, String>,
     outbox: Map<&2, String>,
-    terms: Map<&2, VT.Vt>
+    stores: MailvLocal
   }
 
 type Cmd is Data:
@@ -138,7 +163,7 @@ def Act.ui(a: Act) -> Ui:
 # (the clock goes in the info map from the start, as Ui.tick puts it)
 def Ui.init(+now: Nat) -> Ui:
   Ui{M.State.empty(), "", Map.new(&2, String), Map.new(&2, String), Map.new(&2, Bool), False{}, now, False{}, False{}, "", 0n, False{}, "", "",
-    Map.set(&2, String, Map.new(&2, String), "clock", Nat.show(now)), Map.new(&2, String), Map.new(&2, VT.Vt)}
+    Map.set(&2, String, Map.new(&2, String), "clock", Nat.show(now)), Map.new(&2, String), MailvLocal.empty()}
 
 def Str.get.k(r: Map<&2, String> & String) -> String:
   (_, v) = r
@@ -246,13 +271,6 @@ def Ui.see(u: Ui, c: M.Change) -> Ui:
     case _ _:
       u
 
-def Ui.fold(cs: List<&2, M.Change>, u: Ui) -> Ui:
-  match cs u:
-    case Nil{} _:
-      u
-    case +c <> t Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}:
-      Ui.fold(t, Ui.see(Ui{M.State.apply(st, c), sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}, c))
-
 # Changes this client cannot read (a hub newer than it: a TestFlight build
 # behind, a cached web page) still count: the hub resumes a reconnect by
 # how many it sent, so each is a tick of the read model's sequence (and
@@ -287,15 +305,6 @@ def Ui.skip(u: Ui, n: Nat) -> Ui:
   match u:
     case Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}:
       Ui{Ui.skip.st(n, st), sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}
-
-def Ui.fold.d(d: Decoded, u: Ui) -> Ui:
-  match d:
-    case Decoded{cs, n}:
-      Ui.skip(Ui.fold(List.reverse(&2, M.Change, cs), u), n)
-
-# a message's items folded in, the unreadable ones counted
-def Ui.fold.items(xs: List<&2, J.Json>, u: Ui) -> Ui:
-  Ui.fold.d(Ui.decode.all(xs, Decoded{Nil{}, 0n}), u)
 
 # a "changes" message (or "log") holding these items (for laws)
 def Seq.demo(+t: String, xs: List<&2, J.Json>) -> J.Json:
@@ -446,7 +455,7 @@ def Ui.machine(u: Ui, +url: String) -> Act:
   match u:
     case Ui{_, _, +dr, _, _, _, now, ad, _, _, rid, w, _, _, +nf, _, _}:
       Act{Ui{M.State.empty(), "", Machine.drafts(Map.keys(&2, String, dr), dr, Map.new(&2, String)), Map.new(&2, String), Map.new(&2, Bool), False{}, now, ad, False{}, "", rid, w, "", "connecting",
-        Map.set(&2, String, Map.set(&2, String, Local.keep(nf, Map.new(&2, String)), "local.machine", url), "local.generation", "pending:" ++ Str.get(nf, "local.generation")), Map.new(&2, String), Map.new(&2, VT.Vt)}, [Connect{url}]}
+        Map.set(&2, String, Map.set(&2, String, Local.keep(nf, Map.new(&2, String)), "local.machine", url), "local.generation", "pending:" ++ Str.get(nf, "local.generation")), Map.new(&2, String), MailvLocal.empty()}, [Connect{url}]}
 
 def Ui.info_merge(u: Ui, o: J.Json) -> Ui:
   match u o:
@@ -461,17 +470,6 @@ def Ui.base(resume: Bool, st: M.State) -> M.State:
       st
     case False{}:
       M.State.empty()
-
-# the server's log on (re)connect: from nothing, or, when it says `since`
-# (the client already has that many changes), just what was missed; the
-# client's id survives the machine info being replaced
-def Ui.reset(u: Ui, +o: J.Json) -> Ui:
-  match u:
-    case Ui{st, sel, dr, live, op, _, now, ad, pa, _, rid, w, er, note, +nf, ob, tr}:
-      Ui.fold.items(J.Json.elems(J.Json.get_obj(o, "items")),
-        Ui{Ui.base(Nat.is_gt(J.Json.get_nat(o, "since", 0n), 0n), st), sel, Map.set(&2, String, Map.set(&2, String, dr, "@sync", "1"), "@fab.at", ""), live, op, True{}, now, ad, pa, J.Json.get_str(o, "version", ""), rid, w, er, note,
-          Machines.home(Ui.reset.keep(String.eq(J.Json.get_str(o, "origin", ""), Str.get(nf, "origin")), nf,
-            Local.keep(nf, Map.set(&2, String, Map.set(&2, String, Info.of(J.Json.get_obj(o, "info")), "cid", Str.get(nf, "cid")), "origin", J.Json.get_str(o, "origin", ""))))), ob, tr})
 
 # how many changes this client holds (a reconnect asks for the rest)
 # the log's read model handed over whole (the hub's own window: nothing
@@ -2723,17 +2721,17 @@ def Term.get(+m: Map<&2, VT.Vt>, +thread: String) -> VT.Vt:
 def Ui.term(u: Ui, +thread: String) -> VT.Vt:
   match u:
     case Ui{_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, tr}:
-      Term.get(tr, thread)
+      Term.get(MailvLocal.terms(tr), thread)
 
 def Ui.term_set(u: Ui, +thread: String, v: VT.Vt) -> Ui:
   match u:
-    case Ui{st, sel, dr, live, op, on, now, ad, pa, ve, rid, w, er, note, nf, ob, tr}:
-      Ui{st, sel, dr, live, op, on, now, ad, pa, ve, rid, w, er, note, nf, ob, Map.set(&2, VT.Vt, tr, thread, v)}
+    case Ui{st, sel, dr, live, op, on, now, ad, pa, ve, rid, w, er, note, nf, ob, +tr}:
+      Ui{st, sel, dr, live, op, on, now, ad, pa, ve, rid, w, er, note, nf, ob, MailvLocal.with_terms(tr, Map.set(&2, VT.Vt, MailvLocal.terms(tr), thread, v))}
 
 def Ui.term_feed(u: Ui, +thread: String, bs: List<&2, U32>) -> Ui:
   match u:
     case Ui{st, sel, dr, live, op, on, now, ad, pa, ve, rid, w, er, note, nf, ob, +tr}:
-      Ui{st, sel, dr, live, op, on, now, ad, pa, ve, rid, w, er, note, nf, ob, Map.set(&2, VT.Vt, tr, thread, VT.Vt.feed(Term.get(tr, thread), bs))}
+      Ui{st, sel, dr, live, op, on, now, ad, pa, ve, rid, w, er, note, nf, ob, MailvLocal.with_terms(tr, Map.set(&2, VT.Vt, MailvLocal.terms(tr), thread, VT.Vt.feed(Term.get(MailvLocal.terms(tr), thread), bs)))}
 
 # a chat terminal's snapshot ("reset": [cols, rows]) starts its screen
 # over; other bytes go onto it
@@ -2768,7 +2766,7 @@ def Ui.recv_act.t(term: Bool, +thread: String, a: Act) -> Act:
 def Ui.term_open(u: Ui, +cols: U32, +rows: U32) -> Act:
   match u:
     case Ui{st, +sel, dr, live, op, on, now, ad, pa, ve, rid, w, er, note, nf, ob, +tr}:
-      Ui.rpc(Ui{st, sel, dr, live, op, on, now, ad, pa, ve, rid, w, er, note, nf, ob, Map.set(&2, VT.Vt, tr, sel, VT.Vt.resize(Term.get(tr, sel), cols, rows))},
+      Ui.rpc(Ui{st, sel, dr, live, op, on, now, ad, pa, ve, rid, w, er, note, nf, ob, MailvLocal.with_terms(tr, Map.set(&2, VT.Vt, MailvLocal.terms(tr), sel, VT.Vt.resize(Term.get(MailvLocal.terms(tr), sel), cols, rows)))},
         "term.open", [J.KV{"thread", J.Str{sel}}, J.KV{"cols", J.Num{U32.show(cols)}}, J.KV{"rows", J.Num{U32.show(rows)}}])
 
 # keys typed into the selected thread's terminal
@@ -8572,9 +8570,6 @@ def KX.reply.k(has: Bool, +u: Ui, +r: J.Json) -> Ui:
 def KX.reply(+u: Ui, +o: J.Json) -> Ui:
   KX.reply.k(Bool.not(String.is_empty(J.Json.get_str(J.Json.get_obj(o, "result"), "export10", ""))), u, J.Json.get_obj(o, "result"))
 
-def Ui.reply(u: Ui, +o: J.Json) -> Ui:
-  KX.reply(KN.reply(Made.reply(o, Bots.reply(o, Proj.reply(o, Btw.reply(Fab.reply(Fab.has(o), Ui.reply.skills(u, o), o), o)))), o), o)
-
 # A link's threads and bots (far.bend): its batch folded into the read
 # model under this hub's ids, and whether it answered ("far.away.<link>")
 # and what it is called ("far.name.<link>") kept for the rows that show it
@@ -8637,33 +8632,6 @@ def Ui.far.name(+u: Ui, +id: String) -> String:
 # " (away)" while its machine does not answer
 def Ui.far.title(+u: Ui, +id: String, +title: String) -> String:
   Label.title(Ui.state(u), id, title)
-
-def Ui.recv.k(i: Nat, u: Ui, +o: J.Json) -> Ui:
-  match i:
-    case 0n:
-      Ui.reset(u, o)
-    case 1n:
-      Ui.fold.items(J.Json.elems(J.Json.get_obj(o, "items")), u)
-    case 2n:
-      Ui.delta(u, J.Json.get_str(o, "thread", ""), J.Json.get_str(o, "text", ""))
-    case 3n:
-      Ui.reply(u, o)
-    case 4n:
-      Ui.update(u, o)
-    case 5n:
-      Ui.view(u, o)
-    case 6n:
-      Emb.recv(J.Json.elems(J.Json.get_obj(o, "reset")), u, J.Json.get_str(o, "thread", ""), Term.bytes(J.Json.elems(J.Json.get_obj(o, "b"))))
-    case 7n:
-      Ui.info_merge(u, J.Json.get_obj(o, "info"))
-    case 8n:
-      Voice.recv(u, o)
-    case 9n:
-      Ui.far(u, o)
-    case 10n:
-      Ui.live.set(u, o)
-    case _:
-      u
 
 def Want.rebind(bound: Bool, u: Ui, +generation: String) -> Ui:
   match bound:
@@ -8740,9 +8708,6 @@ def Bots.wanted(+u: Ui) -> Ui:
 def Ui.adopt(+u: Ui, st: M.State) -> Ui:
   Ui.reselect(Ui.sel(u), Bots.wanted(Ui.installed(Ui.adopt.raw(u, st))))
 
-def Ui.adopt_log(u: Ui, st: M.State, o: J.Json) -> Ui:
-  Ui.adopt(Ui.reset(u, o), st)
-
 def Ui.join(log: Bool, u: Ui) -> Ui:
   match log:
     case True{}:
@@ -8802,14 +8767,6 @@ def Boot.demo(+t: String, +more: Bool, +boot: Bool, xs: List<&2, J.Json>) -> J.J
 # whether the client is still taking a log in chunks
 def Boot.on(+u: Ui) -> Bool:
   String.eq(Ui.scratch(u, "@boot"), "1")
-
-# a message folded in, and the join's progress noted
-def Ui.recv.b(+i: Nat, u: Ui, +o: J.Json) -> Ui:
-  Boot.mark(i, Ui.recv.k(i, u, o), o)
-
-# A message can resolve a want only against the installed destination.
-def Ui.recv(+u: Ui, +o: J.Json) -> Ui:
-  Ui.reselect(Ui.sel(u), Bots.wanted(Ui.join(String.eq(J.Json.get_str(o, "t", ""), "log"), Ui.recv.b(C.Codec.pos(["log", "changes", "delta", "reply", "update", "view", "term", "info", "voice", "far", "live"], J.Json.get_str(o, "t", "")), u, o))))
 
 # The cache contains home and at most one linked hub; each slot keeps its
 # read model and machine info (including the log origin) together.
@@ -8964,12 +8921,6 @@ def Ui.shows.t(beat: Bool, +u: Ui, +o: J.Json) -> Bool:
 def Ui.shows(+u: Ui, +o: J.Json) -> Bool:
   Ui.shows.t(Bool.or(String.eq(J.Json.get_str(o, "t", ""), "hb"), String.eq(J.Json.get_str(o, "t", ""), "delta_end")), u, o)
 
-# a message from the server, with what to send: a (re)connection (the
-# server's log arrives first on each) sends the outbox again, so nothing
-# the user sent is lost to a dropped link
-def Ui.recv_act.go(u: Ui, +o: J.Json) -> Act:
-  Ui.recv_act.t(Bool.and(String.eq(J.Json.get_str(o, "t", ""), "term"), Bool.not(EM.Emb.is_key(J.Json.get_str(o, "thread", "")))), J.Json.get_str(o, "thread", ""), Fm.again(String.eq(J.Json.get_str(o, "t", ""), "log"), Ui.recv_act.k(String.eq(J.Json.get_str(o, "t", ""), "log"), Ui.recv(u, o))))
-
 # Desks
 # -----
 # The window and the web page (never a phone) tell the hub which thread
@@ -8985,10 +8936,6 @@ def Ui.desk.k(due: Bool, +u: Ui, +thread: String, +focused: Bool, +now: Nat) -> 
       Ui.rpc(Ui.scratch_set(Ui.scratch_set(u, "@desk", DK.Desk.said(thread, focused)), "@desk.at", Nat.show(now)), "desk.look", DK.Desk.params(thread, focused))
     case False{}:
       Act{u, Nil{}}
-
-# a desk's host calls this after its input, focus changes and messages
-def Ui.desk(+u: Ui, +focused: Bool, +now: Nat) -> Act:
-  Ui.desk.k(DK.Desk.due(Ui.scratch(u, "@desk"), Ui.scratch(u, "@desk.at"), Ui.sel(u), focused, now), u, Ui.sel(u), focused, now)
 
 # a new connection to a hub (the window's link): the desk says its look again
 def Ui.desk.reset(u: Ui) -> Ui:
@@ -9654,7 +9601,7 @@ def Ec.make(+tr: Map<&2, VT.Vt>, +st: M.State, +th: String, +now: Nat) -> Ec:
 def Ec.of(+u: Ui, +th: String) -> Ec:
   match u:
     case Ui{+st, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, +tr}:
-      Ec.make(tr, st, th, Side.now(u))
+      Ec.make(MailvLocal.terms(tr), st, th, Side.now(u))
 
 def Ec.vt(+ec: Ec, +key: String) -> VT.Vt:
   match ec:
@@ -9681,7 +9628,7 @@ def Ec.pins(+ec: Ec, +st: M.State, +th: String) -> List<&2, EM.EV>:
 def Emb.has(+u: Ui, +key: String) -> Bool:
   match u:
     case Ui{_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, tr}:
-      Emb.has.k(Map.has(&2, VT.Vt, tr, key))
+      Emb.has.k(Map.has(&2, VT.Vt, MailvLocal.terms(tr), key))
 
 def Emb.views.k(is_t: Bool, +s: M.State, +e: M.Entry, +last: Nat, +now: Nat, rest: List<&2, EM.EV>) -> List<&2, EM.EV>:
   match is_t:
@@ -9742,26 +9689,6 @@ def Emb.sync.if(i: Nat, a: Act) -> Act:
       Emb.sync(a)
     case _:
       a
-
-# a desktop notification ({"t":"notify"}, sent only to a desk)
-def Ui.recv_act.n(notify: Bool, u: Ui, +o: J.Json) -> Act:
-  match notify:
-    case True{}:
-      Act{u, [Notify{J.Json.get_str(o, "thread", ""), J.Json.get_str(o, "title", ""), J.Json.get_str(o, "body", ""), J.Json.get_str(o, "key", "")}]}
-    case False{}:
-      Emb.sync.if(C.Codec.pos(["log", "changes", "view"], J.Json.get_str(o, "t", "")), Fab.sync(Mpage.sync(Ui.recv_act.go(u, o))))
-
-# a frame of a page ({"t":"shot","bot":page,"n":n}) where the client keeps
-# it (the phones): its number as info "shot.<page>", seen when on show
-def Ui.recv_act.s(shot: Bool, u: Ui, +o: J.Json) -> Act:
-  match shot:
-    case True{}:
-      Ui.cast.seen(Ui.info_set(u, "shot." ++ J.Json.get_str(o, "bot", ""), J.Json.as_raw(J.Json.get(o, "n"), "0")), J.Json.get_str(o, "bot", ""))
-    case False{}:
-      Ui.recv_act.n(String.eq(J.Json.get_str(o, "t", ""), "notify"), u, o)
-
-def Ui.recv_act(u: Ui, +o: J.Json) -> Act:
-  Ui.recv_act.s(String.eq(J.Json.get_str(o, "t", ""), "shot"), u, o)
 
 # after an action that chose another thread
 def Emb.sync.sel.k(moved: Bool, a: Act) -> Act:
@@ -10943,9 +10870,6 @@ def Lang.dispatch(k: Nat, +u: Ui, +action: String, +value: String) -> Act:
     case 1n: Lang.act(1n, u, value)
     case _: Rc.sync.of(Ui.act.hold(String.starts_with(action, "hold-"), u, action, value))
 
-def Ui.act(+u: Ui, +action: String, +value: String) -> Act:
-  Ui.cast.now(u, Lang.dispatch(C.Codec.pos(["lang", "lang-os"], action), u, action, value))
-
 # the newest n of a list (oldest first), and how many are left out
 type Win is Data:
   Win{hidden: Nat, shown: List<&2, M.Entry>}
@@ -11082,6 +11006,15 @@ def Page.since(s: M.State, +th: String) -> Nat:
 def Link.from.or(+msg: String) -> List<&2, String>:
   Bool.pick(List<&2, String>, String.is_empty(M.Link.from(msg)), Nil{}, [M.Link.from(msg)])
 
+# A setting touches all; it may change whose parent or child a thread is
+# ("!", the window's MM.Mm.rels) only when it is a launch's: Mm.rels.of
+# reads the tasks (U.Tasks.up, U.Tasks.of: TaskDelegated, which touches
+# both ends), the launcher of a thread ("launch.<id>", M.Launch.by) and a
+# launcher's list ("launched.<by>", M.Launch.of), the settings
+# ThreadLaunched writes (it touches both ends too) and a SettingSet may
+def Touch.setting(+key: String) -> List<&2, String>:
+  Bool.pick(List<&2, String>, Bool.or(String.starts_with(key, "launch."), String.starts_with(key, "launched.")), ["*", "!"], ["*"])
+
 def Touch.raw(c: M.Change) -> List<&2, String>:
   match c:
     case M.ProjectCreated{_, _, _, _}:
@@ -11122,8 +11055,8 @@ def Touch.raw(c: M.Change) -> List<&2, String>:
       ["*"]
     case M.TaskDelivered{_, _}:
       ["*"]
-    case M.SettingSet{_, _, _}:
-      ["*", "!"]
+    case M.SettingSet{+key, _, _}:
+      Touch.setting(key)
     case M.TurnQueued{+thread, _, _, _}:
       [thread]
     case M.QueueTaken{+thread, _}:
@@ -11277,3 +11210,708 @@ def CefUI.strip(+u: Ui, +id: String) -> String:
 
 def CefUI.strip_on(+u: Ui, +id: String) -> Bool:
   CF.Cef.strip_on(Ui.info(u, "browser.engine.live"), Teach.drive(u, id))
+
+# ---- global fallback Settings: shared row model for every client ----
+def Fallbackv.state(u: Ui) -> M.State:
+  Ui.state.of(u)
+
+def Fallbackv.chain(u: Ui) -> List<&2, FB.Target>:
+  FB.Chain.of(Ui.state.of(u))
+
+def Fallbackv.btn(label: String, value: String) -> AgBtn:
+  AgBtn{label, "setting", value, False{}}
+
+def Fallbackv.order(xs: List<&2, FB.Target>, +all: List<&2, FB.Target>, +caps: J.Json, +s: M.State, +n: Nat) -> List<&2, AgRow>:
+  match xs:
+    case Nil{}: Nil{}
+    case +h <> t:
+      +key = FB.Target.key(h)
+      AgRow{Nat.show(n) ++ ". " ++ key, Bool.pick(String, FB.Caps.valid(caps, h), "", "Unavailable on this machine. Skipped during fallback."), Nil{},
+        [Fallbackv.btn("Move up", "fallback.chain=" ++ FB.Chain.show(FB.Chain.up(all, key))),
+         Fallbackv.btn("Move down", "fallback.chain=" ++ FB.Chain.show(List.reverse(&2, FB.Target, FB.Chain.up(List.reverse(&2, FB.Target, all), key)))),
+         Fallbackv.btn("Remove", "fallback.chain=" ++ FB.Chain.show(FB.Chain.remove(all, key)))]} <> Fallbackv.order(t, all, caps, s, 1n+n)
+
+def Fallbackv.provider.k(missing: Bool, +p: String, +cur: String, rest: List<&2, AgBtn>) -> List<&2, AgBtn>:
+  match missing:
+    case True{}: rest
+    case False{}: AgBtn{p, "setting", "fallback.add.provider=" ++ p, String.eq(p, cur)} <> rest
+
+def Fallbackv.providers(ps: List<&2, String>, +caps: J.Json, +cur: String) -> List<&2, AgBtn>:
+  match ps:
+    case Nil{}: Nil{}
+    case +p <> t:
+      Fallbackv.provider.k(List.is_empty(&2, J.Json, J.Json.elems(J.Json.get_obj(caps, p))), p, cur, Fallbackv.providers(t, caps, cur))
+
+def Fallbackv.models(xs: List<&2, String>, +cur: String) -> List<&2, AgBtn>:
+  match xs:
+    case Nil{}: Nil{}
+    case +m <> t: AgBtn{m, "setting", "fallback.add.model=" ++ m, String.eq(m, cur)} <> Fallbackv.models(t, cur)
+
+def Fallbackv.add.k(valid: Bool, +all: List<&2, FB.Target>, target: FB.Target) -> List<&2, AgBtn>:
+  match valid:
+    case False{}: Nil{}
+    case True{}: [Fallbackv.btn("Add to hierarchy", "fallback.chain=" ++ FB.Chain.show(List.append(&2, FB.Target, all, [target])))]
+
+def Fallbackv.add(+u: Ui, +caps: J.Json) -> List<&2, AgRow>:
+  +s = Ui.state.of(u)
+  +p = M.Setting.get(s, "fallback.add.provider", "codex")
+  +m = M.Setting.get(s, "fallback.add.model", "gpt-6.1-sol")
+  +target = {FB.Target{p, m} : FB.Target}
+  [AgRow{"Add a provider", "Choose an installed provider and model, then add it to the end.", Nil{}, Fallbackv.providers(["claude", "codex", "grok", "muse", "antigravity"], caps, p)},
+   AgRow{"Add a model", "Only installed models can be saved. Duplicate entries are not allowed.", Nil{}, Fallbackv.models(Models.list(Ui.info(u, "models"), p), m)},
+   AgRow{FB.Target.key(target), "", Nil{}, Fallbackv.add.k(Bool.and(FB.Caps.valid(caps, target), Bool.not(FB.Chain.has(Fallbackv.chain(u), FB.Target.key(target)))), Fallbackv.chain(u), target)}]
+
+def Fallbackv.outage.one(held: Bool, +scope: String, +o: J.Json) -> List<&2, AgRow>:
+  match held:
+    case False{}: Nil{}
+    case True{}: [AgRow{"Unavailable: " ++ scope, J.Json.get_str(o, "reason", "Usage limit") ++ Bool.pick(String, Nat.is_eq(J.Json.get_nat(o, "reset", 0n), 0n), ". No reset supplied; held until you clear it.", ". Eligible again after the provider's reported reset."), Nil{}, [Fallbackv.btn("Clear availability hold", "fallback.outage." ++ scope ++ "=")]}]
+
+def Fallbackv.outages(xs: List<&2, String>, +s: M.State, +now: Nat) -> List<&2, AgRow>:
+  match xs:
+    case Nil{}: Nil{}
+    case +sc <> rest: List.append(&2, AgRow, Fallbackv.outage.one(FB.Limit.active(s, sc, now), sc, FB.Limit.record(s, sc)), Fallbackv.outages(rest, s, now))
+
+def Fallbackv.scopes(xs: List<&2, FB.Target>) -> List<&2, String>:
+  match xs:
+    case Nil{}: Nil{}
+    case h <> t: FB.Target.key(h) <> Fallbackv.scopes(t)
+
+def Fallbackv.rows(+u: Ui) -> List<&2, AgRow>:
+  +s = Ui.state.of(u)
+  +caps = Maybe.default(&2, J.Json, J.Json.parse(Ui.info(u, "models")), J.Null{})
+  +all = Fallbackv.chain(u)
+  List.concat(&2, AgRow, [[AgRow{"Fallback hierarchy", "Applies to all threads and bots, including delegates, routines and mail runs. Your chosen model runs first. At a confirmed usage limit, try entries after it; if it is absent, start at the top. Never wrap or switch working threads back. Login and network failures do not change provider.", Nil{},
+    [AgBtn{"Enabled", "setting", "fallback.on=on", FB.Chain.on(s)}, AgBtn{"Disabled", "setting", "fallback.on=off", Bool.not(FB.Chain.on(s))}]}],
+    Fallbackv.order(all, all, caps, s, 1n), Fallbackv.add(u, caps),
+    [AgRow{"Fallback notifications", "One alert per outage, with an audit row in each affected thread. If the whole chain is unavailable, work pauses and asks for attention. A limit without a reset stays held until cleared here.", Nil{}, Nil{}}],
+    Fallbackv.outages(List.append(&2, String, ["claude", "codex", "grok", "muse", "antigravity"], Fallbackv.scopes(all)), s, Side.now(u))])
+
+def Mailv.put(u: Ui, m: MailvData) -> Ui:
+  match u:
+    case Ui{st, sel, dr, lv, op, on, now, ad, pa, v, rid, w, er, no, nf, ob, MailvLocal{ts, _}}:
+      Ui{st, sel, dr, lv, op, on, now, ad, pa, v, rid, w, er, no, nf, ob, MailvLocal{ts, [m]}}
+
+def Mailv.cache.of(m: MailvData) -> MV.Cache:
+  match m:
+    case MailvData{c, _, _, _, _, _, _}: c
+
+def Mailv.find.of(m: MailvData) -> MV.Find:
+  match m:
+    case MailvData{_, f, _, _, _, _, _}: f
+
+def Mailv.bubbles.of(m: MailvData) -> List<&2, MV.Bub>:
+  match m:
+    case MailvData{_, _, b, _, _, _, _}: b
+
+def Mailv.targets.of(m: MailvData) -> List<&2, MV.Opt>:
+  match m:
+    case MailvData{_, _, _, t, _, _, _}: t
+
+def Mailv.rev.of(m: MailvData) -> Nat:
+  match m:
+    case MailvData{_, _, _, _, r, _, _}: r
+
+def Mailv.touch.of(m: MailvData) -> Nat:
+  match m:
+    case MailvData{_, _, _, _, _, t, _}: t
+
+def Mailv.owner.thread(b: Maybe<&2, BT.Bot>) -> String:
+  match b:
+    case Some{x}: BT.Bot.id(x)
+    case None{}: ""
+
+def Mailv.owner.explicit(empty: Bool, +u: Ui) -> String:
+  match empty:
+    case False{}: Ui.scratch(u, "@bot")
+    case True{}: Mailv.owner.thread(BT.World.of_thread(M.State.bots(Ui.state(u)), Ui.sel(u)))
+
+def Mailv.owner(+u: Ui) -> String:
+  Mailv.owner.explicit(String.is_empty(Ui.scratch(u, "@bot")), u)
+
+def Mailv.base(+u: Ui) -> String:
+  Bool.pick(String, UB.Uber.is(Ui.state(u), Mailv.owner(u)), "*", Mailv.owner(u))
+
+def Mailv.bot(+u: Ui) -> String:
+  Bool.pick(String, Bool.and(UB.Uber.is(Ui.state(u), Mailv.owner(u)), Bool.not(String.is_empty(Ui.scratch(u, "@mr.bot")))), Ui.scratch(u, "@mr.bot"), Mailv.base(u))
+
+def Mailv.tab(+u: Ui) -> String:
+  Bool.pick(String, String.is_empty(Ui.scratch(u, "@btab")), Bool.pick(String, UB.Uber.is(Ui.state(u), Mailv.owner(u)), "mail", "chat"), Ui.scratch(u, "@btab"))
+
+# Capability supplied only by a client with a Mailroom renderer.
+def Mailv.enabled(+u: Ui) -> Bool:
+  String.eq(Ui.info(u, "local.mailroom"), "on")
+
+def Mailv.shown(+u: Ui) -> Bool:
+  Bool.and(Mailv.enabled(u), Bool.and(Bool.not(Ui.flag(u, "settings")), Bool.and(Bool.not(String.is_empty(Mailv.owner(u))), Bool.and(Bool.not(FR.Fr.is(Mailv.owner(u))), String.eq(Mailv.tab(u), "mail")))))
+
+def Mailv.filter(+u: Ui) -> MV.Filter:
+  MV.Filter{Mailv.bot(u), Ui.scratch(u, "@mr.status"), Ui.scratch(u, "@mr.project"), Ui.scratch(u, "@f.mrsearch")}
+
+def Mailv.key(+u: Ui) -> String:
+  MV.Mv.key(Mailv.filter(u))
+
+def Mailv.scroll(+u: Ui) -> Nat:
+  M.Switch.num(Ui.info(u, "pane:mr"), 0n)
+
+def Mailv.skip(+u: Ui) -> Nat:
+  Nat.mul(Nat.div(Nat.sub(Mailv.scroll(u), 2n), 50n), 50n)
+
+def Mailv.token(+u: Ui) -> String:
+  Mailv.key(u) ++ "/" ++ Nat.show(Mailv.skip(u)) ++ "/" ++ Ui.scratch(u, "@mr.dirty")
+
+def Mailv.badge(+u: Ui, +id: String) -> MV.Badge:
+  MV.Mv.badge.n(id, Bool.pick(Nat, UB.Uber.is(Ui.state(u), id), ML.Box.unread_all(M.State.mail(Ui.state(u))), ML.Box.unread(M.State.mail(Ui.state(u)), id)))
+
+def Mailv.run_open(u: Ui) -> Bool:
+  String.eq(Ui.scratch(u, "@mr.run"), "1")
+
+# A chip is a view edit, never a bot navigation action.
+def Mailv.chip(+u: Ui, +v: String) -> Ui:
+  Ui.info_set(Ui.scratch_set(u, "@mr.bot", v), "pane:mr", "0")
+
+def Mailv.change_conv(c: M.Change) -> String:
+  match c:
+    case M.ConvSet{i, _, _, _, _, _, _}: i
+    case M.MailPosted{_, i, _, _, _, _, _, _, _, _}: i
+    case M.MailMarked{_, i, _, _, _, _}: i
+    case M.MailTagged{_, i, _, _}: i
+    case M.RunSet{_, _, i, _, _}: i
+    case M.DecisionLogged{_, _, i, _, _, _, _}: i
+    case _: ""
+
+def Mailv.bump(m: MailvData) -> MailvData:
+  match m:
+    case MailvData{c, f, b, t, r, n, ix}: MailvData{c, f, b, t, r, 1n+n, ix}
+
+# Non-durable reads are rate limited separately from durable sends/marks.
+# A reply retains the exact filter, page and touch it was requested for.
+def Mailv.request(+u: Ui, +method: String, +params: List<&2, J.KV>, +slot: String, +tag: String) -> Act:
+  Ui.rpc(Ui.scratch_set(Ui.scratch_set(u, "@mr.req:" ++ Nat.show(Ui.rid(u)), J.Json.show(J.Json.obj([J.KV{"m", J.Str{method}}, J.KV{"p", J.Json.obj(params)}, J.KV{"slot", J.Str{slot}}, J.KV{"tag", J.Str{tag}}]))), "@mr." ++ slot, Nat.show(Ui.rid(u))), method, params)
+
+def Mailv.before.msg(m: MV.Msg) -> String:
+  match m:
+    case MV.Msg{i, _, _, _, _, _, _}: i
+
+def Mailv.before.opt(m: Maybe<&2, MV.Msg>) -> String:
+  match m:
+    case Some{x}: Mailv.before.msg(x)
+    case None{}: ""
+
+def Mailv.read(+u: Ui, +before: String) -> Act:
+  Mailv.request(Ui.scratch_set(u, "@mr.read.dirty", ""), "mail.read", [J.KV{"bot", J.Str{Mailv.bot(u)}}, J.KV{"conv", J.Str{Ui.scratch(u, "@mr.conv")}}, J.KV{"before", J.Str{before}}, J.KV{"n", J.Json.nat(50n)}], "read", Ui.scratch(u, "@mr.conv"))
+
+def Mailv.search.set(m: MailvData, f: MV.Find) -> MailvData:
+  match m:
+    case MailvData{c, _, b, t, r, n, ix}: MailvData{c, f, b, t, 1n+r, n, ix}
+
+def Mailv.live_targets(rs: List<&2, ML.Run>, +conv: String) -> List<&2, String>:
+  match rs:
+    case Nil{}: Nil{}
+    case +r <> t:
+      MV.Mv.cons_if(Bool.and(ML.Run.live(r), String.eq(ML.Run.conv(r), conv)), "thread:" ++ ML.Run.thread(r), Mailv.live_targets(t, conv))
+
+def Mailv.read.put(+m: MailvData, +c: MV.Cache, +conv: String, +names: Map<&2, String>, +live: List<&2, String>) -> MailvData:
+  match m:
+    case MailvData{_, f, _, _, r, n, ix}:
+      MailvData{c, f, MV.Mv.bubbles(MV.Mv.read_of(c, conv), names), MV.Mv.targets(MV.Read.parts(MV.Mv.read_of(c, conv)), live, names), 1n+r, n, ix}
+
+def Mailv.list.put(m: MailvData, c: MV.Cache) -> MailvData:
+  match m:
+    case MailvData{_, f, b, t, r, n, ix}: MailvData{c, f, b, t, 1n+r, n, ix}
+
+def Mailv.filter.kind(bot: Bool, project: Bool, machine: Bool, +u: Ui, +v: String) -> Ui:
+  match bot project machine:
+    case True{} _ _: Mailv.chip(u, String.drop(v, 4n))
+    case False{} True{} _: Ui.scratch_set(u, "@mr.project", String.drop(v, 8n))
+    case False{} False{} True{}: Ui.scratch_set(u, "@mr.machine", String.drop(v, 8n))
+    case False{} False{} False{}:
+      Ui.scratch_set(u, "@mr.status", Bool.pick(String, String.eq(Ui.scratch(u, "@mr.status"), v), "", v))
+
+def Mailv.filter.at(i: Nat, +u: Ui, +v: String) -> Ui:
+  match i:
+    case 0n: Mailv.chip(u, String.drop(v, 4n))
+    case _:
+      Mailv.filter.kind(String.starts_with(v, "bot="), String.starts_with(v, "project="), String.starts_with(v, "machine="), u, v)
+
+def Mailv.filter.set(+u: Ui, +v: String) -> Ui:
+  Ui.info_set(Mailv.filter.at(C.Codec.pos(["bot", "project", "machine"], String.take(v, 3n)), u, v), "pane:mr", "0")
+
+def Mailv.send.ok(ok: Bool, +u: Ui, +to: String, +text: String) -> Act:
+  match ok:
+    case False{}: Act{u, Nil{}}
+    case True{}:
+      Ui.rpc.keep(Ui.scratch_set(u, "@f.mrreply", ""), "mail.send", [J.KV{"conv", J.Str{Ui.scratch(u, "@mr.conv")}}, J.KV{"to", J.Str{to}}, J.KV{"text", J.Str{text}}, J.KV{"want", J.Str{"act"}}])
+
+# Reading marks a conversation, but a mark must never trigger another
+# read. Only a newly filed body refreshes the open conversation.
+def Mailv.see.body(c: M.Change, +u: Ui) -> Ui:
+  match c:
+    case M.MailPosted{_, +conv, _, _, _, _, _, _, _, _}:
+      Ui.scratch_set(u, "@mr.read.dirty", Bool.pick(String, String.eq(Ui.scratch(u, "@mr.conv"), conv), "1", Ui.scratch(u, "@mr.read.dirty")))
+    case _: u
+
+def Mailv.status_rpc(+status: String) -> String:
+  Bool.pick(String, Nat.is_lt(C.Codec.pos(["unread", "open", "snoozed", "done"], status), 4n), status, "")
+
+def Mailv.list(+u: Ui) -> Act:
+  Mailv.request(u, "mail.list", [J.KV{"bot", J.Str{Mailv.bot(u)}}, J.KV{"status", J.Str{Mailv.status_rpc(Ui.scratch(u, "@mr.status"))}}, J.KV{"project", J.Str{Ui.scratch(u, "@mr.project")}}, J.KV{"view_status", J.Str{Ui.scratch(u, "@mr.status")}}, J.KV{"skip", J.Json.nat(Mailv.skip(u))}, J.KV{"n", J.Json.nat(100n)}], "list", Mailv.token(u))
+
+def Mailv.join(on: Bool, u: Ui) -> Ui:
+  match on:
+    case False{}: u
+    case True{}:
+      Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(u, "@mr.list", ""), "@mr.read", ""), "@mr.find", ""), "@mr.loaded", ""), "@mr.qkey", "")
+
+# Act/FYI are absent from the 2b list RPC's status enum. A small derived
+# order per bot/project is maintained while folding headers, never while
+# laying out. The ordinary MV page cache still owns every displayed row.
+def Mailv.index.empty() -> MailvIndex:
+  MailvIndex{Map.new(&2, ML.Order), Map.new(&2, ML.Conv), Map.new(&2, Nat)}
+
+# ---- mail ui ----
+# Parsed pages, search hits and grouped bubbles live in the typed Ui stores.
+# @mr.* are small view/request identities only. No JSON is read by layout.
+def Mailv.empty() -> MailvData:
+  MailvData{MV.Mv.cache(), MV.Mv.found(), Nil{}, Nil{}, 0n, 0n, Mailv.index.empty()}
+
+def Mailv.first(xs: List<&2, MailvData>) -> MailvData:
+  match xs:
+    case Nil{}: Mailv.empty()
+    case x <> _: x
+
+def Mailv.data(u: Ui) -> MailvData:
+  match u:
+    case Ui{_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, MailvLocal{_, m}}: Mailv.first(m)
+
+def Mailv.cache(u: Ui) -> MV.Cache:
+  match u:
+    case Ui{_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, MailvLocal{_, m}}: Mailv.cache.of(Mailv.first(m))
+
+def Mailv.find(u: Ui) -> MV.Find:
+  Mailv.find.of(Mailv.data(u))
+
+def Mailv.bubbles(u: Ui) -> List<&2, MV.Bub>:
+  Mailv.bubbles.of(Mailv.data(u))
+
+def Mailv.targets(u: Ui) -> List<&2, MV.Opt>:
+  Mailv.targets.of(Mailv.data(u))
+
+def Mailv.rev(u: Ui) -> Nat:
+  Mailv.rev.of(Mailv.data(u))
+
+def Mailv.touch(u: Ui) -> Nat:
+  Mailv.touch.of(Mailv.data(u))
+
+def Mailv.see.k(affected: Bool, +u: Ui, +conv: String) -> Ui:
+  match affected:
+    case False{}: u
+    case True{}:
+      Ui.scratch_set(u, "@mr.dirty", Nat.show(Mailv.touch(u)))
+
+def Mailv.see.mail(yes: Bool, +u: Ui, +conv: String) -> Ui:
+  match yes:
+    case False{}: u
+    case True{}:
+      Mailv.see.k(Bool.or(String.eq(Mailv.bot(u), "*"), ML.Parts.has(ML.Conv.parts(ML.Box.conv(M.State.mail(Ui.state(u)), conv)), "bot:" ++ Mailv.bot(u), False{})), Mailv.put(u, Mailv.bump(Mailv.data(u))), conv)
+
+def Mailv.before(+u: Ui) -> String:
+  Mailv.before.opt(List.head(&2, MV.Msg, Map.values(&2, MV.Msg, MV.Read.msgs(MV.Mv.read_of(Mailv.cache(u), Ui.scratch(u, "@mr.conv"))))))
+
+def Mailv.found(+u: Ui, +q: String, +result: J.Json) -> Ui:
+  Mailv.put(u, Mailv.search.set(Mailv.data(u), MV.Find{q, MV.Mv.merge_hits(MV.Find.hits(Mailv.find(u)), MV.Mv.parse(result, "person", ML.Box.names(M.State.mail(Ui.state(u))))), False{}}))
+
+def Mailv.reply.find(same: Bool, +u: Ui, +q: String, +res: J.Json) -> Ui:
+  match same:
+    case True{}: Mailv.found(u, q, res)
+    case False{}: u
+
+def Mailv.index.of(m: MailvData) -> MailvIndex:
+  match m:
+    case MailvData{_, _, _, _, _, _, ix}: ix
+
+def Mailv.index(u: Ui) -> MailvIndex:
+  Mailv.index.of(Mailv.data(u))
+
+def Mailv.index.set(m: MailvData, ix: MailvIndex) -> MailvData:
+  match m:
+    case MailvData{c, f, b, t, r, n, _}: MailvData{c, f, b, t, r, n, ix}
+
+def Mailv.index.key(+bot: String, +want: String, +project: String) -> String:
+  Nat.show(String.length(bot)) ++ ":" ++ bot ++ want ++ ":" ++ project
+
+def Mailv.index.orders(ix: MailvIndex) -> Map<&2, ML.Order>:
+  match ix:
+    case MailvIndex{os, _, _}: os
+
+def Mailv.index.order(+ix: MailvIndex, +key: String) -> ML.Order:
+  ML.Box.order_got(Map.get(ML.Order, ML.OEmpty{}, Mailv.index.orders(ix), key))
+
+def Mailv.index.old(ix: MailvIndex, +id: String) -> ML.Conv:
+  match ix:
+    case MailvIndex{_, old, _}: ML.Get.conv.got(Map.get(ML.Conv, ML.Conv.empty(), old, id))
+
+def Mailv.index.act(ix: MailvIndex) -> Map<&2, Nat>:
+  match ix:
+    case MailvIndex{_, _, act}: act
+
+def Mailv.act_unread(+u: Ui) -> Nat:
+  ML.Get.nat(Mailv.index.act(Mailv.index(u)), "total")
+
+def Mailv.index.tree(yes: Bool, +ix: MailvIndex, +key: String, +old: ML.Conv, +cv: ML.Conv) -> MailvIndex:
+  match yes ix:
+    case False{} MailvIndex{+os, cs, ns}:
+      MailvIndex{Map.set(&2, ML.Order, os, key, ML.Order.drop(ML.Box.order_got(Map.get(ML.Order, ML.OEmpty{}, os, key)), ML.Conv.last(old), ML.Conv.id(cv))), cs, ns}
+    case True{} MailvIndex{+os, cs, ns}:
+      MailvIndex{Map.set(&2, ML.Order, os, key, ML.Order.put(ML.Order.drop(ML.Box.order_got(Map.get(ML.Order, ML.OEmpty{}, os, key)), ML.Conv.last(old), ML.Conv.id(cv)), ML.Conv.last(cv), ML.Conv.id(cv))), cs, ns}
+
+def Mailv.index.pair(+ix: MailvIndex, +bot: String, +project: String, +want: String, +old: ML.Conv, +cv: ML.Conv) -> MailvIndex:
+  Mailv.index.tree(String.eq(want, "fyi"), Mailv.index.tree(String.eq(want, "act"), ix, Mailv.index.key(bot, "act", project), old, cv), Mailv.index.key(bot, "fyi", project), old, cv)
+
+def Mailv.index.count.put(ix: MailvIndex, ns: Map<&2, Nat>) -> MailvIndex:
+  match ix:
+    case MailvIndex{os, cs, _}: MailvIndex{os, cs, ns}
+
+def Mailv.index.count(+ix: MailvIndex, +bot: String, +box: ML.Box, +cv: ML.Conv) -> MailvIndex:
+  +ns = Mailv.index.act(ix)
+  +key = "conv:" ++ Nat.show(String.length(bot)) ++ ":" ++ bot ++ ML.Conv.id(cv)
+  +was = ML.Get.nat(ns, key)
+  +now = Bool.pick(Nat, Bool.and(String.eq(ML.Mark.status(ML.Box.mark_of(box, bot, ML.Conv.id(cv))), "unread"), Bool.or(Nat.is_gt(was, 0n), String.eq(ML.Mail.wanted(ML.Box.newest(box, ML.Conv.id(cv))), "act"))), 1n, 0n)
+  Mailv.index.count.put(ix, Map.set(&2, Nat, Map.set(&2, Nat, Map.set(&2, Nat, ns, key, now), "bot:" ++ bot, Nat.add(Nat.sub(ML.Get.nat(ns, "bot:" ++ bot), was), now)), "total", Nat.add(Nat.sub(ML.Get.nat(ns, "total"), was), now)))
+
+def Mailv.index.finish(ix: MailvIndex, +cv: ML.Conv) -> MailvIndex:
+  match ix:
+    case MailvIndex{os, cs, ns}: MailvIndex{os, Map.set(&2, ML.Conv, cs, ML.Conv.id(cv), cv), ns}
+
+def Mailv.index.merge_status(+a: String, +b: String) -> String:
+  Bool.pick(String, Bool.or(String.eq(a, "unread"), String.eq(b, "unread")), "unread", Bool.pick(String, Bool.or(String.eq(a, "snoozed"), String.eq(b, "snoozed")), "snoozed", Bool.pick(String, Bool.or(String.eq(a, "open"), String.eq(b, "open")), "open", "done")))
+
+# Aggregate marks for All mail: one unread participant makes it unread.
+def Mailv.index.aggregate(ps: List<&2, String>, +box: ML.Box, +id: String, +status: String) -> String:
+  match ps:
+    case Nil{}: status
+    case +p <> t:
+      Mailv.index.aggregate(t, box, id, Mailv.index.merge_status(status, ML.Mark.status(ML.Box.mark_of(box, String.drop(p, 4n), id))))
+
+def Mailv.index.status(+ix: MailvIndex, +bot: String, +project: String, +status: String, +old: ML.Conv, +cv: ML.Conv) -> MailvIndex:
+  Mailv.index.tree(String.eq(status, "done"), Mailv.index.tree(String.eq(status, "snoozed"), Mailv.index.tree(String.eq(status, "unread"), ix, Mailv.index.key(bot, "unread", project), old, cv), Mailv.index.key(bot, "snoozed", project), old, cv), Mailv.index.key(bot, "done", project), old, cv)
+
+def Mailv.index.markorders(+ix: MailvIndex, +bot: String, +box: ML.Box, +old: ML.Conv, +cv: ML.Conv) -> MailvIndex:
+  +status = Bool.pick(String, String.eq(bot, "*"), Mailv.index.aggregate(ML.Conv.parts(cv), box, ML.Conv.id(cv), "done"), ML.Mark.status(ML.Box.mark_of(box, bot, ML.Conv.id(cv))))
+  Mailv.index.tree(True{}, Mailv.index.tree(True{}, Mailv.index.status(Mailv.index.status(ix, bot, "", status, old, cv), bot, ML.Conv.project(cv), status, old, cv), Mailv.index.key(bot, "", ""), old, cv), Mailv.index.key(bot, "", ML.Conv.project(cv)), old, cv)
+
+def Mailv.index.bot(+ix: MailvIndex, +bot: String, +box: ML.Box, +old: ML.Conv, +cv: ML.Conv) -> MailvIndex:
+  +want = ML.Mail.wanted(ML.Box.newest(box, ML.Conv.id(cv)))
+  Mailv.index.count(Mailv.index.markorders(Mailv.index.pair(Mailv.index.pair(ix, bot, "", want, old, cv), bot, ML.Conv.project(cv), want, old, cv), bot, box, old, cv), bot, box, cv)
+
+def Mailv.index.part(bot: Bool, ix: MailvIndex, +addr: String, +box: ML.Box, +old: ML.Conv, +cv: ML.Conv) -> MailvIndex:
+  match bot:
+    case False{}: ix
+    case True{}: Mailv.index.bot(ix, String.drop(addr, 4n), box, old, cv)
+
+def Mailv.index.parts(ps: List<&2, String>, ix: MailvIndex, +box: ML.Box, +old: ML.Conv, +cv: ML.Conv) -> MailvIndex:
+  match ps:
+    case Nil{}: ix
+    case +p <> t:
+      Mailv.index.parts(t, Mailv.index.part(String.starts_with(p, "bot:"), ix, p, box, old, cv), box, old, cv)
+
+def Mailv.index.conv(+u: Ui, +id: String) -> Ui:
+  +ix = Mailv.index(u)
+  +box = M.State.mail(Ui.state(u))
+  +cv = ML.Box.conv(box, id)
+  +old = Mailv.index.old(ix, id)
+  +want = ML.Mail.wanted(ML.Box.newest(box, id))
+  Mailv.put(u, Mailv.index.set(Mailv.data(u), Mailv.index.finish(Mailv.index.parts(ML.Conv.parts(cv), Mailv.index.markorders(Mailv.index.pair(Mailv.index.pair(ix, "*", "", want, old, cv), "*", ML.Conv.project(cv), want, old, cv), "*", box, old, cv), box, old, cv), cv)))
+
+def Mailv.index.update(c: M.Change, u: Ui) -> Ui:
+  match c:
+    case M.ConvSet{+id, _, _, _, _, _, _}: Mailv.index.conv(u, id)
+    case M.MailPosted{_, +id, _, _, _, _, _, _, _, _}: Mailv.index.conv(u, id)
+    case M.MailMarked{_, +id, _, _, _, _}: Mailv.index.conv(u, id)
+    case M.MailTagged{_, +id, _, _}: Mailv.index.conv(u, id)
+    case _: u
+
+# Only state that Plane draws changes this stamp. Mail-only arrivals
+# cannot cause another walk of every thread to rebuild PW/@plane.
+def Mailv.plane_event(c: M.Change) -> Bool:
+  match c:
+    case M.ConvSet{_, _, _, _, _, _, _}: False{}
+    case M.MailPosted{_, _, _, _, _, _, _, _, _, _}: False{}
+    case M.MailMarked{_, _, _, _, _, _}: False{}
+    case M.MailTagged{_, _, _, _}: False{}
+    case M.MessageFrom{_, _, _, _, _, _}: False{}
+    case M.CharterSet{_, _, _, _}: False{}
+    case M.DecisionLogged{_, _, _, _, _, _, _}: False{}
+    case _: True{}
+
+def Mailv.plane_seen(on: Bool, +u: Ui) -> Ui:
+  match on:
+    case False{}: u
+    case True{}: Ui.scratch_set(u, "@mr.plane", Nat.show(Ui.seq(u)))
+
+# Durable origins have their own event after MessagePosted. They must
+# revise mail memos too, without invalidating the thread's timeline key.
+def Mailv.origin(c: M.Change, +u: Ui) -> Ui:
+  match c:
+    case M.MessageFrom{_, _, _, _, _, _}: Mailv.put(u, Mailv.bump(Mailv.data(u)))
+    case _: u
+
+def Mailv.see(+u: Ui, +c: M.Change) -> Ui:
+  Mailv.plane_seen(Mailv.plane_event(c), Mailv.origin(c, Mailv.index.update(c, Mailv.see.body(c, Mailv.see.mail(Bool.not(String.is_empty(Mailv.change_conv(c))), u, Mailv.change_conv(c))))))
+
+def Ui.fold(cs: List<&2, M.Change>, u: Ui) -> Ui:
+  match cs u:
+    case Nil{} _:
+      u
+    case +c <> t Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}:
+      Ui.fold(t, Mailv.see(Ui.see(Ui{M.State.apply(st, c), sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}, c), c))
+
+def Ui.fold.d(d: Decoded, u: Ui) -> Ui:
+  match d:
+    case Decoded{cs, n}:
+      Ui.skip(Ui.fold(List.reverse(&2, M.Change, cs), u), n)
+
+# a message's items folded in, the unreadable ones counted
+def Ui.fold.items(xs: List<&2, J.Json>, u: Ui) -> Ui:
+  Ui.fold.d(Ui.decode.all(xs, Decoded{Nil{}, 0n}), u)
+
+# the server's log on (re)connect: from nothing, or, when it says `since`
+# (the client already has that many changes), just what was missed; the
+# client's id survives the machine info being replaced
+# Full replay replaces the mail read model; a true same-origin resume
+# retains it. Terminal buffers follow their existing independent policy.
+def MailvLocal.reset(keep: Bool, m: MailvLocal) -> MailvLocal:
+  match keep m:
+    case True{} _: m
+    case False{} MailvLocal{terms, _}: MailvLocal{terms, Nil{}}
+
+def Ui.reset(u: Ui, +o: J.Json) -> Ui:
+  match u:
+    case Ui{st, sel, dr, live, op, _, now, ad, pa, _, rid, w, er, note, +nf, ob, tr}:
+      Ui.fold.items(J.Json.elems(J.Json.get_obj(o, "items")),
+        Ui{Ui.base(Nat.is_gt(J.Json.get_nat(o, "since", 0n), 0n), st), sel, Map.set(&2, String, Map.set(&2, String, dr, "@sync", "1"), "@fab.at", ""), live, op, True{}, now, ad, pa, J.Json.get_str(o, "version", ""), rid, w, er, note,
+          Machines.home(Ui.reset.keep(String.eq(J.Json.get_str(o, "origin", ""), Str.get(nf, "origin")), nf,
+            Local.keep(nf, Map.set(&2, String, Map.set(&2, String, Info.of(J.Json.get_obj(o, "info")), "cid", Str.get(nf, "cid")), "origin", J.Json.get_str(o, "origin", ""))))), ob, MailvLocal.reset(Bool.and(Nat.is_gt(J.Json.get_nat(o, "since", 0n), 0n), String.eq(J.Json.get_str(o, "origin", ""), Str.get(nf, "origin"))), tr)})
+
+def Ui.adopt_log(u: Ui, st: M.State, o: J.Json) -> Ui:
+  Ui.adopt(Ui.reset(u, o), st)
+
+def Mailv.header.status(+box: ML.Box, +bot: String, +cv: ML.Conv) -> String:
+  Bool.pick(String, String.eq(bot, "*"), Mailv.index.aggregate(ML.Conv.parts(cv), box, ML.Conv.id(cv), "done"), ML.Mark.status(ML.Box.mark_of(box, bot, ML.Conv.id(cv))))
+
+def Mailv.header(+id: String, +box: ML.Box, +bot: String) -> MV.Row:
+  +cv = ML.Box.conv(box, id)
+  +mail = ML.Box.newest(box, id)
+  MV.Mv.make(id, ML.Conv.subject(cv), MV.Mv.who(MV.Mv.labels(ML.Conv.parts(cv), "person", ML.Box.names(box))), ML.Mail.header(mail), ML.Conv.last(cv), String.eq(Mailv.header.status(box, bot, cv), "unread"), Mailv.header.status(box, bot, cv), ML.Conv.project(cv))
+
+def Mailv.headers(ids: List<&2, String>, +box: ML.Box, +bot: String) -> List<&2, MV.Row>:
+  match ids:
+    case Nil{}: Nil{}
+    case id <> t: Mailv.header(id, box, bot) <> Mailv.headers(t, box, bot)
+
+def Mailv.list.ordinary.row(missing: Bool, +r: MV.Row, +box: ML.Box, +bot: String) -> MV.Row:
+  match missing:
+    case True{}: r
+    case False{}: Mailv.header(MV.Row.id(r), box, bot)
+
+def Mailv.list.ordinary.rows(rs: List<&2, MV.Row>, +box: ML.Box, +bot: String) -> List<&2, MV.Row>:
+  match rs:
+    case Nil{}: Nil{}
+    case +r <> t:
+      Mailv.list.ordinary.row(String.is_empty(ML.Conv.id(ML.Box.conv(box, MV.Row.id(r)))), r, box, bot) <> Mailv.list.ordinary.rows(t, box, bot)
+
+def Mailv.list.ordinary(+u: Ui, +p: J.Json, +res: J.Json, +f: MV.Filter) -> MV.Cache:
+  MV.Mv.put_page(Mailv.cache(u), f, J.Json.get_nat(p, "skip", 0n), J.Json.get_nat(res, "total", 0n), Mailv.list.ordinary.rows(MV.Mv.parse(res, "person", ML.Box.names(M.State.mail(Ui.state(u)))), M.State.mail(Ui.state(u)), MV.Filter.bot(f)))
+
+def Mailv.index.kind(+status: String) -> String:
+  Bool.pick(String, Nat.is_lt(C.Codec.pos(["act", "fyi", "unread", "done", "snoozed"], status), 5n), status, "")
+
+def Mailv.list.result.if(local: Bool, +u: Ui, +p: J.Json, +res: J.Json, +f: MV.Filter) -> MV.Cache:
+  match local:
+    case False{}: Mailv.list.ordinary(u, p, res, f)
+    case True{}:
+      +order = Mailv.index.order(Mailv.index(u), Mailv.index.key(MV.Filter.bot(f), Mailv.index.kind(MV.Filter.status(f)), MV.Filter.project(f)))
+      MV.Mv.put_page(Mailv.cache(u), f, J.Json.get_nat(p, "skip", 0n), ML.Order.count(order), Mailv.headers(ML.Order.slice(order, J.Json.get_nat(p, "skip", 0n), 100n), M.State.mail(Ui.state(u)), MV.Filter.bot(f)))
+
+def Mailv.list.result(+u: Ui, +p: J.Json, +res: J.Json) -> MV.Cache:
+  +f = {MV.Filter{J.Json.get_str(p, "bot", "*"), J.Json.get_str(p, "view_status", J.Json.get_str(p, "status", "")), J.Json.get_str(p, "project", ""), ""} : MV.Filter}
+  Mailv.list.result.if(Bool.or(Bool.or(String.eq(MV.Filter.status(f), "act"), String.eq(MV.Filter.status(f), "fyi")), String.eq(MV.Filter.bot(f), "*")), u, p, res, f)
+
+def Mailv.local.previous(same: Bool, +u: Ui) -> MV.Find:
+  match same:
+    case True{}: Mailv.find(u)
+    case False{}: MV.Mv.found()
+
+def Mailv.search.local(+u: Ui) -> Ui:
+  Mailv.put(Ui.scratch_set(u, "@mr.local.key", Mailv.key(u)), Mailv.search.set(Mailv.data(u), MV.Mv.find_next(Mailv.local.previous(String.eq(Ui.scratch(u, "@mr.local.key"), Mailv.key(u)), u), Mailv.cache(u), Mailv.key(u), Ui.scratch(u, "@f.mrsearch"), 100n)))
+
+def Mailv.local.if(need: Bool, +u: Ui) -> Ui:
+  match need:
+    case True{}: Mailv.search.local(Ui.info_set(u, "pane:mr", "0"))
+    case False{}: u
+
+def Mailv.reply.apply(i: Nat, +u: Ui, +p: J.Json, +tag: String, +res: J.Json) -> Ui:
+  match i:
+    case 0n:
+      Ui.scratch_set(Mailv.search.local(Mailv.put(u, Mailv.list.put(Mailv.data(u), Mailv.list.result(u, p, res)))), "@mr.loaded", tag)
+    case 1n:
+      Mailv.put(u, Mailv.read.put(Mailv.data(u), MV.Mv.put_read(Mailv.cache(u), res, Bool.not(String.is_empty(J.Json.get_str(p, "before", "")))), Ui.scratch(u, "@mr.conv"), ML.Box.names(M.State.mail(Ui.state(u))), Mailv.live_targets(Map.values(&2, ML.Run, ML.Box.runs(M.State.mail(Ui.state(u)))), Ui.scratch(u, "@mr.conv"))))
+    case 2n:
+      Mailv.reply.find(Bool.and(String.eq(J.Json.get_str(p, "q", ""), Ui.scratch(u, "@f.mrsearch")), String.eq(tag, Mailv.key(u))), u, J.Json.get_str(p, "q", ""), res)
+    case _: u
+
+def Mailv.reply.got(ok: Bool, +u: Ui, +req: J.Json, +o: J.Json) -> Ui:
+  match ok:
+    case True{}:
+      Mailv.reply.apply(C.Codec.pos(["mail.list", "mail.read", "mail.find"], J.Json.get_str(req, "m", "")), u, J.Json.get_obj(req, "p"), J.Json.get_str(req, "tag", ""), J.Json.get_obj(o, "result"))
+    case False{}:
+      Ui.scratch_set(u, "@mr.loaded", Mailv.token(u))
+
+def Mailv.reply.clear(same: Bool, u: Ui, +slot: String) -> Ui:
+  match same:
+    case True{}: Ui.scratch_set(u, "@mr." ++ slot, "")
+    case False{}: u
+
+def Mailv.reply.on(has: Bool, +u: Ui, +o: J.Json, +id: String) -> Ui:
+  match has:
+    case False{}: u
+    case True{}:
+      +req = Maybe.default(&2, J.Json, J.Json.parse(Ui.scratch(u, "@mr.req:" ++ id)), J.Null{})
+      Mailv.reply.got(J.Json.get_bool(o, "ok", True{}), Ui.scratch_set(Mailv.reply.clear(String.eq(Ui.scratch(u, "@mr." ++ J.Json.get_str(req, "slot", "")), id), u, J.Json.get_str(req, "slot", "")), "@mr.req:" ++ id, ""), req, o)
+
+def Mailv.reply(+u: Ui, +o: J.Json) -> Ui:
+  Mailv.reply.on(Bool.not(String.is_empty(Ui.scratch(u, "@mr.req:" ++ J.Json.as_raw(J.Json.get(o, "id"), "")))), u, o, J.Json.as_raw(J.Json.get(o, "id"), ""))
+
+def Ui.reply(u: Ui, +o: J.Json) -> Ui:
+  KX.reply(KN.reply(Made.reply(o, Bots.reply(o, Proj.reply(o, Btw.reply(Fab.reply(Fab.has(o), Ui.reply.skills(Mailv.reply(u, o), o), o), o)))), o), o)
+
+def Ui.recv.k(i: Nat, u: Ui, +o: J.Json) -> Ui:
+  match i:
+    case 0n:
+      Ui.reset(u, o)
+    case 1n:
+      Ui.fold.items(J.Json.elems(J.Json.get_obj(o, "items")), u)
+    case 2n:
+      Ui.delta(u, J.Json.get_str(o, "thread", ""), J.Json.get_str(o, "text", ""))
+    case 3n:
+      Ui.reply(u, o)
+    case 4n:
+      Ui.update(u, o)
+    case 5n:
+      Ui.view(u, o)
+    case 6n:
+      Emb.recv(J.Json.elems(J.Json.get_obj(o, "reset")), u, J.Json.get_str(o, "thread", ""), Term.bytes(J.Json.elems(J.Json.get_obj(o, "b"))))
+    case 7n:
+      Ui.info_merge(u, J.Json.get_obj(o, "info"))
+    case 8n:
+      Voice.recv(u, o)
+    case 9n:
+      Ui.far(u, o)
+    case 10n:
+      Ui.live.set(u, o)
+    case _:
+      u
+
+# a message folded in, and the join's progress noted
+def Ui.recv.b(+i: Nat, u: Ui, +o: J.Json) -> Ui:
+  Boot.mark(i, Ui.recv.k(i, u, o), o)
+
+# A message can resolve a want only against the installed destination.
+def Ui.recv(+u: Ui, +o: J.Json) -> Ui:
+  Ui.reselect(Ui.sel(u), Bots.wanted(Ui.join(String.eq(J.Json.get_str(o, "t", ""), "log"), Ui.recv.b(C.Codec.pos(["log", "changes", "delta", "reply", "update", "view", "term", "info", "voice", "far", "live"], J.Json.get_str(o, "t", "")), Mailv.join(String.eq(J.Json.get_str(o, "t", ""), "log"), u), o))))
+
+# a message from the server, with what to send: a (re)connection (the
+# server's log arrives first on each) sends the outbox again, so nothing
+# the user sent is lost to a dropped link
+def Ui.recv_act.go(u: Ui, +o: J.Json) -> Act:
+  Ui.recv_act.t(Bool.and(String.eq(J.Json.get_str(o, "t", ""), "term"), Bool.not(EM.Emb.is_key(J.Json.get_str(o, "thread", "")))), J.Json.get_str(o, "thread", ""), Fm.again(String.eq(J.Json.get_str(o, "t", ""), "log"), Ui.recv_act.k(String.eq(J.Json.get_str(o, "t", ""), "log"), Ui.recv(u, o))))
+
+# a desktop notification ({"t":"notify"}, sent only to a desk)
+def Ui.recv_act.n(notify: Bool, u: Ui, +o: J.Json) -> Act:
+  match notify:
+    case True{}:
+      Act{u, [Notify{J.Json.get_str(o, "thread", ""), J.Json.get_str(o, "title", ""), J.Json.get_str(o, "body", ""), J.Json.get_str(o, "key", "")}]}
+    case False{}:
+      Emb.sync.if(C.Codec.pos(["log", "changes", "view"], J.Json.get_str(o, "t", "")), Fab.sync(Mpage.sync(Ui.recv_act.go(u, o))))
+
+# a frame of a page ({"t":"shot","bot":page,"n":n}) where the client keeps
+# it (the phones): its number as info "shot.<page>", seen when on show
+def Ui.recv_act.s(shot: Bool, u: Ui, +o: J.Json) -> Act:
+  match shot:
+    case True{}:
+      Ui.cast.seen(Ui.info_set(u, "shot." ++ J.Json.get_str(o, "bot", ""), J.Json.as_raw(J.Json.get(o, "n"), "0")), J.Json.get_str(o, "bot", ""))
+    case False{}:
+      Ui.recv_act.n(String.eq(J.Json.get_str(o, "t", ""), "notify"), u, o)
+
+def Mailv.search.one(+u: Ui, +bot: String) -> Act:
+  Mailv.request(u, "mail.find", [J.KV{"bot", J.Str{bot}}, J.KV{"q", J.Str{Ui.scratch(u, "@f.mrsearch")}}, J.KV{"n", J.Json.nat(100n)}], "find", Mailv.key(u))
+
+def Mailv.search.bots(bs: List<&2, BT.Bot>, a: Act) -> Act:
+  match bs a:
+    case Nil{} _: a
+    case +b <> t Act{u, cs}:
+      Mailv.search.bots(t, Ui.first(cs, Mailv.search.one(u, BT.Bot.id(b))))
+
+def Mailv.search.route(all: Bool, +u: Ui) -> Act:
+  match all:
+    case False{}: Mailv.search.one(u, Mailv.bot(u))
+    case True{}: Mailv.search.bots(BT.World.bots.here(M.State.bots(Ui.state(u))), Act{u, Nil{}})
+
+def Mailv.search(+u: Ui) -> Act:
+  Mailv.search.route(String.eq(Mailv.bot(u), "*"), Ui.scratch_set(Ui.scratch_set(Mailv.search.local(u), "@mr.qkey", Mailv.key(u)), "@mr.q", Ui.scratch(u, "@f.mrsearch")))
+
+def Mailv.sync.search(need: Bool, +u: Ui, cs: List<&2, Cmd>) -> Act:
+  match need:
+    case True{}: Ui.first(cs, Mailv.search(u))
+    case False{}: Act{u, cs}
+
+def Mailv.sync.read(need: Bool, +u: Ui, cs: List<&2, Cmd>) -> Act:
+  match need:
+    case True{}: Ui.first(cs, Mailv.read(u, ""))
+    case False{}:
+      Mailv.sync.search(Bool.and(String.is_empty(Ui.scratch(u, "@mr.find")), Bool.and(Bool.not(String.is_empty(Ui.scratch(u, "@f.mrsearch"))), Bool.or(Bool.not(String.eq(Ui.scratch(u, "@mr.q"), Ui.scratch(u, "@f.mrsearch"))), Bool.not(String.eq(Ui.scratch(u, "@mr.qkey"), Mailv.key(u)))))), u, cs)
+
+def Mailv.action(i: Nat, +u: Ui, +v: String) -> Act:
+  match i:
+    case 0n: Act{Mailv.filter.set(u, v), Nil{}}
+    case 1n: Mailv.read(Ui.scratch_set(Ui.scratch_set(u, "@mr.conv", v), "@mr.to", ""), "")
+    case 2n: Mailv.read(u, Mailv.before(u))
+    case 3n:
+      Mailv.send.ok(Bool.and(Bool.not(String.is_empty(String.trim(Ui.scratch(u, "@f.mrreply")))), Bool.not(String.is_empty(Ui.scratch(u, "@mr.to")))), u, Ui.scratch(u, "@mr.to"), Ui.scratch(u, "@f.mrreply"))
+    case 4n:
+      Ui.rpc.keep(u, "mail.mark", [J.KV{"bot", J.Str{Mailv.bot(u)}}, J.KV{"conv", J.Str{Ui.scratch(u, "@mr.conv")}}, J.KV{"status", J.Str{v}}])
+    case 5n: Mailv.search(Ui.info_set(Ui.scratch_set(u, "@f.mrsearch", v), "pane:mr", "0"))
+    case 6n: Act{Ui.scratch_set(u, "@mr.run", Bool.pick(String, Mailv.run_open(u), "", "1")), Nil{}}
+    case 7n: Act{Ui.scratch_set(u, "@mr.to", v), Nil{}}
+    case 8n: Act{Ui.scratch_set(u, "@mr.conv", ""), Nil{}}
+    case _: Act{u, Nil{}}
+
+def Mailv.dispatch(mail: Bool, +u: Ui, +action: String, +value: String) -> Act:
+  match mail:
+    case True{}: Mailv.action(C.Codec.pos(["mail-filter", "mail-open", "mail-more", "mail-send", "mail-mark", "mail-search", "mail-run", "mail-to", "mail-close"], action), u, value)
+    case False{}: Lang.dispatch(C.Codec.pos(["lang", "lang-os"], action), u, action, value)
+
+def Mailv.sync.page(need: Bool, +u: Ui, cs: List<&2, Cmd>) -> Act:
+  match need:
+    case True{}: Ui.first(cs, Mailv.list(u))
+    case False{}:
+      Mailv.sync.read(Bool.and(String.is_empty(Ui.scratch(u, "@mr.read")), Bool.and(Bool.not(String.is_empty(Ui.scratch(u, "@mr.conv"))), String.eq(Ui.scratch(u, "@mr.read.dirty"), "1"))), u, cs)
+
+def Mailv.sync.on(on: Bool, +u: Ui, cs: List<&2, Cmd>) -> Act:
+  match on:
+    case False{}: Act{u, cs}
+    case True{}:
+      Mailv.sync.page(Bool.and(String.is_empty(Ui.scratch(u, "@mr.list")), Bool.not(String.eq(Ui.scratch(u, "@mr.loaded"), Mailv.token(u)))), u, cs)
+
+def Mailv.sync(a: Act) -> Act:
+  match a:
+    case Act{+u, cs}: Mailv.sync.on(Mailv.shown(u), Mailv.local.if(Bool.and(Mailv.shown(u), Bool.or(Bool.not(String.eq(MV.Find.q(Mailv.find(u)), Ui.scratch(u, "@f.mrsearch"))), Bool.not(String.eq(Ui.scratch(u, "@mr.local.key"), Mailv.key(u))))), u), cs)
+
+# a desk's host calls this after its input, focus changes and messages
+def Ui.desk(+u: Ui, +focused: Bool, +now: Nat) -> Act:
+  Mailv.sync(Ui.desk.k(DK.Desk.due(Ui.scratch(u, "@desk"), Ui.scratch(u, "@desk.at"), Ui.sel(u), focused, now), u, Ui.sel(u), focused, now))
+
+def Ui.act(+u: Ui, +action: String, +value: String) -> Act:
+  Mailv.sync(Ui.cast.now(u, Mailv.dispatch(String.starts_with(action, "mail-"), u, action, value)))
+
+def Ui.recv_act(u: Ui, +o: J.Json) -> Act:
+  Mailv.sync(Ui.recv_act.s(String.eq(J.Json.get_str(o, "t", ""), "shot"), u, o))

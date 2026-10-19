@@ -129,3 +129,20 @@ mkdir -p /tmp/xvfb-deb && cd /tmp/xvfb-deb && apt-get download xvfb && dpkg -x x
 ## Not covered
 
 The web client: it needs the web bundle and a Chromium; not timed here.
+
+Mailroom is an opt-in `--phases mail` workload. It files 5,000 conversations
+and 50,000 bodies across six synthetic bots through `mail.send`, with
+`mail.on` enabled only in the temporary home. Filing finishes and a list
+plus a body read are verified before the timed phase. The phase scrolls
+40 rows, types `needle`, opens ten conversations, then sends two mails per
+second while the uberbot's Chat tab is selected. `--mail-convs N` and
+`--mail-mails N` permit explicitly smaller smoke runs; the report records
+those counts, so a smoke run cannot be mistaken for the full fixture.
+
+The JSON includes `mail_read_rpc_ms` (real body-read roundtrips) separately
+from `opens_ms` (native input processing through its frame). Native tab
+coverage still needs the screenshots: the existing `desk.look` report
+identifies the bot's thread but does not expose its tab or open mail.
+The Mailroom pane reuses PW with `Mm.mail` as its key. Bot panes bypass
+MainM, so the existing `ui.layout.mm.hit` metric does not measure that
+pane cache; do not claim Mailroom cache hit coverage from that metric.

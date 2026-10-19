@@ -20,18 +20,19 @@ private func fileSymbol(_ name: String) -> String {
 
 // the viewer's choices (Board, Schematic, 3D, Mech, Files) and its close button
 struct ViewerChoices: View {
+    @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let viewer: Viewer
 
     var body: some View {
         HStack {
-            Picker("Source", selection: Binding(get: { viewer.choices.first(where: { $0.on })?.value ?? viewer.open }, set: { model.act("view", $0) })) {
+            Picker(NativeMessages.native_viewer_source(lang), selection: Binding(get: { viewer.choices.first(where: { $0.on })?.value ?? viewer.open }, set: { model.act("view", $0) })) {
                 ForEach(viewer.choices, id: \.value) { Text($0.label).tag($0.value) }
             }
             .pickerStyle(.segmented)
             Spacer()
             Button { model.act("view", "") } label: { Image(systemName: "xmark.circle.fill").font(.title2) }
-                .accessibilityLabel("Close")
+                .accessibilityLabel(NativeMessages.common_close(lang))
         }
         .padding(.horizontal)
         .padding(.vertical, 6)
@@ -39,6 +40,7 @@ struct ViewerChoices: View {
 }
 
 struct FilesScreen: View {
+    @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let viewer: Viewer
     let page: FilesPage
@@ -62,7 +64,7 @@ struct FilesScreen: View {
             if !page.ready {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if page.rows.isEmpty {
-                Text("This folder is empty").foregroundStyle(.secondary).padding()
+                Text(NativeMessages.viewer_files_empty(lang)).foregroundStyle(.secondary).padding()
                 Spacer()
             } else {
                 List(page.rows, id: \.value) { r in
@@ -104,11 +106,13 @@ private struct PDFPages: UIViewRepresentable {
 
 // an image or a PDF opened from the Files tab, under its name and a way back
 struct FileScreen: View {
+    @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let viewer: Viewer
     let file: FileView
     @State private var shown: Shown?
     @State private var pdf: PDFDocument?
+    // Stable failure kind; translate when drawn, so a language switch updates it.
     @State private var failed = ""
 
     var body: some View {
@@ -116,7 +120,7 @@ struct FileScreen: View {
             ViewerChoices(model: model, viewer: viewer)
             HStack {
                 Button { model.act("fm") } label: { Image(systemName: "chevron.left") }
-                    .accessibilityLabel("Back to the folder")
+                    .accessibilityLabel(NativeMessages.files_back_tip(lang))
                 Text(file.name).lineLimit(1).truncationMode(.middle)
                 Spacer()
             }
@@ -125,13 +129,13 @@ struct FileScreen: View {
             Divider()
             if file.kind == "pdf" {
                 if let d = pdf { PDFPages(document: d) }
-                else if !failed.isEmpty { Text(failed).foregroundStyle(.secondary).padding(); Spacer() }
+                else if !failed.isEmpty { Text(NativeMessages.native_file_pdf_error(lang, failed, "")).foregroundStyle(.secondary).padding(); Spacer() }
                 else { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
             } else if let u = model.web(file.url) {
                 AsyncImage(url: u) { phase in
                     switch phase {
                     case .success(let img): img.resizable().scaledToFit().onTapGesture { shown = Shown(url: u) }
-                    case .failure: Text("This image cannot be shown here").foregroundStyle(.secondary)
+                    case .failure: Text(NativeMessages.native_file_image_unsupported(lang)).foregroundStyle(.secondary)
                     default: ProgressView()
                     }
                 }
@@ -150,10 +154,10 @@ struct FileScreen: View {
         failed = ""
         do {
             let (data, resp) = try await URLSession.shared.data(from: u)
-            if (resp as? HTTPURLResponse)?.statusCode != 200 { failed = "The hub could not send this PDF (it may be over 12 MB)"; return }
-            if let d = PDFDocument(data: data) { pdf = d } else { failed = "This PDF cannot be shown here" }
+            if (resp as? HTTPURLResponse)?.statusCode != 200 { failed = "send"; return }
+            if let d = PDFDocument(data: data) { pdf = d } else { failed = "show" }
         } catch {
-            failed = "This PDF cannot be shown here"
+            failed = "show"
         }
     }
 }

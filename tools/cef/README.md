@@ -91,6 +91,11 @@ the browser’s events), since CDP focus emulation can suppress CEF’s usual
 focus callbacks. XInput2 2.0 is required. Returning focus
 to the embedding app is that app's responsibility.
 
+Native hide/show also updates `_NET_WM_STATE_HIDDEN` so Chromium can throttle
+unwatched pages. The helper holds rendering handles only for active preview
+leases or input operations. See [VISIBILITY.md](VISIBILITY.md) for the pinned
+upstream behavior, multi-page CPU/PSS results and remaining acceptance limits.
+
 ## Helper and tests
 
 `tools/browser` provides engine `cef`, adopting these targets with Playwright

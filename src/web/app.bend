@@ -1,4 +1,6 @@
 import Base
+import ../core/i18n.bend as I
+import ../core/msgs.bend as MSG
 import ../core/json.bend as J
 import ./dom.bend as D
 import ../core/client.bend as U
@@ -184,8 +186,8 @@ def part(+u: U.Ui, +o: J.Json) -> String:
 # the selected thread's live row as the page draws it, keyed
 # "live:<thread>": host.js patches the timeline's row with that key in place,
 # and draws the page when there is none
-def live(u: U.Ui) -> D.Node:
-  V.View.live.u(u)
+def live(+u: U.Ui) -> D.Node:
+  V.View.live.u.loc(U.Lang.loc(u), u)
 
 # the node a "bp-memo" element of the page stands for (view.bend's
 # View.memo): host.js keeps it while the element stays the same
@@ -221,10 +223,13 @@ def keys_page() -> String:
 # easing and what closes it; host.js feeds it pointer events and sets the
 # style it answers on the picture)
 
-def lb_node(url: String) -> D.Node:
+def lb_node.loc(+lc: I.Loc, url: String) -> D.Node:
   D.El{"div", "", [D.At{"class", "lightbox"}], [
     D.El{"img", "", [D.At{"class", "lb-img"}, D.At{"src", url}, D.At{"alt", ""}, D.At{"draggable", "false"}], Nil{}},
-    D.El{"button", "", [D.At{"class", "lb-close"}, D.At{"title", "Close"}, D.At{"data-lb-close", "1"}], [D.Txt{"×"}]}]}
+    D.El{"button", "", [D.At{"class", "lb-close"}, D.At{"title", MSG.T.common.close(lc)}, D.At{"data-lb-close", "1"}], [D.Txt{"×"}]}]}
+
+def lb_node(url: String) -> D.Node:
+  lb_node.loc(I.En{}, url)
 
 def lb_open() -> LB.Lb:
   LB.Lb.open()
@@ -267,3 +272,14 @@ def lb_css(lb: LB.Lb, b: LB.LbBox, now: Nat) -> String:
 # the tour's action for a key while its dialog is up ("" for any other)
 def tour_key(key: String) -> String:
   OB.Ob.dom(key)
+
+# The host passes the frame's already resolved language tag.
+def lb_node_in(tag: String, url: String) -> D.Node:
+  lb_node.loc(I.I18n.of_tag(tag), url)
+
+# The WebGL host supplies measurements; Bend chooses their displayed text.
+def solid_waiting(tag: String, +seconds: Nat) -> String:
+  MSG.T.viewer.solid.waiting(I.I18n.of_tag(tag), Nat.show(seconds), Bool.pick(String, Nat.is_ge(seconds, 15n), "yes", "no"))
+
+def solid_stats(tag: String, size: String, triangles: String, waited: String, built: String, delayed: Bool) -> String:
+  MSG.T.viewer.solid.stats(I.I18n.of_tag(tag), size, triangles, Bool.pick(String, delayed, "yes", "no"), waited, built)

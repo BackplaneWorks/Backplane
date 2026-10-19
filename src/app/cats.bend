@@ -17,6 +17,7 @@ import ../gfx/draw.bend as D
 # px square at (Cats.at(), Cats.at()); ok is False for "not in the cache"
 type CatF is Data:
   CatF{ok: Bool, parts: List<&2, C.FPart>, clock: Nat, ops: List<&2, R.Op>}
+  CatAt{parts: List<&2, C.FPart>, clock: Nat, ops: List<&2, R.Op>, x: U32, y: U32}
 
 def Cats.none() -> Map<&2, CatF>:
   Map.new(&2, CatF)
@@ -59,6 +60,8 @@ def Cats.parts.k(f: CatF, +look: Nat, +mood: String) -> List<&2, C.FPart>:
       ps
     case CatF{False{}, _, _, _}:
       C.Cat.flat(look, mood)
+    case CatAt{ps, _, _, _, _}:
+      ps
 
 def Cats.posed(+ps: List<&2, C.FPart>, +clock: Nat, +px: U32) -> CatF:
   CatF{True{}, ps, clock, Cats.pose(ps, clock, D.Clip.all(), U32.to_f32(Cats.at()), U32.to_f32(Cats.at()), U32.to_f32(px))}
@@ -67,6 +70,8 @@ def Cats.fresh(f: CatF, +clock: Nat) -> Bool:
   match f:
     case CatF{+ok, _, +k, _}:
       Bool.and(ok, Nat.is_eq(k, clock))
+    case CatAt{_, k, _, _, _}:
+      Nat.is_eq(k, clock)
 
 def Cats.warm.k(fresh: Bool, c: Map<&2, CatF>, f: CatF, +look: Nat, +mood: String, +px: U32, +clock: Nat) -> Map<&2, CatF>:
   match fresh:
@@ -78,6 +83,28 @@ def Cats.warm.k(fresh: Bool, c: Map<&2, CatF>, f: CatF, +look: Nat, +mood: Strin
 # the cache with this cat posed at the clock (flattened only when new)
 def Cats.warm(+c: Map<&2, CatF>, +look: Nat, +mood: String, +px: U32, +clock: Nat) -> Map<&2, CatF>:
   Cats.warm.k(Cats.fresh(Cats.find(c, look, mood, px), clock), c, Cats.find(c, look, mood, px), look, mood, px, clock)
+
+# A newly requested size is posed at its actual coordinates: posing at
+# 1000 then translating can round small coverage masks differently. There
+# is still only one entry per look/mood/size, even when the cat moves.
+def Cats.placed(+ps: List<&2, C.FPart>, +clock: Nat, +x: U32, +y: U32, +px: U32) -> CatF:
+  CatAt{ps, clock, Cats.pose(ps, clock, D.Clip.all(), U32.to_f32(x), U32.to_f32(y), U32.to_f32(px)), x, y}
+
+def Cats.visible.fresh(f: CatF, +clock: Nat, +x: U32, +y: U32) -> Bool:
+  match f:
+    case CatF{+ok, _, k, _}:
+      Bool.and(ok, Nat.is_eq(k, clock))
+    case CatAt{_, k, _, ox, oy}:
+      Bool.and(Nat.is_eq(k, clock), Bool.and(U32.is_eq(x, ox), U32.is_eq(y, oy)))
+
+def Cats.visible.keep(same: Bool, c: Map<&2, CatF>, f: CatF, +look: Nat, +mood: String, +px: U32, +clock: Nat, +x: U32, +y: U32) -> Map<&2, CatF>:
+  match same:
+    case True{}: c
+    case False{}:
+      Map.set(&2, CatF, c, Cats.key(look, mood, px), Cats.placed(Cats.parts.k(f, look, mood), clock, x, y, px))
+
+def Cats.visible(+c: Map<&2, CatF>, +look: Nat, +mood: String, +px: U32, +clock: Nat, +x: U32, +y: U32) -> Map<&2, CatF>:
+  Cats.visible.keep(Cats.visible.fresh(Cats.find(c, look, mood, px), clock, x, y), c, Cats.find(c, look, mood, px), look, mood, px, clock, x, y)
 
 # Moving posed ops
 # ----------------
@@ -116,12 +143,19 @@ def Cats.move(os: List<&2, R.Op>, +c: D.Clip, +ix: U32, +iy: U32, +dx: F32, +dy:
     case R.Op{x0, y0, x1, y1, +col, +a, s} <> t:
       D.Clip.cut(c, (x0 + ix : U32), (y0 + iy : U32), (x1 + ix : U32), (y1 + iy : U32), col, a, Cats.shape(s, ix, iy, dx, dy)) <> Cats.move(t, c, ix, iy, dx, dy)
 
+def Cats.draw.at(same: Bool, os: List<&2, R.Op>, ps: List<&2, C.FPart>, +clock: Nat, +c: D.Clip, +x: U32, +y: U32, +px: U32) -> List<&2, R.Op>:
+  match same:
+    case True{}: Cats.move(os, c, 0, 0, 0.0, 0.0)
+    case False{}: Cats.pose(ps, clock, c, U32.to_f32(x), U32.to_f32(y), U32.to_f32(px))
+
 def Cats.draw.k(f: CatF, +look: Nat, +mood: String, +ms: Nat, +c: D.Clip, +x: U32, +y: U32, +px: U32) -> List<&2, R.Op>:
   match f:
     case CatF{True{}, _, _, os}:
       Cats.move(os, c, (x - Cats.at() : U32), (y - Cats.at() : U32), F32.sub(U32.to_f32(x), U32.to_f32(Cats.at())), F32.sub(U32.to_f32(y), U32.to_f32(Cats.at())))
     case CatF{False{}, _, _, _}:
       Cats.pose(C.Cat.flat(look, mood), ms, c, U32.to_f32(x), U32.to_f32(y), U32.to_f32(px))
+    case CatAt{ps, clock, os, ox, oy}:
+      Cats.draw.at(Bool.and(U32.is_eq(x, ox), U32.is_eq(y, oy)), os, ps, clock, c, x, y, px)
 
 # a cat drawn from the cache (flattened and posed now, at ms, when the
 # cache lacks it)

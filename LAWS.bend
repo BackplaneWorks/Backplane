@@ -1,7 +1,22 @@
 import Base
+import ./src/core/auth.bend as AUTH
+import ./src/core/http.bend as HTTPAUTH
+import ./src/core/pcb2d.bend as PCB2 # PCB viewer text
+import ./src/app/side_rows.bend as SR
+import ./src/app/side_row_types.bend as SRT
+import ./src/server/botnet.bend as MPLOG # mail perf runtime count
+# ---- native phone i18n imports ----
+import ./src/mobile/app.bend as NATIVEI18N
+# ---- end native phone i18n imports ----
+import ./src/core/fallback.bend as FALL
 import ./src/server/server.bend as MPCREDIT # mail perf
+# ---- i18n web phone imports ----
+import ./src/web/view.bend as WPH
+# ---- end i18n web phone imports ----
+import ./src/core/schematic.bend as SC # kicad fork viewers
 import ./src/core/charter.bend as CH # mail 2c
 import ./src/core/mailrun.bend as MRUN # mail 2c
+import ./src/app/mailroom.bend as MRUI # mail ui
 import ./src/server/mailstore.bend as MIX # mail index
 import ./src/app/mm.bend as MM # window memos
 import ./src/core/kexport.bend as KEX
@@ -42,6 +57,8 @@ import ./src/core/semver.bend as SV
 import ./src/core/clipath.bend as CPA
 import ./src/app/nui.bend as N
 import ./src/app/bots.bend as BV
+import ./src/app/cats.bend as VCAT
+import ./src/core/sexpr.bend as KSEX # kicad fork footprint placement
 import ./src/core/board.bend as B
 import ./src/core/hub.bend as H
 import ./src/core/deploy.bend as DP
@@ -144,6 +161,9 @@ import ./src/core/task.bend as TSK
 import ./src/core/teach.bend as TCH
 import ./src/core/cef.bend as CEF # browser-cef
 import ./src/mobile/bots.bend as MBT
+import ./src/core/cli.bend as CLI # one-hub
+import ./src/core/onehub.bend as OHB # one-hub
+import ./src/core/standin.bend as SIN # one-hub
 
 # Backplane's rules, stated over the real code. `bend PROOF.bend` proves each
 # one. Humans own this file: an agent may add laws, never weaken or delete
@@ -7996,7 +8016,7 @@ law mobile_browser_ask_card:
   for +a: M.Ask
   for +d: String
   for +nf: Map<&2, String>
-  {MSC.Mob.ask.k.loc(lc, st, True{}, a, d, nf) == MBT.MBots.ask(U.Teach.ask.from.loc(lc, a, nf)) : J.Json}
+  {MSC.Mob.ask.k.loc(lc, st, True{}, a, d, nf) == MBT.MBots.ask.loc(lc, U.Teach.ask.from.loc(lc, a, nf)) : J.Json}
 
 law mobile_other_ask_standard:
   for +lc: I18.Loc
@@ -9921,15 +9941,15 @@ law kserve_gate_ok:
 law kserve_unavailable_names_fallback:
   {String.contains(KSL.KS.unavailable("x", "c"), "Fallback: edit the file directly") == True{} : Bool}
 
-# Backplane KiCad 10.99 with API 1 is the least that serves IPC
+# Backplane KiCad 10.99.0-bp.4 with API 2 is the least that serves IPC
 law kicad_min_version:
-  {KH.KH.min_version() == "10.99.0" : String}
+  {KH.KH.min_version() == "10.99.0-bp.4" : String}
 
 law kicad_old_runtime_is_old:
   {KH.KH.status(True{}, True{}, True{}, "10.0.6", 1n) == "old" : String}
 
 law kicad_new_runtime_is_ok:
-  {KH.KH.status(True{}, True{}, True{}, "10.99.0-bp.1", 1n) == "ok" : String}
+  {KH.KH.status(True{}, True{}, True{}, "10.99.0-bp.4", 2n) == "ok" : String}
 
 # with IPC on, agents edit through the kicad_ipc tool
 law prompt_kicad_ok_names_kicad_ipc:
@@ -10332,3 +10352,343 @@ law mail_credit_native_kept:
   for w: MPCREDIT.Wire
   for charge: Nat
   {MPCREDIT.Wire.charged(True{}, w, charge) == w : MPCREDIT.Wire}
+# ---- i18n web phone ----
+law webphone_option_english:
+  {WPH.VLabel.option(I18.En{}, "ui.theme", "dark") == "dark" : String}
+law webphone_model_name_kept:
+  {WPH.VLabel.option(I18.Ja{}, "agent.model", "dark") == "dark" : String}
+law webphone_count_ungrouped:
+  {WPH.View.sub.badge(I18.En{}, 1200n) == "1200 agents" : String}
+law webphone_count_japanese:
+  {WPH.View.sub.badge(I18.Ja{}, 1200n) == "エージェント1200件" : String}
+law webphone_idle_japanese:
+  {Nt.Note.compact.head(I18.Ja{}, 0n) == "すべてのエージェントが待機中" : String}
+# ---- end i18n web phone ----
+# ---- one-hub ----
+# The command line is strict (core/cli.bend): an unknown flag never runs a
+# hub, whatever follows it or comes before it; --help and --version never
+# run one either, and a flag without its value is refused.
+law cli_unknown_never_runs:
+  for xs: List<&2, String>
+  {CLI.Cli.runs(CLI.Cli.of("--bogus" <> xs)) == False{} : Bool}
+
+law cli_unknown_after_flags_never_runs:
+  for xs: List<&2, String>
+  {CLI.Cli.runs(CLI.Cli.of("--home" <> "/h" <> "--no-tailscale" <> "--bogus" <> xs)) == False{} : Bool}
+
+law cli_word_never_runs:
+  for xs: List<&2, String>
+  {CLI.Cli.runs(CLI.Cli.of("serve" <> xs)) == False{} : Bool}
+
+law cli_version_never_runs:
+  for xs: List<&2, String>
+  {CLI.Cli.of("--version" <> xs) == CLI.CliVersion{} : CLI.Cli}
+
+law cli_version_after_flags:
+  for xs: List<&2, String>
+  {CLI.Cli.of("--home" <> "/h" <> "--port" <> "3799" <> "--version" <> xs) == CLI.CliVersion{} : CLI.Cli}
+
+law cli_help_never_runs:
+  for xs: List<&2, String>
+  {CLI.Cli.of("--help" <> xs) == CLI.CliHelp{} : CLI.Cli}
+
+law cli_h_never_runs:
+  for xs: List<&2, String>
+  {CLI.Cli.of("-h" <> xs) == CLI.CliHelp{} : CLI.Cli}
+
+law cli_missing_value:
+  {CLI.Cli.of(["--home"]) == CLI.CliBad{"--home needs a value"} : CLI.Cli}
+
+law cli_value_not_a_flag:
+  for xs: List<&2, String>
+  {CLI.Cli.runs(CLI.Cli.of("--home" <> "--version" <> xs)) == False{} : Bool}
+
+law cli_test_hub_runs:
+  {CLI.Cli.of(["--home", "/h", "--port", "3799", "--no-tailscale", "--foreground"]) == CLI.CliRun{} : CLI.Cli}
+
+# One hub per home (core/onehub.bend): what the lock's answer means
+law onehub_ours:
+  {OHB.OneHub.got("ok") == OHB.HubOurs{} : OHB.HubGot}
+
+law onehub_held:
+  {OHB.OneHub.got("held 12 3799 flock") == OHB.HubHeld{"12", "3799"} : OHB.HubGot}
+
+law onehub_says:
+  {OHB.OneHub.says("/h", "12", "3799") == "a hub already serves /h (pid 12, port 3799)" : String}
+
+# Stand-ins (core/standin.bend) stay ahead of the login shell's PATH and
+# ~/.local/bin, where the real CLIs are
+law standin_path_first:
+  {SIN.Standin.path("/f", "/b", "/usr/bin") == "/f:/b:/usr/bin" : String}
+
+law standin_merge_behind:
+  {CPA.CliPath.merge(SIN.Standin.path("/f", "/b", "/usr/bin"), "/u/.local/bin:/usr/bin", ["/u/.local/bin"]) == "/f:/b:/usr/bin:/u/.local/bin" : String}
+# ---- end one-hub ----
+# ---- kicad-ipc 4 ----
+# the pin is bp.4 (API 2); the -bp.N suffix orders numerically
+law kicad4_bp1_old:
+  {KH.KH.status(True{}, True{}, True{}, "10.99.0-bp.1", 2n) == "old" : String}
+
+law kicad4_bp2_old:
+  {KH.KH.status(True{}, True{}, True{}, "10.99.0-bp.2", 2n) == "old" : String}
+
+law kicad4_bp3_old:
+  {KH.KH.status(True{}, True{}, True{}, "10.99.0-bp.3", 2n) == "old" : String}
+
+law kicad4_bp4_ok:
+  {KH.KH.status(True{}, True{}, True{}, "10.99.0-bp.4", 2n) == "ok" : String}
+
+law kicad4_bp10_ok:
+  {KH.KH.status(True{}, True{}, True{}, "10.99.0-bp.10", 2n) == "ok" : String}
+
+law kicad4_describe_part_reads_bp:
+  {KH.KH.status(True{}, True{}, True{}, "10.99.0-unknown-bp.4", 2n) == "ok" : String}
+
+law kicad4_no_suffix_is_bp0:
+  {KH.KH.status(True{}, True{}, True{}, "10.99.0", 2n) == "old" : String}
+
+law kicad4_bp3_needs_api2:
+  {KH.KH.status(True{}, True{}, True{}, "10.99.0-bp.3", 1n) == "old" : String}
+
+law kicad4_bp2_before_bp3:
+  {KH.KH.version.ge("10.99.0-bp.2", "10.99.0-bp.3") == False{} : Bool}
+
+law kicad4_bp10_after_bp3:
+  {KH.KH.version.ge("10.99.0-bp.10", "10.99.0-bp.3") == True{} : Bool}
+
+law kicad4_min_api:
+  {KH.KH.min_api() == 2n : Nat}
+
+law kicad4_pinned_version_is_min:
+  {KH.KH.min_version() == "10.99.0-bp.4" : String}
+
+law kserve4_launcher_never_real:
+  {KSL.KS.launcher("/r/bin/kicad-cli.real") == "/r/bin/kicad-cli" : String}
+
+law kserve4_launcher_kept:
+  {KSL.KS.launcher("/r/bin/kicad-cli") == "/r/bin/kicad-cli" : String}
+
+law kserve4_argv_launcher:
+  {KSL.KS.nth(KSL.KS.argv("/r/bin/kicad-cli.real", "/p/a.kicad_pro", "/d", 0, Nil{}), 0n) == "/r/bin/kicad-cli" : String}
+
+law kserve4_bare_footprint_refused:
+  {KSL.KS.guard("kiapi.common.commands.UpdateItems", J.Json.obj([J.KV{"items", J.Json.arr([J.Json.obj([J.KV{"@type", J.Str{"type.googleapis.com/kiapi.board.types.FootprintInstance"}}])])}]), Nil{}) == KSL.KS.fp.refusal() : String}
+
+law kserve4_refusal_names_full_instance:
+  {String.contains(KSL.KS.fp.refusal(), "send the full FootprintInstance from GetItems with only the fields you change") == True{} : Bool}
+
+law kserve4_full_footprint_passes:
+  {KSL.KS.guard("kiapi.common.commands.UpdateItems", J.Json.obj([J.KV{"items", J.Json.arr([J.Json.obj([J.KV{"@type", J.Str{"type.googleapis.com/kiapi.board.types.FootprintInstance"}}, J.KV{"definition", J.Json.obj(Nil{})}])])}]), Nil{}) == "" : String}
+
+law kserve4_footprint_cap_lifts:
+  {KSL.KS.guard("kiapi.common.commands.UpdateItems", J.Json.obj([J.KV{"items", J.Json.arr([J.Json.obj([J.KV{"@type", J.Str{"type.googleapis.com/kiapi.board.types.FootprintInstance"}}])])}]), ["footprint-partial-update"]) == "" : String}
+
+law kserve4_other_item_passes:
+  {KSL.KS.guard("kiapi.common.commands.UpdateItems", J.Json.obj([J.KV{"items", J.Json.arr([J.Json.obj([J.KV{"@type", J.Str{"type.googleapis.com/kiapi.board.types.Track"}}])])}]), Nil{}) == "" : String}
+
+law kserve4_other_command_passes:
+  {KSL.KS.guard("kiapi.common.commands.CreateItems", J.Json.obj([J.KV{"items", J.Json.arr([J.Json.obj([J.KV{"@type", J.Str{"type.googleapis.com/kiapi.board.types.FootprintInstance"}}])])}]), Nil{}) == "" : String}
+
+law kserve4_bare_symbol_refused:
+  {KSL.KS.guard("kiapi.common.commands.CreateItems", J.Json.obj([J.KV{"items", J.Json.arr([J.Json.obj([J.KV{"@type", J.Str{"type.googleapis.com/kiapi.schematic.types.SchematicSymbolInstance"}}])])}]), Nil{}) == KSL.KS.sym.refusal() : String}
+
+law kserve4_symbol_advice:
+  {String.contains(KSL.KS.sym.refusal(), "LoadAllLibraries") == True{} : Bool}
+
+law kserve4_symbol_with_definition_passes:
+  {KSL.KS.guard("kiapi.common.commands.CreateItems", J.Json.obj([J.KV{"items", J.Json.arr([J.Json.obj([J.KV{"@type", J.Str{"type.googleapis.com/kiapi.schematic.types.SchematicSymbolInstance"}}, J.KV{"definition", J.Json.obj(Nil{})}])])}]), Nil{}) == "" : String}
+
+law kserve4_symbol_cap_lifts:
+  {KSL.KS.guard("kiapi.common.commands.CreateItems", J.Json.obj([J.KV{"items", J.Json.arr([J.Json.obj([J.KV{"@type", J.Str{"type.googleapis.com/kiapi.schematic.types.SchematicSymbolInstance"}}])])}]), ["symbol-from-libid"]) == "" : String}
+
+law kserve4_no_items_passes:
+  {KSL.KS.guard("kiapi.common.commands.UpdateItems", J.Json.obj(Nil{}), Nil{}) == "" : String}
+
+law prompt4_kicad_ok_names_the_rules:
+  {String.contains(PM.Prompt.kicad.health("ok", "/c", "10.99.0-bp.3", "rev", "", True{}), "PlaceSymbolFromLibrary") == True{} : Bool}
+
+law kserve4_nested_symbol_library_id_refused:
+  {KSL.KS.guard("kiapi.common.commands.CreateItems", J.Json.obj([J.KV{"items", J.Json.arr([J.Json.obj([J.KV{"@type", J.Str{"type.googleapis.com/kiapi.schematic.types.SchematicSymbolInstance"}}, J.KV{"definition", J.Json.obj([J.KV{"id", J.Json.obj(Nil{})}])}])])}]), Nil{}) == KSL.KS.sym.refusal() : String}
+
+law kserve4_nested_symbol_cap_lifts:
+  {KSL.KS.guard("kiapi.common.commands.CreateItems", J.Json.obj([J.KV{"items", J.Json.arr([J.Json.obj([J.KV{"@type", J.Str{"type.googleapis.com/kiapi.schematic.types.SchematicSymbolInstance"}}, J.KV{"definition", J.Json.obj([J.KV{"id", J.Json.obj(Nil{})}])}])])}]), ["symbol-from-libid"]) == "" : String}
+
+# ---- end kicad-ipc 4 ----
+# ---- kicad fork viewers ----
+law fork_cache_legacy:
+  for id: String
+  {SC.Sch.cache.name("", id) == id : String}
+law fork_cache_alias:
+  for id: String
+  {SC.Sch.cache.name("local", id) == "local" : String}
+# ---- end kicad fork viewers ----
+# ---- kicad fork footprint placement ----
+law fork_footprint_legacy_at:
+  for x: KSEX.Sx
+  {B.Fp.at.k(True{}, x) == KSEX.Sx.get(x, "at") : KSEX.Sx}
+# ---- end kicad fork footprint placement ----
+
+# Primary orders already carry an exact subtree size; totals need no page.
+law mail_plain_count:
+  for +b: ML.Box
+  for +bot: String
+  {ML.Box.count(b, bot, "", "") == ML.Order.count(ML.Box.order_of(b, bot)) : Nat}
+
+# All-mail includes a thread-only conversation and a person-only one.
+law mail_global_primary:
+  {ML.Box.slice(ML.Box.conv_set(ML.Box.conv_set(ML.Box.empty(), "a", "A", "pair", ["thread:x"], "", Nil{}, 1n), "b", "B", "pair", ["person"], "", Nil{}, 2n), "*", 0n, 2n)
+    == [ML.Conv{"b", "B", "pair", ["person"], "", Nil{}, 2n, 2n, 0n}, ML.Conv{"a", "A", "pair", ["thread:x"], "", Nil{}, 1n, 1n, 0n}] : List<&2, ML.Conv>}
+
+law mail_log_count_set:
+  for c: MPCREDIT.Cfg
+  for n: Nat
+  {MPCREDIT.LogCount.n(MPCREDIT.LogCount.set(c, n)) == n : Nat}
+
+law mail_log_count_committed:
+  for +c: MPCREDIT.Cfg
+  for +fresh: List<&2, String>
+  {MPCREDIT.LogCount.n(MPCREDIT.LogCount.committed(c, fresh)) == Nat.add(MPCREDIT.LogCount.n(c), List.length(&2, String, fresh)) : Nat}
+
+# ---- native phone i18n ----
+law native_language_english:
+  {NATIVEI18N.native_locale("en", "ja-JP", "1") == "en" : String}
+law native_language_preview:
+  {NATIVEI18N.native_locale("ja", "en-US", "1") == "ja" : String}
+law native_language_system:
+  {NATIVEI18N.native_locale("auto", "ja_JP.UTF-8", "1") == "ja" : String}
+law native_language_fallback:
+  {NATIVEI18N.native_locale("auto", "de-DE", "1") == "en" : String}
+# ---- end native phone i18n ----
+# ---- build-speed: one executable, exact entry selection ----
+law exe_server_name:
+  {EX.Exe.server(["backplane-serve"]) == True{} : Bool}
+
+law exe_server_path:
+  {EX.Exe.server(["/opt/backplane/backplane-serve", "--port", "3799"]) == True{} : Bool}
+
+law exe_app_name:
+  {EX.Exe.server(["backplane", "backplane-serve"]) == False{} : Bool}
+
+law exe_server_exact:
+  {EX.Exe.server(["/opt/other-backplane-serve"]) == False{} : Bool}
+# ---- end build-speed ----
+
+# ---- global provider fallback ----
+
+# An empty suffix cannot launch any provider, regardless of state/catalog.
+law fallback_empty_exhausted:
+  for s: M.State
+  for caps: J.Json
+  for now: Nat
+  {FALL.Chain.pick([], s, caps, now) == None{} : Maybe<&2, FALL.Target>}
+
+law fallback_never_wraps:
+  {FALL.Chain.show(FALL.Chain.suffix(FALL.Chain.parse("claude/sonnet,codex/gpt-6.1-sol"), "codex/gpt-6.1-sol")) == "" : String}
+
+law fallback_auth_is_not_quota:
+  {FALL.Error.classify("codex", "gpt-6.1-sol", J.Json.obj([J.KV{"type", J.Str{"turn.failed"}}, J.KV{"message", J.Str{"login keyring is locked"}}])) == None{} : Maybe<&2, FALL.Limit>}
+
+law fallback_unknown_reset_held:
+  {FALL.Limit.active.o(J.Json.obj([J.KV{"scope", J.Str{"claude"}}, J.KV{"reset", J.Json.nat(0n)}]), 1000n) == True{} : Bool}
+
+law fallback_reset_boundary:
+  {FALL.Limit.active.o(J.Json.obj([J.KV{"scope", J.Str{"claude"}}, J.KV{"reset", J.Json.nat(1000n)}]), 1000n) == False{} : Bool}
+
+law fallback_no_recovery_while_locked:
+  for s: M.State
+  for now: Nat
+  {H.Auth.recover(False{}, s, now) == H.Step.none() : H.Step}
+# ---- end global provider fallback ----
+
+# Sidebar row memos compare exact resolved inputs with the same typography.
+law sidebar_row_key_sound:
+  for a: SRT.SideRowK
+  for b: SRT.SideRowK
+  for +h: {SR.Key.same(a, b) == True{} : Bool}
+  {a == b : SRT.SideRowK}
+
+law sidebar_row_paint_exact:
+  for +ty: L.Ty
+  for +a: SRT.SideRowK
+  for +b: SRT.SideRowK
+  for h: {SR.Key.same(a, b) == True{} : Bool}
+  {SR.Key.paint(ty, a) == SR.Key.paint(ty, b) : L.Out}
+# Visible cat requests are additional to sidebar/header warm-up.
+law visible_cats_empty_preserves_cache:
+  for +c: Map<&2, VCAT.CatF>
+  for +clock: Nat
+  {BV.Spot.warm(Nil{}, c, clock) == c : Map<&2, VCAT.CatF>}
+
+law visible_sleep_cat_posed_once:
+  for +clock: Nat
+  {BV.Bv.warm.at("sleep", clock) == 0n : Nat}
+# ---- mail ui ----
+law mailroom_tab_after_chat:
+  {BU.BU.tabs.mail("b1") == ["chat", "mail", "space", "browser", "tasks", "memory", "routines", "hooks", "settings"] : List<&2, String>}
+
+law mailroom_uber_default:
+  for +u: U.Ui
+  for +id: String
+  {BU.BU.tab.dflt(u, id) == Bool.pick(String, UBR.Uber.is(U.Ui.state(u), id), "mail", "chat") : String}
+
+law mailroom_run_collapsed_default:
+  for +now: Nat
+  {U.Mailv.run_open(U.Ui.init(now)) == False{} : Bool}
+
+law mailroom_chip_filters:
+  for +f: MVW.Filter
+  for +bot: String
+  {MVW.Filter.bot(MVW.Mv.with_bot(f, bot)) == bot : String}
+
+law mailroom_chip_keeps_selection:
+  for +u: U.Ui
+  for +bot: String
+  {U.Ui.sel(U.Mailv.chip(u, bot)) == U.Ui.sel(u) : String}
+
+law mailroom_covers_plane:
+  for +p: PLN.Plane
+  {MRUI.Mr.all(p) == List.concat(&2, PLN.PRow, [PLN.Plane.need(p), PLN.Plane.run(p), PLN.Plane.locks(p), PLN.Plane.routines(p), PLN.Plane.rooms(p), PLN.Plane.idle(p), PLN.Plane.bots(p)]) : List<&2, PLN.PRow>}
+
+# The body cache carries no independent sidebar or timeline state.
+law mail_body_kept_output:
+  for k: String
+  for +o: L.Out
+  for at: Nat
+  for due: Nat
+  {MM.BotM.out(MM.BotM.kept(MM.BotM{k, o, at, due, False{}})) == o : L.Out}
+
+law mail_age_relative_deadline:
+  {MM.BotM.age_due(160n, 101n) == 161n : Nat}
+
+# Reusing the window's exact sidebar index preserves the complete plane.
+law mail_plane_indexed_build:
+  for +u: U.Ui
+  {BV.Bv.plane.build.ix(True{}, u, U.Side.ix(U.Ui.state(u))) == BV.Bv.plane.build(True{}, u) : PLN.Plane}
+
+law mail_plane_indexed_hidden:
+  for +u: U.Ui
+  for ix: U.SIx
+  {BV.Bv.plane.build.ix(False{}, u, ix) == BV.Bv.plane.none() : PLN.Plane}
+# Browser provenance is mandatory even when a connection is otherwise trusted.
+law auth_foreign_origin_denied:
+  for +trusted: Bool
+  for +path: String
+  for +token: String
+  {AUTH.Auth.allowed(trusted, [HTTPAUTH.Header{"origin", "https://foreign.example"}, HTTPAUTH.Header{"host", "localhost:3787"}], path, token) == False{} : Bool}
+
+law auth_empty_remote_token_denied:
+  {AUTH.Auth.allowed(False{}, Nil{}, "/ws?token=", "") == False{} : Bool}
+
+law auth_cookie_prefix_denied:
+  {AUTH.Auth.allowed(False{}, [HTTPAUTH.Header{"cookie", "bp_token=secret-extra"}], "/ws", "secret") == False{} : Bool}
+# ---- PCB viewer text ----
+law pcb2_hidden_text_draws_nothing:
+  for +at: B.Pt
+  for +angle: F32
+  for +x: KSEX.Sx
+  for +text: String
+  for +up: Bool
+  for +key: String
+  for +sig: U32
+  for +ctx: String
+  {PCB2.Text.visible.k(True{}, at, angle, x, text, up, key, sig, ctx) == Nil{} : List<&2, B.Item>}

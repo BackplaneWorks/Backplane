@@ -17,6 +17,7 @@ import ./theme.bend as T
 import ./viewer.bend as V
 import ../server/plot.bend as PV
 import ../core/board.bend as B
+import ../core/pcb2d.bend as P2
 import ../gfx/draw.bend as D
 import ../server/kicad.bend as K
 import ../gfx/text.bend as X
@@ -50,6 +51,8 @@ import ../core/rview.bend as RV
 import ../server/git.bend as GT
 import ../server/review.bend as RVC
 import ../core/cef.bend as CF
+import ../core/cli.bend as CLI
+import ../server/main.bend as SV
 
 # `backplane`: the hub, the web server (for other devices), and the native
 # window as client 0. Window events and hub messages meet in one queue; a
@@ -136,14 +139,14 @@ def TieKeep.with_cache(ks: List<&2, TieKeep>, cs: List<&2, U.HubView>) -> List<&
 # more fields than an arity of 255, main.bend fails to build past it), and
 # the posts on show wrapped (a room's, a bot's elsewhere: BV.Bv.wraps)
 type Kept is Data:
-  Kept{frames: TI.Frames, memos: List<&2, L.TLMemo>, cats: Map<&2, CA.CatF>, parks: List<&2, N.Park>, wraps: Map<&2, BV.PW>, front: List<&2, BV.Fronted>, touch: List<&2, MM.TouchK>, mm: List<&2, MM.MainM>, sm: List<&2, MM.SideM>, ixs: List<&2, MM.IxK>, brs: List<&2, BV.BRows>}
+  Kept{frames: TI.Frames, memos: List<&2, L.TLMemo>, cats: Map<&2, CA.CatF>, parks: List<&2, N.Park>, wraps: Map<&2, BV.PW>, front: List<&2, BV.Fronted>, touch: List<&2, MM.TouchK>, mm: List<&2, MM.MainM>, sm: List<&2, MM.SideM>, ixs: List<&2, MM.IxK>, brs: List<&2, BV.BRows>, mks: List<&2, String>}
 
 # the boards being watched and the fonts
 type Aux is Data:
   Aux{watched: List<&2, String>, ty: List<&2, L.Ty>, tie: Tie, kept: List<&2, Kept>}
 
 def Kept.none() -> Kept:
-  Kept{TI.FNone{}, Nil{}, CA.Cats.none(), [N.Park.init()], BV.Bv.wraps.none(), Nil{}, Nil{}, Nil{}, Nil{}, Nil{}, Nil{}}
+  Kept{TI.FNone{}, Nil{}, CA.Cats.none(), [N.Park.init()], BV.Bv.wraps.none(), Nil{}, Nil{}, Nil{}, Nil{}, Nil{}, Nil{}, Nil{}}
 
 def Kept.of(ks: List<&2, Kept>) -> Kept:
   match ks:
@@ -1123,13 +1126,13 @@ def Aux.with_kept(a: Aux, k: Kept) -> Aux:
 
 def Kept.touch(k: Kept) -> MM.TouchK:
   match k:
-    case Kept{_, _, _, _, _, _, tk, _, _, _, _}:
+    case Kept{_, _, _, _, _, _, tk, _, _, _, _, _}:
       MM.TouchK.of(tk)
 
 def Kept.with_touch(k: Kept, t: MM.TouchK) -> Kept:
   match k:
-    case Kept{f, m, cs, pk, wr, fr, _, mmm, smm, ixx, brr}:
-      Kept{f, m, cs, pk, wr, fr, [t], mmm, smm, ixx, brr}
+    case Kept{f, m, cs, pk, wr, fr, _, mmm, smm, ixx, brr, mk}:
+      Kept{f, m, cs, pk, wr, fr, [t], mmm, smm, ixx, brr, mk}
 
 def Aux.touch(a: Aux) -> MM.TouchK:
   Kept.touch(Aux.kept(a))
@@ -1399,7 +1402,7 @@ def Watch.parse.k(sch: Bool, bs: List<&2, U32>) -> Maybe<&2, List<&2, B.Item>>:
     case True{}:
       SC.Sch.items(bs)
     case False{}:
-      B.Board.items(bs)
+      P2.Pcb2.items(bs)
 
 def Watch.parse(+kind: U32, bs: List<&2, U32>) -> Maybe<&2, List<&2, B.Item>>:
   Watch.parse.k(U32.is_eq(kind, 1), bs)
@@ -2023,13 +2026,13 @@ def Shell.image(pa: Bool, +ops: List<&2, R.Op>, +vw: V.Vw, +ww: U32, +hh: U32, +
 
 def Kept.frames(k: Kept) -> TI.Frames:
   match k:
-    case Kept{f, _, _, _, _, _, _, _, _, _, _}:
+    case Kept{f, _, _, _, _, _, _, _, _, _, _, _}:
       f
 
 def Kept.with_frames(k: Kept, f: TI.Frames) -> Kept:
   match k:
-    case Kept{_, m, cs, pk, wr, fr, tk, mmm, smm, ixx, brr}:
-      Kept{f, m, cs, pk, wr, fr, tk, mmm, smm, ixx, brr}
+    case Kept{_, m, cs, pk, wr, fr, tk, mmm, smm, ixx, brr, mk}:
+      Kept{f, m, cs, pk, wr, fr, tk, mmm, smm, ixx, brr, mk}
 
 def Aux.frames(a: Aux) -> TI.Frames:
   Kept.frames(Aux.kept(a))
@@ -2039,13 +2042,13 @@ def Aux.with_frames(+a: Aux, f: TI.Frames) -> Aux:
 
 def Kept.memos(k: Kept) -> List<&2, L.TLMemo>:
   match k:
-    case Kept{_, m, _, _, _, _, _, _, _, _, _}:
+    case Kept{_, m, _, _, _, _, _, _, _, _, _, _}:
       m
 
 def Kept.with_memos(k: Kept, m: List<&2, L.TLMemo>) -> Kept:
   match k:
-    case Kept{f, _, cs, pk, wr, fr, tk, mmm, smm, ixx, brr}:
-      Kept{f, m, cs, pk, wr, fr, tk, mmm, smm, ixx, brr}
+    case Kept{f, _, cs, pk, wr, fr, tk, mmm, smm, ixx, brr, mk}:
+      Kept{f, m, cs, pk, wr, fr, tk, mmm, smm, ixx, brr, mk}
 
 def Aux.memos(a: Aux) -> List<&2, L.TLMemo>:
   Kept.memos(Aux.kept(a))
@@ -2055,13 +2058,13 @@ def Aux.with_memos(+a: Aux, m: List<&2, L.TLMemo>) -> Aux:
 
 def Kept.cats(k: Kept) -> Map<&2, CA.CatF>:
   match k:
-    case Kept{_, _, cs, _, _, _, _, _, _, _, _}:
+    case Kept{_, _, cs, _, _, _, _, _, _, _, _, _}:
       cs
 
 def Kept.with_cats(k: Kept, cs: Map<&2, CA.CatF>) -> Kept:
   match k:
-    case Kept{f, m, _, pk, wr, fr, tk, mmm, smm, ixx, brr}:
-      Kept{f, m, cs, pk, wr, fr, tk, mmm, smm, ixx, brr}
+    case Kept{f, m, _, pk, wr, fr, tk, mmm, smm, ixx, brr, mk}:
+      Kept{f, m, cs, pk, wr, fr, tk, mmm, smm, ixx, brr, mk}
 
 def Aux.cats(a: Aux) -> Map<&2, CA.CatF>:
   Kept.cats(Aux.kept(a))
@@ -2071,13 +2074,13 @@ def Aux.with_cats(+a: Aux, cs: Map<&2, CA.CatF>) -> Aux:
 
 def Kept.wraps(k: Kept) -> Map<&2, BV.PW>:
   match k:
-    case Kept{_, _, _, _, wr, _, _, _, _, _, _}:
+    case Kept{_, _, _, _, wr, _, _, _, _, _, _, _}:
       wr
 
 def Kept.with_wraps(k: Kept, wr: Map<&2, BV.PW>) -> Kept:
   match k:
-    case Kept{f, m, cs, pk, _, fr, tk, mmm, smm, ixx, brr}:
-      Kept{f, m, cs, pk, wr, fr, tk, mmm, smm, ixx, brr}
+    case Kept{f, m, cs, pk, _, fr, tk, mmm, smm, ixx, brr, mk}:
+      Kept{f, m, cs, pk, wr, fr, tk, mmm, smm, ixx, brr, mk}
 
 def Aux.wraps(a: Aux) -> Map<&2, BV.PW>:
   Kept.wraps(Aux.kept(a))
@@ -2086,13 +2089,13 @@ def Aux.wraps(a: Aux) -> Map<&2, BV.PW>:
 # none: cat frames are whole frames)
 def Kept.front(k: Kept) -> List<&2, BV.Fronted>:
   match k:
-    case Kept{_, _, _, _, _, fr, _, _, _, _, _}:
+    case Kept{_, _, _, _, _, fr, _, _, _, _, _, _}:
       fr
 
 def Kept.with_front(k: Kept, fr: List<&2, BV.Fronted>) -> Kept:
   match k:
-    case Kept{f, m, cs, pk, wr, _, tk, mmm, smm, ixx, brr}:
-      Kept{f, m, cs, pk, wr, fr, tk, mmm, smm, ixx, brr}
+    case Kept{f, m, cs, pk, wr, _, tk, mmm, smm, ixx, brr, mk}:
+      Kept{f, m, cs, pk, wr, fr, tk, mmm, smm, ixx, brr, mk}
 
 def Aux.front(a: Aux) -> List<&2, BV.Fronted>:
   Kept.front(Aux.kept(a))
@@ -2103,23 +2106,23 @@ def Aux.with_front(+a: Aux, fr: List<&2, BV.Fronted>) -> Aux:
 # what hub messages touched (MM.TouchK) and the main area's memo (MM.MainM)
 def Kept.mm(k: Kept) -> List<&2, MM.MainM>:
   match k:
-    case Kept{_, _, _, _, _, _, _, mmm, _, _, _}:
+    case Kept{_, _, _, _, _, _, _, mmm, _, _, _, _}:
       mmm
 
 def Kept.with_mm(k: Kept, mmm: List<&2, MM.MainM>) -> Kept:
   match k:
-    case Kept{f, m, cs, pk, wr, fr, tk, _, smm, ixx, brr}:
-      Kept{f, m, cs, pk, wr, fr, tk, mmm, smm, ixx, brr}
+    case Kept{f, m, cs, pk, wr, fr, tk, _, smm, ixx, brr, mk}:
+      Kept{f, m, cs, pk, wr, fr, tk, mmm, smm, ixx, brr, mk}
 
 def Kept.sm(k: Kept) -> List<&2, MM.SideM>:
   match k:
-    case Kept{_, _, _, _, _, _, _, _, smm, _, _}:
+    case Kept{_, _, _, _, _, _, _, _, smm, _, _, _}:
       smm
 
 def Kept.with_sm(k: Kept, smm: List<&2, MM.SideM>) -> Kept:
   match k:
-    case Kept{f, m, cs, pk, wr, fr, tk, mmm, _, ixx, brr}:
-      Kept{f, m, cs, pk, wr, fr, tk, mmm, smm, ixx, brr}
+    case Kept{f, m, cs, pk, wr, fr, tk, mmm, _, ixx, brr, mk}:
+      Kept{f, m, cs, pk, wr, fr, tk, mmm, smm, ixx, brr, mk}
 
 def Aux.sm(a: Aux) -> List<&2, MM.SideM>:
   Kept.sm(Aux.kept(a))
@@ -2129,13 +2132,13 @@ def Aux.with_sm(+a: Aux, smm: List<&2, MM.SideM>) -> Aux:
 
 def Kept.ixs(k: Kept) -> List<&2, MM.IxK>:
   match k:
-    case Kept{_, _, _, _, _, _, _, _, _, ixx, _}:
+    case Kept{_, _, _, _, _, _, _, _, _, ixx, _, _}:
       ixx
 
 def Kept.with_ixs(k: Kept, ixx: List<&2, MM.IxK>) -> Kept:
   match k:
-    case Kept{f, m, cs, pk, wr, fr, tk, mmm, smm, _, brr}:
-      Kept{f, m, cs, pk, wr, fr, tk, mmm, smm, ixx, brr}
+    case Kept{f, m, cs, pk, wr, fr, tk, mmm, smm, _, brr, mk}:
+      Kept{f, m, cs, pk, wr, fr, tk, mmm, smm, ixx, brr, mk}
 
 def Aux.ixs(a: Aux) -> List<&2, MM.IxK>:
   Kept.ixs(Aux.kept(a))
@@ -2145,16 +2148,33 @@ def Aux.with_ixs(+a: Aux, ixx: List<&2, MM.IxK>) -> Aux:
 
 def Kept.brs(k: Kept) -> List<&2, BV.BRows>:
   match k:
-    case Kept{_, _, _, _, _, _, _, _, _, _, brr}:
+    case Kept{_, _, _, _, _, _, _, _, _, _, brr, _}:
       brr
 
 def Kept.with_brs(k: Kept, brr: List<&2, BV.BRows>) -> Kept:
   match k:
-    case Kept{f, m, cs, pk, wr, fr, tk, mmm, smm, ixx, _}:
-      Kept{f, m, cs, pk, wr, fr, tk, mmm, smm, ixx, brr}
+    case Kept{f, m, cs, pk, wr, fr, tk, mmm, smm, ixx, _, mk}:
+      Kept{f, m, cs, pk, wr, fr, tk, mmm, smm, ixx, brr, mk}
 
 def Aux.with_brs(+a: Aux, brr: List<&2, BV.BRows>) -> Aux:
   Aux.with_kept(a, Kept.with_brs(Aux.kept(a), brr))
+
+# the key the timeline's memos were last brought up to (MM.Mm.tlkey)
+def Kept.mks(k: Kept) -> List<&2, String>:
+  match k:
+    case Kept{_, _, _, _, _, _, _, _, _, _, _, mk}:
+      mk
+
+def Kept.with_mks(k: Kept, mk: List<&2, String>) -> Kept:
+  match k:
+    case Kept{f, m, cs, pk, wr, fr, tk, mmm, smm, ixx, brr, _}:
+      Kept{f, m, cs, pk, wr, fr, tk, mmm, smm, ixx, brr, mk}
+
+def Aux.mks(+a: Aux) -> List<&2, String>:
+  Kept.mks(Aux.kept(a))
+
+def Aux.with_mks(+a: Aux, mk: List<&2, String>) -> Aux:
+  Aux.with_kept(a, Kept.with_mks(Aux.kept(a), mk))
 
 # the cats' rows of this frame (made once by Shell.paint)
 def Aux.br.k(ks: List<&2, BV.BRows>, +n: N.Nui) -> BV.BRows:
@@ -2463,7 +2483,8 @@ def Shell.paint.fr(fr: BV.Fronted, +hs: List<&2, N.Hit>, +oh: List<&2, N.Hit>, +
 def Shell.paint.out(o: L.Out, +oh: List<&2, N.Hit>, +n: N.Nui, w: Window, +q: Chan(ShellMsg), +i: Chan(S.Msg), +wa: Aux, +epoch: Nat, +ms: Nat, +t0: U32, +t2: U32) -> IO(Shell):
   match o:
     case L.Out{+ops, +hs}:
-      Shell.paint.fr(BV.Fronted.of(ops, hs, Aux.cats(wa), N.Nui.ms_of(n)), hs, oh, n, w, q, i, wa, epoch, ms, t0, t2)
+      +wc : Aux = Aux.with_cats(wa, BV.Spot.warm(BV.Spot.all(hs), Aux.cats(wa), BV.Bv.clock.of(n)))
+      Shell.paint.fr(BV.Fronted.of(ops, hs, Aux.cats(wc), N.Nui.ms_of(n)), hs, oh, n, w, q, i, wc, epoch, ms, t0, t2)
 
 # how many ops a layout made (counting them also finishes the layout)
 def Lay.nops(o: L.Out) -> Nat:
@@ -2497,15 +2518,35 @@ def Shell.memos.of(ty: L.Ty, +n: N.Nui, ms: List<&2, L.TLMemo>) -> List<&2, L.TL
 # shows was touched (MM.Mm.main); a bot's or a room's main area is laid
 # out as before and not kept
 type FrameM is Data:
-  FrameM{o: L.Out, mm: List<&2, MM.MainM>, hit: Nat, sm: List<&2, MM.SideM>}
+  FrameM{o: L.Out, mm: List<&2, MM.MainM>, hit: Nat, sm: List<&2, MM.SideM>, bot_hit: Nat}
 
 # the sidebar's body: the memo's while its key holds, else laid out
+# the memos brought up to this frame, or with only the streamed reply's
+# settled part brought up when the open thread's entries cannot have
+# changed since the last frame (MM.Mm.tlkey unchanged: MM.Mm.memos.live)
+def Shell.memos.k(same: Bool, +ty: L.Ty, +n: N.Nui, ms: List<&2, L.TLMemo>) -> List<&2, L.TLMemo>:
+  match same:
+    case True{}:
+      MM.Mm.memos.live(ty, n, ms)
+    case False{}:
+      Shell.memos.of(ty, n, ms)
+
+def Shell.memos.at(+key: String, +ty: L.Ty, +n: N.Nui, +wa: Aux) -> List<&2, L.TLMemo>:
+  Shell.memos.k(MM.Mm.tlkey.same(key, Aux.mks(wa)), ty, n, Aux.memos(wa))
+
+def SideK.painted(key: String, +input: MM.SideInput, cats: Map<&2, CA.CatF>, wraps: Map<&2, BV.PW>, br: BV.BRows, paint: List<&2, MM.SidePaint>) -> MM.SideM:
+  MM.SideM.from(key, BV.Bv.side.rows.ixr(~(List<&2, MM.SidePaint>), ~MM.SideM.row,
+    MM.SideInput.ty(input), cats, wraps, MM.SideInput.nui(input), MM.SideInput.index(input), br, paint))
+
+def SideK.rows(key: String, +input: MM.SideInput, cats: Map<&2, CA.CatF>, wraps: Map<&2, BV.PW>, br: BV.BRows, ms: List<&2, MM.SideM>) -> MM.SideM:
+  SideK.painted(key, input, cats, wraps, br, MM.SideInput.paint(input, ms))
+
 def SideK.of(hit: Bool, +key: String, ms: List<&2, MM.SideM>, +ty: L.Ty, +cats: Map<&2, CA.CatF>, +wraps: Map<&2, BV.PW>, +n: N.Nui, +ix: U.SIx, +br: BV.BRows) -> MM.SideM:
   match hit:
     case True{}:
-      MM.SideM{key, MM.SideM.out(ms)}
+      MM.SideM.of(ms)
     case False{}:
-      MM.SideM{key, BV.Bv.side.a.ixr(ty, cats, wraps, n, ix, br)}
+      SideK.rows(key, MM.SideInput{[ty], [n], [ix]}, cats, wraps, br, ms)
 
 def SideK.go(+key: String, +ms: List<&2, MM.SideM>, +ty: L.Ty, +cats: Map<&2, CA.CatF>, +wraps: Map<&2, BV.PW>, +n: N.Nui, +ix: U.SIx, +br: BV.BRows) -> MM.SideM:
   SideK.of(MM.SideM.same(key, ms), key, ms, ty, cats, wraps, n, ix, br)
@@ -2513,48 +2554,53 @@ def SideK.go(+key: String, +ms: List<&2, MM.SideM>, +ty: L.Ty, +cats: Map<&2, CA
 # the main area: a bot's or a room's (not kept), or the thread's from its
 # memo (MM.Mm.main)
 type Part is Data:
-  PBot{o: L.Out}
+  PBot{o: L.Out, body_hit: Nat}
   PMain{m: MM.MainM}
 
-def Part.of(bm: Maybe<&2, L.Out>, +mm: List<&2, MM.MainM>, +tc: MM.TouchK, +ty: L.Ty, +tlm: L.TLMemo, +n: N.Nui) -> Part:
+def Part.of(bm: Maybe<&2, L.Out>, body_hit: Nat, +mm: List<&2, MM.MainM>, +tc: MM.TouchK, +ty: L.Ty, +tlm: L.TLMemo, +n: N.Nui) -> Part:
   match bm:
     case Some{o}:
-      PBot{o}
+      PBot{o, body_hit}
     case None{}:
       PMain{MM.Mm.main(mm, ty, tlm, n, tc)}
 
-def FrameM.join(p: Part, sd: MM.SideM, +mm: List<&2, MM.MainM>, +ty: L.Ty, +tlm: L.TLMemo, +n: N.Nui) -> FrameM:
-  match p sd:
-    case PBot{o} MM.SideM{+sk, +so}:
-      FrameM{BV.Bv.frame.given(ty, tlm, n, Some{o}, so), Nil{}, 0n, [MM.SideM{sk, so}]}
-    case PMain{MM.MainM{+k, rk, rs, +o, +d}} MM.SideM{+sk, +so}:
-      FrameM{BV.Bv.frame.given(ty, tlm, n, Some{o}, so), MM.MainM.keep(MM.MainM{k, rk, rs, o, d}), Bool.pick(Nat, Bool.and(MM.MainM.same(k, mm), Nat.is_eq(d, MM.MainM.due(mm))), 1n, 0n), [MM.SideM{sk, so}]}
+def FrameM.join(p: Part, +sd: MM.SideM, +mm: List<&2, MM.MainM>, +ty: L.Ty, +tlm: L.TLMemo, +n: N.Nui) -> FrameM:
+  match p:
+    case PBot{o, h}:
+      FrameM{BV.Bv.frame.given(ty, tlm, n, Some{o}, MM.SideM.out([sd])), Nil{}, 0n, [sd], h}
+    case PMain{MM.MainM{+k, rk, rs, +o, +d}}:
+      FrameM{BV.Bv.frame.given(ty, tlm, n, Some{o}, MM.SideM.out([sd])), MM.MainM.keep(MM.MainM{k, rk, rs, o, d}), Bool.pick(Nat, Bool.and(MM.MainM.same(k, mm), Nat.is_eq(d, MM.MainM.due(mm))), 1n, 0n), [sd], 0n}
 
 # the main area and the sidebar's body at once (as Lay.frame.u lays them
 # out), each from its memo when its key holds
 def FrameM.lay(+mm: List<&2, MM.MainM>, sm: List<&2, MM.SideM>, +tc: MM.TouchK, +ty: L.Ty, +tlm: L.TLMemo, +cats: Map<&2, CA.CatF>, +wraps: Map<&2, BV.PW>, +n: N.Nui, +ix: U.SIx, +br: BV.BRows) -> FrameM:
-  p sd = Part.of(BV.Bv.main.w(ty, tlm, cats, wraps, n), mm, tc, ty, tlm, n) SideK.go(MM.Sm.key(n, tc), sm, ty, cats, wraps, n, ix, br)
+  p sd = Part.of(BV.Bv.main.w(ty, tlm, cats, wraps, n), BV.Bv.mail.hit(wraps, n), mm, tc, ty, tlm, n) SideK.go(MM.Sm.key(n, tc), sm, ty, cats, wraps, n, ix, br)
   FrameM.join(p, sd, mm, ty, tlm, n)
 
 def FrameM.out(f: FrameM) -> L.Out:
   match f:
-    case FrameM{o, _, _, _}:
+    case FrameM{o, _, _, _, _}:
       o
 
 def FrameM.mm(f: FrameM) -> List<&2, MM.MainM>:
   match f:
-    case FrameM{_, m, _, _}:
+    case FrameM{_, m, _, _, _}:
       m
 
 def FrameM.hit(f: FrameM) -> Nat:
   match f:
-    case FrameM{_, _, h, _}:
+    case FrameM{_, _, h, _, _}:
       h
 
 def FrameM.sm(f: FrameM) -> List<&2, MM.SideM>:
   match f:
-    case FrameM{_, _, _, x}:
+    case FrameM{_, _, _, x, _}:
       x
+
+# Body reuse is measured separately: bot headers and cats still change.
+def FrameM.bot_hit(f: FrameM) -> Nat:
+  match f:
+    case FrameM{_, _, _, _, h}: h
 
 # the frame again with the glyphs it wanted in the cache: the timeline's
 # memos and the posts' lines are made again (they were measured without
@@ -2590,6 +2636,7 @@ def Shell.paint.c(+cats: Map<&2, CA.CatF>, +memos: List<&2, L.TLMemo>, +oh: List
     tx : U32 <- PS.Perf.span(Bool.pick(String, Nat.is_eq(FrameM.hit(fm), 1n), "ui.layout.mm.hit", "ui.layout.mm.miss"), t1)
     PS.Perf.add("ui.ops", U32.from_nat(k))
     PS.Perf.add("ui.mm.hit", U32.from_nat(FrameM.hit(fm)))
+    PS.Perf.add("ui.mail.body.hit", U32.from_nat(FrameM.bot_hit(fm)))
     Shell.paint.want(X.Text.wants(Lay.ops(o), Nil{}), o, FrameM.mm(fm), FrameM.sm(fm), cats, memos, oh, n, w, q, i, wa, epoch, ms, t0, t2)
 
 def Shell.paint.m(+memos: List<&2, L.TLMemo>, +oh: List<&2, N.Hit>, +n: N.Nui, w: Window, +q: Chan(ShellMsg), +i: Chan(S.Msg), +wa: Aux, +epoch: Nat, +ms: Nat, +t0: U32, +t1: U32) -> IO(Shell):
@@ -2602,12 +2649,13 @@ def Shell.paint.go(+oh: List<&2, N.Hit>, +n: N.Nui, w: Window, +q: Chan(ShellMsg
   do IO<Shell>:
     +t0 : U32 <- PS.Perf.us()
     +wl : Aux = Aux.with_ty(wa, L.Ty.with_loc(Aux.ty(wa), U.Lang.loc(N.Nui.ui(n))))
-    +memos : List<&2, L.TLMemo> = Shell.memos.of(Aux.ty(wl), n, Aux.memos(wl))
+    +mk : String = MM.Mm.tlkey(n, Aux.touch(wl))
+    +memos : List<&2, L.TLMemo> = Shell.memos.at(mk, Aux.ty(wl), n, wl)
     +ixk : MM.IxK = MM.Ix.up(Aux.ixs(wl), Aux.touch(wl), N.Nui.ui(n))
     +ixn : Nat = MM.IxK.force(ixk)
     PS.Perf.add("ui.ix.n", U32.from_nat(Nat.mod(ixn, 1000000n)))
     +t1 : U32 <- PS.Perf.lap("ui.memo", t0)
-    Shell.paint.m(memos, oh, n, w, q, i, Aux.with_ixs(wl, [ixk]), epoch, ms, t0, t1)
+    Shell.paint.m(memos, oh, n, w, q, i, Aux.with_touch(Aux.with_mks(Aux.with_ixs(wl, [ixk]), [mk]), MM.TouchK.consumed(Aux.touch(wl), [MM.IxK.n(ixk)])), epoch, ms, t0, t1)
 
 def Shell.paint.k(+n0: N.Nui, w: Window, +q: Chan(ShellMsg), +i: Chan(S.Msg), wa: Aux, +epoch: Nat, +ms: Nat) -> IO(Shell):
   match n0:
@@ -2768,7 +2816,7 @@ def Shell.tick.shown(r: Window & Image & Image, +n: N.Nui, +q: Chan(ShellMsg), +
 def Shell.tick.fast(+sps: List<&2, BV.Spot>, +cs: List<&2, R.Op>, +n: N.Nui, w: Window, +q: Chan(ShellMsg), +i: Chan(S.Msg), +wa: Aux, +ms: Nat, +t0: U32) -> IO(Shell):
   do IO<Shell>:
     +n2 : N.Nui = BV.Bv.stamp(n, ms)
-    +cache : Map<&2, CA.CatF> = BV.Bv.warm(N.Nui.ui(n2), Aux.cats(wa), BV.Bv.clock.of(n2))
+    +cache : Map<&2, CA.CatF> = BV.Spot.warm(sps, BV.Bv.warm(N.Nui.ui(n2), Aux.cats(wa), BV.Bv.clock.of(n2)), BV.Bv.clock.of(n2))
     +cs2 : List<&2, R.Op> = L.Theme.ops(V.Look.ui(N.Nui.look(n2)), BV.Spot.all.ops(sps, cache, N.Nui.ms_of(n2)))
     +f : TI.Frames = TI.Frames.recat(Aux.frames(wa), cs, cs2)
     +img : Image = Frames.image(f)
@@ -2838,13 +2886,13 @@ def Shell.handle(a: Shell, m: ShellMsg) -> IO(Shell):
 
 def Kept.park(k: Kept) -> N.Park:
   match k:
-    case Kept{_, _, _, pk, _, _, _, _, _, _, _}:
+    case Kept{_, _, _, pk, _, _, _, _, _, _, _, _}:
       Maybe.default(&2, N.Park, List.head(&2, N.Park, pk), N.Park.init())
 
 def Kept.with_park(k: Kept, pk: N.Park) -> Kept:
   match k:
-    case Kept{f, m, cs, _, wr, fr, tk, mmm, smm, ixx, brr}:
-      Kept{f, m, cs, [pk], wr, fr, tk, mmm, smm, ixx, brr}
+    case Kept{f, m, cs, _, wr, fr, tk, mmm, smm, ixx, brr, mk}:
+      Kept{f, m, cs, [pk], wr, fr, tk, mmm, smm, ixx, brr, mk}
 
 def Aux.park(a: Aux) -> N.Park:
   Kept.park(Aux.kept(a))
@@ -3047,7 +3095,7 @@ def Start.detach.k(free: Bool, +held: String, +dir: String, +xs: List<&2, String
         r : P.Ran <- P.Proc.run("sh", List.append(&2, String, ["-c", Start.detach.sh(), "sh", log, EX.Exe.path(exe)], xs), "/")
         Start.detached(r, log)
     case False{}:
-      IO.print("Backplane already runs for " ++ dir ++ " (pid " ++ S.Lock.word(held, 0n) ++ ", port " ++ S.Lock.word(held, 1n) ++ "); nothing was started")
+      S.Lock.refuse(False{}, held, dir)
 
 # (a hub already running for the home is said before anything detaches)
 def Start.detach(+xs: List<&2, String>) -> IO(Unit):
@@ -3071,20 +3119,30 @@ def Start.window(headless: Bool) -> IO(Result<&1, &1, U32 & String, Window>):
     case False{}:
       W.Win.open("Backplane", 1400, 900)
 
-# the home's hub already runs (S.Lock): the window joins it on its port,
-# `--headless` says where it is and ends; else this process runs the hub
+# a window joins the home's hub on its port; with no window (no display)
+# there is nothing to join with: it is a second hub, and ends with status 1
+def Start.join(r: Result<&1, &1, U32 & String, Window>, +held: String, +cfg: S.Cfg, +drafts: String, +fq: Chan(L.Ty)) -> IO(Unit):
+  match r:
+    case Done{w}:
+      do IO<Unit>:
+        +lo : String = "http://" ++ S.Cfg.host(cfg) ++ ":" ++ S.Lock.word(held, 1n)
+        IO.print("Backplane already runs for " ++ S.Cfg.home(cfg) ++ " (pid " ++ S.Lock.word(held, 0n) ++ "): the window joins it at " ++ lo)
+        i : Chan(S.Msg) <- LK.Link.start(lo)
+        Shell.opened(Done{w}, i, drafts, fq, lo)
+    case Fail{_}:
+      S.Lock.refuse(False{}, held, S.Cfg.home(cfg))
+
+# the home's hub already runs (S.Lock, its flock): the window joins it on
+# its port, `--headless` says where it is and ends with status 1; else this
+# process holds the lock now and runs the hub
 def Start.hub(free: Bool, headless: Bool, +held: String, +cfg: S.Cfg, r: Result<&1, &1, U32 & String, Window>, +drafts: String, +fq: Chan(L.Ty)) -> IO(Unit):
   match free headless:
     case True{} _:
       S.Main.boot(cfg, False{}, i => Shell.opened(r, i, drafts, fq, ""))
     case False{} True{}:
-      IO.print("Backplane already runs for " ++ S.Cfg.home(cfg) ++ " (pid " ++ S.Lock.word(held, 0n) ++ "), serving http://" ++ S.Cfg.host(cfg) ++ ":" ++ S.Lock.word(held, 1n) ++ "/")
+      S.Lock.refuse(False{}, held, S.Cfg.home(cfg))
     case False{} False{}:
-      do IO<Unit>:
-        +lo : String = "http://" ++ S.Cfg.host(cfg) ++ ":" ++ S.Lock.word(held, 1n)
-        IO.print("Backplane already runs for " ++ S.Cfg.home(cfg) ++ " (pid " ++ S.Lock.word(held, 0n) ++ "): the window joins it at " ++ lo)
-        i : Chan(S.Msg) <- LK.Link.start(lo)
-        Shell.opened(r, i, drafts, fq, lo)
+      Start.join(r, held, cfg, drafts, fq)
 
 # the window opens first and the fonts load beside the hub's start, so
 # the first frame waits only for the log
@@ -3098,7 +3156,7 @@ def Start.run(+xs: List<&2, String>) -> IO(Unit):
     b : S.Boot <- S.Main.prepare(user, exe)
     +cfg : S.Cfg = S.Main.config(user, exe, Start.args(xs), b)
     +drafts : String = S.Cfg.home(cfg) ++ "/drafts"
-    +held : String <- S.Lock.find(S.Cfg.home(cfg))
+    +held : String <- S.Lock.take(S.Cfg.home(cfg), S.Cfg.port(cfg))
     Start.hub(String.is_empty(held), Start.headless(xs), held, cfg, r, drafts, fq)
 
 def Start.pick(detach: Bool, +xs: List<&2, String>) -> IO(Unit):
@@ -3125,9 +3183,30 @@ def start.go(+xs: List<&2, String>) -> IO(Unit):
 def start(args: List<String>) -> IO(Unit):
   start.go(S.Names.copy(args))
 
-# (`--plot KIND FILE` is the hub's own board reader, src/server/plot.bend;
-# `--review bom OLD NEW` design review's, src/server/review.bend)
-def main() -> IO(Unit):
+def main.go(u: Unit) -> IO(Unit):
   do IO<Unit>:
     args : List<String> <- IO.args()
     RVC.Rvc.main(args, a2 => PV.Pv.main(a2, a => start(a)))
+
+# (`--plot KIND FILE` is the hub's own board reader, src/server/plot.bend;
+# `--review bom OLD NEW` design review's, src/server/review.bend)
+# The command line is read strictly before anything else (core/cli.bend):
+# --help, --version or a bad flag never open a window or reach a hub.
+def main.app() -> IO(Unit):
+  do IO<Unit>:
+    a0 : List<String> <- IO.args()
+    S.Main.cli(CLI.Cli.of(CLI.Cli.args(a0)), u => main.go(u))
+
+# The server name keeps the server's own entry, including strict CLI,
+# lock ownership and restart handling. It never reaches window/font IO.
+def main.entry(server: Bool) -> IO(Unit):
+  match server:
+    case True{}:
+      SV.main()
+    case False{}:
+      main.app()
+
+def main() -> IO(Unit):
+  do IO<Unit>:
+    args : List<String> <- IO.args()
+    main.entry(EX.Exe.server(args))

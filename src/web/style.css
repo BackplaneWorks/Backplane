@@ -19,8 +19,8 @@
   --view: #08090b;
   --add-bg: #11331f;
   --del-bg: #32131a;
-  --mono: "Berkeley Mono", ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
-  --sans: "Berkeley Mono", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "Berkeley Mono", "Noto Sans Mono CJK JP", "Hiragino Sans", "Yu Gothic", ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  --sans: "Berkeley Mono", "Noto Sans Mono CJK JP", "Hiragino Sans", "Yu Gothic", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   color-scheme: dark;
 }
 
@@ -815,3 +815,8 @@ a.ref { color: inherit; text-decoration: none; cursor: text; overflow-wrap: anyw
 .kicad-export ul { margin: 12px 0; padding-left: 20px; max-height: 40vh; overflow: auto; }
 .kicad-export li { margin: 6px 0; white-space: pre-wrap; }
 .kicad-export .kn-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* Japanese uses normal CJK boundaries; long paths and API names still fit. */
+html:lang(ja) { line-break: strict; word-break: normal; }
+html:lang(ja) :is(.body, .set-label, .set-note, .bot-note, .ask-head, .ask-detail, .tour-body, .fm-note, .secret-line, .item-text) { overflow-wrap: anywhere; }
+html:lang(ja) :is(.set-text, .set-ctl) { min-width: 0; }

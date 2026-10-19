@@ -28,15 +28,19 @@ def KiCad.run(+cli: String, args: List<&2, String>) -> IO(P.Ran):
   Bool.pick(IO(P.Ran), String.is_empty(cli), IO.pure(P.Ran, P.Ran{127, KiCad.missing()}), P.Proc.run(cli, args, "/"))
 
 def KiCad.version() -> String:
-  "10.99.0-bp.2"
+  "10.99.0-bp.4"
 
 # the release that carries it and the archive in it (its compression is
 # whatever tar reads: .gz here; change the name when the release differs)
 def KiCad.release() -> String:
-  "backplane-kicad-v10.99.0-bp.2"
+  "backplane-kicad-v10.99.0-bp.4"
 
 def KiCad.asset() -> String:
   "backplane-kicad-linux-x86_64-" ++ KiCad.version() ++ ".tar.gz"
+
+# Published bp.4 runtime digest, verified by FORK against SHA256SUMS and GitHub.
+def KiCad.sha256() -> String:
+  "f60a71817d057f9dcf3faef632b2f85d06a613108dee23807c9de81aae97e0b4"
 
 # the KiStack commit to fall back on: the latest one found (KiStack.refresh)
 # is used once it is here
@@ -170,12 +174,34 @@ def Rt.paths(ps: List<&2, String>) -> List<&2, KCandidate>:
     case +p <> t:
       KCandidate{Bool.pick(String, String.is_empty(p), "./kicad-cli", p ++ "/kicad-cli"), "path"} <> Rt.paths(t)
 
-def Rt.candidates(+setting: String, +root: String, +explicit: String, +exe: String, +data: String, +user: String, +path: String, mac: Bool) -> List<&2, KCandidate>:
+# Keep older managed installs discoverable so the health notice offers
+# Update. The pinned install stays first; the rest are newest-first.
+def Rt.installed.keep.name(+name: String) -> Bool:
+  Bool.and(Bool.not(String.eq(name, KiCad.version())),
+    Nat.is_gt(KH.KH.part(String.split(name, '.'), 0n), 0n))
+
+def Rt.installed.keep(name: String) -> Bool:
+  Rt.installed.keep.name(name)
+
+def Rt.installed.before(a: String, b: String) -> Bool:
+  KH.KH.version.ge(a, b)
+
+def Rt.installed.paths(ns: List<&2, String>, +data: String) -> List<&2, KCandidate>:
+  match ns:
+    case Nil{}: Nil{}
+    case n <> t:
+      KCandidate{data ++ "/kicad/" ++ n ++ "/bin/kicad-cli", "installed"} <> Rt.installed.paths(t, data)
+
+def Rt.installed(ns: List<&2, String>, data: String) -> List<&2, KCandidate>:
+  Rt.installed.paths(List.sort(~String, ~Rt.installed.before, List.filter(~String, ~Rt.installed.keep, ns)), data)
+
+def Rt.candidates(+setting: String, +root: String, +explicit: String, +exe: String, +data: String, +user: String, +path: String, mac: Bool, older: List<&2, KCandidate>) -> List<&2, KCandidate>:
   List.concat(&2, KCandidate, [
     Bool.pick(List<&2, KCandidate>, String.is_empty(setting), Nil{}, [KCandidate{setting, "setting"}]),
     Bool.pick(List<&2, KCandidate>, String.is_empty(root), Nil{}, [KCandidate{root, "env"}]),
     Bool.pick(List<&2, KCandidate>, String.is_empty(explicit), Nil{}, [KCandidate{explicit, "env"}]),
     [KCandidate{exe ++ "/kicad/bin/kicad-cli", "bundled"}, KCandidate{data ++ "/kicad/" ++ KiCad.version() ++ "/bin/kicad-cli", "installed"}],
+    older,
     Bool.pick(List<&2, KCandidate>, mac, [KCandidate{"/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli", "app"}, KCandidate{user ++ "/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli", "app"}], Nil{}),
     Rt.paths(String.split(path, ':')), [KCandidate{"/usr/bin/kicad-cli", "system"}, KCandidate{"/usr/local/bin/kicad-cli", "system"}]])
 
@@ -199,7 +225,8 @@ def Rt.list(+setting: String, +explicit: String, +exe: String, +data: String) ->
     user : String <- Rt.env("HOME")
     path : String <- Rt.env("PATH")
     os : P.Ran <- P.Proc.run("uname", ["-sm"], "/")
-    return Rt.candidates(setting2, root, explicit2, exe, data, user, path, String.starts_with(Rt.platform(os), "Darwin"))
+    installed : List<&2, String> <- Io.names(data ++ "/kicad")
+    return Rt.candidates(setting2, root, explicit2, exe, data, user, path, String.starts_with(Rt.platform(os), "Darwin"), Rt.installed(installed, data))
 
 def Rt.stamp.k(r: Result<&1, &1, U32 & String, U32 & U32 & U32>) -> String:
   match r:
@@ -210,6 +237,20 @@ def Rt.stamp.k(r: Result<&1, &1, U32 & String, U32 & U32 & U32>) -> String:
 
 def Rt.stamp(path: String) -> IO(String):
   IO.bind(Result<&1, &1, U32 & String, U32 & U32 & U32>, String, H.FS.stat(path), r => IO.pure(String, Rt.stamp.k(r)))
+
+# Watch the selected candidate and every candidate that could override it.
+# Paths after it (for example a login shell's extra PATH entries) cannot
+# change discovery, so they must not invalidate an otherwise valid cache.
+def Rt.watch.next(selected: Bool, cs: List<&2, KCandidate>) -> List<&2, KCandidate>:
+  match selected:
+    case True{}: Nil{}
+    case False{}: cs
+
+def Rt.watch(cs: List<&2, KCandidate>, +cli: String) -> List<&2, KCandidate>:
+  match cs:
+    case Nil{}: Nil{}
+    case KCandidate{+p, source} <> t:
+      KCandidate{p, source} <> Rt.watch.next(String.eq(p, cli), Rt.watch(t, cli))
 
 # Include manifest and parent-directory stamps: installing or replacing
 # a runtime (including one ahead of the chosen CLI) invalidates the cache.
@@ -261,8 +302,14 @@ def Rt.json(rt: Rt) -> J.Json:
     case Rt{c, f, v, co, h}:
       KH.KH.put.obj(KH.KH.put.obj(KH.KH.put.obj(KH.KH.put.obj(h, "cli", J.Str{c}), "fork", J.Flag{f}), "version", J.Str{v}), "commit", J.Str{co})
 
+# A cache written by an older app must satisfy this app's minimum too.
+def Rt.cache.status(+o: J.Json) -> String:
+  KH.KH.status(Bool.not(String.eq(J.Json.get_str(o, "status", "checking"), "missing")),
+    J.Json.get_bool(o, "runs", False{}), J.Json.get_bool(o, "fork", False{}),
+    J.Json.get_str(o, "version", ""), J.Json.get_nat(o, "api", 0n))
+
 def Rt.cached(+o: J.Json) -> Rt:
-  Rt{J.Json.get_str(o, "cli", ""), J.Json.get_bool(o, "fork", False{}), J.Json.get_str(o, "version", ""), J.Json.get_str(o, "commit", ""), o}
+  Rt{J.Json.get_str(o, "cli", ""), J.Json.get_bool(o, "fork", False{}), J.Json.get_str(o, "version", ""), J.Json.get_str(o, "commit", ""), KH.KH.put.obj(o, "status", J.Str{Rt.cache.status(o)})}
 
 def Rt.boot.k(valid: Bool, o: J.Json, +stamp: String, cs: List<&2, KCandidate>) -> IO(Rt):
   match valid:
@@ -273,9 +320,9 @@ def Rt.boot(+home: String, +setting: String, +exe: String) -> IO(Rt):
   do IO<Rt>:
     explicit : String <- Rt.env("BACKPLANE_KICAD_CLI")
     +cs : List<&2, KCandidate> <- Rt.list(setting, explicit, exe, home)
-    +stamp : String <- Rt.stamps(cs)
     text : String <- Io.text(home ++ "/kicad-health.json")
     +o : J.Json = Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{})
+    +stamp : String <- Rt.stamps(Rt.watch(cs, J.Json.get_str(o, "cli", "")))
     Rt.boot.k(Bool.and(String.eq(J.Json.get_str(o, "stamp", "?"), stamp), String.eq(J.Json.get_str(o, "setting", "?"), setting)), o, stamp, cs)
 
 def Rt.checked(rt: Rt, +found: Bool, r: P.Ran) -> Rt:
@@ -283,7 +330,7 @@ def Rt.checked(rt: Rt, +found: Bool, r: P.Ran) -> Rt:
     case Rt{+cli, +fork, +version, commit, +h} P.Ran{+code, +out}:
       +v = Bool.pick(String, fork, version, Bool.pick(String, U32.is_eq(code, 0), KH.KH.why(out), ""))
       +runs = U32.is_eq(code, 0)
-      +status = KH.KH.status(found, runs, fork, J.Json.get_str(h, "kicadVersion", v), J.Json.get_nat(h, "api", 0n))
+      +status = KH.KH.status(found, runs, fork, v, J.Json.get_nat(h, "api", 0n))
       +why = Bool.pick(String, found, Bool.pick(String, runs, "", Bool.pick(String, String.is_empty(KH.KH.why(out)), "kicad-cli version failed or timed out", KH.KH.why(out))), "no kicad-cli at " ++ cli)
       Rt{cli, fork, v, commit, KH.KH.put.obj(KH.KH.put.obj(KH.KH.put.obj(h, "runs", J.Flag{runs}), "status", J.Str{status}), "why", J.Str{why})}
 
@@ -330,14 +377,15 @@ def Rt.refresh.k(check: Bool, +home: String, +setting: String, +stamp: String, +
     case True{}:
       do IO<Rt>:
         rt : Rt <- Rt.choose(cs)
-        rt2 : Rt <- Rt.run(rt)
-        return Rt.set(Rt.set(Rt.set(rt2, "setting", J.Str{setting}), "stamp", J.Str{stamp}), "can_install", J.Flag{can})
+        +rt2 : Rt <- Rt.run(rt)
+        chosen_stamp : String <- Rt.stamps(Rt.watch(cs, Rt.cli(rt2)))
+        return Rt.set(Rt.set(Rt.set(rt2, "setting", J.Str{setting}), "stamp", J.Str{chosen_stamp}), "can_install", J.Flag{can})
 
 def Rt.refresh(+home: String, +setting: String, +exe: String, force: Bool, +last: Rt) -> IO(Rt):
   do IO<Rt>:
     explicit : String <- Rt.env("BACKPLANE_KICAD_CLI")
     +cs : List<&2, KCandidate> <- Rt.list(setting, explicit, exe, home)
-    +stamp : String <- Rt.stamps(cs)
+    +stamp : String <- Rt.stamps(Rt.watch(cs, Rt.cli(last)))
     os : P.Ran <- P.Proc.run("uname", ["-sm"], "/")
     Rt.refresh.k(Bool.or(force, Bool.or(String.eq(Rt.status(last), "checking"), Bool.not(String.eq(J.Json.get_str(Rt.health(last), "stamp", ""), stamp)))), home, setting, stamp, cs, String.eq(Rt.platform(os), "Linux x86_64"), last)
 
@@ -515,8 +563,8 @@ def KiCad.install(+data: String) -> IO(String):
     +base : String = "https://github.com/i2cjak/Backplane_KiCad/releases/download/" ++ KiCad.release() ++ "/"
     mk : Result<&1, &1, U32 & String, Unit> <- H.FS.mkdirs(dir)
     r : P.Ran <- P.Proc.run("sh", ["-c",
-      "set -e; cd \"$1\"; curl -fsSL -o pkg.tgz \"$2$3\"; curl -fsSL -o SUMS \"$2SHA256SUMS\"; want=$(awk -v n=\"$3\" '$2 == n || $2 == \"./\" n { print $1 }' SUMS); got=$(sha256sum pkg.tgz | cut -d' ' -f1); [ \"$want\" = \"$got\" ] || { echo checksum mismatch; exit 1; }; tar -xf pkg.tgz --strip-components=1; rm pkg.tgz SUMS",
-      "sh", dir, base, name], "/")
+      "set -e; cd \"$1\"; curl -fsSL -o pkg.tgz \"$2$3\"; curl -fsSL -o SUMS \"$2SHA256SUMS\"; want=$(awk -v n=\"$3\" '$2 == n || $2 == \"./\" n { print $1 }' SUMS); got=$(sha256sum pkg.tgz | cut -d' ' -f1); [ \"$want\" = \"$got\" ] && [ \"$got\" = \"$4\" ] || { echo checksum mismatch; exit 1; }; tar -xf pkg.tgz --strip-components=1; rm pkg.tgz SUMS",
+      "sh", dir, base, name, KiCad.sha256()], "/")
     return KiCad.install.k(r)
 
 # Opening a project

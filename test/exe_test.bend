@@ -4,6 +4,14 @@ import ../src/core/exe.bend as EX
 
 def main() -> IO(Unit):
   do IO<Unit>:
+    C.Check.str("server PATH name", Bool.show(EX.Exe.server(["backplane-serve"])), "True")
+    C.Check.str("server relative path", Bool.show(EX.Exe.server(["dist/backplane-serve", "--port", "3799"])), "True")
+    C.Check.str("server absolute path", Bool.show(EX.Exe.server(["/tmp/bin/backplane-serve"])), "True")
+    C.Check.str("app entry", Bool.show(EX.Exe.server(["/tmp/backplane"])), "False")
+    C.Check.str("argument is not program", Bool.show(EX.Exe.server(["backplane", "backplane-serve"])), "False")
+    C.Check.str("suffix is not basename", Bool.show(EX.Exe.server(["/tmp/my-backplane-serve"])), "False")
+    C.Check.str("trailing text is not server", Bool.show(EX.Exe.server(["backplane-serve-old"])), "False")
+    C.Check.str("no executable name", Bool.show(EX.Exe.server([])), "False")
     C.Check.str("path deleted", EX.Exe.path("/a/backplane (deleted)"), "/a/backplane")
     C.Check.str("child deleted", EX.Exe.child("/a/backplane (deleted)"), "/proc/self/exe")
     C.Check.str("gone deleted", Bool.show(EX.Exe.gone("/a/backplane (deleted)")), "True")

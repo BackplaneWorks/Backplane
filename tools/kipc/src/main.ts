@@ -14,7 +14,8 @@ import { decodeResponse, encodeRequest } from "./codec.ts";
 import { load, NO_SCHEMA } from "./schema.ts";
 import { createInterface } from "node:readline";
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 
 const args = process.argv.slice(2);
 const opt = (n: string) => {
@@ -59,6 +60,24 @@ function wrap(argv: string[], memory?: string): string[] {
   return [sd, "--user", "--scope", "--quiet", "-p", `MemoryMax=${memory}`, "--", ...argv];
 }
 
+// KiCad may choose api-<pid>.sock when the requested path is occupied.
+// Only sockets created by this launch can supply a missing stdout ready line.
+function socketsAt(requested: string): Map<string, string> {
+  const sockets = new Map<string, string>();
+  if (!requested) return sockets;
+  try {
+    for (const name of readdirSync(dirname(requested))) {
+      if (name !== basename(requested) && !/^api-[0-9]+\.sock$/.test(name)) continue;
+      const path = join(dirname(requested), name);
+      try {
+        const stat = statSync(path);
+        if (stat.isSocket()) sockets.set(path, `${stat.dev}:${stat.ino}:${stat.birthtimeMs}`);
+      } catch { /* the server can replace a stale socket during this scan */ }
+    }
+  } catch { /* no socket directory yet */ }
+  return sockets;
+}
+
 function startServer(key: string, argv0: string[], memory?: string) {
   const argv = wrap(argv0, memory);
   const tail: string[] = [];
@@ -73,10 +92,31 @@ function startServer(key: string, argv0: string[], memory?: string) {
     const t = (extra ? [extra, ...tail] : tail).join("\n");
     out({ event: "exit", key, code, tail: t.slice(-400) });
   };
+  const socketArg = argv0.indexOf("--socket");
+  const at = socketArg >= 0 ? argv0[socketArg + 1] ?? "" : "";
+  const before = socketsAt(at);
   const child = spawn(argv[0], argv.slice(1), { stdio: ["ignore", "pipe", "pipe"] });
   child.on("error", (e) => end(127, String(e.message ?? e)));
+  // KiCad buffers stdout on a pipe. Report its freshly bound socket,
+  // then the hub still requires Ping and a matching GetVersion.
+  let said = false;
+  if (at) {
+    const poll = setInterval(() => {
+      if (done || said || child.exitCode !== null) return clearInterval(poll);
+      for (const [path, identity] of socketsAt(at)) {
+        if (before.get(path) === identity) continue;
+        said = true;
+        clearInterval(poll);
+        out({ event: "line", key, text: `KiCad API server listening at ${path}` });
+        break;
+      }
+    }, 100);
+  }
   createInterface({ input: child.stdout! }).on("line", (l) => {
     keep(l);
+    const ready = l.startsWith("KiCad API server listening at ");
+    if (ready && said) return;
+    if (ready) said = true;
     out({ event: "line", key, text: l });
   });
   createInterface({ input: child.stderr! }).on("line", keep);

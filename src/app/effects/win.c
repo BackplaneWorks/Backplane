@@ -1796,6 +1796,421 @@ static void __attribute__((constructor)) win_title_use(void) {
 
 #endif
 
+#elif defined(__CYGWIN__)
+
+// Windows desktop backend. Cygwin supplies the POSIX runtime used by Bend;
+// the window, input, clipboard and presentation use Win32, without X11.
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#include <windowsx.h>
+#include <wchar.h>
+#include <shellapi.h>
+#include <imm.h>
+#include <sys/cygwin.h>
+#include <fcntl.h>
+
+#define BPW_PAINT (WM_APP + 1)
+#define BPW_COPY  (WM_APP + 2)
+#define BPW_PASTE (WM_APP + 3)
+#define BPW_TITLE (WM_APP + 4)
+
+typedef struct {
+  HWND hwnd;
+  pthread_mutex_t lock;
+  pthread_cond_t ready;
+  int opened, error, notify[2];
+  u32 width, height, pw, ph;
+  u32 *events, count, capacity, *pixels;
+  wchar_t *title, *copy;
+  char *paste, *drop;
+  wchar_t surrogate;
+} BpWin;
+
+static wchar_t* bpw_wide(const char* text) {
+  int n = MultiByteToWideChar(CP_UTF8, 0, text, -1, NULL, 0);
+  wchar_t* result = io_mem(calloc(n > 0 ? n : 1, sizeof(wchar_t)));
+  if (n > 0) MultiByteToWideChar(CP_UTF8, 0, text, -1, result, n);
+  return result;
+}
+
+static char* bpw_utf8(const wchar_t* text) {
+  int n = WideCharToMultiByte(CP_UTF8, 0, text, -1, NULL, 0, NULL, NULL);
+  char* result = io_mem(calloc(n > 0 ? n : 1, 1));
+  if (n > 0) WideCharToMultiByte(CP_UTF8, 0, text, -1, result, n, NULL, NULL);
+  return result;
+}
+
+static void bpw_push(BpWin* a, u32 kind, u32 p, u32 q, u32 r, u32 s) {
+  pthread_mutex_lock(&a->lock);
+  if (a->count + 5 > a->capacity) {
+    a->capacity = a->capacity ? a->capacity * 2 : 320;
+    a->events = io_mem(realloc(a->events, a->capacity * sizeof(u32)));
+  }
+  u32 ev[5] = {kind, p, q, r, s};
+  memcpy(a->events + a->count, ev, sizeof ev);
+  if (a->count == 0) {
+    char byte = 1;
+    (void)write(a->notify[1], &byte, 1);
+  }
+  a->count += 5;
+  pthread_mutex_unlock(&a->lock);
+}
+
+static u32 bpw_mods(void) {
+  return ((GetKeyState(VK_SHIFT) & 0x8000) ? 1 : 0)
+    | ((GetKeyState(VK_CONTROL) & 0x8000) ? 2 : 0)
+    | ((GetKeyState(VK_MENU) & 0x8000) ? 4 : 0)
+    | (((GetKeyState(VK_LWIN) | GetKeyState(VK_RWIN)) & 0x8000) ? 8 : 0);
+}
+
+// Keep the portable input contract: navigation keys use X keysyms.
+static u32 bpw_key(WPARAM key) {
+  switch (key) {
+    case VK_BACK: return 0xff08; case VK_TAB: return 0xff09;
+    case VK_RETURN: return 0xff0d; case VK_ESCAPE: return 0xff1b;
+    case VK_HOME: return 0xff50; case VK_LEFT: return 0xff51;
+    case VK_UP: return 0xff52; case VK_RIGHT: return 0xff53;
+    case VK_DOWN: return 0xff54; case VK_PRIOR: return 0xff55;
+    case VK_NEXT: return 0xff56; case VK_END: return 0xff57;
+    case VK_INSERT: return 0xff63; case VK_DELETE: return 0xffff;
+    case VK_SHIFT: return 0xffe1; case VK_CONTROL: return 0xffe3;
+    case VK_MENU: return 0xffe9; case VK_LWIN: return 0xffeb;
+    case VK_RWIN: return 0xffec;
+  }
+  if (key >= VK_F1 && key <= VK_F24) return 0xffbe + key - VK_F1;
+  return key >= 'A' && key <= 'Z' ? key + ('a' - 'A') : (u32)key;
+}
+
+static void bpw_text(BpWin* a, wchar_t c) {
+  u32 cp = c;
+  if (c >= 0xd800 && c <= 0xdbff) { a->surrogate = c; return; }
+  if (c >= 0xdc00 && c <= 0xdfff && a->surrogate) {
+    cp = 0x10000 + ((a->surrogate - 0xd800) << 10) + c - 0xdc00;
+  }
+  a->surrogate = 0;
+  if (cp >= 32 && cp != 127 && !(bpw_mods() & 2))
+    bpw_push(a, 0, 0, cp, bpw_mods(), 1);
+}
+
+static void bpw_clipboard(BpWin* a, int copy) {
+  if (!OpenClipboard(a->hwnd)) return;
+  if (copy) {
+    pthread_mutex_lock(&a->lock);
+    if (a->copy) {
+      size_t n = (wcslen(a->copy) + 1) * sizeof(wchar_t);
+      HGLOBAL data = GlobalAlloc(GMEM_MOVEABLE, n);
+      void* dest = data ? GlobalLock(data) : NULL;
+      if (dest) {
+        memcpy(dest, a->copy, n); GlobalUnlock(data);
+        if (!EmptyClipboard() || !SetClipboardData(CF_UNICODETEXT, data)) GlobalFree(data);
+      } else if (data) GlobalFree(data);
+    }
+    pthread_mutex_unlock(&a->lock);
+  } else {
+    HANDLE data = GetClipboardData(CF_UNICODETEXT);
+    const wchar_t* text = data ? GlobalLock(data) : NULL;
+    if (text) {
+      char* utf8 = bpw_utf8(text);
+      GlobalUnlock(data);
+      pthread_mutex_lock(&a->lock);
+      free(a->paste); a->paste = utf8;
+      pthread_mutex_unlock(&a->lock);
+      bpw_push(a, 7, 0, 0, 0, 0);
+    }
+  }
+  CloseClipboard();
+}
+
+static void bpw_drop(BpWin* a, HDROP files) {
+  UINT count = DragQueryFileW(files, 0xffffffff, NULL, 0);
+  char* result = io_mem(calloc(1, 1)); size_t size = 0;
+  for (UINT i = 0; i < count; i++) {
+    UINT n = DragQueryFileW(files, i, NULL, 0);
+    wchar_t* path = io_mem(calloc(n + 1, sizeof(wchar_t)));
+    DragQueryFileW(files, i, path, n + 1);
+    ssize_t need = cygwin_conv_path(CCP_WIN_W_TO_POSIX, path, NULL, 0);
+    if (need > 0) {
+      char* posix = io_mem(malloc(need));
+      if (cygwin_conv_path(CCP_WIN_W_TO_POSIX, path, posix, need) == 0) {
+        size_t len = strlen(posix);
+        result = io_mem(realloc(result, size + len * 3 + 10));
+        memcpy(result + size, "file://", 7); size += 7;
+        for (size_t k = 0; k < len; k++) {
+          unsigned char c = (unsigned char)posix[k];
+          if (c == '/' || c == '-' || c == '_' || c == '.' || c == '~'
+              || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) result[size++] = c;
+          else { static const char hex[] = "0123456789ABCDEF"; result[size++] = '%'; result[size++] = hex[c >> 4]; result[size++] = hex[c & 15]; }
+        }
+        result[size++] = '\n'; result[size] = 0;
+      }
+      free(posix);
+    }
+    free(path);
+  }
+  DragFinish(files);
+  pthread_mutex_lock(&a->lock); free(a->drop); a->drop = result; pthread_mutex_unlock(&a->lock);
+  bpw_push(a, 10, 0, 0, 0, 0);
+}
+
+static LRESULT CALLBACK bpw_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+  BpWin* a = (BpWin*)GetWindowLongPtrW(hwnd, GWLP_USERDATA);
+  if (msg == WM_NCCREATE) {
+    a = (BpWin*)((CREATESTRUCTW*)lp)->lpCreateParams;
+    a->hwnd = hwnd; SetWindowLongPtrW(hwnd, GWLP_USERDATA, (LONG_PTR)a);
+  }
+  if (!a) return DefWindowProcW(hwnd, msg, wp, lp);
+  switch (msg) {
+    case WM_CLOSE: bpw_push(a, 6, 0, 0, 0, 0); DestroyWindow(hwnd); return 0;
+    case WM_DESTROY: PostQuitMessage(0); return 0;
+    case WM_ERASEBKGND: return 1;
+    case WM_SIZE:
+      if (wp != SIZE_MINIMIZED && LOWORD(lp) && HIWORD(lp)) {
+        pthread_mutex_lock(&a->lock); a->width = LOWORD(lp); a->height = HIWORD(lp); pthread_mutex_unlock(&a->lock);
+        bpw_push(a, 4, LOWORD(lp), HIWORD(lp), 0, 0);
+      }
+      return 0;
+    case WM_SETFOCUS: bpw_push(a, 12, 0, 0, 0, 0); return 0;
+    case WM_KILLFOCUS: a->surrogate = 0; bpw_push(a, 11, 0, 0, 0, 0); return 0;
+    case WM_KEYDOWN: case WM_SYSKEYDOWN: case WM_KEYUP: case WM_SYSKEYUP: {
+      u32 down = msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN;
+      u32 scan = ((u32)lp >> 16) & 0x1ff;
+      bpw_push(a, 0, bpw_key(wp), 0, bpw_mods(), scan * 2 + down);
+      // Alt-F4 remains a normal Windows close action.
+      if (msg == WM_SYSKEYDOWN && wp == VK_F4) return DefWindowProcW(hwnd, msg, wp, lp);
+      return 0;
+    }
+    case WM_CHAR: bpw_text(a, (wchar_t)wp); return 0;
+    case WM_SYSCHAR: return 0;
+    case WM_MOUSEMOVE: bpw_push(a, 2, GET_X_LPARAM(lp), GET_Y_LPARAM(lp), bpw_mods(), 0); return 0;
+    case WM_LBUTTONDOWN: case WM_RBUTTONDOWN: case WM_MBUTTONDOWN:
+    case WM_LBUTTONUP: case WM_RBUTTONUP: case WM_MBUTTONUP: {
+      int down = msg == WM_LBUTTONDOWN || msg == WM_RBUTTONDOWN || msg == WM_MBUTTONDOWN;
+      u32 button = msg == WM_LBUTTONDOWN || msg == WM_LBUTTONUP ? 1 : msg == WM_MBUTTONDOWN || msg == WM_MBUTTONUP ? 2 : 3;
+      if (down) { SetFocus(hwnd); SetCapture(hwnd); } else ReleaseCapture();
+      bpw_push(a, 1, GET_X_LPARAM(lp), GET_Y_LPARAM(lp), button, down); return 0;
+    }
+    case WM_MOUSEWHEEL: case WM_MOUSEHWHEEL: {
+      POINT pos = { GET_X_LPARAM(lp), GET_Y_LPARAM(lp) }; ScreenToClient(hwnd, &pos);
+      int delta = GET_WHEEL_DELTA_WPARAM(wp);
+      u32 dir = msg == WM_MOUSEWHEEL ? (delta > 0 ? 0 : 1) : (delta > 0 ? 3 : 2);
+      for (int i = 0; i < abs(delta); i += WHEEL_DELTA) bpw_push(a, 3, pos.x, pos.y, dir, 0);
+      return 0;
+    }
+    case WM_DROPFILES: bpw_drop(a, (HDROP)wp); return 0;
+    case BPW_COPY: bpw_clipboard(a, 1); return 0;
+    case BPW_PASTE: bpw_clipboard(a, 0); return 0;
+    case BPW_TITLE:
+      pthread_mutex_lock(&a->lock); SetWindowTextW(hwnd, a->title); pthread_mutex_unlock(&a->lock); return 0;
+    case BPW_PAINT: InvalidateRect(hwnd, NULL, FALSE); return 0;
+    case WM_PAINT: {
+      PAINTSTRUCT paint; HDC dc = BeginPaint(hwnd, &paint);
+      pthread_mutex_lock(&a->lock);
+      if (a->pixels) {
+        BITMAPINFO bi = {0}; bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+        bi.bmiHeader.biWidth = a->pw; bi.bmiHeader.biHeight = -(LONG)a->ph;
+        bi.bmiHeader.biPlanes = 1; bi.bmiHeader.biBitCount = 32; bi.bmiHeader.biCompression = BI_RGB;
+        SetDIBitsToDevice(dc, 0, 0, a->pw, a->ph, 0, 0, 0, a->ph, a->pixels, &bi, DIB_RGB_COLORS);
+      }
+      pthread_mutex_unlock(&a->lock); EndPaint(hwnd, &paint); return 0;
+    }
+  }
+  return DefWindowProcW(hwnd, msg, wp, lp);
+}
+
+static void* bpw_thread(void* arg) {
+  BpWin* a = arg;
+  HINSTANCE instance = GetModuleHandleW(NULL);
+  WNDCLASSW wc = {0}; wc.lpfnWndProc = bpw_proc; wc.hInstance = instance;
+  wc.lpszClassName = L"BackplaneNativeWindow"; wc.hCursor = LoadCursorW(NULL, MAKEINTRESOURCEW(32512));
+  RegisterClassW(&wc);
+  RECT rect = {0, 0, a->width, a->height}; AdjustWindowRect(&rect, WS_OVERLAPPEDWINDOW, FALSE);
+  HWND hwnd = CreateWindowExW(0, wc.lpszClassName, a->title, WS_OVERLAPPEDWINDOW,
+    CW_USEDEFAULT, CW_USEDEFAULT, rect.right - rect.left, rect.bottom - rect.top,
+    NULL, NULL, instance, a);
+  pthread_mutex_lock(&a->lock); a->error = hwnd ? 0 : EIO; a->opened = 1; pthread_cond_signal(&a->ready); pthread_mutex_unlock(&a->lock);
+  if (!hwnd) return NULL;
+  DragAcceptFiles(hwnd, TRUE); ShowWindow(hwnd, SW_SHOW); UpdateWindow(hwnd);
+  bpw_push(a, 5, 0, 0, 0, 0);
+  MSG msg;
+  while (GetMessageW(&msg, NULL, 0, 0) > 0) { TranslateMessage(&msg); DispatchMessageW(&msg); }
+  return NULL;
+}
+
+static Term bpw_open(Env e, Term* f) {
+  BpWin* a = io_mem(calloc(1, sizeof *a));
+  pthread_mutex_init(&a->lock, NULL); pthread_cond_init(&a->ready, NULL);
+  u64 n = 0; char* title = io_cstr(e, f[0], &n); a->title = bpw_wide(title); free(title);
+  a->width = f[1]; a->height = f[2];
+  if (pipe(a->notify) != 0) { free(a->title); free(a); return io_fail(e, errno, NULL); }
+  for (u32 i = 0; i < 2; i++) { fcntl(a->notify[i], F_SETFL, O_NONBLOCK); fcntl(a->notify[i], F_SETFD, FD_CLOEXEC); }
+  pthread_t thread;
+  int error = pthread_create(&thread, NULL, bpw_thread, a);
+  if (error) { close(a->notify[0]); close(a->notify[1]); free(a->title); free(a); return io_fail(e, error, NULL); }
+  pthread_detach(thread);
+  pthread_mutex_lock(&a->lock);
+  while (!a->opened) pthread_cond_wait(&a->ready, &a->lock);
+  error = a->error; pthread_mutex_unlock(&a->lock);
+  return error ? io_fail(e, error, NULL) : io_done(e, io_hand((intptr_t)a));
+}
+
+static Term bpw_words_more(Env e, IoWork* w) {
+  BpWin* a = (BpWin*)w->hand;
+  pthread_mutex_lock(&a->lock);
+  if (!a->count) { pthread_mutex_unlock(&a->lock); return io_wait_on(w, a->notify[0], POLLIN, 0, bpw_words_more); }
+  char bytes[128]; while (read(a->notify[0], bytes, sizeof bytes) > 0) {}
+  Term xs = term_pak(CID_NIL, 0);
+  for (u32 i = a->count; i > 0; i--) xs = io_node(e, CID_CON, (Term)a->events[i - 1], xs);
+  a->count = 0; pthread_mutex_unlock(&a->lock);
+  return io_tup(e, io_hand(w->hand), xs);
+}
+
+static void bpw_fill(u64* H, BpWin* a, Term image, u32 x, u32 y, u32 size) {
+  if (x >= a->pw || y >= a->ph) return;
+  if (term_tag(image) == TAG_CTR && size > 1) {
+    u64 at = term_rfc(image) ? H[term_loc(image)] >> 24 : term_loc(image);
+    u32 half = size / 2;
+    bpw_fill(H, a, H[at], x, y, half); bpw_fill(H, a, H[at+1], x+half, y, half);
+    bpw_fill(H, a, H[at+2], x, y+half, half); bpw_fill(H, a, H[at+3], x+half, y+half, half);
+  } else {
+    while (term_tag(image) == TAG_CTR) { u64 at = term_rfc(image) ? H[term_loc(image)] >> 24 : term_loc(image); image = H[at]; }
+    u32 color = (u32)term_loc(image) & 0xffffff;
+    for (u32 row = y; row < a->ph && row < y+size; row++)
+      for (u32 col = x; col < a->pw && col < x+size; col++) a->pixels[(size_t)row*a->pw+col] = color;
+  }
+}
+
+static void bpw_show(Env e, BpWin* a, Term image) {
+  pthread_mutex_lock(&a->lock);
+  if (a->pw != a->width || a->ph != a->height || !a->pixels) {
+    a->pw = a->width; a->ph = a->height;
+    a->pixels = io_mem(realloc(a->pixels, (size_t)a->pw*a->ph*sizeof(u32)));
+  }
+  u32 size = 1; while (size < a->pw || size < a->ph) size *= 2;
+  bpw_fill(e.mem, a, image, 0, 0, size);
+  pthread_mutex_unlock(&a->lock);
+  PostMessageW(a->hwnd, BPW_PAINT, 0, 0);
+}
+
+#ifdef CID(Win.open)
+Term win_open_run(Env e, Term* f, IoWork* w) {
+  return bpw_open(e, f);
+}
+static void __attribute__((constructor)) win_open_use(void) { io_eff(CID(Win.open), win_open_run); }
+#endif
+
+#ifdef CID(Win.words)
+Term win_words_run(Env e, Term* f, IoWork* w) {
+  w->hand = (intptr_t)io_hand_v(f[0]); return bpw_words_more(e, w);
+}
+static void __attribute__((constructor)) win_words_use(void) { io_eff(CID(Win.words), win_words_run); }
+#endif
+
+#ifdef CID(Win.present)
+Term win_present_run(Env e, Term* f, IoWork* w) {
+  BpWin* a = (BpWin*)io_hand_v(f[0]); bpw_show(e, a, f[1]); return io_tup(e, f[0], f[1]);
+}
+static void __attribute__((constructor)) win_present_use(void) { io_eff(CID(Win.present), win_present_run); }
+#endif
+
+#ifdef CID(Win.show)
+Term win_show_run(Env e, Term* f, IoWork* w) {
+  BpWin* a = (BpWin*)io_hand_v(f[0]); bpw_show(e, a, f[1]); return io_tup(e, f[0], io_tup(e, f[1], f[2]));
+}
+static void __attribute__((constructor)) win_show_use(void) { io_eff(CID(Win.show), win_show_run); }
+#endif
+
+#ifdef CID(Win.copy)
+Term win_copy_run(Env e, Term* f, IoWork* w) {
+  BpWin* a = (BpWin*)io_hand_v(f[0]); u64 n = 0; char* text = io_cstr(e, f[1], &n); wchar_t* wide = bpw_wide(text); free(text); pthread_mutex_lock(&a->lock); free(a->copy); a->copy = wide; pthread_mutex_unlock(&a->lock); PostMessageW(a->hwnd, BPW_COPY, 0, 0); return f[0];
+}
+static void __attribute__((constructor)) win_copy_use(void) { io_eff(CID(Win.copy), win_copy_run); }
+#endif
+
+#ifdef CID(Win.paste)
+Term win_paste_run(Env e, Term* f, IoWork* w) {
+  BpWin* a = (BpWin*)io_hand_v(f[0]); PostMessageW(a->hwnd, BPW_PASTE, 0, 0); return f[0];
+}
+static void __attribute__((constructor)) win_paste_use(void) { io_eff(CID(Win.paste), win_paste_run); }
+#endif
+
+#ifdef CID(Win.pasted)
+Term win_pasted_run(Env e, Term* f, IoWork* w) {
+  BpWin* a = (BpWin*)io_hand_v(f[0]); pthread_mutex_lock(&a->lock); Term text = io_str(e, a->paste ? a->paste : "", a->paste ? strlen(a->paste) : 0); pthread_mutex_unlock(&a->lock); return io_tup(e, f[0], text);
+}
+static void __attribute__((constructor)) win_pasted_use(void) { io_eff(CID(Win.pasted), win_pasted_run); }
+#endif
+
+#ifdef CID(Win.dropped)
+Term win_dropped_run(Env e, Term* f, IoWork* w) {
+  BpWin* a = (BpWin*)io_hand_v(f[0]); pthread_mutex_lock(&a->lock); Term text = io_str(e, a->drop ? a->drop : "", a->drop ? strlen(a->drop) : 0); pthread_mutex_unlock(&a->lock); return io_tup(e, f[0], text);
+}
+static void __attribute__((constructor)) win_dropped_use(void) { io_eff(CID(Win.dropped), win_dropped_run); }
+#endif
+
+#ifdef CID(Win.size)
+Term win_size_run(Env e, Term* f, IoWork* w) {
+  BpWin* a = (BpWin*)io_hand_v(f[0]); pthread_mutex_lock(&a->lock); u32 width = a->width, height = a->height; pthread_mutex_unlock(&a->lock); return io_tup(e, f[0], io_tup(e, (Term)width, (Term)height));
+}
+static void __attribute__((constructor)) win_size_use(void) { io_eff(CID(Win.size), win_size_run); }
+#endif
+
+#ifdef CID(Win.twin)
+Term win_twin_run(Env e, Term* f, IoWork* w) {
+  return io_tup(e, f[0], f[0]);
+}
+static void __attribute__((constructor)) win_twin_use(void) { io_eff(CID(Win.twin), win_twin_run); }
+#endif
+
+#ifdef CID(Win.title)
+Term win_title_run(Env e, Term* f, IoWork* w) {
+  BpWin* a = (BpWin*)io_hand_v(f[0]); u64 n = 0; char* text = io_cstr(e, f[1], &n); wchar_t* wide = bpw_wide(text); free(text); pthread_mutex_lock(&a->lock); free(a->title); a->title = wide; pthread_mutex_unlock(&a->lock); PostMessageW(a->hwnd, BPW_TITLE, 0, 0); return f[0];
+}
+static void __attribute__((constructor)) win_title_use(void) { io_eff(CID(Win.title), win_title_run); }
+#endif
+
+#ifdef CID(Win.ime)
+Term win_ime_run(Env e, Term* f, IoWork* w) {
+  return io_tup(e, f[0], (Term)0);
+}
+static void __attribute__((constructor)) win_ime_use(void) { io_eff(CID(Win.ime), win_ime_run); }
+#endif
+
+#ifdef CID(Win.ime_reset)
+Term win_ime_reset_run(Env e, Term* f, IoWork* w) {
+  return f[0];
+}
+static void __attribute__((constructor)) win_ime_reset_use(void) { io_eff(CID(Win.ime_reset), win_ime_reset_run); }
+#endif
+
+#ifdef CID(Win.ime_spot)
+Term win_ime_spot_run(Env e, Term* f, IoWork* w) {
+  return f[0];
+}
+static void __attribute__((constructor)) win_ime_spot_use(void) { io_eff(CID(Win.ime_spot), win_ime_spot_run); }
+#endif
+
+#ifdef CID(Win.ime_inject)
+Term win_ime_inject_run(Env e, Term* f, IoWork* w) {
+  return f[0];
+}
+static void __attribute__((constructor)) win_ime_inject_use(void) { io_eff(CID(Win.ime_inject), win_ime_inject_run); }
+#endif
+
+#ifdef CID(Win.payload)
+Term win_payload_run(Env e, Term* f, IoWork* w) {
+  return io_tup(e, f[0], io_tup(e, io_str(e,"",0), io_str(e,"",0)));
+}
+static void __attribute__((constructor)) win_payload_use(void) { io_eff(CID(Win.payload), win_payload_run); }
+#endif
+
+#ifdef CID(Win.pasted_image)
+Term win_pasted_image_run(Env e, Term* f, IoWork* w) {
+  return io_tup(e, f[0], io_tup(e, io_str(e,"",0), io_tup(e, (Term)0, io_str(e,"",0))));
+}
+static void __attribute__((constructor)) win_pasted_image_use(void) { io_eff(CID(Win.pasted_image), win_pasted_image_run); }
+#endif
+
 #else
 
 // No window on this platform yet (macOS gets its own AppKit twin).

@@ -161,7 +161,13 @@ static __attribute__((unused)) int fx_ft_load(void) {
     return state > 0;
   }
   state = -1;
-  void* lib = dlopen("libfreetype.so.6", RTLD_NOW | RTLD_LOCAL);
+  void* lib = dlopen(
+#ifdef __CYGWIN__
+    "cygfreetype-6.dll",
+#else
+    "libfreetype.so.6",
+#endif
+    RTLD_NOW | RTLD_LOCAL);
   if (lib == NULL) {
     return 0;
   }
@@ -180,7 +186,13 @@ static __attribute__((unused)) void* fx_fc_load(void) {
     return state > 0 ? config : NULL;
   }
   state = -1;
-  void* lib = dlopen("libfontconfig.so.1", RTLD_NOW | RTLD_LOCAL);
+  void* lib = dlopen(
+#ifdef __CYGWIN__
+    "cygfontconfig-1.dll",
+#else
+    "libfontconfig.so.1",
+#endif
+    RTLD_NOW | RTLD_LOCAL);
   if (lib == NULL) {
     return NULL;
   }

@@ -2,6 +2,7 @@ import Base
 import ./check.bend as C
 import ../src/core/kserve.bend as K
 import ../src/core/kihealth.bend as KH
+import ../src/core/json.bend as J
 
 # The headless KiCad servers' policy: where a server lives, its command
 # line, its ready line, the version check, the restart schedule, which
@@ -68,6 +69,12 @@ def crashes(n: Nat, +s: K.KSrv, +now: Nat) -> K.KSrv:
   match n:
     case 0n: s
     case 1n+k: crashes(k, K.KS.exited(s, 1, now, "x"), Nat.add(now, 10n))
+
+def item(ty: String, +withdef: Bool) -> J.Json:
+  J.Json.obj(List.concat(&2, J.KV, [[J.KV{"@type", J.Str{"type.googleapis.com/" ++ ty}}], Bool.pick(List<&2, J.KV>, withdef, [J.KV{"definition", J.Json.obj(Nil{})}], Nil{})]))
+
+def msg(ty: String, withdef: Bool) -> J.Json:
+  J.Json.obj([J.KV{"items", J.Json.arr([item("kiapi.board.types.Track", True{}), item(ty, withdef)])}])
 
 def main() -> IO(Unit):
   do IO<Unit>:
@@ -157,6 +164,24 @@ def main() -> IO(Unit):
     C.Check.str("fallback names the cli", K.KS.unavailable("it is off", "/k/bin/kicad-cli"), "KiCad IPC unavailable: it is off. Fallback: edit the file directly or use `/k/bin/kicad-cli pcb …`; re-read the file after.")
     C.Check.str("fallback without a cli", yes(String.contains(K.KS.unavailable("x", ""), "use `kicad-cli pcb")), "yes")
     C.Check.str("activity line", K.KS.activity("x"), "KiCad: fell back to files: x")
+    +fp : String = "kiapi.board.types.FootprintInstance"
+    +sy : String = "kiapi.schematic.types.SchematicSymbolInstance"
+    +upd : String = "kiapi.common.commands.UpdateItems"
+    +cre : String = "kiapi.common.commands.CreateItems"
+    C.Check.str("launcher stays", K.KS.launcher("/r/bin/kicad-cli"), "/r/bin/kicad-cli")
+    C.Check.str("launcher is never kicad-cli.real", K.KS.launcher("/r/bin/kicad-cli.real"), "/r/bin/kicad-cli")
+    C.Check.str("argv starts with the launcher", K.KS.nth(K.KS.argv("/r/bin/kicad-cli.real", "/p/a.kicad_pro", "/d", 42, caps_all()), 0n), "/r/bin/kicad-cli")
+    C.Check.str("a bare footprint update is refused", K.KS.guard(upd, msg(fp, False{}), caps_none()), K.KS.fp.refusal())
+    C.Check.str("the refusal names the full FootprintInstance", yes(String.contains(K.KS.fp.refusal(), "send the full FootprintInstance from GetItems")), "yes")
+    C.Check.str("a full footprint update goes through", K.KS.guard(upd, msg(fp, True{}), caps_none()), "")
+    C.Check.str("bp.4 lifts the footprint guard", K.KS.guard(upd, msg(fp, False{}), ["footprint-partial-update"]), "")
+    C.Check.str("a bare track update goes through", K.KS.guard(upd, msg("kiapi.board.types.Track", False{}), caps_none()), "")
+    C.Check.str("only UpdateItems is guarded", K.KS.guard(cre, msg(fp, False{}), caps_none()), "")
+    C.Check.str("a bare symbol create is refused", K.KS.guard(cre, msg(sy, False{}), caps_none()), K.KS.sym.refusal())
+    C.Check.str("the symbol advice", yes(String.contains(K.KS.sym.refusal(), "LoadAllLibraries")), "yes")
+    C.Check.str("a symbol with its definition goes through", K.KS.guard(cre, msg(sy, True{}), caps_none()), "")
+    C.Check.str("symbol-from-libid lifts the guard", K.KS.guard(cre, msg(sy, False{}), ["symbol-from-libid"]), "")
+    C.Check.str("no items is fine", K.KS.guard(upd, J.Json.obj(Nil{}), caps_none()), "")
     C.Check.str("info lines", K.KS.lines([a, K.KS.set(b, "failed", "a|b\nc")]), "A|ready|\nB|failed|a b c")
     C.Check.str("info lines have no pids", yes(String.contains(K.KS.lines([a]), "0")), "no")
     C.Check.str("project name", K.KS.name("/p/amp.kicad_pro"), "amp")

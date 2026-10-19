@@ -79,7 +79,7 @@ const start = (src: string, at = home) => {
   const port = freePort();
   const proc = Bun.spawn([resolve(bin), "--home", at, "--port", String(port), "--no-tailscale", "--foreground"], {
     env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "", BACKPLANE_GOOGLE_BAKE: "0", AGY_LOG: log,
-      BACKPLANE_AGY_SOURCE: src, GEMINI_API_KEY: "ambient-must-not-leak", PATH: `${fake}:${process.env.PATH}` },
+      BACKPLANE_AGY_SOURCE: src, GEMINI_API_KEY: "ambient-must-not-leak", BACKPLANE_AGENTS: fake, PATH: `${fake}:${process.env.PATH}` },
     stdout: "ignore",
     stderr: "ignore",
   });

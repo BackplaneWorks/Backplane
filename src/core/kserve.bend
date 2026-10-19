@@ -109,10 +109,15 @@ def KS.idle.args(has: Bool) -> List<&2, String>:
     case True{}: ["--idle-exit", "600"]
     case False{}: Nil{}
 
+# the runtime's launcher, never `kicad-cli.real`: only bin/kicad-cli sets
+# KICAD10_*_DIR (stock footprints, symbols and 3D models need them)
+def KS.launcher(+cli: String) -> String:
+  Bool.pick(String, String.ends_with(cli, "kicad-cli.real"), String.take(cli, Nat.sub(String.length(cli), 5n)), cli)
+
 # the command line: the server exits by itself when the hub is gone
 # (--parent-pid), and after ten idle minutes when the runtime can
 def KS.argv(+cli: String, +pro: String, +dir: String, hub_pid: U32, caps: List<&2, String>) -> List<&2, String>:
-  List.concat(&2, String, [[cli, "api-server", pro, "--socket", dir ++ "/api.sock", "--parent-pid", U32.show(hub_pid)], KS.idle.args(KS.has(caps, "idle-exit"))])
+  List.concat(&2, String, [[KS.launcher(cli), "api-server", pro, "--socket", dir ++ "/api.sock", "--parent-pid", U32.show(hub_pid)], KS.idle.args(KS.has(caps, "idle-exit"))])
 
 def KS.ready.prefix() -> String:
   "KiCad API server listening at "
@@ -392,6 +397,78 @@ def KS.refusal() -> String:
 
 def KS.busy() -> String:
   "IPC busy: 2 KiCad servers already run for other projects"
+
+# What bp.3 gets wrong (FORK-STATUS 2026-10-17)
+# ----------------------------------------------
+
+def KS.fp.type() -> String:
+  "kiapi.board.types.FootprintInstance"
+
+def KS.sym.type() -> String:
+  "kiapi.schematic.types.SchematicSymbolInstance"
+
+# the runtime lists these when it no longer needs the guard (bp.4)
+def KS.fp.cap() -> String:
+  "footprint-partial-update"
+
+def KS.sym.cap() -> String:
+  "symbol-from-libid"
+
+def KS.fp.refusal() -> String:
+  "bp.3 would wipe this footprint's pads and 3D models: send the full FootprintInstance from GetItems with only the fields you change"
+
+def KS.sym.refusal() -> String:
+  "bp.3 would make an empty symbol from a library id: call LoadAllLibraries, wait until GetLibraryStatuses shows the library loaded, then use PlaceSymbolFromLibrary"
+
+def KS.defined(m: Maybe<&2, J.Json>) -> Bool:
+  match m:
+    case None{}: False{}
+    case Some{J.Null{}}: False{}
+    case _: True{}
+
+# an Any item of this type that has no `definition`
+def KS.bare(+it: J.Json, +want: String) -> Bool:
+  Bool.and(String.ends_with(J.Json.get_str(it, "@type", ""), want), Bool.not(KS.defined(J.Json.get(it, "definition"))))
+
+def KS.bare.any(xs: List<&2, J.Json>, +want: String) -> Bool:
+  match xs:
+    case Nil{}: False{}
+    case it <> t: Bool.or(KS.bare(it, want), KS.bare.any(t, want))
+
+def KS.guard.say(hit: Bool, text: String) -> String:
+  match hit:
+    case True{}: text
+    case False{}: ""
+
+# UpdateItems of a FootprintInstance without its definition wipes the footprint
+def KS.guard.fp(+ty: String, +msg: J.Json, caps: List<&2, String>) -> String:
+  KS.guard.say(Bool.and(String.eq(ty, "kiapi.common.commands.UpdateItems"), Bool.and(Bool.not(KS.has(caps, KS.fp.cap())),
+    KS.bare.any(J.Json.elems(J.Json.get_obj(msg, "items")), KS.fp.type()))), KS.fp.refusal())
+
+# Library IDs can live in definition.id too; a definition with no items
+# still relies on the runtime's symbol-from-libid fix.
+def KS.sym.library_only(+it: J.Json) -> Bool:
+  Bool.and(String.ends_with(J.Json.get_str(it, "@type", ""), KS.sym.type()),
+    Bool.and(KS.defined(J.Json.get(J.Json.get_obj(it, "definition"), "id")),
+      Nat.is_eq(List.length(&2, J.Json, J.Json.elems(J.Json.get_obj(J.Json.get_obj(it, "definition"), "items"))), 0n)))
+
+def KS.sym.unsafe(xs: List<&2, J.Json>) -> Bool:
+  match xs:
+    case Nil{}: False{}
+    case +it <> t:
+      Bool.or(Bool.or(KS.bare(it, KS.sym.type()), KS.sym.library_only(it)), KS.sym.unsafe(t))
+
+# CreateItems of a schematic symbol with only a library id makes a hollow symbol
+def KS.guard.sym(+ty: String, +msg: J.Json, caps: List<&2, String>) -> String:
+  KS.guard.say(Bool.and(String.eq(ty, "kiapi.common.commands.CreateItems"), Bool.and(Bool.not(KS.has(caps, KS.sym.cap())),
+    KS.sym.unsafe(J.Json.elems(J.Json.get_obj(msg, "items"))))), KS.sym.refusal())
+
+def KS.guard.pick(+first: String, second: String) -> String:
+  Bool.pick(String, String.is_empty(first), second, first)
+
+# why the hub refuses a command at once ("" when it goes through)
+def KS.guard(+ty: String, +msg: J.Json, +caps: List<&2, String>) -> String:
+  KS.guard.pick(KS.guard.fp(ty, msg, caps), KS.guard.sym(ty, msg, caps))
 
 # Words
 # -----

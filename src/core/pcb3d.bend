@@ -287,7 +287,7 @@ def Text.gr.k(show: Bool, +x: S.Sx, +layer: U32, +key: String) -> List<&2, Got>:
 # -----
 
 def Fp.got(+x: S.Sx, +thick: F32, +key: String) -> List<&2, Got>:
-  +at = S.Sx.get(x, "at")
+  +at = B.Fp.at(x)
   +fx = S.Sx.f(at, 0n)
   +fy = S.Sx.f(at, 1n)
   +fa = S.Sx.f(at, 2n)

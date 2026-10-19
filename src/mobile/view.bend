@@ -419,8 +419,11 @@ def View.lmode(+u: U.Ui) -> U32:
   Bool.pick(U32, LY.Lyr.on(View.focus(u)), LY.Lyr.mode(View.focus(u)), 0)
 
 # the Layers button names the active layer while one stands out
+def View.lhead.loc(+lc: I.Loc, +u: U.Ui) -> String:
+  Bool.pick(String, LY.Lyr.on(View.focus(u)), MSG.T.viewer.layers.active(lc, LY.Lyr.name(View.lkind(u), LY.Lyr.active(View.focus(u)))), MSG.T.viewer.layers(lc))
+
 def View.lhead(+u: U.Ui) -> String:
-  Bool.pick(String, LY.Lyr.on(View.focus(u)), "Layers · " ++ LY.Lyr.name(View.lkind(u), LY.Lyr.active(View.focus(u))), "Layers")
+  View.lhead.loc(I.En{}, u)
 
 def View.names(+kind: String) -> List<&2, String>:
   Bool.pick(List<&2, String>, String.eq(kind, "schematic"), SC.Sch.layer_names(), B.Layer.names())
@@ -706,14 +709,18 @@ def Mech.part(m: Maybe<&2, MC.MPart>, +root: String) -> List<&2, J.KV>:
     case None{}:
       [J.KV{"name", J.Str{""}}, J.KV{"path", J.Str{""}}, J.KV{"shots", J.Json.arr(Nil{})}, J.KV{"empty", J.Str{""}}]
 
-def Mech.say(+state: Nat) -> String:
-  Bool.pick(String, Nat.is_eq(state, 0n), "Loading the parts…", Bool.pick(String, Nat.is_eq(state, 1n), MC.Mech.none(), ""))
+def Mech.say.loc(+lc: I.Loc, +state: Nat) -> String:
+  Bool.pick(String, Nat.is_eq(state, 0n), MSG.T.viewer.mech.loading(lc), Bool.pick(String, Nat.is_eq(state, 1n), MC.Mech.none(), ""))
 
 # (busy: a render job runs; render: its button's label; err: why the last failed)
+
+def Mech.say(+state: Nat) -> String:
+  Mech.say.loc(I.En{}, state)
+
 def Mech.json(+lc: I.Loc, on: Bool, +u: U.Ui) -> J.Json:
   match on:
     case True{}:
-      J.Json.obj(List.append(&2, J.KV, [J.KV{"say", J.Str{Mech.say(U.Mpage.state(u))}}, J.KV{"note", J.Str{U.Mpage.note.loc(lc, u)}},
+      J.Json.obj(List.append(&2, J.KV, [J.KV{"say", J.Str{Mech.say.loc(lc, U.Mpage.state(u))}}, J.KV{"note", J.Str{U.Mpage.note.loc(lc, u)}},
         J.KV{"parts", J.Json.arr(Mech.chips(U.Mpage.parts(u), U.Mpage.cur.path(u)))}, J.KV{"rel", J.Str{U.Mpage.cur.path(u)}},
         J.KV{"busy", J.Flag{Bool.not(String.is_empty(U.Mpage.busy(u)))}}, J.KV{"render", J.Str{U.Mpage.render.label.loc(lc, u)}}, J.KV{"err", J.Str{U.Mpage.err(u)}}],
         Mech.part(U.Mpage.cur(u), U.Mpage.root(u))))
@@ -825,12 +832,15 @@ def Rv.release.form(f: U.RlForm, +err: String, +text: String) -> J.Json:
     case U.RlForm{+tag, +next, publish, force}:
       J.Json.obj([J.KV{"tag", J.Str{tag}}, J.KV{"next", J.Str{next}}, J.KV{"publish", J.Flag{publish}}, J.KV{"force", J.Flag{force}}, J.KV{"err", J.Str{err}}, J.KV{"text", J.Str{text}}])
 
-def Rv.release(on: Bool, +u: U.Ui) -> J.Json:
+def Rv.release.loc(+lc: I.Loc, on: Bool, +u: U.Ui) -> J.Json:
   match on:
     case True{}:
-      Rv.release.form(U.Rl.form(u), U.RpView.err(U.Rp.view(u)), U.Ui.scratch(u, "@f.rltag"))
+      Rv.release.form(U.Rl.form(u), U.RpView.err(U.Rp.view.loc(lc, u)), U.Ui.scratch(u, "@f.rltag"))
     case False{}:
       J.Null{}
+
+def Rv.release(on: Bool, +u: U.Ui) -> J.Json:
+  Rv.release.loc(I.En{}, on, u)
 
 def Rv.json.k(+lc: I.Loc, +v: U.RpView, +rb: J.Json, +checks: J.Json, +release: J.Json) -> J.Json:
   J.Json.obj([J.KV{"tabs", J.Json.arr(Rv.tabs(U.RpView.tabs(v)))}, J.KV{"title", J.Str{U.RpView.title(v)}}, J.KV{"busy", J.Flag{U.RpView.busy(v)}},
@@ -839,7 +849,7 @@ def Rv.json.k(+lc: I.Loc, +v: U.RpView, +rb: J.Json, +checks: J.Json, +release: 
 def Rv.json(+lc: I.Loc, on: Bool, +u: U.Ui, +rb: J.Json) -> J.Json:
   match on:
     case True{}:
-      Rv.json.k(lc, U.Rp.view.loc(lc, u), rb, Rv.checks(String.eq(U.Rp.page(u), "checks"), u), Rv.release(String.eq(U.Rp.page(u), "release"), u))
+      Rv.json.k(lc, U.Rp.view.loc(lc, u), rb, Rv.checks(String.eq(U.Rp.page(u), "checks"), u), Rv.release.loc(lc, String.eq(U.Rp.page(u), "release"), u))
     case False{}:
       J.Null{}
 
@@ -881,11 +891,11 @@ def View.json(+lc: I.Loc, +u: U.Ui, +rb: J.Json) -> J.Json:
     J.KV{"mech", Mech.json(lc, View.mech(u), u)},
     J.KV{"sheets", J.Json.arr(List.append(&2, J.Json, View.board.list(u), View.sheet.list(u)))}, J.KV{"layerList", J.Json.arr(View.layer.list(u))},
     J.KV{"off", J.Num{U32.show(LY.Masks.off(View.masks(u)))}}, J.KV{"dim", J.Num{U32.show(LY.Masks.dim(View.masks(u)))}}, J.KV{"lift", J.Num{U32.show(LY.Lyr.top(View.focus(u)))}},
-    J.KV{"layerMode", J.Num{U32.show(View.lmode(u))}}, J.KV{"layerModes", J.Flag{String.eq(View.kind(u), "board")}}, J.KV{"layerHead", J.Str{View.lhead(u)}},
+    J.KV{"layerMode", J.Num{U32.show(View.lmode(u))}}, J.KV{"layerModes", J.Flag{String.eq(View.kind(u), "board")}}, J.KV{"layerHead", J.Str{View.lhead.loc(lc, u)}},
     J.KV{"parts", J.Flag{Bool.not(View.bare(u))}}, J.KV{"note", J.Str{View.note(u)}},
     J.KV{"choices", J.Json.arr(Bool.pick(List<&2, J.Json>, String.is_empty(U.Ui.root(u)), Nil{},
-      [View.choice("Board", "board", View.kind(u)), View.choice("Schematic", "schematic", View.kind(u)), View.choice("3D", "3d", View.kind(u)), View.choice("Mech", "mech", Bool.pick(String, View.mech(u), "mech", "")),
-       View.choice("Files", "files", Bool.pick(String, View.fm(u), "files", "")), View.choice("Review", "review", View.kind(u))]))},
+      [View.choice(MSG.T.viewer.board(lc), "board", View.kind(u)), View.choice(MSG.T.viewer.schematic(lc), "schematic", View.kind(u)), View.choice("3D", "3d", View.kind(u)), View.choice(MSG.T.viewer.mech(lc), "mech", Bool.pick(String, View.mech(u), "mech", "")),
+       View.choice(MSG.T.viewer.files(lc), "files", Bool.pick(String, View.fm(u), "files", "")), View.choice(MSG.T.viewer.review(lc), "review", View.kind(u))]))},
     J.KV{"bg", J.Num{U32.show(View.bg(View.kind(u), View.light(u)))}}, J.KV{"light", J.Json.bool(View.light(u))}, J.KV{"look", J.Json.arr(View.look(View.light(u), View.kind(u)))}, J.KV{"fade", J.Num{Nat.show(V.Fade.ms())}}, J.KV{"margin", J.Num{"0.9"}},
     J.KV{"zmin", J.Num{"0.5"}}, J.KV{"zmax", J.Num{"0.5"}}, J.KV{"tap", J.Num{"14"}},
     J.KV{"top", J.Json.arr(View.nums(View.top()))}, J.KV{"bottom", J.Json.arr(View.nums(View.bottom()))},

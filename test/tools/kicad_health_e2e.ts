@@ -28,9 +28,12 @@ function freePort() {
   return p;
 }
 const root = mkdtempSync(join(tmpdir(), "bp-health-e2e-"));
-// Backplane KiCad 10.99 with API 1 is the least that serves IPC (KH.min_version, KH.min_api)
-const legacy = { sourceRepository: "https://github.com/i2cjak/Backplane_KiCad", version: "10.99.0-bp.1", sourceCommit: "abc" };
-const v1 = { ...legacy, apiVersion: 1 };
+// Backplane KiCad 10.99.0-bp.4 with API 2 is the least that serves IPC (KH.min_version, KH.min_api)
+const legacy = { sourceRepository: "https://github.com/i2cjak/Backplane_KiCad", version: "10.99.0-bp.4", sourceCommit: "abc" };
+const v1 = { ...legacy, apiVersion: 2 };
+const api1 = { ...legacy, apiVersion: 1 };
+const bp2 = { ...v1, version: "10.99.0-bp.2" };
+const bp3 = { ...v1, version: "10.99.0-bp.3" };
 const v2 = { ...v1, manifestVersion: 2, kicadVersion: "10.99.0", upstreamCommit: "up", capabilities: ["api-server", "headless-pcb"] };
 function runtime(name: string, manifest?: any, script = "printf '10.0.6\\n'", bundle = false, describe?: any) {
   const dir = join(root, name);
@@ -59,7 +62,7 @@ async function start(name: string, path: string, homeOverride?: string) {
   mkdirSync(skills, { recursive: true }); writeFileSync(join(skills, "SKILL.md"), "---\nname: fixture\ndescription: test fixture\n---\n");
   const port = freePort();
   const proc = Bun.spawn([resolve(binary), "--foreground", "--home", home, "--port", String(port), "--no-tailscale"], {
-    env: { ...process.env, HOME: home, XDG_CACHE_HOME: join(home, ".cache"), PATH: `${fake}:/usr/bin:/bin`, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_HOME: home, BACKPLANE_KICAD_TEST_COUNT: join(home, "version-calls"), BACKPLANE_KICAD: path, BACKPLANE_KICAD_CLI: "", BACKPLANE_PEERS: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_WAKE_TICK_MS: "1000", BACKPLANE_LOCK_DIR: join(home, "locks") },
+    env: { ...process.env, HOME: home, XDG_CACHE_HOME: join(home, ".cache"), BACKPLANE_AGENTS: fake, PATH: `${fake}:/usr/bin:/bin`, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_HOME: home, BACKPLANE_KICAD_TEST_COUNT: join(home, "version-calls"), BACKPLANE_KICAD: path, BACKPLANE_KICAD_CLI: "", BACKPLANE_PEERS: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_WAKE_TICK_MS: "1000", BACKPLANE_LOCK_DIR: join(home, "locks") },
     stdout: Bun.file(join(home, "stdout.log")), stderr: Bun.file(join(home, "stderr.log"))
   });
   processes.push(proc);
@@ -82,9 +85,12 @@ async function start(name: string, path: string, homeOverride?: string) {
 async function stop(p: ReturnType<typeof Bun.spawn>) { if (p.exitCode === null) p.kill("SIGTERM"); await p.exited; }
 try {
   for (const [name, manifest, script, expected] of [
-    ["legacy", legacy, "printf '10.99.0-bp.1\\n'", "old"],
-    ["v1", v1, "printf '10.99.0-bp.1\\n'", "ok"],
-    ["v2", v2, "printf '10.99.0-bp.1\\n'", "ok"],
+    ["legacy", legacy, "printf '10.99.0-bp.4\\n'", "old"],
+    ["api1", api1, "printf '10.99.0-bp.4\\n'", "old"],
+    ["bp2", bp2, "printf '10.99.0-bp.2\\n'", "old"],
+    ["bp3", bp3, "printf '10.99.0-bp.3\\n'", "old"],
+    ["v1", v1, "printf '10.99.0-bp.4\\n'", "ok"],
+    ["v2", v2, "printf '10.99.0-bp.4\\n'", "ok"],
     ["stock", undefined, "printf '10.0.6\\n'", "stock"],
     ["broken", undefined, "printf 'cannot execute\\nmore output\\n' >&2; exit 1", "broken"],
     ["old", { ...v1, version: "10.0.5" }, "printf '10.0.5\\n'", "old"],
@@ -101,7 +107,7 @@ try {
       await sleep(2200);
       check("unchanged periodic stat does not rerun CLI", readFileSync(join(h.home, "version-calls"), "utf8").length === calls);
     }
-    if (name === "v2") check("v2 API and caps", info["kicad.api"] === "1" && info["kicad.caps"] === "api-server,headless-pcb", info);
+    if (name === "v2") check("v2 API and caps", info["kicad.api"] === "2" && info["kicad.caps"] === "api-server,headless-pcb", info);
     if (name === "broken") {
       check("failure reason first line", info["kicad.why"] === "cannot execute", info);
       check("failure output is not reported as version", info["kicad.version"] === "", info);
@@ -110,7 +116,7 @@ try {
       check("stock uses version output", info["kicad.version"] === "10.0.6", info);
       const at = h.seen.length; runtime(name, v1); h.send("kicad.retry");
       const updated = await h.health("ok", at);
-      check("in-place stock to fork retry broadcasts", updated["kicad.fork"] === "10.99.0-bp.1", updated);
+      check("in-place stock to fork retry broadcasts", updated["kicad.fork"] === "10.99.0-bp.4", updated);
       const at2 = h.seen.length;
       h.send("setting.set", { key: "kicad.path", value: join(root, "not-there", "kicad-cli") });
       const missing = await h.health("missing", at2);
@@ -123,7 +129,17 @@ try {
     const cache = JSON.parse(readFileSync(join(h.home, "kicad-health.json"), "utf8"));
     check(`${name} full record cached`, !!cache.stamp && typeof cache.runs === "boolean" && cache.status !== "checking", cache);
     h.ws.close(); await stop(h.proc);
+    if (name === "bp2") {
+      // Simulate an older app's healthy cache, with the same runtime files.
+      writeFileSync(join(h.home, "kicad-health.json"), JSON.stringify({ ...cache, status: "ok" }));
+      const restarted = await start("cached-bp2", rt.dir, h.home);
+      await restarted.health("old");
+      const first = restarted.seen.find(o => o.t === "log" || o.t === "info")?.info;
+      check("cached healthy bp.2 is old at boot under the new minimum", first?.["kicad.status"] === "old", first);
+      restarted.ws.close(); await stop(restarted.proc);
+    }
     if (name === "v1") {
+      check("cache stamp stops at the selected explicit runtime", cache.stamp.split("\n").filter(Boolean).length === 1, cache.stamp);
       const restarted = await start("cached-v1", rt.dir, h.home);
       await restarted.health("ok");
       // the connect message (t: "log") carries the info the hub booted with
@@ -132,6 +148,23 @@ try {
       restarted.ws.close(); await stop(restarted.proc);
     }
   }
+  const upgradeHome = join(root, "home-upgrade");
+  const previous = runtime("home-upgrade/kicad/10.99.0-bp.2", bp2, "printf '10.99.0-bp.2\\n'");
+  const upgrade = await start("upgrade", "", upgradeHome);
+  const olderInfo = await upgrade.health("old");
+  check("an older managed install is found and reports old", olderInfo["kicad.cli"] === previous.cli && olderInfo["kicad.source"] === "installed", olderInfo);
+  const upgradeAt = upgrade.seen.length;
+  const upgraded = runtime("home-upgrade/kicad/10.99.0-bp.4", v2, "printf '10.99.0-bp.4\\n'");
+  const upgradedInfo = await upgrade.health("ok", upgradeAt);
+  check("the pinned install appearing replaces the old managed runtime", upgradedInfo["kicad.cli"] === upgraded.cli, upgradedInfo);
+  upgrade.ws.close(); await stop(upgrade.proc);
+  const installedHome = join(root, "home-installed");
+  runtime("home-installed/kicad/10.99.0-bp.2", bp2, "printf '10.99.0-bp.2\\n'");
+  const pinned = runtime("home-installed/kicad/10.99.0-bp.4", v2, "printf '10.99.0-bp.4\\n'");
+  const installed = await start("installed", "", installedHome);
+  const installedInfo = await installed.health("ok");
+  check("leftover bp.2 does not shadow the pinned installed runtime", installedInfo["kicad.cli"] === pinned.cli && installedInfo["kicad.source"] === "installed", installedInfo);
+  installed.ws.close(); await stop(installed.proc);
   const h = await start("missing", "/nonexistent");
   const info = await h.health("missing");
   check("explicit nonexistent does not fall through", info["kicad.source"] === "env" && info["kicad.why"].startsWith("no kicad-cli at /nonexistent"), info);
@@ -145,16 +178,16 @@ try {
   await later.health("missing");
   const after = later.seen.length;
   runtime("later-runtime", v1);
-  check("periodic stat notices runtime becoming present", (await later.health("ok", after))["kicad.fork"] === "10.99.0-bp.1");
+  check("periodic stat notices runtime becoming present", (await later.health("ok", after))["kicad.fork"] === "10.99.0-bp.4");
   later.ws.close(); await stop(later.proc);
-  const bundle = runtime("KiCad.app", v2, "printf '10.99.0-bp.1\\n'", true);
+  const bundle = runtime("KiCad.app", v2, "printf '10.99.0-bp.4\\n'", true);
   const app = await start("bundle", bundle.dir);
-  check("macOS bundle Resources manifest", (await app.health("ok"))["kicad.api"] === "1");
+  check("macOS bundle Resources manifest", (await app.health("ok"))["kicad.api"] === "2");
   app.ws.close(); await stop(app.proc);
-  const desc = runtime("described", undefined, "printf '10.99.0-bp.1\\n'", false, v2);
+  const desc = runtime("described", undefined, "printf '10.99.0-bp.4\\n'", false, v2);
   const dh = await start("described", desc.dir);
   const dinfo = await dh.health("ok");
-  check("no manifest: api-server --describe identifies the fork", dinfo["kicad.api"] === "1" && dinfo["kicad.fork"] === "10.99.0-bp.1", dinfo);
+  check("no manifest: api-server --describe identifies the fork", dinfo["kicad.api"] === "2" && dinfo["kicad.fork"] === "10.99.0-bp.4", dinfo);
   dh.ws.close(); await stop(dh.proc);
 } catch (e) { check("e2e completed", false, String(e)); }
 finally {

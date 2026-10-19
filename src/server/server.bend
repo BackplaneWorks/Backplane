@@ -13,6 +13,7 @@ import ./proc.bend as P
 import ../core/json.bend as J
 import ../core/utf8.bend as U
 import ../core/http.bend as W
+import ../core/auth.bend as AUTH
 import ../core/model.bend as M
 import ../core/codec.bend as C
 import ../core/hub.bend as B
@@ -81,6 +82,10 @@ import ../core/notice.bend as NO
 import ../core/hist.bend as HI
 import ../core/emb.bend as EM
 import ./review.bend as RVS
+import ./hublock.bend as HL
+import ../core/cli.bend as CL
+import ../core/onehub.bend as OH
+import ../core/standin.bend as SI
 import ../core/cmds.bend as CM
 import ../core/errtail.bend as ER
 import ../core/keyring.bend as KR
@@ -304,6 +309,7 @@ type Msg is Data:
   Silence{}
   # every few seconds: progress lines held back land (Hub.beat)
   Beat{}
+  KeyringSeen{state: Nat}
   # watched work (core's Watch.*): a work_run launched; what proves the
   # work is the same; its end
   WatchLaunched{thread: String, id: String}
@@ -324,6 +330,27 @@ type Net is Data:
 
 type Cfg is Data:
   Cfg{home: String, web: String, host: String, port: U32, prompt: String, dirs: List<&2, String>, version: String, net: Net}
+
+# ---- mail perf: local wire-log length ----
+# Valid unknown JSON remains a wire line without changing State.seq.
+# Count the actual replay wire once, then only actual successful fresh lines.
+def LogCount.of(ls: List<&2, String>) -> Nat:
+  List.length(&2, String, ls)
+
+def LogCount.n(c: Cfg) -> Nat:
+  match c:
+    case Cfg{_, _, _, _, _, _, _, Net{_, _, _, _, _, _, _, _, _, _, _, bn, _, _, _, _}}: BN.Bn.wire_n(bn)
+
+def LogCount.set(c: Cfg, n: Nat) -> Cfg:
+  match c:
+    case Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, br, pk, tm, mc, pv, bn, mg, lk, fc, ks}}:
+      Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, br, pk, tm, mc, pv, BN.Bn.with_wire_n(bn, n), mg, lk, fc, ks}}
+
+def LogCount.init(c: Cfg, ls: List<&2, String>) -> Cfg:
+  LogCount.set(c, LogCount.of(ls))
+
+def LogCount.committed(+c: Cfg, fresh: List<&2, String>) -> Cfg:
+  LogCount.set(c, Nat.add(LogCount.n(c), List.length(&2, String, fresh)))
 
 type Client is Data:
   # look: what the client last said it shows (desk.look; core/desk.bend);
@@ -1289,12 +1316,9 @@ def Conn.file(+p: String) -> String:
 def Conn.cache(+path: String) -> String:
   Bool.pick(String, String.starts_with(path, "/chunk-"), "public, max-age=31536000, immutable", "no-cache")
 
-# a websocket from plain loopback is trusted; anything else (the tailnet
-# listener, or `tailscale serve` proxying with its identity headers) must
-# carry ?token=<the pairing token>
+# One authentication boundary for browser, native, upload and MCP requests.
 def Conn.allowed(+trusted: Bool, +hs: List<&2, W.Header>, +path: String, +token: String) -> Bool:
-  Bool.or(Bool.and(trusted, String.is_empty(W.Http.header_of(hs, "tailscale-user-login"))),
-    Bool.and(Bool.not(String.is_empty(token)), Bool.or(String.contains(path, "token=" ++ token), String.contains(W.Http.header_of(hs, "cookie"), "bp_token=" ++ token))))
+  AUTH.Auth.allowed(trusted, hs, path, token)
 
 # a websocket from this machine's loopback, not proxied by tailscale serve,
 # is marked for the hub: only such a window (or the one in this process)
@@ -1518,8 +1542,8 @@ def Bot.dir.changed.all(cs: List<&2, M.Change>, +inbox: Chan(Msg)) -> IO(Unit):
 
 def Hub.commit.k(fd: Folded, f: File, cl: List<&2, Client>, as: List<&2, Agent>, inbox: Chan(Msg), cfg: Cfg, note: String) -> Hub & Wrote:
   match fd:
-    case Folded{st, ls, fr}:
-      (Hub{st, f, ls, cl, as, inbox, cfg, note}, Wrote{fr, True{}, ""})
+    case Folded{st, ls, +fr}:
+      (Hub{st, f, ls, cl, as, inbox, LogCount.committed(cfg, fr), note}, Wrote{fr, True{}, ""})
 
 def Hub.err.msg(e: U32 & String) -> String:
   (_, msg) = e
@@ -2832,7 +2856,7 @@ def Codex.started(r: Result<&1, &1, U32 & String, U32 & Socket>, +thread: String
 
 def Codex.refuse(+thread: String, +gen: String, +inbox: Chan(Msg)) -> IO(Unit):
   do IO<Unit>:
-    ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, SpawnFailed{thread, gen, "{\"type\":\"turn.failed\",\"message\":" ++ J.Json.show(J.Str{KR.Keyring.refusal("codex")}) ++ "}"})
+    ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, SpawnFailed{thread, gen, "{\"type\":\"turn.failed\",\"not_started\":true,\"message\":" ++ J.Json.show(J.Str{KR.Keyring.refusal("codex")}) ++ "}"})
     return Unit{}
 
 def Codex.run(+args: List<&2, String>, +cwd: String, +thread: String, +gen: String, +inbox: Chan(Msg)) -> IO(Unit):
@@ -3035,15 +3059,15 @@ def Net.managed(n: Net) -> Bool:
 # Effects
 # -------
 
-# the MCP endpoint of one thread's agent (token included, so the tailnet
-# rules never lock an agent out)
+# The loopback MCP endpoint of one thread's native agent. Shared pairing
+# credentials stay out of provider arguments and generated configuration.
 # (gen: the process's generation, B.Gen.mcp: a call from a process that is
 # no longer the thread's may only read)
 def Hub.mcp_url.g(+cfg: Cfg, +thread: String, +gen: String) -> String:
-  "http://127.0.0.1:" ++ U32.show(Cfg.port(cfg)) ++ "/mcp/" ++ B.Gen.mcp(thread, gen) ++ "?token=" ++ Net.token(Cfg.net(cfg))
+  "http://127.0.0.1:" ++ U32.show(Cfg.port(cfg)) ++ "/mcp/" ++ B.Gen.mcp(thread, gen)
 
 def Hub.mcp_url(+cfg: Cfg, +thread: String) -> String:
-  "http://127.0.0.1:" ++ U32.show(Cfg.port(cfg)) ++ "/mcp/" ++ thread ++ "?token=" ++ Net.token(Cfg.net(cfg))
+  "http://127.0.0.1:" ++ U32.show(Cfg.port(cfg)) ++ "/mcp/" ++ thread
 
 def Cfg.mtext(c: Cfg) -> String:
   match c:
@@ -3189,7 +3213,7 @@ def Tailnet.https.k(none: Bool, +name: String, +token: String, +inbox: Chan(Msg)
       Log.info("tailscale serve did not report a DNS name")
     case False{}:
       do IO<Unit>:
-        IO.print("Backplane over HTTPS on your tailnet: " ++ TN.Tailnet.link("https://" ++ name, token))
+        IO.print("Backplane over HTTPS on your tailnet: https://" ++ name ++ "/ (pair in Settings)")
         ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, LinkFound{TN.Tailnet.report("reachable", TN.Tailnet.link("https://" ++ name, token))})
         return Unit{}
 
@@ -3318,7 +3342,7 @@ def Deploy.probe(+inbox: Chan(Msg)) -> IO(Unit):
   IO.bind(String, Unit, Env.get("BACKPLANE_DEPLOY_LOCKS", "/tmp/bp-bend.lock:/tmp/bp-wt-build.lock"), l => Deploy.probe.l(l, inbox))
 
 def Deploy.swap.sh() -> String:
-  "set -eu; src=$1; prefix=$2; [ -d \"$src\" ] || { echo \"no staged package at $src\"; exit 1; }; mkdir -p \"$prefix\"; if [ -d \"$src/web\" ]; then rm -rf \"$prefix/web.old\"; [ -d \"$prefix/web\" ] && mv \"$prefix/web\" \"$prefix/web.old\"; mv \"$src/web\" \"$prefix/web\"; fi; for f in backplane backplane-serve backplane-browser backplane-browser.stamp backplane-step2glb backplane-voice backplane-kipc LICENSE; do if [ -e \"$src/$f\" ]; then mv -f \"$src/$f\" \"$prefix/$f\"; fi; done; rmdir \"$src\" 2>/dev/null || true; exit 0"
+  "set -eu; src=$1; prefix=$2; [ -d \"$src\" ] || { echo \"no staged package at $src\"; exit 1; }; mkdir -p \"$prefix\"; if [ -f \"$src/cef-runtime.py\" ]; then python3 \"$src/cef-runtime.py\" install \"$src\" \"$prefix\"; fi; if [ -d \"$src/web\" ]; then rm -rf \"$prefix/web.old\"; [ -d \"$prefix/web\" ] && mv \"$prefix/web\" \"$prefix/web.old\"; mv \"$src/web\" \"$prefix/web\"; fi; for f in backplane backplane-serve backplane-browser backplane-browser.stamp backplane-step2glb backplane-voice backplane-kipc LICENSE; do if [ -e \"$src/$f\" ]; then mv -f \"$src/$f\" \"$prefix/$f\"; fi; done; rmdir \"$src\" 2>/dev/null || true; exit 0"
 
 def Deploy.swapped(ok: Bool, +out: String, +path: String, +inbox: Chan(Msg)) -> IO(Unit):
   match ok:
@@ -4249,10 +4273,10 @@ def Hub.term_to(h: Hub, +client: U32, +key: String, +cols: U32, +rows: U32, data
         cl2 : List<&2, Client> <- Hub.term_to.k(U32.is_eq(client, TM.Et.all()), cl, client, Term.json.reset(key, cols, rows, data))
         return Hub{st, f, ls, cl2, as, inbox, cfg, note}
 
-def Cfg.with_rt(c: Cfg, rt: K.Rt) -> Cfg:
+def Cfg.with_rt(c: Cfg, +rt: K.Rt) -> Cfg:
   match c:
-    case Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, _, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}}:
-      Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}}
+    case Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, old, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}}:
+      Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, K.Rt.set(rt, "auth.probe", J.Flag{J.Json.get_bool(K.Rt.health(rt), "auth.probe", J.Json.get_bool(K.Rt.health(old), "auth.probe", False{}))}), brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}}
 
 def Cfg.with_models(c: Cfg, +ms: String, +mt: String) -> Cfg:
   match c:
@@ -4400,10 +4424,19 @@ def KIpc.pro.k(pro: Bool, absolute: Bool, +path: String) -> IO(String):
 def KIpc.pro(+path: String) -> IO(String):
   KIpc.pro.k(String.ends_with(path, ".kicad_pro"), String.starts_with(path, "/"), path)
 
+# the capabilities the hub acts on (idle-exit only from API 2)
+def KIpc.caps.of(+h: J.Json) -> List<&2, String>:
+  KSC.KS.caps.safe(KH.KH.strings(J.Json.elems(J.Json.get_obj(h, "caps"))), J.Json.get_nat(h, "api", 0n))
+
+def KIpc.caps(rt: K.Rt) -> List<&2, String>:
+  match rt:
+    case K.Rt{_, _, _, _, +h}:
+      KIpc.caps.of(h)
+
 def KIpc.env(rt: K.Rt) -> KSV.KEnv:
   match rt:
     case K.Rt{+cli, _, v, _, +h}:
-      KSV.KEnv{cli, K.Rt.root(cli), KSC.KS.caps.safe(KH.KH.strings(J.Json.elems(J.Json.get_obj(h, "caps"))), J.Json.get_nat(h, "api", 0n)), v}
+      KSV.KEnv{cli, K.Rt.root(cli), KIpc.caps.of(h), v}
 
 # why IPC cannot be used right now ("" when it can)
 def KIpc.gate(rt: K.Rt, +setting: String) -> String:
@@ -4412,11 +4445,11 @@ def KIpc.gate(rt: K.Rt, +setting: String) -> String:
       KSC.KS.gate(J.Json.get_str(h, "status", "checking"), v, J.Json.get_str(h, "why", ""), setting)
 
 # what is wrong with the request itself ("" when nothing)
-def KIpc.check(+ty: String, +path: String, +pro: String) -> String:
+def KIpc.check(+ty: String, +path: String, +pro: String, +msg: J.Json, caps: List<&2, String>) -> String:
   Bool.pick(String, String.is_empty(ty), "type is required: the protobuf command, e.g. kiapi.board.commands.GetItems",
     Bool.pick(String, Bool.not(String.starts_with(path, "/")), "path must be the absolute path of the project's .kicad_pro, .kicad_pcb or .kicad_sch",
       Bool.pick(String, String.is_empty(pro), "no KiCad project (.kicad_pro) found for " ++ path,
-        Bool.pick(String, KSC.KS.headless_refused(ty), KSC.KS.refusal(), ""))))
+        Bool.pick(String, KSC.KS.headless_refused(ty), KSC.KS.refusal(), KSC.KS.guard(ty, msg, caps)))))
 
 def KIpc.body(+o: J.Json) -> J.Json:
   J.Json.obj([J.KV{"type", J.Str{J.Json.get_str(o, "type", "")}}, J.KV{"message", J.Json.get_obj(o, "message")}])
@@ -4433,30 +4466,31 @@ def KIpc.fin.plain(ok: Bool, +o: J.Json, +reply: Chan(String), +id: String) -> I
     case False{}:
       KIpc.fail(reply, id, KIpc.err(o))
 
-def KIpc.fin.ok(status: Bool, ok: Bool, +o: J.Json, +reply: Chan(String), +id: String, +lines: String) -> IO(Unit):
+def KIpc.fin.ok(status: Bool, ok: Bool, +o: J.Json, +reply: Chan(String), +id: String, +lines: String, +argv: String, +version: String) -> IO(Unit):
   match status:
     case True{}:
-      KIpc.send(reply, id, True{}, J.Json.obj([J.KV{"server", J.Str{KSC.KS.note(lines)}}, J.KV{"servers", J.Str{lines}}, J.KV{"capabilities", J.Json.get_obj(o, "message")},
+      KIpc.send(reply, id, True{}, J.Json.obj([J.KV{"server", J.Str{KSC.KS.note(lines)}}, J.KV{"servers", J.Str{lines}}, J.KV{"argv", J.Str{argv}}, J.KV{"version", J.Str{version}}, J.KV{"capabilities", J.Json.get_obj(o, "message")},
         J.KV{"detail", J.Str{Bool.pick(String, ok, "", KIpc.err(o))}}]))
     case False{}:
       KIpc.fin.plain(ok, o, reply, id)
 
-def KIpc.fin.k(fallback: Bool, ok: Bool, +o: J.Json, +inbox: Chan(Msg), +thread: String, +reply: Chan(String), +id: String, status: Bool, +lines: String) -> IO(Unit):
+def KIpc.fin.k(fallback: Bool, ok: Bool, +o: J.Json, +inbox: Chan(Msg), +thread: String, +reply: Chan(String), +id: String, status: Bool, +lines: String, +argv: String, +version: String) -> IO(Unit):
   match fallback:
     case True{}:
       do IO<Unit>:
         KIpc.log(inbox, thread, id, J.Json.get_str(o, "why", ""))
         KIpc.fail(reply, id, J.Json.get_str(o, "error", ""))
     case False{}:
-      KIpc.fin.ok(status, ok, o, reply, id, lines)
+      KIpc.fin.ok(status, ok, o, reply, id, lines, argv, version)
 
 # the project's server is asked, and the answer goes back
-def KIpc.run(+q: Chan(KSV.KMsg), +pro: String, env: KSV.KEnv, +ty: String, msg: J.Json, status: Bool, +inbox: Chan(Msg), +thread: String, +reply: Chan(String), +id: String) -> IO(Unit):
+def KIpc.run(+q: Chan(KSV.KMsg), +pro: String, +env: KSV.KEnv, +ty: String, msg: J.Json, status: Bool, +inbox: Chan(Msg), +thread: String, +reply: Chan(String), +id: String) -> IO(Unit):
   do IO<Unit>:
     +line : String <- KSV.KServe.ask_on(q, pro, env, ty, msg)
     +lines : String <- KSV.KServe.info_on(q)
+    +argv : String <- KSV.KServe.argv_on(q, pro)
     +o : J.Json = KSV.KServe.parse(line)
-    KIpc.fin.k(J.Json.get_bool(o, "fallback", False{}), J.Json.get_bool(o, "ok", False{}), o, inbox, thread, reply, id, status, lines)
+    KIpc.fin.k(J.Json.get_bool(o, "fallback", False{}), J.Json.get_bool(o, "ok", False{}), o, inbox, thread, reply, id, status, lines, argv, KSV.KEnv.version(env))
 
 def KIpc.go.run(m: Maybe<&2, Chan(KSV.KMsg)>, +rt: K.Rt, +inbox: Chan(Msg), +thread: String, +o: J.Json, +reply: Chan(String), +pro: String) -> IO(Unit):
   match m:
@@ -4480,7 +4514,7 @@ def KIpc.go.k(fine: Bool, +plain: String, +gate: String, m: Maybe<&2, Chan(KSV.K
       KIpc.go.gate(String.is_empty(gate), gate, m, rt, inbox, thread, o, reply, pro)
 
 def KIpc.go(m: Maybe<&2, Chan(KSV.KMsg)>, +rt: K.Rt, +setting: String, +inbox: Chan(Msg), +thread: String, +o: J.Json, +reply: Chan(String), +pro: String) -> IO(Unit):
-  +plain = KIpc.check(KIpc.type(o), KIpc.path(o), pro)
+  +plain = KIpc.check(KIpc.type(o), KIpc.path(o), pro, KIpc.msg(J.Json.get_obj(KIpc.args(o), "message")), KIpc.caps(rt))
   KIpc.go.k(String.is_empty(plain), plain, KIpc.gate(rt, setting), m, rt, inbox, thread, o, reply, pro)
 
 def KIpc.job(m: Maybe<&2, Chan(KSV.KMsg)>, +rt: K.Rt, +setting: String, +inbox: Chan(Msg), +thread: String, +o: J.Json, +reply: Chan(String)) -> IO(Unit):
@@ -4773,6 +4807,19 @@ def Machines.start(+inbox: Chan(Msg), +port: U32) -> IO(Unit):
 
 def Main.version() -> String:
   VR.Version.current()
+
+# the strict command line (core/cli.bend), the first thing both mains do:
+# go only runs the program; --help, --version and a bad flag do nothing else
+def Main.cli(c: CL.Cli, go: Unit -> IO(Unit)) -> IO(Unit):
+  match c:
+    case CL.CliRun{}:
+      go(Unit{})
+    case CL.CliHelp{}:
+      IO.print(CL.Cli.usage())
+    case CL.CliVersion{}:
+      IO.print("backplane " ++ Main.version())
+    case CL.CliBad{why}:
+      IO.die(Unit, 2, "backplane: " ++ why ++ "\n" ++ CL.Cli.usage())
 
 def Main.failed(e: U32 & String, h: Hub, addr: String) -> IO(Unit):
   (_, msg) = e
@@ -5130,10 +5177,17 @@ def Conn.is_lock(req: W.Request) -> Bool:
     case W.Request{m, p, _}:
       Bool.and(String.eq(m, "POST"), String.starts_with(W.Http.route(p), "/lock/"))
 
+def Conn.lock.browser(ok: Bool, s: Socket, +op: String, +len: Nat, rest: List<&2, U32>, +inbox: Chan(Msg)) -> IO(Unit):
+  match ok:
+    case True{}:
+      IO.bind(Socket & String, Unit, H.Sock.peer(s), r => LockHttp.peer(r, op, len, rest, inbox))
+    case False{}:
+      Conn.finish(s, W.Http.text("403 Forbidden", "cross-origin request refused"))
+
 def Conn.route.lock(lock: Bool, s: Socket, +req: W.Request, rest: List<&2, U32>, +web: String, +id: U32, +inbox: Chan(Msg), +trusted: Bool, +token: String) -> IO(Unit):
   match lock req:
-    case True{} W.Request{_, +p, hs}:
-      IO.bind(Socket & String, Unit, H.Sock.peer(s), r => LockHttp.peer(r, String.drop(W.Http.route(p), 6n), J.Json.get_nat(J.Json.obj([J.KV{"n", J.Num{W.Http.header_of(hs, "content-length")}}]), "n", 0n), rest, inbox))
+    case True{} W.Request{_, +p, +hs}:
+      Conn.lock.browser(Bool.and(AUTH.Auth.browser(hs), AUTH.Auth.trusted(True{}, hs)), s, String.drop(W.Http.route(p), 6n), J.Json.get_nat(J.Json.obj([J.KV{"n", J.Num{W.Http.header_of(hs, "content-length")}}]), "n", 0n), rest, inbox)
     case False{} _:
       Conn.route.mcp.raw(Conn.is_mcp(req), s, req, rest, web, id, inbox, trusted, token)
 
@@ -5370,10 +5424,11 @@ def Path.refresh(+home: String) -> IO(Unit):
     Path.set(String.eq(cur, next), next)
 
 # which of the five CLIs are on PATH now (Antigravity's agy lives in
-# <home>/antigravity, AGX.Agx.probe, not on PATH), "claude codex " style
+# <home>/antigravity, AGX.Agx.probe, not on PATH), "claude codex " style;
+# a stand-in's block (core/standin.bend) is none
 def Models.present() -> IO(String):
   do IO<String>:
-    r : P.Ran <- P.Proc.run("sh", ["-c", "for c in claude codex grok muse omp; do command -v $c >/dev/null 2>&1 && printf '%s ' $c; done; true"], "/")
+    r : P.Ran <- P.Proc.run("sh", ["-c", SI.Standin.present.sh()], "/")
     return Path.out(r)
 
 # a full detection when it is due, else nothing; answers the list kept
@@ -5443,6 +5498,11 @@ def Main.prepare(+user: String, +exe: String) -> IO(Boot):
     +rt : K.Rt = K.Rt.empty()
     +fc : String <- FC.FreeCAD.find()
     return Models.boot(ks, rt, Found{"", ""}, fc)
+
+# the home and port the arguments name, before anything else is found
+# (the server binary takes the home's lock with them first)
+def Main.where(+user: String, args: List<String>) -> Cfg:
+  Main.args(args, Cfg{user ++ "/.backplane-bend", "", "127.0.0.1", 3787, "", Nil{}, "", Net{True{}, False{}, "", "", "", K.Rt.empty(), None{}, None{}, None{}, "", None{}, BN.Bn.empty(), False{}, "", "", None{}}})
 
 def Main.config(+user: String, +exe: String, args: List<String>, b: Boot) -> Cfg:
   Boot{kdir, skills, rt, ms, mt, +fc} = b
@@ -8942,13 +9002,13 @@ def Boot.go(log: Bool, +c: Client, h: Hub, +n: Nat, +id: U32) -> IO(Hub):
     case False{} Hub{st, f, ls, cl, as, inbox, +cfg, note}:
       Boot.far.k(List.get(&2, FR.In, Far.mirrors(cfg), OB.Cr.fl(Boot.r(c))), Hub{st, f, ls, cl, as, inbox, cfg, note}, c, id)
 
-# the log's length is walked only when the next window is due: a chunk
-# with lines left over takes them (Boot.src), and walking a long log for
-# every 64 lines made a join quadratic (11 ms a chunk on 43k lines)
+# Window lookup uses the actual local wire length kept by successful
+# commits, not State.seq or a walk of the full shared log. Near its head,
+# every small catch-up window used to walk the entire growing log twice.
 def Boot.k.rest(empty: Bool, +c: Client, h: Hub, +id: U32) -> IO(Hub):
   match empty h:
-    case True{} Hub{st, f, +ls, cl, as, inbox, cfg, note}:
-      Boot.go(Nat.is_lt(OB.Cr.at(Boot.r(c)), List.length(&2, String, ls)), c, Hub{st, f, ls, cl, as, inbox, cfg, note}, List.length(&2, String, ls), id)
+    case True{} Hub{st, f, +ls, cl, as, inbox, +cfg, note}:
+      Boot.go(Nat.is_lt(OB.Cr.at(Boot.r(c)), LogCount.n(cfg)), c, Hub{st, f, ls, cl, as, inbox, cfg, note}, LogCount.n(cfg), id)
     case False{} _:
       Boot.go(True{}, c, h, 0n, id)
 
@@ -9112,9 +9172,34 @@ def Hub.step.wakes(step: B.Step, +st: M.State, h: Hub) -> IO(Hub & Bool):
     case B.Step{cs, os}:
       Hub.step.a(st, h, cs, os)
 
+# Keep the affine hub and copied state boxed while computing the pure step.
+# Their expanded records plus caps/now/step exceed Bend's 247-word call
+# limit when held in one continuation. Unbox only at the existing handoff.
+def Hub.step.fallback.done(held: List<Hub>, states: List<&2, M.State>, step: B.Step) -> IO(Hub & Bool):
+  match held states:
+    case h <> hs st <> ss: Hub.step.wakes(step, st, h)
+    case _ _: IO.die(Hub & Bool, 1, "missing fallback step context")
+
+def Hub.step.fallback.fold(states: List<&2, M.State>, caps: J.Json, now: Nat, step: B.Step, held: List<Hub>) -> IO(Hub & Bool):
+  match states:
+    case +st <> rest: Hub.step.fallback.done(held, [st], B.Fallback.validate(st, caps, now, step))
+    case Nil{}: IO.die(Hub & Bool, 1, "missing fallback state")
+
+def Hub.step.fallback.models(h: Hub) -> String & List<Hub>:
+  match h:
+    case Hub{s, f, ls, cl, as, inbox, +cfg, note}:
+      (Cfg.models(cfg), [Hub{s, f, ls, cl, as, inbox, cfg, note}])
+
+def Hub.step.fallback.captured(pair: String & List<Hub>, states: List<&2, M.State>, now: Nat, step: B.Step) -> IO(Hub & Bool):
+  (models, held) = pair
+  Hub.step.fallback.fold(states, Maybe.default(&2, J.Json, J.Json.parse(models), J.Null{}), now, step, held)
+
+def Hub.step.fallback(h: Hub, states: List<&2, M.State>, now: Nat, step: B.Step) -> IO(Hub & Bool):
+  Hub.step.fallback.captured(Hub.step.fallback.models(h), states, now, step)
+
 def Hub.step.k(p: M.State & Hub, cs: List<&2, M.Change>, os: List<&2, B.Out>) -> IO(Hub & Bool):
   (+st, h) = p
-  IO.bind(Nat, Hub & Bool, Now.nat(), +now => Hub.step.wakes(B.Locks.after(st, now, B.Ride.after(st, now, B.Wake.after(st, B.Step{cs, os}))), st, h))
+  IO.bind(Nat, Hub & Bool, Now.nat(), +now => Hub.step.fallback(h, [st], now, B.Locks.after(st, now, B.Ride.after(st, now, B.Wake.after(st, B.Step{cs, os})))))
 
 # a step's changes are stored (with the pending counts they move), then
 # its effects run; answers whether it was stored
@@ -11783,8 +11868,24 @@ def Conn.route.bot(k: Nat, s: Socket, +req: W.Request, rest: List<&2, U32>, +web
     case _ _:
       Conn.route.att(Conn.is_att(req), s, req, rest, web, id, inbox, trusted, token)
 
+def Conn.pair.reply(ok: Bool, s: Socket, +token: String, https: Bool) -> IO(Unit):
+  match ok:
+    case True{}:
+      Conn.finish(s, W.Http.response("204 No Content", "text/plain", Nil{}, AUTH.Auth.cookie(token, https)))
+    case False{}:
+      Conn.finish(s, W.Http.text("401 Unauthorized", "pairing refused"))
+
+def Conn.route.auth(pair: Bool, s: Socket, +req: W.Request, rest: List<&2, U32>, +web: String, +id: U32, +inbox: Chan(Msg), +trusted: Bool, +token: String) -> IO(Unit):
+  match pair req:
+    case True{} W.Request{method, _, +hs}:
+      Conn.pair.reply(Bool.and(String.eq(method, "POST"), AUTH.Auth.pair(hs, token)), s, token, String.starts_with(W.Http.header_of(hs, "origin"), "https://"))
+    case False{} _:
+      Conn.route.bot(Conn.bot.kind(req), s, req, rest, web, id, inbox, trusted, token)
+
 def Conn.route(s: Socket, +req: W.Request, rest: List<&2, U32>, +web: String, +id: U32, +inbox: Chan(Msg), +trusted: Bool, +token: String) -> IO(Unit):
-  Conn.route.bot(Conn.bot.kind(req), s, req, rest, web, id, inbox, trusted, token)
+  match req:
+    case W.Request{+method, +path, +hs}:
+      Conn.route.auth(String.eq(W.Http.route(path), "/auth/pair"), s, W.Request{method, path, hs}, rest, web, id, inbox, trusted, token)
 
 def Conn.head.k(m: Maybe<&2, W.Split>, s: Socket, buf: List<&2, U32>, +web: String, +id: U32, +inbox: Chan(Msg),
     +trusted: Bool, +token: String, k: Socket -> List<&2, U32> -> IO(Unit)) -> IO(Unit):
@@ -11813,12 +11914,17 @@ def Accept.whois(r: Socket & String, +owner: String, +id: U32, +web: String, +in
     w : P.Ran <- P.Proc.run("sh", PT.Port.timeout(["5", "tailscale", "whois", "--json", ip]), "/")
     Conn.head(64n, s, Nil{}, web, id, inbox, TN.Tailnet.trusts(owner, TN.Tailnet.login(Tailnet.out(w))), token)
 
+def Accept.local(r: Socket & String, +id: U32, +web: String, +inbox: Chan(Msg), +trusted: Bool, +token: String) -> IO(Unit):
+  (s, ip) = r
+  Conn.head(64n, s, Nil{}, web, id, inbox, Bool.and(trusted, CF.Cef.loopback(ip)), token)
+
 def Accept.trust(ask: Bool, s: Socket, +owner: String, +id: U32, +web: String, +inbox: Chan(Msg), +trusted: Bool, +token: String) -> IO(Unit):
   match ask:
     case True{}:
       IO.bind(Socket & String, Unit, H.Sock.peer(s), r => Accept.whois(r, owner, id, web, inbox, token))
     case False{}:
-      Conn.head(64n, s, Nil{}, web, id, inbox, trusted, token)
+      IO.bind(Socket & String, Unit, H.Sock.peer(s), r => Accept.local(r, id, web, inbox, trusted, token))
+
 
 def Accept.got(r: Listener & Result<&1, &1, U32 & String, Socket>, +id: U32, +web: String, +inbox: Chan(Msg), +trusted: Bool, +token: String, +owner: String, k: Listener -> IO(Unit)) -> IO(Unit):
   (l, res) = r
@@ -11851,7 +11957,7 @@ def Tailnet.listened(r: Result<&1, &1, U32 & String, Listener>, +host: String, +
       do IO<Unit>:
         w : P.Ran <- P.Proc.run("tailscale", ["whois", "--json", ip], "/")
         +owner : String = TN.Tailnet.login(Tailnet.out(w))
-        IO.print("Backplane on your tailnet: http://" ++ ip ++ ":" ++ U32.show(port) ++ "/ (" ++ Bool.pick(String, String.is_empty(owner), "pairing token " ++ token, owner ++ "'s devices, or pairing token " ++ token) ++ ")")
+        IO.print("Backplane on your tailnet: http://" ++ ip ++ ":" ++ U32.show(port) ++ "/ (" ++ Bool.pick(String, String.is_empty(owner), "pair in Settings", owner ++ "'s devices; pair in Settings") ++ ")")
         ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, LinkFound{TN.Tailnet.report("reachable", TN.Tailnet.link("http://" ++ ip ++ ":" ++ U32.show(port), token))})
         IO.spawn(Unit, Accept.loop(Fuel.forever(), l, 2147483648, web, inbox, False{}, token, owner))
     case Fail{_}:
@@ -12933,6 +13039,8 @@ def Msg.kind(m: Msg) -> String:
       "agent_exited"
     case Silence{}:
       "silence"
+    case KeyringSeen{_}:
+      "keyring_seen"
     case Beat{}:
       "beat"
     case WatchLaunched{_, _}:
@@ -13416,6 +13524,158 @@ def Hub.run.ready(h: Hub, +th: String, head: String, bs: List<&2, MB.Body>, +now
   match h:
     case Hub{+st, f, ls, cl, as, inbox, cfg, note}: Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, B.Run.start.on(B.Run.ready(st, th), st, now, th, head, bs))
 
+# Two inboxes
+# ------------
+# The hub reads one channel (pri): clients' requests, joins and writers'
+# reports, MCP calls and ticks come straight in. Everything else (agents'
+# lines, jobs, the hub's own posts) goes to the hub's inbox, and Bulk.fwd
+# passes it on only while it holds one of Bulk.room() tokens, one given
+# back as each is handled: however fast an agent floods, a request (Stop)
+# waits behind at most that many of its lines.
+
+def Bulk.room() -> Nat:
+  16n
+
+def Bulk.fill(n: Nat, +tok: Chan(Unit)) -> IO(Unit):
+  match n:
+    case 0n:
+      IO.pure(Unit, Unit{})
+    case 1n+k:
+      do IO<Unit>:
+        ok : Result<&1, &1, Unit, Unit> <- Chan.send(Unit, tok, Unit{})
+        Bulk.fill(k, tok)
+
+def Bulk.moved(m: Maybe<&1, Msg>, +pri: Chan(Msg), k: Unit -> IO(Unit)) -> IO(Unit):
+  match m:
+    case Some{msg}:
+      do IO<Unit>:
+        ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, pri, Bulk{msg})
+        k(Unit{})
+    case None{}:
+      IO.pure(Unit, Unit{})
+
+def Bulk.took(t: Maybe<&1, Unit>, +inbox: Chan(Msg), +pri: Chan(Msg), k: Unit -> IO(Unit)) -> IO(Unit):
+  match t:
+    case Some{_}:
+      IO.bind(Maybe<&1, Msg>, Unit, Chan.recv(Msg, inbox), m => Bulk.moved(m, pri, k))
+    case None{}:
+      IO.pure(Unit, Unit{})
+
+def Bulk.fwd(fuel: Nat, +inbox: Chan(Msg), +pri: Chan(Msg), +tok: Chan(Unit)) -> IO(Unit):
+  match fuel:
+    case 0n:
+      IO.pure(Unit, Unit{})
+    case 1n+f:
+      IO.bind(Maybe<&1, Unit>, Unit, Chan.recv(Unit, tok), t => Bulk.took(t, inbox, pri, u => Bulk.fwd(f, inbox, pri, tok)))
+
+def Bulk.back(+tok: Chan(Unit), h: Hub, k: Hub -> IO(Unit)) -> IO(Unit):
+  do IO<Unit>:
+    ok : Result<&1, &1, Unit, Unit> <- Chan.send(Unit, tok, Unit{})
+    k(h)
+
+# The web port was taken at start (often only for a moment, by the process
+# this one replaces): try it again every few seconds, and once it is ours,
+# start what Main.serve starts beside the hub, so a restart never leaves the
+# hub unreachable from other machines and phones
+def Listen.up(l: Listener, +web: String, +inbox: Chan(Msg), +cfg: Cfg, +addr: String) -> IO(Unit):
+  do IO<Unit>:
+    Log.info("web server on: " ++ addr)
+    IO.spawn(Unit, Accept.loop(Fuel.forever(), l, 1, web, inbox, True{}, Net.token(Cfg.net(cfg)), ""))
+    Tailnet.start(Cfg.net(cfg), Cfg.host(cfg), Cfg.port(cfg), web, inbox)
+    Machines.start(inbox, Cfg.port(cfg))
+
+def Listen.got(r: Result<&1, &1, U32 & String, Listener>, +web: String, +inbox: Chan(Msg), +cfg: Cfg, +addr: String, k: Unit -> IO(Unit)) -> IO(Unit):
+  match r:
+    case Done{l}:
+      Listen.up(l, web, inbox, cfg, addr)
+    case Fail{_}:
+      k(Unit{})
+
+def Listen.retry(fuel: Nat, +web: String, +inbox: Chan(Msg), +cfg: Cfg, +addr: String) -> IO(Unit):
+  match fuel:
+    case 0n:
+      IO.pure(Unit, Unit{})
+    case 1n+f:
+      do IO<Unit>:
+        IO.sleep(2000)
+        l : Result<&1, &1, U32 & String, Listener> <- H.Net.listen(Cfg.host(cfg), Cfg.port(cfg))
+        Listen.got(l, web, inbox, cfg, addr, _ => Listen.retry(f, web, inbox, cfg, addr))
+
+# "<pid> <port>" of another live Backplane holding the lock (the same
+# program as this one, by its process name), else ""
+
+
+
+
+# Browser frames
+# --------------
+
+
+
+# a frame goes to every client (or, past the helper's --jpeg-fps, only to
+# the clients showing its page: castio.bend); a recorder step, navigation
+# or load to the hub's teach state
+
+
+
+# page-frame events from the browser, to the hub
+
+
+# the headless KiCad servers' lines, to the hub
+
+def Main.torn.k(r: File & Result<&1, &1, U32 & String, Unit>) -> IO(Result<&1, &1, U32 & String, File>):
+  (f, res) = r
+  match res:
+    case Done{_}:
+      IO.pure(Result<&1, &1, U32 & String, File>, Done{f})
+    case Fail{e}:
+      IO.pure(Result<&1, &1, U32 & String, File>, Fail{e})
+
+# a log whose last line was torn by a crash ends without a newline: the
+# next line starts on its own (ST.Store.tail_fix)
+def Main.torn.w(none: Bool, f: File, +fix: String) -> IO(Result<&1, &1, U32 & String, File>):
+  match none:
+    case True{}:
+      IO.pure(Result<&1, &1, U32 & String, File>, Done{f})
+    case False{}:
+      IO.bind(File & Result<&1, &1, U32 & String, Unit>, Result<&1, &1, U32 & String, File>, File.write(f, fix), Main.torn.k)
+
+def Main.torn(r: Result<&1, &1, U32 & String, File>, +fix: String) -> IO(Result<&1, &1, U32 & String, File>):
+  match r:
+    case Done{f}:
+      Main.torn.w(String.is_empty(fix), f, fix)
+    case Fail{e}:
+      IO.pure(Result<&1, &1, U32 & String, File>, Fail{e})
+
+# Only paused credential-dependent work triggers a bounded, read-only probe.
+def Keyring.resume.job(+inbox: Chan(Msg)) -> IO(Unit):
+  do IO<Unit>:
+    state : Nat <- Keyring.probe()
+    Self.post(inbox, KeyringSeen{state})
+
+def Hub.auth.beat.k(wait: Bool, h: Hub, +now: Nat) -> IO(Hub):
+  match wait h:
+    case True{} Hub{st, f, ls, cl, as, +inbox, +cfg, note}:
+      do IO<Hub>:
+        IO.spawn(Unit, Keyring.resume.job(inbox))
+        Hub.beat(Hub{st, f, ls, cl, as, inbox, Cfg.with_rt(cfg, K.Rt.set(Cfg.rt(cfg), "auth.probe", J.Flag{True{}})), note}, now)
+    case False{} _:
+      Hub.beat(h, now)
+
+def Hub.auth.beat(h: Hub, now: Nat) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
+      Hub.auth.beat.k(Bool.and(B.Auth.any(B.Rec.threads(st), st), Bool.not(J.Json.get_bool(K.Rt.health(Cfg.rt(cfg)), "auth.probe", False{}))), Hub{st, f, ls, cl, as, inbox, cfg, note}, now)
+
+def Hub.auth.ready.clear(h: Hub, st: M.State, open: Bool, now: Nat) -> IO(Hub):
+  match h:
+    case Hub{s, f, ls, cl, as, inbox, +cfg, note}:
+      Hub.step(Hub{s, f, ls, cl, as, inbox, Cfg.with_rt(cfg, K.Rt.set(Cfg.rt(cfg), "auth.probe", J.Flag{False{}})), note}, B.Auth.recover(open, st, now))
+
+def Hub.auth.ready(p: M.State & Hub, open: Bool, now: Nat) -> IO(Hub):
+  (+st, h) = p
+  Hub.auth.ready.clear(h, st, open, now)
+
 def Hub.handle(h: Hub, m: Msg, +now: Nat) -> IO(Hub):
   match m:
     case LockProbe{name, holder, n}:
@@ -13585,8 +13845,10 @@ def Hub.handle(h: Hub, m: Msg, +now: Nat) -> IO(Hub):
       Hub.exited(h, thread, gen, code)
     case Silence{}:
       Hub.quiet.beat(h, now)
+    case KeyringSeen{state}:
+      Hub.auth.ready(Hub.state(h), Nat.is_eq(state, 1n), now)
     case Beat{}:
-      Hub.beat(h, now)
+      Hub.auth.beat(h, now)
     case WatchLaunched{thread, id}:
       Hub.watched(Hub.state(h), 0n, thread, id, "", "", now)
     case WatchIdent{thread, id, ident}:
@@ -13598,55 +13860,6 @@ def Hub.handle(h: Hub, m: Msg, +now: Nat) -> IO(Hub):
     # unwrapped by Hub.got, never nested
     case Bulk{_}:
       IO.pure(Hub, h)
-
-# Two inboxes
-# ------------
-# The hub reads one channel (pri): clients' requests, joins and writers'
-# reports, MCP calls and ticks come straight in. Everything else (agents'
-# lines, jobs, the hub's own posts) goes to the hub's inbox, and Bulk.fwd
-# passes it on only while it holds one of Bulk.room() tokens, one given
-# back as each is handled: however fast an agent floods, a request (Stop)
-# waits behind at most that many of its lines.
-
-def Bulk.room() -> Nat:
-  16n
-
-def Bulk.fill(n: Nat, +tok: Chan(Unit)) -> IO(Unit):
-  match n:
-    case 0n:
-      IO.pure(Unit, Unit{})
-    case 1n+k:
-      do IO<Unit>:
-        ok : Result<&1, &1, Unit, Unit> <- Chan.send(Unit, tok, Unit{})
-        Bulk.fill(k, tok)
-
-def Bulk.moved(m: Maybe<&1, Msg>, +pri: Chan(Msg), k: Unit -> IO(Unit)) -> IO(Unit):
-  match m:
-    case Some{msg}:
-      do IO<Unit>:
-        ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, pri, Bulk{msg})
-        k(Unit{})
-    case None{}:
-      IO.pure(Unit, Unit{})
-
-def Bulk.took(t: Maybe<&1, Unit>, +inbox: Chan(Msg), +pri: Chan(Msg), k: Unit -> IO(Unit)) -> IO(Unit):
-  match t:
-    case Some{_}:
-      IO.bind(Maybe<&1, Msg>, Unit, Chan.recv(Msg, inbox), m => Bulk.moved(m, pri, k))
-    case None{}:
-      IO.pure(Unit, Unit{})
-
-def Bulk.fwd(fuel: Nat, +inbox: Chan(Msg), +pri: Chan(Msg), +tok: Chan(Unit)) -> IO(Unit):
-  match fuel:
-    case 0n:
-      IO.pure(Unit, Unit{})
-    case 1n+f:
-      IO.bind(Maybe<&1, Unit>, Unit, Chan.recv(Unit, tok), t => Bulk.took(t, inbox, pri, u => Bulk.fwd(f, inbox, pri, tok)))
-
-def Bulk.back(+tok: Chan(Unit), h: Hub, k: Hub -> IO(Unit)) -> IO(Unit):
-  do IO<Unit>:
-    ok : Result<&1, &1, Unit, Unit> <- Chan.send(Unit, tok, Unit{})
-    k(h)
 
 # each message's handling is timed as hub.<kind> (docs/perf.md)
 def Hub.got.one(+msg: Msg, h: Hub, k: Hub -> IO(Unit)) -> IO(Unit):
@@ -13673,34 +13886,6 @@ def Hub.loop(fuel: Nat, h: Hub, +pri: Chan(Msg), +tok: Chan(Unit)) -> IO(Unit):
       Hub.close(h)
     case 1n+f:
       IO.bind(Maybe<&1, Msg>, Unit, Chan.recv(Msg, pri), m => Hub.got(m, h, tok, h3 => Hub.loop(f, h3, pri, tok)))
-
-# The web port was taken at start (often only for a moment, by the process
-# this one replaces): try it again every few seconds, and once it is ours,
-# start what Main.serve starts beside the hub, so a restart never leaves the
-# hub unreachable from other machines and phones
-def Listen.up(l: Listener, +web: String, +inbox: Chan(Msg), +cfg: Cfg, +addr: String) -> IO(Unit):
-  do IO<Unit>:
-    Log.info("web server on: " ++ addr)
-    IO.spawn(Unit, Accept.loop(Fuel.forever(), l, 1, web, inbox, True{}, Net.token(Cfg.net(cfg)), ""))
-    Tailnet.start(Cfg.net(cfg), Cfg.host(cfg), Cfg.port(cfg), web, inbox)
-    Machines.start(inbox, Cfg.port(cfg))
-
-def Listen.got(r: Result<&1, &1, U32 & String, Listener>, +web: String, +inbox: Chan(Msg), +cfg: Cfg, +addr: String, k: Unit -> IO(Unit)) -> IO(Unit):
-  match r:
-    case Done{l}:
-      Listen.up(l, web, inbox, cfg, addr)
-    case Fail{_}:
-      k(Unit{})
-
-def Listen.retry(fuel: Nat, +web: String, +inbox: Chan(Msg), +cfg: Cfg, +addr: String) -> IO(Unit):
-  match fuel:
-    case 0n:
-      IO.pure(Unit, Unit{})
-    case 1n+f:
-      do IO<Unit>:
-        IO.sleep(2000)
-        l : Result<&1, &1, U32 & String, Listener> <- H.Net.listen(Cfg.host(cfg), Cfg.port(cfg))
-        Listen.got(l, web, inbox, cfg, addr, _ => Listen.retry(f, web, inbox, cfg, addr))
 
 # without the web server (its port was taken): hub and ticker only
 def Main.headless(h: Hub, +inbox: Chan(Msg), +cfg: Cfg, +tok: Chan(Unit), front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
@@ -13744,6 +13929,46 @@ def Main.listened(r: Result<&1, &1, U32 & String, Listener>, h: Hub, +web: Strin
         IO.spawn(Unit, Listen.retry(Fuel.forever(), web, inbox, cfg, addr))
         Main.headless(h, inbox, cfg, tok, front)
 
+# "<pid> <port>" of another live hub on this home, else "" (this process's
+# own lock is none)
+
+def Lock.taken(g: OH.HubGot, +home: String) -> IO(String):
+  match g:
+    case OH.HubFail{why}:
+      IO.die(String, 1, "backplane: cannot lock " ++ home ++ ": " ++ why)
+    case OH.HubOurs{}:
+      IO.pure(String, "")
+    case OH.HubHeld{+pid, +port}:
+      IO.pure(String, OH.OneHub.line(pid, port))
+
+# Stand-in agents (core/standin.bend): with BACKPLANE_AGENTS=<dir> the
+# provider CLIs come from <dir> or nowhere
+def Agents.only.k(r: P.Ran, +blocks: String) -> IO(Unit):
+  match r:
+    case P.Ran{0, +dir}:
+      do IO<Unit>:
+        +cur : String <- Env.get("PATH", "")
+        H.Env.put("PATH", SI.Standin.path(String.trim(dir), blocks, cur))
+        Log.info("stand-in agents only, from " ++ String.trim(dir))
+    case P.Ran{_, +out}:
+      IO.die(Unit, 1, "backplane: " ++ String.trim(out))
+
+def Agents.only.go(none: Bool, +dir: String, +home: String) -> IO(Unit):
+  match none:
+    case True{}:
+      IO.pure(Unit, Unit{})
+    case False{}:
+      IO.bind(P.Ran, Unit, P.Proc.run("sh", SI.Standin.args(dir, SI.Standin.blocks(home)), "/"), r => Agents.only.k(r, SI.Standin.blocks(home)))
+
+def Agents.only.of(+dir: String, +home: String) -> IO(Unit):
+  Agents.only.go(String.is_empty(dir), dir, home)
+
+def Agents.only(+home: String) -> IO(Unit):
+  IO.bind(String, Unit, Env.get("BACKPLANE_AGENTS", ""), dir => Agents.only.of(dir, home))
+
+def Lock.path(+home: String) -> String:
+  home ++ "/hub.lock"
+
 # One hub per home
 # ----------------
 # Two hubs on one home (a window opened while `--headless` ran for the same
@@ -13753,8 +13978,6 @@ def Main.listened(r: Result<&1, &1, U32 & String, Listener>, h: Hub, +web: Strin
 # later start that finds that hub alive joins it (the window) or leaves it
 # be (`--headless`): src/app/main.bend's Start.run.
 
-def Lock.path(+home: String) -> String:
-  home ++ "/hub.lock"
 
 # the shell's parent is this process, so $PPID is the hub's pid
 def Lock.write(+home: String, +port: U32) -> IO(Unit):
@@ -13762,10 +13985,15 @@ def Lock.write(+home: String, +port: U32) -> IO(Unit):
     r : P.Ran <- P.Proc.run("sh", ["-c", "echo \"$PPID $1\" > \"$2\"", "sh", U32.show(port), Lock.path(home)], "/")
     return Unit{}
 
-# "<pid> <port>" of another live Backplane holding the lock (the same
-# program as this one, by its process name), else ""
+def Lock.take.k(free: Bool, +old: String, +home: String, +port: U32) -> IO(String):
+  match free:
+    case True{}:
+      IO.bind(String, String, HL.HubLock.take(Lock.path(home), U32.show(port)), r => Lock.taken(OH.OneHub.got(r), home))
+    case False{}:
+      IO.pure(String, old)
+
 def Lock.find.sh() -> String:
-  "f=$1/hub.lock; [ -f \"$f\" ] || exit 0; read pid port < \"$f\"; [ -n \"$pid\" ] && [ \"$pid\" != \"$PPID\" ] || exit 0; kill -0 \"$pid\" 2>/dev/null || exit 0; [ \"$(ps -p \"$pid\" -o comm= 2>/dev/null)\" = \"$(ps -p \"$PPID\" -o comm= 2>/dev/null)\" ] && echo \"$pid $port\""
+  "f=$1/hub.lock; [ -f \"$f\" ] || exit 0; read pid port kind < \"$f\"; [ \"$kind\" = flock ] && exit 0; [ -n \"$pid\" ] && [ \"$pid\" != \"$PPID\" ] || exit 0; kill -0 \"$pid\" 2>/dev/null || exit 0; [ \"$(ps -p \"$pid\" -o comm= 2>/dev/null)\" = \"$(ps -p \"$PPID\" -o comm= 2>/dev/null)\" ] && echo \"$pid $port\""
 
 def Lock.out(r: P.Ran) -> String:
   match r:
@@ -13774,14 +14002,57 @@ def Lock.out(r: P.Ran) -> String:
     case _:
       ""
 
-def Lock.find(+home: String) -> IO(String):
+# One hub per home
+# ----------------
+# Two hubs on one home (a window opened while `--headless` ran for the same
+# folder, or `backplane --version` run by hand, which once started a hub on
+# the live home) each kept a state of their own over the same log: a
+# message sent in the window never reached the web or the phones, and
+# theirs never the window. A hub holds an exclusive flock on
+# <home>/hub.lock for as long as it lives (hublock.bend, effects/hublock.c,
+# core/onehub.bend): taken before anything touches the event store, let go
+# by the kernel when the process dies, kept through a restart in place
+# (Sys.exec hands the descriptor over). The file says its pid and port
+# ("<pid> <port> flock"). A later start that finds it held joins that hub
+# (the window), or says so and ends with status 1 (`--headless`, the
+# server binary): src/app/main.bend's Start.run, src/server/main.bend.
+# A file without "flock" was written by an older hub, which held no lock:
+# it is believed while its pid is alive and runs the same program.
+
+
+# "<pid> <port>" of a live older Backplane named by the file (the same
+# program as this one, by its process name), else ""; a file a locking
+# hub wrote is left to the lock
+
+
+def Lock.legacy(+home: String) -> IO(String):
   IO.bind(P.Ran, String, P.Proc.run("sh", ["-c", Lock.find.sh(), "sh", home], "/"), r => IO.pure(String, Lock.out(r)))
 
-def Lock.word(+held: String, +i: Nat) -> String:
-  Maybe.default(&2, String, List.get(&2, String, String.split(held, ' '), i), "")
+def Lock.find.k(+held: String, +home: String) -> IO(String):
+  Bool.pick(IO(String), String.is_empty(held), Lock.legacy(home), IO.pure(String, held))
 
-# Browser frames
-# --------------
+# take the home's lock for this process: "" when it is ours (taken now,
+# again, or handed over by the exec of a restart), else "<pid> <port>" of
+# the hub that holds it; a lock that cannot be taken at all stops here
+def Lock.take(+home: String, +port: U32) -> IO(String):
+  do IO<String>:
+    mk : Result<&1, &1, U32 & String, Unit> <- H.FS.mkdirs(home)
+    +old : String <- Lock.legacy(home)
+    Lock.take.k(String.is_empty(old), old, home, port)
+
+def Lock.find(+home: String) -> IO(String):
+  IO.bind(String, String, HL.HubLock.held(Lock.path(home)), held => Lock.find.k(String.trim(held), home))
+
+def Lock.word(+held: String, +i: Nat) -> String:
+  OH.OneHub.word(held, i)
+
+# a second hub on a home ends here, before it touches the event store
+def Lock.refuse(free: Bool, +held: String, +home: String) -> IO(Unit):
+  match free:
+    case True{}:
+      IO.pure(Unit, Unit{})
+    case False{}:
+      IO.die(Unit, 1, "backplane: " ++ OH.OneHub.says(home, Lock.word(held, 0n), Lock.word(held, 1n)))
 
 def Shot.msg.to(all: Bool, +line: String, +o: J.Json) -> Msg:
   match all:
@@ -13797,9 +14068,6 @@ def Shot.msg.k(frame: Bool, +line: String, +o: J.Json) -> Msg:
     case False{}:
       BrowserEv{line}
 
-# a frame goes to every client (or, past the helper's --jpeg-fps, only to
-# the clients showing its page: castio.bend); a recorder step, navigation
-# or load to the hub's teach state
 def Shot.msg.o(+line: String, +o: J.Json) -> Msg:
   Shot.msg.k(String.eq(J.Json.get_str(o, "event", ""), "frame"), line, o)
 
@@ -13815,7 +14083,6 @@ def Shot.fwd.got(m: Maybe<&1, String>, +inbox: Chan(Msg), k: Unit -> IO(Unit)) -
     case None{}:
       IO.pure(Unit, Unit{})
 
-# page-frame events from the browser, to the hub
 def Shot.fwd(fuel: Nat, +ev: Chan(String), +inbox: Chan(Msg)) -> IO(Unit):
   match fuel:
     case 0n:
@@ -13832,7 +14099,6 @@ def KiSrv.fwd.got(m: Maybe<&1, String>, +inbox: Chan(Msg), k: Unit -> IO(Unit)) 
     case None{}:
       IO.pure(Unit, Unit{})
 
-# the headless KiCad servers' lines, to the hub
 def KiSrv.fwd(fuel: Nat, +ev: Chan(String), +inbox: Chan(Msg)) -> IO(Unit):
   match fuel:
     case 0n:
@@ -13840,11 +14106,26 @@ def KiSrv.fwd(fuel: Nat, +ev: Chan(String), +inbox: Chan(Msg)) -> IO(Unit):
     case 1n+f:
       IO.bind(Maybe<&1, String>, Unit, Chan.recv(String, ev), m => KiSrv.fwd.got(m, inbox, u => KiSrv.fwd(f, ev, inbox)))
 
+# Browser frames
+# --------------
+
+
+
+# a frame goes to every client (or, past the helper's --jpeg-fps, only to
+# the clients showing its page: castio.bend); a recorder step, navigation
+# or load to the hub's teach state
+
+
+
+# page-frame events from the browser, to the hub
+
+
+# the headless KiCad servers' lines, to the hub
+
 def Main.opened(r: Result<&1, &1, U32 & String, File>, st: M.State, ls: List<&2, String>, cfg: Cfg, need: Bool, front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
   match r cfg:
     case Done{f} Cfg{+home, +web, +host, +port, +pr, +ds, +v, nt0}:
       do IO<Unit>:
-        Lock.write(home, port)
         +inbox : Chan(Msg) <- Chan.new(Msg, 4096)
         +pri : Chan(Msg) <- Chan.new(Msg, 4096)
         +tok : Chan(Unit) <- Chan.new(Unit, 32)
@@ -13884,38 +14165,17 @@ def Main.opened(r: Result<&1, &1, U32 & String, File>, st: M.State, ls: List<&2,
     case Fail{e} _:
       Main.nolog(e)
 
-def Main.torn.k(r: File & Result<&1, &1, U32 & String, Unit>) -> IO(Result<&1, &1, U32 & String, File>):
-  (f, res) = r
-  match res:
-    case Done{_}:
-      IO.pure(Result<&1, &1, U32 & String, File>, Done{f})
-    case Fail{e}:
-      IO.pure(Result<&1, &1, U32 & String, File>, Fail{e})
-
-# a log whose last line was torn by a crash ends without a newline: the
-# next line starts on its own (ST.Store.tail_fix)
-def Main.torn.w(none: Bool, f: File, +fix: String) -> IO(Result<&1, &1, U32 & String, File>):
-  match none:
-    case True{}:
-      IO.pure(Result<&1, &1, U32 & String, File>, Done{f})
-    case False{}:
-      IO.bind(File & Result<&1, &1, U32 & String, Unit>, Result<&1, &1, U32 & String, File>, File.write(f, fix), Main.torn.k)
-
-def Main.torn(r: Result<&1, &1, U32 & String, File>, +fix: String) -> IO(Result<&1, &1, U32 & String, File>):
-  match r:
-    case Done{f}:
-      Main.torn.w(String.is_empty(fix), f, fix)
-    case Fail{e}:
-      IO.pure(Result<&1, &1, U32 & String, File>, Fail{e})
-
 # replay the log, start the hub (and the web server), then run front
 # with the hub's inbox; `need` makes a taken web port fatal
 def Main.boot(cfg: Cfg, need: Bool, front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
   match cfg:
-    case Cfg{+home, w, h, p, pr, ds, v, nt}:
+    case Cfg{+home, w, h, +p, pr, ds, v, nt}:
       do IO<Unit>:
+        # the home's lock first: a second hub ends before the event store
+        +held : String <- Lock.take(home, p)
+        Lock.refuse(String.is_empty(held), held, home)
         H.Env.put("BACKPLANE_HOME", home)
-        mk : Result<&1, &1, U32 & String, Unit> <- H.FS.mkdirs(home)
+        Agents.only(home)
         t0 : U32 <- PS.Perf.us()
         +bs : List<&2, U32> <- Files.read(Store.path(home))
         t1 : U32 <- PS.Perf.span("boot.read", t0)
@@ -13934,4 +14194,5 @@ def Main.boot(cfg: Cfg, need: Bool, front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
         +rt : K.Rt = K.Rt.set(rt0, "ipc", J.Str{""})
         +off : String <- Env.get("BACKPLANE_NO_UPDATE", "")
         +ai : String <- Env.get("APPIMAGE", "")
-        Main.opened(f, st, ls, Cfg.with_managed(Cfg.with_models(Cfg.with_bn(Cfg.with_token(Cfg.with_rt(Cfg{home, w, h, p, pr, ds, v, nt}, rt), tok), BN.Bn.with_dir(BN.Bn.empty(), BN.Bn.cache.load(bc, BO.World.peers(M.State.bots(st))))), BT.Cache.json(mc), BT.Cache.text(mc)), SV.Chan.managed(off, ai)), need, front)
+        finalCfg : Cfg = Cfg.with_managed(Cfg.with_models(Cfg.with_bn(Cfg.with_token(Cfg.with_rt(Cfg{home, w, h, p, pr, ds, v, nt}, rt), tok), BN.Bn.with_dir(BN.Bn.empty(), BN.Bn.cache.load(bc, BO.World.peers(M.State.bots(st))))), BT.Cache.json(mc), BT.Cache.text(mc)), SV.Chan.managed(off, ai))
+        Main.opened(f, st, ls, LogCount.init(finalCfg, ls), need, front)

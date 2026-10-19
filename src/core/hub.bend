@@ -30,6 +30,7 @@ import ./locks.bend as LK
 import ./adopt.bend as AD
 import ./cmds.bend as CM
 import ./order.bend as OR
+import ./fallback.bend as FB
 
 # The decider. Requests from clients and lines from agents come in; changes
 # (persisted, folded into the read model) and effects (run by the server)
@@ -2511,7 +2512,7 @@ def Mail.list(+s: M.State, +p: J.Json) -> J.Json:
   +status = J.Json.get_str(p, "status", "")
   +project = J.Json.get_str(p, "project", "")
   J.Json.obj([J.KV{"convs", J.Json.arr(Mail.rows(ML.Box.list(box, bot, status, project, J.Json.get_nat(p, "skip", 0n), Mail.limit(J.Json.get_nat(p, "n", 50n))), box, bot))},
-    J.KV{"total", J.Json.nat(List.length(&2, ML.Conv, ML.Box.list(box, bot, status, project, 0n, ML.Order.count(ML.Box.order_of(box, bot)))))}])
+    J.KV{"total", J.Json.nat(ML.Box.count(box, bot, status, project))}])
 
 def Mail.find(+s: M.State, +p: J.Json) -> J.Json:
   +box = M.State.mail(s)
@@ -4294,9 +4295,6 @@ def Hub.interrupt.k(run: Bool, +s: M.State, +now: Nat, +client: U32, +id: String
     case False{}:
       Step.outs([Reply.ok(client, id)])
 
-def Hub.interrupt(+s: M.State, +now: Nat, +client: U32, +id: String, +thread: String) -> Step:
-  Hub.interrupt.k(Hub.running(Hub.thread(s, thread)), s, now, client, id, thread)
-
 # archive and delete kill the process whatever it was doing: its asks and
 # background rows go, and a running turn ends
 def Retire.archive(+s: M.State, +now: Nat, +th: String, base: Step) -> Step:
@@ -5391,124 +5389,8 @@ def Buy.start(known: Bool, +s: M.State, +now: Nat, +client: U32, +id: String, +s
     case False{}:
       Step.outs([Reply.err(client, id, "no such thread")])
 
-def Hub.request.k(i: Nat, +s: M.State, +now: Nat, +client: U32, +id: String, +p: J.Json, +m: String) -> Step:
-  match i:
-    case 0n:
-      Step.outs([Fs{client, id, "add", J.Json.get_str(p, "path", "")}])
-    case 1n:
-      Step.reply(client, id, [M.ProjectRemoved{J.Json.get_str(p, "project", ""), now}])
-    case 2n:
-      Hub.thread_create(s, now, client, id, p)
-    case 3n:
-      Hub.turn.mode(Bool.or(String.is_empty(J.Json.get_str(p, "mode", "")), String.eq(J.Json.get_str(p, "mode", ""), "auto")), J.Json.get_str(p, "mode", ""),
-        s, now, client, id, J.Json.get_str(p, "thread", ""), J.Json.get_str(p, "text", ""), J.Json.get_str(p, "msg", ""))
-    case 4n:
-      Hub.interrupt(s, now, client, id, J.Json.get_str(p, "thread", ""))
-    case 5n:
-      Step.reply(client, id, [M.ThreadSettled{J.Json.get_str(p, "thread", ""), True{}, now}])
-    case 6n:
-      Step.reply(client, id, [M.ThreadUnsettled{J.Json.get_str(p, "thread", ""), now}])
-    case 7n:
-      Step.cat(Retire.archive(s, now, J.Json.get_str(p, "thread", ""), Step{[M.ThreadArchived{J.Json.get_str(p, "thread", ""), True{}, now}], [Reply.ok(client, id), AgentStop{J.Json.get_str(p, "thread", "")}]}), Watch.retire(s, now, J.Json.get_str(p, "thread", "")))
-    case 8n:
-      Step.reply(client, id, [M.ThreadArchived{J.Json.get_str(p, "thread", ""), False{}, now}])
-    case 9n:
-      Step.reply(client, id, [M.ThreadPinned{J.Json.get_str(p, "thread", ""), True{}, now}])
-    case 10n:
-      Step.reply(client, id, [M.ThreadPinned{J.Json.get_str(p, "thread", ""), False{}, now}])
-    # a rename: the title trimmed; a blank one changes nothing
-    case 11n:
-      Step.reply(client, id, Rename.changes(J.Json.get_str(p, "thread", ""), String.trim(J.Json.get_str(p, "title", "")), now))
-    case 12n:
-      Step.cat(Retire.archive(s, now, J.Json.get_str(p, "thread", ""), Step{[M.ThreadDeleted{J.Json.get_str(p, "thread", ""), now}], [Reply.ok(client, id), AgentStop{J.Json.get_str(p, "thread", "")}, BotFx{"gone", J.Json.get_str(p, "thread", ""), "", ""}]}), Watch.retire(s, now, J.Json.get_str(p, "thread", "")))
-    case 13n:
-      Step.outs([Reply.ok(client, id), Watch{client, J.Json.get_str(p, "kind", ""), J.Json.get_str(p, "root", ""), J.Json.get_str(p, "path", "")}])
-    case 14n:
-      Hub.modes(s, now, client, id, p, Hub.thread(s, J.Json.get_str(p, "thread", "")))
-    case 15n:
-      Update.ask(Nat.is_gt(M.Work.threads(s), 0n), now, client, id)
-    case 16n:
-      Step{[M.SettingSet{J.Json.get_str(p, "key", ""), J.Json.get_str(p, "value", ""), now}], Bool.pick(List<&2, Out>, String.eq(J.Json.get_str(p, "key", ""), "kicad.path"), [Reply.ok(client, id), KiCadRetry{}], [Reply.ok(client, id)])}
-    case 17n:
-      Step.outs([Reply.ok(client, id), KiCadInstall{}])
-    case 18n:
-      Hub.answer(s, now, client, id, J.Json.get_str(p, "id", ""), J.Json.get_str(p, "answer", ""))
-    case 19n:
-      Device.register(now, client, id, p)
-    case 20n:
-      Step.reply(client, id, [M.DeviceDropped{J.Json.get_str(p, "token", ""), now}])
-    case 21n:
-      Step.outs([PlotInfo{client, id, J.Json.get_str(p, "key", ""), Maybe.default(&2, Nat, Nat.read(J.Json.as_raw(J.Json.get(p, "at"), "0")), 0n),
-        Maybe.default(&2, Nat, Nat.read(J.Json.as_raw(J.Json.get(p, "idx"), "0")), 0n)}])
-    case 22n:
-      Hub.resume(s, now, client, id, J.Json.get_str(p, "thread", ""))
-    case 23n:
-      Queue.op(0n, s, now, client, id, p)
-    case 24n:
-      Queue.op(1n, s, now, client, id, p)
-    case 25n:
-      Queue.op(2n, s, now, client, id, p)
-    case 26n:
-      Queue.op(3n, s, now, client, id, p)
-    case 27n:
-      Hub.fork(s, now, client, id, J.Json.get_str(p, "thread", ""))
-    case 28n:
-      Hub.back(s, now, client, id, J.Json.get_str(p, "thread", ""))
-    case 29n:
-      Hub.switch(s, now, client, id, J.Json.get_str(p, "thread", ""), J.Json.get_str(p, "provider", ""))
-    case 30n:
-      Step{[M.SettingSet{"update.wait", "", now}], [Reply.ok(client, id), UpgradeForce{}]}
-    # the person stops watched work or a delegated task from its row
-    case 31n:
-      Step.before(Nil{}, [Reply.ok(client, id)], Watch.cancel(s, now, J.Json.get_str(p, "thread", ""), J.Json.get_str(p, "id", "")))
-    case 37n:
-      Step.before(Nil{}, [Reply.ok(client, id)], Locks.release(s, now, J.Json.get_str(p, "name", ""), J.Json.get_str(p, "thread", "")))
-    case 39n:
-      Step.outs([Reply.ok(client, id), KiCadRetry{}])
-    case 38n:
-      Step.before(Nil{}, [Reply.ok(client, id)], Locks.cancel(s, now, J.Json.get_str(p, "name", ""), J.Json.get_str(p, "thread", "")))
-    case 33n:
-      Step.reply(client, id, Bool.pick(List<&2, M.Change>, String.eq(J.Json.get_str(WK.Wake.get(s, J.Json.get_str(p, "id", "")), "by", ""), J.Json.get_str(p, "thread", "")), [M.WakeDropped{J.Json.get_str(p, "id", ""), now}], Nil{}))
-    case 32n:
-      Step.before(Nil{}, [Reply.ok(client, id)], Task.cancel.user(Maybe.default(&2, M.Task, Task.of_child(s, J.Json.get_str(p, "child", "")), M.Task.blank("")), s, now))
-    case 34n:
-      Deploy.restart(Deploy.stage.ok(J.Json.get_str(p, "stage", "")), s, now, client, id, J.Json.get_str(p, "stage", ""), J.Json.get_str(p, "note", ""))
-    case 35n:
-      Step.before(Nil{}, [Reply.ok(client, id)], Deploy.cancel(s, now))
-    case 36n:
-      Step.outs([Reply.data(client, id, DP.Deploy.status(s))])
-    case 40n: Mail.request.on(String.eq(M.Setting.get(s, "mail.on", "off"), "on"), 0n, s, now, client, id, p)
-    case 41n: Mail.request.on(String.eq(M.Setting.get(s, "mail.on", "off"), "on"), 1n, s, now, client, id, p)
-    case 42n: Mail.request.on(String.eq(M.Setting.get(s, "mail.on", "off"), "on"), 2n, s, now, client, id, p)
-    case 43n: Mail.request.on(String.eq(M.Setting.get(s, "mail.on", "off"), "on"), 3n, s, now, client, id, p)
-    case 44n: Mail.request.on(String.eq(M.Setting.get(s, "mail.on", "off"), "on"), 4n, s, now, client, id, p)
-    case 45n: Mail.request.on(String.eq(M.Setting.get(s, "mail.on", "off"), "on"), 5n, s, now, client, id, p)
-    case 46n:
-      Buy.look(s, client, id, J.Json.get_str(p, "thread", ""), "fab", "")
-    case 47n:
-      Buy.look(s, client, id, J.Json.get_str(p, "thread", ""), "intent", J.Json.get_str(p, "text", ""))
-    case 48n:
-      Buy.start(Hub.owns(s, J.Json.get_str(p, "thread", "")), s, now, client, id, J.Json.get_str(p, "thread", ""))
-    case _:
-      Hub.more(C.Codec.pos(Hub.methods.git(), m), s, now, client, id, p, m)
-
-# one client request {"id": n, "m": method, "p": params}
-def Hub.request(+s: M.State, +now: Nat, +client: U32, +o: J.Json) -> Step:
-  Hub.request.k(C.Codec.pos(Hub.methods(), J.Json.get_str(o, "m", "")), s, now, client,
-    J.Json.as_raw(J.Json.get(o, "id"), "0"), J.Json.get_obj(o, "p"), J.Json.get_str(o, "m", ""))
-
-def Hub.request_text.k(m: Maybe<&2, J.Json>, +s: M.State, +now: Nat, +client: U32) -> Step:
-  match m:
-    case Some{o}:
-      Hub.request(s, now, client, o)
-    case None{}:
-      Step.outs([Reply.err(client, "0", "malformed request")])
-
-def Hub.request_text(+s: M.State, +now: Nat, +client: U32, text: String) -> Step:
-  Hub.request_text.k(J.Json.parse(text), s, now, client)
-
 # one line of an agent's stdout
-def Hub.agent_line(+s: M.State, +now: Nat, +thread: String, line: String) -> Step:
+def Hub.agent_line.raw(+s: M.State, +now: Nat, +thread: String, line: String) -> Step:
   Launch.tell(s, now, thread, Task.finish.w(s, now, thread, Queue.drain(s, now, thread, Ended.out(s, now, thread, Hub.agent_line.k(Bool.not(String.eq(Hub.provider(Hub.thread(s, thread)), "claude")), s, now, thread, line)))))
 
 # Claude's lines by the command ledger (core/cmds.bend)
@@ -5592,15 +5474,12 @@ def Hub.agent_line.v.k(v: Nat, +s: M.State, +now: Nat, +thread: String, +o: J.Js
 
 # one line of an agent's stdout with its verdict (o: the line parsed;
 # text: an ending's outcome, CM.Cmds.text)
-def Hub.agent_line.vo(v: Nat, +s: M.State, +now: Nat, +thread: String, line: String, +o: J.Json, +text: String) -> Step:
+def Hub.agent_line.vo.raw(v: Nat, +s: M.State, +now: Nat, +thread: String, line: String, +o: J.Json, +text: String) -> Step:
   match v:
     case 0n:
-      Hub.agent_line(s, now, thread, line)
+      Hub.agent_line.raw(s, now, thread, line)
     case 1n+p:
       Hub.agent_line.v.k(1n+p, s, now, thread, o, text)
-
-def Hub.agent_line.v(v: Nat, +s: M.State, +now: Nat, +thread: String, +line: String, +text: String) -> Step:
-  Hub.agent_line.vo(v, s, now, thread, line, Maybe.default(&2, J.Json, J.Json.parse(line), J.Null{}), text)
 
 # Lost work
 # ---------
@@ -6889,10 +6768,6 @@ def Ended.stopped(os: List<&2, Out>, +th: String) -> Bool:
     case _ <> r:
       Ended.stopped(r, th)
 
-# thread.archive (or thread.delete: i 12n) of "t1" (for laws)
-def Retire.request(i: Nat, +s: M.State) -> Step:
-  Hub.request.k(i, s, 9n, 0, "r", J.Json.obj([J.KV{"thread", J.Str{"t1"}}]), "")
-
 def Retire.task.k(m: Maybe<&2, M.Task>) -> Bool:
   match m:
     case Some{M.Task{_, _, _, _, st, _, _, _, _}}:
@@ -7316,3 +7191,447 @@ def Run.start.on(ready: Bool, +s: M.State, +now: Nat, +th: String, +head: String
   match ready:
     case False{}: Step.none()
     case True{}: Run.start(s, now, th, head, bs)
+
+# ---- global provider fallback (single owner) ----
+# All start effects pass Fallback.after in the server, after bot/mail/wake
+# routing. There is no separate bot policy and no process signalling here.
+
+def Fallback.target(t: M.Thread) -> FB.Target:
+  match t:
+    case M.Thread{_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, p, m, _, _, _, _}: FB.Target{p, m}
+
+def Fallback.pending(+s: M.State, +th: String) -> J.Json:
+  Maybe.default(&2, J.Json, J.Json.parse(M.Setting.get(s, "fallback.pending." ++ th, "")), J.Null{})
+
+def Fallback.continue(+s: M.State, +th: String) -> String:
+  "[Backplane] The provider reached its usage limit. Continue the interrupted work from its current state. Read the handed-over tool results before acting. Do not repeat completed tool actions or restart finished work. If the request is already satisfied, report that.\n\nOriginal request (context, not a new task):\n" ++ M.Setting.get(s, "fallback.input." ++ th, "")
+
+def Fallback.limited(+s: M.State, +now: Nat, +th: String, +lim: FB.Limit) -> Step:
+  +cs = {List.append(&2, M.Change,
+    Bool.pick(List<&2, M.Change>, FB.Limit.active(s, FB.Limit.scope(lim), now), Nil{}, [M.SettingSet{FB.Limit.key(FB.Limit.scope(lim)), FB.Limit.json(lim, now), now}]),
+    [M.SettingSet{"fallback.pending." ++ th, "", now}, M.SettingSet{"fallback.continuing." ++ th, "yes", now}, M.TurnChanged{th, M.Interrupted{}, now}, M.QueueTaken{th, now}, M.TurnChanged{th, M.Running{}, now}]) : List<&2, M.Change>}
+  Step{cs, AgentStop{th} <> Hub.run(Hub.thread(s, th), Hub.cwd(s, Hub.thread(s, th)), M.Queue.join(Fallback.continue(s, th), M.Queue.of(s, th)), Hub.uuid(now, th ++ "/fallback/" ++ Nat.show(Hub.seq(s))))}
+
+def Fallback.line.limit(terminal: Bool, +s: M.State, +now: Nat, +th: String, +lim: FB.Limit) -> Step:
+  match terminal:
+    case True{}: Fallback.limited(s, now, th, lim)
+    case False{}: Step{[M.SettingSet{"fallback.pending." ++ th, FB.Limit.json(lim, now), now}], Nil{}}
+
+def Fallback.line.m(lim: Maybe<&2, FB.Limit>, terminal: Bool, s: M.State, now: Nat, th: String, normal: Step) -> Step:
+  match lim:
+    case Some{l}: Fallback.line.limit(terminal, s, now, th, l)
+    case None{}: normal
+
+def Fallback.line.pending(has: Bool, +s: M.State, +now: Nat, +th: String, +o: J.Json, normal: Step) -> Step:
+  match has:
+    case True{}:
+      Fallback.limited(s, now, th, FB.Limit{J.Json.get_str(o, "scope", ""), J.Json.get_str(o, "reason", "usage limit reached"), J.Json.get_nat(o, "reset", 0n)})
+    case False{}: normal
+
+def Fallback.line.on(on: Bool, +terminal: Bool, +s: M.State, +now: Nat, +th: String, +o: J.Json, normal: Step) -> Step:
+  match on:
+    case True{}:
+      Fallback.line.m(FB.Error.classify(Hub.provider(Hub.thread(s, th)), FB.Target.model(Fallback.target(Hub.thread(s, th))), o), terminal, s, now, th,
+        Fallback.line.pending(Bool.and(terminal, Bool.not(String.is_empty(J.Json.get_str(Fallback.pending(s, th), "scope", "")))), s, now, th, Fallback.pending(s, th), normal))
+    case False{}: normal
+
+def Fallback.line(+s: M.State, +now: Nat, +th: String, +o: J.Json, terminal: Bool, normal: Step) -> Step:
+  Fallback.line.on(Bool.and(FB.Chain.on(s), Bool.and(Hub.running(Hub.thread(s, th)), String.is_empty(J.Json.get_str(o, "parent_tool_use_id", "")))), terminal, s, now, th, o, normal)
+
+# One durable alert per outage, plus an audit row in every affected thread.
+# The count includes active threads on the same unavailable scope at discovery.
+def Fallback.count(ts: List<&2, M.Thread>, +scope: String, +n: Nat) -> Nat:
+  match ts:
+    case Nil{}: n
+    case +t <> rest:
+      Fallback.count(rest, scope, Bool.pick(Nat, Bool.and(Hub.running(t), Bool.or(String.eq(FB.Target.provider(Fallback.target(t)), scope), String.eq(FB.Target.key(Fallback.target(t)), scope))), 1n+n, n))
+
+def Fallback.scope(+s: M.State, +t: FB.Target, +now: Nat) -> String:
+  Bool.pick(String, FB.Limit.active(s, FB.Target.provider(t), now), FB.Target.provider(t), FB.Target.key(t))
+
+def Fallback.reason(+s: M.State, +scope: String) -> String:
+  J.Json.get_str(FB.Limit.record(s, scope), "reason", "usage limit reached")
+
+def Fallback.reset(+s: M.State, +scope: String) -> String:
+  +n = J.Json.get_nat(FB.Limit.record(s, scope), "reset", 0n)
+  Bool.pick(String, Nat.is_eq(n, 0n), "; reset not supplied", "; reset " ++ TZ.Tz.iso(TZ.Tz.utc0(), n))
+
+def Fallback.alert.k(once: Bool, +s: M.State, +now: Nat, +th: String, +scope: String, +text: String, +blocked: Bool) -> List<&2, M.Change>:
+  match once:
+    case True{}:
+      [M.SettingSet{"fallback.alerted." ++ scope ++ Bool.pick(String, blocked, ".blocked", ""), M.Setting.get(s, FB.Limit.key(scope), ""), now},
+        NO.Alert.set(s, now, th, Bool.pick(String, blocked, "fallback-blocked", "fallback"), "fallback-" ++ scope ++ Bool.pick(String, blocked, "-blocked", ""), NO.Alert.memory(s, th), text)]
+    case False{}: Nil{}
+
+def Fallback.alert.scope(+s: M.State, +now: Nat, +th: String, +scope: String, text: String, +blocked: Bool) -> List<&2, M.Change>:
+  Fallback.alert.k(Bool.not(String.eq(M.Setting.get(s, "fallback.alerted." ++ scope ++ Bool.pick(String, blocked, ".blocked", ""), ""), M.Setting.get(s, FB.Limit.key(scope), ""))), s, now, th, scope, text, blocked)
+
+def Fallback.say(+s: M.State, +now: Nat, +th: String, +from: FB.Target, +to: String, +blocked: Bool) -> String:
+  +sc = Fallback.scope(s, from, now)
+  Bool.pick(String, blocked, "Action needed: all configured fallbacks are unavailable", "Automatic fallback: " ++ FB.Target.key(from) ++ " → " ++ to)
+    ++ ". " ++ Lr.title(Hub.thread(s, th)) ++ " (" ++ th ++ "): " ++ Fallback.reason(s, sc) ++ Fallback.reset(s, sc)
+    ++ ". " ++ Nat.show(Fallback.count(Rec.threads(s), sc, 0n)) ++ " active threads affected."
+
+# Process starts sequentially against the state including earlier switches,
+# so many bots on one outage produce one alert, even in the same hub step.
+def Fallback.outs.next(st: Step, rest: Step) -> Step:
+  Step.cat(st, rest)
+
+def Fallback.claude.uuid(o: Out) -> String:
+  match o:
+    case AgentSend{_, line}: J.Json.get_str(Maybe.default(&2, J.Json, J.Json.parse(line), J.Null{}), "uuid", "")
+    case Git{_, _, "attach.claude", _, _, _, uuid}: uuid
+    case _: ""
+
+# ---- local credential recovery ----
+# A local locked keyring is not a provider outage. Keep the exact unsent
+# prompt queued, notify once for the episode, and only resume after an actual
+# unlocked probe. Unknown state never counts as proof of unlock.
+def Auth.waiting(+s: M.State, +th: String) -> Bool:
+  Bool.not(String.is_empty(M.Setting.get(s, "auth.wait." ++ th, "")))
+
+def Auth.any(ts: List<&2, M.Thread>, +s: M.State) -> Bool:
+  match ts:
+    case Nil{}: False{}
+    case t <> rest: Bool.or(Auth.waiting(s, M.Thread.id(t)), Auth.any(rest, s))
+
+def Auth.hold(+s: M.State, +now: Nat, +th: String, +text: String, +why: String) -> Step:
+  Step{List.append(&2, M.Change,
+    [M.SettingSet{"auth.wait." ++ th, FB.Target.key(Fallback.target(Hub.thread(s, th))), now},
+      M.TurnChanged{th, M.Interrupted{}, now}, M.TurnQueued{th, "auth:held:" ++ Nat.show(Hub.seq(s)), text, now}, M.QueueMoved{th, "auth:held:" ++ Nat.show(Hub.seq(s)), 0n, now},
+      M.ActivityLogged{th, Hub.id("auth", now, Hub.seq(s)), "error", "auth-blocked", why, now}],
+    Bool.pick(List<&2, M.Change>, String.eq(M.Setting.get(s, "auth.alerted.keyring", ""), "held"), Nil{},
+      [M.SettingSet{"auth.alerted.keyring", "held", now}, NO.Alert.set(s, now, th, "auth-blocked", "auth-keyring", NO.Alert.memory(s, th), "Action needed: unlock the desktop login keyring. Credential-dependent threads are paused with their prompts saved; they resume once after unlock. " ++ why)])), Nil{}}
+
+def Auth.recover.one(go: Bool, +s: M.State, +now: Nat, +th: String) -> Step:
+  match go:
+    case False{}: Step.none()
+    case True{}:
+      +cs = {[M.SettingSet{"auth.wait." ++ th, "", now}, M.ActivityLogged{th, Hub.id("auth", now, Hub.seq(s)), "info", "auth-resumed", "Login keyring unlocked; resuming the saved prompt once", now}] : List<&2, M.Change>}
+      Step.before(cs, Nil{}, Wt.start(M.State.replay(cs, s), now, th, False{}))
+
+def Auth.next(ts: List<&2, M.Thread>, +s: M.State, +found: String, done: Bool) -> String:
+  match ts done:
+    case _ True{}: found
+    case Nil{} False{}: ""
+    case +t <> rest False{}:
+      +th = M.Thread.id(t)
+      +go = Bool.and(Auth.waiting(s, th), Bool.and(Lost.live(t), Bool.not(Hub.running(t))))
+      Auth.next(rest, s, Bool.pick(String, go, th, ""), go)
+
+def Auth.recover.clear(+s: M.State, +now: Nat, +st: Step) -> Step:
+  Step.after(st, Bool.pick(List<&2, M.Change>, Bool.and(Auth.any(Rec.threads(s), s), Bool.not(Auth.any(Rec.threads(s), M.State.replay(Queue.changes(st), s)))), [M.SettingSet{"auth.alerted.keyring", "", now}], Nil{}))
+
+# Called only after the single in-flight probe of a five-second Beat.
+# One paused turn is released; clearing its marker commits before start.
+def Auth.recover(open: Bool, +s: M.State, +now: Nat) -> Step:
+  match open:
+    case False{}: Step.none()
+    case True{}:
+      +th = Auth.next(Rec.threads(s), s, "", False{})
+      Auth.recover.clear(s, now, Auth.recover.one(Bool.not(String.is_empty(th)), s, now, th))
+
+# Validate public Settings mutations against this hub's installed capabilities.
+def Fallback.settings.ok(cs: List<&2, M.Change>, +s: M.State, +caps: J.Json) -> Bool:
+  match cs:
+    case Nil{}: True{}
+    case M.SettingSet{"fallback.chain", +value, _} <> rest:
+      Bool.and(Bool.and(Nat.is_le(String.length(value), 2000n), Nat.is_le(List.length(&2, FB.Target, FB.Chain.parse(value)), 16n)), Bool.and(FB.Chain.valid(FB.Chain.parse(value), caps), Fallback.settings.ok(rest, s, caps)))
+    case M.SettingSet{"fallback.on", "on", _} <> rest:
+      Bool.and(Bool.not(List.is_empty(&2, FB.Target, FB.Chain.of(s))), Bool.and(FB.Chain.valid(FB.Chain.of(s), caps), Fallback.settings.ok(rest, s, caps)))
+    case _ <> rest: Fallback.settings.ok(rest, s, caps)
+
+def Fallback.settings.errors(os: List<&2, Out>) -> List<&2, Out>:
+  match os:
+    case Nil{}: Nil{}
+    case Send{client, +text} <> rest:
+      Reply.err(client, J.Json.as_raw(J.Json.get(Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{}), "id"), "0"), "Fallback hierarchy must contain at most 16 distinct installed provider/model entries. Choose a model from the installed list before enabling.") <> Fallback.settings.errors(rest)
+    case _ <> rest: Fallback.settings.errors(rest)
+
+def Auth.cancel(+s: M.State, +now: Nat, +th: String) -> List<&2, M.Change>:
+  List.append(&2, M.Change, Bool.pick(List<&2, M.Change>, Auth.waiting(s, th), [M.SettingSet{"auth.wait." ++ th, "", now}], Nil{}),
+    Bool.pick(List<&2, M.Change>, String.is_empty(M.Setting.get(s, "fallback.pending." ++ th, "")), Nil{}, [M.SettingSet{"fallback.pending." ++ th, "", now}]))
+
+def Hub.interrupt(+s: M.State, +now: Nat, +client: U32, +id: String, +thread: String) -> Step:
+  Step.after(Hub.interrupt.k(Hub.running(Hub.thread(s, thread)), s, now, client, id, thread), Auth.cancel(s, now, thread))
+
+def Hub.request.k(i: Nat, +s: M.State, +now: Nat, +client: U32, +id: String, +p: J.Json, +m: String) -> Step:
+  match i:
+    case 0n:
+      Step.outs([Fs{client, id, "add", J.Json.get_str(p, "path", "")}])
+    case 1n:
+      Step.reply(client, id, [M.ProjectRemoved{J.Json.get_str(p, "project", ""), now}])
+    case 2n:
+      Hub.thread_create(s, now, client, id, p)
+    case 3n:
+      Hub.turn.mode(Bool.or(String.is_empty(J.Json.get_str(p, "mode", "")), String.eq(J.Json.get_str(p, "mode", ""), "auto")), J.Json.get_str(p, "mode", ""),
+        s, now, client, id, J.Json.get_str(p, "thread", ""), J.Json.get_str(p, "text", ""), J.Json.get_str(p, "msg", ""))
+    case 4n:
+      Hub.interrupt(s, now, client, id, J.Json.get_str(p, "thread", ""))
+    case 5n:
+      Step.reply(client, id, [M.ThreadSettled{J.Json.get_str(p, "thread", ""), True{}, now}])
+    case 6n:
+      Step.reply(client, id, [M.ThreadUnsettled{J.Json.get_str(p, "thread", ""), now}])
+    case 7n:
+      Step.cat(Retire.archive(s, now, J.Json.get_str(p, "thread", ""), Step{[M.ThreadArchived{J.Json.get_str(p, "thread", ""), True{}, now}], [Reply.ok(client, id), AgentStop{J.Json.get_str(p, "thread", "")}]}), Watch.retire(s, now, J.Json.get_str(p, "thread", "")))
+    case 8n:
+      Step.reply(client, id, [M.ThreadArchived{J.Json.get_str(p, "thread", ""), False{}, now}])
+    case 9n:
+      Step.reply(client, id, [M.ThreadPinned{J.Json.get_str(p, "thread", ""), True{}, now}])
+    case 10n:
+      Step.reply(client, id, [M.ThreadPinned{J.Json.get_str(p, "thread", ""), False{}, now}])
+    # a rename: the title trimmed; a blank one changes nothing
+    case 11n:
+      Step.reply(client, id, Rename.changes(J.Json.get_str(p, "thread", ""), String.trim(J.Json.get_str(p, "title", "")), now))
+    case 12n:
+      Step.cat(Retire.archive(s, now, J.Json.get_str(p, "thread", ""), Step{[M.ThreadDeleted{J.Json.get_str(p, "thread", ""), now}], [Reply.ok(client, id), AgentStop{J.Json.get_str(p, "thread", "")}, BotFx{"gone", J.Json.get_str(p, "thread", ""), "", ""}]}), Watch.retire(s, now, J.Json.get_str(p, "thread", "")))
+    case 13n:
+      Step.outs([Reply.ok(client, id), Watch{client, J.Json.get_str(p, "kind", ""), J.Json.get_str(p, "root", ""), J.Json.get_str(p, "path", "")}])
+    case 14n:
+      Hub.modes(s, now, client, id, p, Hub.thread(s, J.Json.get_str(p, "thread", "")))
+    case 15n:
+      Update.ask(Nat.is_gt(M.Work.threads(s), 0n), now, client, id)
+    case 16n:
+      Step{[M.SettingSet{J.Json.get_str(p, "key", ""), J.Json.get_str(p, "value", ""), now}], Bool.pick(List<&2, Out>, String.eq(J.Json.get_str(p, "key", ""), "kicad.path"), [Reply.ok(client, id), KiCadRetry{}], [Reply.ok(client, id)])}
+    case 17n:
+      Step.outs([Reply.ok(client, id), KiCadInstall{}])
+    case 18n:
+      Hub.answer(s, now, client, id, J.Json.get_str(p, "id", ""), J.Json.get_str(p, "answer", ""))
+    case 19n:
+      Device.register(now, client, id, p)
+    case 20n:
+      Step.reply(client, id, [M.DeviceDropped{J.Json.get_str(p, "token", ""), now}])
+    case 21n:
+      Step.outs([PlotInfo{client, id, J.Json.get_str(p, "key", ""), Maybe.default(&2, Nat, Nat.read(J.Json.as_raw(J.Json.get(p, "at"), "0")), 0n),
+        Maybe.default(&2, Nat, Nat.read(J.Json.as_raw(J.Json.get(p, "idx"), "0")), 0n)}])
+    case 22n:
+      Hub.resume(s, now, client, id, J.Json.get_str(p, "thread", ""))
+    case 23n:
+      Queue.op(0n, s, now, client, id, p)
+    case 24n:
+      Queue.op(1n, s, now, client, id, p)
+    case 25n:
+      Queue.op(2n, s, now, client, id, p)
+    case 26n:
+      Queue.op(3n, s, now, client, id, p)
+    case 27n:
+      Hub.fork(s, now, client, id, J.Json.get_str(p, "thread", ""))
+    case 28n:
+      Hub.back(s, now, client, id, J.Json.get_str(p, "thread", ""))
+    case 29n:
+      Hub.switch(s, now, client, id, J.Json.get_str(p, "thread", ""), J.Json.get_str(p, "provider", ""))
+    case 30n:
+      Step{[M.SettingSet{"update.wait", "", now}], [Reply.ok(client, id), UpgradeForce{}]}
+    # the person stops watched work or a delegated task from its row
+    case 31n:
+      Step.before(Nil{}, [Reply.ok(client, id)], Watch.cancel(s, now, J.Json.get_str(p, "thread", ""), J.Json.get_str(p, "id", "")))
+    case 37n:
+      Step.before(Nil{}, [Reply.ok(client, id)], Locks.release(s, now, J.Json.get_str(p, "name", ""), J.Json.get_str(p, "thread", "")))
+    case 39n:
+      Step.outs([Reply.ok(client, id), KiCadRetry{}])
+    case 38n:
+      Step.before(Nil{}, [Reply.ok(client, id)], Locks.cancel(s, now, J.Json.get_str(p, "name", ""), J.Json.get_str(p, "thread", "")))
+    case 33n:
+      Step.reply(client, id, Bool.pick(List<&2, M.Change>, String.eq(J.Json.get_str(WK.Wake.get(s, J.Json.get_str(p, "id", "")), "by", ""), J.Json.get_str(p, "thread", "")), [M.WakeDropped{J.Json.get_str(p, "id", ""), now}], Nil{}))
+    case 32n:
+      Step.before(Nil{}, [Reply.ok(client, id)], Task.cancel.user(Maybe.default(&2, M.Task, Task.of_child(s, J.Json.get_str(p, "child", "")), M.Task.blank("")), s, now))
+    case 34n:
+      Deploy.restart(Deploy.stage.ok(J.Json.get_str(p, "stage", "")), s, now, client, id, J.Json.get_str(p, "stage", ""), J.Json.get_str(p, "note", ""))
+    case 35n:
+      Step.before(Nil{}, [Reply.ok(client, id)], Deploy.cancel(s, now))
+    case 36n:
+      Step.outs([Reply.data(client, id, DP.Deploy.status(s))])
+    case 40n: Mail.request.on(String.eq(M.Setting.get(s, "mail.on", "off"), "on"), 0n, s, now, client, id, p)
+    case 41n: Mail.request.on(String.eq(M.Setting.get(s, "mail.on", "off"), "on"), 1n, s, now, client, id, p)
+    case 42n: Mail.request.on(String.eq(M.Setting.get(s, "mail.on", "off"), "on"), 2n, s, now, client, id, p)
+    case 43n: Mail.request.on(String.eq(M.Setting.get(s, "mail.on", "off"), "on"), 3n, s, now, client, id, p)
+    case 44n: Mail.request.on(String.eq(M.Setting.get(s, "mail.on", "off"), "on"), 4n, s, now, client, id, p)
+    case 45n: Mail.request.on(String.eq(M.Setting.get(s, "mail.on", "off"), "on"), 5n, s, now, client, id, p)
+    case 46n:
+      Buy.look(s, client, id, J.Json.get_str(p, "thread", ""), "fab", "")
+    case 47n:
+      Buy.look(s, client, id, J.Json.get_str(p, "thread", ""), "intent", J.Json.get_str(p, "text", ""))
+    case 48n:
+      Buy.start(Hub.owns(s, J.Json.get_str(p, "thread", "")), s, now, client, id, J.Json.get_str(p, "thread", ""))
+    case _:
+      Hub.more(C.Codec.pos(Hub.methods.git(), m), s, now, client, id, p, m)
+
+# one client request {"id": n, "m": method, "p": params}
+def Hub.request(+s: M.State, +now: Nat, +client: U32, +o: J.Json) -> Step:
+  Hub.request.k(C.Codec.pos(Hub.methods(), J.Json.get_str(o, "m", "")), s, now, client,
+    J.Json.as_raw(J.Json.get(o, "id"), "0"), J.Json.get_obj(o, "p"), J.Json.get_str(o, "m", ""))
+
+def Hub.request_text.k(m: Maybe<&2, J.Json>, +s: M.State, +now: Nat, +client: U32) -> Step:
+  match m:
+    case Some{o}:
+      Hub.request(s, now, client, o)
+    case None{}:
+      Step.outs([Reply.err(client, "0", "malformed request")])
+
+def Hub.request_text(+s: M.State, +now: Nat, +client: U32, text: String) -> Step:
+  Hub.request_text.k(J.Json.parse(text), s, now, client)
+
+def Retire.request(i: Nat, +s: M.State) -> Step:
+  Hub.request.k(i, s, 9n, 0, "r", J.Json.obj([J.KV{"thread", J.Str{"t1"}}]), "")
+
+# A refusal before spawn may replay the exact unsent input. A process that
+# already started gets a continuation with its completed actions as context.
+def Auth.prompt(+s: M.State, +th: String, +o: J.Json) -> String:
+  Bool.pick(String, Bool.or(J.Json.get_bool(o, "not_started", False{}), String.contains(FB.Error.reason(o), "was not started:")),
+    M.Setting.get(s, "launch.input." ++ th, M.Setting.get(s, "fallback.input." ++ th, "")),
+    HD.Hand.switch(Hub.entries(s), th, Hub.provider(Hub.thread(s, th)), Hub.provider(Hub.thread(s, th)), 0n)
+      ++ "\n[Backplane] Credentials became unavailable. Continue the interrupted work from the recorded state. Do not repeat completed tool actions or restart finished work.\nOriginal request (context, not a new task):\n" ++ M.Setting.get(s, "fallback.input." ++ th, ""))
+
+def Auth.line.k(locked: Bool, +s: M.State, +now: Nat, +th: String, +o: J.Json, normal: Step) -> Step:
+  match locked:
+    case True{}: Auth.hold(s, now, th, Auth.prompt(s, th, o), FB.Error.reason(o))
+    case False{}: normal
+
+def Auth.line(+s: M.State, +now: Nat, +th: String, +o: J.Json, normal: Step) -> Step:
+  Auth.line.k(Bool.and(Hub.running(Hub.thread(s, th)), Bool.and(FB.Error.envelope(o), String.contains(String.to_lower(FB.Error.reason(o)), "login keyring is locked"))), s, now, th, o, normal)
+
+# Quota failures never reach normal task completion/report-back. A late line
+# from an interrupted/finished turn cannot reopen it.
+def Hub.agent_line(+s: M.State, +now: Nat, +thread: String, +line: String) -> Step:
+  +o = Maybe.default(&2, J.Json, J.Json.parse(line), J.Null{})
+  Auth.line(s, now, thread, o, Fallback.line(s, now, thread, o, Bool.and(FB.Error.envelope(o), Bool.not(String.eq(J.Json.get_str(o, "type", ""), "error"))), Hub.agent_line.raw(s, now, thread, line)))
+
+def Hub.agent_line.vo.active(+v: Nat, +s: M.State, +now: Nat, +thread: String, +line: String, +o: J.Json, +text: String) -> Step:
+  Auth.line(s, now, thread, o, Fallback.line(s, now, thread, o, Bool.or(Bool.or(Nat.is_eq(v, 3n), Nat.is_eq(v, 4n)), Bool.and(Nat.is_eq(v, 0n), FB.Error.envelope(o))), Hub.agent_line.vo.raw(v, s, now, thread, line, o, text)))
+
+def Fallback.blocks(xs: List<&2, J.Json>) -> List<&2, String>:
+  match xs:
+    case Nil{}: Nil{}
+    case h <> t: J.Json.get_str(h, "text", "") <> Fallback.blocks(t)
+
+def Fallback.content(c: J.Json) -> String:
+  match c:
+    case J.Str{s}: s
+    case other: String.join(Fallback.blocks(J.Json.elems(other)), "\n")
+
+def Fallback.claude.text(+o: Out) -> String:
+  match o:
+    case AgentSend{_, +line}: Fallback.content(J.Json.get_obj(J.Json.get_obj(Maybe.default(&2, J.Json, J.Json.parse(line), J.Null{}), "message"), "content"))
+    case Git{_, _, "attach.claude", _, _, text, _}: text
+    case _: ""
+
+# Exhaustion is one action-needed incident for the configured chain, even
+# when different threads first encounter different members of the outage.
+def Fallback.chain.token(xs: List<&2, FB.Target>, +s: M.State) -> String:
+  match xs:
+    case Nil{}: ""
+    case +t <> rest:
+      M.Setting.get(s, FB.Limit.key(FB.Target.provider(t)), "") ++ M.Setting.get(s, FB.Limit.key(FB.Target.key(t)), "") ++ Fallback.chain.token(rest, s)
+
+def Fallback.alert.blocked(new: Bool, +s: M.State, +now: Nat, +th: String, +token: String, text: String) -> List<&2, M.Change>:
+  match new:
+    case False{}: Nil{}
+    case True{}: [M.SettingSet{"fallback.alerted.chain", token, now}, NO.Alert.set(s, now, th, "fallback-blocked", "fallback-chain-blocked", NO.Alert.memory(s, th), text)]
+
+def Fallback.alert(+s: M.State, +now: Nat, +th: String, scope: String, text: String, blocked: Bool) -> List<&2, M.Change>:
+  match blocked:
+    case False{}: Fallback.alert.scope(s, now, th, scope, text, False{})
+    case True{}:
+      +token = M.Setting.get(s, "fallback.chain", "") ++ Fallback.chain.token(FB.Chain.of(s), s)
+      Fallback.alert.blocked(Bool.not(String.eq(M.Setting.get(s, "fallback.alerted.chain", ""), token)), s, now, th, token, text)
+
+def Fallback.block(+s: M.State, +now: Nat, +th: String, +text: String) -> Step:
+  +from = Fallback.target(Hub.thread(s, th))
+  +say = Fallback.say(s, now, th, from, "", True{})
+  Step{List.append(&2, M.Change, [M.TurnChanged{th, M.Interrupted{}, now}, M.TurnQueued{th, "fallback:held:" ++ Nat.show(Hub.seq(s)), text, now},
+    M.ActivityLogged{th, Hub.id("fallback", now, Hub.seq(s)), "error", "fallback-blocked", say, now}], Fallback.alert(s, now, th, Fallback.scope(s, from, now), say, True{})), Nil{}}
+
+# The legacy ledger verdict shares exactly the ordinary line path. This
+# preserves cmds_legacy_same for every input, including provider errors.
+def Hub.agent_line.vo(v: Nat, +s: M.State, +now: Nat, +thread: String, +line: String, o: J.Json, text: String) -> Step:
+  match v:
+    case 0n: Hub.agent_line(s, now, thread, line)
+    case 1n+p: Hub.agent_line.vo.active(1n+p, s, now, thread, line, o, text)
+
+def Hub.agent_line.v(v: Nat, +s: M.State, +now: Nat, +thread: String, +line: String, +text: String) -> Step:
+  Hub.agent_line.vo(v, s, now, thread, line, Maybe.default(&2, J.Json, J.Json.parse(line), J.Null{}), text)
+
+# Settings/model changes in the incoming step are explicit choices. Automatic
+# switches are appended later by preflight, so they keep the original intent.
+def Fallback.manual(cs: List<&2, M.Change>, +now: Nat) -> List<&2, M.Change>:
+  match cs:
+    case Nil{}: Nil{}
+    case M.ProviderSet{+th, _, _, _} <> rest:
+      M.SettingSet{"fallback.intent." ++ th, "", now} <> Fallback.manual(rest, now)
+    case M.ModesSet{+th, _, _, _, _} <> rest:
+      M.SettingSet{"fallback.intent." ++ th, "", now} <> Fallback.manual(rest, now)
+    case _ <> rest: Fallback.manual(rest, now)
+
+def Fallback.intent(+s: M.State, +th: String, +from: FB.Target) -> String:
+  +saved = M.Setting.get(s, "fallback.intent." ++ th, "")
+  Bool.pick(String, String.is_empty(saved), FB.Target.key(from), saved)
+
+def Fallback.change(+s: M.State, +now: Nat, +th: String, +to: FB.Target, +text: String) -> List<&2, M.Change>:
+  +from = Fallback.target(Hub.thread(s, th))
+  +p = FB.Target.provider(to)
+  +say = Fallback.say(s, now, th, from, FB.Target.key(to), False{})
+  List.concat(&2, M.Change, [[M.SettingSet{"fallback.intent." ++ th, Fallback.intent(s, th, from), now},
+    M.SettingSet{"fallback.session." ++ th ++ "." ++ FB.Target.key(from), M.Switch.sess(Hub.thread(s, th)), now},
+    M.ProviderSet{th, p, FB.Target.model(to), now}, M.SessionSet{th, M.Setting.get(s, "fallback.session." ++ th ++ "." ++ FB.Target.key(to), ""), now}, M.SettingSet{"fallback.input." ++ th, Bool.pick(String, String.eq(M.Setting.get(s, "fallback.continuing." ++ th, ""), "yes"), M.Setting.get(s, "fallback.input." ++ th, text), text), now}, M.SettingSet{"fallback.continuing." ++ th, "", now},
+    M.ActivityLogged{th, Hub.id("fallback", now, Hub.seq(s)), "info", "fallback", say, now}],
+    Fallback.alert(s, now, th, Fallback.scope(s, from, now), say, False{})])
+
+def Fallback.use(choice: Maybe<&2, FB.Target>, +s: M.State, +now: Nat, +th: String, +cwd: String, +text: String, +uuid: String) -> Step:
+  match choice:
+    case None{}: Fallback.block(s, now, th, text)
+    case Some{+to}:
+      +cs = Fallback.change(s, now, th, to, text)
+      +ctx = HD.Hand.switch(Hub.entries(s), th, Hub.provider(Hub.thread(s, th)), FB.Target.provider(to), 0n)
+      Step{List.append(&2, M.Change, cs, [M.SettingSet{"launch.input." ++ th, M.Queue.join(ctx, text), now}]), AgentStop{th} <> Hub.run(Hub.thread(M.State.replay(cs, s), th), cwd, M.Queue.join(ctx, text), uuid)}
+
+def Fallback.attempt.k(held: Bool, +s: M.State, +caps: J.Json, +now: Nat, +th: String, +cwd: String, +text: String, +uuid: String, original: List<&2, Out>) -> Step:
+  match held:
+    case False{}: Step{[M.SettingSet{"fallback.input." ++ th, text, now}, M.SettingSet{"launch.input." ++ th, text, now}], original}
+    case True{}: Fallback.use(FB.Chain.pick(FB.Chain.suffix(FB.Chain.of(s), FB.Target.key(Fallback.target(Hub.thread(s, th)))), s, caps, now), s, now, th, cwd, text, uuid)
+
+def Fallback.attempt.quota(+s: M.State, caps: J.Json, +now: Nat, +th: String, cwd: String, text: String, uuid: String, original: List<&2, Out>) -> Step:
+  Fallback.attempt.k(Bool.and(FB.Chain.on(s), FB.Target.held(s, Fallback.target(Hub.thread(s, th)), now)), s, caps, now, th, cwd, text, uuid, original)
+
+def Auth.attempt(wait: Bool, +s: M.State, caps: J.Json, +now: Nat, +th: String, cwd: String, text: String, uuid: String, original: List<&2, Out>) -> Step:
+  match wait:
+    case True{}: Step{[M.TurnChanged{th, M.Interrupted{}, now}, M.TurnQueued{th, "auth:held:" ++ Nat.show(Hub.seq(s)), text, now}], Nil{}}
+    case False{}: Fallback.attempt.quota(s, caps, now, th, cwd, text, uuid, original)
+
+def Fallback.attempt(+s: M.State, caps: J.Json, +now: Nat, +th: String, cwd: String, text: String, uuid: String, original: List<&2, Out>) -> Step:
+  Auth.attempt(Auth.waiting(s, th), s, caps, now, th, cwd, text, uuid, original)
+
+def Fallback.outs.one(+o: Out, +s: M.State, +caps: J.Json, +now: Nat) -> Step:
+  match o:
+    case CodexTurn{+th, +cwd, _, _, _, +text}:
+      Fallback.attempt(s, caps, now, th, cwd, text, Hub.uuid(now, th), [o])
+    case GrokTurn{+th, +cwd, _, _, _, +text}:
+      Fallback.attempt(s, caps, now, th, cwd, text, Hub.uuid(now, th), [o])
+    case MuseTurn{+th, +cwd, _, _, _, +text}:
+      Fallback.attempt(s, caps, now, th, cwd, text, Hub.uuid(now, th), [o])
+    case AgyTurn{+th, +cwd, _, _, _, +text}:
+      Fallback.attempt(s, caps, now, th, cwd, text, Hub.uuid(now, th), [o])
+    case _: Step.outs([o])
+
+def Fallback.outs(os: List<&2, Out>, +s: M.State, +caps: J.Json, +now: Nat) -> Step:
+  match os:
+    case Nil{}: Step.none()
+    case AgentStart{+th, +cwd, p, m, se, r, i} <> +send <> tail:
+      +first = Fallback.attempt(s, caps, now, th, cwd, Fallback.claude.text(send), Fallback.claude.uuid(send), [AgentStart{th, cwd, p, m, se, r, i}, send])
+      Step.cat(first, Fallback.outs(tail, M.State.replay(Queue.changes(first), s), caps, now))
+    case +o <> rest:
+      +first = Fallback.outs.one(o, s, caps, now)
+      Step.cat(first, Fallback.outs(rest, M.State.replay(Queue.changes(first), s), caps, now))
+
+def Fallback.after(+s: M.State, caps: J.Json, +now: Nat, st: Step) -> Step:
+  match st:
+    case Step{+cs, os}:
+      +all = List.append(&2, M.Change, cs, Fallback.manual(cs, now))
+      Step.before(all, Nil{}, Fallback.outs(os, M.State.replay(all, s), caps, now))
+
+def Fallback.validated(ok: Bool, +s: M.State, caps: J.Json, now: Nat, step: Step) -> Step:
+  match ok:
+    case True{}: Fallback.after(s, caps, now, step)
+    case False{}: Step{Nil{}, Fallback.settings.errors(Step.outs_of(step))}
+
+def Fallback.validate(+s: M.State, +caps: J.Json, now: Nat, +step: Step) -> Step:
+  Fallback.validated(Fallback.settings.ok(Queue.changes(step), s, caps), s, caps, now, step)

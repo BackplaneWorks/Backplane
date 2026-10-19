@@ -35,3 +35,92 @@ Plural categories have a P prefix because Base already owns Zero.
 Byte units use 1024 and truncate tenths below 10, integers from 10.
 I18n.day's offset is eastward seconds; convert signed TzOff wall time at callers.
 Run all Bend checks/builds through work_run lock bend and the project caps.
+
+Native phone messages are selected by `i18n/native.keys`. The same generator
+emits typed, pure Swift/Kotlin functions in `mobile/ios/Shared/NativeMessages.swift`
+and Android `NativeMessages.kt`. Commit these outputs together with the catalogs;
+`--check` rejects stale native output too. Counts are UInt64/ULong; strings,
+selects and plural branches compile directly, with English fallback grammar.
+No runtime ICU parser or separate translated native table is used.
+
+Native views take the canonical `locale` tag carried in their screen. The bridge
+caches this tag from Bend's `native_locale` when device settings change; it uses
+the same normalization and preview gate as hub-backed screens. It also keeps the
+unpaired list in this language. Old cached screens omit the optional tag and
+render English until the bridge provides a fresh screen. Device Settings and
+the tab bar are migrated first; other native copy is still being extracted.
+
+Local heavy validation uses bp-admit with an honest memory/CPU reservation;
+Boat remains preferred for combined check/proof/test jobs. The earlier global
+bend-lock example above is superseded by this resource policy.
+
+Native pairing/scanner/hub connection screens also use the generated catalog,
+including connection phase selects and whole hub-detail/accessibility messages.
+They read the resolved screen locale even before a hub is paired. Native iOS
+connection relative dates and counts use that locale explicitly. OS camera
+permission descriptions and the remaining native views are separate extraction
+work; Japanese remains preview-only.
+
+Native file/review/task/space controls read the same resolved tag through
+`EnvironmentValues.backplaneLanguage` on iOS and `LocalBackplaneLanguage` on
+Android, provided by the root screen. They default to English for old screens;
+all OS/override/preview policy remains in Bend. iOS also supplies that locale to
+SwiftUI's built-in controls. PDF fetches retain failure kinds and HTTP codes,
+then translate during rendering; changing language does not repeat the fetch.
+Task result status uses known protocol ids and preserves unknown result text.
+File names, comments, checklists, space contents and task names remain content.
+
+Native viewer controls (layers, history/comparison, mechanical renders and
+inspector actions) use the same resolved locale context. UIKit comment pins
+include the language in their accessibility-label cache; the no-Metal label
+also updates on a language switch. Camera/render geometry stays independent
+of language. Sheet/layer/file names and agent text pass through unchanged.
+Native build/catalog checks cover these changes; device visuals remain pending.
+
+Native bot/room forms, routine controls, connection forms and their lists
+use generated messages too. Routine next/last text and per-hub create menus
+are complete messages; names, memory, prompts, posts, URLs and account data
+remain content. Schedule examples keep the supported English parser syntax
+in Japanese; this extraction does not introduce a Japanese schedule parser.
+The Google brand name stays unchanged. Native device visuals remain pending.
+
+Native project/thread chrome, search, model/effort controls, composer hints
+and sending states use generated messages. Folded shelf counts retain raw
+English digits and use stable selection instead of matching English labels.
+Android snackbar effects include the locale so Dismiss refreshes when it
+changes; error content remains unchanged. Native runtime/device review is pending.
+
+Native thread cards, copy/select menus, attachments, diff/search panels and
+terminal controls use generated messages. Complete accessibility/fold labels
+retain raw text, file names, questions and terminal titles. Android sheet
+default Close resolves in composition from the current locale; explicit labels
+are preserved. Terminal bytes, keys and metrics stay unchanged. Git, keycaps
+esc/tab and the glyph metric M are technical identifiers, kept literal.
+Device visuals/live interaction remain pending; Japanese stays preview.
+
+Catalog metadata (key and missing-translation lists) is emitted in bounded
+chunks and joined with tail calls. This avoids a JavaScript build stack
+overflow as catalogs grow, while keeping sorted keys and fallback metadata
+unchanged. The HTML-backend regression exercises 4,097 keys and a large
+missing list, checking every entry and its order. Native output and message
+lookup stay unchanged by this metadata representation.
+
+Native Home and Status sections resolve labels from the current screen locale.
+Idle remaining counts and uber-card accessibility use full messages with raw
+values; platform-specific English counter labels remain distinct. The proposed
+Japanese uberbot term remains メインボット pending the final linguistic review.
+
+Android notification channel display names refresh on a resolved screen locale
+change. Channel IDs and importance remain stable, preserving notification
+preferences. Startup uses English until the Bend screen resolves device locale.
+
+The camera permission purpose is `native.permission.camera`. The catalog
+compiler generates `mobile/ios/Info.plist` from `Info.plist.in`, retaining the
+English fallback, and writes en/ja `InfoPlist.strings`. Edit the catalog/template,
+then regenerate. OS resource messages must be nonempty literal text, without
+ICU interpolation or selection.
+
+[iOS chooses localized property-list strings using its language preferences](https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/AboutInformationPropertyListFiles.html).
+The Bend in-app language override does not change that OS preference. Japanese
+permission resources can therefore follow iOS language independently of the
+in-app preview gate; live prompt/device verification remains pending.

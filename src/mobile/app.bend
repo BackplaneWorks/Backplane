@@ -1,4 +1,5 @@
 import Base
+import ../core/i18n.bend as I
 import ../core/json.bend as J
 import ../core/client.bend as U
 import ../core/cbor.bend as CB
@@ -7,6 +8,11 @@ import ./hubs.bend as H
 import ./screen.bend as S
 import ./bots.bend as MB
 import ../core/msgs.bend as MSG
+
+# Resolve the native host's language once when device settings change. This uses
+# the same normalization and preview gate as each hub's Ui, including no hubs.
+def native_locale(setting: String, os: String, preview: String) -> String:
+  U.Lang.resolve(U.Lang.normalize(setting), os, String.eq(preview, "1"))
 
 # What bridge.js calls. The phone apps see only strings: server messages
 # in (binary CBOR frames, carried as base64, decoded by bridge.js) from
@@ -131,6 +137,11 @@ def lean(hs: H.Hubs) -> H.Hubs:
 
 def screen_list(+hs: H.Hubs) -> J.Json:
   H.Hubs.screen.fast(hs)
+
+# The bridge also keeps device settings before the first hub is paired.
+def screen_list_in(hs: H.Hubs, tag: String) -> J.Json:
+  H.Hubs.screen.fast.l(I.I18n.of_tag(tag), hs)
+
 
 def focus(+hs: H.Hubs) -> J.Json:
   H.Hubs.opened(hs)

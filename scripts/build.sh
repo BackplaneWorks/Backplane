@@ -61,14 +61,20 @@ if [ "$mode" = emit ]; then
 fi
 # native binaries compile split in parallel, at low priority
 # (scripts/build-app.sh; BACKPLANE_JOBS caps the compiles)
-scripts/build-app.sh src/server/main.bend dist/backplane-serve
 # the window needs X11 (libX11.so.6, dlopen'd); a Mac has none, so there the
 # app always runs as hub + web UI, the same program as backplane-serve. The
 # app's C also takes far more memory than a macOS runner (7 GB) has; build
 # it only where a window can open
-if [ "$(uname -s)" = Darwin ]; then
+if [ "$(uname -s)" = Linux ]; then
+  scripts/build-app.sh src/app/main.bend dist/backplane
+  # argv[0] selects the original server entry; no second Bend emit/compile.
+  # Copy, rather than symlink: self-exec must keep the server's pathname.
+  cp dist/backplane dist/backplane-serve
+elif [ "$(uname -s)" = Darwin ]; then
+  scripts/build-app.sh src/server/main.bend dist/backplane-serve
   cp dist/backplane-serve dist/backplane
 else
+  scripts/build-app.sh src/server/main.bend dist/backplane-serve
   scripts/build-app.sh src/app/main.bend dist/backplane
 fi
 cp dist/backplane build/backplane

@@ -7,6 +7,7 @@ import { createInterface } from "node:readline";
 
 const root = new URL("../../../", import.meta.url).pathname;
 const desc = root + "test/fixtures/kipc/api.desc";
+const version = "10.99.0-bp.4";
 const dir = mkdtempSync(tmpdir() + "/kipc-");
 const sock = dir + "/api.sock";
 let bad = 0;
@@ -15,7 +16,7 @@ const check = (name: string, ok: boolean, extra?: unknown) => {
   if (!ok) bad++;
 };
 
-const stub = spawn("bun", [root + "test/tools/kipc_stub.ts", "api-server", "x.kicad_pro", "--socket", sock, "--parent-pid", String(process.pid), "--idle-exit", "30"], { env: { ...process.env, KIPC_DESC: desc }, stdio: ["ignore", "pipe", "inherit"] });
+const stub = spawn("bun", [root + "test/tools/kipc_stub.ts", "api-server", "x.kicad_pro", "--socket", sock, "--parent-pid", String(process.pid), "--idle-exit", "30"], { env: { ...process.env, KIPC_DESC: desc, KIPC_VERSION: version }, stdio: ["ignore", "pipe", "inherit"] });
 const ready = await new Promise<string>((res) => createInterface({ input: stub.stdout! }).once("line", res));
 check("ready line", ready === `KiCad API server listening at ${sock}`, ready);
 
@@ -39,7 +40,7 @@ const withDesc = await session(["--desc", desc], [
   { id: 6, sock: dir + "/missing.sock", type: "kiapi.common.commands.Ping", message: {} },
 ]);
 check("ping", withDesc[0].ok === true, withDesc[0]);
-check("version", withDesc[1].message?.version?.full_version === "10.99.0-bp.1", withDesc[1]);
+check("version", withDesc[1].message?.version?.full_version === version, withDesc[1]);
 check("items carry KIIDs", withDesc[2].message?.items?.length === 2 && withDesc[2].message.items[0].id.value.endsWith("1"), withDesc[2]);
 check("unknown command", withDesc[3].ok === false, withDesc[3]);
 check("unimplemented keeps its status", withDesc[4].ok === false && withDesc[4].status === "AS_UNIMPLEMENTED", withDesc[4]);
@@ -51,7 +52,7 @@ const bare = await session([], [
   { id: 3, sock, type: "kiapi.board.commands.GetItems", message: {} },
 ]);
 check("builtin ping", bare[0].ok === true, bare[0]);
-check("builtin version", bare[1].message?.version?.full_version === "10.99.0-bp.1", bare[1]);
+check("builtin version", bare[1].message?.version?.full_version === version, bare[1]);
 check("no schema for the rest", bare[2].ok === false && bare[2].error === "no API schema in this KiCad runtime", bare[2]);
 
 const code = await new Promise<number | null>((res) => {
@@ -62,7 +63,7 @@ check("shutdown exits 0", code === 0, code);
 // the helper starts a server, reports its lines, and its exit (idle-exit, no signal)
 {
   const sock2 = dir + "/b.sock";
-  const h = spawn("bun", [root + "tools/kipc/src/main.ts", "--desc", desc], { env: { ...process.env, KIPC_DESC: desc }, stdio: ["pipe", "pipe", "inherit"] });
+  const h = spawn("bun", [root + "tools/kipc/src/main.ts", "--desc", desc], { env: { ...process.env, KIPC_DESC: desc, KIPC_VERSION: version }, stdio: ["pipe", "pipe", "inherit"] });
   const events: any[] = [];
   const replies: any[] = [];
   createInterface({ input: h.stdout! }).on("line", (l) => {

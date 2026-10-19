@@ -26,7 +26,20 @@ export class BunWs extends EventEmitter {
   get readyState() { return this.w.readyState; }
   addEventListener(ev: string, f: (...a: any[]) => void) { this.on(ev, f); }
   removeEventListener(ev: string, f: (...a: any[]) => void) { this.off(ev, f); }
-  send(s: string) { this.w.send(s); }
+  send(s: string) {
+    // This transport is CEF-only. Playwright's synthetic focus obtains a
+    // Chromium capture handle (stay_hidden=false), which keeps minimized
+    // native widgets painting. CEF uses real X focus; retain CDP's reply
+    // and native input semantics without that permanent visibility lock.
+    if (s.includes('"Emulation.setFocusEmulationEnabled"')) {
+      const message = JSON.parse(s);
+      if (message.method === "Emulation.setFocusEmulationEnabled" && message.params?.enabled) {
+        message.params.enabled = false;
+        s = JSON.stringify(message);
+      }
+    }
+    this.w.send(s);
+  }
   close(code?: number, reason?: string) { this.w.close(code, reason); }
 }
 

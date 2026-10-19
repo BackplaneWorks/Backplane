@@ -54,7 +54,7 @@ const spawnHub = (n: number) => Bun.spawn([join(prefix, "backplane"), "--home", 
   env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "", BACKPLANE_GOOGLE_BAKE: "0",
     FAKE_LOG: clog, RIDE_LOG: xlog, BP_EOF_FINISH: "1", BP_STREAM_N: "200", BP_STREAM_MS: "100", BP_DEPLOY_ARGS: JSON.stringify({ stage, note: "deploy mcp e2e" }),
     BACKPLANE_WAKE_TICK_MS: "2000", BACKPLANE_DEPLOY_LOCKS: join(root, "none.lock"), BACKPLANE_LOCK_DIR: join(root, "locks"),
-    PATH: `${fake}:${process.env.PATH}`, TMPDIR: root },
+    BACKPLANE_AGENTS: fake, PATH: `${fake}:${process.env.PATH}`, TMPDIR: root },
   stdout: "ignore", stderr: Bun.file(join(root, `hub${n}.err`)),
 });
 let proc = spawnHub(1);

@@ -66,7 +66,7 @@ for (const l of logLines) if (l.includes('"BotSet"')) { try { mkdirSync(join(roo
 const hub = Bun.spawn([bin, "--home", join(root, "home"), "--port", String(port), "--no-tailscale", ...(web ? ["--web", resolve(web)] : [])], {
   cwd: root, stdout: Bun.file(join(root, "app.log")), stderr: Bun.file(join(root, "app.err")),
   env: {
-    PATH: `${join(root, "bin")}:/usr/bin:/bin`, HOME: join(root, "user"), USER: process.env.USER ?? "h", LANG: "C.UTF-8",
+    BACKPLANE_AGENTS: join(root, "bin"), PATH: `${join(root, "bin")}:/usr/bin:/bin`, HOME: join(root, "user"), USER: process.env.USER ?? "h", LANG: "C.UTF-8",
     DISPLAY: opt("display", process.env.LOAD_DISPLAY ?? ""), WAYLAND_DISPLAY: "", DBUS_SESSION_BUS_ADDRESS: "unix:path=/nonexistent",
     BACKPLANE_NO_UPDATE: "1", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "", BACKPLANE_LOCK_DIR: join(root, "locks"), BACKPLANE_DEPLOY_LOCKS: join(root, "locks/a.lock"),
     BACKPLANE_APNS_URL: "http://127.0.0.1:9", BACKPLANE_HOOK_URL: "", BACKPLANE_GOOGLE_API: "http://127.0.0.1:9", BACKPLANE_GOOGLE_OAUTH: "http://127.0.0.1:9",

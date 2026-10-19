@@ -790,6 +790,7 @@ struct HubIsland: Decodable {
 }
 
 struct Screen: Decodable {
+    let locale: String?
     let online: Bool
     // hub: the one in focus (its thread is shown, its plots are drawn)
     let version, error, note, sel, empty, hub: String
@@ -939,13 +940,14 @@ extension KeyedDecodingContainer {
 // costs that field, never the whole screen (a blank app).
 extension Screen {
     private enum K: String, CodingKey {
-        case online, version, error, note, sel, empty, hub, hubs, found, projects, lang, view, making, active, older, settled,
+        case locale, online, version, error, note, sel, empty, hub, hubs, found, projects, lang, view, making, active, older, settled,
              rowMenu, bots, rooms, uber, plane, newBot, newRoom, bot, deleting, removing, renaming, tour, search,
              folders, settings, find, island, islands, thread, theme, tabs
     }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: K.self)
+        locale = c.lossy(.locale)
         online = c.lossy(.online) ?? false
         version = c.lossy(.version) ?? ""
         error = c.lossy(.error) ?? ""

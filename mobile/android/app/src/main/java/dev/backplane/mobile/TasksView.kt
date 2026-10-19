@@ -93,8 +93,9 @@ fun rememberHubImage(m: AppModel, path: String): ImageBitmap? {
 // where a paused run stopped
 @Composable
 fun HubPicture(m: AppModel, path: String, modifier: Modifier = Modifier, scale: ContentScale = ContentScale.FillWidth) {
+    val lang = LocalBackplaneLanguage.current
     val img = rememberHubImage(m, path)
-    if (img != null) Image(img, "Screenshot", modifier.border(1.dp, MaterialTheme.colorScheme.outlineVariant, square), contentScale = scale)
+    if (img != null) Image(img, NativeMessages.native_browser_screenshot(lang), modifier.border(1.dp, MaterialTheme.colorScheme.outlineVariant, square), contentScale = scale)
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -143,10 +144,11 @@ fun BrowserAsk(m: AppModel, a: Ask) {
 // the page's pixels (about twice the finger's distance)
 @Composable
 private fun Frame(m: AppModel, b: BotBrowser, bot: BotView) {
+    val lang = LocalBackplaneLanguage.current
     val img = rememberHubImage(m, b.url + "?n=" + b.n)
     if (img == null) {
         Box(Modifier.fillMaxWidth().height(160.dp), contentAlignment = Alignment.Center) {
-            Text("No page yet", color = MaterialTheme.colorScheme.outline)
+            Text(NativeMessages.native_browser_empty(lang), color = MaterialTheme.colorScheme.outline)
         }
         return
     }
@@ -178,21 +180,22 @@ private fun Frame(m: AppModel, b: BotBrowser, bot: BotView) {
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun Driving(m: AppModel, b: BotBrowser) {
+    val lang = LocalBackplaneLanguage.current
     var text by remember { mutableStateOf("") }
     Column(Modifier.padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-            OutlinedButton(onClick = { m.act("bb-back") }, shape = square) { Text("Back") }
-            OutlinedButton(onClick = { m.act("bb-reload") }, shape = square) { Text("Reload") }
-            Field(m, "bburl", b.addr, "Address", "go", { m.act("bb-nav") }, Modifier.weight(1f))
-            Button(onClick = { m.act("bb-nav") }, shape = square) { Text("Go") }
+            OutlinedButton(onClick = { m.act("bb-back") }, shape = square) { Text(NativeMessages.tour_back(lang)) }
+            OutlinedButton(onClick = { m.act("bb-reload") }, shape = square) { Text(NativeMessages.common_reload(lang)) }
+            Field(m, "bburl", b.addr, NativeMessages.browser_address(lang), "go", { m.act("bb-nav") }, Modifier.weight(1f))
+            Button(onClick = { m.act("bb-nav") }, shape = square) { Text(NativeMessages.common_go(lang)) }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(text, { text = it }, Modifier.weight(1f), singleLine = true, label = { Text("Type into the page") },
+            OutlinedTextField(text, { text = it }, Modifier.weight(1f), singleLine = true, label = { Text(NativeMessages.native_browser_typing(lang)) },
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false))
-            Button(onClick = { if (text.isNotEmpty()) { m.act("bb-type", text); text = "" } }, shape = square) { Text("Send") }
+            Button(onClick = { if (text.isNotEmpty()) { m.act("bb-type", text); text = "" } }, shape = square) { Text(NativeMessages.composer_send(lang)) }
         }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            for ((label, key) in listOf("Enter" to "Enter", "Tab" to "Tab", "⌫" to "Backspace", "Esc" to "Escape"))
+            for ((label, key) in listOf(NativeMessages.native_key_enter(lang) to "Enter", NativeMessages.native_key_tab(lang) to "Tab", "⌫" to "Backspace", NativeMessages.native_key_esc(lang) to "Escape"))
                 OutlinedButton(onClick = { m.act("bb-key", key) }, shape = square) { Text(label) }
         }
     }
@@ -202,22 +205,23 @@ private fun Driving(m: AppModel, b: BotBrowser) {
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SaveSheet(m: AppModel, b: BotBrowser) {
+    val lang = LocalBackplaneLanguage.current
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(b.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-        Text("Name it. Mark a value you typed to ask for it each time the task runs.", style = MaterialTheme.typography.bodySmall,
+        Text(NativeMessages.teach_name_note(lang), style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.outline)
-        Field(m, "tkname", b.name, "Name")
-        Field(m, "tkdesc", b.desc, "What it does (optional)")
+        Field(m, "tkname", b.name, NativeMessages.bots_name(lang))
+        Field(m, "tkdesc", b.desc, NativeMessages.teach_description(lang))
         for (r in b.rows) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("${r.n}.", color = MaterialTheme.colorScheme.outline, fontFamily = FontFamily.Monospace)
                     Text(r.text, Modifier.weight(1f))
-                    if (r.secret) Text("private", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                    if (r.secret) Text(NativeMessages.native_task_private(lang), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
                 }
                 if (r.chip.isNotEmpty()) FilterChip(r.marked, { m.act("tk-mark", r.n.toString()) }, label = { Text(r.chip, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     shape = square)
-                if (r.marked) Field(m, r.field, "", r.pname.ifEmpty { "Name" })
+                if (r.marked) Field(m, r.field, "", r.pname.ifEmpty { NativeMessages.bots_name(lang) })
             }
         }
         Btns(m, b.btns)
@@ -228,9 +232,10 @@ private fun SaveSheet(m: AppModel, b: BotBrowser) {
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun BrowserTab(m: AppModel, bot: BotView) {
+    val lang = LocalBackplaneLanguage.current
     val b = bot.browser
     if (b == null) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("No page yet", color = MaterialTheme.colorScheme.outline) }
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text(NativeMessages.native_browser_empty(lang), color = MaterialTheme.colorScheme.outline) }
         return
     }
     if (b.mode == 2) { SaveSheet(m, b); return }
@@ -240,7 +245,7 @@ fun BrowserTab(m: AppModel, bot: BotView) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             if (b.title.isNotEmpty()) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(b.title, fontWeight = FontWeight.SemiBold)
-                if (b.mode == 1) Text(b.clock + " · " + b.steps + (if (b.steps == 1) " step" else " steps"),
+                if (b.mode == 1) Text(NativeMessages.teach_steps(lang, b.clock, b.steps.toString(), if (b.steps == 1) "one" else "other"),
                     color = MaterialTheme.colorScheme.outline, style = MaterialTheme.typography.labelMedium)
             }
             Btns(m, b.btns)
@@ -249,8 +254,8 @@ fun BrowserTab(m: AppModel, bot: BotView) {
         Frame(m, b, bot)
         if (b.mode == 1) Row(Modifier.padding(horizontal = 12.dp).padding(bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically) {
-            Field(m, "tknote", b.note, "Tell it what matters", "go", { m.act("tk-note"); sent++ }, Modifier.weight(1f), sent)
-            OutlinedButton(onClick = { m.act("tk-note"); sent++ }, shape = square) { Text("Add note") }
+            Field(m, "tknote", b.note, NativeMessages.native_task_note(lang), "go", { m.act("tk-note"); sent++ }, Modifier.weight(1f), sent)
+            OutlinedButton(onClick = { m.act("tk-note"); sent++ }, shape = square) { Text(NativeMessages.teach_note_add(lang)) }
         }
     }
 }
@@ -265,10 +270,11 @@ private fun statusColor(s: String): Color = when (s) {
 // recent runs with their screenshots
 @Composable
 fun TasksTab(m: AppModel, bot: BotView) {
+    val lang = LocalBackplaneLanguage.current
     val t = bot.tasks ?: BotTasks(emptyList(), emptyList())
     LazyColumn(Modifier.fillMaxSize()) {
         item(key = "note") {
-            Text(if (t.items.isEmpty()) "None yet. Teach one in the Browser tab, or tell it in chat." else "Open one to run it. A routine can run it too.",
+            Text(if (t.items.isEmpty()) NativeMessages.teach_empty(lang) else NativeMessages.teach_run_note(lang),
                 Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
         }
         items(t.items, key = { "t:" + it.slug }) { x ->
@@ -281,14 +287,14 @@ fun TasksTab(m: AppModel, bot: BotView) {
                         if (x.params.isNotEmpty()) Text(x.params.joinToString(", ") { it.label },
                             style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
                     }
-                    if (x.last.isNotEmpty()) Text(x.last, style = MaterialTheme.typography.labelMedium, color = statusColor(x.last))
+                    if (x.last.isNotEmpty()) Text(NativeMessages.native_task_state(lang, x.last), style = MaterialTheme.typography.labelMedium, color = statusColor(x.last))
                 }
                 if (x.open) Column(Modifier.padding(horizontal = 12.dp).padding(bottom = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    for (p in x.params) Field(m, p.field, p.value, p.label + (if (p.example.isEmpty()) "" else " (${p.example})"), reset = t.runs.size)
+                    for (p in x.params) Field(m, p.field, p.value, if (p.example.isEmpty()) p.label else NativeMessages.native_task_parameter(lang, p.label, p.example), reset = t.runs.size)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { m.act("tk-run", x.slug) }, shape = square) { Text("Run") }
+                        Button(onClick = { m.act("tk-run", x.slug) }, shape = square) { Text(NativeMessages.common_run(lang)) }
                         OutlinedButton(onClick = { m.act("tk-del", x.slug) }, shape = square) {
-                            Text(if (x.asking) "Delete this task?" else "Delete", color = MaterialTheme.colorScheme.error)
+                            Text(if (x.asking) NativeMessages.native_task_delete_ask(lang) else NativeMessages.common_delete(lang), color = MaterialTheme.colorScheme.error)
                         }
                     }
                 }
@@ -296,7 +302,7 @@ fun TasksTab(m: AppModel, bot: BotView) {
             }
         }
         if (t.runs.isNotEmpty()) item(key = "runs") {
-            Text("Recent runs", Modifier.padding(12.dp), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            Text(NativeMessages.teach_runs(lang), Modifier.padding(12.dp), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
         }
         items(t.runs, key = { "r:" + it.run }) { r ->
             Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -305,7 +311,7 @@ fun TasksTab(m: AppModel, bot: BotView) {
                         Text(r.slug, fontWeight = FontWeight.SemiBold)
                         if (r.summary.isNotEmpty()) Text(r.summary, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
                     }
-                    Text(r.status, style = MaterialTheme.typography.labelMedium, color = statusColor(r.status))
+                    Text(NativeMessages.native_task_state(lang, r.status), style = MaterialTheme.typography.labelMedium, color = statusColor(r.status))
                 }
                 if (r.shots.isNotEmpty()) LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     items(r.shots) { s -> HubPicture(m, s, Modifier.width(120.dp), ContentScale.FillWidth) }

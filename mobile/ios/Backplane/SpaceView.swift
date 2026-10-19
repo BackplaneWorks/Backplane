@@ -197,6 +197,7 @@ private struct SpaceTable: View {
 }
 
 private struct SpaceInput: View {
+    @Environment(\.backplaneLanguage) private var lang
     let block: SpaceBlock
     let act: (String, String) -> Void
     @State private var text = ""
@@ -211,7 +212,7 @@ private struct SpaceInput: View {
                     .textFieldStyle(.roundedBorder)
                     .submitLabel(.send)
                     .onSubmit(send)
-                Button("Send", action: send)
+                Button(NativeMessages.composer_send(lang), action: send)
                     .buttonStyle(.bordered)
                     .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }

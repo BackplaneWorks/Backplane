@@ -796,7 +796,7 @@ def Box.order_got(r: Map<&2, Order> & Order) -> Order:
   v
 
 def Box.order_of(+b: Box, +bot: String) -> Order:
-  Box.order_got(Map.get(Order, OEmpty{}, Box.order(b), Bool.pick(String, String.starts_with(bot, "thread:"), "*", bot)))
+  Box.order_got(Map.get(Order, OEmpty{}, Box.order(b), bot))
 
 def Box.unread(+b: Box, +bot: String) -> Nat:
   Get.nat(Box.counts(b), bot)
@@ -857,10 +857,18 @@ def Box.part(+yes: Bool, +b: Box, +part: String, +c: Conv) -> Box:
       Box.part_mark(String.is_empty(Mark.bot(Box.mark_of(b, bot, Conv.id(c)))),
         Box.with_order(b, Map.set(&2, Order, Box.order(b), bot, Order.put(Box.order_of(b, bot), Conv.last(c), Conv.id(c)))), bot, Conv.id(c))
 
+# ---- mail perf: primary scope orders ----
+# Threads get their own primary order, without bot marks or counters.
+def Box.thread_part(yes: Bool, +b: Box, +part: String, +c: Conv) -> Box:
+  match yes:
+    case False{}: b
+    case True{}:
+      Box.with_order(b, Map.set(&2, Order, Box.order(b), part, Order.put(Box.order_of(b, part), Conv.last(c), Conv.id(c))))
+
 def Box.parts(+parts: List<&2, String>, +b: Box, +c: Conv) -> Box:
   match parts:
     case Nil{}: b
-    case +h <> t: Box.parts(t, Box.part(String.starts_with(h, "bot:"),b,h, c), c)
+    case +h <> t: Box.parts(t, Box.thread_part(String.starts_with(h, "thread:"), Box.part(String.starts_with(h, "bot:"), b, h, c), h, c), c)
 
 def Box.unpart_mark(+removed: Bool, +b: Box, +bot: String, +id: String) -> Box:
   match removed:
@@ -876,14 +884,25 @@ def Box.unpart(+yes: Bool, +b: Box, +part: String, +old: Conv, +parts: List<&2, 
       Box.unpart_mark(Bool.not(Parts.has(parts, part, False{})),
         Box.with_order(b, Map.set(&2, Order, Box.order(b), bot, Order.drop(Box.order_of(b, bot), Conv.last(old), Conv.id(old)))), bot, Conv.id(old))
 
+def Box.thread_unpart(yes: Bool, +b: Box, +part: String, +old: Conv) -> Box:
+  match yes:
+    case False{}: b
+    case True{}:
+      Box.with_order(b, Map.set(&2, Order, Box.order(b), part, Order.drop(Box.order_of(b, part), Conv.last(old), Conv.id(old))))
+
 def Box.unparts(+xs: List<&2, String>, +b: Box, +old: Conv, +parts: List<&2, String>) -> Box:
   match xs:
     case Nil{}: b
-    case +h <> t: Box.unparts(t, Box.unpart(String.starts_with(h, "bot:"),b,h,old, parts),old, parts)
+    case +h <> t: Box.unparts(t, Box.thread_unpart(String.starts_with(h, "thread:"), Box.unpart(String.starts_with(h, "bot:"), b, h, old, parts), h, old), old, parts)
+
+# The existing AVL stores its subtree count. One global entry per
+# conversation gives rank pages and exact unfiltered totals directly.
+def Box.global(+b: Box, +old: Conv, +c: Conv) -> Box:
+  Box.with_order(b, Map.set(&2, Order, Box.order(b), "*", Order.put(Order.drop(Box.order_of(b, "*"), Conv.last(old), Conv.id(old)), Conv.last(c), Conv.id(c))))
 
 def Box.conv_put(+b: Box, +c: Conv) -> Box:
   +old = Box.conv(b, Conv.id(c))
-  Box.parts(Conv.parts(c), Box.with_convs(Box.unparts(Conv.parts(old), b, old, Conv.parts(c)), Map.set(&2, Conv, Box.convs(b), Conv.id(c), c)), c)
+  Box.global(Box.parts(Conv.parts(c), Box.with_convs(Box.unparts(Conv.parts(old), b, old, Conv.parts(c)), Map.set(&2, Conv, Box.convs(b), Conv.id(c), c)), c), old, c)
 
 def Box.conv_set(+b: Box, +id: String, +subject: String, +kind: String, +parts: List<&2, String>, +project: String, +tags: List<&2, String>, +at: Nat) -> Box:
   +old = Box.conv(b, id)
@@ -1078,7 +1097,15 @@ def Box.list_k(+plain: Bool, +b: Box, +bot: String, +status: String, +project: S
       Box.query(1n+Nat.mul(3n, Order.count(tree)), MQuery{[tree], skip, n, Nil{}}, b, bot, status, project, "")
 
 def Box.list(+b: Box, +bot: String, +status: String, +project: String, +skip: Nat, +n: Nat) -> List<&2, Conv>:
-  Box.list_k(Bool.and(Bool.not(String.starts_with(bot, "thread:")), Bool.and(String.is_empty(status), String.is_empty(project))), b, bot, status, project, skip, n)
+  Box.list_k(Bool.and(String.is_empty(status), String.is_empty(project)), b, bot, status, project, skip, n)
+
+def Box.count_k(plain: Bool, +b: Box, +bot: String, status: String, project: String) -> Nat:
+  match plain:
+    case True{}: Order.count(Box.order_of(b, bot))
+    case False{}: List.length(&2, Conv, Box.list(b, bot, status, project, 0n, Order.count(Box.order_of(b, bot))))
+
+def Box.count(+b: Box, bot: String, +status: String, +project: String) -> Nat:
+  Box.count_k(Bool.and(String.is_empty(status), String.is_empty(project)), b, bot, status, project)
 
 def Box.find(+b: Box, +bot: String, +q: String, +n: Nat) -> List<&2, Conv>:
   +tree = Box.order_of(b, bot)

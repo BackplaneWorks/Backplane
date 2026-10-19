@@ -5,7 +5,7 @@
 //
 //   bun test/tools/perf_load.ts [--bin build/backplane] [--log ~/.backplane-bend/events.jsonl]
 //     [--port 3799] [--display :77] [--xvfb PATH] [--agents 10] [--secs 20]
-//     [--phases normal,idle,bg,fg,type,open,plane] [--out results.json] [--keep] [--shots DIR] [--hold]
+//     [--phases normal,idle,bg,fg,type,open,plane,mail] [--out results.json] [--keep] [--shots DIR] [--hold]
 //
 // See docs/perf-bench.md. Nothing here touches the live home: the log is
 // copied (devices, hooks, peers, routines, push and deploy settings stripped,
@@ -13,15 +13,15 @@
 // app runs with HOME, its lock dir and deploy locks in a temp folder, a
 // stand-in `claude` first on PATH, and only the PIDs started here are
 // stopped.
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync, openSync, readSync, closeSync, statSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync, openSync, readSync, closeSync, statSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { standinScript as claude } from "./perf_standin";
 import { completeOpens, FixtureBots, streamWindow } from "./perf_guard";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 const argv = process.argv.slice(2);
 if (argv.includes("--help")) {
-  console.log("bun test/tools/perf_load.ts --bin BUILD --log SNAPSHOT [--agents 10] [--secs 20] [--phases normal,idle,bg,fg,type,open,plane] [--out results.json] [--shots DIR] [--fail-on-target] [--keep]");
+  console.log("bun test/tools/perf_load.ts --bin BUILD --log SNAPSHOT [--agents 10] [--secs 20] [--phases normal,idle,bg,fg,type,open,plane,mail] [--out results.json] [--shots DIR] [--fail-on-target] [--keep]");
   process.exit(0);
 }
 const opt = (name: string, d: string) => {
@@ -33,7 +33,9 @@ const opt = (name: string, d: string) => {
 const here = resolve(import.meta.dir, "../..");
 const bin = resolve(opt("bin", join(here, "build/backplane")));
 const liveHome = join(homedir(), ".backplane-bend");
-const logSrc = resolve(opt("log", join(liveHome, "events.jsonl")));
+const mailReuseHome = opt("mail-reuse-home", "");
+if (mailReuseHome && (!resolve(mailReuseHome).startsWith(join(tmpdir(), "bp-perfload-")) || !existsSync(join(mailReuseHome, "mail")))) throw new Error("--mail-reuse-home requires a retained isolated perf-load home with mail bodies");
+const logSrc = resolve(opt("log", mailReuseHome ? join(mailReuseHome, "events.jsonl") : join(liveHome, "events.jsonl")));
 const port = Number(opt("port", "3799"));
 const display = opt("display", ":77");
 const nAgents = Number(opt("agents", "10"));
@@ -52,7 +54,7 @@ const say = (s: string) => console.error(`[perf_load] ${s}`);
 if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error("--port must be 1024..65535");
 if (!Number.isInteger(nAgents) || nAgents < 1 || nAgents > 26) throw new Error("--agents must be 1..26");
 if (!Number.isFinite(secs) || secs <= 0) throw new Error("--secs must be positive");
-const knownPhases = ["normal", "idle", "bg", "fg", "type", "open", "plane"];
+const knownPhases = ["normal", "idle", "bg", "fg", "type", "open", "plane", "mail"];
 if (phasesWanted.some((p) => !knownPhases.includes(p))) throw new Error("unknown --phases value");
 if (port === 3787) throw new Error("3787 is the live hub's port");
 if (!existsSync(bin)) throw new Error(`no binary at ${bin}`);
@@ -70,7 +72,7 @@ const home = join(root, "home");
 const user = join(root, "user");
 const fake = join(root, "bin");
 const locks = join(root, "locks");
-const proj = join(root, "proj");
+const proj = join(root, mailReuseHome ? "ui-replay-project" : "proj");
 for (const d of [home, user, fake, locks, proj]) mkdirSync(d, { recursive: true });
 if (shots) mkdirSync(shots, { recursive: true });
 const trace = join(root, "trace.json");
@@ -99,6 +101,7 @@ const kept: string[] = [];
 let dropped = 0;
 const openTasks = new Set<string>();
 const botIds = new Set<string>();
+const mailFixtureByName = new Map<string, { id: string; thread: string }>();
 const raw = readFileSync(logSrc, "utf8");
 const logSha256 = new Bun.CryptoHasher("sha256").update(raw).digest("hex");
 for (const line of raw.split("\n")) {
@@ -114,7 +117,8 @@ for (const line of raw.split("\n")) {
     const k = /"key":"([^"]*)"/.exec(line)?.[1] ?? "";
     if (dropSetting.test(k)) { dropped++; continue; }
   }
-  kept.push(line.split(liveHome).join(home).split(homedir() + "/").join(elsewhere + "/"));
+  const localLine = mailReuseHome ? line.split(resolve(mailReuseHome)).join(home).split(dirname(resolve(mailReuseHome))).join(root) : line;
+  kept.push(localLine.split(liveHome).join(home).split(homedir() + "/").join(elsewhere + "/"));
   if (ty === "ThreadCreated" || ty === "MessagePosted" || ty === "ThreadDeleted" || ty === "ThreadArchived" || ty === "BotSet" || ty === "BotDeleted" || ty === "ProjectRemoved" || ty === "RoomSet" || ty === "RoomDeleted" || ty === "ThreadRenamed") {
     let o: any;
     try { o = JSON.parse(line); } catch { continue; }
@@ -122,7 +126,7 @@ for (const line of raw.split("\n")) {
     else if (ty === "MessagePosted") { const t = threads.get(o.thread); if (t) t.msgs++; }
     else if (ty === "ThreadDeleted" || ty === "ThreadArchived") { const t = threads.get(o.id ?? o.thread); if (t) t.gone = true; }
     else if (ty === "ThreadRenamed") { const t = threads.get(o.id); if (t) t.title = o.title; }
-    else if (ty === "BotSet") { if (o.thread) botThreads.add(o.thread); botIds.add(o.id); }
+    else if (ty === "BotSet") { if (o.name?.startsWith("Mailperf")) mailFixtureByName.set(o.name, { id: o.id, thread: o.thread }); if (o.thread) botThreads.add(o.thread); botIds.add(o.id); }
     else if (ty === "ProjectRemoved") removedProjects.add(o.id);
     else if (ty === "RoomSet") roomById.set(o.id, { id: o.id, name: o.name, members: o.members ?? "" });
     else if (ty === "RoomDeleted") roomById.delete(o.id);
@@ -136,9 +140,17 @@ const longT = real[0];
 if (!longT) throw new Error("--log has no available non-bot thread for the load scenario");
 const openTs = real.slice(1, 11);
 if (phasesWanted.includes("open") && openTs.length !== 10) throw new Error("--log needs eleven available non-bot threads for ten verified opens");
+// A reused fixture already contains the prior driver's load-thread titles.
+// Rename those only in the new test copy so palette selection is unambiguous.
+if (mailReuseHome) for (const t of threads.values()) {
+  if (/^zqrun[a-z] stream$/.test(t.title)) kept.push(JSON.stringify({ $: "ThreadRenamed", id: t.id, title: `retained load ${t.id}`, at: now }));
+}
 // unique titles the palette (ctrl+k) finds them by
 kept.push(JSON.stringify({ $: "ThreadRenamed", id: longT.id, title: "zqlong thread", at: now }));
 openTs.forEach((t, i) => kept.push(JSON.stringify({ $: "ThreadRenamed", id: t.id, title: `zqopen${String.fromCharCode(97 + i)} thread`, at: now })));
+// A synthetic log need not have completed onboarding. The load harness
+// drives the product, not the modal first-run tour.
+kept.push(JSON.stringify({ $: "SettingSet", key: "onboard.done", value: "1", at: now }));
 for (const k of openTasks) if (k) {
   kept.push(JSON.stringify({ $: "TaskStateSet", task: k, state: "cancelled", summary: "", at: now }));
   kept.push(JSON.stringify({ $: "TaskDelivered", task: k, at: now }));
@@ -153,6 +165,7 @@ for (const t of threads.values()) {
   if (turns.get(t.id) === "running") kept.push(JSON.stringify({ $: "TurnChanged", thread: t.id, state: "interrupted", at: now }));
 }
 writeFileSync(join(home, "events.jsonl"), kept.join("\n") + "\n");
+if (mailReuseHome) cpSync(join(mailReuseHome, "mail"), join(home, "mail"), { recursive: true });
 // a bot's turns run in its home folder (<home>/bots/<id>): there, empty
 for (const b of botIds) mkdirSync(join(home, "bots", b), { recursive: true });
 const since = kept.length;
@@ -238,6 +251,7 @@ function cborDec(b: Uint8Array): any {
 const ownPids: { pid: number; what: string; kill: () => void; exited: Promise<any> }[] = [];
 let xvfbPid = 0;
 const xsock = `/tmp/.X11-unix/X${display.replace(/^:/, "").split(".")[0]}`;
+if (argv.includes("--exclusive-display") && existsSync(xsock)) throw new Error(`exclusive X display ${display} already exists; refusing to share another job's X server`);
 if (!existsSync(xsock)) {
   const xv = opt("xvfb", ["/tmp/xvfb-root/usr/bin/Xvfb", "/usr/bin/Xvfb", join(homedir(), ".local/bin/Xvfb")].find((p) => existsSync(p)) ?? "");
   if (!xv) throw new Error("no Xvfb (see docs/perf-bench.md)");
@@ -249,7 +263,7 @@ if (!existsSync(xsock)) {
 } else say(`using the X server already on ${display}`);
 
 const env: Record<string, string> = {
-  PATH: `${fake}:/usr/local/bin:/usr/bin:/bin`,
+  BACKPLANE_AGENTS: fake, PATH: `${fake}:/usr/local/bin:/usr/bin:/bin`,
   HOME: user, USER: process.env.USER ?? "h", LANG: process.env.LANG ?? "C.UTF-8",
   DISPLAY: display, WAYLAND_DISPLAY: "", DBUS_SESSION_BUS_ADDRESS: "unix:path=/nonexistent",
   BACKPLANE_TRACE: trace, BACKPLANE_NO_UPDATE: "1", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "", BACKPLANE_LOCK_DIR: locks,
@@ -319,6 +333,7 @@ let deskThreads = new Set<string>();
 const openEvidence: { title: string; thread: string; verified: boolean }[] = [];
 const traffic = (): Record<string, number> => Object.fromEntries(deltas);
 const replies = new Map<number, any>();
+const replyWaiters = new Map<number, (reply: any) => void>();
 let wsMsgs = 0, wsBytes = 0;
 const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?since=${since}`);
 ws.binaryType = "arraybuffer";
@@ -334,7 +349,12 @@ ws.onmessage = (e) => {
     times.push(performance.now()); deltaTimes.set(o.thread, times);
   }
   if (o.t === "info" && typeof o.info?.desk === "string") deskThreads = new Set(o.info.desk.split("\n").filter(Boolean));
-  if (o.t === "reply") replies.set(Number(o.id), o);
+  if (o.t === "reply") {
+    const id = Number(o.id);
+    replies.set(id, o);
+    replyWaiters.get(id)?.(o);
+    replyWaiters.delete(id);
+  }
   for (const c of Array.isArray(o.items) ? o.items : []) {
     if (typeof c === "string") { try { items.push(JSON.parse(c)); } catch {} } else items.push(c);
   }
@@ -357,10 +377,21 @@ const until = async <T>(ms: number, f: () => T | undefined) => {
     await sleep(50);
   }
 };
-// what the hub logged since we started, read from the copy (the source of truth)
+// Read only the appended suffix. Polling must not split the retained 62 MB
+// fixture repeatedly while waiting for a test-created event.
+const logStartByte = statSync(join(home, "events.jsonl")).size;
 const logged = () => {
-  const s = readFileSync(join(home, "events.jsonl"), "utf8").split("\n").slice(since);
-  return s.filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+  const path = join(home, "events.jsonl");
+  const size = statSync(path).size;
+  if (size < logStartByte) throw new Error("test event log unexpectedly truncated");
+  const fd = openSync(path, "r");
+  let text: string;
+  try {
+    const suffix = Buffer.alloc(size - logStartByte);
+    const n = readSync(fd, suffix, 0, suffix.length, logStartByte);
+    text = suffix.subarray(0, n).toString("utf8");
+  } finally { closeSync(fd); }
+  return text.split("\n").filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
 };
 send("project.add", { path: proj });
 const pc = await until(20000, () => logged().find((c: any) => c.$ === "ProjectCreated" && c.root === proj) ?? logged().find((c: any) => c.$ === "ProjectCreated"));
@@ -373,6 +404,49 @@ const ours = await until(30000, () => {
 if (!ours) { await cleanup(); throw new Error("threads not created"); }
 // a project made afresh starts with a thread of its own: ours are the zqrun ones
 say(`project ${pc.id}, ${ours.length} threads`);
+
+// Mailroom phase. No direct ConvSet/MailPosted fixtures: every seeded
+// body goes through the real mail.on filing path, and both list and read
+// RPCs must prove the expected data exists before native timing starts.
+const mailBots: string[] = [];
+const mailConvs = Number(opt("mail-convs", "5000"));
+const mailMails = Number(opt("mail-mails", "50000"));
+if (!Number.isInteger(mailConvs) || mailConvs < 10 || !Number.isInteger(mailMails) || mailMails < mailConvs) throw new Error("mail fixture needs >=10 conversations and >=1 mail each");
+async function rpc(m: string, p: object) {
+  const id = send(m, p);
+  const r: any = replies.get(id) ?? await new Promise((resolve) => {
+    const timer = setTimeout(() => { replyWaiters.delete(id); resolve(undefined); }, 60000);
+    replyWaiters.set(id, (reply) => { clearTimeout(timer); resolve(reply); });
+  });
+  replies.delete(id);
+  if (!r || r.ok === false || r.error) throw new Error(`${m} failed: ${JSON.stringify(r)}`);
+  return r.result;
+}
+async function seedMail() {
+  if (!phasesWanted.includes("mail")) return;
+  await rpc("setting.set", { key: "mail.on", value: "on" });
+  for (let i = 0; i < 6; i++) {
+    if (!mailReuseHome) await rpc("bots.create", { name: `Mailperf${i}`, provider: "claude", model: "", persona: "", uber: i === 0 });
+    const b = mailReuseHome ? mailFixtureByName.get(`Mailperf${i}`) : await until(10000, () => items.find((x) => x.$ === "BotSet" && x.name === `Mailperf${i}`));
+    if (!b) throw new Error(`mail bot ${i} not filed`);
+    mailBots.push(b.id); botById.set(b.id, b.thread); botThreads.add(b.thread);
+  }
+  await rpc("bots.uber", { bot: mailBots[0] });
+  fixtureBots.uber = mailBots[0];
+  for (let i = 0; !mailReuseHome && i < mailMails; i += 32) {
+    await Promise.all(Array.from({ length: Math.min(32, mailMails - i) }, (_, k) => {
+      const j = i + k, c = j % mailConvs;
+      return rpc("mail.send", { to: `bot:${mailBots[c % 6]}`, conv: `perf-mail-${String(c).padStart(5, "0")}`, subject: `${c >= mailConvs - 10 ? "needle" : "Mail"} conversation ${c}`, text: `Filed body ${j}: inspect the board and report the result.`, want: "fyi" });
+    }));
+    if (i % 3200 === 0) say(`mail filing ${i}/${mailMails}`);
+  }
+  const pages = await Promise.all(mailBots.map((bot) => rpc("mail.list", { bot, n: 10 })));
+  const count = pages.reduce((n, page) => n + Number(page?.total ?? 0), 0);
+  if (count < mailConvs) throw new Error(`mail fixture incomplete: ${count}/${mailConvs}`);
+  const read = await rpc("mail.read", { conv: `perf-mail-${String(mailConvs - 1).padStart(5, "0")}`, n: 50 });
+  if (!read?.mails?.length) throw new Error("mail bodies missing after filing");
+  say(`mail fixture ${mailReuseHome ? "reused from retained filing" : "filed"}: ${mailConvs} conversations, ${mailMails} bodies, six bots`);
+}
 
 // Window driving
 // --------------
@@ -424,7 +498,7 @@ const upMs = async () => (await reading()).up;
 let rssMax = 0;
 const rssTimer = setInterval(() => { rssMax = Math.max(rssMax, rssKb()); }, 500);
 
-type Phase = { name: string; what: string; a: Reading; b: Reading; rssMax: number; trafficBefore: Record<string, number>; trafficAfter: Record<string, number>; streamStart: number; streamEnd: number; marks?: [number, number][]; notes?: string[] };
+type Phase = { name: string; what: string; a: Reading; b: Reading; rssMax: number; trafficBefore: Record<string, number>; trafficAfter: Record<string, number>; streamStart: number; streamEnd: number; marks?: [number, number][]; notes?: string[]; mailReads?: number[]; mailTraffic?: number; mailSeed?: object };
 const phases: Phase[] = [];
 async function phase(name: string, what: string, body: (p: Phase) => Promise<void>) {
   if (!phasesWanted.includes(name)) return;
@@ -493,6 +567,7 @@ if (argv.includes("--hold")) {
 
 // window settles on the long thread
 await sleep(2000);
+await seedMail();
 await poke("size", String(W), String(H));
 await poke("focus");
 await sleep(500);
@@ -533,6 +608,59 @@ await phase("plane", "streaming; the uberbot's Status plane on screen, wheel ove
   if (!ok) p.notes!.push("Status plane not reached");
   for (let i = 0; i < 6; i++) { await poke("wheel", String(MAINX), String(MIDY), i % 2 ? "up" : "down"); await sleep(400); }
   await sleep(secs * 1000 / 2);
+});
+
+await phase("mail", `All mail: filed ${mailConvs} conversations/${mailMails} mails, 40 wheels, six search keys, ten conversations; target 2 mails/s behind FOH chat`, async (p) => {
+  p.mailSeed = { conversations: mailConvs, mails: mailMails, bots: mailBots.length, through_filing: true, reused_home: mailReuseHome || null };
+  p.mailReads = [];
+  await poke("click", "130", "74");
+  await sleep(800);
+  const expectedBotThread = botById.get(fixtureBots.uber);
+  if (!expectedBotThread || !await until(3000, () => deskThreads.has(expectedBotThread))) throw new Error("Mailroom bot selection was not observed");
+  await poke("click", "400", "62"); // explicit Mailroom, including old sidebar defaults
+  await sleep(800);
+  if (shots) {
+    const sh = Bun.spawn(["import", "-display", display, "-window", "root", join(shots, "mail-list.png")]);
+    if (await sh.exited !== 0) throw new Error("Mailroom screenshot failed");
+  }
+  for (let i = 0; i < 40; i++) { await poke("wheel", "400", "600", "down"); await sleep(80); }
+  await poke("click", "410", opt("mail-search-y", "222"));
+  for (const c of "needle") { await poke("type", c); await sleep(125); }
+  await sleep(1000);
+  if (shots) {
+    const sh = Bun.spawn(["import", "-display", display, "-window", "root", join(shots, "mail-search.png")]);
+    if (await sh.exited !== 0) throw new Error("Mail search screenshot failed");
+  }
+  for (let i = 0; i < 10; i++) {
+    const a = (await reading()).up;
+    await poke("click", "410", String(Number(opt("mail-list-y", "325")) + i * 52));
+    // A separate real roundtrip records the body-read latency; input-to-
+    // frame marks below remain processing timings, not body presentation.
+    const t = performance.now();
+    await rpc("mail.read", { conv: `perf-mail-${String(mailConvs - 1 - i).padStart(5, "0")}`, n: 50 });
+    p.mailReads.push(performance.now() - t);
+    await sleep(250);
+    if (shots) {
+      const sh = Bun.spawn(["import", "-display", display, "-window", "root", join(shots, `mail-conversation-${i}.png`)]);
+      if (await sh.exited !== 0) throw new Error("Mail conversation screenshot failed");
+    }
+    p.marks!.push([a, (await reading()).up]);
+  }
+  // Click Chat (third tab after Mailroom/Status) while mailing continues.
+  await poke("click", "556", "62");
+  p.mailTraffic = 0;
+  const end = Date.now() + Math.max(5, secs) * 1000;
+  while (Date.now() < end) {
+    const j = p.mailTraffic++;
+    const started = performance.now();
+    await rpc("mail.send", { to: `bot:${mailBots[j % 6]}`, conv: `perf-mail-${String(j % mailConvs).padStart(5, "0")}`, text: `Live mail ${j}`, want: j % 2 ? "act" : "fyi" });
+    await sleep(Math.max(0, 500 - (performance.now() - started)));
+  }
+  if (shots) {
+    const sh = Bun.spawn(["import", "-display", display, "-window", "root", join(shots, "mail-foh.png")]);
+    if (await sh.exited !== 0) throw new Error("Mail FOH screenshot failed");
+  }
+  p.notes!.push("Mailroom tab and FOH click positions require screenshot review; body RPC roundtrips are reported separately from native input-to-frame samples.");
 });
 
 await phase("normal", "normal use, all at once: agents + subagents + bots streaming; a streaming thread with Subagents (typing, scrolling), the long thread scrolled, the Status plane", async (p) => {
@@ -583,8 +711,8 @@ const stat = (es: Ev[], name: string | RegExp): Sum => {
   return { n: d.length, p50: pctOf(d, 50), p99: pctOf(d, 99), max: d.length ? Math.max(...d) : NaN, sum: d.reduce((a, b) => a + b, 0), over8: d.filter((x) => x > 8).length, over16: d.filter((x) => x > 16).length };
 };
 const f1 = (x: number) => (Number.isFinite(x) ? (x >= 100 ? x.toFixed(0) : x.toFixed(1)) : "-");
-const results: any = { bin, log: logSrc, log_sha256: logSha256, log_bytes: Buffer.byteLength(raw), port, agents: nAgents, secs, rooms: botRooms.length, home: keep ? home : "", phases: [] as any[] };
-const order = ["normal", "idle", "bg", "fg", "type", "open", "plane"];
+const results: any = { bin, mail_reuse_home: mailReuseHome || null, log: logSrc, log_sha256: logSha256, log_bytes: Buffer.byteLength(raw), port, agents: nAgents, secs, rooms: botRooms.length, home: keep ? home : "", phases: [] as any[] };
+const order = ["normal", "idle", "bg", "fg", "type", "open", "plane", "mail"];
 const rows: string[] = [];
 const verdicts: string[] = [];
 for (const name of order) {
@@ -593,7 +721,7 @@ for (const name of order) {
   const es = inWin(p.a.up, p.b.up);
   const wallS = (p.b.wall - p.a.wall) / 1000;
   const cpu = ((p.b.cpu - p.a.cpu) * 10) / (p.b.wall - p.a.wall) * 100;
-  const names = ["ui.frame", "ui.memo", "ui.layout", "ui.raster", "ui.present", "ui.msg.blink", "ui.msg.hub", "ui.input", "ui.hub", "hub.agent_line", "hub.mcp", "hub.rpc"];
+  const names = ["ui.frame", "ui.memo", "ui.layout", "ui.raster", "ui.present", "ui.layout.mm.hit", "ui.layout.mm.miss", "ui.mail.body.hit", "ui.msg.blink", "ui.msg.hub", "ui.input", "ui.hub", "hub.agent_line", "hub.mcp", "hub.rpc"];
   const st: Record<string, Sum> = {};
   for (const n of names) st[n] = stat(es, n);
   st["hub.*"] = stat(es, /^hub\./);
@@ -626,7 +754,8 @@ for (const name of order) {
   const streamWindows = Object.fromEntries(ours.map((t: any) => [t.id, streamWindow(deltaTimes.get(t.id) ?? [], p.streamStart, p.streamEnd)]));
   const checks: [string, boolean | null][] = [
     ...(name !== "idle" ? [["all agents streaming", Object.values(streamWindows).every((w) => w.sustained)] as [string, boolean | null]] : []),
-    ...(name === "open" ? [["all ten opens sampled", completeOpens(opens, 10)] as [string, boolean | null]] : []),
+    ...(["open", "mail"].includes(name) ? [["all ten opens sampled", completeOpens(opens, 10)] as [string, boolean | null]] : []),
+    ...(name === "mail" ? [["Mailroom and ten conversation selections visually verified", null] as [string, boolean | null]] : []),
     ...(["normal", "plane"].includes(name) ? [["Status tab observed", null] as [string, boolean | null]] : []),
     ["frame p99<=8ms", fr.n ? fr.p99 <= 8 : null],
     ...(["bg", "idle"].includes(name) ? [["no frame>16ms", fr.n ? fr.over16 === 0 : null] as [string, boolean | null]] : []),
@@ -647,7 +776,12 @@ for (const name of order) {
     `${String(al.n).padStart(6)} ${f1(al.p50).padStart(4)}/${f1(al.p99).padStart(5)}/${f1(al.max).padStart(5)} ${f1(st["hub.mcp"].p99).padStart(5)} ` +
     `${f1(hubBusy).padStart(5)} ${f1(cpu).padStart(5)} ${String(Math.round(p.rssMax / 1024)).padStart(5)}`,
   );
-  results.phases.push({ name, what: p.what, wall_s: wallS, cpu_pct: cpu, rss_max_mb: p.rssMax / 1024, hub_busy_pct: hubBusy, opens_ms: opens, key_to_frame: key, notes: p.notes, streaming_deltas: streamingCounts, stream_windows: streamWindows, stats: st, top, checks: Object.fromEntries(checks), perf_json_before: Object.fromEntries(p.a.rows), perf_json_after: Object.fromEntries(p.b.rows) });
+  // This is a value counter (ph:C), not a timed span. Keep it separate
+  // from stats so an empty span sample cannot conceal actual body reuse.
+  const mailHitBefore = p.a.rows.get("ui.mail.body.hit");
+  const mailHitAfter = p.b.rows.get("ui.mail.body.hit");
+  const mailBodyCache = { frames: (mailHitAfter?.n ?? 0) - (mailHitBefore?.n ?? 0), hits: (mailHitAfter?.sum ?? 0) - (mailHitBefore?.sum ?? 0) };
+  results.phases.push({ name, mail_body_cache: mailBodyCache, mail_seed: p.mailSeed, mail_read_rpc_ms: p.mailReads, mail_streamed: p.mailTraffic, what: p.what, wall_s: wallS, cpu_pct: cpu, rss_max_mb: p.rssMax / 1024, hub_busy_pct: hubBusy, opens_ms: opens, key_to_frame: key, notes: p.notes, streaming_deltas: streamingCounts, stream_windows: streamWindows, stats: st, top, checks: Object.fromEntries(checks), perf_json_before: Object.fromEntries(p.a.rows), perf_json_after: Object.fromEntries(p.b.rows) });
 }
 console.log(`\nperf_load: ${bin}\n  log ${logSrc} (${kept.length} lines; sha256 ${logSha256}), ${nAgents} agents, ${botRooms.length} bot rooms, ${secs} s phases, port ${port}, display ${display}`);
 console.log(`  ms; frame = ui.frame n p50/p99/max >8/>16; input = ui.input; key>frame = ui.msg.win + ui.input; open = the slowest thread open, Return to frame; line = hub.agent_line n p50/p99/max; hub% = hub.* span time / wall; cpu% = whole app process`);

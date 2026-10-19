@@ -38,13 +38,13 @@ fun QrCode(rows: List<String>, modifier: Modifier = Modifier) {
 // The camera reading a pairing code: Google Play services' scanner (no
 // camera permission of our own); the code goes to found when it is a link
 // Pairing understands
-fun scanPairing(ctx: Context, found: (String) -> Unit) {
+fun scanPairing(ctx: Context, tag: String, found: (String) -> Unit) {
     val opts = GmsBarcodeScannerOptions.Builder().setBarcodeFormats(Barcode.FORMAT_QR_CODE).build()
     GmsBarcodeScanning.getClient(ctx, opts).startScan()
         .addOnSuccessListener { b ->
             val s = b.rawValue.orEmpty()
             if (Pairing.key(s) != null) found(s)
-            else Toast.makeText(ctx, "Not a Backplane pairing code", Toast.LENGTH_SHORT).show()
+            else Toast.makeText(ctx, NativeMessages.native_pair_scanner_invalid(tag), Toast.LENGTH_SHORT).show()
         }
-        .addOnFailureListener { Toast.makeText(ctx, "The scanner needs Google Play services: paste the link instead", Toast.LENGTH_LONG).show() }
+        .addOnFailureListener { Toast.makeText(ctx, NativeMessages.native_pair_scanner_unavailable(tag), Toast.LENGTH_LONG).show() }
 }

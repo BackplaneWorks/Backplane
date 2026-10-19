@@ -5,6 +5,7 @@ import SwiftUI
 // own MarkdownView; its tables scroll sideways), or what to say while
 // there is none. Refresh sits at the bottom, under the thumb.
 struct ReviewScreen: View {
+    @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let viewer: Viewer
     let page: ReviewPage
@@ -53,7 +54,7 @@ struct ReviewScreen: View {
             if page.release == nil {
                 Divider()
                 Button { model.act("rv-run", "") } label: {
-                    Label("Refresh", systemImage: "arrow.clockwise").frame(maxWidth: .infinity)
+                    Label(NativeMessages.common_refresh(lang), systemImage: "arrow.clockwise").frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(page.busy)
@@ -68,6 +69,7 @@ struct ReviewScreen: View {
 // pushes the tag and makes a GitHub release), and the button. The tag goes
 // to Bend as the field "rltag" while it is typed.
 struct ReleaseBox: View {
+    @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let form: ReleaseForm
     let busy: Bool
@@ -83,14 +85,14 @@ struct ReleaseBox: View {
                 .onSubmit { if !busy { model.act("rv-release", "") } }
                 .onChange(of: text) { _, t in model.field("rltag", t) }
                 .accessibilityIdentifier("release-tag")
-            Toggle("Publish on GitHub", isOn: Binding(get: { form.publish }, set: { _ in model.act("rv-release-pub", "") }))
+            Toggle(NativeMessages.review_publish(lang), isOn: Binding(get: { form.publish }, set: { _ in model.act("rv-release-pub", "") }))
                 .accessibilityIdentifier("release-pub")
-            Toggle("Release even if checks fail", isOn: Binding(get: { form.force }, set: { _ in model.act("rv-release-force", "") }))
+            Toggle(NativeMessages.review_force(lang), isOn: Binding(get: { form.force }, set: { _ in model.act("rv-release-force", "") }))
                 .accessibilityIdentifier("release-force")
             // the field is typed without a new screen, so the label follows the text here
             let tag = text.trimmingCharacters(in: .whitespaces).isEmpty ? form.tag : text.trimmingCharacters(in: .whitespaces)
             Button { model.act("rv-release", "") } label: {
-                Text("Make release " + tag).frame(maxWidth: .infinity, minHeight: 32)
+                Text(NativeMessages.review_release_make(lang, tag)).frame(maxWidth: .infinity, minHeight: 32)
             }
             .buttonStyle(.borderedProminent)
             .disabled(busy || tag.isEmpty)
@@ -111,6 +113,7 @@ struct ReleaseBox: View {
 // "rv-tick" index; the hub writes .backplane/checklist.md and answers the
 // boxes, so a toggle shows what the hub says.
 struct ChecksBoxes: View {
+    @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let checks: ReviewChecks
 
@@ -124,7 +127,7 @@ struct ChecksBoxes: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label(checks.gate.isEmpty ? "Passes" : "Fails: " + checks.gate,
+            Label(checks.gate.isEmpty ? NativeMessages.review_passes(lang) : NativeMessages.review_fails(lang, checks.gate),
                   systemImage: checks.gate.isEmpty ? "checkmark.circle.fill" : "xmark.octagon.fill")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(checks.gate.isEmpty ? Color.green : Color.red)
@@ -168,6 +171,7 @@ struct CheckBoxStyle: ToggleStyle {
 // board (and the place) in view. The text goes to Bend as the field
 // "rcnote" while it is typed; Send posts it.
 struct NoteSheet: View {
+    @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let at: String
     @State private var text = ""
@@ -176,18 +180,18 @@ struct NoteSheet: View {
     private var place: String {
         let p = at.split(separator: "\t", omittingEmptySubsequences: false)
         guard p.count >= 2, let x = Double(p[0]), let y = Double(p[1]) else { return "" }
-        return String(format: "at %.2f, %.2f mm", x, y)
+        return NativeMessages.native_review_place(lang, String(format: "%.2f", x), String(format: "%.2f", y))
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("Comment").font(.headline)
+                Text(NativeMessages.native_review_comment(lang)).font(.headline)
                 Text(place).font(.caption).foregroundStyle(.secondary)
                 Spacer()
-                Button("Cancel") { model.act("rv-note-shut", "") }
+                Button(NativeMessages.common_cancel(lang)) { model.act("rv-note-shut", "") }
             }
-            TextField("Write a note", text: $text, axis: .vertical)
+            TextField(NativeMessages.native_review_write(lang), text: $text, axis: .vertical)
                 .lineLimit(1...4)
                 .textFieldStyle(.roundedBorder)
                 .focused($focus)
@@ -195,7 +199,7 @@ struct NoteSheet: View {
                 .accessibilityIdentifier("note-field")
             Button {
                 model.act("rv-note-send", "")
-            } label: { Text("Send").frame(maxWidth: .infinity, minHeight: 32) }
+            } label: { Text(NativeMessages.composer_send(lang)).frame(maxWidth: .infinity, minHeight: 32) }
                 .buttonStyle(.borderedProminent)
                 .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 .accessibilityIdentifier("note-send")
@@ -216,6 +220,7 @@ struct NoteSheet: View {
 // Resolve or Reopen, Close. A sheet of two heights: the pin stays in view
 // at the lower one.
 struct CommentSheet: View {
+    @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let open: ReviewOpen
     @State private var text = ""
@@ -224,10 +229,10 @@ struct CommentSheet: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text(open.by).font(.headline)
-                if open.resolved { Text("Resolved").font(.caption).foregroundStyle(.green) }
+                if open.resolved { Text(NativeMessages.native_review_resolved(lang)).font(.caption).foregroundStyle(.green) }
                 Spacer()
                 Button { model.act("rv-pin", "") } label: { Image(systemName: "xmark.circle.fill").font(.title2) }
-                    .accessibilityLabel("Close")
+                    .accessibilityLabel(NativeMessages.common_close(lang))
             }
             if !open.place.isEmpty { Text(open.place).font(.caption).foregroundStyle(.secondary) }
             ScrollView {
@@ -243,12 +248,12 @@ struct CommentSheet: View {
                 }
             }
             HStack {
-                TextField("Reply", text: $text, axis: .vertical)
+                TextField(NativeMessages.review_reply(lang), text: $text, axis: .vertical)
                     .lineLimit(1...3)
                     .textFieldStyle(.roundedBorder)
                     .onChange(of: text) { _, t in model.field("rcreply", t) }
                     .accessibilityIdentifier("reply-field")
-                Button("Reply") {
+                Button(NativeMessages.review_reply(lang)) {
                     model.act("rv-reply-send", "")
                     text = ""
                 }
@@ -256,7 +261,7 @@ struct CommentSheet: View {
                 .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 .accessibilityIdentifier("reply-send")
             }
-            Button(open.resolved ? "Reopen" : "Resolve") { model.act(open.resolved ? "rv-reopen" : "rv-resolve", open.id) }
+            Button(open.resolved ? NativeMessages.review_reopen(lang) : NativeMessages.review_resolve(lang)) { model.act(open.resolved ? "rv-reopen" : "rv-resolve", open.id) }
                 .buttonStyle(.bordered)
                 .frame(minHeight: 44)
                 .accessibilityIdentifier("resolve")

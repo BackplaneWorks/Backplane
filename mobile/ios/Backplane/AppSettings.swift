@@ -7,13 +7,15 @@ enum AppTab: String, CaseIterable, Identifiable {
     case home, threads, bots, routines, settings
     var id: String { rawValue }
 
-    var title: String {
+    var title: String { title("en") }
+
+    func title(_ tag: String) -> String {
         switch self {
-        case .home: "Home"
-        case .threads: "Threads"
-        case .bots: "Bots"
-        case .routines: "Routines"
-        case .settings: "Settings"
+        case .home: NativeMessages.native_tab_home(tag)
+        case .threads: NativeMessages.tour_title_threads(tag)
+        case .bots: NativeMessages.tour_title_bots(tag)
+        case .routines: NativeMessages.bots_tab_routines(tag)
+        case .settings: NativeMessages.palette_settings(tag)
         }
     }
 

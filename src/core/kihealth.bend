@@ -14,10 +14,10 @@ type KManifest is Data:
   KManifest{fork: Bool, version: String, commit: String, api: Nat, caps: List<&2, String>, upstream: String, kversion: String}
 
 def KH.min_version() -> String:
-  "10.99.0"
+  "10.99.0-bp.4"
 
 def KH.min_api() -> Nat:
-  1n
+  2n
 
 # Parse only the numeric core, allowing the fork's -bp.N suffix. No
 # Nat.read: symbolic laws over the early precedence cases stay cheap.
@@ -41,6 +41,17 @@ def KH.part(xs: List<&2, String>, n: Nat) -> Nat:
     case _ <> t 1n+k: KH.part(t, k)
     case Nil{} _: 0n
 
+# The fork's build number: the digits after a final "-bp." (a git-describe
+# part before it is ignored: "10.99.0-unknown-bp.3" is bp.3); 0 without one.
+def KH.bp.k(hit: Bool, +l: String) -> Nat:
+  match hit:
+    case True{}: KH.num(String.drop(l, 3n), 0n)
+    case False{}: 0n
+
+def KH.bp(+v: String) -> Nat:
+  +l = Maybe.default(&2, String, List.last(&2, String, String.split(v, '-')), "")
+  KH.bp.k(String.starts_with(l, "bp."), l)
+
 def KH.version.ge(+v: String, +min: String) -> Bool:
   +a = String.split(v, '.')
   +b = String.split(min, '.')
@@ -48,8 +59,11 @@ def KH.version.ge(+v: String, +min: String) -> Bool:
   +bm = KH.part(b, 0n)
   +an = KH.part(a, 1n)
   +bn = KH.part(b, 1n)
+  +ap = KH.part(a, 2n)
+  +bpp = KH.part(b, 2n)
   Bool.or(Nat.is_gt(am, bm), Bool.and(Nat.is_eq(am, bm),
-    Bool.or(Nat.is_gt(an, bn), Bool.and(Nat.is_eq(an, bn), Nat.is_ge(KH.part(a, 2n), KH.part(b, 2n))))))
+    Bool.or(Nat.is_gt(an, bn), Bool.and(Nat.is_eq(an, bn),
+      Bool.or(Nat.is_gt(ap, bpp), Bool.and(Nat.is_eq(ap, bpp), Nat.is_ge(KH.bp(v), KH.bp(min))))))))
 
 def KH.status.age(ok: Bool) -> String:
   match ok:

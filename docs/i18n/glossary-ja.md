@@ -63,3 +63,9 @@ beside a date.
 "Turn" depends on the call site: ターン for a conversation turn, 実行 for a run.
 Open questions for the product owner: "due now" (実行時刻です assumed) and mailroom
 (メール assumed). Reviewed independently on 2026-10-16.
+
+Native viewer controls: Parts → 部品; Stand out → 強調; Live file → 現在のファイル.
+Metal is the platform API name and stays Metal. Reply counts use 返信…件.
+
+Schedule input examples (daily 09:30, every 15m, tomorrow 9am, in 2h, cron)
+remain literal parser syntax in Japanese hints. Members → メンバー.

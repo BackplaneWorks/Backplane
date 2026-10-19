@@ -1,0 +1,9 @@
+{"$": "ProjectCreated", "id": "p", "title": "Provider fallback", "root": "/tmp/fallback-example", "at": 1790180000}
+{"$": "ThreadCreated", "id": "worker", "project": "p", "title": "Example thread", "env": "local", "branch": "", "worktree": "", "provider": "codex", "model": "gpt-6.1-sol", "at": 1790180000}
+{"$": "SettingSet", "key": "agent.provider", "value": "codex", "at": 1790180000}
+{"$": "SettingSet", "key": "agent.model", "value": "gpt-6.1-sol", "at": 1790180000}
+{"$": "SettingSet", "key": "fallback.chain", "value": "claude/sonnet,codex/gpt-6.1-sol", "at": 1790180000}
+{"$": "SettingSet", "key": "fallback.on", "value": "on", "at": 1790180000}
+{"$": "SettingSet", "key": "ui.theme", "value": "dark", "at": 1790180000}
+{"$": "SettingSet", "key": "onboard.done", "value": "1", "at": 1790180000}
+{"$": "SettingSet", "key": "onboard.uber", "value": "1", "at": 1790180000}

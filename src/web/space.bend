@@ -1,4 +1,6 @@
 import Base
+import ../core/i18n.bend as I
+import ../core/msgs.bend as MSG
 import ./dom.bend as D
 import ../core/space.bend as SP
 
@@ -73,20 +75,24 @@ def WSpace.tone(+t: String) -> String:
       "sp-badge " ++ t
 
 # an input line: Enter in the field or the Send button sends it
-def WSpace.input(+id: String, +k: String, +l: String, +a: String, +p: String) -> D.Node:
+def WSpace.input.loc(+lc: I.Loc, +id: String, +k: String, +l: String, +a: String, +p: String) -> D.Node:
   D.El{"div", "sp-in:" ++ a, [D.At{"class", "sp-input"}], D.Dom.cat(WSpace.label(l), [
     D.El{"div", "", [D.At{"class", "sp-input-line"}], [
       D.El{"input", "sp-in:" ++ a, [D.At{"id", id}, D.At{"class", "sp-field"}, D.At{"placeholder", p}, D.At{"autocomplete", "off"},
         D.At{"data-enter", "space-input"}, D.At{"data-space", k}, D.At{"data-field", id}], Nil{}},
-      D.El{"button", "", [D.At{"class", "sp-send"}, D.At{"title", a}, D.At{"data-space", k}, D.At{"data-field", id}, D.On{"click", "space-input"}], [D.Txt{"Send"}]}]}])}
+      D.El{"button", "", [D.At{"class", "sp-send"}, D.At{"title", a}, D.At{"data-space", k}, D.At{"data-field", id}, D.On{"click", "space-input"}], [D.Txt{MSG.T.composer.send(lc)}]}]}])}
 
 # one block; `id` names its input field, if it has one
-def WSpace.block(b: SP.Block, +bot: String, +id: String) -> D.Node:
+
+def WSpace.input(+id: String, +k: String, +l: String, +a: String, +p: String) -> D.Node:
+  WSpace.input.loc(I.En{}, id, k, l, a, p)
+
+def WSpace.block.loc(+lc: I.Loc, b: SP.Block, +bot: String, +id: String) -> D.Node:
   match b:
     case SP.BHeading{s}:
       WSpace.txt("h3", "sp-heading", s)
     case SP.BText{s}:
-      WSpace.el("div", "sp-text body", D.Md.render(s))
+      WSpace.el("div", "sp-text body", D.Md.render.loc(lc, s))
     case SP.BStat{l, v, +h}:
       WSpace.el("div", "sp-stat", D.Dom.cat([WSpace.txt("span", "sp-stat-label", l), WSpace.txt("span", "sp-stat-value", v)], WSpace.hint(h)))
     case SP.BProgress{l, +p}:
@@ -102,7 +108,7 @@ def WSpace.block(b: SP.Block, +bot: String, +id: String) -> D.Node:
     case SP.BButton{l, +a}:
       D.Dom.button("sp-button", "space", WSpace.key(bot, a), a, l)
     case SP.BInput{+l, +a, +p}:
-      WSpace.input(id, WSpace.key(bot, a), l, a, p)
+      WSpace.input.loc(lc, id, WSpace.key(bot, a), l, a, p)
     case SP.BDivider{}:
       D.El{"hr", "", [D.At{"class", "sp-divider"}], Nil{}}
     case SP.BBadge{s, +t}:
@@ -112,27 +118,40 @@ def WSpace.block(b: SP.Block, +bot: String, +id: String) -> D.Node:
     case SP.BRow{_}:
       WSpace.el("div", "sp-row", Nil{})
 
-def WSpace.kids(bs: List<&2, SP.Block>, +bot: String, +pre: String, +i: Nat) -> List<&2, D.Node>:
+def WSpace.block(b: SP.Block, +bot: String, +id: String) -> D.Node:
+  WSpace.block.loc(I.En{}, b, bot, id)
+
+def WSpace.kids.loc(+lc: I.Loc, bs: List<&2, SP.Block>, +bot: String, +pre: String, +i: Nat) -> List<&2, D.Node>:
   match bs:
     case Nil{}:
       Nil{}
     case b <> t:
-      WSpace.block(b, bot, pre ++ Nat.show(i)) <> WSpace.kids(t, bot, pre, 1n+i)
+      WSpace.block.loc(lc, b, bot, pre ++ Nat.show(i)) <> WSpace.kids.loc(lc, t, bot, pre, 1n+i)
 
 # a row: its blocks side by side (never a row: Space.parse keeps one level)
-def WSpace.top(b: SP.Block, +bot: String, +id: String) -> D.Node:
+
+def WSpace.kids(bs: List<&2, SP.Block>, +bot: String, +pre: String, +i: Nat) -> List<&2, D.Node>:
+  WSpace.kids.loc(I.En{}, bs, bot, pre, i)
+
+def WSpace.top.loc(+lc: I.Loc, b: SP.Block, +bot: String, +id: String) -> D.Node:
   match b:
     case SP.BRow{kids}:
-      WSpace.el("div", "sp-row", WSpace.kids(kids, bot, id ++ "-", 0n))
+      WSpace.el("div", "sp-row", WSpace.kids.loc(lc, kids, bot, id ++ "-", 0n))
     case _:
-      WSpace.block(b, bot, id)
+      WSpace.block.loc(lc, b, bot, id)
 
-def WSpace.blocks(bs: List<&2, SP.Block>, +bot: String, +i: Nat) -> List<&2, D.Node>:
+def WSpace.top(b: SP.Block, +bot: String, +id: String) -> D.Node:
+  WSpace.top.loc(I.En{}, b, bot, id)
+
+def WSpace.blocks.loc(+lc: I.Loc, bs: List<&2, SP.Block>, +bot: String, +i: Nat) -> List<&2, D.Node>:
   match bs:
     case Nil{}:
       Nil{}
     case b <> t:
-      WSpace.top(b, bot, "sp-in-" ++ Nat.show(i)) <> WSpace.blocks(t, bot, 1n+i)
+      WSpace.top.loc(lc, b, bot, "sp-in-" ++ Nat.show(i)) <> WSpace.blocks.loc(lc, t, bot, 1n+i)
+
+def WSpace.blocks(bs: List<&2, SP.Block>, +bot: String, +i: Nat) -> List<&2, D.Node>:
+  WSpace.blocks.loc(I.En{}, bs, bot, i)
 
 def WSpace.title(+t: String) -> List<&2, D.Node>:
   match t:
@@ -142,7 +161,10 @@ def WSpace.title(+t: String) -> List<&2, D.Node>:
       [WSpace.txt("div", "sp-title", t)]
 
 # a bot's space
-def WSpace.view(sp: SP.Space, +bot: String) -> D.Node:
+def WSpace.view.loc(+lc: I.Loc, sp: SP.Space, +bot: String) -> D.Node:
   match sp:
     case SP.Space{+t, bs}:
-      D.El{"div", "space", [D.At{"class", "sp"}], D.Dom.cat(WSpace.title(t), WSpace.blocks(bs, bot, 0n))}
+      D.El{"div", "space", [D.At{"class", "sp"}], D.Dom.cat(WSpace.title(t), WSpace.blocks.loc(lc, bs, bot, 0n))}
+
+def WSpace.view(sp: SP.Space, +bot: String) -> D.Node:
+  WSpace.view.loc(I.En{}, sp, bot)

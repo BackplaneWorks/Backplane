@@ -122,51 +122,53 @@ fun BotCat(m: AppModel, key: String, size: Dp) {
 
 @Composable
 fun NewBotDialog(m: AppModel, f: NewBot) {
+    val lang = LocalBackplaneLanguage.current
     var name by rememberSaveable { mutableStateOf(f.name) }
     var persona by rememberSaveable { mutableStateOf(f.persona) }
     AlertDialog(
         onDismissRequest = { m.act("form-close", "@bnew") },
-        title = { Text("New bot") },
+        title = { Text(NativeMessages.bots_new(lang)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(name, { name = it; m.field("name", it) }, Modifier.fillMaxWidth(), singleLine = true,
                     label = { Text(f.hint) })
                 OutlinedTextField(persona, { persona = it; m.field("persona", it) }, Modifier.fillMaxWidth(), minLines = 3, maxLines = 8,
-                    label = { Text("Persona") })
+                    label = { Text(NativeMessages.bots_persona(lang)) })
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     for (p in f.providers) FilterChip(selected = p.provider == f.provider, onClick = { m.act("bfield", "provider$SEP${p.provider}") },
                         label = { Text(p.label) }, shape = square)
                 }
             }
         },
-        confirmButton = { TextButton(onClick = { m.act("bot-create") }, enabled = name.isNotBlank()) { Text("Create") } },
-        dismissButton = { TextButton(onClick = { m.act("form-close", "@bnew") }) { Text("Cancel") } },
+        confirmButton = { TextButton(onClick = { m.act("bot-create") }, enabled = name.isNotBlank()) { Text(NativeMessages.common_create(lang)) } },
+        dismissButton = { TextButton(onClick = { m.act("form-close", "@bnew") }) { Text(NativeMessages.common_cancel(lang)) } },
         shape = square,
     )
 }
 
 @Composable
 fun NewRoomDialog(m: AppModel, f: NewRoom) {
+    val lang = LocalBackplaneLanguage.current
     var name by rememberSaveable { mutableStateOf(f.name) }
     AlertDialog(
         onDismissRequest = { m.act("form-close", "@rnew") },
-        title = { Text("New room") },
+        title = { Text(NativeMessages.rooms_new(lang)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 OutlinedTextField(name, { name = it; m.field("rname", it) }, Modifier.fillMaxWidth(), singleLine = true,
-                    label = { Text("Name") })
-                Text("Members", Modifier.padding(top = 8.dp), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.outline)
+                    label = { Text(NativeMessages.bots_name(lang)) })
+                Text(NativeMessages.native_room_members(lang), Modifier.padding(top = 8.dp), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.outline)
                 Column(Modifier.verticalScroll(rememberScrollState())) {
                     for (p in f.picks) Row(Modifier.fillMaxWidth().clickable { m.act("room-pick", p.id) }.padding(vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically) {
                         Text(p.name, Modifier.weight(1f))
-                        if (p.on) Icon(Icons.Filled.Check, "In the room")
+                        if (p.on) Icon(Icons.Filled.Check, NativeMessages.native_room_member(lang))
                     }
                 }
             }
         },
-        confirmButton = { TextButton(onClick = { m.act("room-save") }, enabled = f.picks.any { it.on }) { Text("Save") } },
-        dismissButton = { TextButton(onClick = { m.act("form-close", "@rnew") }) { Text("Cancel") } },
+        confirmButton = { TextButton(onClick = { m.act("room-save") }, enabled = f.picks.any { it.on }) { Text(NativeMessages.common_save(lang)) } },
+        dismissButton = { TextButton(onClick = { m.act("form-close", "@rnew") }) { Text(NativeMessages.common_cancel(lang)) } },
         shape = square,
     )
 }
@@ -216,6 +218,7 @@ private fun BotTabs(m: AppModel, b: BotView) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun BotScreen(m: AppModel, s: Screen, b: BotView) {
+    val lang = LocalBackplaneLanguage.current
     if (b.tab == "chat" && s.thread != null) {
         ThreadScreen(m, s, s.thread) { BotTabs(m, b) }
         return
@@ -224,7 +227,7 @@ private fun BotScreen(m: AppModel, s: Screen, b: BotView) {
         Column {
             TopAppBar(
                 title = { Text(b.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                navigationIcon = { IconButton(onClick = { m.back() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
+                navigationIcon = { IconButton(onClick = { m.back() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, NativeMessages.tour_back(lang)) } },
             )
             BotTabs(m, b)
         }
@@ -259,7 +262,8 @@ private fun Tag(text: String) {
 
 @Composable
 private fun MemoryTab(m: AppModel, items: List<BotMemory>) {
-    if (items.isEmpty()) { Empty("Nothing remembered"); return }
+    val lang = LocalBackplaneLanguage.current
+    if (items.isEmpty()) { Empty(NativeMessages.native_bot_memory_empty(lang)); return }
     LazyColumn(Modifier.fillMaxSize()) {
         items(items, key = { it.key }) { x ->
             ListItem(
@@ -272,7 +276,7 @@ private fun MemoryTab(m: AppModel, items: List<BotMemory>) {
                 },
                 headlineContent = { Text(x.text) },
                 supportingContent = { if (x.tags.isNotEmpty()) Text(x.tags) },
-                trailingContent = { IconButton(onClick = { m.act("mem-forget", x.key) }) { Icon(Icons.Filled.Close, "Forget") } },
+                trailingContent = { IconButton(onClick = { m.act("mem-forget", x.key) }) { Icon(Icons.Filled.Close, NativeMessages.bots_memory_forget(lang)) } },
             )
             HorizontalDivider()
         }
@@ -281,9 +285,10 @@ private fun MemoryTab(m: AppModel, items: List<BotMemory>) {
 
 @Composable
 private fun RoutinesTab(m: AppModel, b: BotView) {
+    val lang = LocalBackplaneLanguage.current
     LazyColumn(Modifier.fillMaxSize()) {
         item(key = "new") {
-            ListItem(headlineContent = { Text("New routine") }, leadingContent = { Icon(Icons.Filled.Add, null) },
+            ListItem(headlineContent = { Text(NativeMessages.routine_new(lang)) }, leadingContent = { Icon(Icons.Filled.Add, null) },
                 modifier = Modifier.clickable { m.act("routine-edit", "") })
             HorizontalDivider()
         }
@@ -300,7 +305,7 @@ private fun RoutinesTab(m: AppModel, b: BotView) {
                         }
                         if (r.done) Text(r.doneText, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
                         else if (r.next.isNotEmpty()) Text(
-                            "Next " + r.next + (if (r.rel.isEmpty()) "" else " · " + r.rel) + (if (r.zone == "your time") "" else " · " + r.zone),
+                            NativeMessages.routine_next(lang, r.next, if (r.rel.isEmpty()) "none" else "some", r.rel, if (r.zone == "your time") "none" else "some", r.zone),
                             style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
                         Text(r.prompt, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     }
@@ -309,11 +314,11 @@ private fun RoutinesTab(m: AppModel, b: BotView) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         if (!r.done) Switch(r.on, { m.act("routine-toggle", r.id) })
                         Box {
-                            IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, "More") }
+                            IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, NativeMessages.common_more(lang)) }
                             DropdownMenu(menu, { menu = false }) {
-                                if (!r.done) DropdownMenuItem(text = { Text("Run now") }, onClick = { menu = false; m.act("routine-run", r.id) })
-                                if (!r.done) DropdownMenuItem(text = { Text("Edit") }, onClick = { menu = false; m.act("routine-edit", r.id) })
-                                DropdownMenuItem(text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
+                                if (!r.done) DropdownMenuItem(text = { Text(NativeMessages.routine_run(lang)) }, onClick = { menu = false; m.act("routine-run", r.id) })
+                                if (!r.done) DropdownMenuItem(text = { Text(NativeMessages.queue_edit(lang)) }, onClick = { menu = false; m.act("routine-edit", r.id) })
+                                DropdownMenuItem(text = { Text(NativeMessages.common_delete(lang), color = MaterialTheme.colorScheme.error) },
                                     onClick = { menu = false; m.act("routine-delete", r.id) })
                             }
                         }
@@ -330,48 +335,50 @@ private fun RoutinesTab(m: AppModel, b: BotView) {
 
 @Composable
 private fun RoutineDialog(m: AppModel, f: RoutineForm) {
+    val lang = LocalBackplaneLanguage.current
     var name by remember(f.id) { mutableStateOf(f.name) }
     var cron by remember(f.id) { mutableStateOf(f.cron) }
     var prompt by remember(f.id) { mutableStateOf(f.prompt) }
     AlertDialog(
         onDismissRequest = { m.act("form-close", "@onew") },
-        title = { Text(if (f.id.isEmpty()) "New routine" else "Routine") },
+        title = { Text(if (f.id.isEmpty()) NativeMessages.routine_new(lang) else NativeMessages.native_routine_title(lang)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(name, { name = it; m.field("oname", it) }, Modifier.fillMaxWidth(), singleLine = true,
-                    label = { Text("Name") })
+                    label = { Text(NativeMessages.bots_name(lang)) })
                 OutlinedTextField(cron, { cron = it; m.field("ocron", it) }, Modifier.fillMaxWidth(), singleLine = true,
-                    label = { Text("When") }, placeholder = { Text("daily 09:30 · tomorrow 9am · in 2h") },
-                    supportingText = { Text(f.hint.ifEmpty { "A schedule (daily 09:30, every 15m, cron) or a time (tomorrow 9am, in 2h)" }) },
+                    label = { Text(NativeMessages.native_routine_timefield(lang)) }, placeholder = { Text(NativeMessages.native_routine_examples(lang)) },
+                    supportingText = { Text(f.hint.ifEmpty { NativeMessages.native_routine_hint(lang) }) },
                     textStyle = MaterialTheme.typography.bodyLarge.copy(fontFamily = FontFamily.Monospace),
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false))
                 OutlinedTextField(prompt, { prompt = it; m.field("oprompt", it) }, Modifier.fillMaxWidth(), minLines = 3, maxLines = 10,
-                    label = { Text("Prompt") })
+                    label = { Text(NativeMessages.native_routine_prompt(lang)) })
             }
         },
-        confirmButton = { TextButton(onClick = { m.act("routine-save") }, enabled = cron.isNotBlank()) { Text("Save") } },
-        dismissButton = { TextButton(onClick = { m.act("form-close", "@onew") }) { Text("Cancel") } },
+        confirmButton = { TextButton(onClick = { m.act("routine-save") }, enabled = cron.isNotBlank()) { Text(NativeMessages.common_save(lang)) } },
+        dismissButton = { TextButton(onClick = { m.act("form-close", "@onew") }) { Text(NativeMessages.common_cancel(lang)) } },
         shape = square,
     )
 }
 
 @Composable
 private fun HooksTab(m: AppModel, b: BotView) {
+    val lang = LocalBackplaneLanguage.current
     var name by rememberSaveable { mutableStateOf("") }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 16.dp)) {
         item(key = "new") {
             Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(name, { name = it; m.field("hname", it) }, Modifier.weight(1f), singleLine = true,
-                    label = { Text("Name") })
-                TextButton(onClick = { m.act("hook-new"); name = "" }) { Text("Add") }
+                    label = { Text(NativeMessages.bots_name(lang)) })
+                TextButton(onClick = { m.act("hook-new"); name = "" }) { Text(NativeMessages.common_add(lang)) }
             }
         }
         if (b.secret.isNotEmpty()) item(key = "secret") {
             Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("Secret, shown once", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.outline)
+                Text(NativeMessages.web_hooks_secret(lang), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.outline)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(b.secret, Modifier.weight(1f), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
-                    IconButton(onClick = { m.act("copy", b.secret) }) { Icon(Icons.Filled.ContentCopy, "Copy") }
+                    IconButton(onClick = { m.act("copy", b.secret) }) { Icon(Icons.Filled.ContentCopy, NativeMessages.common_copy(lang)) }
                 }
                 HorizontalDivider()
             }
@@ -390,8 +397,8 @@ private fun HooksTab(m: AppModel, b: BotView) {
                 },
                 trailingContent = {
                     Row {
-                        IconButton(onClick = { m.act("copy", url) }) { Icon(Icons.Filled.ContentCopy, "Copy URL") }
-                        IconButton(onClick = { m.act("hook-revoke", h.id) }) { Icon(Icons.Filled.Close, "Revoke") }
+                        IconButton(onClick = { m.act("copy", url) }) { Icon(Icons.Filled.ContentCopy, NativeMessages.native_hook_copyurl(lang)) }
+                        IconButton(onClick = { m.act("hook-revoke", h.id) }) { Icon(Icons.Filled.Close, NativeMessages.hooks_revoke(lang)) }
                     }
                 },
             )
@@ -415,6 +422,7 @@ private fun Field(value: String, label: String, onChange: (String) -> Unit, modi
 
 @Composable
 private fun SettingsTab(m: AppModel, b: BotView, st: BotSettings) {
+    val lang = LocalBackplaneLanguage.current
     var persona by remember(b.id) { mutableStateOf(st.personaField.ifEmpty { st.persona }) }
     var gid by remember(b.id) { mutableStateOf(st.google.gid) }
     var gsecret by remember(b.id) { mutableStateOf(st.google.gsecret) }
@@ -426,9 +434,9 @@ private fun SettingsTab(m: AppModel, b: BotView, st: BotSettings) {
     val uri = androidx.compose.ui.platform.LocalUriHandler.current
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        SectionLabel("Persona")
+        SectionLabel(NativeMessages.bots_persona(lang))
         OutlinedTextField(persona, { persona = it; m.field("persona", it) }, Modifier.fillMaxWidth(), minLines = 4, maxLines = 14)
-        OutlinedButton(onClick = { m.act("bot-edit") }, enabled = persona != st.persona, shape = square) { Text("Save") }
+        OutlinedButton(onClick = { m.act("bot-edit") }, enabled = persona != st.persona, shape = square) { Text(NativeMessages.common_save(lang)) }
 
         SectionLabel("Google")
         val ctx = androidx.compose.ui.platform.LocalContext.current
@@ -437,69 +445,69 @@ private fun SettingsTab(m: AppModel, b: BotView, st: BotSettings) {
         st.google.accounts.forEach { a ->
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(a, Modifier.weight(1f), maxLines = 1)
-                TextButton(onClick = { m.act("google", "sig-edit:$a") }) { Text("Signature") }
-                TextButton(onClick = { m.act("google", "signout:$a") }) { Text("Sign out", color = MaterialTheme.colorScheme.error) }
+                TextButton(onClick = { m.act("google", "sig-edit:$a") }) { Text(NativeMessages.google_signature(lang)) }
+                TextButton(onClick = { m.act("google", "signout:$a") }) { Text(NativeMessages.agy_signout(lang), color = MaterialTheme.colorScheme.error) }
             }
             if (st.google.sigFor == a) {
                 var gsig by remember(a) { mutableStateOf(st.google.sigText) }
                 OutlinedTextField(gsig, { gsig = it; m.field("gsig", it) }, Modifier.fillMaxWidth(), minLines = 2, maxLines = 6,
-                    placeholder = { Text("— Sent by Backplane on behalf of $a") })
+                    placeholder = { Text(NativeMessages.google_signature_placeholder(lang, a)) })
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { m.act("google", "sig-save") }, shape = square) { Text("Save") }
-                    TextButton(onClick = { m.act("google", "sig-cancel") }) { Text("Cancel") }
+                    OutlinedButton(onClick = { m.act("google", "sig-save") }, shape = square) { Text(NativeMessages.common_save(lang)) }
+                    TextButton(onClick = { m.act("google", "sig-cancel") }) { Text(NativeMessages.common_cancel(lang)) }
                 }
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = { GoogleLoop.start { a, v -> m.act(a, v) } }, shape = square) { Text(if (st.google.accounts.isEmpty()) "Connect Google" else "Add account") }
-            TextButton(onClick = { gown = !gown }) { Text(if (gown) "Hide own client" else "Own client") }
+            OutlinedButton(onClick = { GoogleLoop.start { a, v -> m.act(a, v) } }, shape = square) { Text(if (st.google.accounts.isEmpty()) NativeMessages.google_connect(lang) else NativeMessages.agy_account_add(lang)) }
+            TextButton(onClick = { gown = !gown }) { Text(if (gown) NativeMessages.native_google_client_hide(lang) else NativeMessages.google_client_own(lang)) }
         }
         if (gown) {
-            Field(gid, "Client ID (Desktop app)", { gid = it; m.field("gid", it) })
-            Field(gsecret, "Client secret", { gsecret = it; m.field("gsecret", it) }, secret = true)
-            OutlinedButton(onClick = { m.act("google", "configure") }, shape = square) { Text("Save client") }
+            Field(gid, NativeMessages.native_google_client_id(lang), { gid = it; m.field("gid", it) })
+            Field(gsecret, NativeMessages.google_client_secret(lang), { gsecret = it; m.field("gsecret", it) }, secret = true)
+            OutlinedButton(onClick = { m.act("google", "configure") }, shape = square) { Text(NativeMessages.google_client_save(lang)) }
         }
         if (st.google.url.isNotEmpty()) {
-            TextButton(onClick = { runCatching { uri.openUri(st.google.url) } }) { Text("Open Google sign-in") }
+            TextButton(onClick = { runCatching { uri.openUri(st.google.url) } }) { Text(NativeMessages.google_open(lang)) }
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Field(gpaste, "Redirected URL", { gpaste = it; m.field("gpaste", it) }, Modifier.weight(1f))
-                TextButton(onClick = { m.act("google", "finish") }) { Text("Finish") }
+                Field(gpaste, NativeMessages.native_google_redirect(lang), { gpaste = it; m.field("gpaste", it) }, Modifier.weight(1f))
+                TextButton(onClick = { m.act("google", "finish") }) { Text(NativeMessages.common_finish(lang)) }
             }
         }
 
-        SectionLabel("Machines")
+        SectionLabel(NativeMessages.bots_machines(lang))
         for (p in st.peers) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(p.name)
                 Text(p.url, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline, maxLines = 1,
                     overflow = TextOverflow.Ellipsis)
             }
-            IconButton(onClick = { m.act("peer-revoke", p.id) }) { Icon(Icons.Filled.Close, "Unlink") }
+            IconButton(onClick = { m.act("peer-revoke", p.id) }) { Icon(Icons.Filled.Close, NativeMessages.machines_unlink(lang)) }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Field(purl, "This hub's address", { purl = it; m.field("purl", it) }, Modifier.weight(1f))
-            TextButton(onClick = { m.act("peer-invite") }) { Text("Invite") }
+            Field(purl, NativeMessages.native_machine_address(lang), { purl = it; m.field("purl", it) }, Modifier.weight(1f))
+            TextButton(onClick = { m.act("peer-invite") }) { Text(NativeMessages.machines_invite(lang)) }
         }
         if (st.invite.isNotEmpty()) Row(verticalAlignment = Alignment.CenterVertically) {
             Text(st.invite, Modifier.weight(1f), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
-            IconButton(onClick = { m.act("copy", st.invite) }) { Icon(Icons.Filled.ContentCopy, "Copy invite") }
+            IconButton(onClick = { m.act("copy", st.invite) }) { Icon(Icons.Filled.ContentCopy, NativeMessages.native_machine_invite_copy(lang)) }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Field(join, "Paste an invite", { join = it; m.field("invite", it) }, Modifier.weight(1f))
-            TextButton(onClick = { m.act("peer-join"); join = "" }) { Text("Join") }
+            Field(join, NativeMessages.native_machine_invite_paste(lang), { join = it; m.field("invite", it) }, Modifier.weight(1f))
+            TextButton(onClick = { m.act("peer-join"); join = "" }) { Text(NativeMessages.bots_invite_join(lang)) }
         }
 
         HorizontalDivider(Modifier.padding(top = 16.dp))
-        TextButton(onClick = { deleting = true }) { Text("Delete bot", color = MaterialTheme.colorScheme.error) }
+        TextButton(onClick = { deleting = true }) { Text(NativeMessages.bots_delete(lang), color = MaterialTheme.colorScheme.error) }
     }
     if (deleting) Overlaid()
     if (deleting) AlertDialog(
         onDismissRequest = { deleting = false },
-        title = { Text("Delete ${b.name}?") },
+        title = { Text(NativeMessages.native_bot_delete_ask(lang, b.name)) },
         confirmButton = {
-            TextButton(onClick = { deleting = false; m.act("bot-delete", b.id) }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+            TextButton(onClick = { deleting = false; m.act("bot-delete", b.id) }) { Text(NativeMessages.common_delete(lang), color = MaterialTheme.colorScheme.error) }
         },
-        dismissButton = { TextButton(onClick = { deleting = false }) { Text("Cancel") } },
+        dismissButton = { TextButton(onClick = { deleting = false }) { Text(NativeMessages.common_cancel(lang)) } },
         shape = square,
     )
 }
@@ -509,6 +517,7 @@ private fun SettingsTab(m: AppModel, b: BotView, st: BotSettings) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun TalkScreen(m: AppModel, b: BotView, field: String, send: String) {
+    val lang = LocalBackplaneLanguage.current
     var text by remember(b.id) { mutableStateOf(b.draft) }
     var menu by remember { mutableStateOf(false) }
     val list = rememberLazyListState()
@@ -524,12 +533,12 @@ private fun TalkScreen(m: AppModel, b: BotView, field: String, send: String) {
                                 color = MaterialTheme.colorScheme.outline, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     },
-                    navigationIcon = { IconButton(onClick = { m.back() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
+                    navigationIcon = { IconButton(onClick = { m.back() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, NativeMessages.tour_back(lang)) } },
                     actions = {
                         if (b.kind == "room") Box {
-                            IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, "More") }
+                            IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, NativeMessages.common_more(lang)) }
                             DropdownMenu(menu, { menu = false }) {
-                                DropdownMenuItem(text = { Text("Delete room", color = MaterialTheme.colorScheme.error) },
+                                DropdownMenuItem(text = { Text(NativeMessages.room_delete(lang), color = MaterialTheme.colorScheme.error) },
                                     onClick = { menu = false; m.act("room-delete", b.id) })
                             }
                         }
@@ -542,16 +551,16 @@ private fun TalkScreen(m: AppModel, b: BotView, field: String, send: String) {
             Surface(tonalElevation = 3.dp) {
                 Row(Modifier.fillMaxWidth().navigationBarsPadding().imePadding().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     OutlinedTextField(text, { text = it; m.field(field, it) }, Modifier.weight(1f), maxLines = 6,
-                        placeholder = { Text(if (b.kind == "room") "Post to the room" else "Message") })
+                        placeholder = { Text(if (b.kind == "room") NativeMessages.native_room_post(lang) else NativeMessages.native_bot_message(lang)) })
                     IconButton(onClick = { m.act(send); text = "" }, enabled = text.isNotBlank()) {
-                        Icon(Icons.AutoMirrored.Filled.Send, "Send",
+                        Icon(Icons.AutoMirrored.Filled.Send, NativeMessages.composer_send(lang),
                             tint = if (text.isNotBlank()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline)
                     }
                 }
             }
         },
     ) { pad ->
-        if (b.posts.isEmpty()) Box(Modifier.padding(pad)) { Empty("No messages") }
+        if (b.posts.isEmpty()) Box(Modifier.padding(pad)) { Empty(NativeMessages.native_bot_messages_empty(lang)) }
         LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(
             start = 16.dp, end = 16.dp, top = pad.calculateTopPadding() + 8.dp, bottom = pad.calculateBottomPadding() + 8.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {

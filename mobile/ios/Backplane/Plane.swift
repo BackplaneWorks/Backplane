@@ -68,6 +68,7 @@ private func planeStatus(_ s: String) -> String {
 // --------------------
 
 struct UberCardRow: View {
+    @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let card: UberCard
 
@@ -79,7 +80,7 @@ struct UberCardRow: View {
                     Text(card.name).font(.headline).foregroundStyle(.primary)
                     HStack(spacing: 5) {
                         MoodDot(mood: card.mood)
-                        Text((card.counts ?? "").isEmpty ? "Nothing waiting" : card.counts ?? "").lineLimit(1)
+                        Text((card.counts ?? "").isEmpty ? NativeMessages.native_plane_waiting(lang) : card.counts ?? "").lineLimit(1)
                     }
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -90,7 +91,7 @@ struct UberCardRow: View {
         }
         .buttonStyle(.plain)
         .listRowBackground(Color.accentColor.opacity(card.sel ? 0.22 : 0.10))
-        .accessibilityLabel("\(card.name), \(card.counts ?? "")")
+        .accessibilityLabel(NativeMessages.native_plane_card(lang, card.name, card.counts ?? ""))
     }
 }
 
@@ -231,6 +232,7 @@ private struct PlaneLabel: View {
 // waits and what runs, then the bots, rooms and routines compactly; on the
 // Status tab (full true) the idle threads follow too.
 struct PlaneSections: View {
+    @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let plane: PlaneModel
     let full: Bool
@@ -245,30 +247,30 @@ struct PlaneSections: View {
     }
 
     var body: some View {
-        if !plane.need.isEmpty { section("Needs you", plane.need) }
-        if !plane.run.isEmpty { section("Running", plane.run) }
+        if !plane.need.isEmpty { section(NativeMessages.plane_needs(lang), plane.need) }
+        if !plane.run.isEmpty { section(NativeMessages.plane_running(lang), plane.run) }
         if full && plane.idleN > 0 {
             Section {
                 if idleOpen { ForEach(plane.idle) { PlaneAny(model: model, row: $0) } }
                 if idleOpen && plane.idleN > plane.idle.count {
-                    Text("\(plane.idleN - plane.idle.count) more").font(.caption).foregroundStyle(.secondary)
+                    Text(NativeMessages.native_plane_more(lang, String(plane.idleN - plane.idle.count))).font(.caption).foregroundStyle(.secondary)
                 }
             } header: {
                 Button { idleOpen.toggle() } label: {
                     HStack(spacing: 6) {
-                        PlaneLabel(text: "Idle", count: plane.idleN)
+                        PlaneLabel(text: NativeMessages.web_plane_idle(lang), count: plane.idleN)
                         Image(systemName: idleOpen ? "chevron.down" : "chevron.right").font(.caption2).foregroundStyle(.tertiary)
                     }
                 }
             }
         }
         // the home list has its own Bots section (the cats)
-        if full && !plane.bots.isEmpty { section("Bots", plane.bots, mood: true) }
-        if !plane.rooms.isEmpty { section("Rooms", plane.rooms) }
-        if let locks = plane.locks, !locks.isEmpty { section("Locks", locks) }
-        if !plane.routines.isEmpty { section("Routines", plane.routines) }
+        if full && !plane.bots.isEmpty { section(NativeMessages.tour_title_bots(lang), plane.bots, mood: true) }
+        if !plane.rooms.isEmpty { section(NativeMessages.bots_rooms(lang), plane.rooms) }
+        if let locks = plane.locks, !locks.isEmpty { section(NativeMessages.plane_locks(lang), locks) }
+        if !plane.routines.isEmpty { section(NativeMessages.bots_tab_routines(lang), plane.routines) }
         if full && plane.need.isEmpty && plane.run.isEmpty && plane.idleN == 0 && plane.bots.isEmpty && plane.rooms.isEmpty && plane.routines.isEmpty {
-            Section { Text("Nothing active").foregroundStyle(.secondary) }
+            Section { Text(NativeMessages.sidebar_nothing(lang)).foregroundStyle(.secondary) }
         }
     }
 }
@@ -278,6 +280,7 @@ struct PlaneSections: View {
 
 // counters, then the machines and where the conversation is held, in one card
 private struct PlaneStrip: View {
+    @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let plane: PlaneModel
 
@@ -300,10 +303,10 @@ private struct PlaneStrip: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 8) {
-                counter(plane.need.count, "Need you", PhaseColor.warn)
-                counter(plane.run.count, "Running", PhaseColor.accent)
-                counter(plane.working, "Bots working", PhaseColor.ok)
-                counter(plane.rooms.count, "Unread rooms", PhaseColor.input)
+                counter(plane.need.count, NativeMessages.plane_need(lang), PhaseColor.warn)
+                counter(plane.run.count, NativeMessages.plane_running(lang), PhaseColor.accent)
+                counter(plane.working, NativeMessages.plane_bots_working(lang), PhaseColor.ok)
+                counter(plane.rooms.count, NativeMessages.plane_rooms_unread(lang), PhaseColor.input)
             }
             if plane.machines.count > 1 {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -352,6 +355,7 @@ struct StatusTab: View {
 // what runs, the bots, rooms and routines, the idle threads). With no
 // uberbot there is no plane: the tab offers to make one.
 struct HomeTab: View {
+    @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let screen: Screen
 
@@ -372,17 +376,17 @@ struct HomeTab: View {
                     ProgressView().opacity(screen.online ? 0 : 1)
                 } else {
                     ContentUnavailableView {
-                        Label("No uberbot", systemImage: "pawprint")
+                        Label(NativeMessages.native_home_none(lang), systemImage: "pawprint")
                     } description: {
-                        Text("Your uberbot keeps the whole picture: what needs you, what runs, your bots and routines.")
+                        Text(NativeMessages.native_home_hint(lang))
                     } actions: {
-                        Button("Make an uberbot") { model.act("uber-new") }.buttonStyle(.borderedProminent)
+                        Button(NativeMessages.native_home_make(lang)) { model.act("uber-new") }.buttonStyle(.borderedProminent)
                     }
                 }
             } else if model.plane(screen) == nil {
                 ProgressView()
             }
         }
-        .navigationTitle("Home")
+        .navigationTitle(NativeMessages.native_tab_home(lang))
     }
 }

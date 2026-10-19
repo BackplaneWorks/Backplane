@@ -38,4 +38,49 @@ fallback says so in the tool result.
   `KH.min_api()`) and the setting `kicad.ipc` is not `off`.
 - Persisted data is untouched: no new events. The server lines live in the hub's runtime record only.
 
+- The pin is Backplane KiCad `10.99.0-bp.4` (API 2): `KH.min_version()` / `KH.min_api()`, and `KH.version.ge` orders
+  the `-bp.N` suffix numerically (bp.2 < bp.3 < bp.4 < bp.10; `10.99.0-unknown-bp.3` reads as bp.3; no suffix is bp.0), so
+  installs older than the pin are "old" and the notice offers Update. Discovery checks the pinned
+  `<data>/kicad/<KiCad.version()>` first, then other managed versions newest-first. Older runtimes offer Update
+  and cannot shadow the bp.4 install.
+- The server is always started through the runtime's `bin/kicad-cli` (`KS.launcher` turns `kicad-cli.real` back into
+  the launcher), which defines `KICAD10_*_DIR`. `kicad_ipc_status` shows the start command line (`argv`) and `version`.
+- Compatibility guards, in the hub (`KS.guard`): `UpdateItems` of a `FootprintInstance` without `definition` on bp.3 wipes the footprint's
+  pads and 3D models, so it is refused unless the runtime lists `footprint-partial-update`; `CreateItems` of a schematic
+  symbol with only a library id makes an empty symbol, so it is refused unless the runtime lists `symbol-from-libid`:
+  `LoadAllLibraries`, wait for `GetLibraryStatuses`, then `PlaceSymbolFromLibrary`.
+
 Test: `bun test/tools/kicad_ipc_e2e.ts` (a stub server stands in for KiCad), `bun tools/kipc/test/kipc.ts`.
+
+## Real runtime e2e
+
+`test/tools/kicad_ipc_real_e2e.ts` runs the whole path against a real Backplane KiCad: a hub on a free port and a temp
+home, the real `backplane-kipc`, the demo `ecc83` copied from the runtime, and only the hub's MCP tools.
+
+```sh
+bun test/tools/kicad_ipc_real_e2e.ts build/backplane-serve build/wire /path/to/backplane-kicad-linux-x86_64-10.99.0-bp.4
+```
+
+Without a runtime (or without `bin/kicad-cli` in it) it prints `skipped: no runtime` and exits 0. It checks health and
+status, footprint/pad/3D-model counts, an edit saved and reloaded, a partial footprint update preserving contents and attributes, a netlist import, symbols
+placed and created from library IDs without bulk preload, a rolled-back commit and the server's argv. Each check is an `ok`/`FAIL` line. It stops the hub
+it started; the KiCad server ends with it (`--parent-pid`).
+
+Health caches are checked against the current minimum even after an app update. Their file stamps cover the selected
+runtime and candidates ahead of it; adding unrelated PATH entries after it does not invalidate healthy startup state.
+
+The bp.4 runtime advertises both fix capabilities: partial footprint updates and symbol creation from a library ID
+are accepted. Symbol libraries load on demand; agents need no blanket library preload on this runtime.
+
+The installer checks the pinned bp.4 asset against both the release SHA256SUMS and the verified SHA-256
+`f60a71817d057f9dcf3faef632b2f85d06a613108dee23807c9de81aae97e0b4`.
+
+KiCad can buffer its ready line until exit when stdout is a pipe. The helper discovers a fresh socket in the
+project's private socket directory, including KiCad's `api-<pid>.sock` fallback, and the hub then requires Ping
+and a matching version. Sockets present before launch never count as readiness for that launch.
+`bun tools/kipc/test/readiness.ts` checks buffered readiness with a fresh requested socket, an occupied requested
+path plus a new alternate, and an occupied path with no new socket.
+
+When the pinned managed install is absent, discovery retains other installed versions as newest-first fallbacks.
+An old install therefore reports old and offers Update; the pinned directory appearing invalidates the health cache
+and takes precedence.

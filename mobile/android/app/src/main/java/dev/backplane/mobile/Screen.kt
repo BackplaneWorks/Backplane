@@ -437,6 +437,7 @@ data class Screen(
     // the uberbot's card and the status plane (Plane.kt); none without an uberbot
     val uber: UberCard? = null, val plane: PlaneModel? = null,
     val tabs: Tabs = Tabs(),
+    val locale: String = "en",
 )
 
 data class Cmd(
@@ -752,6 +753,7 @@ fun parseScreen(o: JSONObject) = Screen(
         Tour(it.optString("counter"), it.optString("title"), it.optString("body"), it.optString("next"), it.optString("back"), it.optString("skip"), it.optBoolean("first"),
             it.optJSONArray("choices")?.let { a -> (0 until a.length()).map { i -> a.getJSONObject(i).let { c -> TourChoice(c.optString("label"), c.optString("action"), c.optString("value")) } } } ?: emptyList())
     },
+    locale = o.optString("locale", "en"),
 )
 
 fun parseSettings(st: JSONObject) = Settings(st.optJSONArray("rows").map { r ->

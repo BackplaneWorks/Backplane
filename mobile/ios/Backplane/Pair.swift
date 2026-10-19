@@ -27,6 +27,7 @@ struct QRCodeView: View {
 // The camera reading a pairing code: the first QR code it sees goes to
 // found (the app pairs with any link Pairing understands)
 struct ScanView: View {
+    let tag: String
     let found: (String) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var denied = false
@@ -36,20 +37,20 @@ struct ScanView: View {
             ZStack {
                 Color.black.ignoresSafeArea()
                 if denied {
-                    Text("Backplane needs the camera to read the code. Allow it in Settings, or paste the link instead.")
+                    Text(NativeMessages.native_pair_scanner_denied(tag))
                         .foregroundStyle(.white).multilineTextAlignment(.center).padding()
                 } else {
                     Scanner { s in found(s); dismiss() }.ignoresSafeArea()
                     VStack {
                         Spacer()
-                        Text("Point the camera at the code in Backplane's Settings (QR code).")
+                        Text(NativeMessages.native_pair_scanner_instructions(tag))
                             .font(.footnote).foregroundStyle(.white).multilineTextAlignment(.center).padding()
                     }
                 }
             }
-            .navigationTitle("Scan code")
+            .navigationTitle(NativeMessages.native_pair_scanner_title(tag))
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button(NativeMessages.common_cancel(tag)) { dismiss() } } }
             .task {
                 switch AVCaptureDevice.authorizationStatus(for: .video) {
                 case .notDetermined: denied = !(await AVCaptureDevice.requestAccess(for: .video))

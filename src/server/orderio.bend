@@ -16,13 +16,21 @@ import ./kicad.bend as K
 def Od.tmp(+home: String) -> String:
   home ++ "/secrets"
 
+# made before curl writes there, 0700 like the API keys' (botnet.bend's
+# Bf.dir): a fresh home has none until something needs it
+def Od.tmp.made(+home: String) -> IO(Unit):
+  do IO<Unit>:
+    mk : Result<&1, &1, U32 & String, Unit> <- H.FS.mkdirs(Od.tmp(home))
+    m : Result<&1, &1, U32 & String, Unit> <- H.FS.chmod(Od.tmp(home), 448)
+    return Unit{}
+
 def Od.install.k(+old: String, +fresh: String, +path: String) -> IO(String):
   Bool.pick(IO(String), Nat.is_ge(String.length(String.trim(old)), 16n), IO.pure(String, String.trim(old)),
     IO.bind(Unit, String, GS.Gf.write(path, fresh), _ => IO.pure(String, fresh)))
 
 def Od.install(+home: String) -> IO(String):
   do IO<String>:
-    mk : Result<&1, &1, U32 & String, Unit> <- H.FS.mkdirs(Od.tmp(home))
+    Od.tmp.made(home)
     old : String <- GS.Gf.text(Od.tmp(home) ++ "/install-id")
     +fresh : String <- GS.Gf.nonce(6n)
     Od.install.k(old, fresh, Od.tmp(home) ++ "/install-id")
@@ -124,10 +132,15 @@ def Od.boards() -> String:
   "find . -maxdepth 4 -name '*.kicad_pcb' -not -name '_autosave-*' -not -path '*/.*' -not -path './extra/*' -not -path './mfg/*' -not -path '*backup*' -not -path '*/node_modules/*' 2>/dev/null | LC_ALL=C sort | head -n 20 | sed 's|^\\./||'"
 
 # with no fab files but a board, the server is only asked whether it is there
+# (curl's files go in the secrets folder: without it, in a fresh home, the
+# card had no Buy it)
 def Od.health.k(ask: Bool, +home: String, +server: String) -> IO(J.Json):
   match ask:
     case True{}:
-      IO.bind(GS.GResp, J.Json, GS.Gc.req(Od.tmp(home), server ++ "/v1/health", ["Accept: application/json"], ""), r => IO.pure(J.Json, Od.est.got(r)))
+      do IO<J.Json>:
+        Od.tmp.made(home)
+        r : GS.GResp <- GS.Gc.req(Od.tmp(home), server ++ "/v1/health", ["Accept: application/json"], "")
+        return Od.est.got(r)
     case False{}:
       IO.pure(J.Json, J.Null{})
 

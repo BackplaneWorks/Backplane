@@ -193,20 +193,21 @@ object PhaseColor {
 // in the same colors as the desktop and web; else its turn
 @Composable
 fun StatusDot(state: String, status: String) {
+    val lang = LocalBackplaneLanguage.current
     Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) {
         when (status) {
-            "approval" -> Icon(Icons.Filled.PanTool, "Waits for approval", Modifier.size(16.dp), tint = PhaseColor.warn)
-            "input" -> Icon(Icons.Filled.QuestionAnswer, "Waits for an answer", Modifier.size(16.dp), tint = PhaseColor.input)
+            "approval" -> Icon(Icons.Filled.PanTool, NativeMessages.native_status_approval(lang), Modifier.size(16.dp), tint = PhaseColor.warn)
+            "input" -> Icon(Icons.Filled.QuestionAnswer, NativeMessages.native_status_answer(lang), Modifier.size(16.dp), tint = PhaseColor.input)
             // ("queued" from an older hub: nothing waits now, it is working)
             "working", "queued" -> CircularProgressIndicator(Modifier.size(16.dp), color = PhaseColor.accent, strokeWidth = 2.dp)
             // the turn is over, its subagents still at work ("waiting" from an older hub)
             "monitoring", "waiting" -> CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = PhaseColor.waiting)
-            "failed" -> Icon(Icons.Filled.Error, "Failed", Modifier.size(18.dp), tint = PhaseColor.bad)
+            "failed" -> Icon(Icons.Filled.Error, NativeMessages.notify_failed(lang), Modifier.size(18.dp), tint = PhaseColor.bad)
             "complete" -> Dot(PhaseColor.ok)
             "stopped", "idle", "ready" -> Dot(PhaseColor.faint)
             else -> when (state) {
                 "run" -> CircularProgressIndicator(Modifier.size(16.dp), color = PhaseColor.accent, strokeWidth = 2.dp)
-                "fail" -> Icon(Icons.Filled.Error, "Failed", Modifier.size(18.dp), tint = PhaseColor.bad)
+                "fail" -> Icon(Icons.Filled.Error, NativeMessages.notify_failed(lang), Modifier.size(18.dp), tint = PhaseColor.bad)
                 "stop" -> Dot(PhaseColor.warn)
                 else -> Dot(PhaseColor.faint)
             }
@@ -263,15 +264,16 @@ private fun hubImage(url: String, max: Int): Got? =
 // an image from the hub filling its width (a part's render); a tap opens it
 @Composable
 fun HubPicture(m: AppModel, path: String, modifier: Modifier, show: (String) -> Unit) {
+    val lang = LocalBackplaneLanguage.current
     val u = m.web(path) ?: return
     when (val g = hubImage(u, 1200)) {
         null -> Box(modifier.aspectRatio(4f / 3f), contentAlignment = Alignment.Center) {
             CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
         }
         Got.Failed -> Box(modifier.aspectRatio(4f / 3f), contentAlignment = Alignment.Center) {
-            Icon(Icons.Filled.BrokenImage, "No image", tint = MaterialTheme.colorScheme.outline)
+            Icon(Icons.Filled.BrokenImage, NativeMessages.native_image_missing(lang), tint = MaterialTheme.colorScheme.outline)
         }
-        is Got.Ok -> Image(g.b.asImageBitmap(), "Render", modifier.aspectRatio(g.b.width.toFloat() / maxOf(g.b.height, 1))
+        is Got.Ok -> Image(g.b.asImageBitmap(), NativeMessages.native_image_render(lang), modifier.aspectRatio(g.b.width.toFloat() / maxOf(g.b.height, 1))
             .clickable { show(u) }, contentScale = ContentScale.Fit)
     }
 }
@@ -279,15 +281,16 @@ fun HubPicture(m: AppModel, path: String, modifier: Modifier, show: (String) -> 
 // an image from the hub, as a thumbnail; a tap opens it full screen
 @Composable
 fun Thumb(m: AppModel, path: String, show: (String) -> Unit) {
+    val lang = LocalBackplaneLanguage.current
     val u = m.web(path) ?: return
     when (val g = hubImage(u, 720)) {
         null -> Box(Modifier.size(80.dp, 60.dp), contentAlignment = Alignment.Center) {
             CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
         }
         Got.Failed -> Box(Modifier.size(80.dp, 60.dp), contentAlignment = Alignment.Center) {
-            Icon(Icons.Filled.BrokenImage, "No image", tint = MaterialTheme.colorScheme.outline)
+            Icon(Icons.Filled.BrokenImage, NativeMessages.native_image_missing(lang), tint = MaterialTheme.colorScheme.outline)
         }
-        is Got.Ok -> Image(g.b.asImageBitmap(), "Image", Modifier.widthIn(max = 260.dp).heightIn(max = 200.dp)
+        is Got.Ok -> Image(g.b.asImageBitmap(), NativeMessages.native_image_plain(lang), Modifier.widthIn(max = 260.dp).heightIn(max = 200.dp)
             .clip(corner).clickable { show(u) }, contentScale = ContentScale.Fit)
     }
 }
@@ -311,6 +314,7 @@ fun Overlaid() {
 // back) closes it
 @Composable
 fun Lightbox(url: String, close: () -> Unit) {
+    val lang = LocalBackplaneLanguage.current
     Overlaid()
     Dialog(close, DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         var scale by remember { mutableFloatStateOf(1f) }
@@ -330,12 +334,12 @@ fun Lightbox(url: String, close: () -> Unit) {
             }) {
             when (val g = hubImage(url, 2560)) {
                 null -> CircularProgressIndicator(Modifier.align(Alignment.Center))
-                Got.Failed -> Icon(Icons.Filled.BrokenImage, "No image", Modifier.align(Alignment.Center), tint = Color.Gray)
-                is Got.Ok -> Image(g.b.asImageBitmap(), "Image", Modifier.fillMaxSize().graphicsLayer(
+                Got.Failed -> Icon(Icons.Filled.BrokenImage, NativeMessages.native_image_missing(lang), Modifier.align(Alignment.Center), tint = Color.Gray)
+                is Got.Ok -> Image(g.b.asImageBitmap(), NativeMessages.native_image_plain(lang), Modifier.fillMaxSize().graphicsLayer(
                     scaleX = scale, scaleY = scale, translationX = offset.x, translationY = offset.y), contentScale = ContentScale.Fit)
             }
             IconButton(close, Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(8.dp)) {
-                Icon(Icons.Filled.Close, "Close", tint = Color.White)
+                Icon(Icons.Filled.Close, NativeMessages.common_close(lang), tint = Color.White)
             }
         }
     }
@@ -356,10 +360,11 @@ fun ChipView(m: AppModel, c: Chip, show: (String) -> Unit) {
 // any part of it can be selected and copied
 @Composable
 private fun MessageMenu(m: AppModel, text: String, open: Boolean, close: () -> Unit) {
+    val lang = LocalBackplaneLanguage.current
     var selecting by remember { mutableStateOf(false) }
     DropdownMenu(expanded = open, onDismissRequest = close) {
-        DropdownMenuItem(text = { Text("Copy") }, onClick = { close(); m.act("copy", text) })
-        DropdownMenuItem(text = { Text("Select text") }, onClick = { close(); selecting = true })
+        DropdownMenuItem(text = { Text(NativeMessages.common_copy(lang)) }, onClick = { close(); m.act("copy", text) })
+        DropdownMenuItem(text = { Text(NativeMessages.native_text_select_action(lang)) }, onClick = { close(); selecting = true })
     }
     if (selecting) {
         Overlaid()
@@ -370,8 +375,8 @@ private fun MessageMenu(m: AppModel, text: String, open: Boolean, close: () -> U
                     Text(text, Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState()), style = MaterialTheme.typography.bodyLarge)
                 }
             },
-            confirmButton = { TextButton(onClick = { selecting = false }) { Text("Done") } },
-            dismissButton = { TextButton(onClick = { m.act("copy", text) }) { Text("Copy all") } },
+            confirmButton = { TextButton(onClick = { selecting = false }) { Text(NativeMessages.tour_done(lang)) } },
+            dismissButton = { TextButton(onClick = { m.act("copy", text) }) { Text(NativeMessages.native_text_copyall_action(lang)) } },
         )
     }
 }
@@ -384,6 +389,7 @@ private fun Stamp(s: String) {
 
 @Composable
 fun EntryRow(m: AppModel, e: Entry, show: (String) -> Unit) {
+    val lang = LocalBackplaneLanguage.current
     var menu by remember(e.text) { mutableStateOf(false) }
     when (e.kind) {
         "user" -> Column(Modifier.fillMaxWidth().padding(start = 48.dp), horizontalAlignment = Alignment.End,
@@ -410,7 +416,7 @@ fun EntryRow(m: AppModel, e: Entry, show: (String) -> Unit) {
         "fold" -> Row(Modifier.fillMaxWidth().clickable { m.act("fold", e.value) }.padding(vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Icon(if (e.open) Icons.Filled.ExpandMore else Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                if (e.open) "Hide" else "Show", Modifier.size(16.dp), tint = MaterialTheme.colorScheme.outline)
+                if (e.open) NativeMessages.common_hide(lang) else NativeMessages.common_show(lang), Modifier.size(16.dp), tint = MaterialTheme.colorScheme.outline)
             Text(e.text, style = MaterialTheme.typography.labelMedium.copy(fontFamily = mono),
                 color = MaterialTheme.colorScheme.outline, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
@@ -420,14 +426,14 @@ fun EntryRow(m: AppModel, e: Entry, show: (String) -> Unit) {
         // a reminder the hub delivered: a bell, Reminder, the text and when
         "reminder" -> Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Icon(Icons.Filled.Notifications, "Reminder", Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+            Icon(Icons.Filled.Notifications, NativeMessages.sched_kind_reminder(lang), Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
             Text(e.text, Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
             Text(e.at, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
         }
         // a design step: shows it in the viewer
         "step" -> Row(Modifier.fillMaxWidth().clickable { m.act("hist-show", e.value) }.padding(vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Icon(Icons.Filled.History, "Show in the viewer", Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+            Icon(Icons.Filled.History, NativeMessages.native_entry_viewer_short(lang), Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
             Text(e.text, style = MaterialTheme.typography.labelMedium.copy(fontFamily = mono),
                 color = MaterialTheme.colorScheme.primary, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
@@ -455,6 +461,7 @@ private fun subColor(state: String) = when (state) {
 // accent while any are at work
 @Composable
 fun SubsView(m: AppModel, subs: Subs) {
+    val lang = LocalBackplaneLanguage.current
     val busy = subs.busy.isNotEmpty()
     Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = corner, modifier = Modifier.fillMaxWidth()
         .then(if (busy) Modifier.border(1.dp, PhaseColor.accent, corner) else Modifier)) {
@@ -462,7 +469,7 @@ fun SubsView(m: AppModel, subs: Subs) {
             // the head opens and shuts the panel; done, it is folded to this line
             Row(Modifier.fillMaxWidth().then(if (subs.act.isNotEmpty()) Modifier.clickable { m.act(subs.act, subs.value) } else Modifier),
                 verticalAlignment = Alignment.CenterVertically) {
-                Text("Subagents", Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold,
+                Text(NativeMessages.thread_subagents(lang), Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold,
                     color = if (busy) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outline)
                 Text(subs.word.ifEmpty { subs.busy }, style = MaterialTheme.typography.labelMedium,
                     color = if (busy) PhaseColor.accent else MaterialTheme.colorScheme.outline)
@@ -475,7 +482,7 @@ fun SubsView(m: AppModel, subs: Subs) {
                     Text(if (r.agent) (if (r.open) "▾" else "▸") else r.who, style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.outline, maxLines = 1)
                     Text(r.title, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    if (r.cancel.isNotEmpty()) Text(if (r.cancel == "wake-cancel") "Cancel" else "Stop", Modifier.clickable { m.act(r.cancel, r.id) }.padding(horizontal = 4.dp),
+                    if (r.cancel.isNotEmpty()) Text(if (r.cancel == "wake-cancel") NativeMessages.common_cancel(lang) else NativeMessages.composer_stop(lang), Modifier.clickable { m.act(r.cancel, r.id) }.padding(horizontal = 4.dp),
                         style = MaterialTheme.typography.labelSmall, color = PhaseColor.warn)
                     Text(r.stateLabel.ifEmpty { r.state }, style = MaterialTheme.typography.labelSmall, color = subColor(r.state))
                 }
@@ -522,14 +529,15 @@ fun AskCard(m: AppModel, a: Ask) {
 // a `>` thread, a `%` project or a `#` room, each with its summary
 @Composable
 fun ComposerExtras(m: AppModel, t: ThreadView) {
+    val lang = LocalBackplaneLanguage.current
     t.btw?.let { b ->
         Surface(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), shape = corner,
             color = MaterialTheme.colorScheme.surfaceVariant) {
             Column(Modifier.padding(start = 12.dp, bottom = 10.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("btw · " + b.q, Modifier.weight(1f), style = MaterialTheme.typography.labelMedium,
+                    Text(NativeMessages.native_composer_btw(lang, b.q), Modifier.weight(1f), style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.outline, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    IconButton(onClick = { m.act("btw-close") }) { Icon(Icons.Filled.Close, "Close") }
+                    IconButton(onClick = { m.act("btw-close") }) { Icon(Icons.Filled.Close, NativeMessages.common_close(lang)) }
                 }
                 Text(b.a, Modifier.padding(end = 12.dp).heightIn(max = 240.dp).verticalScroll(rememberScrollState()),
                     style = MaterialTheme.typography.bodyMedium)
@@ -569,7 +577,7 @@ fun ComposerExtras(m: AppModel, t: ThreadView) {
                     }
                 }
                 IconButton(onClick = { m.act("skill-close") }, Modifier.align(Alignment.TopEnd).size(48.dp)) {
-                    Icon(Icons.Filled.Close, "Close suggestions", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Icon(Icons.Filled.Close, NativeMessages.native_composer_suggestions_close(lang), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
@@ -583,7 +591,7 @@ fun ComposerExtras(m: AppModel, t: ThreadView) {
                 horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 Icon(if (c.image) Icons.Filled.Image else Icons.Filled.Description, null, Modifier.size(14.dp))
                 Text(c.label, style = MaterialTheme.typography.labelMedium, maxLines = 1)
-                Icon(Icons.Filled.Close, "Remove " + c.label, Modifier.size(14.dp))
+                Icon(Icons.Filled.Close, NativeMessages.native_composer_remove(lang, c.label), Modifier.size(14.dp))
             }
         }
         if (t.uploading.isNotEmpty()) {
@@ -625,6 +633,7 @@ internal suspend fun attachUris(ctx: android.content.Context, m: AppModel, uris:
 // the paperclip: photos or files, each sent up in pieces
 @Composable
 fun AttachButton(m: AppModel) {
+    val lang = LocalBackplaneLanguage.current
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var open by remember { mutableStateOf(false) }
@@ -634,13 +643,13 @@ fun AttachButton(m: AppModel) {
     val photos = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(10)) { send(it, true) }
     val files = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { send(it, false) }
     Box {
-        IconButton(onClick = { open = true }) { Icon(Icons.Filled.AttachFile, "Attach") }
+        IconButton(onClick = { open = true }) { Icon(Icons.Filled.AttachFile, NativeMessages.composer_attach(lang)) }
         DropdownMenu(open, { open = false }) {
-            DropdownMenuItem(text = { Text("Photos") }, leadingIcon = { Icon(Icons.Filled.Image, null) }, onClick = {
+            DropdownMenuItem(text = { Text(NativeMessages.native_attach_photos(lang)) }, leadingIcon = { Icon(Icons.Filled.Image, null) }, onClick = {
                 open = false
                 photos.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
             })
-            DropdownMenuItem(text = { Text("Files") }, leadingIcon = { Icon(Icons.Filled.Folder, null) }, onClick = {
+            DropdownMenuItem(text = { Text(NativeMessages.viewer_files(lang)) }, leadingIcon = { Icon(Icons.Filled.Folder, null) }, onClick = {
                 open = false
                 files.launch(arrayOf("*/*"))
             })
@@ -652,17 +661,19 @@ fun AttachButton(m: AppModel) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun Sheet(
-    title: String, close: () -> Unit, closeLabel: String = "Close",
+    title: String, close: () -> Unit, closeLabel: String? = null,
     bar: Color = Color.Unspecified, onBar: Color = Color.Unspecified,
     // a dialog, or (inline) drawn in place of the screen, which follows the
     // keyboard as the thread's composer does
     inline: Boolean = false,
     actions: @Composable () -> Unit = {}, content: @Composable (PaddingValues) -> Unit,
 ) {
-    if (inline) SheetBody(title, close, closeLabel, bar, onBar, actions, content)
+    val lang = LocalBackplaneLanguage.current
+    val resolvedClose = closeLabel ?: NativeMessages.common_close(lang)
+    if (inline) SheetBody(title, close, resolvedClose, bar, onBar, actions, content)
     else Dialog(close, DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         Overlaid()
-        SheetBody(title, close, closeLabel, bar, onBar, actions, content)
+        SheetBody(title, close, resolvedClose, bar, onBar, actions, content)
     }
 }
 
@@ -686,15 +697,16 @@ private fun SheetBody(
 // what the thread changed, with the git actions
 @Composable
 fun DiffSheet(m: AppModel, d: Diff) {
+    val lang = LocalBackplaneLanguage.current
     var git by remember { mutableStateOf(false) }
     var reverting by remember { mutableStateOf(false) }
-    Sheet("Diff", { m.act("panel") }, actions = {
+    Sheet(NativeMessages.viewer_diff(lang), { m.act("panel") }, actions = {
         Box {
             TextButton(onClick = { git = true }) { Text("Git") }
             DropdownMenu(git, { git = false }) {
-                DropdownMenuItem(text = { Text("Commit & push") }, onClick = { git = false; m.act("git", "commit_push") })
-                DropdownMenuItem(text = { Text("Open PR") }, onClick = { git = false; m.act("git", "commit_push_pr") })
-                DropdownMenuItem(text = { Text("Revert thread", color = MaterialTheme.colorScheme.error) },
+                DropdownMenuItem(text = { Text(NativeMessages.palette_commit(lang)) }, onClick = { git = false; m.act("git", "commit_push") })
+                DropdownMenuItem(text = { Text(NativeMessages.viewer_diff_pr(lang)) }, onClick = { git = false; m.act("git", "commit_push_pr") })
+                DropdownMenuItem(text = { Text(NativeMessages.palette_revert(lang), color = MaterialTheme.colorScheme.error) },
                     onClick = { git = false; reverting = true })
             }
         }
@@ -715,11 +727,11 @@ fun DiffSheet(m: AppModel, d: Diff) {
     if (reverting) Overlaid()
     if (reverting) AlertDialog(
         onDismissRequest = { reverting = false },
-        title = { Text("Put the files back as they were when this thread began?") },
+        title = { Text(NativeMessages.native_diff_revert_ask(lang)) },
         confirmButton = {
-            TextButton(onClick = { reverting = false; m.act("revert", "0") }) { Text("Revert thread", color = MaterialTheme.colorScheme.error) }
+            TextButton(onClick = { reverting = false; m.act("revert", "0") }) { Text(NativeMessages.palette_revert(lang), color = MaterialTheme.colorScheme.error) }
         },
-        dismissButton = { TextButton(onClick = { reverting = false }) { Text("Cancel") } },
+        dismissButton = { TextButton(onClick = { reverting = false }) { Text(NativeMessages.common_cancel(lang)) } },
     )
 }
 
@@ -813,6 +825,7 @@ fun TermField(focus: FocusRequester, key: (String, Int) -> Unit, paste: (String)
 // the keys a phone keyboard lacks, and the keyboard's own toggle
 @Composable
 fun TermKeys(key: (String, Int) -> Unit, keyboard: () -> Unit) {
+    val lang = LocalBackplaneLanguage.current
     Surface(tonalElevation = 3.dp) {
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 6.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -828,11 +841,11 @@ fun TermKeys(key: (String, Int) -> Unit, keyboard: () -> Unit) {
             k("^D") { key("d", 4) }
             k("^Z") { key("z", 4) }
             k("^L") { key("l", 4) }
-            ik(Icons.AutoMirrored.Filled.ArrowBack, "Left") { key("ArrowLeft", 0) }
-            ik(Icons.Filled.ArrowUpward, "Up") { key("ArrowUp", 0) }
-            ik(Icons.Filled.ArrowDownward, "Down") { key("ArrowDown", 0) }
-            ik(Icons.AutoMirrored.Filled.ArrowForward, "Right") { key("ArrowRight", 0) }
-            ik(Icons.Filled.Keyboard, "Keyboard", keyboard)
+            ik(Icons.AutoMirrored.Filled.ArrowBack, NativeMessages.native_key_left(lang)) { key("ArrowLeft", 0) }
+            ik(Icons.Filled.ArrowUpward, NativeMessages.native_key_up(lang)) { key("ArrowUp", 0) }
+            ik(Icons.Filled.ArrowDownward, NativeMessages.native_key_down(lang)) { key("ArrowDown", 0) }
+            ik(Icons.AutoMirrored.Filled.ArrowForward, NativeMessages.native_key_right(lang)) { key("ArrowRight", 0) }
+            ik(Icons.Filled.Keyboard, NativeMessages.native_key_keyboard(lang), keyboard)
         }
     }
 }
@@ -841,6 +854,7 @@ fun TermKeys(key: (String, Int) -> Unit, keyboard: () -> Unit) {
 // hidden field, and a row of keys a phone keyboard lacks
 @Composable
 fun TermSheet(m: AppModel, t: Term) {
+    val lang = LocalBackplaneLanguage.current
     val focus = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
     var typing by remember { mutableStateOf(true) }
@@ -858,7 +872,7 @@ fun TermSheet(m: AppModel, t: Term) {
     LaunchedEffect(Unit) { focus.requestFocus(); keyboard?.show() }
     val bg = rgb(t.bg)
     val fg = rgb(t.fg)
-    Sheet(t.title.ifEmpty { "Terminal" }, { m.act("term-toggle") }, bar = bg, onBar = fg, inline = true) { pad ->
+    Sheet(t.title.ifEmpty { NativeMessages.palette_terminal(lang) }, { m.act("term-toggle") }, bar = bg, onBar = fg, inline = true) { pad ->
         Column(Modifier.fillMaxSize().padding(pad).imePadding()) {
             Box(Modifier.weight(1f).fillMaxWidth().background(bg)
                 .clickable { focus.requestFocus(); keyboard?.show(); typing = true }
@@ -881,6 +895,7 @@ fun TermSheet(m: AppModel, t: Term) {
 // and the screen is held to a height, kept on the cursor.
 @Composable
 fun EmbView(m: AppModel, e: Emb, top: Boolean = false) {
+    val lang = LocalBackplaneLanguage.current
     val focus = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
@@ -896,7 +911,7 @@ fun EmbView(m: AppModel, e: Emb, top: Boolean = false) {
             Text(e.title, Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, color = fg,
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
             Box(Modifier.size(36.dp).clickable { m.act("emb-pin", e.key) }, contentAlignment = Alignment.Center) {
-                Icon(Icons.Filled.PushPin, if (e.pinned) "Unpin" else "Pin to the top", Modifier.size(16.dp),
+                Icon(Icons.Filled.PushPin, if (e.pinned) NativeMessages.menu_unpin(lang) else NativeMessages.terminal_pin(lang), Modifier.size(16.dp),
                     tint = if (e.pinned) PhaseColor.accent else fg.copy(alpha = 0.5f))
             }
         }
@@ -929,6 +944,7 @@ fun EmbView(m: AppModel, e: Emb, top: Boolean = false) {
 // that unpins it; else a gray row that starts it again
 @Composable
 fun EmbRow(m: AppModel, entry: Entry, e: Emb?) {
+    val lang = LocalBackplaneLanguage.current
     val style = MaterialTheme.typography.labelMedium.copy(fontFamily = mono)
     val faint = MaterialTheme.colorScheme.outline
     when {
@@ -938,14 +954,14 @@ fun EmbRow(m: AppModel, entry: Entry, e: Emb?) {
         }
         e.pinned -> Row(Modifier.fillMaxWidth().clickable { m.act("emb-pin", e.key) }.padding(vertical = 2.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Filled.PushPin, "Unpin", Modifier.size(14.dp), tint = faint)
-            Text("${e.title} · pinned at the top", style = style, color = faint, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Icon(Icons.Filled.PushPin, NativeMessages.menu_unpin(lang), Modifier.size(14.dp), tint = faint)
+            Text(NativeMessages.web_terminal_pinned(lang, e.title), style = style, color = faint, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         e.live -> EmbView(m, e)
         else -> Row(Modifier.fillMaxWidth().clickable { m.act("emb-restart", e.restart) }.padding(vertical = 2.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Filled.PlayArrow, "Restart", Modifier.size(14.dp), tint = faint)
-            Text("${e.title} · inactive, tap to restart", style = style, color = faint, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Icon(Icons.Filled.PlayArrow, NativeMessages.native_term_restart(lang), Modifier.size(14.dp), tint = faint)
+            Text(NativeMessages.native_term_inactive(lang, e.title), style = style, color = faint, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
@@ -954,19 +970,20 @@ fun EmbRow(m: AppModel, entry: Entry, e: Emb?) {
 // action with its value, then the sheet closes
 @Composable
 fun FindSheet(m: AppModel, f: Find) {
+    val lang = LocalBackplaneLanguage.current
     var text by remember { mutableStateOf(f.query) }
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { focus.requestFocus() }
     val files = f.mode == "files"
-    Sheet(if (files) "Find file" else "Search threads", { m.act("find-close") }, closeLabel = "Cancel") { pad ->
+    Sheet(if (files) NativeMessages.palette_findfile(lang) else NativeMessages.palette_search(lang), { m.act("find-close") }, closeLabel = NativeMessages.common_cancel(lang)) { pad ->
         Column(Modifier.fillMaxSize().padding(pad).imePadding()) {
             OutlinedTextField(text, { text = it; m.act("find-q", it) },
                 Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).focusRequester(focus), singleLine = true,
-                placeholder = { Text(if (files) "File name" else "Titles and messages") },
+                placeholder = { Text(if (files) NativeMessages.native_find_file_label(lang) else NativeMessages.native_find_threads_label(lang)) },
                 leadingIcon = { Icon(Icons.Filled.Search, null) },
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false))
             if (f.rows.isEmpty()) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(if (f.query.isEmpty()) (if (files) "Type to find a file" else "Type to search threads") else "Nothing found",
+                Text(if (f.query.isEmpty()) (if (files) NativeMessages.native_find_file_hint(lang) else NativeMessages.native_find_threads_hint(lang)) else NativeMessages.native_find_empty(lang),
                     color = MaterialTheme.colorScheme.outline)
             } else LazyColumn(Modifier.fillMaxSize()) {
                 items(f.rows) { r ->

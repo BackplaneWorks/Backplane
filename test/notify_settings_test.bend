@@ -154,4 +154,6 @@ def main() -> IO(Unit):
     names(texts([web]), phone, glyphs(ops(out)), ["Notify me for", "Needs me", "Settled", "Reminders", "Everything"])
     C.Check.str("web lead", Bool.show(String.contains(texts([web]), U.Notify.lead(I.En{}))), "True")
     C.Check.str("phone lead", Bool.show(String.contains(phone, U.Notify.lead(I.En{}))), "True")
+    C.Check.str("web settings offers OMP provider", Bool.show(button([web], "agent.provider=omp")), "True")
+    C.Check.str("phone settings offers OMP provider", Bool.show(String.contains(phone, "agent.provider=omp")), "True")
     controls(["notify.needs", "notify.settled", "notify.reminders", "notify.all"], out, web, phone)

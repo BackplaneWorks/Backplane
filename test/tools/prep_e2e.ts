@@ -62,7 +62,7 @@ const check = (ok: boolean, what: string) => {
 const port = freePort();
 const proc = Bun.spawn([resolve(bin), "--home", home, "--port", String(port), "--no-tailscale", "--foreground"], {
   env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "", BACKPLANE_GOOGLE_BAKE: "0", FAKE_LOG: log,
-    BP_WORK_MS: "300", XDG_CACHE_HOME: join(root, "cache"), PATH: `${fake}:${process.env.PATH}` },
+    BP_WORK_MS: "300", XDG_CACHE_HOME: join(root, "cache"), BACKPLANE_AGENTS: fake, PATH: `${fake}:${process.env.PATH}` },
   stdout: "ignore",
   stderr: "ignore",
 });

@@ -43,6 +43,7 @@ struct BotCat: View {
 // -----
 
 struct NewBotSheet: View {
+    @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let form: NewBot
     @State private var name = ""
@@ -54,22 +55,22 @@ struct NewBotSheet: View {
                 Section {
                     TextField(form.hint, text: $name)
                         .onChange(of: name) { _, t in model.field("name", t) }
-                    TextField("Persona", text: $persona, axis: .vertical)
+                    TextField(NativeMessages.bots_persona(lang), text: $persona, axis: .vertical)
                         .lineLimit(3...10)
                         .onChange(of: persona) { _, t in model.field("persona", t) }
                 }
                 Section {
-                    Picker("Provider", selection: Binding(get: { form.provider }, set: { model.act("bfield", "provider" + sep + $0) })) {
+                    Picker(NativeMessages.native_bot_provider(lang), selection: Binding(get: { form.provider }, set: { model.act("bfield", "provider" + sep + $0) })) {
                         ForEach(form.providers, id: \.provider) { Text($0.label).tag($0.provider) }
                     }
                 }
             }
-            .navigationTitle("New bot")
+            .navigationTitle(NativeMessages.bots_new(lang))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { model.act("form-close", "@bnew") } }
+                ToolbarItem(placement: .cancellationAction) { Button(NativeMessages.common_cancel(lang)) { model.act("form-close", "@bnew") } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Create") { model.act("bot-create") }
+                    Button(NativeMessages.common_create(lang)) { model.act("bot-create") }
                         .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             }
@@ -79,6 +80,7 @@ struct NewBotSheet: View {
 }
 
 struct NewRoomSheet: View {
+    @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let form: NewRoom
     @State private var name = ""
@@ -86,9 +88,9 @@ struct NewRoomSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                TextField("Name", text: $name)
+                TextField(NativeMessages.bots_name(lang), text: $name)
                     .onChange(of: name) { _, t in model.field("rname", t) }
-                Section("Members") {
+                Section(NativeMessages.native_room_members(lang)) {
                     ForEach(form.picks, id: \.id) { p in
                         Button { model.act("room-pick", p.id) } label: {
                             HStack {
@@ -100,12 +102,12 @@ struct NewRoomSheet: View {
                     }
                 }
             }
-            .navigationTitle("New room")
+            .navigationTitle(NativeMessages.rooms_new(lang))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { model.act("form-close", "@rnew") } }
+                ToolbarItem(placement: .cancellationAction) { Button(NativeMessages.common_cancel(lang)) { model.act("form-close", "@rnew") } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") { model.act("room-save") }.disabled(!form.picks.contains { $0.on })
+                    Button(NativeMessages.common_save(lang)) { model.act("room-save") }.disabled(!form.picks.contains { $0.on })
                 }
             }
         }
@@ -221,6 +223,7 @@ struct BotScreen: View {
 }
 
 private struct MemoryTab: View {
+    @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let items: [BotMemory]
 
@@ -239,10 +242,10 @@ private struct MemoryTab: View {
                     Text(m.text).font(.subheadline)
                     if !m.tags.isEmpty { Text(m.tags).font(.caption).foregroundStyle(.secondary) }
                 }
-                .swipeActions { Button("Forget", role: .destructive) { model.act("mem-forget", m.key) } }
+                .swipeActions { Button(NativeMessages.bots_memory_forget(lang), role: .destructive) { model.act("mem-forget", m.key) } }
             }
         }
-        .overlay { if items.isEmpty { ContentUnavailableView("Nothing remembered", systemImage: "brain") } }
+        .overlay { if items.isEmpty { ContentUnavailableView(NativeMessages.native_bot_memory_empty(lang), systemImage: "brain") } }
     }
 }
 
@@ -257,51 +260,49 @@ private func routineIcon(_ kind: String?) -> String {
 }
 
 // "Next Tue 14 Oct 09:30 EEST · in 3h", with the routine's zone when it is not the person's
-private func routineNext(_ next: String, _ rel: String?, _ zone: String?) -> String {
-    var s = "Next " + next
-    if let rel = rel, !rel.isEmpty { s += " · " + rel }
-    if let zone = zone, zone != "your time" { s += " · " + zone }
-    return s
+private func routineNext(_ lang: String, _ next: String, _ rel: String?, _ zone: String?) -> String {
+    NativeMessages.routine_next(lang, next, (rel ?? "").isEmpty ? "none" : "some", rel ?? "", zone == nil || zone == "your time" ? "none" : "some", zone ?? "")
 }
 
 private struct RoutinesTab: View {
+    @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let items: [BotRoutine]
     let form: RoutineForm?
 
     var body: some View {
         List {
-            Button { model.act("routine-edit", "") } label: { Label("New routine", systemImage: "plus") }
+            Button { model.act("routine-edit", "") } label: { Label(NativeMessages.routine_new(lang), systemImage: "plus") }
             ForEach(items, id: \.id) { r in
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(r.name).font(.subheadline.weight(.semibold))
                         HStack(spacing: 6) {
                             // kind chip: Repeats, Once, or Reminder with a bell
-                            Label(r.label ?? "Repeats", systemImage: routineIcon(r.kind))
+                            Label(r.label ?? NativeMessages.sched_kind_repeat(lang), systemImage: routineIcon(r.kind))
                                 .font(.caption2).padding(.horizontal, 5).padding(.vertical, 1)
                                 .background(Color.secondary.opacity(0.15))
                             Text(r.when).font(.caption.monospaced()).foregroundStyle(.secondary)
                         }
                         if r.done == true {
-                            Text(r.doneText ?? "Done").font(.caption).foregroundStyle(.secondary)
+                            Text(r.doneText ?? NativeMessages.tour_done(lang)).font(.caption).foregroundStyle(.secondary)
                         } else if let n = r.next, !n.isEmpty {
-                            Text(routineNext(n, r.rel, r.zone))
+                            Text(routineNext(lang, n, r.rel, r.zone))
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                         Text(r.prompt).font(.caption).lineLimit(2)
                     }
                     Spacer()
                     if r.done != true {
-                        Toggle("On", isOn: Binding(get: { r.on }, set: { _ in model.act("routine-toggle", r.id) })).labelsHidden()
+                        Toggle(NativeMessages.settings_lang_on(lang), isOn: Binding(get: { r.on }, set: { _ in model.act("routine-toggle", r.id) })).labelsHidden()
                     }
                 }
                 .opacity(r.done == true ? 0.55 : 1)
                 .contentShape(.rect)
                 .onTapGesture { model.act("routine-edit", r.id) }
                 .swipeActions {
-                    Button("Delete", role: .destructive) { model.act("routine-delete", r.id) }
-                    if r.done != true { Button("Run") { model.act("routine-run", r.id) }.tint(.indigo) }
+                    Button(NativeMessages.common_delete(lang), role: .destructive) { model.act("routine-delete", r.id) }
+                    if r.done != true { Button(NativeMessages.common_run(lang)) { model.act("routine-run", r.id) }.tint(.indigo) }
                 }
             }
         }
@@ -312,6 +313,7 @@ private struct RoutinesTab: View {
 }
 
 private struct RoutineSheet: View {
+    @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let form: RoutineForm
     @State private var name = ""
@@ -321,30 +323,30 @@ private struct RoutineSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                TextField("Name", text: $name).onChange(of: name) { _, t in model.field("oname", t) }
+                TextField(NativeMessages.bots_name(lang), text: $name).onChange(of: name) { _, t in model.field("oname", t) }
                 Section {
-                    TextField("daily 09:30 · tomorrow 9am · in 2h", text: $cron)
+                    TextField(NativeMessages.native_routine_examples(lang), text: $cron)
                         .font(.body.monospaced())
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .onChange(of: cron) { _, t in model.field("ocron", t) }
                 } header: {
-                    Text("When")
+                    Text(NativeMessages.native_routine_timefield(lang))
                 } footer: {
-                    Text((form.hint ?? "").isEmpty ? "A schedule (daily 09:30, every 15m, cron) or a time (tomorrow 9am, in 2h)" : form.hint!)
+                    Text((form.hint ?? "").isEmpty ? NativeMessages.native_routine_hint(lang) : form.hint!)
                 }
-                Section("Prompt") {
-                    TextField("What to do", text: $prompt, axis: .vertical)
+                Section(NativeMessages.native_routine_prompt(lang)) {
+                    TextField(NativeMessages.native_routine_what(lang), text: $prompt, axis: .vertical)
                         .lineLimit(3...12)
                         .onChange(of: prompt) { _, t in model.field("oprompt", t) }
                 }
             }
-            .navigationTitle(form.id.isEmpty ? "New routine" : "Routine")
+            .navigationTitle(form.id.isEmpty ? NativeMessages.routine_new(lang) : NativeMessages.native_routine_title(lang))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { model.act("form-close", "@onew") } }
+                ToolbarItem(placement: .cancellationAction) { Button(NativeMessages.common_cancel(lang)) { model.act("form-close", "@onew") } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") { model.act("routine-save") }.disabled(cron.trimmingCharacters(in: .whitespaces).isEmpty)
+                    Button(NativeMessages.common_save(lang)) { model.act("routine-save") }.disabled(cron.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             }
         }
@@ -353,6 +355,7 @@ private struct RoutineSheet: View {
 }
 
 private struct HooksTab: View {
+    @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let bot: BotView
     @State private var name = ""
@@ -361,18 +364,18 @@ private struct HooksTab: View {
         List {
             Section {
                 HStack {
-                    TextField("Name", text: $name).onChange(of: name) { _, t in model.field("hname", t) }
-                    Button("Add") { model.act("hook-new"); name = "" }
+                    TextField(NativeMessages.bots_name(lang), text: $name).onChange(of: name) { _, t in model.field("hname", t) }
+                    Button(NativeMessages.common_add(lang)) { model.act("hook-new"); name = "" }
                 }
             }
             if let s = bot.secret, !s.isEmpty {
                 Section {
                     Text(s).font(.caption.monospaced()).textSelection(.enabled)
-                    Button("Copy", systemImage: "doc.on.doc") { model.act("copy", s) }
+                    Button(NativeMessages.common_copy(lang), systemImage: "doc.on.doc") { model.act("copy", s) }
                 } header: {
-                    Text("Secret")
+                    Text(NativeMessages.native_hook_secret(lang))
                 } footer: {
-                    Text("Shown once.")
+                    Text(NativeMessages.native_hook_once(lang))
                 }
             }
             Section {
@@ -383,8 +386,8 @@ private struct HooksTab: View {
                         Text(url).font(.caption.monospaced()).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
                         Text(h.last.isEmpty ? "\(h.count)" : "\(h.count) · " + h.last).font(.caption2).foregroundStyle(.secondary)
                     }
-                    .contextMenu { Button("Copy URL", systemImage: "doc.on.doc") { model.act("copy", url) } }
-                    .swipeActions { Button("Revoke", role: .destructive) { model.act("hook-revoke", h.id) } }
+                    .contextMenu { Button(NativeMessages.native_hook_copyurl(lang), systemImage: "doc.on.doc") { model.act("copy", url) } }
+                    .swipeActions { Button(NativeMessages.hooks_revoke(lang), role: .destructive) { model.act("hook-revoke", h.id) } }
                 }
             }
         }
@@ -392,6 +395,7 @@ private struct HooksTab: View {
 }
 
 private struct SettingsTab: View {
+    @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let bot: BotView
     let settings: BotSettings
@@ -406,11 +410,11 @@ private struct SettingsTab: View {
 
     var body: some View {
         Form {
-            Section("Persona") {
-                TextField("Persona", text: $persona, axis: .vertical)
+            Section(NativeMessages.bots_persona(lang)) {
+                TextField(NativeMessages.bots_persona(lang), text: $persona, axis: .vertical)
                     .lineLimit(4...14)
                     .onChange(of: persona) { _, t in model.field("persona", t) }
-                Button("Save") { model.act("bot-edit") }.disabled(persona == settings.persona)
+                Button(NativeMessages.common_save(lang)) { model.act("bot-edit") }.disabled(persona == settings.persona)
             }
             Section {
                 if !settings.google.status.isEmpty { Text(settings.google.status).font(.subheadline) }
@@ -419,38 +423,38 @@ private struct SettingsTab: View {
                         HStack {
                             Text(a).lineLimit(1)
                             Spacer()
-                            Button("Signature") { model.act("google", "sig-edit:" + a) }
+                            Button(NativeMessages.google_signature(lang)) { model.act("google", "sig-edit:" + a) }
                                 .buttonStyle(.borderless)
-                            Button("Sign out", role: .destructive) { model.act("google", "signout:" + a) }
+                            Button(NativeMessages.agy_signout(lang), role: .destructive) { model.act("google", "signout:" + a) }
                                 .buttonStyle(.borderless)
                         }
                         if settings.google.sigFor == a {
-                            TextField("— Sent by Backplane on behalf of " + a, text: $gsig, axis: .vertical)
+                            TextField(NativeMessages.google_signature_placeholder(lang, a), text: $gsig, axis: .vertical)
                                 .lineLimit(2...6)
                                 .onChange(of: gsig) { _, t in model.field("gsig", t) }
                                 .onAppear { gsig = settings.google.sigText }
                             HStack {
-                                Button("Save") { model.act("google", "sig-save") }.buttonStyle(.borderless)
-                                Button("Cancel") { model.act("google", "sig-cancel") }.buttonStyle(.borderless)
+                                Button(NativeMessages.common_save(lang)) { model.act("google", "sig-save") }.buttonStyle(.borderless)
+                                Button(NativeMessages.common_cancel(lang)) { model.act("google", "sig-cancel") }.buttonStyle(.borderless)
                             }
                         }
                     }
                 }
-                Button(settings.google.accounts.isEmpty ? "Connect Google" : "Add account") { GoogleLoop.shared.start { model.act($0, $1) } }
-                DisclosureGroup("Own client") {
-                    TextField("Client ID (Desktop app)", text: $gid)
+                Button(settings.google.accounts.isEmpty ? NativeMessages.google_connect(lang) : NativeMessages.agy_account_add(lang)) { GoogleLoop.shared.start { model.act($0, $1) } }
+                DisclosureGroup(NativeMessages.google_client_own(lang)) {
+                    TextField(NativeMessages.native_google_client_id(lang), text: $gid)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                         .onChange(of: gid) { _, t in model.field("gid", t) }
-                    SecureField("Client secret", text: $gsecret)
+                    SecureField(NativeMessages.google_client_secret(lang), text: $gsecret)
                         .onChange(of: gsecret) { _, t in model.field("gsecret", t) }
-                    Button("Save client") { model.act("google", "configure") }
+                    Button(NativeMessages.google_client_save(lang)) { model.act("google", "configure") }
                 }
                 if let u = URL(string: settings.google.url), !settings.google.url.isEmpty {
-                    Link("Open Google sign-in", destination: u)
-                    TextField("Redirected URL", text: $gpaste)
+                    Link(NativeMessages.google_open(lang), destination: u)
+                    TextField(NativeMessages.native_google_redirect(lang), text: $gpaste)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                         .onChange(of: gpaste) { _, t in model.field("gpaste", t) }
-                    Button("Finish") { model.act("google", "finish") }
+                    Button(NativeMessages.common_finish(lang)) { model.act("google", "finish") }
                 }
             } header: {
                 Text("Google")
@@ -461,29 +465,29 @@ private struct SettingsTab: View {
                         Text(p.name)
                         Text(p.url).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     }
-                    .swipeActions { Button("Unlink", role: .destructive) { model.act("peer-revoke", p.id) } }
+                    .swipeActions { Button(NativeMessages.machines_unlink(lang), role: .destructive) { model.act("peer-revoke", p.id) } }
                 }
                 HStack {
-                    TextField("This hub's address", text: $purl)
+                    TextField(NativeMessages.native_machine_address(lang), text: $purl)
                         .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
                         .onChange(of: purl) { _, t in model.field("purl", t) }
-                    Button("Invite") { model.act("peer-invite") }
+                    Button(NativeMessages.machines_invite(lang)) { model.act("peer-invite") }
                 }
                 if !settings.invite.isEmpty {
                     Text(settings.invite).font(.caption.monospaced()).textSelection(.enabled)
-                    Button("Copy invite", systemImage: "doc.on.doc") { model.act("copy", settings.invite) }
+                    Button(NativeMessages.native_machine_invite_copy(lang), systemImage: "doc.on.doc") { model.act("copy", settings.invite) }
                 }
                 HStack {
-                    TextField("Paste an invite", text: $join)
+                    TextField(NativeMessages.native_machine_invite_paste(lang), text: $join)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                         .onChange(of: join) { _, t in model.field("invite", t) }
-                    Button("Join") { model.act("peer-join"); join = "" }
+                    Button(NativeMessages.bots_invite_join(lang)) { model.act("peer-join"); join = "" }
                 }
             } header: {
-                Text("Machines")
+                Text(NativeMessages.bots_machines(lang))
             }
             Section {
-                Button("Delete bot", role: .destructive) { deleting = true }
+                Button(NativeMessages.bots_delete(lang), role: .destructive) { deleting = true }
             }
         }
         .onChange(of: settings.google.url) { _, u in GoogleLoop.shared.open(u) }
@@ -493,8 +497,8 @@ private struct SettingsTab: View {
             gsecret = settings.google.gsecret
             purl = settings.purl
         }
-        .confirmationDialog("Delete \(bot.name)?", isPresented: $deleting, titleVisibility: .visible) {
-            Button("Delete", role: .destructive) { model.act("bot-delete", bot.id) }
+        .confirmationDialog(NativeMessages.native_bot_delete_ask(lang, bot.name), isPresented: $deleting, titleVisibility: .visible) {
+            Button(NativeMessages.common_delete(lang), role: .destructive) { model.act("bot-delete", bot.id) }
         }
     }
 }
@@ -502,6 +506,7 @@ private struct SettingsTab: View {
 // a room, or the conversation with a bot on a linked machine: posts and a
 // composer (field is its "bfield", send the action that posts it)
 struct TalkScreen: View {
+    @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let bot: BotView
     let field: String
@@ -521,7 +526,7 @@ struct TalkScreen: View {
                             Text(p.text)
                                 .padding(.horizontal, 12).padding(.vertical, 8)
                                 .background(p.mine ? Color.accentColor.opacity(0.15) : Color(.secondarySystemBackground), in: .rect(cornerRadius: 6))
-                                .contextMenu { Button("Copy", systemImage: "doc.on.doc") { model.act("copy", p.text) } }
+                                .contextMenu { Button(NativeMessages.common_copy(lang), systemImage: "doc.on.doc") { model.act("copy", p.text) } }
                         }
                         .frame(maxWidth: .infinity, alignment: p.mine ? .trailing : .leading)
                     }
@@ -534,7 +539,7 @@ struct TalkScreen: View {
             .onChange(of: bot.posts?.count) { withAnimation { proxy.scrollTo("end", anchor: .bottom) } }
             .onChange(of: model.scrolls) { proxy.scrollTo("end", anchor: .bottom) }
         }
-        .overlay { if (bot.posts ?? []).isEmpty { ContentUnavailableView("No messages", systemImage: "bubble.left.and.bubble.right") } }
+        .overlay { if (bot.posts ?? []).isEmpty { ContentUnavailableView(NativeMessages.native_bot_messages_empty(lang), systemImage: "bubble.left.and.bubble.right") } }
         .safeAreaInset(edge: .top, spacing: 0) {
             if bot.kind == "remote" {
                 BotHeader(model: model, bot: bot, size: 48).padding(.horizontal).padding(.vertical, 8).background(.bar)
@@ -542,7 +547,7 @@ struct TalkScreen: View {
         }
         .safeAreaInset(edge: .bottom) {
             HStack(alignment: .bottom, spacing: 8) {
-                TextField(bot.kind == "room" ? "Post to the room" : "Message", text: $text, axis: .vertical)
+                TextField(bot.kind == "room" ? NativeMessages.native_room_post(lang) : NativeMessages.native_bot_message(lang), text: $text, axis: .vertical)
                     .lineLimit(1...6)
                     .padding(.horizontal, 12).padding(.vertical, 8)
                     .background(Color(.secondarySystemBackground), in: .rect(cornerRadius: 8))
@@ -554,7 +559,7 @@ struct TalkScreen: View {
                     Image(systemName: "arrow.up.circle.fill").font(.system(size: 32))
                 }
                 .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .accessibilityLabel("Send")
+                .accessibilityLabel(NativeMessages.composer_send(lang))
             }
             .padding(.horizontal).padding(.vertical, 8)
             .background(.bar)
@@ -571,7 +576,7 @@ struct TalkScreen: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
-                        Button("Delete room", systemImage: "trash", role: .destructive) { model.act("room-delete", bot.id) }
+                        Button(NativeMessages.room_delete(lang), systemImage: "trash", role: .destructive) { model.act("room-delete", bot.id) }
                     } label: {
                         Image(systemName: "ellipsis.circle")
                     }

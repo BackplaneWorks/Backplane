@@ -209,7 +209,7 @@ async function record() {
   writeFileSync(fakeLog, "");
   const app = Bun.spawn([bin, "--home", home, "--port", String(port), "--no-tailscale"], {
     env: {
-      PATH: `${fake}:/usr/local/bin:/usr/bin:/bin`, HOME: user, USER: process.env.USER ?? "h", LANG: process.env.LANG ?? "C.UTF-8",
+      BACKPLANE_AGENTS: fake, PATH: `${fake}:/usr/local/bin:/usr/bin:/bin`, HOME: user, USER: process.env.USER ?? "h", LANG: process.env.LANG ?? "C.UTF-8",
       DISPLAY: "", WAYLAND_DISPLAY: "", DBUS_SESSION_BUS_ADDRESS: "unix:path=/nonexistent",
       BACKPLANE_NO_UPDATE: "1", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "", BACKPLANE_LOCK_DIR: locks,
       BACKPLANE_DEPLOY_LOCKS: `${locks}/bp-bend.lock:${locks}/bp-wt-build.lock`, BACKPLANE_APNS_URL: "http://127.0.0.1:9",

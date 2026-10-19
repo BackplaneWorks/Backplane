@@ -384,9 +384,27 @@ def Fp.children(xs: List<&2, S.Sx>, +fp: String, +sig: U32, +pl: Place, +i: Nat,
         Fp.child.k(String.eq(S.Sx.name(x), "pad"), x, fp ++ "/" ++ Board.key(x, Nat.show(i)), sig, pl, ctx),
         Fp.children(t, fp, sig, pl, 1n+i, ctx))
 
+# 10.99 writes the footprint origin/angle as a TRS transform. Keep the
+# legacy at form for stock KiCad files. The presence of transform is
+# authoritative, including an explicitly zero translation or rotation.
+def Fp.at.k(legacy: Bool, +x: S.Sx) -> S.Sx:
+  match legacy:
+    case True{}:
+      S.Sx.get(x, "at")
+    case False{}:
+      +tr = S.Sx.get(x, "transform")
+      S.XList{S.Sx.chain([S.XAtom{S.Sx.attr(tr, "rotate")}, S.XAtom{S.Sx.arg(S.Sx.get(tr, "translate"), 1n)},
+        S.XAtom{S.Sx.arg(S.Sx.get(tr, "translate"), 0n)}, S.XAtom{"at"}], S.XEnd{})}
+
+def Fp.at(+x: S.Sx) -> S.Sx:
+  Fp.at.k(String.is_empty(S.Sx.name(S.Sx.get(x, "transform"))), x)
+
+def Fp.place(+x: S.Sx) -> Place:
+  +at = Fp.at(x)
+  Place{S.Sx.f(at, 0n), S.Sx.f(at, 1n), Geo.rad(S.Sx.f(at, 2n))}
+
 def Board.footprint(+x: S.Sx, +key: String, +sig: U32) -> List<&2, Item>:
-  +at = S.Sx.get(x, "at")
-  Fp.children(S.Sx.args(x), key, sig, Place{S.Sx.f(at, 0n), S.Sx.f(at, 1n), Geo.rad(S.Sx.f(at, 2n))}, 0n, Info.footprint(x))
+  Fp.children(S.Sx.args(x), key, sig, Fp.place(x), 0n, Info.footprint(x))
 
 # Zones
 # -----

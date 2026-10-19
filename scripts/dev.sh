@@ -149,8 +149,14 @@ build_dist() {
   python3 scripts/js-native.py dist/web/chunk-*.js
   cp src/web/sw.js dist/web/sw.js
   for f in dist/web/*.js dist/web/*.css dist/web/*.html; do gzip -9 -k -n -f "$f"; done
-  BACKPLANE_VERSION_STAMP=$ver scripts/build-app.sh src/server/main.bend dist/backplane-serve
-  BACKPLANE_VERSION_STAMP=$ver scripts/build-app.sh src/app/main.bend dist/backplane
+  if [ "$(uname -s)" = Linux ]; then
+    BACKPLANE_VERSION_STAMP=$ver scripts/build-app.sh src/app/main.bend dist/backplane
+    # Keep the server's pathname for self-exec; its entry uses argv[0].
+    cp dist/backplane dist/backplane-serve
+  else
+    BACKPLANE_VERSION_STAMP=$ver scripts/build-app.sh src/server/main.bend dist/backplane-serve
+    BACKPLANE_VERSION_STAMP=$ver scripts/build-app.sh src/app/main.bend dist/backplane
+  fi
   build_voice dist/backplane-voice
   build_kipc dist/backplane-kipc || true
   build_browser dist/backplane-browser.tmp && mv -f dist/backplane-browser.tmp dist/backplane-browser && mv -f dist/backplane-browser.tmp.stamp dist/backplane-browser.stamp || true
@@ -164,6 +170,7 @@ install_into() {
 set -eu
 src=$1 prefix=$2
 mkdir -p "$prefix" "$HOME/.local/bin"
+if [ -f "$src/cef-runtime.py" ]; then python3 "$src/cef-runtime.py" install "$src" "$prefix"; fi
 rm -rf "$prefix/web.old"
 [ -d "$prefix/web" ] && mv "$prefix/web" "$prefix/web.old"
 mv "$src/web" "$prefix/web"
@@ -175,6 +182,23 @@ ln -sf "$prefix/backplane-serve" "$HOME/.local/bin/backplane-serve"
 EOF
 }
 
+# Only machines with an optional runtime stage CEF. No runtime download or
+# host build is triggered for the default Chrome-only installation.
+stage_cef() {
+  runtime=$(python3 scripts/cef-runtime.py discover "$prefix")
+  [ -n "$runtime" ] || return 0
+  say "staging matched optional CEF host and browser helper"
+  scripts/build-cef.sh build/cef >/dev/null
+  # Reuse the pinned libraries already installed; a different distribution
+  # must never be paired with a host built against this one.
+  [ "$(sha256sum "$runtime/libcef.so" | cut -d' ' -f1)" = "$(sha256sum build/cef/Release/libcef.so | cut -d' ' -f1)" ] || { say "installed CEF distribution differs from the pinned host"; return 1; }
+  helper=build/dev-pkg/backplane-browser
+  helper_stamp=build/dev-pkg/backplane-browser.stamp
+  if [ ! -e "$helper" ]; then helper=$prefix/backplane-browser; helper_stamp=$prefix/backplane-browser.stamp; fi
+  revision=$(cat tools/cef/host.cc tools/cef/CMakeLists.txt scripts/build-cef.sh | sha256sum | cut -d' ' -f1)
+  python3 scripts/cef-runtime.py stage build/dev-pkg "$runtime" build/cef/Release/backplane-cef "$helper" "$helper_stamp" "$revision"
+}
+
 stage() {
   rm -rf build/dev-pkg && mkdir -p build/dev-pkg
   cp -R dist/web build/dev-pkg/web
@@ -182,6 +206,7 @@ stage() {
     [ -e "dist/$f" ] && cp "dist/$f" build/dev-pkg/
   done
   [ -e LICENSE ] && cp LICENSE build/dev-pkg/
+  stage_cef
   return 0
 }
 

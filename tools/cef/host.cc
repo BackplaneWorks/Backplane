@@ -1,11 +1,14 @@
 // Native X11 CEF children controlled over stdin. See README.md for the protocol.
 #include <X11/Xlib.h>
+#include <X11/Xatom.h>
 #include <X11/extensions/XI2.h>
 #include <dlfcn.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
 #include <atomic>
+#include <algorithm>
+#include <vector>
 #include <iostream>
 #include <map>
 #include <set>
@@ -51,7 +54,7 @@ int xi_opcode = 0;
 bool shield_on = false;
 std::string shown;
 std::atomic<bool> quitting{false};
-struct Entry { CefRefPtr<CefBrowser> browser; int x = 0, y = 0, w = 1280, h = 800; };
+struct Entry { CefRefPtr<CefBrowser> browser; int x = 0, y = 0, w = 1280, h = 800; bool hidden = false; };
 std::map<std::string, Entry> pages;
 std::set<std::string> reserved;
 unsigned long popup_n = 0;
@@ -69,9 +72,37 @@ void shield_place() {
   }
   XFlush(dpy);
 }
-void hide_all() {
-  for (auto& [k, e] : pages) XUnmapWindow(dpy, e.browser->GetHost()->GetWindowHandle());
-  shown.clear(); shield_place();
+// The native Linux CEF wrapper forwards _NET_WM_STATE to its Chromium
+// child widget. Unmapping the outer X window alone leaves that widget's
+// compositor visible. Preserve other state atoms (e.g. always-on-top).
+// Upstream: 14c5a08 libcef/browser/native/window_x11.cc.
+void set_hidden(Entry& e, bool hidden) {
+  if (e.hidden == hidden) return;
+  Window win = e.browser->GetHost()->GetWindowHandle();
+  Atom state = XInternAtom(dpy, "_NET_WM_STATE", False);
+  Atom hidden_atom = XInternAtom(dpy, "_NET_WM_STATE_HIDDEN", False);
+  Atom type; int format; unsigned long count, after; unsigned char* data = nullptr;
+  std::vector<Atom> atoms;
+  if (XGetWindowProperty(dpy, win, state, 0, 1024, False, XA_ATOM,
+                         &type, &format, &count, &after, &data) == Success &&
+      type == XA_ATOM && format == 32 && data) {
+    auto values = reinterpret_cast<Atom*>(data);
+    atoms.assign(values, values + count);
+  }
+  if (data) XFree(data);
+  atoms.erase(std::remove(atoms.begin(), atoms.end(), hidden_atom), atoms.end());
+  if (hidden) atoms.push_back(hidden_atom);
+  XChangeProperty(dpy, win, state, XA_ATOM, 32, PropModeReplace,
+                  reinterpret_cast<unsigned char*>(atoms.data()), atoms.size());
+  e.hidden = hidden;
+}
+void hide_all(const std::string& keep = "") {
+  for (auto& [k, e] : pages) if (k != keep) {
+    set_hidden(e, true);
+    XUnmapWindow(dpy, e.browser->GetHost()->GetWindowHandle());
+  }
+  if (keep.empty()) shown.clear();
+  shield_place();
 }
 void focus(CefRefPtr<CefBrowser> b, const std::string& key) {
   if (shown != key) return; // XSetInputFocus requires a viewable window.
@@ -122,6 +153,7 @@ class Client : public CefClient, public CefLifeSpanHandler, public CefLoadHandle
       if (it->second == key) it = pending_popups.erase(it); else ++it;
     }
     pages[key] = {b, initial_x, initial_y, opts.w, opts.h};
+    set_hidden(pages[key], true);
     XUnmapWindow(dpy, b->GetHost()->GetWindowHandle()); XFlush(dpy);
     observer = b->GetHost()->AddDevToolsMessageObserver(this);
     b->GetHost()->ExecuteDevToolsMethod(1, "Target.getTargetInfo", nullptr);
@@ -227,11 +259,11 @@ void run_command(std::string line) {
       int x = e.x, y = e.y, w, h;
       if (cmd == "show" && !(s >> x >> y)) { error(); return; }
       if (!(s >> w >> h) || w <= 0 || h <= 0 || !end()) { error(); return; }
-      if (cmd == "show") hide_all();
+      if (cmd == "show") hide_all(key);
       e.x = x; e.y = y; e.w = w; e.h = h;
       XMoveResizeWindow(dpy, win, x, y, w, h);
       e.browser->GetHost()->WasResized();
-      if (cmd == "show") { shown = key; XMapRaised(dpy, win); }
+      if (cmd == "show") { set_hidden(e, false); shown = key; XMapRaised(dpy, win); }
       shield_place();
     } else if (cmd == "focus" && end()) {
       e.browser->GetHost()->SetFocus(true); focus(e.browser, key); shield_place();

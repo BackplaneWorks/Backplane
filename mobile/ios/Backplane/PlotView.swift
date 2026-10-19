@@ -520,6 +520,7 @@ final class PlotCanvas: MTKView {
     var onNote: (Double, Double) -> Void = { _, _ in }
     var onPin: (String) -> Void = { _ in }
     private var pins: [ReviewPin] = []
+    private var pinLanguage = ""
     private var pinViews: [String: UIButton] = [:]
     private var fitted = false
     private var shownFam = ""
@@ -737,9 +738,10 @@ final class PlotCanvas: MTKView {
 
     // the pins: thumb-sized buttons on the plot's own transform, moved
     // whenever the camera moves (setNeedsDisplay), no redraw of the plot
-    func setPins(_ ps: [ReviewPin]) {
-        guard ps != pins else { return }
+    func setPins(_ ps: [ReviewPin], lang: String) {
+        guard ps != pins || lang != pinLanguage else { return }
         pins = ps
+        pinLanguage = lang
         let ids = Set(ps.map { $0.id })
         for (id, v) in pinViews where !ids.contains(id) { v.removeFromSuperview(); pinViews[id] = nil }
         for p in ps where pinViews[p.id] == nil {
@@ -766,7 +768,7 @@ final class PlotCanvas: MTKView {
             box.layer.borderColor = UIColor.white.cgColor
             box.layer.borderWidth = 1.5
             n.text = p.count > 0 ? String(p.count) : ""
-            b.accessibilityLabel = "Comment" + (p.count > 0 ? ", \(p.count) replies" : "")
+            b.accessibilityLabel = NativeMessages.native_review_pin(lang, p.count > 0 ? "replies" : "none", String(p.count))
         }
         layoutPins()
     }
@@ -860,6 +862,7 @@ extension PlotCanvas: UIGestureRecognizerDelegate {
 }
 
 struct PlotCanvasView: UIViewRepresentable {
+    @Environment(\.backplaneLanguage) private var lang
     let frame: PlotFrame?
     let mesh: MeshFrame?
     let viewer: Viewer
@@ -870,7 +873,7 @@ struct PlotCanvasView: UIViewRepresentable {
     func makeUIView(context: Context) -> UIView {
         guard let c = PlotCanvas(canvas: .zero) else {
             let l = UILabel()
-            l.text = "This device has no Metal."
+            l.text = NativeMessages.native_viewer_metal(lang)
             l.textAlignment = .center
             return l
         }
@@ -878,7 +881,10 @@ struct PlotCanvasView: UIViewRepresentable {
     }
 
     func updateUIView(_ v: UIView, context: Context) {
-        guard let c = v as? PlotCanvas else { return }
+        guard let c = v as? PlotCanvas else {
+            (v as? UILabel)?.text = NativeMessages.native_viewer_metal(lang)
+            return
+        }
         c.margin = viewer.margin
         c.zmin = viewer.zmin
         c.zmax = viewer.zmax
@@ -887,7 +893,7 @@ struct PlotCanvasView: UIViewRepresentable {
         c.onPick = pick
         c.onNote = onNote
         c.onPin = onPin
-        c.setPins(viewer.comments?.pins ?? [])
+        c.setPins(viewer.comments?.pins ?? [], lang: lang)
         c.renderer.top = viewer.top
         c.renderer.bottom = viewer.bottom
         c.renderer.orbit.fov = viewer.fov
@@ -948,6 +954,7 @@ struct PlotCanvasView: UIViewRepresentable {
 
 // what a tapped item is, as the window's inspector shows it
 private struct CardView: View {
+    @Environment(\.backplaneLanguage) private var lang
     let card: Card
     let model: AppModel
 
@@ -957,7 +964,7 @@ private struct CardView: View {
                 Text(card.title).font(.headline)
                 Spacer()
                 Button { model.act("view-unpick") } label: { Image(systemName: "xmark") }
-                    .accessibilityLabel("Close")
+                    .accessibilityLabel(NativeMessages.common_close(lang))
             }
             ForEach(Array(card.rows.enumerated()), id: \.offset) { _, r in
                 HStack(alignment: .firstTextBaseline) {
@@ -966,7 +973,7 @@ private struct CardView: View {
                 }
                 .font(.subheadline)
             }
-            Button("Mention in chat") { model.act("view-mention", card.info) }
+            Button(NativeMessages.viewer_mention(lang)) { model.act("view-mention", card.info) }
                 .buttonStyle(.borderedProminent)
         }
         .padding()
@@ -978,6 +985,7 @@ private struct CardView: View {
 // under the viewer's bar: the schematic's sheet, the layers shown (only
 // those this board or sheet has), and the 3D model's parts
 struct ViewerControls: View {
+    @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let viewer: Viewer
     let present: Set<Int>
@@ -995,7 +1003,7 @@ struct ViewerControls: View {
                         .disabled(s.loop)
                     }
                 } label: {
-                    Label(sheets.first { $0.on }?.label.trimmingCharacters(in: .whitespaces) ?? "Sheet", systemImage: "doc.on.doc")
+                    Label(sheets.first { $0.on }?.label.trimmingCharacters(in: .whitespaces) ?? NativeMessages.native_viewer_sheet(lang), systemImage: "doc.on.doc")
                 }
                 .buttonStyle(.bordered)
             }
@@ -1007,10 +1015,10 @@ struct ViewerControls: View {
                 // back) (core/layers.bend)
                 Menu {
                     if viewer.layerModes ?? false {
-                        Picker("Others", selection: Binding(get: { viewer.layerMode ?? 0 }, set: { model.act("view-layer-mode", String($0)) })) {
-                            Text("All").tag(0)
-                            Text("Dim").tag(1)
-                            Text("Only").tag(2)
+                        Picker(NativeMessages.native_viewer_others(lang), selection: Binding(get: { viewer.layerMode ?? 0 }, set: { model.act("view-layer-mode", String($0)) })) {
+                            Text(NativeMessages.viewer_layers_all(lang)).tag(0)
+                            Text(NativeMessages.viewer_layers_dim(lang)).tag(1)
+                            Text(NativeMessages.viewer_layers_only(lang)).tag(2)
                         }
                         .pickerStyle(.segmented)
                     }
@@ -1020,18 +1028,18 @@ struct ViewerControls: View {
                                 Label(l.name, systemImage: l.on ? "checkmark.square" : "square")
                             }
                             Button { model.act("view-layer-pick", String(l.layer)) } label: {
-                                Label(l.active ?? false ? "All back" : "Stand out", systemImage: l.active ?? false ? "scope" : "circle.dotted")
+                                Label(l.active ?? false ? NativeMessages.native_viewer_restore(lang) : NativeMessages.native_viewer_standout(lang), systemImage: l.active ?? false ? "scope" : "circle.dotted")
                             }
                         }
                     }
                 } label: {
-                    Label(viewer.layerHead ?? "Layers", systemImage: "square.3.layers.3d")
+                    Label(viewer.layerHead ?? NativeMessages.viewer_layers(lang), systemImage: "square.3.layers.3d")
                 }
                 .buttonStyle(.bordered)
                 .menuActionDismissBehavior(.disabled)
             }
             if viewer.open == "3d", !viewer.layers.isEmpty {
-                Toggle(isOn: Binding(get: { viewer.parts ?? true }, set: { _ in model.act("view-parts") })) { Text("Parts") }
+                Toggle(isOn: Binding(get: { viewer.parts ?? true }, set: { _ in model.act("view-parts") })) { Text(NativeMessages.native_viewer_parts(lang)) }
                     .toggleStyle(.button)
             }
             Spacer()
@@ -1043,6 +1051,7 @@ struct ViewerControls: View {
 // The viewer over the thread: the plot of the screen's source, the source
 // choices, the card of what was tapped, and a way back.
 struct PlotScreen: View {
+    @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let viewer: Viewer
 
@@ -1080,7 +1089,7 @@ struct PlotScreen: View {
             }
             VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Picker("Source", selection: Binding(get: { viewer.open }, set: { model.act("view", $0) })) {
+                Picker(NativeMessages.native_viewer_source(lang), selection: Binding(get: { viewer.open }, set: { model.act("view", $0) })) {
                     ForEach(viewer.choices, id: \.value) { Text($0.label).tag($0.value) }
                 }
                 .pickerStyle(.segmented)
@@ -1088,9 +1097,9 @@ struct PlotScreen: View {
                 Spacer()
                 // the viewer's own light or dark ground
                 Button { model.act("vw-light") } label: { Image(systemName: viewer.light == true ? "moon.fill" : "sun.max.fill").font(.title2) }
-                    .accessibilityLabel(viewer.light == true ? "Dark ground" : "Light ground")
+                    .accessibilityLabel(viewer.light == true ? NativeMessages.native_viewer_ground_dark(lang) : NativeMessages.native_viewer_ground_light(lang))
                 Button { model.act("view", "") } label: { Image(systemName: "xmark.circle.fill").font(.title2) }
-                    .accessibilityLabel("Close")
+                    .accessibilityLabel(NativeMessages.common_close(lang))
             }
             .padding(.horizontal)
             .padding(.top, 6)
@@ -1135,6 +1144,7 @@ struct PlotScreen: View {
 // what the agent said before the step shown (a tap goes back to it in the
 // thread), or a comparison of two versions and its legend
 struct HistBarView: View {
+    @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let hist: HistBar
 
@@ -1142,21 +1152,21 @@ struct HistBarView: View {
         VStack(alignment: .leading, spacing: 8) {
             if hist.cmp {
                 HStack(spacing: 6) {
-                    chip("Old: " + hist.a, on: hist.side == "a") { model.act("cmp-side", "a") }
-                    chip("New: " + hist.b, on: hist.side == "b") { model.act("cmp-side", "b") }
+                    chip(NativeMessages.history_old_label(lang, hist.a), on: hist.side == "a") { model.act("cmp-side", "a") }
+                    chip(NativeMessages.history_new_label(lang, hist.b), on: hist.side == "b") { model.act("cmp-side", "b") }
                     Spacer(minLength: 0)
-                    chip("BOM", on: false) { model.act("rv-bom", "") }
-                    chip("Close", on: false) { model.act("cmp-close", "") }
+                    chip(NativeMessages.review_bom(lang), on: false) { model.act("rv-bom", "") }
+                    chip(NativeMessages.common_close(lang), on: false) { model.act("cmp-close", "") }
                 }
-                Picker("Show", selection: Binding(get: { hist.showing ?? "diff" }, set: { model.act("rv-as", $0) })) {
-                    Text("Old").tag("old")
-                    Text("Diff").tag("diff")
-                    Text("New").tag("new")
+                Picker(NativeMessages.common_show(lang), selection: Binding(get: { hist.showing ?? "diff" }, set: { model.act("rv-as", $0) })) {
+                    Text(NativeMessages.viewer_history_old(lang)).tag("old")
+                    Text(NativeMessages.viewer_diff(lang)).tag("diff")
+                    Text(NativeMessages.viewer_history_new(lang)).tag("new")
                 }
                 .pickerStyle(.segmented)
                 if (hist.showing ?? "diff") == "diff" {
                 HStack(spacing: 12) {
-                    ForEach(Array(zip(["Removed", "Changed", "Added"], hist.keys).enumerated()), id: \.offset) { _, k in
+                    ForEach(Array(zip([NativeMessages.viewer_history_removed(lang), NativeMessages.viewer_history_changed(lang), NativeMessages.viewer_history_added(lang)], hist.keys).enumerated()), id: \.offset) { _, k in
                         HStack(spacing: 4) {
                             Rectangle().fill(Color(rgb: k.1)).frame(width: 10, height: 10)
                             Text(k.0)
@@ -1187,7 +1197,7 @@ struct HistBarView: View {
                         .contentShape(.rect)
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("Show in the thread: " + hist.said)
+                    .accessibilityLabel(NativeMessages.native_history_thread(lang, hist.said))
                 } else {
                     Text(hist.said).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 }
@@ -1201,11 +1211,11 @@ struct HistBarView: View {
 
     private var steps: some View {
         HStack(spacing: 2) {
-            icon("backward.end", "First step", "hist-first")
-            icon("chevron.left", "Previous step", "hist-prev")
-            icon(hist.playing ? "pause.fill" : "play.fill", hist.playing ? "Pause" : "Play", "hist-play")
-            icon("chevron.right", "Next step", "hist-next")
-            icon("forward.end", "Last step", "hist-last")
+            icon("backward.end", NativeMessages.native_history_first(lang), "hist-first")
+            icon("chevron.left", NativeMessages.native_history_previous(lang), "hist-prev")
+            icon(hist.playing ? "pause.fill" : "play.fill", hist.playing ? NativeMessages.history_pause(lang) : NativeMessages.native_history_play(lang), "hist-play")
+            icon("chevron.right", NativeMessages.native_history_next(lang), "hist-next")
+            icon("forward.end", NativeMessages.native_history_last(lang), "hist-last")
             Text(hist.title).font(.caption).lineLimit(1).truncationMode(.tail)
                 .padding(.leading, 4)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -1213,9 +1223,9 @@ struct HistBarView: View {
     }
 
     @ViewBuilder private var chips: some View {
-        chip("Changes", on: hist.diff) { model.act("hist-diff", "") }
-        chip("Compare", on: false) { model.act("cmp", "a") }
-        if hist.at > 0 { chip("Live", on: false) { model.act("hist-live", "") } }
+        chip(NativeMessages.viewer_history_changes(lang), on: hist.diff) { model.act("hist-diff", "") }
+        chip(NativeMessages.viewer_history_compare(lang), on: false) { model.act("cmp", "a") }
+        if hist.at > 0 { chip(NativeMessages.history_live(lang), on: false) { model.act("hist-live", "") } }
     }
 
     // a tick per step, then the live file; a tap shows that one
@@ -1231,7 +1241,7 @@ struct HistBarView: View {
                             .contentShape(.rect)
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel(t.id.isEmpty ? "Live file" : "Step \(i + 1)")
+                    .accessibilityLabel(t.id.isEmpty ? NativeMessages.native_history_livefile(lang) : NativeMessages.history_step_label(lang, String(i + 1)))
                     .accessibilityAddTraits(t.on ? .isSelected : [])
                 }
             }
@@ -1261,6 +1271,7 @@ struct HistBarView: View {
 
 // the versions a comparison's side may take ("cmp-pick" value)
 struct HistMenuSheet: View {
+    @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let side: String
     let rows: [HistRow]
@@ -1268,9 +1279,9 @@ struct HistMenuSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(side == "a" ? "Compare from (old)" : "Compare with (new)").font(.headline).padding([.horizontal, .top])
+            Text(side == "a" ? NativeMessages.viewer_history_compare_old(lang) : NativeMessages.viewer_history_compare_new(lang)).font(.headline).padding([.horizontal, .top])
             // any commit, branch or tag (rv-ref "<side>\t<text>")
-            TextField("Commit, branch or tag", text: $ref)
+            TextField(NativeMessages.viewer_history_ref(lang), text: $ref)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .submitLabel(.go)
@@ -1297,6 +1308,7 @@ struct HistMenuSheet: View {
 
 // over a part in 3D: the thread's parts (a tap shows another) and Renders
 struct MechBar: View {
+    @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let page: MechPage
 
@@ -1308,7 +1320,7 @@ struct MechBar: View {
                         .buttonStyle(.bordered)
                         .tint(c.on ? .accentColor : .secondary)
                 }
-                Button("Renders") { model.act("mech-renders", page.rel ?? "") }.buttonStyle(.bordered)
+                Button(NativeMessages.viewer_mech_renders(lang)) { model.act("mech-renders", page.rel ?? "") }.buttonStyle(.bordered)
             }
             .padding(.horizontal)
         }
@@ -1319,6 +1331,7 @@ struct MechBar: View {
 // Open in 3D and Refresh, then the part's renders (a tap opens one full
 // screen), and where to get FreeCAD when the hub has none
 struct MechScreen: View {
+    @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let viewer: Viewer
     let page: MechPage
@@ -1327,14 +1340,14 @@ struct MechScreen: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Picker("Source", selection: Binding(get: { viewer.open }, set: { model.act("view", $0) })) {
+                Picker(NativeMessages.native_viewer_source(lang), selection: Binding(get: { viewer.open }, set: { model.act("view", $0) })) {
                     ForEach(viewer.choices, id: \.value) { Text($0.label).tag($0.value) }
                 }
                 .pickerStyle(.segmented)
                 .frame(maxWidth: 300)
                 Spacer()
                 Button { model.act("view", "") } label: { Image(systemName: "xmark.circle.fill").font(.title2) }
-                    .accessibilityLabel("Close")
+                    .accessibilityLabel(NativeMessages.common_close(lang))
             }
             .padding(.horizontal)
             .padding(.vertical, 6)
@@ -1352,17 +1365,17 @@ struct MechScreen: View {
                             }
                         }
                         HStack(spacing: 8) {
-                            Button("3D") { model.act("mech-3d", page.path) }.buttonStyle(.bordered).disabled(page.path.isEmpty)
+                            Button(NativeMessages.viewer_solid(lang)) { model.act("mech-3d", page.path) }.buttonStyle(.bordered).disabled(page.path.isEmpty)
                             // the render job: queued on the hub, its pictures in when done
                             Button { model.act("mech-render", page.rel ?? "") } label: {
                                 HStack(spacing: 6) {
                                     if page.busy == true { ProgressView() }
-                                    Text(page.render ?? "Create renders")
+                                    Text(page.render ?? NativeMessages.mech_create(lang))
                                 }
                             }.buttonStyle(.borderedProminent).disabled(page.busy == true || (page.rel ?? "").isEmpty)
-                            Button("Refresh") { model.act("mech-refresh") }.buttonStyle(.bordered)
+                            Button(NativeMessages.common_refresh(lang)) { model.act("mech-refresh") }.buttonStyle(.bordered)
                         }
-                        if let e = page.err, !e.isEmpty { Text("Rendering failed: \(e)").font(.caption).foregroundStyle(.red) }
+                        if let e = page.err, !e.isEmpty { Text(NativeMessages.native_mech_failed(lang, e)).font(.caption).foregroundStyle(.red) }
                     }
                     if !page.empty.isEmpty { Text(page.empty).foregroundStyle(.secondary) }
                     ForEach(page.shots, id: \.url) { s in

@@ -50,6 +50,8 @@ type KMsg is Data:
   KEvicted{victim: String, project: String, ok: Bool, why: String}
   # Retry: failed servers are forgotten
   KClear{}
+  # the command line a project's server is started with
+  KArgv{project: String, reply: Chan(String)}
 
 # the helper's input (None until it runs), the requests waiting for a reply,
 # the next id and the helper's path
@@ -782,6 +784,13 @@ def KServe.info(+k: Ks, +reply: Chan(String)) -> IO(Ks):
     BR.Browser.say(reply, KS.KS.lines(Ks.srvs(k)))
     return k
 
+# the words of the command line a project's server is started with
+def KServe.argv(+k: Ks, +project: String, +reply: Chan(String)) -> IO(Ks):
+  do IO<Ks>:
+    +dir : String = KS.KS.dir(Ks.rt(k), Ks.home(k), project)
+    BR.Browser.say(reply, String.join(KS.KS.argv(KEnv.cli(Ks.env(k)), project, dir, Ks.hub(k), KEnv.caps(Ks.env(k))), " "))
+    return k
+
 def KServe.rawcall(+k: Ks, +sock: String, env: KEnv, +ty: String, msg: J.Json, +reply: Chan(String)) -> IO(Ks):
   do IO<Ks>:
     hp : Hp <- KServe.call(Ks.hp(k), Ks.q(k), KServe.call.fields(sock, env, ty, msg), reply)
@@ -811,6 +820,8 @@ def KServe.step(m: Maybe<&1, KMsg>, +k: Ks, kont: Ks -> IO(Unit)) -> IO(Unit):
       IO.bind(Ks, Unit, KServe.evicted(ok, k, victim, project, why), kont)
     case Some{KClear{}}:
       IO.bind(Ks, Unit, KServe.clear(k), kont)
+    case Some{KArgv{project, reply}}:
+      IO.bind(Ks, Unit, KServe.argv(k, project, reply), kont)
     case None{}:
       IO.pure(Unit, Unit{})
 
@@ -856,6 +867,14 @@ def KServe.info_on(+q: Chan(KMsg)) -> IO(String):
   do IO<String>:
     +reply : Chan(String) <- Chan.new(String, 1)
     ok : Result<&1, &1, KMsg, Unit> <- Chan.send(KMsg, q, KInfo{reply})
+    m : Maybe<&1, String> <- Chan.recv(String, reply)
+    return Maybe.default(&1, String, m, "")
+
+# the command line the project's server is started with
+def KServe.argv_on(+q: Chan(KMsg), +project: String) -> IO(String):
+  do IO<String>:
+    +reply : Chan(String) <- Chan.new(String, 1)
+    ok : Result<&1, &1, KMsg, Unit> <- Chan.send(KMsg, q, KArgv{project, reply})
     m : Maybe<&1, String> <- Chan.recv(String, reply)
     return Maybe.default(&1, String, m, "")
 
