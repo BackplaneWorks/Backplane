@@ -98,6 +98,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang-19 libx11-dev
           sudo ln -sf /usr/bin/clang-19 /usr/local/bin/clang
+      - name: Carry staged work into thread worktrees
+        run: |
+          set -euo pipefail
+          scripts/build-app.sh test/native/worktree_carry_test.bend build/worktree_carry_test
+          build/worktree_carry_test | tee build/worktree-carry.log
+          ! grep -q '^FAIL ' build/worktree-carry.log
+          test "$(grep -c '^ok ' build/worktree-carry.log)" -eq 37
       - name: Object cache
         # the compiled C units, by hash of their text (scripts/cc-unit.sh): an
         # unchanged unit is not compiled again. Never holds the Google client
@@ -116,13 +123,6 @@ jobs:
         run: |
           scripts/build-app.sh test/native/git_test.bend build/git_test
           build/git_test
-      - name: Carry staged work into thread worktrees
-        run: |
-          set -euo pipefail
-          scripts/build-app.sh test/native/worktree_carry_test.bend build/worktree_carry_test
-          build/worktree_carry_test | tee build/worktree-carry.log
-          ! grep -q '^FAIL ' build/worktree-carry.log
-          test "$(grep -c '^ok ' build/worktree-carry.log)" -eq 37
       - uses: actions/upload-artifact@v4
         with:
           name: backplane-${{ matrix.target }}
