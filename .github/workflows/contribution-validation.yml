@@ -1,0 +1,314 @@
+name: Contribution acceptance
+
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'mobile/**'
+      - 'tools/**'
+      - 'test/**'
+      - 'scripts/**'
+      - '.github/workflows/contribution-validation.yml'
+  workflow_dispatch:
+    inputs:
+      real_cad:
+        description: Run the separate real KiCad acceptance lane
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: contribution-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native:
+    name: Linux renderer, native effects and browser acceptance
+    needs: phone
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      BACKPLANE_SKIP_CHECK: '1'
+      BACKPLANE_LOW_MEM: '1'
+      BACKPLANE_JOBS: '2'
+      BACKPLANE_GOOGLE_BAKE: '0'
+      BUN_JSC_forceRAMSize: '4294967296'
+      BACKPLANE_TEST_BROWSERS: chromium
+      BACKPLANE_CHROME: /usr/bin/google-chrome
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Fetch exact native negative-control baseline
+        run: git fetch --no-tags --depth=1 origin 30884966ef59c383581bcd1b7653f8f739cf009e
+      - uses: ./.github/actions/setup-bend
+      - uses: oven-sh/setup-bun@v2
+      - name: Native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-19 libx11-dev xvfb fonts-noto-cjk fonts-dejavu-core fontconfig libfreetype6
+          sudo ln -sf /usr/bin/clang-19 /usr/local/bin/clang
+      - name: Validate acceptance tooling
+        run: |
+          python3 test/tools/validation_evidence_test.py
+          python3 test/tools/validation_renderer_test.py
+          python3 test/tools/keep_plan_report_test.py
+          python3 test/tools/build_lock_test.py
+          python3 test/tools/build_clock_test.py
+          python3 test/tools/test_runner_signal_test.py
+          python3 test/tools/ios_simulator_smoke_test.py
+      - uses: actions/download-artifact@v4
+        with:
+          name: contribution-bridge
+          path: mobile/build/assets
+      - name: Bounded temporary swap for Bend emission
+        run: |
+          dir="$RUNNER_TEMP"
+          free_gb=$(df -BG --output=avail "$dir" | tail -1 | tr -dc 0-9)
+          size=$(( free_gb - 8 )); [ "$size" -le 16 ] || size=16
+          if [ "$size" -ge 2 ]; then
+            sudo fallocate -l "${size}G" "$dir/swap-build"
+            sudo chmod 600 "$dir/swap-build"
+            sudo mkswap "$dir/swap-build"
+            sudo swapon "$dir/swap-build"
+          fi
+          free -h
+      # The main-only Keep.step candidate retains independent display observers;
+      # this explicit profile does not claim glyph-cache/705-sample coverage.
+      - name: Required Linux native renderer and X11 readback
+        run: scripts/validate-contribution.sh renderer --renderer-profile keep-plan
+      - name: Build exact candidate
+        run: scripts/validate-contribution.sh build
+      - run: scripts/build-wire.sh
+      - run: scripts/validate-contribution.sh native
+      - run: scripts/validate-contribution.sh browser
+      - name: Separate real-CAD lane (requires KiCad 10 or newer)
+        if: github.event_name == 'workflow_dispatch' && inputs.real_cad
+        run: |
+          sudo apt-get install -y kicad
+          # The runner rejects old or unknown CLI versions before CAD tests;
+          # Ubuntu's package version alone does not establish compatibility.
+          scripts/validate-contribution.sh real-cad
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: contribution-native-evidence
+          path: build/validation
+          if-no-files-found: error
+          retention-days: 7
+
+  emit-darwin:
+    name: Emit Mac hub and web
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      BACKPLANE_SKIP_CHECK: '1'
+      BACKPLANE_LOW_MEM: '1'
+      BACKPLANE_JOBS: '2'
+      BACKPLANE_GOOGLE_BAKE: '0'
+      BUN_JSC_forceRAMSize: '4294967296'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-bend
+      - uses: oven-sh/setup-bun@v2
+      - name: Bounded temporary swap for Bend emission
+        run: |
+          dir="$RUNNER_TEMP"
+          free_gb=$(df -BG --output=avail "$dir" | tail -1 | tr -dc 0-9)
+          size=$(( free_gb - 8 )); [ "$size" -le 16 ] || size=16
+          if [ "$size" -ge 2 ]; then
+            sudo fallocate -l "${size}G" "$dir/swap-build"
+            sudo chmod 600 "$dir/swap-build"
+            sudo mkswap "$dir/swap-build"
+            sudo swapon "$dir/swap-build"
+          fi
+          free -h
+      - run: scripts/validate-contribution.sh emit
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: contribution-darwin-source
+          path: |
+            dist/web
+            build/cc/backplane-serve/all.c
+            build/wire
+            build/validation/emit
+          if-no-files-found: error
+
+  mac:
+    name: Mac hub compile and effects
+    needs: [emit-darwin, phone]
+    runs-on: macos-15
+    timeout-minutes: 40
+    env:
+      BACKPLANE_PREBUILT: '1'
+      BACKPLANE_GOOGLE_BAKE: '0'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Fetch exact native negative-control baseline
+        run: git fetch --no-tags --depth=1 origin 30884966ef59c383581bcd1b7653f8f739cf009e
+      - uses: ./.github/actions/setup-bend
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/download-artifact@v4
+        with:
+          name: contribution-darwin-source
+          path: .
+      - uses: actions/download-artifact@v4
+        with:
+          name: contribution-bridge
+          path: mobile/build/assets
+      - uses: actions/download-artifact@v4
+        with:
+          name: contribution-ios-lifetime-state
+          path: build/validation/phone
+      - name: Actual Swift helpers and production Worker lifetime
+        run: |
+          set -euo pipefail
+          mkdir -p build/ios-native-helpers
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib, json
+          state = Path('build/validation/phone/ios-lifetime-state.json')
+          metadata = json.loads(state.with_suffix('.json.metadata.json').read_text())
+          assert metadata['bridgeSha256'] == hashlib.sha256(Path('mobile/build/assets/bridge.js').read_bytes()).hexdigest()
+          assert metadata['stateSha256'] == hashlib.sha256(state.read_bytes()).hexdigest()
+          assert metadata['rpcExecution'] is False
+          PY
+          git rev-parse HEAD > build/ios-native-helpers/source-commit.txt
+          xcrun swiftc --version > build/ios-native-helpers/swift-version.txt
+          shasum -a 256 mobile/build/assets/bridge.js build/validation/phone/ios-lifetime-state.json > build/ios-native-helpers/inputs.sha256
+          sh test/tools/ios-native-helpers.sh mobile/build/assets/bridge.js build/validation/phone/ios-lifetime-state.json | tee build/ios-native-helpers/run.log
+      - run: scripts/validate-contribution.sh build --prebuilt-receipt build/validation/emit/result.json
+      - run: scripts/smoke.sh
+      - run: test/tools/mac_rss.sh
+      - run: python3 test/tools/build_clock_test.py
+      - run: scripts/validate-contribution.sh native --binary dist/backplane
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: contribution-mac-evidence
+          path: build/validation
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: contribution-ios-native-helpers
+          path: build/ios-native-helpers
+          if-no-files-found: error
+
+  phone:
+    name: Exact phone bridge
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      BUN_JSC_forceRAMSize: '4294967296'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-bend
+      - uses: oven-sh/setup-bun@v2
+      - run: scripts/validate-contribution.sh phone
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: contribution-phone-evidence
+          path: build/validation
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: contribution-bridge
+          path: mobile/build/assets/bridge.js
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: contribution-ios-lifetime-state
+          path: build/validation/phone/ios-lifetime-state.json*
+          if-no-files-found: error
+
+  android:
+    name: Android debug bundle
+    needs: phone
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/download-artifact@v4
+        with:
+          name: contribution-bridge
+          path: mobile/build/assets
+      - working-directory: mobile/android
+        run: ./gradlew --no-daemon --max-workers=2 :app:assembleDebug
+      - name: Check exact bridge bytes
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile
+          import hashlib
+          apk = Path('mobile/android/app/build/outputs/apk/debug/app-debug.apk')
+          bridge = Path('mobile/build/assets/bridge.js').read_bytes()
+          with ZipFile(apk) as bundle:
+              assert bundle.read('assets/bridge.js') == bridge
+          print('bridge sha256', hashlib.sha256(bridge).hexdigest())
+          print('apk sha256', hashlib.sha256(apk.read_bytes()).hexdigest())
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: contribution-android-debug
+          path: mobile/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+  ios:
+    name: iOS simulator build and isolated launch smoke
+    needs: phone
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: contribution-bridge
+          path: mobile/build/assets
+      - name: Build simulator app without publishing
+        id: ios_build
+        run: |
+          cp mobile/build/assets/bridge.js mobile/ios/Backplane/bridge.js
+          xcodebuild -version
+          xcodebuild -project mobile/ios/Backplane.xcodeproj -scheme Backplane \
+            -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/ios-derived" -jobs 2 \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY= build
+          app="$RUNNER_TEMP/ios-derived/Build/Products/Debug-iphonesimulator/Backplane.app"
+          cmp mobile/build/assets/bridge.js "$app/bridge.js"
+          shasum -a 256 "$app/bridge.js"
+          ditto -c -k --sequesterRsrc --keepParent "$app" "$RUNNER_TEMP/Backplane-simulator.zip"
+      - name: Launch only the isolated simulator app
+        run: |
+          python3 test/tools/ios_simulator_smoke.py \
+            --app "$RUNNER_TEMP/ios-derived/Build/Products/Debug-iphonesimulator/Backplane.app"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: contribution-ios-simulator-smoke
+          path: build/ios-simulator-smoke
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.ios_build.outcome == 'success'
+        with:
+          name: contribution-ios-simulator
+          path: ${{ runner.temp }}/Backplane-simulator.zip
+          if-no-files-found: error

@@ -10,7 +10,7 @@
 //
 // BINARY defaults to build/backplane, WIREDIR to build/wire (bend
 // test/wire/index.html -o build/wire). Needs git, kicad-cli and the demo
-// (/usr/share/kicad/demos/ecc83). KEEP=1 keeps the temp folder.
+// (scripts/fetch-cad-fixture.py; BACKPLANE_CAD_FIXTURE overrides its location). KEEP=1 keeps the temp folder.
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -19,7 +19,7 @@ const [bin = "build/backplane", wire = "build/wire"] = process.argv.slice(2);
 for (const f of readdirSync(wire).filter((f) => f.endsWith(".js"))) (0, eval)(readFileSync(`${wire}/${f}`, "utf8"));
 const W = (globalThis as any).Wire;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const demo = "/usr/share/kicad/demos/ecc83";
+const demo = resolve(process.env.BACKPLANE_CAD_FIXTURE ?? "build/fixtures/ecc83");
 
 const root = mkdtempSync(join(tmpdir(), "bp-review-"));
 const fake = join(root, "bin");

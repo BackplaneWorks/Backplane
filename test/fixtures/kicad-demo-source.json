@@ -1,0 +1,32 @@
+{
+  "repository": "KiCad/kicad-source-mirror",
+  "commit": "25fa5459432f766337adfcc6634af48136103442",
+  "license": "CC-BY-SA-4.0",
+  "files": [
+    {
+      "path": "demos/ecc83/ecc83-pp.kicad_pcb",
+      "sha256": "0ab45f4f8c90ac877e3313a1888d875107f2be3fc2b2f40cfb7927873b35260c",
+      "bytes": 158878
+    },
+    {
+      "path": "demos/ecc83/ecc83-pp.kicad_sch",
+      "sha256": "8a2d0359a0f3e647378034d84ab72b09dd7aa42f8b1f5e7fa0ff28ae369beee9",
+      "bytes": 55220
+    },
+    {
+      "path": "demos/ecc83/ecc83-pp.kicad_pro",
+      "sha256": "8a943fac4b0cc3ed4fa83ccc83a6e15b9326178845ada0aa906df63f0672e975",
+      "bytes": 15516
+    },
+    {
+      "path": "LICENSE.README",
+      "sha256": "05ed7ad379869c36a12a7c3702cc37e620d75c8532943ce9cf577b9b04a7f270",
+      "bytes": 2873
+    },
+    {
+      "path": "LICENSE.CC-BY-SA-4.0",
+      "sha256": "00ba11b9a22d453aed299954eaca389d8efef441a4673d84e2dc4ae10ebc7ca5",
+      "bytes": 15164
+    }
+  ]
+}
