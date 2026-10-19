@@ -4872,12 +4872,15 @@ def Mech.part(m: Maybe<&2, MC.MPart>, +ty: Ty, +u: U.Ui, +x0: U32, +x1: U32, +y:
 def Mech.say(+ty: Ty, +text: String, +x0: U32, +x1: U32, +y: U32) -> Out:
   Out.ops(Ty.text(ty, 2n, Ty.fit(ty, 2n, text, (x1 - x0 - 32 : U32)), D.Clip.all(), (x0 + 16 : U32), y, 28, T.Th.faint()))
 
+def Mech.error(+ty: Ty, +err: String, +x0: U32, +x1: U32, +y: U32) -> Out:
+  Out.when(Bool.not(String.is_empty(err)), Mech.say(ty, MSG.T.viewer.render.failed(Ty.loc(ty), err), x0, x1, y))
+
 def Mech.page.k(state: Nat, +ty: Ty, +u: U.Ui, +x0: U32, +x1: U32, +h: U32) -> Out:
   match state:
     case 0n:
-      Mech.say(ty, MSG.T.viewer.mech.loading(Ty.loc(ty)), x0, x1, 68)
+      Out.cat(Mech.say(ty, MSG.T.viewer.mech.loading(Ty.loc(ty)), x0, x1, 68), Mech.error(ty, U.Mpage.err(u), x0, x1, 96))
     case 1n:
-      Mech.say(ty, MC.Mech.none(), x0, x1, 68)
+      Out.cat(Mech.say(ty, MC.Mech.none(), x0, x1, 68), Mech.error(ty, U.Mpage.err(u), x0, x1, 96))
     case _:
       +label0 = MSG.T.viewer.solid(Ty.loc(ty))
       +label1 = MSG.T.common.refresh(Ty.loc(ty))
@@ -4895,7 +4898,7 @@ def Mech.page.k(state: Nat, +ty: Ty, +u: U.Ui, +x0: U32, +x1: U32, +h: U32) -> O
         Lay.button(ty, D.Clip.all(), (x1 - 24 - gw - rw : U32), 64, gl, Bool.pick(U32, String.is_empty(U.Mpage.busy(u)), T.Th.accent(), T.Th.faint()),
           Bool.pick(String, String.is_empty(U.Mpage.busy(u)), "mech-render", ""), cur),
         Lay.button(ty, D.Clip.all(), (x1 - 16 - rw : U32), 64, label1, T.Th.text(), "mech-refresh", ""),
-        Out.when(Bool.not(String.is_empty(err)), Mech.say(ty, MSG.T.viewer.render.failed(Ty.loc(ty), err), x0, x1, (top - 6 : U32))),
+        Mech.error(ty, err, x0, x1, (top - 6 : U32)),
         Mech.part(U.Mpage.cur(u), ty, u, x0, x1, Bool.pick(U32, String.is_empty(err), top, (top + 28 : U32)), h)])
 
 # over a part in 3D: the thread's parts (a click shows another in 3D) and

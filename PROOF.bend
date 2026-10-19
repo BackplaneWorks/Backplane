@@ -4760,6 +4760,15 @@ def Laws.mech_default_assembly():
 def Laws.mech_default_first():
   {==}
 
+def Laws.mech_render_success_quiet(out):
+  {==}
+
+def Laws.mech_render_failure_visible():
+  {==}
+
+def Laws.mech_render_failure_diagnostic():
+  {==}
+
 def Laws.mech_gui_linux():
   {==}
 

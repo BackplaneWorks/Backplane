@@ -1375,8 +1375,8 @@ struct MechScreen: View {
                             }.buttonStyle(.borderedProminent).disabled(page.busy == true || (page.rel ?? "").isEmpty)
                             Button(NativeMessages.common_refresh(lang)) { model.act("mech-refresh") }.buttonStyle(.bordered)
                         }
-                        if let e = page.err, !e.isEmpty { Text(NativeMessages.native_mech_failed(lang, e)).font(.caption).foregroundStyle(.red) }
                     }
+                    if let e = page.err, !e.isEmpty { Text(NativeMessages.native_mech_failed(lang, e)).font(.caption).foregroundStyle(.red) }
                     if !page.empty.isEmpty { Text(page.empty).foregroundStyle(.secondary) }
                     ForEach(page.shots, id: \.url) { s in
                         VStack(alignment: .leading, spacing: 4) {

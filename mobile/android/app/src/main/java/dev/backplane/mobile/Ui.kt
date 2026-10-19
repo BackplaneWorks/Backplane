@@ -1327,8 +1327,8 @@ private fun MechScreen(m: AppModel, v: Viewer, p: MechPage) {
                     }
                     OutlinedButton(onClick = { m.act("mech-refresh") }) { Text(NativeMessages.common_refresh(lang)) }
                 }
-                if (p.err.isNotEmpty()) Text(NativeMessages.native_mech_failed(lang, p.err), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelMedium)
             }
+            if (p.err.isNotEmpty()) Text(NativeMessages.native_mech_failed(lang, p.err), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelMedium)
             if (p.empty.isNotEmpty()) Text(p.empty, color = MaterialTheme.colorScheme.outline)
             for (s in p.shots) Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(s.view, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)

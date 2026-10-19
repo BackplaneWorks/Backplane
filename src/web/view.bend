@@ -2111,19 +2111,22 @@ def View.mech.part(m: Maybe<&2, MC.MPart>, +root: String) -> List<&2, D.Node>:
     case None{}:
       Nil{}
 
+def View.mech.error(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
+  D.Dom.when(Bool.not(String.is_empty(U.Mpage.err(u))), D.Dom.span("mech-say", MSG.T.viewer.render.failed(lc, U.Mpage.err(u))))
+
 def View.mech.k(+lc: I.Loc, state: Nat, +u: U.Ui) -> List<&2, D.Node>:
   match state:
     case 0n:
-      [D.Dom.span("mech-say", MSG.T.viewer.mech.loading(lc))]
+      D.Dom.span("mech-say", MSG.T.viewer.mech.loading(lc)) <> View.mech.error(lc, u)
     case 1n:
-      [D.Dom.span("mech-say", MC.Mech.none())]
+      D.Dom.span("mech-say", MC.Mech.none()) <> View.mech.error(lc, u)
     case _:
       D.El{"div", "", [D.At{"class", "mech-head"}], List.append(&2, D.Node, View.mech.chips(U.Mpage.parts(u), U.Mpage.cur.path(u)),
         [D.Dom.button("", "mech-3d", MC.Mech.abs(U.Mpage.root(u), U.Mpage.cur.path(u)), MSG.T.mech.turn(lc), "3D"),
          D.Dom.button(Bool.pick(String, String.is_empty(U.Mpage.busy(u)), "primary", "busy"), Bool.pick(String, String.is_empty(U.Mpage.busy(u)), "mech-render", ""),
            U.Mpage.cur.path(u), MSG.T.mech.render.tip(lc), U.Mpage.render.label.loc(lc, u)),
          D.Dom.button("", "mech-refresh", "", MSG.T.mech.refresh.tip(lc), MSG.T.common.refresh(lc))])}
-      <> List.append(&2, D.Node, D.Dom.when(Bool.not(String.is_empty(U.Mpage.err(u))), D.Dom.span("mech-say", MSG.T.viewer.render.failed(lc, U.Mpage.err(u)))),
+      <> List.append(&2, D.Node, View.mech.error(lc, u),
         View.mech.part(U.Mpage.cur(u), U.Mpage.root(u)))
 
 def View.mech(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
