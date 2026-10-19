@@ -32,9 +32,9 @@ the first model in the sorted list. Assembly names contain `assembl` or
 end in `-asm`, ignoring case and the file extension.
 
 A part you or an agent explicitly open takes precedence over this default.
-Refresh in Mech rereads the setting and the parts list without replacing
-the model already selected in the thread. The setting applies when no
-model has been chosen.
+Open **Renders** and use **Refresh** to reread the setting and the parts
+list without replacing the model already selected in the thread. The
+setting applies when no model has been chosen.
 
 A missing file, invalid JSON, a non-string `mech` value, or a path that
 does not match a listed model falls back to the usual assembly/first-model
