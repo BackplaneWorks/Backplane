@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      flatpak_only:
+        description: Run only the KiCad Flatpak integration check
+        type: boolean
+        default: false
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -15,6 +20,7 @@ permissions:
 
 jobs:
   check:
+    if: ${{ !inputs.flatpak_only }}
     name: Type-check
     runs-on: ubuntu-24.04
     steps:
@@ -23,6 +29,7 @@ jobs:
       - run: CHECK_JOBS=$(nproc) scripts/check.sh check
 
   proof:
+    if: ${{ !inputs.flatpak_only }}
     name: Prove laws
     runs-on: ubuntu-24.04
     steps:
@@ -41,6 +48,7 @@ jobs:
       - run: echo "type-check and proof both passed"
 
   test:
+    if: ${{ !inputs.flatpak_only }}
     name: Tests ${{ matrix.shard }}/4
     runs-on: ubuntu-24.04
     strategy:
@@ -57,6 +65,7 @@ jobs:
       - run: TEST_JOBS=$(nproc) scripts/test.sh
 
   build:
+    if: ${{ !inputs.flatpak_only }}
     name: Build ${{ matrix.target }}
     # runs beside "laws" (which checks every file); nothing is published here
     strategy:
@@ -137,6 +146,6 @@ jobs:
           scratch=$(mktemp -d '/tmp/bp flatpak.XXXXXX')
           trap 'rm -rf "$scratch"' EXIT
           cp test/fixtures/flatpak/minimal.kicad_pcb "$scratch/test board.kicad_pcb"
-          scripts/kicad-flatpak.sh pcb export svg -o "$scratch/out dir" "$scratch/test board.kicad_pcb"
+          scripts/kicad-flatpak.sh pcb export svg --mode-multi --layers Edge.Cuts -o "$scratch/out dir" "$scratch/test board.kicad_pcb"
           find "$scratch/out dir" -name '*.svg' | grep -q .
           SH
