@@ -107,11 +107,19 @@ jobs:
           path: ~/.cache/backplane-bend/obj
           key: objs-${{ matrix.target }}-${{ github.sha }}
           restore-keys: objs-${{ matrix.target }}-
+      - name: Check failed release exports before the application build
+        run: |
+          mkdir -p build
+          bend test/native/release_child.bend -o build/release-child
+          bun test/tools/release_exports_e2e.ts build/release-child
+        env:
+          BUN_JSC_forceRAMSize: "4294967296"
       - run: clang --version
       - run: scripts/build.sh
         env:
           BACKPLANE_SKIP_CHECK: "1" # the laws job checks every file
       - run: scripts/smoke.sh
+      - run: bun test/tools/release_exports_e2e.ts dist/backplane
       - uses: actions/upload-artifact@v4
         with:
           name: backplane-${{ matrix.target }}

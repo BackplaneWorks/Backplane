@@ -427,3 +427,12 @@ def Release.notes(+tag: String, +prev: String, +commit: String, +bom: String, +c
 # exist on the remote (--verify-tag); files are attached
 def Release.gh(+tag: String, +notes: String, files: List<&2, String>) -> List<&2, String>:
   List.append(&2, String, ["gh", "release", "create", tag, "--title", tag, "--notes-file", notes, "--verify-tag"], files)
+
+# An export is complete only when its command succeeded. Keep the step's
+# name and a bounded diagnostic for the release report.
+def Release.command_error(+label: String, code: U32, +output: String) -> String:
+  match code:
+    case 0:
+      ""
+    case +other:
+      label ++ " failed (exit " ++ U32.show(other) ++ ")" ++ Bool.pick(String, String.is_empty(String.trim(output)), "", ": " ++ String.trim(String.take(output, 300n)))

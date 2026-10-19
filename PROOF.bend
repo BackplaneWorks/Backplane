@@ -12357,3 +12357,9 @@ def Laws.auth_cookie_prefix_denied():
 # ---- PCB viewer text ----
 def Laws.pcb2_hidden_text_draws_nothing(at, angle, x, text, up, key, sig, ctx):
   {==}
+
+def Laws.release_command_success(label, output):
+  {==}
+
+def Laws.release_command_failure():
+  {==}
