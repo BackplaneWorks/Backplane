@@ -160,7 +160,7 @@ cp "$OFFLINE_ARCHIVE" "$output"
         if (upgrade) stage(prefix, "old", helpers);
         const tag = "v0.0.0-updater-test";
         const result = run(fixture, [source, prefix, tag], env, dir);
-        check(`${label}: production file swap succeeds`, result.status === 0 && result.stdout.includes("ok update swap"), result);
+        check(`${label}: production file swap succeeds`, result.status === 0 && result.stdout.includes("ok update swap") && !/^FAIL\b/m.test(result.stdout), result);
         installed(label, prefix, present);
         for (const name of present) check(`${label}: ${name} moved from archive`, !existsSync(join(source, name)));
         for (const name of helpers.filter(name => !present.includes(name))) {
