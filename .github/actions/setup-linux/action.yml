@@ -1,0 +1,23 @@
+name: Setup Linux compiler
+description: Install clang 19 and X11 headers on the supported Linux build hosts.
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        set -euo pipefail
+        . /etc/os-release
+        # Jammy's distro compiler predates the C features Bend emits. Use
+        # LLVM's Jammy packages; libc and the linker sysroot remain Jammy's.
+        if [ "$VERSION_CODENAME" = jammy ]; then
+          curl --proto '=https' --tlsv1.2 -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key \
+            -o /tmp/backplane-llvm.asc
+          gpg --show-keys --with-colons /tmp/backplane-llvm.asc | \
+            grep -q '^fpr:::::::::6084F3CF814B57C1CF12EFD515CF4D18AF4F7421:'
+          sudo install -m 644 /tmp/backplane-llvm.asc /usr/share/keyrings/backplane-llvm.asc
+          echo 'deb [signed-by=/usr/share/keyrings/backplane-llvm.asc] https://apt.llvm.org/jammy/ llvm-toolchain-jammy-19 main' | \
+            sudo tee /etc/apt/sources.list.d/backplane-llvm.list
+        fi
+        sudo apt-get update
+        sudo apt-get install -y clang-19 libx11-dev binutils
+        sudo ln -sf /usr/bin/clang-19 /usr/local/bin/clang

@@ -37,8 +37,8 @@ jobs:
       fail-fast: true
       matrix:
         include:
-          - { target: linux-x64,    os: ubuntu-24.04 }
-          - { target: linux-arm64,  os: ubuntu-24.04-arm }
+          - { target: linux-x64,    os: ubuntu-22.04, glibc: "2.35" }
+          - { target: linux-arm64,  os: ubuntu-24.04-arm, glibc: "2.39" }
           # darwin-arm64 is the two jobs below
     runs-on: ${{ matrix.os }}
     env:
@@ -70,12 +70,7 @@ jobs:
             echo "only ${free_gb} GB free on $dir: no swap"
           fi
           free -h
-      - name: Install clang 19 and X11 headers
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y clang-19 libx11-dev
-          sudo ln -sf /usr/bin/clang-19 /usr/local/bin/clang
+      - uses: ./.github/actions/setup-linux
       - name: Object cache
         # the compiled C units, by hash of their text (scripts/cc-unit.sh): an
         # unchanged unit is not compiled again. Never holds the Google client
@@ -83,14 +78,16 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/backplane-bend/obj
-          key: objs-${{ matrix.target }}-${{ inputs.tag || github.ref_name }}
-          restore-keys: objs-${{ matrix.target }}-
+          key: objs-${{ matrix.os }}-${{ matrix.target }}-${{ inputs.tag || github.ref_name }}
+          restore-keys: objs-${{ matrix.os }}-${{ matrix.target }}-
       - run: BACKPLANE_VERSION="$TAG" scripts/build.sh
         env:
           BACKPLANE_SKIP_CHECK: "1" # the laws job checks every file; publish needs it
           # the Google client "Connect Google" signs in with (scripts/build-app.sh)
           BACKPLANE_GOOGLE_CLIENT_ID: ${{ secrets.BACKPLANE_GOOGLE_CLIENT_ID }}
           BACKPLANE_GOOGLE_CLIENT_SECRET: ${{ secrets.BACKPLANE_GOOGLE_CLIENT_SECRET }}
+      - name: Check Linux ABI (including helpers)
+        run: python3 scripts/linux-abi.py dist --max "${{ matrix.glibc }}"
       - run: scripts/smoke.sh
       - run: scripts/package.sh "$TAG" "${{ matrix.target }}"
       - run: scripts/package-linux.sh "$TAG" "${{ matrix.target }}"
