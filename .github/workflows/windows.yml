@@ -1,6 +1,10 @@
 name: Windows build
 
 on:
+  # Validate the native Windows package before this new workflow reaches main.
+  # This branch trigger runs only this workflow, without the CI Linux matrix.
+  push:
+    branches: [windows/cad-tools]
   workflow_dispatch:
   workflow_call:
     inputs:
