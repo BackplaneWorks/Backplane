@@ -849,7 +849,7 @@ def Vw.kind(v: V.Vw) -> U32:
 # next read merges, so only what changed fades in; anything else starts over
 def Vw.kind_set(+v: V.Vw, +k: U32, +path: String) -> V.Vw:
   Vw.kind_set.k(Bool.and(Bool.and(U32.is_eq(k, Vw.kind(v)), U32.is_lt(k, 2)),
-      Bool.and(Bool.not(String.eq(path, Vw.path(v))), Bool.and(Bool.not(String.is_empty(HS.Hist.family(path))), String.eq(HS.Hist.family(path), HS.Hist.family(Vw.path(v)))))),
+      Bool.or(String.eq(path, Vw.path(v)), Bool.and(Bool.not(String.is_empty(HS.Hist.family(path))), String.eq(HS.Hist.family(path), HS.Hist.family(Vw.path(v)))))),
     v, k, path)
 
 # the layers the user turned on or off in the kind on show (V.Look.on);

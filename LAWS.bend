@@ -10676,3 +10676,16 @@ law pcb2_hidden_text_draws_nothing:
   for +sig: U32
   for +ctx: String
   {PCB2.Text.visible.k(True{}, at, angle, x, text, up, key, sig, ctx) == Nil{} : List<&2, B.Item>}
+
+# ---- Repeated native 2D viewer requests ----
+law viewer_reopen_board_keeps_scene:
+  for +items: List<&2, B.Item>
+  for +now: Nat
+  {N.Vw.kind_set(N.Vw.board.k(False{}, N.Vw.kind_set.k(True{}, V.Vw.init(), 0, "/p/a.kicad_pcb"), "0|/p|/p/a.kicad_pcb", items, now), 0, "/p/a.kicad_pcb") ==
+   N.Vw.board.k(False{}, N.Vw.kind_set.k(True{}, V.Vw.init(), 0, "/p/a.kicad_pcb"), "0|/p|/p/a.kicad_pcb", items, now) : V.Vw}
+
+law viewer_reopen_schematic_keeps_scene:
+  for +items: List<&2, B.Item>
+  for +now: Nat
+  {N.Vw.kind_set(N.Vw.board.k(False{}, N.Vw.kind_set.k(True{}, V.Vw.init(), 1, "/p/a.kicad_sch"), "1|/p|/p/a.kicad_sch", items, now), 1, "/p/a.kicad_sch") ==
+   N.Vw.board.k(False{}, N.Vw.kind_set.k(True{}, V.Vw.init(), 1, "/p/a.kicad_sch"), "1|/p|/p/a.kicad_sch", items, now) : V.Vw}

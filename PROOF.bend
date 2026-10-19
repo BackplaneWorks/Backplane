@@ -12357,3 +12357,10 @@ def Laws.auth_cookie_prefix_denied():
 # ---- PCB viewer text ----
 def Laws.pcb2_hidden_text_draws_nothing(at, angle, x, text, up, key, sig, ctx):
   {==}
+
+# ---- Repeated native 2D viewer requests ----
+def Laws.viewer_reopen_board_keeps_scene(items, now):
+  {==}
+
+def Laws.viewer_reopen_schematic_keeps_scene(items, now):
+  {==}
