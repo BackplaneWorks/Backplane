@@ -401,10 +401,13 @@ def Git.exclude(+cwd: String) -> IO(String):
 
 # Copy the folder's uncommitted work (changed and untracked files, not
 # ignored ones) into a new worktree, and delete there what is deleted here.
+# Compare tracked paths with HEAD so staged edits count too. Disabling
+# rename detection carries a rename as deleting its old path and copying
+# its new one; the destination's index stays at the base commit.
 # KiCad's own droppings (backups, locks, autosaves, the footprint cache)
 # stay behind.
 def Git.carry.sh() -> String:
-  "cd \"$1\" || exit 1; git ls-files -z -m -o --exclude-standard | grep -zv -e '-backups/' -e '\\.lck$' -e 'fp-info-cache$' -e '_autosave-' | tar -c --null -T - -f - 2>/dev/null | tar -x -f - -C \"$2\" 2>/dev/null; git ls-files -z -d | (cd \"$2\" && xargs -0 -r rm -f --); exit 0"
+  "cd \"$1\" || exit 1; { git diff --no-renames --name-only -z --diff-filter=d HEAD --; git ls-files -z -o --exclude-standard; } | grep -zv -e '-backups/' -e '\\.lck$' -e 'fp-info-cache$' -e '_autosave-' | tar -c --null -T - -f - 2>/dev/null | tar -x -f - -C \"$2\" 2>/dev/null; git diff --no-renames --name-only -z --diff-filter=D HEAD -- | xargs -0 -r sh -c 'd=$1; shift; for p do [ -e \"$p\" ] || [ -L \"$p\" ] || rm -f -- \"$d/$p\"; done' sh \"$2\"; exit 0"
 
 def Git.carry(+top: String, +path: String) -> IO(String):
   Git.seq(P.Proc.run("sh", ["-c", Git.carry.sh(), "sh", top, path], top), _ => Git.done(""))
@@ -422,7 +425,7 @@ def Git.thread_wt.carry(carry: Bool, +top: String, +path: String, +cwd: String) 
 # folder's uncommitted work is carried over (it belongs on the HEAD it was
 # made against; copied onto a newer tree it would undo upstream's edits).
 def Git.upstream.sh() -> String:
-  "[ \"$1\" = 1 ] && git ls-files -m -o -d --exclude-standard | grep -v -e '-backups/' -e '\\.lck$' -e 'fp-info-cache$' -e '_autosave-' | grep -q . && exit 0; git remote get-url origin >/dev/null 2>&1 || exit 0; b=$(git symbolic-ref -q --short refs/remotes/origin/HEAD); b=${b:-origin/main}; t=; command -v timeout >/dev/null 2>&1 && t='timeout 30'; GIT_TERMINAL_PROMPT=0 $t git fetch -q origin \"${b#origin/}\" </dev/null >/dev/null 2>&1; git rev-parse -q --verify \"refs/remotes/$b\" >/dev/null && printf %s \"$b\"; exit 0"
+  "[ \"$1\" = 1 ] && { git ls-files -m -o -d --exclude-standard; git diff --cached --name-only --no-renames --; } | grep -v -e '-backups/' -e '\\.lck$' -e 'fp-info-cache$' -e '_autosave-' | grep -q . && exit 0; git remote get-url origin >/dev/null 2>&1 || exit 0; b=$(git symbolic-ref -q --short refs/remotes/origin/HEAD); b=${b:-origin/main}; t=; command -v timeout >/dev/null 2>&1 && t='timeout 30'; GIT_TERMINAL_PROMPT=0 $t git fetch -q origin \"${b#origin/}\" </dev/null >/dev/null 2>&1; git rev-parse -q --verify \"refs/remotes/$b\" >/dev/null && printf %s \"$b\"; exit 0"
 
 def Git.upstream.of(r: P.Ran) -> String:
   match r:
