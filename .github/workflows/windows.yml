@@ -77,6 +77,8 @@ jobs:
         run: ./scripts/install-windows-providers.ps1
       - name: Compile, native smoke tests and Windows package
         env:
+          BACKPLANE_GOOGLE_CLIENT_ID: ${{ secrets.BACKPLANE_GOOGLE_CLIENT_ID }}
+          BACKPLANE_GOOGLE_CLIENT_SECRET: ${{ secrets.BACKPLANE_GOOGLE_CLIENT_SECRET }}
           BACKPLANE_TELEMETRY_BAKE: ${{ inputs.version != '' && '1' || '0' }}
           BACKPLANE_TELEMETRY_URL: ${{ vars.BACKPLANE_TELEMETRY_URL }}
           BACKPLANE_TELEMETRY_KID: ${{ secrets.BACKPLANE_TELEMETRY_KID }}
