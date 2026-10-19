@@ -1,6 +1,8 @@
-<p align="right">
+<p align="left">
   <a href="README.jp.md"><img src="docs/media/readme/language-ja.svg" alt="日本語" width="92" height="28"></a>
 </p>
+
+<h1>Backplane</h1>
 
 1. Backplane is a TOTALLY open-source workspace for agentic hardware development.
 2. Backplane is a [KiCad fork](https://github.com/i2cjak/Backplane_KiCad).
@@ -10,10 +12,14 @@
   <img src="docs/media/readme/royalblue-viewers-200.png" alt="RoyalBlue54L in Backplane’s 3D, PCB, and schematic viewers">
 </p>
 
+<h2>Install</h2>
+
 ```sh
 curl -fsSL https://github.com/i2cjak/backplane-bend/releases/latest/download/install.sh | sh
 backplane
 ```
+
+<h2>Providers Supported</h2>
 
 <p align="center">
   <img src="docs/media/readme/agent-setup-200.png" alt="Backplane’s provider, model, and reasoning effort picker">
