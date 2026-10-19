@@ -66,26 +66,43 @@ def methods(xs: List<&2, J.Json>) -> List<&2, String>:
     case j <> rest:
       J.Json.get_str(j, "m", "") <> methods(rest)
 
+# Closed scenarios keep large client states out of IO continuation
+# captures in the native backend; every assertion still uses the same
+# state and receive sequence.
+def Scenario.root() -> N.Step:
+  adopt("")
+
+def Scenario.child() -> N.Step:
+  adopt("src")
+
+def Scenario.answered() -> N.Step:
+  N.Nui.hear(N.Step.nui(Scenario.root()), reply(1n, ""))
+
+def Scenario.changes() -> N.Step:
+  N.Nui.hear(N.Step.nui(Scenario.answered()), J.Json.obj([J.KV{"t", J.Str{"changes"}}, J.KV{"items", J.Json.arr(Nil{})}]))
+
+def Scenario.info() -> N.Step:
+  N.Nui.hear(N.Step.nui(Scenario.answered()), J.Json.obj([J.KV{"t", J.Str{"info"}}, J.KV{"info", J.Json.obj(Nil{})}]))
+
+def Scenario.queued() -> U.Ui:
+  U.Act.ui(U.Ui.rpc.keep(loaded(""), "turn.start", [J.KV{"thread", J.Str{"t1"}}, J.KV{"text", J.Str{"queued"}}, J.KV{"msg", J.Str{"offline-1"}}]))
+
+def Scenario.repeated() -> N.Step:
+  N.Nui.adopt.step(N.Step.nui(Scenario.root()), U.Ui.state.of(base()), head("files-native-origin"))
+
 def main() -> IO(Unit):
-  +root = adopt("")
-  +child = adopt("src")
-  +answered = N.Nui.hear(N.Step.nui(root), reply(1n, ""))
-  +changes = N.Nui.hear(N.Step.nui(answered), J.Json.obj([J.KV{"t", J.Str{"changes"}}, J.KV{"items", J.Json.arr(Nil{})}]))
-  +info = N.Nui.hear(N.Step.nui(answered), J.Json.obj([J.KV{"t", J.Str{"info"}}, J.KV{"info", J.Json.obj(Nil{})}]))
-  +queued = U.Act.ui(U.Ui.rpc.keep(loaded(""), "turn.start", [J.KV{"thread", J.Str{"t1"}}, J.KV{"text", J.Str{"queued"}}, J.KV{"msg", J.Str{"offline-1"}}]))
-  +repeated = N.Nui.adopt.step(N.Step.nui(root), U.Ui.state.of(base()), head("files-native-origin"))
   do IO<Unit>:
-    C.Check.str("native adoption refreshes a retained project root", files(root), "[{\"id\":1,\"m\":\"files.dir\",\"p\":{\"thread\":\"t1\",\"path\":\"\"}}]")
-    C.Check.str("native adoption refreshes a retained child folder", files(child), "[{\"id\":1,\"m\":\"files.dir\",\"p\":{\"thread\":\"t1\",\"path\":\"src\"}}]")
-    C.Check.str("native adoption waits for the new listing", Bool.show(U.Fm.ready(ui(root))), "False")
-    C.Check.str("native adoption keeps the new request owner", U.Ui.info(ui(root), "fm.req:1"), "t1")
-    C.Check.str("native adoption advances the request counter", Nat.show(U.Ui.rid(ui(root))), "2")
-    C.Check.str("native adopted root accepts an empty reply", Bool.show(U.Fm.ready(ui(answered))), "True")
-    C.Check.str("native adopted child accepts an empty reply", Bool.show(U.Fm.ready(ui(N.Nui.hear(N.Step.nui(child), reply(1n, "src"))))), "True")
-    C.Check.str("native Files reply causes no relist loop", files(answered), "[]")
-    C.Check.str("native ordinary changes cause no relist loop", files(changes), "[]")
-    C.Check.str("native info update causes no relist loop", files(info), "[]")
+    C.Check.str("native adoption refreshes a retained project root", files(Scenario.root()), "[{\"id\":1,\"m\":\"files.dir\",\"p\":{\"thread\":\"t1\",\"path\":\"\"}}]")
+    C.Check.str("native adoption refreshes a retained child folder", files(Scenario.child()), "[{\"id\":1,\"m\":\"files.dir\",\"p\":{\"thread\":\"t1\",\"path\":\"src\"}}]")
+    C.Check.str("native adoption waits for the new listing", Bool.show(U.Fm.ready(ui(Scenario.root()))), "False")
+    C.Check.str("native adoption keeps the new request owner", U.Ui.Scenario.info()(ui(Scenario.root()), "fm.req:1"), "t1")
+    C.Check.str("native adoption advances the request counter", Nat.show(U.Ui.rid(ui(Scenario.root()))), "2")
+    C.Check.str("native adopted root accepts an empty reply", Bool.show(U.Fm.ready(ui(Scenario.answered()))), "True")
+    C.Check.str("native adopted child accepts an empty reply", Bool.show(U.Fm.ready(ui(N.Nui.hear(N.Step.nui(Scenario.child()), reply(1n, "src"))))), "True")
+    C.Check.str("native Files reply causes no relist loop", files(Scenario.answered()), "[]")
+    C.Check.str("native ordinary changes cause no relist loop", files(Scenario.changes()), "[]")
+    C.Check.str("native info update causes no relist loop", files(Scenario.info()), "[]")
     C.Check.str("native unused Files tab is not requested", files(N.Nui.adopt.step(N.Nui.init(base(), 800, 600), U.Ui.state.of(base()), head("files-native-origin"))), "[]")
     C.Check.str("native different origin does not inherit Files requests", files(N.Nui.adopt.step(N.Nui.init(loaded(""), 800, 600), U.Ui.state.of(base()), head("another-origin"))), "[]")
-    C.Check.str("native rejoin uses a fresh Files request id", files(repeated), "[{\"id\":2,\"m\":\"files.dir\",\"p\":{\"thread\":\"t1\",\"path\":\"\"}}]")
-    C.Check.str("native adoption replays outbox before new Files requests", String.join(methods(texts(cmds(N.Nui.adopt.step(N.Nui.init(queued, 800, 600), U.Ui.state.of(base()), head("files-native-origin"))))), "|"), "turn.start|files.dir")
+    C.Check.str("native rejoin uses a fresh Files request id", files(Scenario.repeated()), "[{\"id\":2,\"m\":\"files.dir\",\"p\":{\"thread\":\"t1\",\"path\":\"\"}}]")
+    C.Check.str("native adoption replays outbox before new Files requests", String.join(methods(texts(cmds(N.Nui.adopt.step(N.Nui.init(Scenario.queued(), 800, 600), U.Ui.state.of(base()), head("files-native-origin"))))), "|"), "turn.start|files.dir")

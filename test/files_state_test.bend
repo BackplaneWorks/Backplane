@@ -83,55 +83,82 @@ def key.got(r: Map<&2, String> & Bool) -> String:
 def key(u: U.Ui, name: String) -> String:
   key.got(Map.has(&2, String, U.Ui.infos(u), name))
 
+# Closed scenarios keep large client states out of IO continuation
+# captures in the native backend; every assertion still uses the same
+# state and receive sequence.
+def Scenario.root() -> U.Ui:
+  ask(base(), "")
+
+def Scenario.empty() -> U.Ui:
+  got(Scenario.root(), 0n, "t1", "", "")
+
+def Scenario.ab() -> U.Ui:
+  ask(ask(base(), "a"), "b")
+
+def Scenario.b() -> U.Ui:
+  got(Scenario.ab(), 1n, "t1", "b", "f\t2\tnew.txt\n")
+
+def Scenario.late() -> U.Ui:
+  got(Scenario.b(), 0n, "t1", "a", "f\t1\told.txt\n")
+
+def Scenario.aba() -> U.Ui:
+  ask(Scenario.ab(), "a")
+
+def Scenario.revisited() -> U.Ui:
+  got(Scenario.aba(), 2n, "t1", "a", "f\t2\tfresh.txt\n")
+
+def Scenario.bad() -> U.Ui:
+  U.Ui.recv(ask(base(), "missing"), failure(0n, "no such folder"))
+
+def Scenario.current_error() -> U.Ui:
+  U.Ui.recv(Scenario.ab(), failure(1n, "current folder unavailable"))
+
+def Scenario.rejoin() -> U.Act:
+  U.Ui.recv_act(Scenario.empty(), joined("files-origin"))
+
+def Scenario.two() -> U.Ui:
+  ask(U.Ui.select.k(Scenario.root(), "t2"), "")
+
+def Scenario.both() -> U.Ui:
+  got(got(Scenario.two(), 1n, "t2", "", ""), 0n, "t1", "", "f\t1\tone.txt\n")
+
 def main() -> IO(Unit):
-  +root = ask(base(), "")
-  +empty = got(root, 0n, "t1", "", "")
-  +ab = ask(ask(base(), "a"), "b")
-  +b = got(ab, 1n, "t1", "b", "f\t2\tnew.txt\n")
-  +late = got(b, 0n, "t1", "a", "f\t1\told.txt\n")
-  +aba = ask(ab, "a")
-  +revisited = got(aba, 2n, "t1", "a", "f\t2\tfresh.txt\n")
-  +bad = U.Ui.recv(ask(base(), "missing"), failure(0n, "no such folder"))
-  +current_error = U.Ui.recv(ab, failure(1n, "current folder unavailable"))
-  +rejoin = U.Ui.recv_act(empty, joined("files-origin"))
-  +two = ask(U.Ui.select.k(root, "t2"), "")
-  +both = got(got(two, 1n, "t2", "", ""), 0n, "t1", "", "f\t1\tone.txt\n")
   do IO<Unit>:
-    C.Check.str("empty root waits for its reply", ready(root), "False")
-    C.Check.str("successful empty root is ready", ready(empty), "True")
-    C.Check.str("empty root contains no rows", rows(empty), "")
+    C.Check.str("empty root waits for its reply", ready(Scenario.root()), "False")
+    C.Check.str("successful empty root is ready", ready(Scenario.empty()), "True")
+    C.Check.str("empty root contains no rows", rows(Scenario.empty()), "")
     C.Check.str("an empty child folder is ready", ready(got(ask(base(), "empty"), 0n, "t1", "empty", "")), "True")
-    C.Check.str("another folder's older reply does not mark ready", ready(got(ab, 0n, "t1", "a", "f\t1\told.txt\n")), "False")
-    C.Check.str("latest reply marks its folder ready", ready(b), "True")
-    C.Check.str("late old reply cannot unset readiness", ready(late), "True")
-    C.Check.str("late old reply cannot replace current rows", rows(late), "new.txt:b/new.txt")
-    C.Check.str("late old reply cannot replace current path", U.Ui.info(late, "fm.dir:t1"), "b")
-    C.Check.str("latest completed request owner is removed", key(b, "fm.req:1"), "False")
-    C.Check.str("late old request owner is removed", key(late, "fm.req:0"), "False")
-    C.Check.str("returning to a folder waits for its new request", ready(got(aba, 0n, "t1", "a", "f\t1\told.txt\n")), "False")
-    C.Check.str("returning folder accepts its current reply", ready(revisited), "True")
-    C.Check.str("same path old generation cannot replace new listing", rows(got(revisited, 0n, "t1", "a", "f\t1\told.txt\n")), "fresh.txt:a/fresh.txt")
-    C.Check.str("refreshing the same loaded folder waits again", ready(ask(revisited, "a")), "False")
-    C.Check.str("unknown request id cannot supply a listing", ready(got(root, 99n, "t1", "", "f\t1\twrong.txt\n")), "False")
-    C.Check.str("wrong thread cannot supply a listing", ready(got(root, 0n, "t2", "", "f\t1\twrong.txt\n")), "False")
-    C.Check.str("wrong path cannot supply a listing", ready(got(root, 0n, "t1", "wrong", "f\t1\twrong.txt\n")), "False")
-    C.Check.str("current failure remains visible", error(bad), "no such folder")
-    C.Check.str("current failure is not an empty successful listing", ready(bad), "False")
-    C.Check.str("current failure removes its request owner", key(bad, "fm.req:0"), "False")
-    C.Check.str("late failure cannot replace a newer listing", ready(U.Ui.recv(b, failure(0n, "old failure"))), "True")
-    C.Check.str("late failure cannot show an obsolete error", error(U.Ui.recv(b, failure(0n, "old failure"))), "")
-    C.Check.str("late success cannot clear the current error", error(got(current_error, 0n, "t1", "a", "")), "current folder unavailable")
-    C.Check.str("late failure cannot replace the current error", error(U.Ui.recv(current_error, failure(0n, "old failure"))), "current folder unavailable")
-    C.Check.str("a retry succeeds after a failure", ready(got(ask(bad, ""), 1n, "t1", "", "")), "True")
-    C.Check.str("successful retry clears the old error", error(got(ask(bad, ""), 1n, "t1", "", "")), "")
-    C.Check.str("root reconnect sends one new listing request", requests(rejoin), "[{\"id\":1,\"m\":\"files.dir\",\"p\":{\"thread\":\"t1\",\"path\":\"\"}}]")
-    C.Check.str("root reconnect discards completion", ready(U.Act.ui(rejoin)), "False")
-    C.Check.str("root reconnect accepts an empty reply", ready(got(U.Act.ui(rejoin), 1n, "t1", "", "")), "True")
-    C.Check.str("root reconnect rejects pre-reconnect response", ready(got(U.Act.ui(rejoin), 0n, "t1", "", "f\t1\tstale.txt\n")), "False")
+    C.Check.str("another folder's older reply does not mark ready", ready(got(Scenario.ab(), 0n, "t1", "a", "f\t1\told.txt\n")), "False")
+    C.Check.str("latest reply marks its folder ready", ready(Scenario.b()), "True")
+    C.Check.str("late old reply cannot unset readiness", ready(Scenario.late()), "True")
+    C.Check.str("late old reply cannot replace current rows", rows(Scenario.late()), "new.txt:b/new.txt")
+    C.Check.str("late old reply cannot replace current path", U.Ui.info(Scenario.late(), "fm.dir:t1"), "b")
+    C.Check.str("latest completed request owner is removed", key(Scenario.b(), "fm.req:1"), "False")
+    C.Check.str("late old request owner is removed", key(Scenario.late(), "fm.req:0"), "False")
+    C.Check.str("returning to a folder waits for its new request", ready(got(Scenario.aba(), 0n, "t1", "a", "f\t1\told.txt\n")), "False")
+    C.Check.str("returning folder accepts its current reply", ready(Scenario.revisited()), "True")
+    C.Check.str("same path old generation cannot replace new listing", rows(got(Scenario.revisited(), 0n, "t1", "a", "f\t1\told.txt\n")), "fresh.txt:a/fresh.txt")
+    C.Check.str("refreshing the same loaded folder waits again", ready(ask(Scenario.revisited(), "a")), "False")
+    C.Check.str("unknown request id cannot supply a listing", ready(got(Scenario.root(), 99n, "t1", "", "f\t1\twrong.txt\n")), "False")
+    C.Check.str("wrong thread cannot supply a listing", ready(got(Scenario.root(), 0n, "t2", "", "f\t1\twrong.txt\n")), "False")
+    C.Check.str("wrong path cannot supply a listing", ready(got(Scenario.root(), 0n, "t1", "wrong", "f\t1\twrong.txt\n")), "False")
+    C.Check.str("current failure remains visible", error(Scenario.bad()), "no such folder")
+    C.Check.str("current failure is not an empty successful listing", ready(Scenario.bad()), "False")
+    C.Check.str("current failure removes its request owner", key(Scenario.bad(), "fm.req:0"), "False")
+    C.Check.str("late failure cannot replace a newer listing", ready(U.Ui.recv(Scenario.b(), failure(0n, "old failure"))), "True")
+    C.Check.str("late failure cannot show an obsolete error", error(U.Ui.recv(Scenario.b(), failure(0n, "old failure"))), "")
+    C.Check.str("late success cannot clear the current error", error(got(Scenario.current_error(), 0n, "t1", "a", "")), "current folder unavailable")
+    C.Check.str("late failure cannot replace the current error", error(U.Ui.recv(Scenario.current_error(), failure(0n, "old failure"))), "current folder unavailable")
+    C.Check.str("a retry succeeds after a failure", ready(got(ask(Scenario.bad(), ""), 1n, "t1", "", "")), "True")
+    C.Check.str("successful retry clears the old error", error(got(ask(Scenario.bad(), ""), 1n, "t1", "", "")), "")
+    C.Check.str("root reconnect sends one new listing request", requests(Scenario.rejoin()), "[{\"id\":1,\"m\":\"files.dir\",\"p\":{\"thread\":\"t1\",\"path\":\"\"}}]")
+    C.Check.str("root reconnect discards completion", ready(U.Act.ui(Scenario.rejoin())), "False")
+    C.Check.str("root reconnect accepts an empty reply", ready(got(U.Act.ui(Scenario.rejoin()), 1n, "t1", "", "")), "True")
+    C.Check.str("root reconnect rejects pre-reconnect response", ready(got(U.Act.ui(Scenario.rejoin()), 0n, "t1", "", "f\t1\tstale.txt\n")), "False")
     C.Check.str("unused Files tab is not requested", requests(U.Ui.recv_act(base(), joined("files-origin"))), "[]")
-    C.Check.str("another hub does not inherit Files requests", requests(U.Ui.recv_act(empty, joined("another-origin"))), "[]")
-    C.Check.str("a second thread's empty root is independently ready", ready(both), "True")
-    C.Check.str("the first thread retains its own listing", rows(U.Ui.select.k(both, "t1")), "one.txt:one.txt")
-    C.Check.str("a reply cannot change selection", U.Ui.sel(both), "t2")
-    C.Check.str("root request from each thread is refreshed", Nat.show(List.length(&2, J.Json, files(U.Ui.recv_act(both, joined("files-origin"))))), "2")
-    C.Check.str("phone JSON exposes a ready empty listing", Bool.show(J.Json.get_bool(V.Files.json(U.Lang.loc(empty), True{}, empty), "ready", False{})), "True")
+    C.Check.str("another hub does not inherit Files requests", requests(U.Ui.recv_act(Scenario.empty(), joined("another-origin"))), "[]")
+    C.Check.str("a second thread's empty root is independently ready", ready(Scenario.both()), "True")
+    C.Check.str("the first thread retains its own listing", rows(U.Ui.select.k(Scenario.both(), "t1")), "one.txt:one.txt")
+    C.Check.str("a reply cannot change selection", U.Ui.sel(Scenario.both()), "t2")
+    C.Check.str("root request from each thread is refreshed", Nat.show(List.length(&2, J.Json, files(U.Ui.recv_act(Scenario.both(), joined("files-origin"))))), "2")
+    C.Check.str("phone JSON exposes a ready empty listing", Bool.show(J.Json.get_bool(V.Files.json(U.Lang.loc(Scenario.empty()), True{}, Scenario.empty()), "ready", False{})), "True")
