@@ -216,9 +216,9 @@ try {
   // Choose that row so this is the actual bot UI, rather than its plain thread.
   await poke("click", "100", "74"); await poke("type", "zzno-project-match");
   await poke("click", "100", "154");
-  // Select the bot's Browser tab (Space, Browser, Tasks...) while it has no page.
+  // Select Browser after Chat, Mail room and Space while it has no page.
   const before = (await children()).length;
-  await poke("click", "520", "62"); await Bun.sleep(1500);
+  await poke("click", "595", "62"); await Bun.sleep(1500);
   check("the bot's empty Browser tab creates no CEF browser", (await children()).length === before && !info[`browser.page.${bot.id}`], await children());
   await mcp(bot.thread, "preview_open", { url: `http://127.0.0.1:${site.port}/bot` });
   await poke("click", "820", "24"); // close the duplicate right-hand Viewer pane
