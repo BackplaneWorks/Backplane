@@ -95,7 +95,7 @@ def main() -> IO(Unit):
     C.Check.str("native adoption refreshes a retained project root", files(Scenario.root()), "[{\"id\":1,\"m\":\"files.dir\",\"p\":{\"thread\":\"t1\",\"path\":\"\"}}]")
     C.Check.str("native adoption refreshes a retained child folder", files(Scenario.child()), "[{\"id\":1,\"m\":\"files.dir\",\"p\":{\"thread\":\"t1\",\"path\":\"src\"}}]")
     C.Check.str("native adoption waits for the new listing", Bool.show(U.Fm.ready(ui(Scenario.root()))), "False")
-    C.Check.str("native adoption keeps the new request owner", U.Ui.Scenario.info()(ui(Scenario.root()), "fm.req:1"), "t1")
+    C.Check.str("native adoption keeps the new request owner", U.Ui.info(ui(Scenario.root()), "fm.req:1"), "t1")
     C.Check.str("native adoption advances the request counter", Nat.show(U.Ui.rid(ui(Scenario.root()))), "2")
     C.Check.str("native adopted root accepts an empty reply", Bool.show(U.Fm.ready(ui(Scenario.answered()))), "True")
     C.Check.str("native adopted child accepts an empty reply", Bool.show(U.Fm.ready(ui(N.Nui.hear(N.Step.nui(Scenario.child()), reply(1n, "src"))))), "True")
