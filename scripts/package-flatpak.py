@@ -16,6 +16,9 @@ def manifest(package, assets):
         "runtime-version": "25.08",
         "sdk": "org.freedesktop.Sdk",
         "command": "backplane",
+        # Jammy's builder invokes the removed appstream-compose binary.
+        # Compose with the SDK's modern tool explicitly instead.
+        "appstream-compose": False,
         "finish-args": [
             "--share=network", "--share=ipc", "--socket=x11", "--device=dri",
             "--socket=pulseaudio", "--filesystem=host", "--filesystem=/tmp",
@@ -36,6 +39,8 @@ def manifest(package, assets):
                 f"sed -i 's/^Icon=backplane$/Icon={APP_ID}/' /app/share/applications/{APP_ID}.desktop",
                 f"install -m644 icon/backplane.svg /app/share/icons/hicolor/scalable/apps/{APP_ID}.svg",
                 f"install -m644 {APP_ID}.metainfo.xml /app/share/metainfo/",
+                f"appstreamcli compose --components={APP_ID} --prefix=/ --origin={APP_ID} "
+                "--result-root=/app --data-dir=/app/share/app-info/xmls /app",
             ],
             "sources": [
                 {"type": "dir", "path": str(package)},
