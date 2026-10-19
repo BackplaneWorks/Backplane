@@ -96,7 +96,12 @@ fi
 work="build/cc/$(basename "$out")"
 mkdir -p "$work"
 # stage clocks (ms) and peak RSS (KB) via /usr/bin/time when it is there
-now_ms() { echo $(( $(date +%s%N) / 1000000 )); }
+now_ms() {
+  case $(date +%N) in
+    *[!0-9]*|"") perl -MTime::HiRes=time -e 'printf "%.0f\n", time * 1000' ;;
+    *) echo $(( $(date +%s%N) / 1000000 )) ;;
+  esac
+}
 rss_cmd() {
   f=$1; shift
   if [ "$(uname -s)" = Darwin ]; then scripts/mac-rss.sh "$f" "$@"
