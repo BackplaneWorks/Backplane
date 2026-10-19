@@ -1,6 +1,7 @@
 import Base
 import ./i18n.bend as I
 import ./msgs.bend as MSG
+import ./mailview.bend as MV
 import ./json.bend as J
 import ./model.bend as M
 import ./client.bend as U
@@ -372,11 +373,25 @@ def BU.tabs() -> List<&2, String>:
 def BU.tabs.of(+id: String) -> List<&2, String>:
   Bool.pick(List<&2, String>, FR.Fr.is(id), ["chat", "space", "memory", "routines"], BU.tabs())
 
-# the uberbot's tabs: its status first
-def BU.tabs.for(+u: U.Ui, +id: String) -> List<&2, String>:
-  Bool.pick(List<&2, String>, UB.Uber.is(U.Ui.state(u), id), "status" <> BU.tabs.of(id), BU.tabs.of(id))
+# The historical table remains stable for the teaching/far laws. Product
+# tab lists add Mailroom here; mirrored bots retain their shared table.
+def BU.tabs.mail(+id: String) -> List<&2, String>:
+  Bool.pick(List<&2, String>, FR.Fr.is(id), BU.tabs.of(id), ["chat", "mail", "space", "browser", "tasks", "memory", "routines", "hooks", "settings"])
 
-def BU.tab.label(+l: I.Loc, +t: String) -> String:
+# Renderer capabilities apply only to local bots. Remote headers retain
+# their shared table directly, including for an abstract client.
+def BU.tabs.local(+u: U.Ui, +id: String) -> List<&2, String>:
+  Bool.pick(List<&2, String>, U.Mailv.enabled(u), Bool.pick(List<&2, String>, UB.Uber.is(U.Ui.state(u), id), ["mail", "status", "chat", "space", "browser", "tasks", "memory", "routines", "hooks", "settings"], BU.tabs.mail(id)), Bool.pick(List<&2, String>, UB.Uber.is(U.Ui.state(u), id), "status" <> BU.tabs.of(id), BU.tabs.of(id)))
+
+def BU.tabs.routed(remote: Bool, +u: U.Ui, +id: String) -> List<&2, String>:
+  match remote:
+    case True{}: BU.tabs.of(id)
+    case False{}: BU.tabs.local(u, id)
+
+def BU.tabs.for(+u: U.Ui, +id: String) -> List<&2, String>:
+  BU.tabs.routed(FR.Fr.is(id), u, id)
+
+def BU.tab.label.base(+l: I.Loc, +t: String) -> String:
   Bool.pick(String, String.eq(t, "chat"), MSG.T.bots.tab.chat(l),
     Bool.pick(String, String.eq(t, "space"), MSG.T.bots.tab.space(l),
       Bool.pick(String, String.eq(t, "browser"), MSG.T.bots.tab.browser(l),
@@ -384,6 +399,12 @@ def BU.tab.label(+l: I.Loc, +t: String) -> String:
         Bool.pick(String, String.eq(t, "memory"), MSG.T.bots.tab.memory(l),
           Bool.pick(String, String.eq(t, "routines"), MSG.T.bots.tab.routines(l),
             Bool.pick(String, String.eq(t, "hooks"), MSG.T.bots.tab.hooks(l), Bool.pick(String, String.eq(t, "status"), MSG.T.bots.tab.status(l), MSG.T.bots.tab.settings(l)))))))))
+
+def BU.tab.label(+l: I.Loc, +t: String) -> String:
+  Bool.pick(String, String.eq(t, "mail"), "Mailroom", BU.tab.label.base(l, t))
+
+def BU.tab.label.for(+l: I.Loc, +u: U.Ui, +id: String, +t: String) -> String:
+  BU.tab.label(l, t) ++ Bool.pick(String, String.eq(t, "mail"), Bool.pick(String, Nat.is_eq(MV.Badge.n(U.Mailv.badge(u, id)), 0n), "", " " ++ MV.Badge.text(U.Mailv.badge(u, id))), "")
 
 def BU.tab.has(ts: List<&2, String>, +t: String) -> Bool:
   match ts:
@@ -399,12 +420,15 @@ def BU.tab(+u: U.Ui) -> String:
 # the tab when none is picked (or the one picked is not the bot's): the
 # uberbot's status, else chat
 def BU.tab.dflt(+u: U.Ui, +id: String) -> String:
-  Bool.pick(String, UB.Uber.is(U.Ui.state(u), id), "status", "chat")
+  Bool.pick(String, UB.Uber.is(U.Ui.state(u), id), "mail", "chat")
 
 # the tab shown: the one picked, when this bot has it, else its chat
+def BU.tab.default(+u: U.Ui, +id: String) -> String:
+  Bool.pick(String, U.Mailv.enabled(u), BU.tab.dflt(u, id), Bool.pick(String, UB.Uber.is(U.Ui.state(u), id), "status", "chat"))
+
 def BU.tab.of(+u: U.Ui, +id: String) -> String:
-  Bool.pick(String, String.is_empty(U.Ui.scratch(u, "@btab")), BU.tab.dflt(u, id),
-    Bool.pick(String, BU.tab.has(BU.tabs.for(u, id), BU.tab(u)), BU.tab(u), BU.tab.dflt(u, id)))
+  Bool.pick(String, String.is_empty(U.Ui.scratch(u, "@btab")), BU.tab.default(u, id),
+    Bool.pick(String, BU.tab.has(BU.tabs.for(u, id), BU.tab(u)), BU.tab(u), BU.tab.default(u, id)))
 
 def BU.space.none(paged: Bool, +name: String) -> SP.Space:
   match paged:

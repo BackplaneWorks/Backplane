@@ -1,4 +1,5 @@
 import Base
+import ./src/core/pcb2d.bend as PCB2 # PCB viewer text
 import ./src/app/side_rows.bend as SR
 import ./src/app/side_row_types.bend as SRT
 import ./src/gfx/draw.bend as D
@@ -7,6 +8,7 @@ import ./src/server/server.bend as MPCREDIT # mail perf
 import ./src/core/schematic.bend as SC # kicad fork viewers
 import ./src/core/charter.bend as CH # mail 2c
 import ./src/core/mailrun.bend as MRUN # mail 2c
+import ./src/app/mailroom.bend as MRUI # mail ui
 import ./src/server/mailstore.bend as MIX # mail index
 import ./src/app/mm.bend as MM # window memos
 import ./src/core/kexport.bend as KEX
@@ -12306,4 +12308,38 @@ def Laws.sidebar_row_key_sound(a, b, h):
 
 def Laws.sidebar_row_paint_exact(ty, a, b, h):
   %Laws.sidebar_row_key_sound(a, b, h) : {SR.Key.paint(ty, a) == SR.Key.paint(ty, _) : L.Out}
+  {==}
+
+def Laws.visible_cats_empty_preserves_cache(c, clock):
+  {==}
+
+def Laws.visible_sleep_cat_posed_once(clock):
+  {==}
+# ---- mail ui ----
+def Laws.mailroom_tab_after_chat():
+  {==}
+
+def Laws.mailroom_uber_default(u, id):
+  {==}
+
+def Laws.mailroom_run_collapsed_default(now):
+  {==}
+
+def Laws.mailroom_chip_filters(f, bot):
+  match f:
+    case MVW.Filter{_, _, _, _}: {==}
+
+def Laws.mailroom_chip_keeps_selection(u, bot):
+  match u:
+    case U.Ui{_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _}: {==}
+
+def Laws.mailroom_covers_plane(p):
+  {==}
+
+def Laws.mail_body_kept_output(k, o, at, due): {==}
+
+def Laws.mail_age_relative_deadline(): {==}
+
+# ---- PCB viewer text ----
+def Laws.pcb2_hidden_text_draws_nothing(at, angle, x, text, up, key, sig, ctx):
   {==}

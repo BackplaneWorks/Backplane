@@ -479,6 +479,21 @@ enum NativeMessages {
     tag == "ja" ? ("スレッドで表示") : ("Show in the thread")
   }
 
+  // native.home.hint
+  static func native_home_hint(_ tag: String) -> String {
+    tag == "ja" ? ("メインボットが要対応の作業、実行中の作業、ボット、ルーティンをまとめて把握します。") : ("Your uberbot keeps the whole picture: what needs you, what runs, your bots and routines.")
+  }
+
+  // native.home.make
+  static func native_home_make(_ tag: String) -> String {
+    tag == "ja" ? ("メインボットを作成") : ("Make an uberbot")
+  }
+
+  // native.home.none
+  static func native_home_none(_ tag: String) -> String {
+    tag == "ja" ? ("メインボットなし") : ("No uberbot")
+  }
+
   // native.hook.copyurl
   static func native_hook_copyurl(_ tag: String) -> String {
     tag == "ja" ? ("URLをコピー") : ("Copy URL")
@@ -599,6 +614,16 @@ enum NativeMessages {
     tag == "ja" ? ("レンダリング失敗：" + arg0) : ("Rendering failed: " + arg0)
   }
 
+  // native.notify.channel.live
+  static func native_notify_channel_live(_ tag: String) -> String {
+    tag == "ja" ? ("稼働中のエージェント") : ("Agents working")
+  }
+
+  // native.notify.channel.personal
+  static func native_notify_channel_personal(_ tag: String) -> String {
+    tag == "ja" ? ("個人向け通知") : ("Personal alerts")
+  }
+
   // native.pair.action
   static func native_pair_action(_ tag: String) -> String {
     tag == "ja" ? ("ペアリング") : ("Pair")
@@ -682,6 +707,26 @@ enum NativeMessages {
   // native.pair.unpair
   static func native_pair_unpair(_ tag: String) -> String {
     tag == "ja" ? ("ペアリング解除") : ("Unpair")
+  }
+
+  // native.plane.card
+  static func native_plane_card(_ tag: String, _ arg0: String, _ arg1: String) -> String {
+    tag == "ja" ? (arg0 + "、" + arg1) : (arg0 + ", " + arg1)
+  }
+
+  // native.plane.more
+  static func native_plane_more(_ tag: String, _ arg0: String) -> String {
+    tag == "ja" ? ("他" + arg0 + "件") : (arg0 + " more")
+  }
+
+  // native.plane.unread
+  static func native_plane_unread(_ tag: String) -> String {
+    tag == "ja" ? ("未読") : ("Unread")
+  }
+
+  // native.plane.waiting
+  static func native_plane_waiting(_ tag: String) -> String {
+    tag == "ja" ? ("対応待ちなし") : ("Nothing waiting")
   }
 
   // native.review.comment
@@ -862,6 +907,21 @@ enum NativeMessages {
   // native.settings.paired
   static func native_settings_paired(_ tag: String, _ arg0: String) -> String {
     tag == "ja" ? (arg0 + "台とペアリング済み") : (arg0 + " paired")
+  }
+
+  // native.settings.placeholder.hint
+  static func native_settings_placeholder_hint(_ tag: String) -> String {
+    tag == "ja" ? ("このハブでの設定の説明。") : ("A line of what the setting does for this hub.")
+  }
+
+  // native.settings.placeholder.name
+  static func native_settings_placeholder_name(_ tag: String) -> String {
+    tag == "ja" ? ("設定名") : ("Setting name")
+  }
+
+  // native.settings.placeholder.option
+  static func native_settings_placeholder_option(_ tag: String) -> String {
+    tag == "ja" ? ("選択肢") : ("Option")
   }
 
   // native.settings.system
@@ -1112,6 +1172,36 @@ enum NativeMessages {
   // palette.terminal
   static func palette_terminal(_ tag: String) -> String {
     tag == "ja" ? ("ターミナル") : ("Terminal")
+  }
+
+  // plane.bots.working
+  static func plane_bots_working(_ tag: String) -> String {
+    tag == "ja" ? ("稼働ボット") : ("Bots working")
+  }
+
+  // plane.locks
+  static func plane_locks(_ tag: String) -> String {
+    tag == "ja" ? ("ロック") : ("Locks")
+  }
+
+  // plane.need
+  static func plane_need(_ tag: String) -> String {
+    tag == "ja" ? ("対応待ち") : ("Need you")
+  }
+
+  // plane.needs
+  static func plane_needs(_ tag: String) -> String {
+    tag == "ja" ? ("要対応") : ("Needs you")
+  }
+
+  // plane.rooms.unread
+  static func plane_rooms_unread(_ tag: String) -> String {
+    tag == "ja" ? ("未読ルーム") : ("Unread rooms")
+  }
+
+  // plane.running
+  static func plane_running(_ tag: String) -> String {
+    tag == "ja" ? ("実行中") : ("Running")
   }
 
   // queue.edit
@@ -1477,6 +1567,11 @@ enum NativeMessages {
   // web.hooks.secret
   static func web_hooks_secret(_ tag: String) -> String {
     tag == "ja" ? ("シークレット（1回のみ表示）") : ("Secret, shown once")
+  }
+
+  // web.plane.idle
+  static func web_plane_idle(_ tag: String) -> String {
+    tag == "ja" ? ("待機中") : ("Idle")
   }
 
   // web.terminal.pinned

@@ -1214,3 +1214,25 @@ native.key.up = 上
 native.key.down = 下
 native.key.right = 右
 native.key.keyboard = キーボード
+
+# Native Home and Status plane
+# ja? uberbot term
+native.home.none = メインボットなし
+# ja? uberbot term
+native.home.hint = メインボットが要対応の作業、実行中の作業、ボット、ルーティンをまとめて把握します。
+# ja? uberbot term
+native.home.make = メインボットを作成
+native.plane.waiting = 対応待ちなし
+native.plane.more = 他{count}件
+native.plane.card = {name}、{counts}
+native.plane.unread = 未読
+
+# Native hub-settings loading and notification channels
+native.settings.placeholder.name = 設定名
+native.settings.placeholder.hint = このハブでの設定の説明。
+native.settings.placeholder.option = 選択肢
+native.notify.channel.personal = 個人向け通知
+native.notify.channel.live = 稼働中のエージェント
+
+# iOS system camera permission purpose
+native.permission.camera = コンピューターに表示されたペアリングコードを読み取り、接続します。

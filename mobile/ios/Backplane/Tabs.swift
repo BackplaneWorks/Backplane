@@ -369,6 +369,7 @@ struct AppSettingsTab: View {
 // in the background and takes the fresh rows in place; with none yet, the
 // page's shape as placeholders. Leaving it closes the hub's Settings.
 struct HubSettingsPage: View {
+    @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let key: String
 
@@ -389,9 +390,9 @@ struct HubSettingsPage: View {
                 ForEach(0..<7, id: \.self) { _ in
                     Section {
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("Setting name")
-                            Text("A line of what the setting does for this hub.").font(.footnote)
-                            HStack { Text("Option"); Text("Option"); Text("Option") }
+                            Text(NativeMessages.native_settings_placeholder_name(lang))
+                            Text(NativeMessages.native_settings_placeholder_hint(lang)).font(.footnote)
+                            HStack { Text(NativeMessages.native_settings_placeholder_option(lang)); Text(NativeMessages.native_settings_placeholder_option(lang)); Text(NativeMessages.native_settings_placeholder_option(lang)) }
                         }
                         .padding(.vertical, 4)
                     }
@@ -400,7 +401,7 @@ struct HubSettingsPage: View {
                 .allowsHitTesting(false)
             }
         }
-        .navigationTitle("Hub settings · \(name)")
+        .navigationTitle(NativeMessages.native_settings_hub_named(lang, name))
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { model.act("hub-settings", key + "|on") }
         .onDisappear { model.act("hub-settings", key + "|off") }

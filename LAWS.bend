@@ -1,4 +1,5 @@
 import Base
+import ./src/core/pcb2d.bend as PCB2 # PCB viewer text
 import ./src/app/side_rows.bend as SR
 import ./src/app/side_row_types.bend as SRT
 import ./src/server/botnet.bend as MPLOG # mail perf runtime count
@@ -13,6 +14,7 @@ import ./src/web/view.bend as WPH
 import ./src/core/schematic.bend as SC # kicad fork viewers
 import ./src/core/charter.bend as CH # mail 2c
 import ./src/core/mailrun.bend as MRUN # mail 2c
+import ./src/app/mailroom.bend as MRUI # mail ui
 import ./src/server/mailstore.bend as MIX # mail index
 import ./src/app/mm.bend as MM # window memos
 import ./src/core/kexport.bend as KEX
@@ -53,6 +55,7 @@ import ./src/core/semver.bend as SV
 import ./src/core/clipath.bend as CPA
 import ./src/app/nui.bend as N
 import ./src/app/bots.bend as BV
+import ./src/app/cats.bend as VCAT
 import ./src/core/sexpr.bend as KSEX # kicad fork footprint placement
 import ./src/core/board.bend as B
 import ./src/core/hub.bend as H
@@ -10592,3 +10595,61 @@ law sidebar_row_paint_exact:
   for +b: SRT.SideRowK
   for h: {SR.Key.same(a, b) == True{} : Bool}
   {SR.Key.paint(ty, a) == SR.Key.paint(ty, b) : L.Out}
+# Visible cat requests are additional to sidebar/header warm-up.
+law visible_cats_empty_preserves_cache:
+  for +c: Map<&2, VCAT.CatF>
+  for +clock: Nat
+  {BV.Spot.warm(Nil{}, c, clock) == c : Map<&2, VCAT.CatF>}
+
+law visible_sleep_cat_posed_once:
+  for +clock: Nat
+  {BV.Bv.warm.at("sleep", clock) == 0n : Nat}
+# ---- mail ui ----
+law mailroom_tab_after_chat:
+  {BU.BU.tabs.mail("b1") == ["chat", "mail", "space", "browser", "tasks", "memory", "routines", "hooks", "settings"] : List<&2, String>}
+
+law mailroom_uber_default:
+  for +u: U.Ui
+  for +id: String
+  {BU.BU.tab.dflt(u, id) == Bool.pick(String, UBR.Uber.is(U.Ui.state(u), id), "mail", "chat") : String}
+
+law mailroom_run_collapsed_default:
+  for +now: Nat
+  {U.Mailv.run_open(U.Ui.init(now)) == False{} : Bool}
+
+law mailroom_chip_filters:
+  for +f: MVW.Filter
+  for +bot: String
+  {MVW.Filter.bot(MVW.Mv.with_bot(f, bot)) == bot : String}
+
+law mailroom_chip_keeps_selection:
+  for +u: U.Ui
+  for +bot: String
+  {U.Ui.sel(U.Mailv.chip(u, bot)) == U.Ui.sel(u) : String}
+
+law mailroom_covers_plane:
+  for +p: PLN.Plane
+  {MRUI.Mr.all(p) == List.concat(&2, PLN.PRow, [PLN.Plane.need(p), PLN.Plane.run(p), PLN.Plane.locks(p), PLN.Plane.routines(p), PLN.Plane.rooms(p), PLN.Plane.idle(p), PLN.Plane.bots(p)]) : List<&2, PLN.PRow>}
+
+# The body cache carries no independent sidebar or timeline state.
+law mail_body_kept_output:
+  for k: String
+  for +o: L.Out
+  for at: Nat
+  for due: Nat
+  {MM.BotM.out(MM.BotM.kept(MM.BotM{k, o, at, due, False{}})) == o : L.Out}
+
+law mail_age_relative_deadline:
+  {MM.BotM.age_due(160n, 101n) == 161n : Nat}
+
+# ---- PCB viewer text ----
+law pcb2_hidden_text_draws_nothing:
+  for +at: B.Pt
+  for +angle: F32
+  for +x: KSEX.Sx
+  for +text: String
+  for +up: Bool
+  for +key: String
+  for +sig: U32
+  for +ctx: String
+  {PCB2.Text.visible.k(True{}, at, angle, x, text, up, key, sig, ctx) == Nil{} : List<&2, B.Item>}

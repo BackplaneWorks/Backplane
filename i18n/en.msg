@@ -1194,3 +1194,22 @@ native.key.up = Up
 native.key.down = Down
 native.key.right = Right
 native.key.keyboard = Keyboard
+
+# Native Home and Status plane
+native.home.none = No uberbot
+native.home.hint = Your uberbot keeps the whole picture: what needs you, what runs, your bots and routines.
+native.home.make = Make an uberbot
+native.plane.waiting = Nothing waiting
+native.plane.more = {count} more
+native.plane.card = {name}, {counts}
+native.plane.unread = Unread
+
+# Native hub-settings loading and notification channels
+native.settings.placeholder.name = Setting name
+native.settings.placeholder.hint = A line of what the setting does for this hub.
+native.settings.placeholder.option = Option
+native.notify.channel.personal = Personal alerts
+native.notify.channel.live = Agents working
+
+# iOS system camera permission purpose
+native.permission.camera = Backplane reads the pairing code your computer shows, to connect to it.

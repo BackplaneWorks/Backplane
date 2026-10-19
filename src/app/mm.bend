@@ -361,7 +361,7 @@ def Mm.key.k(ok: Bool, +n: N.Nui, +t: TouchK, +rels: List<&2, String>) -> String
 def Mm.key(+n: N.Nui, +t: TouchK, +rels: List<&2, String>) -> String:
   match n:
     case N.Nui{U.Ui{_, +sel, _, _, +op, _, _, _, _, _, _, _, _, _, _, _, +tr}, _, _, _, _, _, _, _, _, _, _, _, _}:
-      Mm.key.k(Mm.memo.ok(op, sel, tr), n, t, rels)
+      Mm.key.k(Mm.memo.ok(op, sel, U.MailvLocal.terms(tr)), n, t, rels)
 
 # The memo
 # --------
@@ -905,3 +905,60 @@ def IxK.force(k: IxK) -> Nat:
     case IxK{n, lt, U.SIx{by, a, kd, w}}:
       Nat.add(Nat.add(n, Ix.lens(Map.to_list(&2, List<&2, M.Thread>, by), 0n)),
         Nat.add(List.length(&2, String, Map.keys(&2, List<&2, M.Ask>, a)), Nat.add(List.length(&2, String, Map.keys(&2, Nat, kd)), List.length(&2, String, Map.keys(&2, Nat, w)))))
+
+# A Mailroom body memo. The header/cats, sidebar and overlays are composed
+# afresh. No new touch-log reader: revision comes from the mail client.
+type BotM is Data:
+  BotM{key: String, out: L.Out, at: Nat, due: Nat, hit: Bool}
+
+def BotM.empty() -> BotM:
+  BotM{"", L.Out.none(), 0n, 0n, False{}}
+
+def BotM.key(m: BotM) -> String:
+  match m:
+    case BotM{k, _, _, _, _}: k
+
+def BotM.out(m: BotM) -> L.Out:
+  match m:
+    case BotM{_, o, _, _, _}: o
+
+def BotM.hit(m: BotM) -> Bool:
+  match m:
+    case BotM{_, _, _, _, h}: h
+
+def BotM.same(+key: String, +now: Nat, m: BotM) -> Bool:
+  match m:
+    case BotM{k, _, at, +due, _}:
+      Bool.and(String.eq(key, k), Bool.and(Nat.is_ge(now, at), Bool.or(Nat.is_eq(due, 0n), Nat.is_lt(now, due))))
+
+def BotM.kept(m: BotM) -> BotM:
+  match m:
+    case BotM{k, o, at, due, _}: BotM{k, o, at, due, True{}}
+
+# Mv.ago and I18n.ago change at relative age boundaries, rather than the
+# wall clock's minute. Future timestamps still say now until at+60.
+def BotM.age_due(+now: Nat, +at: Nat) -> Nat:
+  +d = Nat.sub(now, at)
+  +unit = Bool.pick(Nat, Nat.is_lt(d, 3600n), 60n, Bool.pick(Nat, Nat.is_lt(d, 86400n), 3600n, 86400n))
+  Nat.add(at, Nat.mul(Nat.add(Nat.div(d, unit), 1n), unit))
+
+def Mm.mail.fields(xs: List<&2, String>, +u: U.Ui) -> String:
+  match xs:
+    case Nil{}: ""
+    case +x <> t: x ++ "\u{1f}" ++ J.Json.show(J.Str{U.Ui.scratch(u, x)}) ++ "\u{1e}" ++ Mm.mail.fields(t, u)
+
+# ---- mail ui ----
+# Exact Mailroom body inputs. The plane signature is computed only when
+# the existing PW/@plane is rebuilt. Age deadlines live in BotM, rather
+# than this key. Unrelated thread drafts and animation clocks stay out.
+def Mm.mail(+n: N.Nui, +plane_key: String) -> String:
+  +u = N.Nui.ui(n)
+  U32.show(N.Nui.width(n)) ++ "," ++ U32.show(N.Nui.height(n)) ++ "," ++ U32.show(Mm.x1.of(n))
+    ++ "|mail=" ++ Nat.show(U.Mailv.touch(u)) ++ "|page=" ++ Nat.show(U.Mailv.rev(u)) ++ "|plane=" ++ plane_key
+    ++ "|bot=" ++ U.Mailv.owner(u) ++ "|filter=" ++ U.Mailv.key(u)
+    ++ "|origin=" ++ J.Json.show(J.Str{U.Ui.info(u, "origin")}) ++ "|generation=" ++ J.Json.show(J.Str{U.Ui.info(u, "local.generation")})
+    ++ "|tab=" ++ U.Ui.scratch(u, "@btab") ++ "|theme=" ++ U32.show(N.Nui.look(n))
+    ++ "|view=" ++ Mm.mail.fields(["@mr.run", "@mr.machine", "@mr.conv", "@mr.to", "@mr.status", "@mr.project", "@mr.bot", "@f.mrsearch", "@f.mrproject", "@f.mrreply"], u)
+    ++ "|scroll=" ++ U.Ui.info(u, "pane:mr") ++ "," ++ U.Ui.info(u, "pane:mrbody")
+    ++ "|edit=" ++ N.Nui.focus_of(n) ++ "," ++ Nat.show(N.Nui.caret_of(n)) ++ "," ++ Nat.show(N.Nui.mark(n)) ++ Mm.b(N.Blink.on(n))
+    ++ "|lang=" ++ L.TL.locale(u)

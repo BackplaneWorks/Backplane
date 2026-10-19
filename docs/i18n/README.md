@@ -104,3 +104,23 @@ overflow as catalogs grow, while keeping sorted keys and fallback metadata
 unchanged. The HTML-backend regression exercises 4,097 keys and a large
 missing list, checking every entry and its order. Native output and message
 lookup stay unchanged by this metadata representation.
+
+Native Home and Status sections resolve labels from the current screen locale.
+Idle remaining counts and uber-card accessibility use full messages with raw
+values; platform-specific English counter labels remain distinct. The proposed
+Japanese uberbot term remains メインボット pending the final linguistic review.
+
+Android notification channel display names refresh on a resolved screen locale
+change. Channel IDs and importance remain stable, preserving notification
+preferences. Startup uses English until the Bend screen resolves device locale.
+
+The camera permission purpose is `native.permission.camera`. The catalog
+compiler generates `mobile/ios/Info.plist` from `Info.plist.in`, retaining the
+English fallback, and writes en/ja `InfoPlist.strings`. Edit the catalog/template,
+then regenerate. OS resource messages must be nonempty literal text, without
+ICU interpolation or selection.
+
+[iOS chooses localized property-list strings using its language preferences](https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/AboutInformationPropertyListFiles.html).
+The Bend in-app language override does not change that OS preference. Japanese
+permission resources can therefore follow iOS language independently of the
+in-app preview gate; live prompt/device verification remains pending.

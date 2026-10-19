@@ -5,6 +5,7 @@ import ./kicad.bend as K
 import ../core/mech.bend as MC
 import ./proc.bend as PR
 import ../core/board.bend as B
+import ../core/pcb2d.bend as P2
 import ../core/schematic.bend as SC
 import ../core/plot.bend as P
 import ../core/glb.bend as G
@@ -302,7 +303,7 @@ def Pv.parse.k(sch: Bool, bs: List<&2, U32>) -> Maybe<&2, List<&2, B.Item>>:
     case True{}:
       SC.Sch.items(bs)
     case False{}:
-      B.Board.items(bs)
+      P2.Pcb2.items(bs)
 
 def Pv.plot(m: Maybe<&2, List<&2, B.Item>>, +kind: U32) -> Maybe<&2, P.Plot>:
   match m:

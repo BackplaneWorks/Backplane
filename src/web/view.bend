@@ -2001,14 +2001,14 @@ def View.thread.p(+lc: I.Loc, u: U.Ui, t: M.Thread, pend: List<&2, String>, +att
         D.At{"data-drop", "attach"}, D.At{"data-drop-hover", "drop-hover"}], D.Dom.cat(D.Dom.cat(
         View.top(lc, hd, M.Thread{id, p, ti, c, a, turn, pe, ar, o, sa, ua, pi, en, br, wt, pr, mo, rm, im, se, de}, st, UZ.Chip.of(st, id, now), mini, panel, M.Snooze.on(now, U.Side.until(st, id)), U.Flag.get(op, "snooze"), term, String.eq(U.Str.get(nf, "view.kind:" ++ id), "diff"), String.eq(U.Str.get(drafts, "@del"), id), U.Str.get(drafts, "@ren"), U.Str.get(drafts, "@f.title")), D.Dom.cat(D.Dom.cat(View.kx.note(U.KX.note(nf, sel), nf, sel), View.kn.loc(lc, U.KN.thread(nf, st, sel), True{})), D.Dom.cat([
         D.El{"div", "timeline", [D.At{"class", "timeline"}, D.At{"id", "timeline"}],
-          D.Dom.cat(fab, D.Dom.cat(View.parent(st, id, U.Tasks.up(st, id)), D.Dom.cat([D.El{"div", "work", [D.At{"class", "work"}], D.Dom.cat(View.subs(lc, nf, id, SB.Subs.rows(st, nf, id, now)), View.pins.loc(lc, U.Ec.pins(U.Ec.make(tr, st, id, now), st, id), U.Ec.make(tr, st, id, now)))}], D.Dom.cat(Nil{},
-          D.Dom.cat(View.paged(lc, drafts, M.State.mine(st, id), st, id, nf, View.running(turn), U.Ec.make(tr, st, id, now)), D.Dom.cat(View.sending.loc(lc, pend),
+          D.Dom.cat(fab, D.Dom.cat(View.parent(st, id, U.Tasks.up(st, id)), D.Dom.cat([D.El{"div", "work", [D.At{"class", "work"}], D.Dom.cat(View.subs(lc, nf, id, SB.Subs.rows(st, nf, id, now)), View.pins.loc(lc, U.Ec.pins(U.Ec.make(U.MailvLocal.terms(tr), st, id, now), st, id), U.Ec.make(U.MailvLocal.terms(tr), st, id, now)))}], D.Dom.cat(Nil{},
+          D.Dom.cat(View.paged(lc, drafts, M.State.mine(st, id), st, id, nf, View.running(turn), U.Ec.make(U.MailvLocal.terms(tr), st, id, now)), D.Dom.cat(View.sending.loc(lc, pend),
             D.Dom.cat(View.live.of.loc(lc, st, live, id), View.hold.pill(pill))))))))},
         View.asks.box(lc, st, id, U.Str.get(drafts, sel), nf),
         View.todos(lc, nf, id, U.Todos.shown(st, id, View.running(turn))),
         View.queued(lc, M.Queue.context(M.Queue.items(st, id)), View.running(turn))], D.Dom.cat(rd, [
         View.composer.t(lc, st, sel, drafts, op, nf, turn, pr, mo, atts, up, vo, mic)])))),
-        D.Dom.when(term, View.term.loc(lc, U.Term.get(tr, id))))}
+        D.Dom.when(term, View.term.loc(lc, U.Term.get(U.MailvLocal.terms(tr), id))))}
 
 def View.thread.h(+lc: I.Loc, +u: U.Ui, +t: M.Thread, hd: List<&2, D.Node>) -> D.Node:
   View.thread.p(lc, u, t, U.Ui.pending(u, U.Ui.sel(u)), U.Ui.atts(u, U.Ui.sel(u)), U.Ui.uploading(u, U.Ui.sel(u)), U.Ui.flag(u, "term"), hd, D.Dom.cat(View.btw(lc, u), View.voice.loc(lc, u, U.Ui.sel(u))), View.mic.of(u, U.Ui.sel(u)), View.fab(u), View.ready(u), U.Fab.mini.tools(u), U.Hold.pill(u, M.Thread.id(t)))

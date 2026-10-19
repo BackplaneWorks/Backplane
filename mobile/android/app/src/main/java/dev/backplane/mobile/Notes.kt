@@ -21,10 +21,10 @@ object Notes {
     // the live status tapped while several threads work: the app asks which
     const val EXTRA_PICK = "dev.backplane.mobile.pick"
 
-    fun channels(ctx: Context) {
+    fun channels(ctx: Context, lang: String = "en") {
         val nm = ctx.getSystemService(NotificationManager::class.java)
-        nm.createNotificationChannel(NotificationChannel(TURNS, "Personal alerts", NotificationManager.IMPORTANCE_DEFAULT))
-        nm.createNotificationChannel(NotificationChannel(LIVE, "Agents working", NotificationManager.IMPORTANCE_LOW).apply {
+        nm.createNotificationChannel(NotificationChannel(TURNS, NativeMessages.native_notify_channel_personal(lang), NotificationManager.IMPORTANCE_DEFAULT))
+        nm.createNotificationChannel(NotificationChannel(LIVE, NativeMessages.native_notify_channel_live(lang), NotificationManager.IMPORTANCE_LOW).apply {
             setShowBadge(false)
         })
     }

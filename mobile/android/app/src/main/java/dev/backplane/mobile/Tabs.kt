@@ -357,6 +357,7 @@ private fun Choice(options: List<Pair<String, String>>, current: String, pick: (
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun HubSettingsPage(m: AppModel, s: Screen, key: String, back: () -> Unit) {
+    val lang = LocalBackplaneLanguage.current
     DisposableEffect(key) {
         m.act("hub-settings", "$key|on")
         onDispose { m.act("hub-settings", "$key|off") }
@@ -364,8 +365,8 @@ private fun HubSettingsPage(m: AppModel, s: Screen, key: String, back: () -> Uni
     val rows = (if (s.hub == key) s.settings?.rows else null) ?: m.hubSettings[key]?.rows
     val name = s.hubs.firstOrNull { it.key == key }?.name ?: key
     Scaffold(topBar = {
-        TopAppBar(title = { Text("Hub settings · $name", maxLines = 1, overflow = TextOverflow.Ellipsis) }, navigationIcon = {
-            IconButton(onClick = back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
+        TopAppBar(title = { Text(NativeMessages.native_settings_hub_named(lang, name), maxLines = 1, overflow = TextOverflow.Ellipsis) }, navigationIcon = {
+            IconButton(onClick = back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, NativeMessages.tour_back(lang)) }
         })
     }) { pad ->
         LazyColumn(Modifier.fillMaxSize(), contentPadding = pad) {
