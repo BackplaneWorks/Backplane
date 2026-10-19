@@ -87,8 +87,12 @@ def jump(b: Batch, n: Nat) -> Batch:
   match b:
     case Batch{u, sent}: Batch{at(u, n), sent}
 
+# Nat holds 48 bits, but each source literal must fit in 32 bits.
+def near_limit() -> Nat:
+  Nat.add(Nat.mul(4294967295n, 65536n), 65533n)
+
 def sparse() -> Batch:
-  add(add(jump(add(skip(add(start(4294967294n), "t1", "first", "m-first")), "t1", "second", "m-second"), 281474976710653n), "t1", "third", "m-third"), "t1", "fourth", "m-fourth")
+  add(add(jump(add(skip(add(start(4294967294n), "t1", "first", "m-first")), "t1", "second", "m-second"), near_limit()), "t1", "third", "m-third"), "t1", "fourth", "m-fourth")
 
 def reply(+id: String, ok: Bool) -> J.Json:
   J.Json.obj([J.KV{"t", J.Str{"reply"}}, J.KV{"id", J.Num{id}}, J.KV{"ok", J.Flag{ok}}, J.KV{"error", J.Str{"request failed"}}])
