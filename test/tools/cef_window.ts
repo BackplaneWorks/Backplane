@@ -238,7 +238,13 @@ try {
   await until(() => (info[`teach.draft.${bot.id}`] ?? "").includes("click"), "native click recorded");
   check("native bot teach records person input", true);
   await rpc("bots.teach", { bot: bot.id, op: "discard" });
-  const cefPids = processTree(status.hostPid);
+  // status.hostPid is local to the helper's PID namespace in Flatpak. Follow
+  // our own app's descendants on the host so this also checks sandboxed CEF.
+  const cefPids = processTree(app.pid).filter(pid => {
+    try { return readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0")[0].endsWith("/backplane-cef"); }
+    catch { return false; }
+  });
+  check("owned CEF process tree exists", cefPids.length > 0);
   const beforeChromePics = await picCount();
   await rpc("setting.set", { key: "browser.engine", value: "chrome" });
   await until(() => info["browser.engine.live"] === "chrome", "Chrome restored", 60000);

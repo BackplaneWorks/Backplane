@@ -198,13 +198,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
+      - uses: ./.github/actions/setup-bend
       - uses: actions/download-artifact@v4
         with:
           name: backplane-flatpak-linux-x64
           path: dist
           github-token: ${{ github.token }}
           run-id: ${{ inputs.flatpak_run || github.run_id }}
-      - run: sudo apt-get update && sudo apt-get install -y flatpak dbus-x11 xvfb libx11-dev libxtst6
+      - run: sudo apt-get update && sudo apt-get install -y flatpak dbus-x11 xvfb libx11-dev libxtst6 x11-utils imagemagick
       - name: Test installed browser engines on a private display
         run: |
           dbus-run-session -- bash -eu <<'SH'
@@ -213,3 +214,12 @@ jobs:
           flatpak --user install -y --noninteractive dist/*.flatpak
           bash scripts/test-flatpak-browser.sh
           SH
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: flatpak-browser-diagnostics
+          path: |
+            build/flatpak-browser-shots
+            build/flatpak-browser-logs
+          if-no-files-found: ignore
+          retention-days: 7
