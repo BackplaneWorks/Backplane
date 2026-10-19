@@ -18,5 +18,6 @@ done
 cp deploy/backplane.desktop "$dir/"
 mkdir -p "$dir/icon"
 cp assets/icon/backplane.svg assets/icon/backplane-256.png "$dir/icon/"
+cp assets/icon/backplane-desktop.svg assets/icon/backplane-desktop-256.png "$dir/icon/"
 tar -czf "dist/backplane-$ver-$plat.tar.gz" -C dist/pkg "backplane-$plat"
 ls -la "dist/backplane-$ver-$plat.tar.gz"
