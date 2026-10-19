@@ -1,0 +1,16 @@
+{
+  "app": "/home/h/Documents/i2cjak/bp-coord/links/run3/backplane",
+  "app_sha256": "5470b8a4e89be01689627c1e101207ab59a00b4404d9fa69911a763688ae7f12",
+  "viewport": [
+    1600,
+    1000
+  ],
+  "temporary_home": "/tmp/bp-readme-features-o7r2vl_b",
+  "display": ":100",
+  "captures": [
+    "startup",
+    "selected",
+    "link-cards"
+  ],
+  "capture": "Actual native app pixels from existing links candidate binary; seeded demo event fixture; no agent turns, sent messages, MCP calls, builds, or runtime changes."
+}

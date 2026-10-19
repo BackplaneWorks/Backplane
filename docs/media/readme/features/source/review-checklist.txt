@@ -1,0 +1,12 @@
+SENSOR BOARD / DESIGN REVIEW
+
+Local review checklist
+
+[x] Check connector orientation
+[x] Confirm programming header access
+[ ] Inspect decoupling placement
+[ ] Review battery protection
+[ ] Verify enclosure clearance
+
+This is a local text file opened in vi.
+Arrow keys move the cursor. Press :q to exit.

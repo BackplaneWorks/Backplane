@@ -1,0 +1,83 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>README.md preview</title><style>
+  *{box-sizing:border-box}body{margin:0;background:#0d1117;color:#e6edf3;font:16px/1.5 system-ui,sans-serif}nav{position:sticky;top:0;display:flex;justify-content:center;gap:8px;padding:12px;background:#010409;border-bottom:1px solid #30363d;z-index:1}button{color:inherit;background:#161b22;border:1px solid #30363d;padding:6px 12px;cursor:pointer}button[aria-pressed=true]{border-color:#58a6ff}article{margin:24px auto;padding:24px;width:min(94%,1000px);border:1px solid #30363d}li+li{margin-top:4px}a{color:#58a6ff}p{margin:24px 0}img{max-width:100%;height:auto}pre{background:#161b22;padding:16px;overflow-x:auto;font:13px/1.6 ui-monospace,monospace}@media(max-width:600px){article{padding:12px;margin:12px auto}ol{padding-left:24px}pre{font-size:11px}}
+  </style><nav aria-label="Preview scale"><button data-scale="150" aria-pressed="false">150%</button><button data-scale="175" aria-pressed="false">175%</button><button data-scale="200" aria-pressed="false">200%</button></nav><article><p align="right">
+  <a href="../../../../README.jp.md"><img src="../language-ja.svg" alt="日本語" width="92" height="28"></a>
+</p>
+<ol>
+<li>Backplane is a TOTALLY open-source workspace for agentic hardware development.</li>
+<li>Backplane is a <a href="https://github.com/i2cjak/Backplane_KiCad">KiCad fork</a>.</li>
+<li>Backplane is created + maintained by real electrical engineers.</li>
+</ol>
+<p align="center">
+  <img src="../royalblue-viewers-200.png" alt="RoyalBlue54L in Backplane’s 3D, PCB, and schematic viewers">
+</p>
+<pre><code class="language-sh">curl -fsSL https://github.com/i2cjak/backplane-bend/releases/latest/download/install.sh | sh
+backplane
+</code></pre>
+<p align="center">
+  <img src="../agent-setup-200.png" alt="Backplane’s provider, model, and reasoning effort picker">
+</p>
+<p>The real VALUE of Backplane is in its KiCad + FreeCAD viewers. See EVERY step the agent takes, click on specific components and reference them in the workbar. Backplane ships with a FULL suite of CAD-specific skills and a KiCad fork that adds additional instrumentation for LLM control (IPC schematic API, for instance).</p>
+<p align="center">
+  <img src="../cad/pad-workbar-detail-200.png" alt="Select a RoyalBlue54L pad and mention its details in the workbar">
+</p>
+<p align="center">
+  <img src="../cad/cm5-mech-200.png" alt="A case assembly in Backplane’s mechanical viewer alongside the agent’s work">
+</p>
+<p align="center">
+  <img src="../cad/kicad-freecad-setup-200.png" alt="KiCad IPC and FreeCAD integration settings">
+</p>
+<p>Backplane features some nice harness orchestration primitives. We have projects that contain threads (wow, a truly novel idea), bots, and an &quot;uberbot&quot; that coordinates bots, projects, and threads. Any harness can create subagents with any other harness, and all harnesses can send messages between threads.</p>
+<p align="center">
+  <img src="../orchestration/overview.png" alt="Uberbot overview with projects, threads, and persistent bots">
+</p>
+<p align="center">
+  <img src="../orchestration/delegation.png" alt="A thread coordinating Claude and Grok subagents">
+</p>
+<p>We also ship persistent agents (catbots) to handle specific tasks. They have webhooks, etc., whatever you expect BUT also ship with a nice mailbox system for communication and a &quot;space&quot; in which the bot can create a persistent webapp.</p>
+<p align="center">
+  <img src="../orchestration/webhooks.png" alt="A catbot’s Webhooks tab">
+</p>
+<p align="center">
+  <img src="../mailroom-200.png" alt="A catbot’s Mailroom with conversations and an open message">
+</p>
+<p align="center">
+  <img src="../orchestration/space.png" alt="A persistent control desk in a catbot’s Space">
+</p>
+<p align="center">
+  <img src="../orchestration/space-webapp.png" alt="A webapp served from a catbot’s persistent Space" width="480">
+</p>
+<h2>Other features</h2>
+<ul>
+<li>
+<p>Clickable links between threads and bots and projects.</p>
+<p align="center">
+  <img src="../features/link-cards-2x.png" alt="Rendered thread, bot, and project link chips">
+</p>
+</li>
+<li>
+<p>Links to other Backplane items with <code>&gt;</code>, <code>#</code>, <code>%</code>, <code>@</code>.</p>
+<p align="center">
+  <img src="../reference-menus-200.png" alt="Thread, room, project, and bot reference menus">
+</p>
+</li>
+<li>
+<p>Inline terminals for TUIs.</p>
+<p align="center">
+  <img src="../features/inline-terminal-2x.png" alt="An actual vi session in an inline terminal">
+</p>
+</li>
+<li>
+<p><code>/btw</code>.</p>
+<p align="center">
+  <img src="../features/btw-autocomplete-2x.png" alt="The btw side-question command in the composer">
+</p>
+</li>
+</ul>
+<p>Backplane works with WHATEVER agent you choose to bring. I'm not going to stop you from using Grok, Codex, Claude, Antigravity, Muse, whatever. We even have OpenCode support!</p>
+<h2>License</h2>
+<p>MIT. See <a href="../../../../LICENSE">LICENSE</a>. The <a href="https://github.com/i2cjak/Backplane_KiCad">KiCad fork</a> retains KiCad's licensing. The STEP converter includes OpenCascade and <code>occt-import-js</code> (LGPL-2.1); see <a href="../../../../tools/step2glb/README.md#license">third-party licensing</a>.</p>
+<p align="center">
+  <img src="../cad/cats-footer-200.png" alt="Three Backplane cats" width="216" height="72">
+</p>
+</article><script>const article=document.querySelector('article');for(const b of document.querySelectorAll('button'))b.onclick=()=>{article.style.zoom=Number(b.dataset.scale)/100;for(const c of document.querySelectorAll('button'))c.setAttribute('aria-pressed',String(c===b));};document.querySelector('button[data-scale="200"]').click();</script></html>
