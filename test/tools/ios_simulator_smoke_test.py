@@ -16,16 +16,19 @@ with tempfile.TemporaryDirectory(prefix='bp-simulator-smoke-control-') as folder
     (app/'bridge.js').write_text('synthetic bridge')
     fake = tools/'xcrun'
     fake.write_text('''#!/usr/bin/env python3
-import json,os,signal,sys
+import json,os,signal,sys,time
 from pathlib import Path
 a=sys.argv[1:];mode=os.environ['SIM_SMOKE_MODE']
 with open(os.environ['SIM_SMOKE_LOG'],'a') as log:log.write(json.dumps(a)+'\\n')
+if a==['--sdk','iphonesimulator','--show-sdk-version']:
+ print('18.1' if mode=='no-sdk-runtime' else '18.0');sys.exit(0)
 assert a[0]=='simctl';a=a[1:];op=a[0]
 owned='bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
 if op=='list' and a[1]=='runtimes':
  print(json.dumps({'runtimes':[] if mode=='no-runtime' else [
  {'identifier':'com.apple.CoreSimulator.SimRuntime.iOS-99-0','version':'99.0','isAvailable':False},
  {'identifier':'com.apple.CoreSimulator.SimRuntime.tvOS-99-0','version':'99.0','isAvailable':True},
+ {'identifier':'com.apple.CoreSimulator.SimRuntime.iOS-26-2','version':'26.2','isAvailable':True},
  {'identifier':'com.apple.CoreSimulator.SimRuntime.iOS-18-0','version':'18.0','isAvailable':True}]}))
 elif op=='list':
  print(json.dumps({'devicetypes':[
@@ -37,6 +40,8 @@ elif op=='create':
 else:
  assert a[1]==owned,'operation aimed at an unowned simulator'
  if op=='install' and mode=='install-fails':sys.exit(19)
+ if op=='install' and mode=='install-timeout':
+  print('install is still waiting',flush=True);time.sleep(5)
  if op=='install' and mode=='signal':os.kill(os.getppid(),signal.SIGTERM)
  if op=='launch':print('fixture.smoke: 1234')
  if op=='spawn':print('- 0 other.service' if mode=='crash' else '1234 0 UIKitApplication:fixture.smoke')
@@ -46,20 +51,28 @@ else:
     def run(mode):
         out=root/mode;log=root/(mode+'.jsonl')
         env=dict(os.environ,PATH=str(tools)+os.pathsep+os.environ['PATH'],SIM_SMOKE_MODE=mode,SIM_SMOKE_LOG=str(log))
-        result=subprocess.run(['python3',str(smoke),'--app',str(app),'--out',str(out),'--settle-seconds','0'],env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,timeout=20)
+        command=['python3',str(smoke),'--app',str(app),'--out',str(out),'--settle-seconds','0']
+        if mode=='install-timeout':command+=['--install-timeout','1']
+        result=subprocess.run(command,env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,timeout=20)
         report=json.loads((out/'result.json').read_text())
         calls=[json.loads(line)[1:] for line in log.read_text().splitlines()]
         return result,report,calls
     result,report,calls=run('healthy')
     assert result.returncode==0 and report['result']=='pass' and report['launchedPid']==1234
+    assert report['sdkVersion']=='18.0' and report['runtime']['version']=='18.0'
     assert calls[-2:]==[['shutdown',owned],['delete',owned]]
-    print('ok enumerated runtime/device, owned launch/PID/screenshot and exact cleanup')
-    for mode in ['install-fails','crash','signal']:
+    print('ok active SDK runtime selected despite newer available runtime; owned launch/PID/screenshot and exact cleanup')
+    for mode in ['install-fails','install-timeout','crash','signal']:
         result,report,calls=run(mode)
         assert result.returncode and report['result']=='fail'
         assert calls[-2:]==[['shutdown',owned],['delete',owned]]
         assert not any('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' in call for call in calls)
+        if mode=='install-timeout':
+            timed=next(c for c in report['commands'] if c.get('timedOut'))
+            assert timed['command'][2]=='install' and timed['timeoutSeconds']==1
+            assert timed['output']=='install is still waiting'
         print('ok '+mode+' cannot pass and cleans only its newly owned simulator')
-    result,report,calls=run('no-runtime')
-    assert result.returncode and report['result']=='fail' and not any(call[0] in ['create','shutdown','delete'] for call in calls)
-    print('ok missing available iOS runtime fails before any simulator ownership change')
+    for mode in ['no-runtime','no-sdk-runtime']:
+        result,report,calls=run(mode)
+        assert result.returncode and report['result']=='fail' and not any(call[0] in ['create','shutdown','delete'] for call in calls)
+        print('ok '+mode+' fails before any simulator ownership change')

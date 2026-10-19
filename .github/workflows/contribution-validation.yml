@@ -243,6 +243,7 @@ jobs:
           name: contribution-bridge
           path: mobile/build/assets
       - name: Build simulator app without publishing
+        id: ios_build
         run: |
           cp mobile/build/assets/bridge.js mobile/ios/Backplane/bridge.js
           xcodebuild -version
@@ -265,6 +266,7 @@ jobs:
           path: build/ios-simulator-smoke
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
+        if: always() && steps.ios_build.outcome == 'success'
         with:
           name: contribution-ios-simulator
           path: ${{ runner.temp }}/Backplane-simulator.zip

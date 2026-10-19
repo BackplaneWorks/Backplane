@@ -4,6 +4,7 @@ import argparse
 from datetime import datetime, timezone
 import hashlib
 import json
+import os
 from pathlib import Path
 import platform
 import plistlib
@@ -20,8 +21,11 @@ def version(value):
     return tuple((parts+[0, 0, 0])[:3])
 
 
-def target(runtimes, devices):
-    available = [r for r in runtimes if r.get('isAvailable') is True and '.iOS-' in r.get('identifier', '')]
+def target(runtimes, devices, sdk):
+    # Hosted images can contain newer runtimes than their selected Xcode.
+    # Use the active SDK's major/minor instead of an unrelated newest runtime.
+    wanted = version(sdk)[:2]
+    available = [r for r in runtimes if r.get('isAvailable') is True and '.iOS-' in r.get('identifier', '') and version(r.get('version', ''))[:2] == wanted]
     phones = [d for d in devices if d.get('productFamily') == 'iPhone' or d.get('name', '').startswith('iPhone')]
     for runtime in sorted(available, key=lambda r: version(r.get('version', '')), reverse=True):
         v = version(runtime.get('version', ''))
@@ -30,7 +34,7 @@ def target(runtimes, devices):
             if lo and v < version(lo): continue
             if hi and v > version(hi): continue
             return runtime, device
-    raise ValueError('no available iOS runtime and compatible enumerated iPhone device type')
+    raise ValueError(f'no available iOS runtime matching active SDK {sdk} and compatible enumerated iPhone device type')
 
 
 def main():
@@ -38,37 +42,52 @@ def main():
     parser.add_argument('--app', type=Path, required=True)
     parser.add_argument('--out', type=Path, default=Path('build/ios-simulator-smoke'))
     parser.add_argument('--settle-seconds', type=float, default=3)
+    parser.add_argument('--install-timeout', type=int, default=180)
     args = parser.parse_args()
     if not 0 <= args.settle_seconds <= 10: parser.error('settle seconds must be 0..10')
+    if not 1 <= args.install_timeout <= 300: parser.error('install timeout must be 1..300 seconds')
     args.out.mkdir(parents=True, exist_ok=True)
     report = {'scope': 'isolated simulator launch smoke', 'host': platform.platform(),
-              'started': datetime.now(timezone.utc).isoformat(), 'commands': [], 'result': 'running'}
+              'started': datetime.now(timezone.utc).isoformat(), 'sourceCommit': os.environ.get('GITHUB_SHA'),
+              'commands': [], 'result': 'running'}
     owned = None
     def interrupted(signum, _frame):
         raise KeyboardInterrupt(f'received signal {signum}')
     signal.signal(signal.SIGTERM, interrupted)
     signal.signal(signal.SIGINT, interrupted)
 
-    def run(*parts, timeout=60, required=True):
-        command = ['xcrun', 'simctl', *map(str, parts)]
-        result = subprocess.run(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=timeout)
+    def execute(command, timeout=60, required=True):
+        try:
+            result = subprocess.run(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=timeout)
+        except subprocess.TimeoutExpired as error:
+            output = error.stdout or ''
+            if isinstance(output, bytes): output = output.decode(errors='replace')
+            report['commands'].append({'command': command, 'exitCode': None, 'timedOut': True,
+                                       'timeoutSeconds': timeout, 'output': output.strip()})
+            raise
         report['commands'].append({'command': command, 'exitCode': result.returncode, 'output': result.stdout.strip()})
         if required and result.returncode: raise RuntimeError(f'{command}: {result.stdout.strip()}')
         return result
+
+    def run(*parts, timeout=60, required=True):
+        return execute(['xcrun', 'simctl', *map(str, parts)], timeout, required)
 
     try:
         app = args.app.resolve(strict=True)
         info = plistlib.loads((app/'Info.plist').read_bytes())
         bundle = info['CFBundleIdentifier']
+        report['bridgeSha256'] = hashlib.sha256((app/'bridge.js').read_bytes()).hexdigest()
+        sdk = execute(['xcrun', '--sdk', 'iphonesimulator', '--show-sdk-version']).stdout.strip()
+        report['sdkVersion'] = sdk
         runtime, device = target(json.loads(run('list', 'runtimes', '--json').stdout)['runtimes'],
-                                 json.loads(run('list', 'devicetypes', '--json').stdout)['devicetypes'])
+                                 json.loads(run('list', 'devicetypes', '--json').stdout)['devicetypes'], sdk)
         report.update(bundleIdentifier=bundle, runtime=runtime, deviceType=device)
         created = run('create', 'Backplane acceptance '+str(uuid.uuid4()), device['identifier'], runtime['identifier']).stdout.strip()
         owned = str(uuid.UUID(created))
         report['ownedSimulator'] = owned
         run('boot', owned)
         run('bootstatus', owned, '-b', timeout=240)
-        run('install', owned, app)
+        run('install', owned, app, timeout=args.install_timeout)
         launched = run('launch', owned, bundle).stdout.strip()
         pid = re.search(r':\s*(\d+)\s*$', launched)
         if not pid or int(pid.group(1)) <= 0: raise ValueError('simulator launch returned no process id')
