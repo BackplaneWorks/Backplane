@@ -46,7 +46,7 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 case "$out" in
-  */) mkdir -p "$out"; out="${out}export-$n.out" ;;
+  */) mkdir -p "$out"; out="$out""export-$n.out" ;;
 esac
 [ -n "$out" ]
 printf 'synthetic output %s\\n' "$n" > "$out"
