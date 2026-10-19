@@ -1,7 +1,7 @@
 // The real native window and CEF, on a private display and an empty home.
 // Run only inside bp-admit --mem 6 --cores 2. Requires build/backplane,
 // build/wire and the 2a BACKPLANE_CEF runtime. No live hub or display is used.
-import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, readlinkSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { check, until, privateDisplay } from "../../tools/cef/test/harness.ts";
 
@@ -250,9 +250,11 @@ try {
     try { return readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0")[0]; }
     catch { return ""; }
   };
+  const cefBinary = realpathSync(process.env.BACKPLANE_CEF!);
   const cefPids = appPids.filter(pid => {
-    try { return command(pid).split("/").at(-1) === "backplane-cef"; }
-    catch { return false; }
+    // CEF overwrites argv[0] with a full process title, including arguments.
+    try { return readlinkSync(`/proc/${pid}/exe`) === cefBinary; }
+    catch { const title = command(pid); return title === cefBinary || title.startsWith(cefBinary + " "); }
   });
   check("owned CEF process tree exists", cefPids.length > 0, appPids.map(pid => ({ pid, command: command(pid) })));
   const beforeChromePics = await picCount();
