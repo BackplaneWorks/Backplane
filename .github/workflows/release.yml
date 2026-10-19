@@ -43,10 +43,17 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       TAG: ${{ inputs.tag || github.ref_name }}
+      BACKPLANE_PERF_ENFORCE: "1"
+      BACKPLANE_PERF_FIXTURE: ${{ vars.BACKPLANE_PERF_FIXTURE }}
+      BACKPLANE_PERF_XVFB: ${{ vars.BACKPLANE_PERF_XVFB }}
+      BACKPLANE_PERF_TRUST_KEY: ${{ vars.BACKPLANE_PERF_TRUST_KEY }}
+      BACKPLANE_PERF_SIGNING_KEY: ${{ vars.BACKPLANE_PERF_SIGNING_KEY }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.tag || github.ref }}
+      - name: Require native performance host configuration
+        run: scripts/perf-native-gate.sh --check-config
       - uses: ./.github/actions/setup-bend
       - uses: oven-sh/setup-bun@v2
       - name: Swap for the compile
@@ -74,7 +81,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-19 libx11-dev
+          sudo apt-get install -y clang-19 libx11-dev squashfs-tools
           sudo ln -sf /usr/bin/clang-19 /usr/local/bin/clang
       - name: Object cache
         # the compiled C units, by hash of their text (scripts/cc-unit.sh): an
@@ -91,9 +98,21 @@ jobs:
           # the Google client "Connect Google" signs in with (scripts/build-app.sh)
           BACKPLANE_GOOGLE_CLIENT_ID: ${{ secrets.BACKPLANE_GOOGLE_CLIENT_ID }}
           BACKPLANE_GOOGLE_CLIENT_SECRET: ${{ secrets.BACKPLANE_GOOGLE_CLIENT_SECRET }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: performance-${{ matrix.target }}
+          path: build/release-performance/
+          if-no-files-found: warn
+          retention-days: 7
       - run: scripts/smoke.sh
       - run: scripts/package.sh "$TAG" "${{ matrix.target }}"
       - run: scripts/package-linux.sh "$TAG" "${{ matrix.target }}"
+      - name: Revalidate final package payloads and attest exact bytes
+        run: bun scripts/perf-package.ts seal "$TAG" "${{ matrix.target }}"
+        env:
+          BACKPLANE_GOOGLE_CLIENT_ID: ${{ secrets.BACKPLANE_GOOGLE_CLIENT_ID }}
+          BACKPLANE_GOOGLE_CLIENT_SECRET: ${{ secrets.BACKPLANE_GOOGLE_CLIENT_SECRET }}
       - uses: actions/upload-artifact@v4
         with:
           name: backplane-${{ matrix.target }}
@@ -101,6 +120,7 @@ jobs:
             dist/backplane-*.tar.gz
             dist/backplane-*.AppImage
             dist/backplane_*.deb
+            dist/backplane-*.perf-package.json
 
   # macOS: the hub and web UI as `backplane` (no X11, so no window). bend's
   # emit of the server takes over 8 GB, which a macOS runner (7 GB) spends
@@ -186,6 +206,7 @@ jobs:
     env:
       TAG: ${{ inputs.tag || github.ref_name }}
       GH_TOKEN: ${{ github.token }}
+      BACKPLANE_PERF_TRUST_KEY: ${{ vars.BACKPLANE_PERF_TRUST_KEY }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -195,6 +216,11 @@ jobs:
           path: out
           pattern: backplane-*
           merge-multiple: true
+      - uses: oven-sh/setup-bun@v2
+      - name: Reject changed or unmeasured Linux packages before publishing
+        run: |
+          set -eu
+          bun scripts/perf-package.ts verify-all "$TAG" out
       - name: Checksums and installer
         run: |
           set -eu

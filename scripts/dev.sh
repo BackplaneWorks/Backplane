@@ -135,6 +135,10 @@ stamp() {
 # (build_browser); the step2glb helper is not rebuilt (scripts/build.sh
 # builds both for releases)
 build_dist() {
+  # Fail before spending a build when this GUI release cannot be measured.
+  # This is also called by deploy_main; --force affects restart scheduling
+  # only and cannot waive performance evidence.
+  if [ "$(uname -s)" = Linux ]; then scripts/perf-native-gate.sh --check-config; fi
   ver=$(stamp)
   # scripts/check.sh's full pass on exactly these inputs covers these three
   # (scripts/verified.sh); else they are checked here
@@ -150,7 +154,7 @@ build_dist() {
   cp src/web/sw.js dist/web/sw.js
   for f in dist/web/*.js dist/web/*.css dist/web/*.html; do gzip -9 -k -n -f "$f"; done
   if [ "$(uname -s)" = Linux ]; then
-    BACKPLANE_VERSION_STAMP=$ver scripts/build-app.sh src/app/main.bend dist/backplane
+    BACKPLANE_VERSION_STAMP=$ver bun scripts/perf-build.ts src/app/main.bend dist/backplane
     # Keep the server's pathname for self-exec; its entry uses argv[0].
     cp dist/backplane dist/backplane-serve
   else
@@ -202,12 +206,25 @@ stage_cef() {
 stage() {
   rm -rf build/dev-pkg && mkdir -p build/dev-pkg
   cp -R dist/web build/dev-pkg/web
-  for f in backplane backplane-serve backplane-browser backplane-browser.stamp backplane-step2glb backplane-voice backplane-kipc; do
+  for f in backplane backplane-serve backplane-browser backplane-browser.stamp backplane-step2glb backplane-voice backplane-kipc backplane.perf-build.json; do
     [ -e "dist/$f" ] && cp "dist/$f" build/dev-pkg/
   done
   [ -e LICENSE ] && cp LICENSE build/dev-pkg/
   stage_cef
+  if [ "$(uname -s)" = Linux ]; then
+    scripts/perf-native-gate.sh build/dev-pkg/backplane build/dev-pkg/performance
+  fi
   return 0
+}
+
+# Recompute from raw evidence and the actual staged binary after copying it;
+# the earlier stage verdict does not authorize a changed or expired package.
+verify_stage() {
+  if [ "$(uname -s)" = Linux ]; then
+    bun scripts/perf-verify.ts "$1/performance/evidence.json" "$1/backplane" \
+      "$BACKPLANE_PERF_FIXTURE" "$1/backplane.perf-build.json" linux-native \
+      long-history timeline subagents rooms bots status >/dev/null
+  fi
 }
 
 # the request that queues a deploy of the package in $1 on a hub (the MCP
@@ -235,6 +252,7 @@ install_local() {
     # before the hub gets to it) into a folder of its own
     sd=$(mktemp -d "${TMPDIR:-/tmp}/bp-deploy.XXXXXX")
     cp -R build/dev-pkg/. "$sd"
+    verify_stage "$sd"
     links
     if eval "$(deploy_post "$sd")" | grep -q scheduled; then
       say "deploy queued: restarts at a safe point (no tool call running, build locks free); staged in $sd"
@@ -243,6 +261,7 @@ install_local() {
     say "the hub did not take the deploy: installing directly"
     rm -rf "$sd"
   fi
+  verify_stage build/dev-pkg
   install_into | sh -s "$PWD/build/dev-pkg" "$prefix"
   say "installed into $prefix"
   if systemctl --user is-active --quiet backplane.service 2>/dev/null; then
@@ -259,6 +278,7 @@ install_remote() {
   host=$1
   build_dist
   stage
+  verify_stage build/dev-pkg
   rdir=$(ssh "$host" mktemp -d)
   tar -C build/dev-pkg -czf - . | ssh "$host" tar -C "$rdir" -xzf -
   if [ "$force" != 1 ] && [ "$(ssh "$host" "$(hello_cmd)" 2>/dev/null)" = 200 ]; then
@@ -293,6 +313,7 @@ case ${1:-run} in
     stage
     rm -rf "$2" && mkdir -p "$2"
     cp -R build/dev-pkg/. "$2"
+    verify_stage "$2"
     say "staged $ver in $2" ;;
   *)
     sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'

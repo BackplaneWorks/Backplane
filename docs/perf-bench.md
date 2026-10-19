@@ -2,19 +2,23 @@
 
 `test/tools/perf_load.ts` runs the native app (hub and window in one
 process) on a copy of a real event log, with stand-in agents streaming, and
-measures it phase by phase against the targets. Keep one immutable log
+measures it phase by phase against the targets. Failed targets or missing evidence
+exit nonzero by default. `--diagnostic` can collect a failing experiment without a
+nonzero timing exit, but every such report records `accepted: false`; invalid
+workloads still fail. The former `--fail-on-target` flag remains compatible and
+is no longer required. Keep one immutable log
 snapshot for a baseline/change comparison; each report records its byte
 count and SHA-256 so different inputs are visible:
 
 ```sh
 cp ~/.backplane-bend/events.jsonl /tmp/backplane-perf-snapshot.jsonl
-bun test/tools/perf_load.ts --bin build/backplane --log /tmp/backplane-perf-snapshot.jsonl --out /tmp/perf-result.json
+bun test/tools/perf_load.ts --bin build/backplane --log /tmp/backplane-perf-snapshot.jsonl --out /tmp/perf-result.json --diagnostic
 ```
 
 | target | metric |
 |---|---|
 | frame p99 ≤ 8 ms | `ui.frame` |
-| no frame > 16 ms from background streaming | `ui.frame` in `idle` and `bg` |
+| no frame > 16 ms while streaming | `ui.frame` in every measured streaming phase |
 | typing ≤ 16 ms | `ui.input` in `type` and `normal` (also shown: key>frame) |
 | key handling through frame ≤ 16 ms | `ui.msg.win` + `ui.input` in `type` and `normal` |
 | thread open ≤ 50 ms | Return in the palette to the frame showing the thread |
@@ -23,9 +27,9 @@ bun test/tools/perf_load.ts --bin build/backplane --log /tmp/backplane-perf-snap
 ## Running it
 
 ```sh
-scripts/build-app.sh src/app/main.bend build/backplane      # under the bend lock
+scripts/build-app.sh src/app/main.bend build/backplane      # inside bp-admit with explicit memory/cores
 cc -O2 test/tools/xpoke.c -o build/xpoke -lX11
-bun test/tools/perf_load.ts --bin build/backplane --out /tmp/perf.json
+bun test/tools/perf_load.ts --bin build/backplane --out /tmp/perf.json --diagnostic
 ```
 
 Options: `--bin` (any branch's build), `--log` (default
@@ -39,10 +43,11 @@ at the end of each phase), `--keep` (keep the temp folder), `--hold` (set up,
 start streaming and wait for `<tmp>/stop`, to look around by hand).
 One run takes about 4 minutes.
 
-`--fail-on-target` exits nonzero when a selected phase misses a target or
-has no samples for a required metric. The default records failures and
-exits successfully, which permits before/after runs while improving a
-known slow build. Neither typing metric includes time spent waiting
+Strict mode exits nonzero when a selected phase misses a target or has no
+samples for a required metric. It additionally requires the build receipt,
+raw evidence, complete required scenarios, and `--keep`. Use `--diagnostic`
+for before/after experiments; those reports never grant acceptance.
+Neither historical processing-only typing metric includes time spent waiting
 before the window handles an event; these are processing measurements,
 not complete input-to-pixels latency. The Status plane is selected by
 its sidebar coordinates; include `--shots` when checking UI coverage.
@@ -146,3 +151,108 @@ identifies the bot's thread but does not expose its tab or open mail.
 The Mailroom pane reuses PW with `Mm.mail` as its key. Bot panes bypass
 MainM, so the existing `ui.layout.mm.hit` metric does not measure that
 pane cache; do not claim Mailroom cache hit coverage from that metric.
+
+
+## Exact-candidate gate (implementation in progress; no FPS acceptance)
+
+Acceptance runs now require `--build-receipt`, `--evidence`, and `--keep`.
+`--diagnostic` can collect incomplete/failing measurements but never authorizes
+merge or release. Existing frame p99 8 ms, streaming frame max 16 ms, input
+16 ms, opens 50 ms and agent-line p99 2 ms budgets are unchanged.
+
+The supported local path is `scripts/perf-build.ts` (one source-frozen native
+build/receipt), `scripts/perf-native-gate.sh` (real ten-stream workload and raw
+verification), then `scripts/perf-merge.sh` while holding `merge-main`. The last
+command checks i2cjak identity, repository, clean/pinned PR head/base and exact
+artifact evidence. Its proposed integration is fast-forward-only: the actual base
+must be an ancestor of the measured head, and an atomic remote lease rejects a
+concurrent base update. This preserves the exact measured commit/tree rather than
+manufacturing an unmeasured merge result. This change in integration procedure is
+still under coordinator review; it has been tested only against isolated local Git
+repositories. A direct raw Git/GitHub merge remains outside this wrapper;
+repository protection/trusted check enforcement is still required. This is not
+branch protection, and no live main update has used this draft wrapper.
+It currently accepts only Linux window evidence and refuses changed phone,
+browser or Windows-renderer paths; it cannot authorize those clients on a
+Linux-only result. Their platform-specific native gates remain separate work.
+
+`dev.sh` Linux stage/install, including deploy_main and `--force`, calls the
+same native gate. It fails before building if the immutable fixture/Xvfb
+configuration is missing, and after building if evidence is missing or fails.
+The acceptance build currently bypasses caches to establish a fresh binding;
+ordinary developer builds retain their caches. Reusing a prebuilt acceptance
+artifact will need validated source/compiler/C/binary provenance, not relabelling
+an old binary. Build flags/private bake inputs are recorded only by hashes.
+The receipt also authenticates a clean committed tree with the configured builder's
+Ed25519 signature. Verification rehashes emitted C, the compiler, Bend dependency
+key, compile environment and private bake inputs; merely asserting hashes in JSON
+is insufficient. `BACKPLANE_PERF_TRUST_KEY` and `BACKPLANE_PERF_SIGNING_KEY` are
+absolute host key paths outside the candidate checkout. No production keys have
+been provisioned by this work. A protected signer/verifier and isolation from
+candidate execution remain required; paths outside a checkout alone do not provide
+that isolation. Pull-request runners must never receive builder signing keys.
+
+Raw spans are checked against the retained trace. Candidate commit, source,
+compiler, binary, fixture, harness, host, coverage and run age must match. Required
+scenarios are continuous scrolling, input and thread switching during ten sustained
+streams over long history, plus rendered feature coverage. Callback/timestamp
+counts alone are insufficient: each demand must correlate to the actual drawn
+content revision/digest and relevant displayed-region pixels, then to a boundary
+acknowledgement for that frame. X-server acknowledgement is distinct from compositor
+presentation and physical scanout. Xvfb is a 60 Hz reference workload, not a physical
+refresh-rate measurement; simulator/layout results do not certify an iOS device.
+Mandatory coverage is fixed by policy even if a caller requests fewer features.
+An independently expected demand names its surface and region; presented labels
+must match that demand. Timeline pixels cannot also certify rooms, bots, Status
+or subagents. Coalesced input credits only features in the actually displayed
+prefix, not an earlier feature absent from that prefix. Coverage must lie within
+its actual streaming phase window and meet that phase's finite response budget.
+Invalid optional content also fails the phase; it cannot borrow valid coverage
+elsewhere or use zero/missing refresh metadata to obtain an infinite budget.
+
+The proposed CI Linux build invokes the same native gate through
+`BACKPLANE_PERF_ENFORCE=1`; versioned Linux release builds also require it even
+when that variable is unset or zero. Configuration is checked before compilation;
+the strict verdict precedes packaging/upload. The workflows retain a separate
+regression check for malformed/stale evidence; that check does not replace the
+native workload. Native evidence includes its raw trace with relative paths so
+it survives artifact upload. `dev.sh` revalidates copied packages before requesting
+deployment or performing a direct install.
+After the completed build, `perf-package.ts dist` signs a manifest of the installed
+payload: both binaries, web files, shipped helpers, licenses, desktop entry and icons.
+`perf-package.ts seal` repeats strict verification, rejects any subsequent dist
+change and reads all installed members from tar, deb and AppImage without executing
+them. File contents, complete member sets, regular-file types and read/execute bits
+must match. AppImage and deb staging/launcher metadata are compared too; extra deb
+maintainer scripts fail. The AppImage runtime prefix remains a packaging-tool input
+frozen by the final package hash, not independently measured GUI code or a verified
+third-party runtime source. The publish
+job authenticates that attestation, candidate commit/tree, original measurement
+age and actual downloaded package bytes before publishing. This covers the Linux
+native artifacts; it does not establish native performance acceptance for macOS,
+Android or iOS. Synthetic archive/signature tests are dispatch and integrity tests,
+not measured Backplane workload evidence.
+Compiler provenance includes inherited CPATH, LIBRARY_PATH, C/C++/Objective-C include
+paths and COMPILER_PATH. Verification must use the build's effective compiler-search
+environment, including the X11 paths `build.sh` prepends when BACKPLANE_X11 is set.
+
+Current limitations are explicit: the real drawn-content/ROI observation producer
+is not wired yet, so strict runs fail closed on that missing evidence even if their
+CPU span summaries pass. These workflow/build changes are unmerged. Hosted Actions
+are unavailable in the current project workflow and hosted runners have no configured
+fixed-host fixture; the new preflight refuses this configuration rather than producing
+a green build-only result. Main currently has no required performance status, and
+deferred hub swap revalidation and a protected trusted verifier are still pending.
+The supported local gate is the available validation path, not an Actions result.
+There is no physical iOS device
+currently visible to the Mac. No whole-app FPS fix, green complete workload, deployed
+gate, or physical-device performance acceptance is claimed by the helper tests.
+
+The revision contract additionally carries the independently expected relevant
+pixel-region SHA256 for each cumulative input prefix. The independent X11
+readback tool hashes canonical RGB pixels; matching only a candidate-supplied
+counter, semantic tag, changing caret/sidebar, or a different pixel region is
+insufficient. A single correctly rendered cumulative prefix may satisfy coalesced
+inputs, but each input retains its own injection-to-visible deadline. Credited
+content frames, callback samples and physical refresh are separate quantities.
+The current readback tool has compiled; live pixel/oracle integration is pending.

@@ -13,6 +13,24 @@ permissions:
   contents: read
 
 jobs:
+  performance-contract:
+    name: Performance evidence regressions
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Install package fixture readers
+        run: sudo apt-get update && sudo apt-get install -y squashfs-tools binutils
+      - run: |
+          set -eu
+          bun test/tools/perf_gate_test.ts
+          bun test/tools/perf_cadence_test.ts
+          bun test/tools/perf_evidence_test.ts
+          bun test/tools/perf_build_path_test.ts
+          bun test/tools/perf_files_test.ts
+          bun test/tools/perf_merge_path_test.ts
+          bun test/tools/perf_package_test.ts
+
   check:
     name: Type-check
     runs-on: ubuntu-24.04
@@ -67,8 +85,20 @@ jobs:
           # macOS is on hold; scripts/build.sh builds it as hub + web server
           # - { target: darwin-arm64, os: macos-15 }
     runs-on: ${{ matrix.os }}
+    env:
+      BACKPLANE_PERF_ENFORCE: "1"
+      BACKPLANE_PERF_FIXTURE: ${{ vars.BACKPLANE_PERF_FIXTURE }}
+      BACKPLANE_PERF_XVFB: ${{ vars.BACKPLANE_PERF_XVFB }}
+      BACKPLANE_PERF_TRUST_KEY: ${{ vars.BACKPLANE_PERF_TRUST_KEY }}
+      # Never provision builder signing keys to pull-request runners. This
+      # hosted job refuses absent trusted native-build configuration; protected
+      # fixed-host execution remains required before native acceptance.
     steps:
       - uses: actions/checkout@v4
+      # Hosted runners without the supported immutable fixture/display fail
+      # explicitly; a build-only result cannot certify GUI performance.
+      - name: Require native performance host configuration
+        run: scripts/perf-native-gate.sh --check-config
       - uses: ./.github/actions/setup-bend
       - uses: oven-sh/setup-bun@v2
       - name: Swap for the compile
@@ -115,5 +145,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: backplane-${{ matrix.target }}
-          path: dist/
+          path: |
+            dist/
+            build/release-performance/
           retention-days: 7

@@ -25,6 +25,16 @@ cd "$(dirname "$0")/.."
 . scripts/bendok.sh
 mode=${1:-all}
 pre=${BACKPLANE_PREBUILT:-}
+# Published Linux GUI binaries use the same fixed-host gate as deploy_main.
+# Check configuration before any checking/emission/compilation. Developer
+# builds can remain ungated; a versioned release cannot opt out.
+perf=0
+if [ "$(uname -s)" = Linux ] && [ "$mode" != emit ]; then
+  if [ "${BACKPLANE_PERF_ENFORCE:-}" = 1 ] || [ -n "${BACKPLANE_VERSION:-}" ]; then
+    perf=1
+    scripts/perf-native-gate.sh --check-config
+  fi
+fi
 # CI's "laws" job (scripts/check.sh) has already checked every file, these
 # three roots included: BACKPLANE_SKIP_CHECK=1 does not do it again
 [ "$pre" = 1 ] || [ "${BACKPLANE_SKIP_CHECK:-}" = 1 ] || for f in src/web/app.bend src/server/main.bend src/app/main.bend; do
@@ -66,7 +76,12 @@ fi
 # app's C also takes far more memory than a macOS runner (7 GB) has; build
 # it only where a window can open
 if [ "$(uname -s)" = Linux ]; then
-  scripts/build-app.sh src/app/main.bend dist/backplane
+  if [ "$perf" = 1 ]; then
+    bun scripts/perf-build.ts src/app/main.bend dist/backplane
+    scripts/perf-native-gate.sh dist/backplane build/release-performance
+  else
+    scripts/build-app.sh src/app/main.bend dist/backplane
+  fi
   # argv[0] selects the original server entry; no second Bend emit/compile.
   # Copy, rather than symlink: self-exec must keep the server's pathname.
   cp dist/backplane dist/backplane-serve
@@ -87,5 +102,10 @@ if command -v bun >/dev/null 2>&1 || [ -x "$HOME/.bun/bin/bun" ]; then
   PATH="$HOME/.bun/bin:$PATH" scripts/build-kipc.sh
 else
   echo "bun not found: skipping backplane-browser, backplane-step2glb, backplane-voice and backplane-kipc"
+fi
+if [ "$perf" = 1 ]; then
+  # Helpers run after the native workload. Recheck the finished dist binary;
+  # a later overwrite is not authorized by the earlier green verdict.
+  bun scripts/perf-package.ts dist
 fi
 ls -la dist

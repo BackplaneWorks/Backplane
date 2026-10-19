@@ -17,11 +17,14 @@ import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, re
 import { homedir, tmpdir } from "node:os";
 import { standinScript as claude } from "./perf_standin";
 import { completeOpens, FixtureBots, streamWindow } from "./perf_guard";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
+import { performanceVerdict } from "./perf_gate";
+import { candidateBinding, fileSha } from "../../scripts/perf-verify";
+import { verifyPerformanceBundle, type PerformanceBundle } from "./perf_evidence";
 
 const argv = process.argv.slice(2);
 if (argv.includes("--help")) {
-  console.log("bun test/tools/perf_load.ts --bin BUILD --log SNAPSHOT [--agents 10] [--secs 20] [--phases normal,idle,bg,fg,type,open,plane,mail] [--out results.json] [--shots DIR] [--fail-on-target] [--keep]");
+  console.log("bun test/tools/perf_load.ts --bin BUILD --log SNAPSHOT [--agents 10] [--secs 20] [--phases normal,idle,bg,fg,type,open,plane,mail] [--out results.json] [--shots DIR] [--diagnostic] [--keep]");
   process.exit(0);
 }
 const opt = (name: string, d: string) => {
@@ -41,20 +44,24 @@ const display = opt("display", ":77");
 const nAgents = Number(opt("agents", "10"));
 const secs = Number(opt("secs", "20"));
 const outPath = opt("out", "");
+const receiptPath=opt("build-receipt", "");
+const evidencePath=opt("evidence", "");
 const keep = argv.includes("--keep");
-const failOnTarget = argv.includes("--fail-on-target");
+const diagnostic = argv.includes("--diagnostic");
+if (diagnostic && argv.includes("--fail-on-target")) throw new Error("--diagnostic conflicts with --fail-on-target");
 const shots = opt("shots", ""); // a folder: a screenshot at the end of each phase (ImageMagick's import)
-const phasesWanted = opt("phases", "normal,idle,bg,fg,type,open,plane").split(",");
+const phasesWanted = opt("phases", "normal,idle,bg,fg,type,open,scroll,plane").split(",");
 const xpoke = resolve(opt("xpoke", join(here, "build/xpoke")));
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const say = (s: string) => console.error(`[perf_load] ${s}`);
 
 // Safety first
 // ------------
+if(!diagnostic && (!receiptPath || !evidencePath || !keep)) throw new Error("strict acceptance requires --build-receipt, --evidence and --keep");
 if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error("--port must be 1024..65535");
 if (!Number.isInteger(nAgents) || nAgents < 1 || nAgents > 26) throw new Error("--agents must be 1..26");
 if (!Number.isFinite(secs) || secs <= 0) throw new Error("--secs must be positive");
-const knownPhases = ["normal", "idle", "bg", "fg", "type", "open", "plane", "mail"];
+const knownPhases = ["normal", "idle", "bg", "fg", "type", "open", "scroll", "plane", "mail"];
 if (phasesWanted.some((p) => !knownPhases.includes(p))) throw new Error("unknown --phases value");
 if (port === 3787) throw new Error("3787 is the live hub's port");
 if (!existsSync(bin)) throw new Error(`no binary at ${bin}`);
@@ -103,6 +110,8 @@ const openTasks = new Set<string>();
 const botIds = new Set<string>();
 const mailFixtureByName = new Map<string, { id: string; thread: string }>();
 const raw = readFileSync(logSrc, "utf8");
+const boundAtStart=receiptPath?candidateBinding(here,bin,logSrc,receiptPath,"linux-native"):null;
+const buildReceipt=receiptPath?JSON.parse(readFileSync(receiptPath,"utf8")):null;
 const logSha256 = new Bun.CryptoHasher("sha256").update(raw).digest("hex");
 for (const line of raw.split("\n")) {
   if (!line) continue;
@@ -275,6 +284,8 @@ const t0Wall = Date.now();
 const app = Bun.spawn([bin, "--home", home, "--port", String(port), "--no-tailscale"], {
   env, cwd: root, stdout: Bun.file(join(root, "app.log")), stderr: Bun.file(join(root, "app.err")),
 });
+const observedExeSha=fileSha(`/proc/${app.pid}/exe`);
+if(boundAtStart && observedExeSha!==boundAtStart.binary_sha256) { app.kill(); await app.exited; throw new Error("running executable differs from candidate binary"); }
 ownPids.push({ pid: app.pid, what: "backplane", kill: () => app.kill(), exited: app.exited });
 say(`app pid ${app.pid}, home ${home}`);
 
@@ -602,6 +613,20 @@ await phase("open", "streaming; 10 real threads opened one after another (ctrl+k
   for (let i = 0; i < 10; i++) p.marks!.push(await openByTitle(`zqopen${String.fromCharCode(97 + i)}`));
 });
 
+// Continuous demand is separate from sparse typing/stream updates. The
+// driver keeps a fixed schedule; late dispatch remains invalid evidence.
+await phase("scroll", "continuous 60Hz wheel demand over long history while ten agents stream", async (p) => {
+  await openByTitle("zqlong");
+  const start=performance.now();
+  const count=Math.floor(secs*60);
+  for(let tick=0;tick<count;tick++) {
+    const due=start+tick*(1000/60);
+    await sleep(Math.max(0,due-performance.now()));
+    await poke("wheel",String(MAINX),String(MIDY),Math.floor(tick/24)%2?"down":"up");
+  }
+  p.notes!.push("Content revision/ROI observation producer is required: wheel dispatch alone is not cadence evidence.");
+});
+
 // the Status plane: the uberbot's first tab, reached by its sidebar row (see docs/perf-bench.md)
 await phase("plane", "streaming; the uberbot's Status plane on screen, wheel over it", async (p) => {
   const ok = await statusPlane(p);
@@ -693,10 +718,11 @@ await cleanup();
 
 type Ev = { name: string; ts: number; dur: number };
 const evs: Ev[] = [];
+const rawEvents:any[]=[];
 for (const l of readFileSync(trace, "utf8").split("\n")) {
   const s = l.replace(/^,/, "").trim();
-  if (!s.startsWith("{") || !s.includes('"ph":"X"')) continue;
-  try { const o = JSON.parse(s.replace(/,$/, "")); evs.push({ name: o.name, ts: o.ts, dur: o.dur }); } catch {}
+  if (!s.startsWith("{")) continue;
+  try { const o = JSON.parse(s.replace(/,$/, "")); rawEvents.push(o); if(o.ph==="X") evs.push({ name: o.name, ts: o.ts, dur: o.dur }); } catch {}
 }
 evs.sort((a, b) => a.ts - b.ts);
 const inWin = (a: number, b: number) => evs.filter((e) => e.ts >= a * 1000 && e.ts < b * 1000);
@@ -711,8 +737,8 @@ const stat = (es: Ev[], name: string | RegExp): Sum => {
   return { n: d.length, p50: pctOf(d, 50), p99: pctOf(d, 99), max: d.length ? Math.max(...d) : NaN, sum: d.reduce((a, b) => a + b, 0), over8: d.filter((x) => x > 8).length, over16: d.filter((x) => x > 16).length };
 };
 const f1 = (x: number) => (Number.isFinite(x) ? (x >= 100 ? x.toFixed(0) : x.toFixed(1)) : "-");
-const results: any = { bin, mail_reuse_home: mailReuseHome || null, log: logSrc, log_sha256: logSha256, log_bytes: Buffer.byteLength(raw), port, agents: nAgents, secs, rooms: botRooms.length, home: keep ? home : "", phases: [] as any[] };
-const order = ["normal", "idle", "bg", "fg", "type", "open", "plane", "mail"];
+const results: any = { bin, observed_exe_sha256: observedExeSha, candidate:boundAtStart, ci:"unavailable — local gate only", acceptance_scope:"local-exact-candidate", mail_reuse_home: mailReuseHome || null, log: logSrc, log_sha256: logSha256, log_bytes: Buffer.byteLength(raw), port, agents: nAgents, secs, rooms: botRooms.length, home: keep ? home : "", phases: [] as any[] };
+const order = ["normal", "idle", "bg", "fg", "type", "open", "scroll", "plane", "mail"];
 const rows: string[] = [];
 const verdicts: string[] = [];
 for (const name of order) {
@@ -758,7 +784,7 @@ for (const name of order) {
     ...(name === "mail" ? [["Mailroom and ten conversation selections visually verified", null] as [string, boolean | null]] : []),
     ...(["normal", "plane"].includes(name) ? [["Status tab observed", null] as [string, boolean | null]] : []),
     ["frame p99<=8ms", fr.n ? fr.p99 <= 8 : null],
-    ...(["bg", "idle"].includes(name) ? [["no frame>16ms", fr.n ? fr.over16 === 0 : null] as [string, boolean | null]] : []),
+    ["no frame>16ms", fr.n ? fr.over16 === 0 : null],
     ...(["type", "normal"].includes(name) ? [["input p99<=16ms", inp.n ? inp.p99 <= 16 : null] as [string, boolean | null]] : []),
     ...(["type", "normal"].includes(name) ? [["key>frame p99<=16ms", key.n ? key.p99 <= 16 : null] as [string, boolean | null]] : []),
     ...(name === "open" && !opens.length ? [["open<=50ms", null] as [string, boolean | null]] : []),
@@ -806,14 +832,52 @@ results.open_selections = openEvidence;
 results.stray_agents = strays;
 results.agentsLog = readFileSync(fakeLog, "utf8").split("\n").filter((l) => l.startsWith("TURN")).length;
 results.appErrTail = appLogTail;
+const workloadValid = results.bot_streaming && strays.length === 0 && !results.phases.some((p: any) => p.checks["all agents streaming"] === false);
+// Bind raw observations, not a copied summary verdict, to the exact build.
+// Missing render/ROI producer data is intentionally left missing and fails
+// strict validation; callbacks, message generations and desk.look cannot fill it.
+let exactVerdict:any=null;
+if(boundAtStart) {
+  const after=candidateBinding(here,bin,logSrc,receiptPath,"linux-native");
+  if(JSON.stringify(after)!==JSON.stringify(boundAtStart)) throw new Error("candidate changed during measurement");
+  const labels:Record<string,string>={scroll:"continuous-scroll",type:"input",open:"thread-switch",bg:"background"};
+  const rawBundle:PerformanceBundle={schema:1,built:{...boundAtStart,commit:buildReceipt.commit,source_sha256:buildReceipt.source_before,
+    binary_sha256:buildReceipt.binary_sha256,compiler_sha256:buildReceipt.compiler_sha256},measured:boundAtStart,
+    started_at:t0Wall,completed_at:Date.now(),history_bytes:Buffer.byteLength(raw),phases:phases.map(p=>({
+      name:labels[p.name]??p.name,start_ms:p.a.up,end_ms:p.b.up,
+      spans:inWin(p.a.up,p.b.up).map(e=>({name:e.name,at_ms:e.ts/1000,duration_ms:e.dur/1000})),
+      streams:ours.map((t:any)=>({id:t.id,received_ms:(deltaTimes.get(t.id)??[])
+        .filter(t=>t>=p.streamStart&&t<p.streamEnd).map(t=>p.a.up+t-p.streamStart)})),
+      opens:(p.marks??[]).map((mark,i)=>({expected:p.name==="open"?openTs[i].id:"",drawn:"",duration_ms:results.phases.find((q:any)=>q.name===p.name)?.opens_ms[i]})),
+    }))};
+  exactVerdict=verifyPerformanceBundle(rawBundle,boundAtStart,["long-history","timeline","subagents","rooms","bots","status"]);
+  if(evidencePath) {
+    const rawPath=resolve(evidencePath+".raw.json");
+    const retainedTrace=resolve(evidencePath+".trace.json");
+    writeFileSync(rawPath,JSON.stringify(rawBundle));
+    // Evidence must survive artifact upload and promotion out of the checkout;
+    // retaining a pointer to an unrelated /tmp directory is insufficient.
+    cpSync(trace,retainedTrace);
+    writeFileSync(evidencePath,JSON.stringify({schema:1,raw:{path:basename(rawPath),sha256:fileSha(rawPath)},
+      trace:{path:basename(retainedTrace),sha256:fileSha(retainedTrace)},candidate:boundAtStart},null,2));
+  }
+}
+results.acceptance = performanceVerdict(results.phases, workloadValid, diagnostic);
+if(!diagnostic) {
+  if(!exactVerdict?.accepted) {
+    results.acceptance.accepted=false;results.acceptance.exitCode=1;
+    results.acceptance.failures.push(...(exactVerdict?.failures??["exact candidate native content/cadence evidence missing"]));
+  }
+}
+results.exact_candidate_acceptance=exactVerdict;
 if (outPath) { writeFileSync(outPath, JSON.stringify(results, null, 1)); console.log(`\nraw JSON: ${outPath}`); }
 if (!keep) rmSync(root, { recursive: true, force: true });
 else console.log(`kept ${root}`);
-// By default this is a measurement tool, including while fixing a known
-// regression. Strict mode makes missing samples and failed targets fail CI.
-if (results.phases.some((p: any) => p.checks["all agents streaming"] === false)) process.exitCode = 1;
-if (!results.bot_streaming || strays.length) process.exitCode = 1;
-if (failOnTarget && results.phases.some((p: any) => Object.values(p.checks).some((v) => v !== true))) process.exitCode = 1;
+// Performance targets and missing coverage are enforced by default.
+// Diagnostics remain useful while fixing failures, but cannot claim acceptance.
+console.log(`\n${results.acceptance.mode}: ${results.acceptance.accepted ? "PASS" : "NOT ACCEPTED"}`);
+for (const failure of results.acceptance.failures) console.log(`  ${failure}`);
+process.exitCode = results.acceptance.exitCode;
 
 // the uberbot's Status plane: its sidebar row (declared last; hoisted)
 async function statusPlane(p: Phase): Promise<boolean> {
