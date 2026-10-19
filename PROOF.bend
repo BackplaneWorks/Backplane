@@ -12386,3 +12386,15 @@ def Laws.cef_fallback_keeps_error(err):
     case SNil{}: {==}
     case SCon{_, _}: {==}
 # --- end browser-cef fallback ---
+
+# ---- Sidebar index rename invalidation ----
+def Laws.ix_rename_global_invalidation_retained(id, t):
+  match t:
+    case MM.TouchK{n, g, r, m, l}: {==}
+
+def Laws.ix_rename_relationship_invalidation_retained(id, t):
+  match t:
+    case MM.TouchK{n, g, r, m, l}: {==}
+
+def Laws.ix_old_touch_global_fallback(n, g, r, l):
+  {==}
