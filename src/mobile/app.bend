@@ -212,6 +212,9 @@ def session_reading(text: String, qualified: String, seen: String, count: Nat, a
 def session_draft(text: String, draft: String) -> J.Json:
   PS.Session.draft(Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{}), draft)
 
+def session_draft_at(text: String, thread: String, draft: String) -> J.Json:
+  PS.Session.draft.at(Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{}), thread, draft)
+
 def session_prepare(text: String, input: String, action: String) -> J.Json:
   PS.Session.prepare(Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{}), Maybe.default(&2, J.Json, J.Json.parse(input), J.Null{}), action)
 

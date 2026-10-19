@@ -7,7 +7,7 @@ const performed:any[]=[];
 const api={
  now:()=>clock,cid:()=>'phone',session:(key:string)=>sessions.get(key) ?? ({sel:'t1',drafts:{t1:''},rid:0}),
  prepare:(s:any,input:any,action:string)=> action==='send' ? {...s,drafts:{...s.drafts,[input.sel]:input.drafts[input.sel]}} : s,
- draft:(s:any,text:string)=>({session:{...s,drafts:{...s.drafts,[s.sel]:text}},cmds:[{type:'keep',text}]}),
+ draft:(s:any,text:string,key:string,thread=s.sel)=>({session:{...s,drafts:{...s.drafts,[thread]:text}},cmds:[{type:'keep',thread:key+'|'+thread,text}]}),
  send:(key:string,wire:any)=>({key,wire}),command:(c:any)=>c,adopt:(key:string,s:any)=>{sessions.set(key,s);adopted.push({key,s});},
  perform:(key:string,op:any)=>{
   const input=api.prepare(api.session(key),op.input,op.action);
@@ -60,4 +60,23 @@ assert.equal(reply(r,'desk',preempt,{sel:'obsolete'}),null,'preempted refresh ca
 assert.deepEqual(r.end('desk'),[]);
 assert.equal(performed.at(-1).action,'thread-permissions','canonical handoff executes pending choice');
 assert.equal(reply(r,'desk',action,{sel:'obsolete'},[{type:'send',text:'duplicate'}]),null,'late renderer cannot duplicate the canonical choice');
+// A delayed selection response must not move a newer draft to its destination.
+sessions.set('drafts',{sel:'t1',drafts:{t1:'old one',t2:'keep two'},rid:0});
+const drafts=new Recent(api);
+const opened:any=drafts.open('drafts','d1')[0];
+reply(drafts,'drafts',opened,opened.wire.p.session);
+const changing:any=drafts.request('drafts','select','drafts|t2')[0];
+drafts.draft('drafts','new one');
+const selected:any=reply(drafts,'drafts',changing,{...changing.wire.p.session,sel:'t2'});
+assert.equal(drafts.links.get('drafts').session.sel,'t2');
+assert.equal(drafts.links.get('drafts').session.drafts.t1,'new one','new draft stays with the thread where it was typed');
+assert.equal(drafts.links.get('drafts').session.drafts.t2,'keep two','destination draft is preserved');
+assert.equal(selected.cmds.find((c:any)=>c.type==='keep').thread,'drafts|t1','kept draft uses original identity');
+drafts.draft('drafts','new two');
+const refreshDrafts:any=drafts.refresh('drafts')[0];
+drafts.draft('drafts','latest two');
+reply(drafts,'drafts',refreshDrafts,refreshDrafts.wire.p.session);
+drafts.end('drafts');
+assert.equal(sessions.get('drafts').drafts.t1,'new one','handoff retains first thread draft');
+assert.equal(sessions.get('drafts').drafts.t2,'latest two','handoff retains independently edited destination draft');
 console.log('PASS recent transport: ordering, exact send capture, one history ack, handoff, generations, hub isolation, expiry');

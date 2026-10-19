@@ -14,7 +14,7 @@ export class Recent {
   open(key, generation) {
     const abandoned = this.abort(key, 'connection changed');
     const link = { key, generation, session: this.api.session(key), waiting: [], flight: null,
-      history: false, complete: false, shown: null, revision: ++this.revision };
+      history: false, complete: false, shown: null, drafts: new Map(), revision: ++this.revision };
     // Separate command ids from the canonical client's in-flight requests.
     link.session.rid = Math.max(Number(link.session.rid || 0), Date.now() * 1000);
     this.links.set(key, link);
@@ -67,7 +67,7 @@ export class Recent {
     link.session = change.session;
     // A draft typed while a response was travelling takes precedence over
     // that older response. Its own next action captures it below.
-    link.draft = { text, revision: ++this.revision };
+    link.drafts.set(link.session.sel, { thread: link.session.sel, text, revision: ++this.revision });
     return change.cmds;
   }
   pump(link) {
@@ -97,10 +97,10 @@ export class Recent {
     for (const ack of link.acks || []) link.session = this.api.reply(link.session, ack);
     link.acks = [];
     let newDraftCommands = [];
-    if (link.draft && link.draft.revision > flight.operation.revision) {
-      const draft = this.api.draft(link.session, link.draft.text, link.key);
-      link.session = draft.session;
-      newDraftCommands = draft.cmds;
+    for (const draft of link.drafts.values()) if (draft.revision > flight.operation.revision) {
+      const change = this.api.draft(link.session, draft.text, link.key, draft.thread);
+      link.session = change.session;
+      newDraftCommands.push(...change.cmds);
     }
     link.shown = result.shown;
     const cmds = (result.cmds || []).map(c => this.api.command(c));
@@ -134,10 +134,10 @@ export class Recent {
       if (!operation.action) continue;
       cmds.push(...this.api.perform(key, operation));
       cmds.push(...(this.api.issued?.(key, operation.input, operation.action) || []));
-      if (link.draft && link.draft.revision > operation.revision) {
-        const draft = this.api.draft(this.api.session(key), link.draft.text, key);
-        this.api.adopt(key, draft.session);
-        cmds.push(...draft.cmds);
+      for (const draft of link.drafts.values()) if (draft.revision > operation.revision) {
+        const change = this.api.draft(this.api.session(key), draft.text, key, draft.thread);
+        this.api.adopt(key, change.session);
+        cmds.push(...change.cmds);
       }
     }
     return cmds;

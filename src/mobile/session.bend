@@ -127,8 +127,13 @@ def Session.reading.ui(away: Bool, +u: U.Ui, +id: String, +seen: String, count: 
 def Session.reading(session: J.Json, id: String, seen: String, count: Nat, away: Bool) -> J.Json:
   Session.pack(Session.reading.ui(away, Session.adopt(U.Ui.init(0n), session), id, seen, count))
 
-def Session.draft(+session: J.Json, +text: String) -> J.Json:
-  Session.pack(U.Ui.scratch_set(Session.adopt(U.Ui.init(0n), session), J.Json.get_str(session, "sel", ""), text))
+# A response can change selection while a newer edit is in flight. Keep
+# the edit bound to its original thread without changing that selection.
+def Session.draft.at(session: J.Json, id: String, text: String) -> J.Json:
+  Session.pack(U.Ui.scratch_set(Session.adopt(U.Ui.init(0n), session), id, text))
+
+def Session.draft(+session: J.Json, text: String) -> J.Json:
+  Session.draft.at(session, J.Json.get_str(session, "sel", ""), text)
 
 def Session.prepare.k(send: Bool, +session: J.Json, +input: J.Json) -> J.Json:
   match send:
@@ -138,10 +143,18 @@ def Session.prepare.k(send: Bool, +session: J.Json, +input: J.Json) -> J.Json:
     case False{}:
       session
 
-# Capture the exact message and recipient at the tap, even when a later
-# keystroke or thread switch overtakes its presentation response.
-def Session.prepare(session: J.Json, input: J.Json, +action: String) -> J.Json:
-  Session.prepare.k(Bool.or(String.eq(action, "send"), String.eq(action, "send-alt")), session, input)
+def Session.prepare.thread(bound: Bool, session: J.Json, input: J.Json) -> J.Json:
+  match bound:
+    case True{}:
+      Session.pack(U.Ui.select.k(Session.adopt(U.Ui.init(0n), session), J.Json.get_str(input, "sel", "")))
+    case False{}: session
+
+# Capture the recipient at the tap even if a selection reply overtakes it.
+# Only sending captures draft text: a permission choice must not restore a
+# draft that an earlier send already cleared.
+def Session.prepare(session: J.Json, +input: J.Json, +action: String) -> J.Json:
+  Session.prepare.k(Bool.or(String.eq(action, "send"), String.eq(action, "send-alt")),
+    Session.prepare.thread(String.eq(action, "thread-permissions"), session, input), input)
 
 def Session.failed.k(send: Bool, +key: String, +input: J.Json) -> List<&2, J.Json>:
   match send:
