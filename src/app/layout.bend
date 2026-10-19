@@ -4838,12 +4838,50 @@ def Page.strip(on: Bool, +ty: Ty, +u: U.Ui, +x0: U32, +x1: U32) -> Out:
         Page.back(Bool.not(String.is_empty(U.Teach.drive(u, U.Ui.page(u)))), ty, u, x1))
     case False{}: Out.none()
 
+# Always-visible browser chrome; the native child starts below both rows.
+def Page.tab.label(+tab: J.Json) -> String:
+  +title = J.Json.get_str(tab, "title", "")
+  Bool.pick(String, String.is_empty(title), J.Json.get_str(tab, "url", "New tab"), title)
+
+def Page.tabs(ts: List<&2, J.Json>, +ty: Ty, +x: U32, +y: U32, +w: U32) -> Out:
+  match ts:
+    case Nil{}: Out.none()
+    case +tab <> rest:
+      +id = J.Json.get_str(tab, "id", "")
+      Out.cat(Out.all([
+        Out.ops([D.Draw.rect(D.Clip.all(), x, y, w, 32, Bool.pick(U32, J.Json.get_bool(tab, "active", False{}), T.Th.sel(), T.Th.panel()), 255)]),
+        Out{Ty.text(ty, 2n, Ty.fit(ty, 2n, Page.tab.label(tab), U32.dim(w, 38)), D.Clip.all(), (x + 8 : U32), y, 32, T.Th.text()),
+          [Lay.hit(x, y, U32.dim(w, 28), 32, "br-select", id)]},
+        Lay.ibutton(ty, D.Clip.all(), (x + U32.dim(w, 28) : U32), y, "x", T.Th.dim(), "br-close", id)]),
+        Page.tabs(rest, ty, (x + w + 2 : U32), y, w))
+
+def Page.controls(+ty: Ty, +u: U.Ui, +focus: String, +blink: Bool, +caret: Nat, +mark: Nat, +page: String, +x0: U32, +x1: U32, +top: U32) -> Out:
+  +c = D.Clip.all()
+  +w = U32.dim((x1 - x0 : U32), 112)
+  +cap = U32.max(1, (w / 160 : U32))
+  +tw = U32.min(190, (w / cap : U32))
+  +field = S.Fld.id(U.Browse.field(page), "br-go", "")
+  Out.all([
+    Out.ops([D.Draw.rect(c, x0, top, (x1 - x0 : U32), 80, T.Th.panel(), 255)]),
+    Lay.ibutton(ty, c, (x0 + 4 : U32), (top + 2 : U32), "chevron-left", T.Th.dim(), "br-prev", ""),
+    Page.tabs(List.take(&2, J.Json, List.drop(&2, J.Json, U.Browse.tabs(u, page), U.Browse.offset(u, page)), U32.to_nat(cap)), ty, (x0 + 36 : U32), (top + 2 : U32), U32.dim(tw, 2)),
+    Lay.ibutton(ty, c, (x1 - 68 : U32), (top + 2 : U32), "chevron-right", T.Th.dim(), "br-next", ""),
+    Lay.ibutton(ty, c, (x1 - 34 : U32), (top + 2 : U32), "plus", T.Th.text(), "br-new", ""),
+    Lay.ibutton(ty, c, (x0 + 4 : U32), (top + 42 : U32), "chevron-left", T.Th.text(), "br-back", ""),
+    Lay.ibutton(ty, c, (x0 + 38 : U32), (top + 42 : U32), "chevron-right", T.Th.text(), "br-forward", ""),
+    Lay.ibutton(ty, c, (x0 + 72 : U32), (top + 42 : U32), "repeat", T.Th.text(), "br-reload", ""),
+    Lay.field(ty, c, (x0 + 110 : U32), (top + 40 : U32), U32.dim((x1 - x0 : U32), 166), U.Browse.address(u, page), String.eq(focus, field), blink, caret, mark, MSG.T.browser.address(Ty.loc(ty)), field),
+    Lay.button(ty, c, (x1 - 50 : U32), (top + 40 : U32), MSG.T.common.go(Ty.loc(ty)), T.Th.text(), "br-go", "")])
+
 # the Browser tab: the selected thread's own page
-def Lay.page.if(on: Bool, +ty: Ty, +u: U.Ui, +x0: U32, +x1: U32, +h: U32) -> Out:
+def Lay.page.if(on: Bool, +ty: Ty, +n: S.Nui, +x0: U32, +x1: U32, +h: U32) -> Out:
   match on:
     case True{}:
-      Out.cat(Page.strip(U.CefUI.strip_on(u, U.Ui.page(u)), ty, u, x0, x1),
-        Lay.page(ty, u, U.Ui.page(u), MSG.T.viewer.page.empty(Ty.loc(ty)), x0, x1, Bool.pick(U32, U.CefUI.strip_on(u, U.Ui.page(u)), 96, 52), h))
+      +u = S.Nui.ui(n)
+      +top = Bool.pick(U32, U.CefUI.strip_on(u, U.Ui.page(u)), 96, 52)
+      Out.all([Page.strip(U.CefUI.strip_on(u, U.Ui.page(u)), ty, u, x0, x1),
+        Page.controls(ty, u, S.Nui.focus_of(n), S.Blink.on(n), S.Nui.caret_of(n), S.Nui.mark(n), U.Ui.page(u), x0, x1, top),
+        Lay.page.in(ty, u, U.Ui.page(u), MSG.T.viewer.page.empty(Ty.loc(ty)), x0, x1, (top + 80 : U32), h, False{})])
     case False{}:
       Out.none()
 
@@ -5660,7 +5698,7 @@ def Lay.viewer.b(+ty: Ty, +n: S.Nui, +b: U.HBar, +x0: U32, +x1: U32, +h: U32) ->
     Lay.mech.if(U32.is_eq(S.Vw.kind(S.Nui.vw(n)), 5), ty, S.Nui.ui(n), x0, x1, h),
     Lay.viewer.vw(ty, S.Nui.vw(n), U.Ui.draft_text(S.Nui.ui(n)), U.Ui.view_get(S.Nui.ui(n), "diff"), U.Mpage.onpart(S.Nui.ui(n)), x0, x1, (h - Hb.h(b) : U32)),
     Mech.bar.if(U.Mpage.onpart(S.Nui.ui(n)), ty, S.Nui.ui(n), x0, x1),
-    Lay.page.if(U32.is_eq(S.Vw.kind(S.Nui.vw(n)), 3), ty, S.Nui.ui(n), x0, x1, h),
+    Lay.page.if(U32.is_eq(S.Vw.kind(S.Nui.vw(n)), 3), ty, n, x0, x1, h),
     Side.k(U32.is_lt(S.Vw.kind(S.Nui.vw(n)), 2), ty, n, S.Vw.kind(S.Nui.vw(n)), Lay.scene(n), x0, x1, (h - Hb.h(b) : U32)),
     Side.ground.if(U32.is_eq(S.Vw.kind(S.Nui.vw(n)), 2), ty, n, x1),
     Hb.draw(ty, n, S.Nui.ui(n), b, Lay.scene(n), x0, x1, h),

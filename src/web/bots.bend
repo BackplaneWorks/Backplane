@@ -1,4 +1,5 @@
 import Base
+import ../core/json.bend as J
 import ../core/msgs.bend as MSG
 import ../core/model.bend as M
 import ../core/i18n.bend as I
@@ -260,6 +261,23 @@ def WB.tbtns(bs: List<&2, U.TBtn>) -> List<&2, D.Node>:
     case U.TBtn{+label, +action, +value, +primary} <> t:
       D.Dom.button(Bool.pick(String, primary, "primary", ""), action, value, label, label) <> WB.tbtns(t)
 
+def WB.browser.tabs(ts: List<&2, J.Json>) -> List<&2, D.Node>:
+  match ts:
+    case Nil{}: Nil{}
+    case +tab <> rest:
+      +title = J.Json.get_str(tab, "title", "")
+      WB.div(Bool.pick(String, J.Json.get_bool(tab, "active", False{}), "browser-tab on", "browser-tab"), [
+        D.Dom.button("browser-tab-title", "br-select", J.Json.get_str(tab, "id", ""), J.Json.get_str(tab, "url", ""),
+          Bool.pick(String, String.is_empty(title), J.Json.get_str(tab, "url", "New tab"), title)),
+        D.Dom.button("", "br-close", J.Json.get_str(tab, "id", ""), "Close tab", "×")]) <> WB.browser.tabs(rest)
+
+def WB.browser.controls(+lc: I.Loc, +u: U.Ui, +page: String) -> List<&2, D.Node>:
+  [WB.div("browser-tabs", List.append(&2, D.Node, WB.browser.tabs(U.Browse.tabs(u, page)), [D.Dom.button("", "br-new", "", "New tab", "+")])),
+   WB.div("browser-address", [D.Dom.button("", "br-back", "", MSG.T.tour.back(lc), "←"),
+    D.Dom.button("", "br-forward", "", "Forward", "→"), D.Dom.button("", "br-reload", "", MSG.T.common.reload(lc), "↻"),
+    WB.input("browser-address:" ++ page, U.Browse.field(page), U.Browse.address(u, page), MSG.T.browser.address(lc), "br-go"),
+    D.Dom.button("", "br-go", "", MSG.T.common.go(lc), MSG.T.common.go(lc))])]
+
 def WB.urlbar.loc(+lc: I.Loc, +u: U.Ui) -> D.Node:
   WB.div("bform row", [D.Dom.button("", "bb-back", "", MSG.T.tour.back(lc), MSG.T.tour.back(lc)), D.Dom.button("", "bb-reload", "", MSG.T.common.reload(lc), MSG.T.common.reload(lc)),
     WB.input("bot-url", "bburl", BI.BU.field(u, "bburl"), MSG.T.browser.address(lc), "bb-nav"), D.Dom.button("", "bb-nav", "", MSG.T.common.go(lc), MSG.T.common.go(lc))])
@@ -282,7 +300,7 @@ def WB.strip.k.loc(+lc: I.Loc, s: U.TStrip, +u: U.Ui, +input: Bool) -> D.Node:
       WB.div("tk-strip mode" ++ Nat.show(mode), D.Dom.cat([WB.div("tk-head", [D.Dom.span("tk-title", title),
           D.Dom.span("tk-meta", Bool.pick(String, rec, clock ++ " · " ++ Nat.show(steps) ++ Bool.pick(String, Nat.is_eq(steps, 1n), " step", " steps"), "")),
           WB.div("tk-btns", WB.tbtns(bs))])],
-        D.Dom.cat(D.Dom.when(input, WB.urlbar.loc(lc, u)), D.Dom.when(rec, WB.notebar.loc(lc, u)))))
+        D.Dom.when(rec, WB.notebar.loc(lc, u))))
 
 # one recorded step in the save sheet: its typed value is a chip that makes
 # it a parameter (a secret has none), named in a field once marked
@@ -326,8 +344,8 @@ def WB.browser.m(+lc: I.Loc, sheet: Bool, +u: U.Ui, +b: BT.Bot) -> D.Node:
     case False{}:
       +id = BT.Bot.id(b)
       +input = {U.Teach.input(u, id) : Bool}
-      WB.div("tk-live", [WB.strip.k.loc(lc, U.Teach.strip.loc(lc, u, id), u, input),
-        WB.browser.in.loc(lc, input, String.is_empty(U.Ui.info(u, "shot." ++ id)), U.Ui.info(u, "shot." ++ id), id, BT.Bot.name(b))])
+      WB.div("tk-live", List.append(&2, D.Node, WB.strip.k.loc(lc, U.Teach.strip.loc(lc, u, id), u, input) <> WB.browser.controls(lc, u, id),
+        [WB.browser.in.loc(lc, input, String.is_empty(U.Ui.info(u, "shot." ++ id)), U.Ui.info(u, "shot." ++ id), id, BT.Bot.name(b))]))
 
 def WB.browser(+lc: I.Loc, +u: U.Ui, +b: BT.Bot) -> D.Node:
   WB.browser.m(lc, Nat.is_eq(U.Teach.mode(u, BT.Bot.id(b)), 2n), u, b)

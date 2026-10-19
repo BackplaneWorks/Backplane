@@ -978,13 +978,12 @@ def Bv.strip.k(s: U.TStrip, +ty: L.Ty, +f: F.FS, +input: Bool, +c: D.Clip, +x: U
     case U.TStrip{+mode, +title, +clock, +steps, bs}:
       +rec = {Nat.is_eq(mode, 1n) : Bool}
       +meta = {Bool.pick(String, rec, MSG.T.teach.steps(L.Ty.loc(ty), clock, Nat.show(steps), Bool.pick(String, Nat.is_eq(steps, 1n), "one", "other")), "") : String}
-      +ub = {Bool.pick(U32, input, 40, 0) : U32}
+      +ub = {0 : U32}
       +nb = {Bool.pick(U32, rec, 40, 0) : U32}
       L.Col{L.Out.all([
           L.Out.ops(L.Ty.text(ty, 1n, title, c, x, y, 30, T.Th.accent())),
           L.Out.ops(L.Ty.text(ty, 2n, meta, c, (x + L.Ty.width(ty, 1n, title) + 12 : U32), y, 30, T.Th.faint())),
           Bv.tbtns(List.reverse(&2, U.TBtn, bs), ty, c, y, (x + w : U32)),
-          Bv.when(input, Bv.urlbar(ty, f, c, x, w, (y + 40 : U32))),
           Bv.when(rec, Bv.row2(ty, f, "tknote", "tk-note", MSG.T.teach.note.placeholder(L.Ty.loc(ty)), MSG.T.teach.note.add(L.Ty.loc(ty)), "", c, x, w, (y + 40 + ub : U32)))]),
         (y + 44 + ub + nb : U32)}
 
@@ -994,7 +993,8 @@ def Bv.live(+ty: L.Ty, +f: F.FS, +b: BT.Bot, +x0: U32, +x1: U32, +top: U32, +h: 
   +id = BT.Bot.id(b)
   +input = {U.Teach.input(u, id) : Bool}
   L.Lay.col.out(L.Lay.col.then(Bv.strip.k(U.Teach.strip.loc(L.Ty.loc(ty), u, id), ty, f, input, D.Clip.all(), (x0 + 24 : U32), (x1 - x0 - 48 : U32), top), +y2 =>
-    L.Col{L.Lay.page.in(ty, u, id, MSG.T.bots.page.empty(L.Ty.loc(ty), BT.Bot.name(b)), x0, x1, y2, h, input), y2}))
+    L.Col{L.Out.cat(L.Page.controls(ty, u, F.FS.focus(f), F.FS.blink(f), F.FS.caret(f), F.FS.mark(f), id, x0, x1, y2),
+      L.Lay.page.in(ty, u, id, MSG.T.bots.page.empty(L.Ty.loc(ty), BT.Bot.name(b)), x0, x1, (y2 + 80 : U32), h, input)), y2}))
 
 # one recorded step in the save sheet: what it did, its typed value as a
 # chip (a secret shows none: it is never kept), and once marked a parameter

@@ -1,7 +1,7 @@
 // The real native window and CEF, on a private display and an empty home.
 // Run only inside bp-admit --mem 6 --cores 2. Requires build/backplane,
 // build/wire and the 2a BACKPLANE_CEF runtime. No live hub or display is used.
-import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { check, until, privateDisplay } from "../../tools/cef/test/harness.ts";
 
@@ -16,8 +16,11 @@ console.log(`private display ${d.env.DISPLAY}; empty home ${home}`);
 for (const provider of ["claude", "codex", "grok", "muse"]) {
   writeFileSync(join(fake, provider), "#!/bin/sh\nexit 1\n"); chmodSync(join(fake, provider), 0o755);
 }
-writeFileSync(join(fake, "backplane-browser"), `#!/bin/sh\nexec bun '${resolve("tools/browser/src/main.ts")}' "$@"\n`);
-chmodSync(join(fake, "backplane-browser"), 0o755);
+if (process.env.BACKPLANE_BROWSER) symlinkSync(resolve(process.env.BACKPLANE_BROWSER), join(fake, "backplane-browser"));
+else {
+  writeFileSync(join(fake, "backplane-browser"), `#!/bin/sh\nexec bun '${resolve("tools/browser/src/main.ts")}' "$@"\n`);
+  chmodSync(join(fake, "backplane-browser"), 0o755);
+}
 const listen = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } });
 const port = listen.port; listen.stop(true);
 const env = { ...d.env, PATH: `${fake}:${process.env.PATH}`, BACKPLANE_AGENTS: fake, BACKPLANE_NO_UPDATE: "1", BACKPLANE_PEERS: "", WAYLAND_DISPLAY: "", BACKPLANE_CEF_NO_GPU: "1" };
@@ -128,9 +131,9 @@ try {
   check("agent opens its shared page", !((await mcp(a.id, "preview_open", { url: `http://127.0.0.1:${site.port}/alpha` })).result?.isError));
   let ca = await until(async () => {
     const c = await mapped();
-    return c?.x === 832 && c.y === 96 && c.w === 568 && c.h === 804 ? c : null;
+    return c?.x === 832 && c.y === 176 && c.w === 568 && c.h === 724 ? c : null;
   }, "native page fills pane", 30000);
-  check("CEF is an embedded mapped child filling the pane", ca.parent === win && ca.x === 832 && ca.y === 96 && ca.w === 568 && ca.h === 804, ca);
+  check("CEF is an embedded mapped child filling the pane", ca.parent === win && ca.x === 832 && ca.y === 176 && ca.w === 568 && ca.h === 724, ca);
   console.log("xwininfo " + (await run(["xwininfo", "-display", d.env.DISPLAY!, "-id", String(ca.xid)])).trim());
   check("the page exists for every client", await until(() => info[`browser.page.${a.id}`] === "1", "browser.page key"));
   const spot = { x: ca.x + Math.floor(ca.w / 2), y: ca.y + ca.h - 60 };
@@ -195,7 +198,7 @@ try {
   await poke("ctrl", "k"); await until(async () => !(await mapped()), "palette hides child");
   await poke("key", "Escape"); await pageShown(); check("closing palette restores child", true);
   await poke("size", "1500", "950");
-  ca = await until(async () => { const c = await mapped(); return c?.x === 882 && c.y === 96 && c.w === 618 && c.h === 854 ? c : null; }, "resize placement");
+  ca = await until(async () => { const c = await mapped(); return c?.x === 882 && c.y === 176 && c.w === 618 && c.h === 774 ? c : null; }, "resize placement");
   await select("zqcefbeta"); await mcp(b.id, "preview_open", { url: `http://127.0.0.1:${site.port}/beta` });
   const cb = await until(async () => { const c = await mapped(); return c && c.xid !== ca.xid ? c : null; }, "second thread browser");
   check("second thread maps a different CEF browser", cb.xid !== ca.xid, cb);

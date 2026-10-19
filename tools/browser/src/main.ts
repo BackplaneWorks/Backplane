@@ -477,6 +477,27 @@ async function newTab(o: Owner): Promise<Page> {
   return p;
 }
 
+// Tab identities survive index shifts; metadata changes are event driven.
+const tabIds = new WeakMap<Page, string>();
+const tabTitles = new WeakMap<Page, string>();
+let nextTabId = 0;
+function tabId(p: Page): string {
+  let id = tabIds.get(p);
+  if (!id) { id = `tab-${process.pid}-${++nextTabId}`; tabIds.set(p, id); }
+  return id;
+}
+function tellTabs(o: Owner): void {
+  if (owners.get(o.name) !== o) return;
+  send({ event: "tabs", page: o.name, url: o.active?.url() ?? "", tabs: o.tabs.map((p, index) => ({
+    id: tabId(p), index, url: p.url(), title: tabTitles.get(p) ?? "", active: p === o.active,
+  })) });
+}
+function titleChanged(o: Owner, p: Page): void {
+  void p.title().then(title => {
+    if (!p.isClosed() && ownerOf.get(p) === o) { tabTitles.set(p, title); tellTabs(o); }
+  }).catch(() => {});
+}
+
 async function adopt(o: Owner, p: Page): Promise<void> {
   if (ownerOf.has(p)) return;
   if (engine === "cef") cefOwners.set(await cef!.key(p), o);
@@ -486,10 +507,12 @@ async function adopt(o: Owner, p: Page): Promise<void> {
   p.on("console", (m) => pushLog(o, { level: m.type(), text: m.text() }));
   p.on("pageerror", (e) => pushLog(o, { level: "error", text: String(e) }));
   p.on("framenavigated", (f) => {
+    if (f === p.mainFrame()) { tellTabs(o); titleChanged(o, p); }
     if (p === o.active && f === p.mainFrame()) send({ event: "navigated", page: o.name, url: f.url() });
     if (o.recording && p === o.active && f === p.mainFrame()) recordNavigate(o, f.url());
   });
   p.on("load", () => {
+    titleChanged(o, p);
     if (p === o.active) send({ event: "load", page: o.name, url: p.url() });
   });
   // a popup (window.open, target=_blank) joins its opener's tabs and is
@@ -499,11 +522,11 @@ async function adopt(o: Owner, p: Page): Promise<void> {
   });
   p.on("close", () => {
     o.tabs = o.tabs.filter((t) => t !== p);
-    if (o.active !== p) return;
+    if (o.active !== p) { tellTabs(o); return; }
     o.active = null;
     const next = o.tabs[o.tabs.length - 1];
     if (next) void activate(o, next).catch((e) => log(`tab: ${e}`));
-    else clearShot(o);
+    else { clearShot(o); tellTabs(o); }
   });
   if (engine === "cef") await sizePage(o, p);
   else await p.setViewportSize(o.viewport).catch(() => {});
@@ -569,6 +592,7 @@ function onRecord(source: { page: Page; frame: any }, ev: Json): any {
 // make p the tab the owner drives, and the one its frames show
 async function activate(o: Owner, p: Page): Promise<void> {
   o.active = p;
+  tellTabs(o); titleChanged(o, p);
   await startShots(o);
   if (o.name === "" && frames.on) await startScreencast();
   const at = cefPlacement, host = cef;
@@ -895,7 +919,7 @@ function freeName(dir: string, name: string): string {
 
 async function tabList(o: Owner): Promise<Json> {
   const tabs = await Promise.all(o.tabs.map(async (t, index) => ({
-    index,
+    id: tabId(t), index,
     url: t.url(),
     title: await t.title().catch(() => ""),
     active: t === o.active,
@@ -907,6 +931,7 @@ async function closeOwner(name: string): Promise<void> {
   const o = owners.get(name);
   if (!o) return;
   owners.delete(name);
+  send({ event: "tabs", page: name, url: "", tabs: [] });
   o.recording = false;
   await stopShots(o);
   clearShot(o);
@@ -1001,6 +1026,7 @@ const handlers: Record<string, (a: Json, name: string) => Promise<any>> = {
     cefPlacement = { owner: name, x: a.x, y: a.y, w: a.w, h: a.h };
     await cef!.command("show", await cef!.key(p), `${a.x} ${a.y} ${a.w} ${a.h}`);
     await sized(p, o.viewport.width, o.viewport.height);
+    tellTabs(o);
     return {};
   },
   async hide() {
@@ -1260,16 +1286,17 @@ const handlers: Record<string, (a: Json, name: string) => Promise<any>> = {
       if (engine !== "cef") { await adopt(o, p); await activate(o, p); }
       const url = typeof a.new === "string" ? a.new : a.url;
       if (url) await p.goto(normalizeUrl(url), { waitUntil: "load", timeout: timeoutOf(a) });
-    } else if (a.select !== undefined) {
-      const p = o.tabs[Number(a.select)];
+    } else if (a.select !== undefined || a.selectId !== undefined) {
+      const p = a.selectId !== undefined ? o.tabs.find(p => tabId(p) === a.selectId) : o.tabs[Number(a.select)];
       if (!p) throw new Error(`no tab ${a.select}`);
       await activate(o, p);
-    } else if (a.close !== undefined) {
-      const p = o.tabs[Number(a.close)];
+    } else if (a.close !== undefined || a.closeId !== undefined) {
+      const p = a.closeId !== undefined ? o.tabs.find(p => tabId(p) === a.closeId) : o.tabs[Number(a.close)];
       if (!p) throw new Error(`no tab ${a.close}`);
       await closeTab(p);
       if (!o.tabs.length) await ensurePage(name);
     }
+    tellTabs(o);
     return tabList(o);
   },
   async record(a, name) {
@@ -1321,6 +1348,7 @@ const handlers: Record<string, (a: Json, name: string) => Promise<any>> = {
   async cast(a, name) {
     const o = ownerFor(name);
     const ms = Math.max(0, Math.min(10_000, Number(a.ms ?? 2500) || 0));
+    tellTabs(o); // Includes metadata for newly connected remote viewers.
     const was = performance.now() < o.shot.fast;
     o.shot.fast = performance.now() + ms;
     // the screencast stops the moment the lease runs out, not at the next tick

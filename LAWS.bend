@@ -10741,3 +10741,19 @@ law run_model_claude_worker_default_kept:
 law run_model_codex_stale_parent_uses_cli_default:
   for uber: Bool
   {H.Run.model.pick("codex", "opus", "sonnet", uber) == "" : String}
+
+# --- browser controls (CEF owner) ---
+law browser_url_hostname:
+  {CEF.Cef.url("example.com") == "https://example.com" : String}
+law browser_url_localhost:
+  {CEF.Cef.url("localhost:3787/path") == "http://localhost:3787/path" : String}
+law browser_url_explicit:
+  for +path: String
+  {CEF.Cef.url.explicit(True{}, path) == path : String}
+law browser_url_no_script:
+  {CEF.Cef.url("javascript:alert(1)") == "" : String}
+law browser_toolbar_no_eval:
+  {CEF.Cef.toolbar.allowed("evaluate") == False{} : Bool}
+law browser_toolbar_tabs_allowed:
+  {CEF.Cef.toolbar.allowed("tabs") == True{} : Bool}
+# --- end browser controls ---

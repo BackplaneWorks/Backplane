@@ -274,7 +274,7 @@ def Browser.is_page_event(+o: J.Json) -> Bool:
   Bool.or(Bool.and(Browser.has_page(J.Json.get(o, "page")), Bool.or(String.eq(J.Json.get_str(o, "event", ""), "frame"),
     Bool.or(String.eq(J.Json.get_str(o, "event", ""), "record"), Bool.or(String.eq(J.Json.get_str(o, "event", ""), "navigated"),
       Bool.or(String.eq(J.Json.get_str(o, "event", ""), "load"), String.eq(J.Json.get_str(o, "event", ""), "shield-click")))))),
-    String.eq(J.Json.get_str(o, "event", ""), "engine"))
+    Bool.or(String.eq(J.Json.get_str(o, "event", ""), "tabs"), String.eq(J.Json.get_str(o, "event", ""), "engine")))
 
 # a page-frame event to the event channel, sent off the actor's thread so
 # a slow reader never holds the browser up

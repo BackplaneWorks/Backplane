@@ -9489,10 +9489,42 @@ def Hub.browser.k(i: Nat, h: Hub, +client: U32, +id: String, +o: J.Json, +b: TE.
       Hub.browser.input(String.is_empty(TE.Teach.bot.drive(b)), h, client, id, o)
 
 # bots.browser {bot, op, ...}
+# Toolbar commands are explicit person input: take over before sending them.
+# The helper reply comes back asynchronously, including navigation failures.
+def BrowseJob.reply(+inbox: Chan(Msg), +client: U32, +id: String, +line: String) -> IO(Unit):
+  +o = Maybe.default(&2, J.Json, J.Json.parse(line), J.Null{})
+  Far.send(inbox, Push{client, J.Json.show(J.Json.obj([J.KV{"t", J.Str{"reply"}}, J.KV{"id", J.Num{id}},
+    J.KV{"ok", J.Flag{J.Json.get_bool(o, "ok", False{})}}, J.KV{"error", J.Str{J.Json.get_str(o, "error", "")}}]))})
+
+def BrowseJob.run(m: Maybe<&2, Chan(BR.BMsg)>, +inbox: Chan(Msg), +client: U32, +id: String, +o: J.Json) -> IO(Unit):
+  match m:
+    case Some{q}:
+      IO.bind(String, Unit, BR.Browser.ask_on(q, J.Json.get_str(o, "bot", ""), J.Json.get_str(o, "command", ""), CF.Cef.toolbar.args(o)),
+        line => BrowseJob.reply(inbox, client, id, line))
+    case None{}: BrowseJob.reply(inbox, client, id, BR.Browser.fail("browser helper unavailable"))
+
+def Hub.browser.toolbar.start(h: Hub, +client: U32, +id: String, +o: J.Json) -> IO(Hub):
+  match h:
+    case Hub{st, f, ls, cl, as, +inbox, +cfg, note}:
+      do IO<Hub>:
+        IO.spawn(Unit, BrowseJob.run(Cfg.br(cfg), inbox, client, id, o))
+        return Hub{st, f, ls, cl, as, inbox, cfg, note}
+
+def Hub.browser.toolbar.ok(ok: Bool, h: Hub, +client: U32, +id: String, +o: J.Json, +b: TE.TeachBot) -> IO(Hub):
+  match ok:
+    case True{}:
+      IO.bind(Hub, Hub, Hub.tch.put(h, TE.Teach.takeover(b)), h2 => Hub.browser.toolbar.start(h2, client, id, o))
+    case False{}: Hub.tch.err(h, client, id, "unsupported browser toolbar command")
+
+def Hub.browser.toolbar(toolbar: Bool, h: Hub, +client: U32, +id: String, +o: J.Json, +b: TE.TeachBot) -> IO(Hub):
+  match toolbar:
+    case True{}: Hub.browser.toolbar.ok(CF.Cef.toolbar.allowed(J.Json.get_str(o, "command", "")), h, client, id, o, b)
+    case False{}: Hub.browser.k(C.Codec.pos(["takeover", "handback"], J.Json.get_str(o, "op", "")), h, client, id, o, b)
+
 def Hub.browser.valid(h: Hub, +client: U32, +id: String, +o: J.Json) -> IO(Hub):
   match h:
     case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
-      Hub.browser.k(C.Codec.pos(["takeover", "handback"], J.Json.get_str(o, "op", "")), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, id, o,
+      Hub.browser.toolbar(String.eq(J.Json.get_str(o, "op", ""), "toolbar"), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, id, o,
         TE.Teach.get(Cfg.tch(cfg), J.Json.get_str(o, "bot", "")))
 
 def Hub.browser.known(ok: Bool, h: Hub, +client: U32, +id: String, +o: J.Json) -> IO(Hub):
@@ -9687,6 +9719,10 @@ def Hub.cef.seen.o(h: Hub, +o: J.Json) -> IO(Hub):
       Hub.cef.seen.k(Bool.and(Cef.page.ok(st, J.Json.get_str(o, "page", "")), Bool.not(CF.Cef.pages.has(CF.Cef.session.pages(Cfg.cef(cfg)), J.Json.get_str(o, "page", "")))),
         Hub{st, f, ls, cl, as, inbox, cfg, note}, J.Json.get_str(o, "page", ""))
 
+def Hub.browser.tabs(h: Hub, +o: J.Json) -> IO(Hub):
+  IO.bind(Hub, Hub, Hub.cef.seen.o(h, o), h2 => Hub.broadcast(h2, J.Json.show(J.Json.obj([J.KV{"t", J.Str{"info"}},
+    J.KV{"info", J.Json.obj([J.KV{"browser.tabs." ++ J.Json.get_str(o, "page", ""), J.Str{J.Json.show(o)}}])}]))))
+
 def Hub.browser_ev.c(i: Nat, h: Hub, +o: J.Json) -> IO(Hub):
   match i:
     case 0n: Hub.browser_ev.record(h, o)
@@ -9695,10 +9731,11 @@ def Hub.browser_ev.c(i: Nat, h: Hub, +o: J.Json) -> IO(Hub):
     case 3n: Hub.cef.exited(h)
     case 4n: Hub.cef.seen.o(h, o)
     case 5n: Hub.cef.seen.o(h, o)
+    case 6n: Hub.browser.tabs(h, o)
     case _: IO.pure(Hub, h)
 
 def Hub.browser_ev.o(h: Hub, +o: J.Json) -> IO(Hub):
-  Hub.browser_ev.c(C.Codec.pos(["record", "engine", "shield-click", "helper-exit", "navigated", "load"], J.Json.get_str(o, "event", "")), h, o)
+  Hub.browser_ev.c(C.Codec.pos(["record", "engine", "shield-click", "helper-exit", "navigated", "load", "tabs"], J.Json.get_str(o, "event", "")), h, o)
 
 # a helper event about a bot's page: a recorder step (navigations and loads
 # need nothing here: the recorder reports the person's own navigations)
