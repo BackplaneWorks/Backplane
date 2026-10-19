@@ -434,6 +434,41 @@ def Git.upstream.of(r: P.Ran) -> String:
 def Git.upstream(+carry: Bool, +top: String) -> IO(String):
   IO.bind(P.Ran, String, P.Proc.run("sh", ["-c", Git.upstream.sh(), "sh", Bool.pick(String, carry, "1", "0")], top), r => IO.pure(String, Git.upstream.of(r)))
 
+# A subdirectory project may only exist on the checked-out branch. Keep
+# upstream when it contains the directory, else use HEAD when it does.
+# A blob at that path is not a directory. Empty base already means HEAD
+# (no origin, or uncommitted hardware work that will be carried over).
+def Git.thread_wt.tree(r: P.Ran) -> Bool:
+  match r:
+    case P.Ran{code, out}:
+      Bool.and(U32.is_eq(code, 0), String.eq(String.trim(out), "tree"))
+
+def Git.thread_wt.base.head(found: Bool, +base: String, +prefix: String) -> IO(String):
+  match found:
+    case True{}:
+      Git.done("")
+    case False{}:
+      Git.done("error: project directory " ++ Git.thread_wt.sub(prefix) ++ " is not a directory in " ++ base ++ " or HEAD")
+
+def Git.thread_wt.base.upstream(found: Bool, +top: String, +base: String, +prefix: String) -> IO(String):
+  match found:
+    case True{}:
+      Git.done(base)
+    case False{}:
+      IO.bind(P.Ran, String, Git.run(top, ["cat-file", "-t", "HEAD:" ++ Git.thread_wt.sub(prefix)]),
+        r => Git.thread_wt.base.head(Git.thread_wt.tree(r), base, prefix))
+
+def Git.thread_wt.base.check(needed: Bool, +top: String, +base: String, +prefix: String) -> IO(String):
+  match needed:
+    case True{}:
+      IO.bind(P.Ran, String, Git.run(top, ["cat-file", "-t", base ++ ":" ++ Git.thread_wt.sub(prefix)]),
+        r => Git.thread_wt.base.upstream(Git.thread_wt.tree(r), top, base, prefix))
+    case False{}:
+      Git.done(base)
+
+def Git.thread_wt.base(+top: String, +base: String, +prefix: String) -> IO(String):
+  Git.thread_wt.base.check(Bool.and(Bool.not(String.is_empty(base)), Bool.not(String.is_empty(prefix))), top, base, prefix)
+
 # --no-track: the thread's branch is its own; a push never goes to main
 def Git.thread_wt.add(+base: String, +carry: Bool, +top: String, +prefix: String, +b: String) -> IO(String):
   Git.seq(Git.run(top, List.append(&2, String, ["worktree", "add", "--no-track", "-b", b, Git.thread_wt.path(top, b)], Git.base_args(base))),
@@ -441,7 +476,8 @@ def Git.thread_wt.add(+base: String, +carry: Bool, +top: String, +prefix: String
 
 def Git.thread_wt.made(+carry: Bool, +top: String, +prefix: String, +b: String) -> IO(String):
   Git.and(Git.exclude(top), _ =>
-    IO.bind(String, String, Git.upstream(carry, top), base => Git.thread_wt.add(base, carry, top, prefix, b)))
+    IO.bind(String, String, Git.upstream(carry, top), base =>
+      Git.and(Git.thread_wt.base(top, base, prefix), chosen => Git.thread_wt.add(chosen, carry, top, prefix, b))))
 
 def Git.thread_wt.head(r: P.Ran, +carry: Bool, +top: String, +prefix: String, +b: String) -> IO(String):
   match r:
@@ -455,7 +491,8 @@ def Git.thread_wt.top(+top: String, +cwd: String, +carry: Bool, +b: String) -> I
     Git.and(Git.seq.raw(Git.run(cwd, ["rev-parse", "--show-prefix"]), p => Git.done(String.trim(p))),
       +prefix => IO.bind(P.Ran, String, Git.run(cwd, ["rev-parse", "--verify", "-q", "HEAD"]), r => Git.thread_wt.head(r, carry, top, prefix, b))))
 
-# a new thread's worktree on a new branch from upstream (Git.upstream), for the project folder
+# a new thread's worktree on a new branch from upstream (Git.upstream),
+# or HEAD when only HEAD contains the project's subdirectory, for the project folder
 # cwd; carry: bring the folder's uncommitted work along. Answers the
 # thread's directory, "skip: <why>" when there is no repository to branch
 # (the thread then works in the folder), or "error: ...".

@@ -119,6 +119,10 @@ jobs:
         env:
           BACKPLANE_SKIP_CHECK: "1" # the laws job checks every file
       - run: scripts/smoke.sh
+      - name: Test Git worktrees
+        run: |
+          scripts/build-app.sh test/native/git_test.bend build/git_test
+          build/git_test
       - uses: actions/upload-artifact@v4
         with:
           name: backplane-${{ matrix.target }}
