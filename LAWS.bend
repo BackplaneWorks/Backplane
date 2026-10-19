@@ -2,6 +2,7 @@ import Base
 import ./src/core/auth.bend as AUTH
 import ./src/core/http.bend as HTTPAUTH
 import ./src/core/pcb2d.bend as PCB2 # PCB viewer text
+import ./src/mobile/session.bend as IOSSESSION
 import ./src/app/side_rows.bend as SR
 import ./src/app/side_row_types.bend as SRT
 import ./src/server/botnet.bend as MPLOG # mail perf runtime count
@@ -10700,3 +10701,20 @@ law pcb2_hidden_text_draws_nothing:
   for +sig: U32
   for +ctx: String
   {PCB2.Text.visible.k(True{}, at, angle, x, text, up, key, sig, ctx) == Nil{} : List<&2, B.Item>}
+# A phone usage view never scans thread usage while hidden, and machine
+# identity survives duplicate names/offline readings.
+law ios_usage_hidden_empty:
+  for +lc: I18.Loc
+  for +u: U.Ui
+  {Hb.Hubs.usage.rows(lc, False{}, u) == Nil{} : List<&2, J.Json>}
+
+law ios_usage_machine_identity:
+  for +k: String
+  for +name: String
+  for +j: J.Json
+  {J.Json.get_str(Hb.Hubs.usage.machine(k, name, j), "key", "") == k : String}
+
+law ios_session_keeps_cursor:
+  for +u: U.Ui
+  for +o: J.Json
+  {U.Ui.seq(IOSSESSION.Session.adopt(u, o)) == U.Ui.seq(u) : Nat}

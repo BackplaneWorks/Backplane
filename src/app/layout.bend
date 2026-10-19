@@ -7282,7 +7282,7 @@ def Lay.frame.us(+ty: Ty, +memo: TLMemo, +n: S.Nui, utop: Out, +uh: U32, more: D
         Lay.viewer.if(pa, ty, n, (264 + U32.shr((w - 264 : U32)) : U32), w, h),
         Lay.term.of(ty, n, Bool.pick(U32, pa, (264 + U32.shr((w - 264 : U32)) : U32), w), h),
         sb,
-        Lay.toast(ty, err, w, h),
+        Lay.toast(ty, U.Ui.error.shown(Ty.loc(ty), err), w, h),
         Lay.palette.if(U.Ui.flag(S.Nui.ui(n), "palette"), ty, n, w, h),
         Lay.proj.if(U.Ui.flag(S.Nui.ui(n), "proj"), ty, n, w, h),
         Lay.hover(U.Ui.info(S.Nui.ui(n), "hover"), S.Hover.alpha(n, S.Nui.ms_of(n))),

@@ -449,6 +449,11 @@ struct ModelPicker: Decodable {
     let providers: [Choice]?
 }
 
+struct ThreadPermissions: Decodable {
+    let label, current: String
+    let choices: [Choice]
+}
+
 // a message waiting in the thread's queue and its buttons (each sends
 // action with value)
 struct QButton: Decodable {
@@ -496,6 +501,9 @@ struct ThreadView: Decodable {
     // the phase the working line's dot shows (as a row's status)
     let phase: String?
     let picker: ModelPicker
+    let permissions: ThreadPermissions?
+    // Raw event ID; rendered rows can split a message or prefix a tool fold.
+    let readingSeen: String?
     let viewer: Viewer
     // the menu under the toolbar's ellipsis, after the tools
     let menu: [Tool]?
@@ -605,6 +613,13 @@ struct HubRow: Decodable, Hashable {
     // its version, and how many of its changes this phone holds
     let version: String?
     let changes: Int?
+}
+
+struct MachineUsage: Decodable, Identifiable {
+    let key, name: String
+    let online: Bool
+    let rows: [SetRow]
+    var id: String { key }
 }
 
 struct Found: Decodable, Hashable {
@@ -795,6 +810,7 @@ struct Screen: Decodable {
     // hub: the one in focus (its thread is shown, its plots are drawn)
     let version, error, note, sel, empty, hub: String
     let hubs: [HubRow]
+    let usageMachines: [MachineUsage]?
     let found: [Found]
     let projects: [Project]
     // "projects" (sections) or "active" (one flat list of rows, active)
@@ -877,12 +893,22 @@ struct Resume: Decodable {
     let since, origin: String
 }
 
+struct SyncUpdate: Decodable, Sendable {
+    let hub, phase: String
+    let detail: String?
+}
+
 struct Out: Decodable, @unchecked Sendable {
     let screen: Screen?
     let cmds: [Cmd]
+    var screenJSON: String? = nil
+    var sync: [SyncUpdate]? = nil
+    var deadline: Double? = nil
 
     private struct Cmds: Decodable {
         let cmds: [Cmd]
+        let sync: [SyncUpdate]?
+        let deadline: Double?
     }
 
     // an answer; with screen false only its commands (a newer screen follows)
@@ -891,18 +917,18 @@ struct Out: Decodable, @unchecked Sendable {
     // screen stays up, and the failure is logged with its path)
     static func decode(_ text: String, screen: Bool) -> Out? {
         let d = Data(text.utf8)
-        let cmds: [Cmd]
-        do { cmds = try JSONDecoder().decode(Cmds.self, from: d).cmds } catch {
+        let answer: Cmds
+        do { answer = try JSONDecoder().decode(Cmds.self, from: d) } catch {
             NSLog("Backplane answer unreadable: %@", String(describing: error))
             return nil
         }
-        guard screen else { return Out(screen: nil, cmds: cmds) }
+        guard screen else { return Out(screen: nil, cmds: answer.cmds, sync: answer.sync, deadline: answer.deadline) }
         do {
             let s = try JSONDecoder().decode(ScreenOnly.self, from: d)
-            return Out(screen: s.screen, cmds: cmds)
+            return Out(screen: s.screen, cmds: answer.cmds, screenJSON: s.screen == nil ? nil : text, sync: answer.sync, deadline: answer.deadline)
         } catch {
             NSLog("Backplane screen unreadable: %@", String(describing: error))
-            return Out(screen: nil, cmds: cmds)
+            return Out(screen: nil, cmds: answer.cmds, sync: answer.sync, deadline: answer.deadline)
         }
     }
 
@@ -940,7 +966,7 @@ extension KeyedDecodingContainer {
 // costs that field, never the whole screen (a blank app).
 extension Screen {
     private enum K: String, CodingKey {
-        case locale, online, version, error, note, sel, empty, hub, hubs, found, projects, lang, view, making, active, older, settled,
+        case locale, online, version, error, note, sel, empty, hub, hubs, usageMachines, found, projects, lang, view, making, active, older, settled,
              rowMenu, bots, rooms, uber, plane, newBot, newRoom, bot, deleting, removing, renaming, tour, search,
              folders, settings, find, island, islands, thread, theme, tabs
     }
@@ -956,6 +982,7 @@ extension Screen {
         empty = c.lossy(.empty) ?? ""
         hub = c.lossy(.hub) ?? ""
         hubs = c.lossyList(.hubs)
+        usageMachines = c.lossyList(.usageMachines)
         found = c.lossyList(.found)
         projects = c.lossyList(.projects)
         lang = c.lossy(.lang)

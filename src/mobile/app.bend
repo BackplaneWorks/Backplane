@@ -8,6 +8,7 @@ import ./hubs.bend as H
 import ./screen.bend as S
 import ./bots.bend as MB
 import ../core/msgs.bend as MSG
+import ./session.bend as PS
 
 # Resolve the native host's language once when device settings change. This uses
 # the same normalization and preview gate as each hub's Ui, including no hubs.
@@ -198,6 +199,53 @@ def seq(+hs: H.Hubs, +key: String) -> String:
 
 def origin(+hs: H.Hubs, +key: String) -> String:
   U.Ui.info(H.Hubs.ui(hs, key), "origin")
+
+def current(hs: H.Hubs) -> String:
+  H.Hubs.cur(hs)
+
+def session(hs: H.Hubs, key: String) -> J.Json:
+  PS.Session.pack(H.Hubs.ui(hs, key))
+
+def session_reading(text: String, qualified: String, seen: String, count: Nat, away: Bool) -> J.Json:
+  PS.Session.reading(Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{}), H.Hubs.rest(qualified), seen, count, away)
+
+def session_draft(text: String, draft: String) -> J.Json:
+  PS.Session.draft(Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{}), draft)
+
+def session_prepare(text: String, input: String, action: String) -> J.Json:
+  PS.Session.prepare(Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{}), Maybe.default(&2, J.Json, J.Json.parse(input), J.Null{}), action)
+
+def session_failed(key: String, input: String, action: String) -> J.Json:
+  J.Json.arr(PS.Session.failed(key, Maybe.default(&2, J.Json, J.Json.parse(input), J.Null{}), action))
+
+def session_issued(key: String, input: String, action: String) -> J.Json:
+  PS.Session.issued(key, Maybe.default(&2, J.Json, J.Json.parse(input), J.Null{}), action)
+
+def session_local(text: String, key: String, value: String) -> J.Json:
+  PS.Session.local(Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{}), key, value)
+
+def session_reply(text: String, o: J.Json) -> J.Json:
+  PS.Session.reply(Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{}), o)
+
+def session_adopt(hs: H.Hubs, key: String, text: String, cur: String) -> H.Hubs:
+  PS.Session.handoff(hs, key, Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{}), cur)
+
+def session_target(hs: H.Hubs, cur: String, action: String, value: String) -> String:
+  PS.Session.target(hs, cur, action, value)
+
+def presentation(hs: H.Hubs, overlays: J.Json, cur: String) -> J.Json:
+  PS.Session.overlay(hs, overlays, cur)
+
+def session_shown_draft(shown: J.Json, session: String) -> J.Json:
+  PS.Session.shown.draft(shown, Maybe.default(&2, J.Json, J.Json.parse(session), J.Null{}))
+
+def json_array() -> J.Json:
+  J.Arr{J.End{}}
+
+def json_cons(v: J.Json, tail: J.Json) -> J.Json:
+  match tail:
+    case J.Arr{xs}: J.Arr{J.Item{v, xs}}
+    case _: J.Arr{J.Item{v, J.End{}}}
 
 # this phone, for pushes while the app sleeps: an APNs token for alerts,
 # for one Live Activity ("activity", with its thread) or for starting one

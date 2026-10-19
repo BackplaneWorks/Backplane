@@ -2,6 +2,7 @@ import Base
 import ./src/core/auth.bend as AUTH
 import ./src/core/http.bend as HTTPAUTH
 import ./src/core/pcb2d.bend as PCB2 # PCB viewer text
+import ./src/mobile/session.bend as IOSSESSION
 import ./src/app/side_rows.bend as SR
 import ./src/app/side_row_types.bend as SRT
 import ./src/gfx/draw.bend as D
@@ -12381,3 +12382,12 @@ def Laws.auth_cookie_prefix_denied():
 # ---- PCB viewer text ----
 def Laws.pcb2_hidden_text_draws_nothing(at, angle, x, text, up, key, sig, ctx):
   {==}
+def Laws.ios_usage_hidden_empty(lc, u):
+  {==}
+
+def Laws.ios_usage_machine_identity(k, name, j):
+  {==}
+
+def Laws.ios_session_keeps_cursor(u, o):
+  match u:
+    case U.Ui{_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _}: {==}

@@ -12,6 +12,7 @@
 
 import App from "./app.bend";
 import { cbor as decode, is, kind, learnJson } from "../web/wire.js";
+import { Recent } from "./recent.js";
 
 // the Json constructors' tags, as this bundle names them (wire.js)
 learnJson(App.json_tags());
@@ -110,6 +111,85 @@ function unflat(text) {
 let hubs = null;
 // the drafts kept on this phone, {"<hub>|<thread>": text}
 let kept = {};
+let clientID = "";
+let previewCur = "";
+let lastPresentation = null;
+const booting = new Set();
+let syncUpdates = [];
+const mutationReplies = new Map();
+const transportEpoch = new Map();
+
+function field(j, key) {
+  if (!is(j, "Obj")) return null;
+  for (let fs = j.fields; is(fs, "Field"); fs = fs.tail) if (fs.key === key) return fs.value;
+  return null;
+}
+// Optional wire fields are absent on older hubs and valid one-frame joins.
+function fieldValue(j, key) {
+  const value = field(j, key);
+  return value === null ? null : plain(value);
+}
+const sendWire = (hub, message) => ({ type: "send", hub, data: App.wire(JSON.stringify(message)) });
+const readingPages = new Map();
+function reconcileSession(session, key) {
+  for (const [name, value] of deviceLocal) session = plain(App.session_local(JSON.stringify(session), name, value));
+  for (const [thread, page] of readingPages) if (App.session_target(hubs, key, "select", thread) === key) {
+    session = plain(App.session_reading(JSON.stringify(session), thread, page.seen, BigInt(page.count), page.away));
+  }
+  return session;
+}
+const recent = new Recent({
+  now: () => Date.now(), cid: () => clientID,
+  session: key => reconcileSession(plain(App.session(hubs, key)), key),
+  reconcile: reconcileSession,
+  prepare: (session, input, action) => plain(App.session_prepare(JSON.stringify(session), JSON.stringify(input), action)),
+  draft: (session, text, key) => ({
+    session: plain(App.session_draft(JSON.stringify(session), text)),
+    cmds: session.sel ? [{ type: "keep", thread: key + "|" + session.sel, text }] : [],
+  }),
+  failed: (key, input, action) => plain(App.session_failed(key, JSON.stringify(input), action)),
+  issued: (key, input, action) => plain(App.session_issued(key, JSON.stringify(input), action)),
+  reply: (session, envelope) => plain(App.session_reply(JSON.stringify(session), envelope.bend)),
+  command: c => {
+    if (c.type !== "send") return c;
+    const request = JSON.parse(c.text);
+    if (request.m === "turn.start" || request.m === "thread.modes") mutationReplies.set(request.id, c.hub);
+    return { type: "send", hub: c.hub, data: App.wire(c.text) };
+  },
+  perform: (key, operation) => {
+    const cur = previewCur || App.current(hubs);
+    const session = plain(App.session_prepare(JSON.stringify(plain(App.session(hubs, key))), JSON.stringify(operation.input), operation.action));
+    hubs = App.session_adopt(hubs, key, JSON.stringify(session), key);
+    const result = App.act(hubs, operation.action, operation.value);
+    hubs = result.hubs;
+    const cmds = commandList(result.cmds, JSON.parse(App.alerts(result)));
+    hubs = App.session_adopt(hubs, key, JSON.stringify(plain(App.session(hubs, key))), cur);
+    return cmds;
+  },
+  send: sendWire,
+  adopt: (key, session) => {
+    hubs = App.session_adopt(hubs, key, JSON.stringify(session), previewCur || App.current(hubs));
+    half = null; focusOf = null;
+  },
+});
+
+function direct(cmds, draw, updates = []) {
+  for (const c of cmds) if (c.type === "keep") {
+    if (c.text) kept[c.thread] = c.text;
+    else delete kept[c.thread];
+  }
+  const deadlines = [...recent.links.values()].filter(l => l.flight).map(l => l.flight.began + 5001);
+  return JSON.stringify({ screen: draw ? JSON.parse(screenText()) : null, cmds, sync: syncUpdates.splice(0).concat(updates), deadline: deadlines.length ? Math.min(...deadlines) : null });
+}
+
+function expired() {
+  const cs = [];
+  for (const failure of recent.expire()) {
+    cs.push(...failure.cmds);
+    syncUpdates.push({ hub: failure.key, phase: "failed", detail: failure.failed });
+  }
+  return cs;
+}
 
 // kept drafts into the clients of the hubs they belong to
 function restore() {
@@ -213,6 +293,15 @@ let half = null; // { lean, head }: the list half's JSON, but its closing brace
 let focusOf = null;
 let focusText = "null";
 function screenText() {
+  const overlays = recent.overlays();
+  if (overlays.length) {
+    let array = App.json_array();
+    const links = [...recent.links.values()].filter(l => l.shown);
+    for (let i = links.length - 1; i >= 0; i--) array = App.json_cons(App.session_shown_draft(links[i].shown, JSON.stringify(links[i].session)), array);
+    lastPresentation = JSON.stringify(plain(App.presentation(hubs, array, previewCur || App.current(hubs))));
+    return lastPresentation;
+  }
+  if (booting.size && lastPresentation) return lastPresentation;
   const lean = App.lean(hubs);
   if (half === null || !same(lean, half.lean)) {
     const o = plain(App.screen_list_in(lean, nativeLocale));
@@ -233,8 +322,7 @@ function screenText() {
 // (so it built none): the next call builds one, whatever that frame is
 let owed = false;
 
-function out(cmds, quiet, alerts) {
-  if (!quiet) owed = false;
+function commandList(cmds, alerts) {
   const cs = [];
   for (const h of each(cmds)) {
     const c = h.cmd;
@@ -255,7 +343,12 @@ function out(cmds, quiet, alerts) {
     }
   }
   for (const a of alerts ?? []) cs.push({ type: "notify", ...a });
-  return '{"screen":' + (quiet ? "null" : screenText()) + ',"cmds":' + JSON.stringify(cs) + "}";
+  return cs;
+}
+
+function out(cmds, quiet, alerts) {
+  if (!quiet) owed = false;
+  return direct(commandList(cmds, alerts), !quiet && !(booting.size && !recent.overlays().length && !lastPresentation));
 }
 
 // a step's answer: the hubs after it, its commands and alerts
@@ -268,6 +361,7 @@ globalThis.Backplane = {
   // cid: this phone's id, part of every message id (a resend is stored once);
   // drafts: the drafts it kept, as JSON {"<hub>|<thread>": text}
   start(cid, drafts) {
+    clientID = cid;
     hubs = App.init(secs(Date.now() / 1000), cid);
     try {
       kept = JSON.parse(drafts ?? "{}") ?? {};
@@ -278,6 +372,9 @@ globalThis.Backplane = {
   },
   // the hubs paired, as their keys (host:port) in order
   hubs(keys) {
+    for (const key of recent.links.keys()) if (!keys.includes(key)) recent.close(key);
+    for (const key of booting) if (!keys.includes(key)) booting.delete(key);
+    for (const key of transportEpoch.keys()) if (!keys.includes(key)) transportEpoch.delete(key);
     hubs = App.hubs(hubs, JSON.stringify(keys));
     restoreLocal();
     restore();
@@ -289,7 +386,25 @@ globalThis.Backplane = {
     deviceLocal.set(key, value);
     refreshNativeLocale();
     hubs = App.local(hubs, key, value);
-    return out(null);
+    const cmds = [];
+    for (const [hub, link] of recent.links) {
+      link.session = plain(App.session_local(JSON.stringify(link.session), key, value));
+      cmds.push(...recent.refresh(hub));
+    }
+    return cmds.length ? direct(cmds, false) : out(null);
+  },
+  reading(thread, seen, count, away) {
+    readingPages.set(thread, { seen, count, away });
+    const key = App.session_target(hubs, previewCur || App.current(hubs), "select", thread);
+    const link = recent.links.get(key);
+    const session = link?.session || plain(App.session(hubs, key));
+    const next = plain(App.session_reading(JSON.stringify(session), thread, seen, BigInt(count), away));
+    if (link) {
+      link.session = next;
+      return direct(recent.refresh(key), false);
+    }
+    hubs = App.session_adopt(hubs, key, JSON.stringify(next), App.current(hubs));
+    return direct([], false);
   },
   // hub k's socket query: resume from what this app already holds
   resume(k) {
@@ -301,6 +416,8 @@ globalThis.Backplane = {
   // The native 250 ms streaming timer. Off-screen frames owe nothing, so
   // this is a cheap no-op unless a visible state was withheld or dropped.
   flush(owe) {
+    const failures = expired();
+    if (failures.length || syncUpdates.length) return direct(failures, false);
     if (owe === true) owed = true;
     return out(null, !owed);
   },
@@ -321,12 +438,55 @@ globalThis.Backplane = {
   // a frame; anything else from any paired hub redraws the merged screen)
   // owe: the app dropped a screen since (a newer call was waiting), so
   // this one builds one
-  recv(k, data, quiet, owe) {
+  recv(k, data, epochOrQuiet, quietOrOwe, owe) {
+    // Older hosts still pass (key, data, quiet, owe). New iOS tags every
+    // queued frame with its connection epoch before it reaches this worker.
+    const tagged = typeof epochOrQuiet === "string";
+    const quiet = tagged ? quietOrOwe : epochOrQuiet;
+    if (!tagged) owe = quietOrOwe;
+    if (tagged && transportEpoch.get(k) !== epochOrQuiet) return direct([], false);
     const o = decode(bytes(data), KEYS, WORDS);
+    const type = fieldValue(o, "t");
+    if (type === "mobile") {
+      booting.add(k);
+      if (!previewCur) previewCur = App.current(hubs) || k;
+      return direct(recent.open(k, String(fieldValue(o, "generation"))), false, [{ hub: k, phase: "recent" }]);
+    }
+    if (type === "reply") {
+      const envelope = plain(o);
+      if (envelope.result?.mobile === 1) envelope.result.shown = field(field(o, "result"), "shown");
+      const answer = recent.reply(k, envelope);
+      if (answer) {
+        const phase = answer.failed ? "failed" : answer.live ? "live" : "history";
+        if (answer.live) booting.delete(k);
+        return direct(answer.cmds, answer.current === true, [{ hub: k, phase, detail: answer.failed }]);
+      }
+      recent.ack(k, { ...envelope, bend: o });
+      if (mutationReplies.get(envelope.id) === k) {
+        mutationReplies.delete(envelope.id);
+        const link = recent.links.get(k);
+        if (link && !link.flight && !link.waiting.length) {
+          return direct(recent.request(k, "", ""), false);
+        }
+      }
+    }
+    if (type === "log" && fieldValue(o, "more") === true || type === "changes" && fieldValue(o, "boot") === true) {
+      if (recent.active(k)) booting.add(k);
+      syncUpdates.push({ hub: k, phase: "history" });
+    }
     const r = App.recv(hubs, k, o);
+    const ended = type === "log" && fieldValue(o, "more") !== true || type === "changes" && fieldValue(o, "boot") === false;
+    if (ended) {
+      hubs = r.hubs;
+      const pending = recent.end(k);
+      booting.delete(k);
+      syncUpdates.push({ hub: k, phase: "live" });
+      if (!booting.size) owed = false;
+      return direct(commandList(r.cmds, JSON.parse(App.alerts(r))).concat(pending), booting.size === 0);
+    }
     const shows = App.shows(r.hubs, k, o);
     if (owe === true || (quiet === true && shows)) owed = true;
-    return step(r, quiet === true || !(shows || owed));
+    return step(r, booting.has(k) || quiet === true || !(shows || owed));
   },
   // The whole client state as text, kept by the app when it leaves the
   // foreground: the next launch load()s it instead of folding every event
@@ -334,7 +494,9 @@ globalThis.Backplane = {
   // each hub only for what came since. The state is plain data (objects,
   // strings, booleans, BigInt naturals), written flat (flat()).
   save() {
-    return flat(hubs);
+    let saved = hubs;
+    for (const [key, link] of recent.links) saved = App.session_adopt(saved, key, JSON.stringify(link.session), previewCur || App.current(saved));
+    return flat(saved);
   },
   load(text) {
     try {
@@ -352,11 +514,22 @@ globalThis.Backplane = {
     return step(App.register_at(hubs, hub, platform, token, kind, thread, env, bundle), true);
   },
   act(action, value) {
+    const key = App.session_target(hubs, previewCur || App.current(hubs), action, value);
+    if (recent.active(key)) {
+      previewCur = key;
+      return direct(recent.request(key, action, value), false);
+    }
+    previewCur = key;
     return step(App.act(hubs, action, value));
   },
   // an action whose screen the native side already shows (typing a draft),
   // unless it changed what the composer offers (app.bend's offer)
   quiet(action, value) {
+    const key = previewCur || App.current(hubs);
+    if (recent.active(key)) {
+      if (action === "draft") return direct(recent.draft(key, value), false);
+      return direct(recent.request(key, action, value), false);
+    }
     const was = App.offer(hubs);
     const r = App.act(hubs, action, value);
     return step(r, App.offer(r.hubs) === was);
@@ -366,11 +539,23 @@ globalThis.Backplane = {
   // quiet: no screen (the hubs marked offline after load(), before the
   // screen that follows)
   // (no screen either when the hub already was so: app.bend's online_same)
-  online(k, b, quiet) {
+  online(k, b, quiet, epoch) {
+    if (epoch && transportEpoch.get(k) !== epoch) return direct([], false);
+    if (!b) {
+      booting.delete(k);
+      const failure = recent.abort(k, "connection closed");
+      if (failure) {
+        const r = App.online(hubs, k, false);
+        hubs = r.hubs;
+        return direct(failure.cmds, false, [{ hub: k, phase: "failed", detail: failure.failed }]);
+      }
+    }
     const same = App.online_same(hubs, k, !!b);
     return step(App.online(hubs, k, !!b), quiet === true || same);
   },
   tick(now) {
+    const failures = expired();
+    if (failures.length || syncUpdates.length) return direct(failures, false);
     return step(App.tick(hubs, secs(now)));
   },
   // for tests and benches: the screen as the bridge makes it (in halves,
@@ -382,5 +567,15 @@ globalThis.Backplane = {
   // time (liveNodes, as the screens do) and all at once
   liveHalves(text) {
     return JSON.stringify({ kept: liveNodes(String(text)), whole: plain(App.live_nodes(String(text))) });
+  },
+  headerKeys() { return JSON.stringify({ keys: KEYS, words: WORDS }); },
+  pulse() { return direct(expired(), false); },
+  connection(key, epoch) {
+    const previous = recent.links.get(key);
+    if (previous) hubs = App.session_adopt(hubs, key, JSON.stringify(previous.session), previewCur || App.current(hubs));
+    const failure = recent.abort(key, "connection changed");
+    booting.delete(key);
+    transportEpoch.set(key, String(epoch));
+    return direct(failure?.cmds || [], false);
   },
 };

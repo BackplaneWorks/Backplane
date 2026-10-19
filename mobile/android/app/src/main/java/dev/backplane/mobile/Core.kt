@@ -478,7 +478,7 @@ class Core(private val app: Application) : Application.ActivityLifecycleCallback
                 }
             }
             val ok = try { JSONObject(answer); true } catch (e: Exception) { false }
-            act("attach-end", if (ok) answer else JSONObject().put("text", "the upload did not reach the hub").put("thread", thread).put("upload", true).toString())
+            act("attach-end", if (ok) answer else JSONObject().put("uiError", "upload.network").put("thread", thread).put("upload", true).toString())
         }
     }
 
