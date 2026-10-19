@@ -39,6 +39,37 @@ jobs:
     steps:
       - run: echo "type-check and proof both passed"
 
+  port-timeout:
+    name: Command deadlines on ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    env:
+      DEVELOPER_DIR: ${{ matrix.os == 'macos-15' && '/Applications/Xcode_26.3.app/Contents/Developer' || '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-bend
+      - uses: oven-sh/setup-bun@v2
+      - name: Install clang 19
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-19
+      - name: Exercise native and JavaScript shell wrappers
+        run: |
+          mkdir -p build
+          bend test/native/port_timeout.bend -o build/port-timeout.c
+          cc=clang
+          if [ "$RUNNER_OS" = Linux ]; then cc=clang-19; fi
+          "$cc" -O1 -pthread build/port-timeout.c -lm -ldl -o build/port-timeout
+          build/port-timeout > build/port-timeout-native.sh
+          bend test/native/port_timeout.bend -o build/port-timeout.js
+          bun build/port-timeout.js > build/port-timeout-js.sh
+          bun test/tools/port_timeout.ts build/port-timeout-native.sh build/port-timeout-js.sh
+
   test:
     name: Tests ${{ matrix.shard }}/4
     runs-on: ubuntu-24.04
