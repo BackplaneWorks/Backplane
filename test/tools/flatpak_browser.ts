@@ -6,6 +6,11 @@ import { check, until, jsonProcess, privateDisplay } from "../../tools/cef/test/
 
 if (!process.env.BACKPLANE_BROWSER || !process.env.BACKPLANE_CEF) throw new Error("Flatpak helper and CEF runtime are required");
 const d = await privateDisplay();
+// Jammy's Flatpak remaps the X11 socket to :99 inside the sandbox. Use the
+// display seen by the native app there, while XTest uses the host display.
+const displayProbe = Bun.spawnSync(["flatpak", "run", "--command=printenv", "io.github.i2cjak.Backplane", "DISPLAY"], { env: d.env });
+const display = displayProbe.stdout.toString().trim();
+if (displayProbe.exitCode || !display) { await d.cleanup(); throw new Error("could not read the sandbox X11 display"); }
 const helper = jsonProcess([process.env.BACKPLANE_BROWSER, "--profile", join(d.root, "profile"), "--jpeg-dir", join(d.root, "shots"), "--frames", join(d.root, "frame.rgb")], d.env);
 const { call, proc, events } = helper;
 const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch(req) {
@@ -18,7 +23,7 @@ const endpointGone = async (port: number) => {
   catch { return true; }
 };
 try {
-  const started = await call("engine", { engine: "cef", parent: d.parent, display: d.env.DISPLAY });
+  const started = await call("engine", { engine: "cef", parent: d.parent, display });
   check("Flatpak CEF starts CDP", started.engine === "cef" && started.port > 0, started);
   await call("open", { page: "a", url });
   await call("open", { page: "b", url: `${url}/other` });
@@ -65,7 +70,7 @@ try {
   check("CEF to Chrome keeps the active URL", (await call("snapshot", { page: "b" })).title === "Flatpak CEF");
   await until(() => endpointGone(started.port), "old CEF endpoint closes");
   check("engine switch removes old native children", (await d.x("children")).children.length === 0);
-  const again = await call("engine", { engine: "cef", parent: d.parent, display: d.env.DISPLAY });
+  const again = await call("engine", { engine: "cef", parent: d.parent, display });
   check("Chrome to CEF keeps the active URL", (await call("snapshot", { page: "b" })).title === "Flatpak CEF");
   await call("close");
   check("Flatpak helper exits cleanly", await proc.exited === 0);
