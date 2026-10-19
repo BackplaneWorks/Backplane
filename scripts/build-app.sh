@@ -46,8 +46,13 @@ set -eu
 held() {
   p=$$
   while [ -n "$p" ] && [ "$p" -gt 1 ]; do
-    case $(tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null) in
-      *flock*bp-wt-build.lock*) return 0 ;;
+    # Inspect argv[0] and the lock argument separately. Matching the whole
+    # command line also matches an ancestor's shell script text, which can
+    # mention a future flock command without holding any lock at all.
+    cmd=$(tr '\0' '\n' < "/proc/$p/cmdline" 2>/dev/null | head -n 1)
+    case ${cmd##*/} in
+      flock)
+        if tr '\0' '\n' < "/proc/$p/cmdline" 2>/dev/null | grep -Fxq /tmp/bp-wt-build.lock; then return 0; fi ;;
     esac
     p=$(awk '{print $4}' "/proc/$p/stat" 2>/dev/null)
   done

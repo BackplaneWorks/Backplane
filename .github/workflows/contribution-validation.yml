@@ -1,0 +1,228 @@
+name: Contribution acceptance
+
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'mobile/**'
+      - 'tools/**'
+      - 'test/**'
+      - 'scripts/**'
+      - '.github/workflows/contribution-validation.yml'
+  workflow_dispatch:
+    inputs:
+      real_cad:
+        description: Run the separate real KiCad acceptance lane
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: contribution-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native:
+    name: Native effects and browser acceptance
+    needs: phone
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      BACKPLANE_SKIP_CHECK: '1'
+      BACKPLANE_LOW_MEM: '1'
+      BACKPLANE_JOBS: '2'
+      BACKPLANE_TEST_BROWSERS: chromium
+      BACKPLANE_CHROME: /usr/bin/google-chrome
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-bend
+      - uses: oven-sh/setup-bun@v2
+      - name: Native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-19 libx11-dev xvfb
+          sudo ln -sf /usr/bin/clang-19 /usr/local/bin/clang
+      - name: Validate acceptance tooling
+        run: |
+          python3 test/tools/validation_evidence_test.py
+          python3 test/tools/build_lock_test.py
+          python3 test/tools/build_clock_test.py
+      - uses: actions/download-artifact@v4
+        with:
+          name: contribution-bridge
+          path: mobile/build/assets
+      - name: Build exact candidate
+        run: scripts/validate-contribution.sh build
+      - run: scripts/build-wire.sh
+      - run: scripts/validate-contribution.sh native
+      - run: scripts/validate-contribution.sh browser
+      - name: Separate real-CAD lane (requires KiCad 10 or newer)
+        if: github.event_name == 'workflow_dispatch' && inputs.real_cad
+        run: |
+          sudo apt-get install -y kicad
+          # The runner rejects old or unknown CLI versions before CAD tests;
+          # Ubuntu's package version alone does not establish compatibility.
+          scripts/validate-contribution.sh real-cad
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: contribution-native-evidence
+          path: build/validation
+          if-no-files-found: error
+          retention-days: 7
+
+  emit-darwin:
+    name: Emit Mac hub and web
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      BACKPLANE_SKIP_CHECK: '1'
+      BACKPLANE_LOW_MEM: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-bend
+      - uses: oven-sh/setup-bun@v2
+      - run: scripts/validate-contribution.sh emit
+      - uses: actions/upload-artifact@v4
+        with:
+          name: contribution-darwin-source
+          path: |
+            dist/web
+            build/cc/backplane-serve/all.c
+            build/wire
+            build/validation/emit/result.json
+          if-no-files-found: error
+
+  mac:
+    name: Mac hub compile and effects
+    needs: [emit-darwin, phone]
+    runs-on: macos-15
+    timeout-minutes: 40
+    env:
+      BACKPLANE_PREBUILT: '1'
+      BACKPLANE_GOOGLE_BAKE: '0'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-bend
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/download-artifact@v4
+        with:
+          name: contribution-darwin-source
+          path: .
+      - uses: actions/download-artifact@v4
+        with:
+          name: contribution-bridge
+          path: mobile/build/assets
+      - run: scripts/validate-contribution.sh build --prebuilt-receipt build/validation/emit/result.json
+      - run: scripts/smoke.sh
+      - run: test/tools/mac_rss.sh
+      - run: python3 test/tools/build_clock_test.py
+      - run: scripts/validate-contribution.sh native --binary dist/backplane
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: contribution-mac-evidence
+          path: build/validation
+          if-no-files-found: error
+
+  phone:
+    name: Exact phone bridge
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      BUN_JSC_forceRAMSize: '4294967296'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-bend
+      - uses: oven-sh/setup-bun@v2
+      - run: scripts/validate-contribution.sh phone
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: contribution-phone-evidence
+          path: build/validation
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: contribution-bridge
+          path: mobile/build/assets/bridge.js
+          if-no-files-found: error
+
+  android:
+    name: Android debug bundle
+    needs: phone
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/download-artifact@v4
+        with:
+          name: contribution-bridge
+          path: mobile/build/assets
+      - working-directory: mobile/android
+        run: ./gradlew --no-daemon --max-workers=2 :app:assembleDebug
+      - name: Check exact bridge bytes
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile
+          import hashlib
+          apk = Path('mobile/android/app/build/outputs/apk/debug/app-debug.apk')
+          bridge = Path('mobile/build/assets/bridge.js').read_bytes()
+          with ZipFile(apk) as bundle:
+              assert bundle.read('assets/bridge.js') == bridge
+          print('bridge sha256', hashlib.sha256(bridge).hexdigest())
+          print('apk sha256', hashlib.sha256(apk.read_bytes()).hexdigest())
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: contribution-android-debug
+          path: mobile/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+  ios:
+    name: Unsigned iOS simulator bundle
+    needs: phone
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: contribution-bridge
+          path: mobile/build/assets
+      - name: Build simulator app without publishing
+        run: |
+          cp mobile/build/assets/bridge.js mobile/ios/Backplane/bridge.js
+          xcodebuild -version
+          xcodebuild -project mobile/ios/Backplane.xcodeproj -scheme Backplane \
+            -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/ios-derived" -jobs 2 \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY= build
+          app="$RUNNER_TEMP/ios-derived/Build/Products/Debug-iphonesimulator/Backplane.app"
+          cmp mobile/build/assets/bridge.js "$app/bridge.js"
+          shasum -a 256 "$app/bridge.js"
+          ditto -c -k --sequesterRsrc --keepParent "$app" "$RUNNER_TEMP/Backplane-simulator.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: contribution-ios-simulator
+          path: ${{ runner.temp }}/Backplane-simulator.zip
+          if-no-files-found: error

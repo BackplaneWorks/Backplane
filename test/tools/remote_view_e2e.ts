@@ -41,10 +41,9 @@ function freePort(): number {
   return p;
 }
 
-const demo = "/usr/share/kicad/demos/ecc83";
+const demo = resolve(process.env.BACKPLANE_CAD_FIXTURE ?? "build/fixtures/ecc83");
 if (!existsSync(`${demo}/ecc83-pp.kicad_pcb`)) {
-  console.log("skip: KiCad's ecc83 demo is not installed");
-  process.exit(0);
+  throw new Error("required CAD fixture missing; run python3 scripts/fetch-cad-fixture.py");
 }
 
 const root = mkdtempSync(join(tmpdir(), "bp-remote-view-e2e-"));
