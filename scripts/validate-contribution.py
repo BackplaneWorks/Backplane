@@ -107,10 +107,18 @@ lanes = {
 }
 report = {'schema':2,'lane':args.lane,'started':datetime.now(timezone.utc).isoformat(),
           'source':source(),'host':{'platform':platform.platform(),'machine':platform.machine()},
-          'toolchain':[capture(c) for c in [['bend','--version'],['bun','--version'],['clang','--version'],['git','--version'],['python3','--version']]],
+          'toolchain':[capture(c) for c in [['bend','version'],['bun','--version'],['clang','--version'],['git','--version'],['python3','--version']]],
           'flags':{k:os.environ.get(k) for k in ['CC','BACKPLANE_CFLAGS','BACKPLANE_LOW_MEM','BACKPLANE_JOBS','BACKPLANE_CPUS','BACKPLANE_PREBUILT','BACKPLANE_GOOGLE_BAKE','BACKPLANE_KICAD_CLI','BUN_JSC_forceRAMSize','BUN_JSC_useJIT','BACKPLANE_CHROME','BACKPLANE_TEST_BROWSERS']},
           'steps':[], 'artifacts':[], 'consumed':{}, 'provenance':{}, 'result':'running'}
 report_path = args.out/'result.json'
+
+def bend_version(toolchain):
+    probes = [item for item in toolchain if isinstance(item, dict) and item.get('command') == ['bend', 'version']]
+    probe = probes[0] if len(probes) == 1 else {}
+    parsed = re.search(r'\b\d+\.\d+\.\d+(?:[+-][0-9A-Za-z.-]+)?\b', str(probe.get('output', '')))
+    if probe.get('status') != 0 or not parsed:
+        raise ValueError('Bend version probe must succeed with a version: bend version')
+    return parsed.group(0)
 
 def artifact(path, role=None):
     path = Path(path).resolve(strict=True)
@@ -141,6 +149,7 @@ def receipt(path, lane):
         raise ValueError(f'{path}: producer source changed during validation')
     if not isinstance(value.get('steps'), list) or not value['steps'] or any(not isinstance(step, dict) or step.get('result') != 'pass' for step in value['steps']):
         raise ValueError(f'{path}: producer commands did not all pass')
+    bend_version(value.get('toolchain', []))
     if not isinstance(value.get('artifacts'), list) or any(not isinstance(item, dict) or not isinstance(item.get('path'), str) or not isinstance(item.get('sha256'), str) for item in value['artifacts']):
         raise ValueError(f'{path}: producer artifact hashes are missing')
     return value, {'receipt':str(path), 'receipt_sha256':hashlib.sha256(raw).hexdigest(),
@@ -200,6 +209,7 @@ def validate_cad():
     os.environ['BACKPLANE_KICAD_CLI'] = binary['resolved_path']
 
 def prepare_inputs():
+    report['provenance']['bend_version'] = bend_version(report['toolchain'])
     if args.lane in ['native', 'browser', 'real-cad']:
         validate_binary()
     if args.lane == 'native':

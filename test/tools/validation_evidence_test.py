@@ -44,6 +44,16 @@ chmod +x "$2"
     script('bin/kicad-cli', 'printf "%s\\n" "${EVIDENCE_KICAD_VERSION:-10.0.6}"\nexit "${EVIDENCE_KICAD_STATUS:-0}"\n')
     for name in ['bun','bend','clang']:
         script(f'bin/{name}', '''
+if [ "$(basename "$0")" = bend ]; then
+  if [ "$#" = 1 ] && [ "$1" = version ]; then
+    printf '%s\\n' "${EVIDENCE_BEND_VERSION-2.0.36}"
+    exit "${EVIDENCE_BEND_STATUS:-0}"
+  fi
+  if [ "${1:-}" = --version ]; then
+    echo 'invalid Bend argument: --version' >&2
+    exit 64
+  fi
+fi
 if [ "${EVIDENCE_MUTATE_BRIDGE:-}" = 1 ] && [ "${1:-}" = test/tools/outbox_e2e.ts ]; then
   printf 'changed\\n' >> mobile/build/assets/bridge.js
 fi
@@ -62,7 +72,12 @@ echo 'ok fixture tool'
         evidence=json.loads((root/output/lane/'result.json').read_text())
         return result.returncode,evidence
     code,e=run();assert code==0 and e['result']=='pass' and all(s['result']=='pass' for s in e['steps'])
-    print('ok complete required commands pass with command/source evidence')
+    bend_probe=next(item for item in e['toolchain'] if item['command']==['bend','version'])
+    assert bend_probe['status']==0 and bend_probe['output']=='2.0.36' and e['provenance']['bend_version']=='2.0.36'
+    for settings in [{'EVIDENCE_BEND_STATUS':'23'},{'EVIDENCE_BEND_VERSION':'unrecognized'},{'EVIDENCE_BEND_VERSION':''}]:
+        code,e=run(extra_env=settings)
+        assert code and e['result']=='fail' and not e['steps'] and 'Bend version probe' in e['provenance']['error']
+    print('ok complete required commands pass; pinned Bend argv and failed/empty/unknown version probes are enforced')
     (root/'scripts/check.sh').write_text('#!/bin/sh\necho "skip required proof"\n')
     code,e=run();assert code and e['result']=='fail' and e['steps'][0]['result']=='skip'
     print('ok skipped required work is visible and fails acceptance')
@@ -115,8 +130,16 @@ echo 'ok fixture tool'
     code,e=run('browser');assert code and not e['steps']
     build_receipt.write_text('[]')
     code,e=run('browser');assert code and not e['steps']
+    invalid=json.loads(saved_receipt)
+    next(item for item in invalid['toolchain'] if item['command']==['bend','version'])['status']=23
+    build_receipt.write_text(json.dumps(invalid))
+    code,e=run('browser');assert code and not e['steps'] and 'Bend version probe' in e['provenance']['error']
+    invalid=json.loads(saved_receipt)
+    next(item for item in invalid['toolchain'] if item['command']==['bend','version'])['command']=['bend','--version']
+    build_receipt.write_text(json.dumps(invalid))
+    code,e=run('browser');assert code and not e['steps'] and 'Bend version probe' in e['provenance']['error']
     build_receipt.write_bytes(saved_receipt)
-    print('ok failed and malformed producer receipts fail before any consumer test')
+    print('ok failed/malformed producers and failed or wrong-argv Bend metadata fail before consumer tests')
     code,e=run('native')
     assert code==0 and e['consumed']['phone_bridge']['sha256']==hashlib.sha256(bridge.read_bytes()).hexdigest()
     code,e=run('native',extra_env={'EVIDENCE_MUTATE_BRIDGE':'1'})
