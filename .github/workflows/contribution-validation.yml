@@ -51,6 +51,7 @@ jobs:
           python3 test/tools/validation_evidence_test.py
           python3 test/tools/build_lock_test.py
           python3 test/tools/build_clock_test.py
+          python3 test/tools/ios_simulator_smoke_test.py
       - uses: actions/download-artifact@v4
         with:
           name: contribution-bridge
@@ -121,6 +122,27 @@ jobs:
         with:
           name: contribution-bridge
           path: mobile/build/assets
+      - uses: actions/download-artifact@v4
+        with:
+          name: contribution-ios-lifetime-state
+          path: build/validation/phone
+      - name: Actual Swift helpers and production Worker lifetime
+        run: |
+          set -euo pipefail
+          mkdir -p build/ios-native-helpers
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib, json
+          state = Path('build/validation/phone/ios-lifetime-state.json')
+          metadata = json.loads(state.with_suffix('.json.metadata.json').read_text())
+          assert metadata['bridgeSha256'] == hashlib.sha256(Path('mobile/build/assets/bridge.js').read_bytes()).hexdigest()
+          assert metadata['stateSha256'] == hashlib.sha256(state.read_bytes()).hexdigest()
+          assert metadata['rpcExecution'] is False
+          PY
+          git rev-parse HEAD > build/ios-native-helpers/source-commit.txt
+          xcrun swiftc --version > build/ios-native-helpers/swift-version.txt
+          shasum -a 256 mobile/build/assets/bridge.js build/validation/phone/ios-lifetime-state.json > build/ios-native-helpers/inputs.sha256
+          sh test/tools/ios-native-helpers.sh mobile/build/assets/bridge.js build/validation/phone/ios-lifetime-state.json | tee build/ios-native-helpers/run.log
       - run: scripts/validate-contribution.sh build --prebuilt-receipt build/validation/emit/result.json
       - run: scripts/smoke.sh
       - run: test/tools/mac_rss.sh
@@ -131,6 +153,12 @@ jobs:
         with:
           name: contribution-mac-evidence
           path: build/validation
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: contribution-ios-native-helpers
+          path: build/ios-native-helpers
           if-no-files-found: error
 
   phone:
@@ -156,6 +184,11 @@ jobs:
         with:
           name: contribution-bridge
           path: mobile/build/assets/bridge.js
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: contribution-ios-lifetime-state
+          path: build/validation/phone/ios-lifetime-state.json*
           if-no-files-found: error
 
   android:
@@ -197,7 +230,7 @@ jobs:
           if-no-files-found: error
 
   ios:
-    name: Unsigned iOS simulator bundle
+    name: iOS simulator build and isolated launch smoke
     needs: phone
     runs-on: macos-15
     timeout-minutes: 30
@@ -221,6 +254,16 @@ jobs:
           cmp mobile/build/assets/bridge.js "$app/bridge.js"
           shasum -a 256 "$app/bridge.js"
           ditto -c -k --sequesterRsrc --keepParent "$app" "$RUNNER_TEMP/Backplane-simulator.zip"
+      - name: Launch only the isolated simulator app
+        run: |
+          python3 test/tools/ios_simulator_smoke.py \
+            --app "$RUNNER_TEMP/ios-derived/Build/Products/Debug-iphonesimulator/Backplane.app"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: contribution-ios-simulator-smoke
+          path: build/ios-simulator-smoke
+          if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
           name: contribution-ios-simulator

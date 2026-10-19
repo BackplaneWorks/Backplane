@@ -16,7 +16,7 @@ is diagnostic data, not a signature or a required upstream GitHub check.
 | `emit` | Current-source server C, web and wire inputs for compilation on a Mac |
 | `native` | Synthetic release transactions, platform installer, integrated worktree preservation, event-log failure, reconnect and retirement effects |
 | `browser` | Synthetic pages through the real helper and hub; ownership and credential boundaries |
-| `phone` | Production bridge, recent-history/replay regressions at the phone's no-JIT stack, live bridge tests |
+| `phone` | Production bridge, recent-history/replay regressions at the phone's no-JIT stack, live bridge tests and sanitized current-type Worker state |
 | `real-cad` | Explicitly selected KiCad integration using the pinned, verified fixture |
 
 `native`, `browser` and `real-cad` consume `dist/backplane` (override with
@@ -76,10 +76,36 @@ patched runtime; stock CLI acceptance does not prove IPC capability.
 phone lanes, then builds Android and an unsigned iOS simulator app from the same
 bridge artifact. It verifies bundled bridge bytes. Existing CI remains responsible
 for type checks, proofs, unit shards and Linux architecture builds. The workflow
-contains no deployment, signing, release, TestFlight or settings changes. A simulator
-build is compile/package evidence; simulator functional and physical-device
-acceptance must be reported separately. Mac runtime tests need an actual Mac and
-compatible published KiCad assets.
+contains no deployment, signing, release, TestFlight or settings changes.
+
+The phone lane creates its Worker kept-state fixture from the exact production
+bridge and three original synthetic events (project, thread and user message),
+selects the thread, asserts its message is present, saves and reloads the current
+types, and records bridge/state hashes. Returned commands are discarded. It
+never reads a copied event store or requires a particular bot. The Mac job
+downloads these exact bytes, verifies their hashes and runs the existing
+`test/tools/ios-native-helpers.sh BRIDGE STATE`. That compiles actual
+`HubConnections`, `WirePriority` and `ScreenCache` helpers, then the exact
+production `Worker` prefix from `Engine.swift` with the existing lifetime
+harness. Host JavaScriptCore runs with JIT disabled; returned RPC commands are
+hashed and never executed. Source/Swift versions, inputs and lifetime logs are
+always uploaded from `build/ios-native-helpers`.
+
+After building the unsigned simulator package and checking bridge bytes, the
+iOS job enumerates an available iOS runtime and compatible iPhone device type,
+creates its own simulator, installs/launches the bundle identifier from its
+Info.plist, checks the returned PID after a short wait and captures a PNG.
+Cleanup targets only the newly created UUID, including on failure or SIGTERM;
+existing simulators are untouched. The synthetic xcrun control suite tests
+successful ownership/cleanup, install failure, process exit, termination and
+missing runtime without invoking a real simulator locally.
+
+These are separate results: production shared-bridge functional tests, Swift
+helper compilation/execution, host-JSC Worker lifetime, simulator package build
+and simulator startup smoke. Startup does not establish recent-history UI
+acceptance, simulator frame budgets or physical-device behavior. Mac runtime
+tests require an actual Mac; compatible published KiCad assets are a separate
+dependency.
 
 For the October 19 contribution run, upstream's latest observed Actions run
 `38623094261` remained queued since October 14. The Actions-policy read returned

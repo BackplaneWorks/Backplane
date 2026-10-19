@@ -95,6 +95,7 @@ lanes = {
     ['sh','-c','cat build/ios-recent-fixture/chunk-*.js > build/ios-recent-fixture.js'],
     ['env','BUN_JSC_useJIT=0','BUN_JSC_maxPerThreadStackUsage=4194304','bun','test/tools/ios_recent_bridge_test.ts','mobile/build/assets/bridge.js','build/ios-recent-fixture.js'],
     ['bun','test/tools/phone_live_test.ts','mobile/build/assets/bridge.js'],
+    ['bun','test/tools/ios_lifetime_state.ts','mobile/build/assets/bridge.js',str(args.out/'ios-lifetime-state.json')],
  ],
  'real-cad': [
     ['python3','scripts/fetch-cad-fixture.py'],
@@ -285,6 +286,13 @@ try:
         raise ValueError('emit produced no complete server C, web entry and wire script')
     known = {item['resolved_path'] for item in report['artifacts']}
     report['artifacts'] += [item for item in report['consumed'].values() if item['resolved_path'] not in known]
+    if args.lane == 'phone':
+        state = artifact(args.out/'ios-lifetime-state.json', 'sanitized_phone_state')
+        metadata_path = args.out/'ios-lifetime-state.json.metadata.json'
+        metadata = json.loads(metadata_path.read_text())
+        if not isinstance(metadata, dict) or metadata.get('bridgeSha256') != report['consumed'].get('phone_bridge', {}).get('sha256') or metadata.get('stateSha256') != state['sha256'] or metadata.get('rpcExecution') is not False:
+            raise ValueError('sanitized Worker state does not match the exact bridge/state identities')
+        report['artifacts'] += [state, artifact(metadata_path, 'sanitized_phone_state_metadata')]
 except (OSError, ValueError) as error:
     failed=True;report['provenance']['error']=str(error)
 report['result']='fail' if failed else 'pass'
