@@ -112,6 +112,14 @@ jobs:
         env:
           BACKPLANE_SKIP_CHECK: "1" # the laws job checks every file
       - run: scripts/smoke.sh
+      - name: Reconnect request ordering
+        run: |
+          bend test/fixtures/outbox/index.html -o build/outbox-client
+          bun test/tools/outbox_e2e.ts dist/backplane build/outbox-client
+          scripts/build-app.sh test/outbox_test.bend build/outbox_test
+          build/outbox_test | tee build/outbox-native.log
+          ! grep -q '^FAIL ' build/outbox-native.log
+          test "$(grep -c '^ok ' build/outbox-native.log)" -eq 42
       - uses: actions/upload-artifact@v4
         with:
           name: backplane-${{ matrix.target }}
