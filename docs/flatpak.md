@@ -20,7 +20,10 @@ flatpak run io.github.i2cjak.Backplane
 
 For arm64 use `linux-arm64`. `--manifest-only` writes the generated manifest
 without invoking the builder. CI can package an already built artifact;
-it does not need to compile Bend again inside the SDK.
+it does not need to compile Bend again inside the SDK. For a focused CI
+package check, dispatch the workflow with `native_run` set to a previous
+CI run containing the `backplane-linux-x64` artifact. The package test runs
+on Ubuntu 22.04 and exports a board through the actual nested KiCad Flatpak.
 
 The native Backplane process and its bundled helpers run inside the
 sandbox. Host tools (`claude`, `codex`, `git`, `gh`, `tailscale`, `pdftoppm`,

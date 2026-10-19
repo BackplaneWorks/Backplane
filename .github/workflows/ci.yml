@@ -5,16 +5,23 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      native_run:
+        description: Existing CI run containing backplane-linux-x64 (package only)
+        type: string
+        default: ""
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.ref }}-${{ inputs.native_run || 'full' }}
   cancel-in-progress: true
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   check:
+    if: ${{ !inputs.native_run }}
     name: Type-check
     runs-on: ubuntu-24.04
     steps:
@@ -23,6 +30,7 @@ jobs:
       - run: CHECK_JOBS=$(nproc) scripts/check.sh check
 
   proof:
+    if: ${{ !inputs.native_run }}
     name: Prove laws
     runs-on: ubuntu-24.04
     steps:
@@ -41,6 +49,7 @@ jobs:
       - run: echo "type-check and proof both passed"
 
   test:
+    if: ${{ !inputs.native_run }}
     name: Tests ${{ matrix.shard }}/4
     runs-on: ubuntu-24.04
     strategy:
@@ -57,6 +66,7 @@ jobs:
       - run: TEST_JOBS=$(nproc) scripts/test.sh
 
   build:
+    if: ${{ !inputs.native_run }}
     name: Build ${{ matrix.target }}
     # runs beside "laws" (which checks every file); nothing is published here
     strategy:
@@ -120,9 +130,10 @@ jobs:
           retention-days: 7
 
   flatpak:
+    if: ${{ !cancelled() && (needs.build.result == 'success' || inputs.native_run != '') }}
     name: Package and run Flatpak
     needs: [build]
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -130,6 +141,8 @@ jobs:
         with:
           name: backplane-linux-x64
           path: dist
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.native_run || github.run_id }}
       - run: chmod +x dist/backplane*
       - run: python3 -m unittest discover -s test/tools -p flatpak_package_test.py
       - run: sudo apt-get update && sudo apt-get install -y flatpak flatpak-builder dbus-x11
@@ -153,6 +166,12 @@ jobs:
           done
           python3 -c 'import json, sys; assert json.load(open(sys.argv[1]))' "$scratch/hello.json"
           cat "$scratch/hello.json"
+          # Exercise the real Flatpak -> host -> KiCad Flatpak boundary.
+          flatpak --user install -y --noninteractive --no-related flathub org.kicad.KiCad
+          flatpak run --command=kicad-cli io.github.i2cjak.Backplane version
+          cp test/fixtures/flatpak/minimal.kicad_pcb "$scratch/test board.kicad_pcb"
+          flatpak run --command=kicad-cli io.github.i2cjak.Backplane pcb export svg --mode-multi --layers Edge.Cuts -o "$scratch/out dir" "$scratch/test board.kicad_pcb"
+          find "$scratch/out dir" -name '*.svg' | grep -q .
           SH
       - uses: actions/upload-artifact@v4
         with:
