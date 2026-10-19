@@ -50,7 +50,49 @@ now_ms() {
 # the inputs' key, taken before any test runs (scripts/verified.sh)
 vkey=$(scripts/verified.sh key test 2>/dev/null || true)
 work=$(mktemp -d .bend-test.XXXXXX)
-trap 'rm -rf "$work"' 0 1 2 15
+# Defer signal handling until every spawned worker is in the owned PID queue.
+# Removing $work in a signal trap let children keep writing into a deleted
+# directory and turned runner shutdown into misleading missing-test failures.
+interrupted=0
+trap 'stop_if_interrupted "$@"; rm -rf "$work"' 0
+trap 'interrupted=129' 1
+trap 'interrupted=130' 2
+trap 'interrupted=143' 15
+stop_if_interrupted() {
+  [ "$interrupted" -ne 0 ] || return 0
+  trap '' 1 2 15
+  trap - 0
+  for pid in "$@"; do kill -TERM "$pid" 2>/dev/null || true; done
+  for pid in "$@"; do wait "$pid" 2>/dev/null || true; done
+  echo "test.sh: interrupted (exit $interrupted); incomplete evidence retained at $work" >&2
+  exit "$interrupted"
+}
+
+run_test() {
+  t=$1; i=$2
+  child=""; stopped=0; interrupted=0
+  forward_term() {
+    stopped=143
+    [ -z "$child" ] || kill -TERM "$child" 2>/dev/null || true
+  }
+  trap forward_term 15
+  s=$(now_ms)
+  rc=0
+  BUN_JSC_forceRAMSize=4294967296 nice -n 19 bend "$t" >"$work/$i.out" 2>&1 &
+  child=$!
+  # A TERM between spawn and assignment sets stopped; the child is now owned.
+  [ "$stopped" = 0 ] || kill -TERM "$child" 2>/dev/null || true
+  wait "$child" || rc=$?
+  if [ "$stopped" != 0 ]; then
+    trap '' 15
+    kill -TERM "$child" 2>/dev/null || true
+    wait "$child" 2>/dev/null || true
+    exit "$stopped"
+  fi
+  echo "$rc" >"$work/$i.rc"
+  e=$(now_ms)
+  echo $(( e - s )) >"$work/$i.dur"
+}
 
 # Run the selected tests $jobs at a time, one output file each, with
 # a sliding window: waiting in whole batches would let one slow test
@@ -59,21 +101,20 @@ trap 'rm -rf "$work"' 0 1 2 15
 set --
 i=0
 for t in $tests; do
+  stop_if_interrupted "$@"
   if [ $# -ge $jobs ]; then
     wait $1 || true
+    stop_if_interrupted "$@"
     shift
   fi
-  ( s=$(now_ms)
-    rc=0
-    BUN_JSC_forceRAMSize=4294967296 nice -n 19 bend "$t" >"$work/$i.out" 2>&1 || rc=$?
-    echo $rc >"$work/$i.rc"
-    e=$(now_ms)
-    echo $(( e - s )) >"$work/$i.dur" ) &
+  run_test "$t" "$i" &
   set -- "$@" $!
+  stop_if_interrupted "$@"
   i=$(( i + 1 ))
 done
 while [ $# -gt 0 ]; do
   wait $1 || true
+  stop_if_interrupted "$@"
   shift
 done
 
@@ -81,6 +122,7 @@ if [ -n "${TEST_TIMINGS_OUT:-}" ]; then
   : >"$TEST_TIMINGS_OUT"
   i=0
   for t in $tests; do
+    stop_if_interrupted "$@"
     ms=$(cat "$work/$i.dur" 2>/dev/null || true)
     case $ms in ""|*[!0-9]*) echo "test.sh: no duration for $t" >&2; exit 1 ;; esac
     awk -v ms="$ms" -v t="$t" 'BEGIN { printf "%.2f %s\n", ms / 1000, t }' >>"$TEST_TIMINGS_OUT"
@@ -93,6 +135,7 @@ fi
 status=0
 i=0
 for t in $tests; do
+  stop_if_interrupted "$@"
   out="$work/$i.out"
   if [ "$(cat "$work/$i.rc")" != 0 ]; then
     echo "$t: exited non-zero"; cat "$out"; status=1; i=$(( i + 1 )); continue
@@ -109,6 +152,7 @@ for t in $tests; do
   fi
   i=$(( i + 1 ))
 done
+stop_if_interrupted "$@"
 # every test passed, unsharded: recorded for these inputs (scripts/verified.sh)
 if [ $status = 0 ] && [ "${TEST_SHARD_COUNT:-1}" -le 1 ]; then scripts/verified.sh mark test "$vkey" || true; fi
 exit $status

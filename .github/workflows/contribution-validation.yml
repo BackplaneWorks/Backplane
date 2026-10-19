@@ -56,6 +56,7 @@ jobs:
           python3 test/tools/validation_renderer_test.py
           python3 test/tools/build_lock_test.py
           python3 test/tools/build_clock_test.py
+          python3 test/tools/test_runner_signal_test.py
           python3 test/tools/ios_simulator_smoke_test.py
       - uses: actions/download-artifact@v4
         with:
@@ -127,13 +128,14 @@ jobs:
           free -h
       - run: scripts/validate-contribution.sh emit
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: contribution-darwin-source
           path: |
             dist/web
             build/cc/backplane-serve/all.c
             build/wire
-            build/validation/emit/result.json
+            build/validation/emit
           if-no-files-found: error
 
   mac:

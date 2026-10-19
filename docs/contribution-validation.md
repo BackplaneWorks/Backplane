@@ -58,6 +58,11 @@ The Linux workflow requires this focused lane. It does not repeat
 The Mac target is the hub and does not run this Linux window-renderer lane.
 These correctness checks and raw microbenchmarks do not establish whole-app
 input/display performance budgets or physical-device performance.
+An interrupted unit-test scheduler stops launching tests, terminates and waits
+for its owned worker/child PIDs, preserves the signal exit status and leaves
+partial `.bend-test.*` evidence available. It never treats external runner
+termination as an assertion result or a passing test. Normal verdicts,
+concurrency limits and shard selection remain unchanged.
 The Linux native and Mac-emission jobs use `BACKPLANE_LOW_MEM=1`, two compile
 workers, no baked Google credentials and a 4 GiB Bun heap-sizing hint. Before
 emission they provision temporary runner swap only when at least 8 GiB of free
@@ -96,6 +101,8 @@ check. The Mac build then creates its own receipt for the newly compiled hub;
 the Linux emit receipt alone cannot authorize a native test binary. The
 workflow uses this same sequence. Receipts document reproducible local work;
 they do not authenticate an untrusted producer.
+The emission artifact retains the full `build/validation/emit` directory,
+including command logs and a failed receipt when emission does not complete.
 
 The separate `real-cad` lane requires **KiCad 10 or newer** for the pinned
 fixture. It probes the selected CLI, records its executable hash/version and
