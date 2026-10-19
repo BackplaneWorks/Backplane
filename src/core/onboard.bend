@@ -21,7 +21,7 @@ import ./msgs.bend as MSG
 # "settings" (the sidebar's Settings button). Phones point at nothing.
 
 def Ob.count() -> Nat:
-  10n
+  11n
 
 def Ob.title(+l: I.Loc, i: Nat) -> String:
   match i:
@@ -44,6 +44,8 @@ def Ob.title(+l: I.Loc, i: Nat) -> String:
     case 8n:
       MSG.T.tour.title.phones(l)
     case 9n:
+      "Anonymous usage"
+    case 10n:
       MSG.T.tour.title.uber(l)
     case _:
       ""
@@ -70,6 +72,8 @@ def Ob.target.d(i: Nat) -> String:
     case 8n:
       "settings"
     case 9n:
+      "settings"
+    case 10n:
       "sidebar"
     case _:
       ""
@@ -96,7 +100,7 @@ def Ob.phone(+k: Nat) -> Bool:
 # Backplane starts and Settings says which of on, not connected or off, as the hub reports it
 # (client.bend's Tail.*). The thread buttons are tools.bend's, named by
 # their labels (test/onboard_test.bend ties them).
-def Ob.body.s0(+l: I.Loc, +k: Nat) -> String:
+def Ob.body.s0.k(+l: I.Loc, +k: Nat) -> String:
   match k:
     case 2n:
       MSG.T.tour.body.welcome.phone(l)
@@ -104,6 +108,15 @@ def Ob.body.s0(+l: I.Loc, +k: Nat) -> String:
       MSG.T.tour.body.welcome.web(l)
     case _:
       MSG.T.tour.body.welcome.window(l)
+
+def Ob.beta() -> String:
+  "Backplane is in beta. If something breaks or looks wrong, please report it."
+
+def Ob.body.s0(+l: I.Loc, k: Nat) -> String:
+  Ob.body.s0.k(l, k) ++ " " ++ Ob.beta()
+
+def Ob.body.share() -> String:
+  "Backplane counts installs and how many people use it: a random install id, the version and OS, once a day. Nothing else: no projects, files, prompts, names or address. If you opt out, installs and updates are still counted, without the id. Change it any time in Settings."
 
 def Ob.body.s1(+l: I.Loc, +k: Nat, +d: String) -> String:
   Bool.pick(String, Ob.phone(k), MSG.T.tour.body.projects.phone(l, d), MSG.T.tour.body.projects.desktop(l, d))
@@ -141,6 +154,11 @@ def Ob.body.s8(+l: I.Loc, +k: Nat) -> String:
 # `name` is the one used most), "have" (an uberbot, `name`), or "join"
 # (reserved: a linked machine has one, `name`; never produced yet).
 def Ob.uber() -> Nat:
+  10n
+
+# The step before it asks about anonymous usage counts (core/telemetry.bend,
+# docs/telemetry.md); client.bend's Share.* act on its choices.
+def Ob.share() -> Nat:
   9n
 
 def Ob.body.s9(+l: I.Loc, +k: Nat, +uc: String, +name: String) -> String:
@@ -170,6 +188,8 @@ def Ob.body(+l: I.Loc, +k: Nat, +d: String, i: Nat) -> String:
     case 8n:
       Ob.body.s8(l, k)
     case 9n:
+      Ob.body.share()
+    case 10n:
       Ob.body.s9(l, k, "none", "")
     case _:
       ""

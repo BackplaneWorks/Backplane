@@ -8,7 +8,7 @@ import ./proc.bend as P
 # there is none, and Settings and the agents say where to get it.
 
 def FreeCAD.sh() -> String:
-  "for c in \"$BACKPLANE_FREECAD\" freecadcmd FreeCADCmd freecad.cmd /Applications/FreeCAD.app/Contents/Resources/bin/freecadcmd; do [ -n \"$c\" ] && p=$(command -v \"$c\" 2>/dev/null) && [ -n \"$p\" ] && { echo \"$p\"; exit 0; }; done; exit 1"
+  "for c in \"$BACKPLANE_FREECAD\" freecadcmd FreeCADCmd freecad.cmd /Applications/FreeCAD.app/Contents/Resources/bin/freecadcmd; do [ -n \"$c\" ] || continue; if command -v cygpath >/dev/null 2>&1; then c=$(cygpath -u \"$c\"); fi; p=$(command -v \"$c\" 2>/dev/null) && [ -n \"$p\" ] && { echo \"$p\"; exit 0; }; done; exit 1"
 
 def FreeCAD.found(r: P.Ran) -> String:
   match r:

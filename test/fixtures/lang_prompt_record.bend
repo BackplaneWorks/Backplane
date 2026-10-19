@@ -9,7 +9,7 @@ import ../../src/server/botnet.bend as BN
 
 def cfg() -> S.Cfg:
   S.Cfg{"/tmp/lang-test", "", "127.0.0.1", 3799, "recorded-system", [], "test",
-    S.Net{False{}, False{}, "", "", "models", K.Rt.empty(), None{}, None{}, None{}, "", None{}, BN.Bn.empty(), False{}, "", "", None{}}}
+    S.Net{False{}, False{}, "", "", "models", K.Rt.empty(), None{}, None{}, None{}, "", None{}, BN.Bn.empty(), False{}, "", "", None{}}, Nil{}}
 
 # The prompt as composed without the language line, from the same parts
 # Hub.prompt uses, with no agent.lang setting: Hub.prompt with "off" must

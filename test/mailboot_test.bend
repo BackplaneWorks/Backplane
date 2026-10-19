@@ -12,7 +12,7 @@ import ../src/core/cef.bend as CF
 
 def cfg(home: String, bn: BN.Bn) -> S.Cfg:
   S.Cfg{home, "", "127.0.0.1", 0, "", Nil{}, "test",
-    S.Net{False{}, False{}, "", "", "", K.Rt.empty(), None{}, None{}, None{}, "[]", None{}, bn, True{}, "", "", None{}}}
+    S.Net{False{}, False{}, "", "", "", K.Rt.empty(), None{}, None{}, None{}, "[]", None{}, bn, True{}, "", "", None{}}, Nil{}}
 
 def disk() -> List<&2, String>:
   ["{\"$\":\"SettingSet\",\"key\":\"test\",\"value\":\"yes\",\"at\":1}",

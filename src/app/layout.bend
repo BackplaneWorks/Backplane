@@ -4071,6 +4071,26 @@ def Set.find(srch: Bool, +ty: Ty, +n: S.Nui, +x: U32, +y: U32, +w: U32) -> Out:
     case False{}:
       Out.none()
 
+# Anonymous usage (client.bend's Share.rows): On/Off, Reset id, Privacy and
+# Report an issue, drawn as Antigravity's rows are
+def Set.share.h(+ty: Ty, +n: S.Nui, +x: U32, +w: U32) -> U32:
+  (52 + Set.agy.sum(U.Share.rows(S.Nui.ui(n)), ty, x, w) : U32)
+
+def Set.share(+ty: Ty, +n: S.Nui, +x: U32, +w: U32, +y: U32) -> Out:
+  +rs = U.Share.rows(S.Nui.ui(n))
+  Out.all([
+    Set.head(ty, U.Share.title(), x, y),
+    Set.card(x, (y + 32 : U32), w, (Set.agy.sum(rs, ty, x, w) + 10 : U32)),
+    Set.agy.rows(rs, ty, n, x, w, (y + 38 : U32))])
+
+# the notification section and the usage section under it, and where the
+# usage section starts
+def Set.nh(+st: M.State, +ty: Ty, +n: S.Nui, +x: U32, +w: U32) -> U32:
+  (Set.notify.h(st, ty, w) + Set.share.h(ty, n, x, w) : U32)
+
+def Set.share.below(+st: M.State, +ty: Ty, +n: S.Nui, +x: U32, +w: U32, +b: U32) -> Out:
+  Set.share(ty, n, x, w, (b + 320 + Set.notify.h(st, ty, w) : U32))
+
 def Lay.settings(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x0: U32, +x1: U32, +h: U32, +raw: U32) -> Out:
   +label0 = MSG.T.settings.theme.light(Ty.loc(ty))
   +label1 = MSG.T.settings.theme.dark(Ty.loc(ty))
@@ -4097,14 +4117,15 @@ def Lay.settings(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: S
   +kh = {(40 + Kn.h(kn, ty, (w - 32 : U32)) : U32) : U32}
   # (the Browser row, then the Ordering group, then Appearance)
   +fy = {(ey + 278 + kh : U32) : U32}
-  +total = {(1196 + Set.fallback.h(ty, n, x, w) + Set.notify.h(st, ty, w) + dy + fy + Set.voice.h(ty, n, x, w) + Set.mates.h(n) + Set.keys.h(n) + Set.agy.h(ty, n, x, w) + Set.tz.h() + Set.usage.h(n) + 132 : U32) : U32}
+  +total = {(1196 + Set.share.h(ty, n, x, w) + Set.fallback.h(ty, n, x, w) + Set.notify.h(st, ty, w) + dy + fy + Set.voice.h(ty, n, x, w) + Set.mates.h(n) + Set.keys.h(n) + Set.agy.h(ty, n, x, w) + Set.tz.h() + Set.usage.h(n) + 132 : U32) : U32}
   +off = {U32.min(raw, U32.dim(total, h)) : U32}
   +b = {(0 - off : U32) : U32}
-  +b2 = {(b + 64 + Set.fallback.h(ty, n, x, w) + Set.notify.h(st, ty, w) : U32) : U32}
+  +b2 = {(b + 64 + Set.share.h(ty, n, x, w) + Set.fallback.h(ty, n, x, w) + Set.notify.h(st, ty, w) : U32) : U32}
   Out.all([
     Out{Nil{}, [Lay.hit(x0, 52, (x1 - x0 : U32), (h - 52 : U32), "set-bg", U32.show(U32.dim(total, h)))]},
     Out.hits_below(52, Out.all([
     Set.threads(ty, st, n, x, w, b),
+    Set.share(ty, n, x, w, (b + 256 + Set.notify.h(st, ty, w) + Set.fallback.h(ty, n, x, w) : U32)),
     Set.head(ty, MSG.T.settings.agents(Ty.loc(ty)), x, (b2 + 192 : U32)),
     Set.card(x, (b2 + 224 : U32), w, (124 + dy : U32)),
     Set.row(ty, MSG.T.settings.agents.default(Ty.loc(ty)), MSG.T.settings.agents.note(Ty.loc(ty), Set.cli.loc(Ty.loc(ty), U.Models.cli(U.Str.get(info, "models"), prov), prov)), x, (b2 + 226 : U32), w),
@@ -7218,6 +7239,10 @@ def Tour.choices(cs: List<&2, U.TChoice>, +ty: Ty, +x: U32, +y: U32) -> Out:
     case U.TChoice{l, a, v} <> t:
       Out.cat(Lay.button(ty, D.Clip.all(), x, y, l, T.Th.accent(), a, v), Tour.choices(t, ty, x, (y + 34 : U32)))
 
+# the forward button's words (named apart so the card's layout stays small)
+def Lay.tour.nb(+n: S.Nui) -> String:
+  U.Tour.forward(S.Nui.ui(n))
+
 def Lay.tour(+ty: Ty, +n: S.Nui, +ww: U32, +hh: U32) -> Out:
   +label0 = MSG.T.tour.skip(Ty.loc(ty))
   +u = S.Nui.ui(n)
@@ -7243,7 +7268,7 @@ def Lay.tour(+ty: Ty, +n: S.Nui, +ww: U32, +hh: U32) -> Out:
   +by = {(cy + ch - 44 : U32) : U32}
   +bt = {(cy + top : U32) : U32}
   +off = {U32.min(U32.from_nat(Maybe.default(&2, Nat, Nat.read(U.Ui.scratch(u, "@tour.sc")), 0n)), U32.dim(nl, nv)) : U32}
-  +nb = OB.Ob.forward(Ty.loc(ty), i)
+  +nb = U.Tour.forward(u)
   +nx = {(cx + cw - 16 - Lay.button.w(ty, nb) : U32) : U32}
   Out.all([
     Out{Tour.dim(Tour.rect(g, hh, Lay.x1(n)), ww, hh), [Lay.hit(0, 0, ww, hh, "", "")]},

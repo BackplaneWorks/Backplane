@@ -839,16 +839,16 @@ def KServe.pid(r: P.Ran) -> U32:
     case P.Ran{_, _}:
       0
 
-def KServe.boot(r: P.Ran, +rt: String, +exe: String, +home: String, +q: Chan(KMsg), +ev: Chan(String)) -> Ks:
-  Ks{Hp{None{}, Nil{}, 1n, exe}, Nil{}, Nil{}, "", KServe.pid(r), home, rt, KEnv.none(), q, ev}
+def KServe.boot(pid: U32, +rt: String, +exe: String, +home: String, +q: Chan(KMsg), +ev: Chan(String)) -> Ks:
+  Ks{Hp{None{}, Nil{}, 1n, exe}, Nil{}, Nil{}, "", pid, home, rt, KEnv.none(), q, ev}
 
 # the KiCad actor: requests on q; the servers' lines go to ev whenever
-# they change. The hub's pid (the shell's parent) is what servers watch.
+# they change. Native children watch the hub's native OS process ID.
 def KServe.run(+q: Chan(KMsg), +ev: Chan(String), +exe: String, +home: String) -> IO(Unit):
   do IO<Unit>:
-    r : P.Ran <- P.Proc.run("sh", ["-c", "echo $PPID"], "/")
+    pid : U32 <- H.Sys.native_pid()
     rt : String <- K.Rt.env("XDG_RUNTIME_DIR")
-    KServe.loop(KServe.forever(), q, KServe.boot(r, rt, exe, home, q, ev))
+    KServe.loop(KServe.forever(), q, KServe.boot(pid, rt, exe, home, q, ev))
 
 # What the hub asks
 # -----------------

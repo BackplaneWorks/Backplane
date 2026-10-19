@@ -55,6 +55,8 @@ def Cli.kind(h: String) -> U32:
       2
     case "--foreground":
       2
+    case "--sandbox":
+      2
     case "--help":
       3
     case "-h":
@@ -165,6 +167,8 @@ def Cli.child(h: String) -> U32:
       3
     case "--plot-info":
       4
+    case "--telemetry-pow":
+      6
     case "--render":
       5
     case _:
@@ -182,6 +186,8 @@ def Cli.first(k: U32, +h: String, t: List<&2, String>) -> Cli:
       Cli.least(1n, t, "--plot-tree FILE")
     case 4:
       Cli.least(3n, t, "--plot-info FILE SIG INDEX")
+    case 6:
+      Cli.least(1n, t, "--telemetry-pow UUID")
     case _:
       CliRun{}
 

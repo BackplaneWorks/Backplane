@@ -3,6 +3,8 @@
 // they run on, so each socket lives in its own Worker (see worker.ts).
 import { dlopen, FFIType, ptr, read, toArrayBuffer } from "bun:ffi";
 import { existsSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+import { nativePath } from "../../platform/windows-path.ts";
 
 const NNG_FLAG_ALLOC = 1;
 const NNG_ETIMEDOUT = 5;
@@ -20,7 +22,7 @@ const symbols = {
   nng_strerror: { args: [FFIType.i32], returns: FFIType.ptr },
 } as const;
 
-const so = process.platform === "darwin" ? "dylib" : "so";
+const so = process.platform === "win32" ? "dll" : process.platform === "darwin" ? "dylib" : "so";
 
 // libnng files under a runtime's lib/, newest-looking name first
 function inRuntime(dir: string): string[] {
@@ -34,9 +36,23 @@ function inRuntime(dir: string): string[] {
 
 export function candidates(lib?: string): string[] {
   const out: string[] = [];
-  if (lib) out.push(...inRuntime(lib));
-  out.push(process.platform === "darwin" ? "libnng.1.dylib" : "libnng.so.1");
-  out.push(process.platform === "darwin" ? "libnng.dylib" : "libnng.so");
+  if (process.platform === "win32") {
+    if (lib) {
+      const dir = nativePath(lib);
+      // The Windows KiCad runtime keeps its dependency DLLs beside its EXE.
+      for (const at of [dir, join(dir, "..", "bin")]) {
+        for (const name of ["nng.dll", "libnng.dll"]) {
+          const candidate = join(at, name);
+          if (existsSync(candidate)) out.push(candidate);
+        }
+      }
+    }
+    out.push("nng.dll", "libnng.dll");
+  } else {
+    if (lib) out.push(...inRuntime(lib));
+    out.push(process.platform === "darwin" ? "libnng.1.dylib" : "libnng.so.1");
+    out.push(process.platform === "darwin" ? "libnng.dylib" : "libnng.so");
+  }
   return out;
 }
 

@@ -1,4 +1,6 @@
 import Base
+import ./src/core/telemetry.bend as TEL
+import ./test/telemetry_cases.bend as TCF
 import ./src/core/auth.bend as AUTH
 import ./src/core/http.bend as HTTPAUTH
 import ./src/core/pcb2d.bend as PCB2 # PCB viewer text
@@ -10766,3 +10768,59 @@ law wt_seed_same_second_next:
 
 law wt_seed_wrap:
   {H.Wt.seed("t4294967296") == 0n : Nat}
+
+# telemetry (wire v1, addendum 1: no client kinds)
+
+law tm_optout_no_id:
+  {Bool.or(String.contains(TCF.Cases.body(TCF.Cases.off()), TCF.Cases.id()), String.contains(TCF.Cases.body(TCF.Cases.off()), "\"id\"")) == False{} : Bool}
+law tm_unasked_no_id:
+  {List.is_empty(&2, TEL.TmEv, TEL.Tm.ready(TEL.TmState.queue(TCF.Cases.unasked()), 2n)) == True{} : Bool}
+law tm_sandbox_never:
+  for se: String
+  for tm: String
+  for dnt: String
+  for ci: String
+  for url: String
+  for kid: String
+  for key: String
+  {TEL.Tm.gate(TEL.TmEnv{True{}, se, tm, dnt, ci, url, kid, key}) == False{} : Bool}
+law tm_gate_no_key:
+  {TEL.Tm.gate(TEL.TmEnv{False{}, "", "", "", "", "http://stub", "dev-1", ""}) == False{} : Bool}
+law tm_clean_drops_path:
+  {String.contains(TCF.Cases.bad("/home/h/x"), "/home/h/x") == False{} : Bool}
+law tm_clean_drops_email:
+  {String.contains(TCF.Cases.bad("a@b.c"), "a@b.c") == False{} : Bool}
+law tm_clean_drops_name:
+  {String.contains(TCF.Cases.bad("private project"), "private project") == False{} : Bool}
+law tm_active_once_a_day:
+  {List.length(&2, TEL.TmEv, TEL.TmState.queue(TCF.Cases.twice())) == 1n : Nat}
+law tm_queue_cap:
+  {List.length(&2, TEL.TmEv, TEL.Tm.queue.limit(TCF.Cases.repeat(201n))) == 200n : Nat}
+law tm_sent_202_drops:
+  {List.is_empty(&2, TEL.TmEv, TEL.TmState.queue(TEL.Tm.sent(TCF.Cases.st([TCF.Cases.ev("install", "0.11.3", True{})]), [TCF.Cases.ev("install", "0.11.3", True{})], 202n, 0n, 2n))) == True{} : Bool}
+law tm_sent_500_keeps:
+  {Bool.and(Nat.is_eq(TEL.TmState.next(TEL.Tm.sent(TCF.Cases.st([TCF.Cases.ev("install", "0.11.3", True{})]), [TCF.Cases.ev("install", "0.11.3", True{})], 500n, 0n, 2n)), 3602n), Nat.is_eq(List.length(&2, TEL.TmEv, TEL.TmState.queue(TEL.Tm.sent(TCF.Cases.st([TCF.Cases.ev("install", "0.11.3", True{})]), [TCF.Cases.ev("install", "0.11.3", True{})], 500n, 0n, 2n))), 1n)) == True{} : Bool}
+law tm_state_roundtrip:
+  {TEL.Tm.state.parse(TEL.Tm.state.json(TCF.Cases.st([TCF.Cases.ev("install", "0.11.3", True{})]))) == TCF.Cases.st([TCF.Cases.ev("install", "0.11.3", True{})]) : TEL.TmState}
+law share_on_sets_asked:
+  {TCF.Cases.setting(U.Ui.act(U.Ui.init(1n), "share", "on"), "telemetry.asked") == "1" : String}
+law share_step_before_uber:
+  {OBD.Ob.next(OBD.Ob.share()) == OBD.Ob.uber() : Nat}
+law bug_url_only_version:
+  {TEL.Bug.url("0.11.3", "linux", "x64") == "https://github.com/i2cjak/Backplane/issues/new?body=Version%3A%200.11.3%0AOS%3A%20linux%20x64%0A%0AWhat%20happened%3A%0A" : String}
+
+law tm_reset_invalidates_worker:
+  {TEL.Tm.current(TCF.Cases.view(True{}, True{}, "0", "0.11.3", "2026-10-14", 2n), M.State.replay([M.SettingSet{"telemetry.asked", "1", 1n}, M.SettingSet{"telemetry.reset", "1", 1n}], M.State.empty())) == False{} : Bool}
+law tm_optout_invalidates_worker:
+  {TEL.Tm.current(TCF.Cases.view(True{}, True{}, "0", "0.11.3", "2026-10-14", 2n), M.State.replay([M.SettingSet{"telemetry.asked", "1", 1n}, M.SettingSet{"telemetry.share", "off", 1n}], M.State.empty())) == False{} : Bool}
+law tm_loopback_rejects_userinfo:
+  {TEL.Tm.loopback("http://127.0.0.1:80@elsewhere/api/v1/events") == False{} : Bool}
+law tm_package_nightly_channel:
+  {TEL.Tm.channel("0.12.1-nightly.20261019.1", "nightly") == "nightly" : String}
+
+law tm_new_usage_marker:
+  {U.Tour.raw(False{}, OBD.Ob.share()) == "s9" : String}
+law tm_cached_uber_step_kept:
+  {U.Tour.legacy("9", OBD.Ob.share()) == OBD.Ob.uber() : Nat}
+law tm_marked_usage_step_kept:
+  {U.Tour.legacy("s9", OBD.Ob.share()) == OBD.Ob.share() : Nat}
