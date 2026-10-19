@@ -61,8 +61,24 @@ if [ -d "$tmp/backplane-$os-$arch/licenses" ]; then
 fi
 ln -sf "$prefix/backplane" "$bin/backplane"
 ln -sf "$prefix/backplane-serve" "$bin/backplane-serve"
+# the applications menu entry and its icon (BACKPLANE_NO_DESKTOP=1 skips
+# them); Exec names the link itself, since a desktop session's PATH often
+# lacks ~/.local/bin
+menu=
+pkg="$tmp/backplane-$os-$arch"
+if [ "$os" = linux ] && [ -z "${BACKPLANE_NO_DESKTOP:-}" ] && [ -f "$pkg/backplane.desktop" ]; then
+  data=${XDG_DATA_HOME:-$HOME/.local/share}
+  mkdir -p "$data/applications" "$data/icons/hicolor/scalable/apps" "$data/icons/hicolor/256x256/apps"
+  sed "s|^Exec=.*|Exec=$bin/backplane|" "$pkg/backplane.desktop" > "$data/applications/backplane.desktop"
+  [ -f "$pkg/icon/backplane.svg" ] && cp -f "$pkg/icon/backplane.svg" "$data/icons/hicolor/scalable/apps/backplane.svg"
+  [ -f "$pkg/icon/backplane-256.png" ] && cp -f "$pkg/icon/backplane-256.png" "$data/icons/hicolor/256x256/apps/backplane.png"
+  command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$data/applications" >/dev/null 2>&1 || true
+  command -v gtk-update-icon-cache >/dev/null 2>&1 && gtk-update-icon-cache -q -t "$data/icons/hicolor" >/dev/null 2>&1 || true
+  menu=1
+fi
 echo
 echo "  Backplane $VER is installed. Run: backplane"
+[ -n "$menu" ] && echo "  It is also in your applications menu."
 case ":$PATH:" in
   *":$bin:"*) ;;
   *) echo "  (add $bin to your PATH)" ;;

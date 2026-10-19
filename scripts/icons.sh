@@ -1,6 +1,7 @@
 #!/bin/sh
 # Draw the app icon everywhere from assets/icon/ (the backplane.works mark):
 #   backplane.svg  the icon: the mark on #111410
+#   backplane-desktop.svg  Linux desktops' icon: the mark on a rounded tile
 #   mark.svg       the mark alone (Android's layers are vectors of it)
 # Writes the iOS app icon, the web's favicon and touch icon, the desktop
 # PNGs (packaging) and the window's icon rows in src/app/effects/win.c.
@@ -15,7 +16,7 @@ magick "$tmp/ios.png" -alpha off mobile/ios/Backplane/Assets.xcassets/AppIcon.ap
 cp assets/icon/backplane.svg src/web/favicon.svg
 rsvg-convert -w 180 -h 180 assets/icon/backplane.svg -o src/web/apple-touch-icon.png
 for s in 64 128 256 512; do
-  rsvg-convert -w $s -h $s assets/icon/backplane.svg -o assets/icon/backplane-$s.png
+  rsvg-convert -w $s -h $s assets/icon/backplane-desktop.svg -o assets/icon/backplane-$s.png
 done
 # the window's icon (_NET_WM_ICON): the mark's coverage at 64 px, one hex
 # digit a pixel, laid over the background by win.c

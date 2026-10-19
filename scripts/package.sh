@@ -17,6 +17,7 @@ done
 # the desktop file and icons, for the Linux packages (scripts/package-linux.sh)
 cp deploy/backplane.desktop "$dir/"
 mkdir -p "$dir/icon"
-cp assets/icon/backplane.svg assets/icon/backplane-256.png "$dir/icon/"
+cp assets/icon/backplane-desktop.svg "$dir/icon/backplane.svg"
+cp assets/icon/backplane-256.png "$dir/icon/"
 tar -czf "dist/backplane-$ver-$plat.tar.gz" -C dist/pkg "backplane-$plat"
 ls -la "dist/backplane-$ver-$plat.tar.gz"

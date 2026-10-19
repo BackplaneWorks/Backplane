@@ -58,7 +58,7 @@ for b in backplane backplane-serve; do
   chmod 755 "$root/usr/bin/$b"
 done
 cp deploy/backplane.desktop "$root/usr/share/applications/"
-cp assets/icon/backplane.svg "$root/usr/share/icons/hicolor/scalable/apps/"
+cp assets/icon/backplane-desktop.svg "$root/usr/share/icons/hicolor/scalable/apps/backplane.svg"
 for s in 64 128 256 512; do
   mkdir -p "$root/usr/share/icons/hicolor/${s}x$s/apps"
   cp "assets/icon/backplane-$s.png" "$root/usr/share/icons/hicolor/${s}x$s/apps/backplane.png"
