@@ -1,0 +1,13 @@
+#!/bin/sh
+# Named symlinks select a host tool; argv, streams and cwd stay intact.
+set -eu
+tool=${0##*/}
+case "$tool" in
+  claude|codex|git|gh|tailscale|pdftoppm|freecadcmd|FreeCADCmd) ;;
+  *) echo "backplane: unknown host tool $tool" >&2; exit 2 ;;
+esac
+exec flatpak-spawn --host --watch-bus --directory="$PWD" /bin/bash -lc '
+  export PATH="$HOME/.local/bin:$HOME/.bun/bin:$HOME/.cargo/bin:$HOME/.volta/bin:$PATH"
+  if [ -s "$HOME/.nvm/nvm.sh" ]; then . "$HOME/.nvm/nvm.sh"; fi
+  exec "$@"
+' bash "$tool" "$@"

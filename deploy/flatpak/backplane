@@ -1,0 +1,28 @@
+#!/bin/sh
+set -eu
+# Host tools have their own libraries and authentication on the host.
+# Only advertise installed tools, so missing providers stay missing.
+bin="$XDG_CACHE_HOME/backplane-host-bin"
+mkdir -p "$bin"
+for tool in claude codex git gh tailscale pdftoppm freecadcmd FreeCADCmd; do
+  rm -f "$bin/$tool"
+done
+flatpak-spawn --host --watch-bus /bin/bash -lc '
+  export PATH="$HOME/.local/bin:$HOME/.bun/bin:$HOME/.cargo/bin:$HOME/.volta/bin:$PATH"
+  if [ -s "$HOME/.nvm/nvm.sh" ]; then . "$HOME/.nvm/nvm.sh"; fi
+  for tool in claude codex git gh tailscale pdftoppm freecadcmd FreeCADCmd; do
+    command -v "$tool" >/dev/null 2>&1 && printf "%s\n" "$tool"
+  done
+  exit 0
+' | while IFS= read -r tool; do
+  case "$tool" in
+    claude|codex|git|gh|tailscale|pdftoppm|freecadcmd|FreeCADCmd)
+      ln -sf /app/lib/backplane/host-tool "$bin/$tool" ;;
+  esac
+done
+export PATH="$bin:/app/bin:/usr/bin:/bin"
+export BACKPLANE_NO_UPDATE=1
+# The native hub and viewer run on the Flatpak runtime. KiCad is launched
+# separately by the CLI adapter, with the host's Flatpak service.
+export BACKPLANE_KICAD_CLI=/app/bin/kicad-cli
+exec /app/lib/backplane/backplane "$@"
