@@ -1,4 +1,5 @@
 import Base
+import ./src/core/pathrecords.bend as PR
 import ./src/core/auth.bend as AUTH
 import ./src/core/http.bend as HTTPAUTH
 import ./src/core/pcb2d.bend as PCB2 # PCB viewer text
@@ -4656,6 +4657,20 @@ law md_head_only_first:
 law md_fence_any:
   for s: String
   {DM.Md.line("```" ++ s) == DM.LFence{} : DM.Line}
+
+# File records preserve every character other than the NUL separator.
+law path_records_newline_is_data:
+  {PR.Paths.read("café.step\0line\nbreak.step\0back\\slash.step\0") == ["café.step", "line\nbreak.step", "back\\slash.step"] : List<&2, String>}
+
+law path_records_keep_whitespace:
+  {PR.Paths.read(" \0\t\0\0") == [" ", "\t"] : List<&2, String>}
+
+law path_records_unterminated_last:
+  {PR.Paths.read("first\0last") == ["first", "last"] : List<&2, String>}
+
+law path_records_legacy_kept:
+  for +text: String
+  {PR.Paths.kept(False{}, text) == String.lines(text) : List<&2, String>}
 
 # The viewer's Files tab (core/fm.bend): what a file opens as, any case;
 # paths from the project's root that never leave it

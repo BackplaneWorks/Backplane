@@ -1,4 +1,5 @@
 import Base
+import ./pathrecords.bend as PR
 import ./fallback.bend as FB
 import ./title.bend as TTL
 import ./mailrun.bend as RUN
@@ -661,7 +662,7 @@ def Ui.files(u: Ui, +r: J.Json) -> Ui:
   match u:
     case Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}:
       Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note,
-        Map.set(&2, String, Map.set(&2, String, nf, "files", String.join(Files.strs(J.Json.elems(J.Json.get_obj(r, "files"))), "\n")), "files.thread", J.Json.get_str(r, "thread", "")), ob, tr}
+        Map.set(&2, String, Map.set(&2, String, Map.set(&2, String, nf, "files", PR.Paths.pack(Files.strs(J.Json.elems(J.Json.get_obj(r, "files"))))), "files.format", "nul"), "files.thread", J.Json.get_str(r, "thread", "")), ob, tr}
 
 def Ui.reply.files(has: Bool, u: Ui, +o: J.Json) -> Ui:
   match has:
@@ -2977,15 +2978,15 @@ def Files.rows(rs: List<&2, FRow>) -> List<&2, PItem>:
 def Files.pick(+ps: List<&2, String>, +q: String) -> List<&2, PItem>:
   Files.rows(List.take(&2, FRow, List.sort(~FRow, ~FRow.before, Files.scored(ps, q)), 200n))
 
-def Files.items.k(same: Bool, +files: String, +q: String) -> List<&2, PItem>:
+def Files.items.k(same: Bool, nul: Bool, +files: String, +q: String) -> List<&2, PItem>:
   match same:
     case True{}:
-      Files.pick(String.lines(files), q)
+      Files.pick(PR.Paths.kept(nul, files), q)
     case False{}:
       Nil{}
 
 def Files.items(+u: Ui) -> List<&2, PItem>:
-  Files.items.k(String.eq(Ui.info(u, "files.thread"), Ui.sel(u)), Ui.info(u, "files"), Palette.query(u))
+  Files.items.k(String.eq(Ui.info(u, "files.thread"), Ui.sel(u)), String.eq(Ui.info(u, "files.format"), "nul"), Ui.info(u, "files"), Palette.query(u))
 
 # what the palette offers in its mode
 def Palette.items.k(+l: I.Loc, i: Nat, +u: Ui) -> List<&2, PItem>:

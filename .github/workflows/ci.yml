@@ -55,6 +55,38 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - run: TEST_JOBS=$(nproc) scripts/test.sh
 
+  file-paths:
+    name: File paths ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: linux-x64, os: ubuntu-24.04 }
+          - { target: linux-arm64, os: ubuntu-24.04-arm }
+          - { target: darwin-arm64, os: macos-15 }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-bend
+      - uses: oven-sh/setup-bun@v2
+      - name: Install clang 19
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-19
+          sudo ln -sf /usr/bin/clang-19 /usr/local/bin/clang
+      - name: Select Xcode 26.3
+        if: runner.os == 'macOS'
+        run: echo "DEVELOPER_DIR=/Applications/Xcode_26.3.app/Contents/Developer" >> "$GITHUB_ENV"
+      - name: Exercise native Git and find file records
+        run: |
+          mkdir -p build
+          bend test/native/file_paths.bend -o build/file-paths
+          bun test/tools/file_paths.ts build/file-paths
+        env:
+          BUN_JSC_forceRAMSize: "2147483648"
+
   build:
     name: Build ${{ matrix.target }}
     # runs beside "laws" (which checks every file); nothing is published here
@@ -107,6 +139,16 @@ jobs:
           path: ~/.cache/backplane-bend/obj
           key: objs-${{ matrix.target }}-${{ github.sha }}
           restore-keys: objs-${{ matrix.target }}-
+      - name: Check file palette behavior in native C
+        run: |
+          set -o pipefail
+          mkdir -p build
+          bend test/file_paths_client_test.bend -o build/file-paths-client
+          build/file-paths-client | tee build/file-paths-client.log
+          test "$(grep -c '^ok ' build/file-paths-client.log)" = 10
+          if grep -q '^FAIL' build/file-paths-client.log; then exit 1; fi
+        env:
+          BUN_JSC_forceRAMSize: "4294967296"
       - run: clang --version
       - run: scripts/build.sh
         env:

@@ -1,4 +1,5 @@
 import Base
+import ./src/core/pathrecords.bend as PR
 import ./src/core/auth.bend as AUTH
 import ./src/core/http.bend as HTTPAUTH
 import ./src/core/pcb2d.bend as PCB2 # PCB viewer text
@@ -6826,6 +6827,11 @@ def Laws.md_fence_any(s):
       {==}
     case SCon{h, t}:
       {==}
+
+def Laws.path_records_newline_is_data(): {==}
+def Laws.path_records_keep_whitespace(): {==}
+def Laws.path_records_unterminated_last(): {==}
+def Laws.path_records_legacy_kept(text): {==}
 
 def Laws.fm_kind_board():
   {==}
