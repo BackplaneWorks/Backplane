@@ -10,9 +10,13 @@ on:
         description: Existing CI run containing backplane-linux-x64 (package only)
         type: string
         default: ""
+      flatpak_run:
+        description: Existing CI run containing backplane-flatpak-linux-x64 (browser tests only)
+        type: string
+        default: ""
 
 concurrency:
-  group: ci-${{ github.ref }}-${{ inputs.native_run || 'full' }}
+  group: ci-${{ github.ref }}-${{ inputs.flatpak_run || inputs.native_run || 'full' }}
   cancel-in-progress: true
 
 permissions:
@@ -21,7 +25,7 @@ permissions:
 
 jobs:
   check:
-    if: ${{ !inputs.native_run }}
+    if: ${{ !inputs.native_run && !inputs.flatpak_run }}
     name: Type-check
     runs-on: ubuntu-24.04
     steps:
@@ -30,7 +34,7 @@ jobs:
       - run: CHECK_JOBS=$(nproc) scripts/check.sh check
 
   proof:
-    if: ${{ !inputs.native_run }}
+    if: ${{ !inputs.native_run && !inputs.flatpak_run }}
     name: Prove laws
     runs-on: ubuntu-24.04
     steps:
@@ -49,7 +53,7 @@ jobs:
       - run: echo "type-check and proof both passed"
 
   test:
-    if: ${{ !inputs.native_run }}
+    if: ${{ !inputs.native_run && !inputs.flatpak_run }}
     name: Tests ${{ matrix.shard }}/4
     runs-on: ubuntu-24.04
     strategy:
@@ -66,7 +70,7 @@ jobs:
       - run: TEST_JOBS=$(nproc) scripts/test.sh
 
   build:
-    if: ${{ !inputs.native_run }}
+    if: ${{ !inputs.native_run && !inputs.flatpak_run }}
     name: Build ${{ matrix.target }}
     # runs beside "laws" (which checks every file); nothing is published here
     strategy:
@@ -184,3 +188,28 @@ jobs:
           name: backplane-flatpak-linux-x64
           path: dist/*.flatpak
           retention-days: 7
+
+  flatpak-browser:
+    if: ${{ !cancelled() && (needs.flatpak.result == 'success' || inputs.flatpak_run != '') }}
+    name: Flatpak Chrome and CEF
+    needs: [flatpak]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/download-artifact@v4
+        with:
+          name: backplane-flatpak-linux-x64
+          path: dist
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.flatpak_run || github.run_id }}
+      - run: sudo apt-get update && sudo apt-get install -y flatpak dbus-x11 xvfb libx11-dev libxtst6
+      - name: Test installed browser engines on a private display
+        run: |
+          dbus-run-session -- bash -eu <<'SH'
+          flatpak --user remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          flatpak --user install -y --noninteractive --no-related flathub org.freedesktop.Platform//25.08 org.freedesktop.Sdk//25.08
+          flatpak --user install -y --noninteractive dist/*.flatpak
+          bash scripts/test-flatpak-browser.sh
+          SH
