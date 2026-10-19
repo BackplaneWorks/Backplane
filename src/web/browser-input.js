@@ -11,7 +11,7 @@ export function installBrowserInput(doc, dispatch, currentOwner) {
   doc.body.append(input);
   let frame = null, owner = "", composing = false;
   const reset = () => { input.value = "\u200b"; input.setSelectionRange(1, 1); };
-  const allowed = () => frame?.isConnected && frame.getAttribute("data-owner") === owner && currentOwner() === owner;
+  const allowed = () => frame?.isConnected && frame.hasAttribute("data-keyto") && frame.hasAttribute("data-type") && frame.getAttribute("data-owner") === owner && currentOwner() === owner;
   const send = (attr, value) => { if (allowed()) dispatch(frame.getAttribute(attr), value); };
   const clear = () => { composing = false; reset(); };
   const editKeys = { deleteContentBackward: "Backspace", deleteContentForward: "Delete",
@@ -98,6 +98,6 @@ export function installBrowserInput(doc, dispatch, currentOwner) {
   const observer = new MutationObserver(() => {
     if (frame && !allowed()) { input.blur(); frame = null; owner = ""; clear(); }
   });
-  observer.observe(doc.getElementById("root") || doc.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-owner", "data-keyto"] });
+  observer.observe(doc.getElementById("root") || doc.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-owner", "data-keyto", "data-type"] });
   return { input };
 }

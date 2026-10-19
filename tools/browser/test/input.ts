@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 const root = mkdtempSync(join(tmpdir(), 'bp-input-'));
-const child = Bun.spawn(['bun', fileURLToPath(new URL('../src/main.ts', import.meta.url)), '--profile', join(root, 'profile')], {stdin:'pipe', stdout:'pipe', stderr:'inherit', env:{...process.env,BACKPLANE_CHROME:chromium.executablePath()}});
+const child = Bun.spawn(['bun', fileURLToPath(new URL('../src/main.ts', import.meta.url)), '--profile', join(root, 'profile')], {stdin:'pipe', stdout:'pipe', stderr:'inherit', env:{...process.env,BACKPLANE_CHROME:process.env.BACKPLANE_CHROME ?? chromium.executablePath()}});
 const pending = new Map<number, (r:any)=>void>(); let id = 0;
 (async()=>{ let rest=''; for await(const bytes of child.stdout) { rest += new TextDecoder().decode(bytes); let i; while((i=rest.indexOf('\n'))>=0) { const r=JSON.parse(rest.slice(0,i)); rest=rest.slice(i+1); pending.get(r.id)?.(r); pending.delete(r.id); } } })();
 function ask(op:string, args:any={}, page:string|null='thread-a'):Promise<any> { return new Promise((resolve,reject)=>{
@@ -22,8 +22,12 @@ installBrowserInput(document,(action,value)=>{window.sent.push({action,value});w
 </script>`;
 const server=Bun.serve({port:0,fetch(req){return new Response(new URL(req.url).pathname==='/input.js'?readFileSync(new URL('../../../src/web/browser-input.js',import.meta.url),'utf8'):html,{headers:{'content-type':new URL(req.url).pathname==='/input.js'?'text/javascript':'text/html'}});}});
 try {
-  for(const [name, engine] of Object.entries({chromium,firefox,webkit})) {
-    const browser=await engine.launch();
+  const engines = {chromium,firefox,webkit};
+  const requested = (process.env.BACKPLANE_TEST_BROWSERS ?? 'chromium,firefox,webkit').split(',');
+  assert.ok(requested.length && requested.every(name => name in engines), 'explicit nonempty browser matrix');
+  for(const name of requested) {
+    const engine = engines[name as keyof typeof engines];
+    const browser=await engine.launch(name === 'chromium' && process.env.BACKPLANE_CHROME ? {executablePath:process.env.BACKPLANE_CHROME} : {});
     try {
       const page=await browser.newPage({viewport:{width:800,height:600}});
       await page.exposeFunction('forward', (action:string,value:string)=>{
@@ -55,10 +59,29 @@ try {
         el.dispatchEvent(new InputEvent('beforeinput',{bubbles:true,cancelable:false,inputType:'deleteContentBackward'}));
         el.value='';el.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'deleteContentBackward'}));
       }); await drain();assert.equal(await read('c'),'line1\nline2漢');
+      // Returning control keeps the same owner but removes editable attributes.
+      // This must release keyboard focus as well as reject any queued input.
+      const returned=await page.evaluate(()=>window.sent.length);
+      await page.evaluate(()=>{
+        const frame=document.getElementById('frame');
+        for (const attr of ['data-pt','data-wheel','data-keyto','data-type']) frame.removeAttribute(attr);
+        // A queued event can arrive before the mutation observer callback.
+        const input=document.activeElement as HTMLTextAreaElement;
+        input.value='queued handback';
+        input.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertText',data:'queued handback'}));
+      });
+      await page.keyboard.type('after handback'); await drain();
+      assert.equal(await page.evaluate(()=>window.sent.length),returned,'handback rejects same-owner input');
+      assert.equal(await page.evaluate(()=>document.activeElement.tagName),'BODY','handback releases keyboard');
+      await page.evaluate(()=>{
+        const frame=document.getElementById('frame');
+        Object.entries({'data-pt':'bb-click','data-wheel':'bb-scroll','data-keyto':'bb-key','data-type':'bb-type'}).forEach(([k,v])=>frame.setAttribute(k,v));
+      });
+      await click(25); await drain();
       const before=await page.evaluate(()=>window.sent.length);
       await page.evaluate(()=>{window.owner='thread-b';document.getElementById('frame').setAttribute('data-owner','thread-b');});
       await page.keyboard.type('stale'); await drain(); assert.equal(await page.evaluate(()=>window.sent.length),before);
-      console.log('ok '+name+': typing, selection, primary shortcut, Unicode, paste, Tab, deletion, multiline, composition, stale-owner rejection');
+      console.log('ok '+name+': typing, selection, primary shortcut, Unicode, paste, Tab, deletion, multiline, composition, same-owner handback, stale-owner rejection');
     } finally { await browser.close(); }
   }
   // Queue click (including viewport conversion), typing and Enter without waiting.
