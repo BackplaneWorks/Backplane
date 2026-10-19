@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -119,9 +120,23 @@ jobs:
           retention-days: 7
 
   kicad-flatpak-adapter:
-    name: KiCad Flatpak adapter
+    name: KiCad Flatpak adapter and export
     runs-on: ubuntu-22.04
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - run: sh -n scripts/kicad-flatpak.sh
       - run: python3 -m unittest discover -s test/tools -p kicad_flatpak_test.py
+      - run: sudo apt-get update && sudo apt-get install -y flatpak dbus-x11
+      - name: Install and export through the adapter
+        run: |
+          dbus-run-session -- sh -eu <<'SH'
+          flatpak --user remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          flatpak --user install -y --noninteractive --no-related flathub org.kicad.KiCad
+          scripts/kicad-flatpak.sh version
+          scratch=$(mktemp -d '/tmp/bp flatpak.XXXXXX')
+          trap 'rm -rf "$scratch"' EXIT
+          cp test/fixtures/flatpak/minimal.kicad_pcb "$scratch/test board.kicad_pcb"
+          scripts/kicad-flatpak.sh pcb export svg -o "$scratch/out dir" "$scratch/test board.kicad_pcb"
+          find "$scratch/out dir" -name '*.svg' | grep -q .
+          SH
