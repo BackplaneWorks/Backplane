@@ -21,7 +21,7 @@ flatpak run --nofilesystem=host --command=sh "$app" -c 'test ! -e /opt/google/ch
 timeout 240 bun tools/browser/test/pages.ts
 find "$BACKPLANE_TEST_CACHE/backplane/chrome" -name chrome -type f | grep -q .
 # Build only the small host against prebuilt CEF, using the app's runtime ABI.
-flatpak run --share=network --filesystem=host --filesystem=/tmp --command=sh org.freedesktop.Sdk//25.08 -c 'scripts/build-cef.sh'
+flatpak run --share=network --filesystem=host --filesystem=/tmp --command=sh org.freedesktop.Sdk//25.08 -c 'CC=gcc CXX=g++ scripts/build-cef.sh'
 timeout 240 bun test/tools/flatpak_browser.ts
 cat > "$scratch/app" <<'SH'
 #!/bin/sh

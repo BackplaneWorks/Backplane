@@ -50,7 +50,7 @@ the source checkout (this downloads prebuilt Chromium, not its source):
 
 ```sh
 flatpak run --share=network --filesystem=host --filesystem=/tmp \
-  --command=sh org.freedesktop.Sdk//25.08 -c scripts/build-cef.sh
+  --command=sh org.freedesktop.Sdk//25.08 -c 'CC=gcc CXX=g++ scripts/build-cef.sh'
 flatpak run --env=BACKPLANE_CEF="$PWD/build/cef/Release/backplane-cef" \
   io.github.i2cjak.Backplane
 ```
