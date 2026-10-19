@@ -19,6 +19,8 @@ import ./plane.bend as MPL
 import ./bots.bend as MB
 import ./tabs.bend as MT
 import ./permissions.bend as PM
+import ../core/ref.bend as R
+import ../core/refview.bend as RE
 
 # The phone keeps every hub it paired with connected at once, each with
 # its own client (Ui). A hub's key is its socket's host:port, which the
@@ -909,9 +911,70 @@ def Hubs.act.go.k(go: Bool, +hs: Hubs, +action: String, +value: String) -> HAct:
     case False{}:
       Hubs.act.one(hs, action, value)
 
+# Internal links carry their containing message's hub separately from the URI.
+# Never remove a remote link~id prefix or reinterpret a URI as a pairing URL.
+def RefOpen.found(m: Maybe<&2, RE.Card>) -> Bool:
+  match m:
+    case Some{_}: True{}
+    case None{}: False{}
+
+def RefOpen.resolves.kind(+u: U.Ui, +r: R.Ref) -> Bool:
+  match r:
+    case R.Ref{k, _, _}:
+      Bool.and(R.Ref.has(["thread", "bot", "room", "project", "machine", "routine", "file", "work", "task", "pr", "mailroom"], k), RefOpen.found(RE.Card.of(U.Ui.state(u), r)))
+
+def RefOpen.resolves(+u: U.Ui, r: R.Ref) -> Bool:
+  RefOpen.resolves.kind(u, r)
+
+def RefOpen.first(+found: String, key: String, resolves: Bool) -> String:
+  match found resolves:
+    case SNil{} True{}: key
+    case _ _: found
+
+def RefOpen.owner(hs: List<&2, Hub>, +r: R.Ref, found: String) -> String:
+  match hs:
+    case Nil{}: found
+    case Hub{+key, +u} <> rest:
+      RefOpen.owner(rest, r, RefOpen.first(found, key, RefOpen.resolves(u, r)))
+
+def RefOpen.go.known(known: Bool, +hs: Hubs, +key: String, +r: R.Ref) -> HAct:
+  match known:
+    case False{}: HAct{hs, Nil{}, Nil{}}
+    case True{}:
+      Hubs.focus(Bool.not(String.eq(Hubs.cur(hs), key)), hs, key, Do{"ref-go", R.Ref.uri(r)})
+
+def RefOpen.go(+hs: Hubs, +key: String, +r: R.Ref) -> HAct:
+  RefOpen.go.known(Bool.and(Hubs.has(Hubs.list(hs), key), RefOpen.resolves(Hubs.ui(hs, key), r)), hs, key, r)
+
+def RefOpen.external(here: Bool, +hs: Hubs, +r: R.Ref) -> HAct:
+  match here:
+    case True{}: RefOpen.go(hs, Hubs.cur(hs), r)
+    case False{}: RefOpen.go(hs, RefOpen.owner(Hubs.list(hs), r, ""), r)
+
+def RefOpen.context(+hs: Hubs, +key: String, +r: R.Ref) -> HAct:
+  match key:
+    case SNil{}: RefOpen.external(RefOpen.resolves(Hubs.ui(hs, Hubs.cur(hs)), r), hs, r)
+    case _: RefOpen.go(hs, key, r)
+
+def RefOpen.parsed(m: Maybe<&2, R.Ref>, hs: Hubs, key: String) -> HAct:
+  match m:
+    case None{}: HAct{hs, Nil{}, Nil{}}
+    case Some{r}: RefOpen.context(hs, key, r)
+
+def RefOpen.json(+hs: Hubs, +j: J.Json) -> HAct:
+  RefOpen.parsed(R.Ref.parse(J.Json.get_str(j, "uri", "")), hs, J.Json.get_str(j, "hub", ""))
+
+def RefOpen.act(+hs: Hubs, value: String) -> HAct:
+  RefOpen.json(hs, Maybe.default(&2, J.Json, J.Json.parse(value), J.Null{}))
+
 # going to a found project shuts the search on every hub, then goes
+def Hubs.act.ref(internal: Bool, +hs: Hubs, +action: String, +value: String) -> HAct:
+  match internal:
+    case True{}: RefOpen.act(hs, value)
+    case False{}: Hubs.act.go.k(String.eq(action, "proj-go"), hs, action, value)
+
 def Hubs.act(+hs: Hubs, +action: String, +value: String) -> HAct:
-  Hubs.act.go.k(String.eq(action, "proj-go"), hs, action, value)
+  Hubs.act.ref(String.eq(action, "ref-open"), hs, action, value)
 
 def Hubs.self(+u: U.Ui) -> String:
   J.Json.get_str(J.Json.get_obj(Maybe.default(&2, J.Json, J.Json.parse(U.Ui.info(u, "machines")), J.Null{}), "self"), "name", "")

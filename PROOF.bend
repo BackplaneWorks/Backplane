@@ -12367,3 +12367,9 @@ def Laws.ios_usage_machine_identity(k, name, j):
 def Laws.ios_session_keeps_cursor(u, o):
   match u:
     case U.Ui{_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _}: {==}
+
+def Laws.ios_ref_unresolved_no_effect(hs, key, r):
+  {==}
+
+def Laws.ios_ref_invalid_no_effect(hs, key):
+  {==}
