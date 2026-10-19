@@ -18,6 +18,7 @@ import ../core/plane.bend as PL
 import ./plane.bend as MPL
 import ./bots.bend as MB
 import ./tabs.bend as MT
+import ./permissions.bend as PM
 
 # The phone keeps every hub it paired with connected at once, each with
 # its own client (Ui). A hub's key is its socket's host:port, which the
@@ -148,14 +149,14 @@ type QN is Data:
 
 def Q.names() -> List<&2, QN>:
   [QN{"sel", 2n}, QN{"thread", 2n}, QN{"entries", 1n}, QN{"live", 1n}, QN{"viewer", 1n}, QN{"blocks", 1n}, QN{"bot", 1n},
-    QN{"picker", 1n}, QN{"folders", 1n}, QN{"find", 1n}, QN{"asks", 1n}, QN{"attaching", 1n}, QN{"menu", 1n}, QN{"diff", 1n},
+    QN{"picker", 1n}, QN{"permissions", 1n}, QN{"folders", 1n}, QN{"find", 1n}, QN{"asks", 1n}, QN{"attaching", 1n}, QN{"menu", 1n}, QN{"diff", 1n},
     QN{"term", 1n}, QN{"skills", 1n}, QN{"settings", 1n}, QN{"newBot", 1n}, QN{"newRoom", 1n}, QN{"plane", 1n}]
 
 def Q.hash(+a: U32, +b: U32) -> U32:
   U32.and(U32.shrn(((a * 29 : U32) + b : U32), 2n), 31)
 
 def Q.bit(+a: U32, +b: U32) -> Bool:
-  U32.is_eq(U32.and(U32.shrn(3100017358, U32.to_nat(Q.hash(a, b))), 1), 1)
+  U32.is_eq(U32.and(U32.shrn(3100017390, U32.to_nat(Q.hash(a, b))), 1), 1)
 
 # whether a key could be one of the names (never false for one of them:
 # law q_may_names)
@@ -273,7 +274,7 @@ def One.act.rest(hist: Bool, +u: U.Ui, +action: String, +value: String) -> U.Act
     case True{}:
       VW.View.hist.act(u, action, value)
     case False{}:
-      VW.View.sync(U.Ui.act(u, action, value))
+      VW.View.sync(PM.Permissions.act(u, action, value))
 
 # The hub's settings page of the Settings tab: "on" opens Settings (the flag
 # "settings") and "off" shuts it, each only when it is not so already (a
@@ -891,7 +892,7 @@ def Hubs.act.r(routed: Bool, +hs: Hubs, +action: String, +value: String) -> HAct
       Hubs.act.k(hs, Hubs.cur(hs), False{}, action, value)
 
 def Hubs.act.one(+hs: Hubs, +action: String, +value: String) -> HAct:
-  Hubs.act.r(Nat.is_lt(Hubs.routed(action), Hubs.routes()), hs, action, value)
+  Hubs.act.r(Bool.or(String.eq(action, "usage-refresh"), Nat.is_lt(Hubs.routed(action), Hubs.routes())), hs, action, value)
 
 def Hubs.act.then(a: HAct, b: HAct) -> HAct:
   match a b:
@@ -1087,8 +1088,25 @@ type Shown is Data:
 # reads those from the hub in focus only)
 # (the index of the state and the sidebar's rows are made once and shared by
 # the screen and the plane)
+# Usage is requested by the device only while its usage page is visible.
+# No per-thread usage scan is added to chat/streaming screens.
+def Hubs.usage.rows(+lc: I.Loc, on: Bool, +u: U.Ui) -> List<&2, J.Json>:
+  match on:
+    case True{}:
+      S.Mob.usage.rows.loc(lc, U.Usage.rows(u))
+    case False{}:
+      Nil{}
+
+def Hubs.usage.put(j: J.Json, rows: List<&2, J.Json>) -> J.Json:
+  match j:
+    case J.Obj{fs}:
+      J.Obj{J.Field{"machineUsage", J.Json.arr(rows), fs}}
+    case x:
+      x
+
 def Hubs.shown.r(+lc: I.Loc, +k: String, +u: U.Ui, +cur: String, +any: Bool, +want: Bool, +idle: Bool, +lite: Bool, +ix: U.SIx, +rows: List<&2, U.SRow>) -> J.Json:
-  Hubs.tabs.put(Hubs.pl.fill(lc, any, want, Q.all(S.Mob.screen.ixr(lc, String.eq(k, cur), u, ix, rows), k), u, k, idle, lite, ix, rows), MT.MTab.json(lc, u, ix, rows))
+  Hubs.usage.put(Hubs.tabs.put(Hubs.pl.fill(lc, any, want, Q.all(S.Mob.screen.ixr(lc, String.eq(k, cur), u, ix, rows), k), u, k, idle, lite, ix, rows), MT.MTab.json(lc, u, ix, rows)),
+    Hubs.usage.rows(lc, String.eq(U.Ui.scratch(u, "@local.usage"), "1"), u))
 
 def Hubs.shown.ix(+lc: I.Loc, +k: String, +u: U.Ui, +cur: String, +any: Bool, +want: Bool, +idle: Bool, +lite: Bool, +ix: U.SIx) -> J.Json:
   Hubs.shown.r(lc, k, u, cur, any, want, idle, lite, ix, U.Side.rows.ix(U.Ui.state(u), ix, S.Mob.now(u)))
@@ -1502,6 +1520,20 @@ def Hubs.rows(ss: List<&2, Shown>) -> List<&2, J.Json>:
     case Shown{+k, +n, +j} <> t:
       J.Json.obj([J.KV{"key", J.Json.str(k)}, J.KV{"name", J.Json.str(n)}, J.KV{"online", J.Json.bool(J.Json.get_bool(j, "online", False{}))},
         J.KV{"version", J.Json.str(J.Json.get_str(j, "version", ""))}, J.KV{"changes", J.Json.nat(J.Json.get_nat(j, "seq", 0n))}]) <> Hubs.rows(t)
+
+# Keep each paired machine's identity even when it is offline or has the
+# same display name as another. Actions stay qualified to the owning hub.
+def Hubs.usage.machine(+k: String, +name: String, +j: J.Json) -> J.Json:
+  J.Json.obj([J.KV{"key", J.Str{k}}, J.KV{"name", J.Str{name}},
+    J.KV{"online", J.Json.bool(J.Json.get_bool(j, "online", False{}))},
+    J.KV{"rows", J.Json.arr(J.Json.elems(J.Json.get_obj(j, "machineUsage")))}])
+
+def Hubs.usage.machines(ss: List<&2, Shown>) -> List<&2, J.Json>:
+  match ss:
+    case Nil{}:
+      Nil{}
+    case Shown{k, name, j} <> t:
+      Hubs.usage.machine(k, name, j) <> Hubs.usage.machines(t)
 
 # the host:port of a hub's url (http://host:3787 -> host:3787)
 def Hubs.auth(+url: String) -> String:
@@ -2070,6 +2102,7 @@ def Hubs.screen.p.loc(+lc: I.Loc, +pl: MPL.MUber, +ss: List<&2, Shown>, +cur: St
     J.KV{"bot", Hubs.origin.focus(ss, cur, "bot")},
     J.KV{"hub", J.Json.str(cur)},
     J.KV{"hubs", J.Json.arr(Hubs.rows(ss))},
+    J.KV{"usageMachines", J.Json.arr(Hubs.usage.machines(ss))},
     J.KV{"found", J.Json.arr(Hubs.found(list))},
     J.KV{"tabs", Hubs.tabs(ss, list, Nat.is_gt(List.length(&2, Shown, ss), 1n))}]))
 

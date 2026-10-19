@@ -7,11 +7,13 @@ import ./ref.bend as R
 import ./refview.bend as RE
 import ./i18n.bend as I
 import ./msgs.bend as MSG
+import ./winnote.bend as NT
 import ./kihealth.bend as KH
 import ./kserve.bend as KSV
 import ./kexport.bend as KEX
 import ./deploy.bend as DP
 import ./live.bend as LV
+import ./rpcout.bend as RPO
 import ./json.bend as J
 import ./model.bend as M
 import ./usage.bend as UZ
@@ -584,10 +586,11 @@ def Ui.reply.err.std(+o: J.Json) -> String:
 def Ui.reply.err(+o: J.Json) -> String:
   Bool.pick(String, String.is_empty(J.Json.get_str(J.Json.get_obj(o, "result"), "kicad", "")), Ui.reply.err.std(o), "")
 
+# Replies to ordinary RPCs must not add empty entries to the kept queue.
 def Ui.reply.k(u: Ui, +o: J.Json) -> Ui:
   match u:
     case Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w, _, note, nf, ob, tr}:
-      Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w, Ui.reply.err(o), note, nf, Map.set(&2, String, ob, J.Json.as_raw(J.Json.get(o, "id"), ""), ""), tr}
+      Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w, Ui.reply.err(o), note, nf, Map.del(&2, String, ob, J.Json.as_raw(J.Json.get(o, "id"), "")), tr}
 
 # The viewer belongs to a thread: what it shows for thread t is kept as
 # "view.kind:t" and "view.path:t" (a file an agent asked for, else the
@@ -890,10 +893,14 @@ def Out.resend(xs: List<&2, String>) -> List<&2, Cmd>:
 def Ui.outbox(u: Ui) -> List<&2, Cmd>:
   match u:
     case Ui{_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, ob, tr}:
-      Out.resend(Map.values(&2, String, ob))
+      Out.resend(RPO.RpcOut.values(ob))
 
 def Ui.recv_act.k(connected: Bool, +u: Ui) -> Act:
-  Act{u, Bool.pick(List<&2, Cmd>, connected, Ui.outbox(u), Nil{})}
+  match connected:
+    case True{}:
+      Act{u, Ui.outbox(u)}
+    case False{}:
+      Act{u, Nil{}}
 
 # the client's own id (a host sets it once at start)
 def Ui.set_cid(u: Ui, +cid: String) -> Ui:
@@ -928,7 +935,7 @@ def Pending.go(xs: List<&2, String>, +thread: String, +es: List<&2, M.Entry>) ->
 def Ui.pending(u: Ui, +thread: String) -> List<&2, String>:
   match u:
     case Ui{st, _, _, _, _, _, _, _, _, _, _, _, _, _, _, ob, tr}:
-      Pending.go(Map.values(&2, String, ob), thread, M.State.mine(st, thread))
+      Pending.go(RPO.RpcOut.values(ob), thread, M.State.mine(st, thread))
 
 # (a new connection has answered nothing: what the Mechanical page and a
 # part in 3D asked for is asked again)
@@ -5460,6 +5467,9 @@ def Mpage.note.loc(+l: I.Loc, +u: Ui) -> String:
 def Mpage.note(+u: Ui) -> String:
   Mpage.note.loc(Lang.loc(u), u)
 
+def Ui.error.shown(l: I.Loc, e: String) -> String:
+  NT.Notice.shown(l, e)
+
 def Ui.error_set(u: Ui, e: String) -> Ui:
   match u:
     case Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w, _, note, nf, ob, tr}:
@@ -5468,7 +5478,7 @@ def Ui.error_set(u: Ui, e: String) -> Ui:
 def Ui.attach.k(big: Bool, first: Bool, +u: Ui, +o: J.Json) -> Act:
   match big first:
     case True{} True{}:
-      Act{Ui.error_set(u, "attachments are limited to " ++ Nat.show(Nat.div(AT.Att.cap(), 1048576n)) ++ " MB"), Nil{}}
+      Act{Ui.error_set(u, NT.Notice.make("upload.cap", Nat.show(Nat.div(AT.Att.cap(), 1048576n)))), Nil{}}
     case True{} False{}:
       Act{u, Nil{}}
     case False{} _:
@@ -6997,10 +7007,14 @@ def Voice.fixed(+u: Ui) -> Act:
 # hub (server.bend's Upload); the answer comes back here as "attach-end":
 # the path joins the thread's attachments, or the failure shows
 
+def Upload.error(+o: J.Json) -> String:
+  NT.Notice.upload(J.Json.get_str(o, "uiError", ""), J.Json.get_str(o, "uiDetail", ""),
+    J.Json.get_str(o, "text", NT.Notice.make("upload.failed", "")))
+
 def Upload.fail(failed: Bool, +o: J.Json, u: Ui) -> Ui:
   match failed:
     case True{}:
-      Ui.error_set(u, J.Json.get_str(o, "text", "the upload failed"))
+      Ui.error_set(u, Upload.error(o))
     case False{}:
       u
 
@@ -7010,15 +7024,24 @@ def Upload.end.k(+o: J.Json, +u: Ui) -> Act:
 def Upload.start.k(big: Bool, +u: Ui, +name: String) -> Act:
   match big:
     case True{}:
-      Act{Ui.error_set(u, "attachments are limited to " ++ Nat.show(Nat.div(AT.Att.cap(), 1048576n)) ++ " MB"), Nil{}}
+      Act{Ui.error_set(u, NT.Notice.make("upload.cap", Nat.show(Nat.div(AT.Att.cap(), 1048576n)))), Nil{}}
     case False{}:
       Act{Ui.up_set(u, Ui.sel(u), name), Nil{}}
 
 def Upload.start(+u: Ui, +o: J.Json) -> Act:
   Upload.start.k(Nat.is_gt(J.Json.get_nat(o, "size", 0n), AT.Att.cap()), u, J.Json.get_str(o, "name", "file"))
 
+# A JSON primitive is not an upload reply. The parser may recover one even
+# from malformed input, so require the expected object before inspecting flags.
+def Upload.end.value(o: J.Json, +u: Ui) -> Act:
+  match o:
+    case J.Obj{fs}:
+      Upload.end.k(J.Obj{fs}, u)
+    case _:
+      Upload.end.k(J.Json.obj([J.KV{"uiError", J.Str{"upload.failed"}}, J.KV{"thread", J.Str{Ui.sel(u)}}, J.KV{"upload", J.Flag{True{}}}]), u)
+
 def Upload.end(+u: Ui, +v: String) -> Act:
-  Upload.end.k(Maybe.default(&2, J.Json, J.Json.parse(v), J.Json.obj([J.KV{"text", J.Str{"the upload failed"}}, J.KV{"thread", J.Str{Ui.sel(u)}}, J.KV{"upload", J.Flag{True{}}}])), u)
+  Upload.end.value(Maybe.default(&2, J.Json, J.Json.parse(v), J.Null{}), u)
 
 # Design history
 # --------------

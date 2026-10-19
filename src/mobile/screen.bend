@@ -33,6 +33,7 @@ import ../core/emb.bend as EM
 import ../core/sched.bend as SCH
 import ../core/tz.bend as TZ
 import ../core/stamp.bend as STP
+import ./permissions.bend as PM
 
 # Ui -> the screen the phone apps draw, as JSON. SwiftUI and Compose map
 # it onto native lists, toolbars and text fields; every decision (order,
@@ -1040,8 +1041,11 @@ def Mob.count(+more: Nat) -> Nat:
 
 # the newest page of a thread's entries (core's Page): "earlier" says how
 # many are left out, and the action "earlier" shows another page
+def Mob.page.from(+es: List<&2, M.Entry>, +drafts: Map<&2, String>, +id: String, +st: M.State) -> U.Win:
+  U.Page.newest.from(es, id, U.Page.since(st, id), U.Hold.page(es, U.Str.get(drafts, "@away." ++ id), Mob.count(Maybe.default(&2, Nat, Nat.read(U.Str.get(drafts, "@more." ++ id)), 0n))))
+
 def Mob.page(+drafts: Map<&2, String>, +id: String, +st: M.State) -> U.Win:
-  U.Page.newest.from(M.State.mine(st, id), id, U.Page.since(st, id), Mob.count(Maybe.default(&2, Nat, Nat.read(U.Str.get(drafts, "@more." ++ id)), 0n)))
+  Mob.page.from(M.State.mine(st, id), drafts, id, st)
 
 def Mob.paged.es(+lc: I.Loc, w: U.Win, +st: M.State, +sel: String, +info: Map<&2, String>, +dr: Map<&2, String>, +running: Bool) -> List<&2, J.Json>:
   Mob.entries(lc, U.Win.shown(w), st, sel, info, dr, running)
@@ -1110,10 +1114,12 @@ def Mob.fab(+st: M.State, +nf: Map<&2, String>, +id: String, run: Bool) -> List<
 
 def Mob.thread(+lc: I.Loc, render: Bool, u: U.Ui, t: M.Thread, pend: List<&2, String>, vw: J.Json, +atts: List<&2, String>, +up: String, term: J.Json, skills: List<&2, J.Json>, +ph: M.Phase, btw: J.Json, embs: J.Json) -> J.Json:
   match u t:
-    case U.Ui{+st, +sel, +drafts, +live, _, _, +now, _, pa, _, _, _, _, _, +nf, _, _} M.Thread{+id, _, title, _, _, +turn, _, archived, o, +sa, +ua, pinned, _, branch, _, +pr, +mo, _, _, _, _}:
+    case U.Ui{+st, +sel, +drafts, +live, _, _, +now, _, pa, _, _, _, _, _, +nf, _, _} M.Thread{+id, _, title, _, _, +turn, _, archived, o, +sa, +ua, pinned, _, branch, _, +pr, +mo, rt, _, _, _}:
       +pg = Mob.page(drafts, id, st)
       J.Json.obj([J.KV{"id", J.Json.str(id)}, J.KV{"title", J.Json.str(U.Label.title(st, id, TTL.Title.shown(lc, title)))}, J.KV{"branch", J.Json.str(branch)},
         J.KV{"boat", J.Json.str(UZ.Chip.of(st, id, now))},
+        J.KV{"permissions", PM.Permissions.json(lc, rt)},
+        J.KV{"readingSeen", J.Json.str(U.Hold.newest(M.State.mine(st, id)))},
         J.KV{"state", J.Json.str(Mob.state(turn))},
         J.KV{"tools", J.Json.arr(Mob.head.loc(lc, V.View.running(turn), pinned, TO.Tools.settled(o, Nat.is_gt(sa, ua)), archived, Bool.not(String.is_empty(M.Fork.source(st, id)))))},
         J.KV{"menu", J.Json.arr(Mob.menu.loc(lc, id, M.Snooze.on(now, U.Side.until(st, id)), U.Fab.mini.tools.of(st, nf, id, V.View.running(turn))))},
@@ -1665,7 +1671,7 @@ def Mob.screen.go(+lc: I.Loc, +focus: Bool, +u: U.Ui, +ix: U.SIx, +g: U.SGroups,
       +newroom = MB.MBots.rnew(u)
       +thread = Mob.focus.thread(lc, focus, u, sel)
       +bot = Mob.focus.bot(lc, focus, u)
-      J.Json.obj([J.KV{"online", J.Json.bool(on)}, J.KV{"version", J.Json.str(v)}, J.KV{"seq", J.Json.nat(U.Ui.seq(u))}, J.KV{"error", J.Json.str(e)},
+      J.Json.obj([J.KV{"online", J.Json.bool(on)}, J.KV{"version", J.Json.str(v)}, J.KV{"seq", J.Json.nat(U.Ui.seq(u))}, J.KV{"error", J.Json.str(U.Ui.error.shown(lc, e))},
         J.KV{"lang", Mob.lang.loc(lc, u)}, J.KV{"note", J.Json.str(note)}, J.KV{"sel", J.Json.str(sel)}, J.KV{"making", J.Json.bool(U.Made.waiting(u))}, J.KV{"theme", J.Json.str(M.Setting.get(st, "ui.theme", ""))},
         J.KV{"empty", J.Json.str(Mob.empty.loc(lc, List.length(&2, M.Project, U.Ui.projects(st))))},
         J.KV{"projects", J.Json.arr(Mob.grouped(lc, g, o, ix, st, now, U.Find.q(o, dr)))},

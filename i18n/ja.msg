@@ -1236,3 +1236,25 @@ native.notify.channel.live = 稼働中のエージェント
 
 # iOS system camera permission purpose
 native.permission.camera = コンピューターに表示されたペアリングコードを読み取り、接続します。
+
+# Upload failure messages resolved at the client
+upload.network = アップロードがハブに届きませんでした
+upload.failed = アップロードに失敗しました
+upload.incomplete = アップロードが途中で途切れました
+upload.cap = 添付ファイルは{mb} MBまでです
+
+# Native per-machine usage and reading position
+native.usage.machines = マシン別の使用量
+native.thread.latest = 最新
+native.thread.new = 新着{n}件
+
+# Native per-thread permissions and history feedback
+native.thread.permissions = 権限
+native.thread.permissions.current = 権限：{mode}
+native.thread.permissions.approval = 承認が必要
+native.thread.permissions.edits = 編集を自動承認
+native.thread.permissions.auto = 自動
+native.thread.permissions.full = フルアクセス
+native.thread.loading.recent = 最近のメッセージを読み込み中…
+native.thread.loading.older = 過去のメッセージを読み込み中…
+native.thread.send.failed = 送信できませんでした

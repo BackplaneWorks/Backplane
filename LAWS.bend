@@ -2,6 +2,7 @@ import Base
 import ./src/core/auth.bend as AUTH
 import ./src/core/http.bend as HTTPAUTH
 import ./src/core/pcb2d.bend as PCB2 # PCB viewer text
+import ./src/mobile/session.bend as IOSSESSION
 import ./src/app/side_rows.bend as SR
 import ./src/app/side_row_types.bend as SRT
 import ./src/server/botnet.bend as MPLOG # mail perf runtime count
@@ -127,6 +128,7 @@ import ./src/core/hier.bend as HI
 
 import ./src/core/boot.bend as BT
 import ./src/core/store.bend as ST
+import ./src/server/logread.bend as LOGREAD
 import ./src/core/sign.bend as SG
 import ./src/core/ring.bend as RG
 import ./src/core/cron.bend as CR
@@ -143,6 +145,7 @@ import ./src/core/desk.bend as DK
 import ./src/core/emb.bend as EMB
 import ./src/core/outbox.bend as OB
 import ./src/core/live.bend as LV
+import ./src/core/rpcout.bend as RPO
 import ./src/core/farlive.bend as FLV
 import ./src/core/qr.bend as QR
 import ./src/core/layers.bend as LY
@@ -2304,6 +2307,18 @@ law reset_asks_card_again:
 
 law reset_drops_results:
   {U.Ui.info(U.Ui.reset(U.Ui.info_set(U.Ui.reset(U.Ui.init(0n), U.Reset.demo("O")), "fm.list:t1", "x"), U.Reset.demo("O")), "fm.list:t1") == "" : String}
+
+# Kept requests replay in numeric request order, with their original bytes.
+# Empty entries from older saved clients are not requests.
+law client_outbox_numeric_order:
+  {RPO.RpcOut.values(Map.set(&2, String, Map.set(&2, String, Map.set(&2, String, Map.set(&2, String, Map.new(&2, String), "100", "fourth"), "9", "first"), "99", "third"), "10", "second")) == ["first", "second", "third", "fourth"] : List<&2, String>}
+
+law client_outbox_legacy_empty:
+  {RPO.RpcOut.values(Map.set(&2, String, Map.set(&2, String, Map.set(&2, String, Map.set(&2, String, Map.new(&2, String), "9", "first"), "10", ""), "100", "second"), "unknown", "")) == ["first", "second"] : List<&2, String>}
+
+law client_outbox_payload_exact:
+  for +request: String
+  {RPO.RpcOut.values(Map.set(&2, String, Map.new(&2, String), "9", request)) == Bool.pick(List<&2, String>, String.is_empty(request), [], [request]) : List<&2, String>}
 
 # a page's lines are those after since, oldest first; the walk stops at
 # the first line at or below it
@@ -5102,6 +5117,16 @@ law store_torn_tail_newline:
 
 law store_fail_names_repair:
   {ST.Store.fail.msg("disk full", True{}) ++ "|" ++ ST.Store.fail.msg("disk full", False{}) == "disk full|disk full; the log's tail could not be repaired" : String}
+
+# An existing history must not be replayed as empty after an IO failure.
+law log_read_missing_only:
+  {[LOGREAD.LogRead.missing(2), LOGREAD.LogRead.missing(0), LOGREAD.LogRead.missing(5), LOGREAD.LogRead.missing(13)] == [True{}, False{}, False{}, False{}] : List<&2, Bool>}
+
+law log_read_complete_only:
+  {[LOGREAD.LogRead.complete(0, 0n), LOGREAD.LogRead.complete(3, 3n), LOGREAD.LogRead.complete(3, 2n), LOGREAD.LogRead.complete(3, 4n)] == [True{}, True{}, False{}, False{}] : List<&2, Bool>}
+
+law log_read_native_capacity:
+  {[LOGREAD.LogRead.supported(0), LOGREAD.LogRead.supported(2147483647), LOGREAD.LogRead.supported(2147483648), LOGREAD.LogRead.supported(4294967295)] == [True{}, True{}, False{}, False{}] : List<&2, Bool>}
 
 # torn before the task's state: the child's turn ended, so its task ends
 law task_repair_finishes_ended_child:
@@ -10676,3 +10701,20 @@ law pcb2_hidden_text_draws_nothing:
   for +sig: U32
   for +ctx: String
   {PCB2.Text.visible.k(True{}, at, angle, x, text, up, key, sig, ctx) == Nil{} : List<&2, B.Item>}
+# A phone usage view never scans thread usage while hidden, and machine
+# identity survives duplicate names/offline readings.
+law ios_usage_hidden_empty:
+  for +lc: I18.Loc
+  for +u: U.Ui
+  {Hb.Hubs.usage.rows(lc, False{}, u) == Nil{} : List<&2, J.Json>}
+
+law ios_usage_machine_identity:
+  for +k: String
+  for +name: String
+  for +j: J.Json
+  {J.Json.get_str(Hb.Hubs.usage.machine(k, name, j), "key", "") == k : String}
+
+law ios_session_keeps_cursor:
+  for +u: U.Ui
+  for +o: J.Json
+  {U.Ui.seq(IOSSESSION.Session.adopt(u, o)) == U.Ui.seq(u) : Nat}

@@ -1213,3 +1213,25 @@ native.notify.channel.live = Agents working
 
 # iOS system camera permission purpose
 native.permission.camera = Backplane reads the pairing code your computer shows, to connect to it.
+
+# Upload failure messages resolved at the client
+upload.network = the upload did not reach the hub
+upload.failed = the upload failed
+upload.incomplete = the upload did not arrive whole
+upload.cap = attachments are limited to {mb} MB
+
+# Native per-machine usage and reading position
+native.usage.machines = Usage by machine
+native.thread.latest = Latest
+native.thread.new = {n} new
+
+# Native per-thread permissions and history feedback
+native.thread.permissions = Permissions
+native.thread.permissions.current = Permissions: {mode}
+native.thread.permissions.approval = Approval required
+native.thread.permissions.edits = Auto-accept edits
+native.thread.permissions.auto = Auto
+native.thread.permissions.full = Full access
+native.thread.loading.recent = Loading recent messages…
+native.thread.loading.older = Loading older messages…
+native.thread.send.failed = Could not send

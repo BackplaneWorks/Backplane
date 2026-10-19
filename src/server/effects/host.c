@@ -1331,6 +1331,8 @@ static int jc_frame(const char* text, size_t n, const char* ks, size_t kn, const
 
 #endif
 
+#if defined(CID(Sock.send_items)) || defined(CID(Json.items_frames))
+
 // A join frame's lines (core/outbox.bend's Items.texts.s) as the binary
 // WebSocket frames of their CBOR, back to back: the first frame is hd, then
 // plain (or split when the lines take more frames), the lines joined by
@@ -1425,6 +1427,8 @@ static int ji_run(Env e, Term* f, JcBuf* out) {
   free(ls); free(hd); free(pl); free(sp); free(tl); free(k); free(ws);
   return ok;
 }
+
+#endif
 
 #ifdef CID(Json.cbor_frame)
 

@@ -247,7 +247,7 @@ def thread_wt_checks(+root: String) -> IO(Bool):
     rv : String <- G.Git.checkpoint.revert(p2, "tw-thread", 0n)
     p3 : String <- cat(p2 ++ "/board.kicad_pcb")
     b7 : Bool <- chk("state restored", rv ++ p3, "v3")
-    s2 : P.Ran <- sh(root, "git init -q --bare twr.git && git -C tw remote add origin ../twr.git && git -C tw push -q origin main && git clone -q twr.git twc && cd twc && git config user.email t@t && git config user.name t && printf 'u\\n' > up.txt && git add up.txt && git commit -q -m up && git push -q origin main")
+    s2 : P.Ran <- sh(root, "git init -q --bare -b main twr.git && git -C tw remote add origin ../twr.git && git -C tw push -q origin main && git clone -q twr.git twc && cd twc && git config user.email t@t && git config user.name t && printf 'u\\n' > up.txt && git add up.txt && git commit -q -m up && git push -q origin main")
     +up : String <- G.Git.thread_wt(repo, False{}, "backplane/up")
     uf : String <- exists(up ++ "/up.txt")
     c1 : Bool <- chk("starts from upstream main", uf, "True")
@@ -257,6 +257,53 @@ def thread_wt_checks(+root: String) -> IO(Bool):
     hf : String <- exists(hc ++ "/../up.txt")
     c3 : Bool <- chk("carried work stays on HEAD", hf, "False")
     return all([a1, a2, a3, a4, a5, a6, a7, a8, a9, b1, b2, b3, b4, b5, b6, b7, c1, c2, c3])
+
+# A project added only on the checked-out branch must exist in the new
+# thread too. A newer origin/main remains preferred when it has that
+# directory; a same-named blob is not a project directory.
+def prefix_setup() -> String:
+  "git init -q --bare -b main prefix-origin.git && git init -q -b main prefix && cd prefix && git config user.email t@t && git config user.name t && git config commit.gpgsign false && mkdir existing && printf 'main\\n' > existing/board.kicad_pro && printf 'blob\\n' > collision && git add -A && git commit -qm base && git remote add origin ../prefix-origin.git && git push -qu origin main && git checkout -qb local-feature && mkdir 'feature only' 'design $(touch injected); pieces' && printf 'feature\\n' > 'feature only/board.kicad_pro' && printf 'special\\n' > 'design $(touch injected); pieces/board.kicad_pro' && rm collision && mkdir collision && printf 'directory\\n' > collision/board.kicad_pro && git add -A && git commit -qm projects && git checkout -qb upstream-source main && printf 'upstream\\n' > existing/board.kicad_pro && git add -A && git commit -qm upstream && git push -q origin HEAD:main && git checkout -q local-feature"
+
+def thread_prefix_checks(+root: String) -> IO(Bool):
+  +repo = root ++ "/prefix"
+  do IO<Bool>:
+    +s0 : P.Ran <- sh(root, prefix_setup())
+    a0 : Bool <- chk("prefix fixture setup", code(s0) ++ out(s0), "0")
+    +head : String <- git(repo, ["rev-parse", "HEAD"])
+    +upstream : String <- git(repo, ["rev-parse", "origin/main"])
+    a1 : Bool <- chk("prefix fixture commits differ", Bool.show(String.eq(head, upstream)), "False")
+    +fresh : String <- G.Git.thread_wt(repo ++ "/feature only", False{}, "backplane/prefix-new")
+    a2 : Bool <- IO.bind(String, Bool, exists(fresh), v => chk("feature-only project directory exists", v, "True"))
+    a3 : Bool <- IO.bind(String, Bool, cat(fresh ++ "/board.kicad_pro"), v => chk("feature-only project files", v, "feature"))
+    a4 : Bool <- IO.bind(String, Bool, git(fresh, ["rev-parse", "HEAD"]), v => chk("feature-only project starts at HEAD", v, head))
+    a5 : Bool <- IO.bind(String, Bool, git(fresh, ["config", "--get", "branch.backplane/prefix-new.remote"]), v => chk("fallback branch tracks nothing", v, ""))
+    +blob : String <- G.Git.thread_wt(repo ++ "/collision", False{}, "backplane/prefix-blob")
+    b1 : Bool <- IO.bind(String, Bool, cat(blob ++ "/board.kicad_pro"), v => chk("upstream file does not replace project directory", v, "directory"))
+    b2 : Bool <- IO.bind(String, Bool, git(blob, ["rev-parse", "HEAD"]), v => chk("file collision starts at HEAD", v, head))
+    +special : String <- G.Git.thread_wt(repo ++ "/design $(touch injected); pieces", False{}, "backplane/prefix-special")
+    b3 : Bool <- IO.bind(String, Bool, cat(special ++ "/board.kicad_pro"), v => chk("project path keeps spaces and shell characters", v, "special"))
+    b4 : Bool <- IO.bind(String, Bool, exists(repo ++ "/injected"), v => chk("project path is not evaluated by a shell", v, "False"))
+    +normal : String <- G.Git.thread_wt(repo ++ "/existing", False{}, "backplane/prefix-normal")
+    c1 : Bool <- IO.bind(String, Bool, cat(normal ++ "/board.kicad_pro"), v => chk("existing project uses upstream files", v, "upstream"))
+    c2 : Bool <- IO.bind(String, Bool, git(normal, ["rev-parse", "HEAD"]), v => chk("existing project keeps origin base", v, upstream))
+    c3 : Bool <- IO.bind(String, Bool, git(normal, ["config", "--get", "branch.backplane/prefix-normal.remote"]), v => chk("upstream-based branch tracks nothing", v, ""))
+    s1 : P.Ran <- sh(repo, "mkdir untracked-only && printf 'new\\n' > untracked-only/board.kicad_pro")
+    +absent : String <- G.Git.thread_wt(repo ++ "/untracked-only", False{}, "backplane/prefix-untracked")
+    d1 : Bool <- chk("uncommitted-only project has a useful error", Bool.show(Bool.and(G.Git.failed(absent), String.contains(absent, "untracked-only"))), "True")
+    d2 : Bool <- IO.bind(String, Bool, exists(G.Git.thread_wt.path(repo, "backplane/prefix-untracked")), v => chk("missing project does not create a worktree", v, "False"))
+    d3 : Bool <- IO.bind(String, Bool, git(repo, ["branch", "--list", "backplane/prefix-untracked"]), v => chk("missing project does not create a branch", v, ""))
+    +untracked : String <- G.Git.thread_wt(repo ++ "/untracked-only", True{}, "backplane/prefix-untracked-carry")
+    d4 : Bool <- IO.bind(String, Bool, cat(untracked ++ "/board.kicad_pro"), v => chk("uncommitted-only project can be carried", untracked ++ "\n" ++ v, G.Git.thread_wt.path(repo, "backplane/prefix-untracked-carry") ++ "/untracked-only\nnew"))
+    d5 : Bool <- IO.bind(String, Bool, git(untracked, ["rev-parse", "HEAD"]), v => chk("carried uncommitted-only project keeps HEAD base", v, head))
+    s2 : P.Ran <- sh(repo, "printf 'dirty\\n' > existing/board.kicad_pro")
+    +carried : String <- G.Git.thread_wt(repo ++ "/existing", True{}, "backplane/prefix-carry")
+    e1 : Bool <- IO.bind(String, Bool, cat(carried ++ "/board.kicad_pro"), v => chk("carried project keeps uncommitted edits", v, "dirty"))
+    e2 : Bool <- IO.bind(String, Bool, git(carried, ["rev-parse", "HEAD"]), v => chk("carried project keeps HEAD base", v, head))
+    s3 : P.Ran <- sh(repo, "git remote remove origin")
+    +local : String <- G.Git.thread_wt(repo ++ "/feature only", False{}, "backplane/prefix-local")
+    f1 : Bool <- IO.bind(String, Bool, cat(local ++ "/board.kicad_pro"), v => chk("project without origin stays usable", v, "feature"))
+    f2 : Bool <- IO.bind(String, Bool, git(local, ["rev-parse", "HEAD"]), v => chk("project without origin keeps HEAD base", v, head))
+    return all([a0, a1, a2, a3, a4, a5, b1, b2, b3, b4, c1, c2, c3, d1, d2, d3, d4, d5, e1, e2, f1, f2])
 
 def act_checks(+root: String) -> IO(Bool):
   +repo = root ++ "/repo"
@@ -291,5 +338,6 @@ def main() -> IO(Unit):
     c : Bool <- worktree_checks(root)
     d : Bool <- act_checks(root)
     e : Bool <- thread_wt_checks(root)
+    f : Bool <- thread_prefix_checks(root)
     x : P.Ran <- P.Proc.run("rm", ["-rf", root], "")
-    finish(all([a, b, c, d, e]))
+    finish(all([a, b, c, d, e, f]))

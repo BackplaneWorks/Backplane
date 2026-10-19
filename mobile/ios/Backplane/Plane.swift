@@ -88,6 +88,7 @@ struct UberCardRow: View {
                 Spacer()
                 Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
             }
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .listRowBackground(Color.accentColor.opacity(card.sel ? 0.22 : 0.10))

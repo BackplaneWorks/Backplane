@@ -70,7 +70,7 @@ struct Thumb: View {
                 default: ProgressView().frame(width: 80, height: 60)
                 }
             }
-            .frame(maxWidth: 260, maxHeight: 200, alignment: .leading)
+            .frame(width: 260, height: 200, alignment: .leading)
             .clipShape(.rect(cornerRadius: 6))
             .onTapGesture { show(Shown(url: u)) }
             .accessibilityAddTraits(.isButton)

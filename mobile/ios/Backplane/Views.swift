@@ -157,7 +157,7 @@ struct HubsView: View {
                                 Spacer()
                                 Text(HubDot.word(c.phase, tag)).font(.caption).foregroundStyle(HubDot.tint(c.phase))
                             }
-                            Text(HubsView.detail(h, c, tag)).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                            Text(HubsView.detail(h, c, model.conn.traffic(h.key), tag)).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                         }
                     }
                     .swipeActions { Button(NativeMessages.native_pair_unpair(tag), role: .destructive) { model.unpair(h.key) } }
@@ -194,15 +194,15 @@ struct HubsView: View {
     }
 
     // host:port · version · changes held · when it last said anything
-    static func detail(_ h: HubRow, _ c: HubConn, _ tag: String) -> String {
+    static func detail(_ h: HubRow, _ c: HubConn, _ traffic: HubTraffic, _ tag: String) -> String {
         var parts = [h.key]
         if let v = h.version, !v.isEmpty { parts.append(v) }
-        if c.phase == .syncing, c.bytes > 0 {
-            parts.append(NativeMessages.native_hub_catchup(tag, ByteCountFormatter.string(fromByteCount: Int64(c.bytes), countStyle: .file)))
+        if c.phase == .syncing, traffic.bytes > 0 {
+            parts.append(NativeMessages.native_hub_catchup(tag, ByteCountFormatter.string(fromByteCount: Int64(traffic.bytes), countStyle: .file)))
         } else if let n = h.changes, n > 0 {
             parts.append(NativeMessages.native_hub_changes(tag, n.formatted(.number.locale(Locale(identifier: tag)))))
         }
-        if let t = c.heard { parts.append(NativeMessages.native_hub_heard(tag, t.formatted(.relative(presentation: .named).locale(Locale(identifier: tag))))) }
+        if let t = traffic.heard { parts.append(NativeMessages.native_hub_heard(tag, t.formatted(.relative(presentation: .named).locale(Locale(identifier: tag))))) }
         return parts.joined(separator: " · ")
     }
 }
@@ -701,40 +701,20 @@ struct ThreadScreen: View {
     @FocusState private var focused: Bool
     // the image open in the lightbox
     @State private var shown: Shown?
-    // the entry that was first when earlier ones were asked for
-    @State private var keepAt: String?
-    // where the earlier mark is (its top in the timeline)
-    @State private var markY: CGFloat = -10000
+    @State private var position = TimelinePosition()
     // the entry a jump showed, tinted for a moment
     @State private var lit: String?
     // the file menu this dialog let go of
     @State private var shutFile: RowMenu?
     // the subagents sheet (the top bar's button) is up
     @State private var showSubs = false
+    @State private var showPermissions = false
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                // not lazy: a page is at most a few dozen entries, and with
-                // every height known on the first frame the view opens at the
-                // bottom and stays there (a lazy stack measured rows as they
-                // came and the text jumped)
+        TimelineScroll(position: position, ids: thread.entries.map(\.id), earlier: thread.earlier ?? 0,
+                       loadEarlier: { if live { model.act("earlier", "") } }) {
                 VStack(alignment: .leading, spacing: 14) {
                     if let p = thread.parent { EntryRow(model: model, entry: p) { shown = $0 } }
-                    // scrolled up to the top while earlier entries are left
-                    // out: they are shown, no button, and the view stays on
-                    // the entry that was first
-                    if let n = thread.earlier, n > 0 {
-                        Color.clear.frame(height: 1).background(GeometryReader { g in
-                            Color.clear.onChange(of: g.frame(in: .named("timeline")).minY) { _, y in
-                                markY = y
-                                if live && y > -400 && keepAt == nil {
-                                    keepAt = thread.entries.first?.id
-                                    model.act("earlier", "")
-                                }
-                            }
-                        })
-                    }
                     ForEach(thread.entries) { e in
                         Group {
                             if e.kind == "emb" {
@@ -745,6 +725,9 @@ struct ThreadScreen: View {
                         }
                         .background(Color.accentColor.opacity(lit == e.id ? 0.18 : 0))
                         .id(e.id)
+                        .background(TimelineMarker(id: e.id))
+                        .accessibilityElement(children: .contain)
+                        .accessibilityIdentifier("thread.entry." + e.id)
                     }
                     // the client's sending rows, then those tapped here it has
                     // not answered yet, by place: one handed over keeps its place
@@ -765,39 +748,33 @@ struct ThreadScreen: View {
                     Color.clear.frame(height: 1).id("end")
                 }
                 .padding()
-                .animation(.spring(duration: 0.3), value: sending)
-            }
-            .coordinateSpace(name: "timeline")
-            .defaultScrollAnchor(.bottom)
-            .scrollDismissesKeyboard(.interactively)
-            .onChange(of: model.scrolls) { proxy.scrollTo("end", anchor: .bottom) }
-            .onChange(of: mine.count) { old, new in
-                if new > old { withAnimation(.spring(duration: 0.3)) { proxy.scrollTo("end", anchor: .bottom) } }
-            }
-            // held at the bottom with no animation: a scroll animated from
-            // wherever the old content left it read as the text snapping
-            .onChange(of: thread.entries.last?.id) { proxy.scrollTo("end", anchor: .bottom) }
-            .onChange(of: thread.entries.first?.id) {
-                if let k = keepAt { proxy.scrollTo(k, anchor: .top); keepAt = nil }
-            }
-            // a page of entries the timeline does not draw (todo steps, a
-            // fold's calls) moves nothing: still at the top, the next is asked for
-            .onChange(of: thread.earlier) {
-                guard live, let k = keepAt, k == thread.entries.first?.id else { return }
-                keepAt = nil
-                if (thread.earlier ?? 0) > 0 && markY > -400 { keepAt = k; model.act("earlier", "") }
-            }
-            // the design history's way back: the entry scrolled to and tinted,
-            // the tint fading out (after the rows the jump opened are laid out)
-            .onChange(of: model.jump) { _, j in
-                guard live, let j else { return }
-                Task { @MainActor in
-                    try? await Task.sleep(for: .milliseconds(60))
-                    withAnimation(.easeInOut(duration: 0.3)) { proxy.scrollTo(j.id, anchor: .center) }
-                    lit = j.id
-                    try? await Task.sleep(for: .milliseconds(400))
-                    withAnimation(.easeOut(duration: 2)) { if lit == j.id { lit = nil } }
+                .environment(\.backplaneLanguage, lang)
+        }
+        .overlay(alignment: .bottomTrailing) {
+            if !position.following {
+                Button { position.latest?() } label: {
+                    Label(position.unread > 0 ? NativeMessages.native_thread_new(lang, String(position.unread)) : NativeMessages.native_thread_latest(lang), systemImage: "arrow.down")
+                        .font(.caption.bold()).padding(.horizontal, 12).padding(.vertical, 8)
+                        .background(.regularMaterial, in: Capsule())
                 }
+                .accessibilityIdentifier("thread.latest")
+                .padding(12)
+            }
+        }
+        .onAppear { if live { model.hold(false, thread: thread) } }
+        .onChange(of: position.following) { _, following in
+            if live { model.hold(!following, thread: thread) }
+        }
+        .onChange(of: live) { _, selected in
+            if selected { model.hold(!position.following, thread: thread) }
+        }
+        .onChange(of: model.jump) { _, j in
+            guard live, let j else { return }
+            position.jump?(j.id)
+            lit = j.id
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(400))
+                withAnimation(.easeOut(duration: 2)) { if lit == j.id { lit = nil } }
             }
         }
         .safeAreaInset(edge: .bottom) {
@@ -889,15 +866,68 @@ struct ThreadScreen: View {
                     .foregroundStyle(.secondary)
                 }
                 .accessibilityLabel(NativeMessages.native_thread_model_effort(lang, thread.picker.label))
+                if let permissions = thread.permissions {
+                  HStack(spacing: 0) {
+                    Button {
+                        showPermissions = true
+                    } label: {
+                        Image(systemName: "lock.shield")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .accessibilityLabel(permissions.current)
+                    .accessibilityIdentifier("thread.permissions")
+                    .disabled(!live || !model.contentReady || model.conn[model.screen?.hub ?? ""]?.phase == .offline || model.conn[model.screen?.hub ?? ""]?.phase == .connecting)
+                  }
+                    .popover(isPresented: $showPermissions, arrowEdge: .bottom) {
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(permissions.choices, id: \.value) { choice in
+                                Button {
+                                    showPermissions = false
+                                    model.act("thread-permissions", choice.value)
+                                } label: {
+                                    HStack {
+                                        Text(choice.label)
+                                        Spacer()
+                                        if choice.on { Image(systemName: "checkmark") }
+                                    }
+                                    .padding(.horizontal, 16).padding(.vertical, 12)
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityIdentifier("thread.permission.choice." + choice.value)
+                                .disabled(!live)
+                            }
+                        }
+                        .frame(width: 260)
+                        .presentationCompactAdaptation(.popover)
+                    }
+                }
+                if let status = model.conn[model.screen?.hub ?? ""], status.phase == .syncing || status.phase == .connecting {
+                    HStack(spacing: 4) {
+                        ProgressView().controlSize(.mini)
+                        Text(status.stage == "recent" || status.phase == .connecting ? NativeMessages.native_thread_loading_recent(lang) : NativeMessages.native_thread_loading_older(lang))
+                            .lineLimit(1)
+                    }
+                    .font(.caption2).foregroundStyle(.secondary)
+                    .accessibilityIdentifier("thread.loading")
+                }
                 Spacer(minLength: 0)
             }
             .padding(.horizontal).padding(.top, 8)
             ComposerExtras(model: model, thread: thread)
+            if model.sendFailure == thread.id {
+                Text(NativeMessages.native_thread_send_failed(lang))
+                    .font(.caption).foregroundStyle(.red).padding(.horizontal)
+                    .accessibilityIdentifier("thread.send-failed")
+            }
             HStack(alignment: .bottom, spacing: 8) {
                 AttachButton(model: model)
                 TextField(NativeMessages.native_thread_composer(lang), text: Binding(get: { model.composer }, set: { model.draft($0) }), axis: .vertical)
+                    .disabled(!model.contentReady)
                     .lineLimit(1...6)
                     .focused($focused)
+                    .accessibilityIdentifier("thread.composer")
                     .padding(.horizontal, 12).padding(.vertical, 8)
                     .background(Color(.secondarySystemBackground), in: .rect(cornerRadius: 18))
                 // a long press sends with the other follow-up mode (queue or steer);
@@ -913,6 +943,7 @@ struct ThreadScreen: View {
                         if !model.composer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { model.send("send-alt") }
                     }
                     .accessibilityLabel(thread.send)
+                    .accessibilityIdentifier("thread.send")
                     .accessibilityAddTraits(.isButton)
             }
             .padding(.horizontal).padding(.vertical, 8)
