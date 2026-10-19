@@ -43,6 +43,7 @@ import ./wake.bend as WJ
 import ../core/wake.bend as WK
 import ./term.bend as TM
 import ./plot.bend as PV
+import ./pdf.bend as PDF
 import ../core/agent.bend as AG
 import ../core/port.bend as PT
 import ../core/clipath.bend as CPA
@@ -2569,9 +2570,6 @@ def DirJob.run(+inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +c
 # a PDF's page drawn to a PNG for the window (which cannot draw a PDF), by
 # poppler's pdftoppm when this machine has it, kept in <home>/pdf per file
 # version and page: "<png> <tab> <pages>"
-def PdfJob.sh() -> String:
-  "command -v pdftoppm >/dev/null 2>&1 || { echo 'nopoppler'; exit 3; }; [ -f \"$1\" ] || { echo 'no such file'; exit 1; }; m=$(stat -c %Y \"$1\" 2>/dev/null || stat -f %m \"$1\"); k=$(printf '%s %s' \"$1\" \"$m\" | cksum | cut -d' ' -f1); mkdir -p \"$3\"; o=\"$3/$k-$2\"; [ -f \"$o.png\" ] || pdftoppm -png -r 110 -f \"$2\" -l \"$2\" -singlefile \"$1\" \"$o\" >/dev/null 2>&1 || { echo \"could not draw page $2\"; exit 1; }; n=$(pdfinfo \"$1\" 2>/dev/null | awk '/^Pages:/{print $2}'); printf '%s\\t%s' \"$o.png\" \"${n:-0}\""
-
 def PdfJob.why(+out: String) -> String:
   Bool.pick(String, String.contains(out, "nopoppler"), "PDFs show here with poppler's pdftoppm (the poppler or poppler-utils package)", String.trim(out))
 
@@ -2585,7 +2583,7 @@ def PdfJob.sent(r: P.Ran, +inbox: Chan(Msg), +client: U32, +id: String, +path: S
       GitJob.reply(inbox, client, id, True{}, J.Json.obj([J.KV{"pdfPath", J.Str{path}}, J.KV{"pdfPage", J.Str{page}}, J.KV{"pdfErr", J.Str{PdfJob.why(out)}}]))
 
 def PdfJob.run(+inbox: Chan(Msg), +client: U32, +id: String, +home: String, +path: String, +page: String) -> IO(Unit):
-  IO.bind(P.Ran, Unit, P.Proc.run("sh", ["-c", PdfJob.sh(), "sh", path, page, home ++ "/pdf"], "/"), r => PdfJob.sent(r, inbox, client, id, path, page))
+  IO.bind(P.Ran, Unit, P.Proc.run("sh", ["-c", PDF.Pdf.sh(), "sh", path, page, home ++ "/pdf"], "/"), r => PdfJob.sent(r, inbox, client, id, path, page))
 
 def GitJob.run.k(i: Nat, +tx: AG.Tx, +job: String, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +a: String, +b: String, +home: String) -> IO(Unit):
   match i:

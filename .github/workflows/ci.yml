@@ -55,7 +55,44 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - run: TEST_JOBS=$(nproc) scripts/test.sh
 
+  pdf:
+    name: PDF cache ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: linux-x64, os: ubuntu-24.04 }
+          - { target: linux-arm64, os: ubuntu-24.04-arm }
+          - { target: darwin-arm64, os: macos-15 }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-bend
+      - uses: oven-sh/setup-bun@v2
+      - name: Install clang 19 and Poppler
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-19 poppler-utils
+          sudo ln -sf /usr/bin/clang-19 /usr/local/bin/clang
+      - name: Select Xcode 26.3
+        if: runner.os == 'macOS'
+        run: echo "DEVELOPER_DIR=/Applications/Xcode_26.3.app/Contents/Developer" >> "$GITHUB_ENV"
+      - name: Build the native PDF command fixture
+        run: |
+          mkdir -p build
+          bend test/native/pdf_cache.bend -o build/pdf-cache
+        env:
+          BUN_JSC_forceRAMSize: "2147483648"
+      - name: Test cache identity, failures and retries
+        run: bun test/tools/pdf_cache.ts build/pdf-cache
+      - name: Render real PDF replacements
+        if: runner.os == 'Linux'
+        run: bun test/tools/pdf_cache.ts build/pdf-cache --poppler
+
   build:
+    needs: pdf
     name: Build ${{ matrix.target }}
     # runs beside "laws" (which checks every file); nothing is published here
     strategy:
