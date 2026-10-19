@@ -120,10 +120,12 @@ if (!clientOnly) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "bp-outbox-e2e-")));
   const quote = (s: string) => "'" + s.replaceAll("'", "'\\''") + "'";
   async function stop(proc: ReturnType<typeof Bun.spawn>) {
-    if (proc.exitCode !== null) return;
+    // Bun leaves exitCode null for a signal exit; signalCode records it.
+    const stopped = () => proc.exitCode !== null || proc.signalCode !== null;
+    if (stopped()) { await proc.exited; return; }
     proc.kill("SIGTERM");
-    if (!(await until(4000, () => proc.exitCode !== null))) proc.kill("SIGKILL");
-    if (!(await until(4000, () => proc.exitCode !== null))) throw new Error(`captured hub ${proc.pid} did not exit`);
+    if (!(await until(4000, stopped))) proc.kill("SIGKILL");
+    if (!(await until(4000, stopped))) throw new Error(`captured hub ${proc.pid} did not exit`);
     await proc.exited;
   }
   function freePort() {
