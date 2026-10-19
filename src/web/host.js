@@ -6,6 +6,10 @@
 // is dumb).
 
 import App from "./app.bend";
+import { pairBrowser } from "./auth.js";
+
+// Consume the secret before the generic deeplink handler clears the fragment.
+const pairingReady = pairBrowser({ location, history, storage: localStorage, fetch: window.fetch.bind(window) }).catch(() => false);
 import * as Solid from "./solid.js";
 import * as Plot2d from "./plot2d.js";
 import * as Wire from "./wire.js";
@@ -1119,20 +1123,8 @@ window.addEventListener("resize", () => {
 
 let backoff = 250;
 
-// A tailnet link carries the pairing token in its fragment; keep it for
-// later visits and never send it anywhere but this server's socket.
-const token = (() => {
-  const m = location.hash.match(/token=([0-9a-f]+)/);
-  if (m) {
-    localStorage.setItem("backplane-token", m[1]);
-    history.replaceState(null, "", location.pathname);
-  }
-  return localStorage.getItem("backplane-token") ?? "";
-})();
-
-// images in threads load by URL (<img src="/img?...">) and cannot carry the
-// token in a query the way the socket does: a same-site cookie carries it
-if (token) document.cookie = `bp_token=${token}; path=/; SameSite=Strict`;
+// Authentication is carried by the same-origin HttpOnly pairing cookie.
+// Native clients retain their existing token protocol.
 
 // The event log this page holds, kept across reloads: a reload shows it at
 // once and the socket then brings only what is new (since=, origin=). The
@@ -1194,7 +1186,6 @@ const restored = opened.then(() => new Promise((done) => {
 function connect() {
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
   const q = new URLSearchParams();
-  if (token) q.set("token", token);
   q.set("since", App.seq(ui));
   q.set("origin", App.origin(ui));
   q.set("enc", "cbor"); // a hub before CBOR-only still needs asking
@@ -1280,7 +1271,7 @@ setInterval(() => {
 }, 30000);
 
 render();
-restored.then(() => {
+Promise.all([restored, pairingReady]).then(() => {
   render();
   connect();
 });

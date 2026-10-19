@@ -1525,6 +1525,15 @@ def Bv.plane.build(shown: Bool, +u: U.Ui) -> PC.Plane:
     case False{}:
       Bv.plane.none()
 
+# The window already maintains this exact index (MM.Ix). Reuse it while
+# rebuilding the plane; its cache key and displayed rows are unchanged.
+def Bv.plane.build.ix(shown: Bool, +u: U.Ui, ix: U.SIx) -> PC.Plane:
+  match shown:
+    case True{}:
+      PC.Plane.of.x(u, ix, U.Side.now(u))
+    case False{}:
+      Bv.plane.none()
+
 def Bv.plane.store(+ws: Map<&2, PW>, +key: String, +plane: PC.Plane, words: String) -> Map<&2, PW>:
   Map.set(&2, PW, Map.set(&2, PW, Map.set(&2, PW, ws, "@plane", PWPlane{key, plane}), "@plane.n", PWCounts{key, words}), "@plane.paint", PWPaint{MR.Mr.plane_stamp(plane)})
 
@@ -1541,7 +1550,7 @@ def Bv.plane.keep.k(same: Bool, +ws: Map<&2, PW>, +u: U.Ui, +key: String, +ix: U
     case True{}:
       ws
     case False{}:
-      Bv.plane.store(ws, key, Bv.plane.build(Bv.plane.shown(u), u), PC.Plane.tally.words.ix(u, ix, U.Side.now(u)))
+      Bv.plane.store(ws, key, Bv.plane.build.ix(Bv.plane.shown(u), u, ix), PC.Plane.tally.words.ix(u, ix, U.Side.now(u)))
 
 # ---- mail ui ----
 def Bv.mail.draw(+ws: Map<&2, PW>, +ty: L.Ty, +n: S.Nui) -> L.Out:

@@ -13,6 +13,7 @@ import ./proc.bend as P
 import ../core/json.bend as J
 import ../core/utf8.bend as U
 import ../core/http.bend as W
+import ../core/auth.bend as AUTH
 import ../core/model.bend as M
 import ../core/codec.bend as C
 import ../core/hub.bend as B
@@ -1314,12 +1315,9 @@ def Conn.file(+p: String) -> String:
 def Conn.cache(+path: String) -> String:
   Bool.pick(String, String.starts_with(path, "/chunk-"), "public, max-age=31536000, immutable", "no-cache")
 
-# a websocket from plain loopback is trusted; anything else (the tailnet
-# listener, or `tailscale serve` proxying with its identity headers) must
-# carry ?token=<the pairing token>
+# One authentication boundary for browser, native, upload and MCP requests.
 def Conn.allowed(+trusted: Bool, +hs: List<&2, W.Header>, +path: String, +token: String) -> Bool:
-  Bool.or(Bool.and(trusted, String.is_empty(W.Http.header_of(hs, "tailscale-user-login"))),
-    Bool.and(Bool.not(String.is_empty(token)), Bool.or(String.contains(path, "token=" ++ token), String.contains(W.Http.header_of(hs, "cookie"), "bp_token=" ++ token))))
+  AUTH.Auth.allowed(trusted, hs, path, token)
 
 # a websocket from this machine's loopback, not proxied by tailscale serve,
 # is marked for the hub: only such a window (or the one in this process)
@@ -3060,15 +3058,15 @@ def Net.managed(n: Net) -> Bool:
 # Effects
 # -------
 
-# the MCP endpoint of one thread's agent (token included, so the tailnet
-# rules never lock an agent out)
+# The loopback MCP endpoint of one thread's native agent. Shared pairing
+# credentials stay out of provider arguments and generated configuration.
 # (gen: the process's generation, B.Gen.mcp: a call from a process that is
 # no longer the thread's may only read)
 def Hub.mcp_url.g(+cfg: Cfg, +thread: String, +gen: String) -> String:
-  "http://127.0.0.1:" ++ U32.show(Cfg.port(cfg)) ++ "/mcp/" ++ B.Gen.mcp(thread, gen) ++ "?token=" ++ Net.token(Cfg.net(cfg))
+  "http://127.0.0.1:" ++ U32.show(Cfg.port(cfg)) ++ "/mcp/" ++ B.Gen.mcp(thread, gen)
 
 def Hub.mcp_url(+cfg: Cfg, +thread: String) -> String:
-  "http://127.0.0.1:" ++ U32.show(Cfg.port(cfg)) ++ "/mcp/" ++ thread ++ "?token=" ++ Net.token(Cfg.net(cfg))
+  "http://127.0.0.1:" ++ U32.show(Cfg.port(cfg)) ++ "/mcp/" ++ thread
 
 def Cfg.mtext(c: Cfg) -> String:
   match c:
@@ -3214,7 +3212,7 @@ def Tailnet.https.k(none: Bool, +name: String, +token: String, +inbox: Chan(Msg)
       Log.info("tailscale serve did not report a DNS name")
     case False{}:
       do IO<Unit>:
-        IO.print("Backplane over HTTPS on your tailnet: " ++ TN.Tailnet.link("https://" ++ name, token))
+        IO.print("Backplane over HTTPS on your tailnet: https://" ++ name ++ "/ (pair in Settings)")
         ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, LinkFound{TN.Tailnet.report("reachable", TN.Tailnet.link("https://" ++ name, token))})
         return Unit{}
 
@@ -5167,10 +5165,17 @@ def Conn.is_lock(req: W.Request) -> Bool:
     case W.Request{m, p, _}:
       Bool.and(String.eq(m, "POST"), String.starts_with(W.Http.route(p), "/lock/"))
 
+def Conn.lock.browser(ok: Bool, s: Socket, +op: String, +len: Nat, rest: List<&2, U32>, +inbox: Chan(Msg)) -> IO(Unit):
+  match ok:
+    case True{}:
+      IO.bind(Socket & String, Unit, H.Sock.peer(s), r => LockHttp.peer(r, op, len, rest, inbox))
+    case False{}:
+      Conn.finish(s, W.Http.text("403 Forbidden", "cross-origin request refused"))
+
 def Conn.route.lock(lock: Bool, s: Socket, +req: W.Request, rest: List<&2, U32>, +web: String, +id: U32, +inbox: Chan(Msg), +trusted: Bool, +token: String) -> IO(Unit):
   match lock req:
-    case True{} W.Request{_, +p, hs}:
-      IO.bind(Socket & String, Unit, H.Sock.peer(s), r => LockHttp.peer(r, String.drop(W.Http.route(p), 6n), J.Json.get_nat(J.Json.obj([J.KV{"n", J.Num{W.Http.header_of(hs, "content-length")}}]), "n", 0n), rest, inbox))
+    case True{} W.Request{_, +p, +hs}:
+      Conn.lock.browser(Bool.and(AUTH.Auth.browser(hs), AUTH.Auth.trusted(True{}, hs)), s, String.drop(W.Http.route(p), 6n), J.Json.get_nat(J.Json.obj([J.KV{"n", J.Num{W.Http.header_of(hs, "content-length")}}]), "n", 0n), rest, inbox)
     case False{} _:
       Conn.route.mcp.raw(Conn.is_mcp(req), s, req, rest, web, id, inbox, trusted, token)
 
@@ -11819,8 +11824,24 @@ def Conn.route.bot(k: Nat, s: Socket, +req: W.Request, rest: List<&2, U32>, +web
     case _ _:
       Conn.route.att(Conn.is_att(req), s, req, rest, web, id, inbox, trusted, token)
 
+def Conn.pair.reply(ok: Bool, s: Socket, +token: String, https: Bool) -> IO(Unit):
+  match ok:
+    case True{}:
+      Conn.finish(s, W.Http.response("204 No Content", "text/plain", Nil{}, AUTH.Auth.cookie(token, https)))
+    case False{}:
+      Conn.finish(s, W.Http.text("401 Unauthorized", "pairing refused"))
+
+def Conn.route.auth(pair: Bool, s: Socket, +req: W.Request, rest: List<&2, U32>, +web: String, +id: U32, +inbox: Chan(Msg), +trusted: Bool, +token: String) -> IO(Unit):
+  match pair req:
+    case True{} W.Request{method, _, +hs}:
+      Conn.pair.reply(Bool.and(String.eq(method, "POST"), AUTH.Auth.pair(hs, token)), s, token, String.starts_with(W.Http.header_of(hs, "origin"), "https://"))
+    case False{} _:
+      Conn.route.bot(Conn.bot.kind(req), s, req, rest, web, id, inbox, trusted, token)
+
 def Conn.route(s: Socket, +req: W.Request, rest: List<&2, U32>, +web: String, +id: U32, +inbox: Chan(Msg), +trusted: Bool, +token: String) -> IO(Unit):
-  Conn.route.bot(Conn.bot.kind(req), s, req, rest, web, id, inbox, trusted, token)
+  match req:
+    case W.Request{+method, +path, +hs}:
+      Conn.route.auth(String.eq(W.Http.route(path), "/auth/pair"), s, W.Request{method, path, hs}, rest, web, id, inbox, trusted, token)
 
 def Conn.head.k(m: Maybe<&2, W.Split>, s: Socket, buf: List<&2, U32>, +web: String, +id: U32, +inbox: Chan(Msg),
     +trusted: Bool, +token: String, k: Socket -> List<&2, U32> -> IO(Unit)) -> IO(Unit):
@@ -11849,12 +11870,17 @@ def Accept.whois(r: Socket & String, +owner: String, +id: U32, +web: String, +in
     w : P.Ran <- P.Proc.run("sh", PT.Port.timeout(["5", "tailscale", "whois", "--json", ip]), "/")
     Conn.head(64n, s, Nil{}, web, id, inbox, TN.Tailnet.trusts(owner, TN.Tailnet.login(Tailnet.out(w))), token)
 
+def Accept.local(r: Socket & String, +id: U32, +web: String, +inbox: Chan(Msg), +trusted: Bool, +token: String) -> IO(Unit):
+  (s, ip) = r
+  Conn.head(64n, s, Nil{}, web, id, inbox, Bool.and(trusted, CF.Cef.loopback(ip)), token)
+
 def Accept.trust(ask: Bool, s: Socket, +owner: String, +id: U32, +web: String, +inbox: Chan(Msg), +trusted: Bool, +token: String) -> IO(Unit):
   match ask:
     case True{}:
       IO.bind(Socket & String, Unit, H.Sock.peer(s), r => Accept.whois(r, owner, id, web, inbox, token))
     case False{}:
-      Conn.head(64n, s, Nil{}, web, id, inbox, trusted, token)
+      IO.bind(Socket & String, Unit, H.Sock.peer(s), r => Accept.local(r, id, web, inbox, trusted, token))
+
 
 def Accept.got(r: Listener & Result<&1, &1, U32 & String, Socket>, +id: U32, +web: String, +inbox: Chan(Msg), +trusted: Bool, +token: String, +owner: String, k: Listener -> IO(Unit)) -> IO(Unit):
   (l, res) = r
@@ -11887,7 +11913,7 @@ def Tailnet.listened(r: Result<&1, &1, U32 & String, Listener>, +host: String, +
       do IO<Unit>:
         w : P.Ran <- P.Proc.run("tailscale", ["whois", "--json", ip], "/")
         +owner : String = TN.Tailnet.login(Tailnet.out(w))
-        IO.print("Backplane on your tailnet: http://" ++ ip ++ ":" ++ U32.show(port) ++ "/ (" ++ Bool.pick(String, String.is_empty(owner), "pairing token " ++ token, owner ++ "'s devices, or pairing token " ++ token) ++ ")")
+        IO.print("Backplane on your tailnet: http://" ++ ip ++ ":" ++ U32.show(port) ++ "/ (" ++ Bool.pick(String, String.is_empty(owner), "pair in Settings", owner ++ "'s devices; pair in Settings") ++ ")")
         ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, LinkFound{TN.Tailnet.report("reachable", TN.Tailnet.link("http://" ++ ip ++ ":" ++ U32.show(port), token))})
         IO.spawn(Unit, Accept.loop(Fuel.forever(), l, 2147483648, web, inbox, False{}, token, owner))
     case Fail{_}:
