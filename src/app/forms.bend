@@ -101,12 +101,15 @@ def Fm.area.caret(on: Bool, +blink: Bool, +ty: L.Ty, +s: String, +p: Nat, +px: U
     case True{}:
       +r = Fm.caret.row(ty, s, p, px)
       Bool.pick(List<&2, R.Op>, Bool.and(Nat.is_ge(r, top), Nat.is_lt(Nat.sub(r, top), rows)),
-        [D.Draw.caret(c, (x + 8 + Fm.caret.x(ty, s, p, px) : U32), (y + 8 + (U32.from_nat(Nat.sub(r, top)) * 20 : U32) : U32), 1, 16, T.Th.accent(), 255, blink)], Nil{})
+        [D.Draw.caret(c, (x + 8 + Fm.caret.x(ty, s, p, px) : U32), (y + 8 + (U32.from_nat(Nat.sub(r, top)) * L.Ty.px(ty, 20) : U32) : U32), 1, L.Ty.px(ty, 16), T.Th.accent(), 255, blink)], Nil{})
     case False{}:
       Nil{}
 
+def Fm.area.h.at(+rows: Nat, +ty: L.Ty) -> U32:
+  (U32.from_nat(rows) * L.Ty.px(ty, 20) + 12 : U32)
+
 def Fm.area.h(+rows: Nat) -> U32:
-  (U32.from_nat(rows) * 20 + 12 : U32)
+  Fm.area.h.at(rows, L.Ty.none())
 
 # a field of `rows` lines (shift+Enter starts a new line); it shows the
 # lines around the caret
@@ -114,14 +117,14 @@ def Fm.area(+ty: L.Ty, +f: FS, +c: D.Clip, +x: U32, +y: U32, +w: U32, +rows: Nat
   +id = S.Fld.id(name, action, pre)
   +on = String.eq(FS.focus(f), id)
   +s = Fm.text(f, name)
-  +px = {(w - 16 : U32) : U32}
+  +px = {(w - L.Ty.px(ty, 16) : U32) : U32}
   +ls = L.Ty.wrap(ty, 2n, s, px)
   +top = Bool.pick(Nat, on, Nat.sub(Fm.caret.row(ty, s, FS.caret(f), px), Nat.sub(rows, 1n)), 0n)
-  +h = Fm.area.h(rows)
+  +h = Fm.area.h.at(rows, ty)
   L.Out{List.concat(&2, R.Op, [
       L.Lay.box(c, x, y, w, h, 0, T.Th.bg(), Bool.pick(U32, on, T.Th.accent(), T.Th.line())),
-      Bool.pick(List<&2, R.Op>, String.is_empty(s), L.Ty.text(ty, 2n, ph, c, (x + 8 : U32), (y + 6 : U32), 20, T.Th.faint()),
-        Fm.rows(List.take(&2, String, List.drop(&2, String, ls, top), rows), ty, c, (x + 8 : U32), (y + 6 : U32), 20, T.Th.text())),
+      Bool.pick(List<&2, R.Op>, String.is_empty(s), L.Ty.text(ty, 2n, ph, c, (x + 8 : U32), (y + 6 : U32), L.Ty.px(ty, 20), T.Th.faint()),
+        Fm.rows(List.take(&2, String, List.drop(&2, String, ls, top), rows), ty, c, (x + 8 : U32), (y + 6 : U32), L.Ty.px(ty, 20), T.Th.text())),
       Fm.area.caret(on, FS.blink(f), ty, s, FS.caret(f), px, top, rows, c, x, y)]),
     [L.Lay.hit(x, y, w, h, "focus", id)]}
 

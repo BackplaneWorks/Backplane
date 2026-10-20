@@ -1,4 +1,5 @@
 import Base
+import ../core/textscale.bend as TS
 import ../core/title.bend as TTL
 import ../core/msgs.bend as MSG
 import ../core/kexport.bend as KEX
@@ -2848,7 +2849,7 @@ def View.tour.cls(+u: U.Ui) -> String:
 def View.page.b(+lc: I.Loc, +bv: BI.View, u: U.Ui) -> D.Node:
   match u:
     case U.Ui{+st, +sel, +d, +l, +o, +on, +now, +ad, +pa, +v, +r, +w, +e, +note, +nf, +ob, +tr}:
-      D.El{"div", "app", [D.At{"class", Bool.pick(String, pa, "app panel", "app") ++ Bool.pick(String, Bool.or(Bool.or(Bool.not(String.is_empty(sel)), U.Flag.get(o, "settings")), WB.WB.shown(bv)), " picked", "")
+      D.El{"div", "app", [D.At{"style", "--text-scale:" ++ U32.show(TS.Scale.of(st))}, D.At{"class", Bool.pick(String, pa, "app panel", "app") ++ Bool.pick(String, Bool.or(Bool.or(Bool.not(String.is_empty(sel)), U.Flag.get(o, "settings")), WB.WB.shown(bv)), " picked", "")
         ++ Bool.pick(String, String.eq(M.Setting.get(st, "ui.theme", ""), "light"), " light", "") ++ View.tour.cls(U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr})}],
         D.Dom.cat([View.sidebar(lc, U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}),
           View.main.b(lc, U.Flag.get(o, "settings"), bv, U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}, sel, List.length(&2, M.Project, U.Ui.projects(st)))],

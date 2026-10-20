@@ -178,8 +178,8 @@ def Mr.bubble(b: MV.Bub, +ty: L.Ty, +u: U.Ui, +c: D.Clip, +x: U32, +w: U32, +y: 
   match b:
     case MV.Bub{_, _, +who, +kind, +want, +at, +text, _}:
       +ls = L.Ty.wrap(ty, 2n, text, L.U32.dim(w, 24))
-      +h = (38 + U32.from_nat(List.length(&2, String, ls)) * 20 : U32)
-      L.Col{L.Out.all([L.Out.ops([D.Draw.rect(c, x, y, w, h, T.Th.raise(), 255)]), Mr.label(ty, c, who ++ " · " ++ kind ++ " · " ++ want ++ " · " ++ MV.Mv.ago(U.Side.now(u), at), (x + 10 : U32), (y + 6 : U32)), L.Out.ops(F.Fm.rows(ls, ty, c, (x + 10 : U32), (y + 30 : U32), 20, T.Th.text()))]), (y + h + 8 : U32)}
+      +h = (38 + U32.from_nat(List.length(&2, String, ls)) * L.Ty.px(ty, 20) : U32)
+      L.Col{L.Out.all([L.Out.ops([D.Draw.rect(c, x, y, w, h, T.Th.raise(), 255)]), Mr.label(ty, c, who ++ " · " ++ kind ++ " · " ++ want ++ " · " ++ MV.Mv.ago(U.Side.now(u), at), (x + 10 : U32), (y + 6 : U32)), L.Out.ops(F.Fm.rows(ls, ty, c, (x + 10 : U32), (y + 30 : U32), L.Ty.px(ty, 20), T.Th.text()))]), (y + h + 8 : U32)}
 
 def Mr.bubbles(bs: List<&2, MV.Bub>, +ty: L.Ty, +u: U.Ui, +c: D.Clip, +x: U32, +w: U32, +y: U32) -> L.Col:
   match bs:

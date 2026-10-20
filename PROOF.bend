@@ -12401,3 +12401,7 @@ def Laws.wt_seed_legacy_small(): {==}
 def Laws.wt_seed_large_id(): {==}
 def Laws.wt_seed_same_second_next(): {==}
 def Laws.wt_seed_wrap(): {==}
+
+def Laws.textscale_default(): {==}
+def Laws.textscale_invalid(): {==}
+def Laws.textscale_real_font_size(): {==}
