@@ -1,5 +1,11 @@
 /* Backplane. Square corners, quiet colours, one accent. */
 
+@font-face {
+  font-family: "Noto Sans Cuneiform";
+  src: url("./fonts/NotoSansCuneiform-Regular.ttf") format("truetype");
+  font-display: swap;
+}
+
 :root {
   --bg: #0d0f12;
   --panel: #13161b;
@@ -22,6 +28,11 @@
   --mono: "Berkeley Mono", "Noto Sans Mono CJK JP", "Hiragino Sans", "Yu Gothic", ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
   --sans: "Berkeley Mono", "Noto Sans Mono CJK JP", "Hiragino Sans", "Yu Gothic", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   color-scheme: dark;
+}
+
+html[lang="sux-Xsux"] {
+  --mono: "Noto Sans Cuneiform", "Berkeley Mono", "Noto Sans Mono CJK JP", "Hiragino Sans", "Yu Gothic", ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  --sans: "Noto Sans Cuneiform", "Berkeley Mono", "Noto Sans Mono CJK JP", "Hiragino Sans", "Yu Gothic", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
 /* the light theme (Settings, Appearance: the hub's ui.theme) */

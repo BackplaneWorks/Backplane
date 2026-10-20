@@ -16,6 +16,7 @@ struct RootView: View {
 
     var body: some View {
         content
+            .font(model.screen?.locale == "sux-Xsux" ? .custom("NotoSansCuneiform-Regular", size: 17, relativeTo: .body) : .body)
             .environment(\.backplaneLanguage, model.screen?.locale ?? "en")
             .environment(\.locale, Locale(identifier: model.screen?.locale ?? "en"))
     }

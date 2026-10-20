@@ -12,6 +12,7 @@ settings.lang = Language
 settings.lang.auto = Automatic
 settings.lang.en = English
 settings.lang.ja = 日本語
+settings.lang.sux = Sumerian (Cuneiform)
 
 settings.agent.lang = Agents reply in my language
 settings.lang.on = On

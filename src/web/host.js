@@ -225,7 +225,7 @@ const WORDS = listOf(App.cbor_words());
 let ui = App.page(App.init(now(), cid), location.origin);
 const forcedLang = new URLSearchParams(location.search).get("lang");
 if (forcedLang === "ja" || forcedLang === "en") ui = App.lang_preview(ui);
-ui = App.act(ui, "lang", forcedLang === "ja" || forcedLang === "en" ? forcedLang : (localStorage.getItem("backplane-lang") || "auto")).ui;
+ui = App.act(ui, "lang", forcedLang === "ja" || forcedLang === "en" || forcedLang === "sux" || forcedLang === "sux-Xsux" ? forcedLang : (localStorage.getItem("backplane-lang") || "auto")).ui;
 ui = App.act(ui, "lang-os", navigator.languages?.[0] || navigator.language || "").ui;
 document.documentElement.lang = App.lang(ui);
 window.addEventListener("languagechange", () => dispatch("lang-os", navigator.languages?.[0] || navigator.language || ""));

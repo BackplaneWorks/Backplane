@@ -10626,6 +10626,9 @@ def i18n_took_same_k(m, h, s):
 def Laws.i18n_plural_ja_other(n):
   {==}
 
+def Laws.i18n_plural_sux_other(n):
+  {==}
+
 def Laws.i18n_plural_en_one():
   {==}
 
@@ -10641,6 +10644,9 @@ def Laws.i18n_resolve_override_en(os):
 def Laws.i18n_resolve_override_ja(os):
   {==}
 
+def Laws.i18n_resolve_override_sux(os):
+  {==}
+
 def Laws.i18n_resolve_auto(os):
   {==}
 
@@ -10654,6 +10660,9 @@ def Laws.i18n_of_tag_empty():
   {==}
 
 def Laws.i18n_of_tag_bcp():
+  {==}
+
+def Laws.i18n_of_tag_sux():
   {==}
 
 def Laws.i18n_ago_en_same(now, at):
@@ -11171,6 +11180,8 @@ def Laws.lang_gate_preview(os):
 def Laws.lang_auto_preview():
   {==}
 def Laws.lang_override_en(os, p):
+  {==}
+def Laws.lang_sux_ungated(os, p):
   {==}
 def Laws.prompt_lang_off():
   {==}

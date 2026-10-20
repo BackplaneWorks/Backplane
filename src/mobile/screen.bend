@@ -838,6 +838,7 @@ def Mob.sub.label(lc: I.Loc, +word: String) -> List<&2, J.KV>:
   match lc:
     case I.En{}: Nil{}
     case I.Ja{}: [J.KV{"stateLabel", J.Json.str(U.StateWord.label(I.Ja{}, word))}]
+    case I.Sux{}: Nil{}
 
 def Mob.sub.loc(+lc: I.Loc, r: SB.SubRow) -> J.Json:
   match r:

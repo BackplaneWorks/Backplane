@@ -176,6 +176,10 @@ rm -rf "$prefix/web.old"
 [ -d "$prefix/web" ] && mv "$prefix/web" "$prefix/web.old"
 mv "$src/web" "$prefix/web"
 if [ -d "$src/kistack" ]; then rm -rf "$prefix/kistack.old"; [ -d "$prefix/kistack" ] && mv "$prefix/kistack" "$prefix/kistack.old"; mv "$src/kistack" "$prefix/kistack"; fi
+rm -rf "$prefix/fonts.old"
+[ ! -d "$prefix/fonts" ] || mv "$prefix/fonts" "$prefix/fonts.old"
+[ ! -d "$src/fonts" ] || mv "$src/fonts" "$prefix/fonts"
+rm -rf "$prefix/fonts.old"
 for f in backplane backplane-serve backplane-browser backplane-browser.stamp backplane-step2glb backplane-voice backplane-kipc LICENSE; do
   [ -e "$src/$f" ] && mv -f "$src/$f" "$prefix/$f"
 done
@@ -205,6 +209,7 @@ stage() {
   rm -rf build/dev-pkg && mkdir -p build/dev-pkg
   cp -R dist/web build/dev-pkg/web
   [ -d dist/kistack ] && cp -R dist/kistack build/dev-pkg/kistack
+  [ ! -d dist/fonts ] || cp -R dist/fonts build/dev-pkg/fonts
   for f in backplane backplane-serve backplane-browser backplane-browser.stamp backplane-step2glb backplane-voice backplane-kipc; do
     [ -e "dist/$f" ] && cp "dist/$f" build/dev-pkg/
   done

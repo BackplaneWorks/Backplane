@@ -2,6 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>UIAppFonts</key>
+	<array>
+		<string>NotoSansCuneiform-Regular.ttf</string>
+	</array>
 	<!-- the hub is reached over the tailnet (WireGuard), as plain ws:// -->
 	<key>NSAppTransportSecurity</key>
 	<dict>

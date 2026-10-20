@@ -8,10 +8,11 @@ def Prompt.lang.k(k: Nat) -> String:
   match k:
     case 0n: "Reply in Japanese (日本語) unless the person writes in another language or asks otherwise. Keep code, commands, paths and identifiers as they are."
     case 1n: "Reply in English unless the person writes in another language or asks otherwise. Keep code, commands, paths and identifiers as they are."
+    case 2n: "Reply in Sumerian using Unicode Sumero-Akkadian cuneiform unless the person writes in another language or asks otherwise. Keep code, commands, paths and identifiers as they are."
     case _: ""
 
 def Prompt.lang(+setting: String) -> String:
-  Prompt.lang.k(C.Codec.pos(["ja", "en"], setting))
+  Prompt.lang.k(C.Codec.pos(["ja", "en", "sux-Xsux"], setting))
 
 def Prompt.lang.add.k(line: String, prompt: String) -> String:
   match line:

@@ -15,7 +15,8 @@ KEY = re.compile(r'[a-z][a-z0-9]*(?:\.[a-z0-9]+)*\Z')
 NAME = re.compile(r'[A-Za-z_][A-Za-z0-9_]*\Z')
 KEYWORDS = set('match case def type is where if else return import as law do with use let fork for when switch true false'.split())
 CATEGORIES = ('zero', 'one', 'two', 'few', 'many', 'other')
-LOCALES = (('en', 'En'), ('ja', 'Ja'))
+LOCALES = (('en', 'En'), ('ja', 'Ja'), ('sux', 'Sux'))
+INCOMPLETE_LOCALES = {'sux'}
 IOS_INFO_KEYS = {'NSCameraUsageDescription': 'native.permission.camera'}
 
 
@@ -219,8 +220,9 @@ def uses(nodes):
 
 
 def validate(catalogs):
-    if 'en' not in catalogs or 'ja' not in catalogs:
-        raise CatalogError('en.msg and ja.msg are required')
+    required = {tag for tag, _ in LOCALES}
+    if required - set(catalogs):
+        raise CatalogError('missing locale catalog: ' + ', '.join(sorted(required - set(catalogs))))
     if set(catalogs) - {tag for tag, _ in LOCALES}:
         raise CatalogError('unsupported locale: add its Loc variant and generator arm first')
     source, signatures = catalogs['en'], {}
@@ -289,10 +291,14 @@ def collision_check(names):
 
 
 def require_complete(catalogs):
-    missing = [f'{tag}:{key}' for tag, _ in LOCALES
+    missing = [f'{tag}:{key}' for tag, _ in LOCALES if tag not in INCOMPLETE_LOCALES
                for key in sorted(set(catalogs['en']) - set(catalogs[tag]))]
     if missing:
         raise CatalogError('missing translations: ' + ', '.join(missing))
+
+
+def translated(catalogs, tag, key):
+    return key in catalogs[tag] and (tag != 'sux' or catalogs[tag][key] != catalogs['en'][key])
 
 
 def metadata_lists(lists):
@@ -336,8 +342,8 @@ def generate(catalogs, i18n_import='./i18n.bend'):
         names.append(name)
         arms = []
         for tag, variant in LOCALES:
-            # An absent translation gets the English arm, including plural rules.
-            actual = variant if key in catalogs[tag] else 'En'
+            # Unchanged Sumerian source text is an explicit English fallback.
+            actual = variant if translated(catalogs, tag, key) else 'En'
             nodes = catalogs[tag].get(key, catalogs['en'][key])
             arms.append((variant, compile_nodes(nodes, params, sig, f'I.{actual}{{}}')))
         # Locale arms are exclusive; count uses within each expression, not across arms.
@@ -349,7 +355,7 @@ def generate(catalogs, i18n_import='./i18n.bend'):
         lines.append('')
     metadata = {'T.keys': keys}
     for tag, variant in LOCALES:
-        metadata[f'T.catalog.missing.{tag}'] = [k for k in keys if k not in catalogs[tag]]
+        metadata[f'T.catalog.missing.{tag}'] = [k for k in keys if not translated(catalogs, tag, k)]
     extra_names, extra_lines = metadata_lists(metadata)
     names.extend(extra_names + ['T.missing', 'T.plain'])
     lines.extend(extra_lines + ['def T.missing(l: I.Loc) -> List<&2, String>:', '  match l:'])
@@ -390,7 +396,7 @@ def native_literal(text, swift):
     return value if swift else value.replace('$', r'\$')
 
 
-def native_nodes(nodes, params, signature, ja, swift):
+def native_nodes(nodes, params, signature, english_plural, swift):
     pieces = []
     def choose(condition, yes, no):
         return f'({condition} ? {yes} : {no})' if swift else f'(if ({condition}) {yes} else {no})'
@@ -401,11 +407,11 @@ def native_nodes(nodes, params, signature, ja, swift):
             arg = params[node.name]
             pieces.append(f'number({arg})' if signature[node.name] == 'Nat' else arg)
         else:
-            arms = {k: native_nodes(v, params, signature, ja, swift) for k, v in node.arms.items()}
+            arms = {k: native_nodes(v, params, signature, english_plural, swift) for k, v in node.arms.items()}
             expr = arms['other']
             arg = params[node.name]
             if node.kind == 'plural':
-                if not ja and 'one' in arms:
+                if english_plural and 'one' in arms:
                     expr = choose(f'{arg} == ' + ('1' if swift else '1uL'), arms['one'], expr)
                 for key in reversed(list(arms)):
                     if key.startswith('='):
@@ -444,16 +450,18 @@ def generate_native(catalogs, keys, swift):
             native_type = ('UInt64' if swift else 'ULong') if kind == 'Nat' else 'String'
             args.append(('_ ' if swift else '') + params[arg] + ': ' + native_type)
         tail = ''.join(', ' + arg for arg in args)
-        en = native_nodes(catalogs['en'][key], params, sig, False, swift)
-        ja = native_nodes(catalogs['ja'].get(key, catalogs['en'][key]), params, sig, key in catalogs['ja'], swift)
+        en = native_nodes(catalogs['en'][key], params, sig, True, swift)
+        ja = native_nodes(catalogs['ja'].get(key, catalogs['en'][key]), params, sig, key not in catalogs['ja'], swift)
+        sux_fallback = not translated(catalogs, 'sux', key)
+        sux = native_nodes(catalogs['sux'].get(key, catalogs['en'][key]), params, sig, sux_fallback, swift)
         lines.append('')
         lines.append('  // ' + key)
         if swift:
             lines += [f'  static func {name}(_ tag: String{tail}) -> String {{',
-                      f'    tag == "ja" ? ({ja}) : ({en})', '  }']
+                      f'    tag == "sux-Xsux" ? ({sux}) : (tag == "ja" ? ({ja}) : ({en}))', '  }']
         else:
             lines += [f'  fun {name}(tag: String{tail}): String =',
-                      f'    if (tag == "ja") ({ja}) else ({en})']
+                      f'    if (tag == "sux-Xsux") ({sux}) else if (tag == "ja") ({ja}) else ({en})']
     return '\n'.join(lines + ['}', ''])
 
 
@@ -480,7 +488,8 @@ def generate_ios_resources(catalogs, template):
     for locale, _ in LOCALES:
         text = plistlib.dumps(values[locale], sort_keys=True).decode('utf-8')
         text = text.replace('\n', '\n' + header, 1)
-        outputs[f'mobile/ios/Backplane/{locale}.lproj/InfoPlist.strings'] = text
+        folder = 'sux-Xsux' if locale == 'sux' else locale
+        outputs[f'mobile/ios/Backplane/{folder}.lproj/InfoPlist.strings'] = text
     fallback = template
     for name, value in values['en'].items():
         fallback = fallback.replace('@' + name + '@', xml_escape(value))
@@ -499,6 +508,7 @@ def fallback_fixture():
     catalogs = {
         'en': parse_catalog('common.save = Save\nfiles.count = {n, plural, one {# file} other {# files}}', 'fallback/en'),
         'ja': {},
+        'sux': {},
     }
     return generate(catalogs, '../../src/core/i18n.bend').replace(
         'from i18n/*.msg.', 'from built-in fallback fixtures.')
@@ -507,10 +517,11 @@ def fallback_fixture():
 def self_test():
     total = 0
 
-    def case(name, en, ja=None, error=False, contains=None, strict=False):
+    def case(name, en, ja=None, sux=None, error=False, contains=None, strict=False):
         nonlocal total
         try:
-            catalogs = {'en': parse_catalog(en, 'en'), 'ja': parse_catalog(en if ja is None else ja, 'ja')}
+            catalogs = {'en': parse_catalog(en, 'en'), 'ja': parse_catalog(en if ja is None else ja, 'ja'),
+                        'sux': parse_catalog(en if sux is None else sux, 'sux')}
             if strict:
                 require_complete(catalogs)
             output = generate(catalogs)
@@ -555,10 +566,14 @@ def self_test():
     case('fallback', 'x = fallback', '', contains='"fallback"')
     case('release rejects missing translation', 'x = source', '', error=True, strict=True)
     case('release accepts complete translation', 'x = source', 'x = 訳', strict=True)
-    fallback = generate({'en': parse_catalog('x = {n, plural, one {# item} other {# items}}', 'en'), 'ja': {}})
+    case('draft Sumerian fallback is explicit', 'x = source', 'x = 訳', '', strict=True,
+         contains='case I.Sux{}:\n      "source"')
+    fallback = generate({'en': parse_catalog('x = {n, plural, one {# item} other {# items}}', 'en'), 'ja': {}, 'sux': {}})
     en_arm = fallback.split('case I.En{}:\n', 1)[1].splitlines()[0]
     ja_arm = fallback.split('case I.Ja{}:\n', 1)[1].splitlines()[0]
+    sux_arm = fallback.split('case I.Sux{}:\n', 1)[1].splitlines()[0]
     assert en_arm == ja_arm, 'plural fallback must preserve English grammar'
+    assert en_arm == sux_arm, 'Sumerian plural fallback must preserve English grammar'
     total += 1
     print('ok plural fallback preserves English grammar')
     print(f'i18n self-test: {total} cases passed')
@@ -576,10 +591,15 @@ def main():
             return 0
         catalogs = {p.stem: parse_catalog(p.read_text(encoding='utf-8'), str(p.relative_to(ROOT))) for p in sorted((ROOT / 'i18n').glob('*.msg'))}
         output = generate(catalogs)
-        missing = sorted(set(catalogs['en']) - set(catalogs['ja']))
-        print(f'i18n: {len(catalogs["en"])} keys, ja missing {len(missing)}')
-        for key in missing:
-            print(f'warning: ja missing {key}; using English')
+        missing = {tag: sorted(set(catalogs['en']) - set(catalogs[tag])) for tag, _ in LOCALES if tag != 'en'}
+        sux_fallback = sum(not translated(catalogs, 'sux', key) for key in catalogs['en'])
+        print(f'i18n: {len(catalogs["en"])} keys, ' + ', '.join(f'{tag} missing {len(keys)}' for tag, keys in missing.items()) + f', sux English fallback {sux_fallback}')
+        for tag, keys in missing.items():
+            if tag == 'sux' and keys:
+                print(f'warning: {tag} is an experimental draft; {len(keys)} messages use English fallback')
+            else:
+                for key in keys:
+                    print(f'warning: {tag} missing {key}; using English')
         if args.check:
             require_complete(catalogs)
         outputs = {

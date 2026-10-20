@@ -54,6 +54,9 @@ else
   # KiStack's skills, pinned and checked (deploy/kistack.lock)
   scripts/build-kistack.sh dist/kistack
 fi
+mkdir -p dist/web/fonts
+cp assets/fonts/NotoSansCuneiform-Regular.ttf dist/web/fonts/
+cp assets/fonts/NOTO-CUNEIFORM-OFL.txt dist/web/fonts/
 mkdir -p build
 if [ "$mode" = emit ]; then
   BACKPLANE_EMIT_ONLY=1 scripts/build-app.sh src/server/main.bend dist/backplane-serve

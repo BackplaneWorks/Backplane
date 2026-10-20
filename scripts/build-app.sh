@@ -204,6 +204,9 @@ grep -q '#include <alsa/' "$work/all.c" && libs="$libs -lasound"
 [ "$(uname -s)" != Linux ] || libs="-Wl,--as-needed $libs"
 nice -n 19 $pin "$CC" $cflags "$work"/u*.o -o "$out" -lpthread -lm $libs
 t_link=$(now_ms)
+mkdir -p "$(dirname "$out")/fonts"
+cp assets/fonts/NotoSansCuneiform-Regular.ttf "$(dirname "$out")/fonts/"
+cp assets/fonts/NOTO-CUNEIFORM-OFL.txt "$(dirname "$out")/fonts/"
 hits=$(cat "$work"/u*.o.how 2>/dev/null | grep -c '^hit$' || true)
 misses=$(cat "$work"/u*.o.how 2>/dev/null | grep -c '^cc$' || true)
 cc_max=$(cat "$work"/u*.o.rss 2>/dev/null | grep -E '^[0-9]+$' | sort -n | tail -n1)

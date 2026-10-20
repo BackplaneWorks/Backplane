@@ -9,6 +9,8 @@ def T.agy.account(l: I.Loc) -> String:
       "Account"
     case I.Ja{}:
       "アカウント"
+    case I.Sux{}:
+      "𒂍𒇽"
 
 def T.agy.account.add(l: I.Loc) -> String:
   match l:
@@ -16,6 +18,8 @@ def T.agy.account.add(l: I.Loc) -> String:
       "Add account"
     case I.Ja{}:
       "アカウントを追加"
+    case I.Sux{}:
+      "𒇽 𒃻"
 
 def T.agy.account.other(l: I.Loc) -> String:
   match l:
@@ -23,6 +27,8 @@ def T.agy.account.other(l: I.Loc) -> String:
       "Another account's name"
     case I.Ja{}:
       "別のアカウント名"
+    case I.Sux{}:
+      "Another account's name"
 
 def T.agy.account.signedin(l: I.Loc, arg0: String) -> String:
   match l:
@@ -30,6 +36,8 @@ def T.agy.account.signedin(l: I.Loc, arg0: String) -> String:
       arg0 ++ ": signed in. The agent keeps its own sign-in; Backplane never sees it."
     case I.Ja{}:
       arg0 ++ "：サインイン済みです。サインイン情報はエージェントが保持し、Backplaneからは見えません。"
+    case I.Sux{}:
+      arg0 ++ ": signed in. The agent keeps its own sign-in; Backplane never sees it."
 
 def T.agy.account.signedout(l: I.Loc, arg0: String) -> String:
   match l:
@@ -37,6 +45,8 @@ def T.agy.account.signedout(l: I.Loc, arg0: String) -> String:
       arg0 ++ ": not signed in."
     case I.Ja{}:
       arg0 ++ "：サインインしていません。"
+    case I.Sux{}:
+      arg0 ++ ": not signed in."
 
 def T.agy.download(l: I.Loc, arg0: String) -> String:
   match l:
@@ -44,6 +54,8 @@ def T.agy.download(l: I.Loc, arg0: String) -> String:
       "Not installed. Backplane downloads Google's agent (agy_acp_server " ++ arg0 ++ ", from the ACP registry, a few hundred MB) and checks its pinned SHA-256."
     case I.Ja{}:
       "未インストールです。BackplaneがGoogleのエージェント（agy_acp_server " ++ arg0 ++ "、ACPレジストリから数百MB）をダウンロードし、固定されたSHA-256を確認します。"
+    case I.Sux{}:
+      "Not installed. Backplane downloads Google's agent (agy_acp_server " ++ arg0 ++ ", from the ACP registry, a few hundred MB) and checks its pinned SHA-256."
 
 def T.agy.gcp(l: I.Loc) -> String:
   match l:
@@ -51,6 +63,8 @@ def T.agy.gcp(l: I.Loc) -> String:
       "Google Cloud project"
     case I.Ja{}:
       "Google Cloudプロジェクト"
+    case I.Sux{}:
+      "Google Cloud project"
 
 def T.agy.gcp.location(l: I.Loc) -> String:
   match l:
@@ -58,6 +72,8 @@ def T.agy.gcp.location(l: I.Loc) -> String:
       "Location, e.g. us-central1"
     case I.Ja{}:
       "ロケーション（例：us-central1）"
+    case I.Sux{}:
+      "Location, e.g. us-central1"
 
 def T.agy.gcp.none(l: I.Loc) -> String:
   match l:
@@ -65,6 +81,8 @@ def T.agy.gcp.none(l: I.Loc) -> String:
       "not set"
     case I.Ja{}:
       "未設定"
+    case I.Sux{}:
+      "𒉡 𒃻"
 
 def T.agy.gcp.project(l: I.Loc) -> String:
   match l:
@@ -72,6 +90,8 @@ def T.agy.gcp.project(l: I.Loc) -> String:
       "Project ID"
     case I.Ja{}:
       "プロジェクトID"
+    case I.Sux{}:
+      "Project ID"
 
 def T.agy.gcp.set(l: I.Loc, arg0: String, arg1: String) -> String:
   match l:
@@ -79,6 +99,8 @@ def T.agy.gcp.set(l: I.Loc, arg0: String, arg1: String) -> String:
       "Project " ++ arg0 ++ ", location " ++ arg1 ++ "."
     case I.Ja{}:
       "プロジェクト" ++ arg0 ++ "、ロケーション" ++ arg1 ++ "。"
+    case I.Sux{}:
+      "Project " ++ arg0 ++ ", location " ++ arg1 ++ "."
 
 def T.agy.gcp.unset(l: I.Loc) -> String:
   match l:
@@ -86,6 +108,8 @@ def T.agy.gcp.unset(l: I.Loc) -> String:
       "Not set."
     case I.Ja{}:
       "未設定です。"
+    case I.Sux{}:
+      "𒉡 𒃻"
 
 def T.agy.google.signin(l: I.Loc) -> String:
   match l:
@@ -93,6 +117,8 @@ def T.agy.google.signin(l: I.Loc) -> String:
       "Sign in with Google"
     case I.Ja{}:
       "Googleでサインイン"
+    case I.Sux{}:
+      "Google 𒆷"
 
 def T.agy.install(l: I.Loc) -> String:
   match l:
@@ -100,6 +126,8 @@ def T.agy.install(l: I.Loc) -> String:
       "Install"
     case I.Ja{}:
       "インストール"
+    case I.Sux{}:
+      "𒃻"
 
 def T.agy.installed(l: I.Loc, arg0: String) -> String:
   match l:
@@ -107,6 +135,8 @@ def T.agy.installed(l: I.Loc, arg0: String) -> String:
       "Google's own agent, Antigravity " ++ arg0 ++ ", installed. Backplane runs it; it signs in by itself."
     case I.Ja{}:
       "Google純正のエージェント、Antigravity " ++ arg0 ++ "をインストール済みです。Backplaneが実行し、サインインはエージェント自身が行います。"
+    case I.Sux{}:
+      "Google's own agent, Antigravity " ++ arg0 ++ ", installed. Backplane runs it; it signs in by itself."
 
 def T.agy.key.check(l: I.Loc) -> String:
   match l:
@@ -114,6 +144,8 @@ def T.agy.key.check(l: I.Loc) -> String:
       "Check"
     case I.Ja{}:
       "確認"
+    case I.Sux{}:
+      "𒆥"
 
 def T.agy.key.paste(l: I.Loc) -> String:
   match l:
@@ -121,6 +153,8 @@ def T.agy.key.paste(l: I.Loc) -> String:
       "Paste the key"
     case I.Ja{}:
       "キーを貼り付け"
+    case I.Sux{}:
+      "𒃻"
 
 def T.agy.key.save(l: I.Loc) -> String:
   match l:
@@ -128,6 +162,8 @@ def T.agy.key.save(l: I.Loc) -> String:
       "Save key"
     case I.Ja{}:
       "キーを保存"
+    case I.Sux{}:
+      "𒁾 𒊬"
 
 def T.agy.key.saved(l: I.Loc) -> String:
   match l:
@@ -135,6 +171,8 @@ def T.agy.key.saved(l: I.Loc) -> String:
       "Saved in API keys. Check it to list the models it offers."
     case I.Ja{}:
       "APIキーに保存済みです。確認すると、使えるモデルが一覧表示されます。"
+    case I.Sux{}:
+      "Saved in API keys. Check it to list the models it offers."
 
 def T.agy.key.unsaved(l: I.Loc) -> String:
   match l:
@@ -142,6 +180,8 @@ def T.agy.key.unsaved(l: I.Loc) -> String:
       "Not saved yet. It goes to this machine's API keys file; no client shows it again."
     case I.Ja{}:
       "まだ保存されていません。このマシンのAPIキーファイルに保存され、どのクライアントにも再表示されません。"
+    case I.Sux{}:
+      "Not saved yet. It goes to this machine's API keys file; no client shows it again."
 
 def T.agy.method(l: I.Loc) -> String:
   match l:
@@ -149,6 +189,8 @@ def T.agy.method(l: I.Loc) -> String:
       "Sign in with"
     case I.Ja{}:
       "サインイン方法"
+    case I.Sux{}:
+      "𒆷"
 
 def T.agy.old(l: I.Loc, arg0: String, arg1: String) -> String:
   match l:
@@ -156,6 +198,8 @@ def T.agy.old(l: I.Loc, arg0: String, arg1: String) -> String:
       "Antigravity " ++ arg0 ++ " is installed; Backplane now pins " ++ arg1 ++ "."
     case I.Ja{}:
       "Antigravity " ++ arg0 ++ "がインストールされています。Backplaneは現在" ++ arg1 ++ "に固定しています。"
+    case I.Sux{}:
+      "Antigravity " ++ arg0 ++ " is installed; Backplane now pins " ++ arg1 ++ "."
 
 def T.agy.reinstall(l: I.Loc) -> String:
   match l:
@@ -163,6 +207,8 @@ def T.agy.reinstall(l: I.Loc) -> String:
       "Reinstall"
     case I.Ja{}:
       "再インストール"
+    case I.Sux{}:
+      "𒄄 𒃻"
 
 def T.agy.signin(l: I.Loc) -> String:
   match l:
@@ -170,6 +216,8 @@ def T.agy.signin(l: I.Loc) -> String:
       "Sign-in"
     case I.Ja{}:
       "サインイン"
+    case I.Sux{}:
+      "𒆷"
 
 def T.agy.signin.back(l: I.Loc) -> String:
   match l:
@@ -177,6 +225,8 @@ def T.agy.signin.back(l: I.Loc) -> String:
       "Paste the address Google sent you to"
     case I.Ja{}:
       "Googleから移動した先のアドレスを貼り付け"
+    case I.Sux{}:
+      "Paste the address Google sent you to"
 
 def T.agy.signin.failed(l: I.Loc) -> String:
   match l:
@@ -184,6 +234,8 @@ def T.agy.signin.failed(l: I.Loc) -> String:
       "Sign-in failed"
     case I.Ja{}:
       "サインインに失敗しました"
+    case I.Sux{}:
+      "𒉡𒆷"
 
 def T.agy.signin.next(l: I.Loc) -> String:
   match l:
@@ -191,6 +243,8 @@ def T.agy.signin.next(l: I.Loc) -> String:
       "Continue"
     case I.Ja{}:
       "続行"
+    case I.Sux{}:
+      "𒁺"
 
 def T.agy.signin.open(l: I.Loc) -> String:
   match l:
@@ -198,6 +252,8 @@ def T.agy.signin.open(l: I.Loc) -> String:
       "Open Google's sign-in"
     case I.Ja{}:
       "Googleのサインインを開く"
+    case I.Sux{}:
+      "Google 𒆷 𒅅"
 
 def T.agy.signout(l: I.Loc) -> String:
   match l:
@@ -205,6 +261,8 @@ def T.agy.signout(l: I.Loc) -> String:
       "Sign out"
     case I.Ja{}:
       "サインアウト"
+    case I.Sux{}:
+      "𒉡𒆷"
 
 def T.agy.unsupported(l: I.Loc) -> String:
   match l:
@@ -212,6 +270,8 @@ def T.agy.unsupported(l: I.Loc) -> String:
       "Google has no Antigravity build for this machine."
     case I.Ja{}:
       "このマシン向けのAntigravityはGoogleから提供されていません。"
+    case I.Sux{}:
+      "Google has no Antigravity build for this machine."
 
 def T.agy.update(l: I.Loc, arg0: String) -> String:
   match l:
@@ -219,6 +279,8 @@ def T.agy.update(l: I.Loc, arg0: String) -> String:
       "Update to " ++ arg0
     case I.Ja{}:
       arg0 ++ "に更新"
+    case I.Sux{}:
+      "𒉋 " ++ arg0
 
 def T.apikeys.form(l: I.Loc) -> String:
   match l:
@@ -226,6 +288,8 @@ def T.apikeys.form(l: I.Loc) -> String:
       "Agents find a key by its name, e.g. OPENAI_API_KEY. It is never shown again."
     case I.Ja{}:
       "エージェントはキーを名前（例：OPENAI_API_KEY）で見つけます。キーは二度と表示されません。"
+    case I.Sux{}:
+      "Agents find a key by its name, e.g. OPENAI_API_KEY. It is never shown again."
 
 def T.apikeys.kept(l: I.Loc, arg0: String) -> String:
   match l:
@@ -233,6 +297,8 @@ def T.apikeys.kept(l: I.Loc, arg0: String) -> String:
       "Agents use these without ever reading them: " ++ arg0 ++ " kept."
     case I.Ja{}:
       "エージェントはキーを読まずに使います：" ++ arg0 ++ "件保管中。"
+    case I.Sux{}:
+      "Agents use these without ever reading them: " ++ arg0 ++ " kept."
 
 def T.apikeys.none(l: I.Loc) -> String:
   match l:
@@ -240,6 +306,8 @@ def T.apikeys.none(l: I.Loc) -> String:
       "Keys for the services agents use, kept in this machine's secrets. Agents use them without ever reading them. None yet."
     case I.Ja{}:
       "エージェントが使うサービスのキーを、このマシンのシークレットに保管します。エージェントはキーを読まずに使えます。まだありません。"
+    case I.Sux{}:
+      "Keys for the services agents use, kept in this machine's secrets. Agents use them without ever reading them. None yet."
 
 def T.approval.allow(l: I.Loc) -> String:
   match l:
@@ -247,6 +315,8 @@ def T.approval.allow(l: I.Loc) -> String:
       "Allow"
     case I.Ja{}:
       "許可"
+    case I.Sux{}:
+      "𒅅"
 
 def T.approval.deny(l: I.Loc) -> String:
   match l:
@@ -254,6 +324,8 @@ def T.approval.deny(l: I.Loc) -> String:
       "Deny"
     case I.Ja{}:
       "拒否"
+    case I.Sux{}:
+      "𒉡𒅅"
 
 def T.approval.dismiss(l: I.Loc) -> String:
   match l:
@@ -261,6 +333,8 @@ def T.approval.dismiss(l: I.Loc) -> String:
       "Dismiss"
     case I.Ja{}:
       "閉じる"
+    case I.Sux{}:
+      "𒄄"
 
 def T.approval.draft(l: I.Loc) -> String:
   match l:
@@ -268,6 +342,8 @@ def T.approval.draft(l: I.Loc) -> String:
       "Answer with draft"
     case I.Ja{}:
       "下書きで回答"
+    case I.Sux{}:
+      "𒁾 𒊬"
 
 def T.approval.implement(l: I.Loc) -> String:
   match l:
@@ -275,6 +351,8 @@ def T.approval.implement(l: I.Loc) -> String:
       "Implement"
     case I.Ja{}:
       "実装"
+    case I.Sux{}:
+      "𒆕"
 
 def T.approval.session(l: I.Loc) -> String:
   match l:
@@ -282,6 +360,8 @@ def T.approval.session(l: I.Loc) -> String:
       "Allow for session"
     case I.Ja{}:
       "セッション中許可"
+    case I.Sux{}:
+      "𒌓"
 
 def T.ask.allow(l: I.Loc, arg0: String) -> String:
   match l:
@@ -289,6 +369,8 @@ def T.ask.allow(l: I.Loc, arg0: String) -> String:
       "Allow " ++ arg0 ++ "?"
     case I.Ja{}:
       arg0 ++ "を許可しますか？"
+    case I.Sux{}:
+      "𒅅 " ++ arg0 ++ "?"
 
 def T.ask.allow.once(l: I.Loc) -> String:
   match l:
@@ -296,6 +378,8 @@ def T.ask.allow.once(l: I.Loc) -> String:
       "Allow once"
     case I.Ja{}:
       "今回のみ許可"
+    case I.Sux{}:
+      "𒅅 𒁹"
 
 def T.ask.allow.session.tip(l: I.Loc) -> String:
   match l:
@@ -303,6 +387,8 @@ def T.ask.allow.session.tip(l: I.Loc) -> String:
       "Allow this tool for the session"
     case I.Ja{}:
       "このセッションでツールを許可"
+    case I.Sux{}:
+      "Allow this tool for the session"
 
 def T.ask.browser.stopped(l: I.Loc) -> String:
   match l:
@@ -310,6 +396,8 @@ def T.ask.browser.stopped(l: I.Loc) -> String:
       "where the task stopped"
     case I.Ja{}:
       "タスクの停止位置"
+    case I.Sux{}:
+      "𒆠 𒉡𒁺"
 
 def T.ask.draft.tip(l: I.Loc) -> String:
   match l:
@@ -317,6 +405,8 @@ def T.ask.draft.tip(l: I.Loc) -> String:
       "Answer with your draft"
     case I.Ja{}:
       "下書きで回答"
+    case I.Sux{}:
+      "𒁾 𒊬"
 
 def T.ask.event.change(l: I.Loc) -> String:
   match l:
@@ -324,6 +414,8 @@ def T.ask.event.change(l: I.Loc) -> String:
       "Change this event?"
     case I.Ja{}:
       "この予定を変更しますか？"
+    case I.Sux{}:
+      "𒄄"
 
 def T.ask.event.create(l: I.Loc) -> String:
   match l:
@@ -331,6 +423,8 @@ def T.ask.event.create(l: I.Loc) -> String:
       "Create this event?"
     case I.Ja{}:
       "この予定を作成しますか？"
+    case I.Sux{}:
+      "𒆕"
 
 def T.ask.event.delete(l: I.Loc) -> String:
   match l:
@@ -338,6 +432,8 @@ def T.ask.event.delete(l: I.Loc) -> String:
       "Delete this event?"
     case I.Ja{}:
       "この予定を削除しますか？"
+    case I.Sux{}:
+      "𒋗𒅆𒌨"
 
 def T.ask.implement.tip(l: I.Loc) -> String:
   match l:
@@ -345,6 +441,8 @@ def T.ask.implement.tip(l: I.Loc) -> String:
       "Implement the plan"
     case I.Ja{}:
       "計画を実行"
+    case I.Sux{}:
+      "𒆕"
 
 def T.ask.input(l: I.Loc) -> String:
   match l:
@@ -352,6 +450,8 @@ def T.ask.input(l: I.Loc) -> String:
       "The agent asks"
     case I.Ja{}:
       "エージェントからの質問"
+    case I.Sux{}:
+      "𒅗"
 
 def T.ask.notnow(l: I.Loc) -> String:
   match l:
@@ -359,6 +459,8 @@ def T.ask.notnow(l: I.Loc) -> String:
       "Not now"
     case I.Ja{}:
       "今はしない"
+    case I.Sux{}:
+      "𒉡 𒌓"
 
 def T.ask.plan(l: I.Loc) -> String:
   match l:
@@ -366,6 +468,8 @@ def T.ask.plan(l: I.Loc) -> String:
       "Proposed plan"
     case I.Ja{}:
       "提案されたプラン"
+    case I.Sux{}:
+      "𒆕"
 
 def T.ask.send.draft(l: I.Loc) -> String:
   match l:
@@ -373,6 +477,8 @@ def T.ask.send.draft(l: I.Loc) -> String:
       "Send this draft?"
     case I.Ja{}:
       "この下書きを送信しますか？"
+    case I.Sux{}:
+      "𒁾 𒊬 𒋧?"
 
 def T.ask.send.email(l: I.Loc) -> String:
   match l:
@@ -380,6 +486,8 @@ def T.ask.send.email(l: I.Loc) -> String:
       "Send this email?"
     case I.Ja{}:
       "このメールを送信しますか？"
+    case I.Sux{}:
+      "Email 𒋧?"
 
 def T.ask.send.none(l: I.Loc) -> String:
   match l:
@@ -387,6 +495,8 @@ def T.ask.send.none(l: I.Loc) -> String:
       "Nothing is sent"
     case I.Ja{}:
       "送信せずに閉じる"
+    case I.Sux{}:
+      "𒉡𒁺"
 
 def T.ask.send.tip(l: I.Loc) -> String:
   match l:
@@ -394,6 +504,8 @@ def T.ask.send.tip(l: I.Loc) -> String:
       "Send these files and get the quote"
     case I.Ja{}:
       "ファイルを送信して見積もりを取得"
+    case I.Sux{}:
+      "Send these files and get the quote"
 
 def T.auth.legacy(l: I.Loc) -> String:
   match l:
@@ -401,6 +513,8 @@ def T.auth.legacy(l: I.Loc) -> String:
       "This device connected without its pairing key, which a later version will require. Open the pairing link from Backplane's Settings on this device (or scan its QR code) to add it."
     case I.Ja{}:
       "この端末はペアリングキーなしで接続しています。今後のバージョンではキーが必要になります。この端末でBackplaneの設定にあるペアリングリンクを開くか、QRコードを読み取って追加してください。"
+    case I.Sux{}:
+      "This device connected without its pairing key, which a later version will require. Open the pairing link from Backplane's Settings on this device (or scan its QR code) to add it."
 
 def T.bots.create.tip(l: I.Loc) -> String:
   match l:
@@ -408,6 +522,8 @@ def T.bots.create.tip(l: I.Loc) -> String:
       "Make the bot"
     case I.Ja{}:
       "ボットを作成"
+    case I.Sux{}:
+      "𒆕"
 
 def T.bots.delete(l: I.Loc) -> String:
   match l:
@@ -415,6 +531,8 @@ def T.bots.delete(l: I.Loc) -> String:
       "Delete bot"
     case I.Ja{}:
       "ボットを削除"
+    case I.Sux{}:
+      "𒇽 𒋗𒅆𒌨"
 
 def T.bots.delete.button.tip(l: I.Loc) -> String:
   match l:
@@ -422,6 +540,8 @@ def T.bots.delete.button.tip(l: I.Loc) -> String:
       "Delete this bot"
     case I.Ja{}:
       "ボットを削除"
+    case I.Sux{}:
+      "𒇽 𒋗𒅆𒌨"
 
 def T.bots.delete.named(l: I.Loc, arg0: String) -> String:
   match l:
@@ -429,6 +549,8 @@ def T.bots.delete.named(l: I.Loc, arg0: String) -> String:
       "Delete " ++ arg0
     case I.Ja{}:
       arg0 ++ "を削除"
+    case I.Sux{}:
+      "𒋗𒅆𒌨 " ++ arg0
 
 def T.bots.delete.tip(l: I.Loc) -> String:
   match l:
@@ -436,6 +558,8 @@ def T.bots.delete.tip(l: I.Loc) -> String:
       "Delete this bot for good"
     case I.Ja{}:
       "ボットを完全に削除"
+    case I.Sux{}:
+      "Delete this bot for good"
 
 def T.bots.face.new(l: I.Loc) -> String:
   match l:
@@ -443,6 +567,8 @@ def T.bots.face.new(l: I.Loc) -> String:
       "New face"
     case I.Ja{}:
       "見た目を変更"
+    case I.Sux{}:
+      "𒇽 𒉋"
 
 def T.bots.invite.address(l: I.Loc) -> String:
   match l:
@@ -450,6 +576,8 @@ def T.bots.invite.address(l: I.Loc) -> String:
       "This hub's address as the other reaches it"
     case I.Ja{}:
       "相手から接続できるこのハブのアドレス"
+    case I.Sux{}:
+      "This hub's address as the other reaches it"
 
 def T.bots.invite.join(l: I.Loc) -> String:
   match l:
@@ -457,6 +585,8 @@ def T.bots.invite.join(l: I.Loc) -> String:
       "Join"
     case I.Ja{}:
       "参加"
+    case I.Sux{}:
+      "𒆷"
 
 def T.bots.invite.make(l: I.Loc) -> String:
   match l:
@@ -464,6 +594,8 @@ def T.bots.invite.make(l: I.Loc) -> String:
       "Make invite"
     case I.Ja{}:
       "招待を作成"
+    case I.Sux{}:
+      "𒆷 𒉋"
 
 def T.bots.invite.once(l: I.Loc) -> String:
   match l:
@@ -471,6 +603,8 @@ def T.bots.invite.once(l: I.Loc) -> String:
       "Invite, shown once: paste it on the other hub"
     case I.Ja{}:
       "招待は一度だけ表示します。相手のハブに貼り付けてください。"
+    case I.Sux{}:
+      "Invite, shown once: paste it on the other hub"
 
 def T.bots.invite.paste(l: I.Loc) -> String:
   match l:
@@ -478,6 +612,8 @@ def T.bots.invite.paste(l: I.Loc) -> String:
       "Paste an invite (bp1:...)"
     case I.Ja{}:
       "招待を貼り付け（bp1:…）"
+    case I.Sux{}:
+      "𒃻 𒆷"
 
 def T.bots.keep(l: I.Loc) -> String:
   match l:
@@ -485,6 +621,8 @@ def T.bots.keep(l: I.Loc) -> String:
       "Keep it"
     case I.Ja{}:
       "残す"
+    case I.Sux{}:
+      "𒃻"
 
 def T.bots.look(l: I.Loc) -> String:
   match l:
@@ -492,6 +630,8 @@ def T.bots.look(l: I.Loc) -> String:
       "Look"
     case I.Ja{}:
       "外観"
+    case I.Sux{}:
+      "𒅆"
 
 def T.bots.look.number(l: I.Loc, arg0: String) -> String:
   match l:
@@ -499,6 +639,8 @@ def T.bots.look.number(l: I.Loc, arg0: String) -> String:
       "Look " ++ arg0
     case I.Ja{}:
       "外観" ++ arg0
+    case I.Sux{}:
+      "𒅆 " ++ arg0
 
 def T.bots.machines(l: I.Loc) -> String:
   match l:
@@ -506,6 +648,8 @@ def T.bots.machines(l: I.Loc) -> String:
       "Machines"
     case I.Ja{}:
       "マシン"
+    case I.Sux{}:
+      "𒂍𒂍"
 
 def T.bots.machines.note(l: I.Loc) -> String:
   match l:
@@ -513,6 +657,8 @@ def T.bots.machines.note(l: I.Loc) -> String:
       "Bots here and on linked hubs can talk. An invite links one hub to another."
     case I.Ja{}:
       "リンクしたハブのボットと会話できます。招待でハブをリンクします。"
+    case I.Sux{}:
+      "Bots here and on linked hubs can talk. An invite links one hub to another."
 
 def T.bots.member(l: I.Loc) -> String:
   match l:
@@ -520,6 +666,8 @@ def T.bots.member(l: I.Loc) -> String:
       "Member"
     case I.Ja{}:
       "メンバー"
+    case I.Sux{}:
+      "𒇽"
 
 def T.bots.memory.count(l: I.Loc, arg0: String) -> String:
   match l:
@@ -527,6 +675,8 @@ def T.bots.memory.count(l: I.Loc, arg0: String) -> String:
       arg0 ++ " items. The ones about you and your preferences go into every turn."
     case I.Ja{}:
       "記憶" ++ arg0 ++ "件。好みなどの記憶は毎ターン渡されます。"
+    case I.Sux{}:
+      arg0 ++ " items. The ones about you and your preferences go into every turn."
 
 def T.bots.memory.empty(l: I.Loc) -> String:
   match l:
@@ -534,6 +684,8 @@ def T.bots.memory.empty(l: I.Loc) -> String:
       "Nothing remembered yet. It keeps what it learns about you, your preferences, facts and how-tos here."
     case I.Ja{}:
       "記憶はまだありません。学んだ好みや事実、手順などをここに残します。"
+    case I.Sux{}:
+      "Nothing remembered yet. It keeps what it learns about you, your preferences, facts and how-tos here."
 
 def T.bots.memory.forget(l: I.Loc) -> String:
   match l:
@@ -541,6 +693,8 @@ def T.bots.memory.forget(l: I.Loc) -> String:
       "Forget"
     case I.Ja{}:
       "忘れる"
+    case I.Sux{}:
+      "𒉡𒋛"
 
 def T.bots.mood.away(l: I.Loc) -> String:
   match l:
@@ -548,6 +702,8 @@ def T.bots.mood.away(l: I.Loc) -> String:
       "away"
     case I.Ja{}:
       "不在"
+    case I.Sux{}:
+      "𒉡𒆠"
 
 def T.bots.mood.error(l: I.Loc) -> String:
   match l:
@@ -555,6 +711,8 @@ def T.bots.mood.error(l: I.Loc) -> String:
       "failed"
     case I.Ja{}:
       "失敗"
+    case I.Sux{}:
+      "𒉡𒅅"
 
 def T.bots.mood.idle(l: I.Loc) -> String:
   match l:
@@ -562,6 +720,8 @@ def T.bots.mood.idle(l: I.Loc) -> String:
       "ready"
     case I.Ja{}:
       "待機中"
+    case I.Sux{}:
+      "𒉡𒁺"
 
 def T.bots.mood.sleep(l: I.Loc) -> String:
   match l:
@@ -569,6 +729,8 @@ def T.bots.mood.sleep(l: I.Loc) -> String:
       "asleep"
     case I.Ja{}:
       "休止中"
+    case I.Sux{}:
+      "𒉡𒁺"
 
 def T.bots.mood.talk(l: I.Loc) -> String:
   match l:
@@ -576,6 +738,8 @@ def T.bots.mood.talk(l: I.Loc) -> String:
       "talking"
     case I.Ja{}:
       "会話中"
+    case I.Sux{}:
+      "𒅗𒁉"
 
 def T.bots.mood.think(l: I.Loc) -> String:
   match l:
@@ -583,6 +747,8 @@ def T.bots.mood.think(l: I.Loc) -> String:
       "thinking"
     case I.Ja{}:
       "考え中"
+    case I.Sux{}:
+      "𒅗"
 
 def T.bots.mood.wait(l: I.Loc) -> String:
   match l:
@@ -590,6 +756,8 @@ def T.bots.mood.wait(l: I.Loc) -> String:
       "needs you"
     case I.Ja{}:
       "対応待ち"
+    case I.Sux{}:
+      "𒃻"
 
 def T.bots.mood.work(l: I.Loc) -> String:
   match l:
@@ -597,6 +765,8 @@ def T.bots.mood.work(l: I.Loc) -> String:
       "working"
     case I.Ja{}:
       "作業中"
+    case I.Sux{}:
+      "𒇽𒁺"
 
 def T.bots.name(l: I.Loc) -> String:
   match l:
@@ -604,6 +774,8 @@ def T.bots.name(l: I.Loc) -> String:
       "Name"
     case I.Ja{}:
       "名前"
+    case I.Sux{}:
+      "𒈬"
 
 def T.bots.name.uber(l: I.Loc) -> String:
   match l:
@@ -611,6 +783,8 @@ def T.bots.name.uber(l: I.Loc) -> String:
       "Name your uberbot"
     case I.Ja{}:
       "メインボットの名前"
+    case I.Sux{}:
+      "𒈬 𒇽"
 
 def T.bots.new(l: I.Loc) -> String:
   match l:
@@ -618,6 +792,8 @@ def T.bots.new(l: I.Loc) -> String:
       "New bot"
     case I.Ja{}:
       "新しいボット"
+    case I.Sux{}:
+      "𒇽 𒉋"
 
 def T.bots.nothing(l: I.Loc) -> String:
   match l:
@@ -625,6 +801,8 @@ def T.bots.nothing(l: I.Loc) -> String:
       "Nothing needs you"
     case I.Ja{}:
       "対応待ちなし"
+    case I.Sux{}:
+      "𒉡𒇽"
 
 def T.bots.page.empty(l: I.Loc, arg0: String) -> String:
   match l:
@@ -632,6 +810,8 @@ def T.bots.page.empty(l: I.Loc, arg0: String) -> String:
       "No page yet. Ask " ++ arg0 ++ " to open one."
     case I.Ja{}:
       arg0 ++ "にページを開くよう頼んでください。"
+    case I.Sux{}:
+      "𒉡 𒁾. " ++ arg0 ++ " 𒂗𒋻 𒅆."
 
 def T.bots.persona(l: I.Loc) -> String:
   match l:
@@ -639,6 +819,8 @@ def T.bots.persona(l: I.Loc) -> String:
       "Persona"
     case I.Ja{}:
       "性格・役割"
+    case I.Sux{}:
+      "𒇽"
 
 def T.bots.persona.example(l: I.Loc) -> String:
   match l:
@@ -646,6 +828,8 @@ def T.bots.persona.example(l: I.Loc) -> String:
       "A helpful cat"
     case I.Ja{}:
       "役に立つ猫"
+    case I.Sux{}:
+      "A helpful cat"
 
 def T.bots.persona.note(l: I.Loc, arg0: String) -> String:
   match l:
@@ -653,6 +837,8 @@ def T.bots.persona.note(l: I.Loc, arg0: String) -> String:
       "Who " ++ arg0 ++ " is and how it works. It reads this at the start of every turn."
     case I.Ja{}:
       arg0 ++ "の性格や動作方針。毎ターン開始時に読みます。"
+    case I.Sux{}:
+      "Who " ++ arg0 ++ " is and how it works. It reads this at the start of every turn."
 
 def T.bots.persona.placeholder(l: I.Loc) -> String:
   match l:
@@ -660,6 +846,8 @@ def T.bots.persona.placeholder(l: I.Loc) -> String:
       "Who it is, what it does"
     case I.Ja{}:
       "性格や役割"
+    case I.Sux{}:
+      "𒇽 · 𒅴 · 𒀝"
 
 def T.bots.persona.revert(l: I.Loc) -> String:
   match l:
@@ -667,6 +855,8 @@ def T.bots.persona.revert(l: I.Loc) -> String:
       "Put it back"
     case I.Ja{}:
       "元に戻す"
+    case I.Sux{}:
+      "𒄄"
 
 def T.bots.persona.save(l: I.Loc) -> String:
   match l:
@@ -674,6 +864,8 @@ def T.bots.persona.save(l: I.Loc) -> String:
       "Save the persona"
     case I.Ja{}:
       "ペルソナを保存"
+    case I.Sux{}:
+      "𒁾 𒊬"
 
 def T.bots.remote.empty(l: I.Loc, arg0: String) -> String:
   match l:
@@ -681,6 +873,8 @@ def T.bots.remote.empty(l: I.Loc, arg0: String) -> String:
       "Write to " ++ arg0 ++ ". It answers from its own machine."
     case I.Ja{}:
       arg0 ++ "にメッセージを送ると、相手のマシンから返信します。"
+    case I.Sux{}:
+      "Write to " ++ arg0 ++ ". It answers from its own machine."
 
 def T.bots.remote.write(l: I.Loc, arg0: String) -> String:
   match l:
@@ -688,6 +882,8 @@ def T.bots.remote.write(l: I.Loc, arg0: String) -> String:
       "Write to " ++ arg0
     case I.Ja{}:
       arg0 ++ "にメッセージ"
+    case I.Sux{}:
+      "𒁾 𒊬 " ++ arg0
 
 def T.bots.room.name(l: I.Loc) -> String:
   match l:
@@ -695,6 +891,8 @@ def T.bots.room.name(l: I.Loc) -> String:
       "Room name"
     case I.Ja{}:
       "ルーム名"
+    case I.Sux{}:
+      "𒂍 𒈬"
 
 def T.bots.rooms(l: I.Loc) -> String:
   match l:
@@ -702,6 +900,8 @@ def T.bots.rooms(l: I.Loc) -> String:
       "Rooms"
     case I.Ja{}:
       "ルーム"
+    case I.Sux{}:
+      "𒂍𒂍"
 
 def T.bots.tab.browser(l: I.Loc) -> String:
   match l:
@@ -709,6 +909,8 @@ def T.bots.tab.browser(l: I.Loc) -> String:
       "Browser"
     case I.Ja{}:
       "ブラウザ"
+    case I.Sux{}:
+      "𒂍𒁾"
 
 def T.bots.tab.chat(l: I.Loc) -> String:
   match l:
@@ -716,6 +918,8 @@ def T.bots.tab.chat(l: I.Loc) -> String:
       "Chat"
     case I.Ja{}:
       "チャット"
+    case I.Sux{}:
+      "𒅗𒁉"
 
 def T.bots.tab.hooks(l: I.Loc) -> String:
   match l:
@@ -723,6 +927,8 @@ def T.bots.tab.hooks(l: I.Loc) -> String:
       "Webhooks"
     case I.Ja{}:
       "Webhook"
+    case I.Sux{}:
+      "𒆷"
 
 def T.bots.tab.memory(l: I.Loc) -> String:
   match l:
@@ -730,6 +936,8 @@ def T.bots.tab.memory(l: I.Loc) -> String:
       "Memory"
     case I.Ja{}:
       "メモリ"
+    case I.Sux{}:
+      "𒋛"
 
 def T.bots.tab.routines(l: I.Loc) -> String:
   match l:
@@ -737,6 +945,8 @@ def T.bots.tab.routines(l: I.Loc) -> String:
       "Routines"
     case I.Ja{}:
       "ルーティン"
+    case I.Sux{}:
+      "𒌓"
 
 def T.bots.tab.settings(l: I.Loc) -> String:
   match l:
@@ -744,6 +954,8 @@ def T.bots.tab.settings(l: I.Loc) -> String:
       "Settings"
     case I.Ja{}:
       "設定"
+    case I.Sux{}:
+      "𒈬 𒃻"
 
 def T.bots.tab.space(l: I.Loc) -> String:
   match l:
@@ -751,6 +963,8 @@ def T.bots.tab.space(l: I.Loc) -> String:
       "Space"
     case I.Ja{}:
       "スペース"
+    case I.Sux{}:
+      "𒆠"
 
 def T.bots.tab.status(l: I.Loc) -> String:
   match l:
@@ -758,6 +972,8 @@ def T.bots.tab.status(l: I.Loc) -> String:
       "Status"
     case I.Ja{}:
       "ステータス"
+    case I.Sux{}:
+      "𒅗𒁉"
 
 def T.bots.tab.tasks(l: I.Loc) -> String:
   match l:
@@ -765,6 +981,8 @@ def T.bots.tab.tasks(l: I.Loc) -> String:
       "Tasks"
     case I.Ja{}:
       "タスク"
+    case I.Sux{}:
+      "𒆕"
 
 def T.browser.address(l: I.Loc) -> String:
   match l:
@@ -772,6 +990,8 @@ def T.browser.address(l: I.Loc) -> String:
       "Address"
     case I.Ja{}:
       "アドレス"
+    case I.Sux{}:
+      "𒂍 𒆠"
 
 def T.browser.handback.tip(l: I.Loc) -> String:
   match l:
@@ -779,6 +999,8 @@ def T.browser.handback.tip(l: I.Loc) -> String:
       "Let the agent drive again"
     case I.Ja{}:
       "操作をエージェントに戻す"
+    case I.Sux{}:
+      "𒇽 𒄄"
 
 def T.browser.note.tip(l: I.Loc) -> String:
   match l:
@@ -786,6 +1008,8 @@ def T.browser.note.tip(l: I.Loc) -> String:
       "Add a note for what you just did"
     case I.Ja{}:
       "今の操作に補足を追加"
+    case I.Sux{}:
+      "𒁾 𒃻"
 
 def T.browser.notopened(l: I.Loc, arg0: String) -> String:
   match l:
@@ -793,6 +1017,8 @@ def T.browser.notopened(l: I.Loc, arg0: String) -> String:
       arg0 ++ " hasn't opened the browser yet."
     case I.Ja{}:
       arg0 ++ "はまだブラウザーを開いていません"
+    case I.Sux{}:
+      arg0 ++ " 𒉡𒅅 𒉋"
 
 def T.browser.owner(l: I.Loc, arg0: String) -> String:
   match l:
@@ -800,6 +1026,8 @@ def T.browser.owner(l: I.Loc, arg0: String) -> String:
       arg0 ++ "'s browser"
     case I.Ja{}:
       arg0 ++ "のブラウザー"
+    case I.Sux{}:
+      arg0 ++ "'s browser"
 
 def T.browser.thread(l: I.Loc) -> String:
   match l:
@@ -807,6 +1035,8 @@ def T.browser.thread(l: I.Loc) -> String:
       "This thread"
     case I.Ja{}:
       "このスレッド"
+    case I.Sux{}:
+      "𒅗"
 
 def T.btw.none(l: I.Loc) -> String:
   match l:
@@ -814,6 +1044,8 @@ def T.btw.none(l: I.Loc) -> String:
       "No answer came back (Settings, Writing: the model it asks)."
     case I.Ja{}:
       "回答がありませんでした（質問先のモデルは設定の「文章生成」で選べます）。"
+    case I.Sux{}:
+      "No answer came back (Settings, Writing: the model it asks)."
 
 def T.btw.thinking(l: I.Loc) -> String:
   match l:
@@ -821,6 +1053,8 @@ def T.btw.thinking(l: I.Loc) -> String:
       "Thinking…"
     case I.Ja{}:
       "考え中…"
+    case I.Sux{}:
+      "𒁺…"
 
 def T.common.add(l: I.Loc) -> String:
   match l:
@@ -828,6 +1062,8 @@ def T.common.add(l: I.Loc) -> String:
       "Add"
     case I.Ja{}:
       "追加"
+    case I.Sux{}:
+      "𒃻"
 
 def T.common.cancel(l: I.Loc) -> String:
   match l:
@@ -835,6 +1071,8 @@ def T.common.cancel(l: I.Loc) -> String:
       "Cancel"
     case I.Ja{}:
       "キャンセル"
+    case I.Sux{}:
+      "𒄄"
 
 def T.common.clear(l: I.Loc) -> String:
   match l:
@@ -842,6 +1080,8 @@ def T.common.clear(l: I.Loc) -> String:
       "Clear"
     case I.Ja{}:
       "クリア"
+    case I.Sux{}:
+      "𒃻"
 
 def T.common.close(l: I.Loc) -> String:
   match l:
@@ -849,6 +1089,8 @@ def T.common.close(l: I.Loc) -> String:
       "Close"
     case I.Ja{}:
       "閉じる"
+    case I.Sux{}:
+      "𒉡𒅅"
 
 def T.common.copy(l: I.Loc) -> String:
   match l:
@@ -856,6 +1098,8 @@ def T.common.copy(l: I.Loc) -> String:
       "Copy"
     case I.Ja{}:
       "コピー"
+    case I.Sux{}:
+      "𒃮𒊑"
 
 def T.common.create(l: I.Loc) -> String:
   match l:
@@ -863,6 +1107,8 @@ def T.common.create(l: I.Loc) -> String:
       "Create"
     case I.Ja{}:
       "作成"
+    case I.Sux{}:
+      "𒆕"
 
 def T.common.default(l: I.Loc) -> String:
   match l:
@@ -870,6 +1116,8 @@ def T.common.default(l: I.Loc) -> String:
       "default"
     case I.Ja{}:
       "既定"
+    case I.Sux{}:
+      "𒅅"
 
 def T.common.delete(l: I.Loc) -> String:
   match l:
@@ -877,6 +1125,8 @@ def T.common.delete(l: I.Loc) -> String:
       "Delete"
     case I.Ja{}:
       "削除"
+    case I.Sux{}:
+      "𒋗𒅆𒌨"
 
 def T.common.earlier(l: I.Loc) -> String:
   match l:
@@ -884,6 +1134,8 @@ def T.common.earlier(l: I.Loc) -> String:
       "Earlier"
     case I.Ja{}:
       "前を表示"
+    case I.Sux{}:
+      "𒄄"
 
 def T.common.finish(l: I.Loc) -> String:
   match l:
@@ -891,6 +1143,8 @@ def T.common.finish(l: I.Loc) -> String:
       "Finish"
     case I.Ja{}:
       "完了"
+    case I.Sux{}:
+      "𒌀"
 
 def T.common.go(l: I.Loc) -> String:
   match l:
@@ -898,6 +1152,8 @@ def T.common.go(l: I.Loc) -> String:
       "Go"
     case I.Ja{}:
       "移動"
+    case I.Sux{}:
+      "𒁺"
 
 def T.common.hide(l: I.Loc) -> String:
   match l:
@@ -905,6 +1161,8 @@ def T.common.hide(l: I.Loc) -> String:
       "Hide"
     case I.Ja{}:
       "隠す"
+    case I.Sux{}:
+      "𒀉𒌫𒆪"
 
 def T.common.hour(l: I.Loc) -> String:
   match l:
@@ -912,6 +1170,8 @@ def T.common.hour(l: I.Loc) -> String:
       "1 hour"
     case I.Ja{}:
       "1時間"
+    case I.Sux{}:
+      "𒋗𒊑𒀀 𒆜"
 
 def T.common.key(l: I.Loc) -> String:
   match l:
@@ -919,6 +1179,8 @@ def T.common.key(l: I.Loc) -> String:
       "Key"
     case I.Ja{}:
       "キー"
+    case I.Sux{}:
+      "𒅗"
 
 def T.common.more(l: I.Loc) -> String:
   match l:
@@ -926,6 +1188,8 @@ def T.common.more(l: I.Loc) -> String:
       "More"
     case I.Ja{}:
       "さらに表示"
+    case I.Sux{}:
+      "𒃲"
 
 def T.common.prev(l: I.Loc) -> String:
   match l:
@@ -933,6 +1197,8 @@ def T.common.prev(l: I.Loc) -> String:
       "Prev"
     case I.Ja{}:
       "前へ"
+    case I.Sux{}:
+      "𒄄"
 
 def T.common.refresh(l: I.Loc) -> String:
   match l:
@@ -940,6 +1206,8 @@ def T.common.refresh(l: I.Loc) -> String:
       "Refresh"
     case I.Ja{}:
       "更新"
+    case I.Sux{}:
+      "𒉋"
 
 def T.common.reload(l: I.Loc) -> String:
   match l:
@@ -947,6 +1215,8 @@ def T.common.reload(l: I.Loc) -> String:
       "Reload"
     case I.Ja{}:
       "再読み込み"
+    case I.Sux{}:
+      "𒉋"
 
 def T.common.remove(l: I.Loc) -> String:
   match l:
@@ -954,6 +1224,8 @@ def T.common.remove(l: I.Loc) -> String:
       "Remove"
     case I.Ja{}:
       "削除"
+    case I.Sux{}:
+      "𒂊"
 
 def T.common.revert(l: I.Loc) -> String:
   match l:
@@ -961,6 +1233,8 @@ def T.common.revert(l: I.Loc) -> String:
       "Revert"
     case I.Ja{}:
       "元に戻す"
+    case I.Sux{}:
+      "𒄄"
 
 def T.common.run(l: I.Loc) -> String:
   match l:
@@ -968,6 +1242,8 @@ def T.common.run(l: I.Loc) -> String:
       "Run"
     case I.Ja{}:
       "実行"
+    case I.Sux{}:
+      "𒁺"
 
 def T.common.save(l: I.Loc) -> String:
   match l:
@@ -975,6 +1251,8 @@ def T.common.save(l: I.Loc) -> String:
       "Save"
     case I.Ja{}:
       "保存"
+    case I.Sux{}:
+      "𒁾 𒊬"
 
 def T.common.search(l: I.Loc) -> String:
   match l:
@@ -982,6 +1260,8 @@ def T.common.search(l: I.Loc) -> String:
       "Search"
     case I.Ja{}:
       "検索"
+    case I.Sux{}:
+      "𒆥"
 
 def T.common.set(l: I.Loc) -> String:
   match l:
@@ -989,6 +1269,8 @@ def T.common.set(l: I.Loc) -> String:
       "Set"
     case I.Ja{}:
       "設定"
+    case I.Sux{}:
+      "𒃻"
 
 def T.common.show(l: I.Loc) -> String:
   match l:
@@ -996,6 +1278,8 @@ def T.common.show(l: I.Loc) -> String:
       "Show"
     case I.Ja{}:
       "表示"
+    case I.Sux{}:
+      "𒅆"
 
 def T.common.tomorrow(l: I.Loc) -> String:
   match l:
@@ -1003,6 +1287,8 @@ def T.common.tomorrow(l: I.Loc) -> String:
       "Tomorrow"
     case I.Ja{}:
       "明日"
+    case I.Sux{}:
+      "𒌓 𒉋"
 
 def T.common.week(l: I.Loc) -> String:
   match l:
@@ -1010,6 +1296,8 @@ def T.common.week(l: I.Loc) -> String:
       "1 week"
     case I.Ja{}:
       "1週間"
+    case I.Sux{}:
+      "7 𒌓"
 
 def T.composer.ask(l: I.Loc) -> String:
   match l:
@@ -1017,6 +1305,8 @@ def T.composer.ask(l: I.Loc) -> String:
       "Ask"
     case I.Ja{}:
       "質問"
+    case I.Sux{}:
+      "𒂗𒋻"
 
 def T.composer.attach(l: I.Loc) -> String:
   match l:
@@ -1024,6 +1314,8 @@ def T.composer.attach(l: I.Loc) -> String:
       "Attach"
     case I.Ja{}:
       "添付"
+    case I.Sux{}:
+      "𒆷"
 
 def T.composer.attach.placeholder(l: I.Loc) -> String:
   match l:
@@ -1031,6 +1323,8 @@ def T.composer.attach.placeholder(l: I.Loc) -> String:
       "/path/to/a/file, or paste one (Enter attaches, Esc closes)"
     case I.Ja{}:
       "ファイルのパス（Enterで添付、Escで閉じる）"
+    case I.Sux{}:
+      "/path/to/a/file, or paste one (Enter attaches, Esc closes)"
 
 def T.composer.attach.tip(l: I.Loc) -> String:
   match l:
@@ -1038,6 +1332,8 @@ def T.composer.attach.tip(l: I.Loc) -> String:
       "Attach files or images (or paste an image)"
     case I.Ja{}:
       "ファイルや画像を添付（画像の貼り付けも可）"
+    case I.Sux{}:
+      "𒁾𒆷 · 𒅆𒅆"
 
 def T.composer.detach(l: I.Loc, arg0: String) -> String:
   match l:
@@ -1045,6 +1341,8 @@ def T.composer.detach(l: I.Loc, arg0: String) -> String:
       "Remove " ++ arg0
     case I.Ja{}:
       arg0 ++ "を削除"
+    case I.Sux{}:
+      "𒂊 " ++ arg0
 
 def T.composer.enter.tip(l: I.Loc, arg0: String) -> String:
   match l:
@@ -1052,6 +1350,8 @@ def T.composer.enter.tip(l: I.Loc, arg0: String) -> String:
       "Enter; ctrl+Enter to " ++ I.I18n.sel(arg0, "steer", "steer", "queue") ++ " instead"
     case I.Ja{}:
       "Enterで送信・ctrl+Enterで" ++ I.I18n.sel(arg0, "steer", "方向を指示", "キューに追加")
+    case I.Sux{}:
+      "Enter; ctrl+Enter to " ++ I.I18n.sel(arg0, "steer", "steer", "queue") ++ " instead"
 
 def T.composer.give(l: I.Loc) -> String:
   match l:
@@ -1059,6 +1359,8 @@ def T.composer.give(l: I.Loc) -> String:
       "Give"
     case I.Ja{}:
       "引き渡す"
+    case I.Sux{}:
+      "𒋧"
 
 def T.composer.model.tip(l: I.Loc) -> String:
   match l:
@@ -1066,6 +1368,8 @@ def T.composer.model.tip(l: I.Loc) -> String:
       "Choose the model and effort"
     case I.Ja{}:
       "モデルと推論の強さを選択"
+    case I.Sux{}:
+      "𒅆𒈽"
 
 def T.composer.placeholder(l: I.Loc) -> String:
   match l:
@@ -1073,6 +1377,8 @@ def T.composer.placeholder(l: I.Loc) -> String:
       "Ask anything: @bot, >thread, %project, #room, $skill, /btw"
     case I.Ja{}:
       "何でも質問：@bot、>thread、%project、#room、$skill、/btw"
+    case I.Sux{}:
+      "Ask anything: @bot, >thread, %project, #room, $skill, /btw"
 
 def T.composer.queue(l: I.Loc) -> String:
   match l:
@@ -1080,6 +1386,8 @@ def T.composer.queue(l: I.Loc) -> String:
       "Queue"
     case I.Ja{}:
       "キューに追加"
+    case I.Sux{}:
+      "𒃻"
 
 def T.composer.send(l: I.Loc) -> String:
   match l:
@@ -1087,6 +1395,8 @@ def T.composer.send(l: I.Loc) -> String:
       "Send"
     case I.Ja{}:
       "送信"
+    case I.Sux{}:
+      "𒅗𒁉"
 
 def T.composer.steer(l: I.Loc) -> String:
   match l:
@@ -1094,6 +1404,8 @@ def T.composer.steer(l: I.Loc) -> String:
       "Steer"
     case I.Ja{}:
       "誘導"
+    case I.Sux{}:
+      "𒁺"
 
 def T.composer.stop(l: I.Loc) -> String:
   match l:
@@ -1101,6 +1413,8 @@ def T.composer.stop(l: I.Loc) -> String:
       "Stop"
     case I.Ja{}:
       "停止"
+    case I.Sux{}:
+      "𒉡𒁺"
 
 def T.composer.stop.tip(l: I.Loc) -> String:
   match l:
@@ -1108,6 +1422,8 @@ def T.composer.stop.tip(l: I.Loc) -> String:
       "Stop the running turn"
     case I.Ja{}:
       "実行中のターンを停止"
+    case I.Sux{}:
+      "𒉡𒁺"
 
 def T.diff.commit.tip(l: I.Loc) -> String:
   match l:
@@ -1115,6 +1431,8 @@ def T.diff.commit.tip(l: I.Loc) -> String:
       "Commit and push"
     case I.Ja{}:
       "コミットしてプッシュ"
+    case I.Sux{}:
+      "𒁾 𒊬 𒁺"
 
 def T.diff.pr.tip(l: I.Loc) -> String:
   match l:
@@ -1122,6 +1440,8 @@ def T.diff.pr.tip(l: I.Loc) -> String:
       "Commit, push and open a pull request"
     case I.Ja{}:
       "コミットしてプッシュし、プルリクエストを作成"
+    case I.Sux{}:
+      "Commit, push and open a pull request"
 
 def T.diff.revert.tip(l: I.Loc) -> String:
   match l:
@@ -1129,6 +1449,8 @@ def T.diff.revert.tip(l: I.Loc) -> String:
       "Put the files back as they were when this thread began"
     case I.Ja{}:
       "ファイルをスレッド開始時に戻す"
+    case I.Sux{}:
+      "Put the files back as they were when this thread began"
 
 def T.empty.add(l: I.Loc) -> String:
   match l:
@@ -1136,6 +1458,8 @@ def T.empty.add(l: I.Loc) -> String:
       "Add a project with + to start."
     case I.Ja{}:
       "＋でプロジェクトを追加してください。"
+    case I.Sux{}:
+      "𒂍 𒃻 +"
 
 def T.empty.thread(l: I.Loc) -> String:
   match l:
@@ -1143,6 +1467,8 @@ def T.empty.thread(l: I.Loc) -> String:
       "Pick a thread, or start one with + next to a project."
     case I.Ja{}:
       "スレッドを選ぶか、プロジェクト横の＋で作成してください。"
+    case I.Sux{}:
+      "𒅆𒈽 𒅗, 𒅗 𒉋 𒂍 𒃻"
 
 def T.files.back.tip(l: I.Loc) -> String:
   match l:
@@ -1150,6 +1476,8 @@ def T.files.back.tip(l: I.Loc) -> String:
       "Back to the folder"
     case I.Ja{}:
       "フォルダに戻る"
+    case I.Sux{}:
+      "𒄄"
 
 def T.files.changed(l: I.Loc, +arg0: Nat) -> String:
   match l:
@@ -1157,6 +1485,8 @@ def T.files.changed(l: I.Loc, +arg0: Nat) -> String:
       I.I18n.exact(arg0, Nat.add(Nat.mul(0n, 10n), 0n), "No files changed", I.I18n.pick(I.I18n.plural(I.En{}, arg0), I.I18n.num(I.En{}, arg0) ++ " files changed", I.I18n.num(I.En{}, arg0) ++ " file changed", I.I18n.num(I.En{}, arg0) ++ " files changed", I.I18n.num(I.En{}, arg0) ++ " files changed", I.I18n.num(I.En{}, arg0) ++ " files changed", I.I18n.num(I.En{}, arg0) ++ " files changed"))
     case I.Ja{}:
       I.I18n.exact(arg0, Nat.add(Nat.mul(0n, 10n), 0n), "変更なし", I.I18n.pick(I.I18n.plural(I.Ja{}, arg0), "変更ファイル" ++ I.I18n.num(I.Ja{}, arg0) ++ "件", "変更ファイル" ++ I.I18n.num(I.Ja{}, arg0) ++ "件", "変更ファイル" ++ I.I18n.num(I.Ja{}, arg0) ++ "件", "変更ファイル" ++ I.I18n.num(I.Ja{}, arg0) ++ "件", "変更ファイル" ++ I.I18n.num(I.Ja{}, arg0) ++ "件", "変更ファイル" ++ I.I18n.num(I.Ja{}, arg0) ++ "件"))
+    case I.Sux{}:
+      I.I18n.exact(arg0, Nat.add(Nat.mul(0n, 10n), 0n), "𒉡 𒁾 𒄄", I.I18n.pick(I.I18n.plural(I.Sux{}, arg0), I.I18n.num(I.Sux{}, arg0) ++ " 𒁾 𒄄", I.I18n.num(I.Sux{}, arg0) ++ " 𒁾 𒄄", I.I18n.num(I.Sux{}, arg0) ++ " 𒁾 𒄄", I.I18n.num(I.Sux{}, arg0) ++ " 𒁾 𒄄", I.I18n.num(I.Sux{}, arg0) ++ " 𒁾 𒄄", I.I18n.num(I.Sux{}, arg0) ++ " 𒁾 𒄄"))
 
 def T.files.preview.none(l: I.Loc, arg0: String) -> String:
   match l:
@@ -1164,6 +1494,8 @@ def T.files.preview.none(l: I.Loc, arg0: String) -> String:
       arg0 ++ ": no preview here"
     case I.Ja{}:
       arg0 ++ "：プレビューなし"
+    case I.Sux{}:
+      arg0 ++ ": 𒉡𒅆 𒉋"
 
 def T.files.tab(l: I.Loc) -> String:
   match l:
@@ -1171,6 +1503,8 @@ def T.files.tab(l: I.Loc) -> String:
       "Open in a tab"
     case I.Ja{}:
       "タブで開く"
+    case I.Sux{}:
+      "𒁾𒅅"
 
 def T.files.up.tip(l: I.Loc) -> String:
   match l:
@@ -1178,6 +1512,8 @@ def T.files.up.tip(l: I.Loc) -> String:
       "The folder above"
     case I.Ja{}:
       "上のフォルダ"
+    case I.Sux{}:
+      "𒀭"
 
 def T.fm.root(l: I.Loc) -> String:
   match l:
@@ -1185,6 +1521,8 @@ def T.fm.root(l: I.Loc) -> String:
       "Project"
     case I.Ja{}:
       "プロジェクト"
+    case I.Sux{}:
+      "𒂍 𒆕"
 
 def T.fold.calls(l: I.Loc, +arg0: String, arg1: String) -> String:
   match l:
@@ -1192,6 +1530,8 @@ def T.fold.calls(l: I.Loc, +arg0: String, arg1: String) -> String:
       arg0 ++ " " ++ I.I18n.sel(arg1, "one", "tool call", "tool calls")
     case I.Ja{}:
       I.I18n.sel(arg1, "one", "ツール呼び出し" ++ arg0 ++ "件", "ツール呼び出し" ++ arg0 ++ "件")
+    case I.Sux{}:
+      arg0 ++ " " ++ I.I18n.sel(arg1, "one", "𒀀𒉘𒅗", "𒀀𒉘𒅗")
 
 def T.fold.more(l: I.Loc) -> String:
   match l:
@@ -1199,6 +1539,8 @@ def T.fold.more(l: I.Loc) -> String:
       ", …"
     case I.Ja{}:
       "、…"
+    case I.Sux{}:
+      ", 𒃲"
 
 def T.fold.steps(l: I.Loc, +arg0: String, arg1: String) -> String:
   match l:
@@ -1206,6 +1548,8 @@ def T.fold.steps(l: I.Loc, +arg0: String, arg1: String) -> String:
       arg0 ++ " " ++ I.I18n.sel(arg1, "one", "design change", "design changes")
     case I.Ja{}:
       I.I18n.sel(arg1, "one", "設計変更" ++ arg0 ++ "件", "設計変更" ++ arg0 ++ "件")
+    case I.Sux{}:
+      arg0 ++ " " ++ I.I18n.sel(arg1, "one", "𒄄", "𒄄")
 
 def T.fold.tooltip(l: I.Loc, arg0: String, arg1: String) -> String:
   match l:
@@ -1213,6 +1557,8 @@ def T.fold.tooltip(l: I.Loc, arg0: String, arg1: String) -> String:
       I.I18n.sel(arg0, "yes", "Hide ", "Show ") ++ I.I18n.sel(arg1, "work", "what the agent did", "these tool calls")
     case I.Ja{}:
       I.I18n.sel(arg1, "work", "エージェントの作業", "ツール呼び出し") ++ I.I18n.sel(arg0, "yes", "を隠す", "を表示")
+    case I.Sux{}:
+      I.I18n.sel(arg0, "yes", "Hide ", "Show ") ++ I.I18n.sel(arg1, "work", "what the agent did", "these tool calls")
 
 def T.fold.worked(l: I.Loc, arg0: String, arg1: String) -> String:
   match l:
@@ -1220,6 +1566,8 @@ def T.fold.worked(l: I.Loc, arg0: String, arg1: String) -> String:
       "Worked for " ++ arg0 ++ " · " ++ arg1
     case I.Ja{}:
       arg0 ++ "作業 · " ++ arg1
+    case I.Sux{}:
+      "𒁺 " ++ arg0 ++ " · " ++ arg1
 
 def T.fold.working(l: I.Loc, arg0: String) -> String:
   match l:
@@ -1227,6 +1575,8 @@ def T.fold.working(l: I.Loc, arg0: String) -> String:
       "Working · started " ++ arg0
     case I.Ja{}:
       "作業中 · " ++ arg0 ++ "から"
+    case I.Sux{}:
+      "𒁺 · " ++ arg0
 
 def T.google.callback(l: I.Loc) -> String:
   match l:
@@ -1234,6 +1584,8 @@ def T.google.callback(l: I.Loc) -> String:
       "Browser on another device? Paste where it landed"
     case I.Ja{}:
       "別端末のブラウザの場合は移動先URLを貼り付け"
+    case I.Sux{}:
+      "Browser on another device? Paste where it landed"
 
 def T.google.client.hide(l: I.Loc) -> String:
   match l:
@@ -1241,6 +1593,8 @@ def T.google.client.hide(l: I.Loc) -> String:
       "Hide the client fields"
     case I.Ja{}:
       "クライアントの入力欄を隠す"
+    case I.Sux{}:
+      "Client 𒀉𒌫𒆪"
 
 def T.google.client.id(l: I.Loc) -> String:
   match l:
@@ -1248,6 +1602,8 @@ def T.google.client.id(l: I.Loc) -> String:
       "Client id (Desktop app)"
     case I.Ja{}:
       "クライアントID（デスクトップアプリ）"
+    case I.Sux{}:
+      "Client id (Desktop app)"
 
 def T.google.client.own(l: I.Loc) -> String:
   match l:
@@ -1255,6 +1611,8 @@ def T.google.client.own(l: I.Loc) -> String:
       "Own client"
     case I.Ja{}:
       "独自クライアント"
+    case I.Sux{}:
+      "Own client"
 
 def T.google.client.save(l: I.Loc) -> String:
   match l:
@@ -1262,6 +1620,8 @@ def T.google.client.save(l: I.Loc) -> String:
       "Save client"
     case I.Ja{}:
       "クライアントを保存"
+    case I.Sux{}:
+      "𒁾 𒊬"
 
 def T.google.client.secret(l: I.Loc) -> String:
   match l:
@@ -1269,6 +1629,8 @@ def T.google.client.secret(l: I.Loc) -> String:
       "Client secret"
     case I.Ja{}:
       "クライアントシークレット"
+    case I.Sux{}:
+      "Client secret"
 
 def T.google.connect(l: I.Loc) -> String:
   match l:
@@ -1276,6 +1638,8 @@ def T.google.connect(l: I.Loc) -> String:
       "Connect Google"
     case I.Ja{}:
       "Googleに接続"
+    case I.Sux{}:
+      "Google 𒆷"
 
 def T.google.finish.tip(l: I.Loc) -> String:
   match l:
@@ -1283,6 +1647,8 @@ def T.google.finish.tip(l: I.Loc) -> String:
       "Finish signing in"
     case I.Ja{}:
       "サインインを完了"
+    case I.Sux{}:
+      "𒌀 𒆷"
 
 def T.google.note(l: I.Loc) -> String:
   match l:
@@ -1290,6 +1656,8 @@ def T.google.note(l: I.Loc) -> String:
       "Gmail and Calendar for bots: connect, then allow access. Connect again for another account."
     case I.Ja{}:
       "接続してアクセスを許可すると、ボットがGmailとカレンダーを使えます。別のアカウントも追加できます。"
+    case I.Sux{}:
+      "Gmail and Calendar for bots: connect, then allow access. Connect again for another account."
 
 def T.google.open(l: I.Loc) -> String:
   match l:
@@ -1297,6 +1665,8 @@ def T.google.open(l: I.Loc) -> String:
       "Open Google sign-in"
     case I.Ja{}:
       "Googleのサインインを開く"
+    case I.Sux{}:
+      "Google 𒆷 𒅅"
 
 def T.google.own.tip(l: I.Loc) -> String:
   match l:
@@ -1304,6 +1674,8 @@ def T.google.own.tip(l: I.Loc) -> String:
       "Use an OAuth client of your own"
     case I.Ja{}:
       "独自のOAuthクライアントを使用"
+    case I.Sux{}:
+      "Use an OAuth client of your own"
 
 def T.google.signature(l: I.Loc) -> String:
   match l:
@@ -1311,6 +1683,8 @@ def T.google.signature(l: I.Loc) -> String:
       "Signature"
     case I.Ja{}:
       "署名"
+    case I.Sux{}:
+      "Signature"
 
 def T.google.signature.cancel(l: I.Loc) -> String:
   match l:
@@ -1318,6 +1692,8 @@ def T.google.signature.cancel(l: I.Loc) -> String:
       "Close without saving"
     case I.Ja{}:
       "保存せずに閉じる"
+    case I.Sux{}:
+      "𒉡𒅅 𒊬"
 
 def T.google.signature.none(l: I.Loc) -> String:
   match l:
@@ -1325,6 +1701,8 @@ def T.google.signature.none(l: I.Loc) -> String:
       "No signature"
     case I.Ja{}:
       "署名なし"
+    case I.Sux{}:
+      "𒉡 𒊬"
 
 def T.google.signature.placeholder(l: I.Loc, arg0: String) -> String:
   match l:
@@ -1332,6 +1710,8 @@ def T.google.signature.placeholder(l: I.Loc, arg0: String) -> String:
       "— Sent by Backplane on behalf of " ++ arg0
     case I.Ja{}:
       "— " ++ arg0 ++ "に代わりBackplaneから送信"
+    case I.Sux{}:
+      "— Sent by Backplane on behalf of " ++ arg0
 
 def T.google.signature.save(l: I.Loc) -> String:
   match l:
@@ -1339,6 +1719,8 @@ def T.google.signature.save(l: I.Loc) -> String:
       "Save the signature (empty removes it)"
     case I.Ja{}:
       "署名を保存（空欄で削除）"
+    case I.Sux{}:
+      "Save the signature (empty removes it)"
 
 def T.google.signature.tip(l: I.Loc, arg0: String) -> String:
   match l:
@@ -1346,6 +1728,8 @@ def T.google.signature.tip(l: I.Loc, arg0: String) -> String:
       "Edit the signature added to mail sent from " ++ arg0
     case I.Ja{}:
       arg0 ++ "から送るメールの署名を編集"
+    case I.Sux{}:
+      "Edit the signature added to mail sent from " ++ arg0
 
 def T.google.signout.tip(l: I.Loc, arg0: String) -> String:
   match l:
@@ -1353,6 +1737,8 @@ def T.google.signout.tip(l: I.Loc, arg0: String) -> String:
       "Sign out " ++ arg0
     case I.Ja{}:
       arg0 ++ "からサインアウト"
+    case I.Sux{}:
+      "Sign out " ++ arg0
 
 def T.google.status.tip(l: I.Loc) -> String:
   match l:
@@ -1360,6 +1746,8 @@ def T.google.status.tip(l: I.Loc) -> String:
       "Check the connection"
     case I.Ja{}:
       "接続を確認"
+    case I.Sux{}:
+      "𒆥 𒆷"
 
 def T.history.bom.tip(l: I.Loc) -> String:
   match l:
@@ -1367,6 +1755,8 @@ def T.history.bom.tip(l: I.Loc) -> String:
       "The parts that changed between the two versions"
     case I.Ja{}:
       "2つの版で変更された部品"
+    case I.Sux{}:
+      "The parts that changed between the two versions"
 
 def T.history.branchpoint(l: I.Loc, arg0: String) -> String:
   match l:
@@ -1374,6 +1764,8 @@ def T.history.branchpoint(l: I.Loc, arg0: String) -> String:
       "Branch point · " ++ arg0
     case I.Ja{}:
       "分岐点 · " ++ arg0
+    case I.Sux{}:
+      "Branch point · " ++ arg0
 
 def T.history.changes.tip(l: I.Loc) -> String:
   match l:
@@ -1381,6 +1773,8 @@ def T.history.changes.tip(l: I.Loc) -> String:
       "Mark what each step changed"
     case I.Ja{}:
       "各変更の差分を表示"
+    case I.Sux{}:
+      "𒄄 𒅆"
 
 def T.history.compare.tip(l: I.Loc) -> String:
   match l:
@@ -1388,6 +1782,8 @@ def T.history.compare.tip(l: I.Loc) -> String:
       "Compare two versions of the file"
     case I.Ja{}:
       "ファイルの2つの版を比較"
+    case I.Sux{}:
+      "𒅆𒈽"
 
 def T.history.comparing(l: I.Loc) -> String:
   match l:
@@ -1395,6 +1791,8 @@ def T.history.comparing(l: I.Loc) -> String:
       "Comparing"
     case I.Ja{}:
       "比較中"
+    case I.Sux{}:
+      "𒅆𒈽"
 
 def T.history.file.tip(l: I.Loc) -> String:
   match l:
@@ -1402,6 +1800,8 @@ def T.history.file.tip(l: I.Loc) -> String:
       "The live file"
     case I.Ja{}:
       "現在のファイル"
+    case I.Sux{}:
+      "𒁾"
 
 def T.history.first(l: I.Loc) -> String:
   match l:
@@ -1409,6 +1809,8 @@ def T.history.first(l: I.Loc) -> String:
       "The first step"
     case I.Ja{}:
       "最初の変更"
+    case I.Sux{}:
+      "𒉋"
 
 def T.history.last(l: I.Loc) -> String:
   match l:
@@ -1416,6 +1818,8 @@ def T.history.last(l: I.Loc) -> String:
       "The last step"
     case I.Ja{}:
       "最後の変更"
+    case I.Sux{}:
+      "𒌀"
 
 def T.history.live(l: I.Loc) -> String:
   match l:
@@ -1423,6 +1827,8 @@ def T.history.live(l: I.Loc) -> String:
       "Live"
     case I.Ja{}:
       "現在"
+    case I.Sux{}:
+      "𒅅"
 
 def T.history.live.note(l: I.Loc) -> String:
   match l:
@@ -1430,6 +1836,8 @@ def T.history.live.note(l: I.Loc) -> String:
       "The live file. Compare it with any commit, branch or tag."
     case I.Ja{}:
       "現在のファイルです。コミット、ブランチ、タグと比較できます。"
+    case I.Sux{}:
+      "The live file. Compare it with any commit, branch or tag."
 
 def T.history.live.steps(l: I.Loc, +arg0: String, arg1: String) -> String:
   match l:
@@ -1437,6 +1845,8 @@ def T.history.live.steps(l: I.Loc, +arg0: String, arg1: String) -> String:
       "Live · " ++ arg0 ++ " " ++ I.I18n.sel(arg1, "one", "step", "steps")
     case I.Ja{}:
       I.I18n.sel(arg1, "one", "現在 · 変更" ++ arg0 ++ "件", "現在 · 変更" ++ arg0 ++ "件")
+    case I.Sux{}:
+      "𒅅 · " ++ arg0 ++ " " ++ I.I18n.sel(arg1, "one", "𒄊", "𒄊")
 
 def T.history.live.ticks(l: I.Loc) -> String:
   match l:
@@ -1444,6 +1854,8 @@ def T.history.live.ticks(l: I.Loc) -> String:
       "The live file. Each tick is a change the agent made; play to watch them."
     case I.Ja{}:
       "現在のファイルです。目盛りはエージェントの変更です。再生すると順に表示されます。"
+    case I.Sux{}:
+      "The live file. Each tick is a change the agent made; play to watch them."
 
 def T.history.live.tip(l: I.Loc) -> String:
   match l:
@@ -1451,6 +1863,8 @@ def T.history.live.tip(l: I.Loc) -> String:
       "Back to the file as it is now"
     case I.Ja{}:
       "現在のファイルに戻る"
+    case I.Sux{}:
+      "𒄄 𒁾 𒅅"
 
 def T.history.new.label(l: I.Loc, arg0: String) -> String:
   match l:
@@ -1458,6 +1872,8 @@ def T.history.new.label(l: I.Loc, arg0: String) -> String:
       "New: " ++ arg0
     case I.Ja{}:
       "新版：" ++ arg0
+    case I.Sux{}:
+      "𒉋: " ++ arg0
 
 def T.history.new.tip(l: I.Loc) -> String:
   match l:
@@ -1465,6 +1881,8 @@ def T.history.new.tip(l: I.Loc) -> String:
       "Pick the new version"
     case I.Ja{}:
       "新しい版を選択"
+    case I.Sux{}:
+      "𒉋"
 
 def T.history.next(l: I.Loc) -> String:
   match l:
@@ -1472,6 +1890,8 @@ def T.history.next(l: I.Loc) -> String:
       "The step after"
     case I.Ja{}:
       "次の変更"
+    case I.Sux{}:
+      "𒉋"
 
 def T.history.notinrepo(l: I.Loc) -> String:
   match l:
@@ -1479,6 +1899,8 @@ def T.history.notinrepo(l: I.Loc) -> String:
       "This file is not in the repository, so it cannot be compared."
     case I.Ja{}:
       "このファイルはリポジトリにないため、比較できません。"
+    case I.Sux{}:
+      "This file is not in the repository, so it cannot be compared."
 
 def T.history.old.label(l: I.Loc, arg0: String) -> String:
   match l:
@@ -1486,6 +1908,8 @@ def T.history.old.label(l: I.Loc, arg0: String) -> String:
       "Old: " ++ arg0
     case I.Ja{}:
       "旧版：" ++ arg0
+    case I.Sux{}:
+      "𒌀: " ++ arg0
 
 def T.history.old.tip(l: I.Loc) -> String:
   match l:
@@ -1493,6 +1917,8 @@ def T.history.old.tip(l: I.Loc) -> String:
       "Pick the old version"
     case I.Ja{}:
       "古い版を選択"
+    case I.Sux{}:
+      "𒌀"
 
 def T.history.pause(l: I.Loc) -> String:
   match l:
@@ -1500,6 +1926,8 @@ def T.history.pause(l: I.Loc) -> String:
       "Pause"
     case I.Ja{}:
       "一時停止"
+    case I.Sux{}:
+      "𒉡𒁺"
 
 def T.history.play(l: I.Loc) -> String:
   match l:
@@ -1507,6 +1935,8 @@ def T.history.play(l: I.Loc) -> String:
       "Play the steps"
     case I.Ja{}:
       "変更を再生"
+    case I.Sux{}:
+      "𒁺"
 
 def T.history.position(l: I.Loc, arg0: String, arg1: String) -> String:
   match l:
@@ -1514,6 +1944,8 @@ def T.history.position(l: I.Loc, arg0: String, arg1: String) -> String:
       "Step " ++ arg0 ++ " of " ++ arg1
     case I.Ja{}:
       "変更" ++ arg0 ++ "/" ++ arg1
+    case I.Sux{}:
+      "𒄊 " ++ arg0 ++ "/" ++ arg1
 
 def T.history.position.first(l: I.Loc, arg0: String, arg1: String) -> String:
   match l:
@@ -1521,6 +1953,8 @@ def T.history.position.first(l: I.Loc, arg0: String, arg1: String) -> String:
       "Step " ++ arg0 ++ " of " ++ arg1 ++ " · before the agent's edits"
     case I.Ja{}:
       "変更" ++ arg0 ++ "/" ++ arg1 ++ " · エージェントの編集前"
+    case I.Sux{}:
+      "𒄊 " ++ arg0 ++ "/" ++ arg1 ++ " · 𒇽 𒄄 𒁾 𒊬"
 
 def T.history.previous(l: I.Loc) -> String:
   match l:
@@ -1528,6 +1962,8 @@ def T.history.previous(l: I.Loc) -> String:
       "The step before"
     case I.Ja{}:
       "前の変更"
+    case I.Sux{}:
+      "𒄄"
 
 def T.history.ref.base(l: I.Loc) -> String:
   match l:
@@ -1535,6 +1971,8 @@ def T.history.ref.base(l: I.Loc) -> String:
       "where this branch left it"
     case I.Ja{}:
       "このブランチの分岐点"
+    case I.Sux{}:
+      "where this branch left it"
 
 def T.history.ref.branch(l: I.Loc) -> String:
   match l:
@@ -1542,6 +1980,8 @@ def T.history.ref.branch(l: I.Loc) -> String:
       "branch"
     case I.Ja{}:
       "ブランチ"
+    case I.Sux{}:
+      "branch"
 
 def T.history.ref.commit(l: I.Loc) -> String:
   match l:
@@ -1549,6 +1989,8 @@ def T.history.ref.commit(l: I.Loc) -> String:
       "commit"
     case I.Ja{}:
       "コミット"
+    case I.Sux{}:
+      "commit"
 
 def T.history.ref.head(l: I.Loc) -> String:
   match l:
@@ -1556,6 +1998,8 @@ def T.history.ref.head(l: I.Loc) -> String:
       "the commit checked out"
     case I.Ja{}:
       "チェックアウト中のコミット"
+    case I.Sux{}:
+      "the commit checked out"
 
 def T.history.ref.start(l: I.Loc) -> String:
   match l:
@@ -1563,6 +2007,8 @@ def T.history.ref.start(l: I.Loc) -> String:
       "this thread, before it began"
     case I.Ja{}:
       "このスレッドの開始前"
+    case I.Sux{}:
+      "𒅗 · 𒉋"
 
 def T.history.ref.tag(l: I.Loc) -> String:
   match l:
@@ -1570,6 +2016,8 @@ def T.history.ref.tag(l: I.Loc) -> String:
       "tag"
     case I.Ja{}:
       "タグ"
+    case I.Sux{}:
+      "tag"
 
 def T.history.ref.turn(l: I.Loc) -> String:
   match l:
@@ -1577,6 +2025,8 @@ def T.history.ref.turn(l: I.Loc) -> String:
       "this thread, at the end of a turn"
     case I.Ja{}:
       "このスレッドのターン終了時"
+    case I.Sux{}:
+      "𒅗 · 𒌓 𒌀"
 
 def T.history.step(l: I.Loc, arg0: String) -> String:
   match l:
@@ -1584,6 +2034,8 @@ def T.history.step(l: I.Loc, arg0: String) -> String:
       "Step " ++ arg0
     case I.Ja{}:
       "変更" ++ arg0
+    case I.Sux{}:
+      "𒄊 " ++ arg0
 
 def T.history.step.label(l: I.Loc, arg0: String) -> String:
   match l:
@@ -1591,6 +2043,8 @@ def T.history.step.label(l: I.Loc, arg0: String) -> String:
       "Step " ++ arg0
     case I.Ja{}:
       "変更" ++ arg0
+    case I.Sux{}:
+      "𒄊 " ++ arg0
 
 def T.history.thread.point(l: I.Loc) -> String:
   match l:
@@ -1598,6 +2052,8 @@ def T.history.thread.point(l: I.Loc) -> String:
       "Go to this point of the thread"
     case I.Ja{}:
       "スレッドのこの位置に移動"
+    case I.Sux{}:
+      "𒅗 𒅆"
 
 def T.history.turn(l: I.Loc, arg0: String) -> String:
   match l:
@@ -1605,6 +2061,8 @@ def T.history.turn(l: I.Loc, arg0: String) -> String:
       "Turn " ++ arg0
     case I.Ja{}:
       "ターン" ++ arg0
+    case I.Sux{}:
+      "𒄄 " ++ arg0
 
 def T.history.version.show(l: I.Loc, arg0: String) -> String:
   match l:
@@ -1612,6 +2070,8 @@ def T.history.version.show(l: I.Loc, arg0: String) -> String:
       "Show the " ++ arg0 ++ " version"
     case I.Ja{}:
       arg0 ++ "を表示"
+    case I.Sux{}:
+      "𒅆 " ++ arg0
 
 def T.history.workingcopy(l: I.Loc) -> String:
   match l:
@@ -1619,6 +2079,8 @@ def T.history.workingcopy(l: I.Loc) -> String:
       "Working copy"
     case I.Ja{}:
       "作業コピー"
+    case I.Sux{}:
+      "𒁾 𒃮𒊑"
 
 def T.history.workingcopy.note(l: I.Loc) -> String:
   match l:
@@ -1626,6 +2088,8 @@ def T.history.workingcopy.note(l: I.Loc) -> String:
       "the files as they are now"
     case I.Ja{}:
       "現在のファイル"
+    case I.Sux{}:
+      "𒁾 𒌓"
 
 def T.home.no.results(l: I.Loc) -> String:
   match l:
@@ -1633,6 +2097,8 @@ def T.home.no.results(l: I.Loc) -> String:
       "No project matches."
     case I.Ja{}:
       "一致するプロジェクトはありません"
+    case I.Sux{}:
+      "𒉡𒂍 𒆥"
 
 def T.home.pair(l: I.Loc) -> String:
   match l:
@@ -1640,6 +2106,8 @@ def T.home.pair(l: I.Loc) -> String:
       "Pair with a hub to start."
     case I.Ja{}:
       "ハブとペアリングしてください。"
+    case I.Sux{}:
+      "𒂍 𒆷"
 
 def T.home.phone.pick(l: I.Loc) -> String:
   match l:
@@ -1647,6 +2115,8 @@ def T.home.phone.pick(l: I.Loc) -> String:
       "Pick a thread, or start one in a project."
     case I.Ja{}:
       "スレッドを選ぶか、プロジェクト内で作成してください。"
+    case I.Sux{}:
+      "𒅆 𒅗 · 𒆕 𒂍"
 
 def T.home.phone.start(l: I.Loc) -> String:
   match l:
@@ -1654,6 +2124,8 @@ def T.home.phone.start(l: I.Loc) -> String:
       "Add a project to start."
     case I.Ja{}:
       "プロジェクトを追加してください。"
+    case I.Sux{}:
+      "𒂍 𒃻 +"
 
 def T.hooks.bearer(l: I.Loc) -> String:
   match l:
@@ -1661,6 +2133,8 @@ def T.hooks.bearer(l: I.Loc) -> String:
       "Bearer token"
     case I.Ja{}:
       "Bearerトークン"
+    case I.Sux{}:
+      "Bearer token"
 
 def T.hooks.create.tip(l: I.Loc) -> String:
   match l:
@@ -1668,6 +2142,8 @@ def T.hooks.create.tip(l: I.Loc) -> String:
       "Make a webhook"
     case I.Ja{}:
       "Webhookを作成"
+    case I.Sux{}:
+      "𒆷 𒆕"
 
 def T.hooks.github.note(l: I.Loc, arg0: String) -> String:
   match l:
@@ -1675,6 +2151,8 @@ def T.hooks.github.note(l: I.Loc, arg0: String) -> String:
       "GitHub: payload URL " ++ arg0 ++ ", content type application/json, this secret."
     case I.Ja{}:
       "GitHub：Payload URLに" ++ arg0 ++ "、Content typeにapplication/json、このシークレットを設定してください。"
+    case I.Sux{}:
+      "GitHub: payload URL " ++ arg0 ++ ", content type application/json, this secret."
 
 def T.hooks.header(l: I.Loc) -> String:
   match l:
@@ -1682,6 +2160,8 @@ def T.hooks.header(l: I.Loc) -> String:
       "Header"
     case I.Ja{}:
       "ヘッダー"
+    case I.Sux{}:
+      "Header"
 
 def T.hooks.http.note(l: I.Loc) -> String:
   match l:
@@ -1689,6 +2169,8 @@ def T.hooks.http.note(l: I.Loc) -> String:
       "Plain HTTP: the ring's app wants HTTPS. Give the hub an HTTPS port on the tailnet (tailscale serve --bg --https=<free port> http://127.0.0.1:<the hub's port>) and open this again."
     case I.Ja{}:
       "HTTP接続です。リングのアプリにはHTTPSが必要です。ハブにTailnetのHTTPSポートを設定し（tailscale serve --bg --https=<空きポート> http://127.0.0.1:<ハブのポート>）、開き直してください。"
+    case I.Sux{}:
+      "Plain HTTP: the ring's app wants HTTPS. Give the hub an HTTPS port on the tailnet (tailscale serve --bg --https=<free port> http://127.0.0.1:<the hub's port>) and open this again."
 
 def T.hooks.name(l: I.Loc) -> String:
   match l:
@@ -1696,6 +2178,8 @@ def T.hooks.name(l: I.Loc) -> String:
       "Name, e.g. GitHub pushes"
     case I.Ja{}:
       "名前（例：GitHubプッシュ）"
+    case I.Sux{}:
+      "Name, e.g. GitHub pushes"
 
 def T.hooks.new(l: I.Loc) -> String:
   match l:
@@ -1703,6 +2187,8 @@ def T.hooks.new(l: I.Loc) -> String:
       "New webhook"
     case I.Ja{}:
       "新しいWebhook"
+    case I.Sux{}:
+      "𒆷 𒉋"
 
 def T.hooks.note(l: I.Loc) -> String:
   match l:
@@ -1710,6 +2196,8 @@ def T.hooks.note(l: I.Loc) -> String:
       "Signed POSTs, or ones with the hook's bearer token, start a turn; the body reaches it as data, never as instructions."
     case I.Ja{}:
       "署名付きPOSTまたはBearerトークン付きPOSTでターンを開始します。本文は指示ではなくデータとして渡します。"
+    case I.Sux{}:
+      "Signed POSTs, or ones with the hook's bearer token, start a turn; the body reaches it as data, never as instructions."
 
 def T.hooks.off(l: I.Loc) -> String:
   match l:
@@ -1717,6 +2205,8 @@ def T.hooks.off(l: I.Loc) -> String:
       "Turn off"
     case I.Ja{}:
       "オフにする"
+    case I.Sux{}:
+      "𒉡𒅅"
 
 def T.hooks.pebble.header(l: I.Loc) -> String:
   match l:
@@ -1724,6 +2214,8 @@ def T.hooks.pebble.header(l: I.Loc) -> String:
       "Header for the Pebble app (Index 01 settings, Webhook); send Transcription"
     case I.Ja{}:
       "Pebbleアプリのヘッダー（Index 01設定のWebhook）。Transcriptionを送信"
+    case I.Sux{}:
+      "Header for the Pebble app (Index 01 settings, Webhook); send Transcription"
 
 def T.hooks.pebble.note(l: I.Loc) -> String:
   match l:
@@ -1731,6 +2223,8 @@ def T.hooks.pebble.note(l: I.Loc) -> String:
       "Pebble app: Index 01 settings, Webhook: this URL, a header Authorization with the value Bearer and the token, send Transcription. The bot reads what arrives as untrusted data."
     case I.Ja{}:
       "PebbleアプリのIndex 01設定のWebhookにこのURLを指定し、AuthorizationヘッダーにBearerとトークンを設定してTranscriptionを送信してください。ボットは受信内容を未検証データとして扱います。"
+    case I.Sux{}:
+      "Pebble app: Index 01 settings, Webhook: this URL, a header Authorization with the value Bearer and the token, send Transcription. The bot reads what arrives as untrusted data."
 
 def T.hooks.post(l: I.Loc) -> String:
   match l:
@@ -1738,6 +2232,8 @@ def T.hooks.post(l: I.Loc) -> String:
       "Post to"
     case I.Ja{}:
       "送信先"
+    case I.Sux{}:
+      "𒆷 𒅗𒁉"
 
 def T.hooks.post.http(l: I.Loc) -> String:
   match l:
@@ -1745,6 +2241,8 @@ def T.hooks.post.http(l: I.Loc) -> String:
       "Post to (plain HTTP: the ring's app wants HTTPS, see tailscale serve)"
     case I.Ja{}:
       "送信先（HTTP。リングにはHTTPSが必要：tailscale serveを参照）"
+    case I.Sux{}:
+      "Post to (plain HTTP: the ring's app wants HTTPS, see tailscale serve)"
 
 def T.hooks.revoke(l: I.Loc) -> String:
   match l:
@@ -1752,6 +2250,8 @@ def T.hooks.revoke(l: I.Loc) -> String:
       "Revoke"
     case I.Ja{}:
       "取り消す"
+    case I.Sux{}:
+      "𒉡𒆷"
 
 def T.hooks.secret(l: I.Loc, arg0: String) -> String:
   match l:
@@ -1759,6 +2259,8 @@ def T.hooks.secret(l: I.Loc, arg0: String) -> String:
       "Secret for /hook/" ++ arg0 ++ ", shown once. Sign with HMAC-SHA256."
     case I.Ja{}:
       "/hook/" ++ arg0 ++ "のシークレット。一度だけ表示します。HMAC-SHA256で署名してください。"
+    case I.Sux{}:
+      "Secret for /hook/" ++ arg0 ++ ", shown once. Sign with HMAC-SHA256."
 
 def T.hooks.secret.hide(l: I.Loc) -> String:
   match l:
@@ -1766,6 +2268,8 @@ def T.hooks.secret.hide(l: I.Loc) -> String:
       "Hide the secret: it is not shown again"
     case I.Ja{}:
       "シークレットを隠す（再表示不可）"
+    case I.Sux{}:
+      "Hide the secret: it is not shown again"
 
 def T.hooks.status(l: I.Loc, arg0: String, +arg1: String, arg2: String, arg3: String) -> String:
   match l:
@@ -1773,6 +2277,8 @@ def T.hooks.status(l: I.Loc, arg0: String, +arg1: String, arg2: String, arg3: St
       "POST /hook/" ++ arg0 ++ " · " ++ I.I18n.sel(arg1, "revoked", "revoked", I.I18n.sel(arg1, "never", "never called", arg2 ++ " calls, last " ++ arg3 ++ " ago"))
     case I.Ja{}:
       "POST /hook/" ++ arg0 ++ "・" ++ I.I18n.sel(arg1, "revoked", "失効済み", I.I18n.sel(arg1, "never", "呼び出しなし", arg2 ++ "回、最終：" ++ arg3))
+    case I.Sux{}:
+      "POST /hook/" ++ arg0 ++ " · " ++ I.I18n.sel(arg1, "revoked", "revoked", I.I18n.sel(arg1, "never", "never called", arg2 ++ " calls, last " ++ arg3 ++ " ago"))
 
 def T.hooks.token(l: I.Loc) -> String:
   match l:
@@ -1780,6 +2286,8 @@ def T.hooks.token(l: I.Loc) -> String:
       "Token"
     case I.Ja{}:
       "トークン"
+    case I.Sux{}:
+      "𒅗"
 
 def T.hooks.token.hide(l: I.Loc) -> String:
   match l:
@@ -1787,6 +2295,8 @@ def T.hooks.token.hide(l: I.Loc) -> String:
       "Hide the token"
     case I.Ja{}:
       "トークンを隠す"
+    case I.Sux{}:
+      "𒀉𒌫𒆪 𒅗"
 
 def T.hooks.token.new(l: I.Loc) -> String:
   match l:
@@ -1794,6 +2304,8 @@ def T.hooks.token.new(l: I.Loc) -> String:
       "New token"
     case I.Ja{}:
       "新しいトークン"
+    case I.Sux{}:
+      "𒅗 𒉋"
 
 def T.hooks.token.new.tip(l: I.Loc) -> String:
   match l:
@@ -1801,6 +2313,8 @@ def T.hooks.token.new.tip(l: I.Loc) -> String:
       "Make a new token: the old one stops working"
     case I.Ja{}:
       "トークンを再発行（以前のトークンは無効）"
+    case I.Sux{}:
+      "Make a new token: the old one stops working"
 
 def T.hooks.token.off.tip(l: I.Loc) -> String:
   match l:
@@ -1808,6 +2322,8 @@ def T.hooks.token.off.tip(l: I.Loc) -> String:
       "Turn bearer tokens off for this webhook"
     case I.Ja{}:
       "このWebhookのBearerトークンを無効にする"
+    case I.Sux{}:
+      "Turn bearer tokens off for this webhook"
 
 def T.hooks.token.tip(l: I.Loc) -> String:
   match l:
@@ -1815,6 +2331,8 @@ def T.hooks.token.tip(l: I.Loc) -> String:
       "A bearer token, for senders that cannot sign (a Pebble Index ring)"
     case I.Ja{}:
       "署名できない送信元（Pebble Indexリング）用のBearerトークン"
+    case I.Sux{}:
+      "A bearer token, for senders that cannot sign (a Pebble Index ring)"
 
 def T.hooks.url(l: I.Loc) -> String:
   match l:
@@ -1822,6 +2340,8 @@ def T.hooks.url(l: I.Loc) -> String:
       "URL to post to"
     case I.Ja{}:
       "送信先URL"
+    case I.Sux{}:
+      "URL to post to"
 
 def T.image.failed(l: I.Loc) -> String:
   match l:
@@ -1829,6 +2349,8 @@ def T.image.failed(l: I.Loc) -> String:
       "cannot show it"
     case I.Ja{}:
       "表示できません"
+    case I.Sux{}:
+      "𒉡𒅆"
 
 def T.image.failed.path(l: I.Loc, arg0: String, arg1: String) -> String:
   match l:
@@ -1836,6 +2358,8 @@ def T.image.failed.path(l: I.Loc, arg0: String, arg1: String) -> String:
       "cannot show " ++ arg0 ++ ": " ++ arg1
     case I.Ja{}:
       arg0 ++ "を表示できません：" ++ arg1
+    case I.Sux{}:
+      "𒉡𒅆 " ++ arg0 ++ ": " ++ arg1
 
 def T.image.loading(l: I.Loc) -> String:
   match l:
@@ -1843,6 +2367,8 @@ def T.image.loading(l: I.Loc) -> String:
       "loading…"
     case I.Ja{}:
       "読み込み中…"
+    case I.Sux{}:
+      "𒉋"
 
 def T.image.loading.path(l: I.Loc, arg0: String) -> String:
   match l:
@@ -1850,6 +2376,8 @@ def T.image.loading.path(l: I.Loc, arg0: String) -> String:
       "loading " ++ arg0
     case I.Ja{}:
       "読み込み中：" ++ arg0
+    case I.Sux{}:
+      "𒉋 " ++ arg0
 
 def T.image.remote.failed(l: I.Loc) -> String:
   match l:
@@ -1857,6 +2385,8 @@ def T.image.remote.failed(l: I.Loc) -> String:
       "that machine did not send it"
     case I.Ja{}:
       "相手のマシンから届きませんでした"
+    case I.Sux{}:
+      "that machine did not send it"
 
 def T.machines.away(l: I.Loc) -> String:
   match l:
@@ -1864,6 +2394,8 @@ def T.machines.away(l: I.Loc) -> String:
       "Away: its projects stay listed and readable until it answers."
     case I.Ja{}:
       "不在：応答があるまで、プロジェクトは一覧に残り、読むことができます。"
+    case I.Sux{}:
+      "𒆷 · 𒉡𒅗"
 
 def T.machines.behind(l: I.Loc, +arg0: String, arg1: String) -> String:
   match l:
@@ -1871,6 +2403,8 @@ def T.machines.behind(l: I.Loc, +arg0: String, arg1: String) -> String:
       "Catching up: " ++ arg0 ++ " " ++ I.I18n.sel(arg1, "one", "project", "projects") ++ " still loading. The rest are ready."
     case I.Ja{}:
       I.I18n.sel(arg1, "one", "同期中：プロジェクト" ++ arg0 ++ "件を読み込み中です。残りは準備できています。", "同期中：プロジェクト" ++ arg0 ++ "件を読み込み中です。残りは準備できています。")
+    case I.Sux{}:
+      "𒆷 · 𒉋 " ++ arg0 ++ " " ++ I.I18n.sel(arg1, "one", "𒂍", "𒂍")
 
 def T.machines.invite(l: I.Loc) -> String:
   match l:
@@ -1878,6 +2412,8 @@ def T.machines.invite(l: I.Loc) -> String:
       "Invite"
     case I.Ja{}:
       "招待"
+    case I.Sux{}:
+      "𒆷"
 
 def T.machines.invite.paste(l: I.Loc) -> String:
   match l:
@@ -1885,6 +2421,8 @@ def T.machines.invite.paste(l: I.Loc) -> String:
       "Paste an invite (bp1:…)"
     case I.Ja{}:
       "招待を貼り付け（bp1:…）"
+    case I.Sux{}:
+      "𒃻 𒆷"
 
 def T.machines.invite.tip(l: I.Loc) -> String:
   match l:
@@ -1892,6 +2430,8 @@ def T.machines.invite.tip(l: I.Loc) -> String:
       "Make an invite to paste on the other machine"
     case I.Ja{}:
       "他のマシンに貼り付ける招待を作成"
+    case I.Sux{}:
+      "Make an invite to paste on the other machine"
 
 def T.machines.join.tip(l: I.Loc) -> String:
   match l:
@@ -1899,6 +2439,8 @@ def T.machines.join.tip(l: I.Loc) -> String:
       "Link to the machine that made the invite"
     case I.Ja{}:
       "招待元のマシンとリンク"
+    case I.Sux{}:
+      "Link to the machine that made the invite"
 
 def T.machines.lead(l: I.Loc) -> String:
   match l:
@@ -1906,6 +2448,8 @@ def T.machines.lead(l: I.Loc) -> String:
       "Projects and threads on these machines sync into this sidebar in the background, so you never have to switch. Turn one off to keep it apart."
     case I.Ja{}:
       "これらのマシンのプロジェクトとスレッドは裏でこのサイドバーに同期されるので、切り替える必要はありません。分けておきたいマシンはオフにしてください。"
+    case I.Sux{}:
+      "Projects and threads on these machines sync into this sidebar in the background, so you never have to switch. Turn one off to keep it apart."
 
 def T.machines.lead.none(l: I.Loc) -> String:
   match l:
@@ -1913,6 +2457,8 @@ def T.machines.lead.none(l: I.Loc) -> String:
       "Other machines of yours on Tailscale that run Backplane show here. Their projects and threads sync into this sidebar by themselves."
     case I.Ja{}:
       "Tailscale上でBackplaneを動かしている他のマシンがここに表示されます。プロジェクトとスレッドは自動でこのサイドバーに同期されます。"
+    case I.Sux{}:
+      "Other machines of yours on Tailscale that run Backplane show here. Their projects and threads sync into this sidebar by themselves."
 
 def T.machines.linked(l: I.Loc) -> String:
   match l:
@@ -1920,6 +2466,8 @@ def T.machines.linked(l: I.Loc) -> String:
       "Linked machines"
     case I.Ja{}:
       "リンク済みのマシン"
+    case I.Sux{}:
+      "𒆷"
 
 def T.machines.linking(l: I.Loc) -> String:
   match l:
@@ -1927,6 +2475,8 @@ def T.machines.linking(l: I.Loc) -> String:
       "Linking. Its projects will appear here within a minute or two."
     case I.Ja{}:
       "接続中です。1～2分ほどでプロジェクトがここに表示されます。"
+    case I.Sux{}:
+      "𒆷…"
 
 def T.machines.off(l: I.Loc) -> String:
   match l:
@@ -1934,6 +2484,8 @@ def T.machines.off(l: I.Loc) -> String:
       "Off. Nothing syncs with it."
     case I.Ja{}:
       "オフ。同期しません。"
+    case I.Sux{}:
+      "𒉡𒆷"
 
 def T.machines.self(l: I.Loc) -> String:
   match l:
@@ -1941,6 +2493,8 @@ def T.machines.self(l: I.Loc) -> String:
       "This machine"
     case I.Ja{}:
       "このマシン"
+    case I.Sux{}:
+      "𒂍"
 
 def T.machines.sync(l: I.Loc) -> String:
   match l:
@@ -1948,6 +2502,8 @@ def T.machines.sync(l: I.Loc) -> String:
       "In sync. Its projects and threads show here as they change."
     case I.Ja{}:
       "同期済みです。プロジェクトとスレッドは変更のたびにここに表示されます。"
+    case I.Sux{}:
+      "𒆷 · 𒄄"
 
 def T.machines.title(l: I.Loc) -> String:
   match l:
@@ -1955,6 +2511,8 @@ def T.machines.title(l: I.Loc) -> String:
       "Your machines"
     case I.Ja{}:
       "自分のマシン"
+    case I.Sux{}:
+      "𒂍𒂍"
 
 def T.machines.unlink(l: I.Loc) -> String:
   match l:
@@ -1962,6 +2520,8 @@ def T.machines.unlink(l: I.Loc) -> String:
       "Unlink"
     case I.Ja{}:
       "リンク解除"
+    case I.Sux{}:
+      "𒉡𒆷"
 
 def T.machines.unlink.tip(l: I.Loc) -> String:
   match l:
@@ -1969,6 +2529,8 @@ def T.machines.unlink.tip(l: I.Loc) -> String:
       "Unlink this machine"
     case I.Ja{}:
       "マシンとのリンクを解除"
+    case I.Sux{}:
+      "𒉡𒆷"
 
 def T.machines.url(l: I.Loc) -> String:
   match l:
@@ -1976,6 +2538,8 @@ def T.machines.url(l: I.Loc) -> String:
       "This hub's URL, as the other machine reaches it"
     case I.Ja{}:
       "他のマシンから接続する際のこのハブのURL"
+    case I.Sux{}:
+      "This hub's URL, as the other machine reaches it"
 
 def T.mech.again(l: I.Loc) -> String:
   match l:
@@ -1983,6 +2547,8 @@ def T.mech.again(l: I.Loc) -> String:
       "Render again"
     case I.Ja{}:
       "再レンダリング"
+    case I.Sux{}:
+      "𒆕 𒄄"
 
 def T.mech.create(l: I.Loc) -> String:
   match l:
@@ -1990,6 +2556,8 @@ def T.mech.create(l: I.Loc) -> String:
       "Create renders"
     case I.Ja{}:
       "レンダリングを作成"
+    case I.Sux{}:
+      "𒆕"
 
 def T.mech.nofreecad(l: I.Loc) -> String:
   match l:
@@ -1997,6 +2565,8 @@ def T.mech.nofreecad(l: I.Loc) -> String:
       "FreeCAD is not installed on this hub's machine, and agents need it to model parts: get it from freecad.org/downloads."
     case I.Ja{}:
       "このハブのマシンにFreeCADがありません。エージェントが部品をモデリングするのに必要です。freecad.org/downloadsから入手してください。"
+    case I.Sux{}:
+      "FreeCAD is not installed on this hub's machine, and agents need it to model parts: get it from freecad.org/downloads."
 
 def T.mech.refresh.tip(l: I.Loc) -> String:
   match l:
@@ -2004,6 +2574,8 @@ def T.mech.refresh.tip(l: I.Loc) -> String:
       "Look for parts and renders again"
     case I.Ja{}:
       "パーツとレンダーを再取得"
+    case I.Sux{}:
+      "𒅆 𒄄"
 
 def T.mech.render.tip(l: I.Loc) -> String:
   match l:
@@ -2011,6 +2583,8 @@ def T.mech.render.tip(l: I.Loc) -> String:
       "Draw the part's iso, front, top and right views on the hub"
     case I.Ja{}:
       "ハブでパーツの等角・正面・上面・右側面図を描画"
+    case I.Sux{}:
+      "Draw the part's iso, front, top and right views on the hub"
 
 def T.mech.rendering(l: I.Loc) -> String:
   match l:
@@ -2018,6 +2592,8 @@ def T.mech.rendering(l: I.Loc) -> String:
       "Rendering…"
     case I.Ja{}:
       "レンダリング中…"
+    case I.Sux{}:
+      "𒆕"
 
 def T.mech.renders.tip(l: I.Loc) -> String:
   match l:
@@ -2025,6 +2601,8 @@ def T.mech.renders.tip(l: I.Loc) -> String:
       "The part's pictures, and drawing them"
     case I.Ja{}:
       "パーツの画像とレンダー作成"
+    case I.Sux{}:
+      "The part's pictures, and drawing them"
 
 def T.mech.turn(l: I.Loc) -> String:
   match l:
@@ -2032,6 +2610,8 @@ def T.mech.turn(l: I.Loc) -> String:
       "Turn the part in the 3D viewer"
     case I.Ja{}:
       "3Dビューアーでパーツを回転"
+    case I.Sux{}:
+      "Turn the part in the 3D viewer"
 
 def T.memory.empty(l: I.Loc) -> String:
   match l:
@@ -2039,6 +2619,8 @@ def T.memory.empty(l: I.Loc) -> String:
       "Nothing remembered yet."
     case I.Ja{}:
       "記憶はありません"
+    case I.Sux{}:
+      "𒉡𒋛"
 
 def T.memory.forget.tip(l: I.Loc) -> String:
   match l:
@@ -2046,6 +2628,8 @@ def T.memory.forget.tip(l: I.Loc) -> String:
       "Forget this"
     case I.Ja{}:
       "記憶を削除"
+    case I.Sux{}:
+      "𒉡𒋛"
 
 def T.menu.archive(l: I.Loc) -> String:
   match l:
@@ -2053,6 +2637,8 @@ def T.menu.archive(l: I.Loc) -> String:
       "Archive"
     case I.Ja{}:
       "アーカイブ"
+    case I.Sux{}:
+      "𒁾 𒂍"
 
 def T.menu.bringback(l: I.Loc) -> String:
   match l:
@@ -2060,6 +2646,8 @@ def T.menu.bringback(l: I.Loc) -> String:
       "Bring back"
     case I.Ja{}:
       "元に戻す"
+    case I.Sux{}:
+      "𒄄"
 
 def T.menu.copylink(l: I.Loc) -> String:
   match l:
@@ -2067,6 +2655,8 @@ def T.menu.copylink(l: I.Loc) -> String:
       "Copy link"
     case I.Ja{}:
       "リンクをコピー"
+    case I.Sux{}:
+      "𒆷"
 
 def T.menu.delete.confirm(l: I.Loc) -> String:
   match l:
@@ -2074,6 +2664,8 @@ def T.menu.delete.confirm(l: I.Loc) -> String:
       "Click again to delete"
     case I.Ja{}:
       "もう一度クリックで削除"
+    case I.Sux{}:
+      "𒋗𒅆𒌨"
 
 def T.menu.file.copy(l: I.Loc) -> String:
   match l:
@@ -2081,6 +2673,8 @@ def T.menu.file.copy(l: I.Loc) -> String:
       "Copy path"
     case I.Ja{}:
       "パスをコピー"
+    case I.Sux{}:
+      "𒁾 𒊬"
 
 def T.menu.file.open(l: I.Loc) -> String:
   match l:
@@ -2088,6 +2682,8 @@ def T.menu.file.open(l: I.Loc) -> String:
       "Open"
     case I.Ja{}:
       "開く"
+    case I.Sux{}:
+      "𒁾 𒅅"
 
 def T.menu.file.reveal(l: I.Loc) -> String:
   match l:
@@ -2095,6 +2691,8 @@ def T.menu.file.reveal(l: I.Loc) -> String:
       "Show in folder"
     case I.Ja{}:
       "フォルダで表示"
+    case I.Sux{}:
+      "𒁾 𒂍 𒅅"
 
 def T.menu.look(l: I.Loc) -> String:
   match l:
@@ -2102,6 +2700,8 @@ def T.menu.look(l: I.Loc) -> String:
       "Colour and icon"
     case I.Ja{}:
       "色とアイコン"
+    case I.Sux{}:
+      "𒅆"
 
 def T.menu.pin(l: I.Loc) -> String:
   match l:
@@ -2109,6 +2709,8 @@ def T.menu.pin(l: I.Loc) -> String:
       "Pin"
     case I.Ja{}:
       "ピン留め"
+    case I.Sux{}:
+      "𒃻"
 
 def T.menu.project.remove(l: I.Loc) -> String:
   match l:
@@ -2116,6 +2718,8 @@ def T.menu.project.remove(l: I.Loc) -> String:
       "Remove project"
     case I.Ja{}:
       "プロジェクトを削除"
+    case I.Sux{}:
+      "𒂊"
 
 def T.menu.remove.confirm(l: I.Loc) -> String:
   match l:
@@ -2123,6 +2727,8 @@ def T.menu.remove.confirm(l: I.Loc) -> String:
       "Click again to remove"
     case I.Ja{}:
       "もう一度クリックで削除"
+    case I.Sux{}:
+      "𒂊"
 
 def T.menu.rename(l: I.Loc) -> String:
   match l:
@@ -2130,6 +2736,8 @@ def T.menu.rename(l: I.Loc) -> String:
       "Rename"
     case I.Ja{}:
       "名前を変更"
+    case I.Sux{}:
+      "𒈬𒉋"
 
 def T.menu.settle(l: I.Loc) -> String:
   match l:
@@ -2137,6 +2745,8 @@ def T.menu.settle(l: I.Loc) -> String:
       "Settle"
     case I.Ja{}:
       "完了"
+    case I.Sux{}:
+      "𒃻"
 
 def T.menu.snooze.hour(l: I.Loc) -> String:
   match l:
@@ -2144,6 +2754,8 @@ def T.menu.snooze.hour(l: I.Loc) -> String:
       "Snooze 1 hour"
     case I.Ja{}:
       "1時間スヌーズ"
+    case I.Sux{}:
+      "𒉡𒅆 𒌓"
 
 def T.menu.snooze.tomorrow(l: I.Loc) -> String:
   match l:
@@ -2151,6 +2763,8 @@ def T.menu.snooze.tomorrow(l: I.Loc) -> String:
       "Snooze until tomorrow"
     case I.Ja{}:
       "明日までスヌーズ"
+    case I.Sux{}:
+      "𒉡𒅆 𒌓 𒉋"
 
 def T.menu.snooze.week(l: I.Loc) -> String:
   match l:
@@ -2158,6 +2772,8 @@ def T.menu.snooze.week(l: I.Loc) -> String:
       "Snooze 1 week"
     case I.Ja{}:
       "1週間スヌーズ"
+    case I.Sux{}:
+      "𒉡𒅆 𒌓𒌓𒌓𒌓𒌓𒌓𒌓"
 
 def T.menu.uber.demote(l: I.Loc) -> String:
   match l:
@@ -2165,6 +2781,8 @@ def T.menu.uber.demote(l: I.Loc) -> String:
       "Not uberbot"
     case I.Ja{}:
       "メインボットを解除"
+    case I.Sux{}:
+      "𒉡 Uberbot"
 
 def T.menu.uber.promote(l: I.Loc) -> String:
   match l:
@@ -2172,6 +2790,8 @@ def T.menu.uber.promote(l: I.Loc) -> String:
       "Make uberbot"
     case I.Ja{}:
       "メインボットにする"
+    case I.Sux{}:
+      "Uberbot 𒆕"
 
 def T.menu.unarchive(l: I.Loc) -> String:
   match l:
@@ -2179,6 +2799,8 @@ def T.menu.unarchive(l: I.Loc) -> String:
       "Unarchive"
     case I.Ja{}:
       "アーカイブを解除"
+    case I.Sux{}:
+      "𒄄"
 
 def T.menu.unpin(l: I.Loc) -> String:
   match l:
@@ -2186,6 +2808,8 @@ def T.menu.unpin(l: I.Loc) -> String:
       "Unpin"
     case I.Ja{}:
       "ピン留めを解除"
+    case I.Sux{}:
+      "𒂊"
 
 def T.menu.wake(l: I.Loc) -> String:
   match l:
@@ -2193,6 +2817,8 @@ def T.menu.wake(l: I.Loc) -> String:
       "Wake"
     case I.Ja{}:
       "再開"
+    case I.Sux{}:
+      "𒁺"
 
 def T.model.choose(l: I.Loc, arg0: String) -> String:
   match l:
@@ -2200,6 +2826,8 @@ def T.model.choose(l: I.Loc, arg0: String) -> String:
       "Use " ++ arg0
     case I.Ja{}:
       arg0 ++ "を使用"
+    case I.Sux{}:
+      "𒅆𒈽 " ++ arg0
 
 def T.model.default.article(l: I.Loc) -> String:
   match l:
@@ -2207,6 +2835,8 @@ def T.model.default.article(l: I.Loc) -> String:
       "the default"
     case I.Ja{}:
       "既定値"
+    case I.Sux{}:
+      "𒅅"
 
 def T.model.effort.next(l: I.Loc, arg0: String) -> String:
   match l:
@@ -2214,6 +2844,8 @@ def T.model.effort.next(l: I.Loc, arg0: String) -> String:
       "Go on with " ++ arg0 ++ " from the next turn"
     case I.Ja{}:
       "次のターンから" ++ arg0 ++ "で続行"
+    case I.Sux{}:
+      "Go on with " ++ arg0 ++ " from the next turn"
 
 def T.model.effort.tip(l: I.Loc, arg0: String) -> String:
   match l:
@@ -2221,6 +2853,8 @@ def T.model.effort.tip(l: I.Loc, arg0: String) -> String:
       "Reasoning effort: " ++ arg0
     case I.Ja{}:
       "推論の強さ：" ++ arg0
+    case I.Sux{}:
+      "Reasoning effort: " ++ arg0
 
 def T.model.level.auto(l: I.Loc) -> String:
   match l:
@@ -2228,6 +2862,8 @@ def T.model.level.auto(l: I.Loc) -> String:
       "auto"
     case I.Ja{}:
       "自動"
+    case I.Sux{}:
+      "auto"
 
 def T.model.level.high(l: I.Loc) -> String:
   match l:
@@ -2235,6 +2871,8 @@ def T.model.level.high(l: I.Loc) -> String:
       "high"
     case I.Ja{}:
       "高"
+    case I.Sux{}:
+      "𒃲"
 
 def T.model.level.low(l: I.Loc) -> String:
   match l:
@@ -2242,6 +2880,8 @@ def T.model.level.low(l: I.Loc) -> String:
       "low"
     case I.Ja{}:
       "低"
+    case I.Sux{}:
+      "𒌉"
 
 def T.model.level.max(l: I.Loc) -> String:
   match l:
@@ -2249,6 +2889,8 @@ def T.model.level.max(l: I.Loc) -> String:
       "max"
     case I.Ja{}:
       "最大"
+    case I.Sux{}:
+      "𒈤"
 
 def T.model.level.medium(l: I.Loc) -> String:
   match l:
@@ -2256,6 +2898,8 @@ def T.model.level.medium(l: I.Loc) -> String:
       "medium"
     case I.Ja{}:
       "中"
+    case I.Sux{}:
+      "𒊮"
 
 def T.model.level.minimal(l: I.Loc) -> String:
   match l:
@@ -2263,6 +2907,8 @@ def T.model.level.minimal(l: I.Loc) -> String:
       "minimal"
     case I.Ja{}:
       "最低"
+    case I.Sux{}:
+      "𒌉"
 
 def T.model.level.none(l: I.Loc) -> String:
   match l:
@@ -2270,6 +2916,8 @@ def T.model.level.none(l: I.Loc) -> String:
       "none"
     case I.Ja{}:
       "なし"
+    case I.Sux{}:
+      "𒉡"
 
 def T.model.level.xhigh(l: I.Loc) -> String:
   match l:
@@ -2277,6 +2925,8 @@ def T.model.level.xhigh(l: I.Loc) -> String:
       "xhigh"
     case I.Ja{}:
       "非常に高"
+    case I.Sux{}:
+      "𒈤 𒃲"
 
 def T.native.attach.paste(l: I.Loc) -> String:
   match l:
@@ -2284,6 +2934,8 @@ def T.native.attach.paste(l: I.Loc) -> String:
       "Paste image"
     case I.Ja{}:
       "画像を貼り付け"
+    case I.Sux{}:
+      "𒃻 𒅆"
 
 def T.native.attach.photos(l: I.Loc) -> String:
   match l:
@@ -2291,6 +2943,8 @@ def T.native.attach.photos(l: I.Loc) -> String:
       "Photos"
     case I.Ja{}:
       "写真"
+    case I.Sux{}:
+      "𒅆𒅆"
 
 def T.native.bot.create.hint(l: I.Loc) -> String:
   match l:
@@ -2298,6 +2952,8 @@ def T.native.bot.create.hint(l: I.Loc) -> String:
       "Make one with the plus button."
     case I.Ja{}:
       "＋ボタンで作成できます。"
+    case I.Sux{}:
+      "𒇽 𒆕"
 
 def T.native.bot.create.menu(l: I.Loc) -> String:
   match l:
@@ -2305,6 +2961,8 @@ def T.native.bot.create.menu(l: I.Loc) -> String:
       "New bot or room"
     case I.Ja{}:
       "ボット・ルームを作成"
+    case I.Sux{}:
+      "𒇽 𒂍 𒉋"
 
 def T.native.bot.createon(l: I.Loc, arg0: String, arg1: String, arg2: String) -> String:
   match l:
@@ -2312,6 +2970,8 @@ def T.native.bot.createon(l: I.Loc, arg0: String, arg1: String, arg2: String) ->
       I.I18n.sel(arg0, "room", "New room", "New bot") ++ I.I18n.sel(arg1, "hub", " on " ++ arg2, "")
     case I.Ja{}:
       I.I18n.sel(arg0, "room", "ルームを作成", "ボットを作成") ++ I.I18n.sel(arg1, "hub", "（" ++ arg2 ++ "）", "")
+    case I.Sux{}:
+      I.I18n.sel(arg0, "room", "𒂍 𒉋", "𒇽 𒉋") ++ I.I18n.sel(arg1, "hub", " 𒂍 " ++ arg2, "")
 
 def T.native.bot.delete.ask(l: I.Loc, arg0: String) -> String:
   match l:
@@ -2319,6 +2979,8 @@ def T.native.bot.delete.ask(l: I.Loc, arg0: String) -> String:
       "Delete " ++ arg0 ++ "?"
     case I.Ja{}:
       arg0 ++ "を削除しますか？"
+    case I.Sux{}:
+      "𒇽 " ++ arg0 ++ " 𒋗𒅆𒌨?"
 
 def T.native.bot.empty(l: I.Loc) -> String:
   match l:
@@ -2326,6 +2988,8 @@ def T.native.bot.empty(l: I.Loc) -> String:
       "No bots yet"
     case I.Ja{}:
       "ボットなし"
+    case I.Sux{}:
+      "𒉡𒇽"
 
 def T.native.bot.memory.empty(l: I.Loc) -> String:
   match l:
@@ -2333,6 +2997,8 @@ def T.native.bot.memory.empty(l: I.Loc) -> String:
       "Nothing remembered"
     case I.Ja{}:
       "記憶なし"
+    case I.Sux{}:
+      "𒉡𒋛"
 
 def T.native.bot.message(l: I.Loc) -> String:
   match l:
@@ -2340,6 +3006,8 @@ def T.native.bot.message(l: I.Loc) -> String:
       "Message"
     case I.Ja{}:
       "メッセージ"
+    case I.Sux{}:
+      "𒅗"
 
 def T.native.bot.messages.empty(l: I.Loc) -> String:
   match l:
@@ -2347,6 +3015,8 @@ def T.native.bot.messages.empty(l: I.Loc) -> String:
       "No messages"
     case I.Ja{}:
       "メッセージなし"
+    case I.Sux{}:
+      "𒉡𒅗"
 
 def T.native.bot.provider(l: I.Loc) -> String:
   match l:
@@ -2354,6 +3024,8 @@ def T.native.bot.provider(l: I.Loc) -> String:
       "Provider"
     case I.Ja{}:
       "プロバイダー"
+    case I.Sux{}:
+      "𒇽"
 
 def T.native.browser.empty(l: I.Loc) -> String:
   match l:
@@ -2361,6 +3033,8 @@ def T.native.browser.empty(l: I.Loc) -> String:
       "No page yet"
     case I.Ja{}:
       "ページなし"
+    case I.Sux{}:
+      "𒉡 𒆠"
 
 def T.native.browser.screenshot(l: I.Loc) -> String:
   match l:
@@ -2368,6 +3042,8 @@ def T.native.browser.screenshot(l: I.Loc) -> String:
       "Screenshot"
     case I.Ja{}:
       "スクリーンショット"
+    case I.Sux{}:
+      "𒅆𒅆"
 
 def T.native.browser.typing(l: I.Loc) -> String:
   match l:
@@ -2375,6 +3051,8 @@ def T.native.browser.typing(l: I.Loc) -> String:
       "Type into the page"
     case I.Ja{}:
       "ページに入力"
+    case I.Sux{}:
+      "𒅗 𒊬"
 
 def T.native.common.ok(l: I.Loc) -> String:
   match l:
@@ -2382,6 +3060,8 @@ def T.native.common.ok(l: I.Loc) -> String:
       "OK"
     case I.Ja{}:
       "OK"
+    case I.Sux{}:
+      "𒅅"
 
 def T.native.common.title(l: I.Loc) -> String:
   match l:
@@ -2389,6 +3069,8 @@ def T.native.common.title(l: I.Loc) -> String:
       "Title"
     case I.Ja{}:
       "タイトル"
+    case I.Sux{}:
+      "𒈬"
 
 def T.native.composer.btw(l: I.Loc, arg0: String) -> String:
   match l:
@@ -2396,6 +3078,8 @@ def T.native.composer.btw(l: I.Loc, arg0: String) -> String:
       "btw · " ++ arg0
     case I.Ja{}:
       "btw・" ++ arg0
+    case I.Sux{}:
+      "btw · " ++ arg0
 
 def T.native.composer.remove(l: I.Loc, arg0: String) -> String:
   match l:
@@ -2403,6 +3087,8 @@ def T.native.composer.remove(l: I.Loc, arg0: String) -> String:
       "Remove " ++ arg0
     case I.Ja{}:
       arg0 ++ "を外す"
+    case I.Sux{}:
+      "𒂊 " ++ arg0
 
 def T.native.composer.suggestions.close(l: I.Loc) -> String:
   match l:
@@ -2410,6 +3096,8 @@ def T.native.composer.suggestions.close(l: I.Loc) -> String:
       "Close suggestions"
     case I.Ja{}:
       "候補を閉じる"
+    case I.Sux{}:
+      "𒉡𒅅"
 
 def T.native.diff.revert.ask(l: I.Loc) -> String:
   match l:
@@ -2417,6 +3105,8 @@ def T.native.diff.revert.ask(l: I.Loc) -> String:
       "Put the files back as they were when this thread began?"
     case I.Ja{}:
       "ファイルをこのスレッドの開始時点に戻しますか？"
+    case I.Sux{}:
+      "Put the files back as they were when this thread began?"
 
 def T.native.entry.fold(l: I.Loc, arg0: String, +arg1: String) -> String:
   match l:
@@ -2424,6 +3114,8 @@ def T.native.entry.fold(l: I.Loc, arg0: String, +arg1: String) -> String:
       I.I18n.sel(arg0, "open", "Hide " ++ arg1, "Show " ++ arg1)
     case I.Ja{}:
       I.I18n.sel(arg0, "open", arg1 ++ "を隠す", arg1 ++ "を表示")
+    case I.Sux{}:
+      I.I18n.sel(arg0, "open", "𒉡𒅆 " ++ arg1, "𒅆 " ++ arg1)
 
 def T.native.entry.viewer(l: I.Loc, arg0: String) -> String:
   match l:
@@ -2431,6 +3123,8 @@ def T.native.entry.viewer(l: I.Loc, arg0: String) -> String:
       "Show in the viewer: " ++ arg0
     case I.Ja{}:
       "ビューアーで表示：" ++ arg0
+    case I.Sux{}:
+      "𒅆 " ++ arg0
 
 def T.native.entry.viewer.short(l: I.Loc) -> String:
   match l:
@@ -2438,6 +3132,8 @@ def T.native.entry.viewer.short(l: I.Loc) -> String:
       "Show in the viewer"
     case I.Ja{}:
       "ビューアーで表示"
+    case I.Sux{}:
+      "𒅆"
 
 def T.native.file.image.unsupported(l: I.Loc) -> String:
   match l:
@@ -2445,6 +3141,8 @@ def T.native.file.image.unsupported(l: I.Loc) -> String:
       "This image cannot be shown here"
     case I.Ja{}:
       "この画像は表示できません"
+    case I.Sux{}:
+      "𒉡𒅆 𒅆 𒆠"
 
 def T.native.file.page(l: I.Loc, arg0: String) -> String:
   match l:
@@ -2452,6 +3150,8 @@ def T.native.file.page(l: I.Loc, arg0: String) -> String:
       "Page " ++ arg0
     case I.Ja{}:
       arg0 ++ "ページ"
+    case I.Sux{}:
+      "𒁾 " ++ arg0
 
 def T.native.file.pdf.error(l: I.Loc, +arg0: String, arg1: String) -> String:
   match l:
@@ -2459,6 +3159,8 @@ def T.native.file.pdf.error(l: I.Loc, +arg0: String, arg1: String) -> String:
       I.I18n.sel(arg0, "send", "The hub could not send this PDF (it may be over 12 MB)", I.I18n.sel(arg0, "http", "The hub answered " ++ arg1, "This PDF cannot be shown here"))
     case I.Ja{}:
       I.I18n.sel(arg0, "send", "ハブからPDFを取得できません（12 MBを超えている可能性があります）", I.I18n.sel(arg0, "http", "ハブの応答：" ++ arg1, "このPDFは表示できません"))
+    case I.Sux{}:
+      I.I18n.sel(arg0, "send", "𒉡𒋧 𒁾", I.I18n.sel(arg0, "http", "𒂍 " ++ arg1, "𒉡𒅆 𒁾"))
 
 def T.native.find.empty(l: I.Loc) -> String:
   match l:
@@ -2466,6 +3168,8 @@ def T.native.find.empty(l: I.Loc) -> String:
       "Nothing found"
     case I.Ja{}:
       "該当なし"
+    case I.Sux{}:
+      "𒉡𒆠"
 
 def T.native.find.file.hint(l: I.Loc) -> String:
   match l:
@@ -2473,6 +3177,8 @@ def T.native.find.file.hint(l: I.Loc) -> String:
       "Type to find a file"
     case I.Ja{}:
       "ファイル名を入力"
+    case I.Sux{}:
+      "𒁾 𒆥"
 
 def T.native.find.file.label(l: I.Loc) -> String:
   match l:
@@ -2480,6 +3186,8 @@ def T.native.find.file.label(l: I.Loc) -> String:
       "File name"
     case I.Ja{}:
       "ファイル名"
+    case I.Sux{}:
+      "𒁾 𒈬"
 
 def T.native.find.threads.hint(l: I.Loc) -> String:
   match l:
@@ -2487,6 +3195,8 @@ def T.native.find.threads.hint(l: I.Loc) -> String:
       "Type to search threads"
     case I.Ja{}:
       "検索語を入力"
+    case I.Sux{}:
+      "𒅗 𒆥"
 
 def T.native.find.threads.label(l: I.Loc) -> String:
   match l:
@@ -2494,6 +3204,8 @@ def T.native.find.threads.label(l: I.Loc) -> String:
       "Titles and messages"
     case I.Ja{}:
       "タイトル・メッセージ"
+    case I.Sux{}:
+      "𒅗𒅗"
 
 def T.native.google.client.hide(l: I.Loc) -> String:
   match l:
@@ -2501,6 +3213,8 @@ def T.native.google.client.hide(l: I.Loc) -> String:
       "Hide own client"
     case I.Ja{}:
       "独自クライアントを隠す"
+    case I.Sux{}:
+      "Client 𒀉𒌫𒆪"
 
 def T.native.google.client.id(l: I.Loc) -> String:
   match l:
@@ -2508,6 +3222,8 @@ def T.native.google.client.id(l: I.Loc) -> String:
       "Client ID (Desktop app)"
     case I.Ja{}:
       "クライアントID（デスクトップアプリ）"
+    case I.Sux{}:
+      "Client ID (Desktop app)"
 
 def T.native.google.redirect(l: I.Loc) -> String:
   match l:
@@ -2515,6 +3231,8 @@ def T.native.google.redirect(l: I.Loc) -> String:
       "Redirected URL"
     case I.Ja{}:
       "リダイレクト先のURL"
+    case I.Sux{}:
+      "Redirected URL"
 
 def T.native.history.first(l: I.Loc) -> String:
   match l:
@@ -2522,6 +3240,8 @@ def T.native.history.first(l: I.Loc) -> String:
       "First step"
     case I.Ja{}:
       "最初のステップ"
+    case I.Sux{}:
+      "𒉋"
 
 def T.native.history.last(l: I.Loc) -> String:
   match l:
@@ -2529,6 +3249,8 @@ def T.native.history.last(l: I.Loc) -> String:
       "Last step"
     case I.Ja{}:
       "最後のステップ"
+    case I.Sux{}:
+      "𒌀"
 
 def T.native.history.livefile(l: I.Loc) -> String:
   match l:
@@ -2536,6 +3258,8 @@ def T.native.history.livefile(l: I.Loc) -> String:
       "Live file"
     case I.Ja{}:
       "現在のファイル"
+    case I.Sux{}:
+      "𒁾 𒅅"
 
 def T.native.history.next(l: I.Loc) -> String:
   match l:
@@ -2543,6 +3267,8 @@ def T.native.history.next(l: I.Loc) -> String:
       "Next step"
     case I.Ja{}:
       "次のステップ"
+    case I.Sux{}:
+      "𒉋"
 
 def T.native.history.play(l: I.Loc) -> String:
   match l:
@@ -2550,6 +3276,8 @@ def T.native.history.play(l: I.Loc) -> String:
       "Play"
     case I.Ja{}:
       "再生"
+    case I.Sux{}:
+      "𒁺"
 
 def T.native.history.previous(l: I.Loc) -> String:
   match l:
@@ -2557,6 +3285,8 @@ def T.native.history.previous(l: I.Loc) -> String:
       "Previous step"
     case I.Ja{}:
       "前のステップ"
+    case I.Sux{}:
+      "𒄄"
 
 def T.native.history.thread(l: I.Loc, arg0: String) -> String:
   match l:
@@ -2564,6 +3294,8 @@ def T.native.history.thread(l: I.Loc, arg0: String) -> String:
       "Show in the thread: " ++ arg0
     case I.Ja{}:
       "スレッドで表示：" ++ arg0
+    case I.Sux{}:
+      "𒅗 𒅆 " ++ arg0
 
 def T.native.history.thread.short(l: I.Loc) -> String:
   match l:
@@ -2571,6 +3303,8 @@ def T.native.history.thread.short(l: I.Loc) -> String:
       "Show in the thread"
     case I.Ja{}:
       "スレッドで表示"
+    case I.Sux{}:
+      "𒅗𒅆"
 
 def T.native.home.hint(l: I.Loc) -> String:
   match l:
@@ -2578,6 +3312,8 @@ def T.native.home.hint(l: I.Loc) -> String:
       "Your uberbot keeps the whole picture: what needs you, what runs, your bots and routines."
     case I.Ja{}:
       "メインボットが要対応の作業、実行中の作業、ボット、ルーティンをまとめて把握します。"
+    case I.Sux{}:
+      "Your uberbot keeps the whole picture: what needs you, what runs, your bots and routines."
 
 def T.native.home.make(l: I.Loc) -> String:
   match l:
@@ -2585,6 +3321,8 @@ def T.native.home.make(l: I.Loc) -> String:
       "Make an uberbot"
     case I.Ja{}:
       "メインボットを作成"
+    case I.Sux{}:
+      "𒂍𒆕"
 
 def T.native.home.none(l: I.Loc) -> String:
   match l:
@@ -2592,6 +3330,8 @@ def T.native.home.none(l: I.Loc) -> String:
       "No uberbot"
     case I.Ja{}:
       "メインボットなし"
+    case I.Sux{}:
+      "𒉡𒂍"
 
 def T.native.hook.copyurl(l: I.Loc) -> String:
   match l:
@@ -2599,6 +3339,8 @@ def T.native.hook.copyurl(l: I.Loc) -> String:
       "Copy URL"
     case I.Ja{}:
       "URLをコピー"
+    case I.Sux{}:
+      "𒃮𒊑 URL"
 
 def T.native.hook.once(l: I.Loc) -> String:
   match l:
@@ -2606,6 +3348,8 @@ def T.native.hook.once(l: I.Loc) -> String:
       "Shown once."
     case I.Ja{}:
       "一度だけ表示します。"
+    case I.Sux{}:
+      "𒅆 𒁹"
 
 def T.native.hook.secret(l: I.Loc) -> String:
   match l:
@@ -2613,6 +3357,8 @@ def T.native.hook.secret(l: I.Loc) -> String:
       "Secret"
     case I.Ja{}:
       "シークレット"
+    case I.Sux{}:
+      "𒀉𒌫"
 
 def T.native.hub.accessibility(l: I.Loc, arg0: String, arg1: String) -> String:
   match l:
@@ -2620,6 +3366,8 @@ def T.native.hub.accessibility(l: I.Loc, arg0: String, arg1: String) -> String:
       arg0 ++ ": " ++ arg1
     case I.Ja{}:
       arg0 ++ "：" ++ arg1
+    case I.Sux{}:
+      arg0 ++ ": " ++ arg1
 
 def T.native.hub.catchup(l: I.Loc, arg0: String) -> String:
   match l:
@@ -2627,6 +3375,8 @@ def T.native.hub.catchup(l: I.Loc, arg0: String) -> String:
       "catching up, " ++ arg0
     case I.Ja{}:
       "同期中・" ++ arg0
+    case I.Sux{}:
+      "𒉋, " ++ arg0
 
 def T.native.hub.changes(l: I.Loc, arg0: String) -> String:
   match l:
@@ -2634,6 +3384,8 @@ def T.native.hub.changes(l: I.Loc, arg0: String) -> String:
       arg0 ++ " changes"
     case I.Ja{}:
       arg0 ++ "件の変更"
+    case I.Sux{}:
+      arg0 ++ " 𒄄"
 
 def T.native.hub.connection(l: I.Loc, arg0: String, arg1: String) -> String:
   match l:
@@ -2641,6 +3393,8 @@ def T.native.hub.connection(l: I.Loc, arg0: String, arg1: String) -> String:
       arg0 ++ " to " ++ arg1
     case I.Ja{}:
       arg1 ++ "：" ++ arg0
+    case I.Sux{}:
+      arg0 ++ " " ++ arg1 ++ " 𒆷"
 
 def T.native.hub.heard(l: I.Loc, arg0: String) -> String:
   match l:
@@ -2648,6 +3402,8 @@ def T.native.hub.heard(l: I.Loc, arg0: String) -> String:
       "heard " ++ arg0
     case I.Ja{}:
       "最終受信：" ++ arg0
+    case I.Sux{}:
+      "𒅗 " ++ arg0
 
 def T.native.hub.state(l: I.Loc, +arg0: String) -> String:
   match l:
@@ -2655,6 +3411,8 @@ def T.native.hub.state(l: I.Loc, +arg0: String) -> String:
       I.I18n.sel(arg0, "online", "Connected", I.I18n.sel(arg0, "syncing", "Catching up", I.I18n.sel(arg0, "offline", "Offline, retrying", "Connecting")))
     case I.Ja{}:
       I.I18n.sel(arg0, "online", "接続済み", I.I18n.sel(arg0, "syncing", "同期中", I.I18n.sel(arg0, "offline", "オフライン・再接続中", "接続中")))
+    case I.Sux{}:
+      I.I18n.sel(arg0, "online", "𒆷", I.I18n.sel(arg0, "syncing", "𒉋", I.I18n.sel(arg0, "offline", "𒉡𒆷 𒄄", "𒆷")))
 
 def T.native.image.missing(l: I.Loc) -> String:
   match l:
@@ -2662,6 +3420,8 @@ def T.native.image.missing(l: I.Loc) -> String:
       "No image"
     case I.Ja{}:
       "画像なし"
+    case I.Sux{}:
+      "𒉡𒅆"
 
 def T.native.image.plain(l: I.Loc) -> String:
   match l:
@@ -2669,6 +3429,8 @@ def T.native.image.plain(l: I.Loc) -> String:
       "Image"
     case I.Ja{}:
       "画像"
+    case I.Sux{}:
+      "𒅆"
 
 def T.native.image.render(l: I.Loc) -> String:
   match l:
@@ -2676,6 +3438,8 @@ def T.native.image.render(l: I.Loc) -> String:
       "Render"
     case I.Ja{}:
       "レンダリング画像"
+    case I.Sux{}:
+      "𒆕"
 
 def T.native.key.down(l: I.Loc) -> String:
   match l:
@@ -2683,12 +3447,16 @@ def T.native.key.down(l: I.Loc) -> String:
       "Down"
     case I.Ja{}:
       "下"
+    case I.Sux{}:
+      "Down"
 
 def T.native.key.enter(l: I.Loc) -> String:
   match l:
     case I.En{}:
       "Enter"
     case I.Ja{}:
+      "Enter"
+    case I.Sux{}:
       "Enter"
 
 def T.native.key.esc(l: I.Loc) -> String:
@@ -2697,6 +3465,8 @@ def T.native.key.esc(l: I.Loc) -> String:
       "Esc"
     case I.Ja{}:
       "Esc"
+    case I.Sux{}:
+      "Esc"
 
 def T.native.key.keyboard(l: I.Loc) -> String:
   match l:
@@ -2704,6 +3474,8 @@ def T.native.key.keyboard(l: I.Loc) -> String:
       "Keyboard"
     case I.Ja{}:
       "キーボード"
+    case I.Sux{}:
+      "Keyboard"
 
 def T.native.key.left(l: I.Loc) -> String:
   match l:
@@ -2711,6 +3483,8 @@ def T.native.key.left(l: I.Loc) -> String:
       "Left"
     case I.Ja{}:
       "左"
+    case I.Sux{}:
+      "Left"
 
 def T.native.key.right(l: I.Loc) -> String:
   match l:
@@ -2718,12 +3492,16 @@ def T.native.key.right(l: I.Loc) -> String:
       "Right"
     case I.Ja{}:
       "右"
+    case I.Sux{}:
+      "Right"
 
 def T.native.key.tab(l: I.Loc) -> String:
   match l:
     case I.En{}:
       "Tab"
     case I.Ja{}:
+      "Tab"
+    case I.Sux{}:
       "Tab"
 
 def T.native.key.up(l: I.Loc) -> String:
@@ -2732,6 +3510,8 @@ def T.native.key.up(l: I.Loc) -> String:
       "Up"
     case I.Ja{}:
       "上"
+    case I.Sux{}:
+      "Up"
 
 def T.native.machine.address(l: I.Loc) -> String:
   match l:
@@ -2739,6 +3519,8 @@ def T.native.machine.address(l: I.Loc) -> String:
       "This hub's address"
     case I.Ja{}:
       "このハブのアドレス"
+    case I.Sux{}:
+      "𒂍 𒆠"
 
 def T.native.machine.invite.copy(l: I.Loc) -> String:
   match l:
@@ -2746,6 +3528,8 @@ def T.native.machine.invite.copy(l: I.Loc) -> String:
       "Copy invite"
     case I.Ja{}:
       "招待をコピー"
+    case I.Sux{}:
+      "𒃮𒊑 𒆷"
 
 def T.native.machine.invite.paste(l: I.Loc) -> String:
   match l:
@@ -2753,6 +3537,8 @@ def T.native.machine.invite.paste(l: I.Loc) -> String:
       "Paste an invite"
     case I.Ja{}:
       "招待を貼り付け"
+    case I.Sux{}:
+      "𒃻 𒆷"
 
 def T.native.mech.failed(l: I.Loc, arg0: String) -> String:
   match l:
@@ -2760,6 +3546,8 @@ def T.native.mech.failed(l: I.Loc, arg0: String) -> String:
       "Rendering failed: " ++ arg0
     case I.Ja{}:
       "レンダリング失敗：" ++ arg0
+    case I.Sux{}:
+      "𒆕 𒉡𒌀 " ++ arg0
 
 def T.native.notify.channel.live(l: I.Loc) -> String:
   match l:
@@ -2767,6 +3555,8 @@ def T.native.notify.channel.live(l: I.Loc) -> String:
       "Agents working"
     case I.Ja{}:
       "稼働中のエージェント"
+    case I.Sux{}:
+      "𒇽𒁺"
 
 def T.native.notify.channel.personal(l: I.Loc) -> String:
   match l:
@@ -2774,6 +3564,8 @@ def T.native.notify.channel.personal(l: I.Loc) -> String:
       "Personal alerts"
     case I.Ja{}:
       "個人向け通知"
+    case I.Sux{}:
+      "𒇽𒅗"
 
 def T.native.pair.action(l: I.Loc) -> String:
   match l:
@@ -2781,6 +3573,8 @@ def T.native.pair.action(l: I.Loc) -> String:
       "Pair"
     case I.Ja{}:
       "ペアリング"
+    case I.Sux{}:
+      "𒆷"
 
 def T.native.pair.add(l: I.Loc) -> String:
   match l:
@@ -2788,6 +3582,8 @@ def T.native.pair.add(l: I.Loc) -> String:
       "Add hub"
     case I.Ja{}:
       "ハブを追加"
+    case I.Sux{}:
+      "𒃻 𒂍"
 
 def T.native.pair.another(l: I.Loc) -> String:
   match l:
@@ -2795,6 +3591,8 @@ def T.native.pair.another(l: I.Loc) -> String:
       "Pair another"
     case I.Ja{}:
       "別のハブとペアリング"
+    case I.Sux{}:
+      "𒆷 𒉋"
 
 def T.native.pair.computer(l: I.Loc) -> String:
   match l:
@@ -2802,6 +3600,8 @@ def T.native.pair.computer(l: I.Loc) -> String:
       "On your computer: Backplane, Settings, Pairing link, QR code."
     case I.Ja{}:
       "パソコンのBackplaneで「設定」→「ペアリングリンク」→「QRコード」を開きます。"
+    case I.Sux{}:
+      "On your computer: Backplane, Settings, Pairing link, QR code."
 
 def T.native.pair.computer.android(l: I.Loc) -> String:
   match l:
@@ -2809,6 +3609,8 @@ def T.native.pair.computer.android(l: I.Loc) -> String:
       "On your computer: Backplane, Settings, Pairing link, QR code. Or paste the link:"
     case I.Ja{}:
       "パソコンのBackplaneで「設定」→「ペアリングリンク」→「QRコード」を開くか、リンクを貼り付けます。"
+    case I.Sux{}:
+      "On your computer: Backplane, Settings, Pairing link, QR code. Or paste the link:"
 
 def T.native.pair.connect(l: I.Loc) -> String:
   match l:
@@ -2816,6 +3618,8 @@ def T.native.pair.connect(l: I.Loc) -> String:
       "Connect"
     case I.Ja{}:
       "接続"
+    case I.Sux{}:
+      "𒆷"
 
 def T.native.pair.instructions(l: I.Loc) -> String:
   match l:
@@ -2823,6 +3627,8 @@ def T.native.pair.instructions(l: I.Loc) -> String:
       "Scan the code, or paste the tailnet link Backplane shows in Settings (Pairing link)."
     case I.Ja{}:
       "QRコードを読み取るか、Backplaneの「設定」→「ペアリングリンク」にあるtailnetリンクを貼り付けます。"
+    case I.Sux{}:
+      "Scan the code, or paste the tailnet link Backplane shows in Settings (Pairing link)."
 
 def T.native.pair.paired(l: I.Loc) -> String:
   match l:
@@ -2830,6 +3636,8 @@ def T.native.pair.paired(l: I.Loc) -> String:
       "Paired"
     case I.Ja{}:
       "ペアリング済み"
+    case I.Sux{}:
+      "𒆷"
 
 def T.native.pair.scan(l: I.Loc) -> String:
   match l:
@@ -2837,6 +3645,8 @@ def T.native.pair.scan(l: I.Loc) -> String:
       "Scan QR code"
     case I.Ja{}:
       "QRコードを読み取る"
+    case I.Sux{}:
+      "𒅆 𒅗"
 
 def T.native.pair.scanner.denied(l: I.Loc) -> String:
   match l:
@@ -2844,6 +3654,8 @@ def T.native.pair.scanner.denied(l: I.Loc) -> String:
       "Backplane needs the camera to read the code. Allow it in Settings, or paste the link instead."
     case I.Ja{}:
       "コードの読み取りにはカメラへのアクセスが必要です。システム設定で許可するか、リンクを貼り付けてください。"
+    case I.Sux{}:
+      "Backplane needs the camera to read the code. Allow it in Settings, or paste the link instead."
 
 def T.native.pair.scanner.instructions(l: I.Loc) -> String:
   match l:
@@ -2851,6 +3663,8 @@ def T.native.pair.scanner.instructions(l: I.Loc) -> String:
       "Point the camera at the code in Backplane's Settings (QR code)."
     case I.Ja{}:
       "Backplaneの「設定」にあるQRコードにカメラを向けてください。"
+    case I.Sux{}:
+      "Point the camera at the code in Backplane's Settings (QR code)."
 
 def T.native.pair.scanner.invalid(l: I.Loc) -> String:
   match l:
@@ -2858,6 +3672,8 @@ def T.native.pair.scanner.invalid(l: I.Loc) -> String:
       "Not a Backplane pairing code"
     case I.Ja{}:
       "Backplaneのペアリング用コードではありません"
+    case I.Sux{}:
+      "𒉡 Backplane QR"
 
 def T.native.pair.scanner.title(l: I.Loc) -> String:
   match l:
@@ -2865,6 +3681,8 @@ def T.native.pair.scanner.title(l: I.Loc) -> String:
       "Scan code"
     case I.Ja{}:
       "コードを読み取る"
+    case I.Sux{}:
+      "𒅆 𒅗"
 
 def T.native.pair.scanner.unavailable(l: I.Loc) -> String:
   match l:
@@ -2872,6 +3690,8 @@ def T.native.pair.scanner.unavailable(l: I.Loc) -> String:
       "The scanner needs Google Play services: paste the link instead"
     case I.Ja{}:
       "読み取りにはGoogle Play開発者サービスが必要です。リンクを貼り付けてください"
+    case I.Sux{}:
+      "The scanner needs Google Play services: paste the link instead"
 
 def T.native.pair.tailnet(l: I.Loc) -> String:
   match l:
@@ -2879,6 +3699,8 @@ def T.native.pair.tailnet(l: I.Loc) -> String:
       "On your tailnet"
     case I.Ja{}:
       "tailnet上のハブ"
+    case I.Sux{}:
+      "On your tailnet"
 
 def T.native.pair.title(l: I.Loc) -> String:
   match l:
@@ -2886,6 +3708,8 @@ def T.native.pair.title(l: I.Loc) -> String:
       "Pair with a hub"
     case I.Ja{}:
       "ハブとペアリング"
+    case I.Sux{}:
+      "𒂍 𒆷"
 
 def T.native.pair.unpair(l: I.Loc) -> String:
   match l:
@@ -2893,6 +3717,8 @@ def T.native.pair.unpair(l: I.Loc) -> String:
       "Unpair"
     case I.Ja{}:
       "ペアリング解除"
+    case I.Sux{}:
+      "𒉡𒆷"
 
 def T.native.permission.camera(l: I.Loc) -> String:
   match l:
@@ -2900,6 +3726,8 @@ def T.native.permission.camera(l: I.Loc) -> String:
       "Backplane reads the pairing code your computer shows, to connect to it."
     case I.Ja{}:
       "コンピューターに表示されたペアリングコードを読み取り、接続します。"
+    case I.Sux{}:
+      "Backplane reads the pairing code your computer shows, to connect to it."
 
 def T.native.plane.card(l: I.Loc, arg0: String, arg1: String) -> String:
   match l:
@@ -2907,6 +3735,8 @@ def T.native.plane.card(l: I.Loc, arg0: String, arg1: String) -> String:
       arg0 ++ ", " ++ arg1
     case I.Ja{}:
       arg0 ++ "、" ++ arg1
+    case I.Sux{}:
+      arg0 ++ ", " ++ arg1
 
 def T.native.plane.more(l: I.Loc, arg0: String) -> String:
   match l:
@@ -2914,6 +3744,8 @@ def T.native.plane.more(l: I.Loc, arg0: String) -> String:
       arg0 ++ " more"
     case I.Ja{}:
       "他" ++ arg0 ++ "件"
+    case I.Sux{}:
+      arg0 ++ " 𒃲"
 
 def T.native.plane.unread(l: I.Loc) -> String:
   match l:
@@ -2921,6 +3753,8 @@ def T.native.plane.unread(l: I.Loc) -> String:
       "Unread"
     case I.Ja{}:
       "未読"
+    case I.Sux{}:
+      "𒉡𒅗"
 
 def T.native.plane.waiting(l: I.Loc) -> String:
   match l:
@@ -2928,6 +3762,8 @@ def T.native.plane.waiting(l: I.Loc) -> String:
       "Nothing waiting"
     case I.Ja{}:
       "対応待ちなし"
+    case I.Sux{}:
+      "𒉡𒃻"
 
 def T.native.review.comment(l: I.Loc) -> String:
   match l:
@@ -2935,6 +3771,8 @@ def T.native.review.comment(l: I.Loc) -> String:
       "Comment"
     case I.Ja{}:
       "コメント"
+    case I.Sux{}:
+      "𒅗"
 
 def T.native.review.pin(l: I.Loc, arg0: String, arg1: String) -> String:
   match l:
@@ -2942,6 +3780,8 @@ def T.native.review.pin(l: I.Loc, arg0: String, arg1: String) -> String:
       "Comment" ++ I.I18n.sel(arg0, "replies", ", " ++ arg1 ++ " replies", "")
     case I.Ja{}:
       "コメント" ++ I.I18n.sel(arg0, "replies", "（返信" ++ arg1 ++ "件）", "")
+    case I.Sux{}:
+      "𒅗" ++ I.I18n.sel(arg0, "replies", " · " ++ arg1 ++ " 𒅗𒅗", "")
 
 def T.native.review.place(l: I.Loc, arg0: String, arg1: String) -> String:
   match l:
@@ -2949,6 +3789,8 @@ def T.native.review.place(l: I.Loc, arg0: String, arg1: String) -> String:
       "at " ++ arg0 ++ ", " ++ arg1 ++ " mm"
     case I.Ja{}:
       "位置：" ++ arg0 ++ ", " ++ arg1 ++ " mm"
+    case I.Sux{}:
+      "𒆠 " ++ arg0 ++ ", " ++ arg1 ++ " mm"
 
 def T.native.review.resolved(l: I.Loc) -> String:
   match l:
@@ -2956,6 +3798,8 @@ def T.native.review.resolved(l: I.Loc) -> String:
       "Resolved"
     case I.Ja{}:
       "解決済み"
+    case I.Sux{}:
+      "𒌀"
 
 def T.native.review.write(l: I.Loc) -> String:
   match l:
@@ -2963,6 +3807,8 @@ def T.native.review.write(l: I.Loc) -> String:
       "Write a note"
     case I.Ja{}:
       "コメントを書く"
+    case I.Sux{}:
+      "𒁾 𒊬"
 
 def T.native.room.empty(l: I.Loc) -> String:
   match l:
@@ -2970,6 +3816,8 @@ def T.native.room.empty(l: I.Loc) -> String:
       "No rooms yet"
     case I.Ja{}:
       "ルームなし"
+    case I.Sux{}:
+      "𒉡𒂍"
 
 def T.native.room.member(l: I.Loc) -> String:
   match l:
@@ -2977,6 +3825,8 @@ def T.native.room.member(l: I.Loc) -> String:
       "In the room"
     case I.Ja{}:
       "参加中"
+    case I.Sux{}:
+      "𒇽"
 
 def T.native.room.members(l: I.Loc) -> String:
   match l:
@@ -2984,6 +3834,8 @@ def T.native.room.members(l: I.Loc) -> String:
       "Members"
     case I.Ja{}:
       "メンバー"
+    case I.Sux{}:
+      "𒇽𒇽"
 
 def T.native.room.post(l: I.Loc) -> String:
   match l:
@@ -2991,12 +3843,16 @@ def T.native.room.post(l: I.Loc) -> String:
       "Post to the room"
     case I.Ja{}:
       "ルームに投稿"
+    case I.Sux{}:
+      "𒂍 𒅗𒁉"
 
 def T.native.routine.examples(l: I.Loc) -> String:
   match l:
     case I.En{}:
       "daily 09:30 · tomorrow 9am · in 2h"
     case I.Ja{}:
+      "daily 09:30 · tomorrow 9am · in 2h"
+    case I.Sux{}:
       "daily 09:30 · tomorrow 9am · in 2h"
 
 def T.native.routine.hint(l: I.Loc) -> String:
@@ -3005,6 +3861,8 @@ def T.native.routine.hint(l: I.Loc) -> String:
       "A schedule (daily 09:30, every 15m, cron) or a time (tomorrow 9am, in 2h)"
     case I.Ja{}:
       "スケジュール（daily 09:30、every 15m、cron）または時刻（tomorrow 9am、in 2h）"
+    case I.Sux{}:
+      "A schedule (daily 09:30, every 15m, cron) or a time (tomorrow 9am, in 2h)"
 
 def T.native.routine.last(l: I.Loc, arg0: String) -> String:
   match l:
@@ -3012,6 +3870,8 @@ def T.native.routine.last(l: I.Loc, arg0: String) -> String:
       "last " ++ arg0 ++ " ago"
     case I.Ja{}:
       "前回：" ++ arg0 ++ "前"
+    case I.Sux{}:
+      "𒌀 " ++ arg0 ++ " 𒄄"
 
 def T.native.routine.prompt(l: I.Loc) -> String:
   match l:
@@ -3019,6 +3879,8 @@ def T.native.routine.prompt(l: I.Loc) -> String:
       "Prompt"
     case I.Ja{}:
       "プロンプト"
+    case I.Sux{}:
+      "𒅗"
 
 def T.native.routine.timefield(l: I.Loc) -> String:
   match l:
@@ -3026,6 +3888,8 @@ def T.native.routine.timefield(l: I.Loc) -> String:
       "When"
     case I.Ja{}:
       "日時"
+    case I.Sux{}:
+      "𒌓"
 
 def T.native.routine.title(l: I.Loc) -> String:
   match l:
@@ -3033,6 +3897,8 @@ def T.native.routine.title(l: I.Loc) -> String:
       "Routine"
     case I.Ja{}:
       "ルーチン"
+    case I.Sux{}:
+      "𒌓 𒈬"
 
 def T.native.routine.what(l: I.Loc) -> String:
   match l:
@@ -3040,6 +3906,8 @@ def T.native.routine.what(l: I.Loc) -> String:
       "What to do"
     case I.Ja{}:
       "実行する内容"
+    case I.Sux{}:
+      "𒅗"
 
 def T.native.routines.empty(l: I.Loc) -> String:
   match l:
@@ -3047,6 +3915,8 @@ def T.native.routines.empty(l: I.Loc) -> String:
       "No routines"
     case I.Ja{}:
       "ルーチンなし"
+    case I.Sux{}:
+      "𒉡𒌓"
 
 def T.native.routines.note(l: I.Loc) -> String:
   match l:
@@ -3054,6 +3924,8 @@ def T.native.routines.note(l: I.Loc) -> String:
       "A bot's Routines tab makes them."
     case I.Ja{}:
       "ボットの「ルーチン」タブで作成できます。"
+    case I.Sux{}:
+      "𒇽 𒌓𒌓 𒆕"
 
 def T.native.settings.about(l: I.Loc) -> String:
   match l:
@@ -3061,6 +3933,8 @@ def T.native.settings.about(l: I.Loc) -> String:
       "About"
     case I.Ja{}:
       "このアプリについて"
+    case I.Sux{}:
+      "𒂍 𒈬"
 
 def T.native.settings.behaviour(l: I.Loc) -> String:
   match l:
@@ -3068,6 +3942,8 @@ def T.native.settings.behaviour(l: I.Loc) -> String:
       "Behaviour"
     case I.Ja{}:
       "動作"
+    case I.Sux{}:
+      "Behaviour"
 
 def T.native.settings.behaviour.android(l: I.Loc) -> String:
   match l:
@@ -3075,6 +3951,8 @@ def T.native.settings.behaviour.android(l: I.Loc) -> String:
       "Projects groups threads by project; Active lists what is going on, what needs you first."
     case I.Ja{}:
       "プロジェクト別、または対応待ちを優先した実行状況別に表示します。"
+    case I.Sux{}:
+      "Projects groups threads by project; Active lists what is going on, what needs you first."
 
 def T.native.settings.behaviour.ios(l: I.Loc) -> String:
   match l:
@@ -3082,6 +3960,8 @@ def T.native.settings.behaviour.ios(l: I.Loc) -> String:
       "Projects groups threads by project; Active lists what is going on, what needs you first. Automatic opens on Home with an uberbot, else Threads."
     case I.Ja{}:
       "プロジェクト別、または対応待ちを優先した実行状況別に表示します。自動ではメインボットがあればホーム、それ以外はスレッドを開きます。"
+    case I.Sux{}:
+      "Projects groups threads by project; Active lists what is going on, what needs you first. Automatic opens on Home with an uberbot, else Threads."
 
 def T.native.settings.cache(l: I.Loc) -> String:
   match l:
@@ -3089,6 +3969,8 @@ def T.native.settings.cache(l: I.Loc) -> String:
       "Cache"
     case I.Ja{}:
       "キャッシュ"
+    case I.Sux{}:
+      "𒁾"
 
 def T.native.settings.cache.ask(l: I.Loc) -> String:
   match l:
@@ -3096,6 +3978,8 @@ def T.native.settings.cache.ask(l: I.Loc) -> String:
       "Clear the cached state?"
     case I.Ja{}:
       "キャッシュを削除しますか？"
+    case I.Sux{}:
+      "𒁾 𒂊?"
 
 def T.native.settings.cache.clear(l: I.Loc) -> String:
   match l:
@@ -3103,6 +3987,8 @@ def T.native.settings.cache.clear(l: I.Loc) -> String:
       "Clear cached state"
     case I.Ja{}:
       "キャッシュを削除"
+    case I.Sux{}:
+      "𒂊"
 
 def T.native.settings.cache.next(l: I.Loc) -> String:
   match l:
@@ -3110,6 +3996,8 @@ def T.native.settings.cache.next(l: I.Loc) -> String:
       "The next launch fetches each hub's history again."
     case I.Ja{}:
       "次回の起動時に各ハブの履歴を再取得します。"
+    case I.Sux{}:
+      "The next launch fetches each hub's history again."
 
 def T.native.settings.haptics(l: I.Loc) -> String:
   match l:
@@ -3117,6 +4005,8 @@ def T.native.settings.haptics(l: I.Loc) -> String:
       "Haptics"
     case I.Ja{}:
       "触覚フィードバック"
+    case I.Sux{}:
+      "Haptics"
 
 def T.native.settings.hub(l: I.Loc) -> String:
   match l:
@@ -3124,6 +4014,8 @@ def T.native.settings.hub(l: I.Loc) -> String:
       "Hub settings"
     case I.Ja{}:
       "ハブ設定"
+    case I.Sux{}:
+      "𒂍 𒈬"
 
 def T.native.settings.hub.named(l: I.Loc, arg0: String) -> String:
   match l:
@@ -3131,6 +4023,8 @@ def T.native.settings.hub.named(l: I.Loc, arg0: String) -> String:
       "Hub settings · " ++ arg0
     case I.Ja{}:
       "ハブ設定 · " ++ arg0
+    case I.Sux{}:
+      "𒂍 𒈬 " ++ arg0
 
 def T.native.settings.hubs(l: I.Loc) -> String:
   match l:
@@ -3138,6 +4032,8 @@ def T.native.settings.hubs(l: I.Loc) -> String:
       "Hubs"
     case I.Ja{}:
       "ハブ"
+    case I.Sux{}:
+      "𒂍𒂍"
 
 def T.native.settings.kept(l: I.Loc) -> String:
   match l:
@@ -3145,6 +4041,8 @@ def T.native.settings.kept(l: I.Loc) -> String:
       "Kept state"
     case I.Ja{}:
       "保存済みの状態"
+    case I.Sux{}:
+      "𒃻"
 
 def T.native.settings.notasked(l: I.Loc) -> String:
   match l:
@@ -3152,6 +4050,8 @@ def T.native.settings.notasked(l: I.Loc) -> String:
       "Not asked"
     case I.Ja{}:
       "未確認"
+    case I.Sux{}:
+      "𒉡 𒂗𒋻"
 
 def T.native.settings.notifications(l: I.Loc) -> String:
   match l:
@@ -3159,6 +4059,8 @@ def T.native.settings.notifications(l: I.Loc) -> String:
       "Notifications"
     case I.Ja{}:
       "通知"
+    case I.Sux{}:
+      "𒅗"
 
 def T.native.settings.notify.hub(l: I.Loc, arg0: String) -> String:
   match l:
@@ -3166,6 +4068,8 @@ def T.native.settings.notify.hub(l: I.Loc, arg0: String) -> String:
       "Notify me for is a setting on " ++ arg0 ++ "."
     case I.Ja{}:
       "通知する内容は" ++ arg0 ++ "で設定します。"
+    case I.Sux{}:
+      "Notify me for is a setting on " ++ arg0 ++ "."
 
 def T.native.settings.opens(l: I.Loc) -> String:
   match l:
@@ -3173,6 +4077,8 @@ def T.native.settings.opens(l: I.Loc) -> String:
       "Opens on"
     case I.Ja{}:
       "起動時のタブ"
+    case I.Sux{}:
+      "𒅅"
 
 def T.native.settings.paired(l: I.Loc, arg0: String) -> String:
   match l:
@@ -3180,6 +4086,8 @@ def T.native.settings.paired(l: I.Loc, arg0: String) -> String:
       arg0 ++ " paired"
     case I.Ja{}:
       arg0 ++ "台とペアリング済み"
+    case I.Sux{}:
+      arg0 ++ " 𒆷"
 
 def T.native.settings.placeholder.hint(l: I.Loc) -> String:
   match l:
@@ -3187,6 +4095,8 @@ def T.native.settings.placeholder.hint(l: I.Loc) -> String:
       "A line of what the setting does for this hub."
     case I.Ja{}:
       "このハブでの設定の説明。"
+    case I.Sux{}:
+      "A line of what the setting does for this hub."
 
 def T.native.settings.placeholder.name(l: I.Loc) -> String:
   match l:
@@ -3194,6 +4104,8 @@ def T.native.settings.placeholder.name(l: I.Loc) -> String:
       "Setting name"
     case I.Ja{}:
       "設定名"
+    case I.Sux{}:
+      "𒈬"
 
 def T.native.settings.placeholder.option(l: I.Loc) -> String:
   match l:
@@ -3201,6 +4113,8 @@ def T.native.settings.placeholder.option(l: I.Loc) -> String:
       "Option"
     case I.Ja{}:
       "選択肢"
+    case I.Sux{}:
+      "𒅗"
 
 def T.native.settings.system(l: I.Loc) -> String:
   match l:
@@ -3208,6 +4122,8 @@ def T.native.settings.system(l: I.Loc) -> String:
       "System"
     case I.Ja{}:
       "システム"
+    case I.Sux{}:
+      "𒂍𒂍"
 
 def T.native.settings.system.open(l: I.Loc) -> String:
   match l:
@@ -3215,6 +4131,8 @@ def T.native.settings.system.open(l: I.Loc) -> String:
       "Open system settings"
     case I.Ja{}:
       "システム設定を開く"
+    case I.Sux{}:
+      "𒅅 𒈬𒃻"
 
 def T.native.settings.system.settings(l: I.Loc) -> String:
   match l:
@@ -3222,6 +4140,8 @@ def T.native.settings.system.settings(l: I.Loc) -> String:
       "System settings"
     case I.Ja{}:
       "システム設定"
+    case I.Sux{}:
+      "𒈬 𒃻"
 
 def T.native.status.answer(l: I.Loc) -> String:
   match l:
@@ -3229,6 +4149,8 @@ def T.native.status.answer(l: I.Loc) -> String:
       "Waits for an answer"
     case I.Ja{}:
       "回答待ち"
+    case I.Sux{}:
+      "𒅗"
 
 def T.native.status.approval(l: I.Loc) -> String:
   match l:
@@ -3236,6 +4158,8 @@ def T.native.status.approval(l: I.Loc) -> String:
       "Waits for approval"
     case I.Ja{}:
       "承認待ち"
+    case I.Sux{}:
+      "𒃻"
 
 def T.native.tab.home(l: I.Loc) -> String:
   match l:
@@ -3243,6 +4167,8 @@ def T.native.tab.home(l: I.Loc) -> String:
       "Home"
     case I.Ja{}:
       "ホーム"
+    case I.Sux{}:
+      "𒂍"
 
 def T.native.task.delete.ask(l: I.Loc) -> String:
   match l:
@@ -3250,6 +4176,8 @@ def T.native.task.delete.ask(l: I.Loc) -> String:
       "Delete this task?"
     case I.Ja{}:
       "このタスクを削除しますか？"
+    case I.Sux{}:
+      "𒋗𒅆𒌨?"
 
 def T.native.task.note(l: I.Loc) -> String:
   match l:
@@ -3257,6 +4185,8 @@ def T.native.task.note(l: I.Loc) -> String:
       "Tell it what matters"
     case I.Ja{}:
       "大事な点を伝える"
+    case I.Sux{}:
+      "𒁾"
 
 def T.native.task.parameter(l: I.Loc, arg0: String, arg1: String) -> String:
   match l:
@@ -3264,6 +4194,8 @@ def T.native.task.parameter(l: I.Loc, arg0: String, arg1: String) -> String:
       arg0 ++ " (" ++ arg1 ++ ")"
     case I.Ja{}:
       arg0 ++ "（" ++ arg1 ++ "）"
+    case I.Sux{}:
+      arg0 ++ " (" ++ arg1 ++ ")"
 
 def T.native.task.private(l: I.Loc) -> String:
   match l:
@@ -3271,6 +4203,8 @@ def T.native.task.private(l: I.Loc) -> String:
       "private"
     case I.Ja{}:
       "非公開"
+    case I.Sux{}:
+      "𒀉𒌫𒆪"
 
 def T.native.task.state(l: I.Loc, +arg0: String) -> String:
   match l:
@@ -3278,6 +4212,8 @@ def T.native.task.state(l: I.Loc, +arg0: String) -> String:
       I.I18n.sel(arg0, "ok", "ok", I.I18n.sel(arg0, "failed", "failed", I.I18n.sel(arg0, "stopped", "stopped", arg0)))
     case I.Ja{}:
       I.I18n.sel(arg0, "ok", "完了", I.I18n.sel(arg0, "failed", "失敗", I.I18n.sel(arg0, "stopped", "停止", arg0)))
+    case I.Sux{}:
+      I.I18n.sel(arg0, "ok", "𒅅", I.I18n.sel(arg0, "failed", "𒉡𒌀", I.I18n.sel(arg0, "stopped", "𒉡𒁺", arg0)))
 
 def T.native.term.inactive(l: I.Loc, arg0: String) -> String:
   match l:
@@ -3285,6 +4221,8 @@ def T.native.term.inactive(l: I.Loc, arg0: String) -> String:
       arg0 ++ " · inactive, tap to restart"
     case I.Ja{}:
       arg0 ++ "・停止中、タップで再起動"
+    case I.Sux{}:
+      arg0 ++ " · 𒉡𒁺, 𒄄"
 
 def T.native.term.restart(l: I.Loc) -> String:
   match l:
@@ -3292,6 +4230,8 @@ def T.native.term.restart(l: I.Loc) -> String:
       "Restart"
     case I.Ja{}:
       "再起動"
+    case I.Sux{}:
+      "𒄄"
 
 def T.native.text.copyall.action(l: I.Loc) -> String:
   match l:
@@ -3299,6 +4239,8 @@ def T.native.text.copyall.action(l: I.Loc) -> String:
       "Copy all"
     case I.Ja{}:
       "すべてコピー"
+    case I.Sux{}:
+      "𒅗𒊬"
 
 def T.native.text.copyall.title(l: I.Loc) -> String:
   match l:
@@ -3306,6 +4248,8 @@ def T.native.text.copyall.title(l: I.Loc) -> String:
       "Copy All"
     case I.Ja{}:
       "すべてコピー"
+    case I.Sux{}:
+      "𒅗𒊬"
 
 def T.native.text.select.action(l: I.Loc) -> String:
   match l:
@@ -3313,6 +4257,8 @@ def T.native.text.select.action(l: I.Loc) -> String:
       "Select text"
     case I.Ja{}:
       "テキストを選択"
+    case I.Sux{}:
+      "𒅗 𒅆𒈽"
 
 def T.native.text.select.title(l: I.Loc) -> String:
   match l:
@@ -3320,6 +4266,8 @@ def T.native.text.select.title(l: I.Loc) -> String:
       "Select Text"
     case I.Ja{}:
       "テキストを選択"
+    case I.Sux{}:
+      "𒅗 𒅆𒈽"
 
 def T.native.thread.archived(l: I.Loc, arg0: String) -> String:
   match l:
@@ -3327,6 +4275,8 @@ def T.native.thread.archived(l: I.Loc, arg0: String) -> String:
       "Archived " ++ arg0
     case I.Ja{}:
       "アーカイブ" ++ arg0
+    case I.Sux{}:
+      "𒁾𒂍 " ++ arg0
 
 def T.native.thread.board(l: I.Loc) -> String:
   match l:
@@ -3334,6 +4284,8 @@ def T.native.thread.board(l: I.Loc) -> String:
       "Board viewer"
     case I.Ja{}:
       "基板ビューアー"
+    case I.Sux{}:
+      "𒁾𒅆"
 
 def T.native.thread.composer(l: I.Loc) -> String:
   match l:
@@ -3341,6 +4293,8 @@ def T.native.thread.composer(l: I.Loc) -> String:
       "Ask the agent"
     case I.Ja{}:
       "エージェントに依頼"
+    case I.Sux{}:
+      "𒅗𒁉"
 
 def T.native.thread.content(l: I.Loc) -> String:
   match l:
@@ -3348,6 +4302,8 @@ def T.native.thread.content(l: I.Loc) -> String:
       "Conversation content"
     case I.Ja{}:
       "会話の内容"
+    case I.Sux{}:
+      "𒅗"
 
 def T.native.thread.content.note(l: I.Loc) -> String:
   match l:
@@ -3355,6 +4311,8 @@ def T.native.thread.content.note(l: I.Loc) -> String:
       "The latest messages will appear here."
     case I.Ja{}:
       "最新のメッセージをここに表示します。"
+    case I.Sux{}:
+      "𒅗𒅗 𒉋 𒆠"
 
 def T.native.thread.effort(l: I.Loc) -> String:
   match l:
@@ -3362,6 +4320,8 @@ def T.native.thread.effort(l: I.Loc) -> String:
       "Effort"
     case I.Ja{}:
       "思考量"
+    case I.Sux{}:
+      "Effort"
 
 def T.native.thread.effort.item(l: I.Loc, arg0: String) -> String:
   match l:
@@ -3369,6 +4329,8 @@ def T.native.thread.effort.item(l: I.Loc, arg0: String) -> String:
       "Effort: " ++ arg0
     case I.Ja{}:
       "思考量：" ++ arg0
+    case I.Sux{}:
+      "Effort: " ++ arg0
 
 def T.native.thread.hub(l: I.Loc) -> String:
   match l:
@@ -3376,6 +4338,8 @@ def T.native.thread.hub(l: I.Loc) -> String:
       "the hub"
     case I.Ja{}:
       "ハブ"
+    case I.Sux{}:
+      "𒂍"
 
 def T.native.thread.menu(l: I.Loc) -> String:
   match l:
@@ -3383,6 +4347,8 @@ def T.native.thread.menu(l: I.Loc) -> String:
       "Menu"
     case I.Ja{}:
       "メニュー"
+    case I.Sux{}:
+      "𒅗"
 
 def T.native.thread.model(l: I.Loc) -> String:
   match l:
@@ -3390,6 +4356,8 @@ def T.native.thread.model(l: I.Loc) -> String:
       "Model"
     case I.Ja{}:
       "モデル"
+    case I.Sux{}:
+      "Model"
 
 def T.native.thread.model.effort(l: I.Loc, arg0: String) -> String:
   match l:
@@ -3397,6 +4365,8 @@ def T.native.thread.model.effort(l: I.Loc, arg0: String) -> String:
       "Model and effort: " ++ arg0
     case I.Ja{}:
       "モデル・思考量：" ++ arg0
+    case I.Sux{}:
+      "Model and effort: " ++ arg0
 
 def T.native.thread.online(l: I.Loc, arg0: String) -> String:
   match l:
@@ -3404,6 +4374,8 @@ def T.native.thread.online(l: I.Loc, arg0: String) -> String:
       I.I18n.sel(arg0, "online", "Connected", "Connecting…")
     case I.Ja{}:
       I.I18n.sel(arg0, "online", "接続済み", "接続中…")
+    case I.Sux{}:
+      I.I18n.sel(arg0, "online", "𒆷", "𒆷…")
 
 def T.native.thread.provider.item(l: I.Loc, arg0: String) -> String:
   match l:
@@ -3411,6 +4383,8 @@ def T.native.thread.provider.item(l: I.Loc, arg0: String) -> String:
       "Provider: " ++ arg0
     case I.Ja{}:
       "プロバイダー：" ++ arg0
+    case I.Sux{}:
+      "Provider: " ++ arg0
 
 def T.native.thread.search.clear(l: I.Loc) -> String:
   match l:
@@ -3418,6 +4392,8 @@ def T.native.thread.search.clear(l: I.Loc) -> String:
       "Clear search"
     case I.Ja{}:
       "検索をクリア"
+    case I.Sux{}:
+      "𒉡𒆥"
 
 def T.native.thread.sending(l: I.Loc) -> String:
   match l:
@@ -3425,6 +4401,8 @@ def T.native.thread.sending(l: I.Loc) -> String:
       "Sending…"
     case I.Ja{}:
       "送信中…"
+    case I.Sux{}:
+      "𒋧…"
 
 def T.native.thread.subagents(l: I.Loc, arg0: String) -> String:
   match l:
@@ -3432,6 +4410,8 @@ def T.native.thread.subagents(l: I.Loc, arg0: String) -> String:
       "Subagents: " ++ arg0
     case I.Ja{}:
       "サブエージェント：" ++ arg0
+    case I.Sux{}:
+      "𒇽𒇽: " ++ arg0
 
 def T.native.thread.waiting(l: I.Loc, arg0: String) -> String:
   match l:
@@ -3439,6 +4419,8 @@ def T.native.thread.waiting(l: I.Loc, arg0: String) -> String:
       "Waiting for " ++ arg0 ++ "…"
     case I.Ja{}:
       arg0 ++ "を待機中…"
+    case I.Sux{}:
+      "𒃻 " ++ arg0 ++ "…"
 
 def T.native.viewer.ground.dark(l: I.Loc) -> String:
   match l:
@@ -3446,6 +4428,8 @@ def T.native.viewer.ground.dark(l: I.Loc) -> String:
       "Dark ground"
     case I.Ja{}:
       "背景を暗く"
+    case I.Sux{}:
+      "𒈪"
 
 def T.native.viewer.ground.light(l: I.Loc) -> String:
   match l:
@@ -3453,6 +4437,8 @@ def T.native.viewer.ground.light(l: I.Loc) -> String:
       "Light ground"
     case I.Ja{}:
       "背景を明るく"
+    case I.Sux{}:
+      "𒌓𒌓"
 
 def T.native.viewer.metal(l: I.Loc) -> String:
   match l:
@@ -3460,6 +4446,8 @@ def T.native.viewer.metal(l: I.Loc) -> String:
       "This device has no Metal."
     case I.Ja{}:
       "このデバイスはMetalに対応していません。"
+    case I.Sux{}:
+      "This device has no Metal."
 
 def T.native.viewer.others(l: I.Loc) -> String:
   match l:
@@ -3467,6 +4455,8 @@ def T.native.viewer.others(l: I.Loc) -> String:
       "Others"
     case I.Ja{}:
       "ほかのレイヤー"
+    case I.Sux{}:
+      "𒇽𒇽"
 
 def T.native.viewer.parts(l: I.Loc) -> String:
   match l:
@@ -3474,6 +4464,8 @@ def T.native.viewer.parts(l: I.Loc) -> String:
       "Parts"
     case I.Ja{}:
       "部品"
+    case I.Sux{}:
+      "𒃲"
 
 def T.native.viewer.restore(l: I.Loc) -> String:
   match l:
@@ -3481,6 +4473,8 @@ def T.native.viewer.restore(l: I.Loc) -> String:
       "All back"
     case I.Ja{}:
       "すべて元に戻す"
+    case I.Sux{}:
+      "𒄄"
 
 def T.native.viewer.sheet(l: I.Loc) -> String:
   match l:
@@ -3488,6 +4482,8 @@ def T.native.viewer.sheet(l: I.Loc) -> String:
       "Sheet"
     case I.Ja{}:
       "シート"
+    case I.Sux{}:
+      "𒁾"
 
 def T.native.viewer.source(l: I.Loc) -> String:
   match l:
@@ -3495,6 +4491,8 @@ def T.native.viewer.source(l: I.Loc) -> String:
       "Source"
     case I.Ja{}:
       "表示元"
+    case I.Sux{}:
+      "𒆠"
 
 def T.native.viewer.standout(l: I.Loc) -> String:
   match l:
@@ -3502,6 +4500,8 @@ def T.native.viewer.standout(l: I.Loc) -> String:
       "Stand out"
     case I.Ja{}:
       "強調"
+    case I.Sux{}:
+      "𒅆"
 
 def T.nav.pr.norepo(l: I.Loc) -> String:
   match l:
@@ -3509,6 +4509,8 @@ def T.nav.pr.norepo(l: I.Loc) -> String:
       "PR link needs a repo"
     case I.Ja{}:
       "PRリンクにはリポジトリが必要です"
+    case I.Sux{}:
+      "PR link needs a repo"
 
 def T.nav.task.none(l: I.Loc) -> String:
   match l:
@@ -3516,6 +4518,8 @@ def T.nav.task.none(l: I.Loc) -> String:
       "No view for this task yet"
     case I.Ja{}:
       "このタスクにはまだビューがありません"
+    case I.Sux{}:
+      "𒉡 𒅆 𒉋"
 
 def T.notify.all(l: I.Loc) -> String:
   match l:
@@ -3523,6 +4527,8 @@ def T.notify.all(l: I.Loc) -> String:
       "Everything"
     case I.Ja{}:
       "すべて"
+    case I.Sux{}:
+      "𒃲"
 
 def T.notify.all.note(l: I.Loc) -> String:
   match l:
@@ -3530,6 +4536,8 @@ def T.notify.all.note(l: I.Loc) -> String:
       "Also every turn end and room exchange, as before."
     case I.Ja{}:
       "これまでどおり、すべてのターンの終了とルームのやり取りも通知します。"
+    case I.Sux{}:
+      "Also every turn end and room exchange, as before."
 
 def T.notify.compact.running(l: I.Loc, arg0: String) -> String:
   match l:
@@ -3537,6 +4545,8 @@ def T.notify.compact.running(l: I.Loc, arg0: String) -> String:
       arg0 ++ " running"
     case I.Ja{}:
       arg0 ++ "件が実行中"
+    case I.Sux{}:
+      arg0 ++ " 𒁺"
 
 def T.notify.failed(l: I.Loc) -> String:
   match l:
@@ -3544,6 +4554,8 @@ def T.notify.failed(l: I.Loc) -> String:
       "Failed"
     case I.Ja{}:
       "失敗"
+    case I.Sux{}:
+      "𒉡𒅅"
 
 def T.notify.finished(l: I.Loc) -> String:
   match l:
@@ -3551,6 +4563,8 @@ def T.notify.finished(l: I.Loc) -> String:
       "Finished"
     case I.Ja{}:
       "完了"
+    case I.Sux{}:
+      "𒌀"
 
 def T.notify.idle(l: I.Loc) -> String:
   match l:
@@ -3558,6 +4572,8 @@ def T.notify.idle(l: I.Loc) -> String:
       "All agents idle"
     case I.Ja{}:
       "すべてのエージェントが待機中"
+    case I.Sux{}:
+      "𒉡𒁺"
 
 def T.notify.lead(l: I.Loc) -> String:
   match l:
@@ -3565,6 +4581,8 @@ def T.notify.lead(l: I.Loc) -> String:
       "Phone and desktop alerts. The rest stays in the app as unread."
     case I.Ja{}:
       "スマートフォンとデスクトップの通知です。それ以外はアプリ内で未読のままになります。"
+    case I.Sux{}:
+      "Phone and desktop alerts. The rest stays in the app as unread."
 
 def T.notify.needs(l: I.Loc) -> String:
   match l:
@@ -3572,6 +4590,8 @@ def T.notify.needs(l: I.Loc) -> String:
       "Needs me"
     case I.Ja{}:
       "要対応"
+    case I.Sux{}:
+      "𒇽"
 
 def T.notify.needs.note(l: I.Loc) -> String:
   match l:
@@ -3579,6 +4599,8 @@ def T.notify.needs.note(l: I.Loc) -> String:
       "Approvals, questions and anything an agent is blocked on until you act."
     case I.Ja{}:
       "承認、質問、操作があるまでエージェントが止まっている事柄です。"
+    case I.Sux{}:
+      "Approvals, questions and anything an agent is blocked on until you act."
 
 def T.notify.reminders(l: I.Loc) -> String:
   match l:
@@ -3586,6 +4608,8 @@ def T.notify.reminders(l: I.Loc) -> String:
       "Reminders"
     case I.Ja{}:
       "リマインダー"
+    case I.Sux{}:
+      "𒌓"
 
 def T.notify.reminders.note(l: I.Loc) -> String:
   match l:
@@ -3593,6 +4617,8 @@ def T.notify.reminders.note(l: I.Loc) -> String:
       "Reminders and digests you scheduled."
     case I.Ja{}:
       "予約したリマインダーとダイジェストです。"
+    case I.Sux{}:
+      "Reminders and digests you scheduled."
 
 def T.notify.settled(l: I.Loc) -> String:
   match l:
@@ -3600,6 +4626,8 @@ def T.notify.settled(l: I.Loc) -> String:
       "Settled"
     case I.Ja{}:
       "完了"
+    case I.Sux{}:
+      "𒌀"
 
 def T.notify.settled.note(l: I.Loc) -> String:
   match l:
@@ -3607,6 +4635,8 @@ def T.notify.settled.note(l: I.Loc) -> String:
       "Work you gave a thread is finished, failed, or its branch merged. Once per piece of work."
     case I.Ja{}:
       "スレッドに任せた作業が完了・失敗した、またはブランチがマージされたときです。作業ごとに1回。"
+    case I.Sux{}:
+      "Work you gave a thread is finished, failed, or its branch merged. Once per piece of work."
 
 def T.notify.title(l: I.Loc) -> String:
   match l:
@@ -3614,6 +4644,8 @@ def T.notify.title(l: I.Loc) -> String:
       "Notify me for"
     case I.Ja{}:
       "通知する内容"
+    case I.Sux{}:
+      "𒅗"
 
 def T.notify.waiting(l: I.Loc, arg0: String) -> String:
   match l:
@@ -3621,6 +4653,8 @@ def T.notify.waiting(l: I.Loc, arg0: String) -> String:
       "waiting on " ++ arg0
     case I.Ja{}:
       arg0 ++ "件を待機中"
+    case I.Sux{}:
+      "𒃻 " ++ arg0
 
 def T.notify.working(l: I.Loc, arg0: String) -> String:
   match l:
@@ -3628,6 +4662,8 @@ def T.notify.working(l: I.Loc, arg0: String) -> String:
       arg0 ++ " agents working"
     case I.Ja{}:
       "エージェント" ++ arg0 ++ "件が作業中"
+    case I.Sux{}:
+      arg0 ++ " 𒇽 𒁺"
 
 def T.option.active(l: I.Loc) -> String:
   match l:
@@ -3635,6 +4671,8 @@ def T.option.active(l: I.Loc) -> String:
       "active"
     case I.Ja{}:
       "進行中"
+    case I.Sux{}:
+      "𒁺"
 
 def T.option.dark(l: I.Loc) -> String:
   match l:
@@ -3642,6 +4680,8 @@ def T.option.dark(l: I.Loc) -> String:
       "dark"
     case I.Ja{}:
       "ダーク"
+    case I.Sux{}:
+      "𒈪"
 
 def T.option.light(l: I.Loc) -> String:
   match l:
@@ -3649,6 +4689,8 @@ def T.option.light(l: I.Loc) -> String:
       "light"
     case I.Ja{}:
       "ライト"
+    case I.Sux{}:
+      "𒌓𒌓"
 
 def T.option.nightly(l: I.Loc) -> String:
   match l:
@@ -3656,6 +4698,8 @@ def T.option.nightly(l: I.Loc) -> String:
       "nightly"
     case I.Ja{}:
       "ナイトリー"
+    case I.Sux{}:
+      "nightly"
 
 def T.option.off(l: I.Loc) -> String:
   match l:
@@ -3663,6 +4707,8 @@ def T.option.off(l: I.Loc) -> String:
       "off"
     case I.Ja{}:
       "オフ"
+    case I.Sux{}:
+      "𒉡𒅅"
 
 def T.option.on(l: I.Loc) -> String:
   match l:
@@ -3670,6 +4716,8 @@ def T.option.on(l: I.Loc) -> String:
       "on"
     case I.Ja{}:
       "オン"
+    case I.Sux{}:
+      "𒅅"
 
 def T.option.projects(l: I.Loc) -> String:
   match l:
@@ -3677,6 +4725,8 @@ def T.option.projects(l: I.Loc) -> String:
       "projects"
     case I.Ja{}:
       "プロジェクト"
+    case I.Sux{}:
+      "𒂍𒂍"
 
 def T.option.stable(l: I.Loc) -> String:
   match l:
@@ -3684,6 +4734,8 @@ def T.option.stable(l: I.Loc) -> String:
       "stable"
     case I.Ja{}:
       "安定版"
+    case I.Sux{}:
+      "stable"
 
 def T.palette.archive(l: I.Loc) -> String:
   match l:
@@ -3691,6 +4743,8 @@ def T.palette.archive(l: I.Loc) -> String:
       "Archive thread"
     case I.Ja{}:
       "スレッドをアーカイブ"
+    case I.Sux{}:
+      "𒁾𒂍"
 
 def T.palette.attach(l: I.Loc) -> String:
   match l:
@@ -3698,6 +4752,8 @@ def T.palette.attach(l: I.Loc) -> String:
       "Attach a file"
     case I.Ja{}:
       "ファイルを添付"
+    case I.Sux{}:
+      "𒁾𒆷"
 
 def T.palette.command.placeholder(l: I.Loc) -> String:
   match l:
@@ -3705,6 +4761,8 @@ def T.palette.command.placeholder(l: I.Loc) -> String:
       "Type a command or a thread"
     case I.Ja{}:
       "コマンドまたはスレッドを入力"
+    case I.Sux{}:
+      "𒁾 𒊬 𒀀𒉘 / 𒅗"
 
 def T.palette.commit(l: I.Loc) -> String:
   match l:
@@ -3712,6 +4770,8 @@ def T.palette.commit(l: I.Loc) -> String:
       "Commit & push"
     case I.Ja{}:
       "コミットしてプッシュ"
+    case I.Sux{}:
+      "𒁾 𒊬"
 
 def T.palette.delete(l: I.Loc) -> String:
   match l:
@@ -3719,6 +4779,8 @@ def T.palette.delete(l: I.Loc) -> String:
       "Delete thread"
     case I.Ja{}:
       "スレッドを削除"
+    case I.Sux{}:
+      "𒋗𒅆𒌨"
 
 def T.palette.diff(l: I.Loc) -> String:
   match l:
@@ -3726,6 +4788,8 @@ def T.palette.diff(l: I.Loc) -> String:
       "Diff: what this thread changed"
     case I.Ja{}:
       "差分：このスレッドの変更"
+    case I.Sux{}:
+      "𒅗 𒄄"
 
 def T.palette.file.placeholder(l: I.Loc) -> String:
   match l:
@@ -3733,6 +4797,8 @@ def T.palette.file.placeholder(l: I.Loc) -> String:
       "Find a file to mention"
     case I.Ja{}:
       "参照するファイルを検索"
+    case I.Sux{}:
+      "𒁾 𒆥"
 
 def T.palette.findfile(l: I.Loc) -> String:
   match l:
@@ -3740,6 +4806,8 @@ def T.palette.findfile(l: I.Loc) -> String:
       "Find file"
     case I.Ja{}:
       "ファイルを探す"
+    case I.Sux{}:
+      "𒁾 𒆥"
 
 def T.palette.kicad(l: I.Loc) -> String:
   match l:
@@ -3747,6 +4815,8 @@ def T.palette.kicad(l: I.Loc) -> String:
       "Open in KiCad"
     case I.Ja{}:
       "KiCadで開く"
+    case I.Sux{}:
+      "KiCad 𒅅"
 
 def T.palette.kicad10(l: I.Loc) -> String:
   match l:
@@ -3754,6 +4824,8 @@ def T.palette.kicad10(l: I.Loc) -> String:
       "Open in KiCad 10 (exported copy)"
     case I.Ja{}:
       "KiCad 10で開く（書き出したコピー）"
+    case I.Sux{}:
+      "Open in KiCad 10 (exported copy)"
 
 def T.palette.newthread(l: I.Loc) -> String:
   match l:
@@ -3761,6 +4833,8 @@ def T.palette.newthread(l: I.Loc) -> String:
       "New thread"
     case I.Ja{}:
       "新しいスレッド"
+    case I.Sux{}:
+      "𒅗 𒉋"
 
 def T.palette.pin(l: I.Loc) -> String:
   match l:
@@ -3768,6 +4842,8 @@ def T.palette.pin(l: I.Loc) -> String:
       "Pin thread"
     case I.Ja{}:
       "スレッドをピン留め"
+    case I.Sux{}:
+      "𒃻"
 
 def T.palette.pr(l: I.Loc) -> String:
   match l:
@@ -3775,6 +4851,8 @@ def T.palette.pr(l: I.Loc) -> String:
       "Open pull request"
     case I.Ja{}:
       "プルリクエストを開く"
+    case I.Sux{}:
+      "PR 𒅅"
 
 def T.palette.revert(l: I.Loc) -> String:
   match l:
@@ -3782,6 +4860,8 @@ def T.palette.revert(l: I.Loc) -> String:
       "Revert thread"
     case I.Ja{}:
       "スレッドを元に戻す"
+    case I.Sux{}:
+      "𒄄"
 
 def T.palette.search(l: I.Loc) -> String:
   match l:
@@ -3789,6 +4869,8 @@ def T.palette.search(l: I.Loc) -> String:
       "Search threads"
     case I.Ja{}:
       "スレッドを検索"
+    case I.Sux{}:
+      "𒅗 𒆥"
 
 def T.palette.search.full(l: I.Loc) -> String:
   match l:
@@ -3796,6 +4878,8 @@ def T.palette.search.full(l: I.Loc) -> String:
       "Search threads and messages"
     case I.Ja{}:
       "スレッドとメッセージを検索"
+    case I.Sux{}:
+      "𒅗𒅗 𒆥"
 
 def T.palette.settings(l: I.Loc) -> String:
   match l:
@@ -3803,6 +4887,8 @@ def T.palette.settings(l: I.Loc) -> String:
       "Settings"
     case I.Ja{}:
       "設定"
+    case I.Sux{}:
+      "𒈬 𒃻"
 
 def T.palette.settle(l: I.Loc) -> String:
   match l:
@@ -3810,6 +4896,8 @@ def T.palette.settle(l: I.Loc) -> String:
       "Settle thread"
     case I.Ja{}:
       "スレッドを完了"
+    case I.Sux{}:
+      "𒅗 𒃻"
 
 def T.palette.snooze.hour(l: I.Loc) -> String:
   match l:
@@ -3817,6 +4905,8 @@ def T.palette.snooze.hour(l: I.Loc) -> String:
       "Snooze 1 hour"
     case I.Ja{}:
       "1時間スヌーズ"
+    case I.Sux{}:
+      "𒉡𒅆 𒌓"
 
 def T.palette.snooze.tomorrow(l: I.Loc) -> String:
   match l:
@@ -3824,6 +4914,8 @@ def T.palette.snooze.tomorrow(l: I.Loc) -> String:
       "Snooze until tomorrow 9:00"
     case I.Ja{}:
       "明日9:00までスヌーズ"
+    case I.Sux{}:
+      "𒉡𒅆 𒌓 𒉋"
 
 def T.palette.snooze.week(l: I.Loc) -> String:
   match l:
@@ -3831,6 +4923,8 @@ def T.palette.snooze.week(l: I.Loc) -> String:
       "Snooze 1 week"
     case I.Ja{}:
       "1週間スヌーズ"
+    case I.Sux{}:
+      "𒉡𒅆 𒌓𒌓𒌓𒌓𒌓𒌓𒌓"
 
 def T.palette.terminal(l: I.Loc) -> String:
   match l:
@@ -3838,6 +4932,8 @@ def T.palette.terminal(l: I.Loc) -> String:
       "Terminal"
     case I.Ja{}:
       "ターミナル"
+    case I.Sux{}:
+      "𒅗"
 
 def T.palette.unarchive(l: I.Loc) -> String:
   match l:
@@ -3845,6 +4941,8 @@ def T.palette.unarchive(l: I.Loc) -> String:
       "Unarchive thread"
     case I.Ja{}:
       "スレッドのアーカイブを解除"
+    case I.Sux{}:
+      "𒄄"
 
 def T.palette.unsnooze(l: I.Loc) -> String:
   match l:
@@ -3852,6 +4950,8 @@ def T.palette.unsnooze(l: I.Loc) -> String:
       "Unsnooze"
     case I.Ja{}:
       "スヌーズを解除"
+    case I.Sux{}:
+      "𒄄"
 
 def T.palette.update(l: I.Loc) -> String:
   match l:
@@ -3859,6 +4959,8 @@ def T.palette.update(l: I.Loc) -> String:
       "Update Backplane"
     case I.Ja{}:
       "Backplaneを更新"
+    case I.Sux{}:
+      "Backplane 𒉋"
 
 def T.palette.viewer(l: I.Loc) -> String:
   match l:
@@ -3866,6 +4968,8 @@ def T.palette.viewer(l: I.Loc) -> String:
       "Viewer: board, schematic, 3D, Mech, files, diff, browser"
     case I.Ja{}:
       "ビューア：基板、回路図、3D、Mech、ファイル、差分、ブラウザ"
+    case I.Sux{}:
+      "𒅆"
 
 def T.pane.range(l: I.Loc, arg0: String, arg1: String, arg2: String) -> String:
   match l:
@@ -3873,6 +4977,8 @@ def T.pane.range(l: I.Loc, arg0: String, arg1: String, arg2: String) -> String:
       " · " ++ arg0 ++ "–" ++ arg1 ++ " of " ++ arg2
     case I.Ja{}:
       "・" ++ arg2 ++ "件中" ++ arg0 ++ "–" ++ arg1 ++ "件"
+    case I.Sux{}:
+      " · " ++ arg0 ++ "–" ++ arg1 ++ "/" ++ arg2
 
 def T.phase.approval(l: I.Loc) -> String:
   match l:
@@ -3880,6 +4986,8 @@ def T.phase.approval(l: I.Loc) -> String:
       "Waiting for approval"
     case I.Ja{}:
       "承認待ち"
+    case I.Sux{}:
+      "𒃻"
 
 def T.phase.complete(l: I.Loc) -> String:
   match l:
@@ -3887,6 +4995,8 @@ def T.phase.complete(l: I.Loc) -> String:
       "Complete"
     case I.Ja{}:
       "完了"
+    case I.Sux{}:
+      "𒌀"
 
 def T.phase.input(l: I.Loc) -> String:
   match l:
@@ -3894,6 +5004,8 @@ def T.phase.input(l: I.Loc) -> String:
       "Waiting for input"
     case I.Ja{}:
       "回答待ち"
+    case I.Sux{}:
+      "𒅗"
 
 def T.phase.monitoring(l: I.Loc, arg0: String, arg1: String) -> String:
   match l:
@@ -3901,6 +5013,8 @@ def T.phase.monitoring(l: I.Loc, arg0: String, arg1: String) -> String:
       "Monitoring " ++ arg0 ++ " " ++ I.I18n.sel(arg1, "one", "task", "tasks")
     case I.Ja{}:
       "タスク" ++ arg0 ++ "件を監視中" ++ ""
+    case I.Sux{}:
+      "Monitoring " ++ arg0 ++ " " ++ I.I18n.sel(arg1, "one", "task", "tasks")
 
 def T.phase.stopped(l: I.Loc) -> String:
   match l:
@@ -3908,6 +5022,8 @@ def T.phase.stopped(l: I.Loc) -> String:
       "Stopped"
     case I.Ja{}:
       "停止"
+    case I.Sux{}:
+      "𒉡𒁺"
 
 def T.phase.working(l: I.Loc) -> String:
   match l:
@@ -3915,6 +5031,8 @@ def T.phase.working(l: I.Loc) -> String:
       "Working…"
     case I.Ja{}:
       "作業中…"
+    case I.Sux{}:
+      "𒇽𒁺"
 
 def T.phone.unsettle(l: I.Loc) -> String:
   match l:
@@ -3922,6 +5040,8 @@ def T.phone.unsettle(l: I.Loc) -> String:
       "Unsettle"
     case I.Ja{}:
       "未完了に戻す"
+    case I.Sux{}:
+      "𒄄"
 
 def T.phone.working(l: I.Loc) -> String:
   match l:
@@ -3929,6 +5049,8 @@ def T.phone.working(l: I.Loc) -> String:
       "Working"
     case I.Ja{}:
       "作業中"
+    case I.Sux{}:
+      "𒇽𒁺"
 
 def T.picker.back(l: I.Loc) -> String:
   match l:
@@ -3936,6 +5058,8 @@ def T.picker.back(l: I.Loc) -> String:
       "Back to projects"
     case I.Ja{}:
       "プロジェクトに戻る"
+    case I.Sux{}:
+      "𒄄"
 
 def T.picker.folder.placeholder(l: I.Loc) -> String:
   match l:
@@ -3943,6 +5067,8 @@ def T.picker.folder.placeholder(l: I.Loc) -> String:
       "Filter, name a new folder, or type a path"
     case I.Ja{}:
       "検索・新規フォルダ名・パス"
+    case I.Sux{}:
+      "𒆥 · 𒂍 𒉋 𒈬 · /path"
 
 def T.picker.hint.find(l: I.Loc) -> String:
   match l:
@@ -3950,6 +5076,8 @@ def T.picker.hint.find(l: I.Loc) -> String:
       "A project, or ~/path to add a folder"
     case I.Ja{}:
       "プロジェクト、またはフォルダを追加する~/パス"
+    case I.Sux{}:
+      "𒂍 𒅆𒈽 · ~/path 𒂍 𒃻"
 
 def T.picker.hint.path(l: I.Loc) -> String:
   match l:
@@ -3957,6 +5085,8 @@ def T.picker.hint.path(l: I.Loc) -> String:
       "~/path, or a name to filter or create"
     case I.Ja{}:
       "~/パス、または絞り込みや作成に使う名前"
+    case I.Sux{}:
+      "~/path · 𒈬 𒆥 / 𒆕"
 
 def T.picker.keys.folder(l: I.Loc) -> String:
   match l:
@@ -3964,6 +5094,8 @@ def T.picker.keys.folder(l: I.Loc) -> String:
       "enter  choose     tab  open     backspace  up     esc  projects"
     case I.Ja{}:
       "Enterで選択　Tabで開く　Backspaceで上へ　Escで一覧"
+    case I.Sux{}:
+      "enter  choose     tab  open     backspace  up     esc  projects"
 
 def T.picker.keys.project(l: I.Loc) -> String:
   match l:
@@ -3971,6 +5103,8 @@ def T.picker.keys.project(l: I.Loc) -> String:
       "enter  choose     esc  close"
     case I.Ja{}:
       "Enterで選択　Escで閉じる"
+    case I.Sux{}:
+      "enter  choose     esc  close"
 
 def T.picker.project.placeholder(l: I.Loc) -> String:
   match l:
@@ -3978,6 +5112,8 @@ def T.picker.project.placeholder(l: I.Loc) -> String:
       "Find a project, or type a path"
     case I.Ja{}:
       "プロジェクト名またはパス"
+    case I.Sux{}:
+      "𒂍 𒆥 · /path"
 
 def T.plane.bots.working(l: I.Loc) -> String:
   match l:
@@ -3985,6 +5121,8 @@ def T.plane.bots.working(l: I.Loc) -> String:
       "Bots working"
     case I.Ja{}:
       "稼働ボット"
+    case I.Sux{}:
+      "𒇽𒁺"
 
 def T.plane.count.need(l: I.Loc, arg0: String) -> String:
   match l:
@@ -3992,6 +5130,8 @@ def T.plane.count.need(l: I.Loc, arg0: String) -> String:
       arg0 ++ " need you"
     case I.Ja{}:
       arg0 ++ "件が要対応"
+    case I.Sux{}:
+      arg0 ++ " 𒂗𒋻"
 
 def T.plane.count.run(l: I.Loc, arg0: String) -> String:
   match l:
@@ -3999,6 +5139,8 @@ def T.plane.count.run(l: I.Loc, arg0: String) -> String:
       arg0 ++ " running"
     case I.Ja{}:
       arg0 ++ "件が実行中"
+    case I.Sux{}:
+      arg0 ++ " 𒁺"
 
 def T.plane.deploy.sub(l: I.Loc, arg0: String) -> String:
   match l:
@@ -4006,6 +5148,8 @@ def T.plane.deploy.sub(l: I.Loc, arg0: String) -> String:
       arg0 ++ " · Cancel"
     case I.Ja{}:
       arg0 ++ " · キャンセル"
+    case I.Sux{}:
+      arg0 ++ " · 𒄄"
 
 def T.plane.deploy.title(l: I.Loc) -> String:
   match l:
@@ -4013,6 +5157,8 @@ def T.plane.deploy.title(l: I.Loc) -> String:
       "Restart pending"
     case I.Ja{}:
       "再起動待ち"
+    case I.Sux{}:
+      "𒄄 𒃻"
 
 def T.plane.heading.bots(l: I.Loc) -> String:
   match l:
@@ -4020,6 +5166,8 @@ def T.plane.heading.bots(l: I.Loc) -> String:
       "BOTS"
     case I.Ja{}:
       "ボット"
+    case I.Sux{}:
+      "𒇽𒇽"
 
 def T.plane.heading.locks(l: I.Loc) -> String:
   match l:
@@ -4027,6 +5175,8 @@ def T.plane.heading.locks(l: I.Loc) -> String:
       "LOCKS"
     case I.Ja{}:
       "ロック"
+    case I.Sux{}:
+      "𒆷"
 
 def T.plane.heading.need(l: I.Loc) -> String:
   match l:
@@ -4034,6 +5184,8 @@ def T.plane.heading.need(l: I.Loc) -> String:
       "NEEDS YOU"
     case I.Ja{}:
       "対応待ち"
+    case I.Sux{}:
+      "𒇽"
 
 def T.plane.heading.rooms(l: I.Loc) -> String:
   match l:
@@ -4041,6 +5193,8 @@ def T.plane.heading.rooms(l: I.Loc) -> String:
       "ROOMS"
     case I.Ja{}:
       "ルーム"
+    case I.Sux{}:
+      "𒂍𒂍"
 
 def T.plane.heading.routines(l: I.Loc) -> String:
   match l:
@@ -4048,6 +5202,8 @@ def T.plane.heading.routines(l: I.Loc) -> String:
       "ROUTINES"
     case I.Ja{}:
       "ルーティン"
+    case I.Sux{}:
+      "𒌓𒌓"
 
 def T.plane.heading.running(l: I.Loc) -> String:
   match l:
@@ -4055,6 +5211,8 @@ def T.plane.heading.running(l: I.Loc) -> String:
       "RUNNING"
     case I.Ja{}:
       "実行中"
+    case I.Sux{}:
+      "𒇽𒁺"
 
 def T.plane.home.line(l: I.Loc, arg0: String) -> String:
   match l:
@@ -4062,6 +5220,8 @@ def T.plane.home.line(l: I.Loc, arg0: String) -> String:
       "Home: " ++ arg0
     case I.Ja{}:
       "ホーム：" ++ arg0
+    case I.Sux{}:
+      "𒂍: " ++ arg0
 
 def T.plane.home.make(l: I.Loc) -> String:
   match l:
@@ -4069,6 +5229,8 @@ def T.plane.home.make(l: I.Loc) -> String:
       "Make this the home"
     case I.Ja{}:
       "ここをホームにする"
+    case I.Sux{}:
+      "𒂍𒆕"
 
 def T.plane.idle(l: I.Loc, arg0: String) -> String:
   match l:
@@ -4076,6 +5238,8 @@ def T.plane.idle(l: I.Loc, arg0: String) -> String:
       "IDLE " ++ arg0
     case I.Ja{}:
       "待機中" ++ arg0 ++ "件"
+    case I.Sux{}:
+      "𒉡𒁺 " ++ arg0
 
 def T.plane.lock.by(l: I.Loc, arg0: String, arg1: String) -> String:
   match l:
@@ -4083,6 +5247,8 @@ def T.plane.lock.by(l: I.Loc, arg0: String, arg1: String) -> String:
       "held by " ++ arg0 ++ " " ++ arg1
     case I.Ja{}:
       arg0 ++ "が保持（" ++ arg1 ++ "）"
+    case I.Sux{}:
+      "held by " ++ arg0 ++ " " ++ arg1
 
 def T.plane.lock.outside(l: I.Loc, arg0: String, arg1: String) -> String:
   match l:
@@ -4090,6 +5256,8 @@ def T.plane.lock.outside(l: I.Loc, arg0: String, arg1: String) -> String:
       "held outside the hub by pid " ++ arg0 ++ " (" ++ arg1 ++ ")"
     case I.Ja{}:
       "ハブ外のpid " ++ arg0 ++ "（" ++ arg1 ++ "）が保持"
+    case I.Sux{}:
+      "held outside the hub by pid " ++ arg0 ++ " (" ++ arg1 ++ ")"
 
 def T.plane.lock.row(l: I.Loc, arg0: String, arg1: String, arg2: String) -> String:
   match l:
@@ -4097,6 +5265,8 @@ def T.plane.lock.row(l: I.Loc, arg0: String, arg1: String, arg2: String) -> Stri
       arg0 ++ " · " ++ arg1 ++ " · " ++ arg2 ++ " waiting"
     case I.Ja{}:
       arg0 ++ " · " ++ arg1 ++ " · 待機" ++ arg2 ++ "件"
+    case I.Sux{}:
+      arg0 ++ " · " ++ arg1 ++ " · " ++ arg2 ++ " 𒄊𒁺"
 
 def T.plane.locks(l: I.Loc) -> String:
   match l:
@@ -4104,6 +5274,8 @@ def T.plane.locks(l: I.Loc) -> String:
       "Locks"
     case I.Ja{}:
       "ロック"
+    case I.Sux{}:
+      "𒆷"
 
 def T.plane.machine.other(l: I.Loc) -> String:
   match l:
@@ -4111,6 +5283,8 @@ def T.plane.machine.other(l: I.Loc) -> String:
       "another machine"
     case I.Ja{}:
       "別のマシン"
+    case I.Sux{}:
+      "𒂍 𒉋"
 
 def T.plane.more(l: I.Loc, arg0: String) -> String:
   match l:
@@ -4118,6 +5292,8 @@ def T.plane.more(l: I.Loc, arg0: String) -> String:
       "+" ++ arg0 ++ " more"
     case I.Ja{}:
       "ほか" ++ arg0 ++ "件"
+    case I.Sux{}:
+      "+" ++ arg0 ++ " 𒃲"
 
 def T.plane.need(l: I.Loc) -> String:
   match l:
@@ -4125,6 +5301,8 @@ def T.plane.need(l: I.Loc) -> String:
       "Need you"
     case I.Ja{}:
       "対応待ち"
+    case I.Sux{}:
+      "𒇽"
 
 def T.plane.needs(l: I.Loc) -> String:
   match l:
@@ -4132,6 +5310,8 @@ def T.plane.needs(l: I.Loc) -> String:
       "Needs you"
     case I.Ja{}:
       "要対応"
+    case I.Sux{}:
+      "𒇽"
 
 def T.plane.rooms.unread(l: I.Loc) -> String:
   match l:
@@ -4139,6 +5319,8 @@ def T.plane.rooms.unread(l: I.Loc) -> String:
       "Unread rooms"
     case I.Ja{}:
       "未読ルーム"
+    case I.Sux{}:
+      "𒂍𒂍 𒉡𒅗"
 
 def T.plane.running(l: I.Loc) -> String:
   match l:
@@ -4146,6 +5328,8 @@ def T.plane.running(l: I.Loc) -> String:
       "Running"
     case I.Ja{}:
       "実行中"
+    case I.Sux{}:
+      "𒁺"
 
 def T.proj.add(l: I.Loc, arg0: String) -> String:
   match l:
@@ -4153,6 +5337,8 @@ def T.proj.add(l: I.Loc, arg0: String) -> String:
       "Add " ++ arg0 ++ " as a project"
     case I.Ja{}:
       arg0 ++ "をプロジェクトとして追加"
+    case I.Sux{}:
+      "𒂍 𒃻 " ++ arg0
 
 def T.proj.addcand(l: I.Loc, arg0: String) -> String:
   match l:
@@ -4160,6 +5346,8 @@ def T.proj.addcand(l: I.Loc, arg0: String) -> String:
       "Add " ++ arg0
     case I.Ja{}:
       arg0 ++ "を追加"
+    case I.Sux{}:
+      "𒃻 " ++ arg0
 
 def T.proj.browse(l: I.Loc) -> String:
   match l:
@@ -4167,6 +5355,8 @@ def T.proj.browse(l: I.Loc) -> String:
       "Add a project from a folder"
     case I.Ja{}:
       "フォルダからプロジェクトを追加"
+    case I.Sux{}:
+      "𒂍 𒃻"
 
 def T.proj.create(l: I.Loc, arg0: String) -> String:
   match l:
@@ -4174,6 +5364,8 @@ def T.proj.create(l: I.Loc, arg0: String) -> String:
       "Create project '" ++ arg0 ++ "' here"
     case I.Ja{}:
       "ここにプロジェクト「" ++ arg0 ++ "」を作成"
+    case I.Sux{}:
+      "𒆕 𒂍 '" ++ arg0 ++ "' 𒆠"
 
 def T.proj.createat(l: I.Loc, arg0: String) -> String:
   match l:
@@ -4181,6 +5373,8 @@ def T.proj.createat(l: I.Loc, arg0: String) -> String:
       "Create project " ++ arg0
     case I.Ja{}:
       "プロジェクト" ++ arg0 ++ "を作成"
+    case I.Sux{}:
+      "𒆕 𒂍 " ++ arg0
 
 def T.proj.exists(l: I.Loc, arg0: String) -> String:
   match l:
@@ -4188,6 +5382,8 @@ def T.proj.exists(l: I.Loc, arg0: String) -> String:
       arg0 ++ " is already a project"
     case I.Ja{}:
       arg0 ++ "はすでにプロジェクトです"
+    case I.Sux{}:
+      "𒂍 " ++ arg0 ++ " 𒉡 𒉋"
 
 def T.proj.goto(l: I.Loc, arg0: String) -> String:
   match l:
@@ -4195,6 +5391,8 @@ def T.proj.goto(l: I.Loc, arg0: String) -> String:
       "Go to " ++ arg0
     case I.Ja{}:
       arg0 ++ "へ移動"
+    case I.Sux{}:
+      "𒁺 " ++ arg0
 
 def T.proj.mkdir(l: I.Loc, arg0: String) -> String:
   match l:
@@ -4202,6 +5400,8 @@ def T.proj.mkdir(l: I.Loc, arg0: String) -> String:
       "Create folder '" ++ arg0 ++ "' here"
     case I.Ja{}:
       "ここにフォルダ「" ++ arg0 ++ "」を作成"
+    case I.Sux{}:
+      "𒆕 𒂍 '" ++ arg0 ++ "' 𒆠"
 
 def T.proj.on(l: I.Loc, arg0: String) -> String:
   match l:
@@ -4209,6 +5409,8 @@ def T.proj.on(l: I.Loc, arg0: String) -> String:
       "On " ++ arg0 ++ " (change)"
     case I.Ja{}:
       arg0 ++ "（変更）"
+    case I.Sux{}:
+      "𒅅 " ++ arg0 ++ " (𒄄)"
 
 def T.queue.context(l: I.Loc) -> String:
   match l:
@@ -4216,6 +5418,8 @@ def T.queue.context(l: I.Loc) -> String:
       "Context"
     case I.Ja{}:
       "コンテキスト"
+    case I.Sux{}:
+      "𒅗"
 
 def T.queue.edit(l: I.Loc) -> String:
   match l:
@@ -4223,6 +5427,8 @@ def T.queue.edit(l: I.Loc) -> String:
       "Edit"
     case I.Ja{}:
       "編集"
+    case I.Sux{}:
+      "𒊬"
 
 def T.queue.handoff(l: I.Loc, arg0: String) -> String:
   match l:
@@ -4230,6 +5436,8 @@ def T.queue.handoff(l: I.Loc, arg0: String) -> String:
       arg0 ++ " (goes with the next message)"
     case I.Ja{}:
       arg0 ++ "（次のメッセージと一緒に送られます）"
+    case I.Sux{}:
+      arg0 ++ " · 𒁺 𒅗𒉋"
 
 def T.queue.held(l: I.Loc) -> String:
   match l:
@@ -4237,6 +5445,8 @@ def T.queue.held(l: I.Loc) -> String:
       "Held"
     case I.Ja{}:
       "保留中"
+    case I.Sux{}:
+      "𒃻"
 
 def T.queue.more(l: I.Loc, arg0: String) -> String:
   match l:
@@ -4244,6 +5454,8 @@ def T.queue.more(l: I.Loc, arg0: String) -> String:
       "  +" ++ arg0 ++ " more"
     case I.Ja{}:
       "ほか" ++ arg0 ++ "件"
+    case I.Sux{}:
+      "  +" ++ arg0 ++ " 𒃲"
 
 def T.queue.queued(l: I.Loc) -> String:
   match l:
@@ -4251,6 +5463,8 @@ def T.queue.queued(l: I.Loc) -> String:
       "Queued"
     case I.Ja{}:
       "待機中"
+    case I.Sux{}:
+      "𒃻"
 
 def T.queue.remove(l: I.Loc) -> String:
   match l:
@@ -4258,6 +5472,8 @@ def T.queue.remove(l: I.Loc) -> String:
       "Remove"
     case I.Ja{}:
       "削除"
+    case I.Sux{}:
+      "𒂊"
 
 def T.queue.resume(l: I.Loc) -> String:
   match l:
@@ -4265,6 +5481,8 @@ def T.queue.resume(l: I.Loc) -> String:
       "Resume"
     case I.Ja{}:
       "再開"
+    case I.Sux{}:
+      "𒄄"
 
 def T.queue.up(l: I.Loc) -> String:
   match l:
@@ -4272,6 +5490,8 @@ def T.queue.up(l: I.Loc) -> String:
       "Up"
     case I.Ja{}:
       "上へ"
+    case I.Sux{}:
+      "𒀭"
 
 def T.remote.address.failed(l: I.Loc) -> String:
   match l:
@@ -4279,6 +5499,8 @@ def T.remote.address.failed(l: I.Loc) -> String:
       "not an http address"
     case I.Ja{}:
       "HTTPアドレスではありません"
+    case I.Sux{}:
+      "not an http address"
 
 def T.remote.away(l: I.Loc) -> String:
   match l:
@@ -4286,6 +5508,8 @@ def T.remote.away(l: I.Loc) -> String:
       "that machine is away"
     case I.Ja{}:
       "相手のマシンは未接続です"
+    case I.Sux{}:
+      "𒉡𒆠"
 
 def T.remote.cache.failed(l: I.Loc) -> String:
   match l:
@@ -4293,6 +5517,8 @@ def T.remote.cache.failed(l: I.Loc) -> String:
       "that folder cannot be kept here"
     case I.Ja{}:
       "このフォルダは保存できません"
+    case I.Sux{}:
+      "that folder cannot be kept here"
 
 def T.remote.denied(l: I.Loc) -> String:
   match l:
@@ -4300,6 +5526,8 @@ def T.remote.denied(l: I.Loc) -> String:
       "that machine did not let this one in (is it the same owner on the tailnet?)"
     case I.Ja{}:
       "相手のマシンに接続を拒否されました（Tailnetの所有者を確認してください）"
+    case I.Sux{}:
+      "that machine did not let this one in (is it the same owner on the tailnet?)"
 
 def T.remote.empty(l: I.Loc) -> String:
   match l:
@@ -4307,6 +5535,8 @@ def T.remote.empty(l: I.Loc) -> String:
       "Nothing said yet."
     case I.Ja{}:
       "メッセージはありません"
+    case I.Sux{}:
+      "𒉡𒅗𒁉"
 
 def T.remote.handshake.failed(l: I.Loc) -> String:
   match l:
@@ -4314,6 +5544,8 @@ def T.remote.handshake.failed(l: I.Loc) -> String:
       "unreachable: no handshake from that machine within 5 seconds"
     case I.Ja{}:
       "接続できません：相手から5秒以内に応答がありません"
+    case I.Sux{}:
+      "unreachable: no handshake from that machine within 5 seconds"
 
 def T.remote.reply.failed(l: I.Loc) -> String:
   match l:
@@ -4321,6 +5553,8 @@ def T.remote.reply.failed(l: I.Loc) -> String:
       "invalid reply from that machine"
     case I.Ja{}:
       "相手のマシンからの応答が不正です"
+    case I.Sux{}:
+      "invalid reply from that machine"
 
 def T.remote.request.error(l: I.Loc, arg0: String) -> String:
   match l:
@@ -4328,6 +5562,8 @@ def T.remote.request.error(l: I.Loc, arg0: String) -> String:
       "that machine did not take it: " ++ arg0
     case I.Ja{}:
       "相手のマシンが受け付けませんでした：" ++ arg0
+    case I.Sux{}:
+      "that machine did not take it: " ++ arg0
 
 def T.remote.request.failed(l: I.Loc) -> String:
   match l:
@@ -4335,6 +5571,8 @@ def T.remote.request.failed(l: I.Loc) -> String:
       "that machine did not take it"
     case I.Ja{}:
       "相手のマシンが受け付けませんでした"
+    case I.Sux{}:
+      "that machine did not take it"
 
 def T.remote.timeout(l: I.Loc) -> String:
   match l:
@@ -4342,6 +5580,8 @@ def T.remote.timeout(l: I.Loc) -> String:
       "no word from that machine for 40 seconds: reconnecting"
     case I.Ja{}:
       "相手から40秒間応答がありません。再接続中"
+    case I.Sux{}:
+      "no word from that machine for 40 seconds: reconnecting"
 
 def T.remote.unreachable(l: I.Loc, arg0: String) -> String:
   match l:
@@ -4349,12 +5589,16 @@ def T.remote.unreachable(l: I.Loc, arg0: String) -> String:
       "unreachable: cannot resolve or reach " ++ arg0
     case I.Ja{}:
       "接続できません：" ++ arg0 ++ "の名前解決または接続に失敗"
+    case I.Sux{}:
+      "unreachable: cannot resolve or reach " ++ arg0
 
 def T.review.bom(l: I.Loc) -> String:
   match l:
     case I.En{}:
       "BOM"
     case I.Ja{}:
+      "BOM"
+    case I.Sux{}:
       "BOM"
 
 def T.review.bom.change(l: I.Loc, arg0: String, arg1: String) -> String:
@@ -4363,6 +5607,8 @@ def T.review.bom.change(l: I.Loc, arg0: String, arg1: String) -> String:
       "BOM change · " ++ arg0 ++ " → " ++ arg1
     case I.Ja{}:
       "BOMの変更 · " ++ arg0 ++ " → " ++ arg1
+    case I.Sux{}:
+      "BOM 𒄄 · " ++ arg0 ++ " → " ++ arg1
 
 def T.review.bom.working(l: I.Loc) -> String:
   match l:
@@ -4370,6 +5616,8 @@ def T.review.bom.working(l: I.Loc) -> String:
       "BOM · Working copy"
     case I.Ja{}:
       "BOM · 作業コピー"
+    case I.Sux{}:
+      "BOM · 𒁾 𒃮𒊑"
 
 def T.review.cancel.tip(l: I.Loc) -> String:
   match l:
@@ -4377,6 +5625,8 @@ def T.review.cancel.tip(l: I.Loc) -> String:
       "Do not comment"
     case I.Ja{}:
       "コメントを中止"
+    case I.Sux{}:
+      "𒄄"
 
 def T.review.checks(l: I.Loc) -> String:
   match l:
@@ -4384,6 +5634,8 @@ def T.review.checks(l: I.Loc) -> String:
       "Checks"
     case I.Ja{}:
       "チェック"
+    case I.Sux{}:
+      "𒅅𒅅"
 
 def T.review.checks.of(l: I.Loc, arg0: String) -> String:
   match l:
@@ -4391,6 +5643,8 @@ def T.review.checks.of(l: I.Loc, arg0: String) -> String:
       "Checks · " ++ arg0
     case I.Ja{}:
       "チェック · " ++ arg0
+    case I.Sux{}:
+      "𒅆 · " ++ arg0
 
 def T.review.comment.meta(l: I.Loc, arg0: String, arg1: String, arg2: String) -> String:
   match l:
@@ -4398,6 +5652,8 @@ def T.review.comment.meta(l: I.Loc, arg0: String, arg1: String, arg2: String) ->
       arg0 ++ " · " ++ arg1 ++ I.I18n.sel(arg2, "resolved", " · resolved", "")
     case I.Ja{}:
       arg0 ++ "・" ++ arg1 ++ I.I18n.sel(arg2, "resolved", "・解決済み", "")
+    case I.Sux{}:
+      arg0 ++ " · " ++ arg1 ++ I.I18n.sel(arg2, "resolved", " · 𒌀", "")
 
 def T.review.comment.open(l: I.Loc) -> String:
   match l:
@@ -4405,6 +5661,8 @@ def T.review.comment.open(l: I.Loc) -> String:
       "Open the comment"
     case I.Ja{}:
       "コメントを開く"
+    case I.Sux{}:
+      "𒅗𒅅"
 
 def T.review.comments(l: I.Loc) -> String:
   match l:
@@ -4412,6 +5670,8 @@ def T.review.comments(l: I.Loc) -> String:
       "Comments"
     case I.Ja{}:
       "コメント"
+    case I.Sux{}:
+      "𒅗𒅗"
 
 def T.review.comments.none(l: I.Loc) -> String:
   match l:
@@ -4419,6 +5679,8 @@ def T.review.comments.none(l: I.Loc) -> String:
       "No comments yet. Right-click a place on the board or schematic (long-press on a phone) to comment there."
     case I.Ja{}:
       "コメントはまだありません。基板や回路図の場所を右クリック（スマートフォンでは長押し）すると、そこにコメントできます。"
+    case I.Sux{}:
+      "No comments yet. Right-click a place on the board or schematic (long-press on a phone) to comment there."
 
 def T.review.comments.open(l: I.Loc, arg0: String) -> String:
   match l:
@@ -4426,6 +5688,8 @@ def T.review.comments.open(l: I.Loc, arg0: String) -> String:
       "Comments · " ++ arg0 ++ " open"
     case I.Ja{}:
       "コメント · 未解決" ++ arg0 ++ "件"
+    case I.Sux{}:
+      "𒁾 " ++ arg0 ++ " 𒅅"
 
 def T.review.empty(l: I.Loc) -> String:
   match l:
@@ -4433,6 +5697,8 @@ def T.review.empty(l: I.Loc) -> String:
       "Nothing yet."
     case I.Ja{}:
       "まだ何もありません。"
+    case I.Sux{}:
+      "𒉡𒅗"
 
 def T.review.fails(l: I.Loc, arg0: String) -> String:
   match l:
@@ -4440,6 +5706,8 @@ def T.review.fails(l: I.Loc, arg0: String) -> String:
       "Fails: " ++ arg0
     case I.Ja{}:
       "不合格：" ++ arg0
+    case I.Sux{}:
+      "𒉡𒌀: " ++ arg0
 
 def T.review.force(l: I.Loc) -> String:
   match l:
@@ -4447,6 +5715,8 @@ def T.review.force(l: I.Loc) -> String:
       "Release even if checks fail"
     case I.Ja{}:
       "チェック失敗時もリリース"
+    case I.Sux{}:
+      "Release even if checks fail"
 
 def T.review.here(l: I.Loc) -> String:
   match l:
@@ -4454,6 +5724,8 @@ def T.review.here(l: I.Loc) -> String:
       "Comment here"
     case I.Ja{}:
       "ここにコメント"
+    case I.Sux{}:
+      "𒆠"
 
 def T.review.note(l: I.Loc) -> String:
   match l:
@@ -4461,6 +5733,8 @@ def T.review.note(l: I.Loc) -> String:
       "Note"
     case I.Ja{}:
       "メモ"
+    case I.Sux{}:
+      "𒁾"
 
 def T.review.page.title(l: I.Loc, arg0: String, arg1: String) -> String:
   match l:
@@ -4468,6 +5742,8 @@ def T.review.page.title(l: I.Loc, arg0: String, arg1: String) -> String:
       arg0 ++ I.I18n.sel(arg1, "busy", " · reading…", "")
     case I.Ja{}:
       arg0 ++ I.I18n.sel(arg1, "busy", "・読み込み中…", "")
+    case I.Sux{}:
+      arg0 ++ I.I18n.sel(arg1, "busy", " · 𒅆…", "")
 
 def T.review.passes(l: I.Loc) -> String:
   match l:
@@ -4475,6 +5751,8 @@ def T.review.passes(l: I.Loc) -> String:
       "Passes"
     case I.Ja{}:
       "合格"
+    case I.Sux{}:
+      "𒌀"
 
 def T.review.pin.tip(l: I.Loc) -> String:
   match l:
@@ -4482,6 +5760,8 @@ def T.review.pin.tip(l: I.Loc) -> String:
       "Pin the comment here"
     case I.Ja{}:
       "ここにコメントを追加"
+    case I.Sux{}:
+      "𒃻"
 
 def T.review.publish(l: I.Loc) -> String:
   match l:
@@ -4489,6 +5769,8 @@ def T.review.publish(l: I.Loc) -> String:
       "Publish on GitHub"
     case I.Ja{}:
       "GitHubで公開"
+    case I.Sux{}:
+      "𒅗𒃻"
 
 def T.review.reading(l: I.Loc) -> String:
   match l:
@@ -4496,6 +5778,8 @@ def T.review.reading(l: I.Loc) -> String:
       "Reading the design…"
     case I.Ja{}:
       "設計を読み込み中…"
+    case I.Sux{}:
+      "𒅗 𒅆…"
 
 def T.review.refresh.tip(l: I.Loc) -> String:
   match l:
@@ -4503,6 +5787,8 @@ def T.review.refresh.tip(l: I.Loc) -> String:
       "Read the design again"
     case I.Ja{}:
       "設計を再取得"
+    case I.Sux{}:
+      "𒉋"
 
 def T.review.release(l: I.Loc) -> String:
   match l:
@@ -4510,6 +5796,8 @@ def T.review.release(l: I.Loc) -> String:
       "Release"
     case I.Ja{}:
       "リリース"
+    case I.Sux{}:
+      "𒉡𒆷"
 
 def T.review.release.make(l: I.Loc, arg0: String) -> String:
   match l:
@@ -4517,6 +5805,8 @@ def T.review.release.make(l: I.Loc, arg0: String) -> String:
       "Make release " ++ arg0
     case I.Ja{}:
       "リリース" ++ arg0 ++ "を作成"
+    case I.Sux{}:
+      "𒆕 " ++ arg0
 
 def T.review.release.making(l: I.Loc, arg0: String) -> String:
   match l:
@@ -4524,6 +5814,8 @@ def T.review.release.making(l: I.Loc, arg0: String) -> String:
       "Making release " ++ arg0 ++ "…"
     case I.Ja{}:
       "リリース" ++ arg0 ++ "を作成中…"
+    case I.Sux{}:
+      "𒆕 " ++ arg0 ++ "…"
 
 def T.review.release.note(l: I.Loc) -> String:
   match l:
@@ -4531,6 +5823,8 @@ def T.review.release.note(l: I.Loc) -> String:
       "Tag this design and make its fabrication outputs: Gerbers, drill, CPL, BOM, PDFs and STEP, in .backplane/releases."
     case I.Ja{}:
       "この設計にタグを付け、製造データ（ガーバー、ドリル、CPL、BOM、PDF、STEP）を.backplane/releasesに作成します。"
+    case I.Sux{}:
+      "Tag this design and make its fabrication outputs: Gerbers, drill, CPL, BOM, PDFs and STEP, in .backplane/releases."
 
 def T.review.reopen(l: I.Loc) -> String:
   match l:
@@ -4538,6 +5832,8 @@ def T.review.reopen(l: I.Loc) -> String:
       "Reopen"
     case I.Ja{}:
       "再開"
+    case I.Sux{}:
+      "𒄄𒅅"
 
 def T.review.reopen.tip(l: I.Loc) -> String:
   match l:
@@ -4545,6 +5841,8 @@ def T.review.reopen.tip(l: I.Loc) -> String:
       "Open it again"
     case I.Ja{}:
       "再度開く"
+    case I.Sux{}:
+      "𒄄𒅅"
 
 def T.review.reply(l: I.Loc) -> String:
   match l:
@@ -4552,6 +5850,8 @@ def T.review.reply(l: I.Loc) -> String:
       "Reply"
     case I.Ja{}:
       "返信"
+    case I.Sux{}:
+      "𒅗𒁉"
 
 def T.review.reply.tip(l: I.Loc) -> String:
   match l:
@@ -4559,6 +5859,8 @@ def T.review.reply.tip(l: I.Loc) -> String:
       "Send the reply"
     case I.Ja{}:
       "返信を送信"
+    case I.Sux{}:
+      "𒅗𒁉"
 
 def T.review.resolve(l: I.Loc) -> String:
   match l:
@@ -4566,6 +5868,8 @@ def T.review.resolve(l: I.Loc) -> String:
       "Resolve"
     case I.Ja{}:
       "解決済みにする"
+    case I.Sux{}:
+      "𒌀"
 
 def T.review.resolve.tip(l: I.Loc) -> String:
   match l:
@@ -4573,6 +5877,8 @@ def T.review.resolve.tip(l: I.Loc) -> String:
       "Mark it done"
     case I.Ja{}:
       "解決済みにする"
+    case I.Sux{}:
+      "𒌀"
 
 def T.review.step.show(l: I.Loc) -> String:
   match l:
@@ -4580,6 +5886,8 @@ def T.review.step.show(l: I.Loc) -> String:
       "Show this change in the viewer"
     case I.Ja{}:
       "ビューアーでこの変更を表示"
+    case I.Sux{}:
+      "𒅆 𒄄"
 
 def T.review.tag(l: I.Loc, arg0: String) -> String:
   match l:
@@ -4587,6 +5895,8 @@ def T.review.tag(l: I.Loc, arg0: String) -> String:
       "Tag " ++ arg0
     case I.Ja{}:
       "タグ" ++ arg0
+    case I.Sux{}:
+      "Tag " ++ arg0
 
 def T.review.tick(l: I.Loc) -> String:
   match l:
@@ -4594,6 +5904,8 @@ def T.review.tick(l: I.Loc) -> String:
       "Tick"
     case I.Ja{}:
       "チェックを付ける"
+    case I.Sux{}:
+      "𒅅"
 
 def T.review.untick(l: I.Loc) -> String:
   match l:
@@ -4601,6 +5913,8 @@ def T.review.untick(l: I.Loc) -> String:
       "Untick"
     case I.Ja{}:
       "チェックを外す"
+    case I.Sux{}:
+      "𒉡𒅅"
 
 def T.room.delete(l: I.Loc) -> String:
   match l:
@@ -4608,6 +5922,8 @@ def T.room.delete(l: I.Loc) -> String:
       "Delete room"
     case I.Ja{}:
       "ルームを削除"
+    case I.Sux{}:
+      "𒂍 𒋗𒅆𒌨"
 
 def T.room.empty(l: I.Loc) -> String:
   match l:
@@ -4615,6 +5931,8 @@ def T.room.empty(l: I.Loc) -> String:
       "Nothing said here yet. Every bot in the room hears what is posted."
     case I.Ja{}:
       "投稿はまだありません。投稿はルームの全ボットに届きます。"
+    case I.Sux{}:
+      "Nothing said here yet. Every bot in the room hears what is posted."
 
 def T.room.write(l: I.Loc) -> String:
   match l:
@@ -4622,6 +5940,8 @@ def T.room.write(l: I.Loc) -> String:
       "Write to the room"
     case I.Ja{}:
       "ルームに投稿"
+    case I.Sux{}:
+      "𒂍 𒁾 𒊬"
 
 def T.rooms.create.tip(l: I.Loc) -> String:
   match l:
@@ -4629,6 +5949,8 @@ def T.rooms.create.tip(l: I.Loc) -> String:
       "Make the room"
     case I.Ja{}:
       "ルームを作成"
+    case I.Sux{}:
+      "𒆕"
 
 def T.rooms.delete.button.tip(l: I.Loc) -> String:
   match l:
@@ -4636,6 +5958,8 @@ def T.rooms.delete.button.tip(l: I.Loc) -> String:
       "Delete this room"
     case I.Ja{}:
       "ルームを削除"
+    case I.Sux{}:
+      "𒂍 𒋗𒅆𒌨"
 
 def T.rooms.delete.tip(l: I.Loc) -> String:
   match l:
@@ -4643,6 +5967,8 @@ def T.rooms.delete.tip(l: I.Loc) -> String:
       "Delete this room for good"
     case I.Ja{}:
       "ルームを完全に削除"
+    case I.Sux{}:
+      "Delete this room for good"
 
 def T.rooms.empty(l: I.Loc) -> String:
   match l:
@@ -4650,6 +5976,8 @@ def T.rooms.empty(l: I.Loc) -> String:
       "No posts yet."
     case I.Ja{}:
       "投稿はありません"
+    case I.Sux{}:
+      "𒉡𒅗"
 
 def T.rooms.new(l: I.Loc) -> String:
   match l:
@@ -4657,6 +5985,8 @@ def T.rooms.new(l: I.Loc) -> String:
       "New room"
     case I.Ja{}:
       "新しいルーム"
+    case I.Sux{}:
+      "𒂍 𒉋"
 
 def T.routine.add(l: I.Loc) -> String:
   match l:
@@ -4664,6 +5994,8 @@ def T.routine.add(l: I.Loc) -> String:
       "Add routine"
     case I.Ja{}:
       "ルーティンを追加"
+    case I.Sux{}:
+      "𒃻"
 
 def T.routine.change(l: I.Loc) -> String:
   match l:
@@ -4671,6 +6003,8 @@ def T.routine.change(l: I.Loc) -> String:
       "Change routine"
     case I.Ja{}:
       "ルーティンを変更"
+    case I.Sux{}:
+      "𒌓 𒄄"
 
 def T.routine.clear.tip(l: I.Loc) -> String:
   match l:
@@ -4678,6 +6012,8 @@ def T.routine.clear.tip(l: I.Loc) -> String:
       "Clear the form"
     case I.Ja{}:
       "入力をクリア"
+    case I.Sux{}:
+      "𒃻"
 
 def T.routine.empty(l: I.Loc, arg0: String) -> String:
   match l:
@@ -4685,6 +6021,8 @@ def T.routine.empty(l: I.Loc, arg0: String) -> String:
       "None yet. A routine gives it a prompt on a schedule, or once, in your time (" ++ arg0 ++ ")."
     case I.Ja{}:
       "ルーティンはまだありません。定期または一度だけ、指定時刻（" ++ arg0 ++ "）に指示を渡します。"
+    case I.Sux{}:
+      "None yet. A routine gives it a prompt on a schedule, or once, in your time (" ++ arg0 ++ ")."
 
 def T.routine.new(l: I.Loc) -> String:
   match l:
@@ -4692,6 +6030,8 @@ def T.routine.new(l: I.Loc) -> String:
       "New routine"
     case I.Ja{}:
       "新しいルーティン"
+    case I.Sux{}:
+      "𒉋"
 
 def T.routine.next(l: I.Loc, arg0: String, arg1: String, arg2: String, arg3: String, arg4: String) -> String:
   match l:
@@ -4699,6 +6039,8 @@ def T.routine.next(l: I.Loc, arg0: String, arg1: String, arg2: String, arg3: Str
       "Next " ++ arg0 ++ I.I18n.sel(arg1, "none", "", " · " ++ arg2) ++ I.I18n.sel(arg3, "none", "", " · " ++ arg4)
     case I.Ja{}:
       "次回" ++ arg0 ++ I.I18n.sel(arg1, "none", "", "・" ++ arg2) ++ I.I18n.sel(arg3, "none", "", "・" ++ arg4)
+    case I.Sux{}:
+      "𒉋 " ++ arg0 ++ I.I18n.sel(arg1, "none", "", " · " ++ arg2) ++ I.I18n.sel(arg3, "none", "", " · " ++ arg4)
 
 def T.routine.note(l: I.Loc, arg0: String) -> String:
   match l:
@@ -4706,6 +6048,8 @@ def T.routine.note(l: I.Loc, arg0: String) -> String:
       "Times are your time (" ++ arg0 ++ "). Each runs once when due, even after the hub was off."
     case I.Ja{}:
       "時刻は" ++ arg0 ++ "です。ハブ停止中の分も再開後に一度だけ実行します。"
+    case I.Sux{}:
+      "Times are your time (" ++ arg0 ++ "). Each runs once when due, even after the hub was off."
 
 def T.routine.on.tip(l: I.Loc) -> String:
   match l:
@@ -4713,6 +6057,8 @@ def T.routine.on.tip(l: I.Loc) -> String:
       "Turn on"
     case I.Ja{}:
       "オンにする"
+    case I.Sux{}:
+      "𒅅"
 
 def T.routine.prompt(l: I.Loc) -> String:
   match l:
@@ -4720,6 +6066,8 @@ def T.routine.prompt(l: I.Loc) -> String:
       "What it should do each time"
     case I.Ja{}:
       "毎回行うこと"
+    case I.Sux{}:
+      "𒅗"
 
 def T.routine.run(l: I.Loc) -> String:
   match l:
@@ -4727,6 +6075,8 @@ def T.routine.run(l: I.Loc) -> String:
       "Run now"
     case I.Ja{}:
       "今すぐ実行"
+    case I.Sux{}:
+      "𒁺"
 
 def T.routine.save(l: I.Loc) -> String:
   match l:
@@ -4734,6 +6084,8 @@ def T.routine.save(l: I.Loc) -> String:
       "Save routine"
     case I.Ja{}:
       "ルーティンを保存"
+    case I.Sux{}:
+      "𒌓 𒁾 𒊬"
 
 def T.routine.save.tip(l: I.Loc) -> String:
   match l:
@@ -4741,6 +6093,8 @@ def T.routine.save.tip(l: I.Loc) -> String:
       "Save the routine"
     case I.Ja{}:
       "ルーティンを保存"
+    case I.Sux{}:
+      "𒁾 𒊬"
 
 def T.routine.time.placeholder(l: I.Loc) -> String:
   match l:
@@ -4748,6 +6102,8 @@ def T.routine.time.placeholder(l: I.Loc) -> String:
       "When: daily 09:30, in 2h, tomorrow 9am"
     case I.Ja{}:
       "時刻：daily 09:30、in 2h、tomorrow 9am"
+    case I.Sux{}:
+      "When: daily 09:30, in 2h, tomorrow 9am"
 
 def T.sched.daily(l: I.Loc, arg0: String) -> String:
   match l:
@@ -4755,6 +6111,8 @@ def T.sched.daily(l: I.Loc, arg0: String) -> String:
       "daily at " ++ arg0
     case I.Ja{}:
       "毎日" ++ arg0
+    case I.Sux{}:
+      "𒌓𒌓 " ++ arg0
 
 def T.sched.done(l: I.Loc, arg0: String) -> String:
   match l:
@@ -4762,6 +6120,8 @@ def T.sched.done(l: I.Loc, arg0: String) -> String:
       "Done · " ++ arg0
     case I.Ja{}:
       "完了 · " ++ arg0
+    case I.Sux{}:
+      "𒌀 · " ++ arg0
 
 def T.sched.every.hour(l: I.Loc) -> String:
   match l:
@@ -4769,6 +6129,8 @@ def T.sched.every.hour(l: I.Loc) -> String:
       "every hour"
     case I.Ja{}:
       "毎時"
+    case I.Sux{}:
+      "𒌓𒄄"
 
 def T.sched.every.hours(l: I.Loc, arg0: String) -> String:
   match l:
@@ -4776,6 +6138,8 @@ def T.sched.every.hours(l: I.Loc, arg0: String) -> String:
       "every " ++ arg0 ++ " hours"
     case I.Ja{}:
       arg0 ++ "時間ごと"
+    case I.Sux{}:
+      "every " ++ arg0 ++ " hours"
 
 def T.sched.every.minute(l: I.Loc) -> String:
   match l:
@@ -4783,6 +6147,8 @@ def T.sched.every.minute(l: I.Loc) -> String:
       "every minute"
     case I.Ja{}:
       "毎分"
+    case I.Sux{}:
+      "every minute"
 
 def T.sched.every.minutes(l: I.Loc, arg0: String) -> String:
   match l:
@@ -4790,6 +6156,8 @@ def T.sched.every.minutes(l: I.Loc, arg0: String) -> String:
       "every " ++ arg0 ++ " minutes"
     case I.Ja{}:
       arg0 ++ "分ごと"
+    case I.Sux{}:
+      "every " ++ arg0 ++ " minutes"
 
 def T.sched.help.time(l: I.Loc) -> String:
   match l:
@@ -4797,6 +6165,8 @@ def T.sched.help.time(l: I.Loc) -> String:
       "I can read: 2026-10-14T09:00+03:00, 2026-10-14 09:00, in 20m, in 1h30m, in 3d, today 17:30, tomorrow 9am, monday 09:00, or just 9am."
     case I.Ja{}:
       "読み取れる形式：2026-10-14T09:00+03:00、2026-10-14 09:00、in 20m、in 1h30m、in 3d、today 17:30、tomorrow 9am、monday 09:00、9am。"
+    case I.Sux{}:
+      "I can read: 2026-10-14T09:00+03:00, 2026-10-14 09:00, in 20m, in 1h30m, in 3d, today 17:30, tomorrow 9am, monday 09:00, or just 9am."
 
 def T.sched.hint.next(l: I.Loc, arg0: String, arg1: String) -> String:
   match l:
@@ -4804,6 +6174,8 @@ def T.sched.hint.next(l: I.Loc, arg0: String, arg1: String) -> String:
       arg0 ++ " · next " ++ arg1
     case I.Ja{}:
       arg0 ++ " · 次回" ++ arg1
+    case I.Sux{}:
+      arg0 ++ " · 𒉋 " ++ arg1
 
 def T.sched.hint.once(l: I.Loc, arg0: String) -> String:
   match l:
@@ -4811,6 +6183,8 @@ def T.sched.hint.once(l: I.Loc, arg0: String) -> String:
       "once · " ++ arg0
     case I.Ja{}:
       "1回 · " ++ arg0
+    case I.Sux{}:
+      "𒁹 · " ++ arg0
 
 def T.sched.hourly(l: I.Loc) -> String:
   match l:
@@ -4818,6 +6192,8 @@ def T.sched.hourly(l: I.Loc) -> String:
       "hourly"
     case I.Ja{}:
       "毎時"
+    case I.Sux{}:
+      "𒌓𒄄"
 
 def T.sched.hourly.at(l: I.Loc, arg0: String) -> String:
   match l:
@@ -4825,6 +6201,8 @@ def T.sched.hourly.at(l: I.Loc, arg0: String) -> String:
       "hourly at :" ++ arg0
     case I.Ja{}:
       "毎時" ++ arg0 ++ "分"
+    case I.Sux{}:
+      "𒌓𒄄 :" ++ arg0
 
 def T.sched.kind.once(l: I.Loc) -> String:
   match l:
@@ -4832,6 +6210,8 @@ def T.sched.kind.once(l: I.Loc) -> String:
       "Once"
     case I.Ja{}:
       "1回"
+    case I.Sux{}:
+      "𒁹"
 
 def T.sched.kind.reminder(l: I.Loc) -> String:
   match l:
@@ -4839,6 +6219,8 @@ def T.sched.kind.reminder(l: I.Loc) -> String:
       "Reminder"
     case I.Ja{}:
       "リマインダー"
+    case I.Sux{}:
+      "𒌓"
 
 def T.sched.kind.repeat(l: I.Loc) -> String:
   match l:
@@ -4846,6 +6228,8 @@ def T.sched.kind.repeat(l: I.Loc) -> String:
       "Repeats"
     case I.Ja{}:
       "繰り返し"
+    case I.Sux{}:
+      "𒄄"
 
 def T.sched.weekdays(l: I.Loc, arg0: String) -> String:
   match l:
@@ -4853,6 +6237,8 @@ def T.sched.weekdays(l: I.Loc, arg0: String) -> String:
       "weekdays at " ++ arg0
     case I.Ja{}:
       "平日" ++ arg0
+    case I.Sux{}:
+      "weekdays at " ++ arg0
 
 def T.sched.zone.machine(l: I.Loc) -> String:
   match l:
@@ -4860,6 +6246,8 @@ def T.sched.zone.machine(l: I.Loc) -> String:
       "this machine's time"
     case I.Ja{}:
       "このマシンの時刻"
+    case I.Sux{}:
+      "𒂍 𒌓"
 
 def T.sched.zone.you(l: I.Loc) -> String:
   match l:
@@ -4867,6 +6255,8 @@ def T.sched.zone.you(l: I.Loc) -> String:
       "your time"
     case I.Ja{}:
       "自分の時刻"
+    case I.Sux{}:
+      "𒌓"
 
 def T.settings.agent.lang(l: I.Loc) -> String:
   match l:
@@ -4874,6 +6264,8 @@ def T.settings.agent.lang(l: I.Loc) -> String:
       "Agents reply in my language"
     case I.Ja{}:
       "エージェントも選択した言語で応答"
+    case I.Sux{}:
+      "𒅴"
 
 def T.settings.agent.lang.note(l: I.Loc) -> String:
   match l:
@@ -4881,6 +6273,8 @@ def T.settings.agent.lang.note(l: I.Loc) -> String:
       "Asks agents and bots to reply in the language above."
     case I.Ja{}:
       "エージェントとボットに、上の言語で応答するよう求めます。"
+    case I.Sux{}:
+      "𒇽 𒅴 · 𒅗𒁉"
 
 def T.settings.agents(l: I.Loc) -> String:
   match l:
@@ -4888,6 +6282,8 @@ def T.settings.agents(l: I.Loc) -> String:
       "Agents"
     case I.Ja{}:
       "エージェント"
+    case I.Sux{}:
+      "𒇽𒇽"
 
 def T.settings.agents.default(l: I.Loc) -> String:
   match l:
@@ -4895,6 +6291,8 @@ def T.settings.agents.default(l: I.Loc) -> String:
       "Provider and model for new threads"
     case I.Ja{}:
       "新規スレッドのプロバイダーとモデル"
+    case I.Sux{}:
+      "Provider and model for new threads"
 
 def T.settings.agents.note(l: I.Loc, arg0: String) -> String:
   match l:
@@ -4902,6 +6300,8 @@ def T.settings.agents.note(l: I.Loc, arg0: String) -> String:
       arg0 ++ ". Each thread keeps its own; change it from the composer."
     case I.Ja{}:
       arg0 ++ "。スレッドごとに保持します。入力欄で変更できます。"
+    case I.Sux{}:
+      arg0 ++ ". Each thread keeps its own; change it from the composer."
 
 def T.settings.appearance(l: I.Loc) -> String:
   match l:
@@ -4909,6 +6309,8 @@ def T.settings.appearance(l: I.Loc) -> String:
       "Appearance"
     case I.Ja{}:
       "外観"
+    case I.Sux{}:
+      "𒅆"
 
 def T.settings.boat.refresh(l: I.Loc) -> String:
   match l:
@@ -4916,6 +6318,8 @@ def T.settings.boat.refresh(l: I.Loc) -> String:
       "Read Boat's status again"
     case I.Ja{}:
       "Boatの状態を再取得"
+    case I.Sux{}:
+      "Boat 𒅗 𒄄"
 
 def T.settings.cad(l: I.Loc) -> String:
   match l:
@@ -4923,6 +6327,8 @@ def T.settings.cad(l: I.Loc) -> String:
       "KiCad and FreeCAD"
     case I.Ja{}:
       "KiCadとFreeCAD"
+    case I.Sux{}:
+      "KiCad and FreeCAD"
 
 def T.settings.channel(l: I.Loc) -> String:
   match l:
@@ -4930,6 +6336,8 @@ def T.settings.channel(l: I.Loc) -> String:
       "Update channel"
     case I.Ja{}:
       "更新チャンネル"
+    case I.Sux{}:
+      "Update channel"
 
 def T.settings.channel.nightly(l: I.Loc) -> String:
   match l:
@@ -4937,6 +6345,8 @@ def T.settings.channel.nightly(l: I.Loc) -> String:
       "Nightly"
     case I.Ja{}:
       "ナイトリー"
+    case I.Sux{}:
+      "Nightly"
 
 def T.settings.channel.note(l: I.Loc) -> String:
   match l:
@@ -4944,6 +6354,8 @@ def T.settings.channel.note(l: I.Loc) -> String:
       "Stable takes releases; nightly also takes the daily builds."
     case I.Ja{}:
       "安定版はリリースのみ、ナイトリーは日次ビルドも受け取ります。"
+    case I.Sux{}:
+      "Stable takes releases; nightly also takes the daily builds."
 
 def T.settings.channel.stable(l: I.Loc) -> String:
   match l:
@@ -4951,6 +6363,8 @@ def T.settings.channel.stable(l: I.Loc) -> String:
       "Stable"
     case I.Ja{}:
       "安定版"
+    case I.Sux{}:
+      "Stable"
 
 def T.settings.close(l: I.Loc) -> String:
   match l:
@@ -4958,6 +6372,8 @@ def T.settings.close(l: I.Loc) -> String:
       "Close settings"
     case I.Ja{}:
       "設定を閉じる"
+    case I.Sux{}:
+      "𒉡𒅅"
 
 def T.settings.days.fewer(l: I.Loc) -> String:
   match l:
@@ -4965,6 +6381,8 @@ def T.settings.days.fewer(l: I.Loc) -> String:
       "Fewer days"
     case I.Ja{}:
       "日数を減らす"
+    case I.Sux{}:
+      "𒉡𒃲"
 
 def T.settings.days.label(l: I.Loc, arg0: String, arg1: String) -> String:
   match l:
@@ -4972,6 +6390,8 @@ def T.settings.days.label(l: I.Loc, arg0: String, arg1: String) -> String:
       "Settle after " ++ arg0 ++ " " ++ I.I18n.sel(arg1, "one", "day", "days")
     case I.Ja{}:
       arg0 ++ "日後に完了へ移動" ++ ""
+    case I.Sux{}:
+      "𒌀 " ++ arg0 ++ " " ++ I.I18n.sel(arg1, "one", "𒌓", "𒌓𒌓")
 
 def T.settings.days.more(l: I.Loc) -> String:
   match l:
@@ -4979,6 +6399,8 @@ def T.settings.days.more(l: I.Loc) -> String:
       "More days"
     case I.Ja{}:
       "日数を増やす"
+    case I.Sux{}:
+      "𒃲"
 
 def T.settings.freecad.install(l: I.Loc) -> String:
   match l:
@@ -4986,6 +6408,8 @@ def T.settings.freecad.install(l: I.Loc) -> String:
       "Agents model mechanical parts with it: get it from freecad.org/downloads"
     case I.Ja{}:
       "エージェントが機構部品のモデリングに使います。freecad.org/downloadsから入手してください"
+    case I.Sux{}:
+      "Agents model mechanical parts with it: get it from freecad.org/downloads"
 
 def T.settings.freecad.missing(l: I.Loc) -> String:
   match l:
@@ -4993,6 +6417,8 @@ def T.settings.freecad.missing(l: I.Loc) -> String:
       "FreeCAD: not found"
     case I.Ja{}:
       "FreeCAD：見つかりません"
+    case I.Sux{}:
+      "FreeCAD: 𒉡𒅆"
 
 def T.settings.key.forget(l: I.Loc) -> String:
   match l:
@@ -5000,6 +6426,8 @@ def T.settings.key.forget(l: I.Loc) -> String:
       "Forget the key"
     case I.Ja{}:
       "キーを削除"
+    case I.Sux{}:
+      "𒂊"
 
 def T.settings.key.keep(l: I.Loc) -> String:
   match l:
@@ -5007,6 +6435,8 @@ def T.settings.key.keep(l: I.Loc) -> String:
       "Keep this key"
     case I.Ja{}:
       "キーを保存"
+    case I.Sux{}:
+      "𒃻"
 
 def T.settings.keys(l: I.Loc) -> String:
   match l:
@@ -5014,6 +6444,8 @@ def T.settings.keys(l: I.Loc) -> String:
       "API keys"
     case I.Ja{}:
       "APIキー"
+    case I.Sux{}:
+      "𒅗𒅗"
 
 def T.settings.keys.add(l: I.Loc) -> String:
   match l:
@@ -5021,6 +6453,8 @@ def T.settings.keys.add(l: I.Loc) -> String:
       "Add API key"
     case I.Ja{}:
       "APIキーを追加"
+    case I.Sux{}:
+      "𒅗 𒃻"
 
 def T.settings.keys.add.tip(l: I.Loc) -> String:
   match l:
@@ -5028,6 +6462,8 @@ def T.settings.keys.add.tip(l: I.Loc) -> String:
       "Add an API key"
     case I.Ja{}:
       "APIキーを追加"
+    case I.Sux{}:
+      "𒅗 𒃻"
 
 def T.settings.keys.empty(l: I.Loc) -> String:
   match l:
@@ -5035,6 +6471,8 @@ def T.settings.keys.empty(l: I.Loc) -> String:
       "No API keys yet"
     case I.Ja{}:
       "APIキーなし"
+    case I.Sux{}:
+      "𒉡 API 𒅗"
 
 def T.settings.keys.forget(l: I.Loc) -> String:
   match l:
@@ -5042,6 +6480,8 @@ def T.settings.keys.forget(l: I.Loc) -> String:
       "Forget this key"
     case I.Ja{}:
       "キーを削除"
+    case I.Sux{}:
+      "𒂊"
 
 def T.settings.keys.names(l: I.Loc) -> String:
   match l:
@@ -5049,6 +6489,8 @@ def T.settings.keys.names(l: I.Loc) -> String:
       "The names kept"
     case I.Ja{}:
       "保存したキー名"
+    case I.Sux{}:
+      "𒈬𒈬"
 
 def T.settings.keys.new(l: I.Loc) -> String:
   match l:
@@ -5056,6 +6498,8 @@ def T.settings.keys.new(l: I.Loc) -> String:
       "New API key"
     case I.Ja{}:
       "新しいAPIキー"
+    case I.Sux{}:
+      "API 𒅗 𒉋"
 
 def T.settings.keys.view(l: I.Loc) -> String:
   match l:
@@ -5063,6 +6507,8 @@ def T.settings.keys.view(l: I.Loc) -> String:
       "View API keys"
     case I.Ja{}:
       "APIキーを表示"
+    case I.Sux{}:
+      "𒅗 𒅆"
 
 def T.settings.kicad.automatic(l: I.Loc, arg0: String) -> String:
   match l:
@@ -5070,6 +6516,8 @@ def T.settings.kicad.automatic(l: I.Loc, arg0: String) -> String:
       "Automatic · " ++ arg0
     case I.Ja{}:
       "自動・" ++ arg0
+    case I.Sux{}:
+      "Automatic · " ++ arg0
 
 def T.settings.kicad.available(l: I.Loc, arg0: String) -> String:
   match l:
@@ -5077,6 +6525,8 @@ def T.settings.kicad.available(l: I.Loc, arg0: String) -> String:
       "Backplane KiCad " ++ arg0 ++ ", IPC available"
     case I.Ja{}:
       "Backplane KiCad " ++ arg0 ++ "、IPC利用可能"
+    case I.Sux{}:
+      "Backplane KiCad " ++ arg0 ++ ", IPC available"
 
 def T.settings.kicad.cli.install(l: I.Loc) -> String:
   match l:
@@ -5084,6 +6534,8 @@ def T.settings.kicad.cli.install(l: I.Loc) -> String:
       "Install KiCad from kicad.org/download, or Backplane KiCad"
     case I.Ja{}:
       "kicad.org/downloadからKiCadを、またはBackplane KiCadをインストールしてください"
+    case I.Sux{}:
+      "Install KiCad from kicad.org/download, or Backplane KiCad"
 
 def T.settings.kicad.cli.missing(l: I.Loc) -> String:
   match l:
@@ -5091,6 +6543,8 @@ def T.settings.kicad.cli.missing(l: I.Loc) -> String:
       "KiCad CLI: not found"
     case I.Ja{}:
       "KiCad CLI：見つかりません"
+    case I.Sux{}:
+      "KiCad CLI: 𒉡𒅆"
 
 def T.settings.kicad.dismiss(l: I.Loc) -> String:
   match l:
@@ -5098,6 +6552,8 @@ def T.settings.kicad.dismiss(l: I.Loc) -> String:
       "Dismiss KiCad notice"
     case I.Ja{}:
       "KiCadの通知を閉じる"
+    case I.Sux{}:
+      "𒉡𒅆"
 
 def T.settings.kicad.install(l: I.Loc) -> String:
   match l:
@@ -5105,6 +6561,8 @@ def T.settings.kicad.install(l: I.Loc) -> String:
       "Install Backplane KiCad"
     case I.Ja{}:
       "Backplane KiCadを導入"
+    case I.Sux{}:
+      "Backplane KiCad 𒃻"
 
 def T.settings.kicad.ipc.install(l: I.Loc) -> String:
   match l:
@@ -5112,6 +6570,8 @@ def T.settings.kicad.ipc.install(l: I.Loc) -> String:
       "Install it with the button above (Linux x86-64) or from github.com/i2cjak/Backplane_KiCad"
     case I.Ja{}:
       "上のボタン（Linux x86-64）か、github.com/i2cjak/Backplane_KiCadからインストールしてください"
+    case I.Sux{}:
+      "Install it with the button above (Linux x86-64) or from github.com/i2cjak/Backplane_KiCad"
 
 def T.settings.kicad.ipc.missing(l: I.Loc) -> String:
   match l:
@@ -5119,6 +6579,8 @@ def T.settings.kicad.ipc.missing(l: I.Loc) -> String:
       "KiCad IPC: needs Backplane KiCad"
     case I.Ja{}:
       "KiCad IPC：Backplane KiCadが必要です"
+    case I.Sux{}:
+      "KiCad IPC: needs Backplane KiCad"
 
 def T.settings.kicad.ipc.on(l: I.Loc) -> String:
   match l:
@@ -5126,6 +6588,8 @@ def T.settings.kicad.ipc.on(l: I.Loc) -> String:
       "Agents edit KiCad through Backplane's headless servers, over IPC."
     case I.Ja{}:
       "エージェントはBackplaneのヘッドレスサーバーを通じ、IPCでKiCadを編集します。"
+    case I.Sux{}:
+      "Agents edit KiCad through Backplane's headless servers, over IPC."
 
 def T.settings.kicad.path(l: I.Loc) -> String:
   match l:
@@ -5133,6 +6597,8 @@ def T.settings.kicad.path(l: I.Loc) -> String:
       "Runtime root or kicad-cli path"
     case I.Ja{}:
       "ランタイムのルート、またはkicad-cliのパス"
+    case I.Sux{}:
+      "Runtime root or kicad-cli path"
 
 def T.settings.kicad.path.save(l: I.Loc) -> String:
   match l:
@@ -5140,6 +6606,8 @@ def T.settings.kicad.path.save(l: I.Loc) -> String:
       "Save path"
     case I.Ja{}:
       "パスを保存"
+    case I.Sux{}:
+      "𒁾 𒊬"
 
 def T.settings.lang(l: I.Loc) -> String:
   match l:
@@ -5147,6 +6615,8 @@ def T.settings.lang(l: I.Loc) -> String:
       "Language"
     case I.Ja{}:
       "言語"
+    case I.Sux{}:
+      "𒅴"
 
 def T.settings.lang.auto(l: I.Loc) -> String:
   match l:
@@ -5154,12 +6624,16 @@ def T.settings.lang.auto(l: I.Loc) -> String:
       "Automatic"
     case I.Ja{}:
       "自動"
+    case I.Sux{}:
+      "Automatic"
 
 def T.settings.lang.en(l: I.Loc) -> String:
   match l:
     case I.En{}:
       "English"
     case I.Ja{}:
+      "English"
+    case I.Sux{}:
       "English"
 
 def T.settings.lang.ja(l: I.Loc) -> String:
@@ -5168,6 +6642,8 @@ def T.settings.lang.ja(l: I.Loc) -> String:
       "日本語"
     case I.Ja{}:
       "日本語"
+    case I.Sux{}:
+      "日本語"
 
 def T.settings.lang.note(l: I.Loc) -> String:
   match l:
@@ -5175,6 +6651,8 @@ def T.settings.lang.note(l: I.Loc) -> String:
       "This device. Automatic follows the system language."
     case I.Ja{}:
       "この端末の設定です。自動はシステムの言語に合わせます。"
+    case I.Sux{}:
+      "This device. Automatic follows the system language."
 
 def T.settings.lang.off(l: I.Loc) -> String:
   match l:
@@ -5182,6 +6660,8 @@ def T.settings.lang.off(l: I.Loc) -> String:
       "Off"
     case I.Ja{}:
       "オフ"
+    case I.Sux{}:
+      "𒉡𒅅"
 
 def T.settings.lang.on(l: I.Loc) -> String:
   match l:
@@ -5189,6 +6669,17 @@ def T.settings.lang.on(l: I.Loc) -> String:
       "On"
     case I.Ja{}:
       "オン"
+    case I.Sux{}:
+      "𒅅"
+
+def T.settings.lang.sux(l: I.Loc) -> String:
+  match l:
+    case I.En{}:
+      "Sumerian (Cuneiform)"
+    case I.Ja{}:
+      "シュメール語（楔形文字）"
+    case I.Sux{}:
+      "𒅴𒂠"
 
 def T.settings.model(l: I.Loc) -> String:
   match l:
@@ -5196,6 +6687,8 @@ def T.settings.model(l: I.Loc) -> String:
       "Model for new threads"
     case I.Ja{}:
       "新しいスレッドのモデル"
+    case I.Sux{}:
+      "Model for new threads"
 
 def T.settings.model.default(l: I.Loc, arg0: String) -> String:
   match l:
@@ -5203,6 +6696,8 @@ def T.settings.model.default(l: I.Loc, arg0: String) -> String:
       "default: " ++ arg0
     case I.Ja{}:
       "既定：" ++ arg0
+    case I.Sux{}:
+      "𒅅: " ++ arg0
 
 def T.settings.network(l: I.Loc) -> String:
   match l:
@@ -5210,6 +6705,8 @@ def T.settings.network(l: I.Loc) -> String:
       "Network and updates"
     case I.Ja{}:
       "ネットワークと更新"
+    case I.Sux{}:
+      "Network and updates"
 
 def T.settings.pair(l: I.Loc) -> String:
   match l:
@@ -5217,6 +6714,8 @@ def T.settings.pair(l: I.Loc) -> String:
       "Pairing link"
     case I.Ja{}:
       "ペアリングリンク"
+    case I.Sux{}:
+      "𒆷"
 
 def T.settings.pair.code(l: I.Loc) -> String:
   match l:
@@ -5224,6 +6723,8 @@ def T.settings.pair.code(l: I.Loc) -> String:
       "QR code"
     case I.Ja{}:
       "QRコード"
+    case I.Sux{}:
+      "𒆷 𒅗"
 
 def T.settings.pair.none(l: I.Loc) -> String:
   match l:
@@ -5231,6 +6732,8 @@ def T.settings.pair.none(l: I.Loc) -> String:
       "Shown once Backplane listens on your tailnet."
     case I.Ja{}:
       "Backplaneがtailnetで待ち受けを始めると表示されます。"
+    case I.Sux{}:
+      "Shown once Backplane listens on your tailnet."
 
 def T.settings.pair.qr(l: I.Loc) -> String:
   match l:
@@ -5238,6 +6741,8 @@ def T.settings.pair.qr(l: I.Loc) -> String:
       "Scan with the Backplane app, or the phone's camera."
     case I.Ja{}:
       "Backplaneアプリか、スマートフォンのカメラで読み取ってください。"
+    case I.Sux{}:
+      "Scan with the Backplane app, or the phone's camera."
 
 def T.settings.pair.qr.tip(l: I.Loc) -> String:
   match l:
@@ -5245,6 +6750,8 @@ def T.settings.pair.qr.tip(l: I.Loc) -> String:
       "Show the link as a code to scan"
     case I.Ja{}:
       "リンクを読み取り用コードで表示"
+    case I.Sux{}:
+      "QR 𒅆"
 
 def T.settings.provider(l: I.Loc) -> String:
   match l:
@@ -5252,6 +6759,8 @@ def T.settings.provider(l: I.Loc) -> String:
       "Provider for new threads"
     case I.Ja{}:
       "新しいスレッドのプロバイダー"
+    case I.Sux{}:
+      "Provider for new threads"
 
 def T.settings.provider.missing(l: I.Loc, arg0: String) -> String:
   match l:
@@ -5259,6 +6768,8 @@ def T.settings.provider.missing(l: I.Loc, arg0: String) -> String:
       arg0 ++ " is not installed"
     case I.Ja{}:
       arg0 ++ "は未インストール"
+    case I.Sux{}:
+      arg0 ++ " is not installed"
 
 def T.settings.restart(l: I.Loc) -> String:
   match l:
@@ -5266,6 +6777,8 @@ def T.settings.restart(l: I.Loc) -> String:
       "Continue after a restart"
     case I.Ja{}:
       "再起動後に続行"
+    case I.Sux{}:
+      "𒄄"
 
 def T.settings.restart.note(l: I.Loc) -> String:
   match l:
@@ -5273,6 +6786,8 @@ def T.settings.restart.note(l: I.Loc) -> String:
       "Turns a restart cuts short go on by themselves."
     case I.Ja{}:
       "再起動で中断したターンを自動で続行します。"
+    case I.Sux{}:
+      "Turns a restart cuts short go on by themselves."
 
 def T.settings.settle(l: I.Loc) -> String:
   match l:
@@ -5280,6 +6795,8 @@ def T.settings.settle(l: I.Loc) -> String:
       "Settle after"
     case I.Ja{}:
       "自動完了まで"
+    case I.Sux{}:
+      "𒃻 𒌓"
 
 def T.settings.settle.days(l: I.Loc, arg0: String, arg1: String) -> String:
   match l:
@@ -5287,6 +6804,8 @@ def T.settings.settle.days(l: I.Loc, arg0: String, arg1: String) -> String:
       arg0 ++ " " ++ I.I18n.sel(arg1, "one", "day", "days")
     case I.Ja{}:
       arg0 ++ "日"
+    case I.Sux{}:
+      arg0 ++ " " ++ I.I18n.sel(arg1, "one", "𒌓", "𒌓𒌓")
 
 def T.settings.settle.note(l: I.Loc) -> String:
   match l:
@@ -5294,6 +6813,8 @@ def T.settings.settle.note(l: I.Loc) -> String:
       "Threads idle this long move to Settled. They stay saved."
     case I.Ja{}:
       "この期間動きのないスレッドを完了済みに移動します。内容は保存されます。"
+    case I.Sux{}:
+      "Threads idle this long move to Settled. They stay saved."
 
 def T.settings.sidebar(l: I.Loc) -> String:
   match l:
@@ -5301,6 +6822,8 @@ def T.settings.sidebar(l: I.Loc) -> String:
       "Thread list"
     case I.Ja{}:
       "スレッド一覧"
+    case I.Sux{}:
+      "𒂍𒂍"
 
 def T.settings.sidebar.active(l: I.Loc) -> String:
   match l:
@@ -5308,6 +6831,8 @@ def T.settings.sidebar.active(l: I.Loc) -> String:
       "Active"
     case I.Ja{}:
       "進行中"
+    case I.Sux{}:
+      "𒁺"
 
 def T.settings.sidebar.note(l: I.Loc) -> String:
   match l:
@@ -5315,6 +6840,8 @@ def T.settings.sidebar.note(l: I.Loc) -> String:
       "Projects groups threads by project; active lists what is going on, what needs you first."
     case I.Ja{}:
       "プロジェクト別、または対応待ちを優先した実行状況別に表示します。"
+    case I.Sux{}:
+      "Projects groups threads by project; active lists what is going on, what needs you first."
 
 def T.settings.sync(l: I.Loc) -> String:
   match l:
@@ -5322,6 +6849,8 @@ def T.settings.sync(l: I.Loc) -> String:
       "Sync"
     case I.Ja{}:
       "同期"
+    case I.Sux{}:
+      "𒄄"
 
 def T.settings.tailscale.label(l: I.Loc, arg0: String) -> String:
   match l:
@@ -5329,6 +6858,8 @@ def T.settings.tailscale.label(l: I.Loc, arg0: String) -> String:
       "Tailscale: " ++ arg0
     case I.Ja{}:
       "Tailscale：" ++ arg0
+    case I.Sux{}:
+      "Tailscale: " ++ arg0
 
 def T.settings.tailscale.looking(l: I.Loc) -> String:
   match l:
@@ -5336,6 +6867,8 @@ def T.settings.tailscale.looking(l: I.Loc) -> String:
       "Looking for Tailscale."
     case I.Ja{}:
       "Tailscaleを探しています。"
+    case I.Sux{}:
+      "𒆥"
 
 def T.settings.tailscale.notconnected(l: I.Loc) -> String:
   match l:
@@ -5343,6 +6876,8 @@ def T.settings.tailscale.notconnected(l: I.Loc) -> String:
       "not connected"
     case I.Ja{}:
       "未接続"
+    case I.Sux{}:
+      "𒉡 𒆷"
 
 def T.settings.tailscale.off.note(l: I.Loc, arg0: String) -> String:
   match l:
@@ -5350,6 +6885,8 @@ def T.settings.tailscale.off.note(l: I.Loc, arg0: String) -> String:
       "Listening on " ++ arg0 ++ " only: started with --no-tailscale."
     case I.Ja{}:
       arg0 ++ "のみで待ち受け中です（--no-tailscaleで起動）。"
+    case I.Sux{}:
+      "Listening on " ++ arg0 ++ " only: started with --no-tailscale."
 
 def T.settings.tailscale.reachable.note(l: I.Loc) -> String:
   match l:
@@ -5357,6 +6894,8 @@ def T.settings.tailscale.reachable.note(l: I.Loc) -> String:
       "Also on your tailnet: your own devices get in, others need the pairing token."
     case I.Ja{}:
       "tailnetでも利用できます。自分の端末はそのまま接続でき、それ以外はペアリングトークンが必要です。"
+    case I.Sux{}:
+      "Also on your tailnet: your own devices get in, others need the pairing token."
 
 def T.settings.tailscale.unavailable.note(l: I.Loc, arg0: String) -> String:
   match l:
@@ -5364,6 +6903,8 @@ def T.settings.tailscale.unavailable.note(l: I.Loc, arg0: String) -> String:
       "Listening on " ++ arg0 ++ " only. Sign in to Tailscale, then restart Backplane."
     case I.Ja{}:
       arg0 ++ "のみで待ち受け中です。Tailscaleにサインインしてから、Backplaneを再起動してください。"
+    case I.Sux{}:
+      "Listening on " ++ arg0 ++ " only. Sign in to Tailscale, then restart Backplane."
 
 def T.settings.theme(l: I.Loc) -> String:
   match l:
@@ -5371,6 +6912,8 @@ def T.settings.theme(l: I.Loc) -> String:
       "Theme"
     case I.Ja{}:
       "テーマ"
+    case I.Sux{}:
+      "𒅆"
 
 def T.settings.theme.dark(l: I.Loc) -> String:
   match l:
@@ -5378,6 +6921,8 @@ def T.settings.theme.dark(l: I.Loc) -> String:
       "Dark"
     case I.Ja{}:
       "ダーク"
+    case I.Sux{}:
+      "𒈪"
 
 def T.settings.theme.light(l: I.Loc) -> String:
   match l:
@@ -5385,6 +6930,8 @@ def T.settings.theme.light(l: I.Loc) -> String:
       "Light"
     case I.Ja{}:
       "ライト"
+    case I.Sux{}:
+      "𒌓𒌓"
 
 def T.settings.theme.note(l: I.Loc) -> String:
   match l:
@@ -5392,6 +6939,8 @@ def T.settings.theme.note(l: I.Loc) -> String:
       "The window and the web page (phones unset follow their own system)."
     case I.Ja{}:
       "ウィンドウとWebに適用します。未設定のスマートフォンは端末の設定に従います。"
+    case I.Sux{}:
+      "The window and the web page (phones unset follow their own system)."
 
 def T.settings.theme.phone.note(l: I.Loc) -> String:
   match l:
@@ -5399,6 +6948,8 @@ def T.settings.theme.phone.note(l: I.Loc) -> String:
       "Unset, the phone follows its own system."
     case I.Ja{}:
       "未設定ならスマートフォンのシステムに従います。"
+    case I.Sux{}:
+      "Unset, the phone follows its own system."
 
 def T.settings.tour(l: I.Loc) -> String:
   match l:
@@ -5406,6 +6957,8 @@ def T.settings.tour(l: I.Loc) -> String:
       "Tour"
     case I.Ja{}:
       "ツアー"
+    case I.Sux{}:
+      "𒅆"
 
 def T.settings.tour.again(l: I.Loc) -> String:
   match l:
@@ -5413,6 +6966,8 @@ def T.settings.tour.again(l: I.Loc) -> String:
       "Show the tour again"
     case I.Ja{}:
       "ツアーをもう一度表示"
+    case I.Sux{}:
+      "𒅆𒄄"
 
 def T.settings.tour.note(l: I.Loc) -> String:
   match l:
@@ -5420,6 +6975,8 @@ def T.settings.tour.note(l: I.Loc) -> String:
       "The short walk through projects, threads, bots, your agents and your machines."
     case I.Ja{}:
       "プロジェクト、スレッド、ボット、エージェント、マシンを紹介します。"
+    case I.Sux{}:
+      "The short walk through projects, threads, bots, your agents and your machines."
 
 def T.settings.tour.show(l: I.Loc) -> String:
   match l:
@@ -5427,6 +6984,8 @@ def T.settings.tour.show(l: I.Loc) -> String:
       "Show the tour"
     case I.Ja{}:
       "ツアーを表示"
+    case I.Sux{}:
+      "𒅆"
 
 def T.settings.tour.welcome(l: I.Loc) -> String:
   match l:
@@ -5434,6 +6993,8 @@ def T.settings.tour.welcome(l: I.Loc) -> String:
       "Welcome tour"
     case I.Ja{}:
       "使い方ツアー"
+    case I.Sux{}:
+      "𒅆 𒉋"
 
 def T.settings.tz.choose(l: I.Loc) -> String:
   match l:
@@ -5441,6 +7002,8 @@ def T.settings.tz.choose(l: I.Loc) -> String:
       "Use this time zone"
     case I.Ja{}:
       "このタイムゾーンを使用"
+    case I.Sux{}:
+      "𒅆𒈽"
 
 def T.settings.tz.follow(l: I.Loc) -> String:
   match l:
@@ -5448,6 +7011,8 @@ def T.settings.tz.follow(l: I.Loc) -> String:
       "Follow your phone again"
     case I.Ja{}:
       "スマートフォンの設定に従う"
+    case I.Sux{}:
+      "𒆠 𒄄"
 
 def T.settings.tz.following(l: I.Loc) -> String:
   match l:
@@ -5455,6 +7020,8 @@ def T.settings.tz.following(l: I.Loc) -> String:
       "Already following your phone"
     case I.Ja{}:
       "スマートフォンの設定に従っています"
+    case I.Sux{}:
+      "𒆠 𒄄"
 
 def T.settings.update.available(l: I.Loc, arg0: String) -> String:
   match l:
@@ -5462,6 +7029,8 @@ def T.settings.update.available(l: I.Loc, arg0: String) -> String:
       "update " ++ arg0
     case I.Ja{}:
       "更新可能：" ++ arg0
+    case I.Sux{}:
+      "𒉋 " ++ arg0
 
 def T.settings.update.check(l: I.Loc) -> String:
   match l:
@@ -5469,6 +7038,8 @@ def T.settings.update.check(l: I.Loc) -> String:
       "Check now"
     case I.Ja{}:
       "今すぐ確認"
+    case I.Sux{}:
+      "Backplane 𒆥"
 
 def T.settings.update.check.tip(l: I.Loc) -> String:
   match l:
@@ -5476,6 +7047,8 @@ def T.settings.update.check.tip(l: I.Loc) -> String:
       "Look for an update now"
     case I.Ja{}:
       "今すぐ更新を確認"
+    case I.Sux{}:
+      "𒅆 𒉋"
 
 def T.settings.update.current(l: I.Loc) -> String:
   match l:
@@ -5483,6 +7056,8 @@ def T.settings.update.current(l: I.Loc) -> String:
       "Up to date, checked hourly."
     case I.Ja{}:
       "最新です。1時間ごとに確認します。"
+    case I.Sux{}:
+      "𒉡 𒉋"
 
 def T.settings.update.install(l: I.Loc) -> String:
   match l:
@@ -5490,6 +7065,8 @@ def T.settings.update.install(l: I.Loc) -> String:
       "Install update"
     case I.Ja{}:
       "更新をインストール"
+    case I.Sux{}:
+      "Backplane 𒉋 𒃻"
 
 def T.settings.update.install.tip(l: I.Loc) -> String:
   match l:
@@ -5497,6 +7074,8 @@ def T.settings.update.install.tip(l: I.Loc) -> String:
       "Install the update"
     case I.Ja{}:
       "更新をインストール"
+    case I.Sux{}:
+      "Backplane 𒉋 𒃻"
 
 def T.settings.update.now(l: I.Loc) -> String:
   match l:
@@ -5504,6 +7083,8 @@ def T.settings.update.now(l: I.Loc) -> String:
       "Update now"
     case I.Ja{}:
       "今すぐ更新"
+    case I.Sux{}:
+      "Backplane 𒉋"
 
 def T.settings.update.now.tip(l: I.Loc) -> String:
   match l:
@@ -5511,6 +7092,8 @@ def T.settings.update.now.tip(l: I.Loc) -> String:
       "Update without waiting for the threads at work"
     case I.Ja{}:
       "作業中のスレッドを待たずに更新"
+    case I.Sux{}:
+      "Update without waiting for the threads at work"
 
 def T.settings.update.packaged(l: I.Loc) -> String:
   match l:
@@ -5518,6 +7101,8 @@ def T.settings.update.packaged(l: I.Loc) -> String:
       "Updated by its package."
     case I.Ja{}:
       "パッケージで更新されます。"
+    case I.Sux{}:
+      "Backplane 𒉋"
 
 def T.settings.update.waits(l: I.Loc, +arg0: String, arg1: String) -> String:
   match l:
@@ -5525,6 +7110,8 @@ def T.settings.update.waits(l: I.Loc, +arg0: String, arg1: String) -> String:
       "Update waits for " ++ arg0 ++ " " ++ I.I18n.sel(arg1, "one", "thread", "threads") ++ " to finish their work."
     case I.Ja{}:
       I.I18n.sel(arg1, "one", "スレッド" ++ arg0 ++ "件の作業が終わるまで、更新を待っています。", "スレッド" ++ arg0 ++ "件の作業が終わるまで、更新を待っています。")
+    case I.Sux{}:
+      "Update waits for " ++ arg0 ++ " " ++ I.I18n.sel(arg1, "one", "thread", "threads") ++ " to finish their work."
 
 def T.settings.usage(l: I.Loc) -> String:
   match l:
@@ -5532,6 +7119,8 @@ def T.settings.usage(l: I.Loc) -> String:
       "Usage"
     case I.Ja{}:
       "使用量"
+    case I.Sux{}:
+      "𒁺"
 
 def T.settings.usage.label(l: I.Loc, arg0: String) -> String:
   match l:
@@ -5539,6 +7128,8 @@ def T.settings.usage.label(l: I.Loc, arg0: String) -> String:
       "Usage: " ++ arg0
     case I.Ja{}:
       "使用状況：" ++ arg0
+    case I.Sux{}:
+      "Usage: " ++ arg0
 
 def T.settings.voice(l: I.Loc) -> String:
   match l:
@@ -5546,6 +7137,8 @@ def T.settings.voice(l: I.Loc) -> String:
       "Voice"
     case I.Ja{}:
       "音声"
+    case I.Sux{}:
+      "𒅗𒁉"
 
 def T.settings.voice.default.mic(l: I.Loc, arg0: String, arg1: String) -> String:
   match l:
@@ -5553,6 +7146,8 @@ def T.settings.voice.default.mic(l: I.Loc, arg0: String, arg1: String) -> String
       "default microphone" ++ I.I18n.sel(arg0, "none", "", " (" ++ arg1 ++ ")")
     case I.Ja{}:
       "既定のマイク" ++ I.I18n.sel(arg0, "none", "", "（" ++ arg1 ++ "）")
+    case I.Sux{}:
+      "default microphone" ++ I.I18n.sel(arg0, "none", "", " (" ++ arg1 ++ ")")
 
 def T.settings.voice.default.tip(l: I.Loc) -> String:
   match l:
@@ -5560,6 +7155,8 @@ def T.settings.voice.default.tip(l: I.Loc) -> String:
       "The default microphone"
     case I.Ja{}:
       "既定のマイク"
+    case I.Sux{}:
+      "𒅗𒁉"
 
 def T.settings.voice.dictionary(l: I.Loc) -> String:
   match l:
@@ -5567,6 +7164,8 @@ def T.settings.voice.dictionary(l: I.Loc) -> String:
       "Dictionary"
     case I.Ja{}:
       "辞書"
+    case I.Sux{}:
+      "𒅗𒅗"
 
 def T.settings.voice.dictionary.note(l: I.Loc) -> String:
   match l:
@@ -5574,6 +7173,8 @@ def T.settings.voice.dictionary.note(l: I.Loc) -> String:
       "Names and terms to expect. Words you clarify after dictating join it."
     case I.Ja{}:
       "名前や専門用語。音声入力後に修正した単語も追加されます。"
+    case I.Sux{}:
+      "Names and terms to expect. Words you clarify after dictating join it."
 
 def T.settings.voice.key(l: I.Loc) -> String:
   match l:
@@ -5581,6 +7182,8 @@ def T.settings.voice.key(l: I.Loc) -> String:
       "OpenAI API key"
     case I.Ja{}:
       "OpenAI APIキー"
+    case I.Sux{}:
+      "OpenAI API key"
 
 def T.settings.voice.key.note(l: I.Loc) -> String:
   match l:
@@ -5588,6 +7191,8 @@ def T.settings.voice.key.note(l: I.Loc) -> String:
       "For GPT-Live-Transcribe. Kept in this machine's secrets; never shown again."
     case I.Ja{}:
       "GPT-Live-Transcribe用。このマシンに保存し、再表示しません。"
+    case I.Sux{}:
+      "For GPT-Live-Transcribe. Kept in this machine's secrets; never shown again."
 
 def T.settings.voice.key.saved(l: I.Loc, arg0: String) -> String:
   match l:
@@ -5595,6 +7200,8 @@ def T.settings.voice.key.saved(l: I.Loc, arg0: String) -> String:
       "Saved: " ++ arg0 ++ ". Paste a new one to replace it."
     case I.Ja{}:
       "保存済み：" ++ arg0 ++ "。変更するには新しいキーを貼り付けてください。"
+    case I.Sux{}:
+      "Saved: " ++ arg0 ++ ". Paste a new one to replace it."
 
 def T.settings.voice.microphone(l: I.Loc) -> String:
   match l:
@@ -5602,6 +7209,8 @@ def T.settings.voice.microphone(l: I.Loc) -> String:
       "Microphone"
     case I.Ja{}:
       "マイク"
+    case I.Sux{}:
+      "Microphone"
 
 def T.settings.voice.microphone.note(l: I.Loc, arg0: String) -> String:
   match l:
@@ -5609,6 +7218,8 @@ def T.settings.voice.microphone.note(l: I.Loc, arg0: String) -> String:
       "The mic button in the composer records this machine's " ++ arg0 ++ "."
     case I.Ja{}:
       "入力欄のマイクボタンで、このマシンの" ++ arg0 ++ "を録音します。"
+    case I.Sux{}:
+      "The mic button in the composer records this machine's " ++ arg0 ++ "."
 
 def T.settings.voice.pebble(l: I.Loc) -> String:
   match l:
@@ -5616,6 +7227,8 @@ def T.settings.voice.pebble(l: I.Loc) -> String:
       "Pebble ring: set its webhook to send the recording; it is transcribed here with this dictionary."
     case I.Ja{}:
       "PebbleリングのWebhookで録音を送ると、この辞書で文字起こしします。"
+    case I.Sux{}:
+      "Pebble ring: set its webhook to send the recording; it is transcribed here with this dictionary."
 
 def T.settings.voice.term(l: I.Loc) -> String:
   match l:
@@ -5623,6 +7236,8 @@ def T.settings.voice.term(l: I.Loc) -> String:
       "Add a term"
     case I.Ja{}:
       "用語を追加"
+    case I.Sux{}:
+      "𒅗"
 
 def T.settings.voice.term.add(l: I.Loc) -> String:
   match l:
@@ -5630,6 +7245,8 @@ def T.settings.voice.term.add(l: I.Loc) -> String:
       "Add it to the dictionary"
     case I.Ja{}:
       "辞書に追加"
+    case I.Sux{}:
+      "𒅗 𒃻"
 
 def T.settings.voice.term.remove(l: I.Loc) -> String:
   match l:
@@ -5637,6 +7254,8 @@ def T.settings.voice.term.remove(l: I.Loc) -> String:
       "Take it out of the dictionary"
     case I.Ja{}:
       "辞書から削除"
+    case I.Sux{}:
+      "𒅗 𒂊"
 
 def T.settings.writing(l: I.Loc) -> String:
   match l:
@@ -5644,6 +7263,8 @@ def T.settings.writing(l: I.Loc) -> String:
       "Writing"
     case I.Ja{}:
       "文章生成"
+    case I.Sux{}:
+      "𒊬"
 
 def T.settings.writing.model(l: I.Loc) -> String:
   match l:
@@ -5651,6 +7272,8 @@ def T.settings.writing.model(l: I.Loc) -> String:
       "Model for titles, branch names and commit messages"
     case I.Ja{}:
       "タイトル・ブランチ名・コミット文のモデル"
+    case I.Sux{}:
+      "Model for titles, branch names and commit messages"
 
 def T.settings.writing.note(l: I.Loc) -> String:
   match l:
@@ -5658,6 +7281,8 @@ def T.settings.writing.note(l: I.Loc) -> String:
       "A small model keeps this cheap. It names each thread from its first message."
     case I.Ja{}:
       "小さなモデルで費用を抑えます。最初のメッセージからスレッド名を付けます。"
+    case I.Sux{}:
+      "A small model keeps this cheap. It names each thread from its first message."
 
 def T.settings.writing.provider(l: I.Loc) -> String:
   match l:
@@ -5665,6 +7290,8 @@ def T.settings.writing.provider(l: I.Loc) -> String:
       "Writing: provider"
     case I.Ja{}:
       "文章生成：プロバイダー"
+    case I.Sux{}:
+      "Writing: provider"
 
 def T.settings.zone(l: I.Loc) -> String:
   match l:
@@ -5672,6 +7299,8 @@ def T.settings.zone(l: I.Loc) -> String:
       "Time zone"
     case I.Ja{}:
       "タイムゾーン"
+    case I.Sux{}:
+      "𒆠"
 
 def T.settings.zone.placeholder(l: I.Loc) -> String:
   match l:
@@ -5679,6 +7308,8 @@ def T.settings.zone.placeholder(l: I.Loc) -> String:
       "A zone name, e.g. Europe/Helsinki"
     case I.Ja{}:
       "例：Europe/Helsinki"
+    case I.Sux{}:
+      "A zone name, e.g. Europe/Helsinki"
 
 def T.sheet.delete(l: I.Loc) -> String:
   match l:
@@ -5686,6 +7317,8 @@ def T.sheet.delete(l: I.Loc) -> String:
       "Delete thread?"
     case I.Ja{}:
       "スレッドを削除しますか？"
+    case I.Sux{}:
+      "𒅗 𒋗𒅆𒌨?"
 
 def T.sheet.remove(l: I.Loc, arg0: String) -> String:
   match l:
@@ -5693,6 +7326,8 @@ def T.sheet.remove(l: I.Loc, arg0: String) -> String:
       "Remove " ++ arg0 ++ "?"
     case I.Ja{}:
       "「" ++ arg0 ++ "」を一覧から削除しますか？"
+    case I.Sux{}:
+      "𒋗𒅆𒌨 " ++ arg0 ++ "?"
 
 def T.sheet.remove.note(l: I.Loc) -> String:
   match l:
@@ -5700,6 +7335,8 @@ def T.sheet.remove.note(l: I.Loc) -> String:
       "Its threads are kept. Adding its folder again brings it back."
     case I.Ja{}:
       "スレッドは残ります。フォルダをもう一度追加すると元に戻ります。"
+    case I.Sux{}:
+      "𒅗 𒁾 𒊬 · 𒂍 𒃻 𒄄"
 
 def T.sheet.rename(l: I.Loc) -> String:
   match l:
@@ -5707,6 +7344,8 @@ def T.sheet.rename(l: I.Loc) -> String:
       "Rename thread"
     case I.Ja{}:
       "スレッド名を変更"
+    case I.Sux{}:
+      "𒅗 𒈬 𒉋"
 
 def T.sidebar.add.project(l: I.Loc) -> String:
   match l:
@@ -5714,6 +7353,8 @@ def T.sidebar.add.project(l: I.Loc) -> String:
       "Add project"
     case I.Ja{}:
       "プロジェクトを追加"
+    case I.Sux{}:
+      "𒂍 𒃻"
 
 def T.sidebar.archived(l: I.Loc) -> String:
   match l:
@@ -5721,6 +7362,8 @@ def T.sidebar.archived(l: I.Loc) -> String:
       "Archived"
     case I.Ja{}:
       "アーカイブ済み"
+    case I.Sux{}:
+      "𒁾𒂍"
 
 def T.sidebar.machine(l: I.Loc) -> String:
   match l:
@@ -5728,6 +7371,8 @@ def T.sidebar.machine(l: I.Loc) -> String:
       "Machine"
     case I.Ja{}:
       "マシン"
+    case I.Sux{}:
+      "𒂍"
 
 def T.sidebar.move.down(l: I.Loc) -> String:
   match l:
@@ -5735,6 +7380,8 @@ def T.sidebar.move.down(l: I.Loc) -> String:
       "Move down"
     case I.Ja{}:
       "下に移動"
+    case I.Sux{}:
+      "𒁺 𒆠"
 
 def T.sidebar.move.up(l: I.Loc) -> String:
   match l:
@@ -5742,6 +7389,8 @@ def T.sidebar.move.up(l: I.Loc) -> String:
       "Move up"
     case I.Ja{}:
       "上に移動"
+    case I.Sux{}:
+      "𒁺 𒀭"
 
 def T.sidebar.nothing(l: I.Loc) -> String:
   match l:
@@ -5749,6 +7398,8 @@ def T.sidebar.nothing(l: I.Loc) -> String:
       "Nothing active"
     case I.Ja{}:
       "実行中の作業なし"
+    case I.Sux{}:
+      "𒉡𒁺"
 
 def T.sidebar.older(l: I.Loc, arg0: String) -> String:
   match l:
@@ -5756,12 +7407,16 @@ def T.sidebar.older(l: I.Loc, arg0: String) -> String:
       "Older " ++ arg0
     case I.Ja{}:
       "以前のプロジェクト" ++ arg0 ++ "件"
+    case I.Sux{}:
+      "𒌀 " ++ arg0
 
 def T.sidebar.path.placeholder(l: I.Loc) -> String:
   match l:
     case I.En{}:
       "/path/to/project"
     case I.Ja{}:
+      "/path/to/project"
+    case I.Sux{}:
       "/path/to/project"
 
 def T.sidebar.quiet.note(l: I.Loc) -> String:
@@ -5770,6 +7425,8 @@ def T.sidebar.quiet.note(l: I.Loc) -> String:
       "Projects quiet for three days"
     case I.Ja{}:
       "3日間動きのないプロジェクト"
+    case I.Sux{}:
+      "𒂍 𒉡𒁺 3 𒌓"
 
 def T.sidebar.remove.note(l: I.Loc) -> String:
   match l:
@@ -5777,6 +7434,8 @@ def T.sidebar.remove.note(l: I.Loc) -> String:
       "Remove from the sidebar (adding its folder again brings it back)"
     case I.Ja{}:
       "サイドバーから削除（フォルダを追加すると戻ります）"
+    case I.Sux{}:
+      "𒂊 · 𒂍 𒃻 𒄄"
 
 def T.sidebar.search.projects(l: I.Loc) -> String:
   match l:
@@ -5784,6 +7443,8 @@ def T.sidebar.search.projects(l: I.Loc) -> String:
       "Search projects"
     case I.Ja{}:
       "プロジェクトを検索"
+    case I.Sux{}:
+      "𒂍 𒆥"
 
 def T.sidebar.settled.count(l: I.Loc, arg0: String) -> String:
   match l:
@@ -5791,6 +7452,8 @@ def T.sidebar.settled.count(l: I.Loc, arg0: String) -> String:
       "Settled " ++ arg0
     case I.Ja{}:
       "完了済み" ++ arg0 ++ "件"
+    case I.Sux{}:
+      "𒌀 " ++ arg0
 
 def T.sidebar.settled.note(l: I.Loc) -> String:
   match l:
@@ -5798,6 +7461,8 @@ def T.sidebar.settled.note(l: I.Loc) -> String:
       "Threads settled in the last three days"
     case I.Ja{}:
       "過去3日間に完了したスレッド"
+    case I.Sux{}:
+      "𒅗 𒌀 3 𒌓"
 
 def T.sidebar.shelf.count(l: I.Loc, arg0: String, arg1: String) -> String:
   match l:
@@ -5805,6 +7470,8 @@ def T.sidebar.shelf.count(l: I.Loc, arg0: String, arg1: String) -> String:
       arg0 ++ " " ++ arg1
     case I.Ja{}:
       arg0 ++ arg1 ++ "件"
+    case I.Sux{}:
+      arg0 ++ " " ++ arg1
 
 def T.sidebar.snoozed(l: I.Loc) -> String:
   match l:
@@ -5812,6 +7479,8 @@ def T.sidebar.snoozed(l: I.Loc) -> String:
       "Snoozed"
     case I.Ja{}:
       "スヌーズ中"
+    case I.Sux{}:
+      "𒉡𒅆"
 
 def T.sidebar.update(l: I.Loc, arg0: String) -> String:
   match l:
@@ -5819,6 +7488,8 @@ def T.sidebar.update(l: I.Loc, arg0: String) -> String:
       "update " ++ arg0
     case I.Ja{}:
       "更新可能：" ++ arg0
+    case I.Sux{}:
+      "𒉋 " ++ arg0
 
 def T.stamp.finished(l: I.Loc, arg0: String) -> String:
   match l:
@@ -5826,6 +7497,8 @@ def T.stamp.finished(l: I.Loc, arg0: String) -> String:
       "Finished " ++ arg0
     case I.Ja{}:
       arg0 ++ "に完了"
+    case I.Sux{}:
+      "𒌀 " ++ arg0
 
 def T.stamp.finished.took(l: I.Loc, arg0: String, arg1: String) -> String:
   match l:
@@ -5833,6 +7506,8 @@ def T.stamp.finished.took(l: I.Loc, arg0: String, arg1: String) -> String:
       "Finished " ++ arg0 ++ " · " ++ arg1
     case I.Ja{}:
       arg0 ++ "に完了 · " ++ arg1
+    case I.Sux{}:
+      "𒌀 " ++ arg0 ++ " · " ++ arg1
 
 def T.state.cancelled(l: I.Loc) -> String:
   match l:
@@ -5840,6 +7515,8 @@ def T.state.cancelled(l: I.Loc) -> String:
       "cancelled"
     case I.Ja{}:
       "キャンセル済み"
+    case I.Sux{}:
+      "𒄄"
 
 def T.state.done(l: I.Loc) -> String:
   match l:
@@ -5847,6 +7524,8 @@ def T.state.done(l: I.Loc) -> String:
       "done"
     case I.Ja{}:
       "完了"
+    case I.Sux{}:
+      "𒌀"
 
 def T.state.failed(l: I.Loc) -> String:
   match l:
@@ -5854,6 +7533,8 @@ def T.state.failed(l: I.Loc) -> String:
       "failed"
     case I.Ja{}:
       "失敗"
+    case I.Sux{}:
+      "𒉡𒅅"
 
 def T.state.held(l: I.Loc) -> String:
   match l:
@@ -5861,6 +7542,8 @@ def T.state.held(l: I.Loc) -> String:
       "held"
     case I.Ja{}:
       "保持中"
+    case I.Sux{}:
+      "𒃻"
 
 def T.state.idle(l: I.Loc) -> String:
   match l:
@@ -5868,6 +7551,8 @@ def T.state.idle(l: I.Loc) -> String:
       "idle"
     case I.Ja{}:
       "待機中"
+    case I.Sux{}:
+      "𒉡𒁺"
 
 def T.state.needsyou(l: I.Loc) -> String:
   match l:
@@ -5875,6 +7560,8 @@ def T.state.needsyou(l: I.Loc) -> String:
       "needs you"
     case I.Ja{}:
       "対応待ち"
+    case I.Sux{}:
+      "𒇽"
 
 def T.state.reporting(l: I.Loc) -> String:
   match l:
@@ -5882,6 +7569,8 @@ def T.state.reporting(l: I.Loc) -> String:
       "reporting"
     case I.Ja{}:
       "報告中"
+    case I.Sux{}:
+      "𒅗𒁉"
 
 def T.state.running(l: I.Loc) -> String:
   match l:
@@ -5889,6 +7578,8 @@ def T.state.running(l: I.Loc) -> String:
       "running"
     case I.Ja{}:
       "実行中"
+    case I.Sux{}:
+      "𒁺"
 
 def T.state.starting(l: I.Loc) -> String:
   match l:
@@ -5896,6 +7587,8 @@ def T.state.starting(l: I.Loc) -> String:
       "starting"
     case I.Ja{}:
       "起動中"
+    case I.Sux{}:
+      "𒉋"
 
 def T.state.stopped(l: I.Loc) -> String:
   match l:
@@ -5903,6 +7596,8 @@ def T.state.stopped(l: I.Loc) -> String:
       "stopped"
     case I.Ja{}:
       "停止"
+    case I.Sux{}:
+      "𒉡𒁺"
 
 def T.state.waiting(l: I.Loc) -> String:
   match l:
@@ -5910,6 +7605,8 @@ def T.state.waiting(l: I.Loc) -> String:
       "waiting"
     case I.Ja{}:
       "待機中"
+    case I.Sux{}:
+      "𒃻"
 
 def T.state.waitingon(l: I.Loc) -> String:
   match l:
@@ -5917,6 +7614,8 @@ def T.state.waitingon(l: I.Loc) -> String:
       "waiting on"
     case I.Ja{}:
       "待機中"
+    case I.Sux{}:
+      "𒃻"
 
 def T.subagents.badge(l: I.Loc, arg0: String, arg1: String) -> String:
   match l:
@@ -5924,6 +7623,8 @@ def T.subagents.badge(l: I.Loc, arg0: String, arg1: String) -> String:
       arg0 ++ " " ++ I.I18n.sel(arg1, "one", "agent", "agents")
     case I.Ja{}:
       "エージェント" ++ arg0 ++ "件" ++ ""
+    case I.Sux{}:
+      arg0 ++ " " ++ I.I18n.sel(arg1, "one", "𒇽", "𒇽")
 
 def T.subagents.busy(l: I.Loc, arg0: String) -> String:
   match l:
@@ -5931,6 +7632,8 @@ def T.subagents.busy(l: I.Loc, arg0: String) -> String:
       arg0 ++ " at work"
     case I.Ja{}:
       arg0 ++ "件が作業中"
+    case I.Sux{}:
+      arg0 ++ " 𒇽 𒁺"
 
 def T.subagents.cancel.tip(l: I.Loc) -> String:
   match l:
@@ -5938,6 +7641,8 @@ def T.subagents.cancel.tip(l: I.Loc) -> String:
       "Cancel this subscription or stop work"
     case I.Ja{}:
       "待機をキャンセル、または作業を停止"
+    case I.Sux{}:
+      "Cancel this subscription or stop work"
 
 def T.subagents.cancel.word(l: I.Loc, +arg0: String) -> String:
   match l:
@@ -5945,6 +7650,8 @@ def T.subagents.cancel.word(l: I.Loc, +arg0: String) -> String:
       I.I18n.sel(arg0, "release", "Release", I.I18n.sel(arg0, "cancel", "Cancel", "Stop"))
     case I.Ja{}:
       I.I18n.sel(arg0, "release", "解除", I.I18n.sel(arg0, "cancel", "キャンセル", "停止"))
+    case I.Sux{}:
+      I.I18n.sel(arg0, "release", "𒂃", I.I18n.sel(arg0, "cancel", "𒄄", "𒉡𒁺"))
 
 def T.subagents.heading(l: I.Loc, arg0: String) -> String:
   match l:
@@ -5952,6 +7659,8 @@ def T.subagents.heading(l: I.Loc, arg0: String) -> String:
       "Subagents · " ++ arg0
     case I.Ja{}:
       "サブエージェント・" ++ arg0
+    case I.Sux{}:
+      "𒇽𒇽 · " ++ arg0
 
 def T.subagents.hide(l: I.Loc) -> String:
   match l:
@@ -5959,6 +7668,8 @@ def T.subagents.hide(l: I.Loc) -> String:
       "Hide the subagents"
     case I.Ja{}:
       "サブエージェントを隠す"
+    case I.Sux{}:
+      "𒇽𒇽 𒀉𒌫𒆪"
 
 def T.subagents.lock.cancel(l: I.Loc, arg0: String) -> String:
   match l:
@@ -5966,6 +7677,8 @@ def T.subagents.lock.cancel(l: I.Loc, arg0: String) -> String:
       I.I18n.sel(arg0, "release", "Release this lock request", "Cancel this lock request")
     case I.Ja{}:
       "ロック要求を" ++ I.I18n.sel(arg0, "release", "解除", "キャンセル")
+    case I.Sux{}:
+      I.I18n.sel(arg0, "release", "Release this lock request", "Cancel this lock request")
 
 def T.subagents.panel(l: I.Loc, +arg0: String, +arg1: String, arg2: String) -> String:
   match l:
@@ -5973,6 +7686,8 @@ def T.subagents.panel(l: I.Loc, +arg0: String, +arg1: String, arg2: String) -> S
       I.I18n.sel(arg0, "none", I.I18n.sel(arg1, "none", arg2 ++ " done", arg1 ++ " at work"), arg0 ++ " waiting" ++ I.I18n.sel(arg1, "none", "", " · " ++ arg1 ++ " at work"))
     case I.Ja{}:
       I.I18n.sel(arg0, "none", I.I18n.sel(arg1, "none", "完了" ++ arg2 ++ "件", arg1 ++ "件が作業中"), arg0 ++ "件が待機中" ++ I.I18n.sel(arg1, "none", "", "・" ++ arg1 ++ "件が作業中"))
+    case I.Sux{}:
+      I.I18n.sel(arg0, "none", I.I18n.sel(arg1, "none", arg2 ++ " 𒌀", arg1 ++ " 𒁺"), arg0 ++ " 𒃻" ++ I.I18n.sel(arg1, "none", "", " · " ++ arg1 ++ " 𒁺"))
 
 def T.subagents.show(l: I.Loc) -> String:
   match l:
@@ -5980,6 +7695,8 @@ def T.subagents.show(l: I.Loc) -> String:
       "Show the subagents"
     case I.Ja{}:
       "サブエージェントを表示"
+    case I.Sux{}:
+      "𒅆𒇽𒇽"
 
 def T.tasks.delete.tip(l: I.Loc) -> String:
   match l:
@@ -5987,6 +7704,8 @@ def T.tasks.delete.tip(l: I.Loc) -> String:
       "Delete this task"
     case I.Ja{}:
       "タスクを削除"
+    case I.Sux{}:
+      "𒋗𒅆𒌨"
 
 def T.tasks.discard.tip(l: I.Loc) -> String:
   match l:
@@ -5994,6 +7713,8 @@ def T.tasks.discard.tip(l: I.Loc) -> String:
       "Throw the recording away"
     case I.Ja{}:
       "記録を破棄"
+    case I.Sux{}:
+      "𒂊"
 
 def T.tasks.run.tip(l: I.Loc) -> String:
   match l:
@@ -6001,6 +7722,8 @@ def T.tasks.run.tip(l: I.Loc) -> String:
       "Run it now"
     case I.Ja{}:
       "今すぐ実行"
+    case I.Sux{}:
+      "𒁺"
 
 def T.tasks.save.tip(l: I.Loc) -> String:
   match l:
@@ -6008,6 +7731,8 @@ def T.tasks.save.tip(l: I.Loc) -> String:
       "Save the task"
     case I.Ja{}:
       "タスクを保存"
+    case I.Sux{}:
+      "𒁾 𒊬"
 
 def T.tasks.value.ask(l: I.Loc) -> String:
   match l:
@@ -6015,6 +7740,8 @@ def T.tasks.value.ask(l: I.Loc) -> String:
       "Ask for this value each time the task runs"
     case I.Ja{}:
       "実行のたびにこの値を確認"
+    case I.Sux{}:
+      "Ask for this value each time the task runs"
 
 def T.teach.choice.confirm(l: I.Loc) -> String:
   match l:
@@ -6022,6 +7749,8 @@ def T.teach.choice.confirm(l: I.Loc) -> String:
       "Confirm"
     case I.Ja{}:
       "確認"
+    case I.Sux{}:
+      "𒅅"
 
 def T.teach.choice.continue(l: I.Loc) -> String:
   match l:
@@ -6029,6 +7758,8 @@ def T.teach.choice.continue(l: I.Loc) -> String:
       "Continue"
     case I.Ja{}:
       "続ける"
+    case I.Sux{}:
+      "𒁺"
 
 def T.teach.choice.skip(l: I.Loc) -> String:
   match l:
@@ -6036,6 +7767,8 @@ def T.teach.choice.skip(l: I.Loc) -> String:
       "Skip this step"
     case I.Ja{}:
       "このステップをスキップ"
+    case I.Sux{}:
+      "𒉡𒁺"
 
 def T.teach.choice.stop(l: I.Loc) -> String:
   match l:
@@ -6043,6 +7776,8 @@ def T.teach.choice.stop(l: I.Loc) -> String:
       "Stop task"
     case I.Ja{}:
       "タスクを停止"
+    case I.Sux{}:
+      "𒉡𒁺"
 
 def T.teach.description(l: I.Loc) -> String:
   match l:
@@ -6050,6 +7785,8 @@ def T.teach.description(l: I.Loc) -> String:
       "What it does (optional)"
     case I.Ja{}:
       "処理内容（任意）"
+    case I.Sux{}:
+      "𒆕"
 
 def T.teach.discard(l: I.Loc) -> String:
   match l:
@@ -6057,6 +7794,8 @@ def T.teach.discard(l: I.Loc) -> String:
       "Discard"
     case I.Ja{}:
       "破棄"
+    case I.Sux{}:
+      "𒂊"
 
 def T.teach.empty(l: I.Loc) -> String:
   match l:
@@ -6064,6 +7803,8 @@ def T.teach.empty(l: I.Loc) -> String:
       "None yet. Teach one in the Browser tab, or tell it in chat."
     case I.Ja{}:
       "タスクはまだありません。ブラウザタブかチャットで教えてください。"
+    case I.Sux{}:
+      "None yet. Teach one in the Browser tab, or tell it in chat."
 
 def T.teach.handback(l: I.Loc) -> String:
   match l:
@@ -6071,6 +7812,8 @@ def T.teach.handback(l: I.Loc) -> String:
       "Hand back"
     case I.Ja{}:
       "引き渡す"
+    case I.Sux{}:
+      "𒄄"
 
 def T.teach.name.note(l: I.Loc) -> String:
   match l:
@@ -6078,6 +7821,8 @@ def T.teach.name.note(l: I.Loc) -> String:
       "Name it. Mark a value you typed to ask for it each time the task runs."
     case I.Ja{}:
       "名前を付けてください。毎回入力する値を指定できます。"
+    case I.Sux{}:
+      "Name it. Mark a value you typed to ask for it each time the task runs."
 
 def T.teach.note.add(l: I.Loc) -> String:
   match l:
@@ -6085,6 +7830,8 @@ def T.teach.note.add(l: I.Loc) -> String:
       "Add note"
     case I.Ja{}:
       "メモを追加"
+    case I.Sux{}:
+      "𒁾 𒃻"
 
 def T.teach.note.placeholder(l: I.Loc) -> String:
   match l:
@@ -6092,6 +7839,8 @@ def T.teach.note.placeholder(l: I.Loc) -> String:
       "Tell it what matters, e.g. use the second tab"
     case I.Ja{}:
       "注意点（例：2番目のタブを使う）"
+    case I.Sux{}:
+      "Tell it what matters, e.g. use the second tab"
 
 def T.teach.paused(l: I.Loc, arg0: String, arg1: String) -> String:
   match l:
@@ -6099,6 +7848,8 @@ def T.teach.paused(l: I.Loc, arg0: String, arg1: String) -> String:
       "Task paused: " ++ arg0 ++ " (step " ++ arg1 ++ ")"
     case I.Ja{}:
       "タスク一時停止：" ++ arg0 ++ "（ステップ" ++ arg1 ++ "）"
+    case I.Sux{}:
+      "𒉡𒁺 " ++ arg0 ++ " · 𒄊 " ++ arg1
 
 def T.teach.run.note(l: I.Loc) -> String:
   match l:
@@ -6106,6 +7857,8 @@ def T.teach.run.note(l: I.Loc) -> String:
       "Open one to run it. A routine can run it too."
     case I.Ja{}:
       "開いて実行できます。ルーティンからも実行できます。"
+    case I.Sux{}:
+      "𒅆 𒁺 · 𒌓 𒁺"
 
 def T.teach.runs(l: I.Loc) -> String:
   match l:
@@ -6113,6 +7866,8 @@ def T.teach.runs(l: I.Loc) -> String:
       "Recent runs"
     case I.Ja{}:
       "最近の実行"
+    case I.Sux{}:
+      "𒁺𒁺"
 
 def T.teach.save(l: I.Loc) -> String:
   match l:
@@ -6120,6 +7875,8 @@ def T.teach.save(l: I.Loc) -> String:
       "Save this task"
     case I.Ja{}:
       "このタスクを保存"
+    case I.Sux{}:
+      "𒁾 𒊬"
 
 def T.teach.step.check(l: I.Loc, arg0: String) -> String:
   match l:
@@ -6127,6 +7884,8 @@ def T.teach.step.check(l: I.Loc, arg0: String) -> String:
       "Check " ++ arg0
     case I.Ja{}:
       arg0 ++ "を確認"
+    case I.Sux{}:
+      "𒅆 " ++ arg0
 
 def T.teach.step.click(l: I.Loc, arg0: String) -> String:
   match l:
@@ -6134,6 +7893,8 @@ def T.teach.step.click(l: I.Loc, arg0: String) -> String:
       "Click " ++ arg0
     case I.Ja{}:
       arg0 ++ "をクリック"
+    case I.Sux{}:
+      "𒋗 " ++ arg0
 
 def T.teach.step.navigate(l: I.Loc, arg0: String) -> String:
   match l:
@@ -6141,6 +7902,8 @@ def T.teach.step.navigate(l: I.Loc, arg0: String) -> String:
       "Go to " ++ arg0
     case I.Ja{}:
       arg0 ++ "に移動"
+    case I.Sux{}:
+      "𒁺 " ++ arg0
 
 def T.teach.step.press(l: I.Loc, arg0: String) -> String:
   match l:
@@ -6148,6 +7911,8 @@ def T.teach.step.press(l: I.Loc, arg0: String) -> String:
       "Press " ++ arg0
     case I.Ja{}:
       arg0 ++ "を押す"
+    case I.Sux{}:
+      "𒋗 " ++ arg0
 
 def T.teach.step.scroll(l: I.Loc, arg0: String) -> String:
   match l:
@@ -6155,6 +7920,8 @@ def T.teach.step.scroll(l: I.Loc, arg0: String) -> String:
       "Scroll " ++ arg0
     case I.Ja{}:
       arg0 ++ "をスクロール"
+    case I.Sux{}:
+      "𒄊 " ++ arg0
 
 def T.teach.step.select(l: I.Loc, arg0: String) -> String:
   match l:
@@ -6162,6 +7929,8 @@ def T.teach.step.select(l: I.Loc, arg0: String) -> String:
       "Choose in " ++ arg0
     case I.Ja{}:
       arg0 ++ "で選択"
+    case I.Sux{}:
+      "𒅆𒈽 " ++ arg0
 
 def T.teach.step.typein(l: I.Loc, arg0: String) -> String:
   match l:
@@ -6169,6 +7938,8 @@ def T.teach.step.typein(l: I.Loc, arg0: String) -> String:
       "Type in " ++ arg0
     case I.Ja{}:
       arg0 ++ "に入力"
+    case I.Sux{}:
+      "𒁾 𒊬 " ++ arg0
 
 def T.teach.step.wait(l: I.Loc, arg0: String) -> String:
   match l:
@@ -6176,6 +7947,8 @@ def T.teach.step.wait(l: I.Loc, arg0: String) -> String:
       "Wait for " ++ arg0
     case I.Ja{}:
       arg0 ++ "を待つ"
+    case I.Sux{}:
+      "𒃻 " ++ arg0
 
 def T.teach.steps(l: I.Loc, arg0: String, arg1: String, arg2: String) -> String:
   match l:
@@ -6183,6 +7956,8 @@ def T.teach.steps(l: I.Loc, arg0: String, arg1: String, arg2: String) -> String:
       arg0 ++ " · " ++ arg1 ++ " " ++ I.I18n.sel(arg2, "one", "step", "steps")
     case I.Ja{}:
       arg0 ++ "・" ++ arg1 ++ "ステップ"
+    case I.Sux{}:
+      arg0 ++ " · " ++ arg1 ++ " " ++ I.I18n.sel(arg2, "one", "𒄊", "𒄊")
 
 def T.teach.stopsave(l: I.Loc) -> String:
   match l:
@@ -6190,6 +7965,8 @@ def T.teach.stopsave(l: I.Loc) -> String:
       "Stop & save"
     case I.Ja{}:
       "停止して保存"
+    case I.Sux{}:
+      "𒉡𒁺 𒁾 𒊬"
 
 def T.teach.takeover(l: I.Loc) -> String:
   match l:
@@ -6197,6 +7974,8 @@ def T.teach.takeover(l: I.Loc) -> String:
       "Take over"
     case I.Ja{}:
       "引き継ぐ"
+    case I.Sux{}:
+      "𒆪"
 
 def T.teach.teach(l: I.Loc) -> String:
   match l:
@@ -6204,6 +7983,8 @@ def T.teach.teach(l: I.Loc) -> String:
       "Teach a task"
     case I.Ja{}:
       "タスクを教える"
+    case I.Sux{}:
+      "𒅗 𒆕"
 
 def T.teach.watching(l: I.Loc, arg0: String) -> String:
   match l:
@@ -6211,6 +7992,8 @@ def T.teach.watching(l: I.Loc, arg0: String) -> String:
       arg0 ++ " is watching and learning"
     case I.Ja{}:
       arg0 ++ "が見て学習しています"
+    case I.Sux{}:
+      arg0 ++ " 𒅆 · 𒆕"
 
 def T.teach.youhave(l: I.Loc) -> String:
   match l:
@@ -6218,6 +8001,8 @@ def T.teach.youhave(l: I.Loc) -> String:
       "You have the browser"
     case I.Ja{}:
       "ブラウザを操作中です"
+    case I.Sux{}:
+      "You have the browser"
 
 def T.terminal.close(l: I.Loc) -> String:
   match l:
@@ -6225,6 +8010,8 @@ def T.terminal.close(l: I.Loc) -> String:
       "Close (ctrl+j)"
     case I.Ja{}:
       "閉じる（ctrl+j）"
+    case I.Sux{}:
+      "𒉡𒅅"
 
 def T.terminal.inactive(l: I.Loc, arg0: String) -> String:
   match l:
@@ -6232,6 +8019,8 @@ def T.terminal.inactive(l: I.Loc, arg0: String) -> String:
       arg0 ++ "  ·  inactive, click to restart"
     case I.Ja{}:
       arg0 ++ "・停止中、クリックで再開"
+    case I.Sux{}:
+      arg0 ++ " · 𒉡𒁺 · 𒋗"
 
 def T.terminal.input(l: I.Loc) -> String:
   match l:
@@ -6239,6 +8028,8 @@ def T.terminal.input(l: I.Loc) -> String:
       "Terminal input"
     case I.Ja{}:
       "ターミナル入力"
+    case I.Sux{}:
+      "𒅗"
 
 def T.terminal.pin(l: I.Loc) -> String:
   match l:
@@ -6246,6 +8037,8 @@ def T.terminal.pin(l: I.Loc) -> String:
       "Pin to the top"
     case I.Ja{}:
       "先頭にピン留め"
+    case I.Sux{}:
+      "𒃻 𒆠"
 
 def T.terminal.pinned(l: I.Loc, arg0: String) -> String:
   match l:
@@ -6253,6 +8046,8 @@ def T.terminal.pinned(l: I.Loc, arg0: String) -> String:
       arg0 ++ "  ·  pinned at the top"
     case I.Ja{}:
       arg0 ++ "・上部に固定"
+    case I.Sux{}:
+      arg0 ++ " · 𒃻 ⬆"
 
 def T.terminal.restart(l: I.Loc) -> String:
   match l:
@@ -6260,6 +8055,8 @@ def T.terminal.restart(l: I.Loc) -> String:
       "Start it again"
     case I.Ja{}:
       "再開"
+    case I.Sux{}:
+      "𒄄 𒁺"
 
 def T.terminal.unpin(l: I.Loc) -> String:
   match l:
@@ -6267,6 +8064,8 @@ def T.terminal.unpin(l: I.Loc) -> String:
       "Unpin it back into the chat"
     case I.Ja{}:
       "ピンを外してチャットに戻す"
+    case I.Sux{}:
+      "𒉡 𒃻 𒅗"
 
 def T.thread.boat.settings(l: I.Loc) -> String:
   match l:
@@ -6274,6 +8073,8 @@ def T.thread.boat.settings(l: I.Loc) -> String:
       "Boat usage in Settings"
     case I.Ja{}:
       "設定でBoatの使用状況を表示"
+    case I.Sux{}:
+      "Boat 𒈬 𒃻"
 
 def T.thread.count(l: I.Loc, +arg0: Nat) -> String:
   match l:
@@ -6281,6 +8082,8 @@ def T.thread.count(l: I.Loc, +arg0: Nat) -> String:
       I.I18n.pick(I.I18n.plural(I.En{}, arg0), I.I18n.num(I.En{}, arg0) ++ " threads", I.I18n.num(I.En{}, arg0) ++ " thread", I.I18n.num(I.En{}, arg0) ++ " threads", I.I18n.num(I.En{}, arg0) ++ " threads", I.I18n.num(I.En{}, arg0) ++ " threads", I.I18n.num(I.En{}, arg0) ++ " threads")
     case I.Ja{}:
       "スレッド" ++ I.I18n.num(I.Ja{}, arg0) ++ "件"
+    case I.Sux{}:
+      "𒅗 " ++ I.I18n.num(I.Sux{}, arg0)
 
 def T.thread.delete.ask(l: I.Loc, arg0: String) -> String:
   match l:
@@ -6288,6 +8091,8 @@ def T.thread.delete.ask(l: I.Loc, arg0: String) -> String:
       "Delete " ++ arg0 ++ "?"
     case I.Ja{}:
       "「" ++ arg0 ++ "」を削除しますか？"
+    case I.Sux{}:
+      arg0 ++ " 𒋗𒅆𒌨?"
 
 def T.thread.from(l: I.Loc, arg0: String) -> String:
   match l:
@@ -6295,6 +8100,8 @@ def T.thread.from(l: I.Loc, arg0: String) -> String:
       "← from " ++ arg0
     case I.Ja{}:
       "← " ++ arg0 ++ "から"
+    case I.Sux{}:
+      "← " ++ arg0
 
 def T.thread.new(l: I.Loc) -> String:
   match l:
@@ -6302,6 +8109,8 @@ def T.thread.new(l: I.Loc) -> String:
       "New thread"
     case I.Ja{}:
       "新しいスレッド"
+    case I.Sux{}:
+      "𒅗 𒉋"
 
 def T.thread.reminder(l: I.Loc, arg0: String, arg1: String) -> String:
   match l:
@@ -6309,6 +8118,8 @@ def T.thread.reminder(l: I.Loc, arg0: String, arg1: String) -> String:
       "Reminder  " ++ arg0 ++ "  ·  " ++ arg1
     case I.Ja{}:
       "リマインダー　" ++ arg0 ++ "・" ++ arg1
+    case I.Sux{}:
+      "Reminder  " ++ arg0 ++ "  ·  " ++ arg1
 
 def T.thread.sending(l: I.Loc) -> String:
   match l:
@@ -6316,6 +8127,8 @@ def T.thread.sending(l: I.Loc) -> String:
       "sending…"
     case I.Ja{}:
       "送信中…"
+    case I.Sux{}:
+      "𒅗𒁉"
 
 def T.thread.snooze.hour.tip(l: I.Loc) -> String:
   match l:
@@ -6323,6 +8136,8 @@ def T.thread.snooze.hour.tip(l: I.Loc) -> String:
       "Snooze for an hour"
     case I.Ja{}:
       "1時間スヌーズ"
+    case I.Sux{}:
+      "𒀉𒌫𒆪 𒌓"
 
 def T.thread.snooze.tomorrow.tip(l: I.Loc) -> String:
   match l:
@@ -6330,6 +8145,8 @@ def T.thread.snooze.tomorrow.tip(l: I.Loc) -> String:
       "Snooze until 9:00 tomorrow"
     case I.Ja{}:
       "明日9:00までスヌーズ"
+    case I.Sux{}:
+      "𒀉𒌫𒆪 𒌓 𒉋 9:00"
 
 def T.thread.snooze.week.tip(l: I.Loc) -> String:
   match l:
@@ -6337,6 +8154,8 @@ def T.thread.snooze.week.tip(l: I.Loc) -> String:
       "Snooze for a week"
     case I.Ja{}:
       "1週間スヌーズ"
+    case I.Sux{}:
+      "𒀉𒌫𒆪 𒌓𒌓𒌓𒌓𒌓𒌓𒌓"
 
 def T.thread.subagents(l: I.Loc) -> String:
   match l:
@@ -6344,6 +8163,8 @@ def T.thread.subagents(l: I.Loc) -> String:
       "Subagents"
     case I.Ja{}:
       "サブエージェント"
+    case I.Sux{}:
+      "𒇽𒇽"
 
 def T.thread.title.cancel(l: I.Loc) -> String:
   match l:
@@ -6351,6 +8172,8 @@ def T.thread.title.cancel(l: I.Loc) -> String:
       "Leave the title as it was"
     case I.Ja{}:
       "名前を元に戻す"
+    case I.Sux{}:
+      "𒈬 𒄄"
 
 def T.thread.title.keep(l: I.Loc) -> String:
   match l:
@@ -6358,6 +8181,8 @@ def T.thread.title.keep(l: I.Loc) -> String:
       "Keep this title"
     case I.Ja{}:
       "この名前を保存"
+    case I.Sux{}:
+      "𒈬 𒃻"
 
 def T.thread.title.placeholder(l: I.Loc) -> String:
   match l:
@@ -6365,6 +8190,8 @@ def T.thread.title.placeholder(l: I.Loc) -> String:
       "Thread title"
     case I.Ja{}:
       "スレッド名"
+    case I.Sux{}:
+      "𒈬"
 
 def T.thread.title.rename(l: I.Loc) -> String:
   match l:
@@ -6372,6 +8199,8 @@ def T.thread.title.rename(l: I.Loc) -> String:
       "Click to rename"
     case I.Ja{}:
       "クリックで名前を変更"
+    case I.Sux{}:
+      "𒈬 𒉋"
 
 def T.thread.viewer(l: I.Loc) -> String:
   match l:
@@ -6379,6 +8208,8 @@ def T.thread.viewer(l: I.Loc) -> String:
       "Viewer"
     case I.Ja{}:
       "ビューア"
+    case I.Sux{}:
+      "𒅆"
 
 def T.todos.all(l: I.Loc, arg0: String) -> String:
   match l:
@@ -6386,6 +8217,8 @@ def T.todos.all(l: I.Loc, arg0: String) -> String:
       "Show all " ++ arg0
     case I.Ja{}:
       "すべて表示（" ++ arg0 ++ "）"
+    case I.Sux{}:
+      "𒅆 " ++ arg0
 
 def T.todos.fewer(l: I.Loc) -> String:
   match l:
@@ -6393,6 +8226,8 @@ def T.todos.fewer(l: I.Loc) -> String:
       "Show fewer"
     case I.Ja{}:
       "表示を減らす"
+    case I.Sux{}:
+      "𒉡𒃲"
 
 def T.todos.hide(l: I.Loc) -> String:
   match l:
@@ -6400,6 +8235,8 @@ def T.todos.hide(l: I.Loc) -> String:
       "Hide the steps"
     case I.Ja{}:
       "手順を隠す"
+    case I.Sux{}:
+      "𒉡𒅆"
 
 def T.todos.show(l: I.Loc) -> String:
   match l:
@@ -6407,6 +8244,8 @@ def T.todos.show(l: I.Loc) -> String:
       "Show the steps"
     case I.Ja{}:
       "手順を表示"
+    case I.Sux{}:
+      "𒅆"
 
 def T.tools.forkthread(l: I.Loc) -> String:
   match l:
@@ -6414,6 +8253,8 @@ def T.tools.forkthread(l: I.Loc) -> String:
       "Fork thread"
     case I.Ja{}:
       "スレッドを分岐"
+    case I.Sux{}:
+      "𒅗 𒉋"
 
 def T.tools.pinned(l: I.Loc) -> String:
   match l:
@@ -6421,6 +8262,8 @@ def T.tools.pinned(l: I.Loc) -> String:
       "Pinned"
     case I.Ja{}:
       "固定中"
+    case I.Sux{}:
+      "𒃻"
 
 def T.tools.snooze(l: I.Loc) -> String:
   match l:
@@ -6428,6 +8271,8 @@ def T.tools.snooze(l: I.Loc) -> String:
       "Snooze"
     case I.Ja{}:
       "スヌーズ"
+    case I.Sux{}:
+      "𒀉𒌫𒆪 𒌓"
 
 def T.tools.tip.archive(l: I.Loc) -> String:
   match l:
@@ -6435,6 +8280,8 @@ def T.tools.tip.archive(l: I.Loc) -> String:
       "Put it away in the archive"
     case I.Ja{}:
       "アーカイブに保管"
+    case I.Sux{}:
+      "𒁾𒂍"
 
 def T.tools.tip.askdelete(l: I.Loc) -> String:
   match l:
@@ -6442,6 +8289,8 @@ def T.tools.tip.askdelete(l: I.Loc) -> String:
       "Delete this thread (asks first)"
     case I.Ja{}:
       "このスレッドを削除（確認あり）"
+    case I.Sux{}:
+      "𒅗 𒋗𒅆𒌨 · 𒂗𒋻"
 
 def T.tools.tip.back(l: I.Loc) -> String:
   match l:
@@ -6449,6 +8298,8 @@ def T.tools.tip.back(l: I.Loc) -> String:
       "Send what this fork did to the thread it came from, with its next message"
     case I.Ja{}:
       "分岐先で行った作業を、次のメッセージとともに元のスレッドへ送る"
+    case I.Sux{}:
+      "Send what this fork did to the thread it came from, with its next message"
 
 def T.tools.tip.delete(l: I.Loc) -> String:
   match l:
@@ -6456,6 +8307,8 @@ def T.tools.tip.delete(l: I.Loc) -> String:
       "Delete it for good"
     case I.Ja{}:
       "完全に削除"
+    case I.Sux{}:
+      "𒋗𒅆𒌨"
 
 def T.tools.tip.forkthread(l: I.Loc) -> String:
   match l:
@@ -6463,6 +8316,8 @@ def T.tools.tip.forkthread(l: I.Loc) -> String:
       "A new thread that goes on from here"
     case I.Ja{}:
       "ここから続く新しいスレッドを作成"
+    case I.Sux{}:
+      "𒅗 𒉋"
 
 def T.tools.tip.keep(l: I.Loc) -> String:
   match l:
@@ -6470,6 +8325,8 @@ def T.tools.tip.keep(l: I.Loc) -> String:
       "Keep it"
     case I.Ja{}:
       "削除せずに残す"
+    case I.Sux{}:
+      "𒃻"
 
 def T.tools.tip.panel(l: I.Loc) -> String:
   match l:
@@ -6477,6 +8334,8 @@ def T.tools.tip.panel(l: I.Loc) -> String:
       "Board, schematic, 3D, Mech, files, diff and browser beside the thread"
     case I.Ja{}:
       "基板、回路図、3D、機構、ファイル、差分、ブラウザーをスレッドの横に表示"
+    case I.Sux{}:
+      "Board, schematic, 3D, Mech, files, diff and browser beside the thread"
 
 def T.tools.tip.pin(l: I.Loc) -> String:
   match l:
@@ -6484,6 +8343,8 @@ def T.tools.tip.pin(l: I.Loc) -> String:
       "Keep it at the top of the list"
     case I.Ja{}:
       "一覧の先頭に固定"
+    case I.Sux{}:
+      "𒃻 𒀭"
 
 def T.tools.tip.settle(l: I.Loc) -> String:
   match l:
@@ -6491,6 +8352,8 @@ def T.tools.tip.settle(l: I.Loc) -> String:
       "Done for now: it leaves the active threads"
     case I.Ja{}:
       "作業を完了し、進行中の一覧から外す"
+    case I.Sux{}:
+      "𒌀"
 
 def T.tools.tip.snooze(l: I.Loc) -> String:
   match l:
@@ -6498,6 +8361,8 @@ def T.tools.tip.snooze(l: I.Loc) -> String:
       "Hide it until later"
     case I.Ja{}:
       "後で表示するまで非表示にする"
+    case I.Sux{}:
+      "𒉡𒅆 𒌓"
 
 def T.tools.tip.stop(l: I.Loc) -> String:
   match l:
@@ -6505,6 +8370,8 @@ def T.tools.tip.stop(l: I.Loc) -> String:
       "Stop the running turn"
     case I.Ja{}:
       "実行中のターンを停止"
+    case I.Sux{}:
+      "𒉡𒁺"
 
 def T.tools.tip.terminal(l: I.Loc) -> String:
   match l:
@@ -6512,6 +8379,8 @@ def T.tools.tip.terminal(l: I.Loc) -> String:
       "A shell in the thread's folder (ctrl+j)"
     case I.Ja{}:
       "スレッドのフォルダーでシェルを開く（ctrl+j）"
+    case I.Sux{}:
+      "A shell in the thread's folder (ctrl+j)"
 
 def T.tools.tip.unarchive(l: I.Loc) -> String:
   match l:
@@ -6519,6 +8388,8 @@ def T.tools.tip.unarchive(l: I.Loc) -> String:
       "Bring it back from the archive"
     case I.Ja{}:
       "アーカイブから戻す"
+    case I.Sux{}:
+      "𒄄 𒁾𒂍"
 
 def T.tools.tip.unpin(l: I.Loc) -> String:
   match l:
@@ -6526,6 +8397,8 @@ def T.tools.tip.unpin(l: I.Loc) -> String:
       "Unpin: it sorts with the rest again"
     case I.Ja{}:
       "ピン留めを外し、通常の順序に戻す"
+    case I.Sux{}:
+      "𒉡𒃻"
 
 def T.tools.tip.unsettle(l: I.Loc) -> String:
   match l:
@@ -6533,6 +8406,8 @@ def T.tools.tip.unsettle(l: I.Loc) -> String:
       "Bring it back to the active threads"
     case I.Ja{}:
       "進行中のスレッドに戻す"
+    case I.Sux{}:
+      "𒄄 𒁺"
 
 def T.tools.tip.wake(l: I.Loc) -> String:
   match l:
@@ -6540,6 +8415,8 @@ def T.tools.tip.wake(l: I.Loc) -> String:
       "Wake it now"
     case I.Ja{}:
       "今すぐスヌーズを解除"
+    case I.Sux{}:
+      "𒁺"
 
 def T.tour.back(l: I.Loc) -> String:
   match l:
@@ -6547,6 +8424,8 @@ def T.tour.back(l: I.Loc) -> String:
       "Back"
     case I.Ja{}:
       "戻る"
+    case I.Sux{}:
+      "𒄄"
 
 def T.tour.back.tip(l: I.Loc) -> String:
   match l:
@@ -6554,6 +8433,8 @@ def T.tour.back.tip(l: I.Loc) -> String:
       "The step before (left arrow)"
     case I.Ja{}:
       "前の手順（左矢印）"
+    case I.Sux{}:
+      "𒄊 𒄄 (←)"
 
 def T.tour.body.agents(l: I.Loc) -> String:
   match l:
@@ -6561,6 +8442,8 @@ def T.tour.body.agents(l: I.Loc) -> String:
       "Backplane runs the Claude Code, Codex, Grok or Muse Code command-line program: install one and sign in to it on the machine that runs this hub. Settings shows whether each is found, not whether you are signed in. Google's Antigravity agent installs and signs in from Settings. Choose the provider and model in a thread's composer, or in Settings for new threads."
     case I.Ja{}:
       "Backplaneは、Claude Code、Codex、Grok、Muse Codeのコマンドラインプログラムを実行します。このハブを動かすマシンにいずれかをインストールし、サインインしてください。設定には各プログラムが見つかったかどうかが表示されますが、サインイン状態は表示されません。GoogleのAntigravityエージェントは設定からインストールとサインインができます。プロバイダーとモデルは、スレッドの入力欄で、新しいスレッド用には設定で選びます。"
+    case I.Sux{}:
+      "Backplane runs the Claude Code, Codex, Grok or Muse Code command-line program: install one and sign in to it on the machine that runs this hub. Settings shows whether each is found, not whether you are signed in. Google's Antigravity agent installs and signs in from Settings. Choose the provider and model in a thread's composer, or in Settings for new threads."
 
 def T.tour.body.bots.desktop(l: I.Loc) -> String:
   match l:
@@ -6568,6 +8451,8 @@ def T.tour.body.bots.desktop(l: I.Loc) -> String:
       "A bot is an agent that stays between chats, with a name, a cat and a memory. Add one under Bots in the sidebar, then mention it in any message: @scout look at the BOM."
     case I.Ja{}:
       "ボットは、チャットをまたいで残るエージェントで、名前、猫、記憶を持ちます。サイドバーの「ボット」から追加し、メッセージで呼び出します：@scout BOMを見て"
+    case I.Sux{}:
+      "A bot is an agent that stays between chats, with a name, a cat and a memory. Add one under Bots in the sidebar, then mention it in any message: @scout look at the BOM."
 
 def T.tour.body.bots.phone(l: I.Loc) -> String:
   match l:
@@ -6575,6 +8460,8 @@ def T.tour.body.bots.phone(l: I.Loc) -> String:
       "A bot is an agent that stays between chats, with a name, a cat and a memory. Add one under Bots in the list, then mention it in any message: @scout look at the BOM."
     case I.Ja{}:
       "ボットは、チャットをまたいで残るエージェントで、名前、猫、記憶を持ちます。一覧の「ボット」から追加し、メッセージで呼び出します：@scout BOMを見て"
+    case I.Sux{}:
+      "A bot is an agent that stays between chats, with a name, a cat and a memory. Add one under Bots in the list, then mention it in any message: @scout look at the BOM."
 
 def T.tour.body.buttons.desktop(l: I.Loc) -> String:
   match l:
@@ -6582,6 +8469,8 @@ def T.tour.body.buttons.desktop(l: I.Loc) -> String:
       "Settle takes a thread out of the active list. Snooze hides it until later. Fork starts a new thread from this one. Viewer opens the board, schematic, 3D and files beside it. Pin, archive and delete are there too."
     case I.Ja{}:
       "「完了」はスレッドを進行中の一覧から外し、「スヌーズ」は後まで隠し、「フォーク」はこのスレッドから新しいスレッドを始めます。「ビューア」は基板、回路図、3D、ファイルを横に開きます。ピン留め、アーカイブ、削除もここにあります。"
+    case I.Sux{}:
+      "Settle takes a thread out of the active list. Snooze hides it until later. Fork starts a new thread from this one. Viewer opens the board, schematic, 3D and files beside it. Pin, archive and delete are there too."
 
 def T.tour.body.buttons.phone(l: I.Loc) -> String:
   match l:
@@ -6589,6 +8478,8 @@ def T.tour.body.buttons.phone(l: I.Loc) -> String:
       "In a thread's toolbar menu, Settle takes it out of the active list. Snooze hides it until later. Fork starts a new thread from it. The viewer shows the board, schematic, 3D and files. Pin, archive and delete are there too."
     case I.Ja{}:
       "スレッドのツールバーメニューで、「完了」は進行中の一覧から外し、「スヌーズ」は後まで隠し、「フォーク」はそこから新しいスレッドを始めます。ビューアには基板、回路図、3D、ファイルが表示されます。ピン留め、アーカイブ、削除もここにあります。"
+    case I.Sux{}:
+      "In a thread's toolbar menu, Settle takes it out of the active list. Snooze hides it until later. Fork starts a new thread from it. The viewer shows the board, schematic, 3D and files. Pin, archive and delete are there too."
 
 def T.tour.body.keys.desktop(l: I.Loc) -> String:
   match l:
@@ -6596,6 +8487,8 @@ def T.tour.body.keys.desktop(l: I.Loc) -> String:
       "API keys for other services are kept in a file on the hub's machine that agents running there could read. They are told not to print them; nothing enforces it. Dictation needs an OpenAI key, set under Voice in Settings."
     case I.Ja{}:
       "他のサービスのAPIキーは、ハブのマシン上のファイルに保管され、そこで動くエージェントなら読める可能性があります。出力しないよう指示してありますが、強制はされません。音声入力にはOpenAIキーが必要で、設定の「音声」で入力します。"
+    case I.Sux{}:
+      "API keys for other services are kept in a file on the hub's machine that agents running there could read. They are told not to print them; nothing enforces it. Dictation needs an OpenAI key, set under Voice in Settings."
 
 def T.tour.body.keys.phone(l: I.Loc) -> String:
   match l:
@@ -6603,6 +8496,8 @@ def T.tour.body.keys.phone(l: I.Loc) -> String:
       "API keys for other services are kept in a file on the hub's machine that agents running there could read. They are told not to print them; nothing enforces it. Dictation's OpenAI key is set in Settings on a computer or the web page."
     case I.Ja{}:
       "他のサービスのAPIキーは、ハブのマシン上のファイルに保管され、そこで動くエージェントなら読める可能性があります。出力しないよう指示してありますが、強制はされません。音声入力のOpenAIキーは、コンピューターまたはウェブページの設定で入力します。"
+    case I.Sux{}:
+      "API keys for other services are kept in a file on the hub's machine that agents running there could read. They are told not to print them; nothing enforces it. Dictation's OpenAI key is set in Settings on a computer or the web page."
 
 def T.tour.body.machines.desktop(l: I.Loc) -> String:
   match l:
@@ -6610,6 +8505,8 @@ def T.tour.body.machines.desktop(l: I.Loc) -> String:
       "Each home folder runs one hub. With Tailscale signed in when Backplane starts, the hub listens on your tailnet and every two minutes asks your other online machines whether Backplane runs there. Tailscale vouches that they are yours, so the hubs link by themselves and sync each other's projects and threads into this sidebar in the background: no switching. A project still loading is faded and says syncing; the rest work meanwhile. In a message, >desktop: names a thread on the machine called desktop. Settings, Your machines shows each one and turns sync off for any of them. Settings also says Tailscale: on, not connected (sign in, then restart Backplane) or off (started with --no-tailscale)."
     case I.Ja{}:
       "ホームフォルダごとに1つのハブが動きます。Backplaneの起動時にTailscaleにサインインしていれば、ハブはtailnetで待ち受け、2分おきにオンラインの他のマシンでBackplaneが動いているか確認します。Tailscaleが自分のマシンであることを保証するので、ハブは自動でリンクし、プロジェクトとスレッドを裏でこのサイドバーに同期します。切り替えは不要です。読み込み中のプロジェクトは薄く表示され、「同期中」と出ますが、残りはその間も使えます。メッセージで>desktop:と書くと、desktopというマシンのスレッドを指します。設定の「自分のマシン」には各マシンが表示され、マシンごとに同期をオフにできます。設定にはTailscaleの状態も表示されます：オン、未接続（サインインしてからBackplaneを再起動）、オフ（--no-tailscaleで起動）。"
+    case I.Sux{}:
+      "Each home folder runs one hub. With Tailscale signed in when Backplane starts, the hub listens on your tailnet and every two minutes asks your other online machines whether Backplane runs there. Tailscale vouches that they are yours, so the hubs link by themselves and sync each other's projects and threads into this sidebar in the background: no switching. A project still loading is faded and says syncing; the rest work meanwhile. In a message, >desktop: names a thread on the machine called desktop. Settings, Your machines shows each one and turns sync off for any of them. Settings also says Tailscale: on, not connected (sign in, then restart Backplane) or off (started with --no-tailscale)."
 
 def T.tour.body.machines.phone(l: I.Loc) -> String:
   match l:
@@ -6617,6 +8514,8 @@ def T.tour.body.machines.phone(l: I.Loc) -> String:
       "Each home folder runs one hub. Hubs on your computers find each other over Tailscale and sync each other's projects and threads in the background, so any one of them shows them all. A project still loading is faded and says syncing. In a message, >desktop: names a thread on the machine called desktop. The Hubs button lists the hubs this phone is paired with; this phone needs Tailscale on the same tailnet."
     case I.Ja{}:
       "ホームフォルダごとに1つのハブが動きます。コンピューター上のハブはTailscale経由で互いを見つけ、プロジェクトとスレッドを裏で同期するので、どのハブからもすべて見えます。読み込み中のプロジェクトは薄く表示され、「同期中」と出ます。メッセージで>desktop:と書くと、desktopというマシンのスレッドを指します。「ハブ」ボタンには、このスマートフォンがペアリングしたハブが並びます。このスマートフォンも同じtailnetのTailscaleが必要です。"
+    case I.Sux{}:
+      "Each home folder runs one hub. Hubs on your computers find each other over Tailscale and sync each other's projects and threads in the background, so any one of them shows them all. A project still loading is faded and says syncing. In a message, >desktop: names a thread on the machine called desktop. The Hubs button lists the hubs this phone is paired with; this phone needs Tailscale on the same tailnet."
 
 def T.tour.body.phones.desktop(l: I.Loc) -> String:
   match l:
@@ -6624,6 +8523,8 @@ def T.tour.body.phones.desktop(l: I.Loc) -> String:
       "To pair a phone, install Tailscale on it and join the same tailnet. Then open Settings, Pairing link, QR code and scan it with the Backplane app or the phone's camera. Settings shows the link when Backplane has one. A browser on a tailnet device can open this hub's web address too."
     case I.Ja{}:
       "スマートフォンをペアリングするには、Tailscaleをインストールして同じtailnetに参加します。次に設定の「ペアリングリンク」から「QRコード」を開き、Backplaneアプリかスマートフォンのカメラで読み取ります。リンクがあるときは設定に表示されます。tailnet上の端末のブラウザでも、このハブのウェブアドレスを開けます。"
+    case I.Sux{}:
+      "To pair a phone, install Tailscale on it and join the same tailnet. Then open Settings, Pairing link, QR code and scan it with the Backplane app or the phone's camera. Settings shows the link when Backplane has one. A browser on a tailnet device can open this hub's web address too."
 
 def T.tour.body.phones.phone(l: I.Loc) -> String:
   match l:
@@ -6631,6 +8532,8 @@ def T.tour.body.phones.phone(l: I.Loc) -> String:
       "On the hub's computer open Settings, Pairing link, QR code. Here, Hubs, Scan QR code pairs it. This phone needs Tailscale on the same tailnet. A browser can open a hub's web address too."
     case I.Ja{}:
       "ハブのコンピューターで、設定の「ペアリングリンク」から「QRコード」を開きます。こちらでは「ハブ」の「QRコードをスキャン」でペアリングします。このスマートフォンも同じtailnetのTailscaleが必要です。ブラウザでもハブのウェブアドレスを開けます。"
+    case I.Sux{}:
+      "On the hub's computer open Settings, Pairing link, QR code. Here, Hubs, Scan QR code pairs it. This phone needs Tailscale on the same tailnet. A browser can open a hub's web address too."
 
 def T.tour.body.projects.desktop(l: I.Loc, arg0: String) -> String:
   match l:
@@ -6638,6 +8541,8 @@ def T.tour.body.projects.desktop(l: I.Loc, arg0: String) -> String:
       "A project is a folder, usually a KiCad project. Add one with + at the top of the sidebar. Scratch holds chats with no project. It is temporary: a thread left alone for " ++ arg0 ++ " days is deleted with its folder, unless pinned."
     case I.Ja{}:
       "プロジェクトはフォルダで、たいていはKiCadプロジェクトです。サイドバー上部の＋で追加します。スクラッチはプロジェクトなしのチャットを置く場所で、一時的なものです。" ++ arg0 ++ "日間放置したスレッドは、ピン留めされていない限りフォルダごと削除されます。"
+    case I.Sux{}:
+      "A project is a folder, usually a KiCad project. Add one with + at the top of the sidebar. Scratch holds chats with no project. It is temporary: a thread left alone for " ++ arg0 ++ " days is deleted with its folder, unless pinned."
 
 def T.tour.body.projects.phone(l: I.Loc, arg0: String) -> String:
   match l:
@@ -6645,6 +8550,8 @@ def T.tour.body.projects.phone(l: I.Loc, arg0: String) -> String:
       "A project is a folder, usually a KiCad project. Add one with the folder-plus button on the project list. Scratch holds chats with no project. It is temporary: a thread left alone for " ++ arg0 ++ " days is deleted with its folder, unless pinned."
     case I.Ja{}:
       "プロジェクトはフォルダで、たいていはKiCadプロジェクトです。プロジェクト一覧のフォルダ追加ボタンで追加します。スクラッチはプロジェクトなしのチャットを置く場所で、一時的なものです。" ++ arg0 ++ "日間放置したスレッドは、ピン留めされていない限りフォルダごと削除されます。"
+    case I.Sux{}:
+      "A project is a folder, usually a KiCad project. Add one with the folder-plus button on the project list. Scratch holds chats with no project. It is temporary: a thread left alone for " ++ arg0 ++ " days is deleted with its folder, unless pinned."
 
 def T.tour.body.threads(l: I.Loc) -> String:
   match l:
@@ -6652,6 +8559,8 @@ def T.tour.body.threads(l: I.Loc) -> String:
       "A thread is a conversation with an agent working on a project. Git projects use separate worktrees by default; without git, or in local mode, threads share the project folder. Runs of tool calls fold into one row, and delegated work shows under Subagents."
     case I.Ja{}:
       "スレッドは、プロジェクトで作業するエージェントとの会話です。Gitプロジェクトでは既定で別々のワークツリーを使い、Gitがない場合やローカルモードでは、スレッドはプロジェクトのフォルダを共有します。ツールの呼び出しは1行にまとめられ、委任した作業はサブエージェントの下に表示されます。"
+    case I.Sux{}:
+      "A thread is a conversation with an agent working on a project. Git projects use separate worktrees by default; without git, or in local mode, threads share the project folder. Runs of tool calls fold into one row, and delegated work shows under Subagents."
 
 def T.tour.body.uber.have.desktop(l: I.Loc, arg0: String) -> String:
   match l:
@@ -6659,6 +8568,8 @@ def T.tour.body.uber.have.desktop(l: I.Loc, arg0: String) -> String:
       arg0 ++ " is your uberbot. Click it at the top of the sidebar for the Status of everything."
     case I.Ja{}:
       arg0 ++ "が自分のメインボットです。サイドバーの先頭でクリックすると、すべてのステータスを確認できます。"
+    case I.Sux{}:
+      arg0 ++ " is your uberbot. Click it at the top of the sidebar for the Status of everything."
 
 def T.tour.body.uber.have.phone(l: I.Loc, arg0: String) -> String:
   match l:
@@ -6666,6 +8577,8 @@ def T.tour.body.uber.have.phone(l: I.Loc, arg0: String) -> String:
       arg0 ++ " is your uberbot. Click it at the top of the list for the Status of everything."
     case I.Ja{}:
       arg0 ++ "が自分のメインボットです。一覧の先頭でタップすると、すべてのステータスを確認できます。"
+    case I.Sux{}:
+      arg0 ++ " is your uberbot. Click it at the top of the list for the Status of everything."
 
 def T.tour.body.uber.join(l: I.Loc, arg0: String) -> String:
   match l:
@@ -6673,6 +8586,8 @@ def T.tour.body.uber.join(l: I.Loc, arg0: String) -> String:
       "Another of your machines has an uberbot, " ++ arg0 ++ "."
     case I.Ja{}:
       "別のマシンにメインボット「" ++ arg0 ++ "」があります。"
+    case I.Sux{}:
+      "Another of your machines has an uberbot, " ++ arg0 ++ "."
 
 def T.tour.body.uber.none(l: I.Loc) -> String:
   match l:
@@ -6680,6 +8595,8 @@ def T.tour.body.uber.none(l: I.Loc) -> String:
       "Your uberbot is the cat you talk to first: it sees every project, thread, bot and machine, and its Status tab shows what runs and what waits on you. Create it now; you can rename it later."
     case I.Ja{}:
       "メインボットは最初に話しかける猫です。すべてのプロジェクト、スレッド、ボット、マシンを把握し、「ステータス」タブで実行中のものや対応待ちのものを確認できます。今作成しましょう。名前はあとから変更できます。"
+    case I.Sux{}:
+      "Your uberbot is the cat you talk to first: it sees every project, thread, bot and machine, and its Status tab shows what runs and what waits on you. Create it now; you can rename it later."
 
 def T.tour.body.uber.pick(l: I.Loc, arg0: String) -> String:
   match l:
@@ -6687,6 +8604,8 @@ def T.tour.body.uber.pick(l: I.Loc, arg0: String) -> String:
       "Your uberbot is the cat you talk to first: it sees every project, thread, bot and machine, and its Status tab shows what runs and what waits on you. Make one of your bots the uberbot: " ++ arg0 ++ " is the one you use most. You can change it later."
     case I.Ja{}:
       "メインボットは最初に話しかける猫です。すべてのプロジェクト、スレッド、ボット、マシンを把握し、「ステータス」タブで実行中のものや対応待ちのものを確認できます。いずれかのボットをメインボットにしてください。" ++ arg0 ++ "が一番よく使われています。あとから変更できます。"
+    case I.Sux{}:
+      "Your uberbot is the cat you talk to first: it sees every project, thread, bot and machine, and its Status tab shows what runs and what waits on you. Make one of your bots the uberbot: " ++ arg0 ++ " is the one you use most. You can change it later."
 
 def T.tour.body.welcome.phone(l: I.Loc) -> String:
   match l:
@@ -6694,6 +8613,8 @@ def T.tour.body.welcome.phone(l: I.Loc) -> String:
       "A short tour of what is where. Skip it any time; More, Settings shows it again."
     case I.Ja{}:
       "どこに何があるかの簡単なツアーです。いつでもスキップできます。「その他」の「設定」からもう一度表示できます。"
+    case I.Sux{}:
+      "A short tour of what is where. Skip it any time; More, Settings shows it again."
 
 def T.tour.body.welcome.web(l: I.Loc) -> String:
   match l:
@@ -6701,6 +8622,8 @@ def T.tour.body.welcome.web(l: I.Loc) -> String:
       "A short tour of what is where. Enter goes on (on a focused button it presses that button), Esc skips it, and Settings shows it again."
     case I.Ja{}:
       "どこに何があるかの簡単なツアーです。Enterで次へ進み（ボタンにフォーカスがあるときはそのボタンを押します）、Escでスキップできます。設定からもう一度表示できます。"
+    case I.Sux{}:
+      "A short tour of what is where. Enter goes on (on a focused button it presses that button), Esc skips it, and Settings shows it again."
 
 def T.tour.body.welcome.window(l: I.Loc) -> String:
   match l:
@@ -6708,6 +8631,8 @@ def T.tour.body.welcome.window(l: I.Loc) -> String:
       "A short tour of what is where. Enter goes on, Esc skips it, and Settings shows it again."
     case I.Ja{}:
       "どこに何があるかの簡単なツアーです。Enterで次へ進み、Escでスキップできます。設定からもう一度表示できます。"
+    case I.Sux{}:
+      "A short tour of what is where. Enter goes on, Esc skips it, and Settings shows it again."
 
 def T.tour.counter(l: I.Loc, arg0: String, arg1: String) -> String:
   match l:
@@ -6715,6 +8640,8 @@ def T.tour.counter(l: I.Loc, arg0: String, arg1: String) -> String:
       arg0 ++ " of " ++ arg1
     case I.Ja{}:
       arg0 ++ "／" ++ arg1
+    case I.Sux{}:
+      "𒄊 " ++ arg0 ++ "/" ++ arg1
 
 def T.tour.done(l: I.Loc) -> String:
   match l:
@@ -6722,6 +8649,8 @@ def T.tour.done(l: I.Loc) -> String:
       "Done"
     case I.Ja{}:
       "完了"
+    case I.Sux{}:
+      "𒌀"
 
 def T.tour.end.tip(l: I.Loc) -> String:
   match l:
@@ -6729,6 +8658,8 @@ def T.tour.end.tip(l: I.Loc) -> String:
       "End the tour (Esc)"
     case I.Ja{}:
       "ツアーを終了（Esc）"
+    case I.Sux{}:
+      "𒅅"
 
 def T.tour.next(l: I.Loc) -> String:
   match l:
@@ -6736,6 +8667,8 @@ def T.tour.next(l: I.Loc) -> String:
       "Next"
     case I.Ja{}:
       "次へ"
+    case I.Sux{}:
+      "𒉋"
 
 def T.tour.next.tip(l: I.Loc) -> String:
   match l:
@@ -6743,6 +8676,8 @@ def T.tour.next.tip(l: I.Loc) -> String:
       "Next step (Enter or right arrow)"
     case I.Ja{}:
       "次の手順（Enterか右矢印）"
+    case I.Sux{}:
+      "𒄊 𒉋 (Enter →)"
 
 def T.tour.skip(l: I.Loc) -> String:
   match l:
@@ -6750,6 +8685,8 @@ def T.tour.skip(l: I.Loc) -> String:
       "Skip"
     case I.Ja{}:
       "スキップ"
+    case I.Sux{}:
+      "𒉡𒁺"
 
 def T.tour.title.agents(l: I.Loc) -> String:
   match l:
@@ -6757,6 +8694,8 @@ def T.tour.title.agents(l: I.Loc) -> String:
       "Your agents"
     case I.Ja{}:
       "エージェント"
+    case I.Sux{}:
+      "𒇽𒇽"
 
 def T.tour.title.bots(l: I.Loc) -> String:
   match l:
@@ -6764,6 +8703,8 @@ def T.tour.title.bots(l: I.Loc) -> String:
       "Bots"
     case I.Ja{}:
       "ボット"
+    case I.Sux{}:
+      "𒇽𒇽"
 
 def T.tour.title.buttons(l: I.Loc) -> String:
   match l:
@@ -6771,6 +8712,8 @@ def T.tour.title.buttons(l: I.Loc) -> String:
       "The thread's buttons"
     case I.Ja{}:
       "スレッドのボタン"
+    case I.Sux{}:
+      "𒅗𒅗"
 
 def T.tour.title.keys(l: I.Loc) -> String:
   match l:
@@ -6778,6 +8721,8 @@ def T.tour.title.keys(l: I.Loc) -> String:
       "Keys and voice"
     case I.Ja{}:
       "キーと音声"
+    case I.Sux{}:
+      "𒅗 𒅗𒁉"
 
 def T.tour.title.machines(l: I.Loc) -> String:
   match l:
@@ -6785,6 +8730,8 @@ def T.tour.title.machines(l: I.Loc) -> String:
       "Other machines"
     case I.Ja{}:
       "他のマシン"
+    case I.Sux{}:
+      "𒂍𒂍"
 
 def T.tour.title.phones(l: I.Loc) -> String:
   match l:
@@ -6792,6 +8739,8 @@ def T.tour.title.phones(l: I.Loc) -> String:
       "Phones and browsers"
     case I.Ja{}:
       "スマートフォンとブラウザ"
+    case I.Sux{}:
+      "Phones and browsers"
 
 def T.tour.title.projects(l: I.Loc) -> String:
   match l:
@@ -6799,6 +8748,8 @@ def T.tour.title.projects(l: I.Loc) -> String:
       "Projects"
     case I.Ja{}:
       "プロジェクト"
+    case I.Sux{}:
+      "𒂍𒂍"
 
 def T.tour.title.threads(l: I.Loc) -> String:
   match l:
@@ -6806,6 +8757,8 @@ def T.tour.title.threads(l: I.Loc) -> String:
       "Threads"
     case I.Ja{}:
       "スレッド"
+    case I.Sux{}:
+      "𒅗𒅗"
 
 def T.tour.title.uber(l: I.Loc) -> String:
   match l:
@@ -6813,6 +8766,8 @@ def T.tour.title.uber(l: I.Loc) -> String:
       "Your uberbot"
     case I.Ja{}:
       "メインボット"
+    case I.Sux{}:
+      "𒇽𒂍"
 
 def T.tour.title.welcome(l: I.Loc) -> String:
   match l:
@@ -6820,6 +8775,8 @@ def T.tour.title.welcome(l: I.Loc) -> String:
       "Welcome to Backplane"
     case I.Ja{}:
       "Backplaneへようこそ"
+    case I.Sux{}:
+      "Backplane 𒅅"
 
 def T.tour.uber.create(l: I.Loc) -> String:
   match l:
@@ -6827,6 +8784,8 @@ def T.tour.uber.create(l: I.Loc) -> String:
       "Create my uberbot"
     case I.Ja{}:
       "自分のメインボットを作成"
+    case I.Sux{}:
+      "𒂍 𒆕"
 
 def T.tour.uber.first(l: I.Loc, arg0: String) -> String:
   match l:
@@ -6834,6 +8793,8 @@ def T.tour.uber.first(l: I.Loc, arg0: String) -> String:
       "Make " ++ arg0 ++ " my uberbot"
     case I.Ja{}:
       arg0 ++ "を自分のメインボットにする"
+    case I.Sux{}:
+      "𒆕 " ++ arg0 ++ " uberbot"
 
 def T.tour.uber.make(l: I.Loc, arg0: String) -> String:
   match l:
@@ -6841,6 +8802,8 @@ def T.tour.uber.make(l: I.Loc, arg0: String) -> String:
       "Make " ++ arg0
     case I.Ja{}:
       arg0 ++ "にする"
+    case I.Sux{}:
+      "𒆕 " ++ arg0
 
 def T.tour.uber.new(l: I.Loc) -> String:
   match l:
@@ -6848,6 +8811,8 @@ def T.tour.uber.new(l: I.Loc) -> String:
       "Create a new one"
     case I.Ja{}:
       "新しく作成"
+    case I.Sux{}:
+      "𒉋"
 
 def T.turn.by(l: I.Loc, +arg0: String) -> String:
   match l:
@@ -6855,6 +8820,8 @@ def T.turn.by(l: I.Loc, +arg0: String) -> String:
       I.I18n.sel(arg0, "you", "You", I.I18n.sel(arg0, "agent", "Agent", "Someone"))
     case I.Ja{}:
       I.I18n.sel(arg0, "you", "自分", I.I18n.sel(arg0, "agent", "エージェント", "不明"))
+    case I.Sux{}:
+      I.I18n.sel(arg0, "you", "𒍝𒂊", I.I18n.sel(arg0, "agent", "𒇽 𒅗", "𒇽"))
 
 def T.tz.invalid(l: I.Loc) -> String:
   match l:
@@ -6862,6 +8829,8 @@ def T.tz.invalid(l: I.Loc) -> String:
       "That is not a time zone name (like Europe/Helsinki)"
     case I.Ja{}:
       "タイムゾーン名ではありません（例：Europe/Helsinki）"
+    case I.Sux{}:
+      "That is not a time zone name (like Europe/Helsinki)"
 
 def T.tz.source.machine(l: I.Loc) -> String:
   match l:
@@ -6869,6 +8838,8 @@ def T.tz.source.machine(l: I.Loc) -> String:
       "this machine"
     case I.Ja{}:
       "このマシン"
+    case I.Sux{}:
+      "𒂍"
 
 def T.tz.source.none(l: I.Loc) -> String:
   match l:
@@ -6876,6 +8847,8 @@ def T.tz.source.none(l: I.Loc) -> String:
       "nothing reported yet"
     case I.Ja{}:
       "まだ報告がありません"
+    case I.Sux{}:
+      "𒉡"
 
 def T.tz.source.phone(l: I.Loc) -> String:
   match l:
@@ -6883,6 +8856,8 @@ def T.tz.source.phone(l: I.Loc) -> String:
       "from your phone"
     case I.Ja{}:
       "スマートフォンから"
+    case I.Sux{}:
+      "Phone 𒆠"
 
 def T.tz.source.set(l: I.Loc) -> String:
   match l:
@@ -6890,6 +8865,8 @@ def T.tz.source.set(l: I.Loc) -> String:
       "set"
     case I.Ja{}:
       "設定済み"
+    case I.Sux{}:
+      "𒃻"
 
 def T.viewer.board(l: I.Loc) -> String:
   match l:
@@ -6897,6 +8874,8 @@ def T.viewer.board(l: I.Loc) -> String:
       "Board"
     case I.Ja{}:
       "基板"
+    case I.Sux{}:
+      "𒁾"
 
 def T.viewer.board.tip(l: I.Loc) -> String:
   match l:
@@ -6904,6 +8883,8 @@ def T.viewer.board.tip(l: I.Loc) -> String:
       "The project's board"
     case I.Ja{}:
       "プロジェクトの基板"
+    case I.Sux{}:
+      "𒂍 𒁾"
 
 def T.viewer.board3d.tip(l: I.Loc) -> String:
   match l:
@@ -6911,6 +8892,8 @@ def T.viewer.board3d.tip(l: I.Loc) -> String:
       "The board in 3D"
     case I.Ja{}:
       "基板の3D表示"
+    case I.Sux{}:
+      "𒁾 3D"
 
 def T.viewer.browser.empty(l: I.Loc) -> String:
   match l:
@@ -6918,6 +8901,8 @@ def T.viewer.browser.empty(l: I.Loc) -> String:
       "The agents' browser shows here when they open a page."
     case I.Ja{}:
       "エージェントが開いたページをここに表示します。"
+    case I.Sux{}:
+      "The agents' browser shows here when they open a page."
 
 def T.viewer.browser.tip(l: I.Loc) -> String:
   match l:
@@ -6925,6 +8910,8 @@ def T.viewer.browser.tip(l: I.Loc) -> String:
       "What this thread's browser shows"
     case I.Ja{}:
       "このスレッドのブラウザー"
+    case I.Sux{}:
+      "𒅗 𒅆"
 
 def T.viewer.close(l: I.Loc) -> String:
   match l:
@@ -6932,6 +8919,8 @@ def T.viewer.close(l: I.Loc) -> String:
       "Close the viewer"
     case I.Ja{}:
       "ビューアーを閉じる"
+    case I.Sux{}:
+      "𒉡𒅅"
 
 def T.viewer.diff(l: I.Loc) -> String:
   match l:
@@ -6939,6 +8928,8 @@ def T.viewer.diff(l: I.Loc) -> String:
       "Diff"
     case I.Ja{}:
       "差分"
+    case I.Sux{}:
+      "𒄄"
 
 def T.viewer.diff.empty(l: I.Loc) -> String:
   match l:
@@ -6946,6 +8937,8 @@ def T.viewer.diff.empty(l: I.Loc) -> String:
       "No changes since this thread began."
     case I.Ja{}:
       "スレッド開始後の変更はありません。"
+    case I.Sux{}:
+      "𒉡𒄄"
 
 def T.viewer.diff.pr(l: I.Loc) -> String:
   match l:
@@ -6953,6 +8946,8 @@ def T.viewer.diff.pr(l: I.Loc) -> String:
       "Open PR"
     case I.Ja{}:
       "PRを作成"
+    case I.Sux{}:
+      "PR 𒅅"
 
 def T.viewer.diff.tip(l: I.Loc) -> String:
   match l:
@@ -6960,6 +8955,8 @@ def T.viewer.diff.tip(l: I.Loc) -> String:
       "What this thread changed (ctrl+d)"
     case I.Ja{}:
       "このスレッドの変更（ctrl+d）"
+    case I.Sux{}:
+      "What this thread changed (ctrl+d)"
 
 def T.viewer.empty.board(l: I.Loc) -> String:
   match l:
@@ -6967,6 +8964,8 @@ def T.viewer.empty.board(l: I.Loc) -> String:
       "No board in this project yet"
     case I.Ja{}:
       "このプロジェクトにはまだ基板がありません"
+    case I.Sux{}:
+      "𒉡 𒁾"
 
 def T.viewer.empty.schematic(l: I.Loc) -> String:
   match l:
@@ -6974,6 +8973,8 @@ def T.viewer.empty.schematic(l: I.Loc) -> String:
       "No schematic in this project yet"
     case I.Ja{}:
       "このプロジェクトにはまだ回路図がありません"
+    case I.Sux{}:
+      "𒉡 𒁾"
 
 def T.viewer.export.failed(l: I.Loc, arg0: String) -> String:
   match l:
@@ -6981,6 +8982,8 @@ def T.viewer.export.failed(l: I.Loc, arg0: String) -> String:
       "3D export failed: " ++ arg0
     case I.Ja{}:
       "3D書き出し失敗：" ++ arg0
+    case I.Sux{}:
+      "3D export failed: " ++ arg0
 
 def T.viewer.exporting(l: I.Loc) -> String:
   match l:
@@ -6988,6 +8991,8 @@ def T.viewer.exporting(l: I.Loc) -> String:
       "Exporting 3D model…"
     case I.Ja{}:
       "3Dモデルを書き出し中…"
+    case I.Sux{}:
+      "Exporting 3D model…"
 
 def T.viewer.field.drill(l: I.Loc) -> String:
   match l:
@@ -6995,6 +9000,8 @@ def T.viewer.field.drill(l: I.Loc) -> String:
       "drill"
     case I.Ja{}:
       "ドリル"
+    case I.Sux{}:
+      "𒅆"
 
 def T.viewer.field.file(l: I.Loc) -> String:
   match l:
@@ -7002,6 +9009,8 @@ def T.viewer.field.file(l: I.Loc) -> String:
       "file"
     case I.Ja{}:
       "ファイル"
+    case I.Sux{}:
+      "𒁾"
 
 def T.viewer.field.footprint(l: I.Loc) -> String:
   match l:
@@ -7009,6 +9018,8 @@ def T.viewer.field.footprint(l: I.Loc) -> String:
       "footprint"
     case I.Ja{}:
       "フットプリント"
+    case I.Sux{}:
+      "𒄊"
 
 def T.viewer.field.ktype(l: I.Loc) -> String:
   match l:
@@ -7016,6 +9027,8 @@ def T.viewer.field.ktype(l: I.Loc) -> String:
       "type"
     case I.Ja{}:
       "タイプ"
+    case I.Sux{}:
+      "𒈬"
 
 def T.viewer.field.layer(l: I.Loc) -> String:
   match l:
@@ -7023,6 +9036,8 @@ def T.viewer.field.layer(l: I.Loc) -> String:
       "layer"
     case I.Ja{}:
       "レイヤー"
+    case I.Sux{}:
+      "𒆠"
 
 def T.viewer.field.lib(l: I.Loc) -> String:
   match l:
@@ -7030,6 +9045,8 @@ def T.viewer.field.lib(l: I.Loc) -> String:
       "lib"
     case I.Ja{}:
       "ライブラリ"
+    case I.Sux{}:
+      "𒁾"
 
 def T.viewer.field.name(l: I.Loc) -> String:
   match l:
@@ -7037,6 +9054,8 @@ def T.viewer.field.name(l: I.Loc) -> String:
       "name"
     case I.Ja{}:
       "名前"
+    case I.Sux{}:
+      "𒈬"
 
 def T.viewer.field.net(l: I.Loc) -> String:
   match l:
@@ -7044,6 +9063,8 @@ def T.viewer.field.net(l: I.Loc) -> String:
       "net"
     case I.Ja{}:
       "ネット"
+    case I.Sux{}:
+      "𒆷"
 
 def T.viewer.field.netclass(l: I.Loc) -> String:
   match l:
@@ -7051,6 +9072,8 @@ def T.viewer.field.netclass(l: I.Loc) -> String:
       "netclass"
     case I.Ja{}:
       "ネットクラス"
+    case I.Sux{}:
+      "𒆷𒇽"
 
 def T.viewer.field.ref(l: I.Loc) -> String:
   match l:
@@ -7058,6 +9081,8 @@ def T.viewer.field.ref(l: I.Loc) -> String:
       "ref"
     case I.Ja{}:
       "参照"
+    case I.Sux{}:
+      "𒈬"
 
 def T.viewer.field.shape(l: I.Loc) -> String:
   match l:
@@ -7065,6 +9090,8 @@ def T.viewer.field.shape(l: I.Loc) -> String:
       "shape"
     case I.Ja{}:
       "形状"
+    case I.Sux{}:
+      "𒅆"
 
 def T.viewer.field.sheet(l: I.Loc) -> String:
   match l:
@@ -7072,6 +9099,8 @@ def T.viewer.field.sheet(l: I.Loc) -> String:
       "sheet"
     case I.Ja{}:
       "シート"
+    case I.Sux{}:
+      "𒁾"
 
 def T.viewer.field.size(l: I.Loc) -> String:
   match l:
@@ -7079,6 +9108,8 @@ def T.viewer.field.size(l: I.Loc) -> String:
       "size"
     case I.Ja{}:
       "サイズ"
+    case I.Sux{}:
+      "𒃲"
 
 def T.viewer.field.symbol(l: I.Loc) -> String:
   match l:
@@ -7086,6 +9117,8 @@ def T.viewer.field.symbol(l: I.Loc) -> String:
       "symbol"
     case I.Ja{}:
       "シンボル"
+    case I.Sux{}:
+      "𒅗"
 
 def T.viewer.field.text(l: I.Loc) -> String:
   match l:
@@ -7093,6 +9126,8 @@ def T.viewer.field.text(l: I.Loc) -> String:
       "text"
     case I.Ja{}:
       "テキスト"
+    case I.Sux{}:
+      "𒅗"
 
 def T.viewer.field.value(l: I.Loc) -> String:
   match l:
@@ -7100,6 +9135,8 @@ def T.viewer.field.value(l: I.Loc) -> String:
       "value"
     case I.Ja{}:
       "値"
+    case I.Sux{}:
+      "value"
 
 def T.viewer.field.width(l: I.Loc) -> String:
   match l:
@@ -7107,6 +9144,8 @@ def T.viewer.field.width(l: I.Loc) -> String:
       "width"
     case I.Ja{}:
       "幅"
+    case I.Sux{}:
+      "𒃲"
 
 def T.viewer.files(l: I.Loc) -> String:
   match l:
@@ -7114,6 +9153,8 @@ def T.viewer.files(l: I.Loc) -> String:
       "Files"
     case I.Ja{}:
       "ファイル"
+    case I.Sux{}:
+      "𒁾𒁾"
 
 def T.viewer.files.back(l: I.Loc) -> String:
   match l:
@@ -7121,6 +9162,8 @@ def T.viewer.files.back(l: I.Loc) -> String:
       "‹ Files"
     case I.Ja{}:
       "‹ ファイル"
+    case I.Sux{}:
+      "𒄄 𒁾"
 
 def T.viewer.files.empty(l: I.Loc) -> String:
   match l:
@@ -7128,6 +9171,8 @@ def T.viewer.files.empty(l: I.Loc) -> String:
       "This folder is empty"
     case I.Ja{}:
       "空のフォルダ"
+    case I.Sux{}:
+      "𒉡𒁾"
 
 def T.viewer.files.loading(l: I.Loc) -> String:
   match l:
@@ -7135,6 +9180,8 @@ def T.viewer.files.loading(l: I.Loc) -> String:
       "Listing the folder…"
     case I.Ja{}:
       "フォルダを読み込み中…"
+    case I.Sux{}:
+      "𒂍 𒁾 𒉋"
 
 def T.viewer.files.range(l: I.Loc, arg0: String, arg1: String, arg2: String) -> String:
   match l:
@@ -7142,6 +9189,8 @@ def T.viewer.files.range(l: I.Loc, arg0: String, arg1: String, arg2: String) -> 
       arg0 ++ "–" ++ arg1 ++ " of " ++ arg2
     case I.Ja{}:
       arg2 ++ "件中" ++ arg0 ++ "–" ++ arg1 ++ "件"
+    case I.Sux{}:
+      "𒁾 " ++ arg0 ++ "–" ++ arg1 ++ "/" ++ arg2
 
 def T.viewer.files.tip(l: I.Loc) -> String:
   match l:
@@ -7149,6 +9198,8 @@ def T.viewer.files.tip(l: I.Loc) -> String:
       "The project's files: open a board, a model, an image or a PDF"
     case I.Ja{}:
       "プロジェクトのファイル：基板、モデル、画像、PDFを開く"
+    case I.Sux{}:
+      "The project's files: open a board, a model, an image or a PDF"
 
 def T.viewer.fit(l: I.Loc) -> String:
   match l:
@@ -7156,6 +9207,8 @@ def T.viewer.fit(l: I.Loc) -> String:
       "Fit"
     case I.Ja{}:
       "全体表示"
+    case I.Sux{}:
+      "𒅅"
 
 def T.viewer.fit.tip(l: I.Loc) -> String:
   match l:
@@ -7163,6 +9216,8 @@ def T.viewer.fit.tip(l: I.Loc) -> String:
       "Show the whole thing (or double-click it)"
     case I.Ja{}:
       "全体を表示（ダブルクリックでも可）"
+    case I.Sux{}:
+      "𒅆 𒃲"
 
 def T.viewer.help.board(l: I.Loc) -> String:
   match l:
@@ -7170,6 +9225,8 @@ def T.viewer.help.board(l: I.Loc) -> String:
       "click inspect · drag pan · wheel zoom · f fit"
     case I.Ja{}:
       "クリックで詳細・ドラッグで移動・ホイールで拡大・Fで全体表示"
+    case I.Sux{}:
+      "click inspect · drag pan · wheel zoom · f fit"
 
 def T.viewer.help.browser(l: I.Loc) -> String:
   match l:
@@ -7177,6 +9234,8 @@ def T.viewer.help.browser(l: I.Loc) -> String:
       "what this thread's browser shows, live"
     case I.Ja{}:
       "このスレッドのブラウザをライブ表示"
+    case I.Sux{}:
+      "𒅗 𒅆 · 𒅅"
 
 def T.viewer.help.scroll(l: I.Loc) -> String:
   match l:
@@ -7184,6 +9243,8 @@ def T.viewer.help.scroll(l: I.Loc) -> String:
       "wheel scroll"
     case I.Ja{}:
       "ホイールでスクロール"
+    case I.Sux{}:
+      "𒄊"
 
 def T.viewer.help.solid(l: I.Loc) -> String:
   match l:
@@ -7191,6 +9252,8 @@ def T.viewer.help.solid(l: I.Loc) -> String:
       "drag rotate · ctrl pan · shift zoom · alt roll · 1-7 views · f fit"
     case I.Ja{}:
       "ドラッグで回転・Ctrlで移動・Shiftで拡大・Altでロール・1–7で視点・Fで全体表示"
+    case I.Sux{}:
+      "drag rotate · ctrl pan · shift zoom · alt roll · 1-7 views · f fit"
 
 def T.viewer.history.added(l: I.Loc) -> String:
   match l:
@@ -7198,6 +9261,8 @@ def T.viewer.history.added(l: I.Loc) -> String:
       "Added"
     case I.Ja{}:
       "追加"
+    case I.Sux{}:
+      "𒃻"
 
 def T.viewer.history.changed(l: I.Loc) -> String:
   match l:
@@ -7205,6 +9270,8 @@ def T.viewer.history.changed(l: I.Loc) -> String:
       "Changed"
     case I.Ja{}:
       "変更"
+    case I.Sux{}:
+      "𒄄"
 
 def T.viewer.history.changes(l: I.Loc) -> String:
   match l:
@@ -7212,6 +9279,8 @@ def T.viewer.history.changes(l: I.Loc) -> String:
       "Changes"
     case I.Ja{}:
       "変更"
+    case I.Sux{}:
+      "𒄄"
 
 def T.viewer.history.compare(l: I.Loc) -> String:
   match l:
@@ -7219,6 +9288,8 @@ def T.viewer.history.compare(l: I.Loc) -> String:
       "Compare"
     case I.Ja{}:
       "比較"
+    case I.Sux{}:
+      "𒅆"
 
 def T.viewer.history.compare.new(l: I.Loc) -> String:
   match l:
@@ -7226,6 +9297,8 @@ def T.viewer.history.compare.new(l: I.Loc) -> String:
       "Compare with (new)"
     case I.Ja{}:
       "比較先（新）"
+    case I.Sux{}:
+      "𒅆𒈽 𒉋"
 
 def T.viewer.history.compare.old(l: I.Loc) -> String:
   match l:
@@ -7233,6 +9306,8 @@ def T.viewer.history.compare.old(l: I.Loc) -> String:
       "Compare from (old)"
     case I.Ja{}:
       "比較元（旧）"
+    case I.Sux{}:
+      "𒅆𒈽 𒌀"
 
 def T.viewer.history.new(l: I.Loc) -> String:
   match l:
@@ -7240,6 +9315,8 @@ def T.viewer.history.new(l: I.Loc) -> String:
       "New"
     case I.Ja{}:
       "新"
+    case I.Sux{}:
+      "𒉋"
 
 def T.viewer.history.old(l: I.Loc) -> String:
   match l:
@@ -7247,6 +9324,8 @@ def T.viewer.history.old(l: I.Loc) -> String:
       "Old"
     case I.Ja{}:
       "旧"
+    case I.Sux{}:
+      "𒌀"
 
 def T.viewer.history.pick(l: I.Loc) -> String:
   match l:
@@ -7254,6 +9333,8 @@ def T.viewer.history.pick(l: I.Loc) -> String:
       "pick…"
     case I.Ja{}:
       "選択…"
+    case I.Sux{}:
+      "𒅆𒈽"
 
 def T.viewer.history.ref(l: I.Loc) -> String:
   match l:
@@ -7261,6 +9342,8 @@ def T.viewer.history.ref(l: I.Loc) -> String:
       "Commit, branch or tag"
     case I.Ja{}:
       "コミット・ブランチ・タグ"
+    case I.Sux{}:
+      "Commit, branch or tag"
 
 def T.viewer.history.removed(l: I.Loc) -> String:
   match l:
@@ -7268,6 +9351,8 @@ def T.viewer.history.removed(l: I.Loc) -> String:
       "Removed"
     case I.Ja{}:
       "削除"
+    case I.Sux{}:
+      "𒂊"
 
 def T.viewer.item.footprint(l: I.Loc) -> String:
   match l:
@@ -7275,6 +9360,8 @@ def T.viewer.item.footprint(l: I.Loc) -> String:
       "footprint"
     case I.Ja{}:
       "フットプリント"
+    case I.Sux{}:
+      "𒄊"
 
 def T.viewer.item.globallabel(l: I.Loc) -> String:
   match l:
@@ -7282,6 +9369,8 @@ def T.viewer.item.globallabel(l: I.Loc) -> String:
       "global label"
     case I.Ja{}:
       "グローバルラベル"
+    case I.Sux{}:
+      "𒈬𒃲"
 
 def T.viewer.item.hierlabel(l: I.Loc) -> String:
   match l:
@@ -7289,6 +9378,8 @@ def T.viewer.item.hierlabel(l: I.Loc) -> String:
       "hier label"
     case I.Ja{}:
       "階層ラベル"
+    case I.Sux{}:
+      "𒈬𒂍"
 
 def T.viewer.item.label(l: I.Loc) -> String:
   match l:
@@ -7296,6 +9387,8 @@ def T.viewer.item.label(l: I.Loc) -> String:
       "label"
     case I.Ja{}:
       "ラベル"
+    case I.Sux{}:
+      "𒈬"
 
 def T.viewer.item.netclassflag(l: I.Loc) -> String:
   match l:
@@ -7303,6 +9396,8 @@ def T.viewer.item.netclassflag(l: I.Loc) -> String:
       "netclass flag"
     case I.Ja{}:
       "ネットクラスフラグ"
+    case I.Sux{}:
+      "netclass flag"
 
 def T.viewer.item.pad(l: I.Loc, arg0: String) -> String:
   match l:
@@ -7310,6 +9405,8 @@ def T.viewer.item.pad(l: I.Loc, arg0: String) -> String:
       "pad " ++ arg0
     case I.Ja{}:
       "パッド" ++ arg0
+    case I.Sux{}:
+      "pad " ++ arg0
 
 def T.viewer.item.pin(l: I.Loc, arg0: String) -> String:
   match l:
@@ -7317,6 +9414,8 @@ def T.viewer.item.pin(l: I.Loc, arg0: String) -> String:
       "pin " ++ arg0
     case I.Ja{}:
       "ピン" ++ arg0
+    case I.Sux{}:
+      "pin " ++ arg0
 
 def T.viewer.item.sheet(l: I.Loc) -> String:
   match l:
@@ -7324,6 +9423,8 @@ def T.viewer.item.sheet(l: I.Loc) -> String:
       "sheet"
     case I.Ja{}:
       "シート"
+    case I.Sux{}:
+      "𒁾"
 
 def T.viewer.item.sheetpin(l: I.Loc) -> String:
   match l:
@@ -7331,6 +9432,8 @@ def T.viewer.item.sheetpin(l: I.Loc) -> String:
       "sheet pin"
     case I.Ja{}:
       "シートピン"
+    case I.Sux{}:
+      "𒁾𒅗"
 
 def T.viewer.item.symbol(l: I.Loc) -> String:
   match l:
@@ -7338,6 +9441,8 @@ def T.viewer.item.symbol(l: I.Loc) -> String:
       "symbol"
     case I.Ja{}:
       "シンボル"
+    case I.Sux{}:
+      "𒅗"
 
 def T.viewer.item.track(l: I.Loc) -> String:
   match l:
@@ -7345,6 +9450,8 @@ def T.viewer.item.track(l: I.Loc) -> String:
       "track"
     case I.Ja{}:
       "トラック"
+    case I.Sux{}:
+      "track"
 
 def T.viewer.item.via(l: I.Loc) -> String:
   match l:
@@ -7352,6 +9459,8 @@ def T.viewer.item.via(l: I.Loc) -> String:
       "via"
     case I.Ja{}:
       "ビア"
+    case I.Sux{}:
+      "via"
 
 def T.viewer.item.zone(l: I.Loc) -> String:
   match l:
@@ -7359,6 +9468,8 @@ def T.viewer.item.zone(l: I.Loc) -> String:
       "zone"
     case I.Ja{}:
       "ゾーン"
+    case I.Sux{}:
+      "𒆠"
 
 def T.viewer.kicad.tip(l: I.Loc) -> String:
   match l:
@@ -7366,6 +9477,8 @@ def T.viewer.kicad.tip(l: I.Loc) -> String:
       "Open this project in KiCad on the hub's machine"
     case I.Ja{}:
       "ハブのKiCadでプロジェクトを開く"
+    case I.Sux{}:
+      "Open this project in KiCad on the hub's machine"
 
 def T.viewer.kicad10(l: I.Loc) -> String:
   match l:
@@ -7373,6 +9486,8 @@ def T.viewer.kicad10(l: I.Loc) -> String:
       "KiCad 10 copy"
     case I.Ja{}:
       "KiCad 10のコピー"
+    case I.Sux{}:
+      "KiCad 10 𒃮𒊑"
 
 def T.viewer.kicad10.tip(l: I.Loc) -> String:
   match l:
@@ -7380,6 +9495,8 @@ def T.viewer.kicad10.tip(l: I.Loc) -> String:
       "Export a separate KiCad 10 copy for stock KiCad"
     case I.Ja{}:
       "標準KiCad用にKiCad 10形式のコピーを出力"
+    case I.Sux{}:
+      "Export a separate KiCad 10 copy for stock KiCad"
 
 def T.viewer.layer.focus(l: I.Loc, arg0: String) -> String:
   match l:
@@ -7387,6 +9504,8 @@ def T.viewer.layer.focus(l: I.Loc, arg0: String) -> String:
       arg0 ++ " stands out"
     case I.Ja{}:
       arg0 ++ "を強調表示"
+    case I.Sux{}:
+      arg0 ++ " 𒅆"
 
 def T.viewer.layer.toggle(l: I.Loc, arg0: String) -> String:
   match l:
@@ -7394,6 +9513,8 @@ def T.viewer.layer.toggle(l: I.Loc, arg0: String) -> String:
       "Show or hide " ++ arg0
     case I.Ja{}:
       arg0 ++ "の表示を切り替え"
+    case I.Sux{}:
+      "𒅆 / 𒀉𒌫𒆪 " ++ arg0
 
 def T.viewer.layers(l: I.Loc) -> String:
   match l:
@@ -7401,6 +9522,8 @@ def T.viewer.layers(l: I.Loc) -> String:
       "Layers"
     case I.Ja{}:
       "レイヤー"
+    case I.Sux{}:
+      "Layers"
 
 def T.viewer.layers.active(l: I.Loc, arg0: String) -> String:
   match l:
@@ -7408,6 +9531,8 @@ def T.viewer.layers.active(l: I.Loc, arg0: String) -> String:
       "Layers · " ++ arg0
     case I.Ja{}:
       "レイヤー・" ++ arg0
+    case I.Sux{}:
+      "Layers · " ++ arg0
 
 def T.viewer.layers.all(l: I.Loc) -> String:
   match l:
@@ -7415,6 +9540,8 @@ def T.viewer.layers.all(l: I.Loc) -> String:
       "All"
     case I.Ja{}:
       "すべて"
+    case I.Sux{}:
+      "𒃲"
 
 def T.viewer.layers.all.tip(l: I.Loc) -> String:
   match l:
@@ -7422,6 +9549,8 @@ def T.viewer.layers.all.tip(l: I.Loc) -> String:
       "Every layer as it is"
     case I.Ja{}:
       "すべてのレイヤーを通常表示"
+    case I.Sux{}:
+      "Every layer as it is"
 
 def T.viewer.layers.dim(l: I.Loc) -> String:
   match l:
@@ -7429,6 +9558,8 @@ def T.viewer.layers.dim(l: I.Loc) -> String:
       "Dim"
     case I.Ja{}:
       "薄く"
+    case I.Sux{}:
+      "𒉡𒅆"
 
 def T.viewer.layers.dim.tip(l: I.Loc) -> String:
   match l:
@@ -7436,6 +9567,8 @@ def T.viewer.layers.dim.tip(l: I.Loc) -> String:
       "The active layer stands out, the rest dimmed"
     case I.Ja{}:
       "選択したレイヤー以外を薄く表示"
+    case I.Sux{}:
+      "The active layer stands out, the rest dimmed"
 
 def T.viewer.layers.only(l: I.Loc) -> String:
   match l:
@@ -7443,6 +9576,8 @@ def T.viewer.layers.only(l: I.Loc) -> String:
       "Only"
     case I.Ja{}:
       "選択のみ"
+    case I.Sux{}:
+      "𒅆"
 
 def T.viewer.layers.only.tip(l: I.Loc) -> String:
   match l:
@@ -7450,6 +9585,8 @@ def T.viewer.layers.only.tip(l: I.Loc) -> String:
       "Only the active layer, with the outline (and a copper layer's pads and vias)"
     case I.Ja{}:
       "選択したレイヤーと外形を表示（銅層ではパッドとビアも表示）"
+    case I.Sux{}:
+      "Only the active layer, with the outline (and a copper layer's pads and vias)"
 
 def T.viewer.layers.reset(l: I.Loc) -> String:
   match l:
@@ -7457,6 +9594,8 @@ def T.viewer.layers.reset(l: I.Loc) -> String:
       "Reset layers"
     case I.Ja{}:
       "レイヤーをリセット"
+    case I.Sux{}:
+      "𒄄"
 
 def T.viewer.layers.restore(l: I.Loc) -> String:
   match l:
@@ -7464,6 +9603,8 @@ def T.viewer.layers.restore(l: I.Loc) -> String:
       "Show every layer again"
     case I.Ja{}:
       "すべてのレイヤーを再表示"
+    case I.Sux{}:
+      "𒅆𒃲"
 
 def T.viewer.layers.tip(l: I.Loc) -> String:
   match l:
@@ -7471,6 +9612,8 @@ def T.viewer.layers.tip(l: I.Loc) -> String:
       "Layers: show, hide or single one out"
     case I.Ja{}:
       "レイヤーの表示・非表示・強調"
+    case I.Sux{}:
+      "Layers: show, hide or single one out"
 
 def T.viewer.loading(l: I.Loc) -> String:
   match l:
@@ -7478,12 +9621,16 @@ def T.viewer.loading(l: I.Loc) -> String:
       "Loading…"
     case I.Ja{}:
       "読み込み中…"
+    case I.Sux{}:
+      "𒉋"
 
 def T.viewer.mech(l: I.Loc) -> String:
   match l:
     case I.En{}:
       "Mech"
     case I.Ja{}:
+      "Mech"
+    case I.Sux{}:
       "Mech"
 
 def T.viewer.mech.loading(l: I.Loc) -> String:
@@ -7492,6 +9639,8 @@ def T.viewer.mech.loading(l: I.Loc) -> String:
       "Loading the parts…"
     case I.Ja{}:
       "パーツを読み込み中…"
+    case I.Sux{}:
+      "𒆕 𒉋"
 
 def T.viewer.mech.renders(l: I.Loc) -> String:
   match l:
@@ -7499,6 +9648,8 @@ def T.viewer.mech.renders(l: I.Loc) -> String:
       "Renders"
     case I.Ja{}:
       "レンダー"
+    case I.Sux{}:
+      "𒆕𒆕"
 
 def T.viewer.mech.tip(l: I.Loc) -> String:
   match l:
@@ -7506,6 +9657,8 @@ def T.viewer.mech.tip(l: I.Loc) -> String:
       "Mechanical parts: their renders, and each in 3D"
     case I.Ja{}:
       "機械パーツのレンダーと3D表示"
+    case I.Sux{}:
+      "Mechanical parts: their renders, and each in 3D"
 
 def T.viewer.mention(l: I.Loc) -> String:
   match l:
@@ -7513,6 +9666,8 @@ def T.viewer.mention(l: I.Loc) -> String:
       "Mention in chat"
     case I.Ja{}:
       "チャットで参照"
+    case I.Sux{}:
+      "𒅗𒁉"
 
 def T.viewer.mesh.failed(l: I.Loc) -> String:
   match l:
@@ -7520,6 +9675,8 @@ def T.viewer.mesh.failed(l: I.Loc) -> String:
       "Could not mesh this STEP file (installing FreeCAD lets Backplane mesh large ones)"
     case I.Ja{}:
       "STEPファイルをメッシュ化できません（大きなファイルにはFreeCADが必要です）"
+    case I.Sux{}:
+      "Could not mesh this STEP file (installing FreeCAD lets Backplane mesh large ones)"
 
 def T.viewer.orbit.tip(l: I.Loc) -> String:
   match l:
@@ -7527,6 +9684,8 @@ def T.viewer.orbit.tip(l: I.Loc) -> String:
       "drag to turn · right-drag or two fingers to move · wheel or pinch to zoom · double-click to fit"
     case I.Ja{}:
       "ドラッグで回転・右ドラッグか2本指で移動・ホイールかピンチで拡大縮小・ダブルクリックで全体表示"
+    case I.Sux{}:
+      "drag to turn · right-drag or two fingers to move · wheel or pinch to zoom · double-click to fit"
 
 def T.viewer.page.empty(l: I.Loc) -> String:
   match l:
@@ -7534,6 +9693,8 @@ def T.viewer.page.empty(l: I.Loc) -> String:
       "No page yet. This thread's browser shows here when its agent opens one."
     case I.Ja{}:
       "エージェントが開いたページをここに表示します。"
+    case I.Sux{}:
+      "𒉡 𒁾"
 
 def T.viewer.page.loading(l: I.Loc) -> String:
   match l:
@@ -7541,6 +9702,8 @@ def T.viewer.page.loading(l: I.Loc) -> String:
       "Loading the page…"
     case I.Ja{}:
       "ページを読み込み中…"
+    case I.Sux{}:
+      "𒁾 𒉋"
 
 def T.viewer.pan.tip(l: I.Loc) -> String:
   match l:
@@ -7548,6 +9711,8 @@ def T.viewer.pan.tip(l: I.Loc) -> String:
       "drag or two fingers to pan · wheel or pinch to zoom · double-click to fit"
     case I.Ja{}:
       "ドラッグか2本指で移動・ホイールかピンチで拡大縮小・ダブルクリックで全体表示"
+    case I.Sux{}:
+      "drag or two fingers to pan · wheel or pinch to zoom · double-click to fit"
 
 def T.viewer.parts3d.tip(l: I.Loc) -> String:
   match l:
@@ -7555,6 +9720,8 @@ def T.viewer.parts3d.tip(l: I.Loc) -> String:
       "The board in 3D, with its parts"
     case I.Ja{}:
       "部品を含む基板の3D表示"
+    case I.Sux{}:
+      "The board in 3D, with its parts"
 
 def T.viewer.pdf.drawing(l: I.Loc, arg0: String) -> String:
   match l:
@@ -7562,6 +9729,8 @@ def T.viewer.pdf.drawing(l: I.Loc, arg0: String) -> String:
       "Drawing page " ++ arg0 ++ "…"
     case I.Ja{}:
       arg0 ++ "ページを描画中…"
+    case I.Sux{}:
+      "𒁾 " ++ arg0 ++ "…"
 
 def T.viewer.pdf.page(l: I.Loc, +arg0: String, arg1: String, arg2: String) -> String:
   match l:
@@ -7569,6 +9738,8 @@ def T.viewer.pdf.page(l: I.Loc, +arg0: String, arg1: String, arg2: String) -> St
       "Page " ++ arg0 ++ I.I18n.sel(arg1, "unknown", "", " of " ++ arg2)
     case I.Ja{}:
       I.I18n.sel(arg1, "unknown", arg0 ++ "ページ", arg2 ++ "ページ中" ++ arg0 ++ "ページ")
+    case I.Sux{}:
+      "Page " ++ arg0 ++ I.I18n.sel(arg1, "unknown", "", " of " ++ arg2)
 
 def T.viewer.picture.failed(l: I.Loc) -> String:
   match l:
@@ -7576,6 +9747,8 @@ def T.viewer.picture.failed(l: I.Loc) -> String:
       "This picture cannot be shown here"
     case I.Ja{}:
       "この画像は表示できません"
+    case I.Sux{}:
+      "𒉡 𒅆"
 
 def T.viewer.render.failed(l: I.Loc, arg0: String) -> String:
   match l:
@@ -7583,6 +9756,8 @@ def T.viewer.render.failed(l: I.Loc, arg0: String) -> String:
       "Rendering failed: " ++ arg0
     case I.Ja{}:
       "レンダー失敗：" ++ arg0
+    case I.Sux{}:
+      "𒉡𒆕 " ++ arg0
 
 def T.viewer.resize(l: I.Loc) -> String:
   match l:
@@ -7590,6 +9765,8 @@ def T.viewer.resize(l: I.Loc) -> String:
       "Drag to resize the viewer; double-click to reset"
     case I.Ja{}:
       "ドラッグで幅を変更・ダブルクリックで元に戻す"
+    case I.Sux{}:
+      "Drag to resize the viewer; double-click to reset"
 
 def T.viewer.review(l: I.Loc) -> String:
   match l:
@@ -7597,6 +9774,8 @@ def T.viewer.review(l: I.Loc) -> String:
       "Review"
     case I.Ja{}:
       "レビュー"
+    case I.Sux{}:
+      "𒅗𒁉"
 
 def T.viewer.review.tip(l: I.Loc) -> String:
   match l:
@@ -7604,6 +9783,8 @@ def T.viewer.review.tip(l: I.Loc) -> String:
       "Review the design: its parts, and what changed"
     case I.Ja{}:
       "設計のレビュー：部品と変更点"
+    case I.Sux{}:
+      "Review the design: its parts, and what changed"
 
 def T.viewer.schematic(l: I.Loc) -> String:
   match l:
@@ -7611,6 +9792,8 @@ def T.viewer.schematic(l: I.Loc) -> String:
       "Schematic"
     case I.Ja{}:
       "回路図"
+    case I.Sux{}:
+      "𒁾𒅆"
 
 def T.viewer.schematic.tip(l: I.Loc) -> String:
   match l:
@@ -7618,6 +9801,8 @@ def T.viewer.schematic.tip(l: I.Loc) -> String:
       "The project's schematic"
     case I.Ja{}:
       "プロジェクトの回路図"
+    case I.Sux{}:
+      "𒂍 𒁾𒅆"
 
 def T.viewer.sheet.open(l: I.Loc) -> String:
   match l:
@@ -7625,6 +9810,8 @@ def T.viewer.sheet.open(l: I.Loc) -> String:
       "Open sheet"
     case I.Ja{}:
       "シートを開く"
+    case I.Sux{}:
+      "𒁾𒅅"
 
 def T.viewer.sheet.title(l: I.Loc, arg0: String, arg1: String) -> String:
   match l:
@@ -7632,6 +9819,8 @@ def T.viewer.sheet.title(l: I.Loc, arg0: String, arg1: String) -> String:
       arg0 ++ I.I18n.sel(arg1, "loop", " (repeats a sheet above)", "")
     case I.Ja{}:
       arg0 ++ I.I18n.sel(arg1, "loop", "（上のシートと重複）", "")
+    case I.Sux{}:
+      arg0 ++ I.I18n.sel(arg1, "loop", " (repeats a sheet above)", "")
 
 def T.viewer.sheet.top(l: I.Loc) -> String:
   match l:
@@ -7639,12 +9828,16 @@ def T.viewer.sheet.top(l: I.Loc) -> String:
       "Top sheet"
     case I.Ja{}:
       "最上位シート"
+    case I.Sux{}:
+      "𒀭 𒁾"
 
 def T.viewer.solid(l: I.Loc) -> String:
   match l:
     case I.En{}:
       "3D"
     case I.Ja{}:
+      "3D"
+    case I.Sux{}:
       "3D"
 
 def T.viewer.solid.stats(l: I.Loc, arg0: String, arg1: String, arg2: String, arg3: String, arg4: String) -> String:
@@ -7653,6 +9846,8 @@ def T.viewer.solid.stats(l: I.Loc, arg0: String, arg1: String, arg2: String, arg
       arg0 ++ " · " ++ arg1 ++ " triangles" ++ I.I18n.sel(arg2, "yes", " · came after " ++ arg3 ++ " s", "") ++ " · built in " ++ arg4 ++ " s"
     case I.Ja{}:
       arg0 ++ " · 三角形" ++ arg1 ++ "個" ++ I.I18n.sel(arg2, "yes", " · 受信まで" ++ arg3 ++ "秒", "") ++ " · 描画準備" ++ arg4 ++ "秒"
+    case I.Sux{}:
+      arg0 ++ " · " ++ arg1 ++ " triangles" ++ I.I18n.sel(arg2, "yes", " · came after " ++ arg3 ++ " s", "") ++ " · built in " ++ arg4 ++ " s"
 
 def T.viewer.solid.waiting(l: I.Loc, arg0: String, arg1: String) -> String:
   match l:
@@ -7660,6 +9855,8 @@ def T.viewer.solid.waiting(l: I.Loc, arg0: String, arg1: String) -> String:
       "Preparing the model on the hub · " ++ arg0 ++ " s" ++ I.I18n.sel(arg1, "yes", " (a board with its parts or a large assembly takes a while the first time; after that it is cached)", "")
     case I.Ja{}:
       "ハブでモデルを準備中 · " ++ arg0 ++ "秒" ++ I.I18n.sel(arg1, "yes", "（部品付き基板や大きなアセンブリは初回に時間がかかります。次回からはキャッシュを使います）", "")
+    case I.Sux{}:
+      "Preparing the model on the hub · " ++ arg0 ++ " s" ++ I.I18n.sel(arg1, "yes", " (a board with its parts or a large assembly takes a while the first time; after that it is cached)", "")
 
 def T.viewer.terminal.title(l: I.Loc, arg0: String, arg1: String) -> String:
   match l:
@@ -7667,6 +9864,8 @@ def T.viewer.terminal.title(l: I.Loc, arg0: String, arg1: String) -> String:
       "Terminal" ++ I.I18n.sel(arg0, "none", "", "  ·  " ++ arg1)
     case I.Ja{}:
       "ターミナル" ++ I.I18n.sel(arg0, "none", "", "・" ++ arg1)
+    case I.Sux{}:
+      "Terminal" ++ I.I18n.sel(arg0, "none", "", "  ·  " ++ arg1)
 
 def T.viewer.unread(l: I.Loc) -> String:
   match l:
@@ -7674,6 +9873,8 @@ def T.viewer.unread(l: I.Loc) -> String:
       "This version of the file cannot be read."
     case I.Ja{}:
       "このバージョンのファイルは読み込めません。"
+    case I.Sux{}:
+      "𒉡 𒅆"
 
 def T.voice.choose(l: I.Loc, arg0: String) -> String:
   match l:
@@ -7681,6 +9882,8 @@ def T.voice.choose(l: I.Loc, arg0: String) -> String:
       "Use " ++ arg0
     case I.Ja{}:
       arg0 ++ "を使う"
+    case I.Sux{}:
+      "𒁺 " ++ arg0
 
 def T.voice.default(l: I.Loc) -> String:
   match l:
@@ -7688,6 +9891,8 @@ def T.voice.default(l: I.Loc) -> String:
       "Default"
     case I.Ja{}:
       "既定"
+    case I.Sux{}:
+      "𒅗𒁉"
 
 def T.voice.device.default(l: I.Loc, arg0: String) -> String:
   match l:
@@ -7695,6 +9900,8 @@ def T.voice.device.default(l: I.Loc, arg0: String) -> String:
       "default microphone, " ++ arg0
     case I.Ja{}:
       "既定のマイク（" ++ arg0 ++ "）"
+    case I.Sux{}:
+      "default microphone, " ++ arg0
 
 def T.voice.device.note(l: I.Loc, arg0: String) -> String:
   match l:
@@ -7702,6 +9909,8 @@ def T.voice.device.note(l: I.Loc, arg0: String) -> String:
       "The mic button in the composer records the hub machine's " ++ arg0 ++ "."
     case I.Ja{}:
       "入力欄のマイクボタンでハブの" ++ arg0 ++ "を録音します。"
+    case I.Sux{}:
+      "The mic button in the composer records the hub machine's " ++ arg0 ++ "."
 
 def T.voice.dictate(l: I.Loc) -> String:
   match l:
@@ -7709,6 +9918,8 @@ def T.voice.dictate(l: I.Loc) -> String:
       "Dictate with the hub machine's microphone"
     case I.Ja{}:
       "ハブのマイクで音声入力"
+    case I.Sux{}:
+      "Dictate with the hub machine's microphone"
 
 def T.voice.dictionary.add(l: I.Loc) -> String:
   match l:
@@ -7716,6 +9927,8 @@ def T.voice.dictionary.add(l: I.Loc) -> String:
       "Add to dictionary"
     case I.Ja{}:
       "辞書に追加"
+    case I.Sux{}:
+      "𒅗𒅗 𒃻"
 
 def T.voice.dictionary.tip(l: I.Loc) -> String:
   match l:
@@ -7723,6 +9936,8 @@ def T.voice.dictionary.tip(l: I.Loc) -> String:
       "Add it to the dictionary as heard"
     case I.Ja{}:
       "認識した表記で辞書に追加"
+    case I.Sux{}:
+      "𒅗𒅗 𒃻"
 
 def T.voice.error(l: I.Loc, arg0: String) -> String:
   match l:
@@ -7730,6 +9945,8 @@ def T.voice.error(l: I.Loc, arg0: String) -> String:
       "Dictation: " ++ arg0
     case I.Ja{}:
       "音声入力：" ++ arg0
+    case I.Sux{}:
+      "Dictation: " ++ arg0
 
 def T.voice.finishing(l: I.Loc) -> String:
   match l:
@@ -7737,6 +9954,8 @@ def T.voice.finishing(l: I.Loc) -> String:
       "Finishing…"
     case I.Ja{}:
       "処理中…"
+    case I.Sux{}:
+      "𒅅"
 
 def T.voice.fix(l: I.Loc) -> String:
   match l:
@@ -7744,6 +9963,8 @@ def T.voice.fix(l: I.Loc) -> String:
       "Fix…"
     case I.Ja{}:
       "修正…"
+    case I.Sux{}:
+      "𒄄"
 
 def T.voice.fix.tip(l: I.Loc) -> String:
   match l:
@@ -7751,6 +9972,8 @@ def T.voice.fix.tip(l: I.Loc) -> String:
       "Type the right spelling"
     case I.Ja{}:
       "正しい表記を入力"
+    case I.Sux{}:
+      "𒅗 𒄄"
 
 def T.voice.guess.tip(l: I.Loc) -> String:
   match l:
@@ -7758,6 +9981,8 @@ def T.voice.guess.tip(l: I.Loc) -> String:
       "Use the guess"
     case I.Ja{}:
       "候補を使用"
+    case I.Sux{}:
+      "𒅗"
 
 def T.voice.heard(l: I.Loc, arg0: String, arg1: String, arg2: String) -> String:
   match l:
@@ -7765,6 +9990,8 @@ def T.voice.heard(l: I.Loc, arg0: String, arg1: String, arg2: String) -> String:
       "Heard \"" ++ arg0 ++ "\"" ++ I.I18n.sel(arg1, "many", " (1 of " ++ arg2 ++ ")", "")
     case I.Ja{}:
       "「" ++ arg0 ++ "」と認識" ++ I.I18n.sel(arg1, "many", "（" ++ arg2 ++ "件中1件目）", "")
+    case I.Sux{}:
+      "𒄑𒌇 “" ++ arg0 ++ "”" ++ I.I18n.sel(arg1, "many", " (1/" ++ arg2 ++ ")", "")
 
 def T.voice.leave(l: I.Loc) -> String:
   match l:
@@ -7772,6 +9999,8 @@ def T.voice.leave(l: I.Loc) -> String:
       "Leave it"
     case I.Ja{}:
       "そのままにする"
+    case I.Sux{}:
+      "𒄄"
 
 def T.voice.listening(l: I.Loc, arg0: String, arg1: String) -> String:
   match l:
@@ -7779,6 +10008,8 @@ def T.voice.listening(l: I.Loc, arg0: String, arg1: String) -> String:
       "Listening" ++ I.I18n.sel(arg0, "none", "", " · " ++ arg1)
     case I.Ja{}:
       "録音中" ++ I.I18n.sel(arg0, "none", "", "・" ++ arg1)
+    case I.Sux{}:
+      "𒄑𒌇" ++ I.I18n.sel(arg0, "none", "", " · " ++ arg1)
 
 def T.voice.microphone(l: I.Loc) -> String:
   match l:
@@ -7786,6 +10017,8 @@ def T.voice.microphone(l: I.Loc) -> String:
       "the microphone"
     case I.Ja{}:
       "マイク"
+    case I.Sux{}:
+      "𒅗𒁉"
 
 def T.voice.noaudio(l: I.Loc, arg0: String) -> String:
   match l:
@@ -7793,6 +10026,8 @@ def T.voice.noaudio(l: I.Loc, arg0: String) -> String:
       "Nothing received from " ++ arg0 ++ " yet. Is it plugged in? Pick another in Settings, Voice."
     case I.Ja{}:
       arg0 ++ "から音声が届いていません。接続を確認するか、設定の音声で別のマイクを選んでください。"
+    case I.Sux{}:
+      "Nothing received from " ++ arg0 ++ " yet. Is it plugged in? Pick another in Settings, Voice."
 
 def T.voice.replace(l: I.Loc) -> String:
   match l:
@@ -7800,6 +10035,8 @@ def T.voice.replace(l: I.Loc) -> String:
       "Replace the word and add it to the dictionary"
     case I.Ja{}:
       "語句を置き換えて辞書に追加"
+    case I.Sux{}:
+      "Replace the word and add it to the dictionary"
 
 def T.voice.silent(l: I.Loc, arg0: String) -> String:
   match l:
@@ -7807,6 +10044,8 @@ def T.voice.silent(l: I.Loc, arg0: String) -> String:
       "Only silence from " ++ arg0 ++ " so far. Is it muted, or the wrong one?"
     case I.Ja{}:
       arg0 ++ "からの音声が無音です。ミュートやマイクの選択を確認してください。"
+    case I.Sux{}:
+      "Only silence from " ++ arg0 ++ " so far. Is it muted, or the wrong one?"
 
 def T.voice.spelling(l: I.Loc) -> String:
   match l:
@@ -7814,6 +10053,8 @@ def T.voice.spelling(l: I.Loc) -> String:
       "The right spelling (it joins the dictionary)"
     case I.Ja{}:
       "正しい表記（辞書に追加）"
+    case I.Sux{}:
+      "𒅗 𒋛"
 
 def T.voice.starting(l: I.Loc) -> String:
   match l:
@@ -7821,6 +10062,8 @@ def T.voice.starting(l: I.Loc) -> String:
       "Starting the microphone…"
     case I.Ja{}:
       "マイクを起動中…"
+    case I.Sux{}:
+      "𒉋 𒅗𒁉"
 
 def T.voice.stop(l: I.Loc) -> String:
   match l:
@@ -7828,6 +10071,8 @@ def T.voice.stop(l: I.Loc) -> String:
       "Stop dictating"
     case I.Ja{}:
       "音声入力を停止"
+    case I.Sux{}:
+      "𒉡𒁺"
 
 def T.web.bots.persona.placeholder(l: I.Loc) -> String:
   match l:
@@ -7835,6 +10080,8 @@ def T.web.bots.persona.placeholder(l: I.Loc) -> String:
       "Persona: who it is, what it does"
     case I.Ja{}:
       "ペルソナ：役割や振る舞い"
+    case I.Sux{}:
+      "𒇽 · 𒅴 · 𒀝"
 
 def T.web.google.callback(l: I.Loc) -> String:
   match l:
@@ -7842,6 +10089,8 @@ def T.web.google.callback(l: I.Loc) -> String:
       "Or paste the address the sign-in ended on"
     case I.Ja{}:
       "サインイン後のアドレスを貼り付け"
+    case I.Sux{}:
+      "Or paste the address the sign-in ended on"
 
 def T.web.google.client.id(l: I.Loc) -> String:
   match l:
@@ -7849,6 +10098,8 @@ def T.web.google.client.id(l: I.Loc) -> String:
       "OAuth client id (Desktop app)"
     case I.Ja{}:
       "OAuthクライアントID（デスクトップアプリ）"
+    case I.Sux{}:
+      "OAuth client id (Desktop app)"
 
 def T.web.google.client.save(l: I.Loc) -> String:
   match l:
@@ -7856,6 +10107,8 @@ def T.web.google.client.save(l: I.Loc) -> String:
       "Save the client id and secret"
     case I.Ja{}:
       "クライアントIDとシークレットを保存"
+    case I.Sux{}:
+      "Save the client id and secret"
 
 def T.web.hooks.revoke(l: I.Loc) -> String:
   match l:
@@ -7863,6 +10116,8 @@ def T.web.hooks.revoke(l: I.Loc) -> String:
       "Revoke this webhook"
     case I.Ja{}:
       "Webhookを無効にする"
+    case I.Sux{}:
+      "𒂊"
 
 def T.web.hooks.secret(l: I.Loc) -> String:
   match l:
@@ -7870,6 +10125,8 @@ def T.web.hooks.secret(l: I.Loc) -> String:
       "Secret, shown once"
     case I.Ja{}:
       "シークレット（1回のみ表示）"
+    case I.Sux{}:
+      "Secret, shown once"
 
 def T.web.plane.idle(l: I.Loc) -> String:
   match l:
@@ -7877,6 +10134,8 @@ def T.web.plane.idle(l: I.Loc) -> String:
       "Idle"
     case I.Ja{}:
       "待機中"
+    case I.Sux{}:
+      "𒉡𒁺"
 
 def T.web.routine.prompt(l: I.Loc) -> String:
   match l:
@@ -7884,6 +10143,8 @@ def T.web.routine.prompt(l: I.Loc) -> String:
       "What to do each time"
     case I.Ja{}:
       "毎回行うこと"
+    case I.Sux{}:
+      "𒅗"
 
 def T.web.settings.voice.dictionary.note(l: I.Loc) -> String:
   match l:
@@ -7891,6 +10152,8 @@ def T.web.settings.voice.dictionary.note(l: I.Loc) -> String:
       "Names and terms to expect. Words you clarify after dictating join it. Pebble ring: set its webhook to send the recording."
     case I.Ja{}:
       "認識させたい名前や用語です。音声入力後に修正した語句も追加されます。Pebbleリングでは、録音を送るWebhookを設定してください。"
+    case I.Sux{}:
+      "Names and terms to expect. Words you clarify after dictating join it. Pebble ring: set its webhook to send the recording."
 
 def T.web.settings.writing.model(l: I.Loc) -> String:
   match l:
@@ -7898,6 +10161,8 @@ def T.web.settings.writing.model(l: I.Loc) -> String:
       "Writing: model"
     case I.Ja{}:
       "文章生成：モデル"
+    case I.Sux{}:
+      "Writing: model"
 
 def T.web.settings.writing.note(l: I.Loc) -> String:
   match l:
@@ -7905,6 +10170,8 @@ def T.web.settings.writing.note(l: I.Loc) -> String:
       "Titles threads, names branches and writes commit messages. A small model keeps this cheap."
     case I.Ja{}:
       "スレッド名、ブランチ名、コミットメッセージを作成します。小さなモデルで費用を抑えられます。"
+    case I.Sux{}:
+      "Titles threads, names branches and writes commit messages. A small model keeps this cheap."
 
 def T.web.terminal.inactive(l: I.Loc, arg0: String) -> String:
   match l:
@@ -7912,6 +10179,8 @@ def T.web.terminal.inactive(l: I.Loc, arg0: String) -> String:
       arg0 ++ " · inactive, click to restart"
     case I.Ja{}:
       arg0 ++ "・停止中、クリックで再開"
+    case I.Sux{}:
+      arg0 ++ " · 𒉡𒁺 · 𒋗 𒄄 𒁺"
 
 def T.web.terminal.pinned(l: I.Loc, arg0: String) -> String:
   match l:
@@ -7919,6 +10188,8 @@ def T.web.terminal.pinned(l: I.Loc, arg0: String) -> String:
       arg0 ++ " · pinned at the top"
     case I.Ja{}:
       arg0 ++ "・先頭にピン留め"
+    case I.Sux{}:
+      arg0 ++ " · 𒃻 ⬆"
 
 def T.web.viewer.layers.active(l: I.Loc, arg0: String) -> String:
   match l:
@@ -7926,6 +10197,8 @@ def T.web.viewer.layers.active(l: I.Loc, arg0: String) -> String:
       "Layers · " ++ arg0
     case I.Ja{}:
       "レイヤー・" ++ arg0
+    case I.Sux{}:
+      "Layers · " ++ arg0
 
 def T.web.voice.heard(l: I.Loc, arg0: String, arg1: String, arg2: String) -> String:
   match l:
@@ -7933,6 +10206,8 @@ def T.web.voice.heard(l: I.Loc, arg0: String, arg1: String, arg2: String) -> Str
       "Heard “" ++ arg0 ++ "”" ++ I.I18n.sel(arg1, "many", " (1 of " ++ arg2 ++ ")", "")
     case I.Ja{}:
       "認識した語句：「" ++ arg0 ++ "」" ++ I.I18n.sel(arg1, "many", "（1／" ++ arg2 ++ "）", "")
+    case I.Sux{}:
+      "𒄑𒌇 “" ++ arg0 ++ "”" ++ I.I18n.sel(arg1, "many", " (1/" ++ arg2 ++ ")", "")
 
 def T.web.voice.listening(l: I.Loc) -> String:
   match l:
@@ -7940,6 +10215,8 @@ def T.web.voice.listening(l: I.Loc) -> String:
       "Listening"
     case I.Ja{}:
       "音声入力中"
+    case I.Sux{}:
+      "𒅗𒁉"
 
 def T.catalog.rev(xs: List<&2, String>, onto: List<&2, String>) -> List<&2, String>:
   match xs:
@@ -7985,25 +10262,25 @@ def T.keys.part10() -> List<&2, String>:
   ["review.publish", "review.reading", "review.refresh.tip", "review.release", "review.release.make", "review.release.making", "review.release.note", "review.reopen", "review.reopen.tip", "review.reply", "review.reply.tip", "review.resolve", "review.resolve.tip", "review.step.show", "review.tag", "review.tick", "review.untick", "room.delete", "room.empty", "room.write", "rooms.create.tip", "rooms.delete.button.tip", "rooms.delete.tip", "rooms.empty", "rooms.new", "routine.add", "routine.change", "routine.clear.tip", "routine.empty", "routine.new", "routine.next", "routine.note", "routine.on.tip", "routine.prompt", "routine.run", "routine.save", "routine.save.tip", "routine.time.placeholder", "sched.daily", "sched.done", "sched.every.hour", "sched.every.hours", "sched.every.minute", "sched.every.minutes", "sched.help.time", "sched.hint.next", "sched.hint.once", "sched.hourly", "sched.hourly.at", "sched.kind.once", "sched.kind.reminder", "sched.kind.repeat", "sched.weekdays", "sched.zone.machine", "sched.zone.you", "settings.agent.lang", "settings.agent.lang.note", "settings.agents", "settings.agents.default", "settings.agents.note", "settings.appearance", "settings.boat.refresh", "settings.cad", "settings.channel"]
 
 def T.keys.part11() -> List<&2, String>:
-  ["settings.channel.nightly", "settings.channel.note", "settings.channel.stable", "settings.close", "settings.days.fewer", "settings.days.label", "settings.days.more", "settings.freecad.install", "settings.freecad.missing", "settings.key.forget", "settings.key.keep", "settings.keys", "settings.keys.add", "settings.keys.add.tip", "settings.keys.empty", "settings.keys.forget", "settings.keys.names", "settings.keys.new", "settings.keys.view", "settings.kicad.automatic", "settings.kicad.available", "settings.kicad.cli.install", "settings.kicad.cli.missing", "settings.kicad.dismiss", "settings.kicad.install", "settings.kicad.ipc.install", "settings.kicad.ipc.missing", "settings.kicad.ipc.on", "settings.kicad.path", "settings.kicad.path.save", "settings.lang", "settings.lang.auto", "settings.lang.en", "settings.lang.ja", "settings.lang.note", "settings.lang.off", "settings.lang.on", "settings.model", "settings.model.default", "settings.network", "settings.pair", "settings.pair.code", "settings.pair.none", "settings.pair.qr", "settings.pair.qr.tip", "settings.provider", "settings.provider.missing", "settings.restart", "settings.restart.note", "settings.settle", "settings.settle.days", "settings.settle.note", "settings.sidebar", "settings.sidebar.active", "settings.sidebar.note", "settings.sync", "settings.tailscale.label", "settings.tailscale.looking", "settings.tailscale.notconnected", "settings.tailscale.off.note", "settings.tailscale.reachable.note", "settings.tailscale.unavailable.note", "settings.theme", "settings.theme.dark"]
+  ["settings.channel.nightly", "settings.channel.note", "settings.channel.stable", "settings.close", "settings.days.fewer", "settings.days.label", "settings.days.more", "settings.freecad.install", "settings.freecad.missing", "settings.key.forget", "settings.key.keep", "settings.keys", "settings.keys.add", "settings.keys.add.tip", "settings.keys.empty", "settings.keys.forget", "settings.keys.names", "settings.keys.new", "settings.keys.view", "settings.kicad.automatic", "settings.kicad.available", "settings.kicad.cli.install", "settings.kicad.cli.missing", "settings.kicad.dismiss", "settings.kicad.install", "settings.kicad.ipc.install", "settings.kicad.ipc.missing", "settings.kicad.ipc.on", "settings.kicad.path", "settings.kicad.path.save", "settings.lang", "settings.lang.auto", "settings.lang.en", "settings.lang.ja", "settings.lang.note", "settings.lang.off", "settings.lang.on", "settings.lang.sux", "settings.model", "settings.model.default", "settings.network", "settings.pair", "settings.pair.code", "settings.pair.none", "settings.pair.qr", "settings.pair.qr.tip", "settings.provider", "settings.provider.missing", "settings.restart", "settings.restart.note", "settings.settle", "settings.settle.days", "settings.settle.note", "settings.sidebar", "settings.sidebar.active", "settings.sidebar.note", "settings.sync", "settings.tailscale.label", "settings.tailscale.looking", "settings.tailscale.notconnected", "settings.tailscale.off.note", "settings.tailscale.reachable.note", "settings.tailscale.unavailable.note", "settings.theme"]
 
 def T.keys.part12() -> List<&2, String>:
-  ["settings.theme.light", "settings.theme.note", "settings.theme.phone.note", "settings.tour", "settings.tour.again", "settings.tour.note", "settings.tour.show", "settings.tour.welcome", "settings.tz.choose", "settings.tz.follow", "settings.tz.following", "settings.update.available", "settings.update.check", "settings.update.check.tip", "settings.update.current", "settings.update.install", "settings.update.install.tip", "settings.update.now", "settings.update.now.tip", "settings.update.packaged", "settings.update.waits", "settings.usage", "settings.usage.label", "settings.voice", "settings.voice.default.mic", "settings.voice.default.tip", "settings.voice.dictionary", "settings.voice.dictionary.note", "settings.voice.key", "settings.voice.key.note", "settings.voice.key.saved", "settings.voice.microphone", "settings.voice.microphone.note", "settings.voice.pebble", "settings.voice.term", "settings.voice.term.add", "settings.voice.term.remove", "settings.writing", "settings.writing.model", "settings.writing.note", "settings.writing.provider", "settings.zone", "settings.zone.placeholder", "sheet.delete", "sheet.remove", "sheet.remove.note", "sheet.rename", "sidebar.add.project", "sidebar.archived", "sidebar.machine", "sidebar.move.down", "sidebar.move.up", "sidebar.nothing", "sidebar.older", "sidebar.path.placeholder", "sidebar.quiet.note", "sidebar.remove.note", "sidebar.search.projects", "sidebar.settled.count", "sidebar.settled.note", "sidebar.shelf.count", "sidebar.snoozed", "sidebar.update", "stamp.finished"]
+  ["settings.theme.dark", "settings.theme.light", "settings.theme.note", "settings.theme.phone.note", "settings.tour", "settings.tour.again", "settings.tour.note", "settings.tour.show", "settings.tour.welcome", "settings.tz.choose", "settings.tz.follow", "settings.tz.following", "settings.update.available", "settings.update.check", "settings.update.check.tip", "settings.update.current", "settings.update.install", "settings.update.install.tip", "settings.update.now", "settings.update.now.tip", "settings.update.packaged", "settings.update.waits", "settings.usage", "settings.usage.label", "settings.voice", "settings.voice.default.mic", "settings.voice.default.tip", "settings.voice.dictionary", "settings.voice.dictionary.note", "settings.voice.key", "settings.voice.key.note", "settings.voice.key.saved", "settings.voice.microphone", "settings.voice.microphone.note", "settings.voice.pebble", "settings.voice.term", "settings.voice.term.add", "settings.voice.term.remove", "settings.writing", "settings.writing.model", "settings.writing.note", "settings.writing.provider", "settings.zone", "settings.zone.placeholder", "sheet.delete", "sheet.remove", "sheet.remove.note", "sheet.rename", "sidebar.add.project", "sidebar.archived", "sidebar.machine", "sidebar.move.down", "sidebar.move.up", "sidebar.nothing", "sidebar.older", "sidebar.path.placeholder", "sidebar.quiet.note", "sidebar.remove.note", "sidebar.search.projects", "sidebar.settled.count", "sidebar.settled.note", "sidebar.shelf.count", "sidebar.snoozed", "sidebar.update"]
 
 def T.keys.part13() -> List<&2, String>:
-  ["stamp.finished.took", "state.cancelled", "state.done", "state.failed", "state.held", "state.idle", "state.needsyou", "state.reporting", "state.running", "state.starting", "state.stopped", "state.waiting", "state.waitingon", "subagents.badge", "subagents.busy", "subagents.cancel.tip", "subagents.cancel.word", "subagents.heading", "subagents.hide", "subagents.lock.cancel", "subagents.panel", "subagents.show", "tasks.delete.tip", "tasks.discard.tip", "tasks.run.tip", "tasks.save.tip", "tasks.value.ask", "teach.choice.confirm", "teach.choice.continue", "teach.choice.skip", "teach.choice.stop", "teach.description", "teach.discard", "teach.empty", "teach.handback", "teach.name.note", "teach.note.add", "teach.note.placeholder", "teach.paused", "teach.run.note", "teach.runs", "teach.save", "teach.step.check", "teach.step.click", "teach.step.navigate", "teach.step.press", "teach.step.scroll", "teach.step.select", "teach.step.typein", "teach.step.wait", "teach.steps", "teach.stopsave", "teach.takeover", "teach.teach", "teach.watching", "teach.youhave", "terminal.close", "terminal.inactive", "terminal.input", "terminal.pin", "terminal.pinned", "terminal.restart", "terminal.unpin", "thread.boat.settings"]
+  ["stamp.finished", "stamp.finished.took", "state.cancelled", "state.done", "state.failed", "state.held", "state.idle", "state.needsyou", "state.reporting", "state.running", "state.starting", "state.stopped", "state.waiting", "state.waitingon", "subagents.badge", "subagents.busy", "subagents.cancel.tip", "subagents.cancel.word", "subagents.heading", "subagents.hide", "subagents.lock.cancel", "subagents.panel", "subagents.show", "tasks.delete.tip", "tasks.discard.tip", "tasks.run.tip", "tasks.save.tip", "tasks.value.ask", "teach.choice.confirm", "teach.choice.continue", "teach.choice.skip", "teach.choice.stop", "teach.description", "teach.discard", "teach.empty", "teach.handback", "teach.name.note", "teach.note.add", "teach.note.placeholder", "teach.paused", "teach.run.note", "teach.runs", "teach.save", "teach.step.check", "teach.step.click", "teach.step.navigate", "teach.step.press", "teach.step.scroll", "teach.step.select", "teach.step.typein", "teach.step.wait", "teach.steps", "teach.stopsave", "teach.takeover", "teach.teach", "teach.watching", "teach.youhave", "terminal.close", "terminal.inactive", "terminal.input", "terminal.pin", "terminal.pinned", "terminal.restart", "terminal.unpin"]
 
 def T.keys.part14() -> List<&2, String>:
-  ["thread.count", "thread.delete.ask", "thread.from", "thread.new", "thread.reminder", "thread.sending", "thread.snooze.hour.tip", "thread.snooze.tomorrow.tip", "thread.snooze.week.tip", "thread.subagents", "thread.title.cancel", "thread.title.keep", "thread.title.placeholder", "thread.title.rename", "thread.viewer", "todos.all", "todos.fewer", "todos.hide", "todos.show", "tools.forkthread", "tools.pinned", "tools.snooze", "tools.tip.archive", "tools.tip.askdelete", "tools.tip.back", "tools.tip.delete", "tools.tip.forkthread", "tools.tip.keep", "tools.tip.panel", "tools.tip.pin", "tools.tip.settle", "tools.tip.snooze", "tools.tip.stop", "tools.tip.terminal", "tools.tip.unarchive", "tools.tip.unpin", "tools.tip.unsettle", "tools.tip.wake", "tour.back", "tour.back.tip", "tour.body.agents", "tour.body.bots.desktop", "tour.body.bots.phone", "tour.body.buttons.desktop", "tour.body.buttons.phone", "tour.body.keys.desktop", "tour.body.keys.phone", "tour.body.machines.desktop", "tour.body.machines.phone", "tour.body.phones.desktop", "tour.body.phones.phone", "tour.body.projects.desktop", "tour.body.projects.phone", "tour.body.threads", "tour.body.uber.have.desktop", "tour.body.uber.have.phone", "tour.body.uber.join", "tour.body.uber.none", "tour.body.uber.pick", "tour.body.welcome.phone", "tour.body.welcome.web", "tour.body.welcome.window", "tour.counter", "tour.done"]
+  ["thread.boat.settings", "thread.count", "thread.delete.ask", "thread.from", "thread.new", "thread.reminder", "thread.sending", "thread.snooze.hour.tip", "thread.snooze.tomorrow.tip", "thread.snooze.week.tip", "thread.subagents", "thread.title.cancel", "thread.title.keep", "thread.title.placeholder", "thread.title.rename", "thread.viewer", "todos.all", "todos.fewer", "todos.hide", "todos.show", "tools.forkthread", "tools.pinned", "tools.snooze", "tools.tip.archive", "tools.tip.askdelete", "tools.tip.back", "tools.tip.delete", "tools.tip.forkthread", "tools.tip.keep", "tools.tip.panel", "tools.tip.pin", "tools.tip.settle", "tools.tip.snooze", "tools.tip.stop", "tools.tip.terminal", "tools.tip.unarchive", "tools.tip.unpin", "tools.tip.unsettle", "tools.tip.wake", "tour.back", "tour.back.tip", "tour.body.agents", "tour.body.bots.desktop", "tour.body.bots.phone", "tour.body.buttons.desktop", "tour.body.buttons.phone", "tour.body.keys.desktop", "tour.body.keys.phone", "tour.body.machines.desktop", "tour.body.machines.phone", "tour.body.phones.desktop", "tour.body.phones.phone", "tour.body.projects.desktop", "tour.body.projects.phone", "tour.body.threads", "tour.body.uber.have.desktop", "tour.body.uber.have.phone", "tour.body.uber.join", "tour.body.uber.none", "tour.body.uber.pick", "tour.body.welcome.phone", "tour.body.welcome.web", "tour.body.welcome.window", "tour.counter"]
 
 def T.keys.part15() -> List<&2, String>:
-  ["tour.end.tip", "tour.next", "tour.next.tip", "tour.skip", "tour.title.agents", "tour.title.bots", "tour.title.buttons", "tour.title.keys", "tour.title.machines", "tour.title.phones", "tour.title.projects", "tour.title.threads", "tour.title.uber", "tour.title.welcome", "tour.uber.create", "tour.uber.first", "tour.uber.make", "tour.uber.new", "turn.by", "tz.invalid", "tz.source.machine", "tz.source.none", "tz.source.phone", "tz.source.set", "viewer.board", "viewer.board.tip", "viewer.board3d.tip", "viewer.browser.empty", "viewer.browser.tip", "viewer.close", "viewer.diff", "viewer.diff.empty", "viewer.diff.pr", "viewer.diff.tip", "viewer.empty.board", "viewer.empty.schematic", "viewer.export.failed", "viewer.exporting", "viewer.field.drill", "viewer.field.file", "viewer.field.footprint", "viewer.field.ktype", "viewer.field.layer", "viewer.field.lib", "viewer.field.name", "viewer.field.net", "viewer.field.netclass", "viewer.field.ref", "viewer.field.shape", "viewer.field.sheet", "viewer.field.size", "viewer.field.symbol", "viewer.field.text", "viewer.field.value", "viewer.field.width", "viewer.files", "viewer.files.back", "viewer.files.empty", "viewer.files.loading", "viewer.files.range", "viewer.files.tip", "viewer.fit", "viewer.fit.tip", "viewer.help.board"]
+  ["tour.done", "tour.end.tip", "tour.next", "tour.next.tip", "tour.skip", "tour.title.agents", "tour.title.bots", "tour.title.buttons", "tour.title.keys", "tour.title.machines", "tour.title.phones", "tour.title.projects", "tour.title.threads", "tour.title.uber", "tour.title.welcome", "tour.uber.create", "tour.uber.first", "tour.uber.make", "tour.uber.new", "turn.by", "tz.invalid", "tz.source.machine", "tz.source.none", "tz.source.phone", "tz.source.set", "viewer.board", "viewer.board.tip", "viewer.board3d.tip", "viewer.browser.empty", "viewer.browser.tip", "viewer.close", "viewer.diff", "viewer.diff.empty", "viewer.diff.pr", "viewer.diff.tip", "viewer.empty.board", "viewer.empty.schematic", "viewer.export.failed", "viewer.exporting", "viewer.field.drill", "viewer.field.file", "viewer.field.footprint", "viewer.field.ktype", "viewer.field.layer", "viewer.field.lib", "viewer.field.name", "viewer.field.net", "viewer.field.netclass", "viewer.field.ref", "viewer.field.shape", "viewer.field.sheet", "viewer.field.size", "viewer.field.symbol", "viewer.field.text", "viewer.field.value", "viewer.field.width", "viewer.files", "viewer.files.back", "viewer.files.empty", "viewer.files.loading", "viewer.files.range", "viewer.files.tip", "viewer.fit", "viewer.fit.tip"]
 
 def T.keys.part16() -> List<&2, String>:
-  ["viewer.help.browser", "viewer.help.scroll", "viewer.help.solid", "viewer.history.added", "viewer.history.changed", "viewer.history.changes", "viewer.history.compare", "viewer.history.compare.new", "viewer.history.compare.old", "viewer.history.new", "viewer.history.old", "viewer.history.pick", "viewer.history.ref", "viewer.history.removed", "viewer.item.footprint", "viewer.item.globallabel", "viewer.item.hierlabel", "viewer.item.label", "viewer.item.netclassflag", "viewer.item.pad", "viewer.item.pin", "viewer.item.sheet", "viewer.item.sheetpin", "viewer.item.symbol", "viewer.item.track", "viewer.item.via", "viewer.item.zone", "viewer.kicad.tip", "viewer.kicad10", "viewer.kicad10.tip", "viewer.layer.focus", "viewer.layer.toggle", "viewer.layers", "viewer.layers.active", "viewer.layers.all", "viewer.layers.all.tip", "viewer.layers.dim", "viewer.layers.dim.tip", "viewer.layers.only", "viewer.layers.only.tip", "viewer.layers.reset", "viewer.layers.restore", "viewer.layers.tip", "viewer.loading", "viewer.mech", "viewer.mech.loading", "viewer.mech.renders", "viewer.mech.tip", "viewer.mention", "viewer.mesh.failed", "viewer.orbit.tip", "viewer.page.empty", "viewer.page.loading", "viewer.pan.tip", "viewer.parts3d.tip", "viewer.pdf.drawing", "viewer.pdf.page", "viewer.picture.failed", "viewer.render.failed", "viewer.resize", "viewer.review", "viewer.review.tip", "viewer.schematic", "viewer.schematic.tip"]
+  ["viewer.help.board", "viewer.help.browser", "viewer.help.scroll", "viewer.help.solid", "viewer.history.added", "viewer.history.changed", "viewer.history.changes", "viewer.history.compare", "viewer.history.compare.new", "viewer.history.compare.old", "viewer.history.new", "viewer.history.old", "viewer.history.pick", "viewer.history.ref", "viewer.history.removed", "viewer.item.footprint", "viewer.item.globallabel", "viewer.item.hierlabel", "viewer.item.label", "viewer.item.netclassflag", "viewer.item.pad", "viewer.item.pin", "viewer.item.sheet", "viewer.item.sheetpin", "viewer.item.symbol", "viewer.item.track", "viewer.item.via", "viewer.item.zone", "viewer.kicad.tip", "viewer.kicad10", "viewer.kicad10.tip", "viewer.layer.focus", "viewer.layer.toggle", "viewer.layers", "viewer.layers.active", "viewer.layers.all", "viewer.layers.all.tip", "viewer.layers.dim", "viewer.layers.dim.tip", "viewer.layers.only", "viewer.layers.only.tip", "viewer.layers.reset", "viewer.layers.restore", "viewer.layers.tip", "viewer.loading", "viewer.mech", "viewer.mech.loading", "viewer.mech.renders", "viewer.mech.tip", "viewer.mention", "viewer.mesh.failed", "viewer.orbit.tip", "viewer.page.empty", "viewer.page.loading", "viewer.pan.tip", "viewer.parts3d.tip", "viewer.pdf.drawing", "viewer.pdf.page", "viewer.picture.failed", "viewer.render.failed", "viewer.resize", "viewer.review", "viewer.review.tip", "viewer.schematic"]
 
 def T.keys.part17() -> List<&2, String>:
-  ["viewer.sheet.open", "viewer.sheet.title", "viewer.sheet.top", "viewer.solid", "viewer.solid.stats", "viewer.solid.waiting", "viewer.terminal.title", "viewer.unread", "voice.choose", "voice.default", "voice.device.default", "voice.device.note", "voice.dictate", "voice.dictionary.add", "voice.dictionary.tip", "voice.error", "voice.finishing", "voice.fix", "voice.fix.tip", "voice.guess.tip", "voice.heard", "voice.leave", "voice.listening", "voice.microphone", "voice.noaudio", "voice.replace", "voice.silent", "voice.spelling", "voice.starting", "voice.stop", "web.bots.persona.placeholder", "web.google.callback", "web.google.client.id", "web.google.client.save", "web.hooks.revoke", "web.hooks.secret", "web.plane.idle", "web.routine.prompt", "web.settings.voice.dictionary.note", "web.settings.writing.model", "web.settings.writing.note", "web.terminal.inactive", "web.terminal.pinned", "web.viewer.layers.active", "web.voice.heard", "web.voice.listening"]
+  ["viewer.schematic.tip", "viewer.sheet.open", "viewer.sheet.title", "viewer.sheet.top", "viewer.solid", "viewer.solid.stats", "viewer.solid.waiting", "viewer.terminal.title", "viewer.unread", "voice.choose", "voice.default", "voice.device.default", "voice.device.note", "voice.dictate", "voice.dictionary.add", "voice.dictionary.tip", "voice.error", "voice.finishing", "voice.fix", "voice.fix.tip", "voice.guess.tip", "voice.heard", "voice.leave", "voice.listening", "voice.microphone", "voice.noaudio", "voice.replace", "voice.silent", "voice.spelling", "voice.starting", "voice.stop", "web.bots.persona.placeholder", "web.google.callback", "web.google.client.id", "web.google.client.save", "web.hooks.revoke", "web.hooks.secret", "web.plane.idle", "web.routine.prompt", "web.settings.voice.dictionary.note", "web.settings.writing.model", "web.settings.writing.note", "web.terminal.inactive", "web.terminal.pinned", "web.viewer.layers.active", "web.voice.heard", "web.voice.listening"]
 
 def T.keys() -> List<&2, String>:
   T.catalog.join([T.keys.part0(), T.keys.part1(), T.keys.part2(), T.keys.part3(), T.keys.part4(), T.keys.part5(), T.keys.part6(), T.keys.part7(), T.keys.part8(), T.keys.part9(), T.keys.part10(), T.keys.part11(), T.keys.part12(), T.keys.part13(), T.keys.part14(), T.keys.part15(), T.keys.part16(), T.keys.part17()], [])
@@ -8014,12 +10291,32 @@ def T.catalog.missing.en() -> List<&2, String>:
 def T.catalog.missing.ja() -> List<&2, String>:
   []
 
+def T.catalog.missing.sux.part0() -> List<&2, String>:
+  ["agy.account.other", "agy.account.signedin", "agy.account.signedout", "agy.download", "agy.gcp", "agy.gcp.location", "agy.gcp.project", "agy.gcp.set", "agy.installed", "agy.key.saved", "agy.key.unsaved", "agy.old", "agy.signin.back", "agy.unsupported", "apikeys.form", "apikeys.kept", "apikeys.none", "ask.allow.session.tip", "ask.send.tip", "auth.legacy", "bots.delete.tip", "bots.invite.address", "bots.invite.once", "bots.machines.note", "bots.memory.count", "bots.memory.empty", "bots.persona.example", "bots.persona.note", "bots.remote.empty", "browser.owner", "btw.none", "composer.attach.placeholder", "composer.enter.tip", "composer.placeholder", "diff.pr.tip", "diff.revert.tip", "fold.tooltip", "google.callback", "google.client.id", "google.client.own", "google.client.secret", "google.note", "google.own.tip", "google.signature", "google.signature.placeholder", "google.signature.save", "google.signature.tip", "google.signout.tip", "history.bom.tip", "history.branchpoint", "history.live.note", "history.live.ticks", "history.notinrepo", "history.ref.base", "history.ref.branch", "history.ref.commit", "history.ref.head", "history.ref.tag", "hooks.bearer", "hooks.github.note", "hooks.header", "hooks.http.note", "hooks.name", "hooks.note"]
+
+def T.catalog.missing.sux.part1() -> List<&2, String>:
+  ["hooks.pebble.header", "hooks.pebble.note", "hooks.post.http", "hooks.secret", "hooks.secret.hide", "hooks.status", "hooks.token.new.tip", "hooks.token.off.tip", "hooks.token.tip", "hooks.url", "image.remote.failed", "machines.invite.tip", "machines.join.tip", "machines.lead", "machines.lead.none", "machines.url", "mech.nofreecad", "mech.render.tip", "mech.renders.tip", "mech.turn", "model.effort.next", "model.effort.tip", "model.level.auto", "native.composer.btw", "native.diff.revert.ask", "native.google.client.id", "native.google.redirect", "native.home.hint", "native.hub.accessibility", "native.key.down", "native.key.enter", "native.key.esc", "native.key.keyboard", "native.key.left", "native.key.right", "native.key.tab", "native.key.up", "native.pair.computer", "native.pair.computer.android", "native.pair.instructions", "native.pair.scanner.denied", "native.pair.scanner.instructions", "native.pair.scanner.unavailable", "native.pair.tailnet", "native.permission.camera", "native.plane.card", "native.routine.examples", "native.routine.hint", "native.settings.behaviour", "native.settings.behaviour.android", "native.settings.behaviour.ios", "native.settings.cache.next", "native.settings.haptics", "native.settings.notify.hub", "native.settings.placeholder.hint", "native.task.parameter", "native.thread.effort", "native.thread.effort.item", "native.thread.model", "native.thread.model.effort", "native.thread.provider.item", "native.viewer.metal", "nav.pr.norepo", "notify.all.note"]
+
+def T.catalog.missing.sux.part2() -> List<&2, String>:
+  ["notify.lead", "notify.needs.note", "notify.reminders.note", "notify.settled.note", "option.nightly", "option.stable", "palette.kicad10", "phase.monitoring", "picker.keys.folder", "picker.keys.project", "plane.lock.by", "plane.lock.outside", "remote.address.failed", "remote.cache.failed", "remote.denied", "remote.handshake.failed", "remote.reply.failed", "remote.request.error", "remote.request.failed", "remote.timeout", "remote.unreachable", "review.bom", "review.comments.none", "review.force", "review.release.note", "review.tag", "room.empty", "rooms.delete.tip", "routine.empty", "routine.note", "routine.time.placeholder", "sched.every.hours", "sched.every.minute", "sched.every.minutes", "sched.help.time", "sched.weekdays", "settings.agents.default", "settings.agents.note", "settings.cad", "settings.channel", "settings.channel.nightly", "settings.channel.note", "settings.channel.stable", "settings.freecad.install", "settings.kicad.automatic", "settings.kicad.available", "settings.kicad.cli.install", "settings.kicad.ipc.install", "settings.kicad.ipc.missing", "settings.kicad.ipc.on", "settings.kicad.path", "settings.lang.auto", "settings.lang.en", "settings.lang.ja", "settings.lang.note", "settings.model", "settings.network", "settings.pair.none", "settings.pair.qr", "settings.provider", "settings.provider.missing", "settings.restart.note", "settings.settle.note", "settings.sidebar.note"]
+
+def T.catalog.missing.sux.part3() -> List<&2, String>:
+  ["settings.tailscale.label", "settings.tailscale.off.note", "settings.tailscale.reachable.note", "settings.tailscale.unavailable.note", "settings.theme.note", "settings.theme.phone.note", "settings.tour.note", "settings.update.now.tip", "settings.update.waits", "settings.usage.label", "settings.voice.default.mic", "settings.voice.dictionary.note", "settings.voice.key", "settings.voice.key.note", "settings.voice.key.saved", "settings.voice.microphone", "settings.voice.microphone.note", "settings.voice.pebble", "settings.writing.model", "settings.writing.note", "settings.writing.provider", "settings.zone.placeholder", "sidebar.path.placeholder", "sidebar.shelf.count", "subagents.cancel.tip", "subagents.lock.cancel", "tasks.value.ask", "teach.empty", "teach.name.note", "teach.note.placeholder", "teach.youhave", "thread.reminder", "tools.tip.back", "tools.tip.panel", "tools.tip.terminal", "tour.body.agents", "tour.body.bots.desktop", "tour.body.bots.phone", "tour.body.buttons.desktop", "tour.body.buttons.phone", "tour.body.keys.desktop", "tour.body.keys.phone", "tour.body.machines.desktop", "tour.body.machines.phone", "tour.body.phones.desktop", "tour.body.phones.phone", "tour.body.projects.desktop", "tour.body.projects.phone", "tour.body.threads", "tour.body.uber.have.desktop", "tour.body.uber.have.phone", "tour.body.uber.join", "tour.body.uber.none", "tour.body.uber.pick", "tour.body.welcome.phone", "tour.body.welcome.web", "tour.body.welcome.window", "tour.title.phones", "tz.invalid", "viewer.browser.empty", "viewer.diff.tip", "viewer.export.failed", "viewer.exporting", "viewer.field.value"]
+
+def T.catalog.missing.sux.part4() -> List<&2, String>:
+  ["viewer.files.tip", "viewer.help.board", "viewer.help.solid", "viewer.history.ref", "viewer.item.netclassflag", "viewer.item.pad", "viewer.item.pin", "viewer.item.track", "viewer.item.via", "viewer.kicad.tip", "viewer.kicad10.tip", "viewer.layers", "viewer.layers.active", "viewer.layers.all.tip", "viewer.layers.dim.tip", "viewer.layers.only.tip", "viewer.layers.tip", "viewer.mech", "viewer.mech.tip", "viewer.mesh.failed", "viewer.orbit.tip", "viewer.pan.tip", "viewer.parts3d.tip", "viewer.pdf.page", "viewer.resize", "viewer.review.tip", "viewer.sheet.title", "viewer.solid", "viewer.solid.stats", "viewer.solid.waiting", "viewer.terminal.title", "voice.device.default", "voice.device.note", "voice.dictate", "voice.error", "voice.noaudio", "voice.replace", "voice.silent", "web.google.callback", "web.google.client.id", "web.google.client.save", "web.hooks.secret", "web.settings.voice.dictionary.note", "web.settings.writing.model", "web.settings.writing.note", "web.viewer.layers.active"]
+
+def T.catalog.missing.sux() -> List<&2, String>:
+  T.catalog.join([T.catalog.missing.sux.part0(), T.catalog.missing.sux.part1(), T.catalog.missing.sux.part2(), T.catalog.missing.sux.part3(), T.catalog.missing.sux.part4()], [])
+
 def T.missing(l: I.Loc) -> List<&2, String>:
   match l:
     case I.En{}:
       T.catalog.missing.en()
     case I.Ja{}:
       T.catalog.missing.ja()
+    case I.Sux{}:
+      T.catalog.missing.sux()
 
 def T.plain.nlllllllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -15892,12 +18189,12 @@ def T.plain.nrlrlrlllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.settings.network(l)}
+      Some{T.settings.model(l)}
     case GT{}:
       None{}
 
 def T.plain.nrlrlrlllr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrlrlllr.cmp(String.cmp(key, "settings.network"), l)
+  T.plain.nrlrlrlllr.cmp(String.cmp(key, "settings.model"), l)
 
 def T.plain.nrlrlrlll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -15905,12 +18202,12 @@ def T.plain.nrlrlrlll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrlrlrllll(l, key)
     case EQ{}:
-      Some{T.settings.model(l)}
+      Some{T.settings.lang.sux(l)}
     case GT{}:
       T.plain.nrlrlrlllr(l, key)
 
 def T.plain.nrlrlrlll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrlrlll.cmp(String.cmp(key, "settings.model"), l)
+  T.plain.nrlrlrlll.cmp(String.cmp(key, "settings.lang.sux"), l)
 
 def T.plain.nrlrlrllrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -15918,12 +18215,12 @@ def T.plain.nrlrlrllrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.settings.pair.code(l)}
+      Some{T.settings.pair(l)}
     case GT{}:
       None{}
 
 def T.plain.nrlrlrllrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrlrllrl.cmp(String.cmp(key, "settings.pair.code"), l)
+  T.plain.nrlrlrllrl.cmp(String.cmp(key, "settings.pair"), l)
 
 def T.plain.nrlrlrllrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -15931,12 +18228,12 @@ def T.plain.nrlrlrllrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.settings.pair.qr(l)}
+      Some{T.settings.pair.none(l)}
     case GT{}:
       None{}
 
 def T.plain.nrlrlrllrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrlrllrr.cmp(String.cmp(key, "settings.pair.qr"), l)
+  T.plain.nrlrlrllrr.cmp(String.cmp(key, "settings.pair.none"), l)
 
 def T.plain.nrlrlrllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -15944,12 +18241,12 @@ def T.plain.nrlrlrllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrlrlrllrl(l, key)
     case EQ{}:
-      Some{T.settings.pair.none(l)}
+      Some{T.settings.pair.code(l)}
     case GT{}:
       T.plain.nrlrlrllrr(l, key)
 
 def T.plain.nrlrlrllr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrlrllr.cmp(String.cmp(key, "settings.pair.none"), l)
+  T.plain.nrlrlrllr.cmp(String.cmp(key, "settings.pair.code"), l)
 
 def T.plain.nrlrlrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -15957,12 +18254,12 @@ def T.plain.nrlrlrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Stri
     case LT{}:
       T.plain.nrlrlrlll(l, key)
     case EQ{}:
-      Some{T.settings.pair(l)}
+      Some{T.settings.network(l)}
     case GT{}:
       T.plain.nrlrlrllr(l, key)
 
 def T.plain.nrlrlrll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrlrll.cmp(String.cmp(key, "settings.pair"), l)
+  T.plain.nrlrlrll.cmp(String.cmp(key, "settings.network"), l)
 
 def T.plain.nrlrlrlrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -15970,12 +18267,12 @@ def T.plain.nrlrlrlrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.settings.provider(l)}
+      Some{T.settings.pair.qr.tip(l)}
     case GT{}:
       None{}
 
 def T.plain.nrlrlrlrll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrlrlrll.cmp(String.cmp(key, "settings.provider"), l)
+  T.plain.nrlrlrlrll.cmp(String.cmp(key, "settings.pair.qr.tip"), l)
 
 def T.plain.nrlrlrlrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -15983,12 +18280,12 @@ def T.plain.nrlrlrlrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.settings.restart.note(l)}
+      Some{T.settings.restart(l)}
     case GT{}:
       None{}
 
 def T.plain.nrlrlrlrlr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrlrlrlr.cmp(String.cmp(key, "settings.restart.note"), l)
+  T.plain.nrlrlrlrlr.cmp(String.cmp(key, "settings.restart"), l)
 
 def T.plain.nrlrlrlrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -15996,12 +18293,12 @@ def T.plain.nrlrlrlrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrlrlrlrll(l, key)
     case EQ{}:
-      Some{T.settings.restart(l)}
+      Some{T.settings.provider(l)}
     case GT{}:
       T.plain.nrlrlrlrlr(l, key)
 
 def T.plain.nrlrlrlrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrlrlrl.cmp(String.cmp(key, "settings.restart"), l)
+  T.plain.nrlrlrlrl.cmp(String.cmp(key, "settings.provider"), l)
 
 def T.plain.nrlrlrlrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16009,12 +18306,12 @@ def T.plain.nrlrlrlrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.settings.settle.note(l)}
+      Some{T.settings.settle(l)}
     case GT{}:
       None{}
 
 def T.plain.nrlrlrlrrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrlrlrrl.cmp(String.cmp(key, "settings.settle.note"), l)
+  T.plain.nrlrlrlrrl.cmp(String.cmp(key, "settings.settle"), l)
 
 def T.plain.nrlrlrlrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16022,12 +18319,12 @@ def T.plain.nrlrlrlrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrlrlrlrrl(l, key)
     case EQ{}:
-      Some{T.settings.sidebar(l)}
+      Some{T.settings.settle.note(l)}
     case GT{}:
       None{}
 
 def T.plain.nrlrlrlrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrlrlrr.cmp(String.cmp(key, "settings.sidebar"), l)
+  T.plain.nrlrlrlrr.cmp(String.cmp(key, "settings.settle.note"), l)
 
 def T.plain.nrlrlrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16035,12 +18332,12 @@ def T.plain.nrlrlrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Stri
     case LT{}:
       T.plain.nrlrlrlrl(l, key)
     case EQ{}:
-      Some{T.settings.settle(l)}
+      Some{T.settings.restart.note(l)}
     case GT{}:
       T.plain.nrlrlrlrr(l, key)
 
 def T.plain.nrlrlrlr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrlrlr.cmp(String.cmp(key, "settings.settle"), l)
+  T.plain.nrlrlrlr.cmp(String.cmp(key, "settings.restart.note"), l)
 
 def T.plain.nrlrlrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16048,12 +18345,12 @@ def T.plain.nrlrlrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Strin
     case LT{}:
       T.plain.nrlrlrll(l, key)
     case EQ{}:
-      Some{T.settings.pair.qr.tip(l)}
+      Some{T.settings.pair.qr(l)}
     case GT{}:
       T.plain.nrlrlrlr(l, key)
 
 def T.plain.nrlrlrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrlrl.cmp(String.cmp(key, "settings.pair.qr.tip"), l)
+  T.plain.nrlrlrl.cmp(String.cmp(key, "settings.pair.qr"), l)
 
 def T.plain.nrlrlrrlll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16061,12 +18358,12 @@ def T.plain.nrlrlrrlll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.settings.sidebar.note(l)}
+      Some{T.settings.sidebar.active(l)}
     case GT{}:
       None{}
 
 def T.plain.nrlrlrrlll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrlrrlll.cmp(String.cmp(key, "settings.sidebar.note"), l)
+  T.plain.nrlrlrrlll.cmp(String.cmp(key, "settings.sidebar.active"), l)
 
 def T.plain.nrlrlrrllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16074,12 +18371,12 @@ def T.plain.nrlrlrrllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.settings.tailscale.looking(l)}
+      Some{T.settings.sync(l)}
     case GT{}:
       None{}
 
 def T.plain.nrlrlrrllr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrlrrllr.cmp(String.cmp(key, "settings.tailscale.looking"), l)
+  T.plain.nrlrlrrllr.cmp(String.cmp(key, "settings.sync"), l)
 
 def T.plain.nrlrlrrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16087,12 +18384,12 @@ def T.plain.nrlrlrrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrlrlrrlll(l, key)
     case EQ{}:
-      Some{T.settings.sync(l)}
+      Some{T.settings.sidebar.note(l)}
     case GT{}:
       T.plain.nrlrlrrllr(l, key)
 
 def T.plain.nrlrlrrll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrlrrll.cmp(String.cmp(key, "settings.sync"), l)
+  T.plain.nrlrlrrll.cmp(String.cmp(key, "settings.sidebar.note"), l)
 
 def T.plain.nrlrlrrlrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16100,12 +18397,12 @@ def T.plain.nrlrlrrlrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.settings.tailscale.reachable.note(l)}
+      Some{T.settings.tailscale.notconnected(l)}
     case GT{}:
       None{}
 
 def T.plain.nrlrlrrlrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrlrrlrl.cmp(String.cmp(key, "settings.tailscale.reachable.note"), l)
+  T.plain.nrlrlrrlrl.cmp(String.cmp(key, "settings.tailscale.notconnected"), l)
 
 def T.plain.nrlrlrrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16113,12 +18410,12 @@ def T.plain.nrlrlrrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrlrlrrlrl(l, key)
     case EQ{}:
-      Some{T.settings.theme(l)}
+      Some{T.settings.tailscale.reachable.note(l)}
     case GT{}:
       None{}
 
 def T.plain.nrlrlrrlr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrlrrlr.cmp(String.cmp(key, "settings.theme"), l)
+  T.plain.nrlrlrrlr.cmp(String.cmp(key, "settings.tailscale.reachable.note"), l)
 
 def T.plain.nrlrlrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16126,12 +18423,12 @@ def T.plain.nrlrlrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Stri
     case LT{}:
       T.plain.nrlrlrrll(l, key)
     case EQ{}:
-      Some{T.settings.tailscale.notconnected(l)}
+      Some{T.settings.tailscale.looking(l)}
     case GT{}:
       T.plain.nrlrlrrlr(l, key)
 
 def T.plain.nrlrlrrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrlrrl.cmp(String.cmp(key, "settings.tailscale.notconnected"), l)
+  T.plain.nrlrlrrl.cmp(String.cmp(key, "settings.tailscale.looking"), l)
 
 def T.plain.nrlrlrrrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16139,12 +18436,12 @@ def T.plain.nrlrlrrrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.settings.theme.light(l)}
+      Some{T.settings.theme.dark(l)}
     case GT{}:
       None{}
 
 def T.plain.nrlrlrrrll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrlrrrll.cmp(String.cmp(key, "settings.theme.light"), l)
+  T.plain.nrlrlrrrll.cmp(String.cmp(key, "settings.theme.dark"), l)
 
 def T.plain.nrlrlrrrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16152,12 +18449,12 @@ def T.plain.nrlrlrrrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.settings.theme.phone.note(l)}
+      Some{T.settings.theme.note(l)}
     case GT{}:
       None{}
 
 def T.plain.nrlrlrrrlr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrlrrrlr.cmp(String.cmp(key, "settings.theme.phone.note"), l)
+  T.plain.nrlrlrrrlr.cmp(String.cmp(key, "settings.theme.note"), l)
 
 def T.plain.nrlrlrrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16165,12 +18462,12 @@ def T.plain.nrlrlrrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrlrlrrrll(l, key)
     case EQ{}:
-      Some{T.settings.theme.note(l)}
+      Some{T.settings.theme.light(l)}
     case GT{}:
       T.plain.nrlrlrrrlr(l, key)
 
 def T.plain.nrlrlrrrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrlrrrl.cmp(String.cmp(key, "settings.theme.note"), l)
+  T.plain.nrlrlrrrl.cmp(String.cmp(key, "settings.theme.light"), l)
 
 def T.plain.nrlrlrrrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16178,12 +18475,12 @@ def T.plain.nrlrlrrrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.settings.tour.again(l)}
+      Some{T.settings.tour(l)}
     case GT{}:
       None{}
 
 def T.plain.nrlrlrrrrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrlrrrrl.cmp(String.cmp(key, "settings.tour.again"), l)
+  T.plain.nrlrlrrrrl.cmp(String.cmp(key, "settings.tour"), l)
 
 def T.plain.nrlrlrrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16191,12 +18488,12 @@ def T.plain.nrlrlrrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrlrlrrrrl(l, key)
     case EQ{}:
-      Some{T.settings.tour.note(l)}
+      Some{T.settings.tour.again(l)}
     case GT{}:
       None{}
 
 def T.plain.nrlrlrrrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrlrrrr.cmp(String.cmp(key, "settings.tour.note"), l)
+  T.plain.nrlrlrrrr.cmp(String.cmp(key, "settings.tour.again"), l)
 
 def T.plain.nrlrlrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16204,12 +18501,12 @@ def T.plain.nrlrlrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Stri
     case LT{}:
       T.plain.nrlrlrrrl(l, key)
     case EQ{}:
-      Some{T.settings.tour(l)}
+      Some{T.settings.theme.phone.note(l)}
     case GT{}:
       T.plain.nrlrlrrrr(l, key)
 
 def T.plain.nrlrlrrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrlrrr.cmp(String.cmp(key, "settings.tour"), l)
+  T.plain.nrlrlrrr.cmp(String.cmp(key, "settings.theme.phone.note"), l)
 
 def T.plain.nrlrlrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16217,12 +18514,12 @@ def T.plain.nrlrlrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Strin
     case LT{}:
       T.plain.nrlrlrrl(l, key)
     case EQ{}:
-      Some{T.settings.theme.dark(l)}
+      Some{T.settings.theme(l)}
     case GT{}:
       T.plain.nrlrlrrr(l, key)
 
 def T.plain.nrlrlrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrlrr.cmp(String.cmp(key, "settings.theme.dark"), l)
+  T.plain.nrlrlrr.cmp(String.cmp(key, "settings.theme"), l)
 
 def T.plain.nrlrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16230,12 +18527,12 @@ def T.plain.nrlrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String
     case LT{}:
       T.plain.nrlrlrl(l, key)
     case EQ{}:
-      Some{T.settings.sidebar.active(l)}
+      Some{T.settings.sidebar(l)}
     case GT{}:
       T.plain.nrlrlrr(l, key)
 
 def T.plain.nrlrlr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrlr.cmp(String.cmp(key, "settings.sidebar.active"), l)
+  T.plain.nrlrlr.cmp(String.cmp(key, "settings.sidebar"), l)
 
 def T.plain.nrlrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16256,12 +18553,12 @@ def T.plain.nrlrrlllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.settings.tour.welcome(l)}
+      Some{T.settings.tour.show(l)}
     case GT{}:
       None{}
 
 def T.plain.nrlrrlllll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrrlllll.cmp(String.cmp(key, "settings.tour.welcome"), l)
+  T.plain.nrlrrlllll.cmp(String.cmp(key, "settings.tour.show"), l)
 
 def T.plain.nrlrrllllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16269,12 +18566,12 @@ def T.plain.nrlrrllllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.settings.tz.follow(l)}
+      Some{T.settings.tz.choose(l)}
     case GT{}:
       None{}
 
 def T.plain.nrlrrllllr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrrllllr.cmp(String.cmp(key, "settings.tz.follow"), l)
+  T.plain.nrlrrllllr.cmp(String.cmp(key, "settings.tz.choose"), l)
 
 def T.plain.nrlrrllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16282,12 +18579,12 @@ def T.plain.nrlrrllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrlrrlllll(l, key)
     case EQ{}:
-      Some{T.settings.tz.choose(l)}
+      Some{T.settings.tour.welcome(l)}
     case GT{}:
       T.plain.nrlrrllllr(l, key)
 
 def T.plain.nrlrrllll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrrllll.cmp(String.cmp(key, "settings.tz.choose"), l)
+  T.plain.nrlrrllll.cmp(String.cmp(key, "settings.tour.welcome"), l)
 
 def T.plain.nrlrrlllrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16295,12 +18592,12 @@ def T.plain.nrlrrlllrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.settings.update.check(l)}
+      Some{T.settings.tz.following(l)}
     case GT{}:
       None{}
 
 def T.plain.nrlrrlllrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrrlllrl.cmp(String.cmp(key, "settings.update.check"), l)
+  T.plain.nrlrrlllrl.cmp(String.cmp(key, "settings.tz.following"), l)
 
 def T.plain.nrlrrlllrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16308,12 +18605,12 @@ def T.plain.nrlrrlllrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.settings.update.current(l)}
+      Some{T.settings.update.check.tip(l)}
     case GT{}:
       None{}
 
 def T.plain.nrlrrlllrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrrlllrr.cmp(String.cmp(key, "settings.update.current"), l)
+  T.plain.nrlrrlllrr.cmp(String.cmp(key, "settings.update.check.tip"), l)
 
 def T.plain.nrlrrlllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16321,12 +18618,12 @@ def T.plain.nrlrrlllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrlrrlllrl(l, key)
     case EQ{}:
-      Some{T.settings.update.check.tip(l)}
+      Some{T.settings.update.check(l)}
     case GT{}:
       T.plain.nrlrrlllrr(l, key)
 
 def T.plain.nrlrrlllr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrrlllr.cmp(String.cmp(key, "settings.update.check.tip"), l)
+  T.plain.nrlrrlllr.cmp(String.cmp(key, "settings.update.check"), l)
 
 def T.plain.nrlrrlll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16334,12 +18631,12 @@ def T.plain.nrlrrlll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Stri
     case LT{}:
       T.plain.nrlrrllll(l, key)
     case EQ{}:
-      Some{T.settings.tz.following(l)}
+      Some{T.settings.tz.follow(l)}
     case GT{}:
       T.plain.nrlrrlllr(l, key)
 
 def T.plain.nrlrrlll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrrlll.cmp(String.cmp(key, "settings.tz.following"), l)
+  T.plain.nrlrrlll.cmp(String.cmp(key, "settings.tz.follow"), l)
 
 def T.plain.nrlrrllrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16347,12 +18644,12 @@ def T.plain.nrlrrllrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.settings.update.install.tip(l)}
+      Some{T.settings.update.install(l)}
     case GT{}:
       None{}
 
 def T.plain.nrlrrllrll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrrllrll.cmp(String.cmp(key, "settings.update.install.tip"), l)
+  T.plain.nrlrrllrll.cmp(String.cmp(key, "settings.update.install"), l)
 
 def T.plain.nrlrrllrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16360,12 +18657,12 @@ def T.plain.nrlrrllrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.settings.update.now.tip(l)}
+      Some{T.settings.update.now(l)}
     case GT{}:
       None{}
 
 def T.plain.nrlrrllrlr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrrllrlr.cmp(String.cmp(key, "settings.update.now.tip"), l)
+  T.plain.nrlrrllrlr.cmp(String.cmp(key, "settings.update.now"), l)
 
 def T.plain.nrlrrllrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16373,12 +18670,12 @@ def T.plain.nrlrrllrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrlrrllrll(l, key)
     case EQ{}:
-      Some{T.settings.update.now(l)}
+      Some{T.settings.update.install.tip(l)}
     case GT{}:
       T.plain.nrlrrllrlr(l, key)
 
 def T.plain.nrlrrllrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrrllrl.cmp(String.cmp(key, "settings.update.now"), l)
+  T.plain.nrlrrllrl.cmp(String.cmp(key, "settings.update.install.tip"), l)
 
 def T.plain.nrlrrllrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16386,12 +18683,12 @@ def T.plain.nrlrrllrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.settings.usage(l)}
+      Some{T.settings.update.packaged(l)}
     case GT{}:
       None{}
 
 def T.plain.nrlrrllrrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrrllrrl.cmp(String.cmp(key, "settings.usage"), l)
+  T.plain.nrlrrllrrl.cmp(String.cmp(key, "settings.update.packaged"), l)
 
 def T.plain.nrlrrllrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16399,12 +18696,12 @@ def T.plain.nrlrrllrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrlrrllrrl(l, key)
     case EQ{}:
-      Some{T.settings.voice(l)}
+      Some{T.settings.usage(l)}
     case GT{}:
       None{}
 
 def T.plain.nrlrrllrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrrllrr.cmp(String.cmp(key, "settings.voice"), l)
+  T.plain.nrlrrllrr.cmp(String.cmp(key, "settings.usage"), l)
 
 def T.plain.nrlrrllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16412,12 +18709,12 @@ def T.plain.nrlrrllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Stri
     case LT{}:
       T.plain.nrlrrllrl(l, key)
     case EQ{}:
-      Some{T.settings.update.packaged(l)}
+      Some{T.settings.update.now.tip(l)}
     case GT{}:
       T.plain.nrlrrllrr(l, key)
 
 def T.plain.nrlrrllr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrrllr.cmp(String.cmp(key, "settings.update.packaged"), l)
+  T.plain.nrlrrllr.cmp(String.cmp(key, "settings.update.now.tip"), l)
 
 def T.plain.nrlrrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16425,12 +18722,12 @@ def T.plain.nrlrrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Strin
     case LT{}:
       T.plain.nrlrrlll(l, key)
     case EQ{}:
-      Some{T.settings.update.install(l)}
+      Some{T.settings.update.current(l)}
     case GT{}:
       T.plain.nrlrrllr(l, key)
 
 def T.plain.nrlrrll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrrll.cmp(String.cmp(key, "settings.update.install"), l)
+  T.plain.nrlrrll.cmp(String.cmp(key, "settings.update.current"), l)
 
 def T.plain.nrlrrlrlll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16438,12 +18735,12 @@ def T.plain.nrlrrlrlll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.settings.voice.dictionary(l)}
+      Some{T.settings.voice.default.tip(l)}
     case GT{}:
       None{}
 
 def T.plain.nrlrrlrlll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrrlrlll.cmp(String.cmp(key, "settings.voice.dictionary"), l)
+  T.plain.nrlrrlrlll.cmp(String.cmp(key, "settings.voice.default.tip"), l)
 
 def T.plain.nrlrrlrllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16451,12 +18748,12 @@ def T.plain.nrlrrlrllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.settings.voice.key(l)}
+      Some{T.settings.voice.dictionary.note(l)}
     case GT{}:
       None{}
 
 def T.plain.nrlrrlrllr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrrlrllr.cmp(String.cmp(key, "settings.voice.key"), l)
+  T.plain.nrlrrlrllr.cmp(String.cmp(key, "settings.voice.dictionary.note"), l)
 
 def T.plain.nrlrrlrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16464,12 +18761,12 @@ def T.plain.nrlrrlrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrlrrlrlll(l, key)
     case EQ{}:
-      Some{T.settings.voice.dictionary.note(l)}
+      Some{T.settings.voice.dictionary(l)}
     case GT{}:
       T.plain.nrlrrlrllr(l, key)
 
 def T.plain.nrlrrlrll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrrlrll.cmp(String.cmp(key, "settings.voice.dictionary.note"), l)
+  T.plain.nrlrrlrll.cmp(String.cmp(key, "settings.voice.dictionary"), l)
 
 def T.plain.nrlrrlrlrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16477,12 +18774,12 @@ def T.plain.nrlrrlrlrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.settings.voice.microphone(l)}
+      Some{T.settings.voice.key.note(l)}
     case GT{}:
       None{}
 
 def T.plain.nrlrrlrlrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrrlrlrl.cmp(String.cmp(key, "settings.voice.microphone"), l)
+  T.plain.nrlrrlrlrl.cmp(String.cmp(key, "settings.voice.key.note"), l)
 
 def T.plain.nrlrrlrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16490,12 +18787,12 @@ def T.plain.nrlrrlrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrlrrlrlrl(l, key)
     case EQ{}:
-      Some{T.settings.voice.pebble(l)}
+      Some{T.settings.voice.microphone(l)}
     case GT{}:
       None{}
 
 def T.plain.nrlrrlrlr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrrlrlr.cmp(String.cmp(key, "settings.voice.pebble"), l)
+  T.plain.nrlrrlrlr.cmp(String.cmp(key, "settings.voice.microphone"), l)
 
 def T.plain.nrlrrlrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16503,12 +18800,12 @@ def T.plain.nrlrrlrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Stri
     case LT{}:
       T.plain.nrlrrlrll(l, key)
     case EQ{}:
-      Some{T.settings.voice.key.note(l)}
+      Some{T.settings.voice.key(l)}
     case GT{}:
       T.plain.nrlrrlrlr(l, key)
 
 def T.plain.nrlrrlrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrrlrl.cmp(String.cmp(key, "settings.voice.key.note"), l)
+  T.plain.nrlrrlrl.cmp(String.cmp(key, "settings.voice.key"), l)
 
 def T.plain.nrlrrlrrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16516,12 +18813,12 @@ def T.plain.nrlrrlrrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.settings.voice.term.add(l)}
+      Some{T.settings.voice.term(l)}
     case GT{}:
       None{}
 
 def T.plain.nrlrrlrrll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrrlrrll.cmp(String.cmp(key, "settings.voice.term.add"), l)
+  T.plain.nrlrrlrrll.cmp(String.cmp(key, "settings.voice.term"), l)
 
 def T.plain.nrlrrlrrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16529,12 +18826,12 @@ def T.plain.nrlrrlrrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.settings.writing(l)}
+      Some{T.settings.voice.term.remove(l)}
     case GT{}:
       None{}
 
 def T.plain.nrlrrlrrlr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrrlrrlr.cmp(String.cmp(key, "settings.writing"), l)
+  T.plain.nrlrrlrrlr.cmp(String.cmp(key, "settings.voice.term.remove"), l)
 
 def T.plain.nrlrrlrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16542,12 +18839,12 @@ def T.plain.nrlrrlrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrlrrlrrll(l, key)
     case EQ{}:
-      Some{T.settings.voice.term.remove(l)}
+      Some{T.settings.voice.term.add(l)}
     case GT{}:
       T.plain.nrlrrlrrlr(l, key)
 
 def T.plain.nrlrrlrrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrrlrrl.cmp(String.cmp(key, "settings.voice.term.remove"), l)
+  T.plain.nrlrrlrrl.cmp(String.cmp(key, "settings.voice.term.add"), l)
 
 def T.plain.nrlrrlrrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16555,12 +18852,12 @@ def T.plain.nrlrrlrrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.settings.writing.note(l)}
+      Some{T.settings.writing.model(l)}
     case GT{}:
       None{}
 
 def T.plain.nrlrrlrrrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrrlrrrl.cmp(String.cmp(key, "settings.writing.note"), l)
+  T.plain.nrlrrlrrrl.cmp(String.cmp(key, "settings.writing.model"), l)
 
 def T.plain.nrlrrlrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16568,12 +18865,12 @@ def T.plain.nrlrrlrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrlrrlrrrl(l, key)
     case EQ{}:
-      Some{T.settings.writing.provider(l)}
+      Some{T.settings.writing.note(l)}
     case GT{}:
       None{}
 
 def T.plain.nrlrrlrrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrrlrrr.cmp(String.cmp(key, "settings.writing.provider"), l)
+  T.plain.nrlrrlrrr.cmp(String.cmp(key, "settings.writing.note"), l)
 
 def T.plain.nrlrrlrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16581,12 +18878,12 @@ def T.plain.nrlrrlrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Stri
     case LT{}:
       T.plain.nrlrrlrrl(l, key)
     case EQ{}:
-      Some{T.settings.writing.model(l)}
+      Some{T.settings.writing(l)}
     case GT{}:
       T.plain.nrlrrlrrr(l, key)
 
 def T.plain.nrlrrlrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrrlrr.cmp(String.cmp(key, "settings.writing.model"), l)
+  T.plain.nrlrrlrr.cmp(String.cmp(key, "settings.writing"), l)
 
 def T.plain.nrlrrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16594,12 +18891,12 @@ def T.plain.nrlrrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Strin
     case LT{}:
       T.plain.nrlrrlrl(l, key)
     case EQ{}:
-      Some{T.settings.voice.term(l)}
+      Some{T.settings.voice.pebble(l)}
     case GT{}:
       T.plain.nrlrrlrr(l, key)
 
 def T.plain.nrlrrlr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrrlr.cmp(String.cmp(key, "settings.voice.term"), l)
+  T.plain.nrlrrlr.cmp(String.cmp(key, "settings.voice.pebble"), l)
 
 def T.plain.nrlrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16607,12 +18904,12 @@ def T.plain.nrlrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String
     case LT{}:
       T.plain.nrlrrll(l, key)
     case EQ{}:
-      Some{T.settings.voice.default.tip(l)}
+      Some{T.settings.voice(l)}
     case GT{}:
       T.plain.nrlrrlr(l, key)
 
 def T.plain.nrlrrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrrl.cmp(String.cmp(key, "settings.voice.default.tip"), l)
+  T.plain.nrlrrl.cmp(String.cmp(key, "settings.voice"), l)
 
 def T.plain.nrlrrrllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16620,12 +18917,12 @@ def T.plain.nrlrrrllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.settings.zone.placeholder(l)}
+      Some{T.settings.zone(l)}
     case GT{}:
       None{}
 
 def T.plain.nrlrrrllll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrrrllll.cmp(String.cmp(key, "settings.zone.placeholder"), l)
+  T.plain.nrlrrrllll.cmp(String.cmp(key, "settings.zone"), l)
 
 def T.plain.nrlrrrlllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16633,12 +18930,12 @@ def T.plain.nrlrrrlllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.sheet.remove.note(l)}
+      Some{T.sheet.delete(l)}
     case GT{}:
       None{}
 
 def T.plain.nrlrrrlllr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrrrlllr.cmp(String.cmp(key, "sheet.remove.note"), l)
+  T.plain.nrlrrrlllr.cmp(String.cmp(key, "sheet.delete"), l)
 
 def T.plain.nrlrrrlll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16646,12 +18943,12 @@ def T.plain.nrlrrrlll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrlrrrllll(l, key)
     case EQ{}:
-      Some{T.sheet.delete(l)}
+      Some{T.settings.zone.placeholder(l)}
     case GT{}:
       T.plain.nrlrrrlllr(l, key)
 
 def T.plain.nrlrrrlll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrrrlll.cmp(String.cmp(key, "sheet.delete"), l)
+  T.plain.nrlrrrlll.cmp(String.cmp(key, "settings.zone.placeholder"), l)
 
 def T.plain.nrlrrrllrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16659,12 +18956,12 @@ def T.plain.nrlrrrllrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.sidebar.add.project(l)}
+      Some{T.sheet.rename(l)}
     case GT{}:
       None{}
 
 def T.plain.nrlrrrllrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrrrllrl.cmp(String.cmp(key, "sidebar.add.project"), l)
+  T.plain.nrlrrrllrl.cmp(String.cmp(key, "sheet.rename"), l)
 
 def T.plain.nrlrrrllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16672,12 +18969,12 @@ def T.plain.nrlrrrllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrlrrrllrl(l, key)
     case EQ{}:
-      Some{T.sidebar.archived(l)}
+      Some{T.sidebar.add.project(l)}
     case GT{}:
       None{}
 
 def T.plain.nrlrrrllr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrrrllr.cmp(String.cmp(key, "sidebar.archived"), l)
+  T.plain.nrlrrrllr.cmp(String.cmp(key, "sidebar.add.project"), l)
 
 def T.plain.nrlrrrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16685,12 +18982,12 @@ def T.plain.nrlrrrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Stri
     case LT{}:
       T.plain.nrlrrrlll(l, key)
     case EQ{}:
-      Some{T.sheet.rename(l)}
+      Some{T.sheet.remove.note(l)}
     case GT{}:
       T.plain.nrlrrrllr(l, key)
 
 def T.plain.nrlrrrll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrrrll.cmp(String.cmp(key, "sheet.rename"), l)
+  T.plain.nrlrrrll.cmp(String.cmp(key, "sheet.remove.note"), l)
 
 def T.plain.nrlrrrlrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16698,12 +18995,12 @@ def T.plain.nrlrrrlrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.sidebar.move.down(l)}
+      Some{T.sidebar.machine(l)}
     case GT{}:
       None{}
 
 def T.plain.nrlrrrlrll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrrrlrll.cmp(String.cmp(key, "sidebar.move.down"), l)
+  T.plain.nrlrrrlrll.cmp(String.cmp(key, "sidebar.machine"), l)
 
 def T.plain.nrlrrrlrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16711,12 +19008,12 @@ def T.plain.nrlrrrlrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.sidebar.nothing(l)}
+      Some{T.sidebar.move.up(l)}
     case GT{}:
       None{}
 
 def T.plain.nrlrrrlrlr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrrrlrlr.cmp(String.cmp(key, "sidebar.nothing"), l)
+  T.plain.nrlrrrlrlr.cmp(String.cmp(key, "sidebar.move.up"), l)
 
 def T.plain.nrlrrrlrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16724,12 +19021,12 @@ def T.plain.nrlrrrlrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrlrrrlrll(l, key)
     case EQ{}:
-      Some{T.sidebar.move.up(l)}
+      Some{T.sidebar.move.down(l)}
     case GT{}:
       T.plain.nrlrrrlrlr(l, key)
 
 def T.plain.nrlrrrlrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrrrlrl.cmp(String.cmp(key, "sidebar.move.up"), l)
+  T.plain.nrlrrrlrl.cmp(String.cmp(key, "sidebar.move.down"), l)
 
 def T.plain.nrlrrrlrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16737,12 +19034,12 @@ def T.plain.nrlrrrlrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.sidebar.quiet.note(l)}
+      Some{T.sidebar.path.placeholder(l)}
     case GT{}:
       None{}
 
 def T.plain.nrlrrrlrrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrrrlrrl.cmp(String.cmp(key, "sidebar.quiet.note"), l)
+  T.plain.nrlrrrlrrl.cmp(String.cmp(key, "sidebar.path.placeholder"), l)
 
 def T.plain.nrlrrrlrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16750,12 +19047,12 @@ def T.plain.nrlrrrlrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrlrrrlrrl(l, key)
     case EQ{}:
-      Some{T.sidebar.remove.note(l)}
+      Some{T.sidebar.quiet.note(l)}
     case GT{}:
       None{}
 
 def T.plain.nrlrrrlrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrrrlrr.cmp(String.cmp(key, "sidebar.remove.note"), l)
+  T.plain.nrlrrrlrr.cmp(String.cmp(key, "sidebar.quiet.note"), l)
 
 def T.plain.nrlrrrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16763,12 +19060,12 @@ def T.plain.nrlrrrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Stri
     case LT{}:
       T.plain.nrlrrrlrl(l, key)
     case EQ{}:
-      Some{T.sidebar.path.placeholder(l)}
+      Some{T.sidebar.nothing(l)}
     case GT{}:
       T.plain.nrlrrrlrr(l, key)
 
 def T.plain.nrlrrrlr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrrrlr.cmp(String.cmp(key, "sidebar.path.placeholder"), l)
+  T.plain.nrlrrrlr.cmp(String.cmp(key, "sidebar.nothing"), l)
 
 def T.plain.nrlrrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16776,12 +19073,12 @@ def T.plain.nrlrrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Strin
     case LT{}:
       T.plain.nrlrrrll(l, key)
     case EQ{}:
-      Some{T.sidebar.machine(l)}
+      Some{T.sidebar.archived(l)}
     case GT{}:
       T.plain.nrlrrrlr(l, key)
 
 def T.plain.nrlrrrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrrrl.cmp(String.cmp(key, "sidebar.machine"), l)
+  T.plain.nrlrrrl.cmp(String.cmp(key, "sidebar.archived"), l)
 
 def T.plain.nrlrrrrlll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16789,12 +19086,12 @@ def T.plain.nrlrrrrlll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.sidebar.settled.note(l)}
+      Some{T.sidebar.search.projects(l)}
     case GT{}:
       None{}
 
 def T.plain.nrlrrrrlll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrrrrlll.cmp(String.cmp(key, "sidebar.settled.note"), l)
+  T.plain.nrlrrrrlll.cmp(String.cmp(key, "sidebar.search.projects"), l)
 
 def T.plain.nrlrrrrllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16802,12 +19099,12 @@ def T.plain.nrlrrrrllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.state.cancelled(l)}
+      Some{T.sidebar.snoozed(l)}
     case GT{}:
       None{}
 
 def T.plain.nrlrrrrllr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrrrrllr.cmp(String.cmp(key, "state.cancelled"), l)
+  T.plain.nrlrrrrllr.cmp(String.cmp(key, "sidebar.snoozed"), l)
 
 def T.plain.nrlrrrrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16815,12 +19112,12 @@ def T.plain.nrlrrrrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrlrrrrlll(l, key)
     case EQ{}:
-      Some{T.sidebar.snoozed(l)}
+      Some{T.sidebar.settled.note(l)}
     case GT{}:
       T.plain.nrlrrrrllr(l, key)
 
 def T.plain.nrlrrrrll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrrrrll.cmp(String.cmp(key, "sidebar.snoozed"), l)
+  T.plain.nrlrrrrll.cmp(String.cmp(key, "sidebar.settled.note"), l)
 
 def T.plain.nrlrrrrlrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16828,12 +19125,12 @@ def T.plain.nrlrrrrlrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.state.failed(l)}
+      Some{T.state.done(l)}
     case GT{}:
       None{}
 
 def T.plain.nrlrrrrlrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrrrrlrl.cmp(String.cmp(key, "state.failed"), l)
+  T.plain.nrlrrrrlrl.cmp(String.cmp(key, "state.done"), l)
 
 def T.plain.nrlrrrrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16841,12 +19138,12 @@ def T.plain.nrlrrrrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrlrrrrlrl(l, key)
     case EQ{}:
-      Some{T.state.held(l)}
+      Some{T.state.failed(l)}
     case GT{}:
       None{}
 
 def T.plain.nrlrrrrlr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrrrrlr.cmp(String.cmp(key, "state.held"), l)
+  T.plain.nrlrrrrlr.cmp(String.cmp(key, "state.failed"), l)
 
 def T.plain.nrlrrrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16854,12 +19151,12 @@ def T.plain.nrlrrrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Stri
     case LT{}:
       T.plain.nrlrrrrll(l, key)
     case EQ{}:
-      Some{T.state.done(l)}
+      Some{T.state.cancelled(l)}
     case GT{}:
       T.plain.nrlrrrrlr(l, key)
 
 def T.plain.nrlrrrrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrrrrl.cmp(String.cmp(key, "state.done"), l)
+  T.plain.nrlrrrrl.cmp(String.cmp(key, "state.cancelled"), l)
 
 def T.plain.nrlrrrrrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16867,12 +19164,12 @@ def T.plain.nrlrrrrrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.state.needsyou(l)}
+      Some{T.state.idle(l)}
     case GT{}:
       None{}
 
 def T.plain.nrlrrrrrll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrrrrrll.cmp(String.cmp(key, "state.needsyou"), l)
+  T.plain.nrlrrrrrll.cmp(String.cmp(key, "state.idle"), l)
 
 def T.plain.nrlrrrrrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16880,12 +19177,12 @@ def T.plain.nrlrrrrrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.state.running(l)}
+      Some{T.state.reporting(l)}
     case GT{}:
       None{}
 
 def T.plain.nrlrrrrrlr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrrrrrlr.cmp(String.cmp(key, "state.running"), l)
+  T.plain.nrlrrrrrlr.cmp(String.cmp(key, "state.reporting"), l)
 
 def T.plain.nrlrrrrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16893,12 +19190,12 @@ def T.plain.nrlrrrrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrlrrrrrll(l, key)
     case EQ{}:
-      Some{T.state.reporting(l)}
+      Some{T.state.needsyou(l)}
     case GT{}:
       T.plain.nrlrrrrrlr(l, key)
 
 def T.plain.nrlrrrrrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrrrrrl.cmp(String.cmp(key, "state.reporting"), l)
+  T.plain.nrlrrrrrl.cmp(String.cmp(key, "state.needsyou"), l)
 
 def T.plain.nrlrrrrrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16906,12 +19203,12 @@ def T.plain.nrlrrrrrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.state.stopped(l)}
+      Some{T.state.starting(l)}
     case GT{}:
       None{}
 
 def T.plain.nrlrrrrrrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrrrrrrl.cmp(String.cmp(key, "state.stopped"), l)
+  T.plain.nrlrrrrrrl.cmp(String.cmp(key, "state.starting"), l)
 
 def T.plain.nrlrrrrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16919,12 +19216,12 @@ def T.plain.nrlrrrrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrlrrrrrrl(l, key)
     case EQ{}:
-      Some{T.state.waiting(l)}
+      Some{T.state.stopped(l)}
     case GT{}:
       None{}
 
 def T.plain.nrlrrrrrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrrrrrr.cmp(String.cmp(key, "state.waiting"), l)
+  T.plain.nrlrrrrrr.cmp(String.cmp(key, "state.stopped"), l)
 
 def T.plain.nrlrrrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16932,12 +19229,12 @@ def T.plain.nrlrrrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Stri
     case LT{}:
       T.plain.nrlrrrrrl(l, key)
     case EQ{}:
-      Some{T.state.starting(l)}
+      Some{T.state.running(l)}
     case GT{}:
       T.plain.nrlrrrrrr(l, key)
 
 def T.plain.nrlrrrrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrrrrr.cmp(String.cmp(key, "state.starting"), l)
+  T.plain.nrlrrrrr.cmp(String.cmp(key, "state.running"), l)
 
 def T.plain.nrlrrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16945,12 +19242,12 @@ def T.plain.nrlrrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Strin
     case LT{}:
       T.plain.nrlrrrrl(l, key)
     case EQ{}:
-      Some{T.state.idle(l)}
+      Some{T.state.held(l)}
     case GT{}:
       T.plain.nrlrrrrr(l, key)
 
 def T.plain.nrlrrrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrrrr.cmp(String.cmp(key, "state.idle"), l)
+  T.plain.nrlrrrr.cmp(String.cmp(key, "state.held"), l)
 
 def T.plain.nrlrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16958,12 +19255,12 @@ def T.plain.nrlrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String
     case LT{}:
       T.plain.nrlrrrl(l, key)
     case EQ{}:
-      Some{T.sidebar.search.projects(l)}
+      Some{T.sidebar.remove.note(l)}
     case GT{}:
       T.plain.nrlrrrr(l, key)
 
 def T.plain.nrlrrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrrr.cmp(String.cmp(key, "sidebar.search.projects"), l)
+  T.plain.nrlrrr.cmp(String.cmp(key, "sidebar.remove.note"), l)
 
 def T.plain.nrlrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16971,12 +19268,12 @@ def T.plain.nrlrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>
     case LT{}:
       T.plain.nrlrrl(l, key)
     case EQ{}:
-      Some{T.settings.zone(l)}
+      Some{T.settings.writing.provider(l)}
     case GT{}:
       T.plain.nrlrrr(l, key)
 
 def T.plain.nrlrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlrr.cmp(String.cmp(key, "settings.zone"), l)
+  T.plain.nrlrr.cmp(String.cmp(key, "settings.writing.provider"), l)
 
 def T.plain.nrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -16984,12 +19281,12 @@ def T.plain.nrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
     case LT{}:
       T.plain.nrlrl(l, key)
     case EQ{}:
-      Some{T.settings.tour.show(l)}
+      Some{T.settings.tour.note(l)}
     case GT{}:
       T.plain.nrlrr(l, key)
 
 def T.plain.nrlr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrlr.cmp(String.cmp(key, "settings.tour.show"), l)
+  T.plain.nrlr.cmp(String.cmp(key, "settings.tour.note"), l)
 
 def T.plain.nrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17010,12 +19307,12 @@ def T.plain.nrrlllllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.subagents.cancel.tip(l)}
+      Some{T.state.waitingon(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrlllllll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrlllllll.cmp(String.cmp(key, "subagents.cancel.tip"), l)
+  T.plain.nrrlllllll.cmp(String.cmp(key, "state.waitingon"), l)
 
 def T.plain.nrrllllllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17023,12 +19320,12 @@ def T.plain.nrrllllllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.subagents.show(l)}
+      Some{T.subagents.hide(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrllllllr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrllllllr.cmp(String.cmp(key, "subagents.show"), l)
+  T.plain.nrrllllllr.cmp(String.cmp(key, "subagents.hide"), l)
 
 def T.plain.nrrllllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17036,12 +19333,12 @@ def T.plain.nrrllllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrrlllllll(l, key)
     case EQ{}:
-      Some{T.subagents.hide(l)}
+      Some{T.subagents.cancel.tip(l)}
     case GT{}:
       T.plain.nrrllllllr(l, key)
 
 def T.plain.nrrllllll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrllllll.cmp(String.cmp(key, "subagents.hide"), l)
+  T.plain.nrrllllll.cmp(String.cmp(key, "subagents.cancel.tip"), l)
 
 def T.plain.nrrlllllrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17049,12 +19346,12 @@ def T.plain.nrrlllllrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.tasks.discard.tip(l)}
+      Some{T.tasks.delete.tip(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrlllllrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrlllllrl.cmp(String.cmp(key, "tasks.discard.tip"), l)
+  T.plain.nrrlllllrl.cmp(String.cmp(key, "tasks.delete.tip"), l)
 
 def T.plain.nrrlllllrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17062,12 +19359,12 @@ def T.plain.nrrlllllrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.tasks.save.tip(l)}
+      Some{T.tasks.run.tip(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrlllllrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrlllllrr.cmp(String.cmp(key, "tasks.save.tip"), l)
+  T.plain.nrrlllllrr.cmp(String.cmp(key, "tasks.run.tip"), l)
 
 def T.plain.nrrlllllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17075,12 +19372,12 @@ def T.plain.nrrlllllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrrlllllrl(l, key)
     case EQ{}:
-      Some{T.tasks.run.tip(l)}
+      Some{T.tasks.discard.tip(l)}
     case GT{}:
       T.plain.nrrlllllrr(l, key)
 
 def T.plain.nrrlllllr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrlllllr.cmp(String.cmp(key, "tasks.run.tip"), l)
+  T.plain.nrrlllllr.cmp(String.cmp(key, "tasks.discard.tip"), l)
 
 def T.plain.nrrlllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17088,12 +19385,12 @@ def T.plain.nrrlllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Stri
     case LT{}:
       T.plain.nrrllllll(l, key)
     case EQ{}:
-      Some{T.tasks.delete.tip(l)}
+      Some{T.subagents.show(l)}
     case GT{}:
       T.plain.nrrlllllr(l, key)
 
 def T.plain.nrrlllll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrlllll.cmp(String.cmp(key, "tasks.delete.tip"), l)
+  T.plain.nrrlllll.cmp(String.cmp(key, "subagents.show"), l)
 
 def T.plain.nrrllllrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17101,12 +19398,12 @@ def T.plain.nrrllllrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.teach.choice.confirm(l)}
+      Some{T.tasks.value.ask(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrllllrll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrllllrll.cmp(String.cmp(key, "teach.choice.confirm"), l)
+  T.plain.nrrllllrll.cmp(String.cmp(key, "tasks.value.ask"), l)
 
 def T.plain.nrrllllrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17114,12 +19411,12 @@ def T.plain.nrrllllrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.teach.choice.skip(l)}
+      Some{T.teach.choice.continue(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrllllrlr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrllllrlr.cmp(String.cmp(key, "teach.choice.skip"), l)
+  T.plain.nrrllllrlr.cmp(String.cmp(key, "teach.choice.continue"), l)
 
 def T.plain.nrrllllrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17127,12 +19424,12 @@ def T.plain.nrrllllrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrrllllrll(l, key)
     case EQ{}:
-      Some{T.teach.choice.continue(l)}
+      Some{T.teach.choice.confirm(l)}
     case GT{}:
       T.plain.nrrllllrlr(l, key)
 
 def T.plain.nrrllllrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrllllrl.cmp(String.cmp(key, "teach.choice.continue"), l)
+  T.plain.nrrllllrl.cmp(String.cmp(key, "teach.choice.confirm"), l)
 
 def T.plain.nrrllllrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17140,12 +19437,12 @@ def T.plain.nrrllllrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.teach.description(l)}
+      Some{T.teach.choice.stop(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrllllrrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrllllrrl.cmp(String.cmp(key, "teach.description"), l)
+  T.plain.nrrllllrrl.cmp(String.cmp(key, "teach.choice.stop"), l)
 
 def T.plain.nrrllllrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17153,12 +19450,12 @@ def T.plain.nrrllllrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrrllllrrl(l, key)
     case EQ{}:
-      Some{T.teach.discard(l)}
+      Some{T.teach.description(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrllllrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrllllrr.cmp(String.cmp(key, "teach.discard"), l)
+  T.plain.nrrllllrr.cmp(String.cmp(key, "teach.description"), l)
 
 def T.plain.nrrllllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17166,12 +19463,12 @@ def T.plain.nrrllllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Stri
     case LT{}:
       T.plain.nrrllllrl(l, key)
     case EQ{}:
-      Some{T.teach.choice.stop(l)}
+      Some{T.teach.choice.skip(l)}
     case GT{}:
       T.plain.nrrllllrr(l, key)
 
 def T.plain.nrrllllr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrllllr.cmp(String.cmp(key, "teach.choice.stop"), l)
+  T.plain.nrrllllr.cmp(String.cmp(key, "teach.choice.skip"), l)
 
 def T.plain.nrrllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17179,12 +19476,12 @@ def T.plain.nrrllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Strin
     case LT{}:
       T.plain.nrrlllll(l, key)
     case EQ{}:
-      Some{T.tasks.value.ask(l)}
+      Some{T.tasks.save.tip(l)}
     case GT{}:
       T.plain.nrrllllr(l, key)
 
 def T.plain.nrrllll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrllll.cmp(String.cmp(key, "tasks.value.ask"), l)
+  T.plain.nrrllll.cmp(String.cmp(key, "tasks.save.tip"), l)
 
 def T.plain.nrrlllrlll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17192,12 +19489,12 @@ def T.plain.nrrlllrlll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.teach.handback(l)}
+      Some{T.teach.empty(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrlllrlll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrlllrlll.cmp(String.cmp(key, "teach.handback"), l)
+  T.plain.nrrlllrlll.cmp(String.cmp(key, "teach.empty"), l)
 
 def T.plain.nrrlllrllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17205,12 +19502,12 @@ def T.plain.nrrlllrllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.teach.note.add(l)}
+      Some{T.teach.name.note(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrlllrllr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrlllrllr.cmp(String.cmp(key, "teach.note.add"), l)
+  T.plain.nrrlllrllr.cmp(String.cmp(key, "teach.name.note"), l)
 
 def T.plain.nrrlllrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17218,12 +19515,12 @@ def T.plain.nrrlllrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrrlllrlll(l, key)
     case EQ{}:
-      Some{T.teach.name.note(l)}
+      Some{T.teach.handback(l)}
     case GT{}:
       T.plain.nrrlllrllr(l, key)
 
 def T.plain.nrrlllrll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrlllrll.cmp(String.cmp(key, "teach.name.note"), l)
+  T.plain.nrrlllrll.cmp(String.cmp(key, "teach.handback"), l)
 
 def T.plain.nrrlllrlrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17231,12 +19528,12 @@ def T.plain.nrrlllrlrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.teach.run.note(l)}
+      Some{T.teach.note.placeholder(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrlllrlrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrlllrlrl.cmp(String.cmp(key, "teach.run.note"), l)
+  T.plain.nrrlllrlrl.cmp(String.cmp(key, "teach.note.placeholder"), l)
 
 def T.plain.nrrlllrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17244,12 +19541,12 @@ def T.plain.nrrlllrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrrlllrlrl(l, key)
     case EQ{}:
-      Some{T.teach.runs(l)}
+      Some{T.teach.run.note(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrlllrlr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrlllrlr.cmp(String.cmp(key, "teach.runs"), l)
+  T.plain.nrrlllrlr.cmp(String.cmp(key, "teach.run.note"), l)
 
 def T.plain.nrrlllrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17257,12 +19554,12 @@ def T.plain.nrrlllrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Stri
     case LT{}:
       T.plain.nrrlllrll(l, key)
     case EQ{}:
-      Some{T.teach.note.placeholder(l)}
+      Some{T.teach.note.add(l)}
     case GT{}:
       T.plain.nrrlllrlr(l, key)
 
 def T.plain.nrrlllrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrlllrl.cmp(String.cmp(key, "teach.note.placeholder"), l)
+  T.plain.nrrlllrl.cmp(String.cmp(key, "teach.note.add"), l)
 
 def T.plain.nrrlllrrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17270,12 +19567,12 @@ def T.plain.nrrlllrrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.teach.stopsave(l)}
+      Some{T.teach.save(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrlllrrll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrlllrrll.cmp(String.cmp(key, "teach.stopsave"), l)
+  T.plain.nrrlllrrll.cmp(String.cmp(key, "teach.save"), l)
 
 def T.plain.nrrlllrrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17283,12 +19580,12 @@ def T.plain.nrrlllrrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.teach.teach(l)}
+      Some{T.teach.takeover(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrlllrrlr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrlllrrlr.cmp(String.cmp(key, "teach.teach"), l)
+  T.plain.nrrlllrrlr.cmp(String.cmp(key, "teach.takeover"), l)
 
 def T.plain.nrrlllrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17296,12 +19593,12 @@ def T.plain.nrrlllrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrrlllrrll(l, key)
     case EQ{}:
-      Some{T.teach.takeover(l)}
+      Some{T.teach.stopsave(l)}
     case GT{}:
       T.plain.nrrlllrrlr(l, key)
 
 def T.plain.nrrlllrrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrlllrrl.cmp(String.cmp(key, "teach.takeover"), l)
+  T.plain.nrrlllrrl.cmp(String.cmp(key, "teach.stopsave"), l)
 
 def T.plain.nrrlllrrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17309,12 +19606,12 @@ def T.plain.nrrlllrrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.terminal.close(l)}
+      Some{T.teach.youhave(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrlllrrrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrlllrrrl.cmp(String.cmp(key, "terminal.close"), l)
+  T.plain.nrrlllrrrl.cmp(String.cmp(key, "teach.youhave"), l)
 
 def T.plain.nrrlllrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17322,12 +19619,12 @@ def T.plain.nrrlllrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrrlllrrrl(l, key)
     case EQ{}:
-      Some{T.terminal.input(l)}
+      Some{T.terminal.close(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrlllrrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrlllrrr.cmp(String.cmp(key, "terminal.input"), l)
+  T.plain.nrrlllrrr.cmp(String.cmp(key, "terminal.close"), l)
 
 def T.plain.nrrlllrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17335,12 +19632,12 @@ def T.plain.nrrlllrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Stri
     case LT{}:
       T.plain.nrrlllrrl(l, key)
     case EQ{}:
-      Some{T.teach.youhave(l)}
+      Some{T.teach.teach(l)}
     case GT{}:
       T.plain.nrrlllrrr(l, key)
 
 def T.plain.nrrlllrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrlllrr.cmp(String.cmp(key, "teach.youhave"), l)
+  T.plain.nrrlllrr.cmp(String.cmp(key, "teach.teach"), l)
 
 def T.plain.nrrlllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17348,12 +19645,12 @@ def T.plain.nrrlllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Strin
     case LT{}:
       T.plain.nrrlllrl(l, key)
     case EQ{}:
-      Some{T.teach.save(l)}
+      Some{T.teach.runs(l)}
     case GT{}:
       T.plain.nrrlllrr(l, key)
 
 def T.plain.nrrlllr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrlllr.cmp(String.cmp(key, "teach.save"), l)
+  T.plain.nrrlllr.cmp(String.cmp(key, "teach.runs"), l)
 
 def T.plain.nrrlll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17361,12 +19658,12 @@ def T.plain.nrrlll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String
     case LT{}:
       T.plain.nrrllll(l, key)
     case EQ{}:
-      Some{T.teach.empty(l)}
+      Some{T.teach.discard(l)}
     case GT{}:
       T.plain.nrrlllr(l, key)
 
 def T.plain.nrrlll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrlll.cmp(String.cmp(key, "teach.empty"), l)
+  T.plain.nrrlll.cmp(String.cmp(key, "teach.discard"), l)
 
 def T.plain.nrrllrllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17374,12 +19671,12 @@ def T.plain.nrrllrllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.terminal.restart(l)}
+      Some{T.terminal.pin(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrllrllll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrllrllll.cmp(String.cmp(key, "terminal.restart"), l)
+  T.plain.nrrllrllll.cmp(String.cmp(key, "terminal.pin"), l)
 
 def T.plain.nrrllrlllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17387,12 +19684,12 @@ def T.plain.nrrllrlllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.thread.boat.settings(l)}
+      Some{T.terminal.unpin(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrllrlllr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrllrlllr.cmp(String.cmp(key, "thread.boat.settings"), l)
+  T.plain.nrrllrlllr.cmp(String.cmp(key, "terminal.unpin"), l)
 
 def T.plain.nrrllrlll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17400,12 +19697,12 @@ def T.plain.nrrllrlll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrrllrllll(l, key)
     case EQ{}:
-      Some{T.terminal.unpin(l)}
+      Some{T.terminal.restart(l)}
     case GT{}:
       T.plain.nrrllrlllr(l, key)
 
 def T.plain.nrrllrlll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrllrlll.cmp(String.cmp(key, "terminal.unpin"), l)
+  T.plain.nrrllrlll.cmp(String.cmp(key, "terminal.restart"), l)
 
 def T.plain.nrrllrllrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17413,12 +19710,12 @@ def T.plain.nrrllrllrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.thread.sending(l)}
+      Some{T.thread.new(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrllrllrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrllrllrl.cmp(String.cmp(key, "thread.sending"), l)
+  T.plain.nrrllrllrl.cmp(String.cmp(key, "thread.new"), l)
 
 def T.plain.nrrllrllrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17426,12 +19723,12 @@ def T.plain.nrrllrllrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.thread.snooze.tomorrow.tip(l)}
+      Some{T.thread.snooze.hour.tip(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrllrllrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrllrllrr.cmp(String.cmp(key, "thread.snooze.tomorrow.tip"), l)
+  T.plain.nrrllrllrr.cmp(String.cmp(key, "thread.snooze.hour.tip"), l)
 
 def T.plain.nrrllrllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17439,12 +19736,12 @@ def T.plain.nrrllrllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrrllrllrl(l, key)
     case EQ{}:
-      Some{T.thread.snooze.hour.tip(l)}
+      Some{T.thread.sending(l)}
     case GT{}:
       T.plain.nrrllrllrr(l, key)
 
 def T.plain.nrrllrllr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrllrllr.cmp(String.cmp(key, "thread.snooze.hour.tip"), l)
+  T.plain.nrrllrllr.cmp(String.cmp(key, "thread.sending"), l)
 
 def T.plain.nrrllrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17452,12 +19749,12 @@ def T.plain.nrrllrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Stri
     case LT{}:
       T.plain.nrrllrlll(l, key)
     case EQ{}:
-      Some{T.thread.new(l)}
+      Some{T.thread.boat.settings(l)}
     case GT{}:
       T.plain.nrrllrllr(l, key)
 
 def T.plain.nrrllrll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrllrll.cmp(String.cmp(key, "thread.new"), l)
+  T.plain.nrrllrll.cmp(String.cmp(key, "thread.boat.settings"), l)
 
 def T.plain.nrrllrlrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17465,12 +19762,12 @@ def T.plain.nrrllrlrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.thread.subagents(l)}
+      Some{T.thread.snooze.week.tip(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrllrlrll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrllrlrll.cmp(String.cmp(key, "thread.subagents"), l)
+  T.plain.nrrllrlrll.cmp(String.cmp(key, "thread.snooze.week.tip"), l)
 
 def T.plain.nrrllrlrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17478,12 +19775,12 @@ def T.plain.nrrllrlrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.thread.title.keep(l)}
+      Some{T.thread.title.cancel(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrllrlrlr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrllrlrlr.cmp(String.cmp(key, "thread.title.keep"), l)
+  T.plain.nrrllrlrlr.cmp(String.cmp(key, "thread.title.cancel"), l)
 
 def T.plain.nrrllrlrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17491,12 +19788,12 @@ def T.plain.nrrllrlrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrrllrlrll(l, key)
     case EQ{}:
-      Some{T.thread.title.cancel(l)}
+      Some{T.thread.subagents(l)}
     case GT{}:
       T.plain.nrrllrlrlr(l, key)
 
 def T.plain.nrrllrlrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrllrlrl.cmp(String.cmp(key, "thread.title.cancel"), l)
+  T.plain.nrrllrlrl.cmp(String.cmp(key, "thread.subagents"), l)
 
 def T.plain.nrrllrlrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17504,12 +19801,12 @@ def T.plain.nrrllrlrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.thread.title.rename(l)}
+      Some{T.thread.title.placeholder(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrllrlrrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrllrlrrl.cmp(String.cmp(key, "thread.title.rename"), l)
+  T.plain.nrrllrlrrl.cmp(String.cmp(key, "thread.title.placeholder"), l)
 
 def T.plain.nrrllrlrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17517,12 +19814,12 @@ def T.plain.nrrllrlrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrrllrlrrl(l, key)
     case EQ{}:
-      Some{T.thread.viewer(l)}
+      Some{T.thread.title.rename(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrllrlrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrllrlrr.cmp(String.cmp(key, "thread.viewer"), l)
+  T.plain.nrrllrlrr.cmp(String.cmp(key, "thread.title.rename"), l)
 
 def T.plain.nrrllrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17530,12 +19827,12 @@ def T.plain.nrrllrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Stri
     case LT{}:
       T.plain.nrrllrlrl(l, key)
     case EQ{}:
-      Some{T.thread.title.placeholder(l)}
+      Some{T.thread.title.keep(l)}
     case GT{}:
       T.plain.nrrllrlrr(l, key)
 
 def T.plain.nrrllrlr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrllrlr.cmp(String.cmp(key, "thread.title.placeholder"), l)
+  T.plain.nrrllrlr.cmp(String.cmp(key, "thread.title.keep"), l)
 
 def T.plain.nrrllrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17543,12 +19840,12 @@ def T.plain.nrrllrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Strin
     case LT{}:
       T.plain.nrrllrll(l, key)
     case EQ{}:
-      Some{T.thread.snooze.week.tip(l)}
+      Some{T.thread.snooze.tomorrow.tip(l)}
     case GT{}:
       T.plain.nrrllrlr(l, key)
 
 def T.plain.nrrllrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrllrl.cmp(String.cmp(key, "thread.snooze.week.tip"), l)
+  T.plain.nrrllrl.cmp(String.cmp(key, "thread.snooze.tomorrow.tip"), l)
 
 def T.plain.nrrllrrlll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17556,12 +19853,12 @@ def T.plain.nrrllrrlll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.todos.hide(l)}
+      Some{T.todos.fewer(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrllrrlll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrllrrlll.cmp(String.cmp(key, "todos.hide"), l)
+  T.plain.nrrllrrlll.cmp(String.cmp(key, "todos.fewer"), l)
 
 def T.plain.nrrllrrllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17569,12 +19866,12 @@ def T.plain.nrrllrrllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.tools.forkthread(l)}
+      Some{T.todos.show(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrllrrllr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrllrrllr.cmp(String.cmp(key, "tools.forkthread"), l)
+  T.plain.nrrllrrllr.cmp(String.cmp(key, "todos.show"), l)
 
 def T.plain.nrrllrrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17582,12 +19879,12 @@ def T.plain.nrrllrrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrrllrrlll(l, key)
     case EQ{}:
-      Some{T.todos.show(l)}
+      Some{T.todos.hide(l)}
     case GT{}:
       T.plain.nrrllrrllr(l, key)
 
 def T.plain.nrrllrrll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrllrrll.cmp(String.cmp(key, "todos.show"), l)
+  T.plain.nrrllrrll.cmp(String.cmp(key, "todos.hide"), l)
 
 def T.plain.nrrllrrlrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17595,12 +19892,12 @@ def T.plain.nrrllrrlrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.tools.snooze(l)}
+      Some{T.tools.pinned(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrllrrlrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrllrrlrl.cmp(String.cmp(key, "tools.snooze"), l)
+  T.plain.nrrllrrlrl.cmp(String.cmp(key, "tools.pinned"), l)
 
 def T.plain.nrrllrrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17608,12 +19905,12 @@ def T.plain.nrrllrrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrrllrrlrl(l, key)
     case EQ{}:
-      Some{T.tools.tip.archive(l)}
+      Some{T.tools.snooze(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrllrrlr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrllrrlr.cmp(String.cmp(key, "tools.tip.archive"), l)
+  T.plain.nrrllrrlr.cmp(String.cmp(key, "tools.snooze"), l)
 
 def T.plain.nrrllrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17621,12 +19918,12 @@ def T.plain.nrrllrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Stri
     case LT{}:
       T.plain.nrrllrrll(l, key)
     case EQ{}:
-      Some{T.tools.pinned(l)}
+      Some{T.tools.forkthread(l)}
     case GT{}:
       T.plain.nrrllrrlr(l, key)
 
 def T.plain.nrrllrrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrllrrl.cmp(String.cmp(key, "tools.pinned"), l)
+  T.plain.nrrllrrl.cmp(String.cmp(key, "tools.forkthread"), l)
 
 def T.plain.nrrllrrrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17634,12 +19931,12 @@ def T.plain.nrrllrrrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.tools.tip.back(l)}
+      Some{T.tools.tip.askdelete(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrllrrrll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrllrrrll.cmp(String.cmp(key, "tools.tip.back"), l)
+  T.plain.nrrllrrrll.cmp(String.cmp(key, "tools.tip.askdelete"), l)
 
 def T.plain.nrrllrrrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17647,12 +19944,12 @@ def T.plain.nrrllrrrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.tools.tip.forkthread(l)}
+      Some{T.tools.tip.delete(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrllrrrlr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrllrrrlr.cmp(String.cmp(key, "tools.tip.forkthread"), l)
+  T.plain.nrrllrrrlr.cmp(String.cmp(key, "tools.tip.delete"), l)
 
 def T.plain.nrrllrrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17660,12 +19957,12 @@ def T.plain.nrrllrrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrrllrrrll(l, key)
     case EQ{}:
-      Some{T.tools.tip.delete(l)}
+      Some{T.tools.tip.back(l)}
     case GT{}:
       T.plain.nrrllrrrlr(l, key)
 
 def T.plain.nrrllrrrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrllrrrl.cmp(String.cmp(key, "tools.tip.delete"), l)
+  T.plain.nrrllrrrl.cmp(String.cmp(key, "tools.tip.back"), l)
 
 def T.plain.nrrllrrrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17673,12 +19970,12 @@ def T.plain.nrrllrrrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.tools.tip.panel(l)}
+      Some{T.tools.tip.keep(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrllrrrrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrllrrrrl.cmp(String.cmp(key, "tools.tip.panel"), l)
+  T.plain.nrrllrrrrl.cmp(String.cmp(key, "tools.tip.keep"), l)
 
 def T.plain.nrrllrrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17686,12 +19983,12 @@ def T.plain.nrrllrrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrrllrrrrl(l, key)
     case EQ{}:
-      Some{T.tools.tip.pin(l)}
+      Some{T.tools.tip.panel(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrllrrrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrllrrrr.cmp(String.cmp(key, "tools.tip.pin"), l)
+  T.plain.nrrllrrrr.cmp(String.cmp(key, "tools.tip.panel"), l)
 
 def T.plain.nrrllrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17699,12 +19996,12 @@ def T.plain.nrrllrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Stri
     case LT{}:
       T.plain.nrrllrrrl(l, key)
     case EQ{}:
-      Some{T.tools.tip.keep(l)}
+      Some{T.tools.tip.forkthread(l)}
     case GT{}:
       T.plain.nrrllrrrr(l, key)
 
 def T.plain.nrrllrrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrllrrr.cmp(String.cmp(key, "tools.tip.keep"), l)
+  T.plain.nrrllrrr.cmp(String.cmp(key, "tools.tip.forkthread"), l)
 
 def T.plain.nrrllrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17712,12 +20009,12 @@ def T.plain.nrrllrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Strin
     case LT{}:
       T.plain.nrrllrrl(l, key)
     case EQ{}:
-      Some{T.tools.tip.askdelete(l)}
+      Some{T.tools.tip.archive(l)}
     case GT{}:
       T.plain.nrrllrrr(l, key)
 
 def T.plain.nrrllrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrllrr.cmp(String.cmp(key, "tools.tip.askdelete"), l)
+  T.plain.nrrllrr.cmp(String.cmp(key, "tools.tip.archive"), l)
 
 def T.plain.nrrllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17725,12 +20022,12 @@ def T.plain.nrrllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String
     case LT{}:
       T.plain.nrrllrl(l, key)
     case EQ{}:
-      Some{T.todos.fewer(l)}
+      Some{T.thread.viewer(l)}
     case GT{}:
       T.plain.nrrllrr(l, key)
 
 def T.plain.nrrllr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrllr.cmp(String.cmp(key, "todos.fewer"), l)
+  T.plain.nrrllr.cmp(String.cmp(key, "thread.viewer"), l)
 
 def T.plain.nrrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17738,12 +20035,12 @@ def T.plain.nrrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>
     case LT{}:
       T.plain.nrrlll(l, key)
     case EQ{}:
-      Some{T.terminal.pin(l)}
+      Some{T.terminal.input(l)}
     case GT{}:
       T.plain.nrrllr(l, key)
 
 def T.plain.nrrll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrll.cmp(String.cmp(key, "terminal.pin"), l)
+  T.plain.nrrll.cmp(String.cmp(key, "terminal.input"), l)
 
 def T.plain.nrrlrlllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17751,12 +20048,12 @@ def T.plain.nrrlrlllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.tools.tip.snooze(l)}
+      Some{T.tools.tip.settle(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrlrlllll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrlrlllll.cmp(String.cmp(key, "tools.tip.snooze"), l)
+  T.plain.nrrlrlllll.cmp(String.cmp(key, "tools.tip.settle"), l)
 
 def T.plain.nrrlrllllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17764,12 +20061,12 @@ def T.plain.nrrlrllllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.tools.tip.terminal(l)}
+      Some{T.tools.tip.stop(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrlrllllr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrlrllllr.cmp(String.cmp(key, "tools.tip.terminal"), l)
+  T.plain.nrrlrllllr.cmp(String.cmp(key, "tools.tip.stop"), l)
 
 def T.plain.nrrlrllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17777,12 +20074,12 @@ def T.plain.nrrlrllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrrlrlllll(l, key)
     case EQ{}:
-      Some{T.tools.tip.stop(l)}
+      Some{T.tools.tip.snooze(l)}
     case GT{}:
       T.plain.nrrlrllllr(l, key)
 
 def T.plain.nrrlrllll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrlrllll.cmp(String.cmp(key, "tools.tip.stop"), l)
+  T.plain.nrrlrllll.cmp(String.cmp(key, "tools.tip.snooze"), l)
 
 def T.plain.nrrlrlllrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17790,12 +20087,12 @@ def T.plain.nrrlrlllrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.tools.tip.unpin(l)}
+      Some{T.tools.tip.unarchive(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrlrlllrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrlrlllrl.cmp(String.cmp(key, "tools.tip.unpin"), l)
+  T.plain.nrrlrlllrl.cmp(String.cmp(key, "tools.tip.unarchive"), l)
 
 def T.plain.nrrlrlllrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17803,12 +20100,12 @@ def T.plain.nrrlrlllrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.tools.tip.wake(l)}
+      Some{T.tools.tip.unsettle(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrlrlllrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrlrlllrr.cmp(String.cmp(key, "tools.tip.wake"), l)
+  T.plain.nrrlrlllrr.cmp(String.cmp(key, "tools.tip.unsettle"), l)
 
 def T.plain.nrrlrlllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17816,12 +20113,12 @@ def T.plain.nrrlrlllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrrlrlllrl(l, key)
     case EQ{}:
-      Some{T.tools.tip.unsettle(l)}
+      Some{T.tools.tip.unpin(l)}
     case GT{}:
       T.plain.nrrlrlllrr(l, key)
 
 def T.plain.nrrlrlllr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrlrlllr.cmp(String.cmp(key, "tools.tip.unsettle"), l)
+  T.plain.nrrlrlllr.cmp(String.cmp(key, "tools.tip.unpin"), l)
 
 def T.plain.nrrlrlll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17829,12 +20126,12 @@ def T.plain.nrrlrlll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Stri
     case LT{}:
       T.plain.nrrlrllll(l, key)
     case EQ{}:
-      Some{T.tools.tip.unarchive(l)}
+      Some{T.tools.tip.terminal(l)}
     case GT{}:
       T.plain.nrrlrlllr(l, key)
 
 def T.plain.nrrlrlll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrlrlll.cmp(String.cmp(key, "tools.tip.unarchive"), l)
+  T.plain.nrrlrlll.cmp(String.cmp(key, "tools.tip.terminal"), l)
 
 def T.plain.nrrlrllrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17842,12 +20139,12 @@ def T.plain.nrrlrllrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.tour.back.tip(l)}
+      Some{T.tour.back(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrlrllrll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrlrllrll.cmp(String.cmp(key, "tour.back.tip"), l)
+  T.plain.nrrlrllrll.cmp(String.cmp(key, "tour.back"), l)
 
 def T.plain.nrrlrllrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17855,12 +20152,12 @@ def T.plain.nrrlrllrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.tour.body.bots.desktop(l)}
+      Some{T.tour.body.agents(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrlrllrlr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrlrllrlr.cmp(String.cmp(key, "tour.body.bots.desktop"), l)
+  T.plain.nrrlrllrlr.cmp(String.cmp(key, "tour.body.agents"), l)
 
 def T.plain.nrrlrllrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17868,12 +20165,12 @@ def T.plain.nrrlrllrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrrlrllrll(l, key)
     case EQ{}:
-      Some{T.tour.body.agents(l)}
+      Some{T.tour.back.tip(l)}
     case GT{}:
       T.plain.nrrlrllrlr(l, key)
 
 def T.plain.nrrlrllrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrlrllrl.cmp(String.cmp(key, "tour.body.agents"), l)
+  T.plain.nrrlrllrl.cmp(String.cmp(key, "tour.back.tip"), l)
 
 def T.plain.nrrlrllrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17881,12 +20178,12 @@ def T.plain.nrrlrllrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.tour.body.buttons.desktop(l)}
+      Some{T.tour.body.bots.phone(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrlrllrrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrlrllrrl.cmp(String.cmp(key, "tour.body.buttons.desktop"), l)
+  T.plain.nrrlrllrrl.cmp(String.cmp(key, "tour.body.bots.phone"), l)
 
 def T.plain.nrrlrllrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17894,12 +20191,12 @@ def T.plain.nrrlrllrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrrlrllrrl(l, key)
     case EQ{}:
-      Some{T.tour.body.buttons.phone(l)}
+      Some{T.tour.body.buttons.desktop(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrlrllrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrlrllrr.cmp(String.cmp(key, "tour.body.buttons.phone"), l)
+  T.plain.nrrlrllrr.cmp(String.cmp(key, "tour.body.buttons.desktop"), l)
 
 def T.plain.nrrlrllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17907,12 +20204,12 @@ def T.plain.nrrlrllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Stri
     case LT{}:
       T.plain.nrrlrllrl(l, key)
     case EQ{}:
-      Some{T.tour.body.bots.phone(l)}
+      Some{T.tour.body.bots.desktop(l)}
     case GT{}:
       T.plain.nrrlrllrr(l, key)
 
 def T.plain.nrrlrllr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrlrllr.cmp(String.cmp(key, "tour.body.bots.phone"), l)
+  T.plain.nrrlrllr.cmp(String.cmp(key, "tour.body.bots.desktop"), l)
 
 def T.plain.nrrlrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17920,12 +20217,12 @@ def T.plain.nrrlrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Strin
     case LT{}:
       T.plain.nrrlrlll(l, key)
     case EQ{}:
-      Some{T.tour.back(l)}
+      Some{T.tools.tip.wake(l)}
     case GT{}:
       T.plain.nrrlrllr(l, key)
 
 def T.plain.nrrlrll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrlrll.cmp(String.cmp(key, "tour.back"), l)
+  T.plain.nrrlrll.cmp(String.cmp(key, "tools.tip.wake"), l)
 
 def T.plain.nrrlrlrlll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17933,12 +20230,12 @@ def T.plain.nrrlrlrlll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.tour.body.keys.phone(l)}
+      Some{T.tour.body.keys.desktop(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrlrlrlll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrlrlrlll.cmp(String.cmp(key, "tour.body.keys.phone"), l)
+  T.plain.nrrlrlrlll.cmp(String.cmp(key, "tour.body.keys.desktop"), l)
 
 def T.plain.nrrlrlrllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17946,12 +20243,12 @@ def T.plain.nrrlrlrllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.tour.body.machines.phone(l)}
+      Some{T.tour.body.machines.desktop(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrlrlrllr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrlrlrllr.cmp(String.cmp(key, "tour.body.machines.phone"), l)
+  T.plain.nrrlrlrllr.cmp(String.cmp(key, "tour.body.machines.desktop"), l)
 
 def T.plain.nrrlrlrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17959,12 +20256,12 @@ def T.plain.nrrlrlrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrrlrlrlll(l, key)
     case EQ{}:
-      Some{T.tour.body.machines.desktop(l)}
+      Some{T.tour.body.keys.phone(l)}
     case GT{}:
       T.plain.nrrlrlrllr(l, key)
 
 def T.plain.nrrlrlrll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrlrlrll.cmp(String.cmp(key, "tour.body.machines.desktop"), l)
+  T.plain.nrrlrlrll.cmp(String.cmp(key, "tour.body.keys.phone"), l)
 
 def T.plain.nrrlrlrlrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17972,12 +20269,12 @@ def T.plain.nrrlrlrlrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.tour.body.phones.phone(l)}
+      Some{T.tour.body.phones.desktop(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrlrlrlrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrlrlrlrl.cmp(String.cmp(key, "tour.body.phones.phone"), l)
+  T.plain.nrrlrlrlrl.cmp(String.cmp(key, "tour.body.phones.desktop"), l)
 
 def T.plain.nrrlrlrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17985,12 +20282,12 @@ def T.plain.nrrlrlrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrrlrlrlrl(l, key)
     case EQ{}:
-      Some{T.tour.body.threads(l)}
+      Some{T.tour.body.phones.phone(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrlrlrlr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrlrlrlr.cmp(String.cmp(key, "tour.body.threads"), l)
+  T.plain.nrrlrlrlr.cmp(String.cmp(key, "tour.body.phones.phone"), l)
 
 def T.plain.nrrlrlrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -17998,12 +20295,12 @@ def T.plain.nrrlrlrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Stri
     case LT{}:
       T.plain.nrrlrlrll(l, key)
     case EQ{}:
-      Some{T.tour.body.phones.desktop(l)}
+      Some{T.tour.body.machines.phone(l)}
     case GT{}:
       T.plain.nrrlrlrlr(l, key)
 
 def T.plain.nrrlrlrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrlrlrl.cmp(String.cmp(key, "tour.body.phones.desktop"), l)
+  T.plain.nrrlrlrl.cmp(String.cmp(key, "tour.body.machines.phone"), l)
 
 def T.plain.nrrlrlrrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -18011,12 +20308,12 @@ def T.plain.nrrlrlrrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.tour.body.welcome.phone(l)}
+      Some{T.tour.body.uber.none(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrlrlrrll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrlrlrrll.cmp(String.cmp(key, "tour.body.welcome.phone"), l)
+  T.plain.nrrlrlrrll.cmp(String.cmp(key, "tour.body.uber.none"), l)
 
 def T.plain.nrrlrlrrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -18024,12 +20321,12 @@ def T.plain.nrrlrlrrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.tour.body.welcome.window(l)}
+      Some{T.tour.body.welcome.web(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrlrlrrlr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrlrlrrlr.cmp(String.cmp(key, "tour.body.welcome.window"), l)
+  T.plain.nrrlrlrrlr.cmp(String.cmp(key, "tour.body.welcome.web"), l)
 
 def T.plain.nrrlrlrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -18037,12 +20334,12 @@ def T.plain.nrrlrlrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrrlrlrrll(l, key)
     case EQ{}:
-      Some{T.tour.body.welcome.web(l)}
+      Some{T.tour.body.welcome.phone(l)}
     case GT{}:
       T.plain.nrrlrlrrlr(l, key)
 
 def T.plain.nrrlrlrrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrlrlrrl.cmp(String.cmp(key, "tour.body.welcome.web"), l)
+  T.plain.nrrlrlrrl.cmp(String.cmp(key, "tour.body.welcome.phone"), l)
 
 def T.plain.nrrlrlrrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -18050,12 +20347,12 @@ def T.plain.nrrlrlrrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.tour.end.tip(l)}
+      Some{T.tour.done(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrlrlrrrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrlrlrrrl.cmp(String.cmp(key, "tour.end.tip"), l)
+  T.plain.nrrlrlrrrl.cmp(String.cmp(key, "tour.done"), l)
 
 def T.plain.nrrlrlrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -18063,12 +20360,12 @@ def T.plain.nrrlrlrrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrrlrlrrrl(l, key)
     case EQ{}:
-      Some{T.tour.next(l)}
+      Some{T.tour.end.tip(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrlrlrrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrlrlrrr.cmp(String.cmp(key, "tour.next"), l)
+  T.plain.nrrlrlrrr.cmp(String.cmp(key, "tour.end.tip"), l)
 
 def T.plain.nrrlrlrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -18076,12 +20373,12 @@ def T.plain.nrrlrlrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Stri
     case LT{}:
       T.plain.nrrlrlrrl(l, key)
     case EQ{}:
-      Some{T.tour.done(l)}
+      Some{T.tour.body.welcome.window(l)}
     case GT{}:
       T.plain.nrrlrlrrr(l, key)
 
 def T.plain.nrrlrlrr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrlrlrr.cmp(String.cmp(key, "tour.done"), l)
+  T.plain.nrrlrlrr.cmp(String.cmp(key, "tour.body.welcome.window"), l)
 
 def T.plain.nrrlrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -18089,12 +20386,12 @@ def T.plain.nrrlrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Strin
     case LT{}:
       T.plain.nrrlrlrl(l, key)
     case EQ{}:
-      Some{T.tour.body.uber.none(l)}
+      Some{T.tour.body.threads(l)}
     case GT{}:
       T.plain.nrrlrlrr(l, key)
 
 def T.plain.nrrlrlr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrlrlr.cmp(String.cmp(key, "tour.body.uber.none"), l)
+  T.plain.nrrlrlr.cmp(String.cmp(key, "tour.body.threads"), l)
 
 def T.plain.nrrlrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -18102,12 +20399,12 @@ def T.plain.nrrlrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String
     case LT{}:
       T.plain.nrrlrll(l, key)
     case EQ{}:
-      Some{T.tour.body.keys.desktop(l)}
+      Some{T.tour.body.buttons.phone(l)}
     case GT{}:
       T.plain.nrrlrlr(l, key)
 
 def T.plain.nrrlrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrlrl.cmp(String.cmp(key, "tour.body.keys.desktop"), l)
+  T.plain.nrrlrl.cmp(String.cmp(key, "tour.body.buttons.phone"), l)
 
 def T.plain.nrrlrrllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -18115,12 +20412,12 @@ def T.plain.nrrlrrllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.tour.skip(l)}
+      Some{T.tour.next.tip(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrlrrllll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrlrrllll.cmp(String.cmp(key, "tour.skip"), l)
+  T.plain.nrrlrrllll.cmp(String.cmp(key, "tour.next.tip"), l)
 
 def T.plain.nrrlrrlllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -18128,12 +20425,12 @@ def T.plain.nrrlrrlllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.tour.title.bots(l)}
+      Some{T.tour.title.agents(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrlrrlllr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrlrrlllr.cmp(String.cmp(key, "tour.title.bots"), l)
+  T.plain.nrrlrrlllr.cmp(String.cmp(key, "tour.title.agents"), l)
 
 def T.plain.nrrlrrlll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -18141,12 +20438,12 @@ def T.plain.nrrlrrlll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrrlrrllll(l, key)
     case EQ{}:
-      Some{T.tour.title.agents(l)}
+      Some{T.tour.skip(l)}
     case GT{}:
       T.plain.nrrlrrlllr(l, key)
 
 def T.plain.nrrlrrlll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrlrrlll.cmp(String.cmp(key, "tour.title.agents"), l)
+  T.plain.nrrlrrlll.cmp(String.cmp(key, "tour.skip"), l)
 
 def T.plain.nrrlrrllrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -18154,12 +20451,25 @@ def T.plain.nrrlrrllrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, St
     case LT{}:
       None{}
     case EQ{}:
-      Some{T.tour.title.keys(l)}
+      Some{T.tour.title.buttons(l)}
     case GT{}:
       None{}
 
 def T.plain.nrrlrrllrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrlrrllrl.cmp(String.cmp(key, "tour.title.keys"), l)
+  T.plain.nrrlrrllrl.cmp(String.cmp(key, "tour.title.buttons"), l)
+
+def T.plain.nrrlrrllrr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
+  ((key, _), c) = r
+  match c:
+    case LT{}:
+      None{}
+    case EQ{}:
+      Some{T.tour.title.machines(l)}
+    case GT{}:
+      None{}
+
+def T.plain.nrrlrrllrr(l: I.Loc, key: String) -> Maybe<&2, String>:
+  T.plain.nrrlrrllrr.cmp(String.cmp(key, "tour.title.machines"), l)
 
 def T.plain.nrrlrrllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -18167,12 +20477,12 @@ def T.plain.nrrlrrllr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Str
     case LT{}:
       T.plain.nrrlrrllrl(l, key)
     case EQ{}:
-      Some{T.tour.title.machines(l)}
+      Some{T.tour.title.keys(l)}
     case GT{}:
-      None{}
+      T.plain.nrrlrrllrr(l, key)
 
 def T.plain.nrrlrrllr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrlrrllr.cmp(String.cmp(key, "tour.title.machines"), l)
+  T.plain.nrrlrrllr.cmp(String.cmp(key, "tour.title.keys"), l)
 
 def T.plain.nrrlrrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -18180,12 +20490,12 @@ def T.plain.nrrlrrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, Stri
     case LT{}:
       T.plain.nrrlrrlll(l, key)
     case EQ{}:
-      Some{T.tour.title.buttons(l)}
+      Some{T.tour.title.bots(l)}
     case GT{}:
       T.plain.nrrlrrllr(l, key)
 
 def T.plain.nrrlrrll(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrlrrll.cmp(String.cmp(key, "tour.title.buttons"), l)
+  T.plain.nrrlrrll.cmp(String.cmp(key, "tour.title.bots"), l)
 
 def T.plain.nrrlrrlrll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -18466,12 +20776,12 @@ def T.plain.nrrlr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>
     case LT{}:
       T.plain.nrrlrl(l, key)
     case EQ{}:
-      Some{T.tour.next.tip(l)}
+      Some{T.tour.next(l)}
     case GT{}:
       T.plain.nrrlrr(l, key)
 
 def T.plain.nrrlr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrlr.cmp(String.cmp(key, "tour.next.tip"), l)
+  T.plain.nrrlr.cmp(String.cmp(key, "tour.next"), l)
 
 def T.plain.nrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -18479,12 +20789,12 @@ def T.plain.nrrl.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
     case LT{}:
       T.plain.nrrll(l, key)
     case EQ{}:
-      Some{T.tools.tip.settle(l)}
+      Some{T.tools.tip.pin(l)}
     case GT{}:
       T.plain.nrrlr(l, key)
 
 def T.plain.nrrl(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nrrl.cmp(String.cmp(key, "tools.tip.settle"), l)
+  T.plain.nrrl.cmp(String.cmp(key, "tools.tip.pin"), l)
 
 def T.plain.nrrrllllll.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r
@@ -19987,12 +22297,12 @@ def T.plain.nr.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
     case LT{}:
       T.plain.nrl(l, key)
     case EQ{}:
-      Some{T.state.waitingon(l)}
+      Some{T.state.waiting(l)}
     case GT{}:
       T.plain.nrr(l, key)
 
 def T.plain.nr(l: I.Loc, key: String) -> Maybe<&2, String>:
-  T.plain.nr.cmp(String.cmp(key, "state.waitingon"), l)
+  T.plain.nr.cmp(String.cmp(key, "state.waiting"), l)
 
 def T.plain.n.cmp(r: (String & String) & Cmp, l: I.Loc) -> Maybe<&2, String>:
   ((key, _), c) = r

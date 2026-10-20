@@ -8675,6 +8675,10 @@ law i18n_plural_ja_other:
   for n: Nat
   {I18.I18n.plural(I18.Ja{}, n) == I18.POther{} : I18.Plural}
 
+law i18n_plural_sux_other:
+  for n: Nat
+  {I18.I18n.plural(I18.Sux{}, n) == I18.POther{} : I18.Plural}
+
 law i18n_plural_en_one:
   {I18.I18n.plural(I18.En{}, 1n) == I18.POne{} : I18.Plural}
 
@@ -8693,6 +8697,10 @@ law i18n_resolve_override_ja:
   for os: String
   {I18.I18n.resolve("ja", os) == I18.Ja{} : I18.Loc}
 
+law i18n_resolve_override_sux:
+  for os: String
+  {I18.I18n.resolve("sux", os) == I18.Sux{} : I18.Loc}
+
 law i18n_resolve_auto:
   for os: String
   {I18.I18n.resolve("auto", os) == I18.I18n.of_tag(os) : I18.Loc}
@@ -8708,6 +8716,9 @@ law i18n_of_tag_empty:
 
 law i18n_of_tag_bcp:
   {I18.I18n.of_tag("ja-JP") == I18.Ja{} : I18.Loc}
+
+law i18n_of_tag_sux:
+  {I18.I18n.of_tag("sux-Xsux") == I18.Sux{} : I18.Loc}
 
 law i18n_ago_en_same:
   for +now: Nat
@@ -9405,6 +9416,10 @@ law lang_override_en:
   for os: String
   for p: Bool
   {U.Lang.resolve("en", os, p) == "en" : String}
+law lang_sux_ungated:
+  for os: String
+  for p: Bool
+  {U.Lang.resolve("sux", os, p) == "sux-Xsux" : String}
 law prompt_lang_off:
   {PM.Prompt.lang("off") == "" : String}
 law prompt_lang_unknown:

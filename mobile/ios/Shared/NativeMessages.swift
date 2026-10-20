@@ -11,1571 +11,1576 @@ enum NativeMessages {
 
   // agy.account.add
   static func agy_account_add(_ tag: String) -> String {
-    tag == "ja" ? ("アカウントを追加") : ("Add account")
+    tag == "sux-Xsux" ? ("𒇽 𒃻") : (tag == "ja" ? ("アカウントを追加") : ("Add account"))
   }
 
   // agy.signout
   static func agy_signout(_ tag: String) -> String {
-    tag == "ja" ? ("サインアウト") : ("Sign out")
+    tag == "sux-Xsux" ? ("𒉡𒆷") : (tag == "ja" ? ("サインアウト") : ("Sign out"))
   }
 
   // approval.dismiss
   static func approval_dismiss(_ tag: String) -> String {
-    tag == "ja" ? ("閉じる") : ("Dismiss")
+    tag == "sux-Xsux" ? ("𒄄") : (tag == "ja" ? ("閉じる") : ("Dismiss"))
   }
 
   // bots.delete
   static func bots_delete(_ tag: String) -> String {
-    tag == "ja" ? ("ボットを削除") : ("Delete bot")
+    tag == "sux-Xsux" ? ("𒇽 𒋗𒅆𒌨") : (tag == "ja" ? ("ボットを削除") : ("Delete bot"))
   }
 
   // bots.invite.join
   static func bots_invite_join(_ tag: String) -> String {
-    tag == "ja" ? ("参加") : ("Join")
+    tag == "sux-Xsux" ? ("𒆷") : (tag == "ja" ? ("参加") : ("Join"))
   }
 
   // bots.machines
   static func bots_machines(_ tag: String) -> String {
-    tag == "ja" ? ("マシン") : ("Machines")
+    tag == "sux-Xsux" ? ("𒂍𒂍") : (tag == "ja" ? ("マシン") : ("Machines"))
   }
 
   // bots.memory.forget
   static func bots_memory_forget(_ tag: String) -> String {
-    tag == "ja" ? ("忘れる") : ("Forget")
+    tag == "sux-Xsux" ? ("𒉡𒋛") : (tag == "ja" ? ("忘れる") : ("Forget"))
   }
 
   // bots.name
   static func bots_name(_ tag: String) -> String {
-    tag == "ja" ? ("名前") : ("Name")
+    tag == "sux-Xsux" ? ("𒈬") : (tag == "ja" ? ("名前") : ("Name"))
   }
 
   // bots.new
   static func bots_new(_ tag: String) -> String {
-    tag == "ja" ? ("新しいボット") : ("New bot")
+    tag == "sux-Xsux" ? ("𒇽 𒉋") : (tag == "ja" ? ("新しいボット") : ("New bot"))
   }
 
   // bots.persona
   static func bots_persona(_ tag: String) -> String {
-    tag == "ja" ? ("性格・役割") : ("Persona")
+    tag == "sux-Xsux" ? ("𒇽") : (tag == "ja" ? ("性格・役割") : ("Persona"))
   }
 
   // bots.rooms
   static func bots_rooms(_ tag: String) -> String {
-    tag == "ja" ? ("ルーム") : ("Rooms")
+    tag == "sux-Xsux" ? ("𒂍𒂍") : (tag == "ja" ? ("ルーム") : ("Rooms"))
   }
 
   // bots.tab.routines
   static func bots_tab_routines(_ tag: String) -> String {
-    tag == "ja" ? ("ルーティン") : ("Routines")
+    tag == "sux-Xsux" ? ("𒌓") : (tag == "ja" ? ("ルーティン") : ("Routines"))
   }
 
   // browser.address
   static func browser_address(_ tag: String) -> String {
-    tag == "ja" ? ("アドレス") : ("Address")
+    tag == "sux-Xsux" ? ("𒂍 𒆠") : (tag == "ja" ? ("アドレス") : ("Address"))
   }
 
   // common.add
   static func common_add(_ tag: String) -> String {
-    tag == "ja" ? ("追加") : ("Add")
+    tag == "sux-Xsux" ? ("𒃻") : (tag == "ja" ? ("追加") : ("Add"))
   }
 
   // common.cancel
   static func common_cancel(_ tag: String) -> String {
-    tag == "ja" ? ("キャンセル") : ("Cancel")
+    tag == "sux-Xsux" ? ("𒄄") : (tag == "ja" ? ("キャンセル") : ("Cancel"))
   }
 
   // common.clear
   static func common_clear(_ tag: String) -> String {
-    tag == "ja" ? ("クリア") : ("Clear")
+    tag == "sux-Xsux" ? ("𒃻") : (tag == "ja" ? ("クリア") : ("Clear"))
   }
 
   // common.close
   static func common_close(_ tag: String) -> String {
-    tag == "ja" ? ("閉じる") : ("Close")
+    tag == "sux-Xsux" ? ("𒉡𒅅") : (tag == "ja" ? ("閉じる") : ("Close"))
   }
 
   // common.copy
   static func common_copy(_ tag: String) -> String {
-    tag == "ja" ? ("コピー") : ("Copy")
+    tag == "sux-Xsux" ? ("𒃮𒊑") : (tag == "ja" ? ("コピー") : ("Copy"))
   }
 
   // common.create
   static func common_create(_ tag: String) -> String {
-    tag == "ja" ? ("作成") : ("Create")
+    tag == "sux-Xsux" ? ("𒆕") : (tag == "ja" ? ("作成") : ("Create"))
   }
 
   // common.delete
   static func common_delete(_ tag: String) -> String {
-    tag == "ja" ? ("削除") : ("Delete")
+    tag == "sux-Xsux" ? ("𒋗𒅆𒌨") : (tag == "ja" ? ("削除") : ("Delete"))
   }
 
   // common.finish
   static func common_finish(_ tag: String) -> String {
-    tag == "ja" ? ("完了") : ("Finish")
+    tag == "sux-Xsux" ? ("𒌀") : (tag == "ja" ? ("完了") : ("Finish"))
   }
 
   // common.go
   static func common_go(_ tag: String) -> String {
-    tag == "ja" ? ("移動") : ("Go")
+    tag == "sux-Xsux" ? ("𒁺") : (tag == "ja" ? ("移動") : ("Go"))
   }
 
   // common.hide
   static func common_hide(_ tag: String) -> String {
-    tag == "ja" ? ("隠す") : ("Hide")
+    tag == "sux-Xsux" ? ("𒀉𒌫𒆪") : (tag == "ja" ? ("隠す") : ("Hide"))
   }
 
   // common.more
   static func common_more(_ tag: String) -> String {
-    tag == "ja" ? ("さらに表示") : ("More")
+    tag == "sux-Xsux" ? ("𒃲") : (tag == "ja" ? ("さらに表示") : ("More"))
   }
 
   // common.refresh
   static func common_refresh(_ tag: String) -> String {
-    tag == "ja" ? ("更新") : ("Refresh")
+    tag == "sux-Xsux" ? ("𒉋") : (tag == "ja" ? ("更新") : ("Refresh"))
   }
 
   // common.reload
   static func common_reload(_ tag: String) -> String {
-    tag == "ja" ? ("再読み込み") : ("Reload")
+    tag == "sux-Xsux" ? ("𒉋") : (tag == "ja" ? ("再読み込み") : ("Reload"))
   }
 
   // common.run
   static func common_run(_ tag: String) -> String {
-    tag == "ja" ? ("実行") : ("Run")
+    tag == "sux-Xsux" ? ("𒁺") : (tag == "ja" ? ("実行") : ("Run"))
   }
 
   // common.save
   static func common_save(_ tag: String) -> String {
-    tag == "ja" ? ("保存") : ("Save")
+    tag == "sux-Xsux" ? ("𒁾 𒊬") : (tag == "ja" ? ("保存") : ("Save"))
   }
 
   // common.show
   static func common_show(_ tag: String) -> String {
-    tag == "ja" ? ("表示") : ("Show")
+    tag == "sux-Xsux" ? ("𒅆") : (tag == "ja" ? ("表示") : ("Show"))
   }
 
   // composer.attach
   static func composer_attach(_ tag: String) -> String {
-    tag == "ja" ? ("添付") : ("Attach")
+    tag == "sux-Xsux" ? ("𒆷") : (tag == "ja" ? ("添付") : ("Attach"))
   }
 
   // composer.model.tip
   static func composer_model_tip(_ tag: String) -> String {
-    tag == "ja" ? ("モデルと推論の強さを選択") : ("Choose the model and effort")
+    tag == "sux-Xsux" ? ("𒅆𒈽") : (tag == "ja" ? ("モデルと推論の強さを選択") : ("Choose the model and effort"))
   }
 
   // composer.send
   static func composer_send(_ tag: String) -> String {
-    tag == "ja" ? ("送信") : ("Send")
+    tag == "sux-Xsux" ? ("𒅗𒁉") : (tag == "ja" ? ("送信") : ("Send"))
   }
 
   // composer.stop
   static func composer_stop(_ tag: String) -> String {
-    tag == "ja" ? ("停止") : ("Stop")
+    tag == "sux-Xsux" ? ("𒉡𒁺") : (tag == "ja" ? ("停止") : ("Stop"))
   }
 
   // files.back.tip
   static func files_back_tip(_ tag: String) -> String {
-    tag == "ja" ? ("フォルダに戻る") : ("Back to the folder")
+    tag == "sux-Xsux" ? ("𒄄") : (tag == "ja" ? ("フォルダに戻る") : ("Back to the folder"))
   }
 
   // files.changed
   static func files_changed(_ tag: String, _ arg0: UInt64) -> String {
-    tag == "ja" ? ((arg0 == 0 ? "変更なし" : "変更ファイル" + number(arg0) + "件")) : ((arg0 == 0 ? "No files changed" : (arg0 == 1 ? number(arg0) + " file changed" : number(arg0) + " files changed")))
+    tag == "sux-Xsux" ? ((arg0 == 0 ? "𒉡 𒁾 𒄄" : number(arg0) + " 𒁾 𒄄")) : (tag == "ja" ? ((arg0 == 0 ? "変更なし" : "変更ファイル" + number(arg0) + "件")) : ((arg0 == 0 ? "No files changed" : (arg0 == 1 ? number(arg0) + " file changed" : number(arg0) + " files changed"))))
   }
 
   // google.client.own
   static func google_client_own(_ tag: String) -> String {
-    tag == "ja" ? ("独自クライアント") : ("Own client")
+    tag == "sux-Xsux" ? ("Own client") : (tag == "ja" ? ("独自クライアント") : ("Own client"))
   }
 
   // google.client.save
   static func google_client_save(_ tag: String) -> String {
-    tag == "ja" ? ("クライアントを保存") : ("Save client")
+    tag == "sux-Xsux" ? ("𒁾 𒊬") : (tag == "ja" ? ("クライアントを保存") : ("Save client"))
   }
 
   // google.client.secret
   static func google_client_secret(_ tag: String) -> String {
-    tag == "ja" ? ("クライアントシークレット") : ("Client secret")
+    tag == "sux-Xsux" ? ("Client secret") : (tag == "ja" ? ("クライアントシークレット") : ("Client secret"))
   }
 
   // google.connect
   static func google_connect(_ tag: String) -> String {
-    tag == "ja" ? ("Googleに接続") : ("Connect Google")
+    tag == "sux-Xsux" ? ("Google 𒆷") : (tag == "ja" ? ("Googleに接続") : ("Connect Google"))
   }
 
   // google.open
   static func google_open(_ tag: String) -> String {
-    tag == "ja" ? ("Googleのサインインを開く") : ("Open Google sign-in")
+    tag == "sux-Xsux" ? ("Google 𒆷 𒅅") : (tag == "ja" ? ("Googleのサインインを開く") : ("Open Google sign-in"))
   }
 
   // google.signature
   static func google_signature(_ tag: String) -> String {
-    tag == "ja" ? ("署名") : ("Signature")
+    tag == "sux-Xsux" ? ("Signature") : (tag == "ja" ? ("署名") : ("Signature"))
   }
 
   // google.signature.placeholder
   static func google_signature_placeholder(_ tag: String, _ arg0: String) -> String {
-    tag == "ja" ? ("— " + arg0 + "に代わりBackplaneから送信") : ("— Sent by Backplane on behalf of " + arg0)
+    tag == "sux-Xsux" ? ("— Sent by Backplane on behalf of " + arg0) : (tag == "ja" ? ("— " + arg0 + "に代わりBackplaneから送信") : ("— Sent by Backplane on behalf of " + arg0))
   }
 
   // history.live
   static func history_live(_ tag: String) -> String {
-    tag == "ja" ? ("現在") : ("Live")
+    tag == "sux-Xsux" ? ("𒅅") : (tag == "ja" ? ("現在") : ("Live"))
   }
 
   // history.new.label
   static func history_new_label(_ tag: String, _ arg0: String) -> String {
-    tag == "ja" ? ("新版：" + arg0) : ("New: " + arg0)
+    tag == "sux-Xsux" ? ("𒉋: " + arg0) : (tag == "ja" ? ("新版：" + arg0) : ("New: " + arg0))
   }
 
   // history.old.label
   static func history_old_label(_ tag: String, _ arg0: String) -> String {
-    tag == "ja" ? ("旧版：" + arg0) : ("Old: " + arg0)
+    tag == "sux-Xsux" ? ("𒌀: " + arg0) : (tag == "ja" ? ("旧版：" + arg0) : ("Old: " + arg0))
   }
 
   // history.pause
   static func history_pause(_ tag: String) -> String {
-    tag == "ja" ? ("一時停止") : ("Pause")
+    tag == "sux-Xsux" ? ("𒉡𒁺") : (tag == "ja" ? ("一時停止") : ("Pause"))
   }
 
   // history.step.label
   static func history_step_label(_ tag: String, _ arg0: String) -> String {
-    tag == "ja" ? ("変更" + arg0) : ("Step " + arg0)
+    tag == "sux-Xsux" ? ("𒄊 " + arg0) : (tag == "ja" ? ("変更" + arg0) : ("Step " + arg0))
   }
 
   // hooks.revoke
   static func hooks_revoke(_ tag: String) -> String {
-    tag == "ja" ? ("取り消す") : ("Revoke")
+    tag == "sux-Xsux" ? ("𒉡𒆷") : (tag == "ja" ? ("取り消す") : ("Revoke"))
   }
 
   // machines.invite
   static func machines_invite(_ tag: String) -> String {
-    tag == "ja" ? ("招待") : ("Invite")
+    tag == "sux-Xsux" ? ("𒆷") : (tag == "ja" ? ("招待") : ("Invite"))
   }
 
   // machines.unlink
   static func machines_unlink(_ tag: String) -> String {
-    tag == "ja" ? ("リンク解除") : ("Unlink")
+    tag == "sux-Xsux" ? ("𒉡𒆷") : (tag == "ja" ? ("リンク解除") : ("Unlink"))
   }
 
   // mech.create
   static func mech_create(_ tag: String) -> String {
-    tag == "ja" ? ("レンダリングを作成") : ("Create renders")
+    tag == "sux-Xsux" ? ("𒆕") : (tag == "ja" ? ("レンダリングを作成") : ("Create renders"))
   }
 
   // menu.unpin
   static func menu_unpin(_ tag: String) -> String {
-    tag == "ja" ? ("ピン留めを解除") : ("Unpin")
+    tag == "sux-Xsux" ? ("𒂊") : (tag == "ja" ? ("ピン留めを解除") : ("Unpin"))
   }
 
   // native.attach.paste
   static func native_attach_paste(_ tag: String) -> String {
-    tag == "ja" ? ("画像を貼り付け") : ("Paste image")
+    tag == "sux-Xsux" ? ("𒃻 𒅆") : (tag == "ja" ? ("画像を貼り付け") : ("Paste image"))
   }
 
   // native.attach.photos
   static func native_attach_photos(_ tag: String) -> String {
-    tag == "ja" ? ("写真") : ("Photos")
+    tag == "sux-Xsux" ? ("𒅆𒅆") : (tag == "ja" ? ("写真") : ("Photos"))
   }
 
   // native.bot.create.hint
   static func native_bot_create_hint(_ tag: String) -> String {
-    tag == "ja" ? ("＋ボタンで作成できます。") : ("Make one with the plus button.")
+    tag == "sux-Xsux" ? ("𒇽 𒆕") : (tag == "ja" ? ("＋ボタンで作成できます。") : ("Make one with the plus button."))
   }
 
   // native.bot.create.menu
   static func native_bot_create_menu(_ tag: String) -> String {
-    tag == "ja" ? ("ボット・ルームを作成") : ("New bot or room")
+    tag == "sux-Xsux" ? ("𒇽 𒂍 𒉋") : (tag == "ja" ? ("ボット・ルームを作成") : ("New bot or room"))
   }
 
   // native.bot.createon
   static func native_bot_createon(_ tag: String, _ arg0: String, _ arg1: String, _ arg2: String) -> String {
-    tag == "ja" ? ((arg0 == "room" ? "ルームを作成" : "ボットを作成") + (arg1 == "hub" ? "（" + arg2 + "）" : "")) : ((arg0 == "room" ? "New room" : "New bot") + (arg1 == "hub" ? " on " + arg2 : ""))
+    tag == "sux-Xsux" ? ((arg0 == "room" ? "𒂍 𒉋" : "𒇽 𒉋") + (arg1 == "hub" ? " 𒂍 " + arg2 : "")) : (tag == "ja" ? ((arg0 == "room" ? "ルームを作成" : "ボットを作成") + (arg1 == "hub" ? "（" + arg2 + "）" : "")) : ((arg0 == "room" ? "New room" : "New bot") + (arg1 == "hub" ? " on " + arg2 : "")))
   }
 
   // native.bot.delete.ask
   static func native_bot_delete_ask(_ tag: String, _ arg0: String) -> String {
-    tag == "ja" ? (arg0 + "を削除しますか？") : ("Delete " + arg0 + "?")
+    tag == "sux-Xsux" ? ("𒇽 " + arg0 + " 𒋗𒅆𒌨?") : (tag == "ja" ? (arg0 + "を削除しますか？") : ("Delete " + arg0 + "?"))
   }
 
   // native.bot.empty
   static func native_bot_empty(_ tag: String) -> String {
-    tag == "ja" ? ("ボットなし") : ("No bots yet")
+    tag == "sux-Xsux" ? ("𒉡𒇽") : (tag == "ja" ? ("ボットなし") : ("No bots yet"))
   }
 
   // native.bot.memory.empty
   static func native_bot_memory_empty(_ tag: String) -> String {
-    tag == "ja" ? ("記憶なし") : ("Nothing remembered")
+    tag == "sux-Xsux" ? ("𒉡𒋛") : (tag == "ja" ? ("記憶なし") : ("Nothing remembered"))
   }
 
   // native.bot.message
   static func native_bot_message(_ tag: String) -> String {
-    tag == "ja" ? ("メッセージ") : ("Message")
+    tag == "sux-Xsux" ? ("𒅗") : (tag == "ja" ? ("メッセージ") : ("Message"))
   }
 
   // native.bot.messages.empty
   static func native_bot_messages_empty(_ tag: String) -> String {
-    tag == "ja" ? ("メッセージなし") : ("No messages")
+    tag == "sux-Xsux" ? ("𒉡𒅗") : (tag == "ja" ? ("メッセージなし") : ("No messages"))
   }
 
   // native.bot.provider
   static func native_bot_provider(_ tag: String) -> String {
-    tag == "ja" ? ("プロバイダー") : ("Provider")
+    tag == "sux-Xsux" ? ("𒇽") : (tag == "ja" ? ("プロバイダー") : ("Provider"))
   }
 
   // native.browser.empty
   static func native_browser_empty(_ tag: String) -> String {
-    tag == "ja" ? ("ページなし") : ("No page yet")
+    tag == "sux-Xsux" ? ("𒉡 𒆠") : (tag == "ja" ? ("ページなし") : ("No page yet"))
   }
 
   // native.browser.screenshot
   static func native_browser_screenshot(_ tag: String) -> String {
-    tag == "ja" ? ("スクリーンショット") : ("Screenshot")
+    tag == "sux-Xsux" ? ("𒅆𒅆") : (tag == "ja" ? ("スクリーンショット") : ("Screenshot"))
   }
 
   // native.browser.typing
   static func native_browser_typing(_ tag: String) -> String {
-    tag == "ja" ? ("ページに入力") : ("Type into the page")
+    tag == "sux-Xsux" ? ("𒅗 𒊬") : (tag == "ja" ? ("ページに入力") : ("Type into the page"))
   }
 
   // native.common.ok
   static func native_common_ok(_ tag: String) -> String {
-    tag == "ja" ? ("OK") : ("OK")
+    tag == "sux-Xsux" ? ("𒅅") : (tag == "ja" ? ("OK") : ("OK"))
   }
 
   // native.common.title
   static func native_common_title(_ tag: String) -> String {
-    tag == "ja" ? ("タイトル") : ("Title")
+    tag == "sux-Xsux" ? ("𒈬") : (tag == "ja" ? ("タイトル") : ("Title"))
   }
 
   // native.composer.btw
   static func native_composer_btw(_ tag: String, _ arg0: String) -> String {
-    tag == "ja" ? ("btw・" + arg0) : ("btw · " + arg0)
+    tag == "sux-Xsux" ? ("btw · " + arg0) : (tag == "ja" ? ("btw・" + arg0) : ("btw · " + arg0))
   }
 
   // native.composer.remove
   static func native_composer_remove(_ tag: String, _ arg0: String) -> String {
-    tag == "ja" ? (arg0 + "を外す") : ("Remove " + arg0)
+    tag == "sux-Xsux" ? ("𒂊 " + arg0) : (tag == "ja" ? (arg0 + "を外す") : ("Remove " + arg0))
   }
 
   // native.composer.suggestions.close
   static func native_composer_suggestions_close(_ tag: String) -> String {
-    tag == "ja" ? ("候補を閉じる") : ("Close suggestions")
+    tag == "sux-Xsux" ? ("𒉡𒅅") : (tag == "ja" ? ("候補を閉じる") : ("Close suggestions"))
   }
 
   // native.diff.revert.ask
   static func native_diff_revert_ask(_ tag: String) -> String {
-    tag == "ja" ? ("ファイルをこのスレッドの開始時点に戻しますか？") : ("Put the files back as they were when this thread began?")
+    tag == "sux-Xsux" ? ("Put the files back as they were when this thread began?") : (tag == "ja" ? ("ファイルをこのスレッドの開始時点に戻しますか？") : ("Put the files back as they were when this thread began?"))
   }
 
   // native.entry.fold
   static func native_entry_fold(_ tag: String, _ arg0: String, _ arg1: String) -> String {
-    tag == "ja" ? ((arg0 == "open" ? arg1 + "を隠す" : arg1 + "を表示")) : ((arg0 == "open" ? "Hide " + arg1 : "Show " + arg1))
+    tag == "sux-Xsux" ? ((arg0 == "open" ? "𒉡𒅆 " + arg1 : "𒅆 " + arg1)) : (tag == "ja" ? ((arg0 == "open" ? arg1 + "を隠す" : arg1 + "を表示")) : ((arg0 == "open" ? "Hide " + arg1 : "Show " + arg1)))
   }
 
   // native.entry.viewer
   static func native_entry_viewer(_ tag: String, _ arg0: String) -> String {
-    tag == "ja" ? ("ビューアーで表示：" + arg0) : ("Show in the viewer: " + arg0)
+    tag == "sux-Xsux" ? ("𒅆 " + arg0) : (tag == "ja" ? ("ビューアーで表示：" + arg0) : ("Show in the viewer: " + arg0))
   }
 
   // native.entry.viewer.short
   static func native_entry_viewer_short(_ tag: String) -> String {
-    tag == "ja" ? ("ビューアーで表示") : ("Show in the viewer")
+    tag == "sux-Xsux" ? ("𒅆") : (tag == "ja" ? ("ビューアーで表示") : ("Show in the viewer"))
   }
 
   // native.file.image.unsupported
   static func native_file_image_unsupported(_ tag: String) -> String {
-    tag == "ja" ? ("この画像は表示できません") : ("This image cannot be shown here")
+    tag == "sux-Xsux" ? ("𒉡𒅆 𒅆 𒆠") : (tag == "ja" ? ("この画像は表示できません") : ("This image cannot be shown here"))
   }
 
   // native.file.page
   static func native_file_page(_ tag: String, _ arg0: String) -> String {
-    tag == "ja" ? (arg0 + "ページ") : ("Page " + arg0)
+    tag == "sux-Xsux" ? ("𒁾 " + arg0) : (tag == "ja" ? (arg0 + "ページ") : ("Page " + arg0))
   }
 
   // native.file.pdf.error
   static func native_file_pdf_error(_ tag: String, _ arg0: String, _ arg1: String) -> String {
-    tag == "ja" ? ((arg0 == "send" ? "ハブからPDFを取得できません（12 MBを超えている可能性があります）" : (arg0 == "http" ? "ハブの応答：" + arg1 : "このPDFは表示できません"))) : ((arg0 == "send" ? "The hub could not send this PDF (it may be over 12 MB)" : (arg0 == "http" ? "The hub answered " + arg1 : "This PDF cannot be shown here")))
+    tag == "sux-Xsux" ? ((arg0 == "send" ? "𒉡𒋧 𒁾" : (arg0 == "http" ? "𒂍 " + arg1 : "𒉡𒅆 𒁾"))) : (tag == "ja" ? ((arg0 == "send" ? "ハブからPDFを取得できません（12 MBを超えている可能性があります）" : (arg0 == "http" ? "ハブの応答：" + arg1 : "このPDFは表示できません"))) : ((arg0 == "send" ? "The hub could not send this PDF (it may be over 12 MB)" : (arg0 == "http" ? "The hub answered " + arg1 : "This PDF cannot be shown here"))))
   }
 
   // native.find.empty
   static func native_find_empty(_ tag: String) -> String {
-    tag == "ja" ? ("該当なし") : ("Nothing found")
+    tag == "sux-Xsux" ? ("𒉡𒆠") : (tag == "ja" ? ("該当なし") : ("Nothing found"))
   }
 
   // native.find.file.hint
   static func native_find_file_hint(_ tag: String) -> String {
-    tag == "ja" ? ("ファイル名を入力") : ("Type to find a file")
+    tag == "sux-Xsux" ? ("𒁾 𒆥") : (tag == "ja" ? ("ファイル名を入力") : ("Type to find a file"))
   }
 
   // native.find.file.label
   static func native_find_file_label(_ tag: String) -> String {
-    tag == "ja" ? ("ファイル名") : ("File name")
+    tag == "sux-Xsux" ? ("𒁾 𒈬") : (tag == "ja" ? ("ファイル名") : ("File name"))
   }
 
   // native.find.threads.hint
   static func native_find_threads_hint(_ tag: String) -> String {
-    tag == "ja" ? ("検索語を入力") : ("Type to search threads")
+    tag == "sux-Xsux" ? ("𒅗 𒆥") : (tag == "ja" ? ("検索語を入力") : ("Type to search threads"))
   }
 
   // native.find.threads.label
   static func native_find_threads_label(_ tag: String) -> String {
-    tag == "ja" ? ("タイトル・メッセージ") : ("Titles and messages")
+    tag == "sux-Xsux" ? ("𒅗𒅗") : (tag == "ja" ? ("タイトル・メッセージ") : ("Titles and messages"))
   }
 
   // native.google.client.hide
   static func native_google_client_hide(_ tag: String) -> String {
-    tag == "ja" ? ("独自クライアントを隠す") : ("Hide own client")
+    tag == "sux-Xsux" ? ("Client 𒀉𒌫𒆪") : (tag == "ja" ? ("独自クライアントを隠す") : ("Hide own client"))
   }
 
   // native.google.client.id
   static func native_google_client_id(_ tag: String) -> String {
-    tag == "ja" ? ("クライアントID（デスクトップアプリ）") : ("Client ID (Desktop app)")
+    tag == "sux-Xsux" ? ("Client ID (Desktop app)") : (tag == "ja" ? ("クライアントID（デスクトップアプリ）") : ("Client ID (Desktop app)"))
   }
 
   // native.google.redirect
   static func native_google_redirect(_ tag: String) -> String {
-    tag == "ja" ? ("リダイレクト先のURL") : ("Redirected URL")
+    tag == "sux-Xsux" ? ("Redirected URL") : (tag == "ja" ? ("リダイレクト先のURL") : ("Redirected URL"))
   }
 
   // native.history.first
   static func native_history_first(_ tag: String) -> String {
-    tag == "ja" ? ("最初のステップ") : ("First step")
+    tag == "sux-Xsux" ? ("𒉋") : (tag == "ja" ? ("最初のステップ") : ("First step"))
   }
 
   // native.history.last
   static func native_history_last(_ tag: String) -> String {
-    tag == "ja" ? ("最後のステップ") : ("Last step")
+    tag == "sux-Xsux" ? ("𒌀") : (tag == "ja" ? ("最後のステップ") : ("Last step"))
   }
 
   // native.history.livefile
   static func native_history_livefile(_ tag: String) -> String {
-    tag == "ja" ? ("現在のファイル") : ("Live file")
+    tag == "sux-Xsux" ? ("𒁾 𒅅") : (tag == "ja" ? ("現在のファイル") : ("Live file"))
   }
 
   // native.history.next
   static func native_history_next(_ tag: String) -> String {
-    tag == "ja" ? ("次のステップ") : ("Next step")
+    tag == "sux-Xsux" ? ("𒉋") : (tag == "ja" ? ("次のステップ") : ("Next step"))
   }
 
   // native.history.play
   static func native_history_play(_ tag: String) -> String {
-    tag == "ja" ? ("再生") : ("Play")
+    tag == "sux-Xsux" ? ("𒁺") : (tag == "ja" ? ("再生") : ("Play"))
   }
 
   // native.history.previous
   static func native_history_previous(_ tag: String) -> String {
-    tag == "ja" ? ("前のステップ") : ("Previous step")
+    tag == "sux-Xsux" ? ("𒄄") : (tag == "ja" ? ("前のステップ") : ("Previous step"))
   }
 
   // native.history.thread
   static func native_history_thread(_ tag: String, _ arg0: String) -> String {
-    tag == "ja" ? ("スレッドで表示：" + arg0) : ("Show in the thread: " + arg0)
+    tag == "sux-Xsux" ? ("𒅗 𒅆 " + arg0) : (tag == "ja" ? ("スレッドで表示：" + arg0) : ("Show in the thread: " + arg0))
   }
 
   // native.history.thread.short
   static func native_history_thread_short(_ tag: String) -> String {
-    tag == "ja" ? ("スレッドで表示") : ("Show in the thread")
+    tag == "sux-Xsux" ? ("𒅗𒅆") : (tag == "ja" ? ("スレッドで表示") : ("Show in the thread"))
   }
 
   // native.home.hint
   static func native_home_hint(_ tag: String) -> String {
-    tag == "ja" ? ("メインボットが要対応の作業、実行中の作業、ボット、ルーティンをまとめて把握します。") : ("Your uberbot keeps the whole picture: what needs you, what runs, your bots and routines.")
+    tag == "sux-Xsux" ? ("Your uberbot keeps the whole picture: what needs you, what runs, your bots and routines.") : (tag == "ja" ? ("メインボットが要対応の作業、実行中の作業、ボット、ルーティンをまとめて把握します。") : ("Your uberbot keeps the whole picture: what needs you, what runs, your bots and routines."))
   }
 
   // native.home.make
   static func native_home_make(_ tag: String) -> String {
-    tag == "ja" ? ("メインボットを作成") : ("Make an uberbot")
+    tag == "sux-Xsux" ? ("𒂍𒆕") : (tag == "ja" ? ("メインボットを作成") : ("Make an uberbot"))
   }
 
   // native.home.none
   static func native_home_none(_ tag: String) -> String {
-    tag == "ja" ? ("メインボットなし") : ("No uberbot")
+    tag == "sux-Xsux" ? ("𒉡𒂍") : (tag == "ja" ? ("メインボットなし") : ("No uberbot"))
   }
 
   // native.hook.copyurl
   static func native_hook_copyurl(_ tag: String) -> String {
-    tag == "ja" ? ("URLをコピー") : ("Copy URL")
+    tag == "sux-Xsux" ? ("𒃮𒊑 URL") : (tag == "ja" ? ("URLをコピー") : ("Copy URL"))
   }
 
   // native.hook.once
   static func native_hook_once(_ tag: String) -> String {
-    tag == "ja" ? ("一度だけ表示します。") : ("Shown once.")
+    tag == "sux-Xsux" ? ("𒅆 𒁹") : (tag == "ja" ? ("一度だけ表示します。") : ("Shown once."))
   }
 
   // native.hook.secret
   static func native_hook_secret(_ tag: String) -> String {
-    tag == "ja" ? ("シークレット") : ("Secret")
+    tag == "sux-Xsux" ? ("𒀉𒌫") : (tag == "ja" ? ("シークレット") : ("Secret"))
   }
 
   // native.hub.accessibility
   static func native_hub_accessibility(_ tag: String, _ arg0: String, _ arg1: String) -> String {
-    tag == "ja" ? (arg0 + "：" + arg1) : (arg0 + ": " + arg1)
+    tag == "sux-Xsux" ? (arg0 + ": " + arg1) : (tag == "ja" ? (arg0 + "：" + arg1) : (arg0 + ": " + arg1))
   }
 
   // native.hub.catchup
   static func native_hub_catchup(_ tag: String, _ arg0: String) -> String {
-    tag == "ja" ? ("同期中・" + arg0) : ("catching up, " + arg0)
+    tag == "sux-Xsux" ? ("𒉋, " + arg0) : (tag == "ja" ? ("同期中・" + arg0) : ("catching up, " + arg0))
   }
 
   // native.hub.changes
   static func native_hub_changes(_ tag: String, _ arg0: String) -> String {
-    tag == "ja" ? (arg0 + "件の変更") : (arg0 + " changes")
+    tag == "sux-Xsux" ? (arg0 + " 𒄄") : (tag == "ja" ? (arg0 + "件の変更") : (arg0 + " changes"))
   }
 
   // native.hub.connection
   static func native_hub_connection(_ tag: String, _ arg0: String, _ arg1: String) -> String {
-    tag == "ja" ? (arg1 + "：" + arg0) : (arg0 + " to " + arg1)
+    tag == "sux-Xsux" ? (arg0 + " " + arg1 + " 𒆷") : (tag == "ja" ? (arg1 + "：" + arg0) : (arg0 + " to " + arg1))
   }
 
   // native.hub.heard
   static func native_hub_heard(_ tag: String, _ arg0: String) -> String {
-    tag == "ja" ? ("最終受信：" + arg0) : ("heard " + arg0)
+    tag == "sux-Xsux" ? ("𒅗 " + arg0) : (tag == "ja" ? ("最終受信：" + arg0) : ("heard " + arg0))
   }
 
   // native.hub.state
   static func native_hub_state(_ tag: String, _ arg0: String) -> String {
-    tag == "ja" ? ((arg0 == "online" ? "接続済み" : (arg0 == "syncing" ? "同期中" : (arg0 == "offline" ? "オフライン・再接続中" : "接続中")))) : ((arg0 == "online" ? "Connected" : (arg0 == "syncing" ? "Catching up" : (arg0 == "offline" ? "Offline, retrying" : "Connecting"))))
+    tag == "sux-Xsux" ? ((arg0 == "online" ? "𒆷" : (arg0 == "syncing" ? "𒉋" : (arg0 == "offline" ? "𒉡𒆷 𒄄" : "𒆷")))) : (tag == "ja" ? ((arg0 == "online" ? "接続済み" : (arg0 == "syncing" ? "同期中" : (arg0 == "offline" ? "オフライン・再接続中" : "接続中")))) : ((arg0 == "online" ? "Connected" : (arg0 == "syncing" ? "Catching up" : (arg0 == "offline" ? "Offline, retrying" : "Connecting")))))
   }
 
   // native.image.missing
   static func native_image_missing(_ tag: String) -> String {
-    tag == "ja" ? ("画像なし") : ("No image")
+    tag == "sux-Xsux" ? ("𒉡𒅆") : (tag == "ja" ? ("画像なし") : ("No image"))
   }
 
   // native.image.plain
   static func native_image_plain(_ tag: String) -> String {
-    tag == "ja" ? ("画像") : ("Image")
+    tag == "sux-Xsux" ? ("𒅆") : (tag == "ja" ? ("画像") : ("Image"))
   }
 
   // native.image.render
   static func native_image_render(_ tag: String) -> String {
-    tag == "ja" ? ("レンダリング画像") : ("Render")
+    tag == "sux-Xsux" ? ("𒆕") : (tag == "ja" ? ("レンダリング画像") : ("Render"))
   }
 
   // native.key.down
   static func native_key_down(_ tag: String) -> String {
-    tag == "ja" ? ("下") : ("Down")
+    tag == "sux-Xsux" ? ("Down") : (tag == "ja" ? ("下") : ("Down"))
   }
 
   // native.key.enter
   static func native_key_enter(_ tag: String) -> String {
-    tag == "ja" ? ("Enter") : ("Enter")
+    tag == "sux-Xsux" ? ("Enter") : (tag == "ja" ? ("Enter") : ("Enter"))
   }
 
   // native.key.esc
   static func native_key_esc(_ tag: String) -> String {
-    tag == "ja" ? ("Esc") : ("Esc")
+    tag == "sux-Xsux" ? ("Esc") : (tag == "ja" ? ("Esc") : ("Esc"))
   }
 
   // native.key.keyboard
   static func native_key_keyboard(_ tag: String) -> String {
-    tag == "ja" ? ("キーボード") : ("Keyboard")
+    tag == "sux-Xsux" ? ("Keyboard") : (tag == "ja" ? ("キーボード") : ("Keyboard"))
   }
 
   // native.key.left
   static func native_key_left(_ tag: String) -> String {
-    tag == "ja" ? ("左") : ("Left")
+    tag == "sux-Xsux" ? ("Left") : (tag == "ja" ? ("左") : ("Left"))
   }
 
   // native.key.right
   static func native_key_right(_ tag: String) -> String {
-    tag == "ja" ? ("右") : ("Right")
+    tag == "sux-Xsux" ? ("Right") : (tag == "ja" ? ("右") : ("Right"))
   }
 
   // native.key.tab
   static func native_key_tab(_ tag: String) -> String {
-    tag == "ja" ? ("Tab") : ("Tab")
+    tag == "sux-Xsux" ? ("Tab") : (tag == "ja" ? ("Tab") : ("Tab"))
   }
 
   // native.key.up
   static func native_key_up(_ tag: String) -> String {
-    tag == "ja" ? ("上") : ("Up")
+    tag == "sux-Xsux" ? ("Up") : (tag == "ja" ? ("上") : ("Up"))
   }
 
   // native.machine.address
   static func native_machine_address(_ tag: String) -> String {
-    tag == "ja" ? ("このハブのアドレス") : ("This hub's address")
+    tag == "sux-Xsux" ? ("𒂍 𒆠") : (tag == "ja" ? ("このハブのアドレス") : ("This hub's address"))
   }
 
   // native.machine.invite.copy
   static func native_machine_invite_copy(_ tag: String) -> String {
-    tag == "ja" ? ("招待をコピー") : ("Copy invite")
+    tag == "sux-Xsux" ? ("𒃮𒊑 𒆷") : (tag == "ja" ? ("招待をコピー") : ("Copy invite"))
   }
 
   // native.machine.invite.paste
   static func native_machine_invite_paste(_ tag: String) -> String {
-    tag == "ja" ? ("招待を貼り付け") : ("Paste an invite")
+    tag == "sux-Xsux" ? ("𒃻 𒆷") : (tag == "ja" ? ("招待を貼り付け") : ("Paste an invite"))
   }
 
   // native.mech.failed
   static func native_mech_failed(_ tag: String, _ arg0: String) -> String {
-    tag == "ja" ? ("レンダリング失敗：" + arg0) : ("Rendering failed: " + arg0)
+    tag == "sux-Xsux" ? ("𒆕 𒉡𒌀 " + arg0) : (tag == "ja" ? ("レンダリング失敗：" + arg0) : ("Rendering failed: " + arg0))
   }
 
   // native.notify.channel.live
   static func native_notify_channel_live(_ tag: String) -> String {
-    tag == "ja" ? ("稼働中のエージェント") : ("Agents working")
+    tag == "sux-Xsux" ? ("𒇽𒁺") : (tag == "ja" ? ("稼働中のエージェント") : ("Agents working"))
   }
 
   // native.notify.channel.personal
   static func native_notify_channel_personal(_ tag: String) -> String {
-    tag == "ja" ? ("個人向け通知") : ("Personal alerts")
+    tag == "sux-Xsux" ? ("𒇽𒅗") : (tag == "ja" ? ("個人向け通知") : ("Personal alerts"))
   }
 
   // native.pair.action
   static func native_pair_action(_ tag: String) -> String {
-    tag == "ja" ? ("ペアリング") : ("Pair")
+    tag == "sux-Xsux" ? ("𒆷") : (tag == "ja" ? ("ペアリング") : ("Pair"))
   }
 
   // native.pair.add
   static func native_pair_add(_ tag: String) -> String {
-    tag == "ja" ? ("ハブを追加") : ("Add hub")
+    tag == "sux-Xsux" ? ("𒃻 𒂍") : (tag == "ja" ? ("ハブを追加") : ("Add hub"))
   }
 
   // native.pair.another
   static func native_pair_another(_ tag: String) -> String {
-    tag == "ja" ? ("別のハブとペアリング") : ("Pair another")
+    tag == "sux-Xsux" ? ("𒆷 𒉋") : (tag == "ja" ? ("別のハブとペアリング") : ("Pair another"))
   }
 
   // native.pair.computer
   static func native_pair_computer(_ tag: String) -> String {
-    tag == "ja" ? ("パソコンのBackplaneで「設定」→「ペアリングリンク」→「QRコード」を開きます。") : ("On your computer: Backplane, Settings, Pairing link, QR code.")
+    tag == "sux-Xsux" ? ("On your computer: Backplane, Settings, Pairing link, QR code.") : (tag == "ja" ? ("パソコンのBackplaneで「設定」→「ペアリングリンク」→「QRコード」を開きます。") : ("On your computer: Backplane, Settings, Pairing link, QR code."))
   }
 
   // native.pair.computer.android
   static func native_pair_computer_android(_ tag: String) -> String {
-    tag == "ja" ? ("パソコンのBackplaneで「設定」→「ペアリングリンク」→「QRコード」を開くか、リンクを貼り付けます。") : ("On your computer: Backplane, Settings, Pairing link, QR code. Or paste the link:")
+    tag == "sux-Xsux" ? ("On your computer: Backplane, Settings, Pairing link, QR code. Or paste the link:") : (tag == "ja" ? ("パソコンのBackplaneで「設定」→「ペアリングリンク」→「QRコード」を開くか、リンクを貼り付けます。") : ("On your computer: Backplane, Settings, Pairing link, QR code. Or paste the link:"))
   }
 
   // native.pair.connect
   static func native_pair_connect(_ tag: String) -> String {
-    tag == "ja" ? ("接続") : ("Connect")
+    tag == "sux-Xsux" ? ("𒆷") : (tag == "ja" ? ("接続") : ("Connect"))
   }
 
   // native.pair.instructions
   static func native_pair_instructions(_ tag: String) -> String {
-    tag == "ja" ? ("QRコードを読み取るか、Backplaneの「設定」→「ペアリングリンク」にあるtailnetリンクを貼り付けます。") : ("Scan the code, or paste the tailnet link Backplane shows in Settings (Pairing link).")
+    tag == "sux-Xsux" ? ("Scan the code, or paste the tailnet link Backplane shows in Settings (Pairing link).") : (tag == "ja" ? ("QRコードを読み取るか、Backplaneの「設定」→「ペアリングリンク」にあるtailnetリンクを貼り付けます。") : ("Scan the code, or paste the tailnet link Backplane shows in Settings (Pairing link)."))
   }
 
   // native.pair.paired
   static func native_pair_paired(_ tag: String) -> String {
-    tag == "ja" ? ("ペアリング済み") : ("Paired")
+    tag == "sux-Xsux" ? ("𒆷") : (tag == "ja" ? ("ペアリング済み") : ("Paired"))
   }
 
   // native.pair.scan
   static func native_pair_scan(_ tag: String) -> String {
-    tag == "ja" ? ("QRコードを読み取る") : ("Scan QR code")
+    tag == "sux-Xsux" ? ("𒅆 𒅗") : (tag == "ja" ? ("QRコードを読み取る") : ("Scan QR code"))
   }
 
   // native.pair.scanner.denied
   static func native_pair_scanner_denied(_ tag: String) -> String {
-    tag == "ja" ? ("コードの読み取りにはカメラへのアクセスが必要です。システム設定で許可するか、リンクを貼り付けてください。") : ("Backplane needs the camera to read the code. Allow it in Settings, or paste the link instead.")
+    tag == "sux-Xsux" ? ("Backplane needs the camera to read the code. Allow it in Settings, or paste the link instead.") : (tag == "ja" ? ("コードの読み取りにはカメラへのアクセスが必要です。システム設定で許可するか、リンクを貼り付けてください。") : ("Backplane needs the camera to read the code. Allow it in Settings, or paste the link instead."))
   }
 
   // native.pair.scanner.instructions
   static func native_pair_scanner_instructions(_ tag: String) -> String {
-    tag == "ja" ? ("Backplaneの「設定」にあるQRコードにカメラを向けてください。") : ("Point the camera at the code in Backplane's Settings (QR code).")
+    tag == "sux-Xsux" ? ("Point the camera at the code in Backplane's Settings (QR code).") : (tag == "ja" ? ("Backplaneの「設定」にあるQRコードにカメラを向けてください。") : ("Point the camera at the code in Backplane's Settings (QR code)."))
   }
 
   // native.pair.scanner.invalid
   static func native_pair_scanner_invalid(_ tag: String) -> String {
-    tag == "ja" ? ("Backplaneのペアリング用コードではありません") : ("Not a Backplane pairing code")
+    tag == "sux-Xsux" ? ("𒉡 Backplane QR") : (tag == "ja" ? ("Backplaneのペアリング用コードではありません") : ("Not a Backplane pairing code"))
   }
 
   // native.pair.scanner.title
   static func native_pair_scanner_title(_ tag: String) -> String {
-    tag == "ja" ? ("コードを読み取る") : ("Scan code")
+    tag == "sux-Xsux" ? ("𒅆 𒅗") : (tag == "ja" ? ("コードを読み取る") : ("Scan code"))
   }
 
   // native.pair.scanner.unavailable
   static func native_pair_scanner_unavailable(_ tag: String) -> String {
-    tag == "ja" ? ("読み取りにはGoogle Play開発者サービスが必要です。リンクを貼り付けてください") : ("The scanner needs Google Play services: paste the link instead")
+    tag == "sux-Xsux" ? ("The scanner needs Google Play services: paste the link instead") : (tag == "ja" ? ("読み取りにはGoogle Play開発者サービスが必要です。リンクを貼り付けてください") : ("The scanner needs Google Play services: paste the link instead"))
   }
 
   // native.pair.tailnet
   static func native_pair_tailnet(_ tag: String) -> String {
-    tag == "ja" ? ("tailnet上のハブ") : ("On your tailnet")
+    tag == "sux-Xsux" ? ("On your tailnet") : (tag == "ja" ? ("tailnet上のハブ") : ("On your tailnet"))
   }
 
   // native.pair.title
   static func native_pair_title(_ tag: String) -> String {
-    tag == "ja" ? ("ハブとペアリング") : ("Pair with a hub")
+    tag == "sux-Xsux" ? ("𒂍 𒆷") : (tag == "ja" ? ("ハブとペアリング") : ("Pair with a hub"))
   }
 
   // native.pair.unpair
   static func native_pair_unpair(_ tag: String) -> String {
-    tag == "ja" ? ("ペアリング解除") : ("Unpair")
+    tag == "sux-Xsux" ? ("𒉡𒆷") : (tag == "ja" ? ("ペアリング解除") : ("Unpair"))
   }
 
   // native.plane.card
   static func native_plane_card(_ tag: String, _ arg0: String, _ arg1: String) -> String {
-    tag == "ja" ? (arg0 + "、" + arg1) : (arg0 + ", " + arg1)
+    tag == "sux-Xsux" ? (arg0 + ", " + arg1) : (tag == "ja" ? (arg0 + "、" + arg1) : (arg0 + ", " + arg1))
   }
 
   // native.plane.more
   static func native_plane_more(_ tag: String, _ arg0: String) -> String {
-    tag == "ja" ? ("他" + arg0 + "件") : (arg0 + " more")
+    tag == "sux-Xsux" ? (arg0 + " 𒃲") : (tag == "ja" ? ("他" + arg0 + "件") : (arg0 + " more"))
   }
 
   // native.plane.unread
   static func native_plane_unread(_ tag: String) -> String {
-    tag == "ja" ? ("未読") : ("Unread")
+    tag == "sux-Xsux" ? ("𒉡𒅗") : (tag == "ja" ? ("未読") : ("Unread"))
   }
 
   // native.plane.waiting
   static func native_plane_waiting(_ tag: String) -> String {
-    tag == "ja" ? ("対応待ちなし") : ("Nothing waiting")
+    tag == "sux-Xsux" ? ("𒉡𒃻") : (tag == "ja" ? ("対応待ちなし") : ("Nothing waiting"))
   }
 
   // native.review.comment
   static func native_review_comment(_ tag: String) -> String {
-    tag == "ja" ? ("コメント") : ("Comment")
+    tag == "sux-Xsux" ? ("𒅗") : (tag == "ja" ? ("コメント") : ("Comment"))
   }
 
   // native.review.pin
   static func native_review_pin(_ tag: String, _ arg0: String, _ arg1: String) -> String {
-    tag == "ja" ? ("コメント" + (arg0 == "replies" ? "（返信" + arg1 + "件）" : "")) : ("Comment" + (arg0 == "replies" ? ", " + arg1 + " replies" : ""))
+    tag == "sux-Xsux" ? ("𒅗" + (arg0 == "replies" ? " · " + arg1 + " 𒅗𒅗" : "")) : (tag == "ja" ? ("コメント" + (arg0 == "replies" ? "（返信" + arg1 + "件）" : "")) : ("Comment" + (arg0 == "replies" ? ", " + arg1 + " replies" : "")))
   }
 
   // native.review.place
   static func native_review_place(_ tag: String, _ arg0: String, _ arg1: String) -> String {
-    tag == "ja" ? ("位置：" + arg0 + ", " + arg1 + " mm") : ("at " + arg0 + ", " + arg1 + " mm")
+    tag == "sux-Xsux" ? ("𒆠 " + arg0 + ", " + arg1 + " mm") : (tag == "ja" ? ("位置：" + arg0 + ", " + arg1 + " mm") : ("at " + arg0 + ", " + arg1 + " mm"))
   }
 
   // native.review.resolved
   static func native_review_resolved(_ tag: String) -> String {
-    tag == "ja" ? ("解決済み") : ("Resolved")
+    tag == "sux-Xsux" ? ("𒌀") : (tag == "ja" ? ("解決済み") : ("Resolved"))
   }
 
   // native.review.write
   static func native_review_write(_ tag: String) -> String {
-    tag == "ja" ? ("コメントを書く") : ("Write a note")
+    tag == "sux-Xsux" ? ("𒁾 𒊬") : (tag == "ja" ? ("コメントを書く") : ("Write a note"))
   }
 
   // native.room.empty
   static func native_room_empty(_ tag: String) -> String {
-    tag == "ja" ? ("ルームなし") : ("No rooms yet")
+    tag == "sux-Xsux" ? ("𒉡𒂍") : (tag == "ja" ? ("ルームなし") : ("No rooms yet"))
   }
 
   // native.room.member
   static func native_room_member(_ tag: String) -> String {
-    tag == "ja" ? ("参加中") : ("In the room")
+    tag == "sux-Xsux" ? ("𒇽") : (tag == "ja" ? ("参加中") : ("In the room"))
   }
 
   // native.room.members
   static func native_room_members(_ tag: String) -> String {
-    tag == "ja" ? ("メンバー") : ("Members")
+    tag == "sux-Xsux" ? ("𒇽𒇽") : (tag == "ja" ? ("メンバー") : ("Members"))
   }
 
   // native.room.post
   static func native_room_post(_ tag: String) -> String {
-    tag == "ja" ? ("ルームに投稿") : ("Post to the room")
+    tag == "sux-Xsux" ? ("𒂍 𒅗𒁉") : (tag == "ja" ? ("ルームに投稿") : ("Post to the room"))
   }
 
   // native.routine.examples
   static func native_routine_examples(_ tag: String) -> String {
-    tag == "ja" ? ("daily 09:30 · tomorrow 9am · in 2h") : ("daily 09:30 · tomorrow 9am · in 2h")
+    tag == "sux-Xsux" ? ("daily 09:30 · tomorrow 9am · in 2h") : (tag == "ja" ? ("daily 09:30 · tomorrow 9am · in 2h") : ("daily 09:30 · tomorrow 9am · in 2h"))
   }
 
   // native.routine.hint
   static func native_routine_hint(_ tag: String) -> String {
-    tag == "ja" ? ("スケジュール（daily 09:30、every 15m、cron）または時刻（tomorrow 9am、in 2h）") : ("A schedule (daily 09:30, every 15m, cron) or a time (tomorrow 9am, in 2h)")
+    tag == "sux-Xsux" ? ("A schedule (daily 09:30, every 15m, cron) or a time (tomorrow 9am, in 2h)") : (tag == "ja" ? ("スケジュール（daily 09:30、every 15m、cron）または時刻（tomorrow 9am、in 2h）") : ("A schedule (daily 09:30, every 15m, cron) or a time (tomorrow 9am, in 2h)"))
   }
 
   // native.routine.last
   static func native_routine_last(_ tag: String, _ arg0: String) -> String {
-    tag == "ja" ? ("前回：" + arg0 + "前") : ("last " + arg0 + " ago")
+    tag == "sux-Xsux" ? ("𒌀 " + arg0 + " 𒄄") : (tag == "ja" ? ("前回：" + arg0 + "前") : ("last " + arg0 + " ago"))
   }
 
   // native.routine.prompt
   static func native_routine_prompt(_ tag: String) -> String {
-    tag == "ja" ? ("プロンプト") : ("Prompt")
+    tag == "sux-Xsux" ? ("𒅗") : (tag == "ja" ? ("プロンプト") : ("Prompt"))
   }
 
   // native.routine.timefield
   static func native_routine_timefield(_ tag: String) -> String {
-    tag == "ja" ? ("日時") : ("When")
+    tag == "sux-Xsux" ? ("𒌓") : (tag == "ja" ? ("日時") : ("When"))
   }
 
   // native.routine.title
   static func native_routine_title(_ tag: String) -> String {
-    tag == "ja" ? ("ルーチン") : ("Routine")
+    tag == "sux-Xsux" ? ("𒌓 𒈬") : (tag == "ja" ? ("ルーチン") : ("Routine"))
   }
 
   // native.routine.what
   static func native_routine_what(_ tag: String) -> String {
-    tag == "ja" ? ("実行する内容") : ("What to do")
+    tag == "sux-Xsux" ? ("𒅗") : (tag == "ja" ? ("実行する内容") : ("What to do"))
   }
 
   // native.routines.empty
   static func native_routines_empty(_ tag: String) -> String {
-    tag == "ja" ? ("ルーチンなし") : ("No routines")
+    tag == "sux-Xsux" ? ("𒉡𒌓") : (tag == "ja" ? ("ルーチンなし") : ("No routines"))
   }
 
   // native.routines.note
   static func native_routines_note(_ tag: String) -> String {
-    tag == "ja" ? ("ボットの「ルーチン」タブで作成できます。") : ("A bot's Routines tab makes them.")
+    tag == "sux-Xsux" ? ("𒇽 𒌓𒌓 𒆕") : (tag == "ja" ? ("ボットの「ルーチン」タブで作成できます。") : ("A bot's Routines tab makes them."))
   }
 
   // native.settings.about
   static func native_settings_about(_ tag: String) -> String {
-    tag == "ja" ? ("このアプリについて") : ("About")
+    tag == "sux-Xsux" ? ("𒂍 𒈬") : (tag == "ja" ? ("このアプリについて") : ("About"))
   }
 
   // native.settings.behaviour
   static func native_settings_behaviour(_ tag: String) -> String {
-    tag == "ja" ? ("動作") : ("Behaviour")
+    tag == "sux-Xsux" ? ("Behaviour") : (tag == "ja" ? ("動作") : ("Behaviour"))
   }
 
   // native.settings.behaviour.android
   static func native_settings_behaviour_android(_ tag: String) -> String {
-    tag == "ja" ? ("プロジェクト別、または対応待ちを優先した実行状況別に表示します。") : ("Projects groups threads by project; Active lists what is going on, what needs you first.")
+    tag == "sux-Xsux" ? ("Projects groups threads by project; Active lists what is going on, what needs you first.") : (tag == "ja" ? ("プロジェクト別、または対応待ちを優先した実行状況別に表示します。") : ("Projects groups threads by project; Active lists what is going on, what needs you first."))
   }
 
   // native.settings.behaviour.ios
   static func native_settings_behaviour_ios(_ tag: String) -> String {
-    tag == "ja" ? ("プロジェクト別、または対応待ちを優先した実行状況別に表示します。自動ではメインボットがあればホーム、それ以外はスレッドを開きます。") : ("Projects groups threads by project; Active lists what is going on, what needs you first. Automatic opens on Home with an uberbot, else Threads.")
+    tag == "sux-Xsux" ? ("Projects groups threads by project; Active lists what is going on, what needs you first. Automatic opens on Home with an uberbot, else Threads.") : (tag == "ja" ? ("プロジェクト別、または対応待ちを優先した実行状況別に表示します。自動ではメインボットがあればホーム、それ以外はスレッドを開きます。") : ("Projects groups threads by project; Active lists what is going on, what needs you first. Automatic opens on Home with an uberbot, else Threads."))
   }
 
   // native.settings.cache
   static func native_settings_cache(_ tag: String) -> String {
-    tag == "ja" ? ("キャッシュ") : ("Cache")
+    tag == "sux-Xsux" ? ("𒁾") : (tag == "ja" ? ("キャッシュ") : ("Cache"))
   }
 
   // native.settings.cache.ask
   static func native_settings_cache_ask(_ tag: String) -> String {
-    tag == "ja" ? ("キャッシュを削除しますか？") : ("Clear the cached state?")
+    tag == "sux-Xsux" ? ("𒁾 𒂊?") : (tag == "ja" ? ("キャッシュを削除しますか？") : ("Clear the cached state?"))
   }
 
   // native.settings.cache.clear
   static func native_settings_cache_clear(_ tag: String) -> String {
-    tag == "ja" ? ("キャッシュを削除") : ("Clear cached state")
+    tag == "sux-Xsux" ? ("𒂊") : (tag == "ja" ? ("キャッシュを削除") : ("Clear cached state"))
   }
 
   // native.settings.cache.next
   static func native_settings_cache_next(_ tag: String) -> String {
-    tag == "ja" ? ("次回の起動時に各ハブの履歴を再取得します。") : ("The next launch fetches each hub's history again.")
+    tag == "sux-Xsux" ? ("The next launch fetches each hub's history again.") : (tag == "ja" ? ("次回の起動時に各ハブの履歴を再取得します。") : ("The next launch fetches each hub's history again."))
   }
 
   // native.settings.haptics
   static func native_settings_haptics(_ tag: String) -> String {
-    tag == "ja" ? ("触覚フィードバック") : ("Haptics")
+    tag == "sux-Xsux" ? ("Haptics") : (tag == "ja" ? ("触覚フィードバック") : ("Haptics"))
   }
 
   // native.settings.hub
   static func native_settings_hub(_ tag: String) -> String {
-    tag == "ja" ? ("ハブ設定") : ("Hub settings")
+    tag == "sux-Xsux" ? ("𒂍 𒈬") : (tag == "ja" ? ("ハブ設定") : ("Hub settings"))
   }
 
   // native.settings.hub.named
   static func native_settings_hub_named(_ tag: String, _ arg0: String) -> String {
-    tag == "ja" ? ("ハブ設定 · " + arg0) : ("Hub settings · " + arg0)
+    tag == "sux-Xsux" ? ("𒂍 𒈬 " + arg0) : (tag == "ja" ? ("ハブ設定 · " + arg0) : ("Hub settings · " + arg0))
   }
 
   // native.settings.hubs
   static func native_settings_hubs(_ tag: String) -> String {
-    tag == "ja" ? ("ハブ") : ("Hubs")
+    tag == "sux-Xsux" ? ("𒂍𒂍") : (tag == "ja" ? ("ハブ") : ("Hubs"))
   }
 
   // native.settings.kept
   static func native_settings_kept(_ tag: String) -> String {
-    tag == "ja" ? ("保存済みの状態") : ("Kept state")
+    tag == "sux-Xsux" ? ("𒃻") : (tag == "ja" ? ("保存済みの状態") : ("Kept state"))
   }
 
   // native.settings.notasked
   static func native_settings_notasked(_ tag: String) -> String {
-    tag == "ja" ? ("未確認") : ("Not asked")
+    tag == "sux-Xsux" ? ("𒉡 𒂗𒋻") : (tag == "ja" ? ("未確認") : ("Not asked"))
   }
 
   // native.settings.notifications
   static func native_settings_notifications(_ tag: String) -> String {
-    tag == "ja" ? ("通知") : ("Notifications")
+    tag == "sux-Xsux" ? ("𒅗") : (tag == "ja" ? ("通知") : ("Notifications"))
   }
 
   // native.settings.notify.hub
   static func native_settings_notify_hub(_ tag: String, _ arg0: String) -> String {
-    tag == "ja" ? ("通知する内容は" + arg0 + "で設定します。") : ("Notify me for is a setting on " + arg0 + ".")
+    tag == "sux-Xsux" ? ("Notify me for is a setting on " + arg0 + ".") : (tag == "ja" ? ("通知する内容は" + arg0 + "で設定します。") : ("Notify me for is a setting on " + arg0 + "."))
   }
 
   // native.settings.opens
   static func native_settings_opens(_ tag: String) -> String {
-    tag == "ja" ? ("起動時のタブ") : ("Opens on")
+    tag == "sux-Xsux" ? ("𒅅") : (tag == "ja" ? ("起動時のタブ") : ("Opens on"))
   }
 
   // native.settings.paired
   static func native_settings_paired(_ tag: String, _ arg0: String) -> String {
-    tag == "ja" ? (arg0 + "台とペアリング済み") : (arg0 + " paired")
+    tag == "sux-Xsux" ? (arg0 + " 𒆷") : (tag == "ja" ? (arg0 + "台とペアリング済み") : (arg0 + " paired"))
   }
 
   // native.settings.placeholder.hint
   static func native_settings_placeholder_hint(_ tag: String) -> String {
-    tag == "ja" ? ("このハブでの設定の説明。") : ("A line of what the setting does for this hub.")
+    tag == "sux-Xsux" ? ("A line of what the setting does for this hub.") : (tag == "ja" ? ("このハブでの設定の説明。") : ("A line of what the setting does for this hub."))
   }
 
   // native.settings.placeholder.name
   static func native_settings_placeholder_name(_ tag: String) -> String {
-    tag == "ja" ? ("設定名") : ("Setting name")
+    tag == "sux-Xsux" ? ("𒈬") : (tag == "ja" ? ("設定名") : ("Setting name"))
   }
 
   // native.settings.placeholder.option
   static func native_settings_placeholder_option(_ tag: String) -> String {
-    tag == "ja" ? ("選択肢") : ("Option")
+    tag == "sux-Xsux" ? ("𒅗") : (tag == "ja" ? ("選択肢") : ("Option"))
   }
 
   // native.settings.system
   static func native_settings_system(_ tag: String) -> String {
-    tag == "ja" ? ("システム") : ("System")
+    tag == "sux-Xsux" ? ("𒂍𒂍") : (tag == "ja" ? ("システム") : ("System"))
   }
 
   // native.settings.system.open
   static func native_settings_system_open(_ tag: String) -> String {
-    tag == "ja" ? ("システム設定を開く") : ("Open system settings")
+    tag == "sux-Xsux" ? ("𒅅 𒈬𒃻") : (tag == "ja" ? ("システム設定を開く") : ("Open system settings"))
   }
 
   // native.settings.system.settings
   static func native_settings_system_settings(_ tag: String) -> String {
-    tag == "ja" ? ("システム設定") : ("System settings")
+    tag == "sux-Xsux" ? ("𒈬 𒃻") : (tag == "ja" ? ("システム設定") : ("System settings"))
   }
 
   // native.status.answer
   static func native_status_answer(_ tag: String) -> String {
-    tag == "ja" ? ("回答待ち") : ("Waits for an answer")
+    tag == "sux-Xsux" ? ("𒅗") : (tag == "ja" ? ("回答待ち") : ("Waits for an answer"))
   }
 
   // native.status.approval
   static func native_status_approval(_ tag: String) -> String {
-    tag == "ja" ? ("承認待ち") : ("Waits for approval")
+    tag == "sux-Xsux" ? ("𒃻") : (tag == "ja" ? ("承認待ち") : ("Waits for approval"))
   }
 
   // native.tab.home
   static func native_tab_home(_ tag: String) -> String {
-    tag == "ja" ? ("ホーム") : ("Home")
+    tag == "sux-Xsux" ? ("𒂍") : (tag == "ja" ? ("ホーム") : ("Home"))
   }
 
   // native.task.delete.ask
   static func native_task_delete_ask(_ tag: String) -> String {
-    tag == "ja" ? ("このタスクを削除しますか？") : ("Delete this task?")
+    tag == "sux-Xsux" ? ("𒋗𒅆𒌨?") : (tag == "ja" ? ("このタスクを削除しますか？") : ("Delete this task?"))
   }
 
   // native.task.note
   static func native_task_note(_ tag: String) -> String {
-    tag == "ja" ? ("大事な点を伝える") : ("Tell it what matters")
+    tag == "sux-Xsux" ? ("𒁾") : (tag == "ja" ? ("大事な点を伝える") : ("Tell it what matters"))
   }
 
   // native.task.parameter
   static func native_task_parameter(_ tag: String, _ arg0: String, _ arg1: String) -> String {
-    tag == "ja" ? (arg0 + "（" + arg1 + "）") : (arg0 + " (" + arg1 + ")")
+    tag == "sux-Xsux" ? (arg0 + " (" + arg1 + ")") : (tag == "ja" ? (arg0 + "（" + arg1 + "）") : (arg0 + " (" + arg1 + ")"))
   }
 
   // native.task.private
   static func native_task_private(_ tag: String) -> String {
-    tag == "ja" ? ("非公開") : ("private")
+    tag == "sux-Xsux" ? ("𒀉𒌫𒆪") : (tag == "ja" ? ("非公開") : ("private"))
   }
 
   // native.task.state
   static func native_task_state(_ tag: String, _ arg0: String) -> String {
-    tag == "ja" ? ((arg0 == "ok" ? "完了" : (arg0 == "failed" ? "失敗" : (arg0 == "stopped" ? "停止" : arg0)))) : ((arg0 == "ok" ? "ok" : (arg0 == "failed" ? "failed" : (arg0 == "stopped" ? "stopped" : arg0))))
+    tag == "sux-Xsux" ? ((arg0 == "ok" ? "𒅅" : (arg0 == "failed" ? "𒉡𒌀" : (arg0 == "stopped" ? "𒉡𒁺" : arg0)))) : (tag == "ja" ? ((arg0 == "ok" ? "完了" : (arg0 == "failed" ? "失敗" : (arg0 == "stopped" ? "停止" : arg0)))) : ((arg0 == "ok" ? "ok" : (arg0 == "failed" ? "failed" : (arg0 == "stopped" ? "stopped" : arg0)))))
   }
 
   // native.term.inactive
   static func native_term_inactive(_ tag: String, _ arg0: String) -> String {
-    tag == "ja" ? (arg0 + "・停止中、タップで再起動") : (arg0 + " · inactive, tap to restart")
+    tag == "sux-Xsux" ? (arg0 + " · 𒉡𒁺, 𒄄") : (tag == "ja" ? (arg0 + "・停止中、タップで再起動") : (arg0 + " · inactive, tap to restart"))
   }
 
   // native.term.restart
   static func native_term_restart(_ tag: String) -> String {
-    tag == "ja" ? ("再起動") : ("Restart")
+    tag == "sux-Xsux" ? ("𒄄") : (tag == "ja" ? ("再起動") : ("Restart"))
   }
 
   // native.text.copyall.action
   static func native_text_copyall_action(_ tag: String) -> String {
-    tag == "ja" ? ("すべてコピー") : ("Copy all")
+    tag == "sux-Xsux" ? ("𒅗𒊬") : (tag == "ja" ? ("すべてコピー") : ("Copy all"))
   }
 
   // native.text.copyall.title
   static func native_text_copyall_title(_ tag: String) -> String {
-    tag == "ja" ? ("すべてコピー") : ("Copy All")
+    tag == "sux-Xsux" ? ("𒅗𒊬") : (tag == "ja" ? ("すべてコピー") : ("Copy All"))
   }
 
   // native.text.select.action
   static func native_text_select_action(_ tag: String) -> String {
-    tag == "ja" ? ("テキストを選択") : ("Select text")
+    tag == "sux-Xsux" ? ("𒅗 𒅆𒈽") : (tag == "ja" ? ("テキストを選択") : ("Select text"))
   }
 
   // native.text.select.title
   static func native_text_select_title(_ tag: String) -> String {
-    tag == "ja" ? ("テキストを選択") : ("Select Text")
+    tag == "sux-Xsux" ? ("𒅗 𒅆𒈽") : (tag == "ja" ? ("テキストを選択") : ("Select Text"))
   }
 
   // native.thread.archived
   static func native_thread_archived(_ tag: String, _ arg0: String) -> String {
-    tag == "ja" ? ("アーカイブ" + arg0) : ("Archived " + arg0)
+    tag == "sux-Xsux" ? ("𒁾𒂍 " + arg0) : (tag == "ja" ? ("アーカイブ" + arg0) : ("Archived " + arg0))
   }
 
   // native.thread.board
   static func native_thread_board(_ tag: String) -> String {
-    tag == "ja" ? ("基板ビューアー") : ("Board viewer")
+    tag == "sux-Xsux" ? ("𒁾𒅆") : (tag == "ja" ? ("基板ビューアー") : ("Board viewer"))
   }
 
   // native.thread.composer
   static func native_thread_composer(_ tag: String) -> String {
-    tag == "ja" ? ("エージェントに依頼") : ("Ask the agent")
+    tag == "sux-Xsux" ? ("𒅗𒁉") : (tag == "ja" ? ("エージェントに依頼") : ("Ask the agent"))
   }
 
   // native.thread.content
   static func native_thread_content(_ tag: String) -> String {
-    tag == "ja" ? ("会話の内容") : ("Conversation content")
+    tag == "sux-Xsux" ? ("𒅗") : (tag == "ja" ? ("会話の内容") : ("Conversation content"))
   }
 
   // native.thread.content.note
   static func native_thread_content_note(_ tag: String) -> String {
-    tag == "ja" ? ("最新のメッセージをここに表示します。") : ("The latest messages will appear here.")
+    tag == "sux-Xsux" ? ("𒅗𒅗 𒉋 𒆠") : (tag == "ja" ? ("最新のメッセージをここに表示します。") : ("The latest messages will appear here."))
   }
 
   // native.thread.effort
   static func native_thread_effort(_ tag: String) -> String {
-    tag == "ja" ? ("思考量") : ("Effort")
+    tag == "sux-Xsux" ? ("Effort") : (tag == "ja" ? ("思考量") : ("Effort"))
   }
 
   // native.thread.effort.item
   static func native_thread_effort_item(_ tag: String, _ arg0: String) -> String {
-    tag == "ja" ? ("思考量：" + arg0) : ("Effort: " + arg0)
+    tag == "sux-Xsux" ? ("Effort: " + arg0) : (tag == "ja" ? ("思考量：" + arg0) : ("Effort: " + arg0))
   }
 
   // native.thread.hub
   static func native_thread_hub(_ tag: String) -> String {
-    tag == "ja" ? ("ハブ") : ("the hub")
+    tag == "sux-Xsux" ? ("𒂍") : (tag == "ja" ? ("ハブ") : ("the hub"))
   }
 
   // native.thread.menu
   static func native_thread_menu(_ tag: String) -> String {
-    tag == "ja" ? ("メニュー") : ("Menu")
+    tag == "sux-Xsux" ? ("𒅗") : (tag == "ja" ? ("メニュー") : ("Menu"))
   }
 
   // native.thread.model
   static func native_thread_model(_ tag: String) -> String {
-    tag == "ja" ? ("モデル") : ("Model")
+    tag == "sux-Xsux" ? ("Model") : (tag == "ja" ? ("モデル") : ("Model"))
   }
 
   // native.thread.model.effort
   static func native_thread_model_effort(_ tag: String, _ arg0: String) -> String {
-    tag == "ja" ? ("モデル・思考量：" + arg0) : ("Model and effort: " + arg0)
+    tag == "sux-Xsux" ? ("Model and effort: " + arg0) : (tag == "ja" ? ("モデル・思考量：" + arg0) : ("Model and effort: " + arg0))
   }
 
   // native.thread.online
   static func native_thread_online(_ tag: String, _ arg0: String) -> String {
-    tag == "ja" ? ((arg0 == "online" ? "接続済み" : "接続中…")) : ((arg0 == "online" ? "Connected" : "Connecting…"))
+    tag == "sux-Xsux" ? ((arg0 == "online" ? "𒆷" : "𒆷…")) : (tag == "ja" ? ((arg0 == "online" ? "接続済み" : "接続中…")) : ((arg0 == "online" ? "Connected" : "Connecting…")))
   }
 
   // native.thread.provider.item
   static func native_thread_provider_item(_ tag: String, _ arg0: String) -> String {
-    tag == "ja" ? ("プロバイダー：" + arg0) : ("Provider: " + arg0)
+    tag == "sux-Xsux" ? ("Provider: " + arg0) : (tag == "ja" ? ("プロバイダー：" + arg0) : ("Provider: " + arg0))
   }
 
   // native.thread.search.clear
   static func native_thread_search_clear(_ tag: String) -> String {
-    tag == "ja" ? ("検索をクリア") : ("Clear search")
+    tag == "sux-Xsux" ? ("𒉡𒆥") : (tag == "ja" ? ("検索をクリア") : ("Clear search"))
   }
 
   // native.thread.sending
   static func native_thread_sending(_ tag: String) -> String {
-    tag == "ja" ? ("送信中…") : ("Sending…")
+    tag == "sux-Xsux" ? ("𒋧…") : (tag == "ja" ? ("送信中…") : ("Sending…"))
   }
 
   // native.thread.subagents
   static func native_thread_subagents(_ tag: String, _ arg0: String) -> String {
-    tag == "ja" ? ("サブエージェント：" + arg0) : ("Subagents: " + arg0)
+    tag == "sux-Xsux" ? ("𒇽𒇽: " + arg0) : (tag == "ja" ? ("サブエージェント：" + arg0) : ("Subagents: " + arg0))
   }
 
   // native.thread.waiting
   static func native_thread_waiting(_ tag: String, _ arg0: String) -> String {
-    tag == "ja" ? (arg0 + "を待機中…") : ("Waiting for " + arg0 + "…")
+    tag == "sux-Xsux" ? ("𒃻 " + arg0 + "…") : (tag == "ja" ? (arg0 + "を待機中…") : ("Waiting for " + arg0 + "…"))
   }
 
   // native.viewer.ground.dark
   static func native_viewer_ground_dark(_ tag: String) -> String {
-    tag == "ja" ? ("背景を暗く") : ("Dark ground")
+    tag == "sux-Xsux" ? ("𒈪") : (tag == "ja" ? ("背景を暗く") : ("Dark ground"))
   }
 
   // native.viewer.ground.light
   static func native_viewer_ground_light(_ tag: String) -> String {
-    tag == "ja" ? ("背景を明るく") : ("Light ground")
+    tag == "sux-Xsux" ? ("𒌓𒌓") : (tag == "ja" ? ("背景を明るく") : ("Light ground"))
   }
 
   // native.viewer.metal
   static func native_viewer_metal(_ tag: String) -> String {
-    tag == "ja" ? ("このデバイスはMetalに対応していません。") : ("This device has no Metal.")
+    tag == "sux-Xsux" ? ("This device has no Metal.") : (tag == "ja" ? ("このデバイスはMetalに対応していません。") : ("This device has no Metal."))
   }
 
   // native.viewer.others
   static func native_viewer_others(_ tag: String) -> String {
-    tag == "ja" ? ("ほかのレイヤー") : ("Others")
+    tag == "sux-Xsux" ? ("𒇽𒇽") : (tag == "ja" ? ("ほかのレイヤー") : ("Others"))
   }
 
   // native.viewer.parts
   static func native_viewer_parts(_ tag: String) -> String {
-    tag == "ja" ? ("部品") : ("Parts")
+    tag == "sux-Xsux" ? ("𒃲") : (tag == "ja" ? ("部品") : ("Parts"))
   }
 
   // native.viewer.restore
   static func native_viewer_restore(_ tag: String) -> String {
-    tag == "ja" ? ("すべて元に戻す") : ("All back")
+    tag == "sux-Xsux" ? ("𒄄") : (tag == "ja" ? ("すべて元に戻す") : ("All back"))
   }
 
   // native.viewer.sheet
   static func native_viewer_sheet(_ tag: String) -> String {
-    tag == "ja" ? ("シート") : ("Sheet")
+    tag == "sux-Xsux" ? ("𒁾") : (tag == "ja" ? ("シート") : ("Sheet"))
   }
 
   // native.viewer.source
   static func native_viewer_source(_ tag: String) -> String {
-    tag == "ja" ? ("表示元") : ("Source")
+    tag == "sux-Xsux" ? ("𒆠") : (tag == "ja" ? ("表示元") : ("Source"))
   }
 
   // native.viewer.standout
   static func native_viewer_standout(_ tag: String) -> String {
-    tag == "ja" ? ("強調") : ("Stand out")
+    tag == "sux-Xsux" ? ("𒅆") : (tag == "ja" ? ("強調") : ("Stand out"))
   }
 
   // notify.failed
   static func notify_failed(_ tag: String) -> String {
-    tag == "ja" ? ("失敗") : ("Failed")
+    tag == "sux-Xsux" ? ("𒉡𒅅") : (tag == "ja" ? ("失敗") : ("Failed"))
   }
 
   // palette.commit
   static func palette_commit(_ tag: String) -> String {
-    tag == "ja" ? ("コミットしてプッシュ") : ("Commit & push")
+    tag == "sux-Xsux" ? ("𒁾 𒊬") : (tag == "ja" ? ("コミットしてプッシュ") : ("Commit & push"))
   }
 
   // palette.findfile
   static func palette_findfile(_ tag: String) -> String {
-    tag == "ja" ? ("ファイルを探す") : ("Find file")
+    tag == "sux-Xsux" ? ("𒁾 𒆥") : (tag == "ja" ? ("ファイルを探す") : ("Find file"))
   }
 
   // palette.revert
   static func palette_revert(_ tag: String) -> String {
-    tag == "ja" ? ("スレッドを元に戻す") : ("Revert thread")
+    tag == "sux-Xsux" ? ("𒄄") : (tag == "ja" ? ("スレッドを元に戻す") : ("Revert thread"))
   }
 
   // palette.search
   static func palette_search(_ tag: String) -> String {
-    tag == "ja" ? ("スレッドを検索") : ("Search threads")
+    tag == "sux-Xsux" ? ("𒅗 𒆥") : (tag == "ja" ? ("スレッドを検索") : ("Search threads"))
   }
 
   // palette.settings
   static func palette_settings(_ tag: String) -> String {
-    tag == "ja" ? ("設定") : ("Settings")
+    tag == "sux-Xsux" ? ("𒈬 𒃻") : (tag == "ja" ? ("設定") : ("Settings"))
   }
 
   // palette.terminal
   static func palette_terminal(_ tag: String) -> String {
-    tag == "ja" ? ("ターミナル") : ("Terminal")
+    tag == "sux-Xsux" ? ("𒅗") : (tag == "ja" ? ("ターミナル") : ("Terminal"))
   }
 
   // plane.bots.working
   static func plane_bots_working(_ tag: String) -> String {
-    tag == "ja" ? ("稼働ボット") : ("Bots working")
+    tag == "sux-Xsux" ? ("𒇽𒁺") : (tag == "ja" ? ("稼働ボット") : ("Bots working"))
   }
 
   // plane.locks
   static func plane_locks(_ tag: String) -> String {
-    tag == "ja" ? ("ロック") : ("Locks")
+    tag == "sux-Xsux" ? ("𒆷") : (tag == "ja" ? ("ロック") : ("Locks"))
   }
 
   // plane.need
   static func plane_need(_ tag: String) -> String {
-    tag == "ja" ? ("対応待ち") : ("Need you")
+    tag == "sux-Xsux" ? ("𒇽") : (tag == "ja" ? ("対応待ち") : ("Need you"))
   }
 
   // plane.needs
   static func plane_needs(_ tag: String) -> String {
-    tag == "ja" ? ("要対応") : ("Needs you")
+    tag == "sux-Xsux" ? ("𒇽") : (tag == "ja" ? ("要対応") : ("Needs you"))
   }
 
   // plane.rooms.unread
   static func plane_rooms_unread(_ tag: String) -> String {
-    tag == "ja" ? ("未読ルーム") : ("Unread rooms")
+    tag == "sux-Xsux" ? ("𒂍𒂍 𒉡𒅗") : (tag == "ja" ? ("未読ルーム") : ("Unread rooms"))
   }
 
   // plane.running
   static func plane_running(_ tag: String) -> String {
-    tag == "ja" ? ("実行中") : ("Running")
+    tag == "sux-Xsux" ? ("𒁺") : (tag == "ja" ? ("実行中") : ("Running"))
   }
 
   // queue.edit
   static func queue_edit(_ tag: String) -> String {
-    tag == "ja" ? ("編集") : ("Edit")
+    tag == "sux-Xsux" ? ("𒊬") : (tag == "ja" ? ("編集") : ("Edit"))
   }
 
   // review.bom
   static func review_bom(_ tag: String) -> String {
-    tag == "ja" ? ("BOM") : ("BOM")
+    tag == "sux-Xsux" ? ("BOM") : (tag == "ja" ? ("BOM") : ("BOM"))
   }
 
   // review.fails
   static func review_fails(_ tag: String, _ arg0: String) -> String {
-    tag == "ja" ? ("不合格：" + arg0) : ("Fails: " + arg0)
+    tag == "sux-Xsux" ? ("𒉡𒌀: " + arg0) : (tag == "ja" ? ("不合格：" + arg0) : ("Fails: " + arg0))
   }
 
   // review.force
   static func review_force(_ tag: String) -> String {
-    tag == "ja" ? ("チェック失敗時もリリース") : ("Release even if checks fail")
+    tag == "sux-Xsux" ? ("Release even if checks fail") : (tag == "ja" ? ("チェック失敗時もリリース") : ("Release even if checks fail"))
   }
 
   // review.passes
   static func review_passes(_ tag: String) -> String {
-    tag == "ja" ? ("合格") : ("Passes")
+    tag == "sux-Xsux" ? ("𒌀") : (tag == "ja" ? ("合格") : ("Passes"))
   }
 
   // review.publish
   static func review_publish(_ tag: String) -> String {
-    tag == "ja" ? ("GitHubで公開") : ("Publish on GitHub")
+    tag == "sux-Xsux" ? ("𒅗𒃻") : (tag == "ja" ? ("GitHubで公開") : ("Publish on GitHub"))
   }
 
   // review.release.make
   static func review_release_make(_ tag: String, _ arg0: String) -> String {
-    tag == "ja" ? ("リリース" + arg0 + "を作成") : ("Make release " + arg0)
+    tag == "sux-Xsux" ? ("𒆕 " + arg0) : (tag == "ja" ? ("リリース" + arg0 + "を作成") : ("Make release " + arg0))
   }
 
   // review.reopen
   static func review_reopen(_ tag: String) -> String {
-    tag == "ja" ? ("再開") : ("Reopen")
+    tag == "sux-Xsux" ? ("𒄄𒅅") : (tag == "ja" ? ("再開") : ("Reopen"))
   }
 
   // review.reply
   static func review_reply(_ tag: String) -> String {
-    tag == "ja" ? ("返信") : ("Reply")
+    tag == "sux-Xsux" ? ("𒅗𒁉") : (tag == "ja" ? ("返信") : ("Reply"))
   }
 
   // review.resolve
   static func review_resolve(_ tag: String) -> String {
-    tag == "ja" ? ("解決済みにする") : ("Resolve")
+    tag == "sux-Xsux" ? ("𒌀") : (tag == "ja" ? ("解決済みにする") : ("Resolve"))
   }
 
   // room.delete
   static func room_delete(_ tag: String) -> String {
-    tag == "ja" ? ("ルームを削除") : ("Delete room")
+    tag == "sux-Xsux" ? ("𒂍 𒋗𒅆𒌨") : (tag == "ja" ? ("ルームを削除") : ("Delete room"))
   }
 
   // rooms.new
   static func rooms_new(_ tag: String) -> String {
-    tag == "ja" ? ("新しいルーム") : ("New room")
+    tag == "sux-Xsux" ? ("𒂍 𒉋") : (tag == "ja" ? ("新しいルーム") : ("New room"))
   }
 
   // routine.new
   static func routine_new(_ tag: String) -> String {
-    tag == "ja" ? ("新しいルーティン") : ("New routine")
+    tag == "sux-Xsux" ? ("𒉋") : (tag == "ja" ? ("新しいルーティン") : ("New routine"))
   }
 
   // routine.next
   static func routine_next(_ tag: String, _ arg0: String, _ arg1: String, _ arg2: String, _ arg3: String, _ arg4: String) -> String {
-    tag == "ja" ? ("次回" + arg0 + (arg1 == "none" ? "" : "・" + arg2) + (arg3 == "none" ? "" : "・" + arg4)) : ("Next " + arg0 + (arg1 == "none" ? "" : " · " + arg2) + (arg3 == "none" ? "" : " · " + arg4))
+    tag == "sux-Xsux" ? ("𒉋 " + arg0 + (arg1 == "none" ? "" : " · " + arg2) + (arg3 == "none" ? "" : " · " + arg4)) : (tag == "ja" ? ("次回" + arg0 + (arg1 == "none" ? "" : "・" + arg2) + (arg3 == "none" ? "" : "・" + arg4)) : ("Next " + arg0 + (arg1 == "none" ? "" : " · " + arg2) + (arg3 == "none" ? "" : " · " + arg4)))
   }
 
   // routine.run
   static func routine_run(_ tag: String) -> String {
-    tag == "ja" ? ("今すぐ実行") : ("Run now")
+    tag == "sux-Xsux" ? ("𒁺") : (tag == "ja" ? ("今すぐ実行") : ("Run now"))
   }
 
   // sched.kind.reminder
   static func sched_kind_reminder(_ tag: String) -> String {
-    tag == "ja" ? ("リマインダー") : ("Reminder")
+    tag == "sux-Xsux" ? ("𒌓") : (tag == "ja" ? ("リマインダー") : ("Reminder"))
   }
 
   // sched.kind.repeat
   static func sched_kind_repeat(_ tag: String) -> String {
-    tag == "ja" ? ("繰り返し") : ("Repeats")
+    tag == "sux-Xsux" ? ("𒄄") : (tag == "ja" ? ("繰り返し") : ("Repeats"))
   }
 
   // settings.appearance
   static func settings_appearance(_ tag: String) -> String {
-    tag == "ja" ? ("外観") : ("Appearance")
+    tag == "sux-Xsux" ? ("𒅆") : (tag == "ja" ? ("外観") : ("Appearance"))
   }
 
   // settings.lang
   static func settings_lang(_ tag: String) -> String {
-    tag == "ja" ? ("言語") : ("Language")
+    tag == "sux-Xsux" ? ("𒅴") : (tag == "ja" ? ("言語") : ("Language"))
   }
 
   // settings.lang.auto
   static func settings_lang_auto(_ tag: String) -> String {
-    tag == "ja" ? ("自動") : ("Automatic")
+    tag == "sux-Xsux" ? ("Automatic") : (tag == "ja" ? ("自動") : ("Automatic"))
   }
 
   // settings.lang.off
   static func settings_lang_off(_ tag: String) -> String {
-    tag == "ja" ? ("オフ") : ("Off")
+    tag == "sux-Xsux" ? ("𒉡𒅅") : (tag == "ja" ? ("オフ") : ("Off"))
   }
 
   // settings.lang.on
   static func settings_lang_on(_ tag: String) -> String {
-    tag == "ja" ? ("オン") : ("On")
+    tag == "sux-Xsux" ? ("𒅅") : (tag == "ja" ? ("オン") : ("On"))
+  }
+
+  // settings.lang.sux
+  static func settings_lang_sux(_ tag: String) -> String {
+    tag == "sux-Xsux" ? ("𒅴𒂠") : (tag == "ja" ? ("シュメール語（楔形文字）") : ("Sumerian (Cuneiform)"))
   }
 
   // settings.pair
   static func settings_pair(_ tag: String) -> String {
-    tag == "ja" ? ("ペアリングリンク") : ("Pairing link")
+    tag == "sux-Xsux" ? ("𒆷") : (tag == "ja" ? ("ペアリングリンク") : ("Pairing link"))
   }
 
   // settings.sidebar
   static func settings_sidebar(_ tag: String) -> String {
-    tag == "ja" ? ("スレッド一覧") : ("Thread list")
+    tag == "sux-Xsux" ? ("𒂍𒂍") : (tag == "ja" ? ("スレッド一覧") : ("Thread list"))
   }
 
   // settings.sidebar.active
   static func settings_sidebar_active(_ tag: String) -> String {
-    tag == "ja" ? ("進行中") : ("Active")
+    tag == "sux-Xsux" ? ("𒁺") : (tag == "ja" ? ("進行中") : ("Active"))
   }
 
   // settings.theme.dark
   static func settings_theme_dark(_ tag: String) -> String {
-    tag == "ja" ? ("ダーク") : ("Dark")
+    tag == "sux-Xsux" ? ("𒈪") : (tag == "ja" ? ("ダーク") : ("Dark"))
   }
 
   // settings.theme.light
   static func settings_theme_light(_ tag: String) -> String {
-    tag == "ja" ? ("ライト") : ("Light")
+    tag == "sux-Xsux" ? ("𒌓𒌓") : (tag == "ja" ? ("ライト") : ("Light"))
   }
 
   // settings.tour
   static func settings_tour(_ tag: String) -> String {
-    tag == "ja" ? ("ツアー") : ("Tour")
+    tag == "sux-Xsux" ? ("𒅆") : (tag == "ja" ? ("ツアー") : ("Tour"))
   }
 
   // settings.tour.show
   static func settings_tour_show(_ tag: String) -> String {
-    tag == "ja" ? ("ツアーを表示") : ("Show the tour")
+    tag == "sux-Xsux" ? ("𒅆") : (tag == "ja" ? ("ツアーを表示") : ("Show the tour"))
   }
 
   // sidebar.add.project
   static func sidebar_add_project(_ tag: String) -> String {
-    tag == "ja" ? ("プロジェクトを追加") : ("Add project")
+    tag == "sux-Xsux" ? ("𒂍 𒃻") : (tag == "ja" ? ("プロジェクトを追加") : ("Add project"))
   }
 
   // sidebar.nothing
   static func sidebar_nothing(_ tag: String) -> String {
-    tag == "ja" ? ("実行中の作業なし") : ("Nothing active")
+    tag == "sux-Xsux" ? ("𒉡𒁺") : (tag == "ja" ? ("実行中の作業なし") : ("Nothing active"))
   }
 
   // sidebar.older
   static func sidebar_older(_ tag: String, _ arg0: String) -> String {
-    tag == "ja" ? ("以前のプロジェクト" + arg0 + "件") : ("Older " + arg0)
+    tag == "sux-Xsux" ? ("𒌀 " + arg0) : (tag == "ja" ? ("以前のプロジェクト" + arg0 + "件") : ("Older " + arg0))
   }
 
   // sidebar.settled.count
   static func sidebar_settled_count(_ tag: String, _ arg0: String) -> String {
-    tag == "ja" ? ("完了済み" + arg0 + "件") : ("Settled " + arg0)
+    tag == "sux-Xsux" ? ("𒌀 " + arg0) : (tag == "ja" ? ("完了済み" + arg0 + "件") : ("Settled " + arg0))
   }
 
   // teach.description
   static func teach_description(_ tag: String) -> String {
-    tag == "ja" ? ("処理内容（任意）") : ("What it does (optional)")
+    tag == "sux-Xsux" ? ("𒆕") : (tag == "ja" ? ("処理内容（任意）") : ("What it does (optional)"))
   }
 
   // teach.empty
   static func teach_empty(_ tag: String) -> String {
-    tag == "ja" ? ("タスクはまだありません。ブラウザタブかチャットで教えてください。") : ("None yet. Teach one in the Browser tab, or tell it in chat.")
+    tag == "sux-Xsux" ? ("None yet. Teach one in the Browser tab, or tell it in chat.") : (tag == "ja" ? ("タスクはまだありません。ブラウザタブかチャットで教えてください。") : ("None yet. Teach one in the Browser tab, or tell it in chat."))
   }
 
   // teach.name.note
   static func teach_name_note(_ tag: String) -> String {
-    tag == "ja" ? ("名前を付けてください。毎回入力する値を指定できます。") : ("Name it. Mark a value you typed to ask for it each time the task runs.")
+    tag == "sux-Xsux" ? ("Name it. Mark a value you typed to ask for it each time the task runs.") : (tag == "ja" ? ("名前を付けてください。毎回入力する値を指定できます。") : ("Name it. Mark a value you typed to ask for it each time the task runs."))
   }
 
   // teach.note.add
   static func teach_note_add(_ tag: String) -> String {
-    tag == "ja" ? ("メモを追加") : ("Add note")
+    tag == "sux-Xsux" ? ("𒁾 𒃻") : (tag == "ja" ? ("メモを追加") : ("Add note"))
   }
 
   // teach.run.note
   static func teach_run_note(_ tag: String) -> String {
-    tag == "ja" ? ("開いて実行できます。ルーティンからも実行できます。") : ("Open one to run it. A routine can run it too.")
+    tag == "sux-Xsux" ? ("𒅆 𒁺 · 𒌓 𒁺") : (tag == "ja" ? ("開いて実行できます。ルーティンからも実行できます。") : ("Open one to run it. A routine can run it too."))
   }
 
   // teach.runs
   static func teach_runs(_ tag: String) -> String {
-    tag == "ja" ? ("最近の実行") : ("Recent runs")
+    tag == "sux-Xsux" ? ("𒁺𒁺") : (tag == "ja" ? ("最近の実行") : ("Recent runs"))
   }
 
   // teach.save
   static func teach_save(_ tag: String) -> String {
-    tag == "ja" ? ("このタスクを保存") : ("Save this task")
+    tag == "sux-Xsux" ? ("𒁾 𒊬") : (tag == "ja" ? ("このタスクを保存") : ("Save this task"))
   }
 
   // teach.steps
   static func teach_steps(_ tag: String, _ arg0: String, _ arg1: String, _ arg2: String) -> String {
-    tag == "ja" ? (arg0 + "・" + arg1 + "ステップ") : (arg0 + " · " + arg1 + " " + (arg2 == "one" ? "step" : "steps"))
+    tag == "sux-Xsux" ? (arg0 + " · " + arg1 + " " + (arg2 == "one" ? "𒄊" : "𒄊")) : (tag == "ja" ? (arg0 + "・" + arg1 + "ステップ") : (arg0 + " · " + arg1 + " " + (arg2 == "one" ? "step" : "steps")))
   }
 
   // terminal.pin
   static func terminal_pin(_ tag: String) -> String {
-    tag == "ja" ? ("先頭にピン留め") : ("Pin to the top")
+    tag == "sux-Xsux" ? ("𒃻 𒆠") : (tag == "ja" ? ("先頭にピン留め") : ("Pin to the top"))
   }
 
   // thread.new
   static func thread_new(_ tag: String) -> String {
-    tag == "ja" ? ("新しいスレッド") : ("New thread")
+    tag == "sux-Xsux" ? ("𒅗 𒉋") : (tag == "ja" ? ("新しいスレッド") : ("New thread"))
   }
 
   // thread.subagents
   static func thread_subagents(_ tag: String) -> String {
-    tag == "ja" ? ("サブエージェント") : ("Subagents")
+    tag == "sux-Xsux" ? ("𒇽𒇽") : (tag == "ja" ? ("サブエージェント") : ("Subagents"))
   }
 
   // tools.pinned
   static func tools_pinned(_ tag: String) -> String {
-    tag == "ja" ? ("固定中") : ("Pinned")
+    tag == "sux-Xsux" ? ("𒃻") : (tag == "ja" ? ("固定中") : ("Pinned"))
   }
 
   // tour.back
   static func tour_back(_ tag: String) -> String {
-    tag == "ja" ? ("戻る") : ("Back")
+    tag == "sux-Xsux" ? ("𒄄") : (tag == "ja" ? ("戻る") : ("Back"))
   }
 
   // tour.done
   static func tour_done(_ tag: String) -> String {
-    tag == "ja" ? ("完了") : ("Done")
+    tag == "sux-Xsux" ? ("𒌀") : (tag == "ja" ? ("完了") : ("Done"))
   }
 
   // tour.title.bots
   static func tour_title_bots(_ tag: String) -> String {
-    tag == "ja" ? ("ボット") : ("Bots")
+    tag == "sux-Xsux" ? ("𒇽𒇽") : (tag == "ja" ? ("ボット") : ("Bots"))
   }
 
   // tour.title.projects
   static func tour_title_projects(_ tag: String) -> String {
-    tag == "ja" ? ("プロジェクト") : ("Projects")
+    tag == "sux-Xsux" ? ("𒂍𒂍") : (tag == "ja" ? ("プロジェクト") : ("Projects"))
   }
 
   // tour.title.threads
   static func tour_title_threads(_ tag: String) -> String {
-    tag == "ja" ? ("スレッド") : ("Threads")
+    tag == "sux-Xsux" ? ("𒅗𒅗") : (tag == "ja" ? ("スレッド") : ("Threads"))
   }
 
   // turn.by
   static func turn_by(_ tag: String, _ arg0: String) -> String {
-    tag == "ja" ? ((arg0 == "you" ? "自分" : (arg0 == "agent" ? "エージェント" : "不明"))) : ((arg0 == "you" ? "You" : (arg0 == "agent" ? "Agent" : "Someone")))
+    tag == "sux-Xsux" ? ((arg0 == "you" ? "𒍝𒂊" : (arg0 == "agent" ? "𒇽 𒅗" : "𒇽"))) : (tag == "ja" ? ((arg0 == "you" ? "自分" : (arg0 == "agent" ? "エージェント" : "不明"))) : ((arg0 == "you" ? "You" : (arg0 == "agent" ? "Agent" : "Someone"))))
   }
 
   // viewer.diff
   static func viewer_diff(_ tag: String) -> String {
-    tag == "ja" ? ("差分") : ("Diff")
+    tag == "sux-Xsux" ? ("𒄄") : (tag == "ja" ? ("差分") : ("Diff"))
   }
 
   // viewer.diff.pr
   static func viewer_diff_pr(_ tag: String) -> String {
-    tag == "ja" ? ("PRを作成") : ("Open PR")
+    tag == "sux-Xsux" ? ("PR 𒅅") : (tag == "ja" ? ("PRを作成") : ("Open PR"))
   }
 
   // viewer.files
   static func viewer_files(_ tag: String) -> String {
-    tag == "ja" ? ("ファイル") : ("Files")
+    tag == "sux-Xsux" ? ("𒁾𒁾") : (tag == "ja" ? ("ファイル") : ("Files"))
   }
 
   // viewer.files.empty
   static func viewer_files_empty(_ tag: String) -> String {
-    tag == "ja" ? ("空のフォルダ") : ("This folder is empty")
+    tag == "sux-Xsux" ? ("𒉡𒁾") : (tag == "ja" ? ("空のフォルダ") : ("This folder is empty"))
   }
 
   // viewer.history.added
   static func viewer_history_added(_ tag: String) -> String {
-    tag == "ja" ? ("追加") : ("Added")
+    tag == "sux-Xsux" ? ("𒃻") : (tag == "ja" ? ("追加") : ("Added"))
   }
 
   // viewer.history.changed
   static func viewer_history_changed(_ tag: String) -> String {
-    tag == "ja" ? ("変更") : ("Changed")
+    tag == "sux-Xsux" ? ("𒄄") : (tag == "ja" ? ("変更") : ("Changed"))
   }
 
   // viewer.history.changes
   static func viewer_history_changes(_ tag: String) -> String {
-    tag == "ja" ? ("変更") : ("Changes")
+    tag == "sux-Xsux" ? ("𒄄") : (tag == "ja" ? ("変更") : ("Changes"))
   }
 
   // viewer.history.compare
   static func viewer_history_compare(_ tag: String) -> String {
-    tag == "ja" ? ("比較") : ("Compare")
+    tag == "sux-Xsux" ? ("𒅆") : (tag == "ja" ? ("比較") : ("Compare"))
   }
 
   // viewer.history.compare.new
   static func viewer_history_compare_new(_ tag: String) -> String {
-    tag == "ja" ? ("比較先（新）") : ("Compare with (new)")
+    tag == "sux-Xsux" ? ("𒅆𒈽 𒉋") : (tag == "ja" ? ("比較先（新）") : ("Compare with (new)"))
   }
 
   // viewer.history.compare.old
   static func viewer_history_compare_old(_ tag: String) -> String {
-    tag == "ja" ? ("比較元（旧）") : ("Compare from (old)")
+    tag == "sux-Xsux" ? ("𒅆𒈽 𒌀") : (tag == "ja" ? ("比較元（旧）") : ("Compare from (old)"))
   }
 
   // viewer.history.new
   static func viewer_history_new(_ tag: String) -> String {
-    tag == "ja" ? ("新") : ("New")
+    tag == "sux-Xsux" ? ("𒉋") : (tag == "ja" ? ("新") : ("New"))
   }
 
   // viewer.history.old
   static func viewer_history_old(_ tag: String) -> String {
-    tag == "ja" ? ("旧") : ("Old")
+    tag == "sux-Xsux" ? ("𒌀") : (tag == "ja" ? ("旧") : ("Old"))
   }
 
   // viewer.history.ref
   static func viewer_history_ref(_ tag: String) -> String {
-    tag == "ja" ? ("コミット・ブランチ・タグ") : ("Commit, branch or tag")
+    tag == "sux-Xsux" ? ("Commit, branch or tag") : (tag == "ja" ? ("コミット・ブランチ・タグ") : ("Commit, branch or tag"))
   }
 
   // viewer.history.removed
   static func viewer_history_removed(_ tag: String) -> String {
-    tag == "ja" ? ("削除") : ("Removed")
+    tag == "sux-Xsux" ? ("𒂊") : (tag == "ja" ? ("削除") : ("Removed"))
   }
 
   // viewer.layers
   static func viewer_layers(_ tag: String) -> String {
-    tag == "ja" ? ("レイヤー") : ("Layers")
+    tag == "sux-Xsux" ? ("Layers") : (tag == "ja" ? ("レイヤー") : ("Layers"))
   }
 
   // viewer.layers.all
   static func viewer_layers_all(_ tag: String) -> String {
-    tag == "ja" ? ("すべて") : ("All")
+    tag == "sux-Xsux" ? ("𒃲") : (tag == "ja" ? ("すべて") : ("All"))
   }
 
   // viewer.layers.dim
   static func viewer_layers_dim(_ tag: String) -> String {
-    tag == "ja" ? ("薄く") : ("Dim")
+    tag == "sux-Xsux" ? ("𒉡𒅆") : (tag == "ja" ? ("薄く") : ("Dim"))
   }
 
   // viewer.layers.only
   static func viewer_layers_only(_ tag: String) -> String {
-    tag == "ja" ? ("選択のみ") : ("Only")
+    tag == "sux-Xsux" ? ("𒅆") : (tag == "ja" ? ("選択のみ") : ("Only"))
   }
 
   // viewer.mech.renders
   static func viewer_mech_renders(_ tag: String) -> String {
-    tag == "ja" ? ("レンダー") : ("Renders")
+    tag == "sux-Xsux" ? ("𒆕𒆕") : (tag == "ja" ? ("レンダー") : ("Renders"))
   }
 
   // viewer.mention
   static func viewer_mention(_ tag: String) -> String {
-    tag == "ja" ? ("チャットで参照") : ("Mention in chat")
+    tag == "sux-Xsux" ? ("𒅗𒁉") : (tag == "ja" ? ("チャットで参照") : ("Mention in chat"))
   }
 
   // viewer.solid
   static func viewer_solid(_ tag: String) -> String {
-    tag == "ja" ? ("3D") : ("3D")
+    tag == "sux-Xsux" ? ("3D") : (tag == "ja" ? ("3D") : ("3D"))
   }
 
   // web.hooks.secret
   static func web_hooks_secret(_ tag: String) -> String {
-    tag == "ja" ? ("シークレット（1回のみ表示）") : ("Secret, shown once")
+    tag == "sux-Xsux" ? ("Secret, shown once") : (tag == "ja" ? ("シークレット（1回のみ表示）") : ("Secret, shown once"))
   }
 
   // web.plane.idle
   static func web_plane_idle(_ tag: String) -> String {
-    tag == "ja" ? ("待機中") : ("Idle")
+    tag == "sux-Xsux" ? ("𒉡𒁺") : (tag == "ja" ? ("待機中") : ("Idle"))
   }
 
   // web.terminal.pinned
   static func web_terminal_pinned(_ tag: String, _ arg0: String) -> String {
-    tag == "ja" ? (arg0 + "・先頭にピン留め") : (arg0 + " · pinned at the top")
+    tag == "sux-Xsux" ? (arg0 + " · 𒃻 ⬆") : (tag == "ja" ? (arg0 + "・先頭にピン留め") : (arg0 + " · pinned at the top"))
   }
 }

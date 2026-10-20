@@ -6,3 +6,5 @@ build/
 .claude/
 node_modules/
 .env
+mobile/ios/Backplane/NotoSansCuneiform-Regular.ttf
+mobile/ios/Backplane/NOTO-CUNEIFORM-OFL.txt

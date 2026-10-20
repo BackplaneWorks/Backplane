@@ -966,7 +966,7 @@ def Lang.start(+u: U.Ui) -> IO(U.Ui):
     messages : String <- S.Env.get("LC_MESSAGES", "")
     lang : String <- S.Env.get("LANG", "")
     +force : String <- S.Env.get("BACKPLANE_LANG", "")
-    return Lang.start.k(Bool.or(String.eq(force, "ja"), String.eq(force, "en")), u, force, I18.I18n.os(all, messages, lang))
+    return Lang.start.k(Bool.or(Bool.or(String.eq(force, "ja"), String.eq(force, "en")), Bool.or(String.eq(force, "sux"), String.eq(force, "sux-Xsux"))), u, force, I18.I18n.os(all, messages, lang))
 
 def Drafts.one(skip: Bool, u: U.Ui, +dir: String, +name: String) -> IO(U.Ui):
   match skip:

@@ -6,1257 +6,1261 @@ object NativeMessages {
 
   // agy.account.add
   fun agy_account_add(tag: String): String =
-    if (tag == "ja") ("アカウントを追加") else ("Add account")
+    if (tag == "sux-Xsux") ("𒇽 𒃻") else if (tag == "ja") ("アカウントを追加") else ("Add account")
 
   // agy.signout
   fun agy_signout(tag: String): String =
-    if (tag == "ja") ("サインアウト") else ("Sign out")
+    if (tag == "sux-Xsux") ("𒉡𒆷") else if (tag == "ja") ("サインアウト") else ("Sign out")
 
   // approval.dismiss
   fun approval_dismiss(tag: String): String =
-    if (tag == "ja") ("閉じる") else ("Dismiss")
+    if (tag == "sux-Xsux") ("𒄄") else if (tag == "ja") ("閉じる") else ("Dismiss")
 
   // bots.delete
   fun bots_delete(tag: String): String =
-    if (tag == "ja") ("ボットを削除") else ("Delete bot")
+    if (tag == "sux-Xsux") ("𒇽 𒋗𒅆𒌨") else if (tag == "ja") ("ボットを削除") else ("Delete bot")
 
   // bots.invite.join
   fun bots_invite_join(tag: String): String =
-    if (tag == "ja") ("参加") else ("Join")
+    if (tag == "sux-Xsux") ("𒆷") else if (tag == "ja") ("参加") else ("Join")
 
   // bots.machines
   fun bots_machines(tag: String): String =
-    if (tag == "ja") ("マシン") else ("Machines")
+    if (tag == "sux-Xsux") ("𒂍𒂍") else if (tag == "ja") ("マシン") else ("Machines")
 
   // bots.memory.forget
   fun bots_memory_forget(tag: String): String =
-    if (tag == "ja") ("忘れる") else ("Forget")
+    if (tag == "sux-Xsux") ("𒉡𒋛") else if (tag == "ja") ("忘れる") else ("Forget")
 
   // bots.name
   fun bots_name(tag: String): String =
-    if (tag == "ja") ("名前") else ("Name")
+    if (tag == "sux-Xsux") ("𒈬") else if (tag == "ja") ("名前") else ("Name")
 
   // bots.new
   fun bots_new(tag: String): String =
-    if (tag == "ja") ("新しいボット") else ("New bot")
+    if (tag == "sux-Xsux") ("𒇽 𒉋") else if (tag == "ja") ("新しいボット") else ("New bot")
 
   // bots.persona
   fun bots_persona(tag: String): String =
-    if (tag == "ja") ("性格・役割") else ("Persona")
+    if (tag == "sux-Xsux") ("𒇽") else if (tag == "ja") ("性格・役割") else ("Persona")
 
   // bots.rooms
   fun bots_rooms(tag: String): String =
-    if (tag == "ja") ("ルーム") else ("Rooms")
+    if (tag == "sux-Xsux") ("𒂍𒂍") else if (tag == "ja") ("ルーム") else ("Rooms")
 
   // bots.tab.routines
   fun bots_tab_routines(tag: String): String =
-    if (tag == "ja") ("ルーティン") else ("Routines")
+    if (tag == "sux-Xsux") ("𒌓") else if (tag == "ja") ("ルーティン") else ("Routines")
 
   // browser.address
   fun browser_address(tag: String): String =
-    if (tag == "ja") ("アドレス") else ("Address")
+    if (tag == "sux-Xsux") ("𒂍 𒆠") else if (tag == "ja") ("アドレス") else ("Address")
 
   // common.add
   fun common_add(tag: String): String =
-    if (tag == "ja") ("追加") else ("Add")
+    if (tag == "sux-Xsux") ("𒃻") else if (tag == "ja") ("追加") else ("Add")
 
   // common.cancel
   fun common_cancel(tag: String): String =
-    if (tag == "ja") ("キャンセル") else ("Cancel")
+    if (tag == "sux-Xsux") ("𒄄") else if (tag == "ja") ("キャンセル") else ("Cancel")
 
   // common.clear
   fun common_clear(tag: String): String =
-    if (tag == "ja") ("クリア") else ("Clear")
+    if (tag == "sux-Xsux") ("𒃻") else if (tag == "ja") ("クリア") else ("Clear")
 
   // common.close
   fun common_close(tag: String): String =
-    if (tag == "ja") ("閉じる") else ("Close")
+    if (tag == "sux-Xsux") ("𒉡𒅅") else if (tag == "ja") ("閉じる") else ("Close")
 
   // common.copy
   fun common_copy(tag: String): String =
-    if (tag == "ja") ("コピー") else ("Copy")
+    if (tag == "sux-Xsux") ("𒃮𒊑") else if (tag == "ja") ("コピー") else ("Copy")
 
   // common.create
   fun common_create(tag: String): String =
-    if (tag == "ja") ("作成") else ("Create")
+    if (tag == "sux-Xsux") ("𒆕") else if (tag == "ja") ("作成") else ("Create")
 
   // common.delete
   fun common_delete(tag: String): String =
-    if (tag == "ja") ("削除") else ("Delete")
+    if (tag == "sux-Xsux") ("𒋗𒅆𒌨") else if (tag == "ja") ("削除") else ("Delete")
 
   // common.finish
   fun common_finish(tag: String): String =
-    if (tag == "ja") ("完了") else ("Finish")
+    if (tag == "sux-Xsux") ("𒌀") else if (tag == "ja") ("完了") else ("Finish")
 
   // common.go
   fun common_go(tag: String): String =
-    if (tag == "ja") ("移動") else ("Go")
+    if (tag == "sux-Xsux") ("𒁺") else if (tag == "ja") ("移動") else ("Go")
 
   // common.hide
   fun common_hide(tag: String): String =
-    if (tag == "ja") ("隠す") else ("Hide")
+    if (tag == "sux-Xsux") ("𒀉𒌫𒆪") else if (tag == "ja") ("隠す") else ("Hide")
 
   // common.more
   fun common_more(tag: String): String =
-    if (tag == "ja") ("さらに表示") else ("More")
+    if (tag == "sux-Xsux") ("𒃲") else if (tag == "ja") ("さらに表示") else ("More")
 
   // common.refresh
   fun common_refresh(tag: String): String =
-    if (tag == "ja") ("更新") else ("Refresh")
+    if (tag == "sux-Xsux") ("𒉋") else if (tag == "ja") ("更新") else ("Refresh")
 
   // common.reload
   fun common_reload(tag: String): String =
-    if (tag == "ja") ("再読み込み") else ("Reload")
+    if (tag == "sux-Xsux") ("𒉋") else if (tag == "ja") ("再読み込み") else ("Reload")
 
   // common.run
   fun common_run(tag: String): String =
-    if (tag == "ja") ("実行") else ("Run")
+    if (tag == "sux-Xsux") ("𒁺") else if (tag == "ja") ("実行") else ("Run")
 
   // common.save
   fun common_save(tag: String): String =
-    if (tag == "ja") ("保存") else ("Save")
+    if (tag == "sux-Xsux") ("𒁾 𒊬") else if (tag == "ja") ("保存") else ("Save")
 
   // common.show
   fun common_show(tag: String): String =
-    if (tag == "ja") ("表示") else ("Show")
+    if (tag == "sux-Xsux") ("𒅆") else if (tag == "ja") ("表示") else ("Show")
 
   // composer.attach
   fun composer_attach(tag: String): String =
-    if (tag == "ja") ("添付") else ("Attach")
+    if (tag == "sux-Xsux") ("𒆷") else if (tag == "ja") ("添付") else ("Attach")
 
   // composer.model.tip
   fun composer_model_tip(tag: String): String =
-    if (tag == "ja") ("モデルと推論の強さを選択") else ("Choose the model and effort")
+    if (tag == "sux-Xsux") ("𒅆𒈽") else if (tag == "ja") ("モデルと推論の強さを選択") else ("Choose the model and effort")
 
   // composer.send
   fun composer_send(tag: String): String =
-    if (tag == "ja") ("送信") else ("Send")
+    if (tag == "sux-Xsux") ("𒅗𒁉") else if (tag == "ja") ("送信") else ("Send")
 
   // composer.stop
   fun composer_stop(tag: String): String =
-    if (tag == "ja") ("停止") else ("Stop")
+    if (tag == "sux-Xsux") ("𒉡𒁺") else if (tag == "ja") ("停止") else ("Stop")
 
   // files.back.tip
   fun files_back_tip(tag: String): String =
-    if (tag == "ja") ("フォルダに戻る") else ("Back to the folder")
+    if (tag == "sux-Xsux") ("𒄄") else if (tag == "ja") ("フォルダに戻る") else ("Back to the folder")
 
   // files.changed
   fun files_changed(tag: String, arg0: ULong): String =
-    if (tag == "ja") ((if (arg0 == 0uL) "変更なし" else "変更ファイル" + number(arg0) + "件")) else ((if (arg0 == 0uL) "No files changed" else (if (arg0 == 1uL) number(arg0) + " file changed" else number(arg0) + " files changed")))
+    if (tag == "sux-Xsux") ((if (arg0 == 0uL) "𒉡 𒁾 𒄄" else number(arg0) + " 𒁾 𒄄")) else if (tag == "ja") ((if (arg0 == 0uL) "変更なし" else "変更ファイル" + number(arg0) + "件")) else ((if (arg0 == 0uL) "No files changed" else (if (arg0 == 1uL) number(arg0) + " file changed" else number(arg0) + " files changed")))
 
   // google.client.own
   fun google_client_own(tag: String): String =
-    if (tag == "ja") ("独自クライアント") else ("Own client")
+    if (tag == "sux-Xsux") ("Own client") else if (tag == "ja") ("独自クライアント") else ("Own client")
 
   // google.client.save
   fun google_client_save(tag: String): String =
-    if (tag == "ja") ("クライアントを保存") else ("Save client")
+    if (tag == "sux-Xsux") ("𒁾 𒊬") else if (tag == "ja") ("クライアントを保存") else ("Save client")
 
   // google.client.secret
   fun google_client_secret(tag: String): String =
-    if (tag == "ja") ("クライアントシークレット") else ("Client secret")
+    if (tag == "sux-Xsux") ("Client secret") else if (tag == "ja") ("クライアントシークレット") else ("Client secret")
 
   // google.connect
   fun google_connect(tag: String): String =
-    if (tag == "ja") ("Googleに接続") else ("Connect Google")
+    if (tag == "sux-Xsux") ("Google 𒆷") else if (tag == "ja") ("Googleに接続") else ("Connect Google")
 
   // google.open
   fun google_open(tag: String): String =
-    if (tag == "ja") ("Googleのサインインを開く") else ("Open Google sign-in")
+    if (tag == "sux-Xsux") ("Google 𒆷 𒅅") else if (tag == "ja") ("Googleのサインインを開く") else ("Open Google sign-in")
 
   // google.signature
   fun google_signature(tag: String): String =
-    if (tag == "ja") ("署名") else ("Signature")
+    if (tag == "sux-Xsux") ("Signature") else if (tag == "ja") ("署名") else ("Signature")
 
   // google.signature.placeholder
   fun google_signature_placeholder(tag: String, arg0: String): String =
-    if (tag == "ja") ("— " + arg0 + "に代わりBackplaneから送信") else ("— Sent by Backplane on behalf of " + arg0)
+    if (tag == "sux-Xsux") ("— Sent by Backplane on behalf of " + arg0) else if (tag == "ja") ("— " + arg0 + "に代わりBackplaneから送信") else ("— Sent by Backplane on behalf of " + arg0)
 
   // history.live
   fun history_live(tag: String): String =
-    if (tag == "ja") ("現在") else ("Live")
+    if (tag == "sux-Xsux") ("𒅅") else if (tag == "ja") ("現在") else ("Live")
 
   // history.new.label
   fun history_new_label(tag: String, arg0: String): String =
-    if (tag == "ja") ("新版：" + arg0) else ("New: " + arg0)
+    if (tag == "sux-Xsux") ("𒉋: " + arg0) else if (tag == "ja") ("新版：" + arg0) else ("New: " + arg0)
 
   // history.old.label
   fun history_old_label(tag: String, arg0: String): String =
-    if (tag == "ja") ("旧版：" + arg0) else ("Old: " + arg0)
+    if (tag == "sux-Xsux") ("𒌀: " + arg0) else if (tag == "ja") ("旧版：" + arg0) else ("Old: " + arg0)
 
   // history.pause
   fun history_pause(tag: String): String =
-    if (tag == "ja") ("一時停止") else ("Pause")
+    if (tag == "sux-Xsux") ("𒉡𒁺") else if (tag == "ja") ("一時停止") else ("Pause")
 
   // history.step.label
   fun history_step_label(tag: String, arg0: String): String =
-    if (tag == "ja") ("変更" + arg0) else ("Step " + arg0)
+    if (tag == "sux-Xsux") ("𒄊 " + arg0) else if (tag == "ja") ("変更" + arg0) else ("Step " + arg0)
 
   // hooks.revoke
   fun hooks_revoke(tag: String): String =
-    if (tag == "ja") ("取り消す") else ("Revoke")
+    if (tag == "sux-Xsux") ("𒉡𒆷") else if (tag == "ja") ("取り消す") else ("Revoke")
 
   // machines.invite
   fun machines_invite(tag: String): String =
-    if (tag == "ja") ("招待") else ("Invite")
+    if (tag == "sux-Xsux") ("𒆷") else if (tag == "ja") ("招待") else ("Invite")
 
   // machines.unlink
   fun machines_unlink(tag: String): String =
-    if (tag == "ja") ("リンク解除") else ("Unlink")
+    if (tag == "sux-Xsux") ("𒉡𒆷") else if (tag == "ja") ("リンク解除") else ("Unlink")
 
   // mech.create
   fun mech_create(tag: String): String =
-    if (tag == "ja") ("レンダリングを作成") else ("Create renders")
+    if (tag == "sux-Xsux") ("𒆕") else if (tag == "ja") ("レンダリングを作成") else ("Create renders")
 
   // menu.unpin
   fun menu_unpin(tag: String): String =
-    if (tag == "ja") ("ピン留めを解除") else ("Unpin")
+    if (tag == "sux-Xsux") ("𒂊") else if (tag == "ja") ("ピン留めを解除") else ("Unpin")
 
   // native.attach.paste
   fun native_attach_paste(tag: String): String =
-    if (tag == "ja") ("画像を貼り付け") else ("Paste image")
+    if (tag == "sux-Xsux") ("𒃻 𒅆") else if (tag == "ja") ("画像を貼り付け") else ("Paste image")
 
   // native.attach.photos
   fun native_attach_photos(tag: String): String =
-    if (tag == "ja") ("写真") else ("Photos")
+    if (tag == "sux-Xsux") ("𒅆𒅆") else if (tag == "ja") ("写真") else ("Photos")
 
   // native.bot.create.hint
   fun native_bot_create_hint(tag: String): String =
-    if (tag == "ja") ("＋ボタンで作成できます。") else ("Make one with the plus button.")
+    if (tag == "sux-Xsux") ("𒇽 𒆕") else if (tag == "ja") ("＋ボタンで作成できます。") else ("Make one with the plus button.")
 
   // native.bot.create.menu
   fun native_bot_create_menu(tag: String): String =
-    if (tag == "ja") ("ボット・ルームを作成") else ("New bot or room")
+    if (tag == "sux-Xsux") ("𒇽 𒂍 𒉋") else if (tag == "ja") ("ボット・ルームを作成") else ("New bot or room")
 
   // native.bot.createon
   fun native_bot_createon(tag: String, arg0: String, arg1: String, arg2: String): String =
-    if (tag == "ja") ((if (arg0 == "room") "ルームを作成" else "ボットを作成") + (if (arg1 == "hub") "（" + arg2 + "）" else "")) else ((if (arg0 == "room") "New room" else "New bot") + (if (arg1 == "hub") " on " + arg2 else ""))
+    if (tag == "sux-Xsux") ((if (arg0 == "room") "𒂍 𒉋" else "𒇽 𒉋") + (if (arg1 == "hub") " 𒂍 " + arg2 else "")) else if (tag == "ja") ((if (arg0 == "room") "ルームを作成" else "ボットを作成") + (if (arg1 == "hub") "（" + arg2 + "）" else "")) else ((if (arg0 == "room") "New room" else "New bot") + (if (arg1 == "hub") " on " + arg2 else ""))
 
   // native.bot.delete.ask
   fun native_bot_delete_ask(tag: String, arg0: String): String =
-    if (tag == "ja") (arg0 + "を削除しますか？") else ("Delete " + arg0 + "?")
+    if (tag == "sux-Xsux") ("𒇽 " + arg0 + " 𒋗𒅆𒌨?") else if (tag == "ja") (arg0 + "を削除しますか？") else ("Delete " + arg0 + "?")
 
   // native.bot.empty
   fun native_bot_empty(tag: String): String =
-    if (tag == "ja") ("ボットなし") else ("No bots yet")
+    if (tag == "sux-Xsux") ("𒉡𒇽") else if (tag == "ja") ("ボットなし") else ("No bots yet")
 
   // native.bot.memory.empty
   fun native_bot_memory_empty(tag: String): String =
-    if (tag == "ja") ("記憶なし") else ("Nothing remembered")
+    if (tag == "sux-Xsux") ("𒉡𒋛") else if (tag == "ja") ("記憶なし") else ("Nothing remembered")
 
   // native.bot.message
   fun native_bot_message(tag: String): String =
-    if (tag == "ja") ("メッセージ") else ("Message")
+    if (tag == "sux-Xsux") ("𒅗") else if (tag == "ja") ("メッセージ") else ("Message")
 
   // native.bot.messages.empty
   fun native_bot_messages_empty(tag: String): String =
-    if (tag == "ja") ("メッセージなし") else ("No messages")
+    if (tag == "sux-Xsux") ("𒉡𒅗") else if (tag == "ja") ("メッセージなし") else ("No messages")
 
   // native.bot.provider
   fun native_bot_provider(tag: String): String =
-    if (tag == "ja") ("プロバイダー") else ("Provider")
+    if (tag == "sux-Xsux") ("𒇽") else if (tag == "ja") ("プロバイダー") else ("Provider")
 
   // native.browser.empty
   fun native_browser_empty(tag: String): String =
-    if (tag == "ja") ("ページなし") else ("No page yet")
+    if (tag == "sux-Xsux") ("𒉡 𒆠") else if (tag == "ja") ("ページなし") else ("No page yet")
 
   // native.browser.screenshot
   fun native_browser_screenshot(tag: String): String =
-    if (tag == "ja") ("スクリーンショット") else ("Screenshot")
+    if (tag == "sux-Xsux") ("𒅆𒅆") else if (tag == "ja") ("スクリーンショット") else ("Screenshot")
 
   // native.browser.typing
   fun native_browser_typing(tag: String): String =
-    if (tag == "ja") ("ページに入力") else ("Type into the page")
+    if (tag == "sux-Xsux") ("𒅗 𒊬") else if (tag == "ja") ("ページに入力") else ("Type into the page")
 
   // native.common.ok
   fun native_common_ok(tag: String): String =
-    if (tag == "ja") ("OK") else ("OK")
+    if (tag == "sux-Xsux") ("𒅅") else if (tag == "ja") ("OK") else ("OK")
 
   // native.common.title
   fun native_common_title(tag: String): String =
-    if (tag == "ja") ("タイトル") else ("Title")
+    if (tag == "sux-Xsux") ("𒈬") else if (tag == "ja") ("タイトル") else ("Title")
 
   // native.composer.btw
   fun native_composer_btw(tag: String, arg0: String): String =
-    if (tag == "ja") ("btw・" + arg0) else ("btw · " + arg0)
+    if (tag == "sux-Xsux") ("btw · " + arg0) else if (tag == "ja") ("btw・" + arg0) else ("btw · " + arg0)
 
   // native.composer.remove
   fun native_composer_remove(tag: String, arg0: String): String =
-    if (tag == "ja") (arg0 + "を外す") else ("Remove " + arg0)
+    if (tag == "sux-Xsux") ("𒂊 " + arg0) else if (tag == "ja") (arg0 + "を外す") else ("Remove " + arg0)
 
   // native.composer.suggestions.close
   fun native_composer_suggestions_close(tag: String): String =
-    if (tag == "ja") ("候補を閉じる") else ("Close suggestions")
+    if (tag == "sux-Xsux") ("𒉡𒅅") else if (tag == "ja") ("候補を閉じる") else ("Close suggestions")
 
   // native.diff.revert.ask
   fun native_diff_revert_ask(tag: String): String =
-    if (tag == "ja") ("ファイルをこのスレッドの開始時点に戻しますか？") else ("Put the files back as they were when this thread began?")
+    if (tag == "sux-Xsux") ("Put the files back as they were when this thread began?") else if (tag == "ja") ("ファイルをこのスレッドの開始時点に戻しますか？") else ("Put the files back as they were when this thread began?")
 
   // native.entry.fold
   fun native_entry_fold(tag: String, arg0: String, arg1: String): String =
-    if (tag == "ja") ((if (arg0 == "open") arg1 + "を隠す" else arg1 + "を表示")) else ((if (arg0 == "open") "Hide " + arg1 else "Show " + arg1))
+    if (tag == "sux-Xsux") ((if (arg0 == "open") "𒉡𒅆 " + arg1 else "𒅆 " + arg1)) else if (tag == "ja") ((if (arg0 == "open") arg1 + "を隠す" else arg1 + "を表示")) else ((if (arg0 == "open") "Hide " + arg1 else "Show " + arg1))
 
   // native.entry.viewer
   fun native_entry_viewer(tag: String, arg0: String): String =
-    if (tag == "ja") ("ビューアーで表示：" + arg0) else ("Show in the viewer: " + arg0)
+    if (tag == "sux-Xsux") ("𒅆 " + arg0) else if (tag == "ja") ("ビューアーで表示：" + arg0) else ("Show in the viewer: " + arg0)
 
   // native.entry.viewer.short
   fun native_entry_viewer_short(tag: String): String =
-    if (tag == "ja") ("ビューアーで表示") else ("Show in the viewer")
+    if (tag == "sux-Xsux") ("𒅆") else if (tag == "ja") ("ビューアーで表示") else ("Show in the viewer")
 
   // native.file.image.unsupported
   fun native_file_image_unsupported(tag: String): String =
-    if (tag == "ja") ("この画像は表示できません") else ("This image cannot be shown here")
+    if (tag == "sux-Xsux") ("𒉡𒅆 𒅆 𒆠") else if (tag == "ja") ("この画像は表示できません") else ("This image cannot be shown here")
 
   // native.file.page
   fun native_file_page(tag: String, arg0: String): String =
-    if (tag == "ja") (arg0 + "ページ") else ("Page " + arg0)
+    if (tag == "sux-Xsux") ("𒁾 " + arg0) else if (tag == "ja") (arg0 + "ページ") else ("Page " + arg0)
 
   // native.file.pdf.error
   fun native_file_pdf_error(tag: String, arg0: String, arg1: String): String =
-    if (tag == "ja") ((if (arg0 == "send") "ハブからPDFを取得できません（12 MBを超えている可能性があります）" else (if (arg0 == "http") "ハブの応答：" + arg1 else "このPDFは表示できません"))) else ((if (arg0 == "send") "The hub could not send this PDF (it may be over 12 MB)" else (if (arg0 == "http") "The hub answered " + arg1 else "This PDF cannot be shown here")))
+    if (tag == "sux-Xsux") ((if (arg0 == "send") "𒉡𒋧 𒁾" else (if (arg0 == "http") "𒂍 " + arg1 else "𒉡𒅆 𒁾"))) else if (tag == "ja") ((if (arg0 == "send") "ハブからPDFを取得できません（12 MBを超えている可能性があります）" else (if (arg0 == "http") "ハブの応答：" + arg1 else "このPDFは表示できません"))) else ((if (arg0 == "send") "The hub could not send this PDF (it may be over 12 MB)" else (if (arg0 == "http") "The hub answered " + arg1 else "This PDF cannot be shown here")))
 
   // native.find.empty
   fun native_find_empty(tag: String): String =
-    if (tag == "ja") ("該当なし") else ("Nothing found")
+    if (tag == "sux-Xsux") ("𒉡𒆠") else if (tag == "ja") ("該当なし") else ("Nothing found")
 
   // native.find.file.hint
   fun native_find_file_hint(tag: String): String =
-    if (tag == "ja") ("ファイル名を入力") else ("Type to find a file")
+    if (tag == "sux-Xsux") ("𒁾 𒆥") else if (tag == "ja") ("ファイル名を入力") else ("Type to find a file")
 
   // native.find.file.label
   fun native_find_file_label(tag: String): String =
-    if (tag == "ja") ("ファイル名") else ("File name")
+    if (tag == "sux-Xsux") ("𒁾 𒈬") else if (tag == "ja") ("ファイル名") else ("File name")
 
   // native.find.threads.hint
   fun native_find_threads_hint(tag: String): String =
-    if (tag == "ja") ("検索語を入力") else ("Type to search threads")
+    if (tag == "sux-Xsux") ("𒅗 𒆥") else if (tag == "ja") ("検索語を入力") else ("Type to search threads")
 
   // native.find.threads.label
   fun native_find_threads_label(tag: String): String =
-    if (tag == "ja") ("タイトル・メッセージ") else ("Titles and messages")
+    if (tag == "sux-Xsux") ("𒅗𒅗") else if (tag == "ja") ("タイトル・メッセージ") else ("Titles and messages")
 
   // native.google.client.hide
   fun native_google_client_hide(tag: String): String =
-    if (tag == "ja") ("独自クライアントを隠す") else ("Hide own client")
+    if (tag == "sux-Xsux") ("Client 𒀉𒌫𒆪") else if (tag == "ja") ("独自クライアントを隠す") else ("Hide own client")
 
   // native.google.client.id
   fun native_google_client_id(tag: String): String =
-    if (tag == "ja") ("クライアントID（デスクトップアプリ）") else ("Client ID (Desktop app)")
+    if (tag == "sux-Xsux") ("Client ID (Desktop app)") else if (tag == "ja") ("クライアントID（デスクトップアプリ）") else ("Client ID (Desktop app)")
 
   // native.google.redirect
   fun native_google_redirect(tag: String): String =
-    if (tag == "ja") ("リダイレクト先のURL") else ("Redirected URL")
+    if (tag == "sux-Xsux") ("Redirected URL") else if (tag == "ja") ("リダイレクト先のURL") else ("Redirected URL")
 
   // native.history.first
   fun native_history_first(tag: String): String =
-    if (tag == "ja") ("最初のステップ") else ("First step")
+    if (tag == "sux-Xsux") ("𒉋") else if (tag == "ja") ("最初のステップ") else ("First step")
 
   // native.history.last
   fun native_history_last(tag: String): String =
-    if (tag == "ja") ("最後のステップ") else ("Last step")
+    if (tag == "sux-Xsux") ("𒌀") else if (tag == "ja") ("最後のステップ") else ("Last step")
 
   // native.history.livefile
   fun native_history_livefile(tag: String): String =
-    if (tag == "ja") ("現在のファイル") else ("Live file")
+    if (tag == "sux-Xsux") ("𒁾 𒅅") else if (tag == "ja") ("現在のファイル") else ("Live file")
 
   // native.history.next
   fun native_history_next(tag: String): String =
-    if (tag == "ja") ("次のステップ") else ("Next step")
+    if (tag == "sux-Xsux") ("𒉋") else if (tag == "ja") ("次のステップ") else ("Next step")
 
   // native.history.play
   fun native_history_play(tag: String): String =
-    if (tag == "ja") ("再生") else ("Play")
+    if (tag == "sux-Xsux") ("𒁺") else if (tag == "ja") ("再生") else ("Play")
 
   // native.history.previous
   fun native_history_previous(tag: String): String =
-    if (tag == "ja") ("前のステップ") else ("Previous step")
+    if (tag == "sux-Xsux") ("𒄄") else if (tag == "ja") ("前のステップ") else ("Previous step")
 
   // native.history.thread
   fun native_history_thread(tag: String, arg0: String): String =
-    if (tag == "ja") ("スレッドで表示：" + arg0) else ("Show in the thread: " + arg0)
+    if (tag == "sux-Xsux") ("𒅗 𒅆 " + arg0) else if (tag == "ja") ("スレッドで表示：" + arg0) else ("Show in the thread: " + arg0)
 
   // native.history.thread.short
   fun native_history_thread_short(tag: String): String =
-    if (tag == "ja") ("スレッドで表示") else ("Show in the thread")
+    if (tag == "sux-Xsux") ("𒅗𒅆") else if (tag == "ja") ("スレッドで表示") else ("Show in the thread")
 
   // native.home.hint
   fun native_home_hint(tag: String): String =
-    if (tag == "ja") ("メインボットが要対応の作業、実行中の作業、ボット、ルーティンをまとめて把握します。") else ("Your uberbot keeps the whole picture: what needs you, what runs, your bots and routines.")
+    if (tag == "sux-Xsux") ("Your uberbot keeps the whole picture: what needs you, what runs, your bots and routines.") else if (tag == "ja") ("メインボットが要対応の作業、実行中の作業、ボット、ルーティンをまとめて把握します。") else ("Your uberbot keeps the whole picture: what needs you, what runs, your bots and routines.")
 
   // native.home.make
   fun native_home_make(tag: String): String =
-    if (tag == "ja") ("メインボットを作成") else ("Make an uberbot")
+    if (tag == "sux-Xsux") ("𒂍𒆕") else if (tag == "ja") ("メインボットを作成") else ("Make an uberbot")
 
   // native.home.none
   fun native_home_none(tag: String): String =
-    if (tag == "ja") ("メインボットなし") else ("No uberbot")
+    if (tag == "sux-Xsux") ("𒉡𒂍") else if (tag == "ja") ("メインボットなし") else ("No uberbot")
 
   // native.hook.copyurl
   fun native_hook_copyurl(tag: String): String =
-    if (tag == "ja") ("URLをコピー") else ("Copy URL")
+    if (tag == "sux-Xsux") ("𒃮𒊑 URL") else if (tag == "ja") ("URLをコピー") else ("Copy URL")
 
   // native.hook.once
   fun native_hook_once(tag: String): String =
-    if (tag == "ja") ("一度だけ表示します。") else ("Shown once.")
+    if (tag == "sux-Xsux") ("𒅆 𒁹") else if (tag == "ja") ("一度だけ表示します。") else ("Shown once.")
 
   // native.hook.secret
   fun native_hook_secret(tag: String): String =
-    if (tag == "ja") ("シークレット") else ("Secret")
+    if (tag == "sux-Xsux") ("𒀉𒌫") else if (tag == "ja") ("シークレット") else ("Secret")
 
   // native.hub.accessibility
   fun native_hub_accessibility(tag: String, arg0: String, arg1: String): String =
-    if (tag == "ja") (arg0 + "：" + arg1) else (arg0 + ": " + arg1)
+    if (tag == "sux-Xsux") (arg0 + ": " + arg1) else if (tag == "ja") (arg0 + "：" + arg1) else (arg0 + ": " + arg1)
 
   // native.hub.catchup
   fun native_hub_catchup(tag: String, arg0: String): String =
-    if (tag == "ja") ("同期中・" + arg0) else ("catching up, " + arg0)
+    if (tag == "sux-Xsux") ("𒉋, " + arg0) else if (tag == "ja") ("同期中・" + arg0) else ("catching up, " + arg0)
 
   // native.hub.changes
   fun native_hub_changes(tag: String, arg0: String): String =
-    if (tag == "ja") (arg0 + "件の変更") else (arg0 + " changes")
+    if (tag == "sux-Xsux") (arg0 + " 𒄄") else if (tag == "ja") (arg0 + "件の変更") else (arg0 + " changes")
 
   // native.hub.connection
   fun native_hub_connection(tag: String, arg0: String, arg1: String): String =
-    if (tag == "ja") (arg1 + "：" + arg0) else (arg0 + " to " + arg1)
+    if (tag == "sux-Xsux") (arg0 + " " + arg1 + " 𒆷") else if (tag == "ja") (arg1 + "：" + arg0) else (arg0 + " to " + arg1)
 
   // native.hub.heard
   fun native_hub_heard(tag: String, arg0: String): String =
-    if (tag == "ja") ("最終受信：" + arg0) else ("heard " + arg0)
+    if (tag == "sux-Xsux") ("𒅗 " + arg0) else if (tag == "ja") ("最終受信：" + arg0) else ("heard " + arg0)
 
   // native.hub.state
   fun native_hub_state(tag: String, arg0: String): String =
-    if (tag == "ja") ((if (arg0 == "online") "接続済み" else (if (arg0 == "syncing") "同期中" else (if (arg0 == "offline") "オフライン・再接続中" else "接続中")))) else ((if (arg0 == "online") "Connected" else (if (arg0 == "syncing") "Catching up" else (if (arg0 == "offline") "Offline, retrying" else "Connecting"))))
+    if (tag == "sux-Xsux") ((if (arg0 == "online") "𒆷" else (if (arg0 == "syncing") "𒉋" else (if (arg0 == "offline") "𒉡𒆷 𒄄" else "𒆷")))) else if (tag == "ja") ((if (arg0 == "online") "接続済み" else (if (arg0 == "syncing") "同期中" else (if (arg0 == "offline") "オフライン・再接続中" else "接続中")))) else ((if (arg0 == "online") "Connected" else (if (arg0 == "syncing") "Catching up" else (if (arg0 == "offline") "Offline, retrying" else "Connecting"))))
 
   // native.image.missing
   fun native_image_missing(tag: String): String =
-    if (tag == "ja") ("画像なし") else ("No image")
+    if (tag == "sux-Xsux") ("𒉡𒅆") else if (tag == "ja") ("画像なし") else ("No image")
 
   // native.image.plain
   fun native_image_plain(tag: String): String =
-    if (tag == "ja") ("画像") else ("Image")
+    if (tag == "sux-Xsux") ("𒅆") else if (tag == "ja") ("画像") else ("Image")
 
   // native.image.render
   fun native_image_render(tag: String): String =
-    if (tag == "ja") ("レンダリング画像") else ("Render")
+    if (tag == "sux-Xsux") ("𒆕") else if (tag == "ja") ("レンダリング画像") else ("Render")
 
   // native.key.down
   fun native_key_down(tag: String): String =
-    if (tag == "ja") ("下") else ("Down")
+    if (tag == "sux-Xsux") ("Down") else if (tag == "ja") ("下") else ("Down")
 
   // native.key.enter
   fun native_key_enter(tag: String): String =
-    if (tag == "ja") ("Enter") else ("Enter")
+    if (tag == "sux-Xsux") ("Enter") else if (tag == "ja") ("Enter") else ("Enter")
 
   // native.key.esc
   fun native_key_esc(tag: String): String =
-    if (tag == "ja") ("Esc") else ("Esc")
+    if (tag == "sux-Xsux") ("Esc") else if (tag == "ja") ("Esc") else ("Esc")
 
   // native.key.keyboard
   fun native_key_keyboard(tag: String): String =
-    if (tag == "ja") ("キーボード") else ("Keyboard")
+    if (tag == "sux-Xsux") ("Keyboard") else if (tag == "ja") ("キーボード") else ("Keyboard")
 
   // native.key.left
   fun native_key_left(tag: String): String =
-    if (tag == "ja") ("左") else ("Left")
+    if (tag == "sux-Xsux") ("Left") else if (tag == "ja") ("左") else ("Left")
 
   // native.key.right
   fun native_key_right(tag: String): String =
-    if (tag == "ja") ("右") else ("Right")
+    if (tag == "sux-Xsux") ("Right") else if (tag == "ja") ("右") else ("Right")
 
   // native.key.tab
   fun native_key_tab(tag: String): String =
-    if (tag == "ja") ("Tab") else ("Tab")
+    if (tag == "sux-Xsux") ("Tab") else if (tag == "ja") ("Tab") else ("Tab")
 
   // native.key.up
   fun native_key_up(tag: String): String =
-    if (tag == "ja") ("上") else ("Up")
+    if (tag == "sux-Xsux") ("Up") else if (tag == "ja") ("上") else ("Up")
 
   // native.machine.address
   fun native_machine_address(tag: String): String =
-    if (tag == "ja") ("このハブのアドレス") else ("This hub's address")
+    if (tag == "sux-Xsux") ("𒂍 𒆠") else if (tag == "ja") ("このハブのアドレス") else ("This hub's address")
 
   // native.machine.invite.copy
   fun native_machine_invite_copy(tag: String): String =
-    if (tag == "ja") ("招待をコピー") else ("Copy invite")
+    if (tag == "sux-Xsux") ("𒃮𒊑 𒆷") else if (tag == "ja") ("招待をコピー") else ("Copy invite")
 
   // native.machine.invite.paste
   fun native_machine_invite_paste(tag: String): String =
-    if (tag == "ja") ("招待を貼り付け") else ("Paste an invite")
+    if (tag == "sux-Xsux") ("𒃻 𒆷") else if (tag == "ja") ("招待を貼り付け") else ("Paste an invite")
 
   // native.mech.failed
   fun native_mech_failed(tag: String, arg0: String): String =
-    if (tag == "ja") ("レンダリング失敗：" + arg0) else ("Rendering failed: " + arg0)
+    if (tag == "sux-Xsux") ("𒆕 𒉡𒌀 " + arg0) else if (tag == "ja") ("レンダリング失敗：" + arg0) else ("Rendering failed: " + arg0)
 
   // native.notify.channel.live
   fun native_notify_channel_live(tag: String): String =
-    if (tag == "ja") ("稼働中のエージェント") else ("Agents working")
+    if (tag == "sux-Xsux") ("𒇽𒁺") else if (tag == "ja") ("稼働中のエージェント") else ("Agents working")
 
   // native.notify.channel.personal
   fun native_notify_channel_personal(tag: String): String =
-    if (tag == "ja") ("個人向け通知") else ("Personal alerts")
+    if (tag == "sux-Xsux") ("𒇽𒅗") else if (tag == "ja") ("個人向け通知") else ("Personal alerts")
 
   // native.pair.action
   fun native_pair_action(tag: String): String =
-    if (tag == "ja") ("ペアリング") else ("Pair")
+    if (tag == "sux-Xsux") ("𒆷") else if (tag == "ja") ("ペアリング") else ("Pair")
 
   // native.pair.add
   fun native_pair_add(tag: String): String =
-    if (tag == "ja") ("ハブを追加") else ("Add hub")
+    if (tag == "sux-Xsux") ("𒃻 𒂍") else if (tag == "ja") ("ハブを追加") else ("Add hub")
 
   // native.pair.another
   fun native_pair_another(tag: String): String =
-    if (tag == "ja") ("別のハブとペアリング") else ("Pair another")
+    if (tag == "sux-Xsux") ("𒆷 𒉋") else if (tag == "ja") ("別のハブとペアリング") else ("Pair another")
 
   // native.pair.computer
   fun native_pair_computer(tag: String): String =
-    if (tag == "ja") ("パソコンのBackplaneで「設定」→「ペアリングリンク」→「QRコード」を開きます。") else ("On your computer: Backplane, Settings, Pairing link, QR code.")
+    if (tag == "sux-Xsux") ("On your computer: Backplane, Settings, Pairing link, QR code.") else if (tag == "ja") ("パソコンのBackplaneで「設定」→「ペアリングリンク」→「QRコード」を開きます。") else ("On your computer: Backplane, Settings, Pairing link, QR code.")
 
   // native.pair.computer.android
   fun native_pair_computer_android(tag: String): String =
-    if (tag == "ja") ("パソコンのBackplaneで「設定」→「ペアリングリンク」→「QRコード」を開くか、リンクを貼り付けます。") else ("On your computer: Backplane, Settings, Pairing link, QR code. Or paste the link:")
+    if (tag == "sux-Xsux") ("On your computer: Backplane, Settings, Pairing link, QR code. Or paste the link:") else if (tag == "ja") ("パソコンのBackplaneで「設定」→「ペアリングリンク」→「QRコード」を開くか、リンクを貼り付けます。") else ("On your computer: Backplane, Settings, Pairing link, QR code. Or paste the link:")
 
   // native.pair.connect
   fun native_pair_connect(tag: String): String =
-    if (tag == "ja") ("接続") else ("Connect")
+    if (tag == "sux-Xsux") ("𒆷") else if (tag == "ja") ("接続") else ("Connect")
 
   // native.pair.instructions
   fun native_pair_instructions(tag: String): String =
-    if (tag == "ja") ("QRコードを読み取るか、Backplaneの「設定」→「ペアリングリンク」にあるtailnetリンクを貼り付けます。") else ("Scan the code, or paste the tailnet link Backplane shows in Settings (Pairing link).")
+    if (tag == "sux-Xsux") ("Scan the code, or paste the tailnet link Backplane shows in Settings (Pairing link).") else if (tag == "ja") ("QRコードを読み取るか、Backplaneの「設定」→「ペアリングリンク」にあるtailnetリンクを貼り付けます。") else ("Scan the code, or paste the tailnet link Backplane shows in Settings (Pairing link).")
 
   // native.pair.paired
   fun native_pair_paired(tag: String): String =
-    if (tag == "ja") ("ペアリング済み") else ("Paired")
+    if (tag == "sux-Xsux") ("𒆷") else if (tag == "ja") ("ペアリング済み") else ("Paired")
 
   // native.pair.scan
   fun native_pair_scan(tag: String): String =
-    if (tag == "ja") ("QRコードを読み取る") else ("Scan QR code")
+    if (tag == "sux-Xsux") ("𒅆 𒅗") else if (tag == "ja") ("QRコードを読み取る") else ("Scan QR code")
 
   // native.pair.scanner.denied
   fun native_pair_scanner_denied(tag: String): String =
-    if (tag == "ja") ("コードの読み取りにはカメラへのアクセスが必要です。システム設定で許可するか、リンクを貼り付けてください。") else ("Backplane needs the camera to read the code. Allow it in Settings, or paste the link instead.")
+    if (tag == "sux-Xsux") ("Backplane needs the camera to read the code. Allow it in Settings, or paste the link instead.") else if (tag == "ja") ("コードの読み取りにはカメラへのアクセスが必要です。システム設定で許可するか、リンクを貼り付けてください。") else ("Backplane needs the camera to read the code. Allow it in Settings, or paste the link instead.")
 
   // native.pair.scanner.instructions
   fun native_pair_scanner_instructions(tag: String): String =
-    if (tag == "ja") ("Backplaneの「設定」にあるQRコードにカメラを向けてください。") else ("Point the camera at the code in Backplane's Settings (QR code).")
+    if (tag == "sux-Xsux") ("Point the camera at the code in Backplane's Settings (QR code).") else if (tag == "ja") ("Backplaneの「設定」にあるQRコードにカメラを向けてください。") else ("Point the camera at the code in Backplane's Settings (QR code).")
 
   // native.pair.scanner.invalid
   fun native_pair_scanner_invalid(tag: String): String =
-    if (tag == "ja") ("Backplaneのペアリング用コードではありません") else ("Not a Backplane pairing code")
+    if (tag == "sux-Xsux") ("𒉡 Backplane QR") else if (tag == "ja") ("Backplaneのペアリング用コードではありません") else ("Not a Backplane pairing code")
 
   // native.pair.scanner.title
   fun native_pair_scanner_title(tag: String): String =
-    if (tag == "ja") ("コードを読み取る") else ("Scan code")
+    if (tag == "sux-Xsux") ("𒅆 𒅗") else if (tag == "ja") ("コードを読み取る") else ("Scan code")
 
   // native.pair.scanner.unavailable
   fun native_pair_scanner_unavailable(tag: String): String =
-    if (tag == "ja") ("読み取りにはGoogle Play開発者サービスが必要です。リンクを貼り付けてください") else ("The scanner needs Google Play services: paste the link instead")
+    if (tag == "sux-Xsux") ("The scanner needs Google Play services: paste the link instead") else if (tag == "ja") ("読み取りにはGoogle Play開発者サービスが必要です。リンクを貼り付けてください") else ("The scanner needs Google Play services: paste the link instead")
 
   // native.pair.tailnet
   fun native_pair_tailnet(tag: String): String =
-    if (tag == "ja") ("tailnet上のハブ") else ("On your tailnet")
+    if (tag == "sux-Xsux") ("On your tailnet") else if (tag == "ja") ("tailnet上のハブ") else ("On your tailnet")
 
   // native.pair.title
   fun native_pair_title(tag: String): String =
-    if (tag == "ja") ("ハブとペアリング") else ("Pair with a hub")
+    if (tag == "sux-Xsux") ("𒂍 𒆷") else if (tag == "ja") ("ハブとペアリング") else ("Pair with a hub")
 
   // native.pair.unpair
   fun native_pair_unpair(tag: String): String =
-    if (tag == "ja") ("ペアリング解除") else ("Unpair")
+    if (tag == "sux-Xsux") ("𒉡𒆷") else if (tag == "ja") ("ペアリング解除") else ("Unpair")
 
   // native.plane.card
   fun native_plane_card(tag: String, arg0: String, arg1: String): String =
-    if (tag == "ja") (arg0 + "、" + arg1) else (arg0 + ", " + arg1)
+    if (tag == "sux-Xsux") (arg0 + ", " + arg1) else if (tag == "ja") (arg0 + "、" + arg1) else (arg0 + ", " + arg1)
 
   // native.plane.more
   fun native_plane_more(tag: String, arg0: String): String =
-    if (tag == "ja") ("他" + arg0 + "件") else (arg0 + " more")
+    if (tag == "sux-Xsux") (arg0 + " 𒃲") else if (tag == "ja") ("他" + arg0 + "件") else (arg0 + " more")
 
   // native.plane.unread
   fun native_plane_unread(tag: String): String =
-    if (tag == "ja") ("未読") else ("Unread")
+    if (tag == "sux-Xsux") ("𒉡𒅗") else if (tag == "ja") ("未読") else ("Unread")
 
   // native.plane.waiting
   fun native_plane_waiting(tag: String): String =
-    if (tag == "ja") ("対応待ちなし") else ("Nothing waiting")
+    if (tag == "sux-Xsux") ("𒉡𒃻") else if (tag == "ja") ("対応待ちなし") else ("Nothing waiting")
 
   // native.review.comment
   fun native_review_comment(tag: String): String =
-    if (tag == "ja") ("コメント") else ("Comment")
+    if (tag == "sux-Xsux") ("𒅗") else if (tag == "ja") ("コメント") else ("Comment")
 
   // native.review.pin
   fun native_review_pin(tag: String, arg0: String, arg1: String): String =
-    if (tag == "ja") ("コメント" + (if (arg0 == "replies") "（返信" + arg1 + "件）" else "")) else ("Comment" + (if (arg0 == "replies") ", " + arg1 + " replies" else ""))
+    if (tag == "sux-Xsux") ("𒅗" + (if (arg0 == "replies") " · " + arg1 + " 𒅗𒅗" else "")) else if (tag == "ja") ("コメント" + (if (arg0 == "replies") "（返信" + arg1 + "件）" else "")) else ("Comment" + (if (arg0 == "replies") ", " + arg1 + " replies" else ""))
 
   // native.review.place
   fun native_review_place(tag: String, arg0: String, arg1: String): String =
-    if (tag == "ja") ("位置：" + arg0 + ", " + arg1 + " mm") else ("at " + arg0 + ", " + arg1 + " mm")
+    if (tag == "sux-Xsux") ("𒆠 " + arg0 + ", " + arg1 + " mm") else if (tag == "ja") ("位置：" + arg0 + ", " + arg1 + " mm") else ("at " + arg0 + ", " + arg1 + " mm")
 
   // native.review.resolved
   fun native_review_resolved(tag: String): String =
-    if (tag == "ja") ("解決済み") else ("Resolved")
+    if (tag == "sux-Xsux") ("𒌀") else if (tag == "ja") ("解決済み") else ("Resolved")
 
   // native.review.write
   fun native_review_write(tag: String): String =
-    if (tag == "ja") ("コメントを書く") else ("Write a note")
+    if (tag == "sux-Xsux") ("𒁾 𒊬") else if (tag == "ja") ("コメントを書く") else ("Write a note")
 
   // native.room.empty
   fun native_room_empty(tag: String): String =
-    if (tag == "ja") ("ルームなし") else ("No rooms yet")
+    if (tag == "sux-Xsux") ("𒉡𒂍") else if (tag == "ja") ("ルームなし") else ("No rooms yet")
 
   // native.room.member
   fun native_room_member(tag: String): String =
-    if (tag == "ja") ("参加中") else ("In the room")
+    if (tag == "sux-Xsux") ("𒇽") else if (tag == "ja") ("参加中") else ("In the room")
 
   // native.room.members
   fun native_room_members(tag: String): String =
-    if (tag == "ja") ("メンバー") else ("Members")
+    if (tag == "sux-Xsux") ("𒇽𒇽") else if (tag == "ja") ("メンバー") else ("Members")
 
   // native.room.post
   fun native_room_post(tag: String): String =
-    if (tag == "ja") ("ルームに投稿") else ("Post to the room")
+    if (tag == "sux-Xsux") ("𒂍 𒅗𒁉") else if (tag == "ja") ("ルームに投稿") else ("Post to the room")
 
   // native.routine.examples
   fun native_routine_examples(tag: String): String =
-    if (tag == "ja") ("daily 09:30 · tomorrow 9am · in 2h") else ("daily 09:30 · tomorrow 9am · in 2h")
+    if (tag == "sux-Xsux") ("daily 09:30 · tomorrow 9am · in 2h") else if (tag == "ja") ("daily 09:30 · tomorrow 9am · in 2h") else ("daily 09:30 · tomorrow 9am · in 2h")
 
   // native.routine.hint
   fun native_routine_hint(tag: String): String =
-    if (tag == "ja") ("スケジュール（daily 09:30、every 15m、cron）または時刻（tomorrow 9am、in 2h）") else ("A schedule (daily 09:30, every 15m, cron) or a time (tomorrow 9am, in 2h)")
+    if (tag == "sux-Xsux") ("A schedule (daily 09:30, every 15m, cron) or a time (tomorrow 9am, in 2h)") else if (tag == "ja") ("スケジュール（daily 09:30、every 15m、cron）または時刻（tomorrow 9am、in 2h）") else ("A schedule (daily 09:30, every 15m, cron) or a time (tomorrow 9am, in 2h)")
 
   // native.routine.last
   fun native_routine_last(tag: String, arg0: String): String =
-    if (tag == "ja") ("前回：" + arg0 + "前") else ("last " + arg0 + " ago")
+    if (tag == "sux-Xsux") ("𒌀 " + arg0 + " 𒄄") else if (tag == "ja") ("前回：" + arg0 + "前") else ("last " + arg0 + " ago")
 
   // native.routine.prompt
   fun native_routine_prompt(tag: String): String =
-    if (tag == "ja") ("プロンプト") else ("Prompt")
+    if (tag == "sux-Xsux") ("𒅗") else if (tag == "ja") ("プロンプト") else ("Prompt")
 
   // native.routine.timefield
   fun native_routine_timefield(tag: String): String =
-    if (tag == "ja") ("日時") else ("When")
+    if (tag == "sux-Xsux") ("𒌓") else if (tag == "ja") ("日時") else ("When")
 
   // native.routine.title
   fun native_routine_title(tag: String): String =
-    if (tag == "ja") ("ルーチン") else ("Routine")
+    if (tag == "sux-Xsux") ("𒌓 𒈬") else if (tag == "ja") ("ルーチン") else ("Routine")
 
   // native.routine.what
   fun native_routine_what(tag: String): String =
-    if (tag == "ja") ("実行する内容") else ("What to do")
+    if (tag == "sux-Xsux") ("𒅗") else if (tag == "ja") ("実行する内容") else ("What to do")
 
   // native.routines.empty
   fun native_routines_empty(tag: String): String =
-    if (tag == "ja") ("ルーチンなし") else ("No routines")
+    if (tag == "sux-Xsux") ("𒉡𒌓") else if (tag == "ja") ("ルーチンなし") else ("No routines")
 
   // native.routines.note
   fun native_routines_note(tag: String): String =
-    if (tag == "ja") ("ボットの「ルーチン」タブで作成できます。") else ("A bot's Routines tab makes them.")
+    if (tag == "sux-Xsux") ("𒇽 𒌓𒌓 𒆕") else if (tag == "ja") ("ボットの「ルーチン」タブで作成できます。") else ("A bot's Routines tab makes them.")
 
   // native.settings.about
   fun native_settings_about(tag: String): String =
-    if (tag == "ja") ("このアプリについて") else ("About")
+    if (tag == "sux-Xsux") ("𒂍 𒈬") else if (tag == "ja") ("このアプリについて") else ("About")
 
   // native.settings.behaviour
   fun native_settings_behaviour(tag: String): String =
-    if (tag == "ja") ("動作") else ("Behaviour")
+    if (tag == "sux-Xsux") ("Behaviour") else if (tag == "ja") ("動作") else ("Behaviour")
 
   // native.settings.behaviour.android
   fun native_settings_behaviour_android(tag: String): String =
-    if (tag == "ja") ("プロジェクト別、または対応待ちを優先した実行状況別に表示します。") else ("Projects groups threads by project; Active lists what is going on, what needs you first.")
+    if (tag == "sux-Xsux") ("Projects groups threads by project; Active lists what is going on, what needs you first.") else if (tag == "ja") ("プロジェクト別、または対応待ちを優先した実行状況別に表示します。") else ("Projects groups threads by project; Active lists what is going on, what needs you first.")
 
   // native.settings.behaviour.ios
   fun native_settings_behaviour_ios(tag: String): String =
-    if (tag == "ja") ("プロジェクト別、または対応待ちを優先した実行状況別に表示します。自動ではメインボットがあればホーム、それ以外はスレッドを開きます。") else ("Projects groups threads by project; Active lists what is going on, what needs you first. Automatic opens on Home with an uberbot, else Threads.")
+    if (tag == "sux-Xsux") ("Projects groups threads by project; Active lists what is going on, what needs you first. Automatic opens on Home with an uberbot, else Threads.") else if (tag == "ja") ("プロジェクト別、または対応待ちを優先した実行状況別に表示します。自動ではメインボットがあればホーム、それ以外はスレッドを開きます。") else ("Projects groups threads by project; Active lists what is going on, what needs you first. Automatic opens on Home with an uberbot, else Threads.")
 
   // native.settings.cache
   fun native_settings_cache(tag: String): String =
-    if (tag == "ja") ("キャッシュ") else ("Cache")
+    if (tag == "sux-Xsux") ("𒁾") else if (tag == "ja") ("キャッシュ") else ("Cache")
 
   // native.settings.cache.ask
   fun native_settings_cache_ask(tag: String): String =
-    if (tag == "ja") ("キャッシュを削除しますか？") else ("Clear the cached state?")
+    if (tag == "sux-Xsux") ("𒁾 𒂊?") else if (tag == "ja") ("キャッシュを削除しますか？") else ("Clear the cached state?")
 
   // native.settings.cache.clear
   fun native_settings_cache_clear(tag: String): String =
-    if (tag == "ja") ("キャッシュを削除") else ("Clear cached state")
+    if (tag == "sux-Xsux") ("𒂊") else if (tag == "ja") ("キャッシュを削除") else ("Clear cached state")
 
   // native.settings.cache.next
   fun native_settings_cache_next(tag: String): String =
-    if (tag == "ja") ("次回の起動時に各ハブの履歴を再取得します。") else ("The next launch fetches each hub's history again.")
+    if (tag == "sux-Xsux") ("The next launch fetches each hub's history again.") else if (tag == "ja") ("次回の起動時に各ハブの履歴を再取得します。") else ("The next launch fetches each hub's history again.")
 
   // native.settings.haptics
   fun native_settings_haptics(tag: String): String =
-    if (tag == "ja") ("触覚フィードバック") else ("Haptics")
+    if (tag == "sux-Xsux") ("Haptics") else if (tag == "ja") ("触覚フィードバック") else ("Haptics")
 
   // native.settings.hub
   fun native_settings_hub(tag: String): String =
-    if (tag == "ja") ("ハブ設定") else ("Hub settings")
+    if (tag == "sux-Xsux") ("𒂍 𒈬") else if (tag == "ja") ("ハブ設定") else ("Hub settings")
 
   // native.settings.hub.named
   fun native_settings_hub_named(tag: String, arg0: String): String =
-    if (tag == "ja") ("ハブ設定 · " + arg0) else ("Hub settings · " + arg0)
+    if (tag == "sux-Xsux") ("𒂍 𒈬 " + arg0) else if (tag == "ja") ("ハブ設定 · " + arg0) else ("Hub settings · " + arg0)
 
   // native.settings.hubs
   fun native_settings_hubs(tag: String): String =
-    if (tag == "ja") ("ハブ") else ("Hubs")
+    if (tag == "sux-Xsux") ("𒂍𒂍") else if (tag == "ja") ("ハブ") else ("Hubs")
 
   // native.settings.kept
   fun native_settings_kept(tag: String): String =
-    if (tag == "ja") ("保存済みの状態") else ("Kept state")
+    if (tag == "sux-Xsux") ("𒃻") else if (tag == "ja") ("保存済みの状態") else ("Kept state")
 
   // native.settings.notasked
   fun native_settings_notasked(tag: String): String =
-    if (tag == "ja") ("未確認") else ("Not asked")
+    if (tag == "sux-Xsux") ("𒉡 𒂗𒋻") else if (tag == "ja") ("未確認") else ("Not asked")
 
   // native.settings.notifications
   fun native_settings_notifications(tag: String): String =
-    if (tag == "ja") ("通知") else ("Notifications")
+    if (tag == "sux-Xsux") ("𒅗") else if (tag == "ja") ("通知") else ("Notifications")
 
   // native.settings.notify.hub
   fun native_settings_notify_hub(tag: String, arg0: String): String =
-    if (tag == "ja") ("通知する内容は" + arg0 + "で設定します。") else ("Notify me for is a setting on " + arg0 + ".")
+    if (tag == "sux-Xsux") ("Notify me for is a setting on " + arg0 + ".") else if (tag == "ja") ("通知する内容は" + arg0 + "で設定します。") else ("Notify me for is a setting on " + arg0 + ".")
 
   // native.settings.opens
   fun native_settings_opens(tag: String): String =
-    if (tag == "ja") ("起動時のタブ") else ("Opens on")
+    if (tag == "sux-Xsux") ("𒅅") else if (tag == "ja") ("起動時のタブ") else ("Opens on")
 
   // native.settings.paired
   fun native_settings_paired(tag: String, arg0: String): String =
-    if (tag == "ja") (arg0 + "台とペアリング済み") else (arg0 + " paired")
+    if (tag == "sux-Xsux") (arg0 + " 𒆷") else if (tag == "ja") (arg0 + "台とペアリング済み") else (arg0 + " paired")
 
   // native.settings.placeholder.hint
   fun native_settings_placeholder_hint(tag: String): String =
-    if (tag == "ja") ("このハブでの設定の説明。") else ("A line of what the setting does for this hub.")
+    if (tag == "sux-Xsux") ("A line of what the setting does for this hub.") else if (tag == "ja") ("このハブでの設定の説明。") else ("A line of what the setting does for this hub.")
 
   // native.settings.placeholder.name
   fun native_settings_placeholder_name(tag: String): String =
-    if (tag == "ja") ("設定名") else ("Setting name")
+    if (tag == "sux-Xsux") ("𒈬") else if (tag == "ja") ("設定名") else ("Setting name")
 
   // native.settings.placeholder.option
   fun native_settings_placeholder_option(tag: String): String =
-    if (tag == "ja") ("選択肢") else ("Option")
+    if (tag == "sux-Xsux") ("𒅗") else if (tag == "ja") ("選択肢") else ("Option")
 
   // native.settings.system
   fun native_settings_system(tag: String): String =
-    if (tag == "ja") ("システム") else ("System")
+    if (tag == "sux-Xsux") ("𒂍𒂍") else if (tag == "ja") ("システム") else ("System")
 
   // native.settings.system.open
   fun native_settings_system_open(tag: String): String =
-    if (tag == "ja") ("システム設定を開く") else ("Open system settings")
+    if (tag == "sux-Xsux") ("𒅅 𒈬𒃻") else if (tag == "ja") ("システム設定を開く") else ("Open system settings")
 
   // native.settings.system.settings
   fun native_settings_system_settings(tag: String): String =
-    if (tag == "ja") ("システム設定") else ("System settings")
+    if (tag == "sux-Xsux") ("𒈬 𒃻") else if (tag == "ja") ("システム設定") else ("System settings")
 
   // native.status.answer
   fun native_status_answer(tag: String): String =
-    if (tag == "ja") ("回答待ち") else ("Waits for an answer")
+    if (tag == "sux-Xsux") ("𒅗") else if (tag == "ja") ("回答待ち") else ("Waits for an answer")
 
   // native.status.approval
   fun native_status_approval(tag: String): String =
-    if (tag == "ja") ("承認待ち") else ("Waits for approval")
+    if (tag == "sux-Xsux") ("𒃻") else if (tag == "ja") ("承認待ち") else ("Waits for approval")
 
   // native.tab.home
   fun native_tab_home(tag: String): String =
-    if (tag == "ja") ("ホーム") else ("Home")
+    if (tag == "sux-Xsux") ("𒂍") else if (tag == "ja") ("ホーム") else ("Home")
 
   // native.task.delete.ask
   fun native_task_delete_ask(tag: String): String =
-    if (tag == "ja") ("このタスクを削除しますか？") else ("Delete this task?")
+    if (tag == "sux-Xsux") ("𒋗𒅆𒌨?") else if (tag == "ja") ("このタスクを削除しますか？") else ("Delete this task?")
 
   // native.task.note
   fun native_task_note(tag: String): String =
-    if (tag == "ja") ("大事な点を伝える") else ("Tell it what matters")
+    if (tag == "sux-Xsux") ("𒁾") else if (tag == "ja") ("大事な点を伝える") else ("Tell it what matters")
 
   // native.task.parameter
   fun native_task_parameter(tag: String, arg0: String, arg1: String): String =
-    if (tag == "ja") (arg0 + "（" + arg1 + "）") else (arg0 + " (" + arg1 + ")")
+    if (tag == "sux-Xsux") (arg0 + " (" + arg1 + ")") else if (tag == "ja") (arg0 + "（" + arg1 + "）") else (arg0 + " (" + arg1 + ")")
 
   // native.task.private
   fun native_task_private(tag: String): String =
-    if (tag == "ja") ("非公開") else ("private")
+    if (tag == "sux-Xsux") ("𒀉𒌫𒆪") else if (tag == "ja") ("非公開") else ("private")
 
   // native.task.state
   fun native_task_state(tag: String, arg0: String): String =
-    if (tag == "ja") ((if (arg0 == "ok") "完了" else (if (arg0 == "failed") "失敗" else (if (arg0 == "stopped") "停止" else arg0)))) else ((if (arg0 == "ok") "ok" else (if (arg0 == "failed") "failed" else (if (arg0 == "stopped") "stopped" else arg0))))
+    if (tag == "sux-Xsux") ((if (arg0 == "ok") "𒅅" else (if (arg0 == "failed") "𒉡𒌀" else (if (arg0 == "stopped") "𒉡𒁺" else arg0)))) else if (tag == "ja") ((if (arg0 == "ok") "完了" else (if (arg0 == "failed") "失敗" else (if (arg0 == "stopped") "停止" else arg0)))) else ((if (arg0 == "ok") "ok" else (if (arg0 == "failed") "failed" else (if (arg0 == "stopped") "stopped" else arg0))))
 
   // native.term.inactive
   fun native_term_inactive(tag: String, arg0: String): String =
-    if (tag == "ja") (arg0 + "・停止中、タップで再起動") else (arg0 + " · inactive, tap to restart")
+    if (tag == "sux-Xsux") (arg0 + " · 𒉡𒁺, 𒄄") else if (tag == "ja") (arg0 + "・停止中、タップで再起動") else (arg0 + " · inactive, tap to restart")
 
   // native.term.restart
   fun native_term_restart(tag: String): String =
-    if (tag == "ja") ("再起動") else ("Restart")
+    if (tag == "sux-Xsux") ("𒄄") else if (tag == "ja") ("再起動") else ("Restart")
 
   // native.text.copyall.action
   fun native_text_copyall_action(tag: String): String =
-    if (tag == "ja") ("すべてコピー") else ("Copy all")
+    if (tag == "sux-Xsux") ("𒅗𒊬") else if (tag == "ja") ("すべてコピー") else ("Copy all")
 
   // native.text.copyall.title
   fun native_text_copyall_title(tag: String): String =
-    if (tag == "ja") ("すべてコピー") else ("Copy All")
+    if (tag == "sux-Xsux") ("𒅗𒊬") else if (tag == "ja") ("すべてコピー") else ("Copy All")
 
   // native.text.select.action
   fun native_text_select_action(tag: String): String =
-    if (tag == "ja") ("テキストを選択") else ("Select text")
+    if (tag == "sux-Xsux") ("𒅗 𒅆𒈽") else if (tag == "ja") ("テキストを選択") else ("Select text")
 
   // native.text.select.title
   fun native_text_select_title(tag: String): String =
-    if (tag == "ja") ("テキストを選択") else ("Select Text")
+    if (tag == "sux-Xsux") ("𒅗 𒅆𒈽") else if (tag == "ja") ("テキストを選択") else ("Select Text")
 
   // native.thread.archived
   fun native_thread_archived(tag: String, arg0: String): String =
-    if (tag == "ja") ("アーカイブ" + arg0) else ("Archived " + arg0)
+    if (tag == "sux-Xsux") ("𒁾𒂍 " + arg0) else if (tag == "ja") ("アーカイブ" + arg0) else ("Archived " + arg0)
 
   // native.thread.board
   fun native_thread_board(tag: String): String =
-    if (tag == "ja") ("基板ビューアー") else ("Board viewer")
+    if (tag == "sux-Xsux") ("𒁾𒅆") else if (tag == "ja") ("基板ビューアー") else ("Board viewer")
 
   // native.thread.composer
   fun native_thread_composer(tag: String): String =
-    if (tag == "ja") ("エージェントに依頼") else ("Ask the agent")
+    if (tag == "sux-Xsux") ("𒅗𒁉") else if (tag == "ja") ("エージェントに依頼") else ("Ask the agent")
 
   // native.thread.content
   fun native_thread_content(tag: String): String =
-    if (tag == "ja") ("会話の内容") else ("Conversation content")
+    if (tag == "sux-Xsux") ("𒅗") else if (tag == "ja") ("会話の内容") else ("Conversation content")
 
   // native.thread.content.note
   fun native_thread_content_note(tag: String): String =
-    if (tag == "ja") ("最新のメッセージをここに表示します。") else ("The latest messages will appear here.")
+    if (tag == "sux-Xsux") ("𒅗𒅗 𒉋 𒆠") else if (tag == "ja") ("最新のメッセージをここに表示します。") else ("The latest messages will appear here.")
 
   // native.thread.effort
   fun native_thread_effort(tag: String): String =
-    if (tag == "ja") ("思考量") else ("Effort")
+    if (tag == "sux-Xsux") ("Effort") else if (tag == "ja") ("思考量") else ("Effort")
 
   // native.thread.effort.item
   fun native_thread_effort_item(tag: String, arg0: String): String =
-    if (tag == "ja") ("思考量：" + arg0) else ("Effort: " + arg0)
+    if (tag == "sux-Xsux") ("Effort: " + arg0) else if (tag == "ja") ("思考量：" + arg0) else ("Effort: " + arg0)
 
   // native.thread.hub
   fun native_thread_hub(tag: String): String =
-    if (tag == "ja") ("ハブ") else ("the hub")
+    if (tag == "sux-Xsux") ("𒂍") else if (tag == "ja") ("ハブ") else ("the hub")
 
   // native.thread.menu
   fun native_thread_menu(tag: String): String =
-    if (tag == "ja") ("メニュー") else ("Menu")
+    if (tag == "sux-Xsux") ("𒅗") else if (tag == "ja") ("メニュー") else ("Menu")
 
   // native.thread.model
   fun native_thread_model(tag: String): String =
-    if (tag == "ja") ("モデル") else ("Model")
+    if (tag == "sux-Xsux") ("Model") else if (tag == "ja") ("モデル") else ("Model")
 
   // native.thread.model.effort
   fun native_thread_model_effort(tag: String, arg0: String): String =
-    if (tag == "ja") ("モデル・思考量：" + arg0) else ("Model and effort: " + arg0)
+    if (tag == "sux-Xsux") ("Model and effort: " + arg0) else if (tag == "ja") ("モデル・思考量：" + arg0) else ("Model and effort: " + arg0)
 
   // native.thread.online
   fun native_thread_online(tag: String, arg0: String): String =
-    if (tag == "ja") ((if (arg0 == "online") "接続済み" else "接続中…")) else ((if (arg0 == "online") "Connected" else "Connecting…"))
+    if (tag == "sux-Xsux") ((if (arg0 == "online") "𒆷" else "𒆷…")) else if (tag == "ja") ((if (arg0 == "online") "接続済み" else "接続中…")) else ((if (arg0 == "online") "Connected" else "Connecting…"))
 
   // native.thread.provider.item
   fun native_thread_provider_item(tag: String, arg0: String): String =
-    if (tag == "ja") ("プロバイダー：" + arg0) else ("Provider: " + arg0)
+    if (tag == "sux-Xsux") ("Provider: " + arg0) else if (tag == "ja") ("プロバイダー：" + arg0) else ("Provider: " + arg0)
 
   // native.thread.search.clear
   fun native_thread_search_clear(tag: String): String =
-    if (tag == "ja") ("検索をクリア") else ("Clear search")
+    if (tag == "sux-Xsux") ("𒉡𒆥") else if (tag == "ja") ("検索をクリア") else ("Clear search")
 
   // native.thread.sending
   fun native_thread_sending(tag: String): String =
-    if (tag == "ja") ("送信中…") else ("Sending…")
+    if (tag == "sux-Xsux") ("𒋧…") else if (tag == "ja") ("送信中…") else ("Sending…")
 
   // native.thread.subagents
   fun native_thread_subagents(tag: String, arg0: String): String =
-    if (tag == "ja") ("サブエージェント：" + arg0) else ("Subagents: " + arg0)
+    if (tag == "sux-Xsux") ("𒇽𒇽: " + arg0) else if (tag == "ja") ("サブエージェント：" + arg0) else ("Subagents: " + arg0)
 
   // native.thread.waiting
   fun native_thread_waiting(tag: String, arg0: String): String =
-    if (tag == "ja") (arg0 + "を待機中…") else ("Waiting for " + arg0 + "…")
+    if (tag == "sux-Xsux") ("𒃻 " + arg0 + "…") else if (tag == "ja") (arg0 + "を待機中…") else ("Waiting for " + arg0 + "…")
 
   // native.viewer.ground.dark
   fun native_viewer_ground_dark(tag: String): String =
-    if (tag == "ja") ("背景を暗く") else ("Dark ground")
+    if (tag == "sux-Xsux") ("𒈪") else if (tag == "ja") ("背景を暗く") else ("Dark ground")
 
   // native.viewer.ground.light
   fun native_viewer_ground_light(tag: String): String =
-    if (tag == "ja") ("背景を明るく") else ("Light ground")
+    if (tag == "sux-Xsux") ("𒌓𒌓") else if (tag == "ja") ("背景を明るく") else ("Light ground")
 
   // native.viewer.metal
   fun native_viewer_metal(tag: String): String =
-    if (tag == "ja") ("このデバイスはMetalに対応していません。") else ("This device has no Metal.")
+    if (tag == "sux-Xsux") ("This device has no Metal.") else if (tag == "ja") ("このデバイスはMetalに対応していません。") else ("This device has no Metal.")
 
   // native.viewer.others
   fun native_viewer_others(tag: String): String =
-    if (tag == "ja") ("ほかのレイヤー") else ("Others")
+    if (tag == "sux-Xsux") ("𒇽𒇽") else if (tag == "ja") ("ほかのレイヤー") else ("Others")
 
   // native.viewer.parts
   fun native_viewer_parts(tag: String): String =
-    if (tag == "ja") ("部品") else ("Parts")
+    if (tag == "sux-Xsux") ("𒃲") else if (tag == "ja") ("部品") else ("Parts")
 
   // native.viewer.restore
   fun native_viewer_restore(tag: String): String =
-    if (tag == "ja") ("すべて元に戻す") else ("All back")
+    if (tag == "sux-Xsux") ("𒄄") else if (tag == "ja") ("すべて元に戻す") else ("All back")
 
   // native.viewer.sheet
   fun native_viewer_sheet(tag: String): String =
-    if (tag == "ja") ("シート") else ("Sheet")
+    if (tag == "sux-Xsux") ("𒁾") else if (tag == "ja") ("シート") else ("Sheet")
 
   // native.viewer.source
   fun native_viewer_source(tag: String): String =
-    if (tag == "ja") ("表示元") else ("Source")
+    if (tag == "sux-Xsux") ("𒆠") else if (tag == "ja") ("表示元") else ("Source")
 
   // native.viewer.standout
   fun native_viewer_standout(tag: String): String =
-    if (tag == "ja") ("強調") else ("Stand out")
+    if (tag == "sux-Xsux") ("𒅆") else if (tag == "ja") ("強調") else ("Stand out")
 
   // notify.failed
   fun notify_failed(tag: String): String =
-    if (tag == "ja") ("失敗") else ("Failed")
+    if (tag == "sux-Xsux") ("𒉡𒅅") else if (tag == "ja") ("失敗") else ("Failed")
 
   // palette.commit
   fun palette_commit(tag: String): String =
-    if (tag == "ja") ("コミットしてプッシュ") else ("Commit & push")
+    if (tag == "sux-Xsux") ("𒁾 𒊬") else if (tag == "ja") ("コミットしてプッシュ") else ("Commit & push")
 
   // palette.findfile
   fun palette_findfile(tag: String): String =
-    if (tag == "ja") ("ファイルを探す") else ("Find file")
+    if (tag == "sux-Xsux") ("𒁾 𒆥") else if (tag == "ja") ("ファイルを探す") else ("Find file")
 
   // palette.revert
   fun palette_revert(tag: String): String =
-    if (tag == "ja") ("スレッドを元に戻す") else ("Revert thread")
+    if (tag == "sux-Xsux") ("𒄄") else if (tag == "ja") ("スレッドを元に戻す") else ("Revert thread")
 
   // palette.search
   fun palette_search(tag: String): String =
-    if (tag == "ja") ("スレッドを検索") else ("Search threads")
+    if (tag == "sux-Xsux") ("𒅗 𒆥") else if (tag == "ja") ("スレッドを検索") else ("Search threads")
 
   // palette.settings
   fun palette_settings(tag: String): String =
-    if (tag == "ja") ("設定") else ("Settings")
+    if (tag == "sux-Xsux") ("𒈬 𒃻") else if (tag == "ja") ("設定") else ("Settings")
 
   // palette.terminal
   fun palette_terminal(tag: String): String =
-    if (tag == "ja") ("ターミナル") else ("Terminal")
+    if (tag == "sux-Xsux") ("𒅗") else if (tag == "ja") ("ターミナル") else ("Terminal")
 
   // plane.bots.working
   fun plane_bots_working(tag: String): String =
-    if (tag == "ja") ("稼働ボット") else ("Bots working")
+    if (tag == "sux-Xsux") ("𒇽𒁺") else if (tag == "ja") ("稼働ボット") else ("Bots working")
 
   // plane.locks
   fun plane_locks(tag: String): String =
-    if (tag == "ja") ("ロック") else ("Locks")
+    if (tag == "sux-Xsux") ("𒆷") else if (tag == "ja") ("ロック") else ("Locks")
 
   // plane.need
   fun plane_need(tag: String): String =
-    if (tag == "ja") ("対応待ち") else ("Need you")
+    if (tag == "sux-Xsux") ("𒇽") else if (tag == "ja") ("対応待ち") else ("Need you")
 
   // plane.needs
   fun plane_needs(tag: String): String =
-    if (tag == "ja") ("要対応") else ("Needs you")
+    if (tag == "sux-Xsux") ("𒇽") else if (tag == "ja") ("要対応") else ("Needs you")
 
   // plane.rooms.unread
   fun plane_rooms_unread(tag: String): String =
-    if (tag == "ja") ("未読ルーム") else ("Unread rooms")
+    if (tag == "sux-Xsux") ("𒂍𒂍 𒉡𒅗") else if (tag == "ja") ("未読ルーム") else ("Unread rooms")
 
   // plane.running
   fun plane_running(tag: String): String =
-    if (tag == "ja") ("実行中") else ("Running")
+    if (tag == "sux-Xsux") ("𒁺") else if (tag == "ja") ("実行中") else ("Running")
 
   // queue.edit
   fun queue_edit(tag: String): String =
-    if (tag == "ja") ("編集") else ("Edit")
+    if (tag == "sux-Xsux") ("𒊬") else if (tag == "ja") ("編集") else ("Edit")
 
   // review.bom
   fun review_bom(tag: String): String =
-    if (tag == "ja") ("BOM") else ("BOM")
+    if (tag == "sux-Xsux") ("BOM") else if (tag == "ja") ("BOM") else ("BOM")
 
   // review.fails
   fun review_fails(tag: String, arg0: String): String =
-    if (tag == "ja") ("不合格：" + arg0) else ("Fails: " + arg0)
+    if (tag == "sux-Xsux") ("𒉡𒌀: " + arg0) else if (tag == "ja") ("不合格：" + arg0) else ("Fails: " + arg0)
 
   // review.force
   fun review_force(tag: String): String =
-    if (tag == "ja") ("チェック失敗時もリリース") else ("Release even if checks fail")
+    if (tag == "sux-Xsux") ("Release even if checks fail") else if (tag == "ja") ("チェック失敗時もリリース") else ("Release even if checks fail")
 
   // review.passes
   fun review_passes(tag: String): String =
-    if (tag == "ja") ("合格") else ("Passes")
+    if (tag == "sux-Xsux") ("𒌀") else if (tag == "ja") ("合格") else ("Passes")
 
   // review.publish
   fun review_publish(tag: String): String =
-    if (tag == "ja") ("GitHubで公開") else ("Publish on GitHub")
+    if (tag == "sux-Xsux") ("𒅗𒃻") else if (tag == "ja") ("GitHubで公開") else ("Publish on GitHub")
 
   // review.release.make
   fun review_release_make(tag: String, arg0: String): String =
-    if (tag == "ja") ("リリース" + arg0 + "を作成") else ("Make release " + arg0)
+    if (tag == "sux-Xsux") ("𒆕 " + arg0) else if (tag == "ja") ("リリース" + arg0 + "を作成") else ("Make release " + arg0)
 
   // review.reopen
   fun review_reopen(tag: String): String =
-    if (tag == "ja") ("再開") else ("Reopen")
+    if (tag == "sux-Xsux") ("𒄄𒅅") else if (tag == "ja") ("再開") else ("Reopen")
 
   // review.reply
   fun review_reply(tag: String): String =
-    if (tag == "ja") ("返信") else ("Reply")
+    if (tag == "sux-Xsux") ("𒅗𒁉") else if (tag == "ja") ("返信") else ("Reply")
 
   // review.resolve
   fun review_resolve(tag: String): String =
-    if (tag == "ja") ("解決済みにする") else ("Resolve")
+    if (tag == "sux-Xsux") ("𒌀") else if (tag == "ja") ("解決済みにする") else ("Resolve")
 
   // room.delete
   fun room_delete(tag: String): String =
-    if (tag == "ja") ("ルームを削除") else ("Delete room")
+    if (tag == "sux-Xsux") ("𒂍 𒋗𒅆𒌨") else if (tag == "ja") ("ルームを削除") else ("Delete room")
 
   // rooms.new
   fun rooms_new(tag: String): String =
-    if (tag == "ja") ("新しいルーム") else ("New room")
+    if (tag == "sux-Xsux") ("𒂍 𒉋") else if (tag == "ja") ("新しいルーム") else ("New room")
 
   // routine.new
   fun routine_new(tag: String): String =
-    if (tag == "ja") ("新しいルーティン") else ("New routine")
+    if (tag == "sux-Xsux") ("𒉋") else if (tag == "ja") ("新しいルーティン") else ("New routine")
 
   // routine.next
   fun routine_next(tag: String, arg0: String, arg1: String, arg2: String, arg3: String, arg4: String): String =
-    if (tag == "ja") ("次回" + arg0 + (if (arg1 == "none") "" else "・" + arg2) + (if (arg3 == "none") "" else "・" + arg4)) else ("Next " + arg0 + (if (arg1 == "none") "" else " · " + arg2) + (if (arg3 == "none") "" else " · " + arg4))
+    if (tag == "sux-Xsux") ("𒉋 " + arg0 + (if (arg1 == "none") "" else " · " + arg2) + (if (arg3 == "none") "" else " · " + arg4)) else if (tag == "ja") ("次回" + arg0 + (if (arg1 == "none") "" else "・" + arg2) + (if (arg3 == "none") "" else "・" + arg4)) else ("Next " + arg0 + (if (arg1 == "none") "" else " · " + arg2) + (if (arg3 == "none") "" else " · " + arg4))
 
   // routine.run
   fun routine_run(tag: String): String =
-    if (tag == "ja") ("今すぐ実行") else ("Run now")
+    if (tag == "sux-Xsux") ("𒁺") else if (tag == "ja") ("今すぐ実行") else ("Run now")
 
   // sched.kind.reminder
   fun sched_kind_reminder(tag: String): String =
-    if (tag == "ja") ("リマインダー") else ("Reminder")
+    if (tag == "sux-Xsux") ("𒌓") else if (tag == "ja") ("リマインダー") else ("Reminder")
 
   // sched.kind.repeat
   fun sched_kind_repeat(tag: String): String =
-    if (tag == "ja") ("繰り返し") else ("Repeats")
+    if (tag == "sux-Xsux") ("𒄄") else if (tag == "ja") ("繰り返し") else ("Repeats")
 
   // settings.appearance
   fun settings_appearance(tag: String): String =
-    if (tag == "ja") ("外観") else ("Appearance")
+    if (tag == "sux-Xsux") ("𒅆") else if (tag == "ja") ("外観") else ("Appearance")
 
   // settings.lang
   fun settings_lang(tag: String): String =
-    if (tag == "ja") ("言語") else ("Language")
+    if (tag == "sux-Xsux") ("𒅴") else if (tag == "ja") ("言語") else ("Language")
 
   // settings.lang.auto
   fun settings_lang_auto(tag: String): String =
-    if (tag == "ja") ("自動") else ("Automatic")
+    if (tag == "sux-Xsux") ("Automatic") else if (tag == "ja") ("自動") else ("Automatic")
 
   // settings.lang.off
   fun settings_lang_off(tag: String): String =
-    if (tag == "ja") ("オフ") else ("Off")
+    if (tag == "sux-Xsux") ("𒉡𒅅") else if (tag == "ja") ("オフ") else ("Off")
 
   // settings.lang.on
   fun settings_lang_on(tag: String): String =
-    if (tag == "ja") ("オン") else ("On")
+    if (tag == "sux-Xsux") ("𒅅") else if (tag == "ja") ("オン") else ("On")
+
+  // settings.lang.sux
+  fun settings_lang_sux(tag: String): String =
+    if (tag == "sux-Xsux") ("𒅴𒂠") else if (tag == "ja") ("シュメール語（楔形文字）") else ("Sumerian (Cuneiform)")
 
   // settings.pair
   fun settings_pair(tag: String): String =
-    if (tag == "ja") ("ペアリングリンク") else ("Pairing link")
+    if (tag == "sux-Xsux") ("𒆷") else if (tag == "ja") ("ペアリングリンク") else ("Pairing link")
 
   // settings.sidebar
   fun settings_sidebar(tag: String): String =
-    if (tag == "ja") ("スレッド一覧") else ("Thread list")
+    if (tag == "sux-Xsux") ("𒂍𒂍") else if (tag == "ja") ("スレッド一覧") else ("Thread list")
 
   // settings.sidebar.active
   fun settings_sidebar_active(tag: String): String =
-    if (tag == "ja") ("進行中") else ("Active")
+    if (tag == "sux-Xsux") ("𒁺") else if (tag == "ja") ("進行中") else ("Active")
 
   // settings.theme.dark
   fun settings_theme_dark(tag: String): String =
-    if (tag == "ja") ("ダーク") else ("Dark")
+    if (tag == "sux-Xsux") ("𒈪") else if (tag == "ja") ("ダーク") else ("Dark")
 
   // settings.theme.light
   fun settings_theme_light(tag: String): String =
-    if (tag == "ja") ("ライト") else ("Light")
+    if (tag == "sux-Xsux") ("𒌓𒌓") else if (tag == "ja") ("ライト") else ("Light")
 
   // settings.tour
   fun settings_tour(tag: String): String =
-    if (tag == "ja") ("ツアー") else ("Tour")
+    if (tag == "sux-Xsux") ("𒅆") else if (tag == "ja") ("ツアー") else ("Tour")
 
   // settings.tour.show
   fun settings_tour_show(tag: String): String =
-    if (tag == "ja") ("ツアーを表示") else ("Show the tour")
+    if (tag == "sux-Xsux") ("𒅆") else if (tag == "ja") ("ツアーを表示") else ("Show the tour")
 
   // sidebar.add.project
   fun sidebar_add_project(tag: String): String =
-    if (tag == "ja") ("プロジェクトを追加") else ("Add project")
+    if (tag == "sux-Xsux") ("𒂍 𒃻") else if (tag == "ja") ("プロジェクトを追加") else ("Add project")
 
   // sidebar.nothing
   fun sidebar_nothing(tag: String): String =
-    if (tag == "ja") ("実行中の作業なし") else ("Nothing active")
+    if (tag == "sux-Xsux") ("𒉡𒁺") else if (tag == "ja") ("実行中の作業なし") else ("Nothing active")
 
   // sidebar.older
   fun sidebar_older(tag: String, arg0: String): String =
-    if (tag == "ja") ("以前のプロジェクト" + arg0 + "件") else ("Older " + arg0)
+    if (tag == "sux-Xsux") ("𒌀 " + arg0) else if (tag == "ja") ("以前のプロジェクト" + arg0 + "件") else ("Older " + arg0)
 
   // sidebar.settled.count
   fun sidebar_settled_count(tag: String, arg0: String): String =
-    if (tag == "ja") ("完了済み" + arg0 + "件") else ("Settled " + arg0)
+    if (tag == "sux-Xsux") ("𒌀 " + arg0) else if (tag == "ja") ("完了済み" + arg0 + "件") else ("Settled " + arg0)
 
   // teach.description
   fun teach_description(tag: String): String =
-    if (tag == "ja") ("処理内容（任意）") else ("What it does (optional)")
+    if (tag == "sux-Xsux") ("𒆕") else if (tag == "ja") ("処理内容（任意）") else ("What it does (optional)")
 
   // teach.empty
   fun teach_empty(tag: String): String =
-    if (tag == "ja") ("タスクはまだありません。ブラウザタブかチャットで教えてください。") else ("None yet. Teach one in the Browser tab, or tell it in chat.")
+    if (tag == "sux-Xsux") ("None yet. Teach one in the Browser tab, or tell it in chat.") else if (tag == "ja") ("タスクはまだありません。ブラウザタブかチャットで教えてください。") else ("None yet. Teach one in the Browser tab, or tell it in chat.")
 
   // teach.name.note
   fun teach_name_note(tag: String): String =
-    if (tag == "ja") ("名前を付けてください。毎回入力する値を指定できます。") else ("Name it. Mark a value you typed to ask for it each time the task runs.")
+    if (tag == "sux-Xsux") ("Name it. Mark a value you typed to ask for it each time the task runs.") else if (tag == "ja") ("名前を付けてください。毎回入力する値を指定できます。") else ("Name it. Mark a value you typed to ask for it each time the task runs.")
 
   // teach.note.add
   fun teach_note_add(tag: String): String =
-    if (tag == "ja") ("メモを追加") else ("Add note")
+    if (tag == "sux-Xsux") ("𒁾 𒃻") else if (tag == "ja") ("メモを追加") else ("Add note")
 
   // teach.run.note
   fun teach_run_note(tag: String): String =
-    if (tag == "ja") ("開いて実行できます。ルーティンからも実行できます。") else ("Open one to run it. A routine can run it too.")
+    if (tag == "sux-Xsux") ("𒅆 𒁺 · 𒌓 𒁺") else if (tag == "ja") ("開いて実行できます。ルーティンからも実行できます。") else ("Open one to run it. A routine can run it too.")
 
   // teach.runs
   fun teach_runs(tag: String): String =
-    if (tag == "ja") ("最近の実行") else ("Recent runs")
+    if (tag == "sux-Xsux") ("𒁺𒁺") else if (tag == "ja") ("最近の実行") else ("Recent runs")
 
   // teach.save
   fun teach_save(tag: String): String =
-    if (tag == "ja") ("このタスクを保存") else ("Save this task")
+    if (tag == "sux-Xsux") ("𒁾 𒊬") else if (tag == "ja") ("このタスクを保存") else ("Save this task")
 
   // teach.steps
   fun teach_steps(tag: String, arg0: String, arg1: String, arg2: String): String =
-    if (tag == "ja") (arg0 + "・" + arg1 + "ステップ") else (arg0 + " · " + arg1 + " " + (if (arg2 == "one") "step" else "steps"))
+    if (tag == "sux-Xsux") (arg0 + " · " + arg1 + " " + (if (arg2 == "one") "𒄊" else "𒄊")) else if (tag == "ja") (arg0 + "・" + arg1 + "ステップ") else (arg0 + " · " + arg1 + " " + (if (arg2 == "one") "step" else "steps"))
 
   // terminal.pin
   fun terminal_pin(tag: String): String =
-    if (tag == "ja") ("先頭にピン留め") else ("Pin to the top")
+    if (tag == "sux-Xsux") ("𒃻 𒆠") else if (tag == "ja") ("先頭にピン留め") else ("Pin to the top")
 
   // thread.new
   fun thread_new(tag: String): String =
-    if (tag == "ja") ("新しいスレッド") else ("New thread")
+    if (tag == "sux-Xsux") ("𒅗 𒉋") else if (tag == "ja") ("新しいスレッド") else ("New thread")
 
   // thread.subagents
   fun thread_subagents(tag: String): String =
-    if (tag == "ja") ("サブエージェント") else ("Subagents")
+    if (tag == "sux-Xsux") ("𒇽𒇽") else if (tag == "ja") ("サブエージェント") else ("Subagents")
 
   // tools.pinned
   fun tools_pinned(tag: String): String =
-    if (tag == "ja") ("固定中") else ("Pinned")
+    if (tag == "sux-Xsux") ("𒃻") else if (tag == "ja") ("固定中") else ("Pinned")
 
   // tour.back
   fun tour_back(tag: String): String =
-    if (tag == "ja") ("戻る") else ("Back")
+    if (tag == "sux-Xsux") ("𒄄") else if (tag == "ja") ("戻る") else ("Back")
 
   // tour.done
   fun tour_done(tag: String): String =
-    if (tag == "ja") ("完了") else ("Done")
+    if (tag == "sux-Xsux") ("𒌀") else if (tag == "ja") ("完了") else ("Done")
 
   // tour.title.bots
   fun tour_title_bots(tag: String): String =
-    if (tag == "ja") ("ボット") else ("Bots")
+    if (tag == "sux-Xsux") ("𒇽𒇽") else if (tag == "ja") ("ボット") else ("Bots")
 
   // tour.title.projects
   fun tour_title_projects(tag: String): String =
-    if (tag == "ja") ("プロジェクト") else ("Projects")
+    if (tag == "sux-Xsux") ("𒂍𒂍") else if (tag == "ja") ("プロジェクト") else ("Projects")
 
   // tour.title.threads
   fun tour_title_threads(tag: String): String =
-    if (tag == "ja") ("スレッド") else ("Threads")
+    if (tag == "sux-Xsux") ("𒅗𒅗") else if (tag == "ja") ("スレッド") else ("Threads")
 
   // turn.by
   fun turn_by(tag: String, arg0: String): String =
-    if (tag == "ja") ((if (arg0 == "you") "自分" else (if (arg0 == "agent") "エージェント" else "不明"))) else ((if (arg0 == "you") "You" else (if (arg0 == "agent") "Agent" else "Someone")))
+    if (tag == "sux-Xsux") ((if (arg0 == "you") "𒍝𒂊" else (if (arg0 == "agent") "𒇽 𒅗" else "𒇽"))) else if (tag == "ja") ((if (arg0 == "you") "自分" else (if (arg0 == "agent") "エージェント" else "不明"))) else ((if (arg0 == "you") "You" else (if (arg0 == "agent") "Agent" else "Someone")))
 
   // viewer.diff
   fun viewer_diff(tag: String): String =
-    if (tag == "ja") ("差分") else ("Diff")
+    if (tag == "sux-Xsux") ("𒄄") else if (tag == "ja") ("差分") else ("Diff")
 
   // viewer.diff.pr
   fun viewer_diff_pr(tag: String): String =
-    if (tag == "ja") ("PRを作成") else ("Open PR")
+    if (tag == "sux-Xsux") ("PR 𒅅") else if (tag == "ja") ("PRを作成") else ("Open PR")
 
   // viewer.files
   fun viewer_files(tag: String): String =
-    if (tag == "ja") ("ファイル") else ("Files")
+    if (tag == "sux-Xsux") ("𒁾𒁾") else if (tag == "ja") ("ファイル") else ("Files")
 
   // viewer.files.empty
   fun viewer_files_empty(tag: String): String =
-    if (tag == "ja") ("空のフォルダ") else ("This folder is empty")
+    if (tag == "sux-Xsux") ("𒉡𒁾") else if (tag == "ja") ("空のフォルダ") else ("This folder is empty")
 
   // viewer.history.added
   fun viewer_history_added(tag: String): String =
-    if (tag == "ja") ("追加") else ("Added")
+    if (tag == "sux-Xsux") ("𒃻") else if (tag == "ja") ("追加") else ("Added")
 
   // viewer.history.changed
   fun viewer_history_changed(tag: String): String =
-    if (tag == "ja") ("変更") else ("Changed")
+    if (tag == "sux-Xsux") ("𒄄") else if (tag == "ja") ("変更") else ("Changed")
 
   // viewer.history.changes
   fun viewer_history_changes(tag: String): String =
-    if (tag == "ja") ("変更") else ("Changes")
+    if (tag == "sux-Xsux") ("𒄄") else if (tag == "ja") ("変更") else ("Changes")
 
   // viewer.history.compare
   fun viewer_history_compare(tag: String): String =
-    if (tag == "ja") ("比較") else ("Compare")
+    if (tag == "sux-Xsux") ("𒅆") else if (tag == "ja") ("比較") else ("Compare")
 
   // viewer.history.compare.new
   fun viewer_history_compare_new(tag: String): String =
-    if (tag == "ja") ("比較先（新）") else ("Compare with (new)")
+    if (tag == "sux-Xsux") ("𒅆𒈽 𒉋") else if (tag == "ja") ("比較先（新）") else ("Compare with (new)")
 
   // viewer.history.compare.old
   fun viewer_history_compare_old(tag: String): String =
-    if (tag == "ja") ("比較元（旧）") else ("Compare from (old)")
+    if (tag == "sux-Xsux") ("𒅆𒈽 𒌀") else if (tag == "ja") ("比較元（旧）") else ("Compare from (old)")
 
   // viewer.history.new
   fun viewer_history_new(tag: String): String =
-    if (tag == "ja") ("新") else ("New")
+    if (tag == "sux-Xsux") ("𒉋") else if (tag == "ja") ("新") else ("New")
 
   // viewer.history.old
   fun viewer_history_old(tag: String): String =
-    if (tag == "ja") ("旧") else ("Old")
+    if (tag == "sux-Xsux") ("𒌀") else if (tag == "ja") ("旧") else ("Old")
 
   // viewer.history.ref
   fun viewer_history_ref(tag: String): String =
-    if (tag == "ja") ("コミット・ブランチ・タグ") else ("Commit, branch or tag")
+    if (tag == "sux-Xsux") ("Commit, branch or tag") else if (tag == "ja") ("コミット・ブランチ・タグ") else ("Commit, branch or tag")
 
   // viewer.history.removed
   fun viewer_history_removed(tag: String): String =
-    if (tag == "ja") ("削除") else ("Removed")
+    if (tag == "sux-Xsux") ("𒂊") else if (tag == "ja") ("削除") else ("Removed")
 
   // viewer.layers
   fun viewer_layers(tag: String): String =
-    if (tag == "ja") ("レイヤー") else ("Layers")
+    if (tag == "sux-Xsux") ("Layers") else if (tag == "ja") ("レイヤー") else ("Layers")
 
   // viewer.layers.all
   fun viewer_layers_all(tag: String): String =
-    if (tag == "ja") ("すべて") else ("All")
+    if (tag == "sux-Xsux") ("𒃲") else if (tag == "ja") ("すべて") else ("All")
 
   // viewer.layers.dim
   fun viewer_layers_dim(tag: String): String =
-    if (tag == "ja") ("薄く") else ("Dim")
+    if (tag == "sux-Xsux") ("𒉡𒅆") else if (tag == "ja") ("薄く") else ("Dim")
 
   // viewer.layers.only
   fun viewer_layers_only(tag: String): String =
-    if (tag == "ja") ("選択のみ") else ("Only")
+    if (tag == "sux-Xsux") ("𒅆") else if (tag == "ja") ("選択のみ") else ("Only")
 
   // viewer.mech.renders
   fun viewer_mech_renders(tag: String): String =
-    if (tag == "ja") ("レンダー") else ("Renders")
+    if (tag == "sux-Xsux") ("𒆕𒆕") else if (tag == "ja") ("レンダー") else ("Renders")
 
   // viewer.mention
   fun viewer_mention(tag: String): String =
-    if (tag == "ja") ("チャットで参照") else ("Mention in chat")
+    if (tag == "sux-Xsux") ("𒅗𒁉") else if (tag == "ja") ("チャットで参照") else ("Mention in chat")
 
   // viewer.solid
   fun viewer_solid(tag: String): String =
-    if (tag == "ja") ("3D") else ("3D")
+    if (tag == "sux-Xsux") ("3D") else if (tag == "ja") ("3D") else ("3D")
 
   // web.hooks.secret
   fun web_hooks_secret(tag: String): String =
-    if (tag == "ja") ("シークレット（1回のみ表示）") else ("Secret, shown once")
+    if (tag == "sux-Xsux") ("Secret, shown once") else if (tag == "ja") ("シークレット（1回のみ表示）") else ("Secret, shown once")
 
   // web.plane.idle
   fun web_plane_idle(tag: String): String =
-    if (tag == "ja") ("待機中") else ("Idle")
+    if (tag == "sux-Xsux") ("𒉡𒁺") else if (tag == "ja") ("待機中") else ("Idle")
 
   // web.terminal.pinned
   fun web_terminal_pinned(tag: String, arg0: String): String =
-    if (tag == "ja") (arg0 + "・先頭にピン留め") else (arg0 + " · pinned at the top")
+    if (tag == "sux-Xsux") (arg0 + " · 𒃻 ⬆") else if (tag == "ja") (arg0 + "・先頭にピン留め") else (arg0 + " · pinned at the top")
 }

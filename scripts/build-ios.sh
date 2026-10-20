@@ -13,6 +13,8 @@ MODE=${1:-sim}
 DIR=${BACKPLANE_MAC_DIR:-backplane-ios}
 [ -n "${BACKPLANE_SKIP_JS:-}" ] || scripts/build-mobile.sh --js
 cp mobile/build/assets/bridge.js mobile/ios/Backplane/bridge.js
+cp assets/fonts/NotoSansCuneiform-Regular.ttf mobile/ios/Backplane/
+cp assets/fonts/NOTO-CUNEIFORM-OFL.txt mobile/ios/Backplane/
 rsync -a --delete --exclude build/ --exclude authorize-mac.sh --exclude signing.env --exclude '*.p8' \
   mobile/ios/ "$MAC:$DIR/"
 ssh "$MAC" "cd $DIR && MODE=$MODE sh -s" <<'REMOTE'

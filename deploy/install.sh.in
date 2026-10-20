@@ -58,6 +58,10 @@ if [ -d "$tmp/backplane-$os-$arch/kistack" ]; then
   [ -d "$prefix/kistack" ] && mv "$prefix/kistack" "$prefix/kistack.old"
   mv "$tmp/backplane-$os-$arch/kistack" "$prefix/kistack"
 fi
+rm -rf "$prefix/fonts.old"
+[ ! -d "$prefix/fonts" ] || mv "$prefix/fonts" "$prefix/fonts.old"
+[ ! -d "$tmp/backplane-$os-$arch/fonts" ] || mv "$tmp/backplane-$os-$arch/fonts" "$prefix/fonts"
+rm -rf "$prefix/fonts.old"
 for h in backplane-browser backplane-step2glb backplane-voice LICENSE; do
   [ -e "$tmp/backplane-$os-$arch/$h" ] && mv -f "$tmp/backplane-$os-$arch/$h" "$prefix/"
 done

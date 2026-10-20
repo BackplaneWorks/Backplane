@@ -27,6 +27,10 @@
 
 #include <dlfcn.h>
 #include <stdint.h>
+#include <string.h>
+#ifdef __linux__
+#include <unistd.h>
+#endif
 
 #define FX_BIAS 32768
 
@@ -153,6 +157,7 @@ FX_FC_FNS(FX_PTR)
 static void*   fx_lib = NULL;
 static FxFace* fx_faces[256];
 static u32     fx_nfaces = 0;
+static int (*fx_FcConfigAppFontAddFile)(void*, const unsigned char*) = NULL;
 
 // FreeType, loaded and initialised once
 static __attribute__((unused)) int fx_ft_load(void) {
@@ -197,10 +202,29 @@ static __attribute__((unused)) void* fx_fc_load(void) {
     return NULL;
   }
   FX_FC_FNS(FX_SYM)
+  fx_FcConfigAppFontAddFile = (int (*)(void*, const unsigned char*))dlsym(lib, "FcConfigAppFontAddFile");
   config = fx_FcInitLoadConfigAndFonts();
   if (config == NULL) {
     return NULL;
   }
+#ifdef __linux__
+  // The package keeps its licensed cuneiform font beside the executable.
+  char exe[4096];
+  ssize_t n = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
+  if (n > 0 && n < (ssize_t)sizeof(exe) - 1) {
+    exe[n] = 0;
+    char* slash = strrchr(exe, '/');
+    if (slash != NULL) {
+      slash[1] = 0;
+      static const char font[] = "fonts/NotoSansCuneiform-Regular.ttf";
+      size_t dir = strlen(exe);
+      if (dir + sizeof(font) <= sizeof(exe) && fx_FcConfigAppFontAddFile != NULL) {
+        memcpy(exe + dir, font, sizeof(font));
+        fx_FcConfigAppFontAddFile(config, (const unsigned char*)exe);
+      }
+    }
+  }
+#endif
   state = 1;
   return config;
 }

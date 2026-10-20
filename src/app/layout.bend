@@ -1937,7 +1937,7 @@ type LiveMemo is Data:
 # Untagged snapshots and the original memo API use English. The localized
 # variant also supplies the containing timeline memo's layout identity.
 def TL.locale.tag(+tag: String) -> String:
-  Bool.pick(String, String.eq(tag, "ja"), "ja", "en")
+  Bool.pick(String, String.eq(tag, "ja"), "ja", Bool.pick(String, String.eq(tag, "sux-Xsux"), "sux-Xsux", "en"))
 
 def TL.locale(u: U.Ui) -> String:
   TL.locale.tag(U.Ui.scratch(u, "@lang.tag"))

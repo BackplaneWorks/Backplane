@@ -1786,6 +1786,7 @@ def StateWord.label(l: I.Loc, +w: String) -> String:
   match l:
     case I.En{}: w
     case I.Ja{}: StateWord.ja(w)
+    case I.Sux{}: w
 
 def Task.word(s: M.TaskState) -> String:
   match s:
@@ -3201,18 +3202,20 @@ def Ui.scratch_set(u: Ui, +k: String, v: String) -> Ui:
 def Lang.ready() -> Bool:
   False{}
 
-def Lang.normalize.k(en: Bool, ja: Bool) -> String:
-  match en ja:
-    case True{} _: "en"
-    case False{} True{}: "ja"
-    case False{} False{}: "auto"
+def Lang.normalize.k(en: Bool, ja: Bool, sux: Bool) -> String:
+  match en ja sux:
+    case True{} _ _: "en"
+    case False{} True{} _: "ja"
+    case False{} False{} True{}: "sux"
+    case False{} False{} False{}: "auto"
 
 def Lang.normalize(+s: String) -> String:
-  Lang.normalize.k(String.eq(s, "en"), String.eq(s, "ja"))
+  Lang.normalize.k(String.eq(s, "en"), String.eq(s, "ja"), Bool.or(String.eq(s, "sux"), String.eq(s, "sux-Xsux")))
 
 def Lang.resolve.k(+l: I.Loc, allow: Bool) -> String:
   match l allow:
     case I.Ja{} True{}: "ja"
+    case I.Sux{} _: "sux-Xsux"
     case _ _: "en"
 
 def Lang.resolve(setting: String, os: String, preview: Bool) -> String:
@@ -3230,8 +3233,8 @@ def Lang.apply(+u: Ui, +setting: String, +os: String) -> Ui:
 
 def Lang.offered.k(allow: Bool) -> List<&2, String>:
   match allow:
-    case True{}: ["auto", "en", "ja"]
-    case False{}: ["auto", "en"]
+    case True{}: ["auto", "en", "ja", "sux"]
+    case False{}: ["auto", "en", "sux"]
 
 def Lang.offered(+u: Ui) -> List<&2, String>:
   Lang.offered.k(Bool.or(Lang.ready(), Lang.preview(u)))
@@ -3240,14 +3243,15 @@ def Lang.label.k(k: Nat, +l: I.Loc) -> String:
   match k:
     case 0n: MSG.T.settings.lang.en(l)
     case 1n: MSG.T.settings.lang.ja(l)
+    case 2n: MSG.T.settings.lang.sux(l)
     case _: MSG.T.settings.lang.auto(l)
 
 def Lang.label(+l: I.Loc, v: String) -> String:
-  Lang.label.k(C.Codec.pos(["en", "ja"], v), l)
+  Lang.label.k(C.Codec.pos(["en", "ja", "sux"], v), l)
 
 def Lang.agent.on(u: Ui) -> Bool:
   +s = M.Setting.get(Ui.state(u), "agent.lang", "off")
-  Bool.or(String.eq(s, "en"), String.eq(s, "ja"))
+  Bool.or(Bool.or(String.eq(s, "en"), String.eq(s, "ja")), String.eq(s, "sux-Xsux"))
 
 def Lang.agent.value(on: Bool, u: Ui) -> String:
   match on:

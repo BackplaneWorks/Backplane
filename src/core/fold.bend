@@ -366,6 +366,8 @@ def Work.ago.loc(l: I.Loc, +now: Nat, +at: Nat) -> String:
       Work.ago(M.Time.ago(now, at))
     case I.Ja{}:
       I.I18n.ago.long(I.Ja{}, now, at)
+    case I.Sux{}:
+      I.I18n.ago.long(I.Sux{}, now, at)
 
 def Work.id(+u: M.Entry) -> String:
   "work:" ++ Fold.id(u)

@@ -17,6 +17,8 @@ python3 scripts/bridge-native.py mobile/build/assets/bridge.js
 python3 scripts/js-unmarshal.py hubs.Hubs mobile/build/assets/bridge.js
 # the kept state's name: the apps keep it across builds with the same types
 printf '\nglobalThis.BackplaneStateKey = "%s";\n' "$(python3 scripts/state-key.py)" >> mobile/build/assets/bridge.js
+cp assets/fonts/NotoSansCuneiform-Regular.ttf mobile/build/assets/
+cp assets/fonts/NOTO-CUNEIFORM-OFL.txt mobile/build/assets/
 echo "mobile/build/assets/bridge.js ($(wc -c < mobile/build/assets/bridge.js) bytes)"
 [ "${1:-}" = "--js" ] && exit 0
 sdk=${ANDROID_HOME:-$HOME/.local/opt/android-sdk}

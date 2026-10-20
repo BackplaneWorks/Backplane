@@ -29,6 +29,7 @@ palette.settings
 settings.appearance
 settings.lang
 settings.lang.auto
+settings.lang.sux
 settings.lang.off
 settings.lang.on
 settings.sidebar
