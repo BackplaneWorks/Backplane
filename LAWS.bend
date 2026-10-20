@@ -143,6 +143,7 @@ import ./src/core/desk.bend as DK
 import ./src/core/emb.bend as EMB
 import ./src/core/outbox.bend as OB
 import ./src/core/live.bend as LV
+import ./src/core/rpcout.bend as RPO
 import ./src/core/farlive.bend as FLV
 import ./src/core/qr.bend as QR
 import ./src/core/layers.bend as LY
@@ -2304,6 +2305,18 @@ law reset_asks_card_again:
 
 law reset_drops_results:
   {U.Ui.info(U.Ui.reset(U.Ui.info_set(U.Ui.reset(U.Ui.init(0n), U.Reset.demo("O")), "fm.list:t1", "x"), U.Reset.demo("O")), "fm.list:t1") == "" : String}
+
+# Kept requests replay in numeric request order, with their original bytes.
+# Empty entries from older saved clients are not requests.
+law client_outbox_numeric_order:
+  {RPO.RpcOut.values(Map.set(&2, String, Map.set(&2, String, Map.set(&2, String, Map.set(&2, String, Map.new(&2, String), "100", "fourth"), "9", "first"), "99", "third"), "10", "second")) == ["first", "second", "third", "fourth"] : List<&2, String>}
+
+law client_outbox_legacy_empty:
+  {RPO.RpcOut.values(Map.set(&2, String, Map.set(&2, String, Map.set(&2, String, Map.set(&2, String, Map.new(&2, String), "9", "first"), "10", ""), "100", "second"), "unknown", "")) == ["first", "second"] : List<&2, String>}
+
+law client_outbox_payload_exact:
+  for +request: String
+  {RPO.RpcOut.values(Map.set(&2, String, Map.new(&2, String), "9", request)) == Bool.pick(List<&2, String>, String.is_empty(request), [], [request]) : List<&2, String>}
 
 # a page's lines are those after since, oldest first; the walk stops at
 # the first line at or below it
