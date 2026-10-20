@@ -1,4 +1,6 @@
 import Base
+import ../core/textscale.bend as TS
+import ../core/codec.bend as C
 import ../core/title.bend as TTL
 import ../core/msgs.bend as MSG
 import ../core/kexport.bend as KEX
@@ -1242,37 +1244,75 @@ def View.lang.loc(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
 def View.lang(+u: U.Ui) -> List<&2, D.Node>:
   View.lang.loc(U.Lang.loc(u), u)
 
-def View.settings.loc(+lc: I.Loc, +u: U.Ui, +st: M.State, +nf: Map<&2, String>, +v: String, +note: String) -> D.Node:
-  +prov = M.Setting.get(st, "agent.provider", "claude")
-  +ipc = M.Setting.get(st, "kicad.ipc", "on")
-  D.El{"main", "settings", [D.At{"class", "settings-view"}], [
-    D.El{"header", "", [D.At{"class", "thread-head"}], [D.Dom.span("title", MSG.T.palette.settings(lc)), D.Dom.span("meta", ""), D.Dom.button("", "flag", "settings", MSG.T.settings.close(lc), MSG.T.common.close(lc))]},
-    D.El{"div", "", [D.At{"class", "settings"}], List.concat(&2, D.Node, [[
-      View.setrow(MSG.T.settings.settle(lc), MSG.T.settings.settle.note(lc), View.days.loc(lc, M.Setting.get(st, "settle.days", "3"))),
-      View.setrow(MSG.T.settings.restart(lc), MSG.T.settings.restart.note(lc), View.chips.loc(lc, ["on", "off"], Bool.pick(String, M.Carry.on(st), "on", "off"), "restart.continue"))],
-      View.notify(lc, st), View.agy.rows(U.Fallbackv.rows(u)),
-      [View.setrow(MSG.T.settings.provider(lc), MSG.T.settings.agents.note(lc, Bool.pick(String, String.is_empty(U.Models.cli(U.Str.get(nf, "models"), prov)), MSG.T.settings.provider.missing(lc, prov), U.Models.cli(U.Str.get(nf, "models"), prov))), View.chips.loc(lc, ["claude", "codex", "grok", "muse", "antigravity", "opencode"], prov, "agent.provider")),
-      View.setrow(MSG.T.settings.model(lc), Bool.pick(String, String.is_empty(M.Setting.get(st, "agent.model", "")), MSG.T.common.default(lc), M.Setting.get(st, "agent.model", "")) ++ ": " ++ U.Models.label_of(U.Models.of(nf, prov), prov, M.Setting.get(st, "agent.model", "")),
-        D.Dom.cat(View.menu.find(lc, U.Models.search(U.Models.menu(U.Models.of(nf, prov), prov)), U.Ui.scratch(u, "@f.mq")),
-          View.chips.loc(lc, U.Models.settings(U.Models.of(nf, prov), prov, U.Ui.scratch(u, "@f.mq"), M.Setting.get(st, "agent.model", "")), M.Setting.get(st, "agent.model", ""), "agent.model"))),
-      View.setrow(MSG.T.settings.writing.provider(lc), MSG.T.web.settings.writing.note(lc), View.chips.loc(lc, ["claude", "codex", "grok", "muse"], U.TextGen.provider(st), "text.provider")),
-      View.setrow(MSG.T.web.settings.writing.model(lc), Bool.pick(String, String.is_empty(U.TextGen.model(st)), MSG.T.common.default(lc), U.TextGen.model(st)) ++ ": " ++ U.Models.label_of(U.Str.get(nf, "models"), U.TextGen.provider(st), U.TextGen.model(st)),
-        View.chips.loc(lc, U.Models.menu(U.Str.get(nf, "models"), U.TextGen.provider(st)), U.TextGen.model(st), "text.model")),
-      View.setrow("KiCad", U.KN.summary(nf), View.kn.path.loc(lc, u) <> View.kn.loc(lc, U.KN.of(nf, st), False{})),
-      View.setrow(U.FreeCAD.label.loc(lc, nf), U.FreeCAD.note(lc, nf), Nil{}),
-      View.setrow(U.KiCad.ipc.label(lc, nf), U.KiCad.ipc.note(lc, nf), Bool.pick(List<&2, D.Node>, U.KiCad.ipc.ready(nf), View.chips.loc(lc, ["on", "off"], ipc, "kicad.ipc"), Nil{})),
-      View.setrow(U.Fab.set.order.label(), U.Fab.set.order.note(), View.chips.loc(lc, ["on", "off"], U.Fab.set.enabled(st), "order.enabled")),
-      View.setrow(U.Fab.set.label(), U.Fab.set.note.k(U.Fab.enabled(st)), Bool.pick(List<&2, D.Node>, U.Fab.enabled(st), View.chips.loc(lc, ["on", "off"], U.Fab.set.on(st), "order.estimates"), Nil{})),
-      View.setrow(MSG.T.settings.theme(lc), MSG.T.settings.theme.note(lc), View.chips.loc(lc, ["dark", "light"], Bool.pick(String, String.eq(M.Setting.get(st, "ui.theme", ""), "light"), "light", "dark"), "ui.theme"))], View.lang.loc(lc, u), [
-      View.setrow(MSG.T.settings.sidebar(lc), MSG.T.settings.sidebar.note(lc), View.chips.loc(lc, ["projects", "active"], U.Side.view(st), "sidebar.view")),
+def View.settings.scale(vs: List<&2, String>, +cur: U32) -> List<&2, D.Node>:
+  match vs:
+    case Nil{}: Nil{}
+    case +v <> t:
+      D.Dom.button(Bool.pick(String, U32.is_eq(TS.Scale.read(v), cur), "on", ""), "setting", "ui.text_scale=" ++ v, TS.Scale.label(v), TS.Scale.label(v)) <> View.settings.scale(t, cur)
 
-      View.setrow(U.Tail.label(lc, nf), U.Tail.note(lc, nf), Nil{})],
+def View.settings.rows.k(i: Nat, +lc: I.Loc, +u: U.Ui, +st: M.State, +nf: Map<&2, String>, +v: String, +note: String, +prov: String, +ipc: String) -> List<&2, D.Node>:
+  match i:
+    case 0n: List.concat(&2, D.Node, [[View.setrow(MSG.T.settings.theme(lc), MSG.T.settings.theme.note(lc), View.chips.loc(lc, ["dark", "light"], Bool.pick(String, String.eq(M.Setting.get(st, "ui.theme", ""), "light"), "light", "dark"), "ui.theme"))],
+      View.lang.loc(lc, u),
+      [View.setrow(MSG.T.settings.sidebar(lc), MSG.T.settings.sidebar.note(lc), View.chips.loc(lc, ["projects", "active"], U.Side.view(st), "sidebar.view"))],
+      [View.setrow(MSG.T.settings.textsize(lc), MSG.T.settings.textsize.note(lc), View.settings.scale(TS.Scale.options(), TS.Scale.of(st)))]])
+    case 1n: List.concat(&2, D.Node, [[View.setrow(MSG.T.settings.settle(lc), MSG.T.settings.settle.note(lc), View.days.loc(lc, M.Setting.get(st, "settle.days", "3")))],
+      [View.setrow(MSG.T.settings.restart(lc), MSG.T.settings.restart.note(lc), View.chips.loc(lc, ["on", "off"], Bool.pick(String, M.Carry.on(st), "on", "off"), "restart.continue"))],
+      View.notify(lc, st),
+      View.agy.rows(U.Fallbackv.rows(u))])
+    case 2n: List.concat(&2, D.Node, [[View.setrow(MSG.T.settings.provider(lc), MSG.T.settings.agents.note(lc, Bool.pick(String, String.is_empty(U.Models.cli(U.Str.get(nf, "models"), prov)), MSG.T.settings.provider.missing(lc, prov), U.Models.cli(U.Str.get(nf, "models"), prov))), View.chips.loc(lc, ["claude", "codex", "grok", "muse", "antigravity", "opencode"], prov, "agent.provider"))],
+      [View.setrow(MSG.T.settings.model(lc), Bool.pick(String, String.is_empty(M.Setting.get(st, "agent.model", "")), MSG.T.common.default(lc), M.Setting.get(st, "agent.model", "")) ++ ": " ++ U.Models.label_of(U.Models.of(nf, prov), prov, M.Setting.get(st, "agent.model", "")),
+        D.Dom.cat(View.menu.find(lc, U.Models.search(U.Models.menu(U.Models.of(nf, prov), prov)), U.Ui.scratch(u, "@f.mq")),
+          View.chips.loc(lc, U.Models.settings(U.Models.of(nf, prov), prov, U.Ui.scratch(u, "@f.mq"), M.Setting.get(st, "agent.model", "")), M.Setting.get(st, "agent.model", ""), "agent.model")))]])
+    case 3n: List.concat(&2, D.Node, [[View.setrow(MSG.T.settings.writing.provider(lc), MSG.T.web.settings.writing.note(lc), View.chips.loc(lc, ["claude", "codex", "grok", "muse"], U.TextGen.provider(st), "text.provider"))],
+      [View.setrow(MSG.T.web.settings.writing.model(lc), Bool.pick(String, String.is_empty(U.TextGen.model(st)), MSG.T.common.default(lc), U.TextGen.model(st)) ++ ": " ++ U.Models.label_of(U.Str.get(nf, "models"), U.TextGen.provider(st), U.TextGen.model(st)),
+        View.chips.loc(lc, U.Models.menu(U.Str.get(nf, "models"), U.TextGen.provider(st)), U.TextGen.model(st), "text.model"))]])
+    case 4n: List.concat(&2, D.Node, [[View.setrow("KiCad", U.KN.summary(nf), View.kn.path.loc(lc, u) <> View.kn.loc(lc, U.KN.of(nf, st), False{}))],
+      [View.setrow(U.FreeCAD.label.loc(lc, nf), U.FreeCAD.note(lc, nf), Nil{})],
+      [View.setrow(U.KiCad.ipc.label(lc, nf), U.KiCad.ipc.note(lc, nf), Bool.pick(List<&2, D.Node>, U.KiCad.ipc.ready(nf), View.chips.loc(lc, ["on", "off"], ipc, "kicad.ipc"), Nil{}))],
+      [View.setrow(U.Fab.set.order.label(), U.Fab.set.order.note(), View.chips.loc(lc, ["on", "off"], U.Fab.set.enabled(st), "order.enabled"))],
+      [View.setrow(U.Fab.set.label(), U.Fab.set.note.k(U.Fab.enabled(st)), Bool.pick(List<&2, D.Node>, U.Fab.enabled(st), View.chips.loc(lc, ["on", "off"], U.Fab.set.on(st), "order.estimates"), Nil{}))]])
+    case 5n: List.concat(&2, D.Node, [[View.setrow(U.Tail.label(lc, nf), U.Tail.note(lc, nf), Nil{})],
       View.mates(lc, u),
       [View.setrow(MSG.T.settings.pair(lc), U.Pair.note(lc, U.Pair.link(nf)), D.Dom.cat(D.Dom.when(U.Pair.qr.ready(nf), D.Dom.button(Bool.pick(String, U.Ui.flag(u, "pairqr"), "on", ""), "flag", "pairqr", MSG.T.settings.pair.qr.tip(lc), MSG.T.settings.pair.code(lc))),
         D.Dom.when(Bool.not(String.is_empty(U.Pair.link(nf))), D.Dom.copy.loc(lc, U.Pair.link(nf)))))],
       View.pair.qr(lc, U.Ui.flag(u, "pairqr"), nf),
-      [View.setrow(MSG.T.settings.channel(lc), MSG.T.settings.channel.note(lc), View.chips.loc(lc, ["stable", "nightly"], M.Setting.get(st, "update.channel", "stable"), "update.channel")),
-      View.setrow("Backplane " ++ v, U.Update.line.w(lc, st, nf, note), View.update.btn.loc(lc, U.Update.btn(st, nf, note)))], View.voice.set.loc(lc, u, st), View.keys.set(lc, u), View.agy.rows(U.Agv.rows.loc(lc, u)), View.tz.set(lc, u), View.usage.rows.loc(lc, U.Usage.rows(u)), [View.setrow(MSG.T.settings.tour(lc), MSG.T.settings.tour.note(lc), [D.Dom.button("", "ob-open", "", MSG.T.settings.tour.again(lc), MSG.T.settings.tour.show(lc))])]])}]}
+      [View.setrow(MSG.T.settings.channel(lc), MSG.T.settings.channel.note(lc), View.chips.loc(lc, ["stable", "nightly"], M.Setting.get(st, "update.channel", "stable"), "update.channel"))],
+      [View.setrow("Backplane " ++ v, U.Update.line.w(lc, st, nf, note), View.update.btn.loc(lc, U.Update.btn(st, nf, note)))]])
+    case 6n: List.concat(&2, D.Node, [View.voice.set.loc(lc, u, st)])
+    case 7n: List.concat(&2, D.Node, [View.keys.set(lc, u)])
+    case 8n: List.concat(&2, D.Node, [View.agy.rows(U.Agv.rows.loc(lc, u))])
+    case 9n: List.concat(&2, D.Node, [View.tz.set(lc, u)])
+    case 10n: List.concat(&2, D.Node, [View.usage.rows.loc(lc, U.Usage.rows(u))])
+    case 11n: List.concat(&2, D.Node, [[View.setrow(MSG.T.settings.tour(lc), MSG.T.settings.tour.note(lc), [D.Dom.button("", "ob-open", "", MSG.T.settings.tour.again(lc), MSG.T.settings.tour.show(lc))])]])
+    case _: Nil{}
+
+def View.settings.rows(i: Nat, +lc: I.Loc, +u: U.Ui, +st: M.State, +nf: Map<&2, String>, +v: String, +note: String) -> List<&2, D.Node>:
+  +prov = M.Setting.get(st, "agent.provider", "claude")
+  +ipc = M.Setting.get(st, "kicad.ipc", "on")
+  View.settings.rows.k(i, lc, u, st, nf, v, note, prov, ipc)
+
+def View.settings.menu(ps: List<&2, String>, +lc: I.Loc) -> List<&2, D.Node>:
+  match ps:
+    case Nil{}: Nil{}
+    case +p <> t:
+      D.Dom.button("settings-category", "settings-page", p, U.Settings.title(lc, p), U.Settings.title(lc, p) ++ " ›") <> View.settings.menu(t, lc)
+
+def View.settings.body(root: Bool, +lc: I.Loc, +u: U.Ui, +st: M.State, +nf: Map<&2, String>, +v: String, +note: String) -> List<&2, D.Node>:
+  match root:
+    case True{}: View.settings.menu(U.Settings.pages(), lc)
+    case False{}: View.settings.rows(C.Codec.pos(U.Settings.pages(), U.Settings.page(u)), lc, u, st, nf, v, note)
+
+def View.settings.loc(+lc: I.Loc, +u: U.Ui, +st: M.State, +nf: Map<&2, String>, +v: String, +note: String) -> D.Node:
+  +page = U.Settings.page(u)
+  D.El{"main", "settings", [D.At{"class", "settings-view"}], [
+    D.El{"header", "", [D.At{"class", "thread-head settings-head"}], [
+      D.Dom.span("title", MSG.T.palette.settings(lc)), D.Dom.span("meta", ""),
+      D.Dom.button("", "flag", "settings", MSG.T.settings.close(lc), MSG.T.common.close(lc))]},
+    D.El{"nav", "settings-path", [D.At{"class", "settings-path"}, D.At{"aria-label", MSG.T.palette.settings(lc)}],
+      D.Dom.cat(D.Dom.when(Bool.not(String.is_empty(page)), D.Dom.button("", "settings-page", "", MSG.T.palette.settings(lc), "‹ " ++ MSG.T.palette.settings(lc))),
+        [D.El{"h2", "settings-title", [D.At{"id", "settings-title"}, D.At{"tabindex", "-1"}], [D.Txt{U.Settings.title(lc, page)}]}])},
+    D.El{"div", "settings-content", [D.At{"id", "settings-content"}, D.At{"class", "settings"}, D.At{"data-settings-page", page}], View.settings.body(String.is_empty(page), lc, u, st, nf, v, note)}]}
 
 def View.settings(+u: U.Ui, +st: M.State, +nf: Map<&2, String>, +v: String, +note: String) -> D.Node:
   View.settings.loc(U.Lang.loc(u), u, st, nf, v, note)

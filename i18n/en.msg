@@ -1214,3 +1214,6 @@ native.notify.channel.live = Agents working
 # iOS system camera permission purpose
 native.permission.camera = Backplane reads the pairing code your computer shows, to connect to it.
 auth.legacy = This device connected without its pairing key, which a later version will require. Open the pairing link from Backplane's Settings on this device (or scan its QR code) to add it.
+
+settings.textsize = Text size
+settings.textsize.note = Text and controls reflow together. Device display scaling remains separate.

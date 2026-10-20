@@ -1,4 +1,5 @@
 import Base
+import ../core/textscale.bend as TS
 import ./side_row_types.bend as ST
 import ../core/title.bend as TTL
 import ../core/i18n.bend as I
@@ -4071,94 +4072,309 @@ def Set.find(srch: Bool, +ty: Ty, +n: S.Nui, +x: U32, +y: U32, +w: U32) -> Out:
     case False{}:
       Out.none()
 
-def Lay.settings(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x0: U32, +x1: U32, +h: U32, +raw: U32) -> Out:
-  +label0 = MSG.T.settings.theme.light(Ty.loc(ty))
-  +label1 = MSG.T.settings.theme.dark(Ty.loc(ty))
-  +label2 = MSG.T.settings.sidebar.active(Ty.loc(ty))
-  +label3 = MSG.T.tour.title.projects(Ty.loc(ty))
-  +label4 = MSG.T.settings.channel.nightly(Ty.loc(ty))
-  +label5 = MSG.T.settings.channel.stable(Ty.loc(ty))
-  +label6 = MSG.T.common.close(Ty.loc(ty))
-  +w = {U32.min((x1 - x0 - 64 : U32), 720) : U32}
-  +x = {(x0 + U32.shr((x1 - x0 - w : U32)) : U32) : U32}
+def Set.page.threads(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x: U32, +w: U32, +y: U32) -> Out:
+
+  Out.all([
+    Set.threads(ty, st, n, x, w, (y - 76 : U32))])
+
+def Set.page.threads.h(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x: U32, +w: U32) -> U32:
+
+  (200 + Set.notify.h(st, ty, w) + Set.fallback.h(ty, n, x, w) : U32)
+
+def Set.page.agents(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x: U32, +w: U32, +y: U32) -> Out:
   +prov = M.Setting.get(st, "agent.provider", "claude")
-  +ipc = M.Setting.get(st, "kicad.ipc", "on")
   +mi = U.Models.of(info, prov)
   +srch = U.Models.search(U.Models.menu(mi, prov))
   +fh = {Bool.pick(U32, srch, 38, 0) : U32}
   +ms = U.Models.settings(mi, prov, U.Ui.scratch(S.Nui.ui(n), "@f.mq"), M.Setting.get(st, "agent.model", ""))
   +dy = {(Set.rows(ty, ms, (x + 16 : U32), (x + w - 16 : U32), (x + 16 : U32)) * 34 + 26 + fh : U32) : U32}
+  +pr = (Set.rows(ty, ["claude", "codex", "grok", "muse", "antigravity", "opencode"], (x + 16 : U32), (x + w - 16 : U32), (x + 16 : U32)) * 34 : U32)
+  Out.all([
+    Set.head(ty, MSG.T.settings.agents(Ty.loc(ty)), x, (y : U32)),
+    Set.card(x, (y + 32 : U32), w, (124 + dy + pr : U32)),
+    Set.row(ty, MSG.T.settings.agents.default(Ty.loc(ty)), MSG.T.settings.agents.note(Ty.loc(ty), Set.cli.loc(Ty.loc(ty), U.Models.cli(U.Str.get(info, "models"), prov), prov)), x, (y + 34 : U32), w),
+    Set.chips(ty, ["claude", "codex", "grok", "muse", "antigravity", "opencode"], prov, "agent.provider", (x + 16 : U32), (x + w - 16 : U32), (x + 16 : U32), (y + 82 : U32)),
+    Set.find(srch, ty, n, (x + 16 : U32), (y + 116 + pr : U32), (w - 32 : U32)),
+    Set.chips(ty, ms, M.Setting.get(st, "agent.model", ""), "agent.model", (x + 16 : U32), (x + w - 16 : U32), (x + 16 : U32), (y + 116 + fh + pr : U32)),
+    Out.ops(Ty.text(ty, 2n, Ty.fit(ty, 2n, Set.model_line.loc(Ty.loc(ty), U.Models.label_of(mi, prov, M.Setting.get(st, "agent.model", "")), M.Setting.get(st, "agent.model", "")), (w - 32 : U32)),
+      D.Clip.all(), (x + 16 : U32), (y + 126 + dy + pr : U32), 24, T.Th.dim()))])
+
+def Set.page.agents.h(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x: U32, +w: U32) -> U32:
+  +prov = M.Setting.get(st, "agent.provider", "claude")
+  +mi = U.Models.of(info, prov)
+  +srch = U.Models.search(U.Models.menu(mi, prov))
+  +fh = {Bool.pick(U32, srch, 38, 0) : U32}
+  +ms = U.Models.settings(mi, prov, U.Ui.scratch(S.Nui.ui(n), "@f.mq"), M.Setting.get(st, "agent.model", ""))
+  +dy = {(Set.rows(ty, ms, (x + 16 : U32), (x + w - 16 : U32), (x + 16 : U32)) * 34 + 26 + fh : U32) : U32}
+  +pr = (Set.rows(ty, ["claude", "codex", "grok", "muse", "antigravity", "opencode"], (x + 16 : U32), (x + w - 16 : U32), (x + 16 : U32)) * 34 : U32)
+  (176 + dy + pr : U32)
+
+def Set.page.writing(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x: U32, +w: U32, +y: U32) -> Out:
   +tp = U.TextGen.provider(st)
   +tm = U.TextGen.model(st)
   +tms = U.Models.menu(U.Str.get(info, "models"), tp)
   +er = {(Set.rows(ty, tms, (x + 16 : U32), (x + w - 16 : U32), (x + 16 : U32)) * 34 : U32) : U32}
+  +pr = (Set.rows(ty, ["claude", "codex", "grok", "muse"], (x + 16 : U32), (x + w - 16 : U32), (x + 16 : U32)) * 34 : U32)
+  Out.all([
+    Set.head(ty, MSG.T.settings.writing(Ty.loc(ty)), x, (y : U32)),
+    Set.card(x, (y + 32 : U32), w, (150 + er + pr : U32)),
+    Set.row(ty, MSG.T.settings.writing.model(Ty.loc(ty)), MSG.T.settings.writing.note(Ty.loc(ty)), x, (y + 34 : U32), w),
+    Set.chips(ty, ["claude", "codex", "grok", "muse"], tp, "text.provider", (x + 16 : U32), (x + w - 16 : U32), (x + 16 : U32), (y + 82 : U32)),
+    Set.chips(ty, tms, tm, "text.model", (x + 16 : U32), (x + w - 16 : U32), (x + 16 : U32), (y + 116 + pr : U32)),
+    Out.ops(Ty.text(ty, 2n, Ty.fit(ty, 2n, Set.model_line.loc(Ty.loc(ty), U.Models.label_of(U.Str.get(info, "models"), tp, tm), tm), (w - 32 : U32)),
+      D.Clip.all(), (x + 16 : U32), (y + 152 + er + pr : U32), 24, T.Th.dim()))])
+
+def Set.page.writing.h(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x: U32, +w: U32) -> U32:
+  +tp = U.TextGen.provider(st)
+  +tms = U.Models.menu(U.Str.get(info, "models"), tp)
+  +er = {(Set.rows(ty, tms, (x + 16 : U32), (x + w - 16 : U32), (x + 16 : U32)) * 34 : U32) : U32}
   +ey = {(202 + er : U32) : U32}
+  +pr = (Set.rows(ty, ["claude", "codex", "grok", "muse"], (x + 16 : U32), (x + w - 16 : U32), (x + 16 : U32)) * 34 : U32)
+  (ey + pr : U32)
+
+def Set.page.cad(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x: U32, +w: U32, +y: U32) -> Out:
+  +ipc = M.Setting.get(st, "kicad.ipc", "on")
   +kn = U.KN.of(info, st)
   +kh = {(40 + Kn.h(kn, ty, (w - 32 : U32)) : U32) : U32}
-  # (the Browser row, then the Ordering group, then Appearance)
-  +fy = {(ey + 278 + kh : U32) : U32}
-  +total = {(1196 + Set.fallback.h(ty, n, x, w) + Set.notify.h(st, ty, w) + dy + fy + Set.voice.h(ty, n, x, w) + Set.mates.h(n) + Set.keys.h(n) + Set.agy.h(ty, n, x, w) + Set.tz.h() + Set.usage.h(n) + 132 : U32) : U32}
-  +off = {U32.min(raw, U32.dim(total, h)) : U32}
-  +b = {(0 - off : U32) : U32}
-  +b2 = {(b + 64 + Set.fallback.h(ty, n, x, w) + Set.notify.h(st, ty, w) : U32) : U32}
   Out.all([
-    Out{Nil{}, [Lay.hit(x0, 52, (x1 - x0 : U32), (h - 52 : U32), "set-bg", U32.show(U32.dim(total, h)))]},
-    Out.hits_below(52, Out.all([
-    Set.threads(ty, st, n, x, w, b),
-    Set.head(ty, MSG.T.settings.agents(Ty.loc(ty)), x, (b2 + 192 : U32)),
-    Set.card(x, (b2 + 224 : U32), w, (124 + dy : U32)),
-    Set.row(ty, MSG.T.settings.agents.default(Ty.loc(ty)), MSG.T.settings.agents.note(Ty.loc(ty), Set.cli.loc(Ty.loc(ty), U.Models.cli(U.Str.get(info, "models"), prov), prov)), x, (b2 + 226 : U32), w),
-    Set.chips(ty, ["claude", "codex", "grok", "muse", "antigravity", "opencode"], prov, "agent.provider", (x + 16 : U32), (x + w - 16 : U32), (x + 16 : U32), (b2 + 274 : U32)),
-    Set.find(srch, ty, n, (x + 16 : U32), (b2 + 308 : U32), (w - 32 : U32)),
-    Set.chips(ty, ms, M.Setting.get(st, "agent.model", ""), "agent.model", (x + 16 : U32), (x + w - 16 : U32), (x + 16 : U32), (b2 + 308 + fh : U32)),
-    Out.ops(Ty.text(ty, 2n, Ty.fit(ty, 2n, Set.model_line.loc(Ty.loc(ty), U.Models.label_of(mi, prov, M.Setting.get(st, "agent.model", "")), M.Setting.get(st, "agent.model", "")), (w - 32 : U32)),
-      D.Clip.all(), (x + 16 : U32), (b2 + 318 + dy : U32), 24, T.Th.dim())),
-    Set.head(ty, MSG.T.settings.writing(Ty.loc(ty)), x, (b2 + 368 + dy : U32)),
-    Set.card(x, (b2 + 400 + dy : U32), w, (150 + er : U32)),
-    Set.row(ty, MSG.T.settings.writing.model(Ty.loc(ty)), MSG.T.settings.writing.note(Ty.loc(ty)), x, (b2 + 402 + dy : U32), w),
-    Set.chips(ty, ["claude", "codex", "grok", "muse"], tp, "text.provider", (x + 16 : U32), (x + w - 16 : U32), (x + 16 : U32), (b2 + 450 + dy : U32)),
-    Set.chips(ty, tms, tm, "text.model", (x + 16 : U32), (x + w - 16 : U32), (x + 16 : U32), (b2 + 484 + dy : U32)),
-    Out.ops(Ty.text(ty, 2n, Ty.fit(ty, 2n, Set.model_line.loc(Ty.loc(ty), U.Models.label_of(U.Str.get(info, "models"), tp, tm), tm), (w - 32 : U32)),
-      D.Clip.all(), (x + 16 : U32), (b2 + 520 + dy + er : U32), 24, T.Th.dim())),
-    Set.head(ty, MSG.T.settings.cad(Ty.loc(ty)), x, (b2 + 368 + dy + ey : U32)),
-    Set.card(x, (b2 + 400 + dy + ey : U32), w, (252 + kh : U32)),
-    Set.row(ty, "KiCad", U.KN.summary(info), x, (b2 + 402 + dy + ey : U32), w),
-    Kn.path(ty, n, (x + 16 : U32), (b2 + 450 + dy + ey : U32), (w - 32 : U32)),
-    Kn.draw(kn, False{}, ty, (x + 16 : U32), (b2 + 490 + dy + ey : U32), (w - 32 : U32)),
-    Set.row.r(ty, U.KiCad.ipc.label(Ty.loc(ty), info), U.KiCad.ipc.note(Ty.loc(ty), info), x, (b2 + 486 + dy + ey + kh : U32), w, Bool.pick(U32, U.KiCad.ipc.ready(info), Set.pairw(ty, MSG.T.settings.lang.on(Ty.loc(ty)), MSG.T.settings.lang.off(Ty.loc(ty)), 140), 0)),
-    Bool.pick(Out, U.KiCad.ipc.ready(info), Set.ipc(ty, ipc, x, w, (b2 + 500 + dy + ey + kh : U32)), Out.none()),
-    Set.row(ty, U.FreeCAD.label.loc(Ty.loc(ty), info), U.FreeCAD.note(Ty.loc(ty), info), x, (b2 + 546 + dy + ey + kh : U32), w),
-    Set.browser(ty, CF.Cef.requested(M.Setting.get(st, "browser.engine", CF.Cef.default())), U.Str.get(info, "browser.engine.err"), U.Str.get(info, "browser.engine.live"), x, w, (b2 + 598 + dy + ey + kh : U32)),
-    Set.order(ty, st, x, w, (b2 + 674 + dy + ey + kh : U32)),
-    Set.head(ty, MSG.T.settings.appearance(Ty.loc(ty)), x, (b2 + 570 + dy + fy : U32)),
-    Set.card(x, (b2 + 602 + dy + fy : U32), w, 220),
-    Set.row.r(ty, MSG.T.settings.theme(Ty.loc(ty)), MSG.T.settings.theme.note(Ty.loc(ty)), x, (b2 + 604 + dy + fy : U32), w, Set.pairw(ty, label0, label1, 150)),
-    Lay.chip(ty, (x + w - 16 - Lay.button.w(ty, label0) - 6 - Lay.button.w(ty, label1) : U32), (b2 + 618 + dy + fy : U32), label1, Bool.not(String.eq(M.Setting.get(st, "ui.theme", ""), "light")), "setting", "ui.theme=dark"),
-    Lay.chip(ty, (x + w - 16 - Lay.button.w(ty, label0) : U32), (b2 + 618 + dy + fy : U32), label0, String.eq(M.Setting.get(st, "ui.theme", ""), "light"), "setting", "ui.theme=light"),
-    Set.lang(ty, S.Nui.ui(n), x, w, (b2 + 656 + dy + fy : U32)),
-    Set.row.r(ty, MSG.T.settings.sidebar(Ty.loc(ty)), MSG.T.settings.sidebar.note(Ty.loc(ty)), x, (b2 + 760 + dy + fy : U32), w, Set.pairw(ty, label2, label3, 190)),
-    Lay.chip(ty, (x + w - 16 - Lay.button.w(ty, label2) - 6 - Lay.button.w(ty, label3) : U32), (b2 + 774 + dy + fy : U32), label3, Bool.not(String.eq(U.Side.view(st), "active")), "setting", "sidebar.view=projects"),
-    Lay.chip(ty, (x + w - 16 - Lay.button.w(ty, label2) : U32), (b2 + 774 + dy + fy : U32), label2, String.eq(U.Side.view(st), "active"), "setting", "sidebar.view=active"),
-    Set.head(ty, MSG.T.settings.network(Ty.loc(ty)), x, (b2 + 846 + dy + fy : U32)),
-    Set.card(x, (b2 + 878 + dy + fy : U32), w, 216),
-    Set.row(ty, U.Tail.label(Ty.loc(ty), info), U.Tail.note(Ty.loc(ty), info), x, (b2 + 880 + dy + fy : U32), w),
-    Set.pair(ty, info, Pq.on(n), x, w, (b2 + 932 + dy + fy : U32)),
-    Set.row.r(ty, "Backplane " ++ v, U.Update.line.w(Ty.loc(ty), st, info, note), x, (b2 + 984 + dy + fy : U32), w, U32.max(150, (Lay.button.w(ty, Set.update.label(U.Update.btn(st, info, note), Ty.loc(ty))) + 22 : U32))),
-    Set.update.btn(U.Update.btn(st, info, note), ty, x, w, (b2 + 994 + dy + fy : U32)),
-    Set.row.r(ty, MSG.T.settings.channel(Ty.loc(ty)), MSG.T.settings.channel.note(Ty.loc(ty)), x, (b2 + 1036 + dy + fy : U32), w, Set.pairw(ty, label4, label5, 190)),
-    Lay.chip(ty, (x + w - 16 - Lay.button.w(ty, label4) - 6 - Lay.button.w(ty, label5) : U32), (b2 + 1050 + dy + fy : U32), label5, Bool.not(String.eq(M.Setting.get(st, "update.channel", "stable"), "nightly")), "setting", "update.channel=stable"),
-    Lay.chip(ty, (x + w - 16 - Lay.button.w(ty, label4) : U32), (b2 + 1050 + dy + fy : U32), label4, String.eq(M.Setting.get(st, "update.channel", "stable"), "nightly"), "setting", "update.channel=nightly"),
-    Set.voice(ty, st, n, x, w, (b2 + 1114 + dy + fy : U32)),
-    Set.mates(ty, n, x, w, (b2 + 1114 + dy + fy + Set.voice.h(ty, n, x, w) : U32)),
-    Set.keys(ty, n, x, w, (b2 + 1114 + dy + fy + Set.voice.h(ty, n, x, w) + Set.mates.h(n) : U32)),
-    Set.agy(ty, n, x, w, (b2 + 1114 + dy + fy + Set.voice.h(ty, n, x, w) + Set.mates.h(n) + Set.keys.h(n) + 16 : U32)),
-    Set.tz(ty, n, x, w, (b2 + 1114 + dy + fy + Set.voice.h(ty, n, x, w) + Set.mates.h(n) + Set.keys.h(n) + Set.agy.h(ty, n, x, w) + 16 : U32)),
-    Set.usage(ty, n, x, w, (b2 + 1114 + dy + fy + Set.voice.h(ty, n, x, w) + Set.mates.h(n) + Set.keys.h(n) + Set.agy.h(ty, n, x, w) + Set.tz.h() + 16 : U32)),
-    Set.tour(ty, x, w, (b2 + 1114 + dy + fy + Set.voice.h(ty, n, x, w) + Set.mates.h(n) + Set.keys.h(n) + Set.agy.h(ty, n, x, w) + Set.tz.h() + Set.usage.h(n) + 16 : U32))])),
-    Out{List.append(&2, R.Op, [D.Draw.rect(D.Clip.all(), x0, 0, (x1 - x0 : U32), 51, T.Th.bg(), 255), D.Draw.rect(D.Clip.all(), x0, 51, (x1 - x0 : U32), 1, T.Th.line(), 255)],
-      Ty.text(ty, 0n, MSG.T.palette.settings(Ty.loc(ty)), D.Clip.all(), (x0 + 24 : U32), 0, 52, T.Th.text())), Nil{}},
-    Lay.button(ty, D.Clip.all(), (x1 - 16 - Lay.button.w(ty, label6) : U32), 12, label6, T.Th.soft(), "flag", "settings"),
-    Pq.over(Pq.on(n), ty, info, x0, x1, h)])
+    Set.head(ty, MSG.T.settings.cad(Ty.loc(ty)), x, (y : U32)),
+    Set.card(x, (y + 32 : U32), w, (252 + kh : U32)),
+    Set.row(ty, "KiCad", U.KN.summary(info), x, (y + 34 : U32), w),
+    Kn.path(ty, n, (x + 16 : U32), (y + 82 : U32), (w - 32 : U32)),
+    Kn.draw(kn, False{}, ty, (x + 16 : U32), (y + 122 : U32), (w - 32 : U32)),
+    Set.row.r(ty, U.KiCad.ipc.label(Ty.loc(ty), info), U.KiCad.ipc.note(Ty.loc(ty), info), x, (y + 118 + kh : U32), w, Bool.pick(U32, U.KiCad.ipc.ready(info), Set.pairw(ty, MSG.T.settings.lang.on(Ty.loc(ty)), MSG.T.settings.lang.off(Ty.loc(ty)), 140), 0)),
+    Bool.pick(Out, U.KiCad.ipc.ready(info), Set.ipc(ty, ipc, x, w, (y + 132 + kh : U32)), Out.none()),
+    Set.row(ty, U.FreeCAD.label.loc(Ty.loc(ty), info), U.FreeCAD.note(Ty.loc(ty), info), x, (y + 178 + kh : U32), w),
+    Set.browser(ty, CF.Cef.requested(M.Setting.get(st, "browser.engine", CF.Cef.default())), U.Str.get(info, "browser.engine.err"), U.Str.get(info, "browser.engine.live"), x, w, (y + 230 + kh : U32)),
+    Set.order(ty, st, x, w, (y + 306 + kh : U32))])
+
+def Set.page.cad.h(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x: U32, +w: U32) -> U32:
+  +kn = U.KN.of(info, st)
+  +kh = {(40 + Kn.h(kn, ty, (w - 32 : U32)) : U32) : U32}
+  (500 + kh : U32)
+
+def Set.scale.btns(vs: List<&2, String>) -> List<&2, VBtn>:
+  match vs:
+    case Nil{}: Nil{}
+    case +v <> t: VBtn{TS.Scale.label(v), "setting", "ui.text_scale=" ++ v} <> Set.scale.btns(t)
+
+def Set.scale.h(+ty: Ty, +x: U32, +w: U32) -> U32:
+  (100 + Vx.chips.rows(Set.scale.btns(TS.Scale.options()), ty, (x + 16 : U32), (x + w - 16 : U32), (x + 16 : U32)) * 34 : U32)
+
+def Set.scale(+ty: Ty, +st: M.State, +x: U32, +w: U32, +y: U32) -> Out:
+  Out.all([Set.card(x, y, w, (Set.scale.h(ty, x, w) - 16 : U32)),
+    Set.row(ty, MSG.T.settings.textsize(Ty.loc(ty)), MSG.T.settings.textsize.note(Ty.loc(ty)), x, (y + 4 : U32), w),
+    Vx.chips(Set.scale.btns(TS.Scale.options()), ty, "ui.text_scale=" ++ U32.show(TS.Scale.of(st)), (x + 16 : U32), (x + w - 16 : U32), (x + 16 : U32), (y + 52 : U32))])
+
+def Set.page.appearance(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x: U32, +w: U32, +y: U32) -> Out:
+  +label0 = MSG.T.settings.theme.light(Ty.loc(ty))
+  +label1 = MSG.T.settings.theme.dark(Ty.loc(ty))
+  +label2 = MSG.T.settings.sidebar.active(Ty.loc(ty))
+  +label3 = MSG.T.tour.title.projects(Ty.loc(ty))
+  Out.all([
+    Set.head(ty, MSG.T.settings.appearance(Ty.loc(ty)), x, (y : U32)),
+    Set.card(x, (y + 32 : U32), w, 220),
+    Set.row.r(ty, MSG.T.settings.theme(Ty.loc(ty)), MSG.T.settings.theme.note(Ty.loc(ty)), x, (y + 34 : U32), w, Set.pairw(ty, label0, label1, 150)),
+    Lay.chip(ty, (x + w - 16 - Lay.button.w(ty, label0) - 6 - Lay.button.w(ty, label1) : U32), (y + 48 : U32), label1, Bool.not(String.eq(M.Setting.get(st, "ui.theme", ""), "light")), "setting", "ui.theme=dark"),
+    Lay.chip(ty, (x + w - 16 - Lay.button.w(ty, label0) : U32), (y + 48 : U32), label0, String.eq(M.Setting.get(st, "ui.theme", ""), "light"), "setting", "ui.theme=light"),
+    Set.lang(ty, S.Nui.ui(n), x, w, (y + 86 : U32)),
+    Set.row.r(ty, MSG.T.settings.sidebar(Ty.loc(ty)), MSG.T.settings.sidebar.note(Ty.loc(ty)), x, (y + 190 : U32), w, Set.pairw(ty, label2, label3, 190)),
+    Lay.chip(ty, (x + w - 16 - Lay.button.w(ty, label2) - 6 - Lay.button.w(ty, label3) : U32), (y + 204 : U32), label3, Bool.not(String.eq(U.Side.view(st), "active")), "setting", "sidebar.view=projects"),
+    Lay.chip(ty, (x + w - 16 - Lay.button.w(ty, label2) : U32), (y + 204 : U32), label2, String.eq(U.Side.view(st), "active"), "setting", "sidebar.view=active"),
+    Set.scale(ty, st, x, w, (y + 268 : U32))])
+
+def Set.page.appearance.h(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x: U32, +w: U32) -> U32:
+
+  (268 + Set.scale.h(ty, x, w) : U32)
+
+def Set.page.network(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x: U32, +w: U32, +y: U32) -> Out:
+  +label4 = MSG.T.settings.channel.nightly(Ty.loc(ty))
+  +label5 = MSG.T.settings.channel.stable(Ty.loc(ty))
+  Out.all([
+    Set.head(ty, MSG.T.settings.network(Ty.loc(ty)), x, (y : U32)),
+    Set.card(x, (y + 32 : U32), w, 216),
+    Set.row(ty, U.Tail.label(Ty.loc(ty), info), U.Tail.note(Ty.loc(ty), info), x, (y + 34 : U32), w),
+    Set.pair(ty, info, Pq.on(n), x, w, (y + 86 : U32)),
+    Set.row.r(ty, "Backplane " ++ v, U.Update.line.w(Ty.loc(ty), st, info, note), x, (y + 138 : U32), w, U32.max(150, (Lay.button.w(ty, Set.update.label(U.Update.btn(st, info, note), Ty.loc(ty))) + 22 : U32))),
+    Set.update.btn(U.Update.btn(st, info, note), ty, x, w, (y + 148 : U32)),
+    Set.row.r(ty, MSG.T.settings.channel(Ty.loc(ty)), MSG.T.settings.channel.note(Ty.loc(ty)), x, (y + 190 : U32), w, Set.pairw(ty, label4, label5, 190)),
+    Lay.chip(ty, (x + w - 16 - Lay.button.w(ty, label4) - 6 - Lay.button.w(ty, label5) : U32), (y + 204 : U32), label5, Bool.not(String.eq(M.Setting.get(st, "update.channel", "stable"), "nightly")), "setting", "update.channel=stable"),
+    Lay.chip(ty, (x + w - 16 - Lay.button.w(ty, label4) : U32), (y + 204 : U32), label4, String.eq(M.Setting.get(st, "update.channel", "stable"), "nightly"), "setting", "update.channel=nightly")])
+
+def Set.page.network.h(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x: U32, +w: U32) -> U32:
+
+  268
+
+def Set.page.voice(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x: U32, +w: U32, +y: U32) -> Out:
+
+  Out.all([
+    Set.voice(ty, st, n, x, w, (y : U32))])
+
+def Set.page.voice.h(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x: U32, +w: U32) -> U32:
+
+  Set.voice.h(ty, n, x, w)
+
+def Set.page.mates(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x: U32, +w: U32, +y: U32) -> Out:
+
+  Out.all([
+    Set.mates(ty, n, x, w, (y : U32))])
+
+def Set.page.mates.h(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x: U32, +w: U32) -> U32:
+
+  Set.mates.h(n)
+
+def Set.page.keys(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x: U32, +w: U32, +y: U32) -> Out:
+
+  Out.all([
+    Set.keys(ty, n, x, w, (y : U32))])
+
+def Set.page.keys.h(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x: U32, +w: U32) -> U32:
+
+  Set.keys.h(n)
+
+def Set.page.antigravity(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x: U32, +w: U32, +y: U32) -> Out:
+
+  Out.all([
+    Set.agy(ty, n, x, w, (y : U32))])
+
+def Set.page.antigravity.h(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x: U32, +w: U32) -> U32:
+
+  Set.agy.h(ty, n, x, w)
+
+def Set.page.timezone(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x: U32, +w: U32, +y: U32) -> Out:
+
+  Out.all([
+    Set.tz(ty, n, x, w, (y : U32))])
+
+def Set.page.timezone.h(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x: U32, +w: U32) -> U32:
+
+  Set.tz.h()
+
+def Set.page.usage(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x: U32, +w: U32, +y: U32) -> Out:
+
+  Out.all([
+    Set.usage(ty, n, x, w, (y : U32))])
+
+def Set.page.usage.h(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x: U32, +w: U32) -> U32:
+
+  Set.usage.h(n)
+
+def Set.page.about(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x: U32, +w: U32, +y: U32) -> Out:
+
+  Out.all([
+    Set.tour(ty, x, w, (y : U32))])
+
+def Set.page.about.h(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x: U32, +w: U32) -> U32:
+
+  132
+
+def Set.page.h(i: Nat, +ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x: U32, +w: U32) -> U32:
+  match i:
+    case 0n: Set.page.appearance.h(ty, st, n, info, v, note, x, w)
+    case 1n: Set.page.threads.h(ty, st, n, info, v, note, x, w)
+    case 2n: Set.page.agents.h(ty, st, n, info, v, note, x, w)
+    case 3n: Set.page.writing.h(ty, st, n, info, v, note, x, w)
+    case 4n: Set.page.cad.h(ty, st, n, info, v, note, x, w)
+    case 5n: (Set.page.network.h(ty, st, n, info, v, note, x, w) + Set.page.mates.h(ty, st, n, info, v, note, x, w) : U32)
+    case 6n: Set.page.voice.h(ty, st, n, info, v, note, x, w)
+    case 7n: Set.page.keys.h(ty, st, n, info, v, note, x, w)
+    case 8n: Set.page.antigravity.h(ty, st, n, info, v, note, x, w)
+    case 9n: Set.page.timezone.h(ty, st, n, info, v, note, x, w)
+    case 10n: Set.page.usage.h(ty, st, n, info, v, note, x, w)
+    case 11n: Set.page.about.h(ty, st, n, info, v, note, x, w)
+    case _: 0
+
+def Set.page.draw(i: Nat, +ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x: U32, +w: U32, +y: U32) -> Out:
+  match i:
+    case 0n: Set.page.appearance(ty, st, n, info, v, note, x, w, y)
+    case 1n: Set.page.threads(ty, st, n, info, v, note, x, w, y)
+    case 2n: Set.page.agents(ty, st, n, info, v, note, x, w, y)
+    case 3n: Set.page.writing(ty, st, n, info, v, note, x, w, y)
+    case 4n: Set.page.cad(ty, st, n, info, v, note, x, w, y)
+    case 5n: Out.cat(Set.page.network(ty, st, n, info, v, note, x, w, y), Set.page.mates(ty, st, n, info, v, note, x, w, (y + Set.page.network.h(ty, st, n, info, v, note, x, w) : U32)))
+    case 6n: Set.page.voice(ty, st, n, info, v, note, x, w, y)
+    case 7n: Set.page.keys(ty, st, n, info, v, note, x, w, y)
+    case 8n: Set.page.antigravity(ty, st, n, info, v, note, x, w, y)
+    case 9n: Set.page.timezone(ty, st, n, info, v, note, x, w, y)
+    case 10n: Set.page.usage(ty, st, n, info, v, note, x, w, y)
+    case 11n: Set.page.about(ty, st, n, info, v, note, x, w, y)
+    case _: Out.none()
+
+def Set.menu.rh(+ty: Ty, +page: String, +w: U32) -> U32:
+  (24 + U32.from_nat(List.length(&2, String, Ty.wrap(ty, 1n, U.Settings.title(Ty.loc(ty), page), U32.dim(w, 64)))) * 24 : U32)
+
+def Set.menu.h(ps: List<&2, String>, +ty: Ty, +w: U32) -> U32:
+  match ps:
+    case Nil{}: 16
+    case +p <> t: (Set.menu.rh(ty, p, w) + 8 + Set.menu.h(t, ty, w) : U32)
+
+def Set.menu(ps: List<&2, String>, +ty: Ty, +x: U32, +w: U32, +y: U32) -> Out:
+  match ps:
+    case Nil{}: Out.none()
+    case +p <> t:
+      +rh = Set.menu.rh(ty, p, w)
+      Out.all([Set.card(x, y, w, rh),
+        Out.ops(Kn.lines(Ty.wrap(ty, 1n, U.Settings.title(Ty.loc(ty), p), U32.dim(w, 64)), ty, 1n, (x + 16 : U32), (y + 12 : U32), 24, T.Th.text())),
+        Out.ops(Ty.text(ty, 1n, "›", D.Clip.all(), (x + w - 28 : U32), y, rh, T.Th.dim())),
+        Out{Nil{}, [Lay.hit(x, y, w, rh, "settings-page", p)]},
+        Set.menu(t, ty, x, w, (y + rh + 8 : U32))])
+
+def Set.body(root: Bool, +i: Nat, +ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x: U32, +w: U32, +y: U32) -> Out:
+  match root:
+    case True{}: Set.menu(U.Settings.pages(), ty, x, w, y)
+    case False{}: Set.page.draw(i, ty, st, n, info, v, note, x, w, y)
+
+def Set.height(root: Bool, +i: Nat, +ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x: U32, +w: U32) -> U32:
+  match root:
+    case True{}: Set.menu.h(U.Settings.pages(), ty, w)
+    case False{}: Set.page.h(i, ty, st, n, info, v, note, x, w)
+
+def Set.back(root: Bool, +ty: Ty, +x: U32) -> Out:
+  match root:
+    case True{}: Out.none()
+    case False{}: Lay.button(ty, D.Clip.all(), x, 48, "‹ " ++ MSG.T.palette.settings(Ty.loc(ty)), T.Th.soft(), "settings-page", "")
+
+def Set.focus.one(h: S.Hit, +id: String) -> List<&2, R.Op>:
+  match h:
+    case S.Hit{+x0, +y0, +x1, +y1, +a, +v}:
+      Bool.pick(List<&2, R.Op>, String.eq(a ++ "\t" ++ v, id),
+        [D.Draw.rect(D.Clip.all(), x0, y0, (x1 - x0 : U32), 2, T.Th.accent(), 255), D.Draw.rect(D.Clip.all(), x0, (y1 - 2 : U32), (x1 - x0 : U32), 2, T.Th.accent(), 255), D.Draw.rect(D.Clip.all(), x0, y0, 2, (y1 - y0 : U32), T.Th.accent(), 255), D.Draw.rect(D.Clip.all(), (x1 - 2 : U32), y0, 2, (y1 - y0 : U32), T.Th.accent(), 255)], Nil{})
+
+def Set.focus.ops(hs: List<&2, S.Hit>, +id: String) -> List<&2, R.Op>:
+  match hs:
+    case Nil{}: Nil{}
+    case h <> t: List.append(&2, R.Op, Set.focus.one(h, id), Set.focus.ops(t, id))
+
+def Set.focus(o: Out, +id: String) -> Out:
+  match o:
+    case Out{os, +hs}: Out{List.append(&2, R.Op, os, Set.focus.ops(hs, id)), hs}
+
+def Set.settings(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x0: U32, +x1: U32, +h: U32, +raw: U32) -> Out:
+  +page = U.Settings.page(S.Nui.ui(n))
+  +root = String.is_empty(page)
+  +i = CC.Codec.pos(U.Settings.pages(), page)
+  +w = U32.min(U32.dim((x1 - x0 : U32), 32), 720)
+  +x = (x0 + U32.shr((x1 - x0 - w : U32)) : U32)
+  +top = {88 : U32}
+  +total = Set.height(root, i, ty, st, n, info, v, note, x, w)
+  +most = U32.dim((total + top : U32), h)
+  +off = U32.min(raw, most)
+  +close = MSG.T.common.close(Ty.loc(ty))
+  Set.focus(Out.all([
+    Out{[D.Draw.rect(D.Clip.all(), x0, 0, (x1 - x0 : U32), h, T.Th.bg(), 255)], [Lay.hit(x0, 0, (x1 - x0 : U32), h, "set-bg", U32.show(most))]},
+    Out{Nil{}, [Lay.hit(x0, top, (x1 - x0 : U32), U32.dim(h, top), "set-bg", U32.show(most))]},
+    Out.hits_below(top, Set.body(root, i, ty, st, n, info, v, note, x, w, (top - off : U32))),
+    Out.ops([D.Draw.rect(D.Clip.all(), x0, 0, (x1 - x0 : U32), top, T.Th.bg(), 255)]),
+    Out.ops(Ty.text(ty, 0n, Ty.fit(ty, 0n, Bool.pick(String, root, MSG.T.palette.settings(Ty.loc(ty)), U.Settings.title(Ty.loc(ty), page)), U32.dim(w, (Lay.button.w(ty, close) + 16 : U32))), D.Clip.all(), x, 0, 44, T.Th.text())),
+    Set.back(root, ty, x),
+    Lay.button(ty, D.Clip.all(), (x1 - 16 - Lay.button.w(ty, close) : U32), 12, close, T.Th.soft(), "flag", "settings"),
+    Pq.over(Pq.on(n), ty, info, x0, x1, h)]), U.Ui.scratch(S.Nui.ui(n), "@set.focus"))
+
+# A narrow settings pane uses the window so controls still have room after
+# display scaling. The ordinary desktop keeps the project sidebar visible.
+def Lay.settings(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x0: U32, +x1: U32, +h: U32, +raw: U32) -> Out:
+  Set.settings(ty, st, n, info, v, note, Bool.pick(U32, U32.is_lt(U32.dim(x1, x0), 560), 0, x0), x1, h, raw)
+
 
 # Terminal
 # --------

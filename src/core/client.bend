@@ -9619,8 +9619,51 @@ def RefNav.act(i: Nat, +u: Ui, +value: String) -> Act:
     case 3n: Act{u, [Copy{value}]}
     case _: RefNav.copy.web(R.Ref.parse(value), u)
 
+# Settings navigation is client-local; choosing a page never persists a setting.
+def Settings.pages() -> List<&2, String>:
+  ["appearance", "threads", "agents", "writing", "cad", "network", "voice", "keys", "antigravity", "timezone", "usage", "about"]
+
+def Settings.phone.pages() -> List<&2, String>:
+  ["appearance", "threads", "agents", "cad", "network", "keys", "antigravity", "timezone", "usage", "about"]
+
+def Settings.known(ps: List<&2, String>, +page: String) -> Bool:
+  match ps:
+    case Nil{}: False{}
+    case +p <> t: Bool.or(String.eq(p, page), Settings.known(t, page))
+
+def Settings.clean(+page: String) -> String:
+  Bool.pick(String, Settings.known(Settings.pages(), page), page, "")
+
+def Settings.page(+u: Ui) -> String:
+  Settings.clean(Ui.scratch(u, "@settings.page"))
+
+def Settings.label(i: Nat, +l: I.Loc) -> String:
+  match i:
+    case 0n: MSG.T.settings.appearance(l)
+    case 1n: MSG.T.tour.title.threads(l)
+    case 2n: MSG.T.settings.agents(l)
+    case 3n: MSG.T.settings.writing(l)
+    case 4n: MSG.T.settings.cad(l)
+    case 5n: MSG.T.settings.network(l)
+    case 6n: MSG.T.settings.voice(l)
+    case 7n: MSG.T.settings.keys(l)
+    case 8n: "Antigravity"
+    case 9n: MSG.T.settings.zone(l)
+    case 10n: MSG.T.settings.usage(l)
+    case _: MSG.T.settings.tour(l)
+
+def Settings.title(+l: I.Loc, +page: String) -> String:
+  Bool.pick(String, String.is_empty(page), MSG.T.palette.settings(l), Settings.label(C.Codec.pos(Settings.pages(), page), l))
+
+def Settings.go(+u: Ui, +page: String) -> Act:
+  Act{Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.flag_off(u, "pairqr"), "@settings.page", Settings.clean(page)), "@set.sc", "0"), "@set.focus", ""), [Focus{""}]}
+
+def Settings.focus(a: Act, id: String) -> Act:
+  match a:
+    case Act{u, _}: Act{u, [Focus{id}]}
+
 def KN.path(+u: Ui) -> Act:
-  Act{Ui.scratch_set(Ui.scratch_set(Ui.flag_on(u, "settings"), "@f.kpath", M.Setting.get(Ui.state.of(u), "kicad.path", "")), "@set.sc", "850"), [Focus{"kicad-path"}]}
+  Settings.focus(Settings.go(Ui.scratch_set(Ui.flag_on(u, "settings"), "@f.kpath", M.Setting.get(Ui.state.of(u), "kicad.path", "")), "cad"), "kicad-path")
 
 def KN.save(+u: Ui) -> Act:
   Ui.setting(u, "kicad.path=" ++ Ui.scratch(u, "@f.kpath"))
@@ -11018,9 +11061,9 @@ def Usage.rows(+u: Ui) -> List<&2, UZ.URow>:
 def Usage.open(open: Bool, +u: Ui) -> Act:
   match open:
     case True{}:
-      Act{u, Nil{}}
+      Settings.go(u, "usage")
     case False{}:
-      Voice.flag("settings", Act{Ui.flag_on(u, "settings"), Nil{}})
+      Voice.flag("settings", Settings.go(Ui.flag_on(u, "settings"), "usage"))
 
 # (Settings > Usage's "usage-refresh": Boat's CLI read again now;
 # "usage-open": a thread's Boat chip)
@@ -12127,8 +12170,13 @@ def Mailv.sync(a: Act) -> Act:
 def Ui.desk(+u: Ui, +focused: Bool, +now: Nat) -> Act:
   Mailv.sync(Ui.desk.k(DK.Desk.due(Ui.scratch(u, "@desk"), Ui.scratch(u, "@desk.at"), Ui.sel(u), focused, now), u, Ui.sel(u), focused, now))
 
+def Settings.dispatch(nav: Bool, +u: Ui, +action: String, +value: String) -> Act:
+  match nav:
+    case True{}: Settings.go(u, value)
+    case False{}: Mailv.sync(Ui.cast.now(u, Mailv.dispatch(String.starts_with(action, "mail-"), u, action, value)))
+
 def Ui.act(+u: Ui, +action: String, +value: String) -> Act:
-  Mailv.sync(Ui.cast.now(u, Mailv.dispatch(String.starts_with(action, "mail-"), u, action, value)))
+  Settings.dispatch(String.eq(action, "settings-page"), u, action, value)
 
 def Ui.recv_act(u: Ui, +o: J.Json) -> Act:
   Mailv.sync(Ui.recv_act.s(String.eq(J.Json.get_str(o, "t", ""), "shot"), u, o))

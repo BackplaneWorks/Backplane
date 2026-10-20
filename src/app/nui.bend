@@ -2184,8 +2184,9 @@ def Nui.spin(viewer: Bool, +n: Nui, +x: U32, +y: U32, +dir: U32) -> Step:
 # a room's posts one tile, Nui.notch), within 0..the most its hit "set-bg"
 # says
 def Set.scroll.by(+now: String, +last: String, +dir: U32, +step: U32) -> String:
-  +off = Maybe.default(&2, U32, U32.read(now), 0)
+  +raw = Maybe.default(&2, U32, U32.read(now), 0)
   +most = Maybe.default(&2, U32, U32.read(last), 0)
+  +off = U32.min(raw, most)
   U32.show(U32.min(Bool.pick(U32, U32.is_eq(dir, 0), Bool.pick(U32, U32.is_ge(off, step), (off - step : U32), 0), (off + step : U32)), most))
 
 def Set.scroll(+now: String, +last: String, +dir: U32) -> String:
@@ -2681,12 +2682,15 @@ def Bots.pre(+n: Nui, +action: String, +value: String) -> Nui:
   Bool.pick(Nui, Bool.or(Bool.or(String.eq(action, "bot"), String.eq(action, "bot-tab")), Bool.or(String.eq(action, "room"), String.eq(action, "remote"))),
     Nui.with_ui(n, Bots.reset(Nui.ui(n), Bool.pick(String, Bool.and(String.eq(action, "bot-tab"), String.eq(value, "settings")), Bots.persona(n), U.Ui.scratch(Nui.ui(n), "@f.persona")))), n)
 
-def Nui.click.act(focus: Bool, +n: Nui, +action: String, +value: String) -> Step:
+def Nui.click.act.base(focus: Bool, +n: Nui, +action: String, +value: String) -> Step:
   match focus:
     case True{}:
       Nui.focus.at(Fld.on(value), n, value)
     case False{}:
       Bool.pick(Step, String.starts_with(action, "vw-"), Nui.vw_act(n, action, value), Nui.click.url(String.eq(action, "open-url"), Bots.pre(n, action, value), action, value))
+
+def Nui.click.act(focus: Bool, +n: Nui, +action: String, +value: String) -> Step:
+  Nui.click.act.base(focus, Nui.with_ui(n, U.Ui.scratch_set(Nui.ui(n), "@set.focus", "")), action, value)
 
 def Nui.key.term.k(term: Bool, pal: Bool, +n: Nui, +code: U32, +text: U32, +mods: U32) -> Step:
   match term pal:
@@ -2781,9 +2785,74 @@ def Nui.key.menu(menu: Bool, +n: Nui, +code: U32, +text: U32, +mods: U32) -> Ste
     case False{}:
       Nui.key.go(Keys.name(code, mods, Bool.or(String.eq(Nui.focus_of(n), "terminal"), String.starts_with(Nui.focus_of(n), "emb:"))), n, code, text, mods)
 
-def Nui.key.m(+n: Nui, +code: U32, +text: U32, +mods: U32) -> Step:
+# Settings keyboard focus follows only controls visible in the current page.
+def Set.key.id(h: Hit) -> String:
+  match h:
+    case Hit{_, _, _, _, a, v}: a ++ "\t" ++ v
+
+def Set.key.keep(on: Bool, h: Hit, rest: List<&2, Hit>) -> List<&2, Hit>:
+  match on:
+    case True{}: h <> rest
+    case False{}: rest
+
+def Set.key.visible(h: Hit, +height: U32) -> Bool:
+  match h:
+    case Hit{_, +y0, _, +y1, _, _}: Bool.and(U32.is_lt(y0, height), U32.is_le(y1, height))
+
+def Set.key.hits(hs: List<&2, Hit>, +height: U32) -> List<&2, Hit>:
+  match hs:
+    case Nil{}: Nil{}
+    case Hit{_, _, _, _, "set-bg", _} <> _: Nil{}
+    case +h <> t: Set.key.keep(Set.key.visible(h, height), h, Set.key.hits(t, height))
+
+def Set.key.next(hs: List<&2, Hit>, +id: String) -> String:
+  match hs:
+    case Nil{}: ""
+    case +h <> +t:
+      Bool.pick(String, String.eq(Set.key.id(h), id), Maybe.default(&2, String, Maybe.map(&2, Hit, String, Set.key.id, List.head(&2, Hit, t)), ""), Set.key.next(t, id))
+
+def Set.key.tab(+n: Nui, +hs: List<&2, Hit>) -> Step:
+  +next = Set.key.next(hs, U.Ui.scratch(Nui.ui(n), "@set.focus"))
+  +first = Maybe.default(&2, String, Maybe.map(&2, Hit, String, Set.key.id, List.head(&2, Hit, hs)), "")
+  Step{Nui.with_focus(Nui.with_ui(n, U.Ui.scratch_set(Nui.ui(n), "@set.focus", Bool.pick(String, String.is_empty(next), first, next))), ""), Nil{}, True{}}
+
+def Set.key.enter(ps: List<&2, String>, +n: Nui) -> Step:
+  match ps:
+    case +a <> +v <> _: Nui.act(Nui.with_ui(n, U.Ui.scratch_set(Nui.ui(n), "@set.focus", "")), a, v)
+    case _: Step{n, Nil{}, False{}}
+
+def Set.key.escape(field: Bool, +n: Nui) -> Step:
+  match field:
+    case True{}: Nui.focus(n, "")
+    case False{}:
+      Nui.act(n, Bool.pick(String, String.is_empty(U.Settings.page(Nui.ui(n))), "flag", "settings-page"), Bool.pick(String, String.is_empty(U.Settings.page(Nui.ui(n))), "settings", ""))
+
+def Set.key.scroll(+n: Nui, +dir: U32) -> Step:
+  Step{Nui.with_ui(n, U.Ui.scratch_set(U.Ui.scratch_set(Nui.ui(n), "@set.focus", ""), "@set.sc", Set.scroll.by(U.Ui.scratch(Nui.ui(n), "@set.sc"), Hit.value_at(Nui.hits(n), "set-bg", (Nui.width(n) - 20 : U32), 100), dir, 256))), Nil{}, True{}}
+
+def Nui.key.m.base(+n: Nui, +code: U32, +text: U32, +mods: U32) -> Step:
   Nui.key.menu(Bool.and(U32.is_eq(code, Key.escape()), Bool.or(Bool.or(U.Ui.flag(Nui.ui(n), "models"), U.Ui.flag(Nui.ui(n), "machines")),
     Bool.not(String.is_empty(U.Ui.scratch(Nui.ui(n), "@look") ++ U.Ui.scratch(Nui.ui(n), "@menu"))))), n, code, text, mods)
+
+def Set.key.route(tab: Bool, esc: Bool, enter: Bool, pg: Bool, +n: Nui, +code: U32, +text: U32, +mods: U32) -> Step:
+  match tab esc enter pg:
+    case True{} _ _ _:
+      Set.key.tab(n, Bool.pick(List<&2, Hit>, Keys.shift(mods), Set.key.hits(Nui.hits(n), Nui.height(n)), List.reverse(&2, Hit, Set.key.hits(Nui.hits(n), Nui.height(n)))))
+    case False{} True{} _ _:
+      Set.key.escape(Bool.and(Bool.not(String.is_empty(Nui.focus_of(n))), Bool.not(String.eq(Nui.focus_of(n), "composer"))), n)
+    case False{} False{} True{} _:
+      Set.key.enter(String.split(U.Ui.scratch(Nui.ui(n), "@set.focus"), '\t'), n)
+    case False{} False{} False{} True{}:
+      Set.key.scroll(n, Bool.pick(U32, U32.is_eq(code, 65365), 0, 1))
+    case _ _ _ _: Nui.key.m.base(n, code, text, mods)
+
+def Set.key.on(on: Bool, +n: Nui, +code: U32, +text: U32, +mods: U32) -> Step:
+  match on:
+    case True{}: Set.key.route(U32.is_eq(code, Key.tab()), U32.is_eq(code, Key.escape()), Bool.and(U32.is_eq(code, Key.enter()), Bool.not(String.is_empty(U.Ui.scratch(Nui.ui(n), "@set.focus")))), Bool.or(U32.is_eq(code, 65365), U32.is_eq(code, 65366)), n, code, text, mods)
+    case False{}: Nui.key.m.base(n, code, text, mods)
+
+def Nui.key.m(+n: Nui, +code: U32, +text: U32, +mods: U32) -> Step:
+  Set.key.on(U.Ui.flag(Nui.ui(n), "settings"), n, code, text, mods)
 
 # Selecting thread text
 # ---------------------
