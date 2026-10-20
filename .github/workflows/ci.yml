@@ -4,6 +4,12 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      flatpak_only:
+        description: Run only the KiCad Flatpak integration check
+        type: boolean
+        default: false
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -21,6 +27,7 @@ jobs:
       - run: python3 test/tools/desktop_install_test.py
 
   check:
+    if: ${{ !inputs.flatpak_only }}
     name: Type-check
     runs-on: ubuntu-24.04
     steps:
@@ -29,6 +36,7 @@ jobs:
       - run: CHECK_JOBS=$(nproc) scripts/check.sh check
 
   proof:
+    if: ${{ !inputs.flatpak_only }}
     name: Prove laws
     runs-on: ubuntu-24.04
     steps:
@@ -47,6 +55,7 @@ jobs:
       - run: echo "type-check and proof both passed"
 
   test:
+    if: ${{ !inputs.flatpak_only }}
     name: Tests ${{ matrix.shard }}/4
     runs-on: ubuntu-24.04
     strategy:
@@ -63,6 +72,7 @@ jobs:
       - run: TEST_JOBS=$(nproc) scripts/test.sh
 
   build:
+    if: ${{ !inputs.flatpak_only }}
     name: Build ${{ matrix.target }}
     # runs beside "laws" (which checks every file); nothing is published here
     strategy:
@@ -124,3 +134,25 @@ jobs:
           name: backplane-${{ matrix.target }}
           path: dist/
           retention-days: 7
+
+  kicad-flatpak-adapter:
+    name: KiCad Flatpak adapter and export
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - run: sh -n scripts/kicad-flatpak.sh
+      - run: python3 -m unittest discover -s test/tools -p kicad_flatpak_test.py
+      - run: sudo apt-get update && sudo apt-get install -y flatpak dbus-x11
+      - name: Install and export through the adapter
+        run: |
+          dbus-run-session -- sh -eu <<'SH'
+          flatpak --user remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          flatpak --user install -y --noninteractive --no-related flathub org.kicad.KiCad
+          scripts/kicad-flatpak.sh version
+          scratch=$(mktemp -d '/tmp/bp flatpak.XXXXXX')
+          trap 'rm -rf "$scratch"' EXIT
+          cp test/fixtures/flatpak/minimal.kicad_pcb "$scratch/test board.kicad_pcb"
+          scripts/kicad-flatpak.sh pcb export svg --mode-multi --layers Edge.Cuts -o "$scratch/out dir" "$scratch/test board.kicad_pcb"
+          find "$scratch/out dir" -name '*.svg' | grep -q .
+          SH
