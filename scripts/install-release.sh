@@ -17,6 +17,13 @@ fi
 rm -rf "$prefix/web.old"
 [ ! -d "$prefix/web" ] || mv "$prefix/web" "$prefix/web.old"
 mv "$src/web" "$prefix/web"
+# Carry the bundled KiStack skills added by the security release. The CEF
+# preflight above must succeed before any installed skill tree is replaced.
+if [ -d "$src/kistack" ]; then
+  rm -rf "$prefix/kistack.old"
+  [ ! -d "$prefix/kistack" ] || mv "$prefix/kistack" "$prefix/kistack.old"
+  mv "$src/kistack" "$prefix/kistack"
+fi
 for file in backplane backplane-serve backplane-browser backplane-browser.stamp backplane-step2glb backplane-voice backplane-kipc LICENSE; do
   if [ -e "$src/$file" ]; then mv -f "$src/$file" "$prefix/$file"; fi
 done

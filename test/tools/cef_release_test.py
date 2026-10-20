@@ -49,6 +49,8 @@ class PublicRelease(unittest.TestCase):
         dist = self.repo / 'dist'
         (dist / 'web').mkdir(exist_ok=True)
         (dist / 'web/index.html').write_text('web-' + label)
+        (dist / 'kistack/skills').mkdir(parents=True, exist_ok=True)
+        (dist / 'kistack/skills/README.md').write_text('skills-' + label)
         helper = dist / 'backplane-browser'
         helper.write_text('#!/bin/sh\necho helper-' + label + '\n')
         helper.chmod(0o755)
@@ -101,12 +103,15 @@ class PublicRelease(unittest.TestCase):
         self.install()
         self.assertIn('helper-first', self.pair()[0])
         self.assertIn('host-first', self.pair()[1])
+        self.assertEqual((self.prefix / 'kistack/skills/README.md').read_text(), 'skills-first')
         first = (self.prefix / 'browser-current').resolve()
         self.build_payload('second')
         ok, output = self.update(self.package())
         self.assertTrue(ok, output)
         self.assertIn('helper-second', self.pair()[0])
         self.assertIn('host-second', self.pair()[1])
+        self.assertEqual((self.prefix / 'kistack/skills/README.md').read_text(), 'skills-second')
+        self.assertEqual((self.prefix / 'kistack.old/skills/README.md').read_text(), 'skills-first')
         self.assertEqual((self.prefix / 'browser-previous').resolve(), first)
         runtime.rollback(self.prefix)
         self.assertIn('helper-first', self.pair()[0])
@@ -124,6 +129,8 @@ class PublicRelease(unittest.TestCase):
         self.assertIn('hash mismatch', output)
         self.assertEqual(before, self.pair())
         self.assertEqual(app, hashlib.sha256((self.prefix / 'backplane').read_bytes()).hexdigest())
+        self.assertEqual((self.prefix / 'kistack/skills/README.md').read_text(), 'skills-first')
+        self.assertFalse((self.prefix / 'kistack.old').exists())
 
     def test_package_refuses_unmatched_helper_and_missing_runtime(self):
         (self.repo / 'dist/backplane-browser').write_text('unmatched')
