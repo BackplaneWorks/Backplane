@@ -188,6 +188,47 @@ class Lifecycle(unittest.TestCase):
                 self.assertEqual((self.prefix / 'backplane').read_text(), 'app-' + name)
                 self.assertIn('host-' + name, self.pair()[1])
 
+    def test_actual_swap_repairs_legacy_helper_bypassing_current_manifest(self):
+        source = Path(__file__).parents[2]
+        hub = (source / 'src/server/server.bend').read_text().split('def Deploy.swap.sh() -> String:\n', 1)[1].splitlines()[0].strip()
+        dev = (source / 'scripts/dev.sh').read_text().split("install_into() {\n  cat <<'EOF'\n", 1)[1].split('\nEOF', 1)[0]
+        for name, script in [('hub-repair', json.loads(hub)), ('dev-repair', dev)]:
+            with self.subTest(path=name):
+                runtime.install(self.package(name + '-before'), self.prefix)
+                previous = (self.prefix / 'browser-current').resolve()
+                # Reproduce the observed live shape: a valid current bundle,
+                # its stamp/host aliases intact, but a legacy regular helper
+                # bypasses the manifest. Never use a live prefix in this test.
+                helper = self.prefix / runtime.HELPER
+                helper.unlink()
+                self.helper(helper, 'legacy-without-cef')
+                self.assertFalse(helper.is_symlink())
+                self.assertNotEqual(runtime.sha(helper), runtime.sha(previous / runtime.HELPER))
+                runtime.verify(previous)
+                package = self.package(name + '-after')
+                shutil.copy2(runtime.__file__, package / 'cef-runtime.py')
+                (package / 'web').mkdir()
+                (package / 'web/index.html').write_text(name)
+                (package / 'backplane').write_text('app-' + name)
+                home = self.root / (name + '-home')
+                home.mkdir()
+                subprocess.run(['sh', '-c', script, 'sh', str(package), str(self.prefix)],
+                               env=dict(os.environ, HOME=str(home)), check=True, capture_output=True)
+                current = (self.prefix / 'browser-current').resolve()
+                manifest = json.loads((current / 'manifest.json').read_text())
+                for alias in (runtime.HELPER, runtime.STAMP, 'cef'):
+                    self.assertTrue((self.prefix / alias).is_symlink())
+                    self.assertEqual((self.prefix / alias).resolve(), current / alias)
+                self.assertEqual(runtime.sha(helper), manifest['files'][runtime.HELPER])
+                self.assertEqual((self.prefix / 'browser-previous').resolve(), previous)
+                runtime.verify(previous)
+                runtime.verify(current)
+                # The fixed-file loop must not overwrite the repaired alias.
+                self.assertFalse((package / runtime.HELPER).exists())
+                self.assertFalse((package / runtime.STAMP).exists())
+                self.assertIn('helper-' + name + '-after', self.pair()[0])
+                self.assertIn('host-' + name + '-after', self.pair()[1])
+
     def test_unlisted_files_or_symlink_payload_are_rejected(self):
         package = self.package('extra')
         (package / 'browser-runtime/extra').write_text('unexpected')
