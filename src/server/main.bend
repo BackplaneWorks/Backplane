@@ -4,6 +4,7 @@ import ../core/prompt.bend as Q
 import ../core/cli.bend as CL
 import ./plot.bend as PV
 import ./review.bend as RVC
+import ../app/render.bend as RN
 
 # `backplane-serve`: the hub and the web server, no window.
 
@@ -22,7 +23,7 @@ def start.k(+held: String, +user: String, +exe: String, +home: String, +xs: List
 
 # the home's lock is taken before anything else is found: a second hub on
 # a home ends at once (server.bend's Lock.*)
-def start(args: List<String>) -> IO(Unit):
+def Start.run(args: List<String>) -> IO(Unit):
   do IO<Unit>:
     +xs : List<&2, String> = S.Names.copy(args)
     +user : String <- S.Env.get("HOME", "/tmp")
@@ -31,13 +32,27 @@ def start(args: List<String>) -> IO(Unit):
     +held : String <- S.Lock.take(S.Cfg.home(c0), S.Cfg.port(c0))
     start.k(held, user, exe, S.Cfg.home(c0), xs)
 
+def start.render(render: Bool, +xs: List<&2, String>) -> IO(Unit):
+  match render:
+    case True{}:
+      RN.Render.main(xs)
+    case False{}:
+      Start.run(Args.back(xs))
+
+def start.go(+xs: List<&2, String>) -> IO(Unit):
+  start.render(RN.Render.wants(xs), xs)
+
+def start(args: List<String>) -> IO(Unit):
+  start.go(S.Names.copy(args))
+
 def main.go(u: Unit) -> IO(Unit):
   do IO<Unit>:
     args : List<String> <- IO.args()
     RVC.Rvc.main(args, a2 => PV.Pv.main(a2, a => start(a)))
 
 # (`--plot KIND FILE` is the hub's own board reader, src/server/plot.bend;
-# `--review bom OLD NEW` design review's, src/server/review.bend)
+# `--review bom OLD NEW` design review's, src/server/review.bend;
+# `--render MODEL` a part's standard views, src/app/render.bend)
 # The command line is read strictly before anything else (core/cli.bend):
 # --help, --version or a bad flag never reach a hub.
 def main() -> IO(Unit):

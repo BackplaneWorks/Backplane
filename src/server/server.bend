@@ -21,6 +21,7 @@ import ../core/deploy.bend as DP
 import ../core/ship.bend as SHP
 import ../core/prompt.bend as Q
 import ../core/mcp.bend as MC
+import ../core/mech.bend as MCH
 import ./update.bend as UP
 import ../core/version.bend as VR
 import ./kicad.bend as K
@@ -2425,10 +2426,8 @@ def Mech.list(+inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cw
 # names what was rendered and why it failed ("" when it did not)
 def Mech.said(r: P.Ran) -> String:
   match r:
-    case P.Ran{0, _}:
-      ""
-    case P.Ran{_, out}:
-      String.take(String.trim(out), 300n)
+    case P.Ran{code, out}:
+      MCH.Mech.error(code, out)
 
 def Mech.rendered(+err: String, l: P.Ran, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +path: String) -> IO(Unit):
   match l:

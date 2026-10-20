@@ -1742,6 +1742,19 @@ law mech_default_assembly:
 law mech_default_first:
   {MCH.Mech.part.path(Maybe.default(&2, MCH.MPart, MCH.Mech.default(MCH.Mech.parts("1 9 mech/bracket.step\n3 9 mech/lid.step")), MCH.MPart{"", "", Nil{}})) == "mech/bracket.step" : String}
 
+# successful render output is a list of paths, not an error
+law mech_render_success_quiet:
+  for out: String
+  {MCH.Mech.error(0, out) == "" : String}
+
+# even a failed child with no output must tell the person it failed
+law mech_render_failure_visible:
+  {String.is_empty(MCH.Mech.error(1, "")) == False{} : Bool}
+
+# an earlier successful view must not hide the real diagnostic
+law mech_render_failure_diagnostic:
+  {MCH.Mech.error(1, "/p/renders/fixture.iso.png\nbackplane --render: could not write /p/renders/fixture.front.png\n") == "backplane --render: could not write /p/renders/fixture.front.png" : String}
+
 # agents are pointed at FreeCAD's GUI beside its console build (the only
 # one that writes a STEP's colours), on Linux and in the macOS app
 law mech_gui_linux:

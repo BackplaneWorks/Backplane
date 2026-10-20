@@ -102,6 +102,31 @@ def Mech.in(+dir: String, +f: String) -> String:
 def Mech.render(+model: String, +view: String) -> String:
   Mech.in(Mech.in(Mech.parent(model), "renders"), Mech.stem(model) ++ "." ++ view ++ ".png")
 
+# A render child prints successful paths as well as diagnostics. Keep the
+# first diagnostic visible even when earlier views succeeded; a silent
+# failed child must still give the person an error.
+def Mech.error.lines(ls: List<&2, String>, +found: String, +fallback: String) -> String:
+  match ls:
+    case Nil{}:
+      Bool.pick(String, String.is_empty(found), fallback, found)
+    case line <> t:
+      +clean = String.trim(line)
+      Mech.error.lines(t, Bool.pick(String, Bool.and(String.is_empty(found), String.starts_with(clean, "backplane --render:")), String.take(clean, 300n), found), fallback)
+
+def Mech.error.failed(+code: U32, +text: String) -> String:
+  Mech.error.lines(String.split(text, '\n'), "", Bool.pick(String, String.is_empty(text),
+    "backplane --render failed (exit " ++ U32.show(code) ++ ")", String.take(text, 300n)))
+
+def Mech.error.k(ok: Bool, +code: U32, +out: String) -> String:
+  match ok:
+    case True{}:
+      ""
+    case False{}:
+      Mech.error.failed(code, String.trim(out))
+
+def Mech.error(+code: U32, +out: String) -> String:
+  Mech.error.k(U32.is_eq(code, 0), code, out)
+
 # a listed file: its path from the project root and its checksum (a
 # render drawn again gets a new one, so no client shows a stale picture)
 type MFile is Data:
