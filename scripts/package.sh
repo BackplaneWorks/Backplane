@@ -1,6 +1,6 @@
 #!/bin/sh
 # Package dist/ into dist/backplane-<version>-<os>-<arch>.tar.gz:
-#   backplane-<os>-<arch>/{backplane, backplane-serve, web/, helpers, licenses/,
+#   backplane-<os>-<arch>/{backplane, backplane-serve, web/, kistack/, helpers, licenses/,
 #   backplane.desktop, icon/}
 #   scripts/package.sh v0.2.0 linux-x64
 set -eu
@@ -18,6 +18,7 @@ dir="dist/pkg/backplane-$plat"
 rm -rf dist/pkg && mkdir -p "$dir"
 cp dist/backplane dist/backplane-serve LICENSE "$dir/"
 cp -R dist/web "$dir/web"
+cp -R dist/kistack "$dir/kistack"
 for h in backplane-browser backplane-browser.stamp backplane-step2glb backplane-voice backplane-kipc; do
   [ -f "dist/$h" ] && cp "dist/$h" "$dir/"
 done
