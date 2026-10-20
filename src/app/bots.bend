@@ -559,7 +559,7 @@ def Bv.lines(ls: List<&2, String>, +ty: L.Ty, +c: D.Clip, +x: U32, +y: U32, +col
     case Nil{}:
       Nil{}
     case l <> t:
-      List.append(&2, R.Op, L.Ty.text(ty, 3n, l, c, x, y, 22, color), Bv.lines(t, ty, c, x, (y + 22 : U32), color))
+      List.append(&2, R.Op, L.Ty.text(ty, 3n, l, c, x, y, L.Ty.px(ty, 22), color), Bv.lines(t, ty, c, x, (y + L.Ty.px(ty, 22) : U32), color))
 
 def Bv.nl(+ls: List<&2, String>) -> U32:
   U32.from_nat(List.length(&2, String, ls))
@@ -584,14 +584,14 @@ def Bv.mem(+ty: L.Ty, m: BT.Mem, +own: Bool, +c: D.Clip, +x: U32, +w: U32, +y: U
       +fw = {Bool.pick(U32, own, L.Lay.button.w(ty, label0), 0) : U32}
       +ls = L.Ty.wrap(ty, 3n, text, (w - 24 : U32))
       +th = {Bool.pick(U32, String.is_empty(tags), 0, 20) : U32}
-      +h = {(48 + Bv.nl(ls) * 22 + th : U32) : U32}
+      +h = {(48 + Bv.nl(ls) * L.Ty.px(ty, 22) + th : U32) : U32}
       L.Col{L.Out.all([
           L.Out.ops(L.Lay.box(c, x, y, w, h, 0, T.Th.panel(), T.Th.line())),
           L.Out.ops(L.Ty.text(ty, 0n, L.Ty.fit(ty, 0n, key, L.U32.dim(w, (kw + fw + 48 : U32))), c, (x + 12 : U32), (y + 6 : U32), 28, T.Th.text())),
           L.Out.ops(L.Ty.text(ty, 2n, kind, c, (x + w - fw - 20 - kw : U32), (y + 6 : U32), 28, T.Th.accent())),
           Bv.when(own, F.Fm.button(ty, c, (x + w - fw - 8 : U32), (y + 6 : U32), label0, T.Th.soft(), "mem-forget", key)),
           L.Out.ops(Bv.lines(ls, ty, c, (x + 12 : U32), (y + 38 : U32), T.Th.soft())),
-          Bv.faint(ty, c, tags, (x + 12 : U32), (w - 24 : U32), (y + 40 + Bv.nl(ls) * 22 : U32))]),
+          Bv.faint(ty, c, tags, (x + 12 : U32), (w - 24 : U32), (y + 40 + Bv.nl(ls) * L.Ty.px(ty, 22) : U32))]),
         (y + h + 8 : U32)}
 
 def Bv.mems(ms: List<&2, BT.Mem>, +ty: L.Ty, +own: Bool, +c: D.Clip, +x: U32, +w: U32, +y: U32) -> L.Col:
@@ -888,7 +888,7 @@ def Bv.gsig(editing: Bool, +ty: L.Ty, +f: F.FS, +e: String, +c: D.Clip, +x: U32,
       L.Col{L.Out.none(), y}
     case True{}:
       +label0 = MSG.T.common.save(L.Ty.loc(ty))
-      +ah = F.Fm.area.h(3n)
+      +ah = F.Fm.area.h.at(3n, ty)
       L.Col{L.Out.all([
           F.Fm.area(ty, f, c, x, y, w, 3n, "gsig", "google", "", MSG.T.google.signature.placeholder(L.Ty.loc(ty), e)),
           F.Fm.button(ty, c, x, (y + ah + 6 : U32), label0, T.Th.accent(), "google", "sig-save"),
@@ -1313,16 +1313,22 @@ def Bv.posts.l(ps: List<&2, BT.Post>, +ws: Map<&2, PW>, +ty: L.Ty, +u: U.Ui, +no
     case BT.Post{+id, _, +from, +text, _, +at} <> t:
       PostL{id, BU.BU.member(u, from), I.I18n.ago(L.Ty.loc(ty), now, at), Bv.wrap(ws, ty, id, text, w)} <> Bv.posts.l(t, ws, ty, u, now, w)
 
-def Bv.posts.h(ps: List<&2, PostL>, +acc: U32) -> U32:
+def Bv.posts.h.at(ps: List<&2, PostL>, +ty: L.Ty, +acc: U32) -> U32:
   match ps:
     case Nil{}:
       acc
     case PostL{_, _, _, +ls} <> t:
-      Bv.posts.h(t, (acc + 36 + Bv.nl(ls) * 22 : U32))
+      Bv.posts.h.at(t, ty, (acc + 36 + Bv.nl(ls) * L.Ty.px(ty, 22) : U32))
 
 # a post's height: its name line, its lines, and the gap under it
+def Bv.posts.h(ps: List<&2, PostL>, +acc: U32) -> U32:
+  Bv.posts.h.at(ps, L.Ty.none(), acc)
+
+def Bv.post.h.at(+ls: List<&2, String>, +ty: L.Ty) -> U32:
+  (36 + Bv.nl(ls) * L.Ty.px(ty, 22) : U32)
+
 def Bv.post.h(+ls: List<&2, String>) -> U32:
-  (36 + Bv.nl(ls) * 22 : U32)
+  Bv.post.h.at(ls, L.Ty.none())
 
 # a post on screen: its name, when, its lines, and a line region of no
 # width (never clicked; its y says how far the posts slid since the last
@@ -1334,7 +1340,7 @@ def Bv.post.draw(on: Bool, +ty: L.Ty, +id: String, +from: String, +when: String,
           L.Ty.text(ty, 0n, from, c, x, y, 24, Bool.pick(U32, String.eq(from, "you"), T.Th.soft(), T.Th.accent())),
           L.Ty.text(ty, 2n, when, c, (x + L.Ty.width(ty, 0n, from) + 10 : U32), y, 24, T.Th.faint()),
           Bv.lines(ls, ty, c, x, (y + 24 : U32), T.Th.text())]),
-        [L.Lay.hit(x, y, 0, Bv.post.h(ls), "chat-line", id)]}
+        [L.Lay.hit(x, y, 0, Bv.post.h.at(ls, ty), "chat-line", id)]}
     case False{}:
       L.Out.none()
 
@@ -1346,9 +1352,9 @@ def Bv.posts.draw(ps: List<&2, PostL>, +ty: L.Ty, +c: D.Clip, +x: U32, +y: U32, 
     case Nil{}:
       L.Out.none()
     case PostL{+id, +from, +when, +ls} <> t:
-      +h = U32.to_nat(Bv.post.h(ls))
+      +h = U32.to_nat(Bv.post.h.at(ls, ty))
       L.Out.cat(Bv.post.draw(Bool.and(Nat.is_gt(Nat.add(Nat.add(oy, h), 16n), lo), Nat.is_lt(oy, Nat.add(hi, 16n))), ty, id, from, when, ls, c, x, y),
-        Bv.posts.draw(t, ty, c, x, (y + Bv.post.h(ls) : U32), Nat.add(oy, h), lo, hi))
+        Bv.posts.draw(t, ty, c, x, (y + Bv.post.h.at(ls, ty) : U32), Nat.add(oy, h), lo, hi))
 
 def Bv.chat.off(+u: U.Ui) -> U32:
   Maybe.default(&2, U32, U32.read(U.Ui.scratch(u, "@chat.sc")), 0)
@@ -1360,7 +1366,7 @@ def Bv.chat(+ty: L.Ty, +ws: Map<&2, PW>, ps: List<&2, BT.Post>, +u: U.Ui, +empty
   +w = Bv.pane.w(x0, x1)
   +x = Bv.pane.x(x0, x1)
   +pl = Bv.posts.l(ps, ws, ty, u, U.Side.now(u), w)
-  +total = Bv.posts.h(pl, 0)
+  +total = Bv.posts.h.at(pl, ty, 0)
   +view = {L.U32.dim(bottom, (top + 16 : U32)) : U32}
   +most = L.U32.dim(total, view)
   +off = U32.min(Bv.chat.off(u), most)

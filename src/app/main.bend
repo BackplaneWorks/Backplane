@@ -1,4 +1,5 @@
 import Base
+import ../core/textscale.bend as TS
 import ../core/msgs.bend as MSG
 import ../core/winnote.bend as NT
 import ../core/i18n.bend as I18
@@ -2497,10 +2498,49 @@ def Lay.ops(o: L.Out) -> List<&2, R.Op>:
     case L.Out{os, _}:
       os
 
-def Aux.with_ty(a: Aux, t: L.Ty) -> Aux:
+# Keep one font set per allowed size. Glyph fills replace just that size;
+# repeated preference changes never exhaust FreeType's finite face table.
+def Types.drop.k(same: Bool, t: L.Ty, rest: List<&2, L.Ty>) -> List<&2, L.Ty>:
+  match same:
+    case True{}: rest
+    case False{}: t <> rest
+
+def Types.drop(xs: List<&2, L.Ty>, +pct: U32) -> List<&2, L.Ty>:
+  match xs:
+    case Nil{}: Nil{}
+    case +t <> rest:
+      Types.drop.k(U32.is_eq(L.Ty.pct(t), pct), t, Types.drop(rest, pct))
+
+def Aux.with_ty(a: Aux, +t: L.Ty) -> Aux:
   match a:
-    case Aux{ws, _, ti, k}:
-      Aux{ws, [t], ti, k}
+    case Aux{ws, ts, ti, k}:
+      Aux{ws, t <> Types.drop(ts, L.Ty.pct(t)), ti, k}
+
+def Types.find.k(same: Bool, t: L.Ty, rest: Maybe<&2, L.Ty>) -> Maybe<&2, L.Ty>:
+  match same:
+    case True{}: Some{t}
+    case False{}: rest
+
+def Types.find(xs: List<&2, L.Ty>, +pct: U32) -> Maybe<&2, L.Ty>:
+  match xs:
+    case Nil{}: None{}
+    case +t <> rest:
+      Types.find.k(U32.is_eq(L.Ty.pct(t), pct), t, Types.find(rest, pct))
+
+def Types.load(found: Maybe<&2, L.Ty>, +pct: U32) -> IO(L.Ty):
+  match found:
+    case Some{t}: IO.pure(L.Ty, t)
+    case None{}: L.Ty.load.pct(pct)
+
+def Aux.type_at(a: Aux, +pct: U32) -> IO(L.Ty):
+  match a:
+    case Aux{_, ts, _, _}: Types.load(Types.find(ts, pct), pct)
+
+# Every cached layout owns the font metrics it was made with. A change
+# invalidates all thread, row, bot wrapping and raster caches together.
+def Aux.retype(+a: Aux, +t: L.Ty) -> Aux:
+  Aux.with_frames(Aux.with_front(Aux.with_sm(Aux.with_mm(Aux.with_wraps(Aux.with_mks(Aux.with_memos(Aux.with_ty(a, t), Nil{}), Nil{}), BV.Bv.wraps.none()), Nil{}), Nil{}), Nil{}), TI.FNone{})
+
 
 # Match before calling Lay.memos: a hidden timeline does no wrapping.
 def Shell.memos(visible: Bool, ty: L.Ty, n: N.Nui, ms: List<&2, L.TLMemo>) -> List<&2, L.TLMemo>:
@@ -2649,7 +2689,7 @@ def Shell.paint.m(+memos: List<&2, L.TLMemo>, +oh: List<&2, N.Hit>, +n: N.Nui, w
 # the timeline's memo is brought up to this frame first; layout draws from
 # it. Each step is timed: ui.memo, ui.layout, then ui.raster and
 # ui.present as the frame goes out
-def Shell.paint.go(+oh: List<&2, N.Hit>, +n: N.Nui, w: Window, +q: Chan(ShellMsg), +i: Chan(S.Msg), +wa: Aux, +epoch: Nat, +ms: Nat) -> IO(Shell):
+def Shell.paint.typed(+oh: List<&2, N.Hit>, +n: N.Nui, w: Window, +q: Chan(ShellMsg), +i: Chan(S.Msg), +wa: Aux, +epoch: Nat, +ms: Nat) -> IO(Shell):
   do IO<Shell>:
     +t0 : U32 <- PS.Perf.us()
     +wl : Aux = Aux.with_ty(wa, L.Ty.with_loc(Aux.ty(wa), U.Lang.loc(N.Nui.ui(n))))
@@ -2660,6 +2700,24 @@ def Shell.paint.go(+oh: List<&2, N.Hit>, +n: N.Nui, w: Window, +q: Chan(ShellMsg
     PS.Perf.add("ui.ix.n", U32.from_nat(Nat.mod(ixn, 1000000n)))
     +t1 : U32 <- PS.Perf.lap("ui.memo", t0)
     Shell.paint.m(memos, oh, n, w, q, i, Aux.with_touch(Aux.with_mks(Aux.with_ixs(wl, [ixk]), [mk]), MM.TouchK.consumed(Aux.touch(wl), [MM.IxK.n(ixk)])), epoch, ms, t0, t1)
+
+# Reflow before painting a newly selected text size. Selection's row/x
+# anchors belong to the old wrapping; the composer's character offsets stay.
+def TextSize.nui(+n: N.Nui) -> N.Nui:
+  N.Sel.put(N.Nui.with_ui(n, U.Ui.scratch_set(U.Ui.scratch_set(N.Nui.ui(n), "@tl.at", ""), "@cgoal", "")), "", "")
+
+def Shell.paint.retyped(ty: L.Ty, +oh: List<&2, N.Hit>, +n: N.Nui, w: Window, +q: Chan(ShellMsg), +i: Chan(S.Msg), +wa: Aux, +epoch: Nat, +ms: Nat) -> IO(Shell):
+  Shell.paint.typed(Nil{}, TextSize.nui(n), w, q, i, Aux.retype(wa, ty), epoch, ms)
+
+def Shell.paint.size(same: Bool, +oh: List<&2, N.Hit>, +n: N.Nui, w: Window, +q: Chan(ShellMsg), +i: Chan(S.Msg), +wa: Aux, +epoch: Nat, +ms: Nat) -> IO(Shell):
+  match same:
+    case True{}:
+      Shell.paint.typed(oh, n, w, q, i, wa, epoch, ms)
+    case False{}:
+      IO.bind(L.Ty, Shell, Aux.type_at(wa, TS.Scale.of(U.Ui.state(N.Nui.ui(n)))), ty => Shell.paint.retyped(ty, oh, n, w, q, i, wa, epoch, ms))
+
+def Shell.paint.go(+oh: List<&2, N.Hit>, +n: N.Nui, w: Window, +q: Chan(ShellMsg), +i: Chan(S.Msg), +wa: Aux, +epoch: Nat, +ms: Nat) -> IO(Shell):
+  Shell.paint.size(U32.is_eq(L.Ty.pct(Aux.ty(wa)), TS.Scale.of(U.Ui.state(N.Nui.ui(n)))), oh, n, w, q, i, wa, epoch, ms)
 
 def Shell.paint.k(+n0: N.Nui, w: Window, +q: Chan(ShellMsg), +i: Chan(S.Msg), wa: Aux, +epoch: Nat, +ms: Nat) -> IO(Shell):
   match n0:

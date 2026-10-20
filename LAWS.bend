@@ -1,4 +1,5 @@
 import Base
+import ./src/core/textscale.bend as TSC
 import ./src/core/auth.bend as AUTH
 import ./src/core/http.bend as HTTPAUTH
 import ./src/core/pcb2d.bend as PCB2 # PCB viewer text
@@ -10766,3 +10767,13 @@ law wt_seed_same_second_next:
 
 law wt_seed_wrap:
   {H.Wt.seed("t4294967296") == 0n : Nat}
+
+# Desktop/web text size is bounded, independent of device DPI, and opt-in.
+law textscale_default:
+  {TSC.Scale.read("") == 100 : U32}
+
+law textscale_invalid:
+  {TSC.Scale.read("2000") == 100 : U32}
+
+law textscale_real_font_size:
+  {TSC.Scale.px(TSC.Scale.read("150"), 14) == 21 : U32}

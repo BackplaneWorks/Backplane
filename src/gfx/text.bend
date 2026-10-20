@@ -388,7 +388,7 @@ def Text.width(+cache: Map<&2, TG>, +f: Face, s: String) -> U32:
 def Text.baseline(+f: Face, +y: U32, +lh: U32) -> U32:
   match f:
     case Face{_, _, _, +asc, +desc, _, _, _, _}:
-      (y + ((lh - (asc + desc : U32) : U32) / 2 : U32) + asc : U32)
+      (y + ((U32.max(lh, (asc + desc : U32)) - (asc + desc : U32) : U32) / 2 : U32) + asc : U32)
 
 # Wrapping (proportional)
 # -----------------------

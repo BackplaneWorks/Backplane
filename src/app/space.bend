@@ -35,40 +35,40 @@ def Spv.n(+ls: List<&2, String>) -> U32:
 # wrapped text in the chat face, 22 px lines
 def Spv.text(+ty: L.Ty, +s: String, +color: U32, +c: D.Clip, +x: U32, +w: U32, +y: U32) -> L.Col:
   +ls = L.Ty.wrap(ty, 3n, s, w)
-  L.Col{L.Out.ops(Spv.lines(ls, ty, 3n, c, x, y, 22, color)), (y + Spv.n(ls) * 22 + 10 : U32)}
+  L.Col{L.Out.ops(Spv.lines(ls, ty, 3n, c, x, y, L.Ty.px(ty, 22), color)), (y + Spv.n(ls) * L.Ty.px(ty, 22) + 10 : U32)}
 
 def Spv.tone(+t: String) -> U32:
   Bool.pick(U32, String.eq(t, "ok"), T.Th.ok(), Bool.pick(U32, String.eq(t, "warn"), T.Th.warn(), Bool.pick(U32, String.eq(t, "bad"), T.Th.bad(), T.Th.dim())))
 
 # a stat card; cards are all one height, so a row of them lines up
 def Spv.stat(+ty: L.Ty, +l: String, +v: String, +hint: String, +c: D.Clip, +x: U32, +w: U32, +y: U32) -> L.Col:
-  +hh = {20 : U32}
+  +hh = {L.Ty.px(ty, 20) : U32}
   L.Col{L.Out.ops(List.concat(&2, R.Op, [
-      L.Lay.box(c, x, y, w, (64 + hh : U32), 0, T.Th.panel(), T.Th.line()),
-      L.Ty.text(ty, 2n, L.Ty.fit(ty, 2n, l, (w - 24 : U32)), c, (x + 12 : U32), (y + 8 : U32), 20, T.Th.dim()),
-      L.Ty.text(ty, 1n, L.Ty.fit(ty, 1n, v, (w - 24 : U32)), c, (x + 12 : U32), (y + 30 : U32), 24, T.Th.text()),
-      L.Ty.text(ty, 2n, L.Ty.fit(ty, 2n, hint, (w - 24 : U32)), c, (x + 12 : U32), (y + 56 : U32), 20, T.Th.faint())])),
-    (y + 76 + hh : U32)}
+      L.Lay.box(c, x, y, w, (L.Ty.px(ty, 64) + hh : U32), 0, T.Th.panel(), T.Th.line()),
+      L.Ty.text(ty, 2n, L.Ty.fit(ty, 2n, l, (w - L.Ty.px(ty, 24) : U32)), c, (x + 12 : U32), (y + 8 : U32), L.Ty.px(ty, 20), T.Th.dim()),
+      L.Ty.text(ty, 1n, L.Ty.fit(ty, 1n, v, (w - L.Ty.px(ty, 24) : U32)), c, (x + 12 : U32), (y + L.Ty.px(ty, 30) : U32), L.Ty.px(ty, 24), T.Th.text()),
+      L.Ty.text(ty, 2n, L.Ty.fit(ty, 2n, hint, (w - L.Ty.px(ty, 24) : U32)), c, (x + 12 : U32), (y + L.Ty.px(ty, 56) : U32), L.Ty.px(ty, 20), T.Th.faint())])),
+    (y + L.Ty.px(ty, 76) + hh : U32)}
 
 def Spv.progress(+ty: L.Ty, +l: String, +p: Nat, +c: D.Clip, +x: U32, +w: U32, +y: U32) -> L.Col:
   +pct = SP.Space.pct(p)
   +pw = L.Ty.width(ty, 2n, pct)
   +fw = {U32.from_nat(Nat.div(Nat.mul(U32.to_nat(w), p), 1000n)) : U32}
   L.Col{L.Out.ops(List.concat(&2, R.Op, [
-      L.Ty.text(ty, 2n, L.Ty.fit(ty, 2n, l, L.U32.dim(w, (pw + 16 : U32))), c, x, y, 20, T.Th.soft()),
-      L.Ty.text(ty, 2n, pct, c, (x + w - pw : U32), y, 20, T.Th.dim()),
-      [D.Draw.rect(c, x, (y + 24 : U32), w, 6, T.Th.raise(), 255), D.Draw.rect(c, x, (y + 24 : U32), fw, 6, T.Th.accent(), 255)]])),
-    (y + 44 : U32)}
+      L.Ty.text(ty, 2n, L.Ty.fit(ty, 2n, l, L.U32.dim(w, (pw + 16 : U32))), c, x, y, L.Ty.px(ty, 20), T.Th.soft()),
+      L.Ty.text(ty, 2n, pct, c, (x + w - pw : U32), y, L.Ty.px(ty, 20), T.Th.dim()),
+      [D.Draw.rect(c, x, (y + L.Ty.px(ty, 24) : U32), w, 6, T.Th.raise(), 255), D.Draw.rect(c, x, (y + L.Ty.px(ty, 24) : U32), fw, 6, T.Th.accent(), 255)]])),
+    (y + L.Ty.px(ty, 44) : U32)}
 
 def Spv.list(xs: List<&2, String>, +ty: L.Ty, +c: D.Clip, +x: U32, +w: U32, +y: U32) -> L.Col:
   match xs:
     case Nil{}:
       L.Col{L.Out.none(), (y + 6 : U32)}
     case +s <> t:
-      +ls = L.Ty.wrap(ty, 3n, s, (w - 20 : U32))
+      +ls = L.Ty.wrap(ty, 3n, s, (w - L.Ty.px(ty, 20) : U32))
       L.Lay.col.cat(L.Out.ops(List.append(&2, R.Op, [D.Draw.disc(c, U32.to_f32((x + 6 : U32)), U32.to_f32((y + 11 : U32)), 2.5, T.Th.dim(), 255)],
-          Spv.lines(ls, ty, 3n, c, (x + 20 : U32), y, 22, T.Th.text()))),
-        Spv.list(t, ty, c, x, w, (y + Spv.n(ls) * 22 + 2 : U32)))
+          Spv.lines(ls, ty, 3n, c, (x + L.Ty.px(ty, 20) : U32), y, L.Ty.px(ty, 22), T.Th.text()))),
+        Spv.list(t, ty, c, x, w, (y + Spv.n(ls) * L.Ty.px(ty, 22) + 2 : U32)))
 
 def Spv.kv(rs: List<&2, SP.Cell>, +ty: L.Ty, +c: D.Clip, +x: U32, +w: U32, +y: U32) -> L.Col:
   match rs:
@@ -118,8 +118,8 @@ def Spv.badge(+ty: L.Ty, +s: String, +tone: String, +c: D.Clip, +x: U32, +y: U32
 
 def Spv.code(+ty: L.Ty, +s: String, +c: D.Clip, +x: U32, +w: U32, +y: U32) -> L.Col:
   +ls = String.lines(s)
-  +h = {(Spv.n(ls) * 20 + 16 : U32) : U32}
-  L.Col{L.Out.ops(List.append(&2, R.Op, L.Lay.box(c, x, y, w, h, 0, T.Th.code(), T.Th.line()), Spv.lines(ls, ty, 4n, c, (x + 12 : U32), (y + 8 : U32), 20, T.Th.soft()))),
+  +h = {(Spv.n(ls) * L.Ty.px(ty, 20) + 16 : U32) : U32}
+  L.Col{L.Out.ops(List.append(&2, R.Op, L.Lay.box(c, x, y, w, h, 0, T.Th.code(), T.Th.line()), Spv.lines(ls, ty, 4n, c, (x + 12 : U32), (y + 8 : U32), L.Ty.px(ty, 20), T.Th.soft()))),
     (y + h + 10 : U32)}
 
 def Spv.button(+ty: L.Ty, +l: String, +a: String, +bot: String, +c: D.Clip, +x: U32, +y: U32) -> L.Col:
