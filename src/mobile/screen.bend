@@ -1507,28 +1507,55 @@ def Mob.agy.rows(rs: List<&2, U.AgRow>) -> List<&2, J.Json>:
     case U.AgRow{+l, +n, fs, bs} <> t:
       Mob.set.row.f(l, n, Mob.agy.fields(fs), Mob.agy.btns(bs)) <> Mob.agy.rows(t)
 
-def Mob.settings.of.loc(+lc: I.Loc, +u: U.Ui, +st: M.State, +nf: Map<&2, String>, +v: String, +note: String, more: List<&2, J.Json>) -> J.Json:
-  +prov = M.Setting.get(st, "agent.provider", "claude")
-  +models = U.Str.get(nf, "models")
-  +model = M.Setting.get(st, "agent.model", "")
-  J.Json.obj([J.KV{"rows", J.Json.arr(List.append(&2, J.Json, List.append(&2, J.Json, List.concat(&2, J.Json, [[
-    Mob.set.row(Mob.set.days.label.loc(lc, M.Setting.get(st, "settle.days", "3")), MSG.T.settings.settle.note(lc), Mob.set.days(M.Setting.get(st, "settle.days", "3"))),
-    Mob.set.row(MSG.T.settings.restart(lc), MSG.T.settings.restart.note(lc), Mob.set.chips.loc(lc, ["on", "off"], Bool.pick(String, M.Carry.on(st), "on", "off"), "restart.continue"))], Mob.notify(lc, st), Mob.agy.rows(U.Fallbackv.rows(u)), [
-    Mob.set.row(MSG.T.settings.provider(lc), Bool.pick(String, String.is_empty(U.Models.cli(models, prov)), MSG.T.settings.provider.missing(lc, prov), U.Models.cli(models, prov)), Mob.set.chips.loc(lc, ["claude", "codex", "grok", "muse", "antigravity", "opencode"], prov, "agent.provider")),
-    Mob.set.row(MSG.T.settings.model(lc), Bool.pick(String, String.is_empty(model), MSG.T.common.default(lc), model) ++ ": " ++ U.Models.label_of(U.Models.of(nf, prov), prov, model),
-      Mob.set.chips.loc(lc, U.Models.settings(U.Models.of(nf, prov), prov, U.Ui.scratch(u, "@f.mq"), model), model, "agent.model"))], Mob.set.find(lc, u, nf, prov), [
-    Mob.set.row.f("KiCad", U.KN.summary(nf) ++ " · " ++ U.Str.get(nf, "kicad.cli"), [Mob.set.field("kpath", MSG.T.settings.kicad.path(lc), False{}, U.Ui.scratch(u, "@f.kpath"))], [Mob.set.btn(MSG.T.settings.kicad.path.save(lc), "kicad-path-save", "", False{})])], Mob.kn(U.KN.of(nf, st)), [
-    Mob.set.row(U.FreeCAD.label.loc(lc, nf), U.FreeCAD.note(lc, nf), Nil{}),
-    Mob.set.row(U.KiCad.ipc.label(lc, nf), U.KiCad.ipc.note(lc, nf), Bool.pick(List<&2, J.Json>, U.KiCad.ipc.ready(nf), Mob.set.chips.loc(lc, ["on", "off"], M.Setting.get(st, "kicad.ipc", "on"), "kicad.ipc"), Nil{})),
-    Mob.set.row(U.Fab.set.order.label(), U.Fab.set.order.note(), Mob.set.chips.loc(lc, ["on", "off"], U.Fab.set.enabled(st), "order.enabled")),
-    Mob.set.row(U.Fab.set.label(), U.Fab.set.note.k(U.Fab.enabled(st)), Bool.pick(List<&2, J.Json>, U.Fab.enabled(st), Mob.set.chips.loc(lc, ["on", "off"], U.Fab.set.on(st), "order.estimates"), Nil{})),
-    Mob.set.row.l(MSG.T.settings.theme(lc), MSG.T.settings.theme.phone.note(lc), Mob.set.chips.loc(lc, ["dark", "light"], M.Setting.get(st, "ui.theme", ""), "ui.theme"))], Mob.lang.rows(lc, u), [
-    Mob.set.row.l(MSG.T.settings.sidebar(lc), MSG.T.settings.sidebar.note(lc), Mob.set.chips.loc(lc, ["projects", "active"], U.Side.view(st), "sidebar.view")),
+def Mob.settings.rows.k(i: Nat, +lc: I.Loc, +u: U.Ui, +st: M.State, +nf: Map<&2, String>, +v: String, +note: String, +more: List<&2, J.Json>, +prov: String, +models: String, +model: String) -> List<&2, J.Json>:
+  match i:
+    case 0n: List.concat(&2, J.Json, [[Mob.set.row.l(MSG.T.settings.theme(lc), MSG.T.settings.theme.phone.note(lc), Mob.set.chips.loc(lc, ["dark", "light"], M.Setting.get(st, "ui.theme", ""), "ui.theme"))],
+      Mob.lang.rows(lc, u),
+      [Mob.set.row.l(MSG.T.settings.sidebar(lc), MSG.T.settings.sidebar.note(lc), Mob.set.chips.loc(lc, ["projects", "active"], U.Side.view(st), "sidebar.view"))]])
+    case 1n: List.concat(&2, J.Json, [[Mob.set.row(Mob.set.days.label.loc(lc, M.Setting.get(st, "settle.days", "3")), MSG.T.settings.settle.note(lc), Mob.set.days(M.Setting.get(st, "settle.days", "3")))],
+      [Mob.set.row(MSG.T.settings.restart(lc), MSG.T.settings.restart.note(lc), Mob.set.chips.loc(lc, ["on", "off"], Bool.pick(String, M.Carry.on(st), "on", "off"), "restart.continue"))],
+      Mob.agy.rows(U.Fallbackv.rows(u))])
+    case 2n: List.concat(&2, J.Json, [[Mob.set.row(MSG.T.settings.provider(lc), Bool.pick(String, String.is_empty(U.Models.cli(models, prov)), MSG.T.settings.provider.missing(lc, prov), U.Models.cli(models, prov)), Mob.set.chips.loc(lc, ["claude", "codex", "grok", "muse", "antigravity", "opencode"], prov, "agent.provider"))],
+      [Mob.set.row(MSG.T.settings.model(lc), Bool.pick(String, String.is_empty(model), MSG.T.common.default(lc), model) ++ ": " ++ U.Models.label_of(U.Models.of(nf, prov), prov, model),
+      Mob.set.chips.loc(lc, U.Models.settings(U.Models.of(nf, prov), prov, U.Ui.scratch(u, "@f.mq"), model), model, "agent.model"))],
+      Mob.set.find(lc, u, nf, prov)])
+    case 3n: List.concat(&2, J.Json, [])
+    case 4n: List.concat(&2, J.Json, [[Mob.set.row.f("KiCad", U.KN.summary(nf) ++ " · " ++ U.Str.get(nf, "kicad.cli"), [Mob.set.field("kpath", MSG.T.settings.kicad.path(lc), False{}, U.Ui.scratch(u, "@f.kpath"))], [Mob.set.btn(MSG.T.settings.kicad.path.save(lc), "kicad-path-save", "", False{})])],
+      Mob.kn(U.KN.of(nf, st)),
+      [Mob.set.row(U.FreeCAD.label.loc(lc, nf), U.FreeCAD.note(lc, nf), Nil{})],
+      [Mob.set.row(U.KiCad.ipc.label(lc, nf), U.KiCad.ipc.note(lc, nf), Bool.pick(List<&2, J.Json>, U.KiCad.ipc.ready(nf), Mob.set.chips.loc(lc, ["on", "off"], M.Setting.get(st, "kicad.ipc", "on"), "kicad.ipc"), Nil{}))],
+      [Mob.set.row(U.Fab.set.order.label(), U.Fab.set.order.note(), Mob.set.chips.loc(lc, ["on", "off"], U.Fab.set.enabled(st), "order.enabled"))],
+      [Mob.set.row(U.Fab.set.label(), U.Fab.set.note.k(U.Fab.enabled(st)), Bool.pick(List<&2, J.Json>, U.Fab.enabled(st), Mob.set.chips.loc(lc, ["on", "off"], U.Fab.set.on(st), "order.estimates"), Nil{}))],
+      Mob.kx.settings(u)])
+    case 5n: List.concat(&2, J.Json, [[Mob.set.row(U.Tail.label(lc, nf), U.Tail.note(lc, nf), Nil{})],
+      Mob.mates(lc, u),
+      [Mob.set.pair(lc, U.Ui.flag(u, "pairqr"), nf)],
+      [Mob.set.row(MSG.T.settings.channel(lc), MSG.T.settings.channel.note(lc), Mob.set.chips.loc(lc, ["stable", "nightly"], M.Setting.get(st, "update.channel", "stable"), "update.channel"))],
+      [Mob.set.row("Backplane " ++ v, U.Update.line.w(lc, st, nf, note), Mob.update.btn.loc(lc, U.Update.btn(st, nf, note)))]])
+    case 6n: List.concat(&2, J.Json, [])
+    case 7n: List.concat(&2, J.Json, [Mob.keys(lc, u)])
+    case 8n: List.concat(&2, J.Json, [Mob.agy.rows(U.Agv.rows.loc(lc, u))])
+    case 9n: List.concat(&2, J.Json, [Mob.tz(lc, u)])
+    case 10n: List.concat(&2, J.Json, [Mob.usage.rows.loc(lc, U.Usage.rows(u))])
+    case 11n: List.concat(&2, J.Json, [[Mob.set.row.l(MSG.T.settings.tour(lc), MSG.T.settings.tour.note(lc), [Mob.set.btn(MSG.T.settings.tour.show(lc), "ob-open", "", False{})])],
+      more])
+    case _: Nil{}
 
-    Mob.set.row(U.Tail.label(lc, nf), U.Tail.note(lc, nf), Nil{})]]), List.append(&2, J.Json, Mob.mates(lc, u), [
-    Mob.set.pair(lc, U.Ui.flag(u, "pairqr"), nf),
-    Mob.set.row(MSG.T.settings.channel(lc), MSG.T.settings.channel.note(lc), Mob.set.chips.loc(lc, ["stable", "nightly"], M.Setting.get(st, "update.channel", "stable"), "update.channel")),
-    Mob.set.row("Backplane " ++ v, U.Update.line.w(lc, st, nf, note), Mob.update.btn.loc(lc, U.Update.btn(st, nf, note)))])), List.append(&2, J.Json, Mob.usage.rows.loc(lc, U.Usage.rows(u)), more)))}])
+def Mob.settings.menu(ps: List<&2, String>, +lc: I.Loc) -> List<&2, J.Json>:
+  match ps:
+    case Nil{}: Nil{}
+    case +p <> t:
+      Mob.set.row(U.Settings.title(lc, p), "", [Mob.set.btn(U.Settings.title(lc, p) ++ " ›", "settings-page", p, False{})]) <> Mob.settings.menu(t, lc)
+
+def Mob.settings.body(root: Bool, +lc: I.Loc, +u: U.Ui, +st: M.State, +nf: Map<&2, String>, +v: String, +note: String, +more: List<&2, J.Json>) -> List<&2, J.Json>:
+  match root:
+    case True{}: Mob.settings.menu(U.Settings.phone.pages(), lc)
+    case False{}:
+      List.append(&2, J.Json, [Mob.set.row(U.Settings.title(lc, U.Settings.page(u)), "", [Mob.set.btn("‹ " ++ MSG.T.palette.settings(lc), "settings-page", "", False{})])],
+        Mob.settings.rows.k(C.Codec.pos(U.Settings.pages(), U.Settings.page(u)), lc, u, st, nf, v, note, more, M.Setting.get(st, "agent.provider", "claude"), U.Str.get(nf, "models"), M.Setting.get(st, "agent.model", "")))
+
+def Mob.settings.of.loc(+lc: I.Loc, +u: U.Ui, +st: M.State, +nf: Map<&2, String>, +v: String, +note: String, +more: List<&2, J.Json>) -> J.Json:
+  J.Json.obj([J.KV{"rows", J.Json.arr(List.append(&2, J.Json, Mob.settings.body(String.is_empty(U.Settings.page(u)), lc, u, st, nf, v, note, more), Mob.notify(lc, st)))}])
 
 def Mob.settings.of(+u: U.Ui, st: M.State, nf: Map<&2, String>, v: String, note: String, more: List<&2, J.Json>) -> J.Json:
   Mob.settings.of.loc(U.Lang.loc(u), u, st, nf, v, note, more)
@@ -1545,7 +1572,7 @@ def Mob.settings.k(+lc: I.Loc, +u: U.Ui, more: List<&2, J.Json>) -> J.Json:
 def Mob.settings(+lc: I.Loc, open: Bool, +u: U.Ui) -> J.Json:
   match open:
     case True{}:
-      Mob.settings.k(lc, u, List.concat(&2, J.Json, [Mob.kx.settings(u), Mob.keys(lc, u), Mob.agy(lc, u), Mob.tz(lc, u), [Mob.set.row.l(MSG.T.settings.tour(lc), MSG.T.settings.tour.note(lc), [Mob.set.btn(MSG.T.settings.tour.show(lc), "ob-open", "", False{})])]]))
+      Mob.settings.k(lc, u, Nil{})
     case False{}:
       J.Null{}
 

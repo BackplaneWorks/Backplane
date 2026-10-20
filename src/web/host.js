@@ -381,6 +381,7 @@ function render() {
     focus = null;
   }
   tourSync();
+  settingsSync();
 }
 
 function later() {
@@ -1278,3 +1279,24 @@ Promise.all([restored, pairingReady]).then(() => {
 if ("serviceWorker" in navigator && window.isSecureContext) {
   navigator.serviceWorker.register("/sw.js").catch(() => {});
 }
+
+// A category change starts at its heading; Back restores its category button.
+let settingsPage = null;
+function settingsSync() {
+  const content = document.getElementById("settings-content");
+  if (!content) { settingsPage = null; return; }
+  const page = content.dataset.settingsPage;
+  if (page === settingsPage) return;
+  const previous = settingsPage;
+  settingsPage = page;
+  content.scrollTop = 0;
+  const target = page ? document.getElementById("settings-title") :
+    content.querySelector(`[data-value="${CSS.escape(previous || "appearance")}"]`) || content.querySelector("button");
+  target?.focus();
+}
+document.addEventListener("keydown", e => {
+  if (e.key !== "Escape" || !document.getElementById("settings-content")) return;
+  if (e.target.matches("input, textarea, select")) { e.target.blur(); }
+  else { dispatch(settingsPage ? "settings-page" : "flag", settingsPage ? "" : "settings"); }
+  e.preventDefault(); e.stopImmediatePropagation();
+}, true);

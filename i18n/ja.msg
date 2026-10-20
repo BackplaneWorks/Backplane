@@ -1237,3 +1237,6 @@ native.notify.channel.live = 稼働中のエージェント
 # iOS system camera permission purpose
 native.permission.camera = コンピューターに表示されたペアリングコードを読み取り、接続します。
 auth.legacy = この端末はペアリングキーなしで接続しています。今後のバージョンではキーが必要になります。この端末でBackplaneの設定にあるペアリングリンクを開くか、QRコードを読み取って追加してください。
+
+settings.textsize = 文字サイズ
+settings.textsize.note = 文字とコントロールの配置を調整します。端末のディスプレイスケーリングとは別の設定です。
