@@ -1,46 +1,108 @@
-name: Release
+name: Release candidate (build only)
 
+# Publication is deliberately not a workflow side effect. Bub publishes the
+# accepted downloaded bundle after native/content/auth/telemetry gates pass.
 on:
-  push:
-    tags: ["v*"]
   workflow_dispatch:
     inputs:
-      tag:
-        description: Existing tag to (re)publish, e.g. v0.2.0
+      telemetry_url:
+        description: Approved endpoint for the frozen candidate native compile
+        type: string
+        default: https://backplane.works/api/v1/events
+      ref:
+        description: Full frozen source commit (40 hex characters)
         required: true
-  # nightly.yml builds and publishes its prerelease through these same jobs
+        type: string
+      version:
+        description: Full package tag, e.g. v0.11.2 (no tag is created)
+        required: true
+        default: v0.11.2
+        type: string
   workflow_call:
     inputs:
-      tag:
-        description: Existing tag to build and publish
+      telemetry_url:
+        description: Approved endpoint for the frozen candidate native compile
+        type: string
+        default: https://backplane.works/api/v1/events
+      ref:
+        required: true
+        type: string
+      version:
         required: true
         type: string
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
+  candidate:
+    name: Validate frozen inputs
+    runs-on: ubuntu-24.04
+    outputs:
+      commit: ${{ steps.identity.outputs.commit }}
+      tag: ${{ steps.identity.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - name: Require exact source and full version
+        id: identity
+        env:
+          SOURCE_COMMIT: ${{ inputs.ref }}
+          RELEASE_TAG: ${{ inputs.version }}
+          WORKFLOW_COMMIT: ${{ github.sha }}
+        run: |
+          python3 - <<'CHECK'
+          import os, re, runpy, subprocess
+          from pathlib import Path
+          commit, tag = os.environ['SOURCE_COMMIT'], os.environ['RELEASE_TAG']
+          if not re.fullmatch(r'[0-9a-f]{40}', commit):
+              raise SystemExit('candidate requires a full source commit')
+          runpy.run_path('scripts/release-assets.py')['identity'](commit, tag)
+          actual = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          if actual != commit or os.environ['WORKFLOW_COMMIT'] != commit:
+              raise SystemExit('workflow and checkout must match the frozen source')
+          with Path(os.environ['GITHUB_OUTPUT']).open('a') as out:
+              out.write(f'commit={commit}\ntag={tag}\n')
+          CHECK
+      - name: Reject missing or mismatched release bake inputs before builds
+        env:
+          BACKPLANE_GOOGLE_BAKE: "1"
+          BACKPLANE_GOOGLE_CLIENT_ID: ${{ secrets.BACKPLANE_GOOGLE_CLIENT_ID }}
+          BACKPLANE_GOOGLE_CLIENT_SECRET: ${{ secrets.BACKPLANE_GOOGLE_CLIENT_SECRET }}
+          BACKPLANE_TELEMETRY_BAKE: "1"
+          BACKPLANE_TELEMETRY_URL: ${{ inputs.telemetry_url }}
+          BACKPLANE_TELEMETRY_KID: ${{ secrets.BACKPLANE_TELEMETRY_KID }}
+          BACKPLANE_TELEMETRY_KEY: ${{ secrets.BACKPLANE_TELEMETRY_KEY }}
+          SOURCE_COMMIT: ${{ steps.identity.outputs.commit }}
+          RELEASE_TAG: ${{ steps.identity.outputs.tag }}
+        run: python3 scripts/release-assets.py check-bake --source "$SOURCE_COMMIT" --tag "$RELEASE_TAG"
+
   windows:
+    needs: [candidate]
     name: Windows
     uses: ./.github/workflows/windows.yml
     secrets: inherit
     with:
-      ref: ${{ inputs.tag || github.ref }}
-      version: ${{ inputs.tag || github.ref_name }}
+      ref: ${{ needs.candidate.outputs.commit }}
+      version: ${{ needs.candidate.outputs.tag }}
+      telemetry_url: ${{ inputs.telemetry_url }}
 
   laws:
+    needs: [candidate]
     name: Check and prove
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ needs.candidate.outputs.commit }}
       - uses: ./.github/actions/setup-bend
       - run: scripts/check.sh
 
   build:
+    needs: [candidate]
     name: Build ${{ matrix.target }}
-    # beside "laws"; publish needs both
+    # beside "laws"; candidate assembly needs both
     strategy:
       fail-fast: true
       matrix:
@@ -50,11 +112,12 @@ jobs:
           # darwin-arm64 is the two jobs below
     runs-on: ${{ matrix.os }}
     env:
-      TAG: ${{ inputs.tag || github.ref_name }}
+      TAG: ${{ needs.candidate.outputs.tag }}
+      BACKPLANE_CEF_RELEASE: ${{ matrix.target == 'linux-x64' && '1' || '0' }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ needs.candidate.outputs.commit }}
       - uses: ./.github/actions/setup-bend
       - uses: oven-sh/setup-bun@v2
       - name: Swap for the compile
@@ -82,7 +145,10 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-19 libx11-dev
+          sudo apt-get install -y clang-19 libx11-dev cmake ninja-build
+          if [ "${{ matrix.target }}" = linux-x64 ]; then
+            sudo apt-get install -y xvfb libxtst6 libnss3 libatk-bridge2.0-0t64 libcups2t64 libasound2t64
+          fi
           sudo ln -sf /usr/bin/clang-19 /usr/local/bin/clang
       - name: Object cache
         # the compiled C units, by hash of their text (scripts/cc-unit.sh): an
@@ -91,19 +157,25 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/backplane-bend/obj
-          key: objs-${{ matrix.target }}-${{ inputs.tag || github.ref_name }}
+          key: objs-${{ matrix.target }}-${{ needs.candidate.outputs.tag }}
           restore-keys: objs-${{ matrix.target }}-
       - run: BACKPLANE_VERSION="$TAG" scripts/build.sh
         env:
-          BACKPLANE_SKIP_CHECK: "1" # the laws job checks every file; publish needs it
+          BACKPLANE_SKIP_CHECK: "1" # the laws job checks every file; candidate assembly needs it
           # the Google client "Connect Google" signs in with (scripts/build-app.sh)
+          BACKPLANE_GOOGLE_BAKE: "1"
           BACKPLANE_GOOGLE_CLIENT_ID: ${{ secrets.BACKPLANE_GOOGLE_CLIENT_ID }}
           BACKPLANE_GOOGLE_CLIENT_SECRET: ${{ secrets.BACKPLANE_GOOGLE_CLIENT_SECRET }}
           BACKPLANE_TELEMETRY_BAKE: "1"
-          BACKPLANE_TELEMETRY_URL: ${{ vars.BACKPLANE_TELEMETRY_URL }}
+          BACKPLANE_TELEMETRY_URL: ${{ inputs.telemetry_url }}
           BACKPLANE_TELEMETRY_KID: ${{ secrets.BACKPLANE_TELEMETRY_KID }}
           BACKPLANE_TELEMETRY_KEY: ${{ secrets.BACKPLANE_TELEMETRY_KEY }}
       - run: scripts/smoke.sh
+      - name: Native CEF popup acceptance
+        if: matrix.target == 'linux-x64'
+        # Retain263's mandatory functional gate. Software Xvfb does not certify FPS.
+        # Current official runtime fails this gate; no fallback or waiver here.
+        run: BACKPLANE_CEF_NO_GPU=1 BACKPLANE_CEF="$PWD/dist/browser-runtime/cef/backplane-cef" BACKPLANE_BROWSER="$PWD/dist/backplane-browser" bun tools/browser/test/popup-cef.ts
       - run: scripts/package.sh "$TAG" "${{ matrix.target }}"
       - run: scripts/package-linux.sh "$TAG" "${{ matrix.target }}"
       - uses: actions/upload-artifact@v4
@@ -119,14 +191,15 @@ jobs:
   # hours swapping through, and its C is the same on every platform: a
   # Linux runner emits it with the web client, the Mac compiles it.
   emit-darwin:
+    needs: [candidate]
     name: Emit darwin-arm64
     runs-on: ubuntu-24.04
     env:
-      TAG: ${{ inputs.tag || github.ref_name }}
+      TAG: ${{ needs.candidate.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ needs.candidate.outputs.commit }}
       - uses: ./.github/actions/setup-bend
       - run: BACKPLANE_VERSION="$TAG" BACKPLANE_SKIP_CHECK=1 scripts/build.sh emit
       - uses: actions/upload-artifact@v4
@@ -135,20 +208,21 @@ jobs:
           retention-days: 1
           path: |
             dist/web
+            dist/kistack
             build/cc/backplane-serve/all.c
             build/wire
 
   build-darwin:
     name: Build darwin-arm64
-    needs: [emit-darwin]
+    needs: [candidate, emit-darwin]
     runs-on: macos-15
     env:
-      TAG: ${{ inputs.tag || github.ref_name }}
+      TAG: ${{ needs.candidate.outputs.tag }}
       BACKPLANE_PREBUILT: "1"
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ needs.candidate.outputs.commit }}
       - uses: ./.github/actions/setup-bend
       - uses: oven-sh/setup-bun@v2
       - uses: actions/download-artifact@v4
@@ -158,10 +232,11 @@ jobs:
       - run: clang --version
       - run: BACKPLANE_VERSION="$TAG" scripts/build.sh
         env:
+          BACKPLANE_GOOGLE_BAKE: "1"
           BACKPLANE_GOOGLE_CLIENT_ID: ${{ secrets.BACKPLANE_GOOGLE_CLIENT_ID }}
           BACKPLANE_GOOGLE_CLIENT_SECRET: ${{ secrets.BACKPLANE_GOOGLE_CLIENT_SECRET }}
           BACKPLANE_TELEMETRY_BAKE: "1"
-          BACKPLANE_TELEMETRY_URL: ${{ vars.BACKPLANE_TELEMETRY_URL }}
+          BACKPLANE_TELEMETRY_URL: ${{ inputs.telemetry_url }}
           BACKPLANE_TELEMETRY_KID: ${{ secrets.BACKPLANE_TELEMETRY_KID }}
           BACKPLANE_TELEMETRY_KEY: ${{ secrets.BACKPLANE_TELEMETRY_KEY }}
       - run: scripts/smoke.sh
@@ -171,81 +246,29 @@ jobs:
           name: backplane-darwin-arm64
           path: dist/backplane-*.tar.gz
 
-  android:
-    name: Build Android
-    needs: [laws]
+  candidate-assets:
+    name: Preserve candidate assets (not publication)
+    needs: [candidate, laws, build, build-darwin, windows]
     runs-on: ubuntu-24.04
     env:
-      TAG: ${{ inputs.tag || github.ref_name }}
+      SOURCE_COMMIT: ${{ needs.candidate.outputs.commit }}
+      RELEASE_TAG: ${{ needs.candidate.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag || github.ref }}
-      - uses: ./.github/actions/setup-bend
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-      # the runner's Android SDK ($ANDROID_HOME); signed with the debug key
-      # until a release key exists (mobile/android/app/build.gradle.kts)
-      - run: scripts/build-mobile.sh
-      - run: mv dist/backplane-android.apk "dist/backplane-$TAG-android.apk"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: backplane-android
-          path: dist/backplane-*-android.apk
-
-  publish:
-    name: Publish
-    needs: [laws, build, build-darwin, android, windows]
-    runs-on: ubuntu-24.04
-    env:
-      TAG: ${{ inputs.tag || github.ref_name }}
-      GH_TOKEN: ${{ github.token }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ needs.candidate.outputs.commit }}
       - uses: actions/download-artifact@v4
         with:
           path: out
           pattern: backplane-*
           merge-multiple: true
-      - name: Checksums and installer
+      - name: Hash and bind the exact candidate files
         run: |
-          set -eu
-          cd out
-          sha256sum backplane-*.tar.gz backplane-*.AppImage backplane_*.deb backplane-*.apk backplane-*-windows-x64.zip > SHA256SUMS
-          cat SHA256SUMS
-          sum() { grep "backplane-$TAG-$1.tar.gz" SHA256SUMS | cut -d' ' -f1; }
-          sed -e "s/@VERSION@/$TAG/" \
-              -e "s/@SHA_LINUX_X64@/$(sum linux-x64)/" \
-              -e "s/@SHA_LINUX_ARM64@/$(sum linux-arm64)/" \
-              -e "s/@SHA_DARWIN_ARM64@/$(sum darwin-arm64)/" \
-              ../deploy/install.sh.in > install.sh
-          chmod +x install.sh
-          # the AUR's PKGBUILD follows full releases only
-          case "$TAG" in
-            *-*) ;;
-            *) sed -e "s/@PKGVER@/${TAG#v}/" \
-                   -e "s/@SHA_LINUX_X64@/$(sum linux-x64)/" \
-                   -e "s/@SHA_LINUX_ARM64@/$(sum linux-arm64)/" \
-                   ../deploy/aur/PKGBUILD.in > PKGBUILD ;;
-          esac
-      - name: Release
-        run: |
-          set -eu
-          pre=""
-          case "$TAG" in *-*) pre="--prerelease" ;; esac
-          # each release's installer installs that release (latest/ never
-          # names a prerelease, so a nightly's must be its own)
-          notes="Linux (x64, arm64) and macOS (Apple silicon; the hub and web UI at http://127.0.0.1:3787, no native window yet).
-
-          Windows x64: extract the Windows zip, run Install-Runtime.ps1 once, then open Backplane.cmd.
-
-          Install: \`curl -fsSL https://github.com/${{ github.repository }}/releases/download/$TAG/install.sh | sh\`"
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" out/* --clobber
-          else
-            gh release create "$TAG" out/* --title "Backplane $TAG" --notes "$notes" $pre
-          fi
+          python3 scripts/release-assets.py collect --directory out --source "$SOURCE_COMMIT" --tag "$RELEASE_TAG" --require-cef
+          python3 scripts/release-assets.py verify --directory out --source "$SOURCE_COMMIT" --tag "$RELEASE_TAG" --require-cef
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-candidate-assets
+          path: out/*
+          if-no-files-found: error
+          retention-days: 14

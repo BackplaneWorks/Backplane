@@ -1,76 +1,52 @@
-name: Nightly
+name: Nightly candidate (build only)
 
-# A prerelease of main every day there is something new, tagged
-# vX.Y.Z-nightly.YYYYMMDD.N where X.Y.Z follows the last release (so a
-# nightly sorts after the release it builds on and before the next one) and
-# N counts that day's nightlies. It is built and published by release.yml's
-# own jobs; the `nightly` update channel takes it (src/core/semver.bend).
-
+# Future nightly wiring remains available; no tag, public release or pruning
+# is performed before root has accepted the candidate's actual package gates.
 on:
   schedule:
     - cron: "17 4 * * *"
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: nightly
   cancel-in-progress: false
 
 jobs:
-  tag:
-    name: Tag
+  plan:
+    name: Plan immutable nightly candidate
     runs-on: ubuntu-24.04
     outputs:
-      tag: ${{ steps.tag.outputs.tag }}
+      commit: ${{ steps.identity.outputs.commit }}
+      version: ${{ steps.identity.outputs.version }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - id: tag
-        env:
-          MANUAL: ${{ github.event_name == 'workflow_dispatch' }}
+      - id: identity
         run: |
           set -eu
-          git fetch --tags --force
-          stable=$(git tag -l 'v*' | grep -v -- '-' | sort -V | tail -n1)
+          stable=$(git tag -l 'v*' | grep -v -- '-' | sort -V | tail -n1 || true)
           ver=${stable#v}
           ver=${ver:-0.0.0}
           maj=${ver%%.*}; rest=${ver#*.}; min=${rest%%.*}; pat=${rest#*.}
           base="v$maj.$min.$((pat + 1))"
-          last=$(git tag -l 'v*-nightly.*' | sort -V | tail -n1)
-          if [ -n "$last" ] && [ "$(git rev-list -n1 "$last")" = "$(git rev-parse HEAD)" ] && [ "$MANUAL" != true ]; then
-            echo "main has not moved since $last"
-            echo "tag=" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
           day=$(date -u +%Y%m%d)
-          n=$(( $(git tag -l "$base-nightly.$day.*" | wc -l) + 1 ))
-          tag="$base-nightly.$day.$n"
-          git tag "$tag" HEAD
-          git push origin "$tag"
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "tagged $tag"
+          # Build-only candidates have no tags to count. Reserve a unique numeric
+          # suffix per actual run/attempt, including retries of the same source.
+          [ "$GITHUB_RUN_ATTEMPT" -lt 1000 ]
+          n=$(( GITHUB_RUN_ID * 1000 + GITHUB_RUN_ATTEMPT ))
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "version=$base-nightly.$day.$n" >> "$GITHUB_OUTPUT"
 
-  release:
-    name: Release
-    needs: [tag]
-    if: needs.tag.outputs.tag != ''
+  candidate:
+    name: Build nightly candidate only
+    needs: [plan]
     uses: ./.github/workflows/release.yml
     with:
-      tag: ${{ needs.tag.outputs.tag }}
+      ref: ${{ needs.plan.outputs.commit }}
+      version: ${{ needs.plan.outputs.version }}
+      telemetry_url: https://backplane.works/api/v1/events
     secrets: inherit
-
-  prune:
-    name: Keep the last 14 nightlies
-    needs: [release]
-    runs-on: ubuntu-24.04
-    env:
-      GH_TOKEN: ${{ github.token }}
-    steps:
-      - run: |
-          set -eu
-          gh release list --repo "$GITHUB_REPOSITORY" --limit 200 --json tagName --jq '.[].tagName' \
-            | grep -- '-nightly\.' | sort -V -r | tail -n +15 \
-            | while read -r t; do gh release delete "$t" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes; done
