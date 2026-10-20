@@ -1,4 +1,5 @@
 import Base
+import ./src/core/refresh.bend as RFSH
 import ./src/core/auth.bend as AUTH
 import ./src/core/http.bend as HTTPAUTH
 import ./src/core/pcb2d.bend as PCB2 # PCB viewer text
@@ -10766,3 +10767,15 @@ law wt_seed_same_second_next:
 
 law wt_seed_wrap:
   {H.Wt.seed("t4294967296") == 0n : Nat}
+
+# Schematic refresh compares revisions even when size is unchanged.
+law refresh_revision_changed:
+  for +size_changed: Bool
+  {RFSH.Revision.decide(size_changed, False{}) == True{} : Bool}
+
+law refresh_size_changed:
+  for +same_revision: Bool
+  {RFSH.Revision.decide(True{}, same_revision) == True{} : Bool}
+
+law refresh_unchanged_quiet:
+  {RFSH.Revision.decide(False{}, True{}) == False{} : Bool}

@@ -1,4 +1,5 @@
 import Base
+import ./src/core/refresh.bend as RFSH
 import ./src/core/auth.bend as AUTH
 import ./src/core/http.bend as HTTPAUTH
 import ./src/core/pcb2d.bend as PCB2 # PCB viewer text
@@ -12401,3 +12402,15 @@ def Laws.wt_seed_legacy_small(): {==}
 def Laws.wt_seed_large_id(): {==}
 def Laws.wt_seed_same_second_next(): {==}
 def Laws.wt_seed_wrap(): {==}
+
+def Laws.refresh_revision_changed(size_changed):
+  match size_changed:
+    case True{}: {==}
+    case False{}: {==}
+
+def Laws.refresh_size_changed(same_revision):
+  match same_revision:
+    case True{}: {==}
+    case False{}: {==}
+
+def Laws.refresh_unchanged_quiet(): {==}

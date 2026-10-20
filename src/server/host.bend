@@ -140,6 +140,12 @@ def FS.stat(path: String) -> IO(Result<&1, &1, U32 & String, U32 & U32 & U32>):
   import "./effects/host.c"
   import "./effects/host.js"
 
+# Size and an exact revision for prompt schematic refresh. Includes file
+# identity and nanosecond mtime/ctime, without changing FS.stat's contract.
+def FS.revision(path: String) -> IO(Result<&1, &1, U32 & String, U32 & String>):
+  import "./effects/host.c"
+  import "./effects/host.js"
+
 def FS.list(path: String) -> IO(Result<&1, &1, U32 & String, List<String>>):
   import "./effects/host.c"
   import "./effects/host.js"

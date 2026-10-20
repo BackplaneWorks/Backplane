@@ -1,4 +1,5 @@
 import Base
+import ../core/refresh.bend as RF
 import ../core/exe.bend as EX
 import ./host.bend as H
 import ./kicad.bend as K
@@ -35,7 +36,7 @@ type PMsg is Data:
   PPoll{}
   # a file read: its size and mtime then, and its plot (None while it is
   # half written, or when it failed: err says why)
-  PGot{key: String, sz: U32, mt: U32, plot: Maybe<&2, P.Plot>, err: String}
+  PGot{key: String, sz: U32, mt: String, plot: Maybe<&2, P.Plot>, err: String}
   # a phone asks what a piece it tapped is (reply id)
   PInfo{client: U32, id: String, key: String, at: Nat, idx: Nat}
 
@@ -49,7 +50,7 @@ type POut is Data:
 # read after a change (a second save within the same second), whether a
 # read is under way, and its latest plot
 type Src is Data:
-  Src{key: String, kind: U32, path: String, sz: U32, mt: U32, re: Nat, busy: Bool, plot: Maybe<&2, P.Plot>}
+  Src{key: String, kind: U32, path: String, sz: U32, mt: String, re: Nat, busy: Bool, plot: Maybe<&2, P.Plot>}
 
 # a phone's view: a source it watches, the chunks it holds, and the 3D
 # model's bytes it holds (a 3D view is two: the board's plot and the model)
@@ -115,7 +116,7 @@ def Src.add(has: Bool, +key: String, +kind: U32, +path: String, ss: List<&2, Src
     case True{}:
       ss
     case False{}:
-      Src{key, kind, path, 0, 0, 0n, False{}, None{}} <> ss
+      Src{key, kind, path, 0, "", 0n, False{}, None{}} <> ss
 
 def Sub.watched(ss: List<&2, Sub>, +key: String) -> Bool:
   match ss:
@@ -312,16 +313,27 @@ def Pv.plot(m: Maybe<&2, List<&2, B.Item>>, +kind: U32) -> Maybe<&2, P.Plot>:
     case None{}:
       None{}
 
-def Pv.stamp.k(v: U32 & U32 & U32) -> U32 & U32:
-  (_, sm) = v
-  sm
+# Non-schematic sources retain their existing whole-second stamp.
+def Pv.stamp.k(v: U32 & U32 & U32) -> U32 & String:
+  (_, (sz, mt)) = v
+  (sz, U32.show(mt))
 
-def Pv.stamp(r: Result<&1, &1, U32 & String, U32 & U32 & U32>) -> U32 & U32:
+def Pv.stamp(r: Result<&1, &1, U32 & String, U32 & U32 & U32>) -> U32 & String:
   match r:
-    case Done{v}:
-      Pv.stamp.k(v)
-    case Fail{_}:
-      (0, 0)
+    case Done{v}: Pv.stamp.k(v)
+    case Fail{_}: (0, "")
+
+def Pv.revision(r: Result<&1, &1, U32 & String, U32 & String>) -> U32 & String:
+  match r:
+    case Done{v}: v
+    case Fail{_}: (0, "")
+
+def Pv.stamp.read(sch: Bool, +path: String) -> IO(U32 & String):
+  match sch:
+    case True{}:
+      IO.bind(Result<&1, &1, U32 & String, U32 & String>, U32 & String, H.FS.revision(path), r => IO.pure(U32 & String, Pv.revision(r)))
+    case False{}:
+      IO.bind(Result<&1, &1, U32 & String, U32 & U32 & U32>, U32 & String, H.FS.stat(path), r => IO.pure(U32 & String, Pv.stamp(r)))
 
 # The child
 # ---------
@@ -704,7 +716,7 @@ def Pv.got.err(r: PR.Ran) -> String:
     case PR.Ran{_, out}:
       String.take(String.trim(out), 200n)
 
-def Pv.read.k(sm: U32 & U32, +r: PR.Ran, +key: String, +kind: U32, +q: Chan(PMsg)) -> IO(Unit):
+def Pv.read.k(sm: U32 & String, +r: PR.Ran, +key: String, +kind: U32, +q: Chan(PMsg)) -> IO(Unit):
   (sz, mt) = sm
   do IO<Unit>:
     ok : Result<&1, &1, PMsg, Unit> <- Chan.send(PMsg, q, PGot{key, sz, mt, Pv.got.ran(r, kind), Pv.got.err(r)})
@@ -745,28 +757,28 @@ def Pv.live(+path: String) -> Bool:
 def Pv.stamp.fixed(+path: String) -> Bool:
   Bool.pick(Bool, Nat.is_eq(HS.Hist.kind(path), 2n), Bool.not(Bool.or(Pv.live(HS.Hist.old(path)), Pv.live(HS.Hist.new(path)))), Bool.not(Nat.is_eq(HS.Hist.kind(path), 0n)))
 
-def Pv.stamp.one.k(live: Bool, +path: String) -> IO(U32 & U32):
+def Pv.stamp.one.k(live: Bool, +path: String) -> IO(U32 & String):
   match live:
     case True{}:
-      IO.bind(Result<&1, &1, U32 & String, U32 & U32 & U32>, U32 & U32, H.FS.stat(path), r => IO.pure(U32 & U32, Pv.stamp(r)))
+      Pv.stamp.read(String.ends_with(path, ".kicad_sch"), path)
     case False{}:
-      IO.pure(U32 & U32, (1, 1))
+      IO.pure(U32 & String, (1, "fixed"))
 
-def Pv.stamp.one(+path: String) -> IO(U32 & U32):
+def Pv.stamp.one(+path: String) -> IO(U32 & String):
   Pv.stamp.one.k(Pv.live(path), path)
 
-def Pv.stamp.fold(a: U32 & U32, b: U32 & U32) -> U32 & U32:
+def Pv.stamp.fold(a: U32 & String, b: U32 & String) -> U32 & String:
   (sa, ma) = a
   (sb, mb) = b
-  ((sa + (sb * 31 : U32) : U32), U32.xor(ma, (mb * 2654435761 : U32)))
+  ((sa + (sb * 31 : U32) : U32), ma ++ "|" ++ mb)
 
-def Pv.stamp.two(+path: String) -> IO(U32 & U32):
-  do IO<U32 & U32>:
-    a : U32 & U32 <- Pv.stamp.one(HS.Hist.old(path))
-    b : U32 & U32 <- Pv.stamp.one(HS.Hist.new(path))
+def Pv.stamp.two(+path: String) -> IO(U32 & String):
+  do IO<U32 & String>:
+    a : U32 & String <- Pv.stamp.one(HS.Hist.old(path))
+    b : U32 & String <- Pv.stamp.one(HS.Hist.new(path))
     return Pv.stamp.fold(a, b)
 
-def Pv.stamp.of.k(cmp: Bool, +path: String) -> IO(U32 & U32):
+def Pv.stamp.of.k(cmp: Bool, +path: String) -> IO(U32 & String):
   match cmp:
     case True{}:
       Pv.stamp.two(path)
@@ -774,12 +786,12 @@ def Pv.stamp.of.k(cmp: Bool, +path: String) -> IO(U32 & U32):
       Pv.stamp.one.k(Nat.is_eq(HS.Hist.kind(path), 0n), path)
 
 # a version's size and mtime (Pv.stamp)
-def Pv.stamp.of(+path: String) -> IO(U32 & U32):
+def Pv.stamp.of(+path: String) -> IO(U32 & String):
   Pv.stamp.of.k(Nat.is_eq(HS.Hist.kind(path), 2n), path)
 
 def Pv.read(+key: String, +kind: U32, +path: String, +q: Chan(PMsg), +dir: String) -> IO(Unit):
   do IO<Unit>:
-    st : U32 & U32 <- Pv.stamp.of(path)
+    st : U32 & String <- Pv.stamp.of(path)
     exe : String <- H.Sys.exe_path()
     r : PR.Ran <- PR.Proc.run(EX.Exe.child(exe), ["--plot", U32.show(kind), path, Pv.infos(dir, key)], "/")
     Pv.read.k(st, r, key, kind, q)
@@ -802,11 +814,11 @@ def Pv.poll.go(changed: Bool, re: Nat, s: Src, +q: Chan(PMsg), +dir: String) -> 
     case False{} 0n _:
       IO.pure(Src, s)
 
-def Pv.poll.st(sm: U32 & U32, s: Src, +q: Chan(PMsg), +dir: String) -> IO(Src):
+def Pv.poll.st(sm: U32 & String, s: Src, +q: Chan(PMsg), +dir: String) -> IO(Src):
   (+s2, +m2) = sm
   match s:
     case Src{k, kd, p, +sz, +mt, +re, b, pl}:
-      Pv.poll.go(Bool.or(U32.is_ne(s2, sz), U32.is_ne(m2, mt)), re, Src{k, kd, p, sz, mt, re, b, pl}, q, dir)
+      Pv.poll.go(RF.Revision.changed(s2, m2, sz, mt), re, Src{k, kd, p, sz, mt, re, b, pl}, q, dir)
 
 # one source's turn: a changed size or mtime reads it again (not while a
 # read is under way)
@@ -816,7 +828,7 @@ def Pv.poll.one(busy: Bool, s: Src, +q: Chan(PMsg), +dir: String) -> IO(Src):
       IO.pure(Src, s)
     case False{} Src{k, kd, +p, sz, mt, re, b, pl}:
       do IO<Src>:
-        st : U32 & U32 <- Pv.stamp.of(p)
+        st : U32 & String <- Pv.stamp.of(p)
         Pv.poll.st(st, Src{k, kd, p, sz, mt, re, b, pl}, q, dir)
 
 def Src.busy(s: Src) -> Bool:
@@ -853,7 +865,7 @@ def Pv.next(any: Bool, +q: Chan(PMsg)) -> IO(Bool):
 # Messages
 # --------
 
-def Pv.got.src(hit: Bool, s: Src, +sz: U32, +mt: U32, +m: Maybe<&2, P.Plot>) -> Src:
+def Pv.got.src(hit: Bool, s: Src, +sz: U32, +mt: String, +m: Maybe<&2, P.Plot>) -> Src:
   match hit s m:
     case True{} Src{k, kd, p, _, _, re, _, _} Some{pl}:
       Src{k, kd, p, sz, mt, re, False{}, Some{pl}}
@@ -862,7 +874,7 @@ def Pv.got.src(hit: Bool, s: Src, +sz: U32, +mt: U32, +m: Maybe<&2, P.Plot>) -> 
     case False{} _ _:
       s
 
-def Pv.got.srcs(ss: List<&2, Src>, +key: String, +sz: U32, +mt: U32, +m: Maybe<&2, P.Plot>) -> List<&2, Src>:
+def Pv.got.srcs(ss: List<&2, Src>, +key: String, +sz: U32, +mt: String, +m: Maybe<&2, P.Plot>) -> List<&2, Src>:
   match ss:
     case Nil{}:
       Nil{}

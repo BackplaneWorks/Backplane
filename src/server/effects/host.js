@@ -232,6 +232,18 @@ function fs_stat(path) {
   }
 }
 
+function fs_revision(path) {
+  try {
+    const st = require("fs").statSync(path, { bigint: true });
+    const rev = [st.dev, st.ino, st.size, st.mtimeNs / 1000000000n,
+      st.mtimeNs % 1000000000n, st.ctimeNs / 1000000000n,
+      st.ctimeNs % 1000000000n].join(":");
+    return io_done(io_tup(Number(st.size > 0xffffffffn ? 0xffffffffn : st.size), rev));
+  } catch (e) {
+    return io_fail(host_errno(e));
+  }
+}
+
 function fs_list(path) {
   try {
     return io_done(host_list(require("fs").readdirSync(path)));
@@ -463,6 +475,7 @@ io_eff(CID(Sock.raw), sock_raw);
 io_eff(CID(Fd.shut), fd_shut);
 io_eff(CID(Fd.close), fd_close);
 io_eff(CID(FS.stat), fs_stat);
+io_eff(CID(FS.revision), fs_revision);
 io_eff(CID(FS.list), fs_list);
 io_eff(CID(FS.mkdirs), fs_mkdirs);
 io_eff(CID(FS.rename), fs_rename);

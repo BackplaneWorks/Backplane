@@ -1,4 +1,5 @@
 import Base
+import ../core/refresh.bend as RF
 import ../core/msgs.bend as MSG
 import ../core/winnote.bend as NT
 import ../core/i18n.bend as I18
@@ -1726,7 +1727,7 @@ def Watch.stat(r: Result<&1, &1, U32 & String, U32 & U32 & U32>) -> U32 & U32:
     case Fail{_}:
       (0, 0)
 
-def Watch.step.k(changed: Bool, re: Nat, +s2: U32, +m2: U32, +key: String, +path: String, +q: Chan(ShellMsg), k: U32 -> U32 -> Nat -> IO(Unit)) -> IO(Unit):
+def Watch.step.k(changed: Bool, re: Nat, +s2: U32, +m2: String, +key: String, +path: String, +q: Chan(ShellMsg), k: U32 -> String -> Nat -> IO(Unit)) -> IO(Unit):
   match changed re:
     case True{} _:
       do IO<Unit>:
@@ -1741,21 +1742,21 @@ def Watch.step.k(changed: Bool, re: Nat, +s2: U32, +m2: U32, +key: String, +path
     case False{} 0n:
       k(s2, m2, 0n)
 
-def Watch.step(sm: U32 & U32, +sz: U32, +mt: U32, re: Nat, +key: String, +path: String, +q: Chan(ShellMsg), k: U32 -> U32 -> Nat -> IO(Unit)) -> IO(Unit):
+def Watch.step(sm: U32 & String, +sz: U32, +mt: String, re: Nat, +key: String, +path: String, +q: Chan(ShellMsg), k: U32 -> String -> Nat -> IO(Unit)) -> IO(Unit):
   (+s2, +m2) = sm
-  Watch.step.k(Bool.or(U32.is_ne(s2, sz), U32.is_ne(m2, mt)), re, s2, m2, key, path, q, k)
+  Watch.step.k(RF.Revision.changed(s2, m2, sz, mt), re, s2, m2, key, path, q, k)
 
-# every 150 ms: a changed size or mtime re-reads the file; one more read
-# ~1 s after a change catches a second save within the same second (a 3D
+# every 150 ms: schematic revisions retain subsecond times and identity.
+# Keep the delayed reread for coarse filesystems/other source kinds (a 3D
 # model re-exports only on a change: exports take seconds)
-def Watch.loop(fuel: Nat, +key: String, +path: String, +sz: U32, +mt: U32, re: Nat, +q: Chan(ShellMsg)) -> IO(Unit):
+def Watch.loop(fuel: Nat, +key: String, +path: String, +sz: U32, +mt: String, re: Nat, +q: Chan(ShellMsg)) -> IO(Unit):
   match fuel:
     case 0n:
       IO.pure(Unit, Unit{})
     case 1n+f:
       do IO<Unit>:
         IO.sleep(150)
-        st : U32 & U32 <- PV.Pv.stamp.of(path)
+        st : U32 & String <- PV.Pv.stamp.of(path)
         Watch.step(st, sz, mt, Bool.pick(Nat, U32.is_eq(Src.kind(key), 2), 0n, re), key, path, q, s2 => m2 => r2 => Watch.loop(f, key, path, s2, m2, r2, q))
 
 def Watch.none(+key: String) -> String:
@@ -1768,7 +1769,7 @@ def Watch.go.k(none: Bool, once: Bool, +key: String, +path: String, +q: Chan(She
     case False{} True{}:
       Watch.read(path, key, q)
     case False{} False{}:
-      Bool.pick(IO(Unit), PV.Pv.stamp.fixed(path), Watch.read(path, key, q), Watch.loop(S.Fuel.forever(), key, path, 0, 0, 0n, q))
+      Bool.pick(IO(Unit), PV.Pv.stamp.fixed(path), Watch.read(path, key, q), Watch.loop(S.Fuel.forever(), key, path, 0, "", 0n, q))
 
 # (the Browser tab, source kind 3, watches no file: its frames come as
 # images, shot:<page>:<n>, which the layout asks for; the raw frame file it

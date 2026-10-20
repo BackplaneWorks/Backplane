@@ -795,6 +795,40 @@ static void __attribute__((constructor)) fs_stat_use(void) {
 
 #endif
 
+#ifdef CID(FS.revision)
+
+Term fs_revision_run(Env e, Term* f, IoWork* w) {
+  u64 n = 0;
+  char* p = io_cstr(e, f[0], &n);
+  struct stat st;
+  int r = io_nul(p, n) ? -1 : stat(p, &st);
+  int code = r < 0 ? (io_nul(p, n) ? EILSEQ : errno) : 0;
+  free(p);
+  if (code) return io_fail(e, code, NULL);
+#if defined(__APPLE__)
+  long mn = st.st_mtimespec.tv_nsec, cn = st.st_ctimespec.tv_nsec;
+#else
+  long mn = st.st_mtim.tv_nsec, cn = st.st_ctim.tv_nsec;
+#endif
+  // Decimal fields are kept whole. Reads do not change this revision:
+  // atime is deliberately absent. Identity catches atomic replacement,
+  // ctime catches a writer that preserves mtime.
+  char rev[256];
+  int len = snprintf(rev, sizeof(rev), "%llu:%llu:%lld:%lld:%ld:%lld:%ld",
+    (unsigned long long)st.st_dev, (unsigned long long)st.st_ino,
+    (long long)st.st_size, (long long)st.st_mtime, mn,
+    (long long)st.st_ctime, cn);
+  if (len < 0 || (size_t)len >= sizeof(rev)) return io_fail(e, EOVERFLOW, NULL);
+  u32 size = st.st_size > 0xFFFFFFFFll ? 0xFFFFFFFFu : (u32)st.st_size;
+  return io_done(e, io_tup(e, (Term)size, io_str(e, rev, (u64)len)));
+}
+
+static void __attribute__((constructor)) fs_revision_use(void) {
+  io_eff(CID(FS.revision), fs_revision_run);
+}
+
+#endif
+
 #ifdef CID(FS.list)
 
 // The names in a directory, without "." and "..", in no set order.
