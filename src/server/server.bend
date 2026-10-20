@@ -38,6 +38,7 @@ import ../core/cbor.bend as CB
 import ./push.bend as PU
 import ./park.bend as PK
 import ./git.bend as GT
+import ./filelist.bend as FL
 import ./gh.bend as GH
 import ./wake.bend as WJ
 import ../core/wake.bend as WK
@@ -2366,41 +2367,17 @@ def GitJob.run.git(+tx: AG.Tx, +job: String, +inbox: Chan(Msg), +client: U32, +i
 # repository, else a bounded walk; at most 3000), and 9:00 tomorrow in the
 # machine's time zone for a snooze.
 
-def Files.limit() -> String:
-  "3000"
-
-def Files.cmd(repo: Bool) -> String:
-  match repo:
-    case True{}:
-      "git ls-files --cached --others --exclude-standard | head -n " ++ Files.limit()
-    case False{}:
-      "find . -maxdepth 8 -type f -not -path '*/.*' -not -path '*/node_modules/*' 2>/dev/null | head -n " ++ Files.limit() ++ " | sed 's|^\\./||'"
-
-def Files.str(blank: Bool, l: String, rest: List<&2, J.Json>) -> List<&2, J.Json>:
-  match blank:
-    case True{}:
-      rest
-    case False{}:
-      J.Str{l} <> rest
-
-def Files.strs(ls: List<&2, String>) -> List<&2, J.Json>:
-  match ls:
-    case Nil{}:
-      Nil{}
-    case +l <> t:
-      Files.str(String.is_empty(String.trim(l)), l, Files.strs(t))
-
 def Files.sent(r: P.Ran, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String) -> IO(Unit):
   match r:
     case P.Ran{0, out}:
-      GitJob.reply(inbox, client, id, True{}, J.Json.obj([J.KV{"files", J.Json.arr(Files.strs(String.lines(out)))}, J.KV{"thread", J.Str{thread}}]))
+      GitJob.reply(inbox, client, id, True{}, J.Json.obj([J.KV{"files", FL.FileList.result(out)}, J.KV{"thread", J.Str{thread}}]))
     case P.Ran{_, out}:
       GitJob.reply(inbox, client, id, False{}, J.Json.obj([J.KV{"text", J.Str{out}}]))
 
 def Files.list(+inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String) -> IO(Unit):
   do IO<Unit>:
     repo : Bool <- GT.Git.is_repo(cwd)
-    r : P.Ran <- P.Proc.run("sh", ["-c", Files.cmd(repo)], cwd)
+    r : P.Ran <- P.Proc.run("sh", ["-c", FL.FileList.cmd(repo)], cwd)
     Files.sent(r, inbox, client, id, thread)
 
 # a thread's mechanical parts for the Mechanical page: every model and
