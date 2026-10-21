@@ -16,10 +16,18 @@
 # before the desktop archive's <plat> (d, l). OUT/install.sh carries the
 # sha256 of both archives for each platform.
 set -eu
-cd "$(dirname "$0")/.."
 [ $# -ge 5 ] && [ $(( ($# - 2) % 3 )) -eq 0 ] || { sed -n '2,17p' "$0"; exit 2; }
-ver=$1 out=$2
+abs() { case $1 in /*) printf '%s\n' "$1" ;; *) printf '%s/%s\n' "$PWD" "$1" ;; esac; }
+ver=$1 out=$(abs "$2")
 shift 2
+# inputs as absolute paths, before moving to the checkout
+n=$#
+while [ $n -gt 0 ]; do
+  set -- "$@" "$1" "$(abs "$2")" "$(abs "$3")"
+  shift 3
+  n=$((n - 3))
+done
+cd "$(dirname "$0")/.."
 case $ver in v[0-9]*) ;; *) echo "release-classic: version must be vX.Y.Z" >&2; exit 2 ;; esac
 mkdir -p "$out"
 out=$(cd "$out" && pwd)

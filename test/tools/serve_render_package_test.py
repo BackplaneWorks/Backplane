@@ -231,6 +231,10 @@ def classic(t):
         launch.parent.mkdir(parents=True, exist_ok=True)
         launch.write_text('#!/bin/sh\necho desktop\n')
         launch.chmod(0o755)
+        if plat.startswith('linux'):
+            (app / 'runtime').mkdir()
+            (app / 'runtime/chrome-sandbox').write_text('sandbox')
+            (app / 'runtime/backplane-desktop').write_text('electron')
         desk = rel / f'backplane-v0.12.0-{plat}.tar.gz'
         subprocess.run(['tar', '-czf', str(desk), '-C', str(app.parent), app.name], check=True)
         args += [plat, str(payload), str(desk)]
@@ -258,6 +262,7 @@ def classic(t):
     tools.mkdir()
     (tools / 'curl').write_text(f'#!/bin/sh\nwhile [ $# -gt 0 ]; do if [ "$1" = -o ]; then o=$2; fi; u=$1; shift; done\ncp "{rel}/$(basename "$u")" "$o"\n')
     (tools / 'uname').write_text('#!/bin/sh\ncase "$1" in -s) echo Linux;; -m) echo x86_64;; esac\n')
+    (tools / 'unshare').write_text('#!/bin/sh\nexit 1\n')
     for f in tools.iterdir():
         f.chmod(0o755)
     prefix, bin_ = t / 'inst', t / 'instbin'
@@ -267,6 +272,13 @@ def classic(t):
     check('classic: install.sh installs hub, launcher and desktop app',
           r.returncode == 0 and (prefix / 'backplane-serve').exists() and (prefix / 'desktop/backplane-open').exists()
           and (prefix / 'backplane').read_text() == LAUNCH.read_text() and (bin_ / 'backplane').resolve() == (prefix / 'backplane').resolve())
+    helper = prefix / 'desktop/runtime/chrome-sandbox'
+    check('classic: no user namespaces and no root chrome-sandbox: install.sh prints the one command',
+          f"sudo chown root:root '{helper}' && sudo chmod 4755 '{helper}'" in r.stdout)
+    (tools / 'unshare').write_text('#!/bin/sh\nexit 0\n')
+    (tools / 'unshare').chmod(0o755)
+    r2 = run(['sh', str(rel / 'install.sh')], env)
+    check('classic: with user namespaces it prints nothing about the sandbox', r2.returncode == 0 and 'chrome-sandbox' not in r2.stdout)
     r = run(['sh', str(rel / 'install.sh')], dict(env, BACKPLANE_PREFIX=str(t / 'inst2'), BACKPLANE_NO_DESKTOP_APP='1'))
     check('classic: BACKPLANE_NO_DESKTOP_APP=1 installs the hub alone', r.returncode == 0 and not (t / 'inst2/desktop').exists() and (t / 'inst2/backplane-serve').exists())
     bad = rel / 'backplane-v0.12.0-linux-x64.tar.gz'
@@ -275,6 +287,29 @@ def classic(t):
     r = run(['sh', str(rel / 'install.sh')], dict(env, BACKPLANE_PREFIX=str(t / 'inst3')))
     check('classic: a desktop archive that fails its sum installs nothing', r.returncode != 0 and not (t / 'inst3/backplane-serve').exists())
     bad.write_bytes(keep)
+    # the .deb, from the same two archives
+    debs = t / 'debs'
+    r = run(['sh', str(ROOT / 'scripts/release-deb.sh'), 'v0.12.0', str(debs), 'linux-x64',
+             str(rel / 'backplane-v0.12.0-classic-linux-x64.tar.gz'), str(rel / 'backplane-v0.12.0-linux-x64.tar.gz')], cwd=ROOT)
+    deb = debs / 'backplane_0.12.0_amd64.deb'
+    check('deb: builds', r.returncode == 0 and deb.exists())
+    x = t / 'debx'
+    x.mkdir()
+    subprocess.run(['ar', 'x', str(deb)], cwd=x, check=True)
+    data = subprocess.run(['tar', '-tzf', str(x / 'data.tar.gz')], capture_output=True, text=True).stdout.split()
+    check('deb: /opt/backplane has launcher, hub, web and the desktop app',
+          {'./opt/backplane/backplane', './opt/backplane/backplane-serve', './opt/backplane/web/index.html',
+           './opt/backplane/desktop/runtime/chrome-sandbox', './usr/bin/backplane', './etc/apparmor.d/backplane'} <= set(data))
+    listing = subprocess.run(['tar', '-tvzf', str(x / 'data.tar.gz')], capture_output=True, text=True).stdout.splitlines()
+    check('deb: nothing group- or world-writable', all(l[5] != 'w' and l[8] != 'w' for l in listing if not l.startswith('l')))
+    (x / 'c').mkdir()
+    subprocess.run(['tar', '-xzf', str(x / 'control.tar.gz'), '-C', str(x / 'c')], check=True)
+    post = (x / 'c/postinst').read_text()
+    check('deb: postinst sets chrome-sandbox root 4755 and loads the AppArmor profile',
+          'chown root:root /opt/backplane/desktop/runtime/chrome-sandbox' in post and 'chmod 4755' in post and 'apparmor_parser -r' in post)
+    control = (x / 'c/control').read_text()
+    check('deb: version 0.12.0, amd64, managed (no self-update)', 'Version: 0.12.0\n' in control and 'Architecture: amd64' in control
+          and 'BACKPLANE_NO_UPDATE=1' in subprocess.run(['tar', '-xzOf', str(x / 'data.tar.gz'), './usr/bin/backplane'], capture_output=True, text=True).stdout)
     # what a 0.11 updater does: rename backplane, backplane-serve, web into place
     old = t / 'old'
     (old / 'web').mkdir(parents=True)
