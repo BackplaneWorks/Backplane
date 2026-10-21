@@ -10,7 +10,7 @@ set -eu
 cd "$(dirname "$0")/.."
 ver=$1 plat=$2
 src="dist/pkg/backplane-$plat"
-[ -x "$src/backplane" ] || { echo "run scripts/package.sh $ver $plat first"; exit 1; }
+[ -x "$src/backplane-serve" ] || { echo "run scripts/package.sh $ver $plat first"; exit 1; }
 case $plat in
   linux-x64) arch=x86_64 deb=amd64 ;;
   linux-arm64) arch=aarch64 deb=arm64 ;;
@@ -20,7 +20,7 @@ esac
 v=${ver#v}
 dv=$(printf '%s' "$v" | tr '-' '~')
 # the newest glibc the binaries ask for
-objects="$src/backplane $src/backplane-serve"
+objects="$src/backplane-serve"
 cef_deps=
 if [ "$plat" = linux-x64 ]; then
   [ -f "$src/browser-runtime/cef/libcef.so" ] || { echo 'Linux x64 package is missing CEF' >&2; exit 1; }
@@ -45,7 +45,9 @@ cat > "$app/AppRun" <<'EOF'
 #!/bin/sh
 here=$(dirname "$(readlink -f "$0")")
 export BACKPLANE_NO_UPDATE=1
-exec "$here/usr/lib/backplane/backplane" "$@"
+lib=$here/usr/lib/backplane
+[ -x "$lib/backplane" ] && exec "$lib/backplane" "$@"
+exec "$lib/backplane-serve" "$@"
 EOF
 chmod +x "$app/AppRun"
 tool=${APPIMAGETOOL:-build/appimagetool-$arch.AppImage}
@@ -60,6 +62,7 @@ ARCH=$arch APPIMAGE_EXTRACT_AND_RUN=1 "$tool" --no-appstream "$app" "dist/backpl
 root="$work/deb"
 mkdir -p "$root/opt" "$root/usr/bin" "$root/usr/share/applications" "$root/usr/share/icons/hicolor/scalable/apps"
 cp -R "$src" "$root/opt/backplane"
+[ -e "$root/opt/backplane/backplane" ] || ln -s backplane-serve "$root/opt/backplane/backplane"
 for b in backplane backplane-serve; do
   printf '#!/bin/sh\nBACKPLANE_NO_UPDATE=1 exec /opt/backplane/%s "$@"\n' "$b" > "$root/usr/bin/$b"
   chmod 755 "$root/usr/bin/$b"
@@ -84,7 +87,7 @@ Section: devel
 Priority: optional
 Description: Agentic hardware development, with live KiCad viewers
  Agent threads (Claude Code, Codex) beside board, schematic and 3D viewers
- that follow the project's files, in a native window.
+ that follow the project's files.
 EOF
 tar -czf "$work/control.tar.gz" --owner=0 --group=0 --numeric-owner -C "$work/control" .
 tar -czf "$work/data.tar.gz" --owner=0 --group=0 --numeric-owner -C "$root" .

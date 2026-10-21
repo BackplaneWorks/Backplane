@@ -3,8 +3,8 @@ import ./glb.bend as G
 import ./images.bend as IM
 
 # Mechanical parts (pure). Agents model parts in FreeCAD and keep them in
-# the project's `mech/` folder as STEP (or GLB); `backplane --render
-# MODEL` draws each from the same few views into `renders/` beside it,
+# the project's `mech/` folder as STEP (or GLB); renders of each
+# from the same few views live in `renders/` beside it,
 # named `<stem>.<view>.png`. The hub lists that folder (mech.list: one
 # cksum line per file, "<crc> <size> <path>", paths from the project
 # root), and every client's Mechanical page shows the parts, each one's

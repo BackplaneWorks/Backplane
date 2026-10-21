@@ -1,7 +1,8 @@
 #!/bin/sh
 # Build into dist/:
-#   dist/backplane        the app: native window + hub + web server
-#   dist/backplane-serve  hub + web server only (no X11 needed)
+#   dist/backplane-serve  the hub and web server (src/server/main.bend)
+#   dist/backplane        the launcher: the desktop app when installed, else
+#                         the hub (deploy/backplane-launch.sh)
 #   dist/web/             the web client (for other devices)
 #   dist/backplane-browser, dist/backplane-step2glb, dist/backplane-voice, dist/backplane-kipc
 #                         host helpers (with bun)
@@ -27,7 +28,7 @@ mode=${1:-all}
 pre=${BACKPLANE_PREBUILT:-}
 # CI's "laws" job (scripts/check.sh) has already checked every file, these
 # three roots included: BACKPLANE_SKIP_CHECK=1 does not do it again
-[ "$pre" = 1 ] || [ "${BACKPLANE_SKIP_CHECK:-}" = 1 ] || for f in src/web/app.bend src/server/main.bend src/app/main.bend; do
+[ "$pre" = 1 ] || [ "${BACKPLANE_SKIP_CHECK:-}" = 1 ] || for f in src/web/app.bend src/server/main.bend; do
   bend_check "$f" || exit 1
 done
 if [ -n "${BACKPLANE_X11:-}" ]; then
@@ -62,24 +63,12 @@ if [ "$mode" = emit ]; then
   exit 0
 fi
 # native binaries compile split in parallel, at low priority
-# (scripts/build-app.sh; BACKPLANE_JOBS caps the compiles)
-# the window needs X11 (libX11.so.6, dlopen'd); a Mac has none, so there the
-# app always runs as hub + web UI, the same program as backplane-serve. The
-# app's C also takes far more memory than a macOS runner (7 GB) has; build
-# it only where a window can open
-if [ "$(uname -s)" = Linux ]; then
-  scripts/build-app.sh src/app/main.bend dist/backplane
-  # argv[0] selects the original server entry; no second Bend emit/compile.
-  # Copy, rather than symlink: self-exec must keep the server's pathname.
-  cp dist/backplane dist/backplane-serve
-elif [ "$(uname -s)" = Darwin ]; then
-  scripts/build-app.sh src/server/main.bend dist/backplane-serve
-  cp dist/backplane-serve dist/backplane
-else
-  scripts/build-app.sh src/server/main.bend dist/backplane-serve
-  scripts/build-app.sh src/app/main.bend dist/backplane
-fi
-cp dist/backplane build/backplane
+# (scripts/build-app.sh; BACKPLANE_JOBS caps the compiles). The window
+# binary (src/app/main.bend) is no longer built: past Bend's 65,536
+# function IDs, and the desktop UI is the Electron app over the hub
+scripts/build-app.sh src/server/main.bend dist/backplane-serve
+cp deploy/backplane-launch.sh dist/backplane
+chmod 755 dist/backplane
 # the host helpers (Bun): the agents' browser, STEP -> GLB for the 3D
 # viewer and speech to text for dictation; the app runs without them, so a machine without bun skips them
 if command -v bun >/dev/null 2>&1 || [ -x "$HOME/.bun/bin/bun" ]; then

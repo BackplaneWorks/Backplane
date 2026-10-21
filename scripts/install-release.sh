@@ -2,9 +2,13 @@
 # Shared public installer/updater path. No restart or user-data changes.
 set -eu
 src=$1 prefix=$2
-for file in backplane backplane-serve; do
+# backplane-serve is required; `backplane` (the launcher,
+# deploy/backplane-launch.sh) may be left out
+for file in backplane-serve; do
   [ -f "$src/$file" ] || { echo "release missing $file" >&2; exit 1; }
 done
+launcher=0
+[ ! -e "$src/backplane" ] || launcher=1
 [ -d "$src/web" ] || { echo 'release missing web' >&2; exit 1; }
 mkdir -p "$prefix"
 if [ -d "$src/browser-runtime" ]; then
@@ -30,4 +34,9 @@ done
 if [ -d "$src/licenses" ]; then
   rm -rf "$prefix/licenses"
   mv "$src/licenses" "$prefix/licenses"
+fi
+# without a launcher in the release, `backplane` (and the links to it) must
+# not stay the old window binary or point at nothing: it runs the hub
+if [ "$launcher" = 0 ]; then
+  ln -sfn backplane-serve "$prefix/backplane.new" && mv -f "$prefix/backplane.new" "$prefix/backplane"
 fi

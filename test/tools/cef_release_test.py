@@ -77,6 +77,7 @@ class PublicRelease(unittest.TestCase):
     def install(self):
         self.package()
         archive = self.repo / 'dist/backplane-v9.0.0-test-linux-x64-cef.tar.gz'
+        # the public installer takes it under its classic name, hub only (no desktop app here)
         digest = hashlib.sha256(archive.read_bytes()).hexdigest()
         script = (SOURCE / 'deploy/install.sh.in').read_text().replace('@VERSION@', 'v9.0.0-test').replace('@SHA_LINUX_X64@', digest)
         installer = self.root / 'install.sh'
@@ -84,10 +85,10 @@ class PublicRelease(unittest.TestCase):
         # The real installer still verifies SHA256 and extracts the real archive.
         curl = self.repo / 'bin/curl'
         curl.write_text('#!/bin/sh\nwhile [ "$#" -gt 0 ]; do case "$1" in -o) out=$2; shift 2;; *) url=$1; shift;; esac; done\n'
-                        'case "$url" in */backplane-v9.0.0-test-linux-x64-cef.tar.gz) ;; *) exit 2;; esac\n'
+                        'case "$url" in */backplane-v9.0.0-test-classic-linux-x64.tar.gz) ;; *) exit 2;; esac\n'
                         'cp "$TEST_RELEASE_ARCHIVE" "$out"\n')
         curl.chmod(0o755)
-        env = dict(self.env, TEST_RELEASE_ARCHIVE=str(archive))
+        env = dict(self.env, TEST_RELEASE_ARCHIVE=str(archive), BACKPLANE_NO_DESKTOP_APP='1')
         subprocess.run(['sh', str(installer)], env=env, check=True, capture_output=True)
 
     def update(self, package):

@@ -26,6 +26,7 @@ class DesktopInstallTest(unittest.TestCase):
         (package / "web").mkdir()
         (package / "web" / "index.html").write_text("fixture\n")
         executable = '#!/bin/sh\nprintf "%s\\n" "$0" "$@" > "$DESKTOP_LAUNCH_RECORD"\n'
+        # backplane is the launcher (deploy/backplane-launch.sh); a stub stands in
         for name in ["backplane", "backplane-serve"]:
             path = package / name
             path.write_text(executable)
@@ -42,6 +43,8 @@ class DesktopInstallTest(unittest.TestCase):
         script = (ROOT / "deploy/install.sh.in").read_text().replace("@VERSION@", "v0.0.0-test")
         for platform in ["LINUX_X64", "LINUX_ARM64", "DARWIN_ARM64"]:
             script = script.replace("@SHA_" + platform + "@", digest)
+            # the stub curl serves this one archive as the desktop app too
+            script = script.replace("@DESKTOP_SHA_" + platform + "@", digest)
         self.installer = self.root / "install.sh"
         self.installer.write_text(script)
         self.tools = self.root / "tools"
@@ -134,6 +137,7 @@ class DesktopInstallTest(unittest.TestCase):
         digest = hashlib.sha256(self.archive.read_bytes()).hexdigest()
         script = self.installer.read_text()
         script = re.sub(r'^SHA_DARWIN_ARM64="[^"]*"', 'SHA_DARWIN_ARM64="' + digest + '"', script, flags=re.M)
+        script = re.sub(r'^DESKTOP_SHA_DARWIN_ARM64="[^"]*"', 'DESKTOP_SHA_DARWIN_ARM64="' + digest + '"', script, flags=re.M)
         self.installer.write_text(script)
         self.tool("uname", 'case "$1" in -s) echo Darwin;; -m) echo arm64;; esac')
         self.install()
