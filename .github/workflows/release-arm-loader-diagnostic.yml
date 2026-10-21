@@ -1,0 +1,49 @@
+name: Diagnose saved ARM service loader mapping (artifact only)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: release-arm-loader-diagnostic-8147b68d
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 8147b68dbc9bcddad7e3b51ae7768ed9eb211ecc
+          persist-credentials: false
+      - name: Check out trusted measurement tools separately
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: build/recovery-tools
+          persist-credentials: false
+      - name: Download original configured native artifact without recompilation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api repos/i2cjak/Backplane/actions/artifacts/12357277029/zip > "$RUNNER_TEMP/original-native.zip"
+          printf '%s  %s\n' 5f4b30a56061b5c00a258a8d2f8800bfc6547e2d40967b42d1474f8b54ac20d9 "$RUNNER_TEMP/original-native.zip" | sha256sum -c -
+      - name: Capture one bounded original-binary loader debug and headers
+        shell: bash
+        run: |
+          python3 build/recovery-tools/scripts/release-arm-loader-diagnostic.py --source-root "$GITHUB_WORKSPACE" --archive "$RUNNER_TEMP/original-native.zip" --out "$GITHUB_WORKSPACE/build/native-arm-recovery"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-arm64-loader-diagnostic-8147
+          path: |
+            build/native-arm-recovery/diagnostic/
+            build/native-arm-recovery/DIAGNOSTIC.json
+          if-no-files-found: warn
+          retention-days: 14
