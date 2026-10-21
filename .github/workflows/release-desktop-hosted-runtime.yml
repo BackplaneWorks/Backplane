@@ -1,0 +1,64 @@
+name: Essential existing desktop runtime and archive (artifact only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      request_url:
+        type: string
+        required: true
+      request_sha256:
+        type: string
+        required: true
+      target:
+        type: choice
+        options: [both, linux-x64, darwin-arm64]
+        default: both
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-desktop-essential-8147-${{ inputs.target }}
+  cancel-in-progress: false
+
+jobs:
+  runtime:
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(inputs.target == 'both' && '["linux-x64","darwin-arm64"]' || format('["{0}"]', inputs.target)) }}
+    runs-on: ${{ matrix.target == 'linux-x64' && 'ubuntu-24.04' || 'macos-14' }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.3'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Require native host then run exact existing desktop artifacts
+        env:
+          REQUEST_URL: ${{ inputs.request_url }}
+          REQUEST_SHA: ${{ inputs.request_sha256 }}
+          TARGET: ${{ matrix.target }}
+        shell: bash
+        run: |
+          python3 scripts/release-desktop-hosted-runtime.py --request-url "$REQUEST_URL" --request-sha256 "$REQUEST_SHA" --target "$TARGET" --out "$GITHUB_WORKSPACE/build/essential-runtime"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: desktop-essential-${{ matrix.target }}
+          path: |
+            build/essential-runtime/evidence/
+            build/essential-runtime/acceptance/
+            build/essential-runtime/dist/
+            build/essential-runtime/*.json
+            build/essential-runtime/*.stdout
+            build/essential-runtime/*.stderr
+          if-no-files-found: warn
+          retention-days: 14
