@@ -41,6 +41,24 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Allow app user namespaces on ephemeral Linux runner
+        if: startsWith(matrix.target, 'linux-')
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          # Keep global userns restrictions and stage modes intact. Permit only
+          # the actual app path and the existing host capability probe.
+          python3 - <<'PY' > "$RUNNER_TEMP/backplane-userns.profile"
+          import os, re
+          app = os.environ['GITHUB_WORKSPACE'] + '/build/essential-runtime/stage-input/stage/runtime/backplane-desktop'
+          assert re.fullmatch(r'/[-A-Za-z0-9_/]+', app)
+          print('abi <abi/4.0>,')
+          for name, exe in [('backplane-release-electron', app), ('backplane-release-probe', '/usr/bin/unshare')]:
+              print(f'profile {name} {exe} flags=(unconfined) {{\n  userns,\n}}')
+          PY
+          sudo apparmor_parser --replace "$RUNNER_TEMP/backplane-userns.profile"
+          unshare --user --map-root-user /bin/true
       - name: Require native host then run exact existing desktop artifacts
         env:
           REQUEST_URL: ${{ inputs.request_url }}
@@ -60,5 +78,6 @@ jobs:
             build/essential-runtime/*.json
             build/essential-runtime/*.stdout
             build/essential-runtime/*.stderr
+            ${{ runner.temp }}/backplane-userns.profile
           if-no-files-found: warn
           retention-days: 14
