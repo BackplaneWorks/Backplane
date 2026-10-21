@@ -115,8 +115,23 @@ if [ "$os" = linux ] && [ -z "${BACKPLANE_NO_DESKTOP:-}" ] && [ -f "$pkg/backpla
   command -v gtk-update-icon-cache >/dev/null 2>&1 && gtk-update-icon-cache -q -t "$data/icons/hicolor" >/dev/null 2>&1 || true
   menu=1
 fi
+# Linux: the desktop app's sandbox needs user namespaces or a root-owned
+# chrome-sandbox (Ubuntu 23.10+ restricts namespaces); say how, never skip it
+sandbox_fix=
+if [ "$os" = linux ] && [ -n "$app" ]; then
+  helper="$prefix/desktop/runtime/chrome-sandbox"
+  if ! { command -v unshare >/dev/null 2>&1 && unshare -Ur true >/dev/null 2>&1; } \
+     && [ "$(stat -c '%u:%g:%a' "$helper" 2>/dev/null)" != "0:0:4755" ]; then
+    q=$(printf '%s' "$helper" | sed "s/'/'\\\\''/g")
+    sandbox_fix="sudo chown root:root '$q' && sudo chmod 4755 '$q'"
+  fi
+fi
 echo
 echo "  Backplane $VER is installed. Run: backplane"
+if [ -n "$sandbox_fix" ]; then
+  echo "  The desktop app needs its sandbox set up once on this system; run:"
+  echo "    $sandbox_fix"
+fi
 [ -n "$menu" ] && echo "  It is also in your applications menu."
 case ":$PATH:" in
   *":$bin:"*) ;;
