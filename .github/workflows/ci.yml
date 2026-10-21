@@ -105,6 +105,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang-19 libx11-dev
           sudo ln -sf /usr/bin/clang-19 /usr/local/bin/clang
+      - name: Publish only successful model conversions
+        run: |
+          set -euo pipefail
+          scripts/build-app.sh test/native/model_cache_test.bend build/model_cache_test
+          build/model_cache_test | tee build/model-cache.log
+          if grep -q '^FAIL ' build/model-cache.log; then exit 1; fi
+          test "$(grep -c '^ok ' build/model-cache.log)" -eq 27
       - name: Object cache
         # the compiled C units, by hash of their text (scripts/cc-unit.sh): an
         # unchanged unit is not compiled again. Never holds the Google client
@@ -119,6 +126,7 @@ jobs:
         env:
           BACKPLANE_SKIP_CHECK: "1" # the laws job checks every file
       - run: scripts/smoke.sh
+      - run: bun test/tools/model_cache_e2e.ts dist/backplane
       - uses: actions/upload-artifact@v4
         with:
           name: backplane-${{ matrix.target }}

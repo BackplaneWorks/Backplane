@@ -4,6 +4,7 @@ import ./host.bend as H
 import ./kicad.bend as K
 import ../core/mech.bend as MC
 import ./proc.bend as PR
+import ./modelcache.bend as CP
 import ../core/board.bend as B
 import ../core/pcb2d.bend as P2
 import ../core/schematic.bend as SC
@@ -418,36 +419,14 @@ def Pv.glb.flags(+bare: Bool, +full: Bool, +out: String, +path: String) -> List<
   List.append(&2, String, ["pcb", "export", "glb"], List.append(&2, String, Bool.pick(List<&2, String>, bare, ["--no-components"], ["--subst-models"]),
     ["--include-pads", "--include-soldermask", "--include-silkscreen", "-f", "-o", out, path]))
 
-# a STEP's GLB is written beside and moved in whole: a reader never meets
-# half of one
-def Pv.step.ran.to(r: PR.Ran, +from: String, +out: String) -> IO(PR.Ran):
-  IO.bind(Result<&1, &1, U32 & String, Unit>, PR.Ran, H.FS.rename(from, out), m => IO.pure(PR.Ran, r))
-
-def Pv.step.ran(r: PR.Ran, +out: String) -> IO(PR.Ran):
-  Pv.step.ran.to(r, out ++ ".part", out)
-
-# a board's GLB is written beside and moved in whole only when KiCad
-# succeeded, so a half-written export is never taken for a cached one
-def Pv.board.ran.k(ok: Bool, r: PR.Ran, +out: String) -> IO(PR.Ran):
-  match ok:
-    case True{}:
-      Pv.step.ran.to(r, out ++ ".part.glb", out)
-    case False{}:
-      IO.pure(PR.Ran, r)
-
-def Pv.board.ran(r: PR.Ran, +out: String) -> IO(PR.Ran):
-  match r:
-    case PR.Ran{+c, +log}:
-      Pv.board.ran.k(U32.is_eq(c, 0), PR.Ran{c, log}, out)
-
 def Pv.glb.run(glb: Bool, step: Bool, +bare: Bool, +full: Bool, +path: String, +out: String) -> IO(PR.Ran):
   match glb step:
     case True{} _:
       IO.pure(PR.Ran, PR.Ran{0, ""})
     case False{} True{}:
-      IO.bind(String, PR.Ran, Pv.step2glb(), x => IO.bind(PR.Ran, PR.Ran, PR.Proc.run(x, [path, out ++ ".part"], "/"), r => Pv.step.ran(r, out)))
+      IO.bind(String, PR.Ran, Pv.step2glb(), x => CP.ModelCache.convert(out, from => PR.Proc.run(x, [path, from], "/")))
     case False{} False{}:
-      IO.bind(String, PR.Ran, Pv.cli(), c => IO.bind(PR.Ran, PR.Ran, K.KiCad.run(c, Pv.glb.flags(bare, full, out ++ ".part.glb", path)), r => Pv.board.ran(r, out)))
+      IO.bind(String, PR.Ran, Pv.cli(), c => CP.ModelCache.convert(out, from => K.KiCad.run(c, Pv.glb.flags(bare, full, from, path))))
 
 # how many parts kicad-cli found no 3D model for ("Could not add 3D model
 # for R1."): the phone says so, else a bare board looks like a bug
@@ -510,7 +489,7 @@ def Pv.step.out(+path: String) -> IO(String):
   do IO<String>:
     +dir : String <- Pv.cache()
     st : Result<&1, &1, U32 & String, U32 & U32 & U32> <- H.FS.stat(path)
-    return dir ++ "/" ++ U32.show(P.Key.hash(path ++ "|" ++ Pv.ver(st), 2166136261)) ++ ".glb"
+    return dir ++ "/" ++ U32.show(P.Key.hash("step1|" ++ path ++ "|" ++ Pv.ver(st), 2166136261)) ++ ".glb"
 
 # a board's model, cached per version of the board file (its size and
 # time) and per export (with its parts or bare): KiCad's export takes half a

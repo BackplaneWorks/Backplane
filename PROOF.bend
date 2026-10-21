@@ -4745,6 +4745,14 @@ def Laws.claude_kistack_plugin():
 def Laws.runtime_no_kistack_block():
   {==}
 
+def Laws.model_cache_missing_rejected(code, text): {==}
+
+def Laws.model_cache_empty_rejected(modified): {==}
+
+def Laws.model_cache_directory_rejected(size, modified): {==}
+
+def Laws.model_cache_file_accepted(): {==}
+
 def Laws.mech_render_path():
   {==}
 

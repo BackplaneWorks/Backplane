@@ -1,4 +1,5 @@
 import Base
+import ./src/server/modelcache.bend as MCACHE
 import ./src/core/auth.bend as AUTH
 import ./src/core/http.bend as HTTPAUTH
 import ./src/core/pcb2d.bend as PCB2 # PCB viewer text
@@ -1724,6 +1725,24 @@ law runtime_no_kistack_block:
   {String.contains(PM.Prompt.runtime("Backplane"), "<kistack_skills>") == False{} : Bool}
 
 # a part's render from a view goes to renders/ beside it, named by view
+# Converted models must be nonempty regular files before publication.
+law model_cache_missing_rejected:
+  for code: U32
+  for text: String
+  {MCACHE.ModelCache.nonempty(Fail{(code, text)}) == False{} : Bool}
+
+law model_cache_empty_rejected:
+  for modified: U32
+  {MCACHE.ModelCache.nonempty(Done{(0, (0, modified))}) == False{} : Bool}
+
+law model_cache_directory_rejected:
+  for size: U32
+  for modified: U32
+  {MCACHE.ModelCache.nonempty(Done{(1, (size, modified))}) == False{} : Bool}
+
+law model_cache_file_accepted:
+  {MCACHE.ModelCache.nonempty(Done{(0, (20, 0))}) == True{} : Bool}
+
 law mech_render_path:
   {MCH.Mech.render("mech/bracket.step", "iso") == "mech/renders/bracket.iso.png" : String}
 
