@@ -1,0 +1,57 @@
+{
+  "schema": 1,
+  "sourceCommit": "7fc9d09851703b43088d1f3a7438bd7db49a2fba",
+  "sourceTree": "ed7b482e66cccbc497dc8b89fc4577cc71a33f5c",
+  "version": "0.12.0",
+  "channel": "release",
+  "sourcePacket": {
+    "url": "https://box-node-fa6929c44afdf8f8-8765.on.boat.dev/unix-source.tar.gz",
+    "sha256": "73f597eb17b9c9a43e2d2b29e2bb903c3d525ed158e3835aa39427f370376380",
+    "bytes": 33018
+  },
+  "playwrightTools": {
+    "url": "https://box-node-fa6929c44afdf8f8-8765.on.boat.dev/playwright-tools.tar.gz",
+    "sha256": "aad7c29b7ac189aaa86e50b5a265bd256757ce2c95330c081c66962191ca2c94",
+    "bytes": 3183615
+  },
+  "acceptanceTools": {
+    "url": "https://box-node-fa6929c44afdf8f8-8765.on.boat.dev/unix-acceptance.tar.gz",
+    "sha256": "942468fefd96a37a36564bc4339e9dcea7cc13b01b7769fff44aea2d0d2b930c",
+    "bytes": 3997,
+    "entrySha256": "9566ef3449b96ed528d4add08baf39c5bf416d3d7da585138ca2f326009fee84"
+  },
+  "targets": {
+    "linux-x64": {
+      "stage": {
+        "url": "https://box-node-fa6929c44afdf8f8-8765.on.boat.dev/linux-x64-stage.tar.gz",
+        "sha256": "4ad2a6b875be3b16f0bef3d1ce1f23f8af01a8eb4449346acd75c563bdd73421",
+        "bytes": 177481738
+      },
+      "stageReceiptSha256": "99a8c57580bb6a332efabe0671ac82bb100b30aa95d95231ca1e9f99957b940a",
+      "payloadManifestSha256": "78cc020ad6a940c25a057d7e269f1f7c2ddeccec0d30a12cf4f80f394c204b33"
+    },
+    "linux-arm64": {
+      "stage": {
+        "url": "https://box-node-fa6929c44afdf8f8-8765.on.boat.dev/linux-arm64-stage.tar.gz",
+        "sha256": "79303cbc58dd5bde4ad39ef69e62bc1f8b139e79834d48e7b893a03239052858",
+        "bytes": 177573743
+      },
+      "stageReceiptSha256": "5459708a501b69f294e93512a50f825b53d85b7b17f7800eafe6b9e363fc3535",
+      "payloadManifestSha256": "1ef40ee6e82f490d3197999e4e113287e3a05d83afcb444377ad3badd4128ed4"
+    },
+    "darwin-arm64": {
+      "stage": {
+        "url": "https://box-node-fa6929c44afdf8f8-8765.on.boat.dev/darwin-arm64-stage.tar.gz",
+        "sha256": "83ca000e44eaa2614e0b485c7b7945dc2a4c60620741835e2e5bd3ad230b83b7",
+        "bytes": 158508870
+      },
+      "stageReceiptSha256": "26baa574fe30573dc9c363ee65a9433dcf054ae5d322f379a33c02ed6307b25b",
+      "payloadManifestSha256": "43ac019688a164278a5d1887ca5d0b60650c360cd0e85caaddbb207722e95c4d"
+    }
+  },
+  "deferredByUser": [
+    "telemetry-privacy",
+    "telemetry-consent",
+    "telemetry-ingestion"
+  ]
+}
