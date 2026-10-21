@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -69,8 +70,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { target: linux-x64,    os: ubuntu-24.04 }
-          - { target: linux-arm64,  os: ubuntu-24.04-arm }
+          - { target: linux-x64,    os: ubuntu-22.04, glibc: "2.35" }
+          - { target: linux-arm64,  os: ubuntu-24.04-arm, glibc: "2.39" }
           # macOS is on hold; scripts/build.sh builds it as hub + web server
           # - { target: darwin-arm64, os: macos-15 }
     runs-on: ${{ matrix.os }}
@@ -99,12 +100,7 @@ jobs:
             echo "only ${free_gb} GB free on $dir: no swap"
           fi
           free -h
-      - name: Install clang 19
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y clang-19 libx11-dev
-          sudo ln -sf /usr/bin/clang-19 /usr/local/bin/clang
+      - uses: ./.github/actions/setup-linux
       - name: Object cache
         # the compiled C units, by hash of their text (scripts/cc-unit.sh): an
         # unchanged unit is not compiled again. Never holds the Google client
@@ -112,15 +108,39 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/backplane-bend/obj
-          key: objs-${{ matrix.target }}-${{ github.sha }}
-          restore-keys: objs-${{ matrix.target }}-
+          key: objs-${{ matrix.os }}-${{ matrix.target }}-${{ github.sha }}
+          restore-keys: objs-${{ matrix.os }}-${{ matrix.target }}-
       - run: clang --version
       - run: scripts/build.sh
         env:
           BACKPLANE_SKIP_CHECK: "1" # the laws job checks every file
+      - name: Check Linux ABI (including helpers)
+        run: python3 scripts/linux-abi.py dist --max "${{ matrix.glibc }}"
       - run: scripts/smoke.sh
+      - run: python3 -m unittest discover -s test/tools -p linux_abi_test.py
+      - run: scripts/package.sh v0.0.0-ci "${{ matrix.target }}"
+      - run: scripts/package-linux.sh v0.0.0-ci "${{ matrix.target }}"
       - uses: actions/upload-artifact@v4
         with:
           name: backplane-${{ matrix.target }}
           path: dist/
           retention-days: 7
+
+  compatibility:
+    name: Run x64 on Ubuntu ${{ matrix.ubuntu }}
+    needs: [build]
+    runs-on: ubuntu-${{ matrix.ubuntu }}
+    strategy:
+      fail-fast: false
+      matrix:
+        ubuntu: ["22.04", "24.04"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-bend
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/download-artifact@v4
+        with:
+          name: backplane-linux-x64
+          path: dist
+      - run: chmod +x dist/backplane*
+      - run: scripts/smoke.sh

@@ -19,9 +19,8 @@ esac
 # dpkg sorts ~ before anything, so a nightly sorts before its release
 v=${ver#v}
 dv=$(printf '%s' "$v" | tr '-' '~')
-# the newest glibc the binaries ask for
-glibc=$(objdump -T "$src/backplane" "$src/backplane-serve" | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)
-glibc=${glibc#GLIBC_}
+# Include every shipped ELF, including Bun helpers and shared libraries.
+glibc=$(python3 scripts/linux-abi.py "$src")
 work=build/pkg-linux
 rm -rf "$work"
 mkdir -p "$work"
