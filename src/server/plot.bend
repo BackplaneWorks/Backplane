@@ -492,7 +492,7 @@ def Pv.solid.done(r: PR.Ran, +glb: String, +note: String, +step: Bool) -> IO(Uni
     case PR.Ran{_, out}:
       IO.die(Unit, 3, "3D export failed: " ++ String.take(String.trim(out), 160n))
 
-# the models cache the window and `backplane --render` keep (parts3.bend's
+# the models cache the window and its renderer kept (parts3.bend's
 # Parts.out: the path, size and time name a STEP's GLB), so a part already
 # rendered or seen opens at once, and a STEP is converted once per version
 def Pv.cache() -> IO(String):

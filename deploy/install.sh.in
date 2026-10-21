@@ -1,11 +1,12 @@
 #!/bin/sh
 # Installs Backplane: curl -fsSL https://github.com/i2cjak/Backplane/releases/latest/download/install.sh | sh
 #
-# The release workflow fills in the version and the sha256 of each archive,
-# so this script vouches for what it downloads. It unpacks into
-# $BACKPLANE_PREFIX (~/.local/share/backplane) and links the binaries into
-# ~/.local/bin. No sudo, no shell files edited. Backplane updates itself
-# from the same releases afterwards.
+# The release fills in the version and the sha256 of each archive
+# (scripts/release-classic.sh), so this script vouches for what it downloads.
+# It unpacks the hub, its web client and the `backplane` launcher into
+# $BACKPLANE_PREFIX (~/.local/share/backplane), the desktop app into its
+# desktop/ folder (BACKPLANE_NO_DESKTOP_APP=1 skips it: a hub-only install),
+# and links the commands into ~/.local/bin. No sudo, no shell files edited.
 set -eu
 
 REPO="i2cjak/Backplane"
@@ -13,6 +14,9 @@ VER="@VERSION@"
 SHA_LINUX_X64="@SHA_LINUX_X64@"
 SHA_LINUX_ARM64="@SHA_LINUX_ARM64@"
 SHA_DARWIN_ARM64="@SHA_DARWIN_ARM64@"
+DESKTOP_SHA_LINUX_X64="@DESKTOP_SHA_LINUX_X64@"
+DESKTOP_SHA_LINUX_ARM64="@DESKTOP_SHA_LINUX_ARM64@"
+DESKTOP_SHA_DARWIN_ARM64="@DESKTOP_SHA_DARWIN_ARM64@"
 
 fail() { printf 'backplane: %s\n' "$*" >&2; exit 1; }
 
@@ -27,31 +31,49 @@ case $(uname -m) in
   *) fail "$(uname -m) is not supported yet" ;;
 esac
 case $os-$arch in
-  linux-x64) sum=$SHA_LINUX_X64 ;;
-  linux-arm64) sum=$SHA_LINUX_ARM64 ;;
-  darwin-arm64) sum=$SHA_DARWIN_ARM64 ;;
+  linux-x64) sum=$SHA_LINUX_X64 dsum=$DESKTOP_SHA_LINUX_X64 ;;
+  linux-arm64) sum=$SHA_LINUX_ARM64 dsum=$DESKTOP_SHA_LINUX_ARM64 ;;
+  darwin-arm64) sum=$SHA_DARWIN_ARM64 dsum=$DESKTOP_SHA_DARWIN_ARM64 ;;
   *) fail "no build for $os-$arch yet" ;;
 esac
 [ -n "$sum" ] || fail "this release has no build for $os-$arch"
 
 prefix=${BACKPLANE_PREFIX:-$HOME/.local/share/backplane}
 bin=${BACKPLANE_BIN:-$HOME/.local/bin}
-archive_plat=$os-$arch
-[ "$archive_plat" != linux-x64 ] || archive_plat=linux-x64-cef
-name="backplane-$VER-$archive_plat.tar.gz"
-url="https://github.com/$REPO/releases/download/$VER/$name"
+# the hub, its web client and the launcher; the desktop app is a separate
+# archive of the same release, checked before anything is replaced
+name="backplane-$VER-classic-$os-$arch.tar.gz"
+dname="backplane-$VER-$os-$arch.tar.gz"
 mkdir -p "$prefix" "$bin"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
-echo "downloading $url"
-curl --proto '=https' --tlsv1.2 -fsSL -o "$tmp/$name" "$url" || fail "download failed: $url"
-if command -v sha256sum >/dev/null 2>&1; then
-  echo "$sum  $tmp/$name" | sha256sum -c - >/dev/null 2>&1 || fail "$name does not match its sha256; not installed"
-else
-  echo "$sum  $tmp/$name" | shasum -a 256 -c - >/dev/null 2>&1 || fail "$name does not match its sha256; not installed"
+fetch() {
+  url="https://github.com/$REPO/releases/download/$VER/$1"
+  echo "downloading $url"
+  curl --proto '=https' --tlsv1.2 -fsSL -o "$tmp/$1" "$url" || fail "download failed: $url"
+  if command -v sha256sum >/dev/null 2>&1; then
+    echo "$2  $tmp/$1" | sha256sum -c - >/dev/null 2>&1 || fail "$1 does not match its sha256; not installed"
+  else
+    echo "$2  $tmp/$1" | shasum -a 256 -c - >/dev/null 2>&1 || fail "$1 does not match its sha256; not installed"
+  fi
+}
+fetch "$name" "$sum"
+app=
+if [ -z "${BACKPLANE_NO_DESKTOP_APP:-}" ]; then
+  [ -n "$dsum" ] || fail "this release has no desktop app for $os-$arch (BACKPLANE_NO_DESKTOP_APP=1 installs the hub alone)"
+  fetch "$dname" "$dsum"
+  mkdir "$tmp/desktop"
+  tar -xzf "$tmp/$dname" -C "$tmp/desktop"
+  [ -d "$tmp/desktop/backplane-$os-$arch" ] || fail "$dname has no backplane-$os-$arch folder; not installed"
+  app=1
 fi
 tar -xzf "$tmp/$name" -C "$tmp"
 sh "$tmp/backplane-$os-$arch/install-release.sh" "$tmp/backplane-$os-$arch" "$prefix"
+if [ -n "$app" ]; then
+  rm -rf "$prefix/desktop.old"
+  [ ! -d "$prefix/desktop" ] || mv "$prefix/desktop" "$prefix/desktop.old"
+  mv "$tmp/desktop/backplane-$os-$arch" "$prefix/desktop"
+fi
 ln -sf "$prefix/backplane" "$bin/backplane"
 ln -sf "$prefix/backplane-serve" "$bin/backplane-serve"
 # the applications menu entry and its icon (BACKPLANE_NO_DESKTOP=1 skips
