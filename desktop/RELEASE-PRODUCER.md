@@ -38,6 +38,27 @@ preserves the resident service. Windows selects `backplane-serve.exe`; its
 managed shutdown may remain explicitly unsupported under the resident-service
 policy below; it is not a release requirement for that policy.
 
+Linux portable archives require either working **unprivileged user namespaces**
+(with the `unshare` command from util-linux), or an administrator-installed
+`runtime/chrome-sandbox` owned by `root:root` with mode `4755`. Start them with
+`./backplane-open`: it checks both routes before starting Electron. If neither is
+available it exits nonzero and prints one safely quoted command, using the actual
+absolute helper path, for an administrator to review and run. The launcher never
+runs `sudo`, changes permissions or falls back to `--no-sandbox`.
+
+The tarball carries the upstream helper with ordinary mode `0755`; installing the
+setuid helper is an explicit administrator action after extraction. On Ubuntu
+23.10 and later an AppArmor profile allowing user namespaces for the Electron
+binary may also be needed. Root-installed packages can set up that profile and
+the helper during installation. These host choices do not change the source-bound
+archive or imply that every Linux security policy has been qualified.
+
+The hosted-runtime workflow loads an AppArmor userns profile only for its exact
+extracted Electron path and `/usr/bin/unshare` in the disposable Linux runner.
+It keeps the host-wide restriction and the stage's `0755` helper mode unchanged,
+so the existing stage/acceptance/archive integrity checks still apply. See
+[Ubuntu's user namespace profile guidance](https://ubuntu.com/blog/ubuntu-23-10-restricted-unprivileged-user-namespaces).
+
 ## Inputs
 
 `release-inputs.schema.json` describes request and acceptance envelopes. Every

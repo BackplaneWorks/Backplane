@@ -10,6 +10,22 @@ const TARGETS={
  'darwin-arm64':{suffix:'.tar.gz',root:'backplane-darwin-arm64',executable:'Backplane.app/Contents/MacOS/Backplane',resources:'Backplane.app/Contents/Resources'},
  'windows-x64':{suffix:'.zip',root:'backplane-windows-x64',executable:'Backplane.exe',resources:'resources'},
 };
+function linuxLauncher(){return String.raw`#!/bin/sh
+set -eu
+BP_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+BP_SANDBOX="$BP_ROOT/runtime/chrome-sandbox"
+if command -v unshare >/dev/null 2>&1 && unshare --user --map-root-user /bin/true >/dev/null 2>&1; then
+  exec "$BP_ROOT/runtime/backplane-desktop" "$@"
+fi
+if [ -f "$BP_SANDBOX" ] && [ ! -L "$BP_SANDBOX" ] && [ "$(stat -c '%u:%g:%a' -- "$BP_SANDBOX" 2>/dev/null)" = '0:0:4755' ]; then
+  exec "$BP_ROOT/runtime/backplane-desktop" "$@"
+fi
+printf '%s\n' 'Backplane cannot start: the Linux OS sandbox needs working unprivileged user namespaces or a root-owned mode-4755 chrome-sandbox helper.' >&2
+printf '%s\n' 'Ask your administrator to run this command for this installation:' >&2
+BP_QUOTED=$(printf '%s' "$BP_SANDBOX" | sed "s/'/'\\\\''/g")
+printf "sudo chown root:root '%s' && sudo chmod 4755 '%s'\n" "$BP_QUOTED" "$BP_QUOTED" >&2
+exit 1
+`;}
 const fail=message=>{throw Error(message);};
 const check=(value,message)=>{if(!value)fail(message);};
 const sha=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
@@ -211,7 +227,7 @@ function stage(requestFile,output){
   // Native Windows BUILD.json is immutable; Electron's own build configuration is separate.
   write(path.join(resources,'DESKTOP-BUILD.json'),build);
   if(shell.receipt.features.directBrowser){build.desktopBrowser={protocol:1,guestManagerSha256:digest(path.join(resources,'app/browser-guest.cjs')),preloadSha256:digest(path.join(resources,'app/browser-recording-preload.cjs'))};write(path.join(resources,'DESKTOP-BUILD.json'),build);}
-  if(target.startsWith('linux-'))fs.writeFileSync(path.join(output,'backplane-open'),'#!/bin/sh\nset -eu\nBP_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\nexec "$BP_ROOT/runtime/backplane-desktop" "$@"\n',{mode:0o755});
+  if(target.startsWith('linux-'))fs.writeFileSync(path.join(output,'backplane-open'),linuxLauncher(),{mode:0o755});
   const provenance=path.join(output,'PROVENANCE');fs.mkdirSync(provenance);const refs={};
   for(const [name,ref]of Object.entries({freeze:release.freezeReceipt,shell:shell.ref,electron:electron.ref,service:service.ref})){fs.copyFileSync(reference(ref),path.join(provenance,name+'.json'));refs[name]=publicReference(ref,name+'.json');}
   if(service.receipt.buildReceipt){const ref=service.receipt.buildReceipt;fs.copyFileSync(reference(ref),path.join(provenance,'service-build.json'));refs.serviceBuild=publicReference(ref,'service-build.json');}
@@ -278,4 +294,4 @@ function main(argv){
  else fail('Unknown operation; use describe');console.log(JSON.stringify(result));
 }
 if(require.main===module){try{main(process.argv.slice(2));}catch(e){console.error('Desktop producer: '+e.message);process.exitCode=1;}}
-module.exports={stage,archive,inspectStage,inventory,membershipExpectation,contentDigest,architecture,validateRequest,generatedWeb,reference,readReference,json,write,sha,digest,canonical,runPython,payload,identity,shellIdentity,WINDOWS_SHELL_SOURCE,TARGETS,browserUtilities};
+module.exports={stage,archive,inspectStage,inventory,membershipExpectation,contentDigest,architecture,validateRequest,generatedWeb,reference,readReference,json,write,sha,digest,canonical,runPython,payload,identity,shellIdentity,WINDOWS_SHELL_SOURCE,TARGETS,browserUtilities,linuxLauncher};
