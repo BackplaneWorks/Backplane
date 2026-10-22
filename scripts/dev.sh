@@ -26,8 +26,8 @@
 #                                  hub's deploy_main runs this (docs/deploy.md)
 #   BACKPLANE_DEV_SERVICE_ONLY=1 scripts/dev.sh stage DIR
 #                                  stage only the hub, the launcher, the
-#                                  matching web and LICENSE; no KiStack,
-#                                  helpers or CEF
+#                                  matching web and LICENSE; no KiStack
+#                                  or helpers
 #   BACKPLANE_SKIP_CHECK=1           stage without type-checking (a follow
 #                                  deploy of main: CI checked it)
 #
@@ -239,7 +239,6 @@ install_into() {
 set -eu
 src=$1 prefix=$2
 mkdir -p "$prefix" "$HOME/.local/bin"
-if [ -f "$src/cef-runtime.py" ]; then python3 "$src/cef-runtime.py" install "$src" "$prefix"; fi
 rm -rf "$prefix/web.old"
 [ -d "$prefix/web" ] && mv "$prefix/web" "$prefix/web.old"
 mv "$src/web" "$prefix/web"
@@ -247,26 +246,10 @@ if [ -d "$src/kistack" ]; then rm -rf "$prefix/kistack.old"; [ -d "$prefix/kista
 for f in backplane backplane-serve backplane-browser backplane-browser.stamp backplane-step2glb backplane-voice backplane-kipc LICENSE; do
   [ -e "$src/$f" ] && mv -f "$src/$f" "$prefix/$f"
 done
+[ -L "$prefix/backplane-browser" ] || rm -rf "$prefix/cef" "$prefix/browser-current" "$prefix/browser-previous" "$prefix/browser-runtimes"
 ln -sf "$prefix/backplane" "$HOME/.local/bin/backplane"
 ln -sf "$prefix/backplane-serve" "$HOME/.local/bin/backplane-serve"
 EOF
-}
-
-# Only machines with an optional runtime stage CEF. No runtime download or
-# host build is triggered for the default Chrome-only installation.
-stage_cef() {
-  runtime=$(python3 scripts/cef-runtime.py discover "$prefix")
-  [ -n "$runtime" ] || return 0
-  say "staging matched optional CEF host and browser helper"
-  scripts/build-cef.sh build/cef >/dev/null
-  # Reuse the pinned libraries already installed; a different distribution
-  # must never be paired with a host built against this one.
-  [ "$(sha256sum "$runtime/libcef.so" | cut -d' ' -f1)" = "$(sha256sum build/cef/Release/libcef.so | cut -d' ' -f1)" ] || { say "installed CEF distribution differs from the pinned host"; return 1; }
-  helper=build/dev-pkg/backplane-browser
-  helper_stamp=build/dev-pkg/backplane-browser.stamp
-  if [ ! -e "$helper" ]; then helper=$prefix/backplane-browser; helper_stamp=$prefix/backplane-browser.stamp; fi
-  revision=$(cat tools/cef/host.cc tools/cef/CMakeLists.txt scripts/build-cef.sh | sha256sum | cut -d' ' -f1)
-  python3 scripts/cef-runtime.py stage build/dev-pkg "$runtime" build/cef/Release/backplane-cef "$helper" "$helper_stamp" "$revision"
 }
 
 stage() {
@@ -284,7 +267,6 @@ stage() {
     [ -e "dist/$f" ] && cp "dist/$f" build/dev-pkg/
   done
   [ -e LICENSE ] && cp LICENSE build/dev-pkg/
-  stage_cef
   return 0
 }
 

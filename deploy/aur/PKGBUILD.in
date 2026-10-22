@@ -9,7 +9,6 @@ arch=(x86_64 aarch64)
 url="https://github.com/i2cjak/Backplane"
 license=(MIT)
 depends=(glibc libx11)
-depends_x86_64=(glib2 nspr nss at-spi2-core dbus libcups libxcomposite libxdamage libxext libxfixes libxrandr libxi mesa expat libxcb libxkbcommon cairo pango systemd-libs alsa-lib)
 optdepends=('git: thread worktrees and commits'
             'kicad: ERC, DRC, exports and the 3D viewer'
             'tailscale: reach it from your other devices')
@@ -17,8 +16,8 @@ provides=(backplane)
 conflicts=(backplane)
 # prebuilt: shipped as released
 options=(!strip !debug)
-source_x86_64=("$url/releases/download/v$pkgver/backplane-v$pkgver-linux-x64-cef.tar.gz")
-source_aarch64=("$url/releases/download/v$pkgver/backplane-v$pkgver-linux-arm64.tar.gz")
+source_x86_64=("$url/releases/download/v$pkgver/backplane-v$pkgver-classic-linux-x64.tar.gz")
+source_aarch64=("$url/releases/download/v$pkgver/backplane-v$pkgver-classic-linux-arm64.tar.gz")
 sha256sums_x86_64=(@SHA_LINUX_X64@)
 sha256sums_aarch64=(@SHA_LINUX_ARM64@)
 
