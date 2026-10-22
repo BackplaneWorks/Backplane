@@ -145,14 +145,14 @@ def Stb.origin(+seq: Nat, +o: J.Json, origin: String) -> String:
     case _:
       origin
 
-def Stb.change(m: Maybe<&2, M.Change>, +st: M.State, +cnt: Map<&2, Nat>, +seq: Nat, +off: Nat, +len: Nat, +ord: Nat, items: List<&2, List<&2, String>>, id: String, origin: String) -> Acc:
+def Stb.change(m: Maybe<&2, M.Change>, +st: M.State, +cnt: Map<&2, Nat>, +seq: Nat, +off: Nat, +len: Nat, +ord: Nat, items: List<&2, List<&2, String>>, id: String, origin: String, w: String) -> Acc:
   match m:
     case Some{+c}:
       +p = SDB.F.posts(c)
       +cnt2 = Stb.bump(p, cnt)
       Acc{Stb.apply(st, cnt, c), cnt2, seq, Nat.add(off, 1n+len), SDB.Sdb.ord(c, ord), Stb.sqls(SDB.Sdb.facts(st, SDB.At{seq, off, len, ord}, c), items), id, origin}
     case None{}:
-      Acc{st, cnt, seq, Nat.add(off, 1n+len), ord, Stb.sqls([SDB.F.line(SDB.At{seq, off, len, ord}, "")], items), id, origin}
+      Acc{st, cnt, seq, Nat.add(off, 1n+len), ord, Stb.sqls([SDB.F.line(SDB.At{seq, off, len, ord}, w)], items), id, origin}
 
 # Flat strings
 # ------------
@@ -191,7 +191,7 @@ def Stb.flat(j: J.Json) -> J.Json:
 def Stb.parsed(m: Maybe<&2, J.Json>, st: M.State, cnt: Map<&2, Nat>, +seq: Nat, +off: Nat, +len: Nat, ord: Nat, items: List<&2, List<&2, String>>, id: String, origin: String) -> Acc:
   match m:
     case Some{+o}:
-      Stb.change(C.Change.decode(Stb.flat(o)), st, cnt, 1n+seq, off, len, ord, items, id, Stb.origin(seq, o, origin))
+      Stb.change(C.Change.decode(Stb.flat(o)), st, cnt, 1n+seq, off, len, ord, items, id, Stb.origin(seq, o, origin), C.Change.wire_over(o, ""))
     case None{}:
       Acc{st, cnt, seq, Nat.add(off, 1n+len), ord, items, id, origin}
 
