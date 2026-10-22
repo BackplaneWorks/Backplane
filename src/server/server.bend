@@ -8194,12 +8194,30 @@ def Far.returned(h: Hub, +ps: List<&2, BO.Peer>) -> IO(Hub):
       IO.bind(Hub, Hub, Far.offer(Hub{st, f, ls, cl, as, inbox, cfg, note}, ps),
         h2 => Far.returned.go(Far.own.go(ps, st, cfg), h2))
 
+# A mirror that was just compacted (FR.In.tidy: no items since its
+# snapshot) is written over its file whole, through a file beside it, so
+# the file stays as small as the mirror (it is a cache: a lost one is
+# pulled again); otherwise the batch is appended.
+def Far.keep.all(+path: String, +text: String) -> IO(Unit):
+  do IO<Unit>:
+    ok : Bool <- BN.Bf.secret(path ++ ".new", text)
+    r : Result<&1, &1, U32 & String, Unit> <- H.FS.rename(path ++ ".new", path)
+    return Unit{}
+
+def Far.keep.k(whole: Bool, +path: String, +i: FR.In, +text: String) -> IO(Unit):
+  match whole:
+    case True{}:
+      Far.keep.all(path, FR.In.file(i))
+    case False{}:
+      Far.keep.job(path, text)
+
 def Far.store(h: Hub, +link: String, +text: String) -> IO(Hub):
   match h:
     case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
       do IO<Hub>:
+        +i : FR.In = FR.Fh.in(BN.Bn.far(Cfg.bn(cfg)), link, link)
         BN.Bf.dir(Far.dir(Cfg.home(cfg)))
-        Far.keep.job(Far.file(Cfg.home(cfg), link), text)
+        Far.keep.k(Nat.is_eq(FR.In.tail(i), 0n), Far.file(Cfg.home(cfg), link), i, text)
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
 
 def Far.took.told(h: Hub, +link: String, ys: List<&2, FR.Item>) -> IO(Hub):

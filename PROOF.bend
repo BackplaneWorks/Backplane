@@ -12610,3 +12610,14 @@ def Laws.cache_identity_empty_cookie(https): {==}
 def Laws.oprep_task_not_in_chat(): {==}
 def Laws.oprep_task_delivered_with_filing(): {==}
 def Laws.oprep_other_thread_unchanged(): {==}
+
+# ---- F1: far mirrors ----
+def Laws.far_snap_live(): {==}
+def Laws.far_snap_fix(): {==}
+def Laws.far_compact_live(): {==}
+def Laws.far_compact_head(): {==}
+def Laws.far_compact_tail(): {==}
+def Laws.far_fact_shared(): {==}
+def Laws.far_fact_private(): {==}
+def Laws.hot_demo_threads(): {==}
+# ---- end F1 ----
