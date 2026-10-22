@@ -1,6 +1,6 @@
 #!/bin/sh
 # One hash of what a build or a gate reads, for the caches that reuse their
-# results (scripts/build-app.sh's emit, the verified records of check.sh and
+# results (scripts/build-js.sh's emit, the verified records of check.sh and
 # test.sh). It covers:
 #   - bend itself: the binary bend resolves to, and the files it reads beside
 #     it (<binary's folder>/../bend2: base.bend, its effects, the proof

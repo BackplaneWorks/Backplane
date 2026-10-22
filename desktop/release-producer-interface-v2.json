@@ -132,25 +132,14 @@
       "launcher": "Backplane.exe",
       "app": "resources/app/",
       "service": "resources/backplane-service/backplane-serve.exe",
-      "web": "resources/backplane-service/web/",
-      "runtimeBin": "resources/backplane-service/runtime/bin/"
+      "web": "resources/backplane-service/web/"
     }
   },
-  "windowsResourceAdapter": {
-    "interface": "backplane-windows-service-resources-v1",
-    "contractSha256": "1c12bd80b6f994ecd0d68d06b8ada98e1958de725d33f6380da3c0243ad099e3",
-    "input": "backplane-windows-service-resources.zip plus its externally bound SHA256 and job artifact identity",
-    "mount": "Extract the archive's single backplane-service/ root under Electron resources/ exactly once, yielding resources/backplane-service/",
-    "preserveReceiptsByteForByte": [
-      "SOURCE.json",
-      "BUILD.json",
-      "WEB.json",
-      "RUNTIME.json",
-      "CLOSURE.json"
-    ],
-    "validate": "Schema3 genuine-service SOURCE/BUILD, requested frozen commit/tree/stable version/channel, all declared members/bytes/hashes, PE architecture/normal+delay import closure and mandatory runtime/tools/notices/source obligations. Reject undeclared/traversing/case-colliding/reparse members.",
-    "receiptMapping": "Final DESKTOP.json references the original ZIP and exact preserved receipt hashes/paths; never rewrite native SOURCE/BUILD as an Electron receipt or change their role identities",
-    "managedControl": "Truthful UNSUPPORTED/null protocol may ship only when root freeze.lifecyclePolicy[target] is {mode:resident-service,managedStop:false,managedUpdate:false}, shell advertises no stop/update, and actual startup/auth/single-instance/reconnect/close-persistence/path/sandbox/runtime evidence passes. No fake managed-stop PASS or lock-PID kill. Other lifecycle policies retain implemented-protocol requirement."
+  "windowsService": {
+    "input": "The same SERVICE.json component as every other target (scripts/service-release.py component): {receipt, payload:{directory}}, pinned by freeze.components[target].serviceReceiptSha256",
+    "service": "backplane-serve.exe, a Bun-compiled PE32+ x64 (roles.service); its original BUILD.json records serviceRuntime 'bun' and service 'backplane-serve.exe'",
+    "validate": "As other targets: genuine configured BUILD, members, PE architecture, measured runtime closure (normal and delay PE imports, Windows system DLLs as approved-system), notices and matching web",
+    "managedControl": "The JS service has no Windows managed-control protocol. Windows ships only under root freeze.lifecyclePolicy[target] {mode:resident-service,managedStop:false,managedUpdate:false}, with shell windowsManagedControl 'UNSUPPORTED' and windowsNativePathMapping true; any other Windows policy is refused. No fake managed-stop PASS or lock-PID kill."
   },
   "finalReceipt": {
     "file": "DESKTOP.json at the declared archive root",
@@ -179,7 +168,7 @@
     "Actual clean stable 0.12.0 common source freeze and genuine configured per-target artifacts remain external inputs; existing dev runtime evidence is not stable evidence.",
     "All actual target lifecycle/sandbox/signing/runtime receipts remain required; offline synthetic checks do not qualify a platform.",
     "AppImage, DMG, installers and updater feeds are not outputs. Native mobile producers remain owned separately.",
-    "Actual Windows startup/path/auth/reconnect/close-persistence and OS sandbox/runtime qualification remain required. Managed stop/update is optional under explicit resident-service shipping policy."
+    "Actual Windows startup/path/auth/reconnect/close-persistence and OS sandbox/runtime qualification remain required. Windows ships only under the explicit resident-service policy: the JS service has no Windows managed stop/update."
   ],
   "scope": "Callable source implementation plus synthetic offline checks only. No actual platform production build, service/web emission, signing, runtime qualification, CI, install, tag or publication by this implementation handoff.",
   "supersedes": {

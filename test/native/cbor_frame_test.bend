@@ -14,7 +14,7 @@ import ../../src/server/argv.bend as AV
 # OB.Items.texts.s's frames through W.Ws.cbor: the log's lines in the hub's
 # chunks of 64, with the writer's limits and with tight ones that split
 # them, the last frame's "boot" both ways.
-#   scripts/build-app.sh test/native/cbor_frame_test.bend build/cbor_frame_test
+#   scripts/build-js.sh test/native/cbor_frame_test.bend build/cbor_frame_test
 #   build/cbor_frame_test EVENTS.jsonl
 
 def Cf.keys() -> String:

@@ -8,7 +8,7 @@ import ../../src/core/utf8.bend as U
 import ../../src/server/argv.bend as AV
 
 # Native network regression probe (temporary hubs only):
-#   scripts/build-app.sh test/native/hub_link_test.bend build/hub_link_test
+#   scripts/build-js.sh test/native/hub_link_test.bend build/hub_link_test
 #   build/hub_link_test http://localhost:3792 [SINCE ORIGIN]
 #   build/hub_link_test http://localhost:3794  (a silent HTTP peer)
 #   PATH=<fake tailscale that prints an owner then hangs>:$PATH ... whois

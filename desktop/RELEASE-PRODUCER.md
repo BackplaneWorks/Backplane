@@ -34,9 +34,9 @@ the archive root. Their resources contain `app/`, `backplane-service/`, and
 `DESKTOP-BUILD.json`. Electron configuration stays separate from the preserved
 native service `BUILD.json`. Packaged launch uses the user's Backplane home;
 checkout launch continues to require an explicit isolated home. Window close
-preserves the resident service. Windows selects `backplane-serve.exe`; its
-managed shutdown may remain explicitly unsupported under the resident-service
-policy below; it is not a release requirement for that policy.
+preserves the resident service. Windows selects `backplane-serve.exe`; it
+ships only under the resident-service policy below, since the JS service has no
+Windows managed shutdown.
 
 Linux portable archives require either working **unprivileged user namespaces**
 (with the `unshare` command from util-linux), or an administrator-installed
@@ -74,8 +74,8 @@ stable `0.12.0`, `v0.12.0`, `release` channel, full Git `commit` and `tree`, and
 `backplane-release-freeze`, status `FROZEN`, the same five identity fields,
 `sourceDateEpoch` (1980 through 2107), `signingPolicy[target]` (`required` or
 `unsigned-portable-allowed`), `compileInputs`, and `components[target]` with exact
-`shellReceiptSha256`, `electronReceiptSha256`, `webManifestSha256`, and either
-`serviceReceiptSha256` or Windows `serviceArchiveSha256`.
+`shellReceiptSha256`, `electronReceiptSha256`, `webManifestSha256`, and
+`serviceReceiptSha256`.
 
 Generic components have `{receipt,payload}`. Their schema 1 receipts have status
 `VERIFIED`, the exact target, `sourceCommit`, `sourceTree`, version and channel,
@@ -87,10 +87,9 @@ The shell must include actual `package.json` name `backplane-desktop`, main
 `main.cjs`, version `0.12.0`, and `features` source qualification for
 `defaultPackagedHome`, `contextIsolation`, `sandbox` true and `nodeIntegration`
 false. macOS needs `bundleIdentifier`. Windows needs verified startup path
-behavior (`windowsNativePathMapping: true`). A managed-stop policy also needs
-the implemented protocol in `features.windowsManagedControl`; resident policy
-instead requires `windowsManagedControl: 'UNSUPPORTED'`, `managedStop: false`
-and `managedUpdate: false`.
+behavior (`windowsNativePathMapping: true`) and, since the JS service has no
+Windows managed control, the resident policy: `windowsManagedControl:
+'UNSUPPORTED'`, `managedStop: false` and `managedUpdate: false`.
 `features.directBrowser` enables the supplied guest/preload files and their pins.
 
 The upstream Electron payload has `electron`, `electron.exe`, or `Electron.app`.
@@ -98,11 +97,14 @@ Its receipt's `signablePaths` lists the actual native files permitted to change
 when signed. Electron and service receipts both name `runtimeManifest`,
 `runtimeManifestSha256`, `closureManifest`, and `closureSha256`.
 
-A generic service receipt requires `genuineService: true`, `entrypoint:
-'src/server/main.bend'`, `roles: {service:'backplane-serve',web:'web'}`, and a
+A service receipt requires `genuineService: true`, `entrypoint:
+'src/server/main.bend'`, `roles: {service:'backplane-serve',web:'web'}`
+(`backplane-serve.exe` on Windows), and a
 `buildReceipt` reference to the original `VERIFIED_GENUINE...` receipt. That raw
 receipt must also be present byte-exact as service `BUILD.json`, with `target`,
 `entry`, stable `version`, `source_commit`, `source_tree`, and `binary_sha256`.
+Windows also needs `serviceRuntime: 'bun'`; elsewhere `serviceRuntime`, when
+present, must be `bun`, and `service`, when present, must be the service file.
 It must record `versionStamp: '0.12.0'`, `telemetryChannel: 'release'`, and this
 public tuple, identical to `freeze.compileInputs`:
 
@@ -134,20 +136,16 @@ roundtrips exactly. No extra assets, bundled fonts, homes/profiles, special file
 privileged modes, escaping links, or case-colliding members are admitted.
 ELF/Mach-O/PE target headers are checked without executing them.
 
-## Windows resources
+## Windows service
 
-Windows `service` is `{contractSha256,archive}` using the unchanged contract
-`1c12bd80b6f994ecd0d68d06b8ada98e1958de725d33f6380da3c0243ad099e3`.
-The ZIP must have only the `backplane-service/` root and original schema 3
-`SOURCE.json`/`BUILD.json`, plus `WEB.json`, `RUNTIME.json`, `CLOSURE.json` and
-native payload. The producer mounts that root exactly once and preserves all
-five receipts byte-for-byte. Native version/stamp/channel/source, complete
-member sizes/hashes, every PE normal/delay import edge, runtime licenses and
-closure are checked. Without an explicit resident policy, `BUILD.managedControl`
-requires status `IMPLEMENTED`, protocol and validation receipt hash. Under the
-explicit resident policy, original `UNSUPPORTED` with null protocol is preserved
-and allowed; no acceptance receipt is invented.
-No lock PID is treated as a native process identity or signalled.
+Windows takes the same `{receipt,payload}` SERVICE.json component as the other
+targets, from `scripts/service-release.py component`. Its service is
+`backplane-serve.exe`, a Bun-compiled PE32+ x64, checked like the others:
+original BUILD, members, PE architecture, the measured closure (normal and
+delay PE imports, Windows system DLLs approved-system), notices and web. The
+JS service has no Windows managed-control protocol, so Windows ships only under
+the explicit resident policy below; without it the producer refuses the stage
+and the archive. No lock PID is treated as a native process identity or signalled.
 
 ## Target acceptance and archive
 
@@ -160,7 +158,7 @@ status `PASS`, target, version, commit, tree, that payload digest and
 | --- | --- | --- |
 | signing | desktop-signing | boolean signed; true if frozen policy requires it |
 | sandbox | desktop-sandbox | osEnforced true; actual flags array without --no-sandbox |
-| lifecycle | desktop-lifecycle | nativeChildIdentity/authBound/singleInstance/reconnect true; windowClose resident-service; explicit resident-policy evidence below, or existing owned-native-child/approved-service-protocol shutdown evidence; Windows startup paths still require nativeToPosixPaths true |
+| lifecycle | desktop-lifecycle | nativeChildIdentity/authBound/singleInstance/reconnect true; windowClose resident-service; explicit resident-policy evidence below, or owned-native-child shutdown evidence off Windows; Windows startup paths still require nativeToPosixPaths true |
 | runtimeAcceptance | desktop-runtime-acceptance | scope desktop-release; actual target owner acceptance |
 
 A root freeze may explicitly select this shipping policy per target:

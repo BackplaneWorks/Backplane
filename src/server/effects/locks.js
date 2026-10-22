@@ -24,6 +24,9 @@ function bp_lock_posix() {
       posix_spawn_file_actions_adddup2: { args: ["ptr", "i32", "i32"], returns: "i32" },
       posix_spawn_file_actions_addopen: { args: ["ptr", "i32", "ptr", "i32", "u32"], returns: "i32" },
       posix_spawn_file_actions_addclose: { args: ["ptr", "i32"], returns: "i32" },
+      posix_spawnattr_init: { args: ["ptr"], returns: "i32" },
+      posix_spawnattr_destroy: { args: ["ptr"], returns: "i32" },
+      posix_spawnattr_setflags: { args: ["ptr", "i16"], returns: "i32" },
       [mac ? "__error" : "__errno_location"]: { args: [], returns: "ptr" },
     }).symbols;
     let closefrom;
@@ -45,11 +48,12 @@ function bp_lock_posix() {
 }
 
 // the descriptors open above 3 (closed in the child where closefrom is
-// missing)
+// missing); the listing's own, closed by now, is left out (a close action
+// on it fails the spawn with EBADF on macOS)
 function bp_lock_fds() {
   try {
     return require("node:fs").readdirSync(process.platform === "darwin" ? "/dev/fd" : "/proc/self/fd")
-      .map(Number).filter((fd) => fd > 3);
+      .map(Number).filter((fd) => fd > 3 && io_sys().fcntl(fd, 1, 0) >= 0);
   } catch (_) {
     return [];
   }
@@ -73,14 +77,24 @@ function bp_lock_spawn(c, pipe, fd, home, holder, script) {
     && c.posix_spawn_file_actions_adddup2(c.ptr(fa), fd, 3) === 0
     && c.posix_spawn_file_actions_addopen(c.ptr(fa), 1, c.ptr(devnull), 1, 0) === 0
     && c.posix_spawn_file_actions_adddup2(c.ptr(fa), 1, 2) === 0;
-  if (ok && c.closefrom !== undefined) {
+  // macOS: POSIX_SPAWN_CLOEXEC_DEFAULT closes the rest (a close action on
+  // a descriptor the child does not inherit, Bun's kqueue, fails the spawn)
+  const at = new Uint8Array(1024);
+  const attr = c.mac && c.posix_spawnattr_init(c.ptr(at)) === 0
+    && c.posix_spawnattr_setflags(c.ptr(at), 0x4000) === 0;
+  if (c.mac) {
+    ok = ok && attr;
+  } else if (ok && c.closefrom !== undefined) {
     ok = c.closefrom(c.ptr(fa), 4) === 0;
   } else if (ok) {
     for (const n of bp_lock_fds()) c.posix_spawn_file_actions_addclose(c.ptr(fa), n);
   }
   let got = -1;
-  if (ok && c.posix_spawn(c.ptr(pid), c.ptr(sh), c.ptr(fa), null, c.ptr(argv), c.ptr(envp)) === 0) {
+  if (ok && c.posix_spawn(c.ptr(pid), c.ptr(sh), c.ptr(fa), attr ? c.ptr(at) : null, c.ptr(argv), c.ptr(envp)) === 0) {
     got = pid[0];
+  }
+  if (attr) {
+    c.posix_spawnattr_destroy(c.ptr(at));
   }
   c.posix_spawn_file_actions_destroy(c.ptr(fa));
   return got;

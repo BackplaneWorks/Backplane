@@ -138,28 +138,9 @@ function generatedWeb(root,manifest,release){
  check(manifest.members['index.html'],'Missing web index');
  for(const [name,v]of Object.entries(manifest.members)){relative(name);if(/\.(?:html|js|css)$/.test(name))check(manifest.members[name+'.gz'],'Missing gzip sibling');check(actual[name].sha256===v.sha256&&actual[name].bytes===v.bytes,'Web hash/size mismatch');if(name.endsWith('.gz')){const plain=inside(root,name.slice(0,-3));check(fs.existsSync(plain)&&require('node:zlib').gunzipSync(fs.readFileSync(inside(root,name))).equals(fs.readFileSync(plain)),'Invalid gzip sibling');}}
 }
+function serviceFile(target){return target==='windows-x64'?'backplane-serve.exe':'backplane-serve';}
 function residentPolicy(policy){
  return policy?.mode==='resident-service'&&policy.managedStop===false&&policy.managedUpdate===false;
-}
-function windowsResources(spec,temp,release,freeze){
- check(spec.contractSha256==='1c12bd80b6f994ecd0d68d06b8ada98e1958de725d33f6380da3c0243ad099e3','Windows resource contract mismatch');
- const archive=reference(spec.archive),dest=path.join(temp,'windows');runPython(['extract',archive,dest]);
- check(fs.readdirSync(dest).join(',')==='backplane-service','Wrong Windows resource ZIP root');const root=path.join(dest,'backplane-service'),s=json(path.join(root,'SOURCE.json')),b=json(path.join(root,'BUILD.json'));
- check(s.schema===3&&s.kind==='windows-service-emission'&&b.schema===3&&b.kind==='windows-service-resources','Wrong Windows native receipt schema/role');
- for(const r of [s,b])check(r.target==='windows-x64'&&r.commit===release.commit&&r.tree===release.tree&&r.entrypoint==='src/server/main.bend','Wrong Windows source/target');
- check(s.version===VERSION&&s.versionTag==='v'+VERSION&&s.versionStamp.replace(/^v/,'')===VERSION&&s.telemetry_channel==='release'&&b.serviceVersion===VERSION&&b.versionStamp.replace(/^v/,'')===VERSION&&b.telemetryChannel==='release','Wrong Windows version/channel stamp');
- configuredService(b,freeze);
- check(b.sourceReceiptSha256===digest(path.join(root,'SOURCE.json'))&&b.webManifestSha256===digest(path.join(root,'WEB.json')),'Windows source/web receipt mismatch');
- const actual=inventory(root,'windows-x64'),files=Object.keys(actual).filter(n=>n!=='BUILD.json');check(files.sort().join('\n')===Object.keys(b.sha256||{}).sort().join('\n')&&files.sort().join('\n')===Object.keys(b.sizes||{}).sort().join('\n'),'Windows undeclared resource member');
- for(const f of files)check(actual[f].sha256===b.sha256[f]&&actual[f].bytes===b.sizes[f],'Windows resource hash/size mismatch');
- check(b.roles?.service==='backplane-serve.exe'&&b.roles.web==='web'&&b.roles.runtimeBin==='runtime/bin','Windows resource role mismatch');
- closure(root,{runtimeManifest:'RUNTIME.json',runtimeManifestSha256:b.runtimeManifestSha256,closureManifest:'CLOSURE.json',closureSha256:b.closureSha256},'windows-x64');
- for(const f of files.filter(n=>/\.(?:exe|dll)$/i.test(n))){architecture(inside(root,f),'windows-x64');const pe=b.pe?.[f];check(pe&&pe.sha256===actual[f].sha256&&Array.isArray(pe.imports||pe.normalImports)&&Array.isArray(pe.delayImports),'Unmeasured native PE imports');const edges=json(path.join(root,'CLOSURE.json')).edges;for(const[k,imports]of [['normal',pe.imports||pe.normalImports],['delay',pe.delayImports]])for(const imported of imports){const name=typeof imported==='string'?imported:imported.name;check(typeof name==='string'&&edges.some(e=>e.from===f&&e.kind===k&&e.name.toLowerCase()===name.toLowerCase()),'PE import missing from measured closure');}}
- architecture(path.join(root,'backplane-serve.exe'),'windows-x64');generatedWeb(path.join(root,'web'),json(path.join(root,'WEB.json')),release);
- check(typeof b.managedControl==='object'&&b.managedControl,'Missing Windows managed control disposition');
- if(residentPolicy(freeze.lifecyclePolicy?.['windows-x64']))check(b.managedControl.status==='UNSUPPORTED'&&b.managedControl.protocol==null,'Resident Windows policy requires truthful unsupported stop');
- else check(b.managedControl.status==='IMPLEMENTED'&&b.managedControl.protocol&&b.managedControl.validationReceiptSha256,'Windows managed control unsupported');
- return{root,validatedMembers:actual,receipt:b,ref:{path:path.join(root,'BUILD.json'),sha256:digest(path.join(root,'BUILD.json')),bytes:fs.statSync(path.join(root,'BUILD.json')).size},archive:spec.archive};
 }
 function validateRequest(request,temp){
  check(request.schema===1&&request.kind==='backplane-electron-release-inputs'&&TARGETS[request.target],'Unsupported request/target');const target=request.target,release=request.release;
@@ -173,18 +154,18 @@ function validateRequest(request,temp){
  const pkg=json(path.join(shell.root,'package.json'));check(pkg.version===VERSION&&pkg.main==='main.cjs'&&pkg.name==='backplane-desktop','Packaged shell version/entry mismatch');
  check(shell.receipt.features?.defaultPackagedHome===true&&shell.receipt.features?.contextIsolation===true&&shell.receipt.features?.sandbox===true&&shell.receipt.features?.nodeIntegration===false,'Missing shell lifecycle/isolation source qualification');
  notices(shell.root,shell.receipt);notices(electron.root,electron.receipt);closure(electron.root,electron.receipt,target);
- let service;
+ // Every target's service is the same JS (Bun) component; Windows names it backplane-serve.exe.
+ const exe=serviceFile(target),service=payload(request.service,temp,'service');check(pins.serviceReceiptSha256===service.ref.sha256,'Service not in freeze');identity(service.receipt,release,target,'backplane-bend-service');
+ check(service.receipt.genuineService===true&&service.receipt.entrypoint==='src/server/main.bend'&&service.receipt.roles?.service===exe&&service.receipt.roles.web==='web','Not a genuine service entry');
+ const build=readReference(service.receipt.buildReceipt);check(/^VERIFIED_GENUINE/.test(build.status)&&build.target===target&&build.entry==='src/server/main.bend'&&build.version===VERSION&&build.source_tree===release.tree&&build.source_commit===release.commit&&build.binary_sha256===digest(path.join(service.root,exe)),'Missing genuine target build provenance');
+ check(target==='windows-x64'?build.serviceRuntime==='bun':build.serviceRuntime===undefined||build.serviceRuntime==='bun','Windows requires the JS (Bun) service runtime');check(build.service===undefined||build.service===exe,'Service file name differs from its build');
+ check(digest(path.join(service.root,'BUILD.json'))===service.receipt.buildReceipt.sha256,'Packaged BUILD must preserve the actual genuine build receipt');configuredService(build,freeze);
+ membership(service.root,service.receipt.members,target);closure(service.root,service.receipt,target);notices(service.root,service.receipt);architecture(path.join(service.root,exe),target);
  if(target==='windows-x64'){
-  check(pins.serviceArchiveSha256===request.service?.archive?.sha256,'Windows resource ZIP not in freeze');service=windowsResources(request.service,temp,release,freeze);
-  if(residentPolicy(freeze.lifecyclePolicy?.[target]))check(shell.receipt.features.windowsManagedControl==='UNSUPPORTED','Resident shell must preserve unsupported Windows control');
-  else check(shell.receipt.features.windowsManagedControl===service.receipt.managedControl.protocol,'Shell lacks approved Windows control adapter');
+  // The JS service has no Windows managed-control protocol: only the resident policy (no managed stop/update) ships.
+  check(residentPolicy(freeze.lifecyclePolicy?.[target]),'Windows managed control unsupported for the JS service');
+  check(shell.receipt.features.windowsManagedControl==='UNSUPPORTED','Resident shell must preserve unsupported Windows control');
   check(shell.receipt.features.windowsNativePathMapping===true,'Shell lacks Windows startup path mapping');
- }else{
-  service=payload(request.service,temp,'service');check(pins.serviceReceiptSha256===service.ref.sha256,'Service not in freeze');identity(service.receipt,release,target,'backplane-bend-service');
-  check(service.receipt.genuineService===true&&service.receipt.entrypoint==='src/server/main.bend'&&service.receipt.roles?.service==='backplane-serve'&&service.receipt.roles.web==='web','Not a genuine service entry');
-  const build=readReference(service.receipt.buildReceipt);check(/^VERIFIED_GENUINE/.test(build.status)&&build.target===target&&build.entry==='src/server/main.bend'&&build.version===VERSION&&build.source_tree===release.tree&&build.source_commit===release.commit&&build.binary_sha256===digest(path.join(service.root,'backplane-serve')),'Missing genuine target build provenance');
-  check(digest(path.join(service.root,'BUILD.json'))===service.receipt.buildReceipt.sha256,'Packaged BUILD must preserve the actual genuine build receipt');configuredService(build,freeze);
-  membership(service.root,service.receipt.members,target);closure(service.root,service.receipt,target);notices(service.root,service.receipt);architecture(path.join(service.root,'backplane-serve'),target);
  }
  check(pins.webManifestSha256===digest(path.join(service.root,'WEB.json')),'Matching web not in release freeze');generatedWeb(path.join(service.root,'web'),json(path.join(service.root,'WEB.json')),release);
  if(freeze.lifecyclePolicy?.[target]){check(residentPolicy(freeze.lifecyclePolicy[target]),'Unknown/incomplete lifecycle policy');check(shell.receipt.features.managedStop===false&&shell.receipt.features.managedUpdate===false,'Resident shell advertises unsupported stop/update');}
@@ -214,7 +195,7 @@ function stage(requestFile,output){
   }
   const resources=inside(output,t.resources);fs.mkdirSync(resources,{recursive:true});check(!fs.existsSync(path.join(resources,'app'))&&!fs.existsSync(path.join(resources,'backplane-service')),'Runtime contains conflicting product resources');
   copy(shell.root,path.join(resources,'app'));copy(service.root,path.join(resources,'backplane-service'));
-  membership(path.join(resources,'app'),shell.receipt.members,target);membership(path.join(resources,'backplane-service'),service.validatedMembers||service.receipt.members,target);
+  membership(path.join(resources,'app'),shell.receipt.members,target);membership(path.join(resources,'backplane-service'),service.receipt.members,target);
   browserOverlay.install(selectedBrowser,path.join(resources,'backplane-service'),target,browserUtilities());
   for(const [n,expected]of Object.entries(membershipExpectation(electron.receipt.members,target))){
    if(target==='darwin-arm64'&&n==='Electron.app/Contents/Info.plist')continue;
@@ -224,18 +205,17 @@ function stage(requestFile,output){
   }
   const build={serviceVersion:VERSION,electronVersion:ELECTRON,sourceTree:release.tree,sourceCommit:release.commit,...(freeze.lifecyclePolicy?.[target]?{lifecyclePolicy:freeze.lifecyclePolicy[target]}:{}),qualification:'staged only; post-assembly signing/sandbox/lifecycle/runtime evidence required'};
   check(!fs.existsSync(path.join(resources,'DESKTOP-BUILD.json')),'Conflicting desktop resource metadata');
-  // Native Windows BUILD.json is immutable; Electron's own build configuration is separate.
+  // The service's BUILD.json is immutable; Electron's own build configuration is separate.
   write(path.join(resources,'DESKTOP-BUILD.json'),build);
   if(shell.receipt.features.directBrowser){build.desktopBrowser={protocol:1,guestManagerSha256:digest(path.join(resources,'app/browser-guest.cjs')),preloadSha256:digest(path.join(resources,'app/browser-recording-preload.cjs'))};write(path.join(resources,'DESKTOP-BUILD.json'),build);}
   if(target.startsWith('linux-'))fs.writeFileSync(path.join(output,'backplane-open'),linuxLauncher(),{mode:0o755});
   const provenance=path.join(output,'PROVENANCE');fs.mkdirSync(provenance);const refs={};
   for(const [name,ref]of Object.entries({freeze:release.freezeReceipt,shell:shell.ref,electron:electron.ref,service:service.ref})){fs.copyFileSync(reference(ref),path.join(provenance,name+'.json'));refs[name]=publicReference(ref,name+'.json');}
   if(service.receipt.buildReceipt){const ref=service.receipt.buildReceipt;fs.copyFileSync(reference(ref),path.join(provenance,'service-build.json'));refs.serviceBuild=publicReference(ref,'service-build.json');}
-  if(service.archive)refs.windowsResourceArchive={sha256:service.archive.sha256,bytes:service.archive.bytes};
   if(selectedBrowser){const authority=selectedBrowser.rootDisposition;fs.copyFileSync(reference(authority),path.join(provenance,'root-staging-disposition.json'));refs.rootStagingDisposition=publicReference(authority,'root-staging-disposition.json');fs.copyFileSync(reference(selectedBrowser.ref),path.join(provenance,'selected-browser.json'));refs.selectedBrowser=publicReference(selectedBrowser.ref,'selected-browser.json');const file=selectedBrowser.manifestFile,ref={path:file,sha256:digest(file),bytes:fs.statSync(file).size};fs.copyFileSync(file,path.join(provenance,'selected-browser-web.json'));refs.selectedBrowserWeb=publicReference(ref,'selected-browser-web.json');}
   const noticesManifest={schema:1,kind:'backplane-desktop-notices',target,packages:[]};
   for(const [part,obj,prefix]of [['shell',shell,t.resources+'/app/'],['electron',electron,target.startsWith('linux-')?'runtime/':target==='windows-x64'?'':''],['service',service,t.resources+'/backplane-service/']]){
-   const packages=part==='service'?[...(target==='windows-x64'?[{name:'Backplane service',version:VERSION,licenses:[{path:'LICENSE.Backplane',sha256:digest(path.join(obj.root,'LICENSE.Backplane'))}],sourceDisposition:'Original SOURCE.json and RUNTIME.json retain source/redistribution obligations'}]:obj.receipt.packages),...json(path.join(obj.root,target==='windows-x64'?'RUNTIME.json':obj.receipt.runtimeManifest)).packages]:obj.receipt.packages;
+   const packages=part==='service'?[...obj.receipt.packages,...json(path.join(obj.root,obj.receipt.runtimeManifest)).packages]:obj.receipt.packages;
    for(const p of packages){const licenses=p.licenses.map(n=>({...n,path:part==='electron'&&target==='darwin-arm64'?(n.path.startsWith('Electron.app/')?'Backplane.app/'+n.path.slice(13):'NOTICES/electron/'+n.path):prefix+n.path}));noticesManifest.packages.push({...p,component:part,licenses});}
   }write(path.join(output,'NOTICES.json'),noticesManifest);notices(output,noticesManifest);
   const signable=electron.receipt.signablePaths||[];check(Array.isArray(signable)&&signable.every(n=>electron.receipt.members[n]?.type==='file'),'Invalid runtime signing paths');for(const n of signable)architecture(inside(electron.root,n),target);
@@ -271,7 +251,7 @@ function archive(stageDir,acceptanceFile,output){
  check(proofs.sandbox.receipt.kind==='desktop-sandbox'&&proofs.sandbox.receipt.osEnforced===true&&Array.isArray(proofs.sandbox.receipt.flags)&&!proofs.sandbox.receipt.flags.includes('--no-sandbox'),'Unqualified OS sandbox');
  const lifecycle=proofs.lifecycle.receipt;check(lifecycle.kind==='desktop-lifecycle'&&lifecycle.nativeChildIdentity===true&&lifecycle.authBound===true&&lifecycle.singleInstance===true&&lifecycle.reconnect===true&&lifecycle.windowClose==='resident-service','Unqualified service lifecycle');
  if(s.lifecyclePolicy){check(residentPolicy(s.lifecyclePolicy),'Unknown lifecycle policy');check(lifecycle.startup===true&&lifecycle.closePreservesService===true&&lifecycle.shutdown==='unsupported'&&lifecycle.managedStopAdvertised===false&&lifecycle.managedUpdateAdvertised===false,'Unqualified resident-service lifecycle');}
- else check(lifecycle.shutdown===(s.target==='windows-x64'?'approved-service-protocol':'owned-native-child'),'Unsupported target shutdown');
+ else{check(s.target!=='windows-x64','Windows managed control unsupported for the JS service');check(lifecycle.shutdown==='owned-native-child','Unsupported target shutdown');}
  if(s.target==='windows-x64')check(lifecycle.nativeToPosixPaths===true,'Unqualified Windows path mapping');
  check(proofs.runtimeAcceptance.receipt.kind==='desktop-runtime-acceptance'&&proofs.runtimeAcceptance.receipt.scope==='desktop-release','Missing full target desktop acceptance');
  const changed=[...new Set([...Object.keys(s.members),...Object.keys(actual)])].filter(n=>canonical(s.members[n])!==canonical(actual[n]));

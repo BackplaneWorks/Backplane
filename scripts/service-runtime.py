@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Measure a matching Unix host's system ABI, then assemble an existing native BUILD."""
+"""Measure a matching host's system ABI for a JS service BUILD (Bun), then assemble its component."""
 import argparse
 import ctypes
 import hashlib
@@ -28,9 +28,58 @@ def write(path, value):
     path.write_text(json.dumps(value, indent=2, sort_keys=True) + '\n')
 
 
+# Windows system DLLs a service may import; API sets (api-ms-win-*, ext-ms-win-*)
+# are OS-owned virtual names resolved by the loader.
+SYSTEM_DLLS = set(('ntdll kernel32 kernelbase user32 gdi32 gdi32full shell32 '
+                  'advapi32 ole32 oleaut32 bcrypt bcryptprimitives crypt32 '
+                  'ws2_32 wsock32 userenv dbghelp iphlpapi imm32 comdlg32 '
+                  'comctl32 winmm version setupapi secur32 shlwapi rpcrt4 '
+                  'msvcrt ucrtbase normaliz dnsapi netapi32 psapi wtsapi32 '
+                  'winhttp wininet powrprof cfgmgr32 dwmapi uxtheme').split())
+APISET = re.compile(r'(api|ext)-ms-win-[a-z0-9.-]+\.dll\Z')
+# Apple system libraries Bun links against; all live in the dyld shared cache.
+APPLE_SYSTEM = {'/usr/lib/libSystem.B.dylib', '/usr/lib/libc++.1.dylib',
+                '/usr/lib/libicucore.A.dylib', '/usr/lib/libresolv.9.dylib'}
+# TODO (fast-hub L1/J4): measure these from the running service on each
+# target instead of declaring them (docs/service-runtime.md).
+# What the JS service may dlopen through bun:ffi, per platform. The Bend JS
+# runtime (pinned bend) and the server's effects (src/**/*.js, checked by
+# ffi_libraries) open the C library and nothing else.
+FFI_APPROVED = {'linux': {'libc.so.6'}, 'darwin': {'libSystem.dylib', '/usr/lib/libSystem.B.dylib'}, 'windows': set()}
+BEND_RUNTIME_FFI = {'linux': ['libc.so.6'], 'darwin': ['libSystem.dylib'], 'windows': []}
+
+
 def target_host():
     return {('Linux', 'x86_64'): 'linux-x64', ('Linux', 'aarch64'): 'linux-arm64',
-            ('Darwin', 'arm64'): 'darwin-arm64'}.get((platform.system(), platform.machine()))
+            ('Darwin', 'arm64'): 'darwin-arm64', ('Darwin', 'x86_64'): 'darwin-x64',
+            ('Windows', 'AMD64'): 'windows-x64'}.get((platform.system(), platform.machine()))
+
+
+def family(target):
+    return target.split('-')[0]
+
+
+def ffi_libraries(root, files, target):
+    # Every dlopen in the service's JS sources must name its libraries as
+    # literals; those for this platform must be approved system libraries.
+    found = {}
+    for name in files:
+        if not (name.startswith('src/') and name.endswith('.js')):
+            continue
+        text = (Path(root)/name).read_text(errors='strict')
+        for call in re.finditer(r'\bdlopen\(([^{}]*?),\s*\{', text):
+            # the libraries named as literals (a platform test's own strings are not)
+            names = [n for n in re.findall(r'["\']([^"\']+)["\']', call[1])
+                     if re.search(r'\.(?:so(?:\.[0-9]+)*|dylib|dll)\Z', n)]
+            require(names, 'Dynamic load of an undeclared library: ' + name)
+            for lib in names:
+                kind = 'linux' if '.so' in lib else 'darwin' if lib.endswith('.dylib') else 'windows'
+                if kind == family(target):
+                    found.setdefault(lib, set()).add(name)
+    for lib in BEND_RUNTIME_FFI[family(target)]:
+        found.setdefault(lib, set()).add('Bend JS runtime (pinned bend)')
+    require(set(found) <= FFI_APPROVED[family(target)], 'Unapproved dynamically loaded library')
+    return [{'name': lib, 'declaredBy': sorted(by)} for lib, by in sorted(found.items())]
 
 
 class Capture:
@@ -135,7 +184,99 @@ def no_loader_imports(symbols):
             'Runtime loading API requires a separately measured dynamic closure')
 
 
-def linux_measure(binary, target, capture):
+def loader_imports(symbols, dynamic):
+    # Bun imports dlopen/dlsym for bun:ffi; that is allowed only with the
+    # declared dynamic loads of ffi_libraries.
+    used = sorted(set(re.findall(r'\b(_?(?:dlopen|dlmopen|dlsym|dlvsym|__libc_dlopen_mode))(?:@|\b)', symbols)))
+    if dynamic is None:
+        no_loader_imports(symbols)
+    require(not any(n.lstrip('_') in {'dlmopen', 'dlvsym', 'libc_dlopen_mode'} for n in used),
+            'Unexpected runtime loading API')
+    return used
+
+
+def pe(data):
+    def unpack(fmt, at):
+        require(0 <= at <= len(data)-struct.calcsize(fmt), 'Truncated PE data')
+        return struct.unpack_from(fmt, data, at)
+    require(data[:2] == b'MZ', 'Expected PE')
+    at, = unpack('<I', 0x3c)
+    require(data[at:at+4] == b'PE\0\0', 'Invalid PE signature')
+    machine, count = unpack('<HH', at+4)
+    length, = unpack('<H', at+20)
+    opt = at + 24
+    require(machine == 0x8664 and length >= 240 and 1 <= count <= 96
+            and opt+length+count*40 <= len(data) and unpack('<H', opt)[0] == 0x20b,
+            'AMD64 PE32+ required')
+    sections = []
+    for i in range(count):
+        vs, va, size, raw = unpack('<IIII', opt+length+40*i+8)
+        sections.append((va, size, raw))
+    def off(rva):
+        for va, size, raw in sections:
+            if va <= rva < va+size:
+                return raw+rva-va
+        require(rva < unpack('<I', opt+60)[0], 'PE RVA outside file-backed data')
+        return rva
+    def string(rva):
+        start = off(rva)
+        end = data.find(b'\0', start)
+        require(end >= 0, 'Unterminated PE string')
+        return data[start:end].decode('ascii')
+    result = {'machine': '0x8664', 'imports': [], 'delayImports': []}
+    for index, width, fmt, field, key in ((1, 20, '<IIIII', 3, 'imports'), (13, 32, '<IIIIIIII', 1, 'delayImports')):
+        rva, size = unpack('<II', opt+112+index*8)
+        if not rva:
+            continue
+        for n in range(min(size // width, 4096)):
+            row = unpack(fmt, off(rva)+width*n)
+            if not any(row):
+                break
+            name = row[field]
+            if index == 13 and not row[0] & 1:
+                name -= unpack('<Q', opt+24)[0]
+            dll = string(name)
+            require(re.fullmatch(r'[A-Za-z0-9_.-]+\.dll', dll, re.I), 'Invalid imported DLL name')
+            result[key].append(dll)
+        else:
+            raise ValueError('Unterminated PE import directory')
+    return result
+
+
+def windows_system(name):
+    return name.lower().removesuffix('.dll') in SYSTEM_DLLS or bool(APISET.fullmatch(name.lower()))
+
+
+def windows_measure(binary, target, dynamic, system32=None):
+    # Static PE imports (normal and delay) of the service, every one an OS DLL.
+    service = pe(Path(binary).read_bytes())
+    require(service['imports'], 'PE imports nothing')
+    system32 = Path(system32 or os.path.join(os.environ.get('SystemRoot', r'C:\Windows'), 'System32'))
+    nodes, edges, seen = [], [], set()
+    for mode, kind in (('imports', 'normal'), ('delayImports', 'delay')):
+        for dep in service[mode]:
+            require(windows_system(dep), 'Non-system DLL import requires supplied runtime qualification: ' + dep)
+            edges.append({'from': 'service', 'name': dep, 'kind': kind, 'resolvedSystemPath':
+                          'apiset:' + dep.lower() if APISET.fullmatch(dep.lower()) else str(system32/dep.lower())})
+            if dep.lower() in seen:
+                continue
+            seen.add(dep.lower())
+            if APISET.fullmatch(dep.lower()):
+                nodes.append({'name': dep.lower(), 'classification': 'approved-system', 'redistributed': False,
+                              'architecture': target, 'apiSet': True})
+                continue
+            path = system32/dep.lower()
+            require(path.is_file(), 'Imported system DLL is not on this host: ' + dep)
+            pe(path.read_bytes())
+            nodes.append({'name': dep.lower(), 'path': str(path), 'sha256': sha(path), 'bytes': path.stat().st_size,
+                          'architecture': target, 'classification': 'approved-system', 'redistributed': False})
+    return {'platform': 'Windows', 'release': platform.release(), 'windowsVersion': platform.version(),
+        'peImports': service, 'systemLibraries': nodes, 'dependencyGraph': edges, 'runtimeLoaderImports': [],
+        'dynamicLoads': dynamic,
+        'sourceDisposition': 'Microsoft Windows system DLLs; no system binary is copied or redistributed.'}
+
+
+def linux_measure(binary, target, capture, dynamic=None):
     loader_name = 'ld-linux-x86-64.so.2' if target == 'linux-x64' else 'ld-linux-aarch64.so.1'
     program = capture(['/usr/bin/readelf', '--program-headers', '--wide', binary])
     interpreters = re.findall(r'Requesting program interpreter: ([^\]]+)\]', program)
@@ -152,13 +293,14 @@ def linux_measure(binary, target, capture):
         require(Path(path).name == name and str(Path(path).resolve()).startswith(('/usr/lib/', '/lib/')),
                 'Dependency resolved outside approved system library directories')
     nodes, edges = [], []
-    queue = [('backplane-serve', binary)] + [(name, Path(path)) for name, path in sorted(resolved.items())]
+    loads = []
+    queue = [('service', binary)] + [(name, Path(path)) for name, path in sorted(resolved.items())]
     for name, path in queue:
-        dynamic = capture(['/usr/bin/readelf', '--dynamic', '--wide', path])
-        needed = elf_needed(dynamic)
+        needed = elf_needed(capture(['/usr/bin/readelf', '--dynamic', '--wide', path]))
         require(all(n in resolved for n in needed), 'Mandatory transitive ELF dependency unresolved')
-        no_loader_imports(capture(['/usr/bin/readelf', '--dyn-syms', '--wide', path]) if name == 'backplane-serve' else '')
-        if name != 'backplane-serve':
+        if name == 'service':
+            loads = loader_imports(capture(['/usr/bin/readelf', '--dyn-syms', '--wide', path]), dynamic)
+        else:
             with path.open('rb') as stream:
                 header = stream.read(20)
             require(header[:6] == b'\x7fELF\x02\x01' and len(header) == 20
@@ -168,11 +310,15 @@ def linux_measure(binary, target, capture):
                 'sha256': sha(path), 'bytes': path.stat().st_size, 'architecture': target,
                 'classification': 'approved-system', 'redistributed': False})
         edges.extend({'from': name, 'name': dep, 'resolvedSystemPath': resolved[dep]} for dep in needed)
-    edges.append({'from': 'backplane-serve', 'name': loader_name, 'resolvedSystemPath': str(loader), 'interpreter': True})
+    edges.append({'from': 'service', 'name': loader_name, 'resolvedSystemPath': str(loader), 'interpreter': True})
+    for item in dynamic or []:
+        require(item['name'] in resolved, 'Dynamically loaded library is not the measured system one')
+        edges.append({'from': 'service', 'name': item['name'], 'kind': 'dynamic', 'resolvedSystemPath': resolved[item['name']]})
     os_release = Path('/etc/os-release').read_text()
     return {'platform': 'Linux', 'release': platform.release(), 'osRelease': os_release, 'loaderVersion': loader_version,
         'mainExecutableMapping': main_mapping,
-        'systemLibraries': nodes, 'dependencyGraph': edges, 'runtimeLoaderImports': [],
+        'systemLibraries': nodes, 'dependencyGraph': edges, 'runtimeLoaderImports': loads,
+        'dynamicLoads': dynamic or [],
         'kernelVirtualDso': 'OS-owned linux-vdso.so.1; no redistributable file',
         'sourceDisposition': 'Host distribution C-library package; system libraries are not copied or redistributed.'}
 
@@ -183,38 +329,46 @@ def macho_dependencies(text):
     dependencies = []
     for line in lines[1:]:
         m = re.fullmatch(r'\s+(/[^ ]+) \(compatibility version ([0-9.]+), current version ([0-9.]+)(?:, [^)]*)?\)', line)
-        require(m is not None and m[1] == '/usr/lib/libSystem.B.dylib',
-                'Mach-O dependency outside approved Apple system umbrella ABI')
+        require(m is not None and m[1] in APPLE_SYSTEM, 'Mach-O dependency outside approved Apple system ABI')
+        require(m[1] not in [d['name'] for d in dependencies], 'Duplicate Mach-O dependency')
         dependencies.append({'name': m[1], 'compatibilityVersion': m[2], 'currentVersion': m[3]})
-    require(len(dependencies) == 1, 'Actual libSystem dependency required')
+    require('/usr/lib/libSystem.B.dylib' in [d['name'] for d in dependencies], 'Actual libSystem dependency required')
     return dependencies
 
 
-def darwin_measure(binary, target, capture):
+def darwin_measure(binary, target, capture, dynamic=None):
     deps = macho_dependencies(capture(['/usr/bin/otool', '-L', binary]))
     commands = capture(['/usr/bin/otool', '-l', binary])
     require(not re.search(r'\bcmd LC_(?:RPATH|LOAD_WEAK_DYLIB|REEXPORT_DYLIB|LOAD_UPWARD_DYLIB|LAZY_LOAD_DYLIB|DYLD_ENVIRONMENT)\b', commands),
             'Unqualified Mach-O search path or secondary dependency command')
     require(re.search(r'name /usr/lib/dyld\b', commands), 'Expected Apple dyld interpreter')
-    no_loader_imports(capture(['/usr/bin/nm', '-u', binary]))
+    loads = loader_imports(capture(['/usr/bin/nm', '-u', binary]), dynamic)
     version = capture(['/usr/bin/sw_vers'])
     # Apple's shared-cache system ABI need not exist as a standalone disk file.
-    # Resolve it through this host's real dyld, then confirm the loaded image.
+    # Resolve each through this host's real dyld, then confirm the loaded image.
     system = ctypes.CDLL('/usr/lib/libSystem.B.dylib')
+    for d in deps:
+        ctypes.CDLL(d['name'])
     system._dyld_image_count.restype = ctypes.c_uint32
     system._dyld_get_image_name.argtypes = [ctypes.c_uint32]
     system._dyld_get_image_name.restype = ctypes.c_char_p
     images = [system._dyld_get_image_name(i).decode() for i in range(system._dyld_image_count())]
-    require('/usr/lib/libSystem.B.dylib' in images, 'Host dyld did not load required system ABI')
     system._dyld_get_image_header.argtypes = [ctypes.c_uint32]
     system._dyld_get_image_header.restype = ctypes.c_void_p
-    header = ctypes.string_at(system._dyld_get_image_header(images.index('/usr/lib/libSystem.B.dylib')), 12)
-    require(struct.unpack_from('<II', header) == (0xfeedfacf, 0x100000c), 'Loaded system image is not arm64 Mach-O')
+    cpu = 0x1000007 if target == 'darwin-x64' else 0x100000c
+    for d in deps:
+        require(d['name'] in images, 'Host dyld did not load required system ABI')
+        header = ctypes.string_at(system._dyld_get_image_header(images.index(d['name'])), 12)
+        require(struct.unpack_from('<II', header) == (0xfeedfacf, cpu), 'Loaded system image is not the target Mach-O')
+    edges = [{'from': 'service', 'name': d['name'], 'resolvedSystemPath': d['name']} for d in deps]
+    # libSystem.dylib is the umbrella's unversioned name in the same shared cache
+    edges += [{'from': 'service', 'name': item['name'], 'kind': 'dynamic',
+               'resolvedSystemPath': '/usr/lib/libSystem.B.dylib'} for item in dynamic or []]
     return {'platform': 'Darwin', 'release': platform.release(), 'swVers': version,
         'systemLibraries': [{**d, 'classification': 'approved-system', 'redistributed': False,
             'architecture': target, 'dyldImageObserved': True} for d in deps],
-        'dependencyGraph': [{'from': 'backplane-serve', 'name': d['name'], 'resolvedSystemPath': d['name']} for d in deps],
-        'runtimeLoaderImports': [], 'systemAbiBoundary': 'Apple libSystem umbrella and its OS-owned shared-cache closure',
+        'dependencyGraph': edges, 'dynamicLoads': dynamic or [],
+        'runtimeLoaderImports': loads, 'systemAbiBoundary': 'Apple system libraries and their OS-owned shared-cache closure',
         'sourceDisposition': 'Apple OS-provided libSystem/dyld; no system binary is copied. https://opensource.apple.com/'}
 
 
@@ -229,28 +383,37 @@ def prepare(args):
     raw = source/'BUILD.json'
     build = service.read(raw)
     target = build.get('target')
-    require(target == target_host() and target in service.TARGETS, 'Matching actual native host required')
+    require(target == target_host() and target in service.TARGETS, 'Matching actual target host required')
     require(not any(k.startswith(('LD_', 'DYLD_')) for k in os.environ), 'Ambient loader overrides refused')
     release = {'version': service.VERSION, 'tag': 'v'+service.VERSION, 'channel': 'release',
         'commit': build['source_commit'], 'tree': build['source_tree']}
     service.frozen(release)
     require(build.get('status') == 'VERIFIED_GENUINE_SERVICE_ONLY_CONFIGURED_BUILD'
-        and build.get('compileInputs') == service.compile_inputs(), 'Original configured native BUILD required')
-    binary = source/'backplane-serve'
-    require(sha(binary) == build['binary_sha256'], 'Native binary changed')
+        and build.get('compileInputs') == service.compile_inputs()
+        and build.get('serviceRuntime') == 'bun', 'Original configured JS service BUILD required')
+    name = service.service_name(target)
+    binary = source/name
+    require(sha(binary) == build['binary_sha256'], 'Service binary changed')
     service.architecture(binary, target)
+    files = service.git('ls-files').splitlines()
     require(service.read(source/'SOURCE.json')['members'] == {
-        n: sha(service.ROOT/n) for n in service.git('ls-files').splitlines()}, 'Native source manifest differs from frozen checkout')
+        n: sha(service.ROOT/n) for n in files}, 'Service source manifest differs from frozen checkout')
+    dynamic = ffi_libraries(service.ROOT, files, target)
     service.new_output(out)
     out.mkdir(parents=True)
     runtime = out/'runtime'
     evidence = runtime/'runtime-evidence'
     evidence.mkdir(parents=True)
     capture = Capture(evidence)
-    measurement = linux_measure(binary, target, capture) if target.startswith('linux-') else darwin_measure(binary, target, capture)
+    measure = {'linux': linux_measure, 'darwin': darwin_measure}.get(family(target))
+    measurement = measure(binary, target, capture, dynamic) if measure else windows_measure(binary, target, dynamic)
+    for edge in measurement['dependencyGraph']:
+        if edge['from'] == 'service':
+            edge['from'] = name
     measurement.update({'schema': 1, 'target': target, 'sourceCommit': release['commit'], 'sourceTree': release['tree'],
-        'binarySha256': sha(binary), 'operations': capture.calls,
-        'scope': 'Measured native dynamic ABI closure only; external CLI tools and installed UI/workflows are not qualified.'})
+        'binarySha256': sha(binary), 'serviceRuntime': 'bun', 'operations': capture.calls,
+        'scope': 'Measured service dynamic ABI closure (static imports and declared bun:ffi loads) only; '
+                 'external CLI tools and installed UI/workflows are not qualified.'})
     write(evidence/'system-dependencies.json', measurement)
     shutil.copyfile(Path(__file__), evidence/'SERVICE-RUNTIME-PRODUCER.py')
     notice = runtime/'runtime-notices'
@@ -272,9 +435,9 @@ def prepare(args):
     # Edges are rooted in the supplied service; system dependencies remain OS-owned
     # leaves. The full measured Linux transitive graph is retained in system.json.
     write(runtime/'CLOSURE.json', {'schema': 1, 'target': target, 'measured': True, 'status': 'PASS',
-        'unresolvedMandatory': [], 'edges': [{'from': 'backplane-serve', 'kind': 'normal', 'name': d['name'],
+        'unresolvedMandatory': [], 'edges': [{'from': name, 'kind': d.get('kind', 'normal'), 'name': d['name'],
           'system': True, 'classification': 'approved-system', 'resolvedSystemPath': d['resolvedSystemPath']}
-          for d in measurement['dependencyGraph'] if d['from'] == 'backplane-serve'],
+          for d in measurement['dependencyGraph'] if d['from'] == name],
         'measurement': 'runtime-evidence/system-dependencies.json', 'runtimeAcceptance': 'PENDING'})
     write(out/'RUNTIME-QUALIFICATION.json', {'schema': 1, 'kind': 'backplane-service-runtime-qualification',
         'status': 'PASS', 'target': target, 'sourceCommit': release['commit'], 'sourceTree': release['tree'],

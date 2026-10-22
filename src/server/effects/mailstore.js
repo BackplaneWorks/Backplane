@@ -9,13 +9,18 @@ function mi_open(path, write) {
     dir = fs.openSync(path.slice(0, at), C.O_RDONLY | C.O_DIRECTORY | C.O_NOFOLLOW);
     // openat binds the final component to the checked directory descriptor.
     const ffi = require('bun:ffi');
+    // arm64 macOS passes a variadic argument (openat's mode) on the stack:
+    // the five registers after the fixed ones are padded so it lands there
+    // (as io_sys does for fcntl)
+    const vari = process.platform === 'darwin' && process.arch === 'arm64';
     const lib = globalThis.BACKPLANE_MI_OPENAT ??= ffi.dlopen(process.platform === 'darwin' ? '/usr/lib/libSystem.B.dylib' : 'libc.so.6', {
-      openat: { args: ['i32', 'ptr', 'i32', 'i32'], returns: 'i32' }
+      openat: { args: vari ? ['i32', 'ptr', 'i32', 'i64', 'i64', 'i64', 'i64', 'i64', 'i32'] : ['i32', 'ptr', 'i32', 'i32'], returns: 'i32' }
     });
+    const openat = (d, p, f, m) => vari ? lib.symbols.openat(d, p, f, 0, 0, 0, 0, 0, m) : lib.symbols.openat(d, p, f, m);
     const name = Buffer.from(path.slice(at + 1) + '\0');
     // close-on-exec, as mailstore.c: a body file never leaks into a child
     const cloexec = process.platform === 'darwin' ? 0x1000000 : 0x80000;
-    fd = lib.symbols.openat(dir, ffi.ptr(name), (write !== 0 ? C.O_RDWR | C.O_CREAT : C.O_RDONLY) | C.O_NOFOLLOW | C.O_NONBLOCK | cloexec, 0o600);
+    fd = openat(dir, ffi.ptr(name), (write !== 0 ? C.O_RDWR | C.O_CREAT : C.O_RDONLY) | C.O_NOFOLLOW | C.O_NONBLOCK | cloexec, 0o600);
     if (fd < 0) code = io_sys().errno();
     if (!code) { const st = fs.fstatSync(fd); if (!st.isFile() || (write !== 0 && st.nlink !== 1)) code = 22; }
   } catch (e) { code = Math.abs(e.errno ?? 5); }

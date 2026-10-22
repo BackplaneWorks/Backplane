@@ -1,7 +1,7 @@
 import Base
 
 # One hub per home (pure). A hub holds an exclusive flock on
-# <home>/hub.lock for as long as its process lives (effects/hublock.c):
+# <home>/hub.lock for as long as its process lives (effects/hublock.js):
 # the kernel lets it go when the process dies, so a stale file never blocks
 # anyone, and an exec (a restart in place) keeps it. The file says the
 # holder's pid and port. HubLock.take answers "ok" (this process holds it),

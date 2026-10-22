@@ -75,7 +75,7 @@ def arg(+xs: List<&2, String>, +i: Nat) -> String:
 # message of its own, the client's clock moved to its time. At each step the main area is laid out from scratch
 # and, when the memo's key says nothing it shows changed, compared with the
 # memo's: they must be the same, op for op and hit for hit.
-#   scripts/build-app.sh test/native/memo_replay.bend build/memo_replay
+#   scripts/build-js.sh test/native/memo_replay.bend build/memo_replay
 #   build/memo_replay EVENTS THREAD [K]
 
 def lines(r: U8.Lines & List<&2, String>) -> List<&2, String>:

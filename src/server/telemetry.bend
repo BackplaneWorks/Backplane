@@ -9,22 +9,18 @@ import ./google.bend as G
 import ./host.bend as H
 import ./proc.bend as P
 import ./argv.bend as AV
-import ../core/port.bend as PO
 
 # A one-element list in Cfg avoids flattening its secrets into app state.
 type TmCfg is Data:
   TmCfg{enabled: Bool, sandbox: Bool, url: String, kid: String, key: String, os: String, arch: String, day_secs: Nat, busy: Nat, id: String, channel: String, human: Nat}
 
 def Tf.baked(name: String) -> IO(String):
-  import "./effects/telemetry.c"
   import "./effects/telemetry.js"
 
 def Tf.platform() -> IO(String):
-  import "./effects/telemetry.c"
   import "./effects/telemetry.js"
 
 def Tf.pow(id: String) -> IO(String):
-  import "./effects/telemetry.c"
   import "./effects/telemetry.js"
 
 def Tio.empty(sb: Bool) -> List<&2, TmCfg>:
@@ -159,16 +155,55 @@ def Tio.pow.result(r: P.Ran) -> String:
 def Tio.pow.accept(+st: T.TmState, +proof: String) -> T.TmState:
   Bool.pick(T.TmState, Bool.and(Bool.not(String.is_empty(proof)), Bool.and(T.Tm.hex(proof), Bool.and(Nat.is_le(String.length(proof), 16n), T.Tm.pow.ok(T.TmState.id(st), proof, 18n)))), T.Tm.pow.put(st, proof), st)
 
+# The pow child runs this hub's own binary (Exe.child) straight through
+# Proc.spawn, never through a shell (inside sh or timeout, /proc/self/exe
+# would name them) nor Base's Process.run (a spawnSync on the JS runtime,
+# which holds the hub's one loop for the child's life). A timer kills it
+# after 300 s unless it ended first; a child already waited for is never
+# signalled (Proc.exited reads it as not running).
+def Tio.pow.kill(running: Bool, +pid: U32) -> IO(Unit):
+  match running:
+    case True{}:
+      H.Proc.kill(pid, 9)
+    case False{}:
+      IO.pure(Unit, Unit{})
+
+def Tio.pow.timer.k(p: Poll<&1, &1, Maybe<&1, Unit>, Unit>, +pid: U32) -> IO(Unit):
+  match p:
+    case Ready{_}:
+      IO.pure(Unit, Unit{})
+    case Wait{_}:
+      IO.bind(U32, Unit, H.Proc.exited(pid), code => Tio.pow.kill(U32.is_eq(code, 4294967295), pid))
+
+def Tio.pow.timer(c: Chan(Unit), +pid: U32) -> IO(Unit):
+  IO.bind(Poll<&1, &1, Maybe<&1, Unit>, Unit>, Unit, Chan.try_recv(Unit, c, 300000), p => Tio.pow.timer.k(p, pid))
+
+def Tio.pow.run(started: U32 & Socket) -> IO(String):
+  (+pid, s) = started
+  do IO<String>:
+    +c : Chan(Unit) <- Chan.new(Unit, 1)
+    IO.spawn(Unit, Tio.pow.timer(c, pid))
+    s2 : Socket <- H.Sock.shutdown(s)
+    r : Socket & List<&2, U32> <- P.Proc.drain(1000n, s2, P.Chunks{Nil{}})
+    ran : P.Ran <- P.Proc.finish(pid, r)
+    ok : Result<&1, &1, Unit, Unit> <- Chan.send(Unit, c, Unit{})
+    return Tio.pow.result(ran)
+
+def Tio.pow.started(r: Result<&1, &1, U32 & String, U32 & Socket>) -> IO(String):
+  match r:
+    case Done{started}:
+      Tio.pow.run(started)
+    case Fail{_}:
+      IO.pure(String, "")
+
 def Tio.pow(needed: Bool, +st: T.TmState) -> IO(T.TmState):
   match needed:
     case False{}: IO.pure(T.TmState, st)
     case True{}:
       do IO<T.TmState>:
         exe : String <- H.Sys.exe_path()
-        # through Proc.run, never Base's Process.run: on the JS runtime that
-        # is a spawnSync that holds the hub's one loop for the child's life
-        r : P.Ran <- P.Proc.run("sh", ["-c", PO.Port.tmo() ++ "tmo \"$@\" 2>/dev/null", "sh", "300", EX.Exe.child(exe), "--telemetry-pow", T.TmState.id(st)], "")
-        return Tio.pow.accept(st, Tio.pow.result(r))
+        proof : String <- IO.bind(Result<&1, &1, U32 & String, U32 & Socket>, String, H.Proc.spawn(EX.Exe.child(exe), ["--telemetry-pow", T.TmState.id(st)], "", 0), Tio.pow.started)
+        return Tio.pow.accept(st, proof)
 
 def Tio.plan(p: T.TmPlan) -> IO(T.TmState):
   match p:

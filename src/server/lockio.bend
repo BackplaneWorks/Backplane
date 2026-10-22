@@ -3,11 +3,9 @@ import Base
 # Nonblocking POSIX flock guard. A captured child holds each granted flock;
 # a pipe ties its lifetime to the hub, including a hub killed with SIGKILL.
 def Guard.take(name: String, holder: String, home: String, script: String) -> IO(Bool):
-  import "./effects/locks.c"
   import "./effects/locks.js"
 
 def Guard.drop(name: String, holder: String) -> IO(Unit):
-  import "./effects/locks.c"
   import "./effects/locks.js"
 
 # Keep the flock until a detached owned job stops, even on hub SIGKILL.

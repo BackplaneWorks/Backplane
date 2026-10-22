@@ -14,7 +14,7 @@ import ../../src/server/argv.bend as AV
 # reads the file it is given: run it on a copy with the devices and tokens
 # left out, never on the live log:
 #   grep -v -E '"(DeviceRegistered|DeviceDropped)"|"push\\.|webhook|token' ~/.backplane-bend/events.jsonl > /tmp/lw-events.jsonl
-#   scripts/build-app.sh test/native/lostwork_replay.bend build/lostwork_replay
+#   scripts/build-js.sh test/native/lostwork_replay.bend build/lostwork_replay
 #   build/lostwork_replay /tmp/lw-events.jsonl
 
 def Lw.fold(m: Maybe<&2, M.Change>, +s: M.State) -> M.State:

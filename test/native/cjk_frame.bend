@@ -8,7 +8,7 @@ import ../../src/app/theme.bend as T
 
 # Headless Japanese fixture at the window's actual 12/13/14 px sizes.
 # Both palettes, 360 px columns, baseline marks and exact cell rulers.
-# Build with scripts/build-app.sh; writes /tmp/cjk.ppm.
+# Build with scripts/build-js.sh; writes /tmp/cjk.ppm.
 def paragraph() -> String:
   "日本語の表示を確認します。「新しいスレッド」を開いて、プロジェクトの設定を変更しました。テストは通過しています。句読点や小さい文字、長音符ーが行頭に残らず、読みやすく折り返されます。"
 

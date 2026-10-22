@@ -56,7 +56,7 @@ def arg(+xs: List<&2, String>, +i: Nat) -> String:
 # message of its own. At each step the main area is laid out from scratch
 # and, when the memo's key says nothing it shows changed, compared with the
 # memo's: they must be the same, op for op and hit for hit.
-#   scripts/build-app.sh test/native/memo_replay.bend build/memo_replay
+#   scripts/build-js.sh test/native/memo_replay.bend build/memo_replay
 #   build/memo_replay EVENTS THREAD [K]
 
 def lines(r: U8.Lines & List<&2, String>) -> List<&2, String>:
@@ -83,7 +83,7 @@ def msg(x: J.Json) -> J.Json:
 # events gives the state, then each of the K comes as its own "changes"
 # message and the state is forced after each (its sequence), as a frame
 # would. Prints ms for all K (profile it with callgrind).
-#   scripts/build-app.sh test/native/fold_bench.bend build/fold_bench
+#   scripts/build-js.sh test/native/fold_bench.bend build/fold_bench
 #   build/fold_bench EVENTS THREAD [K]
 
 def kind(+x: J.Json) -> String:

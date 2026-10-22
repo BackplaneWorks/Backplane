@@ -3,7 +3,7 @@
 A restart is cheap: with `restart.continue` on (the default) the hub resumes
 every turn it cut. What a restart must not cut is a **tool call in flight** (a
 build, an edit) and a **build under way** (the machine-wide `/tmp/bp-bend.lock`
-and `/tmp/bp-wt-build.lock` that `scripts/build-app.sh` holds). A deploy waits
+and `/tmp/bp-wt-build.lock` that builds hold). A deploy waits
 for both, then swaps the new package in and restarts in place.
 
 ## Asking

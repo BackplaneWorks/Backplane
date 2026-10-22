@@ -7,7 +7,7 @@ import ../../src/core/client.bend as U
 
 # What a push, a join and a client cost as a mirror grows (docs/bots.md,
 # "Threads elsewhere"), on a synthetic history of N messages of one thread:
-#   scripts/build-app.sh test/native/far_sync_bench.bend build/far_sync_bench
+#   scripts/build-js.sh test/native/far_sync_bench.bend build/far_sync_bench
 #   build/far_sync_bench           (4000, 16000 and 64000 items, 100 pushes each)
 # Each line is ms for the whole step; "per" is per push or per chunk.
 #   mirror push   a batch of one item taken into a mirror of N items

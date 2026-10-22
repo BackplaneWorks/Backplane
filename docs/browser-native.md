@@ -47,7 +47,7 @@ Validation covers a real app and CEF on a private Xvfb: visible page pixels,
 CDP click/type/snapshot on that page, swallowed takeover click, native typing,
 handback, focus return, palette, resize, per-thread state, popup links, bot
 teaching, remote JPEG delivery, no local JPEG decode in CEF mode, and repeated
-engine switching. See `test/tools/cef_window.ts`; helper checks live under
+engine switching. The window-driven test (`test/tools/cef_window.ts`) went with the native window; helper checks live under
 `tools/browser/test/` and `tools/cef/test/`.
 
 Real Japanese input is checked with IBus Mozc, an independent GTK editor and

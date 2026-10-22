@@ -1,4 +1,4 @@
-// EvLog.read (host.bend), as evlog.c: the tail's fix, then the event log's whole lines as
+// EvLog.read_from (host.bend), as evlog.c: the tail's fix, the end offset, then the event log's whole lines as
 // Strings from one Buffer, never a List cell per byte. A line that is
 // well-formed UTF-8 goes through TextDecoder (fatal, so anything it accepts
 // decodes alike in core/utf8.bend's Utf8.decode); any other line is decoded
@@ -43,18 +43,36 @@ function evlog_line(td, b, s, e) {
   }
 }
 
-function evlog_read(path) {
+// [tail's fix, offset past the last whole line, lines...] from byte off
+function evlog_read_from(path, offs) {
+  const fs = require("fs");
+  const off = Number(/^[0-9]*/.exec(offs)[0] || "0");
+  const none = (end) => ({ $: "Con", head: "", tail: { $: "Con", head: String(end), tail: { $: "Nil" } } });
   let b;
   try {
-    b = require("fs").readFileSync(path);
+    const fd = fs.openSync(path, "r");
+    try {
+      const size = fs.fstatSync(fd).size;
+      b = Buffer.alloc(Math.max(size - off, 0));
+      let got = 0;
+      while (got < b.length) {
+        const r = fs.readSync(fd, b, got, b.length - got, off + got);
+        if (r <= 0) break;
+        got += r;
+      }
+      b = b.subarray(0, got);
+    } finally {
+      fs.closeSync(fd);
+    }
   } catch (_) {
-    return { $: "Con", head: "", tail: { $: "Nil" } };
+    return none(off);
   }
   const n = b.length;
-  if (n === 0) return { $: "Con", head: "", tail: { $: "Nil" } };
+  if (n === 0) return none(off);
   const td = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
   let end = n;
   while (end > 0 && b[end - 1] !== 10) end -= 1;
+  const whole = end;
   let xs = { $: "Nil" };
   while (end > 0) {
     const stop = end - 1;
@@ -62,7 +80,7 @@ function evlog_read(path) {
     xs = { $: "Con", head: evlog_line(td, b, start, stop), tail: xs };
     end = start;
   }
-  return { $: "Con", head: b[n - 1] === 10 ? "" : "\n", tail: xs };
+  return { $: "Con", head: b[n - 1] === 10 ? "" : "\n", tail: { $: "Con", head: String(off + whole), tail: xs } };
 }
 
-io_eff(CID(EvLog.read), evlog_read);
+io_eff(CID(EvLog.read_from), evlog_read_from);

@@ -1,14 +1,13 @@
 #!/bin/sh
-# Start each built binary on a spare port with a throwaway home, run
-# test/smoke.ts against it, stop it (by its PID). The test speaks CBOR
-# through the hub's own codec, built here from test/wire.
+# Start each built binary (scripts/build.sh: the hub on Bun's runtime and
+# its launcher) on a spare port with a throwaway home, run test/smoke.ts
+# against it, stop it (by its PID). The test speaks CBOR through the hub's
+# own codec, built here from test/wire. scripts/js-smoke.sh is the quick
+# check of one binary.
 set -eu
 cd "$(dirname "$0")/.."
-# (made already when the build was split: scripts/build.sh emit)
-if [ "${BACKPLANE_PREBUILT:-}" != 1 ] || [ ! -d build/wire ]; then
-  rm -rf build/wire
-  bend test/wire/index.html -o build/wire > /dev/null
-fi
+rm -rf build/wire
+bend test/wire/index.html -o build/wire > /dev/null
 run() {
   bin=$1 port=$2
   home=$(mktemp -d)

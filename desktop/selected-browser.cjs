@@ -19,7 +19,7 @@ function input(file,u,rootDisposition){
  return{receipt,payload,...(supplied?{rootDisposition:{...supplied,path:path.resolve(base,supplied.path)}}:rootDisposition?{rootDisposition}:{})};
 }
 function nativeServicePin(allowed,target,pins){
- const name=target==='windows-x64'?'serviceArchiveSha256':'serviceReceiptSha256';
+ const name='serviceReceiptSha256';
  check(HEX.test(allowed?.[name]||'')&&allowed[name]===pins[name],'Root native service artifact pin mismatch');
 }
 function rootAuthority(rootDisposition,v,u){
@@ -120,7 +120,7 @@ function composite(a,s,actual,frozen,u){
  check(sameRef(d.components.freeze,b.freeze)&&oldFreeze.kind==='backplane-release-freeze'&&oldFreeze.status==='FROZEN'&&oldFreeze.commit===s.release.commit&&oldFreeze.tree===s.release.tree,'Baseline freeze mismatch');
  check(u.canonical(oldFreeze.signingPolicy?.[s.target])===u.canonical(frozen.signingPolicy?.[s.target]),'Baseline signing disposition changed');
  check(u.canonical(d.lifecyclePolicy??null)===u.canonical(s.lifecyclePolicy??null)&&u.canonical(d.windowsShellSource??null)===u.canonical(s.windowsShellSource??null),'Baseline native policy/source differs');
- for(const k of ['shell','electron','service','serviceBuild','windowsResourceArchive'])check((!d.components[k]&&!s.components[k])||sameRef(d.components[k],s.components[k]),'Baseline immutable component differs: '+k);
+ for(const k of ['shell','electron','service','serviceBuild'])check((!d.components[k]&&!s.components[k])||sameRef(d.components[k],s.components[k]),'Baseline immutable component differs: '+k);
  const webPrefix=u.TARGETS[s.target].resources+'/backplane-service/web/';
  const native=x=>Object.fromEntries(Object.entries(x).filter(([n])=>!n.startsWith(webPrefix)&&!n.startsWith('PROVENANCE/')&&!['STAGE.json','DESKTOP.json','MANIFEST.json'].includes(n)));
  const oldContent=Object.fromEntries(Object.entries(d.members).filter(([n])=>!n.startsWith('PROVENANCE/')&&!['STAGE.json','DESKTOP.json','MANIFEST.json'].includes(n)));

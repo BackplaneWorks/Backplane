@@ -38,11 +38,10 @@ configuration, regardless of developer environment variables or `.env`.
 
 Release compilation explicitly sets `BACKPLANE_TELEMETRY_BAKE=1`,
 `BACKPLANE_VERSION` (the full package version), and the endpoint/key id/key.
-`scripts/telemetry-header.py` writes a private compile-only header, after C
-emission. Linux/macOS use it through `build-app.sh`; Windows passes it as a
-separately quoted `-include` argument in `build-windows.sh`. It never enters
-emitted C, emitted-source uploads, object caches or package files. The
-header is removed when compilation ends. Missing configuration bakes empty
+`scripts/telemetry-header.py` writes a private compile-only prelude (`.js`),
+after the JS emission, which `scripts/build-js.sh` compiles into the binary
+on every target. It never enters the emitted JS, emit caches or package
+files. The prelude is removed when compilation ends. Missing configuration bakes empty
 values; malformed configuration fails the build without printing values.
 
 `BACKPLANE_TELEMETRY_CHANNEL` is immutable build metadata: `release` for a

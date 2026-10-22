@@ -2,6 +2,7 @@
 """Offline parser/closure failures; no configured artifact or runtime acceptance."""
 import importlib.util
 from pathlib import Path
+import struct
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -10,6 +11,38 @@ ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location('runtime', ROOT/'scripts/service-runtime.py')
 R = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(R)
+
+
+def pe_image(imports=(), delay=(), machine=0x8664):
+    # A minimal PE32+: one section at RVA 0x1000 holding the import tables and names.
+    data = bytearray(0x400)
+    data[:2] = b'MZ'
+    struct.pack_into('<I', data, 0x3c, 0x40)
+    data[0x40:0x44] = b'PE\0\0'
+    struct.pack_into('<HH', data, 0x44, machine, 1)
+    struct.pack_into('<H', data, 0x40+20, 240)
+    opt = 0x40 + 24
+    struct.pack_into('<H', data, opt, 0x20b)
+    struct.pack_into('<Q', data, opt+24, 0x140000000)
+    struct.pack_into('<I', data, opt+60, 0x200)
+    struct.pack_into('<8sIIII', data, opt+240, b'.idata', 0x200, 0x1000, 0x200, 0x200)
+    names = 0x1100
+    def place(rows, width, at, field, attrs):
+        nonlocal names
+        for i, dll in enumerate(rows):
+            struct.pack_into('<I', data, 0x200 + at - 0x1000 + width*i + 4*field, names)
+            if attrs:
+                struct.pack_into('<I', data, 0x200 + at - 0x1000 + width*i, 1)
+            raw = dll.encode() + b'\0'
+            data[0x200 + names - 0x1000:0x200 + names - 0x1000 + len(raw)] = raw
+            names += len(raw)
+    if imports:
+        place(imports, 20, 0x1000, 3, False)
+        struct.pack_into('<II', data, opt+112+8, 0x1000, 20*(len(imports)+1))
+    if delay:
+        place(delay, 32, 0x1080, 1, True)
+        struct.pack_into('<II', data, opt+112+13*8, 0x1080, 32*(len(delay)+1))
+    return bytes(data)
 
 
 class RuntimeTests(unittest.TestCase):
@@ -78,7 +111,9 @@ class RuntimeTests(unittest.TestCase):
 
     def test_native_host_tuple_is_exact(self):
         for system, machine, target in [('Linux', 'x86_64', 'linux-x64'), ('Linux', 'aarch64', 'linux-arm64'),
-                                        ('Darwin', 'arm64', 'darwin-arm64'), ('Linux', 'armv7l', None)]:
+                                        ('Darwin', 'arm64', 'darwin-arm64'), ('Darwin', 'x86_64', 'darwin-x64'),
+                                        ('Windows', 'AMD64', 'windows-x64'), ('Windows', 'ARM64', None),
+                                        ('Linux', 'armv7l', None)]:
             with patch.object(R.platform, 'system', return_value=system), patch.object(R.platform, 'machine', return_value=machine):
                 self.assertEqual(R.target_host(), target)
 
@@ -106,6 +141,72 @@ class RuntimeTests(unittest.TestCase):
     def test_macho_system_umbrella_version_measured(self):
         value = R.macho_dependencies('/service:\n\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1345.120.2)\n')
         self.assertEqual(value[0]['currentVersion'], '1345.120.2')
+
+    def test_macho_bun_system_libraries_approved(self):
+        # what Bun 1.x's darwin runtime links (otool -L)
+        text = '/service:\n' + ''.join('\t' + n + ' (compatibility version 1.0.0, current version 1.0.0)\n' for n in [
+            '/usr/lib/libicucore.A.dylib', '/usr/lib/libresolv.9.dylib', '/usr/lib/libc++.1.dylib', '/usr/lib/libSystem.B.dylib'])
+        self.assertEqual(len(R.macho_dependencies(text)), 4)
+        with self.assertRaises(ValueError):
+            R.macho_dependencies(text.replace('\t/usr/lib/libSystem.B.dylib', '\t/usr/lib/libz.1.dylib'))
+        with self.assertRaises(ValueError):
+            R.macho_dependencies(text + '\t/usr/lib/libc++.1.dylib (compatibility version 1.0.0, current version 1.0.0)\n')
+
+    def test_bun_loader_imports_need_declared_dynamic_loads(self):
+        symbols = ' UND dlopen@GLIBC_2.2.5\n UND dlsym@GLIBC_2.2.5\n'
+        with self.assertRaises(ValueError):
+            R.loader_imports(symbols, None)
+        self.assertEqual(R.loader_imports(symbols, [{'name': 'libc.so.6'}]), ['dlopen', 'dlsym'])
+        with self.assertRaises(ValueError):
+            R.loader_imports(' UND dlmopen@GLIBC_2.3.4\n', [{'name': 'libc.so.6'}])
+
+    def test_ffi_libraries_from_sources(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root/'src/server/effects').mkdir(parents=True)
+            (root/'src/server/effects/a.js').write_text(
+                'const l = ffi.dlopen(mac ? "libSystem.dylib" : "libc.so.6", {\n x: {} });\n'
+                'b = dlopen(process.platform === "darwin" ? "/usr/lib/libSystem.B.dylib" : "libc.so.6", { y: {} });\n')
+            files = ['src/server/effects/a.js', 'README']
+            self.assertEqual([x['name'] for x in R.ffi_libraries(root, files, 'linux-arm64')], ['libc.so.6'])
+            self.assertEqual([x['name'] for x in R.ffi_libraries(root, files, 'darwin-x64')],
+                             ['/usr/lib/libSystem.B.dylib', 'libSystem.dylib'])
+            self.assertEqual(R.ffi_libraries(root, files, 'windows-x64'), [])
+            for text in ['x = dlopen(name, { a: {} });', 'x = dlopen("libsqlite3.so.0", { a: {} });',
+                         'x = dlopen(win ? "foreign.dll" : "libc.so.6", { a: {} });']:
+                (root/'src/server/effects/b.js').write_text(text)
+                with self.subTest(text=text), self.assertRaises(ValueError):
+                    for target in ('linux-x64', 'windows-x64'):
+                        R.ffi_libraries(root, files + ['src/server/effects/b.js'], target)
+
+    def test_pe_normal_and_delay_imports(self):
+        got = R.pe(pe_image(['ntdll.dll', 'KERNEL32.dll'], ['WS2_32.dll']))
+        self.assertEqual(got['imports'], ['ntdll.dll', 'KERNEL32.dll'])
+        self.assertEqual(got['delayImports'], ['WS2_32.dll'])
+        for data in [pe_image(['ntdll.dll'], machine=0xaa64), b'MZ' + bytes(62), pe_image(['bad name.dll'])]:
+            with self.assertRaises(ValueError):
+                R.pe(data)
+
+    def test_windows_measure_system_dlls_only(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            system32 = root/'System32'
+            system32.mkdir()
+            for name in ('ntdll.dll', 'kernel32.dll', 'ws2_32.dll'):
+                (system32/name).write_bytes(pe_image())
+            binary = root/'backplane-serve.exe'
+            binary.write_bytes(pe_image(['ntdll.dll', 'KERNEL32.dll', 'api-ms-win-core-synch-l1-2-0.dll'], ['WS2_32.dll']))
+            got = R.windows_measure(binary, 'windows-x64', [], system32)
+            self.assertEqual([(e['name'], e['kind']) for e in got['dependencyGraph']],
+                [('ntdll.dll', 'normal'), ('KERNEL32.dll', 'normal'), ('api-ms-win-core-synch-l1-2-0.dll', 'normal'), ('WS2_32.dll', 'delay')])
+            self.assertTrue(all(n['classification'] == 'approved-system' for n in got['systemLibraries']))
+            self.assertEqual(got['systemLibraries'][1]['sha256'], R.sha(system32/'kernel32.dll'))
+            binary.write_bytes(pe_image(['ntdll.dll'], ['cygwin1.dll']))
+            with self.assertRaisesRegex(ValueError, 'Non-system DLL'):
+                R.windows_measure(binary, 'windows-x64', [], system32)
+            binary.write_bytes(pe_image(['ntdll.dll', 'crypt32.dll']))
+            with self.assertRaisesRegex(ValueError, 'not on this host'):
+                R.windows_measure(binary, 'windows-x64', [], system32)
 
     def test_macho_foreign_framework_rpath_and_empty_not_approved(self):
         for name in ['/opt/homebrew/lib/libSystem.B.dylib', '@rpath/libSystem.B.dylib', '/tmp/libx.dylib', '/usr/lib/libforeign.dylib']:
