@@ -51,7 +51,8 @@ def offered( +a: TA.Actor) -> String:
 
 def main() -> IO(Unit):
   do IO<Unit>:
-    C.Check.str("@ offers bots", offered(fresh("@")), "@alpha ")
+    # Bot completion keeps BotSet.name; its slug is only used for matching.
+    C.Check.str("@ offers bots", offered(fresh("@")), "@Alpha ")
     C.Check.str("> offers threads", Bool.show(String.contains(offered(fresh(">")), ">fix-the-power-rail")), "True")
     C.Check.str("% offers projects", Bool.show(Bool.and(String.contains(offered(fresh("%")), "%alpha-board"), String.contains(offered(fresh("%")), "%beta-enclosure"))), "True")
     C.Check.str("# offers rooms", offered(fresh("#")), "#design-room ")
