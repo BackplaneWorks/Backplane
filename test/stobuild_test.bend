@@ -20,7 +20,18 @@ import ../src/core/far.bend as FR
 # the log's lines (without newlines), oldest first
 def Log.tail() -> List<&2, M.Change>:
   [M.MessagePosted{"t2", "m9", M.User{}, String.repeat("ü", 150n) ++ " long line", 30n}, M.ProviderSet{"t2", "codex", "gpt", 31n},
-   M.ActivityLogged{"t2", "u9", "tool", "Bash", "make", 32n}, M.ProviderSet{"t2", "claude", "opus", 33n}]
+   M.ActivityLogged{"t2", "u9", "tool", "Bash", "make", 32n}, M.ProviderSet{"t2", "claude", "opus", 33n},
+   # Cold settings bypass the fold, but their SQL rows still equal its
+   # final dump: repeated keys, unicode, #digits, empty values and the
+   # WorkSet spelling of the same setting. Tiny chunks split the writes.
+   M.SettingSet{"launch.input.run1", "replacement ü", 34n},
+   M.SettingSet{"fallback.input.run2", "first", 35n},
+   M.SettingSet{"launch.input.run1", "#42", 36n},
+   M.SettingSet{"fallback.input.run2", "", 37n},
+   M.SettingSet{"launch.input.rum", "hot neighbour", 38n},
+   M.WorkSet{"run-work", "launch.input", "first work value", 39n},
+   M.SettingSet{"launch.input.run-work", "second work value", 40n},
+   M.WorkSet{"run-work", "launch.input", "", 41n}]
 
 def Log.encode(cs: List<&2, M.Change>) -> List<&2, String>:
   match cs:
@@ -184,6 +195,17 @@ def counters() -> String:
   +c : Map<&2, Nat> = B.Acc.cnt(B.Stb.lines(Lns.of(Log.lines()), B.Acc.new("")))
   Nat.show(B.Stb.count(c, "t1")) ++ " " ++ Nat.show(B.Stb.count(c, "t2"))
 
+# No cold setting key survives even before Acc.take strips the entries.
+def Cold.count(xs: List<&2, String>, n: Nat) -> Nat:
+  match xs:
+    case Nil{}:
+      n
+    case +k <> t:
+      Cold.count(t, Nat.add(n, Bool.pick(Nat, S.Sdb.cold(k), 1n, 0n)))
+
+def Cold.kept() -> Nat:
+  Cold.count(M.Setting.keys(B.Acc.st(B.Stb.lines(Lns.of(Log.lines()), B.Acc.new("")))), 0n)
+
 def Far.rows(fs: List<&2, FR.Fact>, acc: List<&2, String>) -> List<&2, String>:
   match fs:
     case Nil{}:
@@ -255,6 +277,7 @@ def main() -> IO(Unit):
     +dir : String <- dir.of(made)
     Wf.put(dir ++ "/events.jsonl", String.join(Log.lines(), "\n") ++ "\n{\"$\":\"MessagePosted\",\"th")
     C.Check.str("counters are Switch.count", counters(), Nat.show(M.Switch.count(fold(), "t1")) ++ " " ++ Nat.show(M.Switch.count(fold(), "t2")))
+    C.Check.str("cold settings never enter the build fold", Nat.show(Cold.kept()), "0")
     +b1 : B.Built <- B.Stb.build(dir, 64)
     C.Check.str("tiny chunks: lines, offset, entries", built(b1), Nat.show(Nat.sub(List.length(&2, String, Log.lines()), 1n)) ++ " " ++ Nat.show(bytes(String.join(Log.lines(), "\n") ++ "\n")) ++ " " ++ Nat.show(Mat.ord(mat())))
     o1 : String <- D.Db.open(dir ++ "/store.db")
