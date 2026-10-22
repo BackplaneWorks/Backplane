@@ -51,6 +51,16 @@ const open = (q: string) => {
   let closed = false;ws.onclose = () => { closed = true; };
   return { ws, frames, closed: () => closed, opened: new Promise((r, j) => { ws.onopen = r;ws.onerror = j; }) };
 };
+// A request as the hub reads it: CBOR (the hub drops JSON text requests),
+// plain text keys (its dictionary is optional on the way in).
+const cborOf = (v: any): number[] => {
+  const head = (major: number, n: number): number[] =>
+    n < 24 ? [major << 5 | n] : n < 256 ? [major << 5 | 24, n] : n < 65536 ? [major << 5 | 25, n >> 8, n & 255] : [major << 5 | 26, n >>> 24 & 255, n >> 16 & 255, n >> 8 & 255, n & 255];
+  if (typeof v === "number") return head(0, v);
+  if (typeof v === "string") { const b = [...new TextEncoder().encode(v)]; return [...head(3, b.length), ...b]; }
+  const ks = Object.keys(v);
+  return [...head(5, ks.length), ...ks.flatMap((k) => [...cborOf(k), ...cborOf(v[k])])];
+};
 const isHb = (f: Frame) => JSON.parse(f.text).t === "hb";
 const kind = (f: Frame) => String(JSON.parse(f.text).t);
 
@@ -64,13 +74,21 @@ try {
   await sleep(1500);
   const greeted = thin.frames.length;
   check(greeted > 0, `the view socket is greeted (${thin.frames.map(kind).join(", ")})`);
-  // a change: every legacy client hears it as "changes"
-  const t0 = Date.now();
-  legacy.ws.send(JSON.stringify({ id: 1, m: "project.add", p: { path: proj } }));
-  await sleep(17000); // past one Alive.every (15 s)
+  let t0 = Infinity;
   const later = (fs: Frame[]) => fs.filter((f) => f.at >= t0);
-  const legacyChanges = later(legacy.frames).filter((f) => !isHb(f));
-  check(legacyChanges.length > 0, `the legacy client heard the change (${legacyChanges.length} frames)`);
+  // the legacy client takes its log first (a slow runner's join can outlast a
+  // fixed wait, and a request sent mid-join is not the case under test)
+  for (let i = 0; i < 300 && !legacy.frames.some((f) => kind(f) === "log"); i++) await sleep(100);
+  check(legacy.frames.some((f) => kind(f) === "log"), `the legacy client took its log (${legacy.frames.map(kind).join(", ")})`);
+  // a change: every legacy client hears it as "changes"
+  t0 = Date.now();
+  legacy.ws.send(new Uint8Array(cborOf({ id: 1, m: "project.add", p: { path: proj } })));
+  for (let i = 0; i < 100 && !later(legacy.frames).some((f) => kind(f) === "reply"); i++) await sleep(100);
+  await sleep(17000); // past one Alive.every (15 s)
+  // the change itself, as every full client hears it: a "changes" frame with the project
+  const legacyChanges = later(legacy.frames).filter((f) => kind(f) === "changes" && f.text.includes("ProjectCreated"));
+  check(later(legacy.frames).some((f) => kind(f) === "reply"), "the hub answered the request");
+  check(legacyChanges.length > 0, `the legacy client heard the change (${legacyChanges.length} frames: ${later(legacy.frames).map((f) => kind(f) === "reply" ? f.text.slice(0, 120) : kind(f)).join(", ") || "none"})`);
   check(later(legacy.frames).some(isHb), "the legacy client heard a heartbeat");
   const thinAfter = later(thin.frames);
   check(thinAfter.some(isHb), `the view client heard a heartbeat (${thinAfter.map(kind).join(", ") || "nothing"})`);

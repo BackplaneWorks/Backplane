@@ -26,7 +26,7 @@ class BootstrapTest(unittest.TestCase):
         self.inputs.mkdir()
         (self.inputs / 'js').mkdir()
         self.js = {'schema': 1, 'kind': 'backplane-service-js-bootstrap-inputs', 'sourceCommit': SOURCE,
-                   'sourceTree': TREE, 'version': '0.12.0', 'sourceQualification': 'js/SOURCE-QUALIFICATION.json',
+                   'sourceTree': TREE, 'version': '0.12.1', 'sourceQualification': 'js/SOURCE-QUALIFICATION.json',
                    'webNotices': 'js/WEB-NOTICES.json', 'noticeInputs': {'build/release-notice-inputs/Bend.txt': 'js/notices/Bend.txt'}}
         (self.inputs / 'js/JS-INPUTS.json').write_text(json.dumps(self.js))
         (self.inputs / 'js/SOURCE-QUALIFICATION.json').write_text('{"public": "qualification"}')
@@ -47,7 +47,7 @@ class BootstrapTest(unittest.TestCase):
 
     def test_round_trip_and_identity(self):
         dest = self.unpack()
-        self.assertEqual(b.verify(dest, SOURCE, TREE, 'js')['version'], '0.12.0')
+        self.assertEqual(b.verify(dest, SOURCE, TREE, 'js')['version'], '0.12.1')
         for args in [('c'*40, TREE, 'js'), (SOURCE, 'c'*40, 'js'), (SOURCE, TREE, 'android')]:
             with self.subTest(args=args), self.assertRaises(ValueError): b.verify(dest, *args)
 
@@ -118,7 +118,7 @@ class BootstrapTest(unittest.TestCase):
         (dest / 'BOOTSTRAP.json').write_text(json.dumps(r))
 
     def test_wrong_or_escaping_js_inputs_not_promoted(self):
-        for change in [{'version': '0.12.0-dev'}, {'sourceTree': 'c'*40}, {'kind': 'backplane-service-c-emission'},
+        for change in [{'version': '0.12.1-dev'}, {'sourceTree': 'c'*40}, {'kind': 'backplane-service-c-emission'},
                        {'webNotices': 'js/missing.json'}, {'sourceQualification': '../x'},
                        {'noticeInputs': {'src/server/main.bend': 'js/notices/Bend.txt'}},
                        {'noticeInputs': {'build/release-notice-inputs/x': 'js/notices/missing'}}]:
@@ -197,7 +197,8 @@ class BootstrapTest(unittest.TestCase):
     def test_no_c_operation_remains(self):
         self.assertEqual(b.OPERATIONS, ('js', 'android'))
         text = (ROOT/'.github/workflows/release-bootstrap.yml').read_text()
-        for word in ('clang', 'unix-native', 'windows-native', 'release-llvm', 'cygwin'):
+        # (Cygwin itself is allowed: Windows ships its portable shell runtime, not a Cygwin build)
+        for word in ('clang', 'unix-native', 'windows-native', 'release-llvm'):
             self.assertFalse(word in text.lower(), word)
 
     def test_workflow_pins_this_component_producer(self):

@@ -48,11 +48,14 @@ def Blocks.join(k: Nat, +b: Blocks, +n: Nat, acc: List<&2, String>) -> String:
 type Row is Data:
   Row{ordinal: Nat, entry: M.Entry, terms: Map<&2, Bool>, blocks: Blocks}
 
+# below: per thread, how many of its rows are older than every row of it
+# the index holds (empty for an index of all history; a page index built
+# from the store holds a window of rows and counts the rest here)
 type Index is Data:
-  Index{next: Nat, rows: Map<&2, Row>, threads: Map<&2, ML.Order>, words: Map<&2, ML.Order>, recent: ML.Order, thread_at: Map<&2, Nat>}
+  Index{next: Nat, rows: Map<&2, Row>, threads: Map<&2, ML.Order>, words: Map<&2, ML.Order>, recent: ML.Order, thread_at: Map<&2, Nat>, below: Map<&2, Nat>}
 
 def Index.empty() -> Index:
-  Index{0n, Map.new(&2, Row), Map.new(&2, ML.Order), Map.new(&2, ML.Order), ML.OEmpty{}, Map.new(&2, Nat)}
+  Index{0n, Map.new(&2, Row), Map.new(&2, ML.Order), Map.new(&2, ML.Order), ML.OEmpty{}, Map.new(&2, Nat), Map.new(&2, Nat)}
 
 def Row.blank() -> Row:
   Row{0n, M.Msg{"", "", M.Assistant{}, "", 0n}, Map.new(&2, Bool), Blocks.of("")}
@@ -71,11 +74,11 @@ def Row.terms(r: Row) -> Map<&2, Bool>:
 
 def Index.rows(i: Index) -> Map<&2, Row>:
   match i:
-    case Index{_, rs, _, _, _, _}: rs
+    case Index{_, rs, _, _, _, _, _}: rs
 
 def Index.n(i: Index) -> Nat:
   match i:
-    case Index{n, _, _, _, _, _}: n
+    case Index{n, _, _, _, _, _, _}: n
 
 def Index.row.k(p: Map<&2, Row> & Row) -> Row:
   (_, r) = p
@@ -172,19 +175,19 @@ def Entry.rank(e: M.Entry) -> Nat:
 
 def Index.recent_put(+i: Index, +thread: String, +rank: Nat) -> Index:
   match i:
-    case Index{n, rs, ths, ws, recent, +at}:
+    case Index{n, rs, ths, ws, recent, +at, bl}:
       +best = M.Time.max(Recent.old(at, thread), rank)
-      Index{n, rs, ths, ws, Recent.update(recent, at, thread, best), Map.set(&2, Nat, at, thread, best)}
+      Index{n, rs, ths, ws, Recent.update(recent, at, thread, best), Map.set(&2, Nat, at, thread, best), bl}
 
 def Index.post.row(+i: Index, +e: M.Entry, +terms: Map<&2, Bool>) -> Index:
   match i:
-    case Index{+next, rs, +ths, ws, +recent, +at}:
+    case Index{+next, rs, +ths, ws, +recent, +at, bl}:
       +n = Nat.add(next, 1n)
       +th = M.Idx.thread(e)
       +from = M.Link.from(M.Idx.id(e))
       Index{n, Map.set(&2, Row, rs, Nat.show(n), Row{n, e, terms, Blocks.of(Entry.text(e))}),
         Index.sender(Bool.and(Bool.not(String.is_empty(from)), Bool.not(String.eq(from, th))), Orders.put(ths, th, n), from, n),
-        Words.index(Map.to_list(&2, Bool, terms), n, ws), Recent.update(recent, at, th, M.Time.max(Recent.old(at, th), Entry.rank(e))), Map.set(&2, Nat, at, th, M.Time.max(Recent.old(at, th), Entry.rank(e)))}
+        Words.index(Map.to_list(&2, Bool, terms), n, ws), Recent.update(recent, at, th, M.Time.max(Recent.old(at, th), Entry.rank(e))), Map.set(&2, Nat, at, th, M.Time.max(Recent.old(at, th), Entry.rank(e))), bl}
 
 def Index.post(+i: Index, +e: M.Entry) -> Index:
   Index.post.row(i, e, Words.of(Entry.text(e)))
@@ -223,11 +226,11 @@ def Index.changes(cs: List<&2, M.Change>, i: Index) -> Index:
 
 def Index.thread(i: Index, th: String) -> ML.Order:
   match i:
-    case Index{_, _, ths, _, _, _}: Orders.get(ths, th)
+    case Index{_, _, ths, _, _, _, _}: Orders.get(ths, th)
 
 def Index.word(i: Index, word: String) -> ML.Order:
   match i:
-    case Index{_, _, _, ws, _, _}: Orders.get(ws, word)
+    case Index{_, _, _, ws, _, _, _}: Orders.get(ws, word)
 
 # Rank of an immutable insertion anchor, bounded by AVL height. New entries
 # ahead of the anchor cannot duplicate/skip the next older page.
@@ -259,7 +262,7 @@ def Index.page(+i: Index, th: String, before: Nat, limit: Nat) -> List<&2, Strin
 
 def Index.recent(i: Index) -> List<&2, String>:
   match i:
-    case Index{_, _, _, _, o, _}: ML.Order.slice(o, 0n, 24n)
+    case Index{_, _, _, _, o, _, _}: ML.Order.slice(o, 0n, 24n)
 
 # Query selects the smallest posting list, then tests membership in already
 # indexed term sets. It never walks message text or the full event log.
@@ -317,10 +320,15 @@ def Search.bound(page: SearchPage, full: Bool) -> SearchPage:
   match page:
     case SearchPage{ids, n, last, more}: SearchPage{ids, n, last, Bool.or(more, full)}
 
-def Index.search.terms(+i: Index, +terms: List<&2, Sigma<&2, &2, String, _ => Bool>>, th: String, +before: Nat) -> SearchPage:
-  +o = Search.base(terms, i)
+# the walk over a posting list o (the smallest of the terms'); a store
+# hands in the candidates it fetched (ord < before, at most 129) and an
+# index holding just those rows
+def Index.search.on(+o: ML.Order, +i: Index, +terms: List<&2, Sigma<&2, &2, String, _ => Bool>>, th: String, +before: Nat) -> SearchPage:
   +skip = Page.after(o, before)
   Search.bound(Search.walk(ML.Order.slice(o, skip, 128n), i, terms, th, 0n, 0n, "", Nil{}), Nat.is_gt(ML.Order.count(o), Nat.add(skip, 128n)))
+
+def Index.search.terms(+i: Index, +terms: List<&2, Sigma<&2, &2, String, _ => Bool>>, th: String, +before: Nat) -> SearchPage:
+  Index.search.on(Search.base(terms, i), i, terms, th, before)
 
 def Index.search(i: Index, query: String, th: String, before: Nat) -> SearchPage:
   Index.search.terms(i, Map.to_list(&2, Bool, Words.of(query)), th, before)
@@ -334,15 +342,85 @@ def Entry.with_text(e: M.Entry, text: String) -> M.Entry:
     case M.Msg{id, th, role, _, at}: M.Msg{id, th, role, text, at}
     case M.Act{id, th, tone, kind, _, at}: M.Act{id, th, tone, kind, text, at}
 
-# One bounded visible block; the complete immutable entry stays in the hub.
-# Reply window.partial advertises a chunk continuation for every such row.
+# Only activity rows fold: a message's text is always sent whole (the
+# person's order: no "read rest of message"); an activity shows its first
+# block and window.partial advertises a chunk continuation for the rest.
+def Row.folds(+e: M.Entry) -> Bool:
+  match e:
+    case M.Msg{_, _, _, _, _}: False{}
+    case M.Act{_, _, _, _, _, _}: True{}
+
+def Row.preview.k(fold: Bool, +r: Row) -> M.Entry:
+  match fold:
+    case True{}: Entry.with_text(Row.entry(r), Blocks.get(Row.blocks(r), 0n))
+    case False{}: Row.entry(r)
+
 def Row.preview(+r: Row) -> M.Entry:
-  Entry.with_text(Row.entry(r), Blocks.get(Row.blocks(r), 0n))
+  Row.preview.k(Row.folds(Row.entry(r)), r)
+
+# a row shown cut: an activity longer than one block
+def Row.partial(+r: Row) -> Bool:
+  Bool.and(Row.folds(Row.entry(r)), Nat.is_gt(Blocks.n(Row.blocks(r)), 1n))
 
 def Page.entries(ids: List<&2, String>, +i: Index, acc: List<&2, M.Entry>) -> List<&2, M.Entry>:
   match ids:
     case Nil{}: List.reverse(&2, M.Entry, acc)
     case id <> tail: Page.entries(tail, i, Row.preview(Index.row.k(Map.get(Row, Row.blank(), Index.rows(i), id))) <> acc)
+
+# rows of a thread older than ordinal `before`, counting those the index
+# does not hold (below); what a page's "remaining" says
+def Index.below(i: Index, th: String) -> Nat:
+  match i:
+    case Index{_, _, _, _, _, _, bl}: Recent.old(bl, th)
+
+def Index.remaining(+i: Index, +th: String, +before: Nat) -> Nat:
+  Nat.add(Nat.sub(ML.Order.count(Index.thread(i, th)), Page.after(Index.thread(i, th), before)), Index.below(i, th))
+
+# ---- an index of the recent threads alone ----
+# When the store holds the rows, the hub keeps of the index only what
+# grows with threads, not with history: the recent order (Index.recent).
+# These are Index.change's effects on it, and nothing else.
+def Index.touch(+i: Index, +e: M.Entry) -> Index:
+  Index.recent_put(i, M.Idx.thread(e), Entry.rank(e))
+
+def Index.change.recent(i: Index, c: M.Change) -> Index:
+  match c:
+    case M.ThreadCreated{id, _, _, _, _, _, _, _, at}: Index.recent_put(i, id, at)
+    case M.MessagePosted{th, id, role, text, at}: Index.touch(i, M.Msg{id, th, role, text, at})
+    case M.ActivityLogged{th, id, tone, kind, text, at}: Index.touch(i, M.Act{id, th, tone, kind, text, at})
+    case M.Reminded{id, _, th, text, +at}: Index.touch(i, M.Act{"remind:" ++ id ++ ":" ++ Nat.show(at), th, "remind", "reminder", text, at})
+    case _: i
+
+def Index.changes.recent(cs: List<&2, M.Change>, i: Index) -> Index:
+  match cs:
+    case Nil{}: i
+    case c <> tail: Index.changes.recent(tail, Index.change.recent(i, c))
+
+# A page index: an index holding a few rows the store gave (each with its
+# terms when a search needs them), on the recent order of `base` (the
+# hub's recent-only index). rows: newest first; below: the thread's rows
+# older than all of them.
+def Index.window.put(+i: Index, +th: String, +r: Row) -> Index:
+  match i:
+    case Index{next, rs, ths, ws, recent, at, bl}:
+      Index{next, Map.set(&2, Row, rs, Nat.show(Row.n(r)), r), Orders.put(ths, th, Row.n(r)), ws, recent, at, bl}
+
+def Index.window.rows(rs: List<&2, Row>, +th: String, +base: Index) -> Index:
+  match rs:
+    case Nil{}: base
+    case +r <> tail:
+      Index.window.rows(tail, th, Index.window.put(base, th, r))
+
+def Index.window.below(+i: Index, +th: String, +n: Nat) -> Index:
+  match i:
+    case Index{next, rs, ths, ws, recent, at, _}: Index{next, rs, ths, ws, recent, at, Map.set(&2, Nat, Map.new(&2, Nat), th, n)}
+
+def Index.recent_only(i: Index) -> Index:
+  match i:
+    case Index{next, _, _, _, recent, at, _}: Index{next, Map.new(&2, Row), Map.new(&2, ML.Order), Map.new(&2, ML.Order), recent, at, Map.new(&2, Nat)}
+
+def Index.window(rs: List<&2, Row>, +th: String, +below: Nat, base: Index) -> Index:
+  Index.window.rows(rs, th, Index.window.below(Index.recent_only(base), th, below))
 
 # ---- the index on demand ----
 # Building the index walks every entry's text (words, postings, blocks): a

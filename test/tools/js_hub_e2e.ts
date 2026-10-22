@@ -152,8 +152,13 @@ try {
   c.send("turn.start", { thread: D, text: "mode:deploy go", msg: "d-1" });
   const swapped = await until(90000, () => (read(join(prefix, "LICENSE")) === "new" ? true : undefined));
   check(!!swapped, "the deploy swaps the package in");
-  // the new image has read the log again ("replayed" twice) and answers
-  const h1: any = await until(60000, async () => (read(join(root, "hub.err")).split("info hub: replayed").length === 3 ? await hello() : undefined));
+  // the new image has started (its boot's first line, the stand-in agents,
+  // a second time) and answers; the replay line's words change with how the
+  // log is read (a hot boot says "N lines, state seq ...")
+  const tSwap = Date.now();
+  const h1: any = await until(60000, async () => (read(join(root, "hub.err")).split("stand-in agents only").length >= 3 ? await hello() : undefined));
+  console.log(`     answered ${((Date.now() - tSwap) / 1000).toFixed(1)} s after the swap`);
+  check(Date.now() - tSwap < 15000, "and within 15 s of the swap");
   check(!!h1, "the hub answers again after its restart in place");
   const tRestart = Date.now();
   c = await connect();

@@ -1,4 +1,4 @@
-import { ThinViews, compactSession, compactRoute, viewTarget, readPresentation, writePresentation, utf8Bytes } from '../web/thin.js';
+import { ThinViews, compactSession, compactRoute, viewTarget, readPresentation, writePresentation, utf8Bytes, popupDraft, popupReadDraft, carriesDraft } from '../web/thin.js';
 import { validateThinResult, MessageParts } from '../web/thin-results.js';
 import { validatePresentation } from '../web/startup.js';
 
@@ -88,7 +88,7 @@ export class NativeThinHost307265 {
       now: api.now,
       // Renderer hints are device-owned and never select another hub or owner.
       send: (hub, request) => ({ type: 'request', hub, request: { ...request,
-        p: { ...request.p, ...(request.p.session ? { session: this.requestSession(request.p.session, request.m, request.p.target) } : {}), nativeRenderer: api.renderer() } } }),
+        p: { ...request.p, ...(request.p.session ? { session: this.requestSession(request.p.session, request.m, request.p.target, carriesDraft(request)) } : {}), nativeRenderer: api.renderer() } } }),
       command: (command, input) => ({ type: 'command', command, input }),
       validateResult: (result, input) => this.validate(result, input),
     }, next);
@@ -173,12 +173,16 @@ export class NativeThinHost307265 {
     return this.paired.has(hub) && s?.mode === 'view-v1' && s.epoch === String(epoch) && inertAncillary307265(envelope);
   }
 
-  requestSession(session, method, target) {
+  requestSession(session, method, target, popup = false) {
     const drafts = {};
     for (const key of ['@lang', '@lang.os', '@lang.tag', '@lang.preview'])
       if (typeof session.drafts?.[key] === 'string' && utf8Bytes(session.drafts[key]) <= 128) drafts[key] = session.drafts[key];
     if (method === 'view.action' && session.sel && Object.hasOwn(session.drafts || {}, session.sel) && typeof session.drafts[session.sel] === 'string')
       Object.defineProperty(drafts, session.sel, { value: session.drafts[session.sel], enumerable: true });
+    // a read carries the draft only while the composer's popup may show (or
+    // must shut): the hub renders the popup from it (client.bend's Refs.ready)
+    else if (popup && session.sel && !session.sel.startsWith('@') && typeof session.drafts?.[session.sel] === 'string')
+      Object.defineProperty(drafts, session.sel, { value: popupReadDraft(session.drafts[session.sel]), enumerable: true });
     const choices = (value, accept) => {
       const out = {}; let count = 0;
       for (const [key, item] of Object.entries(object(value) ? value : {})) {
@@ -263,6 +267,8 @@ export class NativeThinHost307265 {
       s.session = copy(intent.session);
       s.drafts.set(s.session.sel, { revision: s.revision, text: value });
       this.commands.push({ type: 'keep', thread: hub + '|' + s.session.sel, text: value });
+      // the hub draws the composer's popup: ask again while it may open or shut
+      if (popupDraft(value) || s.popupSent) this.update(s);
       return true;
     }
     if (intent.kind === 'find') {
@@ -346,7 +352,7 @@ export class NativeThinHost307265 {
     if (this.inert(hub, envelope, epoch)) return true;
     if (envelope?.t === 'view') return this.greeting(hub, envelope, epoch);
     if (envelope?.t === 'view.changed') {
-      if (s.greeted && this.client.links.get(hub)?.viewId) this.issue(s, this.client.changed(hub, envelope, this.requestSession(s.session, 'view.update', s.target), s.anchor));
+      if (s.greeted && this.client.links.get(hub)?.viewId) this.issue(s, this.client.changed(hub, envelope, this.requestSession(s.session, 'view.update', s.target, popupDraft(s.session.drafts?.[s.session.sel])), s.anchor));
       return true;
     }
     if (envelope?.t !== 'reply') {
@@ -467,9 +473,15 @@ export class NativeThinHost307265 {
     return !!l && l.revision === metadata.input.requestRevision && same(l.target, metadata.input.target);
   }
 
+  // whether a read carries the selected draft: while it may open the popup,
+  // and once more after, so the hub shuts it
+  popupRead(s) {
+    const now = popupDraft(s.session.drafts?.[s.session.sel]), carry = now || !!s.popupSent;
+    s.popupSent = now;return carry;
+  }
   update(s) {
     const l = this.client.links.get(s.hub);
-    if (s.greeted && l?.viewId) this.issue(s, this.client.request(s.hub, 'view.update', { session: this.requestSession(s.session, 'view.update', s.target), anchor: s.anchor, viewRevision: l.viewRevision }));
+    if (s.greeted && l?.viewId) this.issue(s, this.client.request(s.hub, 'view.update', { session: this.requestSession(s.session, 'view.update', s.target, this.popupRead(s)), anchor: s.anchor, viewRevision: l.viewRevision }));
   }
 
   register(hub, args) {

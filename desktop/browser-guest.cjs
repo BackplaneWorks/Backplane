@@ -208,8 +208,16 @@ function createBrowserGuestManager({
         (!navigation && ['ws:', 'wss:', 'data:', 'blob:'].includes(url.protocol));
     } catch { return false; }
   }
+  // A refusal before anything reaches the guest says so (dispatched false):
+  // the dispatcher reports it to the caller as refused. Thrown bare, it read
+  // as an unknown outcome, which latches the owner and closes the whole
+  // browser controller: one disallowed URL (a data: navigation) left every
+  // agent's preview_* refused until the app restarted.
+  function refused(message, Kind = Error) {
+    return Object.assign(new Kind(message), { dispatched: false });
+  }
   function validURL(value) {
-    if (typeof value !== 'string' || value.length > 32768 || !urlAllowed(value)) throw new TypeError('Disallowed guest URL');
+    if (typeof value !== 'string' || value.length > 32768 || !urlAllowed(value)) throw refused('Disallowed guest URL', TypeError);
     return value;
   }
   function target(tab) { return Object.freeze({ owner: tab.owner, tabId: tab.id, generation: tab.generation }); }
@@ -537,11 +545,11 @@ function createBrowserGuestManager({
   }
   async function send(tab, ref, method, parameters, initialization, fixedGuardSetup) {
     get(ref);
-    if (initialization && !tab.preparing) throw new Error('Guest preparation has ended');
-    if ((!tab.ready || (recorderConfig && !documentReady(tab))) && !initialization) throw new Error('Guest not ready');
+    if (initialization && !tab.preparing) throw refused('Guest preparation has ended');
+    if ((!tab.ready || (recorderConfig && !documentReady(tab))) && !initialization) throw refused('Guest not ready');
     if (!initialization) creationReady(tab);
-    if (!fixedGuardSetup && initialization && !PREPARATION_METHODS.has(method)) throw new Error('Not a guest initialization command');
-    if (!fixedGuardSetup && !CDP_METHODS.has(method)) throw new Error('CDP method outside guest broker');
+    if (!fixedGuardSetup && initialization && !PREPARATION_METHODS.has(method)) throw refused('Not a guest initialization command');
+    if (!fixedGuardSetup && !CDP_METHODS.has(method)) throw refused('CDP method outside guest broker');
     const params = jsonObject(parameters);
     if (fixedGuardSetup) {
       const valid = initialization && ((method === 'Page.enable' && tab.fileGuard === 'new' && Object.keys(params).length === 0) ||
@@ -549,10 +557,10 @@ function createBrowserGuestManager({
           Object.keys(params).length === 2 && params.enabled === true && params.cancel === true));
       if (!valid) { loseFileGuard(tab, 'invalid-setup'); demandFileGuard(tab); }
     } else if (!initialization || tab.fileGuard === 'lost') demandFileGuard(tab);
-    if ('sessionId' in params) throw new Error('Foreign CDP session refused');
+    if ('sessionId' in params) throw refused('Foreign CDP session refused');
     if (method === 'Page.navigate') {
       validURL(params.url);
-      if (params.frameId) throw new Error('Frame navigation requires an owner-scoped adapter');
+      if (params.frameId) throw refused('Frame navigation requires an owner-scoped adapter');
     }
     demand('cdp', tab, { method, initialization });
     get(ref);

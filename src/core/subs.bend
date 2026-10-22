@@ -531,12 +531,30 @@ def Subs.lock.row(+name: String, +l: LK.NamedLock, +th: String) -> SubRow:
   +held = String.eq(LK.Lock.owner(l), th)
   SubRow{name, True{}, "lock: " ++ name, "lock", Bool.pick(String, held, "held", "waiting"), Bool.pick(String, held, "Release when done", "position " ++ Nat.show(LK.Lock.position(l, th)) ++ " · held by " ++ LK.Lock.owner(l)), True{}, False{}, 0n, Nil{}}
 
+def Subs.lock.has(+has: Bool, +name: String, +l: LK.NamedLock, +th: String) -> List<&2, SubRow>:
+  match has:
+    case True{}:
+      [Subs.lock.row(name, l, th)]
+    case False{}:
+      Nil{}
+
+def Subs.lock.of(+name: String, +l: LK.NamedLock, +th: String) -> List<&2, SubRow>:
+  Subs.lock.has(LK.Lock.has(l, th), name, l, th)
+
+# an idle lock (M.Locks.idle) has no holder or waiter, so no thread's row
+def Subs.lock.if(+idle: Bool, +st: M.State, +name: String, +th: String) -> List<&2, SubRow>:
+  match idle:
+    case True{}:
+      Nil{}
+    case False{}:
+      Subs.lock.of(name, M.Locks.get(st, name), th)
+
 def Subs.locks.go(names: List<&2, String>, +st: M.State, +th: String) -> List<&2, SubRow>:
   match names:
     case Nil{}:
       Nil{}
     case +name <> t:
-      List.append(&2, SubRow, Bool.pick(List<&2, SubRow>, LK.Lock.has(M.Locks.get(st, name), th), [Subs.lock.row(name, M.Locks.get(st, name), th)], Nil{}), Subs.locks.go(t, st, th))
+      List.append(&2, SubRow, Subs.lock.if(M.Locks.idle(st, name), st, name, th), Subs.locks.go(t, st, th))
 
 # Successful/stopped finishes fold away; failures remain visible as attention.
 def Subs.finished(+word: String) -> Bool:

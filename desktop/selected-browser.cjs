@@ -43,7 +43,7 @@ function validate(spec,v,temp,u){
  rootAuthority(spec.rootDisposition,v,u);
  const component=u.payload(spec,temp,'selected-browser'),r=component.receipt;
  check(sameRef(component.ref,pin.receipt)&&v.freeze.components[v.target].selectedBrowserReceiptSha256===component.ref.sha256,'Selected browser not pinned by root freeze');
- check(r.schema===1&&r.kind==='backplane-selected-browser'&&r.status==='VERIFIED'&&r.version==='0.12.0'&&r.channel==='release'&&r.entrypoint==='src/web/index.html','Unqualified selected browser receipt');
+ check(r.schema===1&&r.kind==='backplane-selected-browser'&&r.status==='VERIFIED'&&r.version==='0.12.1'&&r.channel==='release'&&r.entrypoint==='src/web/index.html','Unqualified selected browser receipt');
  check(r.sourceCommit===pin.sourceCommit&&r.sourceTree===pin.sourceTree,'Selected browser source mismatch');
  const original=u.digest(path.join(v.service.root,'WEB.json'));
  check(pin.resourceWebManifestSha256===original&&v.freeze.components[v.target].webManifestSha256===original,'Original resource web binding changed');
@@ -102,7 +102,7 @@ function copyRuntimeEvidence(runtime,output,u){
 
 function currentRuntime(ref,s,payloadHash,u){
  const r=u.readReference(ref),b=s.selectedBrowser;
- check(r.schema===1&&r.kind==='desktop-selected-browser-runtime'&&r.scope==='same-target-selected-browser'&&r.status==='PASS'&&r.target===s.target&&r.version==='0.12.0','Missing same-target selected browser runtime');
+ check(r.schema===1&&r.kind==='desktop-selected-browser-runtime'&&r.scope==='same-target-selected-browser'&&r.status==='PASS'&&r.target===s.target&&r.version==='0.12.1','Missing same-target selected browser runtime');
  check(r.payloadManifestSha256===payloadHash&&r.stageReceiptSha256===s.stageReceiptSha256&&r.freezeReceiptSha256===s.release.freezeReceipt.sha256,'Browser runtime must bind current stage/payload/freeze');
  check(r.selectedBrowserReceiptSha256===b.receipt.sha256&&r.webManifestSha256===b.webManifestSha256&&r.sourceCommit===b.sourceCommit&&r.sourceTree===b.sourceTree,'Browser runtime source/assets mismatch');
  const required=['authenticatedOrigin','newAssetsLoaded','routeRetention','draftRetention','inlineBoundedMore','explicitRetry'];
@@ -116,7 +116,7 @@ function composite(a,s,actual,frozen,u){
  check(['darwin-arm64','windows-x64'].includes(s.target)&&s.selectedBrowser,'Composite baseline is restricted to retained Mac/Windows components');
  const b=a.baseline,d=u.readReference(b?.desktop),oldFreeze=u.readReference(b?.freeze);
  check(HEX.test(frozen.selectedBrowser?.baselineDesktopReceiptSha256||'')&&b.desktop.sha256===frozen.selectedBrowser.baselineDesktopReceiptSha256,'Baseline desktop not pinned by root');
- check(d.schema===1&&d.kind==='backplane-electron-desktop-package'&&d.target===s.target&&d.release.version==='0.12.0'&&d.release.commit===s.release.commit&&d.release.tree===s.release.tree&&!d.selectedBrowser,'Baseline must be original same-target desktop');
+ check(d.schema===1&&d.kind==='backplane-electron-desktop-package'&&d.target===s.target&&d.release.version==='0.12.1'&&d.release.commit===s.release.commit&&d.release.tree===s.release.tree&&!d.selectedBrowser,'Baseline must be original same-target desktop');
  check(sameRef(d.components.freeze,b.freeze)&&oldFreeze.kind==='backplane-release-freeze'&&oldFreeze.status==='FROZEN'&&oldFreeze.commit===s.release.commit&&oldFreeze.tree===s.release.tree,'Baseline freeze mismatch');
  check(u.canonical(oldFreeze.signingPolicy?.[s.target])===u.canonical(frozen.signingPolicy?.[s.target]),'Baseline signing disposition changed');
  check(u.canonical(d.lifecyclePolicy??null)===u.canonical(s.lifecyclePolicy??null)&&u.canonical(d.windowsShellSource??null)===u.canonical(s.windowsShellSource??null),'Baseline native policy/source differs');
@@ -124,12 +124,13 @@ function composite(a,s,actual,frozen,u){
  const webPrefix=u.TARGETS[s.target].resources+'/backplane-service/web/';
  const native=x=>Object.fromEntries(Object.entries(x).filter(([n])=>!n.startsWith(webPrefix)&&!n.startsWith('PROVENANCE/')&&!['STAGE.json','DESKTOP.json','MANIFEST.json'].includes(n)));
  const oldContent=Object.fromEntries(Object.entries(d.members).filter(([n])=>!n.startsWith('PROVENANCE/')&&!['STAGE.json','DESKTOP.json','MANIFEST.json'].includes(n)));
- check(u.contentDigest(oldContent)===d.payloadManifestSha256,'Baseline member manifest corrupt');
+ // a Windows stage is digested as NTFS shows its modes (produce-release.cjs content())
+ check(u.contentDigest(s.target==='windows-x64'?u.membershipExpectation(oldContent,s.target,'win32'):oldContent)===d.payloadManifestSha256,'Baseline member manifest corrupt');
  check(u.canonical(native(d.members))===u.canonical(native(actual)),'Composite changed non-web/native/runtime/vendor/shell bytes');
  const baselineProofs={};
  for(const k of proofs){
   const ref=b.proofs?.[k],r=u.readReference(ref);
-  check(sameRef(ref,d[k])&&r.schema===1&&r.status==='PASS'&&r.target===s.target&&r.version==='0.12.0'&&r.commit===s.release.commit&&r.tree===s.release.tree&&r.payloadManifestSha256===d.payloadManifestSha256&&r.freezeReceiptSha256===b.freeze.sha256,'Baseline proof identity changed: '+k);
+  check(sameRef(ref,d[k])&&r.schema===1&&r.status==='PASS'&&r.target===s.target&&r.version==='0.12.1'&&r.commit===s.release.commit&&r.tree===s.release.tree&&r.payloadManifestSha256===d.payloadManifestSha256&&r.freezeReceiptSha256===b.freeze.sha256,'Baseline proof identity changed: '+k);
   baselineProofs[k]={ref,receipt:r};
  }
  return{proofs:baselineProofs,baseline:{desktop:b.desktop,freeze:b.freeze},lineage:{kind:'desktop-browser-composite',scope:a.scope,baselineDesktopSha256:b.desktop.sha256,baselinePayloadManifestSha256:d.payloadManifestSha256,baselineFreezeReceiptSha256:b.freeze.sha256,immutableComponents:['shell','electron','service','serviceBuild','windowsResourceArchive'].filter(k=>d.components[k]).reduce((o,k)=>({...o,[k]:d.components[k]}),{}),selectedBrowser:s.selectedBrowser}};

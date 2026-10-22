@@ -14,9 +14,6 @@ VER="@VERSION@"
 SHA_LINUX_X64="@SHA_LINUX_X64@"
 SHA_LINUX_ARM64="@SHA_LINUX_ARM64@"
 SHA_DARWIN_ARM64="@SHA_DARWIN_ARM64@"
-DESKTOP_SHA_LINUX_X64="@DESKTOP_SHA_LINUX_X64@"
-DESKTOP_SHA_LINUX_ARM64="@DESKTOP_SHA_LINUX_ARM64@"
-DESKTOP_SHA_DARWIN_ARM64="@DESKTOP_SHA_DARWIN_ARM64@"
 
 fail() { printf 'backplane: %s\n' "$*" >&2; exit 1; }
 
@@ -31,19 +28,18 @@ case $(uname -m) in
   *) fail "$(uname -m) is not supported yet" ;;
 esac
 case $os-$arch in
-  linux-x64) sum=$SHA_LINUX_X64 dsum=$DESKTOP_SHA_LINUX_X64 ;;
-  linux-arm64) sum=$SHA_LINUX_ARM64 dsum=$DESKTOP_SHA_LINUX_ARM64 ;;
-  darwin-arm64) sum=$SHA_DARWIN_ARM64 dsum=$DESKTOP_SHA_DARWIN_ARM64 ;;
+  linux-x64) sum=$SHA_LINUX_X64 ;;
+  linux-arm64) sum=$SHA_LINUX_ARM64 ;;
+  darwin-arm64) sum=$SHA_DARWIN_ARM64 ;;
   *) fail "no build for $os-$arch yet" ;;
 esac
 [ -n "$sum" ] || fail "this release has no build for $os-$arch"
 
 prefix=${BACKPLANE_PREFIX:-$HOME/.local/share/backplane}
 bin=${BACKPLANE_BIN:-$HOME/.local/bin}
-# the hub, its web client and the launcher; the desktop app is a separate
-# archive of the same release, checked before anything is replaced
+# the hub, its web client, the launcher and the desktop app, in one archive
+# checked before anything is replaced
 name="backplane-$VER-classic-$os-$arch.tar.gz"
-dname="backplane-$VER-$os-$arch.tar.gz"
 mkdir -p "$prefix" "$bin"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
@@ -58,22 +54,13 @@ fetch() {
   fi
 }
 fetch "$name" "$sum"
+tar -xzf "$tmp/$name" -C "$tmp"
 app=
 if [ -z "${BACKPLANE_NO_DESKTOP_APP:-}" ]; then
-  [ -n "$dsum" ] || fail "this release has no desktop app for $os-$arch (BACKPLANE_NO_DESKTOP_APP=1 installs the hub alone)"
-  fetch "$dname" "$dsum"
-  mkdir "$tmp/desktop"
-  tar -xzf "$tmp/$dname" -C "$tmp/desktop"
-  [ -d "$tmp/desktop/backplane-$os-$arch" ] || fail "$dname has no backplane-$os-$arch folder; not installed"
+  [ -d "$tmp/backplane-$os-$arch/desktop" ] || fail "this release has no desktop app for $os-$arch (BACKPLANE_NO_DESKTOP_APP=1 installs the hub alone)"
   app=1
 fi
-tar -xzf "$tmp/$name" -C "$tmp"
-sh "$tmp/backplane-$os-$arch/install-release.sh" "$tmp/backplane-$os-$arch" "$prefix"
-if [ -n "$app" ]; then
-  rm -rf "$prefix/desktop.old"
-  [ ! -d "$prefix/desktop" ] || mv "$prefix/desktop" "$prefix/desktop.old"
-  mv "$tmp/desktop/backplane-$os-$arch" "$prefix/desktop"
-fi
+BACKPLANE_INSTALL_DESKTOP=$app sh "$tmp/backplane-$os-$arch/install-release.sh" "$tmp/backplane-$os-$arch" "$prefix"
 ln -sf "$prefix/backplane" "$bin/backplane"
 ln -sf "$prefix/backplane-serve" "$bin/backplane-serve"
 # the applications menu entry and its icon (BACKPLANE_NO_DESKTOP=1 skips

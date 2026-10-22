@@ -164,8 +164,7 @@ def store.db(+name: String, +cs: List<&2, M.Change>, +cuts: List<&2, Nat>, +refu
     +ls : List<&2, String> = Demo.text(cs)
     +home : String <- Q.Tmp.dir()
     Q.Wr.file(home ++ "/events.jsonl", Demo.file(ls))
-    full : M.State <- Q.Full.state(home)
-    +o : Q.Out <- Q.Equiv.cuts(Demo.cuts(cuts, ls), home, full, Q.Out{0n, 0n})
+    +o : Q.Out <- Q.Equiv.cuts(Demo.cuts(cuts, ls), home, Q.Out{0n, 0n})
     rm : Result<&1, &1, U32 & String, U32 & (String & String)> <- Process.run("rm", ["-rf", home], "", 4096, 10000)
     C.Check.str(name ++ ": store.db + Hot.load equals the whole log folded at every cut it is used", Nat.show(Q.Out.bad(o)), "0")
     C.Check.str(name ++ ": the cuts it refuses", Nat.show(Q.Out.refused(o)), Nat.show(refused))
@@ -174,6 +173,16 @@ def store.db(+name: String, +cs: List<&2, M.Change>, +cuts: List<&2, Nat>, +refu
 # entry windows are compared too
 def Demo.live() -> List<&2, M.Change>:
   List.take(&2, M.Change, S.Demo.changes(), Nat.sub(List.length(&2, M.Change, S.Demo.changes()), 5n))
+
+# a thread settled when the store was made, reopened in the tail by a new
+# message: its window must come from the store too, not only its tail
+# entries (the real log's 50% cut found two such threads)
+def Demo.reopen() -> List<&2, M.Change>:
+  [M.ProjectCreated{"p1", "P", "/p", 1n}, M.ThreadCreated{"t1", "p1", "A", M.Local{}, "", "", "claude", "", 1n},
+   M.MessagePosted{"t1", "m1", M.User{}, "one", 2n}, M.MessagePosted{"t1", "m2", M.Assistant{}, "two", 3n}, M.MessagePosted{"t1", "m3", M.User{}, "three", 4n},
+   M.MessagePosted{"t1", "m4", M.Assistant{}, "four", 5n}, M.ActivityLogged{"t1", "u1", "tool", "Bash", "ls", 6n}, M.MessagePosted{"t1", "m5", M.Assistant{}, "five", 7n},
+   M.ThreadSettled{"t1", True{}, 8n},
+   M.ThreadUnsettled{"t1", 9n}, M.MessagePosted{"t1", "m6", M.User{}, "back again", 9n}, M.MessagePosted{"t1", "m7", M.Assistant{}, "welcome back", 10n}]
 
 def main() -> IO(Unit):
   do IO<Unit>:
@@ -185,4 +194,5 @@ def main() -> IO(Unit):
     at(60n)
     at(List.length(&2, S.LL, S.Demo.log()))
     store.db("demo", S.Demo.changes(), [0n, 1n, 30n, 52n, 60n, List.length(&2, M.Change, S.Demo.changes()), List.length(&2, S.LL, S.Demo.log())], 0n)
+    store.db("a thread reopened after the cut", Demo.reopen(), [9n, 0n, 12n], 0n)
     store.db("demo, threads open", Demo.live(), [0n, 3n, 10n, 30n, 50n, List.length(&2, M.Change, Demo.live()), Nat.add(List.length(&2, M.Change, Demo.live()), 2n)], 0n)

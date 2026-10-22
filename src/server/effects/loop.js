@@ -26,12 +26,13 @@
 //   reaches the effect it always did.
 // - Base File.read*, Process.run and errno text without libc.
 //
-// On Linux and macOS the old loop stays the default until L1's load gate
-// passes on this one; BACKPLANE_JS_LOOP=bun turns it on there. Windows has
-// no old loop and always runs this one. globalThis.BEND_ASYNC says which.
+// The default everywhere since L1's load gate passed on it (request latency
+// at parity, lower idle RSS); BACKPLANE_JS_LOOP=sync keeps the old loop on
+// Linux and macOS, to bisect. Windows has no old loop. globalThis.BEND_ASYNC
+// says which runs.
 
 const BP_WIN = process.platform === "win32";
-const BP_ASYNC = BP_WIN || process.env.BACKPLANE_JS_LOOP === "bun";
+const BP_ASYNC = BP_WIN || process.env.BACKPLANE_JS_LOOP !== "sync";
 const BP_BASE = 0x100000;
 const bp_sync_park = io_park_on;
 const bp_sync_strerror = io_strerror;
@@ -361,8 +362,14 @@ class BpFd extends BpStream {
     this.full = false;
     this.wshut = false;
     this.gone = false;
-    this.w = null;
-    this.flushing = null;
+    this.timer = undefined;
+    // the last write's failure: a read's (this.err, ECONNRESET when the
+    // peer left unread bytes) is not what a send meets (EPIPE)
+    this.werr = 0;
+    // Bun reads a descriptor through its own poller only when it is
+    // non-blocking: a blocking pty master was read synchronously and froze
+    // the loop at the first quiet moment (a socketpair end is set too)
+    bp_fd_nonblock(fd);
     this.r = Bun.file(fd).stream().getReader();
     this.pull();
   }
@@ -395,11 +402,11 @@ class BpFd extends BpStream {
     f?.();
   }
   writable() {
-    return !this.full || this.gone || this.err !== 0;
+    return !this.full || this.gone || this.werr !== 0;
   }
   write(b) {
-    if (this.err !== 0) {
-      return -this.err;
+    if (this.werr !== 0) {
+      return -this.werr;
     }
     if (this.gone || this.wshut) {
       return -BP_ERRNO.EPIPE;
@@ -407,40 +414,66 @@ class BpFd extends BpStream {
     if (this.full) {
       return -BP_ERRNO.EAGAIN;
     }
-    // at most 64 KiB, and none while Bun still holds the last: a send to a
-    // reader that does not read waits (as a full socket makes it wait), and
-    // what it sent is all there before a shutdown or close (below)
+    // write(2) on our non-blocking end, at most 64 KiB at a time. Never
+    // Bun's FileSink: a writer on a descriptor Bun also reads made it
+    // blocking again, and the reader then froze the loop in a tty read. A
+    // full descriptor (EAGAIN) is tried again on a timer, 2 ms doubling to
+    // 50, only while a write waits; the bytes taken are in the kernel, so a
+    // shutdown or close after this loses none.
     const c = b.subarray(0, 65536);
-    try {
-      this.w ??= Bun.file(this.fd).writer();
-      this.w.write(c.slice());
-      const f = this.w.flush();
-      if (f instanceof Promise) {
-        this.full = true;
-        this.flushing = f.then(() => {
-          this.full = false;
-          this.flushing = null;
-          this.wake(true);
-        }, (e) => {
-          this.full = false;
-          this.flushing = null;
-          this.err = bp_errno(e);
-          this.wakeAll();
-        });
-      }
-    } catch (e) {
-      this.err = bp_errno(e);
-      return -this.err;
+    const n = bp_fd_write(this.fd, c);
+    if (n >= 0) {
+      return n > 0 ? n : -BP_ERRNO.EAGAIN;
     }
-    return c.length;
+    if (n === -BP_ERRNO.EAGAIN) {
+      this.full = true;
+      this.retry(2);
+      return n;
+    }
+    // a pty whose other side closed answers EIO: the end, as EPIPE
+    this.werr = n === -BP_ERRNO.EIO ? BP_ERRNO.EPIPE : -n;
+    this.wake(true);
+    return -this.werr;
   }
-  // f once what was written has gone (at once when nothing waits)
-  after(f) {
-    if (this.flushing) {
-      this.flushing.then(f, f);
-    } else {
-      f();
+  retry(ms) {
+    if (this.timer !== undefined) {
+      return;
     }
+    this.timer = setTimeout(() => {
+      this.timer = undefined;
+      if (this.gone || this.werr !== 0) {
+        this.full = false;
+        this.wakeAll();
+        return;
+      }
+      if (!this.room()) {
+        this.retry(Math.min(ms * 2, 50));
+        return;
+      }
+      this.full = false;
+      this.wake(true);
+    }, ms);
+  }
+  // whether a write should be tried now: poll(POLLOUT) with no wait, a
+  // hang-up or an error counting too (the write then meets EPIPE)
+  room() {
+    const set = new Int16Array(4);
+    new Int32Array(set.buffer)[0] = this.fd;
+    set[2] = 4;
+    // POLLOUT 4 | POLLERR 8 | POLLHUP 16 | POLLNVAL 32
+    return bp_fd_libc().poll(require("bun:ffi").ptr(set), 1, 0) > 0
+      && (set[3] & (4 | 8 | 16 | 32)) !== 0;
+  }
+  // the reader saw the end: a parked writer tries again at once (the peer
+  // gone, its write fails EPIPE now rather than at the next retry)
+  finish(err) {
+    super.finish(err);
+    this.full = false;
+    this.wake(true);
+  }
+  // f once what was written has gone: write(2) put it in the kernel already
+  after(f) {
+    f();
   }
   shutdown(how) {
     if (how !== 1) {
@@ -476,14 +509,48 @@ class BpFd extends BpStream {
   }
 }
 
+// fcntl through libc, bound once (POSIX only: BpFd is never made on Windows)
+function bp_fd_libc() {
+  const mac = process.platform === "darwin";
+  const vari = mac && process.arch === "arm64";
+  globalThis.BP_FDC ??= require("bun:ffi").dlopen(mac ? "libSystem.dylib" : "libc.so.6", {
+    shutdown: { args: ["i32", "i32"], returns: "i32" },
+    write: { args: ["i32", "ptr", "u64"], returns: "i64" },
+    poll: { args: ["ptr", "u32", "i32"], returns: "i32" },
+    [mac ? "__error" : "__errno_location"]: { args: [], returns: "ptr" },
+    fcntl: { args: vari ? ["i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32", "i32"]
+      : ["i32", "i32", "i32"], returns: "i32" },
+  }).symbols;
+  const c = globalThis.BP_FDC;
+  return { shutdown: c.shutdown, write: c.write, poll: c.poll, errno: () => require("bun:ffi").read.i32(c[mac ? "__error" : "__errno_location"](), 0),
+    fcntl: (fd, cmd, arg) => vari ? c.fcntl(fd, cmd, 0, 0, 0, 0, 0, 0, arg) : c.fcntl(fd, cmd, arg) };
+}
+
+// write(2): the bytes taken, or -errno
+function bp_fd_write(fd, b) {
+  const c = bp_fd_libc();
+  if (b.length === 0) {
+    return 0;
+  }
+  const n = Number(c.write(fd, require("bun:ffi").ptr(b), b.length));
+  return n >= 0 ? n : -c.errno();
+}
+
+// O_NONBLOCK on our end (F_GETFL 3, F_SETFL 4; O_NONBLOCK 0x800, 4 on macOS)
+function bp_fd_nonblock(fd) {
+  const c = bp_fd_libc();
+  const flag = process.platform === "darwin" ? 4 : 0x800;
+  const fl = c.fcntl(fd, 3, 0);
+  if (fl >= 0 && (fl & flag) === 0) {
+    c.fcntl(fd, 4, fl | flag);
+  }
+}
+
 // shutdown(2) on a socket descriptor (POSIX only: BpFd is never made on
 // Windows)
 function bp_fd_shutdown(fd, how) {
   try {
-    globalThis.BP_SHUT ??= require("bun:ffi").dlopen(process.platform === "darwin"
-      ? "libSystem.dylib" : "libc.so.6",
-      { shutdown: { args: ["i32", "i32"], returns: "i32" } }).symbols;
-    globalThis.BP_SHUT.shutdown(fd, how);
+    bp_fd_libc().shutdown(fd, how);
   } catch (_) {
   }
 }
@@ -611,7 +678,9 @@ function bp_recv_with(socket, max, k, read, at) {
   return go();
 }
 
-// sends all of b; a full handle parks (until at, or for good)
+// sends all of b; a full handle parks (until at, or for good). make turns
+// the unsent rest into what Base's TCP.send* fails and waits with; host.bend's
+// Sock.send_* pass null: their failure is the errno alone
 function bp_send_with(socket, b, k, make, at) {
   const h = BP_H.get(socket);
   let off = 0;
@@ -627,7 +696,8 @@ function bp_send_with(socket, b, k, make, at) {
         return undefined;
       }
       if (n < 0) {
-        return io_tup(socket, io_ready(at, io_fail(-n, make(part, part.length))));
+        return io_tup(socket, io_ready(at, make === null ? io_fail(-n)
+          : io_fail(-n, make(part, part.length))));
       }
       off += n;
     }
@@ -751,9 +821,9 @@ function bp_host(old) {
     ["Sock.send_bytes", () => (s, d, k) => {
       const b = io_unlist(d);
       return b === null ? io_tup(s, io_fail(BP_ERRNO.EINVAL))
-        : bp_send_with(s, b, k, io_list);
+        : bp_send_with(s, b, k, null);
     }],
-    ["Sock.send_text", () => (s, t, k) => bp_send_with(s, io_bytes(t), k, io_text)],
+    ["Sock.send_text", () => (s, t, k) => bp_send_with(s, io_bytes(t), k, null)],
     ["Sock.send_until", () => (s, d, ms, k) => {
       const b = io_unlist(d);
       return b === null ? io_tup(s, io_fail(BP_ERRNO.EINVAL))
@@ -968,17 +1038,17 @@ function bp_park_handle(id, out, k, more, at) {
   h.parked[out ? 1 : 0].push(w);
 }
 
-if (BP_ASYNC) {
-  io_park_on = function (fd, out, k, more, at) {
-    if (BP_H.is(fd)) {
-      bp_park_handle(fd, out, k, more, at);
-      return;
-    }
-    if (fd !== undefined && BP_WIN) {
-      throw "bend: a descriptor park on win32 (fd " + fd + ")";
-    }
-    bp_sync_park(fd, out, k, more, at);
-  };
+// installed when an async run starts (bp_run), never at load: a program
+// bend runs in-process keeps the runtime's own parks (see io_run below)
+function bp_park_on(fd, out, k, more, at) {
+  if (BP_H.is(fd)) {
+    bp_park_handle(fd, out, k, more, at);
+    return;
+  }
+  if (fd !== undefined && BP_WIN) {
+    throw "bend: a descriptor park on win32 (fd " + fd + ")";
+  }
+  bp_sync_park(fd, out, k, more, at);
 }
 
 // Descriptor waits through poll(), not the runtime's select(): select puts
@@ -1072,6 +1142,7 @@ async function bp_run(m) {
   const io = { runs: [], live: 0, waits: [], pend: 0, wake: null,
     timer: undefined, tick: 1, exit: null };
   globalThis.BEND_IO = io;
+  io_park_on = bp_park_on;
   Object.assign($0eff, bp_base($0eff), bp_host($0eff), bp_file($0eff));
   if ("Process.run" in $0eff) {
     $0eff["Process.run"] = bp_process_run;
@@ -1133,17 +1204,37 @@ async function bp_run(m) {
   }
 }
 
+// A program runs either from its emitted file (io_exit(main, show) at its
+// end), which runs on this loop, or inside `bend x.bend` (scripts/test.sh),
+// which calls io_run(main) for a number and then exits the process itself
+// (bend's main is `await cli(); process.exit()`), so nothing async could
+// finish there: an in-process run keeps the runtime's own sync loop, with
+// BEND_ASYNC false so the effect files take their sync paths too. Windows
+// has no sync loop; bend does not run programs in-process there.
+function bp_start(main) {
+  bp_run(main).then((code) => process.exit(code), (e) => {
+    io_errs(e instanceof RangeError
+      ? "bend: memory fault (machine stack overflow?)" : String(e));
+    process.exit(1);
+  });
+}
+
 if (BP_ASYNC) {
   const sync_exit = io_exit;
   io_exit = function (main, show) {
     if (show !== null) {
       return sync_exit(main, show);
     }
-    bp_run(main).then((code) => process.exit(code), (e) => {
-      io_errs(e instanceof RangeError
-        ? "bend: memory fault (machine stack overflow?)" : String(e));
-      process.exit(1);
-    });
+    bp_start(main);
+  };
+  const sync_run = io_run;
+  io_run = function (main) {
+    if (BP_WIN) {
+      bp_start(main);
+      return 0;
+    }
+    globalThis.BEND_ASYNC = false;
+    return sync_run(main);
   };
 }
 

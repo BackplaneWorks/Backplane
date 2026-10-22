@@ -88,8 +88,20 @@ def probes() -> List<&2, String>:
   List.append(&2, String, List.append(&2, String, B.Cbor.keys(), B.Cbor.words()),
     ["", "a", "zz", "User", "user ", "Thread", "ThreadZ", "~", "\u{1F600}", "itemsx", "$$", "assistan", "assistantt", "Message", "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"])
 
+# the one-walk Enc.text against the two walks it replaced
+def text.old(+s: String) -> List<&2, U32>:
+  B.Enc.utf8(s, B.Enc.head(96, B.Enc.blen(s, 0), [7]))
+
+def text.same(xs: List<&2, String>, ok: Bool) -> Bool:
+  match xs:
+    case Nil{}:
+      ok
+    case +x <> t:
+      text.same(t, Bool.and(ok, String.eq(bytes(List.reverse(&2, U32, B.Enc.text(x, [7]))), bytes(List.reverse(&2, U32, text.old(x))))))
+
 def main() -> IO(Unit):
   do IO<Unit>:
+    C.Check.str("Enc.text in one walk is the two walks' bytes", Bool.show(text.same(["", "a", "hello world", "é", "日本語", "😀x", "a\"b\\c\n", "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz", "mixed é 日 😀 end"], True{})), "True")
     C.Check.str("trees hold the lists", Bool.show(Bool.and(B.CTree.ok(B.Cbor.keys(), B.Cbor.keys.tree()), B.CTree.ok(B.Cbor.words(), B.Cbor.words.tree()))), "True")
     C.Check.str("tree finds as the list (keys)", Bool.show(same.find(probes(), B.Cbor.keys(), B.Cbor.keys.tree(), True{})), "True")
     C.Check.str("tree finds as the list (words)", Bool.show(same.find(probes(), B.Cbor.words(), B.Cbor.words.tree(), True{})), "True")

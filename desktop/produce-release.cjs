@@ -3,7 +3,7 @@
 const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),crypto=require('node:crypto');
 const {execFileSync}=require('node:child_process');
 const browserOverlay=require('./selected-browser.cjs');
-const VERSION='0.12.0',ELECTRON='44.9.2',HEX=/^[a-f0-9]{64}$/,GIT=/^[a-f0-9]{40}$/;
+const VERSION='0.12.1',ELECTRON='44.9.2',HEX=/^[a-f0-9]{64}$/,GIT=/^[a-f0-9]{40}$/;
 const TARGETS={
  'linux-x64':{suffix:'.tar.gz',root:'backplane-linux-x64',executable:'runtime/backplane-desktop',resources:'runtime/resources'},
  'linux-arm64':{suffix:'.tar.gz',root:'backplane-linux-arm64',executable:'runtime/backplane-desktop',resources:'runtime/resources'},
@@ -84,16 +84,12 @@ function identity(r,release,target,kind){
  check(r&&r.schema===1&&r.kind===kind&&r.status==='VERIFIED','Unverified component receipt');
  check(r.target===target&&r.sourceCommit===release.commit&&r.sourceTree===release.tree&&r.version===VERSION&&r.channel==='release','Component source/version/target mismatch');
 }
-// One root-authorized Windows launcher successor; backend and vendor identities
-// remain the original release source. This is not a general source override.
-const WINDOWS_SHELL_SOURCE={commit:'7b9df017299b93cf75abdfbbfa20fa613c6e91a2',tree:'78ed3ddabe4ec2254fb3dcb48e7f6568a8f4ffc6',serviceSha256:'2064b10f19218f3eb2761d20471c8a77af624afe1f7b432dd4f46700bbeb0c95'};
+// Every target's shell comes from the release commit itself. The 0.12.0
+// Windows launcher successor (a frozen older shell source) is gone: a freeze
+// that still names one is refused.
 function shellIdentity(r,release,target,freeze){
- const successor=freeze.windowsShellSource;
- if(!successor)return identity(r,release,target,'backplane-electron-shell');
- check(target==='windows-x64'&&release.commit==='8147b68dbc9bcddad7e3b51ae7768ed9eb211ecc'&&release.tree==='37c64023d084bca7f209db9d14a84f59d365f696','Windows shell successor has wrong release/target');
- check(canonical(successor)===canonical(WINDOWS_SHELL_SOURCE),'Unapproved Windows shell source successor');
- identity(r,{...release,commit:successor.commit,tree:successor.tree},target,'backplane-electron-shell');
- check(r.sourceFiles?.['desktop/service.cjs']===successor.serviceSha256&&r.members?.['service.cjs']?.type==='file'&&r.members['service.cjs'].sha256===successor.serviceSha256,'Windows shell launch source/payload mismatch');
+ check(freeze.windowsShellSource===undefined,'Windows shell successor sources are no longer accepted; the shell comes from the release commit');
+ return identity(r,release,target,'backplane-electron-shell');
 }
 function architecture(file,target){
  const f=fs.openSync(file,'r'),b=Buffer.alloc(512);let n;try{n=fs.readSync(f,b,0,b.length,0);}finally{fs.closeSync(f);}
@@ -176,10 +172,13 @@ function validateRequest(request,temp){
  const selectedBrowser=browserOverlay.validate(request.selectedBrowser,validated,temp,browserUtilities());
  return{...validated,...(selectedBrowser?{selectedBrowser}:{})};
 }
-function browserUtilities(){return{payload,json,digest,membership,generatedWeb,notices,inventory,copy,canonical,readReference,reference,contentDigest,TARGETS};}
+function browserUtilities(){return{payload,json,digest,membership,membershipExpectation,generatedWeb,notices,inventory,copy,canonical,readReference,reference,contentDigest,TARGETS};}
 function copy(source,dest,preserveModes=false){fs.mkdirSync(path.dirname(dest),{recursive:true});fs.cpSync(source,dest,{recursive:true,dereference:false,verbatimSymlinks:true,errorOnExist:true,force:false,...(preserveModes?{filter:()=>true}:{})});}
 function publicReference(ref,name){return{path:'PROVENANCE/'+name,sha256:ref.sha256,bytes:ref.bytes};}
-function content(stage,target){const all=inventory(stage,target);for(const n of Object.keys(all))if(['STAGE.json','DESKTOP.json','MANIFEST.json'].includes(n)||n.startsWith('PROVENANCE/'))delete all[n];return all;}
+// A Windows stage's content is digested as NTFS shows it (0666 writable, 0444
+// read-only) on every host, so a stage made on Linux inspects the same on the
+// Windows target it is smoked on (a .zip keeps no POSIX modes anyway).
+function content(stage,target){const all=inventory(stage,target);for(const n of Object.keys(all))if(['STAGE.json','DESKTOP.json','MANIFEST.json'].includes(n)||n.startsWith('PROVENANCE/'))delete all[n];return target==='windows-x64'?membershipExpectation(all,target,'win32'):all;}
 function contentDigest(members){return sha(Buffer.from(canonical(members)));}
 function stage(requestFile,output){
  check(path.isAbsolute(output)&&!fs.existsSync(output),'Stage must be a new absolute directory');const temp=fs.mkdtempSync(path.join(os.tmpdir(),'backplane-producer-'));
@@ -274,4 +273,4 @@ function main(argv){
  else fail('Unknown operation; use describe');console.log(JSON.stringify(result));
 }
 if(require.main===module){try{main(process.argv.slice(2));}catch(e){console.error('Desktop producer: '+e.message);process.exitCode=1;}}
-module.exports={stage,archive,inspectStage,inventory,membershipExpectation,contentDigest,architecture,validateRequest,generatedWeb,reference,readReference,json,write,sha,digest,canonical,runPython,payload,identity,shellIdentity,WINDOWS_SHELL_SOURCE,TARGETS,browserUtilities,linuxLauncher};
+module.exports={stage,archive,inspectStage,inventory,membershipExpectation,contentDigest,architecture,validateRequest,generatedWeb,reference,readReference,json,write,sha,digest,canonical,runPython,payload,identity,shellIdentity,TARGETS,browserUtilities,linuxLauncher};

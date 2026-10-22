@@ -1,10 +1,11 @@
 name: CI
 
+# Run by hand only: the pipeline every merge waits on is local CI
+# (bp-coord/fast-hub/local-ci.sh, Boat sandboxes plus this machine). This
+# workflow runs once on a release commit before it is published, as the last
+# check; the release workflows keep their own (user, 2026-10-22).
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-  pull_request:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -156,6 +157,10 @@ jobs:
       # children back at 8 MiB
       - name: Hub stack
         run: bun test/tools/js_stack_test.ts dist-js/linux-x64/backplane-serve
+      # the host effects and ptys on the loop the hub ships (Bun's event
+      # loop): test.sh runs these in-process, on the runtime's sync loop
+      - name: Effects on the Bun loop
+        run: scripts/js-effects-bun.sh
       - name: Bake and release producer
         run: |
           bun test/tools/js_bake_test.ts
@@ -166,6 +171,10 @@ jobs:
         run: |
           bend test/wire/index.html -o build/wire > /dev/null
           BACKPLANE_SMOKE_FULL=1 scripts/js-smoke.sh dist-js/linux-x64/backplane-serve build/web
+      # a 64 KB paste into a real terminal: the hub answers meanwhile and
+      # every byte arrives
+      - name: Terminal paste
+        run: bun test/tools/term_paste_e2e.ts dist-js/linux-x64/backplane-serve build/wire
       # the web client's reconnect pieces, and a view client hearing the
       # hub's heartbeat (and no broadcast) on the built binary
       - name: Reconnect and heartbeat

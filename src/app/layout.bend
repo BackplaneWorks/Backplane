@@ -531,6 +531,18 @@ def Lay.shelf.m(~PC: Data, ~paint: PC -> ST.SideRowReq -> ST.SideRowStep, +ty: T
     case +t <> +rest:
       Lay.shelf.k.m(~PC, ~paint, ty, open, key, name ++ " " ++ Nat.show(1n+List.length(&2, M.Thread, rest)), t <> rest, ix, s, sel, now, c, y, pc)
 
+# the Settled shelf with the project's count (U.Side.settled.n)
+def Lay.shelf.settled.k.m(~PC: Data, ~paint: PC -> ST.SideRowReq -> ST.SideRowStep, none: Bool, +ty: Ty, open: Bool, +key: String, +name: String, st: List<&2, M.Thread>, +n: Nat, +ix: U.SIx, +s: M.State, +sel: String, +now: Nat, +c: D.Clip, +y: U32, +pc: PC) -> SideCol:
+  match none:
+    case True{}:
+      SideCol{Out.none(), y, Nil{}, 0n}
+    case False{}:
+      Lay.shelf.k.m(~PC, ~paint, ty, open, key, name ++ " " ++ Nat.show(n), st, ix, s, sel, now, c, y, pc)
+
+def Lay.shelf.settled.m(~PC: Data, ~paint: PC -> ST.SideRowReq -> ST.SideRowStep, +ty: Ty, open: Bool, +key: String, +name: String, +st: List<&2, M.Thread>, +ix: U.SIx, +s: M.State, +sel: String, +now: Nat, +c: D.Clip, +y: U32, +pc: PC) -> SideCol:
+  +n = U.Side.settled.n(s, key, List.length(&2, M.Thread, st))
+  Lay.shelf.settled.k.m(~PC, ~paint, Nat.is_eq(n, 0n), ty, open, key, name, st, n, ix, s, sel, now, c, y, pc)
+
 def Lay.shelf(+ty: Ty, open: Bool, +key: String, +name: String, st: List<&2, M.Thread>, +ix: U.SIx, +s: M.State, +sel: String, +now: Nat, +c: D.Clip, +y: U32) -> Col:
   SideCol.col(Lay.shelf.m(~(List<&2, SideFreshCtx>), ~Lay.fresh.run, ty, open, key, name, st, ix, s, sel, now, c, y, Lay.fresh(ty, ix, s, sel, now)))
 
@@ -622,7 +634,7 @@ def Lay.project.m(~PC: Data, ~paint: PC -> ST.SideRowReq -> ST.SideRowStep, +ty:
         SideCol.then(Lay.rows.m(~PC, ~paint, ty, pinned, ix, st, sel, now, False{}, c, y0, pc), y1 =>
           SideCol.then(Lay.rows.m(~PC, ~paint, ty, active, ix, st, sel, now, False{}, c, y1, pc), y2 =>
             SideCol.then(Lay.snoozed.m(~PC, ~paint, ty, snoozed, ix, st, sel, now, c, y2, pc), y3 =>
-              SideCol.then(Lay.shelf.m(~PC, ~paint, ty, U.Flag.get(open, id), id, MSG.T.notify.settled(Ty.loc(ty)), settled, ix, st, sel, now, c, y3, pc), y4 =>
+              SideCol.then(Lay.shelf.settled.m(~PC, ~paint, ty, U.Flag.get(open, id), id, MSG.T.notify.settled(Ty.loc(ty)), settled, ix, st, sel, now, c, y3, pc), y4 =>
                 Lay.shelf.m(~PC, ~paint, ty, U.Flag.get(open, "arch:" ++ id), "arch:" ++ id, MSG.T.sidebar.archived(Ty.loc(ty)), M.Archive.of(hidden), ix, st, sel, now, c, y4, pc)))))))
 
 def Lay.project(+ty: Ty, r: U.SRow, +quiet: Bool, +open: Map<&2, Bool>, +ix: U.SIx, +st: M.State, +sel: String, +now: Nat, +look: String, +rm: String, +c: D.Clip, +y: U32) -> Col:

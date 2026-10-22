@@ -23,7 +23,7 @@ class ProducerTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
-        self.release = {"version": "0.12.0", "tag": "v0.12.0", "channel": "release", "commit": "a" * 40, "tree": "b" * 40}
+        self.release = {"version": "0.12.1", "tag": "v0.12.1", "channel": "release", "commit": "a" * 40, "tree": "b" * 40}
         self.env = {"BACKPLANE_GOOGLE_CLIENT_ID": "test.invalid", "BACKPLANE_GOOGLE_CLIENT_SECRET": "test-secret",
                     "BACKPLANE_TELEMETRY_URL": S.ENDPOINT, "BACKPLANE_TELEMETRY_KID": "rel-test",
                     "BACKPLANE_TELEMETRY_KEY": "f" * 64}
@@ -102,7 +102,7 @@ class ProducerTests(unittest.TestCase):
         self.assertEqual(S.identity({"schema": 1, "target": "linux-arm64", "release": self.release}), self.release)
         with self.assertRaises(ValueError):
             S.identity({"schema": 1, "target": "windows-arm64", "release": self.release})
-        for version in ("0.11.2", "0.12.0-dev.test", "v0.12.0"):
+        for version in ("0.11.2", "0.12.0", "0.12.1-dev.test", "v0.12.1"):
             with self.assertRaises(ValueError):
                 S.identity({"schema": 1, "target": "linux-x64", "release": {**self.release, "version": version}})
 
@@ -250,7 +250,7 @@ class ProducerTests(unittest.TestCase):
         req = self.fixture()
         p = self.root / "build/BUILD.json"
         data = S.read(p)
-        data["version"] = "0.12.0-dev.test"
+        data["version"] = "0.12.1-dev.test"
         S.write(p, data)
         req["buildReceipt"] = S.reference(p)
         with self.assertRaises(ValueError):
@@ -380,6 +380,7 @@ class ProducerTests(unittest.TestCase):
                 self.assertEqual(env["BACKPLANE_GOOGLE_BAKE"], "1")
                 self.assertEqual(env["BACKPLANE_TELEMETRY_BAKE"], "1")
                 self.assertEqual(env["BACKPLANE_JS_TARGET"], req["target"])
+                self.assertEqual(env["BACKPLANE_COMMIT_STAMP"], self.release["commit"])
                 self.assertEqual(env["BACKPLANE_JS_BUN_RUNTIME"], str(self.root / "bun-runtime"))
                 for name in ("CC", "BACKPLANE_CFLAGS", "BACKPLANE_OBJ_CACHE"):
                     self.assertNotIn(name, env)
@@ -396,7 +397,7 @@ class ProducerTests(unittest.TestCase):
                 (web / "index.html").write_text("fixture")
                 (web / "chunk-0.js").write_text("// fixture")
             elif args[-1] == "--version":
-                return "backplane 0.12.0\n"
+                return "backplane 0.12.1\n"
             return ""
 
         with patch.object(S, "ROOT", source), \
