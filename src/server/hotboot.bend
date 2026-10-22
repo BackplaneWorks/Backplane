@@ -344,11 +344,21 @@ def Hot.ld.st(ld: ST.Loaded) -> M.State:
     case ST.Loaded{st, _}:
       st
 
+# Apply the same snapshot step, discarding its wire line before the next
+# step. Joins read the store; even an unapplied tail must not accumulate
+# another list of log lines in the hot state.
+def Hot.fold.go(ls: List<&2, String>, +s0: M.State, +cs: Map<&2, Nat>, st: M.State) -> ST.Loaded:
+  match ls:
+    case Nil{}:
+      ST.Loaded{st, Nil{}}
+    case +l <> t:
+      Hot.fold.go(t, s0, cs, Hot.ld.st(SN.Snap.step(J.Json.parse(l), l, s0, cs, ST.Loaded{st, Nil{}})))
+
 # the records with the log's tail folded on. The hub keeps no log lines
 # (S1's line table serves joins), so nothing before applied_off is read.
 def Hot.fold(+rows: SN.SRows, +body: List<&2, String>) -> ST.Loaded:
   +s0 = SN.Snap.state(rows)
-  SN.Snap.tail(body, s0, SN.Snap.counts(rows), ST.Loaded{s0, Nil{}})
+  Hot.fold.go(body, s0, SN.Snap.counts(rows), s0)
 
 # A thread the tail opened (settled when the store was written, so given
 # no window) has only its tail entries in the folded state: load its
