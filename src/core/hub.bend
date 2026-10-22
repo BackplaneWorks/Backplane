@@ -19,6 +19,7 @@ import ./refs.bend as RF
 import ./emb.bend as EM
 import ./far.bend as FR
 import ./ubersync.bend as UBS
+import ./uber.bend as UB
 import ./bot.bend as BT
 import ./tz.bend as TZ
 import ./sched.bend as SC
@@ -6514,12 +6515,22 @@ def Run.unresolved.note(+s: M.State, +r: ML.Run) -> String:
   "Mailroom run " ++ ML.Run.thread(r) ++ " ended without a committed reply, deferral, completion or escalation. The request remains unresolved; review it and respond in the conversation. Do not repeat completed actions.\n" ++
   "Conversation: " ++ ML.Run.conv(r) ++ "\nActionable input: " ++ Run.input(s, r) ++ "\nRun's last response (not evidence of completion):\n" ++ String.take(Task.last(s, ML.Run.thread(r)), 4000n)
 
+# with mail.on off (the uberbot's runs only) nothing reaches its chat that
+# it did not say itself: an unresolved run is an act in the run's own
+# thread, and its mail stays unread in the Mailroom (mail_list finds it)
+def Run.unresolved.quiet(quiet: Bool, +s: M.State, +now: Nat, +r: ML.Run) -> Step:
+  match quiet:
+    case True{}:
+      Step{[M.SettingSet{"run.forwarded." ++ ML.Run.thread(r), Run.input(s, r), now},
+        M.ActivityLogged{ML.Run.thread(r), Hub.id("run-unresolved", now, Hub.seq(s)), "info", "mail", Run.unresolved.note(s, r), now}], Nil{}}
+    case False{}:
+      Step.before([M.SettingSet{"run.forwarded." ++ ML.Run.thread(r), Run.input(s, r), now}], Nil{},
+        Run.escalate(s, now, ML.Run.bot(r), ML.Run.conv(r), "bot", Run.unresolved.note(s, r)))
+
 def Run.unresolved.send(send: Bool, +s: M.State, +now: Nat, +r: ML.Run) -> Step:
   match send:
     case False{}: Step.none()
-    case True{}:
-      Step.before([M.SettingSet{"run.forwarded." ++ ML.Run.thread(r), Run.input(s, r), now}], Nil{},
-        Run.escalate(s, now, ML.Run.bot(r), ML.Run.conv(r), "bot", Run.unresolved.note(s, r)))
+    case True{}: Run.unresolved.quiet(Bool.not(String.eq(M.Setting.get(s, "mail.on", "off"), "on")), s, now, r)
 
 def Run.unresolved(+s: M.State, +now: Nat, +r: ML.Run) -> Step:
   Run.unresolved.send(Bool.and(Bool.not(MD.Disposition.handled(s, r)), MCN.Continuity.needs(Run.input(s, r), M.Setting.get(s, "run.escalated." ++ ML.Run.thread(r), ""),
@@ -6541,9 +6552,9 @@ def Run.after.go(cs: List<&2, M.Change>, +before: M.State, +now: Nat, st: Step) 
   match cs:
     case Nil{}: st
     case M.TurnChanged{+th, M.Completed{}, _} <> rest:
-      Run.after.go(rest, before, now, Run.ended.got(ML.Box.run_of(M.State.mail(before), th), before, now, st))
+      Run.after.go(rest, before, now, Run.ended.got(MD.Runs.gate(before, ML.Box.run_of(M.State.mail(before), th)), before, now, st))
     case M.TurnChanged{+th, M.Failed{}, _} <> rest:
-      Run.after.go(rest, before, now, Run.ended.got(ML.Box.run_of(M.State.mail(before), th), before, now, st))
+      Run.after.go(rest, before, now, Run.ended.got(MD.Runs.gate(before, ML.Box.run_of(M.State.mail(before), th)), before, now, st))
     case _ <> rest: Run.after.go(rest, before, now, st)
 
 def Run.after.on(on: Bool, +before: M.State, +now: Nat, +st: Step) -> Step:
@@ -6551,8 +6562,10 @@ def Run.after.on(on: Bool, +before: M.State, +now: Nat, +st: Step) -> Step:
     case False{}: st
     case True{}: Run.after.go(Queue.changes(st), before, now, st)
 
+# every run's end is looked at; Runs.gate leaves out runs of a bot whose
+# runs are off (all but the uberbot's while mail.on is off)
 def Run.after(+before: M.State, now: Nat, st: Step) -> Step:
-  Run.after.on(String.eq(M.Setting.get(before, "mail.on", "off"), "on"), before, now, st)
+  Run.after.on(Bool.or(String.eq(M.Setting.get(before, "mail.on", "off"), "on"), Bool.not(String.is_empty(UB.Uber.bot(before)))), before, now, st)
 
 def Run.recover.report(on: Bool, +s: M.State, +now: Nat, +r: ML.Run, +st: Step) -> Step:
   match on:
@@ -6570,7 +6583,7 @@ def Run.recover.one(go: Bool, +s: M.State, +now: Nat, +r: ML.Run) -> Step:
 def Run.recover.all(+rs: List<&2, ML.Run>, +s: M.State, +now: Nat, +kept: List<&2, String>, +st: Step) -> Step:
   match rs:
     case Nil{}: st
-    case +r <> +t: Run.recover.all(t, s, now, kept, Step.cat(st, Run.recover.one(Bool.and(ML.Run.live(r), Bool.not(AD.Adopt.in(kept, ML.Run.thread(r)))), M.State.replay(Queue.changes(st), s), now, r)))
+    case +r <> +t: Run.recover.all(t, s, now, kept, Step.cat(st, Run.recover.one(Bool.and(MD.Runs.on(s, ML.Run.bot(r)), Bool.and(ML.Run.live(r), Bool.not(AD.Adopt.in(kept, ML.Run.thread(r))))), M.State.replay(Queue.changes(st), s), now, r)))
 
 def Run.recover.on(on: Bool, +s: M.State, +now: Nat, +kept: List<&2, String>, +st: Step) -> Step:
   match on:
@@ -6578,7 +6591,7 @@ def Run.recover.on(on: Bool, +s: M.State, +now: Nat, +kept: List<&2, String>, +s
     case True{}: Run.recover.all(Map.values(&2, ML.Run, ML.Box.runs(M.State.mail(s))), s, now, kept, st)
 
 def Run.recover(+s: M.State, +now: Nat, +kept: List<&2, String>, +st: Step) -> Step:
-  Run.recover.on(String.eq(M.Setting.get(s, "mail.on", "off"), "on"), s, now, kept, st)
+  Run.recover.on(Bool.or(String.eq(M.Setting.get(s, "mail.on", "off"), "on"), Bool.not(String.is_empty(UB.Uber.bot(s)))), s, now, kept, st)
 
 # (and every watched work still open is watched again: Watch.rearm)
 # kept: the threads whose agent process the restart kept (adopted): their
@@ -7506,9 +7519,22 @@ def Run.fresh(st: Step) -> Step:
 def Run.start(+s: M.State, +now: Nat, +th: String, +head: String, +bs: List<&2, MB.Body>) -> Step:
   Run.fresh(Step.before([M.SettingSet{"run.pending." ++ th, "", now}], Nil{}, Hub.post(s, now, th, Hub.id("brief", now, Hub.seq(s)), M.User{}, head ++ String.take(Run.pending.text(M.State.mine(s, th)), 2000n) ++ "\n<mail_history newest-first>\n" ++ String.take(Run.bodies(bs), 8000n) ++ "\n</mail_history>")))
 
+def Mail.route.uber.k(go: Bool, +s: M.State, +now: Nat, +body: MB.Body, +bot: String) -> Step:
+  match go:
+    case False{}: Step.none()
+    case True{}: Mail.route_bot(s, now, body, bot)
+
+# with mail.on off only mail to the promoted uberbot (not its own) routes:
+# act mail starts or joins its private run, fyi is only filed (MR.Run.plan)
+def Mail.route.uber(r: Maybe<&2, REF.Ref>, +s: M.State, +now: Nat, +body: MB.Body) -> Step:
+  match r:
+    case Some{REF.Ref{"bot", +bot <> _, _}}:
+      Mail.route.uber.k(Bool.and(UB.Uber.is(s, bot), Bool.not(String.eq(ML.Mail.from(MB.Body.mail(body)), "bot:" ++ bot))), s, now, body, bot)
+    case _: Step.none()
+
 def Mail.route.on(on: Bool, +s: M.State, +now: Nat, +body: MB.Body) -> Step:
   match on:
-    case False{}: Step.none()
+    case False{}: Mail.route.uber(REF.Ref.of_addr(ML.Mail.to(MB.Body.mail(body))), s, now, body)
     case True{}: Mail.route.enabled(s, now, body)
 
 def Mail.route(+s: M.State, +now: Nat, +body: MB.Body) -> Step:
