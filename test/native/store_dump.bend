@@ -124,7 +124,7 @@ def Fold.stuck(same: Bool, b: B, k: B -> IO(B)) -> IO(B):
     case False{}:
       k(b)
 
-def Fold.chunk(more: Bool, +path: String, +size: Nat, b: B, k: B -> IO(B)) -> IO(B):
+def Fold.chunk(more: Bool, +path: String, +size: Nat, +b: B, k: B -> IO(B)) -> IO(B):
   match more:
     case False{}:
       IO.pure(B, b)
@@ -160,7 +160,7 @@ def Out.line(+k: String, v: String) -> String:
 def Out.go(xs: List<&2, Sigma<&2, &2, String, _ => String>>) -> IO(Unit):
   match xs:
     case Nil{}:
-      IO.pure(Unit, ())
+      IO.pure(Unit, Unit{})
     case (+k, v) <> t:
       IO.bind(Unit, Unit, IO.print(Out.line(k, v)), u => Out.go(t))
 

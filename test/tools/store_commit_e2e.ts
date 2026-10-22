@@ -1,8 +1,9 @@
 // store.db after a hub's own commits, against the fold. A JS hub on an
 // empty home (build/store_commit_e2e, E2E_ROOT to move it) is driven over
-// its WebSocket: a project, two threads, a message (a turn that holds), a
-// queued message behind it, a setting (one whose value looks like an
-// integer, "#42", too), a finished turn, a rename, an archive. The hub is
+// its WebSocket: a project, two threads, a message (a turn that holds) and
+// another into it, a setting (one whose value looks like an integer,
+// "#42", too), a finished turn, a queued message (a provider switch's
+// handoff), a rename, an archive. The hub is
 // stopped and HOME/store.db read with bun:sqlite:
 //   - records: every row of project, thread, task, ask, queue, setting,
 //     bot, room, routine, conv, mark and obj, columns in Sdb.cols order
@@ -115,12 +116,12 @@ try {
   };
   const A = await made("alpha");
   const B = await made("beta");
-  // a turn that holds (the stand-in works until interrupted), and a message
-  // queued behind it
+  // a turn that holds (the stand-in works until interrupted), and a second
+  // message into it (Claude takes it on its input: no TurnQueued)
   send("turn.start", { thread: A, text: "mode:stop hold on", msg: "a-1" });
   await wait("a message runs a turn", (x) => x.$ === "TurnChanged" && x.thread === A && x.state === "running", 20000);
   send("turn.start", { thread: A, text: "later, please", msg: "a-2" });
-  await wait("a message is queued", (x) => x.$ === "TurnQueued" && x.thread === A);
+  await wait("a second message reaches the running turn", (x) => x.$ === "MessagePosted" && x.thread === A && x.msg === "a-2");
   send("setting.set", { key: "e2e.store", value: "one\ttwo\nthree" });
   await wait("a setting is set", (x) => x.$ === "SettingSet" && x.key === "e2e.store");
   send("setting.set", { key: "e2e.hash", value: "#42" });
@@ -128,6 +129,10 @@ try {
   // a turn that ends, so B has a reply
   send("turn.start", { thread: B, text: "mode:plain hello", msg: "b-1" });
   await wait("B's turn ends", (x) => x.$ === "TurnChanged" && x.thread === B && x.state === "completed", 20000);
+  // a provider switch queues what the new agent missed (TurnQueued
+  // handoff:switch:..., Switch.go in hub.bend): the queue table's row
+  send("thread.provider", { thread: B, provider: "codex" });
+  await wait("a message is queued (provider switch)", (x) => x.$ === "TurnQueued" && x.thread === B);
   send("thread.rename", { thread: B, title: "beta renamed" });
   await wait("a thread is renamed", (x) => x.$ === "ThreadRenamed" && x.id === B);
   send("thread.archive", { thread: B });
