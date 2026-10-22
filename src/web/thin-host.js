@@ -205,17 +205,23 @@ export class ThinHost {
   // whether a read carries the selected draft: while it may open the popup,
   // and once more after, so the hub shuts it
   popupRead() {
-    const now = popupDraft(this.session.drafts?.[this.session.sel]), carry = now || !!this.popupSent;
-    this.popupSent = now;return carry;
+    return popupDraft(this.session.drafts?.[this.session.sel]) || !!this.popupSent;
   }
   update() {
     if (!this.ready) return false;
     const link = this.client.links.get(this.hub);
-    return this.flush(this.client.request(this.hub, 'view.update', { session: requestSession(this.session, false, this.target, this.popupRead()), anchor: this.api.anchor(), viewRevision: link.viewRevision }));
+    const result = this.client.request(this.hub, 'view.update', { session: requestSession(this.session, false, this.target, this.popupRead()), anchor: this.api.anchor(), viewRevision: link.viewRevision });
+    // Coalescing must not consume the one draft that closes a popup.
+    if (result.id) this.popupSent = popupDraft(this.session.drafts?.[this.session.sel]);
+    return this.flush(result);
   }
   receive(envelope) {
     if (envelope?.t === 'view.changed') {
-      if (this.ready) this.flush(this.client.changed(this.hub, envelope, requestSession(this.session, false, this.target, popupDraft(this.session.drafts?.[this.session.sel])), this.api.anchor()));
+      if (this.ready) {
+        const result = this.client.changed(this.hub, envelope, requestSession(this.session, false, this.target, this.popupRead()), this.api.anchor());
+        if (result.id) this.popupSent = popupDraft(this.session.drafts?.[this.session.sel]);
+        this.flush(result);
+      }
       return true;
     }
     if (envelope?.t !== 'reply') return false;
