@@ -113,9 +113,7 @@ dist/backplane        # run it (opens http://127.0.0.1:3787)
 `scripts/test.sh` uses the same bounded stack settings as `scripts/check.sh`.
 For `test/NAME_test.bend`, a matching `test/tools/NAME.mjs` driver receives the
 emitted module's absolute path. A file with an IO `main` and a driver runs both;
-emission alone is never a passing test. The intentionally red
-`cache_identity_before_test.bend` belongs only to its dedicated negative-control
-gate (`test/tools/mobile_cache_identity_gate.py`), not the positive suite.
+emission alone is never a passing test.
 `python3 -m unittest discover -s test/tools -p test_runner_test.py` verifies
 dispatch, sharding and failure propagation without a Bend installation.
 

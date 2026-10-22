@@ -51,9 +51,6 @@ fi
 
 all_tests=""
 for t in test/*_test.bend; do
-  # Deliberately red control used by mobile_cache_identity_gate.py, which
-  # verifies its exact failure. It is not a passing regression program.
-  [ "$t" = test/cache_identity_before_test.bend ] && continue
   all_tests="$all_tests $t"
 done
 
