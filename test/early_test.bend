@@ -30,7 +30,7 @@ def main() -> IO(Unit):
     C.Check.str("delay", U32.show(E.Early.delay("2500")) ++ " " ++ U32.show(E.Early.delay("")) ++ " " ++ U32.show(E.Early.delay("x")), "2500 0 0")
     C.Check.str("page note building", E.Early.html.note("500 1000\n"), "Building the database\u{2026} 50%")
     C.Check.str("page note starting", E.Early.html.note(""), "Starting\u{2026}")
-    C.Check.str("a browser gets the page", String.take(head(E.Early.for(U.Utf8.encode("GET /?token=abc HTTP/1.1\r\nHost: x\r\nAccept: text/html,application/xhtml+xml,*/*;q=0.8\r\n\r\n"), "1.2.3", "250 1000")), 70n), "HTTP/1.1 503 Service Unavailable\r\nContent-Type: text/html; charset=utf-8")
+    C.Check.str("a browser gets the page", String.take(head(E.Early.for(U.Utf8.encode("GET /?token=abc HTTP/1.1\r\nHost: x\r\nAccept: text/html,application/xhtml+xml,*/*;q=0.8\r\n\r\n"), "1.2.3", "250 1000")), 72n), "HTTP/1.1 503 Service Unavailable\r\nContent-Type: text/html; charset=utf-8")
     C.Check.str("the page refreshes the same URL", Bool.show(String.contains(head(E.Early.for(U.Utf8.encode("GET /?token=abc HTTP/1.1\r\nAccept: text/html\r\n\r\n"), "1.2.3", "")), "<meta http-equiv=\"refresh\" content=\"2\">")), "True")
     C.Check.str("the page keeps Retry-After", Bool.show(String.contains(head(E.Early.for(U.Utf8.encode("GET / HTTP/1.1\r\nAccept: text/html\r\n\r\n"), "1.2.3", "")), "Retry-After: 2\r\n")), "True")
     C.Check.str("an API call gets the JSON", head(E.Early.for(U.Utf8.encode("GET /hello HTTP/1.1\r\nAccept: application/json\r\n\r\n"), "1.2.3", "")), head(E.Early.response("1.2.3", "")))
