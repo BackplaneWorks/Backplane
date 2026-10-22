@@ -94,12 +94,28 @@ export async function probeHub(fetch, { timeoutMs = 2000, now = Date.now } = {})
       (async () => {
         const r = await fetch("/hello", { cache: "no-store", signal: abort.signal });
         if (r.status >= 200 && r.status < 300) return { state: "up" };
-        if (r.status === 503) return { state: "starting", retryAfterMs: retryAfterMs(r.headers?.get("retry-after"), now()) };
+        if (r.status === 503) return { state: "starting", retryAfterMs: retryAfterMs(r.headers?.get("retry-after"), now()), note: await startingNote(r) };
         return { state: "down" };
       })().catch(() => ({ state: "down" })),
       new Promise(resolve => { timer = setTimeout(() => { abort.abort();resolve({ state: "down" }); }, timeoutMs); }),
     ]);
   } finally { clearTimeout(timer); }
+}
+
+// What a starting hub says it is doing ({"status":"starting","note":"building
+// store 42%"}), as a sentence for the person; "" when it says nothing usable.
+export async function startingNote(response) {
+  try {
+    const o = JSON.parse((await response.text()).slice(0, 4096));
+    return startingText(o);
+  } catch { return ""; }
+}
+export function startingText(o) {
+  const note = typeof o?.note === "string" ? o.note.slice(0, 200) : "";
+  const m = /^building store\s+(\d{1,3})%$/i.exec(note.trim());
+  if (m) return `Building the database… ${Math.min(100, Number(m[1]))}%`;
+  if (o?.status === "starting") return note ? `Hub starting: ${note}` : "Hub starting…";
+  return "";
 }
 
 // The bundle a page runs, and the one index.html names now: a deploy changed
