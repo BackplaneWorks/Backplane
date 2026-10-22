@@ -12779,3 +12779,14 @@ def Laws.locks_idle_text_exact(): {==}
 # --- J2: the sign-in wait asked again only when the log moved ---
 def Laws.auth_beat_kept(): {==}
 def Laws.auth_beat_asked(): {==}
+# ---- uniichat: the uberbot's infinite context ----
+def Laws.uctx_off_after_same(): {==}
+def Laws.uctx_off_no_thread(): {==}
+def Laws.uctx_off_tools_same(): {==}
+def Laws.uctx_on_fresh_session(): {==}
+def Laws.uctx_on_other_same(): {==}
+def Laws.uctx_roots(): {==}
+def Laws.uctx_view_leaves(): {==}
+def Laws.uctx_own_trailing(): {==}
+def Laws.uctx_wire_hides_text(): {==}
+# ---- end uniichat ----

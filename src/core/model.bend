@@ -299,6 +299,10 @@ type Change is Data:
   # failed, skipped or live. Both fold into the setting deploy.ship
   DeployAsked{by: String, note: String, commit: String, cover: String, at: Nat}
   DeployBuilt{commit: String, state: String, version: String, detail: String, at: Nat}
+  # a line of the uberbot's infinite context (core/uctx.bend): node (l, i)
+  # of the thread's memory tree. It folds to nothing in the hub; store.db
+  # keeps it as a fact (table ctx) and the context is read from there
+  CtxNoted{thread: String, l: Nat, i: Nat, text: String, at: Nat}
 
 # the later of two times. Base's Nat.max recurses once per unit and
 # overflows at epoch scale; Nat.is_ge compiles to a machine comparison.
@@ -2110,6 +2114,8 @@ def State.apply.go(s: State, e: Change) -> State:
       Ship.fold.asked(s, by, cover)
     case DeployBuilt{+commit, +state, _, +detail, _}:
       Ship.fold.built(s, commit, state, detail)
+    case CtxNoted{_, _, _, _, _}:
+      s
     case BotSet{+id, +name, thread, look, persona, at}:
       State.world((w => BT.World.bot_set(w, id, name, thread, look, persona, at)), State.with_mail((b => ML.Box.bot_named(b, id, name)), s))
     case BotDeleted{+id, _}:
