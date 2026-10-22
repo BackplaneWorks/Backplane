@@ -124,7 +124,13 @@ def Actor.merge( +fresh: U.Ui, +old: U.Ui, +same: Bool, +thread: String, +presen
 def Actor.make(+u: U.Ui, +view: String, +target: J.Json) -> Actor:
   Actor{u, view, target, Map.new(&2, String), Nil{}, False{}, Nil{}}
 
-def Actor.refresh( +xs: List<&2, Actor>, +web: Bool, +st: M.State, +info: J.Json, +live: J.Json, +now: Nat, +p: J.Json, +view: String) -> Actor:
+# the composer's references for the draft the request brought (client.bend's
+# Refs.ready: a thin view never runs Ui.draft)
+def Actor.refs(+a: Actor) -> Actor:
+  match a:
+    case Actor{+u, +view, +target, +pending, +reads, +dirty, +memo}: Actor{U.Refs.ready(u), view, target, pending, reads, dirty, memo}
+
+def Actor.refresh.k( +xs: List<&2, Actor>, +web: Bool, +st: M.State, +info: J.Json, +live: J.Json, +now: Nat, +p: J.Json, +view: String) -> Actor:
   match xs:
     case Nil{}: Actor.make(V.Session.current(web, st, info, live, now, Actor.safe_input(st, p)), view, J.Json.get_obj(p, "target"))
     case Actor{old, oldView, +target, pending, reads, dirty, _} <> _:
@@ -134,6 +140,9 @@ def Actor.refresh( +xs: List<&2, Actor>, +web: Bool, +st: M.State, +info: J.Json
       +same = Bool.and(String.eq(oldView, view), W.Target.same(target, J.Json.get_obj(p, "target")))
       Actor{V.Session.renderer(web, U.Ui.info_merge(Actor.merge(fresh, old, same, thread, Maybe.is_some(&2, J.Json, J.Json.get(J.Json.get_obj(J.Json.get_obj(input, "session"), "drafts"), thread))), info), p),
         view, J.Json.get_obj(p, "target"), Bool.pick(Map<&2, String>, same, pending, Map.new(&2, String)), Bool.pick(List<&2, J.Json>, same, reads, Nil{}), dirty, Nil{}}
+
+def Actor.refresh( +xs: List<&2, Actor>, +web: Bool, +st: M.State, +info: J.Json, +live: J.Json, +now: Nat, +p: J.Json, +view: String) -> Actor:
+  Actor.refs(Actor.refresh.k(xs, web, st, info, live, now, p, view))
 
 # The hub's canonical projection is shared; each actor keeps its own pages,
 # drafts, request slots and exact scope. Compare only the selected body's
