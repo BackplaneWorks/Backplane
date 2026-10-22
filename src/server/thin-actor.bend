@@ -21,7 +21,7 @@ import ../core/i18n.bend as I
 # one; thin-splice.bend writes only the live row into it until anything
 # else changes or a second passes: Memo.splice)
 type Memo is Data:
-  Memo{key: String, clock: Nat, partial: Bool, result: J.Json}
+  Memo{key: String, clock: Nat, partial: Bool, cuts: S.Cuts}
 
 type Actor is Data:
   Actor{ui: U.Ui, view: String, target: J.Json, pending: Map<&2, String>, reads: List<&2, J.Json>, dirty: Bool, memo: List<&2, Memo>}
@@ -124,7 +124,13 @@ def Actor.merge( +fresh: U.Ui, +old: U.Ui, +same: Bool, +thread: String, +presen
 def Actor.make(+u: U.Ui, +view: String, +target: J.Json) -> Actor:
   Actor{u, view, target, Map.new(&2, String), Nil{}, False{}, Nil{}}
 
-def Actor.refresh( +xs: List<&2, Actor>, +web: Bool, +st: M.State, +info: J.Json, +live: J.Json, +now: Nat, +p: J.Json, +view: String) -> Actor:
+# the composer's references for the draft the request brought (client.bend's
+# Refs.ready: a thin view never runs Ui.draft)
+def Actor.refs(+a: Actor) -> Actor:
+  match a:
+    case Actor{+u, +view, +target, +pending, +reads, +dirty, +memo}: Actor{U.Refs.ready(u), view, target, pending, reads, dirty, memo}
+
+def Actor.refresh.k( +xs: List<&2, Actor>, +web: Bool, +st: M.State, +info: J.Json, +live: J.Json, +now: Nat, +p: J.Json, +view: String) -> Actor:
   match xs:
     case Nil{}: Actor.make(V.Session.current(web, st, info, live, now, Actor.safe_input(st, p)), view, J.Json.get_obj(p, "target"))
     case Actor{old, oldView, +target, pending, reads, dirty, _} <> _:
@@ -134,6 +140,9 @@ def Actor.refresh( +xs: List<&2, Actor>, +web: Bool, +st: M.State, +info: J.Json
       +same = Bool.and(String.eq(oldView, view), W.Target.same(target, J.Json.get_obj(p, "target")))
       Actor{V.Session.renderer(web, U.Ui.info_merge(Actor.merge(fresh, old, same, thread, Maybe.is_some(&2, J.Json, J.Json.get(J.Json.get_obj(J.Json.get_obj(input, "session"), "drafts"), thread))), info), p),
         view, J.Json.get_obj(p, "target"), Bool.pick(Map<&2, String>, same, pending, Map.new(&2, String)), Bool.pick(List<&2, J.Json>, same, reads, Nil{}), dirty, Nil{}}
+
+def Actor.refresh( +xs: List<&2, Actor>, +web: Bool, +st: M.State, +info: J.Json, +live: J.Json, +now: Nat, +p: J.Json, +view: String) -> Actor:
+  Actor.refs(Actor.refresh.k(xs, web, st, info, live, now, p, view))
 
 # The hub's canonical projection is shared; each actor keeps its own pages,
 # drafts, request slots and exact scope. Compare only the selected body's
@@ -282,22 +291,34 @@ def Memo.key(+seq: Nat, +info: String, +p: J.Json, +anchor: Nat, +view: String, 
   J.Json.show(J.Json.obj([J.KV{"seq", J.Json.nat(seq)}, J.KV{"info", J.Str{info}}, J.KV{"p", Memo.request(p)}, J.KV{"anchor", J.Json.nat(anchor)},
     J.KV{"view", J.Str{view}}, J.KV{"web", J.Flag{web}}, J.KV{"thread", J.Str{thread}}]))
 
-def Memo.reply.k(+ok: Bool, +res: J.Json, +web: Bool, +stream: TL.Stream, +thread: String, +epoch: String, +target: J.Json, +lc: I.Loc) -> Maybe<&2, J.Json>:
+def Memo.reply.k(+ok: Bool, +cuts: S.Cuts, +web: Bool, +stream: TL.Stream, +thread: String, +epoch: String, +target: J.Json, +lc: I.Loc) -> Maybe<&2, S.Spliced>:
   match ok:
-    case True{}: S.Splice.reply(web, res, stream, thread, epoch, target, lc)
+    case True{}: Some{S.Cuts.splice(cuts, web, stream, thread, epoch, target, lc)}
     case False{}: None{}
 
+# how long a view's memo holds (ms): at most a second, less by the view's
+# place (client id mod 5, 150 ms apart) so the views' forced full renders
+# do not land together
+def Memo.life(+client: U32) -> Nat:
+  Nat.sub(1000n, Nat.mul(Nat.mod(U32.to_nat(client), 5n), 150n))
+
 # the memo's reply with only the live row and window new, when nothing else
-# can have changed: the same key, at most a second old (clock text), a live
-# row now with the same chunk marker as then; None: render in full
-def Memo.reply(ms: List<&2, Memo>, +update: Bool, +key: String, +clock: Nat, +web: Bool, +stream: TL.Stream, +thread: String, +epoch: String, +target: J.Json, +lc: I.Loc) -> Maybe<&2, J.Json>:
+# can have changed: the same key, younger than its life (clock text), a
+# live row now with the same chunk marker as then; None: render in full
+def Memo.reply(ms: List<&2, Memo>, +update: Bool, +key: String, +clock: Nat, +life: Nat, +web: Bool, +stream: TL.Stream, +thread: String, +epoch: String, +target: J.Json, +lc: I.Loc) -> Maybe<&2, S.Spliced>:
   match ms:
     case Nil{}: None{}
-    case Memo{+k, +at, +partial, +res} <> _:
-      Memo.reply.k(Bool.and(update, Bool.and(String.eq(k, key), Bool.and(Nat.is_ge(clock, at), Bool.and(Nat.is_lt(Nat.sub(clock, at), 1000n),
-        Bool.and(Nat.is_gt(TL.Stream.size(stream), 0n), Bool.or(Bool.and(partial, S.Splice.partial(stream)), Bool.and(Bool.not(partial), Bool.not(S.Splice.partial(stream))))))))), res, web, stream, thread, epoch, target, lc)
+    case Memo{+k, +at, +partial, +cuts} <> _:
+      Memo.reply.k(Bool.and(update, Bool.and(String.eq(k, key), Bool.and(Nat.is_ge(clock, at), Bool.and(Nat.is_lt(Nat.sub(clock, at), life),
+        Bool.and(Nat.is_gt(TL.Stream.size(stream), 0n), Bool.or(Bool.and(partial, S.Splice.partial(stream)), Bool.and(Bool.not(partial), Bool.not(S.Splice.partial(stream))))))))), cuts, web, stream, thread, epoch, target, lc)
 
-# a full render remembered for the next ones (clock: ms)
-def Rendered.remember(r: Rendered, +key: String, +clock: Nat, +stream: TL.Stream) -> Rendered:
+def Actor.remember.m(+a: Actor, m: Maybe<&2, S.Cuts>, +key: String, +clock: Nat, +stream: TL.Stream) -> Actor:
+  match a m:
+    case Actor{u, view, target, pending, reads, dirty, _} Some{+cuts}: Actor{u, view, target, pending, reads, dirty, [Memo{key, clock, S.Splice.partial(stream), cuts}]}
+    case Actor{u, view, target, pending, reads, dirty, _} None{}: Actor{u, view, target, pending, reads, dirty, Nil{}}
+
+# a full render remembered for the next ones (clock: ms), as bytes cut
+# around its live rows (none to keep when it has no live row)
+def Rendered.remember(r: Rendered, +key: String, +clock: Nat, +stream: TL.Stream, +web: Bool, +thread: String) -> Rendered:
   match r:
-    case Rendered{+a, +res}: Rendered{Actor.remember(a, Memo{key, clock, S.Splice.partial(stream), res}), res}
+    case Rendered{+a, +res}: Rendered{Actor.remember.m(a, S.Cuts.of(web, res, thread), key, clock, stream), res}

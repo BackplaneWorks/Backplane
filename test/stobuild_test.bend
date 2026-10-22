@@ -7,6 +7,7 @@ import ../src/core/codec.bend as CD
 import ../src/core/utf8.bend as U
 import ../src/server/db.bend as D
 import ../src/server/stobuild.bend as B
+import ../src/core/far.bend as FR
 
 # The store's streamed first build (src/server/stobuild.bend), under JS:
 # a log written to a fresh mktemp directory (the demo's changes, a torn
@@ -157,6 +158,11 @@ def Wf.opened(+text: String, r: Result<&1, &1, U32 & String, File>) -> IO(Unit):
 def Wf.put(+path: String, +text: String) -> IO(Unit):
   IO.bind(Result<&1, &1, U32 & String, File>, Unit, File.open(path, "w"), r => Wf.opened(text, r))
 
+def built.n(b: B.Built) -> String:
+  match b:
+    case B.Built{s, _, _}:
+      Nat.show(s)
+
 def built(b: B.Built) -> String:
   match b:
     case B.Built{s, o, n}:
@@ -178,6 +184,54 @@ def counters() -> String:
   +c : Map<&2, Nat> = B.Acc.cnt(B.Stb.lines(Lns.of(Log.lines()), B.Acc.new("")))
   Nat.show(B.Stb.count(c, "t1")) ++ " " ++ Nat.show(B.Stb.count(c, "t2"))
 
+def Far.rows(fs: List<&2, FR.Fact>, acc: List<&2, String>) -> List<&2, String>:
+  match fs:
+    case Nil{}:
+      acc
+    case FR.Fact{+q, +sc} <> t:
+      Far.rows(t, (Nat.show(q) ++ " " ++ sc) <> acc)
+
+# far_line as the commit path files it: FR.Fr.fact for each line that
+# decodes (its number among the lines that parse), judged by the fold (a
+# change's far row depends only on mappings fixed once made: F1)
+def Far.want.go(ls: List<&2, S.LL>, +n: Nat, +st: M.State, acc: List<&2, String>) -> List<&2, String>:
+  match ls:
+    case Nil{}:
+      acc
+    case S.LL{_, False{}, _} <> t:
+      Far.want.go(t, n, st, acc)
+    case S.LL{_, True{}, None{}} <> t:
+      Far.want.go(t, 1n+n, st, acc)
+    case S.LL{_, True{}, Some{+c}} <> t:
+      Far.want.go(t, 1n+n, st, Far.rows(FR.Fr.fact(st, c, 1n+n), acc))
+
+def Far.got(rs: List<&2, List<&2, String>>, acc: List<&2, String>) -> List<&2, String>:
+  match rs:
+    case (+q <> +sc <> _) <> t:
+      Far.got(t, (q ++ " " ++ sc) <> acc)
+    case _ <> t:
+      Far.got(t, acc)
+    case Nil{}:
+      acc
+
+def Far.set(xs: List<&2, String>, m: Map<&2, Bool>) -> Map<&2, Bool>:
+  match xs:
+    case Nil{}:
+      m
+    case +x <> t:
+      Far.set(t, Map.set(&2, Bool, m, x, True{}))
+
+def Far.sort(xs: List<&2, String>) -> String:
+  String.join(Map.keys(&2, Bool, Far.set(xs, Map.new(&2, Bool))), "|")
+
+# the files a build leaves beside the log (none but store.db)
+def Files.left(r: Result<&1, &1, U32 & String, U32 & (String & String)>) -> String:
+  match r:
+    case Done{(_, (out, _))}:
+      String.trim(out)
+    case Fail{_}:
+      "?"
+
 def check(+name: String, +h: String) -> IO(Unit):
   do IO<Unit>:
     fs : Map<&2, String> <- Db.tables(facts(), h, "", Map.new(&2, String))
@@ -187,9 +241,11 @@ def check(+name: String, +h: String) -> IO(Unit):
     c0 : List<&2, List<&2, String>> <- D.Db.query(h, "SELECT count(*) FROM obj WHERE domain = 'count'", [], 1)
     C.Check.str(name ++ ": no counter rows", one(c0), "0")
     mt : List<&2, List<&2, String>> <- D.Db.query(h, "SELECT group_concat(k || '=' || v, ' ') FROM (SELECT k, v FROM meta WHERE k <> 'log_id' ORDER BY k)", [], 1)
-    C.Check.str(name ++ ": meta", one(mt), "applied_off=" ++ Nat.show(bytes(String.join(Log.lines(), "\n") ++ "\n")) ++ " applied_seq=" ++ Nat.show(Nat.sub(List.length(&2, String, Log.lines()), 1n)) ++ " codec=" ++ Nat.show(S.Sdb.codec()) ++ " ord=" ++ Nat.show(Mat.ord(mat())) ++ " origin=1 schema=1")
+    C.Check.str(name ++ ": meta", one(mt), "applied_off=" ++ Nat.show(bytes(String.join(Log.lines(), "\n") ++ "\n")) ++ " applied_seq=" ++ Nat.show(Nat.sub(List.length(&2, String, Log.lines()), 1n)) ++ " codec=" ++ Nat.show(S.Sdb.codec()) ++ " far_line=filled ord=" ++ Nat.show(Mat.ord(mat())) ++ " origin=1 schema=1")
     id : List<&2, List<&2, String>> <- D.Db.query(h, "SELECT v FROM meta WHERE k = 'log_id'", [], 1)
     C.Check.str(name ++ ": log id", one(id), S.Sdb.log_id(U.Utf8.encode(String.join(Log.lines(), "\n") ++ "\n{\"$\":\"MessagePosted\",\"th")))
+    fl : List<&2, List<&2, String>> <- D.Db.query(h, "SELECT seq, scope FROM far_line", [], 100000)
+    C.Check.str(name ++ ": far_line as the commit path files it", Far.sort(Far.got(fl, Nil{})), Far.sort(Far.want.go(Log.lls(Log.lines()), 0n, fold(), Nil{})))
     cl : String <- D.Db.close(h)
     return Unit{}
 
@@ -203,9 +259,24 @@ def main() -> IO(Unit):
     C.Check.str("tiny chunks: lines, offset, entries", built(b1), Nat.show(Nat.sub(List.length(&2, String, Log.lines()), 1n)) ++ " " ++ Nat.show(bytes(String.join(Log.lines(), "\n") ++ "\n")) ++ " " ++ Nat.show(Mat.ord(mat())))
     o1 : String <- D.Db.open(dir ++ "/store.db")
     check("tiny chunks", String.drop(o1, 3n))
+    # an earlier build cut short left its temp file: a build starts over
+    Wf.put(dir ++ "/store.db.tmp", "half a store")
     b2 : B.Built <- B.Stb.build(dir, 1048576)
+    ls : Result<&1, &1, U32 & String, U32 & (String & String)> <- Process.run("sh", ["-c", "cd " ++ dir ++ " && ls store.db* store.build* 2>/dev/null | tr '\\n' ' '"], "", 4096, 10000)
+    C.Check.str("a build leaves store.db alone (no temp, no progress file)", Files.left(ls), "store.db")
     C.Check.str("rebuilt, one chunk", built(b2), built(b1))
     o2 : String <- D.Db.open(dir ++ "/store.db")
     check("one chunk", String.drop(o2, 3n))
+    # a line that parses but is no object ("Unreadable"): numbered, its wire
+    # the inert placeholder (C.Change.wire_over), the records as before
+    Wf.put(dir ++ "/events.jsonl", String.join(Log.lines(), "\n") ++ "\n\"Unreadable\"\n")
+    b3 : B.Built <- B.Stb.build(dir, 1048576)
+    C.Check.str("a non-object line is numbered", built.n(b3), Nat.show(List.length(&2, String, Log.lines())))
+    +o3 : String <- D.Db.open(dir ++ "/store.db")
+    w3 : List<&2, List<&2, String>> <- D.Db.query(String.drop(o3, 3n), "SELECT wire FROM line ORDER BY seq DESC LIMIT 1", [], 1)
+    C.Check.str("its wire is the inert placeholder", one(w3), CD.Change.inert())
+    r3 : Map<&2, String> <- Db.tables(recs(), String.drop(o3, 3n), "", Map.new(&2, String))
+    C.Check.str("records unchanged by it", Db.show(r3), Pure.of(S.Tab.dump(fold())))
+    c3 : String <- D.Db.close(String.drop(o3, 3n))
     rm : Result<&1, &1, U32 & String, U32 & (String & String)> <- Process.run("rm", ["-rf", dir], "", 4096, 10000)
     return Unit{}
