@@ -12,7 +12,7 @@ import ../../src/core/utf8.bend as U
 #   <table>\t<key cols>\t<all cols>
 # The two column fields are JSON string literals (a value may hold a tab
 # or a newline) whose columns are joined by "\u{1f}", as the pure store
-# keeps them (SDB.Tab.key/Tab.op): an integer column reads "#<n>".
+# keeps them (SDB.Tab.key/Tab.op): a number reads as plain digits.
 # test/tools/store_commit_e2e.ts compares it with store.db.
 #   bend test/native/store_dump.bend HOME
 

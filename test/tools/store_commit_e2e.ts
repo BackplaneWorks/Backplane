@@ -7,10 +7,11 @@
 // stopped and HOME/store.db read with bun:sqlite:
 //   - records: every row of project, thread, task, ask, queue, setting,
 //     bot, room, routine, conv, mark and obj, columns in Sdb.cols order
-//     (src/core/storedb.bend; an integer reads "#<n>", as the pure store
-//     keeps it), equals test/native/store_dump.bend's lines for the home
+//     (src/core/storedb.bend; a number reads as plain digits, as the pure
+//     store keeps it; obj('count', *) rows left out on both sides), equals test/native/store_dump.bend's lines for the home
 //     (the log folded, SDB.Tab.dump)
-//   - facts: count(line) is the number of log lines that parse, count(entry)
+//   - facts: count(line) is the number of log lines that parse by Bend's
+//     parser (store_dump's count), count(entry)
 //     the number of MessagePosted, ActivityLogged and Reminded lines
 //
 //   bun test/tools/store_commit_e2e.ts HUB WIREDIR DUMP     (port 3831, E2E_PORT)
@@ -188,7 +189,12 @@ const COLS: Record<string, string[]> = {
 };
 const keyn = (t: string) => (t === "obj" ? 2 : 1);
 const SEP = "\u001f";
-const cell = (v: unknown) => (v === null ? "<NULL>" : typeof v === "number" || typeof v === "bigint" ? `#${v}` : v instanceof Uint8Array ? `<blob ${v.length}>` : String(v));
+// numbers are plain digits on both sides (storedb codec 4: the text sqlite
+// gives back for an INTEGER column)
+const cell = (v: unknown) => (v === null ? "<NULL>" : v instanceof Uint8Array ? `<blob ${v.length}>` : String(v));
+// obj('count', <thread>) rows (store_build's per-thread counters) are left
+// out on both sides until S1 takes them out of store_build
+const skip = (t: string, k: string) => t === "obj" && k.startsWith(`count${SEP}`);
 
 const dbPath = join(home, "store.db");
 const logText = read(join(home, "events.jsonl"));
@@ -203,14 +209,15 @@ else {
     const got = new Map<string, string>();
     for (const r of db.query(`SELECT ${cols.join(", ")} FROM ${t}`).values() as unknown[][]) {
       const cs = r.map(cell);
-      got.set(cs.slice(0, keyn(t)).join(SEP), cs.join(SEP));
+      const k = cs.slice(0, keyn(t)).join(SEP);
+      if (!skip(t, k)) got.set(k, cs.join(SEP));
     }
     const w = want.get(t) ?? new Map<string, string>();
     const diffs: string[] = [];
-    for (const [k, v] of w) if (got.get(k) !== v) diffs.push(k);
+    for (const [k, v] of w) if (!skip(t, k) && got.get(k) !== v) diffs.push(k);
     for (const k of got.keys()) if (!w.has(k)) diffs.push(k);
     if (!diffs.length) ok(`records ${t} (${got.size} rows)`);
-    // columns shown as a JSON array (an integer column reads "#<n>")
+    // columns shown as a JSON array
     const show = (v: string | undefined) => (v === undefined ? "<no row>" : JSON.stringify(v.split(SEP)));
     for (const k of diffs.slice(0, 20)) bad(`records ${t} ${JSON.stringify(k.split(SEP))}`, show(got.get(k)), show(w.get(k)));
     if (diffs.length > 20) console.log(`     ... ${diffs.length - 20} more in ${t}`);
@@ -218,11 +225,13 @@ else {
   for (const t of want.keys()) if (!(t in COLS)) bad(`records: the dump's table ${t} is checked`, "unchecked", Object.keys(COLS));
 
   // facts
-  let parsed = 0, entries = 0;
+  // count(line) follows Bend's parser (store_dump's count), not JSON.parse:
+  // the hub numbers lines by Bend's notion of "parses"
+  const parsed = Number(/(\d+) lines parsed/.exec(String(d.stderr))?.[1] ?? -1);
+  let entries = 0;
   for (const l of logText.split("\n").slice(0, -1)) {
     let o: any;
     try { o = JSON.parse(l); } catch { continue; }
-    parsed++;
     if (o && (o.$ === "MessagePosted" || o.$ === "ActivityLogged" || o.$ === "Reminded")) entries++;
   }
   const n = (q: string) => Number((db.query(q).values()[0] as unknown[])[0]);
