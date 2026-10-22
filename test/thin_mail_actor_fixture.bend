@@ -54,7 +54,7 @@ def refresh(+a: TA.Actor, p: J.Json, view: String) -> TA.Actor:
 
 def with_ui(a: TA.Actor, next: U.Ui) -> TA.Actor:
   match a:
-    case TA.Actor{_, view, target, pending, reads, dirty}: TA.Actor{next, view, target, pending, reads, dirty}
+    case TA.Actor{_, view, target, pending, reads, dirty, memo}: TA.Actor{next, view, target, pending, reads, dirty, memo}
 
 def commands(r: V.ActResult) -> List<&2, J.Json>:
   match r:

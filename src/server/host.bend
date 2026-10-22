@@ -6,6 +6,17 @@ import Base
 def Clock.epoch() -> IO(U32):
   import "./effects/host.js"
 
+# One full collection and a release of free memory, at most once per
+# process, called when the boot's thin index is warm (server.bend's
+# Hub.thin.warmed): on the JS target its build leaves ~0.9 GB of heap
+# capacity behind at the boot peak (3.35 GB → 2.44 GB measured on a copy of
+# the real log, 2026-10-22). Answers the line to log; "" when nothing was
+# done (the C build, or any later call). It goes once store mode keeps the
+# thin index small (only the recent threads).
+def Mem.settle() -> IO(String):
+  import "./effects/mem.c"
+  import "./effects/mem.js"
+
 # The event log from byte offset off (decimal text; "0" for all of it,
 # a line's start for a tail) to its end, read in one go: the text that
 # closes off a torn tail, the offset past the last whole line, then the

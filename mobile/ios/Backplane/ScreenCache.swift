@@ -22,14 +22,6 @@ final class ScreenCache: @unchecked Sendable {
         return SHA256.hash(data: Data(([profile] + normalized.sorted()).joined(separator: "\n").utf8))
             .map { String(format: "%02x", $0) }.joined()
     }
-    private static func textTail(_ text: String) -> String {
-        // One grapheme can contain arbitrarily many scalars. A Character
-        // suffix would leave a megabyte combining sequence unbounded.
-        var tail = String.UnicodeScalarView()
-        tail.append(contentsOf: text.unicodeScalars.suffix(8192))
-        return String(tail)
-    }
-
     // Only materialized activity display fields are neutralized. A cached
     // body, owner, route, blocked state or settled state keeps its identity.
     private static func offlineActivity(_ input: [String: Any]) -> [String: Any] {
@@ -102,30 +94,12 @@ final class ScreenCache: @unchecked Sendable {
         if var thread = screen["thread"] as? [String: Any] {
             thread["draft"] = ""; thread["sending"] = []; thread["attaching"] = []; thread["uploading"] = ""
             // Keep the current page bounded regardless of how many older pages
-            // were opened. Oversized individual replies retain readable text.
+            // were opened. A message's text is never cut: one too big for the
+            // cache is dropped whole below (the size limit), never shown in part.
             let all = thread["entries"] as? [[String: Any]] ?? []
             thread["earlier"] = (thread["earlier"] as? Int ?? 0) + max(0, all.count - 40)
-            thread["entries"] = all.suffix(40).map { entry -> [String: Any] in
-                var e = entry
-                if let text = e["text"] as? String, text.utf8.count > 32768 {
-                    let tail = Self.textTail(text)
-                    e["text"] = tail
-                    e["partial"] = ["version": "", "cursor": "", "hasMore": false, "complete": false]
-                    e["blocks"] = [["tag": "p", "kids": [["text": tail]]]]
-                }
-                return e
-            }
+            thread["entries"] = Array(all.suffix(40))
             for key in ["diff", "term", "embs", "asks", "skills", "parent", "subs"] { thread.removeValue(forKey: key) }
-            if let live = thread["live"] as? [[String: Any]],
-               ((try? JSONSerialization.data(withJSONObject: live).count) ?? 0) > 32768 {
-                var pending = Array(live.reversed()), text = ""
-                while let node = pending.popLast() {
-                    if let t = node["text"] as? String { text = Self.textTail(text + t) }
-                    if let kids = node["kids"] as? [[String: Any]] { pending.append(contentsOf: kids.reversed()) }
-                }
-                thread["live"] = [["tag": "p", "kids": [["text": text]]]]
-                thread["livePartial"] = ["id": "", "version": "", "cursor": "", "hasMore": false, "complete": false]
-            }
             screen["thread"] = thread
         }
         for key in ["hubs", "usageMachines"] {
@@ -147,6 +121,15 @@ final class ScreenCache: @unchecked Sendable {
             t["entries"] = Array(entries.suffix(keep))
             t["earlier"] = (t["earlier"] as? Int ?? 0) + entries.count - keep
             screen["thread"] = t
+            data = encode()
+        }
+        // still too big: the streamed reply, then the one entry left, go whole
+        if (data?.count ?? 0) > limit, var t = screen["thread"] as? [String: Any], !((t["live"] as? [Any]) ?? []).isEmpty {
+            t["live"] = []; t.removeValue(forKey: "livePartial"); screen["thread"] = t
+            data = encode()
+        }
+        if (data?.count ?? 0) > limit, var t = screen["thread"] as? [String: Any], let entries = t["entries"] as? [[String: Any]], !entries.isEmpty {
+            t["entries"] = []; t["earlier"] = (t["earlier"] as? Int ?? 0) + entries.count; screen["thread"] = t
             data = encode()
         }
         guard let data, data.count <= limit else { return nil }

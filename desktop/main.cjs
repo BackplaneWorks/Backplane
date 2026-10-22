@@ -57,15 +57,25 @@ async function connect(ses) {
       // Credential material stays in main and the service's HttpOnly cookie.
       const response = await ses.fetch(`${origin}/auth/pair`, { method: 'POST', credentials: 'include', headers: { Authorization: `Bearer ${await service.token()}` }, redirect: 'error' });
       if (!response.ok) throw new Error('Could not authenticate with the service');
-      if(directBrowser){await connectBrowser(ses);if(desktopBrowser.state().phase!=='ready')throw new Error('Direct Browser service unavailable');}
       if (!quitting && window && !window.isDestroyed()) await window.loadURL(origin);
+      // The in-app browser starts only after the UI is up and never holds it:
+      // a hub that does not serve it (started by systemd, --headless or an
+      // older install), or one that never answers, leaves the browser
+      // unavailable with Reconnect (desktop:browser-reconnect) and nothing else.
+      if(directBrowser)void connectBrowser(ses).catch(()=>{});
     } catch (error) {
       status('error', error.message);
     } finally { connecting = null; }
   })();
   return connecting;
 }
-async function connectBrowser(ses){
+// one attempt at a time: the start after load and a Reconnect share it
+let browserStarting=null;
+function connectBrowser(ses){
+  browserStarting??=startBrowser(ses).finally(()=>{browserStarting=null;});
+  return browserStarting;
+}
+async function startBrowser(ses){
   if(desktopBrowser&&!desktopBrowser.isClosed())return;
   const guestPath=path.join(__dirname,'browser-guest.cjs'),preloadPath=path.join(__dirname,'browser-recording-preload.cjs');
   const hash=file=>createHash('sha256').update(fs.readFileSync(file)).digest('hex');
@@ -103,18 +113,19 @@ function start() {
     return result.canceled ? null : result.filePaths[0];
   });
   ipcMain.handle('desktop:browser-present',(event,value)=>{
-    if(!trusted(event)||!directBrowser||!desktopBrowser)throw new Error('Invalid Browser sender');
+    if(!trusted(event)||!directBrowser)throw new Error('Invalid Browser sender');
     exactObject(value,['owner','bounds']);exactObject(value.bounds,['x','y','width','height']);
     if(typeof value.owner!=='string'||!value.owner.length||value.owner.length>512||/[\x00-\x1f]/.test(value.owner))throw new Error('Invalid Browser owner');
     if(Object.values(value.bounds).some(v=>!Number.isFinite(v)||Math.abs(v)>1000000)||value.bounds.width<1||value.bounds.height<1)throw new Error('Invalid Browser geometry');
     const zoom=window.webContents.getZoomFactor(),box=window.getContentBounds();
     const x=Math.max(0,Math.min(box.width,Math.round(value.bounds.x*zoom))),y=Math.max(0,Math.min(box.height,Math.round(value.bounds.y*zoom)));
     const width=Math.min(box.width-x,Math.round(value.bounds.width*zoom)),height=Math.min(box.height-y,Math.round(value.bounds.height*zoom));
+    if(!desktopBrowser||desktopBrowser.isClosed())return{shown:false,phase:'error',message:'Browser unavailable'};
     if(width<1||height<1){desktopBrowser.hide();return{shown:false,message:'Browser panel is hidden'};}
     return desktopBrowser.present({owner:value.owner,bounds:{x,y,width,height}}).then(result=>({shown:result.shown===true,...(result.message?{message:result.message}:{} )}));
   });
   ipcMain.handle('desktop:browser-hide',event=>{if(!trusted(event)||!directBrowser)throw new Error('Invalid Browser sender');desktopBrowser?.hide();return true;});
-  ipcMain.handle('desktop:browser-reconnect',async event=>{if(!trusted(event)||!directBrowser)throw new Error('Invalid Browser sender');await connectBrowser(ses);return desktopBrowser.state();});
+  ipcMain.handle('desktop:browser-reconnect',async event=>{if(!trusted(event)||!directBrowser)throw new Error('Invalid Browser sender');await connectBrowser(ses);return desktopBrowser?.state()??{phase:'error',message:'Browser unavailable'};});
   const edit=(label,operation,accelerator)=>({label,accelerator,click:()=>{
     const focused=electron.webContents.getFocusedWebContents();
     if(focused===window?.webContents)focused[operation]();else if(directBrowser)desktopBrowser?.edit(operation);

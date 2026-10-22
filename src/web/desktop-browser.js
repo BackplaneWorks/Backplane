@@ -34,7 +34,7 @@ export function installDesktopBrowser({bridge,root=document,isReady=()=>true,onT
     // clamps to its content bounds. DPR/roles/target IDs from DOM grant nothing.
     void Promise.resolve(bridge.present({owner,bounds})).then(result=>{
       if(disposed||stamp!==ticket||current!==node)return;
-      if(result?.shown!==true){state={owner,phase:'connecting',message:result?.message||'Connecting Browser…'};status(node);}
+      if(result?.shown!==true){state={owner,phase:result?.phase==='error'?'error':'connecting',message:result?.message||'Connecting Browser…'};status(node);}
     }).catch(()=>{if(stamp===ticket){state={owner,phase:'error',message:'Browser unavailable'};status(node);}});
   }
   function sync(){if(!disposed&&!raf)raf=win.requestAnimationFrame(measure);}

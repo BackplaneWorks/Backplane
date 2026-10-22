@@ -5,6 +5,8 @@ import ../core/codec.bend as C
 import ../core/storedb.bend as SDB
 import ../core/utf8.bend as U
 import ./db.bend as D
+import ./host.bend as H
+import ../core/far.bend as FR
 
 # The store's first build (store.db from events.jsonl, docs:
 # bp-coord/store/S1-SCHEMA.md)
@@ -137,6 +139,15 @@ def Stb.sqls(os: List<&2, SDB.Op>, acc: List<&2, List<&2, String>>) -> List<&2, 
     case o <> t:
       Stb.sqls(t, SDB.Sql.of(o) <> acc)
 
+# a change's far_line rows (FR.Fr.fact over the state after it: what the
+# commit path writes, storedb.bend's Sto.far.fact), as statements
+def Stb.far(fs: List<&2, FR.Fact>, acc: List<&2, List<&2, String>>) -> List<&2, List<&2, String>>:
+  match fs:
+    case Nil{}:
+      acc
+    case FR.Fact{+seq, +scope} <> t:
+      Stb.far(t, ["INSERT INTO far_line(seq, scope) VALUES (CAST(? AS INTEGER), ?) ON CONFLICT DO NOTHING", Nat.show(seq), scope] <> acc)
+
 # the log's origin: the "at" of its first line that parses (Hub.origin)
 def Stb.origin(+seq: Nat, +o: J.Json, origin: String) -> String:
   match seq:
@@ -145,14 +156,15 @@ def Stb.origin(+seq: Nat, +o: J.Json, origin: String) -> String:
     case _:
       origin
 
-def Stb.change(m: Maybe<&2, M.Change>, +st: M.State, +cnt: Map<&2, Nat>, +seq: Nat, +off: Nat, +len: Nat, +ord: Nat, items: List<&2, List<&2, String>>, id: String, origin: String) -> Acc:
+def Stb.change(m: Maybe<&2, M.Change>, +st: M.State, +cnt: Map<&2, Nat>, +seq: Nat, +off: Nat, +len: Nat, +ord: Nat, items: List<&2, List<&2, String>>, id: String, origin: String, w: String) -> Acc:
   match m:
     case Some{+c}:
       +p = SDB.F.posts(c)
       +cnt2 = Stb.bump(p, cnt)
-      Acc{Stb.apply(st, cnt, c), cnt2, seq, Nat.add(off, 1n+len), SDB.Sdb.ord(c, ord), Stb.sqls(SDB.Sdb.facts(st, SDB.At{seq, off, len, ord}, c), items), id, origin}
+      +post = Stb.apply(st, cnt, c)
+      Acc{post, cnt2, seq, Nat.add(off, 1n+len), SDB.Sdb.ord(c, ord), Stb.far(FR.Fr.fact(post, c, seq), Stb.sqls(SDB.Sdb.facts(st, SDB.At{seq, off, len, ord}, c), items)), id, origin}
     case None{}:
-      Acc{st, cnt, seq, Nat.add(off, 1n+len), ord, Stb.sqls([SDB.F.line(SDB.At{seq, off, len, ord}, "")], items), id, origin}
+      Acc{st, cnt, seq, Nat.add(off, 1n+len), ord, Stb.sqls([SDB.F.line(SDB.At{seq, off, len, ord}, w)], items), id, origin}
 
 # Flat strings
 # ------------
@@ -191,7 +203,7 @@ def Stb.flat(j: J.Json) -> J.Json:
 def Stb.parsed(m: Maybe<&2, J.Json>, st: M.State, cnt: Map<&2, Nat>, +seq: Nat, +off: Nat, +len: Nat, ord: Nat, items: List<&2, List<&2, String>>, id: String, origin: String) -> Acc:
   match m:
     case Some{+o}:
-      Stb.change(C.Change.decode(Stb.flat(o)), st, cnt, 1n+seq, off, len, ord, items, id, Stb.origin(seq, o, origin))
+      Stb.change(C.Change.decode(Stb.flat(o)), st, cnt, 1n+seq, off, len, ord, items, id, Stb.origin(seq, o, origin), C.Change.wire_over(o, ""))
     case None{}:
       Acc{st, cnt, seq, Nat.add(off, 1n+len), ord, items, id, origin}
 
@@ -226,18 +238,19 @@ def Acc.off(a: Acc) -> Nat:
 def Stb.meta.sql(+k: String, v: String) -> List<&2, String>:
   ["INSERT OR REPLACE INTO meta(k, v) VALUES (?, ?)", k, v]
 
-# the statements written after the last line
+# the meta, written last (after every record): a store with a codec in its
+# meta is a whole one; far_line is filled (Fr.fact per line above)
 def Stb.end(a: Acc) -> List<&2, List<&2, String>>:
   match a:
-    case Acc{+st, _, +seq, +off, +ord, _, id, origin}:
-      List.append(&2, List<&2, String>, List.reverse(&2, List<&2, String>, Stb.sqls(SDB.Dump.ops(st), Nil{})), [
-        Stb.meta.sql("schema", "1"),
-        Stb.meta.sql("codec", Nat.show(SDB.Sdb.codec())),
-        Stb.meta.sql("applied_seq", Nat.show(seq)),
-        Stb.meta.sql("applied_off", Nat.show(off)),
-        Stb.meta.sql("ord", Nat.show(ord)),
-        Stb.meta.sql("log_id", id),
-        Stb.meta.sql("origin", origin)])
+    case Acc{_, _, +seq, +off, +ord, _, id, origin}:
+      [Stb.meta.sql("schema", "1"),
+       Stb.meta.sql("applied_seq", Nat.show(seq)),
+       Stb.meta.sql("applied_off", Nat.show(off)),
+       Stb.meta.sql("ord", Nat.show(ord)),
+       Stb.meta.sql("log_id", id),
+       Stb.meta.sql("origin", origin),
+       Stb.meta.sql("far_line", "filled"),
+       Stb.meta.sql("codec", Nat.show(SDB.Sdb.codec()))]
 
 def Acc.seq(a: Acc) -> Nat:
   match a:
@@ -273,17 +286,48 @@ def Stb.ok.k(ok: Bool, +what: String, +r: String) -> IO(Unit):
 def Stb.check(+what: String, +r: String) -> IO(Unit):
   Stb.ok.k(String.starts_with(r, "ok"), what, r)
 
-def Stb.write.k(+h: String, r: List<&2, List<&2, String>> & Acc) -> IO(Acc):
+# Progress
+# --------
+# The hub that waits for a build reads HOME/store.build ("progress <lines>
+# <bytes done> <log bytes>", replaced whole after each chunk) for its note;
+# the same line goes to stdout.
+
+def Stb.put.done(r: File & Result<&1, &1, U32 & String, Unit>) -> IO(Unit):
+  (f, _) = r
+  File.close(f)
+
+def Stb.put.k(r: Result<&1, &1, U32 & String, File>, +text: String) -> IO(Unit):
+  match r:
+    case Done{f}:
+      IO.bind(File & Result<&1, &1, U32 & String, Unit>, Unit, File.write(f, text), Stb.put.done)
+    case Fail{_}:
+      IO.pure(Unit, Unit{})
+
+# a file's text replaced whole (written beside it, then renamed over it)
+def Stb.put(+path: String, +text: String) -> IO(Unit):
+  do IO<Unit>:
+    IO.bind(Result<&1, &1, U32 & String, File>, Unit, File.open(path ++ ".tmp", "w"), r => Stb.put.k(r, text))
+    mv : Result<&1, &1, U32 & String, Unit> <- H.FS.rename(path ++ ".tmp", path)
+    return Unit{}
+
+def Stb.progress(+home: String, +seq: Nat, +off: Nat, +total: Nat) -> IO(Unit):
+  +line = "progress " ++ Nat.show(seq) ++ " " ++ Nat.show(off) ++ " " ++ Nat.show(total)
+  do IO<Unit>:
+    IO.print("store-rebuild " ++ line)
+    Stb.put(home ++ "/store.build", line ++ "\n")
+
+def Stb.write.k(+h: String, +home: String, +total: Nat, r: List<&2, List<&2, String>> & Acc) -> IO(Acc):
   (items, +a) = r
   do IO<Acc>:
     +res : String <- D.Db.script(h, items)
     Stb.check("chunk ending at " ++ Nat.show(Acc.off(a)), res)
+    Stb.progress(home, Acc.seq(a), Acc.off(a), total)
     return a
 
 # a chunk's lines folded and written in one transaction; answers the
 # accumulator after them, entries stripped
-def Stb.write(+h: String, ls: List<&2, Ln>, a: Acc) -> IO(Acc):
-  Stb.write.k(h, Acc.take(Stb.lines(ls, a)))
+def Stb.write(+h: String, +home: String, +total: Nat, ls: List<&2, Ln>, a: Acc) -> IO(Acc):
+  Stb.write.k(h, home, total, Acc.take(Stb.lines(ls, a)))
 
 # what to do after a chunk: 0 the log has ended (nothing read, or only a
 # fragment with no newline before the end), 1 lines were read (go on), 2 a
@@ -302,37 +346,37 @@ def Stb.next.k(none: Bool, nothing: Bool, short: Bool) -> Nat:
 def Stb.next(+used: Nat, +total: Nat, +max: U32) -> Nat:
   Stb.next.k(Nat.is_eq(total, 0n), Nat.is_eq(used, 0n), Nat.is_lt(total, U32.to_nat(max)))
 
-def Stb.then(i: Nat, f: File, +h: String, +max: U32, ls: List<&2, Ln>, a: Acc, k: File -> Acc -> U32 -> IO(File & Acc)) -> IO(File & Acc):
+def Stb.then(i: Nat, f: File, +h: String, +home: String, +logsize: Nat, +max: U32, ls: List<&2, Ln>, a: Acc, k: File -> Acc -> U32 -> IO(File & Acc)) -> IO(File & Acc):
   match i:
     case 0n:
       IO.pure(File & Acc, (f, a))
     case 1n:
-      IO.bind(Acc, File & Acc, Stb.write(h, ls, a), a2 => k(f, a2, max))
+      IO.bind(Acc, File & Acc, Stb.write(h, home, logsize, ls, a), a2 => k(f, a2, max))
     case _:
       k(f, a, U32.mul(max, 2))
 
-def Stb.cut(f: File, +h: String, +max: U32, c: Cut, a: Acc, k: File -> Acc -> U32 -> IO(File & Acc)) -> IO(File & Acc):
+def Stb.cut(f: File, +h: String, +home: String, +logsize: Nat, +max: U32, c: Cut, a: Acc, k: File -> Acc -> U32 -> IO(File & Acc)) -> IO(File & Acc):
   match c:
     case Cut{ls, +used, +total}:
-      Stb.then(Stb.next(used, total, max), f, h, max, ls, a, k)
+      Stb.then(Stb.next(used, total, max), f, h, home, logsize, max, ls, a, k)
 
-def Stb.read(r: File & Result<&1, &1, U32 & String, List<&2, U32>>, +h: String, +max: U32, a: Acc, k: File -> Acc -> U32 -> IO(File & Acc)) -> IO(File & Acc):
+def Stb.read(r: File & Result<&1, &1, U32 & String, List<&2, U32>>, +h: String, +home: String, +logsize: Nat, +max: U32, a: Acc, k: File -> Acc -> U32 -> IO(File & Acc)) -> IO(File & Acc):
   (f, res) = r
   match res:
     case Done{bs}:
-      Stb.cut(f, h, max, Cut.of(bs), a, k)
+      Stb.cut(f, h, home, logsize, max, Cut.of(bs), a, k)
     case Fail{(_, e)}:
       IO.die(File & Acc, 1, "store build: read: " ++ e)
 
 # chunks until the log ends (fuel: more than the chunks it can take)
-def Stb.loop(fuel: Nat, f: File, +h: String, +max: U32, +a: Acc) -> IO(File & Acc):
+def Stb.loop(fuel: Nat, f: File, +h: String, +home: String, +logsize: Nat, +max: U32, +a: Acc) -> IO(File & Acc):
   match fuel:
     case 0n:
       IO.pure(File & Acc, (f, a))
     case 1n+n:
       +off : Nat = Acc.off(a)
       IO.bind(File & Result<&1, &1, U32 & String, List<&2, U32>>, File & Acc, File.read_at(f, U32.from_nat(off), max),
-        r => Stb.read(r, h, max, a, f2 => a2 => m2 => Stb.loop(n, f2, h, m2, a2)))
+        r => Stb.read(r, h, home, logsize, max, a, f2 => a2 => m2 => Stb.loop(n, f2, h, home, logsize, m2, a2)))
 
 def Stb.file(r: Result<&1, &1, U32 & String, File>) -> IO(File):
   match r:
@@ -366,34 +410,69 @@ type Built is Data:
 
 # the log's id (SDB.Sdb.log_id of its first 4096 bytes, as the commit path
 # checks it), then the chunks
-def Stb.first(+size: Nat, +h: String, +chunk: U32, r: File & Result<&1, &1, U32 & String, List<&2, U32>>) -> IO(File & Acc):
+def Stb.first(+size: Nat, +h: String, +home: String, +chunk: U32, r: File & Result<&1, &1, U32 & String, List<&2, U32>>) -> IO(File & Acc):
   (f, res) = r
-  Stb.loop(Nat.add(size, 64n), f, h, chunk, Acc.new(SDB.Sdb.log_id(Result.default(&1, &1, U32 & String, List<&2, U32>, res, Nil{}))))
+  Stb.loop(Nat.add(size, 64n), f, h, home, size, chunk, Acc.new(SDB.Sdb.log_id(Result.default(&1, &1, U32 & String, List<&2, U32>, res, Nil{}))))
 
-def Stb.run(r: File & Nat, +h: String, +chunk: U32) -> IO(File & Acc):
+def Stb.run(r: File & Nat, +h: String, +home: String, +chunk: U32) -> IO(File & Acc):
   (f, +size) = r
-  IO.bind(File & Result<&1, &1, U32 & String, List<&2, U32>>, File & Acc, File.read_at(f, 0, 4096), x => Stb.first(size, h, chunk, x))
+  do IO<File & Acc>:
+    IO.print("store-rebuild start " ++ Nat.show(size))
+    IO.bind(File & Result<&1, &1, U32 & String, List<&2, U32>>, File & Acc, File.read_at(f, 0, 4096), x => Stb.first(size, h, home, chunk, x))
 
-def Stb.finish.k(+h: String, f: File, +a: Acc) -> IO(Built):
+# every record of the state, a domain at a time (SDB.Dump.part): one
+# domain's statements at most in memory, never all of them
+def Stb.parts(k: Nat, +h: String, +st: M.State, +i: Nat) -> IO(Unit):
+  match k:
+    case 0n:
+      IO.pure(Unit, Unit{})
+    case 1n+r:
+      do IO<Unit>:
+        +res : String <- D.Db.script(h, List.reverse(&2, List<&2, String>, Stb.sqls(SDB.Dump.part(st, i), Nil{})))
+        Stb.check("records", res)
+        Stb.parts(r, h, st, 1n+i)
+
+def Stb.gone(+path: String) -> IO(Unit):
+  do IO<Unit>:
+    r : Result<&1, &1, U32 & String, Unit> <- H.FS.remove(path)
+    return Unit{}
+
+def Stb.moved(r: Result<&1, &1, U32 & String, Unit>) -> IO(Unit):
+  match r:
+    case Done{_}:
+      IO.pure(Unit, Unit{})
+    case Fail{(_, e)}:
+      IO.die(Unit, 1, "store build: rename store.db.tmp: " ++ e)
+
+def Stb.finish.k(+h: String, +home: String, f: File, +a: Acc) -> IO(Built):
+  +db = home ++ "/store.db"
   do IO<Built>:
     File.close(f)
+    Stb.parts(SDB.Dump.n(), h, Acc.st(a), 0n)
     +res : String <- D.Db.script(h, Stb.end(a))
-    Stb.check("records", res)
-    sy : String <- D.Db.exec(h, "PRAGMA synchronous = NORMAL")
-    Stb.check("pragma", sy)
+    Stb.check("meta", res)
+    jm : String <- D.Db.exec(h, "PRAGMA journal_mode = DELETE")
+    Stb.check("journal", jm)
     cl : String <- D.Db.close(h)
     Stb.check("close", cl)
+    Stb.gone(db ++ "-wal")
+    Stb.gone(db ++ "-shm")
+    Stb.gone(db)
+    mv : Result<&1, &1, U32 & String, Unit> <- H.FS.rename(db ++ ".tmp", db)
+    Stb.moved(mv)
+    Stb.gone(home ++ "/store.build")
     return Built{Acc.seq(a), Acc.off(a), Acc.ord(a)}
 
-def Stb.finish(+h: String, r: File & Acc) -> IO(Built):
+def Stb.finish(+h: String, +home: String, r: File & Acc) -> IO(Built):
   (f, a) = r
-  Stb.finish.k(h, f, a)
+  Stb.finish.k(h, home, f, a)
 
 # HOME/store.db made again from HOME/events.jsonl, read chunk bytes at a
-# time (a line longer than that grows the read). The old store, if any, is
-# deleted first.
+# time (a line longer than that grows the read), built in store.db.tmp and
+# renamed over store.db only once whole: an interrupted build leaves no
+# store.db of its own (the old one, if any, stays until the rename)
 def Stb.build(+home: String, +chunk: U32) -> IO(Built):
-  +db : String = home ++ "/store.db"
+  +db : String = home ++ "/store.db.tmp"
   do IO<Built>:
     rm : Result<&1, &1, U32 & String, U32 & (String & String)> <- Process.run("rm", ["-f", db, db ++ "-wal", db ++ "-shm", db ++ "-journal"], "", 4096, 30000)
     o : String <- D.Db.open(db)
@@ -404,5 +483,45 @@ def Stb.build(+home: String, +chunk: U32) -> IO(Built):
     Stb.check("pragma", sy)
     f0 : File <- IO.bind(Result<&1, &1, U32 & String, File>, File, File.open(home ++ "/events.jsonl", "r"), Stb.file)
     fs : File & Nat <- IO.bind(File & Result<&1, &1, U32 & String, U32>, File & Nat, File.size(f0), Stb.size)
-    out : File & Acc <- Stb.run(fs, h, chunk)
-    Stb.finish(h, out)
+    out : File & Acc <- Stb.run(fs, h, home, chunk)
+    Stb.finish(h, home, out)
+
+# The child: backplane-serve --store-rebuild HOME (src/core/cli.bend)
+# --------------------------------------------------------------------
+
+def Stb.args.copy(xs: List<String>) -> List<&2, String>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case x <> t:
+      x <> Stb.args.copy(t)
+
+def Stb.args.back(xs: List<&2, String>) -> List<String>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case x <> t:
+      x <> Stb.args.back(t)
+
+def Stb.done(b: Built, +t0: Nat, +t1: Nat) -> IO(Unit):
+  match b:
+    case Built{seq, off, ord}:
+      IO.print("store built lines=" ++ Nat.show(seq) ++ " applied_off=" ++ Nat.show(off) ++ " entries=" ++ Nat.show(Nat.sub(ord, 1n)) ++ " ms=" ++ Nat.show(Nat.sub(t1, t0)))
+
+def Stb.child(+home: String) -> IO(Unit):
+  do IO<Unit>:
+    t0 : Nat <- IO.now()
+    b : Built <- Stb.build(home, 1048576)
+    t1 : Nat <- IO.now()
+    Stb.done(b, t0, t1)
+
+def Stb.main.k(xs: List<&2, String>, go: List<String> -> IO(Unit)) -> IO(Unit):
+  match xs:
+    case "--store-rebuild" <> +home <> _:
+      Stb.child(home)
+    case +a:
+      go(Stb.args.back(a))
+
+# the arguments, if they ask for a store build (else go on with them)
+def Stb.main(xs: List<String>, go: List<String> -> IO(Unit)) -> IO(Unit):
+  Stb.main.k(Stb.args.copy(xs), go)

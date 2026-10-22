@@ -1224,6 +1224,9 @@ auth.legacy = This device connected without its pairing key, which a later versi
 settings.textsize = Text size
 settings.textsize.note = Text and controls reflow together. Device display scaling remains separate.
 settings.privacy = Privacy
+settings.beta = Beta
+settings.uctx = Uberbot: infinite context (beta)
+settings.uctx.note = The uberbot keeps the whole conversation as a tree of summaries it can open again, and each turn starts a fresh session with it. Off by default.
 
 # Native phone controls and Mailroom.
 native.usage.machines = Usage by machine

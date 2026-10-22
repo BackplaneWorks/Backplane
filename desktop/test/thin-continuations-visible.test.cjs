@@ -6,7 +6,8 @@ const kids=n=>{const out=[];for(let xs=n?.kids;xs?.head;xs=xs.tail)out.push(xs.h
 const all=n=>[n,...kids(n).flatMap(all)];
 const attr=(n,key)=>{for(let xs=n?.attrs;xs?.head;xs=xs.tail)if(xs.head.name===key)return xs.head.value;};
 const button=id=>({...el('button',{'data-value':JSON.stringify({entryId:id,cursor:''})}),attrs:list([{$:'At',name:'data-value',value:JSON.stringify({entryId:id,cursor:''})},{$:'On',event:'click',action:'thin-message-more'}])});
-const row=id=>el('div',{'class':'msg assistant','data-id':id},[el('div',{'class':'body'},[{$:'Txt',text:'preview'}])]);
+const row=id=>el('div',{'class':'act','data-id':id},[el('div',{'class':'body'},[{$:'Txt',text:'preview'}])]);
+const msg=id=>el('div',{'class':'msg assistant','data-id':id},[el('div',{'class':'body'},[{$:'Txt',text:'whole message text'}])]);
 const timeline=xs=>el('div',{id:'timeline'},xs);
 async function setup(ids){const {ThinContinuations}=await import(process.env.CONTINUATIONS_SOURCE||'../../src/web/thin-continuations.js');const c=new ThinContinuations();c.bind('h',{epoch:'e',target:{kind:'thread',id:'t'},window:{partial:ids.map(id=>({id,version:'1'}))}});return c;}
 test('hidden partial entries produce no Additional-text disclosure or orphan footer; showing exact row restores its reader',async()=>{
@@ -19,4 +20,10 @@ test('a complete explicit reader remains plaintext inline in its exact unique ro
 });
 test('ambiguous same-ID rows and duplicate controls create no guessed reader and retain issued metadata',async()=>{
  const c=await setup(['a']),shown=c.project(timeline([row('a'),row('a'),button('a'),button('a')]),n=>n);assert.equal(kids(shown).length,2);assert(!all(shown).some(n=>n.tag==='button'||n.tag==='details'));assert.equal(c.partial.size,1);assert.equal(c.readers.size,0);
+});
+test('a message row never gets a read-more control, even when the window names it partial',async()=>{
+ const c=await setup(['m']),shown=c.project(timeline([msg('m'),button('m')]),n=>n);
+ assert(!all(shown).some(n=>n.tag==='button'));assert(!all(shown).some(n=>n.tag==='pre'));
+ assert.equal(all(shown).filter(n=>n.$==='Txt').map(n=>n.text).join(''),'whole message text');
+ const src=require('node:fs').readFileSync(require('node:path').join(__dirname,'../../src/web/thin-continuations.js'),'utf8');assert(!src.includes('Read rest of message'));
 });

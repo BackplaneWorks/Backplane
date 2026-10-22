@@ -58,7 +58,4 @@ scripts/build-browser.sh
 scripts/build-step2glb.sh
 scripts/build-voice.sh
 scripts/build-kipc.sh
-if [ "${BACKPLANE_CEF_RELEASE:-0}" = 1 ]; then
-  scripts/stage-cef-release.sh
-fi
 ls -la dist
