@@ -168,7 +168,7 @@ import ./src/core/rules.bend as RLS
 import ./src/core/tboard.bend as TBD
 import ./src/core/task.bend as TSK
 import ./src/core/teach.bend as TCH
-import ./src/core/cef.bend as CEF # browser-cef
+import ./src/core/brctl.bend as BRC # browser controls
 import ./src/mobile/bots.bend as MBT
 import ./src/core/cli.bend as CLI # one-hub
 import ./src/core/onehub.bend as OHB # one-hub
@@ -10082,278 +10082,7 @@ law window_provider_missing:
   {L.Set.cli.loc(I18.En{}, "", "codex") == "codex is not installed" : String}
 # ---- end i18n window ----
 
-# --- browser-cef ---
-# The embedded Chromium (core/cef.bend): the hub moves the helper to the CEF
-# engine only for the setting "cef", with a window's embed known and no
-# runtime failure; only this machine's window may embed; the shield is on
-# exactly while the agent drives; a page is placed natively only when no
-# overlay covers it, and only what changed is sent.
 
-law cef_engine_needs_setting:
-  for known: Bool
-  for ok: Bool
-  {CEF.Cef.engine("chrome", known, ok) == False{} : Bool}
-
-law cef_engine_needs_embed:
-  for ok: Bool
-  {CEF.Cef.engine("cef", False{}, ok) == False{} : Bool}
-
-law cef_engine_needs_runtime:
-  for known: Bool
-  {CEF.Cef.engine("cef", known, False{}) == False{} : Bool}
-
-law cef_engine_on:
-  {CEF.Cef.engine("cef", True{}, True{}) == True{} : Bool}
-
-# only the window in this process or one linked over loopback embeds
-law cef_embed_window_here:
-  {CEF.Cef.from(0, False{}) == True{} : Bool}
-
-law cef_embed_loopback_link:
-  {CEF.Cef.from(5, True{}) == True{} : Bool}
-
-law cef_embed_remote_refused:
-  {CEF.Cef.from(2147483649, False{}) == False{} : Bool}
-
-law cef_loopback_v4:
-  {CEF.Cef.loopback("127.0.0.1") == True{} : Bool}
-
-law cef_loopback_v6:
-  {CEF.Cef.loopback("::1") == True{} : Bool}
-
-law cef_tailnet_not_loopback:
-  {CEF.Cef.loopback("100.64.0.7") == False{} : Bool}
-
-# a window that leaves takes its embed with it, another's leaving does not
-law cef_leave_clears_embed:
-  {CEF.Cef.session.known(CEF.Cef.session.leave(CEF.Cef.session.embed_set(CEF.Cef.empty(), 7, 12, ":9"), 7)) == False{} : Bool}
-
-law cef_leave_other_keeps_embed:
-  {CEF.Cef.session.known(CEF.Cef.session.leave(CEF.Cef.session.embed_set(CEF.Cef.empty(), 7, 12, ":9"), 8)) == True{} : Bool}
-
-law cef_embed_bad_xid_unknown:
-  {CEF.Cef.known(0, ":9") == False{} : Bool}
-
-# the window says its X window once per connection, after the log came
-law cef_embed_once_per_join:
-  {CEF.Cef.embed.due("12", "", "o1", "#1", "#1") == False{} : Bool}
-
-law cef_embed_new_join:
-  {CEF.Cef.embed.due("12", "", "o1", "#1", "#2") == True{} : Bool}
-
-law cef_embed_not_remote:
-  {CEF.Cef.embed.due("12", "http://x:3787", "o1", "", "#2") == False{} : Bool}
-
-law cef_embed_needs_xid:
-  {CEF.Cef.embed.due("", "", "o1", "", "#2") == False{} : Bool}
-
-# the shield: on while the agent drives, off while the person holds the page
-law cef_shield_agent_drives:
-  {CEF.Cef.shield("") == True{} : Bool}
-
-law cef_shield_takeover_off:
-  {CEF.Cef.shield("takeover") == False{} : Bool}
-
-law cef_shield_teach_off:
-  {CEF.Cef.shield("teach") == False{} : Bool}
-
-law cef_shield_focus_opposite:
-  for +d: String
-  {CEF.Cef.shield.focus(d) == Bool.not(CEF.Cef.shield(d)) : Bool}
-
-# a click on the shield takes the page over only from the agent
-law cef_shield_take_from_agent:
-  {CEF.Cef.shield.take("") == True{} : Bool}
-
-law cef_shield_take_not_from_person:
-  {CEF.Cef.shield.take("takeover") == False{} : Bool}
-
-# the shield is sent again only when it changed
-law cef_shield_due_same:
-  {CEF.Cef.shield.due("1", "") == False{} : Bool}
-
-law cef_shield_due_first:
-  {CEF.Cef.shield.due("", "") == True{} : Bool}
-
-law cef_shield_due_person:
-  {CEF.Cef.shield.due("1", "takeover") == True{} : Bool}
-
-# a page is placed natively only while no overlay is over it
-law cef_covered_none:
-  {CEF.Cef.covered(False{}, False{}, False{}, False{}, False{}, False{}, False{}, False{}) == False{} : Bool}
-
-law cef_covered_palette:
-  {CEF.Cef.covered(True{}, False{}, False{}, False{}, False{}, False{}, False{}, False{}) == True{} : Bool}
-
-law cef_covered_picker:
-  {CEF.Cef.covered(False{}, True{}, False{}, False{}, False{}, False{}, False{}, False{}) == True{} : Bool}
-
-law cef_covered_menu:
-  {CEF.Cef.covered(False{}, False{}, True{}, False{}, False{}, False{}, False{}, False{}) == True{} : Bool}
-
-law cef_covered_look:
-  {CEF.Cef.covered(False{}, False{}, False{}, True{}, False{}, False{}, False{}, False{}) == True{} : Bool}
-
-law cef_covered_models:
-  {CEF.Cef.covered(False{}, False{}, False{}, False{}, True{}, False{}, False{}, False{}) == True{} : Bool}
-
-law cef_covered_tour:
-  {CEF.Cef.covered(False{}, False{}, False{}, False{}, False{}, True{}, False{}, False{}) == True{} : Bool}
-
-law cef_covered_perf:
-  {CEF.Cef.covered(False{}, False{}, False{}, False{}, False{}, False{}, True{}, False{}) == True{} : Bool}
-
-law cef_covered_lightbox:
-  {CEF.Cef.covered(False{}, False{}, False{}, False{}, False{}, False{}, False{}, True{}) == True{} : Bool}
-
-law cef_shows_needs_live:
-  for covered: Bool
-  {CEF.Cef.shows(False{}, covered) == False{} : Bool}
-
-law cef_shows_not_covered:
-  {CEF.Cef.shows(True{}, True{}) == False{} : Bool}
-
-# placement: nothing is sent while the frame leaves what was sent; a new
-# rectangle is placed; none where one was hides
-law cef_place_same_nothing:
-  {CEF.Cef.place.step("t1 0 52 600 400", "t1 0 52 600 400") == 0n : Nat}
-
-law cef_place_hidden_nothing:
-  {CEF.Cef.place.step("", "") == 0n : Nat}
-
-law cef_place_new_shows:
-  {CEF.Cef.place.step("", "t1 0 52 600 400") == 1n : Nat}
-
-law cef_place_moved_shows:
-  {CEF.Cef.place.step("t1 0 52 600 400", "t1 0 52 700 400") == 1n : Nat}
-
-law cef_place_gone_hides:
-  {CEF.Cef.place.step("t1 0 52 600 400", "") == 2n : Nat}
-
-# out of cef mode the window sends nothing: it forgets a place once
-law cef_post_chrome_idle:
-  {CEF.Cef.post.step(False{}, "", "") == 0n : Nat}
-
-law cef_post_chrome_forgets:
-  {CEF.Cef.post.step(False{}, "t1 0 52 600 400", "") == 3n : Nat}
-
-law cef_post_native_places:
-  {CEF.Cef.post.step(True{}, "", "t1 0 52 600 400") == 1n : Nat}
-
-# a hit's corners become the pane's extent
-law cef_pane_extent:
-  {CEF.Cef.extent(832, 1400) == 568 : U32}
-
-law cef_extent_never_wraps:
-  {CEF.Cef.extent(900, 96) == 0 : U32}
-
-# a window on another machine's hub never shows pages natively
-law cef_native_local_only:
-  {CEF.Cef.native("cef", "http://x:3787") == False{} : Bool}
-
-law cef_native_local_cef:
-  {CEF.Cef.native("cef", "") == True{} : Bool}
-
-law cef_native_chrome:
-  {CEF.Cef.native("chrome", "") == False{} : Bool}
-
-# only the native local viewer stops the JPEG cast; others keep it
-law cef_native_skips_cast:
-  {CEF.Cef.cast(True{}, "cef", "") == False{} : Bool}
-
-law cef_web_keeps_cast:
-  {CEF.Cef.cast(False{}, "cef", "") == True{} : Bool}
-
-law cef_remote_keeps_cast:
-  {CEF.Cef.cast(True{}, "cef", "http://other") == True{} : Bool}
-
-law cef_page_here_native:
-  {CEF.Cef.page_local("t1") == True{} : Bool}
-
-law cef_page_elsewhere_jpeg:
-  {CEF.Cef.page_local("peer~t1") == False{} : Bool}
-
-# a fallback to chrome still lets the person hand a held page back
-law cef_fallback_keeps_handback:
-  {CEF.Cef.strip_on("chrome", "takeover") == True{} : Bool}
-
-law cef_chrome_idle_strip_off:
-  {CEF.Cef.strip_on("chrome", "") == False{} : Bool}
-
-# the settings row's note is only the reason Embedded cannot run
-law cef_note_quiet:
-  {CEF.Cef.note("") == "" : String}
-
-# engine replies: only the newest request's counts
-law cef_old_engine_reply_ignored:
-  {CEF.Cef.current(CEF.Cef.session.request_set(CEF.Cef.session.request_set(CEF.Cef.empty(), "cef 1 :9"), "chrome"), "1") == False{} : Bool}
-
-law cef_current_engine_reply_used:
-  {CEF.Cef.current(CEF.Cef.session.request_set(CEF.Cef.session.request_set(CEF.Cef.empty(), "cef 1 :9"), "chrome"), "2") == True{} : Bool}
-
-# the engine is compared as a short key: the same embed asks nothing again
-law cef_want_key_chrome:
-  for x: U32
-  for +d: String
-  {CEF.Cef.want.key(False{}, x, d) == "chrome" : String}
-
-# the hub reconsiders the engine after requests, leaves, engine answers and
-# helper events, never after an agent's streamed line
-law cef_after_rpc:
-  {CEF.Cef.after("rpc") == True{} : Bool}
-
-law cef_after_helper:
-  {CEF.Cef.after("browser_ev") == True{} : Bool}
-
-law cef_not_after_agent_line:
-  {CEF.Cef.after("agent_line") == False{} : Bool}
-
-# a helper restart re-shows the page a few times at most
-law cef_revive_first:
-  {CEF.Cef.revive(True{}, True{}, 0n) == True{} : Bool}
-
-law cef_revive_bounded:
-  {CEF.Cef.revive(True{}, True{}, 3n) == False{} : Bool}
-
-law cef_revive_not_chrome:
-  for placed: Bool
-  {CEF.Cef.revive(False{}, placed, 0n) == False{} : Bool}
-
-# page ids: an unknown one is refused, a thread's or bot's accepted
-law cef_unknown_refused:
-  {CEF.Cef.owner("unknown", False{}, False{}) == False{} : Bool}
-
-law cef_thread_owner:
-  {CEF.Cef.owner("t1", True{}, False{}) == True{} : Bool}
-
-law cef_empty_owner_refused:
-  for t: Bool
-  for b: Bool
-  {CEF.Cef.owner("", t, b) == False{} : Bool}
-
-# take over and hand back act on the page their value names (a thread's
-# page: its Browser pane's strip); without one, on the bot whose tab is open
-law cef_handback_names_page:
-  {U.Teach.target(7n, "b1", "t9") == "t9" : String}
-
-law cef_handback_default_bot:
-  {U.Teach.target(7n, "b1", "") == "b1" : String}
-
-law cef_takeover_names_page:
-  {U.Teach.target(6n, "b1", "t9") == "t9" : String}
-
-law cef_other_actions_keep_bot:
-  {U.Teach.target(11n, "b1", "t9") == "b1" : String}
-# --- end browser-cef ---
-
-# --- browser-cef local window guard ---
-law cef_web_origin_refused:
-  for proxy: String
-  {CEF.Cef.link(proxy, "http://localhost") == False{} : Bool}
-
-law cef_native_link_allowed:
-  {CEF.Cef.link("", "") == True{} : Bool}
-# --- end browser-cef local window guard ---
 # ---- mail perf ----
 
 # Credit travels with the message, independently of its encoding and size.
@@ -10749,26 +10478,7 @@ law viewer_reopen_schematic_keeps_scene:
   {N.Vw.kind_set(N.Vw.board.k(False{}, N.Vw.kind_set.k(True{}, V.Vw.init(), 1, "/p/a.kicad_sch"), "1|/p|/p/a.kicad_sch", items, now), 1, "/p/a.kicad_sch") ==
    N.Vw.board.k(False{}, N.Vw.kind_set.k(True{}, V.Vw.init(), 1, "/p/a.kicad_sch"), "1|/p|/p/a.kicad_sch", items, now) : V.Vw}
 
-# --- browser-cef default (October19) ---
-law cef_default_request:
-  {CEF.Cef.default() == "cef" : String}
-law cef_unset_request:
-  {CEF.Cef.requested("") == CEF.Cef.default() : String}
-law cef_explicit_chrome_request:
-  {CEF.Cef.requested("chrome") == "chrome" : String}
-law cef_explicit_cef_request:
-  {CEF.Cef.requested("cef") == "cef" : String}
-# --- end browser-cef default ---
 
-# --- browser-cef fallback (October19) ---
-law cef_unavailable_default_is_explained:
-  {CEF.Cef.reason("cef", "chrome", "") == "native Linux X11 window/runtime is not active" : String}
-law cef_explicit_chrome_has_no_warning:
-  {CEF.Cef.reason("chrome", "chrome", "") == "" : String}
-law cef_fallback_keeps_error:
-  for +err: String
-  {CEF.Cef.reason("cef", "chrome", err) == Bool.pick(String, String.is_empty(err), "native Linux X11 window/runtime is not active", err) : String}
-# --- end browser-cef fallback ---
 
 # Mailroom runs select a model for the provider they actually inherit.
 law run_model_codex_unset_inherits:
@@ -10881,20 +10591,20 @@ law tm_cached_uber_step_kept:
   {U.Tour.legacy("9", OBD.Ob.share()) == OBD.Ob.uber() : Nat}
 law tm_marked_usage_step_kept:
   {U.Tour.legacy("s9", OBD.Ob.share()) == OBD.Ob.share() : Nat}
-# --- browser controls (CEF owner) ---
+# --- browser controls ---
 law browser_url_hostname:
-  {CEF.Cef.url("example.com") == "https://example.com" : String}
+  {BRC.Brc.url("example.com") == "https://example.com" : String}
 law browser_url_localhost:
-  {CEF.Cef.url("localhost:3787/path") == "http://localhost:3787/path" : String}
+  {BRC.Brc.url("localhost:3787/path") == "http://localhost:3787/path" : String}
 law browser_url_explicit:
   for +path: String
-  {CEF.Cef.url.explicit(True{}, path) == path : String}
+  {BRC.Brc.url.explicit(True{}, path) == path : String}
 law browser_url_no_script:
-  {CEF.Cef.url("javascript:alert(1)") == "" : String}
+  {BRC.Brc.url("javascript:alert(1)") == "" : String}
 law browser_toolbar_no_eval:
-  {CEF.Cef.toolbar.allowed("evaluate") == False{} : Bool}
+  {BRC.Brc.toolbar.allowed("evaluate") == False{} : Bool}
 law browser_toolbar_tabs_allowed:
-  {CEF.Cef.toolbar.allowed("tabs") == True{} : Bool}
+  {BRC.Brc.toolbar.allowed("tabs") == True{} : Bool}
 # --- end browser controls ---
 # Schematic refresh compares revisions even when size is unchanged.
 law refresh_revision_changed:
@@ -10907,16 +10617,6 @@ law refresh_size_changed:
 
 law refresh_unchanged_quiet:
   {RFSH.Revision.decide(False{}, True{}) == False{} : Bool}
-# --- browser-cef release archive (October19) ---
-law cef_release_uses_paired_archive:
-  {CEF.Cef.archive("linux-x64") == "linux-x64-cef.tar.gz" : String}
-law cef_release_arm_archive_unchanged:
-  {CEF.Cef.archive("linux-arm64") == "linux-arm64.tar.gz" : String}
-law cef_release_mac_archive_unchanged:
-  {CEF.Cef.archive("darwin-arm64") == "darwin-arm64.tar.gz" : String}
-law cef_release_old_updater_cannot_match:
-  {String.ends_with("backplane-v1-linux-x64-cef.tar.gz", "linux-x64.tar.gz") == False{} : Bool}
-# --- end browser-cef release archive ---
 
 law ix_rename_global_invalidation_retained:
   for id: String
@@ -11316,3 +11016,48 @@ law sdb_eq_fold_small:
 law sdb_entries_mine_small:
   {SDB.Tab.mine(SDB.Mat.facts(SDB.Mat.replay(SDB.Demo.small.log(), SDB.Mat.empty())), "t1") == M.State.mine(M.State.replay(SDB.Demo.small(), M.State.empty()), "t1") : List<&2, M.Entry>}
 # ---- end S1 indexed store ----
+
+# ---- browser pages and loopback (J3) ----
+# page ids: an unknown one is refused, a thread's or bot's accepted
+law browser_owner_unknown_refused:
+  {BRC.Brc.owner("unknown", False{}, False{}) == False{} : Bool}
+
+law browser_owner_thread:
+  {BRC.Brc.owner("t1", True{}, False{}) == True{} : Bool}
+
+law browser_owner_empty_refused:
+  for t: Bool
+  for b: Bool
+  {BRC.Brc.owner("", t, b) == False{} : Bool}
+
+# the strip shows while the person holds the page, so they can hand it back
+law browser_strip_person_holds:
+  {BRC.Brc.strip_on("takeover") == True{} : Bool}
+
+law browser_strip_agent_off:
+  {BRC.Brc.strip_on("") == False{} : Bool}
+
+# take over and hand back act on the page their value names (a thread's
+# page: its Browser pane's strip); without one, on the bot whose tab is open
+law teach_handback_names_page:
+  {U.Teach.target(7n, "b1", "t9") == "t9" : String}
+
+law teach_handback_default_bot:
+  {U.Teach.target(7n, "b1", "") == "b1" : String}
+
+law teach_takeover_names_page:
+  {U.Teach.target(6n, "b1", "t9") == "t9" : String}
+
+law teach_other_actions_keep_bot:
+  {U.Teach.target(11n, "b1", "t9") == "b1" : String}
+
+# a peer address on this machine (the hub's loopback trust)
+law auth_loopback_v4:
+  {AUTH.Auth.loopback("127.0.0.1") == True{} : Bool}
+
+law auth_loopback_v6:
+  {AUTH.Auth.loopback("::1") == True{} : Bool}
+
+law auth_tailnet_not_loopback:
+  {AUTH.Auth.loopback("100.64.0.7") == False{} : Bool}
+# ---- end browser pages and loopback ----
