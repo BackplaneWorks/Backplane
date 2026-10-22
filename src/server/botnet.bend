@@ -853,14 +853,14 @@ def Bn.models.text(b: Bn) -> String:
 def Bn.models.json(+b: Bn, +text: String) -> J.Json & Bn:
   Bn.models.json.k(String.eq(Bn.models.text(b), text), b, text)
 
+def Bn.models.again.fst(r: J.Json & Bn) -> J.Json:
+  (j, _) = r
+  j
+
 # the models' JSON for a text asked twice: the second answer is the kept one
 def Bn.models.again.k(r: J.Json & Bn, +text: String) -> J.Json:
   (_, b) = r
   Bn.models.again.fst(Bn.models.json(b, text))
-
-def Bn.models.again.fst(r: J.Json & Bn) -> J.Json:
-  (j, _) = r
-  j
 
 def Bn.models.again(+text: String) -> J.Json:
   Bn.models.again.k(Bn.models.json(Bn.empty(), text), text)
