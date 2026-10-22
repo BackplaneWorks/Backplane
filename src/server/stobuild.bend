@@ -546,25 +546,27 @@ def Stb.record.add(+h: String, +item: List<&2, String>, b: RecordBatch) -> IO(Re
 
 # Structural traversal: each subtree is consumed, and each row is encoded
 # only when reached. The IO continuation keeps the remaining subtree,
-# not a pre-serialized copy of the domain.
-def Stb.record.tree(-V: Data, m: Map<&2, V>, +h: String, +row: String -> V -> SDB.Op, b: RecordBatch) -> IO(RecordBatch):
+# not a pre-serialized copy of the domain. Like Base List.map/filter,
+# row is a closed template; reusable captured data is an explicit context,
+# never a runtime function marked +. All template arguments precede values.
+def Stb.record.tree(~V: Data, ~Ctx: Data, ~row: Ctx -> String -> V -> SDB.Op, m: Map<&2, V>, +h: String, +ctx: Ctx, b: RecordBatch) -> IO(RecordBatch):
   match m:
     case MTip{}:
       IO.pure(RecordBatch, b)
     case MLeaf{k, v}:
-      Stb.record.add(h, SDB.Sql.of(row(k, v)), b)
+      Stb.record.add(h, SDB.Sql.of(row(ctx, k, v)), b)
     case MNode{_, lo, hi}:
-      IO.bind(RecordBatch, RecordBatch, Stb.record.tree(V, lo, h, row, b), b2 => Stb.record.tree(V, hi, h, row, b2))
+      IO.bind(RecordBatch, RecordBatch, Stb.record.tree(~V, ~Ctx, ~row, lo, h, ctx, b), b2 => Stb.record.tree(~V, ~Ctx, ~row, hi, h, ctx, b2))
 
 def Stb.record.end(+h: String, b: RecordBatch) -> IO(Unit):
   do IO<Unit>:
     rest : RecordBatch <- Stb.record.flush(h, b)
     return Unit{}
 
-def Stb.domain(-V: Data, +name: String, m: Map<&2, V>, +h: String, +row: String -> V -> SDB.Op) -> IO(Unit):
+def Stb.domain(~V: Data, ~Ctx: Data, ~row: Ctx -> String -> V -> SDB.Op, +name: String, m: Map<&2, V>, +h: String, +ctx: Ctx) -> IO(Unit):
   do IO<Unit>:
     IO.print("store-rebuild records " ++ name ++ " start")
-    IO.bind(RecordBatch, Unit, Stb.record.tree(V, m, h, row, RecordBatch{Nil{}, 0n, 0n}), b => Stb.record.end(h, b))
+    IO.bind(RecordBatch, Unit, Stb.record.tree(~V, ~Ctx, ~row, m, h, ctx, RecordBatch{Nil{}, 0n, 0n}), b => Stb.record.end(h, b))
     IO.print("store-rebuild records " ++ name ++ " done")
 
 # After replay, dedup IDs, order/count/live indexes are no longer needed
@@ -575,29 +577,29 @@ def Stb.mail.records(b: ML.Box, +h: String) -> IO(Unit):
     case ML.Box{cs, ms, marks, _, _, _, origins, runs, _, _, charters, decisions, _, names, _}:
       +heads = ML.Box.with_mails(ML.Box.empty(), ms)
       do IO<Unit>:
-        Stb.domain(ML.Conv, "conv", cs, h, k => v => SDB.Row.conv(heads, v))
-        Stb.domain(ML.Mark, "mark", marks, h, k => v => SDB.Row.mark(k, v))
-        Stb.domain(ML.Run, "run", runs, h, k => v => SDB.Row.run(v))
-        Stb.domain(ML.Origin, "origin", origins, h, k => v => SDB.Row.origin(k, v))
-        Stb.domain(String, "charter", charters, h, k => v => SDB.Row.obj("charter", k, J.Str{v}))
-        Stb.domain(List<&2, ML.Decision>, "decision", decisions, h, k => v => SDB.Row.obj("decision", k, J.Json.arr(SDB.Row.decisions.js(v, Nil{}))))
-        Stb.domain(String, "mailname", names, h, k => v => SDB.Row.obj("mailname", k, J.Str{v}))
+        Stb.domain(~ML.Conv, ~ML.Box, ~(ctx => k => v => SDB.Row.conv(ctx, v)), "conv", cs, h, heads)
+        Stb.domain(~ML.Mark, ~Unit, ~(ctx => k => v => SDB.Row.mark(k, v)), "mark", marks, h, Unit{})
+        Stb.domain(~ML.Run, ~Unit, ~(ctx => k => v => SDB.Row.run(v)), "run", runs, h, Unit{})
+        Stb.domain(~ML.Origin, ~Unit, ~(ctx => k => v => SDB.Row.origin(k, v)), "origin", origins, h, Unit{})
+        Stb.domain(~String, ~Unit, ~(ctx => k => v => SDB.Row.obj("charter", k, J.Str{v})), "charter", charters, h, Unit{})
+        Stb.domain(~List<&2, ML.Decision>, ~Unit, ~(ctx => k => v => SDB.Row.obj("decision", k, J.Json.arr(SDB.Row.decisions.js(v, Nil{})))), "decision", decisions, h, Unit{})
+        Stb.domain(~String, ~Unit, ~(ctx => k => v => SDB.Row.obj("mailname", k, J.Str{v})), "mailname", names, h, Unit{})
 
 def Stb.world.records(w: BT.World, +h: String) -> IO(Unit):
   match w:
     case BT.World{bs, rs, _, hs, ro, ms, pe, sp, ho, ta, pg, tk}:
       do IO<Unit>:
-        Stb.domain(BT.Bot, "bot", bs, h, k => v => SDB.Row.bot(v))
-        Stb.domain(BT.Room, "room", rs, h, k => v => SDB.Row.room(v))
-        Stb.domain(BT.Routine, "routine", ro, h, k => v => SDB.Row.routine(v))
-        Stb.domain(BT.Hook, "hook", hs, h, k => v => SDB.Row.hook(v))
-        Stb.domain(BT.Mem, "mem", ms, h, k => v => SDB.Row.mem(k, v))
-        Stb.domain(BT.Peer, "peer", pe, h, k => v => SDB.Row.peer(v))
-        Stb.domain(String, "space", sp, h, k => v => SDB.Row.obj("space", k, J.Str{v}))
-        Stb.domain(BT.Page, "page", pg, h, k => v => SDB.Row.page(k, v))
-        Stb.domain(String, "skill", tk, h, k => v => SDB.Row.obj("skill", k, J.Str{v}))
-        Stb.domain(BT.Hops, "hops", ho, h, k => v => SDB.Row.hops(k, v))
-        Stb.domain(Nat, "talk", ta, h, k => v => SDB.Row.obj("talk", k, C.Codec.nat(v)))
+        Stb.domain(~BT.Bot, ~Unit, ~(ctx => k => v => SDB.Row.bot(v)), "bot", bs, h, Unit{})
+        Stb.domain(~BT.Room, ~Unit, ~(ctx => k => v => SDB.Row.room(v)), "room", rs, h, Unit{})
+        Stb.domain(~BT.Routine, ~Unit, ~(ctx => k => v => SDB.Row.routine(v)), "routine", ro, h, Unit{})
+        Stb.domain(~BT.Hook, ~Unit, ~(ctx => k => v => SDB.Row.hook(v)), "hook", hs, h, Unit{})
+        Stb.domain(~BT.Mem, ~Unit, ~(ctx => k => v => SDB.Row.mem(k, v)), "mem", ms, h, Unit{})
+        Stb.domain(~BT.Peer, ~Unit, ~(ctx => k => v => SDB.Row.peer(v)), "peer", pe, h, Unit{})
+        Stb.domain(~String, ~Unit, ~(ctx => k => v => SDB.Row.obj("space", k, J.Str{v})), "space", sp, h, Unit{})
+        Stb.domain(~BT.Page, ~Unit, ~(ctx => k => v => SDB.Row.page(k, v)), "page", pg, h, Unit{})
+        Stb.domain(~String, ~Unit, ~(ctx => k => v => SDB.Row.obj("skill", k, J.Str{v})), "skill", tk, h, Unit{})
+        Stb.domain(~BT.Hops, ~Unit, ~(ctx => k => v => SDB.Row.hops(k, v)), "hops", ho, h, Unit{})
+        Stb.domain(~Nat, ~Unit, ~(ctx => k => v => SDB.Row.obj("talk", k, C.Codec.nat(v))), "talk", ta, h, Unit{})
 
 def Stb.ext.records(x: M.Ext, +h: String) -> IO(Unit):
   match x:
@@ -612,14 +614,14 @@ def Stb.records(st: M.State, +h: String) -> IO(Unit):
   match st:
     case M.State{ps, ts, _, n, tk, sg, qu, ak, dv, nv, bw}:
       do IO<Unit>:
-        Stb.domain(M.Project, "project", ps, h, k => v => SDB.Row.project(v))
-        Stb.domain(M.Thread, "thread", ts, h, k => v => SDB.Row.thread(v))
-        Stb.domain(M.Task, "task", tk, h, k => v => SDB.Row.task(v))
-        Stb.domain(M.Ask, "ask", ak, h, k => v => SDB.Row.ask(v))
-        Stb.domain(List<&2, M.QItem>, "queue", qu, h, k => v => SDB.Row.queue(k, v))
-        Stb.domain(String, "setting", sg, h, k => v => SDB.Row.set(k, v))
-        Stb.domain(M.Device, "device", dv, h, k => v => SDB.Row.device(v))
-        Stb.domain(M.Nav, "nav", nv, h, k => v => SDB.Row.nav(k, v))
+        Stb.domain(~M.Project, ~Unit, ~(ctx => k => v => SDB.Row.project(v)), "project", ps, h, Unit{})
+        Stb.domain(~M.Thread, ~Unit, ~(ctx => k => v => SDB.Row.thread(v)), "thread", ts, h, Unit{})
+        Stb.domain(~M.Task, ~Unit, ~(ctx => k => v => SDB.Row.task(v)), "task", tk, h, Unit{})
+        Stb.domain(~M.Ask, ~Unit, ~(ctx => k => v => SDB.Row.ask(v)), "ask", ak, h, Unit{})
+        Stb.domain(~List<&2, M.QItem>, ~Unit, ~(ctx => k => v => SDB.Row.queue(k, v)), "queue", qu, h, Unit{})
+        Stb.domain(~String, ~Unit, ~(ctx => k => v => SDB.Row.set(k, v)), "setting", sg, h, Unit{})
+        Stb.domain(~M.Device, ~Unit, ~(ctx => k => v => SDB.Row.device(v)), "device", dv, h, Unit{})
+        Stb.domain(~M.Nav, ~Unit, ~(ctx => k => v => SDB.Row.nav(k, v)), "nav", nv, h, Unit{})
         Stb.ext.records(M.Ext.of(bw), h)
         res : String <- D.Db.script(h, [SDB.Sql.of(SDB.Row.obj("state", "seq", C.Codec.nat(n)))])
         Stb.check("state sequence", res)
