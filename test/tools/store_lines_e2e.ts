@@ -96,6 +96,27 @@ const same = (a: any[], b: any[]) => JSON.stringify(a) === JSON.stringify(b);
 try {
   await start();
   check(statSync(join(home, "store.db")).ino === ino0, "the streaming build's store.db was kept (no rebuild)");
+  // the streaming build wrote no far_line: the hub back-fills it after it
+  // listens (SO.Sto.far.fill) and marks it filled; the thread's lines are
+  // under its project
+  {
+    const { Database } = await import("bun:sqlite");
+    let filled = "";
+    for (let i = 0; i < 100 && filled !== "filled"; i++) {
+      await sleep(100);
+      const db = new Database(join(home, "store.db"), { readonly: true });
+      filled = ((db.query("SELECT v FROM meta WHERE k = 'far_line'").get() as any)?.v) ?? "";
+      db.close();
+    }
+    check(filled === "filled", `far_line back-filled (${filled})`);
+    const db = new Database(join(home, "store.db"), { readonly: true });
+    const rows = db.query("SELECT seq, scope FROM far_line ORDER BY seq").all() as { seq: number; scope: string }[];
+    db.close();
+    const ls = readFileSync(log, "utf8").split("\n").filter((l) => { try { JSON.parse(l); return true; } catch { return false; } }).map((l) => JSON.parse(l));
+    const at = (pred: (o: any) => boolean) => ls.findIndex(pred) + 1;
+    const tc = at((o) => o.$ === "ThreadCreated"), m1 = at((o) => o.$ === "MessagePosted" && o.msg === "m1");
+    check(rows.some((r) => r.seq === tc && r.scope === "p1") && rows.some((r) => r.seq === m1 && r.scope === "p1"), `far_line rows for the thread's lines under its project (${JSON.stringify(rows.slice(0, 8))})`);
+  }
   let j = await join_("?since=0&origin=");
   // the hub commits lines of its own at start: what the log holds now
   let want = expected();

@@ -16125,4 +16125,7 @@ def Main.boot(cfg: Cfg, need: Bool, front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
         # the thin views read store.db once it is open and written on every
         # commit (Thin.store.open: the index keeps only recent threads)
         cfg2 : Cfg <- Thin.store.if(String.is_empty(SO.Lg.db(ls)), Cfg.with_thin_cache(cfg1, ThinCache{ti, org, 1n, Map.new(&2, TLIVE.Stream), tmc, Nil{}, TPACE.Notes.empty(), ""}), st, SO.Lg.db(ls))
+        # far_line for the log's older lines, in the background once the
+        # hub listens (SO.Sto.far.fill: nothing when meta far_line is filled)
+        IO.spawn(Unit, SO.Sto.far.fill(ls, st))
         Main.opened(f, st, ls, cfg2, need, front, t8)
