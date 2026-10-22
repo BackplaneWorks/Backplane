@@ -3,6 +3,7 @@ import ../src/core/vt.bend as V
 import ../src/core/utf8.bend as U
 import ../src/server/host.bend as H
 import ../src/server/pty.bend as P
+import ../src/server/jsloop.bend as LP
 
 # Real shells on a real pty under the JS runtime (pty.js, host.js's
 # recv/send fallback and Proc.wait), read into the emulator. Prints ok /
@@ -396,6 +397,9 @@ def done(+n: U32) -> IO(Unit):
 
 def main() -> IO(Unit):
   do IO<Unit>:
+    # the runtime's loop (loop.js) is part of the program, as in the hub:
+    # on Windows nothing spawns without it
+    rt : String <- LP.Rt.loop()
     a : U32 <- IO.bind(Result<&1, &1, U32 & String, U32 & Socket>, U32, P.Pty.spawn("sh", [], "", 80, 24), case.shell)
     b : U32 <- IO.bind(Result<&1, &1, U32 & String, U32 & Socket>, U32, P.Pty.spawn("sh", ["-c", "stty size; read x; stty size"], "", 80, 24), case.size)
     c : U32 <- IO.bind(Result<&1, &1, U32 & String, U32 & Socket>, U32, P.Pty.spawn("sh", ["-c", "echo $TERM; echo $COLORTERM; echo $LINES$COLUMNS; pwd; [ -t 0 ] && printf tty; : </dev/tty && echo ' ctty'; echo $(ls /dev/fd/)"], "/tmp", 80, 24), case.env)

@@ -16,9 +16,9 @@ import ./db.bend as D
 # entries (Stb.strip after every chunk): the one step that reads them,
 # ProviderSet's Switch.count, is given a counter of each thread's own
 # entries instead (M.State.switch.c). After the last line every record of
-# the final state is written (SDB.Dump.ops), with the counters as
-# obj('count', <thread>, n) and the meta rows. Numbering is SDB.Mat.step's:
-# a line that is not JSON takes its bytes but no number, a line no change
+# the final state is written (SDB.Dump.ops) with the meta rows; the
+# counters are not (nothing would keep them current on commit). Numbering
+# is SDB.Mat.step's: a line that is not JSON takes its bytes but no number, a line no change
 # decodes from gets a line row (wire "") and is not folded; a trailing
 # fragment with no newline is left for the hub (it never reads one either).
 
@@ -154,10 +154,44 @@ def Stb.change(m: Maybe<&2, M.Change>, +st: M.State, +cnt: Map<&2, Nat>, +seq: N
     case None{}:
       Acc{st, cnt, seq, Nat.add(off, 1n+len), ord, Stb.sqls([SDB.F.line(SDB.At{seq, off, len, ord}, "")], items), id, origin}
 
+# Flat strings
+# ------------
+# In the JS build a String grown a char at a time (the JSON lexer's
+# accumulator, then String.reverse) is a rope: one JS string cell per
+# character until something reads it. A setting's value, a thread's title,
+# a mail header are kept in the state and never read here, so every one
+# stayed a rope: 28 million string cells (1 GB of heap, 3 GB of RSS) by the
+# log's 160th MB, OOM-killed under 3 GB. Matching a String reads its first
+# character, which makes JSC flatten the rope in place; so each line's
+# strings are read once before the change is decoded from them.
+
+# a String read once (flattened), the same text
+def Stb.str(s: String) -> String:
+  match s:
+    case SNil{}:
+      SNil{}
+    case SCon{c, t}:
+      SCon{c, t}
+
+def Stb.flat(j: J.Json) -> J.Json:
+  match j:
+    case J.Str{t}:
+      J.Str{Stb.str(t)}
+    case J.Arr{xs}:
+      J.Arr{Stb.flat(xs)}
+    case J.Obj{fs}:
+      J.Obj{Stb.flat(fs)}
+    case J.Item{h, t}:
+      J.Item{Stb.flat(h), Stb.flat(t)}
+    case J.Field{k, v, t}:
+      J.Field{Stb.str(k), Stb.flat(v), Stb.flat(t)}
+    case other:
+      other
+
 def Stb.parsed(m: Maybe<&2, J.Json>, st: M.State, cnt: Map<&2, Nat>, +seq: Nat, +off: Nat, +len: Nat, ord: Nat, items: List<&2, List<&2, String>>, id: String, origin: String) -> Acc:
   match m:
     case Some{+o}:
-      Stb.change(C.Change.decode(o), st, cnt, 1n+seq, off, len, ord, items, id, Stb.origin(seq, o, origin))
+      Stb.change(C.Change.decode(Stb.flat(o)), st, cnt, 1n+seq, off, len, ord, items, id, Stb.origin(seq, o, origin))
     case None{}:
       Acc{st, cnt, seq, Nat.add(off, 1n+len), ord, items, id, origin}
 
@@ -186,15 +220,8 @@ def Acc.off(a: Acc) -> Nat:
     case Acc{_, _, _, off, _, _, _, _}:
       off
 
-# The end: every record, the counters and meta
+# The end: every record and meta
 # --------------------------------------------
-
-def Stb.counts(xs: List<&2, Sigma<&2, &2, String, _ => Nat>>) -> List<&2, SDB.Op>:
-  match xs:
-    case Nil{}:
-      Nil{}
-    case (k, n) <> t:
-      SDB.Put{"obj", ["count", k, Nat.show(n)]} <> Stb.counts(t)
 
 def Stb.meta.sql(+k: String, v: String) -> List<&2, String>:
   ["INSERT OR REPLACE INTO meta(k, v) VALUES (?, ?)", k, v]
@@ -202,8 +229,8 @@ def Stb.meta.sql(+k: String, v: String) -> List<&2, String>:
 # the statements written after the last line
 def Stb.end(a: Acc) -> List<&2, List<&2, String>>:
   match a:
-    case Acc{+st, cnt, +seq, +off, +ord, _, id, origin}:
-      List.append(&2, List<&2, String>, List.reverse(&2, List<&2, String>, Stb.sqls(Stb.counts(Map.to_list(&2, Nat, cnt)), Stb.sqls(SDB.Dump.ops(st), Nil{}))), [
+    case Acc{+st, _, +seq, +off, +ord, _, id, origin}:
+      List.append(&2, List<&2, String>, List.reverse(&2, List<&2, String>, Stb.sqls(SDB.Dump.ops(st), Nil{})), [
         Stb.meta.sql("schema", "1"),
         Stb.meta.sql("codec", Nat.show(SDB.Sdb.codec())),
         Stb.meta.sql("applied_seq", Nat.show(seq)),
@@ -221,6 +248,11 @@ def Acc.ord(a: Acc) -> Nat:
   match a:
     case Acc{_, _, _, _, ord, _, _, _}:
       ord
+
+def Acc.cnt(a: Acc) -> Map<&2, Nat>:
+  match a:
+    case Acc{_, cnt, _, _, _, _, _, _}:
+      cnt
 
 def Acc.st(a: Acc) -> M.State:
   match a:

@@ -13,7 +13,8 @@ import ../src/server/stobuild.bend as B
 # line, a newer hub's line, a long line, a trailing fragment), built with
 # a tiny chunk (most lines outgrow it) and again with a big one; the
 # tables must equal the pure store: facts as SDB.Mat.replay files them,
-# records as SDB.Tab.dump of the fold, the counters Switch.count.
+# records as SDB.Tab.dump of the fold (no counter rows), the in-memory
+# counters Switch.count.
 
 # the log's lines (without newlines), oldest first
 def Log.tail() -> List<&2, M.Change>:
@@ -164,15 +165,27 @@ def built(b: B.Built) -> String:
 def bytes(+s: String) -> Nat:
   List.length(&2, U32, U.Utf8.encode(s))
 
+# the build's lines, as it cuts them
+def Lns.of(ls: List<&2, String>) -> List<&2, B.Ln>:
+  match ls:
+    case Nil{}:
+      Nil{}
+    case +l <> t:
+      B.Ln{bytes(l), l} <> Lns.of(t)
+
+# the counters after every line: Switch.count of the fold, thread by thread
+def counters() -> String:
+  +c : Map<&2, Nat> = B.Acc.cnt(B.Stb.lines(Lns.of(Log.lines()), B.Acc.new("")))
+  Nat.show(B.Stb.count(c, "t1")) ++ " " ++ Nat.show(B.Stb.count(c, "t2"))
+
 def check(+name: String, +h: String) -> IO(Unit):
   do IO<Unit>:
     fs : Map<&2, String> <- Db.tables(facts(), h, "", Map.new(&2, String))
     C.Check.str(name ++ ": facts equal the pure store's", Db.show(fs), Pure.of(S.Mat.facts(mat())))
-    rs : Map<&2, String> <- Db.tables(recs(), h, " WHERE domain <> 'count'", Map.new(&2, String))
+    rs : Map<&2, String> <- Db.tables(recs(), h, "", Map.new(&2, String))
     C.Check.str(name ++ ": records equal the fold's dump", Db.show(rs), Pure.of(S.Tab.dump(fold())))
-    c1 : List<&2, List<&2, String>> <- D.Db.query(h, "SELECT json FROM obj WHERE domain = 'count' AND key = 't1'", [], 1)
-    c2 : List<&2, List<&2, String>> <- D.Db.query(h, "SELECT json FROM obj WHERE domain = 'count' AND key = 't2'", [], 1)
-    C.Check.str(name ++ ": counters are Switch.count", one(c1) ++ " " ++ one(c2), Nat.show(M.Switch.count(fold(), "t1")) ++ " " ++ Nat.show(M.Switch.count(fold(), "t2")))
+    c0 : List<&2, List<&2, String>> <- D.Db.query(h, "SELECT count(*) FROM obj WHERE domain = 'count'", [], 1)
+    C.Check.str(name ++ ": no counter rows", one(c0), "0")
     mt : List<&2, List<&2, String>> <- D.Db.query(h, "SELECT group_concat(k || '=' || v, ' ') FROM (SELECT k, v FROM meta WHERE k <> 'log_id' ORDER BY k)", [], 1)
     C.Check.str(name ++ ": meta", one(mt), "applied_off=" ++ Nat.show(bytes(String.join(Log.lines(), "\n") ++ "\n")) ++ " applied_seq=" ++ Nat.show(Nat.sub(List.length(&2, String, Log.lines()), 1n)) ++ " codec=" ++ Nat.show(S.Sdb.codec()) ++ " ord=" ++ Nat.show(Mat.ord(mat())) ++ " origin=1 schema=1")
     id : List<&2, List<&2, String>> <- D.Db.query(h, "SELECT v FROM meta WHERE k = 'log_id'", [], 1)
@@ -185,6 +198,7 @@ def main() -> IO(Unit):
     made : Result<&1, &1, U32 & String, U32 & (String & String)> <- Process.run("mktemp", ["-d"], "", 4096, 10000)
     +dir : String <- dir.of(made)
     Wf.put(dir ++ "/events.jsonl", String.join(Log.lines(), "\n") ++ "\n{\"$\":\"MessagePosted\",\"th")
+    C.Check.str("counters are Switch.count", counters(), Nat.show(M.Switch.count(fold(), "t1")) ++ " " ++ Nat.show(M.Switch.count(fold(), "t2")))
     +b1 : B.Built <- B.Stb.build(dir, 64)
     C.Check.str("tiny chunks: lines, offset, entries", built(b1), Nat.show(Nat.sub(List.length(&2, String, Log.lines()), 1n)) ++ " " ++ Nat.show(bytes(String.join(Log.lines(), "\n") ++ "\n")) ++ " " ++ Nat.show(Mat.ord(mat())))
     o1 : String <- D.Db.open(dir ++ "/store.db")

@@ -526,6 +526,9 @@ function pty_spawn(cmd, args, cwd, cols, rows) {
     }
     return bp_pty_spawn(cmd, list, cwd, cols, rows);
   }
+  if (process.platform === "win32") {
+    return io_fail(38);
+  }
   const p = pty_lib();
   const sys = io_sys();
   const argv = [cmd];

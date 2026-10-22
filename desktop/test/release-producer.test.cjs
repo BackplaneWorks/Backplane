@@ -141,14 +141,7 @@ test('resident-service lifecycle works on non-Windows targets and never override
  const f=fixture(t,'windows-x64',true);f.freeze.signingPolicy[f.target]='required';f.refresh();const dir=path.join(f.root,'stage');producer.stage(f.requestPath,dir);assert.throws(()=>producer.archive(dir,evidence(f,dir),path.join(f.root,'dist')),/Signing/);
 });
 
-test('exact Windows launcher successor preserves original native/vendor source and package provenance',t=>{
- const base={commit:'8147b68dbc9bcddad7e3b51ae7768ed9eb211ecc',tree:'37c64023d084bca7f209db9d14a84f59d365f696'},f=fixture(t,'windows-x64',true,base);
- const successor=producer.WINDOWS_SHELL_SOURCE,source=fs.readFileSync(path.join(__dirname,'../service.cjs'));
- put(path.join(f.shell,'service.cjs'),source);assert.equal(hash(path.join(f.shell,'service.cjs')),successor.serviceSha256);
- Object.assign(f.shellReceipt,{sourceCommit:successor.commit,sourceTree:successor.tree,sourceFiles:{'desktop/service.cjs':successor.serviceSha256},members:producer.inventory(f.shell,f.target)});
- f.request.shell.receipt=ref(write(path.join(f.root,'shell.json'),f.shellReceipt));f.freeze.components[f.target].shellReceiptSha256=f.request.shell.receipt.sha256;f.freeze.windowsShellSource=successor;f.refresh();
- const dir=path.join(f.root,'stage');producer.stage(f.requestPath,dir);
- const staged=JSON.parse(fs.readFileSync(path.join(dir,'STAGE.json')));assert.deepEqual(staged.windowsShellSource,successor);assert.equal(staged.release.commit,base.commit);
- const result=producer.archive(dir,evidence(f,dir),path.join(f.root,'dist')),desktop=JSON.parse(fs.readFileSync(result.desktopReceipt));assert.deepEqual(desktop.windowsShellSource,successor);
- const prov=path.join(path.dirname(result.desktopReceipt),'PROVENANCE');assert.equal(JSON.parse(fs.readFileSync(path.join(prov,'shell.json'))).sourceCommit,successor.commit);assert.equal(JSON.parse(fs.readFileSync(path.join(prov,'electron.json'))).sourceCommit,base.commit);
+test('a Windows shell successor source is refused: the shell comes from the release commit',t=>{
+ const f=fixture(t,'windows-x64',true);f.freeze.windowsShellSource={commit:'7'.repeat(40),tree:'8'.repeat(40),serviceSha256:'9'.repeat(64)};f.refresh();
+ assert.throws(()=>producer.stage(f.requestPath,path.join(f.root,'stage')),/successor/);
 });
