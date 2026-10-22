@@ -15739,6 +15739,14 @@ def Thin.warm.if(built: Bool, +st: M.State, +inbox: Chan(Msg)) -> IO(Unit):
 def Thin.warm(+c: ThinCache, +inbox: Chan(Msg)) -> IO(Unit):
   Thin.warm.if(Bool.and(THIN.Lazy.ready(ThinCache.lazy(c)), TMAIL.Lazy.ready(ThinCache.mail(c))), THIN.Lazy.base(ThinCache.lazy(c)), inbox)
 
+# the thin views on store.db when the boot opened one (none: as before)
+def Thin.store.if(none: Bool, +cfg: Cfg, +st: M.State, +h: String) -> IO(Cfg):
+  match none:
+    case True{}:
+      IO.pure(Cfg, cfg)
+    case False{}:
+      Thin.store.open(cfg, st, h)
+
 def Main.opened(r: Result<&1, &1, U32 & String, File>, +st: M.State, ls: SO.Lg, cfg: Cfg, need: Bool, front: Chan(Msg) -> IO(Unit), t0: U32) -> IO(Unit):
   match r cfg:
     case Done{f} Cfg{+home, +web, +host, +port, +pr, +ds, +v, nt0, +tcfg, +views}:
@@ -15847,9 +15855,6 @@ def Main.boot(cfg: Cfg, need: Bool, front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
         # S1: Sto.boot here (the store brought up to the log's end; the hub
         # keeps no log lines, SO.Lg)
         +ls : SO.Lg <- SO.Sto.boot(home, st)
-        # S3: the thin index on the store once Thin.store.open lands
-        # (backplane/s3-thinstore): the config below goes through
-        # Thin.store.open(cfg, st, SO.Lg.db(ls)) before Main.opened
         ts : U32 <- PS.Perf.span("boot.store", t2)
         Log.info("replayed " ++ Nat.show(SO.Lg.n(ls)) ++ " changes from " ++ Store.path(home))
         tok : String <- Token.load(home)
@@ -15874,4 +15879,7 @@ def Main.boot(cfg: Cfg, need: Bool, front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
         +org : String = Bool.pick(String, Nat.is_eq(SO.Lg.n(ls), 0n), "", Hub.origin(ls))
         Log.info("origin " ++ org)
         t8 : U32 <- PS.Perf.span("boot.origin", t7)
-        Main.opened(f, st, ls, Cfg.with_thin_cache(cfg1, ThinCache{ti, org, 1n, Map.new(&2, TLIVE.Stream), tmc, Nil{}, TPACE.Notes.empty(), ""}), need, front, t8)
+        # the thin views read store.db once it is open and written on every
+        # commit (Thin.store.open: the index keeps only recent threads)
+        cfg2 : Cfg <- Thin.store.if(String.is_empty(SO.Lg.db(ls)), Cfg.with_thin_cache(cfg1, ThinCache{ti, org, 1n, Map.new(&2, TLIVE.Stream), tmc, Nil{}, TPACE.Notes.empty(), ""}), st, SO.Lg.db(ls))
+        Main.opened(f, st, ls, cfg2, need, front, t8)
