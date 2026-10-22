@@ -557,7 +557,7 @@ def Sto.line.c(m: Maybe<&2, M.Change>, +o: J.Json, text: String, +len: Nat, +st:
     case Some{+c} Pr{Tail{+s, +ord, +off}, its, ks}:
       Pr{Tail{1n+s, SDB.Sdb.ord(c, ord), Nat.add(off, 1n+len)}, Sto.push.far(Sto.far.fact(st, c, 1n+s), Sto.push.ops(SDB.Sdb.facts(st, SDB.At{1n+s, off, len, ord}, c), its)), Sto.keys.add(SDB.Sdb.keys(st, st, c), ks)}
     case None{} Pr{Tail{+s, +ord, +off}, its, ks}:
-      Pr{Tail{1n+s, ord, Nat.add(off, 1n+len)}, Sto.push.ops([SDB.F.line(SDB.At{1n+s, off, len, ord}, Sto.wire.k(C.Change.private(J.Json.get_str(o, "$", "")), o, text))], its), ks}
+      Pr{Tail{1n+s, ord, Nat.add(off, 1n+len)}, Sto.push.ops([SDB.F.line(SDB.At{1n+s, off, len, ord}, C.Change.wire_over(o, text))], its), ks}
 
 def Sto.line.k(m: Maybe<&2, J.Json>, text: String, +len: Nat, +st: M.State, p: Pr) -> Pr:
   match m p:

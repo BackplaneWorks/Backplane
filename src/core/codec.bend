@@ -696,6 +696,33 @@ def Change.wire_line.k(private: Bool, +o: J.Json, l: String) -> String:
     case False{}:
       l
 
+# A line that parses but is not a JSON object (J.Json.parse is lenient:
+# a bare word passes) goes to clients as this inert object, never as its
+# own text, which no client frame can carry; it keeps its number, so
+# since/resume stay exact. Clients decode no change from it.
+def Change.inert() -> String:
+  J.Json.show(Change.obj("Unreadable", Nil{}))
+
+def Change.is_obj(o: J.Json) -> Bool:
+  match o:
+    case J.Obj{_}: True{}
+    case _: False{}
+
+def Change.wire_line.o(obj: Bool, +o: J.Json, l: String) -> String:
+  match obj:
+    case True{}: Change.wire_line.k(Change.private(J.Json.get_str(o, "$", "")), o, l)
+    case False{}: Change.inert()
+
 # a stored line (parsed as o) as clients may see it
 def Change.wire_line(+o: J.Json, l: String) -> String:
-  Change.wire_line.k(Change.private(J.Json.get_str(o, "$", "")), o, l)
+  Change.wire_line.o(Change.is_obj(o), o, l)
+
+def Change.wire_over.o(obj: Bool, +o: J.Json, l: String) -> String:
+  match obj:
+    case True{}: Bool.pick(String, Change.private(J.Json.get_str(o, "$", "")), Change.wire_line(o, l), "")
+    case False{}: Change.inert()
+
+# what the store's line table keeps as a line's wire text when clients do
+# not see the line itself ("": they do): a non-object, or a private line
+def Change.wire_over(+o: J.Json, l: String) -> String:
+  Change.wire_over.o(Change.is_obj(o), o, l)
