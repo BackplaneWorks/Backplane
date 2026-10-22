@@ -45,6 +45,7 @@ import ../core/cbor.bend as CB
 import ../mobile/session.bend as MSE
 import ./thin-view.bend as TV
 import ./thin-actor.bend as TA
+import ./thin-splice.bend as TSPL
 import ../core/thin-pace.bend as TPACE
 import ./thin-mail.bend as TMAIL
 import ../core/thin.bend as THIN
@@ -152,6 +153,10 @@ type Wire is Data:
   # a message as its JSON tree with its charge (a thin view's reply): the
   # writer encodes the tree, never printing and parsing it again
   WJson{json: J.Json, charge: Nat}
+  # a message already CBOR with its charge (a thin view's spliced reply,
+  # thin-splice.bend): framed by the writer, its charge given back as it
+  # was offered
+  WCbor{cbor: List<&2, U32>, charge: Nat}
 
 type Msg is Data:
   Desktop{client: U32, kind: String, text: String, out: Chan(String), epoch: String, lease: String}
@@ -841,6 +846,7 @@ def Wire.charged(native: Bool, w: Wire, n: Nat) -> Wire:
     case False{} WText{t}: WCharged{t, n}
     case False{} WCharged{t, _}: WCharged{t, n}
     case False{} WJson{j, _}: WJson{j, n}
+    case False{} WCbor{b, _}: WCbor{b, n}
     case _ _: w
 
 def Wire.offer.k(c: Client, w: Wire, +n: Nat) -> IO(Maybe<&2, Client>):
@@ -1383,6 +1389,9 @@ def Conn.write(m: Maybe<&1, Wire>, s: Socket, +out: Chan(Wire), k: Socket -> Nat
       Conn.out.items(s, hd, pl, sp, xs, tl, ends, out, k)
     case Some{WJson{j, charge}}:
       +bs = W.Ws.encode(2, CB.Cbor.encode(j))
+      Conn.out(s, bs, out, s2 => Conn.written(s2, List.length(&2, U32, bs), charge, k))
+    case Some{WCbor{b, charge}}:
+      +bs = W.Ws.encode(2, b)
       Conn.out(s, bs, out, s2 => Conn.written(s2, List.length(&2, U32, bs), charge, k))
     case None{}:
       Socket.close(s)
@@ -10948,6 +10957,25 @@ def Hub.thin.respond(h: Hub, +client: U32, +o: J.Json, +result: J.Json, +c: Clie
       Hub.thin.deliver(Nat.is_le(size, Bool.pick(Nat, String.eq(J.Json.get_str(o, "m", ""), "view.search"), 65536n, 262144n)),
         Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, answer, size, c, context, now)
 
+def Hub.thin.deliver.cbor(+fits: Bool, h: Hub, +client: U32, +o: J.Json, +bytes: List<&2, U32>, +size: Nat, +c: Client, +context: ThinContext, +now: Nat) -> IO(Hub):
+  match fits h:
+    case False{} _: Hub.thin.error(h, client, o, "LIMIT")
+    case True{} Hub{+st, f, ls, cl, as, inbox, cfg, note}:
+      do IO<Hub>:
+        +cl2 : List<&2, Client> <- Wire.to.raw(Clients.swap(cl, client, Some{Client.thin.with(c, context)}), client, WCbor{bytes, size}, size)
+        return Hub{st, f, ls, cl2, as, inbox, Cfg.telemetry.ui_action(st, cfg, o, Maybe.is_some(&2, Client, Clients.get(cl2, client)), now), note}
+
+# a spliced reply (thin-splice.bend): the envelope Hub.thin.respond writes,
+# its pages as the kept bytes; its JSON size added up, not walked
+def Hub.thin.respond.spliced(h: Hub, +client: U32, +o: J.Json, +sp: TSPL.Spliced, +c: Client, +context: ThinContext, +now: Nat) -> IO(Hub):
+  match h sp:
+    case Hub{st, f, ls, cl, as, inbox, +cfg, note} TSPL.Spliced{+res, +holes, +json, +names}:
+      +p = J.Json.get_obj(o, "p")
+      +answer = (J.Json.obj([J.KV{"t", J.Str{"reply"}}, J.KV{"id", Maybe.default(&2, J.Json, J.Json.get(o, "id"), J.Null{})}, J.KV{"ok", J.Flag{True{}}},
+        J.KV{"result", Hub.thin.result(res, p, ThinContext.view(context), Bool.pick(String, String.eq(Client.thin.mode(c), "view-web"), "web", "mobile"), Cfg.thin.revision(cfg))}]))
+      +size = Nat.sub(Nat.add(J.Json.bytes(answer), json), names)
+      Hub.thin.deliver.cbor(Nat.is_le(size, 262144n), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, CB.Cbor.encode.holes(answer, holes), size, c, context, now)
+
 def Hub.thin.cursor.empty(+empty: Bool, +text: String, +epoch: String, +target: J.Json, +query: String) -> Maybe<&2, Nat>:
   match empty:
     case True{}: Some{0n}
@@ -11005,7 +11033,7 @@ def Hub.thin.render.page(+pg: TSTO.Page, h: Hub, +client: U32, +o: J.Json, +c: C
       +stream = TLIVE.Stream.get(Cfg.thin.streams(cfg), TV.Target.thread(st, J.Json.get_obj(p, "target")))
       +actor = TA.Actor.mail_cache(TA.Actor.refresh(ThinContext.actors(context), web, st, Hub.info(cfg),
         J.Json.obj([J.KV{"t", J.Str{"live"}}, J.KV{"items", J.Json.arr(Nil{})}]), now, p, ThinContext.view(context)), ThinContext.actors(context), Cfg.thin.mail(cfg))
-      Hub.thin.rendered(TA.Rendered.remember(TA.Actor.render(actor, web, st, TSTO.Page.index(pg), p, Cfg.thin.epoch(cfg), now, TSTO.Page.ids(pg), stream), key, ms, stream),
+      Hub.thin.rendered(TA.Rendered.remember(TA.Actor.render(actor, web, st, TSTO.Page.index(pg), p, Cfg.thin.epoch(cfg), now, TSTO.Page.ids(pg), stream), key, ms, stream, web, TV.Target.thread(st, J.Json.get_obj(p, "target"))),
         Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now, context)
 
 def Hub.thin.render.full(h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, +context: ThinContext, +anchor: Nat, +p: J.Json, +key: String, +ms: Nat) -> IO(Hub):
@@ -11018,10 +11046,10 @@ def Hub.thin.render.full(h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat
 # a view.update whose render memo still holds (thin-actor.bend's
 # Memo.reply: only the live row can have changed) answers with it spliced
 # (thin-splice.bend); anything else renders in full and is remembered
-def Hub.thin.render.memo(+m: Maybe<&2, J.Json>, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, +context: ThinContext, +anchor: Nat, +p: J.Json, +key: String, +ms: Nat) -> IO(Hub):
+def Hub.thin.render.memo(+m: Maybe<&2, TSPL.Spliced>, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, +context: ThinContext, +anchor: Nat, +p: J.Json, +key: String, +ms: Nat) -> IO(Hub):
   match m:
-    case Some{+res}:
-      Hub.thin.respond(h, client, o, res, c, context, now)
+    case Some{+sp}:
+      Hub.thin.respond.spliced(h, client, o, sp, c, context, now)
     case None{}:
       Hub.thin.render.full(h, client, o, c, now, context, anchor, p, key, ms)
 
@@ -11032,7 +11060,7 @@ def Hub.thin.render.at(h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, 
       +web = String.eq(Client.thin.mode(c), "view-web")
       +thread = TV.Target.thread(st, J.Json.get_obj(p, "target"))
       +key = TA.Memo.key(M.State.seq(st), J.Json.show(Hub.info(cfg)), p, anchor, ThinContext.view(context), web, thread)
-      Hub.thin.render.memo(TA.Memo.reply(TA.Actor.memos(ThinContext.actors(context)), String.eq(J.Json.get_str(o, "m", ""), "view.update"), key, ms, web,
+      Hub.thin.render.memo(TA.Memo.reply(TA.Actor.memos(ThinContext.actors(context)), String.eq(J.Json.get_str(o, "m", ""), "view.update"), key, ms, TA.Memo.life(client), web,
         TLIVE.Stream.get(Cfg.thin.streams(cfg), thread), thread, Cfg.thin.epoch(cfg), J.Json.get_obj(p, "target"), TA.Actor.loc(ThinContext.actors(context))),
         Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now, context, anchor, p, key, ms)
 

@@ -7,6 +7,7 @@ import ../web/dom.bend as D
 import ../mobile/screen.bend as SC
 import ../mobile/thin.bend as MT
 import ./thin-view.bend as V
+import ../core/cbor.bend as CB
 
 # A thin view's reply when only its thread's live row changed (fast hub R1).
 # Streamed deltas come 20 a second per busy thread; re-rendering the whole
@@ -179,3 +180,128 @@ def Splice.window(+old: J.Json, +stream: TL.Stream, +thread: String, +epoch: Str
 # found exactly once where the renderer puts it
 def Splice.reply(+web: Bool, +res: J.Json, +stream: TL.Stream, +thread: String, +epoch: String, +target: J.Json, +lc: I.Loc) -> Maybe<&2, J.Json>:
   Splice.k(Splice.ok.k(web, res, TL.Stream.id(thread)), web, res, Splice.window(J.Json.get_obj(res, "window"), stream, thread, epoch, target), TL.Stream.id(thread), TL.Stream.preview(stream), lc)
+
+# Splicing bytes
+# --------------
+# A full render's reply, kept as bytes around its live rows (Cut): the
+# encoded page before and after the row, the row as it was, and the JSON
+# size of everything but the row. A splice then encodes only the new row
+# and the reply's small envelope: its page goes in as those bytes
+# (CB.Cbor.encode.holes), its JSON size is added up (the 256 KB check).
+type Cut is Data:
+  Cut{hole: String, live: J.Json, before: List<&2, U32>, after: List<&2, U32>, rest: Nat}
+
+# the reply with its pages replaced by hole names, and the cuts
+type Cuts is Data:
+  Cuts{res: J.Json, cuts: List<&2, Cut>}
+
+# a reply ready to send: its tree with holes, the holes' bytes, and how much
+# JSON the holes stand for and their names take
+type Spliced is Data:
+  Spliced{res: J.Json, holes: List<&2, CB.Hole>, json: Nat, names: Nat}
+
+def Splice.marker() -> String:
+  "\u{0}live"
+
+def Splice.hole.shown() -> String:
+  "\u{0}h:shown"
+
+def Splice.hole.j() -> String:
+  "\u{0}h:j"
+
+def Live.keep(+found: J.Json, +o: J.Json) -> J.Json:
+  match found:
+    case J.Null{}: o
+    case _: found
+
+# the first live node of a tree (J.Null when none)
+def Live.find(j: J.Json, hit: Bool, +web: Bool, +id: String, +found: J.Json) -> J.Json:
+  match j hit:
+    case +o True{}:
+      Live.keep(found, o)
+    case J.Obj{+fs} False{}:
+      Live.find(fs, False{}, web, id, found)
+    case J.Arr{+xs} False{}:
+      Live.find(xs, False{}, web, id, found)
+    case J.Item{+h, +t} False{}:
+      Live.find(t, False{}, web, id, Live.find(h, Live.is(h, web, id), web, id, found))
+    case J.Field{_, +v, +t} False{}:
+      Live.find(t, False{}, web, id, Live.find(v, Live.is(v, web, id), web, id, found))
+    case _ False{}:
+      found
+
+# the tree with its live node replaced by the marker
+def Live.mark(j: J.Json, hit: Bool, +web: Bool, +id: String) -> J.Json:
+  match j hit:
+    case _ True{}:
+      J.Str{Splice.marker()}
+    case J.Obj{+fs} False{}:
+      J.Obj{Live.mark(fs, False{}, web, id)}
+    case J.Arr{+xs} False{}:
+      J.Arr{Live.mark(xs, False{}, web, id)}
+    case J.Item{+h, +t} False{}:
+      J.Item{Live.mark(h, Live.is(h, web, id), web, id), Live.mark(t, False{}, web, id)}
+    case J.Field{+k, +v, +t} False{}:
+      J.Field{k, Live.mark(v, Live.is(v, web, id), web, id), Live.mark(t, False{}, web, id)}
+    case +o False{}:
+      o
+
+def Cut.of.k(m: Maybe<&2, CB.Cut2>, +hole: String, +live: J.Json, +rest: Nat) -> Maybe<&2, Cut>:
+  match m:
+    case Some{CB.Cut2{b, a}}: Some{Cut{hole, live, b, a, rest}}
+    case None{}: None{}
+
+def Cut.of.marked(+marked: J.Json, +hole: String, +live: J.Json) -> Maybe<&2, Cut>:
+  Cut.of.k(CB.Cbor.cut(CB.Cbor.encode(marked), CB.Cbor.encode(J.Str{Splice.marker()})), hole, live,
+    Nat.sub(J.Json.bytes(marked), J.Json.bytes(J.Str{Splice.marker()})))
+
+def Cut.of.ok(+ok: Bool, +tree: J.Json, +web: Bool, +id: String, +hole: String) -> Maybe<&2, Cut>:
+  match ok:
+    case True{}: Cut.of.marked(Live.mark(tree, Live.is(tree, web, id), web, id), hole, Live.find(tree, Live.is(tree, web, id), web, id, J.Null{}))
+    case False{}: None{}
+
+# a page cut around its one live row
+def Cut.of(+tree: J.Json, +web: Bool, +id: String, +hole: String) -> Maybe<&2, Cut>:
+  Cut.of.ok(Live.one(tree, web, id), tree, web, id, hole)
+
+def Cuts.web(m: Maybe<&2, Cut>, +res: J.Json) -> Maybe<&2, Cuts>:
+  match m:
+    case Some{c}: Some{Cuts{Jx.set(res, "shown", J.Str{Splice.hole.shown()}), [c]}}
+    case None{}: None{}
+
+def Cuts.mobile(a: Maybe<&2, Cut>, b: Maybe<&2, Cut>, +res: J.Json) -> Maybe<&2, Cuts>:
+  match a b:
+    case Some{x} Some{y}:
+      Some{Cuts{Jx.set(Jx.set(res, "shown", J.Str{Splice.hole.shown()}), "overlay", Jx.set(J.Json.get_obj(res, "overlay"), "j", J.Str{Splice.hole.j()})), [x, y]}}
+    case _ _: None{}
+
+# what a memo keeps of a full render's reply (None: no live row to splice)
+def Cuts.of(+web: Bool, +res: J.Json, +thread: String) -> Maybe<&2, Cuts>:
+  match web:
+    case True{}:
+      Cuts.web(Cut.of(J.Json.get_obj(res, "shown"), True{}, TL.Stream.id(thread), Splice.hole.shown()), res)
+    case False{}:
+      Cuts.mobile(Cut.of(J.Json.get_obj(res, "shown"), False{}, TL.Stream.id(thread), Splice.hole.shown()),
+        Cut.of(J.Json.get_obj(J.Json.get_obj(res, "overlay"), "j"), False{}, TL.Stream.id(thread), Splice.hole.j()), res)
+
+def Spliced.add(s: Spliced, +h: CB.Hole, +json: Nat, +names: Nat) -> Spliced:
+  match s:
+    case Spliced{r, hs, j, n}: Spliced{r, h <> hs, Nat.add(j, json), Nat.add(n, names)}
+
+def Cut.splice(+c: Cut, +web: Bool, +id: String, +text: String, +lc: I.Loc, +part: J.Json, acc: Spliced) -> Spliced:
+  match c:
+    case Cut{+hole, +live, +b, +a, +rest}:
+      +row = Live.node(web, live, id, text, lc, part)
+      Spliced.add(acc, CB.Hole{hole, [b, CB.Cbor.encode(row), a]}, Nat.add(rest, J.Json.bytes(row)), J.Json.bytes(J.Str{hole}))
+
+def Cuts.splice.go(cs: List<&2, Cut>, +web: Bool, +id: String, +text: String, +lc: I.Loc, +part: J.Json, acc: Spliced) -> Spliced:
+  match cs:
+    case Nil{}: acc
+    case +c <> t: Cuts.splice.go(t, web, id, text, lc, part, Cut.splice(c, web, id, text, lc, part, acc))
+
+# the kept reply with stream's live row and window, as holes to fill
+def Cuts.splice(+cs: Cuts, +web: Bool, +stream: TL.Stream, +thread: String, +epoch: String, +target: J.Json, +lc: I.Loc) -> Spliced:
+  match cs:
+    case Cuts{+res, +cuts}:
+      +window = Splice.window(J.Json.get_obj(res, "window"), stream, thread, epoch, target)
+      Cuts.splice.go(cuts, web, TL.Stream.id(thread), TL.Stream.preview(stream), lc, Splice.part(window, TL.Stream.id(thread)), Spliced{Jx.set(res, "window", window), Nil{}, 0n, 0n})
