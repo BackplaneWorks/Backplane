@@ -91,7 +91,7 @@ def summary(+s: M.State) -> String:
     J.KV{"reply", J.Flag{handled(s, "fixture-m2")}},
     J.KV{"defer", J.Flag{handled(s, "fixture-m3")}},
     J.KV{"current", J.Str{current(s)}},
-    J.KV{"cef_enabled", J.Str{M.Setting.get(s, "cef.enabled", "")}},
+    J.KV{"hold_enabled", J.Str{M.Setting.get(s, "hold.enabled", "")}},
     J.KV{"forwarded", J.Str{M.Setting.get(s, "run.forwarded." ++ T.run(), "")}},
     J.KV{"fallback_posts", J.Json.nat(T.owes(s))},
     J.KV{"next_fallback_posts", J.Json.nat(T.owes(M.State.apply(s, T.incoming("fixture-m4"))))}]))

@@ -3,7 +3,6 @@ import ../core/textscale.bend as TS
 import ./side_row_types.bend as ST
 import ../core/title.bend as TTL
 import ../core/i18n.bend as I
-import ../core/cef.bend as CF
 import ../core/msgs.bend as MSG
 import ../core/winnote.bend as NT
 import ../core/codec.bend as CC
@@ -4129,16 +4128,6 @@ def Set.order(+ty: Ty, +st: M.State, +x: U32, +w: U32, +y: U32) -> Out:
     Set.row.r(ty, U.Fab.set.label(), U.Fab.set.note.k(U.Fab.enabled(st)), x, (y + 86 : U32), w, 140),
     Set.order.est(U.Fab.enabled(st), ty, U.Fab.set.on(st), x, w, (y + 100 : U32))])
 
-# the browser engine row (core/cef.bend): Chrome apart from the window, or
-# Embedded in it; a note only when Embedded cannot run
-def Set.browser.row(+ty: Ty, +eng: String, +err: String, +x: U32, +w: U32, +y: U32) -> Out:
-  Out.all([Set.row.r(ty, "Browser", CF.Cef.note(err), x, Bool.pick(U32, String.is_empty(err), (y + 12 : U32), y), w, 190),
-    Lay.chip(ty, (x + w - 16 - Lay.button.w(ty, "Embedded") - 6 - Lay.button.w(ty, "Chrome") : U32), (y + 14 : U32), "Chrome", Bool.not(String.eq(eng, "cef")), "setting", "browser.engine=chrome"),
-    Lay.chip(ty, (x + w - 16 - Lay.button.w(ty, "Embedded") : U32), (y + 14 : U32), "Embedded", String.eq(eng, "cef"), "setting", "browser.engine=cef")])
-
-def Set.browser(ty: Ty, +eng: String, err: String, live: String, x: U32, w: U32, y: U32) -> Out:
-  Set.browser.row(ty, eng, CF.Cef.reason(eng, live, err), x, w, y)
-
 def Set.fallback.h(+ty: Ty, +n: S.Nui, +x: U32, +w: U32) -> U32:
   (20 + Set.agy.sum(U.Fallbackv.rows(S.Nui.ui(n)), ty, x, w) : U32)
 
@@ -4246,20 +4235,19 @@ def Set.page.cad(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: S
   +kh = {(40 + Kn.h(kn, ty, (w - 32 : U32)) : U32) : U32}
   Out.all([
     Set.head(ty, MSG.T.settings.cad(Ty.loc(ty)), x, (y : U32)),
-    Set.card(x, (y + 32 : U32), w, (252 + kh : U32)),
+    Set.card(x, (y + 32 : U32), w, (200 + kh : U32)),
     Set.row(ty, "KiCad", U.KN.summary(info), x, (y + 34 : U32), w),
     Kn.path(ty, n, (x + 16 : U32), (y + 82 : U32), (w - 32 : U32)),
     Kn.draw(kn, False{}, ty, (x + 16 : U32), (y + 122 : U32), (w - 32 : U32)),
     Set.row.r(ty, U.KiCad.ipc.label(Ty.loc(ty), info), U.KiCad.ipc.note(Ty.loc(ty), info), x, (y + 118 + kh : U32), w, Bool.pick(U32, U.KiCad.ipc.ready(info), Set.pairw(ty, MSG.T.settings.lang.on(Ty.loc(ty)), MSG.T.settings.lang.off(Ty.loc(ty)), 140), 0)),
     Bool.pick(Out, U.KiCad.ipc.ready(info), Set.ipc(ty, ipc, x, w, (y + 132 + kh : U32)), Out.none()),
     Set.row(ty, U.FreeCAD.label.loc(Ty.loc(ty), info), U.FreeCAD.note(Ty.loc(ty), info), x, (y + 178 + kh : U32), w),
-    Set.browser(ty, CF.Cef.requested(M.Setting.get(st, "browser.engine", CF.Cef.default())), U.Str.get(info, "browser.engine.err"), U.Str.get(info, "browser.engine.live"), x, w, (y + 230 + kh : U32)),
-    Set.order(ty, st, x, w, (y + 306 + kh : U32))])
+    Set.order(ty, st, x, w, (y + 254 + kh : U32))])
 
 def Set.page.cad.h(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x: U32, +w: U32) -> U32:
   +kn = U.KN.of(info, st)
   +kh = {(40 + Kn.h(kn, ty, (w - 32 : U32)) : U32) : U32}
-  (500 + kh : U32)
+  (448 + kh : U32)
 
 def Set.scale.btns(vs: List<&2, String>) -> List<&2, VBtn>:
   match vs:
@@ -5120,33 +5108,8 @@ def Lay.page.jpeg(+ty: Ty, +u: U.Ui, +id: String, +none: String, +x0: U32, +x1: 
   Out.cat(Out{Nil{}, [Lay.hit(x0, top, 1, 1, "img", key)]},
     Page.k(Page.state(shown, size, U.Ui.info(u, "img:" ++ key)), ty, shown, size, none, x0, x1, (top + 12 : U32), h, input))
 
-# The embedded page (core/cef.bend)
-# ---------------------------------
-# With the engine "cef" the page is a native child window of this one: the
-# window draws a plain background and leaves one "cef" hit, the pane's
-# rectangle, for main.bend to place it by (browser.place). No hit while an
-# overlay drawn over the main area is open (a toast does not hide it), nor
-# before the page exists (the text says so, as it does without cef), so an
-# empty Browser tab never makes a page.
-def Page.cef.k(has: Bool, shows: Bool, +ty: Ty, +id: String, +none: String, +x0: U32, +x1: U32, +top: U32, +h: U32) -> Out:
-  match has:
-    case True{}:
-      Out{[D.Draw.rect(D.Clip.all(), x0, top, (x1 - x0 : U32), U32.dim(h, top), T.Th.bg(), 255)],
-        Bool.pick(List<&2, S.Hit>, shows, [Lay.hit(x0, top, (x1 - x0 : U32), U32.dim(h, top), "cef", id)], Nil{})}
-    case False{}:
-      Out.ops(Ty.text(ty, 2n, none, D.Clip.all(), (x0 + 24 : U32), (top + 12 : U32), 28, T.Th.faint()))
-
-def Page.cef(+ty: Ty, +u: U.Ui, +id: String, +none: String, +x0: U32, +x1: U32, +top: U32, +h: U32) -> Out:
-  Page.cef.k(Bool.or(Bool.not(String.is_empty(U.Ui.info(u, "shot." ++ id))), Bool.not(String.is_empty(U.Ui.info(u, CF.Cef.page.key(id))))),
-    CF.Cef.shows(True{}, U.CefUI.covered(u)), ty, id, none, x0, x1, top, h)
-
-def Lay.page.engine(native: Bool, +ty: Ty, +u: U.Ui, +id: String, +none: String, +x0: U32, +x1: U32, +top: U32, +h: U32, +input: Bool) -> Out:
-  match native:
-    case True{}: Page.cef(ty, u, id, none, x0, x1, top, h)
-    case False{}: Lay.page.jpeg(ty, u, id, none, x0, x1, top, h, input)
-
 def Lay.page.in(+ty: Ty, +u: U.Ui, +id: String, +none: String, +x0: U32, +x1: U32, +top: U32, +h: U32, +input: Bool) -> Out:
-  Lay.page.engine(U.CefUI.native(u, id), ty, u, id, none, x0, x1, top, h, input)
+  Lay.page.jpeg(ty, u, id, none, x0, x1, top, h, input)
 
 def Lay.page(+ty: Ty, +u: U.Ui, +id: String, +none: String, +x0: U32, +x1: U32, +top: U32, +h: U32) -> Out:
   Lay.page.in(ty, u, id, none, x0, x1, top, h, False{})
@@ -5160,11 +5123,11 @@ def Page.strip(on: Bool, +ty: Ty, +u: U.Ui, +x0: U32, +x1: U32) -> Out:
   match on:
     case True{}:
       Out.cat(Out.ops(List.append(&2, R.Op, [D.Draw.rect(D.Clip.all(), x0, 52, (x1 - x0 : U32), 44, T.Th.bg(), 255)],
-          Ty.text(ty, 2n, U.CefUI.strip(u, U.Ui.page(u)), D.Clip.all(), (x0 + 16 : U32), 58, 32, T.Th.dim()))),
+          Ty.text(ty, 2n, U.BrUI.strip(u, U.Ui.page(u)), D.Clip.all(), (x0 + 16 : U32), 58, 32, T.Th.dim()))),
         Page.back(Bool.not(String.is_empty(U.Teach.drive(u, U.Ui.page(u)))), ty, u, x1))
     case False{}: Out.none()
 
-# Always-visible browser chrome; the native child starts below both rows.
+# Always-visible browser chrome; the page starts below both rows.
 def Page.tab.label(+tab: J.Json) -> String:
   +title = J.Json.get_str(tab, "title", "")
   Bool.pick(String, String.is_empty(title), J.Json.get_str(tab, "url", "New tab"), title)
@@ -5204,8 +5167,8 @@ def Lay.page.if(on: Bool, +ty: Ty, +n: S.Nui, +x0: U32, +x1: U32, +h: U32) -> Ou
   match on:
     case True{}:
       +u = S.Nui.ui(n)
-      +top = Bool.pick(U32, U.CefUI.strip_on(u, U.Ui.page(u)), 96, 52)
-      Out.all([Page.strip(U.CefUI.strip_on(u, U.Ui.page(u)), ty, u, x0, x1),
+      +top = Bool.pick(U32, U.BrUI.strip_on(u, U.Ui.page(u)), 96, 52)
+      Out.all([Page.strip(U.BrUI.strip_on(u, U.Ui.page(u)), ty, u, x0, x1),
         Page.controls(ty, u, S.Nui.focus_of(n), S.Blink.on(n), S.Nui.caret_of(n), S.Nui.mark(n), U.Ui.page(u), x0, x1, top),
         Lay.page.in(ty, u, U.Ui.page(u), MSG.T.viewer.page.empty(Ty.loc(ty)), x0, x1, (top + 80 : U32), h, False{})])
     case False{}:

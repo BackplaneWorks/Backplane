@@ -46,7 +46,7 @@ source=source.replace('import ./check.bend','import ../../test/check.bend').repl
 source+='''def main() -> IO(Unit):
   do IO<Unit>:
     b("shipped incident cannot record bounded notice", MC.Res.good(call(base(), args(input(), "done"))), True{})
-    n("shipped done cannot stop repeated known CEF escalation", owes(apply(base(), call(base(), args(input(), "done")))), 0n)
+    n("shipped done cannot stop repeated known hold escalation", owes(apply(base(), call(base(), args(input(), "done")))), 0n)
     n("shipped defer cannot durably retain the existing hold", owes(apply(base(), call(base(), args(input(), "defer")))), 0n)
 '''
 (out/'before.bend').write_text(source)
