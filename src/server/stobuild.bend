@@ -15,10 +15,11 @@ import ../core/far.bend as FR
 # complete lines are folded and their facts written in one Db.script; the
 # partial last line is read again with the next chunk, and a line longer
 # than a chunk makes the chunk grow until it fits. The fold keeps no
-# entries (Stb.strip after every chunk): the one step that reads them,
+# entries (Stb.strip after every chunk) or cold settings (written straight
+# to SQL, never inserted in the fold): the one step that reads entries,
 # ProviderSet's Switch.count, is given a counter of each thread's own
 # entries instead (M.State.switch.c). After the last line every record of
-# the final state is written (SDB.Dump.ops) with the meta rows; the
+# the final state is written (SDB.Dump.part) with the meta rows; the
 # counters are not (nothing would keep them current on commit). Numbering
 # is SDB.Mat.step's: a line that is not JSON takes its bytes but no number, a line no change
 # decodes from gets a line row (wire "") and is not folded; a trailing
@@ -110,14 +111,50 @@ def Stb.bump(m: Maybe<&2, M.Entry>, cnt: Map<&2, Nat>) -> Map<&2, Nat>:
     case None{}:
       cnt
 
-# one change folded: M.State.apply, but a ProviderSet takes the thread's
-# count from the counters
+# Cold settings are opaque run-input copies: no model transition reads
+# them. Keep their rows in SQL, and preserve the fold's tick without ever
+# inserting their values into M.State. Empty cold values are records too
+# (only told.*, rule.*, board.* use deletion semantics).
+def Stb.setting(cold: Bool, st: M.State, k: String, v: String) -> M.State:
+  match cold:
+    case True{}:
+      M.State.tick(st)
+    case False{}:
+      M.State.tick(M.State.setting(st, k, v))
+
+# one change folded: M.State.apply, but cold settings bypass the fold and
+# a ProviderSet takes the thread's count from the counters. WorkSet also
+# writes a setting, so it must use the same cold-key decision.
 def Stb.apply(+st: M.State, +cnt: Map<&2, Nat>, +c: M.Change) -> M.State:
   match c:
     case M.ProviderSet{+id, +p, m, _}:
       M.State.tick(M.State.switch.c(st, id, p, m, Stb.count(cnt, id)))
+    case M.SettingSet{+k, v, _}:
+      Stb.setting(SDB.Sdb.cold(k), st, k, v)
+    case M.WorkSet{+th, +kind, rows, _}:
+      +k = kind ++ "." ++ th
+      Stb.setting(SDB.Sdb.cold(k), st, k, rows)
     case other:
       M.State.apply(st, other)
+
+# The cold setting row named by this event, if any. SDB.Row.set uses the
+# same raw text and cold flag as the final fold dump, including #digits.
+def Stb.setting.ops(cold: Bool, k: String, v: String) -> List<&2, SDB.Op>:
+  match cold:
+    case True{}:
+      [SDB.Row.set(k, v)]
+    case False{}:
+      Nil{}
+
+def Stb.cold(c: M.Change) -> List<&2, SDB.Op>:
+  match c:
+    case M.SettingSet{+k, v, _}:
+      Stb.setting.ops(SDB.Sdb.cold(k), k, v)
+    case M.WorkSet{+th, +kind, rows, _}:
+      +k = kind ++ "." ++ th
+      Stb.setting.ops(SDB.Sdb.cold(k), k, rows)
+    case _:
+      Nil{}
 
 # The build
 # ---------
@@ -162,7 +199,7 @@ def Stb.change(m: Maybe<&2, M.Change>, +st: M.State, +cnt: Map<&2, Nat>, +seq: N
       +p = SDB.F.posts(c)
       +cnt2 = Stb.bump(p, cnt)
       +post = Stb.apply(st, cnt, c)
-      Acc{post, cnt2, seq, Nat.add(off, 1n+len), SDB.Sdb.ord(c, ord), Stb.far(FR.Fr.fact(post, c, seq), Stb.sqls(SDB.Sdb.facts(st, SDB.At{seq, off, len, ord}, c), items)), id, origin}
+      Acc{post, cnt2, seq, Nat.add(off, 1n+len), SDB.Sdb.ord(c, ord), Stb.far(FR.Fr.fact(post, c, seq), Stb.sqls(Stb.cold(c), Stb.sqls(SDB.Sdb.facts(st, SDB.At{seq, off, len, ord}, c), items))), id, origin}
     case None{}:
       Acc{st, cnt, seq, Nat.add(off, 1n+len), ord, Stb.sqls([SDB.F.line(SDB.At{seq, off, len, ord}, w)], items), id, origin}
 
@@ -331,7 +368,9 @@ def Stb.write(+h: String, +home: String, +total: Nat, ls: List<&2, Ln>, a: Acc) 
 
 # what to do after a chunk: 0 the log has ended (nothing read, or only a
 # fragment with no newline before the end), 1 lines were read (go on), 2 a
-# line longer than the chunk (read again, twice as much)
+# line longer than the chunk (read again, twice as much); a successful
+# read resets to the configured chunk so a long line cannot raise all
+# subsequent chunk allocations
 def Stb.next.k(none: Bool, nothing: Bool, short: Bool) -> Nat:
   match none nothing short:
     case True{} _ _:
@@ -346,37 +385,37 @@ def Stb.next.k(none: Bool, nothing: Bool, short: Bool) -> Nat:
 def Stb.next(+used: Nat, +total: Nat, +max: U32) -> Nat:
   Stb.next.k(Nat.is_eq(total, 0n), Nat.is_eq(used, 0n), Nat.is_lt(total, U32.to_nat(max)))
 
-def Stb.then(i: Nat, f: File, +h: String, +home: String, +logsize: Nat, +max: U32, ls: List<&2, Ln>, a: Acc, k: File -> Acc -> U32 -> IO(File & Acc)) -> IO(File & Acc):
+def Stb.then(i: Nat, f: File, +h: String, +home: String, +logsize: Nat, +chunk: U32, +max: U32, ls: List<&2, Ln>, a: Acc, k: File -> Acc -> U32 -> IO(File & Acc)) -> IO(File & Acc):
   match i:
     case 0n:
       IO.pure(File & Acc, (f, a))
     case 1n:
-      IO.bind(Acc, File & Acc, Stb.write(h, home, logsize, ls, a), a2 => k(f, a2, max))
+      IO.bind(Acc, File & Acc, Stb.write(h, home, logsize, ls, a), a2 => k(f, a2, chunk))
     case _:
       k(f, a, U32.mul(max, 2))
 
-def Stb.cut(f: File, +h: String, +home: String, +logsize: Nat, +max: U32, c: Cut, a: Acc, k: File -> Acc -> U32 -> IO(File & Acc)) -> IO(File & Acc):
+def Stb.cut(f: File, +h: String, +home: String, +logsize: Nat, +chunk: U32, +max: U32, c: Cut, a: Acc, k: File -> Acc -> U32 -> IO(File & Acc)) -> IO(File & Acc):
   match c:
     case Cut{ls, +used, +total}:
-      Stb.then(Stb.next(used, total, max), f, h, home, logsize, max, ls, a, k)
+      Stb.then(Stb.next(used, total, max), f, h, home, logsize, chunk, max, ls, a, k)
 
-def Stb.read(r: File & Result<&1, &1, U32 & String, List<&2, U32>>, +h: String, +home: String, +logsize: Nat, +max: U32, a: Acc, k: File -> Acc -> U32 -> IO(File & Acc)) -> IO(File & Acc):
+def Stb.read(r: File & Result<&1, &1, U32 & String, List<&2, U32>>, +h: String, +home: String, +logsize: Nat, +chunk: U32, +max: U32, a: Acc, k: File -> Acc -> U32 -> IO(File & Acc)) -> IO(File & Acc):
   (f, res) = r
   match res:
     case Done{bs}:
-      Stb.cut(f, h, home, logsize, max, Cut.of(bs), a, k)
+      Stb.cut(f, h, home, logsize, chunk, max, Cut.of(bs), a, k)
     case Fail{(_, e)}:
       IO.die(File & Acc, 1, "store build: read: " ++ e)
 
 # chunks until the log ends (fuel: more than the chunks it can take)
-def Stb.loop(fuel: Nat, f: File, +h: String, +home: String, +logsize: Nat, +max: U32, +a: Acc) -> IO(File & Acc):
+def Stb.loop(fuel: Nat, f: File, +h: String, +home: String, +logsize: Nat, +chunk: U32, +max: U32, +a: Acc) -> IO(File & Acc):
   match fuel:
     case 0n:
       IO.pure(File & Acc, (f, a))
     case 1n+n:
       +off : Nat = Acc.off(a)
       IO.bind(File & Result<&1, &1, U32 & String, List<&2, U32>>, File & Acc, File.read_at(f, U32.from_nat(off), max),
-        r => Stb.read(r, h, home, logsize, max, a, f2 => a2 => m2 => Stb.loop(n, f2, h, home, logsize, m2, a2)))
+        r => Stb.read(r, h, home, logsize, chunk, max, a, f2 => a2 => m2 => Stb.loop(n, f2, h, home, logsize, chunk, m2, a2)))
 
 def Stb.file(r: Result<&1, &1, U32 & String, File>) -> IO(File):
   match r:
@@ -412,7 +451,7 @@ type Built is Data:
 # checks it), then the chunks
 def Stb.first(+size: Nat, +h: String, +home: String, +chunk: U32, r: File & Result<&1, &1, U32 & String, List<&2, U32>>) -> IO(File & Acc):
   (f, res) = r
-  Stb.loop(Nat.add(size, 64n), f, h, home, size, chunk, Acc.new(SDB.Sdb.log_id(Result.default(&1, &1, U32 & String, List<&2, U32>, res, Nil{}))))
+  Stb.loop(Nat.add(size, 64n), f, h, home, size, chunk, chunk, Acc.new(SDB.Sdb.log_id(Result.default(&1, &1, U32 & String, List<&2, U32>, res, Nil{}))))
 
 def Stb.run(r: File & Nat, +h: String, +home: String, +chunk: U32) -> IO(File & Acc):
   (f, +size) = r
@@ -477,6 +516,9 @@ def Stb.build(+home: String, +chunk: U32) -> IO(Built):
     rm : Result<&1, &1, U32 & String, U32 & (String & String)> <- Process.run("rm", ["-f", db, db ++ "-wal", db ++ "-shm", db ++ "-journal"], "", 4096, 30000)
     o : String <- D.Db.open(db)
     +h : String <- Stb.open(o)
+    # Bound SQLite's page cache to 2 MiB; sort/index scratch goes to disk.
+    cfg : String <- D.Db.exec(h, "PRAGMA cache_size = -2048; PRAGMA temp_store = FILE")
+    Stb.check("cache and temp storage", cfg)
     sch : String <- D.Db.exec(h, SDB.Sdb.schema())
     Stb.check("schema", sch)
     sy : String <- D.Db.exec(h, "PRAGMA synchronous = OFF")
@@ -511,7 +553,7 @@ def Stb.done(b: Built, +t0: Nat, +t1: Nat) -> IO(Unit):
 def Stb.child(+home: String) -> IO(Unit):
   do IO<Unit>:
     t0 : Nat <- IO.now()
-    b : Built <- Stb.build(home, 1048576)
+    b : Built <- Stb.build(home, 262144)
     t1 : Nat <- IO.now()
     Stb.done(b, t0, t1)
 
