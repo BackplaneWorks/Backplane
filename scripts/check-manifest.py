@@ -45,19 +45,17 @@ def deps(path):
 
 
 def closures(files):
-    graph = {f: deps(f) for f in files}
-    lines = {}
-    for f in files:
-        try:
-            lines[f] = len(pathlib.Path(f).read_text(errors="ignore").splitlines())
-        except OSError:
-            lines[f] = 0
-    # Files imported but not in the list still count toward a closure's size.
-    extra = set()
-    for ds in graph.values():
-        extra.update(d for d in ds if d not in graph)
-    for f in extra:
+    # A selected file may reach several levels of unselected imports.
+    # Discover and cost every reached file, including cycles, before scoring
+    # the selection; only the requested roots become manifest imports.
+    graph, lines = {}, {}
+    pending = list(files)
+    while pending:
+        f = pending.pop()
+        if f in graph:
+            continue
         graph[f] = deps(f)
+        pending.extend(graph[f])
         try:
             lines[f] = len(pathlib.Path(f).read_text(errors="ignore").splitlines())
         except OSError:
