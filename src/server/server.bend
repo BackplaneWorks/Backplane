@@ -191,6 +191,10 @@ type Msg is Data:
   Ping{client: U32, payload: List<&2, U32>}
   Leave{client: U32}
   Rpc{client: U32, text: String}
+  # a thin view's request (view.*), passed on to the hub's inbox so it
+  # waits in the bulk lane, not ahead of pings and other requests
+  # (Rpc.lane)
+  RpcLane{client: U32, text: String}
   AgentLine{thread: String, line: String}
   # why is the exit in words (B.Exit.why), made off the hub
   AgentGone{thread: String, code: U32, pid: U32, why: String}
@@ -14421,6 +14425,8 @@ def Msg.kind(m: Msg) -> String:
       "thin-read"
     case Rpc{_, _}:
       "rpc"
+    case RpcLane{_, _}:
+      "rpc_lane"
     case AgentLine{_, _}:
       "agent_line"
     case AgentGone{_, _, _, _}:
@@ -15639,6 +15645,27 @@ def Hub.thin.flush(h: Hub, +now: Nat) -> IO(Hub):
     case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
       Hub.thin.notify(Hub{st, f, ls, cl, as, inbox, Cfg.thin.with_notes(cfg, TPACE.Notes{TPACE.Notes.touched(Cfg.thin.notes(cfg)), TPACE.Notes.paces(Cfg.thin.notes(cfg)), 0n}), note}, now)
 
+# Thin views' requests take the bulk lane (Bulk.*): a view asks again
+# after each change (view.update), and the renders those take went ahead of
+# pings, /hello and other clients' requests in the one queue (the tail
+# latencies on a busy hub, fast hub R1). Every view.* request of a client
+# takes the lane, so they stay in order among themselves (their control ids
+# must rise). The lane is a FIFO with Bulk.room() places, so agents' lines
+# keep their turn.
+def Rpc.thin(+text: String) -> Bool:
+  String.contains(text, "\"m\":\"view.")
+
+def Rpc.lane(+thin: Bool, h: Hub, +client: U32, +text: String, +now: Nat) -> IO(Hub):
+  match thin h:
+    case True{} Hub{st, f, ls, cl, as, +inbox, cfg, note}:
+      do IO<Hub>:
+        # sent in place, not spawned, so a client's requests keep their order
+        # (the inbox holds 4096; Bulk.fwd drains it whatever the hub does)
+        ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, RpcLane{client, text})
+        return Hub{st, f, ls, cl, as, inbox, cfg, note}
+    case False{} _:
+      Hub.rpc(h, client, text, now)
+
 def Hub.handle(h: Hub, m: Msg, +now: Nat) -> IO(Hub):
   match m:
     case LockProbe{name, holder, n}:
@@ -15691,7 +15718,9 @@ def Hub.handle(h: Hub, m: Msg, +now: Nat) -> IO(Hub):
       Hub.leave(h, client, now)
     case ThinRead{client, gen, view, target, text}:
       Hub.thin.read_job(h, client, gen, view, target, text, now)
-    case Rpc{client, text}:
+    case Rpc{client, +text}:
+      Rpc.lane(Rpc.thin(text), h, client, text, now)
+    case RpcLane{client, text}:
       Hub.rpc(h, client, text, now)
     case AgentLine{tag, line}:
       Hub.tagged(h, tag, line, now)
