@@ -677,12 +677,17 @@ def Hub.methods.git() -> List<&2, String>:
 def Hub.git(+s: M.State, +client: U32, +id: String, +job: String, +thread: String, +a: String, +b: String) -> Step:
   Step.outs([Git{client, id, job, thread, Hub.cwd(s, Hub.thread(s, thread)), a, b}])
 
-def Term.bytes(xs: List<&2, J.Json>) -> List<&2, U32>:
+# a request's byte array, in tail calls only (a 64 KB paste is 64K
+# elements: a frame each overflowed the JS stack)
+def Term.bytes.go(xs: List<&2, J.Json>, acc: List<&2, U32>) -> List<&2, U32>:
   match xs:
     case Nil{}:
-      Nil{}
+      List.reverse(&2, U32, acc)
     case +x <> t:
-      U32.from_nat(Maybe.default(&2, Nat, Nat.read(J.Json.as_raw(Some{x}, "0")), 0n)) <> Term.bytes(t)
+      Term.bytes.go(t, U32.from_nat(Maybe.default(&2, Nat, Nat.read(J.Json.as_raw(Some{x}, "0")), 0n)) <> acc)
+
+def Term.bytes(xs: List<&2, J.Json>) -> List<&2, U32>:
+  Term.bytes.go(xs, Nil{})
 
 # a thread's terminal: open (in the thread's directory), keys in, resize
 def Hub.term(+s: M.State, +client: U32, +id: String, +op: String, +p: J.Json) -> Step:
