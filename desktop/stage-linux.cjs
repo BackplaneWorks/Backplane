@@ -43,6 +43,18 @@ if(directBrowser){
   build.desktopBrowser={protocol:1,guestManagerSha256:sha('browser-guest.cjs'),preloadSha256:sha('browser-recording-preload.cjs'),recorderSourceSha256:'2e4b03765cc4ae6595e32048555ffe27e750994a85c18b89027064f3c0c15350',subframePreload:true,popupPreloadVerified:false};
 }
 fs.writeFileSync(path.join(resourceRoot,'BUILD.json'),JSON.stringify(build,null,2)+'\n');
+// BACKPLANE_DESKTOP_RESIDENT=1: the app attaches to the resident hub of its
+// home and never owns it (no stop, no update), as a release made by
+// produce-release.cjs with a resident lifecycle policy: the same
+// runtime/resources/DESKTOP-BUILD.json fields, which main.cjs reads first.
+if(process.env.BACKPLANE_DESKTOP_RESIDENT==='1'){
+  const sha=file=>crypto.createHash('sha256').update(fs.readFileSync(path.join(appRoot,file))).digest('hex');
+  const desktop={serviceVersion:version,electronVersion,sourceTree:process.env.BACKPLANE_SOURCE_TREE||null,sourceCommit:process.env.BACKPLANE_SOURCE_COMMIT||null,
+    lifecyclePolicy:{mode:'resident-service',managedStop:false,managedUpdate:false},
+    qualification:'local Linux stage (stage-linux.cjs); resident service; unsigned'};
+  if(directBrowser)desktop.desktopBrowser={protocol:1,guestManagerSha256:sha('browser-guest.cjs'),preloadSha256:sha('browser-recording-preload.cjs')};
+  fs.writeFileSync(path.join(output,'runtime/resources/DESKTOP-BUILD.json'),JSON.stringify(desktop,null,2)+'\n');
+}
 fs.writeFileSync(path.join(output,'backplane-electron'),'#!/bin/sh\nset -eu\n: "${BACKPLANE_HOME:?Set the explicit absolute Backplane home selected for this stage}"\nBACKPLANE_STAGE_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\nexec "$BACKPLANE_STAGE_ROOT/runtime/backplane-desktop" "$@"\n',{mode:0o755});
 const hashes={};
 function inventory(dir){for(const entry of fs.readdirSync(dir,{withFileTypes:true})){const file=path.join(dir,entry.name);if(entry.isDirectory())inventory(file);else if(entry.isSymbolicLink())throw Error('Stage symlinks are not supported');else{assert(!/\.(?:ttf|otf|woff2?)$/i.test(file),'No font files in stage');hashes[path.relative(output,file)]=crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');}}}

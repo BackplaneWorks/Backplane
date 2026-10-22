@@ -1,4 +1,6 @@
 import Base
+import ./src/core/thin.bend as THINL # S3 lazy thin index
+import ./src/server/thin-mail.bend as TMAILL # S3 lazy mail cache
 import ./src/core/storedb.bend as SDB # S1 indexed store
 import ./test/mobile_loading_proof.bend as PRESENTPROOF
 import ./src/core/mailcontinuity.bend as MCN
@@ -12389,6 +12391,49 @@ def Laws.sdb_eq_fold_small():
 def Laws.sdb_entries_mine_small():
   {==}
 # ---- end S1 indexed store ----
+
+# ---- S3: the thin index and the mail cache on demand (fast-hub) ----
+def Laws.thin_changes_append(a, b, i):
+  match a:
+    case Nil{}:
+      {==}
+    case h <> t:
+      Laws.thin_changes_append(t, b, THINL.Index.change(i, h))
+
+def Laws.thin_lazy_of(st): {==}
+
+def Laws.thin_lazy_changes(cs, l):
+  match l:
+    case THINL.Built{i}:
+      {==}
+    case THINL.Later{st, done}:
+      Laws.thin_changes_append(done, cs, THINL.Index.of(st))
+
+def Laws.thin_lazy_warm(l):
+  match l:
+    case THINL.Built{i}:
+      {==}
+    case THINL.Later{st, done}:
+      {==}
+
+def Laws.thin_mail_replay_append(a, b, c):
+  match a:
+    case Nil{}:
+      {==}
+    case TMAILL.Pending{cs, st} <> t:
+      Laws.thin_mail_replay_append(t, b, TMAILL.Cache.committed(cs, st, c))
+
+def Laws.thin_mail_lazy_of(st): {==}
+
+def Laws.thin_mail_lazy_committed(cs, st, l):
+  match l:
+    case TMAILL.Built{c}:
+      {==}
+    case TMAILL.Later{base, done}:
+      Laws.thin_mail_replay_append(done, [TMAILL.Pending{cs, st}], TMAILL.Cache.of(base))
+
+def Laws.thin_mail_lazy_warm(st, done): {==}
+# ---- end S3 ----
 
 # ---- browser pages and loopback (J3) ----
 def Laws.browser_owner_unknown_refused(): {==}

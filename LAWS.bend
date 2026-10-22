@@ -1,4 +1,6 @@
 import Base
+import ./src/core/thin.bend as THINL # S3 lazy thin index
+import ./src/server/thin-mail.bend as TMAILL # S3 lazy mail cache
 import ./src/core/storedb.bend as SDB # S1 indexed store
 import ./src/core/presentation.bend as PRESENTVIEW
 import ./src/core/desktop-browser.bend as DBGUI
@@ -11016,6 +11018,55 @@ law sdb_eq_fold_small:
 law sdb_entries_mine_small:
   {SDB.Tab.mine(SDB.Mat.facts(SDB.Mat.replay(SDB.Demo.small.log(), SDB.Mat.empty())), "t1") == M.State.mine(M.State.replay(SDB.Demo.small(), M.State.empty()), "t1") : List<&2, M.Entry>}
 # ---- end S1 indexed store ----
+
+# ---- S3: the thin index and the mail cache on demand (fast-hub) ----
+# The hub builds both after it listens (THIN.Lazy, TMAIL.Lazy): what it
+# answers once they are built is what the eager boot would have held.
+
+# the index fed two runs of changes is the index fed them one after the other
+law thin_changes_append:
+  for a: List<&2, M.Change>
+  for +b: List<&2, M.Change>
+  for +i: THINL.Index
+  {THINL.Index.changes(List.append(&2, M.Change, a, b), i) == THINL.Index.changes(b, THINL.Index.changes(a, i)) : THINL.Index}
+
+# an index not built yet is the boot's index
+law thin_lazy_of:
+  for st: M.State
+  {THINL.Lazy.force(THINL.Lazy.of(st)) == THINL.Index.of(st) : THINL.Index}
+
+# a commit while it is not built is the commit applied to the eager index
+law thin_lazy_changes:
+  for +cs: List<&2, M.Change>
+  for l: THINL.Lazy
+  {THINL.Lazy.force(THINL.Lazy.changes(cs, l)) == THINL.Index.changes(cs, THINL.Lazy.force(l)) : THINL.Index}
+
+# the index built away from the hub, taken with the commits it missed
+law thin_lazy_warm:
+  for l: THINL.Lazy
+  {THINL.Lazy.force(THINL.Lazy.warm(THINL.Index.of(THINL.Lazy.base(l)), l)) == THINL.Lazy.force(l) : THINL.Index}
+
+law thin_mail_replay_append:
+  for a: List<&2, TMAILL.Pending>
+  for +b: List<&2, TMAILL.Pending>
+  for +c: TMAILL.Cache
+  {TMAILL.Lazy.replay(List.append(&2, TMAILL.Pending, a, b), c) == TMAILL.Lazy.replay(b, TMAILL.Lazy.replay(a, c)) : TMAILL.Cache}
+
+law thin_mail_lazy_of:
+  for st: M.State
+  {TMAILL.Lazy.force(TMAILL.Lazy.of(st)) == TMAILL.Cache.of(st) : TMAILL.Cache}
+
+law thin_mail_lazy_committed:
+  for +cs: List<&2, M.Change>
+  for +st: M.State
+  for l: TMAILL.Lazy
+  {TMAILL.Lazy.force(TMAILL.Lazy.committed(cs, st, l)) == TMAILL.Cache.committed(cs, st, TMAILL.Lazy.force(l)) : TMAILL.Cache}
+
+law thin_mail_lazy_warm:
+  for +st: M.State
+  for +done: List<&2, TMAILL.Pending>
+  {TMAILL.Lazy.force(TMAILL.Lazy.warm(TMAILL.Cache.of(st), TMAILL.Later{st, done})) == TMAILL.Lazy.force(TMAILL.Later{st, done}) : TMAILL.Cache}
+# ---- end S3 ----
 
 # ---- browser pages and loopback (J3) ----
 # page ids: an unknown one is refused, a thread's or bot's accepted
