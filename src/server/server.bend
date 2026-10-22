@@ -16256,7 +16256,7 @@ def Boot.got(+hot: HB.Hot, +home: String, +left: Nat, again: Unit -> IO(HB.Hot))
 
 # load the store; if it is not usable, build it and load again (left
 # builds at most)
-def Boot.loop(left: Nat, +home: String) -> IO(HB.Hot):
+def Boot.loop(+left: Nat, +home: String) -> IO(HB.Hot):
   match left:
     case 0n:
       IO.bind(HB.Hot, HB.Hot, HB.Hot.load(home), hot => Boot.got(hot, home, 0n, u => IO.pure(HB.Hot, HB.Hot.no("no build left"))))
