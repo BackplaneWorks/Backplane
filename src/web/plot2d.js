@@ -178,7 +178,27 @@ class View {
       if (placed && Number.isFinite(x) && Number.isFinite(y)) placed(`${x.toFixed(4)}\t${y.toFixed(4)}\t\t`);
     });
     // a new size refits the view, unless the user has moved it
-    new ResizeObserver(() => { if (!this.fitted || !this.touched) this.fit(); else this.later(); }).observe(canvas);
+    this.resize = new ResizeObserver(() => { if (!this.fitted || !this.touched) this.fit(); else this.later(); });
+    this.resize.observe(canvas);
+    this.dprChanged = () => { this.watchDpr(); this.later(); };
+    this.watchDpr();
+  }
+
+  watchDpr() {
+    this.dprQuery?.removeEventListener("change", this.dprChanged);
+    this.dprQuery = window.matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`);
+    this.dprQuery.addEventListener("change", this.dprChanged);
+  }
+
+  dispose() {
+    this.disposed = true;
+    this.resize.disconnect();
+    this.dprQuery.removeEventListener("change", this.dprChanged);
+    cancelAnimationFrame(this.frame);
+    clearInterval(this.tick);
+    clearTimeout(this.baking);
+    clearTimeout(this.resting);
+    if (this.idling) cancelIdleCallback(this.idling);
   }
 
   // the whole plot in view, centred, with a margin
@@ -191,6 +211,8 @@ class View {
     this.oy = h / 2 - (y0 + y1) / 2 * this.scale;
     this.fitted = true;
     this.touched = false;
+    // a jump, not a move: drawn at once rather than stretched from the bitmap
+    this.rest = true;
     this.later();
   }
 
@@ -201,9 +223,9 @@ class View {
   }
 
   later() {
-    if (this.queued) return;
+    if (this.queued || this.disposed) return;
     this.queued = true;
-    requestAnimationFrame(() => { this.queued = false; this.draw(); });
+    this.frame = requestAnimationFrame(() => { this.queued = false; this.draw(); });
   }
 
   // review comments' pins and the note form sit on the stage at their place
@@ -243,7 +265,96 @@ class View {
       if (!(p && p.none) && !this.tick) this.tick = setInterval(() => { if (this.plot && (this.plot.chunks || this.plot.none)) { clearInterval(this.tick); this.tick = null; } this.later(); }, 1000);
       return;
     }
-    g.setTransform(this.scale * dpr, 0, 0, this.scale * dpr, this.ox * dpr, this.oy * dpr);
+    // while the view moves, the layers come from a bitmap of them with a
+    // margin (the native window keeps a base frame the same way): a pan
+    // inside the margin only places it; a zoom, or a pan past it, stretches
+    // it until the view rests a moment, then it is drawn again. A view that
+    // has not moved (a new plot, a fade, a layer turned off) draws the
+    // layers straight onto the page, and the bitmap follows when idle.
+    const look = `${this.off} ${this.dim} ${this.lift} ${this.fade} ${this.bg} ${w} ${h} ${dpr}`;
+    this.look = look;
+    const view = `${this.scale} ${this.ox} ${this.oy}`;
+    const moved = this.shown !== undefined && view !== this.shown;
+    this.shown = view;
+    let b = this.cache;
+    if (b && (b.plot !== p || b.look !== look)) b = null;
+    // Even a pan inside the margin needs a fresh rested frame: a bitmap
+    // shifted by a fraction of a pixel cannot reproduce vector antialiasing.
+    if (moved && !this.rest) {
+      this.moving = true;
+      clearTimeout(this.resting);
+      this.resting = setTimeout(() => { this.rest = true; this.later(); }, 120);
+    }
+    if (this.rest) this.moving = false;
+    if (b && this.moving) {
+      const f = this.scale / b.scale;
+      g.setTransform(f, 0, 0, f, this.ox * dpr - f * (b.ox * dpr + b.m), this.oy * dpr - f * (b.oy * dpr + b.m));
+      g.drawImage(b.canvas, 0, 0);
+    } else {
+      const t = performance.now();
+      this.fading = this.paint(g, dpr, 0);
+      this.drew = performance.now() - t;
+      // only while something fades in does it ask for the next frame
+      if (this.fading) this.later();
+      else this.idle();
+    }
+    this.rest = false;
+    // how it came and how long the layers took to draw, small in a corner
+    const st = stats.get(this.key);
+    if (st) {
+      g.setTransform(1, 0, 0, 1, 0, 0);
+      g.fillStyle = "rgba(138,143,152,0.9)";
+      g.font = `${11 * dpr}px system-ui, sans-serif`;
+      g.textAlign = "left";
+      g.fillText(`${mb(st.bytes)}` + (st.waited > 0.5 ? ` · came after ${st.waited.toFixed(1)} s` : "") + (this.drew ? ` · drawn in ${Math.round(this.drew)} ms` : ""), 8 * dpr, h - 8 * dpr);
+    }
+  }
+
+  // the layers at the current view into the bitmap, kept for the next frames
+  // unless something is still fading in (then the next frame draws again)
+  bake(p, look, w, h, dpr) {
+    const m = Math.round(256 * dpr);
+    const b = this.cache && this.cache.canvas.width === w + 2 * m && this.cache.canvas.height === h + 2 * m ? this.cache : { canvas: document.createElement("canvas") };
+    if (b.canvas.width !== w + 2 * m) b.canvas.width = w + 2 * m;
+    if (b.canvas.height !== h + 2 * m) b.canvas.height = h + 2 * m;
+    const g = b.canvas.getContext("2d");
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.fillStyle = this.bg;
+    g.fillRect(0, 0, b.canvas.width, b.canvas.height);
+    const t = performance.now();
+    const fading = this.paint(g, dpr, m);
+    this.drew = performance.now() - t;
+    Object.assign(b, { plot: fading ? null : p, look, scale: this.scale, ox: this.ox, oy: this.oy, m });
+    this.cache = b;
+    this.fading = fading;
+    // only while something fades in does it ask for the next frame
+    if (fading) this.later();
+    return b;
+  }
+
+  // the bitmap for the view on screen, made when the page is idle so the
+  // first pan or zoom finds it ready
+  idle() {
+    clearTimeout(this.baking);
+    if (this.idling) cancelIdleCallback(this.idling);
+    this.baking = setTimeout(() => {
+      // Baking never replaces the rested canvas. Even an integer margin
+      // can change Canvas2D's clipping/antialiasing by a few pixels.
+      const go = () => {
+        if (!this.disposed && !this.fading && !this.moving && this.plot && this.plot.chunks) {
+          const dpr = window.devicePixelRatio || 1;
+          this.bake(this.plot, this.look, this.canvas.width, this.canvas.height, dpr);
+        }
+      };
+      if (window.requestIdleCallback) this.idling = requestIdleCallback(go, { timeout: 1000 }); else go();
+    }, 150);
+  }
+
+  // every layer at the current view, shifted by the bitmap's margin; whether
+  // something is still fading in
+  paint(g, dpr, m) {
+    const p = this.plot;
+    g.setTransform(this.scale * dpr, 0, 0, this.scale * dpr, this.ox * dpr + m, this.oy * dpr + m);
     g.lineCap = "round";
     g.lineJoin = "round";
     const now = performance.now();
@@ -266,17 +377,7 @@ class View {
       g.stroke(k.line);
     }
     g.globalAlpha = 1;
-    // only while something fades in does it ask for the next frame
-    if (fading) this.later();
-    // how it came, small in a corner
-    const st = stats.get(this.key);
-    if (st) {
-      g.setTransform(1, 0, 0, 1, 0, 0);
-      g.fillStyle = "rgba(138,143,152,0.9)";
-      g.font = `${11 * dpr}px system-ui, sans-serif`;
-      g.textAlign = "left";
-      g.fillText(`${mb(st.bytes)}` + (st.waited > 0.5 ? ` · came after ${st.waited.toFixed(1)} s` : ""), 8 * dpr, h - 8 * dpr);
-    }
+    return fading;
   }
 }
 
@@ -298,8 +399,8 @@ function present(p) {
 // after each render: the canvas on the page (if any) shows the source its
 // data-key names, once the hub has sent it
 export function mount(canvas) {
-  if (!canvas) { view = null; return; }
-  if (!view || view.canvas !== canvas) view = new View(canvas, canvas.dataset.bg || "#0d0f12");
+  if (!canvas) { view?.dispose(); view = null; return; }
+  if (!view || view.canvas !== canvas) { view?.dispose(); view = new View(canvas, canvas.dataset.bg || "#0d0f12"); }
   const off = Number(canvas.dataset.off || 0), dim = Number(canvas.dataset.dim || 0), lift = Number(canvas.dataset.lift ?? 255);
   if (off !== view.off || dim !== view.dim || lift !== view.lift) { view.off = off; view.dim = dim; view.lift = lift; view.later(); }
   present(view.plot);
@@ -308,7 +409,8 @@ export function mount(canvas) {
   const note = document.querySelector(".rc-note input");
   if (note && !noteSeen) note.focus();
   noteSeen = !!note;
-  view.fade = Number(canvas.dataset.fade || 0);
+  const fade = Number(canvas.dataset.fade || 0);
+  if (fade !== view.fade) { view.fade = fade; view.later(); }
   const key = canvas.dataset.key || "";
   if (key !== view.key) {
     // another version of the same file keeps its view, and the last one
