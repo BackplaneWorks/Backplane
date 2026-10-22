@@ -36,6 +36,38 @@ else:
 """
 
 
+class CheckManifestTest(unittest.TestCase):
+    """A focused check selection still costs its complete import closure."""
+
+    def test_transitive_unselected_imports_and_cycle(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "deep").mkdir()
+            (root / "selected.bend").write_text("import ./middle.bend as Mid\n")
+            (root / "middle.bend").write_text("import ./deep/leaf.bend as Leaf\n")
+            (root / "deep/leaf.bend").write_text("import ../middle.bend as Mid\n# leaf\n")
+            tool = ROOT / "scripts/check-manifest.py"
+            code = ("import importlib.util,json; "
+                    "s=importlib.util.spec_from_file_location('m'," + repr(str(tool)) + "); "
+                    "m=importlib.util.module_from_spec(s); s.loader.exec_module(m); "
+                    "c,n=m.closures(['selected.bend']); "
+                    "print(json.dumps({'closure':sorted(c['selected.bend']),'lines':n}))")
+            got = subprocess.run([os.sys.executable, "-c", code], cwd=root,
+                                 capture_output=True, text=True, check=True)
+            result = json.loads(got.stdout)
+            self.assertEqual(result["closure"], ["deep/leaf.bend", "middle.bend", "selected.bend"])
+            self.assertEqual(result["lines"], {"selected.bend": 1, "middle.bend": 1, "deep/leaf.bend": 2})
+            out = root / "manifests"
+            ran = subprocess.run([os.sys.executable, str(tool), "generate", str(out), "1", "selected.bend"],
+                                 cwd=root, capture_output=True, text=True)
+            self.assertEqual(ran.returncode, 0, ran.stdout + ran.stderr)
+            manifest = (out / "manifest-0.bend").read_text()
+            self.assertEqual(manifest.count(" as M"), 1)
+            self.assertIn("../selected.bend as M000", manifest)
+            self.assertNotIn("middle.bend", manifest)
+            self.assertNotIn("leaf.bend", manifest)
+
+
 class TestRunnerTest(unittest.TestCase):
     """Keep the positive suite strict across both execution paths."""
 
