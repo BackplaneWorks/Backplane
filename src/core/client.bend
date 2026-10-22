@@ -2195,6 +2195,16 @@ def Side.ids(ts: List<&2, M.Thread>) -> List<&2, String>:
     case t <> rest:
       M.Thread.id(t) <> Side.ids(rest)
 
+# A project's "Settled N": the count a thin window carries (the hub's
+# thin-view Settled.counts, setting "thin.settled.<project>": a window
+# holds only a few of a collapsed project's threads), else the shelf's own
+def Side.settled.key(+pid: String) -> String:
+  "thin.settled." ++ pid
+
+def Side.settled.n(+st: M.State, +pid: String, +shown: Nat) -> Nat:
+  +n = M.Switch.num(M.Setting.get(st, Side.settled.key(pid), ""), 0n)
+  Bool.pick(Nat, Nat.is_gt(n, shown), n, shown)
+
 def Side.when(on: Bool, xs: List<&2, String>) -> List<&2, String>:
   match on:
     case True{}:
@@ -2668,6 +2678,11 @@ def Ui.skill.k(+word: String, +u: Ui) -> Act:
 # complete the word being typed
 def Ui.skill(+u: Ui, +v: String) -> Act:
   Ui.skill.k(Skills.pick(Ui.skills(u), v), u)
+
+# whether a draft offers the thread's skills: a `$name` or a slash
+# command being typed (a hub rendering a thin view lists them for it)
+def Skills.wants(+draft: String) -> Bool:
+  Bool.or(Skills.typing(draft), SL.Slash.typing(draft))
 
 def Skills.need(+u: Ui) -> Bool:
   Bool.and(Bool.or(Skills.typing(Ui.draft_text(u)), SL.Slash.typing(Ui.draft_text(u))), Bool.not(String.eq(Ui.info(u, "skills.for"), Ui.sel(u))))
@@ -4047,6 +4062,13 @@ def Refs.fill(on: Bool, u: Ui) -> Ui:
           RF.Refs.fars.if(String.starts_with(Skills.token(Str.get(dr, sel)), "@"), Str.get(nf, "bots.remote"), BT.World.peers(M.State.bots(st))))), "\n")), "refs.for", Refs.for(sel, Str.get(dr, sel))), ob, tr}
     case False{} _:
       u
+
+# A view the hub renders (server/thin-actor.bend) never runs Ui.draft: its
+# draft comes with the request. The references cache is filled here for the
+# draft as it is, when a reference is being typed and the cache is for
+# another draft, so a thin client's composer offers @ > % # rows too.
+def Refs.ready(+u: Ui) -> Ui:
+  Refs.fill(Bool.and(RF.Refs.typing(Skills.token(Ui.draft_text(u))), Bool.not(String.eq(Ui.info(u, "refs.for"), Refs.for(Ui.sel(u), Ui.draft_text(u))))), u)
 
 def Refs.want(a: Act) -> Act:
   match a:

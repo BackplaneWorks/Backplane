@@ -3,6 +3,7 @@ import ./model.bend as M
 import ./mail.bend as ML
 import ./mailcontinuity.bend as MC
 import ./json.bend as J
+import ./uber.bend as UBM
 
 # A disposition settles ONE received notice, never the underlying work,
 # conversation status, permission, provider, or notification policy.
@@ -18,13 +19,31 @@ def Disposition.current(+s: M.State, +r: ML.Run) -> String:
 def Disposition.handled(+s: M.State, +r: ML.Run) -> Bool:
   Bool.not(String.is_empty(M.Setting.get(s, Disposition.key(ML.Run.thread(r), Disposition.current(s, r)), "")))
 
+# Mail runs for a bot: on with mail.on (automation), and always for the
+# promoted uberbot. Mail addressed to the uberbot is a delivery, not
+# automation: act mail wakes it in a private run (never the person's chat)
+# even with mail.on off; no other bot is woken (laws uber_mail_*).
+def Runs.on(+s: M.State, +bot: String) -> Bool:
+  Bool.or(String.eq(M.Setting.get(s, "mail.on", "off"), "on"), UBM.Uber.is(s, bot))
+
+def Runs.gate.k(on: Bool, +r: ML.Run) -> Maybe<&2, ML.Run>:
+  match on:
+    case True{}: Some{r}
+    case False{}: None{}
+
+# a run, if runs are on for its bot
+def Runs.gate(+s: M.State, r: Maybe<&2, ML.Run>) -> Maybe<&2, ML.Run>:
+  match r:
+    case None{}: None{}
+    case Some{+r}: Runs.gate.k(Runs.on(s, ML.Run.bot(r)), r)
+
 def Disposition.running(t: M.TurnState) -> Bool:
   match t:
     case M.Running{}: True{}
     case _: False{}
 
 def Disposition.live(+s: M.State, +r: ML.Run) -> Bool:
-  Bool.and(String.eq(M.Setting.get(s, "mail.on", "off"), "on"),
+  Bool.and(Runs.on(s, ML.Run.bot(r)),
     Bool.and(ML.Run.live(r), Disposition.running(M.Thread.turn(M.State.thread.get(s, ML.Run.thread(r))))))
 
 def Disposition.matches(live: Bool, +input: String, +current: String) -> Bool:
