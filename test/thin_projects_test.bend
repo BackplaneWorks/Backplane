@@ -5,6 +5,7 @@ import ../src/core/model.bend as M
 import ../src/core/thin.bend as T
 import ../src/server/thin-view.bend as V
 import ../src/core/client.bend as U
+import ../src/core/thin-wire.bend as W
 
 # Every project is in a thin view's window, with its few most recent
 # threads, whatever the thin index holds: after a hot boot it holds only the
@@ -48,6 +49,11 @@ def threads(+s: M.State) -> String:
 def has(+xs: String, +x: String) -> String:
   Bool.show(String.contains(xs, x))
 
+def search.many(+n: Nat, i: T.Index) -> T.Index:
+  match n:
+    case 0n: i
+    case 1n+k: search.many(k, T.Index.post(i, M.Msg{"ctx-" ++ Nat.show(k), "s1", M.Assistant{}, "UniiChat", 60n}))
+
 def main() -> IO(Unit):
   do IO<Unit>:
     C.Check.str("every project is in the window", projects(win()), "p1,p2,p3,p4")
@@ -60,3 +66,16 @@ def main() -> IO(Unit):
     C.Check.str("and no more", has(threads(win()), "q1"), "False")
     C.Check.str("a project whose settled threads are opened has them all", has(threads(win.opened(["p3"])), "q1"), "True")
     C.Check.str("opening one project brings no other's", has(threads(win.opened(["p2"])), "q1"), "False")
+    +index : T.Index = T.Index.post(T.Index.post(T.Index.of(st()), M.Msg{"ctx-old", "s1", M.Assistant{}, "UniiChat infinite context", 57n}), M.Msg{"ctx-here", "t1", M.Assistant{}, "UniiChat here too", 58n})
+    +found : J.Json = V.Search.render(index, st(), J.Json.obj([J.KV{"target", V.Target.json("thread", "t1")}, J.KV{"query", J.Str{"UniiChat"}}]), "epoch", 0n)
+    +rows : J.Json = J.Json.get_obj(J.Json.get_obj(found, "search"), "rows")
+    C.Check.str("conversation search finds both current and hidden threads", Nat.show(List.length(&2, J.Json, J.Json.elems(rows))), "2")
+    C.Check.str("the hidden settled conversation is a selectable result", Bool.show(String.contains(J.Json.show(rows), "\"thread\":\"s1\"")), "True")
+    +paged : J.Json = V.Search.render(search.many(30n, T.Index.of(st())), st(), J.Json.obj([J.KV{"target", V.Target.json("thread", "t1")}, J.KV{"query", J.Str{"UniiChat"}}]), "epoch", 0n)
+    +page : J.Json = J.Json.get_obj(paged, "search")
+    +cursor : String = J.Json.get_str(page, "cursor", "")
+    C.Check.str("global search retains the result bound", Nat.show(List.length(&2, J.Json, J.Json.elems(J.Json.get_obj(page, "rows")))), "25")
+    C.Check.str("additional global matches require an explicit next page", Bool.show(J.Json.get_bool(page, "hasMore", False{})), "True")
+    C.Check.str("global cursor stays bound to the selected target", Bool.show(Maybe.is_some(&2, Nat, W.Cursor.read(cursor, "epoch", V.Target.json("thread", "t1"), "UniiChat"))), "True")
+    C.Check.str("a result thread cannot borrow the selected target's cursor", Bool.show(Maybe.is_some(&2, Nat, W.Cursor.read(cursor, "epoch", V.Target.json("thread", "s1"), "UniiChat"))), "False")
+    C.Check.str("search issues no selection or other commands", Nat.show(List.length(&2, J.Json, J.Json.elems(J.Json.get_obj(paged, "cmds")))), "0")
