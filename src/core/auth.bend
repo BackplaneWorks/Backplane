@@ -8,6 +8,10 @@ import ./sha256.bend as SH
 def Auth.same(+a: String, +b: String) -> Bool:
   Bool.and(Nat.is_eq(List.length(&2, U32, U8.Utf8.encode(a)), List.length(&2, U32, U8.Utf8.encode(b))), SH.Ct.eq(U8.Utf8.encode(a), U8.Utf8.encode(b)))
 
+# a peer address on this machine
+def Auth.loopback(+ip: String) -> Bool:
+  Bool.or(String.eq(ip, "127.0.0.1"), Bool.or(String.eq(ip, "::1"), String.eq(ip, "::ffff:127.0.0.1")))
+
 # Credentials are complete field values, never substrings of another field.
 def Auth.cookie.go(xs: List<&2, String>, +token: String) -> Bool:
   match xs:

@@ -109,7 +109,7 @@ def main() -> IO(Unit):
     C.Check.str("usage shortcut opens usage", U.Settings.page(state(U.Ui.act(u, "usage-open", ""))), "usage")
     C.Check.str("KiCad shortcut opens CAD", U.Settings.page(state(U.Ui.act(u, "kicad-path", ""))), "cad")
     C.Check.str("appearance still has theme", Bool.show(present(page(u, "appearance", 800, 500, 0), "setting", "ui.theme=light")), "True")
-    C.Check.str("CAD still has browser engine", Bool.show(present(page(u, "cad", 800, 900, 0), "setting", "browser.engine=cef")), "True")
+    C.Check.str("CAD has no browser engine row", Bool.show(present(page(u, "cad", 800, 900, 0), "setting", "browser.engine=chrome")), "False")
     C.Check.str("CAD still has ordering", Bool.show(present(page(u, "cad", 800, 900, 0), "setting", "order.enabled=on")), "True")
     C.Check.str("locale category uses translated label", Bool.show(String.is_empty(U.Settings.title(I.Ja{}, "appearance"))), "False")
     C.Check.str("phones omit empty desktop voice page", Bool.show(U.Settings.known(U.Settings.phone.pages(), "voice")), "False")

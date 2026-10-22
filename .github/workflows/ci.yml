@@ -110,6 +110,37 @@ jobs:
       # per runner; the four shards still execute on separate machines.
       - run: TEST_JOBS=2 scripts/test.sh
 
+  # The phone bridge as it ships (scripts/build-mobile.sh --js, the bundle
+  # the apps load) driven by its emitted-bundle tests, the web/mobile export
+  # wire, and the native sources' paging boundaries. Hermetic: no hub,
+  # device or network; about three minutes.
+  bridge:
+    name: Phone bridge, emitted
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-bend
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.3'
+      - name: Native paging source boundaries
+        run: python3 test/phone-cache/thin/check_paging_successor.py
+      - name: Emit the bridge
+        run: bash scripts/build-mobile.sh --js
+      - name: Bridge tests
+        run: |
+          mkdir -p build
+          bun test/tools/ios_mailroom_bridge_test.ts mobile/build/assets/bridge.js build/legacy-mailroom.json
+          bun test/tools/native_thin_actual07_307265.mjs mobile/build/assets/bridge.js
+          bend test/thin_emitted_fixture.bend > build/thin-emitted-fixture.json
+          bun test/tools/native_thin_emitted_307265.mjs mobile/build/assets/bridge.js build/thin-emitted-fixture.json
+      - name: Web and mobile export wire
+        run: |
+          bend test/thin_host_wire.html -o build/thin-host-wire > /dev/null
+          set -- build/thin-host-wire/chunk-*.js
+          [ "$#" = 1 ] || { echo "expected one chunk, got $#"; exit 1; }
+          bun "$1"
+
   # The hub (docs/js-service.md): bend emits src/server/main.bend as JS
   # once (kept by a hash of what it reads, so a change that leaves the
   # server alone takes the last emit), `bun build --compile` cross-builds a
