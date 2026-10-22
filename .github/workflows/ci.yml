@@ -170,6 +170,10 @@ jobs:
         run: |
           bend test/wire/index.html -o build/wire > /dev/null
           BACKPLANE_SMOKE_FULL=1 scripts/js-smoke.sh dist-js/linux-x64/backplane-serve build/web
+      # a 64 KB paste into a real terminal: the hub answers meanwhile and
+      # every byte arrives
+      - name: Terminal paste
+        run: bun test/tools/term_paste_e2e.ts dist-js/linux-x64/backplane-serve build/wire
       # the web client's reconnect pieces, and a view client hearing the
       # hub's heartbeat (and no broadcast) on the built binary
       - name: Reconnect and heartbeat
