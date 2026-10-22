@@ -54,7 +54,6 @@ import ./rvw.bend as RW
 import ../core/rview.bend as RV
 import ../server/git.bend as GT
 import ../server/review.bend as RVC
-import ../core/cef.bend as CF
 import ../core/cli.bend as CLI
 import ../server/main.bend as SV
 
@@ -616,7 +615,7 @@ def Pics.store(a: Shell, +path: String, +note: String, m: Maybe<&2, BM.Bitmap>) 
   match a:
     case Shell{+n, w, _, qd, q, +i, Aux{ws, ty, Tie{home, +url, tag, k, +ks}, fr}}:
       do IO<Shell>:
-        u2 : U.Ui <- Shot.seen(Bool.and(Bool.and(Shot.ok(path, note), String.is_empty(url)), Bool.not(U.CefUI.native(N.Nui.ui(n), Shot.bot(path)))), Pics.noted(N.Nui.ui(n), path, note), i, Shot.bot(path))
+        u2 : U.Ui <- Shot.seen(Bool.and(Shot.ok(path, note), String.is_empty(url)), Pics.noted(N.Nui.ui(n), path, note), i, Shot.bot(path))
         Shell.later(Shell{N.Nui.with_ui(n, u2), w, True{}, qd, q, i,
           Aux{ws, ty, Tie{home, url, tag, k, TieKeep.with_pics(ks, Shot.keep(Shot.ok(path, note), m, TieKeep.pics(ks), path))}, fr}})
 
@@ -2279,102 +2278,6 @@ def Caret.show(on: Bool, +t: TI.Tiles, +e: Nat) -> TI.Tiles:
     case False{}:
       TI.Tiles.blink(t, e, False{})
 
-# The embedded browser (core/cef.bend, layout.bend's Page.cef)
-# ------------------------------------------------------------
-# A window whose hub is this machine's tells it its X window (kept in the
-# scratch once at start, Cef.start) once the log has come, and again at
-# every join (browser.embed). After each frame in cef mode the "cef" hit
-# layout left for the shown page is compared with what was last sent
-# (scratch "@cef.at"): a new one is placed (browser.place), none where
-# there was one hides it. A window not in cef mode scans no hits and writes
-# nothing, except to forget a place once when the hub went back to chrome.
-
-def CefWin.say(+i: Chan(S.Msg), +method: String, p: J.Json) -> IO(Unit):
-  do IO<Unit>:
-    ok : Result<&1, &1, S.Msg, Unit> <- Chan.send(S.Msg, i, S.Rpc{0, CF.Cef.rpc(method, p)})
-    return Unit{}
-
-# a new embed places the page again (the hub forgot the old place)
-def CefWin.embed(due: Bool, +u: U.Ui, +i: Chan(S.Msg), +tag: String) -> IO(U.Ui):
-  match due:
-    case True{}:
-      do IO<U.Ui>:
-        CefWin.say(i, "browser.embed", CF.Cef.embed(U32.from_nat(CF.Cef.num(U.Ui.scratch(u, "@cef.xid"), 0n)), U.Ui.scratch(u, "@cef.display")))
-        return U.Ui.scratch_set(U.Ui.scratch_set(u, "@cef.emb", tag), "@cef.at", "")
-    case False{}:
-      IO.pure(U.Ui, u)
-
-# the first "cef" hit's place key ("" none); stops at the first
-def CefWin.hit.head(hs: List<&2, N.Hit>) -> Bool:
-  match hs:
-    case N.Hit{_, _, _, _, a, _} <> _: String.eq(a, "cef")
-    case Nil{}: False{}
-
-def CefWin.hit.go(hs: List<&2, N.Hit>, hit: Bool) -> String:
-  match hs hit:
-    case N.Hit{x0, y0, x1, y1, _, page} <> +rest True{}: CF.Cef.at.hit(page, x0, y0, x1, y1)
-    case _ <> +t False{}: CefWin.hit.go(t, CefWin.hit.head(t))
-    case Nil{} _: ""
-
-def CefWin.now(native: Bool, +hs: List<&2, N.Hit>) -> String:
-  match native:
-    case True{}: CefWin.hit.go(hs, CefWin.hit.head(hs))
-    case False{}: ""
-
-def CefWin.place(step: Nat, +u: U.Ui, +i: Chan(S.Msg), +key: String) -> IO(U.Ui):
-  match step:
-    case 0n:
-      IO.pure(U.Ui, u)
-    case 1n:
-      do IO<U.Ui>:
-        CefWin.say(i, "browser.place", CF.Cef.place.of(key))
-        return U.Ui.scratch_set(u, "@cef.at", key)
-    case 2n:
-      do IO<U.Ui>:
-        CefWin.say(i, "browser.place", CF.Cef.place.of(""))
-        return U.Ui.scratch_set(u, "@cef.at", "")
-    case _:
-      IO.pure(U.Ui, U.Ui.scratch_set(u, "@cef.at", ""))
-
-def CefWin.post.go(act: Bool, due: Bool, +step: Nat, +n: N.Nui, +i: Chan(S.Msg), +tag: String, +key: String) -> IO(N.Nui):
-  match act:
-    case True{}:
-      do IO<N.Nui>:
-        u1 : U.Ui <- CefWin.embed(due, N.Nui.ui(n), i, tag)
-        u2 : U.Ui <- CefWin.place(step, u1, i, key)
-        return N.Nui.with_ui(n, u2)
-    case False{}:
-      IO.pure(N.Nui, n)
-
-def CefWin.post.step(+due: Bool, +step: Nat, +n: N.Nui, +i: Chan(S.Msg), +tag: String, +key: String) -> IO(N.Nui):
-  CefWin.post.go(Bool.or(due, Bool.not(Nat.is_eq(step, 0n))), due, step, n, i, tag, key)
-
-def CefWin.post.key(+due: Bool, native: Bool, +key: String, +n: N.Nui, +i: Chan(S.Msg), +tag: String) -> IO(N.Nui):
-  CefWin.post.step(due, CF.Cef.post.step(native, Bool.pick(String, due, "", U.Ui.scratch(N.Nui.ui(n), "@cef.at")), key), n, i, tag, key)
-
-def CefWin.post.k(due: Bool, +native: Bool, +n: N.Nui, +hs: List<&2, N.Hit>, +i: Chan(S.Msg), +tag: String) -> IO(N.Nui):
-  CefWin.post.key(due, native, CefWin.now(native, hs), n, i, tag)
-
-# after a frame: the embed (once per join), the page's place
-def CefWin.post(+n: N.Nui, +hs: List<&2, N.Hit>, +i: Chan(S.Msg), +tag: String, +url: String) -> IO(N.Nui):
-  CefWin.post.k(CF.Cef.embed.due(U.Ui.scratch(N.Nui.ui(n), "@cef.xid"), url, U.Ui.info(N.Nui.ui(n), "origin"), U.Ui.scratch(N.Nui.ui(n), "@cef.emb"), tag),
-    CF.Cef.native(U.Ui.info(N.Nui.ui(n), "browser.engine.live"), url), n, hs, i, tag)
-
-# the window's X id and the display, kept once for the embed request
-def CefWin.seed(+u: U.Ui, +x: U32, +d: String) -> U.Ui:
-  U.Ui.scratch_set(U.Ui.scratch_set(U.Ui.scratch_set(u, "@cef.xid", CF.Cef.xid.text(x)), "@cef.display", d), "@cef.window", Bool.pick(String, U32.is_eq(x, 0), "", "1"))
-
-def CefWin.start(+u: U.Ui, +x: U32) -> IO(U.Ui):
-  IO.bind(String, U.Ui, S.Env.get("DISPLAY", ""), d => IO.pure(U.Ui, CefWin.seed(u, x, d)))
-
-# Shell.shown.two / Shell.shown after the embed and place step (kept out of
-# the long frame functions: their do-blocks are near the compiler's arity)
-def CefWin.shown.two(r: Window & Image & Image, +n: N.Nui, +hs: List<&2, N.Hit>, +q: Chan(ShellMsg), +i: Chan(S.Msg), +wa: Aux, anim: Bool, +ms: Nat) -> IO(Shell):
-  IO.bind(N.Nui, Shell, CefWin.post(n, hs, i, Tie.tag(Aux.tie(wa)), Tie.url(Aux.tie(wa))), n2 => Shell.shown.two(r, n2, q, i, wa, anim, ms))
-
-def CefWin.shown(r: Window & Image, +n: N.Nui, +hs: List<&2, N.Hit>, +q: Chan(ShellMsg), +i: Chan(S.Msg), +wa: Aux, anim: Bool, +ms: Nat) -> IO(Shell):
-  IO.bind(N.Nui, Shell, CefWin.post(n, hs, i, Tie.tag(Aux.tie(wa)), Tie.url(Aux.tie(wa))), n2 => Shell.shown(r, n2, q, i, wa, anim, ms))
-
 # the tiles to draw drawn in parallel, the tiles filled in), present them
 # and keep them for the next frame; the window fills only what differs
 # from the last one
@@ -2395,7 +2298,7 @@ def Shell.present(+pl: TI.Plan, o: L.Out, +n: N.Nui, w: Window, +q: Chan(ShellMs
         Shell.timed(t0)
         +s : N.Step = Shell.hits(n, hs, epoch)
         r2 : Window & Image & Image <- Shell.spot(r, hs)
-        CefWin.shown.two(r2, Shell.hits.nui(s), hs, q, i, Aux.with_frames(wa, TI.FSome{N.Nui.width(n), N.Nui.height(n), tiles}), Shell.hits.anim(s, Shell.anim(n, ms)), ms)
+        Shell.shown.two(r2, Shell.hits.nui(s), q, i, Aux.with_frames(wa, TI.FSome{N.Nui.width(n), N.Nui.height(n), tiles}), Shell.hits.anim(s, Shell.anim(n, ms)), ms)
 
 # The lightbox (nui.bend's Lbx, core/lightbox.bend's Lb): the picture
 # alone on a dark window, zoomed and panned, its full decode once there
@@ -2472,7 +2375,7 @@ def Lbv.paint(on: Bool, +ops: List<&2, R.Op>, +hs: List<&2, N.Hit>, +oh: List<&2
         t3 : U32 <- PS.Perf.lap("ui.lightbox", t2)
         Shell.timed(t0)
         +s : N.Step = Shell.hits(n, hs, epoch)
-        CefWin.shown(r, Shell.hits.nui(s), hs, q, i, wa, Shell.hits.anim(s, Shell.anim(n, ms)), ms)
+        Shell.shown(r, Shell.hits.nui(s), q, i, wa, Shell.hits.anim(s, Shell.anim(n, ms)), ms)
     case False{}:
       Shell.plan.timed(ops, hs, oh, n, w, q, i, wa, epoch, ms, t0, t2)
 
@@ -3133,8 +3036,7 @@ def Shell.fonts(m: Maybe<&1, L.Ty>) -> IO(L.Ty):
 def Shell.join.first(+inbox: Chan(S.Msg), +out: Chan(S.Wire), +lo: String, +gen: U32) -> IO(Result<&1, &1, S.Msg, Unit>):
   Bool.pick(IO(Result<&1, &1, S.Msg, Unit>), String.is_empty(lo), Chan.send(S.Msg, inbox, S.JoinHere{0, out, gen}), Chan.send(S.Msg, inbox, S.Join{0, out, 0n, "", gen, 0, False{}}))
 
-def Shell.twin.go(ev: Window, x: Window & U32, +inbox: Chan(S.Msg), +drafts: String, +fq: Chan(L.Ty), +lo: String, +tok: String) -> IO(Unit):
-  (pw, +xid) = x
+def Shell.twin.go(ev: Window, pw: Window, +inbox: Chan(S.Msg), +drafts: String, +fq: Chan(L.Ty), +lo: String, +tok: String) -> IO(Unit):
   do IO<Unit>:
     +q : Chan(ShellMsg) <- Chan.new(ShellMsg, 8192)
     +out : Chan(S.Wire) <- Chan.new(S.Wire, 8192)
@@ -3146,15 +3048,13 @@ def Shell.twin.go(ev: Window, x: Window & U32, +inbox: Chan(S.Msg), +drafts: Str
     got : Maybe<&1, L.Ty> <- Chan.recv(L.Ty, fq)
     ty : L.Ty <- Shell.fonts(got)
     saved : U.Ui <- Drafts.load(U.Ui.info_set(U.Ui.info_set(U.Ui.init(U32.to_nat(t)), "local.hub", lo), "local.token", tok), drafts)
-    seeded : U.Ui <- CefWin.start(saved, xid)
-    ui : U.Ui <- Lang.start(seeded)
+    ui : U.Ui <- Lang.start(saved)
     a : Shell <- Shell.later(Shell{N.Nui.init(ui, 1400, 900), pw, True{}, False{}, q, inbox, Aux{Nil{}, [ty], Tie{inbox, "", "#0", 1n, TieKeep.empty()}, [Kept.none()]}})
     Shell.loop(S.Fuel.forever(), a)
 
-# the window's X id, read once (an embedded page is made its child)
 def Shell.twin(r: Window & Window, +inbox: Chan(S.Msg), +drafts: String, +fq: Chan(L.Ty), +lo: String, +tok: String) -> IO(Unit):
   (ev, pw) = r
-  IO.bind(Window & U32, Unit, W.Win.xid(pw), x => Shell.twin.go(ev, x, inbox, drafts, fq, lo, tok))
+  Shell.twin.go(ev, pw, inbox, drafts, fq, lo, tok)
 
 # (tok: the joined hub's pairing token, read from its home: the link
 # presents it, and so does a later link back to it, "local.token")

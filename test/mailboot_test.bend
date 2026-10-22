@@ -8,7 +8,6 @@ import ../src/core/model.bend as M
 import ../src/core/sign.bend as SG
 import ../src/core/far.bend as FR
 import ../src/core/codec.bend as CC
-import ../src/core/cef.bend as CF
 
 def cfg(home: String, bn: BN.Bn) -> S.Cfg:
   S.Cfg{home, "", "127.0.0.1", 0, "", Nil{}, "test",
@@ -50,9 +49,6 @@ def main() -> IO(Unit):
     bn_count("far live setter preserves local count", BN.Bn.with_fl(b, Nil{}))
     bn_count("tools setter preserves count", BN.Bn.with_tools(b, ["tool"]))
     bn_count("teach setter preserves count", BN.Bn.with_tch(b, BN.Bn.tch(b)))
-    +cef : BN.Bn = BN.Bn.with_cef(b, CF.Cef.session.request_set(BN.Bn.cef(b), "cef"))
-    bn_count("CEF setter preserves local wire count", cef)
-    C.Check.str("count setter preserves CEF generation", CF.Cef.session.token(BN.Bn.cef(BN.Bn.with_wire_n(cef, 19n))), "1")
     +mirror : FR.In = FR.In.put(FR.In.new("synthetic-peer", "Peer"), 0n, 1n, [FR.Item{1n, CC.Change.encode(M.SettingSet{"peer.test", "yes", 1n})}])
     +far : BN.Bn = BN.Bn.with_far(b, FR.Fh.in.set(BN.Bn.far(b), mirror))
     C.Check.str("mirror fixture actually has one remote item", Nat.show(FR.In.head(FR.Fh.in(BN.Bn.far(far), "synthetic-peer", "Peer"))), "1")

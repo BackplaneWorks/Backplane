@@ -10,7 +10,7 @@ import ../src/core/mailrun.bend as R
 import ../src/core/charter.bend as CH
 import ../src/core/json.bend as J
 
-# Public incident identities, not user memory or prompts. The CEF hold is
+# Public incident identities, not user memory or prompts. The resource hold is
 # intentionally NOT a permission grant or a completed work objective.
 def run() -> String: "run1792519184-284989"
 def conv() -> String: "wake:w1792461724-229122"
@@ -18,16 +18,16 @@ def input() -> String: "t:t1792182150-155310:lr-r1792519183-284979"
 def worker() -> String: "t1792182150-155310"
 
 def incoming(+id: String) -> M.Change:
-  M.MailPosted{id, conv(), "thread:" ++ worker(), "bot:root", "wake", "w1792461724-229122", "act", "CEF remains held; no new action", 32n, 1792519183n}
+  M.MailPosted{id, conv(), "thread:" ++ worker(), "bot:root", "wake", "w1792461724-229122", "act", "Resource remains held; no new action", 32n, 1792519183n}
 
 def base() -> M.State:
   M.State.replay([
     M.ThreadCreated{"foh", "", "Root", M.Local{}, "", "/tmp/dispositions", "codex", "gpt-6.1-sol", 1n},
-    M.ThreadCreated{worker(), "", "CEF owner", M.Local{}, "", "/tmp/dispositions", "codex", "", 1n},
+    M.ThreadCreated{worker(), "", "Hold owner", M.Local{}, "", "/tmp/dispositions", "codex", "", 1n},
     M.ThreadCreated{run(), "", "Mailroom", M.Local{}, "", "/tmp/dispositions", "codex", "", 1n},
     M.BotSet{"root", "Root", "foh", 0n, "", 1n}, M.SettingSet{"mail.on", "on", 1n},
-    M.SettingSet{"cef.enabled", "off", 1n},
-    M.ConvSet{conv(), "CEF resource hold", "wake", "thread:" ++ worker() ++ "\nbot:root", "", "", 1n},
+    M.SettingSet{"hold.enabled", "off", 1n},
+    M.ConvSet{conv(), "Resource hold", "wake", "thread:" ++ worker() ++ "\nbot:root", "", "", 1n},
     incoming(input()), M.RunSet{run(), "root", conv(), input(), 1792519184n},
     M.TurnChanged{run(), M.Running{}, 1792519184n}], M.State.empty())
 
@@ -95,8 +95,8 @@ def main() -> IO(Unit):
     +done : MC.Res = call(s, args(input(), "done"))
     b("known hold can be durably handled", MC.Res.good(done), True{})
     +handled : M.State = apply(s, done)
-    n("handled notice avoids repeating known CEF escalation", owes(handled), 0n)
-    C.Check.str("CEF remains disabled", M.Setting.get(handled, "cef.enabled", ""), "off")
+    n("handled notice avoids repeating known hold escalation", owes(handled), 0n)
+    C.Check.str("Hold remains disabled", M.Setting.get(handled, "hold.enabled", ""), "off")
     C.Check.str("conversation is not marked done", ML.Mark.status(ML.Box.mark_of(M.State.mail(handled), "root", conv())), ML.Mark.status(ML.Box.mark_of(M.State.mail(s), "root", conv())))
     b("notice does not fake a running or completed turn", H.Hub.running(H.Hub.thread(handled, run())), True{})
     n("notice bookkeeping starts no effects", List.length(&2, H.Out, H.Step.outs_of(step(done))), 0n)
