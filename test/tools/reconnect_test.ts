@@ -2,7 +2,8 @@
 // jitter and a cap, Retry-After from a starting hub, one pending retry that
 // a wake runs at once, and telling a deploy from the bundle names.
 //   bun test/tools/reconnect_test.ts
-import { Backoff, Retry, retryAfterMs, bundleOf, bundleIn, deployed, probeHub, CAP_MS, RETRY_AFTER_CAP_MS } from "../../src/web/reconnect.js";
+import { Backoff, Retry, retryAfterMs, bundleOf, bundleIn, deployed, probeHub, startingText, CAP_MS, RETRY_AFTER_CAP_MS } from "../../src/web/reconnect.js";
+import { pairBrowser } from "../../src/web/auth.js";
 
 let fail = 0;
 const check = (ok: boolean, what: string) => { console.log(`${ok ? "ok  " : "FAIL"} ${what}`); if (!ok) fail++; };
@@ -68,6 +69,41 @@ check((await probeHub((() => new Promise(() => {})) as any, { timeoutMs: 50 })).
   check(deleted.sort().join() === "/chunk-old00000.js,/chunk-old11111.css,/favicon-oldoldol.svg", `old build's assets deleted (${deleted})`);
   deleted.length = 0;await prune(c, "<html>502 Bad Gateway</html>");
   check(deleted.length === 0, "a page naming no chunk prunes nothing");
+}
+// a hub that is starting (building its store): its note, as the person reads it
+check(startingText({ status: "starting", note: "building store 42%" }) === "Building the database… 42%", "store build note");
+check(startingText({ status: "starting", note: "replaying" }) === "Hub starting: replaying" && startingText({ status: "starting" }) === "Hub starting…", "other starting notes");
+check(startingText({}) === "" && startingText(null) === "", "no note");
+const starting503 = async () => ({ ok: false, status: 503, headers: new Headers({ "retry-after": "2" }), text: async () => '{"status":"starting","note":"building store 7%"}' });
+const sp = await probeHub(starting503 as any);
+check(sp.state === "starting" && sp.retryAfterMs === 2000 && sp.note === "Building the database… 7%", "probeHub carries the starting note");
+
+// pairing while the hub starts: the link's token is kept, the wait says why, then it pairs
+{
+  const store = new Map<string, string>(), waits: string[] = [], slept: number[] = [];
+  const storage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => store.set(k, v), removeItem: (k: string) => store.delete(k) };
+  const tok = "0123456789abcdef0123456789abcdef";
+  let calls = 0, keptDuring = false;
+  const fetch = async () => { calls++; keptDuring ||= store.get("backplane-token") === tok; if (calls <= 2) return { ok: false, status: 503, headers: new Headers({ "retry-after": "2" }), text: async () => '{"status":"starting","note":"building store 50%"}' }; return { ok: true, status: 200, headers: new Headers() }; };
+  const ok = await pairBrowser({ location: { hash: "#token=" + tok, pathname: "/", search: "" }, history: { replaceState() {} }, storage, fetch, onWait: (n: string) => waits.push(n), sleep: async (ms: number) => { slept.push(ms); } } as any);
+  check(ok === true && calls === 3, "pairing retries through a starting hub and pairs");
+  check(keptDuring && !store.has("backplane-token"), "the token is kept while waiting, dropped once paired");
+  check(waits[0] === "Building the database… 50%" && slept.every((ms) => ms === 2000), "the wait says why and follows Retry-After");
+  const refused = await pairBrowser({ location: { hash: "#token=" + tok, pathname: "/", search: "" }, history: { replaceState() {} }, storage, fetch: async () => ({ ok: false, status: 401, headers: new Headers() }), sleep: async () => {} } as any);
+  check(refused === false && !store.has("backplane-token"), "a refused link fails at once and is not kept");
+  let n2 = 0;
+  const flaky = await pairBrowser({ location: { hash: "#token=" + tok, pathname: "/", search: "" }, history: { replaceState() {} }, storage, fetch: async () => { if (++n2 === 1) throw new TypeError("refused"); return { ok: true, status: 200, headers: new Headers() }; }, sleep: async () => {} } as any);
+  check(flaky === true && n2 === 2, "a hub not up yet is asked again");
+}
+
+// the service worker's waiting page for a starting hub
+{
+  const src = await Bun.file(new URL("../../src/web/sw.js", import.meta.url)).text();
+  const starting = new Function("self", "caches", "location", src + "\nreturn starting;")({ addEventListener() {} }, {}, { origin: "http://h" });
+  const res = await starting(new Response('{"status":"starting","note":"building store 63%"}', { status: 503, headers: { "retry-after": "2" } }));
+  const html = await res.text();
+  check(res.status === 503 && res.headers.get("content-type")?.startsWith("text/html"), "a page, not the raw answer");
+  check(html.includes("Building the database… 63%") && html.includes('http-equiv="refresh" content="2"'), "it says the progress and loads again after Retry-After");
 }
 if (fail) { console.log(`${fail} failed`);process.exit(1); }
 console.log("all ok");
