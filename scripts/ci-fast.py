@@ -14,7 +14,8 @@ scripts/focus.sh run it.
                   with --steps
   --steps         which gates (default check,proof,tests,js)
   --shards N      at most N test shards (default 16, LOCAL_CI_SHARDS)
-  --local         run every job here through bp-admit instead of on Boat
+  --local         run every job here, as one bp-admit job, instead of on Boat
+  --dry-run       say what would run where (DIR/plan.txt); run and record nothing
 
 Records (only from a job that exited 0, only under the runner text the job
 itself printed, and only when the inputs hash the same after every job as
@@ -195,44 +196,55 @@ class Job:
                 "--timeout", str(self.timeout), "--budget-usd", "25", "--wait", "900", "--", "bash", "-c", inner]
 
     def run(self):
+        """on Boat: a refusal (75) is tried again with backoff, never run here
+        job by job; still refused, the job is left for the one local batch
+        (deferred). Boat's own trouble (70, 76) is tried once more."""
         t0 = time.time()
-        tries = 0
-        local = self.local
-        self.waited = 0.0
+        self.waited, self.deferred, tries = 0.0, False, 0
+        if self.local:
+            self.deferred = True
+            return
+        backoff = [int(x) for x in os.environ.get("LOCAL_CI_BOAT_BACKOFF", "60 120 240 480").split()]
         while True:
             tries += 1
-            self.where = "local" if local else "boat:" + self.slot
-            with open(self.log, "a") as f:
-                f.write("[ci-fast] %s try %d on %s\n" % (self.name, tries, self.where))
-                f.flush()
-                at = f.tell()
-                ts = time.time()
-                p = subprocess.Popen(self.argv(local), stdout=f, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
-                # the wait ends when bp-admit admits it, or when Boat starts the command;
-                # nothing here has a deadline: a queue is waited for, however long
-                mark = "bp-admit: admitted" if local else "running: "
-                began = None
-                while p.poll() is None:
-                    if began is None:
-                        try:
-                            with open(self.log, encoding="utf-8", errors="replace") as g:
-                                g.seek(at)
-                                if mark in g.read():
-                                    began = time.time()
-                        except OSError:
-                            pass
-                    time.sleep(1)
-                self.rc = p.returncode
-                self.waited += (began or time.time()) - ts
-            # Boat's own trouble (no exit status 70, setup 76): once more; refused (75): here
-            if not local and self.rc in (70, 76) and tries == 1:
+            self.where = "boat:" + self.slot
+            self.rc, w = self.once(self.argv(False), "running: ", tries)
+            self.waited += w
+            if self.rc in (70, 76) and tries == 1:
                 continue
-            if not local and self.rc == 75 and os.environ.get("LOCAL_CI_NO_LOCAL") != "1":
-                local = True
+            if self.rc == 75 and backoff:
+                p = backoff.pop(0)
+                with open(self.log, "a") as f:
+                    f.write("[ci-fast] Boat refused it; trying Boat again in %ds\n" % p)
+                time.sleep(p)
+                self.waited += p
                 continue
             break
+        if self.rc == 75:
+            self.deferred = True
         self.secs = time.time() - t0
         self.ran = self.secs - self.waited
+
+    def once(self, argv, mark, tries):
+        """one try, its output appended to the log; the wait ends at mark"""
+        with open(self.log, "a") as f:
+            f.write("[ci-fast] %s try %d on %s\n" % (self.name, tries, self.where))
+            f.flush()
+            at = f.tell()
+            ts = time.time()
+            p = subprocess.Popen(argv, stdout=f, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
+            began = None
+            while p.poll() is None:
+                if began is None:
+                    try:
+                        with open(self.log, encoding="utf-8", errors="replace") as g:
+                            g.seek(at)
+                            if mark in g.read():
+                                began = time.time()
+                    except OSError:
+                        pass
+                time.sleep(1)
+        return p.returncode, (began or time.time()) - ts
 
     # exit codes that are not the gate's verdict: Boat refused (75), lost the
     # status (70), failed setup (76) or cleanup (77); cancelled (143), killed
@@ -260,6 +272,55 @@ class Job:
         return self.text().split("[ci-fast] %s try " % self.name)[-1]
 
 
+# machine-wide, whatever cache a run uses; bp-coord's local-ci.sh takes it too
+LOCAL_LOCK = os.environ.get("LOCAL_CI_LOCK") or os.path.join(
+    os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "backplane-bend", "ci-local.lock")
+
+
+def local_batch(left, logs):
+    mem = max(j.mem for j in left)
+    d = os.path.join(logs, "local-batch")
+    os.makedirs(d, exist_ok=True)
+    lines = ["set -o pipefail"]
+    for i, j in enumerate(left):
+        lines.append("date +%%s > %s/%d.start" % (shlex.quote(d), i))
+        lines.append("( echo '[ci-fast] %s try local (one job of the local batch)'; scripts/ci-runner-id.sh | sed 's/^/[ci-runner] /'; %s ) >> %s 2>&1; echo $? > %s/%d.rc" % (
+            j.name, j.cmd, shlex.quote(j.log), shlex.quote(d), i))
+        lines.append("date +%%s > %s/%d.end" % (shlex.quote(d), i))
+    script = os.path.join(d, "batch.sh")
+    open(script, "w").write("\n".join(lines) + "\n")
+    say("%d jobs Boat would not take run here as one bp-admit job (%d GB): %s" % (len(left), mem, " ".join(j.name for j in left)))
+    t0 = time.time()
+    with open(os.path.join(d, "batch.log"), "a") as f:
+        f.write("[ci-fast] waiting for the local-CI lock %s\n" % LOCAL_LOCK)
+        f.flush()
+        os.makedirs(os.path.dirname(LOCAL_LOCK), exist_ok=True)
+        lk = open(LOCAL_LOCK, "w")
+        fcntl.flock(lk, fcntl.LOCK_EX)
+        tl = time.time()
+        f.write("[ci-fast] lock taken after %.0fs; asking bp-admit\n" % (tl - t0))
+        f.flush()
+        argv = [ADMIT] + (["--priority"] if PRIORITY else []) + ["--mem", str(mem), "--cores", "2", "--", "bash", script]
+        rc = subprocess.call(argv, stdout=f, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
+        lk.close()
+    end = time.time()
+    for i, j in enumerate(left):
+        j.where = "local"
+        try:
+            j.rc = int(open(os.path.join(d, "%d.rc" % i)).read().strip())
+            st = int(open(os.path.join(d, "%d.start" % i)).read().strip())
+            en = int(open(os.path.join(d, "%d.end" % i)).read().strip())
+            j.ran = en - st
+            j.waited += st - t0
+        except (OSError, ValueError):
+            # never reached: the batch was refused, killed or cancelled before it
+            j.rc = rc if rc and rc != 0 else 143
+            j.waited += end - t0
+            j.ran = 0
+        j.deferred = False
+        j.secs = j.waited + j.ran
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--logs", required=True)
@@ -268,6 +329,7 @@ def main():
     ap.add_argument("--steps")
     ap.add_argument("--shards", type=int, default=int(os.environ.get("LOCAL_CI_SHARDS", "16")))
     ap.add_argument("--local", action="store_true")
+    ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
     root = subprocess.run(["git", "-C", HERE, "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=True).stdout.strip()
     os.chdir(root)
@@ -409,13 +471,36 @@ def main():
         used.add(j.slot)
     if not a.local:
         say("Boat: %d warm slots reused, %d new sandboxes at most" % (min(len(warm), len(jobs)), max(0, len(jobs) - len(warm))))
+    if a.dry_run:
+        # what would run, where, and what is reused: no job, no record
+        plan_lines = []
+        for g in ("check", "proof", "tests", "js"):
+            if g in summary:
+                plan_lines.append("%s: %d to run, %d reused" % (g, len(summary[g]["run"]), len(summary[g]["cached"])))
+        for j in jobs:
+            plan_lines.append("  %s on %s (%s, %d GB here if Boat refuses)%s" % (
+                j.name, "here" if a.local else "boat:" + j.slot, "warm" if j.slot in warm else "new sandbox",
+                j.mem, ": %d tests, about %.0f test-s" % (len(j.tests), j.est) if hasattr(j, "tests") else ""))
+        plan_lines.append("dry run: nothing ran, nothing recorded")
+        open(os.path.join(logs, "plan.txt"), "w").write("\n".join(plan_lines) + "\n")
+        print("\n".join(plan_lines), flush=True)
+        return 0
     ts = [threading.Thread(target=j.run) for j in jobs]
     for t in ts:
         t.start()
     for t in ts:
         t.join()
+    # what Boat would not take runs here as ONE job: one bp-admit reservation (the
+    # largest peak among them) running them one after another, and never more than
+    # one local-CI reservation machine-wide (a lock taken before bp-admit's queue)
+    left = [j for j in jobs if getattr(j, "deferred", False)]
+    if left and os.environ.get("LOCAL_CI_NO_LOCAL") == "1":
+        say("%d jobs Boat would not take; LOCAL_CI_NO_LOCAL=1: left INCOMPLETE" % len(left))
+    elif left:
+        local_batch(left, logs)
 
-    # the inputs must hash as they did before the jobs, or nothing is recorded
+    # a gate's inputs must hash as they did before the jobs, or it is not recorded
+    changed = set()
     if not norecord:
         K._hash.clear()
         K._text.clear()
@@ -426,9 +511,10 @@ def main():
             after = {k: K.key(k[0], k[1], "x", v) for k, v in again.items()}
         except K.Fail:
             after = None
-        if after != before:
-            say("the inputs changed while the jobs ran: nothing recorded")
-            norecord = True
+        changed = {k for k in before if after is None or after.get(k) != before[k]}
+        if changed:
+            say("the inputs of %d gates changed while the jobs ran (%s): those are not recorded" % (
+                len(changed), ", ".join(sorted("%s %s" % k for k in changed)[:5])))
     commit = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
     stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
@@ -440,6 +526,8 @@ def main():
         os.makedirs(os.path.join(CACHE, "runner"), exist_ok=True)
         open(os.path.join(CACHE, "runner", kn + ".txt"), "w").write(r)
         for n in names:
+            if (g, n) in changed:
+                continue
             mark(g, keyof(g, n, r), "%s %s %s %s %s" % (g, n, commit, stamp, job.where))
         return len(names)
 

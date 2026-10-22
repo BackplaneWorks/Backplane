@@ -50,16 +50,19 @@ esac
 EOF
 cat > "$B/admit" <<'EOF'
 #!/bin/bash
-# stand-in for bp-admit.sh: waits FAKE_WAIT seconds in line, then admits; FAKE_ADMIT=kill dies first
+# stand-in for bp-admit.sh: waits FAKE_WAIT seconds in line, then admits; FAKE_ADMIT=kill dies
+# first. $FAKE_LOG.q counts reservations in its queue at once; the most is kept in $FAKE_LOG.max
 echo "admit $*" >> "$FAKE_LOG"
+q() { ( flock 9; n=$(( $(cat "$FAKE_LOG.q" 2>/dev/null || echo 0) + $1 )); echo $n > "$FAKE_LOG.q"; m=$(cat "$FAKE_LOG.max" 2>/dev/null || echo 0); [ $n -gt $m ] && echo $n > "$FAKE_LOG.max" ) 9>"$FAKE_LOG.lk"; }
+q 1; trap 'q -1' EXIT
 while [ $# -gt 0 ] && [ "$1" != -- ]; do shift; done; shift
 for i in $(seq "${FAKE_WAIT:-0}"); do echo "bp-admit: waiting (behind-older=0, avail 20 GB)"; sleep 1; done
 [ "${FAKE_ADMIT:-}" = kill ] && exit 143
 echo "bp-admit: admitted (2 GB, 2 cores; 0 other jobs running; waited ${FAKE_WAIT:-0}s)"
-exec "$@"
+"$@"
 EOF
 chmod +x "$B/boat-job" "$B/admit"
-export PATH=$B:$PATH CI_FAST_BOAT_JOB=$B/boat-job BP_ADMIT=$B/admit FAKE_LOG=$T/calls \
+export PATH=$B:$PATH CI_FAST_BOAT_JOB=$B/boat-job BP_ADMIT=$B/admit FAKE_LOG=$T/calls LOCAL_CI_LOCK=$T/local.lock LOCAL_CI_BOAT_BACKOFF="1 1" \
   BACKPLANE_VERIFIED=$T/cache BOAT_JOB_ROOT=$T/boat LOCAL_CI_SHARD_SECS=0.4
 run() { L=$T/logs$1; shift; out=$(cd "$R" && python3 scripts/ci-fast.py --logs "$L" --steps check,proof,tests "$@" 2>&1); rc=$?; }
 calls() { wc -l < "$T/calls" 2>/dev/null || echo 0; }
@@ -70,7 +73,9 @@ ok $rc 0 "refused + long admission wait: exit 0"
 has "$out" "verdict PASS" "refused + long wait: PASS, never FAIL"
 has "$(cat "$L/summary.txt")" "tests=ok 2 run (2 ok, 0 fail, 0 no verdict) in 2 shards, 0 cached; 2 here, waited" "tests: ran here, says so"
 w=$(sed -n 's/^  check on local: ok, rc 0, waited \([0-9]*\)s.*/\1/p' "$L/summary.txt"); [ "${w:-0}" -ge 3 ]; ok $? 0 "the admission wait is counted as waiting ($w s)"
-ok "$(grep -c '^boat ' "$T/calls")" 4 "each job asked Boat first"
+ok "$(grep -c '^boat ' "$T/calls")" 12 "each job asked Boat first, then twice more after a backoff"
+ok "$(grep -c '^admit ' "$T/calls")" 1 "Boat refusing four jobs makes ONE local reservation"
+has "$(cat "$L/local-batch/batch.sh")" "scripts/test.sh" "the one local job runs the jobs one after another"
 ok "$(ls "$T/cache/test" | wc -l)" 2 "both tests recorded"
 ok "$(ls "$T/cache/check" | wc -l)" 4 "every checked file recorded"
 ok "$(ls "$T/cache/proof" | wc -l)" 1 "proof recorded"
@@ -121,6 +126,20 @@ ok $rc 1 "a failing check: exit 1"; has "$out" "check=FAIL" "a failing check: ch
 # 9. --full reuses nothing and still records
 c=$(calls); run 9 --full
 ok $rc 0 "full: exit 0"; has "$(cat "$L/summary.txt")" "tests=ok 2 run" "full: every test runs"
+
+# a dry run says what would run and runs nothing
+echo '# dry' >> "$R/src/m.bend"; c=$(calls); run 9d --dry-run
+ok $rc 0 "dry run: exit 0"; ok $(( $(calls) - c )) 0 "dry run: no job"
+has "$out" "tests: 1 to run, 1 reused" "dry run: what would run"; has "$out" "new sandbox" "dry run: where"
+
+# 10. two runs at once, both refused by Boat: never more than one local reservation in the queue
+rm -f "$T/calls.max"; echo '# four' >> "$R/src/m.bend"
+R2=$T/repo2; git clone -q "$R" "$R2"; cp "$R/src/m.bend" "$R2/src/m.bend"
+( cd "$R" && FAKE_BOAT=refuse FAKE_WAIT=2 python3 scripts/ci-fast.py --logs "$T/logs10a" --steps tests >/dev/null 2>&1 ) &
+( cd "$R2" && FAKE_BOAT=refuse FAKE_WAIT=2 BACKPLANE_VERIFIED=$T/cache2 python3 scripts/ci-fast.py --logs "$T/logs10b" --steps tests >/dev/null 2>&1 ) &
+wait
+ok "$(cat "$T/calls.max")" 1 "two refused runs at once: at most one local reservation at a time"
+ok "$(cat "$T/logs10a/summary.txt" "$T/logs10b/summary.txt" | grep -c 'verdict PASS')" 2 "two refused runs: both still pass"
 
 echo "ci_fast_test: $pass passed, $failn failed"
 [ $failn = 0 ]
