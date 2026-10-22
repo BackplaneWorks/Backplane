@@ -283,12 +283,35 @@ def Mcp.read.last(+xs: List<&2, J.Json>, +limit: Nat, +target: String) -> Res:
   Res.ok(J.Json.obj([J.KV{"threadId", J.Str{target}},
     J.KV{"entries", J.Json.arr(List.drop(&2, J.Json, xs, Nat.sub(List.length(&2, J.Json, xs), limit)))}]))
 
+# a thread's entries read from what the hub holds: its own entries, which
+# a hub's window has the newest of (M.State.mine; Mcp.read.need says when
+# that is not enough)
 def Mcp.read.k(ok: Bool, +s: M.State, +target: String, +limit: Nat) -> Res:
-  match ok s:
-    case True{} M.State{_, _, es, _, _, _, _, _, _, _, _}:
-      Mcp.read.last(Mcp.mine(es, target, Nil{}), limit, target)
-    case False{} _:
+  match ok:
+    case True{}:
+      Mcp.read.last(Mcp.mine(M.State.mine(s, target), target, Nil{}), limit, target)
+    case False{}:
       Res.fail("that thread is not in this project")
+
+def Mcp.own.n(es: List<&2, M.Entry>, +th: String, +n: Nat) -> Nat:
+  match es:
+    case Nil{}:
+      n
+    case +e <> t:
+      Mcp.own.n(t, th, Bool.pick(Nat, String.eq(Mcp.of(e), th), 1n+n, n))
+
+# whether thread_read on target needs the store: a hub's window holds fewer
+# than limit of the thread's own entries and the thread has more (the
+# server then reads its pages, Sto.page, and answers with Mcp.read.rows)
+def Mcp.read.need(+s: M.State, +target: String, +limit: Nat) -> Bool:
+  +have = Mcp.own.n(M.State.mine(s, target), target, 0n)
+  Bool.and(Nat.is_gt(M.State.win(s), 0n), Bool.and(Nat.is_lt(have, limit), Nat.is_gt(M.Switch.count(s, target), have)))
+
+# thread_read answered from entries the server read from the store (newest
+# first: SDB.Tab.entry.of of each Sto.page row, until limit of the
+# thread's own or none left)
+def Mcp.read.rows(es: List<&2, M.Entry>, +target: String, +limit: Nat) -> Res:
+  Mcp.read.last(Mcp.mine(es, target, Nil{}), limit, target)
 
 # the file goes to the viewer of the thread that asked
 def Mcp.view(+thread: String, +path: String, +kind: String) -> Res:
@@ -473,7 +496,7 @@ def Mcp.update.k(ok: Bool, regen: Bool, +s: M.State, +now: Nat, +target: String,
       Res{True{}, J.Json.obj([J.KV{"threadId", J.Str{target}}, J.KV{"title", J.Str{title}}]), B.Step{[M.ThreadRenamed{target, title, now}], Nil{}}}
     case True{} True{}:
       Res{True{}, J.Json.obj([J.KV{"threadId", J.Str{target}}, J.KV{"title", J.Str{"being written"}}]),
-        B.Step{Nil{}, [B.Git{0, "", "title", target, "", HD.Hand.title(B.Hub.thread(s, target)), String.take(Mcp.first(B.Hub.entries(s), target, ""), 4000n)}]}}
+        B.Step{Nil{}, [B.Git{0, "", "title", target, "", HD.Hand.title(B.Hub.thread(s, target)), String.take(Mcp.first(M.State.own(s, target), target, ""), 4000n)}]}}
 
 def Mcp.update(+s: M.State, +now: Nat, +thread: String, +target: String, +title: String) -> Res:
   Mcp.update.k(Mcp.same_project(s, thread, target), String.is_empty(String.trim(title)), s, now, target, String.trim(title))
@@ -1035,9 +1058,9 @@ def Mcp.call.k(i: Nat, +s: M.State, +now: Nat, +thread: String, +models: J.Json,
     case 13n:
       Mcp.term.open(s, now, thread, J.Json.get_str(a, "command", ""), J.Json.get_str(a, "title", ""), EM.Emb.cols(J.Json.get_u32(a, "cols", 0)), EM.Emb.rows(J.Json.get_u32(a, "rows", 0)))
     case 14n:
-      Mcp.term.op(String.is_empty(EM.Emb.sum(M.State.mine(s, thread), J.Json.get_str(a, "id", ""))), True{}, thread, J.Json.get_str(a, "id", ""), J.Json.get_str(a, "text", ""))
+      Mcp.term.op(String.is_empty(EM.Emb.sum(M.State.terms(s, thread), J.Json.get_str(a, "id", ""))), True{}, thread, J.Json.get_str(a, "id", ""), J.Json.get_str(a, "text", ""))
     case 15n:
-      Mcp.term.op(String.is_empty(EM.Emb.sum(M.State.mine(s, thread), J.Json.get_str(a, "id", ""))), False{}, thread, J.Json.get_str(a, "id", ""), "")
+      Mcp.term.op(String.is_empty(EM.Emb.sum(M.State.terms(s, thread), J.Json.get_str(a, "id", ""))), False{}, thread, J.Json.get_str(a, "id", ""), "")
     case 16n:
       Mcp.work.run(Bool.or(String.is_empty(String.trim(J.Json.get_str(a, "command", ""))), Bool.and(Bool.not(String.is_empty(J.Json.get_str(a, "lock", ""))), Bool.not(LK.Lock.name.valid(J.Json.get_str(a, "lock", ""))))), s, now, thread, a)
     case 17n:

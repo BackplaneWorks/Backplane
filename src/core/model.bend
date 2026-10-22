@@ -924,6 +924,319 @@ def Idx.term(term: Bool, ix: Map<&2, List<&2, Entry>>, +e: Entry) -> Map<&2, Lis
 def Idx.post(ix: Map<&2, List<&2, Entry>>, +e: Entry) -> Map<&2, List<&2, Entry>>:
   Idx.term(Idx.is_term(e), Idx.review(Idx.is_review(e), Idx.step(Idx.is_step(e), Idx.post.k(ix, Idx.thread(e), Link.from(Idx.id(e)), e), e), e), e)
 
+# Bounded entries (the hub's fold)
+# --------------------------------
+# A client folds the whole log and keeps every entry. The hub must not: it
+# starts from State.bounded(w), whose entries list holds one marker in
+# place of the log (no global list), and files each entry posted under its
+# thread (and under its sender, and a message between threads under the
+# links) in a window that keeps, newest first:
+#  - at least w entries (Win.size() on the hub);
+#  - back to the thread's newest user message and its newest assistant
+#    message (every walk to the current turn's start or to the last reply
+#    stops there: Answer.of, Lr.*, Turn.of, Sum.last, Mcp.last...);
+#  - back past where a handoff's budget is spent (handoff.bend's Hand.text
+#    reads no further: Win.cost is a lower bound of a handoff line);
+#  - never more than Win.most() entries, whatever the above say.
+# Beside it, per thread: the count of its own entries (Switch.count, a
+# handoff's "N earlier items") and its first user message (Mcp.first, a
+# handoff's first request). The window is trimmed only once it has doubled
+# since the last trim, so a post costs O(1) amortized. Design steps are
+# not filed (only the clients' viewers read them); terminals and review
+# ops are filed whole (few, and read whole: Emb.*, Review.of_state).
+# Everything older is in the store (src/server's Sto.page). Laws win_*.
+
+# the marker a bounded state keeps in place of the log
+def Win.mark() -> String:
+  "@window"
+
+# the hub's least window
+def Win.size() -> Nat:
+  100n
+
+# the most entries a window keeps
+def Win.most() -> Nat:
+  2000n
+
+# a handoff's budget (handoff.bend's Hand.budget; law win_hand_budget)
+def Win.budget() -> Nat:
+  16000n
+
+def Win.len.key(+k: String) -> String:
+  "@len:" ++ k
+
+def Win.n.key(+th: String) -> String:
+  "@n:" ++ th
+
+def Win.first.key(+th: String) -> String:
+  "@first:" ++ th
+
+# a number kept as an entry (the index holds only entries)
+def Win.num(+k: String, +n: Nat) -> Entry:
+  Act{"", k, "", "", "", n}
+
+def Win.at(es: List<&2, Entry>, +d: Nat) -> Nat:
+  match es:
+    case Nil{}:
+      d
+    case Msg{_, _, _, _, at} <> _:
+      at
+    case Act{_, _, _, _, _, at} <> _:
+      at
+
+def Win.at2(es: List<&2, Entry>, +d: Nat) -> Nat:
+  match es:
+    case Nil{}:
+      d
+    case _ <> t:
+      Win.at(t, d)
+
+def Win.cap.k(hit: Bool, +w: Nat) -> Nat:
+  match hit:
+    case True{}:
+      w
+    case False{}:
+      0n
+
+# the window of a state's entries list: 0 for a whole log (a client)
+def Win.cap(es: List<&2, Entry>) -> Nat:
+  match es:
+    case Act{+i, _, _, _, _, +w} <> _:
+      Win.cap.k(String.eq(i, Win.mark()), w)
+    case _:
+      0n
+
+# the length of s, at most n
+def Win.clen(s: String, n: Nat, +acc: Nat) -> Nat:
+  match s n:
+    case SNil{} _:
+      acc
+    case _ 0n:
+      acc
+    case SCon{_, t} 1n+k:
+      Win.clen(t, k, 1n+acc)
+
+# at most what an entry's handoff line costs (handoff.bend's Hand.line and
+# Hand.step: the line, cut, and its newline)
+def Win.cost(e: Entry) -> Nat:
+  match e:
+    case Msg{_, _, Assistant{}, +text, _}:
+      Nat.add(12n, Win.clen(text, 4000n, 0n))
+    case Msg{_, _, _, +text, _}:
+      Nat.add(7n, Win.clen(text, 4000n, 0n))
+    case Act{_, _, _, +kind, +summary, _}:
+      Nat.add(Nat.add(8n, Win.clen(kind, 4000n, 0n)), Win.clen(summary, 300n, 0n))
+
+def Win.is_user(e: Entry) -> Bool:
+  match e:
+    case Msg{_, _, User{}, _, _}:
+      True{}
+    case _:
+      False{}
+
+def Win.is_asst(e: Entry) -> Bool:
+  match e:
+    case Msg{_, _, Assistant{}, _, _}:
+      True{}
+    case _:
+      False{}
+
+# a trim's walk: entries kept, the newest own user and assistant messages
+# passed, the handoff budget left and whether it is spent
+type WSt is Data:
+  WSt{i: Nat, user: Bool, asst: Bool, left: Nat, full: Bool}
+
+def Win.left(spent: Bool, +cost: Nat, +left: Nat) -> Nat:
+  match spent:
+    case True{}:
+      left
+    case False{}:
+      Nat.sub(left, cost)
+
+def Win.step.k(own: Bool, +e: Entry, +i: Nat, user: Bool, asst: Bool, +left: Nat, +full: Bool) -> WSt:
+  match own:
+    case False{}:
+      WSt{1n+i, user, asst, left, full}
+    case True{}:
+      WSt{1n+i, Bool.or(user, Win.is_user(e)), Bool.or(asst, Win.is_asst(e)),
+        Win.left(Bool.or(full, Nat.is_gt(Win.cost(e), left)), Win.cost(e), left), Bool.or(full, Nat.is_gt(Win.cost(e), left))}
+
+def Win.step(+k: String, +e: Entry, st: WSt) -> WSt:
+  match st:
+    case WSt{+i, user, asst, +left, +full}:
+      Win.step.k(String.eq(Idx.thread(e), k), e, i, user, asst, left, full)
+
+# whether the walk keeps no more (anchor: a thread's own list, not the links)
+def Win.stop(+w: Nat, anchor: Bool, st: WSt) -> Bool:
+  match st:
+    case WSt{+i, user, asst, _, full}:
+      Bool.or(Nat.is_ge(i, Win.most()), Bool.and(Nat.is_ge(i, w), Bool.or(Bool.not(anchor), Bool.and(user, Bool.and(asst, full)))))
+
+def Win.st0() -> WSt:
+  WSt{0n, False{}, False{}, Win.budget(), False{}}
+
+# the entries kept, reversed
+def Win.go(es: List<&2, Entry>, +k: String, +w: Nat, +anchor: Bool, stop: Bool, st: WSt, acc: List<&2, Entry>) -> List<&2, Entry>:
+  match es stop:
+    case _ True{}:
+      acc
+    case Nil{} False{}:
+      acc
+    case +e <> t False{}:
+      +st2 = Win.step(k, e, st)
+      Win.go(t, k, w, anchor, Win.stop(w, anchor, st2), st2, e <> acc)
+
+# what a window keeps of a list filed under k (newest first)
+def Win.trim(+es: List<&2, Entry>, +k: String, +w: Nat, +anchor: Bool) -> List<&2, Entry>:
+  List.reverse(&2, Entry, Win.go(es, k, w, anchor, Win.stop(w, anchor, Win.st0()), Win.st0(), Nil{}))
+
+# whether a page of a thread's entries (newest first, as the store reads
+# them) holds all its window needs: the server fetches pages until it does
+# or the thread has no more (Win.load)
+def Win.enough.go(es: List<&2, Entry>, +k: String, +w: Nat, stop: Bool, st: WSt) -> Bool:
+  match es stop:
+    case _ True{}:
+      True{}
+    case Nil{} False{}:
+      False{}
+    case +e <> t False{}:
+      +st2 = Win.step(k, e, st)
+      Win.enough.go(t, k, w, Win.stop(w, True{}, st2), st2)
+
+def Win.enough(es: List<&2, Entry>, +k: String, +w: Nat) -> Bool:
+  Win.enough.go(es, k, w, Win.stop(w, True{}, Win.st0()), Win.st0())
+
+def Win.put.t(ix: Map<&2, List<&2, Entry>>, +k: String, +kept: List<&2, Entry>, +w: Nat) -> Map<&2, List<&2, Entry>>:
+  +n = List.length(&2, Entry, kept)
+  Map.set(&2, List<&2, Entry>, Map.set(&2, List<&2, Entry>, ix, k, kept), Win.len.key(k),
+    [Win.num(k, n), Win.num(k, Nat.mul(2n, Bool.pick(Nat, Nat.is_ge(n, w), n, w)))])
+
+def Win.put.k(trim: Bool, ix: Map<&2, List<&2, Entry>>, +k: String, +es: List<&2, Entry>, +len: Nat, +lim: Nat, +w: Nat, +anchor: Bool) -> Map<&2, List<&2, Entry>>:
+  match trim:
+    case True{}:
+      Win.put.t(ix, k, Win.trim(es, k, w, anchor), w)
+    case False{}:
+      Map.set(&2, List<&2, Entry>, Map.set(&2, List<&2, Entry>, ix, k, es), Win.len.key(k), [Win.num(k, len), Win.num(k, lim)])
+
+# e filed under k, the window trimmed when it has doubled
+def Win.put(+ix: Map<&2, List<&2, Entry>>, +k: String, +e: Entry, +w: Nat, +anchor: Bool) -> Map<&2, List<&2, Entry>>:
+  +meta = {Idx.get(ix, Win.len.key(k)) : List<&2, Entry>}
+  +len = {1n+Win.at(meta, 0n) : Nat}
+  +lim = {Win.at2(meta, Nat.mul(2n, w)) : Nat}
+  Win.put.k(Nat.is_ge(len, lim), ix, k, e <> Idx.get(ix, k), len, lim, w, anchor)
+
+def Win.first.k(set: Bool, ix: Map<&2, List<&2, Entry>>, +th: String, +e: Entry) -> Map<&2, List<&2, Entry>>:
+  match set:
+    case True{}:
+      Map.set(&2, List<&2, Entry>, ix, Win.first.key(th), [e])
+    case False{}:
+      ix
+
+# a thread's own entry counted, and kept when it is its first user message
+def Win.own(+ix: Map<&2, List<&2, Entry>>, +th: String, +e: Entry) -> Map<&2, List<&2, Entry>>:
+  Win.first.k(Bool.and(Win.is_user(e), List.is_empty(&2, Entry, Idx.get(ix, Win.first.key(th)))),
+    Map.set(&2, List<&2, Entry>, ix, Win.n.key(th), [Win.num(th, 1n+Win.at(Idx.get(ix, Win.n.key(th)), 0n))]), th, e)
+
+def Win.link(msg: Bool, ix: Map<&2, List<&2, Entry>>, +e: Entry, +w: Nat) -> Map<&2, List<&2, Entry>>:
+  match msg:
+    case True{}:
+      Win.put(ix, Idx.links(), e, w, False{})
+    case False{}:
+      ix
+
+def Win.sent(sent: Bool, ix: Map<&2, List<&2, Entry>>, +from: String, +e: Entry, +w: Nat) -> Map<&2, List<&2, Entry>>:
+  match sent:
+    case True{}:
+      Win.link(Idx.is_msg(e), Win.put(ix, from, e, w, True{}), e, w)
+    case False{}:
+      ix
+
+def Win.post.k(ix: Map<&2, List<&2, Entry>>, +th: String, +from: String, +e: Entry, +w: Nat) -> Map<&2, List<&2, Entry>>:
+  Win.sent(Bool.and(Bool.not(String.is_empty(from)), Bool.not(String.eq(from, th))), Win.own(Win.put(ix, th, e, w, True{}), th, e), from, e, w)
+
+# Idx.post for a bounded state
+def Win.post(ix: Map<&2, List<&2, Entry>>, +e: Entry, +w: Nat) -> Map<&2, List<&2, Entry>>:
+  Idx.term(Idx.is_term(e), Idx.review(Idx.is_review(e), Win.post.k(ix, Idx.thread(e), Link.from(Idx.id(e)), e, w), e), e)
+
+# the marker of a thread's own count, ending its run in State.own
+def Win.count.id() -> String:
+  "@count"
+
+def Win.count(+th: String, +n: Nat) -> Entry:
+  Act{Win.count.id(), th, Win.count.id(), "", "", n}
+
+def Win.is_count(e: Entry) -> Bool:
+  match e:
+    case Act{+i, _, _, _, _, _}:
+      String.eq(i, Win.count.id())
+    case _:
+      False{}
+
+def Win.mine.k(own: Bool, +e: Entry, acc: List<&2, Entry>) -> List<&2, Entry>:
+  match own:
+    case True{}:
+      e <> acc
+    case False{}:
+      acc
+
+# a thread's own entries of a list, reversed
+def Win.mine(es: List<&2, Entry>, +th: String, acc: List<&2, Entry>) -> List<&2, Entry>:
+  match es:
+    case Nil{}:
+      acc
+    case +e <> t:
+      Win.mine(t, th, Win.mine.k(String.eq(Idx.thread(e), th), e, acc))
+
+def Win.has(es: List<&2, Entry>, +id: String, found: Bool) -> Bool:
+  match es found:
+    case _ True{}:
+      True{}
+    case Nil{} False{}:
+      False{}
+    case +e <> t False{}:
+      Win.has(t, id, String.eq(Idx.id(e), id))
+
+def Win.first.add(have: Bool, +first: List<&2, Entry>, rev: List<&2, Entry>) -> List<&2, Entry>:
+  match have:
+    case True{}:
+      rev
+    case False{}:
+      List.append(&2, Entry, first, rev)
+
+def Win.first.id(es: List<&2, Entry>) -> String:
+  match es:
+    case Nil{}:
+      ""
+    case +e <> _:
+      Idx.id(e)
+
+# a thread's own run in a bounded state: its own entries in the window,
+# newest first, then its first user message when the window has lost it,
+# then its count (Win.count)
+def Win.run(+ix: Map<&2, List<&2, Entry>>, +th: String) -> List<&2, Entry>:
+  +rev = Win.mine(Idx.get(ix, th), th, Nil{})
+  +first = Idx.get(ix, Win.first.key(th))
+  List.reverse(&2, Entry, Win.count(th, Win.at(Idx.get(ix, Win.n.key(th)), 0n)) <> Win.first.add(Win.has(rev, Win.first.id(first), False{}), first, rev))
+
+def Win.cut.k(drop: Bool, by: Map<&2, List<&2, Entry>>, +k: String) -> Map<&2, List<&2, Entry>>:
+  match drop:
+    case True{}:
+      Map.del(&2, List<&2, Entry>, by, k)
+    case False{}:
+      by
+
+def Win.cut.go(ks: List<&2, String>, by: Map<&2, List<&2, Entry>>, +prefix: String) -> Map<&2, List<&2, Entry>>:
+  match ks:
+    case Nil{}:
+      by
+    case +k <> t:
+      Win.cut.go(t, Win.cut.k(Bool.or(String.starts_with(k, Win.n.key(prefix)), Bool.or(String.starts_with(k, Win.first.key(prefix)), String.starts_with(k, Win.len.key(prefix)))), by, k), prefix)
+
+# a link's threads' counts, first messages and window lengths dropped
+# (far.bend's Fr.forget, in a bounded state)
+def Win.cut(+by: Map<&2, List<&2, Entry>>, +prefix: String) -> Map<&2, List<&2, Entry>>:
+  Win.cut.go(Map.keys(&2, List<&2, Entry>, by), by, prefix)
+
 # Projection
 # ----------
 
@@ -958,6 +1271,16 @@ def Ext.post(x: Ext, +e: Entry) -> Ext:
   match x:
     case Ext{w, by, mail}:
       Ext{w, Idx.post(by, e), mail}
+
+def Ext.post.w(x: Ext, +e: Entry, +n: Nat) -> Ext:
+  match x:
+    case Ext{w, by, mail}:
+      Ext{w, Win.post(by, e, n), mail}
+
+def Ext.with_by(f: Map<&2, List<&2, Entry>> -> Map<&2, List<&2, Entry>>, x: Ext) -> Ext:
+  match x:
+    case Ext{w, by, mail}:
+      Ext{w, f(by), mail}
 
 def Ext.mail(x: Ext) -> List<&2, ML.Box>:
   match x:
@@ -1020,9 +1343,28 @@ def State.remove_project(s: State, +id: String) -> State:
   State{ps, ts, es, n, tk, sg, qu, ak, dv, nv, bw} = s
   State.remove_project.fin(ts, es, n, tk, sg, qu, ak, dv, nv, bw, id, Map.get(Project, Project.blank(id), ps, id))
 
+# a hub's state, which keeps a window of each thread's entries (Win.*):
+# its entries list is the marker alone
+def State.bounded(+w: Nat) -> State:
+  State{Map.new(&2, Project), Map.new(&2, Thread), [Act{Win.mark(), "", "window", "", "", w}], 0n, Map.new(&2, Task), Map.new(&2, String), Map.new(&2, List<&2, QItem>), Map.new(&2, Ask), Map.new(&2, Device), Map.new(&2, Nav), [Ext{BT.World.empty(), Map.new(&2, List<&2, Entry>), Nil{}}]}
+
+# the window a state keeps (0: every entry, a client's)
+def State.win(s: State) -> Nat:
+  match s:
+    case State{_, _, es, _, _, _, _, _, _, _, _}:
+      Win.cap(es)
+
+def State.post.k(w: Nat, ps: Map<&2, Project>, ts: Map<&2, Thread>, es: List<&2, Entry>, n: Nat, tk: Map<&2, Task>, sg: Map<&2, String>, qu: Map<&2, List<&2, QItem>>, ak: Map<&2, Ask>, dv: Map<&2, Device>, nv: Map<&2, Nav>, bw: List<&2, Ext>, +e: Entry) -> State:
+  match w:
+    case 0n:
+      State{ps, ts, e <> es, n, tk, sg, qu, ak, dv, nv, [Ext.post(Ext.of(bw), e)]}
+    case 1n+k:
+      State{ps, ts, es, n, tk, sg, qu, ak, dv, nv, [Ext.post.w(Ext.of(bw), e, 1n+k)]}
+
 def State.post(s: State, +e: Entry) -> State:
-  State{ps, ts, es, n, tk, sg, qu, ak, dv, nv, bw} = s
-  State{ps, ts, e <> es, n, tk, sg, qu, ak, dv, nv, [Ext.post(Ext.of(bw), e)]}
+  match s:
+    case State{ps, ts, +es, n, tk, sg, qu, ak, dv, nv, bw}:
+      State.post.k(Win.cap(es), ps, ts, es, n, tk, sg, qu, ak, dv, nv, bw, e)
 
 # a thread's entries and the messages it sent, newest first: what walking
 # the whole log for that thread finds, without the walk (Idx)
@@ -1054,6 +1396,64 @@ def State.links(s: State) -> List<&2, Entry>:
   match s:
     case State{_, _, _, _, _, _, _, _, _, _, bw}:
       Idx.get(Ext.by(Ext.of(bw)), Idx.links())
+
+# a thread's own entries for a reader that needs its whole conversation
+# (a handoff, its first request): every one in a client's state; in a
+# hub's, its window's, then its first user message when the window has
+# lost it, then the count of all (Win.run; handoff.bend's Hand.total)
+def State.own.k(w: Nat, +s: State, +th: String) -> List<&2, Entry>:
+  match w:
+    case 0n:
+      State.mine(s, th)
+    case 1n+_:
+      match s:
+        case State{_, _, _, _, _, _, _, _, _, _, bw}:
+          Win.run(Ext.by(Ext.of(bw)), th)
+
+def State.own(+s: State, +th: String) -> List<&2, Entry>:
+  State.own.k(State.win(s), s, th)
+
+def State.recent.go(ks: List<&2, String>, +s: State, acc: List<&2, Entry>) -> List<&2, Entry>:
+  match ks:
+    case Nil{}:
+      acc
+    case +k <> t:
+      State.recent.go(t, s, List.append(&2, Entry, State.own(s, k), acc))
+
+def State.recent.k(w: Nat, +s: State) -> List<&2, Entry>:
+  match w:
+    case 0n:
+      match s:
+        case State{_, _, es, _, _, _, _, _, _, _, _}:
+          es
+    case 1n+_:
+      match s:
+        case State{_, ts, _, _, _, _, _, _, _, _, _}:
+          State.recent.go(Map.keys(&2, Thread, ts), s, Nil{})
+
+# the entries a state holds: a client's whole log; a hub's every thread's
+# own run (State.own), thread after thread
+def State.recent(+s: State) -> List<&2, Entry>:
+  State.recent.k(State.win(s), s)
+
+def State.with_by(f: Map<&2, List<&2, Entry>> -> Map<&2, List<&2, Entry>>, s: State) -> State:
+  State{ps, ts, es, n, tk, sg, qu, ak, dv, nv, bw} = s
+  State{ps, ts, es, n, tk, sg, qu, ak, dv, nv, [Ext.with_by(f, Ext.of(bw))]}
+
+# a thread's window put back from the store (a hub that starts from a
+# snapshot, not the log): its entries and the messages it sent, newest
+# first (Sto.page until Win.enough, or the thread's all), its own count
+# (Sto.count) and its first user message ([] if none)
+def Win.load(by: Map<&2, List<&2, Entry>>, +th: String, +es: List<&2, Entry>, +count: Nat, first: List<&2, Entry>, +w: Nat) -> Map<&2, List<&2, Entry>>:
+  Map.set(&2, List<&2, Entry>, Map.set(&2, List<&2, Entry>, Win.put.t(by, th, Win.trim(es, th, w, True{}), w), Win.n.key(th), [Win.num(th, count)]), Win.first.key(th), first)
+
+def State.win.load(+s: State, +th: String, +es: List<&2, Entry>, +count: Nat, first: List<&2, Entry>) -> State:
+  State.with_by((by => Win.load(by, th, es, count, first, State.win(s))), s)
+
+# a whole index list put back from the store (Idx.terms.key, Idx.review.key,
+# Idx.links: newest first)
+def State.idx.load(s: State, +k: String, es: List<&2, Entry>) -> State:
+  State.with_by((by => Map.set(&2, List<&2, Entry>, by, k, es)), s)
 
 def State.tick(s: State) -> State:
   State{ps, ts, es, n, tk, sg, qu, ak, dv, nv, bw} = s
@@ -1334,8 +1734,19 @@ def Switch.count.go(es: List<&2, Entry>, +th: String, n: Nat) -> Nat:
 
 # how many entries a thread has: its own among those filed under it (Idx;
 # the messages it sent elsewhere are filed there too), never the whole log
-def Switch.count(s: State, +th: String) -> Nat:
-  Switch.count.go(State.mine(s, th), th, 0n)
+def Switch.count.w(w: Nat, +s: State, +th: String) -> Nat:
+  match w:
+    case 0n:
+      Switch.count.go(State.mine(s, th), th, 0n)
+    case 1n+_:
+      match s:
+        case State{_, _, _, _, _, _, _, _, _, _, bw}:
+          Win.at(Idx.get(Ext.by(Ext.of(bw)), Win.n.key(th)), 0n)
+
+# (a hub's state keeps the count beside the window, Win.own: law
+# win_count_*)
+def Switch.count(+s: State, +th: String) -> Nat:
+  Switch.count.w(State.win(s), s, th)
 
 def Switch.prov(t: Thread) -> String:
   match t:
@@ -3210,3 +3621,25 @@ def Work.threads(+s: State) -> Nat:
   match s:
     case State{_, +ts, _, _, _, _, _, _, _, _, _}:
       Work.threads.go(Map.values(&2, Thread, ts), Work.kids.map(s), s, 0n)
+
+# Bounded entries: the laws' log (win_*). Thread t1 asks, gets long
+# replies (a handoff's budget is spent within them), runs tools, writes to
+# t2, opens a terminal, switches provider, asks again: in a window of 1 its
+# first request and its oldest entries are trimmed away.
+def Win.demo.big(+c: String) -> String:
+  String.repeat(c, 4000n)
+
+def Win.demo.cs() -> List<&2, Change>:
+  [ThreadCreated{"t1", "p1", "A", Local{}, "", "", "claude", "", 1n}, ThreadCreated{"t2", "p1", "B", Local{}, "", "", "claude", "", 1n},
+    MessagePosted{"t1", "m1", User{}, "first ask", 2n}, MessagePosted{"t1", "a1", Assistant{}, Win.demo.big("a"), 3n},
+    ActivityLogged{"t1", "x1", "tool", "Bash", "ls", 4n}, MessagePosted{"t2", Link.id("t1", "1"), User{}, "hi from t1", 5n},
+    MessagePosted{"t1", "m2", User{}, "second ask", 6n}, MessagePosted{"t1", "a2", Assistant{}, Win.demo.big("b"), 7n},
+    MessagePosted{"t1", "a3", Assistant{}, Win.demo.big("c"), 8n}, MessagePosted{"t1", "a4", Assistant{}, Win.demo.big("d"), 9n},
+    MessagePosted{"t1", "a5", Assistant{}, Win.demo.big("e"), 10n}, ActivityLogged{"t1", "x2", "tool", "Bash", "pwd", 11n},
+    ActivityLogged{"t1", "k1", "term", "terminal", "{\"title\":\"sh\"}", 12n}, MessagePosted{"t1", "a6", Assistant{}, "done", 13n},
+    ProviderSet{"t1", "codex", "", 14n}, MessagePosted{"t1", "m3", User{}, "third ask", 15n},
+    ActivityLogged{"t1", "x3", "tool", "Bash", "make", 16n}, MessagePosted{"t2", "m4", Assistant{}, "t2 reply", 17n}]
+
+# the log folded whole (a client) and in windows of w (a hub; 0: whole)
+def Win.demo(+w: Nat) -> State:
+  State.replay(Win.demo.cs(), Bool.pick(State, Nat.is_eq(w, 0n), State.empty(), State.bounded(w)))
