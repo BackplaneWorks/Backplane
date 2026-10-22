@@ -42,6 +42,11 @@ class Core(private val app: Application) : Application.ActivityLifecycleCallback
     private var presentationGeneration = 0L
     private var pendingNav: String? = null
     val startup = mutableStateMapOf<String, StartupPolicy>()
+    // whether each hub's socket is up, as the native side knows it (a thin
+    // screen keeps the hub's last word on that through an outage)
+    val linkUp = mutableStateMapOf<String, Boolean>()
+    // when the app last left the front (its sockets may have died since)
+    private var awayAt = 0L
     private val thinReady = mutableStateMapOf<String, Pair<Long, String>>()
     private val thinRequests = mutableMapOf<String, ThinPresentationFence>()
     private val legacyReady = mutableStateMapOf<String, Long>()
@@ -244,6 +249,21 @@ class Core(private val app: Application) : Application.ActivityLifecycleCallback
 
     init {
         AppSettings.init(app)
+        // a network that comes up (Wi-Fi back, a switch to cellular): sockets
+        // are tried now, and one that went quiet on the old network replaced
+        runCatching {
+            val cm = app.getSystemService(android.net.ConnectivityManager::class.java)
+            cm?.registerDefaultNetworkCallback(object : android.net.ConnectivityManager.NetworkCallback() {
+                private var last: android.net.Network? = null
+                override fun onAvailable(network: android.net.Network) {
+                    val changed = last != null && last != network
+                    last = network
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        for (h in hubs.values) h.wake(if (changed) 3000 else 40_000)
+                    }
+                }
+            })
+        }
         val cached = recentScreen.load(links, cid())
         if (cached != null) runCatching { parseScreen(cached) }.onSuccess { saved ->
             screen = saved
@@ -397,12 +417,12 @@ class Core(private val app: Application) : Application.ActivityLifecycleCallback
         }
     }
 
-    fun retryView(key: String, compatibility: Boolean = false) {
+    fun retryView(key: String) {
         if (links.none { Pairing.key(it) == key } || startup[key] != StartupPolicy.COMPATIBILITY_REQUIRED) return
         hubs.remove(key)?.stop()
         thinReady.remove(key)
         presentationEpochs.remove(key)
-        startup[key] = if (compatibility) StartupPolicy.COMPATIBILITY_CHOSEN else StartupPolicy.DISCOVERING
+        startup[key] = StartupPolicy.DISCOVERING
         connect()
     }
 
@@ -417,17 +437,17 @@ class Core(private val app: Application) : Application.ActivityLifecycleCallback
                 requestedFrameAt.remove(key)
                 thinReady.remove(key)
                 legacyReady.remove(key)
-                if (startup[key] == StartupPolicy.COMPATIBILITY_CHOSEN) {
-                    apply(engine.connection(key, epoch.toString()))
-                    Pairing.resume(base, engine.resume(key))
-                } else {
+                run {
                     startup[key] = StartupPolicy.DISCOVERING
-                    val supported = ViewCapability.discover(link)
-                    if (link !in links || epochs[key] != epoch) null
-                    else if (!supported) {
+                    val found = ViewCapability.find(link)
+                    if (link !in links || epochs[key] != epoch) Next.Stop
+                    // a hub that is down or restarting is asked again after
+                    // the backoff; only a hub that answers without views parks
+                    else if (found == ViewCapability.Found.UNREACHABLE) Next.Later
+                    else if (found != ViewCapability.Found.SUPPORTED) {
                         startup[key] = StartupPolicy.COMPATIBILITY_REQUIRED
                         android.util.Log.i("Backplane", "view capability_required")
-                        null
+                        Next.Stop
                     } else {
                         startup[key] = StartupPolicy.THIN
                         apply(engine.connection(key, epoch.toString(), "view-v1"))
@@ -436,13 +456,14 @@ class Core(private val app: Application) : Application.ActivityLifecycleCallback
                             earlyActions.remove(pending)
                             apply(engine.act(pending.first, pending.second))
                         } else if (screen?.hub == key) apply(engine.act("select", screen?.sel.orEmpty()))
-                        Pairing.viewSocket(link)
+                        Pairing.viewSocket(link)?.let { Next.Go(it) } ?: Next.Stop
                     }
                 }
             },
             onOpen = {
                 if (shownHub == key) plots.reset()
                 connected.add(key)
+                linkUp[key] = true
                 val epoch = epochs[key] ?: 0L
                 scope.launch { apply(engine.online(key, true, epoch.toString())) }
                 // where the person is: every hub keeps the phone's zone (routines follow it)
@@ -488,6 +509,7 @@ class Core(private val app: Application) : Application.ActivityLifecycleCallback
             },
             onClose = {
                 connected.remove(key)
+                linkUp[key] = false
                 legacyReady.remove(key)
                 thinReady.remove(key)
                 presentationEpochs.remove(key)
@@ -846,11 +868,16 @@ class Core(private val app: Application) : Application.ActivityLifecycleCallback
     // being in front is when the live service may start
     override fun onActivityResumed(activity: Activity) {
         if (contentReady) screen?.let { LiveService.sync(app, it.island, true) }
+        // back in front: a socket that may have died while away is replaced
+        // at once, and a hub waiting out its backoff is tried now
+        val away = if (awayAt > 0) android.os.SystemClock.elapsedRealtime() - awayAt else 0L
+        awayAt = 0L
+        for (h in hubs.values) h.wake(if (away > 20_000) 3000 else 40_000)
     }
 
     override fun onActivityStopped(activity: Activity) {
         started = maxOf(0, started - 1)
-        if (started == 0) keep()
+        if (started == 0) { keep(); awayAt = android.os.SystemClock.elapsedRealtime() }
     }
 
     override fun onActivityCreated(activity: Activity, state: Bundle?) {}
