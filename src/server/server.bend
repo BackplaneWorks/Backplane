@@ -16078,36 +16078,117 @@ def Main.opened(r: Result<&1, &1, U32 & String, File>, +st: M.State, ls: SO.Lg, 
 
 # The state a boot starts from (S3 hot boot)
 # ------------------------------------------
-# store.db's records plus the log's tail (src/server/hotboot.bend); with no
-# usable store, or BACKPLANE_HOT_BOOT=0, the whole log replayed as before:
-# the lines straight from the file (no List cell per byte, which was most
-# of the JS hub's memory), then only the lines are kept.
+# store.db's records plus the log's tail (src/server/hotboot.bend). A hub
+# with no usable store.db (none, another codec, another log) never replays
+# the whole log into memory: a child of its own binary (--store-rebuild,
+# S1's stobuild) streams the log into store.db, and the hot boot then
+# loads it. A failed build is tried once more (its files removed first);
+# a second failure stops the hub with the reason. The whole replay
+# (Boot.cold) is only the developer's escape, BACKPLANE_HOT_BOOT=0
+# (Boot.next; law boot_next_never_cold).
 
+# the escape's whole replay: the lines straight from the file, then only
+# the lines kept
 def Boot.cold(+home: String) -> IO(HB.Hot):
   do IO<HB.Hot>:
     +rd : List<&2, String> <- H.EvLog.read_from(Store.path(home), "0")
     +ld : ST.Loaded = ST.Store.load(ST.Store.read.body(rd), ST.Loaded{M.State.empty(), Nil{}})
     return HB.Hot{True{}, "", ST.Loaded.st(ld), ST.Loaded.wire(ld), ST.Store.read.tail(rd)}
 
-def Boot.state.k(ok: Bool, +hot: HB.Hot, +home: String) -> IO(HB.Hot):
-  match ok:
-    case True{}:
+# what a boot does next: use the store it loaded, build store.db (builds
+# left), stop (none left), or the escape's whole replay
+type BootNext is Data:
+  BootUse{}
+  BootBuild{}
+  BootStop{}
+  BootCold{}
+
+def Boot.next(escape: Bool, ok: Bool, left: Nat) -> BootNext:
+  match escape ok left:
+    case True{} _ _:
+      BootCold{}
+    case False{} True{} _:
+      BootUse{}
+    case False{} False{} 0n:
+      BootStop{}
+    case False{} False{} 1n+_:
+      BootBuild{}
+
+def Boot.is_cold(n: BootNext) -> Bool:
+  match n:
+    case BootCold{}:
+      True{}
+    case _:
+      False{}
+
+# how many builds a boot tries
+def Boot.builds() -> Nat:
+  2n
+
+# The child: the hub's own binary with --store-rebuild (EX.Exe.child: the
+# running image even after an update replaced the file), its JS heap kept
+# small (it shares the hub's memory cap) and Bun's stack as the hub's
+def Boot.child.env() -> List<&2, String>:
+  ["BUN_JSC_forceRAMSize=671088640", "BUN_JSC_maxPerThreadStackUsage=536870912"]
+
+def Boot.build(+home: String) -> IO(P.Ran):
+  +db = home ++ "/store.db"
+  do IO<P.Ran>:
+    rm : Result<&1, &1, U32 & String, U32 & (String & String)> <- Process.run("rm", ["-f", db, db ++ "-wal", db ++ "-shm"], "", 4096, 30000)
+    exe : String <- H.Sys.exe_path()
+    t0 : U32 <- PS.Perf.us()
+    r : Result<&1, &1, U32 & String, U32 & Socket> <- H.Proc.spawn("env", List.append(&2, String, Boot.child.env(), [EX.Exe.child(exe), "--store-rebuild", home]), "/", 1)
+    +ran : P.Ran <- P.Proc.run.k(r)
+    t1 : U32 <- PS.Perf.span("boot.store_build", t0)
+    return ran
+
+def Boot.ran.last(+out: String) -> String:
+  Maybe.default(&2, String, List.head(&2, String, List.reverse(&2, String, String.split(String.trim(out), '\n'))), "")
+
+def Boot.ran.say(r: P.Ran) -> String:
+  match r:
+    case P.Ran{0, +out}:
+      "store.db built: " ++ Boot.ran.last(out)
+    case P.Ran{code, +out}:
+      "store.db build failed (exit " ++ U32.show(code) ++ "): " ++ Boot.ran.last(out)
+
+def Boot.act(n: BootNext, +hot: HB.Hot, +home: String, again: Unit -> IO(HB.Hot)) -> IO(HB.Hot):
+  match n:
+    case BootUse{}:
       do IO<HB.Hot>:
         Log.info("hot boot from " ++ HB.Hot.path(home))
         return hot
-    case False{}:
+    case BootBuild{}:
+      do IO<HB.Hot>:
+        Log.info("store.db not used (" ++ HB.Hot.why(hot) ++ "): building it from the log")
+        ran : P.Ran <- Boot.build(home)
+        Log.info(Boot.ran.say(ran))
+        again(Unit{})
+    case BootStop{}:
+      IO.die(HB.Hot, 1, "backplane: store.db could not be built from the event log (" ++ HB.Hot.why(hot) ++ "); not starting. Its log: " ++ home ++ "/events.jsonl")
+    case BootCold{}:
       do IO<HB.Hot>:
         Log.info("full replay: " ++ HB.Hot.why(hot))
         Boot.cold(home)
 
+def Boot.got(+hot: HB.Hot, +home: String, +left: Nat, again: Unit -> IO(HB.Hot)) -> IO(HB.Hot):
+  Boot.act(Boot.next(False{}, HB.Hot.ok(hot), left), hot, home, again)
+
+# load the store; if it is not usable, build it and load again (left
+# builds at most)
+def Boot.loop(left: Nat, +home: String) -> IO(HB.Hot):
+  match left:
+    case 0n:
+      IO.bind(HB.Hot, HB.Hot, HB.Hot.load(home), hot => Boot.got(hot, home, 0n, u => IO.pure(HB.Hot, HB.Hot.no("no build left"))))
+    case 1n+f:
+      IO.bind(HB.Hot, HB.Hot, HB.Hot.load(home), hot => Boot.got(hot, home, 1n+f, u => Boot.loop(f, home)))
+
 def Boot.state.on(on: Bool, +home: String) -> IO(HB.Hot):
   match on:
     case True{}:
-      do IO<HB.Hot>:
-        +hot : HB.Hot <- HB.Hot.load(home)
-        Boot.state.k(HB.Hot.ok(hot), hot, home)
+      Boot.loop(Boot.builds(), home)
     case False{}:
-      Boot.state.k(False{}, HB.Hot.no("BACKPLANE_HOT_BOOT=0"), home)
+      Boot.act(Boot.next(True{}, False{}, 0n), HB.Hot.no("BACKPLANE_HOT_BOOT=0"), home, u => IO.pure(HB.Hot, HB.Hot.no("escape")))
 
 def Boot.state(+home: String) -> IO(HB.Hot):
   do IO<HB.Hot>:
