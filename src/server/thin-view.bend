@@ -119,10 +119,44 @@ def Projects.pick(+ts: List<&2, M.Thread>, +ps: Map<&2, M.Project>, +acc: Map<&2
 # every project whose threads were all settled once a hot boot's index held
 # only open threads: the sidebar dropped them and their viewers had no
 # project to resolve against (live, 2026-10-22).
+# Each project's count of settled threads, as the settings
+# "thin.settled.<project>" (client.bend's Side.settled.n reads it): the
+# window holds only a few of a collapsed project's threads, and its
+# "Settled N" counted only those.
+def Settled.is.k(s: M.Shelf) -> Bool:
+  match s:
+    case M.Settled{}: True{}
+    case _: False{}
+
+def Settled.is(+t: M.Thread) -> Bool:
+  Settled.is.k(M.Shelf.of(t))
+
+def Settled.bump(r: Map<&2, Nat> & Nat, +p: String) -> Map<&2, Nat>:
+  (m, n) = r
+  Map.set(&2, Nat, m, p, Nat.add(n, 1n))
+
+def Settled.put(+hit: Bool, +p: String, m: Map<&2, Nat>) -> Map<&2, Nat>:
+  match hit:
+    case True{}: Settled.bump(Map.get(Nat, 0n, m, p), p)
+    case False{}: m
+
+def Settled.fold(ts: List<&2, M.Thread>, m: Map<&2, Nat>) -> Map<&2, Nat>:
+  match ts:
+    case Nil{}: m
+    case +t <> tail: Settled.fold(tail, Settled.put(Settled.is(t), Projects.id(t), m))
+
+def Settled.set(xs: List<&2, Sigma<&2, &2, String, _ => Nat>>, sg: Map<&2, String>) -> Map<&2, String>:
+  match xs:
+    case Nil{}: sg
+    case (+k, +n) <> t: Settled.set(t, Map.set(&2, String, sg, U.Side.settled.key(k), Nat.show(n)))
+
+def Settled.counts(+ts: Map<&2, M.Thread>, +sg: Map<&2, String>) -> Map<&2, String>:
+  Settled.set(Map.to_list(&2, Nat, Settled.fold(Map.values(&2, M.Thread, ts), Map.new(&2, Nat))), sg)
+
 def State.window.empty(+st: M.State, +threads: Map<&2, M.Thread>) -> M.State:
   match st:
-    case M.State{+ps, _, _, +n, +tk, +settings, +queued, +asks, _, +nav, +bw}:
-      M.State{ps, threads, Nil{}, n, tk, settings, queued, asks, Map.new(&2, M.Device), nav,
+    case M.State{+ps, +ts, _, +n, +tk, +settings, +queued, +asks, _, +nav, +bw}:
+      M.State{ps, threads, Nil{}, n, tk, Settled.counts(ts, settings), queued, asks, Map.new(&2, M.Device), nav,
         [M.Ext{M.Ext.world(M.Ext.of(bw)), Map.new(&2, List<&2, M.Entry>), M.Ext.mail(M.Ext.of(bw))}]}
 
 def State.window.add(+es: List<&2, M.Entry>, +st: M.State) -> M.State:
