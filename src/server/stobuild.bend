@@ -540,7 +540,7 @@ def Stb.record.full(full: Bool, +h: String, b: RecordBatch) -> IO(RecordBatch):
 def Stb.record.add(+h: String, +item: List<&2, String>, b: RecordBatch) -> IO(RecordBatch):
   match b:
     case RecordBatch{items, +rows, +size}:
-      +n = 1n+rows
+      +n : Nat = 1n+rows
       +bytes = Nat.add(size, Stb.record.size(item, 0n))
       Stb.record.full(Bool.or(Nat.is_ge(n, 128n), Nat.is_ge(bytes, 65536n)), h, RecordBatch{item <> items, n, bytes})
 
