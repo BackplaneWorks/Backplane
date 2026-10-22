@@ -24,6 +24,13 @@
 # number of manifests (default: 1; one manifest already loads each
 # file's source only once, so extra shards only trade more total work
 # and memory for parallelism when the single check is the bottleneck).
+# CHECK_FILES (check mode only): type-check exactly these tracked .bend
+# files (space or newline separated) instead of all of them, for a caller
+# that keeps per-file results (bp-coord's local-ci). Each must be one of
+# the tracked files; an unknown one, a repeat or an empty list stops it
+# (exit 2). The manifests then cover exactly the selection, verified the
+# same way, and LAWS.bend is checked only when it is selected. A selection
+# is never recorded as the whole check passing.
 set -eu
 cd "$(dirname "$0")/.."
 python3 scripts/i18n-gen.py --check
@@ -90,11 +97,25 @@ if [ "$mode" != proof ]; then
   # Tracked files, listed before any manifest exists so the generated
   # manifests themselves are never part of the list.
   git ls-files --cached --others --exclude-standard '*.bend' | grep -v '^PROOF.bend$' >"$work/files.txt"
+  if [ -n "${CHECK_FILES+x}" ]; then
+    [ "$mode" = check ] || { echo "check.sh: CHECK_FILES is for check mode only" >&2; exit 2; }
+    printf '%s\n' $CHECK_FILES >"$work/sel.txt"
+    [ -s "$work/sel.txt" ] && [ -n "$(cat "$work/sel.txt")" ] || { echo "check.sh: CHECK_FILES lists no file" >&2; exit 2; }
+    d=$(sort "$work/sel.txt" | uniq -d)
+    [ -z "$d" ] || { echo "check.sh: CHECK_FILES lists a file twice: $d" >&2; exit 2; }
+    while IFS= read -r f; do
+      grep -qxF "$f" "$work/files.txt" || { echo "check.sh: CHECK_FILES names $f, which is not a tracked .bend file" >&2; exit 2; }
+    done <"$work/sel.txt"
+    grep -xF -f "$work/sel.txt" "$work/files.txt" >"$work/files.sel" || true
+    mv "$work/files.sel" "$work/files.txt"
+  fi
   grep -v '^LAWS.bend$' "$work/files.txt" >"$work/covered.txt" || true
-  python3 scripts/check-manifest.py generate "$work/m" "$shards" $(cat "$work/covered.txt")
-  python3 scripts/check-manifest.py verify "$work/m" $(cat "$work/covered.txt")
+  [ -s "$work/covered.txt" ] || shards=0
+  [ "$shards" = 0 ] || python3 scripts/check-manifest.py generate "$work/m" "$shards" $(cat "$work/covered.txt")
+  [ "$shards" = 0 ] || python3 scripts/check-manifest.py verify "$work/m" $(cat "$work/covered.txt")
   # Manifests plus the separately checked LAWS.bend must be the list.
-  mcount=$(grep -h -c '^import ' "$work"/m/manifest-*.bend | awk '{s+=$1} END {print s+0}')
+  mcount=0
+  [ "$shards" = 0 ] || mcount=$(grep -h -c '^import ' "$work"/m/manifest-*.bend | awk '{s+=$1} END {print s+0}')
   mcount=$(( mcount - shards ))
   laws_in_list=$(grep -c '^LAWS.bend$' "$work/files.txt" || true)
   total=$(wc -l <"$work/files.txt")
@@ -110,6 +131,7 @@ if [ "$mode" != proof ]; then
   i=0
   pids=""
   for m in "$work"/m/manifest-*.bend; do
+    [ -e "$m" ] || continue
     ( rc=0; BUN_JSC_forceRAMSize=4294967296 nice -n 19 bend "$m" --check-only >"$work/m$i.out" 2>&1 || rc=$?
       echo $rc >"$work/m$i.rc" ) &
     pids="$pids $!"
@@ -119,12 +141,17 @@ if [ "$mode" != proof ]; then
       pids=""
     fi
   done
-  ( rc=0; check_one LAWS.bend >"$work/laws.out" 2>&1 || rc=$?; echo $rc >"$work/laws.rc" ) &
-  pids="$pids $!"
+  if [ "$laws_in_list" -gt 0 ]; then
+    ( rc=0; check_one LAWS.bend >"$work/laws.out" 2>&1 || rc=$?; echo $rc >"$work/laws.rc" ) &
+    pids="$pids $!"
+  else
+    : >"$work/laws.out"; echo 0 >"$work/laws.rc"
+  fi
   for p in $pids; do wait $p || true; done
   bad=0
   i=0
   for m in "$work"/m/manifest-*.bend; do
+    [ -e "$m" ] || continue
     # a manifest passes only with its own success verdict and status: a
     # checker killed before writing anything must not count as a pass
     out=$(cat "$work/m$i.out")
