@@ -9,7 +9,10 @@ import App from "./app.bend";
 import { pairBrowser } from "./auth.js";
 
 // Consume the secret before the generic deeplink handler clears the fragment.
-const pairingReady = pairBrowser({ location, history, storage: localStorage, fetch: window.fetch.bind(window) }).catch(() => false);
+// a hub that is starting (building its store) answers 503: pairing waits and
+// says so, and the link's token is kept until it pairs
+const pairingReady = pairBrowser({ location, history, storage: localStorage, fetch: window.fetch.bind(window),
+  onWait: note => { try { showViewStatus(note); } catch {} } }).catch(() => false);
 import * as Solid from "./solid.js";
 import * as Plot2d from "./plot2d.js";
 import { installDesktopBrowser } from "./desktop-browser.js";
@@ -1478,7 +1481,7 @@ function thinReconnect() {
     const hub = await probeHub(window.fetch.bind(window));
     if (viewMode === "compatibility") return;
     if (hub.state === "up") { void startThin(true);return; }
-    if (hub.state === "starting") { thinBackoff.retryAfter(hub.retryAfterMs);downStatus("Hub restarting… Your draft is kept."); }
+    if (hub.state === "starting") { thinBackoff.retryAfter(hub.retryAfterMs);downStatus(`${hub.note || "Hub restarting…"} Your draft is kept.`); }
     else downStatus(navigator.onLine === false ? "Offline. Reconnects when the network is back; your draft is kept." : "Hub unreachable. Reconnecting… Your draft is kept.");
     thinReconnect();
   });
