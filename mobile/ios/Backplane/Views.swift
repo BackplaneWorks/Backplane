@@ -750,10 +750,6 @@ struct ThreadScreen: View {
                         }
                         .font(thread.state == "run" ? .body : .caption)
                     }
-                    if let partial = thread.livePartial {
-                        PartialMessageFooter(model: model, hub: model.screen?.hub ?? "", thread: thread.id,
-                                             entry: partial.id ?? "", partial: partial, live: true, selected: live)
-                    }
                     Color.clear.frame(height: 1).id("end")
                 }
                 .padding()

@@ -3625,7 +3625,8 @@ def Task.demo(busy: Bool) -> M.State:
 def Lr.loops() -> Nat:
   20n
 
-# how much of the last reply a wake's summary carries (Wake.thread.text)
+# how much of the last reply a report kept before reports were sent whole;
+# only Lr.whole reads it, to give such a stored row back whole
 def Lr.cut() -> Nat:
   1500n
 
@@ -4321,7 +4322,7 @@ def Wake.thread.events(+s: M.State, +th: String, +cs: List<&2, M.Change>) -> Lis
 
 def Wake.thread.text(+s: M.State, +th: String, +cs: List<&2, M.Change>) -> String:
   "thread \"" ++ Lr.title(Hub.thread(s, th)) ++ "\" (" ++ th ++ ") " ++
-    Bool.pick(String, Nat.is_gt(Wake.ended(cs, th), 0n), "ended its turn (" ++ Lr.word(Wake.ended(cs, th), "") ++ "). Its last reply: " ++ String.take(Lr.reply(Answer.of(M.State.mine(s, th), th)), Lr.cut()), "opened an ask: " ++ Lr.ask(cs, th))
+    Bool.pick(String, Nat.is_gt(Wake.ended(cs, th), 0n), "ended its turn (" ++ Lr.word(Wake.ended(cs, th), "") ++ "). Its last reply: " ++ Lr.reply(Answer.of(M.State.mine(s, th), th)), "opened an ask: " ++ Lr.ask(cs, th))
 
 def Wake.poll.k(empty: Bool, prs: List<&2, String>, files: List<&2, String>) -> Step:
   match empty:

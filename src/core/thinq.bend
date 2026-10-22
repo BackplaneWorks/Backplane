@@ -42,15 +42,16 @@ def Q.sql.seq_at() -> String:
   "SELECT coalesce((SELECT seq FROM entry WHERE ord >= ?1 ORDER BY ord LIMIT 1), 140737488355328)"
 
 def Q.cols.prefix() -> String:
-  "seq, ord, id, thread, src, kind, role, akind, substr(text, 1, 513) AS text, at"
+  "seq, ord, id, thread, src, kind, role, akind, CASE WHEN kind = 'msg' THEN text ELSE substr(text, 1, 513) END AS text, at"
 
 def Q.cols.full() -> String:
   "seq, ord, id, thread, src, kind, role, akind, text, at"
 
 # a thread's rows (its own and the messages it sent elsewhere) older than
 # seq ?2, newest first, at most ?3: T.Index's thread order, one window of it.
-# Each text is cut to 513 characters: enough for its first 512-byte block
-# and to know whether there is another (T.Blocks).
+# An activity's text is cut to 513 characters: enough for its first 512-byte
+# block and to know whether there is another (T.Blocks); a message's comes
+# whole, as the thin view sends it (T.Row.preview: only activities fold).
 def Q.sql.page() -> String:
   "SELECT * FROM (SELECT * FROM (SELECT " ++ Q.cols.prefix() ++ " FROM entry WHERE thread = ?1 AND seq < ?2 ORDER BY seq DESC LIMIT ?3)" ++
   " UNION ALL SELECT * FROM (SELECT " ++ Q.cols.prefix() ++ " FROM entry WHERE src = ?1 AND src <> '' AND seq < ?2 ORDER BY seq DESC LIMIT ?3))" ++
@@ -73,7 +74,7 @@ def Q.sql.count() -> String:
 # walk looks at 128; a 129th says there are more), each with its row and
 # which of the query's words (?3, a JSON array) it has, joined by \u001f
 def Q.sql.search() -> String:
-  "SELECT e.seq, e.ord, e.id, e.thread, e.src, e.kind, e.role, e.akind, substr(e.text, 1, 513), e.at," ++
+  "SELECT e.seq, e.ord, e.id, e.thread, e.src, e.kind, e.role, e.akind, CASE WHEN e.kind = 'msg' THEN e.text ELSE substr(e.text, 1, 513) END, e.at," ++
   " (SELECT group_concat(u.word, char(31)) FROM term u WHERE u.ord = t.ord AND u.word IN (SELECT value FROM json_each(?3)))" ++
   " FROM term t JOIN entry e ON e.ord = t.ord WHERE t.word = ?1 AND t.ord < ?2 ORDER BY t.ord DESC LIMIT 129"
 

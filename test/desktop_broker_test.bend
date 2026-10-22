@@ -107,6 +107,14 @@ def main() -> IO(Unit):
     refused : Maybe<&1, String> <- Chan.recv(String, reply)
     check("production actor refuses queued agent after takeover", Bool.not(J.Json.get_bool(obj(text(refused)), "ok", True{})))
     check("refused command never enters pending", List.is_empty(&2, B.Pending, B.Broker.pending(stopped)))
+    # a thread latched by an unknown outcome is told which thread, why and
+    # what clears it; another refusal keeps the old words with its reason
+    +latched : B.Broker = B.Broker{42, "epoch-A", "lease-A", Some{out}, D.Desktop.put(meta(), "unknownOwners", obj("{\"A\":true}")), Nil{}, 1n}
+    still : B.Broker <- B.Broker.call(latched, q, "snapshot", obj("{\"page\":\"A\",\"__desktopActor\":\"agent\"}"), reply)
+    why : Maybe<&1, String> <- Chan.recv(String, reply)
+    check("a latched thread hears its thread, the unknown outcome and what clears it", String.eq(J.Json.get_str(obj(text(why)), "error", ""), "the browser is closed to thread A: its last browser command has an unknown outcome, so the browser stays closed to it until the hub restarts or the person resets it"))
+    check("a latched thread's call never enters pending", List.is_empty(&2, B.Pending, B.Broker.pending(still)))
+    check("another refusal keeps its words and says why", String.starts_with(B.Broker.refusal(person, "evaluate", obj("{\"page\":\"A\",\"__desktopActor\":\"agent\"}")), "direct desktop guest unavailable or owner authority refused: owner A is not driven by its agent"))
     # Real production candidate queue: original revision and document survive.
     +events : Chan(String) <- Chan.new(String, 8)
     +sub : B.Broker = B.Broker.document_save(withDoc, sub_event())

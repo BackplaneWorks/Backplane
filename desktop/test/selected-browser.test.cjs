@@ -93,7 +93,7 @@ test('selected-browser membership caller uses the existing native Windows mode p
 });
 function lineage(t,target='darwin-arm64'){
  const f=fixture(t,target,true),base=path.join(f.root,'baseline-stage');p.stage(f.requestPath,base);const old=p.json(path.join(base,'STAGE.json')),e=p.json(evidence(f,base)),oldFreeze=path.join(f.root,'old-freeze.json');fs.copyFileSync(path.join(f.root,'freeze.json'),oldFreeze);
- const members=p.inventory(base,target);delete members['STAGE.json'];
+ const raw=p.inventory(base,target);delete raw['STAGE.json'];const members=target==='windows-x64'?p.membershipExpectation(raw,target,'win32'):raw; // as content() records a Windows stage
  const d={schema:1,kind:'backplane-electron-desktop-package',target,release:old.release,components:old.components,lifecyclePolicy:old.lifecyclePolicy,payloadManifestSha256:old.payloadManifestSha256,members};for(const k of ['signing','sandbox','lifecycle','runtimeAcceptance'])d[k]=e[k];
  const desktop=ref(write(path.join(f.root,'baseline-desktop.json'),d));browser(f);f.freeze.selectedBrowser.baselineDesktopReceiptSha256=desktop.sha256;authorize(f);
  const stage=path.join(f.root,'new-stage');p.stage(f.requestPath,stage);const s=p.json(path.join(stage,'STAGE.json'));s.stageReceiptSha256=p.digest(path.join(stage,'STAGE.json'));

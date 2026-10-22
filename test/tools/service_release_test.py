@@ -380,6 +380,7 @@ class ProducerTests(unittest.TestCase):
                 self.assertEqual(env["BACKPLANE_GOOGLE_BAKE"], "1")
                 self.assertEqual(env["BACKPLANE_TELEMETRY_BAKE"], "1")
                 self.assertEqual(env["BACKPLANE_JS_TARGET"], req["target"])
+                self.assertEqual(env["BACKPLANE_COMMIT_STAMP"], self.release["commit"])
                 self.assertEqual(env["BACKPLANE_JS_BUN_RUNTIME"], str(self.root / "bun-runtime"))
                 for name in ("CC", "BACKPLANE_CFLAGS", "BACKPLANE_OBJ_CACHE"):
                     self.assertNotIn(name, env)

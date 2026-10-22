@@ -247,7 +247,8 @@ def js(request, base, out):
             and request["toolchain"]["bunRuntime"].get("version") == request["toolchain"]["bun"]["version"],
             "Pinned Bun runtime must be the target's, of the pinned Bun's version")
     architecture(bun_runtime, target)
-    env.update(BACKPLANE_JS_TARGET=target, BACKPLANE_JS_BUN_RUNTIME=str(bun_runtime),
+    # /hello's commit is the frozen release commit (build-js.sh stamps it)
+    env.update(BACKPLANE_JS_TARGET=target, BACKPLANE_JS_BUN_RUNTIME=str(bun_runtime), BACKPLANE_COMMIT_STAMP=release["commit"],
                PATH=str(bun.parent) + os.pathsep + str(bend.parent) + os.pathsep + env.get("PATH", ""))
     clock = subprocess.check_output(["date", "+%s%N"], env=env, text=True).strip()
     require(re.fullmatch(r"[0-9]{19,}", clock), "build-js.sh requires GNU date in PATH (Darwin: coreutils gnubin)")

@@ -57,7 +57,11 @@ async function connect(ses) {
       // Credential material stays in main and the service's HttpOnly cookie.
       const response = await ses.fetch(`${origin}/auth/pair`, { method: 'POST', credentials: 'include', headers: { Authorization: `Bearer ${await service.token()}` }, redirect: 'error' });
       if (!response.ok) throw new Error('Could not authenticate with the service');
-      if(directBrowser){await connectBrowser(ses);if(desktopBrowser.state().phase!=='ready')throw new Error('Direct Browser service unavailable');}
+      // The in-app browser is optional: a hub that does not serve it (one
+      // started by systemd, --headless or an older install) still gets the
+      // whole UI. The browser only reads as unavailable, and Reconnect
+      // (desktop:browser-reconnect) tries it again.
+      if(directBrowser)await connectBrowser(ses).catch(()=>{});
       if (!quitting && window && !window.isDestroyed()) await window.loadURL(origin);
     } catch (error) {
       status('error', error.message);
@@ -103,13 +107,14 @@ function start() {
     return result.canceled ? null : result.filePaths[0];
   });
   ipcMain.handle('desktop:browser-present',(event,value)=>{
-    if(!trusted(event)||!directBrowser||!desktopBrowser)throw new Error('Invalid Browser sender');
+    if(!trusted(event)||!directBrowser)throw new Error('Invalid Browser sender');
     exactObject(value,['owner','bounds']);exactObject(value.bounds,['x','y','width','height']);
     if(typeof value.owner!=='string'||!value.owner.length||value.owner.length>512||/[\x00-\x1f]/.test(value.owner))throw new Error('Invalid Browser owner');
     if(Object.values(value.bounds).some(v=>!Number.isFinite(v)||Math.abs(v)>1000000)||value.bounds.width<1||value.bounds.height<1)throw new Error('Invalid Browser geometry');
     const zoom=window.webContents.getZoomFactor(),box=window.getContentBounds();
     const x=Math.max(0,Math.min(box.width,Math.round(value.bounds.x*zoom))),y=Math.max(0,Math.min(box.height,Math.round(value.bounds.y*zoom)));
     const width=Math.min(box.width-x,Math.round(value.bounds.width*zoom)),height=Math.min(box.height-y,Math.round(value.bounds.height*zoom));
+    if(!desktopBrowser||desktopBrowser.isClosed())return{shown:false,phase:'error',message:'Browser unavailable'};
     if(width<1||height<1){desktopBrowser.hide();return{shown:false,message:'Browser panel is hidden'};}
     return desktopBrowser.present({owner:value.owner,bounds:{x,y,width,height}}).then(result=>({shown:result.shown===true,...(result.message?{message:result.message}:{} )}));
   });

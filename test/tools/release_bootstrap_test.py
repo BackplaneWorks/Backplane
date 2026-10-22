@@ -197,7 +197,8 @@ class BootstrapTest(unittest.TestCase):
     def test_no_c_operation_remains(self):
         self.assertEqual(b.OPERATIONS, ('js', 'android'))
         text = (ROOT/'.github/workflows/release-bootstrap.yml').read_text()
-        for word in ('clang', 'unix-native', 'windows-native', 'release-llvm', 'cygwin'):
+        # (Cygwin itself is allowed: Windows ships its portable shell runtime, not a Cygwin build)
+        for word in ('clang', 'unix-native', 'windows-native', 'release-llvm'):
             self.assertFalse(word in text.lower(), word)
 
     def test_workflow_pins_this_component_producer(self):

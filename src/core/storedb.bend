@@ -642,6 +642,12 @@ def K.bot.marks(ps: List<&2, String>, +conv: String, acc: List<&2, RK>) -> List<
 def K.conv(+post: M.State, +conv: String) -> List<&2, RK>:
   RK{"conv", conv} <> K.bot.marks(ML.Conv.parts(ML.Box.conv(M.State.mail(post), conv)), conv, Nil{})
 
+# a conversation whose members may change (ML.Box.conv_set: a joining bot
+# gets an open mark, one that left loses its mark): the marks of its
+# members before and after (found missing by the copy harness, F1)
+def K.conv.both(+pre: M.State, +post: M.State, +conv: String) -> List<&2, RK>:
+  List.append(&2, RK, K.conv(post, conv), K.conv(pre, conv))
+
 def K.tokens(+pre: M.State, +th: String, +pv: String, +mo: String, +at: Nat) -> List<&2, RK>:
   +x = M.Tok.pre(pre)
   +pm = pv ++ "|" ++ Bool.pick(String, String.is_empty(mo), "default", mo)
@@ -766,7 +772,7 @@ def Sdb.keys(+pre: M.State, +post: M.State, c: M.Change) -> List<&2, RK>:
     case M.BotDeleted{+id, _}:
       RK{"bot", id} <> K.names(pre, id)
     case M.RoomSet{+id, _, _, _}:
-      [RK{"room", id}, RK{"conv", "room:" ++ id}]
+      RK{"room", id} <> K.conv.both(pre, post, "room:" ++ id)
     case M.RoomDeleted{+id, _}:
       [RK{"room", id}]
     case M.RoomPosted{_, +room, +from, _, _, _}:
@@ -822,7 +828,7 @@ def Sdb.keys(+pre: M.State, +post: M.State, c: M.Change) -> List<&2, RK>:
     case M.MessageFrom{+th, +msg, _, _, _, _}:
       [RK{"origin", th ++ "/" ++ msg}]
     case M.ConvSet{+id, _, _, _, _, _, _}:
-      [RK{"conv", id}]
+      K.conv.both(pre, post, id)
     case M.MailPosted{_, +conv, _, _, _, _, _, _, _, _}:
       K.conv(post, conv)
     case M.MailMarked{+bot, +conv, _, _, _, _}:
@@ -1427,7 +1433,9 @@ def Demo.changes() -> List<&2, M.Change>:
    M.AskOpened{"a1", "t1", "approval", "Bash", "rm", "yes,no", 10n}, M.AskClosed{"a1", "yes", 11n},
    M.TaskDelegated{"k1", "t1", "t2", 1n, "claude", "opus", 11n}, M.TaskStateSet{"k1", M.TaskDone{}, "ok", 12n}, M.TaskDelivered{"k1", 12n},
    M.ThreadSnoozed{"t2", 99n, 12n}, M.ProjectOrdered{"p1", "80", 12n}, M.ThreadRenamed{"t2", "Bee", 13n}, M.ThreadPinned{"t2", True{}, 13n},
-   M.BotSet{"b1", "Bub", "t2", 1n, "kind", 14n}, M.RoomSet{"r1", "Room", "b1", 14n}, M.RoomPosted{"rp1", "r1", "b1", "hey room", 0n, 15n},
+   M.BotSet{"b1", "Bub", "t2", 1n, "kind", 14n}, M.RoomSet{"r1", "Room", "b1", 14n},
+   M.BotSet{"b2", "Two", "t1", 1n, "", 14n}, M.RoomSet{"r2", "Quiet", "b1\nb2", 14n}, M.RoomSet{"r2", "Quiet", "b1", 15n},
+   M.ConvSet{"c2", "S2", "pair", "bot:b2\nperson", "p1", "", 15n}, M.ConvSet{"c2", "S2", "pair", "person", "p1", "", 16n}, M.RoomPosted{"rp1", "r1", "b1", "hey room", 0n, 15n},
    M.HookSet{"h1", "b1", "gh", False{}, 15n}, M.HookHit{"h1", 16n},
    M.RoutineSet{"ro1", "b1", "daily", "0 9 * * *", "go", True{}, 16n}, M.RoutineFired{"ro1", 17n}, M.RoutinePlan{"ro1", 0n, "person", "", 17n},
    M.MemorySaved{"b1", "k", "note", "remember", "", 17n}, M.MemorySaved{"b1", "k2", "note", "gone", "", 17n}, M.MemoryForgot{"b1", "k2", 18n},
