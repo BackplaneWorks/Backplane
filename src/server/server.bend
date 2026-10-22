@@ -13370,7 +13370,7 @@ type EarlyGo is Data:
 # a listener bound early (its loop waiting for the go), or the bind's error
 type Early is Data:
   EarlyUp{ctl: Chan(EarlyGo)}
-  EarlyDown{e: U32 & String}
+  EarlyDown{code: U32, why: String}
 
 def Early.answer(s: Socket, +home: String) -> IO(Unit):
   do IO<Unit>:
@@ -13419,6 +13419,10 @@ def Early.loop(+fuel: Nat, l: Listener, +id: U32, +home: String, +ctl: Chan(Earl
         r => IO.bind(Poll<&1, &1, Maybe<&1, EarlyGo>, Unit>, Unit, Chan.try_recv(EarlyGo, ctl, 0),
           p => Early.step(p, r, f, id, home, l2 => Early.loop(f, l2, id, home, ctl))))
 
+def Early.down(e: U32 & String) -> Early:
+  (c, w) = e
+  EarlyDown{c, w}
+
 # a bound listener starts answering 503 at once; ids as Accept.loop's
 def Early.up(r: Result<&1, &1, U32 & String, Listener>, +id: U32, +home: String) -> IO(Early):
   match r:
@@ -13428,7 +13432,7 @@ def Early.up(r: Result<&1, &1, U32 & String, Listener>, +id: U32, +home: String)
         IO.spawn(Unit, Early.loop(Fuel.forever(), l, id, home, ctl))
         return EarlyUp{ctl}
     case Fail{e}:
-      IO.pure(Early, EarlyDown{e})
+      IO.pure(Early, Early.down(e))
 
 def Early.bind(+host: String, +port: U32, +id: U32, +home: String) -> IO(Early):
   IO.bind(Result<&1, &1, U32 & String, Listener>, Early, H.Net.listen(host, port), r => Early.up(r, id, home))
@@ -13437,7 +13441,7 @@ def Early.is_up(e: Early) -> Bool:
   match e:
     case EarlyUp{_}:
       True{}
-    case EarlyDown{_}:
+    case EarlyDown{_, _}:
       False{}
 
 # the hub is ready: the loop serves from its next accept on
@@ -13448,16 +13452,15 @@ def Early.go(+ctl: Chan(EarlyGo), g: EarlyGo) -> IO(Unit):
 
 # a hub that must listen (backplane-serve, --headless) stops at once when
 # its port is taken, before it loads anything
-def Early.need.die(e: U32 & String, +addr: String) -> IO(Early):
-  (_, msg) = e
+def Early.need.die(+msg: String, +addr: String) -> IO(Early):
   IO.die(Early, 1, "backplane: cannot listen on " ++ addr ++ ": " ++ msg)
 
 def Early.need(e: Early, need: Bool, +addr: String) -> IO(Early):
   match e need:
-    case EarlyDown{er} True{}:
-      Early.need.die(er, addr)
-    case EarlyDown{er} False{}:
-      IO.pure(Early, EarlyDown{er})
+    case EarlyDown{_, w} True{}:
+      Early.need.die(w, addr)
+    case EarlyDown{c, w} False{}:
+      IO.pure(Early, EarlyDown{c, w})
     case EarlyUp{c} _:
       IO.pure(Early, EarlyUp{c})
 
@@ -13469,7 +13472,7 @@ type TEarly is Data:
 def Early.tail.ip.k(none: Bool, +ip: String, +port: U32, +home: String) -> IO(TEarly):
   match none:
     case True{}:
-      IO.pure(TEarly, TEarly{"", EarlyDown{(0, "no tailnet address")}})
+      IO.pure(TEarly, TEarly{"", EarlyDown{0, "no tailnet address"}})
     case False{}:
       IO.bind(Early, TEarly, Early.bind(ip, port, 2147483648, home), e => IO.pure(TEarly, TEarly{ip, e}))
 
@@ -13481,7 +13484,7 @@ def Early.tail(on: Bool, +port: U32, +home: String) -> IO(TEarly):
     case True{}:
       IO.bind(P.Ran, TEarly, P.Proc.run("tailscale", ["ip", "-4"], ""), r => Early.tail.ip(Tailnet.first(r), port, home))
     case False{}:
-      IO.pure(TEarly, TEarly{"", EarlyDown{(0, "off")}})
+      IO.pure(TEarly, TEarly{"", EarlyDown{0, "off"}})
 
 def Net.tailnet(n: Net) -> Bool:
   match n:
@@ -13502,7 +13505,7 @@ def Tailnet.listened(r: Early, +host: String, +ip: String, +port: U32, +web: Str
         IO.print("Backplane on your tailnet: http://" ++ ip ++ ":" ++ U32.show(port) ++ "/ (" ++ Bool.pick(String, String.is_empty(owner), "pair in Settings", owner ++ "'s devices; pair in Settings") ++ ")")
         ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, LinkFound{TN.Tailnet.report("reachable", TN.Tailnet.link("http://" ++ ip ++ ":" ++ U32.show(port), token))})
         Early.go(ctl, EarlyGo{web, inbox, False{}, token, owner})
-    case EarlyDown{_}:
+    case EarlyDown{_, _}:
       do IO<Unit>:
         Log.info("could not listen on the tailnet address " ++ ip)
         ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, LinkFound{TN.Tailnet.report(Bool.pick(String, Tailnet.covered(host, ip), "reachable", "unavailable"), "")})
@@ -16040,9 +16043,9 @@ def Main.listened(r: Early, te: TEarly, h: Hub, +web: String, +inbox: Chan(Msg),
       do IO<Unit>:
         IO.print("Backplane listening on http://" ++ addr)
         Main.serve(ctl, te, h, web, inbox, cfg, tok, front)
-    case EarlyDown{e} True{}:
-      Main.failed(e, h, addr)
-    case EarlyDown{_} False{}:
+    case EarlyDown{c, w} True{}:
+      Main.failed((c, w), h, addr)
+    case EarlyDown{_, _} False{}:
       do IO<Unit>:
         Log.info("web server off: " ++ addr ++ " is taken; trying again every 2 s")
         IO.spawn(Unit, Listen.retry(Fuel.forever(), web, inbox, cfg, addr))
