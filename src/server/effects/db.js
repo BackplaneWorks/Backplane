@@ -185,6 +185,35 @@ function db_batch_t(h, sql, rows) {
 function db_script(h, items) {
   return bp_db_rows(h, null, items, false);
 }
+// Builder-only status path. Keep the counted APIs above unchanged. Reuse
+// their preparation and String parameter helpers and identical savepoint
+// protocol; a write's result count is deliberately never queried.
+function db_script_status(h, items) {
+  const db = bp_db_get(h);
+  if (!db) return "fail no handle " + h;
+  try {
+    db.exec("SAVEPOINT bp_db");
+  } catch (e) {
+    return "fail " + bp_db_why(e);
+  }
+  try {
+    for (let xs = items; xs.$ === CID(Con); xs = xs.tail) {
+      const row = xs.head;
+      if (row.$ !== CID(Con)) throw new Error("an empty item");
+      const st = bp_db_prep(db, row.head, true);
+      const ps = bp_db_params(row.tail, false);
+      if (st.paramsCount !== ps.length) throw new Error(ps.length + " params for " + st.paramsCount + " placeholders");
+      st.run(...ps);
+    }
+    db.exec("RELEASE bp_db");
+    return "ok";
+  } catch (e) {
+    try {
+      db.exec("ROLLBACK TO bp_db; RELEASE bp_db");
+    } catch {}
+    return "fail " + bp_db_why(e);
+  }
+}
 function db_script_t(h, items) {
   return bp_db_rows(h, null, items, true);
 }
@@ -250,6 +279,7 @@ io_eff(CID(Db.exec), db_exec);
 io_eff(CID(Db.run), db_run);
 io_eff(CID(Db.batch), db_batch);
 io_eff(CID(Db.script), db_script);
+io_eff(CID(Db.script_status), db_script_status);
 io_eff(CID(Db.query), db_query);
 io_eff(CID(Db.close), db_close);
 io_eff(CID(Db.run.t), db_run_t);

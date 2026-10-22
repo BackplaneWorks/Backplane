@@ -50,6 +50,13 @@ def Db.batch(h: String, sql: String, rows: List<&2, List<&2, String>>) -> IO(Str
 def Db.script(h: String, items: List<&2, List<&2, String>>) -> IO(String):
   import "./effects/db.js"
 
+# Same prepared statements, parameter checks, ordering and savepoint rollback
+# as Db.script, but success is just "ok": no changed-row count is queried.
+# The first-store builder checks only this status; counted callers keep
+# using Db.script and its unchanged exact changes contract.
+def Db.script_status(h: String, items: List<&2, List<&2, String>>) -> IO(String):
+  import "./effects/db.js"
+
 # Db.run, Db.batch, Db.script and Db.query with typed params
 
 def Db.run.t(h: String, sql: String, params: List<&2, DbVal>) -> IO(String):
