@@ -23,6 +23,11 @@ function harness(selected='saved'){
 }
 function safeRead(request){assert(request);assert.deepEqual(request.p.session.drafts,{'@lang':'en'});assert.deepEqual(request.p.session.outbox,{});assert.deepEqual(request.p.session.open,{p:true});assert.deepEqual(request.p.session.info,{'fold:e':'on','subs:x':'on'});assert(JSON.stringify(request).length<4096);}
 const tests=[
+ ['composer popup: a trigger word goes on view.update through the real transport, once more after, then only safe reads',()=>{const x=harness();x.open();
+  const type=t=>{x.h.request('h','draft',t);const o=x.h.drain(),u=o.cmds.filter(c=>c.request?.m==='view.update');return u.at(-1)?.request;};
+  for(const t of ['@','>','%','#','$','/']){const r=type(t+'zo');assert(r,'a read for '+t);assert.equal(r.p.session.drafts.a,t+'zo',t);assert.deepEqual(Object.keys(r.p.session.drafts).sort(),['@lang','a']);assert(JSON.stringify(r).length<4096);x.reply(r.id);}
+  const shut=type('/zo done');assert(shut,'once more, so the hub shuts the popup');assert.equal(shut.p.session.drafts.a,'/zo done');x.reply(shut.id);
+  assert.equal(type('/zo done.'),undefined,'then an ordinary edit sends no read');}],
  ['open filters before shared snapshot bounds and retains full local maps',()=>{const x=harness();const o=x.greeting();assert.equal(o.cmds.length,1);safeRead(o.cmds[0].request);const s=x.h.states.get('h').session;assert.equal(s.drafts.b,huge);assert.equal(s.drafts['@f.secret'],huge);assert.equal(s.outbox.old,huge);assert.equal(s.info.private,huge);}],
  ['explicit page is bounded before shared snapshot',()=>{const x=harness();x.open();x.h.request('h','earlier','');const o=x.h.drain();assert.equal(o.cmds.length,1);assert.equal(o.cmds[0].request.m,'view.page');safeRead(o.cmds[0].request);}],
  ['update is bounded before shared snapshot',()=>{const x=harness();x.open();x.h.update(x.h.states.get('h'));const o=x.h.drain();assert.equal(o.cmds.length,1);assert.equal(o.cmds[0].request.m,'view.update');safeRead(o.cmds[0].request);}],
