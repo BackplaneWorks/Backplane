@@ -18,10 +18,7 @@ runtime has Win32 syscalls (fast-hub J4). See
 `scripts/test.sh` runs each standalone IO test and its matching
 `test/tools/NAME.mjs` driver when present. JavaScript fixtures are emitted
 and their drivers execute assertions; successful emission alone cannot pass.
-Files with an IO `main` and a driver exercise both. The intentionally failing
-`cache_identity_before_test.bend` is reserved for
-`test/tools/mobile_cache_identity_gate.py`, which checks its exact negative
-result. It is excluded from the positive suite.
+Files with an IO `main` and a driver exercise both.
 
 ## No C
 
