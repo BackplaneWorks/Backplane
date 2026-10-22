@@ -273,3 +273,14 @@ test('composer popup: a keystroke in a trigger word sends view.update with the d
  type('see %pr');const event={t:'view.changed',version:1,generation:'7',epoch:'actual',viewId:'view-A',target:{kind:'thread',id:'A'},viewRevision:'2'};
  f.host.receive(event);assert.equal(last().m,'view.update');assert.equal(last().p.session.drafts.A,'see %pr','a hub change keeps the popup draft');
 });
+
+test('composer popup: coalesced clearing edits still deliver the closing draft',async()=>{
+ const f=await fixture({draftRefresh:fn=>fn()});f.open();
+ f.host.request('draft','@Zo');const opening=f.sent.at(-1),count=f.sent.length;
+ f.host.request('draft','plain');f.host.request('draft','');
+ assert.equal(f.sent.length,count,'clearing edits coalesce behind the popup read');
+ f.host.receive(f.reply(opening));const closing=f.sent.at(-1);
+ assert.notEqual(closing.id,opening.id);assert.equal(closing.p.session.drafts.A,'','the deferred read closes the hub popup');
+ f.host.receive(f.reply(closing));
+ f.host.request('draft','plain again');assert(!Object.hasOwn(f.sent.at(-1).p.session.drafts,'A'),'ordinary reads stop carrying the draft');
+});

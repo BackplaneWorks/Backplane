@@ -352,7 +352,11 @@ export class NativeThinHost307265 {
     if (this.inert(hub, envelope, epoch)) return true;
     if (envelope?.t === 'view') return this.greeting(hub, envelope, epoch);
     if (envelope?.t === 'view.changed') {
-      if (s.greeted && this.client.links.get(hub)?.viewId) this.issue(s, this.client.changed(hub, envelope, this.requestSession(s.session, 'view.update', s.target, popupDraft(s.session.drafts?.[s.session.sel])), s.anchor));
+      if (s.greeted && this.client.links.get(hub)?.viewId) {
+        const result = this.client.changed(hub, envelope, this.requestSession(s.session, 'view.update', s.target, this.popupRead(s)), s.anchor);
+        if (result.id) s.popupSent = popupDraft(s.session.drafts?.[s.session.sel]);
+        this.issue(s, result);
+      }
       return true;
     }
     if (envelope?.t !== 'reply') {
@@ -476,12 +480,17 @@ export class NativeThinHost307265 {
   // whether a read carries the selected draft: while it may open the popup,
   // and once more after, so the hub shuts it
   popupRead(s) {
-    const now = popupDraft(s.session.drafts?.[s.session.sel]), carry = now || !!s.popupSent;
-    s.popupSent = now;return carry;
+    return popupDraft(s.session.drafts?.[s.session.sel]) || !!s.popupSent;
   }
   update(s) {
     const l = this.client.links.get(s.hub);
-    if (s.greeted && l?.viewId) this.issue(s, this.client.request(s.hub, 'view.update', { session: this.requestSession(s.session, 'view.update', s.target, this.popupRead(s)), anchor: s.anchor, viewRevision: l.viewRevision }));
+    if (s.greeted && l?.viewId) {
+      const result = this.client.request(s.hub, 'view.update', { session: this.requestSession(s.session, 'view.update', s.target, this.popupRead(s)), anchor: s.anchor, viewRevision: l.viewRevision });
+      // A coalesced edit has not reached the hub. Keep the closing draft
+      // owed until the follow-up request actually leaves the transport.
+      if (result.id) s.popupSent = popupDraft(s.session.drafts?.[s.session.sel]);
+      this.issue(s, result);
+    }
   }
 
   register(hub, args) {
