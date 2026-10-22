@@ -7,6 +7,8 @@ import ../core/utf8.bend as U
 import ./db.bend as D
 import ./host.bend as H
 import ../core/far.bend as FR
+import ../core/bot.bend as BT
+import ../core/mail.bend as ML
 
 # The store's first build (store.db from events.jsonl, docs:
 # bp-coord/store/S1-SCHEMA.md)
@@ -15,7 +17,8 @@ import ../core/far.bend as FR
 # complete lines are folded and their facts written in one Db.script; the
 # partial last line is read again with the next chunk, and a line longer
 # than a chunk makes the chunk grow until it fits. The fold keeps no
-# entries (Stb.strip after every chunk) or cold settings (written straight
+# entries or room-post text (Stb.strip after every chunk), older mail
+# headers (Stb.after after each mail), or cold settings (written straight
 # to SQL, never inserted in the fold): the one step that reads entries,
 # ProviderSet's Switch.count, is given a counter of each thread's own
 # entries instead (M.State.switch.c). After the last line every record of
@@ -69,13 +72,22 @@ def Cut.go(bs: List<&2, U32>, s: CutS) -> Cut:
 def Cut.of(bs: List<&2, U32>) -> Cut:
   Cut.go(bs, CutS{Nil{}, 0n, Nil{}, 0n, 0n})
 
-# The fold without entries
-# ------------------------
+# The fold without already-filed histories
+# ----------------------------------------
+
+# RoomPosted facts have been produced for the chunk transaction when
+# Stb.strip runs. No State.apply or Sdb.facts transition reads World.posts;
+# Dump.part never dumps them. Preserve World.talk and every other
+# world field for subsequent records.
+def Stb.world(w: BT.World) -> BT.World:
+  match w:
+    case BT.World{bs, rs, _, hs, ro, ms, pe, sp, ho, ta, pg, tk}:
+      BT.World{bs, rs, Nil{}, hs, ro, ms, pe, sp, ho, ta, pg, tk}
 
 def Stb.ext(x: M.Ext) -> M.Ext:
   match x:
     case M.Ext{w, _, mail}:
-      M.Ext{w, Map.new(&2, List<&2, M.Entry>), mail}
+      M.Ext{Stb.world(w), Map.new(&2, List<&2, M.Entry>), mail}
 
 def Stb.exts(xs: List<&2, M.Ext>) -> List<&2, M.Ext>:
   match xs:
@@ -156,6 +168,30 @@ def Stb.cold(c: M.Change) -> List<&2, SDB.Op>:
     case _:
       Nil{}
 
+# Mail facts keep every header in SQL. The fold's only header-dependent
+# output is Row.conv's wanted field from Box.newest; Headers.add compares
+# against that same first header (timestamp ties favour the new arrival).
+# Keep exactly that header after each mail event. Preserve Box.ids in full:
+# duplicate mail must still be ignored even after its header was dropped.
+def Stb.header(ms: List<&2, ML.Mail>) -> List<&2, ML.Mail>:
+  match ms:
+    case Nil{}:
+      Nil{}
+    case m <> _:
+      [m]
+
+def Stb.mail(+b: ML.Box, +conv: String) -> ML.Box:
+  ML.Box.with_mails(b, Map.set(&2, List<&2, ML.Mail>, ML.Box.mails(b), conv, Stb.header(ML.Box.headers(b, conv))))
+
+def Stb.after(c: M.Change, st: M.State) -> M.State:
+  match c:
+    case M.MailPosted{_, +conv, _, _, _, _, _, _, _, _}:
+      M.State.with_mail(b => Stb.mail(b, conv), st)
+    case M.RoomPosted{_, +room, _, _, _, _}:
+      M.State.with_mail(b => Stb.mail(b, "room:" ++ room), st)
+    case _:
+      st
+
 # The build
 # ---------
 
@@ -198,7 +234,7 @@ def Stb.change(m: Maybe<&2, M.Change>, +st: M.State, +cnt: Map<&2, Nat>, +seq: N
     case Some{+c}:
       +p = SDB.F.posts(c)
       +cnt2 = Stb.bump(p, cnt)
-      +post = Stb.apply(st, cnt, c)
+      +post = Stb.after(c, Stb.apply(st, cnt, c))
       Acc{post, cnt2, seq, Nat.add(off, 1n+len), SDB.Sdb.ord(c, ord), Stb.far(FR.Fr.fact(post, c, seq), Stb.sqls(Stb.cold(c), Stb.sqls(SDB.Sdb.facts(st, SDB.At{seq, off, len, ord}, c), items))), id, origin}
     case None{}:
       Acc{st, cnt, seq, Nat.add(off, 1n+len), ord, Stb.sqls([SDB.F.line(SDB.At{seq, off, len, ord}, w)], items), id, origin}
@@ -483,11 +519,13 @@ def Stb.moved(r: Result<&1, &1, U32 & String, Unit>) -> IO(Unit):
     case Fail{(_, e)}:
       IO.die(Unit, 1, "store build: rename store.db.tmp: " ++ e)
 
-def Stb.finish.k(+h: String, +home: String, f: File, +a: Acc) -> IO(Built):
+# a holds only completion metadata here: the full fold is consumed by
+# the record dump, so it is no longer rooted during journal close/rename.
+def Stb.finish.records(+h: String, +home: String, f: File, st: M.State, +a: Acc) -> IO(Built):
   +db = home ++ "/store.db"
   do IO<Built>:
     File.close(f)
-    Stb.parts(SDB.Dump.n(), h, Acc.st(a), 0n)
+    Stb.parts(SDB.Dump.n(), h, st, 0n)
     +res : String <- D.Db.script(h, Stb.end(a))
     Stb.check("meta", res)
     jm : String <- D.Db.exec(h, "PRAGMA journal_mode = DELETE")
@@ -501,6 +539,11 @@ def Stb.finish.k(+h: String, +home: String, f: File, +a: Acc) -> IO(Built):
     Stb.moved(mv)
     Stb.gone(home ++ "/store.build")
     return Built{Acc.seq(a), Acc.off(a), Acc.ord(a)}
+
+def Stb.finish.k(+h: String, +home: String, f: File, a: Acc) -> IO(Built):
+  match a:
+    case Acc{st, _, seq, off, ord, _, id, origin}:
+      Stb.finish.records(h, home, f, st, Acc{M.State.empty(), Map.new(&2, Nat), seq, off, ord, Nil{}, id, origin})
 
 def Stb.finish(+h: String, +home: String, r: File & Acc) -> IO(Built):
   (f, a) = r
