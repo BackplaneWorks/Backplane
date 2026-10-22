@@ -263,3 +263,13 @@ test('request privacy: read views send only language and bounded choices; action
    g.host.receive(g.reply(sent,{session:{...sent.p.session,drafts:{A:'selected domain result',B:'foreign replacement'}}}));assert.equal(g.getSession().drafts.A,'selected domain result');assert.equal(g.getSession().drafts.B,'other local');assert.deepEqual(g.getSession().outbox,{'44':'local pending'});
  }
 });
+test('composer popup: a keystroke in a trigger word sends view.update with the draft through the real transport, once more after, then none',async()=>{
+ const f=await fixture({draftRefresh:fn=>fn()});f.open();
+ const last=()=>f.sent.at(-1),answer=()=>f.host.receive(f.reply(last()));
+ const type=t=>{const n=f.sent.length;f.host.request('draft',t);assert.equal(f.sent.length,n+1,'a read for '+t);assert.equal(last().m,'view.update');const r=last();answer();return r;};
+ for(const t of ['@','>','%','#','$','/'])assert.equal(type(t+'al').p.session.drafts.A,t+'al',t);
+ assert.equal(type('/al done').p.session.drafts.A,'/al done','once more, so the hub shuts the popup');
+ assert(!('A' in type('/al done.').p.session.drafts),'then an ordinary draft stays local');
+ type('see %pr');const event={t:'view.changed',version:1,generation:'7',epoch:'actual',viewId:'view-A',target:{kind:'thread',id:'A'},viewRevision:'2'};
+ f.host.receive(event);assert.equal(last().m,'view.update');assert.equal(last().p.session.drafts.A,'see %pr','a hub change keeps the popup draft');
+});
