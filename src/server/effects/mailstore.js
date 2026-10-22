@@ -9,13 +9,14 @@ function mi_open(path, write) {
     dir = fs.openSync(path.slice(0, at), C.O_RDONLY | C.O_DIRECTORY | C.O_NOFOLLOW);
     // openat binds the final component to the checked directory descriptor.
     const ffi = require('bun:ffi');
-    const lib = ffi.dlopen(process.platform === 'darwin' ? '/usr/lib/libSystem.B.dylib' : 'libc.so.6', {
+    const lib = globalThis.BACKPLANE_MI_OPENAT ??= ffi.dlopen(process.platform === 'darwin' ? '/usr/lib/libSystem.B.dylib' : 'libc.so.6', {
       openat: { args: ['i32', 'ptr', 'i32', 'i32'], returns: 'i32' }
     });
     const name = Buffer.from(path.slice(at + 1) + '\0');
-    fd = lib.symbols.openat(dir, ffi.ptr(name), (write !== 0 ? C.O_RDWR | C.O_CREAT : C.O_RDONLY) | C.O_NOFOLLOW | C.O_NONBLOCK, 0o600);
+    // close-on-exec, as mailstore.c: a body file never leaks into a child
+    const cloexec = process.platform === 'darwin' ? 0x1000000 : 0x80000;
+    fd = lib.symbols.openat(dir, ffi.ptr(name), (write !== 0 ? C.O_RDWR | C.O_CREAT : C.O_RDONLY) | C.O_NOFOLLOW | C.O_NONBLOCK | cloexec, 0o600);
     if (fd < 0) code = io_sys().errno();
-    lib.close();
     if (!code) { const st = fs.fstatSync(fd); if (!st.isFile() || (write !== 0 && st.nlink !== 1)) code = 22; }
   } catch (e) { code = Math.abs(e.errno ?? 5); }
   if (dir >= 0) { try { fs.closeSync(dir); } catch (e) { code ||= Math.abs(e.errno ?? 5); } }

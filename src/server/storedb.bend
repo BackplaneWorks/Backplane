@@ -61,11 +61,6 @@ def Sto.num(+s: String) -> Nat:
 def Sto.path(+home: String) -> String:
   home ++ "/store.db"
 
-# what store.db needs beside SDB.Sdb.schema() (far mirrors' shared lines,
-# F1: to move into Sdb.schema)
-def Sto.extra() -> String:
-  "CREATE TABLE IF NOT EXISTS far_line(seq INTEGER PRIMARY KEY, scope TEXT);\nCREATE INDEX IF NOT EXISTS far_line_scope ON far_line(scope, seq);"
-
 # HOOK (F1): swap for FR.Fr.fact once backplane/far-live is on main. The
 # state after the change; [] or one row ["#<seq>", scope]
 def Sto.far.fact(+s: M.State, c: M.Change, +seq: Nat) -> List<&2, List<&2, String>>:
@@ -92,41 +87,6 @@ def Sto.blen(s: String, +acc: Nat) -> Nat:
       acc
     case SCon{Chr{+c}, t}:
       Sto.blen(t, Nat.add(acc, Sto.cpl(U32.is_lt(c, 128), U32.is_lt(c, 2048), U32.is_lt(c, 65536))))
-
-def Sto.skip(bs: List<&2, U32>, n: Nat) -> List<&2, U32>:
-  match bs n:
-    case Nil{} _:
-      Nil{}
-    case +x <> +t 0n:
-      x <> t
-    case +x <> +t 1n+k:
-      Sto.skip(t, k)
-
-# n bytes off the front, decoded, and what is left
-type Cut is Data:
-  Cut{rest: List<&2, U32>, text: String}
-
-def Sto.cut(bs: List<&2, U32>, n: Nat, d: U.Dec) -> Cut:
-  match bs n:
-    case Nil{} _:
-      Cut{Nil{}, U.Utf8.fin(d)}
-    case +x <> +t 0n:
-      Cut{x <> t, U.Utf8.fin(d)}
-    case +x <> +t 1n+k:
-      Sto.cut(t, k, U.Utf8.step(d, x))
-
-def Cut.rest(c: Cut) -> List<&2, U32>:
-  match c:
-    case Cut{r, _}:
-      r
-
-def Cut.text(c: Cut) -> String:
-  match c:
-    case Cut{_, t}:
-      t
-
-def Sto.dec0() -> U.Dec:
-  U.Dec{SNil{}, 0, 0n}
 
 def Sto.bytes(r: Result<&1, &1, U32 & String, List<&2, U32>>) -> List<&2, U32>:
   match r:
@@ -272,14 +232,45 @@ def Sto.why(rs: List<&2, List<&2, String>>) -> String:
 def Sto.wire(+w: String, raw: String) -> String:
   Bool.pick(String, String.is_empty(w), raw, w)
 
-# each row's line, cut from bytes that start at pos (oldest first)
-def Sto.texts(rows: List<&2, LRow>, bs: List<&2, U32>, +pos: Nat, acc: List<&2, String>) -> List<&2, String>:
-  match rows:
-    case Nil{}:
+# the event log's whole lines from byte off within about max bytes, each
+# as its byte length and its text: [len, text, ...] (effects/storedb.js)
+def Sto.fx.lines(path: String, off: U32, max: U32) -> IO(List<&2, String>):
+  import "./effects/storedb.js"
+
+def Sto.texts.acc(hit: Bool, +w: String, t: String, acc: List<&2, String>) -> List<&2, String>:
+  match hit:
+    case True{}:
+      Sto.wire(w, t) <> acc
+    case False{}:
+      acc
+
+def Sto.texts.rows(hit: Bool, +r: LRow, rs: List<&2, LRow>) -> List<&2, LRow>:
+  match hit:
+    case True{}:
+      rs
+    case False{}:
+      r <> rs
+
+def LRow.off(r: LRow) -> Nat:
+  match r:
+    case LRow{o, _, _}:
+      o
+
+def LRow.wire(r: LRow) -> String:
+  match r:
+    case LRow{_, _, w}:
+      w
+
+# each row's line from the file's lines (ps: [len, text, ...] from pos),
+# oldest first; a line with no row (a torn write's fragment) is passed
+def Sto.texts(ps: List<&2, String>, rows: List<&2, LRow>, +pos: Nat, acc: List<&2, String>) -> List<&2, String>:
+  match ps rows:
+    case _ Nil{}:
       List.reverse(&2, String, acc)
-    case LRow{+off, +len, +w} <> t:
-      +c = Sto.cut(Sto.skip(bs, Nat.sub(off, pos)), len, Sto.dec0())
-      Sto.texts(t, Cut.rest(c), Nat.add(off, len), Sto.wire(w, Cut.text(c)) <> acc)
+    case +l <> +t <> +r +x <> +rs:
+      Sto.texts(r, Sto.texts.rows(Nat.is_eq(LRow.off(x), pos), x, rs), Nat.add(pos, 1n+Sto.num(l)), Sto.texts.acc(Nat.is_eq(LRow.off(x), pos), LRow.wire(x), t, acc))
+    case _ _:
+      List.reverse(&2, String, acc)
 
 def Sto.lastend(rows: List<&2, LRow>, +acc: Nat) -> Nat:
   match rows:
@@ -294,8 +285,8 @@ def Sto.lines.rows(rows: List<&2, LRow>, +path: String) -> IO(List<&2, String>):
       IO.pure(List<&2, String>, Nil{})
     case LRow{+off, +len, +w} <> +t:
       do IO<List<&2, String>>:
-        bs : List<&2, U32> <- Sto.read(path, off, Nat.sub(Sto.lastend(t, Nat.add(off, len)), off))
-        return Sto.texts(LRow{off, len, w} <> t, bs, off, Nil{})
+        ps : List<&2, String> <- Sto.fx.lines(path, U32.from_nat(off), U32.from_nat(1n+Nat.sub(Sto.lastend(t, Nat.add(off, len)), off)))
+        return Sto.texts(ps, LRow{off, len, w} <> t, off, Nil{})
 
 def Sto.lines.k(bad: Bool, rs: List<&2, List<&2, String>>, +path: String) -> IO(List<&2, String>):
   match bad:
@@ -437,23 +428,13 @@ def Sto.commit(cm: Cm) -> IO(Lg):
 type Raw is Data:
   Raw{len: Nat, text: String}
 
-type Sp is Data:
-  Sp{part: List<&2, U32>, plen: Nat, done: List<&2, Raw>, used: Nat}
-
-def Sto.split.step(nl: Bool, +x: U32, s: Sp) -> Sp:
-  match nl s:
-    case True{} Sp{part, +plen, done, +used}:
-      Sp{Nil{}, 0n, Raw{plen, U.Utf8.decode(List.reverse(&2, U32, part))} <> done, Nat.add(used, 1n+plen)}
-    case False{} Sp{part, +plen, done, used}:
-      Sp{x <> part, 1n+plen, done, used}
-
-# the whole lines of a chunk (newest first) and the bytes they take
-def Sto.split(bs: List<&2, U32>, s: Sp) -> Sp:
-  match bs:
-    case Nil{}:
-      s
-    case +x <> t:
-      Sto.split(t, Sto.split.step(U32.is_eq(x, 10), x, s))
+# [len, text, ...] as lines
+def Sto.raws(ps: List<&2, String>, acc: List<&2, Raw>) -> List<&2, Raw>:
+  match ps:
+    case +l <> +t <> +r:
+      Sto.raws(r, Raw{Sto.num(l), t} <> acc)
+    case _:
+      List.reverse(&2, Raw, acc)
 
 type Tail is Data:
   Tail{seq: Nat, ord: Nat, off: Nat}
@@ -505,7 +486,7 @@ def Sto.lines.apply(rs: List<&2, Raw>, +st: M.State, p: Pr) -> Pr:
 def Sto.chunk.items(p: Pr, +st: M.State) -> List<&2, List<&2, String>> & Tail:
   match p:
     case Pr{Tail{+s, +ord, +off}, its, ks}:
-      (List.reverse(&2, List<&2, String>, Sto.metas(s, off, ord, Sto.push.ops(SDB.Row.ofs(SDB.RK{"state", "seq"} <> Map.values(&2, SDB.RK, ks), st), its))), Tail{s, ord, off})
+      (List.reverse(&2, List<&2, String>, Sto.metas(s, off, ord, Sto.push.ops(SDB.Row.ofs(SDB.RK{"state", "seq"} <> Map.values(&2, SDB.RK, ks), st, Nil{}), its))), Tail{s, ord, off})
 
 def Sto.chunk.go(r: List<&2, List<&2, String>> & Tail, +db: String, k: Tail -> Nat -> IO(Tail)) -> IO(Tail):
   (items, t) = r
@@ -513,29 +494,17 @@ def Sto.chunk.go(r: List<&2, List<&2, String>> & Tail, +db: String, k: Tail -> N
     Sto.script(db, items)
     k(t, 1048576n)
 
-def Sto.done(s: Sp) -> List<&2, Raw>:
-  match s:
-    case Sp{_, _, d, _}:
-      List.reverse(&2, Raw, d)
-
-def Sto.used(s: Sp) -> Nat:
-  match s:
-    case Sp{_, _, _, u}:
-      u
-
 def Tail.off(t: Tail) -> Nat:
   match t:
     case Tail{_, _, o}:
       o
 
-def Sto.chunk.got(whole: Bool, +sp: Sp, +last: Bool, +db: String, +st: M.State, t: Tail, +chunk: Nat, k: Tail -> Nat -> IO(Tail)) -> IO(Tail):
-  match whole last:
-    case True{} _:
-      Sto.chunk.go(Sto.chunk.items(Sto.lines.apply(Sto.done(sp), st, Pr{t, Nil{}, Map.new(&2, SDB.RK)}), st), db, k)
-    case False{} True{}:
+def Sto.chunk.got(none: Bool, +ps: List<&2, String>, +db: String, +st: M.State, t: Tail, k: Tail -> Nat -> IO(Tail)) -> IO(Tail):
+  match none:
+    case True{}:
       IO.pure(Tail, t)
-    case False{} False{}:
-      k(t, Nat.mul(chunk, 2n))
+    case False{}:
+      Sto.chunk.go(Sto.chunk.items(Sto.lines.apply(Sto.raws(ps, Nil{}), st, Pr{t, Nil{}, Map.new(&2, SDB.RK)}), st), db, k)
 
 def Sto.tail.at(go: Bool, +db: String, +path: String, +st: M.State, +size: Nat, t: Tail, +chunk: Nat, k: Tail -> Nat -> IO(Tail)) -> IO(Tail):
   match go t:
@@ -543,10 +512,8 @@ def Sto.tail.at(go: Bool, +db: String, +path: String, +st: M.State, +size: Nat, 
       IO.pure(Tail, t)
     case True{} Tail{+s, +ord, +off}:
       do IO<Tail>:
-        +want : Nat = Bool.pick(Nat, Nat.is_lt(Nat.sub(size, off), chunk), Nat.sub(size, off), chunk)
-        bs : List<&2, U32> <- Sto.read(path, off, want)
-        +sp : Sp = Sto.split(bs, Sp{Nil{}, 0n, Nil{}, 0n})
-        Sto.chunk.got(Nat.is_gt(Sto.used(sp), 0n), sp, Nat.is_ge(Nat.add(off, want), size), db, st, Tail{s, ord, off}, chunk, k)
+        +ps : List<&2, String> <- Sto.fx.lines(path, U32.from_nat(off), U32.from_nat(chunk))
+        Sto.chunk.got(List.is_empty(&2, String, ps), ps, db, st, Tail{s, ord, off}, k)
 
 def Sto.tail(fuel: Nat, +db: String, +path: String, +st: M.State, +size: Nat, +t: Tail, +chunk: Nat) -> IO(Tail):
   match fuel:
@@ -587,7 +554,7 @@ def Sto.open.schema(bad: Bool, +h: String, +a: String) -> IO(String):
         return ""
     case False{}:
       do IO<String>:
-        +e : String <- D.Db.exec(h, SDB.Sdb.schema() ++ "\n" ++ Sto.extra())
+        +e : String <- D.Db.exec(h, SDB.Sdb.schema())
         Sto.open.made(String.starts_with(e, "ok"), h, e)
 
 # the store opened with its tables made: its handle, or "" with the reason

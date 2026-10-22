@@ -111,6 +111,96 @@ jobs:
       # per runner; the four shards still execute on separate machines.
       - run: TEST_JOBS=2 scripts/test.sh
 
+  # The JS service (docs/js-service.md): bend emits src/server/main.bend
+  # as JS once (kept by a hash of what it reads, so a change that leaves the
+  # server alone takes the last emit), `bun build --compile` cross-builds a
+  # single-file backplane-serve for every target from it in seconds, and
+  # the Linux one is smoke-tested here; js-native runs the others on their
+  # own machines.
+  js:
+    name: JS service
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-bend
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.3'
+      - id: key
+        run: |
+          k=$(scripts/build-js.sh --key src/server/main.bend) || k=""
+          echo "key=$k" >> "$GITHUB_OUTPUT"
+          echo "emit inputs: ${k:-<none: emitted fresh>}"
+      # the folder and key scripts/build-js.sh keeps its emit under
+      # (BACKPLANE_EMIT_CACHE's default; the file is <key>.js and .js.ok)
+      - if: steps.key.outputs.key != ''
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/backplane-bend/emit-js
+          key: emit-js-${{ steps.key.outputs.key }}
+      - name: Build backplane-serve for every target
+        env:
+          # nothing is published here: no Google client, no telemetry
+          BACKPLANE_GOOGLE_BAKE: "0"
+          BACKPLANE_TELEMETRY_BAKE: "0"
+        run: |
+          for t in linux-x64 linux-arm64 darwin-x64 darwin-arm64 windows-x64; do
+            BACKPLANE_JS_TARGET=$t scripts/build-js.sh src/server/main.bend dist-js/$t/backplane-serve
+          done
+          ls -l dist-js/*/
+          # the notices every one ships with, Bun's pinned to its version
+          BACKPLANE_LICENSES_STRICT=1 scripts/js-licenses.sh dist-js/licenses
+      # the web client the hub serves (test/smoke.ts loads its page)
+      - name: Web client
+        run: bend src/web/index.html -o build/web > /dev/null
+      - run: scripts/js-smoke.sh dist-js/linux-x64/backplane-serve build/web
+      - name: Bake and release producer
+        run: |
+          bun test/tools/js_bake_test.ts
+          python3 test/tools/service_release_test.py
+      # the whole of test/smoke.ts (threads, agents) as scripts/smoke.sh runs
+      # it for C, over the JS processes (fast-hub J1)
+      - name: Full smoke
+        run: |
+          bend test/wire/index.html -o build/wire > /dev/null
+          BACKPLANE_SMOKE_FULL=1 scripts/js-smoke.sh dist-js/linux-x64/backplane-serve build/web
+      - uses: actions/upload-artifact@v4
+        with:
+          name: backplane-serve-js
+          path: dist-js/
+          retention-days: 7
+          compression-level: 6
+
+  js-native:
+    name: JS service on ${{ matrix.target }}
+    needs: js
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: linux-arm64,  os: ubuntu-24.04-arm, gate: true }
+          - { target: darwin-arm64, os: macos-15,         gate: true }
+          - { target: darwin-x64,   os: macos-15-intel,   gate: true }
+          # Bend's JS runtime has no Win32 syscalls yet (fast-hub: Windows
+          # io_sys): the binary builds but cannot serve, so this only reports
+          - { target: windows-x64,  os: windows-2025,     gate: false }
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ !matrix.gate }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts
+      - uses: actions/download-artifact@v4
+        with:
+          name: backplane-serve-js
+          path: dist-js
+      - shell: bash
+        run: |
+          f=dist-js/${{ matrix.target }}/backplane-serve
+          [ -f "$f" ] || f=$f.exe
+          chmod +x "$f"
+          scripts/js-smoke.sh "$f"
+
   build:
     name: Build ${{ matrix.target }}
     # runs beside "laws" (which checks every file); nothing is published here

@@ -1,7 +1,7 @@
 import Base
 
-# Pseudo-terminals for the integrated terminal. pty.c / pty.js implement
-# them (native only; the JS twin fails with ENOSYS).
+# Pseudo-terminals for the integrated terminal. pty.c (native) and pty.js
+# (Bun, posix_spawn through bun:ffi) implement them; see docs/terminal.md.
 #
 # The master side comes back as a Socket, so host.bend's Sock.recv_bytes
 # and Sock.send_bytes read and write it (a closed child reads as []), and

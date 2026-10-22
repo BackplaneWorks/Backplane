@@ -9,6 +9,7 @@ import ./google.bend as G
 import ./host.bend as H
 import ./proc.bend as P
 import ./argv.bend as AV
+import ../core/port.bend as PO
 
 # A one-element list in Cfg avoids flattening its secrets into app state.
 type TmCfg is Data:
@@ -150,9 +151,9 @@ def Tio.write(+home: String, st: T.TmState) -> IO(Unit):
     r : Result<&1, &1, U32 & String, Unit> <- H.FS.rename(home ++ "/telemetry/state.tmp", home ++ "/telemetry/state.json")
     return Unit{}
 
-def Tio.pow.result(r: Result<&1, &1, U32 & String, U32 & String & String>) -> String:
+def Tio.pow.result(r: P.Ran) -> String:
   match r:
-    case Done{(0, (out, _))}: String.trim(out)
+    case P.Ran{0, out}: String.trim(out)
     case _: ""
 
 def Tio.pow.accept(+st: T.TmState, +proof: String) -> T.TmState:
@@ -164,7 +165,9 @@ def Tio.pow(needed: Bool, +st: T.TmState) -> IO(T.TmState):
     case True{}:
       do IO<T.TmState>:
         exe : String <- H.Sys.exe_path()
-        r : Result<&1, &1, U32 & String, U32 & String & String> <- Process.run(EX.Exe.child(exe), ["--telemetry-pow", T.TmState.id(st)], "", 4096, 300000)
+        # through Proc.run, never Base's Process.run: on the JS runtime that
+        # is a spawnSync that holds the hub's one loop for the child's life
+        r : P.Ran <- P.Proc.run("sh", ["-c", PO.Port.tmo() ++ "tmo \"$@\" 2>/dev/null", "sh", "300", EX.Exe.child(exe), "--telemetry-pow", T.TmState.id(st)], "")
         return Tio.pow.accept(st, Tio.pow.result(r))
 
 def Tio.plan(p: T.TmPlan) -> IO(T.TmState):

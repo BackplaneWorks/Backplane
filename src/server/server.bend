@@ -15531,16 +15531,22 @@ def Main.boot(cfg: Cfg, need: Bool, front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
         H.Env.put("BACKPLANE_HOME", home)
         Agents.only(home)
         t0 : U32 <- PS.Perf.us()
-        +bs : List<&2, U32> <- Files.read(Store.path(home))
+        # the lines straight from the file (no List cell per byte, which
+        # was most of the JS hub's memory), then only the lines are kept
+        +rd : List<&2, String> <- H.EvLog.read(Store.path(home))
         t1 : U32 <- PS.Perf.span("boot.read", t0)
-        +st : M.State = Boot.fold(Store.lines(bs), M.State.empty())
+        +torn : String = ST.Store.read.tail(rd)
+        +st : M.State = Boot.fold(ST.Store.read.body(rd), M.State.empty())
         t2 : U32 <- PS.Perf.span("boot.replay", t1)
         GT.Git.step.migrate(home, HistReg.roots(st))
         f0 : Result<&1, &1, U32 & String, File> <- File.open(Store.path(home), "a")
-        f : Result<&1, &1, U32 & String, File> <- Main.torn(f0, ST.Store.tail_fix(bs))
+        f : Result<&1, &1, U32 & String, File> <- Main.torn(f0, torn)
         # S1: Sto.boot here (the store brought up to the log's end; the hub
         # keeps no log lines, SO.Lg)
         +ls : SO.Lg <- SO.Sto.boot(home, st)
+        # S3: the thin index on the store once Thin.store.open lands
+        # (backplane/s3-thinstore): the config below goes through
+        # Thin.store.open(cfg, st, SO.Lg.db(ls)) before Main.opened
         t3 : U32 <- PS.Perf.span("boot.store", t2)
         Log.info("replayed " ++ Nat.show(SO.Lg.n(ls)) ++ " changes from " ++ Store.path(home))
         tok : String <- Token.load(home)
