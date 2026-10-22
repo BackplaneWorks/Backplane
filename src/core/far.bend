@@ -849,6 +849,16 @@ def Fr.ext(bw: List<&2, M.Ext>, +prefix: String) -> List<&2, M.Ext>:
   +x = M.Ext.of(bw)
   [M.Ext{Fr.world(M.Ext.world(x), prefix), Fr.by(M.Ext.by(x), prefix), M.Ext.mail(x)}]
 
+# in a hub's bounded state, the link's threads' counts, first messages and
+# window lengths go too (model.bend's Win.cut)
+def Fr.ext.w(bounded: Bool, bw: List<&2, M.Ext>, +prefix: String) -> List<&2, M.Ext>:
+  match bounded:
+    case True{}:
+      +x = M.Ext.of(bw)
+      [M.Ext{Fr.world(M.Ext.world(x), prefix), M.Win.cut(Fr.by(M.Ext.by(x), prefix), prefix), M.Ext.mail(x)}]
+    case False{}:
+      Fr.ext(bw, prefix)
+
 # the settings a link's things leave behind: the work their threads had
 # (WorkSet's bg.<link>~... and watch.<link>~...); the rest stay
 def Fr.settings(+sg: Map<&2, String>, +prefix: String) -> Map<&2, String>:
@@ -872,7 +882,7 @@ def Fr.forget(s: M.State, +link: String) -> M.State:
       +prefix = link ++ "~"
       M.State{Fr.map(M.Project, ps, prefix), Fr.map(M.Thread, ts, prefix), Fr.entries.go(es, prefix, Nil{}), n, Fr.map(M.Task, tk, prefix), Fr.settings(sg, prefix),
         Fr.map(List<&2, M.QItem>, qu, prefix), Fr.map(M.Ask, ak, prefix), dv,
-        Map.del(&2, M.Nav, Fr.map(M.Nav, nv, prefix), Fr.nav(link)), Fr.ext(bw, prefix)}
+        Map.del(&2, M.Nav, Fr.map(M.Nav, nv, prefix), Fr.nav(link)), Fr.ext.w(Nat.is_gt(M.Win.cap(es), 0n), bw, prefix)}
 
 # a state with a link's threads, steps and messages in both directions
 def Fr.demo.idx() -> M.State:

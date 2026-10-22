@@ -301,10 +301,13 @@ def Sum.last.go(es: List<&2, M.Entry>, hit: Bool, +th: String, +user: Bool) -> S
     case _ _:
       ""
 
-def Sum.last(s: M.State, +th: String, +user: Bool) -> String:
-  match s:
-    case M.State{_, _, +es, _, _, _, _, _, _, _, _}:
-      Sum.last.go(es, Sum.last.hit(es, th, user), th, user)
+def Sum.last.mine(+es: List<&2, M.Entry>, +th: String, +user: Bool) -> String:
+  Sum.last.go(es, Sum.last.hit(es, th, user), th, user)
+
+# read from the thread's own entries (M.State.mine: a hub's window keeps
+# its newest user and assistant messages), never the whole log
+def Sum.last(+s: M.State, +th: String, +user: Bool) -> String:
+  Sum.last.mine(M.State.mine(s, th), th, user)
 
 def Refs.got.t(r: Map<&2, M.Thread> & M.Thread) -> M.Thread:
   (_, t) = r

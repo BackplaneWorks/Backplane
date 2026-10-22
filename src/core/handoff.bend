@@ -124,14 +124,37 @@ def Hand.head(+omitted: Nat, +first: String, +th: String) -> List<&2, String>:
   Bool.pick(List<&2, String>, Nat.is_eq(omitted, 0n), Nil{},
     [Hand.cut(first, 2000n), "[" ++ Nat.show(omitted) ++ " earlier items left out; thread_read with threadId " ++ th ++ " has them all]"])
 
-def Hand.body(s: Sel, +first: String, +th: String) -> String:
+# what was left out: every item but the lines kept (total: how many items
+# the thread has, Hand.total)
+def Hand.body(s: Sel, +total: Nat, +first: String, +th: String) -> String:
   match s:
-    case Sel{_, ls, _, +om}:
-      String.join(List.append(&2, String, Hand.head(om, first, th), ls), "\n\n")
+    case Sel{_, +ls, _, _}:
+      String.join(List.append(&2, String, Hand.head(Nat.sub(total, List.length(&2, String, ls)), first, th), ls), "\n\n")
+
+# the items of a run, without its count (a hub's state ends a thread's run
+# with one, model.bend's Win.count)
+def Hand.real(es: List<&2, M.Entry>) -> List<&2, M.Entry>:
+  match es:
+    case Nil{}:
+      Nil{}
+    case +e <> t:
+      Hand.mine.k(Bool.not(M.Win.is_count(e)), e, Hand.real(t))
+
+def Hand.total.go(es: List<&2, M.Entry>, +n: Nat) -> Nat:
+  match es:
+    case Nil{}:
+      n
+    case +e <> t:
+      Hand.total.go(t, Bool.pick(Nat, M.Win.is_count(e), M.Win.at([e], 0n), 1n+n))
+
+# how many items a run stands for: its count when it has one (a hub's
+# window holds the newest only), else its length
+def Hand.total(es: List<&2, M.Entry>) -> Nat:
+  Hand.total.go(es, 0n)
 
 # the handoff text: why it is here, the selection, and where it ends
 def Hand.text(+why: String, +es: List<&2, M.Entry>, +th: String) -> String:
-  "[Backplane] " ++ why ++ "\n\n" ++ Hand.body(Hand.go(es, Sel{Hand.budget(), Nil{}, False{}, 0n}), Hand.first(es, ""), th) ++
+  "[Backplane] " ++ why ++ "\n\n" ++ Hand.body(Hand.go(Hand.real(es), Sel{Hand.budget(), Nil{}, False{}, 0n}), Hand.total(es), Hand.first(Hand.real(es), ""), th) ++
     "\n\n[End of the handed-over context. The user's message follows.]"
 
 def Hand.title(t: M.Thread) -> String:
@@ -174,6 +197,10 @@ def Hand.newest(n: Nat, es: List<&2, M.Entry>) -> List<&2, M.Entry>:
     case 1n+k e <> t:
       e <> Hand.newest(k, t)
 
+# the newest n, counted as n (the window may hold fewer)
+def Hand.newest.c(+n: Nat, +es: List<&2, M.Entry>, +th: String) -> List<&2, M.Entry>:
+  List.append(&2, M.Entry, Hand.newest(n, es), [M.Win.count(th, n)])
+
 # a provider taking a thread up: what happened since it last took part
 # (seen: how many of the thread's entries it had seen; 0 for a provider
 # new to the thread, which then gets it all)
@@ -181,4 +208,4 @@ def Hand.switch(+es: List<&2, M.Entry>, +th: String, +from: String, +to: String,
   Hand.text(Bool.pick(String, Nat.is_eq(seen, 0n),
       "This thread was worked on with " ++ from ++ " until now; you (" ++ to ++ ") take it over. Its conversation so far, oldest first:",
       "This thread went on with " ++ from ++ " since you (" ++ to ++ ") last took part. What happened meanwhile, oldest first:"),
-    Hand.newest(Nat.sub(List.length(&2, M.Entry, Hand.mine(es, th)), seen), Hand.mine(es, th)), th)
+    Hand.newest.c(Nat.sub(Hand.total(Hand.mine(es, th)), seen), Hand.real(Hand.mine(es, th)), th), th)

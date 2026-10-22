@@ -543,7 +543,7 @@ def Fm.give.go(far: Bool, +s: M.State, +ins: List<&2, FR.In>, +src: String, +tex
       [PAnswer{MC.Res.fail("give this thread from its own machine")}]
     case False{}:
       Fm.give.words(RF.Refs.sigil.words(text), ins, 0n, Fm.src.of(B.Hub.thread(s, src), src,
-        String.take(HD.Hand.give(B.Hub.entries(s), src, HD.Hand.title(B.Hub.thread(s, src)), BH.Give.note(Fm.give.text(text))), 100000n), Nat.show(now) ++ "-" ++ Nat.show(B.Hub.seq(s))))
+        String.take(HD.Hand.give(M.State.own(s, src), src, HD.Hand.title(B.Hub.thread(s, src)), BH.Give.note(Fm.give.text(text))), 100000n), Nat.show(now) ++ "-" ++ Nat.show(B.Hub.seq(s))))
 
 def Fm.give.k(any: Bool, +s: M.State, +ins: List<&2, FR.In>, +src: String, +text: String, +now: Nat) -> List<&2, Plan>:
   match any:

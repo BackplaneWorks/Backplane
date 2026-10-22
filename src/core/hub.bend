@@ -485,10 +485,10 @@ def Hub.has_msg.go(es: List<&2, M.Entry>, +id: String, found: Bool) -> Bool:
 def Hub.has_msg(es: List<&2, M.Entry>, +id: String) -> Bool:
   Hub.has_msg.go(es, id, False{})
 
-def Hub.entries(s: M.State) -> List<&2, M.Entry>:
-  match s:
-    case M.State{_, _, es, _, _, _, _, _, _, _, _}:
-      es
+# the entries the state holds: a client's whole log, a hub's every
+# thread's window (M.State.recent)
+def Hub.entries(+s: M.State) -> List<&2, M.Entry>:
+  M.State.recent(s)
 
 # a message the client named and the hub already stored: only a named one
 # looks anything up
@@ -696,7 +696,7 @@ def Emb.restart.k(+sum: String, +s: M.State, +now: Nat, +client: U32, +id: Strin
       [Reply.ok(client, id), TermRun{EM.Emb.key(thread, term), EM.Emb.title(sum), Hub.cwd(s, Hub.thread(s, thread)), EM.Emb.cmd(sum), EM.Emb.wide(sum), EM.Emb.tall(sum), True{}}]})
 
 def Emb.restart(+s: M.State, +now: Nat, +client: U32, +id: String, +thread: String, +term: String) -> Step:
-  Emb.restart.k(EM.Emb.sum(M.State.mine(s, thread), term), s, now, client, id, thread, term)
+  Emb.restart.k(EM.Emb.sum(M.State.terms(s, thread), term), s, now, client, id, thread, term)
 
 # Phones
 # ------
@@ -2888,7 +2888,7 @@ def Hub.fork.k(t: M.Thread, +s: M.State, +now: Nat, +client: U32, +id: String, +
     case M.Thread{_, +p, +ti, _, _, _, _, _, _, _, _, _, _, _, +wt, +pr, +mo, rt, im, _, _}:
       +th = Hub.id("t", now, Hub.seq(s))
       Step{[M.ThreadCreated{th, p, "Fork: " ++ ti, Fork.env.s(M.Scratch.is(p), wt), "", Hub.new.wt(M.Scratch.is(p), Hub.project.root(Hub.project(s, p)), th), pr, mo, now}, M.ModesSet{th, rt, im, mo, now}, M.ThreadForked{th, src, now},
-          M.TurnQueued{th, HD.Hand.prefix() ++ src, HD.Hand.fork(Hub.entries(s), src, ti), now},
+          M.TurnQueued{th, HD.Hand.prefix() ++ src, HD.Hand.fork(M.State.own(s, src), src, ti), now},
           M.ActivityLogged{src, Hub.id("k", now, Hub.seq(s)), "info", "fork", "Forked into \"Fork: " ++ ti ++ "\"", now}],
         Reply.made(client, id, th) <> Fork.outs.s(M.Scratch.is(p), wt, th, Hub.project.root(Hub.project(s, p)), src)}
 
@@ -2901,7 +2901,7 @@ def Hub.back.k(none: Bool, +s: M.State, +now: Nat, +client: U32, +id: String, +f
     case True{}:
       Step.outs([Reply.err(client, id, "this thread is not a fork")])
     case False{}:
-      Step.reply(client, id, [M.TurnQueued{src, HD.Hand.prefix() ++ "back:" ++ fork ++ ":" ++ Nat.show(Hub.seq(s)), HD.Hand.back(Hub.entries(s), fork, HD.Hand.title(Hub.thread(s, fork))), now},
+      Step.reply(client, id, [M.TurnQueued{src, HD.Hand.prefix() ++ "back:" ++ fork ++ ":" ++ Nat.show(Hub.seq(s)), HD.Hand.back(M.State.own(s, fork), fork, HD.Hand.title(Hub.thread(s, fork))), now},
         M.ActivityLogged{src, Hub.id("k", now, Hub.seq(s)), "info", "fork", "The work of \"" ++ HD.Hand.title(Hub.thread(s, fork)) ++ "\" goes with the next message", now},
         M.ActivityLogged{fork, Hub.id("k", now, 1n+Hub.seq(s)), "info", "fork", "Brought back to \"" ++ HD.Hand.title(Hub.thread(s, src)) ++ "\"", now}])
 
@@ -2937,7 +2937,7 @@ def Switch.go(+s: M.State, +now: Nat, +client: U32, +id: String, +th: String, +f
   +seen = M.Switch.seen(s, th, to)
   +missed = Nat.sub(M.Switch.count(s, th), seen)
   Step{List.concat(&2, M.Change, [Switch.old(M.Queue.items(s, th), th, now), [M.ProviderSet{th, to, "", now}],
-      Switch.ctx(Nat.is_eq(missed, 0n), th, HD.Hand.prefix() ++ "switch:" ++ Nat.show(Hub.seq(s)), HD.Hand.switch(Hub.entries(s), th, from, to, seen), now),
+      Switch.ctx(Nat.is_eq(missed, 0n), th, HD.Hand.prefix() ++ "switch:" ++ Nat.show(Hub.seq(s)), HD.Hand.switch(M.State.own(s, th), th, from, to, seen), now),
       [M.ActivityLogged{th, Hub.id("p", now, Hub.seq(s)), "info", "provider", "Now on " ++ to ++ Bool.pick(String, Nat.is_eq(missed, 0n), "", "; it gets what it missed with the next message"), now}]]),
     [Reply.ok(client, id), AgentStop{th}]}
 
@@ -7788,7 +7788,7 @@ def Retire.request(i: Nat, +s: M.State) -> Step:
 def Auth.prompt(+s: M.State, +th: String, +o: J.Json) -> String:
   Bool.pick(String, Bool.or(J.Json.get_bool(o, "not_started", False{}), String.contains(FB.Error.reason(o), "was not started:")),
     M.Setting.get(s, "launch.input." ++ th, M.Setting.get(s, "fallback.input." ++ th, "")),
-    HD.Hand.switch(Hub.entries(s), th, Hub.provider(Hub.thread(s, th)), Hub.provider(Hub.thread(s, th)), 0n)
+    HD.Hand.switch(M.State.own(s, th), th, Hub.provider(Hub.thread(s, th)), Hub.provider(Hub.thread(s, th)), 0n)
       ++ "\n[Backplane] Credentials became unavailable. Continue the interrupted work from the recorded state. Do not repeat completed tool actions or restart finished work.\nOriginal request (context, not a new task):\n" ++ M.Setting.get(s, "fallback.input." ++ th, ""))
 
 def Auth.line.k(locked: Bool, +s: M.State, +now: Nat, +th: String, +o: J.Json, normal: Step) -> Step:
@@ -7890,7 +7890,7 @@ def Fallback.use(choice: Maybe<&2, FB.Target>, +s: M.State, +now: Nat, +th: Stri
     case None{}: Fallback.block(s, now, th, text)
     case Some{+to}:
       +cs = Fallback.change(s, now, th, to, text)
-      +ctx = HD.Hand.switch(Hub.entries(s), th, Hub.provider(Hub.thread(s, th)), FB.Target.provider(to), 0n)
+      +ctx = HD.Hand.switch(M.State.own(s, th), th, Hub.provider(Hub.thread(s, th)), FB.Target.provider(to), 0n)
       Step{List.append(&2, M.Change, cs, [M.SettingSet{"launch.input." ++ th, M.Queue.join(ctx, text), now}]), AgentStop{th} <> Hub.run(Hub.thread(M.State.replay(cs, s), th), cwd, M.Queue.join(ctx, text), uuid)}
 
 def Fallback.attempt.k(held: Bool, +s: M.State, +caps: J.Json, +now: Nat, +th: String, +cwd: String, +text: String, +uuid: String, original: List<&2, Out>) -> Step:

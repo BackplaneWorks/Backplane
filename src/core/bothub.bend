@@ -1018,7 +1018,7 @@ def Reply.send(+s: M.State, +now: Nat, +thread: String, +to: String, +text: Stri
 # person on a linked machine goes back to them (bots.answered, which a
 # hub no longer sends itself: BotReply is captured instead)
 def Reply.back(+s: M.State, +now: Nat, +thread: String, +state: String) -> B.Step:
-  Reply.back.said(Said.of(M.State.entries.all(s), thread), s, now, thread, String.eq(state, "completed"))
+  Reply.back.said(Said.of(M.State.mine(s, thread), thread), s, now, thread, String.eq(state, "completed"))
 
 # the request the server sends itself when a turn ends (the hub's step
 # runs it against the state it has then; the reply goes to no one)
@@ -1193,7 +1193,7 @@ def Give.done(st: B.Step, +client: U32, +id: String) -> B.Step:
 
 def Give.step(+s: M.State, +now: Nat, +client: U32, +id: String, +src: String, +text: String) -> B.Step:
   Give.done(Give.go(RF.Refs.found(s, src, text), 0n, s, now, src,
-    HD.Hand.give(B.Hub.entries(s), src, HD.Hand.title(B.Hub.thread(s, src)), Give.note(text))), client, id)
+    HD.Hand.give(M.State.own(s, src), src, HD.Hand.title(B.Hub.thread(s, src)), Give.note(text))), client, id)
 
 # Joining an uberbot another machine offered (setting uber.offer), and
 # pinning one of its routines to a machine
