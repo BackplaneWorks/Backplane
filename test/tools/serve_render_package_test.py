@@ -173,7 +173,7 @@ def dev_stage(t):
     (home / '.bend/bin').mkdir(parents=True)
     (home / '.bun/bin').mkdir(parents=True)
     (tree / 'scripts/verified.sh').write_text('#!/bin/sh\nexit 1\n')
-    for f in ('js-unmarshal.py', 'js-native.py', 'cef-runtime.py'):
+    for f in ('js-unmarshal.py', 'js-native.py'):
         (tree / 'scripts' / f).write_text(f'import sys\nopen({str(log)!r},"a").write({f!r}+" "+" ".join(sys.argv[1:])+"\\n")\n')
     (tree / 'scripts/build-js.sh').write_text(f'#!/bin/sh\necho "build-js $1 $2 stamp=${{BACKPLANE_VERSION_STAMP:-}}" >> "{log}"\necho bin > "$2"\n')
     (tree / 'scripts/js-licenses.sh').write_text(f'#!/bin/sh\necho "js-licenses $1" >> "{log}"\nmkdir -p "$1/bun" "$1/bend"\n')
@@ -199,13 +199,13 @@ def dev_stage(t):
           r.returncode == 0 and 'build-js src/server/main.bend dist/backplane-serve stamp=0.12.1-main.1' in calls
           and calls.count('build-js ') == 1)
     check('dev stage: never checks or builds src/app/main.bend or a render root', 'src/app/main.bend' not in calls and 'src/render' not in calls)
-    check('dev stage: default still builds KiStack and helpers, looks for CEF', 'kistack' in calls and 'bun build.ts' in calls and 'cef-runtime.py discover' in calls)
+    check('dev stage: default still builds KiStack and helpers', 'kistack' in calls and 'bun build.ts' in calls)
     check('dev stage: default stages launcher and serve, no renderer',
           {'backplane', 'backplane-serve', 'kistack', 'web', 'licenses'} <= set(staged) and 'backplane-render' not in staged)
     r, calls, staged = stage({'BACKPLANE_DEV_SERVICE_ONLY': '1', 'BACKPLANE_VERSION_STAMP': '0.12.1-main.2'})
     check('dev stage: service-only stages launcher, serve, web, LICENSE and the notices',
           r.returncode == 0 and staged == ['LICENSE', 'backplane', 'backplane-serve', 'licenses', 'web'])
-    check('dev stage: service-only skips KiStack, helpers and CEF', not any(k in calls for k in ('kistack', 'bun ', 'cef-runtime')))
+    check('dev stage: service-only skips KiStack and helpers', not any(k in calls for k in ('kistack', 'bun ')))
     r, calls, _ = stage({'BACKPLANE_DEV_SERVICE_ONLY': '1'})
     check('dev stage: no caller stamp keeps the generated dev stamp', 'stamp=0.11.2-dev.' in calls)
     r, calls, _ = stage({'BACKPLANE_DEV_SERVICE_ONLY': 'yes'})
@@ -245,6 +245,10 @@ def classic(t):
     run(['sh', str(ROOT / 'scripts/release-classic.sh'), 'v0.12.0', str(again), *args], cwd=ROOT)
     same = all((rel / n).read_bytes() == (again / n).read_bytes() for n in ('backplane-v0.12.0-classic-linux-x64.tar.gz', 'install.sh'))
     check('classic: the same inputs give the same bytes', same)
+    legacy = rel / 'backplane-v0.12.0-linux-x64-cef.tar.gz'
+    check('classic: linux-x64 also as the name the v0.12.0 updater looks for, same bytes',
+          legacy.exists() and legacy.read_bytes() == (rel / 'backplane-v0.12.0-classic-linux-x64.tar.gz').read_bytes()
+          and not (rel / 'backplane-v0.12.0-darwin-arm64-cef.tar.gz').exists())
     names = subprocess.run(['tar', '-tzf', str(rel / 'backplane-v0.12.0-classic-linux-x64.tar.gz')], capture_output=True, text=True).stdout.split()
     check('classic: launcher, serve, web, install-release, menu entry under backplane-linux-x64/',
           {'backplane-linux-x64/backplane', 'backplane-linux-x64/backplane-serve', 'backplane-linux-x64/web/index.html',
