@@ -72,6 +72,49 @@ def Early.body(+version: String, +build: String) -> String:
 def Early.response(+version: String, +build: String) -> List<&2, U32>:
   W.Http.response.c("503 Service Unavailable", "application/json", U.Utf8.encode(Early.body(version, build)), "no-store", "Retry-After: 2\r\n")
 
+# A browser's first visit (no service worker yet) gets a page, not JSON:
+# the same 503 and Retry-After, the progress in words, and a meta refresh
+# with no URL, so the browser reloads the very URL it asked for (query and
+# pairing token included). Nothing from the request goes into the page.
+def Early.html.note.k(building: Bool, +note: String) -> String:
+  match building:
+    case True{}:
+      "Building the database\u{2026} " ++ String.drop(note, 15n)
+    case False{}:
+      "Starting\u{2026}"
+
+def Early.html.note(+build: String) -> String:
+  Early.html.note.k(String.starts_with(Early.note(build), "building store "), Early.note(build))
+
+def Early.page(+build: String) -> String:
+  "<!doctype html><html><head><meta charset=\"utf-8\"><meta http-equiv=\"refresh\" content=\"2\">"
+    ++ "<meta name=\"viewport\" content=\"width=device-width\"><title>Backplane</title></head>"
+    ++ "<body style=\"font-family:sans-serif;margin:3em\"><p>" ++ Early.html.note(build) ++ "</p></body></html>"
+
+def Early.html.response(+build: String) -> List<&2, U32>:
+  W.Http.response.c("503 Service Unavailable", "text/html; charset=utf-8", U.Utf8.encode(Early.page(build)), "no-store", "Retry-After: 2\r\n")
+
+# a page for a browser asking for HTML; anything else (an API call, a
+# WebSocket upgrade) the JSON
+def Early.html.wanted(+accept: String, +upgrade: String) -> Bool:
+  Bool.and(String.contains(String.to_lower(accept), "text/html"), String.is_empty(upgrade))
+
+def Early.for.k(html: Bool, +version: String, +build: String) -> List<&2, U32>:
+  match html:
+    case True{}:
+      Early.html.response(build)
+    case False{}:
+      Early.response(version, build)
+
+def Early.for.req(r: W.Request, +version: String, +build: String) -> List<&2, U32>:
+  match r:
+    case W.Request{_, _, +hs}:
+      Early.for.k(Early.html.wanted(W.Http.header_of(hs, "accept"), W.Http.header_of(hs, "upgrade")), version, build)
+
+# the answer to a request whose head is these bytes (none read: the JSON)
+def Early.for(head: List<&2, U32>, +version: String, +build: String) -> List<&2, U32>:
+  Early.for.req(W.Http.request(head), version, build)
+
 # the file the store builder writes its progress to
 def Early.build.path(+home: String) -> String:
   home ++ "/store.build"

@@ -11140,7 +11140,7 @@ def Hub.thin.warmed.k(h: Hub, i: THIN.Index, m: TMAIL.Cache) -> IO(Hub):
 # the boot's thin index arrived: the JS heap is settled once (H.Mem.settle,
 # until store mode keeps the index small), then the waiting reads answered
 def Hub.thin.warmed(h: Hub, i: THIN.Index, m: TMAIL.Cache) -> IO(Hub):
-  IO.bind(String, Hub, H.Mem.settle(), line => IO.bind(Unit, Hub, Mem.settled(line), _ => Hub.thin.warmed.k(h, i, m)))
+  IO.bind(String, Hub, H.Mem.settle("the thin index"), line => IO.bind(Unit, Hub, Mem.settled(line), _ => Hub.thin.warmed.k(h, i, m)))
 
 def Hub.thin.read_guard(valid: Bool, h: Hub, +client: U32, +text: String, +now: Nat) -> IO(Hub):
   match valid:
@@ -13370,17 +13370,22 @@ type EarlyGo is Data:
 # a listener bound early (its loop waiting for the go), or the bind's error
 type Early is Data:
   EarlyUp{ctl: Chan(EarlyGo)}
-  EarlyDown{e: U32 & String}
+  EarlyDown{code: U32, why: String}
 
-def Early.answer(s: Socket, +home: String) -> IO(Unit):
+def Early.answer(s: Socket, +home: String, head: List<&2, U32>) -> IO(Unit):
   do IO<Unit>:
     +b : String <- Files.text(EA.Early.build.path(home))
-    Conn.finish(s, EA.Early.response(Main.version(), b))
+    Conn.finish(s, EA.Early.for(head, Main.version(), b))
+
+def Early.split.head(sp: W.Split) -> List<&2, U32>:
+  match sp:
+    case W.Split{h, _}:
+      h
 
 def Early.head.k(m: Maybe<&2, W.Split>, s: Socket, buf: List<&2, U32>, +home: String, k: Socket -> List<&2, U32> -> IO(Unit)) -> IO(Unit):
   match m:
-    case Some{_}:
-      Early.answer(s, home)
+    case Some{sp}:
+      Early.answer(s, home, Early.split.head(sp))
     case None{}:
       IO.bind(Socket & Result<&1, &1, U32 & String, List<&2, U32>>, Unit, H.Sock.recv_bytes(s, 65536), r => Conn.head.got(r, buf, k))
 
@@ -13389,7 +13394,7 @@ def Early.head.k(m: Maybe<&2, W.Split>, s: Socket, buf: List<&2, U32>, +home: St
 def Early.head(fuel: Nat, s: Socket, +buf: List<&2, U32>, +home: String) -> IO(Unit):
   match fuel:
     case 0n:
-      Early.answer(s, home)
+      Early.answer(s, home, Nil{})
     case 1n+f:
       Early.head.k(W.Http.split(buf), s, buf, home, s2 => b2 => Early.head(f, s2, b2, home))
 
@@ -13419,6 +13424,10 @@ def Early.loop(+fuel: Nat, l: Listener, +id: U32, +home: String, +ctl: Chan(Earl
         r => IO.bind(Poll<&1, &1, Maybe<&1, EarlyGo>, Unit>, Unit, Chan.try_recv(EarlyGo, ctl, 0),
           p => Early.step(p, r, f, id, home, l2 => Early.loop(f, l2, id, home, ctl))))
 
+def Early.down(e: U32 & String) -> Early:
+  (c, w) = e
+  EarlyDown{c, w}
+
 # a bound listener starts answering 503 at once; ids as Accept.loop's
 def Early.up(r: Result<&1, &1, U32 & String, Listener>, +id: U32, +home: String) -> IO(Early):
   match r:
@@ -13428,7 +13437,7 @@ def Early.up(r: Result<&1, &1, U32 & String, Listener>, +id: U32, +home: String)
         IO.spawn(Unit, Early.loop(Fuel.forever(), l, id, home, ctl))
         return EarlyUp{ctl}
     case Fail{e}:
-      IO.pure(Early, EarlyDown{e})
+      IO.pure(Early, Early.down(e))
 
 def Early.bind(+host: String, +port: U32, +id: U32, +home: String) -> IO(Early):
   IO.bind(Result<&1, &1, U32 & String, Listener>, Early, H.Net.listen(host, port), r => Early.up(r, id, home))
@@ -13437,7 +13446,7 @@ def Early.is_up(e: Early) -> Bool:
   match e:
     case EarlyUp{_}:
       True{}
-    case EarlyDown{_}:
+    case EarlyDown{_, _}:
       False{}
 
 # the hub is ready: the loop serves from its next accept on
@@ -13448,16 +13457,15 @@ def Early.go(+ctl: Chan(EarlyGo), g: EarlyGo) -> IO(Unit):
 
 # a hub that must listen (backplane-serve, --headless) stops at once when
 # its port is taken, before it loads anything
-def Early.need.die(e: U32 & String, +addr: String) -> IO(Early):
-  (_, msg) = e
+def Early.need.die(+msg: String, +addr: String) -> IO(Early):
   IO.die(Early, 1, "backplane: cannot listen on " ++ addr ++ ": " ++ msg)
 
 def Early.need(e: Early, need: Bool, +addr: String) -> IO(Early):
   match e need:
-    case EarlyDown{er} True{}:
-      Early.need.die(er, addr)
-    case EarlyDown{er} False{}:
-      IO.pure(Early, EarlyDown{er})
+    case EarlyDown{_, w} True{}:
+      Early.need.die(w, addr)
+    case EarlyDown{c, w} False{}:
+      IO.pure(Early, EarlyDown{c, w})
     case EarlyUp{c} _:
       IO.pure(Early, EarlyUp{c})
 
@@ -13469,7 +13477,7 @@ type TEarly is Data:
 def Early.tail.ip.k(none: Bool, +ip: String, +port: U32, +home: String) -> IO(TEarly):
   match none:
     case True{}:
-      IO.pure(TEarly, TEarly{"", EarlyDown{(0, "no tailnet address")}})
+      IO.pure(TEarly, TEarly{"", EarlyDown{0, "no tailnet address"}})
     case False{}:
       IO.bind(Early, TEarly, Early.bind(ip, port, 2147483648, home), e => IO.pure(TEarly, TEarly{ip, e}))
 
@@ -13481,7 +13489,7 @@ def Early.tail(on: Bool, +port: U32, +home: String) -> IO(TEarly):
     case True{}:
       IO.bind(P.Ran, TEarly, P.Proc.run("tailscale", ["ip", "-4"], ""), r => Early.tail.ip(Tailnet.first(r), port, home))
     case False{}:
-      IO.pure(TEarly, TEarly{"", EarlyDown{(0, "off")}})
+      IO.pure(TEarly, TEarly{"", EarlyDown{0, "off"}})
 
 def Net.tailnet(n: Net) -> Bool:
   match n:
@@ -13502,7 +13510,7 @@ def Tailnet.listened(r: Early, +host: String, +ip: String, +port: U32, +web: Str
         IO.print("Backplane on your tailnet: http://" ++ ip ++ ":" ++ U32.show(port) ++ "/ (" ++ Bool.pick(String, String.is_empty(owner), "pair in Settings", owner ++ "'s devices; pair in Settings") ++ ")")
         ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, LinkFound{TN.Tailnet.report("reachable", TN.Tailnet.link("http://" ++ ip ++ ":" ++ U32.show(port), token))})
         Early.go(ctl, EarlyGo{web, inbox, False{}, token, owner})
-    case EarlyDown{_}:
+    case EarlyDown{_, _}:
       do IO<Unit>:
         Log.info("could not listen on the tailnet address " ++ ip)
         ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, LinkFound{TN.Tailnet.report(Bool.pick(String, Tailnet.covered(host, ip), "reachable", "unavailable"), "")})
@@ -16040,9 +16048,9 @@ def Main.listened(r: Early, te: TEarly, h: Hub, +web: String, +inbox: Chan(Msg),
       do IO<Unit>:
         IO.print("Backplane listening on http://" ++ addr)
         Main.serve(ctl, te, h, web, inbox, cfg, tok, front)
-    case EarlyDown{e} True{}:
-      Main.failed(e, h, addr)
-    case EarlyDown{_} False{}:
+    case EarlyDown{c, w} True{}:
+      Main.failed((c, w), h, addr)
+    case EarlyDown{_, _} False{}:
       do IO<Unit>:
         Log.info("web server off: " ++ addr ++ " is taken; trying again every 2 s")
         IO.spawn(Unit, Listen.retry(Fuel.forever(), web, inbox, cfg, addr))
@@ -16152,7 +16160,7 @@ def Main.opened(r: Result<&1, &1, U32 & String, File>, +st: M.State, ls: SO.Lg, 
 # loads it. A failed build is tried once more (its files removed first);
 # a second failure stops the hub with the reason. The whole replay
 # (Boot.cold) is only the developer's escape, BACKPLANE_HOT_BOOT=0
-# (Boot.next; law boot_next_never_cold).
+# (Boot.decide; law boot_next_never_cold).
 
 # the escape's whole replay: the lines straight from the file, then only
 # the lines kept
@@ -16170,7 +16178,7 @@ type BootNext is Data:
   BootStop{}
   BootCold{}
 
-def Boot.next(escape: Bool, ok: Bool, left: Nat) -> BootNext:
+def Boot.decide(escape: Bool, ok: Bool, left: Nat) -> BootNext:
   match escape ok left:
     case True{} _ _:
       BootCold{}
@@ -16226,6 +16234,9 @@ def Boot.act(n: BootNext, +hot: HB.Hot, +home: String, again: Unit -> IO(HB.Hot)
     case BootUse{}:
       do IO<HB.Hot>:
         Log.info("hot boot from " ++ HB.Hot.path(home))
+        # the load's garbage collected before anything else is built
+        line : String <- H.Mem.settle("the hot load")
+        Mem.settled(line)
         return hot
     case BootBuild{}:
       do IO<HB.Hot>:
@@ -16241,11 +16252,11 @@ def Boot.act(n: BootNext, +hot: HB.Hot, +home: String, again: Unit -> IO(HB.Hot)
         Boot.cold(home)
 
 def Boot.got(+hot: HB.Hot, +home: String, +left: Nat, again: Unit -> IO(HB.Hot)) -> IO(HB.Hot):
-  Boot.act(Boot.next(False{}, HB.Hot.ok(hot), left), hot, home, again)
+  Boot.act(Boot.decide(False{}, HB.Hot.ok(hot), left), hot, home, again)
 
 # load the store; if it is not usable, build it and load again (left
 # builds at most)
-def Boot.loop(left: Nat, +home: String) -> IO(HB.Hot):
+def Boot.loop(+left: Nat, +home: String) -> IO(HB.Hot):
   match left:
     case 0n:
       IO.bind(HB.Hot, HB.Hot, HB.Hot.load(home), hot => Boot.got(hot, home, 0n, u => IO.pure(HB.Hot, HB.Hot.no("no build left"))))
@@ -16257,7 +16268,7 @@ def Boot.state.on(on: Bool, +home: String) -> IO(HB.Hot):
     case True{}:
       Boot.loop(Boot.builds(), home)
     case False{}:
-      Boot.act(Boot.next(True{}, False{}, 0n), HB.Hot.no("BACKPLANE_HOT_BOOT=0"), home, u => IO.pure(HB.Hot, HB.Hot.no("escape")))
+      Boot.act(Boot.decide(True{}, False{}, 0n), HB.Hot.no("BACKPLANE_HOT_BOOT=0"), home, u => IO.pure(HB.Hot, HB.Hot.no("escape")))
 
 def Boot.state(+home: String) -> IO(HB.Hot):
   do IO<HB.Hot>:
