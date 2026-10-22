@@ -71,6 +71,18 @@ try {
   };
   await one("repo", true);
   await one("plain", false);
+  // each commit writes its shared lines' far_line rows (storedb.bend's
+  // Sto.far.fact over far.bend's Fr.fact): a project thread's ThreadCreated
+  // is one, under its project
+  await sleep(500);
+  const { Database } = await import("bun:sqlite");
+  const db = new Database(join(home, "store.db"), { readonly: true });
+  const rows = db.query("SELECT seq, scope FROM far_line ORDER BY seq").all() as { seq: number; scope: string }[];
+  const lines = readFileSync(join(home, "events.jsonl"), "utf8").split("\n").filter((l) => l.trim()).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter((o) => o);
+  const made = lines.map((o, i) => ({ o, seq: i + 1 })).filter((x) => x.o.$ === "ThreadCreated" && String(x.o.title).startsWith("WT "));
+  const ok = made.length === 2 && made.every((x) => rows.some((r) => r.seq === x.seq && r.scope === x.o.project));
+  check("each commit writes far_line rows: the threads' ThreadCreated under their projects", ok, { made: made.map((x) => [x.seq, x.o.project]), rows: rows.slice(0, 20) });
+  db.close();
 } finally { proc.kill(); await proc.exited; }
 console.log(failed ? "worktree e2e: FAIL" : "worktree e2e: ok");
 process.exit(failed ? 1 : 0);

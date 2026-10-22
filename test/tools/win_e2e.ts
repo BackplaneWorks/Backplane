@@ -10,6 +10,8 @@
 //   - a terminal (terminal_open through the hub's MCP) shows its program's
 //     output, takes typed keys (term.input) and is read back
 //     (terminal_read), and a client's term.snap gets its screen
+//   - a 64 KB paste into a program that does not read leaves the hub
+//     answering (/hello and the MCP within 1 s)
 // Prints "ok ..." / "FAIL ..." and exits with the number of failures.
 //
 //   win_e2e HUB WIREDIR AGENTS        (SHELL: the shell terminals run under)
@@ -147,6 +149,28 @@ try {
   const snap = await until(5000, () => msgs.slice(m0).find((o) => o.t === "term" && o.thread === key && o.reset));
   check(!!snap && text(snap.b ?? []).includes("hello-term"), "term.snap: the screen", snap);
   await mcp(th, "terminal_close", { id });
+
+  // a paste far bigger than a pty's buffer (64 KB) into a program that never
+  // reads: the hub must not block on it (a blocking write to the pty would
+  // stall every client), so /hello and the MCP keep answering at once
+  const open2 = await mcp(th, "terminal_open", { command: "echo waiting; sleep 60", title: "Deaf", cols: 60, rows: 8 });
+  const id2 = open2.err ? "" : JSON.parse(open2.text).id;
+  const key2 = `x:${th}:${id2}`;
+  await until(15000, () => msgs.find((o) => o.t === "term" && o.thread === key2 && text(o.b).includes("waiting")));
+  const big = new TextEncoder().encode("x".repeat(65535) + "\r");
+  send("term.input", { thread: key2, b: [...big] });
+  let worst = 0;
+  for (let i = 0; i < 10; i++) {
+    const t = performance.now();
+    const ok = (await fetch(`http://127.0.0.1:${port}/hello`, { signal: AbortSignal.timeout(5000) }).catch(() => null))?.status === 200;
+    worst = Math.max(worst, ok ? performance.now() - t : 5000);
+    await sleep(100);
+  }
+  const t1 = performance.now();
+  const r2 = await mcp(th, "terminal_read", { id: id2 });
+  const mcpMs = performance.now() - t1;
+  check(worst < 1000 && mcpMs < 1000 && !r2.err, `a 64 KB paste into a program that does not read leaves the hub answering (/hello worst ${worst | 0} ms, MCP ${mcpMs | 0} ms)`, r2);
+  await mcp(th, "terminal_close", { id: id2 });
   ws.close();
 } catch (e) {
   check(false, "the run", String(e));
