@@ -1,0 +1,122 @@
+name: Signed Android (apk + aab, artifact only)
+
+# The phones' release APK and AAB for one commit, signed with the release key
+# (repo secrets), and checked before anything is kept: the signer is the one
+# installed phones have, the version name and code are the ones asked for,
+# and the bridge.js inside both is the one this run built. Dispatch only; it
+# publishes, tags and pushes nothing (contents: read). The keystore is decoded
+# into $RUNNER_TEMP and never uploaded.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Commit (full sha) or branch to build
+        type: string
+        required: true
+      version:
+        description: Version name, e.g. 0.12.1
+        type: string
+        required: true
+      version_code:
+        description: Version code, above the published floor (0.12.0 was 2026102101)
+        type: string
+        required: true
+      signer_sha256:
+        description: Expected signing certificate SHA-256 (lowercase hex)
+        type: string
+        required: true
+        default: ef21acdb7d2de02106c29caf35eb73e704a152960e8113c8149eca1c305e906e
+permissions:
+  contents: read
+concurrency:
+  group: android-signed-${{ inputs.ref }}
+  cancel-in-progress: false
+
+jobs:
+  android:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      VERSION: ${{ inputs.version }}
+      VERSION_CODE: ${{ inputs.version_code }}
+      SIGNER: ${{ inputs.signer_sha256 }}
+      REF: ${{ inputs.ref }}
+      BEND_NO_TELEMETRY: '1'
+    steps:
+      - name: Check the inputs
+        run: |
+          set -eu
+          echo "$VERSION" | grep -E -x '[0-9]+\.[0-9]+\.[0-9]+' >/dev/null || { echo "version must be N.N.N"; exit 1; }
+          echo "$VERSION_CODE" | grep -E -x '[0-9]+' >/dev/null && [ "$VERSION_CODE" -gt 2026102101 ] && [ "$VERSION_CODE" -le 2100000000 ] || { echo "version_code must be above 2026102101"; exit 1; }
+          echo "$SIGNER" | grep -E -x '[0-9a-f]{64}' >/dev/null || { echo "signer_sha256 must be 64 lowercase hex"; exit 1; }
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-bend
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Build bridge.js
+        run: |
+          set -eu
+          scripts/build-mobile.sh --js
+          sha256sum mobile/build/assets/bridge.js | cut -d' ' -f1 > "$RUNNER_TEMP/bridge.sha256"
+      - name: Build the signed APK and AAB
+        env:
+          KEYSTORE_B64: ${{ secrets.BACKPLANE_ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.BACKPLANE_ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.BACKPLANE_ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.BACKPLANE_ANDROID_KEY_PASSWORD }}
+        run: |
+          set -eu
+          umask 077
+          ks="$RUNNER_TEMP/release.keystore"
+          printf '%s' "$KEYSTORE_B64" | base64 -d > "$ks"
+          cd mobile/android
+          BACKPLANE_ANDROID_KEYSTORE_PATH="$ks" BACKPLANE_ANDROID_VERSION_NAME="$VERSION" BACKPLANE_ANDROID_VERSION_CODE="$VERSION_CODE" \
+            ./gradlew --no-daemon -q assembleRelease bundleRelease
+          rm -f "$ks"
+      - name: Check signer, version and embedded bridge
+        run: |
+          set -eu
+          apk=mobile/android/app/build/outputs/apk/release/app-release.apk
+          aab=mobile/android/app/build/outputs/bundle/release/app-release.aab
+          bt=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          want_bridge=$(cat "$RUNNER_TEMP/bridge.sha256")
+          fail() { echo "FAIL: $*"; exit 1; }
+          # signer
+          got=$("$bt/apksigner" verify --print-certs "$apk" | grep -m1 'certificate SHA-256 digest' | awk '{print $NF}')
+          [ "$got" = "$SIGNER" ] || fail "apk signer $got, want $SIGNER"
+          got=$(keytool -printcert -jarfile "$aab" | grep -m1 'SHA256:' | awk '{print $2}' | tr -d ':' | tr 'A-F' 'a-f')
+          [ "$got" = "$SIGNER" ] || fail "aab signer $got, want $SIGNER"
+          # version
+          "$bt/aapt2" dump badging "$apk" | grep -m1 "^package:" > "$RUNNER_TEMP/apk-badging.txt"
+          grep -q "versionCode='$VERSION_CODE'" "$RUNNER_TEMP/apk-badging.txt" && grep -q "versionName='$VERSION'" "$RUNNER_TEMP/apk-badging.txt" || fail "apk version: $(cat "$RUNNER_TEMP/apk-badging.txt")"
+          # an aab's manifest is protobuf, which aapt2 cannot read: bundletool, pinned
+          bt_jar="$RUNNER_TEMP/bundletool.jar"
+          curl --proto '=https' --tlsv1.2 -fsSL -o "$bt_jar" https://github.com/google/bundletool/releases/download/1.18.3/bundletool-all-1.18.3.jar
+          echo "a099cfa1543f55593bc2ed16a70a7c67fe54b1747bb7301f37fdfd6d91028e29  $bt_jar" | sha256sum -c - >/dev/null || fail "bundletool checksum"
+          got=$(java -jar "$bt_jar" dump manifest --bundle="$aab" --xpath=/manifest/@android:versionCode | tr -d '[:space:]')
+          [ "$got" = "$VERSION_CODE" ] || fail "aab versionCode $got, want $VERSION_CODE"
+          got=$(java -jar "$bt_jar" dump manifest --bundle="$aab" --xpath=/manifest/@android:versionName | tr -d '[:space:]')
+          [ "$got" = "$VERSION" ] || fail "aab versionName $got, want $VERSION"
+          # the bridge inside both is the one built here
+          got=$(unzip -p "$apk" assets/bridge.js | sha256sum | cut -d' ' -f1); [ "$got" = "$want_bridge" ] || fail "apk bridge $got, want $want_bridge"
+          got=$(unzip -p "$aab" base/assets/bridge.js | sha256sum | cut -d' ' -f1); [ "$got" = "$want_bridge" ] || fail "aab bridge $got, want $want_bridge"
+          mkdir -p out
+          cp "$apk" "out/backplane-$VERSION.apk"
+          cp "$aab" "out/backplane-$VERSION.aab"
+          (cd out && sha256sum backplane-$VERSION.apk backplane-$VERSION.aab > SHA256SUMS)
+          commit=$(git rev-parse HEAD)
+          printf '{"commit":"%s","ref":"%s","version":"%s","versionCode":%s,"signerSha256":"%s","bridgeSha256":"%s","run":"%s"}\n' \
+            "$commit" "$REF" "$VERSION" "$VERSION_CODE" "$SIGNER" "$want_bridge" "$GITHUB_RUN_ID" > out/build.json
+          cat out/SHA256SUMS out/build.json
+          { echo '```'; cat out/SHA256SUMS out/build.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-signed-${{ inputs.version }}-${{ inputs.version_code }}
+          path: out/
+          if-no-files-found: error

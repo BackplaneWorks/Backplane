@@ -10,7 +10,7 @@ import androidx.compose.runtime.Composable
 fun PartialMessageFooter(m: AppModel, hub: String, thread: String, entry: String, partial: MessagePartial, live: Boolean = false) {
     if (partial.incomplete) Row {
         val lang = LocalBackplaneLanguage.current
-        Text(if (lang == "ja") "メッセージの一部" else "Partial message", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+        Text(if (lang == "ja") "出力の一部" else "Partial output", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
         if (partial.hasMore) TextButton(onClick = { m.moreMessage(hub, thread, entry, partial, live) }, enabled = m.contentReady && partial.canRequest) {
             Text(if (lang == "ja") "続きを読む" else "More")
         }

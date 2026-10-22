@@ -10,7 +10,7 @@ struct PartialMessageFooter: View {
     var body: some View {
         if partial.incomplete {
             HStack {
-                Text(lang == "ja" ? "メッセージの一部" : "Partial message").foregroundStyle(.secondary)
+                Text(lang == "ja" ? "出力の一部" : "Partial output").foregroundStyle(.secondary)
                 if partial.hasMore {
                     Button(lang == "ja" ? "続きを読む" : "More") {
                         model.moreMessage(hub: hub, thread: thread, entry: entry, partial: partial, live: live)

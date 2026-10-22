@@ -3675,9 +3675,10 @@ def Task.demo(busy: Bool) -> M.State:
 def Lr.loops() -> Nat:
   20n
 
-# how much of the last reply a report kept before reports were sent whole;
-# only Lr.whole reads it, to give such a stored row back whole
-def Lr.cut() -> Nat:
+# Legacy only: how much of the last reply a report kept in logs written
+# before reports were sent whole. No report is cut now; Lr.whole reads this
+# to give such an old stored row back whole.
+def Lr.old.cut() -> Nat:
   1500n
 
 # 0: nothing, 1 completed, 2 failed, 3 interrupted (the thread's last turn change)
@@ -3786,17 +3787,15 @@ def Lr.word(+e: Nat, +reply: String) -> String:
 def Lr.head(+id: String, +title: String) -> String:
   "[Backplane] Launched thread \"" ++ title ++ "\" (" ++ id ++ ")"
 
-# the note for a turn's end: the state and the last reply, whole (the row
-# is the report: a client folds a long one and opens the rest from it;
-# before, it kept Lr.cut() and a thread_read hint, so "read rest" had
-# nothing more to show)
+# the note for a turn's end: the state and the last reply, whole. Nothing
+# cuts a report: the row is delivered and shown in full on every client.
 def Lr.note(+id: String, +title: String, +word: String, +reply: String) -> String:
   Lr.head(id, title) ++ " " ++ word ++ Bool.pick(String, String.is_empty(String.trim(reply)), ".", ":\n\n" ++ reply)
 
-# Reports stored before they were kept whole: the reply's first Lr.cut()
-# characters, then this tail. Lr.whole gives such a row back whole, for a
-# reader that opens the rest of it (thin-view's Message.read).
-def Lr.cut.tail(+th: String) -> String:
+# Legacy only: the tail old stored reports end in (the reply's first
+# Lr.old.cut() characters, then this). Nothing writes it now; Lr.whole
+# recognises it to show such a row whole (thin-view's Message.whole).
+def Lr.old.tail(+th: String) -> String:
   "…\n\n(cut short: thread_read " ++ th ++ " for the rest)"
 
 def Lr.upto.k(keep: Bool, +e: M.Entry, +rest: List<&2, M.Entry>) -> List<&2, M.Entry>:
@@ -3833,14 +3832,14 @@ def Lr.whole.head(+head: String, +th: String) -> Bool:
 
 # body: the row without the tail; reply: what the report was made from
 def Lr.whole.got(+text: String, +th: String, +body: String, +reply: String) -> String:
-  +cut = String.take(reply, Lr.cut())
+  +cut = String.take(reply, Lr.old.cut())
   +head = String.take(body, Nat.sub(String.length(body), String.length(cut)))
-  Lr.whole.k(Bool.and(Nat.is_gt(String.length(reply), Lr.cut()), Bool.and(String.ends_with(body, cut), Lr.whole.head(head, th))), text, head, reply)
+  Lr.whole.k(Bool.and(Nat.is_gt(String.length(reply), Lr.old.cut()), Bool.and(String.ends_with(body, cut), Lr.whole.head(head, th))), text, head, reply)
 
 def Lr.whole.cut(cut: Bool, +st: M.State, +th: String, +text: String, +at: Nat) -> String:
   match cut:
     case True{}:
-      Lr.whole.got(text, th, String.take(text, Nat.sub(String.length(text), String.length(Lr.cut.tail(th)))), Lr.reply(Answer.of(Lr.upto(M.State.mine(st, th), at), th)))
+      Lr.whole.got(text, th, String.take(text, Nat.sub(String.length(text), String.length(Lr.old.tail(th)))), Lr.reply(Answer.of(Lr.upto(M.State.mine(st, th), at), th)))
     case False{}: text
 
 # A report row (id, text, at) stored cut short, whole: its launched thread
@@ -3850,7 +3849,7 @@ def Lr.whole.cut(cut: Bool, +st: M.State, +th: String, +text: String, +at: Nat) 
 # cut form under a report's own head (Lr.whole.head); any other row, or one
 # that does not match, is left as it is.
 def Lr.whole(+st: M.State, +id: String, +text: String, +at: Nat) -> String:
-  Lr.whole.cut(Bool.and(Lr.is(id), Bool.and(Bool.not(String.is_empty(M.Link.from(id))), String.ends_with(text, Lr.cut.tail(M.Link.from(id))))), st, M.Link.from(id), text, at)
+  Lr.whole.cut(Bool.and(Lr.is(id), Bool.and(Bool.not(String.is_empty(M.Link.from(id))), String.ends_with(text, Lr.old.tail(M.Link.from(id))))), st, M.Link.from(id), text, at)
 
 # the note for an ask: the thread waits on the person
 def Lr.ask.note(+id: String, +title: String, +ask: String) -> String:
