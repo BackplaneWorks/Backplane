@@ -8,6 +8,8 @@ import ../src/core/utf8.bend as U
 import ../src/server/db.bend as D
 import ../src/server/stobuild.bend as B
 import ../src/core/far.bend as FR
+import ../src/core/mail.bend as ML
+import ../src/core/bot.bend as BT
 
 # The store's streamed first build (src/server/stobuild.bend), under JS:
 # a log written to a fresh mktemp directory (the demo's changes, a torn
@@ -31,7 +33,17 @@ def Log.tail() -> List<&2, M.Change>:
    M.SettingSet{"launch.input.rum", "hot neighbour", 38n},
    M.WorkSet{"run-work", "launch.input", "first work value", 39n},
    M.SettingSet{"launch.input.run-work", "second work value", 40n},
-   M.WorkSet{"run-work", "launch.input", "", 41n}]
+   M.WorkSet{"run-work", "launch.input", "", 41n},
+   # A mail header older than the newest is filed but not retained. A
+   # duplicate of that dropped header still does not change the records;
+   # a timestamp tie selects the last arrival just as Headers.add does.
+   M.MailPosted{"ml-new", "c1", "person", "bot:b1", "note", "", "act", "new", 3n, 45n},
+   M.MailPosted{"ml-old", "c1", "person", "bot:b1", "note", "", "fyi", "old", 3n, 21n},
+   M.MailPosted{"ml-old", "c1", "person", "bot:b1", "note", "", "act", "duplicate", 9n, 46n},
+   M.MailPosted{"ml-tie", "c1", "person", "bot:b1", "note", "", "fyi", "tie", 3n, 45n},
+   M.RoomPosted{"rp-new", "r1", "b1", "new room text", 0n, 47n},
+   M.RoomPosted{"rp-old", "r1", "b1", "older room text", 0n, 16n},
+   M.RoomPosted{"rp-old", "r1", "b1", "duplicate room text", 0n, 48n}]
 
 def Log.encode(cs: List<&2, M.Change>) -> List<&2, String>:
   match cs:
@@ -206,6 +218,15 @@ def Cold.count(xs: List<&2, String>, n: Nat) -> Nat:
 def Cold.kept() -> Nat:
   Cold.count(M.Setting.keys(B.Acc.st(B.Stb.lines(Lns.of(Log.lines()), B.Acc.new("")))), 0n)
 
+# The chunk checkpoint drops full room texts and keeps one mail header
+# per conversation; the unchanged SQL-vs-fold checks cover every fact and
+# record, including wanted, counts and duplicate suppression.
+def Retained.histories() -> String:
+  +st = B.Stb.strip(B.Acc.st(B.Stb.lines(Lns.of(Log.lines()), B.Acc.new(""))))
+  Nat.show(List.length(&2, ML.Mail, ML.Box.headers(M.State.mail(st), "c1"))) ++ " " ++
+    Nat.show(List.length(&2, ML.Mail, ML.Box.headers(M.State.mail(st), "room:r1"))) ++ " " ++
+    Nat.show(List.length(&2, BT.Post, S.W.posts(M.State.world.of(st))))
+
 def Far.rows(fs: List<&2, FR.Fact>, acc: List<&2, String>) -> List<&2, String>:
   match fs:
     case Nil{}:
@@ -278,6 +299,7 @@ def main() -> IO(Unit):
     Wf.put(dir ++ "/events.jsonl", String.join(Log.lines(), "\n") ++ "\n{\"$\":\"MessagePosted\",\"th")
     C.Check.str("counters are Switch.count", counters(), Nat.show(M.Switch.count(fold(), "t1")) ++ " " ++ Nat.show(M.Switch.count(fold(), "t2")))
     C.Check.str("cold settings never enter the build fold", Nat.show(Cold.kept()), "0")
+    C.Check.str("retained mail headers c1/room:r1 and room texts", Retained.histories(), "1 1 0")
     +b1 : B.Built <- B.Stb.build(dir, 64)
     C.Check.str("tiny chunks: lines, offset, entries", built(b1), Nat.show(Nat.sub(List.length(&2, String, Log.lines()), 1n)) ++ " " ++ Nat.show(bytes(String.join(Log.lines(), "\n") ++ "\n")) ++ " " ++ Nat.show(Mat.ord(mat())))
     o1 : String <- D.Db.open(dir ++ "/store.db")
