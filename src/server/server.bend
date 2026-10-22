@@ -11140,7 +11140,7 @@ def Hub.thin.warmed.k(h: Hub, i: THIN.Index, m: TMAIL.Cache) -> IO(Hub):
 # the boot's thin index arrived: the JS heap is settled once (H.Mem.settle,
 # until store mode keeps the index small), then the waiting reads answered
 def Hub.thin.warmed(h: Hub, i: THIN.Index, m: TMAIL.Cache) -> IO(Hub):
-  IO.bind(String, Hub, H.Mem.settle(), line => IO.bind(Unit, Hub, Mem.settled(line), _ => Hub.thin.warmed.k(h, i, m)))
+  IO.bind(String, Hub, H.Mem.settle("the thin index"), line => IO.bind(Unit, Hub, Mem.settled(line), _ => Hub.thin.warmed.k(h, i, m)))
 
 def Hub.thin.read_guard(valid: Bool, h: Hub, +client: U32, +text: String, +now: Nat) -> IO(Hub):
   match valid:
@@ -16229,6 +16229,9 @@ def Boot.act(n: BootNext, +hot: HB.Hot, +home: String, again: Unit -> IO(HB.Hot)
     case BootUse{}:
       do IO<HB.Hot>:
         Log.info("hot boot from " ++ HB.Hot.path(home))
+        # the load's garbage collected before anything else is built
+        line : String <- H.Mem.settle("the hot load")
+        Mem.settled(line)
         return hot
     case BootBuild{}:
       do IO<HB.Hot>:
