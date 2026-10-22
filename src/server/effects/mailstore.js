@@ -1,5 +1,24 @@
 // Twins of the low-level file operations; no journal parsing or policy here.
+// Windows has no openat or O_NOFOLLOW: the final component must not be a
+// link (lstat), then it is opened (never inherited: Bun opens handles
+// non-inheritable there) and checked as on POSIX.
+function mi_open_win(path, write) {
+  const fs = require('fs');
+  let fd = -1, code = 0;
+  try {
+    if (path.includes('\0')) throw { errno: 22 };
+    let st = null;
+    try { st = fs.lstatSync(path); } catch (e) { if (e.code !== 'ENOENT' || write === 0) throw e; }
+    if (st !== null && !st.isFile()) throw { errno: 22 };
+    fd = fs.openSync(path, write !== 0 ? (st === null ? 'w+' : 'r+') : 'r', 0o600);
+    const got = fs.fstatSync(fd);
+    if (!got.isFile() || (write !== 0 && got.nlink !== 1)) code = 22;
+  } catch (e) { code = e.code === 'ENOENT' ? 2 : Math.abs(e.errno ?? 5); }
+  if (code) { if (fd >= 0) try { fs.closeSync(fd); } catch {} throw { errno: code }; }
+  return fd;
+}
 function mi_open(path, write) {
+  if (process.platform === 'win32') return mi_open_win(path, write);
   const fs = require('fs'), C = fs.constants;
   let dir = -1, fd = -1, code = 0;
   try {

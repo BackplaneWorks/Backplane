@@ -122,12 +122,13 @@ def Stb.apply(+st: M.State, +cnt: Map<&2, Nat>, +c: M.Change) -> M.State:
 
 # what the build carries: the state, the counters, the last line's number,
 # the next line's offset, the next entry's ordinal, this chunk's statements
-# (newest first), the log's id and origin ("" until the first line)
+# (newest first), the log's id (SDB.Sdb.log_id) and origin ("" until the
+# first line)
 type Acc is Data:
   Acc{st: M.State, cnt: Map<&2, Nat>, seq: Nat, off: Nat, ord: Nat, items: List<&2, List<&2, String>>, id: String, origin: String}
 
-def Acc.new() -> Acc:
-  Acc{M.State.empty(), Map.new(&2, Nat), 0n, 0n, 1n, Nil{}, "", ""}
+def Acc.new(id: String) -> Acc:
+  Acc{M.State.empty(), Map.new(&2, Nat), 0n, 0n, 1n, Nil{}, id, ""}
 
 def Stb.sqls(os: List<&2, SDB.Op>, acc: List<&2, List<&2, String>>) -> List<&2, List<&2, String>>:
   match os:
@@ -135,14 +136,6 @@ def Stb.sqls(os: List<&2, SDB.Op>, acc: List<&2, List<&2, String>>) -> List<&2, 
       acc
     case o <> t:
       Stb.sqls(t, SDB.Sql.of(o) <> acc)
-
-# the log's id: its first line's length and first 64 characters
-def Stb.id(+off: Nat, +len: Nat, +text: String, id: String) -> String:
-  match off:
-    case 0n:
-      Nat.show(len) ++ ":" ++ String.take(text, 64n)
-    case _:
-      id
 
 # the log's origin: the "at" of its first line that parses (Hub.origin)
 def Stb.origin(+seq: Nat, +o: J.Json, origin: String) -> String:
@@ -172,7 +165,7 @@ def Stb.parsed(m: Maybe<&2, J.Json>, st: M.State, cnt: Map<&2, Nat>, +seq: Nat, 
 def Stb.line(a: Acc, l: Ln) -> Acc:
   match a l:
     case Acc{st, cnt, +seq, +off, ord, items, id, origin} Ln{+len, +text}:
-      Stb.parsed(J.Json.parse(text), st, cnt, seq, off, len, ord, items, Stb.id(off, len, text, id), origin)
+      Stb.parsed(J.Json.parse(text), st, cnt, seq, off, len, ord, items, id, origin)
 
 def Stb.lines(ls: List<&2, Ln>, a: Acc) -> Acc:
   match ls:
@@ -339,9 +332,15 @@ def Stb.open(+r: String) -> IO(String):
 type Built is Data:
   Built{seq: Nat, off: Nat, ord: Nat}
 
+# the log's id (SDB.Sdb.log_id of its first 4096 bytes, as the commit path
+# checks it), then the chunks
+def Stb.first(+size: Nat, +h: String, +chunk: U32, r: File & Result<&1, &1, U32 & String, List<&2, U32>>) -> IO(File & Acc):
+  (f, res) = r
+  Stb.loop(Nat.add(size, 64n), f, h, chunk, Acc.new(SDB.Sdb.log_id(Result.default(&1, &1, U32 & String, List<&2, U32>, res, Nil{}))))
+
 def Stb.run(r: File & Nat, +h: String, +chunk: U32) -> IO(File & Acc):
-  (f, size) = r
-  Stb.loop(Nat.add(size, 64n), f, h, chunk, Acc.new())
+  (f, +size) = r
+  IO.bind(File & Result<&1, &1, U32 & String, List<&2, U32>>, File & Acc, File.read_at(f, 0, 4096), x => Stb.first(size, h, chunk, x))
 
 def Stb.finish.k(+h: String, f: File, +a: Acc) -> IO(Built):
   do IO<Built>:

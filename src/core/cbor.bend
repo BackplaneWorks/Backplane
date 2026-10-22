@@ -58,6 +58,81 @@ def Cbor.nth.go(names: List<&2, String>, zero: Bool, +i: U32) -> Maybe<&2, Strin
 def Cbor.nth(names: List<&2, String>, +i: U32) -> Maybe<&2, String>:
   Cbor.nth.go(names, U32.is_eq(i, 0), i)
 
+# The dictionaries as balanced search trees, so a string costs about six
+# comparisons instead of one per entry (the encoder's lookup was half the JS
+# hub's CPU). Generated from the lists by scripts/cbor-tree.py; law
+# cbor_trees_exact holds them to the lists (sorted, every entry at its index,
+# nothing else), so a lookup in a tree is Cbor.find in its list.
+type CTree is Data:
+  CLeaf{}
+  CNode{l: CTree, w: String, i: U32, r: CTree}
+
+def CTree.cmp(t: CTree, +s: String) -> Cmp:
+  match t:
+    case CLeaf{}:
+      EQ{}
+    case CNode{_, w, _, _}:
+      String.order(s, w)
+
+def CTree.go(t: CTree, o: Cmp, +s: String) -> Maybe<&2, U32>:
+  match t o:
+    case CLeaf{} _:
+      None{}
+    case CNode{_, _, i, _} EQ{}:
+      Some{i}
+    case CNode{+l, _, _, _} LT{}:
+      CTree.go(l, CTree.cmp(l, s), s)
+    case CNode{_, _, _, +r} GT{}:
+      CTree.go(r, CTree.cmp(r, s), s)
+
+# the index of s in the dictionary the tree holds
+def CTree.find(+t: CTree, +s: String) -> Maybe<&2, U32>:
+  CTree.go(t, CTree.cmp(t, s), s)
+
+# the tree's words in order
+def CTree.list(t: CTree, acc: List<&2, String>) -> List<&2, String>:
+  match t:
+    case CLeaf{}:
+      acc
+    case CNode{l, w, _, r}:
+      CTree.list(l, w <> CTree.list(r, acc))
+
+def CTree.rising(xs: List<&2, String>, +prev: String, ok: Bool) -> Bool:
+  match xs ok:
+    case _ False{}:
+      False{}
+    case Nil{} True{}:
+      True{}
+    case +x <> t True{}:
+      CTree.rising(t, x, String.is_lt(prev, x))
+
+def CTree.all(names: List<&2, String>, +t: CTree, +i: U32, ok: Bool) -> Bool:
+  match names ok:
+    case _ False{}:
+      False{}
+    case Nil{} True{}:
+      True{}
+    case +n <> rest True{}:
+      CTree.all(rest, t, (i + 1 : U32), Maybe.is_some(&2, U32, CTree.find(t, n)) && U32.is_eq(Maybe.default(&2, U32, CTree.find(t, n), 0), i))
+
+def CTree.words.ok(xs: List<&2, String>) -> Bool:
+  match xs:
+    case Nil{}:
+      True{}
+    case +x <> t:
+      CTree.rising(t, x, True{})
+
+# the tree holds exactly the list: its words strictly rising (so a search
+# that misses is right), as many as the list, each at its list index
+def CTree.ok(+names: List<&2, String>, +t: CTree) -> Bool:
+  Bool.and(CTree.words.ok(CTree.list(t, Nil{})), Bool.and(Nat.is_eq(List.length(&2, String, CTree.list(t, Nil{})), List.length(&2, String, names)), CTree.all(names, t, 0, True{})))
+
+def Cbor.keys.tree() -> CTree:
+  CNode{CNode{CNode{CNode{CNode{CNode{CLeaf{}, "$", 0, CLeaf{}}, "act", 19, CNode{CLeaf{}, "archived", 49, CLeaf{}}}, "at", 12, CNode{CNode{CLeaf{}, "branch", 36, CLeaf{}}, "child", 34, CLeaf{}}}, "cid", 46, CNode{CNode{CNode{CLeaf{}, "content", 44, CLeaf{}}, "count", 47, CLeaf{}}, "depth", 35, CNode{CNode{CLeaf{}, "env", 37, CLeaf{}}, "error", 6, CLeaf{}}}}, "id", 2, CNode{CNode{CNode{CNode{CLeaf{}, "info", 28, CLeaf{}}, "interaction", 24, CNode{CLeaf{}, "items", 7, CLeaf{}}}, "key", 31, CNode{CNode{CLeaf{}, "kind", 16, CLeaf{}}, "m", 3, CLeaf{}}}, "manual", 48, CNode{CNode{CNode{CLeaf{}, "model", 21, CLeaf{}}, "msg", 9, CLeaf{}}, "name", 42, CNode{CNode{CLeaf{}, "ok", 5, CLeaf{}}, "p", 4, CLeaf{}}}}}, "parent", 33, CNode{CNode{CNode{CNode{CNode{CLeaf{}, "path", 29, CLeaf{}}, "pinned", 40, CNode{CLeaf{}, "project", 14, CLeaf{}}}, "provider", 22, CNode{CNode{CLeaf{}, "result", 43, CLeaf{}}, "role", 10, CLeaf{}}}, "root", 39, CNode{CNode{CNode{CLeaf{}, "runtime", 23, CLeaf{}}, "seq", 26, CLeaf{}}, "session", 20, CNode{CNode{CLeaf{}, "settled", 41, CLeaf{}}, "since", 25, CLeaf{}}}}, "state", 13, CNode{CNode{CNode{CNode{CLeaf{}, "summary", 17, CLeaf{}}, "t", 1, CLeaf{}}, "task", 32, CNode{CNode{CLeaf{}, "text", 11, CLeaf{}}, "thread", 8, CLeaf{}}}, "title", 15, CNode{CNode{CNode{CLeaf{}, "tone", 18, CLeaf{}}, "type", 45, CLeaf{}}, "value", 30, CNode{CNode{CLeaf{}, "version", 27, CLeaf{}}, "worktree", 38, CLeaf{}}}}}}
+
+def Cbor.words.tree() -> CTree:
+  CNode{CNode{CNode{CNode{CNode{CNode{CLeaf{}, "ActivityLogged", 2, CLeaf{}}, "AskClosed", 50, CNode{CLeaf{}, "AskOpened", 49, CLeaf{}}}, "DeviceDropped", 54, CNode{CNode{CLeaf{}, "DeviceRegistered", 53, CLeaf{}}, "MessagePosted", 0, CNode{CLeaf{}, "ModesSet", 33, CLeaf{}}}}, "PendingChanged", 21, CNode{CNode{CNode{CLeaf{}, "ProjectCreated", 24, CLeaf{}}, "ProjectRemoved", 25, CNode{CLeaf{}, "SessionSet", 32, CLeaf{}}}, "SettingSet", 37, CNode{CNode{CLeaf{}, "TaskDelegated", 34, CLeaf{}}, "TaskDelivered", 36, CNode{CLeaf{}, "TaskStateSet", 35, CLeaf{}}}}}, "ThreadArchived", 28, CNode{CNode{CNode{CNode{CLeaf{}, "ThreadCreated", 26, CLeaf{}}, "ThreadDeleted", 30, CNode{CLeaf{}, "ThreadPinned", 29, CLeaf{}}}, "ThreadRenamed", 27, CNode{CNode{CLeaf{}, "ThreadSettled", 22, CLeaf{}}, "ThreadUnsettled", 23, CNode{CLeaf{}, "TurnChanged", 1, CLeaf{}}}}, "WorktreeSet", 31, CNode{CNode{CNode{CLeaf{}, "activity", 58, CLeaf{}}, "alert", 57, CNode{CLeaf{}, "android", 56, CLeaf{}}}, "approval-required", 40, CNode{CNode{CLeaf{}, "assistant", 7, CLeaf{}}, "auto", 42, CLeaf{}}}}}, "auto-accept-edits", 41, CNode{CNode{CNode{CNode{CNode{CLeaf{}, "cancelled", 48, CLeaf{}}, "changes", 3, CNode{CLeaf{}, "completed", 9, CLeaf{}}}, "default", 44, CNode{CNode{CLeaf{}, "delta", 4, CLeaf{}}, "device.drop", 52, CNode{CLeaf{}, "device.register", 51, CLeaf{}}}}, "done", 47, CNode{CNode{CNode{CLeaf{}, "error", 13, CLeaf{}}, "failed", 20, CNode{CLeaf{}, "full-access", 43, CLeaf{}}}, "hello", 17, CNode{CNode{CLeaf{}, "idle", 10, CLeaf{}}, "info", 11, CNode{CLeaf{}, "interrupted", 19, CLeaf{}}}}}, "ios", 55, CNode{CNode{CNode{CNode{CLeaf{}, "local", 38, CLeaf{}}, "log", 14, CNode{CLeaf{}, "plan", 45, CLeaf{}}}, "production", 60, CNode{CNode{CLeaf{}, "queued", 46, CLeaf{}}, "reply", 5, CNode{CLeaf{}, "running", 8, CLeaf{}}}}, "sandbox", 59, CNode{CNode{CNode{CLeaf{}, "system", 18, CLeaf{}}, "tool", 12, CNode{CLeaf{}, "update", 15, CLeaf{}}}, "user", 6, CNode{CNode{CLeaf{}, "view", 16, CLeaf{}}, "worktree", 39, CLeaf{}}}}}}
+
 # Encoding
 # --------
 
@@ -206,8 +281,8 @@ def Enc.str.k(m: Maybe<&2, U32>, s: String, acc: List<&2, U32>) -> List<&2, U32>
     case None{}:
       Enc.text(s, acc)
 
-def Enc.str(+s: String, +ws: List<&2, String>, acc: List<&2, U32>) -> List<&2, U32>:
-  Enc.str.k(Cbor.find(ws, s), s, acc)
+def Enc.str(+s: String, +ws: CTree, acc: List<&2, U32>) -> List<&2, U32>:
+  Enc.str.k(CTree.find(ws, s), s, acc)
 
 def Enc.key.k(m: Maybe<&2, U32>, k: String, acc: List<&2, U32>) -> List<&2, U32>:
   match m:
@@ -216,8 +291,8 @@ def Enc.key.k(m: Maybe<&2, U32>, k: String, acc: List<&2, U32>) -> List<&2, U32>
     case None{}:
       Enc.text(k, acc)
 
-def Enc.key(+k: String, +ks: List<&2, String>, acc: List<&2, U32>) -> List<&2, U32>:
-  Enc.key.k(Cbor.find(ks, k), k, acc)
+def Enc.key(+k: String, +ks: CTree, acc: List<&2, U32>) -> List<&2, U32>:
+  Enc.key.k(CTree.find(ks, k), k, acc)
 
 # the cells of an Item / Field chain
 def Enc.count(xs: J.Json, acc: U32) -> U32:
@@ -230,7 +305,7 @@ def Enc.count(xs: J.Json, acc: U32) -> U32:
       acc
 
 # j's bytes, reversed onto acc
-def Enc.go(j: J.Json, +ks: List<&2, String>, +ws: List<&2, String>, acc: List<&2, U32>) -> List<&2, U32>:
+def Enc.go(j: J.Json, +ks: CTree, +ws: CTree, acc: List<&2, U32>) -> List<&2, U32>:
   match j:
     case J.Null{}:
       246 <> acc
@@ -255,8 +330,8 @@ def Enc.go(j: J.Json, +ks: List<&2, String>, +ws: List<&2, String>, acc: List<&2
 
 # the CBOR bytes (0..255 per cell) of a JSON value
 def Cbor.encode(j: J.Json) -> List<&2, U32>:
-  +ks = Cbor.keys()
-  +ws = Cbor.words()
+  +ks = Cbor.keys.tree()
+  +ws = Cbor.words.tree()
   List.reverse(&2, U32, Enc.go(j, ks, ws, Nil{}))
 
 # Decoding

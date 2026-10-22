@@ -11785,6 +11785,7 @@ def Laws.mail_credit_native_kept(w, charge):
     case MPCREDIT.WClose{}: {==}
     case MPCREDIT.WState{_, _}: {==}
     case MPCREDIT.WItems{_, _, _, _, _, _}: {==}
+    case MPCREDIT.WJson{_, _}: {==}
 # ---- i18n web phone ----
 def Laws.webphone_option_english(): {==}
 def Laws.webphone_model_name_kept(): {==}
@@ -12353,6 +12354,17 @@ def Laws.oprep_task_not_in_chat(): {==}
 def Laws.oprep_task_delivered_with_filing(): {==}
 def Laws.oprep_other_thread_unchanged(): {==}
 
+def Laws.cbor_trees_exact(): {==}
+def Laws.thin_pace_own_urgent(): {==}
+def Laws.thin_pace_other_soft(): {==}
+def Laws.thin_pace_all_urgent(): {==}
+def Laws.thin_pace_none_quiet(th): {==}
+def Laws.thin_pace_no_thread_soft(): {==}
+def Laws.thin_pace_own_sends(): {==}
+def Laws.thin_pace_soft_owed(): {==}
+def Laws.thin_pace_flush_sends(): {==}
+def Laws.thin_pace_owed_raised(): {==}
+def Laws.thin_pace_quiet(last, now): {==}
 # --- J2: walks the JS hub makes over a whole log, in tail calls ---
 
 def Laws.store_size_go_succ(ls, n):
@@ -12434,6 +12446,40 @@ def Laws.thin_mail_lazy_committed(cs, st, l):
 
 def Laws.thin_mail_lazy_warm(st, done): {==}
 # ---- end S3 ----
+
+# --- J2: HTTP and WebSocket bodies counted and unmasked in tail calls ---
+
+def Laws.http_count_go_succ(bs, n):
+  match bs:
+    case Nil{}:
+      {==}
+    case _ <> t:
+      Laws.http_count_go_succ(t, 1n+n)
+
+def Laws.http_count_is_length(bs):
+  match bs:
+    case Nil{}:
+      {==}
+    case _ <> t:
+      %Equal.sym(Nat, HTTPAUTH.Http.count.go(t, 1n+0n), 1n+HTTPAUTH.Http.count.go(t, 0n), Laws.http_count_go_succ(t, 0n)) : {_ == 1n+List.length(&2, U32, t) : Nat}
+      %Laws.http_count_is_length(t) : {1n+HTTPAUTH.Http.count.go(t, 0n) == 1n+_ : Nat}
+      {==}
+
+def Laws.ws_unmask_go(bs, key, i, acc):
+  match bs:
+    case Nil{}:
+      {==}
+    case x <> t:
+      Laws.ws_unmask_go(t, key, 1n+i, HTTPAUTH.Ws.unmask.k(x, key, i) <> acc)
+
+def Laws.ws_unmask_take_go(bs, n, key, i, acc):
+  match bs n:
+    case Nil{} _:
+      {==}
+    case _ <> _ 0n:
+      {==}
+    case x <> t 1n+m:
+      Laws.ws_unmask_take_go(t, m, key, 1n+i, HTTPAUTH.Ws.unmask.k(x, key, i) <> acc)
 
 # ---- browser pages and loopback (J3) ----
 def Laws.browser_owner_unknown_refused(): {==}
