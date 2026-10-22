@@ -9,6 +9,24 @@ const MAX_REVISION = 2 ** 32 - 1;
 const METHODS = new Set(['view.open', 'view.page', 'view.search', 'view.update', 'view.action', 'view.message', 'view.cancel']);
 const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
 const record = o => o !== null && typeof o === 'object' && !Array.isArray(o);
+// whether a draft can open (or, as the previous draft, close) the composer's
+// popup: its last word starts with a reference's or a skill's sigil, or the
+// whole draft is a slash command being typed (client.bend's Skills.all
+// decides what it offers; this only says when to ask the hub again)
+export function popupDraft(text) {
+  const t = typeof text === 'string' ? text : '';
+  const word = t.slice(Math.max(t.lastIndexOf(' '), t.lastIndexOf('\n'), t.lastIndexOf('\t'), t.lastIndexOf('\r')) + 1);
+  return /^[@>%#$]/.test(word) || /^\/\S*$/.test(t);
+}
+// the draft a read (view.update, view.changed) carries for the popup: whole
+// up to 2 KiB, else only its last word (all a reference needs; a draft that
+// long is no slash command), so reads stay small
+export function popupReadDraft(text) {
+  const t = typeof text === 'string' ? text : '';
+  if (utf8Bytes(t) <= 2048) return t;
+  const word = t.slice(Math.max(t.lastIndexOf(' '), t.lastIndexOf('\n'), t.lastIndexOf('\t'), t.lastIndexOf('\r')) + 1);
+  return utf8Bytes(word) <= 1024 ? ' ' + word : ' ';
+}
 export function utf8Bytes(text) {
   let n = 0;
   for (const c of text) { const x = c.codePointAt(0); n += x < 128 ? 1 : x < 2048 ? 2 : x < 65536 ? 3 : 4; }

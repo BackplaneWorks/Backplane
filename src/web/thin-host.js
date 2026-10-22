@@ -1,6 +1,6 @@
 import { validatePresentation } from './startup.js';
 import { validateThinResult, MessageParts } from './thin-results.js';
-import { compactRoute, utf8Bytes } from './thin.js';
+import { compactRoute, utf8Bytes, popupDraft, popupReadDraft } from './thin.js';
 
 const clone = value => typeof structuredClone === 'function' ? structuredClone(value) : JSON.parse(JSON.stringify(value));
 const object = value => value && typeof value === 'object' && !Array.isArray(value);
@@ -12,13 +12,17 @@ function choices(value, accept) {
   }
   return out;
 }
-function requestSession(session, action, target) {
+export function requestSession(session, action, target, popup = false) {
   const drafts = {}, local = object(session.drafts) ? session.drafts : {};
   for (const key of ['@lang', '@lang.os', '@lang.tag', '@lang.preview']) {
     if (typeof local[key] === 'string' && utf8Bytes(local[key]) <= 128) drafts[key] = local[key];
   }
   if (action && session.sel && !session.sel.startsWith('@') && Object.hasOwn(local, session.sel) && typeof local[session.sel] === 'string') {
     Object.defineProperty(drafts, session.sel, { value: local[session.sel], enumerable: true });
+  } else if (popup && session.sel && !session.sel.startsWith('@') && typeof local[session.sel] === 'string') {
+    // A read carries the draft only while the composer's popup may show (or
+    // must shut): the hub renders the popup from it (client.bend's Refs.ready)
+    Object.defineProperty(drafts, session.sel, { value: popupReadDraft(local[session.sel]), enumerable: true });
   }
   const route = compactRoute(session.route, target);
   return { sel: session.sel, rid: session.rid, drafts, outbox: {},
@@ -198,14 +202,20 @@ export class ThinHost {
     if (!original || original.operation) return false;
     return this.flush(this.client.request(this.hub, 'view.cancel', { requestId }));
   }
+  // whether a read carries the selected draft: while it may open the popup,
+  // and once more after, so the hub shuts it
+  popupRead() {
+    const now = popupDraft(this.session.drafts?.[this.session.sel]), carry = now || !!this.popupSent;
+    this.popupSent = now;return carry;
+  }
   update() {
     if (!this.ready) return false;
     const link = this.client.links.get(this.hub);
-    return this.flush(this.client.request(this.hub, 'view.update', { session: requestSession(this.session, false, this.target), anchor: this.api.anchor(), viewRevision: link.viewRevision }));
+    return this.flush(this.client.request(this.hub, 'view.update', { session: requestSession(this.session, false, this.target, this.popupRead()), anchor: this.api.anchor(), viewRevision: link.viewRevision }));
   }
   receive(envelope) {
     if (envelope?.t === 'view.changed') {
-      if (this.ready) this.flush(this.client.changed(this.hub, envelope, requestSession(this.session, false, this.target), this.api.anchor()));
+      if (this.ready) this.flush(this.client.changed(this.hub, envelope, requestSession(this.session, false, this.target, popupDraft(this.session.drafts?.[this.session.sel])), this.api.anchor()));
       return true;
     }
     if (envelope?.t !== 'reply') return false;
