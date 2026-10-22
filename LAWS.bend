@@ -12658,6 +12658,16 @@ law life_later_manual_settle_held:
 # an http(s) address, nothing is sent. A secret is optional: missing when
 # one was configured posts nothing (never an unsigned notice instead), and
 # a stop is reported as "stopped".
+# Outbound webhook (core/wnote.bend)
+# ----------------------------------
+# push.webhook.url posts a JSON notice for an alert Notify me for would
+# raise (Policy.loud, the same classification as the phones). A settle or
+# a failure is event "turn.ended" and goes out from TurnEnded; an ask, a
+# merge, a reminder or a note uses its kind as the event and goes out from
+# Alerted. Unset, or not an http(s) address, nothing is sent. A secret is
+# optional: missing when one was configured posts nothing (never an
+# unsigned notice instead), and a stop is reported as "stopped" and, with
+# the policy, is not posted.
 
 law hook_off_unset:
   {WN.Wn.on("") == False{} : Bool}
@@ -12699,10 +12709,16 @@ law hook_completed_word:
   {WN.Wn.outcome(M.Completed{}) == "completed" : String}
 
 law hook_body_state:
-  {J.Json.get_str(Maybe.default(&2, J.Json, J.Json.parse(WN.Wn.body("t1", "failed", "Board", "Failed")), J.Null{}), "state", "") == "failed" : String}
+  {J.Json.get_str(Maybe.default(&2, J.Json, J.Json.parse(WN.Wn.body("fail", "t1", "failed", "Board", "Failed")), J.Null{}), "state", "") == "failed" : String}
 
 law hook_body_event:
-  {J.Json.get_str(Maybe.default(&2, J.Json, J.Json.parse(WN.Wn.body("t1", "completed", "A", "ok")), J.Null{}), "event", "") == "turn.ended" : String}
+  {J.Json.get_str(Maybe.default(&2, J.Json, J.Json.parse(WN.Wn.body("done", "t1", "completed", "A", "ok")), J.Null{}), "event", "") == "turn.ended" : String}
+
+law hook_body_kind:
+  {J.Json.get_str(Maybe.default(&2, J.Json, J.Json.parse(WN.Wn.body("fail", "t1", "failed", "Board", "Failed")), J.Null{}), "kind", "") == "fail" : String}
+
+law hook_body_ask_event:
+  {J.Json.get_str(Maybe.default(&2, J.Json, J.Json.parse(WN.Wn.body("ask", "t1", "running", "Board", "Needs you")), J.Null{}), "event", "") == "ask" : String}
 
 law hook_unsigned_header:
   {List.length(&2, String, WN.Wn.headers("", 1n, "{}")) == 1n : Nat}
@@ -12725,3 +12741,50 @@ law hook_report_keeps_fail:
 
 law hook_report_fallback:
   {WN.Wn.report("", M.Interrupted{}) == "stopped" : String}
+
+# the webhook posts exactly when the policy would notify
+law hook_follows_settle:
+  {WN.Wn.agrees(NO.Policy.end(NO.Policy.demo.s(NO.Policy.demo.ask()), 13n, "t1", "completed")) == True{} : Bool}
+
+law hook_follows_stop:
+  {WN.Wn.agrees(NO.Policy.end(NO.Policy.demo.s(NO.Policy.demo.cat([NO.Policy.demo.base(), NO.Policy.demo.run("t1", "m1", "do it", 10n), [M.TurnChanged{"t1", M.Interrupted{}, 12n}]])), 13n, "t1", "stopped")) == True{} : Bool}
+
+law hook_follows_ask:
+  {WN.Wn.agrees(NO.Policy.ask(NO.Policy.demo.s(NO.Policy.demo.ask()), 20n, "t1", "Bash", "ls")) == True{} : Bool}
+
+law hook_follows_ask_off:
+  {WN.Wn.agrees(NO.Policy.ask(NO.Policy.demo.fold(NO.Policy.demo.s(NO.Policy.demo.ask()), Nil{}, [M.SettingSet{"notify.needs", "off", 19n}]), 20n, "t1", "Bash", "ls")) == True{} : Bool}
+
+law hook_follows_settled_off:
+  {WN.Wn.agrees(NO.Policy.end(NO.Policy.demo.s(NO.Policy.demo.cat([[M.SettingSet{"notify.settled", "off", 1n}], NO.Policy.demo.ask()])), 13n, "t1", "completed")) == True{} : Bool}
+
+law hook_follows_fail:
+  {WN.Wn.agrees(NO.Policy.end(NO.Policy.demo.s(NO.Policy.demo.cat([NO.Policy.demo.base(), NO.Policy.demo.run("t1", "m1", "do it", 10n), NO.Policy.demo.fail("t1", 12n)])), 13n, "t1", "failed")) == True{} : Bool}
+
+law hook_follows_reminder:
+  {WN.Wn.agrees(NO.Policy.reminder(NO.Policy.demo.s(NO.Policy.demo.ask()), 40n, "t1", "r7", "Call the bank")) == True{} : Bool}
+
+law hook_follows_all:
+  {WN.Wn.agrees(NO.Policy.end(NO.Policy.demo.s(NO.Policy.demo.cat([[M.SettingSet{"notify.all", "on", 1n}], NO.Policy.demo.room()])), 1007n, "tb", "completed")) == True{} : Bool}
+
+# which path posts: 1 the turn end (done, fail), 2 the other alerts, 0 quiet
+law hook_route_done:
+  {WN.Wn.route("done") == 1n : Nat}
+
+law hook_route_fail:
+  {WN.Wn.route("fail") == 1n : Nat}
+
+law hook_route_ask:
+  {WN.Wn.route("ask") == 2n : Nat}
+
+law hook_route_merged:
+  {WN.Wn.route("merged") == 2n : Nat}
+
+law hook_route_reminder:
+  {WN.Wn.route("reminder") == 2n : Nat}
+
+law hook_route_note:
+  {WN.Wn.route("note") == 2n : Nat}
+
+law hook_route_quiet:
+  {WN.Wn.route("") == 0n : Nat}

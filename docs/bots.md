@@ -271,19 +271,29 @@ Clicking it opens the thread.
 ### Webhook
 
 `push.webhook.url` (a setting: an `http` or `https` address) makes the hub
-POST a JSON notice when a turn ends. The hub calls `Push.turn_ended` for
-every end, including a failure and a stop, off its own thread. Unset, nothing
-is sent and nothing else changes.
+POST a JSON notice for each alert **Notify me for** would raise. The same
+record decides it (`Policy.loud` / `Policy.kind` in `src/core/notice.bend`):
+a kind of `done` or `fail` goes out from `TurnEnded`, and a kind of `ask`,
+`merged`, `reminder` or `note` goes out from `Alerted`. A quiet settle (an
+empty kind: a stop, an intermediate end, a routine, a launched report, or a
+channel switched off) posts nothing. A desk that holds the phone push does
+not hold the webhook. Unset, nothing is sent and nothing else changes.
 
 ```
-{"event":"turn.ended","thread":"…","state":"completed","title":"…","text":"…"}
+{"event":"turn.ended","kind":"done","thread":"…","state":"completed","title":"…","text":"…"}
 ```
 
-`state` is the word the turn ended with: `completed`, `failed`, or
-`stopped` (a stop, an archive or a delete). A message already waiting does
-not replace it when it starts the next turn. `text` is
-`Failed`, or the first line of the last reply. A POST that fails is logged
-(`backplane: push webhook -> …`) and does not affect the turn.
+`event` is `turn.ended` for a settle or a failure, and otherwise the kind
+itself (`ask`, `merged`, `reminder`, `note`). `kind` is that alert's kind.
+`state` for a turn end is the word the turn ended with: `completed`,
+`failed`, or `stopped`. A message already waiting does not replace it when
+it starts the next turn. For the other alerts, `state` is the thread's turn
+at the time (`running`, `idle`, …). `text` for a settle or a failure is
+`Failed`, or the first line of the last reply; for the others it is the
+record's own text (the ask, the merge url, the reminder, the note). A POST
+that fails is logged (`backplane: push webhook -> …`) and does not affect
+the turn. With `notify.all` on, a room exchange the older rule alerts is a
+`done` or `fail` and goes out as `turn.ended` too.
 
 The notice is signed when a secret is configured. `push.webhook.secret` is
 the path of a file that holds it (only the path is a setting, as with

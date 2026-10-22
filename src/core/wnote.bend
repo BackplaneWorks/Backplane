@@ -1,12 +1,17 @@
 import Base
 import ./json.bend as J
 import ./model.bend as M
+import ./notice.bend as NO
 import ./sign.bend as SG
 
-# A turn-end notice posted to push.webhook.url (server/push.bend's
-# Push.turn_ended). Off unless that setting is an http(s) address. The
-# body is JSON. When a secret is configured the request carries the same
-# signature a webhook in does (sign.bend):
+# An outbound notice posted to push.webhook.url (server/push.bend). It
+# follows Notify me for (notice.bend's Policy): a post goes out only for
+# an alert record whose kind the policy would notify on. A settled turn
+# or a failure (kind done or fail) is event "turn.ended" and keeps the
+# end word TurnEnded reported. An ask, a merge, a reminder or a
+# notify_person note uses the kind as its event. Off unless the URL is
+# an http(s) address. The body is JSON. When a secret is configured the
+# request carries the same signature a webhook in does (sign.bend):
 #
 #   X-Backplane-Timestamp: <unix seconds>
 #   X-Backplane-Signature: sha256=<hex HMAC-SHA256(secret, ts + "." + body)>
@@ -109,9 +114,92 @@ def Wn.report.k(known: Bool, +given: String, t: M.TurnState) -> String:
 def Wn.report(+given: String, t: M.TurnState) -> String:
   Wn.report.k(Wn.known(given), given, t)
 
-def Wn.body(+thread: String, +state: String, +title: String, +text: String) -> String:
+# a settled completion or a failure: the turn-end notice, with the end word
+def Wn.ended.or(done: Bool, fail: Bool) -> Bool:
+  match done:
+    case True{}:
+      True{}
+    case False{}:
+      fail
+
+def Wn.ended(+kind: String) -> Bool:
+  Wn.ended.or(String.eq(kind, "done"), String.eq(kind, "fail"))
+
+def Wn.event.k(ended: Bool, +kind: String) -> String:
+  match ended:
+    case True{}:
+      "turn.ended"
+    case False{}:
+      kind
+
+# "turn.ended" for a settle or a failure; otherwise the alert's own kind
+def Wn.event(+kind: String) -> String:
+  Wn.event.k(Wn.ended(kind), kind)
+
+# the policy's own test, on a record of this kind (an empty kind is the
+# quiet settle: Policy.said reads "_", so nothing is posted)
+def Wn.fires(+kind: String) -> Bool:
+  NO.Policy.loud([M.SettingSet{NO.Alert.key("t"), NO.Alert.line(kind, "k", "", "1.0", ""), 1n}])
+
+def Wn.same(a: Bool, b: Bool) -> Bool:
+  match a b:
+    case True{} True{}:
+      True{}
+    case False{} False{}:
+      True{}
+    case True{} False{}:
+      False{}
+    case False{} True{}:
+      False{}
+
+# the webhook posts for a change list exactly when the policy would notify
+def Wn.agrees(+cs: List<&2, M.Change>) -> Bool:
+  Wn.same(Wn.fires(NO.Policy.kind(cs)), NO.Policy.loud(cs))
+
+def Wn.route.e(ended: Bool) -> Nat:
+  match ended:
+    case True{}:
+      1n
+    case False{}:
+      2n
+
+def Wn.route.f(fires: Bool, ended: Bool) -> Nat:
+  match fires:
+    case False{}:
+      0n
+    case True{}:
+      Wn.route.e(ended)
+
+# 0 quiet, 1 the turn-end path (done, fail), 2 the alert path (ask, merged, reminder, note)
+def Wn.route(+kind: String) -> Nat:
+  Wn.route.f(Wn.fires(kind), Wn.ended(kind))
+
+def Wn.turn(route: Nat) -> Bool:
+  match route:
+    case 1n:
+      True{}
+    case _:
+      False{}
+
+def Wn.other(route: Nat) -> Bool:
+  match route:
+    case 2n:
+      True{}
+    case _:
+      False{}
+
+# TurnEnded posts only a settle or a failure the policy raised
+def Wn.due.turn(+kind: String) -> Bool:
+  Wn.turn(Wn.route(kind))
+
+# Alerted posts the other kinds (so a settle is not sent twice)
+def Wn.due.alert(+kind: String) -> Bool:
+  Wn.other(Wn.route(kind))
+
+def Wn.body(+kind: String, +thread: String, +state: String, +title: String, +text: String) -> String:
   J.Json.show(J.Json.obj([
-    J.KV{"event", J.Str{"turn.ended"}},
+    J.KV{"event", J.Str{Wn.event(kind)}},
+    J.KV{"kind", J.Str{kind}},
     J.KV{"thread", J.Str{thread}},
     J.KV{"state", J.Str{state}},
     J.KV{"title", J.Str{title}},

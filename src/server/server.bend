@@ -4069,6 +4069,11 @@ def Hub.island(+home: String, st: M.State, +inbox: Chan(Msg)) -> IO(Unit):
 def Hub.phone(+home: String, st: M.State, +thread: String, +state: String, +inbox: Chan(Msg)) -> IO(Unit):
   IO.bind(List<&2, String>, Unit, PU.Push.turn_ended.dead(home, st, thread, state), ds => Hub.drop_dead(ds, inbox))
 
+# an ask, a merge, a reminder or a note: the webhook, off the hub loop.
+# a settle or a failure is posted from TurnEnded, which has the end word
+def Hub.alert.hook(+home: String, st: M.State, +thread: String) -> IO(Unit):
+  PU.Push.hook.alert(home, st, thread)
+
 def Desk.lead.held(seen: Bool, m: Maybe<&2, U32>) -> Maybe<&2, U32>:
   match seen:
     case True{}:
@@ -10046,6 +10051,7 @@ def Hub.out(h: Hub, o: B.Out) -> IO(Hub):
         PU.Push.held(seen, thread)
         cl2 : List<&2, Client> <- Desk.tell(seen, cl, st, thread, rec)
         IO.spawn(Unit, Far.note.push(Cfg.home(cfg), st, thread, PU.Push.title(B.Hub.thread(st, thread)), PU.Push.alert.body(st, thread, rec), DK.Desk.hold(seen, NO.Alert.rkey(rec)), inbox))
+        IO.spawn(Unit, Hub.alert.hook(Cfg.home(cfg), st, thread))
         Far.note.out(Hub{st, f, ls, cl2, as, inbox, cfg, note}, rec, thread, seen)
     # a bot's answer to a person elsewhere, captured by the step that left
     # its thread ready (hub.bend's Answer.out)

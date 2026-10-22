@@ -140,9 +140,11 @@ push: phones are registered but ...` at each turn end instead of pushing.
 The key must belong to the team that owns the app's bundle id, or APNs
 answers `TopicDisallowed`.
 
-A turn's end can also POST elsewhere. Set `push.webhook.url` to an `http`
-or `https` address (unset: nothing is sent). `push.webhook.secret` is an
-optional path to a file holding an HMAC-SHA256 secret; with it unset,
-`<home>/secrets/push.webhook` is used when that file exists. The notice
-and the signature headers are in `docs/bots.md` ("Webhook"). A failed POST
-is logged and does not affect the turn.
+An alert Notify me for would raise can also POST elsewhere. Set
+`push.webhook.url` to an `http` or `https` address (unset: nothing is
+sent). The notice follows that policy: a settle or a failure, an ask, a
+merge, a reminder or a note; a stop and the other quiet ends do not.
+`push.webhook.secret` is an optional path to a file holding an HMAC-SHA256
+secret; with it unset, `<home>/secrets/push.webhook` is used when that
+file exists. The notice and the signature headers are in `docs/bots.md`
+("Webhook"). A failed POST is logged and does not affect the turn.

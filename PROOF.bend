@@ -13446,3 +13446,54 @@ def Laws.hook_report_keeps_fail():
 
 def Laws.hook_report_fallback():
   {==}
+
+def Laws.hook_follows_settle():
+  {==}
+
+def Laws.hook_follows_stop():
+  {==}
+
+def Laws.hook_follows_ask():
+  {==}
+
+def Laws.hook_follows_ask_off():
+  {==}
+
+def Laws.hook_follows_settled_off():
+  {==}
+
+def Laws.hook_follows_fail():
+  {==}
+
+def Laws.hook_follows_reminder():
+  {==}
+
+def Laws.hook_follows_all():
+  {==}
+
+def Laws.hook_route_done():
+  {==}
+
+def Laws.hook_route_fail():
+  {==}
+
+def Laws.hook_route_ask():
+  {==}
+
+def Laws.hook_route_merged():
+  {==}
+
+def Laws.hook_route_reminder():
+  {==}
+
+def Laws.hook_route_note():
+  {==}
+
+def Laws.hook_route_quiet():
+  {==}
+
+def Laws.hook_body_kind():
+  {==}
+
+def Laws.hook_body_ask_event():
+  {==}
