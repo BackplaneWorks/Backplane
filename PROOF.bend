@@ -12022,6 +12022,7 @@ def Laws.mail_credit_native_kept(w, charge):
     case MPCREDIT.WState{_, _}: {==}
     case MPCREDIT.WItems{_, _, _, _, _, _}: {==}
     case MPCREDIT.WJson{_, _}: {==}
+    case MPCREDIT.WCbor{_, _}: {==}
 # ---- i18n web phone ----
 def Laws.webphone_option_english(): {==}
 def Laws.webphone_model_name_kept(): {==}
