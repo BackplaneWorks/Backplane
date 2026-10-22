@@ -14,7 +14,7 @@ import ../core/mail.bend as ML
 # bp-coord/store/S1-SCHEMA.md)
 # ---------------------------------------------------------------
 # The log is read a chunk at a time (EvLog.read_chunk), never whole: a chunk's
-# complete lines are folded and their facts written in one Db.script; the
+# complete lines are folded and their facts written in one Db.script_status; the
 # partial last line is read again with the next chunk, and a line longer
 # than a chunk makes the chunk grow until it fits. The fold keeps no
 # entries or room-post text (Stb.strip after every chunk), older mail
@@ -409,7 +409,7 @@ def Stb.progress(+home: String, +seq: Nat, +off: Nat, +total: Nat) -> IO(Unit):
 def Stb.write.k(+h: String, +home: String, +total: Nat, r: List<&2, List<&2, String>> & Acc) -> IO(Acc):
   (items, +a) = r
   do IO<Acc>:
-    +res : String <- D.Db.script(h, items)
+    +res : String <- D.Db.script_status(h, items)
     Stb.check("chunk ending at " ++ Nat.show(Acc.off(a)), res)
     Stb.progress(home, Acc.seq(a), Acc.off(a), total)
     return a
@@ -542,7 +542,7 @@ def Stb.record.flush(+h: String, b: RecordBatch) -> IO(RecordBatch):
   match b:
     case RecordBatch{items, _, _}:
       do IO<RecordBatch>:
-        res : String <- D.Db.script(h, List.reverse(&2, List<&2, String>, items))
+        res : String <- D.Db.script_status(h, List.reverse(&2, List<&2, String>, items))
         Stb.check("record batch", res)
         return RecordBatch{Nil{}, 0n, 0n}
 
@@ -639,7 +639,7 @@ def Stb.records(st: M.State, +h: String) -> IO(Unit):
         Stb.domain(~M.Device, ~Unit, ~(ctx => k => v => SDB.Row.device(v)), "device", dv, h, Unit{})
         Stb.domain(~M.Nav, ~Unit, ~(ctx => k => v => SDB.Row.nav(k, v)), "nav", nv, h, Unit{})
         Stb.ext.records(M.Ext.of(bw), h)
-        res : String <- D.Db.script(h, [SDB.Sql.of(SDB.Row.obj("state", "seq", C.Codec.nat(n)))])
+        res : String <- D.Db.script_status(h, [SDB.Sql.of(SDB.Row.obj("state", "seq", C.Codec.nat(n)))])
         Stb.check("state sequence", res)
 
 def Stb.gone(+path: String) -> IO(Unit):
@@ -661,7 +661,7 @@ def Stb.finish.records(+h: String, +home: String, f: File, st: M.State, +a: Acc)
   do IO<Built>:
     File.close(f)
     Stb.records(st, h)
-    +res : String <- D.Db.script(h, Stb.end(a))
+    +res : String <- D.Db.script_status(h, Stb.end(a))
     Stb.check("meta", res)
     IO.print("store-rebuild journal start")
     jm : String <- D.Db.exec(h, "PRAGMA journal_mode = DELETE")
