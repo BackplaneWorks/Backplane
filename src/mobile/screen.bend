@@ -134,7 +134,7 @@ def Mob.project(+lc: I.Loc, r: U.SRow, +open: Map<&2, Bool>, +ix: U.SIx, +st: M.
         J.KV{"threads", J.Json.arr(Mob.rows(lc, List.append(&2, M.Thread, pinned, active), ix, st, now, 0n))},
         J.KV{"snoozedShelf", J.Json.str(MSG.T.sidebar.snoozed(lc))},
         J.KV{"snoozed", J.Json.arr(Mob.rows(lc, snoozed, ix, st, now, 2n))},
-        J.KV{"shelf", J.Json.str(MSG.T.sidebar.settled.count(lc, Nat.show(List.length(&2, M.Thread, settled))))},
+        J.KV{"shelf", J.Json.str(MSG.T.sidebar.settled.count(lc, Nat.show(U.Side.settled.n(st, id, List.length(&2, M.Thread, settled)))))},
         J.KV{"settled", J.Json.arr(Mob.rows(lc, settled, ix, st, now, 1n))},
         J.KV{"value", J.Json.str("arch:" ++ id)}, J.KV{"archOpen", J.Json.bool(U.Flag.get(open, "arch:" ++ id))},
         J.KV{"archived", J.Json.arr(Mob.rows(lc, M.Archive.of(hidden), ix, st, now, 3n))}])
@@ -1592,6 +1592,7 @@ def Mob.settings.rows.k(i: Nat, +lc: I.Loc, +u: U.Ui, +st: M.State, +nf: Map<&2,
     case 11n: List.concat(&2, J.Json, [[Mob.set.row.l(MSG.T.settings.tour(lc), MSG.T.settings.tour.note(lc), [Mob.set.btn(MSG.T.settings.tour.show(lc), "ob-open", "", False{})])],
       more])
     case 12n: Mob.agy.rows(U.Share.rows(u))
+    case 13n: [Mob.set.row(MSG.T.settings.uctx(lc), MSG.T.settings.uctx.note(lc), Mob.set.chips.loc(lc, ["on", "off"], M.Setting.get(st, "uber.ctx", "off"), "uber.ctx"))]
     case _: Nil{}
 
 def Mob.settings.menu(ps: List<&2, String>, +lc: I.Loc) -> List<&2, J.Json>:

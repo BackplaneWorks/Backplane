@@ -19,6 +19,7 @@ import ./refs.bend as RF
 import ./emb.bend as EM
 import ./far.bend as FR
 import ./ubersync.bend as UBS
+import ./uber.bend as UB
 import ./bot.bend as BT
 import ./tz.bend as TZ
 import ./sched.bend as SC
@@ -33,6 +34,7 @@ import ./adopt.bend as AD
 import ./cmds.bend as CM
 import ./order.bend as OR
 import ./fallback.bend as FB
+import ./uctx.bend as UC
 
 # The decider. Requests from clients and lines from agents come in; changes
 # (persisted, folded into the read model) and effects (run by the server)
@@ -146,6 +148,9 @@ type Out is Data:
   # the server keeps the driver and the draft, so it answers (m is
   # bots.browser or bots.teach, p the request's params as JSON text)
   Teach{client: U32, id: String, m: String, p: String}
+  # the uberbot's fyi digest (Digest.*): read these conversations' bodies,
+  # then Digest.got with those of the mail ids
+  DigestRead{bot: String, ids: List<&2, String>, convs: List<&2, String>}
 
 type Step is Data:
   Step{changes: List<&2, M.Change>, outs: List<&2, Out>}
@@ -677,12 +682,17 @@ def Hub.methods.git() -> List<&2, String>:
 def Hub.git(+s: M.State, +client: U32, +id: String, +job: String, +thread: String, +a: String, +b: String) -> Step:
   Step.outs([Git{client, id, job, thread, Hub.cwd(s, Hub.thread(s, thread)), a, b}])
 
-def Term.bytes(xs: List<&2, J.Json>) -> List<&2, U32>:
+# a request's byte array, in tail calls only (a 64 KB paste is 64K
+# elements: a frame each overflowed the JS stack)
+def Term.bytes.go(xs: List<&2, J.Json>, acc: List<&2, U32>) -> List<&2, U32>:
   match xs:
     case Nil{}:
-      Nil{}
+      List.reverse(&2, U32, acc)
     case +x <> t:
-      U32.from_nat(Maybe.default(&2, Nat, Nat.read(J.Json.as_raw(Some{x}, "0")), 0n)) <> Term.bytes(t)
+      Term.bytes.go(t, U32.from_nat(Maybe.default(&2, Nat, Nat.read(J.Json.as_raw(Some{x}, "0")), 0n)) <> acc)
+
+def Term.bytes(xs: List<&2, J.Json>) -> List<&2, U32>:
+  Term.bytes.go(xs, Nil{})
 
 # a thread's terminal: open (in the thread's directory), keys in, resize
 def Hub.term(+s: M.State, +client: U32, +id: String, +op: String, +p: J.Json) -> Step:
@@ -861,7 +871,7 @@ def Sum.got(+s: M.State, +now: Nat, +client: U32, +id: String, +p: J.Json) -> St
 
 # agent features (skills, effort, naming)
 def Hub.methods.agent() -> List<&2, String>:
-  ["thread.branch", "skills.list", "thread.effort", "thread.local", "thread.merged", "thread.unrooted", "thread.titled", "thread.btw", "summary.set"]
+  ["thread.branch", "skills.list", "thread.effort", "thread.local", "thread.merged", "thread.unrooted", "thread.titled", "thread.btw", "summary.set", "uctx.node", "uctx.start", "uctx.done"]
 
 # a side question (/btw {thread, q}): the writing model answers it off
 # the hub (Git job "btw": a is the question, b what it reads), only to the
@@ -2122,6 +2132,40 @@ def Wt.start(+s: M.State, +now: Nat, +thread: String, +first: Bool) -> Step:
 def Wt.ready(+s: M.State, +now: Nat, +client: U32, +id: String, +thread: String, +c: M.Change) -> Step:
   Step.before([c], [Reply.ok(client, id)], Wt.start(M.State.replay([c], s), now, thread, String.is_empty(M.Merge.branch(Hub.thread(s, thread)))))
 
+# The uberbot's infinite context: the compaction run's requests (the rest
+# is after the fallback pass, below)
+
+# a compaction run asked for (the server's UctxJob)
+def Uc.kick.cs(go: Bool, +th: String, +now: Nat) -> List<&2, M.Change>:
+  match go:
+    case True{}: [M.SettingSet{UC.Uctx.busy.key(th), Nat.show(now), now}]
+    case False{}: Nil{}
+
+def Uc.kick.os(go: Bool, +th: String) -> List<&2, Out>:
+  match go:
+    case True{}: [Git{0, "", "uctx", th, "", "", ""}]
+    case False{}: Nil{}
+
+# what the compaction run says: a line written {thread, l, i, text}
+def Uc.node(+s: M.State, +now: Nat, +client: U32, +id: String, +p: J.Json) -> Step:
+  Step.reply(client, id, Bool.pick(List<&2, M.Change>,
+    Bool.and(UC.Uctx.on(s, J.Json.get_str(p, "thread", "")), Bool.not(String.is_empty(J.Json.get_str(p, "text", "")))),
+    [M.CtxNoted{J.Json.get_str(p, "thread", ""), J.Json.get_nat(p, "l", 0n), J.Json.get_nat(p, "i", 0n), J.Json.get_str(p, "text", ""), now}], Nil{}))
+
+# where the thread's tree starts {thread, ord}: kept once
+def Uc.start.set(+s: M.State, +now: Nat, +client: U32, +id: String, +p: J.Json) -> Step:
+  Step.reply(client, id, Bool.pick(List<&2, M.Change>,
+    Bool.and(UC.Uctx.on(s, J.Json.get_str(p, "thread", "")), String.is_empty(UC.Uctx.start(s, J.Json.get_str(p, "thread", "")))),
+    [M.SettingSet{UC.Uctx.start.key(J.Json.get_str(p, "thread", "")), J.Json.get_str(p, "ord", "0"), now}], Nil{}))
+
+# a compaction run ended {thread, more}: its place is free, and another
+# starts at once when it left work
+def Uc.run.done(+s: M.State, +now: Nat, +client: U32, +id: String, +p: J.Json) -> Step:
+  +th = J.Json.get_str(p, "thread", "")
+  +more = Bool.and(UC.Uctx.on(s, th), String.eq(J.Json.get_str(p, "more", ""), "1"))
+  Step{Bool.pick(List<&2, M.Change>, more, Uc.kick.cs(True{}, th, now), [M.SettingSet{UC.Uctx.busy.key(th), "", now}]),
+    Reply.ok(client, id) <> Uc.kick.os(more, th)}
+
 def Hub.agentm(i: Nat, +s: M.State, +now: Nat, +client: U32, +id: String, +p: J.Json, +m: String) -> Step:
   match i:
     case 0n:
@@ -2142,6 +2186,12 @@ def Hub.agentm(i: Nat, +s: M.State, +now: Nat, +client: U32, +id: String, +p: J.
       Hub.btw(s, client, id, J.Json.get_str(p, "thread", ""), J.Json.get_str(p, "q", ""))
     case 8n:
       Sum.got(s, now, client, id, p)
+    case 9n:
+      Uc.node(s, now, client, id, p)
+    case 10n:
+      Uc.start.set(s, now, client, id, p)
+    case 11n:
+      Uc.run.done(s, now, client, id, p)
     case _:
       Hub.media(C.Codec.pos(Hub.methods.media(), m), s, now, client, id, p, m)
 
@@ -3625,7 +3675,8 @@ def Task.demo(busy: Bool) -> M.State:
 def Lr.loops() -> Nat:
   20n
 
-# how much of the last reply a wake's summary carries (Wake.thread.text)
+# how much of the last reply a report kept before reports were sent whole;
+# only Lr.whole reads it, to give such a stored row back whole
 def Lr.cut() -> Nat:
   1500n
 
@@ -4321,7 +4372,7 @@ def Wake.thread.events(+s: M.State, +th: String, +cs: List<&2, M.Change>) -> Lis
 
 def Wake.thread.text(+s: M.State, +th: String, +cs: List<&2, M.Change>) -> String:
   "thread \"" ++ Lr.title(Hub.thread(s, th)) ++ "\" (" ++ th ++ ") " ++
-    Bool.pick(String, Nat.is_gt(Wake.ended(cs, th), 0n), "ended its turn (" ++ Lr.word(Wake.ended(cs, th), "") ++ "). Its last reply: " ++ String.take(Lr.reply(Answer.of(M.State.mine(s, th), th)), Lr.cut()), "opened an ask: " ++ Lr.ask(cs, th))
+    Bool.pick(String, Nat.is_gt(Wake.ended(cs, th), 0n), "ended its turn (" ++ Lr.word(Wake.ended(cs, th), "") ++ "). Its last reply: " ++ Lr.reply(Answer.of(M.State.mine(s, th), th)), "opened an ask: " ++ Lr.ask(cs, th))
 
 def Wake.poll.k(empty: Bool, prs: List<&2, String>, files: List<&2, String>) -> Step:
   match empty:
@@ -5480,12 +5531,35 @@ def Locks.after.one(+before: M.State, +s: M.State, +now: Nat, +name: String) -> 
   Step.cat(Step.cat(Step{cs, Bool.pick(List<&2, Out>, changed, [LockGuard{name, LK.Lock.owner(old), LK.Lock.owner(l)}], Nil{})}, Locks.wait.go(LK.Lock.waiters(l), s1, now, name, 1n, Step.none())),
     Locks.grant(Bool.and(LK.Lock.ready(l), Bool.and(Bool.not(changed), Bool.not(LK.Lock.ready(old)))), LK.Lock.holder(l), s1, now, name))
 
+# a step's changes hold a LockChanged of this lock (the only change that
+# writes a lock's setting, M.Locks.fold)
+def Locks.touched(cs: List<&2, M.Change>, +name: String, hit: Bool) -> Bool:
+  match cs hit:
+    case _ True{}:
+      True{}
+    case Nil{} False{}:
+      False{}
+    case M.LockChanged{n, _, _} <> t False{}:
+      Locks.touched(t, name, String.eq(n, name))
+    case _ <> t False{}:
+      Locks.touched(t, name, False{})
+
+# a lock idle before the step and not changed by it can neither expire,
+# promote nor grant: Locks.after.one answers Step.none() for it (law
+# locks_after_idle_none), so it is not read
+def Locks.after.skip(+idle: Bool, +before: M.State, +now: Nat, +name: String, +st: Step) -> Step:
+  match idle:
+    case True{}:
+      st
+    case False{}:
+      Step.cat(st, Locks.after.one(before, M.State.replay(Queue.changes(st), before), now, name))
+
 def Locks.after.go(names: List<&2, String>, +before: M.State, +now: Nat, +st: Step) -> Step:
   match names:
     case Nil{}:
       st
-    case name <> t:
-      Locks.after.go(t, before, now, Step.cat(st, Locks.after.one(before, M.State.replay(Queue.changes(st), before), now, name)))
+    case +name <> t:
+      Locks.after.go(t, before, now, Locks.after.skip(Bool.and(M.Locks.idle(before, name), Bool.not(Locks.touched(Queue.changes(st), name, False{}))), before, now, name, st))
 
 def Locks.after(+s: M.State, +now: Nat, +st: Step) -> Step:
   Locks.after.go(M.Locks.names(M.State.replay(Queue.changes(st), s)), s, now, st)
@@ -5943,6 +6017,8 @@ def Commit.line(+c: M.Change, +disk: String) -> String:
       J.Json.show(C.Change.wire(c))
     case M.DeviceDropped{_, _}:
       J.Json.show(C.Change.wire(c))
+    case M.CtxNoted{_, _, _, _, _}:
+      J.Json.show(C.Change.wire(c))
     case _:
       disk
 
@@ -5971,6 +6047,8 @@ def Busy.inert(c: M.Change) -> Bool:
     case M.DeployAsked{_, _, _, _, _}:
       True{}
     case M.DeployBuilt{_, _, _, _, _}:
+      True{}
+    case M.CtxNoted{_, _, _, _, _}:
       True{}
     case M.TodosSet{_, _, _}:
       True{}
@@ -6485,12 +6563,22 @@ def Run.unresolved.note(+s: M.State, +r: ML.Run) -> String:
   "Mailroom run " ++ ML.Run.thread(r) ++ " ended without a committed reply, deferral, completion or escalation. The request remains unresolved; review it and respond in the conversation. Do not repeat completed actions.\n" ++
   "Conversation: " ++ ML.Run.conv(r) ++ "\nActionable input: " ++ Run.input(s, r) ++ "\nRun's last response (not evidence of completion):\n" ++ String.take(Task.last(s, ML.Run.thread(r)), 4000n)
 
+# with mail.on off (the uberbot's runs only) nothing reaches its chat that
+# it did not say itself: an unresolved run is an act in the run's own
+# thread, and its mail stays unread in the Mailroom (mail_list finds it)
+def Run.unresolved.quiet(quiet: Bool, +s: M.State, +now: Nat, +r: ML.Run) -> Step:
+  match quiet:
+    case True{}:
+      Step{[M.SettingSet{"run.forwarded." ++ ML.Run.thread(r), Run.input(s, r), now},
+        M.ActivityLogged{ML.Run.thread(r), Hub.id("run-unresolved", now, Hub.seq(s)), "info", "mail", Run.unresolved.note(s, r), now}], Nil{}}
+    case False{}:
+      Step.before([M.SettingSet{"run.forwarded." ++ ML.Run.thread(r), Run.input(s, r), now}], Nil{},
+        Run.escalate(s, now, ML.Run.bot(r), ML.Run.conv(r), "bot", Run.unresolved.note(s, r)))
+
 def Run.unresolved.send(send: Bool, +s: M.State, +now: Nat, +r: ML.Run) -> Step:
   match send:
     case False{}: Step.none()
-    case True{}:
-      Step.before([M.SettingSet{"run.forwarded." ++ ML.Run.thread(r), Run.input(s, r), now}], Nil{},
-        Run.escalate(s, now, ML.Run.bot(r), ML.Run.conv(r), "bot", Run.unresolved.note(s, r)))
+    case True{}: Run.unresolved.quiet(Bool.not(String.eq(M.Setting.get(s, "mail.on", "off"), "on")), s, now, r)
 
 def Run.unresolved(+s: M.State, +now: Nat, +r: ML.Run) -> Step:
   Run.unresolved.send(Bool.and(Bool.not(MD.Disposition.handled(s, r)), MCN.Continuity.needs(Run.input(s, r), M.Setting.get(s, "run.escalated." ++ ML.Run.thread(r), ""),
@@ -6512,9 +6600,9 @@ def Run.after.go(cs: List<&2, M.Change>, +before: M.State, +now: Nat, st: Step) 
   match cs:
     case Nil{}: st
     case M.TurnChanged{+th, M.Completed{}, _} <> rest:
-      Run.after.go(rest, before, now, Run.ended.got(ML.Box.run_of(M.State.mail(before), th), before, now, st))
+      Run.after.go(rest, before, now, Run.ended.got(MD.Runs.gate(before, ML.Box.run_of(M.State.mail(before), th)), before, now, st))
     case M.TurnChanged{+th, M.Failed{}, _} <> rest:
-      Run.after.go(rest, before, now, Run.ended.got(ML.Box.run_of(M.State.mail(before), th), before, now, st))
+      Run.after.go(rest, before, now, Run.ended.got(MD.Runs.gate(before, ML.Box.run_of(M.State.mail(before), th)), before, now, st))
     case _ <> rest: Run.after.go(rest, before, now, st)
 
 def Run.after.on(on: Bool, +before: M.State, +now: Nat, +st: Step) -> Step:
@@ -6522,8 +6610,10 @@ def Run.after.on(on: Bool, +before: M.State, +now: Nat, +st: Step) -> Step:
     case False{}: st
     case True{}: Run.after.go(Queue.changes(st), before, now, st)
 
+# every run's end is looked at; Runs.gate leaves out runs of a bot whose
+# runs are off (all but the uberbot's while mail.on is off)
 def Run.after(+before: M.State, now: Nat, st: Step) -> Step:
-  Run.after.on(String.eq(M.Setting.get(before, "mail.on", "off"), "on"), before, now, st)
+  Run.after.on(Bool.or(String.eq(M.Setting.get(before, "mail.on", "off"), "on"), Bool.not(String.is_empty(UB.Uber.bot(before)))), before, now, st)
 
 def Run.recover.report(on: Bool, +s: M.State, +now: Nat, +r: ML.Run, +st: Step) -> Step:
   match on:
@@ -6541,7 +6631,7 @@ def Run.recover.one(go: Bool, +s: M.State, +now: Nat, +r: ML.Run) -> Step:
 def Run.recover.all(+rs: List<&2, ML.Run>, +s: M.State, +now: Nat, +kept: List<&2, String>, +st: Step) -> Step:
   match rs:
     case Nil{}: st
-    case +r <> +t: Run.recover.all(t, s, now, kept, Step.cat(st, Run.recover.one(Bool.and(ML.Run.live(r), Bool.not(AD.Adopt.in(kept, ML.Run.thread(r)))), M.State.replay(Queue.changes(st), s), now, r)))
+    case +r <> +t: Run.recover.all(t, s, now, kept, Step.cat(st, Run.recover.one(Bool.and(MD.Runs.on(s, ML.Run.bot(r)), Bool.and(ML.Run.live(r), Bool.not(AD.Adopt.in(kept, ML.Run.thread(r))))), M.State.replay(Queue.changes(st), s), now, r)))
 
 def Run.recover.on(on: Bool, +s: M.State, +now: Nat, +kept: List<&2, String>, +st: Step) -> Step:
   match on:
@@ -6549,7 +6639,7 @@ def Run.recover.on(on: Bool, +s: M.State, +now: Nat, +kept: List<&2, String>, +s
     case True{}: Run.recover.all(Map.values(&2, ML.Run, ML.Box.runs(M.State.mail(s))), s, now, kept, st)
 
 def Run.recover(+s: M.State, +now: Nat, +kept: List<&2, String>, +st: Step) -> Step:
-  Run.recover.on(String.eq(M.Setting.get(s, "mail.on", "off"), "on"), s, now, kept, st)
+  Run.recover.on(Bool.or(String.eq(M.Setting.get(s, "mail.on", "off"), "on"), Bool.not(String.is_empty(UB.Uber.bot(s)))), s, now, kept, st)
 
 # (and every watched work still open is watched again: Watch.rearm)
 # kept: the threads whose agent process the restart kept (adopted): their
@@ -7447,6 +7537,139 @@ def Mail.route.got(r: Maybe<&2, REF.Ref>, +s: M.State, +now: Nat, +body: MB.Body
 def Mail.route.enabled(+s: M.State, +now: Nat, +body: MB.Body) -> Step:
   Mail.route.got(REF.Ref.of_addr(ML.Mail.to(MB.Body.mail(body))), s, now, body)
 
+# ---- the uberbot's fyi digest ----
+# fyi mail to the uberbot is only filed (Mail.route). While some of it is
+# unread, the minute tick files at most one digest every Digest.every()
+# seconds: act mail to the uberbot listing the new items, a short text
+# each, which Mail.route turns into one private run (never the person's
+# chat). "uber.digest.upto" is the newest item a digest listed; only items
+# after it are new. With mail.on on the mailroom routes as before: none.
+def Digest.every() -> Nat:
+  600n
+
+def Digest.num(+s: M.State, +key: String) -> Nat:
+  M.Switch.num(M.Setting.get(s, key, "0"), 0n)
+
+# a fyi item for the digest: to the uberbot, fyi, new, not its own
+def Digest.one(+m: ML.Mail, +bot: String, +since: Nat) -> Bool:
+  Bool.and(String.eq(ML.Mail.to(m), "bot:" ++ bot), Bool.and(String.eq(ML.Mail.wanted(m), "fyi"),
+    Bool.and(Nat.is_gt(ML.Mail.at(m), since), Bool.not(String.eq(ML.Mail.from(m), "bot:" ++ bot)))))
+
+def Digest.keep(keep: Bool, +m: ML.Mail, +acc: List<&2, ML.Mail>) -> List<&2, ML.Mail>:
+  match keep:
+    case True{}: m <> acc
+    case False{}: acc
+
+def Digest.pick(ms: List<&2, ML.Mail>, +bot: String, +since: Nat, +acc: List<&2, ML.Mail>) -> List<&2, ML.Mail>:
+  match ms:
+    case Nil{}: acc
+    case +m <> +t: Digest.pick(t, bot, since, Digest.keep(Digest.one(m, bot, since), m, acc))
+
+def Digest.conv(unread: Bool, +b: ML.Box, +conv: String, +bot: String, +since: Nat, +acc: List<&2, ML.Mail>) -> List<&2, ML.Mail>:
+  match unread:
+    case True{}: Digest.pick(ML.Box.headers(b, conv), bot, since, acc)
+    case False{}: acc
+
+# the newest 30 conversations of the uberbot, only those still unread
+def Digest.convs(cs: List<&2, String>, +b: ML.Box, +bot: String, +since: Nat, +acc: List<&2, ML.Mail>) -> List<&2, ML.Mail>:
+  match cs:
+    case Nil{}: acc
+    case +c <> +t: Digest.convs(t, b, bot, since, Digest.conv(String.eq(ML.Mark.status(ML.Box.mark_of(b, bot, c)), "unread"), b, c, bot, since, acc))
+
+def Digest.items(+s: M.State, +bot: String) -> List<&2, ML.Mail>:
+  Digest.convs(ML.Order.slice(ML.Box.order_of(M.State.mail(s), bot), 0n, 30n), M.State.mail(s), bot, Digest.num(s, "uber.digest.upto"), Nil{})
+
+def Digest.upto(ms: List<&2, ML.Mail>, +acc: Nat) -> Nat:
+  match ms:
+    case Nil{}: acc
+    case +m <> +t: Digest.upto(t, Bool.pick(Nat, Nat.is_gt(ML.Mail.at(m), acc), ML.Mail.at(m), acc))
+
+# at most n lines, then how many more
+def Digest.ids(ms: List<&2, ML.Mail>) -> List<&2, String>:
+  match ms:
+    case Nil{}: Nil{}
+    case +m <> +t: ML.Mail.id(m) <> Digest.ids(t)
+
+def Digest.convs.add(has: Bool, +c: String, +acc: List<&2, String>) -> List<&2, String>:
+  match has:
+    case True{}: acc
+    case False{}: c <> acc
+
+def Digest.convs.of(ms: List<&2, ML.Mail>, +acc: List<&2, String>) -> List<&2, String>:
+  match ms:
+    case Nil{}: acc
+    case +m <> +t: Digest.convs.of(t, Digest.convs.add(ML.Parts.has(acc, ML.Mail.conv(m), False{}), ML.Mail.conv(m), acc))
+
+# a body's text on one line, at most n characters
+def Digest.short(+n: Nat, +s: String, +acc: String) -> String:
+  match n s:
+    case 0n _: String.reverse(acc) ++ "…"
+    case _ SNil{}: String.reverse(acc)
+    case 1n+k SCon{+c, +t}:
+      match c:
+        case Chr{10}: Digest.short(k, t, SCon{Chr{32}, acc})
+        case Chr{13}: Digest.short(k, t, SCon{Chr{32}, acc})
+        case _: Digest.short(k, t, SCon{c, acc})
+
+# the bodies asked for, a line each with a short text; at most n lines
+def Digest.lines(+n: Nat, +bs: List<&2, MB.Body>, +s: M.State) -> String:
+  match n bs:
+    case _ Nil{}: ""
+    case 0n +rest: "… and " ++ Nat.show(List.length(&2, MB.Body, rest)) ++ " more (mail_list)\n"
+    case 1n+k +b <> +t: "- " ++ Mail.name(s, ML.Mail.from(MB.Body.mail(b))) ++ " (" ++ ML.Mail.conv(MB.Body.mail(b)) ++ "): " ++ Digest.short(240n, MB.Body.text(b), "") ++ "\n" ++ Digest.lines(k, t, s)
+
+def Digest.text(+s: M.State, +bs: List<&2, MB.Body>) -> String:
+  "[fyi digest] " ++ Nat.show(List.length(&2, MB.Body, bs)) ++ " new fyi item(s) are filed in your Mailroom, unread. Nothing here asks you to act; tell the person only what they need. mail_read a conversation for the full text.\n" ++ Digest.lines(25n, bs, s)
+
+def Digest.keep.b(keep: Bool, +b: MB.Body, +acc: List<&2, MB.Body>) -> List<&2, MB.Body>:
+  match keep:
+    case True{}: b <> acc
+    case False{}: acc
+
+def Digest.wanted(+bs: List<&2, MB.Body>, +ids: List<&2, String>, +acc: List<&2, MB.Body>) -> List<&2, MB.Body>:
+  match bs:
+    case Nil{}: List.reverse(&2, MB.Body, acc)
+    case +b <> +t: Digest.wanted(t, ids, Digest.keep.b(ML.Parts.has(ids, ML.Mail.id(MB.Body.mail(b)), False{}), b, acc))
+
+def Digest.file(+s: M.State, +now: Nat, +bot: String, +bs: List<&2, MB.Body>) -> Step:
+  +o = {ML.Origin{"backplane", "digest", ""} : ML.Origin}
+  +to = "bot:" ++ bot
+  Mail.file.body(s, Mail.body(s, now, o, to, Digest.text(s, bs), Hub.id("digest", now, Hub.seq(s)), ML.Mail.route(o, to), "Mailroom digest", "act"))
+
+def Digest.got.k(none: Bool, +s: M.State, +now: Nat, +bot: String, +bs: List<&2, MB.Body>) -> Step:
+  match none:
+    case True{}: Step.none()
+    case False{}: Digest.file(s, now, bot, bs)
+
+# the server read the bodies (DigestRead): file the digest, act mail to the
+# uberbot, from those of the items asked for (still the uberbot's)
+def Digest.got(+s: M.State, +now: Nat, +bot: String, +ids: List<&2, String>, +bs: List<&2, MB.Body>) -> Step:
+  +want = Digest.wanted(bs, ids, Nil{})
+  Digest.got.k(Bool.or(List.is_empty(&2, MB.Body, want), Bool.not(UB.Uber.is(s, bot))), s, now, bot, want)
+
+# due: remember the time and the newest item, and ask for the bodies
+def Digest.ask(+s: M.State, +now: Nat, +bot: String, +ms: List<&2, ML.Mail>) -> Step:
+  Step{[M.SettingSet{"uber.digest.at", Nat.show(now), now}, M.SettingSet{"uber.digest.upto", Nat.show(Digest.upto(ms, 0n)), now}],
+    [DigestRead{bot, Digest.ids(ms), Digest.convs.of(ms, Nil{})}]}
+
+def Digest.send.k(none: Bool, +s: M.State, +now: Nat, +bot: String, +ms: List<&2, ML.Mail>) -> Step:
+  match none:
+    case True{}: Step.none()
+    case False{}: Digest.ask(s, now, bot, ms)
+
+def Digest.send(+s: M.State, +now: Nat, +bot: String, +ms: List<&2, ML.Mail>) -> Step:
+  Digest.send.k(List.is_empty(&2, ML.Mail, ms), s, now, bot, ms)
+
+def Digest.due(due: Bool, +s: M.State, +now: Nat, +bot: String) -> Step:
+  match due:
+    case False{}: Step.none()
+    case True{}: Digest.send(s, now, bot, Digest.items(s, bot))
+
+# the minute tick's part: the promoted uberbot, mail.on off, Digest.every() since the last
+def Digest.tick(+s: M.State, +now: Nat) -> Step:
+  Digest.due(Bool.and(Bool.not(String.is_empty(UB.Uber.bot(s))), Bool.and(Bool.not(String.eq(M.Setting.get(s, "mail.on", "off"), "on")),
+    Nat.is_ge(now, Nat.add(Digest.num(s, "uber.digest.at"), Digest.every())))), s, now, UB.Uber.bot(s))
+
 def Run.pending.text(+es: List<&2, M.Entry>) -> String:
   match es:
     case Nil{}: ""
@@ -7477,9 +7700,22 @@ def Run.fresh(st: Step) -> Step:
 def Run.start(+s: M.State, +now: Nat, +th: String, +head: String, +bs: List<&2, MB.Body>) -> Step:
   Run.fresh(Step.before([M.SettingSet{"run.pending." ++ th, "", now}], Nil{}, Hub.post(s, now, th, Hub.id("brief", now, Hub.seq(s)), M.User{}, head ++ String.take(Run.pending.text(M.State.mine(s, th)), 2000n) ++ "\n<mail_history newest-first>\n" ++ String.take(Run.bodies(bs), 8000n) ++ "\n</mail_history>")))
 
+def Mail.route.uber.k(go: Bool, +s: M.State, +now: Nat, +body: MB.Body, +bot: String) -> Step:
+  match go:
+    case False{}: Step.none()
+    case True{}: Mail.route_bot(s, now, body, bot)
+
+# with mail.on off only mail to the promoted uberbot (not its own) routes:
+# act mail starts or joins its private run, fyi is only filed (MR.Run.plan)
+def Mail.route.uber(r: Maybe<&2, REF.Ref>, +s: M.State, +now: Nat, +body: MB.Body) -> Step:
+  match r:
+    case Some{REF.Ref{"bot", +bot <> _, _}}:
+      Mail.route.uber.k(Bool.and(UB.Uber.is(s, bot), Bool.not(String.eq(ML.Mail.from(MB.Body.mail(body)), "bot:" ++ bot))), s, now, body, bot)
+    case _: Step.none()
+
 def Mail.route.on(on: Bool, +s: M.State, +now: Nat, +body: MB.Body) -> Step:
   match on:
-    case False{}: Step.none()
+    case False{}: Mail.route.uber(REF.Ref.of_addr(ML.Mail.to(MB.Body.mail(body))), s, now, body)
     case True{}: Mail.route.enabled(s, now, body)
 
 def Mail.route(+s: M.State, +now: Nat, +body: MB.Body) -> Step:
@@ -7946,6 +8182,86 @@ def Fallback.validated(ok: Bool, +s: M.State, caps: J.Json, now: Nat, step: Step
 
 def Fallback.validate(+s: M.State, +caps: J.Json, now: Nat, +step: Step) -> Step:
   Fallback.validated(Fallback.settings.ok(Queue.changes(step), s, caps), s, caps, now, step)
+
+# The uberbot's infinite context (core/uctx.bend; beta, setting uber.ctx)
+# ---------------------------------------------------------------------
+# After the fallback pass, on every step: each turn of the uberbot starts a
+# fresh provider session (Claude's process stopped and started again with
+# no --resume; the others' session ""), and the server gives it the view
+# from store.db; a turn of it that ends starts a compaction run when none
+# is live (uctx.busy.<thread>). With the setting off the step is as it was
+# (laws uctx_off_*).
+
+# the thread a turn's effect starts, "" for any other effect
+def Uc.turn.of(o: Out) -> String:
+  match o:
+    case AgentStart{t, _, _, _, _, _, _}: t
+    case CodexTurn{t, _, _, _, _, _}: t
+    case GrokTurn{t, _, _, _, _, _}: t
+    case MuseTurn{t, _, _, _, _, _}: t
+    case AgyTurn{t, _, _, _, _, _}: t
+    case OcTurn{t, _, _, _, _, _}: t
+    case _: ""
+
+def Uc.fresh(o: Out) -> List<&2, Out>:
+  match o:
+    case AgentStart{+t, cwd, p, m, _, r, i}: [AgentStop{t}, AgentStart{t, cwd, p, m, "", r, i}]
+    case other: [Run.fresh.out(other)]
+
+def Uc.out.k(mine: Bool, o: Out) -> List<&2, Out>:
+  match mine:
+    case True{}: Uc.fresh(o)
+    case False{}: [o]
+
+def Uc.outs(os: List<&2, Out>, +th: String) -> List<&2, Out>:
+  match os:
+    case Nil{}: Nil{}
+    case +o <> t: List.append(&2, Out, Uc.out.k(Bool.and(Bool.not(String.is_empty(th)), String.eq(Uc.turn.of(o), th)), o), Uc.outs(t, th))
+
+def Uc.done.state(t: M.TurnState) -> Bool:
+  match t:
+    case M.Running{}: False{}
+    case M.Idle{}: False{}
+    case _: True{}
+
+# a step's changes end a turn of th
+def Uc.ended(cs: List<&2, M.Change>, +th: String) -> Bool:
+  match cs:
+    case Nil{}: False{}
+    case M.TurnChanged{+t, st, _} <> rest: Bool.or(Bool.and(String.eq(t, th), Uc.done.state(st)), Uc.ended(rest, th))
+    case _ <> rest: Uc.ended(rest, th)
+
+def Uc.after.go(+th: String, +s: M.State, +now: Nat, st: Step) -> Step:
+  match st:
+    case Step{+cs, os}:
+      +go = Bool.and(Bool.not(String.is_empty(th)), Bool.and(Uc.ended(cs, th), Bool.not(UC.Uctx.busy(s, th, now))))
+      Step{List.append(&2, M.Change, cs, Uc.kick.cs(go, th, now)), List.append(&2, Out, Uc.outs(os, th), Uc.kick.os(go, th))}
+
+def Uc.after.k(on: Bool, +s: M.State, +now: Nat, st: Step) -> Step:
+  match on:
+    case False{}: st
+    case True{}: Uc.after.go(UC.Uctx.thread(s), s, now, st)
+
+# a step as the uberbot's infinite context needs it (the identity while
+# uber.ctx is off)
+def Uc.after(+s: M.State, +now: Nat, st: Step) -> Step:
+  Uc.after.k(UC.Uctx.flag(s), s, now, st)
+
+# For the laws (uctx_*; test/uctx_test.bend): Kit (b1, thread t1) is the
+# uberbot, Pip (b2, t2) another bot; uber.ctx on when `on`
+def Uc.demo(+on: Bool) -> M.State:
+  M.State.replay(List.append(&2, M.Change, [M.ThreadCreated{"t1", "", "Kit", M.Local{}, "", "", "claude", "", 100n}, M.BotSet{"b1", "Kit", "t1", 7n, "", 100n},
+    M.ThreadCreated{"t2", "", "Pip", M.Local{}, "", "", "claude", "", 101n}, M.BotSet{"b2", "Pip", "t2", 8n, "", 101n}, M.SettingSet{"uber.bot", "b1", 102n}],
+    Bool.pick(List<&2, M.Change>, on, [M.SettingSet{"uber.ctx", "on", 103n}], Nil{})), M.State.empty())
+
+# a turn of th that ends, and the next one's Claude effects
+def Uc.demo.turn(+th: String) -> Step:
+  Step{[M.TurnChanged{th, M.Completed{}, 50n}], [AgentStart{th, "/w", "claude", "", "sess", M.FullAccess{}, M.DefaultMode{}}, AgentSend{th, "hi"}]}
+
+def Uc.demo.fresh() -> Step:
+  Step{[M.TurnChanged{"t1", M.Completed{}, 50n}, M.SettingSet{UC.Uctx.busy.key("t1"), "60", 60n}],
+    [AgentStop{"t1"}, AgentStart{"t1", "/w", "claude", "", "", M.FullAccess{}, M.DefaultMode{}}, AgentSend{"t1", "hi"}, Git{0, "", "uctx", "t1", "", "", ""}]}
+
 
 # Operational reports, for the laws (oprep_*; test/oprep_test.bend): a task
 # of t1 for t0, t0 the bot "bu"'s thread, made the uberbot when `on`

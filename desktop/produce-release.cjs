@@ -172,10 +172,13 @@ function validateRequest(request,temp){
  const selectedBrowser=browserOverlay.validate(request.selectedBrowser,validated,temp,browserUtilities());
  return{...validated,...(selectedBrowser?{selectedBrowser}:{})};
 }
-function browserUtilities(){return{payload,json,digest,membership,generatedWeb,notices,inventory,copy,canonical,readReference,reference,contentDigest,TARGETS};}
+function browserUtilities(){return{payload,json,digest,membership,membershipExpectation,generatedWeb,notices,inventory,copy,canonical,readReference,reference,contentDigest,TARGETS};}
 function copy(source,dest,preserveModes=false){fs.mkdirSync(path.dirname(dest),{recursive:true});fs.cpSync(source,dest,{recursive:true,dereference:false,verbatimSymlinks:true,errorOnExist:true,force:false,...(preserveModes?{filter:()=>true}:{})});}
 function publicReference(ref,name){return{path:'PROVENANCE/'+name,sha256:ref.sha256,bytes:ref.bytes};}
-function content(stage,target){const all=inventory(stage,target);for(const n of Object.keys(all))if(['STAGE.json','DESKTOP.json','MANIFEST.json'].includes(n)||n.startsWith('PROVENANCE/'))delete all[n];return all;}
+// A Windows stage's content is digested as NTFS shows it (0666 writable, 0444
+// read-only) on every host, so a stage made on Linux inspects the same on the
+// Windows target it is smoked on (a .zip keeps no POSIX modes anyway).
+function content(stage,target){const all=inventory(stage,target);for(const n of Object.keys(all))if(['STAGE.json','DESKTOP.json','MANIFEST.json'].includes(n)||n.startsWith('PROVENANCE/'))delete all[n];return target==='windows-x64'?membershipExpectation(all,target,'win32'):all;}
 function contentDigest(members){return sha(Buffer.from(canonical(members)));}
 function stage(requestFile,output){
  check(path.isAbsolute(output)&&!fs.existsSync(output),'Stage must be a new absolute directory');const temp=fs.mkdtempSync(path.join(os.tmpdir(),'backplane-producer-'));

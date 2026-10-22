@@ -9,6 +9,9 @@
 //     signals nothing (the process lives), deploy_main is refused;
 //   - the same copy without it re-launches the work_run (the marker
 //     appears): the control, so this test would see the danger.
+// The copied log also gets a work_run whose id is written only inside a
+// WorkSet's rows string (no quoted id anywhere: a harness that greps quoted
+// ids for its pre-cancel misses it): neither hub may need the id found.
 //
 //   bun test/tools/copy_e2e.ts HUB [WIREDIR]      (port 3831, E2E_PORT)
 // HUB: the server as JS (run with bun) or a single-file build.
@@ -34,7 +37,7 @@ const alive = (pid: number) => { try { process.kill(pid, 0); return !/^\d+ \(.*\
 const root = resolve(process.env.E2E_ROOT ?? "build/copy_e2e");
 if (!root.includes("copy_e2e")) throw new Error(`refusing root ${root}`);
 rmSync(root, { recursive: true, force: true });
-const fake = join(root, "bin"), proj = join(root, "proj"), mark = join(root, "mark");
+const fake = join(root, "bin"), proj = join(root, "proj"), mark = join(root, "mark"), mark2 = join(root, "mark2");
 for (const d of [fake, proj, join(root, "tmp")]) mkdirSync(d, { recursive: true });
 for (const n of ["claude", "codex", "grok", "muse"]) { writeFileSync(join(fake, n), "#!/bin/sh\nexit 1\n"); chmodSync(join(fake, n), 0o755); }
 const argv = (home: string) => [...(hub.endsWith(".js") ? [process.execPath, resolve(hub)] : [resolve(hub)]),
@@ -97,10 +100,16 @@ try {
   check(!existsSync(mark), "the first hub's work never ran (killed in time)");
   ws.close();
 
+  // a second run known only from a WorkSet row: the thread's last row set
+  // again with the run's id and marker swapped
+  const lines = read(join(home1, "events.jsonl")).split("\n").filter((l) => l.includes('"$":"WorkSet"') && l.includes(runId));
+  const rowOnly = "w-t1792000000-1-1";
+  const extra = (lines[lines.length - 1] ?? "").split(runId).join(rowOnly).split(mark).join(mark2);
+  check(extra.includes(rowOnly) && !extra.includes(`"${rowOnly}"`), "a work_run whose id is only inside a WorkSet rows string");
   const copyHome = (n: string) => {
     const h = join(root, n);
     mkdirSync(h);
-    copyFileSync(join(home1, "events.jsonl"), join(h, "events.jsonl"));
+    writeFileSync(join(h, "events.jsonl"), read(join(home1, "events.jsonl")) + extra + "\n");
     copyFileSync(join(home1, "token"), join(h, "token"));
     return h;
   };
@@ -114,6 +123,7 @@ try {
   const dep = await mcp(home2, th, "deploy_main", {});
   await sleep(9000);
   check(!existsSync(mark), "it never runs the work_run the log names");
+  check(!existsSync(mark2), "nor the one known only from a rows string");
   check(!existsSync(join(home2, "work", runId, "started")), "nor makes its work folder");
   check(alive(sleeper.pid), `work_cancel of the pid watch signalled nothing (the process lives; ${cancel.slice(0, 80)})`);
   check(dep.includes("does not deploy"), `deploy_main is refused (${dep.slice(0, 120)})`);
@@ -125,7 +135,7 @@ try {
   const h3 = Bun.spawn(argv(home3), { env: env(false), stdout: "ignore", stderr: Bun.file(join(root, "hub3.err")) });
   procs.push(h3);
   check(!!(await up()), "the control hub is up");
-  check(!!(await until(20000, () => (existsSync(mark) ? true : undefined))), "without BACKPLANE_COPY the copy re-runs the work (the danger this guards)");
+  check(!!(await until(20000, () => (existsSync(mark2) ? true : undefined))), "without BACKPLANE_COPY the copy re-runs the work, the rows-only one too (the danger this guards)");
 } finally {
   for (const p of procs) { try { p.kill(9); } catch {} }
   try { sleeper.kill(9); } catch {}

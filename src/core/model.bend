@@ -299,6 +299,10 @@ type Change is Data:
   # failed, skipped or live. Both fold into the setting deploy.ship
   DeployAsked{by: String, note: String, commit: String, cover: String, at: Nat}
   DeployBuilt{commit: String, state: String, version: String, detail: String, at: Nat}
+  # a line of the uberbot's infinite context (core/uctx.bend): node (l, i)
+  # of the thread's memory tree. It folds to nothing in the hub; store.db
+  # keeps it as a fact (table ctx) and the context is read from there
+  CtxNoted{thread: String, l: Nat, i: Nat, text: String, at: Nat}
 
 # the later of two times. Base's Nat.max recurses once per unit and
 # overflows at epoch scale; Nat.is_ge compiles to a machine comparison.
@@ -1284,6 +1288,52 @@ def Setting.keys(s: State) -> List<&2, String>:
     case State{_, _, _, _, _, sg, _, _, _, _, _}:
       Map.keys(&2, String, sg)
 
+# The keys of a String map that start with pre, without walking the others.
+# Base's Map is a crit-bit trie (Map.bit: char ci of a key takes bits
+# 33·ci .. 33·ci+32), so every key under a node at bit p agrees on its first
+# p/33 chars: once p ≥ 33·|pre|, any one of them says whether all start
+# with pre. Order: as Map.keys.
+def Pfx.first(m: Map<&2, String>) -> String:
+  match m:
+    case MTip{}:
+      ""
+    case MLeaf{k, _}:
+      k
+    case MNode{_, MTip{}, hi}:
+      Pfx.first(hi)
+    case MNode{_, lo, _}:
+      Pfx.first(lo)
+
+# whether some key under m may start with pre (bits: 33·|pre|)
+def Pfx.may(+m: Map<&2, String>, +pre: String, +bits: Nat) -> Bool:
+  match m:
+    case MTip{}:
+      False{}
+    case MLeaf{k, _}:
+      String.starts_with(k, pre)
+    case MNode{p, _, _}:
+      Bool.or(Nat.is_lt(p, bits), String.starts_with(Pfx.first(m), pre))
+
+def Pfx.go(m: Map<&2, String>, may: Bool, +pre: String, +bits: Nat, acc: List<&2, String>) -> List<&2, String>:
+  match m may:
+    case _ False{}:
+      acc
+    case MTip{} True{}:
+      acc
+    case MLeaf{k, _} True{}:
+      k <> acc
+    case MNode{_, +lo, +hi} True{}:
+      Pfx.go(lo, Pfx.may(lo, pre, bits), pre, bits, Pfx.go(hi, Pfx.may(hi, pre, bits), pre, bits, acc))
+
+def Pfx.keys(+m: Map<&2, String>, +pre: String) -> List<&2, String>:
+  Pfx.go(m, Pfx.may(m, pre, Nat.mul(33n, String.length(pre))), pre, Nat.mul(33n, String.length(pre)), Nil{})
+
+# the settings' keys that start with pre
+def Setting.keys.pre(s: State, +pre: String) -> List<&2, String>:
+  match s:
+    case State{_, _, _, _, _, sg, _, _, _, _, _}:
+      Pfx.keys(sg, pre)
+
 # The "restart.continue" setting: after a restart, a turn the restart cut
 # short goes on by itself (on unless "off"; hub.bend's Carry)
 def Carry.on(+s: State) -> Bool:
@@ -1651,6 +1701,20 @@ def Locks.names(s: State) -> List<&2, String>:
 
 def Locks.get(s: State, +name: String) -> LK.NamedLock:
   LK.Lock.read(Maybe.default(&2, J.Json, J.Json.parse(Setting.get(s, "lock." ++ name, "")), J.Null{}))
+
+# the lock is free with no one waiting (never held, or released): what
+# Locks.get reads as LK.Lock.empty(), told from its setting's text without
+# parsing it. A real log keeps every lock name ever used (72), nearly all
+# idle, and every step and every sidebar row read each one (laws
+# locks_idle_*).
+def Locks.idle.text() -> String:
+  "{\"holder\":null,\"waiters\":[],\"ready\":false}"
+
+def Locks.idle.k(+t: String) -> Bool:
+  Bool.or(String.is_empty(t), String.eq(t, Locks.idle.text()))
+
+def Locks.idle(s: State, +name: String) -> Bool:
+  Locks.idle.k(Setting.get(s, "lock." ++ name, ""))
 
 # deploy_main's state, one JSON line (core/ship.bend)
 def Ship.fold.asked(+s: State, +by: String, +cover: String) -> State:
@@ -2050,6 +2114,8 @@ def State.apply.go(s: State, e: Change) -> State:
       Ship.fold.asked(s, by, cover)
     case DeployBuilt{+commit, +state, _, +detail, _}:
       Ship.fold.built(s, commit, state, detail)
+    case CtxNoted{_, _, _, _, _}:
+      s
     case BotSet{+id, +name, thread, look, persona, at}:
       State.world((w => BT.World.bot_set(w, id, name, thread, look, persona, at)), State.with_mail((b => ML.Box.bot_named(b, id, name)), s))
     case BotDeleted{+id, _}:
@@ -3131,8 +3197,23 @@ def Work.rows.go(ks: List<&2, String>, +s: State, m: Map<&2, Nat>) -> Map<&2, Na
     case +k <> t:
       Work.rows.go(t, s, Work.rows.put(s, Work.rows.id(k, "bg."), Work.rows.put(s, Work.rows.id(k, "watch."), m)))
 
-def Work.rows.map(+s: State) -> Map<&2, Nat>:
+# every thread's rows by walking every setting (the specification of
+# Work.rows.map; test/work_rows_test.bend holds them equal)
+def Work.rows.map.all(+s: State) -> Map<&2, Nat>:
   Work.rows.go(Setting.keys(s), s, Map.new(&2, Nat))
+
+def Work.rows.ids(ks: List<&2, String>, +n: Nat, +s: State, m: Map<&2, Nat>) -> Map<&2, Nat>:
+  match ks:
+    case Nil{}:
+      m
+    case +k <> t:
+      Work.rows.ids(t, n, s, Work.rows.put(s, String.drop(k, n), m))
+
+# Work.rows.map.all reading only the settings named "bg.*" and "watch.*"
+# (Pfx.keys): the sidebar asks it every frame, and walking every setting
+# (10k+ on a real log, each key sliced twice) grew each frame with history
+def Work.rows.map(+s: State) -> Map<&2, Nat>:
+  Work.rows.ids(Setting.keys.pre(s, "watch."), 6n, s, Work.rows.ids(Setting.keys.pre(s, "bg."), 3n, s, Map.new(&2, Nat)))
 
 def Work.kids.at.k(r: Map<&2, Nat> & Nat) -> Nat:
   (_, n) = r

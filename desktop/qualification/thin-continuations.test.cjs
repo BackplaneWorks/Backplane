@@ -36,7 +36,7 @@ test('RED generic server footer groups indistinguishable More controls; GREEN at
   const p = await project(timeline([memo('a'), memo('b', 'act'), button('a'), button('b')]), ['a', 'b']);
   assert.equal(kids(p.original).slice(-2).every(n => textOf(n) === 'More'), true);
   const a = all(p.result).find(n => attrs(n)['data-id'] === 'a'), b = all(p.result).find(n => attrs(n)['data-id'] === 'b');
-  assert.equal(textOf(controls(a)[0]), 'Read rest of message');assert.equal(textOf(controls(b)[0]), 'Read full activity text');
+  assert.equal(controls(a).length, 0, 'message text is whole: no read-more');assert.equal(textOf(controls(b)[0]), 'Read full activity text');
   assert.equal(kids(p.result).filter(n => n.tag === 'button').length, 0);assert.equal(JSON.stringify(p.original), p.frozen);
   for (const memoValue of p.cache.values()) assert.equal(controls(memoValue).length, 0);
 });
@@ -45,7 +45,7 @@ test('folded and outgoing entries add no orphan Additional message text panel; u
   assert.equal(all(p.result).find(n => n.tag === 'details'), undefined);assert.equal(controls(p.result).length, 0);
   assert(!textOf(p.result).includes('Additional message text'));
   assert.equal(kids(p.result)[0].kids.head.text, 'outgoing');
-  const shown = p.c.project(p.node(timeline([memo('hidden'), button('hidden'), button('linked')])), p.expand);
+  const shown = p.c.project(p.node(timeline([memo('hidden', 'act'), button('hidden'), button('linked')])), p.expand);
   const row = all(shown).find(n => attrs(n)['data-id'] === 'hidden');assert.equal(controls(row).length, 1);assert.equal(controls(shown).length, 1);
   assert.equal(p.c.partial.size, 2);assert.equal(p.c.readers.size, 0);
 });
@@ -57,21 +57,21 @@ test('earlier history is separately labelled and no longer inherits hidden one-p
   const p = await project(timeline([el('button', '', [at('class', 'earlier'), { event: 'click', action: 'view-page' }, at('data-value', '')], [txt('More')])]), []);
   const b = kids(p.result)[0];assert.equal(textOf(b), 'Load earlier messages');assert.equal(attrs(b).class, 'thin-earlier');assert.equal(attrs(b)['on:click'], 'view-page');
 });
-test('explicit assembled plain Unicode text replaces preview body inline; next cursor retained and no auto-read occurs', async () => {
-  const p = await project(timeline([memo('a'), button('a')]), ['a']);
+test('explicit assembled plain Unicode activity text shows inline; next cursor retained and no auto-read occurs', async () => {
+  const p = await project(timeline([memo('a', 'act'), button('a')]), ['a']);
   assert(p.c.accept({ id: 'a', version: '1', text: '<script>日本語 👩‍💻</script>', hasMore: true, cursor: 'opaque-next', fromStart: true, complete: false }));
   const out = p.c.project(p.original, p.expand), row = all(out).find(n => attrs(n)['data-id'] === 'a'), pre = all(row).find(n => n.tag === 'pre');
   assert.equal(textOf(pre), '<script>日本語 👩‍💻</script>');assert.equal(kids(pre)[0].tag, undefined);
-  assert(!all(row).some(n => attrs(n).class === 'body'));assert.equal(textOf(controls(row)[0]), 'Read next part');
+  assert.equal(textOf(controls(row)[0]), 'Read next part');
   assert.deepEqual(JSON.parse(attrs(controls(row)[0])['data-value']), { entryId: 'a', cursor: 'opaque-next' });
   assert.equal(p.c.readers.size, 1);assert.equal(JSON.stringify(p.original), p.frozen);
 });
 test('complete reader removes continuation and unchanged current refresh retains text', async () => {
-  const p = await project(timeline([memo('a'), button('a')]), ['a']);p.c.accept({ id: 'a', version: '1', text: 'whole', hasMore: false, cursor: '', complete: true, fromStart: true });
+  const p = await project(timeline([memo('a', 'act'), button('a')]), ['a']);p.c.accept({ id: 'a', version: '1', text: 'whole', hasMore: false, cursor: '', complete: true, fromStart: true });
   p.c.bind('https://fixture', detail(['a']));const out = p.c.project(p.original, p.expand);assert.equal(controls(out).length, 0);assert.match(textOf(out), /whole/);
 });
 test('current version change/removal retires only affected reader and rejects stale response without reading', async () => {
-  const p = await project(timeline([memo('a'), memo('b'), button('a'), button('b')]), ['a', 'b']);
+  const p = await project(timeline([memo('a', 'act'), memo('b', 'act'), button('a'), button('b')]), ['a', 'b']);
   for (const id of ['a', 'b']) p.c.accept({ id, version: '1', text: id, hasMore: false });
   const d = detail(['a', 'b']);d.window.partial[0].version = '2';p.c.bind('https://fixture', d);assert(!p.c.readers.has('a'));assert(p.c.readers.has('b'));assert(!p.c.accept({ id: 'a', version: '1', text: 'stale' }));
   p.c.bind('https://fixture', detail([]));assert.equal(p.c.readers.size, 0);

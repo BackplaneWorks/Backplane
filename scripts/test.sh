@@ -20,6 +20,11 @@
 # via scripts/test-shard.py and scripts/test-timings.txt. A test with
 # no recorded duration still runs, in exactly one shard (the shard
 # script verifies the partition covers every test exactly once).
+# TEST_ONLY: run exactly these tests (paths "test/X_test.bend", separated
+# by spaces or newlines; TEST_ONLY_FILE names a file of them), in the usual
+# order, under the same verdicts. Each must be one of the tests above: an
+# unknown name, a repeat or an empty list stops the run (exit 2) before any
+# test starts. A selection is never recorded as the whole suite passing.
 # TEST_TIMINGS_OUT: when set, per-test wall seconds are written there
 # as "<seconds> <path>" lines (scripts/record-test-timings.sh uses it
 # to regenerate scripts/test-timings.txt from a serial run).
@@ -55,6 +60,31 @@ for t in test/*_test.bend; do
 done
 
 tests=$all_tests
+selected=0
+if [ -n "${TEST_ONLY_FILE:-}" ]; then
+  [ -r "$TEST_ONLY_FILE" ] || { echo "test.sh: TEST_ONLY_FILE $TEST_ONLY_FILE cannot be read" >&2; exit 2; }
+  TEST_ONLY="${TEST_ONLY:-} $(cat "$TEST_ONLY_FILE")"
+fi
+if [ -n "${TEST_ONLY+x}" ] || [ -n "${TEST_ONLY_FILE:-}" ]; then
+  selected=1
+  want=$(printf '%s\n' $TEST_ONLY)
+  [ -n "$want" ] || { echo "test.sh: TEST_ONLY lists no test" >&2; exit 2; }
+  dup=$(printf '%s\n' "$want" | sort | uniq -d)
+  [ -z "$dup" ] || { echo "test.sh: TEST_ONLY lists a test twice: $dup" >&2; exit 2; }
+  for w in $want; do
+    case " $all_tests " in *" $w "*) ;; *) echo "test.sh: TEST_ONLY names $w, which is not one of the tests" >&2; exit 2 ;; esac
+  done
+  # kept in the suite's own order
+  tests=""
+  for t in $all_tests; do
+    case "
+$want
+" in *"
+$t
+"*) tests="$tests $t" ;; esac
+  done
+  all_tests=$tests
+fi
 if [ "${TEST_SHARD_COUNT:-1}" -gt 1 ]; then
   tests=$(python3 scripts/test-shard.py scripts/test-timings.txt "${TEST_SHARD:?TEST_SHARD_COUNT is set but TEST_SHARD is not}" "$TEST_SHARD_COUNT" $all_tests)
   tests=" $tests"
@@ -152,5 +182,5 @@ for t in $tests; do
   i=$(( i + 1 ))
 done
 # every test passed, unsharded: recorded for these inputs (scripts/verified.sh)
-if [ $status = 0 ] && [ "${TEST_SHARD_COUNT:-1}" -le 1 ]; then scripts/verified.sh mark test "$vkey" || true; fi
+if [ $status = 0 ] && [ "${TEST_SHARD_COUNT:-1}" -le 1 ] && [ $selected = 0 ]; then scripts/verified.sh mark test "$vkey" || true; fi
 exit $status

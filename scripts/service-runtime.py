@@ -384,6 +384,48 @@ def darwin_measure(binary, target, capture, dynamic=None):
         'sourceDisposition': 'Apple OS-provided libSystem/dyld; no system binary is copied. https://opensource.apple.com/'}
 
 
+# Windows: the hub needs sh/bash and coreutils for its children (Proc.run:
+# git, gh, curl, helpers) and terminals. 0.12.1 ships 0.12.0's portable
+# Cygwin runtime and its two Bun helpers unchanged: the exact bytes its
+# RUNTIME.json lists, with that release's measured static-import closure.
+WINDOWS_RUNTIME_SHA256 = 'e455abb52858638bd5bb341c2a9c7395e3efd9bf8454867038e8844a17f9adc3'
+WINDOWS_CLOSURE_SHA256 = 'eec3914d9425a91c8c23d08756935a7e455b035c3daef3dc8a7425cc3c4ae3b9'
+
+
+def windows_bundle(src, runtime):
+    """Copy the pinned bundle in SRC (RUNTIME.json, CLOSURE.json, the members)
+    into the service runtime folder; answer its inventory, packages and the
+    closure edges of its own binaries (the old C service's edges are dropped)."""
+    src = Path(src)
+    require(sha(src/'RUNTIME.json') == WINDOWS_RUNTIME_SHA256, 'Windows runtime bundle is not the pinned one')
+    require(sha(src/'CLOSURE.json') == WINDOWS_CLOSURE_SHA256, 'Windows runtime closure is not the pinned one')
+    manifest = json.loads((src/'RUNTIME.json').read_text())
+    closure = json.loads((src/'CLOSURE.json').read_text())
+    require(manifest.get('target') == 'windows-x64' and closure.get('target') == 'windows-x64'
+            and closure.get('status') == 'PASS' and closure.get('unresolvedMandatory') == [], 'Pinned Windows runtime is not a passing windows-x64 closure')
+    members = manifest['members']
+    # its licences sit beside the service's own (licenses/{bun,bend}), so they
+    # go under runtime-licenses/; every path that names one follows
+    place = lambda name: 'runtime-licenses/' + name[len('licenses/'):] if name.startswith('licenses/') else name
+    for name, m in sorted(members.items()):
+        require(m.get('type', 'file') == 'file' and not name.startswith(('/', '../')) and '/../' not in name, 'Unsafe bundle member: ' + name)
+        f = src/name
+        require(f.is_file() and not f.is_symlink() and f.stat().st_size == m['bytes'] and sha(f) == m['sha256'], 'Bundle member differs: ' + name)
+        dest = runtime/place(name)
+        require(not dest.exists(), 'Bundle member collides: ' + name)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(f, dest)
+    edges = [e for e in closure['edges'] if e.get('from') in members]
+    for e in edges:
+        require(e.get('kind') in ('normal', 'delay', 'dynamic') and e.get('name'), 'Unusable bundle closure edge')
+        if not e.get('system'):
+            require(e.get('resolved') in members, 'Bundle edge resolves outside the bundle: ' + str(e.get('resolved')))
+    inventory = [{**i, 'path': place(i['path'])} for i in manifest['inventory']]
+    packages = [{**p, 'licenses': [{**l, 'path': place(l['path'])} for l in p.get('licenses', [])]} for p in manifest['packages']]
+    require(not any(e.get('from', '').startswith('licenses/') or str(e.get('resolved') or '').startswith('licenses/') for e in edges), 'A closure edge names a licence file')
+    return inventory, packages, edges
+
+
 def prepare(args):
     producer = args.producer.resolve(strict=True)
     require(sha(producer) == args.producer_sha256, 'Component producer hash mismatch')
@@ -439,17 +481,24 @@ def prepare(args):
         'sourceDisposition': 'https://github.com/i2cjak/Backplane/tree/'+release['commit']+'; actual separately pinned measurement producer retained in runtime-evidence.',
         'licenses': [{'path': 'runtime-notices/LICENSE.Backplane', 'sha256': sha(notice/'LICENSE.Backplane')},
                      {'path': 'runtime-notices/SYSTEM-ABI-NOTICE.txt', 'sha256': sha(notice/'SYSTEM-ABI-NOTICE.txt')}]}]
-    write(runtime/'RUNTIME.json', {'schema': 1, 'target': target, 'inventory': [
-        {'path': f.relative_to(runtime).as_posix(), 'package': packages[0]['name'], 'version': service.VERSION,
-         'architecture': target, 'sha256': sha(f), 'bytes': f.stat().st_size}
-        for f in sorted(evidence.iterdir())], 'packages': packages,
-        'suppliedLibraries': [], 'systemDependencies': measurement['systemLibraries']})
+    inventory = [{'path': f.relative_to(runtime).as_posix(), 'package': packages[0]['name'], 'version': service.VERSION,
+         'architecture': target, 'sha256': sha(f), 'bytes': f.stat().st_size} for f in sorted(evidence.iterdir())]
+    bundled = []
+    if target == 'windows-x64':
+        require(args.windows_runtime is not None, 'windows-x64 needs --windows-runtime: the hub has no shell without it')
+        extra, extra_packages, bundled = windows_bundle(args.windows_runtime, runtime)
+        inventory += extra
+        packages += extra_packages
+    write(runtime/'RUNTIME.json', {'schema': 1, 'target': target, 'inventory': inventory, 'packages': packages,
+        'suppliedLibraries': [], 'systemDependencies': measurement['systemLibraries'],
+        **({'bundledRuntime': {'runtimeManifestSha256': WINDOWS_RUNTIME_SHA256, 'closureSha256': WINDOWS_CLOSURE_SHA256,
+             'source': '0.12.0 portable Cygwin runtime and Bun helpers, unchanged'}} if bundled else {})})
     # Edges are rooted in the supplied service; system dependencies remain OS-owned
     # leaves. The full measured Linux transitive graph is retained in system.json.
     write(runtime/'CLOSURE.json', {'schema': 1, 'target': target, 'measured': True, 'status': 'PASS',
         'unresolvedMandatory': [], 'edges': [{'from': name, 'kind': d.get('kind', 'normal'), 'name': d['name'],
           'system': True, 'classification': 'approved-system', 'resolvedSystemPath': d['resolvedSystemPath']}
-          for d in measurement['dependencyGraph'] if d['from'] == name],
+          for d in measurement['dependencyGraph'] if d['from'] == name] + bundled,
         'measurement': 'runtime-evidence/system-dependencies.json', 'runtimeAcceptance': 'PENDING'})
     write(out/'RUNTIME-QUALIFICATION.json', {'schema': 1, 'kind': 'backplane-service-runtime-qualification',
         'status': 'PASS', 'target': target, 'sourceCommit': release['commit'], 'sourceTree': release['tree'],
@@ -473,6 +522,7 @@ def main():
     for name in ('source-root', 'build', 'producer', 'out'):
         parser.add_argument('--'+name, type=Path, required=True)
     parser.add_argument('--producer-sha256', required=True)
+    parser.add_argument('--windows-runtime', type=Path, help='windows-x64: the pinned bundle folder (RUNTIME.json, CLOSURE.json, members)')
     args = parser.parse_args()
     require(args.out.is_absolute(), 'New absolute output directory required')
     print(json.dumps(prepare(args), indent=2))

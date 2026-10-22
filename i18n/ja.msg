@@ -1247,6 +1247,9 @@ auth.legacy = この端末はペアリングキーなしで接続しています
 settings.textsize = 文字サイズ
 settings.textsize.note = 文字とコントロールの配置を調整します。端末のディスプレイスケーリングとは別の設定です。
 settings.privacy = プライバシー
+settings.beta = ベータ
+settings.uctx = Uberbot: 無限コンテキスト（ベータ）
+settings.uctx.note = Uberbotは会話全体を要約のツリーとして保ち、必要に応じて開き直します。各ターンはそれを持って新しいセッションで始まります。既定ではオフです。
 
 # Native phone controls and Mailroom.
 native.usage.machines = マシン別の使用量

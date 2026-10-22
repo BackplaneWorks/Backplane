@@ -12,13 +12,8 @@ def Run.bot.got(r: Maybe<&2, ML.Run>, +s: M.State, +thread: String) -> Maybe<&2,
     case Some{+r}: BT.World.find.id(BT.World.bot(M.State.bots(s), ML.Run.bot(r)))
     case None{}: BT.World.of_thread(M.State.bots(s), thread)
 
-def Run.of.on(on: Bool, +s: M.State, +thread: String) -> Maybe<&2, ML.Run>:
-  match on:
-    case False{}: None{}
-    case True{}: ML.Box.run_of(M.State.mail(s), thread)
-
 def Run.of(+s: M.State, +thread: String) -> Maybe<&2, ML.Run>:
-  Run.of.on(String.eq(M.Setting.get(s, "mail.on", "off"), "on"), s, thread)
+  MD.Runs.gate(s, ML.Box.run_of(M.State.mail(s), thread))
 
 def Run.bot(+s: M.State, +thread: String) -> Maybe<&2, BT.Bot>:
   Run.bot.got(Run.of(s, thread), s, thread)

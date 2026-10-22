@@ -8,7 +8,7 @@ import ../core/maildisposition.bend as MD
 import ../core/kihealth.bend as KH
 import ../core/kserve.bend as KSC
 import ./kserve.bend as KSV
-import ../core/cef.bend as CF
+import ../core/brctl.bend as BRC
 import ../core/exe.bend as EX
 import ./lockio.bend as LG
 import ../core/locks.bend as LCK
@@ -45,6 +45,7 @@ import ../core/cbor.bend as CB
 import ../mobile/session.bend as MSE
 import ./thin-view.bend as TV
 import ./thin-actor.bend as TA
+import ./thin-splice.bend as TSPL
 import ../core/thin-pace.bend as TPACE
 import ./thin-mail.bend as TMAIL
 import ../core/thin.bend as THIN
@@ -71,6 +72,7 @@ import ../core/attach.bend as AT
 import ../core/sha1.bend as SH
 import ../core/boot.bend as BT
 import ../core/store.bend as ST
+import ./storedb.bend as SO
 import ./hotboot.bend as HB
 import ./botnet.bend as BN
 import ../core/far.bend as FR
@@ -125,8 +127,12 @@ import ../core/task.bend as TKS
 import ../core/teach.bend as TE
 import ../core/usage.bend as UZ
 import ./thinstore.bend as TSTO
+import ./db.bend as UDB
+import ./uctxio.bend as UXIO
+import ../core/uctx.bend as UCX
 import ../core/copy.bend as CP # BACKPLANE_COPY
 import ../core/copynet.bend as CN
+import ../core/early.bend as EA
 
 # The server. One hub computation owns the read model and the event log;
 # every connection and agent process is its own computation and talks to
@@ -152,11 +158,17 @@ type Wire is Data:
   # a message as its JSON tree with its charge (a thin view's reply): the
   # writer encodes the tree, never printing and parsing it again
   WJson{json: J.Json, charge: Nat}
+  # a message already CBOR with its charge (a thin view's spliced reply,
+  # thin-splice.bend): framed by the writer, its charge given back as it
+  # was offered
+  WCbor{cbor: List<&2, U32>, charge: Nat}
 
 type Msg is Data:
   Desktop{client: U32, kind: String, text: String, out: Chan(String), epoch: String, lease: String}
   MailRouted{body: MB.Body}
   RunReady{thread: String, head: String, bodies: List<&2, MB.Body>}
+  # the uberbot's fyi digest: the bodies of the conversations asked for
+  DigestGot{bot: String, ids: List<&2, String>, bodies: List<&2, MB.Body>}
   # n: how many probes since the lock was asked for (the guard is tried
   # each 100 ms; who holds it outside is asked every LockJob.every())
   LockProbe{name: String, holder: String, n: Nat}
@@ -186,6 +198,10 @@ type Msg is Data:
   Ping{client: U32, payload: List<&2, U32>}
   Leave{client: U32}
   Rpc{client: U32, text: String}
+  # a thin view's request (view.*), passed on to the hub's inbox so it
+  # waits in the bulk lane, not ahead of pings and other requests
+  # (Rpc.lane)
+  RpcLane{client: U32, text: String}
   AgentLine{thread: String, line: String}
   # why is the exit in words (B.Exit.why), made off the hub
   AgentGone{thread: String, code: U32, pid: U32, why: String}
@@ -291,9 +307,6 @@ type Msg is Data:
   # the browser back; a task run asks the person (task_pause)
   TeachReq{client: U32, id: String, m: String, p: String}
   BrowserEv{line: String}
-  CefDone{request: String, live: String, err: String}
-  # a websocket from this machine (loopback, not proxied): it may embed
-  Near{client: U32}
   TeachBack{bot: String}
   TaskPaused{thread: String, bot: String, run: String, slug: String, n: Nat, kind: String, question: String, risky: Bool, rid: String, reply: Chan(String)}
   # a bot's new project, approved by the person, its folder made and
@@ -503,9 +516,6 @@ def Cfg.thin.committed(+cfg: Cfg, +changes: List<&2, M.Change>, st: M.State) -> 
 # ---- mail perf: local wire-log length ----
 # Valid unknown JSON remains a wire line without changing State.seq.
 # Count the actual replay wire once, then only actual successful fresh lines.
-def LogCount.of(ls: List<&2, String>) -> Nat:
-  ST.Store.size(ls)
-
 def LogCount.n(c: Cfg) -> Nat:
   match c:
     case Cfg{_, _, _, _, _, _, _, Net{_, _, _, _, _, _, _, _, _, _, _, bn, _, _, _, _}, +tcfg, +views}: BN.Bn.wire_n(bn)
@@ -515,8 +525,8 @@ def LogCount.set(c: Cfg, n: Nat) -> Cfg:
     case Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, br, pk, tm, mc, pv, bn, mg, lk, fc, ks}, +tcfg, +views}:
       Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, br, pk, tm, mc, pv, BN.Bn.with_wire_n(bn, n), mg, lk, fc, ks}, tcfg, views}
 
-def LogCount.init(c: Cfg, ls: List<&2, String>) -> Cfg:
-  LogCount.set(c, LogCount.of(ls))
+def LogCount.init(c: Cfg, +ls: SO.Lg) -> Cfg:
+  LogCount.set(c, SO.Lg.n(ls))
 
 def LogCount.committed(+c: Cfg, fresh: List<&2, String>) -> Cfg:
   LogCount.set(c, Nat.add(LogCount.n(c), List.length(&2, String, fresh)))
@@ -841,6 +851,7 @@ def Wire.charged(native: Bool, w: Wire, n: Nat) -> Wire:
     case False{} WText{t}: WCharged{t, n}
     case False{} WCharged{t, _}: WCharged{t, n}
     case False{} WJson{j, _}: WJson{j, n}
+    case False{} WCbor{b, _}: WCbor{b, n}
     case _ _: w
 
 def Wire.offer.k(c: Client, w: Wire, +n: Nat) -> IO(Maybe<&2, Client>):
@@ -975,13 +986,13 @@ def Wire.behind(c: Client) -> Bool:
 # behind goes back to taking it, from `at`, Cr.catch); 2 streamed text
 # (none for a client taking its log: the live text comes with its end)
 type All is Data:
-  All{kind: Nat, log: List<&2, String>, fresh: Nat, fl: Nat, inbox: List<&2, Chan(Msg)>}
+  All{kind: Nat, log: Nat, fresh: Nat, fl: Nat, inbox: List<&2, Chan(Msg)>}
 
 # where a client too far behind takes its log up again: the log's length
 # before the changes. Counted only for such a client: counting the whole
-# log (100k lines) for every step cost ~30 ms each
-def All.at(+log: List<&2, String>, +fresh: Nat) -> Nat:
-  Nat.sub(ST.Store.size(log), fresh)
+# log (100k lines) for every step cost ~30 ms each (log: its length now)
+def All.at(+log: Nat, +fresh: Nat) -> Nat:
+  Nat.sub(log, fresh)
 
 # A message the hub sends itself. The hub fiber is the inbox's only
 # reader, so a send into a full inbox (4096 slots) would park it for good:
@@ -1087,11 +1098,11 @@ def Wire.all.of(+cs: List<&2, Client>, +text: String, +a: All) -> IO(List<&2, Cl
   Wire.all.k(Clients.socket(cs), cs, text, a)
 
 def Wire.all(+cs: List<&2, Client>, +text: String) -> IO(List<&2, Client>):
-  Wire.all.of(cs, text, All{0n, Nil{}, 0n, 0n, Nil{}})
+  Wire.all.of(cs, text, All{0n, 0n, 0n, 0n, Nil{}})
 
 # the heartbeat: every client, thin (view) ones too (Wire.all.thin)
 def Wire.beat(+cs: List<&2, Client>, +text: String) -> IO(List<&2, Client>):
-  Wire.all.of(cs, text, All{3n, Nil{}, 0n, 0n, Nil{}})
+  Wire.all.of(cs, text, All{3n, 0n, 0n, 0n, Nil{}})
 
 def Client.legacy(c: Client) -> Bool:
   match c:
@@ -1112,13 +1123,13 @@ def Wire.pair(cs: List<&2, Client>, +text: String) -> IO(List<&2, Client>):
 
 # streamed text: none for a client taking its log
 def Wire.delta(+cs: List<&2, Client>, +text: String) -> IO(List<&2, Client>):
-  Wire.all.of(cs, text, All{2n, Nil{}, 0n, 0n, Nil{}})
+  Wire.all.of(cs, text, All{2n, 0n, 0n, 0n, Nil{}})
 
 # log changes: every client but those taking their log (they get them with
 # the rest of it); one too far behind goes back to taking it from the log's
 # length before these changes (log: the log with them, fresh: how many),
 # the far mirrors left out
-def Wire.changes(+cs: List<&2, Client>, +text: String, +log: List<&2, String>, +fresh: Nat, +fl: Nat, +inbox: Chan(Msg)) -> IO(List<&2, Client>):
+def Wire.changes(+cs: List<&2, Client>, +text: String, +log: Nat, +fresh: Nat, +fl: Nat, +inbox: Chan(Msg)) -> IO(List<&2, Client>):
   Wire.all.of(cs, text, All{1n, log, fresh, fl, [inbox]})
 
 # Agent processes
@@ -1384,6 +1395,9 @@ def Conn.write(m: Maybe<&1, Wire>, s: Socket, +out: Chan(Wire), k: Socket -> Nat
     case Some{WJson{j, charge}}:
       +bs = W.Ws.encode(2, CB.Cbor.encode(j))
       Conn.out(s, bs, out, s2 => Conn.written(s2, List.length(&2, U32, bs), charge, k))
+    case Some{WCbor{b, charge}}:
+      +bs = W.Ws.encode(2, b)
+      Conn.out(s, bs, out, s2 => Conn.written(s2, List.length(&2, U32, bs), charge, k))
     case None{}:
       Socket.close(s)
 
@@ -1499,6 +1513,20 @@ def Conn.frame(fr: W.Frame, +id: U32, +inbox: Chan(Msg), +last: Nat, +now: Nat) 
     case W.Frame{_, +op, p}:
       Conn.frame.k(U32.is_eq(op, 2), U32.is_eq(op, 8), U32.is_eq(op, 9), p, id, inbox, last, now)
 
+# a's bytes then b's, in tail calls only: Base's List.append keeps a stack
+# frame per element of a, and a socket's buffered bytes grow past what the
+# JS stack holds (a 64 KB paste into a terminal is a ~200 KB WebSocket frame
+# read in pieces: the hub died at the second piece)
+def Bytes.rev(xs: List<&2, U32>, acc: List<&2, U32>) -> List<&2, U32>:
+  match xs:
+    case Nil{}:
+      acc
+    case x <> t:
+      Bytes.rev(t, x <> acc)
+
+def Bytes.cat(a: List<&2, U32>, b: List<&2, U32>) -> List<&2, U32>:
+  Bytes.rev(Bytes.rev(a, Nil{}), b)
+
 def Conn.more(r: Socket & Result<&1, &1, U32 & String, List<&2, U32>>, buf: List<&2, U32>, +id: U32, +inbox: Chan(Msg), +last: Nat,
     k: Socket -> List<&2, U32> -> Nat -> Nat -> IO(Unit)) -> IO(Unit):
   (s, res) = r
@@ -1506,7 +1534,7 @@ def Conn.more(r: Socket & Result<&1, &1, U32 & String, List<&2, U32>>, buf: List
     case Done{Nil{}}:
       Conn.leave(s, id, inbox)
     case Done{bs}:
-      IO.bind(Nat, Unit, IO.now(), now => k(s, List.append(&2, U32, buf, bs), last, now))
+      IO.bind(Nat, Unit, IO.now(), now => k(s, Bytes.cat(buf, bs), last, now))
     case Fail{_}:
       Conn.leave(s, id, inbox)
 
@@ -1592,35 +1620,10 @@ def Conn.cache(+path: String) -> String:
 def Conn.allowed(+trusted: Bool, +hs: List<&2, W.Header>, +path: String, +token: String) -> Bool:
   AUTH.Auth.allowed(trusted, hs, path, token)
 
-# a websocket from this machine's loopback, not proxied by tailscale serve,
-# is marked for the hub: only such a window (or the one in this process)
-# may embed the browser (core/cef.bend's Cef.from)
-def Conn.near.say(near: Bool, +id: U32, +inbox: Chan(Msg)) -> IO(Unit):
-  match near:
-    case True{}:
-      do IO<Unit>:
-        ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, Near{id})
-        return Unit{}
-    case False{}:
-      IO.pure(Unit, Unit{})
-
-def Conn.near.k(r: Socket & String, +key: String, rest: List<&2, U32>, +id: U32, +inbox: Chan(Msg), +since: Nat, +origin: String, legacy: Bool, +mobile: String) -> IO(Unit):
-  (s, +ip) = r
-  do IO<Unit>:
-    Conn.near.say(CF.Cef.loopback(ip), id, inbox)
-    Conn.ws(s, key, rest, id, inbox, since, origin, legacy, mobile)
-
-def Conn.near(plain: Bool, s: Socket, +key: String, rest: List<&2, U32>, +id: U32, +inbox: Chan(Msg), +since: Nat, +origin: String, legacy: Bool, +mobile: String) -> IO(Unit):
-  match plain:
-    case True{}:
-      IO.bind(Socket & String, Unit, H.Sock.peer(s), r => Conn.near.k(r, key, rest, id, inbox, since, origin, legacy, mobile))
-    case False{}:
-      Conn.ws(s, key, rest, id, inbox, since, origin, legacy, mobile)
-
-def Conn.gate(ok: Bool, plain: Bool, s: Socket, +key: String, rest: List<&2, U32>, +id: U32, +inbox: Chan(Msg), +since: Nat, +origin: String, legacy: Bool, +mobile: String) -> IO(Unit):
+def Conn.gate(ok: Bool, s: Socket, +key: String, rest: List<&2, U32>, +id: U32, +inbox: Chan(Msg), +since: Nat, +origin: String, legacy: Bool, +mobile: String) -> IO(Unit):
   match ok:
     case True{}:
-      Conn.near(plain, s, key, rest, id, inbox, since, origin, legacy, mobile)
+      Conn.ws(s, key, rest, id, inbox, since, origin, legacy, mobile)
     case False{}:
       Conn.finish(s, W.Http.text("401 Unauthorized", "this Backplane needs its pairing token"))
 
@@ -1640,7 +1643,7 @@ def Mcp.got(r: Socket & Result<&1, &1, U32 & String, List<&2, U32>>, buf: List<&
     case Done{Nil{}}:
       Socket.close(s)
     case Done{bs}:
-      k(s, List.append(&2, U32, buf, bs))
+      k(s, Bytes.cat(buf, bs))
     case Fail{_}:
       Socket.close(s)
 
@@ -1718,7 +1721,7 @@ def Conn.head.got(r: Socket & Result<&1, &1, U32 & String, List<&2, U32>>, buf: 
     case Done{Nil{}}:
       Socket.close(s)
     case Done{bs}:
-      k(s, List.append(&2, U32, buf, bs))
+      k(s, Bytes.cat(buf, bs))
     case Fail{_}:
       Socket.close(s)
 
@@ -1726,7 +1729,7 @@ def Conn.head.got(r: Socket & Result<&1, &1, U32 & String, List<&2, U32>>, buf: 
 # -------
 
 type Hub is Type:
-  Hub{state: M.State, log: File, lines: List<&2, String>, clients: List<&2, Client>, agents: List<&2, Agent>, inbox: Chan(Msg), cfg: Cfg, note: String}
+  Hub{state: M.State, log: File, lines: SO.Lg, clients: List<&2, Client>, agents: List<&2, Agent>, inbox: Chan(Msg), cfg: Cfg, note: String}
 
 def Hub.changes_msg(ls: List<&2, String>) -> String:
   "{\"t\":\"changes\",\"items\":[" ++ String.join(ls, ",") ++ "]}"
@@ -1743,8 +1746,16 @@ def Info.kicad(rt: K.Rt) -> List<&2, J.KV>:
        J.KV{"kicad.ipc.servers", J.Str{J.Json.get_str(h, "ipc", "")}}]
 
 # the pairing link as a QR code's rows (core/qr.bend), for Settings
+def Info.qr.k(none: Bool, +lk: String) -> String:
+  match none:
+    case True{}:
+      ""
+    case False{}:
+      QR.Qr.text(QR.Qr.link(lk))
+
+# the pairing link's QR code; none for no link
 def Info.qr(+lk: String) -> String:
-  QR.Qr.text(QR.Qr.link(lk))
+  Info.qr.k(String.is_empty(lk), lk)
 
 # the tailnet side as clients are told it ("tailscale"): off (the flag),
 # checking (no answer yet), unavailable, or reachable
@@ -1755,7 +1766,7 @@ def Info.tailscale(tn: Bool, +st: String) -> String:
 def Info.tch(n: Net) -> List<&2, J.KV>:
   match n:
     case Net{_, _, _, _, _, _, _, _, _, _, _, +bnx, _, _, _, _}:
-      List.append(&2, J.KV, TE.Teach.info(BN.Bn.tch(bnx)), List.append(&2, J.KV, CF.Cef.session.info(BN.Bn.cef(bnx)), CF.Cef.pages.info(CF.Cef.session.pages(BN.Bn.cef(bnx)))))
+      TE.Teach.info(BN.Bn.tch(bnx))
 
 def Info.net(n: Net) -> List<&2, J.KV>:
   match n:
@@ -1772,10 +1783,26 @@ def Hub.info(c: Cfg) -> J.Json:
 # the pairing link (the tailnet address and the token) and its QR code: not
 # in the info every client hears, but told only to clients that came with
 # the token (Hub.join.k, Wire.pair), never to one let in the legacy way
+# the pairing message for a link report (its QR code is made here: ~2 s on
+# the JS target, so Cfg.with_link keeps it in Bn and joins reuse it)
+def Hub.pair_msg.of(+lk: String) -> String:
+  "{\"t\":\"info\",\"info\":" ++ J.Json.show(J.Json.obj([J.KV{"pair", J.Str{TN.Tailnet.report.link(lk)}}, J.KV{"pair.qr", J.Str{Info.qr(TN.Tailnet.report.link(lk))}}])) ++ "}"
+
+def Hub.pair_msg.k(hit: Bool, +kept: String, +lk: String) -> String:
+  match hit:
+    case True{}:
+      String.drop(kept, 1n+String.length(lk))
+    case False{}:
+      Hub.pair_msg.of(lk)
+
+# the message kept for this link, else made (law pair_msg_kept)
+def Hub.pair_msg.from(+kept: String, +lk: String) -> String:
+  Hub.pair_msg.k(String.starts_with(kept, lk ++ "\n"), kept, lk)
+
 def Hub.pair_msg(c: Cfg) -> String:
   match c:
-    case Cfg{_, _, _, _, _, _, _, Net{_, _, _, _, _, _, _, _, _, _, _, _, _, +lk, _, _}, _, +views}:
-      "{\"t\":\"info\",\"info\":" ++ J.Json.show(J.Json.obj([J.KV{"pair", J.Str{TN.Tailnet.report.link(lk)}}, J.KV{"pair.qr", J.Str{Info.qr(TN.Tailnet.report.link(lk))}}])) ++ "}"
+    case Cfg{_, _, _, _, _, _, _, Net{_, _, _, _, _, _, _, _, _, _, _, bnx, _, +lk, _, _}, _, +views}:
+      Hub.pair_msg.from(BN.Bn.pair(bnx), lk)
 
 # A link change is handled after it has been stored, through the inbox,
 # so both sides of an invite refresh immediately (revokes prune rows).
@@ -1806,18 +1833,24 @@ def Hub.lines.disk(cs: List<&2, M.Change>) -> List<&2, String>:
     case c <> t:
       J.Json.show(C.Change.encode(c)) <> Hub.lines.disk(t)
 
-# the written changes folded in: the state, the log's lines and the new
-# ones (both newest first)
+# the written changes folded in: the state, the commit's store statements
+# (SO.Cm: the log's count and the lines' facts and records) and the new
+# lines for clients (newest first)
 type Folded is Data:
-  Folded{st: M.State, ls: List<&2, String>, fresh: List<&2, String>}
+  Folded{st: M.State, cm: SO.Cm, fresh: List<&2, String>}
+
+def Hub.fold.k(r: M.State & SO.Cm, +w: String, fr: List<&2, String>) -> Folded:
+  (st, cm) = r
+  Folded{st, cm, w <> fr}
 
 # (ds: the changes' disk lines, Hub.lines.disk: each change is shown once
-# per commit and its line reused for clients, B.Commit.line)
+# per commit and its line reused for clients, B.Commit.line; the state
+# after each is the store's step's, SO.Sto.step)
 def Hub.fold(cs: List<&2, M.Change>, ds: List<&2, String>, f: Folded) -> Folded:
   match cs ds f:
-    case +c <> t +d <> dt Folded{st, ls, fr}:
+    case +c <> t +d <> dt Folded{+st, cm, fr}:
       +w = B.Commit.line(c, d)
-      Hub.fold(t, dt, Folded{M.State.apply(st, c), w <> ls, w <> fr})
+      Hub.fold(t, dt, Hub.fold.k(SO.Sto.step(st, c, d, w, cm), w, fr))
     case _ _ _:
       f
 
@@ -1830,10 +1863,12 @@ def Bot.dir.changed.all(cs: List<&2, M.Change>, +inbox: Chan(Msg)) -> IO(Unit):
         Bot.dir.changed(c, inbox)
         Bot.dir.changed.all(t, inbox)
 
-def Hub.commit.k(fd: Folded, +cs: List<&2, M.Change>, f: File, cl: List<&2, Client>, as: List<&2, Agent>, inbox: Chan(Msg), cfg: Cfg, note: String) -> Hub & Wrote:
+def Hub.commit.k(fd: Folded, +cs: List<&2, M.Change>, f: File, cl: List<&2, Client>, as: List<&2, Agent>, inbox: Chan(Msg), cfg: Cfg, note: String) -> IO(Hub & Wrote):
   match fd:
-    case Folded{+st, ls, +fr}:
-      (Hub{st, f, ls, cl, as, inbox, LogCount.committed(Cfg.thin.committed(cfg, cs, st), fr), note}, Wrote{fr, True{}, ""})
+    case Folded{+st, cm, +fr}:
+      do IO<Hub & Wrote>:
+        ls : SO.Lg <- SO.Sto.commit(cm)
+        return (Hub{st, f, ls, cl, as, inbox, LogCount.committed(Cfg.thin.committed(cfg, cs, st), fr), note}, Wrote{fr, True{}, ""})
 
 def Hub.err.msg(e: U32 & String) -> String:
   (_, msg) = e
@@ -1967,18 +2002,14 @@ def Cfg.version(c: Cfg) -> String:
 
 # which log this is: the time of its first change (a client resumes only
 # into the log it came from)
-def Hub.origin(+ls: List<&2, String>) -> String:
-  Nat.show(J.Json.get_nat(Maybe.default(&2, J.Json, J.Json.parse(Maybe.default(&2, String, List.last(&2, String, ls), "")), J.Null{}), "at", 0n))
+def Hub.origin(+ls: SO.Lg) -> String:
+  SO.Lg.origin(ls)
 
-def Hub.log_msg.k(+n: Nat, +ls: List<&2, String>, +cfg: Cfg, +since: Nat) -> String:
-  "{\"t\":\"log\",\"since\":" ++ Nat.show(since) ++ ",\"origin\":\"" ++ Hub.origin(ls) ++ "\",\"version\":" ++ J.Json.show(J.Str{Cfg.version(cfg)}) ++ ",\"info\":" ++ J.Json.show(Hub.info(cfg))
-    ++ ",\"items\":[" ++ String.join(List.reverse(&2, String, List.take(&2, String, ls, Nat.sub(n, since))), ",") ++ "]}"
-
-# the log for a client that has the first `since` changes already (a
-# reconnect sends only what it missed; a client ahead of the log, as after
-# a server reset, gets everything, since 0)
-def Hub.log_msg(+ls: List<&2, String>, +cfg: Cfg, +since: Nat) -> String:
-  Hub.log_msg.k(ST.Store.size(ls), ls, cfg, Bool.pick(Nat, Nat.is_le(since, ST.Store.size(ls)), since, 0n))
+# the log message with no items (the window in this process: it reads the
+# state itself)
+def Hub.log_msg.k(+ls: SO.Lg, +cfg: Cfg) -> String:
+  "{\"t\":\"log\",\"since\":0,\"origin\":\"" ++ Hub.origin(ls) ++ "\",\"version\":" ++ J.Json.show(J.Str{Cfg.version(cfg)}) ++ ",\"info\":" ++ J.Json.show(Hub.info(cfg))
+    ++ ",\"items\":[]}"
 
 # the first frame of a join: the log message with the first chunk of what
 # the client lacks; "more": the rest follows a chunk at a time
@@ -2506,6 +2537,144 @@ def BtwJob.run(+tx: AG.Tx, +inbox: Chan(Msg), +client: U32, +id: String, +thread
 def SumJob.run(+tx: AG.Tx, +inbox: Chan(Msg), +id: String, +kind: String, +input: String) -> IO(Unit):
   IO.bind(String, Unit, OneShot.run(tx, RF.Sum.system(), input), a =>
     GitJob.say(inbox, "summary.set", [J.KV{"id", J.Str{id}}, J.KV{"kind", J.Str{kind}}, J.KV{"text", J.Str{a}}]))
+
+# The uberbot's infinite context (core/uctx.bend, server/uctxio.bend)
+# -------------------------------------------------------------------
+# Only while uber.ctx is on, and only for the uberbot's own thread: a fresh
+# turn's context is read from store.db (Ucs.prompt: Claude's system prompt,
+# the others' turn text), compaction runs write the tree's lines through
+# the writer (UctxJob, after the uberbot's turns end) and memory_zoom /
+# memory_search answer from the store (Ucs.tool). Off the hub's fiber.
+
+def Ucs.start.k(have: Bool, +kept: String, +h: String, +th: String, +inbox: Chan(Msg)) -> IO(String):
+  match have:
+    case True{}:
+      IO.pure(String, kept)
+    case False{}:
+      do IO<String>:
+        +s : String <- UXIO.Ux.start(h, th)
+        GitJob.say(inbox, "uctx.start", [J.KV{"thread", J.Str{th}}, J.KV{"ord", J.Str{s}}])
+        return s
+
+# where the thread's tree starts: kept, else found now and kept
+def Ucs.start(+h: String, +st: M.State, +th: String, +inbox: Chan(Msg)) -> IO(String):
+  Ucs.start.k(Bool.not(String.is_empty(UCX.Uctx.start(st, th))), UCX.Uctx.start(st, th), h, th, inbox)
+
+def Ucs.prompt.k(on: Bool, +h: String, +st: M.State, +th: String, +inbox: Chan(Msg)) -> IO(String):
+  match on:
+    case False{}:
+      IO.pure(String, "")
+    case True{}:
+      do IO<String>:
+        +start : String <- Ucs.start(h, st, th, inbox)
+        +v : String <- UXIO.Ux.view(h, th, start)
+        return "\n\n" ++ v
+
+# the view for a fresh turn of th ("" unless it runs with infinite context)
+def Ucs.prompt(+cfg: Cfg, +st: M.State, +th: String, +inbox: Chan(Msg)) -> IO(String):
+  Ucs.prompt.k(UCX.Uctx.on(st, th), Cfg.thin.store(cfg), st, th, inbox)
+
+# a turn's text after the view (Codex, Grok, Muse, Antigravity, OpenCode)
+def Ucs.text(+view: String, +text: String) -> String:
+  Bool.pick(String, String.is_empty(view), text, String.trim(view) ++ "\n\n" ++ text)
+
+# Compaction runs
+
+def UctxJob.said(empty: Bool, +inbox: Chan(Msg), +th: String, +l: Nat, +i: Nat, +line: String) -> IO(Bool):
+  match empty:
+    case True{}:
+      IO.pure(Bool, False{})
+    case False{}:
+      do IO<Bool>:
+        GitJob.say(inbox, "uctx.node", [J.KV{"thread", J.Str{th}}, J.KV{"l", J.Num{Nat.show(l)}}, J.KV{"i", J.Num{Nat.show(i)}}, J.KV{"text", J.Str{line}}])
+        return True{}
+
+# a first answer too long is asked once more with the cut shown; no answer
+# at all (the writer failed) writes nothing
+def UctxJob.again(fits: Bool, empty: Bool, +tx: AG.Tx, +l: Nat, +i: Nat, +src: String, +a: String) -> IO(String):
+  match fits empty:
+    case True{} _:
+      IO.pure(String, UCX.Uctx.line(a))
+    case False{} True{}:
+      IO.pure(String, "")
+    case False{} False{}:
+      IO.bind(String, String, OneShot.run(tx, UCX.Uctx.system(), UCX.Uctx.task(l, i, src) ++ UCX.Uctx.over(a)),
+        +a2 => IO.pure(String, UCX.Uctx.line(Bool.pick(String, String.is_empty(String.trim(a2)), a, a2))))
+
+def UctxJob.line(fits: Bool, +tx: AG.Tx, +l: Nat, +i: Nat, +src: String) -> IO(String):
+  match fits:
+    case True{}:
+      IO.pure(String, UCX.Uctx.line(src))
+    case False{}:
+      IO.bind(String, String, OneShot.run(tx, UCX.Uctx.system(), UCX.Uctx.task(l, i, src)),
+        +a => UctxJob.again(UCX.Uctx.short(a), String.is_empty(String.trim(a)), tx, l, i, src, a))
+
+# one node written and told to the hub; False when the writer gave nothing
+def UctxJob.node(+tx: AG.Tx, +h: String, +th: String, +start: String, +l: Nat, +i: Nat, +inbox: Chan(Msg)) -> IO(Bool):
+  do IO<Bool>:
+    +src : String <- UXIO.Ux.source(l, h, th, start, i)
+    +line : String <- UctxJob.line(UCX.Uctx.short(src), tx, l, i, src)
+    UctxJob.said(String.is_empty(line), inbox, th, l, i, line)
+
+def UctxJob.loop(ns: List<&2, UCX.UNode>, ok: Bool, +tx: AG.Tx, +h: String, +th: String, +start: String, +inbox: Chan(Msg)) -> IO(Bool):
+  match ns ok:
+    case _ False{}:
+      IO.pure(Bool, False{})
+    case Nil{} True{}:
+      IO.pure(Bool, True{})
+    case UCX.UNode{+l, +i} <> t True{}:
+      do IO<Bool>:
+        +k : Bool <- UctxJob.node(tx, h, th, start, l, i, inbox)
+        UctxJob.loop(t, k, tx, h, th, start, inbox)
+
+def UctxJob.go(rs: List<&2, List<&2, String>>, lr: List<&2, List<&2, String>>, +tx: AG.Tx, +h: String, +th: String, +start: String, +inbox: Chan(Msg)) -> IO(Unit):
+  do IO<Unit>:
+    +ms : List<&2, UCX.UMsg> = UCX.Uctx.msgs(rs)
+    +due : List<&2, UCX.UNode> = UCX.Uctx.due(List.length(&2, UCX.UMsg, ms), UCX.Uctx.jobs(), UCX.Uctx.fit(ms, 0n, UCX.Uctx.lined(lr, Map.new(&2, Bool))))
+    +ok : Bool <- UctxJob.loop(due, True{}, tx, h, th, start, inbox)
+    GitJob.say(inbox, "uctx.done", [J.KV{"thread", J.Str{th}}, J.KV{"more", J.Str{Bool.pick(String, Bool.and(ok, Nat.is_ge(List.length(&2, UCX.UNode, due), UCX.Uctx.jobs())), "1", "0")}}])
+
+def UctxJob.read(bad: Bool, rs: List<&2, List<&2, String>>, +tx: AG.Tx, +h: String, +th: String, +start: String, +inbox: Chan(Msg)) -> IO(Unit):
+  match bad:
+    case True{}:
+      do IO<Unit>:
+        PS.Log.warn("uctx", "the store could not be read: " ++ UXIO.Ux.why(rs))
+        GitJob.say(inbox, "uctx.done", [J.KV{"thread", J.Str{th}}, J.KV{"more", J.Str{"0"}}])
+    case False{}:
+      IO.bind(List<&2, List<&2, String>>, Unit, UXIO.Ux.q(h, UCX.Uctx.sql.lined(), [UDB.DbText{th}]), lr => UctxJob.go(rs, lr, tx, h, th, start, inbox))
+
+# a compaction run: the nodes due (Uctx.due), each written by the writer
+# (the settings' text model) and told to the hub (uctx.node), then
+# uctx.done, which starts another run when this one left work
+def UctxJob.run(+tx: AG.Tx, +h: String, +st: M.State, +th: String, +inbox: Chan(Msg)) -> IO(Unit):
+  do IO<Unit>:
+    +start : String <- Ucs.start(h, st, th, inbox)
+    +rs : List<&2, List<&2, String>> <- UXIO.Ux.q(h, UCX.Uctx.sql.msgs(), [UDB.DbText{th}, UDB.DbInt{start}])
+    UctxJob.read(UXIO.Ux.failed(rs), rs, tx, h, th, start, inbox)
+
+# memory_zoom and memory_search
+
+def Ucs.is(+o: J.Json) -> Bool:
+  Bool.and(String.eq(J.Json.get_str(o, "method", ""), "tools/call"),
+    Bool.or(String.eq(J.Json.get_str(J.Json.get_obj(o, "params"), "name", ""), "memory_zoom"), String.eq(J.Json.get_str(J.Json.get_obj(o, "params"), "name", ""), "memory_search")))
+
+def Ucs.answer(+id: String, text: String) -> String:
+  "{\"jsonrpc\":\"2.0\",\"id\":" ++ id ++ ",\"result\":" ++ J.Json.show(J.Json.obj([J.KV{"content", J.Json.arr([J.Json.obj([J.KV{"type", J.Str{"text"}}, J.KV{"text", J.Str{text}}])])}, J.KV{"isError", J.Flag{False{}}}])) ++ "}"
+
+def Ucs.tool.k(zoom: Bool, +h: String, +st: M.State, +th: String, +start: String, +a: J.Json) -> IO(String):
+  match zoom:
+    case True{}:
+      UXIO.Ux.zoom(h, st, th, start, J.Json.get_nat(a, "id", 0n), J.Json.get_nat(a, "n", 1n), J.Json.get_nat(a, "at", 0n))
+    case False{}:
+      UXIO.Ux.search(h, st, th, start, J.Json.get_str(a, "query", ""))
+
+def Ucs.tool(+h: String, +st: M.State, +th: String, +o: J.Json, +reply: Chan(String)) -> IO(Unit):
+  do IO<Unit>:
+    +start : String = Bool.pick(String, String.is_empty(UCX.Uctx.start(st, th)), "0", UCX.Uctx.start(st, th))
+    +text : String <- Ucs.tool.k(String.eq(J.Json.get_str(J.Json.get_obj(o, "params"), "name", ""), "memory_zoom"), h, st, th, start, J.Json.get_obj(J.Json.get_obj(o, "params"), "arguments"))
+    sent : Result<&1, &1, String, Unit> <- Chan.send(String, reply, Ucs.answer(J.Json.as_raw(J.Json.get(o, "id"), "null"), text))
+    return Unit{}
+
 
 def AgentJob.named(+r: String, +inbox: Chan(Msg), +thread: String) -> IO(Unit):
   Bool.pick(IO(Unit), GT.Git.failed(r), GitJob.note(inbox, thread, "error", "branch name: " ++ r),
@@ -3637,7 +3806,7 @@ def Deploy.probe(+inbox: Chan(Msg)) -> IO(Unit):
   IO.bind(String, Unit, Env.get("BACKPLANE_DEPLOY_LOCKS", "/tmp/bp-bend.lock:/tmp/bp-wt-build.lock"), l => Deploy.probe.l(l, inbox))
 
 def Deploy.swap.sh() -> String:
-  "set -eu; src=$1; prefix=$2; [ -d \"$src\" ] || { echo \"no staged package at $src\"; exit 1; }; mkdir -p \"$prefix\"; if [ -f \"$src/cef-runtime.py\" ]; then python3 \"$src/cef-runtime.py\" install \"$src\" \"$prefix\"; fi; if [ -d \"$src/web\" ]; then rm -rf \"$prefix/web.old\"; [ -d \"$prefix/web\" ] && mv \"$prefix/web\" \"$prefix/web.old\"; mv \"$src/web\" \"$prefix/web\"; fi; if [ -d \"$src/kistack\" ]; then rm -rf \"$prefix/kistack.old\"; [ -d \"$prefix/kistack\" ] && mv \"$prefix/kistack\" \"$prefix/kistack.old\"; mv \"$src/kistack\" \"$prefix/kistack\"; fi; for f in backplane backplane-serve backplane-browser backplane-browser.stamp backplane-step2glb backplane-voice backplane-kipc LICENSE; do if [ -e \"$src/$f\" ]; then mv -f \"$src/$f\" \"$prefix/$f\"; fi; done; rmdir \"$src\" 2>/dev/null || true; exit 0"
+  "set -eu; src=$1; prefix=$2; [ -d \"$src\" ] || { echo \"no staged package at $src\"; exit 1; }; mkdir -p \"$prefix\"; if [ -d \"$src/web\" ]; then rm -rf \"$prefix/web.old\"; [ -d \"$prefix/web\" ] && mv \"$prefix/web\" \"$prefix/web.old\"; mv \"$src/web\" \"$prefix/web\"; fi; if [ -d \"$src/kistack\" ]; then rm -rf \"$prefix/kistack.old\"; [ -d \"$prefix/kistack\" ] && mv \"$prefix/kistack\" \"$prefix/kistack.old\"; mv \"$src/kistack\" \"$prefix/kistack\"; fi; for f in backplane backplane-serve backplane-browser backplane-browser.stamp backplane-step2glb backplane-voice backplane-kipc LICENSE; do if [ -e \"$src/$f\" ]; then mv -f \"$src/$f\" \"$prefix/$f\"; fi; done; [ -L \"$prefix/backplane-browser\" ] || rm -rf \"$prefix/cef\" \"$prefix/browser-current\" \"$prefix/browser-previous\" \"$prefix/browser-runtimes\"; rmdir \"$src\" 2>/dev/null || true; exit 0"
 
 def Deploy.swapped(ok: Bool, +out: String, +path: String, +inbox: Chan(Msg)) -> IO(Unit):
   match ok:
@@ -4114,12 +4283,6 @@ def Plot.put(m: Maybe<&2, Chan(PV.PMsg)>, +msg: PV.PMsg) -> IO(Unit):
     case None{}:
       IO.pure(Unit, Unit{})
 
-def CefCfg.depart(c: Cfg, +client: U32) -> Cfg:
-  match c:
-    case Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, +bnx, mgd, lk, fc, ksx}, +tcfg, +views}:
-      Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx,
-        BN.Bn.with_cef(bnx, CF.Cef.session.leave(BN.Bn.cef(bnx), client)), mgd, lk, fc, ksx}, tcfg, views}
-
 def Hub.leave(h: Hub, +client: U32, +now: Nat) -> IO(Hub):
   match h:
     case Hub{st, f, ls, +cl, as, inbox, +cfg, note}:
@@ -4128,7 +4291,7 @@ def Hub.leave(h: Hub, +client: U32, +now: Nat) -> IO(Hub):
         Plot.put(Cfg.pv(cfg), PV.PStop{client})
         +cl2 : List<&2, Client> = Clients.drop(cl, client)
         cl3 : List<&2, Client> <- Desk.say(DK.Desk.text(Clients.looks(cl), now), cl2, now)
-        return Hub{st, f, ls, cl3, as, inbox, CefCfg.depart(cfg, client), note}
+        return Hub{st, f, ls, cl3, as, inbox, cfg, note}
 
 # kicad.watch: kind "board", "schematic", "3d", "3d-bare" or "3d-full"
 # shows it, anything else stops
@@ -4907,10 +5070,11 @@ def Cfg.with_machines(c: Cfg, +mc: String) -> Cfg:
     case Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, _, pvx, bnx, mgd, lk, fc, ksx}, +tcfg, +views}:
       Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}, tcfg, views}
 
+# a new pairing link, its message made once and kept for every join
 def Cfg.with_link(c: Cfg, +lk: String) -> Cfg:
   match c:
     case Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, _, fc, ksx}, +tcfg, +views}:
-      Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}, tcfg, views}
+      Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, BN.Bn.with_pair(bnx, lk ++ "\n" ++ Hub.pair_msg.of(lk)), mgd, lk, fc, ksx}, tcfg, views}
 
 # the tailnet listener is up: every client hears the pairing link. Each
 # one either is the owner's own device or came in with the token already,
@@ -5455,7 +5619,7 @@ def Conn.view.mode(view: String, +mobile: String, +frontend: String) -> String:
 def Conn.route.k(ws: Bool, s: Socket, req: W.Request, rest: List<&2, U32>, +web: String, +id: U32, +inbox: Chan(Msg), +trusted: Bool, +token: String) -> IO(Unit):
   match ws req:
     case True{} W.Request{_, +p, +hs}:
-      Conn.gate(Conn.allowed(trusted, hs, p, token), CF.Cef.link(W.Http.header_of(hs, "tailscale-user-login"), W.Http.header_of(hs, "origin")), s, W.Http.header_of(hs, "sec-websocket-key"), rest, id, inbox,
+      Conn.gate(Conn.allowed(trusted, hs, p, token), s, W.Http.header_of(hs, "sec-websocket-key"), rest, id, inbox,
         Maybe.default(&2, Nat, Nat.read(W.Http.param(p, "since")), 0n), W.Http.param(p, "origin"), AUTH.Auth.legacy(trusted, hs, p, token), Conn.view.mode(W.Http.param(p, "view"), W.Http.param(p, "mobile"), W.Http.param(p, "frontend")))
     case False{} W.Request{_, +p, +hs}:
       Conn.get.k(Conn.pos(["/hello", "/img", "/debug/perf", "/debug/perf.json", "/debug/log"], W.Http.route(p), 0n), s, web, p, String.contains(W.Http.header_of(hs, "accept-encoding"), "gzip"), Conn.allowed(trusted, hs, p, token))
@@ -6229,12 +6393,6 @@ def Cfg.with_bn(c: Cfg, b: BN.Bn) -> Cfg:
     case Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, _, mgd, lk, fc, ksx}, +tcfg, +views}:
       Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, b, mgd, lk, fc, ksx}, tcfg, views}
 
-def Cfg.cef(c: Cfg) -> CF.CefSession:
-  BN.Bn.cef(Cfg.bn(c))
-
-def Cfg.with_cef(+c: Cfg, cp: CF.CefSession) -> Cfg:
-  Cfg.with_bn(c, BN.Bn.with_cef(Cfg.bn(c), cp))
-
 def Cfg.tch(c: Cfg) -> TE.TeachSt:
   BN.Bn.tch(Cfg.bn(c))
 
@@ -6278,12 +6436,12 @@ def Hub.cut.ok(r: P.Ran) -> Bool:
 def Hub.cut(+len: String, +cfg: Cfg) -> IO(Bool):
   IO.bind(P.Ran, Bool, P.Proc.run("truncate", ST.Store.trunc.args(len, Store.path(Cfg.home(cfg))), "/"), r => IO.pure(Bool, Hub.cut.ok(r)))
 
-def Hub.held(+hold: String, st: M.State, f: File, ls: List<&2, String>, cl: List<&2, Client>,
+def Hub.held(+hold: String, st: M.State, f: File, ls: SO.Lg, cl: List<&2, Client>,
     as: List<&2, Agent>, inbox: Chan(Msg), +cfg: Cfg, note: String) -> Hub & Wrote:
   (Hub{st, f, ls, cl, as, inbox, Cfg.with_bn(cfg, BN.Bn.with_broken(Cfg.bn(cfg), hold)), note}, Wrote{Nil{}, False{}, ST.Store.held.msg(hold)})
 
 # a write failed: cut back (the log is as it was) or held
-def Hub.commit.failed(cut: Bool, +len: String, +err: String, st: M.State, f: File, ls: List<&2, String>, cl: List<&2, Client>,
+def Hub.commit.failed(cut: Bool, +len: String, +err: String, st: M.State, f: File, ls: SO.Lg, cl: List<&2, Client>,
     as: List<&2, Agent>, inbox: Chan(Msg), +cfg: Cfg, note: String) -> IO(Hub & Wrote):
   match cut:
     case True{}:
@@ -6297,25 +6455,25 @@ def Cfg.telemetry.privacy_committed(cs: List<&2, M.Change>, cfg: Cfg) -> Cfg:
     case Cfg{h, w, ho, p, pr, ds, v, nt, tm, views}:
       Cfg{h, w, ho, p, pr, ds, v, nt, TUI.Privacy.committed(cs, tm), views}
 
-def Hub.commit.done(r: File & Result<&1, &1, U32 & String, Unit>, +disk: List<&2, String>, +len: String, +cs: List<&2, M.Change>, st: M.State, ls: List<&2, String>, cl: List<&2, Client>,
+def Hub.commit.done(r: File & Result<&1, &1, U32 & String, Unit>, +disk: List<&2, String>, +len: String, +cs: List<&2, M.Change>, st: M.State, ls: SO.Lg, cl: List<&2, Client>,
     as: List<&2, Agent>, +inbox: Chan(Msg), +cfg: Cfg, note: String) -> IO(Hub & Wrote):
   (f, res) = r
   match res:
     case Done{_}:
       do IO<Hub & Wrote>:
         Bot.dir.changed.all(cs, inbox)
-        return Hub.commit.k(Hub.fold(cs, disk, Folded{st, ls, Nil{}}), cs, f, cl, as, inbox, Cfg.telemetry.privacy_committed(cs, Live.with(cfg, LV.Live.ends(cs, Live.of(cfg)))), note)
+        Hub.commit.k(Hub.fold(cs, disk, Folded{st, SO.Cm.new(ls, M.Switch.num(len, 0n)), Nil{}}), cs, f, cl, as, inbox, Cfg.telemetry.privacy_committed(cs, Live.with(cfg, LV.Live.ends(cs, Live.of(cfg)))), note)
     case Fail{e}:
       do IO<Hub & Wrote>:
         cut : Bool <- Hub.cut(len, cfg)
         Hub.commit.failed(cut, len, Hub.err.msg(e), st, f, ls, cl, as, inbox, cfg, note)
 
-def Hub.commit.write(+disk: List<&2, String>, f: File, +len: String, +cs: List<&2, M.Change>, st: M.State, ls: List<&2, String>, cl: List<&2, Client>,
+def Hub.commit.write(+disk: List<&2, String>, f: File, +len: String, +cs: List<&2, M.Change>, st: M.State, ls: SO.Lg, cl: List<&2, Client>,
     as: List<&2, Agent>, +inbox: Chan(Msg), +cfg: Cfg, note: String) -> IO(Hub & Wrote):
   IO.bind(File & Result<&1, &1, U32 & String, Unit>, Hub & Wrote, File.write(f, ST.Store.text(disk)),
     w => Hub.commit.done(w, disk, len, cs, st, ls, cl, as, inbox, cfg, note))
 
-def Hub.commit.at(r: File & Result<&1, &1, U32 & String, U32>, +cs: List<&2, M.Change>, st: M.State, ls: List<&2, String>, cl: List<&2, Client>,
+def Hub.commit.at(r: File & Result<&1, &1, U32 & String, U32>, +cs: List<&2, M.Change>, st: M.State, ls: SO.Lg, cl: List<&2, Client>,
     as: List<&2, Agent>, +inbox: Chan(Msg), +cfg: Cfg, note: String) -> IO(Hub & Wrote):
   (f, res) = r
   match res:
@@ -6324,12 +6482,12 @@ def Hub.commit.at(r: File & Result<&1, &1, U32 & String, U32>, +cs: List<&2, M.C
     case Fail{e}:
       IO.pure(Hub & Wrote, (Hub{st, f, ls, cl, as, inbox, cfg, note}, Wrote{Nil{}, False{}, Hub.err.msg(e)}))
 
-def Hub.commit.go(+cs: List<&2, M.Change>, st: M.State, f: File, ls: List<&2, String>, cl: List<&2, Client>,
+def Hub.commit.go(+cs: List<&2, M.Change>, st: M.State, f: File, ls: SO.Lg, cl: List<&2, Client>,
     as: List<&2, Agent>, +inbox: Chan(Msg), +cfg: Cfg, note: String) -> IO(Hub & Wrote):
   IO.bind(File & Result<&1, &1, U32 & String, U32>, Hub & Wrote, File.size(f), r => Hub.commit.at(r, cs, st, ls, cl, as, inbox, cfg, note))
 
 # the log was held: cut it back now; commit if that worked, else refuse
-def Hub.commit.heal(cut: Bool, +hold: String, +cs: List<&2, M.Change>, st: M.State, f: File, ls: List<&2, String>, cl: List<&2, Client>,
+def Hub.commit.heal(cut: Bool, +hold: String, +cs: List<&2, M.Change>, st: M.State, f: File, ls: SO.Lg, cl: List<&2, Client>,
     as: List<&2, Agent>, +inbox: Chan(Msg), +cfg: Cfg, note: String) -> IO(Hub & Wrote):
   match cut:
     case True{}:
@@ -6337,7 +6495,7 @@ def Hub.commit.heal(cut: Bool, +hold: String, +cs: List<&2, M.Change>, st: M.Sta
     case False{}:
       IO.pure(Hub & Wrote, Hub.held(hold, st, f, ls, cl, as, inbox, cfg, note))
 
-def Hub.commit.gate(ok: Bool, +cs: List<&2, M.Change>, st: M.State, f: File, ls: List<&2, String>, cl: List<&2, Client>,
+def Hub.commit.gate(ok: Bool, +cs: List<&2, M.Change>, st: M.State, f: File, ls: SO.Lg, cl: List<&2, Client>,
     as: List<&2, Agent>, +inbox: Chan(Msg), +cfg: Cfg, note: String) -> IO(Hub & Wrote):
   match ok:
     case True{}:
@@ -7843,8 +8001,8 @@ def Far.history(+ls: List<&2, String>) -> String:
 
 # at start: lines the log holds that this build cannot decode give the
 # history a new identity (Fr.history.body)
-def Far.history.at(+ls: List<&2, String>, +seq: Nat) -> String:
-  Bool.pick(String, List.is_empty(&2, String, ls), "", SG.Sign.header("00", 0n, FR.Fr.history.body(Maybe.default(&2, String, List.last(&2, String, ls), ""), ST.Store.size(ls), seq)))
+def Far.history.at(+ls: SO.Lg, +seq: Nat) -> String:
+  Bool.pick(String, Nat.is_eq(SO.Lg.n(ls), 0n), "", SG.Sign.header("00", 0n, FR.Fr.history.body(SO.Lg.first(ls), SO.Lg.n(ls), seq)))
 
 def Far.push.body(+s: FR.Send, +name: String) -> String:
   Bool.pick(String, Nat.is_gt(String.length(FR.Send.body(s, name)), 200000n), FR.Send.body(FR.Send.gap(s), name), FR.Send.body(s, name))
@@ -7895,9 +8053,49 @@ def Far.mcp.job(+id: J.Json, +link: String, +body: String, +home: String, +url: 
     ok : Result<&1, &1, String, Unit> <- Chan.send(String, reply, FM.Fm.answer(id, link, Far.code(r), Far.body(r)))
     return Unit{}
 
-# this hub's shared lines, made from its log (newest first)
-def Far.feed.job(+ls: List<&2, String>, +st: M.State, +inbox: Chan(Msg)) -> IO(Unit):
-  Far.send(inbox, FarFeed{FR.Fr.feed.full(ls, st), ""})
+# a page of the log's lines (oldest first, numbered after n) into the feed
+def Feed.page(xs: List<&2, String>, +n: Nat, +st: M.State, acc: FR.Feed) -> FR.Feed:
+  match xs:
+    case Nil{}:
+      acc
+    case +l <> t:
+      Feed.page(t, 1n+n, st, FR.Fr.feed.step(FR.Fr.line.parsed(J.Json.parse(l)), st, 1n+n, l, acc))
+
+def Far.feed.more(none: Bool, +xs: List<&2, String>, +at: Nat, +st: M.State, acc: FR.Feed, k: Nat -> FR.Feed -> IO(FR.Feed)) -> IO(FR.Feed):
+  match none:
+    case True{}:
+      IO.pure(FR.Feed, acc)
+    case False{}:
+      k(Nat.add(at, List.length(&2, String, xs)), Feed.page(xs, at, st, acc))
+
+# (the fiber given back between pages, as F1's slices did: the JS hub runs
+# every job on its one fiber)
+def Far.feed.got(+xs: List<&2, String>, +at: Nat, +st: M.State, acc: FR.Feed, k: Nat -> FR.Feed -> IO(FR.Feed)) -> IO(FR.Feed):
+  do IO<FR.Feed>:
+    IO.sleep(1)
+    Far.feed.more(List.is_empty(&2, String, xs), xs, at, st, acc, k)
+
+def Far.feed.at(go: Bool, +ls: SO.Lg, +st: M.State, +at: Nat, acc: FR.Feed, k: Nat -> FR.Feed -> IO(FR.Feed)) -> IO(FR.Feed):
+  match go:
+    case False{}:
+      IO.pure(FR.Feed, acc)
+    case True{}:
+      IO.bind(List<&2, String>, FR.Feed, SO.Sto.lines(ls, at, 500n), xs => Far.feed.got(xs, at, st, acc, k))
+
+def Far.feed.loop(fuel: Nat, +ls: SO.Lg, +st: M.State, +at: Nat, acc: FR.Feed) -> IO(FR.Feed):
+  match fuel:
+    case 0n:
+      IO.pure(FR.Feed, acc)
+    case 1n+f:
+      Far.feed.at(Nat.is_lt(at, SO.Lg.n(ls)), ls, st, at, acc, a2 => acc2 => Far.feed.loop(f, ls, st, a2, acc2))
+
+# this hub's shared lines (newest first), read from the store 500 lines at a
+# time when a linked machine first asks (Far.feed.want): the hub holds no
+# log lines; F1 moves the feed onto far_line
+def Far.feed.job(+ls: SO.Lg, +st: M.State, +inbox: Chan(Msg)) -> IO(Unit):
+  do IO<Unit>:
+    fd : FR.Feed <- Far.feed.loop(1n+SO.Lg.n(ls), ls, st, 0n, FR.Feed{Nil{}, Map.new(&2, Nat)})
+    Far.send(inbox, FarFeed{fd, ""})
 
 # a mirror kept on disk, read back
 def Far.load.job(+link: String, +name: String, +home: String, +inbox: Chan(Msg)) -> IO(Unit):
@@ -8595,7 +8793,7 @@ def Far.start.go(ps: List<&2, BO.Peer>, +home: String, +inbox: Chan(Msg)) -> IO(
         IO.spawn(Unit, Far.load.job(i, n, home, inbox))
         Far.start.go(t, home, inbox)
 
-def Far.start.epoch(p: FR.Fh & Hub, +ls: List<&2, String>, +seq: Nat) -> Hub:
+def Far.start.epoch(p: FR.Fh & Hub, +ls: SO.Lg, +seq: Nat) -> Hub:
   (fh, h) = p
   Far.with(h, FR.Fh.epoch.set(fh, Far.history.at(ls, seq)))
 
@@ -8603,7 +8801,6 @@ def Far.start(h: Hub) -> IO(Hub):
   match h:
     case Hub{+st, f, +ls, cl, as, +inbox, +cfg, note}:
       do IO<Hub>:
-        IO.spawn(Unit, Far.feed.job(ls, st, inbox))
         Far.start.go(Far.live(BO.World.peers(M.State.bots(st))), Cfg.home(cfg), inbox)
         return Far.start.epoch(Far.fh(Hub{st, f, ls, cl, as, inbox, cfg, note}), ls, M.State.seq(st))
 
@@ -8617,7 +8814,7 @@ def Hub.announce(r: Hub & List<&2, String>) -> IO(Hub):
       IO.pure(Hub, h)
     case Hub{st, f, +ls, cl, as, +inbox, +cfg, note} +l <> +t:
       do IO<Hub>:
-        cl2 : List<&2, Client> <- Wire.changes(cl, Hub.changes_msg(List.reverse(&2, String, l <> t)), ls, List.length(&2, String, l <> t),
+        cl2 : List<&2, Client> <- Wire.changes(cl, Hub.changes_msg(List.reverse(&2, String, l <> t)), SO.Lg.n(ls), List.length(&2, String, l <> t),
           List.length(&2, FR.In, Far.mirrors(cfg)), inbox)
         return Hub{st, f, ls, cl2, as, inbox, cfg, note}
 
@@ -8694,7 +8891,8 @@ def Claude.job(+cfg: Cfg, +st: M.State, +thread: String, +cwd: String, +model: S
     +fs : K.Files <- K.Files.read(cwd)
     ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, AutoView{thread, fs})
     +keys : String <- AKS.Ak.prompt(Cfg.home(cfg))
-    Keyring.gate("claude", IO.bind(Result<&1, &1, U32 & String, U32 & Socket>, Unit, H.Proc.spawn("env", "MCP_TOOL_TIMEOUT=86400000" <> "CLAUDE_CODE_ENABLE_TODO_TOOLS=1" <> "claude" <> Hub.agent_args(cfg, thread, model, session, r, i, Hub.prompt(cfg, st, thread, cwd, fs, keys), effort, gen), cwd, 3),
+    +ux : String <- Ucs.prompt(cfg, st, thread, inbox)
+    Keyring.gate("claude", IO.bind(Result<&1, &1, U32 & String, U32 & Socket>, Unit, H.Proc.spawn("env", "MCP_TOOL_TIMEOUT=86400000" <> "CLAUDE_CODE_ENABLE_TODO_TOOLS=1" <> "claude" <> Hub.agent_args(cfg, thread, model, session, r, i, Hub.prompt(cfg, st, thread, cwd, fs, keys) ++ ux, effort, gen), cwd, 3),
       res => Claude.started(res, thread, gen, cwd, input, inbox)), Claude.fail(thread, gen, KR.Keyring.refusal("claude"), inbox))
 
 def Agents.pid.k(same: Bool, a: Agent, +pid: U32) -> Agent:
@@ -9098,11 +9296,39 @@ def MailJob.read.text(out: B.Out) -> String:
     case B.Send{_, +text}: text
     case _: ""
 
+# the uberbot's fyi digest: the newest bodies of each conversation asked for
+def DigestJob.add(r: MST.StoreResult<List<&2, MB.Body>>, +acc: List<&2, MB.Body>) -> List<&2, MB.Body>:
+  match r:
+    case MST.Stored{+bs}: List.append(&2, MB.Body, acc, bs)
+    case _: acc
+
+def DigestJob.read(convs: List<&2, String>, +home: String, +acc: List<&2, MB.Body>) -> IO(List<&2, MB.Body>):
+  match convs:
+    case Nil{}: IO.pure(List<&2, MB.Body>, acc)
+    case +c <> +t: IO.bind(MST.StoreResult<List<&2, MB.Body>>, List<&2, MB.Body>, MST.MailStore.read(home, c, "", 10n), r => DigestJob.read(t, home, DigestJob.add(r, acc)))
+
+def DigestJob.run(convs: List<&2, String>, +home: String, +inbox: Chan(Msg), +bot: String, +ids: List<&2, String>) -> IO(Unit):
+  IO.bind(List<&2, MB.Body>, Unit, DigestJob.read(convs, home, Nil{}), bs => Self.post(inbox, DigestGot{bot, ids, bs}))
+
 def RunJob.start(r: MST.StoreResult<List<&2, MB.Body>>, +inbox: Chan(Msg), +s: M.State, +now: Nat, +th: String, +head: String) -> IO(Unit):
   match r:
     case MST.Stored{bs}: Self.post(inbox, RunReady{th, head, bs})
     case MST.Missing{_}: Self.post(inbox, RunReady{th, head, Nil{}})
     case MST.StoreError{+path, +err}: Self.post(inbox, Commit{[M.ActivityLogged{th, B.Hub.id("run-read", now, M.State.seq(s)), "error", "mail", path ++ ": " ++ err, now}, M.TurnChanged{th, M.Failed{}, now}, M.ThreadSettled{th, False{}, now}]})
+
+# a Git job (hub.bend's Git): the uberbot's compaction run (job "uctx",
+# UctxJob) here, any other as it always ran
+def Hub.git.out(uctx: Bool, h: Hub, +client: U32, +id: String, +job: String, +thread: String, +cwd: String, +a: String, +b: String) -> IO(Hub):
+  match uctx h:
+    case True{} Hub{+st, f, ls, cl, as, +inbox, +cfg, note}:
+      do IO<Hub>:
+        IO.spawn(Unit, UctxJob.run(AG.Text.of(st), Cfg.thin.store(cfg), st, thread, inbox))
+        return Hub{st, f, ls, cl, as, inbox, cfg, note}
+    case False{} Hub{+st, f, ls, cl, +as, +inbox, +cfg, note}:
+      do IO<Hub>:
+        +now : Nat <- Now.nat()
+        KExportJob.route(String.eq(job, "kexport"), inbox, client, id, thread, cwd, Cfg.home(cfg), Cfg.rt(cfg), a, KiCadJob.route(String.eq(job, "kicad"), inbox, client, id, thread, cwd, Cfg.rt(cfg), Media.run(AG.Text.of(st), job, inbox, client, id, thread, cwd, Bot.attach(String.eq(job, "attach.claude"), cfg, st, now, thread, a), b, Cfg.home(cfg), Net.managed(Cfg.net(cfg)), Agents.gen(as, thread))))
+        return Claude.prep(Bool.and(String.eq(job, "attach.claude"), Bool.not(String.is_empty(b))), Hub{st, f, ls, cl, as, inbox, cfg, note}, thread, b)
 
 def Hub.out(h: Hub, o: B.Out) -> IO(Hub):
   match h o:
@@ -9111,6 +9337,10 @@ def Hub.out(h: Hub, o: B.Out) -> IO(Hub):
         r : MST.StoreResult<List<&2, MB.Body>> <- MST.MailStore.read(Cfg.home(cfg), conv, "", 20n)
         +now : Nat <- Now.nat()
         RunJob.start(r, inbox, st, now, thread, head)
+        return Hub{st, f, ls, cl, as, inbox, cfg, note}
+    case Hub{st, f, ls, cl, as, +inbox, +cfg, note} B.DigestRead{bot, ids, convs}:
+      do IO<Hub>:
+        IO.spawn(Unit, DigestJob.run(convs, Cfg.home(cfg), inbox, bot, ids))
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
     case Hub{st, f, ls, cl, as, inbox, cfg, note} B.CharterWrite{path, text}:
       do IO<Hub>:
@@ -9136,7 +9366,7 @@ def Hub.out(h: Hub, o: B.Out) -> IO(Hub):
         Far.live.out(Hub{st, f, ls, cl2, as, inbox, Live.with_delta(cfg, LV.Live.add.at(Live.of(cfg), thread, text, Nat.mul(now, 1000n)), thread, text), note}, thread, off, text, now)
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note} B.Broadcast{+text}:
       do IO<Hub>:
-        cl2 : List<&2, Client> <- Wire.all.of(cl, text, All{Bool.pick(Nat, String.starts_with(text, "{\"t\":\"delta"), 2n, 0n), Nil{}, 0n, 0n, Nil{}})
+        cl2 : List<&2, Client> <- Wire.all.of(cl, text, All{Bool.pick(Nat, String.starts_with(text, "{\"t\":\"delta"), 2n, 0n), 0n, 0n, 0n, Nil{}})
         Far.shown(st, cfg, text)
         return Hub{st, f, ls, cl2, as, inbox, cfg, note}
     case Hub{+st, f, ls, cl, +as, inbox, cfg, note} B.AgentStart{+thread, +cwd, _, +model, +session, r, i}:
@@ -9168,7 +9398,8 @@ def Hub.out(h: Hub, o: B.Out) -> IO(Hub):
     case Hub{+st, f, ls, cl, as, +inbox, +cfg, note} B.CodexTurn{+thread, +cwd, +model, +session, r, text}:
       do IO<Hub>:
         +now : Nat <- Now.nat()
-        +t2 : String = Far.turn(cfg, st, now, thread, text)
+        +ux : String <- Ucs.prompt(cfg, st, thread, inbox)
+        +t2 : String = Ucs.text(ux, Far.turn(cfg, st, now, thread, text))
         +g : String = Hub.gen(st, now)
         IO.spawn(Unit, IO.bind(String, Unit, EmbNote.take(cfg, st, thread), n => Codex.go(cfg, st, thread, cwd, model, session, r, t2 ++ n, g, inbox)))
         Hub.placeholder(Hub{st, f, ls, cl, as, inbox, cfg, note}, thread, g)
@@ -9189,28 +9420,32 @@ def Hub.out(h: Hub, o: B.Out) -> IO(Hub):
     case Hub{+st, f, ls, cl, as, +inbox, +cfg, note} B.GrokTurn{+thread, +cwd, +model, +session, r, +text}:
       do IO<Hub>:
         +now : Nat <- Now.nat()
-        +t2 : String = Far.turn(cfg, st, now, thread, text)
+        +ux : String <- Ucs.prompt(cfg, st, thread, inbox)
+        +t2 : String = Ucs.text(ux, Far.turn(cfg, st, now, thread, text))
         +g : String = Hub.gen(st, now)
         IO.spawn(Unit, IO.bind(String, Unit, EmbNote.take(cfg, st, thread), n => Grok.go(cfg, st, thread, cwd, model, session, r, t2 ++ n, g, inbox)))
         Hub.placeholder(Hub{st, f, ls, cl, as, inbox, cfg, note}, thread, g)
     case Hub{+st, f, ls, cl, as, +inbox, +cfg, note} B.MuseTurn{+thread, +cwd, +model, +session, r, +text}:
       do IO<Hub>:
         +now : Nat <- Now.nat()
-        +t2 : String = Far.turn(cfg, st, now, thread, text)
+        +ux : String <- Ucs.prompt(cfg, st, thread, inbox)
+        +t2 : String = Ucs.text(ux, Far.turn(cfg, st, now, thread, text))
         +g : String = Hub.gen(st, now)
         IO.spawn(Unit, IO.bind(String, Unit, EmbNote.take(cfg, st, thread), n => Muse.go(cfg, st, thread, cwd, model, session, r, t2 ++ n, g, inbox)))
         Hub.placeholder(Hub{st, f, ls, cl, as, inbox, cfg, note}, thread, g)
     case Hub{+st, f, ls, cl, as, +inbox, +cfg, note} B.AgyTurn{+thread, +cwd, +model, +session, r, +text}:
       do IO<Hub>:
         +now : Nat <- Now.nat()
-        +t2 : String = Far.turn(cfg, st, now, thread, text)
+        +ux : String <- Ucs.prompt(cfg, st, thread, inbox)
+        +t2 : String = Ucs.text(ux, Far.turn(cfg, st, now, thread, text))
         +g : String = Hub.gen(st, now)
         IO.spawn(Unit, IO.bind(String, Unit, EmbNote.take(cfg, st, thread), n => Agt.go(cfg, st, thread, cwd, model, session, r, t2 ++ n, g, inbox)))
         Hub.placeholder(Hub{st, f, ls, cl, as, inbox, cfg, note}, thread, g)
     case Hub{+st, f, ls, cl, as, +inbox, +cfg, note} B.OcTurn{+thread, +cwd, +model, +session, r, +text}:
       do IO<Hub>:
         +now : Nat <- Now.nat()
-        +t2 : String = Far.turn(cfg, st, now, thread, text)
+        +ux : String <- Ucs.prompt(cfg, st, thread, inbox)
+        +t2 : String = Ucs.text(ux, Far.turn(cfg, st, now, thread, text))
         +g : String = Hub.gen(st, now)
         IO.spawn(Unit, IO.bind(String, Unit, EmbNote.take(cfg, st, thread), n => Oc.go(cfg, st, thread, cwd, model, session, r, t2 ++ n, g, inbox)))
         Hub.placeholder(Hub{st, f, ls, cl, as, inbox, cfg, note}, thread, g)
@@ -9295,10 +9530,7 @@ def Hub.out(h: Hub, o: B.Out) -> IO(Hub):
         Term.put(Cfg.tm(cfg), TM.TKill{key})
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
     case Hub{+st, f, ls, cl, +as, +inbox, +cfg, note} B.Git{+client, +id, +job, +thread, +cwd, +a, +b}:
-      do IO<Hub>:
-        +now : Nat <- Now.nat()
-        KExportJob.route(String.eq(job, "kexport"), inbox, client, id, thread, cwd, Cfg.home(cfg), Cfg.rt(cfg), a, KiCadJob.route(String.eq(job, "kicad"), inbox, client, id, thread, cwd, Cfg.rt(cfg), Media.run(AG.Text.of(st), job, inbox, client, id, thread, cwd, Bot.attach(String.eq(job, "attach.claude"), cfg, st, now, thread, a), b, Cfg.home(cfg), Net.managed(Cfg.net(cfg)), Agents.gen(as, thread))))
-        return Claude.prep(Bool.and(String.eq(job, "attach.claude"), Bool.not(String.is_empty(b))), Hub{st, f, ls, cl, as, inbox, cfg, note}, thread, b)
+      Hub.git.out(String.eq(job, "uctx"), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, id, job, thread, cwd, a, b)
     case Hub{st, f, ls, cl, as, inbox, +cfg, note} B.AskAnswered{+ask, +answer}:
       do IO<Hub>:
         Park.put(Cfg.pk(cfg), PK.PAnswer{ask, answer})
@@ -9503,23 +9735,28 @@ def Boot.far.k(m: Maybe<&2, FR.In>, h: Hub, +c: Client, +id: U32) -> IO(Hub):
     case None{}:
       Boot.last(h, Boot.cr(c, OB.Cr.live(Boot.r(c))), id)
 
-# what the next chunk comes from: what was left when the client joined
-# (or caught up), else the changes made since
-def Boot.src(rs: List<&2, String>, +ls: List<&2, String>, +n: Nat, +at: Nat) -> List<&2, String>:
-  match rs:
-    case Nil{}:
-      OB.Join.window(ls, n, at)
-    case +x <> t:
-      x <> t
+# how many lines a join's next chunk takes from item at of n: what
+# OB.Join.next(OB.Join.window(...)) took when the hub held the lines
+def Join.min(+a: Nat, +b: Nat) -> Nat:
+  Bool.pick(Nat, Nat.is_le(a, b), a, b)
 
+def Join.take(+n: Nat, +at: Nat) -> Nat:
+  Join.min(Nat.sub(n, at), Join.min(OB.Join.most(), OB.Join.lines()))
+
+# where a chunk leaves the cursor; a chunk the store could not give (none
+# while lines are due) skips to the end rather than asking forever
+def Join.adv(+ch: List<&2, String>, +at: Nat, +n: Nat) -> Nat:
+  Bool.pick(Nat, List.is_empty(&2, String, ch), n, Nat.add(at, List.length(&2, String, ch)))
+
+# the next chunk, read from the store (SO.Sto.lines) from the cursor
 def Boot.go(log: Bool, +c: Client, h: Hub, +n: Nat, +id: U32) -> IO(Hub):
   match log h:
     case True{} Hub{st, f, +ls, cl, as, inbox, cfg, note}:
-      +xs = Boot.src(OB.Cr.rest(Boot.r(c)), ls, n, OB.Cr.at(Boot.r(c)))
-      +ch = OB.Join.next(xs)
-      Boot.send(Hub{st, f, ls, cl, as, inbox, cfg, note},
-        Boot.cr(c, OB.Cr.rest.set(OB.Cr.at.set(Boot.r(c), Nat.add(OB.Cr.at(Boot.r(c)), List.length(&2, String, ch))), List.drop(&2, String, xs, List.length(&2, String, ch)))),
-        Hub.boot_items(ch), 0n, id)
+      do IO<Hub>:
+        +ch : List<&2, String> <- SO.Sto.lines(ls, OB.Cr.at(Boot.r(c)), Join.take(n, OB.Cr.at(Boot.r(c))))
+        Boot.send(Hub{st, f, ls, cl, as, inbox, cfg, note},
+          Boot.cr(c, OB.Cr.at.set(Boot.r(c), Join.adv(ch, OB.Cr.at(Boot.r(c)), n))),
+          Hub.boot_items(ch), 0n, id)
     case False{} Hub{st, f, ls, cl, as, inbox, +cfg, note}:
       Boot.far.k(List.get(&2, FR.In, Far.mirrors(cfg), OB.Cr.fl(Boot.r(c))), Hub{st, f, ls, cl, as, inbox, cfg, note}, c, id)
 
@@ -9781,19 +10018,30 @@ def Hub.step.fallback.done(held: List<Hub>, states: List<&2, M.State>, step: B.S
     case h <> hs st <> ss: Hub.step.wakes(step, st, h)
     case _ _: IO.die(Hub & Bool, 1, "missing fallback step context")
 
-def Hub.step.fallback.fold(states: List<&2, M.State>, caps: J.Json, now: Nat, step: B.Step, held: List<Hub>) -> IO(Hub & Bool):
+# (then the uberbot's infinite context: hub.bend's Uc.after, the step as
+# it was while uber.ctx is off)
+def Hub.step.fallback.fold(states: List<&2, M.State>, caps: J.Json, +now: Nat, step: B.Step, held: List<Hub>) -> IO(Hub & Bool):
   match states:
-    case +st <> rest: Hub.step.fallback.done(held, [st], B.Fallback.validate(st, caps, now, step))
+    case +st <> rest: Hub.step.fallback.done(held, [st], B.Uc.after(st, now, B.Fallback.validate(st, caps, now, step)))
     case Nil{}: IO.die(Hub & Bool, 1, "missing fallback state")
 
-def Hub.step.fallback.models(h: Hub) -> String & List<Hub>:
+def Hub.step.fallback.kept(r: J.Json & BN.Bn, +cfg: Cfg, h: Hub) -> J.Json & List<Hub>:
+  (caps, bn) = r
+  match h:
+    case Hub{s, f, ls, cl, as, inbox, _, note}:
+      (caps, [Hub{s, f, ls, cl, as, inbox, Cfg.with_bn(cfg, bn), note}])
+
+# the models' JSON every step needs, kept parsed with its text in Bn
+# (BN.Bn.models.json): parsing Cfg.models at every step was seconds of the
+# JS hub's first minute after boot
+def Hub.step.fallback.models(h: Hub) -> J.Json & List<Hub>:
   match h:
     case Hub{s, f, ls, cl, as, inbox, +cfg, note}:
-      (Cfg.models(cfg), [Hub{s, f, ls, cl, as, inbox, cfg, note}])
+      Hub.step.fallback.kept(BN.Bn.models.json(Cfg.bn(cfg), Cfg.models(cfg)), cfg, Hub{s, f, ls, cl, as, inbox, cfg, note})
 
-def Hub.step.fallback.captured(pair: String & List<Hub>, states: List<&2, M.State>, now: Nat, step: B.Step) -> IO(Hub & Bool):
-  (models, held) = pair
-  Hub.step.fallback.fold(states, Maybe.default(&2, J.Json, J.Json.parse(models), J.Null{}), now, step, held)
+def Hub.step.fallback.captured(pair: J.Json & List<Hub>, states: List<&2, M.State>, now: Nat, step: B.Step) -> IO(Hub & Bool):
+  (caps, held) = pair
+  Hub.step.fallback.fold(states, caps, now, step, held)
 
 def Hub.step.fallback(h: Hub, states: List<&2, M.State>, now: Nat, step: B.Step) -> IO(Hub & Bool):
   Hub.step.fallback.captured(Hub.step.fallback.models(h), states, now, step)
@@ -9822,153 +10070,26 @@ def Hub.step(h: Hub, s: B.Step) -> IO(Hub):
 # keeps each bot's driver and draft in its Cfg (core/teach.bend) and tells
 # every client the info keys drive.<bot>, teach.<bot>, teach.draft.<bot>.
 
-# The embedded browser (core/cef.bend, tools/cef)
-# -----------------------------------------------
-# The window says its X window (browser.embed); with the setting
-# browser.engine "cef" the hub moves the helper to the CEF engine, whose
-# pages are native children of that window. The window says where the
-# shown page goes (browser.place). Every native operation runs in order on
-# one worker (CefQueue): shield on, show, then the shield the page's drive
-# calls for; engine replies carry a generation, and stale ones are dropped.
-# The state is in memory (botnet.bend's Bn.cef).
-
-# a page id names a real thread or a live bot
-def Cef.page.ok(+st: M.State, +page: String) -> Bool:
-  CF.Cef.owner(page, B.Hub.owns(st, page), BO.Bot.live(BO.World.bot(M.State.bots(st), page)))
+# a page id names a real thread or a live bot (core/brctl.bend)
+def Page.ok(+st: M.State, +page: String) -> Bool:
+  BRC.Brc.owner(page, B.Hub.owns(st, page), BO.Bot.live(BO.World.bot(M.State.bots(st), page)))
 
 def Hub.preview(h: Hub, +thread: String, +o: J.Json, +reply: Chan(String)) -> IO(Hub):
   match h:
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
       do IO<Hub>:
-        Desktop.policy(Cfg.br(cfg), Bot.page(st, thread), Cef.page.ok(st, Bot.page(st, thread)), Cfg.tch(cfg))
+        Desktop.policy(Cfg.br(cfg), Bot.page(st, thread), Page.ok(st, Bot.page(st, thread)), Cfg.tch(cfg))
         IO.spawn(Unit, Preview.go(TE.Teach.bot_may(Cfg.tch(cfg), Bot.page(st, thread)), cfg, Bot.page(st, thread), o, reply))
         cl2 : List<&2, Client> <- Hub.auto.k(Bool.not(Bool.and(Bool.not(Bot.is_bot(RUN.Run.bot(st, thread))), Preview.shows(o))), cl, Preview.view(thread))
         return Hub{st, f, ls, cl2, as, inbox, cfg, note}
-
-def CefJob.ask(m: Maybe<&2, Chan(BR.BMsg)>, +op: String, +args: J.Json) -> IO(String):
-  match m:
-    case Some{q}: BR.Browser.ask_on(q, J.Json.get_str(args, "page", ""), op, args)
-    case None{}: IO.pure(String, BR.Browser.fail("no browser helper"))
-
-# the engine request; the helper keeps its flags, so a restarted helper runs
-# the same engine (cef starts the helper; chrome does not)
-def CefJob.engine_ask(m: Maybe<&2, Chan(BR.BMsg)>, +on: Bool, +args: J.Json) -> IO(String):
-  match m:
-    case Some{q}: BR.Browser.engine_ask(q, CF.Cef.argv(on, U32.from_nat(J.Json.get_nat(args, "parent", 0n)), J.Json.get_str(args, "display", "")), args, on)
-    case None{}: IO.pure(String, BR.Browser.fail("no browser helper"))
-
-def CefJob.focus(on: Bool, +m: Maybe<&2, Chan(BR.BMsg)>, +page: String) -> IO(Unit):
-  match on:
-    case True{}:
-      IO.bind(String, Unit, CefJob.ask(m, "focus", J.Json.obj([J.KV{"page", J.Str{page}}])), r => IO.pure(Unit, Unit{}))
-    case False{}: IO.pure(Unit, Unit{})
-
-def CefJob.shield(+m: Maybe<&2, Chan(BR.BMsg)>, +page: String, +drive: String) -> IO(Unit):
-  do IO<Unit>:
-    r : String <- CefJob.ask(m, "shield", J.Json.obj([J.KV{"on", J.Flag{CF.Cef.shield(drive)}}]))
-    CefJob.focus(CF.Cef.shield.focus(drive), m, page)
-
-def CefJob.place(show: Bool, +m: Maybe<&2, Chan(BR.BMsg)>, +p: J.Json, drive: String) -> IO(Unit):
-  match show:
-    case True{}:
-      do IO<Unit>:
-        # Shield first, so a freshly mapped agent page cannot take a stray click.
-        r : String <- CefJob.ask(m, "shield", J.Json.obj([J.KV{"on", J.Flag{True{}}}]))
-        shown : String <- CefJob.ask(m, "show", p)
-        CefJob.shield(m, J.Json.get_str(p, "page", ""), drive)
-    case False{}:
-      IO.bind(String, Unit, CefJob.ask(m, "hide", J.Null{}), r => IO.pure(Unit, Unit{}))
-
-def CefJob.done(+inbox: Chan(Msg), request: String, live: String, err: String) -> IO(Unit):
-  do IO<Unit>:
-    ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, CefDone{request, live, err})
-    return Unit{}
-
-def CefJob.switched(ok: Bool, +m: Maybe<&2, Chan(BR.BMsg)>, +inbox: Chan(Msg), +request: String, +args: J.Json, +err: String) -> IO(Unit):
-  match ok:
-    case True{}: CefJob.done(inbox, request, J.Json.get_str(args, "engine", "chrome"), "")
-    case False{}:
-      do IO<Unit>:
-        r : String <- CefJob.engine_ask(m, False{}, CF.Cef.args(False{}, 0, ""))
-        CefJob.done(inbox, request, "chrome", err)
-
-def CefJob.reply(+r: J.Json, +m: Maybe<&2, Chan(BR.BMsg)>, +inbox: Chan(Msg), request: String, args: J.Json) -> IO(Unit):
-  CefJob.switched(J.Json.get_bool(r, "ok", False{}), m, inbox, request, args, J.Json.get_str(r, "error", "CEF host failed"))
-
-def CefJob.engine(+m: Maybe<&2, Chan(BR.BMsg)>, +inbox: Chan(Msg), +args: J.Json, token: String) -> IO(Unit):
-  do IO<Unit>:
-    r : String <- CefJob.engine_ask(m, String.eq(J.Json.get_str(args, "engine", ""), "cef"), args)
-    CefJob.reply(Maybe.default(&2, J.Json, J.Json.parse(r), J.Null{}), m, inbox, token, args)
-
-# A whole native operation finishes before the next begins. In particular,
-# hide cannot overtake show's shield step, and stale engine replies are ignored.
-def CefQueue.submit(m: Maybe<&2, Chan(CF.CefWork)>, w: CF.CefWork) -> IO(Unit):
-  match m:
-    case Some{q}:
-      do IO<Unit>:
-        ok : Result<&1, &1, CF.CefWork, Unit> <- Chan.send(CF.CefWork, q, w)
-        return Unit{}
-    case None{}: IO.pure(Unit, Unit{})
-
-def CefQueue.act(op: Nat, +m: Maybe<&2, Chan(BR.BMsg)>, +inbox: Chan(Msg), +args: J.Json, drive: String, token: String) -> IO(Unit):
-  match op:
-    case 0n: CefJob.engine(m, inbox, args, token)
-    case 1n: CefJob.place(CF.Cef.visible(args), m, args, drive)
-    case 2n: CefJob.shield(m, J.Json.get_str(args, "page", ""), drive)
-    case _: CefJob.switched(False{}, m, inbox, token, J.Null{}, J.Json.get_str(args, "error", "CEF host exited"))
-
-def CefQueue.run(w: CF.CefWork, m: Maybe<&2, Chan(BR.BMsg)>, inbox: Chan(Msg)) -> IO(Unit):
-  match w:
-    case CF.CefWork{op, args, drive, token}:
-      CefQueue.act(C.Codec.pos(["engine", "place", "shield"], op), m, inbox, args, drive, token)
-
-def CefQueue.got(w: Maybe<&1, CF.CefWork>, +m: Maybe<&2, Chan(BR.BMsg)>, +inbox: Chan(Msg), k: Unit -> IO(Unit)) -> IO(Unit):
-  match w:
-    case Some{work}: IO.bind(Unit, Unit, CefQueue.run(work, m, inbox), k)
-    case None{}: IO.pure(Unit, Unit{})
-
-def CefQueue.loop(fuel: Nat, +q: Chan(CF.CefWork), +m: Maybe<&2, Chan(BR.BMsg)>, +inbox: Chan(Msg)) -> IO(Unit):
-  match fuel:
-    case 0n: IO.pure(Unit, Unit{})
-    case 1n+f:
-      IO.bind(Maybe<&1, CF.CefWork>, Unit, Chan.recv(CF.CefWork, q), w => CefQueue.got(w, m, inbox, u => CefQueue.loop(f, q, m, inbox)))
-
-def Hub.cef.queue.ensure(known: Bool, h: Hub) -> IO(Hub):
-  match known h:
-    case True{} _: IO.pure(Hub, h)
-    case False{} Hub{st, f, ls, cl, as, +inbox, +cfg, note}:
-      do IO<Hub>:
-        +q : Chan(CF.CefWork) <- Chan.new(CF.CefWork, 256)
-        IO.spawn(Unit, CefQueue.loop(Fuel.forever(), q, Cfg.br(cfg), inbox))
-        return Hub{st, f, ls, cl, as, inbox, Cfg.with_cef(cfg, CF.Cef.session.queued(Cfg.cef(cfg), q)), note}
-
-def CefQueue.known(m: Maybe<&2, Chan(CF.CefWork)>) -> Bool:
-  match m:
-    case Some{_}: True{}
-    case None{}: False{}
-
-# the placed page's shield follows its drive, sent only when it changed
-def Hub.cef.shield.go(due: Bool, h: Hub, +drive: String) -> IO(Hub):
-  match due h:
-    case True{} Hub{st, f, ls, cl, as, inbox, +cfg, note}:
-      do IO<Hub>:
-        CefQueue.submit(CF.Cef.session.queue(Cfg.cef(cfg)), CF.CefWork{"shield", CF.Cef.session.place(Cfg.cef(cfg)), drive, ""})
-        return Hub{st, f, ls, cl, as, inbox, Cfg.with_cef(cfg, CF.Cef.session.shield_set(Cfg.cef(cfg), CF.Cef.shield.val(drive))), note}
-    case False{} _: IO.pure(Hub, h)
-
-def Hub.cef.driven(h: Hub, +b: TE.TeachBot) -> IO(Hub):
-  match h:
-    case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
-      Hub.cef.shield.go(Bool.and(Bool.and(String.eq(CF.Cef.session.live(Cfg.cef(cfg)), "cef"), String.eq(TE.Teach.bot.id(b), CF.Cef.session.page(Cfg.cef(cfg)))),
-        CF.Cef.shield.due(CF.Cef.session.shield(Cfg.cef(cfg)), TE.Teach.bot.drive(b))), Hub{st, f, ls, cl, as, inbox, cfg, note}, TE.Teach.bot.drive(b))
 
 def Hub.tch.put(h: Hub, +b: TE.TeachBot) -> IO(Hub):
   match h:
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
       do IO<Hub>:
-        Desktop.policy(Cfg.br(cfg), TE.Teach.bot.id(b), Cef.page.ok(st, TE.Teach.bot.id(b)), TE.Teach.put(Cfg.tch(cfg), b))
+        Desktop.policy(Cfg.br(cfg), TE.Teach.bot.id(b), Page.ok(st, TE.Teach.bot.id(b)), TE.Teach.put(Cfg.tch(cfg), b))
         cl2 : List<&2, Client> <- Wire.all(cl, TE.Teach.msg(b))
-        Hub.cef.driven(Hub{st, f, ls, cl2, as, inbox, Cfg.with_tch(cfg, TE.Teach.put(Cfg.tch(cfg), b)), note}, b)
+        return Hub{st, f, ls, cl2, as, inbox, Cfg.with_tch(cfg, TE.Teach.put(Cfg.tch(cfg), b)), note}
 
 def Hub.tch.ok(h: Hub, +client: U32, +id: String) -> IO(Hub):
   Hub.out(h, B.Reply.ok(client, id))
@@ -10027,7 +10148,7 @@ def BrowseJob.reply(+inbox: Chan(Msg), +client: U32, +id: String, +line: String)
 def BrowseJob.run(m: Maybe<&2, Chan(BR.BMsg)>, +inbox: Chan(Msg), +client: U32, +id: String, +o: J.Json) -> IO(Unit):
   match m:
     case Some{q}:
-      IO.bind(String, Unit, BR.Browser.ask_on(q, J.Json.get_str(o, "bot", ""), J.Json.get_str(o, "command", ""), CF.Cef.toolbar.args(o)),
+      IO.bind(String, Unit, BR.Browser.ask_on(q, J.Json.get_str(o, "bot", ""), J.Json.get_str(o, "command", ""), BRC.Brc.toolbar.args(o)),
         line => BrowseJob.reply(inbox, client, id, line))
     case None{}: BrowseJob.reply(inbox, client, id, BR.Browser.fail("browser helper unavailable"))
 
@@ -10046,7 +10167,7 @@ def Hub.browser.toolbar.ok(ok: Bool, h: Hub, +client: U32, +id: String, +o: J.Js
 
 def Hub.browser.toolbar(toolbar: Bool, h: Hub, +client: U32, +id: String, +o: J.Json, +b: TE.TeachBot) -> IO(Hub):
   match toolbar:
-    case True{}: Hub.browser.toolbar.ok(CF.Cef.toolbar.allowed(J.Json.get_str(o, "command", "")), h, client, id, o, b)
+    case True{}: Hub.browser.toolbar.ok(BRC.Brc.toolbar.allowed(J.Json.get_str(o, "command", "")), h, client, id, o, b)
     case False{}: Hub.browser.k(C.Codec.pos(["takeover", "handback"], J.Json.get_str(o, "op", "")), h, client, id, o, b)
 
 def Hub.browser.valid(h: Hub, +client: U32, +id: String, +o: J.Json) -> IO(Hub):
@@ -10063,7 +10184,7 @@ def Hub.browser.known(ok: Bool, h: Hub, +client: U32, +id: String, +o: J.Json) -
 def Hub.browser(h: Hub, +client: U32, +id: String, +o: J.Json) -> IO(Hub):
   match h:
     case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
-      Hub.browser.known(Cef.page.ok(st, J.Json.get_str(o, "bot", "")), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, id, o)
+      Hub.browser.known(Page.ok(st, J.Json.get_str(o, "bot", "")), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, id, o)
 
 def Hub.teach.start(h: Hub, +client: U32, +id: String, +bot: String, +now: Nat) -> IO(Hub):
   match h:
@@ -10241,7 +10362,7 @@ def Hub.desktop_record(h: Hub, +candidate: J.Json) -> IO(Hub):
   match h:
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
       +owner = J.Json.get_str(J.Json.get_obj(J.Json.get_obj(candidate, "payload"), "event"), "owner", "")
-      Hub.desktop_record.request(Bool.and(Cef.page.ok(st, owner), TE.Teach.recording(TE.Teach.get(Cfg.tch(cfg), owner))), Cfg.br(cfg), Hub{st, f, ls, cl, as, inbox, cfg, note}, candidate)
+      Hub.desktop_record.request(Bool.and(Page.ok(st, owner), TE.Teach.recording(TE.Teach.get(Cfg.tch(cfg), owner))), Cfg.br(cfg), Hub{st, f, ls, cl, as, inbox, cfg, note}, candidate)
 
 def Hub.browser_ev.record_kind(desktop: Bool, h: Hub, +o: J.Json) -> IO(Hub):
   match desktop:
@@ -10251,95 +10372,20 @@ def Hub.browser_ev.record_kind(desktop: Bool, h: Hub, +o: J.Json) -> IO(Hub):
 def Hub.browser_ev.record(h: Hub, +o: J.Json) -> IO(Hub):
   Hub.browser_ev.record_kind(String.eq(J.Json.get_str(o, "event", ""), "desktop-record-candidate"), h, o)
 
-# a press on a page's shield: the person takes the page over (the shield
-# then comes off and the page is focused: Hub.tch.put); no reply goes out
-def Hub.cef.click.k(take: Bool, h: Hub, +b: TE.TeachBot) -> IO(Hub):
-  match take:
-    case True{}:
-      Hub.tch.put(h, TE.Teach.takeover(b))
-    case False{}:
-      IO.pure(Hub, h)
-
-def Hub.cef.click(real: Bool, h: Hub, +page: String) -> IO(Hub):
-  match real h:
-    case True{} Hub{st, f, ls, cl, as, inbox, +cfg, note}:
-      Hub.cef.click.k(CF.Cef.shield.take(TE.Teach.bot.drive(TE.Teach.get(Cfg.tch(cfg), page))), Hub{st, f, ls, cl, as, inbox, cfg, note}, TE.Teach.get(Cfg.tch(cfg), page))
-    case False{} _:
-      IO.pure(Hub, h)
-
-def Hub.cef.click.o(h: Hub, +o: J.Json) -> IO(Hub):
-  match h:
-    case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
-      Hub.cef.click(Cef.page.ok(st, J.Json.get_str(o, "page", "")), Hub{st, f, ls, cl, as, inbox, cfg, note}, J.Json.get_str(o, "page", ""))
-
-# the CEF host failed while live: back to chrome, through the queue
-def Hub.cef.hostdead(failed: Bool, h: Hub, +o: J.Json) -> IO(Hub):
-  match failed h:
-    case True{} Hub{st, f, ls, cl, as, +inbox, +cfg, note}:
-      do IO<Hub>:
-        CefQueue.submit(CF.Cef.session.queue(Cfg.cef(cfg)), CF.CefWork{"failed", o, "", CF.Cef.session.token(Cfg.cef(cfg))})
-        return Hub{st, f, ls, cl, as, inbox, cfg, note}
-    case False{} _: IO.pure(Hub, h)
-
-def Hub.cef.engine_ev(h: Hub, +o: J.Json) -> IO(Hub):
-  match h:
-    case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
-      Hub.cef.hostdead(Bool.and(String.eq(CF.Cef.session.live(Cfg.cef(cfg)), "cef"), Bool.not(J.Json.get_bool(o, "ok", True{}))),
-        Hub{st, f, ls, cl, as, inbox, cfg, note}, o)
-
-# the helper exited: it is started again (with the engine's flags) by
-# showing the placed page and its shield again, a few times at most
-def Hub.cef.revive(go: Bool, h: Hub) -> IO(Hub):
-  match go h:
-    case True{} Hub{st, f, ls, cl, as, inbox, +cfg, note}:
-      do IO<Hub>:
-        CefQueue.submit(CF.Cef.session.queue(Cfg.cef(cfg)), CF.CefWork{"place", CF.Cef.session.place(Cfg.cef(cfg)),
-          TE.Teach.bot.drive(TE.Teach.get(Cfg.tch(cfg), CF.Cef.session.page(Cfg.cef(cfg)))), ""})
-        return Hub{st, f, ls, cl, as, inbox, Cfg.with_cef(cfg, CF.Cef.session.tried(Cfg.cef(cfg))), note}
-    case False{} _: IO.pure(Hub, h)
-
-def Hub.cef.exited(h: Hub) -> IO(Hub):
-  match h:
-    case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
-      Hub.cef.revive(CF.Cef.revive(String.eq(CF.Cef.session.live(Cfg.cef(cfg)), "cef"), CF.Cef.visible(CF.Cef.session.place(Cfg.cef(cfg))), CF.Cef.session.tries(Cfg.cef(cfg))),
-        Hub{st, f, ls, cl, as, inbox, cfg, note})
-
-# a page navigated: it exists; every client hears its one key (and the
-# key of the oldest, if it was pushed out)
-def Hub.cef.seen.k(new: Bool, h: Hub, +page: String) -> IO(Hub):
-  match new h:
-    case True{} Hub{st, f, ls, cl, as, inbox, +cfg, note}:
-      do IO<Hub>:
-        cl2 : List<&2, Client> <- Wire.all(cl, J.Json.show(J.Json.obj([J.KV{"t", J.Str{"info"}}, J.KV{"info", J.Json.obj(CF.Cef.pages.told(page, CF.Cef.pages.out(CF.Cef.session.pages(Cfg.cef(cfg)))))}])))
-        return Hub{st, f, ls, cl2, as, inbox, Cfg.with_cef(cfg, CF.Cef.session.pages_set(Cfg.cef(cfg), CF.Cef.pages.add(CF.Cef.session.pages(Cfg.cef(cfg)), page))), note}
-    case False{} _:
-      IO.pure(Hub, h)
-
-def Hub.cef.seen.o(h: Hub, +o: J.Json) -> IO(Hub):
-  match h:
-    case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
-      Hub.cef.seen.k(Bool.and(Cef.page.ok(st, J.Json.get_str(o, "page", "")), Bool.not(CF.Cef.pages.has(CF.Cef.session.pages(Cfg.cef(cfg)), J.Json.get_str(o, "page", "")))),
-        Hub{st, f, ls, cl, as, inbox, cfg, note}, J.Json.get_str(o, "page", ""))
-
 def Hub.browser.tabs(h: Hub, +o: J.Json) -> IO(Hub):
-  IO.bind(Hub, Hub, Hub.cef.seen.o(h, o), h2 => Hub.broadcast(h2, J.Json.show(J.Json.obj([J.KV{"t", J.Str{"info"}},
-    J.KV{"info", J.Json.obj([J.KV{"browser.tabs." ++ J.Json.get_str(o, "page", ""), J.Str{J.Json.show(o)}}])}]))))
+  Hub.broadcast(h, J.Json.show(J.Json.obj([J.KV{"t", J.Str{"info"}},
+    J.KV{"info", J.Json.obj([J.KV{"browser.tabs." ++ J.Json.get_str(o, "page", ""), J.Str{J.Json.show(o)}}])}])))
 
 def Hub.browser_ev.c(i: Nat, h: Hub, +o: J.Json) -> IO(Hub):
   match i:
     case 0n: Hub.browser_ev.record(h, o)
-    case 1n: Hub.cef.engine_ev(h, o)
-    case 2n: Hub.cef.click.o(h, o)
-    case 3n: Hub.cef.exited(h)
-    case 4n: Hub.cef.seen.o(h, o)
-    case 5n: Hub.cef.seen.o(h, o)
-    case 6n: Hub.browser.tabs(h, o)
+    case 1n: Hub.browser.tabs(h, o)
     case _: IO.pure(Hub, h)
 
 def Hub.browser_ev.record_dispatch(desktop: Bool, h: Hub, +o: J.Json) -> IO(Hub):
   match desktop:
     case True{}: Hub.desktop_record(h, o)
-    case False{}: Hub.browser_ev.c(C.Codec.pos(["record", "engine", "shield-click", "helper-exit", "navigated", "load", "tabs"], J.Json.get_str(o, "event", "")), h, o)
+    case False{}: Hub.browser_ev.c(C.Codec.pos(["record", "tabs"], J.Json.get_str(o, "event", "")), h, o)
 
 def Hub.browser_ev.o(h: Hub, +o: J.Json) -> IO(Hub):
   Hub.browser_ev.record_dispatch(String.eq(J.Json.get_str(o, "event", ""), "desktop-record-candidate"), h, o)
@@ -10571,102 +10617,6 @@ def Hub.rpc.c(seen: Bool, h: Hub, +client: U32, +text: String, +now: Nat) -> IO(
     case False{}:
       Hub.rpc.g(String.contains(text, "bots.give"), h, client, text, now)
 
-def Hub.cef.say(+cp: CF.CefSession) -> String:
-  J.Json.show(J.Json.obj([J.KV{"t", J.Str{"info"}}, J.KV{"info", J.Json.obj(CF.Cef.session.info(cp))}]))
-
-def Hub.cef.done(current: Bool, h: Hub, +live: String, +err: String) -> IO(Hub):
-  match current h:
-    case True{} Hub{st, f, ls, cl, as, inbox, +cfg, note}:
-      do IO<Hub>:
-        +cp : CF.CefSession = CF.Cef.session.done(Cfg.cef(cfg), live, err)
-        cl2 : List<&2, Client> <- Wire.all(cl, Hub.cef.say(cp))
-        return Hub{st, f, ls, cl2, as, inbox, Cfg.with_cef(cfg, cp), note}
-    case False{} _: IO.pure(Hub, h)
-
-def Hub.cef.finished(h: Hub, +request: String, live: String, err: String) -> IO(Hub):
-  match h:
-    case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
-      Hub.cef.done(CF.Cef.current(Cfg.cef(cfg), request), Hub{st, f, ls, cl, as, inbox, cfg, note}, live, err)
-
-# the engine the setting and the window's embed call for, asked of the
-# helper when it differs from what was last asked (a short key compared)
-def Hub.cef.reconcile.queue(h: Hub, +on: Bool, +key: String) -> IO(Hub):
-  match h:
-    case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
-      do IO<Hub>:
-        +cp : CF.CefSession = CF.Cef.session.done(CF.Cef.session.request_set(Cfg.cef(cfg), key), "chrome", "")
-        CefQueue.submit(CF.Cef.session.queue(cp), CF.CefWork{"engine", CF.Cef.args(on, CF.Cef.session.xid(cp), CF.Cef.session.display(cp)), "", CF.Cef.session.token(cp)})
-        cl2 : List<&2, Client> <- Wire.all(cl, Hub.cef.say(cp))
-        return Hub{st, f, ls, cl2, as, inbox, Cfg.with_cef(cfg, cp), note}
-
-def Hub.cef.reconcile.k(changed: Bool, h: Hub, +on: Bool, +key: String) -> IO(Hub):
-  match changed h:
-    case True{} Hub{st, f, ls, cl, as, inbox, +cfg, note}:
-      IO.bind(Hub, Hub, Hub.cef.queue.ensure(CefQueue.known(CF.Cef.session.queue(Cfg.cef(cfg))), Hub{st, f, ls, cl, as, inbox, cfg, note}), h2 => Hub.cef.reconcile.queue(h2, on, key))
-    case False{} _: IO.pure(Hub, h)
-
-def Hub.cef.reconcile.on(h: Hub, +on: Bool) -> IO(Hub):
-  match h:
-    case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
-      Hub.cef.reconcile.k(Bool.not(String.eq(CF.Cef.session.request(Cfg.cef(cfg)), CF.Cef.want.key(on, CF.Cef.session.xid(Cfg.cef(cfg)), CF.Cef.session.display(Cfg.cef(cfg))))),
-        Hub{st, f, ls, cl, as, inbox, cfg, note}, on, CF.Cef.want.key(on, CF.Cef.session.xid(Cfg.cef(cfg)), CF.Cef.session.display(Cfg.cef(cfg))))
-
-def Hub.cef.reconcile(h: Hub) -> IO(Hub):
-  match h:
-    case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
-      Hub.cef.reconcile.on(Hub{st, f, ls, cl, as, inbox, cfg, note}, CF.Cef.engine(CF.Cef.requested(M.Setting.get(st, "browser.engine", CF.Cef.default())), CF.Cef.session.known(Cfg.cef(cfg)), True{}))
-
-# only after the messages that can change the engine (Cef.after)
-def Hub.cef.after(go: Bool, h: Hub) -> IO(Hub):
-  match go:
-    case True{}: Hub.cef.reconcile(h)
-    case False{}: IO.pure(Hub, h)
-
-def Hub.cef.near(h: Hub, +client: U32) -> IO(Hub):
-  match h:
-    case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
-      IO.pure(Hub, Hub{st, f, ls, cl, as, inbox, Cfg.with_cef(cfg, CF.Cef.session.near(Cfg.cef(cfg), client)), note})
-
-def Hub.cef.place(ok: Bool, h: Hub, +client: U32, +id: String, +p: J.Json) -> IO(Hub):
-  match ok h:
-    case True{} Hub{st, f, ls, cl, as, inbox, +cfg, note}:
-      do IO<Hub>:
-        +drive : String = TE.Teach.bot.drive(TE.Teach.get(Cfg.tch(cfg), J.Json.get_str(p, "page", "")))
-        CefQueue.submit(CF.Cef.session.queue(Cfg.cef(cfg)), CF.CefWork{"place", p, drive, ""})
-        Hub.tch.ok(Hub{st, f, ls, cl, as, inbox, Cfg.with_cef(cfg, CF.Cef.session.place_set(Cfg.cef(cfg), p, CF.Cef.shield.val(drive))), note}, client, id)
-    case False{} _: Hub.tch.err(h, client, id, "not the embedded browser window or unknown page")
-
-def Hub.cef.embed(ok: Bool, h: Hub, +client: U32, +id: String, +p: J.Json) -> IO(Hub):
-  match ok h:
-    case True{} Hub{st, f, ls, cl, as, inbox, +cfg, note}:
-      Hub.tch.ok(Hub{st, f, ls, cl, as, inbox, Cfg.with_cef(cfg, CF.Cef.session.embed_set(Cfg.cef(cfg), client, U32.from_nat(J.Json.get_nat(p, "xid", 0n)), J.Json.get_str(p, "display", ""))), note}, client, id)
-    case False{} _: Hub.tch.err(h, client, id, "only this machine's window can embed the browser")
-
-# browser.embed {xid, display} and browser.place {page, x, y, w, h} or {}:
-# only from this machine's window (Cef.from); a place only from the window
-# that embedded, only while cef runs, and only for a real page
-def Hub.cef.rpc.k(embed: Bool, h: Hub, +client: U32, +id: String, +p: J.Json) -> IO(Hub):
-  match embed h:
-    case True{} Hub{st, f, ls, cl, as, inbox, +cfg, note}:
-      Hub.cef.embed(CF.Cef.from(client, CF.Cef.session.is_local(Cfg.cef(cfg), client)), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, id, p)
-    case False{} Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
-      Hub.cef.place(Bool.and(Bool.and(CF.Cef.from(client, CF.Cef.session.is_local(Cfg.cef(cfg), client)), U32.is_eq(client, CF.Cef.session.client(Cfg.cef(cfg)))),
-        Bool.and(String.eq(CF.Cef.session.live(Cfg.cef(cfg)), "cef"), Bool.or(Bool.not(CF.Cef.visible(p)), Cef.page.ok(st, J.Json.get_str(p, "page", ""))))),
-        Hub{st, f, ls, cl, as, inbox, cfg, note}, client, id, p)
-
-def Hub.cef.rpc(cef: Bool, h: Hub, +client: U32, +text: String, +now: Nat, +o: J.Json) -> IO(Hub):
-  match cef:
-    case True{}: Hub.cef.rpc.k(String.eq(J.Json.get_str(o, "m", ""), "browser.embed"), h, client, J.Json.as_raw(J.Json.get(o, "id"), "0"), J.Json.get_obj(o, "p"))
-    case False{}: Hub.rpc.c(String.eq(J.Json.get_str(o, "m", ""), "browser.seen"), h, client, text, now)
-
-def Hub.rpc.ocef(h: Hub, +client: U32, +text: String, +now: Nat, +o: J.Json) -> IO(Hub):
-  Hub.cef.rpc(Bool.or(String.eq(J.Json.get_str(o, "m", ""), "browser.embed"), String.eq(J.Json.get_str(o, "m", ""), "browser.place")), h, client, text, now, o)
-
-def Hub.rpc.cefroute(cef: Bool, h: Hub, +client: U32, +text: String, +now: Nat) -> IO(Hub):
-  match cef:
-    case True{}: Hub.rpc.ocef(h, client, text, now, Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{}))
-    case False{}: Hub.rpc.c(String.contains(text, "\"browser.seen\""), h, client, text, now)
-
 # A mobile connection asks for a recent presentation before starting its
 # canonical log. It is an ordinary remote client: it never takes the trusted
 # in-process WState/JoinHere path. The timeout falls back to the old join.
@@ -10704,15 +10654,15 @@ def Hub.mobile.history.begin(+n: Nat, +s0: Nat, +origin: String, +xs: List<&2, S
       +more = Bool.or(Nat.is_lt(Nat.add(s0, k), n), Bool.not(List.is_empty(&2, FR.In, Far.mirrors(cfg))))
       do IO<Hub>:
         m : Maybe<&2, Client> <- Wire.offer(Client{id, out, look,
-          PRESENT.Session.history_credit(cr, Nat.add(s0, k), more, OB.Join.from(ls, n, Nat.add(s0, k))), sock, legacy, Nil{}},
+          PRESENT.Session.history_credit(cr, Nat.add(s0, k), more, Nil{}), sock, legacy, Nil{}},
           Hub.log_items(origin, cfg, s0, List.take(&2, String, xs, k), more), 0n)
         m1 : Maybe<&2, Client> <- Hub.join.live(more, m, cfg)
         Hub.join.more(more, inbox, id, OB.Cr.gen(cr))
         return Hub{st, f, ls, Clients.swap(cl, id, m1), as, inbox, cfg, note}
 
-def Hub.mobile.history.window(+n: Nat, +origin: String, +since: Nat, oldOrigin: String, +ls: List<&2, String>, h: Hub, c: Client) -> IO(Hub):
+def Hub.mobile.history.window(+n: Nat, +origin: String, +since: Nat, oldOrigin: String, +ls: SO.Lg, h: Hub, c: Client) -> IO(Hub):
   +s0 = PRESENT.Session.resume_cursor(since, oldOrigin, origin, n)
-  Hub.mobile.history.begin(n, s0, origin, OB.Join.window(ls, n, s0), h, c)
+  IO.bind(List<&2, String>, Hub, SO.Sto.lines(ls, s0, Join.take(n, s0)), xs => Hub.mobile.history.begin(n, s0, origin, xs, h, c))
 
 def Hub.mobile.history.start(h: Hub, c: Client) -> IO(Hub):
   match h c:
@@ -10818,7 +10768,7 @@ def Hub.rpc.mobile.kind(i: Nat, +o: J.Json, h: Hub, +client: U32, +text: String,
     case 1n: Hub.rpc.mobile.dispatch(True{}, False{}, h, client, o, now)
     case 2n: Hub.rpc.mobile.dispatch(False{}, True{}, h, client, o, now)
     case 3n: Hub.rpc.mobile.dispatch(True{}, True{}, h, client, o, now)
-    case _: Hub.rpc.cefroute(Bool.or(String.contains(text, "\"browser.embed\""), String.contains(text, "\"browser.place\"")), h, client, text, now)
+    case _: Hub.rpc.c(String.contains(text, "\"browser.seen\""), h, client, text, now)
 
 # On-demand view RPCs are separate from optional early full-log presentation.
 # This context is connection-local and never a kept-state/cache authority.
@@ -10911,6 +10861,25 @@ def Hub.thin.respond(h: Hub, +client: U32, +o: J.Json, +result: J.Json, +c: Clie
       Hub.thin.deliver(Nat.is_le(size, Bool.pick(Nat, String.eq(J.Json.get_str(o, "m", ""), "view.search"), 65536n, 262144n)),
         Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, answer, size, c, context, now)
 
+def Hub.thin.deliver.cbor(+fits: Bool, h: Hub, +client: U32, +o: J.Json, +bytes: List<&2, U32>, +size: Nat, +c: Client, +context: ThinContext, +now: Nat) -> IO(Hub):
+  match fits h:
+    case False{} _: Hub.thin.error(h, client, o, "LIMIT")
+    case True{} Hub{+st, f, ls, cl, as, inbox, cfg, note}:
+      do IO<Hub>:
+        +cl2 : List<&2, Client> <- Wire.to.raw(Clients.swap(cl, client, Some{Client.thin.with(c, context)}), client, WCbor{bytes, size}, size)
+        return Hub{st, f, ls, cl2, as, inbox, Cfg.telemetry.ui_action(st, cfg, o, Maybe.is_some(&2, Client, Clients.get(cl2, client)), now), note}
+
+# a spliced reply (thin-splice.bend): the envelope Hub.thin.respond writes,
+# its pages as the kept bytes; its JSON size added up, not walked
+def Hub.thin.respond.spliced(h: Hub, +client: U32, +o: J.Json, +sp: TSPL.Spliced, +c: Client, +context: ThinContext, +now: Nat) -> IO(Hub):
+  match h sp:
+    case Hub{st, f, ls, cl, as, inbox, +cfg, note} TSPL.Spliced{+res, +holes, +json, +names}:
+      +p = J.Json.get_obj(o, "p")
+      +answer = (J.Json.obj([J.KV{"t", J.Str{"reply"}}, J.KV{"id", Maybe.default(&2, J.Json, J.Json.get(o, "id"), J.Null{})}, J.KV{"ok", J.Flag{True{}}},
+        J.KV{"result", Hub.thin.result(res, p, ThinContext.view(context), Bool.pick(String, String.eq(Client.thin.mode(c), "view-web"), "web", "mobile"), Cfg.thin.revision(cfg))}]))
+      +size = Nat.sub(Nat.add(J.Json.bytes(answer), json), names)
+      Hub.thin.deliver.cbor(Nat.is_le(size, 262144n), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, CB.Cbor.encode.holes(answer, holes), size, c, context, now)
+
 def Hub.thin.cursor.empty(+empty: Bool, +text: String, +epoch: String, +target: J.Json, +query: String) -> Maybe<&2, Nat>:
   match empty:
     case True{}: Some{0n}
@@ -10961,22 +10930,65 @@ def Hub.thin.fetch(memory: Bool, +cfg: Cfg, +thread: String, +anchor: Nat) -> IO
     case True{}: IO.pure(TSTO.Page, TSTO.Page{Cfg.thin(cfg), THIN.Index.page(Cfg.thin(cfg), thread, anchor, 32n)})
     case False{}: TSTO.Ts.page(Cfg.thin.store(cfg), thread, anchor, 32n, Cfg.thin(cfg))
 
-def Hub.thin.render.page(+pg: TSTO.Page, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, +context: ThinContext, +p: J.Json) -> IO(Hub):
+# the hub's info with a thread's skills (as a client's skills.list answer
+# keeps them: "skills", "skills.for")
+def Hub.thin.skills.info(+ss: List<&2, AG.USkill>, +info: J.Json, +thread: String) -> J.Json:
+  TV.Obj.put(TV.Obj.put(info, "skills", J.Str{J.Json.show(AG.USkill.json(ss))}), "skills.for", J.Str{thread})
+
+def Hub.thin.info.k(+want: Bool, +st: M.State, +cfg: Cfg, +thread: String) -> IO(J.Json):
+  match want:
+    case True{}: IO.bind(List<&2, AG.USkill>, J.Json, Skills.scan(B.Hub.cwd(st, B.Hub.thread(st, thread))), +ss => IO.pure(J.Json, Hub.thin.skills.info(ss, Hub.info(cfg), thread)))
+    case False{}: IO.pure(J.Json, Hub.info(cfg))
+
+# The info a thin render reads: the hub's, and the thread's skills while the
+# draft the request brought types a `$name` or a slash command (a thin view
+# never asks skills.list: the hub renders its composer, client.bend's
+# Skills.wants)
+def Hub.thin.info(+st: M.State, +cfg: Cfg, +p: J.Json) -> IO(J.Json):
+  +thread = TV.Target.thread(st, J.Json.get_obj(p, "target"))
+  Hub.thin.info.k(Bool.and(Bool.not(String.is_empty(thread)), UC.Skills.wants(J.Json.get_str(J.Json.get_obj(J.Json.get_obj(p, "session"), "drafts"), thread, ""))), st, cfg, thread)
+
+def Hub.thin.render.page(+pg: TSTO.Page, +info: J.Json, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, +context: ThinContext, +p: J.Json, +key: String, +ms: Nat) -> IO(Hub):
   match h:
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
       +web = String.eq(Client.thin.mode(c), "view-web")
-      +actor = TA.Actor.mail_cache(TA.Actor.refresh(ThinContext.actors(context), web, st, Hub.info(cfg),
+      +stream = TLIVE.Stream.get(Cfg.thin.streams(cfg), TV.Target.thread(st, J.Json.get_obj(p, "target")))
+      +actor = TA.Actor.mail_cache(TA.Actor.refresh(ThinContext.actors(context), web, st, info,
         J.Json.obj([J.KV{"t", J.Str{"live"}}, J.KV{"items", J.Json.arr(Nil{})}]), now, p, ThinContext.view(context)), ThinContext.actors(context), Cfg.thin.mail(cfg))
-      Hub.thin.rendered(TA.Actor.render(actor, web, st, TSTO.Page.index(pg), p, Cfg.thin.epoch(cfg), now, TSTO.Page.ids(pg), TLIVE.Stream.get(Cfg.thin.streams(cfg), TV.Target.thread(st, J.Json.get_obj(p, "target")))),
+      Hub.thin.rendered(TA.Rendered.remember(TA.Actor.render(actor, web, st, TSTO.Page.index(pg), p, Cfg.thin.epoch(cfg), now, TSTO.Page.ids(pg), stream), key, ms, stream, web, TV.Target.thread(st, J.Json.get_obj(p, "target"))),
         Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now, context)
 
-def Hub.thin.render(h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, +context: ThinContext, +anchor: Nat) -> IO(Hub):
+def Hub.thin.render.full(h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, +context: ThinContext, +anchor: Nat, +p: J.Json, +key: String, +ms: Nat) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
+      do IO<Hub>:
+        +pg : TSTO.Page <- Hub.thin.fetch(String.is_empty(Cfg.thin.store(cfg)), cfg, TV.Target.thread(st, J.Json.get_obj(p, "target")), anchor)
+        +info : J.Json <- Hub.thin.info(st, cfg, p)
+        Hub.thin.render.page(pg, info, Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now, context, p, key, ms)
+
+# a view.update whose render memo still holds (thin-actor.bend's
+# Memo.reply: only the live row can have changed) answers with it spliced
+# (thin-splice.bend); anything else renders in full and is remembered
+def Hub.thin.render.memo(+m: Maybe<&2, TSPL.Spliced>, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, +context: ThinContext, +anchor: Nat, +p: J.Json, +key: String, +ms: Nat) -> IO(Hub):
+  match m:
+    case Some{+sp}:
+      Hub.thin.respond.spliced(h, client, o, sp, c, context, now)
+    case None{}:
+      Hub.thin.render.full(h, client, o, c, now, context, anchor, p, key, ms)
+
+def Hub.thin.render.at(h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, +context: ThinContext, +anchor: Nat, +ms: Nat) -> IO(Hub):
   match h:
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
       +p = Hub.thin.input(String.eq(J.Json.get_str(o, "m", ""), "view.action"), J.Json.get_obj(o, "p"), ThinContext.cid(context))
-      do IO<Hub>:
-        +pg : TSTO.Page <- Hub.thin.fetch(String.is_empty(Cfg.thin.store(cfg)), cfg, TV.Target.thread(st, J.Json.get_obj(p, "target")), anchor)
-        Hub.thin.render.page(pg, Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now, context, p)
+      +web = String.eq(Client.thin.mode(c), "view-web")
+      +thread = TV.Target.thread(st, J.Json.get_obj(p, "target"))
+      +key = TA.Memo.key(M.State.seq(st), J.Json.show(Hub.info(cfg)), p, anchor, ThinContext.view(context), web, thread)
+      Hub.thin.render.memo(TA.Memo.reply(TA.Actor.memos(ThinContext.actors(context)), String.eq(J.Json.get_str(o, "m", ""), "view.update"), key, ms, TA.Memo.life(client), web,
+        TLIVE.Stream.get(Cfg.thin.streams(cfg), thread), thread, Cfg.thin.epoch(cfg), J.Json.get_obj(p, "target"), TA.Actor.loc(ThinContext.actors(context))),
+        Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now, context, anchor, p, key, ms)
+
+def Hub.thin.render(h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, +context: ThinContext, +anchor: Nat) -> IO(Hub):
+  IO.bind(Nat, Hub, IO.now(), +ms => Hub.thin.render.at(h, client, o, c, now, context, anchor, ms))
 
 # a search page: over the whole index, or (with a store) over the
 # candidates it fetched (TSTO.Ts.search); the same rows either way
@@ -11110,10 +11122,25 @@ def Hub.thin.answer(ws: List<&2, ThinWait>, h: Hub) -> IO(Hub):
         h2 : Hub <- Hub.thin.rpc.now(h, client, o, now)
         Hub.thin.answer(tail, h2)
 
-def Hub.thin.warmed(h: Hub, i: THIN.Index, m: TMAIL.Cache) -> IO(Hub):
+def Mem.settled.k(none: Bool, +line: String) -> IO(Unit):
+  match none:
+    case True{}:
+      IO.pure(Unit, Unit{})
+    case False{}:
+      Log.info(line)
+
+def Mem.settled(+line: String) -> IO(Unit):
+  Mem.settled.k(String.is_empty(line), line)
+
+def Hub.thin.warmed.k(h: Hub, i: THIN.Index, m: TMAIL.Cache) -> IO(Hub):
   match h:
     case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
       Hub.thin.answer(List.reverse(&2, ThinWait, Cfg.thin.waiting(cfg)), Hub{st, f, ls, cl, as, inbox, Cfg.thin.warm(cfg, i, m), note})
+
+# the boot's thin index arrived: the JS heap is settled once (H.Mem.settle,
+# until store mode keeps the index small), then the waiting reads answered
+def Hub.thin.warmed(h: Hub, i: THIN.Index, m: TMAIL.Cache) -> IO(Hub):
+  IO.bind(String, Hub, H.Mem.settle(), line => IO.bind(Unit, Hub, Mem.settled(line), _ => Hub.thin.warmed.k(h, i, m)))
 
 def Hub.thin.read_guard(valid: Bool, h: Hub, +client: U32, +text: String, +now: Nat) -> IO(Hub):
   match valid:
@@ -11158,10 +11185,20 @@ def Hub.rpc.thin_cap(thin: Bool, h: Hub, +client: U32, +text: String, +now: Nat)
     case True{}: Hub.rpc.thin_short(TVW.Wire.within(text, 262144n), h, client, text, now)
     case False{}: Hub.rpc.parse(h, client, text, now)
 
+# A request from no connected client is dropped (a client that left),
+# except client 0: the hub's own jobs (GitJob.say: a thread's worktree, its
+# notes; a dead push token) and the in-process window send theirs as 0, and
+# a headless hub has no client 0. Dropping those lost every new thread's
+# worktree, so its first turn never started (far_e2e on a headless hub).
+def Hub.rpc.own(own: Bool, h: Hub, +client: U32, +text: String, +now: Nat) -> IO(Hub):
+  match own:
+    case True{}: Hub.rpc.thin_cap(False{}, h, client, text, now)
+    case False{}: IO.pure(Hub, h)
+
 def Hub.rpc.client(c: Maybe<&2, Client>, h: Hub, +client: U32, +text: String, +now: Nat) -> IO(Hub):
   match c:
     case Some{c}: Hub.rpc.thin_cap(Client.thin(c), h, client, text, now)
-    case None{}: IO.pure(Hub, h)
+    case None{}: Hub.rpc.own(U32.is_eq(client, 0), h, client, text, now)
 
 def Hub.rpc(h: Hub, +client: U32, +text: String, +now: Nat) -> IO(Hub):
   match h:
@@ -11236,7 +11273,7 @@ def Hub.tick(h: Hub, +now: Nat) -> IO(Hub):
         +cl : List<&2, Client> <- Desk.say(DK.Desk.text(Clients.looks(cl0), Nat.sub(now, 60n)), cl0, now)
         PS.Perf.set("hub.clients", U32.from_nat(List.length(&2, Client, cl)))
         PS.Perf.set("hub.agents", U32.from_nat(List.length(&2, Agent, as)))
-        PS.Perf.set("hub.changes", U32.from_nat(ST.Store.size(ls)))
+        PS.Perf.set("hub.changes", U32.from_nat(SO.Lg.n(ls)))
         PS.Perf.set("hub.busy", U32.from_nat(M.Work.threads(st)))
         # children the last exec handed over that ended meanwhile are waited
         # for (effects/adopt.js), so none stays a zombie
@@ -11634,6 +11671,15 @@ def Hub.adopt.es(+es: List<&2, AD.AEntry>, h: Hub, +allow: Bool, +now: Nat) -> I
     +nows : List<&2, String> <- Adopt.idents(es)
     Hub.adopt.all(AD.Adopt.decide(es, nows, allow), h, now)
 
+# the agents a hub takes over or stops at boot: none for a hub on a copied
+# log, whose records name the real hub's agents (law adopt_copy_none)
+def Adopt.copy.entries(copy: Bool, +rec: String, +hand: String) -> List<&2, AD.AEntry>:
+  match copy:
+    case True{}:
+      Nil{}
+    case False{}:
+      AD.Adopt.entries(rec, hand)
+
 def Hub.adopt(h: Hub, +now: Nat) -> IO(Hub):
   match h:
     case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
@@ -11644,7 +11690,8 @@ def Hub.adopt(h: Hub, +now: Nat) -> IO(Hub):
         rm : Result<&1, &1, U32 & String, Unit> <- H.FS.remove(Adopt.home.hand(home))
         AIO.Adopt.record(Adopt.home.record(home))
         +off : String <- Env.get("BACKPLANE_ADOPT", "")
-        Hub.adopt.es(AD.Adopt.entries(rec, hand), Hub{st, f, ls, cl, as, inbox, cfg, note}, Bool.not(String.eq(off, "0")), now)
+        copy : Bool <- P.Proc.copy()
+        Hub.adopt.es(Adopt.copy.entries(copy, rec, hand), Hub{st, f, ls, cl, as, inbox, cfg, note}, Bool.not(String.eq(off, "0")), now)
 
 def Hub.mail.recover.on(+on: Bool, h: Hub) -> IO(Hub):
   match on h:
@@ -12005,7 +12052,7 @@ def Hub.desktop.forward(h: Hub, client: U32, +kind: String, +text: String, out: 
   match h:
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
       do IO<Hub>:
-        Desktop.forward(Cfg.br(cfg), client, kind, Desktop.connection_info(kind, text, Cfg.version(cfg), M.Setting.get(st, "machine.id", "")), out, e, l, Desktop.frame_owner(text), Cef.page.ok(st, Desktop.frame_owner(text)), Cfg.tch(cfg))
+        Desktop.forward(Cfg.br(cfg), client, kind, Desktop.connection_info(kind, text, Cfg.version(cfg), M.Setting.get(st, "machine.id", "")), out, e, l, Desktop.frame_owner(text), Page.ok(st, Desktop.frame_owner(text)), Cfg.tch(cfg))
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
 
 # A brand-new home must establish its real persisted machine identity before
@@ -12231,6 +12278,27 @@ def Hub.far.push.in(ok: Bool, m: Maybe<&2, J.Json>, h: Hub, +peer: String, +repl
     case False{} _:
       Hub.answer(h, reply, W.Http.text("403 Forbidden", "threads are shared with the owner's own machines"))
 
+# The feed is made when a linked machine first asks for it, never at
+# start (FR.Fh.feed.ask): that ask starts the job, and it and every other
+# until the job is done are told "not ready", so the machine pulls again.
+def Far.feed.asked.set(p: FR.Fh & Hub) -> Hub:
+  (fh, h) = p
+  Far.with(h, FR.Fh.feed.ask(fh))
+
+def Far.feed.want.k(asked: Bool, h: Hub) -> IO(Hub):
+  match asked h:
+    case True{} _:
+      IO.pure(Hub, h)
+    case False{} Hub{+st, f, +ls, cl, as, +inbox, cfg, note}:
+      do IO<Hub>:
+        IO.spawn(Unit, Far.feed.job(ls, st, inbox))
+        return Far.feed.asked.set(Far.fh(Hub{st, f, ls, cl, as, inbox, cfg, note}))
+
+def Far.feed.want(h: Hub) -> IO(Hub):
+  match h:
+    case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      Far.feed.want.k(FR.Fh.feed.asked(BN.Bn.far(Cfg.bn(cfg))), Hub{st, f, ls, cl, as, inbox, cfg, note})
+
 def Far.log.go(m: Maybe<&2, List<&2, FR.Line>>, h: Hub, +since: Nat, +epoch: String, +reply: Chan(List<&2, U32>)) -> IO(Hub):
   match m h:
     case Some{+fs} Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
@@ -12239,7 +12307,7 @@ def Far.log.go(m: Maybe<&2, List<&2, FR.Line>>, h: Hub, +since: Nat, +epoch: Str
       Hub.answer(Hub{st, f, ls, cl, as, inbox, cfg, note}, reply, Bot.json("200 OK", FR.Fr.log.json(from, FR.Fr.catalog(st, FR.Fh.lasts(BN.Bn.far(Cfg.bn(cfg)))),
         FR.Fr.with.epoch(FR.Page.json(FR.Fr.page(fs, from, M.State.seq(st), 400000n)), own))))
     case None{} _:
-      Hub.answer(h, reply, W.Http.text("503 Service Unavailable", "not ready"))
+      IO.bind(Hub, Hub, Far.feed.want(h), h2 => Hub.answer(h2, reply, W.Http.text("503 Service Unavailable", "not ready")))
 
 def Far.log.k(r: Maybe<&2, List<&2, FR.Line>> & Hub, +since: Nat, +epoch: String, +reply: Chan(List<&2, U32>)) -> IO(Hub):
   (m, h) = r
@@ -13253,7 +13321,7 @@ def Accept.whois(r: Socket & String, +owner: String, +id: U32, +web: String, +in
 
 def Accept.local(r: Socket & String, +id: U32, +web: String, +inbox: Chan(Msg), +trusted: Bool, +token: String) -> IO(Unit):
   (s, ip) = r
-  Conn.head(64n, s, Nil{}, web, id, inbox, Bool.and(trusted, CF.Cef.loopback(ip)), token)
+  Conn.head(64n, s, Nil{}, web, id, inbox, Bool.and(trusted, AUTH.Auth.loopback(ip)), token)
 
 def Accept.trust(ask: Bool, s: Socket, +owner: String, +id: U32, +web: String, +inbox: Chan(Msg), +trusted: Bool, +token: String) -> IO(Unit):
   match ask:
@@ -13282,21 +13350,159 @@ def Accept.loop(fuel: Nat, l: Listener, +id: U32, +web: String, +inbox: Chan(Msg
       IO.bind(Listener & Result<&1, &1, U32 & String, Socket>, Unit, TCP.accept(l),
         r => Accept.got(r, id, web, inbox, trusted, token, owner, l2 => Accept.loop(f, l2, (id + 1 : U32), web, inbox, trusted, token, owner)))
 
+# The early listener
+# ------------------
+# Main.boot binds the hub's port before it loads its state (which can take
+# minutes while store.db is first built from the log). Until the hub is
+# ready the listener's accept loop answers every request, a WebSocket
+# upgrade too, with core/early.bend's 503 (Retry-After: 2, the build's
+# progress from <home>/store.build), so clients wait instead of failing.
+# When the hub is ready it sends the loop EarlyGo on its channel, and the
+# same fiber goes on as Accept.loop over the same listener: never closed,
+# never bound twice. The loop looks at the channel after each accept, so a
+# connection accepted before the go gets its 503 and every later one is
+# served; none is dropped.
+
+# Accept.loop's arguments, known once the hub is up
+type EarlyGo is Data:
+  EarlyGo{web: String, inbox: Chan(Msg), trusted: Bool, token: String, owner: String}
+
+# a listener bound early (its loop waiting for the go), or the bind's error
+type Early is Data:
+  EarlyUp{ctl: Chan(EarlyGo)}
+  EarlyDown{e: U32 & String}
+
+def Early.answer(s: Socket, +home: String) -> IO(Unit):
+  do IO<Unit>:
+    +b : String <- Files.text(EA.Early.build.path(home))
+    Conn.finish(s, EA.Early.response(Main.version(), b))
+
+def Early.head.k(m: Maybe<&2, W.Split>, s: Socket, buf: List<&2, U32>, +home: String, k: Socket -> List<&2, U32> -> IO(Unit)) -> IO(Unit):
+  match m:
+    case Some{_}:
+      Early.answer(s, home)
+    case None{}:
+      IO.bind(Socket & Result<&1, &1, U32 & String, List<&2, U32>>, Unit, H.Sock.recv_bytes(s, 65536), r => Conn.head.got(r, buf, k))
+
+# the request's head is read first (closing on unread bytes would reset
+# the connection before the client reads the answer)
+def Early.head(fuel: Nat, s: Socket, +buf: List<&2, U32>, +home: String) -> IO(Unit):
+  match fuel:
+    case 0n:
+      Early.answer(s, home)
+    case 1n+f:
+      Early.head.k(W.Http.split(buf), s, buf, home, s2 => b2 => Early.head(f, s2, b2, home))
+
+def Early.got(r: Listener & Result<&1, &1, U32 & String, Socket>, +home: String, k: Listener -> IO(Unit)) -> IO(Unit):
+  (l, res) = r
+  match res:
+    case Done{s}:
+      do IO<Unit>:
+        IO.spawn(Unit, Early.head(64n, s, Nil{}, home))
+        k(l)
+    case Fail{_}:
+      k(l)
+
+def Early.step(p: Poll<&1, &1, Maybe<&1, EarlyGo>, Unit>, r: Listener & Result<&1, &1, U32 & String, Socket>, f: Nat, +id: U32, +home: String, k: Listener -> IO(Unit)) -> IO(Unit):
+  match p:
+    case Ready{Some{EarlyGo{+web, +inbox, +trusted, +token, +owner}}}:
+      Accept.got(r, id, web, inbox, trusted, token, owner, l2 => Accept.loop(f, l2, (id + 1 : U32), web, inbox, trusted, token, owner))
+    case _:
+      Early.got(r, home, k)
+
+def Early.loop(+fuel: Nat, l: Listener, +id: U32, +home: String, +ctl: Chan(EarlyGo)) -> IO(Unit):
+  match fuel:
+    case 0n:
+      Listener.close(l)
+    case 1n+f:
+      IO.bind(Listener & Result<&1, &1, U32 & String, Socket>, Unit, TCP.accept(l),
+        r => IO.bind(Poll<&1, &1, Maybe<&1, EarlyGo>, Unit>, Unit, Chan.try_recv(EarlyGo, ctl, 0),
+          p => Early.step(p, r, f, id, home, l2 => Early.loop(f, l2, id, home, ctl))))
+
+# a bound listener starts answering 503 at once; ids as Accept.loop's
+def Early.up(r: Result<&1, &1, U32 & String, Listener>, +id: U32, +home: String) -> IO(Early):
+  match r:
+    case Done{l}:
+      do IO<Early>:
+        +ctl : Chan(EarlyGo) <- Chan.new(EarlyGo, 1)
+        IO.spawn(Unit, Early.loop(Fuel.forever(), l, id, home, ctl))
+        return EarlyUp{ctl}
+    case Fail{e}:
+      IO.pure(Early, EarlyDown{e})
+
+def Early.bind(+host: String, +port: U32, +id: U32, +home: String) -> IO(Early):
+  IO.bind(Result<&1, &1, U32 & String, Listener>, Early, H.Net.listen(host, port), r => Early.up(r, id, home))
+
+def Early.is_up(e: Early) -> Bool:
+  match e:
+    case EarlyUp{_}:
+      True{}
+    case EarlyDown{_}:
+      False{}
+
+# the hub is ready: the loop serves from its next accept on
+def Early.go(+ctl: Chan(EarlyGo), g: EarlyGo) -> IO(Unit):
+  do IO<Unit>:
+    r : Result<&1, &1, EarlyGo, Unit> <- Chan.send(EarlyGo, ctl, g)
+    return Unit{}
+
+# a hub that must listen (backplane-serve, --headless) stops at once when
+# its port is taken, before it loads anything
+def Early.need.die(e: U32 & String, +addr: String) -> IO(Early):
+  (_, msg) = e
+  IO.die(Early, 1, "backplane: cannot listen on " ++ addr ++ ": " ++ msg)
+
+def Early.need(e: Early, need: Bool, +addr: String) -> IO(Early):
+  match e need:
+    case EarlyDown{er} True{}:
+      Early.need.die(er, addr)
+    case EarlyDown{er} False{}:
+      IO.pure(Early, EarlyDown{er})
+    case EarlyUp{c} _:
+      IO.pure(Early, EarlyUp{c})
+
+# the tailnet address's listener, bound early beside the main one (only
+# when that one is up: otherwise the tailnet waits for it, Listen.up)
+type TEarly is Data:
+  TEarly{ip: String, e: Early}
+
+def Early.tail.ip.k(none: Bool, +ip: String, +port: U32, +home: String) -> IO(TEarly):
+  match none:
+    case True{}:
+      IO.pure(TEarly, TEarly{"", EarlyDown{(0, "no tailnet address")}})
+    case False{}:
+      IO.bind(Early, TEarly, Early.bind(ip, port, 2147483648, home), e => IO.pure(TEarly, TEarly{ip, e}))
+
+def Early.tail.ip(+ip: String, +port: U32, +home: String) -> IO(TEarly):
+  Early.tail.ip.k(String.is_empty(ip), ip, port, home)
+
+def Early.tail(on: Bool, +port: U32, +home: String) -> IO(TEarly):
+  match on:
+    case True{}:
+      IO.bind(P.Ran, TEarly, P.Proc.run("tailscale", ["ip", "-4"], ""), r => Early.tail.ip(Tailnet.first(r), port, home))
+    case False{}:
+      IO.pure(TEarly, TEarly{"", EarlyDown{(0, "off")}})
+
+def Net.tailnet(n: Net) -> Bool:
+  match n:
+    case Net{t, _, _, _, _, _, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}:
+      t
+
 # the tailnet address answers when the main listener already covers it
 # (--host 0.0.0.0, or the address itself): the extra bind then fails by design
 def Tailnet.covered(+host: String, +ip: String) -> Bool:
   Bool.or(String.eq(host, "0.0.0.0"), String.eq(host, ip))
 
-def Tailnet.listened(r: Result<&1, &1, U32 & String, Listener>, +host: String, +ip: String, +port: U32, +web: String, +inbox: Chan(Msg), +token: String) -> IO(Unit):
+def Tailnet.listened(r: Early, +host: String, +ip: String, +port: U32, +web: String, +inbox: Chan(Msg), +token: String) -> IO(Unit):
   match r:
-    case Done{l}:
+    case EarlyUp{ctl}:
       do IO<Unit>:
         w : P.Ran <- P.Proc.run("tailscale", ["whois", "--json", ip], "/")
         +owner : String = TN.Tailnet.login(Tailnet.out(w))
         IO.print("Backplane on your tailnet: http://" ++ ip ++ ":" ++ U32.show(port) ++ "/ (" ++ Bool.pick(String, String.is_empty(owner), "pair in Settings", owner ++ "'s devices; pair in Settings") ++ ")")
         ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, LinkFound{TN.Tailnet.report("reachable", TN.Tailnet.link("http://" ++ ip ++ ":" ++ U32.show(port), token))})
-        IO.spawn(Unit, Accept.loop(Fuel.forever(), l, 2147483648, web, inbox, False{}, token, owner))
-    case Fail{_}:
+        Early.go(ctl, EarlyGo{web, inbox, False{}, token, owner})
+    case EarlyDown{_}:
       do IO<Unit>:
         Log.info("could not listen on the tailnet address " ++ ip)
         ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, LinkFound{TN.Tailnet.report(Bool.pick(String, Tailnet.covered(host, ip), "reachable", "unavailable"), "")})
@@ -13310,7 +13516,7 @@ def Tailnet.listen.k(none: Bool, +host: String, +ip: String, +port: U32, +web: S
         ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, LinkFound{TN.Tailnet.report("unavailable", "")})
         return Unit{}
     case False{}:
-      IO.bind(Result<&1, &1, U32 & String, Listener>, Unit, H.Net.listen(ip, port), r => Tailnet.listened(r, host, ip, port, web, inbox, token))
+      IO.bind(Early, Unit, Early.bind(ip, port, 2147483648, ""), r => Tailnet.listened(r, host, ip, port, web, inbox, token))
 
 # listen on the tailnet address too (clients there need the token), and
 # serve HTTPS through `tailscale serve` when asked
@@ -13321,6 +13527,29 @@ def Tailnet.start(n: Net, +host: String, +port: U32, +web: String, +inbox: Chan(
         r : P.Ran <- P.Proc.run("tailscale", ["ip", "-4"], "")
         +ip : String = Tailnet.first(r)
         Tailnet.listen.k(String.is_empty(ip), host, ip, port, web, inbox, token)
+        Tailnet.https(https, port, token, inbox)
+    case Net{False{}, _, _, _, _, _, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}:
+      IO.pure(Unit, Unit{})
+
+# the same with the listener Main.boot bound early (TEarly): no second
+# probe, no second bind
+def Tailnet.early.ip(none: Bool, +ip: String, e: Early, +host: String, +port: U32, +web: String, +inbox: Chan(Msg), +token: String) -> IO(Unit):
+  match none:
+    case True{}:
+      Tailnet.listen.k(True{}, host, ip, port, web, inbox, token)
+    case False{}:
+      Tailnet.listened(e, host, ip, port, web, inbox, token)
+
+def Tailnet.early.k(te: TEarly, +host: String, +port: U32, +web: String, +inbox: Chan(Msg), +token: String) -> IO(Unit):
+  match te:
+    case TEarly{+ip, e}:
+      Tailnet.early.ip(String.is_empty(ip), ip, e, host, port, web, inbox, token)
+
+def Tailnet.start.early(n: Net, te: TEarly, +host: String, +port: U32, +web: String, +inbox: Chan(Msg)) -> IO(Unit):
+  match n:
+    case Net{True{}, https, +token, _, _, _, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}:
+      do IO<Unit>:
+        Tailnet.early.k(te, host, port, web, inbox, token)
         Tailnet.https(https, port, token, inbox)
     case Net{False{}, _, _, _, _, _, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}:
       IO.pure(Unit, Unit{})
@@ -14182,6 +14411,22 @@ def Hub.mcp.tr(tr: Bool, h: Hub, +thread: String, +o: J.Json, body: String, +rep
     case False{}:
       Hub.mcp.ki(KIpc.is(o), h, thread, o, body, reply, now)
 
+# memory_zoom and memory_search, answered from the store while the thread
+# runs with infinite context (Ucs.tool); otherwise as any unknown tool
+def Hub.mcp.uc.k(uc: Bool, h: Hub, +thread: String, +o: J.Json, body: String, +reply: Chan(String), +now: Nat) -> IO(Hub):
+  match uc h:
+    case True{} Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
+      do IO<Hub>:
+        IO.spawn(Unit, Ucs.tool(Cfg.thin.store(cfg), st, thread, o, reply))
+        return Hub{st, f, ls, cl, as, inbox, cfg, note}
+    case False{} _:
+      Hub.mcp.tr(TermRead.is(o), h, thread, o, body, reply, now)
+
+def Hub.mcp.uc(h: Hub, +thread: String, +o: J.Json, body: String, +reply: Chan(String), +now: Nat) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
+      Hub.mcp.uc.k(Bool.and(Ucs.is(o), UCX.Uctx.on(st, thread)), Hub{st, f, ls, cl, as, inbox, cfg, note}, thread, o, body, reply, now)
+
 # thread_read on a thread on another of the owner's machines: read from
 # this hub's mirror of it (xref.bend)
 def Hub.mcp.x(x: Bool, h: Hub, +thread: String, +o: J.Json, body: String, +reply: Chan(String), +now: Nat) -> IO(Hub):
@@ -14191,7 +14436,7 @@ def Hub.mcp.x(x: Bool, h: Hub, +thread: String, +o: J.Json, body: String, +reply
         sent : Result<&1, &1, String, Unit> <- Chan.send(String, reply, XR.Xref.read(o, FR.Fh.ins(BN.Bn.far(Cfg.bn(cfg)))))
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
     case False{} _:
-      Hub.mcp.tr(TermRead.is(o), h, thread, o, body, reply, now)
+      Hub.mcp.uc(h, thread, o, body, reply, now)
 
 # (only to the owner's own machines with sync on)
 def Hub.mcp.far(own: Bool, h: Hub, +link: String, +rq: String, +o: J.Json, body: String, +reply: Chan(String)) -> IO(Hub):
@@ -14276,6 +14521,8 @@ def Msg.kind(m: Msg) -> String:
       "thin-read"
     case Rpc{_, _}:
       "rpc"
+    case RpcLane{_, _}:
+      "rpc_lane"
     case AgentLine{_, _}:
       "agent_line"
     case AgentGone{_, _, _, _}:
@@ -14327,6 +14574,7 @@ def Msg.kind(m: Msg) -> String:
       "reexec"
     case MailRouted{_}: "mail-route"
     case RunReady{_, _, _}: "run-ready"
+    case DigestGot{_, _, _}: "digest"
     case Commit{_}:
       "commit"
     case OrderNote{_, _, _, _}:
@@ -14362,10 +14610,6 @@ def Msg.kind(m: Msg) -> String:
     case BrowserEv{_}:
       "browser_ev"
     case Desktop{_, _, _, _, _, _}: "desktop_browser"
-    case CefDone{_, _, _}:
-      "cef_done"
-    case Near{_}:
-      "cef_near"
     case TeachBack{_}:
       "teach_back"
     case TaskPaused{_, _, _, _, _, _, _, _, _, _}:
@@ -14891,6 +15135,10 @@ def Hub.mail.routed(h: Hub, body: MB.Body, +now: Nat) -> IO(Hub):
   match h:
     case Hub{+st, f, ls, cl, as, inbox, cfg, note}: Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, B.Mail.route(st, now, body))
 
+def Hub.digest.got(h: Hub, +bot: String, +ids: List<&2, String>, +bs: List<&2, MB.Body>, +now: Nat) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, cfg, note}: Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, B.Digest.got(st, now, bot, ids, bs))
+
 def Hub.run.ready(h: Hub, +th: String, head: String, bs: List<&2, MB.Body>, +now: Nat) -> IO(Hub):
   match h:
     case Hub{+st, f, ls, cl, as, inbox, cfg, note}: Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, B.Run.start.on(B.Run.ready(st, th), st, now, th, head, bs))
@@ -15033,10 +15281,35 @@ def Hub.auth.beat.k(wait: Bool, h: Hub, +now: Nat) -> IO(Hub):
     case False{} _:
       Hub.beat(h, now)
 
+# Whether any thread waits for its provider's sign-in (B.Auth.any: a
+# setting looked up for every thread) is asked at every beat, but only a
+# commit can change it: the answer is kept in Bn with the state's sequence
+# and asked again only when the log moved (law auth_beat_kept). On the JS
+# hub the walk was most of an idle hub's CPU.
+def Auth.kept.key(+st: M.State) -> String:
+  Nat.show(1n+M.State.seq(st)) ++ " "
+
+def Auth.kept.k(hit: Bool, +kept: String, +st: M.State) -> Bool:
+  match hit:
+    case True{}:
+      String.ends_with(kept, " 1")
+    case False{}:
+      B.Auth.any(B.Rec.threads(st), st)
+
+# the answer for st: the one kept for its sequence, else asked
+def Auth.kept(+kept: String, +st: M.State) -> Bool:
+  Auth.kept.k(String.starts_with(kept, Auth.kept.key(st)), kept, st)
+
+def Hub.auth.beat.any(+any: Bool, h: Hub, +now: Nat) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
+      Hub.auth.beat.k(Bool.and(any, Bool.not(J.Json.get_bool(K.Rt.health(Cfg.rt(cfg)), "auth.probe", False{}))),
+        Hub{st, f, ls, cl, as, inbox, Cfg.with_bn(cfg, BN.Bn.with_auth(Cfg.bn(cfg), Auth.kept.key(st) ++ Bool.pick(String, any, "1", "0"))), note}, now)
+
 def Hub.auth.beat(h: Hub, now: Nat) -> IO(Hub):
   match h:
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
-      Hub.auth.beat.k(Bool.and(B.Auth.any(B.Rec.threads(st), st), Bool.not(J.Json.get_bool(K.Rt.health(Cfg.rt(cfg)), "auth.probe", False{}))), Hub{st, f, ls, cl, as, inbox, cfg, note}, now)
+      Hub.auth.beat.any(Auth.kept(BN.Bn.auth(Cfg.bn(cfg)), st), Hub{st, f, ls, cl, as, inbox, cfg, note}, now)
 
 def Hub.auth.ready.clear(h: Hub, st: M.State, open: Bool, now: Nat) -> IO(Hub):
   match h:
@@ -15126,10 +15399,13 @@ def Lock.take.k(free: Bool, +old: String, +home: String, +port: U32) -> IO(Strin
 def Lock.find.sh() -> String:
   "f=$1/hub.lock; [ -f \"$f\" ] || exit 0; read pid port kind < \"$f\"; [ \"$kind\" = flock ] && exit 0; [ -n \"$pid\" ] && [ \"$pid\" != \"$PPID\" ] || exit 0; kill -0 \"$pid\" 2>/dev/null || exit 0; [ \"$(ps -p \"$pid\" -o comm= 2>/dev/null)\" = \"$(ps -p \"$PPID\" -o comm= 2>/dev/null)\" ] && echo \"$pid $port\""
 
+# the holder the probe names: only a "<pid> <port>" line (OH.OneHub.legacy),
+# never the shell's own noise (Cygwin bash's /tmp warning once stopped a hub
+# on a fresh home)
 def Lock.out(r: P.Ran) -> String:
   match r:
     case P.Ran{0, +out}:
-      String.trim(out)
+      OH.OneHub.legacy(out)
     case _:
       ""
 
@@ -15172,7 +15448,7 @@ def Lock.take(+home: String, +port: U32) -> IO(String):
     Lock.take.k(String.is_empty(old), old, home, port)
 
 def Lock.find(+home: String) -> IO(String):
-  IO.bind(String, String, HL.HubLock.held(Lock.path(home)), held => Lock.find.k(String.trim(held), home))
+  IO.bind(String, String, HL.HubLock.held(Lock.path(home)), held => Lock.find.k(OH.OneHub.pair(held), home))
 
 def Lock.word(+held: String, +i: Nat) -> String:
   OH.OneHub.word(held, i)
@@ -15276,7 +15552,7 @@ def Hub.join.here(h: Hub, +client: U32, +out: Chan(Wire), +gen: U32, +now: Nat) 
   match h:
     case Hub{+st, f, +ls, +cl, as, inbox, +cfg, +note}:
       do IO<Hub>:
-        m : Maybe<&2, Client> <- Hub.join.state(Client{client, out, DK.Look.none(), OB.Cr.new(gen, True{}, False{}, 0n), 0, False{}, Nil{}}, WState{M.State.private(st), Hub.log_msg.k(0n, ls, cfg, 0n)})
+        m : Maybe<&2, Client> <- Hub.join.state(Client{client, out, DK.Look.none(), OB.Cr.new(gen, True{}, False{}, 0n), 0, False{}, Nil{}}, WState{M.State.private(st), Hub.log_msg.k(ls, cfg)})
         m1 : Maybe<&2, Client> <- Far.join.here(Far.mirrors(cfg), m)
         m2 : Maybe<&2, Client> <- Wire.text.m(m1, LV.Live.msg(Live.of(cfg)))
         m3 : Maybe<&2, Client> <- Hub.join.notes(m2, note, Desk.join(DK.Desk.text(Clients.looks(cl), now)))
@@ -15290,7 +15566,7 @@ def Hub.join.k(+n: Nat, +s0: Nat, +xs: List<&2, String>, h: Hub, +client: U32, +
       +k = List.length(&2, String, OB.Join.next(xs))
       +more = Bool.or(Nat.is_lt(Nat.add(s0, k), n), Bool.not(List.is_empty(&2, FR.In, Far.mirrors(cfg))))
       do IO<Hub>:
-        m : Maybe<&2, Client> <- Wire.offer(Client{client, out, DK.Look.none(), OB.Cr.rest.set(OB.Cr.wait.set(OB.Cr.new(gen, U32.is_eq(client, 0), more, Nat.add(s0, k)), more), OB.Join.from(ls, n, Nat.add(s0, k))), sock, legacy, Nil{}},
+        m : Maybe<&2, Client> <- Wire.offer(Client{client, out, DK.Look.none(), OB.Cr.wait.set(OB.Cr.new(gen, U32.is_eq(client, 0), more, Nat.add(s0, k)), more), sock, legacy, Nil{}},
           Hub.log_items(origin, cfg, s0, List.take(&2, String, xs, k), more), 0n)
         m1 : Maybe<&2, Client> <- Hub.join.live(more, m, cfg)
         m2 : Maybe<&2, Client> <- Hub.join.notes(m1, note, Desk.join(DK.Desk.text(Clients.looks(cl), now)))
@@ -15305,10 +15581,10 @@ def Hub.join.k(+n: Nat, +s0: Nat, +xs: List<&2, String>, h: Hub, +client: U32, +
 def Hub.join(h: Hub, +client: U32, +out: Chan(Wire), +since: Nat, +origin: String, +gen: U32, +sock: U32, +legacy: Bool, +now: Nat) -> IO(Hub):
   match h:
     case Hub{st, f, +ls, cl, as, inbox, cfg, note}:
-      +n = ST.Store.size(ls)
+      +n = SO.Lg.n(ls)
       +o = Hub.origin(ls)
       +s0 = Bool.pick(Nat, Bool.and(String.eq(origin, o), Nat.is_le(since, n)), since, 0n)
-      Hub.join.k(n, s0, OB.Join.window(ls, n, s0), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, out, o, gen, sock, legacy, now)
+      IO.bind(List<&2, String>, Hub, SO.Sto.lines(ls, s0, Join.take(n, s0)), xs => Hub.join.k(n, s0, xs, Hub{st, f, ls, cl, as, inbox, cfg, note}, client, out, o, gen, sock, legacy, now))
 
 type ThinReadJob is Data:
   ThinReadJob{client: U32, gen: U32, view: String, target: J.Json, text: String}
@@ -15469,6 +15745,27 @@ def Hub.thin.flush(h: Hub, +now: Nat) -> IO(Hub):
     case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
       Hub.thin.notify(Hub{st, f, ls, cl, as, inbox, Cfg.thin.with_notes(cfg, TPACE.Notes{TPACE.Notes.touched(Cfg.thin.notes(cfg)), TPACE.Notes.paces(Cfg.thin.notes(cfg)), 0n}), note}, now)
 
+# Thin views' requests take the bulk lane (Bulk.*): a view asks again
+# after each change (view.update), and the renders those take went ahead of
+# pings, /hello and other clients' requests in the one queue (the tail
+# latencies on a busy hub, fast hub R1). Every view.* request of a client
+# takes the lane, so they stay in order among themselves (their control ids
+# must rise). The lane is a FIFO with Bulk.room() places, so agents' lines
+# keep their turn.
+def Rpc.thin(+text: String) -> Bool:
+  String.contains(text, "\"m\":\"view.")
+
+def Rpc.lane(+thin: Bool, h: Hub, +client: U32, +text: String, +now: Nat) -> IO(Hub):
+  match thin h:
+    case True{} Hub{st, f, ls, cl, as, +inbox, cfg, note}:
+      do IO<Hub>:
+        # sent in place, not spawned, so a client's requests keep their order
+        # (the inbox holds 4096; Bulk.fwd drains it whatever the hub does)
+        ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, RpcLane{client, text})
+        return Hub{st, f, ls, cl, as, inbox, cfg, note}
+    case False{} _:
+      Hub.rpc(h, client, text, now)
+
 def Hub.handle(h: Hub, m: Msg, +now: Nat) -> IO(Hub):
   match m:
     case LockProbe{name, holder, n}:
@@ -15521,7 +15818,9 @@ def Hub.handle(h: Hub, m: Msg, +now: Nat) -> IO(Hub):
       Hub.leave(h, client, now)
     case ThinRead{client, gen, view, target, text}:
       Hub.thin.read_job(h, client, gen, view, target, text, now)
-    case Rpc{client, text}:
+    case Rpc{client, +text}:
+      Rpc.lane(Rpc.thin(text), h, client, text, now)
+    case RpcLane{client, text}:
       Hub.rpc(h, client, text, now)
     case AgentLine{tag, line}:
       Hub.tagged(h, tag, line, now)
@@ -15574,6 +15873,7 @@ def Hub.handle(h: Hub, m: Msg, +now: Nat) -> IO(Hub):
       Hub.link(h, lk)
     case MailRouted{body}: Hub.mail.routed(h, body, now)
     case RunReady{thread, head, bs}: Hub.run.ready(h, thread, head, bs, now)
+    case DigestGot{bot, ids, bs}: Hub.digest.got(h, bot, ids, bs, now)
     case Commit{cs}:
       Hub.step(h, B.Step{cs, Nil{}})
     case OrderNote{thread, id, text, +ping}:
@@ -15615,10 +15915,6 @@ def Hub.handle(h: Hub, m: Msg, +now: Nat) -> IO(Hub):
     case BrowserEv{line}:
       Hub.browser_ev(h, line)
     case Desktop{client, kind, text, out, e, l}: Hub.desktop(h, client, kind, text, out, e, l, now)
-    case CefDone{request, live, err}:
-      Hub.cef.finished(h, request, live, err)
-    case Near{client}:
-      Hub.cef.near(h, client)
     case TeachBack{bot}:
       Hub.back(h, bot)
     case TaskPaused{thread, bot, run, slug, n, kind, question, risky, rid, reply}:
@@ -15684,8 +15980,7 @@ def Hub.got.one_at(+msg: Msg, snapshot: Nat & Hub, k: Hub -> IO(Unit)) -> IO(Uni
     now : Nat <- Now.nat()
     t0 : U32 <- PS.Perf.us()
     h1 : Hub <- Hub.handle(h, msg, now)
-    h2 : Hub <- Hub.cef.after(CF.Cef.after(Msg.kind(msg)), h1)
-    h2a : Hub <- Hub.thin.drain(h2)
+    h2a : Hub <- Hub.thin.drain(h1)
     ms : Nat <- IO.now()
     h3 : Hub <- Hub.thin.invalidate(before, h2a, ms)
     t1 : U32 <- PS.Perf.lap("hub." ++ Msg.kind(msg), t0)
@@ -15723,10 +16018,11 @@ def Main.headless(h: Hub, +inbox: Chan(Msg), +cfg: Cfg, +tok: Chan(Unit), front:
     Upgrade.start(cfg, inbox)
     front(inbox)
 
-def Main.serve(l: Listener, h: Hub, +web: String, +inbox: Chan(Msg), +cfg: Cfg, +tok: Chan(Unit), front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
+# the listeners Main.boot bound early serve from here on (Early.go)
+def Main.serve(+ctl: Chan(EarlyGo), te: TEarly, h: Hub, +web: String, +inbox: Chan(Msg), +cfg: Cfg, +tok: Chan(Unit), front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
   do IO<Unit>:
-    IO.spawn(Unit, Accept.loop(Fuel.forever(), l, 1, web, inbox, True{}, Net.token(Cfg.net(cfg)), ""))
-    Tailnet.start(Cfg.net(cfg), Cfg.host(cfg), Cfg.port(cfg), web, inbox)
+    Early.go(ctl, EarlyGo{web, inbox, True{}, Net.token(Cfg.net(cfg)), ""})
+    Tailnet.start.early(Cfg.net(cfg), te, Cfg.host(cfg), Cfg.port(cfg), web, inbox)
     IO.spawn(Unit, Ticker.loop(Fuel.forever(), inbox))
     IO.spawn(Unit, Beat.loop(Fuel.forever(), inbox))
     IO.spawn(Unit, Heart.loop(Fuel.forever(), inbox))
@@ -15738,15 +16034,15 @@ def Main.serve(l: Listener, h: Hub, +web: String, +inbox: Chan(Msg), +cfg: Cfg, 
     Upgrade.start(cfg, inbox)
     front(inbox)
 
-def Main.listened(r: Result<&1, &1, U32 & String, Listener>, h: Hub, +web: String, +inbox: Chan(Msg), +addr: String, need: Bool, +cfg: Cfg, +tok: Chan(Unit), front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
+def Main.listened(r: Early, te: TEarly, h: Hub, +web: String, +inbox: Chan(Msg), +addr: String, need: Bool, +cfg: Cfg, +tok: Chan(Unit), front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
   match r need:
-    case Done{l} _:
+    case EarlyUp{ctl} _:
       do IO<Unit>:
         IO.print("Backplane listening on http://" ++ addr)
-        Main.serve(l, h, web, inbox, cfg, tok, front)
-    case Fail{e} True{}:
+        Main.serve(ctl, te, h, web, inbox, cfg, tok, front)
+    case EarlyDown{e} True{}:
       Main.failed(e, h, addr)
-    case Fail{_} False{}:
+    case EarlyDown{_} False{}:
       do IO<Unit>:
         Log.info("web server off: " ++ addr ++ " is taken; trying again every 2 s")
         IO.spawn(Unit, Listen.retry(Fuel.forever(), web, inbox, cfg, addr))
@@ -15792,7 +16088,15 @@ def Thin.warm.if(built: Bool, +st: M.State, +inbox: Chan(Msg)) -> IO(Unit):
 def Thin.warm(+c: ThinCache, +inbox: Chan(Msg)) -> IO(Unit):
   Thin.warm.if(Bool.and(THIN.Lazy.ready(ThinCache.lazy(c)), TMAIL.Lazy.ready(ThinCache.mail(c))), THIN.Lazy.base(ThinCache.lazy(c)), inbox)
 
-def Main.opened(r: Result<&1, &1, U32 & String, File>, +st: M.State, ls: List<&2, String>, cfg: Cfg, need: Bool, front: Chan(Msg) -> IO(Unit), t0: U32) -> IO(Unit):
+# the thin views on store.db when the boot opened one (none: as before)
+def Thin.store.if(none: Bool, +cfg: Cfg, +st: M.State, +h: String) -> IO(Cfg):
+  match none:
+    case True{}:
+      IO.pure(Cfg, cfg)
+    case False{}:
+      Thin.store.open(cfg, st, h)
+
+def Main.opened(r: Result<&1, &1, U32 & String, File>, +st: M.State, ls: SO.Lg, cfg: Cfg, need: Bool, front: Chan(Msg) -> IO(Unit), t0: U32, el: Early, te: TEarly) -> IO(Unit):
   match r cfg:
     case Done{f} Cfg{+home, +web, +host, +port, +pr, +ds, +v, nt0, +tcfg, +views}:
       do IO<Unit>:
@@ -15833,60 +16137,150 @@ def Main.opened(r: Result<&1, &1, U32 & String, File>, +st: M.State, ls: List<&2
         +now : Nat <- Now.nat()
         h0 : Hub <- Hub.adopt(Hub{st, f, ls, Nil{}, Nil{}, inbox, Cfg{home, web, host, port, pr, ds, v, nt, tcfg, views}, ""}, now)
         t2 : U32 <- PS.Perf.span("boot.adopt", t1)
-        l : Result<&1, &1, U32 & String, Listener> <- H.Net.listen(host, port)
-        t3 : U32 <- PS.Perf.span("boot.listen", t2)
+        # the port was bound at the start of the boot (Early.*)
         Thin.warm(ThinCache.first(views), inbox)
-        Main.listened(l, h0, web, pri, host ++ ":" ++ U32.show(port), need, Cfg{home, web, host, port, pr, ds, v, nt, tcfg, views}, tok, front)
+        Main.listened(el, te, h0, web, pri, host ++ ":" ++ U32.show(port), need, Cfg{home, web, host, port, pr, ds, v, nt, tcfg, views}, tok, front)
     case Fail{e} _:
       Main.nolog(e)
 
 # The state a boot starts from (S3 hot boot)
 # ------------------------------------------
-# store.db's records plus the log's tail (src/server/hotboot.bend); with no
-# usable store, or BACKPLANE_HOT_BOOT=0, the whole log replayed as before:
-# the lines straight from the file (no List cell per byte, which was most
-# of the JS hub's memory), then only the lines are kept.
+# store.db's records plus the log's tail (src/server/hotboot.bend). A hub
+# with no usable store.db (none, another codec, another log) never replays
+# the whole log into memory: a child of its own binary (--store-rebuild,
+# S1's stobuild) streams the log into store.db, and the hot boot then
+# loads it. A failed build is tried once more (its files removed first);
+# a second failure stops the hub with the reason. The whole replay
+# (Boot.cold) is only the developer's escape, BACKPLANE_HOT_BOOT=0
+# (Boot.next; law boot_next_never_cold).
 
+# the escape's whole replay: the lines straight from the file, then only
+# the lines kept
 def Boot.cold(+home: String) -> IO(HB.Hot):
   do IO<HB.Hot>:
     +rd : List<&2, String> <- H.EvLog.read_from(Store.path(home), "0")
     +ld : ST.Loaded = ST.Store.load(ST.Store.read.body(rd), ST.Loaded{M.State.empty(), Nil{}})
     return HB.Hot{True{}, "", ST.Loaded.st(ld), ST.Loaded.wire(ld), ST.Store.read.tail(rd)}
 
-def Boot.state.k(ok: Bool, +hot: HB.Hot, +home: String) -> IO(HB.Hot):
-  match ok:
-    case True{}:
+# what a boot does next: use the store it loaded, build store.db (builds
+# left), stop (none left), or the escape's whole replay
+type BootNext is Data:
+  BootUse{}
+  BootBuild{}
+  BootStop{}
+  BootCold{}
+
+def Boot.next(escape: Bool, ok: Bool, left: Nat) -> BootNext:
+  match escape ok left:
+    case True{} _ _:
+      BootCold{}
+    case False{} True{} _:
+      BootUse{}
+    case False{} False{} 0n:
+      BootStop{}
+    case False{} False{} 1n+_:
+      BootBuild{}
+
+def Boot.is_cold(n: BootNext) -> Bool:
+  match n:
+    case BootCold{}:
+      True{}
+    case _:
+      False{}
+
+# how many builds a boot tries
+def Boot.builds() -> Nat:
+  2n
+
+# The child: the hub's own binary with --store-rebuild (EX.Exe.child: the
+# running image even after an update replaced the file), its JS heap kept
+# small (it shares the hub's memory cap) and Bun's stack as the hub's
+def Boot.child.env() -> List<&2, String>:
+  ["BUN_JSC_forceRAMSize=671088640", "BUN_JSC_maxPerThreadStackUsage=536870912"]
+
+# (a build that failed leaves the child's progress, home/store.build: it
+# goes before the next try with the store's files)
+def Boot.build(+home: String) -> IO(P.Ran):
+  +db = home ++ "/store.db"
+  do IO<P.Ran>:
+    rm : Result<&1, &1, U32 & String, U32 & (String & String)> <- Process.run("rm", ["-f", db, db ++ "-wal", db ++ "-shm", home ++ "/store.build"], "", 4096, 30000)
+    exe : String <- H.Sys.exe_path()
+    t0 : U32 <- PS.Perf.us()
+    r : Result<&1, &1, U32 & String, U32 & Socket> <- H.Proc.spawn("env", List.append(&2, String, Boot.child.env(), [EX.Exe.child(exe), "--store-rebuild", home]), "/", 1)
+    +ran : P.Ran <- P.Proc.run.k(r)
+    t1 : U32 <- PS.Perf.span("boot.store_build", t0)
+    return ran
+
+def Boot.ran.last(+out: String) -> String:
+  Maybe.default(&2, String, List.head(&2, String, List.reverse(&2, String, String.split(String.trim(out), '\n'))), "")
+
+def Boot.ran.say(r: P.Ran) -> String:
+  match r:
+    case P.Ran{0, +out}:
+      "store.db built: " ++ Boot.ran.last(out)
+    case P.Ran{code, +out}:
+      "store.db build failed (exit " ++ U32.show(code) ++ "): " ++ Boot.ran.last(out)
+
+def Boot.act(n: BootNext, +hot: HB.Hot, +home: String, again: Unit -> IO(HB.Hot)) -> IO(HB.Hot):
+  match n:
+    case BootUse{}:
       do IO<HB.Hot>:
         Log.info("hot boot from " ++ HB.Hot.path(home))
         return hot
-    case False{}:
+    case BootBuild{}:
+      do IO<HB.Hot>:
+        Log.info("store.db not used (" ++ HB.Hot.why(hot) ++ "): building it from the log")
+        ran : P.Ran <- Boot.build(home)
+        Log.info(Boot.ran.say(ran))
+        again(Unit{})
+    case BootStop{}:
+      IO.die(HB.Hot, 1, "backplane: store.db could not be built from the event log (" ++ HB.Hot.why(hot) ++ "); not starting. Its log: " ++ home ++ "/events.jsonl")
+    case BootCold{}:
       do IO<HB.Hot>:
         Log.info("full replay: " ++ HB.Hot.why(hot))
         Boot.cold(home)
 
+def Boot.got(+hot: HB.Hot, +home: String, +left: Nat, again: Unit -> IO(HB.Hot)) -> IO(HB.Hot):
+  Boot.act(Boot.next(False{}, HB.Hot.ok(hot), left), hot, home, again)
+
+# load the store; if it is not usable, build it and load again (left
+# builds at most)
+def Boot.loop(left: Nat, +home: String) -> IO(HB.Hot):
+  match left:
+    case 0n:
+      IO.bind(HB.Hot, HB.Hot, HB.Hot.load(home), hot => Boot.got(hot, home, 0n, u => IO.pure(HB.Hot, HB.Hot.no("no build left"))))
+    case 1n+f:
+      IO.bind(HB.Hot, HB.Hot, HB.Hot.load(home), hot => Boot.got(hot, home, 1n+f, u => Boot.loop(f, home)))
+
 def Boot.state.on(on: Bool, +home: String) -> IO(HB.Hot):
   match on:
     case True{}:
-      do IO<HB.Hot>:
-        +hot : HB.Hot <- HB.Hot.load(home)
-        Boot.state.k(HB.Hot.ok(hot), hot, home)
+      Boot.loop(Boot.builds(), home)
     case False{}:
-      Boot.state.k(False{}, HB.Hot.no("BACKPLANE_HOT_BOOT=0"), home)
+      Boot.act(Boot.next(True{}, False{}, 0n), HB.Hot.no("BACKPLANE_HOT_BOOT=0"), home, u => IO.pure(HB.Hot, HB.Hot.no("escape")))
 
 def Boot.state(+home: String) -> IO(HB.Hot):
   do IO<HB.Hot>:
     +on : String <- Env.get("BACKPLANE_HOT_BOOT", "1")
     Boot.state.on(Bool.not(String.eq(on, "0")), home)
 
-def Main.boot(cfg: Cfg, need: Bool, front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
+def Main.boot(cfg: Cfg, +need: Bool, front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
   match cfg:
-    case Cfg{+home, w, h, +p, pr, ds, v, nt, +tcfg, +views}:
+    case Cfg{+home, w, +h, +p, pr, ds, v, +nt, +tcfg, +views}:
       do IO<Unit>:
         # the home's lock first: a second hub ends before the event store
         +held : String <- Lock.take(home, p)
         Lock.refuse(String.is_empty(held), held, home)
         H.Env.put("BACKPLANE_HOME", home)
         Agents.only(home)
+        # the port first: until the hub is ready every request gets a 503
+        # that says it is starting (Early.*), so clients wait
+        el0 : Early <- Early.bind(h, p, 1, home)
+        +el : Early <- Early.need(el0, need, h ++ ":" ++ U32.show(p))
+        te : TEarly <- Early.tail(Bool.and(Early.is_up(el), Net.tailnet(nt)), p, home)
+        # BACKPLANE_BOOT_DELAY_MS: tests only (test/tools/early_listener_e2e.ts)
+        +dl : String <- Env.get("BACKPLANE_BOOT_DELAY_MS", "0")
+        IO.sleep(EA.Early.delay(dl))
         t0 : U32 <- PS.Perf.us()
         # store.db's records and the log's tail (hotboot.bend), or the
         # whole log replayed when there is no usable store
@@ -15894,17 +16288,19 @@ def Main.boot(cfg: Cfg, need: Bool, front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
         t2 : U32 <- PS.Perf.span("boot.replay", t0)
         +torn : String = HB.Hot.torn(bt)
         +st : M.State = HB.Hot.st(bt)
-        +ls : List<&2, String> = HB.Hot.ls(bt)
-        Log.info(Nat.show(ST.Store.size(ls)) ++ " lines, state seq " ++ Nat.show(M.State.seq(st)) ++ " from " ++ Store.path(home))
-        # S1: Sto.boot here
         GT.Git.step.migrate(home, HistReg.roots(st))
         f0 : Result<&1, &1, U32 & String, File> <- File.open(Store.path(home), "a")
         f : Result<&1, &1, U32 & String, File> <- Main.torn(f0, torn)
+        # S1: Sto.boot here (the store brought up to the log's end; the hub
+        # keeps no log lines, SO.Lg)
+        +ls : SO.Lg <- SO.Sto.boot(home, st)
+        ts : U32 <- PS.Perf.span("boot.store", t2)
+        Log.info("replayed " ++ Nat.show(SO.Lg.n(ls)) ++ " changes from " ++ Store.path(home))
         tok : String <- Token.load(home)
         +mc : String <- Files.text(Models.cache(home))
         +bc : String <- BN.Bf.text(BN.Bn.cache(home))
         exe : String <- H.Sys.exe_dir()
-        t3 : U32 <- PS.Perf.span("boot.files", t2)
+        t3 : U32 <- PS.Perf.span("boot.files", ts)
         rt0 : K.Rt <- K.Rt.boot(home, M.Setting.get(st, "kicad.path", ""), exe)
         t4 : U32 <- PS.Perf.span("boot.kicad", t3)
         +rt : K.Rt = K.Rt.set(rt0, "ipc", J.Str{""})
@@ -15919,7 +16315,13 @@ def Main.boot(cfg: Cfg, need: Bool, front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
         t6 : U32 <- PS.Perf.span("boot.thin", t5)
         +tmc : TMAIL.Lazy = TMAIL.Lazy.of(st)
         t7 : U32 <- PS.Perf.span("boot.mail", t6)
-        +org : String = Bool.pick(String, List.is_empty(&2, String, ls), "", Hub.origin(ls))
+        +org : String = Bool.pick(String, Nat.is_eq(SO.Lg.n(ls), 0n), "", Hub.origin(ls))
         Log.info("origin " ++ org)
         t8 : U32 <- PS.Perf.span("boot.origin", t7)
-        Main.opened(f, st, ls, Cfg.with_thin_cache(cfg1, ThinCache{ti, org, 1n, Map.new(&2, TLIVE.Stream), tmc, Nil{}, TPACE.Notes.empty(), ""}), need, front, t8)
+        # the thin views read store.db once it is open and written on every
+        # commit (Thin.store.open: the index keeps only recent threads)
+        cfg2 : Cfg <- Thin.store.if(String.is_empty(SO.Lg.db(ls)), Cfg.with_thin_cache(cfg1, ThinCache{ti, org, 1n, Map.new(&2, TLIVE.Stream), tmc, Nil{}, TPACE.Notes.empty(), ""}), st, SO.Lg.db(ls))
+        # far_line for the log's older lines, in the background once the
+        # hub listens (SO.Sto.far.fill: nothing when meta far_line is filled)
+        IO.spawn(Unit, SO.Sto.far.fill(ls, st))
+        Main.opened(f, st, ls, cfg2, need, front, t8, el, te)

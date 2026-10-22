@@ -1038,17 +1038,17 @@ function bp_park_handle(id, out, k, more, at) {
   h.parked[out ? 1 : 0].push(w);
 }
 
-if (BP_ASYNC) {
-  io_park_on = function (fd, out, k, more, at) {
-    if (BP_H.is(fd)) {
-      bp_park_handle(fd, out, k, more, at);
-      return;
-    }
-    if (fd !== undefined && BP_WIN) {
-      throw "bend: a descriptor park on win32 (fd " + fd + ")";
-    }
-    bp_sync_park(fd, out, k, more, at);
-  };
+// installed when an async run starts (bp_run), never at load: a program
+// bend runs in-process keeps the runtime's own parks (see io_run below)
+function bp_park_on(fd, out, k, more, at) {
+  if (BP_H.is(fd)) {
+    bp_park_handle(fd, out, k, more, at);
+    return;
+  }
+  if (fd !== undefined && BP_WIN) {
+    throw "bend: a descriptor park on win32 (fd " + fd + ")";
+  }
+  bp_sync_park(fd, out, k, more, at);
 }
 
 // Descriptor waits through poll(), not the runtime's select(): select puts
@@ -1142,6 +1142,7 @@ async function bp_run(m) {
   const io = { runs: [], live: 0, waits: [], pend: 0, wake: null,
     timer: undefined, tick: 1, exit: null };
   globalThis.BEND_IO = io;
+  io_park_on = bp_park_on;
   Object.assign($0eff, bp_base($0eff), bp_host($0eff), bp_file($0eff));
   if ("Process.run" in $0eff) {
     $0eff["Process.run"] = bp_process_run;
@@ -1203,17 +1204,37 @@ async function bp_run(m) {
   }
 }
 
+// A program runs either from its emitted file (io_exit(main, show) at its
+// end), which runs on this loop, or inside `bend x.bend` (scripts/test.sh),
+// which calls io_run(main) for a number and then exits the process itself
+// (bend's main is `await cli(); process.exit()`), so nothing async could
+// finish there: an in-process run keeps the runtime's own sync loop, with
+// BEND_ASYNC false so the effect files take their sync paths too. Windows
+// has no sync loop; bend does not run programs in-process there.
+function bp_start(main) {
+  bp_run(main).then((code) => process.exit(code), (e) => {
+    io_errs(e instanceof RangeError
+      ? "bend: memory fault (machine stack overflow?)" : String(e));
+    process.exit(1);
+  });
+}
+
 if (BP_ASYNC) {
   const sync_exit = io_exit;
   io_exit = function (main, show) {
     if (show !== null) {
       return sync_exit(main, show);
     }
-    bp_run(main).then((code) => process.exit(code), (e) => {
-      io_errs(e instanceof RangeError
-        ? "bend: memory fault (machine stack overflow?)" : String(e));
-      process.exit(1);
-    });
+    bp_start(main);
+  };
+  const sync_run = io_run;
+  io_run = function (main) {
+    if (BP_WIN) {
+      bp_start(main);
+      return 0;
+    }
+    globalThis.BEND_ASYNC = false;
+    return sync_run(main);
   };
 }
 

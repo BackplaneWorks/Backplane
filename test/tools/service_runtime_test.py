@@ -194,6 +194,48 @@ class RuntimeTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             R.loader_imports(' UND dlmopen@GLIBC_2.3.4\n', [{'name': 'libc.so.6'}])
 
+    def bundle(self, root):
+        # a two-member synthetic Windows runtime bundle: bash.exe importing
+        # cygwin1.dll (in the bundle) and KERNEL32.dll (system)
+        (root/'runtime/bin').mkdir(parents=True)
+        (root/'runtime/bin/bash.exe').write_bytes(b'bash')
+        (root/'runtime/bin/cygwin1.dll').write_bytes(b'cyg')
+        (root/'licenses').mkdir()
+        (root/'licenses/COPYING').write_text('GPL')
+        members = {n: {'type': 'file', 'sha256': R.sha(root/n), 'bytes': (root/n).stat().st_size}
+                   for n in ('runtime/bin/bash.exe', 'runtime/bin/cygwin1.dll', 'licenses/COPYING')}
+        R.write(root/'RUNTIME.json', {'target': 'windows-x64', 'members': members,
+            'inventory': [{'path': n, 'package': 'bash', 'version': '5', 'architecture': 'x64', **m} for n, m in members.items()],
+            'packages': [{'name': 'bash', 'version': '5', 'sourceDisposition': 'fixture', 'licenses': [{'path': 'licenses/COPYING', 'sha256': members['licenses/COPYING']['sha256']}]}]})
+        R.write(root/'CLOSURE.json', {'target': 'windows-x64', 'status': 'PASS', 'unresolvedMandatory': [], 'edges': [
+            {'from': 'runtime/bin/bash.exe', 'kind': 'normal', 'name': 'cygwin1.dll', 'resolved': 'runtime/bin/cygwin1.dll'},
+            {'from': 'runtime/bin/bash.exe', 'kind': 'normal', 'name': 'KERNEL32.dll', 'system': True, 'classification': 'approved-system'},
+            {'from': 'backplane-serve.exe', 'kind': 'normal', 'name': 'cygwin1.dll', 'resolved': 'runtime/bin/cygwin1.dll'}]})
+
+    def test_windows_bundle_copies_the_pinned_runtime_and_its_own_edges(self):
+        with tempfile.TemporaryDirectory() as d:
+            src, rt = Path(d)/'bundle', Path(d)/'runtime'
+            src.mkdir(); rt.mkdir(); self.bundle(src)
+            with patch.object(R, 'WINDOWS_RUNTIME_SHA256', R.sha(src/'RUNTIME.json')), patch.object(R, 'WINDOWS_CLOSURE_SHA256', R.sha(src/'CLOSURE.json')):
+                inv, packages, edges = R.windows_bundle(src, rt)
+            self.assertEqual(len(inv), 3); self.assertEqual(packages[0]['name'], 'bash')
+            self.assertEqual((rt/'runtime/bin/bash.exe').read_bytes(), b'bash')
+            # the old C service's edge is not carried over
+            self.assertEqual(sorted(e['name'] for e in edges), ['KERNEL32.dll', 'cygwin1.dll'])
+            self.assertTrue(all(e['from'] == 'runtime/bin/bash.exe' for e in edges))
+
+    def test_windows_bundle_refuses_another_bundle_or_changed_bytes(self):
+        with tempfile.TemporaryDirectory() as d:
+            src = Path(d)/'bundle'; src.mkdir(); self.bundle(src)
+            with self.assertRaises(ValueError):
+                R.windows_bundle(src, Path(d)/'rt1')  # the real pins: not this bundle
+            pins = (R.sha(src/'RUNTIME.json'), R.sha(src/'CLOSURE.json'))
+            (src/'runtime/bin/bash.exe').write_bytes(b'tampered')
+            (Path(d)/'rt2').mkdir()
+            with patch.object(R, 'WINDOWS_RUNTIME_SHA256', pins[0]), patch.object(R, 'WINDOWS_CLOSURE_SHA256', pins[1]):
+                with self.assertRaises(ValueError):
+                    R.windows_bundle(src, Path(d)/'rt2')
+
     def test_ffi_libraries_named_anywhere_in_the_file(self):
         # an effect picks its library into a variable: the literals in the
         # file declare it, and kernel32.dll is the Windows system library

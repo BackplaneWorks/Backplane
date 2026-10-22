@@ -10,7 +10,7 @@ import ../src/server/thin-view.bend as V
 # Launch reports are kept whole (hub.bend's Lr.note), and a report stored
 # cut short before that reads whole when its original is exactly
 # recoverable (Lr.whole, thin-view's Message.whole). The last line printed
-# is the fixture the UI's click test reads (cut-report-inline.cjs).
+# is the fixture a UI check may read.
 
 # t1's reply: over Lr.cut() characters, under 8 KiB (one read completes it)
 def reply() -> String:
@@ -65,6 +65,11 @@ def fixture() -> String:
     J.KV{"version", J.Str{Nat.show(T.Row.n(row(read())))}}, J.KV{"preview", J.Str{legacy()}}, J.KV{"fullText", J.Str{head() ++ reply()}},
     J.KV{"newReport", J.Str{told()}}]))
 
+def window.whole(es: List<&2, M.Entry>) -> Bool:
+  match es:
+    case Nil{}: False{}
+    case +e <> t: Bool.or(String.eq(T.Entry.text(e), head() ++ reply()), window.whole(t))
+
 def main() -> IO(Unit):
   do IO<Unit>:
     C.Check.str("the reply is over the old cut and under 8 KiB", Bool.show(Bool.and(Nat.is_gt(String.length(reply()), H.Lr.cut()), Nat.is_lt(String.length(reply()), 8000n))), "True")
@@ -80,4 +85,6 @@ def main() -> IO(Unit):
     C.Check.str("the view reads the legacy row whole", Bool.show(String.eq(T.Entry.text(T.Row.entry(row(read()))), head() ++ reply())), "True")
     C.Check.str("one read completes it", Bool.show(J.Json.get_bool(J.Json.get_obj(result(), "message"), "complete", False{})), "True")
     C.Check.str("the read returns the whole text", Bool.show(String.eq(J.Json.get_str(J.Json.get_obj(result(), "message"), "text", ""), head() ++ reply())), "True")
+    C.Check.str("the thread's window shows the legacy row whole, with no read-more", Bool.show(window.whole(M.State.entries.all(V.State.window(M.State.apply(st(), M.MessagePosted{"t0", id(), M.User{}, legacy(), 9n}), index(), target(), ["1"])))), "True")
+    C.Check.str("the window marks no message partial", Nat.show(List.length(&2, J.Json, J.Json.elems(J.Json.get_obj(V.Page.window(index(), "t0", J.Json.obj([J.KV{"target", target()}]), "epoch", ["1"]), "partial")))), "0")
     IO.print("fixture " ++ fixture())

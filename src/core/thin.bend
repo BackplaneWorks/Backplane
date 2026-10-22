@@ -342,10 +342,25 @@ def Entry.with_text(e: M.Entry, text: String) -> M.Entry:
     case M.Msg{id, th, role, _, at}: M.Msg{id, th, role, text, at}
     case M.Act{id, th, tone, kind, _, at}: M.Act{id, th, tone, kind, text, at}
 
-# One bounded visible block; the complete immutable entry stays in the hub.
-# Reply window.partial advertises a chunk continuation for every such row.
+# Only activity rows fold: a message's text is always sent whole (the
+# person's order: no "read rest of message"); an activity shows its first
+# block and window.partial advertises a chunk continuation for the rest.
+def Row.folds(+e: M.Entry) -> Bool:
+  match e:
+    case M.Msg{_, _, _, _, _}: False{}
+    case M.Act{_, _, _, _, _, _}: True{}
+
+def Row.preview.k(fold: Bool, +r: Row) -> M.Entry:
+  match fold:
+    case True{}: Entry.with_text(Row.entry(r), Blocks.get(Row.blocks(r), 0n))
+    case False{}: Row.entry(r)
+
 def Row.preview(+r: Row) -> M.Entry:
-  Entry.with_text(Row.entry(r), Blocks.get(Row.blocks(r), 0n))
+  Row.preview.k(Row.folds(Row.entry(r)), r)
+
+# a row shown cut: an activity longer than one block
+def Row.partial(+r: Row) -> Bool:
+  Bool.and(Row.folds(Row.entry(r)), Nat.is_gt(Blocks.n(Row.blocks(r)), 1n))
 
 def Page.entries(ids: List<&2, String>, +i: Index, acc: List<&2, M.Entry>) -> List<&2, M.Entry>:
   match ids:
