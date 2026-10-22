@@ -271,6 +271,55 @@ def Sto.lines.go(none: Bool, +lg: Lg, +from: Nat, +count: Nat) -> IO(List<&2, St
 def Sto.lines(+lg: Lg, +from: Nat, +count: Nat) -> IO(List<&2, String>):
   Sto.lines.go(Bool.or(Nat.is_eq(count, 0n), String.is_empty(Lg.db(lg))), lg, from, count)
 
+# Lines by a list of numbers (F1's far feed from far_line)
+# --------------------------------------------------------
+
+# consecutive numbers as one run: its first number and how many
+type LRun is Data:
+  LRun{from: Nat, n: Nat}
+
+def Runs.close(+from: Nat, +n: Nat, +acc: List<&2, LRun>) -> List<&2, LRun>:
+  Bool.pick(List<&2, LRun>, Nat.is_eq(n, 0n), acc, LRun{from, n} <> acc)
+
+# the runs of consecutive numbers, in the order given (each step's values
+# picked without recursion: the walk calls only itself)
+def Runs.go(xs: List<&2, Nat>, +from: Nat, +n: Nat, +acc: List<&2, LRun>) -> List<&2, LRun>:
+  match xs:
+    case Nil{}:
+      List.reverse(&2, LRun, Runs.close(from, n, acc))
+    case +x <> t:
+      +next = Bool.and(Nat.is_gt(n, 0n), Nat.is_eq(x, Nat.add(from, n)))
+      Runs.go(t, Bool.pick(Nat, next, from, x), Bool.pick(Nat, next, 1n+n, 1n), Bool.pick(List<&2, LRun>, next, acc, Runs.close(from, n, acc)))
+
+def Sto.runs(xs: List<&2, Nat>) -> List<&2, LRun>:
+  Runs.go(xs, 0n, 0n, Nil{})
+
+# xs pushed onto acc (reversed): a tail call per line
+def Sto.onto(xs: List<&2, String>, acc: List<&2, String>) -> List<&2, String>:
+  match xs:
+    case Nil{}:
+      acc
+    case x <> t:
+      Sto.onto(t, x <> acc)
+
+def Sto.lines.run(r: LRun, +lg: Lg, k: List<&2, String> -> IO(List<&2, String>)) -> IO(List<&2, String>):
+  match r:
+    case LRun{+from, +n}:
+      IO.bind(List<&2, String>, List<&2, String>, Sto.lines(lg, Nat.sub(from, 1n), n), k)
+
+def Sto.lines.at.go(rs: List<&2, LRun>, +lg: Lg, acc: List<&2, String>) -> IO(List<&2, String>):
+  match rs:
+    case Nil{}:
+      IO.pure(List<&2, String>, List.reverse(&2, String, acc))
+    case r <> t:
+      Sto.lines.run(r, lg, xs => Sto.lines.at.go(t, lg, Sto.onto(xs, acc)))
+
+# the lines numbered seqs (from 1), in the order given, each as Sto.lines
+# gives it; one file read per run of consecutive numbers. A number past
+# the log's end has no line (none is answered for it)
+def Sto.lines.at(+lg: Lg, seqs: List<&2, Nat>) -> IO(List<&2, String>):
+  Sto.lines.at.go(Sto.runs(seqs), lg, Nil{})
+
 # Committing
 # ----------
 # Hub.fold steps each written change through Sto.step: the state after it
@@ -415,7 +464,7 @@ def Sto.line.c(m: Maybe<&2, M.Change>, +o: J.Json, text: String, +len: Nat, +st:
     case Some{+c} Pr{Tail{+s, +ord, +off}, its, ks}:
       Pr{Tail{1n+s, SDB.Sdb.ord(c, ord), Nat.add(off, 1n+len)}, Sto.push.far(Sto.far.fact(st, c, 1n+s), Sto.push.ops(SDB.Sdb.facts(st, SDB.At{1n+s, off, len, ord}, c), its)), Sto.keys.add(SDB.Sdb.keys(st, st, c), ks)}
     case None{} Pr{Tail{+s, +ord, +off}, its, ks}:
-      Pr{Tail{1n+s, ord, Nat.add(off, 1n+len)}, Sto.push.ops([SDB.F.line(SDB.At{1n+s, off, len, ord}, Sto.wire.k(C.Change.private(J.Json.get_str(o, "$", "")), o, text))], its), ks}
+      Pr{Tail{1n+s, ord, Nat.add(off, 1n+len)}, Sto.push.ops([SDB.F.line(SDB.At{1n+s, off, len, ord}, C.Change.wire_over(o, text))], its), ks}
 
 def Sto.line.k(m: Maybe<&2, J.Json>, text: String, +len: Nat, +st: M.State, p: Pr) -> Pr:
   match m p:

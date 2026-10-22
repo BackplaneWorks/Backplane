@@ -2195,6 +2195,16 @@ def Side.ids(ts: List<&2, M.Thread>) -> List<&2, String>:
     case t <> rest:
       M.Thread.id(t) <> Side.ids(rest)
 
+# A project's "Settled N": the count a thin window carries (the hub's
+# thin-view Settled.counts, setting "thin.settled.<project>": a window
+# holds only a few of a collapsed project's threads), else the shelf's own
+def Side.settled.key(+pid: String) -> String:
+  "thin.settled." ++ pid
+
+def Side.settled.n(+st: M.State, +pid: String, +shown: Nat) -> Nat:
+  +n = M.Switch.num(M.Setting.get(st, Side.settled.key(pid), ""), 0n)
+  Bool.pick(Nat, Nat.is_gt(n, shown), n, shown)
+
 def Side.when(on: Bool, xs: List<&2, String>) -> List<&2, String>:
   match on:
     case True{}:
