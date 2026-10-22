@@ -477,10 +477,23 @@ def Lex.uni(acc: String, left: Nat, +code: U32, c: Char) -> Lex:
     case 0n _:
       LStr{acc}
 
+# a finished string read once at its head. In the JS build a string grown
+# a character at a time is a rope (one string cell per character) until
+# something reads it, and a parsed value folded into the hub's state may
+# never be read: a log's settings kept millions of cells alive (the store
+# build: 5.4 GB). Matching the head makes the engine flatten it in place,
+# once; in C it is one cell. Never a walk per character.
+def Lex.flat(s: String) -> String:
+  match s:
+    case SNil{}:
+      SNil{}
+    case SCon{c, t}:
+      SCon{c, t}
+
 def Lex.str.k(q: Bool, bs: Bool, +u: U32, acc: String, out: List<&2, Tok>) -> Lex & List<&2, Tok>:
   match q bs:
     case True{} _:
-      (LIdle{}, TStr{String.reverse(acc)} <> out)
+      (LIdle{}, TStr{Lex.flat(String.reverse(acc))} <> out)
     case _ True{}:
       (LEsc{acc}, out)
     case _ _:

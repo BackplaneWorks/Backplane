@@ -400,6 +400,7 @@ def main() -> IO(Unit):
     # the runtime's loop (loop.js) is part of the program, as in the hub:
     # on Windows nothing spawns without it
     rt : String <- LP.Rt.loop()
+    IO.print("js pty: starting (" ++ rt ++ " loop)")
     a : U32 <- IO.bind(Result<&1, &1, U32 & String, U32 & Socket>, U32, P.Pty.spawn("sh", [], "", 80, 24), case.shell)
     b : U32 <- IO.bind(Result<&1, &1, U32 & String, U32 & Socket>, U32, P.Pty.spawn("sh", ["-c", "stty size; read x; stty size"], "", 80, 24), case.size)
     c : U32 <- IO.bind(Result<&1, &1, U32 & String, U32 & Socket>, U32, P.Pty.spawn("sh", ["-c", "echo $TERM; echo $COLORTERM; echo $LINES$COLUMNS; pwd; [ -t 0 ] && printf tty; : </dev/tty && echo ' ctty'; echo $(ls /dev/fd/)"], "/tmp", 80, 24), case.env)

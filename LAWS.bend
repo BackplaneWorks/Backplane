@@ -75,6 +75,8 @@ import ./src/app/cats.bend as VCAT
 import ./src/core/sexpr.bend as KSEX # kicad fork footprint placement
 import ./src/core/board.bend as B
 import ./src/core/hub.bend as H
+import ./src/core/copy.bend as JCOPY # J2: BACKPLANE_COPY
+import ./src/core/copynet.bend as JCNET # J2: BACKPLANE_COPY
 import ./src/core/deploy.bend as DP
 import ./src/core/ship.bend as SHP # deploy main
 import ./src/core/cmds.bend as CM
@@ -11445,3 +11447,105 @@ law ws_unmask_take_go:
   for +i: Nat
   for +acc: List<&2, U32>
   {WS.Ws.unmask.take.go(bs, n, key, i, acc) == List.reverse.go(&2, U32, WS.Ws.unmask(List.take(&2, U32, bs, n), key, i), acc) : List<&2, U32>}
+
+# --- J2: a hub on a copied log (BACKPLANE_COPY=1) acts on nothing outside ---
+# Its watch scripts are none (no launch, check, stop or intent shell: every
+# watch reads as gone, nothing the log names is signalled)
+law watch_copy_launch_none:
+  for +home: String
+  for +id: String
+  for +cwd: String
+  for +target: String
+  {MPCREDIT.Watch.launch.argv(True{}, home, id, cwd, target) == [] : List<&2, String>}
+
+law watch_copy_check_none:
+  for +kind: String
+  for +target: String
+  for +ident: String
+  for +home: String
+  for +id: String
+  {MPCREDIT.Watch.check.argv(True{}, kind, target, ident, home, id) == [] : List<&2, String>}
+
+law watch_copy_stop_none:
+  for +kind: String
+  for +target: String
+  for +ident: String
+  for +home: String
+  for +id: String
+  {MPCREDIT.Watch.stop.argv(True{}, kind, target, ident, home, id) == [] : List<&2, String>}
+
+law watch_copy_intent_none:
+  for +home: String
+  for +id: String
+  {MPCREDIT.Watch.intent.argv(True{}, home, id) == [] : List<&2, String>}
+
+# a hub that is no copy runs every out it made
+law copy_off_runs_all:
+  for +os: List<&2, H.Out>
+  {JCOPY.Copy.outs(False{}, os) == os : List<&2, H.Out>}
+
+# a copy drops deploys, restarts, updates, far reports, pushes, watch stops,
+# named locks, git that writes and bot effects outside its home
+law copy_drops_outside:
+  {JCOPY.Copy.outs(True{}, [H.DeployGo{"s"}, H.ShipRun{"c"}, H.ShipNext{"w"}, H.DeployProbe{}, H.Restart{}, H.Upgrade{}, H.UpgradeForce{}, H.LaunchFar{}, H.Alerted{"t"}, H.IslandSync{},
+    H.WatchStop{"t", "w", "pid", "1", "x"}, H.LockGuard{"n", "", "t"}, H.Git{0, "", "step", "t", "/c", "", ""}, H.BotFx{"send", "a", "b", "c"}, H.BotReply{"t", "to", "x", ""}]) == [] : List<&2, H.Out>}
+
+# and keeps what stays in the hub: replies, reading git, its home's folders
+law copy_keeps_inside:
+  {JCOPY.Copy.outs(True{}, [H.Send{1, "x"}, H.Git{3, "9", "diff", "t", "/c", "", ""}, H.BotFx{"scratch", "a", "", ""}]) == [H.Send{1, "x"}, H.Git{3, "9", "diff", "t", "/c", "", ""}, H.BotFx{"scratch", "a", "", ""}] : List<&2, H.Out>}
+
+# a client that asked for git that writes is told, not left waiting
+law copy_git_write_told:
+  {JCOPY.Copy.outs(True{}, [H.Git{3, "9", "act", "t", "/c", "", ""}]) == [H.Reply.err(3, "9", "a hub on a copied log (BACKPLANE_COPY=1) runs no git that writes")] : List<&2, H.Out>}
+
+# no network command from a copy; every command from a hub that is no copy
+law copy_refuses_net:
+  {Bool.and(Bool.and(JCNET.Copy.refused(True{}, "curl", []), JCNET.Copy.refused(True{}, "git", ["push", "origin"])), Bool.not(JCNET.Copy.refused(True{}, "git", ["status"]))) == True{} : Bool}
+
+law copy_off_refuses_none:
+  for +cmd: String
+  for +args: List<&2, String>
+  {JCNET.Copy.refused(False{}, cmd, args) == False{} : Bool}
+
+# a copy takes over or stops none of the agents its home's records name
+law adopt_copy_none:
+  for +rec: String
+  for +hand: String
+  {MPCREDIT.Adopt.copy.entries(True{}, rec, hand) == [] : List<&2, AD.AEntry>}
+
+# and opens no file on the machine (file.open is git job "open"): the
+# client is told
+law copy_file_open_told:
+  {JCOPY.Copy.outs(True{}, [H.Git{3, "9", "open", "", "/", "/x", "open"}]) == [H.Reply.err(3, "9", "a hub on a copied log (BACKPLANE_COPY=1) runs no git that writes")] : List<&2, H.Out>}
+
+# --- J2: the pairing message made once per link, not per join ---
+# (its QR code took ~2 s on the JS target, for every client that joined)
+law pair_msg_kept:
+  {MPCREDIT.Hub.pair_msg.from("r1\n{m}", "r1") == "{m}" : String}
+
+# a message kept for another link is not used
+law pair_msg_other_link:
+  {MPCREDIT.Hub.pair_msg.from("r1\n{m}", "") == MPCREDIT.Hub.pair_msg.of("") : String}
+
+# no link, no QR code
+law pair_msg_no_link_qr:
+  {MPCREDIT.Info.qr("") == "" : String}
+# ---- F1: the far feed made a slice at a time (far.bend Fr.feed.some) ----
+# folding every slice of 2 lines is the feed made from the whole log at once
+law far_feed_sliced:
+  {FR.Fr.feed.sliced(20n, FR.Fr.feed.start(FR.Fr.feed.demo.lines()), 2n, FR.Fr.feed.demo.st()) == FR.Fr.feed.full(FR.Fr.feed.demo.lines(), FR.Fr.feed.demo.st()) : FR.Feed}
+
+# and so are slices of one line, and one slice bigger than the log
+law far_feed_sliced_one:
+  {FR.Fr.feed.sliced(20n, FR.Fr.feed.start(FR.Fr.feed.demo.lines()), 1n, FR.Fr.feed.demo.st()) == FR.Fr.feed.full(FR.Fr.feed.demo.lines(), FR.Fr.feed.demo.st()) : FR.Feed}
+
+law far_feed_sliced_big:
+  {FR.Fr.feed.sliced(20n, FR.Fr.feed.start(FR.Fr.feed.demo.lines()), 500n, FR.Fr.feed.demo.st()) == FR.Fr.feed.full(FR.Fr.feed.demo.lines(), FR.Fr.feed.demo.st()) : FR.Feed}
+
+# a store row for a shared line, none for a private one
+law far_fact_shared:
+  {FR.Fr.fact(FR.Fr.feed.demo.st(), M.ThreadRenamed{"t1", "x", 9n}, 8n) == [FR.Fact{8n, "p1"}] : List<&2, FR.Fact>}
+
+law far_fact_private:
+  {FR.Fr.fact(FR.Fr.feed.demo.st(), M.SettingSet{"k", "v", 9n}, 8n) == Nil{} : List<&2, FR.Fact>}
+# ---- end F1 feed ----

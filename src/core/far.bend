@@ -426,6 +426,24 @@ def Fr.scope(+s: M.State, c: M.Change) -> String:
     case _:
       ""
 
+# The store's row for a log line that goes to the owner's other machines
+# (table far_line(seq, scope), written with the line in the commit's one
+# transaction, and by the streaming build): none for a change that is not
+# shared, else its number and the project it belongs to ("" for none).
+# s is the state after the change, as Fr.shared reads it.
+type Fact is Data:
+  Fact{seq: Nat, scope: String}
+
+def Fr.fact.k(sh: Bool, +scope: String, +seq: Nat) -> List<&2, Fact>:
+  match sh:
+    case True{}:
+      [Fact{seq, scope}]
+    case False{}:
+      Nil{}
+
+def Fr.fact(+s: M.State, +c: M.Change, +seq: Nat) -> List<&2, Fact>:
+  Fr.fact.k(Fr.shared(s, c), Fr.scope(s, c), seq)
+
 # Each project's last shared change, as the owning hub numbers it
 # (project id → n). Lines are walked newest first at start, so a project
 # keeps the first number it meets; a commit's are newer than all of them.
@@ -1344,6 +1362,76 @@ def Fr.feed.go(ls: List<&2, String>, +n: Nat, +s: M.State, acc: Feed) -> Feed:
 def Fr.feed.full(+ls: List<&2, String>, +s: M.State) -> Feed:
   Fr.feed.go(ls, ST.Store.size(ls), s, Feed{Nil{}, Map.new(&2, Nat)})
 
+# The feed made a slice at a time (the server's Far.feed.job yields
+# between slices, so building it never holds the hub's one fiber): k more
+# lines folded, what is left, the number of the next. Folding every slice
+# is the whole-log feed (law far_feed_sliced).
+type FeedPart is Data:
+  FeedPart{rest: List<&2, String>, n: Nat, acc: Feed}
+
+def Fr.feed.some(ls: List<&2, String>, +k: Nat, +n: Nat, +s: M.State, acc: Feed) -> FeedPart:
+  match ls k:
+    case Nil{} _:
+      FeedPart{Nil{}, n, acc}
+    case +l <> +t 0n:
+      FeedPart{l <> t, n, acc}
+    case +l <> t 1n+p:
+      Fr.feed.some(t, p, Nat.sub(n, 1n), s, Fr.feed.step(Fr.line.parsed(J.Json.parse(l)), s, n, l, acc))
+
+def FeedPart.done(p: FeedPart) -> Bool:
+  match p:
+    case FeedPart{Nil{}, _, _}:
+      True{}
+    case _:
+      False{}
+
+def Fr.feed.start(+ls: List<&2, String>) -> FeedPart:
+  FeedPart{ls, ST.Store.size(ls), Feed{Nil{}, Map.new(&2, Nat)}}
+
+def Fr.feed.next(p: FeedPart, +k: Nat, +s: M.State) -> FeedPart:
+  match p:
+    case FeedPart{ls, +n, acc}:
+      Fr.feed.some(ls, k, n, s, acc)
+
+def FeedPart.feed(p: FeedPart) -> Feed:
+  match p:
+    case FeedPart{_, _, acc}:
+      Fr.feed.done(acc)
+
+# lines folded per slice: about 40 ms of JSON at the JS hub's rate
+def Fr.feed.slice() -> Nat:
+  500n
+
+# every slice folded, as the job does (fuel: more slices than it takes)
+def Fr.feed.sliced(fuel: Nat, p: FeedPart, +k: Nat, +s: M.State) -> Feed:
+  match fuel p:
+    case _ FeedPart{Nil{}, _, acc}:
+      Fr.feed.done(acc)
+    case 0n FeedPart{_, _, acc}:
+      Fr.feed.done(acc)
+    case 1n+f FeedPart{+l <> +t, +n, acc}:
+      Fr.feed.sliced(f, Fr.feed.some(l <> t, k, n, s, acc), k, s)
+
+# a small log for the laws: shared and private lines, newest first as the
+# hub keeps them, and the state after it
+def Fr.feed.demo.cs() -> List<&2, M.Change>:
+  [M.ProjectCreated{"p1", "Board", "/b", 1n}, M.ThreadCreated{"t1", "p1", "A", M.Local{}, "", "", "claude", "", 2n},
+   M.SettingSet{"k", "v", 3n}, M.MessagePosted{"t1", "m1", M.User{}, "hi", 4n}, M.ThreadRenamed{"t1", "B", 5n},
+   M.SettingSet{"k", "w", 6n}, M.ActivityLogged{"t1", "a1", "tool", "Bash", "ls", 7n}]
+
+def Fr.feed.demo.go(cs: List<&2, M.Change>, acc: List<&2, String>) -> List<&2, String>:
+  match cs:
+    case Nil{}:
+      acc
+    case c <> t:
+      Fr.feed.demo.go(t, J.Json.show(C.Change.wire(c)) <> acc)
+
+def Fr.feed.demo.lines() -> List<&2, String>:
+  Fr.feed.demo.go(Fr.feed.demo.cs(), Nil{})
+
+def Fr.feed.demo.st() -> M.State:
+  M.State.replay(Fr.feed.demo.cs(), M.State.empty())
+
 def Fr.feed(+ls: List<&2, String>, +s: M.State) -> List<&2, Line>:
   Feed.lines(Fr.feed.full(ls, s))
 
@@ -1646,11 +1734,34 @@ def Fh.feed.at(f: Fh, r: Maybe<&2, List<&2, Line>> & List<&2, Line>) -> Fh:
   (fd, e) = r
   Fh.feed.at.k(f, fd, e)
 
-# a commit's shared lines (newest first) join the feed, or wait for it
-def Fh.feed.add(f: Fh, ls: List<&2, Line>) -> Fh:
+# The feed is made only once a linked machine asks for it (POST
+# /far/log), never at start: the first ask starts the job and is told
+# "not ready" until it is made. Until then a commit's lines are not kept
+# (the job reads the log as it is when asked); while it is being made they
+# wait beside it (early).
+def Fh.feed.key() -> String:
+  "\u{0}feed"
+
+def Fh.feed.asked(f: Fh) -> Bool:
   match f:
-    case Fh{ms, os, fd, e, p, ep, cx}:
+    case Fh{_, _, _, _, p, _, _}:
+      Fr.may.go(p, Fh.feed.key())
+
+def Fh.feed.ask(f: Fh) -> Fh:
+  match f:
+    case Fh{ms, os, fd, _, p, ep, cx}:
+      Fh{ms, os, fd, Nil{}, Fh.feed.key() <> p, ep, cx}
+
+def Fh.feed.add.k(asked: Bool, f: Fh, ls: List<&2, Line>) -> Fh:
+  match asked f:
+    case False{} _:
+      f
+    case True{} Fh{ms, os, fd, e, p, ep, cx}:
       Fh.feed.at(Fh{ms, os, None{}, Nil{}, p, ep, cx}, Fh.feed.put(fd, e, ls))
+
+# a commit's shared lines (newest first) join the feed, or wait for it
+def Fh.feed.add(+f: Fh, ls: List<&2, Line>) -> Fh:
+  Fh.feed.add.k(Fh.feed.asked(f), f, ls)
 
 # the feed made from the log (up to where it was when asked), with what
 # was committed since on top; its projects' numbers join the commits'

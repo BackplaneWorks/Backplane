@@ -124,7 +124,8 @@ function composite(a,s,actual,frozen,u){
  const webPrefix=u.TARGETS[s.target].resources+'/backplane-service/web/';
  const native=x=>Object.fromEntries(Object.entries(x).filter(([n])=>!n.startsWith(webPrefix)&&!n.startsWith('PROVENANCE/')&&!['STAGE.json','DESKTOP.json','MANIFEST.json'].includes(n)));
  const oldContent=Object.fromEntries(Object.entries(d.members).filter(([n])=>!n.startsWith('PROVENANCE/')&&!['STAGE.json','DESKTOP.json','MANIFEST.json'].includes(n)));
- check(u.contentDigest(oldContent)===d.payloadManifestSha256,'Baseline member manifest corrupt');
+ // a Windows stage is digested as NTFS shows its modes (produce-release.cjs content())
+ check(u.contentDigest(s.target==='windows-x64'?u.membershipExpectation(oldContent,s.target,'win32'):oldContent)===d.payloadManifestSha256,'Baseline member manifest corrupt');
  check(u.canonical(native(d.members))===u.canonical(native(actual)),'Composite changed non-web/native/runtime/vendor/shell bytes');
  const baselineProofs={};
  for(const k of proofs){

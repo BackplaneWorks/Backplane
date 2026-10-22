@@ -125,8 +125,31 @@ def State.window.add(+es: List<&2, M.Entry>, +st: M.State) -> M.State:
     case Nil{}: st
     case +e <> +tail: State.window.add(tail, M.State.post(st, e))
 
+# A launched thread's report stored cut short (before reports were kept
+# whole) reads whole: hub.bend's Lr.whole checks the row is exactly the old
+# cut form of the reply its id links to; any other row is read as stored.
+def Message.whole.k(+row: T.Row, +text: String) -> T.Row:
+  match row:
+    case T.Row{+n, +e, +terms, +blocks}:
+      Bool.pick(T.Row, String.eq(text, T.Entry.text(e)), T.Row{n, e, terms, blocks}, T.Row{n, T.Entry.with_text(e, text), terms, T.Blocks.of(text)})
+
+def Message.whole.e(+st: M.State, +row: T.Row, +e: M.Entry) -> T.Row:
+  match e:
+    case M.Msg{+id, _, _, +text, +at}: Message.whole.k(row, HB.Lr.whole(st, id, text, at))
+    case _: row
+
+def Message.whole(+st: M.State, +row: T.Row) -> T.Row:
+  Message.whole.e(st, row, T.Row.entry(row))
+
+# the window's entries: each row as shown (T.Row.preview), a report stored
+# cut short whole again (Message.whole), so no message reads cut
+def State.window.rows(ids: List<&2, String>, +st: M.State, +index: T.Index, acc: List<&2, M.Entry>) -> List<&2, M.Entry>:
+  match ids:
+    case Nil{}: acc
+    case id <> tail: State.window.rows(tail, st, index, T.Row.preview(Message.whole(st, T.Index.row.k(Map.get(T.Row, T.Row.blank(), T.Index.rows(index), id)))) <> acc)
+
 def State.window(+st: M.State, +index: T.Index, +target: J.Json, +rows: List<&2, String>) -> M.State:
-  State.window.add(List.reverse(&2, M.Entry, T.Page.entries(rows, index, Nil{})),
+  State.window.add(State.window.rows(rows, st, index, Nil{}),
     State.window.empty(st, Threads.pick(Target.thread(st, target) <> T.Index.recent(index), st, Map.new(&2, M.Thread))))
 
 # A route restores only transient selection. The normal bot tab policy
@@ -215,7 +238,7 @@ def Partial.rows(+ids: List<&2, String>, +index: T.Index, +epoch: String, +targe
     case Nil{}: List.reverse(&2, J.Json, acc)
     case +id <> +tail:
       +r = T.Index.row.k(Map.get(T.Row, T.Row.blank(), T.Index.rows(index), id))
-      +part = Partial.one(Nat.is_gt(T.Blocks.n(T.Row.blocks(r)), 1n), r, W.Cursor.write(epoch, target, "message:" ++ id, 1n))
+      +part = Partial.one(T.Row.partial(r), r, W.Cursor.write(epoch, target, "message:" ++ id, 1n))
       Partial.rows(tail, index, epoch, target, Partial.include(part, acc))
 
 def Page.last(+ids: List<&2, String>, +acc: String) -> String:
@@ -265,17 +288,9 @@ def Action.run(+web: Bool, +u: U.Ui, +p: J.Json, +now: Nat) -> ActResult:
     case True{}: ActResult.web(Action.web(String.is_empty(J.Json.get_str(p, "action", "")), u, J.Json.get_str(p, "action", ""), J.Json.get_str(p, "value", "")))
     case False{}: ActResult.mobile(MS.Session.act(u, J.Json.get_str(p, "hub", ""), J.Json.get_str(p, "cid", ""), now, J.Json.get_str(p, "action", ""), J.Json.get_str(p, "value", "")), J.Json.get_str(p, "hub", ""))
 
-def Partial.live_if( +partial: Bool, +thread: String, +version: Nat, +epoch: String, +target: J.Json) -> List<&2, J.Json>:
-  match partial:
-    case False{}: Nil{}
-    case True{}: [J.Json.obj([J.KV{"id", J.Str{TL.Stream.id(thread)}}, J.KV{"version", J.Str{Nat.show(version)}},
-      J.KV{"cursor", J.Str{W.Cursor.write(epoch, target, "live:" ++ Nat.show(version), 1n)}}, J.KV{"reason", J.Str{"byte-limit"}},
-      J.KV{"hasMore", J.Flag{True{}}}, J.KV{"complete", J.Flag{False{}}}])]
-
+# A streamed reply is shown whole (TL.Stream.preview), so it is never partial.
 def Partial.live( +s: TL.Stream, +thread: String, +epoch: String, +target: J.Json) -> List<&2, J.Json>:
-  match s:
-    case TL.Stream{_, size, blocks, cut, version}:
-      Partial.live_if(Bool.and(Nat.is_gt(size, 0n), Bool.or(cut, Nat.is_gt(T.Blocks.n(blocks), 16n))), thread, version, epoch, target)
+  []
 
 def Window.live(+window: J.Json, +parts: List<&2, J.Json>) -> J.Json:
   Obj.put(window, "partial", J.Json.arr(List.append(&2, J.Json, J.Json.elems(J.Json.get_obj(window, "partial")), parts)))
@@ -397,22 +412,6 @@ def Message.result(+row: T.Row, +start: Nat, +p: J.Json, +epoch: String) -> J.Js
     J.KV{"text", J.Str{T.Blocks.join(count, T.Row.blocks(row), start, Nil{})}},
     J.KV{"hasMore", J.Flag{Nat.is_lt(next, n)}}, J.KV{"complete", J.Flag{Nat.is_ge(next, n)}},
     J.KV{"cursor", J.Str{Bool.pick(String, Nat.is_lt(next, n), W.Cursor.write(epoch, J.Json.get_obj(p, "target"), "message:" ++ Nat.show(T.Row.n(row)), next), "")}}])}])
-
-# A launched thread's report stored cut short (before reports were kept
-# whole) reads whole: hub.bend's Lr.whole checks the row is exactly the old
-# cut form of the reply its id links to; any other row is read as stored.
-def Message.whole.k(+row: T.Row, +text: String) -> T.Row:
-  match row:
-    case T.Row{+n, +e, +terms, +blocks}:
-      Bool.pick(T.Row, String.eq(text, T.Entry.text(e)), T.Row{n, e, terms, blocks}, T.Row{n, T.Entry.with_text(e, text), terms, T.Blocks.of(text)})
-
-def Message.whole.e(+st: M.State, +row: T.Row, +e: M.Entry) -> T.Row:
-  match e:
-    case M.Msg{+id, _, _, +text, +at}: Message.whole.k(row, HB.Lr.whole(st, id, text, at))
-    case _: row
-
-def Message.whole(+st: M.State, +row: T.Row) -> T.Row:
-  Message.whole.e(st, row, T.Row.entry(row))
 
 # A chunk is scoped to the selected thread and exact immutable row version.
 # Empty cursors may only resolve one of the at-most-32 visible rows. Continued

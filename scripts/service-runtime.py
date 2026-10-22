@@ -45,7 +45,7 @@ APPLE_SYSTEM = {'/usr/lib/libSystem.B.dylib', '/usr/lib/libc++.1.dylib',
 # What the JS service may dlopen through bun:ffi, per platform. The Bend JS
 # runtime (pinned bend) and the server's effects (src/**/*.js, checked by
 # ffi_libraries) open the C library and nothing else.
-FFI_APPROVED = {'linux': {'libc.so.6'}, 'darwin': {'libSystem.dylib', '/usr/lib/libSystem.B.dylib'}, 'windows': set()}
+FFI_APPROVED = {'linux': {'libc.so.6'}, 'darwin': {'libSystem.dylib', '/usr/lib/libSystem.B.dylib'}, 'windows': {'kernel32.dll'}}
 BEND_RUNTIME_FFI = {'linux': ['libc.so.6'], 'darwin': ['libSystem.dylib'], 'windows': []}
 
 
@@ -60,22 +60,25 @@ def family(target):
 
 
 def ffi_libraries(root, files, target):
-    # Every dlopen in the service's JS sources must name its libraries as
-    # literals; those for this platform must be approved system libraries.
+    # A service JS source that calls dlopen declares the libraries it may open
+    # as string literals in the file (an effect picks one per platform into a
+    # variable, `ffi.dlopen(lib, ...)`); a file that calls dlopen and names
+    # none is refused, and those named for this platform must be approved
+    # system libraries.
     found = {}
     for name in files:
         if not (name.startswith('src/') and name.endswith('.js')):
             continue
         text = (Path(root)/name).read_text(errors='strict')
-        for call in re.finditer(r'\bdlopen\(([^{}]*?),\s*\{', text):
-            # the libraries named as literals (a platform test's own strings are not)
-            names = [n for n in re.findall(r'["\']([^"\']+)["\']', call[1])
-                     if re.search(r'\.(?:so(?:\.[0-9]+)*|dylib|dll)\Z', n)]
-            require(names, 'Dynamic load of an undeclared library: ' + name)
-            for lib in names:
-                kind = 'linux' if '.so' in lib else 'darwin' if lib.endswith('.dylib') else 'windows'
-                if kind == family(target):
-                    found.setdefault(lib, set()).add(name)
+        if not re.search(r'\bdlopen\(', text):
+            continue
+        names = sorted({n for n in re.findall(r'["\']([^"\'\s]+)["\']', text)
+                        if re.search(r'\.(?:so(?:\.[0-9]+)*|dylib|dll)\Z', n)})
+        require(names, 'Dynamic load of an undeclared library: ' + name)
+        for lib in names:
+            kind = 'linux' if re.search(r'\.so(?:\.[0-9]+)*\Z', lib) else 'darwin' if lib.endswith('.dylib') else 'windows'
+            if kind == family(target):
+                found.setdefault(lib, set()).add(name)
     for lib in BEND_RUNTIME_FFI[family(target)]:
         found.setdefault(lib, set()).add('Bend JS runtime (pinned bend)')
     require(set(found) <= FFI_APPROVED[family(target)], 'Unapproved dynamically loaded library')
@@ -142,14 +145,23 @@ def elf_main_mapping(debug, binary, program):
     dynamic_vaddr = int(one(r'^\s*DYNAMIC\s+0x[0-9a-f]+\s+(0x[0-9a-f]+)\s'), 16)
     phdr_vaddr = int(one(r'^\s*PHDR\s+0x[0-9a-f]+\s+(0x[0-9a-f]+)\s'), 16)
     first_load = re.findall(r'^\s*LOAD\s+(0x[0-9a-f]+)\s+(0x[0-9a-f]+)\s', program, re.M)
-    require(first_load and tuple(int(x, 16) for x in first_load[0]) == (0, 0),
-            'Unnamed main mapping requires zero-origin executable LOAD')
-    require(base > 0 and size > 0 and dynamic == base + dynamic_vaddr
+    kind = one(r'^Elf file type is (EXEC|DYN) ')
+    # a position-independent executable (DYN) is mapped at base, its first
+    # LOAD at vaddr 0; a fixed-address one (EXEC, as bun's Linux builds are)
+    # has base 0 and its segments at their own addresses (aarch64 bun: the
+    # first LOAD at 0x200000), so the same binding holds with base 0
+    require(first_load and int(first_load[0][0], 16) == 0
+            and (int(first_load[0][1], 16) == 0 if kind == 'DYN' else True),
+            'Unnamed main mapping requires the executable LOAD at file offset 0 (and vaddr 0 for a PIE)')
+    require((base > 0 if kind == 'DYN' else base == 0) and size > 0 and dynamic == base + dynamic_vaddr
         and entry == base + int(one(r'^Entry point (0x[0-9a-f]+)$'), 16)
         and phdr == base + phdr_vaddr
         and int(count) == int(one(r'^There are ([0-9]+) program headers,')),
         'Unnamed ELF mapping does not bind executable program headers')
-    return {'path': str(binary), 'sha256': sha(binary), 'mapStart': hex(base),
+    # the unnamed row shows the link map's address: base for a PIE; for a
+    # fixed-address executable glibc's l_addr (0), or its first LOAD
+    starts = [hex(base)] if kind == 'DYN' else [hex(base), hex(int(first_load[0][1], 16))]
+    return {'path': str(binary), 'sha256': sha(binary), 'mapStart': hex(base), 'mapStarts': starts, 'elfType': kind,
         'binding': 'Same --list invocation LD_DEBUG=files exact file, base/dynamic/entry/phdr/phnum',
         'classification': 'measured-main-executable-not-dependency'}
 
@@ -162,7 +174,7 @@ def elf_resolved(text, main_mapping=None):
         anonymous = re.fullmatch(r'\(0x([0-9a-f]+)\)', line)
         if anonymous:
             require(index == 0 and main_mapping is not None
-                and int(anonymous[1], 16) == int(main_mapping['mapStart'], 16),
+                and int(anonymous[1], 16) in [int(x, 16) for x in main_mapping.get('mapStarts', [main_mapping['mapStart']])],
                 'Unbound or misplaced unnamed ELF mapping')
             continue
         if re.fullmatch(r'linux-vdso\.so\.1 \(0x[0-9a-f]+\)', line):
@@ -372,6 +384,48 @@ def darwin_measure(binary, target, capture, dynamic=None):
         'sourceDisposition': 'Apple OS-provided libSystem/dyld; no system binary is copied. https://opensource.apple.com/'}
 
 
+# Windows: the hub needs sh/bash and coreutils for its children (Proc.run:
+# git, gh, curl, helpers) and terminals. 0.12.1 ships 0.12.0's portable
+# Cygwin runtime and its two Bun helpers unchanged: the exact bytes its
+# RUNTIME.json lists, with that release's measured static-import closure.
+WINDOWS_RUNTIME_SHA256 = 'e455abb52858638bd5bb341c2a9c7395e3efd9bf8454867038e8844a17f9adc3'
+WINDOWS_CLOSURE_SHA256 = 'eec3914d9425a91c8c23d08756935a7e455b035c3daef3dc8a7425cc3c4ae3b9'
+
+
+def windows_bundle(src, runtime):
+    """Copy the pinned bundle in SRC (RUNTIME.json, CLOSURE.json, the members)
+    into the service runtime folder; answer its inventory, packages and the
+    closure edges of its own binaries (the old C service's edges are dropped)."""
+    src = Path(src)
+    require(sha(src/'RUNTIME.json') == WINDOWS_RUNTIME_SHA256, 'Windows runtime bundle is not the pinned one')
+    require(sha(src/'CLOSURE.json') == WINDOWS_CLOSURE_SHA256, 'Windows runtime closure is not the pinned one')
+    manifest = json.loads((src/'RUNTIME.json').read_text())
+    closure = json.loads((src/'CLOSURE.json').read_text())
+    require(manifest.get('target') == 'windows-x64' and closure.get('target') == 'windows-x64'
+            and closure.get('status') == 'PASS' and closure.get('unresolvedMandatory') == [], 'Pinned Windows runtime is not a passing windows-x64 closure')
+    members = manifest['members']
+    # its licences sit beside the service's own (licenses/{bun,bend}), so they
+    # go under runtime-licenses/; every path that names one follows
+    place = lambda name: 'runtime-licenses/' + name[len('licenses/'):] if name.startswith('licenses/') else name
+    for name, m in sorted(members.items()):
+        require(m.get('type', 'file') == 'file' and not name.startswith(('/', '../')) and '/../' not in name, 'Unsafe bundle member: ' + name)
+        f = src/name
+        require(f.is_file() and not f.is_symlink() and f.stat().st_size == m['bytes'] and sha(f) == m['sha256'], 'Bundle member differs: ' + name)
+        dest = runtime/place(name)
+        require(not dest.exists(), 'Bundle member collides: ' + name)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(f, dest)
+    edges = [e for e in closure['edges'] if e.get('from') in members]
+    for e in edges:
+        require(e.get('kind') in ('normal', 'delay', 'dynamic') and e.get('name'), 'Unusable bundle closure edge')
+        if not e.get('system'):
+            require(e.get('resolved') in members, 'Bundle edge resolves outside the bundle: ' + str(e.get('resolved')))
+    inventory = [{**i, 'path': place(i['path'])} for i in manifest['inventory']]
+    packages = [{**p, 'licenses': [{**l, 'path': place(l['path'])} for l in p.get('licenses', [])]} for p in manifest['packages']]
+    require(not any(e.get('from', '').startswith('licenses/') or str(e.get('resolved') or '').startswith('licenses/') for e in edges), 'A closure edge names a licence file')
+    return inventory, packages, edges
+
+
 def prepare(args):
     producer = args.producer.resolve(strict=True)
     require(sha(producer) == args.producer_sha256, 'Component producer hash mismatch')
@@ -427,17 +481,24 @@ def prepare(args):
         'sourceDisposition': 'https://github.com/i2cjak/Backplane/tree/'+release['commit']+'; actual separately pinned measurement producer retained in runtime-evidence.',
         'licenses': [{'path': 'runtime-notices/LICENSE.Backplane', 'sha256': sha(notice/'LICENSE.Backplane')},
                      {'path': 'runtime-notices/SYSTEM-ABI-NOTICE.txt', 'sha256': sha(notice/'SYSTEM-ABI-NOTICE.txt')}]}]
-    write(runtime/'RUNTIME.json', {'schema': 1, 'target': target, 'inventory': [
-        {'path': f.relative_to(runtime).as_posix(), 'package': packages[0]['name'], 'version': service.VERSION,
-         'architecture': target, 'sha256': sha(f), 'bytes': f.stat().st_size}
-        for f in sorted(evidence.iterdir())], 'packages': packages,
-        'suppliedLibraries': [], 'systemDependencies': measurement['systemLibraries']})
+    inventory = [{'path': f.relative_to(runtime).as_posix(), 'package': packages[0]['name'], 'version': service.VERSION,
+         'architecture': target, 'sha256': sha(f), 'bytes': f.stat().st_size} for f in sorted(evidence.iterdir())]
+    bundled = []
+    if target == 'windows-x64':
+        require(args.windows_runtime is not None, 'windows-x64 needs --windows-runtime: the hub has no shell without it')
+        extra, extra_packages, bundled = windows_bundle(args.windows_runtime, runtime)
+        inventory += extra
+        packages += extra_packages
+    write(runtime/'RUNTIME.json', {'schema': 1, 'target': target, 'inventory': inventory, 'packages': packages,
+        'suppliedLibraries': [], 'systemDependencies': measurement['systemLibraries'],
+        **({'bundledRuntime': {'runtimeManifestSha256': WINDOWS_RUNTIME_SHA256, 'closureSha256': WINDOWS_CLOSURE_SHA256,
+             'source': '0.12.0 portable Cygwin runtime and Bun helpers, unchanged'}} if bundled else {})})
     # Edges are rooted in the supplied service; system dependencies remain OS-owned
     # leaves. The full measured Linux transitive graph is retained in system.json.
     write(runtime/'CLOSURE.json', {'schema': 1, 'target': target, 'measured': True, 'status': 'PASS',
         'unresolvedMandatory': [], 'edges': [{'from': name, 'kind': d.get('kind', 'normal'), 'name': d['name'],
           'system': True, 'classification': 'approved-system', 'resolvedSystemPath': d['resolvedSystemPath']}
-          for d in measurement['dependencyGraph'] if d['from'] == name],
+          for d in measurement['dependencyGraph'] if d['from'] == name] + bundled,
         'measurement': 'runtime-evidence/system-dependencies.json', 'runtimeAcceptance': 'PENDING'})
     write(out/'RUNTIME-QUALIFICATION.json', {'schema': 1, 'kind': 'backplane-service-runtime-qualification',
         'status': 'PASS', 'target': target, 'sourceCommit': release['commit'], 'sourceTree': release['tree'],
@@ -461,6 +522,7 @@ def main():
     for name in ('source-root', 'build', 'producer', 'out'):
         parser.add_argument('--'+name, type=Path, required=True)
     parser.add_argument('--producer-sha256', required=True)
+    parser.add_argument('--windows-runtime', type=Path, help='windows-x64: the pinned bundle folder (RUNTIME.json, CLOSURE.json, members)')
     args = parser.parse_args()
     require(args.out.is_absolute(), 'New absolute output directory required')
     print(json.dumps(prepare(args), indent=2))

@@ -5,7 +5,7 @@ import ./json.bend as J
 import ./model.bend as M
 
 # Process-local UTF8 blocks. Local deltas extend only the last <=512-byte
-# block and new text. Rendering reads a fixed tail, not the growing buffer.
+# block and new text.
 type Stream is Data:
   Stream{generation: Nat, size: Nat, blocks: T.Blocks, cut: Bool, version: Nat}
 
@@ -78,12 +78,11 @@ def Streams.delta_find( +bs: List<&2, L.Buf>, +old: Stream, +thread: String, +te
 def Streams.delta(+streams: Map<&2, Stream>, +bs: List<&2, L.Buf>, +thread: String, +text: String, +version: Nat) -> Map<&2, Stream>:
   Map.set(&2, Stream, streams, thread, Streams.delta_find(bs, Stream.get(streams, thread), thread, text, version, Stream.get(streams, thread)))
 
-def Stream.start(+s: Stream) -> Nat:
-  Nat.sub(T.Blocks.n(Stream.blocks(s)), 16n)
-
+# The streamed reply whole: message text is never folded. Only what the
+# hub's own buffer dropped past Live.cap() (the stream's cut) is marked.
 def Stream.preview(+s: Stream) -> String:
-  Bool.pick(String, Bool.or(Stream.cut(s), Nat.is_gt(Stream.start(s), 0n)), "…\n", "") ++
-    T.Blocks.join(Nat.sub(T.Blocks.n(Stream.blocks(s)), Stream.start(s)), Stream.blocks(s), Stream.start(s), Nil{})
+  Bool.pick(String, Stream.cut(s), "…\n", "") ++
+    T.Blocks.join(T.Blocks.n(Stream.blocks(s)), Stream.blocks(s), 0n, Nil{})
 
 def Stream.id( +thread: String) -> String:
   "@live:" ++ thread

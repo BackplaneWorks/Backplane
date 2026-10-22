@@ -1,5 +1,6 @@
 import Base
 import ./host.bend as H
+import ./proc.bend as P
 import ../core/json.bend as J
 import ../core/utf8.bend as U
 import ../core/desktop-browser.bend as DB
@@ -181,11 +182,23 @@ def Browser.spawned(r: Result<&1, &1, U32 & String, U32 & Socket>, +q: Chan(BMsg
     case Fail{_}:
       IO.pure(Maybe<&2, Chan(String)>, None{})
 
-def Browser.start(+exe: String, +home: String, +q: Chan(BMsg), av: List<&2, String>) -> IO(Maybe<&2, Chan(String)>):
+def Browser.start.go(+exe: String, +home: String, +q: Chan(BMsg), av: List<&2, String>) -> IO(Maybe<&2, Chan(String)>):
   do IO<Maybe<&2, Chan(String)>>:
     mk : Result<&1, &1, U32 & String, Unit> <- H.FS.mkdirs(Br.shots(home))
     r : Result<&1, &1, U32 & String, U32 & Socket> <- H.Proc.spawn(exe, List.append(&2, String, ["--profile", Br.profile(home), "--jpeg-dir", Br.shots(home)], av), "/", 0)
     Browser.spawned(r, q)
+
+def Browser.start.c(copy: Bool, +exe: String, +home: String, +q: Chan(BMsg), av: List<&2, String>) -> IO(Maybe<&2, Chan(String)>):
+  match copy:
+    case True{}:
+      IO.pure(Maybe<&2, Chan(String)>, None{})
+    case False{}:
+      Browser.start.go(exe, home, q, av)
+
+# the helper started; none for a hub on a copied log (its bots' pages and
+# tasks name real sites)
+def Browser.start(+exe: String, +home: String, +q: Chan(BMsg), av: List<&2, String>) -> IO(Maybe<&2, Chan(String)>):
+  IO.bind(Bool, Maybe<&2, Chan(String)>, P.Proc.copy(), copy => Browser.start.c(copy, exe, home, q, av))
 
 # the running helper's input, starting it if needed
 def Browser.ensure(m: Maybe<&2, Chan(String)>, +exe: String, +home: String, +q: Chan(BMsg), av: List<&2, String>) -> IO(Maybe<&2, Chan(String)>):

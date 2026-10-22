@@ -77,8 +77,11 @@ remain explicit; the desktop owner performs actual stage/startup/auth/reconnect,
 OS enforcement and UI acceptance afterward.
 
 Bun opens libraries itself through `bun:ffi` (Bend's JS runtime makes its
-syscalls that way). Those loads are declared, not measured: the C library on
-Linux, libSystem on macOS, nothing on Windows; any other `dlopen` target fails.
+syscalls that way). Those loads are declared, not measured: a service JS source that calls
+`dlopen` declares its libraries as string literals in the file (one picked
+per platform into a variable is fine), and those for the target must be the
+C library on Linux, libSystem on macOS or kernel32.dll on Windows; a file
+naming none, or any other library, fails.
 TODO (fast-hub L1/J4): measure them instead, from the running service on each
 target (the libraries it actually maps), and compare with the declared list.
 
