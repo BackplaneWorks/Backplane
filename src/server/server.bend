@@ -16131,10 +16131,12 @@ def Boot.builds() -> Nat:
 def Boot.child.env() -> List<&2, String>:
   ["BUN_JSC_forceRAMSize=671088640", "BUN_JSC_maxPerThreadStackUsage=536870912"]
 
+# (a build that failed leaves the child's progress, home/store.build: it
+# goes before the next try with the store's files)
 def Boot.build(+home: String) -> IO(P.Ran):
   +db = home ++ "/store.db"
   do IO<P.Ran>:
-    rm : Result<&1, &1, U32 & String, U32 & (String & String)> <- Process.run("rm", ["-f", db, db ++ "-wal", db ++ "-shm"], "", 4096, 30000)
+    rm : Result<&1, &1, U32 & String, U32 & (String & String)> <- Process.run("rm", ["-f", db, db ++ "-wal", db ++ "-shm", home ++ "/store.build"], "", 4096, 30000)
     exe : String <- H.Sys.exe_path()
     t0 : U32 <- PS.Perf.us()
     r : Result<&1, &1, U32 & String, U32 & Socket> <- H.Proc.spawn("env", List.append(&2, String, Boot.child.env(), [EX.Exe.child(exe), "--store-rebuild", home]), "/", 1)
