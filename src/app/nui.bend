@@ -1499,11 +1499,11 @@ def Nui.adopt.theme(changed: Bool, +n: Nui) -> Nui:
 def Nui.adopt(+n: Nui, +st: M.State, head: J.Json) -> Nui:
   Nui.adopt.theme(Bool.not(String.eq(M.Setting.get(st, "ui.theme", ""), M.Setting.get(U.Ui.state.of(Nui.ui(n)), "ui.theme", ""))), Nui.adopt.k(n, st, head))
 
-# the same, with the outbox sent again: the hub's own window joins without
-# a socket, so what was waiting to be sent goes now (the hub stores a
-# resent message once)
+# The hub's own window joins without a socket. This runs only for the
+# join's read-model/log handover, not ordinary changes or replies: resend
+# the outbox and refresh retained Files folders as a socket join does.
 def Nui.adopt.out(+n: Nui) -> Step:
-  Step{n, Nui.cmds(U.Ui.outbox(Nui.ui(n))), True{}}
+  Nui.act.k(U.Fm.again(True{}, U.Act{Nui.ui(n), U.Ui.outbox(Nui.ui(n))}), n)
 
 def Nui.adopt.step(+n: Nui, +st: M.State, head: J.Json) -> Step:
   Nui.adopt.out(Nui.adopt(n, st, head))

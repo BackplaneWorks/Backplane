@@ -6879,6 +6879,24 @@ def Laws.fm_parent_down():
 def Laws.fm_join_root():
   {==}
 
+def Laws.fm_empty_root_ready():
+  {==}
+
+def Laws.fm_unanswered_root_waits():
+  {==}
+
+def Laws.fm_previous_request_waits():
+  {==}
+
+def Laws.fm_other_folder_waits():
+  {==}
+
+def Laws.fm_previous_reply_rejected():
+  {==}
+
+def Laws.fm_root_reconnect_requested():
+  {==}
+
 def Laws.emb_summary_round():
   {==}
 def Laws.emb_size_round():

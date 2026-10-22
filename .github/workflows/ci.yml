@@ -165,6 +165,20 @@ jobs:
           path: ~/.cache/backplane-bend/obj
           key: objs-${{ matrix.target }}-${{ github.sha }}
           restore-keys: objs-${{ matrix.target }}-
+      - name: Verify native Files navigation state
+        run: |
+          set -o pipefail
+          . scripts/bendok.sh
+          bend_check test/files_state_test.bend
+          scripts/build-app.sh test/files_state_test.bend build/files-state-test
+          build/files-state-test | tee build/files-state-test.log
+          ! grep -q '^FAIL ' build/files-state-test.log
+          test "$(grep -c '^ok ' build/files-state-test.log)" = 38
+          bend_check test/files_native_test.bend
+          scripts/build-app.sh test/files_native_test.bend build/files-native-test
+          build/files-native-test | tee build/files-native-test.log
+          ! grep -q '^FAIL ' build/files-native-test.log
+          test "$(grep -c '^ok ' build/files-native-test.log)" = 14
       - run: clang --version
       - name: Check pinned native emitter and ID boundaries
         run: python3 test/tools/native_compiler_test.py
