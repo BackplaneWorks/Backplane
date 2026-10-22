@@ -141,16 +141,16 @@ class PublicRelease(unittest.TestCase):
         result = subprocess.run(['sh', 'scripts/package.sh', 'v9', 'linux-x64'], cwd=self.repo, env=self.env, capture_output=True)
         self.assertNotEqual(result.returncode, 0)
 
-    def test_non_native_archive_stays_plain_and_cannot_replace_existing_cef_pair(self):
+    def test_non_native_archive_stays_plain_and_leaves_existing_cef_pair(self):
         self.install()
         before = self.pair()
         shutil.rmtree(self.repo / 'dist/browser-runtime')
         subprocess.run(['sh', 'scripts/package.sh', 'v9', 'linux-arm64'], cwd=self.repo,
                        env=self.env, check=True, capture_output=True)
         self.assertTrue((self.repo / 'dist/backplane-v9-linux-arm64.tar.gz').is_file())
+        # 0.12.1 on: a release without CEF updates and leaves the old pair alone
         ok, output = self.update(self.repo / 'dist/pkg/backplane-linux-arm64')
-        self.assertFalse(ok, output)
-        self.assertIn('lacks the installed CEF pair', output)
+        self.assertTrue(ok, output)
         self.assertEqual(self.pair(), before)
 
     def test_managed_packages_carry_pair_and_runtime_dependencies(self):

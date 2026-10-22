@@ -13,7 +13,7 @@ import struct
 import subprocess
 import sys
 
-VERSION = "0.12.0"
+VERSION = "0.12.1"
 ENDPOINT = "https://backplane.works/api/v1/events"
 # The JS service (scripts/build-js.sh, `bun build --compile` against a
 # pinned Bun runtime of the target), cross-built from any host.
