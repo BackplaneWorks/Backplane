@@ -171,6 +171,35 @@ function pty_open_fds() {
   return out;
 }
 
+// as host.js's host_child_stack (each effect file has its own scope): the
+// shell starts with a soft stack limit of 8 MiB at most, not the hub's 4G
+function pty_child_stack(spawn) {
+  let lib;
+  try {
+    lib = globalThis.BACKPLANE_RLIMIT ?? (globalThis.BACKPLANE_RLIMIT = require("bun:ffi").dlopen(
+      process.platform === "darwin" ? "libSystem.dylib" : "libc.so.6", {
+        getrlimit: { args: ["i32", "ptr"], returns: "i32" },
+        setrlimit: { args: ["i32", "ptr"], returns: "i32" },
+      }).symbols);
+  } catch (_) {
+    return spawn();
+  }
+  const ptr = require("bun:ffi").ptr;
+  const was = new BigUint64Array(2);
+  const want = 8n << 20n;
+  if (lib.getrlimit(3, ptr(was)) !== 0 || was[0] <= want) {
+    return spawn();
+  }
+  const lowered = lib.setrlimit(3, ptr(new BigUint64Array([want, was[1]]))) === 0;
+  try {
+    return spawn();
+  } finally {
+    if (lowered) {
+      lib.setrlimit(3, ptr(was));
+    }
+  }
+}
+
 // Answers (pid, master socket).
 function pty_spawn(cmd, args, cwd, cols, rows) {
   const p = pty_lib();
@@ -276,7 +305,7 @@ function pty_spawn(cmd, args, cwd, cols, rows) {
   }
   const pid = new Int32Array(1);
   if (code === 0) {
-    code = p.posix_spawn(p.ptr(pid), p.ptr(eb), p.ptr(fa), p.ptr(at), p.ptr(av), p.ptr(ev));
+    code = pty_child_stack(() => p.posix_spawn(p.ptr(pid), p.ptr(eb), p.ptr(fa), p.ptr(at), p.ptr(av), p.ptr(ev)));
   }
   p.posix_spawn_file_actions_destroy(p.ptr(fa));
   p.posix_spawnattr_destroy(p.ptr(at));

@@ -197,7 +197,16 @@ function sock_save(socket, path, n, k) {
 }
 
 // Sends all of b; a full socket parks until writable (never a spin), as
-// host.c's host_send_more does.
+// host.c's host_send_more does. A parked send also tries again each second:
+// the loop waits with select(), which never reports a socketpair whose
+// connection was shut (Fd.shut) as writable (only POLLHUP, which C's poll
+// sees), so the send would wait for the peer to exit; the retry fails with
+// EPIPE at once.
+function host_park_out(socket, k, go, until) {
+  const tick = performance.now() + 1000;
+  io_park_on(socket, true, k, go, until === undefined ? tick : Math.min(until, tick));
+}
+
 function host_send(socket, b, k) {
   const sys = io_sys();
   const again = sys.mac ? 35 : 11;
@@ -208,7 +217,7 @@ function host_send(socket, b, k) {
       if (n < 0) {
         const code = sys.errno();
         if (code === again) {
-          io_park_on(socket, true, k, go);
+          host_park_out(socket, k, go);
           return undefined;
         }
         return io_tup(socket, io_fail(code));
@@ -254,7 +263,7 @@ function sock_send_until(socket, data, ms, k) {
       if (n < 0) {
         const code = sys.errno();
         if (code === again && performance.now() < until) {
-          io_park_on(socket, true, k, go, until);
+          host_park_out(socket, k, go, until);
           return undefined;
         }
         host_libc().shutdown(socket, 2);
@@ -319,6 +328,42 @@ function sock_shutdown(socket) {
 
 // Proc
 // ====
+
+// A child starts with a soft stack limit of 8 MiB at most. The hub runs with
+// a large one (LimitSTACK=4G: Bun's JS stack is bounded by it, and Bend's
+// deep walks need it), which children would inherit, and glibc sizes every
+// thread's stack from it: each agent's threads would reserve gigabytes.
+// The soft limit is lowered around the spawn and put back; the hub's own
+// stack is untouched (lowering a limit unmaps nothing, and the loop runs
+// spawns from a shallow stack). Hard limit unchanged.
+function host_child_stack(spawn) {
+  let lib;
+  try {
+    lib = globalThis.BACKPLANE_RLIMIT ?? (globalThis.BACKPLANE_RLIMIT = require("bun:ffi").dlopen(
+      process.platform === "darwin" ? "libSystem.dylib" : "libc.so.6", {
+        getrlimit: { args: ["i32", "ptr"], returns: "i32" },
+        setrlimit: { args: ["i32", "ptr"], returns: "i32" },
+      }).symbols);
+  } catch (_) {
+    return spawn();
+  }
+  const ptr = require("bun:ffi").ptr;
+  const was = new BigUint64Array(2);
+  const want = 8n << 20n;
+  // RLIMIT_STACK is 3 on Linux and macOS; RLIM_INFINITY is all ones
+  if (lib.getrlimit(3, ptr(was)) !== 0 || was[0] <= want) {
+    return spawn();
+  }
+  const low = new BigUint64Array([want, was[1]]);
+  const lowered = lib.setrlimit(3, ptr(low)) === 0;
+  try {
+    return spawn();
+  } finally {
+    if (lowered) {
+      lib.setrlimit(3, ptr(was));
+    }
+  }
+}
 
 // Where an agent's stderr goes (err 3): ${BACKPLANE_ERR_DIR:-${TMPDIR:-/tmp}/backplane-err-<uid>}/<pid>.err
 function host_err_dir() {
@@ -503,8 +548,8 @@ function proc_spawn(cmd, args, cwd, err) {
   c.posix_spawnattr_setsigmask(c.ptr(at), c.ptr(set));
   c.posix_spawnattr_setflags(c.ptr(at), 0x04 | 0x08 | (c.mac ? 0x4000 : 0));
   if (code === 0) {
-    code = c.posix_spawnp(c.ptr(pid), c.ptr(v.bufs[0]), c.ptr(fa), c.ptr(at),
-      c.ptr(v.vec), c.ptr(env.vec));
+    code = host_child_stack(() => c.posix_spawnp(c.ptr(pid), c.ptr(v.bufs[0]), c.ptr(fa), c.ptr(at),
+      c.ptr(v.vec), c.ptr(env.vec)));
   }
   c.posix_spawn_file_actions_destroy(c.ptr(fa));
   c.posix_spawnattr_destroy(c.ptr(at));

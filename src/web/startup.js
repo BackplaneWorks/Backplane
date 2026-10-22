@@ -34,7 +34,9 @@ export function validatePresentation(result) {
   node(result.view, 0);
 }
 export class FrontendStartup {
-  constructor(api, { setTimer = setTimeout, clearTimer = clearTimeout } = {}) {
+  // Bound: a bare reference to window.setTimeout called as this.setTimer(...)
+  // throws "Illegal invocation" in Chromium, which stopped compatibility sync.
+  constructor(api, { setTimer = (f, ms) => setTimeout(f, ms), clearTimer = id => clearTimeout(id) } = {}) {
     this.api = api;
     this.setTimer = setTimer;
     this.clearTimer = clearTimer;
