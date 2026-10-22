@@ -179,7 +179,7 @@ def check(+name: String, +h: String) -> IO(Unit):
     mt : List<&2, List<&2, String>> <- D.Db.query(h, "SELECT group_concat(k || '=' || v, ' ') FROM (SELECT k, v FROM meta WHERE k <> 'log_id' ORDER BY k)", [], 1)
     C.Check.str(name ++ ": meta", one(mt), "applied_off=" ++ Nat.show(bytes(String.join(Log.lines(), "\n") ++ "\n")) ++ " applied_seq=" ++ Nat.show(Nat.sub(List.length(&2, String, Log.lines()), 1n)) ++ " codec=" ++ Nat.show(S.Sdb.codec()) ++ " ord=" ++ Nat.show(Mat.ord(mat())) ++ " origin=1 schema=1")
     id : List<&2, List<&2, String>> <- D.Db.query(h, "SELECT v FROM meta WHERE k = 'log_id'", [], 1)
-    C.Check.str(name ++ ": log id", one(id), Nat.show(bytes(first())) ++ ":" ++ String.take(first(), 64n))
+    C.Check.str(name ++ ": log id (Sto.log_id's form: SHA-1 of the first line)", one(id), B.Stb.sha.k(U.Utf8.encode(first())))
     cl : String <- D.Db.close(h)
     return Unit{}
 
