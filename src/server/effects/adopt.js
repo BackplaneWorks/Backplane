@@ -110,8 +110,14 @@ function adopt_keep(thread, pid, socket) {
   pid >>>= 0;
   bp_adopt_remove(thread, 0, true);
   bp_inherited_drop(pid);
-  const c = bp_adopt_libc();
-  const got = c.fcntl(socket, c.mac ? 67 : 1030, 3);
+  // a Bun handle (loop.js's BP_H) or a Windows hub has no descriptor to
+  // keep through an exec: the process is recorded alone, as adopt_note's
+  // (a handle over a real descriptor, BP_H.fromFd's, keeps that one)
+  const h = globalThis.BP_H?.get(socket);
+  const fd = h === undefined ? socket : h.fd;
+  const bare = process.platform === "win32" || fd === undefined;
+  const c = bare ? null : bp_adopt_libc();
+  const got = bare ? -1 : c.fcntl(fd, c.mac ? 67 : 1030, 3);
   if (pid > 1) {
     bp_adopt.list.unshift({ thread, pid, ident: bp_adopt_id(pid), fd: got });
   } else if (got > 2) {
@@ -190,7 +196,13 @@ function adopt_stop(pid, want) {
   let ok = false;
   if (pid > 1 && want.length > 0 && !bp_adopt_ancestor(pid)) {
     const now = bp_adopt_id(pid);
-    if (now && now === want) ok = bp_adopt_libc().kill(pid, 15) === 0;
+    if (now && now === want) {
+      try {
+        process.kill(pid, "SIGTERM");
+        ok = true;
+      } catch (_) {
+      }
+    }
     if (ok) bp_inherited_drop(pid);
   }
   return ok;
@@ -222,6 +234,8 @@ function bp_inherited_scan() {
 // waits, without blocking, for each inherited child; answers how many are
 // left
 function adopt_reap() {
+  // none inherited (always so on Windows, where no exec hands any on)
+  if (bp_adopt.inherited.length === 0) return 0;
   const c = bp_adopt_libc();
   const st = new Int32Array(1);
   bp_adopt.inherited = bp_adopt.inherited.filter((pid) => {

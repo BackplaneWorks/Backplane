@@ -5,6 +5,7 @@ import ../core/prompt.bend as Q
 import ../core/cli.bend as CL
 import ./plot.bend as PV
 import ./review.bend as RVC
+import ./jsloop.bend as LP
 
 # `backplane-serve`: the hub and the web server, no window.
 
@@ -43,5 +44,6 @@ def main.go(u: Unit) -> IO(Unit):
 # --help, --version or a bad flag never reach a hub.
 def main() -> IO(Unit):
   do IO<Unit>:
+    rt : String <- LP.Rt.loop()
     a0 : List<String> <- IO.args()
     S.Main.cli(CL.Cli.of(CL.Cli.args(a0)), u => main.go(u))

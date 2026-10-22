@@ -11367,3 +11367,30 @@ law thin_mail_lazy_warm:
   for +done: List<&2, TMAILL.Pending>
   {TMAILL.Lazy.force(TMAILL.Lazy.warm(TMAILL.Cache.of(st), TMAILL.Later{st, done})) == TMAILL.Lazy.force(TMAILL.Later{st, done}) : TMAILL.Cache}
 # ---- end S3 ----
+
+# --- J2: HTTP and WebSocket bodies counted and unmasked in tail calls ---
+# (Base's List.length and a per-byte non-tail unmask keep a frame per byte:
+# the JS target overflowed on bodies and frames of a few hundred KB)
+law http_count_go_succ:
+  for +bs: List<&2, U32>
+  for +n: Nat
+  {WS.Http.count.go(bs, 1n+n) == 1n+WS.Http.count.go(bs, n) : Nat}
+
+law http_count_is_length:
+  for +bs: List<&2, U32>
+  {WS.Http.count(bs) == List.length(&2, U32, bs) : Nat}
+
+law ws_unmask_go:
+  for +bs: List<&2, U32>
+  for +key: List<&2, U32>
+  for +i: Nat
+  for +acc: List<&2, U32>
+  {WS.Ws.unmask.go(bs, key, i, acc) == List.reverse.go(&2, U32, WS.Ws.unmask(bs, key, i), acc) : List<&2, U32>}
+
+law ws_unmask_take_go:
+  for +bs: List<&2, U32>
+  for +n: Nat
+  for +key: List<&2, U32>
+  for +i: Nat
+  for +acc: List<&2, U32>
+  {WS.Ws.unmask.take.go(bs, n, key, i, acc) == List.reverse.go(&2, U32, WS.Ws.unmask(List.take(&2, U32, bs, n), key, i), acc) : List<&2, U32>}
