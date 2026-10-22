@@ -13372,15 +13372,20 @@ type Early is Data:
   EarlyUp{ctl: Chan(EarlyGo)}
   EarlyDown{code: U32, why: String}
 
-def Early.answer(s: Socket, +home: String) -> IO(Unit):
+def Early.answer(s: Socket, +home: String, head: List<&2, U32>) -> IO(Unit):
   do IO<Unit>:
     +b : String <- Files.text(EA.Early.build.path(home))
-    Conn.finish(s, EA.Early.response(Main.version(), b))
+    Conn.finish(s, EA.Early.for(head, Main.version(), b))
+
+def Early.split.head(sp: W.Split) -> List<&2, U32>:
+  match sp:
+    case W.Split{h, _}:
+      h
 
 def Early.head.k(m: Maybe<&2, W.Split>, s: Socket, buf: List<&2, U32>, +home: String, k: Socket -> List<&2, U32> -> IO(Unit)) -> IO(Unit):
   match m:
-    case Some{_}:
-      Early.answer(s, home)
+    case Some{sp}:
+      Early.answer(s, home, Early.split.head(sp))
     case None{}:
       IO.bind(Socket & Result<&1, &1, U32 & String, List<&2, U32>>, Unit, H.Sock.recv_bytes(s, 65536), r => Conn.head.got(r, buf, k))
 
@@ -13389,7 +13394,7 @@ def Early.head.k(m: Maybe<&2, W.Split>, s: Socket, buf: List<&2, U32>, +home: St
 def Early.head(fuel: Nat, s: Socket, +buf: List<&2, U32>, +home: String) -> IO(Unit):
   match fuel:
     case 0n:
-      Early.answer(s, home)
+      Early.answer(s, home, Nil{})
     case 1n+f:
       Early.head.k(W.Http.split(buf), s, buf, home, s2 => b2 => Early.head(f, s2, b2, home))
 
