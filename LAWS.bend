@@ -96,6 +96,7 @@ import ./src/core/notice.bend as NO
 import ./src/core/codec.bend as C
 import ./src/core/json.bend as J
 import ./src/core/attach.bend as AT
+import ./src/server/filebytes.bend as FBY
 import ./src/gfx/tiles.bend as T
 import ./src/gfx/raster.bend as R
 import ./src/gfx/draw.bend as D
@@ -538,6 +539,16 @@ law semver_nightly_next_day:
 
 # Attachments
 # -----------
+
+# Whole-file reads keep valid empty files distinct from read failures.
+law file_bytes_success:
+  for bs: List<&2, U32>
+  {FBY.FileBytes.result(Done{bs}) == Done{bs} : Result<&2, &2, String, List<&2, U32>>}
+
+law file_bytes_failure:
+  for code: U32
+  for why: String
+  {FBY.FileBytes.result(Fail{(code, why)}) == Fail{why} : Result<&2, &2, String, List<&2, U32>>}
 
 # a stored attachment's name uses only letters, digits, '.', '_' and '-',
 # so no name can reach outside its thread's directory

@@ -14,6 +14,7 @@ import ./lockio.bend as LG
 import ../core/locks.bend as LCK
 import ./host.bend as H
 import ./proc.bend as P
+import ./filebytes.bend as FB
 import ../core/json.bend as J
 import ../core/utf8.bend as U
 import ../core/http.bend as W
@@ -5912,12 +5913,17 @@ def Media.put.parts(ps: List<&2, String>, +b: String, +inbox: Chan(Msg), +client
 def Media.put(+inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +a: String, +b: String, +home: String) -> IO(Unit):
   Media.put.parts(String.split(a, '|'), b, inbox, client, id, thread, home)
 
+def Media.copy.read(r: Result<&2, &2, String, List<&2, U32>>, +src: String, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +dest: String) -> IO(Unit):
+  match r:
+    case Done{bs}:
+      Media.put.go(0n, True{}, True{}, bs, inbox, client, id, thread, dest)
+    case Fail{why}:
+      Media.fail(inbox, client, id, thread, "could not read file: " ++ src ++ ": " ++ why)
+
 def Media.copy.k(ok: Bool, fits: Bool, +src: String, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +dest: String) -> IO(Unit):
   match ok fits:
     case True{} True{}:
-      do IO<Unit>:
-        bs : List<&2, U32> <- Files.read(src)
-        Media.put.go(0n, True{}, True{}, bs, inbox, client, id, thread, dest)
+      IO.bind(Result<&2, &2, String, List<&2, U32>>, Unit, FB.FileBytes.read(src), r => Media.copy.read(r, src, inbox, client, id, thread, dest))
     case True{} False{}:
       Media.fail(inbox, client, id, thread, "attachments are limited to " ++ Nat.show(Nat.div(AT.Att.cap(), 1048576n)) ++ " MB")
     case False{} _:
