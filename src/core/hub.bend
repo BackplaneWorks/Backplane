@@ -147,6 +147,9 @@ type Out is Data:
   # the server keeps the driver and the draft, so it answers (m is
   # bots.browser or bots.teach, p the request's params as JSON text)
   Teach{client: U32, id: String, m: String, p: String}
+  # the uberbot's fyi digest (Digest.*): read these conversations' bodies,
+  # then Digest.got with those of the mail ids
+  DigestRead{bot: String, ids: List<&2, String>, convs: List<&2, String>}
 
 type Step is Data:
   Step{changes: List<&2, M.Change>, outs: List<&2, Out>}
@@ -7488,6 +7491,139 @@ def Mail.route.got(r: Maybe<&2, REF.Ref>, +s: M.State, +now: Nat, +body: MB.Body
 
 def Mail.route.enabled(+s: M.State, +now: Nat, +body: MB.Body) -> Step:
   Mail.route.got(REF.Ref.of_addr(ML.Mail.to(MB.Body.mail(body))), s, now, body)
+
+# ---- the uberbot's fyi digest ----
+# fyi mail to the uberbot is only filed (Mail.route). While some of it is
+# unread, the minute tick files at most one digest every Digest.every()
+# seconds: act mail to the uberbot listing the new items, a short text
+# each, which Mail.route turns into one private run (never the person's
+# chat). "uber.digest.upto" is the newest item a digest listed; only items
+# after it are new. With mail.on on the mailroom routes as before: none.
+def Digest.every() -> Nat:
+  600n
+
+def Digest.num(+s: M.State, +key: String) -> Nat:
+  M.Switch.num(M.Setting.get(s, key, "0"), 0n)
+
+# a fyi item for the digest: to the uberbot, fyi, new, not its own
+def Digest.one(+m: ML.Mail, +bot: String, +since: Nat) -> Bool:
+  Bool.and(String.eq(ML.Mail.to(m), "bot:" ++ bot), Bool.and(String.eq(ML.Mail.wanted(m), "fyi"),
+    Bool.and(Nat.is_gt(ML.Mail.at(m), since), Bool.not(String.eq(ML.Mail.from(m), "bot:" ++ bot)))))
+
+def Digest.keep(keep: Bool, +m: ML.Mail, +acc: List<&2, ML.Mail>) -> List<&2, ML.Mail>:
+  match keep:
+    case True{}: m <> acc
+    case False{}: acc
+
+def Digest.pick(ms: List<&2, ML.Mail>, +bot: String, +since: Nat, +acc: List<&2, ML.Mail>) -> List<&2, ML.Mail>:
+  match ms:
+    case Nil{}: acc
+    case +m <> +t: Digest.pick(t, bot, since, Digest.keep(Digest.one(m, bot, since), m, acc))
+
+def Digest.conv(unread: Bool, +b: ML.Box, +conv: String, +bot: String, +since: Nat, +acc: List<&2, ML.Mail>) -> List<&2, ML.Mail>:
+  match unread:
+    case True{}: Digest.pick(ML.Box.headers(b, conv), bot, since, acc)
+    case False{}: acc
+
+# the newest 30 conversations of the uberbot, only those still unread
+def Digest.convs(cs: List<&2, String>, +b: ML.Box, +bot: String, +since: Nat, +acc: List<&2, ML.Mail>) -> List<&2, ML.Mail>:
+  match cs:
+    case Nil{}: acc
+    case +c <> +t: Digest.convs(t, b, bot, since, Digest.conv(String.eq(ML.Mark.status(ML.Box.mark_of(b, bot, c)), "unread"), b, c, bot, since, acc))
+
+def Digest.items(+s: M.State, +bot: String) -> List<&2, ML.Mail>:
+  Digest.convs(ML.Order.slice(ML.Box.order_of(M.State.mail(s), bot), 0n, 30n), M.State.mail(s), bot, Digest.num(s, "uber.digest.upto"), Nil{})
+
+def Digest.upto(ms: List<&2, ML.Mail>, +acc: Nat) -> Nat:
+  match ms:
+    case Nil{}: acc
+    case +m <> +t: Digest.upto(t, Bool.pick(Nat, Nat.is_gt(ML.Mail.at(m), acc), ML.Mail.at(m), acc))
+
+# at most n lines, then how many more
+def Digest.ids(ms: List<&2, ML.Mail>) -> List<&2, String>:
+  match ms:
+    case Nil{}: Nil{}
+    case +m <> +t: ML.Mail.id(m) <> Digest.ids(t)
+
+def Digest.convs.add(has: Bool, +c: String, +acc: List<&2, String>) -> List<&2, String>:
+  match has:
+    case True{}: acc
+    case False{}: c <> acc
+
+def Digest.convs.of(ms: List<&2, ML.Mail>, +acc: List<&2, String>) -> List<&2, String>:
+  match ms:
+    case Nil{}: acc
+    case +m <> +t: Digest.convs.of(t, Digest.convs.add(ML.Parts.has(acc, ML.Mail.conv(m), False{}), ML.Mail.conv(m), acc))
+
+# a body's text on one line, at most n characters
+def Digest.short(+n: Nat, +s: String, +acc: String) -> String:
+  match n s:
+    case 0n _: String.reverse(acc) ++ "…"
+    case _ SNil{}: String.reverse(acc)
+    case 1n+k SCon{+c, +t}:
+      match c:
+        case Chr{10}: Digest.short(k, t, SCon{Chr{32}, acc})
+        case Chr{13}: Digest.short(k, t, SCon{Chr{32}, acc})
+        case _: Digest.short(k, t, SCon{c, acc})
+
+# the bodies asked for, a line each with a short text; at most n lines
+def Digest.lines(+n: Nat, +bs: List<&2, MB.Body>, +s: M.State) -> String:
+  match n bs:
+    case _ Nil{}: ""
+    case 0n +rest: "… and " ++ Nat.show(List.length(&2, MB.Body, rest)) ++ " more (mail_list)\n"
+    case 1n+k +b <> +t: "- " ++ Mail.name(s, ML.Mail.from(MB.Body.mail(b))) ++ " (" ++ ML.Mail.conv(MB.Body.mail(b)) ++ "): " ++ Digest.short(240n, MB.Body.text(b), "") ++ "\n" ++ Digest.lines(k, t, s)
+
+def Digest.text(+s: M.State, +bs: List<&2, MB.Body>) -> String:
+  "[fyi digest] " ++ Nat.show(List.length(&2, MB.Body, bs)) ++ " new fyi item(s) are filed in your Mailroom, unread. Nothing here asks you to act; tell the person only what they need. mail_read a conversation for the full text.\n" ++ Digest.lines(25n, bs, s)
+
+def Digest.keep.b(keep: Bool, +b: MB.Body, +acc: List<&2, MB.Body>) -> List<&2, MB.Body>:
+  match keep:
+    case True{}: b <> acc
+    case False{}: acc
+
+def Digest.wanted(+bs: List<&2, MB.Body>, +ids: List<&2, String>, +acc: List<&2, MB.Body>) -> List<&2, MB.Body>:
+  match bs:
+    case Nil{}: List.reverse(&2, MB.Body, acc)
+    case +b <> +t: Digest.wanted(t, ids, Digest.keep.b(ML.Parts.has(ids, ML.Mail.id(MB.Body.mail(b)), False{}), b, acc))
+
+def Digest.file(+s: M.State, +now: Nat, +bot: String, +bs: List<&2, MB.Body>) -> Step:
+  +o = {ML.Origin{"backplane", "digest", ""} : ML.Origin}
+  +to = "bot:" ++ bot
+  Mail.file.body(s, Mail.body(s, now, o, to, Digest.text(s, bs), Hub.id("digest", now, Hub.seq(s)), ML.Mail.route(o, to), "Mailroom digest", "act"))
+
+def Digest.got.k(none: Bool, +s: M.State, +now: Nat, +bot: String, +bs: List<&2, MB.Body>) -> Step:
+  match none:
+    case True{}: Step.none()
+    case False{}: Digest.file(s, now, bot, bs)
+
+# the server read the bodies (DigestRead): file the digest, act mail to the
+# uberbot, from those of the items asked for (still the uberbot's)
+def Digest.got(+s: M.State, +now: Nat, +bot: String, +ids: List<&2, String>, +bs: List<&2, MB.Body>) -> Step:
+  +want = Digest.wanted(bs, ids, Nil{})
+  Digest.got.k(Bool.or(List.is_empty(&2, MB.Body, want), Bool.not(UB.Uber.is(s, bot))), s, now, bot, want)
+
+# due: remember the time and the newest item, and ask for the bodies
+def Digest.ask(+s: M.State, +now: Nat, +bot: String, +ms: List<&2, ML.Mail>) -> Step:
+  Step{[M.SettingSet{"uber.digest.at", Nat.show(now), now}, M.SettingSet{"uber.digest.upto", Nat.show(Digest.upto(ms, 0n)), now}],
+    [DigestRead{bot, Digest.ids(ms), Digest.convs.of(ms, Nil{})}]}
+
+def Digest.send.k(none: Bool, +s: M.State, +now: Nat, +bot: String, +ms: List<&2, ML.Mail>) -> Step:
+  match none:
+    case True{}: Step.none()
+    case False{}: Digest.ask(s, now, bot, ms)
+
+def Digest.send(+s: M.State, +now: Nat, +bot: String, +ms: List<&2, ML.Mail>) -> Step:
+  Digest.send.k(List.is_empty(&2, ML.Mail, ms), s, now, bot, ms)
+
+def Digest.due(due: Bool, +s: M.State, +now: Nat, +bot: String) -> Step:
+  match due:
+    case False{}: Step.none()
+    case True{}: Digest.send(s, now, bot, Digest.items(s, bot))
+
+# the minute tick's part: the promoted uberbot, mail.on off, Digest.every() since the last
+def Digest.tick(+s: M.State, +now: Nat) -> Step:
+  Digest.due(Bool.and(Bool.not(String.is_empty(UB.Uber.bot(s))), Bool.and(Bool.not(String.eq(M.Setting.get(s, "mail.on", "off"), "on")),
+    Nat.is_ge(now, Nat.add(Digest.num(s, "uber.digest.at"), Digest.every())))), s, now, UB.Uber.bot(s))
 
 def Run.pending.text(+es: List<&2, M.Entry>) -> String:
   match es:
