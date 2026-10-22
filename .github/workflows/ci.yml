@@ -1,10 +1,11 @@
 name: CI
 
+# Run by hand only: the pipeline every merge waits on is local CI
+# (bp-coord/fast-hub/local-ci.sh, Boat sandboxes plus this machine). This
+# workflow runs once on a release commit before it is published, as the last
+# check; the release workflows keep their own (user, 2026-10-22).
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-  pull_request:
 
 concurrency:
   group: ci-${{ github.ref }}
