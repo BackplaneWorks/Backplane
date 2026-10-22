@@ -4,6 +4,7 @@
 #ifdef CID(Mem.settle)
 
 Term mem_settle_run(Env e, Term* f, IoWork* w) {
+  (void)f;
   return term_pak(CID(SNil), 0);
 }
 

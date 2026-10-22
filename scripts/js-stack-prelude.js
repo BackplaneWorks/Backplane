@@ -19,6 +19,15 @@
 // 8 MiB again (host.js's host_child_stack). Sys.exec in place keeps both, so
 // a restart does not repeat this.
 //
+// The same exec sets the hub's memory budget for JSC (also read only at
+// start): BUN_JSC_forceRAMSize makes the collector size its heap and collect
+// for that much RAM instead of the machine's, so a hub held to 1 GB (the
+// service's MemoryMax) is not killed by garbage the collector had not yet
+// gone for (the store's hot load peaked past 1 GB with ~0.4 GB live).
+// BACKPLANE_RAM_BUDGET_MB says how much (768 for the hub, 640 for its
+// --store-rebuild, --plot ... children by default; 0 leaves JSC its own
+// guess); a BUN_JSC_forceRAMSize already set is kept.
+//
 // Only a compiled hub on Linux or macOS (process.argv[1] under /$bunfs/):
 // `bun serve.js` and the tests run as they are. macOS's hard stack limit is
 // usually 64 MiB, below 4 GiB: there it takes what the hard limit allows. Anything
@@ -56,10 +65,16 @@
     }
     const jsc = process.env.BUN_JSC_maxPerThreadStackUsage;
     const short = soft === inf || soft < goal;
-    if (!short && jsc) {
+    const child = /^--/.test(String(process.argv[2] ?? "")) && /^--(plot|review|render|telemetry-pow|store-rebuild)/.test(String(process.argv[2] ?? ""));
+    const mb = Number(process.env.BACKPLANE_RAM_BUDGET_MB ?? (child ? 640 : 768));
+    const ram = process.env.BUN_JSC_forceRAMSize || !(mb > 0) ? "" : String(Math.round(mb * 1048576));
+    if (!short && jsc && !ram) {
       return;
     }
-    if (short && lib.setrlimit(3, ffi.ptr(new BigUint64Array([goal, hard]))) !== 0) {
+    if (ram) {
+      process.env.BUN_JSC_forceRAMSize = ram;
+    }
+    if (short && lib.setrlimit(3, ffi.ptr(new BigUint64Array([goal, hard]))) !== 0 && !ram) {
       return;
     }
     if (!jsc) {
