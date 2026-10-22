@@ -17,6 +17,10 @@ import sys
 VERSION = "0.12.0"
 ENDPOINT = "https://backplane.works/api/v1/events"
 TARGETS = {"linux-x64", "linux-arm64", "darwin-arm64"}
+# The JS service (phase "js": scripts/build-js.sh, `bun build --compile`
+# against a pinned Bun runtime of the target), cross-built from any host.
+# Windows joins when Bend's JS runtime has Win32 syscalls.
+JS_TARGETS = {"linux-x64", "linux-arm64", "darwin-x64", "darwin-arm64"}
 ROOT = Path(__file__).resolve().parents[1]
 NATIVE_LOCK = Path("/tmp/bp-wt-build.lock")
 HEX = re.compile(r"[0-9a-f]{64}\Z")
@@ -105,13 +109,14 @@ def architecture(path, target):
                 and struct.unpack_from("<H", b, 18)[0] == (62 if target == "linux-x64" else 183),
                 "Service is not the requested ELF architecture")
     else:
-        require(len(b) >= 12 and struct.unpack_from("<II", b) == (0xfeedfacf, 0x100000c),
-                "Service is not arm64 Mach-O")
+        cpu = 0x1000007 if target == "darwin-x64" else 0x100000c
+        require(len(b) >= 12 and struct.unpack_from("<II", b) == (0xfeedfacf, cpu),
+                "Service is not the requested Mach-O architecture")
 
 
 def identity(request):
     release = request.get("release", {})
-    require(request.get("schema") == 1 and request.get("target") in TARGETS, "Unsupported target/schema")
+    require(request.get("schema") == 1 and request.get("target") in TARGETS | JS_TARGETS, "Unsupported target/schema")
     require(release.get("version") == VERSION and release.get("tag") == "v" + VERSION
             and release.get("channel") == "release" and GIT.fullmatch(release.get("commit", ""))
             and GIT.fullmatch(release.get("tree", "")), "Exact stable source identity required")
@@ -167,6 +172,8 @@ def check_tool(spec, base, command):
     require(spec.get("version") and version == spec["version"], command + " version mismatch")
     if command == "bend":
         require(path.name == "bend", "Bend tool must have canonical executable name")
+    elif command == "bun":
+        require(re.fullmatch(r"1\.[0-9]+\.[0-9]+", version), "Bun 1.x required")
     else:
         require(re.search(r"clang version (?:[2-9][0-9]|19)\.", version), "Clang 19+ required")
     return path
@@ -269,16 +276,32 @@ def license_sources(web_notices, packet=None):
 
 def build(request, base, out, phase="build"):
     release = identity(request)
-    expected_kind = "backplane-service-native-inputs" if phase == "native" else "backplane-service-build-inputs"
+    expected_kind = {"native": "backplane-service-native-inputs", "js": "backplane-service-js-inputs"}.get(
+        phase, "backplane-service-build-inputs")
     require(request.get("kind") == expected_kind, "Wrong build request kind")
+    require(request["target"] in (JS_TARGETS if phase == "js" else TARGETS), "Unsupported target for this producer")
     actual_host = {("Linux", "x86_64"): "linux-x64", ("Linux", "aarch64"): "linux-arm64",
-                   ("Darwin", "arm64"): "darwin-arm64"}.get((platform.system(), platform.machine()))
-    require(phase == "emit" or actual_host == request["target"], "Real target host required; cross-target compilation is not supported")
+                   ("Darwin", "arm64"): "darwin-arm64", ("Darwin", "x86_64"): "darwin-x64"}.get((platform.system(), platform.machine()))
+    # the JS service is cross-built: bun links the emitted JS onto the
+    # target's own pinned Bun runtime, nothing is compiled for the host
+    require(phase in ("emit", "js") or actual_host == request["target"], "Real target host required; cross-target compilation is not supported")
     frozen(release)
     env = emission_environment(os.environ) if phase == "emit" else configured_environment(os.environ)
     bend = None if phase == "native" else check_tool(request["toolchain"]["bend"], base, "bend")
-    cc = check_tool(request["toolchain"]["clang"], base, "clang")
-    env.update(CC=str(cc), PATH=(str(bend.parent) + os.pathsep if bend else "") + env.get("PATH", ""))
+    if phase == "js":
+        bun = check_tool(request["toolchain"]["bun"], base, "bun")
+        bun_runtime = bound(request["toolchain"]["bunRuntime"], base)
+        require(request["toolchain"]["bunRuntime"].get("target") == request["target"]
+                and request["toolchain"]["bunRuntime"].get("version") == request["toolchain"]["bun"]["version"],
+                "Pinned Bun runtime must be the target's, of the pinned Bun's version")
+        architecture(bun_runtime, request["target"])
+        env.update(BACKPLANE_JS_TARGET=request["target"], BACKPLANE_JS_BUN_RUNTIME=str(bun_runtime),
+                   PATH=str(bun.parent) + os.pathsep + str(bend.parent) + os.pathsep + env.get("PATH", ""))
+        env.pop("BACKPLANE_CFLAGS", None)
+        env.pop("BACKPLANE_OBJ_CACHE", None)
+    else:
+        cc = check_tool(request["toolchain"]["clang"], base, "clang")
+        env.update(CC=str(cc), PATH=(str(bend.parent) + os.pathsep if bend else "") + env.get("PATH", ""))
     clock = subprocess.check_output(["date", "+%s%N"], env=env, text=True).strip()
     require(re.fullmatch(r"[0-9]{19,}", clock), "Native builder requires GNU date in PATH (Darwin: coreutils gnubin)")
     packet, emitted = emission_packet(request, base, release) if phase == "native" else (None, None)
@@ -320,8 +343,11 @@ def build(request, base, out, phase="build"):
                 require(digest(work / "all.c") == emitted["cArtifact"]["sha256"], "Copied portable C changed")
             else:
                 run(["bash", "-c", 'set -e; source scripts/bendok.sh; bend_check src/server/main.bend; bend_check src/web/app.bend'], logs / "entries.log", env, 600)
-            native_log = run(["scripts/build-app.sh", "src/server/main.bend", out / "backplane-serve"],
-                             logs / ("c-emission.log" if phase == "emit" else "native.log"), env)
+            if phase == "js":
+                native_log = run(["scripts/build-js.sh", "src/server/main.bend", out / "backplane-serve"], logs / "js.log", env)
+            else:
+                native_log = run(["scripts/build-app.sh", "src/server/main.bend", out / "backplane-serve"],
+                                 logs / ("c-emission.log" if phase == "emit" else "native.log"), env)
             if phase == "emit":
                 shutil.copyfile(ROOT / "build/cc/backplane-serve/all.c", out / "all.c")
             if packet:
@@ -330,12 +356,16 @@ def build(request, base, out, phase="build"):
         finally:
             for name in ("bp_google.h", "bp_telemetry.h"):
                 (ROOT / "build/cc/backplane-serve" / name).unlink(missing_ok=True)
+            for name in ("baked.js", "bin.js", "baked.js.t", "baked.js.g"):
+                (ROOT / "build/js/backplane-serve" / name).unlink(missing_ok=True)
     if phase != "emit":
         architecture(out / "backplane-serve", request["target"])
+    # a cross-built JS service is run on its target by runtime acceptance
+    if phase != "emit" and actual_host == request["target"]:
         version = run([out / "backplane-serve", "--version"], logs / "version.log", env, 30).strip()
         require(version == "backplane " + VERSION, "Compiled service did not report exact stable version")
     frozen(release)
-    tool_names = ("clang",) if packet else ("bend", "clang")
+    tool_names = ("clang",) if packet else ("bend", "bun", "bunRuntime") if phase == "js" else ("bend", "clang")
     for name in tool_names:
         bound(request["toolchain"][name], base)
     shutil.copyfile(Path(__file__), out / "EXECUTION-HELPER.py")
@@ -404,6 +434,7 @@ def build(request, base, out, phase="build"):
               "sourceManifestSha256": digest(out / "SOURCE.json"),
               "toolchain": {name: {key: request["toolchain"][name][key] for key in ("path", "bytes", "sha256", "version")}
                             for name in tool_names},
+              "serviceRuntime": "bun" if phase == "js" else "native-c",
               "logs": {p.name: local_reference(p, out) for p in sorted(logs.iterdir())},
               "runtimeAcceptance": "PENDING", "published": False}
     result["executionHelper"] = local_reference(out / "EXECUTION-HELPER.py", out)
@@ -421,6 +452,10 @@ def emit(request, base, out):
 
 def native(request, base, out):
     return build(request, base, out, phase="native")
+
+
+def js(request, base, out):
+    return build(request, base, out, phase="js")
 
 
 def notices(root, packages):
@@ -513,7 +548,7 @@ def component(request, base, out):
 def main():
     global ROOT
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("operation", choices=("describe", "emit", "native", "build", "component"))
+    parser.add_argument("operation", choices=("describe", "emit", "native", "build", "js", "component"))
     parser.add_argument("--request", type=Path)
     parser.add_argument("--out", type=Path)
     parser.add_argument("--source-root", type=Path,
@@ -524,7 +559,9 @@ def main():
         require(ROOT.is_dir(), "Product source root must be a directory")
     if args.operation == "describe":
         print(json.dumps({"interface": "backplane-service-release-producer-v1", "version": VERSION,
-                          "targets": sorted(TARGETS), "build": "build --request REQUEST.json --out NEW_ABS_BUILD",
+                          "targets": sorted(TARGETS), "jsTargets": sorted(JS_TARGETS),
+                          "build": "build --request REQUEST.json --out NEW_ABS_BUILD",
+                          "js": "js --request REQUEST.json --out NEW_ABS_BUILD",
                           "emit": "emit --request REQUEST.json --out NEW_ABS_PACKET",
                           "native": "native --request REQUEST.json --out NEW_ABS_BUILD",
                           "component": "component --request REQUEST.json --out NEW_ABS_COMPONENT",

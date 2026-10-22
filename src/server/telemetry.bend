@@ -150,13 +150,54 @@ def Tio.write(+home: String, st: T.TmState) -> IO(Unit):
     r : Result<&1, &1, U32 & String, Unit> <- H.FS.rename(home ++ "/telemetry/state.tmp", home ++ "/telemetry/state.json")
     return Unit{}
 
-def Tio.pow.result(r: Result<&1, &1, U32 & String, U32 & String & String>) -> String:
+def Tio.pow.result(r: P.Ran) -> String:
   match r:
-    case Done{(0, (out, _))}: String.trim(out)
+    case P.Ran{0, out}: String.trim(out)
     case _: ""
 
 def Tio.pow.accept(+st: T.TmState, +proof: String) -> T.TmState:
   Bool.pick(T.TmState, Bool.and(Bool.not(String.is_empty(proof)), Bool.and(T.Tm.hex(proof), Bool.and(Nat.is_le(String.length(proof), 16n), T.Tm.pow.ok(T.TmState.id(st), proof, 18n)))), T.Tm.pow.put(st, proof), st)
+
+# The pow child runs this hub's own binary (Exe.child) straight through
+# Proc.spawn, never through a shell (inside sh or timeout, /proc/self/exe
+# would name them) nor Base's Process.run (a spawnSync on the JS runtime,
+# which holds the hub's one loop for the child's life). A timer kills it
+# after 300 s unless it ended first; a child already waited for is never
+# signalled (Proc.exited reads it as not running).
+def Tio.pow.kill(running: Bool, +pid: U32) -> IO(Unit):
+  match running:
+    case True{}:
+      H.Proc.kill(pid, 9)
+    case False{}:
+      IO.pure(Unit, Unit{})
+
+def Tio.pow.timer.k(p: Poll<&1, &1, Maybe<&1, Unit>, Unit>, +pid: U32) -> IO(Unit):
+  match p:
+    case Ready{_}:
+      IO.pure(Unit, Unit{})
+    case Wait{_}:
+      IO.bind(U32, Unit, H.Proc.exited(pid), code => Tio.pow.kill(U32.is_eq(code, 4294967295), pid))
+
+def Tio.pow.timer(c: Chan(Unit), +pid: U32) -> IO(Unit):
+  IO.bind(Poll<&1, &1, Maybe<&1, Unit>, Unit>, Unit, Chan.try_recv(Unit, c, 300000), p => Tio.pow.timer.k(p, pid))
+
+def Tio.pow.run(started: U32 & Socket) -> IO(String):
+  (+pid, s) = started
+  do IO<String>:
+    +c : Chan(Unit) <- Chan.new(Unit, 1)
+    IO.spawn(Unit, Tio.pow.timer(c, pid))
+    s2 : Socket <- H.Sock.shutdown(s)
+    r : Socket & List<&2, U32> <- P.Proc.drain(1000n, s2, P.Chunks{Nil{}})
+    ran : P.Ran <- P.Proc.finish(pid, r)
+    ok : Result<&1, &1, Unit, Unit> <- Chan.send(Unit, c, Unit{})
+    return Tio.pow.result(ran)
+
+def Tio.pow.started(r: Result<&1, &1, U32 & String, U32 & Socket>) -> IO(String):
+  match r:
+    case Done{started}:
+      Tio.pow.run(started)
+    case Fail{_}:
+      IO.pure(String, "")
 
 def Tio.pow(needed: Bool, +st: T.TmState) -> IO(T.TmState):
   match needed:
@@ -164,8 +205,8 @@ def Tio.pow(needed: Bool, +st: T.TmState) -> IO(T.TmState):
     case True{}:
       do IO<T.TmState>:
         exe : String <- H.Sys.exe_path()
-        r : Result<&1, &1, U32 & String, U32 & String & String> <- Process.run(EX.Exe.child(exe), ["--telemetry-pow", T.TmState.id(st)], "", 4096, 300000)
-        return Tio.pow.accept(st, Tio.pow.result(r))
+        proof : String <- IO.bind(Result<&1, &1, U32 & String, U32 & Socket>, String, H.Proc.spawn(EX.Exe.child(exe), ["--telemetry-pow", T.TmState.id(st)], "", 0), Tio.pow.started)
+        return Tio.pow.accept(st, proof)
 
 def Tio.plan(p: T.TmPlan) -> IO(T.TmState):
   match p:

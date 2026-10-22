@@ -39,7 +39,7 @@ type RK is Data:
 # bumped on any change to the tables or to a record's columns or json
 # (a different number in meta.codec: the store is made again)
 def Sdb.codec() -> Nat:
-  2n
+  3n
 
 def Sdb.schema() -> String:
   String.join([
@@ -49,14 +49,18 @@ def Sdb.schema() -> String:
     "CREATE INDEX IF NOT EXISTS entry_thread ON entry(thread, seq)",
     "CREATE INDEX IF NOT EXISTS entry_src ON entry(src, seq) WHERE src <> ''",
     "CREATE INDEX IF NOT EXISTS entry_id ON entry(id)",
+    "CREATE INDEX IF NOT EXISTS entry_user ON entry(thread, at) WHERE kind = 'msg' AND role = 'user'",
     "CREATE INDEX IF NOT EXISTS entry_tone ON entry(thread, role, seq) WHERE kind = 'act'",
     "CREATE VIRTUAL TABLE IF NOT EXISTS entry_fts USING fts5(text, content='entry', content_rowid='seq', tokenize='unicode61 remove_diacritics 0')",
     "CREATE TRIGGER IF NOT EXISTS entry_fts_add AFTER INSERT ON entry BEGIN INSERT INTO entry_fts(rowid, text) VALUES (new.seq, new.text); END",
     "CREATE TABLE IF NOT EXISTS term(word TEXT, ord INTEGER, PRIMARY KEY(word, ord)) WITHOUT ROWID",
     "CREATE TABLE IF NOT EXISTS post(seq INTEGER PRIMARY KEY, id TEXT, room TEXT, src TEXT, text TEXT, hop INTEGER, at INTEGER)",
     "CREATE INDEX IF NOT EXISTS post_room ON post(room, seq)",
+    "CREATE INDEX IF NOT EXISTS post_room_id ON post(room, id)",
     "CREATE TABLE IF NOT EXISTS mail(seq INTEGER PRIMARY KEY, id TEXT, conv TEXT, src TEXT, dst TEXT, kind TEXT, ref TEXT, want TEXT, head TEXT, size INTEGER, at INTEGER)",
     "CREATE INDEX IF NOT EXISTS mail_conv ON mail(conv, seq)",
+    "CREATE INDEX IF NOT EXISTS mail_newest ON mail(conv, at, seq)",
+    "CREATE INDEX IF NOT EXISTS mail_id ON mail(id)",
     "CREATE TABLE IF NOT EXISTS project(id TEXT PRIMARY KEY, title TEXT, root TEXT, created INTEGER, removed INTEGER, json TEXT)",
     "CREATE TABLE IF NOT EXISTS thread(id TEXT PRIMARY KEY, project TEXT, title TEXT, created INTEGER, activity INTEGER, turn TEXT, pending INTEGER, archived INTEGER, pinned INTEGER, settled_at INTEGER, provider TEXT, model TEXT, session TEXT, deleted INTEGER, json TEXT)",
     "CREATE INDEX IF NOT EXISTS thread_project ON thread(project, activity)",
@@ -76,6 +80,8 @@ def Sdb.schema() -> String:
     "CREATE TABLE IF NOT EXISTS conv(id TEXT PRIMARY KEY, kind TEXT, project TEXT, last INTEGER, want TEXT, parts TEXT, json TEXT)",
     "CREATE TABLE IF NOT EXISTS mark(k TEXT PRIMARY KEY, bot TEXT, conv TEXT, status TEXT, json TEXT)",
     "CREATE INDEX IF NOT EXISTS mark_bot ON mark(bot)",
+    "CREATE TABLE IF NOT EXISTS far_line(seq INTEGER PRIMARY KEY, scope TEXT)",
+    "CREATE INDEX IF NOT EXISTS far_line_scope ON far_line(scope, seq)",
     "CREATE TABLE IF NOT EXISTS obj(domain TEXT, key TEXT, json TEXT, PRIMARY KEY(domain, key)) WITHOUT ROWID"
   ], ";\n") ++ ";"
 
@@ -179,15 +185,15 @@ def S.b(b: Bool) -> String:
 def S.j(kvs: List<&2, J.KV>) -> String:
   J.Json.show(J.Json.obj(kvs))
 
-def S.strs.go(xs: List<&2, String>) -> List<&2, J.Json>:
+def S.strs.go(xs: List<&2, String>, acc: List<&2, J.Json>) -> List<&2, J.Json>:
   match xs:
     case Nil{}:
-      Nil{}
+      List.reverse(&2, J.Json, acc)
     case x <> t:
-      J.Str{x} <> S.strs.go(t)
+      S.strs.go(t, J.Str{x} <> acc)
 
 def S.strs(xs: List<&2, String>) -> J.Json:
-  J.Json.arr(S.strs.go(xs))
+  J.Json.arr(S.strs.go(xs, Nil{}))
 
 def S.override(o: M.Override) -> String:
   match o:
@@ -230,15 +236,16 @@ def Row.ask(a: M.Ask) -> Op:
         S.j([J.KV{"id", J.Str{id}}, J.KV{"thread", J.Str{th}}, J.KV{"kind", J.Str{k}}, J.KV{"tool", J.Str{tl}}, J.KV{"detail", J.Str{d}},
           J.KV{"options", J.Str{o}}, J.KV{"open", J.Flag{op}}, J.KV{"answer", J.Str{an}}])]}
 
-def Row.qitems(qs: List<&2, M.QItem>) -> List<&2, J.Json>:
+# (walked into acc reversed, then turned back: a tail call per item)
+def Row.qitems(qs: List<&2, M.QItem>, acc: List<&2, J.Json>) -> List<&2, J.Json>:
   match qs:
     case Nil{}:
-      Nil{}
+      List.reverse(&2, J.Json, acc)
     case M.QItem{m, t} <> rest:
-      J.Json.obj([J.KV{"msg", J.Str{m}}, J.KV{"text", J.Str{t}}]) <> Row.qitems(rest)
+      Row.qitems(rest, J.Json.obj([J.KV{"msg", J.Str{m}}, J.KV{"text", J.Str{t}}]) <> acc)
 
 def Row.queue(+th: String, +qs: List<&2, M.QItem>) -> Op:
-  Put{"queue", [th, S.n(List.length(&2, M.QItem, qs)), J.Json.show(J.Json.arr(Row.qitems(qs)))]}
+  Put{"queue", [th, S.n(List.length(&2, M.QItem, qs)), J.Json.show(J.Json.arr(Row.qitems(qs, Nil{})))]}
 
 def Row.obj(+dom: String, +key: String, j: J.Json) -> Op:
   Put{"obj", [dom, key, J.Json.show(j)]}
@@ -324,13 +331,13 @@ def Row.origin(+key: String, o: ML.Origin) -> Op:
     case ML.Origin{f, k, r}:
       Row.obj("origin", key, J.Json.obj([J.KV{"from", J.Str{f}}, J.KV{"kind", J.Str{k}}, J.KV{"ref", J.Str{r}}]))
 
-def Row.decisions.js(ds: List<&2, ML.Decision>) -> List<&2, J.Json>:
+def Row.decisions.js(ds: List<&2, ML.Decision>, acc: List<&2, J.Json>) -> List<&2, J.Json>:
   match ds:
     case Nil{}:
-      Nil{}
+      List.reverse(&2, J.Json, acc)
     case ML.Decision{i, b, c, r, t, rs, at} <> rest:
-      J.Json.obj([J.KV{"id", J.Str{i}}, J.KV{"bot", J.Str{b}}, J.KV{"conv", J.Str{c}}, J.KV{"run", J.Str{r}}, J.KV{"text", J.Str{t}},
-        J.KV{"reason", J.Str{rs}}, J.KV{"at", C.Codec.nat(at)}]) <> Row.decisions.js(rest)
+      Row.decisions.js(rest, J.Json.obj([J.KV{"id", J.Str{i}}, J.KV{"bot", J.Str{b}}, J.KV{"conv", J.Str{c}}, J.KV{"run", J.Str{r}}, J.KV{"text", J.Str{t}},
+        J.KV{"reason", J.Str{rs}}, J.KV{"at", C.Codec.nat(at)}]) <> acc)
 
 # Reading the state
 # -----------------
@@ -474,7 +481,7 @@ def Row.nat(+dom: String, +k: String, m: Maybe<&2, Nat>) -> Op:
   Row.obj.or(Nat, v => Row.obj(dom, k, C.Codec.nat(v)), dom, k, m)
 
 def Row.decisions(+bot: String, m: Maybe<&2, List<&2, ML.Decision>>) -> Op:
-  Row.obj.or(List<&2, ML.Decision>, ds => Row.obj("decision", bot, J.Json.arr(Row.decisions.js(ds))), "decision", bot, m)
+  Row.obj.or(List<&2, ML.Decision>, ds => Row.obj("decision", bot, J.Json.arr(Row.decisions.js(ds, Nil{}))), "decision", bot, m)
 
 def Row.world.k(i: Nat, +w: BT.World, +k: String) -> Op:
   match i:
@@ -572,12 +579,13 @@ def Row.of(+s: M.State, k: RK) -> Op:
     case RK{+d, +key}:
       Row.of.k(Dom.at(Dom.top(), d), s, d, key)
 
-def Row.ofs(ks: List<&2, RK>, +s: M.State) -> List<&2, Op>:
+# (records' order is free: each is the state's value at its key)
+def Row.ofs(ks: List<&2, RK>, +s: M.State, acc: List<&2, Op>) -> List<&2, Op>:
   match ks:
     case Nil{}:
-      Nil{}
+      acc
     case k <> t:
-      Row.of(s, k) <> Row.ofs(t, s)
+      Row.ofs(t, s, Row.of(s, k) <> acc)
 
 # Which records a change may touch
 # --------------------------------
@@ -602,16 +610,16 @@ def K.bot.mark(bot: Bool, +p: String, +conv: String, rest: List<&2, RK>) -> List
     case False{}:
       rest
 
-def K.bot.marks(ps: List<&2, String>, +conv: String) -> List<&2, RK>:
+def K.bot.marks(ps: List<&2, String>, +conv: String, acc: List<&2, RK>) -> List<&2, RK>:
   match ps:
     case Nil{}:
-      Nil{}
+      acc
     case +p <> t:
-      K.bot.mark(String.starts_with(p, "bot:"), p, conv, K.bot.marks(t, conv))
+      K.bot.marks(t, conv, K.bot.mark(String.starts_with(p, "bot:"), p, conv, acc))
 
 # a conversation that took mail, and every bot in it (Box.received)
 def K.conv(+post: M.State, +conv: String) -> List<&2, RK>:
-  RK{"conv", conv} <> K.bot.marks(ML.Conv.parts(ML.Box.conv(M.State.mail(post), conv)), conv)
+  RK{"conv", conv} <> K.bot.marks(ML.Conv.parts(ML.Box.conv(M.State.mail(post), conv)), conv, Nil{})
 
 def K.tokens(+pre: M.State, +th: String, +pv: String, +mo: String, +at: Nat) -> List<&2, RK>:
   +x = M.Tok.pre(pre)
@@ -821,12 +829,12 @@ def Sdb.keys(+pre: M.State, +post: M.State, c: M.Change) -> List<&2, RK>:
 type At is Data:
   At{seq: Nat, off: Nat, len: Nat, ord: Nat}
 
-def F.terms(ws: List<&2, String>, +ord: Nat) -> List<&2, Op>:
+def F.terms(ws: List<&2, String>, +ord: Nat, acc: List<&2, Op>) -> List<&2, Op>:
   match ws:
     case Nil{}:
-      Nil{}
+      acc
     case w <> t:
-      Put{"term", [w, S.n(ord)]} <> F.terms(t, ord)
+      F.terms(t, ord, Put{"term", [w, S.n(ord)]} <> acc)
 
 def F.entry.cols(e: M.Entry, +seq: String, +ord: String, +id: String, +th: String, +src: String, +text: String) -> List<&2, String>:
   match e:
@@ -845,7 +853,7 @@ def F.entry(+e: M.Entry, +a: At) -> List<&2, Op>:
       +from = M.Link.from(id)
       +src = Bool.pick(String, Bool.or(String.is_empty(from), String.eq(from, th)), "", from)
       +text = THIN.Entry.text(e)
-      Put{"entry", F.entry.cols(e, S.n(seq), S.n(ord), id, th, src, text)} <> F.terms(Map.keys(&2, Bool, THIN.Words.of(text)), ord)
+      Put{"entry", F.entry.cols(e, S.n(seq), S.n(ord), id, th, src, text)} <> F.terms(Map.keys(&2, Bool, THIN.Words.of(text)), ord, Nil{})
 
 # the entry a change posts (State.post's three producers), if any
 def F.posts(c: M.Change) -> Maybe<&2, M.Entry>:
@@ -945,7 +953,7 @@ type Step is Data:
   Step{st: M.State, facts: List<&2, Op>, recs: List<&2, Op>, ord: Nat}
 
 def Sdb.step.k(+pre: M.State, +post: M.State, +a: At, +c: M.Change) -> Step:
-  Step{post, Sdb.facts(pre, a, c), Row.ofs(RK{"state", "seq"} <> Sdb.keys(pre, post, c), post), Sdb.ord(c, At.ord(a))}
+  Step{post, Sdb.facts(pre, a, c), Row.ofs(RK{"state", "seq"} <> Sdb.keys(pre, post, c), post, Nil{}), Sdb.ord(c, At.ord(a))}
 
 def Sdb.step(+pre: M.State, +a: At, +c: M.Change) -> Step:
   Sdb.step.k(pre, M.State.apply(pre, c), a, c)
@@ -1042,226 +1050,218 @@ def Mat.replay(ls: List<&2, LL>, m: Mat) -> Mat:
 # What a full rebuild writes after the last line, and what the incremental
 # store must equal (laws store_eq_fold_*).
 
-def Dump.d0(xs: List<&2, Sigma<&2, &2, String, _ => M.Project>>) -> List<&2, Op>:
+def Dump.d0(xs: List<&2, Sigma<&2, &2, String, _ => M.Project>>, acc: List<&2, Op>) -> List<&2, Op>:
   match xs:
     case Nil{}:
-      Nil{}
+      acc
     case (_, v) <> t:
-      Row.project(v) <> Dump.d0(t)
+      Dump.d0(t, Row.project(v) <> acc)
 
-def Dump.d1(xs: List<&2, Sigma<&2, &2, String, _ => M.Thread>>) -> List<&2, Op>:
+def Dump.d1(xs: List<&2, Sigma<&2, &2, String, _ => M.Thread>>, acc: List<&2, Op>) -> List<&2, Op>:
   match xs:
     case Nil{}:
-      Nil{}
+      acc
     case (_, v) <> t:
-      Row.thread(v) <> Dump.d1(t)
+      Dump.d1(t, Row.thread(v) <> acc)
 
-def Dump.d2(xs: List<&2, Sigma<&2, &2, String, _ => M.Task>>) -> List<&2, Op>:
+def Dump.d2(xs: List<&2, Sigma<&2, &2, String, _ => M.Task>>, acc: List<&2, Op>) -> List<&2, Op>:
   match xs:
     case Nil{}:
-      Nil{}
+      acc
     case (_, v) <> t:
-      Row.task(v) <> Dump.d2(t)
+      Dump.d2(t, Row.task(v) <> acc)
 
-def Dump.d3(xs: List<&2, Sigma<&2, &2, String, _ => M.Ask>>) -> List<&2, Op>:
+def Dump.d3(xs: List<&2, Sigma<&2, &2, String, _ => M.Ask>>, acc: List<&2, Op>) -> List<&2, Op>:
   match xs:
     case Nil{}:
-      Nil{}
+      acc
     case (_, v) <> t:
-      Row.ask(v) <> Dump.d3(t)
+      Dump.d3(t, Row.ask(v) <> acc)
 
-def Dump.d4(xs: List<&2, Sigma<&2, &2, String, _ => List<&2, M.QItem>>>) -> List<&2, Op>:
+def Dump.d4(xs: List<&2, Sigma<&2, &2, String, _ => List<&2, M.QItem>>>, acc: List<&2, Op>) -> List<&2, Op>:
   match xs:
     case Nil{}:
-      Nil{}
+      acc
     case (k, v) <> t:
-      Row.queue(k, v) <> Dump.d4(t)
+      Dump.d4(t, Row.queue(k, v) <> acc)
 
-def Dump.d5(xs: List<&2, Sigma<&2, &2, String, _ => String>>) -> List<&2, Op>:
+def Dump.d5(xs: List<&2, Sigma<&2, &2, String, _ => String>>, acc: List<&2, Op>) -> List<&2, Op>:
   match xs:
     case Nil{}:
-      Nil{}
+      acc
     case (k, v) <> t:
-      Row.set(k, v) <> Dump.d5(t)
+      Dump.d5(t, Row.set(k, v) <> acc)
 
-def Dump.d6(xs: List<&2, Sigma<&2, &2, String, _ => M.Device>>) -> List<&2, Op>:
+def Dump.d6(xs: List<&2, Sigma<&2, &2, String, _ => M.Device>>, acc: List<&2, Op>) -> List<&2, Op>:
   match xs:
     case Nil{}:
-      Nil{}
+      acc
     case (_, v) <> t:
-      Row.device(v) <> Dump.d6(t)
+      Dump.d6(t, Row.device(v) <> acc)
 
-def Dump.d7(xs: List<&2, Sigma<&2, &2, String, _ => M.Nav>>) -> List<&2, Op>:
+def Dump.d7(xs: List<&2, Sigma<&2, &2, String, _ => M.Nav>>, acc: List<&2, Op>) -> List<&2, Op>:
   match xs:
     case Nil{}:
-      Nil{}
+      acc
     case (k, v) <> t:
-      Row.nav(k, v) <> Dump.d7(t)
+      Dump.d7(t, Row.nav(k, v) <> acc)
 
-def Dump.d8(xs: List<&2, Sigma<&2, &2, String, _ => BT.Bot>>) -> List<&2, Op>:
+def Dump.d8(xs: List<&2, Sigma<&2, &2, String, _ => BT.Bot>>, acc: List<&2, Op>) -> List<&2, Op>:
   match xs:
     case Nil{}:
-      Nil{}
+      acc
     case (_, v) <> t:
-      Row.bot(v) <> Dump.d8(t)
+      Dump.d8(t, Row.bot(v) <> acc)
 
-def Dump.d9(xs: List<&2, Sigma<&2, &2, String, _ => BT.Room>>) -> List<&2, Op>:
+def Dump.d9(xs: List<&2, Sigma<&2, &2, String, _ => BT.Room>>, acc: List<&2, Op>) -> List<&2, Op>:
   match xs:
     case Nil{}:
-      Nil{}
+      acc
     case (_, v) <> t:
-      Row.room(v) <> Dump.d9(t)
+      Dump.d9(t, Row.room(v) <> acc)
 
-def Dump.d10(xs: List<&2, Sigma<&2, &2, String, _ => BT.Routine>>) -> List<&2, Op>:
+def Dump.d10(xs: List<&2, Sigma<&2, &2, String, _ => BT.Routine>>, acc: List<&2, Op>) -> List<&2, Op>:
   match xs:
     case Nil{}:
-      Nil{}
+      acc
     case (_, v) <> t:
-      Row.routine(v) <> Dump.d10(t)
+      Dump.d10(t, Row.routine(v) <> acc)
 
-def Dump.d11(xs: List<&2, Sigma<&2, &2, String, _ => BT.Hook>>) -> List<&2, Op>:
+def Dump.d11(xs: List<&2, Sigma<&2, &2, String, _ => BT.Hook>>, acc: List<&2, Op>) -> List<&2, Op>:
   match xs:
     case Nil{}:
-      Nil{}
+      acc
     case (_, v) <> t:
-      Row.hook(v) <> Dump.d11(t)
+      Dump.d11(t, Row.hook(v) <> acc)
 
-def Dump.d12(xs: List<&2, Sigma<&2, &2, String, _ => BT.Mem>>) -> List<&2, Op>:
+def Dump.d12(xs: List<&2, Sigma<&2, &2, String, _ => BT.Mem>>, acc: List<&2, Op>) -> List<&2, Op>:
   match xs:
     case Nil{}:
-      Nil{}
+      acc
     case (k, v) <> t:
-      Row.mem(k, v) <> Dump.d12(t)
+      Dump.d12(t, Row.mem(k, v) <> acc)
 
-def Dump.d13(xs: List<&2, Sigma<&2, &2, String, _ => BT.Peer>>) -> List<&2, Op>:
+def Dump.d13(xs: List<&2, Sigma<&2, &2, String, _ => BT.Peer>>, acc: List<&2, Op>) -> List<&2, Op>:
   match xs:
     case Nil{}:
-      Nil{}
+      acc
     case (_, v) <> t:
-      Row.peer(v) <> Dump.d13(t)
+      Dump.d13(t, Row.peer(v) <> acc)
 
-def Dump.d14(xs: List<&2, Sigma<&2, &2, String, _ => String>>) -> List<&2, Op>:
+def Dump.d14(xs: List<&2, Sigma<&2, &2, String, _ => String>>, acc: List<&2, Op>) -> List<&2, Op>:
   match xs:
     case Nil{}:
-      Nil{}
+      acc
     case (k, v) <> t:
-      Row.obj("space", k, J.Str{v}) <> Dump.d14(t)
+      Dump.d14(t, Row.obj("space", k, J.Str{v}) <> acc)
 
-def Dump.d15(xs: List<&2, Sigma<&2, &2, String, _ => BT.Page>>) -> List<&2, Op>:
+def Dump.d15(xs: List<&2, Sigma<&2, &2, String, _ => BT.Page>>, acc: List<&2, Op>) -> List<&2, Op>:
   match xs:
     case Nil{}:
-      Nil{}
+      acc
     case (k, v) <> t:
-      Row.page(k, v) <> Dump.d15(t)
+      Dump.d15(t, Row.page(k, v) <> acc)
 
-def Dump.d16(xs: List<&2, Sigma<&2, &2, String, _ => String>>) -> List<&2, Op>:
+def Dump.d16(xs: List<&2, Sigma<&2, &2, String, _ => String>>, acc: List<&2, Op>) -> List<&2, Op>:
   match xs:
     case Nil{}:
-      Nil{}
+      acc
     case (k, v) <> t:
-      Row.obj("skill", k, J.Str{v}) <> Dump.d16(t)
+      Dump.d16(t, Row.obj("skill", k, J.Str{v}) <> acc)
 
-def Dump.d17(xs: List<&2, Sigma<&2, &2, String, _ => BT.Hops>>) -> List<&2, Op>:
+def Dump.d17(xs: List<&2, Sigma<&2, &2, String, _ => BT.Hops>>, acc: List<&2, Op>) -> List<&2, Op>:
   match xs:
     case Nil{}:
-      Nil{}
+      acc
     case (k, v) <> t:
-      Row.hops(k, v) <> Dump.d17(t)
+      Dump.d17(t, Row.hops(k, v) <> acc)
 
-def Dump.d18(xs: List<&2, Sigma<&2, &2, String, _ => Nat>>) -> List<&2, Op>:
+def Dump.d18(xs: List<&2, Sigma<&2, &2, String, _ => Nat>>, acc: List<&2, Op>) -> List<&2, Op>:
   match xs:
     case Nil{}:
-      Nil{}
+      acc
     case (k, v) <> t:
-      Row.obj("talk", k, C.Codec.nat(v)) <> Dump.d18(t)
+      Dump.d18(t, Row.obj("talk", k, C.Codec.nat(v)) <> acc)
 
-def Dump.d19(xs: List<&2, Sigma<&2, &2, String, _ => ML.Conv>>, +b: ML.Box) -> List<&2, Op>:
+def Dump.d19(xs: List<&2, Sigma<&2, &2, String, _ => ML.Conv>>, +b: ML.Box, acc: List<&2, Op>) -> List<&2, Op>:
   match xs:
     case Nil{}:
-      Nil{}
+      acc
     case (_, v) <> t:
-      Row.conv(b, v) <> Dump.d19(t, b)
+      Dump.d19(t, b, Row.conv(b, v) <> acc)
 
-def Dump.d20(xs: List<&2, Sigma<&2, &2, String, _ => ML.Mark>>) -> List<&2, Op>:
+def Dump.d20(xs: List<&2, Sigma<&2, &2, String, _ => ML.Mark>>, acc: List<&2, Op>) -> List<&2, Op>:
   match xs:
     case Nil{}:
-      Nil{}
+      acc
     case (k, v) <> t:
-      Row.mark(k, v) <> Dump.d20(t)
+      Dump.d20(t, Row.mark(k, v) <> acc)
 
-def Dump.d21(xs: List<&2, Sigma<&2, &2, String, _ => ML.Run>>) -> List<&2, Op>:
+def Dump.d21(xs: List<&2, Sigma<&2, &2, String, _ => ML.Run>>, acc: List<&2, Op>) -> List<&2, Op>:
   match xs:
     case Nil{}:
-      Nil{}
+      acc
     case (_, v) <> t:
-      Row.run(v) <> Dump.d21(t)
+      Dump.d21(t, Row.run(v) <> acc)
 
-def Dump.d22(xs: List<&2, Sigma<&2, &2, String, _ => ML.Origin>>) -> List<&2, Op>:
+def Dump.d22(xs: List<&2, Sigma<&2, &2, String, _ => ML.Origin>>, acc: List<&2, Op>) -> List<&2, Op>:
   match xs:
     case Nil{}:
-      Nil{}
+      acc
     case (k, v) <> t:
-      Row.origin(k, v) <> Dump.d22(t)
+      Dump.d22(t, Row.origin(k, v) <> acc)
 
-def Dump.d23(xs: List<&2, Sigma<&2, &2, String, _ => String>>) -> List<&2, Op>:
+def Dump.d23(xs: List<&2, Sigma<&2, &2, String, _ => String>>, acc: List<&2, Op>) -> List<&2, Op>:
   match xs:
     case Nil{}:
-      Nil{}
+      acc
     case (k, v) <> t:
-      Row.obj("charter", k, J.Str{v}) <> Dump.d23(t)
+      Dump.d23(t, Row.obj("charter", k, J.Str{v}) <> acc)
 
-def Dump.d24(xs: List<&2, Sigma<&2, &2, String, _ => List<&2, ML.Decision>>>) -> List<&2, Op>:
+def Dump.d24(xs: List<&2, Sigma<&2, &2, String, _ => List<&2, ML.Decision>>>, acc: List<&2, Op>) -> List<&2, Op>:
   match xs:
     case Nil{}:
-      Nil{}
+      acc
     case (k, v) <> t:
-      Row.obj("decision", k, J.Json.arr(Row.decisions.js(v))) <> Dump.d24(t)
+      Dump.d24(t, Row.obj("decision", k, J.Json.arr(Row.decisions.js(v, Nil{}))) <> acc)
 
-def Dump.d25(xs: List<&2, Sigma<&2, &2, String, _ => String>>) -> List<&2, Op>:
+def Dump.d25(xs: List<&2, Sigma<&2, &2, String, _ => String>>, acc: List<&2, Op>) -> List<&2, Op>:
   match xs:
     case Nil{}:
-      Nil{}
+      acc
     case (k, v) <> t:
-      Row.obj("mailname", k, J.Str{v}) <> Dump.d25(t)
-
-def Dump.concat(xss: List<&2, List<&2, Op>>) -> List<&2, Op>:
-  match xss:
-    case Nil{}:
-      Nil{}
-    case xs <> t:
-      List.append(&2, Op, xs, Dump.concat(t))
+      Dump.d25(t, Row.obj("mailname", k, J.Str{v}) <> acc)
 
 def Dump.ops(+s: M.State) -> List<&2, Op>:
   +w = M.State.world.of(s)
   +b = M.State.mail(s)
-  Dump.concat([
-    [Row.obj("state", "seq", C.Codec.nat(M.State.seq(s)))],
-    Dump.d0(Map.to_list(&2, M.Project, St.ps(s))),
-    Dump.d1(Map.to_list(&2, M.Thread, St.ts(s))),
-    Dump.d2(Map.to_list(&2, M.Task, St.tk(s))),
-    Dump.d3(Map.to_list(&2, M.Ask, St.ak(s))),
-    Dump.d4(Map.to_list(&2, List<&2, M.QItem>, St.qu(s))),
-    Dump.d5(Map.to_list(&2, String, St.sg(s))),
-    Dump.d6(Map.to_list(&2, M.Device, St.dv(s))),
-    Dump.d7(Map.to_list(&2, M.Nav, M.State.navs(s))),
-    Dump.d8(Map.to_list(&2, BT.Bot, W.bots(w))),
-    Dump.d9(Map.to_list(&2, BT.Room, W.rooms(w))),
-    Dump.d10(Map.to_list(&2, BT.Routine, W.routines(w))),
-    Dump.d11(Map.to_list(&2, BT.Hook, W.hooks(w))),
-    Dump.d12(Map.to_list(&2, BT.Mem, W.mems(w))),
-    Dump.d13(Map.to_list(&2, BT.Peer, W.peers(w))),
-    Dump.d14(Map.to_list(&2, String, W.spaces(w))),
-    Dump.d15(Map.to_list(&2, BT.Page, W.pages(w))),
-    Dump.d16(Map.to_list(&2, String, W.skills(w))),
-    Dump.d17(Map.to_list(&2, BT.Hops, W.hops(w))),
-    Dump.d18(Map.to_list(&2, Nat, W.talk(w))),
-    Dump.d19(Map.to_list(&2, ML.Conv, ML.Box.convs(b)), b),
-    Dump.d20(Map.to_list(&2, ML.Mark, ML.Box.marks(b))),
-    Dump.d21(Map.to_list(&2, ML.Run, ML.Box.runs(b))),
-    Dump.d22(Map.to_list(&2, ML.Origin, ML.Box.origins(b))),
-    Dump.d23(Map.to_list(&2, String, ML.Box.charters(b))),
-    Dump.d24(Map.to_list(&2, List<&2, ML.Decision>, ML.Box.decision_log(b))),
-    Dump.d25(Map.to_list(&2, String, ML.Box.names(b)))])
+  Dump.d25(Map.to_list(&2, String, ML.Box.names(b)),
+    Dump.d24(Map.to_list(&2, List<&2, ML.Decision>, ML.Box.decision_log(b)),
+    Dump.d23(Map.to_list(&2, String, ML.Box.charters(b)),
+    Dump.d22(Map.to_list(&2, ML.Origin, ML.Box.origins(b)),
+    Dump.d21(Map.to_list(&2, ML.Run, ML.Box.runs(b)),
+    Dump.d20(Map.to_list(&2, ML.Mark, ML.Box.marks(b)),
+    Dump.d19(Map.to_list(&2, ML.Conv, ML.Box.convs(b)), b,
+    Dump.d18(Map.to_list(&2, Nat, W.talk(w)),
+    Dump.d17(Map.to_list(&2, BT.Hops, W.hops(w)),
+    Dump.d16(Map.to_list(&2, String, W.skills(w)),
+    Dump.d15(Map.to_list(&2, BT.Page, W.pages(w)),
+    Dump.d14(Map.to_list(&2, String, W.spaces(w)),
+    Dump.d13(Map.to_list(&2, BT.Peer, W.peers(w)),
+    Dump.d12(Map.to_list(&2, BT.Mem, W.mems(w)),
+    Dump.d11(Map.to_list(&2, BT.Hook, W.hooks(w)),
+    Dump.d10(Map.to_list(&2, BT.Routine, W.routines(w)),
+    Dump.d9(Map.to_list(&2, BT.Room, W.rooms(w)),
+    Dump.d8(Map.to_list(&2, BT.Bot, W.bots(w)),
+    Dump.d7(Map.to_list(&2, M.Nav, M.State.navs(s)),
+    Dump.d6(Map.to_list(&2, M.Device, St.dv(s)),
+    Dump.d5(Map.to_list(&2, String, St.sg(s)),
+    Dump.d4(Map.to_list(&2, List<&2, M.QItem>, St.qu(s)),
+    Dump.d3(Map.to_list(&2, M.Ask, St.ak(s)),
+    Dump.d2(Map.to_list(&2, M.Task, St.tk(s)),
+    Dump.d1(Map.to_list(&2, M.Thread, St.ts(s)),
+    Dump.d0(Map.to_list(&2, M.Project, St.ps(s)),
+    [Row.obj("state", "seq", C.Codec.nat(M.State.seq(s)))]))))))))))))))))))))))))))
 
 # every record of a state, as the pure store holds them
 def Tab.dump(+s: M.State) -> Map<&2, String>:
@@ -1381,3 +1381,12 @@ def Demo.lines(cs: List<&2, M.Change>, +i: Nat) -> List<&2, LL>:
 
 def Demo.log() -> List<&2, LL>:
   Demo.lines(Demo.changes(), 0n)
+
+# a few changes for laws the checker normalizes (the wide demo above is
+# for test/storedb_test.bend: normalizing it takes the checker minutes)
+def Demo.small() -> List<&2, M.Change>:
+  [M.ThreadCreated{"t1", "p1", "A", M.Local{}, "", "", "claude", "", 1n}, M.MessagePosted{"t1", "m1", M.User{}, "hi", 2n},
+   M.SettingSet{"a", "1", 3n}, M.SettingSet{"a", "", 4n}, M.ThreadPinned{"t1", True{}, 5n}]
+
+def Demo.small.log() -> List<&2, LL>:
+  Demo.lines(Demo.small(), 0n)

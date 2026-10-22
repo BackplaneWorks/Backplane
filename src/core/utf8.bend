@@ -94,13 +94,19 @@ def Utf8.put.k(a: Bool, b: Bool, c: Bool, +cp: U32, rest: List<&2, U32>) -> List
 def Utf8.put(+cp: U32, rest: List<&2, U32>) -> List<&2, U32>:
   Utf8.put.k(U32.is_lt(cp, 128), U32.is_lt(cp, 2048), U32.is_lt(cp, 65536), cp, rest)
 
-# the UTF-8 bytes of a String, in front of rest
-def Utf8.encode_onto(s: String, rest: List<&2, U32>) -> List<&2, U32>:
+# the UTF-8 bytes of a String, last first, onto acc: a tail call per
+# character (the walk that put each one in front of the rest's overflowed
+# the JS runtime's stack on an MCP answer of some 25,000 characters)
+def Utf8.encode_rev(s: String, acc: List<&2, U32>) -> List<&2, U32>:
   match s:
     case SNil{}:
-      rest
+      acc
     case SCon{Chr{c}, t}:
-      Utf8.put(c, Utf8.encode_onto(t, rest))
+      Utf8.encode_rev(t, List.reverse.go(&2, U32, Utf8.put(c, Nil{}), acc))
+
+# the UTF-8 bytes of a String, in front of rest
+def Utf8.encode_onto(s: String, rest: List<&2, U32>) -> List<&2, U32>:
+  List.reverse.go(&2, U32, Utf8.encode_rev(s, Nil{}), rest)
 
 def Utf8.encode(s: String) -> List<&2, U32>:
   Utf8.encode_onto(s, Nil{})

@@ -110,13 +110,30 @@ def Words.step(letter: Bool, c: U32, w: String, +n: Nat, ts: Map<&2, Bool>) -> W
     case True{}: Words.letter(Nat.is_lt(n, 64n), c, w, n, ts)
     case False{}: WordState{"", 0n, Words.put(Bool.and(Nat.is_gt(n, 0n), Nat.is_le(n, 64n)), ts, w)}
 
+def Words.code(c: Char) -> U32:
+  match c:
+    case Chr{u}: u
+
+def Words.at(+c: U32, w: String, +n: Nat, ts: Map<&2, Bool>) -> WordState:
+  Words.step(Word.char(c), c, w, n, ts)
+
+# the walk over a String already lowered whole: what Words.go does
+# (law thin_words_lower_each)
+def Words.go.whole(s: String, ws: WordState) -> Map<&2, Bool>:
+  match s ws:
+    case SNil{} WordState{w, +n, ts}: Words.put(Bool.and(Nat.is_gt(n, 0n), Nat.is_le(n, 64n)), ts, w)
+    case SCon{Chr{+c}, tail} WordState{w, n, ts}: Words.go.whole(tail, Words.step(Word.char(c), c, w, n, ts))
+
+# each character lowered as it is read: String.to_lower builds its result
+# outside its recursive call, so on the JS target a long message overflowed
+# the stack while the index was built at start-up
 def Words.go(s: String, ws: WordState) -> Map<&2, Bool>:
   match s ws:
     case SNil{} WordState{w, +n, ts}: Words.put(Bool.and(Nat.is_gt(n, 0n), Nat.is_le(n, 64n)), ts, w)
-    case SCon{Chr{+c}, tail} WordState{w, n, ts}: Words.go(tail, Words.step(Word.char(c), c, w, n, ts))
+    case SCon{h, tail} WordState{w, n, ts}: Words.go(tail, Words.at(Words.code(Char.to_lower(h)), w, n, ts))
 
 def Words.of(s: String) -> Map<&2, Bool>:
-  Words.go(String.to_lower(s), WordState{"", 0n, Map.new(&2, Bool)})
+  Words.go(s, WordState{"", 0n, Map.new(&2, Bool)})
 
 def Orders.get.k(p: Map<&2, ML.Order> & ML.Order) -> ML.Order:
   (_, o) = p

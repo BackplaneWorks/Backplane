@@ -1,19 +1,88 @@
 // Backplane host effects: the JS twin of host.c.
 //
-// The server ships as a native binary; this twin exists so `bend server.bend`
-// runs for quick checks. Process effects answer ENOSYS here.
+// Bend's JS runtime is one synchronous loop that waits on descriptors with
+// select() (through bun:ffi); Bun's own event loop never runs, so nothing
+// here uses a Promise, a callback or a blocking call. Children start with
+// posix_spawnp and are waited for on a pidfd the loop polls, sockets park
+// on the loop when full, and everything else is a plain syscall.
 
+// libc through bun:ffi: the symbols every libc has, then the optional ones
+// one at a time (a missing one is absent, never a failed load)
 function host_libc() {
   if (globalThis.BACKPLANE_LIBC === undefined) {
     const ffi = require("bun:ffi");
     const mac = process.platform === "darwin";
-    globalThis.BACKPLANE_LIBC = ffi.dlopen(mac ? "libSystem.dylib" : "libc.so.6", {
-      dup: { args: ["i32"], returns: "i32" },
-      shutdown: { args: ["i32", "i32"], returns: "i32" },
-      close: { args: ["i32"], returns: "i32" },
-    }).symbols;
+    const lib = mac ? "libSystem.dylib" : "libc.so.6";
+    const T = { i: "i32", u: "u32", h: "i16", U: "u64", I: "i64", p: "ptr" };
+    const spec = (list) => Object.fromEntries(list.split(" ").map((x) => {
+      const [name, args, ret] = x.split(/[:>]/);
+      return [name, { args: [...args].map((a) => T[a]), returns: T[ret] }];
+    }));
+    const c = ffi.dlopen(lib, spec("dup:i>i shutdown:ii>i close:i>i"
+      + " write:ipU>I socketpair:iiip>i pipe:p>i kill:ii>i"
+      + " waitpid:ipi>i waitid:iupi>i getpeername:ipp>i inet_ntop:ippu>p"
+      + " execve:ppp>i setenv:ppi>i unsetenv:p>i"
+      + " posix_spawnp:pppppp>i posix_spawn:pppppp>i"
+      + " posix_spawn_file_actions_init:p>i posix_spawn_file_actions_destroy:p>i"
+      + " posix_spawn_file_actions_adddup2:pii>i posix_spawn_file_actions_addclose:pi>i"
+      + " posix_spawn_file_actions_addopen:pipiu>i"
+      + " posix_spawnattr_init:p>i posix_spawnattr_destroy:p>i"
+      + " posix_spawnattr_setflags:ph>i posix_spawnattr_setsigdefault:pp>i"
+      + " posix_spawnattr_setsigmask:pp>i sigemptyset:p>i sigaddset:pi>i sigfillset:p>i")).symbols;
+    const opt = (one) => {
+      try {
+        return Object.values(ffi.dlopen(lib, spec(one)).symbols)[0];
+      } catch (_) {
+        return undefined;
+      }
+    };
+    c.addchdir = opt("posix_spawn_file_actions_addchdir_np:pp>i");
+    c.addclosefrom = opt("posix_spawn_file_actions_addclosefrom_np:pi>i");
+    c.pidfd_open = mac ? undefined : opt("pidfd_open:iu>i");
+    c.mac = mac;
+    c.ptr = ffi.ptr;
+    c.read_ptr = ffi.read;
+    globalThis.BACKPLANE_LIBC = c;
   }
   return globalThis.BACKPLANE_LIBC;
+}
+
+// a String as a NUL-terminated buffer (null when it holds a NUL)
+function host_cstr(s) {
+  return s.includes("\0") ? null : Buffer.from(s + "\0", "utf8");
+}
+
+// strings as a NULL-terminated char* vector; bufs keeps them alive
+function host_vec(strs) {
+  const bufs = strs.map(host_cstr);
+  if (bufs.some((b) => b === null)) {
+    return null;
+  }
+  const c = host_libc();
+  const vec = new BigUint64Array(bufs.length + 1);
+  bufs.forEach((b, i) => { vec[i] = BigInt(c.ptr(b)); });
+  return { bufs, vec };
+}
+
+// this process's environment, as the C runtime's environ is (Env.put
+// writes process.env); extra names override
+function host_envp(extra) {
+  const env = { ...process.env, ...(extra ?? {}) };
+  return Object.entries(env).filter(([k, v]) => v !== undefined && k !== ""
+    && !k.includes("=")).map(([k, v]) => k + "=" + v)
+    .filter((kv) => !kv.includes("\0"));
+}
+
+function host_eilseq() {
+  return process.platform === "darwin" ? 92 : 84;
+}
+
+function host_list_js(xs) {
+  const out = [];
+  for (; xs.$ === "Con"; xs = xs.tail) {
+    out.push(xs.head);
+  }
+  return out;
 }
 
 function host_errno(e) {
@@ -32,12 +101,36 @@ function host_list(xs) {
   return out;
 }
 
+// Socket handles may also wrap a pty master (see pty.c): recv and send
+// answer ENOTSOCK there, so they fall back to read and write. A pty whose
+// other side has closed reads EIO, which means end of stream.
+function host_read(fd, p, n) {
+  const sys = io_sys();
+  let r = Number(sys.recv(fd, p, BigInt(n), 0));
+  if (r < 0 && sys.errno() === (sys.mac ? 38 : 88)) {
+    r = Number(sys.read(fd, p, BigInt(n)));
+    if (r < 0 && sys.errno() === 5) {
+      r = 0;
+    }
+  }
+  return r;
+}
+
+function host_write(fd, p, n) {
+  const sys = io_sys();
+  let r = Number(sys.send(fd, p, BigInt(n), sys.mac ? 0 : 0x4000));
+  if (r < 0 && sys.errno() === (sys.mac ? 38 : 88)) {
+    r = Number(host_libc().write(fd, p, BigInt(n)));
+  }
+  return r;
+}
+
 function sock_recv_bytes(socket, max, k) {
   const sys = io_sys();
   const b = new Uint8Array(Math.max(Number(max), 1));
   const again = sys.mac ? 35 : 11;
   const go = () => {
-    const n = Number(sys.recv(socket, sys.ptr(b), b.length, 0));
+    const n = host_read(socket, sys.ptr(b), b.length);
     if (n < 0) {
       const code = sys.errno();
       if (code === again) {
@@ -69,16 +162,30 @@ function sock_save(socket, path, n, k) {
   }
   const go = () => {
     while (left > 0) {
-      const got = Number(sys.recv(socket, sys.ptr(b), Math.min(left, b.length), 0));
+      const got = host_read(socket, sys.ptr(b), Math.min(left, b.length));
       if (got < 0 && sys.errno() === again) {
         io_park_on(socket, false, k, go);
         return undefined;
       }
       if (got <= 0) {
+        const code = got === 0 ? 32 : sys.errno();
         fs.closeSync(out);
-        return io_tup(socket, io_fail(got === 0 ? 32 : sys.errno()));
+        return io_tup(socket, io_fail(code));
       }
-      fs.writeSync(out, b.subarray(0, got));
+      // a write that fails (a full disk) is the save's failure, as in C,
+      // never a throw out of the loop
+      try {
+        let at = 0;
+        while (at < got) {
+          at += fs.writeSync(out, b.subarray(at, got));
+        }
+      } catch (err) {
+        try {
+          fs.closeSync(out);
+        } catch (_) {
+        }
+        return io_tup(socket, io_fail(host_errno(err)));
+      }
       left -= got;
     }
     fs.closeSync(out);
@@ -89,24 +196,31 @@ function sock_save(socket, path, n, k) {
   return undefined;
 }
 
-function host_send(socket, b) {
+// Sends all of b; a full socket parks until writable (never a spin), as
+// host.c's host_send_more does.
+function host_send(socket, b, k) {
   const sys = io_sys();
+  const again = sys.mac ? 35 : 11;
   let at = 0;
-  while (at < b.length) {
-    const n = Number(sys.send(socket, sys.ptr(b.subarray(at)), BigInt(b.length - at), 0x4000));
-    if (n < 0) {
-      const code = sys.errno();
-      if (code === (sys.mac ? 35 : 11)) {
-        continue;
+  const go = () => {
+    while (at < b.length) {
+      const n = host_write(socket, sys.ptr(b, at), b.length - at);
+      if (n < 0) {
+        const code = sys.errno();
+        if (code === again) {
+          io_park_on(socket, true, k, go);
+          return undefined;
+        }
+        return io_tup(socket, io_fail(code));
       }
-      return io_tup(socket, io_fail(code));
+      at += n;
     }
-    at += n;
-  }
-  return io_tup(socket, io_done({ $: "Unit" }));
+    return io_tup(socket, io_done({ $: "Unit" }));
+  };
+  return go();
 }
 
-function sock_send_bytes(socket, data) {
+function sock_send_bytes(socket, data, k) {
   const bytes = [];
   for (let xs = data; xs.$ === "Con"; xs = xs.tail) {
     bytes.push(xs.head);
@@ -114,7 +228,7 @@ function sock_send_bytes(socket, data) {
   if (bytes.some((x) => x > 255)) {
     return io_tup(socket, io_fail(22));
   }
-  return host_send(socket, Uint8Array.from(bytes));
+  return host_send(socket, Uint8Array.from(bytes), k);
 }
 
 // Sock.send_until: a deadline renewed after every send that made progress;
@@ -136,7 +250,7 @@ function sock_send_until(socket, data, ms, k) {
   let at = 0;
   const go = () => {
     while (at < b.length) {
-      const n = Number(sys.send(socket, sys.ptr(b.subarray(at)), BigInt(b.length - at), 0x4000));
+      const n = host_write(socket, sys.ptr(b, at), b.length - at);
       if (n < 0) {
         const code = sys.errno();
         if (code === again && performance.now() < until) {
@@ -144,7 +258,7 @@ function sock_send_until(socket, data, ms, k) {
           return undefined;
         }
         host_libc().shutdown(socket, 2);
-        return io_tup(socket, io_fail(code === again ? 110 : code));
+        return io_tup(socket, io_fail(code === again ? (sys.mac ? 60 : 110) : code));
       }
       at += n;
       until = performance.now() + span;
@@ -154,17 +268,48 @@ function sock_send_until(socket, data, ms, k) {
   return go();
 }
 
-function sock_send_text(socket, text) {
-  return host_send(socket, io_bytes(text));
+function sock_send_text(socket, text, k) {
+  return host_send(socket, io_bytes(text), k);
 }
 
+// A second handle on the same socket (close-on-exec), each frame sent at
+// once (TCP_NODELAY) and a silent peer found by keepalive and
+// TCP_USER_TIMEOUT, as host.c's Sock.dup; a socketpair refuses the
+// options, which changes nothing.
 function sock_dup(socket) {
-  const got = host_libc().dup(socket);
-  return io_tup(socket, got < 0 ? io_fail(io_sys().errno()) : io_done(got));
+  const sys = io_sys();
+  const opt = (level, name, v) => {
+    const x = new Int32Array([v]);
+    sys.setsockopt(socket, level, name, sys.ptr(x), 4);
+  };
+  opt(6, 1, 1);
+  opt(sys.mac ? 0xffff : 1, sys.mac ? 8 : 9, 1);
+  if (!sys.mac) {
+    opt(6, 4, 20);
+    opt(6, 5, 5);
+    opt(6, 6, 3);
+    opt(6, 18, 30000);
+  }
+  const got = sys.fcntl(socket, sys.mac ? 67 : 1030, 0);
+  return io_tup(socket, got < 0 ? io_fail(sys.errno()) : io_done(got));
 }
 
+// The peer's IP address as text ("" when it has none, e.g. a socketpair).
 function sock_peer(socket) {
-  return io_tup(socket, "");
+  const c = host_libc();
+  const a = new Uint8Array(128);
+  const n = new Uint32Array([128]);
+  const out = new Uint8Array(64);
+  if (c.getpeername(socket, c.ptr(a), c.ptr(n)) === 0) {
+    const fam = c.mac ? a[1] : a[0] | a[1] << 8;
+    if (fam === 2) {
+      c.inet_ntop(2, c.ptr(a, 4), c.ptr(out), 64);
+    } else if (fam === (c.mac ? 30 : 10)) {
+      c.inet_ntop(fam, c.ptr(a, 8), c.ptr(out), 64);
+    }
+  }
+  const end = out.indexOf(0);
+  return io_tup(socket, Buffer.from(out.subarray(0, end < 0 ? 0 : end)).toString("latin1"));
 }
 
 function sock_shutdown(socket) {
@@ -172,20 +317,353 @@ function sock_shutdown(socket) {
   return socket;
 }
 
+// Proc
+// ====
+
+// Where an agent's stderr goes (err 3): ${BACKPLANE_ERR_DIR:-${TMPDIR:-/tmp}/backplane-err-<uid>}/<pid>.err
+function host_err_dir() {
+  const d = process.env.BACKPLANE_ERR_DIR;
+  const t = process.env.TMPDIR;
+  const dir = d ? d : (t ? t : "/tmp") + "/backplane-err-" + process.getuid();
+  try {
+    require("fs").mkdirSync(dir, { mode: 0o700 });
+  } catch (_) {
+  }
+  return dir;
+}
+
+function host_err_path(pid) {
+  return host_err_dir() + "/" + (pid >>> 0) + ".err";
+}
+
+// files of processes that ended unread (their hub was killed) go, once per
+// hub: those whose pid no longer runs
+function host_err_sweep(dir) {
+  const fs = require("fs");
+  let names = [];
+  try {
+    names = fs.readdirSync(dir);
+  } catch (_) {
+    return;
+  }
+  for (const name of names) {
+    const m = /^([0-9]+)\.err$/.exec(name);
+    if (m === null || Number(m[1]) <= 1) {
+      continue;
+    }
+    if (host_libc().kill(Number(m[1]) | 0, 0) !== 0 && io_sys().errno() === 3) {
+      try {
+        fs.unlinkSync(dir + "/" + name);
+      } catch (_) {
+      }
+    }
+  }
+}
+
+// a fresh file for a child's stderr: [fd, its temporary path], or null
+function host_err_open() {
+  const g = globalThis.BACKPLANE_ERR ?? (globalThis.BACKPLANE_ERR = { seq: 0 });
+  const dir = host_err_dir();
+  if (g.seq === 0) {
+    host_err_sweep(dir);
+  }
+  g.seq += 1;
+  const tmp = dir + "/spawn." + process.pid + "." + g.seq;
+  try {
+    return [require("fs").openSync(tmp, "w", 0o600), tmp];
+  } catch (_) {
+    return null;
+  }
+}
+
+// The descriptors open in this process above 2 (Bun's own included). The
+// listing names the descriptor that read it, closed by now: only those
+// still open are kept (on macOS a close action on a closed one fails the
+// whole posix_spawn with EBADF).
+function host_fds() {
+  const fs = require("fs");
+  try {
+    return fs.readdirSync(process.platform === "darwin" ? "/dev/fd" : "/proc/self/fd")
+      .map(Number).filter((fd) => fd > 2 && io_sys().fcntl(fd, 1, 0) >= 0);
+  } catch (_) {
+    return [];
+  }
+}
+
+// Running this program again. Under `bun x.js` the script is no
+// executable of its own: a command that names it (the path Sys.exe_path
+// answers, as Exe.child gives it, maybe after env's NAME=value words)
+// runs through the bun that runs us, with bun's own flags. A single-file binary
+// (`bun build --compile`) runs as itself.
+function host_compiled() {
+  const m = process.argv[1] ?? "";
+  return m.startsWith("/$bunfs/") || m.startsWith("B:/~BUN/") || m.startsWith("B:\\~BUN\\");
+}
+
+function host_script() {
+  return require("path").resolve(process.argv[1] ?? "");
+}
+
+function host_bun() {
+  if (process.platform !== "darwin") {
+    try {
+      const raw = require("fs").readlinkSync("/proc/self/exe");
+      return raw.endsWith(" (deleted)") ? "/proc/self/exe" : raw;
+    } catch (_) {
+    }
+  }
+  return process.execPath;
+}
+
+function host_self(argv) {
+  if (host_compiled()) {
+    return argv;
+  }
+  const me = host_script();
+  let i = 0;
+  if (argv[0] === "env" || argv[0] === "/usr/bin/env" || argv[0] === "/bin/env") {
+    i = 1;
+    while (i < argv.length && argv[i].includes("=") && !argv[i].startsWith("-")) {
+      i += 1;
+    }
+  }
+  if (i < argv.length && argv[i] === me) {
+    return [...argv.slice(0, i), host_bun(), ...(process.execArgv ?? []), ...argv.slice(i)];
+  }
+  return argv;
+}
+
+// Starts cmd (searched on PATH) in cwd. Its stdin and stdout are one end of
+// a socketpair; we keep the other, non-blocking. stderr: 0 discards it, 1
+// joins it to stdout, 2 inherits ours, 3 goes to a file read back by
+// Proc.errtail. Answers (pid, socket). As host.c, plus: the child gets
+// only 0-2 (Bun opens descriptors without close-on-exec), and starts with
+// every signal at its default and none blocked.
 function proc_spawn(cmd, args, cwd, err) {
-  return io_fail(38);
+  const c = host_libc();
+  const sys = io_sys();
+  const argv = host_self([cmd, ...host_list_js(args)]);
+  const v = host_vec(argv);
+  const env = host_vec(host_envp());
+  const dir = host_cstr(cwd);
+  if (v === null || dir === null || env === null) {
+    return io_fail(host_eilseq());
+  }
+  const sv = new Int32Array(2);
+  if (c.socketpair(1, c.mac ? 1 : 1 | 0x80000, 0, c.ptr(sv)) < 0) {
+    return io_fail(sys.errno());
+  }
+  const fa = new Uint8Array(1024);
+  const at = new Uint8Array(1024);
+  const set = new Uint8Array(256);
+  const pid = new Int32Array(1);
+  const devnull = host_cstr("/dev/null");
+  let code = 0;
+  let errf = null;
+  c.posix_spawn_file_actions_init(c.ptr(fa));
+  c.posix_spawnattr_init(c.ptr(at));
+  if (cwd.length > 0) {
+    code = c.addchdir === undefined ? 38 : c.addchdir(c.ptr(fa), c.ptr(dir));
+  }
+  c.posix_spawn_file_actions_adddup2(c.ptr(fa), sv[1], 0);
+  c.posix_spawn_file_actions_adddup2(c.ptr(fa), sv[1], 1);
+  if (err === 0) {
+    c.posix_spawn_file_actions_addopen(c.ptr(fa), 2, c.ptr(devnull), 1, 0);
+  } else if (err === 1) {
+    c.posix_spawn_file_actions_adddup2(c.ptr(fa), sv[1], 2);
+  } else if (err === 3) {
+    // stderr to a file of its own, named for the pid once it is known
+    // (Proc.errtail reads its end and removes it)
+    errf = host_err_open();
+    if (errf !== null) {
+      c.posix_spawn_file_actions_adddup2(c.ptr(fa), errf[0], 2);
+    } else {
+      c.posix_spawn_file_actions_addopen(c.ptr(fa), 2, c.ptr(devnull), 1, 0);
+    }
+  }
+  // the child keeps only the copies on 0-2: left open, a process it puts
+  // in the background would hold the pipe, and the caller never sees EOF
+  // (macOS: POSIX_SPAWN_CLOEXEC_DEFAULT below; a close action there on a
+  // descriptor the child does not inherit, Bun's kqueue, fails the spawn)
+  if (c.mac) {
+  } else if (c.addclosefrom !== undefined) {
+    c.addclosefrom(c.ptr(fa), 3);
+  } else {
+    for (const fd of host_fds()) {
+      c.posix_spawn_file_actions_addclose(c.ptr(fa), fd);
+    }
+  }
+  // every signal at its default (a hub started from a background job
+  // ignores SIGINT and SIGQUIT, and Bun ignores SIGPIPE and SIGXFSZ). This
+  // differs from host.c, which resets only SIGPIPE: agents run under
+  // systemd and must answer the signals the hub and their own tools send
+  c.sigfillset(c.ptr(set));
+  c.posix_spawnattr_setsigdefault(c.ptr(at), c.ptr(set));
+  c.sigemptyset(c.ptr(set));
+  c.posix_spawnattr_setsigmask(c.ptr(at), c.ptr(set));
+  c.posix_spawnattr_setflags(c.ptr(at), 0x04 | 0x08 | (c.mac ? 0x4000 : 0));
+  if (code === 0) {
+    code = c.posix_spawnp(c.ptr(pid), c.ptr(v.bufs[0]), c.ptr(fa), c.ptr(at),
+      c.ptr(v.vec), c.ptr(env.vec));
+  }
+  c.posix_spawn_file_actions_destroy(c.ptr(fa));
+  c.posix_spawnattr_destroy(c.ptr(at));
+  c.close(sv[1]);
+  if (errf !== null) {
+    const fs = require("fs");
+    fs.closeSync(errf[0]);
+    try {
+      if (code === 0) {
+        fs.renameSync(errf[1], host_err_path(pid[0]));
+      } else {
+        fs.unlinkSync(errf[1]);
+      }
+    } catch (_) {
+    }
+  }
+  if (code !== 0) {
+    c.close(sv[0]);
+    return io_fail(code);
+  }
+  sys.fcntl(sv[0], 4, sys.fcntl(sv[0], 3, 0) | (c.mac ? 4 : 0x800));
+  sys.fcntl(sv[0], 2, 1);
+  return io_done(io_tup(pid[0] >>> 0, sv[0]));
 }
 
-function proc_wait(pid) {
-  return 255;
-}
-
+// The last 2048 bytes a process started with err 3 wrote to stderr ("" when
+// none); its file is removed.
 function proc_errtail(pid) {
-  return "";
+  const fs = require("fs");
+  const path = host_err_path(pid);
+  let fd;
+  try {
+    fd = fs.openSync(path, "r");
+  } catch (_) {
+    return "";
+  }
+  let text = "";
+  try {
+    const end = fs.fstatSync(fd).size;
+    const n = Math.min(end, 2048);
+    const b = Buffer.alloc(n);
+    const got = n > 0 ? fs.readSync(fd, b, 0, n, end - n) : 0;
+    text = b.subarray(0, got).toString("utf8");
+  } catch (_) {
+  }
+  fs.closeSync(fd);
+  try {
+    fs.unlinkSync(path);
+  } catch (_) {
+  }
+  return text;
 }
 
+// a wait status as Proc.wait answers it: the exit code, 128 + the signal
+function host_status(st) {
+  return (st & 0x7f) === 0 ? st >> 8 & 0xff : 128 + (st & 0x7f);
+}
+
+// waitpid(pid, WNOHANG): the code once it ended (255 when it is no child
+// of ours), undefined while it runs
+function host_reap(pid) {
+  const c = host_libc();
+  const st = new Int32Array(1);
+  for (;;) {
+    const r = c.waitpid(pid | 0, c.ptr(st), 1);
+    if (r === (pid | 0)) {
+      return host_status(st[0]);
+    }
+    if (r === 0) {
+      return undefined;
+    }
+    if (io_sys().errno() !== 4) {
+      return 255;
+    }
+  }
+}
+
+// a descriptor readable once pid has ended (Linux 5.3+), or -1
+function host_pidfd(pid) {
+  const c = host_libc();
+  if (c.mac) {
+    return -1;
+  }
+  let fd = c.pidfd_open === undefined ? -1 : c.pidfd_open(pid | 0, 0);
+  if (fd < 0 && c.pidfd_open === undefined) {
+    const sc = globalThis.BACKPLANE_SYSCALL ?? (globalThis.BACKPLANE_SYSCALL = (() => {
+      try {
+        return require("bun:ffi").dlopen("libc.so.6", { syscall: { args: ["i64", "i64", "i64"], returns: "i64" } }).symbols.syscall;
+      } catch (_) {
+        return null;
+      }
+    })());
+    const nr = process.arch === "x64" || process.arch === "arm64" ? 434 : -1;
+    fd = sc && nr > 0 ? Number(sc(BigInt(nr), BigInt(pid | 0), 0n)) : -1;
+  }
+  if (fd >= 0) {
+    io_sys().fcntl(fd, 2, 1);
+  }
+  return fd;
+}
+
+// Waits for pid without blocking the loop: parked on its pidfd (or, where
+// there is none, on a 20 ms clock), then reaped. calls k with the code.
+function host_wait_then(pid, k, done) {
+  const now = host_reap(pid);
+  if (now !== undefined) {
+    return done(now);
+  }
+  const fd = host_pidfd(pid);
+  const more = () => {
+    const r = host_reap(pid);
+    if (r !== undefined) {
+      if (fd >= 0) {
+        host_libc().close(fd);
+      }
+      return done(r);
+    }
+    if (fd >= 0) {
+      io_park_on(fd, false, k, more);
+    } else {
+      io_park_on(undefined, false, k, more, io_until(20));
+    }
+    return undefined;
+  };
+  if (fd >= 0) {
+    io_park_on(fd, false, k, more);
+  } else {
+    io_park_on(undefined, false, k, more, io_until(20));
+  }
+  return undefined;
+}
+
+// The exit code (128 + signal when killed), once the child ends.
+function proc_wait(pid, k) {
+  return host_wait_then(pid, k, (code) => code);
+}
+
+// Proc.exited: the exit code of a child that has exited (left unreaped:
+// WNOWAIT), 4294967295 while it runs; one already reaped reads 255.
 function proc_exited(pid) {
-  return 4294967295;
+  const c = host_libc();
+  const si = new Uint8Array(256);
+  const dv = new DataView(si.buffer);
+  const r = c.waitid(1, pid >>> 0, c.ptr(si), c.mac ? 0x04 | 0x01 | 0x20 : 4 | 1 | 0x1000000);
+  if (r < 0) {
+    return 255;
+  }
+  const spid = dv.getInt32(c.mac ? 12 : 16, true);
+  if (spid === 0) {
+    return 4294967295;
+  }
+  const scode = dv.getInt32(8, true);
+  const status = dv.getInt32(c.mac ? 20 : 24, true);
+  return (scode === 1 ? status : 128 + status) >>> 0;
+}
+
+function proc_kill(pid, sig) {
+  host_libc().kill(pid | 0, sig | 0);
+  return { $: "Unit" };
 }
 
 function sock_shut_read(socket) {
@@ -193,8 +671,9 @@ function sock_shut_read(socket) {
   return socket;
 }
 
+// a raw descriptor on the same socket (a dup, close-on-exec); 0 when none
 function sock_raw(socket) {
-  const got = host_libc().dup(socket);
+  const got = io_sys().fcntl(socket, io_sys().mac ? 67 : 1030, 0);
   return io_tup(socket, got < 3 ? 0 : got);
 }
 
@@ -209,14 +688,6 @@ function fd_shut(fd) {
 function fd_close(fd) {
   if (Number(fd) > 2) {
     host_libc().close(Number(fd));
-  }
-  return { $: "Unit" };
-}
-
-function proc_kill(pid, sig) {
-  try {
-    process.kill(pid, sig);
-  } catch (e) {
   }
   return { $: "Unit" };
 }
@@ -293,27 +764,101 @@ function fs_chmod(path, mode) {
   }
 }
 
+// as net_listen_run in host.c: SO_REUSEADDR, a backlog of 64, nonblocking,
+// close-on-exec (Base's tcp_listen.js through the same ffi)
 function net_listen(host, port) {
-  return io_fail(38);
+  const at = io_addr(host, Number(port));
+  if (at === null) {
+    return io_fail(22);
+  }
+  const sys = io_sys();
+  const fd = sys.socket(2, 1, 0);
+  if (fd < 0) {
+    return io_fail(sys.errno());
+  }
+  const one = new Int32Array([1]);
+  sys.setsockopt(fd, sys.mac ? 0xffff : 1, sys.mac ? 4 : 2, sys.ptr(one), 4);
+  if (sys.bind(fd, sys.ptr(at), 16) < 0 || sys.listen(fd, 64) < 0
+    || sys.fcntl(fd, 4, sys.fcntl(fd, 3, 0) | (sys.mac ? 4 : 0x800)) < 0) {
+    const code = sys.errno();
+    sys.close(fd);
+    return io_fail(code);
+  }
+  sys.fcntl(fd, 2, 1);
+  return io_done(fd);
 }
 
+// setenv(name, value, 1): processes started afterwards inherit it (they
+// get process.env; libc's copy is kept the same for PATH lookups)
 function env_put(name, value) {
-  if (typeof process !== "undefined" && process.env) {
+  if (typeof process !== "undefined" && process.env && name.length > 0
+    && !name.includes("\0") && !value.includes("\0")) {
     process.env[name] = value;
+    try {
+      host_libc().setenv(host_libc().ptr(host_cstr(name)), host_libc().ptr(host_cstr(value)), 1);
+    } catch (_) {
+    }
   }
   return { $: "Unit" };
 }
 
-function sys_exe_dir() {
-  return require("path").dirname(process.argv[1] ?? "");
+// The running program's full path: a single-file binary's own path read
+// from /proc/self/exe, as host.c (so a replaced binary reads back
+// "<path> (deleted)"); under `bun x.js` the script's absolute path.
+function host_exe() {
+  if (!host_compiled()) {
+    return process.argv[1] === undefined ? "" : host_script();
+  }
+  if (process.platform !== "darwin") {
+    try {
+      return require("fs").readlinkSync("/proc/self/exe");
+    } catch (_) {
+    }
+  }
+  return process.execPath ?? "";
 }
 
-function sys_exec(path, args) {
-  return io_fail(38);
+// The directory holding the running binary ("" when unknown).
+function sys_exe_dir() {
+  const raw = host_exe();
+  const at = raw.lastIndexOf("/");
+  return at < 0 ? "" : raw.slice(0, at);
 }
 
 function sys_exe_path() {
-  return process.argv[1] ?? "";
+  return host_exe();
+}
+
+// Replace this process with path (argv[0] = path, then args), as host.c:
+// every descriptor is close-on-exec but the agents' (adopt.js) and the
+// hub's lock (hublock.js), which those files' hooks keep open through it.
+// Answers only on failure. Under `bun x.js` the script runs through bun
+// (host_self).
+function sys_exec(path, args) {
+  const c = host_libc();
+  const argv = host_self([path, ...host_list_js(args)]);
+  if (argv.some((a) => a.includes("\0"))) {
+    return io_fail(host_eilseq());
+  }
+  for (const fd of host_fds()) {
+    io_sys().fcntl(fd, 2, 1);
+  }
+  const hooks = [globalThis.BACKPLANE_ADOPT_EXEC, globalThis.BACKPLANE_HUBLOCK_EXEC]
+    .filter((f) => typeof f === "function");
+  for (const f of hooks) {
+    f(1);
+  }
+  const v = host_vec(argv);
+  const env = host_vec(host_envp());
+  let code = host_eilseq();
+  if (v !== null && env !== null) {
+    c.execve(c.ptr(v.bufs[0]), c.ptr(v.vec), c.ptr(env.vec));
+    code = io_sys().errno();
+  }
+  for (const f of hooks.reverse()) {
+    f(0);
+  }
+  return io_fail(code);
 }
 
 // Json.cbor_frame and Sock.send_cbor: JSON text to one binary WebSocket
