@@ -3,7 +3,6 @@ import ../core/json.bend as J
 import ../core/model.bend as M
 import ../core/codec.bend as C
 import ../core/utf8.bend as U
-import ../core/sha1.bend as SH
 import ../core/storedb.bend as SDB
 import ./db.bend as D
 import ./proc.bend as P
@@ -139,53 +138,8 @@ def Sto.size(+path: String) -> IO(Nat):
 # a store made from another log is made again
 # ----------------------------------------------------------------------
 
-def Sto.upto.t(nl: Bool, t: List<&2, U32>) -> List<&2, U32>:
-  match nl:
-    case True{}:
-      Nil{}
-    case False{}:
-      t
-
-def Sto.upto.x(nl: Bool, +x: U32, acc: List<&2, U32>) -> List<&2, U32>:
-  match nl:
-    case True{}:
-      acc
-    case False{}:
-      x <> acc
-
-# the bytes before the first newline, at most n of them
-def Sto.upto(n: Nat, bs: List<&2, U32>, acc: List<&2, U32>) -> List<&2, U32>:
-  match n bs:
-    case _ Nil{}:
-      List.reverse(&2, U32, acc)
-    case 0n +x <> +t:
-      List.reverse(&2, U32, acc)
-    case 1n+k +x <> +t:
-      Sto.upto(k, Sto.upto.t(U32.is_eq(x, 10), t), Sto.upto.x(U32.is_eq(x, 10), x, acc))
-
-def Sto.nib(+x: U32) -> String:
-  String.take(String.drop("0123456789abcdef", U32.to_nat(x)), 1n)
-
-def Sto.hex(bs: List<&2, U32>) -> String:
-  match bs:
-    case Nil{}:
-      ""
-    case +b <> t:
-      Sto.nib(U32.shrn(b, 4n)) ++ Sto.nib(U32.and(b, 15)) ++ Sto.hex(t)
-
-def Sto.id.k(bs: List<&2, U32>) -> String:
-  match bs:
-    case Nil{}:
-      ""
-    case +b <> t:
-      "sha1:" ++ Sto.hex(SH.Sha1.hash(b <> t))
-
-# the identity of a log whose file starts with these bytes ("" when empty)
-def Sto.id.of(bs: List<&2, U32>) -> String:
-  Sto.id.k(Sto.upto(4096n, bs, Nil{}))
-
 def Sto.log_id(+path: String) -> IO(String):
-  IO.bind(List<&2, U32>, String, Sto.read(path, 0n, 4096n), bs => IO.pure(String, Sto.id.of(bs)))
+  IO.bind(List<&2, U32>, String, Sto.read(path, 0n, 4096n), bs => IO.pure(String, SDB.Sdb.log_id(bs)))
 
 # Lines by number
 # ---------------
@@ -362,7 +316,7 @@ def Sto.first(+n: Nat, first: String, w: String) -> String:
 def Sto.idnew(+off: Nat, id: String, +disk: String) -> String:
   match off:
     case 0n:
-      Sto.id.of(U.Utf8.encode(disk))
+      SDB.Sdb.log_id(U.Utf8.encode(disk))
     case _:
       id
 
