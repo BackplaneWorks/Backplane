@@ -12,9 +12,8 @@ def Clock.epoch() -> IO(U32):
 # (Hub.thin.warmed). On the JS target each leaves heap capacity and garbage
 # the collector had not gone for: the hot load peaked past a 1 GB budget with
 # ~0.4 GB live, the thin build left ~0.9 GB at the boot peak (2026-10-22).
-# Answers the line to log; "" in the C build.
+# Answers the line to log; "" where there is no collector to ask.
 def Mem.settle(after: String) -> IO(String):
-  import "./effects/mem.c"
   import "./effects/mem.js"
 
 # The event log from byte offset off (decimal text; "0" for all of it,
