@@ -14519,7 +14519,7 @@ def Hookv.dispatch(hit: Bool, +u: Ui, +action: String, +value: String) -> Act:
       Hookv.act(u, action, value)
     case False{}:
       Mailv.sync(Ui.cast.now(u, Browse.dispatch(String.starts_with(action, "br-"),
-        Browse.field.change(Bool.and(String.eq(action, "bfield"), String.starts_with(value, "brurl:")), u, value), action, value))
+        Browse.field.change(Bool.and(String.eq(action, "bfield"), String.starts_with(value, "brurl:")), u, value), action, value)))
 
 def Settings.dispatch(nav: Bool, +u: Ui, +action: String, +value: String) -> Act:
   match nav:
