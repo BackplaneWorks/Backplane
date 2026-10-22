@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Write compile-only telemetry defaults; never put credentials in emitted C."""
+import json
 import os
 from pathlib import Path
 import re
@@ -39,6 +40,13 @@ def write_header(path: Path) -> None:
     os.fchmod(fd, 0o600)
     with os.fdopen(fd, "w") as stream:
         stream.write("/* Generated locally for compilation only. */\n")
+        if path.suffix == ".js":
+            # the JS build's prelude (scripts/build-js.sh), read by the JS
+            # twin of the effect; the same values the C header defines
+            baked = {"BACKPLANE_TELEMETRY_" + name: value for name, value in values.items()}
+            stream.write("globalThis.BACKPLANE_BAKED = Object.assign(globalThis.BACKPLANE_BAKED || {}, "
+                         + json.dumps(baked, sort_keys=True) + ");\n")
+            return
         for name, value in values.items():
             stream.write(f'#define BP_TELEMETRY_{name} "{value}"\n')
 

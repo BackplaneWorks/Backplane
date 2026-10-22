@@ -3,6 +3,7 @@ import ./json.bend as J
 import ./model.bend as M
 import ./codec.bend as C
 import ./bot.bend as BT
+import ./store.bend as ST
 
 # Threads that live on a linked machine (docs/bots.md, "Threads elsewhere").
 #
@@ -1341,7 +1342,7 @@ def Fr.feed.go(ls: List<&2, String>, +n: Nat, +s: M.State, acc: Feed) -> Feed:
       Fr.feed.go(t, Nat.sub(n, 1n), s, Fr.feed.step(Fr.line.parsed(J.Json.parse(l)), s, n, l, acc))
 
 def Fr.feed.full(+ls: List<&2, String>, +s: M.State) -> Feed:
-  Fr.feed.go(ls, List.length(&2, String, ls), s, Feed{Nil{}, Map.new(&2, Nat)})
+  Fr.feed.go(ls, ST.Store.size(ls), s, Feed{Nil{}, Map.new(&2, Nat)})
 
 def Fr.feed(+ls: List<&2, String>, +s: M.State) -> List<&2, Line>:
   Feed.lines(Fr.feed.full(ls, s))

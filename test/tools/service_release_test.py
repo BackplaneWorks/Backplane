@@ -290,6 +290,15 @@ class ProducerTests(unittest.TestCase):
             args = [str(a) for a in args]
             calls.append(args)
             Path(log).write_text("offline mock operation\n")
+            if args[0] == "scripts/build-js.sh":
+                self.assertEqual(args[1], "src/server/main.bend")
+                self.assertEqual(env["BACKPLANE_GOOGLE_BAKE"], "1")
+                self.assertEqual(env["BACKPLANE_TELEMETRY_BAKE"], "1")
+                self.assertEqual(env["BACKPLANE_JS_TARGET"], req["target"])
+                self.assertEqual(env["BACKPLANE_JS_BUN_RUNTIME"], str(self.root / "bun-runtime"))
+                self.assertNotIn("CC", env)
+                self.elf(Path(args[2]), 183 if req["target"] == "linux-arm64" else 62)
+                return "stages: linux-arm64 emit (fresh)\n"
             if args[0] == "scripts/build-app.sh":
                 self.assertEqual(args[1], "src/server/main.bend")
                 if env.get("BACKPLANE_EMIT_ONLY") == "1":
@@ -334,6 +343,67 @@ class ProducerTests(unittest.TestCase):
         self.assertEqual(S.read(out / "WEB.json"), S.web_manifest(out / "web", self.release))
         self.assertEqual(S.read(out / "WEB-EMISSION.json")["sourceCommit"], self.release["commit"])
         self.assertFalse(any((self.root / "source/build/cc/backplane-serve" / n).exists() for n in ("bp_google.h", "bp_telemetry.h")))
+
+    def js_request(self, target="linux-arm64", runtime_machine=183, runtime_target=None):
+        self.elf(self.root / "bun-runtime", runtime_machine)
+        for name in ("bend", "bun"):
+            (self.root / name).write_text("fixture tool")
+        req = {"schema": 1, "kind": "backplane-service-js-inputs", "target": target, "release": self.release,
+               "toolchain": {"bend": {**S.reference(self.root / "bend"), "version": "fixture"},
+                             "bun": {**S.reference(self.root / "bun"), "version": "1.4.3"},
+                             "bunRuntime": {**S.reference(self.root / "bun-runtime"), "version": "1.4.3",
+                                            "target": runtime_target or target}},
+               "sourceQualification": S.reference(self.root / "qualification.json"),
+               "webNotices": S.reference(self.root / "notices.json")}
+        return req
+
+    def test_js_cross_builds_on_the_pinned_target_runtime(self):
+        # an x64 host makes the arm64 service: bun links the JS onto the
+        # arm64 runtime pinned in the request; nothing runs it here
+        self.mocked_build()  # writes the fixture qualification and notices
+        out, calls, req = self.mocked_build(phase="js", request=self.js_request(), outname="js-output")
+        self.assertEqual([c[0] for c in calls if c[0].startswith("scripts/")], ["scripts/build-js.sh"])
+        self.assertFalse(any(c[-1] == "--version" for c in calls))
+        build = S.read(out / "BUILD.json")
+        self.assertEqual(build["serviceRuntime"], "bun")
+        self.assertEqual(build["target"], "linux-arm64")
+        self.assertEqual(set(build["toolchain"]), {"bend", "bun", "bunRuntime"})
+        self.assertEqual(build["compileInputs"], S.compile_inputs())
+        S.architecture(out / "backplane-serve", "linux-arm64")
+
+    def test_js_on_its_own_host_checks_the_version(self):
+        self.mocked_build()
+        out, calls, req = self.mocked_build(phase="js", request=self.js_request("linux-x64", 62), outname="js-x64")
+        self.assertTrue(any(c[-1] == "--version" for c in calls))
+
+    def test_js_refuses_a_runtime_of_another_target(self):
+        self.mocked_build()
+        with self.assertRaises(ValueError):
+            self.mocked_build(phase="js", request=self.js_request("linux-arm64", 62, "linux-x64"), outname="js-bad")
+        with self.assertRaises(ValueError):
+            self.mocked_build(phase="js", request=self.js_request("linux-arm64", 62), outname="js-bad2")
+
+    def test_js_has_no_windows_target_yet(self):
+        self.mocked_build()
+        req = self.js_request()
+        req["target"] = "windows-x64"
+        with self.assertRaises(ValueError):
+            S.build(req, self.root, self.root / "js-win", phase="js")
+
+    def test_c_build_keeps_its_targets_and_runtime(self):
+        out, calls, req = self.mocked_build()
+        self.assertEqual(S.read(out / "BUILD.json")["serviceRuntime"], "native-c")
+        req = dict(req, target="darwin-x64")
+        with self.assertRaises(ValueError):
+            S.build(req, self.root, self.root / "c-darwin-x64")
+
+    def test_darwin_x64_macho(self):
+        b = bytearray(32)
+        struct.pack_into("<II", b, 0, 0xfeedfacf, 0x1000007)
+        (self.root / "m").write_bytes(b)
+        S.architecture(self.root / "m", "darwin-x64")
+        with self.assertRaises(ValueError):
+            S.architecture(self.root / "m", "darwin-arm64")
 
     def test_secretless_emit_has_no_native_binary_or_bake_witness(self):
         self.env = {}
