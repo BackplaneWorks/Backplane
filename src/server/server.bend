@@ -161,6 +161,8 @@ type Msg is Data:
   Desktop{client: U32, kind: String, text: String, out: Chan(String), epoch: String, lease: String}
   MailRouted{body: MB.Body}
   RunReady{thread: String, head: String, bodies: List<&2, MB.Body>}
+  # the uberbot's fyi digest: the bodies of the conversations asked for
+  DigestGot{bot: String, ids: List<&2, String>, bodies: List<&2, MB.Body>}
   # n: how many probes since the lock was asked for (the guard is tried
   # each 100 ms; who holds it outside is asked every LockJob.every())
   LockProbe{name: String, holder: String, n: Nat}
@@ -9320,6 +9322,20 @@ def MailJob.read.text(out: B.Out) -> String:
     case B.Send{_, +text}: text
     case _: ""
 
+# the uberbot's fyi digest: the newest bodies of each conversation asked for
+def DigestJob.add(r: MST.StoreResult<List<&2, MB.Body>>, +acc: List<&2, MB.Body>) -> List<&2, MB.Body>:
+  match r:
+    case MST.Stored{+bs}: List.append(&2, MB.Body, acc, bs)
+    case _: acc
+
+def DigestJob.read(convs: List<&2, String>, +home: String, +acc: List<&2, MB.Body>) -> IO(List<&2, MB.Body>):
+  match convs:
+    case Nil{}: IO.pure(List<&2, MB.Body>, acc)
+    case +c <> +t: IO.bind(MST.StoreResult<List<&2, MB.Body>>, List<&2, MB.Body>, MST.MailStore.read(home, c, "", 10n), r => DigestJob.read(t, home, DigestJob.add(r, acc)))
+
+def DigestJob.run(convs: List<&2, String>, +home: String, +inbox: Chan(Msg), +bot: String, +ids: List<&2, String>) -> IO(Unit):
+  IO.bind(List<&2, MB.Body>, Unit, DigestJob.read(convs, home, Nil{}), bs => Self.post(inbox, DigestGot{bot, ids, bs}))
+
 def RunJob.start(r: MST.StoreResult<List<&2, MB.Body>>, +inbox: Chan(Msg), +s: M.State, +now: Nat, +th: String, +head: String) -> IO(Unit):
   match r:
     case MST.Stored{bs}: Self.post(inbox, RunReady{th, head, bs})
@@ -9347,6 +9363,10 @@ def Hub.out(h: Hub, o: B.Out) -> IO(Hub):
         r : MST.StoreResult<List<&2, MB.Body>> <- MST.MailStore.read(Cfg.home(cfg), conv, "", 20n)
         +now : Nat <- Now.nat()
         RunJob.start(r, inbox, st, now, thread, head)
+        return Hub{st, f, ls, cl, as, inbox, cfg, note}
+    case Hub{st, f, ls, cl, as, +inbox, +cfg, note} B.DigestRead{bot, ids, convs}:
+      do IO<Hub>:
+        IO.spawn(Unit, DigestJob.run(convs, Cfg.home(cfg), inbox, bot, ids))
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
     case Hub{st, f, ls, cl, as, inbox, cfg, note} B.CharterWrite{path, text}:
       do IO<Hub>:
@@ -10031,14 +10051,23 @@ def Hub.step.fallback.fold(states: List<&2, M.State>, caps: J.Json, +now: Nat, s
     case +st <> rest: Hub.step.fallback.done(held, [st], B.Uc.after(st, now, B.Fallback.validate(st, caps, now, step)))
     case Nil{}: IO.die(Hub & Bool, 1, "missing fallback state")
 
-def Hub.step.fallback.models(h: Hub) -> String & List<Hub>:
+def Hub.step.fallback.kept(r: J.Json & BN.Bn, +cfg: Cfg, h: Hub) -> J.Json & List<Hub>:
+  (caps, bn) = r
+  match h:
+    case Hub{s, f, ls, cl, as, inbox, _, note}:
+      (caps, [Hub{s, f, ls, cl, as, inbox, Cfg.with_bn(cfg, bn), note}])
+
+# the models' JSON every step needs, kept parsed with its text in Bn
+# (BN.Bn.models.json): parsing Cfg.models at every step was seconds of the
+# JS hub's first minute after boot
+def Hub.step.fallback.models(h: Hub) -> J.Json & List<Hub>:
   match h:
     case Hub{s, f, ls, cl, as, inbox, +cfg, note}:
-      (Cfg.models(cfg), [Hub{s, f, ls, cl, as, inbox, cfg, note}])
+      Hub.step.fallback.kept(BN.Bn.models.json(Cfg.bn(cfg), Cfg.models(cfg)), cfg, Hub{s, f, ls, cl, as, inbox, cfg, note})
 
-def Hub.step.fallback.captured(pair: String & List<Hub>, states: List<&2, M.State>, now: Nat, step: B.Step) -> IO(Hub & Bool):
-  (models, held) = pair
-  Hub.step.fallback.fold(states, Maybe.default(&2, J.Json, J.Json.parse(models), J.Null{}), now, step, held)
+def Hub.step.fallback.captured(pair: J.Json & List<Hub>, states: List<&2, M.State>, now: Nat, step: B.Step) -> IO(Hub & Bool):
+  (caps, held) = pair
+  Hub.step.fallback.fold(states, caps, now, step, held)
 
 def Hub.step.fallback(h: Hub, states: List<&2, M.State>, now: Nat, step: B.Step) -> IO(Hub & Bool):
   Hub.step.fallback.captured(Hub.step.fallback.models(h), states, now, step)
@@ -11206,12 +11235,30 @@ def Hub.thin.fetch(memory: Bool, +cfg: Cfg, +thread: String, +anchor: Nat) -> IO
     case True{}: IO.pure(TSTO.Page, TSTO.Page{Cfg.thin(cfg), THIN.Index.page(Cfg.thin(cfg), thread, anchor, 32n)})
     case False{}: TSTO.Ts.page(Cfg.thin.store(cfg), thread, anchor, 32n, Cfg.thin(cfg))
 
-def Hub.thin.render.page(+pg: TSTO.Page, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, +context: ThinContext, +p: J.Json, +key: String, +ms: Nat) -> IO(Hub):
+# the hub's info with a thread's skills (as a client's skills.list answer
+# keeps them: "skills", "skills.for")
+def Hub.thin.skills.info(+ss: List<&2, AG.USkill>, +info: J.Json, +thread: String) -> J.Json:
+  TV.Obj.put(TV.Obj.put(info, "skills", J.Str{J.Json.show(AG.USkill.json(ss))}), "skills.for", J.Str{thread})
+
+def Hub.thin.info.k(+want: Bool, +st: M.State, +cfg: Cfg, +thread: String) -> IO(J.Json):
+  match want:
+    case True{}: IO.bind(List<&2, AG.USkill>, J.Json, Skills.scan(B.Hub.cwd(st, B.Hub.thread(st, thread))), +ss => IO.pure(J.Json, Hub.thin.skills.info(ss, Hub.info(cfg), thread)))
+    case False{}: IO.pure(J.Json, Hub.info(cfg))
+
+# The info a thin render reads: the hub's, and the thread's skills while the
+# draft the request brought types a `$name` or a slash command (a thin view
+# never asks skills.list: the hub renders its composer, client.bend's
+# Skills.wants)
+def Hub.thin.info(+st: M.State, +cfg: Cfg, +p: J.Json) -> IO(J.Json):
+  +thread = TV.Target.thread(st, J.Json.get_obj(p, "target"))
+  Hub.thin.info.k(Bool.and(Bool.not(String.is_empty(thread)), UC.Skills.wants(J.Json.get_str(J.Json.get_obj(J.Json.get_obj(p, "session"), "drafts"), thread, ""))), st, cfg, thread)
+
+def Hub.thin.render.page(+pg: TSTO.Page, +info: J.Json, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, +context: ThinContext, +p: J.Json, +key: String, +ms: Nat) -> IO(Hub):
   match h:
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
       +web = String.eq(Client.thin.mode(c), "view-web")
       +stream = TLIVE.Stream.get(Cfg.thin.streams(cfg), TV.Target.thread(st, J.Json.get_obj(p, "target")))
-      +actor = TA.Actor.mail_cache(TA.Actor.refresh(ThinContext.actors(context), web, st, Hub.info(cfg),
+      +actor = TA.Actor.mail_cache(TA.Actor.refresh(ThinContext.actors(context), web, st, info,
         J.Json.obj([J.KV{"t", J.Str{"live"}}, J.KV{"items", J.Json.arr(Nil{})}]), now, p, ThinContext.view(context)), ThinContext.actors(context), Cfg.thin.mail(cfg))
       Hub.thin.rendered(TA.Rendered.remember(TA.Actor.render(actor, web, st, TSTO.Page.index(pg), p, Cfg.thin.epoch(cfg), now, TSTO.Page.ids(pg), stream), key, ms, stream),
         Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now, context)
@@ -11221,7 +11268,8 @@ def Hub.thin.render.full(h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
       do IO<Hub>:
         +pg : TSTO.Page <- Hub.thin.fetch(String.is_empty(Cfg.thin.store(cfg)), cfg, TV.Target.thread(st, J.Json.get_obj(p, "target")), anchor)
-        Hub.thin.render.page(pg, Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now, context, p, key, ms)
+        +info : J.Json <- Hub.thin.info(st, cfg, p)
+        Hub.thin.render.page(pg, info, Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now, context, p, key, ms)
 
 # a view.update whose render memo still holds (thin-actor.bend's
 # Memo.reply: only the live row can have changed) answers with it spliced
@@ -14668,6 +14716,7 @@ def Msg.kind(m: Msg) -> String:
       "reexec"
     case MailRouted{_}: "mail-route"
     case RunReady{_, _, _}: "run-ready"
+    case DigestGot{_, _, _}: "digest"
     case Commit{_}:
       "commit"
     case OrderNote{_, _, _, _}:
@@ -15232,6 +15281,10 @@ def Hub.mail.routed(h: Hub, body: MB.Body, +now: Nat) -> IO(Hub):
   match h:
     case Hub{+st, f, ls, cl, as, inbox, cfg, note}: Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, B.Mail.route(st, now, body))
 
+def Hub.digest.got(h: Hub, +bot: String, +ids: List<&2, String>, +bs: List<&2, MB.Body>, +now: Nat) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, cfg, note}: Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, B.Digest.got(st, now, bot, ids, bs))
+
 def Hub.run.ready(h: Hub, +th: String, head: String, bs: List<&2, MB.Body>, +now: Nat) -> IO(Hub):
   match h:
     case Hub{+st, f, ls, cl, as, inbox, cfg, note}: Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, B.Run.start.on(B.Run.ready(st, th), st, now, th, head, bs))
@@ -15492,10 +15545,13 @@ def Lock.take.k(free: Bool, +old: String, +home: String, +port: U32) -> IO(Strin
 def Lock.find.sh() -> String:
   "f=$1/hub.lock; [ -f \"$f\" ] || exit 0; read pid port kind < \"$f\"; [ \"$kind\" = flock ] && exit 0; [ -n \"$pid\" ] && [ \"$pid\" != \"$PPID\" ] || exit 0; kill -0 \"$pid\" 2>/dev/null || exit 0; [ \"$(ps -p \"$pid\" -o comm= 2>/dev/null)\" = \"$(ps -p \"$PPID\" -o comm= 2>/dev/null)\" ] && echo \"$pid $port\""
 
+# the holder the probe names: only a "<pid> <port>" line (OH.OneHub.legacy),
+# never the shell's own noise (Cygwin bash's /tmp warning once stopped a hub
+# on a fresh home)
 def Lock.out(r: P.Ran) -> String:
   match r:
     case P.Ran{0, +out}:
-      String.trim(out)
+      OH.OneHub.legacy(out)
     case _:
       ""
 
@@ -15538,7 +15594,7 @@ def Lock.take(+home: String, +port: U32) -> IO(String):
     Lock.take.k(String.is_empty(old), old, home, port)
 
 def Lock.find(+home: String) -> IO(String):
-  IO.bind(String, String, HL.HubLock.held(Lock.path(home)), held => Lock.find.k(String.trim(held), home))
+  IO.bind(String, String, HL.HubLock.held(Lock.path(home)), held => Lock.find.k(OH.OneHub.pair(held), home))
 
 def Lock.word(+held: String, +i: Nat) -> String:
   OH.OneHub.word(held, i)
@@ -15940,6 +15996,7 @@ def Hub.handle(h: Hub, m: Msg, +now: Nat) -> IO(Hub):
       Hub.link(h, lk)
     case MailRouted{body}: Hub.mail.routed(h, body, now)
     case RunReady{thread, head, bs}: Hub.run.ready(h, thread, head, bs, now)
+    case DigestGot{bot, ids, bs}: Hub.digest.got(h, bot, ids, bs, now)
     case Commit{cs}:
       Hub.step(h, B.Step{cs, Nil{}})
     case OrderNote{thread, id, text, +ping}:
@@ -16301,4 +16358,7 @@ def Main.boot(cfg: Cfg, need: Bool, front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
         # the thin views read store.db once it is open and written on every
         # commit (Thin.store.open: the index keeps only recent threads)
         cfg2 : Cfg <- Thin.store.if(String.is_empty(SO.Lg.db(ls)), Cfg.with_thin_cache(cfg1, ThinCache{ti, org, 1n, Map.new(&2, TLIVE.Stream), tmc, Nil{}, TPACE.Notes.empty(), ""}), st, SO.Lg.db(ls))
+        # far_line for the log's older lines, in the background once the
+        # hub listens (SO.Sto.far.fill: nothing when meta far_line is filled)
+        IO.spawn(Unit, SO.Sto.far.fill(ls, st))
         Main.opened(f, st, ls, cfg2, need, front, t8)

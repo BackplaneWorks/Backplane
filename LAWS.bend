@@ -11621,3 +11621,24 @@ law uctx_own_trailing:
 law uctx_wire_hides_text:
   {String.contains(J.Json.show(C.Change.wire(M.CtxNoted{"t1", 1n, 0n, "secret", 9n})), "secret") == False{} : Bool}
 # ---- end uniichat ----
+# --- J2: the models' JSON kept parsed, not parsed at every step ---
+# (Hub.step.fallback: Cfg.models parsed for every step was seconds of the JS
+# hub's first minute after boot); the kept answer is the parse's
+law models_json_kept:
+  {J.Json.show(MPLOG.Bn.models.again("{\"claude\":[\"opus\"]}")) == "{\"claude\":[\"opus\"]}" : String}
+
+# --- J2: a holder is only "<pid> <port>", never a shell's noise ---
+# (Cygwin bash printed "could not find /tmp" and a fresh Windows home read
+# as held by pid "bash.exe:", port "warning:")
+law onehub_legacy_noise:
+  {OHB.OneHub.legacy("bash.exe: warning: could not find /tmp, please create!\n") == "" : String}
+
+law onehub_legacy_after_noise:
+  {OHB.OneHub.legacy("bash.exe: warning: could not find /tmp, please create!\n1234 3787\n") == "1234 3787" : String}
+
+law onehub_legacy_line:
+  {OHB.OneHub.legacy("1234 3787") == "1234 3787" : String}
+
+# the lock file's own line, with or without its "flock"
+law onehub_pair_flock:
+  {OHB.OneHub.pair("1234 3787 flock") ++ "|" ++ OHB.OneHub.pair("x 3787") ++ "|" ++ OHB.OneHub.pair("") == "1234 3787||" : String}

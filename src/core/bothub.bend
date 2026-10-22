@@ -1623,7 +1623,7 @@ def Bots.tick.go(rs: List<&2, BT.Routine>, +i: Nat, +s: M.State, +now: Nat, +tz:
 
 # the minute tick: every due routine runs once
 def Bots.tick(+s: M.State, +now: Nat, +tz: Tz) -> B.Step:
-  Step.cat(Bots.tick.go(BT.World.routines.all(M.State.bots(s)), 0n, s, now, tz), B.Step{List.append(&2, M.Change, TLD.Told.prune(s, now), B.Mail.due(s, now)), Nil{}})
+  Step.cat(Step.cat(Bots.tick.go(BT.World.routines.all(M.State.bots(s)), 0n, s, now, tz), B.Step{List.append(&2, M.Change, TLD.Told.prune(s, now), B.Mail.due(s, now)), Nil{}}), B.Digest.tick(s, now))
 
 # The bots' tools
 # ---------------
