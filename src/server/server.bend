@@ -71,6 +71,7 @@ import ../core/sha1.bend as SH
 import ../core/boot.bend as BT
 import ../core/store.bend as ST
 import ./storedb.bend as SO
+import ./hotboot.bend as HB
 import ./botnet.bend as BN
 import ../core/far.bend as FR
 import ../core/fview.bend as FV
@@ -15619,21 +15620,43 @@ def Main.opened(r: Result<&1, &1, U32 & String, File>, +st: M.State, ls: SO.Lg, 
     case Fail{e} _:
       Main.nolog(e)
 
-# the log's changes folded (a line that does not parse is left out, as
-# ST.Store.load leaves it; the lines themselves are not kept)
-def Boot.fold.one(m: Maybe<&2, J.Json>, st: M.State) -> M.State:
-  match m:
-    case Some{o}:
-      ST.Store.apply(C.Change.decode(o), st)
-    case None{}:
-      st
+# The state a boot starts from (S3 hot boot)
+# ------------------------------------------
+# store.db's records plus the log's tail (src/server/hotboot.bend); with no
+# usable store, or BACKPLANE_HOT_BOOT=0, the whole log replayed as before:
+# the lines straight from the file (no List cell per byte, which was most
+# of the JS hub's memory), then only the lines are kept.
 
-def Boot.fold(ls: List<&2, String>, st: M.State) -> M.State:
-  match ls:
-    case Nil{}:
-      st
-    case l <> t:
-      Boot.fold(t, Boot.fold.one(J.Json.parse(l), st))
+def Boot.cold(+home: String) -> IO(HB.Hot):
+  do IO<HB.Hot>:
+    +rd : List<&2, String> <- H.EvLog.read_from(Store.path(home), "0")
+    +ld : ST.Loaded = ST.Store.load(ST.Store.read.body(rd), ST.Loaded{M.State.empty(), Nil{}})
+    return HB.Hot{True{}, "", ST.Loaded.st(ld), ST.Loaded.wire(ld), ST.Store.read.tail(rd)}
+
+def Boot.state.k(ok: Bool, +hot: HB.Hot, +home: String) -> IO(HB.Hot):
+  match ok:
+    case True{}:
+      do IO<HB.Hot>:
+        Log.info("hot boot from " ++ HB.Hot.path(home))
+        return hot
+    case False{}:
+      do IO<HB.Hot>:
+        Log.info("full replay: " ++ HB.Hot.why(hot))
+        Boot.cold(home)
+
+def Boot.state.on(on: Bool, +home: String) -> IO(HB.Hot):
+  match on:
+    case True{}:
+      do IO<HB.Hot>:
+        +hot : HB.Hot <- HB.Hot.load(home)
+        Boot.state.k(HB.Hot.ok(hot), hot, home)
+    case False{}:
+      Boot.state.k(False{}, HB.Hot.no("BACKPLANE_HOT_BOOT=0"), home)
+
+def Boot.state(+home: String) -> IO(HB.Hot):
+  do IO<HB.Hot>:
+    +on : String <- Env.get("BACKPLANE_HOT_BOOT", "1")
+    Boot.state.on(Bool.not(String.eq(on, "0")), home)
 
 def Main.boot(cfg: Cfg, need: Bool, front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
   match cfg:
@@ -15645,13 +15668,12 @@ def Main.boot(cfg: Cfg, need: Bool, front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
         H.Env.put("BACKPLANE_HOME", home)
         Agents.only(home)
         t0 : U32 <- PS.Perf.us()
-        # the lines straight from the file (no List cell per byte, which
-        # was most of the JS hub's memory), then only the lines are kept
-        +rd : List<&2, String> <- H.EvLog.read_from(Store.path(home), "0")
-        t1 : U32 <- PS.Perf.span("boot.read", t0)
-        +torn : String = ST.Store.read.tail(rd)
-        +st : M.State = Boot.fold(ST.Store.read.body(rd), M.State.empty())
-        t2 : U32 <- PS.Perf.span("boot.replay", t1)
+        # store.db's records and the log's tail (hotboot.bend), or the
+        # whole log replayed when there is no usable store
+        +bt : HB.Hot <- Boot.state(home)
+        t2 : U32 <- PS.Perf.span("boot.replay", t0)
+        +torn : String = HB.Hot.torn(bt)
+        +st : M.State = HB.Hot.st(bt)
         GT.Git.step.migrate(home, HistReg.roots(st))
         f0 : Result<&1, &1, U32 & String, File> <- File.open(Store.path(home), "a")
         f : Result<&1, &1, U32 & String, File> <- Main.torn(f0, torn)

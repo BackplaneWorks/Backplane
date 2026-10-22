@@ -30,6 +30,8 @@ var App={current:h=>h.cur,lean:h=>h,screen_list_in:()=>({hub:'A',sel:'A-thread'}
 var plain=x=>x,same=(a,b)=>a===b,liveNodes=()=>[];
 var recent={links:new Map(),overlays:()=>[],end:()=>[]};
 var commandList=cs=>cs;
+// a hub that is not on the thin view lane (the transport these checks cover)
+var thin={thin:()=>false,views:()=>null,drain:()=>({cmds:[],sync:[]}),inert:()=>false,receive(){},fail(){},disconnect(){}};
 var direct=(cmds,draw,updates=[])=>({cmds,draw,updates,screen:draw?JSON.parse(screenText()):null});
 ${focus}
 ${screen}

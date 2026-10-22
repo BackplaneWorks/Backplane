@@ -281,7 +281,6 @@ class Engine(private val app: android.content.Context, source: () -> String, pri
     suspend fun hubs(keys: List<String>) = out("Backplane.hubs(${org.json.JSONArray(keys)})")
     // a choice of this device that Bend draws by ("view": "projects" or "active")
     suspend fun local(key: String, value: String) = out("Backplane.local(${q(key)}, ${q(value)})", person = true)
-    suspend fun resume(key: String) = call("Backplane.resume(${q(key)})")
     suspend fun screen() = out("Backplane.screen()", person = true)
     // a binary frame from hub key, as base64
     suspend fun connection(key: String, epoch: String, mode: String = "") =

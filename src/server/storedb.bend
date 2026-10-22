@@ -255,7 +255,7 @@ def Sto.lines.q(+lg: Lg, +from: Nat, +count: Nat) -> IO(List<&2, String>):
   match lg:
     case Lg{+db, +path, _, _, _}:
       do IO<List<&2, String>>:
-        +rs : List<&2, List<&2, String>> <- D.Db.query(db, "SELECT off, len, wire FROM line WHERE seq > ? ORDER BY seq LIMIT ?", ["#" ++ Nat.show(from), "#" ++ Nat.show(count)], U32.from_nat(count))
+        +rs : List<&2, List<&2, String>> <- D.Db.query.t(db, "SELECT off, len, wire FROM line WHERE seq > ? ORDER BY seq LIMIT ?", [D.Db.nat(from), D.Db.nat(count)], U32.from_nat(count))
         Sto.lines.k(Sto.failed(rs), rs, path)
 
 def Sto.lines.go(none: Bool, +lg: Lg, +from: Nat, +count: Nat) -> IO(List<&2, String>):
@@ -304,7 +304,7 @@ def Sto.push.far(rs: List<&2, List<&2, String>>, acc: List<&2, List<&2, String>>
     case Nil{}:
       acc
     case r <> t:
-      Sto.push.far(t, ("INSERT INTO far_line(seq, scope) VALUES (?, ?) ON CONFLICT DO NOTHING" <> r) <> acc)
+      Sto.push.far(t, ("INSERT INTO far_line(seq, scope) VALUES (CAST(ltrim(?, '#') AS INTEGER), ?) ON CONFLICT DO NOTHING" <> r) <> acc)
 
 def Sto.first(+n: Nat, first: String, w: String) -> String:
   match n:
@@ -598,16 +598,26 @@ def Sto.boot(+home: String, +st: M.State) -> IO(Lg):
 def Sto.ecols() -> String:
   "ord, seq, id, thread, src, kind, role, akind, text, at"
 
-def Sto.q(+lg: Lg, +sql: String, ps: List<&2, String>, +limit: Nat) -> IO(List<&2, List<&2, String>>):
-  Bool.pick(IO(List<&2, List<&2, String>>), String.is_empty(Lg.db(lg)), IO.pure(List<&2, List<&2, String>>, Nil{}), D.Db.query(Lg.db(lg), sql, ps, U32.from_nat(limit)))
+def Sto.q(+lg: Lg, +sql: String, ps: List<&2, D.DbVal>, +limit: Nat) -> IO(List<&2, List<&2, String>>):
+  Bool.pick(IO(List<&2, List<&2, String>>), String.is_empty(Lg.db(lg)), IO.pure(List<&2, List<&2, String>>, Nil{}), D.Db.query.t(Lg.db(lg), sql, ps, U32.from_nat(limit)))
 
-def Sto.n(+n: Nat) -> String:
-  "#" ++ Nat.show(n)
+def Sto.n(+n: Nat) -> D.DbVal:
+  D.Db.nat(n)
+
+def Sto.t(+x: String) -> D.DbVal:
+  D.DbText{x}
+
+def Sto.ts(xs: List<&2, String>, acc: List<&2, D.DbVal>) -> List<&2, D.DbVal>:
+  match xs:
+    case Nil{}:
+      List.reverse(&2, D.DbVal, acc)
+    case x <> t:
+      Sto.ts(t, D.DbText{x} <> acc)
 
 # a thread's entries before ordinal `before`, newest first
 def Sto.page(+lg: Lg, +thread: String, +before: Nat, +limit: Nat) -> IO(List<&2, List<&2, String>>):
   Sto.q(lg, "SELECT " ++ Sto.ecols() ++ " FROM entry WHERE (thread = ? OR src = ?) AND (? = 0 OR ord < ?) ORDER BY ord DESC LIMIT ?",
-    [thread, thread, Sto.n(before), Sto.n(before), Sto.n(limit)], limit)
+    [Sto.t(thread), Sto.t(thread), Sto.n(before), Sto.n(before), Sto.n(limit)], limit)
 
 def Sto.marks(xs: List<&2, String>) -> String:
   match xs:
@@ -625,7 +635,7 @@ def Sto.search.k(none: Bool, +lg: Lg, +thread: String, +words: List<&2, String>,
     case False{}:
       Sto.q(lg, "SELECT " ++ Sto.ecols() ++ " FROM entry WHERE ord IN (SELECT ord FROM term WHERE word IN (" ++ Sto.marks(words) ++ ") GROUP BY ord HAVING count(DISTINCT word) = ?)"
         ++ " AND (? = '' OR thread = ? OR src = ?) AND (? = 0 OR ord < ?) ORDER BY ord DESC LIMIT ?",
-        List.append(&2, String, words, [Sto.n(List.length(&2, String, words)), thread, thread, thread, Sto.n(before), Sto.n(before), Sto.n(limit)]), limit)
+        List.append(&2, D.DbVal, Sto.ts(words, Nil{}), [Sto.n(List.length(&2, String, words)), Sto.t(thread), Sto.t(thread), Sto.t(thread), Sto.n(before), Sto.n(before), Sto.n(limit)]), limit)
 
 # entries holding every word (THIN.Words.of's words: the caller makes them
 # from the query the same way), in a thread ("" for all), newest first
@@ -634,7 +644,7 @@ def Sto.search(+lg: Lg, +thread: String, +words: List<&2, String>, +before: Nat,
 
 # the entries with this id (a duplicate's too), oldest first
 def Sto.entry(+lg: Lg, +id: String) -> IO(List<&2, List<&2, String>>):
-  Sto.q(lg, "SELECT " ++ Sto.ecols() ++ " FROM entry WHERE id = ? ORDER BY seq LIMIT 64", [id], 64n)
+  Sto.q(lg, "SELECT " ++ Sto.ecols() ++ " FROM entry WHERE id = ? ORDER BY seq LIMIT 64", [Sto.t(id)], 64n)
 
 def Sto.count.of(rs: List<&2, List<&2, String>>) -> Nat:
   match rs:
@@ -645,7 +655,7 @@ def Sto.count.of(rs: List<&2, List<&2, String>>) -> Nat:
 
 # how many entries a thread has
 def Sto.count(+lg: Lg, +thread: String) -> IO(Nat):
-  IO.bind(List<&2, List<&2, String>>, Nat, Sto.q(lg, "SELECT count(*) FROM entry WHERE thread = ? OR src = ?", [thread, thread], 1n), rs => IO.pure(Nat, Sto.count.of(rs)))
+  IO.bind(List<&2, List<&2, String>>, Nat, Sto.q(lg, "SELECT count(*) FROM entry WHERE thread = ? OR src = ?", [Sto.t(thread), Sto.t(thread)], 1n), rs => IO.pure(Nat, Sto.count.of(rs)))
 
 def Sto.tcols() -> String:
   "id, project, title, created, activity, turn, pending, archived, pinned, settled_at, provider, model, session, deleted, json"
@@ -662,4 +672,4 @@ def Sto.threads(+lg: Lg, +project: String, +state: String, +before: Nat, +limit:
   Sto.q(lg, "SELECT " ++ Sto.tcols() ++ " FROM thread WHERE (? = '' OR project = ?)"
     ++ " AND ((? = 'settled' AND settled_at > 0 AND archived = 0 AND deleted = 0) OR (? = 'archived' AND archived = 1 AND deleted = 0) OR (? = 'deleted' AND deleted = 1))"
     ++ " AND (? = 0 OR activity < ?) ORDER BY activity DESC LIMIT ?",
-    [project, project, state, state, state, Sto.n(before), Sto.n(before), Sto.n(limit)], limit)
+    [Sto.t(project), Sto.t(project), Sto.t(state), Sto.t(state), Sto.t(state), Sto.n(before), Sto.n(before), Sto.n(limit)], limit)

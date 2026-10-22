@@ -60,20 +60,6 @@ object Pairing {
         val host = u.host ?: return null
         return if (u.port > 0) "$host:${u.port}" else host
     }
-
-    // the socket address for a (re)connect: the client's resume point
-    // ({"since", "origin"} from Backplane.resume()) as query parameters
-    fun resume(socket: String, resume: String): String {
-        val r = JSONObject(resume)
-        return Uri.parse(socket).buildUpon()
-            .appendQueryParameter("since", r.optString("since", "0"))
-            .appendQueryParameter("origin", r.optString("origin", ""))
-            // a hub from before CBOR-only still needs asking
-            .appendQueryParameter("enc", "cbor")
-            // The matching bridge understands Recent; old hubs ignore this hint.
-            .appendQueryParameter("mobile", "1")
-            .build().toString()
-    }
 }
 
 // A socket that tells a dead link by TCP keepalive: probed after 15 s with
@@ -110,12 +96,20 @@ private object LiveSockets : SocketFactory() {
 // Alive.limit in core/desk.bend, in ms
 private const val ALIVE_LIMIT_MS = 40_000L
 
+// What to do on each (re)connect: open this address, try again after the
+// backoff (the hub is down or restarting), or stop.
+sealed class Next {
+    data class Go(val url: String) : Next()
+    object Later : Next()
+    object Stop : Next()
+}
+
 // The socket to the hub, reconnecting with backoff like host.js. The
 // address is asked for afresh on every attempt, so each reconnect resumes
 // from what the client already holds.
 class Hub(
     private val scope: CoroutineScope,
-    private val url: suspend () -> String?,
+    private val url: suspend () -> Next,
     private val onOpen: () -> Unit,
     private val onMessage: (ByteArray) -> Unit,
     private val onClose: () -> Unit,
@@ -125,6 +119,11 @@ class Hub(
     private var socket: WebSocket? = null
     private var backoff = 250L
     private var stopped = false
+    // the attempt waiting out its backoff, which wake() runs at once
+    private var retry: Runnable? = null
+    // whether this socket has said anything yet: the backoff starts over
+    // only then, so a hub that accepts and drops is not hammered
+    private var spoke = false
 
     // When a frame (a heartbeat included) last arrived. The hub sends one
     // every 15 s (core/desk.bend's Alive.every); a link silent for more
@@ -151,8 +150,28 @@ class Hub(
         connect()
     }
 
+    // Try now rather than after the backoff: the network came back or the
+    // app is in front again. A socket quiet for quietMs (it may have died
+    // while the app was away) is replaced.
+    fun wake(quietMs: Long = 3000) {
+        if (stopped) return
+        backoff = 250
+        val ws = socket
+        if (ws != null) {
+            if (SystemClock.elapsedRealtime() - heard > quietMs) ws.cancel() // onFailure follows and reconnects
+            return
+        }
+        retry?.let {
+            main.removeCallbacks(it)
+            retry = null
+            connect()
+        }
+    }
+
     fun stop() {
         stopped = true
+        retry?.let { main.removeCallbacks(it) }
+        retry = null
         main.removeCallbacks(watch)
         socket?.close(1000, null)
         socket = null
@@ -164,10 +183,26 @@ class Hub(
 
     private fun connect() {
         if (stopped) return
+        retry?.let { main.removeCallbacks(it) }
+        retry = null
         scope.launch {
-            val u = url()
-            if (!stopped && u != null) open(u)
+            when (val next = url()) {
+                is Next.Go -> if (!stopped) open(next.url)
+                Next.Later -> main.post { if (!stopped && socket == null) { onClose(); later() } }
+                Next.Stop -> {}
+            }
         }
+    }
+
+    // the next attempt after the backoff, with equal jitter: after a
+    // deploy the phones spread out, none at zero
+    private fun later() {
+        val wait = backoff / 2 + (Math.random() * (backoff / 2)).toLong()
+        backoff = minOf(backoff * 2, 3000)
+        val r = Runnable { retry = null; connect() }
+        retry?.let { main.removeCallbacks(it) }
+        retry = r
+        main.postDelayed(r, wait)
     }
 
     private fun open(u: String) {
@@ -179,7 +214,7 @@ class Hub(
                     } else {
                         socket = ws
                         heard = SystemClock.elapsedRealtime()
-                        backoff = 250
+                        spoke = false
                         onOpen()
                     }
                 }
@@ -191,6 +226,7 @@ class Hub(
                 main.post {
                     if (!stopped && socket === ws) {
                         heard = SystemClock.elapsedRealtime()
+                        if (!spoke) { spoke = true; backoff = 250 }
                         onMessage(b)
                     }
                 }
@@ -211,8 +247,7 @@ class Hub(
             } else if (socket === ws || socket == null) {
                 socket = null
                 onClose()
-                main.postDelayed({ connect() }, backoff)
-                backoff = minOf(backoff * 2, 5000)
+                later()
             }
         }
     }

@@ -1,6 +1,8 @@
 package dev.backplane.mobile
 
-// Explicit compatibility applies only to this running app session.
+// A hub without views is COMPATIBILITY_REQUIRED: it needs an update. The
+// whole-log compatibility sync is retired: COMPATIBILITY_CHOSEN is never set
+// (the app loads the recent window and pages back, never all history).
 enum class StartupPolicy { DISCOVERING, THIN, COMPATIBILITY_REQUIRED, COMPATIBILITY_CHOSEN }
 
 // Owner identity alone cannot distinguish two tabs of the same bot.
