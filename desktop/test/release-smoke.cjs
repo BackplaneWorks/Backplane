@@ -86,7 +86,7 @@ async function main(args){
   const originalEnv=process.env;process.env=env;
   const service=new Service({home,binary,web:path.join(resources,'backplane-service/web'),expectedVersion:'0.12.0',residentService:true});
   let app,uiChild,page,second,error,phase='prepare',serviceIdentity,sandbox,uiPid,origin;
-  const facts={checks:[],errors:[],reconnectMode:'explicit-retry',deferredByUser:['telemetry-privacy','telemetry-consent','telemetry-ingestion'],scope:'Minimal actual matching-host stable stage startup/discovery/auth, renderer OS sandbox, current content, explicit Retry connection, single instance and resident close. Telemetry validation DEFERRED by user, not PASS. No Send/provider/scale/390/native-phone/IME/Browser parity or telemetry-upload claim.'};
+  const facts={checks:[],errors:[],reconnectMode:'automatic',deferredByUser:['telemetry-privacy','telemetry-consent','telemetry-ingestion'],scope:'Minimal actual matching-host stable stage startup/discovery/auth, renderer OS sandbox, current content, automatic reconnect, single instance and resident close. Telemetry validation DEFERRED by user, not PASS. No Send/provider/scale/390/native-phone/IME/Browser parity or telemetry-upload claim.'};
   const save=()=>write(path.join(out,'result.json'),{...facts,status:error||facts.cleanupError||facts.cleanup?.portClosed===false?'FAIL':phase==='done'?'PASS':'INCOMPLETE',phase,error:error?.message,home,target:s.target,version:'0.12.0',commit:s.release.commit,tree:s.release.tree,stage:inspected,fixture:ref(__filename),serviceIdentity,sandbox,uiPid});
   const step=name=>{phase=name;save();console.log('phase '+name);};
   const record=name=>{facts.checks.push(name);save();};
@@ -120,8 +120,8 @@ async function main(args){
     step('single-instance');second=spawn(executable,[],{env,stdio:'ignore',windowsHide:true});const secondPid=second.pid;assert.equal(await exitOf(second,'second-instance exit'),0);
     const windows=await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().length);assert.equal(windows,1);assert.equal(uiChild.pid,uiPid);assert.equal(nativeIdentity(service.child).birth,serviceIdentity.birth);write(path.join(out,'single-instance.json'),{secondPid,secondExit:second.exitCode,windowCount:windows,originalUiPid:uiPid});record('second launcher joins single resident UI/service');
     step('websocket-reconnect');const opened=await page.evaluate(()=>{const n={opened:__releaseSockets.opened,messages:__releaseSockets.messages};__releaseDisconnect();return n;});
-    await page.waitForFunction(()=>__releaseSockets.closed>0&&document.documentElement.dataset.backplaneRemoteReady!=='true',null,{timeout:5000});
-    await page.getByRole('button',{name:'Retry connection',exact:true}).click({timeout:5000});
+    // the page reconnects by itself (src/web/reconnect.js): no Retry click
+    await page.waitForFunction(()=>__releaseSockets.closed>0,null,{timeout:5000});
     await page.waitForFunction(n=>__releaseSockets.opened>n.opened&&__releaseSockets.messages>n.messages&&document.documentElement.dataset.backplaneRemoteReady==='true',opened,{timeout:20000});await current();
     await page.reload({waitUntil:'domcontentloaded'});await ready();await current();record('real socket reconnect and reload restore current content');
     const menu=await app.evaluate(({Menu})=>{const labels=[];const walk=items=>{for(const i of items){labels.push(i.label||'');if(i.submenu)walk(i.submenu.items);}};walk(Menu.getApplicationMenu()?.items||[]);return labels;});assert(!menu.some(v=>/stop service|restart service|update service/i.test(v)));record('no unsupported managed-stop/update menu advertised');

@@ -64,6 +64,8 @@ button.icon { padding: 0 7px; background: none; border-color: transparent; color
 button.icon:hover { color: var(--text); border-color: var(--line); }
 
 #root, .app { height: 100%; }
+/* the connection bar (host.js showViewStatus) sits under the page, not over it */
+#root { height: calc(100% - var(--status-h, 0px)); }
 .app { font-size: calc(13px * var(--text-scale, 100) / 100); display: grid; grid-template-columns: 264px minmax(0, 1fr); }
 .app.panel { grid-template-columns: 264px minmax(0, 1fr) var(--viewer-w, minmax(0, 1.1fr)); }
 /* the viewer's left edge: drag to resize it (host.js sets --viewer-w) */

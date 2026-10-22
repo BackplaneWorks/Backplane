@@ -348,53 +348,77 @@ type Msg is Data:
   # Boat's status.json, read again because it changed: the threads' Boat
   # chips (core/usage.bend's Chip)
   BoatThreads{status: String}
+  # the thin index and the mail cache, built off the hub after it
+  # listened (Thin.warm)
+  ThinWarm{index: THIN.Index, mail: TMAIL.Cache}
 
 # remote access: also listen on the tailnet, serve HTTPS through
 # `tailscale serve`, and the token remote clients must present
 type Net is Data:
   Net{tailnet: Bool, https: Bool, token: String, models: String, mtext: String, rt: K.Rt, br: Maybe<&2, Chan(BR.BMsg)>, pk: Maybe<&2, Chan(PK.PMsg)>, tm: Maybe<&2, Chan(TM.TMsg)>, machines: String, pv: Maybe<&2, Chan(PV.PMsg)>, bn: BN.Bn, managed: Bool, link: String, freecad: String, ks: Maybe<&2, Chan(KSV.KMsg)>}
 
+# a thin request that came while the index was still being built
+# (THIN.Lazy): answered, in order, when it arrives (Hub.thin.warmed)
+type ThinWait is Data:
+  ThinWait{client: U32, o: J.Json, now: Nat}
+
 type ThinCache is Data:
-  ThinCache{index: THIN.Index, epoch: String, revision: Nat, streams: Map<&2, TLIVE.Stream>, mail: TMAIL.Cache}
+  ThinCache{index: THIN.Lazy, epoch: String, revision: Nat, streams: Map<&2, TLIVE.Stream>, mail: TMAIL.Lazy, waiting: List<&2, ThinWait>}
 
 type Cfg is Data:
   Cfg{home: String, web: String, host: String, port: U32, prompt: String, dirs: List<&2, String>, version: String, net: Net, telemetry: List<&2, TI.TmCfg>, views: List<&2, ThinCache>}
 
 def ThinCache.first(xs: List<&2, ThinCache>) -> ThinCache:
-  Maybe.default(&2, ThinCache, List.head(&2, ThinCache, xs), ThinCache{THIN.Index.empty(), "0", 0n, Map.new(&2, TLIVE.Stream), TMAIL.Cache.empty()})
+  Maybe.default(&2, ThinCache, List.head(&2, ThinCache, xs), ThinCache{THIN.Built{THIN.Index.empty()}, "0", 0n, Map.new(&2, TLIVE.Stream), TMAIL.Built{TMAIL.Cache.empty()}, Nil{}})
 
 def Cfg.thin.cache(cfg: Cfg) -> ThinCache:
   match cfg:
     case Cfg{_, _, _, _, _, _, _, _, _, views}: ThinCache.first(views)
 
-def ThinCache.index(c: ThinCache) -> THIN.Index:
+def ThinCache.lazy(c: ThinCache) -> THIN.Lazy:
   match c:
-    case ThinCache{i, _, _, _, _}: i
+    case ThinCache{i, _, _, _, _, _}: i
 
 def ThinCache.epoch(c: ThinCache) -> String:
   match c:
-    case ThinCache{_, e, _, _, _}: e
+    case ThinCache{_, e, _, _, _, _}: e
 
 def ThinCache.revision(c: ThinCache) -> Nat:
   match c:
-    case ThinCache{_, _, n, _, _}: n
+    case ThinCache{_, _, n, _, _, _}: n
 
 def ThinCache.streams(cache: ThinCache) -> Map<&2, TLIVE.Stream>:
   match cache:
-    case ThinCache{_, _, _, streams, _}: streams
+    case ThinCache{_, _, _, streams, _, _}: streams
 
-def ThinCache.mail(cache: ThinCache) -> TMAIL.Cache:
+def ThinCache.mail(cache: ThinCache) -> TMAIL.Lazy:
   match cache:
-    case ThinCache{_, _, _, _, mail}: mail
+    case ThinCache{_, _, _, _, mail, _}: mail
 
-def Cfg.thin.mail(cfg: Cfg) -> TMAIL.Cache:
+def ThinCache.waiting(cache: ThinCache) -> List<&2, ThinWait>:
+  match cache:
+    case ThinCache{_, _, _, _, _, ws}: ws
+
+def Cfg.thin.mail.lazy(cfg: Cfg) -> TMAIL.Lazy:
   ThinCache.mail(Cfg.thin.cache(cfg))
+
+# the cache itself: like Cfg.thin, read only once Hub.thin.rpc found it built
+def Cfg.thin.mail(cfg: Cfg) -> TMAIL.Cache:
+  TMAIL.Lazy.force(Cfg.thin.mail.lazy(cfg))
 
 def Cfg.thin.streams(cfg: Cfg) -> Map<&2, TLIVE.Stream>:
   ThinCache.streams(Cfg.thin.cache(cfg))
 
+def Cfg.thin.lazy(cfg: Cfg) -> THIN.Lazy:
+  ThinCache.lazy(Cfg.thin.cache(cfg))
+
+# the index itself: Hub.thin.rpc answers only once it is built, so this
+# never builds it on the hub's time
 def Cfg.thin(cfg: Cfg) -> THIN.Index:
-  ThinCache.index(Cfg.thin.cache(cfg))
+  THIN.Lazy.force(Cfg.thin.lazy(cfg))
+
+def Cfg.thin.waiting(cfg: Cfg) -> List<&2, ThinWait>:
+  ThinCache.waiting(Cfg.thin.cache(cfg))
 
 def Cfg.thin.epoch(cfg: Cfg) -> String:
   ThinCache.epoch(Cfg.thin.cache(cfg))
@@ -409,11 +433,19 @@ def Cfg.with_thin_cache(cfg: Cfg, cache: ThinCache) -> Cfg:
 def Cfg.thin.next(+n: Nat) -> Nat:
   Nat.add(n, Bool.pick(Nat, Nat.is_lt(n, PRESENT.Session.nat.max()), 1n, 0n))
 
-def Cfg.with_thin(+cfg: Cfg, index: THIN.Index) -> Cfg:
-  Cfg.with_thin_cache(cfg, ThinCache{index, Cfg.thin.epoch(cfg), Cfg.thin.next(Cfg.thin.revision(cfg)), Cfg.thin.streams(cfg), Cfg.thin.mail(cfg)})
+def Cfg.with_thin(+cfg: Cfg, index: THIN.Lazy) -> Cfg:
+  Cfg.with_thin_cache(cfg, ThinCache{index, Cfg.thin.epoch(cfg), Cfg.thin.next(Cfg.thin.revision(cfg)), Cfg.thin.streams(cfg), Cfg.thin.mail.lazy(cfg), Cfg.thin.waiting(cfg)})
 
 def Cfg.thin.bump(+cfg: Cfg) -> Cfg:
-  Cfg.with_thin(cfg, Cfg.thin(cfg))
+  Cfg.with_thin(cfg, Cfg.thin.lazy(cfg))
+
+# the index built away from the hub arrived (THIN.Lazy.warm); the waiting
+# requests are taken out, to be answered now (Hub.thin.warmed)
+def Cfg.thin.warm(+cfg: Cfg, i: THIN.Index, m: TMAIL.Cache) -> Cfg:
+  Cfg.with_thin_cache(cfg, ThinCache{THIN.Lazy.warm(i, Cfg.thin.lazy(cfg)), Cfg.thin.epoch(cfg), Cfg.thin.revision(cfg), Cfg.thin.streams(cfg), TMAIL.Lazy.warm(m, Cfg.thin.mail.lazy(cfg)), Nil{}})
+
+def Cfg.thin.wait(+cfg: Cfg, w: ThinWait) -> Cfg:
+  Cfg.with_thin_cache(cfg, ThinCache{Cfg.thin.lazy(cfg), Cfg.thin.epoch(cfg), Cfg.thin.revision(cfg), Cfg.thin.streams(cfg), Cfg.thin.mail.lazy(cfg), w <> Cfg.thin.waiting(cfg)})
 
 def Cfg.thin.first_epoch(changes: List<&2, M.Change>, old: String) -> String:
   match changes old:
@@ -421,7 +453,7 @@ def Cfg.thin.first_epoch(changes: List<&2, M.Change>, old: String) -> String:
     case _ _: old
 
 def Cfg.thin.committed(+cfg: Cfg, +changes: List<&2, M.Change>, st: M.State) -> Cfg:
-  Cfg.with_thin_cache(cfg, ThinCache{THIN.Index.changes(changes, Cfg.thin(cfg)), Cfg.thin.first_epoch(changes, Cfg.thin.epoch(cfg)), Cfg.thin.next(Cfg.thin.revision(cfg)), Cfg.thin.streams(cfg), TMAIL.Cache.committed(changes, st, Cfg.thin.mail(cfg))})
+  Cfg.with_thin_cache(cfg, ThinCache{THIN.Lazy.changes(changes, Cfg.thin.lazy(cfg)), Cfg.thin.first_epoch(changes, Cfg.thin.epoch(cfg)), Cfg.thin.next(Cfg.thin.revision(cfg)), Cfg.thin.streams(cfg), TMAIL.Lazy.committed(changes, st, Cfg.thin.mail.lazy(cfg)), Cfg.thin.waiting(cfg)})
 
 # ---- mail perf: local wire-log length ----
 # Valid unknown JSON remains a wire line without changing State.seq.
@@ -954,6 +986,8 @@ def Wire.all.legacy.k2(kind: Nat, booting: Bool, +c: Client, +a: All, +text: Str
   match kind booting:
     case 0n _:
       Wire.all.as(Wire.native(c), c, text, bs, n)
+    case 3n _:
+      Wire.all.as(Wire.native(c), c, text, bs, n)
     case _ True{}:
       IO.pure(Maybe<&2, Client>, Some{c})
     case 1n False{}:
@@ -961,9 +995,17 @@ def Wire.all.legacy.k2(kind: Nat, booting: Bool, +c: Client, +a: All, +text: Str
     case _ False{}:
       Wire.all.as(Wire.native(c), c, text, bs, n)
 
+# a thin (view) client takes no broadcast but the heartbeat (kind 3): it
+# hears its own view's changes, and the heartbeat tells it the link lives
+# (without it an idle page took a healthy link for dead after Alive.limit)
+def Wire.all.thin.k(kind: Nat, +c: Client, +text: String, +bs: List<&2, U32>, +n: Nat) -> IO(Maybe<&2, Client>):
+  match kind:
+    case 3n: Wire.all.as(Wire.native(c), c, text, bs, n)
+    case _: IO.pure(Maybe<&2, Client>, Some{c})
+
 def Wire.all.thin(thin: Bool, kind: Nat, booting: Bool, c: Client, a: All, text: String, bs: List<&2, U32>, n: Nat) -> IO(Maybe<&2, Client>):
   match thin:
-    case True{}: IO.pure(Maybe<&2, Client>, Some{c})
+    case True{}: Wire.all.thin.k(kind, c, text, bs, n)
     case False{}: Wire.all.legacy.k2(kind, booting, c, a, text, bs, n)
 
 def Wire.all.k2(kind: Nat, booting: Bool, +c: Client, a: All, text: String, bs: List<&2, U32>, n: Nat) -> IO(Maybe<&2, Client>):
@@ -1000,6 +1042,10 @@ def Wire.all.of(+cs: List<&2, Client>, +text: String, +a: All) -> IO(List<&2, Cl
 
 def Wire.all(+cs: List<&2, Client>, +text: String) -> IO(List<&2, Client>):
   Wire.all.of(cs, text, All{0n, Nil{}, 0n, 0n, Nil{}})
+
+# the heartbeat: every client, thin (view) ones too (Wire.all.thin)
+def Wire.beat(+cs: List<&2, Client>, +text: String) -> IO(List<&2, Client>):
+  Wire.all.of(cs, text, All{3n, Nil{}, 0n, 0n, Nil{}})
 
 def Client.legacy(c: Client) -> Bool:
   match c:
@@ -6147,7 +6193,7 @@ def Cfg.with_tch(+c: Cfg, t: TE.TeachSt) -> Cfg:
   Cfg.with_bn(c, BN.Bn.with_tch(Cfg.bn(c), t))
 
 def Cfg.thin.live(+cfg: Cfg, streams: Map<&2, TLIVE.Stream>) -> Cfg:
-  Cfg.with_thin_cache(cfg, ThinCache{Cfg.thin(cfg), Cfg.thin.epoch(cfg), Cfg.thin.next(Cfg.thin.revision(cfg)), streams, Cfg.thin.mail(cfg)})
+  Cfg.with_thin_cache(cfg, ThinCache{Cfg.thin.lazy(cfg), Cfg.thin.epoch(cfg), Cfg.thin.next(Cfg.thin.revision(cfg)), streams, Cfg.thin.mail.lazy(cfg), Cfg.thin.waiting(cfg)})
 
 def Live.with(+cfg: Cfg, +lv: List<&2, LV.Buf>) -> Cfg:
   Cfg.thin.live(Cfg.with_bn(cfg, BN.Bn.with_live(Cfg.bn(cfg), lv)), TLIVE.Streams.snapshot(lv, Cfg.thin.next(Cfg.thin.revision(cfg)), Map.new(&2, TLIVE.Stream)))
@@ -6283,6 +6329,14 @@ def Hub.broadcast(h: Hub, +text: String) -> IO(Hub):
     case Hub{st, f, ls, cl, as, inbox, cfg, note}:
       do IO<Hub>:
         cl2 : List<&2, Client> <- Wire.all(cl, text)
+        return Hub{st, f, ls, cl2, as, inbox, cfg, note}
+
+# the heartbeat to every client, view clients included (Wire.beat)
+def Hub.beat.all(h: Hub, +text: String) -> IO(Hub):
+  match h:
+    case Hub{st, f, ls, cl, as, inbox, cfg, note}:
+      do IO<Hub>:
+        cl2 : List<&2, Client> <- Wire.beat(cl, text)
         return Hub{st, f, ls, cl2, as, inbox, cfg, note}
 
 # a thread's browser page: a bot's is named by the bot, any other
@@ -10862,9 +10916,34 @@ def Hub.thin.have(+c: Maybe<&2, Client>, h: Hub, +client: U32, +o: J.Json, +now:
     case Some{+c} Hub{st, f, ls, cl, as, inbox, +cfg, note}:
       Hub.thin.checked(Bool.and(Bool.and(Client.thin(c), Nat.is_lt(Cfg.thin.revision(cfg), PRESENT.Session.nat.max())), Bool.and(TVW.Wire.control.id(TVW.Wire.nat(o, "id", PRESENT.Session.nat.max())), TVW.Wire.request(J.Json.get_obj(o, "p"), U32.show(OB.Cr.gen(Boot.r(c))), Cfg.thin.epoch(cfg)))), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now)
 
-def Hub.thin.rpc(h: Hub, +client: U32, +o: J.Json, +now: Nat) -> IO(Hub):
+def Hub.thin.rpc.now(h: Hub, +client: U32, +o: J.Json, +now: Nat) -> IO(Hub):
   match h:
     case Hub{st, f, ls, +cl, as, inbox, cfg, note}: Hub.thin.have(Clients.get(cl, client), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, now)
+
+# Until the index is built (THIN.Lazy, Thin.warm) a thin request waits in
+# the cache rather than build it on the hub's time; Hub.thin.warmed answers
+# the waiting ones in the order they came
+def Hub.thin.rpc.ready(ready: Bool, h: Hub, +client: U32, +o: J.Json, +now: Nat) -> IO(Hub):
+  match ready h:
+    case True{} _: Hub.thin.rpc.now(h, client, o, now)
+    case False{} Hub{st, f, ls, cl, as, inbox, +cfg, note}: IO.pure(Hub, Hub{st, f, ls, cl, as, inbox, Cfg.thin.wait(cfg, ThinWait{client, o, now}), note})
+
+def Hub.thin.rpc(h: Hub, +client: U32, +o: J.Json, +now: Nat) -> IO(Hub):
+  match h:
+    case Hub{st, f, ls, cl, as, inbox, +cfg, note}: Hub.thin.rpc.ready(Bool.and(THIN.Lazy.ready(Cfg.thin.lazy(cfg)), TMAIL.Lazy.ready(Cfg.thin.mail.lazy(cfg))), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, now)
+
+def Hub.thin.answer(ws: List<&2, ThinWait>, h: Hub) -> IO(Hub):
+  match ws:
+    case Nil{}: IO.pure(Hub, h)
+    case ThinWait{client, o, now} <> tail:
+      do IO<Hub>:
+        h2 : Hub <- Hub.thin.rpc.now(h, client, o, now)
+        Hub.thin.answer(tail, h2)
+
+def Hub.thin.warmed(h: Hub, i: THIN.Index, m: TMAIL.Cache) -> IO(Hub):
+  match h:
+    case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      Hub.thin.answer(List.reverse(&2, ThinWait, Cfg.thin.waiting(cfg)), Hub{st, f, ls, cl, as, inbox, Cfg.thin.warm(cfg, i, m), note})
 
 def Hub.thin.read_guard(valid: Bool, h: Hub, +client: U32, +text: String, +now: Nat) -> IO(Hub):
   match valid:
@@ -14072,6 +14151,8 @@ def Msg.kind(m: Msg) -> String:
       "order_gate"
     case BoatThreads{_}:
       "boat_threads"
+    case ThinWarm{_, _}:
+      "thin_warm"
     case UberDo{_}:
       "uber_do"
     case UberAnswer{_, _, _}:
@@ -15103,7 +15184,7 @@ def Hub.handle(h: Hub, m: Msg, +now: Nat) -> IO(Hub):
     case Tick{}:
       Hub.tick(h, now)
     case Heart{}:
-      IO.bind(Hub, Hub, IO.bind(Hub, Hub, IO.bind(Hub, Hub, Hub.step(h, B.Step.none()), h1 => Hub.broadcast(h1, DK.Alive.frame())), h2 => Hub.uber.beat(h2, now)), h3 => Hub.deploy_poll(h3, now))
+      IO.bind(Hub, Hub, IO.bind(Hub, Hub, IO.bind(Hub, Hub, Hub.step(h, B.Step.none()), h1 => Hub.beat.all(h1, DK.Alive.frame())), h2 => Hub.uber.beat(h2, now)), h3 => Hub.deploy_poll(h3, now))
     case AutoView{thread, fs}:
       Hub.autoview(h, thread, fs)
     case ClaudePid{thread, pid, gen}:
@@ -15143,6 +15224,8 @@ def Hub.handle(h: Hub, m: Msg, +now: Nat) -> IO(Hub):
       Hub.order.gate(kind, h, thread, md, now)
     case BoatThreads{status}:
       Hub.chips(Hub.state(h), status, now)
+    case ThinWarm{i, m}:
+      Hub.thin.warmed(h, i, m)
     case UberDo{what}:
       Hub.uber.do(h, what, now)
     case UberAnswer{link, code, body}:
@@ -15422,7 +15505,31 @@ def Main.listened(r: Result<&1, &1, U32 & String, Listener>, h: Hub, +web: Strin
 
 # the headless KiCad servers' lines, to the hub
 
-def Main.opened(r: Result<&1, &1, U32 & String, File>, +st: M.State, ls: List<&2, String>, cfg: Cfg, need: Bool, front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
+# the thin index and the mail cache built after the hub listens, on their
+# own thread, from the state it booted with: what the boot used to build
+# before it (THIN.Lazy, TMAIL.Lazy); the hub takes them as ThinWarm
+def Thin.warm.go(+st: M.State, +inbox: Chan(Msg)) -> IO(Unit):
+  do IO<Unit>:
+    t0 : U32 <- PS.Perf.us()
+    +i : THIN.Index = THIN.Index.of(st)
+    Log.info("thin index: " ++ Nat.show(THIN.Index.n(i)) ++ " rows")
+    t1 : U32 <- PS.Perf.span("thin.warm", t0)
+    +m : TMAIL.Cache = TMAIL.Cache.of(st)
+    Log.info("mail cache at " ++ Nat.show(TMAIL.Cache.revision(m)))
+    t2 : U32 <- PS.Perf.span("mail.warm", t1)
+    r : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, ThinWarm{i, m})
+    return Unit{}
+
+def Thin.warm.if(built: Bool, +st: M.State, +inbox: Chan(Msg)) -> IO(Unit):
+  match built:
+    case True{}: IO.pure(Unit, Unit{})
+    case False{}: IO.spawn(Unit, Thin.warm.go(st, inbox))
+
+# both are Later from the same boot state, or both built (an empty home)
+def Thin.warm(+c: ThinCache, +inbox: Chan(Msg)) -> IO(Unit):
+  Thin.warm.if(Bool.and(THIN.Lazy.ready(ThinCache.lazy(c)), TMAIL.Lazy.ready(ThinCache.mail(c))), THIN.Lazy.base(ThinCache.lazy(c)), inbox)
+
+def Main.opened(r: Result<&1, &1, U32 & String, File>, +st: M.State, ls: List<&2, String>, cfg: Cfg, need: Bool, front: Chan(Msg) -> IO(Unit), t0: U32) -> IO(Unit):
   match r cfg:
     case Done{f} Cfg{+home, +web, +host, +port, +pr, +ds, +v, nt0, +tcfg, +views}:
       do IO<Unit>:
@@ -15457,11 +15564,15 @@ def Main.opened(r: Result<&1, &1, U32 & String, File>, +st: M.State, ls: List<&2
         IO.spawn(Unit, PV.Pv.loop(Fuel.forever(), vq, PV.Pv.empty(), vo, home ++ "/plot"))
         IO.spawn(Unit, Plot.fwd(Fuel.forever(), vo, inbox))
         +nt : Net = Net.with_ks(Net.with_pv(Net.with_tm(Net.with_pk(Net.with_br(nt0, bq), pq), tq), vq), kq)
+        t1 : U32 <- PS.Perf.span("boot.helpers", t0)
         # the agents a restart in place handed off are kept before anything
         # else can reach the hub (adopt.bend); recovery then leaves them be
         +now : Nat <- Now.nat()
         h0 : Hub <- Hub.adopt(Hub{st, f, ls, Nil{}, Nil{}, inbox, Cfg{home, web, host, port, pr, ds, v, nt, tcfg, views}, ""}, now)
+        t2 : U32 <- PS.Perf.span("boot.adopt", t1)
         l : Result<&1, &1, U32 & String, Listener> <- H.Net.listen(host, port)
+        t3 : U32 <- PS.Perf.span("boot.listen", t2)
+        Thin.warm(ThinCache.first(views), inbox)
         Main.listened(l, h0, web, pri, host ++ ":" ++ U32.show(port), need, Cfg{home, web, host, port, pr, ds, v, nt, tcfg, views}, tok, front)
     case Fail{e} _:
       Main.nolog(e)
@@ -15493,10 +15604,22 @@ def Main.boot(cfg: Cfg, need: Bool, front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
         +mc : String <- Files.text(Models.cache(home))
         +bc : String <- BN.Bf.text(BN.Bn.cache(home))
         exe : String <- H.Sys.exe_dir()
+        t3 : U32 <- PS.Perf.span("boot.files", t2)
         rt0 : K.Rt <- K.Rt.boot(home, M.Setting.get(st, "kicad.path", ""), exe)
+        t4 : U32 <- PS.Perf.span("boot.kicad", t3)
         +rt : K.Rt = K.Rt.set(rt0, "ipc", J.Str{""})
         +off : String <- Env.get("BACKPLANE_NO_UPDATE", "")
         +ai : String <- Env.get("APPIMAGE", "")
         +tc : List<&2, TI.TmCfg> <- TI.Tio.config(TI.Tio.sb(tcfg))
         finalCfg : Cfg = Cfg.with_managed(Cfg.with_models(Cfg.with_bn(Cfg.with_token(Cfg.with_rt(Cfg{home, w, h, p, pr, ds, v, nt, tc, views}, rt), tok), BN.Bn.with_dir(BN.Bn.empty(), BN.Bn.cache.load(bc, BO.World.peers(M.State.bots(st))))), BT.Cache.json(mc), BT.Cache.text(mc)), SV.Chan.managed(off, ai))
-        Main.opened(f, st, ls, Cfg.with_thin_cache(LogCount.init(finalCfg, ls), ThinCache{THIN.Index.of(st), Bool.pick(String, List.is_empty(&2, String, ls), "", Hub.origin(ls)), 1n, Map.new(&2, TLIVE.Stream), TMAIL.Cache.of(st)}), need, front)
+        +cfg1 : Cfg = LogCount.init(finalCfg, ls)
+        Log.info("log count " ++ Nat.show(LogCount.n(cfg1)))
+        t5 : U32 <- PS.Perf.span("boot.cfg", t4)
+        +ti : THIN.Lazy = THIN.Lazy.of(st)
+        t6 : U32 <- PS.Perf.span("boot.thin", t5)
+        +tmc : TMAIL.Lazy = TMAIL.Lazy.of(st)
+        t7 : U32 <- PS.Perf.span("boot.mail", t6)
+        +org : String = Bool.pick(String, List.is_empty(&2, String, ls), "", Hub.origin(ls))
+        Log.info("origin " ++ org)
+        t8 : U32 <- PS.Perf.span("boot.origin", t7)
+        Main.opened(f, st, ls, Cfg.with_thin_cache(cfg1, ThinCache{ti, org, 1n, Map.new(&2, TLIVE.Stream), tmc, Nil{}}), need, front, t8)

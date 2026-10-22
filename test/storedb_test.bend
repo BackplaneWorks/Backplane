@@ -44,3 +44,5 @@ def main() -> IO(Unit):
     C.Check.str("record sql", String.join(S.Sql.of(S.Put{"thread", ["t", "p"]}), "|"), "INSERT OR REPLACE INTO thread(id, project, title, created, activity, turn, pending, archived, pinned, settled_at, provider, model, session, deleted, json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)|t|p")
     C.Check.str("fact sql", String.join(S.Sql.of(S.Put{"term", ["w", "#3"]}), "|"), "INSERT INTO term(word, ord) VALUES (?, ?) ON CONFLICT DO NOTHING|w|#3")
     C.Check.str("obj delete sql", String.join(S.Sql.of(S.Del{"obj", ["mem", "b/k"]}), "|"), "DELETE FROM obj WHERE domain = ? AND key = ?|mem|b/k")
+    C.Check.str("log id is the first line's sha1", S.Sdb.log_id([123, 34, 97, 34, 58, 49, 125, 10, 120, 121]), "sha1:9f89c740ceb46d7418c924a78ac57941d5e96520")
+    C.Check.str("an empty log has no id", S.Sdb.log_id(Nil{}), "")

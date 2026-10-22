@@ -343,3 +343,45 @@ def Page.entries(ids: List<&2, String>, +i: Index, acc: List<&2, M.Entry>) -> Li
   match ids:
     case Nil{}: List.reverse(&2, M.Entry, acc)
     case id <> tail: Page.entries(tail, i, Row.preview(Index.row.k(Map.get(Row, Row.blank(), Index.rows(i), id))) <> acc)
+
+# ---- the index on demand ----
+# Building the index walks every entry's text (words, postings, blocks): a
+# minute on a big log, so the hub must not do it before it listens. Later
+# keeps the state the hub booted with and the changes committed since, in
+# order; Lazy.force builds from them the index the eager boot (Index.of)
+# followed by each commit (Index.changes) would have held (laws
+# thin_lazy_*). A store can stand behind Lazy later.
+type Lazy is Data:
+  Built{index: Index}
+  Later{st: M.State, done: List<&2, M.Change>}
+
+def Lazy.of(st: M.State) -> Lazy:
+  Later{st, Nil{}}
+
+def Lazy.changes(cs: List<&2, M.Change>, l: Lazy) -> Lazy:
+  match l:
+    case Built{i}: Built{Index.changes(cs, i)}
+    case Later{st, done}: Later{st, List.append(&2, M.Change, done, cs)}
+
+def Lazy.force(l: Lazy) -> Index:
+  match l:
+    case Built{i}: i
+    case Later{st, done}: Index.changes(done, Index.of(st))
+
+def Lazy.ready(l: Lazy) -> Bool:
+  match l:
+    case Built{_}: True{}
+    case Later{_, _}: False{}
+
+# the state a background build starts from (Lazy.warm takes its result)
+def Lazy.base(l: Lazy) -> M.State:
+  match l:
+    case Built{_}: M.State.empty()
+    case Later{st, _}: st
+
+# `i` is Index.of(Lazy.base(l)), built away from the hub: the commits it
+# missed are applied on arrival; an index already built is kept
+def Lazy.warm(i: Index, l: Lazy) -> Lazy:
+  match l:
+    case Built{b}: Built{b}
+    case Later{_, done}: Built{Index.changes(done, i)}
