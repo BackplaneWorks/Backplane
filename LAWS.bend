@@ -11580,3 +11580,9 @@ law auth_beat_kept:
 
 law auth_beat_asked:
   {MPCREDIT.Auth.kept("7 1", M.State.empty()) == False{} : Bool}
+
+# --- J2: the models' JSON kept parsed, not parsed at every step ---
+# (Hub.step.fallback: Cfg.models parsed for every step was seconds of the JS
+# hub's first minute after boot); the kept answer is the parse's
+law models_json_kept:
+  {J.Json.show(MPLOG.Bn.models.again("{\"claude\":[\"opus\"]}")) == "{\"claude\":[\"opus\"]}" : String}
