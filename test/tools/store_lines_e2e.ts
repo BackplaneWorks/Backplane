@@ -32,7 +32,10 @@ const lines = [
   '{"$":"ProjectCreated","id":"p1","title":"Pé","root":"/tmp/p1","at":1700000000}',
   '{"$":"ThreadCreated","id":"t1","project":"p1","title":"T 🙂","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1700000001}',
   '{"$":"MessagePosted","thread":"t1","msg":"m1","role":"user","text":"héllo wörld 🙂 ünïcode","at":1700000002}',
-  "not json at all",
+  // a torn line (a write cut short): never numbered, never sent. (A line
+  // Bend's lenient parser takes, like a bare word, is numbered as before and
+  // its raw text breaks the join frame: the hub has always done that)
+  '{"$":"MessagePosted","thread":"t1","msg":"m9","te',
   '{"$":"FutureChange","x":1,"at":1700000003}',
   '{"$":"DeviceRegistered","token":"fake-token","platform":"ios","kind":"alert","thread":"","env":"dev","bundle":"x","at":1700000004}',
   '{"$":"MessagePosted","thread":"t1","msg":"m2","role":"assistant","text":"' + "x".repeat(5000) + '","at":1700000005}',
@@ -63,8 +66,11 @@ async function start() {
 async function stop() { if (proc) { proc.kill("SIGTERM"); await proc.exited; proc = null; } }
 
 // every log item a join gets, and the origin it was told
+// a paired client (the hub's token, HOME/token, made at its first start):
+// a client let in without it is asked to pair and sent no log
 async function join_(query: string): Promise<{ items: any[]; origin: string; since: number }> {
-  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws${query}`);
+  const token = readFileSync(join(home, "token"), "utf8").trim();
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws${query}&token=${encodeURIComponent(token)}`);
   ws.binaryType = "arraybuffer";
   const items: any[] = []; let origin = "", since = -1, done = false;
   ws.onmessage = (e) => {
@@ -90,8 +96,9 @@ const same = (a: any[], b: any[]) => JSON.stringify(a) === JSON.stringify(b);
 try {
   await start();
   check(statSync(join(home, "store.db")).ino === ino0, "the streaming build's store.db was kept (no rebuild)");
-  let want = expected();
   let j = await join_("?since=0&origin=");
+  // the hub commits lines of its own at start: what the log holds now
+  let want = expected();
   check(same(j.items, want), `join from 0: ${j.items.length} items, ${want.length} expected`);
   check(j.origin === "1700000000", `origin from the oldest line (${j.origin})`);
   check(!JSON.stringify(j.items).includes("fake-token"), "a push registration goes out without its token");
