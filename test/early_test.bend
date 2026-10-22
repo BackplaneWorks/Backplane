@@ -27,3 +27,4 @@ def main() -> IO(Unit):
     C.Check.str("body starting", E.Early.body("0.12.1", ""), "{\"status\":\"starting\",\"note\":\"starting\",\"app\":\"backplane\",\"version\":\"0.12.1\"}")
     C.Check.str("response", head(E.Early.response("1.2.3", "")), "HTTP/1.1 503 Service Unavailable\r\nContent-Type: application/json\r\nContent-Length: 75\r\nCache-Control: no-store\r\nConnection: close\r\nRetry-After: 2\r\n\r\n{\"status\":\"starting\",\"note\":\"starting\",\"app\":\"backplane\",\"version\":\"1.2.3\"}")
     C.Check.str("path", E.Early.build.path("/h"), "/h/store.build")
+    C.Check.str("delay", U32.show(E.Early.delay("2500")) ++ " " ++ U32.show(E.Early.delay("")) ++ " " ++ U32.show(E.Early.delay("x")), "2500 0 0")
