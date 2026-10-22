@@ -832,6 +832,11 @@ function proc_spawn(cmd, args, cwd, err) {
   if (bp_proc_bun()) {
     return bp_proc_spawn(cmd, host_list_js(args), cwd, Number(err));
   }
+  // Windows without the Bun loop's handles (loop.js not in the program):
+  // nothing to spawn with, never a libc call
+  if (process.platform === "win32") {
+    return io_fail(38);
+  }
   const c = host_libc();
   const sys = io_sys();
   const argv = host_self([cmd, ...host_list_js(args)]);
@@ -1034,6 +1039,11 @@ function proc_wait(pid, k) {
   if (bp_proc_bun() && bp_procs().has(pid >>> 0)) {
     return bp_proc_wait(pid, k);
   }
+  // Windows has no libc: a pid not ours (or already waited for) reads 255,
+  // as waitpid's ECHILD does in C
+  if (process.platform === "win32") {
+    return 255;
+  }
   if (bp_loop_bun()) {
     return bp_chld_wait(pid >>> 0, k);
   }
@@ -1045,6 +1055,9 @@ function proc_wait(pid, k) {
 function proc_exited(pid) {
   if (bp_proc_bun() && bp_procs().has(pid >>> 0)) {
     return bp_proc_exited(pid);
+  }
+  if (process.platform === "win32") {
+    return 255;
   }
   const c = host_libc();
   const si = new Uint8Array(256);

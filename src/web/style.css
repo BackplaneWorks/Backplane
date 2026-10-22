@@ -53,6 +53,11 @@ html:has(.app.light), html:has(.app.light) body { background: #fafaf8; color: #1
 * { box-sizing: border-box; border-radius: 0; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 13px/1.5 var(--sans); }
 button, input, textarea { font: inherit; color: inherit; }
+/* the page never zooms on a phone: no double-tap zoom, no text inflation,
+   and fields at 16px or more on touch screens (iOS zooms into a smaller one
+   when it takes the focus); the viewers and the lightbox zoom themselves */
+html { touch-action: manipulation; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+@media (pointer: coarse) { input, textarea, select { font-size: max(16px, 1em) !important; } }
 button {
   background: var(--raise); border: 1px solid var(--line); padding: 3px 9px; cursor: pointer;
 }

@@ -84,16 +84,12 @@ function identity(r,release,target,kind){
  check(r&&r.schema===1&&r.kind===kind&&r.status==='VERIFIED','Unverified component receipt');
  check(r.target===target&&r.sourceCommit===release.commit&&r.sourceTree===release.tree&&r.version===VERSION&&r.channel==='release','Component source/version/target mismatch');
 }
-// One root-authorized Windows launcher successor; backend and vendor identities
-// remain the original release source. This is not a general source override.
-const WINDOWS_SHELL_SOURCE={commit:'7b9df017299b93cf75abdfbbfa20fa613c6e91a2',tree:'78ed3ddabe4ec2254fb3dcb48e7f6568a8f4ffc6',serviceSha256:'2064b10f19218f3eb2761d20471c8a77af624afe1f7b432dd4f46700bbeb0c95'};
+// Every target's shell comes from the release commit itself. The 0.12.0
+// Windows launcher successor (a frozen older shell source) is gone: a freeze
+// that still names one is refused.
 function shellIdentity(r,release,target,freeze){
- const successor=freeze.windowsShellSource;
- if(!successor)return identity(r,release,target,'backplane-electron-shell');
- check(target==='windows-x64'&&release.commit==='8147b68dbc9bcddad7e3b51ae7768ed9eb211ecc'&&release.tree==='37c64023d084bca7f209db9d14a84f59d365f696','Windows shell successor has wrong release/target');
- check(canonical(successor)===canonical(WINDOWS_SHELL_SOURCE),'Unapproved Windows shell source successor');
- identity(r,{...release,commit:successor.commit,tree:successor.tree},target,'backplane-electron-shell');
- check(r.sourceFiles?.['desktop/service.cjs']===successor.serviceSha256&&r.members?.['service.cjs']?.type==='file'&&r.members['service.cjs'].sha256===successor.serviceSha256,'Windows shell launch source/payload mismatch');
+ check(freeze.windowsShellSource===undefined,'Windows shell successor sources are no longer accepted; the shell comes from the release commit');
+ return identity(r,release,target,'backplane-electron-shell');
 }
 function architecture(file,target){
  const f=fs.openSync(file,'r'),b=Buffer.alloc(512);let n;try{n=fs.readSync(f,b,0,b.length,0);}finally{fs.closeSync(f);}
@@ -274,4 +270,4 @@ function main(argv){
  else fail('Unknown operation; use describe');console.log(JSON.stringify(result));
 }
 if(require.main===module){try{main(process.argv.slice(2));}catch(e){console.error('Desktop producer: '+e.message);process.exitCode=1;}}
-module.exports={stage,archive,inspectStage,inventory,membershipExpectation,contentDigest,architecture,validateRequest,generatedWeb,reference,readReference,json,write,sha,digest,canonical,runPython,payload,identity,shellIdentity,WINDOWS_SHELL_SOURCE,TARGETS,browserUtilities,linuxLauncher};
+module.exports={stage,archive,inspectStage,inventory,membershipExpectation,contentDigest,architecture,validateRequest,generatedWeb,reference,readReference,json,write,sha,digest,canonical,runPython,payload,identity,shellIdentity,TARGETS,browserUtilities,linuxLauncher};

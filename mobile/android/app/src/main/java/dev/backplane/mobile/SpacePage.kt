@@ -68,16 +68,24 @@ fun SpacePage(m: AppModel, p: SpacePageModel) {
         update = { w ->
             if (w.tag != h) {
                 w.tag = h
-                w.loadDataWithBaseURL(null, h, "text/html", "utf-8", null)
+                w.loadDataWithBaseURL(null, FIXED_VIEWPORT + h, "text/html", "utf-8", null)
             }
         },
         modifier = Modifier.fillMaxSize(),
     )
 }
 
+// a viewport that never scales, ahead of the page's own
+private const val FIXED_VIEWPORT = "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no\">"
+
 private fun pageWeb(ctx: android.content.Context, tapped: (String) -> Unit): WebView = WebView(ctx).apply {
     setBackgroundColor(Color.TRANSPARENT)
     settings.javaScriptEnabled = false
+    // the page never zooms (pinch or double-tap): the app's own text, not a web page's
+    settings.setSupportZoom(false)
+    settings.builtInZoomControls = false
+    settings.displayZoomControls = false
+    settings.useWideViewPort = false
     settings.blockNetworkLoads = true
     settings.allowFileAccess = false
     settings.allowContentAccess = false
