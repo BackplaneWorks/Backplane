@@ -53,7 +53,7 @@ async function connect(ses) {
   if (connecting) return connecting;
   connecting = (async () => {
     try {
-      connection = await service.start(); origin = connection.origin; serviceReadyAtMs = Date.now();
+      connection = await service.start({ onStatus: message => status('waiting', message) }); origin = connection.origin; serviceReadyAtMs = Date.now();
       // Credential material stays in main and the service's HttpOnly cookie.
       const response = await ses.fetch(`${origin}/auth/pair`, { method: 'POST', credentials: 'include', headers: { Authorization: `Bearer ${await service.token()}` }, redirect: 'error' });
       if (!response.ok) throw new Error('Could not authenticate with the service');
