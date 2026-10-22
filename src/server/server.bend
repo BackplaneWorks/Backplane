@@ -7892,7 +7892,7 @@ def Far.feed.loop(fuel: Nat, +ls: SO.Lg, +st: M.State, +at: Nat, acc: FR.Feed) -
 # time (the hub holds no log lines; F1 replaces the feed with far_line)
 def Far.feed.job(+ls: SO.Lg, +st: M.State, +inbox: Chan(Msg)) -> IO(Unit):
   do IO<Unit>:
-    fd : FR.Feed <- Far.feed.loop(1000000000n, ls, st, 0n, FR.Feed{Nil{}, Map.new(&2, Nat)})
+    fd : FR.Feed <- Far.feed.loop(1n+SO.Lg.n(ls), ls, st, 0n, FR.Feed{Nil{}, Map.new(&2, Nat)})
     Far.send(inbox, FarFeed{fd, ""})
 
 # a mirror kept on disk, read back
