@@ -33,7 +33,7 @@ def main() -> IO(Unit):
   do IO<Unit>:
     +ld : ST.Loaded = loaded()
     +wire : List<&2, String> = ST.Loaded.wire(ld)
-    +c : S.Cfg = S.LogCount.init(cfg("/tmp/unused-mailboot", BN.Bn.empty()), wire)
+    +c : S.Cfg = S.LogCount.set(cfg("/tmp/unused-mailboot", BN.Bn.empty()), List.length(&2, String, wire))
     C.Check.str("torn object is excluded from replay wire", Nat.show(List.length(&2, String, ST.Loaded.wire(ST.Store.load(["{"], ST.Loaded{M.State.empty(), Nil{}})))), "0")
     count("initialized count equals real replay wire", c, 3n)
     C.Check.str("unknown JSON makes seq differ from wire count", Nat.show(M.State.seq(ST.Loaded.st(ld))), "2")
