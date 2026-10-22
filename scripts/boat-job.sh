@@ -2,7 +2,8 @@
 # Run one command on a disposable Boat sandbox (boat.dev), from this worktree.
 #
 #   scripts/boat-job.sh [--size small|default] [--timeout SECS] [--artifact PATH]...
-#                       [--exclude GLOB]... [--budget-usd X] [--wait SECS] [--setup-bend|--no-setup-bend] -- CMD...
+#                       [--exclude GLOB]... [--budget-usd X] [--wait SECS] [--setup-bend|--no-setup-bend]
+#                       [--slot NAME] -- CMD...
 #   scripts/boat-job.sh sweep      delete sandboxes this tool started whose job is gone
 #   scripts/boat-job.sh status [--json] [--refresh]   the ledger and the cached account limits
 #
@@ -114,7 +115,7 @@ for l in lines:
     if ev in ("created", "claim") and sid: sbx[sid] = {"state": "busy", "job": e.get("job", ""), "thread": j.get("thread", ""), "size": j.get("size")}
     if ev == "claim": j["id"] = sid
     if ev == "ended" and sid and not e.get("kept"): sbx.pop(sid, None)
-    if ev == "warm" and sid: sbx[sid] = {"state": "warm", "job": e.get("job", ""), "thread": e.get("thread", ""), "size": e.get("size"), "until": e.get("until", 0), "warm_at": e.get("at", 0), "reserved": e.get("reserved", 0)}
+    if ev == "warm" and sid: sbx[sid] = {"state": "warm", "job": e.get("job", ""), "thread": e.get("thread", ""), "size": e.get("size"), "until": e.get("until", 0), "warm_at": e.get("at", 0), "reserved": e.get("reserved", 0), "slot": e.get("slot", "")}
     if ev in ("deleted", "swept", "orphan") and sid: sbx.pop(sid, None)
     if ev == "attempt": attempts.append(e.get("at", 0)); j["attempt_at"] = e.get("at", 0)
     if ev in ("ended", "swept"): j["done"] = True; j["cost"] = e.get("cost", 0); j["orphan"] = False
@@ -131,7 +132,7 @@ if mode == "known":
 if mode == "warm":
     for sid, x in sbx.items():
         if x["state"] == "warm":
-            print(sid, x.get("size") or "default", x.get("thread") or "-", x.get("until", 0), x.get("job", ""), x.get("warm_at", 0), x.get("reserved", 0))
+            print(sid, x.get("size") or "default", x.get("thread") or "-", x.get("until", 0), x.get("job", ""), x.get("warm_at", 0), x.get("reserved", 0), x.get("slot") or "-")
     sys.exit()
 if mode == "ambig":
     for k, j in jobs.items():
@@ -255,7 +256,7 @@ sweep() {
   l=$(listed) || { say "sweep: cannot list sandboxes"; return 1; }
   # warm sandboxes past their idle window: deleted (ours only, by id)
   now=$(date +%s)
-  [ -z "$w" ] || printf '%s\n' "$w" | while read -r id size thread until job wat reserved; do
+  [ -z "$w" ] || printf '%s\n' "$w" | while read -r id size thread until job wat reserved _slot; do
     [ "$until" -le "$now" ] || continue
     if printf '%s\n' "$l" | grep -qx "$id"; then
       u=$(usage_since "$id" "$wat"); [ -n "$u" ] || u=$reserved
@@ -290,7 +291,7 @@ for l in lines:
     except Exception: continue
     j = jobs.setdefault(e.get("job", ""), {"job": e.get("job", ""), "state": "starting"})
     ev = e.get("ev")
-    for k in ("size", "ttl", "thread", "work", "project", "machine", "cmd", "src", "day"):
+    for k in ("size", "ttl", "thread", "slot", "work", "project", "machine", "cmd", "src", "day"):
         if k in e and k not in j: j[k] = e[k]
     if ev == "reserve": j["reserved_cs"] = e.get("reserved", 0); j["queued_at"] = e["at"]
     elif ev == "created": j["sandbox"] = e.get("id"); j["started_at"] = e["at"]; j["state"] = "running"
@@ -305,9 +306,9 @@ for l in lines:
     elif ev == "attempt": j["attempts"] = j.get("attempts", 0) + 1; j["attempt_at"] = e["at"]
     elif ev == "claim": j["sandbox"] = e.get("id"); j["started_at"] = e["at"]; j["state"] = "running"; j["reused"] = True; saved.append(e.get("day", ""))
     sid = e.get("id")
-    if ev in ("created", "claim") and sid: sbx[sid] = {"id": sid, "state": "running", "job": j["job"], "thread": j.get("thread", ""), "size": j.get("size"), "since": e["at"]}
+    if ev in ("created", "claim") and sid: sbx[sid] = {"id": sid, "state": "running", "job": j["job"], "thread": j.get("thread", ""), "slot": j.get("slot", ""), "size": j.get("size"), "since": e["at"]}
     if ev == "ended" and sid and not e.get("kept"): sbx.pop(sid, None)
-    if ev == "warm" and sid: sbx[sid] = {"id": sid, "state": "warm", "job": j["job"], "thread": e.get("thread", ""), "size": e.get("size"), "since": e["at"], "idle_until": e.get("until"), "reserved_cs": e.get("reserved", 0)}
+    if ev == "warm" and sid: sbx[sid] = {"id": sid, "state": "warm", "job": j["job"], "thread": e.get("thread", ""), "slot": e.get("slot", ""), "size": e.get("size"), "since": e["at"], "idle_until": e.get("until"), "reserved_cs": e.get("reserved", 0)}
     if ev in ("deleted", "swept", "orphan") and sid: sbx.pop(sid, None)
     if ev == "deleted": idle_costs.append(e)
 now = int(time.time())
@@ -400,7 +401,7 @@ case ${1:-} in
 esac
 
 SIZE="" TIMEOUT=1800 WAIT=${BOAT_JOB_WAIT:-3600} BUDGET_ASK="" SETUP_BEND=auto
-IDLE=${BOAT_JOB_IDLE:-1200} KEEP_BUILD=0 NOREUSE=0 GUARD=${BOAT_JOB_START_GUARD:-0.8}
+IDLE=${BOAT_JOB_IDLE:-1200} KEEP_BUILD=0 NOREUSE=0 GUARD=${BOAT_JOB_START_GUARD:-0.8} SLOT=""
 ARTS=() EXCL=()
 while [ $# -gt 0 ]; do
   case $1 in
@@ -413,6 +414,7 @@ while [ $# -gt 0 ]; do
     --idle) IDLE=$2; shift 2 ;;
     --keep-build) KEEP_BUILD=1; shift ;;
     --no-reuse) NOREUSE=1; shift ;;
+    --slot) SLOT=$2; shift 2 ;;
     --setup-bend) SETUP_BEND=yes; shift ;;
     --no-setup-bend) SETUP_BEND=no; shift ;;
     --) shift; break ;;
@@ -435,6 +437,7 @@ sys.exit(0 if proof else 1)'; then
   else SIZE=default; fi
 fi
 case $SIZE in small) RATE2=1 ;; default) RATE2=2 ;; large) RATE2=4 ;; *) say "size $SIZE is not supported (small, default or large; large only when the job is measured to need it)"; exit 75 ;; esac
+case $SLOT in *[!A-Za-z0-9._-]*) say "bad --slot (letters, digits, . _ -)"; exit 75 ;; esac
 case $TIMEOUT$WAIT$IDLE in ''|*[!0-9]*) say "bad --timeout, --wait or --idle"; exit 75 ;; esac
 [ "$IDLE" -le 3600 ] || { say "--idle is at most 3600 s"; exit 75; }
 TTL=$(( TIMEOUT + 600 )); [ $TTL -lt 900 ] && TTL=900; [ $TTL -gt 7200 ] && TTL=7200
@@ -476,25 +479,30 @@ admit() {
   read -r n r s o am ah ad u <<<"$(fold)"
   [ "$o" = 0 ] || { echo "a sandbox delete was never verified; run scripts/boat-job.sh sweep"; return 1; }
   [ "$u" = 0 ] || { echo "an unclear Boat create is unresolved (sandboxes like it are still up past its lifetime): check boat list, delete it if it is ours, then run scripts/boat-job.sh sweep"; return 1; }
-  # a warm sandbox of this thread, free and big enough: reused, no new start
-  if [ "$NOREUSE" = 0 ] && [ -n "$THREAD" ]; then
+  # a warm sandbox of this thread (or of this --slot), free and big enough:
+  # reused, no new start. A slot's sandboxes are only its own; a thread's
+  # only those that belong to no slot.
+  if [ "$NOREUSE" = 0 ] && [ -n "$THREAD$SLOT" ]; then
     local pick wl pid_ psize pres wres
     pick=$(fold warm | python3 -c '
 import sys, time
-thread, size = sys.argv[1], sys.argv[2]; rank = {"small": 0, "default": 1, "large": 2}; now = time.time(); c = []
+thread, size, slot = sys.argv[1], sys.argv[2], sys.argv[3]; rank = {"small": 0, "default": 1, "large": 2}; now = time.time(); c = []
 for l in sys.stdin:
     f = l.split()
-    if len(f) < 7 or f[2] != thread or int(f[3]) < now + 60 or rank.get(f[1], 1) < rank.get(size, 1): continue
+    if len(f) < 7 or int(f[3]) < now + 60 or rank.get(f[1], 1) < rank.get(size, 1): continue
+    owner = f[7] if len(f) > 7 else "-"
+    if slot and owner != slot: continue
+    if not slot and (owner != "-" or f[2] != thread): continue
     c.append((rank.get(f[1], 1), -int(f[3]), f[0], f[1], f[6]))
 if c: c.sort(); print(c[0][2], c[0][3], c[0][4])
-' "$THREAD" "$SIZE")
+' "$THREAD" "$SIZE" "$SLOT")
     if [ -n "$pick" ]; then
       read -r pid_ psize wres <<<"$pick"
       wl=$(listed) || { echo "cannot list sandboxes"; return 1; }
       if printf '%s\n' "$wl" | grep -qx "$pid_"; then
         pres=$(( TTL * $(rate2 "$psize") / 2 ))
         if [ $(( s + r - wres + pres )) -le "$BUDGET" ]; then
-          ledger ev=reserve job="$JOB" size="$psize" ttl="$TTL" reserved="$pres" budget="$BUDGET" budget_src="$BUDGET_SRC" src="$SRC" thread="$THREAD" work="$WORK" project="$PROJECT" machine="$MACHINE" cmd="$*" pid=$$ pidid="$(pid_id $$)"
+          ledger ev=reserve job="$JOB" size="$psize" ttl="$TTL" reserved="$pres" budget="$BUDGET" budget_src="$BUDGET_SRC" src="$SRC" thread="$THREAD" slot="$SLOT" work="$WORK" project="$PROJECT" machine="$MACHINE" cmd="$*" pid=$$ pidid="$(pid_id $$)"
           ledger ev=claim job="$JOB" id="$pid_" size="$psize" thread="$THREAD"
           echo "claim $pid_ $psize"; return 0
         fi
@@ -537,7 +545,7 @@ if not st.get("unlimited"):
         rem, lim = int(st[w]["remaining"]), int(st[w]["limit"])
         used = max(lim - rem, mine) + n
         if used + 1 > guard * lim:
-            print(f"NO start guard: {used} of {lim} Boat starts used this {w} (over {round(guard * 100)}%), and this thread has no free warm sandbox to reuse. Run the job from a thread whose sandbox is warm, wait for the {w} window, or run it locally"); sys.exit()
+            print(f"NO start guard: {used} of {lim} Boat starts used this {w} (over {round(guard * 100)}%), and this thread (or slot) has no free warm sandbox to reuse. Run the job from a thread whose sandbox is warm, wait for the {w} window, or run it locally"); sys.exit()
 print("OK")
 ' "$RESERVE" "$SIZE" "$n" "$am" "$ah" "$ad" "$GUARD")
   case $why in
@@ -546,7 +554,7 @@ print("OK")
     *) echo "${why#NO }"; return 1 ;;
   esac
   [ $(( s + r + RESERVE )) -le "$BUDGET" ] || { echo "daily budget \$$BUDGET_USD ($BUDGET_SRC) would be exceeded (spent+reserved $(( s + r )) cs, this job $RESERVE cs)"; return 1; }
-  ledger ev=reserve job="$JOB" size="$SIZE" ttl="$TTL" reserved="$RESERVE" budget="$BUDGET" budget_src="$BUDGET_SRC" src="$SRC" thread="$THREAD" work="$WORK" project="$PROJECT" machine="$MACHINE" cmd="$*" pid=$$ pidid="$(pid_id $$)"
+  ledger ev=reserve job="$JOB" size="$SIZE" ttl="$TTL" reserved="$RESERVE" budget="$BUDGET" budget_src="$BUDGET_SRC" src="$SRC" thread="$THREAD" slot="$SLOT" work="$WORK" project="$PROJECT" machine="$MACHINE" cmd="$*" pid=$$ pidid="$(pid_id $$)"
   echo ok
 }
 refuse() { FINISHING=1; rm -rf "${STAGE:-}"; say "refused: $1"; ledger ev=refused job="$JOB" why="$1" budget="$BUDGET" budget_src="$BUDGET_SRC" thread="$THREAD" work="$WORK" project="$PROJECT" machine="$MACHINE" size="$SIZE"; exit 75; }
@@ -608,12 +616,12 @@ finish() {
   [ "$HB" -gt 1 ] 2>/dev/null && kill "$HB" 2>/dev/null
   if [ -n "$ID" ]; then
     u=$(usage_since "$ID" "$JSTART"); [ -n "$u" ] || u=$RESERVE
-    keep=0; [ "$IDLE" -gt 0 ] && [ -n "$THREAD" ] && [ "$CANCELLED" = 0 ] && case $rc in 70|76|77|143) ;; *) keep=1 ;; esac
+    keep=0; [ "$IDLE" -gt 0 ] && [ -n "$THREAD$SLOT" ] && [ "$CANCELLED" = 0 ] && case $rc in 70|76|77|143) ;; *) keep=1 ;; esac
     if [ $keep = 1 ] && BT=60 b extend "$ID" --ttl $(( IDLE + 300 )) --json >/dev/null 2>&1; then
       until=$(( $(date +%s) + IDLE ))
       ledger ev=ended job="$JOB" id="$ID" cost="$u" rc="$rc" kept=1
-      ledger ev=warm job="$JOB" id="$ID" until="$until" thread="$THREAD" size="$SIZE" reserved=$(( (IDLE + 300) * RATE2 / 2 ))
-      echo "sandbox $ID kept warm for this thread until $(date -d "@$until" +%H:%M 2>/dev/null || echo "+${IDLE}s") (Boat stops it 5 min later at the latest); this job used ${u} credit-s"
+      ledger ev=warm job="$JOB" id="$ID" until="$until" thread="$THREAD" slot="$SLOT" size="$SIZE" reserved=$(( (IDLE + 300) * RATE2 / 2 ))
+      echo "sandbox $ID kept warm for this $([ -n "$SLOT" ] && echo "slot ($SLOT)" || echo thread) until $(date -d "@$until" +%H:%M 2>/dev/null || echo "+${IDLE}s") (Boat stops it 5 min later at the latest); this job used ${u} credit-s"
     elif delete_verify "$ID"; then ledger ev=ended job="$JOB" id="$ID" cost="$u" rc="$rc"; echo "sandbox $ID deleted (verified); used ${u} credit-s (\$$(python3 -c "print(round($u/100000,5))"))"
     else ledger ev=orphan job="$JOB" id="$ID"; say "COULD NOT VERIFY delete of $ID: later jobs are refused until scripts/boat-job.sh sweep removes it"; rc=77; fi
   else
@@ -629,6 +637,9 @@ trap 'CANCELLED=1; say "cancelled"; finish 143' TERM INT HUP
 if [ "$CLAIMED" = 1 ]; then
   ID=$CLAIM_ID; JSTART=$(date +%s)
   echo "reusing this thread's warm sandbox $ID ($SIZE): no new Boat start"
+  # a --slot sandbox keeps the last project's tree (renamed to this one's), so
+  # only what differs is sent below; anything else is wiped as before
+  [ -n "$SLOT" ] && clean="set -e; rm -rf /home/user/.bj-keep /home/user/.bj-delta; touch /home/user/.bj-projects; last=''; while read -r p; do [ -n \"\$p\" ] && [ -d \"/home/user/\$p\" ] && last=\$p; done < /home/user/.bj-projects; while read -r p; do [ -n \"\$p\" ] || continue; [ \"\$p\" = \"\$last\" ] || rm -rf \"/home/user/\$p\"; done < /home/user/.bj-projects; if [ -n \"\$last\" ] && [ \"\$last\" != '$NAME_GUESS' ]; then rm -rf '/home/user/$NAME_GUESS'; mv \"/home/user/\$last\" '/home/user/$NAME_GUESS'; fi; : > /home/user/.bj-projects; echo cleaned" || \
   clean="set -e; k=/home/user/.bj-keep; rm -rf \$k; mkdir -p \$k; touch /home/user/.bj-projects; while read -r p; do [ -n \"\$p\" ] || continue; d=/home/user/\$p; if [ $KEEP_BUILD = 1 ] && [ \"\$p\" = '$NAME_GUESS' ] && [ -d \$d/build ]; then mv \$d/build \$k/build; fi; rm -rf \"\$d\"; done < /home/user/.bj-projects; : > /home/user/.bj-projects; echo cleaned"
   if ! { BT=60 b extend "$ID" --ttl "$TTL" --json >/dev/null 2>&1 && BT=120 b exec "$ID" --timeout 120 -- bash -c "$clean" >/dev/null 2>&1; }; then
     say "warm sandbox $ID could not be reused; deleting it and admitting a new one"
@@ -723,8 +734,55 @@ if [ "$CLAIMED" = 0 ]; then
 fi
 
 T1=$(date +%s)
+# A claimed --slot sandbox still holds an earlier tree: it is hashed there,
+# only the files that differ are sent and the ones not in this manifest are
+# removed, then the whole tree is hashed again and must be exactly this
+# manifest (.git aside; build/ too with --keep-build). Anything else (no
+# tree, an unreadable answer, a mismatch) wipes it and pushes all of it.
+delta_push() {
+  local D r k=""
+  [ "$KEEP_BUILD" = 1 ] && k="-path ./build -prune -o"
+  r=$(BT=200 b exec "$ID" --timeout 180 -- bash -c "cd /home/user/$NAME 2>/dev/null || exit 3; echo BJ-BEGIN; find . -path ./.git -prune -o $k -type f -print0 | LC_ALL=C sort -z | xargs -0 -r sha256sum; echo BJ-END" 2>/dev/null | plain) || return 1
+  printf '%s\n' "$r" | grep -qx BJ-END || return 1
+  D=$(mktemp -d) || return 1
+  printf '%s\n' "$r" | sed -n '/^BJ-BEGIN$/,/^BJ-END$/p' | grep -E '^[0-9a-f]{64}  \./' > "$D/remote" || true
+  python3 - "$OUT/manifest.sha256" "$D/remote" "$STAGE/$NAME" "$D/d" <<'PYEOF' || { rm -rf "$D"; return 1; }
+import os, shutil, sys
+man, rem, src, out = sys.argv[1:5]
+def rows(p):
+    d = {}
+    for l in open(p, encoding="utf-8", errors="surrogateescape").read().splitlines():
+        h, _, f = l.partition("  ")
+        if len(h) != 64 or not f.startswith("./") or "\n" in f: sys.exit(1)
+        d[f] = h
+    return d
+want, have = rows(man), rows(rem)
+os.makedirs(out + "/files")
+send = [f for f, h in want.items() if have.get(f) != h]
+for f in send:
+    os.makedirs(os.path.dirname(os.path.join(out, "files", f)), exist_ok=True)
+    shutil.copy2(os.path.join(src, f), os.path.join(out, "files", f))
+open(out + "/extra.txt", "w", encoding="utf-8", errors="surrogateescape").write("".join(f + "\n" for f in have if f not in want))
+shutil.copy(man, out + "/manifest.sha256")
+print("delta: %d of %d files sent, %d removed" % (len(send), len(want), sum(1 for f in have if f not in want)))
+PYEOF
+  BT=600 b push "$ID" "$D/d" --to /home/user/.bj-delta --json >/dev/null 2>"$OUT/push.err" || { rm -rf "$D"; return 1; }
+  rm -rf "$D"
+  r=$(BT=200 b exec "$ID" --timeout 180 -- bash -c "set -e; d=/home/user/.bj-delta; cd /home/user/$NAME; if [ -d \$d/files ]; then cp -a \$d/files/. ./; fi; while IFS= read -r p; do rm -f -- \"\$p\"; done < \$d/extra.txt; find . -mindepth 1 -type d -empty -not -path './.git' -not -path './.git/*' -delete; find . -path ./.git -prune -o $k -type f -print0 | LC_ALL=C sort -z | xargs -0 -r sha256sum | LC_ALL=C sort > \$d/have; LC_ALL=C sort \$d/manifest.sha256 > \$d/want; cmp -s \$d/have \$d/want && echo BJ-SYNCED; rm -rf \$d" 2>/dev/null | plain) || return 1
+  printf '%s\n' "$r" | grep -qx BJ-SYNCED
+}
+SYNCED=0
+if [ "$CLAIMED" = 1 ] && [ -n "$SLOT" ]; then
+  if delta_push; then SYNCED=1; echo "synced the slot's kept tree in $(( $(date +%s) - T1 ))s (only the files that differ sent; the whole tree verified against the manifest)"
+  else
+    say "the slot's kept tree could not be synced; wiping it and pushing all of it"
+    BT=120 b exec "$ID" --timeout 120 -- bash -c "rm -rf /home/user/$NAME /home/user/.bj-delta" >/dev/null 2>&1 || { say "could not wipe the kept tree"; finish 76; }
+  fi
+fi
+if [ "$SYNCED" = 0 ]; then
 BT=600 b push "$ID" "$STAGE/$NAME" --json >/dev/null 2>"$OUT/push.err" || { say "push failed: $(nourl < "$OUT/push.err" | head -c 300)"; finish 76; }
 echo "pushed in $(( $(date +%s) - T1 ))s"
+fi
 
 # pinned Bend from the pushed tree's CI setup (only when the tree has one, or asked)
 BEND_LINE=""
@@ -740,7 +798,7 @@ EOF
   BEND_LINE="set -e; if [ \"\$(cat \$HOME/.bend/.pinned 2>/dev/null)\" = '$BV $BSUM' ] && [ -x \$HOME/.bend/bin/bend ]; then echo bend $BV already installed; else n=bend-$BV-linux-x64.tar.gz; t=\$(mktemp -d); curl --proto =https --tlsv1.2 -fsSL -o \$t/\$n https://github.com/bendlang/bend/releases/download/v$BV/\$n; echo '$BSUM  '\$t/\$n | sha256sum -c - >/dev/null; tar -xzf \$t/\$n -C \$t; rm -rf \$HOME/.bend; mkdir -p \$HOME/.bend/bin; mv \$t/bend/bend2 \$t/bend/guide \$HOME/.bend/; mv \$t/bend/bin/bend \$HOME/.bend/bin/bend; echo '$BV $BSUM' > \$HOME/.bend/.pinned; echo bend $BV sha256-verified; fi;"
 elif [ "$SETUP_BEND" = yes ]; then say "--setup-bend: no .github/actions/setup-bend/action.yml here"; finish 76; fi
 T2=$(date +%s)
-BT=600 b exec "$ID" --timeout 600 -- bash -c "${BEND_LINE} echo $NAME >> /home/user/.bj-projects; [ -d /home/user/.bj-keep/build ] && mv /home/user/.bj-keep/build /home/user/$NAME/build && echo build/ kept; cd /home/user/$NAME && git init -q && git add -A && git -c user.name=boat-job -c user.email=boat-job@localhost commit -qm '$REV' && echo tree committed" > "$OUT/setup.log" 2>&1 \
+BT=600 b exec "$ID" --timeout 600 -- bash -c "${BEND_LINE} echo $NAME >> /home/user/.bj-projects; [ -d /home/user/.bj-keep/build ] && mv /home/user/.bj-keep/build /home/user/$NAME/build && echo build/ kept; cd /home/user/$NAME && git init -q && git add -A && git -c user.name=boat-job -c user.email=boat-job@localhost commit -q --allow-empty -m '$REV' && echo tree committed" > "$OUT/setup.log" 2>&1 \
   || { say "setup failed: $(nourl < "$OUT/setup.log" | tail -5)"; finish 76; }
 nourl < "$OUT/setup.log"; echo "setup in $(( $(date +%s) - T2 ))s"
 

@@ -9642,10 +9642,10 @@ def RefNav.act(i: Nat, +u: Ui, +value: String) -> Act:
 
 # Settings navigation is client-local; choosing a page never persists a setting.
 def Settings.pages() -> List<&2, String>:
-  ["appearance", "threads", "agents", "writing", "cad", "network", "voice", "keys", "antigravity", "timezone", "usage", "about", "privacy"]
+  ["appearance", "threads", "agents", "writing", "cad", "network", "voice", "keys", "antigravity", "timezone", "usage", "about", "privacy", "beta"]
 
 def Settings.phone.pages() -> List<&2, String>:
-  ["appearance", "threads", "agents", "cad", "network", "keys", "antigravity", "timezone", "usage", "about", "privacy"]
+  ["appearance", "threads", "agents", "cad", "network", "keys", "antigravity", "timezone", "usage", "about", "privacy", "beta"]
 
 def Settings.known(ps: List<&2, String>, +page: String) -> Bool:
   match ps:
@@ -9672,6 +9672,7 @@ def Settings.label(i: Nat, +l: I.Loc) -> String:
     case 9n: MSG.T.settings.zone(l)
     case 10n: MSG.T.settings.usage(l)
     case 12n: MSG.T.settings.privacy(l)
+    case 13n: MSG.T.settings.beta(l)
     case _: MSG.T.settings.tour(l)
 
 def Settings.title(+l: I.Loc, +page: String) -> String:
@@ -11741,6 +11742,8 @@ def Touch.raw(c: M.Change) -> List<&2, String>:
       ["*", "!"]
     case M.DeployBuilt{_, _, _, _, _}:
       ["*", "!"]
+    case M.CtxNoted{+thread, _, _, _, _}:
+      [thread]
 
 # a thread id as touched: a subagent's log ("@sub:<thread>", model.bend's
 # Bg.log) is its thread's; any other name with "@" is no plain thread, so

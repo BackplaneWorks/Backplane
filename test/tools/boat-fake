@@ -45,7 +45,8 @@ case $sub in
     echo '{"event":"created","desktopUrl":"https://example.invalid/secret-token"}'
     echo "{\"id\":\"$id\",\"state\":\"ready\"}" ;;
   push)
-    fail push; id=$1; src=$2; cp -r "$src" "$(home "$id")/" ;;
+    fail push; id=$1; src=$2; to=""; [ "${3:-}" = --to ] && to=${4:-}
+    if [ -n "$to" ]; then d="$(home "$id")${to#/home/user}"; mkdir -p "$d"; cp -r "$src/." "$d/"; else cp -r "$src" "$(home "$id")/"; fi ;;
   exec)
     fail exec; id=$1; shift
     st=0; while [ $# -gt 0 ]; do case $1 in --timeout) shift 2 ;; --stream) st=1; shift ;; --) shift; break ;; *) break ;; esac; done

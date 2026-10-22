@@ -29,6 +29,19 @@ Idle time counts against the daily cap. Runs without a thread (by hand),
 cancelled jobs and failed setups delete at once. `--no-reuse` always
 starts a new one.
 
+Slots (`--slot NAME`): a sandbox kept warm for a named slot instead of
+a thread, so a caller that runs many jobs (bp-coord's local CI,
+`scripts/ci-fast.py`, slots `ci-1`...`ci-16`) gets its sandboxes back
+across runs whatever thread runs it. A slot's warm sandbox is used only
+by that slot (a thread never takes one, nor a slot a thread's), and it
+keeps its last tree: the next job hashes it on the sandbox, sends only
+the files that differ, removes the ones not in this job's manifest, and
+hashes the whole tree again, which must be exactly the manifest (`.git`
+aside, `build/` too with `--keep-build`); anything else wipes it and
+pushes all of it. A full push of this repository takes about 100 s; a
+synced one a few seconds. Budget, start guard, lifetime, sweep and
+ledger are as for a thread's.
+
 Start guard: past 80% of Boat's hourly or daily start limit
 (`BOAT_JOB_START_GUARD`), no new sandbox is started; a job from a thread
 with a free warm sandbox still runs. The refusal says so.

@@ -127,8 +127,12 @@ import ../core/task.bend as TKS
 import ../core/teach.bend as TE
 import ../core/usage.bend as UZ
 import ./thinstore.bend as TSTO
+import ./db.bend as UDB
+import ./uctxio.bend as UXIO
+import ../core/uctx.bend as UCX
 import ../core/copy.bend as CP # BACKPLANE_COPY
 import ../core/copynet.bend as CN
+import ../core/early.bend as EA
 
 # The server. One hub computation owns the read model and the event log;
 # every connection and agent process is its own computation and talks to
@@ -2533,6 +2537,144 @@ def BtwJob.run(+tx: AG.Tx, +inbox: Chan(Msg), +client: U32, +id: String, +thread
 def SumJob.run(+tx: AG.Tx, +inbox: Chan(Msg), +id: String, +kind: String, +input: String) -> IO(Unit):
   IO.bind(String, Unit, OneShot.run(tx, RF.Sum.system(), input), a =>
     GitJob.say(inbox, "summary.set", [J.KV{"id", J.Str{id}}, J.KV{"kind", J.Str{kind}}, J.KV{"text", J.Str{a}}]))
+
+# The uberbot's infinite context (core/uctx.bend, server/uctxio.bend)
+# -------------------------------------------------------------------
+# Only while uber.ctx is on, and only for the uberbot's own thread: a fresh
+# turn's context is read from store.db (Ucs.prompt: Claude's system prompt,
+# the others' turn text), compaction runs write the tree's lines through
+# the writer (UctxJob, after the uberbot's turns end) and memory_zoom /
+# memory_search answer from the store (Ucs.tool). Off the hub's fiber.
+
+def Ucs.start.k(have: Bool, +kept: String, +h: String, +th: String, +inbox: Chan(Msg)) -> IO(String):
+  match have:
+    case True{}:
+      IO.pure(String, kept)
+    case False{}:
+      do IO<String>:
+        +s : String <- UXIO.Ux.start(h, th)
+        GitJob.say(inbox, "uctx.start", [J.KV{"thread", J.Str{th}}, J.KV{"ord", J.Str{s}}])
+        return s
+
+# where the thread's tree starts: kept, else found now and kept
+def Ucs.start(+h: String, +st: M.State, +th: String, +inbox: Chan(Msg)) -> IO(String):
+  Ucs.start.k(Bool.not(String.is_empty(UCX.Uctx.start(st, th))), UCX.Uctx.start(st, th), h, th, inbox)
+
+def Ucs.prompt.k(on: Bool, +h: String, +st: M.State, +th: String, +inbox: Chan(Msg)) -> IO(String):
+  match on:
+    case False{}:
+      IO.pure(String, "")
+    case True{}:
+      do IO<String>:
+        +start : String <- Ucs.start(h, st, th, inbox)
+        +v : String <- UXIO.Ux.view(h, th, start)
+        return "\n\n" ++ v
+
+# the view for a fresh turn of th ("" unless it runs with infinite context)
+def Ucs.prompt(+cfg: Cfg, +st: M.State, +th: String, +inbox: Chan(Msg)) -> IO(String):
+  Ucs.prompt.k(UCX.Uctx.on(st, th), Cfg.thin.store(cfg), st, th, inbox)
+
+# a turn's text after the view (Codex, Grok, Muse, Antigravity, OpenCode)
+def Ucs.text(+view: String, +text: String) -> String:
+  Bool.pick(String, String.is_empty(view), text, String.trim(view) ++ "\n\n" ++ text)
+
+# Compaction runs
+
+def UctxJob.said(empty: Bool, +inbox: Chan(Msg), +th: String, +l: Nat, +i: Nat, +line: String) -> IO(Bool):
+  match empty:
+    case True{}:
+      IO.pure(Bool, False{})
+    case False{}:
+      do IO<Bool>:
+        GitJob.say(inbox, "uctx.node", [J.KV{"thread", J.Str{th}}, J.KV{"l", J.Num{Nat.show(l)}}, J.KV{"i", J.Num{Nat.show(i)}}, J.KV{"text", J.Str{line}}])
+        return True{}
+
+# a first answer too long is asked once more with the cut shown; no answer
+# at all (the writer failed) writes nothing
+def UctxJob.again(fits: Bool, empty: Bool, +tx: AG.Tx, +l: Nat, +i: Nat, +src: String, +a: String) -> IO(String):
+  match fits empty:
+    case True{} _:
+      IO.pure(String, UCX.Uctx.line(a))
+    case False{} True{}:
+      IO.pure(String, "")
+    case False{} False{}:
+      IO.bind(String, String, OneShot.run(tx, UCX.Uctx.system(), UCX.Uctx.task(l, i, src) ++ UCX.Uctx.over(a)),
+        +a2 => IO.pure(String, UCX.Uctx.line(Bool.pick(String, String.is_empty(String.trim(a2)), a, a2))))
+
+def UctxJob.line(fits: Bool, +tx: AG.Tx, +l: Nat, +i: Nat, +src: String) -> IO(String):
+  match fits:
+    case True{}:
+      IO.pure(String, UCX.Uctx.line(src))
+    case False{}:
+      IO.bind(String, String, OneShot.run(tx, UCX.Uctx.system(), UCX.Uctx.task(l, i, src)),
+        +a => UctxJob.again(UCX.Uctx.short(a), String.is_empty(String.trim(a)), tx, l, i, src, a))
+
+# one node written and told to the hub; False when the writer gave nothing
+def UctxJob.node(+tx: AG.Tx, +h: String, +th: String, +start: String, +l: Nat, +i: Nat, +inbox: Chan(Msg)) -> IO(Bool):
+  do IO<Bool>:
+    +src : String <- UXIO.Ux.source(l, h, th, start, i)
+    +line : String <- UctxJob.line(UCX.Uctx.short(src), tx, l, i, src)
+    UctxJob.said(String.is_empty(line), inbox, th, l, i, line)
+
+def UctxJob.loop(ns: List<&2, UCX.UNode>, ok: Bool, +tx: AG.Tx, +h: String, +th: String, +start: String, +inbox: Chan(Msg)) -> IO(Bool):
+  match ns ok:
+    case _ False{}:
+      IO.pure(Bool, False{})
+    case Nil{} True{}:
+      IO.pure(Bool, True{})
+    case UCX.UNode{+l, +i} <> t True{}:
+      do IO<Bool>:
+        +k : Bool <- UctxJob.node(tx, h, th, start, l, i, inbox)
+        UctxJob.loop(t, k, tx, h, th, start, inbox)
+
+def UctxJob.go(rs: List<&2, List<&2, String>>, lr: List<&2, List<&2, String>>, +tx: AG.Tx, +h: String, +th: String, +start: String, +inbox: Chan(Msg)) -> IO(Unit):
+  do IO<Unit>:
+    +ms : List<&2, UCX.UMsg> = UCX.Uctx.msgs(rs)
+    +due : List<&2, UCX.UNode> = UCX.Uctx.due(List.length(&2, UCX.UMsg, ms), UCX.Uctx.jobs(), UCX.Uctx.fit(ms, 0n, UCX.Uctx.lined(lr, Map.new(&2, Bool))))
+    +ok : Bool <- UctxJob.loop(due, True{}, tx, h, th, start, inbox)
+    GitJob.say(inbox, "uctx.done", [J.KV{"thread", J.Str{th}}, J.KV{"more", J.Str{Bool.pick(String, Bool.and(ok, Nat.is_ge(List.length(&2, UCX.UNode, due), UCX.Uctx.jobs())), "1", "0")}}])
+
+def UctxJob.read(bad: Bool, rs: List<&2, List<&2, String>>, +tx: AG.Tx, +h: String, +th: String, +start: String, +inbox: Chan(Msg)) -> IO(Unit):
+  match bad:
+    case True{}:
+      do IO<Unit>:
+        PS.Log.warn("uctx", "the store could not be read: " ++ UXIO.Ux.why(rs))
+        GitJob.say(inbox, "uctx.done", [J.KV{"thread", J.Str{th}}, J.KV{"more", J.Str{"0"}}])
+    case False{}:
+      IO.bind(List<&2, List<&2, String>>, Unit, UXIO.Ux.q(h, UCX.Uctx.sql.lined(), [UDB.DbText{th}]), lr => UctxJob.go(rs, lr, tx, h, th, start, inbox))
+
+# a compaction run: the nodes due (Uctx.due), each written by the writer
+# (the settings' text model) and told to the hub (uctx.node), then
+# uctx.done, which starts another run when this one left work
+def UctxJob.run(+tx: AG.Tx, +h: String, +st: M.State, +th: String, +inbox: Chan(Msg)) -> IO(Unit):
+  do IO<Unit>:
+    +start : String <- Ucs.start(h, st, th, inbox)
+    +rs : List<&2, List<&2, String>> <- UXIO.Ux.q(h, UCX.Uctx.sql.msgs(), [UDB.DbText{th}, UDB.DbInt{start}])
+    UctxJob.read(UXIO.Ux.failed(rs), rs, tx, h, th, start, inbox)
+
+# memory_zoom and memory_search
+
+def Ucs.is(+o: J.Json) -> Bool:
+  Bool.and(String.eq(J.Json.get_str(o, "method", ""), "tools/call"),
+    Bool.or(String.eq(J.Json.get_str(J.Json.get_obj(o, "params"), "name", ""), "memory_zoom"), String.eq(J.Json.get_str(J.Json.get_obj(o, "params"), "name", ""), "memory_search")))
+
+def Ucs.answer(+id: String, text: String) -> String:
+  "{\"jsonrpc\":\"2.0\",\"id\":" ++ id ++ ",\"result\":" ++ J.Json.show(J.Json.obj([J.KV{"content", J.Json.arr([J.Json.obj([J.KV{"type", J.Str{"text"}}, J.KV{"text", J.Str{text}}])])}, J.KV{"isError", J.Flag{False{}}}])) ++ "}"
+
+def Ucs.tool.k(zoom: Bool, +h: String, +st: M.State, +th: String, +start: String, +a: J.Json) -> IO(String):
+  match zoom:
+    case True{}:
+      UXIO.Ux.zoom(h, st, th, start, J.Json.get_nat(a, "id", 0n), J.Json.get_nat(a, "n", 1n), J.Json.get_nat(a, "at", 0n))
+    case False{}:
+      UXIO.Ux.search(h, st, th, start, J.Json.get_str(a, "query", ""))
+
+def Ucs.tool(+h: String, +st: M.State, +th: String, +o: J.Json, +reply: Chan(String)) -> IO(Unit):
+  do IO<Unit>:
+    +start : String = Bool.pick(String, String.is_empty(UCX.Uctx.start(st, th)), "0", UCX.Uctx.start(st, th))
+    +text : String <- Ucs.tool.k(String.eq(J.Json.get_str(J.Json.get_obj(o, "params"), "name", ""), "memory_zoom"), h, st, th, start, J.Json.get_obj(J.Json.get_obj(o, "params"), "arguments"))
+    sent : Result<&1, &1, String, Unit> <- Chan.send(String, reply, Ucs.answer(J.Json.as_raw(J.Json.get(o, "id"), "null"), text))
+    return Unit{}
+
 
 def AgentJob.named(+r: String, +inbox: Chan(Msg), +thread: String) -> IO(Unit):
   Bool.pick(IO(Unit), GT.Git.failed(r), GitJob.note(inbox, thread, "error", "branch name: " ++ r),
@@ -8749,7 +8891,8 @@ def Claude.job(+cfg: Cfg, +st: M.State, +thread: String, +cwd: String, +model: S
     +fs : K.Files <- K.Files.read(cwd)
     ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, AutoView{thread, fs})
     +keys : String <- AKS.Ak.prompt(Cfg.home(cfg))
-    Keyring.gate("claude", IO.bind(Result<&1, &1, U32 & String, U32 & Socket>, Unit, H.Proc.spawn("env", "MCP_TOOL_TIMEOUT=86400000" <> "CLAUDE_CODE_ENABLE_TODO_TOOLS=1" <> "claude" <> Hub.agent_args(cfg, thread, model, session, r, i, Hub.prompt(cfg, st, thread, cwd, fs, keys), effort, gen), cwd, 3),
+    +ux : String <- Ucs.prompt(cfg, st, thread, inbox)
+    Keyring.gate("claude", IO.bind(Result<&1, &1, U32 & String, U32 & Socket>, Unit, H.Proc.spawn("env", "MCP_TOOL_TIMEOUT=86400000" <> "CLAUDE_CODE_ENABLE_TODO_TOOLS=1" <> "claude" <> Hub.agent_args(cfg, thread, model, session, r, i, Hub.prompt(cfg, st, thread, cwd, fs, keys) ++ ux, effort, gen), cwd, 3),
       res => Claude.started(res, thread, gen, cwd, input, inbox)), Claude.fail(thread, gen, KR.Keyring.refusal("claude"), inbox))
 
 def Agents.pid.k(same: Bool, a: Agent, +pid: U32) -> Agent:
@@ -9173,6 +9316,20 @@ def RunJob.start(r: MST.StoreResult<List<&2, MB.Body>>, +inbox: Chan(Msg), +s: M
     case MST.Missing{_}: Self.post(inbox, RunReady{th, head, Nil{}})
     case MST.StoreError{+path, +err}: Self.post(inbox, Commit{[M.ActivityLogged{th, B.Hub.id("run-read", now, M.State.seq(s)), "error", "mail", path ++ ": " ++ err, now}, M.TurnChanged{th, M.Failed{}, now}, M.ThreadSettled{th, False{}, now}]})
 
+# a Git job (hub.bend's Git): the uberbot's compaction run (job "uctx",
+# UctxJob) here, any other as it always ran
+def Hub.git.out(uctx: Bool, h: Hub, +client: U32, +id: String, +job: String, +thread: String, +cwd: String, +a: String, +b: String) -> IO(Hub):
+  match uctx h:
+    case True{} Hub{+st, f, ls, cl, as, +inbox, +cfg, note}:
+      do IO<Hub>:
+        IO.spawn(Unit, UctxJob.run(AG.Text.of(st), Cfg.thin.store(cfg), st, thread, inbox))
+        return Hub{st, f, ls, cl, as, inbox, cfg, note}
+    case False{} Hub{+st, f, ls, cl, +as, +inbox, +cfg, note}:
+      do IO<Hub>:
+        +now : Nat <- Now.nat()
+        KExportJob.route(String.eq(job, "kexport"), inbox, client, id, thread, cwd, Cfg.home(cfg), Cfg.rt(cfg), a, KiCadJob.route(String.eq(job, "kicad"), inbox, client, id, thread, cwd, Cfg.rt(cfg), Media.run(AG.Text.of(st), job, inbox, client, id, thread, cwd, Bot.attach(String.eq(job, "attach.claude"), cfg, st, now, thread, a), b, Cfg.home(cfg), Net.managed(Cfg.net(cfg)), Agents.gen(as, thread))))
+        return Claude.prep(Bool.and(String.eq(job, "attach.claude"), Bool.not(String.is_empty(b))), Hub{st, f, ls, cl, as, inbox, cfg, note}, thread, b)
+
 def Hub.out(h: Hub, o: B.Out) -> IO(Hub):
   match h o:
     case Hub{+st, f, ls, cl, as, inbox, cfg, note} B.RunStart{+thread, conv, head}:
@@ -9241,7 +9398,8 @@ def Hub.out(h: Hub, o: B.Out) -> IO(Hub):
     case Hub{+st, f, ls, cl, as, +inbox, +cfg, note} B.CodexTurn{+thread, +cwd, +model, +session, r, text}:
       do IO<Hub>:
         +now : Nat <- Now.nat()
-        +t2 : String = Far.turn(cfg, st, now, thread, text)
+        +ux : String <- Ucs.prompt(cfg, st, thread, inbox)
+        +t2 : String = Ucs.text(ux, Far.turn(cfg, st, now, thread, text))
         +g : String = Hub.gen(st, now)
         IO.spawn(Unit, IO.bind(String, Unit, EmbNote.take(cfg, st, thread), n => Codex.go(cfg, st, thread, cwd, model, session, r, t2 ++ n, g, inbox)))
         Hub.placeholder(Hub{st, f, ls, cl, as, inbox, cfg, note}, thread, g)
@@ -9262,28 +9420,32 @@ def Hub.out(h: Hub, o: B.Out) -> IO(Hub):
     case Hub{+st, f, ls, cl, as, +inbox, +cfg, note} B.GrokTurn{+thread, +cwd, +model, +session, r, +text}:
       do IO<Hub>:
         +now : Nat <- Now.nat()
-        +t2 : String = Far.turn(cfg, st, now, thread, text)
+        +ux : String <- Ucs.prompt(cfg, st, thread, inbox)
+        +t2 : String = Ucs.text(ux, Far.turn(cfg, st, now, thread, text))
         +g : String = Hub.gen(st, now)
         IO.spawn(Unit, IO.bind(String, Unit, EmbNote.take(cfg, st, thread), n => Grok.go(cfg, st, thread, cwd, model, session, r, t2 ++ n, g, inbox)))
         Hub.placeholder(Hub{st, f, ls, cl, as, inbox, cfg, note}, thread, g)
     case Hub{+st, f, ls, cl, as, +inbox, +cfg, note} B.MuseTurn{+thread, +cwd, +model, +session, r, +text}:
       do IO<Hub>:
         +now : Nat <- Now.nat()
-        +t2 : String = Far.turn(cfg, st, now, thread, text)
+        +ux : String <- Ucs.prompt(cfg, st, thread, inbox)
+        +t2 : String = Ucs.text(ux, Far.turn(cfg, st, now, thread, text))
         +g : String = Hub.gen(st, now)
         IO.spawn(Unit, IO.bind(String, Unit, EmbNote.take(cfg, st, thread), n => Muse.go(cfg, st, thread, cwd, model, session, r, t2 ++ n, g, inbox)))
         Hub.placeholder(Hub{st, f, ls, cl, as, inbox, cfg, note}, thread, g)
     case Hub{+st, f, ls, cl, as, +inbox, +cfg, note} B.AgyTurn{+thread, +cwd, +model, +session, r, +text}:
       do IO<Hub>:
         +now : Nat <- Now.nat()
-        +t2 : String = Far.turn(cfg, st, now, thread, text)
+        +ux : String <- Ucs.prompt(cfg, st, thread, inbox)
+        +t2 : String = Ucs.text(ux, Far.turn(cfg, st, now, thread, text))
         +g : String = Hub.gen(st, now)
         IO.spawn(Unit, IO.bind(String, Unit, EmbNote.take(cfg, st, thread), n => Agt.go(cfg, st, thread, cwd, model, session, r, t2 ++ n, g, inbox)))
         Hub.placeholder(Hub{st, f, ls, cl, as, inbox, cfg, note}, thread, g)
     case Hub{+st, f, ls, cl, as, +inbox, +cfg, note} B.OcTurn{+thread, +cwd, +model, +session, r, +text}:
       do IO<Hub>:
         +now : Nat <- Now.nat()
-        +t2 : String = Far.turn(cfg, st, now, thread, text)
+        +ux : String <- Ucs.prompt(cfg, st, thread, inbox)
+        +t2 : String = Ucs.text(ux, Far.turn(cfg, st, now, thread, text))
         +g : String = Hub.gen(st, now)
         IO.spawn(Unit, IO.bind(String, Unit, EmbNote.take(cfg, st, thread), n => Oc.go(cfg, st, thread, cwd, model, session, r, t2 ++ n, g, inbox)))
         Hub.placeholder(Hub{st, f, ls, cl, as, inbox, cfg, note}, thread, g)
@@ -9368,10 +9530,7 @@ def Hub.out(h: Hub, o: B.Out) -> IO(Hub):
         Term.put(Cfg.tm(cfg), TM.TKill{key})
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
     case Hub{+st, f, ls, cl, +as, +inbox, +cfg, note} B.Git{+client, +id, +job, +thread, +cwd, +a, +b}:
-      do IO<Hub>:
-        +now : Nat <- Now.nat()
-        KExportJob.route(String.eq(job, "kexport"), inbox, client, id, thread, cwd, Cfg.home(cfg), Cfg.rt(cfg), a, KiCadJob.route(String.eq(job, "kicad"), inbox, client, id, thread, cwd, Cfg.rt(cfg), Media.run(AG.Text.of(st), job, inbox, client, id, thread, cwd, Bot.attach(String.eq(job, "attach.claude"), cfg, st, now, thread, a), b, Cfg.home(cfg), Net.managed(Cfg.net(cfg)), Agents.gen(as, thread))))
-        return Claude.prep(Bool.and(String.eq(job, "attach.claude"), Bool.not(String.is_empty(b))), Hub{st, f, ls, cl, as, inbox, cfg, note}, thread, b)
+      Hub.git.out(String.eq(job, "uctx"), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, id, job, thread, cwd, a, b)
     case Hub{st, f, ls, cl, as, inbox, +cfg, note} B.AskAnswered{+ask, +answer}:
       do IO<Hub>:
         Park.put(Cfg.pk(cfg), PK.PAnswer{ask, answer})
@@ -9859,9 +10018,11 @@ def Hub.step.fallback.done(held: List<Hub>, states: List<&2, M.State>, step: B.S
     case h <> hs st <> ss: Hub.step.wakes(step, st, h)
     case _ _: IO.die(Hub & Bool, 1, "missing fallback step context")
 
-def Hub.step.fallback.fold(states: List<&2, M.State>, caps: J.Json, now: Nat, step: B.Step, held: List<Hub>) -> IO(Hub & Bool):
+# (then the uberbot's infinite context: hub.bend's Uc.after, the step as
+# it was while uber.ctx is off)
+def Hub.step.fallback.fold(states: List<&2, M.State>, caps: J.Json, +now: Nat, step: B.Step, held: List<Hub>) -> IO(Hub & Bool):
   match states:
-    case +st <> rest: Hub.step.fallback.done(held, [st], B.Fallback.validate(st, caps, now, step))
+    case +st <> rest: Hub.step.fallback.done(held, [st], B.Uc.after(st, now, B.Fallback.validate(st, caps, now, step)))
     case Nil{}: IO.die(Hub & Bool, 1, "missing fallback state")
 
 def Hub.step.fallback.kept(r: J.Json & BN.Bn, +cfg: Cfg, h: Hub) -> J.Json & List<Hub>:
@@ -13189,21 +13350,159 @@ def Accept.loop(fuel: Nat, l: Listener, +id: U32, +web: String, +inbox: Chan(Msg
       IO.bind(Listener & Result<&1, &1, U32 & String, Socket>, Unit, TCP.accept(l),
         r => Accept.got(r, id, web, inbox, trusted, token, owner, l2 => Accept.loop(f, l2, (id + 1 : U32), web, inbox, trusted, token, owner)))
 
+# The early listener
+# ------------------
+# Main.boot binds the hub's port before it loads its state (which can take
+# minutes while store.db is first built from the log). Until the hub is
+# ready the listener's accept loop answers every request, a WebSocket
+# upgrade too, with core/early.bend's 503 (Retry-After: 2, the build's
+# progress from <home>/store.build), so clients wait instead of failing.
+# When the hub is ready it sends the loop EarlyGo on its channel, and the
+# same fiber goes on as Accept.loop over the same listener: never closed,
+# never bound twice. The loop looks at the channel after each accept, so a
+# connection accepted before the go gets its 503 and every later one is
+# served; none is dropped.
+
+# Accept.loop's arguments, known once the hub is up
+type EarlyGo is Data:
+  EarlyGo{web: String, inbox: Chan(Msg), trusted: Bool, token: String, owner: String}
+
+# a listener bound early (its loop waiting for the go), or the bind's error
+type Early is Data:
+  EarlyUp{ctl: Chan(EarlyGo)}
+  EarlyDown{e: U32 & String}
+
+def Early.answer(s: Socket, +home: String) -> IO(Unit):
+  do IO<Unit>:
+    +b : String <- Files.text(EA.Early.build.path(home))
+    Conn.finish(s, EA.Early.response(Main.version(), b))
+
+def Early.head.k(m: Maybe<&2, W.Split>, s: Socket, buf: List<&2, U32>, +home: String, k: Socket -> List<&2, U32> -> IO(Unit)) -> IO(Unit):
+  match m:
+    case Some{_}:
+      Early.answer(s, home)
+    case None{}:
+      IO.bind(Socket & Result<&1, &1, U32 & String, List<&2, U32>>, Unit, H.Sock.recv_bytes(s, 65536), r => Conn.head.got(r, buf, k))
+
+# the request's head is read first (closing on unread bytes would reset
+# the connection before the client reads the answer)
+def Early.head(fuel: Nat, s: Socket, +buf: List<&2, U32>, +home: String) -> IO(Unit):
+  match fuel:
+    case 0n:
+      Early.answer(s, home)
+    case 1n+f:
+      Early.head.k(W.Http.split(buf), s, buf, home, s2 => b2 => Early.head(f, s2, b2, home))
+
+def Early.got(r: Listener & Result<&1, &1, U32 & String, Socket>, +home: String, k: Listener -> IO(Unit)) -> IO(Unit):
+  (l, res) = r
+  match res:
+    case Done{s}:
+      do IO<Unit>:
+        IO.spawn(Unit, Early.head(64n, s, Nil{}, home))
+        k(l)
+    case Fail{_}:
+      k(l)
+
+def Early.step(p: Poll<&1, &1, Maybe<&1, EarlyGo>, Unit>, r: Listener & Result<&1, &1, U32 & String, Socket>, f: Nat, +id: U32, +home: String, k: Listener -> IO(Unit)) -> IO(Unit):
+  match p:
+    case Ready{Some{EarlyGo{+web, +inbox, +trusted, +token, +owner}}}:
+      Accept.got(r, id, web, inbox, trusted, token, owner, l2 => Accept.loop(f, l2, (id + 1 : U32), web, inbox, trusted, token, owner))
+    case _:
+      Early.got(r, home, k)
+
+def Early.loop(+fuel: Nat, l: Listener, +id: U32, +home: String, +ctl: Chan(EarlyGo)) -> IO(Unit):
+  match fuel:
+    case 0n:
+      Listener.close(l)
+    case 1n+f:
+      IO.bind(Listener & Result<&1, &1, U32 & String, Socket>, Unit, TCP.accept(l),
+        r => IO.bind(Poll<&1, &1, Maybe<&1, EarlyGo>, Unit>, Unit, Chan.try_recv(EarlyGo, ctl, 0),
+          p => Early.step(p, r, f, id, home, l2 => Early.loop(f, l2, id, home, ctl))))
+
+# a bound listener starts answering 503 at once; ids as Accept.loop's
+def Early.up(r: Result<&1, &1, U32 & String, Listener>, +id: U32, +home: String) -> IO(Early):
+  match r:
+    case Done{l}:
+      do IO<Early>:
+        +ctl : Chan(EarlyGo) <- Chan.new(EarlyGo, 1)
+        IO.spawn(Unit, Early.loop(Fuel.forever(), l, id, home, ctl))
+        return EarlyUp{ctl}
+    case Fail{e}:
+      IO.pure(Early, EarlyDown{e})
+
+def Early.bind(+host: String, +port: U32, +id: U32, +home: String) -> IO(Early):
+  IO.bind(Result<&1, &1, U32 & String, Listener>, Early, H.Net.listen(host, port), r => Early.up(r, id, home))
+
+def Early.is_up(e: Early) -> Bool:
+  match e:
+    case EarlyUp{_}:
+      True{}
+    case EarlyDown{_}:
+      False{}
+
+# the hub is ready: the loop serves from its next accept on
+def Early.go(+ctl: Chan(EarlyGo), g: EarlyGo) -> IO(Unit):
+  do IO<Unit>:
+    r : Result<&1, &1, EarlyGo, Unit> <- Chan.send(EarlyGo, ctl, g)
+    return Unit{}
+
+# a hub that must listen (backplane-serve, --headless) stops at once when
+# its port is taken, before it loads anything
+def Early.need.die(e: U32 & String, +addr: String) -> IO(Early):
+  (_, msg) = e
+  IO.die(Early, 1, "backplane: cannot listen on " ++ addr ++ ": " ++ msg)
+
+def Early.need(e: Early, need: Bool, +addr: String) -> IO(Early):
+  match e need:
+    case EarlyDown{er} True{}:
+      Early.need.die(er, addr)
+    case EarlyDown{er} False{}:
+      IO.pure(Early, EarlyDown{er})
+    case EarlyUp{c} _:
+      IO.pure(Early, EarlyUp{c})
+
+# the tailnet address's listener, bound early beside the main one (only
+# when that one is up: otherwise the tailnet waits for it, Listen.up)
+type TEarly is Data:
+  TEarly{ip: String, e: Early}
+
+def Early.tail.ip.k(none: Bool, +ip: String, +port: U32, +home: String) -> IO(TEarly):
+  match none:
+    case True{}:
+      IO.pure(TEarly, TEarly{"", EarlyDown{(0, "no tailnet address")}})
+    case False{}:
+      IO.bind(Early, TEarly, Early.bind(ip, port, 2147483648, home), e => IO.pure(TEarly, TEarly{ip, e}))
+
+def Early.tail.ip(+ip: String, +port: U32, +home: String) -> IO(TEarly):
+  Early.tail.ip.k(String.is_empty(ip), ip, port, home)
+
+def Early.tail(on: Bool, +port: U32, +home: String) -> IO(TEarly):
+  match on:
+    case True{}:
+      IO.bind(P.Ran, TEarly, P.Proc.run("tailscale", ["ip", "-4"], ""), r => Early.tail.ip(Tailnet.first(r), port, home))
+    case False{}:
+      IO.pure(TEarly, TEarly{"", EarlyDown{(0, "off")}})
+
+def Net.tailnet(n: Net) -> Bool:
+  match n:
+    case Net{t, _, _, _, _, _, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}:
+      t
+
 # the tailnet address answers when the main listener already covers it
 # (--host 0.0.0.0, or the address itself): the extra bind then fails by design
 def Tailnet.covered(+host: String, +ip: String) -> Bool:
   Bool.or(String.eq(host, "0.0.0.0"), String.eq(host, ip))
 
-def Tailnet.listened(r: Result<&1, &1, U32 & String, Listener>, +host: String, +ip: String, +port: U32, +web: String, +inbox: Chan(Msg), +token: String) -> IO(Unit):
+def Tailnet.listened(r: Early, +host: String, +ip: String, +port: U32, +web: String, +inbox: Chan(Msg), +token: String) -> IO(Unit):
   match r:
-    case Done{l}:
+    case EarlyUp{ctl}:
       do IO<Unit>:
         w : P.Ran <- P.Proc.run("tailscale", ["whois", "--json", ip], "/")
         +owner : String = TN.Tailnet.login(Tailnet.out(w))
         IO.print("Backplane on your tailnet: http://" ++ ip ++ ":" ++ U32.show(port) ++ "/ (" ++ Bool.pick(String, String.is_empty(owner), "pair in Settings", owner ++ "'s devices; pair in Settings") ++ ")")
         ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, LinkFound{TN.Tailnet.report("reachable", TN.Tailnet.link("http://" ++ ip ++ ":" ++ U32.show(port), token))})
-        IO.spawn(Unit, Accept.loop(Fuel.forever(), l, 2147483648, web, inbox, False{}, token, owner))
-    case Fail{_}:
+        Early.go(ctl, EarlyGo{web, inbox, False{}, token, owner})
+    case EarlyDown{_}:
       do IO<Unit>:
         Log.info("could not listen on the tailnet address " ++ ip)
         ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, LinkFound{TN.Tailnet.report(Bool.pick(String, Tailnet.covered(host, ip), "reachable", "unavailable"), "")})
@@ -13217,7 +13516,7 @@ def Tailnet.listen.k(none: Bool, +host: String, +ip: String, +port: U32, +web: S
         ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, LinkFound{TN.Tailnet.report("unavailable", "")})
         return Unit{}
     case False{}:
-      IO.bind(Result<&1, &1, U32 & String, Listener>, Unit, H.Net.listen(ip, port), r => Tailnet.listened(r, host, ip, port, web, inbox, token))
+      IO.bind(Early, Unit, Early.bind(ip, port, 2147483648, ""), r => Tailnet.listened(r, host, ip, port, web, inbox, token))
 
 # listen on the tailnet address too (clients there need the token), and
 # serve HTTPS through `tailscale serve` when asked
@@ -13228,6 +13527,29 @@ def Tailnet.start(n: Net, +host: String, +port: U32, +web: String, +inbox: Chan(
         r : P.Ran <- P.Proc.run("tailscale", ["ip", "-4"], "")
         +ip : String = Tailnet.first(r)
         Tailnet.listen.k(String.is_empty(ip), host, ip, port, web, inbox, token)
+        Tailnet.https(https, port, token, inbox)
+    case Net{False{}, _, _, _, _, _, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}:
+      IO.pure(Unit, Unit{})
+
+# the same with the listener Main.boot bound early (TEarly): no second
+# probe, no second bind
+def Tailnet.early.ip(none: Bool, +ip: String, e: Early, +host: String, +port: U32, +web: String, +inbox: Chan(Msg), +token: String) -> IO(Unit):
+  match none:
+    case True{}:
+      Tailnet.listen.k(True{}, host, ip, port, web, inbox, token)
+    case False{}:
+      Tailnet.listened(e, host, ip, port, web, inbox, token)
+
+def Tailnet.early.k(te: TEarly, +host: String, +port: U32, +web: String, +inbox: Chan(Msg), +token: String) -> IO(Unit):
+  match te:
+    case TEarly{+ip, e}:
+      Tailnet.early.ip(String.is_empty(ip), ip, e, host, port, web, inbox, token)
+
+def Tailnet.start.early(n: Net, te: TEarly, +host: String, +port: U32, +web: String, +inbox: Chan(Msg)) -> IO(Unit):
+  match n:
+    case Net{True{}, https, +token, _, _, _, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}:
+      do IO<Unit>:
+        Tailnet.early.k(te, host, port, web, inbox, token)
         Tailnet.https(https, port, token, inbox)
     case Net{False{}, _, _, _, _, _, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}:
       IO.pure(Unit, Unit{})
@@ -14089,6 +14411,22 @@ def Hub.mcp.tr(tr: Bool, h: Hub, +thread: String, +o: J.Json, body: String, +rep
     case False{}:
       Hub.mcp.ki(KIpc.is(o), h, thread, o, body, reply, now)
 
+# memory_zoom and memory_search, answered from the store while the thread
+# runs with infinite context (Ucs.tool); otherwise as any unknown tool
+def Hub.mcp.uc.k(uc: Bool, h: Hub, +thread: String, +o: J.Json, body: String, +reply: Chan(String), +now: Nat) -> IO(Hub):
+  match uc h:
+    case True{} Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
+      do IO<Hub>:
+        IO.spawn(Unit, Ucs.tool(Cfg.thin.store(cfg), st, thread, o, reply))
+        return Hub{st, f, ls, cl, as, inbox, cfg, note}
+    case False{} _:
+      Hub.mcp.tr(TermRead.is(o), h, thread, o, body, reply, now)
+
+def Hub.mcp.uc(h: Hub, +thread: String, +o: J.Json, body: String, +reply: Chan(String), +now: Nat) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
+      Hub.mcp.uc.k(Bool.and(Ucs.is(o), UCX.Uctx.on(st, thread)), Hub{st, f, ls, cl, as, inbox, cfg, note}, thread, o, body, reply, now)
+
 # thread_read on a thread on another of the owner's machines: read from
 # this hub's mirror of it (xref.bend)
 def Hub.mcp.x(x: Bool, h: Hub, +thread: String, +o: J.Json, body: String, +reply: Chan(String), +now: Nat) -> IO(Hub):
@@ -14098,7 +14436,7 @@ def Hub.mcp.x(x: Bool, h: Hub, +thread: String, +o: J.Json, body: String, +reply
         sent : Result<&1, &1, String, Unit> <- Chan.send(String, reply, XR.Xref.read(o, FR.Fh.ins(BN.Bn.far(Cfg.bn(cfg)))))
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
     case False{} _:
-      Hub.mcp.tr(TermRead.is(o), h, thread, o, body, reply, now)
+      Hub.mcp.uc(h, thread, o, body, reply, now)
 
 # (only to the owner's own machines with sync on)
 def Hub.mcp.far(own: Bool, h: Hub, +link: String, +rq: String, +o: J.Json, body: String, +reply: Chan(String)) -> IO(Hub):
@@ -15680,10 +16018,11 @@ def Main.headless(h: Hub, +inbox: Chan(Msg), +cfg: Cfg, +tok: Chan(Unit), front:
     Upgrade.start(cfg, inbox)
     front(inbox)
 
-def Main.serve(l: Listener, h: Hub, +web: String, +inbox: Chan(Msg), +cfg: Cfg, +tok: Chan(Unit), front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
+# the listeners Main.boot bound early serve from here on (Early.go)
+def Main.serve(+ctl: Chan(EarlyGo), te: TEarly, h: Hub, +web: String, +inbox: Chan(Msg), +cfg: Cfg, +tok: Chan(Unit), front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
   do IO<Unit>:
-    IO.spawn(Unit, Accept.loop(Fuel.forever(), l, 1, web, inbox, True{}, Net.token(Cfg.net(cfg)), ""))
-    Tailnet.start(Cfg.net(cfg), Cfg.host(cfg), Cfg.port(cfg), web, inbox)
+    Early.go(ctl, EarlyGo{web, inbox, True{}, Net.token(Cfg.net(cfg)), ""})
+    Tailnet.start.early(Cfg.net(cfg), te, Cfg.host(cfg), Cfg.port(cfg), web, inbox)
     IO.spawn(Unit, Ticker.loop(Fuel.forever(), inbox))
     IO.spawn(Unit, Beat.loop(Fuel.forever(), inbox))
     IO.spawn(Unit, Heart.loop(Fuel.forever(), inbox))
@@ -15695,15 +16034,15 @@ def Main.serve(l: Listener, h: Hub, +web: String, +inbox: Chan(Msg), +cfg: Cfg, 
     Upgrade.start(cfg, inbox)
     front(inbox)
 
-def Main.listened(r: Result<&1, &1, U32 & String, Listener>, h: Hub, +web: String, +inbox: Chan(Msg), +addr: String, need: Bool, +cfg: Cfg, +tok: Chan(Unit), front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
+def Main.listened(r: Early, te: TEarly, h: Hub, +web: String, +inbox: Chan(Msg), +addr: String, need: Bool, +cfg: Cfg, +tok: Chan(Unit), front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
   match r need:
-    case Done{l} _:
+    case EarlyUp{ctl} _:
       do IO<Unit>:
         IO.print("Backplane listening on http://" ++ addr)
-        Main.serve(l, h, web, inbox, cfg, tok, front)
-    case Fail{e} True{}:
+        Main.serve(ctl, te, h, web, inbox, cfg, tok, front)
+    case EarlyDown{e} True{}:
       Main.failed(e, h, addr)
-    case Fail{_} False{}:
+    case EarlyDown{_} False{}:
       do IO<Unit>:
         Log.info("web server off: " ++ addr ++ " is taken; trying again every 2 s")
         IO.spawn(Unit, Listen.retry(Fuel.forever(), web, inbox, cfg, addr))
@@ -15757,7 +16096,7 @@ def Thin.store.if(none: Bool, +cfg: Cfg, +st: M.State, +h: String) -> IO(Cfg):
     case False{}:
       Thin.store.open(cfg, st, h)
 
-def Main.opened(r: Result<&1, &1, U32 & String, File>, +st: M.State, ls: SO.Lg, cfg: Cfg, need: Bool, front: Chan(Msg) -> IO(Unit), t0: U32) -> IO(Unit):
+def Main.opened(r: Result<&1, &1, U32 & String, File>, +st: M.State, ls: SO.Lg, cfg: Cfg, need: Bool, front: Chan(Msg) -> IO(Unit), t0: U32, el: Early, te: TEarly) -> IO(Unit):
   match r cfg:
     case Done{f} Cfg{+home, +web, +host, +port, +pr, +ds, +v, nt0, +tcfg, +views}:
       do IO<Unit>:
@@ -15798,10 +16137,9 @@ def Main.opened(r: Result<&1, &1, U32 & String, File>, +st: M.State, ls: SO.Lg, 
         +now : Nat <- Now.nat()
         h0 : Hub <- Hub.adopt(Hub{st, f, ls, Nil{}, Nil{}, inbox, Cfg{home, web, host, port, pr, ds, v, nt, tcfg, views}, ""}, now)
         t2 : U32 <- PS.Perf.span("boot.adopt", t1)
-        l : Result<&1, &1, U32 & String, Listener> <- H.Net.listen(host, port)
-        t3 : U32 <- PS.Perf.span("boot.listen", t2)
+        # the port was bound at the start of the boot (Early.*)
         Thin.warm(ThinCache.first(views), inbox)
-        Main.listened(l, h0, web, pri, host ++ ":" ++ U32.show(port), need, Cfg{home, web, host, port, pr, ds, v, nt, tcfg, views}, tok, front)
+        Main.listened(el, te, h0, web, pri, host ++ ":" ++ U32.show(port), need, Cfg{home, web, host, port, pr, ds, v, nt, tcfg, views}, tok, front)
     case Fail{e} _:
       Main.nolog(e)
 
@@ -15926,15 +16264,23 @@ def Boot.state(+home: String) -> IO(HB.Hot):
     +on : String <- Env.get("BACKPLANE_HOT_BOOT", "1")
     Boot.state.on(Bool.not(String.eq(on, "0")), home)
 
-def Main.boot(cfg: Cfg, need: Bool, front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
+def Main.boot(cfg: Cfg, +need: Bool, front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
   match cfg:
-    case Cfg{+home, w, h, +p, pr, ds, v, nt, +tcfg, +views}:
+    case Cfg{+home, w, +h, +p, pr, ds, v, +nt, +tcfg, +views}:
       do IO<Unit>:
         # the home's lock first: a second hub ends before the event store
         +held : String <- Lock.take(home, p)
         Lock.refuse(String.is_empty(held), held, home)
         H.Env.put("BACKPLANE_HOME", home)
         Agents.only(home)
+        # the port first: until the hub is ready every request gets a 503
+        # that says it is starting (Early.*), so clients wait
+        el0 : Early <- Early.bind(h, p, 1, home)
+        +el : Early <- Early.need(el0, need, h ++ ":" ++ U32.show(p))
+        te : TEarly <- Early.tail(Bool.and(Early.is_up(el), Net.tailnet(nt)), p, home)
+        # BACKPLANE_BOOT_DELAY_MS: tests only (test/tools/early_listener_e2e.ts)
+        +dl : String <- Env.get("BACKPLANE_BOOT_DELAY_MS", "0")
+        IO.sleep(EA.Early.delay(dl))
         t0 : U32 <- PS.Perf.us()
         # store.db's records and the log's tail (hotboot.bend), or the
         # whole log replayed when there is no usable store
@@ -15978,4 +16324,4 @@ def Main.boot(cfg: Cfg, need: Bool, front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
         # far_line for the log's older lines, in the background once the
         # hub listens (SO.Sto.far.fill: nothing when meta far_line is filled)
         IO.spawn(Unit, SO.Sto.far.fill(ls, st))
-        Main.opened(f, st, ls, cfg2, need, front, t8)
+        Main.opened(f, st, ls, cfg2, need, front, t8, el, te)
