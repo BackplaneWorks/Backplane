@@ -172,6 +172,15 @@ jobs:
         run: |
           bun test/tools/reconnect_test.ts
           bun test/tools/thin_heartbeat_e2e.ts dist-js/linux-x64/backplane-serve
+      # the phone bridge's thin rows, request privacy, transport, readiness
+      # and flush (hermetic: no hub, build or network)
+      - name: Phone bridge
+        run: |
+          bun test/tools/native_thin_rows_307265.mjs
+          bun test/tools/native_thin_privacy_307265.mjs
+          bun test/tools/native_thin_bridge_307265.mjs
+          bun test/tools/mobile_readiness_test.ts
+          bun test/tools/phone_flush_test.ts
       - uses: actions/setup-node@v4
         with:
           node-version: '24'

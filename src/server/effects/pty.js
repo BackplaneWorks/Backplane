@@ -200,8 +200,319 @@ function pty_child_stack(spawn) {
   }
 }
 
+// Terminals on Bun's own APIs
+// ---------------------------
+// Where the runtime runs on Bun's event loop (bp_pty_bun), the
+// shell starts with Bun.spawn's terminal option (openpty on POSIX, ConPTY on
+// Windows): a session leader with the terminal as its controlling one, as
+// pty.c makes it. The master is a BP_H handle (a BpStream): reading the
+// terminal's output, writing its input, closing it hangs the terminal up.
+
+// Made at first use: loop.js's BpStream may load after this file.
+function bp_pty_class() {
+  if (globalThis.BP_PTY_CLASS !== undefined) {
+    return globalThis.BP_PTY_CLASS;
+  }
+  globalThis.BP_PTY_CLASS = class BpPty extends globalThis.BP_H.Stream {
+    constructor() {
+      super("pty");
+      this.t = null;
+    }
+    // a terminal takes every byte (what it cannot pass on yet it holds and
+    // sends on as the program reads: Bun 1.3's write answers only the part
+    // that went at once, and its drain callback does not fire), so a write
+    // never waits: a terminal's input is what the person types or pastes
+    write(b) {
+      if (this.t === null || this.t.closed) {
+        return -globalThis.BP_H.ERRNO.EIO;
+      }
+      this.t.write(b);
+      return b.length;
+    }
+    // a pty has no half close (a program is sent ^D), as pty.c
+    shutdown(how) {
+      if (how !== 1) {
+        this.shutRead();
+      }
+    }
+    close() {
+      this.rshut = true;
+      this.q = [];
+      this.qsize = 0;
+      try {
+        this.t?.close();
+      } catch (_) {
+      }
+      this.wakeAll();
+    }
+    resize(cols, rows) {
+      try {
+        this.t?.resize(cols, rows);
+      } catch (_) {
+      }
+    }
+  };
+  return globalThis.BP_PTY_CLASS;
+}
+
+// as host.js's (each effect file has its own scope): Bun's backend where
+// the runtime runs on Bun's loop, and the children it started by pid
+function bp_pty_bun() {
+  return (process.platform === "win32" || process.env.BACKPLANE_JS_PROC === "bun")
+    && globalThis.BP_H?.Stream !== undefined;
+}
+
+function bp_pty_procs() {
+  return globalThis.BP_PROCS ?? (globalThis.BP_PROCS = new Map());
+}
+
+function bp_pty_size(n, d) {
+  return n > 0 && n < 65536 ? n : d;
+}
+
+// Windows: Bun's terminal option is POSIX-only (Bun 1.3: "terminal option
+// is not supported on this platform"), so the shell gets a pseudoconsole
+// through kernel32: two pipes, CreatePseudoConsole, CreateProcessW with
+// PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE. Anonymous pipes cannot be waited on
+// without blocking, so while the terminal lives a 15 ms timer peeks its
+// output pipe and its process. Answers a child shaped as Bun.spawn's with a
+// terminal (pid, terminal.write/resize/close, exited, exitCode, kill).
+function bp_conpty_lib() {
+  if (globalThis.BP_CONPTY !== undefined) {
+    return globalThis.BP_CONPTY;
+  }
+  const ffi = require("bun:ffi");
+  const k = ffi.dlopen("kernel32.dll", {
+    CreatePipe: { args: ["ptr", "ptr", "ptr", "u32"], returns: "i32" },
+    CreatePseudoConsole: { args: ["u32", "ptr", "ptr", "u32", "ptr"], returns: "i32" },
+    ResizePseudoConsole: { args: ["ptr", "u32"], returns: "i32" },
+    ClosePseudoConsole: { args: ["ptr"], returns: "void" },
+    InitializeProcThreadAttributeList: { args: ["ptr", "u32", "u32", "ptr"], returns: "i32" },
+    UpdateProcThreadAttribute: { args: ["ptr", "u32", "u64", "ptr", "u64", "ptr", "ptr"], returns: "i32" },
+    DeleteProcThreadAttributeList: { args: ["ptr"], returns: "void" },
+    CreateProcessW: { args: ["ptr", "ptr", "ptr", "ptr", "i32", "u32", "ptr", "ptr", "ptr", "ptr"], returns: "i32" },
+    CloseHandle: { args: ["ptr"], returns: "i32" },
+    ReadFile: { args: ["ptr", "ptr", "u32", "ptr", "ptr"], returns: "i32" },
+    WriteFile: { args: ["ptr", "ptr", "u32", "ptr", "ptr"], returns: "i32" },
+    PeekNamedPipe: { args: ["ptr", "ptr", "u32", "ptr", "ptr", "ptr"], returns: "i32" },
+    GetExitCodeProcess: { args: ["ptr", "ptr"], returns: "i32" },
+    TerminateProcess: { args: ["ptr", "u32"], returns: "i32" },
+    GetLastError: { args: [], returns: "u32" },
+  }).symbols;
+  globalThis.BP_CONPTY = { k, ptr: ffi.ptr, read: ffi.read };
+  return globalThis.BP_CONPTY;
+}
+
+// one argument as CreateProcessW's command line parses it back (the
+// rules of CommandLineToArgvW: backslashes double only before a quote)
+function bp_win_quote(a) {
+  if (a !== "" && !/[ \t\n\v"]/.test(a)) {
+    return a;
+  }
+  let out = '"';
+  let bs = 0;
+  for (const c of a) {
+    if (c === "\\") {
+      bs += 1;
+    } else if (c === '"') {
+      out += "\\".repeat(bs * 2 + 1) + '"';
+      bs = 0;
+    } else {
+      out += "\\".repeat(bs) + c;
+      bs = 0;
+    }
+  }
+  return out + "\\".repeat(bs * 2) + '"';
+}
+
+function bp_wide(s) {
+  return Buffer.from(s + "\0", "utf16le");
+}
+
+function bp_conpty(argv, cwd, env, cols, rows) {
+  const { k, ptr, read } = bp_conpty_lib();
+  const handle = (b) => read.ptr(ptr(b), 0);
+  const inR = new BigUint64Array(1), inW = new BigUint64Array(1);
+  const outR = new BigUint64Array(1), outW = new BigUint64Array(1);
+  const fail = (what) => Object.assign(new Error(what + " failed (" + k.GetLastError() + ")"), { code: "EIO" });
+  if (!k.CreatePipe(ptr(inR), ptr(inW), null, 0) || !k.CreatePipe(ptr(outR), ptr(outW), null, 0)) {
+    throw fail("CreatePipe");
+  }
+  const size = (rows & 0xffff) << 16 | (cols & 0xffff);
+  const hpc = new BigUint64Array(1);
+  const hr = k.CreatePseudoConsole(size >>> 0, handle(inR), handle(outW), 0, ptr(hpc));
+  // the console holds its own copies: ours of its ends go
+  k.CloseHandle(handle(inR));
+  k.CloseHandle(handle(outW));
+  if (hr !== 0) {
+    k.CloseHandle(handle(inW));
+    k.CloseHandle(handle(outR));
+    throw fail("CreatePseudoConsole");
+  }
+  const pc = handle(hpc);
+  const need = new BigUint64Array(1);
+  k.InitializeProcThreadAttributeList(null, 1, 0, ptr(need));
+  const list = new Uint8Array(Number(need[0]) + 64);
+  const pcv = new BigUint64Array([hpc[0]]);
+  // STARTUPINFOEXW: STARTUPINFOW (104 bytes on x64) then the list pointer
+  const si = new Uint8Array(112);
+  const pi = new Uint8Array(24);
+  new DataView(si.buffer).setUint32(0, 112, true);
+  if (!k.InitializeProcThreadAttributeList(ptr(list), 1, 0, ptr(need))
+    || !k.UpdateProcThreadAttribute(ptr(list), 0, 0x00020016n, ptr(pcv), 8n, null, null)) {
+    k.ClosePseudoConsole(pc);
+    throw fail("ProcThreadAttribute");
+  }
+  new DataView(si.buffer).setBigUint64(104, BigInt(ptr(list)), true);
+  const line = bp_wide(argv.map(bp_win_quote).join(" "));
+  const block = Buffer.from(Object.entries(env).map(([n, v]) => n + "=" + v + "\0").join("") + "\0", "utf16le");
+  const dir = cwd === "" ? null : bp_wide(cwd);
+  // EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT
+  const ok = k.CreateProcessW(null, ptr(line), null, null, 0, 0x00080000 | 0x00000400,
+    ptr(block), dir === null ? null : ptr(dir), ptr(si), ptr(pi));
+  k.DeleteProcThreadAttributeList(ptr(list));
+  if (!ok) {
+    const e = k.GetLastError();
+    k.ClosePseudoConsole(pc);
+    k.CloseHandle(handle(inW));
+    k.CloseHandle(handle(outR));
+    throw Object.assign(new Error("CreateProcessW failed (" + e + ")"), { code: e === 2 || e === 3 ? "ENOENT" : "EIO" });
+  }
+  const pv = new DataView(pi.buffer);
+  const proc = read.ptr(ptr(pi), 0);
+  k.CloseHandle(read.ptr(ptr(pi), 8));
+  const pid = pv.getUint32(16, true);
+  const term = { closed: false, data: null, exit: null };
+  const child = { pid, terminal: term, exitCode: null, signalCode: null };
+  let done;
+  child.exited = new Promise((r) => { done = r; });
+  const buf = new Uint8Array(65536);
+  const n = new Uint32Array(1);
+  const avail = new Uint32Array(1);
+  const code = new Uint32Array(1);
+  const hang = () => {
+    if (!term.closed) {
+      term.closed = true;
+      k.ClosePseudoConsole(pc);
+      k.CloseHandle(handle(inW));
+    }
+  };
+  const tick = () => {
+    // what the console wrote, then whether the process ended
+    while (k.PeekNamedPipe(handle(outR), null, 0, null, ptr(avail), null) && avail[0] > 0) {
+      if (!k.ReadFile(handle(outR), ptr(buf), Math.min(avail[0], buf.length), ptr(n), null) || n[0] === 0) {
+        break;
+      }
+      term.data?.(term, buf.slice(0, n[0]));
+    }
+    if (child.exitCode === null && k.GetExitCodeProcess(proc, ptr(code)) && code[0] !== 259) {
+      child.exitCode = code[0] & 0xff;
+      hang();
+    }
+    if (child.exitCode !== null && !(k.PeekNamedPipe(handle(outR), null, 0, null, ptr(avail), null) && avail[0] > 0)) {
+      clearInterval(timer);
+      k.CloseHandle(handle(outR));
+      k.CloseHandle(proc);
+      term.exit?.(term, 0, null);
+      done(child.exitCode);
+    }
+  };
+  const timer = setInterval(tick, 15);
+  term.write = (b) => {
+    if (term.closed) {
+      return 0;
+    }
+    const u = typeof b === "string" ? Buffer.from(b) : b;
+    k.WriteFile(handle(inW), ptr(u), u.length, ptr(n), null);
+    return n[0];
+  };
+  term.resize = (c, r) => {
+    if (!term.closed) {
+      k.ResizePseudoConsole(pc, ((r & 0xffff) << 16 | (c & 0xffff)) >>> 0);
+    }
+  };
+  term.close = () => {
+    hang();
+  };
+  // a signal ends it: Windows has no signals, so the code is 128 + sig
+  child.kill = (sig) => {
+    if (child.exitCode === null) {
+      k.TerminateProcess(proc, 128 + ((sig ?? 15) & 0x7f));
+    }
+    hang();
+  };
+  return child;
+}
+
+// the console's output into the handle, its end as the stream's end
+function bp_conpty_wire(child, h) {
+  child.terminal.data = (_, d) => h.feed(d);
+  child.terminal.exit = () => h.finish(0);
+  return child;
+}
+
+function bp_pty_spawn(cmd, args, cwd, cols, rows) {
+  const fs = require("fs");
+  const argv = [cmd, ...args];
+  if (cmd === "" || argv.some((a) => a.includes("\0")) || cwd.includes("\0")) {
+    return io_fail(process.platform === "darwin" ? 92 : 84);
+  }
+  if (Bun.which(cmd, { PATH: process.env.PATH ?? "" }) === null
+    && !(cmd.includes("/") && fs.existsSync(cmd))) {
+    return io_fail(globalThis.BP_H.ERRNO.ENOENT);
+  }
+  if (cwd !== "") {
+    try {
+      if (!fs.statSync(cwd).isDirectory()) {
+        return io_fail(globalThis.BP_H.ERRNO.ENOTDIR);
+      }
+    } catch (e) {
+      return io_fail(globalThis.BP_H.errno(e));
+    }
+  }
+  const env = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (v !== undefined && k !== "" && !k.includes("=") && k !== "TERM"
+      && k !== "COLORTERM" && k !== "LINES" && k !== "COLUMNS") {
+      env[k] = v;
+    }
+  }
+  env.TERM = "xterm-256color";
+  env.COLORTERM = "truecolor";
+  const h = new (bp_pty_class())();
+  let child;
+  try {
+    child = process.platform === "win32"
+      ? bp_conpty_wire(bp_conpty([Bun.which(cmd, { PATH: process.env.PATH ?? "" }) ?? cmd, ...args], cwd, env,
+        bp_pty_size(Number(cols), 80), bp_pty_size(Number(rows), 24)), h)
+      : Bun.spawn(argv, {
+      cwd: cwd === "" ? undefined : cwd,
+      env,
+      terminal: {
+        cols: bp_pty_size(Number(cols), 80),
+        rows: bp_pty_size(Number(rows), 24),
+        name: "xterm-256color",
+        data: (_, d) => h.feed(d),
+        exit: () => h.finish(0),
+      },
+    });
+  } catch (e) {
+    return io_fail(globalThis.BP_H.errno(e));
+  }
+  h.t = child.terminal;
+  bp_pty_procs().set(child.pid >>> 0, child);
+  return io_done(io_tup(child.pid >>> 0, globalThis.BP_H.add(h)));
+}
+
 // Answers (pid, master socket).
 function pty_spawn(cmd, args, cwd, cols, rows) {
+  if (bp_pty_bun()) {
+    const list = [];
+    for (let xs = args; xs.$ === "Con"; xs = xs.tail) {
+      list.push(xs.head);
+    }
+    return bp_pty_spawn(cmd, list, cwd, cols, rows);
+  }
   const p = pty_lib();
   const sys = io_sys();
   const argv = [cmd];
@@ -317,11 +628,23 @@ function pty_spawn(cmd, args, cwd, cols, rows) {
     return fail(code);
   }
   sys.fcntl(m, 4, sys.fcntl(m, 3, 0) | p.O_NONBLOCK); // F_SETFL
-  return io_done(io_tup(pid[0] >>> 0, m));
+  // on Bun's loop the master is a handle over the descriptor (loop.js's
+  // BpFd: EIO reads as the end), its fd kept for Pty.resize
+  const bun = globalThis.BEND_ASYNC === true && globalThis.BP_H?.fromFd !== undefined;
+  return io_done(io_tup(pid[0] >>> 0, bun ? globalThis.BP_H.fromFd(m, "pty") : m));
 }
 
 // a new window size; the kernel sends the child SIGWINCH
 function pty_resize(socket, cols, rows) {
+  if (globalThis.BP_H !== undefined && globalThis.BP_H.is(socket)) {
+    const h = globalThis.BP_H.get(socket);
+    if (h?.fd !== undefined) {
+      pty_size(h.fd, Number(cols), Number(rows));
+    } else {
+      h?.resize?.(bp_pty_size(Number(cols), 80), bp_pty_size(Number(rows), 24));
+    }
+    return socket;
+  }
   pty_size(Number(socket), Number(cols), Number(rows));
   return socket;
 }

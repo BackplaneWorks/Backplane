@@ -7,6 +7,7 @@
 //     in store.db (line rows, meta.applied_off at the file's end) and in
 //     the next join; a resume from `since` gets only what follows, a
 //     resume from another origin everything;
+//   - a store.db the streaming build made is kept and its tail applied;
 //   - a restart serves the same; a deleted store.db is made again.
 //   bun test/tools/store_lines_e2e.ts [BINARY]
 import { Database } from "bun:sqlite";
@@ -38,7 +39,14 @@ const lines = [
   '{"$":"MessagePosted","thread":"t1","msg":"m2","role":"assistant","text":"' + "x".repeat(5000) + '","at":1700000005}',
   '{"$":"SettingSet","key":"restart.continue","value":"off","at":1700000006}',
 ];
-writeFileSync(log, lines.join("\n") + "\n");
+// a codec-current store.db made by the streaming build (stobuild.bend) from
+// the first lines, then more lines appended: the hub takes it as it is and
+// applies the tail (no store made again)
+writeFileSync(log, lines.slice(0, 5).join("\n") + "\n");
+const sb = Bun.spawnSync(["bend", "test/native/store_build.bend", home], { env: { ...process.env, BEND_NO_TELEMETRY: "1", BUN_JSC_maxPerThreadStackUsage: "536870912" }, stdout: "pipe", stderr: "pipe" });
+check(sb.exitCode === 0, `store_build made store.db (${sb.exitCode}) ${sb.stderr.toString().slice(-300)}`);
+const ino0 = statSync(join(home, "store.db")).ino;
+appendFileSync(log, lines.slice(5).join("\n") + "\n");
 const wire = (l: string) => { const o = JSON.parse(l); return o.$ === "DeviceRegistered" || o.$ === "DeviceDropped" ? { $: o.$, at: o.at } : o; };
 const expected = () => readFileSync(log, "utf8").split("\n").filter((l) => { try { JSON.parse(l); return true; } catch { return false; } }).map(wire);
 
@@ -76,6 +84,7 @@ const same = (a: any[], b: any[]) => JSON.stringify(a) === JSON.stringify(b);
 
 try {
   await start();
+  check(statSync(join(home, "store.db")).ino === ino0, "the streaming build's store.db was kept (no rebuild)");
   let want = expected();
   let j = await join_("?since=0&origin=");
   check(same(j.items, want), `join from 0: ${j.items.length} items, ${want.length} expected`);

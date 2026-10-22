@@ -780,17 +780,11 @@ function bp_host(old) {
     ["Sock.peer", () => (s) => io_tup(s, BP_H.get(s)?.peer() ?? "")],
     ["Sock.shutdown", () => (s) => (BP_H.get(s)?.shutdown(1), s)],
     ["Sock.shut_read", () => (s) => (BP_H.get(s)?.shutdown(0), s)],
-    // a duplicate of the handle's descriptor; a handle over no descriptor (a Bun socket, a Bun.spawn child) answers
-    // another id on itself, so Fd.shut can still cut it (abort) from outside
-    // its writer: that is how the hub drops a client whose writer waits
-    ["Sock.raw", () => (s) => {
-      const h = BP_H.get(s);
-      if (h !== undefined && h.fd === undefined) {
-        return io_tup(s, BP_H.dup(s));
-      }
-      const fd = h?.fd;
-      return io_tup(s, fd === undefined ? 0 : io_sys().fcntl(fd, process.platform === "darwin" ? 67 : 1030, 3));
-    }],
+    // a handle answers another id on itself (its only use is the hub's
+    // Fd.shut/Fd.close of a client from outside its writer), so Fd.shut
+    // aborts the handle: a raw dup of a BpFd's descriptor, shut, left Bun's
+    // pending flush parked for good
+    ["Sock.raw", () => (s) => io_tup(s, BP_H.get(s) === undefined ? 0 : BP_H.dup(s))],
     ["Fd.shut", () => (s) => {
       const h = BP_H.get(s);
       if (h !== undefined) {
