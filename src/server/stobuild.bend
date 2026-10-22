@@ -5,6 +5,7 @@ import ../core/codec.bend as C
 import ../core/storedb.bend as SDB
 import ../core/utf8.bend as U
 import ./db.bend as D
+import ../core/sha1.bend as SH
 
 # The store's first build (store.db from events.jsonl, docs:
 # bp-coord/store/S1-SCHEMA.md)
@@ -343,16 +344,73 @@ def Stb.run(r: File & Nat, +h: String, +chunk: U32) -> IO(File & Acc):
   (f, size) = r
   Stb.loop(Nat.add(size, 64n), f, h, chunk, Acc.new())
 
-def Stb.finish.k(+h: String, f: File, +a: Acc) -> IO(Built):
+# The log's identity as the commit path reads it (storedb.bend's
+# Sto.log_id: the SHA-1 of its first line's bytes, at most 4096 of them),
+# so a store built here is not made again at the first boot
+def Stb.upto.t(nl: Bool, t: List<&2, U32>) -> List<&2, U32>:
+  match nl:
+    case True{}:
+      Nil{}
+    case False{}:
+      t
+
+def Stb.upto.x(nl: Bool, +x: U32, acc: List<&2, U32>) -> List<&2, U32>:
+  match nl:
+    case True{}:
+      acc
+    case False{}:
+      x <> acc
+
+def Stb.upto(n: Nat, bs: List<&2, U32>, acc: List<&2, U32>) -> List<&2, U32>:
+  match n bs:
+    case _ Nil{}:
+      List.reverse(&2, U32, acc)
+    case 0n +x <> +t:
+      List.reverse(&2, U32, acc)
+    case 1n+k +x <> +t:
+      Stb.upto(k, Stb.upto.t(U32.is_eq(x, 10), t), Stb.upto.x(U32.is_eq(x, 10), x, acc))
+
+def Stb.nib(+x: U32) -> String:
+  String.take(String.drop("0123456789abcdef", U32.to_nat(x)), 1n)
+
+def Stb.hex(bs: List<&2, U32>, acc: String) -> String:
+  match bs:
+    case Nil{}:
+      acc
+    case +b <> t:
+      Stb.hex(t, acc ++ Stb.nib(U32.shrn(b, 4n)) ++ Stb.nib(U32.and(b, 15)))
+
+def Stb.sha.k(bs: List<&2, U32>) -> String:
+  match bs:
+    case Nil{}:
+      ""
+    case +b <> t:
+      "sha1:" ++ Stb.hex(SH.Sha1.hash(b <> t), "")
+
+def Stb.sha(r: File & Result<&1, &1, U32 & String, List<&2, U32>>) -> IO(File & String):
+  (f, res) = r
+  match res:
+    case Done{bs}:
+      IO.pure(File & String, (f, Stb.sha.k(Stb.upto(4096n, bs, Nil{}))))
+    case Fail{_}:
+      IO.pure(File & String, (f, ""))
+
+def Stb.finish.id(+h: String, r: File & String, +a: Acc) -> IO(Built):
+  (f, id) = r
   do IO<Built>:
     File.close(f)
-    +res : String <- D.Db.script(h, Stb.end(a))
+    +res : String <- D.Db.script(h, List.append(&2, List<&2, String>, Stb.end(a), [Stb.meta.sql("log_id", id)]))
     Stb.check("records", res)
     sy : String <- D.Db.exec(h, "PRAGMA synchronous = NORMAL")
     Stb.check("pragma", sy)
     cl : String <- D.Db.close(h)
     Stb.check("close", cl)
     return Built{Acc.seq(a), Acc.off(a), Acc.ord(a)}
+
+def Stb.finish.k(+h: String, f: File, +a: Acc) -> IO(Built):
+  do IO<Built>:
+    r : File & String <- IO.bind(File & Result<&1, &1, U32 & String, List<&2, U32>>, File & String, File.read_at(f, 0, 4096), Stb.sha)
+    Stb.finish.id(h, r, a)
 
 def Stb.finish(+h: String, r: File & Acc) -> IO(Built):
   (f, a) = r
