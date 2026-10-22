@@ -26,6 +26,14 @@ def Mem.settle(after: String) -> IO(String):
 def EvLog.read_from(path: String, off: String) -> IO(List<&2, String>):
   import "./effects/evlog.js"
 
+# Bounded pread on the same log descriptor, without one List cell per
+# byte. Done holds [used bytes, total bytes read, line byte length, text,
+# ...], complete lines oldest first, excluding newlines from lengths.
+# A trailing fragment contributes to total only, as stobuild's Cut.of.
+# The File/error contract and max-byte cap match File.read_at.
+def EvLog.read_chunk(file: File, off: U32, max: U32) -> IO(File & Result<&1, &1, U32 & String, List<&2, String>>):
+  import "./effects/evlog.js"
+
 # up to max bytes as they arrive; [] means the peer closed
 def Sock.recv_bytes(sock: Socket, max: U32) ->
   IO(Socket & Result<&1, &1, U32 & String, List<&2, U32>>):

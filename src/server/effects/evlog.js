@@ -84,3 +84,33 @@ function evlog_read_from(path, offs) {
 }
 
 io_eff(CID(EvLog.read_from), evlog_read_from);
+
+// File.read_at's descriptor/offset/max contract, with complete lines and
+// their raw byte counts packed directly. The builder retains only these
+// strings, never a linked list for every byte of every read. No fadvise,
+// cache dropping, or collection; the parser/fold still runs in Bend.
+function evlog_read_chunk(file, off, max) {
+  try {
+    const len = Math.min(max, 2147483647);
+    const b = Buffer.alloc(Math.max(len, 1));
+    const n = require("fs").readSync(file, b, 0, len, off);
+    const td = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+    let end = n;
+    while (end > 0 && b[end - 1] !== 10) end--;
+    const used = end;
+    let xs = { $: "Nil" };
+    while (end > 0) {
+      const stop = end - 1;
+      const start = stop > 0 ? b.lastIndexOf(10, stop - 1) + 1 : 0;
+      xs = { $: "Con", head: String(stop - start), tail:
+        { $: "Con", head: evlog_line(td, b, start, stop), tail: xs } };
+      end = start;
+    }
+    return io_tup(file, io_done({ $: "Con", head: String(used), tail:
+      { $: "Con", head: String(n), tail: xs } }));
+  } catch (e) {
+    return io_tup(file, io_fail(Math.abs(e.errno ?? 5)));
+  }
+}
+
+io_eff(CID(EvLog.read_chunk), evlog_read_chunk);
