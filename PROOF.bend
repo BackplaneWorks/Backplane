@@ -12651,3 +12651,81 @@ def Laws.sdb_eq_fold_small():
 def Laws.sdb_entries_mine_small():
   {==}
 # ---- end S1 indexed store ----
+
+# ---- S1 entries (3a) ----
+def Laws.win_no_log():
+  {==}
+
+def Laws.win_trimmed():
+  {==}
+
+def Laws.win_client_whole():
+  {==}
+
+def Laws.win_count_own():
+  {==}
+
+def Laws.win_count_other():
+  {==}
+
+def Laws.win_switch_seen():
+  {==}
+
+def Laws.win_answer():
+  {==}
+
+def Laws.win_trigger():
+  {==}
+
+def Laws.win_last_reply():
+  {==}
+
+def Laws.win_sum_user():
+  {==}
+
+def Laws.win_sum_reply():
+  {==}
+
+def Laws.win_first():
+  {==}
+
+def Laws.win_first_whole():
+  {==}
+
+def Laws.win_fork():
+  {==}
+
+def Laws.win_btw():
+  {==}
+
+def Laws.win_switch_missed():
+  {==}
+
+def Laws.win_switch_all():
+  {==}
+
+def Laws.win_dup_recent():
+  {==}
+
+def Laws.win_term():
+  {==}
+
+def Laws.win_read_window():
+  {==}
+
+def Laws.win_read_need():
+  {==}
+
+def Laws.win_read_rows():
+  {==}
+
+def Laws.win_hand_budget():
+  {==}
+
+def Laws.win_cost_act():
+  {==}
+
+def Laws.win_cost_msg():
+  {==}
+
+# ---- end S1 entries (3a) ----

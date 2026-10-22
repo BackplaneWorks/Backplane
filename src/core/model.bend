@@ -3638,7 +3638,8 @@ def Win.demo.cs() -> List<&2, Change>:
     MessagePosted{"t1", "a5", Assistant{}, Win.demo.big("e"), 10n}, ActivityLogged{"t1", "x2", "tool", "Bash", "pwd", 11n},
     ActivityLogged{"t1", "k1", "term", "terminal", "{\"title\":\"sh\"}", 12n}, MessagePosted{"t1", "a6", Assistant{}, "done", 13n},
     ProviderSet{"t1", "codex", "", 14n}, MessagePosted{"t1", "m3", User{}, "third ask", 15n},
-    ActivityLogged{"t1", "x3", "tool", "Bash", "make", 16n}, MessagePosted{"t2", "m4", Assistant{}, "t2 reply", 17n}]
+    ActivityLogged{"t1", "x3", "tool", "Bash", "make", 16n}, MessagePosted{"t2", "m4", Assistant{}, "t2 reply", 17n},
+    ActivityLogged{"t1", "x4", "tool", "Bash", "make test", 18n}]
 
 # the log folded whole (a client) and in windows of w (a hub; 0: whole)
 def Win.demo(+w: Nat) -> State:
