@@ -11734,6 +11734,7 @@ def Laws.foh_clean(cs):
     case M.TurnUsage{_, _, _, _, _, _, _, _, _, _, _, _, _} <> +t: Laws.foh_clean(t)
     case M.DeployAsked{_, _, _, _, _} <> +t: Laws.foh_clean(t)
     case M.DeployBuilt{_, _, _, _, _} <> +t: Laws.foh_clean(t)
+    case M.CtxNoted{_, _, _, _, _} <> +t: Laws.foh_clean(t)
 
 def Laws.fyi_never_spawns(live): {==}
 
