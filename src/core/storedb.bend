@@ -1290,6 +1290,71 @@ def Dump.ops(+s: M.State) -> List<&2, Op>:
     Dump.d0(Map.to_list(&2, M.Project, St.ps(s)),
     [Row.obj("state", "seq", C.Codec.nat(M.State.seq(s)))]))))))))))))))))))))))))))
 
+# one domain's records (i from 0; Dump.n() of them, then the state's seq):
+# a build writes them a domain at a time, never all of them in one list
+def Dump.n() -> Nat:
+  27n
+
+def Dump.part.k(i: Nat, +s: M.State, +w: BT.World, +b: ML.Box) -> List<&2, Op>:
+  match i:
+    case 0n:
+      Dump.d0(Map.to_list(&2, M.Project, St.ps(s)), Nil{})
+    case 1n:
+      Dump.d1(Map.to_list(&2, M.Thread, St.ts(s)), Nil{})
+    case 2n:
+      Dump.d2(Map.to_list(&2, M.Task, St.tk(s)), Nil{})
+    case 3n:
+      Dump.d3(Map.to_list(&2, M.Ask, St.ak(s)), Nil{})
+    case 4n:
+      Dump.d4(Map.to_list(&2, List<&2, M.QItem>, St.qu(s)), Nil{})
+    case 5n:
+      Dump.d5(Map.to_list(&2, String, St.sg(s)), Nil{})
+    case 6n:
+      Dump.d6(Map.to_list(&2, M.Device, St.dv(s)), Nil{})
+    case 7n:
+      Dump.d7(Map.to_list(&2, M.Nav, M.State.navs(s)), Nil{})
+    case 8n:
+      Dump.d8(Map.to_list(&2, BT.Bot, W.bots(w)), Nil{})
+    case 9n:
+      Dump.d9(Map.to_list(&2, BT.Room, W.rooms(w)), Nil{})
+    case 10n:
+      Dump.d10(Map.to_list(&2, BT.Routine, W.routines(w)), Nil{})
+    case 11n:
+      Dump.d11(Map.to_list(&2, BT.Hook, W.hooks(w)), Nil{})
+    case 12n:
+      Dump.d12(Map.to_list(&2, BT.Mem, W.mems(w)), Nil{})
+    case 13n:
+      Dump.d13(Map.to_list(&2, BT.Peer, W.peers(w)), Nil{})
+    case 14n:
+      Dump.d14(Map.to_list(&2, String, W.spaces(w)), Nil{})
+    case 15n:
+      Dump.d15(Map.to_list(&2, BT.Page, W.pages(w)), Nil{})
+    case 16n:
+      Dump.d16(Map.to_list(&2, String, W.skills(w)), Nil{})
+    case 17n:
+      Dump.d17(Map.to_list(&2, BT.Hops, W.hops(w)), Nil{})
+    case 18n:
+      Dump.d18(Map.to_list(&2, Nat, W.talk(w)), Nil{})
+    case 19n:
+      Dump.d19(Map.to_list(&2, ML.Conv, ML.Box.convs(b)), b, Nil{})
+    case 20n:
+      Dump.d20(Map.to_list(&2, ML.Mark, ML.Box.marks(b)), Nil{})
+    case 21n:
+      Dump.d21(Map.to_list(&2, ML.Run, ML.Box.runs(b)), Nil{})
+    case 22n:
+      Dump.d22(Map.to_list(&2, ML.Origin, ML.Box.origins(b)), Nil{})
+    case 23n:
+      Dump.d23(Map.to_list(&2, String, ML.Box.charters(b)), Nil{})
+    case 24n:
+      Dump.d24(Map.to_list(&2, List<&2, ML.Decision>, ML.Box.decision_log(b)), Nil{})
+    case 25n:
+      Dump.d25(Map.to_list(&2, String, ML.Box.names(b)), Nil{})
+    case _:
+      [Row.obj("state", "seq", C.Codec.nat(M.State.seq(s)))]
+
+def Dump.part(+s: M.State, i: Nat) -> List<&2, Op>:
+  Dump.part.k(i, s, M.State.world.of(s), M.State.mail(s))
+
 # every record of a state, as the pure store holds them
 def Tab.dump(+s: M.State) -> Map<&2, String>:
   Tab.ops(Dump.ops(s), Map.new(&2, String))

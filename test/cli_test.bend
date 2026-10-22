@@ -55,6 +55,8 @@ def main() -> IO(Unit):
     C.Check.str("--plot short", of(["--plot", "1"]), "bad: --plot KIND FILE [INFO]")
     C.Check.str("--plot-tree", of(["--plot-tree", "/a.kicad_sch"]), "run")
     C.Check.str("--plot-tree short", of(["--plot-tree"]), "bad: --plot-tree FILE")
+    C.Check.str("--store-rebuild", of(["--store-rebuild", "/h"]), "run")
+    C.Check.str("--store-rebuild short", of(["--store-rebuild"]), "bad: --store-rebuild HOME")
     C.Check.str("--plot-info", of(["--plot-info", "/a", "1", "2"]), "run")
     C.Check.str("--plot-info short", of(["--plot-info", "/a", "1"]), "bad: --plot-info FILE SIG INDEX")
     C.Check.str("--review bom", of(["--review", "bom", "", "/s.kicad_sch"]), "run")

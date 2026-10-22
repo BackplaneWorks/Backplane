@@ -6,6 +6,7 @@ import ../core/cli.bend as CL
 import ./plot.bend as PV
 import ./review.bend as RVC
 import ./jsloop.bend as LP
+import ./stobuild.bend as STB
 
 # `backplane-serve`: the hub and the web server, no window.
 
@@ -36,7 +37,7 @@ def start(args: List<String>) -> IO(Unit):
 def main.go(u: Unit) -> IO(Unit):
   do IO<Unit>:
     args : List<String> <- IO.args()
-    RVC.Rvc.main(args, a2 => TI.Tio.main(a2, a0 => PV.Pv.main(a0, a => start(a))))
+    RVC.Rvc.main(args, a2 => TI.Tio.main(a2, a0 => PV.Pv.main(a0, a1 => STB.Stb.main(a1, a => start(a)))))
 
 # (`--plot KIND FILE` is the hub's own board reader, src/server/plot.bend;
 # `--review bom OLD NEW` design review's, src/server/review.bend)
