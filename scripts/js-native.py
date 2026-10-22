@@ -47,7 +47,11 @@ HELPERS = (
     "return((c.codePointAt(0)>>>(31-(off-1)))&1)!==0}n++}return false}"
     "function __bpSplit(s,sep){let ps;const u=sep.charCodeAt(0);if(sep.length===1&&(u<0xd800||u>0xdfff))ps=s.split(sep);"
     "else{ps=[];let cur=\"\";for(const c of s){if(c===sep){ps.push(cur);cur=\"\"}else cur+=c}ps.push(cur)}"
-    "let xs={$:\"Nil\"};for(let i=ps.length-1;i>=0;i--)xs={$:\"Con\",head:ps[i],tail:xs};return xs}\n"
+    "let xs={$:\"Nil\"};for(let i=ps.length-1;i>=0;i--)xs={$:\"Con\",head:ps[i],tail:xs};return xs}"
+    "function __bpHi(c){return c>=55296&&c<56320}function __bpLo(c){return c>=56320&&c<57344}"
+    "function __bpStarts(s,p){return s.startsWith(p)&&!(p.length>0&&__bpHi(p.charCodeAt(p.length-1))&&__bpLo(s.charCodeAt(p.length)))}"
+    "function __bpContains(s,p){if(p===\"\")return true;for(let f=0;;){const i=s.indexOf(p,f);if(i<0)return false;"
+    "if(!((i>0&&__bpLo(s.charCodeAt(i))&&__bpHi(s.charCodeAt(i-1)))||(__bpHi(p.charCodeAt(p.length-1))&&__bpLo(s.charCodeAt(i+p.length)))))return true;f=i+1}}\n"
 )
 
 # String.cmp: function F(a,b){if(a==="")if(b==="")return{$:"Tuple",fst:{$:"Tuple",fst:"",snd:""},snd:{$:"EQ"}};...
@@ -69,6 +73,24 @@ LEN = re.compile(
     r'function (' + I + r')\((' + I + r')\)\{if\(\2\.\$==="Nil"\)return 0;else\{let (' + I + r')=\2\.tail;return (nat_chk)\(\1\(\3\)\+1\)\}\}'
 )
 
+# String.starts_with(s, p), a code point at a time (Base), and
+# String.contains(s, p), which at every code point of s joins the rest back
+# into a string and asks starts_with of it (quadratic: a bot turn's memory
+# recall was 1.4 s of the JS hub's first minute tick): natively the same
+# answers, JavaScript comparing UTF-16 units, so a match that ends or starts
+# between the two halves of a surrogate pair is not one (as in Base, and as
+# scripts/bridge-native.py does for the phones). Emitted as
+#   function F($0,$1,$2){let $pc=0;for(;;)switch($pc){case 0:{let s=$0,p=$1;if(s==="")if(p==="")return!0;...
+STARTS = re.compile(
+    r'function (' + I + r')\((' + I + r'),(' + I + r'),(' + I + r')\)\{(?=let (' + I + r')=0;for\(;;\)switch\(\5\)\{case 0:\{let (' + I + r')=\2,(' + I + r')=\3;'
+    r'if\(\6===""\)if\(\7===""\)return!0;else return!1;else\{)'
+)
+def contains_rx(starts):
+    return re.compile(
+        r'function (' + I + r')\((' + I + r'),(' + I + r'),(' + I + r')\)\{(?=let (' + I + r')=0;for\(;;\)switch\(\5\)\{case 0:\{let (' + I + r')=\2,(' + I + r')=\3;'
+        r'if\(\6===""\)return ' + I + r'\(\7\);else\{[^{}]*' + re.escape(starts) + r'\()'
+    )
+
 args = sys.argv[1:]
 server = "--server" in args
 files = [a for a in args if a != "--server"]
@@ -80,8 +102,19 @@ for name, rx, required in (("String.cmp", CMP, True), ("Map.bit.go", BIT, True),
     if n != 1 and (required or n > 1):
         sys.exit(f"js-native: {name} found {n} times, not once")
     found[name] = n
+# starts_with first (contains is found by its call to it)
+n = sum(len(STARTS.findall(s)) for s in srcs.values())
+if n != 1 and (server or n > 1):
+    sys.exit(f"js-native: String.starts_with found {n} times, not once")
+found["String.starts_with"] = n
+starts = next((m.group(1) for s in srcs.values() for m in [STARTS.search(s)] if m), None)
+CONTAINS = contains_rx(starts) if starts else None
+n = sum(len(CONTAINS.findall(s)) for s in srcs.values()) if CONTAINS else 0
+if n != 1 and (server or n > 1):
+    sys.exit(f"js-native: String.contains found {n} times, not once")
+found["String.contains"] = n
 for f, s in srcs.items():
-    hit = CMP.search(s) or BIT.search(s) or SPLIT.search(s) or LEN.search(s)
+    hit = CMP.search(s) or BIT.search(s) or SPLIT.search(s) or LEN.search(s) or STARTS.search(s) or (CONTAINS and CONTAINS.search(s))
     if not hit:
         continue
     # one pass down the list; nat_chk once (the count only grows)
@@ -89,6 +122,9 @@ for f, s in srcs.items():
     s = CMP.sub(lambda m: m.group(0) + 'return{$:"Tuple",fst:{$:"Tuple",fst:%s,snd:%s},snd:{$:__bpOrd(%s,%s)}};' % (m.group(2), m.group(3), m.group(2), m.group(3)), s)
     s = BIT.sub(lambda m: m.group(0) + 'return{$:"Tuple",fst:%s,snd:__bpBit(%s,%s,%s)};' % (m.group(2), m.group(2), m.group(3), m.group(4)), s)
     s = SPLIT.sub(lambda m: m.group(0) + 'return __bpSplit(%s,%s);' % (m.group(2), m.group(3)), s)
+    s = STARTS.sub(lambda m: m.group(0) + 'return __bpStarts(%s,%s);' % (m.group(2), m.group(3)), s)
+    if CONTAINS:
+        s = CONTAINS.sub(lambda m: m.group(0) + 'return __bpContains(%s,%s);' % (m.group(2), m.group(3)), s)
     # (a module's imports may come after it: they are hoisted)
     s = HELPERS + s
     open(f, "w", encoding="utf-8").write(s)
@@ -96,7 +132,8 @@ for f, s in srcs.items():
 # matched but was not rewritten, or rewritten twice, stops the build too)
 outs = "".join(open(f, encoding="utf-8").read() for f in files)
 for name, call in (("String.cmp", "snd:{$:__bpOrd("), ("Map.bit.go", "snd:__bpBit("),
-                   ("String.split", "return __bpSplit("), ("List.length", 'x.$!=="Nil";x=x.tail)n++;return ')):
+                   ("String.split", "return __bpSplit("), ("List.length", 'x.$!=="Nil";x=x.tail)n++;return '),
+                   ("String.starts_with", "return __bpStarts("), ("String.contains", "return __bpContains(")):
     n = outs.count(call)
     if n != found[name]:
         sys.exit(f"js-native: {name}'s native body is in the output {n} times, not {found[name]}")
