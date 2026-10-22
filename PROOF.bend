@@ -12707,6 +12707,14 @@ def Laws.thin_mail_lazy_committed(cs, st, l):
       Laws.thin_mail_replay_append(done, [TMAILL.Pending{cs, st}], TMAILL.Cache.of(base))
 
 def Laws.thin_mail_lazy_warm(st, done): {==}
+def Laws.boot_next_never_cold(ok, n):
+  match ok n:
+    case True{} _:
+      {==}
+    case False{} 0n:
+      {==}
+    case False{} 1n+_:
+      {==}
 # ---- end S3 ----
 
 # --- J2: HTTP and WebSocket bodies counted and unmasked in tail calls ---
