@@ -70,6 +70,7 @@ import ../core/attach.bend as AT
 import ../core/sha1.bend as SH
 import ../core/boot.bend as BT
 import ../core/store.bend as ST
+import ./storedb.bend as SO
 import ./botnet.bend as BN
 import ../core/far.bend as FR
 import ../core/fview.bend as FV
@@ -426,9 +427,6 @@ def Cfg.thin.committed(+cfg: Cfg, +changes: List<&2, M.Change>, st: M.State) -> 
 # ---- mail perf: local wire-log length ----
 # Valid unknown JSON remains a wire line without changing State.seq.
 # Count the actual replay wire once, then only actual successful fresh lines.
-def LogCount.of(ls: List<&2, String>) -> Nat:
-  List.length(&2, String, ls)
-
 def LogCount.n(c: Cfg) -> Nat:
   match c:
     case Cfg{_, _, _, _, _, _, _, Net{_, _, _, _, _, _, _, _, _, _, _, bn, _, _, _, _}, +tcfg, +views}: BN.Bn.wire_n(bn)
@@ -438,8 +436,8 @@ def LogCount.set(c: Cfg, n: Nat) -> Cfg:
     case Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, br, pk, tm, mc, pv, bn, mg, lk, fc, ks}, +tcfg, +views}:
       Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, br, pk, tm, mc, pv, BN.Bn.with_wire_n(bn, n), mg, lk, fc, ks}, tcfg, views}
 
-def LogCount.init(c: Cfg, ls: List<&2, String>) -> Cfg:
-  LogCount.set(c, LogCount.of(ls))
+def LogCount.init(c: Cfg, +ls: SO.Lg) -> Cfg:
+  LogCount.set(c, SO.Lg.n(ls))
 
 def LogCount.committed(+c: Cfg, fresh: List<&2, String>) -> Cfg:
   LogCount.set(c, Nat.add(LogCount.n(c), List.length(&2, String, fresh)))
@@ -897,13 +895,13 @@ def Wire.behind(c: Client) -> Bool:
 # behind goes back to taking it, from `at`, Cr.catch); 2 streamed text
 # (none for a client taking its log: the live text comes with its end)
 type All is Data:
-  All{kind: Nat, log: List<&2, String>, fresh: Nat, fl: Nat, inbox: List<&2, Chan(Msg)>}
+  All{kind: Nat, log: Nat, fresh: Nat, fl: Nat, inbox: List<&2, Chan(Msg)>}
 
 # where a client too far behind takes its log up again: the log's length
 # before the changes. Counted only for such a client: counting the whole
-# log (100k lines) for every step cost ~30 ms each
-def All.at(+log: List<&2, String>, +fresh: Nat) -> Nat:
-  Nat.sub(List.length(&2, String, log), fresh)
+# log (100k lines) for every step cost ~30 ms each (log: its length now)
+def All.at(+log: Nat, +fresh: Nat) -> Nat:
+  Nat.sub(log, fresh)
 
 # A message the hub sends itself. The hub fiber is the inbox's only
 # reader, so a send into a full inbox (4096 slots) would park it for good:
@@ -999,7 +997,7 @@ def Wire.all.of(+cs: List<&2, Client>, +text: String, +a: All) -> IO(List<&2, Cl
   Wire.all.k(Clients.socket(cs), cs, text, a)
 
 def Wire.all(+cs: List<&2, Client>, +text: String) -> IO(List<&2, Client>):
-  Wire.all.of(cs, text, All{0n, Nil{}, 0n, 0n, Nil{}})
+  Wire.all.of(cs, text, All{0n, 0n, 0n, 0n, Nil{}})
 
 def Client.legacy(c: Client) -> Bool:
   match c:
@@ -1020,13 +1018,13 @@ def Wire.pair(cs: List<&2, Client>, +text: String) -> IO(List<&2, Client>):
 
 # streamed text: none for a client taking its log
 def Wire.delta(+cs: List<&2, Client>, +text: String) -> IO(List<&2, Client>):
-  Wire.all.of(cs, text, All{2n, Nil{}, 0n, 0n, Nil{}})
+  Wire.all.of(cs, text, All{2n, 0n, 0n, 0n, Nil{}})
 
 # log changes: every client but those taking their log (they get them with
 # the rest of it); one too far behind goes back to taking it from the log's
 # length before these changes (log: the log with them, fresh: how many),
 # the far mirrors left out
-def Wire.changes(+cs: List<&2, Client>, +text: String, +log: List<&2, String>, +fresh: Nat, +fl: Nat, +inbox: Chan(Msg)) -> IO(List<&2, Client>):
+def Wire.changes(+cs: List<&2, Client>, +text: String, +log: Nat, +fresh: Nat, +fl: Nat, +inbox: Chan(Msg)) -> IO(List<&2, Client>):
   Wire.all.of(cs, text, All{1n, log, fresh, fl, [inbox]})
 
 # Agent processes
@@ -1631,7 +1629,7 @@ def Conn.head.got(r: Socket & Result<&1, &1, U32 & String, List<&2, U32>>, buf: 
 # -------
 
 type Hub is Type:
-  Hub{state: M.State, log: File, lines: List<&2, String>, clients: List<&2, Client>, agents: List<&2, Agent>, inbox: Chan(Msg), cfg: Cfg, note: String}
+  Hub{state: M.State, log: File, lines: SO.Lg, clients: List<&2, Client>, agents: List<&2, Agent>, inbox: Chan(Msg), cfg: Cfg, note: String}
 
 def Hub.changes_msg(ls: List<&2, String>) -> String:
   "{\"t\":\"changes\",\"items\":[" ++ String.join(ls, ",") ++ "]}"
@@ -1711,18 +1709,24 @@ def Hub.lines.disk(cs: List<&2, M.Change>) -> List<&2, String>:
     case c <> t:
       J.Json.show(C.Change.encode(c)) <> Hub.lines.disk(t)
 
-# the written changes folded in: the state, the log's lines and the new
-# ones (both newest first)
+# the written changes folded in: the state, the commit's store statements
+# (SO.Cm: the log's count and the lines' facts and records) and the new
+# lines for clients (newest first)
 type Folded is Data:
-  Folded{st: M.State, ls: List<&2, String>, fresh: List<&2, String>}
+  Folded{st: M.State, cm: SO.Cm, fresh: List<&2, String>}
+
+def Hub.fold.k(r: M.State & SO.Cm, +w: String, fr: List<&2, String>) -> Folded:
+  (st, cm) = r
+  Folded{st, cm, w <> fr}
 
 # (ds: the changes' disk lines, Hub.lines.disk: each change is shown once
-# per commit and its line reused for clients, B.Commit.line)
+# per commit and its line reused for clients, B.Commit.line; the state
+# after each is the store's step's, SO.Sto.step)
 def Hub.fold(cs: List<&2, M.Change>, ds: List<&2, String>, f: Folded) -> Folded:
   match cs ds f:
-    case +c <> t +d <> dt Folded{st, ls, fr}:
+    case +c <> t +d <> dt Folded{+st, cm, fr}:
       +w = B.Commit.line(c, d)
-      Hub.fold(t, dt, Folded{M.State.apply(st, c), w <> ls, w <> fr})
+      Hub.fold(t, dt, Hub.fold.k(SO.Sto.step(st, c, d, w, cm), w, fr))
     case _ _ _:
       f
 
@@ -1735,10 +1739,12 @@ def Bot.dir.changed.all(cs: List<&2, M.Change>, +inbox: Chan(Msg)) -> IO(Unit):
         Bot.dir.changed(c, inbox)
         Bot.dir.changed.all(t, inbox)
 
-def Hub.commit.k(fd: Folded, +cs: List<&2, M.Change>, f: File, cl: List<&2, Client>, as: List<&2, Agent>, inbox: Chan(Msg), cfg: Cfg, note: String) -> Hub & Wrote:
+def Hub.commit.k(fd: Folded, +cs: List<&2, M.Change>, f: File, cl: List<&2, Client>, as: List<&2, Agent>, inbox: Chan(Msg), cfg: Cfg, note: String) -> IO(Hub & Wrote):
   match fd:
-    case Folded{+st, ls, +fr}:
-      (Hub{st, f, ls, cl, as, inbox, LogCount.committed(Cfg.thin.committed(cfg, cs, st), fr), note}, Wrote{fr, True{}, ""})
+    case Folded{+st, cm, +fr}:
+      do IO<Hub & Wrote>:
+        ls : SO.Lg <- SO.Sto.commit(cm)
+        return (Hub{st, f, ls, cl, as, inbox, LogCount.committed(Cfg.thin.committed(cfg, cs, st), fr), note}, Wrote{fr, True{}, ""})
 
 def Hub.err.msg(e: U32 & String) -> String:
   (_, msg) = e
@@ -1872,18 +1878,14 @@ def Cfg.version(c: Cfg) -> String:
 
 # which log this is: the time of its first change (a client resumes only
 # into the log it came from)
-def Hub.origin(+ls: List<&2, String>) -> String:
-  Nat.show(J.Json.get_nat(Maybe.default(&2, J.Json, J.Json.parse(Maybe.default(&2, String, List.last(&2, String, ls), "")), J.Null{}), "at", 0n))
+def Hub.origin(+ls: SO.Lg) -> String:
+  SO.Lg.origin(ls)
 
-def Hub.log_msg.k(+n: Nat, +ls: List<&2, String>, +cfg: Cfg, +since: Nat) -> String:
-  "{\"t\":\"log\",\"since\":" ++ Nat.show(since) ++ ",\"origin\":\"" ++ Hub.origin(ls) ++ "\",\"version\":" ++ J.Json.show(J.Str{Cfg.version(cfg)}) ++ ",\"info\":" ++ J.Json.show(Hub.info(cfg))
-    ++ ",\"items\":[" ++ String.join(List.reverse(&2, String, List.take(&2, String, ls, Nat.sub(n, since))), ",") ++ "]}"
-
-# the log for a client that has the first `since` changes already (a
-# reconnect sends only what it missed; a client ahead of the log, as after
-# a server reset, gets everything, since 0)
-def Hub.log_msg(+ls: List<&2, String>, +cfg: Cfg, +since: Nat) -> String:
-  Hub.log_msg.k(List.length(&2, String, ls), ls, cfg, Bool.pick(Nat, Nat.is_le(since, List.length(&2, String, ls)), since, 0n))
+# the log message with no items (the window in this process: it reads the
+# state itself)
+def Hub.log_msg.k(+ls: SO.Lg, +cfg: Cfg) -> String:
+  "{\"t\":\"log\",\"since\":0,\"origin\":\"" ++ Hub.origin(ls) ++ "\",\"version\":" ++ J.Json.show(J.Str{Cfg.version(cfg)}) ++ ",\"info\":" ++ J.Json.show(Hub.info(cfg))
+    ++ ",\"items\":[]}"
 
 # the first frame of a join: the log message with the first chunk of what
 # the client lacks; "more": the rest follows a chunk at a time
@@ -6182,12 +6184,12 @@ def Hub.cut.ok(r: P.Ran) -> Bool:
 def Hub.cut(+len: String, +cfg: Cfg) -> IO(Bool):
   IO.bind(P.Ran, Bool, P.Proc.run("truncate", ST.Store.trunc.args(len, Store.path(Cfg.home(cfg))), "/"), r => IO.pure(Bool, Hub.cut.ok(r)))
 
-def Hub.held(+hold: String, st: M.State, f: File, ls: List<&2, String>, cl: List<&2, Client>,
+def Hub.held(+hold: String, st: M.State, f: File, ls: SO.Lg, cl: List<&2, Client>,
     as: List<&2, Agent>, inbox: Chan(Msg), +cfg: Cfg, note: String) -> Hub & Wrote:
   (Hub{st, f, ls, cl, as, inbox, Cfg.with_bn(cfg, BN.Bn.with_broken(Cfg.bn(cfg), hold)), note}, Wrote{Nil{}, False{}, ST.Store.held.msg(hold)})
 
 # a write failed: cut back (the log is as it was) or held
-def Hub.commit.failed(cut: Bool, +len: String, +err: String, st: M.State, f: File, ls: List<&2, String>, cl: List<&2, Client>,
+def Hub.commit.failed(cut: Bool, +len: String, +err: String, st: M.State, f: File, ls: SO.Lg, cl: List<&2, Client>,
     as: List<&2, Agent>, inbox: Chan(Msg), +cfg: Cfg, note: String) -> IO(Hub & Wrote):
   match cut:
     case True{}:
@@ -6201,25 +6203,25 @@ def Cfg.telemetry.privacy_committed(cs: List<&2, M.Change>, cfg: Cfg) -> Cfg:
     case Cfg{h, w, ho, p, pr, ds, v, nt, tm, views}:
       Cfg{h, w, ho, p, pr, ds, v, nt, TUI.Privacy.committed(cs, tm), views}
 
-def Hub.commit.done(r: File & Result<&1, &1, U32 & String, Unit>, +disk: List<&2, String>, +len: String, +cs: List<&2, M.Change>, st: M.State, ls: List<&2, String>, cl: List<&2, Client>,
+def Hub.commit.done(r: File & Result<&1, &1, U32 & String, Unit>, +disk: List<&2, String>, +len: String, +cs: List<&2, M.Change>, st: M.State, ls: SO.Lg, cl: List<&2, Client>,
     as: List<&2, Agent>, +inbox: Chan(Msg), +cfg: Cfg, note: String) -> IO(Hub & Wrote):
   (f, res) = r
   match res:
     case Done{_}:
       do IO<Hub & Wrote>:
         Bot.dir.changed.all(cs, inbox)
-        return Hub.commit.k(Hub.fold(cs, disk, Folded{st, ls, Nil{}}), cs, f, cl, as, inbox, Cfg.telemetry.privacy_committed(cs, Live.with(cfg, LV.Live.ends(cs, Live.of(cfg)))), note)
+        Hub.commit.k(Hub.fold(cs, disk, Folded{st, SO.Cm.new(ls, M.Switch.num(len, 0n)), Nil{}}), cs, f, cl, as, inbox, Cfg.telemetry.privacy_committed(cs, Live.with(cfg, LV.Live.ends(cs, Live.of(cfg)))), note)
     case Fail{e}:
       do IO<Hub & Wrote>:
         cut : Bool <- Hub.cut(len, cfg)
         Hub.commit.failed(cut, len, Hub.err.msg(e), st, f, ls, cl, as, inbox, cfg, note)
 
-def Hub.commit.write(+disk: List<&2, String>, f: File, +len: String, +cs: List<&2, M.Change>, st: M.State, ls: List<&2, String>, cl: List<&2, Client>,
+def Hub.commit.write(+disk: List<&2, String>, f: File, +len: String, +cs: List<&2, M.Change>, st: M.State, ls: SO.Lg, cl: List<&2, Client>,
     as: List<&2, Agent>, +inbox: Chan(Msg), +cfg: Cfg, note: String) -> IO(Hub & Wrote):
   IO.bind(File & Result<&1, &1, U32 & String, Unit>, Hub & Wrote, File.write(f, ST.Store.text(disk)),
     w => Hub.commit.done(w, disk, len, cs, st, ls, cl, as, inbox, cfg, note))
 
-def Hub.commit.at(r: File & Result<&1, &1, U32 & String, U32>, +cs: List<&2, M.Change>, st: M.State, ls: List<&2, String>, cl: List<&2, Client>,
+def Hub.commit.at(r: File & Result<&1, &1, U32 & String, U32>, +cs: List<&2, M.Change>, st: M.State, ls: SO.Lg, cl: List<&2, Client>,
     as: List<&2, Agent>, +inbox: Chan(Msg), +cfg: Cfg, note: String) -> IO(Hub & Wrote):
   (f, res) = r
   match res:
@@ -6228,12 +6230,12 @@ def Hub.commit.at(r: File & Result<&1, &1, U32 & String, U32>, +cs: List<&2, M.C
     case Fail{e}:
       IO.pure(Hub & Wrote, (Hub{st, f, ls, cl, as, inbox, cfg, note}, Wrote{Nil{}, False{}, Hub.err.msg(e)}))
 
-def Hub.commit.go(+cs: List<&2, M.Change>, st: M.State, f: File, ls: List<&2, String>, cl: List<&2, Client>,
+def Hub.commit.go(+cs: List<&2, M.Change>, st: M.State, f: File, ls: SO.Lg, cl: List<&2, Client>,
     as: List<&2, Agent>, +inbox: Chan(Msg), +cfg: Cfg, note: String) -> IO(Hub & Wrote):
   IO.bind(File & Result<&1, &1, U32 & String, U32>, Hub & Wrote, File.size(f), r => Hub.commit.at(r, cs, st, ls, cl, as, inbox, cfg, note))
 
 # the log was held: cut it back now; commit if that worked, else refuse
-def Hub.commit.heal(cut: Bool, +hold: String, +cs: List<&2, M.Change>, st: M.State, f: File, ls: List<&2, String>, cl: List<&2, Client>,
+def Hub.commit.heal(cut: Bool, +hold: String, +cs: List<&2, M.Change>, st: M.State, f: File, ls: SO.Lg, cl: List<&2, Client>,
     as: List<&2, Agent>, +inbox: Chan(Msg), +cfg: Cfg, note: String) -> IO(Hub & Wrote):
   match cut:
     case True{}:
@@ -6241,7 +6243,7 @@ def Hub.commit.heal(cut: Bool, +hold: String, +cs: List<&2, M.Change>, st: M.Sta
     case False{}:
       IO.pure(Hub & Wrote, Hub.held(hold, st, f, ls, cl, as, inbox, cfg, note))
 
-def Hub.commit.gate(ok: Bool, +cs: List<&2, M.Change>, st: M.State, f: File, ls: List<&2, String>, cl: List<&2, Client>,
+def Hub.commit.gate(ok: Bool, +cs: List<&2, M.Change>, st: M.State, f: File, ls: SO.Lg, cl: List<&2, Client>,
     as: List<&2, Agent>, +inbox: Chan(Msg), +cfg: Cfg, note: String) -> IO(Hub & Wrote):
   match ok:
     case True{}:
@@ -7700,8 +7702,8 @@ def Far.history(+ls: List<&2, String>) -> String:
 
 # at start: lines the log holds that this build cannot decode give the
 # history a new identity (Fr.history.body)
-def Far.history.at(+ls: List<&2, String>, +seq: Nat) -> String:
-  Bool.pick(String, List.is_empty(&2, String, ls), "", SG.Sign.header("00", 0n, FR.Fr.history.body(Maybe.default(&2, String, List.last(&2, String, ls), ""), List.length(&2, String, ls), seq)))
+def Far.history.at(+ls: SO.Lg, +seq: Nat) -> String:
+  Bool.pick(String, Nat.is_eq(SO.Lg.n(ls), 0n), "", SG.Sign.header("00", 0n, FR.Fr.history.body(SO.Lg.first(ls), SO.Lg.n(ls), seq)))
 
 def Far.push.body(+s: FR.Send, +name: String) -> String:
   Bool.pick(String, Nat.is_gt(String.length(FR.Send.body(s, name)), 200000n), FR.Send.body(FR.Send.gap(s), name), FR.Send.body(s, name))
@@ -7752,9 +7754,41 @@ def Far.mcp.job(+id: J.Json, +link: String, +body: String, +home: String, +url: 
     ok : Result<&1, &1, String, Unit> <- Chan.send(String, reply, FM.Fm.answer(id, link, Far.code(r), Far.body(r)))
     return Unit{}
 
-# this hub's shared lines, made from its log (newest first)
-def Far.feed.job(+ls: List<&2, String>, +st: M.State, +inbox: Chan(Msg)) -> IO(Unit):
-  Far.send(inbox, FarFeed{FR.Fr.feed.full(ls, st), ""})
+# a page of the log's lines (oldest first, numbered after n) into the feed
+def Feed.page(xs: List<&2, String>, +n: Nat, +st: M.State, acc: FR.Feed) -> FR.Feed:
+  match xs:
+    case Nil{}:
+      acc
+    case +l <> t:
+      Feed.page(t, 1n+n, st, FR.Fr.feed.step(FR.Fr.line.parsed(J.Json.parse(l)), st, 1n+n, l, acc))
+
+def Far.feed.more(none: Bool, +xs: List<&2, String>, +at: Nat, +st: M.State, acc: FR.Feed, k: Nat -> FR.Feed -> IO(FR.Feed)) -> IO(FR.Feed):
+  match none:
+    case True{}:
+      IO.pure(FR.Feed, acc)
+    case False{}:
+      k(Nat.add(at, List.length(&2, String, xs)), Feed.page(xs, at, st, acc))
+
+def Far.feed.at(go: Bool, +ls: SO.Lg, +st: M.State, +at: Nat, acc: FR.Feed, k: Nat -> FR.Feed -> IO(FR.Feed)) -> IO(FR.Feed):
+  match go:
+    case False{}:
+      IO.pure(FR.Feed, acc)
+    case True{}:
+      IO.bind(List<&2, String>, FR.Feed, SO.Sto.lines(ls, at, 2000n), xs => Far.feed.more(List.is_empty(&2, String, xs), xs, at, st, acc, k))
+
+def Far.feed.loop(fuel: Nat, +ls: SO.Lg, +st: M.State, +at: Nat, acc: FR.Feed) -> IO(FR.Feed):
+  match fuel:
+    case 0n:
+      IO.pure(FR.Feed, acc)
+    case 1n+f:
+      Far.feed.at(Nat.is_lt(at, SO.Lg.n(ls)), ls, st, at, acc, a2 => acc2 => Far.feed.loop(f, ls, st, a2, acc2))
+
+# this hub's shared lines (newest first), read from the store a page at a
+# time (the hub holds no log lines; F1 replaces the feed with far_line)
+def Far.feed.job(+ls: SO.Lg, +st: M.State, +inbox: Chan(Msg)) -> IO(Unit):
+  do IO<Unit>:
+    fd : FR.Feed <- Far.feed.loop(1000000000n, ls, st, 0n, FR.Feed{Nil{}, Map.new(&2, Nat)})
+    Far.send(inbox, FarFeed{fd, ""})
 
 # a mirror kept on disk, read back
 def Far.load.job(+link: String, +name: String, +home: String, +inbox: Chan(Msg)) -> IO(Unit):
@@ -8440,7 +8474,7 @@ def Far.start.go(ps: List<&2, BO.Peer>, +home: String, +inbox: Chan(Msg)) -> IO(
         IO.spawn(Unit, Far.load.job(i, n, home, inbox))
         Far.start.go(t, home, inbox)
 
-def Far.start.epoch(p: FR.Fh & Hub, +ls: List<&2, String>, +seq: Nat) -> Hub:
+def Far.start.epoch(p: FR.Fh & Hub, +ls: SO.Lg, +seq: Nat) -> Hub:
   (fh, h) = p
   Far.with(h, FR.Fh.epoch.set(fh, Far.history.at(ls, seq)))
 
@@ -8462,7 +8496,7 @@ def Hub.announce(r: Hub & List<&2, String>) -> IO(Hub):
       IO.pure(Hub, h)
     case Hub{st, f, +ls, cl, as, +inbox, +cfg, note} +l <> +t:
       do IO<Hub>:
-        cl2 : List<&2, Client> <- Wire.changes(cl, Hub.changes_msg(List.reverse(&2, String, l <> t)), ls, List.length(&2, String, l <> t),
+        cl2 : List<&2, Client> <- Wire.changes(cl, Hub.changes_msg(List.reverse(&2, String, l <> t)), SO.Lg.n(ls), List.length(&2, String, l <> t),
           List.length(&2, FR.In, Far.mirrors(cfg)), inbox)
         return Hub{st, f, ls, cl2, as, inbox, cfg, note}
 
@@ -8951,7 +8985,7 @@ def Hub.out(h: Hub, o: B.Out) -> IO(Hub):
         Far.live.out(Hub{st, f, ls, cl2, as, inbox, Live.with_delta(cfg, LV.Live.add.at(Live.of(cfg), thread, text, Nat.mul(now, 1000n)), thread, text), note}, thread, off, text, now)
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note} B.Broadcast{+text}:
       do IO<Hub>:
-        cl2 : List<&2, Client> <- Wire.all.of(cl, text, All{Bool.pick(Nat, String.starts_with(text, "{\"t\":\"delta"), 2n, 0n), Nil{}, 0n, 0n, Nil{}})
+        cl2 : List<&2, Client> <- Wire.all.of(cl, text, All{Bool.pick(Nat, String.starts_with(text, "{\"t\":\"delta"), 2n, 0n), 0n, 0n, 0n, Nil{}})
         Far.shown(st, cfg, text)
         return Hub{st, f, ls, cl2, as, inbox, cfg, note}
     case Hub{+st, f, ls, cl, +as, inbox, cfg, note} B.AgentStart{+thread, +cwd, _, +model, +session, r, i}:
@@ -9313,23 +9347,28 @@ def Boot.far.k(m: Maybe<&2, FR.In>, h: Hub, +c: Client, +id: U32) -> IO(Hub):
     case None{}:
       Boot.last(h, Boot.cr(c, OB.Cr.live(Boot.r(c))), id)
 
-# what the next chunk comes from: what was left when the client joined
-# (or caught up), else the changes made since
-def Boot.src(rs: List<&2, String>, +ls: List<&2, String>, +n: Nat, +at: Nat) -> List<&2, String>:
-  match rs:
-    case Nil{}:
-      OB.Join.window(ls, n, at)
-    case +x <> t:
-      x <> t
+# how many lines a join's next chunk takes from item at of n: what
+# OB.Join.next(OB.Join.window(...)) took when the hub held the lines
+def Join.min(+a: Nat, +b: Nat) -> Nat:
+  Bool.pick(Nat, Nat.is_le(a, b), a, b)
 
+def Join.take(+n: Nat, +at: Nat) -> Nat:
+  Join.min(Nat.sub(n, at), Join.min(OB.Join.most(), OB.Join.lines()))
+
+# where a chunk leaves the cursor; a chunk the store could not give (none
+# while lines are due) skips to the end rather than asking forever
+def Join.adv(+ch: List<&2, String>, +at: Nat, +n: Nat) -> Nat:
+  Bool.pick(Nat, List.is_empty(&2, String, ch), n, Nat.add(at, List.length(&2, String, ch)))
+
+# the next chunk, read from the store (SO.Sto.lines) from the cursor
 def Boot.go(log: Bool, +c: Client, h: Hub, +n: Nat, +id: U32) -> IO(Hub):
   match log h:
     case True{} Hub{st, f, +ls, cl, as, inbox, cfg, note}:
-      +xs = Boot.src(OB.Cr.rest(Boot.r(c)), ls, n, OB.Cr.at(Boot.r(c)))
-      +ch = OB.Join.next(xs)
-      Boot.send(Hub{st, f, ls, cl, as, inbox, cfg, note},
-        Boot.cr(c, OB.Cr.rest.set(OB.Cr.at.set(Boot.r(c), Nat.add(OB.Cr.at(Boot.r(c)), List.length(&2, String, ch))), List.drop(&2, String, xs, List.length(&2, String, ch)))),
-        Hub.boot_items(ch), 0n, id)
+      do IO<Hub>:
+        +ch : List<&2, String> <- SO.Sto.lines(ls, OB.Cr.at(Boot.r(c)), Join.take(n, OB.Cr.at(Boot.r(c))))
+        Boot.send(Hub{st, f, ls, cl, as, inbox, cfg, note},
+          Boot.cr(c, OB.Cr.at.set(Boot.r(c), Join.adv(ch, OB.Cr.at(Boot.r(c)), n))),
+          Hub.boot_items(ch), 0n, id)
     case False{} Hub{st, f, ls, cl, as, inbox, +cfg, note}:
       Boot.far.k(List.get(&2, FR.In, Far.mirrors(cfg), OB.Cr.fl(Boot.r(c))), Hub{st, f, ls, cl, as, inbox, cfg, note}, c, id)
 
@@ -10514,15 +10553,15 @@ def Hub.mobile.history.begin(+n: Nat, +s0: Nat, +origin: String, +xs: List<&2, S
       +more = Bool.or(Nat.is_lt(Nat.add(s0, k), n), Bool.not(List.is_empty(&2, FR.In, Far.mirrors(cfg))))
       do IO<Hub>:
         m : Maybe<&2, Client> <- Wire.offer(Client{id, out, look,
-          PRESENT.Session.history_credit(cr, Nat.add(s0, k), more, OB.Join.from(ls, n, Nat.add(s0, k))), sock, legacy, Nil{}},
+          PRESENT.Session.history_credit(cr, Nat.add(s0, k), more, Nil{}), sock, legacy, Nil{}},
           Hub.log_items(origin, cfg, s0, List.take(&2, String, xs, k), more), 0n)
         m1 : Maybe<&2, Client> <- Hub.join.live(more, m, cfg)
         Hub.join.more(more, inbox, id, OB.Cr.gen(cr))
         return Hub{st, f, ls, Clients.swap(cl, id, m1), as, inbox, cfg, note}
 
-def Hub.mobile.history.window(+n: Nat, +origin: String, +since: Nat, oldOrigin: String, +ls: List<&2, String>, h: Hub, c: Client) -> IO(Hub):
+def Hub.mobile.history.window(+n: Nat, +origin: String, +since: Nat, oldOrigin: String, +ls: SO.Lg, h: Hub, c: Client) -> IO(Hub):
   +s0 = PRESENT.Session.resume_cursor(since, oldOrigin, origin, n)
-  Hub.mobile.history.begin(n, s0, origin, OB.Join.window(ls, n, s0), h, c)
+  IO.bind(List<&2, String>, Hub, SO.Sto.lines(ls, s0, Join.take(n, s0)), xs => Hub.mobile.history.begin(n, s0, origin, xs, h, c))
 
 def Hub.mobile.history.start(h: Hub, c: Client) -> IO(Hub):
   match h c:
@@ -10987,7 +11026,7 @@ def Hub.tick(h: Hub, +now: Nat) -> IO(Hub):
         +cl : List<&2, Client> <- Desk.say(DK.Desk.text(Clients.looks(cl0), Nat.sub(now, 60n)), cl0, now)
         PS.Perf.set("hub.clients", U32.from_nat(List.length(&2, Client, cl)))
         PS.Perf.set("hub.agents", U32.from_nat(List.length(&2, Agent, as)))
-        PS.Perf.set("hub.changes", U32.from_nat(List.length(&2, String, ls)))
+        PS.Perf.set("hub.changes", U32.from_nat(SO.Lg.n(ls)))
         PS.Perf.set("hub.busy", U32.from_nat(M.Work.threads(st)))
         # children the last exec handed over that ended meanwhile are waited
         # for (effects/adopt.c), so none stays a zombie
@@ -14996,7 +15035,7 @@ def Hub.join.here(h: Hub, +client: U32, +out: Chan(Wire), +gen: U32, +now: Nat) 
   match h:
     case Hub{+st, f, +ls, +cl, as, inbox, +cfg, +note}:
       do IO<Hub>:
-        m : Maybe<&2, Client> <- Hub.join.state(Client{client, out, DK.Look.none(), OB.Cr.new(gen, True{}, False{}, 0n), 0, False{}, Nil{}}, WState{M.State.private(st), Hub.log_msg.k(0n, ls, cfg, 0n)})
+        m : Maybe<&2, Client> <- Hub.join.state(Client{client, out, DK.Look.none(), OB.Cr.new(gen, True{}, False{}, 0n), 0, False{}, Nil{}}, WState{M.State.private(st), Hub.log_msg.k(ls, cfg)})
         m1 : Maybe<&2, Client> <- Far.join.here(Far.mirrors(cfg), m)
         m2 : Maybe<&2, Client> <- Wire.text.m(m1, LV.Live.msg(Live.of(cfg)))
         m3 : Maybe<&2, Client> <- Hub.join.notes(m2, note, Desk.join(DK.Desk.text(Clients.looks(cl), now)))
@@ -15010,7 +15049,7 @@ def Hub.join.k(+n: Nat, +s0: Nat, +xs: List<&2, String>, h: Hub, +client: U32, +
       +k = List.length(&2, String, OB.Join.next(xs))
       +more = Bool.or(Nat.is_lt(Nat.add(s0, k), n), Bool.not(List.is_empty(&2, FR.In, Far.mirrors(cfg))))
       do IO<Hub>:
-        m : Maybe<&2, Client> <- Wire.offer(Client{client, out, DK.Look.none(), OB.Cr.rest.set(OB.Cr.wait.set(OB.Cr.new(gen, U32.is_eq(client, 0), more, Nat.add(s0, k)), more), OB.Join.from(ls, n, Nat.add(s0, k))), sock, legacy, Nil{}},
+        m : Maybe<&2, Client> <- Wire.offer(Client{client, out, DK.Look.none(), OB.Cr.wait.set(OB.Cr.new(gen, U32.is_eq(client, 0), more, Nat.add(s0, k)), more), sock, legacy, Nil{}},
           Hub.log_items(origin, cfg, s0, List.take(&2, String, xs, k), more), 0n)
         m1 : Maybe<&2, Client> <- Hub.join.live(more, m, cfg)
         m2 : Maybe<&2, Client> <- Hub.join.notes(m1, note, Desk.join(DK.Desk.text(Clients.looks(cl), now)))
@@ -15025,10 +15064,10 @@ def Hub.join.k(+n: Nat, +s0: Nat, +xs: List<&2, String>, h: Hub, +client: U32, +
 def Hub.join(h: Hub, +client: U32, +out: Chan(Wire), +since: Nat, +origin: String, +gen: U32, +sock: U32, +legacy: Bool, +now: Nat) -> IO(Hub):
   match h:
     case Hub{st, f, +ls, cl, as, inbox, cfg, note}:
-      +n = List.length(&2, String, ls)
+      +n = SO.Lg.n(ls)
       +o = Hub.origin(ls)
       +s0 = Bool.pick(Nat, Bool.and(String.eq(origin, o), Nat.is_le(since, n)), since, 0n)
-      Hub.join.k(n, s0, OB.Join.window(ls, n, s0), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, out, o, gen, sock, legacy, now)
+      IO.bind(List<&2, String>, Hub, SO.Sto.lines(ls, s0, Join.take(n, s0)), xs => Hub.join.k(n, s0, xs, Hub{st, f, ls, cl, as, inbox, cfg, note}, client, out, o, gen, sock, legacy, now))
 
 def Hub.handle(h: Hub, m: Msg, +now: Nat) -> IO(Hub):
   match m:
@@ -15422,7 +15461,7 @@ def Main.listened(r: Result<&1, &1, U32 & String, Listener>, h: Hub, +web: Strin
 
 # the headless KiCad servers' lines, to the hub
 
-def Main.opened(r: Result<&1, &1, U32 & String, File>, +st: M.State, ls: List<&2, String>, cfg: Cfg, need: Bool, front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
+def Main.opened(r: Result<&1, &1, U32 & String, File>, +st: M.State, ls: SO.Lg, cfg: Cfg, need: Bool, front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
   match r cfg:
     case Done{f} Cfg{+home, +web, +host, +port, +pr, +ds, +v, nt0, +tcfg, +views}:
       do IO<Unit>:
@@ -15466,6 +15505,22 @@ def Main.opened(r: Result<&1, &1, U32 & String, File>, +st: M.State, ls: List<&2
     case Fail{e} _:
       Main.nolog(e)
 
+# the log's changes folded (a line that does not parse is left out, as
+# ST.Store.load leaves it; the lines themselves are not kept)
+def Boot.fold.one(m: Maybe<&2, J.Json>, st: M.State) -> M.State:
+  match m:
+    case Some{o}:
+      ST.Store.apply(C.Change.decode(o), st)
+    case None{}:
+      st
+
+def Boot.fold(ls: List<&2, String>, st: M.State) -> M.State:
+  match ls:
+    case Nil{}:
+      st
+    case l <> t:
+      Boot.fold(t, Boot.fold.one(J.Json.parse(l), st))
+
 def Main.boot(cfg: Cfg, need: Bool, front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
   match cfg:
     case Cfg{+home, w, h, +p, pr, ds, v, nt, +tcfg, +views}:
@@ -15478,14 +15533,16 @@ def Main.boot(cfg: Cfg, need: Bool, front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
         t0 : U32 <- PS.Perf.us()
         +bs : List<&2, U32> <- Files.read(Store.path(home))
         t1 : U32 <- PS.Perf.span("boot.read", t0)
-        +ld : ST.Loaded = ST.Store.load(Store.lines(bs), ST.Loaded{M.State.empty(), Nil{}})
-        +st : M.State = ST.Loaded.st(ld)
-        +ls : List<&2, String> = ST.Loaded.wire(ld)
+        +st : M.State = Boot.fold(Store.lines(bs), M.State.empty())
         t2 : U32 <- PS.Perf.span("boot.replay", t1)
-        Log.info("replayed " ++ Nat.show(List.length(&2, String, ls)) ++ " changes from " ++ Store.path(home))
         GT.Git.step.migrate(home, HistReg.roots(st))
         f0 : Result<&1, &1, U32 & String, File> <- File.open(Store.path(home), "a")
         f : Result<&1, &1, U32 & String, File> <- Main.torn(f0, ST.Store.tail_fix(bs))
+        # S1: Sto.boot here (the store brought up to the log's end; the hub
+        # keeps no log lines, SO.Lg)
+        +ls : SO.Lg <- SO.Sto.boot(home, st)
+        t3 : U32 <- PS.Perf.span("boot.store", t2)
+        Log.info("replayed " ++ Nat.show(SO.Lg.n(ls)) ++ " changes from " ++ Store.path(home))
         tok : String <- Token.load(home)
         +mc : String <- Files.text(Models.cache(home))
         +bc : String <- BN.Bf.text(BN.Bn.cache(home))
@@ -15496,4 +15553,4 @@ def Main.boot(cfg: Cfg, need: Bool, front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
         +ai : String <- Env.get("APPIMAGE", "")
         +tc : List<&2, TI.TmCfg> <- TI.Tio.config(TI.Tio.sb(tcfg))
         finalCfg : Cfg = Cfg.with_managed(Cfg.with_models(Cfg.with_bn(Cfg.with_token(Cfg.with_rt(Cfg{home, w, h, p, pr, ds, v, nt, tc, views}, rt), tok), BN.Bn.with_dir(BN.Bn.empty(), BN.Bn.cache.load(bc, BO.World.peers(M.State.bots(st))))), BT.Cache.json(mc), BT.Cache.text(mc)), SV.Chan.managed(off, ai))
-        Main.opened(f, st, ls, Cfg.with_thin_cache(LogCount.init(finalCfg, ls), ThinCache{THIN.Index.of(st), Bool.pick(String, List.is_empty(&2, String, ls), "", Hub.origin(ls)), 1n, Map.new(&2, TLIVE.Stream), TMAIL.Cache.of(st)}), need, front)
+        Main.opened(f, st, ls, Cfg.with_thin_cache(LogCount.init(finalCfg, ls), ThinCache{THIN.Index.of(st), Bool.pick(String, Nat.is_eq(SO.Lg.n(ls), 0n), "", Hub.origin(ls)), 1n, Map.new(&2, TLIVE.Stream), TMAIL.Cache.of(st)}), need, front)
