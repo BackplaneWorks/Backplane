@@ -221,3 +221,7 @@ Headless UI checks go through the web client and the phones (`bun test/tools/web
 - The UI is dumb: every decision (order, settle state, fade alpha, what's visible) comes from a Bend def with a law behind it where possible.
 - Square corners, minimal copy, no decorative headings.
 - Before pushing, verify the GitHub account (`i2cjak`), the remote, and the branch.
+
+## Links
+Any time you give me a link to something running on this computer (a dev server, preview, review page, or dashboard), use its Tailscale MagicDNS name instead of localhost or 127.0.0.1, e.g. http://chriss-mac-mini.taildd33e.ts.net:<port>/. I work across several computers on my tailnet, and localhost links only open on this machine.
+Bind dev servers to 0.0.0.0 (or the Tailscale interface) so that link actually works, never to 127.0.0.1 only.
