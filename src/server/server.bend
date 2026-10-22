@@ -11075,12 +11075,30 @@ def Hub.thin.fetch(memory: Bool, +cfg: Cfg, +thread: String, +anchor: Nat) -> IO
     case True{}: IO.pure(TSTO.Page, TSTO.Page{Cfg.thin(cfg), THIN.Index.page(Cfg.thin(cfg), thread, anchor, 32n)})
     case False{}: TSTO.Ts.page(Cfg.thin.store(cfg), thread, anchor, 32n, Cfg.thin(cfg))
 
-def Hub.thin.render.page(+pg: TSTO.Page, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, +context: ThinContext, +p: J.Json, +key: String, +ms: Nat) -> IO(Hub):
+# the hub's info with a thread's skills (as a client's skills.list answer
+# keeps them: "skills", "skills.for")
+def Hub.thin.skills.info(+ss: List<&2, AG.USkill>, +info: J.Json, +thread: String) -> J.Json:
+  TV.Obj.put(TV.Obj.put(info, "skills", J.Str{J.Json.show(AG.USkill.json(ss))}), "skills.for", J.Str{thread})
+
+def Hub.thin.info.k(+want: Bool, +st: M.State, +cfg: Cfg, +thread: String) -> IO(J.Json):
+  match want:
+    case True{}: IO.bind(List<&2, AG.USkill>, J.Json, Skills.scan(B.Hub.cwd(st, B.Hub.thread(st, thread))), +ss => IO.pure(J.Json, Hub.thin.skills.info(ss, Hub.info(cfg), thread)))
+    case False{}: IO.pure(J.Json, Hub.info(cfg))
+
+# The info a thin render reads: the hub's, and the thread's skills while the
+# draft the request brought types a `$name` or a slash command (a thin view
+# never asks skills.list: the hub renders its composer, client.bend's
+# Skills.wants)
+def Hub.thin.info(+st: M.State, +cfg: Cfg, +p: J.Json) -> IO(J.Json):
+  +thread = TV.Target.thread(st, J.Json.get_obj(p, "target"))
+  Hub.thin.info.k(Bool.and(Bool.not(String.is_empty(thread)), UC.Skills.wants(J.Json.get_str(J.Json.get_obj(J.Json.get_obj(p, "session"), "drafts"), thread, ""))), st, cfg, thread)
+
+def Hub.thin.render.page(+pg: TSTO.Page, +info: J.Json, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, +context: ThinContext, +p: J.Json, +key: String, +ms: Nat) -> IO(Hub):
   match h:
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
       +web = String.eq(Client.thin.mode(c), "view-web")
       +stream = TLIVE.Stream.get(Cfg.thin.streams(cfg), TV.Target.thread(st, J.Json.get_obj(p, "target")))
-      +actor = TA.Actor.mail_cache(TA.Actor.refresh(ThinContext.actors(context), web, st, Hub.info(cfg),
+      +actor = TA.Actor.mail_cache(TA.Actor.refresh(ThinContext.actors(context), web, st, info,
         J.Json.obj([J.KV{"t", J.Str{"live"}}, J.KV{"items", J.Json.arr(Nil{})}]), now, p, ThinContext.view(context)), ThinContext.actors(context), Cfg.thin.mail(cfg))
       Hub.thin.rendered(TA.Rendered.remember(TA.Actor.render(actor, web, st, TSTO.Page.index(pg), p, Cfg.thin.epoch(cfg), now, TSTO.Page.ids(pg), stream), key, ms, stream),
         Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now, context)
@@ -11090,7 +11108,8 @@ def Hub.thin.render.full(h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
       do IO<Hub>:
         +pg : TSTO.Page <- Hub.thin.fetch(String.is_empty(Cfg.thin.store(cfg)), cfg, TV.Target.thread(st, J.Json.get_obj(p, "target")), anchor)
-        Hub.thin.render.page(pg, Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now, context, p, key, ms)
+        +info : J.Json <- Hub.thin.info(st, cfg, p)
+        Hub.thin.render.page(pg, info, Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now, context, p, key, ms)
 
 # a view.update whose render memo still holds (thin-actor.bend's
 # Memo.reply: only the live row can have changed) answers with it spliced
