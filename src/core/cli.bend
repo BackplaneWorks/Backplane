@@ -16,7 +16,7 @@ import Base
 #   --headless --foreground                        (the window app's)
 # The children the hub runs of its own binary come first and keep their
 # own arguments: --review (review.bend), --plot, --plot-tree, --plot-info
-# (plot.bend), --render (render.bend).
+# (plot.bend), --render (render.bend), --store-rebuild (stobuild.bend).
 
 type Cli is Data:
   CliRun{}
@@ -156,7 +156,8 @@ def Cli.review(t: List<&2, String>) -> Cli:
     case +s <> r:
       Cli.review.k(s, r)
 
-# 0 none, 1 --review, 2 --plot, 3 --plot-tree, 4 --plot-info, 5 --render
+# 0 none, 1 --review, 2 --plot, 3 --plot-tree, 4 --plot-info, 5 --render,
+# 6 --telemetry-pow, 7 --store-rebuild (stobuild.bend: store.db from the log)
 def Cli.child(h: String) -> U32:
   match h:
     case "--review":
@@ -171,6 +172,8 @@ def Cli.child(h: String) -> U32:
       6
     case "--render":
       5
+    case "--store-rebuild":
+      7
     case _:
       0
 
@@ -188,6 +191,8 @@ def Cli.first(k: U32, +h: String, t: List<&2, String>) -> Cli:
       Cli.least(3n, t, "--plot-info FILE SIG INDEX")
     case 6:
       Cli.least(1n, t, "--telemetry-pow UUID")
+    case 7:
+      Cli.least(1n, t, "--store-rebuild HOME")
     case _:
       CliRun{}
 

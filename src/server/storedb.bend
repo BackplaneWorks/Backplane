@@ -4,6 +4,7 @@ import ../core/model.bend as M
 import ../core/codec.bend as C
 import ../core/utf8.bend as U
 import ../core/storedb.bend as SDB
+import ../core/far.bend as FR
 import ./db.bend as D
 import ./proc.bend as P
 import ./perf.bend as PS
@@ -60,10 +61,19 @@ def Sto.num(+s: String) -> Nat:
 def Sto.path(+home: String) -> String:
   home ++ "/store.db"
 
-# HOOK (F1): swap for FR.Fr.fact once backplane/far-live is on main. The
+# far_line (F1's far feed). The
 # state after the change; [] or one row ["#<seq>", scope]
-def Sto.far.fact(+s: M.State, c: M.Change, +seq: Nat) -> List<&2, List<&2, String>>:
-  Nil{}
+def Sto.far.rows(fs: List<&2, FR.Fact>, acc: List<&2, List<&2, String>>) -> List<&2, List<&2, String>>:
+  match fs:
+    case Nil{}:
+      List.reverse(&2, List<&2, String>, acc)
+    case FR.Fact{+seq, +scope} <> t:
+      Sto.far.rows(t, [Nat.show(seq), scope] <> acc)
+
+# a line's far_line rows: [seq, scope] when the change goes to the owner's
+# other machines (FR.Fr.fact; s the state after it)
+def Sto.far.fact(+s: M.State, +c: M.Change, +seq: Nat) -> List<&2, List<&2, String>>:
+  Sto.far.rows(FR.Fr.fact(s, c, seq), Nil{})
 
 def Sto.cpl(a: Bool, b: Bool, c: Bool) -> Nat:
   match a b c:
@@ -320,6 +330,39 @@ def Sto.lines.at.go(rs: List<&2, LRun>, +lg: Lg, acc: List<&2, String>) -> IO(Li
 def Sto.lines.at(+lg: Lg, seqs: List<&2, Nat>) -> IO(List<&2, String>):
   Sto.lines.at.go(Sto.runs(seqs), lg, Nil{})
 
+# far_line for the lines before it was written (the back-fill)
+# ------------------------------------------------------------
+# A store made before the commit path wrote far_line has none for the log's
+# older lines. After the hub listens, a job reads the log 500 lines at a
+# time and writes their rows, judged by the hub's state at its start: what a
+# change's far_line row is depends only on mappings that never change once
+# made (F1: a thread's project, ids), so that state gives every past line
+# the row the commit path gave it. Each page is one transaction with the
+# place it reached (meta far_line.at), so a restart resumes; rows are
+# ON CONFLICT DO NOTHING, so a line written twice is harmless; at the end
+# meta far_line is "filled" (F1's feed reads far_line only then). The
+# fiber is given back between pages.
+
+def Fill.rows.m(m: Maybe<&2, M.Change>, +st: M.State, +seq: Nat) -> List<&2, List<&2, String>>:
+  match m:
+    case Some{+c}:
+      Sto.far.fact(st, c, seq)
+    case None{}:
+      Nil{}
+
+def Fill.rows.p(m: Maybe<&2, J.Json>, +st: M.State, +seq: Nat) -> List<&2, List<&2, String>>:
+  match m:
+    case Some{+o}:
+      Fill.rows.m(C.Change.decode(o), st, seq)
+    case None{}:
+      Nil{}
+
+def Fill.page(+n0: Nat, +at: Nat) -> Nat:
+  Bool.pick(Nat, Nat.is_lt(Nat.sub(n0, at), 500n), Nat.sub(n0, at), 500n)
+
+def Fill.short(+at: Nat) -> IO(Unit):
+  PS.Log.warn("store", "far_line back-fill stopped at line " ++ Nat.show(at) ++ " (the log read short); the next start goes on from there")
+
 # Committing
 # ----------
 # Hub.fold steps each written change through Sto.step: the state after it
@@ -354,6 +397,14 @@ def Sto.push.far(rs: List<&2, List<&2, String>>, acc: List<&2, List<&2, String>>
       acc
     case r <> t:
       Sto.push.far(t, ("INSERT INTO far_line(seq, scope) VALUES (CAST(ltrim(?, '#') AS INTEGER), ?) ON CONFLICT DO NOTHING" <> r) <> acc)
+
+# the rows of lines numbered from 1+n, pushed onto acc as statements
+def Fill.rows(xs: List<&2, String>, +n: Nat, +st: M.State, acc: List<&2, List<&2, String>>) -> List<&2, List<&2, String>>:
+  match xs:
+    case Nil{}:
+      acc
+    case +l <> t:
+      Fill.rows(t, 1n+n, st, Sto.push.far(Fill.rows.p(J.Json.parse(l), st, 1n+n), acc))
 
 def Sto.first(+n: Nat, first: String, w: String) -> String:
   match n:
@@ -403,6 +454,48 @@ def Sto.script.k(+r: String) -> IO(Unit):
 
 def Sto.script(+db: String, items: List<&2, List<&2, String>>) -> IO(Unit):
   IO.bind(String, Unit, D.Db.script(db, items), r => Sto.script.k(r))
+
+def Fill.done(+db: String) -> IO(Unit):
+  do IO<Unit>:
+    Sto.script(db, [Sto.meta("far_line", "filled")])
+    PS.Log.info("store", "far_line filled")
+
+def Fill.got.k(none: Bool, +xs: List<&2, String>, +db: String, +at: Nat, +st: M.State, k: Nat -> IO(Unit)) -> IO(Unit):
+  match none:
+    case True{}:
+      Fill.short(at)
+    case False{}:
+      do IO<Unit>:
+        +to : Nat = Nat.add(at, List.length(&2, String, xs))
+        Sto.script(db, List.reverse(&2, List<&2, String>, Sto.meta("far_line.at", Nat.show(to)) <> Fill.rows(xs, at, st, Nil{})))
+        IO.sleep(1)
+        k(to)
+
+def Fill.got(+xs: List<&2, String>, +db: String, +at: Nat, +st: M.State, k: Nat -> IO(Unit)) -> IO(Unit):
+  Fill.got.k(List.is_empty(&2, String, xs), xs, db, at, st, k)
+
+def Fill.step(go: Bool, +lg: Lg, +st: M.State, +at: Nat, +n0: Nat, k: Nat -> IO(Unit)) -> IO(Unit):
+  match go:
+    case False{}:
+      Fill.done(Lg.db(lg))
+    case True{}:
+      IO.bind(List<&2, String>, Unit, Sto.lines(lg, at, Fill.page(n0, at)), xs => Fill.got(xs, Lg.db(lg), at, st, k))
+
+def Fill.loop(fuel: Nat, +lg: Lg, +st: M.State, +at: Nat, +n0: Nat) -> IO(Unit):
+  match fuel:
+    case 0n:
+      Fill.short(at)
+    case 1n+f:
+      Fill.step(Nat.is_lt(at, n0), lg, st, at, n0, a2 => Fill.loop(f, lg, st, a2, n0))
+
+def Fill.start(filled: Bool, +lg: Lg, +st: M.State, +at: Nat) -> IO(Unit):
+  match filled:
+    case True{}:
+      IO.pure(Unit, Unit{})
+    case False{}:
+      do IO<Unit>:
+        PS.Log.info("store", "far_line back-fill from line " ++ Nat.show(at) ++ " of " ++ Nat.show(Lg.n(lg)))
+        Fill.loop(1n+Lg.n(lg), lg, st, at, Lg.n(lg))
 
 def Sto.commit.k(none: Bool, +db: String, items: List<&2, List<&2, String>>) -> IO(Unit):
   match none:
@@ -536,6 +629,21 @@ def Sto.got(+k: String, rs: List<&2, List<&2, String>>) -> String:
       Bool.pick(String, String.eq(a, k), v, Sto.got(k, t))
     case _ <> t:
       Sto.got(k, t)
+
+def Fill.open(none: Bool, +lg: Lg, +st: M.State) -> IO(Unit):
+  match none:
+    case True{}:
+      IO.pure(Unit, Unit{})
+    case False{}:
+      do IO<Unit>:
+        IO.sleep(2000)
+        +rs : List<&2, List<&2, String>> <- D.Db.query(Lg.db(lg), "SELECT k, v FROM meta WHERE k GLOB 'far_line*'", Nil{}, 8)
+        Fill.start(String.eq(Sto.got("far_line", rs), "filled"), lg, st, Sto.num(Sto.got("far_line.at", rs)))
+
+# the back-fill, as a job of its own (spawned at start, after listening):
+# lg the store as the boot left it, st the booted state
+def Sto.far.fill(+lg: Lg, +st: M.State) -> IO(Unit):
+  Fill.open(String.is_empty(Lg.db(lg)), lg, st)
 
 def Sto.handle(+a: String) -> String:
   Bool.pick(String, String.starts_with(a, "ok "), String.drop(a, 3n), "")
