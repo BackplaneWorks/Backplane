@@ -15325,10 +15325,13 @@ def Lock.take.k(free: Bool, +old: String, +home: String, +port: U32) -> IO(Strin
 def Lock.find.sh() -> String:
   "f=$1/hub.lock; [ -f \"$f\" ] || exit 0; read pid port kind < \"$f\"; [ \"$kind\" = flock ] && exit 0; [ -n \"$pid\" ] && [ \"$pid\" != \"$PPID\" ] || exit 0; kill -0 \"$pid\" 2>/dev/null || exit 0; [ \"$(ps -p \"$pid\" -o comm= 2>/dev/null)\" = \"$(ps -p \"$PPID\" -o comm= 2>/dev/null)\" ] && echo \"$pid $port\""
 
+# the holder the probe names: only a "<pid> <port>" line (OH.OneHub.legacy),
+# never the shell's own noise (Cygwin bash's /tmp warning once stopped a hub
+# on a fresh home)
 def Lock.out(r: P.Ran) -> String:
   match r:
     case P.Ran{0, +out}:
-      String.trim(out)
+      OH.OneHub.legacy(out)
     case _:
       ""
 
@@ -15371,7 +15374,7 @@ def Lock.take(+home: String, +port: U32) -> IO(String):
     Lock.take.k(String.is_empty(old), old, home, port)
 
 def Lock.find(+home: String) -> IO(String):
-  IO.bind(String, String, HL.HubLock.held(Lock.path(home)), held => Lock.find.k(String.trim(held), home))
+  IO.bind(String, String, HL.HubLock.held(Lock.path(home)), held => Lock.find.k(OH.OneHub.pair(held), home))
 
 def Lock.word(+held: String, +i: Nat) -> String:
   OH.OneHub.word(held, i)
