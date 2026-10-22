@@ -17,9 +17,16 @@ test('oversized headers or streaming bodies are rejected before validation',asyn
 test('malformed UTF8 is not accepted as a different capability',async()=>{
  const r={status:200,headers:new Headers({'content-type':'application/json'}),body:new ReadableStream({start(c){c.enqueue(new Uint8Array([0xff]));c.close();}})};assert.deepEqual(await run(async()=>r),{supported:false});
 });
+// A stall is a hub that is down or restarting: unsupported, and offline, so
+// the page tries again later (host.js thinReconnect) instead of parking.
 test('stalled fetch is bounded and a late success cannot turn its result into supported',async()=>{
- let release;const result=await run(()=>new Promise(r=>release=r),{timeoutMs:5});assert.deepEqual(result,{supported:false});release(response(JSON.stringify(capability)));await new Promise(r=>setImmediate(r));assert.deepEqual(result,{supported:false});
+ let release;const result=await run(()=>new Promise(r=>release=r),{timeoutMs:5});assert.deepEqual(result,{supported:false,offline:true});release(response(JSON.stringify(capability)));await new Promise(r=>setImmediate(r));assert.deepEqual(result,{supported:false,offline:true});
 });
 test('stalled body has the same bounded failure as a stalled connection',async()=>{
- let controller;const r={status:200,headers:new Headers({'content-type':'application/json'}),body:new ReadableStream({start(c){controller=c;}})};const result=await run(async()=>r,{timeoutMs:5});assert.deepEqual(result,{supported:false});controller.enqueue(new TextEncoder().encode(JSON.stringify(capability)));controller.close();await new Promise(r=>setImmediate(r));assert.deepEqual(result,{supported:false});
+ let controller;const r={status:200,headers:new Headers({'content-type':'application/json'}),body:new ReadableStream({start(c){controller=c;}})};const result=await run(async()=>r,{timeoutMs:5});assert.deepEqual(result,{supported:false,offline:true});controller.enqueue(new TextEncoder().encode(JSON.stringify(capability)));controller.close();await new Promise(r=>setImmediate(r));assert.deepEqual(result,{supported:false,offline:true});
+});
+
+test('a refused connection or a starting hub (502-504) is offline, not unsupported',async()=>{
+ assert.deepEqual(await run(async()=>{throw new TypeError('fetch failed');}),{supported:false,offline:true});
+ for(const code of [502,503,504])assert.deepEqual(await run(async()=>response('',code)),{supported:false,offline:true});
 });

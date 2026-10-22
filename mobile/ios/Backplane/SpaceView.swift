@@ -275,6 +275,9 @@ private struct PageWeb: UIViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
+    // a viewport that never scales (the page's own, if any, comes later and loses to it)
+    static let fixed = "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no\">"
+
     func makeUIView(context: Context) -> WKWebView {
         let c = WKWebViewConfiguration()
         c.defaultWebpagePreferences.allowsContentJavaScript = false
@@ -283,6 +286,11 @@ private struct PageWeb: UIViewRepresentable {
         w.navigationDelegate = context.coordinator
         w.isOpaque = false
         w.backgroundColor = .clear
+        // the page never zooms (pinch or double-tap): the app's own text, not a web page's
+        w.scrollView.pinchGestureRecognizer?.isEnabled = false
+        w.scrollView.minimumZoomScale = 1
+        w.scrollView.maximumZoomScale = 1
+        w.scrollView.bouncesZoom = false
         return w
     }
 
@@ -290,7 +298,7 @@ private struct PageWeb: UIViewRepresentable {
         context.coordinator.tapped = tapped
         if context.coordinator.shown != html {
             context.coordinator.shown = html
-            w.loadHTMLString(html, baseURL: nil)
+            w.loadHTMLString(PageWeb.fixed + html, baseURL: nil)
         }
     }
 

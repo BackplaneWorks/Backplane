@@ -5,7 +5,7 @@ import ../../src/gfx/tiles.bend as TI
 
 # How a thread switch's redraw spreads over cores: a 3440 x 1400 frame of
 # text lines in a centred column, drawn from scratch as tiles.
-#   scripts/build-app.sh test/native/par_bench.bend build/par_bench
+#   scripts/build-js.sh test/native/par_bench.bend build/par_bench
 #   taskset -c 4 build/par_bench; taskset -c 4-19 build/par_bench
 
 def line(+i: Nat) -> List<&2, R.Op>:

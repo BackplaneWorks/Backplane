@@ -1,8 +1,9 @@
 name: Configured release producer bootstrap (artifact only)
 
 # First producer run: no fictitious prior successful artifact run is required.
-# The large-memory executor emits C without secrets. Here each target compiles
-# exact hash-bound C with protected inputs, one C lane, never a Bend emission.
+# The JS service is emitted and cross-built per target on Linux, with the
+# protected inputs baked into a private prelude, onto each target's pinned Bun
+# runtime; each target's own runner then checks it and measures its runtime.
 # No push/tag trigger, publication, install, runner registration or write token.
 on:
   workflow_dispatch:
@@ -13,7 +14,7 @@ on:
         required: true
       operation:
         type: choice
-        options: [unix-native, windows-native, android, android-signing-info]
+        options: [js, android, android-signing-info]
         required: true
       packet_url:
         description: Public source-bound input URL; unused for android-signing-info
@@ -25,6 +26,16 @@ on:
         type: string
         required: false
         default: ''
+      windows_runtime_url:
+        description: js, windows-x64 only. The portable Cygwin runtime bundle (.tar.gz of RUNTIME.json, CLOSURE.json and their members); its contents are pinned in service-runtime.py
+        type: string
+        required: false
+        default: ''
+      windows_runtime_sha256:
+        description: SHA256 of that .tar.gz
+        type: string
+        required: false
+        default: ''
 permissions:
   contents: read
 concurrency:
@@ -33,25 +44,21 @@ concurrency:
 
 env:
   BACKPLANE_FROZEN_COMMIT: ${{ inputs.ref }}
-  BACKPLANE_VERSION: v0.12.0
-  BACKPLANE_VERSION_STAMP: '0.12.0'
+  BACKPLANE_VERSION: v0.12.1
+  BACKPLANE_VERSION_STAMP: '0.12.1'
   BACKPLANE_TELEMETRY_CHANNEL: release
 
 jobs:
-  unix-native:
-    if: inputs.operation == 'unix-native'
+  js:
+    if: inputs.operation == 'js'
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - target: linux-x64
-            runner: ubuntu-24.04
-          - target: linux-arm64
-            runner: ubuntu-24.04-arm
-          - target: darwin-arm64
-            runner: macos-14
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 75
+        target: [linux-x64, linux-arm64, darwin-x64, darwin-arm64, windows-x64]
+    # every target cross-builds here: bun links the emitted JS onto the
+    # target's own Bun runtime, pinned in scripts/release-bootstrap.py
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         with:
@@ -63,33 +70,19 @@ jobs:
           ref: ${{ github.sha }}
           path: build/bootstrap-tools
           persist-credentials: false
-      - name: Record workflow tools separately; require frozen product source; fetch verified public C packet
+      - uses: ./build/bootstrap-tools/.github/actions/setup-bend
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.3'
+      - name: Record workflow tools separately; require frozen product source; fetch verified public JS inputs
         env:
           WORKFLOW_SHA: ${{ github.sha }}
           PACKET_URL: ${{ inputs.packet_url }}
           PACKET_SHA: ${{ inputs.packet_sha256 }}
         shell: bash
         run: |
-          python3 build/bootstrap-tools/scripts/release-bootstrap.py fetch --source "$BACKPLANE_FROZEN_COMMIT" --operation unix-native --url "$PACKET_URL" --sha256 "$PACKET_SHA" --directory "$RUNNER_TEMP/release-inputs"
-      - name: Select native compiler without administrator changes (no Bend)
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ "$RUNNER_OS" = macOS ]; then
-            brew install llvm@21 coreutils
-            echo "$(brew --prefix llvm@21)/bin" >> "$GITHUB_PATH"
-            echo "$(brew --prefix coreutils)/libexec/gnubin" >> "$GITHUB_PATH"
-          else
-            compiler=''
-            for candidate in clang-21 clang-20 clang-19 /usr/lib/llvm-21/bin/clang /usr/lib/llvm-20/bin/clang /usr/lib/llvm-19/bin/clang; do
-              if command -v "$candidate" >/dev/null 2>&1; then compiler="$(command -v "$candidate")"; break; fi
-            done
-            if [ -z "$compiler" ]; then
-              compiler="$(python3 build/bootstrap-tools/scripts/release-llvm.py --target '${{ matrix.target }}' --out "$RUNNER_TEMP/backplane-llvm21")"
-            fi
-            echo "BACKPLANE_BOOTSTRAP_CLANG=$compiler" >> "$GITHUB_ENV"
-          fi
-      - name: Compile exact portable C with configured protected release inputs
+          python3 build/bootstrap-tools/scripts/release-bootstrap.py fetch --source "$BACKPLANE_FROZEN_COMMIT" --operation js --url "$PACKET_URL" --sha256 "$PACKET_SHA" --directory "$RUNNER_TEMP/release-inputs"
+      - name: Build the JS service with configured protected release inputs
         shell: bash
         env:
           BACKPLANE_GOOGLE_BAKE: '1'
@@ -99,38 +92,38 @@ jobs:
           BACKPLANE_TELEMETRY_URL: https://backplane.works/api/v1/events
           BACKPLANE_TELEMETRY_KID: ${{ secrets.BACKPLANE_TELEMETRY_KID }}
           BACKPLANE_TELEMETRY_KEY: ${{ secrets.BACKPLANE_TELEMETRY_KEY }}
-          BACKPLANE_JOBS: '1'
           TARGET: ${{ matrix.target }}
         run: |
-          set -euo pipefail
-          if [ "$RUNNER_OS" = macOS ]; then compiler="$(command -v clang)"; else compiler="$BACKPLANE_BOOTSTRAP_CLANG"; fi
-          python3 build/bootstrap-tools/scripts/release-bootstrap.py run --source "$BACKPLANE_FROZEN_COMMIT" --operation unix-native --target "$TARGET" --clang "$compiler" --directory "$RUNNER_TEMP/release-inputs"
-      - name: Measure matching-host system ABI and assemble genuine service component
-        shell: bash
-        run: |
-          python3 build/bootstrap-tools/scripts/service-runtime.py --source-root "$GITHUB_WORKSPACE" --build "$GITHUB_WORKSPACE/build/bootstrap-native" --producer "$GITHUB_WORKSPACE/build/bootstrap-tools/scripts/service-release.py" --producer-sha256 b6350f66cee22adaca71f52f52105a8a6dbdb3fe2b6ba48b95d6e66e65ef3cc7 --out "$GITHUB_WORKSPACE/build/bootstrap-service"
+          python3 build/bootstrap-tools/scripts/release-bootstrap.py run --source "$BACKPLANE_FROZEN_COMMIT" --operation js --target "$TARGET" --directory "$RUNNER_TEMP/release-inputs"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: configured-service-${{ matrix.target }}
+          name: configured-service-build-${{ matrix.target }}
           path: |
-            build/bootstrap-native/
-            build/bootstrap-service/
+            build/bootstrap-js/
             build/bootstrap-execution.json
-            ${{ runner.temp }}/backplane-llvm21/LLVM-PROVENANCE.json
           if-no-files-found: warn
           retention-days: 14
 
-  windows-native:
-    if: inputs.operation == 'windows-native'
-    runs-on: windows-2022
-    timeout-minutes: 90
-    env:
-      BACKPLANE_CYGWIN_ROOT: ${{ github.workspace }}\..\backplane-cygwin
-      BACKPLANE_JOBS: '1'
+  js-runtime:
+    if: inputs.operation == 'js'
+    needs: js
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: linux-x64,    runner: ubuntu-24.04,     service: backplane-serve,     version: true }
+          - { target: linux-arm64,  runner: ubuntu-24.04-arm, service: backplane-serve,     version: true }
+          - { target: darwin-x64,   runner: macos-15-intel,   service: backplane-serve,     version: true }
+          - { target: darwin-arm64, runner: macos-15,         service: backplane-serve,     version: true }
+          # Bend's JS runtime has no Win32 syscalls yet: the service is
+          # measured and assembled, its --version only reported
+          - { target: windows-x64,  runner: windows-2025,     service: backplane-serve.exe, version: false }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
     steps:
-      - name: Keep producer shell source LF
-        shell: pwsh
+      - name: Keep frozen source bytes as committed
+        shell: bash
         run: git config --global core.autocrlf false
       - uses: actions/checkout@v4
         with:
@@ -142,46 +135,55 @@ jobs:
           ref: ${{ github.sha }}
           path: build/bootstrap-tools
           persist-credentials: false
-      - name: Record workflow tools separately; require frozen product source; fetch Windows owner's packet
-        shell: pwsh
+      # Linux measures with the runner's own python3 (Ubuntu 24.04: 3.12):
+      # setup-python puts LD_LIBRARY_PATH in the job's environment, and the
+      # measurement refuses an ambient loader override
+      - uses: actions/setup-python@v5
+        if: runner.os != 'Linux'
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: configured-service-build-${{ matrix.target }}
+          path: build
+      - name: Run the service on its own target
+        shell: bash
+        continue-on-error: ${{ !matrix.version }}
         env:
-          WORKFLOW_SHA: ${{ github.sha }}
-          PACKET_URL: ${{ inputs.packet_url }}
-          PACKET_SHA: ${{ inputs.packet_sha256 }}
+          SERVICE: build/bootstrap-js/${{ matrix.service }}
         run: |
-          python build/bootstrap-tools/scripts/release-bootstrap.py fetch --source $env:BACKPLANE_FROZEN_COMMIT --operation windows-native --url $env:PACKET_URL --sha256 $env:PACKET_SHA --directory "$env:RUNNER_TEMP/release-inputs"
-          if ($LASTEXITCODE -ne 0) { throw 'Public Windows packet refused' }
-          ./scripts/setup-windows.ps1 -Root $env:BACKPLANE_CYGWIN_ROOT -BuildTools
-          if ($LASTEXITCODE -ne 0) { throw 'Native environment setup failed' }
-      - name: Compile with existing protected inputs; preserve owner runtime checks
-        shell: pwsh
+          set -euo pipefail
+          chmod 755 "$SERVICE"  # artifacts drop file modes
+          v=$("$SERVICE" --version)
+          echo "$v"
+          [ "$v" = "backplane 0.12.1" ]
+      - name: Measure matching-host system ABI and assemble genuine service component
+        shell: bash
         env:
-          BACKPLANE_GOOGLE_BAKE: '1'
-          BACKPLANE_GOOGLE_CLIENT_ID: ${{ secrets.BACKPLANE_GOOGLE_CLIENT_ID }}
-          BACKPLANE_GOOGLE_CLIENT_SECRET: ${{ secrets.BACKPLANE_GOOGLE_CLIENT_SECRET }}
-          BACKPLANE_TELEMETRY_BAKE: '1'
-          BACKPLANE_TELEMETRY_URL: https://backplane.works/api/v1/events
-          BACKPLANE_TELEMETRY_KID: ${{ secrets.BACKPLANE_TELEMETRY_KID }}
-          BACKPLANE_TELEMETRY_KEY: ${{ secrets.BACKPLANE_TELEMETRY_KEY }}
+          WINRT_URL: ${{ inputs.windows_runtime_url }}
+          WINRT_SHA: ${{ inputs.windows_runtime_sha256 }}
         run: |
-          $bin = Join-Path $env:BACKPLANE_CYGWIN_ROOT 'bin'
-          $env:PATH = $bin + ';' + $env:PATH
-          $workspace = & (Join-Path $bin 'cygpath.exe') -u $env:GITHUB_WORKSPACE
-          if ($LASTEXITCODE -ne 0) { throw 'Source path mapping failed' }
-          $packet = & (Join-Path $bin 'cygpath.exe') -u "$env:RUNNER_TEMP/release-inputs"
-          if ($LASTEXITCODE -ne 0) { throw 'Packet path mapping failed' }
-          & (Join-Path $bin 'bash.exe') --login -c 'cd "$1" && env GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0="$1" GIT_CONFIG_KEY_1=safe.directory GIT_CONFIG_VALUE_1="$1/build/bootstrap-tools" python3 build/bootstrap-tools/scripts/release-bootstrap.py run --source "$BACKPLANE_FROZEN_COMMIT" --operation windows-native --directory "$2"' -- $workspace $packet
-          exit $LASTEXITCODE
+          chmod 755 build/bootstrap-js/${{ matrix.service }}
+          py=python; [ "$RUNNER_OS" = Linux ] && py=/usr/bin/python3
+          # Windows: the hub's shell (sh, bash, coreutils) ships beside it
+          set --
+          if [ "${{ matrix.target }}" = windows-x64 ]; then
+            [ -n "$WINRT_URL" ] && [ -n "$WINRT_SHA" ] || { echo "windows-x64 needs windows_runtime_url and windows_runtime_sha256"; exit 1; }
+            curl -fsSL "$WINRT_URL" -o "$RUNNER_TEMP/winrt.tar.gz"
+            echo "$WINRT_SHA  $RUNNER_TEMP/winrt.tar.gz" | sha256sum -c -
+            # (Git Bash tar takes "D:..." for a remote host: work relative to the folder)
+            mkdir -p "$RUNNER_TEMP/winrt" && (cd "$RUNNER_TEMP" && tar -xzf winrt.tar.gz -C winrt)
+            set -- --windows-runtime "$RUNNER_TEMP/winrt"
+          fi
+          "$py" build/bootstrap-tools/scripts/service-runtime.py "$@" --source-root "$GITHUB_WORKSPACE" --build "$GITHUB_WORKSPACE/build/bootstrap-js" --producer "$GITHUB_WORKSPACE/build/bootstrap-tools/scripts/service-release.py" --producer-sha256 e8b52fb537d587c2946c9e893e193a7e967fe9ebe0088390dd7b8eec15656058 --out "$GITHUB_WORKSPACE/build/bootstrap-service"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: configured-windows-service
+          name: configured-service-${{ matrix.target }}
           path: |
+            build/bootstrap-js/
+            build/bootstrap-service/
             build/bootstrap-execution.json
-            build/windows-service-native/backplane-serve.exe
-            build/windows-service-native/unsigned-service.exe
-            build/windows-service-native/COMPILE.json
-            build/windows-service-native/inputs/**
           if-no-files-found: warn
           retention-days: 14
 

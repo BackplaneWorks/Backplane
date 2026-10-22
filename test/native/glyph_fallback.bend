@@ -4,7 +4,7 @@ import ../../src/gfx/text.bend as X
 # Glyphs the UI's face lacks come from a fallback font: each code point is
 # fetched as the window does (a want, then Text.fill) and printed with its
 # size (w x h 0 x 0: nothing drew it).
-#   scripts/build-app.sh test/native/glyph_fallback.bend build/glyph_fallback
+#   scripts/build-js.sh test/native/glyph_fallback.bend build/glyph_fallback
 #   build/glyph_fallback
 
 def dims(g: X.TG) -> String:

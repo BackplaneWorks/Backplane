@@ -5,7 +5,7 @@ import ../../src/gfx/draw.bend as D
 import ../../src/server/argv.bend as AV
 
 # The 3D viewer's frame time at a window's size, over a few orbits.
-#   scripts/build-app.sh test/native/mesh_bench.bend build/mesh_bench
+#   scripts/build-js.sh test/native/mesh_bench.bend build/mesh_bench
 #   build/mesh_bench MODEL.glb [W H]   # frames to /tmp/mesh-N.ppm
 
 def many(xs: List<&1, String>) -> List<&2, String>:

@@ -64,7 +64,7 @@ async function main(args){
   const options=argumentsFor(args);if(!options){console.log('node desktop/test/release-smoke.cjs --stage ABS_TARGET_STAGE --out NEW_ABS_EVIDENCE\nRequires pinned playwright-core 1.64.1 and a native desktop session. Linux requires working unprivileged Chromium sandbox. No product compile, mail/chat Send or provider turn.');return;}
   const {stage,out}=options,producer=require('../produce-release.cjs'),{_electron}=require('playwright-core');
   const s=read(path.join(stage,'STAGE.json'));assert.equal(s.target,hostTarget(),'A matching native host is required; no emulation substitution');
-  assert.equal(s.release.version,'0.12.0');assert.equal(s.electronVersion,'44.9.2');
+  assert.equal(s.release.version,'0.12.1');assert.equal(s.electronVersion,'44.9.2');
   assert.deepEqual(s.lifecyclePolicy,{mode:'resident-service',managedStop:false,managedUpdate:false});
   const inspected=producer.inspectStage(stage);assert.equal(inspected.payloadManifestSha256,s.payloadManifestSha256,'Stage payload changed');
   const layout=producer.TARGETS[s.target],resources=path.join(stage,layout.resources),appRoot=path.join(resources,'app');
@@ -84,10 +84,10 @@ async function main(args){
   Object.assign(env,{BACKPLANE_HOME:home,BACKPLANE_AGENTS:agents,BACKPLANE_NO_UPDATE:'1',BACKPLANE_PEERS:'',BACKPLANE_LOCK_DIR:path.join(home,'locks')});
   // Exact shipped Service owns the native child handle. UI then discovers and authenticates to it.
   const originalEnv=process.env;process.env=env;
-  const service=new Service({home,binary,web:path.join(resources,'backplane-service/web'),expectedVersion:'0.12.0',residentService:true});
+  const service=new Service({home,binary,web:path.join(resources,'backplane-service/web'),expectedVersion:'0.12.1',residentService:true});
   let app,uiChild,page,second,error,phase='prepare',serviceIdentity,sandbox,uiPid,origin;
-  const facts={checks:[],errors:[],reconnectMode:'explicit-retry',deferredByUser:['telemetry-privacy','telemetry-consent','telemetry-ingestion'],scope:'Minimal actual matching-host stable stage startup/discovery/auth, renderer OS sandbox, current content, explicit Retry connection, single instance and resident close. Telemetry validation DEFERRED by user, not PASS. No Send/provider/scale/390/native-phone/IME/Browser parity or telemetry-upload claim.'};
-  const save=()=>write(path.join(out,'result.json'),{...facts,status:error||facts.cleanupError||facts.cleanup?.portClosed===false?'FAIL':phase==='done'?'PASS':'INCOMPLETE',phase,error:error?.message,home,target:s.target,version:'0.12.0',commit:s.release.commit,tree:s.release.tree,stage:inspected,fixture:ref(__filename),serviceIdentity,sandbox,uiPid});
+  const facts={checks:[],errors:[],reconnectMode:'automatic',deferredByUser:['telemetry-privacy','telemetry-consent','telemetry-ingestion'],scope:'Minimal actual matching-host stable stage startup/discovery/auth, renderer OS sandbox, current content, automatic reconnect, single instance and resident close. Telemetry validation DEFERRED by user, not PASS. No Send/provider/scale/390/native-phone/IME/Browser parity or telemetry-upload claim.'};
+  const save=()=>write(path.join(out,'result.json'),{...facts,status:error||facts.cleanupError||facts.cleanup?.portClosed===false?'FAIL':phase==='done'?'PASS':'INCOMPLETE',phase,error:error?.message,home,target:s.target,version:'0.12.1',commit:s.release.commit,tree:s.release.tree,stage:inspected,fixture:ref(__filename),serviceIdentity,sandbox,uiPid});
   const step=name=>{phase=name;save();console.log('phase '+name);};
   const record=name=>{facts.checks.push(name);save();};
   async function ready(){await page.waitForFunction(()=>document.documentElement.dataset.backplaneRemoteReady==='true',null,{timeout:30000});const skip=page.locator('[data-on-click="ob-skip"]');if(await skip.isVisible())await skip.click();}
@@ -107,7 +107,7 @@ async function main(args){
     // the same socket observer used by the retained accepted probe, before JS.
     await page.reload({waitUntil:'domcontentloaded'});await ready();await current();
     assert.deepEqual(await page.evaluate(()=>({node:typeof require,process:typeof process})),{node:'undefined',process:'undefined'});
-    const versions=await page.evaluate(()=>backplaneDesktop.version());assert.equal(versions.service,'0.12.0');assert.equal(versions.electron,'44.9.2');
+    const versions=await page.evaluate(()=>backplaneDesktop.version());assert.equal(versions.service,'0.12.1');assert.equal(versions.electron,'44.9.2');
     facts.authSession=await app.evaluate(windowAuthWitness,origin);save();
     assert.equal(facts.authSession.matchingWindows,1,'Expected one authenticated app window');assert.equal(facts.authSession.uiPartition,true,'Wrong app session partition');
     assert.equal(facts.authSession.cookieCount,1,'Authenticated app session cookie missing/ambiguous');assert.equal(facts.authSession.httpOnly,true,'Authenticated app session cookie must be HttpOnly');assert(!await page.evaluate(()=>document.cookie.includes('bp_token=')));
@@ -120,8 +120,8 @@ async function main(args){
     step('single-instance');second=spawn(executable,[],{env,stdio:'ignore',windowsHide:true});const secondPid=second.pid;assert.equal(await exitOf(second,'second-instance exit'),0);
     const windows=await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().length);assert.equal(windows,1);assert.equal(uiChild.pid,uiPid);assert.equal(nativeIdentity(service.child).birth,serviceIdentity.birth);write(path.join(out,'single-instance.json'),{secondPid,secondExit:second.exitCode,windowCount:windows,originalUiPid:uiPid});record('second launcher joins single resident UI/service');
     step('websocket-reconnect');const opened=await page.evaluate(()=>{const n={opened:__releaseSockets.opened,messages:__releaseSockets.messages};__releaseDisconnect();return n;});
-    await page.waitForFunction(()=>__releaseSockets.closed>0&&document.documentElement.dataset.backplaneRemoteReady!=='true',null,{timeout:5000});
-    await page.getByRole('button',{name:'Retry connection',exact:true}).click({timeout:5000});
+    // the page reconnects by itself (src/web/reconnect.js): no Retry click
+    await page.waitForFunction(()=>__releaseSockets.closed>0,null,{timeout:5000});
     await page.waitForFunction(n=>__releaseSockets.opened>n.opened&&__releaseSockets.messages>n.messages&&document.documentElement.dataset.backplaneRemoteReady==='true',opened,{timeout:20000});await current();
     await page.reload({waitUntil:'domcontentloaded'});await ready();await current();record('real socket reconnect and reload restore current content');
     const menu=await app.evaluate(({Menu})=>{const labels=[];const walk=items=>{for(const i of items){labels.push(i.label||'');if(i.submenu)walk(i.submenu.items);}};walk(Menu.getApplicationMenu()?.items||[]);return labels;});assert(!menu.some(v=>/stop service|restart service|update service/i.test(v)));record('no unsupported managed-stop/update menu advertised');

@@ -11,11 +11,9 @@ import ../core/winnote.bend as NT
 # Resolution and TCP connect share a bounded deadline. The byte poll
 # keeps any binary frame that arrives with the HTTP upgrade head intact.
 def Link.connect(host: String, port: U32, ms: U32) -> IO(Result<&1, &1, U32 & String, Socket>):
-  import "./effects/link.c"
   import "./effects/link.js"
 
 def Link.poll(s: Socket, ms: U32) -> IO(Socket & Result<&1, &1, U32 & String, Maybe<&2, List<&2, U32>>>):
-  import "./effects/link.c"
   import "./effects/link.js"
 
 # A link to another machine's hub, in the shape of a hub: the window sends

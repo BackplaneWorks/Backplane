@@ -1,10 +1,11 @@
 name: CI
 
+# Run by hand only: the pipeline every merge waits on is local CI
+# (bp-coord/fast-hub/local-ci.sh, Boat sandboxes plus this machine). This
+# workflow runs once on a release commit before it is published, as the last
+# check; the release workflows keep their own (user, 2026-10-22).
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-  pull_request:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -12,21 +13,21 @@ concurrency:
 
 permissions:
   contents: read
-  actions: read # scripts/emit-fetch.sh reads other runs' emits
 
 jobs:
   windows:
-    name: Windows producer guards
+    name: Release producer guards
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Check Windows resource and request guards
+      - name: Check the service runtime, bootstrap and release asset guards
         run: |
-          python3 -m unittest discover -s test/tools -p windows_service_test.py
-          python3 -m unittest discover -s test/tools -p windows_release_request_test.py
+          python3 test/tools/service_runtime_test.py
+          python3 test/tools/release_bootstrap_test.py
+          python3 test/tools/release_assets_test.py
 
   desktop-install:
     name: Linux desktop installer
@@ -42,8 +43,6 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Check emit artifact producer trust
-        run: python3 test/tools/emit_fetch_test.py
       - uses: ./.github/actions/setup-bend
       - run: CHECK_JOBS=$(nproc) scripts/check.sh check
 
@@ -111,12 +110,43 @@ jobs:
       # per runner; the four shards still execute on separate machines.
       - run: TEST_JOBS=2 scripts/test.sh
 
-  # The JS service (docs/js-service.md): bend emits src/server/main.bend
-  # as JS once (kept by a hash of what it reads, so a change that leaves the
+  # The phone bridge as it ships (scripts/build-mobile.sh --js, the bundle
+  # the apps load) driven by its emitted-bundle tests, the web/mobile export
+  # wire, and the native sources' paging boundaries. Hermetic: no hub,
+  # device or network; about three minutes.
+  bridge:
+    name: Phone bridge, emitted
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-bend
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.3'
+      - name: Native paging source boundaries
+        run: python3 test/phone-cache/thin/check_paging_successor.py
+      - name: Emit the bridge
+        run: bash scripts/build-mobile.sh --js
+      - name: Bridge tests
+        run: |
+          mkdir -p build
+          bun test/tools/ios_mailroom_bridge_test.ts mobile/build/assets/bridge.js build/legacy-mailroom.json
+          bun test/tools/native_thin_actual07_307265.mjs mobile/build/assets/bridge.js
+          bend test/thin_emitted_fixture.bend > build/thin-emitted-fixture.json
+          bun test/tools/native_thin_emitted_307265.mjs mobile/build/assets/bridge.js build/thin-emitted-fixture.json
+      - name: Web and mobile export wire
+        run: |
+          bend test/thin_host_wire.html -o build/thin-host-wire > /dev/null
+          set -- build/thin-host-wire/chunk-*.js
+          [ "$#" = 1 ] || { echo "expected one chunk, got $#"; exit 1; }
+          bun "$1"
+
+  # The hub (docs/js-service.md): bend emits src/server/main.bend as JS
+  # once (kept by a hash of what it reads, so a change that leaves the
   # server alone takes the last emit), `bun build --compile` cross-builds a
   # single-file backplane-serve for every target from it in seconds, and
-  # the Linux one is smoke-tested here; js-native runs the others on their
-  # own machines.
+  # the Linux one is tested here; js-native runs the others on their own
+  # machines. There is no C build of the hub.
   js:
     name: JS service
     runs-on: ubuntu-24.04
@@ -154,16 +184,53 @@ jobs:
       - name: Web client
         run: bend src/web/index.html -o build/web > /dev/null
       - run: scripts/js-smoke.sh dist-js/linux-x64/backplane-serve build/web
+      # the compiled hub's 4 GiB stack (scripts/js-stack-prelude.js), its
+      # children back at 8 MiB
+      - name: Hub stack
+        run: bun test/tools/js_stack_test.ts dist-js/linux-x64/backplane-serve
+      # the host effects and ptys on the loop the hub ships (Bun's event
+      # loop): test.sh runs these in-process, on the runtime's sync loop
+      - name: Effects on the Bun loop
+        run: scripts/js-effects-bun.sh
       - name: Bake and release producer
         run: |
           bun test/tools/js_bake_test.ts
           python3 test/tools/service_release_test.py
-      # the whole of test/smoke.ts (threads, agents) as scripts/smoke.sh runs
-      # it for C, over the JS processes (fast-hub J1)
+      # the whole of test/smoke.ts (threads, agents), as scripts/smoke.sh
+      # runs it
       - name: Full smoke
         run: |
           bend test/wire/index.html -o build/wire > /dev/null
           BACKPLANE_SMOKE_FULL=1 scripts/js-smoke.sh dist-js/linux-x64/backplane-serve build/web
+      # a 64 KB paste into a real terminal: the hub answers meanwhile and
+      # every byte arrives
+      - name: Terminal paste
+        run: bun test/tools/term_paste_e2e.ts dist-js/linux-x64/backplane-serve build/wire
+      # the web client's reconnect pieces, and a view client hearing the
+      # hub's heartbeat (and no broadcast) on the built binary
+      - name: Reconnect and heartbeat
+        run: |
+          bun test/tools/reconnect_test.ts
+          bun test/tools/thin_heartbeat_e2e.ts dist-js/linux-x64/backplane-serve
+      # the phone bridge's thin rows, request privacy, transport, readiness
+      # and flush (hermetic: no hub, build or network)
+      - name: Phone bridge
+        run: |
+          bun test/tools/native_thin_rows_307265.mjs
+          bun test/tools/native_thin_privacy_307265.mjs
+          bun test/tools/native_thin_bridge_307265.mjs
+          bun test/tools/mobile_readiness_test.ts
+          bun test/tools/phone_flush_test.ts
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      # the desktop app's thin client, discovery, reader, mail and search
+      # pieces (node --test, headless, under a second)
+      - name: Desktop thin and mail tests
+        working-directory: desktop
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          node --test test/host-thin-startup.test.cjs test/mail-draft-dispatch.test.cjs test/mail-drafts.test.cjs test/thin-*.test.cjs
       - uses: actions/upload-artifact@v4
         with:
           name: backplane-serve-js
@@ -181,8 +248,8 @@ jobs:
           - { target: linux-arm64,  os: ubuntu-24.04-arm, gate: true }
           - { target: darwin-arm64, os: macos-15,         gate: true }
           - { target: darwin-x64,   os: macos-15-intel,   gate: true }
-          # Bend's JS runtime has no Win32 syscalls yet (fast-hub: Windows
-          # io_sys): the binary builds but cannot serve, so this only reports
+          # serves once Bend's JS runtime has Win32 syscalls (fast-hub J4,
+          # io_sys); until then it only reports
           - { target: windows-x64,  os: windows-2025,     gate: false }
     runs-on: ${{ matrix.os }}
     continue-on-error: ${{ !matrix.gate }}
@@ -200,92 +267,3 @@ jobs:
           [ -f "$f" ] || f=$f.exe
           chmod +x "$f"
           scripts/js-smoke.sh "$f"
-
-  build:
-    name: Build ${{ matrix.target }}
-    # runs beside "laws" (which checks every file); nothing is published here
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { target: linux-x64,    os: ubuntu-24.04 }
-          - { target: linux-arm64,  os: ubuntu-24.04-arm }
-          # macOS is on hold; scripts/build.sh builds it as hub + web server
-          # - { target: darwin-arm64, os: macos-15 }
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-bend
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: '1.4.3'
-      - name: Swap for the compile
-        # bend's emit of the app takes 16-22 GB; the Linux runners have 16, so
-        # without swap it can be killed. (The clang compiles no longer need
-        # it: scripts/build-app.sh cuts the C into 16 units of about 2.5 GB.)
-        if: runner.os == 'Linux'
-        # the swap file goes on /mnt when the runner has it, and never takes
-        # more than the free space less 8 GB (a full disk kills the runner)
-        run: |
-          dir=/; [ -d /mnt ] && dir=/mnt
-          df -h / /mnt || true
-          free_gb=$(df -BG --output=avail "$dir" | tail -1 | tr -dc 0-9)
-          size=$(( free_gb - 8 )); [ "$size" -gt 16 ] && size=16
-          if [ "$size" -ge 2 ]; then
-            sudo fallocate -l "${size}G" "$dir/swap-build"
-            sudo chmod 600 "$dir/swap-build"
-            sudo mkswap "$dir/swap-build"
-            sudo swapon "$dir/swap-build"
-          else
-            echo "only ${free_gb} GB free on $dir: no swap"
-          fi
-          free -h
-      - name: Install clang 19
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y clang-19 libx11-dev
-          sudo ln -sf /usr/bin/clang-19 /usr/local/bin/clang
-      - name: Object cache
-        # the compiled C units, by hash of their text (scripts/cc-unit.sh): an
-        # unchanged unit is not compiled again. Never holds the Google client
-        # (a unit that includes it is not cached).
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/backplane-bend/obj
-          key: objs-${{ matrix.target }}-${{ github.sha }}
-          restore-keys: objs-${{ matrix.target }}-
-      - run: clang --version
-      - name: Check pinned native emitter and ID boundaries
-        run: python3 test/tools/native_compiler_test.py
-      - run: scripts/build.sh
-        env:
-          BACKPLANE_SKIP_CHECK: "1" # the laws job checks every file
-          BACKPLANE_JOBS: "2" # leave memory headroom for the larger native units
-          # an emit of these exact inputs that another run made is fetched
-          # instead of made again (scripts/emit-fetch.sh)
-          GH_TOKEN: ${{ github.token }}
-      # this run's own emit, for any later build of the same inputs (another
-      # run, deploy_main, a release): scripts/emit-fetch.sh takes it by key
-      - id: emit
-        run: |
-          f=build/cc/backplane-serve/emit.key
-          if [ -f "$f" ] && [ "$(cut -d' ' -f2 "$f")" = fresh ]; then
-            k=$(cut -d' ' -f1 "$f")
-            mkdir -p build/emit-share
-            cp "$HOME/.cache/backplane-bend/emit/$k.c" "$HOME/.cache/backplane-bend/emit/$k.ok" build/emit-share/
-            echo "key=$k" >> "$GITHUB_OUTPUT"
-          fi
-      - if: steps.emit.outputs.key != '' && matrix.target == 'linux-x64'
-        uses: actions/upload-artifact@v4
-        with:
-          name: emit-${{ steps.emit.outputs.key }}
-          path: build/emit-share/
-          retention-days: 14
-          compression-level: 6
-      - run: scripts/smoke.sh
-      - uses: actions/upload-artifact@v4
-        with:
-          name: backplane-${{ matrix.target }}
-          path: dist/
-          retention-days: 7

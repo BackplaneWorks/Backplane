@@ -75,13 +75,12 @@ class TestRunnerTest(unittest.TestCase):
         return [json.loads(line) for line in
                 (self.root / "calls.jsonl").read_text().splitlines()]
 
-    def test_runs_main_and_javascript_driver_and_skips_negative_control(self) -> None:
+    def test_runs_main_and_javascript_driver(self) -> None:
         self.program("ordinary")
         self.program("fixture", "def exported() -> String:\n")
         self.driver("fixture")
         self.program("both")
         self.driver("both")
-        self.program("cache_identity_before", "# fail\ndef main() -> IO(Unit):\n")
         result = self.run_suite()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         calls = self.calls()
@@ -90,7 +89,6 @@ class TestRunnerTest(unittest.TestCase):
         self.assertIn(["test/both_test.bend"], args)
         self.assertNotIn(["test/fixture_test.bend"], args)
         self.assertEqual(sum(row[0] == "bun" for row in calls), 2)
-        self.assertFalse(any("cache_identity_before" in str(row) for row in calls))
         self.assertTrue(all(row[2] == "536870912" for row in calls))
 
     def test_standalone_failures_crashes_and_empty_results_fail_suite(self) -> None:

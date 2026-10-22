@@ -27,15 +27,22 @@ function bp_db_get(h) {
   const k = Number(h);
   return k > 0 && k < BP_DB_SLOTS ? bp_db_slots[k] || null : null;
 }
-// "#<digits>" that fits an int64 binds as an integer, anything else as text
-function bp_db_params(ps) {
-  return bp_db_list(ps).map((p) => {
-    if (/^#[0-9]{1,19}$/.test(p)) {
-      const v = BigInt(p.slice(1));
-      if (v <= 9223372036854775807n) return v;
-    }
-    return p;
-  });
+// params as bound: a String list binds every one as text (never read for a
+// type); a typed (DbVal) list says each: DbText, DbInt (decimal digits in
+// int64's range, as a BigInt) or DbNull
+const BP_DB_I64 = 9223372036854775807n;
+function bp_db_val(v) {
+  if (v.$ === CID(DbText)) return v.text;
+  if (v.$ === CID(DbNull)) return null;
+  if (v.$ === CID(DbInt) && /^-?[0-9]{1,19}$/.test(v.digits)) {
+    const n = BigInt(v.digits);
+    if (n <= BP_DB_I64 && n >= -BP_DB_I64 - 1n) return n;
+  }
+  throw new Error("not an integer: " + v.digits);
+}
+function bp_db_params(ps, typed) {
+  const out = bp_db_list(ps);
+  return typed ? out.map(bp_db_val) : out;
 }
 // a column as SQLite's own text for it (sqlite3_column_text): REAL as
 // "%!.15g", integers in full, NULL as ""
@@ -116,28 +123,28 @@ function bp_db_prep(db, sql, keep) {
 }
 // one statement (bun:sqlite keeps it, prepared, by its SQL text) bound and
 // run: the rows it changed
-function bp_db_one(db, sql, params) {
+function bp_db_one(db, sql, params, typed) {
   const st = bp_db_prep(db, sql, true);
-  const ps = bp_db_params(params);
+  const ps = bp_db_params(params, typed);
   if (st.paramsCount !== ps.length) throw new Error(ps.length + " params for " + st.paramsCount + " placeholders");
   // bun:sqlite's changes is how far total_changes moved (trigger and FTS5
   // writes included); the answer is the statement's own rows (sqlite3_changes)
   if (st.run(...ps).changes == 0) return 0;
   return Number(db.query("SELECT changes()").values()[0][0]);
 }
-function db_run(h, sql, params) {
+function bp_db_run(h, sql, params, typed) {
   const db = bp_db_get(h);
   if (!db) return "fail no handle " + h;
   try {
-    return "ok " + bp_db_one(db, sql, params);
+    return "ok " + bp_db_one(db, sql, params, typed);
   } catch (e) {
     return "fail " + bp_db_why(e);
   }
 }
 // rows run one at a time inside a savepoint (so inside or outside the
-// caller's own BEGIN), all or none; each row is [sql, ...params] when
-// sql is null (a script)
-function bp_db_rows(h, sql, rows) {
+// caller's own BEGIN), all or none; when sql is null (a script) each row is
+// [sql, ...params], or a DbStmt when typed
+function bp_db_rows(h, sql, rows, typed) {
   const db = bp_db_get(h);
   if (!db) return "fail no handle " + h;
   try {
@@ -149,9 +156,10 @@ function bp_db_rows(h, sql, rows) {
     let total = 0;
     for (let xs = rows; xs.$ === CID(Con); xs = xs.tail) {
       const row = xs.head;
-      if (sql !== null) total += bp_db_one(db, sql, row);
+      if (sql !== null) total += bp_db_one(db, sql, row, typed);
+      else if (typed) total += bp_db_one(db, row.sql, row.params, true);
       else if (row.$ !== CID(Con)) throw new Error("an empty item");
-      else total += bp_db_one(db, row.head, row.tail);
+      else total += bp_db_one(db, row.head, row.tail, false);
     }
     db.exec("RELEASE bp_db");
     return "ok " + total;
@@ -162,22 +170,34 @@ function bp_db_rows(h, sql, rows) {
     return "fail " + bp_db_why(e);
   }
 }
+function db_run(h, sql, params) {
+  return bp_db_run(h, sql, params, false);
+}
+function db_run_t(h, sql, params) {
+  return bp_db_run(h, sql, params, true);
+}
 function db_batch(h, sql, rows) {
-  return bp_db_rows(h, sql, rows);
+  return bp_db_rows(h, sql, rows, false);
+}
+function db_batch_t(h, sql, rows) {
+  return bp_db_rows(h, sql, rows, true);
 }
 function db_script(h, items) {
-  return bp_db_rows(h, null, items);
+  return bp_db_rows(h, null, items, false);
+}
+function db_script_t(h, items) {
+  return bp_db_rows(h, null, items, true);
 }
 function bp_db_fail(why) {
   return bp_db_from([bp_db_from(["\0fail", why])]);
 }
-function db_query(h, sql, params, limit) {
+function bp_db_query(h, sql, params, limit, typed) {
   const db = bp_db_get(h);
   if (!db) return bp_db_fail("no handle " + h);
   let st;
   try {
     st = bp_db_prep(db, sql, false);
-    const ps = bp_db_params(params);
+    const ps = bp_db_params(params, typed);
     if (st.paramsCount !== ps.length) throw new Error(ps.length + " params for " + st.paramsCount + " placeholders");
     const out = [];
     if (limit > 0) {
@@ -207,6 +227,12 @@ function db_query(h, sql, params, limit) {
     if (st) st.finalize();
   }
 }
+function db_query(h, sql, params, limit) {
+  return bp_db_query(h, sql, params, limit, false);
+}
+function db_query_t(h, sql, params, limit) {
+  return bp_db_query(h, sql, params, limit, true);
+}
 function db_close(h) {
   const db = bp_db_get(h);
   if (!db) return "fail no handle " + h;
@@ -226,3 +252,7 @@ io_eff(CID(Db.batch), db_batch);
 io_eff(CID(Db.script), db_script);
 io_eff(CID(Db.query), db_query);
 io_eff(CID(Db.close), db_close);
+io_eff(CID(Db.run.t), db_run_t);
+io_eff(CID(Db.batch.t), db_batch_t);
+io_eff(CID(Db.script.t), db_script_t);
+io_eff(CID(Db.query.t), db_query_t);

@@ -173,9 +173,10 @@ def dev_stage(t):
     (home / '.bend/bin').mkdir(parents=True)
     (home / '.bun/bin').mkdir(parents=True)
     (tree / 'scripts/verified.sh').write_text('#!/bin/sh\nexit 1\n')
-    for f in ('js-unmarshal.py', 'js-native.py', 'cef-runtime.py'):
+    for f in ('js-unmarshal.py', 'js-native.py'):
         (tree / 'scripts' / f).write_text(f'import sys\nopen({str(log)!r},"a").write({f!r}+" "+" ".join(sys.argv[1:])+"\\n")\n')
-    (tree / 'scripts/build-app.sh').write_text(f'#!/bin/sh\necho "build-app $1 $2 stamp=${{BACKPLANE_VERSION_STAMP:-}}" >> "{log}"\necho bin > "$2"\n')
+    (tree / 'scripts/build-js.sh').write_text(f'#!/bin/sh\necho "build-js $1 $2 stamp=${{BACKPLANE_VERSION_STAMP:-}}" >> "{log}"\necho bin > "$2"\n')
+    (tree / 'scripts/js-licenses.sh').write_text(f'#!/bin/sh\necho "js-licenses $1" >> "{log}"\nmkdir -p "$1/bun" "$1/bend"\n')
     (tree / 'scripts/build-kistack.sh').write_text(f'#!/bin/sh\necho "kistack" >> "{log}"\nmkdir -p "$1"\n')
     (tree / 'scripts/build-browser.sh').write_text('#!/bin/sh\nexit 1\n')
     (home / '.bend/bin/bend').write_text(
@@ -194,17 +195,17 @@ def dev_stage(t):
         return r, (log.read_text() if log.exists() else ''), sorted(p.name for p in out.iterdir()) if out.is_dir() else []
 
     r, calls, staged = stage({'BACKPLANE_VERSION_STAMP': '0.12.1-main.1'})
-    check('dev stage: default builds only the server root, stamped',
-          r.returncode == 0 and 'build-app src/server/main.bend dist/backplane-serve stamp=0.12.1-main.1' in calls
-          and calls.count('build-app ') == 1)
+    check('dev stage: default builds only the server root, on Bun, stamped',
+          r.returncode == 0 and 'build-js src/server/main.bend dist/backplane-serve stamp=0.12.1-main.1' in calls
+          and calls.count('build-js ') == 1)
     check('dev stage: never checks or builds src/app/main.bend or a render root', 'src/app/main.bend' not in calls and 'src/render' not in calls)
-    check('dev stage: default still builds KiStack and helpers, looks for CEF', 'kistack' in calls and 'bun build.ts' in calls and 'cef-runtime.py discover' in calls)
+    check('dev stage: default still builds KiStack and helpers', 'kistack' in calls and 'bun build.ts' in calls)
     check('dev stage: default stages launcher and serve, no renderer',
-          {'backplane', 'backplane-serve', 'kistack', 'web'} <= set(staged) and 'backplane-render' not in staged)
+          {'backplane', 'backplane-serve', 'kistack', 'web', 'licenses'} <= set(staged) and 'backplane-render' not in staged)
     r, calls, staged = stage({'BACKPLANE_DEV_SERVICE_ONLY': '1', 'BACKPLANE_VERSION_STAMP': '0.12.1-main.2'})
-    check('dev stage: service-only stages launcher, serve, web, LICENSE',
-          r.returncode == 0 and staged == ['LICENSE', 'backplane', 'backplane-serve', 'web'])
-    check('dev stage: service-only skips KiStack, helpers and CEF', not any(k in calls for k in ('kistack', 'bun ', 'cef-runtime')))
+    check('dev stage: service-only stages launcher, serve, web, LICENSE and the notices',
+          r.returncode == 0 and staged == ['LICENSE', 'backplane', 'backplane-serve', 'licenses', 'web'])
+    check('dev stage: service-only skips KiStack and helpers', not any(k in calls for k in ('kistack', 'bun ')))
     r, calls, _ = stage({'BACKPLANE_DEV_SERVICE_ONLY': '1'})
     check('dev stage: no caller stamp keeps the generated dev stamp', 'stamp=0.11.2-dev.' in calls)
     r, calls, _ = stage({'BACKPLANE_DEV_SERVICE_ONLY': 'yes'})
@@ -244,10 +245,19 @@ def classic(t):
     run(['sh', str(ROOT / 'scripts/release-classic.sh'), 'v0.12.0', str(again), *args], cwd=ROOT)
     same = all((rel / n).read_bytes() == (again / n).read_bytes() for n in ('backplane-v0.12.0-classic-linux-x64.tar.gz', 'install.sh'))
     check('classic: the same inputs give the same bytes', same)
+    legacy = rel / 'backplane-v0.12.0-linux-x64-cef.tar.gz'
+    check('classic: linux-x64 also as the name the v0.12.0 updater looks for, same bytes',
+          legacy.exists() and legacy.read_bytes() == (rel / 'backplane-v0.12.0-classic-linux-x64.tar.gz').read_bytes()
+          and not (rel / 'backplane-v0.12.0-darwin-arm64-cef.tar.gz').exists())
     names = subprocess.run(['tar', '-tzf', str(rel / 'backplane-v0.12.0-classic-linux-x64.tar.gz')], capture_output=True, text=True).stdout.split()
-    check('classic: launcher, serve, web, install-release, menu entry under backplane-linux-x64/',
+    check('classic: launcher, serve, web, install-release, menu entry and desktop app under backplane-linux-x64/',
           {'backplane-linux-x64/backplane', 'backplane-linux-x64/backplane-serve', 'backplane-linux-x64/web/index.html',
-           'backplane-linux-x64/install-release.sh', 'backplane-linux-x64/backplane.desktop', 'backplane-linux-x64/BUILD.json'} <= set(names))
+           'backplane-linux-x64/install-release.sh', 'backplane-linux-x64/backplane.desktop', 'backplane-linux-x64/BUILD.json',
+           'backplane-linux-x64/desktop/backplane-open', 'backplane-linux-x64/desktop/runtime/chrome-sandbox'} <= set(names))
+    cef = rel / 'backplane-v0.12.0-classic-linux-x64-cef.tar.gz'
+    check('classic: linux-x64 also as classic-linux-x64-cef (the name a 0.12.0 updater asks for), same bytes',
+          cef.exists() and cef.read_bytes() == (rel / 'backplane-v0.12.0-classic-linux-x64.tar.gz').read_bytes()
+          and not (rel / 'backplane-v0.12.0-classic-darwin-arm64-cef.tar.gz').exists())
     script = (rel / 'install.sh').read_text()
     check('classic: install.sh has every sum filled or empty, no placeholder left', '@' not in script.split('REPO=')[1].split('fail()')[0])
     check('classic: linux-arm64 has no sum (no build given)', 'SHA_LINUX_ARM64=""' in script)
@@ -257,6 +267,10 @@ def classic(t):
     for plat in ('linux-x64', 'darwin-arm64'):
         first = next(n for n in assets if n.endswith(plat + '.tar.gz'))
         check(f'classic: a 0.11 updater on {plat} takes the classic package', first == f'backplane-v0.12.0-classic-{plat}.tar.gz')
+    # 0.12.0's updater (Update.archive = Cef.archive): linux-x64 asks for linux-x64-cef.tar.gz
+    for plat, suffix in (('linux-x64', 'linux-x64-cef.tar.gz'), ('darwin-arm64', 'darwin-arm64.tar.gz')):
+        first = next((n for n in assets if n.endswith(suffix)), '')
+        check(f'classic: a 0.12.0 updater on {plat} takes a classic package', first.startswith('backplane-v0.12.0-classic-'))
     # install.sh, end to end, against the built archives
     tools = t / 'tools'
     tools.mkdir()
@@ -281,12 +295,27 @@ def classic(t):
     check('classic: with user namespaces it prints nothing about the sandbox', r2.returncode == 0 and 'chrome-sandbox' not in r2.stdout)
     r = run(['sh', str(rel / 'install.sh')], dict(env, BACKPLANE_PREFIX=str(t / 'inst2'), BACKPLANE_NO_DESKTOP_APP='1'))
     check('classic: BACKPLANE_NO_DESKTOP_APP=1 installs the hub alone', r.returncode == 0 and not (t / 'inst2/desktop').exists() and (t / 'inst2/backplane-serve').exists())
-    bad = rel / 'backplane-v0.12.0-linux-x64.tar.gz'
+    bad = rel / 'backplane-v0.12.0-classic-linux-x64.tar.gz'
     keep = bad.read_bytes()
     bad.write_bytes(keep + b'x')
     r = run(['sh', str(rel / 'install.sh')], dict(env, BACKPLANE_PREFIX=str(t / 'inst3')))
-    check('classic: a desktop archive that fails its sum installs nothing', r.returncode != 0 and not (t / 'inst3/backplane-serve').exists())
+    check('classic: an archive that fails its sum installs nothing', r.returncode != 0 and not (t / 'inst3/backplane-serve').exists())
     bad.write_bytes(keep)
+    # an updater runs the package's install-release.sh over an existing prefix
+    def updated(prefix_dir):
+        x = Path(tempfile.mkdtemp(dir=t, prefix='upd-'))
+        subprocess.run(['tar', '-xzf', str(rel / 'backplane-v0.12.0-classic-linux-x64.tar.gz'), '-C', str(x)], check=True)
+        return run(['sh', str(x / 'backplane-linux-x64/install-release.sh'), str(x / 'backplane-linux-x64'), str(prefix_dir)], {'PATH': os.environ['PATH']})
+    (prefix / 'desktop/backplane-open').write_text('old 0.12.0 app')
+    r = updated(prefix)
+    check('classic: an update replaces the installed desktop app (a 0.12.0 app refuses the new hub)',
+          r.returncode == 0 and (prefix / 'desktop/backplane-open').read_text() != 'old 0.12.0 app'
+          and (prefix / 'desktop.old/backplane-open').read_text() == 'old 0.12.0 app')
+    r = updated(t / 'inst2')
+    check('classic: an update leaves a hub-only install hub-only', r.returncode == 0 and not (t / 'inst2/desktop').exists())
+    (t / 'inst2/browser-current').mkdir()
+    r = updated(t / 'inst2')
+    check('classic: an install with an old CEF pair still updates', r.returncode == 0)
     # the .deb, from the same two archives
     debs = t / 'debs'
     r = run(['sh', str(ROOT / 'scripts/release-deb.sh'), 'v0.12.0', str(debs), 'linux-x64',
@@ -300,6 +329,7 @@ def classic(t):
     check('deb: /opt/backplane has launcher, hub, web and the desktop app',
           {'./opt/backplane/backplane', './opt/backplane/backplane-serve', './opt/backplane/web/index.html',
            './opt/backplane/desktop/runtime/chrome-sandbox', './usr/bin/backplane', './etc/apparmor.d/backplane'} <= set(data))
+    check('deb: one desktop app, no nested copy from the classic package', not any(n.startswith('./opt/backplane/desktop/backplane-linux-x64') or n.startswith('./opt/backplane/desktop/desktop') for n in data))
     listing = subprocess.run(['tar', '-tvzf', str(x / 'data.tar.gz')], capture_output=True, text=True).stdout.splitlines()
     check('deb: nothing group- or world-writable', all(l[5] != 'w' and l[8] != 'w' for l in listing if not l.startswith('l')))
     (x / 'c').mkdir()

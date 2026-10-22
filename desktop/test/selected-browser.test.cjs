@@ -17,7 +17,7 @@ const fixtureFile=path.join(__dirname,'release-producer.test.cjs'),source=fs.rea
 const {fixture,evidence,put,write,ref}=vm.runInThisContext('(function(require){'+source.slice(0,stop)+';return{fixture,evidence,put,write,ref};})', {filename:fixtureFile})(createRequire(fixtureFile));
 const utils=()=>p.browserUtilities();
 function authorize(f){
- const r=f.request.release,allowed={selectedBrowser:f.freeze.selectedBrowser,signingPolicy:f.freeze.signingPolicy[f.target],lifecyclePolicy:f.freeze.lifecyclePolicy?.[f.target],shellReceiptSha256:f.freeze.components[f.target].shellReceiptSha256,electronReceiptSha256:f.freeze.components[f.target].electronReceiptSha256,...(f.target==='windows-x64'?{serviceArchiveSha256:f.freeze.components[f.target].serviceArchiveSha256}:{serviceReceiptSha256:f.freeze.components[f.target].serviceReceiptSha256}),...(f.freeze.windowsShellSource?{windowsShellSource:f.freeze.windowsShellSource}:{})};
+ const r=f.request.release,allowed={selectedBrowser:f.freeze.selectedBrowser,signingPolicy:f.freeze.signingPolicy[f.target],lifecyclePolicy:f.freeze.lifecyclePolicy?.[f.target],shellReceiptSha256:f.freeze.components[f.target].shellReceiptSha256,electronReceiptSha256:f.freeze.components[f.target].electronReceiptSha256,serviceReceiptSha256:f.freeze.components[f.target].serviceReceiptSha256,...(f.freeze.windowsShellSource?{windowsShellSource:f.freeze.windowsShellSource}:{})};
  const policy={schema:1,kind:'backplane-root-staging-disposition',status:'AUTHORIZED_STAGING_POLICY_PENDING_ACTUAL_SERVICE_BINDINGS',publicationOwner:'root',version:r.version,tag:r.tag,channel:r.channel,commit:r.commit,tree:r.tree,electronVersion:'44.9.2',sourceDateEpoch:f.freeze.sourceDateEpoch,compileInputs:f.freeze.compileInputs,targets:{[f.target]:allowed}};
  const policyRef=ref(write(path.join(f.root,'root-policy.json'),policy));f.request.selectedBrowser.rootDisposition=policyRef;f.freeze.rootStagingDisposition={sha256:policyRef.sha256,bytes:policyRef.bytes};trustSyntheticPolicy(policyRef.sha256);f.refresh();
 }
@@ -27,7 +27,7 @@ function browser(f){
   put(path.join(web,n),text);if(/\.(html|js)$/.test(n))put(path.join(web,n+'.gz'),zlib.gzipSync(Buffer.from(text)));
  }
  const manifest={schema:1,kind:'matching-generated-web',sourceCommit:'c'.repeat(40),sourceTree:'d'.repeat(40),entrypoint:'src/web/index.html',members:p.inventory(web,'linux-x64')};write(path.join(root,'WEB.json'),manifest);
- const receipt={schema:1,kind:'backplane-selected-browser',status:'VERIFIED',version:'0.12.0',channel:'release',sourceCommit:manifest.sourceCommit,sourceTree:manifest.sourceTree,entrypoint:manifest.entrypoint,webManifest:'WEB.json',webRoot:'web',webManifestSha256:p.digest(path.join(root,'WEB.json')),members:p.inventory(root,'linux-x64'),packages:[{name:'Browser fixture',version:'fixture',sourceDisposition:'Synthetic source-only fixture',licenses:[{path:'LICENSE.Web',sha256:p.digest(path.join(web,'LICENSE.Web'))}]}]};
+ const receipt={schema:1,kind:'backplane-selected-browser',status:'VERIFIED',version:'0.12.1',channel:'release',sourceCommit:manifest.sourceCommit,sourceTree:manifest.sourceTree,entrypoint:manifest.entrypoint,webManifest:'WEB.json',webRoot:'web',webManifestSha256:p.digest(path.join(root,'WEB.json')),members:p.inventory(root,'linux-x64'),packages:[{name:'Browser fixture',version:'fixture',sourceDisposition:'Synthetic source-only fixture',licenses:[{path:'LICENSE.Web',sha256:p.digest(path.join(web,'LICENSE.Web'))}]}]};
  const file=write(path.join(f.root,'browser.json'),receipt);f.request.selectedBrowser={receipt:ref(file),payload:{directory:root}};
  f.freeze.selectedBrowser={mode:'generated-web-subtree-only',receipt:{sha256:ref(file).sha256,bytes:ref(file).bytes},sourceCommit:receipt.sourceCommit,sourceTree:receipt.sourceTree,webManifestSha256:receipt.webManifestSha256,resourceWebManifestSha256:p.digest(path.join(f.service,'WEB.json'))};
  f.freeze.components[f.target].selectedBrowserReceiptSha256=ref(file).sha256;
@@ -93,7 +93,7 @@ test('selected-browser membership caller uses the existing native Windows mode p
 });
 function lineage(t,target='darwin-arm64'){
  const f=fixture(t,target,true),base=path.join(f.root,'baseline-stage');p.stage(f.requestPath,base);const old=p.json(path.join(base,'STAGE.json')),e=p.json(evidence(f,base)),oldFreeze=path.join(f.root,'old-freeze.json');fs.copyFileSync(path.join(f.root,'freeze.json'),oldFreeze);
- const members=p.inventory(base,target);delete members['STAGE.json'];
+ const raw=p.inventory(base,target);delete raw['STAGE.json'];const members=target==='windows-x64'?p.membershipExpectation(raw,target,'win32'):raw; // as content() records a Windows stage
  const d={schema:1,kind:'backplane-electron-desktop-package',target,release:old.release,components:old.components,lifecyclePolicy:old.lifecyclePolicy,payloadManifestSha256:old.payloadManifestSha256,members};for(const k of ['signing','sandbox','lifecycle','runtimeAcceptance'])d[k]=e[k];
  const desktop=ref(write(path.join(f.root,'baseline-desktop.json'),d));browser(f);f.freeze.selectedBrowser.baselineDesktopReceiptSha256=desktop.sha256;authorize(f);
  const stage=path.join(f.root,'new-stage');p.stage(f.requestPath,stage);const s=p.json(path.join(stage,'STAGE.json'));s.stageReceiptSha256=p.digest(path.join(stage,'STAGE.json'));
@@ -112,7 +112,7 @@ test('composite rejects raw proof rewrite, wrong baseline policy, native mutatio
 });
 test('new browser runtime requires exact current payload/source/assets, all changed behaviors and actual renderer sandbox',t=>{
  const x=lineage(t),file=path.join(x.f.root,'runtime.json'),log={...ref(put(path.join(x.f.root,'PROVENANCE/selected-browser-evidence/runtime.log'),'synthetic source-only witness')),path:'PROVENANCE/selected-browser-evidence/runtime.log'};
- const good={schema:1,kind:'desktop-selected-browser-runtime',scope:'same-target-selected-browser',status:'PASS',target:x.s.target,version:'0.12.0',payloadManifestSha256:x.s.payloadManifestSha256,stageReceiptSha256:x.s.stageReceiptSha256,freezeReceiptSha256:x.s.release.freezeReceipt.sha256,selectedBrowserReceiptSha256:x.s.selectedBrowser.receipt.sha256,webManifestSha256:x.s.selectedBrowser.webManifestSha256,sourceCommit:x.s.selectedBrowser.sourceCommit,sourceTree:x.s.selectedBrowser.sourceTree,checks:Object.fromEntries(['authenticatedOrigin','newAssetsLoaded','routeRetention','draftRetention','inlineBoundedMore','explicitRetry'].map(k=>[k,true])),rendererSandbox:{processType:'renderer',osEnforced:true,flags:[]},evidence:[log]};
+ const good={schema:1,kind:'desktop-selected-browser-runtime',scope:'same-target-selected-browser',status:'PASS',target:x.s.target,version:'0.12.1',payloadManifestSha256:x.s.payloadManifestSha256,stageReceiptSha256:x.s.stageReceiptSha256,freezeReceiptSha256:x.s.release.freezeReceipt.sha256,selectedBrowserReceiptSha256:x.s.selectedBrowser.receipt.sha256,webManifestSha256:x.s.selectedBrowser.webManifestSha256,sourceCommit:x.s.selectedBrowser.sourceCommit,sourceTree:x.s.selectedBrowser.sourceTree,checks:Object.fromEntries(['authenticatedOrigin','newAssetsLoaded','routeRetention','draftRetention','inlineBoundedMore','explicitRetry'].map(k=>[k,true])),rendererSandbox:{processType:'renderer',osEnforced:true,flags:[]},evidence:[log]};
  const validate=r=>overlay.currentRuntime(ref(write(file,r)),x.s,x.s.payloadManifestSha256,utils());const accepted=validate(good);assert.equal(accepted.receipt.kind,good.kind);const copied=path.join(x.f.root,'evidence-only');overlay.copyRuntimeEvidence(accepted,copied,utils());assert(fs.readFileSync(path.join(copied,log.path)).equals(fs.readFileSync(path.join(x.f.root,log.path))));assert.throws(()=>overlay.copyRuntimeEvidence(accepted,copied,utils()),/exist/);
  for(const mutate of [r=>r.target='linux-arm64',r=>r.status='PENDING',r=>r.payloadManifestSha256='0'.repeat(64),r=>r.sourceCommit='0'.repeat(40),r=>r.webManifestSha256='0'.repeat(64),r=>r.checks.explicitRetry=false,r=>r.checks.inlineBoundedMore=false,r=>r.rendererSandbox.osEnforced=false,r=>r.rendererSandbox.processType='browser',r=>r.rendererSandbox.flags=['--no-sandbox'],r=>r.rendererSandbox.flags=['--disable-namespace-sandbox'],r=>r.rendererSandbox.flags=['--disable-gpu-sandbox=true'],r=>r.evidence=[]]){const r=structuredClone(good);mutate(r);assert.throws(()=>validate(r));}
 });
@@ -125,7 +125,8 @@ test('current stage provenance carries the exact raw receipt and independently v
 test('composer and direct producer require the root-selected native service artifact pin',()=>{
  const sha='a'.repeat(64);
  for(const target of ['linux-x64','linux-arm64','darwin-arm64','windows-x64']){
-  const key=target==='windows-x64'?'serviceArchiveSha256':'serviceReceiptSha256';
+  // every target, Windows included, pins the service component's SERVICE.json
+  const key='serviceReceiptSha256';
   overlay.nativeServicePin({[key]:sha},target,{[key]:sha});
   assert.throws(()=>overlay.nativeServicePin({},target,{[key]:sha}),/native service/);
   assert.throws(()=>overlay.nativeServicePin({[key]:sha},target,{[key]:'b'.repeat(64)}),/native service/);

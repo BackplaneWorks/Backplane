@@ -18,7 +18,7 @@ import ../../src/core/far.bend as FR
 # takes it, and by the old rule) and each pass Hub.step runs over every
 # step (wakes, locks, alerts, pending counts, outs), then a whole message's
 # fold. Each part is run REPS times; ms per run.
-#   scripts/build-app.sh test/native/hub_line_bench.bend build/hub_line_bench
+#   scripts/build-js.sh test/native/hub_line_bench.bend build/hub_line_bench
 #   build/hub_line_bench EVENTS.jsonl THREAD [REPS]   (only reads the log)
 
 def copy(xs: List<String>) -> List<&2, String>:

@@ -7,7 +7,7 @@ import ../../src/server/argv.bend as AV
 
 # The sidebar's rows, timed on a real log: Side.rows and its parts, 20
 # times each (ms for all 20).
-#   scripts/build-app.sh test/native/side_bench.bend build/side_bench
+#   scripts/build-js.sh test/native/side_bench.bend build/side_bench
 #   build/side_bench EVENTS.jsonl
 
 def items(ls: List<&2, String>, acc: List<&2, J.Json>) -> List<&2, J.Json>:

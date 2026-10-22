@@ -3,7 +3,7 @@ import ../check.bend as C
 import ../../src/server/kicad.bend as K
 import ../../src/server/proc.bend as P
 
-# (native: scripts/build-app.sh test/native/kicad_files.bend build/kicad_files)
+# (native: scripts/build-js.sh test/native/kicad_files.bend build/kicad_files)
 # Which KiCad project a folder's threads work on (K.Files.read): one in the
 # root, one only in a folder below it, several, and one named in
 # .backplane.json. Fixtures are made under a temporary folder.

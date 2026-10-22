@@ -1,12 +1,14 @@
 # The JS service
 
-The hub (`src/server/main.bend`) also builds for Bun's JS runtime. bend emits it as one JS file, and `bun build --compile` turns that into a single-file `backplane-serve` for any target. This is the fast-hub program's path to a server with no C: C stays until the two gates in the program's plan pass.
+The hub (`src/server/main.bend`) runs on Bun's JS runtime, and only there: its effects are JavaScript (`src/server/effects/*.js`) and there is no C build of it. bend emits it as one JS file, and `bun build --compile` turns that into a single-file `backplane-serve` for any target.
 
 ```sh
-scripts/build-js.sh src/server/main.bend dist/backplane-serve          # this machine
+scripts/build.sh                                                        # the hub, web client and helpers into dist/
+scripts/build-js.sh src/server/main.bend dist/backplane-serve          # only the hub, this machine
 BACKPLANE_JS_TARGET=darwin-arm64 scripts/build-js.sh src/server/main.bend out/backplane-serve
+BACKPLANE_JS_TARGET=windows-x64 scripts/build-js.sh src/server/main.bend out/backplane-serve  # out/backplane-serve.exe
 scripts/js-smoke.sh dist/backplane-serve [dist/web]                     # --version, exit 2, /hello, the page
-BACKPLANE_DEV_SERVICE_ONLY=1 BACKPLANE_DEV_SERVICE_JS=1 scripts/dev.sh stage DIR
+BACKPLANE_DEV_SERVICE_ONLY=1 scripts/dev.sh stage DIR
 ```
 
 ## Why `bun build --compile`, not Electron's Node
@@ -52,9 +54,9 @@ A compiled binary contains Bun (MIT). Bun statically links JavaScriptCore and We
 
 Because of that pin, a target can be built from any host. `--version` runs only when the host is the target; runtime acceptance runs the binary on its target as before.
 
-BUILD.json gains `serviceRuntime: "bun"`. Everything downstream is unchanged, and the Electron app launches it as before as `resources/backplane-service/backplane-serve`. That covers `component`, `desktop/produce-release.cjs` (an ELF or Mach-O of the target's architecture), the runtime closure and `desktop/service.cjs`.
+BUILD.json says `serviceRuntime: "bun"`. Everything downstream is unchanged, and the Electron app launches it as before as `resources/backplane-service/backplane-serve`. That covers `component`, `desktop/produce-release.cjs` (an ELF or Mach-O of the target's architecture), the runtime closure and `desktop/service.cjs`.
 
-The JS targets are linux-x64, linux-arm64, darwin-x64 and darwin-arm64. Windows is missing because Bend's JS runtime has no Win32 syscalls yet. A Windows binary builds but can't serve, so the Windows producer stays on C.
+The targets are linux-x64, linux-arm64, darwin-x64, darwin-arm64 and windows-x64. On Windows the service is `backplane-serve.exe` (a PE checked for x64), and the desktop producer takes it the same way as the others. It builds today but cannot serve until Bend's JS runtime has Win32 syscalls (fast-hub J4).
 
 ## CI
 
@@ -67,4 +69,4 @@ The `js` job (`.github/workflows/ci.yml`) does the following:
 - runs the bake and producer tests;
 - uploads `backplane-serve-js`.
 
-`js-native` runs the smoke test on arm64 Linux and on both kinds of Mac. Windows only reports.
+`js-native` runs the smoke test on arm64 Linux, both kinds of Mac and Windows. Windows only reports until Bend's JS runtime has Win32 syscalls (fast-hub J4).

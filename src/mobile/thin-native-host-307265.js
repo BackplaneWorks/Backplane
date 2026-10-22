@@ -1,4 +1,4 @@
-import { ThinViews, compactSession, compactRoute, viewTarget, readPresentation, writePresentation, utf8Bytes } from '../web/thin.js';
+import { ThinViews, compactSession, compactRoute, viewTarget, readPresentation, writePresentation, utf8Bytes, popupDraft, popupReadDraft, carriesDraft } from '../web/thin.js';
 import { validateThinResult, MessageParts } from '../web/thin-results.js';
 import { validatePresentation } from '../web/startup.js';
 
@@ -77,11 +77,18 @@ export class NativeThinHost307265 {
     this.api = api;
     this.states = new Map(); this.paired = new Set(); this.current = '';
     this.pending = new Map(); this.ordinary = new Map(); this.commands = []; this.sync = [];
+    // The outbox: a message sent is kept until its hub answers. A drop
+    // before the answer (or a send while the socket is down, which the app
+    // cannot deliver) leaves it here; each view connection that presents
+    // sends it again. The hub stores a client-named message once (Hub.dup),
+    // so a resend never posts twice; a refusal puts the text back in its
+    // draft. Kept for a day; keyed by the message's own id.
+    this.outbox = new Map();
     this.client = new ThinViews({
       now: api.now,
       // Renderer hints are device-owned and never select another hub or owner.
       send: (hub, request) => ({ type: 'request', hub, request: { ...request,
-        p: { ...request.p, ...(request.p.session ? { session: this.requestSession(request.p.session, request.m, request.p.target) } : {}), nativeRenderer: api.renderer() } } }),
+        p: { ...request.p, ...(request.p.session ? { session: this.requestSession(request.p.session, request.m, request.p.target, carriesDraft(request)) } : {}), nativeRenderer: api.renderer() } } }),
       command: (command, input) => ({ type: 'command', command, input }),
       validateResult: (result, input) => this.validate(result, input),
     }, next);
@@ -115,14 +122,48 @@ export class NativeThinHost307265 {
     for (const key of this.states.keys()) this.client.disconnect(key);
     this.states.clear(); this.paired.clear(); this.current = '';
     this.pending.clear(); this.ordinary.clear(); this.commands = []; this.sync = [];
+    this.outbox.clear();
   }
+
+  outboxKeep(hub, rpc) {
+    const msg = rpc?.p?.msg;
+    if (rpc?.m !== 'turn.start' || typeof msg !== 'string' || !msg || this.outbox.size >= 64) return;
+    this.outbox.set(msg, { hub, rpc: copy(rpc), at: this.api.now() });
+  }
+
+  // a hub's answer to a message in the outbox; true when it was one
+  outboxReply(hub, envelope) {
+    for (const [msg, o] of this.outbox) if (o.hub === hub && o.rpc.id === envelope.id) {
+      this.outbox.delete(msg);
+      if (envelope.ok === false) {
+        const thread = String(o.rpc.p.thread || ''), s = this.states.get(hub);
+        if (thread && s && !s.session.drafts[thread]) {
+          this.commands.push({ type: 'keep', thread: hub + '|' + thread, text: String(o.rpc.p.text || '') });
+          s.session.drafts = { ...s.session.drafts, [thread]: String(o.rpc.p.text || '') };
+        }
+      }
+      return true;
+    }
+    return false;
+  }
+
+  // a presented view connection: what waits in the outbox goes again
+  outboxFlush(hub) {
+    const now = this.api.now();
+    for (const [msg, o] of this.outbox) {
+      if (o.hub !== hub) continue;
+      if (now - o.at > 86400000) { this.outbox.delete(msg); continue; }
+      this.commands.push(this.api.command(hub, { type: 'send', text: JSON.stringify(o.rpc) }, {}, false));
+    }
+  }
+
 
   connection(hub, epoch, mode) {
     if (!this.paired.has(hub)) return;
     this.disconnect(hub);
     const s = this.state(hub);
     s.mode = mode === 'view-v1' ? 'view-v1' : mode === undefined ? 'compatibility' : 'blocked';
-    s.epoch = String(epoch); s.greeted = false; s.ready = false;
+    s.epoch = String(epoch); s.greeted = false; s.ready = false; s.flushed = false;
   }
 
   thin(hub) { return this.states.get(hub)?.mode === 'view-v1'; }
@@ -132,12 +173,16 @@ export class NativeThinHost307265 {
     return this.paired.has(hub) && s?.mode === 'view-v1' && s.epoch === String(epoch) && inertAncillary307265(envelope);
   }
 
-  requestSession(session, method, target) {
+  requestSession(session, method, target, popup = false) {
     const drafts = {};
     for (const key of ['@lang', '@lang.os', '@lang.tag', '@lang.preview'])
       if (typeof session.drafts?.[key] === 'string' && utf8Bytes(session.drafts[key]) <= 128) drafts[key] = session.drafts[key];
     if (method === 'view.action' && session.sel && Object.hasOwn(session.drafts || {}, session.sel) && typeof session.drafts[session.sel] === 'string')
       Object.defineProperty(drafts, session.sel, { value: session.drafts[session.sel], enumerable: true });
+    // a read carries the draft only while the composer's popup may show (or
+    // must shut): the hub renders the popup from it (client.bend's Refs.ready)
+    else if (popup && session.sel && !session.sel.startsWith('@') && typeof session.drafts?.[session.sel] === 'string')
+      Object.defineProperty(drafts, session.sel, { value: popupReadDraft(session.drafts[session.sel]), enumerable: true });
     const choices = (value, accept) => {
       const out = {}; let count = 0;
       for (const [key, item] of Object.entries(object(value) ? value : {})) {
@@ -222,6 +267,8 @@ export class NativeThinHost307265 {
       s.session = copy(intent.session);
       s.drafts.set(s.session.sel, { revision: s.revision, text: value });
       this.commands.push({ type: 'keep', thread: hub + '|' + s.session.sel, text: value });
+      // the hub draws the composer's popup: ask again while it may open or shut
+      if (popupDraft(value) || s.popupSent) this.update(s);
       return true;
     }
     if (intent.kind === 'find') {
@@ -305,7 +352,11 @@ export class NativeThinHost307265 {
     if (this.inert(hub, envelope, epoch)) return true;
     if (envelope?.t === 'view') return this.greeting(hub, envelope, epoch);
     if (envelope?.t === 'view.changed') {
-      if (s.greeted && this.client.links.get(hub)?.viewId) this.issue(s, this.client.changed(hub, envelope, this.requestSession(s.session, 'view.update', s.target), s.anchor));
+      if (s.greeted && this.client.links.get(hub)?.viewId) {
+        const result = this.client.changed(hub, envelope, this.requestSession(s.session, 'view.update', s.target, this.popupRead(s)), s.anchor);
+        if (result.id) s.popupSent = popupDraft(s.session.drafts?.[s.session.sel]);
+        this.issue(s, result);
+      }
       return true;
     }
     if (envelope?.t !== 'reply') {
@@ -372,6 +423,7 @@ export class NativeThinHost307265 {
       if (c.type === 'send') {
         const rpc = JSON.parse(c.text);
         this.ordinary.set(ordinaryKey(hub, rpc.id), { hub, epoch: s.epoch, revision: metadata.revision, thread: item.input.session?.sel || '', session: copy(response) });
+        this.outboxKeep(hub, rpc);
       }
       commands.push(this.api.command(hub, c, item.input, result.current));
       if (c.type === 'keep') {
@@ -389,6 +441,7 @@ export class NativeThinHost307265 {
         if (old?.partial?.version !== entry.partial?.version) s.messages.reset(entry.id);
       }
       s.shown = view.shown; s.overlay = view.overlay;
+      if (!s.flushed) { s.flushed = true; this.outboxFlush(hub); }
       this.sync.push({ hub, phase: 'presented', detail: 'view-v1', mode: 'view-v1', viewId: r.viewId,
         requestRevision: r.requestRevision, viewRevision: r.viewRevision, remoteReady: true });
       for (const args of s.registrations.values()) this.sendRegistration(s, args);
@@ -399,6 +452,7 @@ export class NativeThinHost307265 {
   }
 
   ack(hub, envelope) {
+    this.outboxReply(hub, envelope);
     const key = ordinaryKey(hub, envelope.id), original = this.ordinary.get(key), s = this.states.get(hub);
     if (!original || original.hub !== hub || original.epoch !== s?.epoch) return true;
     this.ordinary.delete(key);
@@ -423,9 +477,20 @@ export class NativeThinHost307265 {
     return !!l && l.revision === metadata.input.requestRevision && same(l.target, metadata.input.target);
   }
 
+  // whether a read carries the selected draft: while it may open the popup,
+  // and once more after, so the hub shuts it
+  popupRead(s) {
+    return popupDraft(s.session.drafts?.[s.session.sel]) || !!s.popupSent;
+  }
   update(s) {
     const l = this.client.links.get(s.hub);
-    if (s.greeted && l?.viewId) this.issue(s, this.client.request(s.hub, 'view.update', { session: this.requestSession(s.session, 'view.update', s.target), anchor: s.anchor, viewRevision: l.viewRevision }));
+    if (s.greeted && l?.viewId) {
+      const result = this.client.request(s.hub, 'view.update', { session: this.requestSession(s.session, 'view.update', s.target, this.popupRead(s)), anchor: s.anchor, viewRevision: l.viewRevision });
+      // A coalesced edit has not reached the hub. Keep the closing draft
+      // owed until the follow-up request actually leaves the transport.
+      if (result.id) s.popupSent = popupDraft(s.session.drafts?.[s.session.sel]);
+      this.issue(s, result);
+    }
   }
 
   register(hub, args) {

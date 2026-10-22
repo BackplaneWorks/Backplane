@@ -4,7 +4,6 @@ import ./proc.bend as P
 import ../core/json.bend as J
 import ../core/semver.bend as SV
 import ../core/version.bend as VR
-import ../core/cef.bend as CF
 
 # Updates from GitHub releases. A check lists the recent releases, takes
 # the newest one the update channel allows (SV.Chan.pick: `stable` only full
@@ -201,11 +200,11 @@ def Update.swap.one(+from: String, +to: String) -> IO(String):
     r : Result<&1, &1, U32 & String, Unit> <- H.FS.rename(from, to)
     return Update.swap.k(r, to)
 
-# Old updaters cannot promote the pair; the CEF suffix makes them refuse safely.
+# the release's archive for this platform
 def Update.archive(+plat: String) -> String:
-  CF.Cef.archive(plat)
+  plat ++ ".tar.gz"
 
-# Shared installer validates/promotes the complete pair before replacing app.
+# the release's own installer swaps the package in
 def Update.swap(+src: String, +exe: String, +tag: String) -> IO(String):
   Update.run("sh", [src ++ "/install-release.sh", src, exe], "install release " ++ tag)
 

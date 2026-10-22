@@ -1,6 +1,7 @@
 import Base
 import ../core/json.bend as J
 import ../core/desktop-browser.bend as D
+import ./perf.bend as PF
 
 type Message is Data:
   Refresh{}
@@ -135,10 +136,13 @@ def Broker.pending_latches(ps: List<&2, Pending>, +meta: J.Json) -> J.Json:
     case Pending{_, owner, +target, _, _} <> t:
       Broker.pending_latches(t, Broker.pending_latch_one(Bool.or(Bool.not(Broker.is_preparation(target)), J.Json.get_bool(target, "cancelling", False{})), meta, owner))
 
-def Broker.close(b: Broker, why: String) -> IO(Broker):
+# every close says why, once, at the default log level (the live hub's
+# refusals were silent)
+def Broker.close(b: Broker, +why: String) -> IO(Broker):
   match b:
     case Broker{_, _, _, +out, meta, +ps, _}:
       do IO<Broker>:
+        PF.Log.warn("desktop", "browser channel closed: " ++ why)
         Broker.fail(ps, why)
         Broker.send(out, "{\"v\":1,\"op\":\"closed\"}")
         Broker.close_output(out)
@@ -1440,11 +1444,39 @@ def Broker.call_existing(create: Bool, +b: Broker, +op: String, +args: J.Json, r
     case False{}:
       Broker.call_ready(Bool.and(Broker.request_target_valid(b, op, args), Bool.or(Broker.close_op(op, args), J.Json.get_bool(J.Json.get_obj(J.Json.get_obj(Broker.meta(b), "targets"), J.Json.get_str(Broker.request_target(b, op, args), "tabId", "")), "ready", False{}))), b, op, args, reply)
 
+# which of Broker.call's conditions refused it (the first that fails), for
+# the log line
+def Broker.refused_why(+b: Broker, +op: String, +args: J.Json) -> String:
+  +owner = J.Json.get_str(args, "page", "")
+  Bool.pick(String, Bool.not(J.Json.get_bool(Broker.meta(b), "ready", False{})), "no desktop guest is ready (no app attached, or its channel closed)",
+  Bool.pick(String, Bool.not(J.Json.get_bool(Broker.owner(b, owner), "known", False{})), "owner " ++ owner ++ " is not known to the desktop",
+  Bool.pick(String, Broker.unknown_owner(b, owner), "owner " ++ owner ++ " is marked unknown",
+  Bool.pick(String, Broker.pending_owner(Broker.pending(b), owner), "owner " ++ owner ++ " has a command pending",
+  Bool.pick(String, Broker.preparing(b, owner), "owner " ++ owner ++ " is being prepared",
+  Bool.pick(String, Bool.and(String.eq(J.Json.get_str(args, "__desktopActor", "service"), "agent"), Bool.not(String.eq(J.Json.get_str(Broker.owner(b, owner), "drive", "none"), "agent"))),
+    "owner " ++ owner ++ " is not driven by its agent (drive " ++ J.Json.get_str(Broker.owner(b, owner), "drive", "none") ++ ")",
+    "too many commands pending")))))) ++ " (" ++ op ++ ")"
+
+# what a refused caller is told: a thread latched by an unknown outcome
+# (Broker.close keeps it for the hub's life, never retried) hears which
+# thread, why, and what clears it; any other refusal keeps the old words
+# with its reason
+def Broker.refusal.k(latched: Bool, +owner: String, why: String) -> String:
+  match latched:
+    case True{}:
+      "the browser is closed to thread " ++ owner ++ ": its last browser command has an unknown outcome, so the browser stays closed to it until the hub restarts or the person resets it"
+    case False{}:
+      "direct desktop guest unavailable or owner authority refused: " ++ why
+
+def Broker.refusal(+b: Broker, +op: String, +args: J.Json) -> String:
+  Broker.refusal.k(Broker.unknown_owner(b, J.Json.get_str(args, "page", "")), J.Json.get_str(args, "page", ""), Broker.refused_why(b, op, args))
+
 def Broker.refuse_call(ok: Bool, +b: Broker, +q: Chan(Message), +op: String, +args: J.Json, +reply: Chan(String)) -> IO(Broker):
   match ok:
     case False{}:
       do IO<Broker>:
-        Broker.send(Some{reply}, D.Desktop.error("", "direct desktop guest unavailable or owner authority refused", False{}))
+        PF.Log.warn("desktop", "browser call refused: " ++ Broker.refused_why(b, op, args))
+        Broker.send(Some{reply}, D.Desktop.error("", Broker.refusal(b, op, args), False{}))
         return b
     case True{}:
       do IO<Broker>:

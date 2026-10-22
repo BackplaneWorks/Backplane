@@ -32,6 +32,10 @@ class DesktopInstallTest(unittest.TestCase):
             path.write_text(executable)
             path.chmod(0o755)
         shutil.copy2(ROOT / "scripts/install-release.sh", package)
+        # the classic package carries the desktop app (0.12.1 on)
+        (package / "desktop" / "runtime").mkdir(parents=True)
+        (package / "desktop" / "backplane-open").write_text("#!/bin/sh\n")
+        (package / "desktop" / "runtime" / "chrome-sandbox").write_text("sandbox\n")
         shutil.copy2(ROOT / "deploy/backplane.desktop", package)
         (package / "icon").mkdir()
         for name in ["backplane-desktop.svg", "backplane-desktop-256.png"]:
@@ -43,8 +47,6 @@ class DesktopInstallTest(unittest.TestCase):
         script = (ROOT / "deploy/install.sh.in").read_text().replace("@VERSION@", "v0.0.0-test")
         for platform in ["LINUX_X64", "LINUX_ARM64", "DARWIN_ARM64"]:
             script = script.replace("@SHA_" + platform + "@", digest)
-            # the stub curl serves this one archive as the desktop app too
-            script = script.replace("@DESKTOP_SHA_" + platform + "@", digest)
         self.installer = self.root / "install.sh"
         self.installer.write_text(script)
         self.tools = self.root / "tools"

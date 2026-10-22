@@ -4,7 +4,7 @@ import ../../src/server/perf.bend as PS
 
 # The performance overlay's text from real readings of a busy process
 # (30 window rows, 7 hub rows), timed.
-#   scripts/build-app.sh test/native/hud_bench.bend build/hud_bench
+#   scripts/build-js.sh test/native/hud_bench.bend build/hud_bench
 #   build/hud_bench
 
 def fill(+n: Nat, +k: U32) -> IO(Unit):

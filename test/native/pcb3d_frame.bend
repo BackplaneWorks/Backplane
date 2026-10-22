@@ -13,7 +13,7 @@ import ../../src/server/argv.bend as AV
 
 # A board drawn in 3D straight from its .kicad_pcb, its models loaded the
 # way the viewer loads them (one after another here), timed.
-#   scripts/build-app.sh test/native/pcb3d_frame.bend build/pcb3d_frame
+#   scripts/build-js.sh test/native/pcb3d_frame.bend build/pcb3d_frame
 #   build/pcb3d_frame BOARD.kicad_pcb [W H]   # frames to /tmp/pcb3d-N.ppm
 #                                             # (and four samples a pixel to /tmp/pcb3d-N-fine.ppm)
 

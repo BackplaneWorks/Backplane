@@ -87,7 +87,7 @@ def error(r: MS.StoreResult<J.Json>) -> String:
 
 def io_page(+home: String, +s: M.State, +before: String, +n: Nat, +want: String, +more: Bool) -> IO(Unit):
   do IO<Unit>:
-    +r : MS.StoreResult<J.Json> <- S.MailJob.page(home, s, "room:r", "", before, n)
+    +r : MS.StoreResult<J.Json> <- S.MailJob.page("", home, s, "room:r", "", before, n)
     C.Check.str("actual room page " ++ before ++ "/" ++ Nat.show(n), rowids(J.Json.elems(J.Json.get_obj(result(r), "mails")), ""), want)
     Q.b("actual more " ++ before ++ "/" ++ Nat.show(n), J.Json.get_bool(result(r), "more", Bool.not(more)), more)
 
@@ -136,7 +136,7 @@ def main() -> IO(Unit):
     client()
     +home : String <- ST.home()
     io_page(home, historic(), "", 3n, "p3,p1,", False{})
-    +hist : MS.StoreResult<J.Json> <- S.MailJob.page(home, historic(), "room:r", "", "", 3n)
+    +hist : MS.StoreResult<J.Json> <- S.MailJob.page("", home, historic(), "room:r", "", "", 3n)
     C.Check.str("historic complete Unicode source", J.Json.get_str(Maybe.default(&2, J.Json, List.head(&2, J.Json, J.Json.elems(J.Json.get_obj(result(hist), "mails"))), J.Null{}), "text", ""), "third 漢字")
     +a : MS.StoreResult<Bool> <- MS.MailStore.append(home, filed(initial(), "f2", "second 🧪", 2n))
     C.Check.str("file append f2", ST.status(Bool, a), "ok")
@@ -151,9 +151,9 @@ def main() -> IO(Unit):
     io_page(home, mixed(), "p1", 2n, "", False{})
     +exact : MS.StoreResult<MB.Body> <- MS.MailStore.exact(home, "room:r", "f2")
     C.Check.str("indexed exact lookup preserves body", ST.status(MB.Body, exact), "ok")
-    +missing : MS.StoreResult<J.Json> <- S.MailJob.page(home, M.State.apply(initial(), MB.Body.header(MB.Body.mail(filed(initial(), "absent", "no source", 5n)))), "room:r", "", "", 1n)
+    +missing : MS.StoreResult<J.Json> <- S.MailJob.page("", home, M.State.apply(initial(), MB.Body.header(MB.Body.mail(filed(initial(), "absent", "no source", 5n)))), "room:r", "", "", 1n)
     Q.b("header without canonical or disk body reports diagnostic", String.contains(error(missing), "mail body unavailable"), True{})
-    +badcursor : MS.StoreResult<J.Json> <- S.MailJob.page(home, mixed(), "room:r", "", "unknown", 3n)
+    +badcursor : MS.StoreResult<J.Json> <- S.MailJob.page("", home, mixed(), "room:r", "", "unknown", 3n)
     Q.b("actual unknown cursor diagnostic", String.contains(error(badcursor), "cursor"), True{})
-    +nonroom : MS.StoreResult<J.Json> <- S.MailJob.page(home, mixed(), "not-room", "", "", 3n)
+    +nonroom : MS.StoreResult<J.Json> <- S.MailJob.page("", home, mixed(), "not-room", "", "", 3n)
     C.Check.str("non-room missing behavior unchanged", rowids(J.Json.elems(J.Json.get_obj(result(nonroom), "mails")), ""), "")

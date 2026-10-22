@@ -133,7 +133,7 @@ A locator or selector acts on its first match.
 Status:
 
 ```json
-{"version": "3", "engine": "chrome", "page": "", "open": true, "chromium": "/path/to/chrome", "profile": "/x/browser-profile",
+{"version": "3", "page": "", "open": true, "chromium": "/path/to/chrome", "profile": "/x/browser-profile",
  "url": "https://example.com/", "title": "Example Domain", "loading": false, "width": 700, "height": 800,
  "tabs": 1, "frames": {"on": true, "maxFps": 15, "seq": 3, "path": "/tmp/bp-preview.rgb"},
  "shot": {"path": "/x/shots/shared.jpg", "n": 5, "maxFps": 4}}
@@ -291,126 +291,10 @@ phone clients (two screencasts on one page, one per CDP session).
 - `chromium-bidi` is left external in the compiled binary (Playwright only
   needs it for Firefox/BiDi).
 
-## Embedded CEF engine (Linux X11)
-
-Backplane defaults to embedded CEF on Linux X11 once its local native window
-is attached. The explicit `browser.engine=chrome` setting remains available.
-The helper also defaults to CEF when supplied a native Linux X11 parent;
-headless, remote-only and unsupported native clients use Chrome frames. If
-native startup fails, automatic selection reports the reason in `status.fallback`
-and uses Chrome; explicit `--engine cef` failures remain errors for the hub to
-report. Set `--parent XID --display :NN --cef /path/to/backplane-cef`
-(`--display` defaults to DISPLAY, `--cef` to BACKPLANE_CEF). `--cache DIR`
-overrides the CEF profile; by default it is `<--profile>/../cef-profile`,
-separate from Chrome's profile. Without `--profile`, it is a temporary
-per-helper directory. The host protocol is in [tools/cef](../cef/README.md).
-
-The helper owns the CEF host. It launches it with `--parent`, a free loopback
-CDP `--port`, `--cache`, and the chosen DISPLAY. It creates every page with
-the host's `create`, adopts its reported CDP target, and uses keys
-`safeOwner-<n>` (long owner names are truncated to fit the 64-character key
-limit; the monotonic counter disambiguates tabs). Popups are new embedded
-children, adopted as the opener's active tab. CEF never calls
-`context.newPage()`, `setViewportSize()` or `browser.close()`.
-
-| op | arguments | result |
-|---|---|---|
-| `engine` | `engine:"chrome"` or `"cef"`; for cef `parent` (numeric XID), `display`, `cef?` (host path), `cache?` | status including `engine`; start/switch engine at runtime |
-| `restore` | owner `page`, `state` with url/origin/local/session/fields/scroll as saved during a handoff | status; restore this owner's active tab after an older-helper upgrade; context cookies are never exported |
-| `show` | owner `page`, `x`, `y`, `w`, `h` in parent pixels | `{}`; show that owner's active tab, hiding all others; cef only |
-| `hide` | none | `{}`; hide all native browsers; cef only |
-| `shield` | `on` (bool) | `{}`; block person's pointer and wheel over the shown child; cef only |
-| `focus` | owner `page` | `{}`; focus its active native child; cef only |
-
-Switching engines reloads all owned tabs, retaining their selected tab, cookies,
-local/session storage, non-password editable form values and scroll position,
-and resumes recording when active. JavaScript heaps, history, passwords and
-file selections cannot transfer between processes. The previous engine stays
-open until replacement succeeds; failed replacement restores it. Reconfiguring
-a live CEF host with the same cache first releases its singleton profile lock.
-On first CEF use after an upgrade, the helper imports Chrome cookies through
-Chrome's profile API once, retaining the separate original Chrome profile.
-Chrome closes its persistent context;
-CEF receives `quit` and the helper waits for its exit. `close` without page
-and stdin EOF likewise quit and wait for the host before the helper exits.
-Closing an owner closes only its tabs. The host stays alive even after the
-last browser closes. On host death, `closed` is emitted, owners' tabs are
-cleared, and the next page request starts a new host.
-
-`status` adds `engine`, `requestedEngine` and any automatic `fallback` reason; cef also includes `port`, `hostPid`,
-and `cache`. CEF width/height are the page's real innerWidth/innerHeight.
-`open {width,height}` and `resize` resize the native child, including hidden
-ones, without viewport emulation. `show` also updates the real viewport.
-The context recorder binding and init script, console capture, shots,
-cast leases, idle JPEG stills and shared raw RGB frames work over CDP.
-`pdf` errors with `pdf needs the headless engine` in cef mode. Downloads
-use Browser.setDownloadBehavior (`allowAndName`, temporary directory) and
-CDP download events; a runtime without that CDP support answers a clear
-`download unavailable in CEF` error.
-
-Added events (cef only):
-
-| event | fields | meaning |
-|---|---|---|
-| `engine` | `engine:"cef"`, `ok`, `error?` | host started or failed/died |
-| `shield-click` | `page` (owner), `x`, `y` | native shield press, CSS pixels |
-| `focus` | `page` (owner) | native page took keyboard focus |
-
-Bun 1.3 cannot complete Playwright's vendored ws upgrade against CEF.
-`src/bunws.ts` adapts Bun's native WebSocket. A guarded source transform at
-Playwright's ws constructor selects it only during CEF CDP connection;
-Chrome retains its original transport. `src/playwright.ts` registers the
-runtime transform **before** loading Playwright for `bun src/main.ts`.
-`build.ts` applies the same patch beside the existing JSON bundling patch.
-
-Runtime discovery (`src/cef.ts`): explicit `--cef`/engine-op `cef`, then
-BACKPLANE_CEF, `cef/backplane-cef` beside the helper executable (also
-`dist/cef/backplane-cef` in a source checkout), then the newest cached
-`$XDG_CACHE_HOME/backplane/cef-runtime/<version>/backplane-cef`.
-`installCef(url, sha256)` downloads a tar.zst, verifies SHA-256 before
-unpacking, then installs the runtime in that cache. The published URL and
-SHA constants are intentionally empty until the asset is released. With
-no local runtime, the error is `no CEF runtime: set BACKPLANE_CEF`.
-
-Acceptance (one private Xvfb/test at a time, never :0):
-
-```sh
-bun tools/cef/test/chrome.ts # existing pages.ts and record.ts unchanged
-BACKPLANE_CEF="$PWD/build/cef/Release/backplane-cef" bun tools/browser/test/cef.ts
-BACKPLANE_CEF="$PWD/build/cef/Release/backplane-cef" bun tools/browser/test/cef-lifetime.ts
-bun tools/browser/test/cef-runtime.ts
-nice -n 10 bun tools/browser/build.ts /tmp/x/backplane-browser # within the admitted scope
-BACKPLANE_BROWSER=/tmp/x/backplane-browser BACKPLANE_CEF="$PWD/build/cef/Release/backplane-cef" bun tools/browser/test/cef.ts
-```
-
-CEF 154 first announces a browser the host creates as a CDP target of type
-`other`, which Playwright skips; the helper sets `PW_CHROMIUM_ATTACH_TO_OTHER=1`
-(a Playwright switch, read at each attach) while CEF runs, so host pages and
-popups arrive as ordinary Playwright pages. This creates no targets or windows.
-
-Playwright's own `ws` client never finishes the WebSocket upgrade under Bun
-1.3, so the CEF connection uses Bun's `WebSocket` (`src/bunws.ts`).
-`utilsBundle.ws` is a read-only getter: `build.ts` rewrites the one line of
-`coreBundle.js` that reads it (the build fails if that line moves), and when
-running from source `src/init.ts` answers `ws` from a proxy in the require
-cache. Import Playwright through `src/playwright.ts`.
-
-Pixels: the host's `show`/`size` and `shield-click` speak X (device) pixels;
-agents, `status` and the viewport speak CSS pixels. The helper converts with
-the page's `devicePixelRatio` (1 on most screens).
-
-CEF's unmapped `Chromium clipboard` X selection-owner window is excluded
-from the tests' top-level browser-window check; it is required clipboard
-infrastructure. Every actual page and popup is an embedded child.
-
-The last `show` rectangle follows its owner's active tab, including a newly
-adopted popup and the previous tab when that popup closes. `hide` clears that
-placement, so a later tab activation cannot map a browser over a window overlay.
-The active tab inherits the current shield and receives focus only when the
-person drives. Engine changes clear native placement.
+## Browser panel
 
 The Browser panel has an address bar (Enter or Go), back/forward/reload and
-new, select and close tab controls, for both native CEF and Chrome frames.
+new, select and close tab controls.
 Toolbar actions take over that owner's page; Hand back returns it to the agent.
 Plain hostnames use HTTPS; localhost, loopback and explicit host:port use HTTP.
 Tab titles and the current URL follow navigation, including agent navigation.

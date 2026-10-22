@@ -38,19 +38,15 @@ class Fixture:
         self.put(self.service+'/backplane-serve'+('.exe' if target == 'windows-x64' else ''), b'not executable fixture')
         self.put(self.service+'/LICENSE.Backplane', b'fixture license')
         build = {'commit':self.source, 'tree':self.tree, 'entrypoint':'src/server/main.bend', 'serviceVersion':'0.12.0', 'versionStamp':'0.12.0', 'telemetryChannel':'release', 'compileInputs':{'version':'0.12.0','versionStamp':'0.12.0','telemetryChannel':'release','google':{'requested':True,'requiredInputsPresent':True},'telemetry':{'requested':True,'requiredInputsPresent':True,'endpoint':'https://backplane.works/api/v1/events'}}}
+        self.service_name = 'backplane-serve' + ('.exe' if target == 'windows-x64' else '')
         if target == 'windows-x64':
-            self.put(self.service+'/SOURCE.json', {'schema':3,'kind':'windows-service-emission','commit':self.source,'tree':self.tree,'entrypoint':'src/server/main.bend','target':target,'versionStamp':'0.12.0','version':'0.12.0','telemetry_channel':'release'})
-            for n in ('RUNTIME.json','CLOSURE.json'):self.put(self.service+'/'+n, {'fixture':True})
-            build.update(schema=3, kind='windows-service-resources', target=target, roles={'service':'backplane-serve.exe'}, managedControl={'status':'UNSUPPORTED','protocol':None})
-            for k,n in [('sourceReceiptSha256','SOURCE.json'),('webManifestSha256','WEB.json'),('runtimeManifestSha256','RUNTIME.json'),('closureSha256','CLOSURE.json')]:build[k] = binding(self.files[self.service+'/'+n])['sha256']
-            own = {n[len(self.service)+1:]:binding(b) for n,b in self.files.items() if n.startswith(self.service+'/')}
-            build.update(sha256={n:v['sha256'] for n,v in own.items()},sizes={n:v['bytes'] for n,v in own.items()})
+            build.update(serviceRuntime='bun', service=self.service_name)
         self.put(self.service+'/BUILD.json', build)
         service_members = {n[len(self.service)+1:]:dict(binding(b),type='file',mode=self.modes[n]) for n,b in self.files.items() if n.startswith(self.service+'/')}
         build_ref = self.ref('PROVENANCE/service-build.json',build)
-        service = {'kind':'backplane-bend-service','status':'VERIFIED','sourceCommit':self.source,'sourceTree':self.tree,'target':target,'entrypoint':'src/server/main.bend','genuineService':True,'members':service_members,'buildReceipt':build_ref}
-        components = {'service':self.ref('PROVENANCE/service.json', build if target=='windows-x64' else service),'shell':self.ref('PROVENANCE/shell.json',{'fixture':'shell'}),'electron':self.ref('PROVENANCE/electron.json',{'fixture':'electron'})}
-        if target != 'windows-x64':components['serviceBuild']=build_ref
+        service = {'kind':'backplane-bend-service','status':'VERIFIED','sourceCommit':self.source,'sourceTree':self.tree,'target':target,'entrypoint':'src/server/main.bend','genuineService':True,'roles':{'service':self.service_name,'web':'web'},'members':service_members,'buildReceipt':build_ref}
+        components = {'service':self.ref('PROVENANCE/service.json', service),'shell':self.ref('PROVENANCE/shell.json',{'fixture':'shell'}),'electron':self.ref('PROVENANCE/electron.json',{'fixture':'electron'})}
+        components['serviceBuild']=build_ref
         self.put(self.resources+'/app/package.json', {'version':'0.12.0','main':'main.cjs'})
         old_freeze = {'schema':1,'kind':'backplane-release-freeze','status':'FROZEN','commit':self.source,'tree':self.tree,'signingPolicy':{target:'unsigned-portable-allowed'},'lifecyclePolicy':{target:self.resident}}
         old_freeze_ref=self.ref('PROVENANCE/freeze.json',old_freeze)
@@ -81,14 +77,9 @@ class Fixture:
         if composite:pin['baselineDesktopReceiptSha256']=binding(encode(self.old))['sha256']
         resource={'sourceCommit':self.source,'sourceTree':self.tree,'webManifestSha256':self.old['webManifestSha256']}
         policy={'kind':'backplane-root-staging-disposition','status':'AUTHORIZED_STAGING_POLICY_PENDING_ACTUAL_SERVICE_BINDINGS','publicationOwner':'root','electronVersion':'44.9.2',**{k:release[k] for k in ('version','tag','channel','commit','tree')},'compileInputs':build['compileInputs'],'targets':{target:{'selectedBrowser':pin,'signingPolicy':'unsigned-portable-allowed','lifecyclePolicy':self.resident,'shellReceiptSha256':components['shell']['sha256'],'electronReceiptSha256':components['electron']['sha256']}}}
-        service_key='serviceArchiveSha256' if target=='windows-x64' else 'serviceReceiptSha256'
-        service_sha='e'*64 if target=='windows-x64' else components['service']['sha256']
+        service_key='serviceReceiptSha256'
+        service_sha=components['service']['sha256']
         policy['targets'][target][service_key]=service_sha
-        if target=='windows-x64':
-            self.receipt['components']['windowsResourceArchive']={'sha256':service_sha,'bytes':99}
-            self.old['components']['windowsResourceArchive']={'sha256':service_sha,'bytes':99}
-            components['windowsResourceArchive']={'sha256':service_sha,'bytes':99}
-            pin['baselineDesktopReceiptSha256']=binding(encode(self.old))['sha256']
         policy_ref=self.ref('PROVENANCE/root-staging-disposition.json',policy)
         self.policy={k:policy_ref[k] for k in ('sha256','bytes')}
         self.receipt['components']['rootStagingDisposition']=policy_ref
@@ -199,7 +190,7 @@ class BrowserControls(unittest.TestCase):
     def test_changed_native_fails_before_browser(self):
         f=Fixture();f.put(f.service+'/backplane-serve',b'changed native');self.assertRaisesRegex(ValueError,'native SERVICE closure',f.check)
     def test_changed_original_windows_compile_resource(self):
-        f=Fixture('windows-x64');f.put(f.service+'/SOURCE.json',{'tampered':True});self.assertRaises(ValueError,f.check)
+        f=Fixture('windows-x64');f.put(f.service+'/backplane-serve.exe',b'changed service');self.assertRaisesRegex(ValueError,'SERVICE closure',f.check)
     def test_changed_original_web_manifest(self):
         f=Fixture();f.put(f.service+'/WEB.json',{'tampered':True});self.assertRaisesRegex(ValueError,'resourceWeb identity',f.check)
     def test_changed_nonweb_shell_rejected(self):

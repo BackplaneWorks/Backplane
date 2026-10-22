@@ -3,6 +3,7 @@ import ../src/core/vt.bend as V
 import ../src/core/utf8.bend as U
 import ../src/server/host.bend as H
 import ../src/server/pty.bend as P
+import ../src/server/jsloop.bend as LP
 
 # Real shells on a real pty under the JS runtime (pty.js, host.js's
 # recv/send fallback and Proc.wait), read into the emulator. Prints ok /
@@ -130,6 +131,31 @@ def Rd.go(fuel: Nat, s: Socket, st: Rd, +want: U32) -> IO(Socket & Rd):
       IO.bind(Socket & Result<&1, &1, U32 & String, List<&2, U32>>, Socket & Rd, H.Sock.recv_bytes(s, 65536),
         r => Rd.got(r, st, want, s2 => st2 => Rd.go(f, s2, st2, want)))
 
+# reading until the screen shows text (a byte count is not enough: a
+# Windows pseudoconsole sends mode escapes before the program's first line)
+def Rd.till.k(+st: Rd, s: Socket, +text: String, k: Socket -> Rd -> IO(Socket & Rd)) -> IO(Socket & Rd):
+  match st:
+    case Rd{+v, +n}:
+      Rd.more(has(screen(v), text), s, Rd{v, n}, k)
+
+def Rd.till.got(r: Socket & Result<&1, &1, U32 & String, List<&2, U32>>, st: Rd, +text: String, k: Socket -> Rd -> IO(Socket & Rd)) -> IO(Socket & Rd):
+  (s, res) = r
+  match res st:
+    case Done{Nil{}} _:
+      IO.pure(Socket & Rd, (s, st))
+    case Done{bs} Rd{v, +n}:
+      Rd.till.k(Rd.fed(v, n, bs), s, text, k)
+    case Fail{_} _:
+      IO.pure(Socket & Rd, (s, st))
+
+def Rd.till(fuel: Nat, s: Socket, st: Rd, +text: String) -> IO(Socket & Rd):
+  match fuel:
+    case 0n:
+      IO.pure(Socket & Rd, (s, st))
+    case 1n+f:
+      IO.bind(Socket & Result<&1, &1, U32 & String, List<&2, U32>>, Socket & Rd, H.Sock.recv_bytes(s, 65536),
+        r => Rd.till.got(r, st, text, s2 => st2 => Rd.till(f, s2, st2, text)))
+
 def Rd.vt(st: Rd) -> V.Vt:
   match st:
     case Rd{v, _}:
@@ -198,7 +224,7 @@ def case.size.more(r: Socket & V.Vt, +pid: U32) -> IO(U32):
 def case.size.k(started: U32 & Socket) -> IO(U32):
   (+pid, s) = started
   do IO<U32>:
-    r1 : Socket & V.Vt <- IO.bind(Socket & Rd, Socket & V.Vt, Rd.go(1000n, s, Rd{V.Vt.new(100, 30), 0}, 6), r => IO.pure(Socket & V.Vt, Rd.keep(r)))
+    r1 : Socket & V.Vt <- IO.bind(Socket & Rd, Socket & V.Vt, Rd.till(1000n, s, Rd{V.Vt.new(100, 30), 0}, "24 80"), r => IO.pure(Socket & V.Vt, Rd.keep(r)))
     a : U32 <- case.size.more(r1, pid)
     return a
 
@@ -228,27 +254,35 @@ def case.env(r: Result<&1, &1, U32 & String, U32 & Socket>) -> IO(U32):
     case Fail{e}:
       fail("pty env", e)
 
-# closing the master hangs up the shell (SIGHUP: 129)
-def case.close.more(r: Socket & V.Vt, +pid: U32) -> IO(U32):
+# closing the master hangs up the shell (SIGHUP: 129; on Windows the
+# pseudoconsole closes and the shell ends with a code of its own)
+def case.close.code(win: Bool, +code: U32) -> IO(U32):
+  match win:
+    case True{}:
+      check("pty close ends the child", Bool.show(Bool.not(U32.is_eq(code, 0))), "True")
+    case False{}:
+      check("pty close kills child", U32.show(code), "129")
+
+def case.close.more(r: Socket & V.Vt, +pid: U32, win: Bool) -> IO(U32):
   (s, +v) = r
   do IO<U32>:
     Socket.close(s)
     code : U32 <- H.Proc.wait(pid)
     a : U32 <- check.has("pty child up", screen(v), "up")
-    b : U32 <- check("pty close kills child", U32.show(code), "129")
+    b : U32 <- case.close.code(win, code)
     return (a + b : U32)
 
-def case.close.k(started: U32 & Socket) -> IO(U32):
+def case.close.k(started: U32 & Socket, win: Bool) -> IO(U32):
   (+pid, s) = started
   do IO<U32>:
-    r1 : Socket & V.Vt <- IO.bind(Socket & Rd, Socket & V.Vt, Rd.go(1000n, s, Rd{V.Vt.new(80, 24), 0}, 3), r => IO.pure(Socket & V.Vt, Rd.keep(r)))
-    a : U32 <- case.close.more(r1, pid)
+    r1 : Socket & V.Vt <- IO.bind(Socket & Rd, Socket & V.Vt, Rd.till(1000n, s, Rd{V.Vt.new(80, 24), 0}, "up"), r => IO.pure(Socket & V.Vt, Rd.keep(r)))
+    a : U32 <- case.close.more(r1, pid, win)
     return a
 
-def case.close(r: Result<&1, &1, U32 & String, U32 & Socket>) -> IO(U32):
+def case.close(win: Bool, r: Result<&1, &1, U32 & String, U32 & Socket>) -> IO(U32):
   match r:
     case Done{started}:
-      case.close.k(started)
+      case.close.k(started, win)
     case Fail{e}:
       fail("pty close", e)
 
@@ -266,7 +300,7 @@ def case.hup.more(r: Socket & V.Vt, +pid: U32) -> IO(U32):
 def case.hup.k(started: U32 & Socket) -> IO(U32):
   (+pid, s) = started
   do IO<U32>:
-    r1 : Socket & V.Vt <- IO.bind(Socket & Rd, Socket & V.Vt, Rd.go(1000n, s, Rd{V.Vt.new(80, 24), 0}, 3), r => IO.pure(Socket & V.Vt, Rd.keep(r)))
+    r1 : Socket & V.Vt <- IO.bind(Socket & Rd, Socket & V.Vt, Rd.till(1000n, s, Rd{V.Vt.new(80, 24), 0}, "up"), r => IO.pure(Socket & V.Vt, Rd.keep(r)))
     a : U32 <- case.hup.more(r1, pid)
     return a
 
@@ -367,6 +401,23 @@ def case.full(r: Result<&1, &1, U32 & String, U32 & Socket>) -> IO(U32):
     case Fail{e}:
       fail("pty full", e)
 
+# the shell starts with a soft stack limit of 8 MiB at most (the hub's may
+# be far larger), or the hub's own when that is less
+def case.stack.k(started: U32 & Socket) -> IO(U32):
+  (+pid, s) = started
+  do IO<U32>:
+    +v : V.Vt <- Rd.all(s, 80, 24)
+    code : U32 <- H.Proc.wait(pid)
+    a : U32 <- check.has("pty stack limit", screen(v), "stack-ok")
+    return a
+
+def case.stack(r: Result<&1, &1, U32 & String, U32 & Socket>) -> IO(U32):
+  match r:
+    case Done{started}:
+      case.stack.k(started)
+    case Fail{e}:
+      fail("pty stack", e)
+
 def done.k(ok: Bool, +n: U32) -> IO(Unit):
   match ok:
     case True{}:
@@ -377,14 +428,39 @@ def done.k(ok: Bool, +n: U32) -> IO(Unit):
 def done(+n: U32) -> IO(Unit):
   done.k(U32.is_eq(n, 0), n)
 
+# a case that needs a POSIX host (/tmp as a path, /proc), named as skipped on
+# Windows
+def posix.only(win: Bool, name: String, run: IO(U32)) -> IO(U32):
+  match win:
+    case True{}:
+      do IO<U32>:
+        IO.print("ok " ++ name ++ " skipped on Windows")
+        return 0
+    case False{}:
+      run
+
+def is.win(r: Result<&1, &1, U32 & String, String>) -> Bool:
+  match r:
+    case Done{os}:
+      String.eq(os, "Windows_NT")
+    case Fail{_}:
+      False{}
+
 def main() -> IO(Unit):
   do IO<Unit>:
+    # the runtime's loop (loop.js) is part of the program, as in the hub:
+    # on Windows nothing spawns without it
+    rt : String <- LP.Rt.loop()
+    IO.print("js pty: starting (" ++ rt ++ " loop)")
+    os : Result<&1, &1, U32 & String, String> <- IO.get_env("OS")
+    +win : Bool = is.win(os)
     a : U32 <- IO.bind(Result<&1, &1, U32 & String, U32 & Socket>, U32, P.Pty.spawn("sh", [], "", 80, 24), case.shell)
     b : U32 <- IO.bind(Result<&1, &1, U32 & String, U32 & Socket>, U32, P.Pty.spawn("sh", ["-c", "stty size; read x; stty size"], "", 80, 24), case.size)
-    c : U32 <- IO.bind(Result<&1, &1, U32 & String, U32 & Socket>, U32, P.Pty.spawn("sh", ["-c", "echo $TERM; echo $COLORTERM; echo $LINES$COLUMNS; pwd; [ -t 0 ] && printf tty; : </dev/tty && echo ' ctty'; echo $(ls /dev/fd/)"], "/tmp", 80, 24), case.env)
-    d : U32 <- IO.bind(Result<&1, &1, U32 & String, U32 & Socket>, U32, P.Pty.spawn("sh", ["-c", "echo up; sleep 30; echo done"], "", 80, 24), case.close)
+    c : U32 <- posix.only(win, "pty env cwd ctty", IO.bind(Result<&1, &1, U32 & String, U32 & Socket>, U32, P.Pty.spawn("sh", ["-c", "echo $TERM; echo $COLORTERM; echo $LINES$COLUMNS; pwd; [ -t 0 ] && printf tty; : </dev/tty && echo ' ctty'; echo $(ls /dev/fd/)"], "/tmp", 80, 24), case.env))
+    d : U32 <- IO.bind(Result<&1, &1, U32 & String, U32 & Socket>, U32, P.Pty.spawn("sh", ["-c", "echo up; sleep 30; echo done"], "", 80, 24), r => case.close(win, r))
     e : U32 <- IO.bind(Result<&1, &1, U32 & String, U32 & Socket>, U32, P.Pty.spawn("definitely-not-a-command", [], "", 80, 24), case.missing)
     f : U32 <- IO.bind(Result<&1, &1, U32 & String, U32 & Socket>, U32, P.Pty.spawn("sh", ["-c", "true"], "/definitely/not/a/dir", 80, 24), case.badcwd)
     g : U32 <- IO.bind(Result<&1, &1, U32 & String, U32 & Socket>, U32, P.Pty.spawn("sh", ["-c", "echo up; sleep 30; echo done"], "", 80, 24), case.hup)
     h : U32 <- IO.bind(Result<&1, &1, U32 & String, U32 & Socket>, U32, P.Pty.spawn("sh", ["-c", "stty raw -echo; sleep 1; head -c 20000 | wc -c"], "", 80, 24), case.full)
-    done((a + b + c + d + e + f + g + h : U32))
+    i : U32 <- posix.only(win, "pty stack limit", IO.bind(Result<&1, &1, U32 & String, U32 & Socket>, U32, P.Pty.spawn("sh", ["-c", "c=$(ulimit -s); p=$(awk '/Max stack size/{print $4}' /proc/$PPID/limits); if [ \"$p\" = unlimited ] || [ \"$p\" -gt 8388608 ]; then w=8192; else w=$((p/1024)); fi; [ \"$c\" = \"$w\" ] && echo stack-ok || echo \"child $c hub $p\""], "", 80, 24), case.stack))
+    done((a + b + c + d + e + f + g + h + i : U32))

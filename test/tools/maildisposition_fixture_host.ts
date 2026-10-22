@@ -41,7 +41,7 @@ function advance(input: string) {
   state = F.advance(state, input);
 }
 function call(input: string, mode: string, id: number) {
-  return transact({ jsonrpc: "2.0", id, method: "tools/call", params: { name: "mail_dispose", arguments: { input, mode, reason: "Synthetic unchanged CEF hold; no work permission or completion", ...(mode === "reply" ? { text: "Synthetic internal FYI, same hold remains." } : {}) } } });
+  return transact({ jsonrpc: "2.0", id, method: "tools/call", params: { name: "mail_dispose", arguments: { input, mode, reason: "Synthetic unchanged resource hold; no work permission or completion", ...(mode === "reply" ? { text: "Synthetic internal FYI, same hold remains." } : {}) } } });
 }
 function summary() {
   const s = JSON.parse(F.summary(state));
@@ -51,7 +51,7 @@ function summary() {
 }
 function finalEvidence() {
   const before = summary();
-  assert(before.done && before.reply && before.defer && before.cef_enabled === "off");
+  assert(before.done && before.reply && before.defer && before.hold_enabled === "off");
   assert.equal(before.fallback_posts, 0);
   advance("fixture-m4");
   const p = F.complete(state);

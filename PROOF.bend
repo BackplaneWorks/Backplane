@@ -1,4 +1,6 @@
 import Base
+import ./src/core/thin.bend as THINL # S3 lazy thin index
+import ./src/server/thin-mail.bend as TMAILL # S3 lazy mail cache
 import ./src/core/storedb.bend as SDB # S1 indexed store
 import ./test/mobile_loading_proof.bend as PRESENTPROOF
 import ./src/core/mailcontinuity.bend as MCN
@@ -11769,243 +11771,7 @@ def Laws.window_provider_missing():
   {==}
 # ---- end i18n window ----
 
-# --- browser-cef ---
-def Laws.cef_engine_needs_setting(known, ok):
-  {==}
 
-def Laws.cef_engine_needs_embed(ok):
-  {==}
-
-def Laws.cef_engine_needs_runtime(known):
-  match known:
-    case True{}:
-      {==}
-    case False{}:
-      {==}
-
-def Laws.cef_engine_on():
-  {==}
-
-def Laws.cef_embed_window_here():
-  {==}
-
-def Laws.cef_embed_loopback_link():
-  {==}
-
-def Laws.cef_embed_remote_refused():
-  {==}
-
-def Laws.cef_loopback_v4():
-  {==}
-
-def Laws.cef_loopback_v6():
-  {==}
-
-def Laws.cef_tailnet_not_loopback():
-  {==}
-
-def Laws.cef_leave_clears_embed():
-  {==}
-
-def Laws.cef_leave_other_keeps_embed():
-  {==}
-
-def Laws.cef_embed_bad_xid_unknown():
-  {==}
-
-def Laws.cef_embed_once_per_join():
-  {==}
-
-def Laws.cef_embed_new_join():
-  {==}
-
-def Laws.cef_embed_not_remote():
-  {==}
-
-def Laws.cef_embed_needs_xid():
-  {==}
-
-def Laws.cef_shield_agent_drives():
-  {==}
-
-def Laws.cef_shield_takeover_off():
-  {==}
-
-def Laws.cef_shield_teach_off():
-  {==}
-
-def Laws.cef_shield_focus_opposite(d):
-  {==}
-
-def Laws.cef_shield_take_from_agent():
-  {==}
-
-def Laws.cef_shield_take_not_from_person():
-  {==}
-
-def Laws.cef_shield_due_same():
-  {==}
-
-def Laws.cef_shield_due_first():
-  {==}
-
-def Laws.cef_shield_due_person():
-  {==}
-
-def Laws.cef_covered_none():
-  {==}
-
-def Laws.cef_covered_palette():
-  {==}
-
-def Laws.cef_covered_picker():
-  {==}
-
-def Laws.cef_covered_menu():
-  {==}
-
-def Laws.cef_covered_look():
-  {==}
-
-def Laws.cef_covered_models():
-  {==}
-
-def Laws.cef_covered_tour():
-  {==}
-
-def Laws.cef_covered_perf():
-  {==}
-
-def Laws.cef_covered_lightbox():
-  {==}
-
-def Laws.cef_shows_needs_live(covered):
-  {==}
-
-def Laws.cef_shows_not_covered():
-  {==}
-
-def Laws.cef_place_same_nothing():
-  {==}
-
-def Laws.cef_place_hidden_nothing():
-  {==}
-
-def Laws.cef_place_new_shows():
-  {==}
-
-def Laws.cef_place_moved_shows():
-  {==}
-
-def Laws.cef_place_gone_hides():
-  {==}
-
-def Laws.cef_post_chrome_idle():
-  {==}
-
-def Laws.cef_post_chrome_forgets():
-  {==}
-
-def Laws.cef_post_native_places():
-  {==}
-
-def Laws.cef_pane_extent():
-  {==}
-
-def Laws.cef_extent_never_wraps():
-  {==}
-
-def Laws.cef_native_local_only():
-  {==}
-
-def Laws.cef_native_local_cef():
-  {==}
-
-def Laws.cef_native_chrome():
-  {==}
-
-def Laws.cef_native_skips_cast():
-  {==}
-
-def Laws.cef_web_keeps_cast():
-  {==}
-
-def Laws.cef_remote_keeps_cast():
-  {==}
-
-def Laws.cef_page_here_native():
-  {==}
-
-def Laws.cef_page_elsewhere_jpeg():
-  {==}
-
-def Laws.cef_fallback_keeps_handback():
-  {==}
-
-def Laws.cef_chrome_idle_strip_off():
-  {==}
-
-def Laws.cef_note_quiet():
-  {==}
-
-def Laws.cef_old_engine_reply_ignored():
-  {==}
-
-def Laws.cef_current_engine_reply_used():
-  {==}
-
-def Laws.cef_want_key_chrome(x, d):
-  {==}
-
-def Laws.cef_after_rpc():
-  {==}
-
-def Laws.cef_after_helper():
-  {==}
-
-def Laws.cef_not_after_agent_line():
-  {==}
-
-def Laws.cef_revive_first():
-  {==}
-
-def Laws.cef_revive_bounded():
-  {==}
-
-def Laws.cef_revive_not_chrome(placed):
-  {==}
-
-def Laws.cef_unknown_refused():
-  {==}
-
-def Laws.cef_thread_owner():
-  {==}
-
-def Laws.cef_empty_owner_refused(t, b):
-  {==}
-
-def Laws.cef_handback_names_page():
-  {==}
-
-def Laws.cef_handback_default_bot():
-  {==}
-
-def Laws.cef_takeover_names_page():
-  {==}
-
-def Laws.cef_other_actions_keep_bot():
-  {==}
-# --- end browser-cef ---
-
-# --- browser-cef local window guard ---
-def Laws.cef_web_origin_refused(proxy):
-  match proxy:
-    case SNil{}: {==}
-    case SCon{_, _}: {==}
-
-def Laws.cef_native_link_allowed():
-  {==}
-# --- end browser-cef local window guard ---
 # ---- mail perf ----
 
 def Laws.mail_credit_carried(text, charge): {==}
@@ -12019,6 +11785,8 @@ def Laws.mail_credit_native_kept(w, charge):
     case MPCREDIT.WClose{}: {==}
     case MPCREDIT.WState{_, _}: {==}
     case MPCREDIT.WItems{_, _, _, _, _, _}: {==}
+    case MPCREDIT.WJson{_, _}: {==}
+    case MPCREDIT.WCbor{_, _}: {==}
 # ---- i18n web phone ----
 def Laws.webphone_option_english(): {==}
 def Laws.webphone_model_name_kept(): {==}
@@ -12182,12 +11950,14 @@ def Laws.mail_global_primary(): {==}
 
 def Laws.mail_log_count_set(c, n):
   match c:
-    case MPCREDIT.Cfg{home, web, host, port, prompt, dirs, version, MPCREDIT.Net{tailnet, https, token, models, mtext, rt, br, pk, tm, machines, pv, MPLOG.Bn{dir, seen, work, far, live, broken, fl, tools, tch, cef, wire_n}, managed, link, freecad, ks}, telemetry, views}:
+    case MPCREDIT.Cfg{home, web, host, port, prompt, dirs, version, MPCREDIT.Net{tailnet, https, token, models, mtext, rt, br, pk, tm, machines, pv, MPLOG.Bn{dir, seen, work, far, live, broken, fl, tools, tch, cef, wire_n, pair, auth, mtext, mjson}, managed, link, freecad, ks}, telemetry, views}:
+    case MPCREDIT.Cfg{home, web, host, port, prompt, dirs, version, MPCREDIT.Net{tailnet, https, token, models, mtext, rt, br, pk, tm, machines, pv, MPLOG.Bn{dir, seen, work, far, live, broken, fl, tools, tch, wire_n}, managed, link, freecad, ks}, telemetry, views}:
       {==}
 
 def Laws.mail_log_count_committed(c, fresh):
   match c:
-    case MPCREDIT.Cfg{home, web, host, port, prompt, dirs, version, MPCREDIT.Net{tailnet, https, token, models, mtext, rt, br, pk, tm, machines, pv, MPLOG.Bn{dir, seen, work, far, live, broken, fl, tools, tch, cef, wire_n}, managed, link, freecad, ks}, telemetry, views}:
+    case MPCREDIT.Cfg{home, web, host, port, prompt, dirs, version, MPCREDIT.Net{tailnet, https, token, models, mtext, rt, br, pk, tm, machines, pv, MPLOG.Bn{dir, seen, work, far, live, broken, fl, tools, tch, cef, wire_n, pair, auth, mtext, mjson}, managed, link, freecad, ks}, telemetry, views}:
+    case MPCREDIT.Cfg{home, web, host, port, prompt, dirs, version, MPCREDIT.Net{tailnet, https, token, models, mtext, rt, br, pk, tm, machines, pv, MPLOG.Bn{dir, seen, work, far, live, broken, fl, tools, tch, wire_n}, managed, link, freecad, ks}, telemetry, views}:
       {==}
 
 # ---- native phone i18n ----
@@ -12400,27 +12170,7 @@ def Laws.viewer_reopen_board_keeps_scene(items, now):
 def Laws.viewer_reopen_schematic_keeps_scene(items, now):
   {==}
 
-# --- browser-cef default (October19) ---
-def Laws.cef_default_request():
-  {==}
-def Laws.cef_unset_request():
-  {==}
-def Laws.cef_explicit_chrome_request():
-  {==}
-def Laws.cef_explicit_cef_request():
-  {==}
-# --- end browser-cef default ---
 
-# --- browser-cef fallback (October19) ---
-def Laws.cef_unavailable_default_is_explained():
-  {==}
-def Laws.cef_explicit_chrome_has_no_warning():
-  {==}
-def Laws.cef_fallback_keeps_error(err):
-  match err:
-    case SNil{}: {==}
-    case SCon{_, _}: {==}
-# --- end browser-cef fallback ---
 
 def Laws.run_model_codex_unset_inherits(uber): {==}
 def Laws.run_model_codex_stale_claude_uses_default(parent, uber): {==}
@@ -12484,7 +12234,7 @@ def Laws.tm_cached_uber_step_kept():
   {==}
 def Laws.tm_marked_usage_step_kept():
   {==}
-# --- browser controls (CEF owner) ---
+# --- browser controls ---
 def Laws.browser_url_hostname(): {==}
 def Laws.browser_url_localhost(): {==}
 def Laws.browser_url_explicit(path): {==}
@@ -12504,12 +12254,6 @@ def Laws.refresh_size_changed(same_revision):
     case False{}: {==}
 
 def Laws.refresh_unchanged_quiet(): {==}
-# --- browser-cef release archive (October19) ---
-def Laws.cef_release_uses_paired_archive(): {==}
-def Laws.cef_release_arm_archive_unchanged(): {==}
-def Laws.cef_release_mac_archive_unchanged(): {==}
-def Laws.cef_release_old_updater_cannot_match(): {==}
-# --- end browser-cef release archive ---
 
 def Laws.ix_rename_global_invalidation_retained(id, t):
   match t:
@@ -12613,6 +12357,17 @@ def Laws.oprep_task_not_in_chat(): {==}
 def Laws.oprep_task_delivered_with_filing(): {==}
 def Laws.oprep_other_thread_unchanged(): {==}
 
+def Laws.cbor_trees_exact(): {==}
+def Laws.thin_pace_own_urgent(): {==}
+def Laws.thin_pace_other_soft(): {==}
+def Laws.thin_pace_all_urgent(): {==}
+def Laws.thin_pace_none_quiet(th): {==}
+def Laws.thin_pace_no_thread_soft(): {==}
+def Laws.thin_pace_own_sends(): {==}
+def Laws.thin_pace_soft_owed(): {==}
+def Laws.thin_pace_flush_sends(): {==}
+def Laws.thin_pace_owed_raised(): {==}
+def Laws.thin_pace_quiet(last, now): {==}
 # --- J2: walks the JS hub makes over a whole log, in tail calls ---
 
 def Laws.store_size_go_succ(ls, n):
@@ -12651,3 +12406,159 @@ def Laws.sdb_eq_fold_small():
 def Laws.sdb_entries_mine_small():
   {==}
 # ---- end S1 indexed store ----
+
+# ---- S3: the thin index and the mail cache on demand (fast-hub) ----
+def Laws.thin_changes_append(a, b, i):
+  match a:
+    case Nil{}:
+      {==}
+    case h <> t:
+      Laws.thin_changes_append(t, b, THINL.Index.change(i, h))
+
+def Laws.thin_lazy_of(st): {==}
+
+def Laws.thin_lazy_changes(cs, l):
+  match l:
+    case THINL.Built{i}:
+      {==}
+    case THINL.Later{st, done}:
+      Laws.thin_changes_append(done, cs, THINL.Index.of(st))
+
+def Laws.thin_lazy_warm(l):
+  match l:
+    case THINL.Built{i}:
+      {==}
+    case THINL.Later{st, done}:
+      {==}
+
+def Laws.thin_mail_replay_append(a, b, c):
+  match a:
+    case Nil{}:
+      {==}
+    case TMAILL.Pending{cs, st} <> t:
+      Laws.thin_mail_replay_append(t, b, TMAILL.Cache.committed(cs, st, c))
+
+def Laws.thin_mail_lazy_of(st): {==}
+
+def Laws.thin_mail_lazy_committed(cs, st, l):
+  match l:
+    case TMAILL.Built{c}:
+      {==}
+    case TMAILL.Later{base, done}:
+      Laws.thin_mail_replay_append(done, [TMAILL.Pending{cs, st}], TMAILL.Cache.of(base))
+
+def Laws.thin_mail_lazy_warm(st, done): {==}
+def Laws.boot_next_never_cold(ok, n):
+  match ok n:
+    case True{} _:
+      {==}
+    case False{} 0n:
+      {==}
+    case False{} 1n+_:
+      {==}
+# ---- end S3 ----
+
+# --- J2: HTTP and WebSocket bodies counted and unmasked in tail calls ---
+
+def Laws.http_count_go_succ(bs, n):
+  match bs:
+    case Nil{}:
+      {==}
+    case _ <> t:
+      Laws.http_count_go_succ(t, 1n+n)
+
+def Laws.http_count_is_length(bs):
+  match bs:
+    case Nil{}:
+      {==}
+    case _ <> t:
+      %Equal.sym(Nat, HTTPAUTH.Http.count.go(t, 1n+0n), 1n+HTTPAUTH.Http.count.go(t, 0n), Laws.http_count_go_succ(t, 0n)) : {_ == 1n+List.length(&2, U32, t) : Nat}
+      %Laws.http_count_is_length(t) : {1n+HTTPAUTH.Http.count.go(t, 0n) == 1n+_ : Nat}
+      {==}
+
+def Laws.ws_unmask_go(bs, key, i, acc):
+  match bs:
+    case Nil{}:
+      {==}
+    case x <> t:
+      Laws.ws_unmask_go(t, key, 1n+i, HTTPAUTH.Ws.unmask.k(x, key, i) <> acc)
+
+def Laws.ws_unmask_take_go(bs, n, key, i, acc):
+  match bs n:
+    case Nil{} _:
+      {==}
+    case _ <> _ 0n:
+      {==}
+    case x <> t 1n+m:
+      Laws.ws_unmask_take_go(t, m, key, 1n+i, HTTPAUTH.Ws.unmask.k(x, key, i) <> acc)
+
+
+# --- J2: a hub on a copied log (BACKPLANE_COPY=1) acts on nothing outside ---
+
+def Laws.watch_copy_launch_none(home, id, cwd, target): {==}
+def Laws.watch_copy_check_none(kind, target, ident, home, id): {==}
+def Laws.watch_copy_stop_none(kind, target, ident, home, id): {==}
+def Laws.watch_copy_intent_none(home, id): {==}
+def Laws.copy_off_runs_all(os): {==}
+def Laws.copy_drops_outside(): {==}
+def Laws.copy_keeps_inside(): {==}
+def Laws.copy_git_write_told(): {==}
+def Laws.copy_refuses_net(): {==}
+def Laws.copy_off_refuses_none(cmd, args): {==}
+def Laws.adopt_copy_none(rec, hand): {==}
+def Laws.copy_file_open_told(): {==}
+
+# --- J2: the pairing message made once per link, not per join ---
+def Laws.pair_msg_kept(): {==}
+def Laws.pair_msg_other_link(): {==}
+def Laws.pair_msg_no_link_qr(): {==}
+# ---- F1: far feed slices ----
+def Laws.far_feed_sliced(): {==}
+def Laws.far_feed_sliced_one(): {==}
+def Laws.far_feed_sliced_big(): {==}
+def Laws.far_fact_shared(): {==}
+def Laws.far_fact_private(): {==}
+# ---- end F1 feed ----
+def Laws.locks_idle_never_set(): {==}
+def Laws.locks_idle_released(): {==}
+def Laws.locks_idle_held_not(): {==}
+def Laws.locks_after_idle_none(): {==}
+def Laws.locks_idle_text_exact(): {==}
+
+# --- J2: the sign-in wait asked again only when the log moved ---
+def Laws.auth_beat_kept(): {==}
+def Laws.auth_beat_asked(): {==}
+# ---- uniichat: the uberbot's infinite context ----
+def Laws.uctx_off_after_same(): {==}
+def Laws.uctx_off_no_thread(): {==}
+def Laws.uctx_off_tools_same(): {==}
+def Laws.uctx_on_fresh_session(): {==}
+def Laws.uctx_on_other_same(): {==}
+def Laws.uctx_roots(): {==}
+def Laws.uctx_view_leaves(): {==}
+def Laws.uctx_own_trailing(): {==}
+def Laws.uctx_wire_hides_text(): {==}
+# ---- end uniichat ----
+
+# --- J2: the models' JSON kept parsed, not parsed at every step ---
+def Laws.models_json_kept(): {==}
+
+# --- J2: a holder is only "<pid> <port>", never a shell's noise ---
+def Laws.onehub_legacy_noise(): {==}
+def Laws.onehub_legacy_after_noise(): {==}
+def Laws.onehub_legacy_line(): {==}
+def Laws.onehub_pair_flock(): {==}
+# ---- browser pages and loopback (J3) ----
+def Laws.browser_owner_unknown_refused(): {==}
+def Laws.browser_owner_thread(): {==}
+def Laws.browser_owner_empty_refused(t, b): {==}
+def Laws.browser_strip_person_holds(): {==}
+def Laws.browser_strip_agent_off(): {==}
+def Laws.teach_handback_names_page(): {==}
+def Laws.teach_handback_default_bot(): {==}
+def Laws.teach_takeover_names_page(): {==}
+def Laws.teach_other_actions_keep_bot(): {==}
+def Laws.auth_loopback_v4(): {==}
+def Laws.auth_loopback_v6(): {==}
+def Laws.auth_tailnet_not_loopback(): {==}
+# ---- end browser pages and loopback ----

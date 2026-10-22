@@ -9,7 +9,7 @@ import ../../src/server/argv.bend as AV
 # decoded off the loop, the quadtree built in C), each REPS times, then
 # the bitmap placed in a 1400x900 frame. Prints ms per frame and checks
 # both trees draw the same frame.
-#   scripts/build-app.sh test/native/pic_bench.bend build/pic_bench
+#   scripts/build-js.sh test/native/pic_bench.bend build/pic_bench
 #   build/pic_bench FRAME.jpg [REPS]
 
 def arg(xs: List<&2, String>, +i: Nat, d: String) -> String:

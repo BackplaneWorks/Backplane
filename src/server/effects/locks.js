@@ -24,6 +24,9 @@ function bp_lock_posix() {
       posix_spawn_file_actions_adddup2: { args: ["ptr", "i32", "i32"], returns: "i32" },
       posix_spawn_file_actions_addopen: { args: ["ptr", "i32", "ptr", "i32", "u32"], returns: "i32" },
       posix_spawn_file_actions_addclose: { args: ["ptr", "i32"], returns: "i32" },
+      posix_spawnattr_init: { args: ["ptr"], returns: "i32" },
+      posix_spawnattr_destroy: { args: ["ptr"], returns: "i32" },
+      posix_spawnattr_setflags: { args: ["ptr", "i16"], returns: "i32" },
       [mac ? "__error" : "__errno_location"]: { args: [], returns: "ptr" },
     }).symbols;
     let closefrom;
@@ -45,11 +48,12 @@ function bp_lock_posix() {
 }
 
 // the descriptors open above 3 (closed in the child where closefrom is
-// missing)
+// missing); the listing's own, closed by now, is left out (a close action
+// on it fails the spawn with EBADF on macOS)
 function bp_lock_fds() {
   try {
     return require("node:fs").readdirSync(process.platform === "darwin" ? "/dev/fd" : "/proc/self/fd")
-      .map(Number).filter((fd) => fd > 3);
+      .map(Number).filter((fd) => fd > 3 && io_sys().fcntl(fd, 1, 0) >= 0);
   } catch (_) {
     return [];
   }
@@ -73,17 +77,73 @@ function bp_lock_spawn(c, pipe, fd, home, holder, script) {
     && c.posix_spawn_file_actions_adddup2(c.ptr(fa), fd, 3) === 0
     && c.posix_spawn_file_actions_addopen(c.ptr(fa), 1, c.ptr(devnull), 1, 0) === 0
     && c.posix_spawn_file_actions_adddup2(c.ptr(fa), 1, 2) === 0;
-  if (ok && c.closefrom !== undefined) {
+  // macOS: POSIX_SPAWN_CLOEXEC_DEFAULT closes the rest (a close action on
+  // a descriptor the child does not inherit, Bun's kqueue, fails the spawn)
+  const at = new Uint8Array(1024);
+  const attr = c.mac && c.posix_spawnattr_init(c.ptr(at)) === 0
+    && c.posix_spawnattr_setflags(c.ptr(at), 0x4000) === 0;
+  if (c.mac) {
+    ok = ok && attr;
+  } else if (ok && c.closefrom !== undefined) {
     ok = c.closefrom(c.ptr(fa), 4) === 0;
   } else if (ok) {
     for (const n of bp_lock_fds()) c.posix_spawn_file_actions_addclose(c.ptr(fa), n);
   }
   let got = -1;
-  if (ok && c.posix_spawn(c.ptr(pid), c.ptr(sh), c.ptr(fa), null, c.ptr(argv), c.ptr(envp)) === 0) {
+  if (ok && c.posix_spawn(c.ptr(pid), c.ptr(sh), c.ptr(fa), attr ? c.ptr(at) : null, c.ptr(argv), c.ptr(envp)) === 0) {
     got = pid[0];
+  }
+  if (attr) {
+    c.posix_spawnattr_destroy(c.ptr(at));
   }
   c.posix_spawn_file_actions_destroy(c.ptr(fa));
   return got;
+}
+
+// Windows: no flock and no descriptor passing. The hub holds the lock file
+// open with no sharing (CreateFileW, share mode 0), so another taker gets a
+// sharing violation and the system lets go when the hub dies; the cleanup
+// is the same script under the package's sh, started with a stdin pipe the
+// hub closes (or dies with). Unlike POSIX the lock goes with the hub, not
+// after the cleanup ran.
+let bp_lock_k32;
+function bp_lock_win() {
+  if (!bp_lock_k32) {
+    const ffi = require("bun:ffi");
+    bp_lock_k32 = { ffi, ...ffi.dlopen("kernel32.dll", {
+      CreateFileW: { args: ["ptr", "u32", "u32", "ptr", "u32", "u32", "ptr"], returns: "i64" },
+      CloseHandle: { args: ["i64"], returns: "i32" },
+    }).symbols };
+  }
+  return bp_lock_k32;
+}
+
+function guard_take_win(name, holder, home, script) {
+  const k = bp_lock_win();
+  const dir = process.env.BACKPLANE_LOCK_DIR || require("node:os").tmpdir();
+  const path = Buffer.from(require("node:path").join(dir, `bp-${name}.lock`) + "\0", "utf16le");
+  // GENERIC_READ|GENERIC_WRITE, no sharing, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL
+  const h = k.CreateFileW(k.ffi.ptr(path), 0xC0000000, 0, null, 4, 0x80, null);
+  // INVALID_HANDLE_VALUE is -1
+  if (Number(h) === -1) return false;
+  let child;
+  try {
+    child = Bun.spawn(["sh", "-c", script, "sh", home, holder],
+      { stdin: "pipe", stdout: "ignore", stderr: "ignore" });
+  } catch (_) {
+    k.CloseHandle(h);
+    return false;
+  }
+  bp_lock_guards.set(name, { holder, h, child });
+  return true;
+}
+
+function guard_drop_win(g, k) {
+  g.child.stdin.end();
+  return io_park_promise(g.child.exited, k, () => {
+    bp_lock_win().CloseHandle(g.h);
+    return { $: "Unit" };
+  });
 }
 
 // (a Bend Bool is a JS boolean)
@@ -91,6 +151,7 @@ function guard_take(name, holder, home, script) {
   if (!/^[A-Za-z0-9_-]{1,64}$/.test(name) || !holder) return false;
   const prior = bp_lock_guards.get(name);
   if (prior) return prior.holder === holder;
+  if (process.platform === "win32") return guard_take_win(name, holder, home, script);
   const fs = require("node:fs");
   const c = bp_lock_posix();
   const dupx = c.mac ? 67 : 1030;
@@ -148,6 +209,7 @@ function guard_drop(name, holder, k) {
   const unit = { $: "Unit" };
   if (!g || g.holder !== holder) return unit;
   bp_lock_guards.delete(name);
+  if (process.platform === "win32") return guard_drop_win(g, k);
   const c = bp_lock_posix();
   c.close(g.pipe);
   if (bp_lock_reaped(c, g.pid)) return unit;

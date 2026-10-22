@@ -14,7 +14,7 @@
 //
 // BINARY defaults to build/backplane (build/backplane-serve works too);
 // WIREDIR to build/wire; RVW_SYNC (build/rvw_sync, from test/native/rvw_sync.bend
-// with scripts/build-app.sh) is the window's own fetching code run against the hub:
+// with scripts/build-js.sh) is the window's own fetching code run against the hub:
 // when it is built the test also checks that it fills a cache folder, byte for
 // byte, follows a change with one long poll and reads a version of a commit.
 // Needs KiCad's ecc83 demo.

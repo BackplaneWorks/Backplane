@@ -1,7 +1,7 @@
 import Base
 import ./i18n.bend as I18N
 import ./mailrun.bend as RUN
-import ./cef.bend as CF
+import ./brctl.bend as BRC
 import ./prompt.bend as LP
 import ./mail.bend as ML
 import ./ref.bend as RMAIL
@@ -1367,7 +1367,7 @@ def Bots.request.k(i: Nat, +s: M.State, +now: Nat, +client: U32, +id: String, +p
     case 27n:
       Bots.uber_home(s, now, client, id)
     case 28n:
-      Bots.teach.out(CF.Cef.owner(J.Json.get_str(p, "bot", ""), B.Hub.owns(s, J.Json.get_str(p, "bot", "")), Bots.live(s, J.Json.get_str(p, "bot", ""))), client, id, "bots.browser", p)
+      Bots.teach.out(BRC.Brc.owner(J.Json.get_str(p, "bot", ""), B.Hub.owns(s, J.Json.get_str(p, "bot", "")), Bots.live(s, J.Json.get_str(p, "bot", ""))), client, id, "bots.browser", p)
     case 29n:
       Bots.teach.out(Bots.live(s, J.Json.get_str(p, "bot", "")), client, id, "bots.teach", p)
     case 30n:
@@ -1623,7 +1623,7 @@ def Bots.tick.go(rs: List<&2, BT.Routine>, +i: Nat, +s: M.State, +now: Nat, +tz:
 
 # the minute tick: every due routine runs once
 def Bots.tick(+s: M.State, +now: Nat, +tz: Tz) -> B.Step:
-  Step.cat(Bots.tick.go(BT.World.routines.all(M.State.bots(s)), 0n, s, now, tz), B.Step{List.append(&2, M.Change, TLD.Told.prune(s, now), B.Mail.due(s, now)), Nil{}})
+  Step.cat(Step.cat(Bots.tick.go(BT.World.routines.all(M.State.bots(s)), 0n, s, now, tz), B.Step{List.append(&2, M.Change, TLD.Told.prune(s, now), B.Mail.due(s, now)), Nil{}}), B.Digest.tick(s, now))
 
 # The bots' tools
 # ---------------

@@ -267,6 +267,86 @@ def Json.emit(j: Json, first: Bool, rest: String) -> String:
 def Json.show(j: Json) -> String:
   Json.emit(j, True{}, "")
 
+# The UTF-8 size of Json.show(j), read from the tree: a reply's size is
+# checked without printing it (the hub's thin replies go to their writer as
+# the tree, core/cbor.bend encodes it). Each case counts what Json.emit.rev
+# writes; test/json_bytes_test.bend holds it to the printed text.
+def Json.bytes.chr.slow(+c: U32) -> Nat:
+  Bool.pick(Nat, U32.is_lt(c, 32), Bool.pick(Nat, Bool.or(U32.is_eq(c, 10), Bool.or(U32.is_eq(c, 13), U32.is_eq(c, 9))), 2n, 6n),
+    Bool.pick(Nat, Bool.or(U32.is_eq(c, 34), U32.is_eq(c, 92)), 2n,
+      Bool.pick(Nat, U32.is_lt(c, 128), 1n, Bool.pick(Nat, U32.is_lt(c, 2048), 2n, Bool.pick(Nat, U32.is_lt(c, 65536), 3n, 4n)))))
+
+def Json.bytes.chr.k(plain: Bool, +c: U32) -> Nat:
+  match plain:
+    case True{}:
+      1n
+    case False{}:
+      Json.bytes.chr.slow(c)
+
+# printable ASCII but '"' and '\\' is one byte: tested first, alone
+def Json.bytes.chr(+c: U32) -> Nat:
+  Json.bytes.chr.k(Bool.and(U32.is_ge(c, 32), Bool.and(U32.is_lt(c, 128), Bool.and(U32.is_ne(c, 34), U32.is_ne(c, 92)))), c)
+
+def Json.bytes.raw(+c: U32) -> Nat:
+  Bool.pick(Nat, U32.is_lt(c, 128), 1n, Bool.pick(Nat, U32.is_lt(c, 2048), 2n, Bool.pick(Nat, U32.is_lt(c, 65536), 3n, 4n)))
+
+# s escaped (no quotes), added to n
+def Json.bytes.esc(s: String, +n: Nat) -> Nat:
+  match s:
+    case SNil{}:
+      n
+    case SCon{Chr{c}, t}:
+      Json.bytes.esc(t, Nat.add(n, Json.bytes.chr(c)))
+
+# s as it is, added to n
+def Json.bytes.str(s: String, +n: Nat) -> Nat:
+  match s:
+    case SNil{}:
+      n
+    case SCon{Chr{c}, t}:
+      Json.bytes.str(t, Nat.add(n, Json.bytes.raw(c)))
+
+def Json.bytes.sep(first: Bool, +n: Nat) -> Nat:
+  match first:
+    case True{}:
+      n
+    case False{}:
+      Nat.add(n, 1n)
+
+law Json.bytes.go:
+  for j: Json
+  for first: Bool
+  for n: Nat
+  Nat
+
+# as Json.emit.rev: a chain's tail is the tail call, so only nesting uses stack
+def Json.bytes.go(j, first, n):
+  match j:
+    case Null{}:
+      Nat.add(n, 4n)
+    case Flag{True{}}:
+      Nat.add(n, 4n)
+    case Flag{False{}}:
+      Nat.add(n, 5n)
+    case Num{r}:
+      Json.bytes.str(r, n)
+    case Str{s}:
+      Json.bytes.esc(s, Nat.add(n, 2n))
+    case Arr{xs}:
+      Nat.add(Json.bytes.go(xs, True{}, n), 2n)
+    case Obj{fs}:
+      Nat.add(Json.bytes.go(fs, True{}, n), 2n)
+    case Item{h, t}:
+      Json.bytes.go(t, False{}, Json.bytes.go(h, True{}, Json.bytes.sep(first, n)))
+    case Field{k, v, t}:
+      Json.bytes.go(t, False{}, Json.bytes.go(v, True{}, Nat.add(Json.bytes.esc(k, Nat.add(Json.bytes.sep(first, n), 2n)), 1n)))
+    case End{}:
+      n
+
+# the size in UTF-8 bytes of Json.show(j)
+def Json.bytes(j: Json) -> Nat:
+  Json.bytes.go(j, True{}, 0n)
+
 # Lexing
 # ------
 
@@ -408,10 +488,23 @@ def Lex.uni(acc: String, left: Nat, +code: U32, c: Char) -> Lex:
     case 0n _:
       LStr{acc}
 
+# a finished string read once at its head. In the JS build a string grown
+# a character at a time is a rope (one string cell per character) until
+# something reads it, and a parsed value folded into the hub's state may
+# never be read: a log's settings kept millions of cells alive (the store
+# build: 5.4 GB). Matching the head makes the engine flatten it in place,
+# once; in C it is one cell. Never a walk per character.
+def Lex.flat(s: String) -> String:
+  match s:
+    case SNil{}:
+      SNil{}
+    case SCon{c, t}:
+      SCon{c, t}
+
 def Lex.str.k(q: Bool, bs: Bool, +u: U32, acc: String, out: List<&2, Tok>) -> Lex & List<&2, Tok>:
   match q bs:
     case True{} _:
-      (LIdle{}, TStr{String.reverse(acc)} <> out)
+      (LIdle{}, TStr{Lex.flat(String.reverse(acc))} <> out)
     case _ True{}:
       (LEsc{acc}, out)
     case _ _:

@@ -9,6 +9,7 @@ import ../src/server/castio.bend as K
 import ../src/server/perf.bend as F
 import ../src/core/exe.bend as EX
 import ../src/core/utf8.bend as U
+import ../src/server/jsloop.bend as LP
 
 # The server's host effects on the target the test runs on (JS through
 # bun under `bend test/js_host_effects_test.bend`, or native): children
@@ -121,8 +122,10 @@ def procs(+dir: String) -> IO(Unit):
   do IO<Unit>:
     r1 : P.Ran <- sh("echo hi; exit 3")
     C.Check.str("run status and output", ran.show(r1), "3:hi")
-    r2 : P.Ran <- P.Proc.run("pwd", [], dir)
-    C.Check.str("run in cwd", ran.show(r2), "0:" ++ dir)
+    +r2 : P.Ran <- P.Proc.run("pwd", [], dir)
+    # the folder's own path, whatever is in front of it (Cygwin's pwd on
+    # Windows says /cygdrive/c/tmp/... for /tmp/...)
+    C.Check.str("run in cwd", Bool.show(Bool.and(String.starts_with(ran.show(r2), "0:"), String.ends_with(ran.show(r2), String.drop(dir, 4n)))), "True")
     s3 : Result<&1, &1, U32 & String, U32 & Socket> <- H.Proc.spawn("/nonexistent/bp-js-x", [], "", 0)
     c3 : String <- spawned.code(s3)
     C.Check.str("spawn of a missing program fails ENOENT", c3, "fail 2")
@@ -234,6 +237,101 @@ def slow() -> IO(Unit):
     r : Result<&1, &1, U32 & String, U32 & Socket> <- H.Proc.spawn("sh", ["-c", "sleep 0.5; wc -c | tr -d ' '"], "", 0)
     slow.k(r, ch)
 
+# a send parked on a full socketpair whose peer hangs up (the child closes
+# its end after 0.3 s and lives on): it fails at once, as poll() reports the
+# hang-up (select() never puts such a socket in the write set). Within 80 ms
+# on the Bun loop; the sync loop's retry takes up to a second.
+def hup.limit.k(bun: Bool) -> Nat:
+  match bun:
+    case True{}:
+      380n
+    case False{}:
+      1500n
+
+def hup.limit(rt: String) -> Nat:
+  hup.limit.k(String.eq(rt, "bun"))
+
+def hup.sent(r: Socket & Result<&1, &1, U32 & String, Unit>, +t0: Nat, +pid: U32, +rt: String) -> IO(Unit):
+  (s, res) = r
+  do IO<Unit>:
+    +t1 : Nat <- IO.now()
+    C.Check.str("a parked send fails when the peer hangs up", sent.ok(res), "fail 32")
+    C.Check.str("it fails within " ++ Nat.show(Nat.sub(hup.limit(rt), 300n)) ++ " ms of the hang-up", Bool.show(Nat.is_lt(Nat.sub(t1, t0), hup.limit(rt))), "True")
+    Socket.close(s)
+    H.Proc.kill(pid, 9)
+    c : U32 <- H.Proc.wait(pid)
+    return Unit{}
+
+def hup.go(started: U32 & Socket, +rt: String) -> IO(Unit):
+  (pid, s) = started
+  do IO<Unit>:
+    +t0 : Nat <- IO.now()
+    r : Socket & Result<&1, &1, U32 & String, Unit> <- H.Sock.send_text(s, big(21n, "x"))
+    hup.sent(r, t0, pid, rt)
+
+def hup.k(r: Result<&1, &1, U32 & String, U32 & Socket>, +rt: String) -> IO(Unit):
+  match r:
+    case Fail{(c, _)}:
+      C.Check.str("hang-up child spawned", U32.show(c), "started")
+    case Done{started}:
+      hup.go(started, rt)
+
+# on Windows a child's stdin hang-up reaches the send as the pipe write's
+# own failure (node's child_process), not a readiness wake: the sync
+# loop's bound applies
+def hup.rt(win: Result<&1, &1, U32 & String, String>, +rt: String) -> String:
+  match win:
+    case Done{os}:
+      Bool.pick(String, String.eq(os, "Windows_NT"), "windows", rt)
+    case Fail{_}:
+      rt
+
+def hup() -> IO(Unit):
+  do IO<Unit>:
+    rt0 : String <- LP.Rt.loop()
+    os : Result<&1, &1, U32 & String, String> <- IO.get_env("OS")
+    +rt : String = hup.rt(os, rt0)
+    r : Result<&1, &1, U32 & String, U32 & Socket> <- H.Proc.spawn("sh", ["-c", "sleep 0.3; exec 0<&- 1>&-; sleep 5"], "", 0)
+    hup.k(r, rt)
+
+# a send parked on a full socket while another computation cuts the
+# connection through its raw descriptor (Sock.raw + Fd.shut: how the hub
+# drops a client whose writer waits): the send fails, at once, and the
+# program runs on
+def cut.later(+fd: U32) -> IO(Unit):
+  do IO<Unit>:
+    IO.sleep(300)
+    H.Fd.shut(fd)
+
+def cut.sent(r: Socket & Result<&1, &1, U32 & String, Unit>, +t0: Nat, +pid: U32) -> IO(Unit):
+  (s2, res) = r
+  do IO<Unit>:
+    +t1 : Nat <- IO.now()
+    C.Check.str("a parked send cut by Fd.shut fails", Bool.show(String.starts_with(sent.ok(res), "fail")), "True")
+    C.Check.str("the cut send ended at the cut", Bool.show(Bool.and(Nat.is_ge(Nat.sub(t1, t0), 200n), Nat.is_lt(Nat.sub(t1, t0), 3000n))), "True")
+    Socket.close(s2)
+    H.Proc.kill(pid, 15)
+    code : U32 <- H.Proc.wait(pid)
+    return Unit{}
+
+def cut.raw(r: Socket & U32, +pid: U32) -> IO(Unit):
+  (s, +fd) = r
+  do IO<Unit>:
+    IO.spawn(Unit, cut.later(fd))
+    +t0 : Nat <- IO.now()
+    r2 : Socket & Result<&1, &1, U32 & String, Unit> <- H.Sock.send_text(s, big(21n, "x"))
+    cut.sent(r2, t0, pid)
+
+def cut.k(r: Result<&1, &1, U32 & String, U32 & Socket>) -> IO(Unit):
+  match r:
+    case Fail{(c, _)}:
+      C.Check.str("non-reader spawned", U32.show(c), "started")
+    case Done{(+pid, s)}:
+      IO.bind(Socket & U32, Unit, H.Sock.raw(s), raw => cut.raw(raw, pid))
+
+def cut() -> IO(Unit):
+  IO.bind(Result<&1, &1, U32 & String, U32 & Socket>, Unit, H.Proc.spawn("sleep", ["10"], "", 0), cut.k)
+
 def dup.show(r: Result<&1, &1, U32 & String, Socket>) -> IO(String):
   match r:
     case Done{d}:
@@ -322,11 +420,18 @@ def locks(+dir: String) -> IO(Unit):
     C.Check.str("Guard.take by another holder", Bool.show(g2), "False")
     g3 : String <- sh.out("flock -n " ++ dir ++ "/bp-jst.lock true; echo $?")
     C.Check.str("guard holds the flock", g3, "1")
-    fds : String <- sh.out("ls /proc/$$/fd | tr '\\n' ' '")
+    # what a child of the spawned shell inherits from it, as ls lists its
+    # own descriptors (less the one it reads the listing through): listing
+    # the shell's from outside raced its own pipes and saved descriptors
+    fds : String <- sh.out("ls -l /proc/self/fd | awk '$NF !~ /^\\/proc\\/[0-9]+\\/fd$/ && NF > 3 {printf \"%s \", $(NF-2)}'")
     C.Check.str("a child gets only 0-2 (no lock, socket or Bun descriptor)", fds, "0 1 2")
     sp : Result<&1, &1, U32 & String, U32 & Socket> <- H.Proc.spawn("cat", ["/proc/self/status"], "", 0)
     +sig : String <- spawned.ran(sp)
     C.Check.str("a child starts with no signal ignored or blocked", Bool.show(Bool.and(String.contains(sig, "SigIgn:\t0000000000000000"), String.contains(sig, "SigBlk:\t0000000000000000"))), "True")
+    # (the hub may run with a large stack limit; a child starts with 8 MiB
+    # at most, or the hub's own when that is less)
+    stk : String <- sh.out("c=$(ulimit -s); p=$(awk '/Max stack size/{print $4}' /proc/$PPID/limits); if [ \"$p\" = unlimited ] || [ \"$p\" -gt 8388608 ]; then w=8192; else w=$((p/1024)); fi; [ \"$c\" = \"$w\" ] && echo stack-ok || echo \"child $c hub $p\"")
+    C.Check.str("a child starts with a soft stack of 8 MiB at most", stk, "stack-ok")
     G.Guard.drop("jst", "h1")
     g4 : String <- sh.out("cat " ++ dir ++ "/guard-h1")
     C.Check.str("Guard.drop waits for the cleanup", g4, "done")
@@ -456,7 +561,7 @@ def after.mode(+dir: String) -> IO(Unit):
     +cat : U32 = Maybe.default(&2, U32, U32.read(pidt), 0)
     s : Result<&1, &1, U32 & String, Socket> <- A.Adopt.take(pid)
     echo : String <- after.sock(s)
-    fds : String <- sh.out("ls /proc/$$/fd | tr '\\n' ' '")
+    fds : String <- sh.out("ls -l /proc/self/fd | awk '$NF !~ /^\\/proc\\/[0-9]+\\/fd$/ && NF > 3 {printf \"%s \", $(NF-2)}'")
     w : U32 <- H.Proc.wait(cat)
     IO.print("after lock=" ++ l ++ " agent=" ++ echo ++ " fds=" ++ fds ++ " child=" ++ Bool.show(Bool.not(U32.is_eq(w, 255))))
 
@@ -480,20 +585,40 @@ def self.at(+exe: String, +dir: String) -> IO(Unit):
 def self(+dir: String) -> IO(Unit):
   IO.bind(String, Unit, H.Sys.exe_path(), exe => self.at(exe, dir))
 
+# the checks that need a POSIX host (flock(1), /proc, an exec in place)
+# run off Windows; there they are named as skipped
+def tests.posix(win: Bool, +dir: String) -> IO(Unit):
+  match win:
+    case True{}:
+      IO.print("ok locks, log file, adopt and self/exec checks skipped on Windows (flock(1), /proc, exec in place)")
+    case False{}:
+      do IO<Unit>:
+        locks(dir)
+        perf(dir)
+        adopt(dir)
+        self(dir)
+
+def tests.win(r: Result<&1, &1, U32 & String, String>) -> Bool:
+  match r:
+    case Done{os}:
+      String.eq(os, "Windows_NT")
+    case Fail{_}:
+      False{}
+
 def tests() -> IO(Unit):
   do IO<Unit>:
     t : U32 <- H.Clock.epoch()
     n : Result<&1, &1, U32 & String, U32> <- IO.random_u32()
     +r : U32 = rand(n)
     +dir : String <- scratch(t, r)
+    os : Result<&1, &1, U32 & String, String> <- IO.get_env("OS")
     procs(dir)
     slow()
+    hup()
+    cut()
     net((30000 + (r % 20000 : U32) : U32))
-    locks(dir)
     cast()
-    perf(dir)
-    adopt(dir)
-    self(dir)
+    tests.posix(tests.win(os), dir)
     out : String <- sh.out("rm -rf " ++ dir ++ " && echo gone")
     C.Check.str("scratch removed", out, "gone")
 
@@ -513,6 +638,7 @@ def main.k(+mode: String, +dir: String) -> IO(Unit):
 
 def main() -> IO(Unit):
   do IO<Unit>:
+    rt : String <- LP.Rt.loop()
     raw : List<String> <- IO.args()
     +args : List<&2, String> = copy(raw)
     main.k(arg(args, 1n), arg(args, 2n))

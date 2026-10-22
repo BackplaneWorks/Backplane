@@ -58,6 +58,81 @@ def Cbor.nth.go(names: List<&2, String>, zero: Bool, +i: U32) -> Maybe<&2, Strin
 def Cbor.nth(names: List<&2, String>, +i: U32) -> Maybe<&2, String>:
   Cbor.nth.go(names, U32.is_eq(i, 0), i)
 
+# The dictionaries as balanced search trees, so a string costs about six
+# comparisons instead of one per entry (the encoder's lookup was half the JS
+# hub's CPU). Generated from the lists by scripts/cbor-tree.py; law
+# cbor_trees_exact holds them to the lists (sorted, every entry at its index,
+# nothing else), so a lookup in a tree is Cbor.find in its list.
+type CTree is Data:
+  CLeaf{}
+  CNode{l: CTree, w: String, i: U32, r: CTree}
+
+def CTree.cmp(t: CTree, +s: String) -> Cmp:
+  match t:
+    case CLeaf{}:
+      EQ{}
+    case CNode{_, w, _, _}:
+      String.order(s, w)
+
+def CTree.go(t: CTree, o: Cmp, +s: String) -> Maybe<&2, U32>:
+  match t o:
+    case CLeaf{} _:
+      None{}
+    case CNode{_, _, i, _} EQ{}:
+      Some{i}
+    case CNode{+l, _, _, _} LT{}:
+      CTree.go(l, CTree.cmp(l, s), s)
+    case CNode{_, _, _, +r} GT{}:
+      CTree.go(r, CTree.cmp(r, s), s)
+
+# the index of s in the dictionary the tree holds
+def CTree.find(+t: CTree, +s: String) -> Maybe<&2, U32>:
+  CTree.go(t, CTree.cmp(t, s), s)
+
+# the tree's words in order
+def CTree.list(t: CTree, acc: List<&2, String>) -> List<&2, String>:
+  match t:
+    case CLeaf{}:
+      acc
+    case CNode{l, w, _, r}:
+      CTree.list(l, w <> CTree.list(r, acc))
+
+def CTree.rising(xs: List<&2, String>, +prev: String, ok: Bool) -> Bool:
+  match xs ok:
+    case _ False{}:
+      False{}
+    case Nil{} True{}:
+      True{}
+    case +x <> t True{}:
+      CTree.rising(t, x, String.is_lt(prev, x))
+
+def CTree.all(names: List<&2, String>, +t: CTree, +i: U32, ok: Bool) -> Bool:
+  match names ok:
+    case _ False{}:
+      False{}
+    case Nil{} True{}:
+      True{}
+    case +n <> rest True{}:
+      CTree.all(rest, t, (i + 1 : U32), Maybe.is_some(&2, U32, CTree.find(t, n)) && U32.is_eq(Maybe.default(&2, U32, CTree.find(t, n), 0), i))
+
+def CTree.words.ok(xs: List<&2, String>) -> Bool:
+  match xs:
+    case Nil{}:
+      True{}
+    case +x <> t:
+      CTree.rising(t, x, True{})
+
+# the tree holds exactly the list: its words strictly rising (so a search
+# that misses is right), as many as the list, each at its list index
+def CTree.ok(+names: List<&2, String>, +t: CTree) -> Bool:
+  Bool.and(CTree.words.ok(CTree.list(t, Nil{})), Bool.and(Nat.is_eq(List.length(&2, String, CTree.list(t, Nil{})), List.length(&2, String, names)), CTree.all(names, t, 0, True{})))
+
+def Cbor.keys.tree() -> CTree:
+  CNode{CNode{CNode{CNode{CNode{CNode{CLeaf{}, "$", 0, CLeaf{}}, "act", 19, CNode{CLeaf{}, "archived", 49, CLeaf{}}}, "at", 12, CNode{CNode{CLeaf{}, "branch", 36, CLeaf{}}, "child", 34, CLeaf{}}}, "cid", 46, CNode{CNode{CNode{CLeaf{}, "content", 44, CLeaf{}}, "count", 47, CLeaf{}}, "depth", 35, CNode{CNode{CLeaf{}, "env", 37, CLeaf{}}, "error", 6, CLeaf{}}}}, "id", 2, CNode{CNode{CNode{CNode{CLeaf{}, "info", 28, CLeaf{}}, "interaction", 24, CNode{CLeaf{}, "items", 7, CLeaf{}}}, "key", 31, CNode{CNode{CLeaf{}, "kind", 16, CLeaf{}}, "m", 3, CLeaf{}}}, "manual", 48, CNode{CNode{CNode{CLeaf{}, "model", 21, CLeaf{}}, "msg", 9, CLeaf{}}, "name", 42, CNode{CNode{CLeaf{}, "ok", 5, CLeaf{}}, "p", 4, CLeaf{}}}}}, "parent", 33, CNode{CNode{CNode{CNode{CNode{CLeaf{}, "path", 29, CLeaf{}}, "pinned", 40, CNode{CLeaf{}, "project", 14, CLeaf{}}}, "provider", 22, CNode{CNode{CLeaf{}, "result", 43, CLeaf{}}, "role", 10, CLeaf{}}}, "root", 39, CNode{CNode{CNode{CLeaf{}, "runtime", 23, CLeaf{}}, "seq", 26, CLeaf{}}, "session", 20, CNode{CNode{CLeaf{}, "settled", 41, CLeaf{}}, "since", 25, CLeaf{}}}}, "state", 13, CNode{CNode{CNode{CNode{CLeaf{}, "summary", 17, CLeaf{}}, "t", 1, CLeaf{}}, "task", 32, CNode{CNode{CLeaf{}, "text", 11, CLeaf{}}, "thread", 8, CLeaf{}}}, "title", 15, CNode{CNode{CNode{CLeaf{}, "tone", 18, CLeaf{}}, "type", 45, CLeaf{}}, "value", 30, CNode{CNode{CLeaf{}, "version", 27, CLeaf{}}, "worktree", 38, CLeaf{}}}}}}
+
+def Cbor.words.tree() -> CTree:
+  CNode{CNode{CNode{CNode{CNode{CNode{CLeaf{}, "ActivityLogged", 2, CLeaf{}}, "AskClosed", 50, CNode{CLeaf{}, "AskOpened", 49, CLeaf{}}}, "DeviceDropped", 54, CNode{CNode{CLeaf{}, "DeviceRegistered", 53, CLeaf{}}, "MessagePosted", 0, CNode{CLeaf{}, "ModesSet", 33, CLeaf{}}}}, "PendingChanged", 21, CNode{CNode{CNode{CLeaf{}, "ProjectCreated", 24, CLeaf{}}, "ProjectRemoved", 25, CNode{CLeaf{}, "SessionSet", 32, CLeaf{}}}, "SettingSet", 37, CNode{CNode{CLeaf{}, "TaskDelegated", 34, CLeaf{}}, "TaskDelivered", 36, CNode{CLeaf{}, "TaskStateSet", 35, CLeaf{}}}}}, "ThreadArchived", 28, CNode{CNode{CNode{CNode{CLeaf{}, "ThreadCreated", 26, CLeaf{}}, "ThreadDeleted", 30, CNode{CLeaf{}, "ThreadPinned", 29, CLeaf{}}}, "ThreadRenamed", 27, CNode{CNode{CLeaf{}, "ThreadSettled", 22, CLeaf{}}, "ThreadUnsettled", 23, CNode{CLeaf{}, "TurnChanged", 1, CLeaf{}}}}, "WorktreeSet", 31, CNode{CNode{CNode{CLeaf{}, "activity", 58, CLeaf{}}, "alert", 57, CNode{CLeaf{}, "android", 56, CLeaf{}}}, "approval-required", 40, CNode{CNode{CLeaf{}, "assistant", 7, CLeaf{}}, "auto", 42, CLeaf{}}}}}, "auto-accept-edits", 41, CNode{CNode{CNode{CNode{CNode{CLeaf{}, "cancelled", 48, CLeaf{}}, "changes", 3, CNode{CLeaf{}, "completed", 9, CLeaf{}}}, "default", 44, CNode{CNode{CLeaf{}, "delta", 4, CLeaf{}}, "device.drop", 52, CNode{CLeaf{}, "device.register", 51, CLeaf{}}}}, "done", 47, CNode{CNode{CNode{CLeaf{}, "error", 13, CLeaf{}}, "failed", 20, CNode{CLeaf{}, "full-access", 43, CLeaf{}}}, "hello", 17, CNode{CNode{CLeaf{}, "idle", 10, CLeaf{}}, "info", 11, CNode{CLeaf{}, "interrupted", 19, CLeaf{}}}}}, "ios", 55, CNode{CNode{CNode{CNode{CLeaf{}, "local", 38, CLeaf{}}, "log", 14, CNode{CLeaf{}, "plan", 45, CLeaf{}}}, "production", 60, CNode{CNode{CLeaf{}, "queued", 46, CLeaf{}}, "reply", 5, CNode{CLeaf{}, "running", 8, CLeaf{}}}}, "sandbox", 59, CNode{CNode{CNode{CLeaf{}, "system", 18, CLeaf{}}, "tool", 12, CNode{CLeaf{}, "update", 15, CLeaf{}}}, "user", 6, CNode{CNode{CLeaf{}, "view", 16, CLeaf{}}, "worktree", 39, CLeaf{}}}}}}
+
 # Encoding
 # --------
 
@@ -125,9 +200,39 @@ def Enc.utf8(s: String, acc: List<&2, U32>) -> List<&2, U32>:
     case SCon{Chr{c}, t}:
       Enc.utf8(t, Enc.put(c, acc))
 
-# a text string item
+# a string's UTF-8 bytes, newest first, and how many: one walk of the
+# string (on the JS target each step of a walk slices the string, so
+# measuring it and then writing it cost twice that)
+type U8 is Data:
+  U8{n: U32, rev: List<&2, U32>}
+
+def Enc.u8.put(+c: U32, +n: U32, rev: List<&2, U32>) -> U8:
+  U8{(n + Enc.cw(c) : U32), Enc.put(c, rev)}
+
+def Enc.u8(s: String, u: U8) -> U8:
+  match s u:
+    case SNil{} _:
+      u
+    case SCon{Chr{c}, t} U8{n, rev}:
+      Enc.u8(t, Enc.u8.put(c, n, rev))
+
+# xs pushed onto acc in order (each a tail call)
+def Enc.onto(xs: List<&2, U32>, acc: List<&2, U32>) -> List<&2, U32>:
+  match xs:
+    case Nil{}:
+      acc
+    case x <> t:
+      Enc.onto(t, x <> acc)
+
+def Enc.text.k(u: U8, acc: List<&2, U32>) -> List<&2, U32>:
+  match u:
+    case U8{n, rev}:
+      Enc.onto(List.reverse(&2, U32, rev), Enc.head(96, n, acc))
+
+# a text string item: the same bytes as Enc.utf8 over Enc.head of Enc.blen
+# (test/cbor_test.bend), from one walk of the string
 def Enc.text(+s: String, acc: List<&2, U32>) -> List<&2, U32>:
-  Enc.utf8(s, Enc.head(96, Enc.blen(s, 0), acc))
+  Enc.text.k(Enc.u8(s, U8{0, Nil{}}), acc)
 
 # Numbers: which ones travel as integers
 type Sc is Data:
@@ -206,8 +311,8 @@ def Enc.str.k(m: Maybe<&2, U32>, s: String, acc: List<&2, U32>) -> List<&2, U32>
     case None{}:
       Enc.text(s, acc)
 
-def Enc.str(+s: String, +ws: List<&2, String>, acc: List<&2, U32>) -> List<&2, U32>:
-  Enc.str.k(Cbor.find(ws, s), s, acc)
+def Enc.str(+s: String, +ws: CTree, acc: List<&2, U32>) -> List<&2, U32>:
+  Enc.str.k(CTree.find(ws, s), s, acc)
 
 def Enc.key.k(m: Maybe<&2, U32>, k: String, acc: List<&2, U32>) -> List<&2, U32>:
   match m:
@@ -216,8 +321,8 @@ def Enc.key.k(m: Maybe<&2, U32>, k: String, acc: List<&2, U32>) -> List<&2, U32>
     case None{}:
       Enc.text(k, acc)
 
-def Enc.key(+k: String, +ks: List<&2, String>, acc: List<&2, U32>) -> List<&2, U32>:
-  Enc.key.k(Cbor.find(ks, k), k, acc)
+def Enc.key(+k: String, +ks: CTree, acc: List<&2, U32>) -> List<&2, U32>:
+  Enc.key.k(CTree.find(ks, k), k, acc)
 
 # the cells of an Item / Field chain
 def Enc.count(xs: J.Json, acc: U32) -> U32:
@@ -230,7 +335,7 @@ def Enc.count(xs: J.Json, acc: U32) -> U32:
       acc
 
 # j's bytes, reversed onto acc
-def Enc.go(j: J.Json, +ks: List<&2, String>, +ws: List<&2, String>, acc: List<&2, U32>) -> List<&2, U32>:
+def Enc.go(j: J.Json, +ks: CTree, +ws: CTree, acc: List<&2, U32>) -> List<&2, U32>:
   match j:
     case J.Null{}:
       246 <> acc
@@ -255,8 +360,8 @@ def Enc.go(j: J.Json, +ks: List<&2, String>, +ws: List<&2, String>, acc: List<&2
 
 # the CBOR bytes (0..255 per cell) of a JSON value
 def Cbor.encode(j: J.Json) -> List<&2, U32>:
-  +ks = Cbor.keys()
-  +ws = Cbor.words()
+  +ks = Cbor.keys.tree()
+  +ws = Cbor.words.tree()
   List.reverse(&2, U32, Enc.go(j, ks, ws, Nil{}))
 
 # Decoding
@@ -493,3 +598,154 @@ def Cbor.decode(bs: List<&2, U32>) -> Maybe<&2, J.Json>:
   +ks = Cbor.keys()
   +ws = Cbor.words()
   Dec.fin(Dec.go(bs, SHead{Nil{}, TNone{}}, ks, ws))
+
+# Encoding with holes (fast hub R1: a thin reply whose page was encoded
+# before): a string value that is a hole's name (they start with "\u{0}",
+# which no text the hub writes does) is written as the hole's bytes, each
+# segment in turn, exactly as Enc.go would write the value it stands for
+# (test/thin_splice_test.bend holds Cbor.encode.holes to Cbor.encode of
+# the whole tree).
+type Hole is Data:
+  Hole{name: String, segs: List<&2, List<&2, U32>>}
+
+def Hole.segs.go(segs: List<&2, List<&2, U32>>, acc: List<&2, U32>) -> List<&2, U32>:
+  match segs:
+    case Nil{}:
+      acc
+    case s <> t:
+      Hole.segs.go(t, Enc.onto(s, acc))
+
+def Hole.name.is(hs: List<&2, Hole>, +s: String) -> Bool:
+  match hs:
+    case Hole{+n, _} <> _:
+      String.eq(n, s)
+    case Nil{}:
+      False{}
+
+def Hole.find(hs: List<&2, Hole>, +s: String, +hit: Bool) -> Maybe<&2, List<&2, List<&2, U32>>>:
+  match hs hit:
+    case Nil{} _:
+      None{}
+    case Hole{+n, segs} <> +r True{}:
+      Some{segs}
+    case +x <> t False{}:
+      Hole.find(t, s, Hole.name.is(t, s))
+
+def Hole.mark(+s: String) -> Bool:
+  match s:
+    case SCon{Chr{c}, _}:
+      U32.is_eq(c, 0)
+    case SNil{}:
+      False{}
+
+def Enc.hole.put(m: Maybe<&2, List<&2, List<&2, U32>>>, +s: String, +ws: CTree, acc: List<&2, U32>) -> List<&2, U32>:
+  match m:
+    case Some{segs}:
+      Hole.segs.go(segs, acc)
+    case None{}:
+      Enc.str(s, ws, acc)
+
+def Enc.hole.str(+marked: Bool, +s: String, +ws: CTree, +hs: List<&2, Hole>, acc: List<&2, U32>) -> List<&2, U32>:
+  match marked:
+    case True{}:
+      Enc.hole.put(Hole.find(hs, s, Hole.name.is(hs, s)), s, ws, acc)
+    case False{}:
+      Enc.str(s, ws, acc)
+
+# Enc.go with holes
+def Enc.hole.go(j: J.Json, +ks: CTree, +ws: CTree, +hs: List<&2, Hole>, acc: List<&2, U32>) -> List<&2, U32>:
+  match j:
+    case J.Null{}:
+      246 <> acc
+    case J.Flag{True{}}:
+      245 <> acc
+    case J.Flag{False{}}:
+      244 <> acc
+    case J.Num{r}:
+      Enc.num(r, acc)
+    case J.Str{+s}:
+      Enc.hole.str(Hole.mark(s), s, ws, hs, acc)
+    case J.Arr{+xs}:
+      Enc.hole.go(xs, ks, ws, hs, Enc.head(128, Enc.count(xs, 0), acc))
+    case J.Obj{+fs}:
+      Enc.hole.go(fs, ks, ws, hs, Enc.head(160, Enc.count(fs, 0), acc))
+    case J.Item{h, t}:
+      Enc.hole.go(t, ks, ws, hs, Enc.hole.go(h, ks, ws, hs, acc))
+    case J.Field{k, v, t}:
+      Enc.hole.go(t, ks, ws, hs, Enc.hole.go(v, ks, ws, hs, Enc.key(k, ks, acc)))
+    case J.End{}:
+      acc
+
+def Cbor.encode.holes(j: J.Json, +hs: List<&2, Hole>) -> List<&2, U32>:
+  +ks = Cbor.keys.tree()
+  +ws = Cbor.words.tree()
+  List.reverse(&2, U32, Enc.hole.go(j, ks, ws, hs, Nil{}))
+
+# A tree's bytes split where a marker string stands (its bytes, once):
+# (before, after), forward; None when the marker is not there exactly once
+type Cut2 is Data:
+  Cut2{before: List<&2, U32>, after: List<&2, U32>}
+
+def Cut.prefix(xs: List<&2, U32>, pat: List<&2, U32>, ok: Bool) -> Bool:
+  match xs pat ok:
+    case _ _ False{}:
+      False{}
+    case _ Nil{} True{}:
+      True{}
+    case Nil{} _ True{}:
+      False{}
+    case +x <> xt +p <> pt True{}:
+      Cut.prefix(xt, pt, U32.is_eq(p, x))
+
+def Cut.drop(xs: List<&2, U32>, n: Nat) -> List<&2, U32>:
+  match xs n:
+    case +ys 0n:
+      ys
+    case Nil{} _:
+      Nil{}
+    case +y <> t 1n+m:
+      Cut.drop(t, m)
+
+# walk xs a byte at a time; rev: the bytes before the first match,
+# reversed; n: matches so far; skip: the match's bytes still to pass;
+# after: what follows the first match
+type CutAt is Data:
+  CutAt{rev: List<&2, U32>, n: Nat, skip: Nat, after: List<&2, U32>}
+
+def Cut.skip(+t: List<&2, U32>, rev: List<&2, U32>, +n: Nat, +skip: Nat, +after: List<&2, U32>) -> CutAt:
+  CutAt{rev, n, Nat.sub(skip, 1n), Bool.pick(List<&2, U32>, Bool.and(Nat.is_eq(n, 1n), Nat.is_eq(skip, 1n)), t, after)}
+
+def Cut.hit(+t: List<&2, U32>, rev: List<&2, U32>, +n: Nat, +after: List<&2, U32>, +plen: Nat) -> CutAt:
+  CutAt{rev, Nat.add(n, 1n), Nat.sub(plen, 1n), Bool.pick(List<&2, U32>, Bool.and(Nat.is_eq(n, 0n), Nat.is_le(plen, 1n)), t, after)}
+
+def Cut.plain(+x: U32, +rev: List<&2, U32>, +n: Nat, after: List<&2, U32>) -> CutAt:
+  CutAt{Bool.pick(List<&2, U32>, Nat.is_eq(n, 0n), x <> rev, rev), n, 0n, after}
+
+def Cut.step.k(skipping: Bool, hit: Bool, +x: U32, +t: List<&2, U32>, at: CutAt, +plen: Nat) -> CutAt:
+  match skipping hit at:
+    case True{} _ CutAt{rev, +n, +skip, +after}:
+      Cut.skip(t, rev, n, skip, after)
+    case False{} True{} CutAt{rev, +n, _, +after}:
+      Cut.hit(t, rev, n, after, plen)
+    case False{} False{} CutAt{+rev, +n, _, after}:
+      Cut.plain(x, rev, n, after)
+
+def Cut.skipping(+at: CutAt) -> Bool:
+  match at:
+    case CutAt{_, _, skip, _}:
+      Nat.is_gt(skip, 0n)
+
+def Cut.find(xs: List<&2, U32>, +pat: List<&2, U32>, +plen: Nat, +at: CutAt, hit: Bool) -> CutAt:
+  match xs:
+    case Nil{}:
+      at
+    case +x <> +t:
+      Cut.find(t, pat, plen, Cut.step.k(Cut.skipping(at), hit, x, t, at, plen), Cut.prefix(t, pat, True{}))
+
+def Cut.done(at: CutAt) -> Maybe<&2, Cut2>:
+  match at:
+    case CutAt{+rev, +n, _, +after}:
+      Bool.pick(Maybe<&2, Cut2>, Nat.is_eq(n, 1n), Some{Cut2{List.reverse(&2, U32, rev), after}}, None{})
+
+def Cbor.cut(+bs: List<&2, U32>, +pat: List<&2, U32>) -> Maybe<&2, Cut2>:
+  Cut.done(Cut.find(bs, pat, List.length(&2, U32, pat), CutAt{Nil{}, 0n, 0n, Nil{}}, Cut.prefix(bs, pat, True{})))

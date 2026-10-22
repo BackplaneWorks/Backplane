@@ -2,7 +2,7 @@
 // Supplied, qualified web artifacts only. Never emits Bend, fetches or runs a payload.
 const fs=require('node:fs'),path=require('node:path'),os=require('node:os');
 const p=require('./produce-release.cjs');
-const VERSION='0.12.0',GIT=/^[a-f0-9]{40}$/,HEX=/^[a-f0-9]{64}$/;
+const VERSION='0.12.1',GIT=/^[a-f0-9]{40}$/,HEX=/^[a-f0-9]{64}$/;
 const check=(v,m)=>{if(!v)throw Error(m);};
 function archive(requestFile,output){
  check(path.isAbsolute(output)&&!fs.existsSync(output),'Distribution output must be a new absolute directory');

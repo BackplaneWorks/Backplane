@@ -333,9 +333,11 @@ def Change.encode(c: M.Change) -> J.Json:
       Change.obj("DeployAsked", [J.KV{"by", J.Str{by}}, J.KV{"note", J.Str{note}}, J.KV{"commit", J.Str{commit}}, J.KV{"cover", J.Str{cover}}, J.KV{"at", Codec.nat(at)}])
     case M.DeployBuilt{commit, state, version, detail, at}:
       Change.obj("DeployBuilt", [J.KV{"commit", J.Str{commit}}, J.KV{"state", J.Str{state}}, J.KV{"version", J.Str{version}}, J.KV{"detail", J.Str{detail}}, J.KV{"at", Codec.nat(at)}])
+    case M.CtxNoted{thread, l, i, text, at}:
+      Change.obj("CtxNoted", [J.KV{"thread", J.Str{thread}}, J.KV{"l", Codec.nat(l)}, J.KV{"i", Codec.nat(i)}, J.KV{"text", J.Str{text}}, J.KV{"at", Codec.nat(at)}])
 
 def Change.tags() -> List<&2, String>:
-  ["ProjectCreated", "ProjectRemoved", "ThreadCreated", "ThreadRenamed", "MessagePosted", "TurnChanged", "PendingChanged", "ActivityLogged", "ThreadSettled", "ThreadUnsettled", "ThreadArchived", "ThreadPinned", "ThreadDeleted", "WorktreeSet", "SessionSet", "ModesSet", "TaskDelegated", "TaskStateSet", "TaskDelivered", "SettingSet", "TurnQueued", "QueueTaken", "AskOpened", "AskClosed", "DeviceRegistered", "DeviceDropped", "ThreadSnoozed", "ThreadOrdered", "WorktreeSkipped", "ThreadMerged", "WorktreeRemoved", "ProjectOrdered", "QueueEdited", "QueueRemoved", "QueueMoved", "QueueTakenOne", "ThreadForked", "ProviderSet", "TodosSet", "UsageSet", "BotSet", "BotDeleted", "RoomSet", "RoomDeleted", "RoomPosted", "HookSet", "HookHit", "RoutineSet", "RoutineDeleted", "RoutineFired", "MemorySaved", "MemoryForgot", "SpaceSet", "PeerSet", "BotWoke", "SpacePageSet", "WorkSet", "UberSet", "UberOp", "ThreadLaunched", "WakeSet", "WakeDropped", "LockChanged", "RoutinePlan", "RoutineSlot", "RoutineDone", "Reminded", "TaskSet", "TaskDeleted", "MessageFrom", "ConvSet", "MailPosted", "MailMarked", "MailTagged", "RunSet", "CharterSet", "DecisionLogged", "TurnUsage", "DeployAsked", "DeployBuilt"]
+  ["ProjectCreated", "ProjectRemoved", "ThreadCreated", "ThreadRenamed", "MessagePosted", "TurnChanged", "PendingChanged", "ActivityLogged", "ThreadSettled", "ThreadUnsettled", "ThreadArchived", "ThreadPinned", "ThreadDeleted", "WorktreeSet", "SessionSet", "ModesSet", "TaskDelegated", "TaskStateSet", "TaskDelivered", "SettingSet", "TurnQueued", "QueueTaken", "AskOpened", "AskClosed", "DeviceRegistered", "DeviceDropped", "ThreadSnoozed", "ThreadOrdered", "WorktreeSkipped", "ThreadMerged", "WorktreeRemoved", "ProjectOrdered", "QueueEdited", "QueueRemoved", "QueueMoved", "QueueTakenOne", "ThreadForked", "ProviderSet", "TodosSet", "UsageSet", "BotSet", "BotDeleted", "RoomSet", "RoomDeleted", "RoomPosted", "HookSet", "HookHit", "RoutineSet", "RoutineDeleted", "RoutineFired", "MemorySaved", "MemoryForgot", "SpaceSet", "PeerSet", "BotWoke", "SpacePageSet", "WorkSet", "UberSet", "UberOp", "ThreadLaunched", "WakeSet", "WakeDropped", "LockChanged", "RoutinePlan", "RoutineSlot", "RoutineDone", "Reminded", "TaskSet", "TaskDeleted", "MessageFrom", "ConvSet", "MailPosted", "MailMarked", "MailTagged", "RunSet", "CharterSet", "DecisionLogged", "TurnUsage", "DeployAsked", "DeployBuilt", "CtxNoted"]
 
 def Codec.wake.events(xs: List<&2, J.Json>) -> List<&2, String>:
   match xs:
@@ -506,6 +508,8 @@ def Change.decode.k(i: Nat, +o: J.Json) -> Maybe<&2, M.Change>:
         J.Json.get_nat(o, "reasoning", 0n), J.Json.get_nat(o, "cost", 0n), J.Json.get_str(o, "known", ""), J.Json.get_str(o, "basis", ""), J.Json.get_nat(o, "at", 0n)}}
     case 78n:
       Some{M.DeployAsked{J.Json.get_str(o, "by", ""), J.Json.get_str(o, "note", ""), J.Json.get_str(o, "commit", ""), J.Json.get_str(o, "cover", ""), J.Json.get_nat(o, "at", 0n)}}
+    case 80n:
+      Some{M.CtxNoted{J.Json.get_str(o, "thread", ""), J.Json.get_nat(o, "l", 0n), J.Json.get_nat(o, "i", 0n), J.Json.get_str(o, "text", ""), J.Json.get_nat(o, "at", 0n)}}
     case 79n:
       Some{M.DeployBuilt{J.Json.get_str(o, "commit", ""), J.Json.get_str(o, "state", ""), J.Json.get_str(o, "version", ""), J.Json.get_str(o, "detail", ""), J.Json.get_nat(o, "at", 0n)}}
     case _:
@@ -685,9 +689,13 @@ def Change.wire(c: M.Change) -> J.Json:
       Change.encode(M.DeployAsked{by, note, commit, cover, at})
     case M.DeployBuilt{commit, state, version, detail, at}:
       Change.encode(M.DeployBuilt{commit, state, version, detail, at})
+    case M.CtxNoted{_, _, _, _, at}:
+      Change.obj("CtxNoted", [J.KV{"at", Codec.nat(at)}])
 
+# (CtxNoted too: the uberbot's memory lines are for its agent only, and
+# clients fold it to nothing)
 def Change.private(+tag: String) -> Bool:
-  Bool.or(String.eq(tag, "DeviceRegistered"), String.eq(tag, "DeviceDropped"))
+  Bool.or(Bool.or(String.eq(tag, "DeviceRegistered"), String.eq(tag, "DeviceDropped")), String.eq(tag, "CtxNoted"))
 
 def Change.wire_line.k(private: Bool, +o: J.Json, l: String) -> String:
   match private:
@@ -696,6 +704,33 @@ def Change.wire_line.k(private: Bool, +o: J.Json, l: String) -> String:
     case False{}:
       l
 
+# A line that parses but is not a JSON object (J.Json.parse is lenient:
+# a bare word passes) goes to clients as this inert object, never as its
+# own text, which no client frame can carry; it keeps its number, so
+# since/resume stay exact. Clients decode no change from it.
+def Change.inert() -> String:
+  J.Json.show(Change.obj("Unreadable", Nil{}))
+
+def Change.is_obj(o: J.Json) -> Bool:
+  match o:
+    case J.Obj{_}: True{}
+    case _: False{}
+
+def Change.wire_line.o(obj: Bool, +o: J.Json, l: String) -> String:
+  match obj:
+    case True{}: Change.wire_line.k(Change.private(J.Json.get_str(o, "$", "")), o, l)
+    case False{}: Change.inert()
+
 # a stored line (parsed as o) as clients may see it
 def Change.wire_line(+o: J.Json, l: String) -> String:
-  Change.wire_line.k(Change.private(J.Json.get_str(o, "$", "")), o, l)
+  Change.wire_line.o(Change.is_obj(o), o, l)
+
+def Change.wire_over.o(obj: Bool, +o: J.Json, l: String) -> String:
+  match obj:
+    case True{}: Bool.pick(String, Change.private(J.Json.get_str(o, "$", "")), Change.wire_line(o, l), "")
+    case False{}: Change.inert()
+
+# what the store's line table keeps as a line's wire text when clients do
+# not see the line itself ("": they do): a non-object, or a private line
+def Change.wire_over(+o: J.Json, l: String) -> String:
+  Change.wire_over.o(Change.is_obj(o), o, l)

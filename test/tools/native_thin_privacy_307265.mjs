@@ -1,5 +1,7 @@
 // Focused source controls; real shared transport, stub pure Bend adapter. No build/runtime claim.
 import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import assert from 'node:assert/strict';import {pathToFileURL} from 'node:url';
+// Hermetic by default: without the frozen review packet (build/phone-cache), check the repo's own sources.
+if(!process.env.BP_NATIVE_THIN_SOURCE_ROOT&&!fs.existsSync(path.join(process.cwd(),'build/phone-cache/native-thin-bridge-proposal-01')))process.env.BP_NATIVE_THIN_SOURCE_ROOT=process.cwd();
 const root=process.env.BP_NATIVE_THIN_SOURCE_ROOT||process.cwd(),stage=fs.mkdtempSync(path.join(os.tmpdir(),'bp-native-privacy-307265-'));
 const donor=process.env.BP_NATIVE_THIN_SOURCE_ROOT?root:path.join(root,'build/phone-cache/native-thin-bridge-proposal-01/qualified-dependencies');
 for(const n of ['src/web/thin.js','src/web/thin-results.js','src/web/startup.js','src/web/mail-drafts.js']){const q=path.join(stage,n);fs.mkdirSync(path.dirname(q),{recursive:true});fs.copyFileSync(path.join(donor,n),q);}
@@ -21,6 +23,17 @@ function harness(selected='saved'){
 }
 function safeRead(request){assert(request);assert.deepEqual(request.p.session.drafts,{'@lang':'en'});assert.deepEqual(request.p.session.outbox,{});assert.deepEqual(request.p.session.open,{p:true});assert.deepEqual(request.p.session.info,{'fold:e':'on','subs:x':'on'});assert(JSON.stringify(request).length<4096);}
 const tests=[
+ ['composer popup: coalesced clearing edits still deliver the closing draft',()=>{const x=harness();x.open();
+  x.h.request('h','draft','@Zo');const opening=x.h.drain().cmds.find(c=>c.request?.m==='view.update').request;
+  for(const text of ['plain','']){x.h.request('h','draft',text);assert.equal(x.h.drain().cmds.filter(c=>c.request).length,0,'edit coalesced');}
+  const closing=x.reply(opening.id).cmds.find(c=>c.request?.m==='view.update')?.request;
+  assert(closing,'deferred read');assert.equal(closing.p.session.drafts.a,'','hub receives the closing draft');x.reply(closing.id);
+  x.h.request('h','draft','plain again');assert.equal(x.h.drain().cmds.filter(c=>c.request).length,0,'ordinary edits stay local');}],
+ ['composer popup: a trigger word goes on view.update through the real transport, once more after, then only safe reads',()=>{const x=harness();x.open();
+  const type=t=>{x.h.request('h','draft',t);const o=x.h.drain(),u=o.cmds.filter(c=>c.request?.m==='view.update');return u.at(-1)?.request;};
+  for(const t of ['@','>','%','#','$','/']){const r=type(t+'zo');assert(r,'a read for '+t);assert.equal(r.p.session.drafts.a,t+'zo',t);assert.deepEqual(Object.keys(r.p.session.drafts).sort(),['@lang','a']);assert(JSON.stringify(r).length<4096);x.reply(r.id);}
+  const shut=type('/zo done');assert(shut,'once more, so the hub shuts the popup');assert.equal(shut.p.session.drafts.a,'/zo done');x.reply(shut.id);
+  assert.equal(type('/zo done.'),undefined,'then an ordinary edit sends no read');}],
  ['open filters before shared snapshot bounds and retains full local maps',()=>{const x=harness();const o=x.greeting();assert.equal(o.cmds.length,1);safeRead(o.cmds[0].request);const s=x.h.states.get('h').session;assert.equal(s.drafts.b,huge);assert.equal(s.drafts['@f.secret'],huge);assert.equal(s.outbox.old,huge);assert.equal(s.info.private,huge);}],
  ['explicit page is bounded before shared snapshot',()=>{const x=harness();x.open();x.h.request('h','earlier','');const o=x.h.drain();assert.equal(o.cmds.length,1);assert.equal(o.cmds[0].request.m,'view.page');safeRead(o.cmds[0].request);}],
  ['update is bounded before shared snapshot',()=>{const x=harness();x.open();x.h.update(x.h.states.get('h'));const o=x.h.drain();assert.equal(o.cmds.length,1);assert.equal(o.cmds[0].request.m,'view.update');safeRead(o.cmds[0].request);}],

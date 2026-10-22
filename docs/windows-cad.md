@@ -41,18 +41,19 @@ for its own input/output arguments and preserves colors through the GUI
 FreeCAD fallback.
 
 Native checks include `test/native/native_pid.bend` and
-`test/native/windows_paths.bend`. Emit them with `BACKPLANE_EMIT_ONLY=1`
-through `scripts/build-app.sh`, then compile their C on Windows with
-`scripts/build-windows.sh`. Require the printed path checks to pass: the
+`test/native/windows_paths.bend`. They use the hub's effects, so they build
+as the hub does, on Bun:
+`BACKPLANE_JS_TARGET=windows-x64 scripts/build-js.sh test/native/windows_paths.bend build/windows-paths`
+writes `build/windows-paths.exe`. Require the printed path checks to pass: the
 Check helper reports failures in its output. Compare the PID test to the
-actual native process ID, not a Cygwin PID.
+actual native process ID.
 
 `test/fixtures/windows-cad/mech/native_box.py` is a disposable real FreeCAD
 GUI fixture. Run it with `QT_QPA_PLATFORM=offscreen`; it validates geometry,
 FCStd save/reopen, colored STEP export/reimport and volume. Its generated
 files belong in an isolated acceptance directory. Test the resulting STEP
-with the native helper and `backplane.exe --render ...`, and inspect the
-actual Windows PNGs. Linux output does not establish Windows acceptance.
+with the native helper on Windows. Linux output does not establish Windows
+acceptance.
 
 Run the compiled helper's Windows Worker/error-path check with Cygwin Python:
 
@@ -71,8 +72,7 @@ BACKPLANE_FREECAD='C:\FreeCAD\FreeCADCmd.exe' python3 test/tools/windows-freecad
 The test pads a disposable copy above the native fallback threshold and
 requires the actual FreeCAD GLB generator and the original orange material.
 
-The Windows CI emit job builds these helpers with pinned Bun 1.4.3 and uploads
-their checksum manifest alongside the portable C. The Windows job verifies
-and stages them, tests the actual compiled KiCad Worker, and includes both
-executables, dependency licenses and WINDOWS-HELPERS.json in the app ZIP.
-FreeCAD and the Backplane KiCad runtime are installed separately.
+`scripts/build-windows-helpers.sh` builds these helpers with pinned Bun 1.4.3
+and writes their checksum manifest, WINDOWS-HELPERS.json, beside their
+dependency licenses. FreeCAD and the Backplane KiCad runtime are installed
+separately.

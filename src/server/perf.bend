@@ -3,53 +3,44 @@ import ../core/perf.bend as PF
 import ./host.bend as H
 
 # Measuring and logging, for any computation in the process (the hub, the
-# window, a connection). effects/perf.c keeps the numbers; core/perf.bend
+# window, a connection). effects/perf.js keeps the numbers; core/perf.bend
 # reads them. See docs/perf.md.
 
 # microseconds since the first reading (wraps after 71 minutes; spans are
 # wrapping differences, so they stay right)
 def Perf.us() -> IO(U32):
-  import "./effects/perf.c"
   import "./effects/perf.js"
 
 # record now - t0 under name; answers now, the next span's t0
 def Perf.span(name: String, t0: U32) -> IO(U32):
-  import "./effects/perf.c"
   import "./effects/perf.js"
 
 # record a value (a count, a size) under name
 def Perf.add(name: String, v: U32) -> IO(Unit):
-  import "./effects/perf.c"
   import "./effects/perf.js"
 
 # a gauge: only its last value means anything
 def Perf.set(name: String, v: U32) -> IO(Unit):
-  import "./effects/perf.c"
   import "./effects/perf.js"
 
 # start a span under name, unless one is already started
 def Perf.mark(name: String) -> IO(Unit):
-  import "./effects/perf.c"
   import "./effects/perf.js"
 
 # end the span mark started (nothing when none is)
 def Perf.done(name: String) -> IO(Unit):
-  import "./effects/perf.c"
   import "./effects/perf.js"
 
 # every row, as PF.Stats.parse reads them
 def Perf.take() -> IO(String):
-  import "./effects/perf.c"
   import "./effects/perf.js"
 
 # one log line to stderr, BACKPLANE_LOG_FILE, the trace and the ring
 def Perf.emit(line: String) -> IO(Unit):
-  import "./effects/perf.c"
   import "./effects/perf.js"
 
 # the last 512 lines emitted, oldest first
 def Perf.logs() -> IO(String):
-  import "./effects/perf.c"
   import "./effects/perf.js"
 
 def Perf.env.or(r: Result<&1, &1, U32 & String, String>, +d: String) -> String:
