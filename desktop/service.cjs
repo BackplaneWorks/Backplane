@@ -61,6 +61,29 @@ async function launchPaths({ home, binary, web, env, platform = process.platform
   const absolute = value => typeof value === 'string' && !/[\0\r\n]/.test(value) &&
     (/^[A-Za-z]:[\\/]/.test(value) || /^\\\\[^\\/]+[\\/][^\\/]+/.test(value));
   if (![home, binary, web].every(absolute)) throw new Error('Windows service paths must be fully qualified native paths');
+  // The JS (Bun) service is a native Windows program: it takes native paths
+  // as they are; only the Cygwin service needs them mapped. Its own BUILD.json,
+  // beside it, says which it is (serviceRuntime "bun").
+  let runtime = '';
+  try { runtime = JSON.parse(await files.readFile(path.win32.join(path.win32.dirname(binary), 'BUILD.json'), 'utf8')).serviceRuntime || ''; } catch {}
+  if (runtime === 'bun') {
+    // The bundled Cygwin runtime (sh, bash, coreutils) beside it, as the hub
+    // finds it too: first on PATH, bash as SHELL, and the /tmp Cygwin bash
+    // checks for (a ZIP keeps no empty folder)
+    const bin = path.win32.join(path.win32.dirname(binary), 'runtime', 'bin');
+    const childEnv = { ...env, BACKPLANE_HOME: home };
+    let hasRuntime = false;
+    try { hasRuntime = (await files.lstat(path.win32.join(bin, 'bash.exe'))).isFile?.() === true; } catch {}
+    if (hasRuntime) {
+      const pathKey = Object.keys(childEnv).find(k => k.toLowerCase() === 'path') || 'PATH';
+      const rest = String(childEnv[pathKey] || '').split(';').filter(p => p && p.toLowerCase() !== bin.toLowerCase());
+      for (const k of Object.keys(childEnv)) if (k.toLowerCase() === 'path') delete childEnv[k];
+      childEnv.PATH = [bin, ...rest].join(';');
+      if (!childEnv.SHELL) childEnv.SHELL = path.win32.join(bin, 'bash.exe');
+      try { await files.mkdir(path.win32.join(path.win32.dirname(bin), 'tmp'), { recursive: true, mode: 0o700 }); } catch {}
+    }
+    return { home, web, env: childEnv };
+  }
   const runtimeBin = path.win32.join(path.win32.dirname(binary), 'runtime', 'bin');
   const helper = path.win32.join(runtimeBin, 'cygpath.exe');
   const childEnv = { ...env, LC_ALL: 'C.UTF-8' };

@@ -200,9 +200,39 @@ def Enc.utf8(s: String, acc: List<&2, U32>) -> List<&2, U32>:
     case SCon{Chr{c}, t}:
       Enc.utf8(t, Enc.put(c, acc))
 
-# a text string item
+# a string's UTF-8 bytes, newest first, and how many: one walk of the
+# string (on the JS target each step of a walk slices the string, so
+# measuring it and then writing it cost twice that)
+type U8 is Data:
+  U8{n: U32, rev: List<&2, U32>}
+
+def Enc.u8.put(+c: U32, +n: U32, rev: List<&2, U32>) -> U8:
+  U8{(n + Enc.cw(c) : U32), Enc.put(c, rev)}
+
+def Enc.u8(s: String, u: U8) -> U8:
+  match s u:
+    case SNil{} _:
+      u
+    case SCon{Chr{c}, t} U8{n, rev}:
+      Enc.u8(t, Enc.u8.put(c, n, rev))
+
+# xs pushed onto acc in order (each a tail call)
+def Enc.onto(xs: List<&2, U32>, acc: List<&2, U32>) -> List<&2, U32>:
+  match xs:
+    case Nil{}:
+      acc
+    case x <> t:
+      Enc.onto(t, x <> acc)
+
+def Enc.text.k(u: U8, acc: List<&2, U32>) -> List<&2, U32>:
+  match u:
+    case U8{n, rev}:
+      Enc.onto(List.reverse(&2, U32, rev), Enc.head(96, n, acc))
+
+# a text string item: the same bytes as Enc.utf8 over Enc.head of Enc.blen
+# (test/cbor_test.bend), from one walk of the string
 def Enc.text(+s: String, acc: List<&2, U32>) -> List<&2, U32>:
-  Enc.utf8(s, Enc.head(96, Enc.blen(s, 0), acc))
+  Enc.text.k(Enc.u8(s, U8{0, Nil{}}), acc)
 
 # Numbers: which ones travel as integers
 type Sc is Data:
@@ -568,3 +598,154 @@ def Cbor.decode(bs: List<&2, U32>) -> Maybe<&2, J.Json>:
   +ks = Cbor.keys()
   +ws = Cbor.words()
   Dec.fin(Dec.go(bs, SHead{Nil{}, TNone{}}, ks, ws))
+
+# Encoding with holes (fast hub R1: a thin reply whose page was encoded
+# before): a string value that is a hole's name (they start with "\u{0}",
+# which no text the hub writes does) is written as the hole's bytes, each
+# segment in turn, exactly as Enc.go would write the value it stands for
+# (test/thin_splice_test.bend holds Cbor.encode.holes to Cbor.encode of
+# the whole tree).
+type Hole is Data:
+  Hole{name: String, segs: List<&2, List<&2, U32>>}
+
+def Hole.segs.go(segs: List<&2, List<&2, U32>>, acc: List<&2, U32>) -> List<&2, U32>:
+  match segs:
+    case Nil{}:
+      acc
+    case s <> t:
+      Hole.segs.go(t, Enc.onto(s, acc))
+
+def Hole.name.is(hs: List<&2, Hole>, +s: String) -> Bool:
+  match hs:
+    case Hole{+n, _} <> _:
+      String.eq(n, s)
+    case Nil{}:
+      False{}
+
+def Hole.find(hs: List<&2, Hole>, +s: String, +hit: Bool) -> Maybe<&2, List<&2, List<&2, U32>>>:
+  match hs hit:
+    case Nil{} _:
+      None{}
+    case Hole{+n, segs} <> +r True{}:
+      Some{segs}
+    case +x <> t False{}:
+      Hole.find(t, s, Hole.name.is(t, s))
+
+def Hole.mark(+s: String) -> Bool:
+  match s:
+    case SCon{Chr{c}, _}:
+      U32.is_eq(c, 0)
+    case SNil{}:
+      False{}
+
+def Enc.hole.put(m: Maybe<&2, List<&2, List<&2, U32>>>, +s: String, +ws: CTree, acc: List<&2, U32>) -> List<&2, U32>:
+  match m:
+    case Some{segs}:
+      Hole.segs.go(segs, acc)
+    case None{}:
+      Enc.str(s, ws, acc)
+
+def Enc.hole.str(+marked: Bool, +s: String, +ws: CTree, +hs: List<&2, Hole>, acc: List<&2, U32>) -> List<&2, U32>:
+  match marked:
+    case True{}:
+      Enc.hole.put(Hole.find(hs, s, Hole.name.is(hs, s)), s, ws, acc)
+    case False{}:
+      Enc.str(s, ws, acc)
+
+# Enc.go with holes
+def Enc.hole.go(j: J.Json, +ks: CTree, +ws: CTree, +hs: List<&2, Hole>, acc: List<&2, U32>) -> List<&2, U32>:
+  match j:
+    case J.Null{}:
+      246 <> acc
+    case J.Flag{True{}}:
+      245 <> acc
+    case J.Flag{False{}}:
+      244 <> acc
+    case J.Num{r}:
+      Enc.num(r, acc)
+    case J.Str{+s}:
+      Enc.hole.str(Hole.mark(s), s, ws, hs, acc)
+    case J.Arr{+xs}:
+      Enc.hole.go(xs, ks, ws, hs, Enc.head(128, Enc.count(xs, 0), acc))
+    case J.Obj{+fs}:
+      Enc.hole.go(fs, ks, ws, hs, Enc.head(160, Enc.count(fs, 0), acc))
+    case J.Item{h, t}:
+      Enc.hole.go(t, ks, ws, hs, Enc.hole.go(h, ks, ws, hs, acc))
+    case J.Field{k, v, t}:
+      Enc.hole.go(t, ks, ws, hs, Enc.hole.go(v, ks, ws, hs, Enc.key(k, ks, acc)))
+    case J.End{}:
+      acc
+
+def Cbor.encode.holes(j: J.Json, +hs: List<&2, Hole>) -> List<&2, U32>:
+  +ks = Cbor.keys.tree()
+  +ws = Cbor.words.tree()
+  List.reverse(&2, U32, Enc.hole.go(j, ks, ws, hs, Nil{}))
+
+# A tree's bytes split where a marker string stands (its bytes, once):
+# (before, after), forward; None when the marker is not there exactly once
+type Cut2 is Data:
+  Cut2{before: List<&2, U32>, after: List<&2, U32>}
+
+def Cut.prefix(xs: List<&2, U32>, pat: List<&2, U32>, ok: Bool) -> Bool:
+  match xs pat ok:
+    case _ _ False{}:
+      False{}
+    case _ Nil{} True{}:
+      True{}
+    case Nil{} _ True{}:
+      False{}
+    case +x <> xt +p <> pt True{}:
+      Cut.prefix(xt, pt, U32.is_eq(p, x))
+
+def Cut.drop(xs: List<&2, U32>, n: Nat) -> List<&2, U32>:
+  match xs n:
+    case +ys 0n:
+      ys
+    case Nil{} _:
+      Nil{}
+    case +y <> t 1n+m:
+      Cut.drop(t, m)
+
+# walk xs a byte at a time; rev: the bytes before the first match,
+# reversed; n: matches so far; skip: the match's bytes still to pass;
+# after: what follows the first match
+type CutAt is Data:
+  CutAt{rev: List<&2, U32>, n: Nat, skip: Nat, after: List<&2, U32>}
+
+def Cut.skip(+t: List<&2, U32>, rev: List<&2, U32>, +n: Nat, +skip: Nat, +after: List<&2, U32>) -> CutAt:
+  CutAt{rev, n, Nat.sub(skip, 1n), Bool.pick(List<&2, U32>, Bool.and(Nat.is_eq(n, 1n), Nat.is_eq(skip, 1n)), t, after)}
+
+def Cut.hit(+t: List<&2, U32>, rev: List<&2, U32>, +n: Nat, +after: List<&2, U32>, +plen: Nat) -> CutAt:
+  CutAt{rev, Nat.add(n, 1n), Nat.sub(plen, 1n), Bool.pick(List<&2, U32>, Bool.and(Nat.is_eq(n, 0n), Nat.is_le(plen, 1n)), t, after)}
+
+def Cut.plain(+x: U32, +rev: List<&2, U32>, +n: Nat, after: List<&2, U32>) -> CutAt:
+  CutAt{Bool.pick(List<&2, U32>, Nat.is_eq(n, 0n), x <> rev, rev), n, 0n, after}
+
+def Cut.step.k(skipping: Bool, hit: Bool, +x: U32, +t: List<&2, U32>, at: CutAt, +plen: Nat) -> CutAt:
+  match skipping hit at:
+    case True{} _ CutAt{rev, +n, +skip, +after}:
+      Cut.skip(t, rev, n, skip, after)
+    case False{} True{} CutAt{rev, +n, _, +after}:
+      Cut.hit(t, rev, n, after, plen)
+    case False{} False{} CutAt{+rev, +n, _, after}:
+      Cut.plain(x, rev, n, after)
+
+def Cut.skipping(+at: CutAt) -> Bool:
+  match at:
+    case CutAt{_, _, skip, _}:
+      Nat.is_gt(skip, 0n)
+
+def Cut.find(xs: List<&2, U32>, +pat: List<&2, U32>, +plen: Nat, +at: CutAt, hit: Bool) -> CutAt:
+  match xs:
+    case Nil{}:
+      at
+    case +x <> +t:
+      Cut.find(t, pat, plen, Cut.step.k(Cut.skipping(at), hit, x, t, at, plen), Cut.prefix(t, pat, True{}))
+
+def Cut.done(at: CutAt) -> Maybe<&2, Cut2>:
+  match at:
+    case CutAt{+rev, +n, _, +after}:
+      Bool.pick(Maybe<&2, Cut2>, Nat.is_eq(n, 1n), Some{Cut2{List.reverse(&2, U32, rev), after}}, None{})
+
+def Cbor.cut(+bs: List<&2, U32>, +pat: List<&2, U32>) -> Maybe<&2, Cut2>:
+  Cut.done(Cut.find(bs, pat, List.length(&2, U32, pat), CutAt{Nil{}, 0n, 0n, Nil{}}, Cut.prefix(bs, pat, True{})))

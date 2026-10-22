@@ -109,7 +109,10 @@ const root = mkdtempSync(join(tmpdir(), "bp-phonecold-"));
 const home = join(root, "home");
 mkdirSync(home);
 const lines: string[] = [];
-const at = 1790000000;
+// recent times: a project idle past Quiet.days (3 days) folds under "Older"
+// and leaves the screen's `projects`, so a fixed date made every project
+// check fail three days after it was written
+const at = Math.floor(Date.now() / 1000) - 3600 - PER;
 for (let p = 0; p < PROJECTS; p++) lines.push(JSON.stringify({ $: "ProjectCreated", id: `p${p}`, title: `Project ${p}`, root: join(root, `p${p}`), at }));
 for (let t = 0; t < THREADS; t++)
   lines.push(JSON.stringify({ $: "ThreadCreated", id: `t${t}`, project: `p${t % PROJECTS}`, title: `Thread ${t}`, env: "local", branch: "", worktree: "", provider: "claude", model: "", at: at + 1 }));

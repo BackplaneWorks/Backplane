@@ -129,6 +129,7 @@ def main() -> IO(Unit):
     C.Check.str("a question in the reply", told(H.Lr.demo.k(True{}, False{}, False{}, [M.MessagePosted{"t1", "a2", M.Assistant{}, "Shall I go on?", 3n}]), H.Lr.demo.end()),
       "[Backplane] Launched thread \"work\" (t1) finished its turn and waits for an answer:\n\nShall I go on?")
     C.Check.str("a long reply is kept whole", Bool.show(String.contains(told(H.Lr.demo.k(True{}, False{}, False{}, [M.MessagePosted{"t1", "a2", M.Assistant{}, long(), 3n}]), H.Lr.demo.end()), long())), "True")
+    C.Check.str("a wake on a thread carries a long reply whole", Bool.show(String.contains(H.Wake.thread.text(H.Lr.demo.k(True{}, False{}, False{}, [M.MessagePosted{"t1", "a2", M.Assistant{}, long(), 3n}]), "t1", H.Lr.demo.end()), long())), "True")
     C.Check.str("not cut: no thread_read hint", Bool.show(String.contains(told(H.Lr.demo.k(True{}, False{}, False{}, [M.MessagePosted{"t1", "a2", M.Assistant{}, long(), 3n}]), H.Lr.demo.end()), "cut short")), "False")
     C.Check.str("the report starts the launcher's turn", tags(cs(H.Launch.tell(d, 9n, "t1", H.Step{H.Lr.demo.end(), Nil{}}))), "TurnChanged MessagePosted MessageFrom TurnChanged ")
     C.Check.str("its id names the thread", Bool.show(String.contains(J.Json.show(K.Change.encode(Maybe.default(&2, M.Change, List.head(&2, M.Change, List.drop(&2, M.Change, cs(H.Launch.tell(d, 9n, "t1", H.Step{H.Lr.demo.end(), Nil{}})), 1n)), M.TurnChanged{"x", M.Idle{}, 0n}))), "t:t1:lr-")), "True")

@@ -844,7 +844,7 @@ fun ThreadScreen(m: AppModel, s: Screen, t: ThreadView, below: (@Composable () -
     }
     Errors(m, s, snacks)
     val count = (if (t.parent != null) 1 else 0) +
-        (if (t.earlier > 0) 1 else 0) + t.entries.size + t.sending.size + (if (t.live.isNotEmpty() || t.livePartial != null || t.working.isNotEmpty()) 1 else 0)
+        (if (t.earlier > 0) 1 else 0) + t.entries.size + t.sending.size + (if (t.live.isNotEmpty() || t.working.isNotEmpty()) 1 else 0)
     LaunchedEffect(t.id, m.scrolls) { if (count > 0) list.scrollToItem(count - 1) }
     // earlier entries shown: the view goes back to the entry that was first
     var keepAt by remember { mutableStateOf<String?>(null) }
@@ -1075,13 +1075,7 @@ fun ThreadScreen(m: AppModel, s: Screen, t: ThreadView, below: (@Composable () -
                 }
             }
             itemsIndexed(t.sending, key = { i, _ -> "sending:$i" }) { _, text -> SendingView(text) }
-            if (t.live.isNotEmpty()) item(key = "live") {
-                Column {
-                    Markdown(t.live)
-                    t.livePartial?.let { PartialMessageFooter(m, s.hub, t.id, it.id, it, live = true) }
-                }
-            }
-            else if (t.livePartial != null) item(key = "live") { PartialMessageFooter(m, s.hub, t.id, t.livePartial.id, t.livePartial, live = true) }
+            if (t.live.isNotEmpty()) item(key = "live") { Markdown(t.live) }
             else if (t.working.isNotEmpty()) item(key = "live") {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {

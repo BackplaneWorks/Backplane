@@ -28,6 +28,7 @@ import ./src/server/server.bend as MPCREDIT # mail perf
 import ./src/web/view.bend as WPH
 # ---- end i18n web phone imports ----
 import ./src/core/schematic.bend as SC # kicad fork viewers
+import ./src/core/uctx.bend as UCXL # uniichat infinite context
 import ./src/core/charter.bend as CH # mail 2c
 import ./src/core/mailrun.bend as MRUN # mail 2c
 import ./src/app/mailroom.bend as MRUI # mail ui
@@ -75,6 +76,8 @@ import ./src/app/cats.bend as VCAT
 import ./src/core/sexpr.bend as KSEX # kicad fork footprint placement
 import ./src/core/board.bend as B
 import ./src/core/hub.bend as H
+import ./src/core/copy.bend as JCOPY # J2: BACKPLANE_COPY
+import ./src/core/copynet.bend as JCNET # J2: BACKPLANE_COPY
 import ./src/core/deploy.bend as DP
 import ./src/core/ship.bend as SHP # deploy main
 import ./src/core/cmds.bend as CM
@@ -11117,6 +11120,12 @@ law thin_mail_lazy_warm:
   for +st: M.State
   for +done: List<&2, TMAILL.Pending>
   {TMAILL.Lazy.force(TMAILL.Lazy.warm(TMAILL.Cache.of(st), TMAILL.Later{st, done})) == TMAILL.Lazy.force(TMAILL.Later{st, done}) : TMAILL.Cache}
+# a boot without the developer's escape never replays the whole log into
+# memory: an unusable store.db is built (a child), or the hub stops
+law boot_next_never_cold:
+  for ok: Bool
+  for n: Nat
+  {MPCREDIT.Boot.is_cold(MPCREDIT.Boot.next(False{}, ok, n)) == False{} : Bool}
 # ---- end S3 ----
 
 # --- J2: HTTP and WebSocket bodies counted and unmasked in tail calls ---
@@ -11146,6 +11155,199 @@ law ws_unmask_take_go:
   for +acc: List<&2, U32>
   {WS.Ws.unmask.take.go(bs, n, key, i, acc) == List.reverse.go(&2, U32, WS.Ws.unmask(List.take(&2, U32, bs, n), key, i), acc) : List<&2, U32>}
 
+# --- J2: a hub on a copied log (BACKPLANE_COPY=1) acts on nothing outside ---
+# Its watch scripts are none (no launch, check, stop or intent shell: every
+# watch reads as gone, nothing the log names is signalled)
+law watch_copy_launch_none:
+  for +home: String
+  for +id: String
+  for +cwd: String
+  for +target: String
+  {MPCREDIT.Watch.launch.argv(True{}, home, id, cwd, target) == [] : List<&2, String>}
+
+law watch_copy_check_none:
+  for +kind: String
+  for +target: String
+  for +ident: String
+  for +home: String
+  for +id: String
+  {MPCREDIT.Watch.check.argv(True{}, kind, target, ident, home, id) == [] : List<&2, String>}
+
+law watch_copy_stop_none:
+  for +kind: String
+  for +target: String
+  for +ident: String
+  for +home: String
+  for +id: String
+  {MPCREDIT.Watch.stop.argv(True{}, kind, target, ident, home, id) == [] : List<&2, String>}
+
+law watch_copy_intent_none:
+  for +home: String
+  for +id: String
+  {MPCREDIT.Watch.intent.argv(True{}, home, id) == [] : List<&2, String>}
+
+# a hub that is no copy runs every out it made
+law copy_off_runs_all:
+  for +os: List<&2, H.Out>
+  {JCOPY.Copy.outs(False{}, os) == os : List<&2, H.Out>}
+
+# a copy drops deploys, restarts, updates, far reports, pushes, watch stops,
+# named locks, git that writes and bot effects outside its home
+law copy_drops_outside:
+  {JCOPY.Copy.outs(True{}, [H.DeployGo{"s"}, H.ShipRun{"c"}, H.ShipNext{"w"}, H.DeployProbe{}, H.Restart{}, H.Upgrade{}, H.UpgradeForce{}, H.LaunchFar{}, H.Alerted{"t"}, H.IslandSync{},
+    H.WatchStop{"t", "w", "pid", "1", "x"}, H.LockGuard{"n", "", "t"}, H.Git{0, "", "step", "t", "/c", "", ""}, H.BotFx{"send", "a", "b", "c"}, H.BotReply{"t", "to", "x", ""}]) == [] : List<&2, H.Out>}
+
+# and keeps what stays in the hub: replies, reading git, its home's folders
+law copy_keeps_inside:
+  {JCOPY.Copy.outs(True{}, [H.Send{1, "x"}, H.Git{3, "9", "diff", "t", "/c", "", ""}, H.BotFx{"scratch", "a", "", ""}]) == [H.Send{1, "x"}, H.Git{3, "9", "diff", "t", "/c", "", ""}, H.BotFx{"scratch", "a", "", ""}] : List<&2, H.Out>}
+
+# a client that asked for git that writes is told, not left waiting
+law copy_git_write_told:
+  {JCOPY.Copy.outs(True{}, [H.Git{3, "9", "act", "t", "/c", "", ""}]) == [H.Reply.err(3, "9", "a hub on a copied log (BACKPLANE_COPY=1) runs no git that writes")] : List<&2, H.Out>}
+
+# no network command from a copy; every command from a hub that is no copy
+law copy_refuses_net:
+  {Bool.and(Bool.and(JCNET.Copy.refused(True{}, "curl", []), JCNET.Copy.refused(True{}, "git", ["push", "origin"])), Bool.not(JCNET.Copy.refused(True{}, "git", ["status"]))) == True{} : Bool}
+
+law copy_off_refuses_none:
+  for +cmd: String
+  for +args: List<&2, String>
+  {JCNET.Copy.refused(False{}, cmd, args) == False{} : Bool}
+
+# a copy takes over or stops none of the agents its home's records name
+law adopt_copy_none:
+  for +rec: String
+  for +hand: String
+  {MPCREDIT.Adopt.copy.entries(True{}, rec, hand) == [] : List<&2, AD.AEntry>}
+
+# and opens no file on the machine (file.open is git job "open"): the
+# client is told
+law copy_file_open_told:
+  {JCOPY.Copy.outs(True{}, [H.Git{3, "9", "open", "", "/", "/x", "open"}]) == [H.Reply.err(3, "9", "a hub on a copied log (BACKPLANE_COPY=1) runs no git that writes")] : List<&2, H.Out>}
+
+# --- J2: the pairing message made once per link, not per join ---
+# (its QR code took ~2 s on the JS target, for every client that joined)
+law pair_msg_kept:
+  {MPCREDIT.Hub.pair_msg.from("r1\n{m}", "r1") == "{m}" : String}
+
+# a message kept for another link is not used
+law pair_msg_other_link:
+  {MPCREDIT.Hub.pair_msg.from("r1\n{m}", "") == MPCREDIT.Hub.pair_msg.of("") : String}
+
+# no link, no QR code
+law pair_msg_no_link_qr:
+  {MPCREDIT.Info.qr("") == "" : String}
+# ---- F1: the far feed made a slice at a time (far.bend Fr.feed.some) ----
+# folding every slice of 2 lines is the feed made from the whole log at once
+law far_feed_sliced:
+  {FR.Fr.feed.sliced(20n, FR.Fr.feed.start(FR.Fr.feed.demo.lines()), 2n, FR.Fr.feed.demo.st()) == FR.Fr.feed.full(FR.Fr.feed.demo.lines(), FR.Fr.feed.demo.st()) : FR.Feed}
+
+# and so are slices of one line, and one slice bigger than the log
+law far_feed_sliced_one:
+  {FR.Fr.feed.sliced(20n, FR.Fr.feed.start(FR.Fr.feed.demo.lines()), 1n, FR.Fr.feed.demo.st()) == FR.Fr.feed.full(FR.Fr.feed.demo.lines(), FR.Fr.feed.demo.st()) : FR.Feed}
+
+law far_feed_sliced_big:
+  {FR.Fr.feed.sliced(20n, FR.Fr.feed.start(FR.Fr.feed.demo.lines()), 500n, FR.Fr.feed.demo.st()) == FR.Fr.feed.full(FR.Fr.feed.demo.lines(), FR.Fr.feed.demo.st()) : FR.Feed}
+
+# a store row for a shared line, none for a private one
+law far_fact_shared:
+  {FR.Fr.fact(FR.Fr.feed.demo.st(), M.ThreadRenamed{"t1", "x", 9n}, 8n) == [FR.Fact{8n, "p1"}] : List<&2, FR.Fact>}
+
+law far_fact_private:
+  {FR.Fr.fact(FR.Fr.feed.demo.st(), M.SettingSet{"k", "v", 9n}, 8n) == Nil{} : List<&2, FR.Fact>}
+# ---- end F1 feed ----
+
+# --- fast hub R1: per-frame reads that do not grow with the log (locks_idle_*) ---
+# a lock never set, and a lock released, are idle (M.Locks.idle: read from
+# the setting's text, not parsed)
+law locks_idle_never_set:
+  {M.Locks.idle(M.State.empty(), "bend") == True{} : Bool}
+
+law locks_idle_released:
+  {M.Locks.idle(M.State.replay([M.LockChanged{"bend", LCK.Lock.empty(), 1n}], M.State.empty()), "bend") == True{} : Bool}
+
+# a lock that is held is not idle
+law locks_idle_held_not:
+  {M.Locks.idle(M.State.replay([M.LockChanged{"bend", LCK.Lock.promote([LCK.LockParty{"t1", "thread", "t1", "", 1n, 0n}]), 1n}], M.State.empty()), "bend") == False{} : Bool}
+
+# what Locks.after skips: an idle lock that the step does not touch answers
+# Step.none() from Locks.after.one
+law locks_after_idle_none:
+  {H.Locks.after.one(M.State.replay([M.LockChanged{"bend", LCK.Lock.empty(), 1n}], M.State.empty()), M.State.replay([M.LockChanged{"bend", LCK.Lock.empty(), 1n}], M.State.empty()), 5n, "bend") == H.Step.none() : H.Step}
+
+# the idle lock's text, written out (Locks.idle reads it for every lock on
+# every step): the empty lock exactly as Locks.fold writes it
+law locks_idle_text_exact:
+  {M.Locks.idle.text() == J.Json.show(LCK.Lock.json(LCK.Lock.empty())) : String}
+# --- J2: the sign-in wait asked again only when the log moved ---
+# (Hub.auth.beat: a settings lookup per thread at every beat was most of an
+# idle JS hub's CPU)
+law auth_beat_kept:
+  {MPCREDIT.Auth.kept("1 1", M.State.empty()) == True{} : Bool}
+
+law auth_beat_asked:
+  {MPCREDIT.Auth.kept("7 1", M.State.empty()) == False{} : Bool}
+
+# ---- uniichat: the uberbot's infinite context (core/uctx.bend, beta) ----
+# with uber.ctx off a step passes as it was: no fresh session, no
+# compaction run, no busy mark (hub.bend's Uc.after)
+law uctx_off_after_same:
+  {H.Uc.after(H.Uc.demo(False{}), 60n, H.Uc.demo.turn("t1")) == H.Uc.demo.turn("t1") : H.Step}
+
+# off: no thread runs with infinite context, the uberbot's included
+law uctx_off_no_thread:
+  {UCXL.Uctx.on(H.Uc.demo(False{}), "t1") == False{} : Bool}
+
+# off: the tool list gains nothing
+law uctx_off_tools_same:
+  {MC.Mcp.uctx.with(UCXL.Uctx.on(H.Uc.demo(False{}), "t1"), J.Null{}) == J.Null{} : J.Json}
+
+# on: the uberbot's turn starts a fresh Claude process with no session, and
+# the turn's end starts one compaction run, marked busy
+law uctx_on_fresh_session:
+  {H.Uc.after(H.Uc.demo(True{}), 60n, H.Uc.demo.turn("t1")) == H.Uc.demo.fresh() : H.Step}
+
+# on: another bot's thread is untouched
+law uctx_on_other_same:
+  {H.Uc.after(H.Uc.demo(True{}), 60n, H.Uc.demo.turn("t2")) == H.Uc.demo.turn("t2") : H.Step}
+
+# the tree's roots: a node per power of two, largest first
+law uctx_roots:
+  {UCXL.Uctx.refs(UCXL.Uctx.roots(13n)) == ["0+8", "8+4", "12+1"] : List<&2, String>}
+
+# with no line written, every message is its own line in the view
+law uctx_view_leaves:
+  {UCXL.Uctx.refs(UCXL.Uctx.view(5n, Map.new(&2, Bool))) == ["0+1", "1+1", "2+1", "3+1", "4+1"] : List<&2, String>}
+
+# the turn's own messages (the person's at the end) are left out of its view
+law uctx_own_trailing:
+  {UCXL.Uctx.own([UCXL.UMsg{"you", 1n}, UCXL.UMsg{"user", 1n}, UCXL.UMsg{"user", 1n}]) == 2n : Nat}
+
+# a memory line never goes to clients
+law uctx_wire_hides_text:
+  {String.contains(J.Json.show(C.Change.wire(M.CtxNoted{"t1", 1n, 0n, "secret", 9n})), "secret") == False{} : Bool}
+# ---- end uniichat ----
+# --- J2: the models' JSON kept parsed, not parsed at every step ---
+# (Hub.step.fallback: Cfg.models parsed for every step was seconds of the JS
+# hub's first minute after boot); the kept answer is the parse's
+law models_json_kept:
+  {J.Json.show(MPLOG.Bn.models.again("{\"claude\":[\"opus\"]}")) == "{\"claude\":[\"opus\"]}" : String}
+
+# --- J2: a holder is only "<pid> <port>", never a shell's noise ---
+# (Cygwin bash printed "could not find /tmp" and a fresh Windows home read
+# as held by pid "bash.exe:", port "warning:")
+law onehub_legacy_noise:
+  {OHB.OneHub.legacy("bash.exe: warning: could not find /tmp, please create!\n") == "" : String}
+
+law onehub_legacy_after_noise:
+  {OHB.OneHub.legacy("bash.exe: warning: could not find /tmp, please create!\n1234 3787\n") == "1234 3787" : String}
+
+law onehub_legacy_line:
+  {OHB.OneHub.legacy("1234 3787") == "1234 3787" : String}
+
+# the lock file's own line, with or without its "flock"
+law onehub_pair_flock:
+  {OHB.OneHub.pair("1234 3787 flock") ++ "|" ++ OHB.OneHub.pair("x 3787") ++ "|" ++ OHB.OneHub.pair("") == "1234 3787||" : String}
 # ---- browser pages and loopback (J3) ----
 # page ids: an unknown one is refused, a thread's or bot's accepted
 law browser_owner_unknown_refused:

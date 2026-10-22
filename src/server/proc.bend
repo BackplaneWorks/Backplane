@@ -1,6 +1,7 @@
 import Base
 import ./host.bend as H
 import ../core/utf8.bend as U
+import ../core/copynet.bend as CN
 
 # Running commands to completion. Loops that wait on the outside world count
 # down a Nat fuel (Bend requires every loop to end).
@@ -75,6 +76,18 @@ def Proc.git.env() -> List<&2, String>:
   ["GIT_CONFIG_COUNT=3", "GIT_CONFIG_KEY_0=core.fsmonitor", "GIT_CONFIG_VALUE_0=false", "GIT_CONFIG_KEY_1=core.hooksPath", "GIT_CONFIG_VALUE_1=/dev/null",
    "GIT_CONFIG_KEY_2=core.pager", "GIT_CONFIG_VALUE_2=cat", "GIT_PAGER=cat"]
 
-# run cmd with args in cwd; stdout and stderr together, stdin closed
-def Proc.run(cmd: String, args: List<&2, String>, cwd: String) -> IO(Ran):
-  IO.bind(Result<&1, &1, U32 & String, U32 & Socket>, Ran, H.Proc.spawn("env", List.append(&2, String, Proc.git.env(), cmd <> args), cwd, 1), Proc.run.k)
+# whether this hub is on a copied log (core/copy.bend)
+def Proc.copy() -> IO(Bool):
+  IO.bind(Result<&1, &1, U32 & String, String>, Bool, IO.get_env("BACKPLANE_COPY"), r => IO.pure(Bool, String.eq(Result.default(&1, &1, U32 & String, String, r, ""), "1")))
+
+def Proc.run.go(refused: Bool, +cmd: String, args: List<&2, String>, cwd: String) -> IO(Ran):
+  match refused:
+    case True{}:
+      IO.pure(Ran, Ran{126, CN.Copy.refusal(cmd)})
+    case False{}:
+      IO.bind(Result<&1, &1, U32 & String, U32 & Socket>, Ran, H.Proc.spawn("env", List.append(&2, String, Proc.git.env(), cmd <> args), cwd, 1), Proc.run.k)
+
+# run cmd with args in cwd; stdout and stderr together, stdin closed (a
+# hub on a copied log runs no network command: CN.Copy.refused)
+def Proc.run(+cmd: String, +args: List<&2, String>, +cwd: String) -> IO(Ran):
+  IO.bind(Bool, Ran, Proc.copy(), copy => Proc.run.go(CN.Copy.refused(copy, cmd, args), cmd, args, cwd))

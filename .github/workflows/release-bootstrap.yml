@@ -26,6 +26,16 @@ on:
         type: string
         required: false
         default: ''
+      windows_runtime_url:
+        description: js, windows-x64 only. The portable Cygwin runtime bundle (.tar.gz of RUNTIME.json, CLOSURE.json and their members); its contents are pinned in service-runtime.py
+        type: string
+        required: false
+        default: ''
+      windows_runtime_sha256:
+        description: SHA256 of that .tar.gz
+        type: string
+        required: false
+        default: ''
 permissions:
   contents: read
 concurrency:
@@ -34,8 +44,8 @@ concurrency:
 
 env:
   BACKPLANE_FROZEN_COMMIT: ${{ inputs.ref }}
-  BACKPLANE_VERSION: v0.12.0
-  BACKPLANE_VERSION_STAMP: '0.12.0'
+  BACKPLANE_VERSION: v0.12.1
+  BACKPLANE_VERSION_STAMP: '0.12.1'
   BACKPLANE_TELEMETRY_CHANNEL: release
 
 jobs:
@@ -125,7 +135,11 @@ jobs:
           ref: ${{ github.sha }}
           path: build/bootstrap-tools
           persist-credentials: false
+      # Linux measures with the runner's own python3 (Ubuntu 24.04: 3.12):
+      # setup-python puts LD_LIBRARY_PATH in the job's environment, and the
+      # measurement refuses an ambient loader override
       - uses: actions/setup-python@v5
+        if: runner.os != 'Linux'
         with:
           python-version: '3.12'
       - uses: actions/download-artifact@v4
@@ -142,12 +156,26 @@ jobs:
           chmod 755 "$SERVICE"  # artifacts drop file modes
           v=$("$SERVICE" --version)
           echo "$v"
-          [ "$v" = "backplane 0.12.0" ]
+          [ "$v" = "backplane 0.12.1" ]
       - name: Measure matching-host system ABI and assemble genuine service component
         shell: bash
+        env:
+          WINRT_URL: ${{ inputs.windows_runtime_url }}
+          WINRT_SHA: ${{ inputs.windows_runtime_sha256 }}
         run: |
           chmod 755 build/bootstrap-js/${{ matrix.service }}
-          python build/bootstrap-tools/scripts/service-runtime.py --source-root "$GITHUB_WORKSPACE" --build "$GITHUB_WORKSPACE/build/bootstrap-js" --producer "$GITHUB_WORKSPACE/build/bootstrap-tools/scripts/service-release.py" --producer-sha256 3a5bdfbdf05bfc2819756b1b77cbf1518c9a90ea013be622dca8c69b76f16972 --out "$GITHUB_WORKSPACE/build/bootstrap-service"
+          py=python; [ "$RUNNER_OS" = Linux ] && py=/usr/bin/python3
+          # Windows: the hub's shell (sh, bash, coreutils) ships beside it
+          set --
+          if [ "${{ matrix.target }}" = windows-x64 ]; then
+            [ -n "$WINRT_URL" ] && [ -n "$WINRT_SHA" ] || { echo "windows-x64 needs windows_runtime_url and windows_runtime_sha256"; exit 1; }
+            curl -fsSL "$WINRT_URL" -o "$RUNNER_TEMP/winrt.tar.gz"
+            echo "$WINRT_SHA  $RUNNER_TEMP/winrt.tar.gz" | sha256sum -c -
+            # (Git Bash tar takes "D:..." for a remote host: work relative to the folder)
+            mkdir -p "$RUNNER_TEMP/winrt" && (cd "$RUNNER_TEMP" && tar -xzf winrt.tar.gz -C winrt)
+            set -- --windows-runtime "$RUNNER_TEMP/winrt"
+          fi
+          "$py" build/bootstrap-tools/scripts/service-runtime.py "$@" --source-root "$GITHUB_WORKSPACE" --build "$GITHUB_WORKSPACE/build/bootstrap-js" --producer "$GITHUB_WORKSPACE/build/bootstrap-tools/scripts/service-release.py" --producer-sha256 e8b52fb537d587c2946c9e893e193a7e967fe9ebe0088390dd7b8eec15656058 --out "$GITHUB_WORKSPACE/build/bootstrap-service"
       - uses: actions/upload-artifact@v4
         if: always()
         with:

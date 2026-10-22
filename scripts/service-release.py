@@ -13,7 +13,7 @@ import struct
 import subprocess
 import sys
 
-VERSION = "0.12.0"
+VERSION = "0.12.1"
 ENDPOINT = "https://backplane.works/api/v1/events"
 # The JS service (scripts/build-js.sh, `bun build --compile` against a
 # pinned Bun runtime of the target), cross-built from any host.
@@ -247,7 +247,8 @@ def js(request, base, out):
             and request["toolchain"]["bunRuntime"].get("version") == request["toolchain"]["bun"]["version"],
             "Pinned Bun runtime must be the target's, of the pinned Bun's version")
     architecture(bun_runtime, target)
-    env.update(BACKPLANE_JS_TARGET=target, BACKPLANE_JS_BUN_RUNTIME=str(bun_runtime),
+    # /hello's commit is the frozen release commit (build-js.sh stamps it)
+    env.update(BACKPLANE_JS_TARGET=target, BACKPLANE_JS_BUN_RUNTIME=str(bun_runtime), BACKPLANE_COMMIT_STAMP=release["commit"],
                PATH=str(bun.parent) + os.pathsep + str(bend.parent) + os.pathsep + env.get("PATH", ""))
     clock = subprocess.check_output(["date", "+%s%N"], env=env, text=True).strip()
     require(re.fullmatch(r"[0-9]{19,}", clock), "build-js.sh requires GNU date in PATH (Darwin: coreutils gnubin)")

@@ -42,4 +42,32 @@ cache.save(reply([entry(1, "stale")]), links: links, generation: 2)
 require(cache.size() == 0, "retired selection generation cannot write after clear")
 cache.save(reply([entry(2, "newer")]), links: links, generation: 4)
 require(cache.load(links: links) != nil, "new generation can persist")
+// message text is never cut: a 40 KB reply comes back whole, from its first character
+let long = "START-OF-LONG " + String(repeating: "forty kilobytes of reply text ", count: 1400) + " END-OF-LONG"
+require(long.utf8.count > 40000, "the test message is over 40 KB")
+let wholeCache = ScreenCache(file: root.appendingPathComponent("whole.json"))
+wholeCache.save(reply([entry(1, "before"), entry(2, long)]), links: links, generation: 1)
+guard let wd = wholeCache.load(links: links) else { require(false, "a 40 KB reply is cached"); exit(1) }
+let wt = (try JSONSerialization.jsonObject(with: wd) as! [String: Any])["thread"] as! [String: Any]
+let we = wt["entries"] as! [[String: Any]]
+require(we.last?["text"] as? String == long, "a 40 KB reply is cached whole")
+require(we.last?["partial"] == nil, "a whole reply is not marked partial")
+require(String(decoding: try! JSONSerialization.data(withJSONObject: we.last!["blocks"]!), as: UTF8.self).contains("START-OF-LONG"), "its blocks start at its start")
+// one entry over the whole limit is dropped whole, never cut; the others stay whole
+let huge = "HUGE-START " + String(repeating: "x", count: 600 * 1024) + " HUGE-END"
+let dropCache = ScreenCache(file: root.appendingPathComponent("drop.json"))
+dropCache.save(reply([entry(1, huge), entry(2, "newest whole reply")]), links: links, generation: 1)
+guard let dd = dropCache.load(links: links) else { require(false, "the screen is still cached when one entry is too big"); exit(1) }
+let ds = String(decoding: dd, as: UTF8.self)
+require(!ds.contains("HUGE-END") && !ds.contains("HUGE-START"), "an entry over the limit is dropped whole, no part of it kept")
+require(ds.contains("newest whole reply"), "the newer entry stays whole")
+// a streamed reply alone over the limit goes whole too
+let bigLive: [String: Any] = ["hub": "hub.test:3787", "sel": "hub.test:3787|selected", "online": true, "projects": [], "hubs": [],
+  "thread": ["id": "selected", "entries": [entry(1, "kept entry")], "live": [["tag": "p", "kids": [["text": "LIVE-START " + String(repeating: "y", count: 600 * 1024)]]]]]]
+let liveCache = ScreenCache(file: root.appendingPathComponent("live.json"))
+liveCache.save(String(decoding: try! JSONSerialization.data(withJSONObject: ["screen": bigLive]), as: UTF8.self), links: links, generation: 1)
+guard let ld = liveCache.load(links: links) else { require(false, "the screen is cached when the live reply is too big"); exit(1) }
+let ls = String(decoding: ld, as: UTF8.self)
+require(!ls.contains("LIVE-START") && !ls.contains("yyyyyyyy"), "a live reply over the limit is dropped whole")
+require(ls.contains("kept entry"), "the entries stay when the live reply goes")
 print("PASS native persisted-screen helper; long-history bytes \(large.utf8.count), elapsed \(Date().timeIntervalSince(start)*1000) ms")

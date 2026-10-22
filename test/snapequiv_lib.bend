@@ -537,22 +537,26 @@ def Equiv.loaded(+ok: Bool, +why: String, +full: M.State, +hot: M.State, +cut: N
         return Out{Rep.bad(r), 0n}
 
 # build store.db from the lines before byte `cut`, Hot.load it and compare
-# with full (the whole log folded)
-def Equiv.cut(+home: String, +cut: Nat, +full: M.State) -> IO(Out):
+# with the whole log folded. The fold is made after the store is built (and
+# its own fold let go): on a real log one folded state is many GB on the JS
+# runtime, two at once outgrew a 20 GB cap.
+def Equiv.cut(+home: String, +cut: Nat) -> IO(Out):
   do IO<Out>:
     Build.store(home, cut)
     +hot : HOT.Hot <- HOT.Hot.load(home)
+    +full : M.State <- Full.state(home)
+    IO.print("folded whole: seq " ++ Nat.show(M.State.seq(full)))
     Equiv.loaded(HOT.Hot.ok(hot), HOT.Hot.why(hot), full, HOT.Hot.st(hot), cut)
 
 # the run over several cuts (byte offsets)
-def Equiv.cuts(cs: List<&2, Nat>, +home: String, +full: M.State, acc: Out) -> IO(Out):
+def Equiv.cuts(cs: List<&2, Nat>, +home: String, acc: Out) -> IO(Out):
   match cs:
     case Nil{}:
       IO.pure(Out, acc)
     case +c <> rest:
       do IO<Out>:
-        n : Out <- Equiv.cut(home, c, full)
-        Equiv.cuts(rest, home, full, Out.add(acc, n))
+        n : Out <- Equiv.cut(home, c)
+        Equiv.cuts(rest, home, Out.add(acc, n))
 
 # Files
 # -----
@@ -605,3 +609,81 @@ def Tmp.out(r: Result<&1, &1, U32 & String, U32 & (String & String)>) -> String:
 # a new temporary folder
 def Tmp.dir() -> IO(String):
   IO.bind(Result<&1, &1, U32 & String, U32 & (String & String)>, String, Process.run("mktemp", ["-d"], "", 4096, 10000), r => IO.pure(String, Tmp.out(r)))
+
+# Dumps, for the phased run on a real log (test/tools/snap_equiv.sh): one
+# folded state per process, written as JSON lines, compared outside
+# (test/tools/snap_equiv_cmp.py). Records: [key, value]; an open thread's
+# entries: ["E", thread, key...] newest first (Ent.key); a refusal:
+# ["REFUSED", why].
+
+def Wf.got(r: File & Result<&1, &1, U32 & String, Unit>, k: File -> IO(File)) -> IO(File):
+  (f, _) = r
+  k(f)
+
+def Wf.recs(xs: List<&2, Sigma<&2, &2, String, _ => String>>, f: File) -> IO(File):
+  match xs:
+    case Nil{}:
+      IO.pure(File, f)
+    case (k, v) <> t:
+      IO.bind(File & Result<&1, &1, U32 & String, Unit>, File, File.write(f, J.Json.show(J.Json.arr([J.Str{k}, J.Str{v}])) ++ "\n"), r => Wf.got(r, f2 => Wf.recs(t, f2)))
+
+def Wf.keys(es: List<&2, M.Entry>, acc: List<&2, J.Json>) -> List<&2, J.Json>:
+  match es:
+    case Nil{}:
+      List.reverse(&2, J.Json, acc)
+    case e <> t:
+      Wf.keys(t, J.Str{Ent.key(e)} <> acc)
+
+def Wf.thread(+st: M.State, +th: String) -> String:
+  J.Json.show(J.Json.arr(J.Str{"E"} <> J.Str{th} <> Wf.keys(M.State.mine(st, th), Nil{}))) ++ "\n"
+
+def Wf.ents(ths: List<&2, String>, +st: M.State, f: File) -> IO(File):
+  match ths:
+    case Nil{}:
+      IO.pure(File, f)
+    case +th <> t:
+      IO.bind(File & Result<&1, &1, U32 & String, Unit>, File, File.write(f, Wf.thread(st, th)), r => Wf.got(r, f2 => Wf.ents(t, st, f2)))
+
+def Wf.open(ts: List<&2, M.Thread>, +acc: List<&2, String>) -> List<&2, String>:
+  match ts:
+    case Nil{}:
+      acc
+    case +t <> rest:
+      Wf.open(rest, Bool.pick(List<&2, String>, HOT.Hot.open(t), M.Thread.id(t) <> acc, acc))
+
+# the threads a hot state loaded entries for
+def Wf.opens(+st: M.State) -> List<&2, String>:
+  Wf.open(St.threads(st), Nil{})
+
+def Wf.done(r: Result<&1, &1, U32 & String, File>, +st: M.State, +ths: List<&2, String>) -> IO(Unit):
+  match r:
+    case Done{f}:
+      do IO<Unit>:
+        f2 : File <- Wf.recs(Map.to_list(&2, String, S.Tab.dump(st)), f)
+        f3 : File <- Wf.ents(ths, st, f2)
+        File.close(f3)
+    case Fail{_}:
+      IO.die(Unit, 1, "snap_equiv: cannot write the dump")
+
+# a state's records and the given threads' entries, to path
+def Wf.state(+path: String, +st: M.State, +ths: List<&2, String>) -> IO(Unit):
+  IO.bind(Result<&1, &1, U32 & String, File>, Unit, File.open(path, "w"), r => Wf.done(r, st, ths))
+
+def Wf.refused(+ok: Bool, +why: String, +path: String, +st: M.State) -> IO(Unit):
+  match ok:
+    case True{}:
+      Wf.state(path, st, Wf.opens(st))
+    case False{}:
+      Wr.file(path, J.Json.show(J.Json.arr([J.Str{"REFUSED"}, J.Str{why}])) ++ "\n")
+
+# phase hot: Hot.load home, dump what it loaded
+def Phase.hot(+home: String, +out: String) -> IO(Unit):
+  do IO<Unit>:
+    +hot : HOT.Hot <- HOT.Hot.load(home)
+    Wf.refused(HOT.Hot.ok(hot), HOT.Hot.why(hot), out, HOT.Hot.st(hot))
+
+# phase full: the whole log folded, dumped with the given threads' entries
+def Phase.full(+home: String, +out: String, +ths: List<&2, String>) -> IO(Unit):
+  do IO<Unit>:
+    full : M.State <- Full.state(home)
+    Wf.state(out, full, ths)

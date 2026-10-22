@@ -271,10 +271,21 @@ def Json.show(j: Json) -> String:
 # checked without printing it (the hub's thin replies go to their writer as
 # the tree, core/cbor.bend encodes it). Each case counts what Json.emit.rev
 # writes; test/json_bytes_test.bend holds it to the printed text.
-def Json.bytes.chr(+c: U32) -> Nat:
+def Json.bytes.chr.slow(+c: U32) -> Nat:
   Bool.pick(Nat, U32.is_lt(c, 32), Bool.pick(Nat, Bool.or(U32.is_eq(c, 10), Bool.or(U32.is_eq(c, 13), U32.is_eq(c, 9))), 2n, 6n),
     Bool.pick(Nat, Bool.or(U32.is_eq(c, 34), U32.is_eq(c, 92)), 2n,
       Bool.pick(Nat, U32.is_lt(c, 128), 1n, Bool.pick(Nat, U32.is_lt(c, 2048), 2n, Bool.pick(Nat, U32.is_lt(c, 65536), 3n, 4n)))))
+
+def Json.bytes.chr.k(plain: Bool, +c: U32) -> Nat:
+  match plain:
+    case True{}:
+      1n
+    case False{}:
+      Json.bytes.chr.slow(c)
+
+# printable ASCII but '"' and '\\' is one byte: tested first, alone
+def Json.bytes.chr(+c: U32) -> Nat:
+  Json.bytes.chr.k(Bool.and(U32.is_ge(c, 32), Bool.and(U32.is_lt(c, 128), Bool.and(U32.is_ne(c, 34), U32.is_ne(c, 92)))), c)
 
 def Json.bytes.raw(+c: U32) -> Nat:
   Bool.pick(Nat, U32.is_lt(c, 128), 1n, Bool.pick(Nat, U32.is_lt(c, 2048), 2n, Bool.pick(Nat, U32.is_lt(c, 65536), 3n, 4n)))
@@ -477,10 +488,23 @@ def Lex.uni(acc: String, left: Nat, +code: U32, c: Char) -> Lex:
     case 0n _:
       LStr{acc}
 
+# a finished string read once at its head. In the JS build a string grown
+# a character at a time is a rope (one string cell per character) until
+# something reads it, and a parsed value folded into the hub's state may
+# never be read: a log's settings kept millions of cells alive (the store
+# build: 5.4 GB). Matching the head makes the engine flatten it in place,
+# once; in C it is one cell. Never a walk per character.
+def Lex.flat(s: String) -> String:
+  match s:
+    case SNil{}:
+      SNil{}
+    case SCon{c, t}:
+      SCon{c, t}
+
 def Lex.str.k(q: Bool, bs: Bool, +u: U32, acc: String, out: List<&2, Tok>) -> Lex & List<&2, Tok>:
   match q bs:
     case True{} _:
-      (LIdle{}, TStr{String.reverse(acc)} <> out)
+      (LIdle{}, TStr{Lex.flat(String.reverse(acc))} <> out)
     case _ True{}:
       (LEsc{acc}, out)
     case _ _:

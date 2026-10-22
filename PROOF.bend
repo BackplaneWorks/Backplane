@@ -11786,6 +11786,7 @@ def Laws.mail_credit_native_kept(w, charge):
     case MPCREDIT.WState{_, _}: {==}
     case MPCREDIT.WItems{_, _, _, _, _, _}: {==}
     case MPCREDIT.WJson{_, _}: {==}
+    case MPCREDIT.WCbor{_, _}: {==}
 # ---- i18n web phone ----
 def Laws.webphone_option_english(): {==}
 def Laws.webphone_model_name_kept(): {==}
@@ -11949,11 +11950,13 @@ def Laws.mail_global_primary(): {==}
 
 def Laws.mail_log_count_set(c, n):
   match c:
+    case MPCREDIT.Cfg{home, web, host, port, prompt, dirs, version, MPCREDIT.Net{tailnet, https, token, models, mtext, rt, br, pk, tm, machines, pv, MPLOG.Bn{dir, seen, work, far, live, broken, fl, tools, tch, cef, wire_n, pair, auth, mtext, mjson}, managed, link, freecad, ks}, telemetry, views}:
     case MPCREDIT.Cfg{home, web, host, port, prompt, dirs, version, MPCREDIT.Net{tailnet, https, token, models, mtext, rt, br, pk, tm, machines, pv, MPLOG.Bn{dir, seen, work, far, live, broken, fl, tools, tch, wire_n}, managed, link, freecad, ks}, telemetry, views}:
       {==}
 
 def Laws.mail_log_count_committed(c, fresh):
   match c:
+    case MPCREDIT.Cfg{home, web, host, port, prompt, dirs, version, MPCREDIT.Net{tailnet, https, token, models, mtext, rt, br, pk, tm, machines, pv, MPLOG.Bn{dir, seen, work, far, live, broken, fl, tools, tch, cef, wire_n, pair, auth, mtext, mjson}, managed, link, freecad, ks}, telemetry, views}:
     case MPCREDIT.Cfg{home, web, host, port, prompt, dirs, version, MPCREDIT.Net{tailnet, https, token, models, mtext, rt, br, pk, tm, machines, pv, MPLOG.Bn{dir, seen, work, far, live, broken, fl, tools, tch, wire_n}, managed, link, freecad, ks}, telemetry, views}:
       {==}
 
@@ -12445,6 +12448,14 @@ def Laws.thin_mail_lazy_committed(cs, st, l):
       Laws.thin_mail_replay_append(done, [TMAILL.Pending{cs, st}], TMAILL.Cache.of(base))
 
 def Laws.thin_mail_lazy_warm(st, done): {==}
+def Laws.boot_next_never_cold(ok, n):
+  match ok n:
+    case True{} _:
+      {==}
+    case False{} 0n:
+      {==}
+    case False{} 1n+_:
+      {==}
 # ---- end S3 ----
 
 # --- J2: HTTP and WebSocket bodies counted and unmasked in tail calls ---
@@ -12481,6 +12492,62 @@ def Laws.ws_unmask_take_go(bs, n, key, i, acc):
     case x <> t 1n+m:
       Laws.ws_unmask_take_go(t, m, key, 1n+i, HTTPAUTH.Ws.unmask.k(x, key, i) <> acc)
 
+
+# --- J2: a hub on a copied log (BACKPLANE_COPY=1) acts on nothing outside ---
+
+def Laws.watch_copy_launch_none(home, id, cwd, target): {==}
+def Laws.watch_copy_check_none(kind, target, ident, home, id): {==}
+def Laws.watch_copy_stop_none(kind, target, ident, home, id): {==}
+def Laws.watch_copy_intent_none(home, id): {==}
+def Laws.copy_off_runs_all(os): {==}
+def Laws.copy_drops_outside(): {==}
+def Laws.copy_keeps_inside(): {==}
+def Laws.copy_git_write_told(): {==}
+def Laws.copy_refuses_net(): {==}
+def Laws.copy_off_refuses_none(cmd, args): {==}
+def Laws.adopt_copy_none(rec, hand): {==}
+def Laws.copy_file_open_told(): {==}
+
+# --- J2: the pairing message made once per link, not per join ---
+def Laws.pair_msg_kept(): {==}
+def Laws.pair_msg_other_link(): {==}
+def Laws.pair_msg_no_link_qr(): {==}
+# ---- F1: far feed slices ----
+def Laws.far_feed_sliced(): {==}
+def Laws.far_feed_sliced_one(): {==}
+def Laws.far_feed_sliced_big(): {==}
+def Laws.far_fact_shared(): {==}
+def Laws.far_fact_private(): {==}
+# ---- end F1 feed ----
+def Laws.locks_idle_never_set(): {==}
+def Laws.locks_idle_released(): {==}
+def Laws.locks_idle_held_not(): {==}
+def Laws.locks_after_idle_none(): {==}
+def Laws.locks_idle_text_exact(): {==}
+
+# --- J2: the sign-in wait asked again only when the log moved ---
+def Laws.auth_beat_kept(): {==}
+def Laws.auth_beat_asked(): {==}
+# ---- uniichat: the uberbot's infinite context ----
+def Laws.uctx_off_after_same(): {==}
+def Laws.uctx_off_no_thread(): {==}
+def Laws.uctx_off_tools_same(): {==}
+def Laws.uctx_on_fresh_session(): {==}
+def Laws.uctx_on_other_same(): {==}
+def Laws.uctx_roots(): {==}
+def Laws.uctx_view_leaves(): {==}
+def Laws.uctx_own_trailing(): {==}
+def Laws.uctx_wire_hides_text(): {==}
+# ---- end uniichat ----
+
+# --- J2: the models' JSON kept parsed, not parsed at every step ---
+def Laws.models_json_kept(): {==}
+
+# --- J2: a holder is only "<pid> <port>", never a shell's noise ---
+def Laws.onehub_legacy_noise(): {==}
+def Laws.onehub_legacy_after_noise(): {==}
+def Laws.onehub_legacy_line(): {==}
+def Laws.onehub_pair_flock(): {==}
 # ---- browser pages and loopback (J3) ----
 def Laws.browser_owner_unknown_refused(): {==}
 def Laws.browser_owner_thread(): {==}

@@ -18,17 +18,6 @@ class ScreenCache(private val file: File, private val report: (String) -> Unit =
             return MessageDigest.getInstance("SHA-256").digest((listOf(profile) + normalized.sorted()).joinToString("\n").toByteArray())
                 .joinToString("") { "%02x".format(it) }
         }
-        // Walk at most 8192 Unicode code points from the end. UTF-16 slice
-        // offsets can split a surrogate pair at the saved-text boundary.
-        private fun textTail(body: String): String {
-            var start = body.length
-            var left = 8192
-            while (start > 0 && left > 0) {
-                start -= Character.charCount(body.codePointBefore(start))
-                left -= 1
-            }
-            return body.substring(start)
-        }
         private fun tail(rows: JSONArray, n: Int) = JSONArray().also { out ->
             for (i in maxOf(0, rows.length() - n) until rows.length()) out.put(rows.get(i))
         }
@@ -82,29 +71,10 @@ class ScreenCache(private val file: File, private val report: (String) -> Unit =
                 thread.put("draft", "").put("sending", JSONArray()).put("attaching", JSONArray()).put("uploading", "")
                 val all = thread.optJSONArray("entries") ?: JSONArray()
                 val entries = tail(all, 40)
+                // A message's text is never cut: one too big for the cache is
+                // dropped whole below (the size limit), never shown in part.
                 thread.put("earlier", thread.optInt("earlier") + maxOf(0, all.length() - 40)).put("entries", entries)
-                for (i in 0 until entries.length()) {
-                    val e = entries.getJSONObject(i)
-                    val body = e.optString("text")
-                    if (body.toByteArray().size > 32768) {
-                        val textTail = textTail(body)
-                        e.put("partial", JSONObject().put("version", "").put("cursor", "").put("hasMore", false).put("complete", false))
-                        e.put("text", textTail).put("blocks", JSONArray().put(JSONObject().put("tag", "p").put("kids", JSONArray().put(JSONObject().put("text", textTail)))))
-                    }
-                }
                 for (key in listOf("diff", "term", "embs", "asks", "skills", "parent", "subs")) thread.remove(key)
-                thread.optJSONArray("live")?.takeIf { it.toString().toByteArray().size > 32768 }?.let { live ->
-                    val pending = java.util.ArrayDeque<JSONObject>()
-                    for (i in live.length() - 1 downTo 0) pending.addLast(live.getJSONObject(i))
-                    var body = ""
-                    while (pending.isNotEmpty()) {
-                        val node = pending.removeLast()
-                        if (node.has("text")) body = textTail(body + node.optString("text"))
-                        node.optJSONArray("kids")?.let { kids -> for (i in kids.length() - 1 downTo 0) pending.addLast(kids.getJSONObject(i)) }
-                    }
-                    thread.put("live", JSONArray().put(JSONObject().put("tag", "p").put("kids", JSONArray().put(JSONObject().put("text", body)))))
-                    thread.put("livePartial", JSONObject().put("id", "").put("version", "").put("cursor", "").put("hasMore", false).put("complete", false))
-                }
             }
             for (key in listOf("hubs", "usageMachines")) screen.optJSONArray(key)?.let { rows ->
                 for (i in 0 until rows.length()) rows.getJSONObject(i).put("online", false)
@@ -122,6 +92,16 @@ class ScreenCache(private val file: File, private val report: (String) -> Unit =
                 if (entries.length() <= 1) break
                 val keep = maxOf(1, entries.length() / 2)
                 thread.put("entries", tail(entries, keep)).put("earlier", thread.optInt("earlier") + entries.length() - keep)
+                data = root.toString()
+            }
+            // still too big: the streamed reply, then the one entry left, go whole
+            if (data.toByteArray().size > LIMIT && thread != null && (thread.optJSONArray("live")?.length() ?: 0) > 0) {
+                thread.put("live", JSONArray()).remove("livePartial")
+                data = root.toString()
+            }
+            val left = thread?.optJSONArray("entries")?.length() ?: 0
+            if (data.toByteArray().size > LIMIT && thread != null && left > 0) {
+                thread.put("entries", JSONArray()).put("earlier", thread.optInt("earlier") + left)
                 data = root.toString()
             }
             data.takeIf { it.toByteArray().size <= LIMIT }
