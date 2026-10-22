@@ -40,6 +40,8 @@ import sys
 import threading
 import time
 
+# no __pycache__ beside ci-keys.py: an untracked file there would be an input
+sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
 spec = importlib.util.spec_from_file_location("ci_keys", os.path.join(HERE, "ci-keys.py"))
 K = importlib.util.module_from_spec(spec)
