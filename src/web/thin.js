@@ -27,6 +27,14 @@ export function popupReadDraft(text) {
   const word = t.slice(Math.max(t.lastIndexOf(' '), t.lastIndexOf('\n'), t.lastIndexOf('\t'), t.lastIndexOf('\r')) + 1);
   return utf8Bytes(word) <= 1024 ? ' ' + word : ' ';
 }
+// The transport filters a request's session once more on the way out: a
+// read that already carries its selected draft (a popup read, built by
+// update() or changed()) keeps it (popupReadDraft leaves it as it is).
+export function carriesDraft(request) {
+  const s = request?.p?.session;
+  return request?.m !== 'view.action' && typeof s?.sel === 'string' && typeof s?.drafts?.[s.sel] === 'string';
+}
+
 export function utf8Bytes(text) {
   let n = 0;
   for (const c of text) { const x = c.codePointAt(0); n += x < 128 ? 1 : x < 2048 ? 2 : x < 65536 ? 3 : 4; }
