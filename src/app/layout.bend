@@ -4166,6 +4166,13 @@ def Set.fallback(+ty: Ty, +n: S.Nui, +x: U32, +w: U32, +y: U32) -> Out:
   +rs = U.Fallbackv.rows(S.Nui.ui(n))
   Out.cat(Set.card(x, y, w, (Set.agy.sum(rs, ty, x, w) + 10 : U32)), Set.agy.rows(rs, ty, n, x, w, (y + 8 : U32)))
 
+def Set.hook.h(+ty: Ty, +n: S.Nui, +x: U32, +w: U32) -> U32:
+  (20 + Set.agy.sum(U.Hookv.rows(S.Nui.ui(n)), ty, x, w) : U32)
+
+def Set.hook(+ty: Ty, +n: S.Nui, +x: U32, +w: U32, +y: U32) -> Out:
+  +rs = U.Hookv.rows(S.Nui.ui(n))
+  Out.cat(Set.card(x, y, w, (Set.agy.sum(rs, ty, x, w) + 10 : U32)), Set.agy.rows(rs, ty, n, x, w, (y + 8 : U32)))
+
 # Keep the first Settings group in its own native layout call. The full
 # screen's single row expression otherwise exceeds Bend's call arity.
 def Set.threads(+ty: Ty, +st: M.State, +n: S.Nui, +x: U32, +w: U32, +b: U32) -> Out:
@@ -4177,7 +4184,8 @@ def Set.threads(+ty: Ty, +st: M.State, +n: S.Nui, +x: U32, +w: U32, +b: U32) -> 
     Set.settle.done(ty, M.Lifecycle.on(st), x, w, (b + 174 : U32)),
     Set.carry(ty, M.Carry.on(st), x, w, (b + 238 : U32)),
     Set.notify(st, ty, x, w, (b + 320 : U32)),
-    Set.fallback(ty, n, x, w, (b + 320 + Set.notify.h(st, ty, w) : U32))])
+    Set.fallback(ty, n, x, w, (b + 320 + Set.notify.h(st, ty, w) : U32)),
+    Set.hook(ty, n, x, w, (b + 320 + Set.notify.h(st, ty, w) + Set.fallback.h(ty, n, x, w) : U32))])
 
 # Settings' model search (the picker's field, "mq"), once the provider
 # lists many models
@@ -4208,7 +4216,7 @@ def Set.page.threads(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +
 
 def Set.page.threads.h(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x: U32, +w: U32) -> U32:
 
-  (264 + Set.notify.h(st, ty, w) + Set.fallback.h(ty, n, x, w) : U32)
+  (264 + Set.notify.h(st, ty, w) + Set.fallback.h(ty, n, x, w) + Set.hook.h(ty, n, x, w) : U32)
 
 def Set.page.agents(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x: U32, +w: U32, +y: U32) -> Out:
   +prov = M.Setting.get(st, "agent.provider", "claude")

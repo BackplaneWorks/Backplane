@@ -271,7 +271,10 @@ Clicking it opens the thread.
 ### Webhook
 
 `push.webhook.url` (a setting: an `http` or `https` address) makes the hub
-POST a JSON notice for each alert **Notify me for** would raise. The same
+POST a JSON notice for each alert **Notify me for** would raise. Settings,
+on the Threads page, has the address and the path of the secret file
+(empty turns the webhook off; an address that is not http or https is
+refused; the secret's contents are never shown). The same
 record decides it (`Policy.loud` / `Policy.kind` in `src/core/notice.bend`):
 a kind of `done` or `fail` goes out from `TurnEnded`, and a kind of `ask`,
 `merged`, `reminder` or `note` goes out from `Alerted`. A quiet settle (an
