@@ -22,8 +22,9 @@ import ../core/mail.bend as ML
 # to SQL, never inserted in the fold): the one step that reads entries,
 # ProviderSet's Switch.count, is given a counter of each thread's own
 # entries instead (M.State.switch.c). After the last line every record of
-# the final state is written (SDB.Dump.part) with the meta rows; the
-# counters are not (nothing would keep them current on commit). Numbering
+# the final state is written (Stb.records, same Row.* as Dump.part) with
+# the meta rows; counters are not written (nothing would keep them
+# current on commit). Numbering
 # is SDB.Mat.step's: a line that is not JSON takes its bytes but no number, a line no change
 # decodes from gets a line row (wire "") and is not folded; a trailing
 # fragment with no newline is left for the hub (it never reads one either).
@@ -495,17 +496,133 @@ def Stb.run(r: File & Nat, +h: String, +home: String, +chunk: U32) -> IO(File & 
     IO.print("store-rebuild start " ++ Nat.show(size))
     IO.bind(File & Result<&1, &1, U32 & String, List<&2, U32>>, File & Acc, File.read_at(f, 0, 4096), x => Stb.first(size, h, home, chunk, x))
 
-# every record of the state, a domain at a time (SDB.Dump.part): one
-# domain's statements at most in memory, never all of them
-def Stb.parts(k: Nat, +h: String, +st: M.State, +i: Nat) -> IO(Unit):
-  match k:
-    case 0n:
-      IO.pure(Unit, Unit{})
-    case 1n+r:
+# Final records, streamed from the maps
+# -------------------------------------
+# A batch contains at most 128 rows. A conservative UTF-8 payload budget
+# (4 bytes per code point, capped per field) triggers a flush at 64 KiB;
+# the last row can exceed that budget, so a single large JSON record is
+# still possible. No full-domain Map.to_list, Op list or SQL list is made.
+type RecordBatch is Data:
+  RecordBatch{items: List<&2, List<&2, String>>, rows: Nat, size: Nat}
+
+# Count at most 16384 code points without allocating an encoded byte list.
+def Stb.record.chars(fuel: Nat, s: String, n: Nat) -> Nat:
+  match fuel s:
+    case 0n _:
+      n
+    case 1n+r SNil{}:
+      n
+    case 1n+r SCon{_, t}:
+      Stb.record.chars(r, t, 1n+n)
+
+def Stb.record.size(xs: List<&2, String>, n: Nat) -> Nat:
+  match xs:
+    case Nil{}:
+      n
+    case x <> t:
+      Stb.record.size(t, Nat.add(n, Nat.mul(4n, Stb.record.chars(16384n, x, 0n))))
+
+def Stb.record.flush(+h: String, b: RecordBatch) -> IO(RecordBatch):
+  match b:
+    case RecordBatch{items, _, _}:
+      do IO<RecordBatch>:
+        res : String <- D.Db.script(h, List.reverse(&2, List<&2, String>, items))
+        Stb.check("record batch", res)
+        return RecordBatch{Nil{}, 0n, 0n}
+
+def Stb.record.full(full: Bool, +h: String, b: RecordBatch) -> IO(RecordBatch):
+  match full:
+    case True{}:
+      Stb.record.flush(h, b)
+    case False{}:
+      IO.pure(RecordBatch, b)
+
+def Stb.record.add(+h: String, +item: List<&2, String>, b: RecordBatch) -> IO(RecordBatch):
+  match b:
+    case RecordBatch{items, +rows, +size}:
+      +n = 1n+rows
+      +bytes = Nat.add(size, Stb.record.size(item, 0n))
+      Stb.record.full(Bool.or(Nat.is_ge(n, 128n), Nat.is_ge(bytes, 65536n)), h, RecordBatch{item <> items, n, bytes})
+
+# Structural traversal: each subtree is consumed, and each row is encoded
+# only when reached. The IO continuation keeps the remaining subtree,
+# not a pre-serialized copy of the domain.
+def Stb.record.tree(-V: Data, m: Map<&2, V>, +h: String, +row: String -> V -> SDB.Op, b: RecordBatch) -> IO(RecordBatch):
+  match m:
+    case MTip{}:
+      IO.pure(RecordBatch, b)
+    case MLeaf{k, v}:
+      Stb.record.add(h, SDB.Sql.of(row(k, v)), b)
+    case MNode{_, lo, hi}:
+      IO.bind(RecordBatch, RecordBatch, Stb.record.tree(V, lo, h, row, b), b2 => Stb.record.tree(V, hi, h, row, b2))
+
+def Stb.record.end(+h: String, b: RecordBatch) -> IO(Unit):
+  do IO<Unit>:
+    rest : RecordBatch <- Stb.record.flush(h, b)
+    return Unit{}
+
+def Stb.domain(-V: Data, +name: String, m: Map<&2, V>, +h: String, +row: String -> V -> SDB.Op) -> IO(Unit):
+  do IO<Unit>:
+    IO.print("store-rebuild records " ++ name ++ " start")
+    IO.bind(RecordBatch, Unit, Stb.record.tree(V, m, h, row, RecordBatch{Nil{}, 0n, 0n}), b => Stb.record.end(h, b))
+    IO.print("store-rebuild records " ++ name ++ " done")
+
+# After replay, dedup IDs, order/count/live indexes are no longer needed
+# by any serializer. Conversation rows need only the newest headers, so
+# give Row.conv a box containing those alone and release it after convs.
+def Stb.mail.records(b: ML.Box, +h: String) -> IO(Unit):
+  match b:
+    case ML.Box{cs, ms, marks, _, _, _, origins, runs, _, _, charters, decisions, _, names, _}:
+      +heads = ML.Box.with_mails(ML.Box.empty(), ms)
       do IO<Unit>:
-        +res : String <- D.Db.script(h, List.reverse(&2, List<&2, String>, Stb.sqls(SDB.Dump.part(st, i), Nil{})))
-        Stb.check("records", res)
-        Stb.parts(r, h, st, 1n+i)
+        Stb.domain(ML.Conv, "conv", cs, h, k => v => SDB.Row.conv(heads, v))
+        Stb.domain(ML.Mark, "mark", marks, h, k => v => SDB.Row.mark(k, v))
+        Stb.domain(ML.Run, "run", runs, h, k => v => SDB.Row.run(v))
+        Stb.domain(ML.Origin, "origin", origins, h, k => v => SDB.Row.origin(k, v))
+        Stb.domain(String, "charter", charters, h, k => v => SDB.Row.obj("charter", k, J.Str{v}))
+        Stb.domain(List<&2, ML.Decision>, "decision", decisions, h, k => v => SDB.Row.obj("decision", k, J.Json.arr(SDB.Row.decisions.js(v, Nil{}))))
+        Stb.domain(String, "mailname", names, h, k => v => SDB.Row.obj("mailname", k, J.Str{v}))
+
+def Stb.world.records(w: BT.World, +h: String) -> IO(Unit):
+  match w:
+    case BT.World{bs, rs, _, hs, ro, ms, pe, sp, ho, ta, pg, tk}:
+      do IO<Unit>:
+        Stb.domain(BT.Bot, "bot", bs, h, k => v => SDB.Row.bot(v))
+        Stb.domain(BT.Room, "room", rs, h, k => v => SDB.Row.room(v))
+        Stb.domain(BT.Routine, "routine", ro, h, k => v => SDB.Row.routine(v))
+        Stb.domain(BT.Hook, "hook", hs, h, k => v => SDB.Row.hook(v))
+        Stb.domain(BT.Mem, "mem", ms, h, k => v => SDB.Row.mem(k, v))
+        Stb.domain(BT.Peer, "peer", pe, h, k => v => SDB.Row.peer(v))
+        Stb.domain(String, "space", sp, h, k => v => SDB.Row.obj("space", k, J.Str{v}))
+        Stb.domain(BT.Page, "page", pg, h, k => v => SDB.Row.page(k, v))
+        Stb.domain(String, "skill", tk, h, k => v => SDB.Row.obj("skill", k, J.Str{v}))
+        Stb.domain(BT.Hops, "hops", ho, h, k => v => SDB.Row.hops(k, v))
+        Stb.domain(Nat, "talk", ta, h, k => v => SDB.Row.obj("talk", k, C.Codec.nat(v)))
+
+def Stb.ext.records(x: M.Ext, +h: String) -> IO(Unit):
+  match x:
+    case M.Ext{w, _, mail}:
+      do IO<Unit>:
+        Stb.world.records(w, h)
+        Stb.mail.records(Maybe.default(&2, ML.Box, List.head(&2, ML.Box, mail), ML.Box.empty()), h)
+
+# Destructure once: completed domains are not carried into later domains.
+# The exact same Row.* serializers as Dump.part produce every record.
+def Stb.records(st: M.State, +h: String) -> IO(Unit):
+  match st:
+    case M.State{ps, ts, _, n, tk, sg, qu, ak, dv, nv, bw}:
+      do IO<Unit>:
+        Stb.domain(M.Project, "project", ps, h, k => v => SDB.Row.project(v))
+        Stb.domain(M.Thread, "thread", ts, h, k => v => SDB.Row.thread(v))
+        Stb.domain(M.Task, "task", tk, h, k => v => SDB.Row.task(v))
+        Stb.domain(M.Ask, "ask", ak, h, k => v => SDB.Row.ask(v))
+        Stb.domain(List<&2, M.QItem>, "queue", qu, h, k => v => SDB.Row.queue(k, v))
+        Stb.domain(String, "setting", sg, h, k => v => SDB.Row.set(k, v))
+        Stb.domain(M.Device, "device", dv, h, k => v => SDB.Row.device(v))
+        Stb.domain(M.Nav, "nav", nv, h, k => v => SDB.Row.nav(k, v))
+        Stb.ext.records(M.Ext.of(bw), h)
+        res : String <- D.Db.script(h, [SDB.Sql.of(SDB.Row.obj("state", "seq", C.Codec.nat(n)))])
+        Stb.check("state sequence", res)
 
 def Stb.gone(+path: String) -> IO(Unit):
   do IO<Unit>:
@@ -525,13 +642,15 @@ def Stb.finish.records(+h: String, +home: String, f: File, st: M.State, +a: Acc)
   +db = home ++ "/store.db"
   do IO<Built>:
     File.close(f)
-    Stb.parts(SDB.Dump.n(), h, st, 0n)
+    Stb.records(st, h)
     +res : String <- D.Db.script(h, Stb.end(a))
     Stb.check("meta", res)
+    IO.print("store-rebuild journal start")
     jm : String <- D.Db.exec(h, "PRAGMA journal_mode = DELETE")
     Stb.check("journal", jm)
     cl : String <- D.Db.close(h)
     Stb.check("close", cl)
+    IO.print("store-rebuild journal done")
     Stb.gone(db ++ "-wal")
     Stb.gone(db ++ "-shm")
     Stb.gone(db)
