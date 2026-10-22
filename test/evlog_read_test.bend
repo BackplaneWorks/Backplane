@@ -3,6 +3,7 @@ import ./check.bend as C
 import ../src/server/host.bend as H
 import ../src/core/store.bend as ST
 import ../src/core/thin.bend as TH
+import ../src/server/stobuild.bend as SB
 
 # H.EvLog.read_from (effects/evlog.c, evlog.js) answers what
 # ST.Store.read.from answers over the same file's bytes from that offset:
@@ -65,6 +66,43 @@ def fixture.k(r: Result<&1, &1, U32 & String, File>, +bs: List<&2, U32>) -> IO(U
 def fixture(+path: String, +bs: List<&2, U32>) -> IO(Unit):
   IO.bind(Result<&1, &1, U32 & String, File>, Unit, File.open(path, "w"), r => fixture.k(r, bs))
 
+# The builder's bounded native chunk reader must equal the original
+# byte-list Cut.of for every decoder fixture, including truncated reads.
+def chunk.lines(ls: List<&2, SB.Ln>, acc: String) -> String:
+  match ls:
+    case Nil{}:
+      acc
+    case SB.Ln{len, text} <> t:
+      chunk.lines(t, acc ++ "[" ++ Nat.show(len) ++ ":" ++ show.cps.go(text, "") ++ "]")
+
+def chunk.show(c: SB.Cut) -> String:
+  match c:
+    case SB.Cut{ls, used, total}:
+      Nat.show(used) ++ "/" ++ Nat.show(total) ++ chunk.lines(ls, "")
+
+def chunk.result(r: Result<&1, &1, U32 & String, List<&2, String>>, name: String, want: SB.Cut) -> IO(Unit):
+  match r:
+    case Done{xs}:
+      C.Check.str(name, chunk.show(SB.Cut.native(xs)), chunk.show(want))
+    case Fail{(_, e)}:
+      C.Check.str(name, "read failed: " ++ e, chunk.show(want))
+
+def chunk.got(r: File & Result<&1, &1, U32 & String, List<&2, String>>, name: String, want: SB.Cut) -> IO(Unit):
+  (f, res) = r
+  do IO<Unit>:
+    File.close(f)
+    chunk.result(res, name, want)
+
+def chunk.opened(r: Result<&1, &1, U32 & String, File>, name: String, off: U32, max: U32, want: SB.Cut) -> IO(Unit):
+  match r:
+    case Done{f}:
+      IO.bind(File & Result<&1, &1, U32 & String, List<&2, String>>, Unit, H.EvLog.read_chunk(f, off, max), x => chunk.got(x, name, want))
+    case Fail{(_, e)}:
+      C.Check.str(name, "open failed: " ++ e, chunk.show(want))
+
+def chunk.at(path: String, name: String, off: U32, max: U32, want: SB.Cut) -> IO(Unit):
+  IO.bind(Result<&1, &1, U32 & String, File>, Unit, File.open(path, "r"), r => chunk.opened(r, name, off, max, want))
+
 def case.read(+name: String, +bs: List<&2, U32>, +path: String) -> IO(Unit):
   do IO<Unit>:
     fixture(path, bs)
@@ -72,6 +110,11 @@ def case.read(+name: String, +bs: List<&2, U32>, +path: String) -> IO(Unit):
     C.Check.str("read " ++ name, show.read(got), show.read(ST.Store.read.of(bs)))
     at2 : List<&2, String> <- H.EvLog.read_from(path, "2")
     C.Check.str("read " ++ name ++ " from 2", show.read(at2), show.read(ST.Store.read.from(2n, List.drop(&2, U32, bs, 2n))))
+    chunk.at(path, "chunk " ++ name, 0, 4096, SB.Cut.of(bs))
+    chunk.at(path, "chunk capped " ++ name, 0, 2, SB.Cut.of(List.take(&2, U32, bs, 2n)))
+    chunk.at(path, "chunk offset " ++ name, 2, 4096, SB.Cut.of(List.drop(&2, U32, bs, 2n)))
+    chunk.at(path, "chunk zero " ++ name, 0, 0, SB.Cut.of(Nil{}))
+    chunk.at(path, "chunk past end " ++ name, 4096, 2, SB.Cut.of(Nil{}))
 
 def case.run(c: Case, +path: String) -> IO(Unit):
   match c:

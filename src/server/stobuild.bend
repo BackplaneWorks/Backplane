@@ -13,7 +13,7 @@ import ../core/mail.bend as ML
 # The store's first build (store.db from events.jsonl, docs:
 # bp-coord/store/S1-SCHEMA.md)
 # ---------------------------------------------------------------
-# The log is read a chunk at a time (File.read_at), never whole: a chunk's
+# The log is read a chunk at a time (EvLog.read_chunk), never whole: a chunk's
 # complete lines are folded and their facts written in one Db.script; the
 # partial last line is read again with the next chunk, and a line longer
 # than a chunk makes the chunk grow until it fits. The fold keeps no
@@ -72,6 +72,22 @@ def Cut.go(bs: List<&2, U32>, s: CutS) -> Cut:
 
 def Cut.of(bs: List<&2, U32>) -> Cut:
   Cut.go(bs, CutS{Nil{}, 0n, Nil{}, 0n, 0n})
+
+# Native chunk reader's compact form. Cut.of above remains the pure byte
+# oracle; both paths use the same UTF-8/newline/fragment semantics.
+def Cut.native.lines(xs: List<&2, String>, acc: List<&2, Ln>) -> List<&2, Ln>:
+  match xs:
+    case len <> text <> t:
+      Cut.native.lines(t, Ln{M.Switch.num(len, 0n), text} <> acc)
+    case _:
+      List.reverse(&2, Ln, acc)
+
+def Cut.native(xs: List<&2, String>) -> Cut:
+  match xs:
+    case used <> total <> t:
+      Cut{Cut.native.lines(t, Nil{}), M.Switch.num(used, 0n), M.Switch.num(total, 0n)}
+    case _:
+      Cut{Nil{}, 0n, 0n}
 
 # The fold without already-filed histories
 # ----------------------------------------
@@ -436,11 +452,11 @@ def Stb.cut(f: File, +h: String, +home: String, +logsize: Nat, +chunk: U32, +max
     case Cut{ls, +used, +total}:
       Stb.then(Stb.next(used, total, max), f, h, home, logsize, chunk, max, ls, a, k)
 
-def Stb.read(r: File & Result<&1, &1, U32 & String, List<&2, U32>>, +h: String, +home: String, +logsize: Nat, +chunk: U32, +max: U32, a: Acc, k: File -> Acc -> U32 -> IO(File & Acc)) -> IO(File & Acc):
+def Stb.read(r: File & Result<&1, &1, U32 & String, List<&2, String>>, +h: String, +home: String, +logsize: Nat, +chunk: U32, +max: U32, a: Acc, k: File -> Acc -> U32 -> IO(File & Acc)) -> IO(File & Acc):
   (f, res) = r
   match res:
     case Done{bs}:
-      Stb.cut(f, h, home, logsize, chunk, max, Cut.of(bs), a, k)
+      Stb.cut(f, h, home, logsize, chunk, max, Cut.native(bs), a, k)
     case Fail{(_, e)}:
       IO.die(File & Acc, 1, "store build: read: " ++ e)
 
@@ -451,7 +467,7 @@ def Stb.loop(fuel: Nat, f: File, +h: String, +home: String, +logsize: Nat, +chun
       IO.pure(File & Acc, (f, a))
     case 1n+n:
       +off : Nat = Acc.off(a)
-      IO.bind(File & Result<&1, &1, U32 & String, List<&2, U32>>, File & Acc, File.read_at(f, U32.from_nat(off), max),
+      IO.bind(File & Result<&1, &1, U32 & String, List<&2, String>>, File & Acc, H.EvLog.read_chunk(f, U32.from_nat(off), max),
         r => Stb.read(r, h, home, logsize, chunk, max, a, f2 => a2 => m2 => Stb.loop(n, f2, h, home, logsize, chunk, m2, a2)))
 
 def Stb.file(r: Result<&1, &1, U32 & String, File>) -> IO(File):
