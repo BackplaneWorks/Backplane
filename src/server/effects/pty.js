@@ -298,6 +298,7 @@ function bp_conpty_lib() {
     GetExitCodeProcess: { args: ["ptr", "ptr"], returns: "i32" },
     TerminateProcess: { args: ["ptr", "u32"], returns: "i32" },
     GetLastError: { args: [], returns: "u32" },
+    SetNamedPipeHandleState: { args: ["ptr", "ptr", "ptr", "ptr"], returns: "i32" },
   }).symbols;
   globalThis.BP_CONPTY = { k, ptr: ffi.ptr, read: ffi.read };
   return globalThis.BP_CONPTY;
@@ -357,6 +358,11 @@ function bp_conpty(argv, cwd, env, cols, rows) {
     throw fail("CreatePseudoConsole");
   }
   const pc = handle(hpc);
+  // the input pipe never blocks the hub: PIPE_NOWAIT makes WriteFile take
+  // what fits and answer at once; the rest waits in a queue the 15 ms
+  // timer drains (a big paste into a program that is not reading stalled
+  // the whole loop on a blocking write)
+  k.SetNamedPipeHandleState(handle(inW), ptr(new Uint32Array([1])), null, null);
   const need = new BigUint64Array(1);
   k.InitializeProcThreadAttributeList(null, 1, 0, ptr(need));
   const list = new Uint8Array(Number(need[0]) + 64);
@@ -449,6 +455,7 @@ function bp_conpty(argv, cwd, env, cols, rows) {
     }
   };
   const tick = () => {
+    pump();
     // what the console wrote, then whether the process ended
     while (k.PeekNamedPipe(handle(outR), null, 0, null, ptr(avail), null) && avail[0] > 0) {
       if (!k.ReadFile(handle(outR), ptr(buf), Math.min(avail[0], buf.length), ptr(n), null) || n[0] === 0) {
@@ -474,13 +481,35 @@ function bp_conpty(argv, cwd, env, cols, rows) {
     }
   };
   const timer = setInterval(tick, 15);
+  const queue = [];
+  const wrote = new Uint32Array(1);
+  const pump = () => {
+    while (queue.length > 0 && !term.closed) {
+      const head = queue[0];
+      const part = head.subarray(0, 4096);
+      if (!k.WriteFile(handle(inW), ptr(part), part.length, ptr(wrote), null)) {
+        // the console is gone (ERROR_NO_DATA): what is left goes nowhere
+        queue.length = 0;
+        return;
+      }
+      if (wrote[0] === 0) {
+        return;
+      }
+      if (wrote[0] >= head.length) {
+        queue.shift();
+      } else {
+        queue[0] = head.subarray(wrote[0]);
+      }
+    }
+  };
   term.write = (b) => {
     if (term.closed) {
       return 0;
     }
-    const u = typeof b === "string" ? Buffer.from(b) : b;
-    k.WriteFile(handle(inW), ptr(u), u.length, ptr(n), null);
-    return n[0];
+    const u = typeof b === "string" ? Buffer.from(b) : new Uint8Array(b);
+    queue.push(u);
+    pump();
+    return u.length;
   };
   term.resize = (c, r) => {
     if (!term.closed) {
