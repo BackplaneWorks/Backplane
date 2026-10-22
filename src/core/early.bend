@@ -89,7 +89,8 @@ def Early.html.note(+build: String) -> String:
 def Early.page(+build: String) -> String:
   "<!doctype html><html><head><meta charset=\"utf-8\"><meta http-equiv=\"refresh\" content=\"2\">"
     ++ "<meta name=\"viewport\" content=\"width=device-width\"><title>Backplane</title></head>"
-    ++ "<body style=\"font-family:sans-serif;margin:3em\"><p>" ++ Early.html.note(build) ++ "</p></body></html>"
+    ++ "<body style=\"font-family:sans-serif;margin:3em\"><p>" ++ Early.html.note(build)
+    ++ "</p><p>Upgrading your local database may take a few minutes on first startup. Please keep Backplane open.</p></body></html>"
 
 def Early.html.response(+build: String) -> List<&2, U32>:
   W.Http.response.c("503 Service Unavailable", "text/html; charset=utf-8", U.Utf8.encode(Early.page(build)), "no-store", "Retry-After: 2\r\n")
