@@ -11125,7 +11125,7 @@ law thin_mail_lazy_warm:
 law boot_next_never_cold:
   for ok: Bool
   for n: Nat
-  {MPCREDIT.Boot.is_cold(MPCREDIT.Boot.next(False{}, ok, n)) == False{} : Bool}
+  {MPCREDIT.Boot.is_cold(MPCREDIT.Boot.decide(False{}, ok, n)) == False{} : Bool}
 # ---- end S3 ----
 
 # --- J2: HTTP and WebSocket bodies counted and unmasked in tail calls ---

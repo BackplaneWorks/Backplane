@@ -16152,7 +16152,7 @@ def Main.opened(r: Result<&1, &1, U32 & String, File>, +st: M.State, ls: SO.Lg, 
 # loads it. A failed build is tried once more (its files removed first);
 # a second failure stops the hub with the reason. The whole replay
 # (Boot.cold) is only the developer's escape, BACKPLANE_HOT_BOOT=0
-# (Boot.next; law boot_next_never_cold).
+# (Boot.decide; law boot_next_never_cold).
 
 # the escape's whole replay: the lines straight from the file, then only
 # the lines kept
@@ -16170,7 +16170,7 @@ type BootNext is Data:
   BootStop{}
   BootCold{}
 
-def Boot.next(escape: Bool, ok: Bool, left: Nat) -> BootNext:
+def Boot.decide(escape: Bool, ok: Bool, left: Nat) -> BootNext:
   match escape ok left:
     case True{} _ _:
       BootCold{}
@@ -16241,7 +16241,7 @@ def Boot.act(n: BootNext, +hot: HB.Hot, +home: String, again: Unit -> IO(HB.Hot)
         Boot.cold(home)
 
 def Boot.got(+hot: HB.Hot, +home: String, +left: Nat, again: Unit -> IO(HB.Hot)) -> IO(HB.Hot):
-  Boot.act(Boot.next(False{}, HB.Hot.ok(hot), left), hot, home, again)
+  Boot.act(Boot.decide(False{}, HB.Hot.ok(hot), left), hot, home, again)
 
 # load the store; if it is not usable, build it and load again (left
 # builds at most)
@@ -16257,7 +16257,7 @@ def Boot.state.on(on: Bool, +home: String) -> IO(HB.Hot):
     case True{}:
       Boot.loop(Boot.builds(), home)
     case False{}:
-      Boot.act(Boot.next(True{}, False{}, 0n), HB.Hot.no("BACKPLANE_HOT_BOOT=0"), home, u => IO.pure(HB.Hot, HB.Hot.no("escape")))
+      Boot.act(Boot.decide(True{}, False{}, 0n), HB.Hot.no("BACKPLANE_HOT_BOOT=0"), home, u => IO.pure(HB.Hot, HB.Hot.no("escape")))
 
 def Boot.state(+home: String) -> IO(HB.Hot):
   do IO<HB.Hot>:
