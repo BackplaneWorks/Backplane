@@ -9823,14 +9823,23 @@ def Hub.step.fallback.fold(states: List<&2, M.State>, caps: J.Json, now: Nat, st
     case +st <> rest: Hub.step.fallback.done(held, [st], B.Fallback.validate(st, caps, now, step))
     case Nil{}: IO.die(Hub & Bool, 1, "missing fallback state")
 
-def Hub.step.fallback.models(h: Hub) -> String & List<Hub>:
+def Hub.step.fallback.kept(r: J.Json & BN.Bn, +cfg: Cfg, h: Hub) -> J.Json & List<Hub>:
+  (caps, bn) = r
+  match h:
+    case Hub{s, f, ls, cl, as, inbox, _, note}:
+      (caps, [Hub{s, f, ls, cl, as, inbox, Cfg.with_bn(cfg, bn), note}])
+
+# the models' JSON every step needs, kept parsed with its text in Bn
+# (BN.Bn.models.json): parsing Cfg.models at every step was seconds of the
+# JS hub's first minute after boot
+def Hub.step.fallback.models(h: Hub) -> J.Json & List<Hub>:
   match h:
     case Hub{s, f, ls, cl, as, inbox, +cfg, note}:
-      (Cfg.models(cfg), [Hub{s, f, ls, cl, as, inbox, cfg, note}])
+      Hub.step.fallback.kept(BN.Bn.models.json(Cfg.bn(cfg), Cfg.models(cfg)), cfg, Hub{s, f, ls, cl, as, inbox, cfg, note})
 
-def Hub.step.fallback.captured(pair: String & List<Hub>, states: List<&2, M.State>, now: Nat, step: B.Step) -> IO(Hub & Bool):
-  (models, held) = pair
-  Hub.step.fallback.fold(states, Maybe.default(&2, J.Json, J.Json.parse(models), J.Null{}), now, step, held)
+def Hub.step.fallback.captured(pair: J.Json & List<Hub>, states: List<&2, M.State>, now: Nat, step: B.Step) -> IO(Hub & Bool):
+  (caps, held) = pair
+  Hub.step.fallback.fold(states, caps, now, step, held)
 
 def Hub.step.fallback(h: Hub, states: List<&2, M.State>, now: Nat, step: B.Step) -> IO(Hub & Bool):
   Hub.step.fallback.captured(Hub.step.fallback.models(h), states, now, step)
