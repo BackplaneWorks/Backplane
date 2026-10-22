@@ -451,14 +451,27 @@ function bp_conpty_wire(child, h) {
   return child;
 }
 
+// On Windows a command named by an absolute POSIX path that is not there
+// ("/bin/bash", the hub's default SHELL; "/bin/sh") is the program of that
+// name on PATH: the Windows package ships its runtime's bin (bash.exe,
+// sh.exe) there. Anything else is left as it is.
+function bp_pty_win_cmd(cmd) {
+  if (process.platform !== "win32" || !cmd.startsWith("/") || require("fs").existsSync(cmd)) {
+    return cmd;
+  }
+  const base = cmd.slice(cmd.lastIndexOf("/") + 1);
+  return base === "" ? cmd : Bun.which(base, { PATH: process.env.PATH ?? "" }) ?? cmd;
+}
+
 function bp_pty_spawn(cmd, args, cwd, cols, rows) {
+  cmd = bp_pty_win_cmd(cmd);
   const fs = require("fs");
   const argv = [cmd, ...args];
   if (cmd === "" || argv.some((a) => a.includes("\0")) || cwd.includes("\0")) {
     return io_fail(process.platform === "darwin" ? 92 : 84);
   }
   if (Bun.which(cmd, { PATH: process.env.PATH ?? "" }) === null
-    && !(cmd.includes("/") && fs.existsSync(cmd))) {
+    && !((cmd.includes("/") || cmd.includes("\\")) && fs.existsSync(cmd))) {
     return io_fail(globalThis.BP_H.ERRNO.ENOENT);
   }
   if (cwd !== "") {

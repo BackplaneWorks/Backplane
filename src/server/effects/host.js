@@ -568,7 +568,20 @@ function bp_proc_class() {
 // host.c: 0 discards stderr, 1 joins it to stdout, 2 inherits ours, 3
 // writes it to the file Proc.errtail reads. The environment is ours
 // (Env.put writes process.env).
+// On Windows a command named by an absolute POSIX path that is not there
+// ("/bin/bash", the hub's default SHELL; "/bin/sh") is the program of that
+// name on PATH: the Windows package ships its runtime's bin (bash.exe,
+// sh.exe) there. Anything else is left as it is.
+function bp_win_cmd(cmd) {
+  if (process.platform !== "win32" || !cmd.startsWith("/") || require("fs").existsSync(cmd)) {
+    return cmd;
+  }
+  const base = cmd.slice(cmd.lastIndexOf("/") + 1);
+  return base === "" ? cmd : Bun.which(base, { PATH: process.env.PATH ?? "" }) ?? cmd;
+}
+
 function bp_proc_spawn(cmd, args, cwd, err) {
+  cmd = bp_win_cmd(cmd);
   const fs = require("fs");
   const argv = host_self([cmd, ...args]);
   if (argv.some((a) => a.includes("\0")) || cwd.includes("\0")) {

@@ -1,10 +1,18 @@
 // hotboot.bend's effects: the log's lines in a byte range, read in one
 // pass outside Bend (a Bend list of every byte of a 200 MB log is gigabytes
 // in JavaScript). Lines are the text between newlines, decoded as UTF-8,
-// newest first; empty lines are left out (they never parse).
-function hot_lines(path, from, to) {
+// newest first. Left out: empty lines, and every line that starts inside
+// one of the skipped ranges (skips: [a1, b1, a2, b2, ...] as decimal text,
+// a <= start < b): the stretches the store gave no number (a torn fragment).
+function hot_lines(path, from, to, skips) {
   let out = { $: CID(Nil) };
   try {
+    const sk = [];
+    for (let xs = skips; xs.$ === CID(Con); xs = xs.tail) sk.push(Number(xs.head));
+    const skipped = (s) => {
+      for (let i = 0; i + 1 < sk.length; i += 2) if (s >= sk[i] && s < sk[i + 1]) return true;
+      return false;
+    };
     const fs = require("fs");
     const a = Number(from);
     const b = Number(to);
@@ -27,7 +35,7 @@ function hot_lines(path, from, to) {
     for (;;) {
       const nl = buf.indexOf(10, start);
       const end = nl < 0 ? buf.length : nl;
-      if (end > start) out = { $: CID(Con), head: buf.toString("utf8", start, end), tail: out };
+      if (end > start && !(sk.length && skipped(a + start))) out = { $: CID(Con), head: buf.toString("utf8", start, end), tail: out };
       if (nl < 0) break;
       start = nl + 1;
     }

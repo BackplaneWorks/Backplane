@@ -247,7 +247,7 @@ def Anchor.safe(+a: J.Json) -> J.Json:
 def Page.window(+index: T.Index, +th: String, +p: J.Json, +epoch: String, +ids: List<&2, String>) -> J.Json:
   +last = Page.last(ids, "")
   +older = Page.older(Bool.not(List.is_empty(&2, String, ids)), index, th, Page.number(last))
-  J.Json.obj([J.KV{"ids", J.Json.arr(Ids.json(ids))}, J.KV{"anchor", Anchor.safe(J.Json.get_obj(p, "anchor"))}, J.KV{"older", J.Str{Bool.pick(String, List.is_empty(&2, String, older), "", W.Cursor.write(epoch, J.Json.get_obj(p, "target"), "", Page.number(last)))}}, J.KV{"hasMore", J.Flag{Bool.not(List.is_empty(&2, String, older))}}, J.KV{"remaining", J.Json.nat(Bool.pick(Nat, List.is_empty(&2, String, ids), 0n, Nat.sub(ML.Order.count(T.Index.thread(index, th)), T.Page.after(T.Index.thread(index, th), Page.number(last)))))}, J.KV{"partial", J.Json.arr(Partial.rows(ids, index, epoch, J.Json.get_obj(p, "target"), Nil{}))}])
+  J.Json.obj([J.KV{"ids", J.Json.arr(Ids.json(ids))}, J.KV{"anchor", Anchor.safe(J.Json.get_obj(p, "anchor"))}, J.KV{"older", J.Str{Bool.pick(String, List.is_empty(&2, String, older), "", W.Cursor.write(epoch, J.Json.get_obj(p, "target"), "", Page.number(last)))}}, J.KV{"hasMore", J.Flag{Bool.not(List.is_empty(&2, String, older))}}, J.KV{"remaining", J.Json.nat(Bool.pick(Nat, List.is_empty(&2, String, ids), 0n, T.Index.remaining(index, th, Page.number(last))))}, J.KV{"partial", J.Json.arr(Partial.rows(ids, index, epoch, J.Json.get_obj(p, "target"), Nil{}))}])
 
 type ActResult is Data:
   ActResult{ui: U.Ui, commands: List<&2, J.Json>}

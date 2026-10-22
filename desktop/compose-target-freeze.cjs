@@ -9,7 +9,7 @@ function policyIdentity(policy,components,policySha){
   assert.equal(policySha,POLICY,'Untrusted root disposition');assert.equal(policy.kind,'backplane-root-staging-disposition');assert.equal(policy.status,'AUTHORIZED_STAGING_POLICY_PENDING_ACTUAL_SERVICE_BINDINGS');
   assert.equal(components.kind,'backplane-desktop-prepared-components');assert(p.TARGETS[components.target]);
   for(const key of ['version','tag','channel','commit','tree'])assert.equal(policy[key],components.release[key],'Root source mismatch: '+key);
-  assert.equal(policy.version,'0.12.0');assert.equal(policy.electronVersion,'44.9.2');assert.equal(policy.publicationOwner,'root');
+  assert.equal(policy.version,'0.12.1');assert.equal(policy.electronVersion,'44.9.2');assert.equal(policy.publicationOwner,'root');
   const allowed=policy.targets[components.target];assert(allowed,'Target not authorized');assert.equal(allowed.signingPolicy,'unsigned-portable-allowed');assert.deepEqual(allowed.lifecyclePolicy,{mode:'resident-service',managedStop:false,managedUpdate:false});return allowed;
 }
 function compose(a){

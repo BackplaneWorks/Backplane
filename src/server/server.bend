@@ -125,6 +125,7 @@ import ../core/rules.bend as RLS
 import ../core/task.bend as TKS
 import ../core/teach.bend as TE
 import ../core/usage.bend as UZ
+import ./thinstore.bend as TSTO
 
 # The server. One hub computation owns the read model and the event log;
 # every connection and agent process is its own computation and talks to
@@ -371,13 +372,16 @@ type ThinWait is Data:
   ThinWait{client: U32, o: J.Json, now: Nat}
 
 type ThinCache is Data:
-  ThinCache{index: THIN.Lazy, epoch: String, revision: Nat, streams: Map<&2, TLIVE.Stream>, mail: TMAIL.Lazy, waiting: List<&2, ThinWait>, notes: TPACE.Notes}
+  # store: a store.db handle (server/thinstore.bend; "": none). With one,
+  # index holds the recent threads alone and pages, message reads and
+  # search are queries (Thin.store.open)
+  ThinCache{index: THIN.Lazy, epoch: String, revision: Nat, streams: Map<&2, TLIVE.Stream>, mail: TMAIL.Lazy, waiting: List<&2, ThinWait>, notes: TPACE.Notes, store: String}
 
 type Cfg is Data:
   Cfg{home: String, web: String, host: String, port: U32, prompt: String, dirs: List<&2, String>, version: String, net: Net, telemetry: List<&2, TI.TmCfg>, views: List<&2, ThinCache>}
 
 def ThinCache.first(xs: List<&2, ThinCache>) -> ThinCache:
-  Maybe.default(&2, ThinCache, List.head(&2, ThinCache, xs), ThinCache{THIN.Built{THIN.Index.empty()}, "0", 0n, Map.new(&2, TLIVE.Stream), TMAIL.Built{TMAIL.Cache.empty()}, Nil{}, TPACE.Notes.empty()})
+  Maybe.default(&2, ThinCache, List.head(&2, ThinCache, xs), ThinCache{THIN.Built{THIN.Index.empty()}, "0", 0n, Map.new(&2, TLIVE.Stream), TMAIL.Built{TMAIL.Cache.empty()}, Nil{}, TPACE.Notes.empty(), ""})
 
 def Cfg.thin.cache(cfg: Cfg) -> ThinCache:
   match cfg:
@@ -385,34 +389,41 @@ def Cfg.thin.cache(cfg: Cfg) -> ThinCache:
 
 def ThinCache.lazy(c: ThinCache) -> THIN.Lazy:
   match c:
-    case ThinCache{i, _, _, _, _, _, _}: i
+    case ThinCache{i, _, _, _, _, _, _, _}: i
 
 def ThinCache.epoch(c: ThinCache) -> String:
   match c:
-    case ThinCache{_, e, _, _, _, _, _}: e
+    case ThinCache{_, e, _, _, _, _, _, _}: e
 
 def ThinCache.revision(c: ThinCache) -> Nat:
   match c:
-    case ThinCache{_, _, n, _, _, _, _}: n
+    case ThinCache{_, _, n, _, _, _, _, _}: n
 
 def ThinCache.streams(cache: ThinCache) -> Map<&2, TLIVE.Stream>:
   match cache:
-    case ThinCache{_, _, _, streams, _, _, _}: streams
+    case ThinCache{_, _, _, streams, _, _, _, _}: streams
 
 def ThinCache.mail(cache: ThinCache) -> TMAIL.Lazy:
   match cache:
-    case ThinCache{_, _, _, _, mail, _, _}: mail
+    case ThinCache{_, _, _, _, mail, _, _, _}: mail
 
 def ThinCache.notes(cache: ThinCache) -> TPACE.Notes:
   match cache:
-    case ThinCache{_, _, _, _, _, _, notes}: notes
+    case ThinCache{_, _, _, _, _, _, notes, _}: notes
 
 def Cfg.thin.notes(cfg: Cfg) -> TPACE.Notes:
   ThinCache.notes(Cfg.thin.cache(cfg))
 
 def ThinCache.waiting(cache: ThinCache) -> List<&2, ThinWait>:
   match cache:
-    case ThinCache{_, _, _, _, _, ws, _}: ws
+    case ThinCache{_, _, _, _, _, ws, _, _}: ws
+
+def ThinCache.store(cache: ThinCache) -> String:
+  match cache:
+    case ThinCache{_, _, _, _, _, _, _, h}: h
+
+def Cfg.thin.store(cfg: Cfg) -> String:
+  ThinCache.store(Cfg.thin.cache(cfg))
 
 def Cfg.thin.mail.lazy(cfg: Cfg) -> TMAIL.Lazy:
   ThinCache.mail(Cfg.thin.cache(cfg))
@@ -449,7 +460,7 @@ def Cfg.thin.next(+n: Nat) -> Nat:
   Nat.add(n, Bool.pick(Nat, Nat.is_lt(n, PRESENT.Session.nat.max()), 1n, 0n))
 
 def Cfg.with_thin(+cfg: Cfg, index: THIN.Lazy) -> Cfg:
-  Cfg.with_thin_cache(cfg, ThinCache{index, Cfg.thin.epoch(cfg), Cfg.thin.next(Cfg.thin.revision(cfg)), Cfg.thin.streams(cfg), Cfg.thin.mail.lazy(cfg), Cfg.thin.waiting(cfg), TPACE.Notes.touch(Cfg.thin.notes(cfg), "*")})
+  Cfg.with_thin_cache(cfg, ThinCache{index, Cfg.thin.epoch(cfg), Cfg.thin.next(Cfg.thin.revision(cfg)), Cfg.thin.streams(cfg), Cfg.thin.mail.lazy(cfg), Cfg.thin.waiting(cfg), TPACE.Notes.touch(Cfg.thin.notes(cfg), "*"), Cfg.thin.store(cfg)})
 
 def Cfg.thin.bump(+cfg: Cfg) -> Cfg:
   Cfg.with_thin(cfg, Cfg.thin.lazy(cfg))
@@ -457,18 +468,36 @@ def Cfg.thin.bump(+cfg: Cfg) -> Cfg:
 # the index built away from the hub arrived (THIN.Lazy.warm); the waiting
 # requests are taken out, to be answered now (Hub.thin.warmed)
 def Cfg.thin.warm(+cfg: Cfg, i: THIN.Index, m: TMAIL.Cache) -> Cfg:
-  Cfg.with_thin_cache(cfg, ThinCache{THIN.Lazy.warm(i, Cfg.thin.lazy(cfg)), Cfg.thin.epoch(cfg), Cfg.thin.revision(cfg), Cfg.thin.streams(cfg), TMAIL.Lazy.warm(m, Cfg.thin.mail.lazy(cfg)), Nil{}, Cfg.thin.notes(cfg)})
+  Cfg.with_thin_cache(cfg, ThinCache{THIN.Lazy.warm(i, Cfg.thin.lazy(cfg)), Cfg.thin.epoch(cfg), Cfg.thin.revision(cfg), Cfg.thin.streams(cfg), TMAIL.Lazy.warm(m, Cfg.thin.mail.lazy(cfg)), Nil{}, Cfg.thin.notes(cfg), Cfg.thin.store(cfg)})
 
 def Cfg.thin.wait(+cfg: Cfg, w: ThinWait) -> Cfg:
-  Cfg.with_thin_cache(cfg, ThinCache{Cfg.thin.lazy(cfg), Cfg.thin.epoch(cfg), Cfg.thin.revision(cfg), Cfg.thin.streams(cfg), Cfg.thin.mail.lazy(cfg), w <> Cfg.thin.waiting(cfg), Cfg.thin.notes(cfg)})
+  Cfg.with_thin_cache(cfg, ThinCache{Cfg.thin.lazy(cfg), Cfg.thin.epoch(cfg), Cfg.thin.revision(cfg), Cfg.thin.streams(cfg), Cfg.thin.mail.lazy(cfg), w <> Cfg.thin.waiting(cfg), Cfg.thin.notes(cfg), Cfg.thin.store(cfg)})
 
 def Cfg.thin.first_epoch(changes: List<&2, M.Change>, old: String) -> String:
   match changes old:
     case c <> _ "": Nat.show(J.Json.get_nat(C.Change.encode(c), "at", 0n))
     case _ _: old
 
+# a commit reaches the index: all of it, or (with a store, which has the
+# rows) only the recent threads
+def Cfg.thin.lazy.committed(memory: Bool, +changes: List<&2, M.Change>, l: THIN.Lazy) -> THIN.Lazy:
+  match memory:
+    case True{}: THIN.Lazy.changes(changes, l)
+    case False{}: THIN.Built{THIN.Index.changes.recent(changes, THIN.Lazy.force(l))}
+
+# The thin views on a store (S1's store.db, kept by the commit path): the
+# recent threads read from it once, and from then on pages, message reads
+# and search are queries; nothing of history stays in the hub
+def Cfg.thin.stored(+cfg: Cfg, +h: String, recent: THIN.Index) -> Cfg:
+  Cfg.with_thin_cache(cfg, ThinCache{THIN.Built{recent}, Cfg.thin.epoch(cfg), Cfg.thin.next(Cfg.thin.revision(cfg)), Cfg.thin.streams(cfg), Cfg.thin.mail.lazy(cfg), Cfg.thin.waiting(cfg), Cfg.thin.notes(cfg), h})
+
+def Thin.store.open(+cfg: Cfg, +st: M.State, +h: String) -> IO(Cfg):
+  do IO<Cfg>:
+    r : THIN.Index <- TSTO.Ts.recent(h, st)
+    return Cfg.thin.stored(cfg, h, r)
+
 def Cfg.thin.committed(+cfg: Cfg, +changes: List<&2, M.Change>, st: M.State) -> Cfg:
-  Cfg.with_thin_cache(cfg, ThinCache{THIN.Lazy.changes(changes, Cfg.thin.lazy(cfg)), Cfg.thin.first_epoch(changes, Cfg.thin.epoch(cfg)), Cfg.thin.next(Cfg.thin.revision(cfg)), Cfg.thin.streams(cfg), TMAIL.Lazy.committed(changes, st, Cfg.thin.mail.lazy(cfg)), Cfg.thin.waiting(cfg), TPACE.Notes.changes(Cfg.thin.notes(cfg), changes)})
+  Cfg.with_thin_cache(cfg, ThinCache{Cfg.thin.lazy.committed(String.is_empty(Cfg.thin.store(cfg)), changes, Cfg.thin.lazy(cfg)), Cfg.thin.first_epoch(changes, Cfg.thin.epoch(cfg)), Cfg.thin.next(Cfg.thin.revision(cfg)), Cfg.thin.streams(cfg), TMAIL.Lazy.committed(changes, st, Cfg.thin.mail.lazy(cfg)), Cfg.thin.waiting(cfg), TPACE.Notes.changes(Cfg.thin.notes(cfg), changes), Cfg.thin.store(cfg)})
 
 # ---- mail perf: local wire-log length ----
 # Valid unknown JSON remains a wire line without changing State.seq.
@@ -6214,7 +6243,7 @@ def Cfg.with_tch(+c: Cfg, t: TE.TeachSt) -> Cfg:
 
 # th: the thread whose stream changed ("*": any of them)
 def Cfg.thin.live(+cfg: Cfg, streams: Map<&2, TLIVE.Stream>, +th: String) -> Cfg:
-  Cfg.with_thin_cache(cfg, ThinCache{Cfg.thin.lazy(cfg), Cfg.thin.epoch(cfg), Cfg.thin.next(Cfg.thin.revision(cfg)), streams, Cfg.thin.mail.lazy(cfg), Cfg.thin.waiting(cfg), TPACE.Notes.touch(Cfg.thin.notes(cfg), th)})
+  Cfg.with_thin_cache(cfg, ThinCache{Cfg.thin.lazy(cfg), Cfg.thin.epoch(cfg), Cfg.thin.next(Cfg.thin.revision(cfg)), streams, Cfg.thin.mail.lazy(cfg), Cfg.thin.waiting(cfg), TPACE.Notes.touch(Cfg.thin.notes(cfg), th), Cfg.thin.store(cfg)})
 
 def Live.with(+cfg: Cfg, +lv: List<&2, LV.Buf>) -> Cfg:
   Cfg.thin.live(Cfg.with_bn(cfg, BN.Bn.with_live(Cfg.bn(cfg), lv)), TLIVE.Streams.snapshot(lv, Cfg.thin.next(Cfg.thin.revision(cfg)), Map.new(&2, TLIVE.Stream)), "*")
@@ -9001,16 +9030,36 @@ def MailJob.room.selected(page: Maybe<&2, RH.RoomPage>, +home: String, +s: M.Sta
     case Some{RH.RoomPage{+headers, more}}:
       MailJob.room.bodies(headers, home, s, ML.Box.conv(M.State.mail(s), conv), bot, RH.RoomHistory.sources(s, conv, headers), more, Nil{})
 
-def MailJob.page.kind(room: Bool, +home: String, +s: M.State, +conv: String, +bot: String, +before: String, +n: Nat) -> IO(MST.StoreResult<J.Json>):
-  match room:
+# A room's page from the store (server/thinstore.bend's Ms.*): the headers
+# after the cursor and the posts' texts, by query, as RH.RoomHistory reads
+# them from the box and the world
+def MailJob.room.stored(page: Maybe<&2, RH.RoomPage>, +h: String, +home: String, +s: M.State, +conv: String, +bot: String) -> IO(MST.StoreResult<J.Json>):
+  match page:
+    case None{}: IO.pure(MST.StoreResult<J.Json>, MST.StoreError{conv, "unknown room conversation or mail cursor"})
+    case Some{RH.RoomPage{+headers, more}}:
+      do IO<MST.StoreResult<J.Json>>:
+        texts : Map<&2, String> <- TSTO.Ms.room.sources(h, conv, headers)
+        MailJob.room.bodies(headers, home, s, ML.Box.conv(M.State.mail(s), conv), bot, texts, more, Nil{})
+
+def MailJob.room.kind(memory: Bool, +h: String, +home: String, +s: M.State, +conv: String, +bot: String, +before: String, +n: Nat) -> IO(MST.StoreResult<J.Json>):
+  match memory:
     case True{}: MailJob.room.selected(RH.RoomHistory.page(s, conv, before, n), home, s, conv, bot)
+    case False{}:
+      do IO<MST.StoreResult<J.Json>>:
+        page : Maybe<&2, RH.RoomPage> <- TSTO.Ms.room.page(h, conv, before, n)
+        MailJob.room.stored(page, h, home, s, conv, bot)
+
+def MailJob.page.kind(room: Bool, +h: String, +home: String, +s: M.State, +conv: String, +bot: String, +before: String, +n: Nat) -> IO(MST.StoreResult<J.Json>):
+  match room:
+    case True{}: MailJob.room.kind(String.is_empty(h), h, home, s, conv, bot, before, n)
     case False{}:
       do IO<MST.StoreResult<J.Json>>:
         r : MST.StoreResult<List<&2, MB.Body>> <- MST.MailStore.read(home, conv, before, n)
         MailJob.page.result(r, home, s, conv, bot, n)
 
-def MailJob.page(+home: String, +s: M.State, +conv: String, +bot: String, +before: String, +n: Nat) -> IO(MST.StoreResult<J.Json>):
-  MailJob.page.kind(String.starts_with(conv, "room:"), home, s, conv, bot, before, n)
+# h: the store's handle ("": read the box in memory)
+def MailJob.page(+h: String, +home: String, +s: M.State, +conv: String, +bot: String, +before: String, +n: Nat) -> IO(MST.StoreResult<J.Json>):
+  MailJob.page.kind(String.starts_with(conv, "room:"), h, home, s, conv, bot, before, n)
 
 def MailJob.read.reply(+r: MST.StoreResult<J.Json>, +client: U32, +id: String) -> B.Out:
   match r:
@@ -9046,7 +9095,7 @@ def Hub.out(h: Hub, o: B.Out) -> IO(Hub):
       MailJob.append.parsed(MB.Body.parse(line), Cfg.home(cfg), changes, Hub{st, f, ls, cl, as, inbox, cfg, note})
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note} B.MailRead{+client, +id, conv, before, n}:
       do IO<Hub>:
-        r : MST.StoreResult<J.Json> <- MailJob.page(Cfg.home(cfg), st, conv, "*", before, n)
+        r : MST.StoreResult<J.Json> <- MailJob.page(Cfg.thin.store(cfg), Cfg.home(cfg), st, conv, "*", before, n)
         cl2 : List<&2, Client> <- Wire.to(cl, client, MailJob.read.text(MailJob.read.reply(r, client, id)))
         return Hub{st, f, ls, cl2, as, inbox, cfg, note}
     case Hub{st, f, ls, cl, as, inbox, cfg, note} B.Send{+client, +text}:
@@ -10879,23 +10928,46 @@ def Hub.thin.rendered(rendered: TA.Rendered, h: Hub, +client: U32, +o: J.Json, +
   match rendered:
     case TA.Rendered{+actor, result}: Hub.thin.rendered_valid(TA.Actor.capacity(actor), actor, result, h, client, o, c, now, context)
 
+# A thread's page and the index the renderers read it from: the whole
+# index's, or (with a store) a page index of just its rows (TSTO.Ts.page)
+def Hub.thin.fetch(memory: Bool, +cfg: Cfg, +thread: String, +anchor: Nat) -> IO(TSTO.Page):
+  match memory:
+    case True{}: IO.pure(TSTO.Page, TSTO.Page{Cfg.thin(cfg), THIN.Index.page(Cfg.thin(cfg), thread, anchor, 32n)})
+    case False{}: TSTO.Ts.page(Cfg.thin.store(cfg), thread, anchor, 32n, Cfg.thin(cfg))
+
+def Hub.thin.render.page(+pg: TSTO.Page, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, +context: ThinContext, +p: J.Json) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
+      +web = String.eq(Client.thin.mode(c), "view-web")
+      +actor = TA.Actor.mail_cache(TA.Actor.refresh(ThinContext.actors(context), web, st, Hub.info(cfg),
+        J.Json.obj([J.KV{"t", J.Str{"live"}}, J.KV{"items", J.Json.arr(Nil{})}]), now, p, ThinContext.view(context)), ThinContext.actors(context), Cfg.thin.mail(cfg))
+      Hub.thin.rendered(TA.Actor.render(actor, web, st, TSTO.Page.index(pg), p, Cfg.thin.epoch(cfg), now, TSTO.Page.ids(pg), TLIVE.Stream.get(Cfg.thin.streams(cfg), TV.Target.thread(st, J.Json.get_obj(p, "target")))),
+        Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now, context)
+
 def Hub.thin.render(h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, +context: ThinContext, +anchor: Nat) -> IO(Hub):
   match h:
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
       +p = Hub.thin.input(String.eq(J.Json.get_str(o, "m", ""), "view.action"), J.Json.get_obj(o, "p"), ThinContext.cid(context))
-      +rows = THIN.Index.page(Cfg.thin(cfg), TV.Target.thread(st, J.Json.get_obj(p, "target")), anchor, 32n)
-      +web = String.eq(Client.thin.mode(c), "view-web")
-      +actor = TA.Actor.mail_cache(TA.Actor.refresh(ThinContext.actors(context), web, st, Hub.info(cfg),
-        J.Json.obj([J.KV{"t", J.Str{"live"}}, J.KV{"items", J.Json.arr(Nil{})}]), now, p, ThinContext.view(context)), ThinContext.actors(context), Cfg.thin.mail(cfg))
-      Hub.thin.rendered(TA.Actor.render(actor, web, st, Cfg.thin(cfg), p, Cfg.thin.epoch(cfg), now, rows, TLIVE.Stream.get(Cfg.thin.streams(cfg), TV.Target.thread(st, J.Json.get_obj(p, "target")))),
-        Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now, context)
+      do IO<Hub>:
+        +pg : TSTO.Page <- Hub.thin.fetch(String.is_empty(Cfg.thin.store(cfg)), cfg, TV.Target.thread(st, J.Json.get_obj(p, "target")), anchor)
+        Hub.thin.render.page(pg, Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now, context, p)
+
+# a search page: over the whole index, or (with a store) over the
+# candidates it fetched (TSTO.Ts.search); the same rows either way
+def Hub.thin.find(memory: Bool, +cfg: Cfg, +q: String, +thread: String, +before: Nat) -> IO(TSTO.Found):
+  match memory:
+    case True{}: IO.pure(TSTO.Found, TSTO.Found{THIN.Index.search(Cfg.thin(cfg), q, thread, before), Cfg.thin(cfg)})
+    case False{}: TSTO.Ts.search(Cfg.thin.store(cfg), q, thread, before)
 
 def Hub.thin.search.valid(+valid: Bool, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, +context: ThinContext, +cursor: Maybe<&2, Nat>) -> IO(Hub):
   match valid h cursor:
     case False{} _ _: Hub.thin.error(h, client, o, "LIMIT")
     case True{} _ None{}: Hub.thin.error(h, client, o, "STALE_CURSOR")
-    case True{} Hub{+st, f, ls, cl, as, inbox, +cfg, note} Some{before}:
-      Hub.thin.respond(Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, TV.Search.render(Cfg.thin(cfg), st, J.Json.get_obj(o, "p"), Cfg.thin.epoch(cfg), before), c, context, now)
+    case True{} Hub{+st, f, ls, cl, as, inbox, +cfg, note} Some{+before}:
+      +p = J.Json.get_obj(o, "p")
+      do IO<Hub>:
+        +found : TSTO.Found <- Hub.thin.find(String.is_empty(Cfg.thin.store(cfg)), cfg, J.Json.get_str(p, "query", ""), TV.Target.thread(st, J.Json.get_obj(p, "target")), before)
+        Hub.thin.respond(Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, TV.Search.result(TSTO.Found.page(found), TSTO.Found.index(found), p, Cfg.thin.epoch(cfg)), c, context, now)
 
 def Hub.thin.page(+cursor: Maybe<&2, Nat>, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat) -> IO(Hub):
   match cursor:
@@ -10920,14 +10992,24 @@ def Hub.thin.live_message_cursor(cursor: Maybe<&2, Nat>, h: Hub, client: U32, o:
     case None{}: Hub.thin.error(h, client, o, "STALE_CURSOR")
     case Some{+start}: Hub.thin.live_message_result(Bool.and(Nat.is_gt(TLIVE.Stream.size(stream), 0n), Nat.is_lt(start, THIN.Blocks.n(TLIVE.Stream.blocks(stream)))), h, client, o, c, now, stream, start, thread)
 
+# the rows a message read may name, whole (TSTO.Ts.whole); the whole
+# index has them already
+def Hub.thin.whole(memory: Bool, +cfg: Cfg, +thread: String, +p: J.Json, +pg: TSTO.Page) -> IO(TSTO.Page):
+  match memory:
+    case True{}: IO.pure(TSTO.Page, pg)
+    case False{}: TSTO.Ts.whole(Cfg.thin.store(cfg), thread, TSTO.Ts.cursor.ord(p), J.Json.get_str(p, "entryId", ""), pg)
+
 def Hub.thin.message_kind(live: Bool, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, +thread: String) -> IO(Hub):
   match live h:
     case True{} Hub{st, f, ls, cl, as, inbox, +cfg, note}:
       +stream = TLIVE.Stream.get(Cfg.thin.streams(cfg), thread)
       Hub.thin.live_message_cursor(TV.LiveMessage.start(stream, J.Json.get_obj(o, "p"), Cfg.thin.epoch(cfg)), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now, stream, thread)
     case False{} Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
-      Hub.thin.message_read(TV.Message.read(Cfg.thin(cfg), thread, J.Json.get_obj(o, "p"), Cfg.thin.epoch(cfg),
-        THIN.Index.page(Cfg.thin(cfg), thread, ThinContext.anchor(Client.thin.context(c)), 32n), st), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now)
+      +p = J.Json.get_obj(o, "p")
+      do IO<Hub>:
+        +pg : TSTO.Page <- Hub.thin.fetch(String.is_empty(Cfg.thin.store(cfg)), cfg, thread, ThinContext.anchor(Client.thin.context(c)))
+        +whole : TSTO.Page <- Hub.thin.whole(String.is_empty(Cfg.thin.store(cfg)), cfg, thread, p, pg)
+        Hub.thin.message_read(TV.Message.read(TSTO.Page.index(whole), thread, p, Cfg.thin.epoch(cfg), TSTO.Page.ids(pg), st), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now)
 
 def Hub.thin.message(h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat) -> IO(Hub):
   match h:
@@ -11167,7 +11249,7 @@ def Hub.mail.mcp.read(h: Hub, +cs: List<&2, M.Change>, +conv: String, +before: S
   match h:
     case Hub{+st, f, +ls, +cl, +as, +inbox, +cfg, +note}:
       do IO<Hub>:
-        r : MST.StoreResult<J.Json> <- MailJob.page(Cfg.home(cfg), st, conv, "*", before, n)
+        r : MST.StoreResult<J.Json> <- MailJob.page(Cfg.thin.store(cfg), Cfg.home(cfg), st, conv, "*", before, n)
         IO.bind(Hub & Bool, Hub, Hub.step.ok(Hub{st, f, ls, cl, as, inbox, cfg, note}, B.Step{cs, Nil{}}), got => Hub.mcp.after(got, "", body, MailJob.mcp.json(r, J.Json.get_obj(Maybe.default(&2, J.Json, J.Json.parse(body), J.Null{}), "id")), reply))
 
 def Hub.mcp.k(o: MC.McpOut, h: Hub, +reply: Chan(String), +body: String) -> IO(Hub):
@@ -15293,7 +15375,7 @@ def Wire.thin.paced(clients: List<&2, Client>, +st: M.State, +touch: TPACE.Touch
         Wire.thin.paced.thin(Client.thin(c), c, st, touch, ps, now, epoch, revision, rest)
 
 def Cfg.thin.with_notes(+cfg: Cfg, notes: TPACE.Notes) -> Cfg:
-  Cfg.with_thin_cache(cfg, ThinCache{Cfg.thin.lazy(cfg), Cfg.thin.epoch(cfg), Cfg.thin.revision(cfg), Cfg.thin.streams(cfg), Cfg.thin.mail.lazy(cfg), Cfg.thin.waiting(cfg), notes})
+  Cfg.with_thin_cache(cfg, ThinCache{Cfg.thin.lazy(cfg), Cfg.thin.epoch(cfg), Cfg.thin.revision(cfg), Cfg.thin.streams(cfg), Cfg.thin.mail.lazy(cfg), Cfg.thin.waiting(cfg), notes, Cfg.thin.store(cfg)})
 
 def Hub.thin.timer(+want: Bool, +inbox: Chan(Msg), +wait: Nat) -> IO(Unit):
   match want:
@@ -15792,4 +15874,4 @@ def Main.boot(cfg: Cfg, need: Bool, front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
         +org : String = Bool.pick(String, Nat.is_eq(SO.Lg.n(ls), 0n), "", Hub.origin(ls))
         Log.info("origin " ++ org)
         t8 : U32 <- PS.Perf.span("boot.origin", t7)
-        Main.opened(f, st, ls, Cfg.with_thin_cache(cfg1, ThinCache{ti, org, 1n, Map.new(&2, TLIVE.Stream), tmc, Nil{}, TPACE.Notes.empty()}), need, front, t8)
+        Main.opened(f, st, ls, Cfg.with_thin_cache(cfg1, ThinCache{ti, org, 1n, Map.new(&2, TLIVE.Stream), tmc, Nil{}, TPACE.Notes.empty(), ""}), need, front, t8)

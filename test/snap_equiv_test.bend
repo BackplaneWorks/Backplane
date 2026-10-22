@@ -5,14 +5,20 @@ import ../src/core/snapshot.bend as SN
 import ../src/core/model.bend as M
 import ../src/core/mail.bend as ML
 import ../src/core/bot.bend as BT
+import ../src/core/json.bend as J
+import ../src/core/codec.bend as CD
+import ./snapequiv_lib.bend as Q
 
 # The hot boot equals the full replay (S3): the store made of the demo
 # log's first n lines (S1's pure materializer), read back by
 # snapshot.bend and then folded with the rest, dumps every record the
 # whole log's fold dumps, per domain; and what the load derives (entries
 # filed by thread, the mail box's counts, orders and headers, room posts)
-# is what the fold made. test/native/snap_equiv.bend does the same with
-# store.db on a copy of a real log.
+# is what the fold made. Then the same through the hub's own path: the
+# demo log written as HOME/events.jsonl in a temporary folder, store.db
+# built from its first k lines and read back by Hot.load, compared per
+# domain with the whole log folded (test/snapequiv_lib.bend);
+# test/native/snap_equiv.bend does that on a copy of a real home.
 
 def changes(ls: List<&2, S.LL>) -> List<&2, M.Change>:
   match ls:
@@ -130,6 +136,45 @@ def at(+n: Nat) -> IO(Unit):
     C.Check.str("hot boot from line " ++ Nat.show(n) ++ ": derived", derived(boot(n)), derived(fold()))
     C.Check.str("hot boot from line " ++ Nat.show(n) ++ " with no entries: records", dump(boot.bare(n)), dump(fold()))
 
+# the demo log as file lines: each change, then a torn write's fragment
+# and a line from a newer hub (as S.Demo.log has them)
+def Demo.text(cs: List<&2, M.Change>) -> List<&2, String>:
+  match cs:
+    case Nil{}:
+      ["{\"$\":\"Torn", "{\"$\":\"FromALaterHub\",\"at\":30}"]
+    case c <> t:
+      J.Json.show(CD.Change.encode(c)) <> Demo.text(t)
+
+def Demo.file(ls: List<&2, String>) -> String:
+  String.join(ls, "\n") ++ "\n"
+
+# where each cut's line starts
+def Demo.cuts(ks: List<&2, Nat>, +ls: List<&2, String>) -> List<&2, Nat>:
+  match ks:
+    case Nil{}:
+      Nil{}
+    case k <> t:
+      Q.Bytes.at(ls, k, 0n) <> Demo.cuts(t, ls)
+
+# one log through store.db at each cut: no record or window may differ;
+# refused: the cuts Hot.load must refuse (none: a torn fragment before
+# applied_off is skipped as the store skipped it)
+def store.db(+name: String, +cs: List<&2, M.Change>, +cuts: List<&2, Nat>, +refused: Nat) -> IO(Unit):
+  do IO<Unit>:
+    +ls : List<&2, String> = Demo.text(cs)
+    +home : String <- Q.Tmp.dir()
+    Q.Wr.file(home ++ "/events.jsonl", Demo.file(ls))
+    full : M.State <- Q.Full.state(home)
+    +o : Q.Out <- Q.Equiv.cuts(Demo.cuts(cuts, ls), home, full, Q.Out{0n, 0n})
+    rm : Result<&1, &1, U32 & String, U32 & (String & String)> <- Process.run("rm", ["-rf", home], "", 4096, 10000)
+    C.Check.str(name ++ ": store.db + Hot.load equals the whole log folded at every cut it is used", Nat.show(Q.Out.bad(o)), "0")
+    C.Check.str(name ++ ": the cuts it refuses", Nat.show(Q.Out.refused(o)), Nat.show(refused))
+
+# the demo log without its last deletions: threads still open, so their
+# entry windows are compared too
+def Demo.live() -> List<&2, M.Change>:
+  List.take(&2, M.Change, S.Demo.changes(), Nat.sub(List.length(&2, M.Change, S.Demo.changes()), 5n))
+
 def main() -> IO(Unit):
   do IO<Unit>:
     IO.print(per.domain(S.Tab.dump(boot(30n)), S.Tab.dump(fold())))
@@ -139,3 +184,5 @@ def main() -> IO(Unit):
     at(52n)
     at(60n)
     at(List.length(&2, S.LL, S.Demo.log()))
+    store.db("demo", S.Demo.changes(), [0n, 1n, 30n, 52n, 60n, List.length(&2, M.Change, S.Demo.changes()), List.length(&2, S.LL, S.Demo.log())], 0n)
+    store.db("demo, threads open", Demo.live(), [0n, 3n, 10n, 30n, 50n, List.length(&2, M.Change, Demo.live()), Nat.add(List.length(&2, M.Change, Demo.live()), 2n)], 0n)

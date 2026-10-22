@@ -54,7 +54,7 @@ def public_signer(env, source):
     need(not directory.exists(), 'Private temporary store cleanup failed')
     return {'schema': 1, 'kind': 'backplane-configured-android-public-signer',
             'status': 'PASS_PUBLIC_CERTIFICATE_IDENTITY_ONLY', 'sourceCommit': source,
-            'workflowSourceCommit': workflow, 'version': '0.12.0', 'channel': 'release',
+            'workflowSourceCommit': workflow, 'version': '0.12.1', 'channel': 'release',
             'certificateSha256': fingerprint, 'keystoreRemovedBeforeReceipt': True,
             'privateInputsRetained': False, 'appBuildExecuted': False,
             'artifactRuntimeAccepted': False, 'published': False}
