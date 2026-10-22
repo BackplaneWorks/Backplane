@@ -352,3 +352,17 @@ def main() -> IO(Unit):
     # a mirrored bot's space page, served by the mirroring hub
     +pi : FR.In = FR.In.put(FR.In.new("p1", "box"), 0n, 3n, numbered([M.SpacePageSet{"b1", "<p>old</p>", 1n}, M.SpacePageSet{"b2", "<p>other</p>", 2n}, M.SpacePageSet{"b1", "<p>new</p>", 3n}], 1n))
     C.Check.str("mirrored space page", FR.In.page(pi, "b1") ++ "|" ++ FR.In.page(pi, "b9"), "<p>new</p>|")
+    # the feed made a slice at a time, and only once asked for (F1)
+    +dl : List<&2, String> = FR.Fr.feed.demo.lines()
+    +dst : M.State = FR.Fr.feed.demo.st()
+    C.Check.str("feed: slices of 2 give the same pages as the whole log",
+      FR.Page.json(FR.Fr.page(FR.Feed.lines(FR.Fr.feed.sliced(20n, FR.Fr.feed.start(dl), 2n, dst)), 0n, 7n, 400000n)),
+      FR.Page.json(FR.Fr.page(FR.Fr.feed(dl, dst), 0n, 7n, 400000n)))
+    C.Check.str("feed: shared lines of the demo", Nat.show(List.length(&2, FR.Line, FR.Fr.feed(dl, dst))), "5")
+    +l9 : List<&2, FR.Line> = [FR.Line{9n, "x"}]
+    +l1 : FR.Feed = FR.Feed{[FR.Line{1n, "a"}], Map.new(&2, Nat)}
+    C.Check.str("feed: a commit before anyone asked is not kept",
+      Nat.show(List.length(&2, FR.Line, Maybe.default(&2, List<&2, FR.Line>, FR.Fh.feed(FR.Fh.feed.ready(FR.Fh.feed.add(FR.Fh.empty(), l9), l1)), Nil{}))), "1")
+    C.Check.str("feed: once asked, a commit waits beside it",
+      Nat.show(List.length(&2, FR.Line, Maybe.default(&2, List<&2, FR.Line>, FR.Fh.feed(FR.Fh.feed.ready(FR.Fh.feed.add(FR.Fh.feed.ask(FR.Fh.empty()), l9), l1)), Nil{}))), "2")
+    C.Check.str("feed: not asked at start, asked after", Bool.show(FR.Fh.feed.asked(FR.Fh.empty())) ++ " " ++ Bool.show(FR.Fh.feed.asked(FR.Fh.feed.ask(FR.Fh.empty()))), "False True")

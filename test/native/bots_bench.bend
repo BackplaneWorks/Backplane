@@ -22,7 +22,7 @@ import ../../src/server/argv.bend as AV
 # frame again, keys typed into the focused field, cat frames and wheel
 # notches over the main area. ms per frame, split memo/layout/tiles, and
 # how many frames were not the one drawn from scratch (none should be).
-#   scripts/build-app.sh test/native/bots_bench.bend build/bots_bench
+#   scripts/build-js.sh test/native/bots_bench.bend build/bots_bench
 #   build/bots_bench EVENTS STEPS [FOCUS [THREAD [REMOTE [busy [DIR]]]]]
 # FOCUS "room" is the room's line, "remote" a remote bot's, else the
 # composer; REMOTE is "bots.remote" as the hub would send it ("" for

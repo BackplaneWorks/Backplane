@@ -14,7 +14,7 @@ import ../../src/server/argv.bend as AV
 # (2026-10-02, bun with its JIT: old 11.2 s a frame; ix 205 ms, of which
 # the index 140 ms and the rows 20 ms)
 # (the JS build, as the web and the phones run it), or build it native
-# with scripts/build-app.sh. It prints a checksum that must match.
+# with scripts/build-js.sh. It prints a checksum that must match.
 
 def Gen.cat(xs: List<&2, M.Change>, ys: List<&2, M.Change>) -> List<&2, M.Change>:
   match xs:

@@ -1,7 +1,7 @@
 import Base
 import ./json.bend as J
 
-# Performance numbers, read and summed up (pure). src/server/effects/perf.c
+# Performance numbers, read and summed up (pure). src/server/effects/perf.js
 # keeps one row per name: how many values, their sum, the largest, the last
 # one and a log2 histogram (bucket 0 holds 0, bucket i holds [2^(i-1),
 # 2^i)). Spans are microseconds. Perf.take answers the rows as text:

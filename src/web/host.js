@@ -9,15 +9,18 @@ import App from "./app.bend";
 import { pairBrowser } from "./auth.js";
 
 // Consume the secret before the generic deeplink handler clears the fragment.
-const pairingReady = pairBrowser({ location, history, storage: localStorage, fetch: window.fetch.bind(window) }).catch(() => false);
+// a hub that is starting (building its store) answers 503: pairing waits and
+// says so, and the link's token is kept until it pairs
+const pairingReady = pairBrowser({ location, history, storage: localStorage, fetch: window.fetch.bind(window),
+  onWait: note => { try { showViewStatus(note); } catch {} } }).catch(() => false);
 import * as Solid from "./solid.js";
 import * as Plot2d from "./plot2d.js";
 import { installDesktopBrowser } from "./desktop-browser.js";
 import { restoreCache } from "./replay.js";
-import { FrontendStartup, validatePresentation } from "./startup.js";
 import { FocusedCache, FocusedView, captureFocused, cacheIdentity, mergeFocused, scopeKey } from "./focused-cache.js";
 import { refreshCacheIdentity } from "./cache-identity.js";
 import { discoverViews } from "./thin-discovery.js";
+import { Backoff, Retry, watchWake, probeHub, bundleOf, deployed, QUIET_MS } from "./reconnect.js";
 import { ThinHost, preservePresentationRoute, presentationTarget } from "./thin-host.js";
 import { ThinContinuations } from "./thin-continuations.js";
 import { ThinMailDraft, mailReplyField } from "./mail-drafts.js";
@@ -260,6 +263,10 @@ if (location.hash) {
 }
 // drafts this browser kept (Keep commands), one key per thread
 const DRAFT = "backplane-draft:";
+// the outbox (see outboxKeep below), declared before anything can send
+const OUTBOX = "backplane-outbox", OUTBOX_DAY = 86400000;
+const outbox = new Map();
+try { for (const o of JSON.parse(localStorage.getItem(OUTBOX) || "[]")) if (o?.msg && Date.now() - o.at < OUTBOX_DAY) outbox.set(o.msg, o); } catch {}
 for (let i = 0; i < localStorage.length; i += 1) {
   const k = localStorage.key(i);
   if (k && k.startsWith(DRAFT)) ui = App.restore(ui, k.slice(DRAFT.length), localStorage.getItem(k) ?? "");
@@ -599,6 +606,7 @@ function copy(text) {
 function run(cmds) {
   for (const c of each(cmds)) {
     if (is(c, "Send")) {
+      outboxKeep(c.text);
       if (socket && socket.readyState === 1) {
         if (PERF?.trace) { const request = JSON.parse(c.text); trace("send", { id: request.id, method: request.m, queuedBytes: socket.bufferedAmount }); }
         socket.send(fromList(App.wire_out(c.text)));
@@ -1383,86 +1391,8 @@ window.addEventListener("resize", () => {
 // Socket
 // ------
 
-let backoff = 250;
-
 // Authentication is carried by the same-origin HttpOnly pairing cookie.
 // Native clients retain their existing token protocol.
-
-// The event log this page holds, kept across reloads: a reload shows it at
-// once and the socket then brings only what is new (since=, origin=). The
-// hub's log frames are kept as they came (their CBOR bytes, one record each,
-// in IndexedDB: a long log is many MB, past what localStorage holds), and a
-// reload folds them again as if they had just arrived. A log from the start
-// (since 0: a new page, or another log at the hub) clears what was kept.
-const FRAMES = "frames";
-let db = null;
-let opened = null;
-function openCompatibilityCache() {
-  if (opened) return opened;
-  return opened = new Promise((done) => {
-  const identity = cacheIdentity(document.cookie);
-  if (!identity) { done(); return; }
-  let settled = false;
-  const finish = database => {
-    if (settled) { database?.close(); return; }
-    settled = true;clearTimeout(timer);db = database || null;done();
-  };
-  const timer = setTimeout(() => finish(null), 1500);
-  try {
-    // Old unpartitioned read models are retained, but never hydrated under a
-    // different or absent credential tag, even in explicit compatibility.
-    const r = indexedDB.open("backplane-log-v2:" + identity, 1);
-    r.onupgradeneeded = () => r.result.createObjectStore(FRAMES, { autoIncrement: true });
-    r.onsuccess = () => finish(r.result);
-    r.onerror = () => finish(null);
-    r.onblocked = () => finish(null);
-  } catch {
-    finish(null);
-  }
-});
-}
-
-// the number in field k of a frame's top object, as Bend's Json holds it
-function field(j, k) {
-  for (let c = j && j.fields; c && is(c, "Field"); c = c.tail) if (c.key === k) return c.value && c.value.raw;
-  return undefined;
-}
-
-function keep(kind, j, bytes) {
-  if (!db || (kind !== "log" && kind !== "changes")) return;
-  try {
-    const tx = db.transaction(FRAMES, "readwrite");
-    const st = tx.objectStore(FRAMES);
-    if (kind === "log" && Number(field(j, "since") ?? 0) === 0) st.clear();
-    st.add(bytes.slice().buffer);
-  } catch {}
-}
-
-// Cache folding and the optional view may overlap; canonical frame application
-// may not. Even a timed-out cache loop must stop before its cursor is used.
-let restored = Promise.resolve(), compatibilityRestore = null;
-function restoreCompatibilityCache() {
-  if (compatibilityRestore) return compatibilityRestore;
-  return compatibilityRestore = restoreCache(async () => {
-  await openCompatibilityCache();
-  if (!db) return [];
-  return new Promise((resolve, reject) => {
-    const r = db.transaction(FRAMES, "readonly").objectStore(FRAMES).getAll();
-    r.onsuccess = () => { trace("cache-replay-start", { frames: (r.result ?? []).length }); resolve(r.result ?? []); };
-    r.onerror = () => reject(r.error || Error("Cache read failed"));
-  });
-}, buf => {
-  const frame = Wire.cbor(new Uint8Array(buf), KEYS, WORDS);
-  if (!["log", "changes"].includes(App.kind(frame))) throw Error("Invalid cached frame");
-  ui = App.recv(ui, frame).ui;
-}, { onYield: frames => trace("cache-replay-yield", { frames }) }).then(result => {
-  if (result.error) ui = App.presentation_reset(ui, now(), cid);
-  ui = App.unsync(ui);
-  try { restoreSubs(); } catch {}
-  cacheReady = true;
-  trace("cache-replay-end", { seq: App.seq(ui), applied: result.applied, reset: !!result.error });
-});
-}
 
 function jsonValue(j, key) {
   for (let f = j?.fields; f && is(f, "Field"); f = f.tail) if (f.key === key) return f.value;
@@ -1510,7 +1440,7 @@ function showViewStatus(message) {
     box = document.createElement("aside");box.id = "view-connection";box.setAttribute("role", "status");
     box.style.cssText = "position:fixed;bottom:0;left:0;right:0;z-index:30;display:flex;flex-wrap:wrap;gap:8px;padding:8px;background:var(--panel);border-top:1px solid var(--line)";
     const text = document.createElement("span");text.id = "view-connection-text";box.append(text);
-    for (const [label, action] of [["Retry connection", () => startThin()], ["Full sync (compatibility)", chooseCompatibility]]) {
+    for (const [label, action] of [["Retry now", retryNow]]) {
       const button = document.createElement("button");button.type = "button";button.textContent = label;button.addEventListener("click", action);box.append(button);
     }
     document.body.append(box);
@@ -1518,7 +1448,93 @@ function showViewStatus(message) {
   box.hidden = !message;
   box.style.display = message ? "flex" : "none";
   document.getElementById("view-connection-text").textContent = message;
+  // The page shrinks above the bar instead of sliding under it.
+  document.documentElement.style.setProperty("--status-h", message ? box.offsetHeight + "px" : "0px");
 }
+
+// Reconnecting
+// ------------
+// A dropped view connection is tried again by itself: a jittered, growing
+// delay (reconnect.js), cut short when the network comes back or the page is
+// looked at again; a hub that is starting says how long with Retry-After.
+// While it is down the last view stays on screen (actions wait, the draft is
+// kept) and the bar says so only if the gap lasts past QUIET_MS.
+const thinBackoff = new Backoff(), thinRetry = new Retry();
+let downSince = 0, downNote = "", downTimer = 0;
+function downStatus(note) {
+  downNote = note;
+  if (!downSince) downSince = Date.now();
+  clearTimeout(downTimer);
+  const wait = Math.max(0, downSince + QUIET_MS - Date.now());
+  downTimer = setTimeout(() => { if (downSince) showViewStatus(waiting(downNote)); }, wait);
+}
+function upStatus() {
+  downSince = 0;clearTimeout(downTimer);downTimer = 0;
+  thinBackoff.reset();thinRetry.cancel();
+  showViewStatus("");
+}
+function thinReconnect() {
+  if (!pairingAccepted || viewMode === "compatibility" || thinRetry.pending) return;
+  downStatus(downNote || "Reconnecting… Your draft is kept.");
+  thinRetry.schedule(thinBackoff.next(), async () => {
+    if (viewMode === "compatibility") return;
+    const hub = await probeHub(window.fetch.bind(window));
+    if (viewMode === "compatibility") return;
+    if (hub.state === "up") { void startThin(true);return; }
+    if (hub.state === "starting") { thinBackoff.retryAfter(hub.retryAfterMs);downStatus(`${hub.note || "Hub restarting…"} Your draft is kept.`); }
+    else downStatus(navigator.onLine === false ? "Offline. Reconnects when the network is back; your draft is kept." : "Hub unreachable. Reconnecting… Your draft is kept.");
+    thinReconnect();
+  });
+}
+// The outbox: a message sent in view mode is kept until the hub answers it.
+// A drop before the answer (or a Send while down) leaves it here, and every
+// new view connection sends it again. The hub stores a client-named message
+// once (Hub.dup), so a resend never posts twice. Kept in localStorage, so a
+// reload or a crash loses nothing; a refusal puts the text back in its
+// thread's draft. Compatibility mode has Bend's own outbox.
+function outboxSave() {
+  try { if (outbox.size) localStorage.setItem(OUTBOX, JSON.stringify([...outbox.values()]));else localStorage.removeItem(OUTBOX); } catch {}
+}
+function outboxKeep(text) {
+  if (viewMode === "compatibility") return;
+  let r;try { r = JSON.parse(text); } catch { return; }
+  const msg = r?.p?.msg;
+  if (r?.m !== "turn.start" || typeof msg !== "string" || !msg) return;
+  outbox.set(msg, { msg, id: r.id, text, thread: String(r.p.thread || ""), body: String(r.p.text || ""), at: Date.now() });
+  outboxSave();
+}
+function outboxReply(envelope) {
+  for (const o of outbox.values()) if (o.id === envelope.id) {
+    outbox.delete(o.msg);outboxSave();
+    if (envelope.ok === false) outboxRefused(o, envelope.error);
+    return;
+  }
+}
+function outboxRefused(o, error) {
+  const session = currentSession();
+  if (thin && session.sel === o.thread && !session.drafts?.[o.thread]) thin.request("draft", o.body);
+  else try { if (!localStorage.getItem(DRAFT + o.thread)) localStorage.setItem(DRAFT + o.thread, o.body); } catch {}
+  showViewStatus(`A message was not sent (${String(error || "refused")}); its text is back in its draft.`);
+}
+function outboxFlush() {
+  if (!socket || socket.readyState !== 1) return;
+  for (const o of outbox.values()) {
+    if (Date.now() - o.at > OUTBOX_DAY) { outbox.delete(o.msg);outboxRefused(o, "too old");continue; }
+    socket.send(fromList(App.wire_out(o.text)));
+  }
+  outboxSave();
+}
+function waiting(note) {
+  return outbox.size ? `${note} ${outbox.size === 1 ? "1 message" : outbox.size + " messages"} will send once connected.` : note;
+}
+
+function retryNow() {
+  if (viewMode === "compatibility") return;
+  thinBackoff.reset();
+  if (thinRetry.pending) thinRetry.wake();
+  else void startThin();
+}
+
 function resultPanel(title) {
   document.getElementById("thin-result")?.remove();
   const shade = document.createElement("div");shade.id = "thin-result";shade.className = "shade";
@@ -1577,8 +1593,9 @@ function showThinMessage(message) {
     more.addEventListener("click", () => thin?.message(message.id, message.cursor));panel.append(more);
   }
 }
-function stopThin() {
+function stopThin(keepView = false) {
   checkpointFocused();
+  thinRetry.cancel();
   thinContinuations.clear();
   thinAttempt++;clearInterval(thinExpiry);clearTimeout(thinGreetingTimer);clearTimeout(thinDraftTimer);clearTimeout(thinFieldTimer);
   const previous = thin;thin = null;
@@ -1586,18 +1603,24 @@ function stopThin() {
   if (socket === s) socket = null;
   if (s) { s.onclose = null;s.onmessage = null;try { s.close(); } catch {} }
   if (previous) previous.disconnect();
-  remoteReady = false;frontendNode = null;desktopBrowser.hide();Plot2d.reset();Solid.reset();
+  remoteReady = false;desktopBrowser.hide();Plot2d.reset();Solid.reset();
+  if (!keepView) frontendNode = null;
 }
-async function startThin() {
+async function startThin(again = false) {
   if (!pairingAccepted) return;
   if (viewMode === "compatibility") return;
-  stopThin();const attempt = thinAttempt;
+  stopThin(again || downSince > 0);const attempt = thinAttempt;
   viewMode = "discovering";
-  showViewStatus("Connecting…");later();
+  if (downSince) downStatus(downNote);
+  else showViewStatus("Connecting…");
+  later();
   const capability = await discoverViews({ fetch: window.fetch.bind(window), validate: viewCapability });
   if (attempt !== thinAttempt || viewMode === "compatibility") return;
+  if (!capability.supported && capability.offline) {
+    viewMode = "offline";later();thinReconnect();return;
+  }
   if (!capability.supported) {
-    viewMode = "read-only";showViewStatus("Connection unavailable. Saved conversation is read-only.");later();return;
+    viewMode = "read-only";showViewStatus("This hub needs an update to work with this page. Saved conversation is read-only.");later();return;
   }
   viewMode = "view-v1";
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
@@ -1612,9 +1635,12 @@ async function startThin() {
   };
   const disconnect = () => {
     if (!current()) return;
-    fail("Disconnected. Saved conversation is read-only.");ended = true;
+    ended = true;
+    checkpointFocused();remoteReady = false;desktopBrowser.hide();Plot2d.reset();Solid.reset();
     clearTimeout(thinGreetingTimer);clearInterval(thinExpiry);clearTimeout(thinDraftTimer);clearTimeout(thinFieldTimer);
     thin?.disconnect();if (socket === s) socket = null;
+    if (!frontendNode) void restoreFocused(true);
+    later();thinReconnect();
   };
   try {
     const saved = localStorage.getItem("backplane-view-request-id");
@@ -1673,6 +1699,7 @@ async function startThin() {
         remoteReady = state.remoteReady === true;
         if (!remoteReady) { frontendNode = null;desktopBrowser.hide(); }
         if (state.phase === "error") fail("Conversation unavailable. Your draft is kept; retry explicitly.");
+        else if (remoteReady && !s.up) { s.up = true;upStatus();outboxFlush();void checkDeploy(); }
         else if (remoteReady) showViewStatus("");
         later();
       },
@@ -1680,7 +1707,7 @@ async function startThin() {
   } catch { disconnect();try { s.close(); } catch {}return; }
   s.onopen = () => {
     if (!current()) return;
-    socket = s;heard = BigInt(Date.now());
+    socket = s;heard = BigInt(Date.now());s.hb = false;
   };
   s.onmessage = event => {
     if (!current() || typeof event.data === "string") return;
@@ -1696,192 +1723,38 @@ async function startThin() {
     if (bytes.byteLength > 262144) { disconnect();try { s.close(); } catch {}return; }
     try {
       const j = Wire.cbor(bytes, KEYS, WORDS), envelope = Wire.plain(j);
+      if (envelope.t === "hb") { s.hb = true;return; }
+      if (envelope.t === "reply") outboxReply(envelope);
       if (envelope.t === "view") { clearTimeout(thinGreetingTimer);thin.greeting(envelope); }
       else if (!thin.receive(envelope) && envelope.t === "reply" && Number.isSafeInteger(envelope.id) && envelope.id < 2 ** 47) thin.ack(envelope);
       // A thin socket never folds log/changes/info into canonical Ui.
     } catch { disconnect();try { s.close(); } catch {} }
   };
   s.onclose = disconnect;s.onerror = disconnect;
+  s.thin = true;
   s.dead = () => { disconnect();try { s.close(); } catch {} };
   // Include the HTTP Upgrade/connect phase in the greeting deadline.
-  thinGreetingTimer = setTimeout(() => { fail("No current view reply. Retry connection.");disconnect();try { s.close(); } catch {} }, 2000);
+  thinGreetingTimer = setTimeout(() => { disconnect();try { s.close(); } catch {} }, 4000);
   thinExpiry = setInterval(() => { if (current()) thin.expire(); }, 250);
 }
 
-function connect() {
-  const proto = location.protocol === "https:" ? "wss:" : "ws:";
-  const q = new URLSearchParams();
-  q.set("since", App.seq(ui));
-  q.set("origin", App.origin(ui));
-  q.set("enc", "cbor");
-  if (wantFrontend) q.set("frontend", "1");
-  const optIn = wantFrontend;
-  const s = new WebSocket(`${proto}//${location.host}/ws?${q}`);
-  s.binaryType = "arraybuffer";
-  let lost = false, remembered = false, bufferedBytes = 0;
-  const buffered = [];
-  const remember = pending => {
-    if (remembered || (!front.generation && !front.changed)) return;
-    remembered = true;
-    fallbackIntent = pending;
-  };
-  const front = new FrontendStartup({
-    cid: () => cid,
-    session: () => {
-      try { return fallbackIntent?.session || Wire.plain(App.presentation(ui)); }
-      catch { return { sel: "", drafts: {}, rid: null }; } // rejected; never a replacement Ui
-    },
-    cursor: () => ({ since: Number(App.seq(ui)), origin: App.origin(ui) }),
-    send: request => {
-      if (lost || s.readyState !== 1) throw Error("Startup connection closed");
-      s.send(fromList(App.wire_out(JSON.stringify(request))));
-    },
-    allowed: action => App.presentation_allowed(action),
-    blocked: () => { ui = App.presentation_blocked(ui); frontendNode = null; later(); },
-    choice: choosePresentation,
-    local: localPresentation,
-    prepare: (session, input, action) => Wire.plain(App.presentation_prepare(presentationJson(session), presentationJson(input), action)),
-    ack: (session, reply) => Wire.plain(App.presentation_reply(presentationJson(session), presentationJson(reply))),
-    decode: (result, opaque) => {
-      validatePresentation(result);
-      return App.presentation_node(jsonValue(jsonValue(opaque, "result"), "view"));
-    },
-    view: node => { frontendNode = node; trace("frontend-view"); later(); },
-    hide: () => { frontendNode = null; later(); },
-    command: presentationCommand,
-    adopt: adoptPresentation,
-    perform: performPresentation,
-    legacy: (_reason, pending) => {
-      remember(pending);
-      wantFrontend = false;
-      trace("frontend-fallback", { reason: _reason });
-      try { s.close(); } catch { gone(); }
-    },
-  });
-  front.inherit(fallbackIntent);
-  fallbackIntent = null;
-  frontend = front;
-  s.onopen = () => {
-    socket = s;
-    heard = BigInt(Date.now());
-    backoff = 250;
-    ui = App.unsync(App.online(ui, true));
-    if (optIn) front.opened();
-    startHistory();
-    later();
-  };
-  function receive(bytes, j, decodeMs = 0) {
-    const t0 = PERF ? pnow() : 0;
-    if (Solid.isPlot(bytes)) {
-      const at = { bytes: bytes.length, t: performance.now() };
-      const o = Solid.cbor(bytes);
-      const key = typeof o?.key === "string" ? o.key : "";
-      if (key.startsWith("2|") || key.startsWith("3|") || key.startsWith("4|")) Solid.got(o, at);
-      else if (o) Plot2d.got(o, at);
-      return;
-    }
-    j ||= Wire.cbor(bytes, KEYS, WORDS);
-    const t = App.kind(j);
-    trace("receive", { kind: t, id: field(j, "id"), bytes: bytes.length });
-    if (t === "reply") front.ack(Wire.plain(j));
-    const part = App.part(ui, j);
-    keep(t, j, bytes);
-    const r = App.recv(ui, j);
-    ui = r.ui;
-    const wasCanonical = canonicalBoot;
-    canonicalBoot = App.synced(ui);
-    const becameCanonical = canonicalBoot && !wasCanonical;
-    if (canonicalBoot && !front.closed) front.end();
-    if (canonicalBoot && fallbackIntent) {
-      const intent = fallbackIntent;
-      fallbackIntent = null;
-      adoptPresentation(intent.session);
-      for (const operation of intent.operations) {
-        performPresentation(operation);
-        for (const choice of intent.choices || []) if (choice.revision > operation.revision)
-          adoptPresentation(choosePresentation(Wire.plain(App.presentation(ui)), choice.action, choice.value));
-      }
-    }
-    if (t === "log" && Number(field(j, "since") ?? 0) === 0) restoreSubs();
-    let acts = false;
-    for (const _ of each(r.cmds)) { acts = true; break; }
-    run(r.cmds);
-    if (acts || part === "page" || becameCanonical) later();
-    else if (part === "live") laterLive();
-    if (PERF) PERF.msg.push([decodeMs + pnow() - t0, t, part ? 1 : 0]);
-  }
-  s.onmessage = e => {
-    if (lost || s.readyState !== 1) return;
-    heard = BigInt(Date.now());
-    if (typeof e.data === "string") return;
-    const t0 = PERF ? pnow() : 0;
-    const bytes = new Uint8Array(e.data);
-    const plot = Solid.isPlot(bytes);
-    const j = plot ? null : Wire.cbor(bytes, KEYS, WORDS);
-    const t = j ? App.kind(j) : "";
-    const decodeMs = PERF ? pnow() - t0 : 0;
-    if (t === "frontend") {
-      front.greeting(Wire.plain(j));
-      trace("frontend-receive", { kind: t, bytes: bytes.length });
-      if (PERF) PERF.msg.push([pnow() - t0, t, 1]);
-      return;
-    }
-    if (t === "reply") {
-      const id = jsonValue(j, "id");
-      const number = is(id, "Num") ? Number(id.raw) : null;
-      if (front.owns(number)) {
-        front.reply(Wire.plain(j), j);
-        trace("frontend-receive", { kind: "screen-or-history", bytes: bytes.length });
-        if (PERF) PERF.msg.push([pnow() - t0, "frontend-reply", 1]);
-        return;
-      }
-    }
-    if (t === "log" || t === "changes") front.canonicalFrame();
-    if (!cacheReady) {
-      bufferedBytes += bytes.length;
-      if (bufferedBytes > 4194304) { front.legacy("startup frame backlog"); return; }
-      buffered.push({ bytes, j, decodeMs });
-      return;
-    }
-    receive(bytes, j, decodeMs);
-  };
-  function startHistory() {
-    if (lost || s.readyState !== 1) return;
-    if (!cacheReady) return;
-    front.ready();
-    for (const frame of buffered.splice(0)) {
-      if (lost || s.readyState !== 1) break;
-      receive(frame.bytes, frame.j, frame.decodeMs);
-    }
-    bufferedBytes = 0;
-  }
-  restored.then(startHistory);
-  const gone = () => {
-    if (lost) return;
-    lost = true;
-    if (!canonicalBoot) remember(front.pending());
-    front.close();
-    if (socket === s) socket = null;
-    desktopBrowser.hide();
-    Plot2d.reset();
-    Solid.reset();
-    ui = App.unsync(App.online(ui, false));
-    canonicalBoot = false;
-    delete document.documentElement.dataset.backplaneReady;
-    later();
-    const retry = backoff;
-    restored.then(() => setTimeout(connect, retry));
-    backoff = Math.min(backoff * 2, 5000);
-  };
-  s.onclose = gone;
-  s.dead = () => { s.onmessage = null; try { s.close(); } catch {} gone(); };
-}
-
 // when a frame (a heartbeat included) last arrived, in ms
-let heard = BigInt(Date.now());
+let heard = BigInt(Date.now()), tick = Date.now(), hiddenAt = 0;
 setInterval(() => {
-  if (socket && App.alive_due(heard, BigInt(Date.now()))) socket.dead();
+  const t = Date.now(), slept = t - tick > 30000;tick = t;
+  if (socket && (slept || ((!socket.thin || socket.hb) && App.alive_due(heard, BigInt(t))))) socket.dead();
 }, 5000);
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") hiddenAt = Date.now(); }, true);
+watchWake(window, document, why => {
+  const away = hiddenAt ? Date.now() - hiddenAt : 0;
+  if (why === "visible") hiddenAt = 0;
+  // the network changed, or the page slept a while: a socket may be dead
+  // without a close, so a quiet one is replaced (cheap: a bounded view)
+  if (socket && (why === "online" || (why === "visible" && away > 60000) || why === "pageshow")) {
+    if (Date.now() - Number(heard) > 3000) socket.dead();
+  }
+  if (thinRetry.pending) { thinBackoff.reset();thinRetry.wake(); }
+});
 
 setInterval(() => {
   ui = App.tick(ui, now());
@@ -1889,17 +1762,6 @@ setInterval(() => {
 }, 30000);
 
 render();
-// Normal startup negotiates a bounded view; only an explicit human choice
-// below may load a canonical cache or open a legacy history socket.
-function chooseCompatibility() {
-  if (!pairingAccepted) return;
-  if (viewMode === "compatibility") return;
-  stopThin();
-  viewMode = "compatibility";remoteReady = false;remoteEpoch = "";
-  thinSession = null;wantFrontend = false;
-  restored = restoreCompatibilityCache();
-  restored.then(() => { render();connect(); });
-}
 pairingReady.then(paired => {
   pairingAccepted = paired === true;
   if (!pairingAccepted) {
@@ -1912,6 +1774,27 @@ pairingReady.then(paired => {
   startThin();
 });
 window.addEventListener("pagehide", checkpointFocused);
+
+// A deploy: the hub serves a new web client. An open page reloads into it at
+// a quiet moment (drafts live in localStorage), so it never runs stale.
+const RUNNING = bundleOf(import.meta.url);
+let lastKey = 0, updating = false;
+document.addEventListener("keydown", () => { lastKey = Date.now(); }, true);
+async function checkDeploy() {
+  if (!RUNNING || updating) return;
+  let html = "";
+  try { const r = await fetch("/", { cache: "no-store", credentials: "same-origin" }); if (r.ok) html = await r.text(); } catch { return; }
+  if (!deployed(RUNNING, html)) return;
+  updating = true;trace("deploy", { running: RUNNING });
+  const quiet = () => {
+    const busy = document.getElementById("thin-result") || document.querySelector(".shade, .picker, [aria-modal=true]");
+    if (document.visibilityState === "hidden" || (Date.now() - lastKey > 3000 && !busy)) {
+      try { checkpointFocused(); } catch {}
+      location.reload();
+    } else setTimeout(quiet, 1000);
+  };
+  quiet();
+}
 
 // the app shell works offline where the browser allows it (HTTPS or localhost)
 if ("serviceWorker" in navigator && window.isSecureContext) {

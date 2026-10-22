@@ -31,9 +31,22 @@ function lockLine(text) {
   if (!match || +match[1] < 1 || +match[2] < 1 || +match[2] > 65535) throw Object.assign(new Error('Invalid service lock'), { code: 'ERR_SERVICE_LOCK' });
   return { posixPid: +match[1], port: +match[2] };
 }
+// What the waiting screen says for a hub's "starting" answer.
+function startingNote(body) {
+  const match = /building store (\d{1,3})%/.exec(typeof body?.note === 'string' ? body.note : '');
+  return match ? `Building the database… ${Math.min(+match[1], 100)}%` : 'Starting your service…';
+}
 async function greeting(origin) {
   const response = await fetch(`${origin}/hello`, { signal: AbortSignal.timeout(1500), redirect: 'error' });
-  if (!response.ok) throw Object.assign(new Error('Service greeting failed'), { code: response.status === 503 ? 'ERR_SERVICE_BUSY' : 'ERR_SERVICE_GREETING' });
+  if (response.status === 503) {
+    // A hub building its store answers early: 503, Retry-After, {"status":"starting","note":"building store N%"}.
+    let body = {};
+    try { const text = await response.text(); if (text.length <= 4096) body = JSON.parse(text); } catch {}
+    const after = Number(response.headers.get('retry-after'));
+    throw Object.assign(new Error('Service is starting'), { code: 'ERR_SERVICE_BUSY', note: startingNote(body),
+      retryMs: Number.isFinite(after) && after > 0 ? Math.min(after, 5) * 1000 : 0 });
+  }
+  if (!response.ok) throw Object.assign(new Error('Service greeting failed'), { code: 'ERR_SERVICE_GREETING' });
   const bytes = Buffer.from(await response.arrayBuffer());
   if (bytes.length > 4096) throw new Error('Service greeting too large');
   return hello(bytes);
@@ -61,6 +74,29 @@ async function launchPaths({ home, binary, web, env, platform = process.platform
   const absolute = value => typeof value === 'string' && !/[\0\r\n]/.test(value) &&
     (/^[A-Za-z]:[\\/]/.test(value) || /^\\\\[^\\/]+[\\/][^\\/]+/.test(value));
   if (![home, binary, web].every(absolute)) throw new Error('Windows service paths must be fully qualified native paths');
+  // The JS (Bun) service is a native Windows program: it takes native paths
+  // as they are; only the Cygwin service needs them mapped. Its own BUILD.json,
+  // beside it, says which it is (serviceRuntime "bun").
+  let runtime = '';
+  try { runtime = JSON.parse(await files.readFile(path.win32.join(path.win32.dirname(binary), 'BUILD.json'), 'utf8')).serviceRuntime || ''; } catch {}
+  if (runtime === 'bun') {
+    // The bundled Cygwin runtime (sh, bash, coreutils) beside it, as the hub
+    // finds it too: first on PATH, bash as SHELL, and the /tmp Cygwin bash
+    // checks for (a ZIP keeps no empty folder)
+    const bin = path.win32.join(path.win32.dirname(binary), 'runtime', 'bin');
+    const childEnv = { ...env, BACKPLANE_HOME: home };
+    let hasRuntime = false;
+    try { hasRuntime = (await files.lstat(path.win32.join(bin, 'bash.exe'))).isFile?.() === true; } catch {}
+    if (hasRuntime) {
+      const pathKey = Object.keys(childEnv).find(k => k.toLowerCase() === 'path') || 'PATH';
+      const rest = String(childEnv[pathKey] || '').split(';').filter(p => p && p.toLowerCase() !== bin.toLowerCase());
+      for (const k of Object.keys(childEnv)) if (k.toLowerCase() === 'path') delete childEnv[k];
+      childEnv.PATH = [bin, ...rest].join(';');
+      if (!childEnv.SHELL) childEnv.SHELL = path.win32.join(bin, 'bash.exe');
+      try { await files.mkdir(path.win32.join(path.win32.dirname(bin), 'tmp'), { recursive: true, mode: 0o700 }); } catch {}
+    }
+    return { home, web, env: childEnv };
+  }
   const runtimeBin = path.win32.join(path.win32.dirname(binary), 'runtime', 'bin');
   const helper = path.win32.join(runtimeBin, 'cygpath.exe');
   const childEnv = { ...env, LC_ALL: 'C.UTF-8' };
@@ -126,9 +162,17 @@ class Service {
     if (!paired.ok) throw new Error('Discovered service does not authenticate for this home');
     return { origin, version: info.backplane, lockIdentity: { posixPid: lock.posixPid } };
   }
-  async start() {
+  // onStatus(message) hears what the hub says while it starts. There is no
+  // deadline while it keeps answering 503 "starting" (a store build can take
+  // minutes); the 45 s limit counts only from the last answer of any kind.
+  async start({ onStatus } = {}) {
     await fs.mkdir(this.home, { recursive: true, mode: 0o700 });
-    const deadline = Date.now() + 45000;
+    let deadline = Date.now() + 45000;
+    const busy = async error => {
+      deadline = Date.now() + 45000;
+      if (error.note) onStatus?.(error.note);
+      await new Promise(resolve => setTimeout(resolve, error.retryMs || 100));
+    };
     // A listening service can still be recovering a large log. Keep the local
     // window visible while waiting; a busy endpoint is not permission to spawn.
     while (true) {
@@ -137,7 +181,8 @@ class Service {
         if (existing) return this.connection = existing;
         break;
       } catch (error) {
-        if ((error.name !== 'TimeoutError' && !['ERR_SERVICE_BUSY', 'TimeoutError'].includes(error.code ?? error.name)) || Date.now() >= deadline) throw error;
+        if (error.code === 'ERR_SERVICE_BUSY') { await busy(error); continue; }
+        if (error.name !== 'TimeoutError' || Date.now() >= deadline) throw error;
         await new Promise(resolve => setTimeout(resolve, 100));
       }
     }
@@ -162,7 +207,8 @@ class Service {
           return this.connection = connection;
         }
       } catch (error) {
-        if (error.name !== 'TimeoutError' && !['ECONNREFUSED', 'ENOENT', 'ERR_SERVICE_LOCK', 'ERR_SERVICE_BUSY', 'TimeoutError'].includes(error.cause?.code ?? error.code ?? error.name) && error.message !== 'fetch failed') throw error;
+        if (error.code === 'ERR_SERVICE_BUSY') { await busy(error); continue; }
+        if (error.name !== 'TimeoutError' && !['ECONNREFUSED', 'ENOENT', 'ERR_SERVICE_LOCK', 'TimeoutError'].includes(error.cause?.code ?? error.code ?? error.name) && error.message !== 'fetch failed') throw error;
       }
       await new Promise(resolve => setTimeout(resolve, 100));
     }
@@ -182,4 +228,4 @@ class Service {
     this.child = null;
   }
 }
-module.exports = { Service, hello, lockLine, preferredPort, servicePort, launchPaths };
+module.exports = { Service, hello, lockLine, startingNote, preferredPort, servicePort, launchPaths };

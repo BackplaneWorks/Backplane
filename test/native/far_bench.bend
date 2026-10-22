@@ -23,7 +23,7 @@ import ../../src/server/argv.bend as AV
 # ("remote", "name@box") and the frame after it drawn. Before, the window
 # switched to that machine's hub and fetched its whole log
 # (test/native/link_bench.bend: 11-20 s on a 13 MB log).
-#   scripts/build-app.sh test/native/far_bench.bend build/far_bench
+#   scripts/build-js.sh test/native/far_bench.bend build/far_bench
 #   build/far_bench ~/.backplane-bend/events.jsonl   (only reads it)
 
 def ops(o: L.Out) -> List<&2, R.Op>:

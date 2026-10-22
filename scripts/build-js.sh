@@ -1,26 +1,27 @@
 #!/bin/sh
 # Build a Bend program as one executable on Bun's JS runtime: bend emits the
-# JS (about 40 s for the server, against 10 minutes for its C), the version
-# and commit are stamped into it, and `bun build --compile` makes a single
-# file (a few seconds), for this machine or, cross-compiled, any target Bun
-# has. The dev service (scripts/dev.sh stage with BACKPLANE_DEV_SERVICE_JS=1)
-# and CI's JS service (.github/workflows/ci.yml, job js) are built this way.
+# JS (about 40 s for the server), the version and commit are stamped into
+# it, and `bun build --compile` makes a single file (a few seconds), for this
+# machine or, cross-compiled, any target Bun has. The hub is built this way
+# everywhere: scripts/build.sh, scripts/dev.sh, CI's js job and releases
+# (scripts/service-release.py js).
 #
 #   scripts/build-js.sh src/server/main.bend dist/backplane-serve
 #   BACKPLANE_JS_TARGET=windows-x64 scripts/build-js.sh src/server/main.bend dist/backplane-serve
 #                     (writes dist/backplane-serve.exe)
 #
-#   BACKPLANE_VERSION_STAMP / BACKPLANE_COMMIT_STAMP  as scripts/build-app.sh
+#   BACKPLANE_VERSION_STAMP / BACKPLANE_COMMIT_STAMP  the version and commit
+#                     stamped into a copy of the emit (scripts/stamp-version.py)
 #   BACKPLANE_JS_TARGET  a Bun target without "bun-" (linux-x64, linux-arm64,
 #                     darwin-x64, darwin-arm64, windows-x64, ...); default
 #                     this machine
-#   BACKPLANE_TELEMETRY_BAKE=1 / BACKPLANE_GOOGLE_BAKE  as build-app.sh: the
+#   BACKPLANE_TELEMETRY_BAKE=1 / BACKPLANE_GOOGLE_BAKE  the
 #                     release's credentials go into a private prelude that
 #                     is compiled in (scripts/*-header.py writing .js) and
 #                     removed after; the emitted and kept JS never hold them
 #   BACKPLANE_EMIT_CACHE  the emitted JS kept by a hash of everything bend
-#                     reads (default ~/.cache/backplane-bend/emit; 0 = none),
-#                     as build-app.sh keeps its C; three are kept
+#                     reads (default ~/.cache/backplane-bend/emit-js; 0 =
+#                     none); three are kept
 # Prints one "stages:" line: emit (fresh or reused), stamp, compile seconds
 # and the emit's peak RSS.
 set -eu
@@ -38,7 +39,9 @@ fi
 src=$1
 out=$2
 export BEND_NO_TELEMETRY=1
-# bend's heap told 4 GiB (see build-app.sh: the emit's time does not change)
+# bend is a Bun program: JavaScriptCore sizes its heap to the machine's RAM.
+# BUN_JSC_forceRAMSize tells it a 4 GiB machine (a sizing hint, not a cap),
+# which keeps the emit near 8 GB at about the same speed
 export BUN_JSC_forceRAMSize=${BUN_JSC_forceRAMSize:-4294967296}
 bun=$(command -v bun || echo "$HOME/.bun/bin/bun")
 [ -x "$bun" ] || { echo "build-js.sh: bun is needed" >&2; exit 1; }
@@ -90,7 +93,7 @@ fi
 # minified shape, so the emit is minified (names kept) first.
 "$bun" build --minify-whitespace --minify-syntax --keep-names --target=bun \
   "$work/stamped.js" --outfile "$work/native.js" >/dev/null
-python3 scripts/js-native.py "$work/native.js" >/dev/null
+python3 scripts/js-native.py --server "$work/native.js" >/dev/null
 mv -f "$work/native.js" "$work/stamped.js"
 # the baked prelude, then the program: one file for bun to compile
 # removed on every way out: done, a failure (set -e) or a signal
@@ -101,7 +104,8 @@ trap 'unbake; exit 130' INT
 trap 'unbake; exit 143' TERM
 rm -f "$work/baked.js" "$work/bin.js"
 python3 scripts/telemetry-header.py "$work/baked-t.js"
-# the baked Google client, read from .env without running it (build-app.sh)
+# the baked Google client, read from .env (here or in the main checkout)
+# without running it
 envval() {
   for f in .env "$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)/../.env"; do
     [ -f "$f" ] || continue
@@ -116,7 +120,10 @@ if [ "${BACKPLANE_GOOGLE_BAKE:-1}" != 0 ]; then
 else
   BACKPLANE_GOOGLE_BAKE=0 python3 scripts/google-header.py "$work/baked-g.js"
 fi
-(umask 077; cat "$work/baked-t.js" "$work/baked-g.js" >"$work/baked.js"; cat "$work/baked.js" "$work/stamped.js" >"$work/bin.js")
+# the stack prelude first (scripts/js-stack-prelude.js: a 4 GiB stack and
+# Bun's matching JS stack bound, set by executing itself once), then the
+# baked values, then the program
+(umask 077; cat "$work/baked-t.js" "$work/baked-g.js" >"$work/baked.js"; cat scripts/js-stack-prelude.js "$work/baked.js" "$work/stamped.js" >"$work/bin.js")
 rm -f "$work/baked-t.js" "$work/baked-g.js"
 grep -q '"BACKPLANE_GOOGLE_CLIENT_ID": "[^"]' "$work/baked.js" && echo "baked Google client"
 grep -q '"BACKPLANE_TELEMETRY_KEY": "[^"]' "$work/baked.js" && echo "baked telemetry"

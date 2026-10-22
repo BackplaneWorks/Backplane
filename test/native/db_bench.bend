@@ -13,18 +13,18 @@ def hd(a: String) -> String:
 def words(+k: Nat) -> String:
   "routed the board " ++ Nat.show(k) ++ " drc clean usb pair regulator net" ++ Nat.show(Nat.mod(k, 97n))
 
-# n entry rows [#k, thread, text] for k < n
-def rows.go(+n: Nat, acc: List<&2, List<&2, String>>) -> List<&2, List<&2, String>>:
+# n entry rows [k, thread, text] for k < n
+def rows.go(+n: Nat, acc: List<&2, List<&2, D.DbVal>>) -> List<&2, List<&2, D.DbVal>>:
   match n:
     case 0n: acc
-    case 1n+k: rows.go(k, ["#" ++ Nat.show(k), "t" ++ Nat.show(Nat.mod(k, 50n)), words(k)] <> acc)
+    case 1n+k: rows.go(k, [D.Db.nat(k), D.DbText{"t" ++ Nat.show(Nat.mod(k, 50n))}, D.DbText{words(k)}] <> acc)
 
 # one commit's items, as the store writes them: c entries from seq s, a
 # record upsert and the meta row
-def commit.go(+c: Nat, +s: Nat, acc: List<&2, List<&2, String>>) -> List<&2, List<&2, String>>:
+def commit.go(+c: Nat, +s: Nat, acc: List<&2, D.DbStmt>) -> List<&2, D.DbStmt>:
   match c:
-    case 0n: ["INSERT INTO thread(id, json) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET json = excluded.json", "t" ++ Nat.show(Nat.mod(s, 50n)), "{\"seq\":" ++ Nat.show(s) ++ "}"] <> (["INSERT OR REPLACE INTO meta(k, v) VALUES ('applied_seq', ?)", "#" ++ Nat.show(s)] <> acc)
-    case 1n+k: commit.go(k, s, ["INSERT INTO entry(seq, thread, text) VALUES (?, ?, ?) ON CONFLICT DO NOTHING", "#" ++ Nat.show(Nat.add(s, k)), "t" ++ Nat.show(Nat.mod(s, 50n)), words(Nat.add(s, k))] <> acc)
+    case 0n: D.DbStmt{"INSERT INTO thread(id, json) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET json = excluded.json", [D.DbText{"t" ++ Nat.show(Nat.mod(s, 50n))}, D.DbText{"{\"seq\":" ++ Nat.show(s) ++ "}"}]} <> (D.DbStmt{"INSERT OR REPLACE INTO meta(k, v) VALUES ('applied_seq', ?)", [D.Db.nat(s)]} <> acc)
+    case 1n+k: commit.go(k, s, D.DbStmt{"INSERT INTO entry(seq, thread, text) VALUES (?, ?, ?) ON CONFLICT DO NOTHING", [D.Db.nat(Nat.add(s, k)), D.DbText{"t" ++ Nat.show(Nat.mod(s, 50n))}, D.DbText{words(Nat.add(s, k))}]} <> acc)
 
 def ok.not.k(b: Bool) -> Nat:
   match b:
@@ -40,7 +40,7 @@ def commits(+n: Nat, +h: String, +c: Nat, +s: Nat, bad: Nat) -> IO(Nat):
     case 0n: IO.pure(Nat, bad)
     case 1n+k:
       do IO<Nat>:
-        r : String <- D.Db.script(h, commit.go(c, s, []))
+        r : String <- D.Db.script.t(h, commit.go(c, s, []))
         commits(k, h, c, Nat.add(s, c), Nat.add(bad, ok.not(r)))
 
 # rows counted with an accumulator (Base's List.length is not a tail call
@@ -59,7 +59,7 @@ def lookups(+n: Nat, +h: String, found: Nat) -> IO(Nat):
     case 0n: IO.pure(Nat, found)
     case 1n+k:
       do IO<Nat>:
-        r : List<&2, List<&2, String>> <- D.Db.query(h, "SELECT thread, text FROM entry WHERE seq = ?", ["#" ++ Nat.show(Nat.mod(Nat.mul(k, 7919n), 50000n))], 1)
+        r : List<&2, List<&2, String>> <- D.Db.query.t(h, "SELECT thread, text FROM entry WHERE seq = ?", [D.Db.nat(Nat.mod(Nat.mul(k, 7919n), 50000n))], 1)
         lookups(k, h, Nat.add(found, got(r)))
 
 # n pages of 50 newest-first entries of a thread before a seq: rows read
@@ -68,7 +68,7 @@ def pages(+n: Nat, +h: String, found: Nat) -> IO(Nat):
     case 0n: IO.pure(Nat, found)
     case 1n+k:
       do IO<Nat>:
-        r : List<&2, List<&2, String>> <- D.Db.query(h, "SELECT seq, text FROM entry WHERE thread = ? AND seq < ? ORDER BY seq DESC LIMIT 50", ["t" ++ Nat.show(Nat.mod(k, 50n)), "#" ++ Nat.show(Nat.sub(50000n, Nat.mul(k, 37n)))], 50)
+        r : List<&2, List<&2, String>> <- D.Db.query.t(h, "SELECT seq, text FROM entry WHERE thread = ? AND seq < ? ORDER BY seq DESC LIMIT 50", [D.DbText{"t" ++ Nat.show(Nat.mod(k, 50n))}, D.Db.nat(Nat.sub(50000n, Nat.mul(k, 37n)))], 50)
         pages(k, h, Nat.add(found, got(r)))
 
 # n searches, 20 hits at most each: rows read
@@ -96,9 +96,9 @@ def main() -> IO(Unit):
     +h : String = hd(a0)
     +ddl : String <- D.Db.exec(h, "CREATE TABLE meta(k TEXT PRIMARY KEY, v); CREATE TABLE thread(id TEXT PRIMARY KEY, json TEXT); CREATE TABLE entry(seq INTEGER PRIMARY KEY, thread TEXT, text TEXT); CREATE INDEX entry_thread ON entry(thread, seq); CREATE VIRTUAL TABLE entry_fts USING fts5(text, content='entry', content_rowid='seq'); CREATE TRIGGER entry_ai AFTER INSERT ON entry BEGIN INSERT INTO entry_fts(rowid, text) VALUES (new.seq, new.text); END")
     IO.print("setup " ++ a0 ++ " " ++ ddl)
-    +all : List<&2, List<&2, String>> = rows.go(50000n, [])
+    +all : List<&2, List<&2, D.DbVal>> = rows.go(50000n, [])
     t0 : Nat <- IO.now()
-    +b1 : String <- D.Db.batch(h, "INSERT INTO entry(seq, thread, text) VALUES (?, ?, ?)", all)
+    +b1 : String <- D.Db.batch.t(h, "INSERT INTO entry(seq, thread, text) VALUES (?, ?, ?)", all)
     +t1 : Nat <- IO.now()
     say("batch_insert_fts(" ++ b1 ++ ")", 50000n, t0, t1)
     +bad : Nat <- commits(1000n, h, 10n, 100000n, 0n)

@@ -26,12 +26,13 @@
 #                                  hub's deploy_main runs this (docs/deploy.md)
 #   BACKPLANE_DEV_SERVICE_ONLY=1 scripts/dev.sh stage DIR
 #                                  stage only the hub, the launcher, the
-#                                  matching web and LICENSE; no KiStack,
-#                                  helpers or CEF
-#   BACKPLANE_DEV_SERVICE_JS=1 (with SERVICE_ONLY=1) the hub is built for
-#                                  Bun's JS runtime (scripts/build-js.sh), not C
+#                                  matching web and LICENSE; no KiStack
+#                                  or helpers
 #   BACKPLANE_SKIP_CHECK=1           stage without type-checking (a follow
 #                                  deploy of main: CI checked it)
+#
+# The hub is built for Bun's JS runtime (scripts/build-js.sh: about 45 s to
+# emit, nothing when the server's sources are as last time).
 #
 # The dev run keeps to itself: its own home (BACKPLANE_DEV_HOME, default
 # ~/.backplane-dev, never ~/.backplane-bend), port 3788 (BACKPLANE_DEV_PORT),
@@ -50,15 +51,12 @@ set -eu
 cd "$(dirname "$0")/.."
 . scripts/bendok.sh
 export PATH="$HOME/.bend/bin:$HOME/.bun/bin:$PATH"
-# 4 clang jobs at -O3 passed 28 GB here; 2 stay near 12 GB
-export BACKPLANE_JOBS=${BACKPLANE_JOBS:-2}
 prefix=${BACKPLANE_PREFIX:-$HOME/.local/share/backplane}
 dev=build/dev
 port=${BACKPLANE_DEV_PORT:-3788}
 home=${BACKPLANE_DEV_HOME:-$HOME/.backplane-dev}
 # Opt-in belongs only to stage; run/web/install retain their existing modes.
 service_only=0
-service_js=0
 
 say() { printf '\033[1mdev:\033[0m %s\n' "$*"; }
 
@@ -113,7 +111,7 @@ build_browser() {
 # the hub and the launcher (no window binary: scripts/build.sh)
 build_app() {
   check src/server/main.bend
-  scripts/build-app.sh src/server/main.bend "$dev/backplane-serve.new"
+  scripts/build-js.sh src/server/main.bend "$dev/backplane-serve.new"
   mv -f "$dev/backplane-serve.new" "$dev/backplane-serve"
   cp deploy/backplane-launch.sh "$dev/backplane.new" && chmod 755 "$dev/backplane.new"
   mv -f "$dev/backplane.new" "$dev/backplane"
@@ -175,7 +173,7 @@ build_web_dist() {
 }
 
 # the memory this build may use in GB: BACKPLANE_MEM_GB, else the cap of
-# the cgroup it runs in (bp-admit's MemoryMax), else 12 (as build-app.sh)
+# the cgroup it runs in (bp-admit's MemoryMax), else 12
 mem_budget() {
   cgmax=""
   cgp=$(cut -d: -f3 /proc/self/cgroup 2>/dev/null | head -n1)
@@ -185,8 +183,8 @@ mem_budget() {
 }
 
 # the app, the server, the web client and the voice helper into dist/,
-# stamped with the version (in the emitted C, BACKPLANE_VERSION_STAMP: the
-# source is never rewritten). The browser helper is
+# stamped with the version (in a copy of the emitted JS,
+# BACKPLANE_VERSION_STAMP: the source is never rewritten). The browser helper is
 # built only when tools/browser changed since the installed one
 # (build_browser); the step2glb helper is not rebuilt (scripts/build.sh
 # builds both for releases)
@@ -203,16 +201,15 @@ build_dist() {
     for f in src/web/app.bend src/server/main.bend; do check "$f"; done
   fi
   rm -rf dist && mkdir -p dist
-  # no window binary (scripts/build.sh): the hub and the launcher; the dev
-  # service runs on Bun's JS runtime when BACKPLANE_DEV_SERVICE_JS=1
-  # (scripts/build-js.sh: about 50 s and 8 GB to emit, against minutes of
-  # C). The web client (about 19 s, 7 GB) is built beside it when the
-  # budget holds both (15 GB: measured 14.8 together), else after it
-  if [ "$service_js" = 1 ] && [ "$(mem_budget)" -lt 15 ]; then
+  # no window binary (scripts/build.sh): the hub on Bun's JS runtime
+  # (scripts/build-js.sh: about 50 s and 8 GB to emit) and the launcher.
+  # The web client (about 19 s, 7 GB) is built beside it when the budget
+  # holds both (15 GB: measured 14.8 together), else after it
+  if [ "$(mem_budget)" -lt 15 ]; then
     say "the hub, then the web (a $(mem_budget) GB budget)"
     BACKPLANE_VERSION_STAMP=$ver BACKPLANE_COMMIT_STAMP=$(git rev-parse HEAD) scripts/build-js.sh src/server/main.bend dist/backplane-serve
     build_web_dist
-  elif [ "$service_js" = 1 ]; then
+  else
     mkdir -p build
     build_web_dist > build/web-dist.log 2>&1 &
     webpid=$!
@@ -222,9 +219,6 @@ build_dist() {
     wait "$webpid" || webrc=$?
     [ "$webrc" = 0 ] || { cat build/web-dist.log >&2; say "the web client did not build"; exit 1; }
     [ "$hubrc" = 0 ] || { say "the hub did not build"; exit 1; }
-  else
-    build_web_dist
-    BACKPLANE_VERSION_STAMP=$ver BACKPLANE_COMMIT_STAMP=$(git rev-parse HEAD) scripts/build-app.sh src/server/main.bend dist/backplane-serve
   fi
   cp deploy/backplane-launch.sh dist/backplane && chmod 755 dist/backplane
   if [ "$service_only" = 1 ]; then
@@ -245,7 +239,6 @@ install_into() {
 set -eu
 src=$1 prefix=$2
 mkdir -p "$prefix" "$HOME/.local/bin"
-if [ -f "$src/cef-runtime.py" ]; then python3 "$src/cef-runtime.py" install "$src" "$prefix"; fi
 rm -rf "$prefix/web.old"
 [ -d "$prefix/web" ] && mv "$prefix/web" "$prefix/web.old"
 mv "$src/web" "$prefix/web"
@@ -253,36 +246,20 @@ if [ -d "$src/kistack" ]; then rm -rf "$prefix/kistack.old"; [ -d "$prefix/kista
 for f in backplane backplane-serve backplane-browser backplane-browser.stamp backplane-step2glb backplane-voice backplane-kipc LICENSE; do
   [ -e "$src/$f" ] && mv -f "$src/$f" "$prefix/$f"
 done
+[ -L "$prefix/backplane-browser" ] || rm -rf "$prefix/cef" "$prefix/browser-current" "$prefix/browser-previous" "$prefix/browser-runtimes"
 ln -sf "$prefix/backplane" "$HOME/.local/bin/backplane"
 ln -sf "$prefix/backplane-serve" "$HOME/.local/bin/backplane-serve"
 EOF
 }
 
-# Only machines with an optional runtime stage CEF. No runtime download or
-# host build is triggered for the default Chrome-only installation.
-stage_cef() {
-  runtime=$(python3 scripts/cef-runtime.py discover "$prefix")
-  [ -n "$runtime" ] || return 0
-  say "staging matched optional CEF host and browser helper"
-  scripts/build-cef.sh build/cef >/dev/null
-  # Reuse the pinned libraries already installed; a different distribution
-  # must never be paired with a host built against this one.
-  [ "$(sha256sum "$runtime/libcef.so" | cut -d' ' -f1)" = "$(sha256sum build/cef/Release/libcef.so | cut -d' ' -f1)" ] || { say "installed CEF distribution differs from the pinned host"; return 1; }
-  helper=build/dev-pkg/backplane-browser
-  helper_stamp=build/dev-pkg/backplane-browser.stamp
-  if [ ! -e "$helper" ]; then helper=$prefix/backplane-browser; helper_stamp=$prefix/backplane-browser.stamp; fi
-  revision=$(cat tools/cef/host.cc tools/cef/CMakeLists.txt scripts/build-cef.sh | sha256sum | cut -d' ' -f1)
-  python3 scripts/cef-runtime.py stage build/dev-pkg "$runtime" build/cef/Release/backplane-cef "$helper" "$helper_stamp" "$revision"
-}
-
 stage() {
   rm -rf build/dev-pkg && mkdir -p build/dev-pkg
   cp -R dist/web build/dev-pkg/web
+  # the hub ships Bun's and Bend's notices (scripts/js-licenses.sh)
+  scripts/js-licenses.sh build/dev-pkg/licenses
   if [ "$service_only" = 1 ]; then
     cp dist/backplane dist/backplane-serve build/dev-pkg/
     [ -e LICENSE ] && cp LICENSE build/dev-pkg/
-    # a JS hub ships Bun's and Bend's notices (scripts/js-licenses.sh)
-    [ "$service_js" = 1 ] && scripts/js-licenses.sh build/dev-pkg/licenses
     return 0
   fi
   [ -d dist/kistack ] && cp -R dist/kistack build/dev-pkg/kistack
@@ -290,7 +267,6 @@ stage() {
     [ -e "dist/$f" ] && cp "dist/$f" build/dev-pkg/
   done
   [ -e LICENSE ] && cp LICENSE build/dev-pkg/
-  stage_cef
   return 0
 }
 
@@ -377,11 +353,6 @@ case ${1:-run} in
       0|1) service_only=${BACKPLANE_DEV_SERVICE_ONLY:-0} ;;
       *) say "BACKPLANE_DEV_SERVICE_ONLY must be 0 or 1"; exit 1 ;;
     esac
-    case ${BACKPLANE_DEV_SERVICE_JS:-0} in
-      0|1) service_js=${BACKPLANE_DEV_SERVICE_JS:-0} ;;
-      *) say "BACKPLANE_DEV_SERVICE_JS must be 0 or 1"; exit 1 ;;
-    esac
-    [ "$service_js" = 1 ] && [ "$service_only" != 1 ] && { say "BACKPLANE_DEV_SERVICE_JS=1 needs BACKPLANE_DEV_SERVICE_ONLY=1"; exit 1; }
     [ -n "${2:-}" ] || { say "usage: scripts/dev.sh stage DIR"; exit 1; }
     build_dist
     stage

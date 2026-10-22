@@ -22,6 +22,7 @@ import ./sched.bend as SC
 import ./tz.bend as TZ
 import ./mail.bend as ML
 import ./uber.bend as UBM
+import ./uctx.bend as UC
 
 # The Backplane MCP server, as a decider. Each agent session gets its own
 # endpoint (/mcp/<thread>), so every call knows which thread is asking. A
@@ -869,8 +870,10 @@ def Mcp.mail.call.on(+ok: Bool, +i: Nat, +s: M.State, +now: Nat, +thread: String
     case True{} 39n: Mcp.mail.change(s, now, thread, a, True{})
     case True{} _: Mcp.mail.change(s, now, thread, a, False{})
 
+# with mail.on off the uberbot (its chat and its runs) still lists and
+# reads its mail (mail_list 35, mail_read 36)
 def Mcp.mail.call(+i: Nat, +s: M.State, +now: Nat, +thread: String, +a: J.Json) -> Res:
-  Mcp.mail.call.on(Bool.and(String.eq(M.Setting.get(s, "mail.on", "off"), "on"), Bool.or(ML.Parts.has(["34", "35", "37"], Nat.show(i), False{}), Mcp.mail.allowed(s, thread, J.Json.get_str(a, "conv", "")))), i, s, now, thread, a)
+  Mcp.mail.call.on(Bool.and(Bool.or(String.eq(M.Setting.get(s, "mail.on", "off"), "on"), Bool.and(Mcp.mail.uber(s, thread), ML.Parts.has(["35", "36"], Nat.show(i), False{}))), Bool.or(ML.Parts.has(["34", "35", "37"], Nat.show(i), False{}), Mcp.mail.allowed(s, thread, J.Json.get_str(a, "conv", "")))), i, s, now, thread, a)
 
 # deploy_main (core/ship.bend, hub.bend's Ship.*). The server reads
 # origin/main first (server.bend's Ship.look) and answers through Mcp.ship;
@@ -924,6 +927,10 @@ def Mcp.charter.got(b: Maybe<&2, BT.Bot>, +s: M.State, +now: Nat, +a: J.Json) ->
       Res{True{}, J.Json.obj([J.KV{"ok", J.Flag{True{}}}]), B.Step{[M.CharterSet{BT.Bot.id(b), J.Json.get_str(a, "text", ""), "bot", now},
         M.ActivityLogged{BT.Bot.thread(b), B.Hub.id("charter", now, B.Hub.seq(s)), "info", "charter", J.Json.get_str(a, "reason", ""), now}],
         [B.CharterWrite{B.Hub.cwd(s, B.Hub.thread(s, BT.Bot.thread(b))) ++ "/CHARTER.md", J.Json.get_str(a, "text", "")}]}}
+
+# decide and escalate: with mail.on, or in the uberbot's own private run
+def Mcp.run.on(+s: M.State, +thread: String) -> Bool:
+  Bool.or(String.eq(M.Setting.get(s, "mail.on", "off"), "on"), Bool.and(Mcp.mail.uber(s, thread), RUN.Run.is(s, thread)))
 
 def Mcp.run.call(on: Bool, +i: Nat, +s: M.State, +now: Nat, +thread: String, +a: J.Json) -> Res:
   match on i:
@@ -1081,8 +1088,8 @@ def Mcp.call.k(i: Nat, +s: M.State, +now: Nat, +thread: String, +models: J.Json,
     case 38n: Mcp.mail.call(i, s, now, thread, a)
     case 39n: Mcp.mail.call(i, s, now, thread, a)
     case 40n: Mcp.mail.call(i, s, now, thread, a)
-    case 41n: Mcp.run.call(String.eq(M.Setting.get(s, "mail.on", "off"), "on"), i, s, now, thread, a)
-    case 42n: Mcp.run.call(String.eq(M.Setting.get(s, "mail.on", "off"), "on"), i, s, now, thread, a)
+    case 41n: Mcp.run.call(Mcp.run.on(s, thread), i, s, now, thread, a)
+    case 42n: Mcp.run.call(Mcp.run.on(s, thread), i, s, now, thread, a)
     case 43n: Mcp.run.call(String.eq(M.Setting.get(s, "mail.on", "off"), "on"), i, s, now, thread, a)
     case 44n: Mcp.dispose(s, now, thread, a)
     case _:
@@ -1337,8 +1344,53 @@ def Mcp.tools.live(live: Bool, on: Bool) -> J.Json:
     case False{}: Mcp.tools.on(on)
     case True{}: J.Json.obj([J.KV{"tools", J.Json.arr(List.append(&2, J.Json, J.Json.elems(J.Json.get_obj(Mcp.tools.on(on), "tools")), Mcp.dispose.tools()))}])
 
+# the uberbot's infinite context (core/uctx.bend), only while it is on
+def Mcp.uctx.tools() -> List<&2, J.Json>:
+  [Tool.def("memory_zoom", "Open line id+n of your memory view into the two lines of n/2 messages it was made from; n = 1 gives message id whole, with who wrote it and when. A long message comes in pages from character at.",
+     [Tool.prop("id", "integer", "The line's first message."), Tool.prop("n", "integer", "How many messages the line covers (a power of 2)."), Tool.prop("at", "integer", "For n = 1: the character to start from (default 0).")], ["id", "n"]),
+   Tool.def("memory_search", "Find words anywhere in your conversation with the person, older than your memory view too: up to 20 messages, newest first, each with its id (memory_zoom(id, 1) gives it whole).",
+     [Tool.prop("query", "string", "The words to find (all of them).")], ["query"])]
+
+def Mcp.uctx.with(on: Bool, tools: J.Json) -> J.Json:
+  match on:
+    case False{}:
+      tools
+    case True{}:
+      J.Json.obj([J.KV{"tools", J.Json.arr(List.append(&2, J.Json, J.Json.elems(J.Json.get_obj(tools, "tools")), Mcp.uctx.tools()))}])
+
+def Mcp.tools.named.k(keep: Bool, +t: J.Json, +rest: List<&2, J.Json>) -> List<&2, J.Json>:
+  match keep:
+    case True{}: t <> rest
+    case False{}: rest
+
+# the tools named, from a list of tool definitions, in its order
+def Mcp.tools.named(ts: List<&2, J.Json>, +names: List<&2, String>) -> List<&2, J.Json>:
+  match ts:
+    case Nil{}: Nil{}
+    case +t <> +rest: Mcp.tools.named.k(ML.Parts.has(names, J.Json.get_str(t, "name", ""), False{}), t, Mcp.tools.named(rest, names))
+
+def Mcp.run.tools.named() -> List<&2, J.Json>:
+  Mcp.tools.named(Mcp.run.tools(), ["decide", "escalate"])
+
+# the uberbot with mail.on off: mail_list and mail_read, and in its private
+# runs decide and escalate (how a run tells the person), then mail_dispose
+def Mcp.tools.uber.run(run: Bool) -> List<&2, J.Json>:
+  match run:
+    case True{}: List.append(&2, J.Json, Mcp.tools.named(Mcp.mail.tools(), ["mail_list", "mail_read"]), Mcp.run.tools.named())
+    case False{}: Mcp.tools.named(Mcp.mail.tools(), ["mail_list", "mail_read"])
+
+def Mcp.tools.uber(+s: M.State, +thread: String) -> J.Json:
+  +base = J.Json.elems(J.Json.get_obj(Mcp.tools(), "tools"))
+  +extra = List.append(&2, J.Json, Mcp.tools.uber.run(RUN.Run.is(s, thread)), Bool.pick(List<&2, J.Json>, MD.Disposition.launch(s, thread), Mcp.dispose.tools(), Nil{}))
+  J.Json.obj([J.KV{"tools", J.Json.arr(List.append(&2, J.Json, base, extra))}])
+
+def Mcp.tools.pick(uber: Bool, +s: M.State, +thread: String) -> J.Json:
+  match uber:
+    case True{}: Mcp.tools.uber(s, thread)
+    case False{}: Mcp.tools.live(MD.Disposition.launch(s, thread), String.eq(M.Setting.get(s, "mail.on", "off"), "on"))
+
 def Mcp.tools.for(+s: M.State, +thread: String) -> J.Json:
-  Mcp.tools.live(MD.Disposition.launch(s, thread), String.eq(M.Setting.get(s, "mail.on", "off"), "on"))
+  Mcp.uctx.with(UC.Uctx.on(s, thread), Mcp.tools.pick(Bool.and(Bool.not(String.eq(M.Setting.get(s, "mail.on", "off"), "on")), Mcp.mail.uber(s, thread)), s, thread))
 
 def Mcp.method.k(i: Nat, +s: M.State, +now: Nat, +thread: String, +models: J.Json, +version: String, +id: J.Json, +p: J.Json) -> McpOut:
   match i:

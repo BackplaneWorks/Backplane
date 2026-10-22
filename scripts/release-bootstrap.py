@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Transport source-bound public build inputs into configured native producers.
+"""Transport source-bound public build inputs into configured release producers.
 
-No emission, publication, secret fetching, target acceptance or automatic install.
+No publication, secret fetching, target acceptance or automatic install.
 Only the checked-out producers execute; packet files are data, never scripts.
+The JS service is cross-built for every target onto the target's pinned Bun runtime.
 """
 import argparse
 import hashlib
@@ -18,10 +19,23 @@ import tarfile
 import tempfile
 import urllib.parse
 import urllib.request
+import zipfile
 
-VERSION = '0.12.0'
-OPERATIONS = ('unix-native', 'windows-native', 'android')
+VERSION = '0.12.1'
+OPERATIONS = ('js', 'android')
 MAX_BYTES = 4 * 1024**3
+# The Bun every JS service is built with, and each target's runtime it is
+# linked onto (`bun build --compile --compile-executable-path`): the release
+# zips and their SHASUMS256.txt digests.
+BUN_VERSION = '1.4.3'
+BUN_RUNTIMES = {
+    'linux-x64': ('bun-linux-x64', '3e730528d89775f03f87f05c06787c4df4099d0a37f3f252e7b829cb23816e18'),
+    'linux-arm64': ('bun-linux-aarch64', 'efa9813da5ed72423bf847f916e8d2c47c0d776add972354026a75e10da9aa21'),
+    'darwin-x64': ('bun-darwin-x64', '62660e6438eb872278877acca77e1152d5d031324df368d4a81b428211489d2d'),
+    'darwin-arm64': ('bun-darwin-aarch64', '80afd4c069b46a6fa8f3ec520bebc750a7843e4a8d5b9583d29ad436c00a3403'),
+    'windows-x64': ('bun-windows-x64', '0bf84e808552beea67bf1202a287a35c6c825d837b287b3f8e9dd513dba35d3d'),
+}
+JS_INPUTS = 'js/JS-INPUTS.json'
 
 
 def need(ok, message):
@@ -97,18 +111,29 @@ def verify(directory, source, tree, operation):
     actual = inventory(directory)
     actual.pop('BOOTSTRAP.json', None)
     need(actual and actual == manifest.get('files'), 'bootstrap input bytes differ')
-    if operation == 'unix-native':
-        p = directory / 'emission/EMISSION.json'
-        e = json.loads(p.read_text())
-        need(e.get('kind') == 'backplane-service-c-emission' and
-             e.get('status') == 'VERIFIED_PORTABLE_C_EMISSION_ONLY' and
-             (e.get('sourceCommit'), e.get('sourceTree'), e.get('version')) == (source, tree, VERSION),
-             'actual source-bound portable C emission required')
+    if operation == 'js':
+        js_inputs(directory, source, tree)
     else:
-        name = 'windows-service-request.json' if operation == 'windows-native' else 'android-release-inputs.json'
-        r = json.loads((directory / name).read_text())
+        r = json.loads((directory / 'android-release-inputs.json').read_text())
         need((r.get('sourceCommit'), r.get('sourceTree', tree)) == (source, tree), 'producer request source mismatch')
     return manifest
+
+
+def js_inputs(directory, source, tree):
+    # The source qualification, web notices and the external notice files the
+    # web build copies: all public, all bound to the frozen source.
+    r = json.loads((directory / JS_INPUTS).read_text())
+    need((r.get('schema'), r.get('kind'), r.get('sourceCommit'), r.get('sourceTree'), r.get('version')) ==
+         (1, 'backplane-service-js-bootstrap-inputs', source, tree, VERSION), 'JS producer inputs source mismatch')
+    for key in ('sourceQualification', 'webNotices'):
+        need((directory / relative(r.get(key, ''))).is_file(), 'JS producer input missing: ' + key)
+    notices = r.get('noticeInputs', {})
+    need(isinstance(notices, dict), 'notice inputs must be a mapping')
+    for dest, member in notices.items():
+        # only into the ignored build folder, never over product source
+        need(str(relative(dest)).startswith('build/release-notice-inputs/'), 'notice input outside build/release-notice-inputs')
+        need((directory / relative(member)).is_file(), 'notice input missing')
+    return r
 
 
 def pack(directory, output, source, tree, operation):
@@ -153,49 +178,87 @@ def extract(archive, output):
             p.chmod(m.mode & 0o777)
 
 
-def fetch(url, expected, output, source, tree, operation):
+def download(url, expected, archive):
     u = urllib.parse.urlsplit(url)
     need(u.scheme == 'https' and u.hostname and not u.username and not u.password and not u.fragment and
          u.port in (None, 443), 'HTTPS artifact URL without credentials required')
     need(re.fullmatch('[0-9a-f]{64}', expected), 'trusted packet digest required')
+    # No account headers, cookies, config or secret environment is forwarded.
+    with urllib.request.urlopen(urllib.request.Request(url), timeout=120) as response, archive.open('wb') as f:
+        need(urllib.parse.urlsplit(response.url).scheme == 'https', 'insecure download redirect refused')
+        count = 0
+        for chunk in iter(lambda: response.read(1024 * 1024), b''):
+            count += len(chunk)
+            need(count <= MAX_BYTES, 'download size limit exceeded')
+            f.write(chunk)
+    need(sha(archive) == expected, 'download differs from trusted digest')
+
+
+def fetch(url, expected, output, source, tree, operation):
     with tempfile.TemporaryDirectory(prefix='bp-bootstrap-fetch-') as tmp:
         archive = Path(tmp) / 'inputs.tar.gz'
-        # No account headers, cookies, config or secret environment is forwarded.
-        with urllib.request.urlopen(urllib.request.Request(url), timeout=120) as response, archive.open('wb') as f:
-            need(urllib.parse.urlsplit(response.url).scheme == 'https', 'insecure download redirect refused')
-            count = 0
-            for chunk in iter(lambda: response.read(1024 * 1024), b''):
-                count += len(chunk)
-                need(count <= MAX_BYTES, 'download size limit exceeded')
-                f.write(chunk)
-        need(sha(archive) == expected, 'download differs from trusted packet digest')
+        download(url, expected, archive)
         extract(archive, output)
     return verify(output, source, tree, operation)
 
 
-def tool(path):
-    p = Path(path).resolve(strict=True)
-    v = subprocess.check_output([str(p), '--version'], text=True).strip()
-    need(re.search(r'clang version (?:19|[2-9][0-9])\.', v), 'clang 19+ required')
+def tool(name, flag):
+    found = shutil.which(name)
+    need(found, name + ' is not on PATH')
+    p = Path(found).resolve(strict=True)
+    v = subprocess.check_output([str(p), flag], text=True, stderr=subprocess.STDOUT).strip()
     return {'path': str(p), 'bytes': p.stat().st_size, 'sha256': sha(p), 'version': v}
 
 
-def run(directory, operation, target, source, checkout, compiler=None):
+def bun_runtime(target, destination):
+    # The target's own Bun, from its pinned release zip; only its one executable is taken.
+    need(target in BUN_RUNTIMES, 'JS service target required')
+    stem, expected = BUN_RUNTIMES[target]
+    exe = 'bun.exe' if target.startswith('windows-') else 'bun'
+    need(not destination.exists(), 'fresh Bun runtime directory required')
+    destination.mkdir(parents=True)
+    archive = destination / (stem + '.zip')
+    download('https://github.com/oven-sh/bun/releases/download/bun-v' + BUN_VERSION + '/' + stem + '.zip', expected, archive)
+    with zipfile.ZipFile(archive) as z:
+        info = z.getinfo(stem + '/' + exe)
+        need(0 < info.file_size <= MAX_BYTES, 'Bun runtime size limit exceeded')
+        path = destination / exe
+        with z.open(info) as src, path.open('xb') as dst:
+            shutil.copyfileobj(src, dst)
+    path.chmod(0o755)
+    archive.unlink()
+    return {'path': str(path), 'sha256': sha(path), 'bytes': path.stat().st_size,
+            'version': BUN_VERSION, 'target': target, 'archiveSha256': expected}
+
+
+def run(directory, operation, target, source, checkout):
     tree = source_identity(source, checkout)
     verify(directory, source, tree, operation)
-    if operation == 'unix-native':
-        need(target in ('linux-x64', 'linux-arm64', 'darwin-arm64'), 'actual Unix target required')
-        receipt = directory / 'emission/EMISSION.json'
-        r = {'schema': 1, 'kind': 'backplane-service-native-inputs', 'target': target,
+    if operation == 'js':
+        need(target in BUN_RUNTIMES, 'JS service target required')
+        inputs = js_inputs(directory, source, tree)
+        for dest, member in inputs.get('noticeInputs', {}).items():
+            path = checkout / relative(dest)
+            if path.exists():
+                need(path.is_file() and sha(path) == sha(directory / relative(member)), 'notice input differs in checkout')
+            else:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(directory / relative(member), path)
+        bun = tool('bun', '--version')
+        need(bun['version'] == BUN_VERSION, 'Bun ' + BUN_VERSION + ' required')
+        r = {'schema': 1, 'kind': 'backplane-service-js-inputs', 'target': target,
              'release': {'version': VERSION, 'tag': 'v' + VERSION, 'channel': 'release', 'commit': source, 'tree': tree},
-             'toolchain': {'clang': tool(compiler)}, 'emissionReceipt': {'path': str(receipt), 'sha256': sha(receipt), 'bytes': receipt.stat().st_size},
-             'emissionDirectory': str(receipt.parent)}
-        request = directory.parent / ('native-' + target + '.json')
-        need(not request.exists(), 'inspect existing native request before retry')
+             'toolchain': {'bend': tool('bend', 'version'), 'bun': bun,
+                           'bunRuntime': bun_runtime(target, directory.parent / ('bun-runtime-' + target))},
+             'sourceQualification': str(directory / relative(inputs['sourceQualification'])),
+             'webNotices': str(directory / relative(inputs['webNotices']))}
+        for key in ('sourceQualification', 'webNotices'):
+            p = Path(r[key])
+            r[key] = {'path': str(p), 'sha256': sha(p), 'bytes': p.stat().st_size}
+        request = directory.parent / ('js-' + target + '.json')
+        need(not request.exists(), 'inspect existing JS request before retry')
         request.write_text(json.dumps(r, indent=2) + '\n')
-        command = [sys.executable, str(Path(__file__).resolve().with_name('service-release.py')), 'native', '--source-root', str(checkout), '--request', str(request), '--out', str(checkout / 'build/bootstrap-native')]
-    elif operation == 'windows-native':
-        command = [sys.executable, str(Path(__file__).resolve().with_name('windows-release-request.py')), 'native', str(directory / 'windows-service-request.json')]
+        command = [sys.executable, str(Path(__file__).resolve().with_name('service-release.py')), 'js', '--source-root', str(checkout), '--request', str(request), '--out', str(checkout / 'build/bootstrap-js')]
     else:
         helper = Path(__file__).resolve().with_name('build-android-artifacts.py')
         command = [sys.executable, str(helper), '--execution-helper-sha256', sha(helper), '--inputs', str(directory / 'android-release-inputs.json'), '--source', str(checkout), '--output', str(checkout / 'build/bootstrap-android')]
@@ -217,7 +280,6 @@ def main():
             a.add_argument('--sha256', required=True)
         if name == 'run':
             a.add_argument('--target')
-            a.add_argument('--clang')
     a = p.parse_args()
     a.checkout = a.checkout.resolve()
     a.directory = a.directory.resolve()
@@ -227,7 +289,7 @@ def main():
     elif a.command == 'fetch':
         fetch(a.url, a.sha256, a.directory, a.source, tree, a.operation)
         print('PASS source-bound public input packet; configured build not yet run')
-    else: run(a.directory, a.operation, a.target, a.source, a.checkout, a.clang)
+    else: run(a.directory, a.operation, a.target, a.source, a.checkout)
 
 
 if __name__ == '__main__':

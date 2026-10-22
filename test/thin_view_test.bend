@@ -26,6 +26,11 @@ def cmd.count(a: V.ActResult) -> Nat:
   match a:
     case V.ActResult{_, cs}: List.length(&2, J.Json, cs)
 
+def has.text(es: List<&2, M.Entry>, +x: String) -> Bool:
+  match es:
+    case Nil{}: False{}
+    case +e <> t: Bool.or(String.eq(T.Entry.text(e), x), has.text(t, x))
+
 def main() -> IO(Unit):
   do IO<Unit>:
     +st : M.State = state()
@@ -44,9 +49,18 @@ def main() -> IO(Unit):
     C.Check.str("last page explicitly has no older entries", yes(J.Json.get_bool(window, "hasMore", True{})), "no")
     +large : T.Index = T.Index.post(i, M.Msg{"large", "a", M.Assistant{}, String.repeat("😀", 129n), 3n})
     +partial : J.Json = V.Page.window(large, "a", request(), "epoch", ["2"])
-    C.Check.str("partial body has explicit continuation", Nat.show(List.length(&2, J.Json, J.Json.elems(J.Json.get_obj(partial, "partial")))), "1")
+    C.Check.str("a long message is never partial", Nat.show(List.length(&2, J.Json, J.Json.elems(J.Json.get_obj(partial, "partial")))), "0")
     C.Check.str("visible preview never rewrites original body", T.Entry.text(T.Row.entry(T.Index.row(large, 2n))), String.repeat("😀", 129n))
-    C.Check.str("partial first body stays scalar safe", T.Entry.text(T.Row.preview(T.Index.row(large, 2n))), String.repeat("😀", 128n))
+    C.Check.str("a long message is shown whole", T.Entry.text(T.Row.preview(T.Index.row(large, 2n))), String.repeat("😀", 129n))
+    +huge : T.Index = T.Index.post(large, M.Msg{"huge", "a", M.Assistant{}, String.repeat("long line of message text ", 400n), 4n})
+    +hst : M.State = M.State.post(M.State.post(st, M.Msg{"large", "a", M.Assistant{}, String.repeat("😀", 129n), 3n}), M.Msg{"huge", "a", M.Assistant{}, String.repeat("long line of message text ", 400n), 4n})
+    C.Check.str("the window carries a 10 KB message whole", Bool.show(has.text(M.State.entries.all(V.State.window(hst, huge, target(), ["3"])), String.repeat("long line of message text ", 400n))), "True")
+    +mob : J.Json = V.Render.view(False{}, hst, huge, obj("{}"), obj("{}"), 5n, request(), "epoch", ["3"])
+    C.Check.str("the phones' screen carries the 10 KB message whole", Bool.show(String.contains(J.Json.show(mob), String.repeat("long line of message text ", 400n))), "True")
+    C.Check.str("the phones' screen marks no message partial", Bool.show(String.contains(J.Json.show(mob), "byte-limit")), "False")
+    +act : T.Index = T.Index.post(huge, M.Act{"act", "a", "tool", "Bash", String.repeat("o", 2000n), 5n})
+    C.Check.str("a long activity stays folded", Nat.show(List.length(&2, J.Json, J.Json.elems(J.Json.get_obj(V.Page.window(act, "a", request(), "epoch", ["4"]), "partial")))), "1")
+    C.Check.str("a folded activity shows its first block", Nat.show(String.length(T.Entry.text(T.Row.preview(T.Index.row(act, 4n))))), "512")
     +search : J.Json = V.Search.render(i, st, V.Obj.put(request(), "query", J.Str{"exact"}), "epoch", 0n)
     C.Check.str("indexed search returns normal explicit result rows", Nat.show(List.length(&2, J.Json, J.Json.elems(J.Json.get_obj(J.Json.get_obj(search, "search"), "rows")))), "1")
     C.Check.str("search produces no commands", Nat.show(List.length(&2, J.Json, J.Json.elems(J.Json.get_obj(search, "cmds")))), "0")

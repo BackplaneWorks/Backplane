@@ -2,7 +2,7 @@ import Base
 import ./fallback.bend as FB
 import ./title.bend as TTL
 import ./mailrun.bend as RUN
-import ./cef.bend as CF
+import ./brctl.bend as BRC
 import ./ref.bend as R
 import ./refview.bend as RE
 import ./i18n.bend as I
@@ -2195,6 +2195,16 @@ def Side.ids(ts: List<&2, M.Thread>) -> List<&2, String>:
     case t <> rest:
       M.Thread.id(t) <> Side.ids(rest)
 
+# A project's "Settled N": the count a thin window carries (the hub's
+# thin-view Settled.counts, setting "thin.settled.<project>": a window
+# holds only a few of a collapsed project's threads), else the shelf's own
+def Side.settled.key(+pid: String) -> String:
+  "thin.settled." ++ pid
+
+def Side.settled.n(+st: M.State, +pid: String, +shown: Nat) -> Nat:
+  +n = M.Switch.num(M.Setting.get(st, Side.settled.key(pid), ""), 0n)
+  Bool.pick(Nat, Nat.is_gt(n, shown), n, shown)
+
 def Side.when(on: Bool, xs: List<&2, String>) -> List<&2, String>:
   match on:
     case True{}:
@@ -2668,6 +2678,11 @@ def Ui.skill.k(+word: String, +u: Ui) -> Act:
 # complete the word being typed
 def Ui.skill(+u: Ui, +v: String) -> Act:
   Ui.skill.k(Skills.pick(Ui.skills(u), v), u)
+
+# whether a draft offers the thread's skills: a `$name` or a slash
+# command being typed (a hub rendering a thin view lists them for it)
+def Skills.wants(+draft: String) -> Bool:
+  Bool.or(Skills.typing(draft), SL.Slash.typing(draft))
 
 def Skills.need(+u: Ui) -> Bool:
   Bool.and(Bool.or(Skills.typing(Ui.draft_text(u)), SL.Slash.typing(Ui.draft_text(u))), Bool.not(String.eq(Ui.info(u, "skills.for"), Ui.sel(u))))
@@ -3317,14 +3332,9 @@ def Ui.shown.page.k(bot: Bool, +u: Ui) -> String:
 def Ui.shown.page(+u: Ui) -> String:
   Ui.shown.page.k(Bool.and(String.eq(Ui.scratch(u, "@btab"), "browser"), Bool.not(String.is_empty(Ui.scratch(u, "@bot")))), u)
 
-# the native window shows its own hub's pages itself (core/cef.bend), so
-# it takes no frames of them
-def Ui.cast.allowed(+u: Ui) -> Bool:
-  CF.Cef.cast(Bool.and(String.eq(Ui.scratch(u, "@cef.window"), "1"), CF.Cef.page_local(Ui.shown.page(u))), Ui.info(u, "browser.engine.live"), Ui.info(u, "local.remote.url"))
-
 # a frame of page heard ({"t":"shot"}): said seen when the tab shows it
 def Ui.cast.seen(+u: Ui, +page: String) -> Act:
-  Ui.cast.k(Bool.and(Ui.cast.allowed(u), Bool.and(Bool.not(String.is_empty(page)), String.eq(page, Ui.shown.page(u)))), u, page)
+  Ui.cast.k(Bool.and(Bool.not(String.is_empty(page)), String.eq(page, Ui.shown.page(u))), u, page)
 
 # An unwatched page is not cast at all (the helper stops its screencast and
 # keeps a still every few seconds), so a client cannot wait for a frame to
@@ -3344,7 +3354,7 @@ def Ui.cast.now.k(go: Bool, a: Act, +page: String) -> Act:
 def Ui.cast.now.p(+before: String, a: Act) -> Act:
   match a:
     case Act{+u, cs}:
-      Ui.cast.now.k(Bool.and(Ui.cast.allowed(u), Bool.and(Bool.not(String.is_empty(Ui.shown.page(u))), Bool.not(String.eq(Ui.shown.page(u), before)))), Act{u, cs}, Ui.shown.page(u))
+      Ui.cast.now.k(Bool.and(Bool.not(String.is_empty(Ui.shown.page(u))), Bool.not(String.eq(Ui.shown.page(u), before))), Act{u, cs}, Ui.shown.page(u))
 
 def Ui.cast.now(+u: Ui, a: Act) -> Act:
   Ui.cast.now.p(Ui.shown.page(u), a)
@@ -4047,6 +4057,13 @@ def Refs.fill(on: Bool, u: Ui) -> Ui:
           RF.Refs.fars.if(String.starts_with(Skills.token(Str.get(dr, sel)), "@"), Str.get(nf, "bots.remote"), BT.World.peers(M.State.bots(st))))), "\n")), "refs.for", Refs.for(sel, Str.get(dr, sel))), ob, tr}
     case False{} _:
       u
+
+# A view the hub renders (server/thin-actor.bend) never runs Ui.draft: its
+# draft comes with the request. The references cache is filled here for the
+# draft as it is, when a reference is being typed and the cache is for
+# another draft, so a thin client's composer offers @ > % # rows too.
+def Refs.ready(+u: Ui) -> Ui:
+  Refs.fill(Bool.and(RF.Refs.typing(Skills.token(Ui.draft_text(u))), Bool.not(String.eq(Ui.info(u, "refs.for"), Refs.for(Ui.sel(u), Ui.draft_text(u))))), u)
 
 def Refs.want(a: Act) -> Act:
   match a:
@@ -9625,10 +9642,10 @@ def RefNav.act(i: Nat, +u: Ui, +value: String) -> Act:
 
 # Settings navigation is client-local; choosing a page never persists a setting.
 def Settings.pages() -> List<&2, String>:
-  ["appearance", "threads", "agents", "writing", "cad", "network", "voice", "keys", "antigravity", "timezone", "usage", "about", "privacy"]
+  ["appearance", "threads", "agents", "writing", "cad", "network", "voice", "keys", "antigravity", "timezone", "usage", "about", "privacy", "beta"]
 
 def Settings.phone.pages() -> List<&2, String>:
-  ["appearance", "threads", "agents", "cad", "network", "keys", "antigravity", "timezone", "usage", "about", "privacy"]
+  ["appearance", "threads", "agents", "cad", "network", "keys", "antigravity", "timezone", "usage", "about", "privacy", "beta"]
 
 def Settings.known(ps: List<&2, String>, +page: String) -> Bool:
   match ps:
@@ -9655,6 +9672,7 @@ def Settings.label(i: Nat, +l: I.Loc) -> String:
     case 9n: MSG.T.settings.zone(l)
     case 10n: MSG.T.settings.usage(l)
     case 12n: MSG.T.settings.privacy(l)
+    case 13n: MSG.T.settings.beta(l)
     case _: MSG.T.settings.tour(l)
 
 def Settings.title(+l: I.Loc, +page: String) -> String:
@@ -11184,7 +11202,7 @@ def Browse.nav.k(empty: Bool, +u: Ui, +url: String) -> Act:
     case False{}: Browse.send(u, "navigate", [J.KV{"url", J.Str{url}}])
 
 def Browse.nav(+u: Ui) -> Act:
-  +url = CF.Cef.url(Browse.address(u, Browse.owner(u)))
+  +url = BRC.Brc.url(Browse.address(u, Browse.owner(u)))
   Browse.nav.k(String.is_empty(url), u, url)
 
 def Browse.offset.k(+at: Nat, +count: Nat) -> Nat:
@@ -11724,6 +11742,8 @@ def Touch.raw(c: M.Change) -> List<&2, String>:
       ["*", "!"]
     case M.DeployBuilt{_, _, _, _, _}:
       ["*", "!"]
+    case M.CtxNoted{+thread, _, _, _, _}:
+      [thread]
 
 # a thread id as touched: a subagent's log ("@sub:<thread>", model.bend's
 # Bg.log) is its thread's; any other name with "@" is no plain thread, so
@@ -11741,22 +11761,12 @@ def Touch.ids(ids: List<&2, String>) -> List<&2, String>:
 def Touch.of(c: M.Change) -> List<&2, String>:
   Touch.ids(Touch.raw(c))
 
-# Native content can only be embedded in this machine's own window
-# (core/cef.bend): the page given (a thread's, or a bot's in its tab) shows
-# natively when this window's hub is its own and runs cef.
-def CefUI.native(+u: Ui, +page: String) -> Bool:
-  Bool.and(CF.Cef.native(Ui.info(u, "browser.engine.live"), Ui.info(u, "local.remote.url")), CF.Cef.page_local(page))
+# the strip over a page the person holds (core/brctl.bend)
+def BrUI.strip(+u: Ui, +id: String) -> String:
+  BRC.Brc.drive_text(Teach.drive(u, id))
 
-# an overlay drawn over the main area is open (a toast is not one)
-def CefUI.covered(+u: Ui) -> Bool:
-  CF.Cef.covered(Ui.flag(u, "palette"), Ui.flag(u, "proj"), Bool.not(String.is_empty(Menu.open(u))), Bool.not(String.is_empty(Ui.scratch(u, "@look"))),
-    Ui.flag(u, "models"), Tour.on(u), Ui.flag(u, "perf"), Bool.not(String.is_empty(Ui.scratch(u, "@lb"))))
-
-def CefUI.strip(+u: Ui, +id: String) -> String:
-  CF.Cef.drive_text(Teach.drive(u, id), Bool.and(String.eq(Ui.scratch(u, "@cef.window"), "1"), CefUI.native(u, id)))
-
-def CefUI.strip_on(+u: Ui, +id: String) -> Bool:
-  CF.Cef.strip_on(Ui.info(u, "browser.engine.live"), Teach.drive(u, id))
+def BrUI.strip_on(+u: Ui, +id: String) -> Bool:
+  BRC.Brc.strip_on(Teach.drive(u, id))
 
 # ---- global fallback Settings: shared row model for every client ----
 def Fallbackv.state(u: Ui) -> M.State:

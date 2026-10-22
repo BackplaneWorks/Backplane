@@ -726,11 +726,11 @@ out all). Pure half: `Acct`/`Accts.*` in `src/core/google.bend`, laws
 
 Connect Google in Settings signs in with Backplane's shared OAuth client,
 so nobody pastes anything. The client is baked in at build time:
-`scripts/build-app.sh` reads `BACKPLANE_GOOGLE_CLIENT_ID` and
+`scripts/build-js.sh` reads `BACKPLANE_GOOGLE_CLIENT_ID` and
 `BACKPLANE_GOOGLE_CLIENT_SECRET` from its environment (release builds get
 them from the repository's Actions secrets) or from a git-ignored `.env` in
-the checkout or the main checkout, and `src/server/effects/google.c` hands
-them to `Gs.shared`. The same variables at run time win over the baked
+the checkout or the main checkout into a private prelude of the binary, and
+`src/server/effects/google.js` hands them to `Gs.shared`. The same variables at run time win over the baked
 ones; with neither, `Google.shared` in `src/core/google.bend` is used.
 The shared client asks for Gmail and Calendar (laws `google_shared_*`).
 Gmail's scopes are restricted: until Google verifies the client (a yearly

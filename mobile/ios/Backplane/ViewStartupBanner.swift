@@ -11,13 +11,15 @@ struct ViewStartupBanner: View {
     var body: some View {
         if let key {
             VStack(alignment: .leading, spacing: 4) {
-                Text("Fast loading unavailable · " + key).font(.caption)
+                // a hub without views (older than 0.12.0): it needs an
+                // update; the app never downloads a hub's whole history
+                Text("This hub needs an update · " + key).font(.caption)
                 HStack {
                     Button("Retry") { model.retryView(key) }
                     Spacer()
-                    Button("Download history for this session") { model.retryView(key, compatibility: true) }
                 }.font(.caption)
             }.padding(10).background(.bar)
         }
     }
 }
+

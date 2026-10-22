@@ -11,19 +11,27 @@ import ../core/thin-live.bend as TL
 import ../web/app.bend as A
 import ../web/mail-actions.bend as MA
 import ../mobile/hubs.bend as H
+import ./thin-splice.bend as S
+import ../core/i18n.bend as I
 
 # Private, connection-owned UI state. It never enters a client snapshot or
 # persisted event. Keep it behind a List in the connection context so the
 # native ABI does not flatten a second full Ui into every Client argument.
+# memo: the last full render's reply and what it was made of (at most
+# one; thin-splice.bend writes only the live row into it until anything
+# else changes or a second passes: Memo.splice)
+type Memo is Data:
+  Memo{key: String, clock: Nat, partial: Bool, cuts: S.Cuts}
+
 type Actor is Data:
-  Actor{ui: U.Ui, view: String, target: J.Json, pending: Map<&2, String>, reads: List<&2, J.Json>, dirty: Bool}
+  Actor{ui: U.Ui, view: String, target: J.Json, pending: Map<&2, String>, reads: List<&2, J.Json>, dirty: Bool, memo: List<&2, Memo>}
 
 type Rendered is Data:
   Rendered{actor: Actor, result: J.Json}
 
 def Actor.ui( +a: Actor) -> U.Ui:
   match a:
-    case Actor{u, _, _, _, _, _}: u
+    case Actor{u, _, _, _, _, _, _}: u
 
 def Actor.scope(+target: J.Json) -> String:
   J.Json.show(V.Target.json(J.Json.get_str(target, "kind", ""), J.Json.get_str(target, "id", "")))
@@ -114,28 +122,37 @@ def Actor.merge( +fresh: U.Ui, +old: U.Ui, +same: Bool, +thread: String, +presen
         M.Time.max(rid, rid2), want, error, note, Actor.prefs(Map.to_list(&2, String, nf2), nf), outbox, stores}
 
 def Actor.make(+u: U.Ui, +view: String, +target: J.Json) -> Actor:
-  Actor{u, view, target, Map.new(&2, String), Nil{}, False{}}
+  Actor{u, view, target, Map.new(&2, String), Nil{}, False{}, Nil{}}
 
-def Actor.refresh( +xs: List<&2, Actor>, +web: Bool, +st: M.State, +info: J.Json, +live: J.Json, +now: Nat, +p: J.Json, +view: String) -> Actor:
+# the composer's references for the draft the request brought (client.bend's
+# Refs.ready: a thin view never runs Ui.draft)
+def Actor.refs(+a: Actor) -> Actor:
+  match a:
+    case Actor{+u, +view, +target, +pending, +reads, +dirty, +memo}: Actor{U.Refs.ready(u), view, target, pending, reads, dirty, memo}
+
+def Actor.refresh.k( +xs: List<&2, Actor>, +web: Bool, +st: M.State, +info: J.Json, +live: J.Json, +now: Nat, +p: J.Json, +view: String) -> Actor:
   match xs:
     case Nil{}: Actor.make(V.Session.current(web, st, info, live, now, Actor.safe_input(st, p)), view, J.Json.get_obj(p, "target"))
-    case Actor{old, oldView, +target, pending, reads, dirty} <> _:
+    case Actor{old, oldView, +target, pending, reads, dirty, _} <> _:
       +input = Actor.safe_input(st, p)
       +thread = V.Target.thread(st, J.Json.get_obj(p, "target"))
       +fresh = V.Session.current(web, st, info, live, now, input)
       +same = Bool.and(String.eq(oldView, view), W.Target.same(target, J.Json.get_obj(p, "target")))
       Actor{V.Session.renderer(web, U.Ui.info_merge(Actor.merge(fresh, old, same, thread, Maybe.is_some(&2, J.Json, J.Json.get(J.Json.get_obj(J.Json.get_obj(input, "session"), "drafts"), thread))), info), p),
-        view, J.Json.get_obj(p, "target"), Bool.pick(Map<&2, String>, same, pending, Map.new(&2, String)), Bool.pick(List<&2, J.Json>, same, reads, Nil{}), dirty}
+        view, J.Json.get_obj(p, "target"), Bool.pick(Map<&2, String>, same, pending, Map.new(&2, String)), Bool.pick(List<&2, J.Json>, same, reads, Nil{}), dirty, Nil{}}
+
+def Actor.refresh( +xs: List<&2, Actor>, +web: Bool, +st: M.State, +info: J.Json, +live: J.Json, +now: Nat, +p: J.Json, +view: String) -> Actor:
+  Actor.refs(Actor.refresh.k(xs, web, st, info, live, now, p, view))
 
 # The hub's canonical projection is shared; each actor keeps its own pages,
 # drafts, request slots and exact scope. Compare only the selected body's
 # newest identity across authoritative states, never its text or full log.
 def Actor.mail_cache(+a: Actor, previous: List<&2, Actor>, cache: TM.Cache) -> Actor:
   match a previous:
-    case Actor{u, view, target, pending, reads, dirty} Nil{}:
-      Actor{TM.Cache.install(cache, u), view, target, pending, reads, dirty}
-    case Actor{u, view, target, pending, reads, dirty} old <> _:
-      Actor{TM.Cache.refresh(cache, u, Actor.ui(old)), view, target, pending, reads, dirty}
+    case Actor{u, view, target, pending, reads, dirty, memo} Nil{}:
+      Actor{TM.Cache.install(cache, u), view, target, pending, reads, dirty, memo}
+    case Actor{u, view, target, pending, reads, dirty, memo} old <> _:
+      Actor{TM.Cache.refresh(cache, u, Actor.ui(old)), view, target, pending, reads, dirty, memo}
 
 def Actor.rpc(+command: J.Json) -> J.Json:
   Maybe.default(&2, J.Json, J.Json.parse(J.Json.get_str(command, "text", "")), J.Null{})
@@ -166,16 +183,16 @@ def Actor.reads( +cs: List<&2, J.Json>, +acc: List<&2, J.Json>) -> List<&2, J.Js
 
 def Actor.accept( +a: Actor, +r: V.ActResult, +queue: Bool) -> Actor:
   match a r:
-    case Actor{_, view, +target, pending, reads, dirty} V.ActResult{u, +cs}:
+    case Actor{_, view, +target, pending, reads, dirty, memo} V.ActResult{u, +cs}:
       Actor{u, view, target, Actor.note(cs, pending, Actor.scope(target)),
-        List.append(&2, J.Json, reads, Bool.pick(List<&2, J.Json>, queue, Actor.reads(cs, Nil{}), Nil{})), dirty}
+        List.append(&2, J.Json, reads, Bool.pick(List<&2, J.Json>, queue, Actor.reads(cs, Nil{}), Nil{})), dirty, memo}
 
 def Actor.mail_ready( +a: Actor) -> Actor:
   Actor.accept(a, V.ActResult.web(MA.MA.after(U.Mailv.sync(U.Act{Actor.ui(a), Nil{}}))), True{})
 
 def Actor.origin( +a: Actor, +origin: String) -> Actor:
   match a:
-    case Actor{u, view, target, pending, reads, dirty}: Actor{U.Ui.info_set(u, "origin", origin), view, target, pending, reads, dirty}
+    case Actor{u, view, target, pending, reads, dirty, memo}: Actor{U.Ui.info_set(u, "origin", origin), view, target, pending, reads, dirty, memo}
 
 def Actor.mail_context_if( +shown: Bool, +u: U.Ui) -> J.Json:
   match shown:
@@ -202,7 +219,7 @@ def Actor.receive( +web: Bool, +u: U.Ui, +key: String, +now: Nat, +o: J.Json) ->
 
 def Actor.mark_dirty( +a: Actor) -> Actor:
   match a:
-    case Actor{u, view, target, pending, reads, _}: Actor{u, view, target, pending, reads, True{}}
+    case Actor{u, view, target, pending, reads, _, _}: Actor{u, view, target, pending, reads, True{}, Nil{}}
 
 def Actor.now( +u: U.Ui) -> Nat:
   match u:
@@ -215,26 +232,26 @@ def Actor.reply_if( +owned: Bool, +a: Actor, +web: Bool, +key: String, +o: J.Jso
 
 def Actor.reply(+a: Actor, +web: Bool, +key: String, +o: J.Json) -> Actor:
   match a:
-    case Actor{u, view, +target, +pending, reads, dirty}:
+    case Actor{u, view, +target, +pending, reads, dirty, memo}:
       +id = J.Json.as_raw(J.Json.get(o, "id"), "")
       Actor.reply_if(Bool.and(String.eq(J.Json.get_str(o, "t", ""), "reply"), String.eq(Actor.pending_scope(pending, id), Actor.scope(target))),
-        Actor{u, view, target, Map.del(&2, String, pending, id), reads, dirty}, web, key, o)
+        Actor{u, view, target, Map.del(&2, String, pending, id), reads, dirty, memo}, web, key, o)
 
 def Actor.clean( +a: Actor) -> Actor:
   match a:
-    case Actor{u, view, target, pending, _, _}: Actor{u, view, target, pending, Nil{}, False{}}
+    case Actor{u, view, target, pending, _, _, memo}: Actor{u, view, target, pending, Nil{}, False{}, memo}
 
 def Actor.queued( +a: Actor) -> List<&2, J.Json>:
   match a:
-    case Actor{_, _, _, _, reads, _}: reads
+    case Actor{_, _, _, _, reads, _, _}: reads
 
 def Actor.dirty( +a: Actor) -> Bool:
   match a:
-    case Actor{_, _, _, _, _, dirty}: dirty
+    case Actor{_, _, _, _, _, dirty, _}: dirty
 
 def Actor.capacity( +a: Actor) -> Bool:
   match a:
-    case Actor{_, _, _, pending, reads, _}: Bool.and(Nat.is_le(List.length(&2, String, Map.keys(&2, String, pending)), 128n), Nat.is_le(List.length(&2, J.Json, reads), 16n))
+    case Actor{_, _, _, pending, reads, _, _}: Bool.and(Nat.is_le(List.length(&2, String, Map.keys(&2, String, pending)), 128n), Nat.is_le(List.length(&2, J.Json, reads), 16n))
 
 # A queued read is useful only to the exact surviving connection incarnation
 # and view that produced it. Equal RPC ids on another socket grant nothing.
@@ -244,3 +261,64 @@ def Job.valid(+actualClient: U32, +jobClient: U32, +actualGen: U32, +jobGen: U32
 
 def Control.fresh(+id: Nat, +last: Nat) -> Bool:
   Bool.and(Nat.is_gt(id, Nat.mul(65536n, 2147483648n)), Bool.and(Nat.is_le(id, P.Session.nat.max()), Nat.is_gt(id, last)))
+
+# The render memo (thin-splice.bend)
+# ----------------------------------
+
+def Actor.memos(xs: List<&2, Actor>) -> List<&2, Memo>:
+  match xs:
+    case Actor{_, _, _, _, _, _, memo} <> _: memo
+    case Nil{}: Nil{}
+
+def Actor.loc(xs: List<&2, Actor>) -> I.Loc:
+  match xs:
+    case Actor{u, _, _, _, _, _, _} <> _: U.Lang.loc(u)
+    case Nil{}: I.En{}
+
+def Actor.remember(+a: Actor, +m: Memo) -> Actor:
+  match a:
+    case Actor{u, view, target, pending, reads, dirty, _}: Actor{u, view, target, pending, reads, dirty, [m]}
+
+# what a render is made of but its live row: the read model's sequence, the
+# hub's info, the request but its revisions, the page anchor, the view, the
+# renderer and the thread (a reply arriving clears the memo: Actor.reply_if)
+def Memo.request(+p: J.Json) -> J.Json:
+  match p:
+    case J.Obj{+fs}: J.Obj{V.Obj.drop(V.Obj.drop(fs, "requestRevision"), "viewRevision")}
+    case _: p
+
+def Memo.key(+seq: Nat, +info: String, +p: J.Json, +anchor: Nat, +view: String, +web: Bool, +thread: String) -> String:
+  J.Json.show(J.Json.obj([J.KV{"seq", J.Json.nat(seq)}, J.KV{"info", J.Str{info}}, J.KV{"p", Memo.request(p)}, J.KV{"anchor", J.Json.nat(anchor)},
+    J.KV{"view", J.Str{view}}, J.KV{"web", J.Flag{web}}, J.KV{"thread", J.Str{thread}}]))
+
+def Memo.reply.k(+ok: Bool, +cuts: S.Cuts, +web: Bool, +stream: TL.Stream, +thread: String, +epoch: String, +target: J.Json, +lc: I.Loc) -> Maybe<&2, S.Spliced>:
+  match ok:
+    case True{}: Some{S.Cuts.splice(cuts, web, stream, thread, epoch, target, lc)}
+    case False{}: None{}
+
+# how long a view's memo holds (ms): at most a second, less by the view's
+# place (client id mod 5, 150 ms apart) so the views' forced full renders
+# do not land together
+def Memo.life(+client: U32) -> Nat:
+  Nat.sub(1000n, Nat.mul(Nat.mod(U32.to_nat(client), 5n), 150n))
+
+# the memo's reply with only the live row and window new, when nothing else
+# can have changed: the same key, younger than its life (clock text), a
+# live row now with the same chunk marker as then; None: render in full
+def Memo.reply(ms: List<&2, Memo>, +update: Bool, +key: String, +clock: Nat, +life: Nat, +web: Bool, +stream: TL.Stream, +thread: String, +epoch: String, +target: J.Json, +lc: I.Loc) -> Maybe<&2, S.Spliced>:
+  match ms:
+    case Nil{}: None{}
+    case Memo{+k, +at, +partial, +cuts} <> _:
+      Memo.reply.k(Bool.and(update, Bool.and(String.eq(k, key), Bool.and(Nat.is_ge(clock, at), Bool.and(Nat.is_lt(Nat.sub(clock, at), life),
+        Bool.and(Nat.is_gt(TL.Stream.size(stream), 0n), Bool.or(Bool.and(partial, S.Splice.partial(stream)), Bool.and(Bool.not(partial), Bool.not(S.Splice.partial(stream))))))))), cuts, web, stream, thread, epoch, target, lc)
+
+def Actor.remember.m(+a: Actor, m: Maybe<&2, S.Cuts>, +key: String, +clock: Nat, +stream: TL.Stream) -> Actor:
+  match a m:
+    case Actor{u, view, target, pending, reads, dirty, _} Some{+cuts}: Actor{u, view, target, pending, reads, dirty, [Memo{key, clock, S.Splice.partial(stream), cuts}]}
+    case Actor{u, view, target, pending, reads, dirty, _} None{}: Actor{u, view, target, pending, reads, dirty, Nil{}}
+
+# a full render remembered for the next ones (clock: ms), as bytes cut
+# around its live rows (none to keep when it has no live row)
+def Rendered.remember(r: Rendered, +key: String, +clock: Nat, +stream: TL.Stream, +web: Bool, +thread: String) -> Rendered:
+  match r:
+    case Rendered{+a, +res}: Rendered{Actor.remember.m(a, S.Cuts.of(web, res, thread), key, clock, stream), res}

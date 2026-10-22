@@ -8,7 +8,7 @@ import ./cmds.bend as CM
 # used to leave each Claude process running its turn on a dead stdout
 # while the new image resumed the same session: two processes on one
 # thread. Now the hub keeps each one it started in a record (the server's
-# effects/adopt.c writes <home>/agents.pids: thread, pid, start identity,
+# effects/adopt.js writes <home>/agents.pids: thread, pid, start identity,
 # a descriptor on its socket), and before the exec writes a handoff
 # (<home>/agents.handoff: each Claude agent's generation, key and command
 # ledger) and keeps those descriptors open across it. The new image reads

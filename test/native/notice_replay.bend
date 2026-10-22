@@ -16,7 +16,7 @@ import ../../src/server/argv.bend as AV
 #           default settings), folding the policy's own records into the
 #           state as it goes
 # Desks are ignored in both counts, and days are UTC.
-#   scripts/build-app.sh test/native/notice_replay.bend build/notice_replay
+#   scripts/build-js.sh test/native/notice_replay.bend build/notice_replay
 #   build/notice_replay EVENTS.jsonl [FROM_EPOCH TO_EPOCH]
 # It only reads the file it is given: run it on a copy with the devices and
 # tokens left out, never on the live log:

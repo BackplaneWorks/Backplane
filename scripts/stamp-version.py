@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-# Stamp the build's version into the C bend emitted, in place of the slot
+# Stamp the build's version into the JS bend emitted, in place of the slot
 # src/core/version.bend holds (Version.slot), so the version is no input of
-# the emit: one tree emits the same C whatever version it is built as, and
-# scripts/build-app.sh can reuse it (BACKPLANE_EMIT_CACHE).
+# the emit: one tree emits the same JS whatever version it is built as, and
+# scripts/build-js.sh can reuse it (BACKPLANE_EMIT_CACHE).
 #
-#   scripts/stamp-version.py build/cc/backplane/all.c 0.11.2-dev.20261015.1222
-#   scripts/stamp-version.py build/cc/backplane/all.c <40-hex sha> commit
+#   scripts/stamp-version.py build/js/backplane-serve/stamped.js 0.11.2-dev.20261015.1222
+#   scripts/stamp-version.py build/js/backplane-serve/stamped.js <40-hex sha> commit
 #   (a .js file, the dev service's emit, has each slot as one literal)
 #     the commit slot (Version.commit.slot) the same way: a git sha, or
 #     nothing stamped ("unknown")

@@ -36,88 +36,71 @@ type WinEv is Data:
   WJunk{}
 
 def Win.open(title: String, w: U32, h: U32) -> IO(Result<&1, &1, U32 & String, Window>):
-  import "./effects/win.c"
   import "./effects/win.js"
 
 # the events since the last call, five words each; parks until there is
 # at least one (Win.decode reads them)
 def Win.words(win: Window) -> IO(Window & List<&2, U32>):
-  import "./effects/win.c"
   import "./effects/win.js"
 
 # show a frame; the image comes back so the caller can free it
 def Win.present(win: Window, image: Image) -> IO(Window & Image):
-  import "./effects/win.c"
   import "./effects/win.js"
 
 # show the window's own frame; prev is the last frame it showed this way
 # (regions that are the same in both are not filled again). Both images
 # come back so the caller can free them
 def Win.show(win: Window, image: Image, prev: Image) -> IO(Window & Image & Image):
-  import "./effects/win.c"
   import "./effects/win.js"
 
 def Win.copy(win: Window, text: String) -> IO(Window):
-  import "./effects/win.c"
   import "./effects/win.js"
 
 # request the clipboard; it arrives as a WPaste event
 def Win.paste(win: Window) -> IO(Window):
-  import "./effects/win.c"
   import "./effects/win.js"
 
 def Win.pasted(win: Window) -> IO(Window & String):
-  import "./effects/win.c"
   import "./effects/win.js"
 
 # MIME, byte count, and ASCII base64 of the last WImage
 def Win.pasted_image(win: Window) -> IO(Window & String & U32 & String):
-  import "./effects/win.c"
   import "./effects/win.js"
 
 # the text/uri-list of the last WDrop (files dragged in from outside)
 def Win.dropped(win: Window) -> IO(Window & String):
-  import "./effects/win.c"
   import "./effects/win.js"
 
 def Win.size(win: Window) -> IO(Window & U32 & U32):
-  import "./effects/win.c"
   import "./effects/win.js"
 
 # a second handle: one computation waits on events, another presents
 def Win.twin(win: Window) -> IO(Window & Window):
-  import "./effects/win.c"
   import "./effects/win.js"
 
 def Win.title(win: Window, title: String) -> IO(Window):
-  import "./effects/win.c"
   import "./effects/win.js"
 
 # how the input method is used: 0 plain keys, 1 preedit drawn by the app,
 # 2 drawn by the method
 def Win.ime(win: Window) -> IO(Window & U32):
-  import "./effects/win.c"
   import "./effects/win.js"
 
 # drop a composition in the method (the field with the keys changed)
 def Win.ime_reset(win: Window) -> IO(Window):
-  import "./effects/win.c"
   import "./effects/win.js"
 
 # the caret's place in the window, for the method's candidate window
 def Win.ime_spot(win: Window, x: U32, y: U32) -> IO(Window):
-  import "./effects/win.c"
   import "./effects/win.js"
 
 # the text of a WCommit or WPreedit (by its id, once) and its feedback
 def Win.payload(win: Window, id: U32) -> IO(Window & String & String):
-  import "./effects/win.c"
   import "./effects/win.js"
 
 # queue what the method would, for tests: kind 0 a commit, 1 a preedit,
 # 2 the preedit done
 def Win.ime_inject(win: Window, kind: U32, text: String) -> IO(Window):
-  import "./effects/win.c"
   import "./effects/win.js"
 
 def Win.ev.k(k: Nat, +a: U32, +b: U32, +c: U32, +d: U32) -> WinEv:
@@ -189,7 +172,3 @@ def Win.quit(e: WinEv) -> Bool:
     case _:
       False{}
 
-# X11 parent id for the helper's native content children.
-def Win.xid(win: Window) -> IO(Window & U32):
-  import "./effects/win.c"
-  import "./effects/win.js"

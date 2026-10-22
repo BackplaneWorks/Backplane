@@ -17,7 +17,7 @@ import ../../src/server/argv.bend as AV
 # slid or redrawn) with no window, 30 notches up then 30 down, then the
 # same in the sidebar, each frame
 # checked against the frame drawn from scratch. The log is type_bench's.
-#   scripts/build-app.sh test/native/scroll_bench.bend build/scroll_bench
+#   scripts/build-js.sh test/native/scroll_bench.bend build/scroll_bench
 #   build/scroll_bench
 #   build/scroll_bench EVENTS.jsonl   (the sidebar of a real log; only reads it)
 

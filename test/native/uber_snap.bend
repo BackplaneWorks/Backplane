@@ -14,12 +14,12 @@ import ../../src/server/argv.bend as AV
 # The bots' screens with no window: a made-up log (a project, four bots,
 # two rooms, posts, memory, routines, webhooks, a space), each screen as a
 # PPM in DIR (default /tmp): bots-<name>.ppm. Also times a cat frame.
-#   scripts/build-app.sh test/native/bots_snap.bend build/bots_snap
+#   scripts/build-js.sh test/native/bots_snap.bend build/bots_snap
 #   build/bots_snap [DIR]
 
 # The uberbot: the sidebar's row and the Status tab (a made-up log with N
 # threads in every state, one bot promoted), as PPMs and frame times.
-#   scripts/build-app.sh test/native/uber_snap.bend build/uber_snap
+#   scripts/build-js.sh test/native/uber_snap.bend build/uber_snap
 #   build/uber_snap [DIR [THREADS]]
 
 def at() -> Nat:

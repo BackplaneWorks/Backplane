@@ -98,7 +98,7 @@ def VLabel.option.k(+lc: I.Loc, known: Bool, +v: String) -> String:
     case False{}: Bool.pick(String, String.is_empty(v), MSG.T.common.default(lc), v)
 
 def VLabel.option(+lc: I.Loc, +key: String, v: String) -> String:
-  VLabel.option.k(lc, Bool.or(Bool.or(String.eq(key, "order.enabled"), String.eq(key, "order.estimates")), Bool.or(String.eq(key, "restart.continue"), Bool.or(String.eq(key, "ui.theme"), Bool.or(String.eq(key, "sidebar.view"), Bool.or(String.eq(key, "update.channel"), Bool.or(String.eq(key, "kicad.ipc"), Bool.or(String.starts_with(key, "notify."), String.starts_with(key, "sync.")))))))), v)
+  VLabel.option.k(lc, Bool.or(Bool.or(String.eq(key, "order.enabled"), String.eq(key, "order.estimates")), Bool.or(String.eq(key, "restart.continue"), Bool.or(String.eq(key, "ui.theme"), Bool.or(String.eq(key, "sidebar.view"), Bool.or(String.eq(key, "update.channel"), Bool.or(Bool.or(String.eq(key, "kicad.ipc"), String.eq(key, "uber.ctx")), Bool.or(String.starts_with(key, "notify."), String.starts_with(key, "sync.")))))))), v)
 
 # Display labels only: metadata keys and submitted chip values stay unchanged.
 def VLabel.effort(+lc: I.Loc, +e: String) -> String:
@@ -243,6 +243,20 @@ def View.shelf(+lc: I.Loc, open: Bool, +key: String, +name: String, ts: List<&2,
     case +t <> +rest:
       View.shelf.k(lc, open, key, MSG.T.sidebar.shelf.count(lc, name, Nat.show(List.length(&2, M.Thread, t <> rest))), t <> rest, ix, st, sel, now)
 
+# the Settled shelf, labelled with the project's count (U.Side.settled.n:
+# a thin window holds only some of the threads); shown while the count is
+# not 0, its rows (what the window holds) when open
+def View.shelf.settled.k(none: Bool, +lc: I.Loc, open: Bool, +key: String, +name: String, ts: List<&2, M.Thread>, +n: Nat, +ix: U.SIx, +st: M.State, +sel: String, +now: Nat) -> List<&2, D.Node>:
+  match none:
+    case True{}:
+      Nil{}
+    case False{}:
+      View.shelf.k(lc, open, key, MSG.T.sidebar.shelf.count(lc, name, Nat.show(n)), ts, ix, st, sel, now)
+
+def View.shelf.settled(+lc: I.Loc, open: Bool, +key: String, +name: String, +ts: List<&2, M.Thread>, +ix: U.SIx, +st: M.State, +sel: String, +now: Nat) -> List<&2, D.Node>:
+  +n = U.Side.settled.n(st, key, List.length(&2, M.Thread, ts))
+  View.shelf.settled.k(Nat.is_eq(n, 0n), lc, open, key, name, ts, n, ix, st, sel, now)
+
 # snoozed threads, soonest to wake first
 def View.snoozed(+lc: I.Loc, ts: List<&2, M.Thread>, +ix: U.SIx, +st: M.State, +sel: String, +now: Nat) -> List<&2, D.Node>:
   match ts:
@@ -295,7 +309,7 @@ def View.project(+lc: I.Loc, r: U.SRow, +quiet: Bool, +open: Map<&2, Bool>, +ix:
           View.rows_in(lc, pinned, ix, st, sel, now, True{}, False{}),
           View.rows_in(lc, active, ix, st, sel, now, True{}, False{}),
           View.snoozed(lc, snoozed, ix, st, sel, now),
-          View.shelf(lc, U.Flag.get(open, id), id, MSG.T.notify.settled(lc), settled, ix, st, sel, now),
+          View.shelf.settled(lc, U.Flag.get(open, id), id, MSG.T.notify.settled(lc), settled, ix, st, sel, now),
           View.shelf(lc, U.Flag.get(open, "arch:" ++ id), "arch:" ++ id, MSG.T.sidebar.archived(lc), M.Archive.of(hidden), ix, st, sel, now)])}
 
 def View.projects(+lc: I.Loc, rs: List<&2, U.SRow>, +quiet: Bool, +open: Map<&2, Bool>, +ix: U.SIx, +st: M.State, +sel: String, +now: Nat, +look: String, +rm: String) -> List<&2, D.Node>:
@@ -1357,6 +1371,8 @@ def View.settings.rows.k(i: Nat, +lc: I.Loc, +u: U.Ui, +st: M.State, +nf: Map<&2
     case 10n: View.usage.page(lc, u)
     case 11n: List.concat(&2, D.Node, [[View.setrow(MSG.T.settings.tour(lc), MSG.T.settings.tour.note(lc), [D.Dom.button("", "ob-open", "", MSG.T.settings.tour.again(lc), MSG.T.settings.tour.show(lc))])]])
     case 12n: View.agy.rows(U.Share.rows(u))
+    # Beta: the uberbot's infinite context (core/uctx.bend), off by default
+    case 13n: [View.setrow(MSG.T.settings.uctx(lc), MSG.T.settings.uctx.note(lc), View.chips.loc(lc, ["on", "off"], M.Setting.get(st, "uber.ctx", "off"), "uber.ctx"))]
     case _: Nil{}
 
 def View.settings.rows(i: Nat, +lc: I.Loc, +u: U.Ui, +st: M.State, +nf: Map<&2, String>, +v: String, +note: String) -> List<&2, D.Node>:
@@ -2216,14 +2232,14 @@ def View.browser.back(on: Bool, +u: U.Ui) -> List<&2, D.Node>:
 def View.browser.strip.loc(+lc: I.Loc, on: Bool, +u: U.Ui) -> List<&2, D.Node>:
   match on:
     case True{}:
-      D.Dom.span("", U.CefUI.strip(u, U.Ui.page(u))) <> View.browser.back.loc(lc, Bool.not(String.is_empty(U.Teach.drive(u, U.Ui.page(u)))), u)
+      D.Dom.span("", U.BrUI.strip(u, U.Ui.page(u))) <> View.browser.back.loc(lc, Bool.not(String.is_empty(U.Teach.drive(u, U.Ui.page(u)))), u)
     case False{}: Nil{}
 
 def View.browser.strip(on: Bool, +u: U.Ui) -> List<&2, D.Node>:
   View.browser.strip.loc(I.En{}, on, u)
 
 def View.browser.loc(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
-  List.append(&2, D.Node, List.append(&2, D.Node, View.browser.strip.loc(lc, U.CefUI.strip_on(u, U.Ui.page(u)), u), WB.WB.browser.controls(lc, u, U.Ui.page(u))),
+  List.append(&2, D.Node, List.append(&2, D.Node, View.browser.strip.loc(lc, U.BrUI.strip_on(u, U.Ui.page(u)), u), WB.WB.browser.controls(lc, u, U.Ui.page(u))),
     [WB.WB.browser.surface.loc(lc, u, U.Ui.page(u), MSG.T.browser.thread(lc))])
 
 # The Mechanical page (client.bend's Mpage): a chip per part, Open in 3D

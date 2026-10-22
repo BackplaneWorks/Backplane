@@ -52,13 +52,15 @@ export class ThinContinuations {
         const c = control(n);if (c) controls.set(c, [...controls.get(c) || [], n]);
         for (const k of items(n.kids)) scan(k);
       };scan(node);
-      const readerNodes = (id, button, activity) => {
+      // Only activity rows fold: message text always arrives whole, so a
+      // message row never gets a reader or a "read more" control.
+      const readerNodes = (id, button) => {
         const reader = this.readers.get(id), out = [];
         if (reader) out.push(element('pre', 'thin-text:' + id, { class: 'thin-message-text',
           style: 'white-space:pre-wrap;overflow-wrap:anywhere;max-width:100%',
-          'aria-label': activity ? 'Full activity text' : 'Message text from start' }, [text(reader.text)]));
+          'aria-label': 'Full activity text' }, [text(reader.text)]));
         if (!reader || reader.hasMore) {
-          const wording = reader ? 'Read next part' : activity ? 'Read full activity text' : 'Read rest of message';
+          const wording = reader ? 'Read next part' : 'Read full activity text';
           // The existing ThinHost resolves its assembled next cursor. Keep the
           // original empty cursor for the first explicit request only.
           const attrs = reader ? items(button.attrs).map(a => is(a, 'At') && a.name === 'data-value'
@@ -78,12 +80,8 @@ export class ThinContinuations {
         }
         let kids = items(n.kids).map(rewrite).filter(Boolean);
         const row = attr(n, 'data-id'), button = controls.get(row);
-        if (rows.get(row)?.length === 1 && rows.get(row)[0] === n && button?.length === 1) {
-          const reader = this.readers.get(row), activity = classes(n).includes('act');
-          const extra = readerNodes(row, button[0], activity);
-          if (reader && !activity) kids = [...extra, ...kids.filter(k => !is(k, 'El') || !classes(k).includes('body'))];
-          else kids.push(...extra);
-        }
+        if (rows.get(row)?.length === 1 && rows.get(row)[0] === n && button?.length === 1 && classes(n).includes('act'))
+          kids.push(...readerNodes(row, button[0]));
         if (n.tag === 'button' && action(n) === 'view-page' && classes(n).includes('earlier')) {
           return { ...label(n, 'Load earlier messages', 'thin-earlier'), attrs: list(items(n.attrs).filter(a => !is(a, 'At') || !['class', 'style', 'title'].includes(a.name)).concat([
             { $: T.At, name: 'class', value: 'thin-earlier' }, { $: T.At, name: 'title', value: 'Load earlier messages' }

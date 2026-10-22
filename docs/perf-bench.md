@@ -23,9 +23,8 @@ bun test/tools/perf_load.ts --bin build/backplane --log /tmp/backplane-perf-snap
 ## Running it
 
 ```sh
-scripts/build-app.sh src/app/main.bend build/backplane      # under the bend lock
-cc -O2 test/tools/xpoke.c -o build/xpoke -lX11
 bun test/tools/perf_load.ts --bin build/backplane --out /tmp/perf.json
+# needs the native window and xpoke, which are no longer built (no C)
 ```
 
 Options: `--bin` (any branch's build), `--log` (default

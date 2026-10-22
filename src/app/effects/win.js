@@ -71,5 +71,3 @@ function win_payload(win, id) {
 }
 io_eff(CID(Win.payload), win_payload);
 
-function win_xid(win) { return io_tup(win, 0); }
-io_eff(CID(Win.xid), win_xid);

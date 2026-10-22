@@ -274,12 +274,22 @@ def Vo.alive(+home: String) -> IO(U32):
 def Vo.live.args(+home: String, +device: String) -> List<&2, String>:
   List.append(&2, String, ["live", "--key-file", Vo.key(home), "--keywords-file", Vo.dict(home)], Bool.pick(List<&2, String>, String.is_empty(device), Nil{}, ["--device", device]))
 
-def Vo.live.go(+exe: String, +home: String, +thread: String, +device: String, +out: Chan(String)) -> IO(Unit):
+def Vo.live.run(+exe: String, +home: String, +thread: String, +device: String, +out: Chan(String)) -> IO(Unit):
   do IO<Unit>:
     mk : Result<&1, &1, U32 & String, Unit> <- H.FS.mkdirs(Vo.dir(home))
     +d : String <- BN.Bf.text(Vo.dict(home))
     r : Result<&1, &1, U32 & String, U32 & Socket> <- H.Proc.spawn(exe, Vo.live.args(home, device), "/", 0)
     Vo.started(r, home, out, thread, V.Voice.dict.parse(d))
+
+def Vo.live.c(copy: Bool, +exe: String, +home: String, +thread: String, +device: String, +out: Chan(String)) -> IO(Unit):
+  match copy:
+    case True{}:
+      Vo.fail(out, thread, "a hub on a copied log (BACKPLANE_COPY=1) starts no dictation")
+    case False{}:
+      Vo.live.run(exe, home, thread, device, out)
+
+def Vo.live.go(+exe: String, +home: String, +thread: String, +device: String, +out: Chan(String)) -> IO(Unit):
+  IO.bind(Bool, Unit, P.Proc.copy(), copy => Vo.live.c(copy, exe, home, thread, device, out))
 
 def Vo.live.k(busy: Bool, keyed: Bool, +exe: String, +home: String, +thread: String, +device: String, +out: Chan(String)) -> IO(Unit):
   match busy keyed:

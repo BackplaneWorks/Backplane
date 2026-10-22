@@ -2,19 +2,22 @@
 # The classic packages and install.sh of a release, from what it already
 # built (nothing is compiled or relabelled here):
 #
-#   scripts/release-classic.sh v0.12.0 OUT \
+#   scripts/release-classic.sh v0.12.1 OUT \
 #     linux-x64 SERVICE_PAYLOAD DESKTOP_ARCHIVE [linux-arm64 ... darwin-arm64 ...]
 #
 # SERVICE_PAYLOAD is the accepted service component's payload/ (its
 # backplane-serve, web/, licences and receipts, as built); DESKTOP_ARCHIVE is
 # the release's backplane-<ver>-<plat>.tar.gz (the desktop app). Each
 # platform gets OUT/backplane-<ver>-classic-<plat>.tar.gz: the payload, the
-# `backplane` launcher, install-release.sh, the menu entry and icons, under
-# backplane-<plat>/. That is the layout install.sh unpacks and the one every
-# 0.11 updater swaps in: it takes the first asset whose name ends in
-# <plat>.tar.gz, and GitHub lists assets by name, so -classic- (c) comes
-# before the desktop archive's <plat> (d, l). OUT/install.sh carries the
-# sha256 of both archives for each platform.
+# `backplane` launcher, install-release.sh, the menu entry and icons, and the
+# desktop app as desktop/, under backplane-<plat>/. That is the layout
+# install.sh unpacks and the one every updater swaps in: it takes the first
+# asset whose name ends in <plat>.tar.gz (0.12.0 on linux-x64: in
+# linux-x64-cef.tar.gz, so linux-x64 also gets classic-linux-x64-cef.tar.gz,
+# the same bytes), and GitHub lists assets by name, so -classic- (c) comes
+# before the desktop archive's <plat> (d, l). The desktop app rides along
+# because a 0.12.0 app refuses a hub of any other version. OUT/install.sh
+# carries the sha256 of each classic package.
 set -eu
 [ $# -ge 5 ] && [ $(( ($# - 2) % 3 )) -eq 0 ] || { sed -n '2,17p' "$0"; exit 2; }
 abs() { case $1 in /*) printf '%s\n' "$1" ;; *) printf '%s/%s\n' "$PWD" "$1" ;; esac; }
@@ -49,6 +52,10 @@ while [ $# -gt 0 ]; do
   cp scripts/install-release.sh "$dir/install-release.sh"
   [ -f "$dir/LICENSE" ] || cp "$dir/LICENSE.Backplane" "$dir/LICENSE"
   cp deploy/backplane.desktop "$dir/"
+  mkdir "$stage/app"
+  tar -xzf "$desktop" -C "$stage/app"
+  mv "$stage/app/backplane-$plat" "$dir/desktop"
+  rmdir "$stage/app"
   mkdir -p "$dir/icon"
   cp assets/icon/backplane-desktop.svg assets/icon/backplane-desktop-256.png "$dir/icon/"
   name=backplane-$ver-classic-$plat.tar.gz
@@ -56,6 +63,10 @@ while [ $# -gt 0 ]; do
   (cd "$stage" && find "backplane-$plat" -print | LC_ALL=C sort > list &&
     tar --no-recursion --owner=0 --group=0 --numeric-owner --mtime=@0 -cf - -T list | gzip -9 -n > "$out/$name")
   rm -rf "$stage"
+  if [ "$plat" = linux-x64 ]; then
+    cp "$out/$name" "$out/backplane-$ver-classic-linux-x64-cef.tar.gz"
+    echo "$out/backplane-$ver-classic-linux-x64-cef.tar.gz"
+  fi
   key=$(printf '%s' "$plat" | tr 'a-z-' 'A-Z_')
   seds="$seds -e s/@SHA_$key@/$(sum "$out/$name")/ -e s/@DESKTOP_SHA_$key@/$(sum "$desktop")/"
   echo "$out/$name"

@@ -1,5 +1,5 @@
 #!/bin/sh
-# The JS service's smoke test: a backplane-serve that scripts/build-js.sh
+# The hub's quick smoke test: a backplane-serve that scripts/build-js.sh
 # made, run on a throwaway home and a spare port, stopped by its PID.
 #
 #   scripts/js-smoke.sh BINARY [WEB_DIR]
@@ -7,7 +7,7 @@
 # Checks --version, an unknown flag (exit 2), the hub answering /hello
 # within BACKPLANE_SMOKE_SECS (default 20) and, with WEB_DIR, serving the
 # web client's page. BACKPLANE_SMOKE_FULL=1 also runs test/smoke.ts (as
-# scripts/smoke.sh does for C; it needs build/wire). POSIX sh, curl and
+# scripts/smoke.sh does; it needs build/wire). POSIX sh, curl and
 # nothing GNU: it runs on the Linux and macOS runners as is.
 set -eu
 bin=$1
@@ -51,6 +51,14 @@ if [ -n "$web" ]; then
   code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port/") || code=000
   [ "$code" = 200 ] || fail "GET / answered $code"
   echo "js-smoke: the web client is served"
+  # the largest file whole: a multi-MB body once overflowed the JS hub's
+  # stack (List.length in Http.response.c) the moment a browser loaded it
+  big=$(ls -S "$web" | head -n1)
+  want=$(wc -c <"$web/$big" | tr -d ' ')
+  got=$(curl -s -o /dev/null -w '%{size_download}' "http://127.0.0.1:$port/$big") || got=0
+  [ "$got" = "$want" ] || fail "GET /$big gave $got bytes of $want"
+  kill -0 "$pid" 2>/dev/null || { pid=""; fail "the hub died serving /$big"; }
+  echo "js-smoke: /$big served whole ($want bytes)"
 fi
 if [ "${BACKPLANE_SMOKE_FULL:-}" = 1 ]; then
   bun test/smoke.ts "$port" "$home" build/wire

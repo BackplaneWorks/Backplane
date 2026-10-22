@@ -3,14 +3,6 @@ import Foundation
 // A pairing link as the desktop shows it (http://host:3787/#token=abc)
 // becomes the hub's socket address (ws://host:3787/ws?token=abc).
 enum Pairing {
-    // the socket address, resuming from since/origin
-    static func socket(_ link: String, since: String, origin: String) -> URL? {
-        guard let u = socket(link), var c = URLComponents(url: u, resolvingAgainstBaseURL: false) else { return nil }
-        // enc=cbor: a hub from before CBOR-only still needs asking
-        c.queryItems = (c.queryItems ?? []) + [URLQueryItem(name: "since", value: since), URLQueryItem(name: "origin", value: origin),
-                                               URLQueryItem(name: "enc", value: "cbor"), URLQueryItem(name: "view", value: "mobile")]
-        return c.url
-    }
 
     static func viewSocket(_ link: String) -> URL? {
         guard let u = socket(link), var c = URLComponents(url: u, resolvingAgainstBaseURL: false) else { return nil }
@@ -69,15 +61,18 @@ enum Pairing {
 // The socket to the hub, reconnecting with backoff like host.js.
 @MainActor
 final class Hub {
-    // the address for each (re)connect: it carries since/origin, so the
-    // hub sends only what this app has not seen
-    private let url: () async -> URL?
+    // What to do on each (re)connect: open this address (it carries
+    // since/origin, so the hub sends only what this app has not seen), try
+    // again after the backoff (the hub is down or restarting), or stop.
+    enum Next { case go(URL), later, stop }
+    private let url: () async -> Next
     private let onConnecting: () -> Void
     private let onOpen: () -> Void
     private let onMessage: (Data) -> Void
     private let onClose: () -> Void
     private var task: URLSessionWebSocketTask?
     private var backoff: Double = 0.25
+    private var retry: DispatchWorkItem?
     private var stopped = false
     private var generation = 0
     // When a frame (a heartbeat included) last arrived. The hub sends one
@@ -88,7 +83,7 @@ final class Hub {
     private var heard = Date()
     private var watch: Timer?
 
-    init(url: @escaping () async -> URL?, onConnecting: @escaping () -> Void, onOpen: @escaping () -> Void, onMessage: @escaping (Data) -> Void,
+    init(url: @escaping () async -> Next, onConnecting: @escaping () -> Void, onOpen: @escaping () -> Void, onMessage: @escaping (Data) -> Void,
          onClose: @escaping () -> Void) {
         self.url = url
         self.onConnecting = onConnecting
@@ -113,8 +108,30 @@ final class Hub {
         lost()
     }
 
+    // Try now rather than after the backoff: the network came back or the
+    // app is in front again. A socket quiet for `quiet` seconds (it may have
+    // died while the app was suspended) is replaced.
+    func wake(quiet: TimeInterval = 3) {
+        guard !stopped else { return }
+        backoff = 0.25
+        if let t = task {
+            guard Date().timeIntervalSince(heard) > quiet else { return }
+            t.cancel(with: .goingAway, reason: nil)
+            task = nil
+            generation += 1
+            onClose()
+            connect()
+        } else if let r = retry {
+            r.cancel()
+            retry = nil
+            connect()
+        }
+    }
+
     func stop() {
         stopped = true
+        retry?.cancel()
+        retry = nil
         watch?.invalidate()
         watch = nil
         generation += 1
@@ -132,8 +149,17 @@ final class Hub {
         generation += 1
         let gen = generation
         onConnecting()
+        retry?.cancel()
+        retry = nil
         Task {
-            guard let u = await url(), gen == generation, !stopped else { return }
+            let next = await url()
+            guard gen == generation, !stopped else { return }
+            let u: URL
+            switch next {
+            case .go(let to): u = to
+            case .later: lost(); return
+            case .stop: return
+            }
             let t = URLSession.shared.webSocketTask(with: u)
             // the first frame is the whole log (megabytes on a busy hub);
             // past the 1 MB default every receive fails and it reconnects forever
@@ -171,8 +197,16 @@ final class Hub {
         generation += 1
         onClose()
         guard !stopped else { return }
-        let wait = backoff
-        backoff = min(backoff * 2, 5)
-        DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [weak self] in self?.connect() }
+        // equal jitter: after a deploy the phones spread out, none at zero
+        let wait = backoff / 2 + Double.random(in: 0...(backoff / 2))
+        backoff = min(backoff * 2, 3)
+        let r = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.retry = nil
+            self.connect()
+        }
+        retry?.cancel()
+        retry = r
+        DispatchQueue.main.asyncAfter(deadline: .now() + wait, execute: r)
     }
 }

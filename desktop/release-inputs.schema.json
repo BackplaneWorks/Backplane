@@ -39,14 +39,7 @@
           "$ref": "#/$defs/component"
         },
         "service": {
-          "oneOf": [
-            {
-              "$ref": "#/$defs/component"
-            },
-            {
-              "$ref": "#/$defs/windowsService"
-            }
-          ]
+          "$ref": "#/$defs/component"
         },
         "selectedBrowser": {
           "$ref": "#/$defs/selectedBrowser"
@@ -307,10 +300,10 @@
       ],
       "properties": {
         "version": {
-          "const": "0.12.0"
+          "const": "0.12.1"
         },
         "tag": {
-          "const": "v0.12.0"
+          "const": "v0.12.1"
         },
         "channel": {
           "const": "release"
@@ -324,22 +317,6 @@
           "pattern": "^[a-f0-9]{40}$"
         },
         "freezeReceipt": {
-          "$ref": "#/$defs/artifact"
-        }
-      },
-      "additionalProperties": false
-    },
-    "windowsService": {
-      "type": "object",
-      "required": [
-        "contractSha256",
-        "archive"
-      ],
-      "properties": {
-        "contractSha256": {
-          "const": "1c12bd80b6f994ecd0d68d06b8ada98e1958de725d33f6380da3c0243ad099e3"
-        },
-        "archive": {
           "$ref": "#/$defs/artifact"
         }
       },
@@ -392,10 +369,10 @@
           "const": "FROZEN"
         },
         "version": {
-          "const": "0.12.0"
+          "const": "0.12.1"
         },
         "tag": {
-          "const": "v0.12.0"
+          "const": "v0.12.1"
         },
         "channel": {
           "const": "release"

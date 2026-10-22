@@ -5,88 +5,57 @@
 #                         the hub (deploy/backplane-launch.sh)
 #   dist/web/             the web client (for other devices)
 #   dist/backplane-browser, dist/backplane-step2glb, dist/backplane-voice, dist/backplane-kipc
-#                         host helpers (with bun)
-# X11 headers: /usr/include (libx11-dev), or BACKPLANE_X11=<prefix> holding
-# include/ and lib/libX11.so (see AGENTS.md).
-# System fonts (src/gfx/effects/font.c) need no headers and no link flags:
-# libfreetype.so.6 and libfontconfig.so.1 are dlopen'd at run time and the
-# few FreeType structs read are declared in font.c; without them text falls
-# back to the Spleen bitmap font. To re-check those struct layouts against
-# real headers without root:
-#   apt-get download libfreetype-dev && dpkg -x libfreetype-dev_*.deb ~/.local/ft
-#   (headers in ~/.local/ft/usr/include/freetype2; compare offsetof values)
+#                         host helpers
 #
-# A macOS runner's 7 GB is too little for bend's emit, so releases split
-# the build (.github/workflows/release.yml): `scripts/build.sh emit` on
-# Linux writes what is the same everywhere (the web client, the server's C
-# and test/wire for smoke.sh), and `BACKPLANE_PREBUILT=1 scripts/build.sh`
-# on the Mac compiles it.
+# The hub is JS on Bun's runtime (scripts/build-js.sh, docs/js-service.md):
+# bend emits it once (kept by a hash of what it reads) and `bun build
+# --compile` makes one file; BACKPLANE_JS_TARGET cross-builds another
+# target's from here.
 set -eu
 cd "$(dirname "$0")/.."
 . scripts/bendok.sh
-mode=${1:-all}
-pre=${BACKPLANE_PREBUILT:-}
+export PATH="$HOME/.bun/bin:$PATH"
+command -v bun >/dev/null 2>&1 || { echo "build.sh: bun is needed" >&2; exit 1; }
 # CI's "laws" job (scripts/check.sh) has already checked every file, these
-# three roots included: BACKPLANE_SKIP_CHECK=1 does not do it again
-[ "$pre" = 1 ] || [ "${BACKPLANE_SKIP_CHECK:-}" = 1 ] || for f in src/web/app.bend src/server/main.bend; do
+# roots included: BACKPLANE_SKIP_CHECK=1 does not do it again
+[ "${BACKPLANE_SKIP_CHECK:-}" = 1 ] || for f in src/web/app.bend src/server/main.bend; do
   bend_check "$f" || exit 1
 done
-if [ -n "${BACKPLANE_X11:-}" ]; then
-  export CPATH="$BACKPLANE_X11/include${CPATH:+:$CPATH}"
-  export LIBRARY_PATH="$BACKPLANE_X11/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
-fi
-# a release build stamps its version (BACKPLANE_VERSION=v1.2.3) into the
-# native binaries' emitted C (scripts/build-app.sh, BACKPLANE_VERSION_STAMP)
+# a release build stamps its version (BACKPLANE_VERSION=v1.2.3) into a
+# copy of the emitted JS (scripts/build-js.sh, BACKPLANE_VERSION_STAMP)
 if [ -n "${BACKPLANE_VERSION:-}" ]; then
   export BACKPLANE_VERSION_STAMP="${BACKPLANE_VERSION#v}"
 fi
-if [ "$pre" = 1 ]; then
-  [ -f dist/web/index.html ] || { echo "BACKPLANE_PREBUILT: no dist/web (scripts/build.sh emit)"; exit 1; }
-  find dist -mindepth 1 -maxdepth 1 ! -name web ! -name kistack -exec rm -rf {} +
-else
-  rm -rf dist
-  mkdir -p dist
+rm -rf dist
+mkdir -p dist build
+# the web client and the hub are emitted side by side
+(
   bend src/web/index.html -o dist/web
   python3 scripts/js-unmarshal.py ../core/client.Ui dist/web/chunk-*.js
   python3 scripts/js-native.py dist/web/chunk-*.js
   cp src/web/sw.js dist/web/sw.js
   # precompressed copies: the server sends these to browsers that take gzip
   for f in dist/web/*.js dist/web/*.css dist/web/*.html; do gzip -9 -k -n -f "$f"; done
-  # KiStack's skills, pinned and checked (deploy/kistack.lock)
-  scripts/build-kistack.sh dist/kistack
-fi
-mkdir -p build
-compiler_notices() {
-  python3 scripts/native-compiler.py --verify-metadata "$1/compiler"
-  mkdir -p dist/licenses/bend
-  cp "$1/compiler/LICENSE" "$1/compiler/bend-native-ids.patch" "$1/compiler/bend-fast-emit.patch" \
-    "$1/compiler/native-compiler.json" dist/licenses/bend/
-}
-if [ "$mode" = emit ]; then
-  BACKPLANE_EMIT_ONLY=1 scripts/build-app.sh src/server/main.bend dist/backplane-serve
-  compiler_notices build/cc/backplane-serve
-  rm -rf build/wire
-  bend test/wire/index.html -o build/wire > /dev/null
-  exit 0
-fi
-# native binaries compile split in parallel, at low priority
-# (scripts/build-app.sh; BACKPLANE_JOBS caps the compiles). The desktop UI
-# is the Electron app over the hub; the package carries its launcher.
-scripts/build-app.sh src/server/main.bend dist/backplane-serve
-compiler_notices build/cc/backplane-serve
+) > build/web-dist.log 2>&1 &
+webpid=$!
+hubrc=0
+scripts/build-js.sh src/server/main.bend dist/backplane-serve || hubrc=$?
+webrc=0
+wait "$webpid" || webrc=$?
+[ "$webrc" = 0 ] || { cat build/web-dist.log >&2; echo "build.sh: the web client did not build" >&2; exit 1; }
+[ "$hubrc" = 0 ] || { echo "build.sh: the hub did not build" >&2; exit 1; }
+# Bun's and Bend's notices, which the hub ships with (scripts/js-licenses.sh)
+scripts/js-licenses.sh dist/licenses
+# KiStack's skills, pinned and checked (deploy/kistack.lock)
+scripts/build-kistack.sh dist/kistack
+# The desktop UI is the Electron app over the hub; the package carries its
+# launcher.
 cp deploy/backplane-launch.sh dist/backplane
 chmod 755 dist/backplane
-# the host helpers (Bun): the agents' browser, STEP -> GLB for the 3D
-# viewer and speech to text for dictation; the app runs without them, so a machine without bun skips them
-if command -v bun >/dev/null 2>&1 || [ -x "$HOME/.bun/bin/bun" ]; then
-  PATH="$HOME/.bun/bin:$PATH" scripts/build-browser.sh
-  PATH="$HOME/.bun/bin:$PATH" scripts/build-step2glb.sh
-  PATH="$HOME/.bun/bin:$PATH" scripts/build-voice.sh
-  PATH="$HOME/.bun/bin:$PATH" scripts/build-kipc.sh
-else
-  echo "bun not found: skipping backplane-browser, backplane-step2glb, backplane-voice and backplane-kipc"
-fi
-if [ "${BACKPLANE_CEF_RELEASE:-0}" = 1 ]; then
-  scripts/stage-cef-release.sh
-fi
+# the host helpers (Bun too): the agents' browser, STEP -> GLB for the 3D
+# viewer, speech to text for dictation and KiCad's IPC
+scripts/build-browser.sh
+scripts/build-step2glb.sh
+scripts/build-voice.sh
+scripts/build-kipc.sh
 ls -la dist

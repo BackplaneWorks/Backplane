@@ -29,6 +29,19 @@ Idle time counts against the daily cap. Runs without a thread (by hand),
 cancelled jobs and failed setups delete at once. `--no-reuse` always
 starts a new one.
 
+Slots (`--slot NAME`): a sandbox kept warm for a named slot instead of
+a thread, so a caller that runs many jobs (bp-coord's local CI,
+`scripts/ci-fast.py`, slots `ci-1`...`ci-16`) gets its sandboxes back
+across runs whatever thread runs it. A slot's warm sandbox is used only
+by that slot (a thread never takes one, nor a slot a thread's), and it
+keeps its last tree: the next job hashes it on the sandbox, sends only
+the files that differ, removes the ones not in this job's manifest, and
+hashes the whole tree again, which must be exactly the manifest (`.git`
+aside, `build/` too with `--keep-build`); anything else wipes it and
+pushes all of it. A full push of this repository takes about 100 s; a
+synced one a few seconds. Budget, start guard, lifetime, sweep and
+ledger are as for a thread's.
+
 Start guard: past 80% of Boat's hourly or daily start limit
 (`BOAT_JOB_START_GUARD`), no new sandbox is started; a job from a thread
 with a free warm sandbox still runs. The refusal says so.
@@ -59,7 +72,6 @@ checkout).
 | `scripts/check.sh` (type-check + PROOF) | exit 0 until #149; since then PROOF is OOM-killed at 7.45 GB: use large (the default for it now) | 149 s | 4.29 GB (before #149) |
 | `scripts/check.sh proof` | as above | 98 s | 4.32 GB (before #149) |
 | `scripts/test.sh` (136 programs) | exit 0 | 294 s | 3.38 GB |
-| native `BACKPLANE_LOW_MEM=1 scripts/build-app.sh src/app/main.bend build/backplane` (4 GiB heap hint, one clang at a time; `CC=clang-19`, `libx11-dev`, `libasound2-dev` installed in the job, `BACKPLANE_GOOGLE_BAKE=0`) | exit 0 twice; the built binary starts `--headless` and answers `/hello` | 17–21 min | 6.7–7.1 GB (0.6–1.0 GB left free: tight) |
 
 Run proofs and checks through `scripts/check.sh` (or `check.sh proof`): it
 sets what `bend PROOF.bend` needs, a 1 GiB stack (`ulimit -s 1048576`) and

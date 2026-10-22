@@ -22,7 +22,7 @@ on:
       version:
         description: Exact stable tag spelling; this workflow creates no tag
         required: true
-        default: v0.12.0
+        default: v0.12.1
         type: string
       producer_run_id:
         description: Completed successful run containing owner-produced package artifacts
@@ -105,8 +105,8 @@ jobs:
           e = os.environ
           commit, tag = e['SOURCE_COMMIT'], e['RELEASE_TAG']
           runpy.run_path('scripts/release-assets.py')['identity'](commit, tag)
-          if tag != 'v0.12.0':
-              raise SystemExit('this stable preparation targets v0.12.0 only')
+          if tag != 'v0.12.1':
+              raise SystemExit('this stable preparation targets v0.12.1 only')
           if e['WORKFLOW_COMMIT'] != commit or subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip() != commit:
               raise SystemExit('workflow and checkout must equal frozen source')
           if not re.fullmatch(r'[1-9][0-9]*', e['PRODUCER_RUN']) or not re.fullmatch(r'[1-9][0-9]*(,[1-9][0-9]*)*', e['PRODUCER_IDS']):
