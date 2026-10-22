@@ -45,6 +45,16 @@ def Log.tail() -> List<&2, M.Change>:
    M.RoomPosted{"rp-old", "r1", "b1", "older room text", 0n, 16n},
    M.RoomPosted{"rp-old", "r1", "b1", "duplicate room text", 0n, 48n}]
 
+# Cross the record-count flush boundary in a single domain, then the
+# payload budget with one oversized unicode record. The same full
+# SQL-vs-fold comparison checks all resulting batches, not just the last.
+def Log.batch(+n: Nat) -> List<&2, M.Change>:
+  match n:
+    case 0n:
+      [M.SettingSet{"batch.oversized", String.repeat("ü", 17000n), 50n}]
+    case 1n+r:
+      M.SettingSet{"batch." ++ Nat.show(r), "value", 50n} <> Log.batch(r)
+
 def Log.encode(cs: List<&2, M.Change>) -> List<&2, String>:
   match cs:
     case Nil{}:
@@ -53,7 +63,7 @@ def Log.encode(cs: List<&2, M.Change>) -> List<&2, String>:
       J.Json.show(CD.Change.encode(c)) <> Log.encode(t)
 
 def Log.lines() -> List<&2, String>:
-  List.append(&2, String, Log.encode(S.Demo.changes()), List.append(&2, String, ["{torn", "{\"$\":\"FromTheFuture\",\"at\":5}"], Log.encode(Log.tail())))
+  List.append(&2, String, Log.encode(S.Demo.changes()), List.append(&2, String, ["{torn", "{\"$\":\"FromTheFuture\",\"at\":5}"], Log.encode(List.append(&2, M.Change, Log.tail(), Log.batch(140n)))))
 
 # what the pure store reads of a line
 def Log.ll.k(m: Maybe<&2, J.Json>, +len: Nat) -> S.LL:
