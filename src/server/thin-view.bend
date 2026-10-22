@@ -114,10 +114,15 @@ def Projects.pick(+ts: List<&2, M.Thread>, +ps: Map<&2, M.Project>, +acc: Map<&2
       +id = Projects.id(t)
       Projects.pick(tail, ps, Map.set(&2, M.Project, acc, id, Projects.get.k(Map.get(M.Project, M.Project.blank(id), ps, id))))
 
+# Every project is in the window, always (a project record is small: a
+# name and a folder). Picking only the projects of the window's threads lost
+# every project whose threads were all settled once a hot boot's index held
+# only open threads: the sidebar dropped them and their viewers had no
+# project to resolve against (live, 2026-10-22).
 def State.window.empty(+st: M.State, +threads: Map<&2, M.Thread>) -> M.State:
   match st:
     case M.State{+ps, _, _, +n, +tk, +settings, +queued, +asks, _, +nav, +bw}:
-      M.State{Projects.pick(Map.values(&2, M.Thread, threads), ps, Map.new(&2, M.Project)), threads, Nil{}, n, tk, settings, queued, asks, Map.new(&2, M.Device), nav,
+      M.State{ps, threads, Nil{}, n, tk, settings, queued, asks, Map.new(&2, M.Device), nav,
         [M.Ext{M.Ext.world(M.Ext.of(bw)), Map.new(&2, List<&2, M.Entry>), M.Ext.mail(M.Ext.of(bw))}]}
 
 def State.window.add(+es: List<&2, M.Entry>, +st: M.State) -> M.State:
@@ -148,9 +153,72 @@ def State.window.rows(ids: List<&2, String>, +st: M.State, +index: T.Index, acc:
     case Nil{}: acc
     case id <> tail: State.window.rows(tail, st, index, T.Row.preview(Message.whole(st, T.Index.row.k(Map.get(T.Row, T.Row.blank(), T.Index.rows(index), id)))) <> acc)
 
+# Each project's few most recent threads, settled ones too (by activity;
+# deleted and archived ones left out), so every project in the sidebar shows
+# its latest threads whatever the thin index holds (a hot boot's holds only
+# the open threads). At most Recent.per() a project: the window stays small.
+def Recent.per() -> Nat:
+  5n
+
+type Picked is Data:
+  Picked{at: Nat, id: String}
+
+def Recent.newer(+xs: List<&2, Picked>, +at: Nat) -> Bool:
+  match xs:
+    case Picked{+a, _} <> _: Nat.is_gt(at, a)
+    case Nil{}: True{}
+
+# xs (newest first, at most n) with (at, id) put in its place
+def Recent.ins(n: Nat, xs: List<&2, Picked>, +at: Nat, +id: String, newer: Bool) -> List<&2, Picked>:
+  match n xs newer:
+    case 0n _ _: Nil{}
+    case 1n+_ Nil{} _: [Picked{at, id}]
+    case 1n+m +h <> +t True{}: Picked{at, id} <> List.take(&2, Picked, h <> t, m)
+    case 1n+m Picked{+a, +i} <> +t False{}: Picked{a, i} <> Recent.ins(m, t, at, id, Recent.newer(t, at))
+
+def Recent.cur.k(m: Map<&2, List<&2, Picked>>, +cur: List<&2, Picked>, +p: String, +at: Nat, +id: String) -> Map<&2, List<&2, Picked>>:
+  Map.set(&2, List<&2, Picked>, m, p, Recent.ins(Recent.per(), cur, at, id, Recent.newer(cur, at)))
+
+def Recent.cur(r: Map<&2, List<&2, Picked>> & List<&2, Picked>, +p: String, +at: Nat, +id: String) -> Map<&2, List<&2, Picked>>:
+  (m, cur) = r
+  Recent.cur.k(m, cur, p, at, id)
+
+def Recent.put(+keep: Bool, +t: M.Thread, m: Map<&2, List<&2, Picked>>) -> Map<&2, List<&2, Picked>>:
+  match keep t:
+    case True{} M.Thread{+id, +p, _, _, +act, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _}:
+      Recent.cur(Map.get(List<&2, Picked>, Nil{}, m, p), p, act, id)
+    case False{} _: m
+
+def Recent.keep(+t: M.Thread) -> Bool:
+  match t:
+    case M.Thread{_, _, _, _, _, _, _, +archived, _, _, _, _, _, _, _, _, _, _, _, _, +deleted}: Bool.not(Bool.or(archived, deleted))
+
+def Recent.fold(ts: List<&2, M.Thread>, m: Map<&2, List<&2, Picked>>) -> Map<&2, List<&2, Picked>>:
+  match ts:
+    case Nil{}: m
+    case +t <> tail: Recent.fold(tail, Recent.put(Recent.keep(t), t, m))
+
+def Recent.ids(ps: List<&2, Picked>, acc: List<&2, String>) -> List<&2, String>:
+  match ps:
+    case Nil{}: acc
+    case Picked{_, +id} <> t: Recent.ids(t, id <> acc)
+
+def Recent.all(xs: List<&2, List<&2, Picked>>, acc: List<&2, String>) -> List<&2, String>:
+  match xs:
+    case Nil{}: acc
+    case x <> t: Recent.all(t, Recent.ids(x, acc))
+
+def Threads.all(+st: M.State) -> List<&2, M.Thread>:
+  match st:
+    case M.State{_, +ts, _, _, _, _, _, _, _, _, _}: Map.values(&2, M.Thread, ts)
+
+# every project's few most recent threads' ids
+def Recent.per.project(+st: M.State) -> List<&2, String>:
+  Recent.all(Map.values(&2, List<&2, Picked>, Recent.fold(Threads.all(st), Map.new(&2, List<&2, Picked>))), Nil{})
+
 def State.window(+st: M.State, +index: T.Index, +target: J.Json, +rows: List<&2, String>) -> M.State:
   State.window.add(State.window.rows(rows, st, index, Nil{}),
-    State.window.empty(st, Threads.pick(Target.thread(st, target) <> T.Index.recent(index), st, Map.new(&2, M.Thread))))
+    State.window.empty(st, Threads.pick(List.append(&2, String, Target.thread(st, target) <> T.Index.recent(index), Recent.per.project(st)), st, Map.new(&2, M.Thread))))
 
 # A route restores only transient selection. The normal bot tab policy
 # decides whether that content route is still available for this exact bot.
