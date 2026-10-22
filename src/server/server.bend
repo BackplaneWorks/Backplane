@@ -157,6 +157,8 @@ type Msg is Data:
   Desktop{client: U32, kind: String, text: String, out: Chan(String), epoch: String, lease: String}
   MailRouted{body: MB.Body}
   RunReady{thread: String, head: String, bodies: List<&2, MB.Body>}
+  # the uberbot's fyi digest: the bodies of the conversations asked for
+  DigestGot{bot: String, ids: List<&2, String>, bodies: List<&2, MB.Body>}
   # n: how many probes since the lock was asked for (the guard is tried
   # each 100 ms; who holds it outside is asked every LockJob.every())
   LockProbe{name: String, holder: String, n: Nat}
@@ -9149,6 +9151,20 @@ def MailJob.read.text(out: B.Out) -> String:
     case B.Send{_, +text}: text
     case _: ""
 
+# the uberbot's fyi digest: the newest bodies of each conversation asked for
+def DigestJob.add(r: MST.StoreResult<List<&2, MB.Body>>, +acc: List<&2, MB.Body>) -> List<&2, MB.Body>:
+  match r:
+    case MST.Stored{+bs}: List.append(&2, MB.Body, acc, bs)
+    case _: acc
+
+def DigestJob.read(convs: List<&2, String>, +home: String, +acc: List<&2, MB.Body>) -> IO(List<&2, MB.Body>):
+  match convs:
+    case Nil{}: IO.pure(List<&2, MB.Body>, acc)
+    case +c <> +t: IO.bind(MST.StoreResult<List<&2, MB.Body>>, List<&2, MB.Body>, MST.MailStore.read(home, c, "", 10n), r => DigestJob.read(t, home, DigestJob.add(r, acc)))
+
+def DigestJob.run(convs: List<&2, String>, +home: String, +inbox: Chan(Msg), +bot: String, +ids: List<&2, String>) -> IO(Unit):
+  IO.bind(List<&2, MB.Body>, Unit, DigestJob.read(convs, home, Nil{}), bs => Self.post(inbox, DigestGot{bot, ids, bs}))
+
 def RunJob.start(r: MST.StoreResult<List<&2, MB.Body>>, +inbox: Chan(Msg), +s: M.State, +now: Nat, +th: String, +head: String) -> IO(Unit):
   match r:
     case MST.Stored{bs}: Self.post(inbox, RunReady{th, head, bs})
@@ -9162,6 +9178,10 @@ def Hub.out(h: Hub, o: B.Out) -> IO(Hub):
         r : MST.StoreResult<List<&2, MB.Body>> <- MST.MailStore.read(Cfg.home(cfg), conv, "", 20n)
         +now : Nat <- Now.nat()
         RunJob.start(r, inbox, st, now, thread, head)
+        return Hub{st, f, ls, cl, as, inbox, cfg, note}
+    case Hub{st, f, ls, cl, as, +inbox, +cfg, note} B.DigestRead{bot, ids, convs}:
+      do IO<Hub>:
+        IO.spawn(Unit, DigestJob.run(convs, Cfg.home(cfg), inbox, bot, ids))
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
     case Hub{st, f, ls, cl, as, inbox, cfg, note} B.CharterWrite{path, text}:
       do IO<Hub>:
@@ -14458,6 +14478,7 @@ def Msg.kind(m: Msg) -> String:
       "reexec"
     case MailRouted{_}: "mail-route"
     case RunReady{_, _, _}: "run-ready"
+    case DigestGot{_, _, _}: "digest"
     case Commit{_}:
       "commit"
     case OrderNote{_, _, _, _}:
@@ -15021,6 +15042,10 @@ def Hub.lock.http(h: Hub, +op: String, +body: String, +reply: Chan(String), +now
 def Hub.mail.routed(h: Hub, body: MB.Body, +now: Nat) -> IO(Hub):
   match h:
     case Hub{+st, f, ls, cl, as, inbox, cfg, note}: Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, B.Mail.route(st, now, body))
+
+def Hub.digest.got(h: Hub, +bot: String, +ids: List<&2, String>, +bs: List<&2, MB.Body>, +now: Nat) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, cfg, note}: Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, B.Digest.got(st, now, bot, ids, bs))
 
 def Hub.run.ready(h: Hub, +th: String, head: String, bs: List<&2, MB.Body>, +now: Nat) -> IO(Hub):
   match h:
@@ -15730,6 +15755,7 @@ def Hub.handle(h: Hub, m: Msg, +now: Nat) -> IO(Hub):
       Hub.link(h, lk)
     case MailRouted{body}: Hub.mail.routed(h, body, now)
     case RunReady{thread, head, bs}: Hub.run.ready(h, thread, head, bs, now)
+    case DigestGot{bot, ids, bs}: Hub.digest.got(h, bot, ids, bs, now)
     case Commit{cs}:
       Hub.step(h, B.Step{cs, Nil{}})
     case OrderNote{thread, id, text, +ping}:

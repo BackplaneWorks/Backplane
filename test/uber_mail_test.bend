@@ -110,6 +110,56 @@ def acts(cs: List<&2, M.Change>, +th: String) -> Nat:
 def ended(+s: M.State, +th: String) -> H.Step:
   H.Run.after(s, 60n, H.Step{[M.TurnChanged{th, M.Completed{}, 60n}], Nil{}})
 
+# a fyi report from t1 at a time, filed (header committed)
+def fyi.at(+s: M.State, +msg: String, +txt: String, +now: Nat) -> M.State:
+  M.State.replay(appended(outs(H.Operational.mail(s, now, ML.Origin{H.Mail.addr(s, "t1"), "launch", ""}, "t0", txt, msg, "fyi", Nil{}))), s)
+
+def fyi.bodies(+s: M.State, +msg: String, +txt: String, +now: Nat) -> List<&2, MB.Body>:
+  bodies(body(outs(H.Operational.mail(s, now, ML.Origin{H.Mail.addr(s, "t1"), "launch", ""}, "t0", txt, msg, "fyi", Nil{}))))
+
+def reads(os: List<&2, H.Out>) -> Nat:
+  match os:
+    case Nil{}: 0n
+    case H.DigestRead{_, _, _} <> +t: 1n+reads(t)
+    case _ <> +t: reads(t)
+
+def read.ids.go(ids: List<&2, String>) -> String:
+  match ids:
+    case Nil{}: ""
+    case +i <> +t: i ++ " " ++ read.ids.go(t)
+
+def read.ids(os: List<&2, H.Out>) -> String:
+  match os:
+    case Nil{}: ""
+    case H.DigestRead{_, +ids, _} <> _: read.ids.go(ids)
+    case _ <> +t: read.ids(t)
+
+def appends(os: List<&2, H.Out>) -> Nat:
+  match os:
+    case Nil{}: 0n
+    case H.MailAppend{_, _, _} <> +t: 1n+appends(t)
+    case _ <> +t: appends(t)
+
+def digest.text.k(b: Maybe<&2, MB.Body>) -> String:
+  match b:
+    case None{}: ""
+    case Some{+b}: MB.Body.text(b)
+
+def digest.text(os: List<&2, H.Out>) -> String:
+  digest.text.k(body(os))
+
+def digest.want.k(b: Maybe<&2, MB.Body>) -> String:
+  match b:
+    case None{}: ""
+    case Some{+b}: ML.Mail.wanted(MB.Body.mail(b)) ++ " " ++ ML.Mail.to(MB.Body.mail(b))
+
+def digest.want(os: List<&2, H.Out>) -> String:
+  digest.want.k(body(os))
+
+# the tick's step applied: its settings and the digest's header
+def ticked(+s: M.State, +st: H.Step) -> M.State:
+  M.State.replay(appended(outs(st)), M.State.replay(changes(st), s))
+
 def tool.names(ts: List<&2, J.Json>) -> String:
   match ts:
     case Nil{}: ""
@@ -144,6 +194,29 @@ def main() -> IO(Unit):
     C.Check.str("and as no act in the chat", Nat.show(acts(changes(quiet), "t0")), "0")
     +loud : H.Step = ended(M.State.apply(s2, M.SettingSet{"mail.on", "on", 59n}), run)
     C.Check.str("with mail.on on, today's escalation into the chat stays", Nat.show(posts(changes(loud), "t0")), "1")
+    # the fyi digest: at most one every 10 min while new fyi mail is unread
+    +b1 : List<&2, MB.Body> = fyi.bodies(s, "t:t1:lr-a", "Launched thread worker completed:\n\nbuilt the board", 100n)
+    +b2 : List<&2, MB.Body> = fyi.bodies(s, "t:t1:lr-b", "Launched thread worker completed:\n\nDRC clean", 200n)
+    +f2 : M.State = fyi.at(fyi.at(s, "t:t1:lr-a", "Launched thread worker completed:\n\nbuilt the board", 100n), "t:t1:lr-b", "Launched thread worker completed:\n\nDRC clean", 200n)
+    +d1 : H.Step = H.Digest.tick(f2, 700n)
+    C.Check.str("two fyi items: the tick asks for their bodies once", Nat.show(reads(outs(d1))), "1")
+    C.Check.str("it asks for both items", read.ids(outs(d1)), "t:t1:lr-a t:t1:lr-b ")
+    +g0 : M.State = M.State.replay(changes(d1), f2)
+    +got : H.Step = H.Digest.got(g0, 701n, "bu", ["t:t1:lr-a", "t:t1:lr-b"], List.append(&2, MB.Body, b2, b1))
+    C.Check.str("with the bodies: one digest", Nat.show(appends(outs(got))), "1")
+    C.Check.str("the digest is act mail to the uberbot", digest.want(outs(got)), "act bot:bu")
+    C.Check.str("it lists both items with a short text each", Bool.show(Bool.and(String.contains(digest.text(outs(got)), "built the board"), String.contains(digest.text(outs(got)), "DRC clean"))), "True")
+    C.Check.str("it posts nothing in the chat", Nat.show(Nat.add(posts(changes(d1), "t0"), posts(changes(got), "t0"))), "0")
+    +g1 : M.State = ticked(g0, got)
+    C.Check.str("routing the digest wakes the uberbot once", Nat.show(runs(outs(routed.k(body(outs(got)), g1)))), "1")
+    C.Check.str("no second digest within 10 min", Nat.show(reads(outs(H.Digest.tick(fyi.at(g1, "t:t1:lr-c", "third", 800n), 1000n)))), "0")
+    C.Check.str("nothing new: no digest after 10 min", Nat.show(reads(outs(H.Digest.tick(g1, 1400n)))), "0")
+    +d2 : H.Step = H.Digest.tick(fyi.at(g1, "t:t1:lr-c", "Launched thread worker completed: third item", 800n), 1300n)
+    C.Check.str("a new item after 10 min: asked for, alone", read.ids(outs(d2)), "t:t1:lr-c ")
+    C.Check.str("bodies of other mail are left out", Nat.show(appends(outs(H.Digest.got(g0, 701n, "bu", ["t:t1:lr-z"], b1)))), "0")
+    C.Check.str("act mail is not in a digest", Nat.show(reads(outs(H.Digest.tick(M.State.replay(appended(outs(filed(s, "t0", ""))), s), 700n)))), "0")
+    C.Check.str("with mail.on on: no digest", Nat.show(reads(outs(H.Digest.tick(M.State.apply(f2, M.SettingSet{"mail.on", "on", 1n}), 700n)))), "0")
+    C.Check.str("no uberbot: no digest", Nat.show(reads(outs(H.Digest.tick(M.State.apply(f2, M.SettingSet{"uber.bot", "", 1n}), 700n)))), "0")
     # fyi: filed only
     +fyi : H.Step = routed(s, "t0", "fyi")
     C.Check.str("fyi mail starts no run", Nat.show(runs(outs(fyi))), "0")
