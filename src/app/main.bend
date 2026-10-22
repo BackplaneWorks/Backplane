@@ -11,6 +11,7 @@ import ../server/server.bend as S
 import ../server/host.bend as H
 import ../core/prompt.bend as Q
 import ../core/json.bend as J
+import ../core/cbor.bend as CB
 import ../core/client.bend as U
 import ../gfx/raster.bend as R
 import ./win.bend as W
@@ -186,6 +187,10 @@ def Fwd.got(m: Maybe<&1, S.Wire>, +q: Chan(ShellMsg), +tag: String, k: Unit -> I
     case Some{S.WState{st, h}}:
       do IO<Unit>:
         ok : Result<&1, &1, ShellMsg, Unit> <- Chan.send(ShellMsg, q, FromHubSt{tag, st, h})
+        k(Unit{})
+    case Some{S.WCbor{b, _}}:
+      do IO<Unit>:
+        ok : Result<&1, &1, ShellMsg, Unit> <- Chan.send(ShellMsg, q, FromHub{tag, J.Json.show(Maybe.default(&2, J.Json, CB.Cbor.decode(b), J.Null{}))})
         k(Unit{})
     case Some{S.WJson{j, _}}:
       do IO<Unit>:
