@@ -12782,3 +12782,9 @@ def Laws.auth_beat_asked(): {==}
 
 # --- J2: the models' JSON kept parsed, not parsed at every step ---
 def Laws.models_json_kept(): {==}
+
+# --- J2: a holder is only "<pid> <port>", never a shell's noise ---
+def Laws.onehub_legacy_noise(): {==}
+def Laws.onehub_legacy_after_noise(): {==}
+def Laws.onehub_legacy_line(): {==}
+def Laws.onehub_pair_flock(): {==}
