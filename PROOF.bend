@@ -12021,6 +12021,7 @@ def Laws.mail_credit_native_kept(w, charge):
     case MPCREDIT.WClose{}: {==}
     case MPCREDIT.WState{_, _}: {==}
     case MPCREDIT.WItems{_, _, _, _, _, _}: {==}
+    case MPCREDIT.WJson{_, _}: {==}
 # ---- i18n web phone ----
 def Laws.webphone_option_english(): {==}
 def Laws.webphone_model_name_kept(): {==}
@@ -12615,6 +12616,17 @@ def Laws.oprep_task_not_in_chat(): {==}
 def Laws.oprep_task_delivered_with_filing(): {==}
 def Laws.oprep_other_thread_unchanged(): {==}
 
+def Laws.cbor_trees_exact(): {==}
+def Laws.thin_pace_own_urgent(): {==}
+def Laws.thin_pace_other_soft(): {==}
+def Laws.thin_pace_all_urgent(): {==}
+def Laws.thin_pace_none_quiet(th): {==}
+def Laws.thin_pace_no_thread_soft(): {==}
+def Laws.thin_pace_own_sends(): {==}
+def Laws.thin_pace_soft_owed(): {==}
+def Laws.thin_pace_flush_sends(): {==}
+def Laws.thin_pace_owed_raised(): {==}
+def Laws.thin_pace_quiet(last, now): {==}
 # --- J2: walks the JS hub makes over a whole log, in tail calls ---
 
 def Laws.store_size_go_succ(ls, n):
