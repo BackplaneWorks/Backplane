@@ -1,4 +1,4 @@
-import { ThinViews, compactSession, compactRoute, viewTarget, readPresentation, writePresentation, utf8Bytes, popupDraft, popupReadDraft } from '../web/thin.js';
+import { ThinViews, compactSession, compactRoute, viewTarget, readPresentation, writePresentation, utf8Bytes, popupDraft, popupReadDraft, carriesDraft } from '../web/thin.js';
 import { validateThinResult, MessageParts } from '../web/thin-results.js';
 import { validatePresentation } from '../web/startup.js';
 
@@ -88,7 +88,7 @@ export class NativeThinHost307265 {
       now: api.now,
       // Renderer hints are device-owned and never select another hub or owner.
       send: (hub, request) => ({ type: 'request', hub, request: { ...request,
-        p: { ...request.p, ...(request.p.session ? { session: this.requestSession(request.p.session, request.m, request.p.target) } : {}), nativeRenderer: api.renderer() } } }),
+        p: { ...request.p, ...(request.p.session ? { session: this.requestSession(request.p.session, request.m, request.p.target, carriesDraft(request)) } : {}), nativeRenderer: api.renderer() } } }),
       command: (command, input) => ({ type: 'command', command, input }),
       validateResult: (result, input) => this.validate(result, input),
     }, next);

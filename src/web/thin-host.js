@@ -1,6 +1,6 @@
 import { validatePresentation } from './startup.js';
 import { validateThinResult, MessageParts } from './thin-results.js';
-import { compactRoute, utf8Bytes, popupDraft, popupReadDraft } from './thin.js';
+import { compactRoute, utf8Bytes, popupDraft, popupReadDraft, carriesDraft } from './thin.js';
 
 const clone = value => typeof structuredClone === 'function' ? structuredClone(value) : JSON.parse(JSON.stringify(value));
 const object = value => value && typeof value === 'object' && !Array.isArray(value);
@@ -58,7 +58,7 @@ export class ThinHost {
     this.messages = new MessageParts();this.ordinary = new Map();
     this.client = new Views({ now: api.now,
       send: (_hub, request) => ({ type: 'request', request: request.p.session ? { ...request,
-        p: { ...request.p, session: requestSession(request.p.session, request.m === 'view.action', request.p.target) } } : request }),
+        p: { ...request.p, session: requestSession(request.p.session, request.m === 'view.action', request.p.target, carriesDraft(request)) } } : request }),
       command: (command, input) => ({ type: 'command', command, input }),
       validateResult: api.validateResult || validateThinResult,
     }, next);
