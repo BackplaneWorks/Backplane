@@ -45,6 +45,7 @@ import ../core/cbor.bend as CB
 import ../mobile/session.bend as MSE
 import ./thin-view.bend as TV
 import ./thin-actor.bend as TA
+import ./thin-splice.bend as TSPL
 import ../core/thin-pace.bend as TPACE
 import ./thin-mail.bend as TMAIL
 import ../core/thin.bend as THIN
@@ -156,6 +157,10 @@ type Wire is Data:
   # a message as its JSON tree with its charge (a thin view's reply): the
   # writer encodes the tree, never printing and parsing it again
   WJson{json: J.Json, charge: Nat}
+  # a message already CBOR with its charge (a thin view's spliced reply,
+  # thin-splice.bend): framed by the writer, its charge given back as it
+  # was offered
+  WCbor{cbor: List<&2, U32>, charge: Nat}
 
 type Msg is Data:
   Desktop{client: U32, kind: String, text: String, out: Chan(String), epoch: String, lease: String}
@@ -192,6 +197,10 @@ type Msg is Data:
   Ping{client: U32, payload: List<&2, U32>}
   Leave{client: U32}
   Rpc{client: U32, text: String}
+  # a thin view's request (view.*), passed on to the hub's inbox so it
+  # waits in the bulk lane, not ahead of pings and other requests
+  # (Rpc.lane)
+  RpcLane{client: U32, text: String}
   AgentLine{thread: String, line: String}
   # why is the exit in words (B.Exit.why), made off the hub
   AgentGone{thread: String, code: U32, pid: U32, why: String}
@@ -844,6 +853,7 @@ def Wire.charged(native: Bool, w: Wire, n: Nat) -> Wire:
     case False{} WText{t}: WCharged{t, n}
     case False{} WCharged{t, _}: WCharged{t, n}
     case False{} WJson{j, _}: WJson{j, n}
+    case False{} WCbor{b, _}: WCbor{b, n}
     case _ _: w
 
 def Wire.offer.k(c: Client, w: Wire, +n: Nat) -> IO(Maybe<&2, Client>):
@@ -1386,6 +1396,9 @@ def Conn.write(m: Maybe<&1, Wire>, s: Socket, +out: Chan(Wire), k: Socket -> Nat
       Conn.out.items(s, hd, pl, sp, xs, tl, ends, out, k)
     case Some{WJson{j, charge}}:
       +bs = W.Ws.encode(2, CB.Cbor.encode(j))
+      Conn.out(s, bs, out, s2 => Conn.written(s2, List.length(&2, U32, bs), charge, k))
+    case Some{WCbor{b, charge}}:
+      +bs = W.Ws.encode(2, b)
       Conn.out(s, bs, out, s2 => Conn.written(s2, List.length(&2, U32, bs), charge, k))
     case None{}:
       Socket.close(s)
@@ -11185,6 +11198,25 @@ def Hub.thin.respond(h: Hub, +client: U32, +o: J.Json, +result: J.Json, +c: Clie
       Hub.thin.deliver(Nat.is_le(size, Bool.pick(Nat, String.eq(J.Json.get_str(o, "m", ""), "view.search"), 65536n, 262144n)),
         Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, answer, size, c, context, now)
 
+def Hub.thin.deliver.cbor(+fits: Bool, h: Hub, +client: U32, +o: J.Json, +bytes: List<&2, U32>, +size: Nat, +c: Client, +context: ThinContext, +now: Nat) -> IO(Hub):
+  match fits h:
+    case False{} _: Hub.thin.error(h, client, o, "LIMIT")
+    case True{} Hub{+st, f, ls, cl, as, inbox, cfg, note}:
+      do IO<Hub>:
+        +cl2 : List<&2, Client> <- Wire.to.raw(Clients.swap(cl, client, Some{Client.thin.with(c, context)}), client, WCbor{bytes, size}, size)
+        return Hub{st, f, ls, cl2, as, inbox, Cfg.telemetry.ui_action(st, cfg, o, Maybe.is_some(&2, Client, Clients.get(cl2, client)), now), note}
+
+# a spliced reply (thin-splice.bend): the envelope Hub.thin.respond writes,
+# its pages as the kept bytes; its JSON size added up, not walked
+def Hub.thin.respond.spliced(h: Hub, +client: U32, +o: J.Json, +sp: TSPL.Spliced, +c: Client, +context: ThinContext, +now: Nat) -> IO(Hub):
+  match h sp:
+    case Hub{st, f, ls, cl, as, inbox, +cfg, note} TSPL.Spliced{+res, +holes, +json, +names}:
+      +p = J.Json.get_obj(o, "p")
+      +answer = (J.Json.obj([J.KV{"t", J.Str{"reply"}}, J.KV{"id", Maybe.default(&2, J.Json, J.Json.get(o, "id"), J.Null{})}, J.KV{"ok", J.Flag{True{}}},
+        J.KV{"result", Hub.thin.result(res, p, ThinContext.view(context), Bool.pick(String, String.eq(Client.thin.mode(c), "view-web"), "web", "mobile"), Cfg.thin.revision(cfg))}]))
+      +size = Nat.sub(Nat.add(J.Json.bytes(answer), json), names)
+      Hub.thin.deliver.cbor(Nat.is_le(size, 262144n), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, CB.Cbor.encode.holes(answer, holes), size, c, context, now)
+
 def Hub.thin.cursor.empty(+empty: Bool, +text: String, +epoch: String, +target: J.Json, +query: String) -> Maybe<&2, Nat>:
   match empty:
     case True{}: Some{0n}
@@ -11260,7 +11292,7 @@ def Hub.thin.render.page(+pg: TSTO.Page, +info: J.Json, h: Hub, +client: U32, +o
       +stream = TLIVE.Stream.get(Cfg.thin.streams(cfg), TV.Target.thread(st, J.Json.get_obj(p, "target")))
       +actor = TA.Actor.mail_cache(TA.Actor.refresh(ThinContext.actors(context), web, st, info,
         J.Json.obj([J.KV{"t", J.Str{"live"}}, J.KV{"items", J.Json.arr(Nil{})}]), now, p, ThinContext.view(context)), ThinContext.actors(context), Cfg.thin.mail(cfg))
-      Hub.thin.rendered(TA.Rendered.remember(TA.Actor.render(actor, web, st, TSTO.Page.index(pg), p, Cfg.thin.epoch(cfg), now, TSTO.Page.ids(pg), stream), key, ms, stream),
+      Hub.thin.rendered(TA.Rendered.remember(TA.Actor.render(actor, web, st, TSTO.Page.index(pg), p, Cfg.thin.epoch(cfg), now, TSTO.Page.ids(pg), stream), key, ms, stream, web, TV.Target.thread(st, J.Json.get_obj(p, "target"))),
         Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now, context)
 
 def Hub.thin.render.full(h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, +context: ThinContext, +anchor: Nat, +p: J.Json, +key: String, +ms: Nat) -> IO(Hub):
@@ -11274,10 +11306,10 @@ def Hub.thin.render.full(h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat
 # a view.update whose render memo still holds (thin-actor.bend's
 # Memo.reply: only the live row can have changed) answers with it spliced
 # (thin-splice.bend); anything else renders in full and is remembered
-def Hub.thin.render.memo(+m: Maybe<&2, J.Json>, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, +context: ThinContext, +anchor: Nat, +p: J.Json, +key: String, +ms: Nat) -> IO(Hub):
+def Hub.thin.render.memo(+m: Maybe<&2, TSPL.Spliced>, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, +context: ThinContext, +anchor: Nat, +p: J.Json, +key: String, +ms: Nat) -> IO(Hub):
   match m:
-    case Some{+res}:
-      Hub.thin.respond(h, client, o, res, c, context, now)
+    case Some{+sp}:
+      Hub.thin.respond.spliced(h, client, o, sp, c, context, now)
     case None{}:
       Hub.thin.render.full(h, client, o, c, now, context, anchor, p, key, ms)
 
@@ -11288,7 +11320,7 @@ def Hub.thin.render.at(h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, 
       +web = String.eq(Client.thin.mode(c), "view-web")
       +thread = TV.Target.thread(st, J.Json.get_obj(p, "target"))
       +key = TA.Memo.key(M.State.seq(st), J.Json.show(Hub.info(cfg)), p, anchor, ThinContext.view(context), web, thread)
-      Hub.thin.render.memo(TA.Memo.reply(TA.Actor.memos(ThinContext.actors(context)), String.eq(J.Json.get_str(o, "m", ""), "view.update"), key, ms, web,
+      Hub.thin.render.memo(TA.Memo.reply(TA.Actor.memos(ThinContext.actors(context)), String.eq(J.Json.get_str(o, "m", ""), "view.update"), key, ms, TA.Memo.life(client), web,
         TLIVE.Stream.get(Cfg.thin.streams(cfg), thread), thread, Cfg.thin.epoch(cfg), J.Json.get_obj(p, "target"), TA.Actor.loc(ThinContext.actors(context))),
         Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now, context, anchor, p, key, ms)
 
@@ -14665,6 +14697,8 @@ def Msg.kind(m: Msg) -> String:
       "thin-read"
     case Rpc{_, _}:
       "rpc"
+    case RpcLane{_, _}:
+      "rpc_lane"
     case AgentLine{_, _}:
       "agent_line"
     case AgentGone{_, _, _, _}:
@@ -15891,6 +15925,27 @@ def Hub.thin.flush(h: Hub, +now: Nat) -> IO(Hub):
     case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
       Hub.thin.notify(Hub{st, f, ls, cl, as, inbox, Cfg.thin.with_notes(cfg, TPACE.Notes{TPACE.Notes.touched(Cfg.thin.notes(cfg)), TPACE.Notes.paces(Cfg.thin.notes(cfg)), 0n}), note}, now)
 
+# Thin views' requests take the bulk lane (Bulk.*): a view asks again
+# after each change (view.update), and the renders those take went ahead of
+# pings, /hello and other clients' requests in the one queue (the tail
+# latencies on a busy hub, fast hub R1). Every view.* request of a client
+# takes the lane, so they stay in order among themselves (their control ids
+# must rise). The lane is a FIFO with Bulk.room() places, so agents' lines
+# keep their turn.
+def Rpc.thin(+text: String) -> Bool:
+  String.contains(text, "\"m\":\"view.")
+
+def Rpc.lane(+thin: Bool, h: Hub, +client: U32, +text: String, +now: Nat) -> IO(Hub):
+  match thin h:
+    case True{} Hub{st, f, ls, cl, as, +inbox, cfg, note}:
+      do IO<Hub>:
+        # sent in place, not spawned, so a client's requests keep their order
+        # (the inbox holds 4096; Bulk.fwd drains it whatever the hub does)
+        ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, RpcLane{client, text})
+        return Hub{st, f, ls, cl, as, inbox, cfg, note}
+    case False{} _:
+      Hub.rpc(h, client, text, now)
+
 def Hub.handle(h: Hub, m: Msg, +now: Nat) -> IO(Hub):
   match m:
     case LockProbe{name, holder, n}:
@@ -15943,7 +15998,9 @@ def Hub.handle(h: Hub, m: Msg, +now: Nat) -> IO(Hub):
       Hub.leave(h, client, now)
     case ThinRead{client, gen, view, target, text}:
       Hub.thin.read_job(h, client, gen, view, target, text, now)
-    case Rpc{client, text}:
+    case Rpc{client, +text}:
+      Rpc.lane(Rpc.thin(text), h, client, text, now)
+    case RpcLane{client, text}:
       Hub.rpc(h, client, text, now)
     case AgentLine{tag, line}:
       Hub.tagged(h, tag, line, now)
@@ -16273,36 +16330,119 @@ def Main.opened(r: Result<&1, &1, U32 & String, File>, +st: M.State, ls: SO.Lg, 
 
 # The state a boot starts from (S3 hot boot)
 # ------------------------------------------
-# store.db's records plus the log's tail (src/server/hotboot.bend); with no
-# usable store, or BACKPLANE_HOT_BOOT=0, the whole log replayed as before:
-# the lines straight from the file (no List cell per byte, which was most
-# of the JS hub's memory), then only the lines are kept.
+# store.db's records plus the log's tail (src/server/hotboot.bend). A hub
+# with no usable store.db (none, another codec, another log) never replays
+# the whole log into memory: a child of its own binary (--store-rebuild,
+# S1's stobuild) streams the log into store.db, and the hot boot then
+# loads it. A failed build is tried once more (its files removed first);
+# a second failure stops the hub with the reason. The whole replay
+# (Boot.cold) is only the developer's escape, BACKPLANE_HOT_BOOT=0
+# (Boot.next; law boot_next_never_cold).
 
+# the escape's whole replay: the lines straight from the file, then only
+# the lines kept
 def Boot.cold(+home: String) -> IO(HB.Hot):
   do IO<HB.Hot>:
     +rd : List<&2, String> <- H.EvLog.read_from(Store.path(home), "0")
     +ld : ST.Loaded = ST.Store.load(ST.Store.read.body(rd), ST.Loaded{M.State.empty(), Nil{}})
     return HB.Hot{True{}, "", ST.Loaded.st(ld), ST.Loaded.wire(ld), ST.Store.read.tail(rd)}
 
-def Boot.state.k(ok: Bool, +hot: HB.Hot, +home: String) -> IO(HB.Hot):
-  match ok:
-    case True{}:
+# what a boot does next: use the store it loaded, build store.db (builds
+# left), stop (none left), or the escape's whole replay
+type BootNext is Data:
+  BootUse{}
+  BootBuild{}
+  BootStop{}
+  BootCold{}
+
+def Boot.next(escape: Bool, ok: Bool, left: Nat) -> BootNext:
+  match escape ok left:
+    case True{} _ _:
+      BootCold{}
+    case False{} True{} _:
+      BootUse{}
+    case False{} False{} 0n:
+      BootStop{}
+    case False{} False{} 1n+_:
+      BootBuild{}
+
+def Boot.is_cold(n: BootNext) -> Bool:
+  match n:
+    case BootCold{}:
+      True{}
+    case _:
+      False{}
+
+# how many builds a boot tries
+def Boot.builds() -> Nat:
+  2n
+
+# The child: the hub's own binary with --store-rebuild (EX.Exe.child: the
+# running image even after an update replaced the file), its JS heap kept
+# small (it shares the hub's memory cap) and Bun's stack as the hub's
+def Boot.child.env() -> List<&2, String>:
+  ["BUN_JSC_forceRAMSize=671088640", "BUN_JSC_maxPerThreadStackUsage=536870912"]
+
+# (a build that failed leaves the child's progress, home/store.build: it
+# goes before the next try with the store's files)
+def Boot.build(+home: String) -> IO(P.Ran):
+  +db = home ++ "/store.db"
+  do IO<P.Ran>:
+    rm : Result<&1, &1, U32 & String, U32 & (String & String)> <- Process.run("rm", ["-f", db, db ++ "-wal", db ++ "-shm", home ++ "/store.build"], "", 4096, 30000)
+    exe : String <- H.Sys.exe_path()
+    t0 : U32 <- PS.Perf.us()
+    r : Result<&1, &1, U32 & String, U32 & Socket> <- H.Proc.spawn("env", List.append(&2, String, Boot.child.env(), [EX.Exe.child(exe), "--store-rebuild", home]), "/", 1)
+    +ran : P.Ran <- P.Proc.run.k(r)
+    t1 : U32 <- PS.Perf.span("boot.store_build", t0)
+    return ran
+
+def Boot.ran.last(+out: String) -> String:
+  Maybe.default(&2, String, List.head(&2, String, List.reverse(&2, String, String.split(String.trim(out), '\n'))), "")
+
+def Boot.ran.say(r: P.Ran) -> String:
+  match r:
+    case P.Ran{0, +out}:
+      "store.db built: " ++ Boot.ran.last(out)
+    case P.Ran{code, +out}:
+      "store.db build failed (exit " ++ U32.show(code) ++ "): " ++ Boot.ran.last(out)
+
+def Boot.act(n: BootNext, +hot: HB.Hot, +home: String, again: Unit -> IO(HB.Hot)) -> IO(HB.Hot):
+  match n:
+    case BootUse{}:
       do IO<HB.Hot>:
         Log.info("hot boot from " ++ HB.Hot.path(home))
         return hot
-    case False{}:
+    case BootBuild{}:
+      do IO<HB.Hot>:
+        Log.info("store.db not used (" ++ HB.Hot.why(hot) ++ "): building it from the log")
+        ran : P.Ran <- Boot.build(home)
+        Log.info(Boot.ran.say(ran))
+        again(Unit{})
+    case BootStop{}:
+      IO.die(HB.Hot, 1, "backplane: store.db could not be built from the event log (" ++ HB.Hot.why(hot) ++ "); not starting. Its log: " ++ home ++ "/events.jsonl")
+    case BootCold{}:
       do IO<HB.Hot>:
         Log.info("full replay: " ++ HB.Hot.why(hot))
         Boot.cold(home)
 
+def Boot.got(+hot: HB.Hot, +home: String, +left: Nat, again: Unit -> IO(HB.Hot)) -> IO(HB.Hot):
+  Boot.act(Boot.next(False{}, HB.Hot.ok(hot), left), hot, home, again)
+
+# load the store; if it is not usable, build it and load again (left
+# builds at most)
+def Boot.loop(left: Nat, +home: String) -> IO(HB.Hot):
+  match left:
+    case 0n:
+      IO.bind(HB.Hot, HB.Hot, HB.Hot.load(home), hot => Boot.got(hot, home, 0n, u => IO.pure(HB.Hot, HB.Hot.no("no build left"))))
+    case 1n+f:
+      IO.bind(HB.Hot, HB.Hot, HB.Hot.load(home), hot => Boot.got(hot, home, 1n+f, u => Boot.loop(f, home)))
+
 def Boot.state.on(on: Bool, +home: String) -> IO(HB.Hot):
   match on:
     case True{}:
-      do IO<HB.Hot>:
-        +hot : HB.Hot <- HB.Hot.load(home)
-        Boot.state.k(HB.Hot.ok(hot), hot, home)
+      Boot.loop(Boot.builds(), home)
     case False{}:
-      Boot.state.k(False{}, HB.Hot.no("BACKPLANE_HOT_BOOT=0"), home)
+      Boot.act(Boot.next(True{}, False{}, 0n), HB.Hot.no("BACKPLANE_HOT_BOOT=0"), home, u => IO.pure(HB.Hot, HB.Hot.no("escape")))
 
 def Boot.state(+home: String) -> IO(HB.Hot):
   do IO<HB.Hot>:
