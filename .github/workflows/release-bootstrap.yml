@@ -171,7 +171,8 @@ jobs:
             [ -n "$WINRT_URL" ] && [ -n "$WINRT_SHA" ] || { echo "windows-x64 needs windows_runtime_url and windows_runtime_sha256"; exit 1; }
             curl -fsSL "$WINRT_URL" -o "$RUNNER_TEMP/winrt.tar.gz"
             echo "$WINRT_SHA  $RUNNER_TEMP/winrt.tar.gz" | sha256sum -c -
-            mkdir -p "$RUNNER_TEMP/winrt" && tar -xzf "$RUNNER_TEMP/winrt.tar.gz" -C "$RUNNER_TEMP/winrt"
+            # (Git Bash tar takes "D:..." for a remote host: work relative to the folder)
+            mkdir -p "$RUNNER_TEMP/winrt" && (cd "$RUNNER_TEMP" && tar -xzf winrt.tar.gz -C winrt)
             set -- --windows-runtime "$RUNNER_TEMP/winrt"
           fi
           "$py" build/bootstrap-tools/scripts/service-runtime.py "$@" --source-root "$GITHUB_WORKSPACE" --build "$GITHUB_WORKSPACE/build/bootstrap-js" --producer "$GITHUB_WORKSPACE/build/bootstrap-tools/scripts/service-release.py" --producer-sha256 e8b52fb537d587c2946c9e893e193a7e967fe9ebe0088390dd7b8eec15656058 --out "$GITHUB_WORKSPACE/build/bootstrap-service"

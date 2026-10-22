@@ -6,6 +6,7 @@ import ../core/store.bend as ST
 import ../core/storedb.bend as SDB
 import ../core/snapshot.bend as SN
 import ./host.bend as H
+import ../core/thin.bend as THIN
 
 # The hot boot (S3; bp-coord/store/S1-SCHEMA.md)
 # ----------------------------------------------
@@ -302,8 +303,67 @@ def Hot.loaded(ld: ST.Loaded, torn: String) -> Hot:
     case ST.Loaded{st, ls}:
       Hot{True{}, "", st, ls, torn}
 
+# the open threads the tail made: open in the state after the tail but
+# given no window at load (settled when the store was written), as JSON
+def Hot.missed.k(yes: Bool, +id: String, acc: List<&2, J.Json>) -> List<&2, J.Json>:
+  match yes:
+    case True{}:
+      J.Str{id} <> acc
+    case False{}:
+      acc
+
+def Hot.has(p: Map<&2, Bool> & Bool) -> Bool:
+  (_, b) = p
+  b
+
+def Hot.missed(ts: List<&2, M.Thread>, +had: Map<&2, Bool>, acc: List<&2, J.Json>) -> List<&2, J.Json>:
+  match ts:
+    case Nil{}:
+      acc
+    case +t <> rest:
+      Hot.missed(rest, had, Hot.missed.k(Bool.and(Hot.open(t), Bool.not(Hot.has(Map.has(&2, Bool, had, M.Thread.id(t))))), M.Thread.id(t), acc))
+
+def Hot.str(x: J.Json) -> String:
+  match x:
+    case J.Str{s}:
+      s
+    case _:
+      ""
+
+def Hot.had(xs: List<&2, J.Json>, m: Map<&2, Bool>) -> Map<&2, Bool>:
+  match xs:
+    case Nil{}:
+      m
+    case x <> t:
+      Hot.had(t, Map.set(&2, Bool, m, Hot.str(x), True{}))
+
+def Hot.ld.st(ld: ST.Loaded) -> M.State:
+  match ld:
+    case ST.Loaded{st, _}:
+      st
+
+def Hot.fold(+rows: SN.SRows, +body: List<&2, String>, +ls: List<&2, String>, +reps: List<&2, List<&2, String>>, +seq: Nat) -> ST.Loaded:
+  +s0 = SN.Snap.state(rows)
+  SN.Snap.tail(body, s0, SN.Snap.counts(rows), ST.Loaded{s0, Wire.of(ls, reps, seq)})
+
+# A thread the tail opened (settled when the store was written, so given
+# no window) has only its tail entries in the folded state: load its
+# window as well and fold the tail again (only then; a store kept current
+# has an empty tail). Open in the final state is what the window serves.
+def Hot.again(none: Bool, +h: String, +ids: List<&2, J.Json>, +more: List<&2, J.Json>, +recs: Map<&2, List<&2, List<&2, String>>>, +ld: ST.Loaded, +body: List<&2, String>, +torn: String, +ls: List<&2, String>, +reps: List<&2, List<&2, String>>, +seq: Nat) -> IO(Hot):
+  match none:
+    case True{}:
+      do IO<Hot>:
+        cl : String <- D.Db.close(h)
+        return Hot.loaded(ld, torn)
+    case False{}:
+      do IO<Hot>:
+        +rows : SN.SRows <- Hot.read.open(h, J.Json.show(J.Json.arr(List.append(&2, J.Json, ids, more))), recs)
+        cl : String <- D.Db.close(h)
+        return Hot.loaded(Hot.fold(rows, body, ls, reps, seq), torn)
+
 # the lines add up: fold the tail onto the records
-def Hot.lined(same: Bool, +h: String, +home: String, +rows: SN.SRows, ls: List<&2, String>, +seq: Nat, +off: U32, +size: U32) -> IO(Hot):
+def Hot.lined(same: Bool, +h: String, +home: String, +ids: List<&2, J.Json>, +recs: Map<&2, List<&2, List<&2, String>>>, +rows: SN.SRows, +ls: List<&2, String>, +seq: Nat, +off: U32, +size: U32) -> IO(Hot):
   match same:
     case False{}:
       do IO<Hot>:
@@ -311,22 +371,22 @@ def Hot.lined(same: Bool, +h: String, +home: String, +rows: SN.SRows, ls: List<&
         return Hot.no("the log's lines before applied_off are not the store's " ++ Nat.show(seq))
     case True{}:
       do IO<Hot>:
-        reps : List<&2, List<&2, String>> <- D.Db.query(h, "SELECT seq, wire FROM line WHERE wire <> '' ORDER BY seq DESC", [], Hot.big())
-        cl : String <- D.Db.close(h)
-        +s0 : M.State = SN.Snap.state(rows)
+        +reps : List<&2, List<&2, String>> <- D.Db.query(h, "SELECT seq, wire FROM line WHERE wire <> '' ORDER BY seq DESC", [], Hot.big())
         +rd : List<&2, String> <- H.EvLog.read_from(Hot.log(home), U32.show(off))
-        return Hot.loaded(SN.Snap.tail(ST.Store.read.body(rd), s0, SN.Snap.counts(rows), ST.Loaded{s0, Wire.of(ls, reps, seq)}), ST.Store.read.tail(rd))
+        +ld : ST.Loaded = Hot.fold(rows, ST.Store.read.body(rd), ls, reps, seq)
+        +more : List<&2, J.Json> = Hot.missed(THIN.State.threads(Hot.ld.st(ld)), Hot.had(ids, Map.new(&2, Bool)), Nil{})
+        Hot.again(List.is_empty(&2, J.Json, more), h, ids, more, recs, ld, ST.Store.read.body(rd), ST.Store.read.tail(rd), ls, reps, seq)
 
 def Hot.read(+h: String, +home: String, +m: Map<&2, String>, +size: U32) -> IO(Hot):
   do IO<Hot>:
     +recs : Map<&2, List<&2, List<&2, String>>> <- Hot.read.recs(h)
-    +ids : String = Hot.ids(SN.SRows{recs})
-    +rows : SN.SRows <- Hot.read.open(h, ids, recs)
+    +ids : List<&2, J.Json> = Hot.ids.rows(SN.SRows.of(SN.SRows{recs}, "thread"), Nil{})
+    +rows : SN.SRows <- Hot.read.open(h, J.Json.show(J.Json.arr(ids)), recs)
     +seq : Nat = SN.Snap.num(Hot.get(m, "applied_seq"), 0n)
     +off : U32 = U32.from_nat(SN.Snap.num(Hot.get(m, "applied_off"), 0n))
     gaps : List<&2, List<&2, String>> <- D.Db.query.t(h, Hot.q.gaps(), [D.DbInt{U32.show(off)}], Hot.big())
     +ls : List<&2, String> <- Hot.lines(Hot.log(home), 0, off, Hot.gaps(gaps))
-    Hot.lined(Nat.is_eq(List.length(&2, String, ls), seq), h, home, rows, ls, seq, off, size)
+    Hot.lined(Nat.is_eq(List.length(&2, String, ls), seq), h, home, ids, recs, rows, ls, seq, off, size)
 
 # why the store and the log do not go together ("": they do): its meta,
 # the log's identity (SDB.Sdb.log_id: a store made from another log), and

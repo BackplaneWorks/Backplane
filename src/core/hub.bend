@@ -5481,12 +5481,35 @@ def Locks.after.one(+before: M.State, +s: M.State, +now: Nat, +name: String) -> 
   Step.cat(Step.cat(Step{cs, Bool.pick(List<&2, Out>, changed, [LockGuard{name, LK.Lock.owner(old), LK.Lock.owner(l)}], Nil{})}, Locks.wait.go(LK.Lock.waiters(l), s1, now, name, 1n, Step.none())),
     Locks.grant(Bool.and(LK.Lock.ready(l), Bool.and(Bool.not(changed), Bool.not(LK.Lock.ready(old)))), LK.Lock.holder(l), s1, now, name))
 
+# a step's changes hold a LockChanged of this lock (the only change that
+# writes a lock's setting, M.Locks.fold)
+def Locks.touched(cs: List<&2, M.Change>, +name: String, hit: Bool) -> Bool:
+  match cs hit:
+    case _ True{}:
+      True{}
+    case Nil{} False{}:
+      False{}
+    case M.LockChanged{n, _, _} <> t False{}:
+      Locks.touched(t, name, String.eq(n, name))
+    case _ <> t False{}:
+      Locks.touched(t, name, False{})
+
+# a lock idle before the step and not changed by it can neither expire,
+# promote nor grant: Locks.after.one answers Step.none() for it (law
+# locks_after_idle_none), so it is not read
+def Locks.after.skip(+idle: Bool, +before: M.State, +now: Nat, +name: String, +st: Step) -> Step:
+  match idle:
+    case True{}:
+      st
+    case False{}:
+      Step.cat(st, Locks.after.one(before, M.State.replay(Queue.changes(st), before), now, name))
+
 def Locks.after.go(names: List<&2, String>, +before: M.State, +now: Nat, +st: Step) -> Step:
   match names:
     case Nil{}:
       st
-    case name <> t:
-      Locks.after.go(t, before, now, Step.cat(st, Locks.after.one(before, M.State.replay(Queue.changes(st), before), now, name)))
+    case +name <> t:
+      Locks.after.go(t, before, now, Locks.after.skip(Bool.and(M.Locks.idle(before, name), Bool.not(Locks.touched(Queue.changes(st), name, False{}))), before, now, name, st))
 
 def Locks.after(+s: M.State, +now: Nat, +st: Step) -> Step:
   Locks.after.go(M.Locks.names(M.State.replay(Queue.changes(st), s)), s, now, st)

@@ -15135,10 +15135,35 @@ def Hub.auth.beat.k(wait: Bool, h: Hub, +now: Nat) -> IO(Hub):
     case False{} _:
       Hub.beat(h, now)
 
+# Whether any thread waits for its provider's sign-in (B.Auth.any: a
+# setting looked up for every thread) is asked at every beat, but only a
+# commit can change it: the answer is kept in Bn with the state's sequence
+# and asked again only when the log moved (law auth_beat_kept). On the JS
+# hub the walk was most of an idle hub's CPU.
+def Auth.kept.key(+st: M.State) -> String:
+  Nat.show(1n+M.State.seq(st)) ++ " "
+
+def Auth.kept.k(hit: Bool, +kept: String, +st: M.State) -> Bool:
+  match hit:
+    case True{}:
+      String.ends_with(kept, " 1")
+    case False{}:
+      B.Auth.any(B.Rec.threads(st), st)
+
+# the answer for st: the one kept for its sequence, else asked
+def Auth.kept(+kept: String, +st: M.State) -> Bool:
+  Auth.kept.k(String.starts_with(kept, Auth.kept.key(st)), kept, st)
+
+def Hub.auth.beat.any(+any: Bool, h: Hub, +now: Nat) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
+      Hub.auth.beat.k(Bool.and(any, Bool.not(J.Json.get_bool(K.Rt.health(Cfg.rt(cfg)), "auth.probe", False{}))),
+        Hub{st, f, ls, cl, as, inbox, Cfg.with_bn(cfg, BN.Bn.with_auth(Cfg.bn(cfg), Auth.kept.key(st) ++ Bool.pick(String, any, "1", "0"))), note}, now)
+
 def Hub.auth.beat(h: Hub, now: Nat) -> IO(Hub):
   match h:
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
-      Hub.auth.beat.k(Bool.and(B.Auth.any(B.Rec.threads(st), st), Bool.not(J.Json.get_bool(K.Rt.health(Cfg.rt(cfg)), "auth.probe", False{}))), Hub{st, f, ls, cl, as, inbox, cfg, note}, now)
+      Hub.auth.beat.any(Auth.kept(BN.Bn.auth(Cfg.bn(cfg)), st), Hub{st, f, ls, cl, as, inbox, cfg, note}, now)
 
 def Hub.auth.ready.clear(h: Hub, st: M.State, open: Bool, now: Nat) -> IO(Hub):
   match h:

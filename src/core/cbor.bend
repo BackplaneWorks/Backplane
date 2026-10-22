@@ -200,9 +200,39 @@ def Enc.utf8(s: String, acc: List<&2, U32>) -> List<&2, U32>:
     case SCon{Chr{c}, t}:
       Enc.utf8(t, Enc.put(c, acc))
 
-# a text string item
+# a string's UTF-8 bytes, newest first, and how many: one walk of the
+# string (on the JS target each step of a walk slices the string, so
+# measuring it and then writing it cost twice that)
+type U8 is Data:
+  U8{n: U32, rev: List<&2, U32>}
+
+def Enc.u8.put(+c: U32, +n: U32, rev: List<&2, U32>) -> U8:
+  U8{(n + Enc.cw(c) : U32), Enc.put(c, rev)}
+
+def Enc.u8(s: String, u: U8) -> U8:
+  match s u:
+    case SNil{} _:
+      u
+    case SCon{Chr{c}, t} U8{n, rev}:
+      Enc.u8(t, Enc.u8.put(c, n, rev))
+
+# xs pushed onto acc in order (each a tail call)
+def Enc.onto(xs: List<&2, U32>, acc: List<&2, U32>) -> List<&2, U32>:
+  match xs:
+    case Nil{}:
+      acc
+    case x <> t:
+      Enc.onto(t, x <> acc)
+
+def Enc.text.k(u: U8, acc: List<&2, U32>) -> List<&2, U32>:
+  match u:
+    case U8{n, rev}:
+      Enc.onto(List.reverse(&2, U32, rev), Enc.head(96, n, acc))
+
+# a text string item: the same bytes as Enc.utf8 over Enc.head of Enc.blen
+# (test/cbor_test.bend), from one walk of the string
 def Enc.text(+s: String, acc: List<&2, U32>) -> List<&2, U32>:
-  Enc.utf8(s, Enc.head(96, Enc.blen(s, 0), acc))
+  Enc.text.k(Enc.u8(s, U8{0, Nil{}}), acc)
 
 # Numbers: which ones travel as integers
 type Sc is Data:

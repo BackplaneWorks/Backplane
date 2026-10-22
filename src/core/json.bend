@@ -271,10 +271,21 @@ def Json.show(j: Json) -> String:
 # checked without printing it (the hub's thin replies go to their writer as
 # the tree, core/cbor.bend encodes it). Each case counts what Json.emit.rev
 # writes; test/json_bytes_test.bend holds it to the printed text.
-def Json.bytes.chr(+c: U32) -> Nat:
+def Json.bytes.chr.slow(+c: U32) -> Nat:
   Bool.pick(Nat, U32.is_lt(c, 32), Bool.pick(Nat, Bool.or(U32.is_eq(c, 10), Bool.or(U32.is_eq(c, 13), U32.is_eq(c, 9))), 2n, 6n),
     Bool.pick(Nat, Bool.or(U32.is_eq(c, 34), U32.is_eq(c, 92)), 2n,
       Bool.pick(Nat, U32.is_lt(c, 128), 1n, Bool.pick(Nat, U32.is_lt(c, 2048), 2n, Bool.pick(Nat, U32.is_lt(c, 65536), 3n, 4n)))))
+
+def Json.bytes.chr.k(plain: Bool, +c: U32) -> Nat:
+  match plain:
+    case True{}:
+      1n
+    case False{}:
+      Json.bytes.chr.slow(c)
+
+# printable ASCII but '"' and '\\' is one byte: tested first, alone
+def Json.bytes.chr(+c: U32) -> Nat:
+  Json.bytes.chr.k(Bool.and(U32.is_ge(c, 32), Bool.and(U32.is_lt(c, 128), Bool.and(U32.is_ne(c, 34), U32.is_ne(c, 92)))), c)
 
 def Json.bytes.raw(+c: U32) -> Nat:
   Bool.pick(Nat, U32.is_lt(c, 128), 1n, Bool.pick(Nat, U32.is_lt(c, 2048), 2n, Bool.pick(Nat, U32.is_lt(c, 65536), 3n, 4n)))

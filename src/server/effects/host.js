@@ -331,8 +331,9 @@ function sock_shutdown(socket) {
 // (resources\backplane-service\runtime\bin). It goes first on the hub's PATH
 // at load, however the hub was started (the app, a shortcut, a shell), so
 // Proc.run's sh/env, the default SHELL (/bin/bash, bp_win_cmd) and every
-// child's environment find it. Nothing changes when it is not there.
-(() => {
+// child's environment find it. Nothing changes when it is not there. Again
+// after every Env.put of PATH (clipath's merge), so it stays first.
+function host_win_runtime() {
   if (process.platform !== "win32") {
     return;
   }
@@ -351,12 +352,15 @@ function sock_shutdown(socket) {
     }
     const key = Object.keys(process.env).find((k) => k.toUpperCase() === "PATH") ?? "PATH";
     const was = process.env[key] ?? "";
-    if (!was.toLowerCase().split(";").includes(bin.toLowerCase())) {
-      process.env[key] = was === "" ? bin : bin + ";" + was;
+    const rest = was.split(";").filter((d) => d !== "" && d.toLowerCase() !== bin.toLowerCase());
+    process.env[key] = [bin, ...rest].join(";");
+    if (process.env.BACKPLANE_DEBUG_CONPTY === "1") {
+      require("fs").writeSync(2, "spawn: PATH (" + key + ") = " + process.env[key] + "\n");
     }
   } catch (_) {
   }
-})();
+}
+host_win_runtime();
 
 // Proc
 // ====
@@ -605,6 +609,13 @@ function bp_proc_class() {
 // ("/bin/bash", the hub's default SHELL; "/bin/sh") is the program of that
 // name on PATH outside the system's folders: the Windows package ships its
 // runtime's bin (bash.exe, sh.exe) there. Anything else is left as it is.
+// PATH by any case of its name: Windows keeps it as "Path", and the
+// environment object need not match names case-insensitively
+function host_path() {
+  const key = Object.keys(process.env).find((k) => k.toUpperCase() === "PATH");
+  return key === undefined ? "" : String(process.env[key] ?? "");
+}
+
 function bp_win_cmd(cmd) {
   if (process.platform !== "win32" || !cmd.startsWith("/") || require("fs").existsSync(cmd)) {
     return cmd;
@@ -618,7 +629,7 @@ function bp_win_cmd(cmd) {
   // distribution; the package's runtime bin has the real one
   const sys = String(process.env.SystemRoot || process.env.windir || "C:\\Windows").toLowerCase();
   const fs = require("fs");
-  for (const dir of String(process.env.PATH ?? "").split(";")) {
+  for (const dir of host_path().split(";")) {
     if (dir === "" || dir.toLowerCase().startsWith(sys) || /\\windowsapps\\?$/i.test(dir)) {
       continue;
     }
@@ -661,7 +672,10 @@ function bp_proc_spawn(cmd, args, cwd, err) {
   // Proc.spawn fails at once with ENOENT as posix_spawnp does
   const named = /[\\/]/.test(argv[0]);
   const found = named ? (fs.existsSync(argv[0]) ? argv[0] : null)
-    : Bun.which(argv[0], { PATH: env.PATH ?? env.Path ?? "", cwd: cwd === "" ? undefined : cwd });
+    : Bun.which(argv[0], { PATH: host_path(), cwd: cwd === "" ? undefined : cwd });
+  if (process.env.BACKPLANE_DEBUG_CONPTY === "1") {
+    require("fs").writeSync(2, "spawn: " + JSON.stringify(argv[0]) + " -> " + JSON.stringify(found) + " (PATH " + host_path() + ")\n");
+  }
   if (found === null) {
     return io_fail(globalThis.BP_H.ERRNO.ENOENT);
   }
@@ -1295,7 +1309,14 @@ function net_listen(host, port) {
 function env_put(name, value) {
   if (typeof process !== "undefined" && process.env && name.length > 0
     && !name.includes("\0") && !value.includes("\0")) {
-    process.env[name] = value;
+    // Windows: the name as the environment already has it (PATH is "Path"
+    // there), never a second entry beside it; PATH keeps the runtime first
+    const key = process.platform === "win32"
+      ? Object.keys(process.env).find((k) => k.toUpperCase() === name.toUpperCase()) ?? name : name;
+    process.env[key] = value;
+    if (process.platform === "win32" && name.toUpperCase() === "PATH") {
+      host_win_runtime();
+    }
     // Windows has no libc copy to keep (Bun's own environment is the one)
     if (process.platform !== "win32") try {
       host_libc().setenv(host_libc().ptr(host_cstr(name)), host_libc().ptr(host_cstr(value)), 1);
