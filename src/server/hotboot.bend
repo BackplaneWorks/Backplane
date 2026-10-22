@@ -20,8 +20,9 @@ import ./host.bend as H
 # replays the log as before.
 
 # lines of the file between two byte offsets, newest first, empty ones
-# left out (effects/hotboot.js)
-def Hot.lines(path: String, from: U32, to: U32) -> IO(List<&2, String>):
+# and those starting in a skipped range left out (skips: [a1, b1, ...],
+# decimal, a <= start < b; effects/hotboot.js)
+def Hot.lines(path: String, from: U32, to: U32, skips: List<&2, String>) -> IO(List<&2, String>):
   import "./effects/hotboot.js"
 
 # what a boot starts from: the read model, the lines clients may see
@@ -200,6 +201,21 @@ def Hot.read.open(+h: String, +ids: String, m: Map<&2, List<&2, List<&2, String>
 
 # Lines
 # -----
+# The byte ranges before applied_off the store numbered no line in (a torn
+# fragment that never parsed, empty lines): the gaps between its line rows
+# and after the last one. The lines left are the store's, in its order.
+
+def Hot.q.gaps() -> String:
+  "SELECT pe, off FROM (SELECT off, lag(off + len + 1, 1, 0) OVER (ORDER BY seq) AS pe FROM line) WHERE off > pe"
+    ++ " UNION ALL SELECT coalesce(max(off + len + 1), 0), ?1 FROM line HAVING coalesce(max(off + len + 1), 0) < ?1"
+
+def Hot.gaps(rows: List<&2, List<&2, String>>) -> List<&2, String>:
+  match rows:
+    case Nil{}:
+      Nil{}
+    case +r <> t:
+      SN.Snap.col(r, 0n) <> SN.Snap.col(r, 1n) <> Hot.gaps(t)
+
 # Hub `ls` for now (S1's lines-by-offset replaces it): the lines before
 # applied_off read outside Bend, each a line clients saw. The store's line
 # table numbers only lines that parse; when the non-empty lines are not
@@ -308,7 +324,8 @@ def Hot.read(+h: String, +home: String, +m: Map<&2, String>, +size: U32) -> IO(H
     +rows : SN.SRows <- Hot.read.open(h, ids, recs)
     +seq : Nat = SN.Snap.num(Hot.get(m, "applied_seq"), 0n)
     +off : U32 = U32.from_nat(SN.Snap.num(Hot.get(m, "applied_off"), 0n))
-    +ls : List<&2, String> <- Hot.lines(Hot.log(home), 0, off)
+    gaps : List<&2, List<&2, String>> <- D.Db.query.t(h, Hot.q.gaps(), [D.DbInt{U32.show(off)}], Hot.big())
+    +ls : List<&2, String> <- Hot.lines(Hot.log(home), 0, off, Hot.gaps(gaps))
     Hot.lined(Nat.is_eq(List.length(&2, String, ls), seq), h, home, rows, ls, seq, off, size)
 
 # why the store and the log do not go together ("": they do): its meta,
