@@ -1,5 +1,7 @@
 // Native connection policy. The shared bridge owns view RPCs and compact choices.
-// Compatibility is a deliberate choice for this running app session only.
+// A hub without views is compatibilityRequired: it needs an update. The
+// whole-log compatibility sync is retired: compatibilityChosen is never set
+// (the app loads the recent window and pages back, never all history).
 enum StartupPolicy: Equatable {
     case discovering
     case thin

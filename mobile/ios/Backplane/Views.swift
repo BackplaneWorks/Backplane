@@ -912,7 +912,16 @@ struct ThreadScreen: View {
                         .presentationCompactAdaptation(.popover)
                     }
                 }
-                if let status = model.conn[model.screen?.hub ?? ""], status.phase == .syncing || status.phase == .connecting {
+                // the link is down, or coming back after it was up (a reconnect,
+                // not the first connect): say so, not "loading"
+                if let status = model.conn[model.screen?.hub ?? ""], status.phase == .offline || (status.phase == .connecting && status.epoch > 1) {
+                    HStack(spacing: 4) {
+                        HubDot(phase: .offline)
+                        Text(HubDot.word(.offline, lang)).lineLimit(1)
+                    }
+                    .font(.caption2).foregroundStyle(.secondary)
+                    .accessibilityIdentifier("thread.reconnecting")
+                } else if let status = model.conn[model.screen?.hub ?? ""], status.phase == .syncing || status.phase == .connecting {
                     HStack(spacing: 4) {
                         ProgressView().controlSize(.mini)
                         Text(status.stage == "recent" || status.phase == .connecting ? NativeMessages.native_thread_loading_recent(lang) : NativeMessages.native_thread_loading_older(lang))

@@ -77,6 +77,13 @@ export class NativeThinHost307265 {
     this.api = api;
     this.states = new Map(); this.paired = new Set(); this.current = '';
     this.pending = new Map(); this.ordinary = new Map(); this.commands = []; this.sync = [];
+    // The outbox: a message sent is kept until its hub answers. A drop
+    // before the answer (or a send while the socket is down, which the app
+    // cannot deliver) leaves it here; each view connection that presents
+    // sends it again. The hub stores a client-named message once (Hub.dup),
+    // so a resend never posts twice; a refusal puts the text back in its
+    // draft. Kept for a day; keyed by the message's own id.
+    this.outbox = new Map();
     this.client = new ThinViews({
       now: api.now,
       // Renderer hints are device-owned and never select another hub or owner.
@@ -115,14 +122,48 @@ export class NativeThinHost307265 {
     for (const key of this.states.keys()) this.client.disconnect(key);
     this.states.clear(); this.paired.clear(); this.current = '';
     this.pending.clear(); this.ordinary.clear(); this.commands = []; this.sync = [];
+    this.outbox.clear();
   }
+
+  outboxKeep(hub, rpc) {
+    const msg = rpc?.p?.msg;
+    if (rpc?.m !== 'turn.start' || typeof msg !== 'string' || !msg || this.outbox.size >= 64) return;
+    this.outbox.set(msg, { hub, rpc: copy(rpc), at: this.api.now() });
+  }
+
+  // a hub's answer to a message in the outbox; true when it was one
+  outboxReply(hub, envelope) {
+    for (const [msg, o] of this.outbox) if (o.hub === hub && o.rpc.id === envelope.id) {
+      this.outbox.delete(msg);
+      if (envelope.ok === false) {
+        const thread = String(o.rpc.p.thread || ''), s = this.states.get(hub);
+        if (thread && s && !s.session.drafts[thread]) {
+          this.commands.push({ type: 'keep', thread: hub + '|' + thread, text: String(o.rpc.p.text || '') });
+          s.session.drafts = { ...s.session.drafts, [thread]: String(o.rpc.p.text || '') };
+        }
+      }
+      return true;
+    }
+    return false;
+  }
+
+  // a presented view connection: what waits in the outbox goes again
+  outboxFlush(hub) {
+    const now = this.api.now();
+    for (const [msg, o] of this.outbox) {
+      if (o.hub !== hub) continue;
+      if (now - o.at > 86400000) { this.outbox.delete(msg); continue; }
+      this.commands.push(this.api.command(hub, { type: 'send', text: JSON.stringify(o.rpc) }, {}, false));
+    }
+  }
+
 
   connection(hub, epoch, mode) {
     if (!this.paired.has(hub)) return;
     this.disconnect(hub);
     const s = this.state(hub);
     s.mode = mode === 'view-v1' ? 'view-v1' : mode === undefined ? 'compatibility' : 'blocked';
-    s.epoch = String(epoch); s.greeted = false; s.ready = false;
+    s.epoch = String(epoch); s.greeted = false; s.ready = false; s.flushed = false;
   }
 
   thin(hub) { return this.states.get(hub)?.mode === 'view-v1'; }
@@ -372,6 +413,7 @@ export class NativeThinHost307265 {
       if (c.type === 'send') {
         const rpc = JSON.parse(c.text);
         this.ordinary.set(ordinaryKey(hub, rpc.id), { hub, epoch: s.epoch, revision: metadata.revision, thread: item.input.session?.sel || '', session: copy(response) });
+        this.outboxKeep(hub, rpc);
       }
       commands.push(this.api.command(hub, c, item.input, result.current));
       if (c.type === 'keep') {
@@ -389,6 +431,7 @@ export class NativeThinHost307265 {
         if (old?.partial?.version !== entry.partial?.version) s.messages.reset(entry.id);
       }
       s.shown = view.shown; s.overlay = view.overlay;
+      if (!s.flushed) { s.flushed = true; this.outboxFlush(hub); }
       this.sync.push({ hub, phase: 'presented', detail: 'view-v1', mode: 'view-v1', viewId: r.viewId,
         requestRevision: r.requestRevision, viewRevision: r.viewRevision, remoteReady: true });
       for (const args of s.registrations.values()) this.sendRegistration(s, args);
@@ -399,6 +442,7 @@ export class NativeThinHost307265 {
   }
 
   ack(hub, envelope) {
+    this.outboxReply(hub, envelope);
     const key = ordinaryKey(hub, envelope.id), original = this.ordinary.get(key), s = this.states.get(hub);
     if (!original || original.hub !== hub || original.epoch !== s?.epoch) return true;
     this.ordinary.delete(key);
