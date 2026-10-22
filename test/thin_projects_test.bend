@@ -29,6 +29,9 @@ def st() -> M.State:
 def win() -> M.State:
   V.State.window(st(), T.Index.of(M.State.replay(open(), M.State.empty())), J.Json.obj([J.KV{"kind", J.Str{"thread"}}, J.KV{"id", J.Str{"t1"}}]), Nil{})
 
+def win.opened(+opened: List<&2, String>) -> M.State:
+  V.State.window.opened(st(), T.Index.of(M.State.replay(open(), M.State.empty())), J.Json.obj([J.KV{"kind", J.Str{"thread"}}, J.KV{"id", J.Str{"t1"}}]), Nil{}, opened)
+
 def projects(+s: M.State) -> String:
   match s:
     case M.State{ps, _, _, _, _, _, _, _, _, _, _}: String.join(Map.keys(&2, M.Project, ps), ",")
@@ -47,3 +50,5 @@ def main() -> IO(Unit):
     C.Check.str("the open thread is there", has(threads(win()), "t1"), "True")
     C.Check.str("a project's five most recent threads", Bool.show(Bool.and(String.contains(threads(win()), "q6"), String.contains(threads(win()), "q2"))), "True")
     C.Check.str("and no more", has(threads(win()), "q1"), "False")
+    C.Check.str("a project whose settled threads are opened has them all", has(threads(win.opened(["p3"])), "q1"), "True")
+    C.Check.str("opening one project brings no other's", has(threads(win.opened(["p2"])), "q1"), "False")
