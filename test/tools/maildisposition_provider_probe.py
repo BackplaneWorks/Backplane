@@ -102,7 +102,7 @@ def main() -> int:
                 'Request it once, accept refusal, and never work around it. Execute MCP calls sequentially and report exact failures honestly.')
             prompt = f'''Use only this isolated backplane MCP fixture; no shell, files or other tools.
 Call these operations SEQUENTIALLY, waiting for each result:
-1. mail_dispose input={FIRST!r}, mode="done", reason="Already-known synthetic CEF hold; root handled the notice, no new action or permission".
+1. mail_dispose input={FIRST!r}, mode="done", reason="Already-known synthetic resource hold; root handled the notice, no new action or permission".
 2. Repeat that same exact done call once. It must be idempotent, with no second receipt. The fixture now introduces fixture-m2.
 3. Call mail_dispose with the OLD input {FIRST!r}, mode="done", reason="Stale-input negative test". Expect rejection; do not retry it.
 4. mail_dispose input="fixture-m2", mode="reply", reason="Internal synthetic FYI only", text="Synthetic hold acknowledged; no permission or completion granted". Recipient/conversation are fixed by the production tool; supply no other fields.

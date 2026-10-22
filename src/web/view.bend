@@ -2232,14 +2232,14 @@ def View.browser.back(on: Bool, +u: U.Ui) -> List<&2, D.Node>:
 def View.browser.strip.loc(+lc: I.Loc, on: Bool, +u: U.Ui) -> List<&2, D.Node>:
   match on:
     case True{}:
-      D.Dom.span("", U.CefUI.strip(u, U.Ui.page(u))) <> View.browser.back.loc(lc, Bool.not(String.is_empty(U.Teach.drive(u, U.Ui.page(u)))), u)
+      D.Dom.span("", U.BrUI.strip(u, U.Ui.page(u))) <> View.browser.back.loc(lc, Bool.not(String.is_empty(U.Teach.drive(u, U.Ui.page(u)))), u)
     case False{}: Nil{}
 
 def View.browser.strip(on: Bool, +u: U.Ui) -> List<&2, D.Node>:
   View.browser.strip.loc(I.En{}, on, u)
 
 def View.browser.loc(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
-  List.append(&2, D.Node, List.append(&2, D.Node, View.browser.strip.loc(lc, U.CefUI.strip_on(u, U.Ui.page(u)), u), WB.WB.browser.controls(lc, u, U.Ui.page(u))),
+  List.append(&2, D.Node, List.append(&2, D.Node, View.browser.strip.loc(lc, U.BrUI.strip_on(u, U.Ui.page(u)), u), WB.WB.browser.controls(lc, u, U.Ui.page(u))),
     [WB.WB.browser.surface.loc(lc, u, U.Ui.page(u), MSG.T.browser.thread(lc))])
 
 # The Mechanical page (client.bend's Mpage): a chip per part, Open in 3D

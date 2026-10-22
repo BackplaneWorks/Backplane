@@ -8,7 +8,7 @@ import ../core/maildisposition.bend as MD
 import ../core/kihealth.bend as KH
 import ../core/kserve.bend as KSC
 import ./kserve.bend as KSV
-import ../core/cef.bend as CF
+import ../core/brctl.bend as BRC
 import ../core/exe.bend as EX
 import ./lockio.bend as LG
 import ../core/locks.bend as LCK
@@ -307,9 +307,6 @@ type Msg is Data:
   # the browser back; a task run asks the person (task_pause)
   TeachReq{client: U32, id: String, m: String, p: String}
   BrowserEv{line: String}
-  CefDone{request: String, live: String, err: String}
-  # a websocket from this machine (loopback, not proxied): it may embed
-  Near{client: U32}
   TeachBack{bot: String}
   TaskPaused{thread: String, bot: String, run: String, slug: String, n: Nat, kind: String, question: String, risky: Bool, rid: String, reply: Chan(String)}
   # a bot's new project, approved by the person, its folder made and
@@ -1623,35 +1620,10 @@ def Conn.cache(+path: String) -> String:
 def Conn.allowed(+trusted: Bool, +hs: List<&2, W.Header>, +path: String, +token: String) -> Bool:
   AUTH.Auth.allowed(trusted, hs, path, token)
 
-# a websocket from this machine's loopback, not proxied by tailscale serve,
-# is marked for the hub: only such a window (or the one in this process)
-# may embed the browser (core/cef.bend's Cef.from)
-def Conn.near.say(near: Bool, +id: U32, +inbox: Chan(Msg)) -> IO(Unit):
-  match near:
-    case True{}:
-      do IO<Unit>:
-        ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, Near{id})
-        return Unit{}
-    case False{}:
-      IO.pure(Unit, Unit{})
-
-def Conn.near.k(r: Socket & String, +key: String, rest: List<&2, U32>, +id: U32, +inbox: Chan(Msg), +since: Nat, +origin: String, legacy: Bool, +mobile: String) -> IO(Unit):
-  (s, +ip) = r
-  do IO<Unit>:
-    Conn.near.say(CF.Cef.loopback(ip), id, inbox)
-    Conn.ws(s, key, rest, id, inbox, since, origin, legacy, mobile)
-
-def Conn.near(plain: Bool, s: Socket, +key: String, rest: List<&2, U32>, +id: U32, +inbox: Chan(Msg), +since: Nat, +origin: String, legacy: Bool, +mobile: String) -> IO(Unit):
-  match plain:
-    case True{}:
-      IO.bind(Socket & String, Unit, H.Sock.peer(s), r => Conn.near.k(r, key, rest, id, inbox, since, origin, legacy, mobile))
-    case False{}:
-      Conn.ws(s, key, rest, id, inbox, since, origin, legacy, mobile)
-
-def Conn.gate(ok: Bool, plain: Bool, s: Socket, +key: String, rest: List<&2, U32>, +id: U32, +inbox: Chan(Msg), +since: Nat, +origin: String, legacy: Bool, +mobile: String) -> IO(Unit):
+def Conn.gate(ok: Bool, s: Socket, +key: String, rest: List<&2, U32>, +id: U32, +inbox: Chan(Msg), +since: Nat, +origin: String, legacy: Bool, +mobile: String) -> IO(Unit):
   match ok:
     case True{}:
-      Conn.near(plain, s, key, rest, id, inbox, since, origin, legacy, mobile)
+      Conn.ws(s, key, rest, id, inbox, since, origin, legacy, mobile)
     case False{}:
       Conn.finish(s, W.Http.text("401 Unauthorized", "this Backplane needs its pairing token"))
 
@@ -1794,7 +1766,7 @@ def Info.tailscale(tn: Bool, +st: String) -> String:
 def Info.tch(n: Net) -> List<&2, J.KV>:
   match n:
     case Net{_, _, _, _, _, _, _, _, _, _, _, +bnx, _, _, _, _}:
-      List.append(&2, J.KV, TE.Teach.info(BN.Bn.tch(bnx)), List.append(&2, J.KV, CF.Cef.session.info(BN.Bn.cef(bnx)), CF.Cef.pages.info(CF.Cef.session.pages(BN.Bn.cef(bnx)))))
+      TE.Teach.info(BN.Bn.tch(bnx))
 
 def Info.net(n: Net) -> List<&2, J.KV>:
   match n:
@@ -3834,7 +3806,7 @@ def Deploy.probe(+inbox: Chan(Msg)) -> IO(Unit):
   IO.bind(String, Unit, Env.get("BACKPLANE_DEPLOY_LOCKS", "/tmp/bp-bend.lock:/tmp/bp-wt-build.lock"), l => Deploy.probe.l(l, inbox))
 
 def Deploy.swap.sh() -> String:
-  "set -eu; src=$1; prefix=$2; [ -d \"$src\" ] || { echo \"no staged package at $src\"; exit 1; }; mkdir -p \"$prefix\"; if [ -f \"$src/cef-runtime.py\" ]; then python3 \"$src/cef-runtime.py\" install \"$src\" \"$prefix\"; fi; if [ -d \"$src/web\" ]; then rm -rf \"$prefix/web.old\"; [ -d \"$prefix/web\" ] && mv \"$prefix/web\" \"$prefix/web.old\"; mv \"$src/web\" \"$prefix/web\"; fi; if [ -d \"$src/kistack\" ]; then rm -rf \"$prefix/kistack.old\"; [ -d \"$prefix/kistack\" ] && mv \"$prefix/kistack\" \"$prefix/kistack.old\"; mv \"$src/kistack\" \"$prefix/kistack\"; fi; for f in backplane backplane-serve backplane-browser backplane-browser.stamp backplane-step2glb backplane-voice backplane-kipc LICENSE; do if [ -e \"$src/$f\" ]; then mv -f \"$src/$f\" \"$prefix/$f\"; fi; done; rmdir \"$src\" 2>/dev/null || true; exit 0"
+  "set -eu; src=$1; prefix=$2; [ -d \"$src\" ] || { echo \"no staged package at $src\"; exit 1; }; mkdir -p \"$prefix\"; if [ -d \"$src/web\" ]; then rm -rf \"$prefix/web.old\"; [ -d \"$prefix/web\" ] && mv \"$prefix/web\" \"$prefix/web.old\"; mv \"$src/web\" \"$prefix/web\"; fi; if [ -d \"$src/kistack\" ]; then rm -rf \"$prefix/kistack.old\"; [ -d \"$prefix/kistack\" ] && mv \"$prefix/kistack\" \"$prefix/kistack.old\"; mv \"$src/kistack\" \"$prefix/kistack\"; fi; for f in backplane backplane-serve backplane-browser backplane-browser.stamp backplane-step2glb backplane-voice backplane-kipc LICENSE; do if [ -e \"$src/$f\" ]; then mv -f \"$src/$f\" \"$prefix/$f\"; fi; done; [ -L \"$prefix/backplane-browser\" ] || rm -rf \"$prefix/cef\" \"$prefix/browser-current\" \"$prefix/browser-previous\" \"$prefix/browser-runtimes\"; rmdir \"$src\" 2>/dev/null || true; exit 0"
 
 def Deploy.swapped(ok: Bool, +out: String, +path: String, +inbox: Chan(Msg)) -> IO(Unit):
   match ok:
@@ -4311,12 +4283,6 @@ def Plot.put(m: Maybe<&2, Chan(PV.PMsg)>, +msg: PV.PMsg) -> IO(Unit):
     case None{}:
       IO.pure(Unit, Unit{})
 
-def CefCfg.depart(c: Cfg, +client: U32) -> Cfg:
-  match c:
-    case Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, +bnx, mgd, lk, fc, ksx}, +tcfg, +views}:
-      Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx,
-        BN.Bn.with_cef(bnx, CF.Cef.session.leave(BN.Bn.cef(bnx), client)), mgd, lk, fc, ksx}, tcfg, views}
-
 def Hub.leave(h: Hub, +client: U32, +now: Nat) -> IO(Hub):
   match h:
     case Hub{st, f, ls, +cl, as, inbox, +cfg, note}:
@@ -4325,7 +4291,7 @@ def Hub.leave(h: Hub, +client: U32, +now: Nat) -> IO(Hub):
         Plot.put(Cfg.pv(cfg), PV.PStop{client})
         +cl2 : List<&2, Client> = Clients.drop(cl, client)
         cl3 : List<&2, Client> <- Desk.say(DK.Desk.text(Clients.looks(cl), now), cl2, now)
-        return Hub{st, f, ls, cl3, as, inbox, CefCfg.depart(cfg, client), note}
+        return Hub{st, f, ls, cl3, as, inbox, cfg, note}
 
 # kicad.watch: kind "board", "schematic", "3d", "3d-bare" or "3d-full"
 # shows it, anything else stops
@@ -5653,7 +5619,7 @@ def Conn.view.mode(view: String, +mobile: String, +frontend: String) -> String:
 def Conn.route.k(ws: Bool, s: Socket, req: W.Request, rest: List<&2, U32>, +web: String, +id: U32, +inbox: Chan(Msg), +trusted: Bool, +token: String) -> IO(Unit):
   match ws req:
     case True{} W.Request{_, +p, +hs}:
-      Conn.gate(Conn.allowed(trusted, hs, p, token), CF.Cef.link(W.Http.header_of(hs, "tailscale-user-login"), W.Http.header_of(hs, "origin")), s, W.Http.header_of(hs, "sec-websocket-key"), rest, id, inbox,
+      Conn.gate(Conn.allowed(trusted, hs, p, token), s, W.Http.header_of(hs, "sec-websocket-key"), rest, id, inbox,
         Maybe.default(&2, Nat, Nat.read(W.Http.param(p, "since")), 0n), W.Http.param(p, "origin"), AUTH.Auth.legacy(trusted, hs, p, token), Conn.view.mode(W.Http.param(p, "view"), W.Http.param(p, "mobile"), W.Http.param(p, "frontend")))
     case False{} W.Request{_, +p, +hs}:
       Conn.get.k(Conn.pos(["/hello", "/img", "/debug/perf", "/debug/perf.json", "/debug/log"], W.Http.route(p), 0n), s, web, p, String.contains(W.Http.header_of(hs, "accept-encoding"), "gzip"), Conn.allowed(trusted, hs, p, token))
@@ -6426,12 +6392,6 @@ def Cfg.with_bn(c: Cfg, b: BN.Bn) -> Cfg:
   match c:
     case Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, _, mgd, lk, fc, ksx}, +tcfg, +views}:
       Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, b, mgd, lk, fc, ksx}, tcfg, views}
-
-def Cfg.cef(c: Cfg) -> CF.CefSession:
-  BN.Bn.cef(Cfg.bn(c))
-
-def Cfg.with_cef(+c: Cfg, cp: CF.CefSession) -> Cfg:
-  Cfg.with_bn(c, BN.Bn.with_cef(Cfg.bn(c), cp))
 
 def Cfg.tch(c: Cfg) -> TE.TeachSt:
   BN.Bn.tch(Cfg.bn(c))
@@ -10110,153 +10070,26 @@ def Hub.step(h: Hub, s: B.Step) -> IO(Hub):
 # keeps each bot's driver and draft in its Cfg (core/teach.bend) and tells
 # every client the info keys drive.<bot>, teach.<bot>, teach.draft.<bot>.
 
-# The embedded browser (core/cef.bend, tools/cef)
-# -----------------------------------------------
-# The window says its X window (browser.embed); with the setting
-# browser.engine "cef" the hub moves the helper to the CEF engine, whose
-# pages are native children of that window. The window says where the
-# shown page goes (browser.place). Every native operation runs in order on
-# one worker (CefQueue): shield on, show, then the shield the page's drive
-# calls for; engine replies carry a generation, and stale ones are dropped.
-# The state is in memory (botnet.bend's Bn.cef).
-
-# a page id names a real thread or a live bot
-def Cef.page.ok(+st: M.State, +page: String) -> Bool:
-  CF.Cef.owner(page, B.Hub.owns(st, page), BO.Bot.live(BO.World.bot(M.State.bots(st), page)))
+# a page id names a real thread or a live bot (core/brctl.bend)
+def Page.ok(+st: M.State, +page: String) -> Bool:
+  BRC.Brc.owner(page, B.Hub.owns(st, page), BO.Bot.live(BO.World.bot(M.State.bots(st), page)))
 
 def Hub.preview(h: Hub, +thread: String, +o: J.Json, +reply: Chan(String)) -> IO(Hub):
   match h:
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
       do IO<Hub>:
-        Desktop.policy(Cfg.br(cfg), Bot.page(st, thread), Cef.page.ok(st, Bot.page(st, thread)), Cfg.tch(cfg))
+        Desktop.policy(Cfg.br(cfg), Bot.page(st, thread), Page.ok(st, Bot.page(st, thread)), Cfg.tch(cfg))
         IO.spawn(Unit, Preview.go(TE.Teach.bot_may(Cfg.tch(cfg), Bot.page(st, thread)), cfg, Bot.page(st, thread), o, reply))
         cl2 : List<&2, Client> <- Hub.auto.k(Bool.not(Bool.and(Bool.not(Bot.is_bot(RUN.Run.bot(st, thread))), Preview.shows(o))), cl, Preview.view(thread))
         return Hub{st, f, ls, cl2, as, inbox, cfg, note}
-
-def CefJob.ask(m: Maybe<&2, Chan(BR.BMsg)>, +op: String, +args: J.Json) -> IO(String):
-  match m:
-    case Some{q}: BR.Browser.ask_on(q, J.Json.get_str(args, "page", ""), op, args)
-    case None{}: IO.pure(String, BR.Browser.fail("no browser helper"))
-
-# the engine request; the helper keeps its flags, so a restarted helper runs
-# the same engine (cef starts the helper; chrome does not)
-def CefJob.engine_ask(m: Maybe<&2, Chan(BR.BMsg)>, +on: Bool, +args: J.Json) -> IO(String):
-  match m:
-    case Some{q}: BR.Browser.engine_ask(q, CF.Cef.argv(on, U32.from_nat(J.Json.get_nat(args, "parent", 0n)), J.Json.get_str(args, "display", "")), args, on)
-    case None{}: IO.pure(String, BR.Browser.fail("no browser helper"))
-
-def CefJob.focus(on: Bool, +m: Maybe<&2, Chan(BR.BMsg)>, +page: String) -> IO(Unit):
-  match on:
-    case True{}:
-      IO.bind(String, Unit, CefJob.ask(m, "focus", J.Json.obj([J.KV{"page", J.Str{page}}])), r => IO.pure(Unit, Unit{}))
-    case False{}: IO.pure(Unit, Unit{})
-
-def CefJob.shield(+m: Maybe<&2, Chan(BR.BMsg)>, +page: String, +drive: String) -> IO(Unit):
-  do IO<Unit>:
-    r : String <- CefJob.ask(m, "shield", J.Json.obj([J.KV{"on", J.Flag{CF.Cef.shield(drive)}}]))
-    CefJob.focus(CF.Cef.shield.focus(drive), m, page)
-
-def CefJob.place(show: Bool, +m: Maybe<&2, Chan(BR.BMsg)>, +p: J.Json, drive: String) -> IO(Unit):
-  match show:
-    case True{}:
-      do IO<Unit>:
-        # Shield first, so a freshly mapped agent page cannot take a stray click.
-        r : String <- CefJob.ask(m, "shield", J.Json.obj([J.KV{"on", J.Flag{True{}}}]))
-        shown : String <- CefJob.ask(m, "show", p)
-        CefJob.shield(m, J.Json.get_str(p, "page", ""), drive)
-    case False{}:
-      IO.bind(String, Unit, CefJob.ask(m, "hide", J.Null{}), r => IO.pure(Unit, Unit{}))
-
-def CefJob.done(+inbox: Chan(Msg), request: String, live: String, err: String) -> IO(Unit):
-  do IO<Unit>:
-    ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, CefDone{request, live, err})
-    return Unit{}
-
-def CefJob.switched(ok: Bool, +m: Maybe<&2, Chan(BR.BMsg)>, +inbox: Chan(Msg), +request: String, +args: J.Json, +err: String) -> IO(Unit):
-  match ok:
-    case True{}: CefJob.done(inbox, request, J.Json.get_str(args, "engine", "chrome"), "")
-    case False{}:
-      do IO<Unit>:
-        r : String <- CefJob.engine_ask(m, False{}, CF.Cef.args(False{}, 0, ""))
-        CefJob.done(inbox, request, "chrome", err)
-
-def CefJob.reply(+r: J.Json, +m: Maybe<&2, Chan(BR.BMsg)>, +inbox: Chan(Msg), request: String, args: J.Json) -> IO(Unit):
-  CefJob.switched(J.Json.get_bool(r, "ok", False{}), m, inbox, request, args, J.Json.get_str(r, "error", "CEF host failed"))
-
-def CefJob.engine(+m: Maybe<&2, Chan(BR.BMsg)>, +inbox: Chan(Msg), +args: J.Json, token: String) -> IO(Unit):
-  do IO<Unit>:
-    r : String <- CefJob.engine_ask(m, String.eq(J.Json.get_str(args, "engine", ""), "cef"), args)
-    CefJob.reply(Maybe.default(&2, J.Json, J.Json.parse(r), J.Null{}), m, inbox, token, args)
-
-# A whole native operation finishes before the next begins. In particular,
-# hide cannot overtake show's shield step, and stale engine replies are ignored.
-def CefQueue.submit(m: Maybe<&2, Chan(CF.CefWork)>, w: CF.CefWork) -> IO(Unit):
-  match m:
-    case Some{q}:
-      do IO<Unit>:
-        ok : Result<&1, &1, CF.CefWork, Unit> <- Chan.send(CF.CefWork, q, w)
-        return Unit{}
-    case None{}: IO.pure(Unit, Unit{})
-
-def CefQueue.act(op: Nat, +m: Maybe<&2, Chan(BR.BMsg)>, +inbox: Chan(Msg), +args: J.Json, drive: String, token: String) -> IO(Unit):
-  match op:
-    case 0n: CefJob.engine(m, inbox, args, token)
-    case 1n: CefJob.place(CF.Cef.visible(args), m, args, drive)
-    case 2n: CefJob.shield(m, J.Json.get_str(args, "page", ""), drive)
-    case _: CefJob.switched(False{}, m, inbox, token, J.Null{}, J.Json.get_str(args, "error", "CEF host exited"))
-
-def CefQueue.run(w: CF.CefWork, m: Maybe<&2, Chan(BR.BMsg)>, inbox: Chan(Msg)) -> IO(Unit):
-  match w:
-    case CF.CefWork{op, args, drive, token}:
-      CefQueue.act(C.Codec.pos(["engine", "place", "shield"], op), m, inbox, args, drive, token)
-
-def CefQueue.got(w: Maybe<&1, CF.CefWork>, +m: Maybe<&2, Chan(BR.BMsg)>, +inbox: Chan(Msg), k: Unit -> IO(Unit)) -> IO(Unit):
-  match w:
-    case Some{work}: IO.bind(Unit, Unit, CefQueue.run(work, m, inbox), k)
-    case None{}: IO.pure(Unit, Unit{})
-
-def CefQueue.loop(fuel: Nat, +q: Chan(CF.CefWork), +m: Maybe<&2, Chan(BR.BMsg)>, +inbox: Chan(Msg)) -> IO(Unit):
-  match fuel:
-    case 0n: IO.pure(Unit, Unit{})
-    case 1n+f:
-      IO.bind(Maybe<&1, CF.CefWork>, Unit, Chan.recv(CF.CefWork, q), w => CefQueue.got(w, m, inbox, u => CefQueue.loop(f, q, m, inbox)))
-
-def Hub.cef.queue.ensure(known: Bool, h: Hub) -> IO(Hub):
-  match known h:
-    case True{} _: IO.pure(Hub, h)
-    case False{} Hub{st, f, ls, cl, as, +inbox, +cfg, note}:
-      do IO<Hub>:
-        +q : Chan(CF.CefWork) <- Chan.new(CF.CefWork, 256)
-        IO.spawn(Unit, CefQueue.loop(Fuel.forever(), q, Cfg.br(cfg), inbox))
-        return Hub{st, f, ls, cl, as, inbox, Cfg.with_cef(cfg, CF.Cef.session.queued(Cfg.cef(cfg), q)), note}
-
-def CefQueue.known(m: Maybe<&2, Chan(CF.CefWork)>) -> Bool:
-  match m:
-    case Some{_}: True{}
-    case None{}: False{}
-
-# the placed page's shield follows its drive, sent only when it changed
-def Hub.cef.shield.go(due: Bool, h: Hub, +drive: String) -> IO(Hub):
-  match due h:
-    case True{} Hub{st, f, ls, cl, as, inbox, +cfg, note}:
-      do IO<Hub>:
-        CefQueue.submit(CF.Cef.session.queue(Cfg.cef(cfg)), CF.CefWork{"shield", CF.Cef.session.place(Cfg.cef(cfg)), drive, ""})
-        return Hub{st, f, ls, cl, as, inbox, Cfg.with_cef(cfg, CF.Cef.session.shield_set(Cfg.cef(cfg), CF.Cef.shield.val(drive))), note}
-    case False{} _: IO.pure(Hub, h)
-
-def Hub.cef.driven(h: Hub, +b: TE.TeachBot) -> IO(Hub):
-  match h:
-    case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
-      Hub.cef.shield.go(Bool.and(Bool.and(String.eq(CF.Cef.session.live(Cfg.cef(cfg)), "cef"), String.eq(TE.Teach.bot.id(b), CF.Cef.session.page(Cfg.cef(cfg)))),
-        CF.Cef.shield.due(CF.Cef.session.shield(Cfg.cef(cfg)), TE.Teach.bot.drive(b))), Hub{st, f, ls, cl, as, inbox, cfg, note}, TE.Teach.bot.drive(b))
 
 def Hub.tch.put(h: Hub, +b: TE.TeachBot) -> IO(Hub):
   match h:
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
       do IO<Hub>:
-        Desktop.policy(Cfg.br(cfg), TE.Teach.bot.id(b), Cef.page.ok(st, TE.Teach.bot.id(b)), TE.Teach.put(Cfg.tch(cfg), b))
+        Desktop.policy(Cfg.br(cfg), TE.Teach.bot.id(b), Page.ok(st, TE.Teach.bot.id(b)), TE.Teach.put(Cfg.tch(cfg), b))
         cl2 : List<&2, Client> <- Wire.all(cl, TE.Teach.msg(b))
-        Hub.cef.driven(Hub{st, f, ls, cl2, as, inbox, Cfg.with_tch(cfg, TE.Teach.put(Cfg.tch(cfg), b)), note}, b)
+        return Hub{st, f, ls, cl2, as, inbox, Cfg.with_tch(cfg, TE.Teach.put(Cfg.tch(cfg), b)), note}
 
 def Hub.tch.ok(h: Hub, +client: U32, +id: String) -> IO(Hub):
   Hub.out(h, B.Reply.ok(client, id))
@@ -10315,7 +10148,7 @@ def BrowseJob.reply(+inbox: Chan(Msg), +client: U32, +id: String, +line: String)
 def BrowseJob.run(m: Maybe<&2, Chan(BR.BMsg)>, +inbox: Chan(Msg), +client: U32, +id: String, +o: J.Json) -> IO(Unit):
   match m:
     case Some{q}:
-      IO.bind(String, Unit, BR.Browser.ask_on(q, J.Json.get_str(o, "bot", ""), J.Json.get_str(o, "command", ""), CF.Cef.toolbar.args(o)),
+      IO.bind(String, Unit, BR.Browser.ask_on(q, J.Json.get_str(o, "bot", ""), J.Json.get_str(o, "command", ""), BRC.Brc.toolbar.args(o)),
         line => BrowseJob.reply(inbox, client, id, line))
     case None{}: BrowseJob.reply(inbox, client, id, BR.Browser.fail("browser helper unavailable"))
 
@@ -10334,7 +10167,7 @@ def Hub.browser.toolbar.ok(ok: Bool, h: Hub, +client: U32, +id: String, +o: J.Js
 
 def Hub.browser.toolbar(toolbar: Bool, h: Hub, +client: U32, +id: String, +o: J.Json, +b: TE.TeachBot) -> IO(Hub):
   match toolbar:
-    case True{}: Hub.browser.toolbar.ok(CF.Cef.toolbar.allowed(J.Json.get_str(o, "command", "")), h, client, id, o, b)
+    case True{}: Hub.browser.toolbar.ok(BRC.Brc.toolbar.allowed(J.Json.get_str(o, "command", "")), h, client, id, o, b)
     case False{}: Hub.browser.k(C.Codec.pos(["takeover", "handback"], J.Json.get_str(o, "op", "")), h, client, id, o, b)
 
 def Hub.browser.valid(h: Hub, +client: U32, +id: String, +o: J.Json) -> IO(Hub):
@@ -10351,7 +10184,7 @@ def Hub.browser.known(ok: Bool, h: Hub, +client: U32, +id: String, +o: J.Json) -
 def Hub.browser(h: Hub, +client: U32, +id: String, +o: J.Json) -> IO(Hub):
   match h:
     case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
-      Hub.browser.known(Cef.page.ok(st, J.Json.get_str(o, "bot", "")), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, id, o)
+      Hub.browser.known(Page.ok(st, J.Json.get_str(o, "bot", "")), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, id, o)
 
 def Hub.teach.start(h: Hub, +client: U32, +id: String, +bot: String, +now: Nat) -> IO(Hub):
   match h:
@@ -10529,7 +10362,7 @@ def Hub.desktop_record(h: Hub, +candidate: J.Json) -> IO(Hub):
   match h:
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
       +owner = J.Json.get_str(J.Json.get_obj(J.Json.get_obj(candidate, "payload"), "event"), "owner", "")
-      Hub.desktop_record.request(Bool.and(Cef.page.ok(st, owner), TE.Teach.recording(TE.Teach.get(Cfg.tch(cfg), owner))), Cfg.br(cfg), Hub{st, f, ls, cl, as, inbox, cfg, note}, candidate)
+      Hub.desktop_record.request(Bool.and(Page.ok(st, owner), TE.Teach.recording(TE.Teach.get(Cfg.tch(cfg), owner))), Cfg.br(cfg), Hub{st, f, ls, cl, as, inbox, cfg, note}, candidate)
 
 def Hub.browser_ev.record_kind(desktop: Bool, h: Hub, +o: J.Json) -> IO(Hub):
   match desktop:
@@ -10539,95 +10372,20 @@ def Hub.browser_ev.record_kind(desktop: Bool, h: Hub, +o: J.Json) -> IO(Hub):
 def Hub.browser_ev.record(h: Hub, +o: J.Json) -> IO(Hub):
   Hub.browser_ev.record_kind(String.eq(J.Json.get_str(o, "event", ""), "desktop-record-candidate"), h, o)
 
-# a press on a page's shield: the person takes the page over (the shield
-# then comes off and the page is focused: Hub.tch.put); no reply goes out
-def Hub.cef.click.k(take: Bool, h: Hub, +b: TE.TeachBot) -> IO(Hub):
-  match take:
-    case True{}:
-      Hub.tch.put(h, TE.Teach.takeover(b))
-    case False{}:
-      IO.pure(Hub, h)
-
-def Hub.cef.click(real: Bool, h: Hub, +page: String) -> IO(Hub):
-  match real h:
-    case True{} Hub{st, f, ls, cl, as, inbox, +cfg, note}:
-      Hub.cef.click.k(CF.Cef.shield.take(TE.Teach.bot.drive(TE.Teach.get(Cfg.tch(cfg), page))), Hub{st, f, ls, cl, as, inbox, cfg, note}, TE.Teach.get(Cfg.tch(cfg), page))
-    case False{} _:
-      IO.pure(Hub, h)
-
-def Hub.cef.click.o(h: Hub, +o: J.Json) -> IO(Hub):
-  match h:
-    case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
-      Hub.cef.click(Cef.page.ok(st, J.Json.get_str(o, "page", "")), Hub{st, f, ls, cl, as, inbox, cfg, note}, J.Json.get_str(o, "page", ""))
-
-# the CEF host failed while live: back to chrome, through the queue
-def Hub.cef.hostdead(failed: Bool, h: Hub, +o: J.Json) -> IO(Hub):
-  match failed h:
-    case True{} Hub{st, f, ls, cl, as, +inbox, +cfg, note}:
-      do IO<Hub>:
-        CefQueue.submit(CF.Cef.session.queue(Cfg.cef(cfg)), CF.CefWork{"failed", o, "", CF.Cef.session.token(Cfg.cef(cfg))})
-        return Hub{st, f, ls, cl, as, inbox, cfg, note}
-    case False{} _: IO.pure(Hub, h)
-
-def Hub.cef.engine_ev(h: Hub, +o: J.Json) -> IO(Hub):
-  match h:
-    case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
-      Hub.cef.hostdead(Bool.and(String.eq(CF.Cef.session.live(Cfg.cef(cfg)), "cef"), Bool.not(J.Json.get_bool(o, "ok", True{}))),
-        Hub{st, f, ls, cl, as, inbox, cfg, note}, o)
-
-# the helper exited: it is started again (with the engine's flags) by
-# showing the placed page and its shield again, a few times at most
-def Hub.cef.revive(go: Bool, h: Hub) -> IO(Hub):
-  match go h:
-    case True{} Hub{st, f, ls, cl, as, inbox, +cfg, note}:
-      do IO<Hub>:
-        CefQueue.submit(CF.Cef.session.queue(Cfg.cef(cfg)), CF.CefWork{"place", CF.Cef.session.place(Cfg.cef(cfg)),
-          TE.Teach.bot.drive(TE.Teach.get(Cfg.tch(cfg), CF.Cef.session.page(Cfg.cef(cfg)))), ""})
-        return Hub{st, f, ls, cl, as, inbox, Cfg.with_cef(cfg, CF.Cef.session.tried(Cfg.cef(cfg))), note}
-    case False{} _: IO.pure(Hub, h)
-
-def Hub.cef.exited(h: Hub) -> IO(Hub):
-  match h:
-    case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
-      Hub.cef.revive(CF.Cef.revive(String.eq(CF.Cef.session.live(Cfg.cef(cfg)), "cef"), CF.Cef.visible(CF.Cef.session.place(Cfg.cef(cfg))), CF.Cef.session.tries(Cfg.cef(cfg))),
-        Hub{st, f, ls, cl, as, inbox, cfg, note})
-
-# a page navigated: it exists; every client hears its one key (and the
-# key of the oldest, if it was pushed out)
-def Hub.cef.seen.k(new: Bool, h: Hub, +page: String) -> IO(Hub):
-  match new h:
-    case True{} Hub{st, f, ls, cl, as, inbox, +cfg, note}:
-      do IO<Hub>:
-        cl2 : List<&2, Client> <- Wire.all(cl, J.Json.show(J.Json.obj([J.KV{"t", J.Str{"info"}}, J.KV{"info", J.Json.obj(CF.Cef.pages.told(page, CF.Cef.pages.out(CF.Cef.session.pages(Cfg.cef(cfg)))))}])))
-        return Hub{st, f, ls, cl2, as, inbox, Cfg.with_cef(cfg, CF.Cef.session.pages_set(Cfg.cef(cfg), CF.Cef.pages.add(CF.Cef.session.pages(Cfg.cef(cfg)), page))), note}
-    case False{} _:
-      IO.pure(Hub, h)
-
-def Hub.cef.seen.o(h: Hub, +o: J.Json) -> IO(Hub):
-  match h:
-    case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
-      Hub.cef.seen.k(Bool.and(Cef.page.ok(st, J.Json.get_str(o, "page", "")), Bool.not(CF.Cef.pages.has(CF.Cef.session.pages(Cfg.cef(cfg)), J.Json.get_str(o, "page", "")))),
-        Hub{st, f, ls, cl, as, inbox, cfg, note}, J.Json.get_str(o, "page", ""))
-
 def Hub.browser.tabs(h: Hub, +o: J.Json) -> IO(Hub):
-  IO.bind(Hub, Hub, Hub.cef.seen.o(h, o), h2 => Hub.broadcast(h2, J.Json.show(J.Json.obj([J.KV{"t", J.Str{"info"}},
-    J.KV{"info", J.Json.obj([J.KV{"browser.tabs." ++ J.Json.get_str(o, "page", ""), J.Str{J.Json.show(o)}}])}]))))
+  Hub.broadcast(h, J.Json.show(J.Json.obj([J.KV{"t", J.Str{"info"}},
+    J.KV{"info", J.Json.obj([J.KV{"browser.tabs." ++ J.Json.get_str(o, "page", ""), J.Str{J.Json.show(o)}}])}])))
 
 def Hub.browser_ev.c(i: Nat, h: Hub, +o: J.Json) -> IO(Hub):
   match i:
     case 0n: Hub.browser_ev.record(h, o)
-    case 1n: Hub.cef.engine_ev(h, o)
-    case 2n: Hub.cef.click.o(h, o)
-    case 3n: Hub.cef.exited(h)
-    case 4n: Hub.cef.seen.o(h, o)
-    case 5n: Hub.cef.seen.o(h, o)
-    case 6n: Hub.browser.tabs(h, o)
+    case 1n: Hub.browser.tabs(h, o)
     case _: IO.pure(Hub, h)
 
 def Hub.browser_ev.record_dispatch(desktop: Bool, h: Hub, +o: J.Json) -> IO(Hub):
   match desktop:
     case True{}: Hub.desktop_record(h, o)
-    case False{}: Hub.browser_ev.c(C.Codec.pos(["record", "engine", "shield-click", "helper-exit", "navigated", "load", "tabs"], J.Json.get_str(o, "event", "")), h, o)
+    case False{}: Hub.browser_ev.c(C.Codec.pos(["record", "tabs"], J.Json.get_str(o, "event", "")), h, o)
 
 def Hub.browser_ev.o(h: Hub, +o: J.Json) -> IO(Hub):
   Hub.browser_ev.record_dispatch(String.eq(J.Json.get_str(o, "event", ""), "desktop-record-candidate"), h, o)
@@ -10859,102 +10617,6 @@ def Hub.rpc.c(seen: Bool, h: Hub, +client: U32, +text: String, +now: Nat) -> IO(
     case False{}:
       Hub.rpc.g(String.contains(text, "bots.give"), h, client, text, now)
 
-def Hub.cef.say(+cp: CF.CefSession) -> String:
-  J.Json.show(J.Json.obj([J.KV{"t", J.Str{"info"}}, J.KV{"info", J.Json.obj(CF.Cef.session.info(cp))}]))
-
-def Hub.cef.done(current: Bool, h: Hub, +live: String, +err: String) -> IO(Hub):
-  match current h:
-    case True{} Hub{st, f, ls, cl, as, inbox, +cfg, note}:
-      do IO<Hub>:
-        +cp : CF.CefSession = CF.Cef.session.done(Cfg.cef(cfg), live, err)
-        cl2 : List<&2, Client> <- Wire.all(cl, Hub.cef.say(cp))
-        return Hub{st, f, ls, cl2, as, inbox, Cfg.with_cef(cfg, cp), note}
-    case False{} _: IO.pure(Hub, h)
-
-def Hub.cef.finished(h: Hub, +request: String, live: String, err: String) -> IO(Hub):
-  match h:
-    case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
-      Hub.cef.done(CF.Cef.current(Cfg.cef(cfg), request), Hub{st, f, ls, cl, as, inbox, cfg, note}, live, err)
-
-# the engine the setting and the window's embed call for, asked of the
-# helper when it differs from what was last asked (a short key compared)
-def Hub.cef.reconcile.queue(h: Hub, +on: Bool, +key: String) -> IO(Hub):
-  match h:
-    case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
-      do IO<Hub>:
-        +cp : CF.CefSession = CF.Cef.session.done(CF.Cef.session.request_set(Cfg.cef(cfg), key), "chrome", "")
-        CefQueue.submit(CF.Cef.session.queue(cp), CF.CefWork{"engine", CF.Cef.args(on, CF.Cef.session.xid(cp), CF.Cef.session.display(cp)), "", CF.Cef.session.token(cp)})
-        cl2 : List<&2, Client> <- Wire.all(cl, Hub.cef.say(cp))
-        return Hub{st, f, ls, cl2, as, inbox, Cfg.with_cef(cfg, cp), note}
-
-def Hub.cef.reconcile.k(changed: Bool, h: Hub, +on: Bool, +key: String) -> IO(Hub):
-  match changed h:
-    case True{} Hub{st, f, ls, cl, as, inbox, +cfg, note}:
-      IO.bind(Hub, Hub, Hub.cef.queue.ensure(CefQueue.known(CF.Cef.session.queue(Cfg.cef(cfg))), Hub{st, f, ls, cl, as, inbox, cfg, note}), h2 => Hub.cef.reconcile.queue(h2, on, key))
-    case False{} _: IO.pure(Hub, h)
-
-def Hub.cef.reconcile.on(h: Hub, +on: Bool) -> IO(Hub):
-  match h:
-    case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
-      Hub.cef.reconcile.k(Bool.not(String.eq(CF.Cef.session.request(Cfg.cef(cfg)), CF.Cef.want.key(on, CF.Cef.session.xid(Cfg.cef(cfg)), CF.Cef.session.display(Cfg.cef(cfg))))),
-        Hub{st, f, ls, cl, as, inbox, cfg, note}, on, CF.Cef.want.key(on, CF.Cef.session.xid(Cfg.cef(cfg)), CF.Cef.session.display(Cfg.cef(cfg))))
-
-def Hub.cef.reconcile(h: Hub) -> IO(Hub):
-  match h:
-    case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
-      Hub.cef.reconcile.on(Hub{st, f, ls, cl, as, inbox, cfg, note}, CF.Cef.engine(CF.Cef.requested(M.Setting.get(st, "browser.engine", CF.Cef.default())), CF.Cef.session.known(Cfg.cef(cfg)), True{}))
-
-# only after the messages that can change the engine (Cef.after)
-def Hub.cef.after(go: Bool, h: Hub) -> IO(Hub):
-  match go:
-    case True{}: Hub.cef.reconcile(h)
-    case False{}: IO.pure(Hub, h)
-
-def Hub.cef.near(h: Hub, +client: U32) -> IO(Hub):
-  match h:
-    case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
-      IO.pure(Hub, Hub{st, f, ls, cl, as, inbox, Cfg.with_cef(cfg, CF.Cef.session.near(Cfg.cef(cfg), client)), note})
-
-def Hub.cef.place(ok: Bool, h: Hub, +client: U32, +id: String, +p: J.Json) -> IO(Hub):
-  match ok h:
-    case True{} Hub{st, f, ls, cl, as, inbox, +cfg, note}:
-      do IO<Hub>:
-        +drive : String = TE.Teach.bot.drive(TE.Teach.get(Cfg.tch(cfg), J.Json.get_str(p, "page", "")))
-        CefQueue.submit(CF.Cef.session.queue(Cfg.cef(cfg)), CF.CefWork{"place", p, drive, ""})
-        Hub.tch.ok(Hub{st, f, ls, cl, as, inbox, Cfg.with_cef(cfg, CF.Cef.session.place_set(Cfg.cef(cfg), p, CF.Cef.shield.val(drive))), note}, client, id)
-    case False{} _: Hub.tch.err(h, client, id, "not the embedded browser window or unknown page")
-
-def Hub.cef.embed(ok: Bool, h: Hub, +client: U32, +id: String, +p: J.Json) -> IO(Hub):
-  match ok h:
-    case True{} Hub{st, f, ls, cl, as, inbox, +cfg, note}:
-      Hub.tch.ok(Hub{st, f, ls, cl, as, inbox, Cfg.with_cef(cfg, CF.Cef.session.embed_set(Cfg.cef(cfg), client, U32.from_nat(J.Json.get_nat(p, "xid", 0n)), J.Json.get_str(p, "display", ""))), note}, client, id)
-    case False{} _: Hub.tch.err(h, client, id, "only this machine's window can embed the browser")
-
-# browser.embed {xid, display} and browser.place {page, x, y, w, h} or {}:
-# only from this machine's window (Cef.from); a place only from the window
-# that embedded, only while cef runs, and only for a real page
-def Hub.cef.rpc.k(embed: Bool, h: Hub, +client: U32, +id: String, +p: J.Json) -> IO(Hub):
-  match embed h:
-    case True{} Hub{st, f, ls, cl, as, inbox, +cfg, note}:
-      Hub.cef.embed(CF.Cef.from(client, CF.Cef.session.is_local(Cfg.cef(cfg), client)), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, id, p)
-    case False{} Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
-      Hub.cef.place(Bool.and(Bool.and(CF.Cef.from(client, CF.Cef.session.is_local(Cfg.cef(cfg), client)), U32.is_eq(client, CF.Cef.session.client(Cfg.cef(cfg)))),
-        Bool.and(String.eq(CF.Cef.session.live(Cfg.cef(cfg)), "cef"), Bool.or(Bool.not(CF.Cef.visible(p)), Cef.page.ok(st, J.Json.get_str(p, "page", ""))))),
-        Hub{st, f, ls, cl, as, inbox, cfg, note}, client, id, p)
-
-def Hub.cef.rpc(cef: Bool, h: Hub, +client: U32, +text: String, +now: Nat, +o: J.Json) -> IO(Hub):
-  match cef:
-    case True{}: Hub.cef.rpc.k(String.eq(J.Json.get_str(o, "m", ""), "browser.embed"), h, client, J.Json.as_raw(J.Json.get(o, "id"), "0"), J.Json.get_obj(o, "p"))
-    case False{}: Hub.rpc.c(String.eq(J.Json.get_str(o, "m", ""), "browser.seen"), h, client, text, now)
-
-def Hub.rpc.ocef(h: Hub, +client: U32, +text: String, +now: Nat, +o: J.Json) -> IO(Hub):
-  Hub.cef.rpc(Bool.or(String.eq(J.Json.get_str(o, "m", ""), "browser.embed"), String.eq(J.Json.get_str(o, "m", ""), "browser.place")), h, client, text, now, o)
-
-def Hub.rpc.cefroute(cef: Bool, h: Hub, +client: U32, +text: String, +now: Nat) -> IO(Hub):
-  match cef:
-    case True{}: Hub.rpc.ocef(h, client, text, now, Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{}))
-    case False{}: Hub.rpc.c(String.contains(text, "\"browser.seen\""), h, client, text, now)
-
 # A mobile connection asks for a recent presentation before starting its
 # canonical log. It is an ordinary remote client: it never takes the trusted
 # in-process WState/JoinHere path. The timeout falls back to the old join.
@@ -11106,7 +10768,7 @@ def Hub.rpc.mobile.kind(i: Nat, +o: J.Json, h: Hub, +client: U32, +text: String,
     case 1n: Hub.rpc.mobile.dispatch(True{}, False{}, h, client, o, now)
     case 2n: Hub.rpc.mobile.dispatch(False{}, True{}, h, client, o, now)
     case 3n: Hub.rpc.mobile.dispatch(True{}, True{}, h, client, o, now)
-    case _: Hub.rpc.cefroute(Bool.or(String.contains(text, "\"browser.embed\""), String.contains(text, "\"browser.place\"")), h, client, text, now)
+    case _: Hub.rpc.c(String.contains(text, "\"browser.seen\""), h, client, text, now)
 
 # On-demand view RPCs are separate from optional early full-log presentation.
 # This context is connection-local and never a kept-state/cache authority.
@@ -12390,7 +12052,7 @@ def Hub.desktop.forward(h: Hub, client: U32, +kind: String, +text: String, out: 
   match h:
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
       do IO<Hub>:
-        Desktop.forward(Cfg.br(cfg), client, kind, Desktop.connection_info(kind, text, Cfg.version(cfg), M.Setting.get(st, "machine.id", "")), out, e, l, Desktop.frame_owner(text), Cef.page.ok(st, Desktop.frame_owner(text)), Cfg.tch(cfg))
+        Desktop.forward(Cfg.br(cfg), client, kind, Desktop.connection_info(kind, text, Cfg.version(cfg), M.Setting.get(st, "machine.id", "")), out, e, l, Desktop.frame_owner(text), Page.ok(st, Desktop.frame_owner(text)), Cfg.tch(cfg))
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
 
 # A brand-new home must establish its real persisted machine identity before
@@ -13659,7 +13321,7 @@ def Accept.whois(r: Socket & String, +owner: String, +id: U32, +web: String, +in
 
 def Accept.local(r: Socket & String, +id: U32, +web: String, +inbox: Chan(Msg), +trusted: Bool, +token: String) -> IO(Unit):
   (s, ip) = r
-  Conn.head(64n, s, Nil{}, web, id, inbox, Bool.and(trusted, CF.Cef.loopback(ip)), token)
+  Conn.head(64n, s, Nil{}, web, id, inbox, Bool.and(trusted, AUTH.Auth.loopback(ip)), token)
 
 def Accept.trust(ask: Bool, s: Socket, +owner: String, +id: U32, +web: String, +inbox: Chan(Msg), +trusted: Bool, +token: String) -> IO(Unit):
   match ask:
@@ -14948,10 +14610,6 @@ def Msg.kind(m: Msg) -> String:
     case BrowserEv{_}:
       "browser_ev"
     case Desktop{_, _, _, _, _, _}: "desktop_browser"
-    case CefDone{_, _, _}:
-      "cef_done"
-    case Near{_}:
-      "cef_near"
     case TeachBack{_}:
       "teach_back"
     case TaskPaused{_, _, _, _, _, _, _, _, _, _}:
@@ -16257,10 +15915,6 @@ def Hub.handle(h: Hub, m: Msg, +now: Nat) -> IO(Hub):
     case BrowserEv{line}:
       Hub.browser_ev(h, line)
     case Desktop{client, kind, text, out, e, l}: Hub.desktop(h, client, kind, text, out, e, l, now)
-    case CefDone{request, live, err}:
-      Hub.cef.finished(h, request, live, err)
-    case Near{client}:
-      Hub.cef.near(h, client)
     case TeachBack{bot}:
       Hub.back(h, bot)
     case TaskPaused{thread, bot, run, slug, n, kind, question, risky, rid, reply}:
@@ -16326,8 +15980,7 @@ def Hub.got.one_at(+msg: Msg, snapshot: Nat & Hub, k: Hub -> IO(Unit)) -> IO(Uni
     now : Nat <- Now.nat()
     t0 : U32 <- PS.Perf.us()
     h1 : Hub <- Hub.handle(h, msg, now)
-    h2 : Hub <- Hub.cef.after(CF.Cef.after(Msg.kind(msg)), h1)
-    h2a : Hub <- Hub.thin.drain(h2)
+    h2a : Hub <- Hub.thin.drain(h1)
     ms : Nat <- IO.now()
     h3 : Hub <- Hub.thin.invalidate(before, h2a, ms)
     t1 : U32 <- PS.Perf.lap("hub." ++ Msg.kind(msg), t0)
@@ -16499,7 +16152,7 @@ def Main.opened(r: Result<&1, &1, U32 & String, File>, +st: M.State, ls: SO.Lg, 
 # loads it. A failed build is tried once more (its files removed first);
 # a second failure stops the hub with the reason. The whole replay
 # (Boot.cold) is only the developer's escape, BACKPLANE_HOT_BOOT=0
-# (Boot.next; law boot_next_never_cold).
+# (Boot.decide; law boot_next_never_cold).
 
 # the escape's whole replay: the lines straight from the file, then only
 # the lines kept
@@ -16517,7 +16170,7 @@ type BootNext is Data:
   BootStop{}
   BootCold{}
 
-def Boot.next(escape: Bool, ok: Bool, left: Nat) -> BootNext:
+def Boot.decide(escape: Bool, ok: Bool, left: Nat) -> BootNext:
   match escape ok left:
     case True{} _ _:
       BootCold{}
@@ -16588,7 +16241,7 @@ def Boot.act(n: BootNext, +hot: HB.Hot, +home: String, again: Unit -> IO(HB.Hot)
         Boot.cold(home)
 
 def Boot.got(+hot: HB.Hot, +home: String, +left: Nat, again: Unit -> IO(HB.Hot)) -> IO(HB.Hot):
-  Boot.act(Boot.next(False{}, HB.Hot.ok(hot), left), hot, home, again)
+  Boot.act(Boot.decide(False{}, HB.Hot.ok(hot), left), hot, home, again)
 
 # load the store; if it is not usable, build it and load again (left
 # builds at most)
@@ -16604,7 +16257,7 @@ def Boot.state.on(on: Bool, +home: String) -> IO(HB.Hot):
     case True{}:
       Boot.loop(Boot.builds(), home)
     case False{}:
-      Boot.act(Boot.next(True{}, False{}, 0n), HB.Hot.no("BACKPLANE_HOT_BOOT=0"), home, u => IO.pure(HB.Hot, HB.Hot.no("escape")))
+      Boot.act(Boot.decide(True{}, False{}, 0n), HB.Hot.no("BACKPLANE_HOT_BOOT=0"), home, u => IO.pure(HB.Hot, HB.Hot.no("escape")))
 
 def Boot.state(+home: String) -> IO(HB.Hot):
   do IO<HB.Hot>:
