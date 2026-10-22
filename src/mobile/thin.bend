@@ -87,10 +87,20 @@ def Partial.find( +rows: List<&2, J.Json>, +id: String) -> J.Json:
     case Nil{}: J.Null{}
     case +row <> tail: Partial.found(String.eq(J.Json.get_str(row, "id", ""), id), row, Partial.find(tail, id))
 
+def Partial.entry_k( +msg: Bool, +part: J.Json, +entry: J.Json) -> J.Json:
+  match msg:
+    case True{}: entry
+    case False{}: Obj.put(entry, "partial", part)
+
+# a message's text is always whole: only activity rows carry a partial
+# footer, whatever the window advertises (no "read rest of message")
+def Partial.message( +kind: String) -> Bool:
+  Bool.or(String.eq(kind, "user"), String.eq(kind, "assistant"))
+
 def Partial.entry_if( +part: J.Json, +entry: J.Json) -> J.Json:
   match part:
     case J.Null{}: entry
-    case +p: Obj.put(entry, "partial", p)
+    case +p: Partial.entry_k(Partial.message(J.Json.get_str(entry, "kind", "")), p, entry)
 
 def Partial.entries( +entries: List<&2, J.Json>, +parts: List<&2, J.Json>) -> List<&2, J.Json>:
   match entries:

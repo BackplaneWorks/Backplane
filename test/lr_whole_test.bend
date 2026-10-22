@@ -12,7 +12,7 @@ import ../src/server/thin-view.bend as V
 # recoverable (Lr.whole, thin-view's Message.whole). The last line printed
 # is the fixture a UI check may read.
 
-# t1's reply: over Lr.cut() characters, under 8 KiB (one read completes it)
+# t1's reply: over Lr.old.cut() characters, under 8 KiB (one read completes it)
 def reply() -> String:
   String.repeat("Step done: the board passes DRC and ERC. ", 80n) ++ "Last line ✓"
 
@@ -23,9 +23,9 @@ def st() -> M.State:
 def head() -> String:
   H.Lr.head("t1", "work") ++ " completed:\n\n"
 
-# the row as it was stored before: the reply's first Lr.cut() characters and the tail
+# the row as it was stored before: the reply's first Lr.old.cut() characters and the tail
 def legacy() -> String:
-  head() ++ String.take(reply(), H.Lr.cut()) ++ H.Lr.cut.tail("t1")
+  head() ++ String.take(reply(), H.Lr.old.cut()) ++ H.Lr.old.tail("t1")
 
 def id() -> String:
   H.Lr.msg("t1", "r9")
@@ -72,16 +72,16 @@ def window.whole(es: List<&2, M.Entry>) -> Bool:
 
 def main() -> IO(Unit):
   do IO<Unit>:
-    C.Check.str("the reply is over the old cut and under 8 KiB", Bool.show(Bool.and(Nat.is_gt(String.length(reply()), H.Lr.cut()), Nat.is_lt(String.length(reply()), 8000n))), "True")
+    C.Check.str("the reply is over the old cut and under 8 KiB", Bool.show(Bool.and(Nat.is_gt(String.length(reply()), H.Lr.old.cut()), Nat.is_lt(String.length(reply()), 8000n))), "True")
     C.Check.str("a new report carries the reply whole", Bool.show(String.ends_with(told(), reply())), "True")
     C.Check.str("a new report has no cut-short hint", Bool.show(String.contains(told(), "cut short")), "False")
     C.Check.str("a legacy cut row reads whole", Bool.show(String.eq(H.Lr.whole(st(), id(), legacy(), 9n), head() ++ reply())), "True")
     C.Check.str("not a report id: left as stored", Bool.show(String.eq(H.Lr.whole(st(), M.Link.id("t1", "m5"), legacy(), 9n), legacy())), "True")
-    C.Check.str("text that is not the reply's exact cut: left as stored", Bool.show(String.eq(H.Lr.whole(st(), id(), head() ++ "x" ++ String.take(reply(), H.Lr.cut()) ++ H.Lr.cut.tail("t1"), 9n),
-      head() ++ "x" ++ String.take(reply(), H.Lr.cut()) ++ H.Lr.cut.tail("t1"))), "True")
+    C.Check.str("text that is not the reply's exact cut: left as stored", Bool.show(String.eq(H.Lr.whole(st(), id(), head() ++ "x" ++ String.take(reply(), H.Lr.old.cut()) ++ H.Lr.old.tail("t1"), 9n),
+      head() ++ "x" ++ String.take(reply(), H.Lr.old.cut()) ++ H.Lr.old.tail("t1"))), "True")
     C.Check.str("a report from before the reply: left as stored", Bool.show(String.eq(H.Lr.whole(st(), id(), legacy(), 2n), legacy())), "True")
-    C.Check.str("the hint names another thread: left as stored", Bool.show(String.eq(H.Lr.whole(st(), id(), head() ++ String.take(reply(), H.Lr.cut()) ++ H.Lr.cut.tail("t9"), 9n),
-      head() ++ String.take(reply(), H.Lr.cut()) ++ H.Lr.cut.tail("t9"))), "True")
+    C.Check.str("the hint names another thread: left as stored", Bool.show(String.eq(H.Lr.whole(st(), id(), head() ++ String.take(reply(), H.Lr.old.cut()) ++ H.Lr.old.tail("t9"), 9n),
+      head() ++ String.take(reply(), H.Lr.old.cut()) ++ H.Lr.old.tail("t9"))), "True")
     C.Check.str("the view reads the legacy row whole", Bool.show(String.eq(T.Entry.text(T.Row.entry(row(read()))), head() ++ reply())), "True")
     C.Check.str("one read completes it", Bool.show(J.Json.get_bool(J.Json.get_obj(result(), "message"), "complete", False{})), "True")
     C.Check.str("the read returns the whole text", Bool.show(String.eq(J.Json.get_str(J.Json.get_obj(result(), "message"), "text", ""), head() ++ reply())), "True")
