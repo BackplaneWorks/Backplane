@@ -9,17 +9,16 @@
 //     resume from another origin everything;
 //   - a store.db the streaming build made is kept and its tail applied;
 //   - a restart serves the same; a deleted store.db is made again.
-//   bun test/tools/store_lines_e2e.ts [BINARY]
+//   bun test/tools/store_lines_e2e.ts [BINARY] [WIREDIR]
 import { Database } from "bun:sqlite";
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { cbor, plain } from "../../src/web/wire.js";
 
-const [bin = "build/backplane-serve"] = process.argv.slice(2);
-const src = readFileSync(new URL("../../src/core/cbor.bend", import.meta.url).pathname, "utf8");
-const list = (name: string) => JSON.parse(src.split(`def Cbor.${name}() -> List<&2, String>:`)[1].split("\n\n")[0].replace(/\s+/g, " ").trim());
-const KEYS = list("keys"), WORDS = list("words");
+const [bin = "build/backplane-serve", wiredir = "build/wire"] = process.argv.slice(2);
+// the hub's own CBOR codec (bend test/wire/index.html -o build/wire), as far_e2e
+for (const f of readdirSync(wiredir).filter((f) => f.endsWith(".js"))) (0, eval)(readFileSync(`${wiredir}/${f}`, "utf8"));
+const W = (globalThis as any).Wire;
 let fail = 0;
 const check = (ok: boolean, what: string) => { console.log(`${ok ? "ok  " : "FAIL"} ${what}`); if (!ok) fail++; };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -69,9 +68,15 @@ async function join_(query: string): Promise<{ items: any[]; origin: string; sin
   ws.binaryType = "arraybuffer";
   const items: any[] = []; let origin = "", since = -1, done = false;
   ws.onmessage = (e) => {
-    const b = new Uint8Array(e.data as ArrayBuffer);
-    if (b[1] === 1 && Buffer.from(b.subarray(3, 7)).toString() === "plot") return;
-    const m = plain(cbor(b, KEYS, WORDS)) as any;
+    // a frame is text (JSON) or binary (the hub's CBOR, W.decode)
+    let m: any;
+    if (typeof e.data === "string") m = JSON.parse(e.data);
+    else {
+      const b = new Uint8Array(e.data as ArrayBuffer);
+      if (b[1] === 1 && Buffer.from(b.subarray(3, 7)).toString() === "plot") return;
+      m = JSON.parse(W.decode(b));
+    }
+    if (!m) return;
     if (m.t === "log") { origin = m.origin; since = m.since; items.push(...m.items); if (!m.more) done = true; }
     else if (m.t === "changes" && "boot" in m) { items.push(...m.items); if (m.boot === false) done = true; }
   };
