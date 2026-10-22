@@ -545,7 +545,9 @@ def Search.result(+page: T.SearchPage, +index: T.Index, +p: J.Json, +epoch: Stri
         J.KV{"visited", J.Json.nat(visited)}, J.KV{"hasMore", J.Flag{more}}, J.KV{"cursor", J.Str{Bool.pick(String, more, W.Cursor.write(epoch, J.Json.get_obj(p, "target"), J.Json.get_str(p, "query", ""), Page.number(last)), "")}}])}])
 
 def Search.render(+index: T.Index, +st: M.State, +p: J.Json, +epoch: String, +before: Nat) -> J.Json:
-  Search.result(T.Index.search(index, J.Json.get_str(p, "query", ""), Target.thread(st, J.Json.get_obj(p, "target")), before), index, p, epoch)
+  # Conversation search finds other threads even when the sidebar omits
+  # them. The target binds the reply/cursor, not the search's scope.
+  Search.result(T.Index.search(index, J.Json.get_str(p, "query", ""), "", before), index, p, epoch)
 
 def Message.result(+row: T.Row, +start: Nat, +p: J.Json, +epoch: String) -> J.Json:
   +n = T.Blocks.n(T.Row.blocks(row))

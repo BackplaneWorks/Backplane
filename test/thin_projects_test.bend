@@ -60,3 +60,8 @@ def main() -> IO(Unit):
     C.Check.str("and no more", has(threads(win()), "q1"), "False")
     C.Check.str("a project whose settled threads are opened has them all", has(threads(win.opened(["p3"])), "q1"), "True")
     C.Check.str("opening one project brings no other's", has(threads(win.opened(["p2"])), "q1"), "False")
+    +index : T.Index = T.Index.post(T.Index.post(T.Index.of(st()), M.Msg{"ctx-old", "s1", M.Assistant{}, "UniiChat infinite context", 57n}), M.Msg{"ctx-here", "t1", M.Assistant{}, "UniiChat here too", 58n})
+    +found : J.Json = V.Search.render(index, st(), J.Json.obj([J.KV{"target", V.Target.json("thread", "t1")}, J.KV{"query", J.Str{"UniiChat"}}]), "epoch", 0n)
+    +rows : J.Json = J.Json.get_obj(J.Json.get_obj(found, "search"), "rows")
+    C.Check.str("conversation search finds both current and hidden threads", Nat.show(List.length(&2, J.Json, J.Json.elems(rows))), "2")
+    C.Check.str("the hidden settled conversation is a selectable result", Bool.show(String.contains(J.Json.show(rows), "\"thread\":\"s1\"")), "True")
