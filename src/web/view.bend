@@ -243,6 +243,20 @@ def View.shelf(+lc: I.Loc, open: Bool, +key: String, +name: String, ts: List<&2,
     case +t <> +rest:
       View.shelf.k(lc, open, key, MSG.T.sidebar.shelf.count(lc, name, Nat.show(List.length(&2, M.Thread, t <> rest))), t <> rest, ix, st, sel, now)
 
+# the Settled shelf, labelled with the project's count (U.Side.settled.n:
+# a thin window holds only some of the threads); shown while the count is
+# not 0, its rows (what the window holds) when open
+def View.shelf.settled.k(none: Bool, +lc: I.Loc, open: Bool, +key: String, +name: String, ts: List<&2, M.Thread>, +n: Nat, +ix: U.SIx, +st: M.State, +sel: String, +now: Nat) -> List<&2, D.Node>:
+  match none:
+    case True{}:
+      Nil{}
+    case False{}:
+      View.shelf.k(lc, open, key, MSG.T.sidebar.shelf.count(lc, name, Nat.show(n)), ts, ix, st, sel, now)
+
+def View.shelf.settled(+lc: I.Loc, open: Bool, +key: String, +name: String, +ts: List<&2, M.Thread>, +ix: U.SIx, +st: M.State, +sel: String, +now: Nat) -> List<&2, D.Node>:
+  +n = U.Side.settled.n(st, key, List.length(&2, M.Thread, ts))
+  View.shelf.settled.k(Nat.is_eq(n, 0n), lc, open, key, name, ts, n, ix, st, sel, now)
+
 # snoozed threads, soonest to wake first
 def View.snoozed(+lc: I.Loc, ts: List<&2, M.Thread>, +ix: U.SIx, +st: M.State, +sel: String, +now: Nat) -> List<&2, D.Node>:
   match ts:
@@ -295,7 +309,7 @@ def View.project(+lc: I.Loc, r: U.SRow, +quiet: Bool, +open: Map<&2, Bool>, +ix:
           View.rows_in(lc, pinned, ix, st, sel, now, True{}, False{}),
           View.rows_in(lc, active, ix, st, sel, now, True{}, False{}),
           View.snoozed(lc, snoozed, ix, st, sel, now),
-          View.shelf(lc, U.Flag.get(open, id), id, MSG.T.notify.settled(lc), settled, ix, st, sel, now),
+          View.shelf.settled(lc, U.Flag.get(open, id), id, MSG.T.notify.settled(lc), settled, ix, st, sel, now),
           View.shelf(lc, U.Flag.get(open, "arch:" ++ id), "arch:" ++ id, MSG.T.sidebar.archived(lc), M.Archive.of(hidden), ix, st, sel, now)])}
 
 def View.projects(+lc: I.Loc, rs: List<&2, U.SRow>, +quiet: Bool, +open: Map<&2, Bool>, +ix: U.SIx, +st: M.State, +sel: String, +now: Nat, +look: String, +rm: String) -> List<&2, D.Node>:
