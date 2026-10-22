@@ -25,4 +25,4 @@ def main() -> IO(Unit):
     C.Check.str("the escape replays the whole log", show(S.Boot.decide(True{}, False{}, 0n)), "cold")
     C.Check.str("two builds at most", Nat.show(S.Boot.builds()), "2")
     C.Check.str("the child's JS heap is capped", String.join(S.Boot.child.env(), " "), "BUN_JSC_forceRAMSize=671088640 BUN_JSC_maxPerThreadStackUsage=536870912")
-    C.Check.str("the last line of a child's output", S.Boot.ran.last("store-rebuild progress 1 2 3\\nstore built lines=5 applied_off=9\\n"), "store built lines=5 applied_off=9")
+    C.Check.str("the last line of a child's output", S.Boot.ran.last("store-rebuild progress 1 2 3\nstore built lines=5 applied_off=9\n"), "store built lines=5 applied_off=9")
