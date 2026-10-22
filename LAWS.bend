@@ -11420,6 +11420,12 @@ law thin_mail_lazy_warm:
   for +st: M.State
   for +done: List<&2, TMAILL.Pending>
   {TMAILL.Lazy.force(TMAILL.Lazy.warm(TMAILL.Cache.of(st), TMAILL.Later{st, done})) == TMAILL.Lazy.force(TMAILL.Later{st, done}) : TMAILL.Cache}
+# a boot without the developer's escape never replays the whole log into
+# memory: an unusable store.db is built (a child), or the hub stops
+law boot_next_never_cold:
+  for ok: Bool
+  for n: Nat
+  {MPCREDIT.Boot.is_cold(MPCREDIT.Boot.next(False{}, ok, n)) == False{} : Bool}
 # ---- end S3 ----
 
 # --- J2: HTTP and WebSocket bodies counted and unmasked in tail calls ---
