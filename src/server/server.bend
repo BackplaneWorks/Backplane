@@ -7769,12 +7769,15 @@ def Far.feed.more(none: Bool, +xs: List<&2, String>, +at: Nat, +st: M.State, acc
     case False{}:
       k(Nat.add(at, List.length(&2, String, xs)), Feed.page(xs, at, st, acc))
 
+def Far.feed.got(+xs: List<&2, String>, +at: Nat, +st: M.State, acc: FR.Feed, k: Nat -> FR.Feed -> IO(FR.Feed)) -> IO(FR.Feed):
+  Far.feed.more(List.is_empty(&2, String, xs), xs, at, st, acc, k)
+
 def Far.feed.at(go: Bool, +ls: SO.Lg, +st: M.State, +at: Nat, acc: FR.Feed, k: Nat -> FR.Feed -> IO(FR.Feed)) -> IO(FR.Feed):
   match go:
     case False{}:
       IO.pure(FR.Feed, acc)
     case True{}:
-      IO.bind(List<&2, String>, FR.Feed, SO.Sto.lines(ls, at, 2000n), xs => Far.feed.more(List.is_empty(&2, String, xs), xs, at, st, acc, k))
+      IO.bind(List<&2, String>, FR.Feed, SO.Sto.lines(ls, at, 2000n), xs => Far.feed.got(xs, at, st, acc, k))
 
 def Far.feed.loop(fuel: Nat, +ls: SO.Lg, +st: M.State, +at: Nat, acc: FR.Feed) -> IO(FR.Feed):
   match fuel:
