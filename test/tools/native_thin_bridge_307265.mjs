@@ -4,6 +4,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+// Hermetic by default: without the frozen review packet (build/phone-cache), check the repo's own sources.
+if(!process.env.BP_NATIVE_THIN_SOURCE_ROOT&&!fs.existsSync(path.join(process.cwd(),'build/phone-cache/native-thin-bridge-proposal-01')))process.env.BP_NATIVE_THIN_SOURCE_ROOT=process.cwd();
 const root=process.cwd(), packet=path.join(root,'build/phone-cache/native-thin-bridge-proposal-01');
 const stage=fs.mkdtempSync(path.join(os.tmpdir(),'bp-native-thin-js-307265-'));
 for(const n of ['src/web/thin.js','src/web/thin-results.js','src/web/startup.js','src/web/mail-drafts.js']) {const q=path.join(stage,n);fs.mkdirSync(path.dirname(q),{recursive:true});fs.copyFileSync((process.env.BP_NATIVE_THIN_SOURCE_ROOT ? path.join(process.env.BP_NATIVE_THIN_SOURCE_ROOT,n) : path.join(packet,fs.existsSync(path.join(packet,'qualified-dependencies'))?'qualified-dependencies':'dependencies',n)),q);}

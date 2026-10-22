@@ -59,9 +59,6 @@ def Mat.ord(m: S.Mat) -> Nat:
     case S.Mat{_, _, _, _, _, o}:
       o
 
-def first() -> String:
-  Maybe.default(&2, String, List.head(&2, String, Log.lines()), "")
-
 def mat() -> S.Mat:
   S.Mat.replay(Log.lls(Log.lines()), S.Mat.empty())
 
@@ -179,7 +176,7 @@ def check(+name: String, +h: String) -> IO(Unit):
     mt : List<&2, List<&2, String>> <- D.Db.query(h, "SELECT group_concat(k || '=' || v, ' ') FROM (SELECT k, v FROM meta WHERE k <> 'log_id' ORDER BY k)", [], 1)
     C.Check.str(name ++ ": meta", one(mt), "applied_off=" ++ Nat.show(bytes(String.join(Log.lines(), "\n") ++ "\n")) ++ " applied_seq=" ++ Nat.show(Nat.sub(List.length(&2, String, Log.lines()), 1n)) ++ " codec=" ++ Nat.show(S.Sdb.codec()) ++ " ord=" ++ Nat.show(Mat.ord(mat())) ++ " origin=1 schema=1")
     id : List<&2, List<&2, String>> <- D.Db.query(h, "SELECT v FROM meta WHERE k = 'log_id'", [], 1)
-    C.Check.str(name ++ ": log id", one(id), Nat.show(bytes(first())) ++ ":" ++ String.take(first(), 64n))
+    C.Check.str(name ++ ": log id", one(id), S.Sdb.log_id(U.Utf8.encode(String.join(Log.lines(), "\n") ++ "\n{\"$\":\"MessagePosted\",\"th")))
     cl : String <- D.Db.close(h)
     return Unit{}
 

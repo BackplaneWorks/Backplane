@@ -197,7 +197,16 @@ function sock_save(socket, path, n, k) {
 }
 
 // Sends all of b; a full socket parks until writable (never a spin), as
-// host.c's host_send_more does.
+// host.c's host_send_more does. A parked send also tries again each second:
+// the loop waits with select(), which never reports a socketpair whose
+// connection was shut (Fd.shut) as writable (only POLLHUP, which C's poll
+// sees), so the send would wait for the peer to exit; the retry fails with
+// EPIPE at once.
+function host_park_out(socket, k, go, until) {
+  const tick = performance.now() + 1000;
+  io_park_on(socket, true, k, go, until === undefined ? tick : Math.min(until, tick));
+}
+
 function host_send(socket, b, k) {
   const sys = io_sys();
   const again = sys.mac ? 35 : 11;
@@ -208,7 +217,7 @@ function host_send(socket, b, k) {
       if (n < 0) {
         const code = sys.errno();
         if (code === again) {
-          io_park_on(socket, true, k, go);
+          host_park_out(socket, k, go);
           return undefined;
         }
         return io_tup(socket, io_fail(code));
@@ -254,7 +263,7 @@ function sock_send_until(socket, data, ms, k) {
       if (n < 0) {
         const code = sys.errno();
         if (code === again && performance.now() < until) {
-          io_park_on(socket, true, k, go, until);
+          host_park_out(socket, k, go, until);
           return undefined;
         }
         host_libc().shutdown(socket, 2);
@@ -320,11 +329,372 @@ function sock_shutdown(socket) {
 // Proc
 // ====
 
+// A child starts with a soft stack limit of 8 MiB at most. The hub runs with
+// a large one (LimitSTACK=4G: Bun's JS stack is bounded by it, and Bend's
+// deep walks need it), which children would inherit, and glibc sizes every
+// thread's stack from it: each agent's threads would reserve gigabytes.
+// The soft limit is lowered around the spawn and put back; the hub's own
+// stack is untouched (lowering a limit unmaps nothing, and the loop runs
+// spawns from a shallow stack). Hard limit unchanged.
+function host_child_stack(spawn) {
+  let lib;
+  try {
+    lib = globalThis.BACKPLANE_RLIMIT ?? (globalThis.BACKPLANE_RLIMIT = require("bun:ffi").dlopen(
+      process.platform === "darwin" ? "libSystem.dylib" : "libc.so.6", {
+        getrlimit: { args: ["i32", "ptr"], returns: "i32" },
+        setrlimit: { args: ["i32", "ptr"], returns: "i32" },
+      }).symbols);
+  } catch (_) {
+    return spawn();
+  }
+  const ptr = require("bun:ffi").ptr;
+  const was = new BigUint64Array(2);
+  const want = 8n << 20n;
+  // RLIMIT_STACK is 3 on Linux and macOS; RLIM_INFINITY is all ones
+  if (lib.getrlimit(3, ptr(was)) !== 0 || was[0] <= want) {
+    return spawn();
+  }
+  const low = new BigUint64Array([want, was[1]]);
+  const lowered = lib.setrlimit(3, ptr(low)) === 0;
+  try {
+    return spawn();
+  } finally {
+    if (lowered) {
+      lib.setrlimit(3, ptr(was));
+    }
+  }
+}
+
+// Children on Bun's own APIs
+// --------------------------
+// Where the runtime runs on Bun's event loop (loop.js: BEND_ASYNC, always on
+// Windows), children start with Bun.spawn and their stdin and stdout are one
+// BP_H handle (a BpStream), as host.c's socketpair end is one Socket:
+// reading its stdout (with stderr when err is 1), writing its stdin (held
+// back while Bun's pipe is full), Sock.shutdown ending its stdin, closing
+// both. Proc.wait parks on the child's exit (io_park_promise). The libc
+// backend below stays for the old loop (BACKPLANE_JS_LOOP=sync, POSIX).
+// Chosen at each call: effect files load in no fixed order.
+function bp_proc_bun() {
+  return (process.platform === "win32" || process.env.BACKPLANE_JS_PROC === "bun")
+    && globalThis.BP_H?.Stream !== undefined;
+}
+
+// On POSIX the libc spawn stays (a real socketpair end: an exec in place
+// keeps it, adopt.js hands it on); on Bun's loop that end is a BP_H handle
+// over the descriptor (loop.js's BpFd: read and written through Bun's own
+// streams, nothing polled), and Proc.wait waits on SIGCHLD.
+function bp_loop_bun() {
+  return globalThis.BEND_ASYNC === true && globalThis.BP_H?.fromFd !== undefined;
+}
+
+// Proc.wait on Bun's loop: the waited pids, reaped (waitpid WNOHANG) at
+// each SIGCHLD, which Bun delivers to process.on (several exits may share
+// one signal: every pending pid is tried). Bun reaps only its own children.
+// Under the sync loop the signal never fires (Bun's loop does not turn):
+// there Proc.wait parks on a pidfd as before.
+function bp_chld() {
+  if (globalThis.BP_CHLD === undefined) {
+    // a signal listener and a pending Promise do not keep Bun's loop alive:
+    // while any pid is waited for, a timer does (sweeping once a second
+    // too, should a signal be missed)
+    const g = { want: new Map(), timer: null };
+    g.sweep = () => {
+      for (const [pid, done] of g.want) {
+        const code = host_reap(pid);
+        if (code !== undefined) {
+          g.want.delete(pid);
+          for (const f of done) {
+            f(code);
+          }
+        }
+      }
+      if (g.want.size === 0 && g.timer !== null) {
+        clearInterval(g.timer);
+        g.timer = null;
+      } else if (g.want.size > 0 && g.timer === null) {
+        g.timer = setInterval(g.sweep, 1000);
+      }
+    };
+    process.on("SIGCHLD", g.sweep);
+    globalThis.BP_CHLD = g;
+  }
+  return globalThis.BP_CHLD;
+}
+
+function bp_chld_wait(pid, k) {
+  const now = host_reap(pid);
+  if (now !== undefined) {
+    return now;
+  }
+  const g = bp_chld();
+  const p = new Promise((res) => {
+    const list = g.want.get(pid) ?? [];
+    list.push(res);
+    g.want.set(pid, list);
+  });
+  // an exit between the reap above and the listener: tried once more
+  g.sweep();
+  return io_park_promise(p, k, (code) => code);
+}
+
+// the children Bun started, by pid, until Proc.wait has answered
+function bp_procs() {
+  return globalThis.BP_PROCS ?? (globalThis.BP_PROCS = new Map());
+}
+
+function bp_proc_errno(e) {
+  return globalThis.BP_H?.errno ? globalThis.BP_H.errno(e) : Math.abs(e?.errno ?? 5);
+}
+
+// a child's stdio as one handle; open counts the streams still feeding it.
+// Made at first use: loop.js's BpStream may load after this file.
+function bp_proc_class() {
+  if (globalThis.BP_PROC_CLASS !== undefined) {
+    return globalThis.BP_PROC_CLASS;
+  }
+  globalThis.BP_PROC_CLASS = class BpProc extends globalThis.BP_H.Stream {
+  constructor(child, streams) {
+    super("proc");
+    this.child = child;
+    this.sink = child.stdin;
+    this.wshut = false;
+    this.full = false;
+    this.readers = streams.filter((x) => x !== null && x !== undefined).map((x) => x.getReader());
+    this.open = this.readers.length;
+    this.stop = false;
+    this.idle = [];
+    if (this.open === 0) {
+      this.finish(0);
+    }
+    for (const r of this.readers) {
+      this.pump(r);
+    }
+  }
+  pump(r) {
+    if (this.paused) {
+      this.idle.push(r);
+      return;
+    }
+    r.read().then(({ value, done }) => {
+      if (done || this.stop) {
+        this.ended();
+        return;
+      }
+      this.feed(value);
+      this.pump(r);
+    }, () => this.ended());
+  }
+  ended() {
+    this.open -= 1;
+    if (this.open === 0) {
+      this.finish(0);
+    }
+  }
+  pause() {
+  }
+  resume() {
+    const rs = this.idle;
+    this.idle = [];
+    for (const r of rs) {
+      this.pump(r);
+    }
+  }
+  writable() {
+    return !this.full || this.wshut;
+  }
+  write(b) {
+    if (this.wshut || this.sink === null || this.sink === undefined) {
+      return -globalThis.BP_H.ERRNO.EPIPE;
+    }
+    if (this.full) {
+      return -globalThis.BP_H.ERRNO.EAGAIN;
+    }
+    // at most 64 KiB at a time, and none while Bun still holds the last:
+    // the sink takes everything it is given, so a send to a child that
+    // does not read waits here, as a full socketpair makes it wait in C
+    const c = b.subarray(0, 65536);
+    try {
+      this.sink.write(c);
+      const f = this.sink.flush();
+      if (f && typeof f.then === "function") {
+        this.full = true;
+        f.then(() => {
+          this.full = false;
+          this.wake(true);
+        }, () => {
+          this.full = false;
+          this.wshut = true;
+          this.wake(true);
+        });
+      }
+    } catch (e) {
+      return -globalThis.BP_H.ERRNO.EPIPE;
+    }
+    return c.length;
+  }
+  shutdown(how) {
+    if (how !== 1) {
+      this.shutRead();
+    }
+    if (how !== 0 && !this.wshut) {
+      this.wshut = true;
+      try {
+        this.sink?.end();
+      } catch (_) {
+      }
+    }
+    this.wake(true);
+  }
+  close() {
+    this.shutdown(2);
+    this.stop = true;
+    for (const r of this.readers) {
+      try {
+        r.cancel().catch(() => {});
+      } catch (_) {
+      }
+    }
+    this.wakeAll();
+  }
+  abort() {
+    this.close();
+  }
+  };
+  return globalThis.BP_PROC_CLASS;
+}
+
+// Proc.spawn on Bun: cmd (on PATH) with args in cwd ("" keeps ours); err as
+// host.c: 0 discards stderr, 1 joins it to stdout, 2 inherits ours, 3
+// writes it to the file Proc.errtail reads. The environment is ours
+// (Env.put writes process.env).
+function bp_proc_spawn(cmd, args, cwd, err) {
+  const fs = require("fs");
+  const argv = host_self([cmd, ...args]);
+  if (argv.some((a) => a.includes("\0")) || cwd.includes("\0")) {
+    return io_fail(host_eilseq());
+  }
+  if (cwd !== "") {
+    try {
+      if (!fs.statSync(cwd).isDirectory()) {
+        return io_fail(globalThis.BP_H.ERRNO.ENOTDIR);
+      }
+    } catch (e) {
+      return io_fail(bp_proc_errno(e));
+    }
+  }
+  let tmp = null;
+  let stderr = "ignore";
+  if (err === 1) {
+    stderr = "pipe";
+  } else if (err === 2) {
+    stderr = "inherit";
+  } else if (err === 3) {
+    const g = globalThis.BACKPLANE_ERR ?? (globalThis.BACKPLANE_ERR = { seq: 0 });
+    const dir = host_err_dir();
+    if (g.seq === 0) {
+      host_err_sweep(dir);
+    }
+    g.seq += 1;
+    tmp = dir + "/spawn." + process.pid + "." + g.seq;
+    try {
+      fs.writeFileSync(tmp, "", { mode: 0o600 });
+      stderr = Bun.file(tmp);
+    } catch (_) {
+      tmp = null;
+    }
+  }
+  const env = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (v !== undefined && k !== "" && !k.includes("=")) {
+      env[k] = v;
+    }
+  }
+  let child;
+  try {
+    child = Bun.spawn(argv, { cwd: cwd === "" ? undefined : cwd, env,
+      stdin: "pipe", stdout: "pipe", stderr });
+  } catch (e) {
+    if (tmp !== null) {
+      try {
+        fs.unlinkSync(tmp);
+      } catch (_) {
+      }
+    }
+    return io_fail(bp_proc_errno(e));
+  }
+  if (tmp !== null) {
+    try {
+      fs.renameSync(tmp, host_err_path(child.pid));
+    } catch (_) {
+    }
+  }
+  const h = new (bp_proc_class())(child, err === 1 ? [child.stdout, child.stderr] : [child.stdout]);
+  bp_procs().set(child.pid >>> 0, child);
+  return io_done(io_tup(child.pid >>> 0, globalThis.BP_H.add(h)));
+}
+
+// the code Proc.wait answers for a child that ended: its exit code, 128 +
+// the signal that ended it
+function bp_proc_code(child) {
+  if (child.signalCode !== null && child.signalCode !== undefined) {
+    return 128 + (require("os").constants.signals[child.signalCode] ?? 0);
+  }
+  return (child.exitCode ?? 255) & 0xff;
+}
+
+// Proc.wait: parks until the child ends; 255 when it is not ours (or was
+// waited for already), as waitpid's ECHILD
+function bp_proc_wait(pid, k) {
+  const child = bp_procs().get(pid >>> 0);
+  if (child === undefined) {
+    return 255;
+  }
+  return io_park_promise(child.exited, k, () => {
+    bp_procs().delete(pid >>> 0);
+    return bp_proc_code(child);
+  });
+}
+
+// Proc.exited: the code of a child that ended (Proc.wait still answers it),
+// 4294967295 while it runs, 255 when it is not ours
+function bp_proc_exited(pid) {
+  const child = bp_procs().get(pid >>> 0);
+  if (child === undefined) {
+    return 255;
+  }
+  if (child.exitCode === null && (child.signalCode === null || child.signalCode === undefined)) {
+    return 4294967295;
+  }
+  return bp_proc_code(child) >>> 0;
+}
+
+// Proc.kill: pid as kill(2) reads it, a negated pid a process group (POSIX;
+// on Windows a group's leader is ended alone). Never 0, 1 or -1.
+function bp_proc_kill(pid, sig) {
+  const n = pid | 0;
+  if (n === 0 || n === 1 || n === -1) {
+    return;
+  }
+  const child = bp_procs().get((n < 0 ? -n : n) >>> 0);
+  try {
+    if (n < 0 && process.platform !== "win32") {
+      process.kill(n, sig | 0);
+    } else if (child !== undefined) {
+      child.kill(sig | 0);
+    } else {
+      process.kill(n < 0 ? -n : n, sig | 0);
+    }
+  } catch (_) {
+  }
+}
+
 // Where an agent's stderr goes (err 3): ${BACKPLANE_ERR_DIR:-${TMPDIR:-/tmp}/backplane-err-<uid>}/<pid>.err
 function host_err_dir() {
   const d = process.env.BACKPLANE_ERR_DIR;
-  const t = process.env.TMPDIR;
-  const dir = d ? d : (t ? t : "/tmp") + "/backplane-err-" + process.getuid();
+  const t = process.env.TMPDIR || require("os").tmpdir();
+  const uid = typeof process.getuid === "function" ? process.getuid() : "user";
+  const dir = d ? d : t + "/backplane-err-" + uid;
   try {
     require("fs").mkdirSync(dir, { mode: 0o700 });
   } catch (_) {
@@ -351,7 +721,13 @@ function host_err_sweep(dir) {
     if (m === null || Number(m[1]) <= 1) {
       continue;
     }
-    if (host_libc().kill(Number(m[1]) | 0, 0) !== 0 && io_sys().errno() === 3) {
+    let gone = false;
+    try {
+      process.kill(Number(m[1]), 0);
+    } catch (e) {
+      gone = e?.code === "ESRCH";
+    }
+    if (gone) {
       try {
         fs.unlinkSync(dir + "/" + name);
       } catch (_) {
@@ -440,6 +816,9 @@ function host_self(argv) {
 // only 0-2 (Bun opens descriptors without close-on-exec), and starts with
 // every signal at its default and none blocked.
 function proc_spawn(cmd, args, cwd, err) {
+  if (bp_proc_bun()) {
+    return bp_proc_spawn(cmd, host_list_js(args), cwd, Number(err));
+  }
   const c = host_libc();
   const sys = io_sys();
   const argv = host_self([cmd, ...host_list_js(args)]);
@@ -503,8 +882,8 @@ function proc_spawn(cmd, args, cwd, err) {
   c.posix_spawnattr_setsigmask(c.ptr(at), c.ptr(set));
   c.posix_spawnattr_setflags(c.ptr(at), 0x04 | 0x08 | (c.mac ? 0x4000 : 0));
   if (code === 0) {
-    code = c.posix_spawnp(c.ptr(pid), c.ptr(v.bufs[0]), c.ptr(fa), c.ptr(at),
-      c.ptr(v.vec), c.ptr(env.vec));
+    code = host_child_stack(() => c.posix_spawnp(c.ptr(pid), c.ptr(v.bufs[0]), c.ptr(fa), c.ptr(at),
+      c.ptr(v.vec), c.ptr(env.vec)));
   }
   c.posix_spawn_file_actions_destroy(c.ptr(fa));
   c.posix_spawnattr_destroy(c.ptr(at));
@@ -527,7 +906,7 @@ function proc_spawn(cmd, args, cwd, err) {
   }
   sys.fcntl(sv[0], 4, sys.fcntl(sv[0], 3, 0) | (c.mac ? 4 : 0x800));
   sys.fcntl(sv[0], 2, 1);
-  return io_done(io_tup(pid[0] >>> 0, sv[0]));
+  return io_done(io_tup(pid[0] >>> 0, bp_loop_bun() ? globalThis.BP_H.fromFd(sv[0], "proc") : sv[0]));
 }
 
 // The last 2048 bytes a process started with err 3 wrote to stderr ("" when
@@ -639,12 +1018,21 @@ function host_wait_then(pid, k, done) {
 
 // The exit code (128 + signal when killed), once the child ends.
 function proc_wait(pid, k) {
+  if (bp_proc_bun() && bp_procs().has(pid >>> 0)) {
+    return bp_proc_wait(pid, k);
+  }
+  if (bp_loop_bun()) {
+    return bp_chld_wait(pid >>> 0, k);
+  }
   return host_wait_then(pid, k, (code) => code);
 }
 
 // Proc.exited: the exit code of a child that has exited (left unreaped:
 // WNOWAIT), 4294967295 while it runs; one already reaped reads 255.
 function proc_exited(pid) {
+  if (bp_proc_bun() && bp_procs().has(pid >>> 0)) {
+    return bp_proc_exited(pid);
+  }
   const c = host_libc();
   const si = new Uint8Array(256);
   const dv = new DataView(si.buffer);
@@ -662,6 +1050,10 @@ function proc_exited(pid) {
 }
 
 function proc_kill(pid, sig) {
+  if (process.platform === "win32") {
+    bp_proc_kill(pid, sig);
+    return { $: "Unit" };
+  }
   host_libc().kill(pid | 0, sig | 0);
   return { $: "Unit" };
 }

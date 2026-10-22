@@ -51,6 +51,14 @@ if [ -n "$web" ]; then
   code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port/") || code=000
   [ "$code" = 200 ] || fail "GET / answered $code"
   echo "js-smoke: the web client is served"
+  # the largest file whole: a multi-MB body once overflowed the JS hub's
+  # stack (List.length in Http.response.c) the moment a browser loaded it
+  big=$(ls -S "$web" | head -n1)
+  want=$(wc -c <"$web/$big" | tr -d ' ')
+  got=$(curl -s -o /dev/null -w '%{size_download}' "http://127.0.0.1:$port/$big") || got=0
+  [ "$got" = "$want" ] || fail "GET /$big gave $got bytes of $want"
+  kill -0 "$pid" 2>/dev/null || { pid=""; fail "the hub died serving /$big"; }
+  echo "js-smoke: /$big served whole ($want bytes)"
 fi
 if [ "${BACKPLANE_SMOKE_FULL:-}" = 1 ]; then
   bun test/smoke.ts "$port" "$home" build/wire

@@ -1,5 +1,7 @@
 // Focused source controls; real shared transport, stub pure Bend adapter. No build/runtime claim.
 import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import assert from 'node:assert/strict';import {pathToFileURL} from 'node:url';
+// Hermetic by default: without the frozen review packet (build/phone-cache), check the repo's own sources.
+if(!process.env.BP_NATIVE_THIN_SOURCE_ROOT&&!fs.existsSync(path.join(process.cwd(),'build/phone-cache/native-thin-bridge-proposal-01')))process.env.BP_NATIVE_THIN_SOURCE_ROOT=process.cwd();
 const root=process.env.BP_NATIVE_THIN_SOURCE_ROOT||process.cwd(),stage=fs.mkdtempSync(path.join(os.tmpdir(),'bp-native-privacy-307265-'));
 const donor=process.env.BP_NATIVE_THIN_SOURCE_ROOT?root:path.join(root,'build/phone-cache/native-thin-bridge-proposal-01/qualified-dependencies');
 for(const n of ['src/web/thin.js','src/web/thin-results.js','src/web/startup.js','src/web/mail-drafts.js']){const q=path.join(stage,n);fs.mkdirSync(path.dirname(q),{recursive:true});fs.copyFileSync(path.join(donor,n),q);}

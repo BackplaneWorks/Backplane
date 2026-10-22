@@ -120,11 +120,24 @@ def Http.param(+p: String, +name: String) -> String:
 def Http.route(p: String) -> String:
   Http.route.k(String.split(p, '?'))
 
+# How many bytes, in a tail call: Base's List.length keeps a stack frame
+# per cell, which the JS target (web, phones, the Bun hub) overflows on a
+# body of a few hundred KB (laws http_count_go_succ, http_count_is_length)
+def Http.count.go(bs: List<&2, U32>, +n: Nat) -> Nat:
+  match bs:
+    case Nil{}:
+      n
+    case _ <> t:
+      Http.count.go(t, 1n+n)
+
+def Http.count(bs: List<&2, U32>) -> Nat:
+  Http.count.go(bs, 0n)
+
 # a response with its own Cache-Control
 def Http.response.c(status: String, ctype: String, body: List<&2, U32>, cache: String, extra: String) -> List<&2, U32>:
   +body2 = body
   List.append(&2, U32, U.Utf8.encode("HTTP/1.1 " ++ status ++ "\r\nContent-Type: " ++ ctype
-    ++ "\r\nContent-Length: " ++ Nat.show(List.length(&2, U32, body2))
+    ++ "\r\nContent-Length: " ++ Nat.show(Http.count(body2))
     ++ "\r\nCache-Control: " ++ cache ++ "\r\nConnection: close\r\n" ++ extra ++ "\r\n"), body2)
 
 # Responses
@@ -183,6 +196,25 @@ def Ws.unmask(bs: List<&2, U32>, +key: List<&2, U32>, +i: Nat) -> List<&2, U32>:
     case x <> t:
       Ws.unmask.k(x, key, i) <> Ws.unmask(t, key, 1n+i)
 
+# Ws.unmask in tail calls, onto acc reversed (laws ws_unmask_go,
+# ws_unmask_take_go): a frame's payload is walked once, however long
+def Ws.unmask.go(bs: List<&2, U32>, +key: List<&2, U32>, +i: Nat, acc: List<&2, U32>) -> List<&2, U32>:
+  match bs:
+    case Nil{}:
+      acc
+    case x <> t:
+      Ws.unmask.go(t, key, 1n+i, Ws.unmask.k(x, key, i) <> acc)
+
+# the first n bytes unmasked (Ws.unmask of List.take), reversed onto acc
+def Ws.unmask.take.go(bs: List<&2, U32>, n: Nat, +key: List<&2, U32>, +i: Nat, acc: List<&2, U32>) -> List<&2, U32>:
+  match bs n:
+    case Nil{} _:
+      acc
+    case _ <> _ 0n:
+      acc
+    case x <> t 1n+m:
+      Ws.unmask.take.go(t, m, key, 1n+i, Ws.unmask.k(x, key, i) <> acc)
+
 def Ws.be(bs: List<&2, U32>, acc: Nat) -> Nat:
   match bs:
     case Nil{}:
@@ -193,7 +225,7 @@ def Ws.be(bs: List<&2, U32>, acc: Nat) -> Nat:
 def Ws.body.fit(ok: Bool, fin: Bool, +op: U32, +key: List<&2, U32>, +len: Nat, +bs: List<&2, U32>) -> Maybe<&2, Got>:
   match ok:
     case True{}:
-      Some{Got{Frame{fin, op, Ws.unmask(List.take(&2, U32, bs, len), key, 0n)}, List.drop(&2, U32, bs, len)}}
+      Some{Got{Frame{fin, op, List.reverse(&2, U32, Ws.unmask.take.go(bs, len, key, 0n, Nil{}))}, List.drop(&2, U32, bs, len)}}
     case False{}:
       None{}
 
@@ -251,7 +283,7 @@ def Ws.len_bytes.k(short: Bool, mid: Bool, +n: Nat) -> List<&2, U32>:
 # an unmasked, final server frame
 def Ws.encode(+op: U32, payload: List<&2, U32>) -> List<&2, U32>:
   +p = payload
-  +n = List.length(&2, U32, p)
+  +n = Http.count(p)
   U32.or(128, op) <> List.append(&2, U32, Ws.len_bytes.k(Nat.is_lt(n, 126n), Nat.is_lt(n, 65536n), n), p)
 
 def Ws.text(s: String) -> List<&2, U32>:
@@ -287,9 +319,9 @@ def Ws.mask_len(bs: List<&2, U32>) -> List<&2, U32>:
 # a masked, final client frame
 def Ws.encode_masked(+op: U32, payload: List<&2, U32>) -> List<&2, U32>:
   +p = payload
-  +n = List.length(&2, U32, p)
+  +n = Http.count(p)
   U32.or(128, op) <> List.append(&2, U32, Ws.mask_len(Ws.len_bytes.k(Nat.is_lt(n, 126n), Nat.is_lt(n, 65536n), n)),
-    List.append(&2, U32, Ws.key(), Ws.unmask(p, Ws.key(), 0n)))
+    List.append(&2, U32, Ws.key(), List.reverse(&2, U32, Ws.unmask.go(p, Ws.key(), 0n, Nil{}))))
 
 def Ws.client_text(s: String) -> List<&2, U32>:
   Ws.encode_masked(1, U.Utf8.encode(s))

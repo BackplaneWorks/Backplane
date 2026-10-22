@@ -1,4 +1,5 @@
 import Foundation
+import Network
 import Observation
 import UIKit
 
@@ -141,6 +142,12 @@ final class AppModel {
     // the hub whose plots are drawn: frames from any other are dropped
     @ObservationIgnored private var shownHub = ""
     var active = true
+    // when the app last left the front (a suspension may kill its sockets)
+    @ObservationIgnored private var awayAt: Date?
+    // network changes (Wi-Fi to cellular, back online): sockets are tried now
+    @ObservationIgnored private let paths = NWPathMonitor()
+    @ObservationIgnored private var lastPath: NWPath.Status?
+    @ObservationIgnored private var lastInterfaces: [String] = []
     // drafts sent to Bend and not yet answered: until then a screen may
     // carry an older draft than the one on screen
     @ObservationIgnored private var typing = 0
@@ -210,6 +217,11 @@ final class AppModel {
             else { tab = cached.uber == nil ? .threads : .home }
         }
         notifier.open = { [weak self] id in self?.act("select", id) }
+        paths.pathUpdateHandler = { [weak self] path in
+            let names = path.availableInterfaces.map(\.name)
+            Task { @MainActor [weak self] in self?.pathChanged(path.status, names) }
+        }
+        paths.start(queue: .main)
         NotificationCenter.default.addObserver(forName: .NSSystemTimeZoneDidChange, object: nil, queue: .main) { [weak self] _ in
             self?.act("tz-report", TimeZone.current.identifier)
         }
@@ -338,21 +350,19 @@ final class AppModel {
     private func open(_ key: String, _ link: String) {
         let e = engine
         let h = Hub(url: { [weak self] in
-                guard let self else { return nil }
+                guard let self else { return Hub.Next.stop }
                 let epoch = String(self.conn[key]?.epoch ?? 0)
-                if self.startup[key] == .compatibilityChosen {
-                    self.apply(await e.connection(key, epoch))
-                    let r = try? JSONDecoder().decode(Resume.self, from: Data(await e.resume(key).utf8))
-                    return Pairing.socket(link, since: r?.since ?? "0", origin: r?.origin ?? "")
-                }
                 self.startup[key] = .discovering
-                let supported = await ViewCapability.discover(link)
-                guard self.links.contains(link), self.conn[key]?.epoch == UInt64(epoch) else { return nil }
-                guard supported else {
+                let found = await ViewCapability.find(link)
+                guard self.links.contains(link), self.conn[key]?.epoch == UInt64(epoch) else { return .stop }
+                // a hub that is down or restarting is asked again after the
+                // backoff; only a hub that answers without views parks
+                if found == .unreachable { return .later }
+                guard found == .supported else {
                     self.startup[key] = .compatibilityRequired
                     self.conn[key, default: HubConn()].phase = .offline
                     NSLog("Backplane view capability_required")
-                    return nil
+                    return .stop
                 }
                 self.startup[key] = .thin
                 self.apply(await e.connection(key, epoch, mode: "view-v1"))
@@ -362,7 +372,7 @@ final class AppModel {
                 } else if let cached = self.screen, cached.hub == key {
                     self.apply(await e.act("select", cached.sel))
                 }
-                return Pairing.viewSocket(link)
+                return Pairing.viewSocket(link).map { Hub.Next.go($0) } ?? Hub.Next.stop
             },
             onConnecting: { [weak self] in
                 self?.cachedReadiness.retire(key)
@@ -893,12 +903,12 @@ final class AppModel {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("hub-settings.json")
     }
 
-    func retryView(_ key: String, compatibility: Bool = false) {
+    func retryView(_ key: String) {
         guard links.contains(where: { Pairing.key($0) == key }), startup[key] == .compatibilityRequired else { return }
         hubs.removeValue(forKey: key)?.stop()
         thinReady[key] = nil
         cachedReadiness.retire(key)
-        startup[key] = compatibility ? .compatibilityChosen : .discovering
+        startup[key] = .discovering
         connect()
     }
 
@@ -960,9 +970,22 @@ final class AppModel {
         run { await $0.local("view", v) }
     }
 
+    private func pathChanged(_ status: NWPath.Status, _ interfaces: [String]) {
+        defer { lastPath = status; lastInterfaces = interfaces }
+        guard let was = lastPath, status == .satisfied, was != .satisfied || interfaces != lastInterfaces else { return }
+        for h in hubs.values { h.wake(quiet: 3) }
+    }
+
     func foreground(_ yes: Bool) {
         active = yes
-        if !yes { keep() }
+        if !yes { keep(); awayAt = Date() }
+        // back in front: a socket the suspension may have killed is replaced
+        // at once, and a hub waiting out its backoff is tried now
+        if yes {
+            let away = awayAt.map { Date().timeIntervalSince($0) } ?? 0
+            awayAt = nil
+            for h in hubs.values { h.wake(quiet: away > 20 ? 3 : 40) }
+        }
         if yes, contentReady, let s = screen { island?.show(s.islands ?? [], foreground: true) }
     }
 

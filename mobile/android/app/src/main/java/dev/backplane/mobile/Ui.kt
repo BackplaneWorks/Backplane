@@ -569,9 +569,10 @@ internal fun Projects(m: AppModel, s: Screen, onPair: () -> Unit, state: LazyLis
                 title = {
                     Column {
                         Text(NativeMessages.tour_title_threads(lang))
-                        Text(NativeMessages.native_thread_online(lang, if (s.online) "online" else "connecting"),
+                        val online = s.online && m.linkUp(s.hub)
+                        Text(NativeMessages.native_thread_online(lang, if (online) "online" else "connecting"),
                             style = MaterialTheme.typography.labelMedium,
-                            color = if (s.online) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline)
+                            color = if (online) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline)
                     }
                 },
                 actions = {

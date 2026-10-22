@@ -186,6 +186,10 @@ def Fwd.got(m: Maybe<&1, S.Wire>, +q: Chan(ShellMsg), +tag: String, k: Unit -> I
       do IO<Unit>:
         ok : Result<&1, &1, ShellMsg, Unit> <- Chan.send(ShellMsg, q, FromHubSt{tag, st, h})
         k(Unit{})
+    case Some{S.WJson{j, _}}:
+      do IO<Unit>:
+        ok : Result<&1, &1, ShellMsg, Unit> <- Chan.send(ShellMsg, q, FromHub{tag, J.Json.show(j)})
+        k(Unit{})
     case Some{S.WItems{hd, pl, _, xs, tl, _}}:
       do IO<Unit>:
         ok : Result<&1, &1, ShellMsg, Unit> <- Chan.send(ShellMsg, q, FromHub{tag, hd ++ pl ++ String.join(xs, ",") ++ tl})

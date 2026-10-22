@@ -89,10 +89,73 @@ function bp_hub_fail(path, code) {
   return "fail " + path + ": " + io_strerror(code);
 }
 
+// Windows: no flock. The hub keeps the file open for writing and lets
+// others only read it (CreateFileW, FILE_SHARE_READ): another hub's open
+// for writing fails with a sharing violation, while the line it wrote stays
+// readable, and the system lets go when the hub dies. No exec hands it on
+// (Windows has none; the supervisor will own restarts).
+let bp_hub_h = null;
+let bp_hub_k32;
+function bp_hub_win() {
+  if (!bp_hub_k32) {
+    const ffi = require("bun:ffi");
+    bp_hub_k32 = { ffi, ...ffi.dlopen("kernel32.dll", {
+      CreateFileW: { args: ["ptr", "u32", "u32", "ptr", "u32", "u32", "ptr"], returns: "i64" },
+      CloseHandle: { args: ["i64"], returns: "i32" },
+      WriteFile: { args: ["i64", "ptr", "u32", "ptr", "ptr"], returns: "i32" },
+      SetFilePointerEx: { args: ["i64", "i64", "ptr", "u32"], returns: "i32" },
+      SetEndOfFile: { args: ["i64"], returns: "i32" },
+      GetLastError: { args: [], returns: "u32" },
+    }).symbols };
+  }
+  return bp_hub_k32;
+}
+
+// a handle on path for writing (share: what others may still do), or the
+// Windows error
+function bp_hub_open(path, share, create) {
+  const k = bp_hub_win();
+  const name = Buffer.from(require("node:path").resolve(path) + "\0", "utf16le");
+  // GENERIC_WRITE; OPEN_ALWAYS or OPEN_EXISTING; FILE_ATTRIBUTE_NORMAL
+  const h = k.CreateFileW(k.ffi.ptr(name), 0x40000000, share, null, create ? 4 : 3, 0x80, null);
+  return Number(h) === -1 ? { err: k.GetLastError() } : { h };
+}
+
+function hub_lock_take_win(path, port) {
+  const k = bp_hub_win();
+  if (bp_hub_h === null) {
+    const got = bp_hub_open(path, 1, true);
+    if (got.err !== undefined) {
+      // ERROR_SHARING_VIOLATION / ERROR_LOCK_VIOLATION
+      return got.err === 32 || got.err === 33 ? "held " + bp_hub_read(path)
+        : "fail " + path + ": Windows error " + got.err;
+    }
+    bp_hub_h = got.h;
+  }
+  const line = Buffer.from(`${process.pid} ${port} flock\n`);
+  const n = new Uint32Array(1);
+  k.SetFilePointerEx(bp_hub_h, 0, null, 0);
+  k.WriteFile(bp_hub_h, k.ffi.ptr(line), line.length, k.ffi.ptr(n), null);
+  k.SetEndOfFile(bp_hub_h);
+  return "ok";
+}
+
+function hub_lock_held_win(path) {
+  if (bp_hub_h !== null) return "";
+  // FILE_SHARE_READ | FILE_SHARE_WRITE: refused only while a holder writes
+  const got = bp_hub_open(path, 3, false);
+  if (got.err === undefined) {
+    bp_hub_win().CloseHandle(got.h);
+    return "";
+  }
+  return got.err === 32 || got.err === 33 ? bp_hub_read(path) || "? ?" : "";
+}
+
 // "ok" (this process holds the lock, and the file says "<pid> <port>
 // flock"), "held <pid> <port> flock" (another process holds it) or
 // "fail <why>"
 function hub_lock_take(path, port) {
+  if (process.platform === "win32") return hub_lock_take_win(path, port);
   const line = `${process.pid} ${port} flock`;
   const fs = require("node:fs");
   const c = bp_hub_libc();
@@ -147,6 +210,7 @@ function hub_lock_take(path, port) {
 // "" when no other process holds the lock (or this one does), else what
 // the holder wrote ("<pid> <port>"; "? ?" when it wrote nothing)
 function hub_lock_held(path) {
+  if (process.platform === "win32") return hub_lock_held_win(path);
   if (bp_hub_same(bp_hub_fd, path)) return "";
   const fs = require("node:fs");
   const c = bp_hub_libc();

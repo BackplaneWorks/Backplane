@@ -40,7 +40,7 @@ type RK is Data:
 # bumped on any change to the tables or to a record's columns or json
 # (a different number in meta.codec: the store is made again)
 def Sdb.codec() -> Nat:
-  3n
+  4n
 
 def Sdb.schema() -> String:
   String.join([
@@ -135,24 +135,43 @@ def Tab.keyn(+t: String) -> Nat:
 def Sdb.fact(+t: String) -> Bool:
   Bool.or(Bool.or(String.eq(t, "line"), String.eq(t, "entry")), Bool.or(Bool.or(String.eq(t, "term"), String.eq(t, "post")), String.eq(t, "mail")))
 
-# one "?" per column
+# Parameters
+# ----------
+# D.Db binds a parameter that reads "#<digits>" as an integer, so a value
+# written as it is would lose a person's "#42" (a title, a setting, a
+# message) to the number 42. Every value goes as "v" ++ value and the
+# statement takes substr(?, 2): no parameter ever starts with '#'. Numbers
+# go as plain digits and the INTEGER columns' affinity stores them as
+# integers (law-free, checked by test/storedb_test.bend and the commit e2e).
+
+def Sql.p() -> String:
+  "substr(?, 2)"
+
+def Sql.vals(xs: List<&2, String>, acc: List<&2, String>) -> List<&2, String>:
+  match xs:
+    case Nil{}:
+      List.reverse(&2, String, acc)
+    case x <> t:
+      Sql.vals(t, ("v" ++ x) <> acc)
+
+# one parameter per column
 def Sql.marks(cs: List<&2, String>) -> String:
   match cs:
     case Nil{}:
       ""
     case _ <> Nil{}:
-      "?"
+      Sql.p()
     case _ <> t:
-      "?, " ++ Sql.marks(t)
+      Sql.p() ++ ", " ++ Sql.marks(t)
 
 def Sql.eqs(xs: List<&2, String>) -> String:
   match xs:
     case Nil{}:
       ""
     case x <> Nil{}:
-      x ++ " = ?"
+      x ++ " = " ++ Sql.p()
     case x <> t:
-      x ++ " = ? AND " ++ Sql.eqs(t)
+      x ++ " = " ++ Sql.p() ++ " AND " ++ Sql.eqs(t)
 
 def Sql.put.k(fact: Bool, +t: String, +cs: List<&2, String>) -> String:
   match fact:
@@ -161,27 +180,28 @@ def Sql.put.k(fact: Bool, +t: String, +cs: List<&2, String>) -> String:
     case False{}:
       "INSERT OR REPLACE INTO " ++ t ++ "(" ++ String.join(cs, ", ") ++ ") VALUES (" ++ Sql.marks(cs) ++ ")"
 
-# an op as a statement and its parameters (S2's D.Db: "#<digits>" binds an
-# integer, anything else text). The SQL depends on the table alone.
+# an op as a statement and its parameters (each "v" ++ value, Sql.p). The
+# SQL depends on the table alone.
 def Sql.of(o: Op) -> List<&2, String>:
   match o:
     case Put{+t, cols}:
-      Sql.put.k(Sdb.fact(t), t, Sdb.cols(t)) <> cols
+      Sql.put.k(Sdb.fact(t), t, Sdb.cols(t)) <> Sql.vals(cols, Nil{})
     case Del{+t, key}:
-      ("DELETE FROM " ++ t ++ " WHERE " ++ Sql.eqs(List.take(&2, String, Sdb.cols(t), Tab.keyn(t)))) <> key
+      ("DELETE FROM " ++ t ++ " WHERE " ++ Sql.eqs(List.take(&2, String, Sdb.cols(t), Tab.keyn(t)))) <> Sql.vals(key, Nil{})
 
 # Columns
 # -------
 
+# a number as its column holds it (plain digits: Sql.p)
 def S.n(+n: Nat) -> String:
-  "#" ++ Nat.show(n)
+  Nat.show(n)
 
 def S.b(b: Bool) -> String:
   match b:
     case True{}:
-      "#1"
+      "1"
     case False{}:
-      "#0"
+      "0"
 
 def S.j(kvs: List<&2, J.KV>) -> String:
   J.Json.show(J.Json.obj(kvs))
@@ -1282,7 +1302,7 @@ def Tab.entry.k(msg: Bool, id: String, th: String, r: String, ak: String, text: 
 def Tab.entry.of(cs: List<&2, String>) -> M.Entry:
   match cs:
     case _ <> _ <> id <> th <> _ <> +k <> r <> ak <> text <> at <> Nil{}:
-      Tab.entry.k(String.eq(k, "msg"), id, th, r, ak, text, M.Switch.num(String.drop(at, 1n), 0n))
+      Tab.entry.k(String.eq(k, "msg"), id, th, r, ak, text, M.Switch.num(at, 0n))
     case _:
       M.Act{"", "", "", "", "", 0n}
 

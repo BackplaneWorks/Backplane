@@ -1,4 +1,6 @@
 import Base
+import ./src/core/cbor.bend as CBR1 # fast hub R1
+import ./src/core/thin-pace.bend as TPR1 # fast hub R1
 import ./src/core/thin.bend as THINL # S3 lazy thin index
 import ./src/server/thin-mail.bend as TMAILL # S3 lazy mail cache
 import ./src/core/storedb.bend as SDB # S1 indexed store
@@ -10976,6 +10978,55 @@ law oprep_task_delivered_with_filing:
 law oprep_other_thread_unchanged:
   {H.Operational.posts(H.Queue.changes(H.Operational.demo.finish(False{})), "t0") == 1n : Nat}
 
+# --- fast hub R1: frames encoded without a scan per string (cbor_*) ---
+# the encoder's search trees hold exactly the append-only dictionaries: a
+# lookup in a tree answers what Cbor.find answers in its list
+law cbor_trees_exact:
+  {Bool.and(CBR1.CTree.ok(CBR1.Cbor.keys(), CBR1.Cbor.keys.tree()), CBR1.CTree.ok(CBR1.Cbor.words(), CBR1.Cbor.words.tree())) == True{} : Bool}
+
+# --- fast hub R1: thin view notices paced (thin_pace_*) ---
+# a delta or change to a view's own thread is its urgent level; another
+# thread's is the soft level; "*" (anything not clearly one thread's) is
+# urgent for every view; nothing touched is nothing
+law thin_pace_own_urgent:
+  {TPR1.Touch.level(TPR1.Touch.add(TPR1.Touch.none(), "t1"), "t1") == 2n : Nat}
+
+law thin_pace_other_soft:
+  {TPR1.Touch.level(TPR1.Touch.add(TPR1.Touch.none(), "t1"), "t2") == 1n : Nat}
+
+law thin_pace_all_urgent:
+  {TPR1.Touch.level(TPR1.Touch.add(TPR1.Touch.none(), "*"), "t2") == 2n : Nat}
+
+law thin_pace_none_quiet:
+  for th: String
+  {TPR1.Touch.level(TPR1.Touch.none(), th) == 0n : Nat}
+
+# a view of no thread (recent, a room) hears thread changes as soft
+law thin_pace_no_thread_soft:
+  {TPR1.Touch.level(TPR1.Touch.add(TPR1.Touch.none(), "t1"), "") == 1n : Nat}
+
+# its own thread is told at once once the urgent gap has passed
+law thin_pace_own_sends:
+  {TPR1.Paced.send(TPR1.Pace.step(TPR1.Pace{1000n, 0n}, Nat.add(1000n, TPR1.Pace.urgent()), 2n)) == True{} : Bool}
+
+# another thread's change within the soft gap is owed, not dropped, and its
+# wait is what is left of the gap
+law thin_pace_soft_owed:
+  {TPR1.Pace.step(TPR1.Pace{1000n, 0n}, 1100n, 1n) == TPR1.Paced{False{}, TPR1.Pace{1000n, 1n}, 400n} : TPR1.Paced}
+
+# the flush timer tells an owed view once due, and then it owes nothing
+law thin_pace_flush_sends:
+  {TPR1.Pace.step(TPR1.Pace{1000n, 1n}, 1500n, 0n) == TPR1.Paced{True{}, TPR1.Pace{1500n, 0n}, 0n} : TPR1.Paced}
+
+# an urgent change raises what a view owes, never lowers it
+law thin_pace_owed_raised:
+  {TPR1.Pace.step(TPR1.Pace{1000n, 1n}, 1010n, 2n) == TPR1.Paced{False{}, TPR1.Pace{1000n, 2n}, Nat.sub(TPR1.Pace.urgent(), 10n)} : TPR1.Paced}
+
+# a view owed nothing and touched by nothing is never told
+law thin_pace_quiet:
+  for last: Nat
+  for now: Nat
+  {TPR1.Paced.send(TPR1.Pace.step(TPR1.Pace{last, 0n}, now, 0n)) == False{} : Bool}
 # --- J2: walks the JS hub makes over a whole log, in tail calls ---
 # Bend's JS target turns only tail self-calls into loops, and Bun's stack
 # holds about 67k frames: Base's List.length and String.to_lower overflowed
@@ -11067,6 +11118,33 @@ law thin_mail_lazy_warm:
   for +done: List<&2, TMAILL.Pending>
   {TMAILL.Lazy.force(TMAILL.Lazy.warm(TMAILL.Cache.of(st), TMAILL.Later{st, done})) == TMAILL.Lazy.force(TMAILL.Later{st, done}) : TMAILL.Cache}
 # ---- end S3 ----
+
+# --- J2: HTTP and WebSocket bodies counted and unmasked in tail calls ---
+# (Base's List.length and a per-byte non-tail unmask keep a frame per byte:
+# the JS target overflowed on bodies and frames of a few hundred KB)
+law http_count_go_succ:
+  for +bs: List<&2, U32>
+  for +n: Nat
+  {WS.Http.count.go(bs, 1n+n) == 1n+WS.Http.count.go(bs, n) : Nat}
+
+law http_count_is_length:
+  for +bs: List<&2, U32>
+  {WS.Http.count(bs) == List.length(&2, U32, bs) : Nat}
+
+law ws_unmask_go:
+  for +bs: List<&2, U32>
+  for +key: List<&2, U32>
+  for +i: Nat
+  for +acc: List<&2, U32>
+  {WS.Ws.unmask.go(bs, key, i, acc) == List.reverse.go(&2, U32, WS.Ws.unmask(bs, key, i), acc) : List<&2, U32>}
+
+law ws_unmask_take_go:
+  for +bs: List<&2, U32>
+  for +n: Nat
+  for +key: List<&2, U32>
+  for +i: Nat
+  for +acc: List<&2, U32>
+  {WS.Ws.unmask.take.go(bs, n, key, i, acc) == List.reverse.go(&2, U32, WS.Ws.unmask(List.take(&2, U32, bs, n), key, i), acc) : List<&2, U32>}
 
 # ---- browser pages and loopback (J3) ----
 # page ids: an unknown one is refused, a thread's or bot's accepted

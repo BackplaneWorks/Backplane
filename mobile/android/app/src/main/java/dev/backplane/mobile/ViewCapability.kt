@@ -20,21 +20,28 @@ object ViewCapability {
                 (0 until a.length()).any { a.get(it) == "mobile" }
             }
     }.getOrDefault(false)
-    suspend fun discover(link: String): Boolean = withContext(Dispatchers.IO) {
+    // What discovery found: a hub that is down or starting (refused, a
+    // timeout, 502-504) is not a hub without views, and is asked again.
+    enum class Found { SUPPORTED, UNSUPPORTED, UNREACHABLE }
+
+    suspend fun discover(link: String): Boolean = find(link) == Found.SUPPORTED
+
+    suspend fun find(link: String): Found = withContext(Dispatchers.IO) {
         runCatching {
-            val url = Pairing.http(link, "/client/capabilities", token = false) ?: return@withContext false
+            val url = Pairing.http(link, "/client/capabilities", token = false) ?: return@withContext Found.UNSUPPORTED
             val request = Request.Builder().url(url).header("Cache-Control", "no-cache")
             val token = android.net.Uri.parse(Pairing.socket(link)).getQueryParameter("token")
             if (token != null) request.header("Authorization", "Bearer $token")
             client.newCall(request.build()).execute().use { response ->
-                if (response.code != 200) return@use false
-                val body = response.body ?: return@use false
-                if (body.contentLength() > 16384) return@use false
+                if (response.code in 502..504) return@use Found.UNREACHABLE
+                if (response.code != 200) return@use Found.UNSUPPORTED
+                val body = response.body ?: return@use Found.UNSUPPORTED
+                if (body.contentLength() > 16384) return@use Found.UNSUPPORTED
                 val source = body.source()
                 // Request one extra byte to reject, before allocating a body.
-                if (source.request(16385)) return@use false
-                accepts(source.readByteArray())
+                if (source.request(16385)) return@use Found.UNSUPPORTED
+                if (accepts(source.readByteArray())) Found.SUPPORTED else Found.UNSUPPORTED
             }
-        }.getOrDefault(false)
+        }.getOrDefault(Found.UNREACHABLE)
     }
 }
