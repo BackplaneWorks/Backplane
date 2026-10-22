@@ -14,6 +14,7 @@
 //     the number of MessagePosted, ActivityLogged and Reminded lines
 //
 //   bun test/tools/store_commit_e2e.ts HUB WIREDIR DUMP     (port 3831, E2E_PORT)
+//   bun test/tools/store_commit_e2e.ts --check HOME DUMP     (no hub: a store.db already made)
 // HUB: the server as JS (bend src/server/main.bend -o hub.js, or
 // scripts/build-js.sh's build/js/backplane-serve/stamped.js) or the single
 // file scripts/build-js.sh makes. WIREDIR: bend test/wire/index.html -o
@@ -24,10 +25,15 @@ import { Database } from "bun:sqlite";
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
-const [hub, wire, dump] = process.argv.slice(2);
-if (!hub || !wire || !dump) { console.log("usage: bun test/tools/store_commit_e2e.ts HUB WIREDIR DUMP"); process.exit(2); }
-for (const f of readdirSync(wire).filter((f) => f.endsWith(".js"))) (0, eval)(readFileSync(`${wire}/${f}`, "utf8"));
-const W = (globalThis as any).Wire;
+const argv = process.argv.slice(2);
+// --check HOME DUMP: no hub, only compare a home's store.db (made by any
+// writer: the hub, a rebuild) with store_dump's lines for its log
+const checkOnly = argv[0] === "--check";
+const [hub, wire, dump] = checkOnly ? ["", "", argv[2]] : argv;
+if (checkOnly ? !argv[1] || !dump : !hub || !wire || !dump) {
+  console.log("usage: bun test/tools/store_commit_e2e.ts HUB WIREDIR DUMP | --check HOME DUMP");
+  process.exit(2);
+}
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const PORT = Number(process.env.E2E_PORT ?? 3831);
 if (PORT === 3787 || PORT < 3799) throw new Error(`refusing port ${PORT}`);
@@ -51,99 +57,106 @@ const until = async <T>(ms: number, f: () => T | undefined | Promise<T | undefin
 const read = (p: string) => (existsSync(p) ? readFileSync(p, "utf8") : "");
 const run = (cmd: string[], cwd?: string) => Bun.spawnSync(cmd, { cwd, stdout: "pipe", stderr: "pipe" });
 
-try { if ((await fetch(`http://127.0.0.1:${PORT}/hello`)).status === 200) { console.log(`port ${PORT} is in use`); process.exit(2); } } catch {}
+let root = "", home = "", drove = false;
+// the hub on an empty home, driven, then stopped
+async function drive() {
+  for (const f of readdirSync(wire).filter((f) => f.endsWith(".js"))) (0, eval)(readFileSync(`${wire}/${f}`, "utf8"));
+  const W = (globalThis as any).Wire;
+  try { if ((await fetch(`http://127.0.0.1:${PORT}/hello`)).status === 200) { console.log(`port ${PORT} is in use`); process.exit(2); } } catch {}
 
-const root = resolve(process.env.E2E_ROOT ?? "build/store_commit_e2e");
-if (root === "/" || !root.includes("store_commit_e2e")) throw new Error(`refusing root ${root}`);
-rmSync(root, { recursive: true, force: true });
-const fake = join(root, "bin"), log = join(root, "claude.log"), home = join(root, "home"), proj = join(root, "proj"), web = join(root, "web");
-for (const d of [fake, home, proj, web, join(root, "locks"), join(root, "tmp")]) mkdirSync(d, { recursive: true });
+  root = resolve(process.env.E2E_ROOT ?? "build/store_commit_e2e");
+  if (root === "/" || !root.includes("store_commit_e2e")) throw new Error(`refusing root ${root}`);
+  rmSync(root, { recursive: true, force: true });
+  home = join(root, "home");
+  const fake = join(root, "bin"), log = join(root, "claude.log"), proj = join(root, "proj"), web = join(root, "web");
+  for (const d of [fake, home, proj, web, join(root, "locks"), join(root, "tmp")]) mkdirSync(d, { recursive: true });
 
-const exe = join(root, "backplane");
-if (hub.endsWith(".js")) {
-  const b = run([process.execPath, "build", "--compile", resolve(hub), "--outfile", exe]);
-  if (b.exitCode !== 0) { console.log(String(b.stderr)); process.exit(1); }
-} else copyFileSync(resolve(hub), exe);
-chmodSync(exe, 0o755);
-writeFileSync(join(web, "index.html"), "<!doctype html><title>store-commit-e2e</title>");
-// the stand-ins (BACKPLANE_AGENTS): claude is test/tools/claude_standin.ts
-writeFileSync(join(fake, "claude"), `#!/bin/sh\nexec ${process.execPath} ${resolve("test/tools/claude_standin.ts")} "$@"\n`);
-chmodSync(join(fake, "claude"), 0o755);
-for (const n of ["codex", "grok", "muse"]) { writeFileSync(join(fake, n), "#!/bin/sh\nexit 1\n"); chmodSync(join(fake, n), 0o755); }
-writeFileSync(join(home, "events.jsonl"), "");
-writeFileSync(join(proj, "README"), "e2e\n");
+  const exe = join(root, "backplane");
+  if (hub.endsWith(".js")) {
+    const b = run([process.execPath, "build", "--compile", resolve(hub), "--outfile", exe]);
+    if (b.exitCode !== 0) { console.log(String(b.stderr)); process.exit(1); }
+  } else copyFileSync(resolve(hub), exe);
+  chmodSync(exe, 0o755);
+  writeFileSync(join(web, "index.html"), "<!doctype html><title>store-commit-e2e</title>");
+  // the stand-ins (BACKPLANE_AGENTS): claude is test/tools/claude_standin.ts
+  writeFileSync(join(fake, "claude"), `#!/bin/sh\nexec ${process.execPath} ${resolve("test/tools/claude_standin.ts")} "$@"\n`);
+  chmodSync(join(fake, "claude"), 0o755);
+  for (const n of ["codex", "grok", "muse"]) { writeFileSync(join(fake, n), "#!/bin/sh\nexit 1\n"); chmodSync(join(fake, n), 0o755); }
+  writeFileSync(join(home, "events.jsonl"), "");
+  writeFileSync(join(proj, "README"), "e2e\n");
 
-const env = {
-  ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_TELEMETRY: "off", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "",
-  BACKPLANE_GOOGLE_BAKE: "0", FAKE_LOG: log, BACKPLANE_LOCK_DIR: join(root, "locks"), BACKPLANE_DEPLOY_LOCKS: join(root, "none.lock"),
-  BACKPLANE_AGENTS: fake, PATH: `${fake}:${process.env.PATH}`, TMPDIR: join(root, "tmp"),
-};
-delete (env as any).BACKPLANE_HOME;
-const proc = Bun.spawn([exe, "--home", home, "--port", String(PORT), "--no-tailscale", "--foreground", "--web", web],
-  { env, stdout: Bun.file(join(root, "hub.out")), stderr: Bun.file(join(root, "hub.err")) });
-const hello = async () => { try { const r = await fetch(`http://127.0.0.1:${PORT}/hello`); return r.status === 200 ? true : undefined; } catch { return undefined; } };
-// stop the hub we started (its PID only), then the stand-ins it ran (their
-// PIDs from the stand-in's own log)
-const stop = async () => {
-  if (proc.exitCode === null) { try { process.kill(proc.pid, "SIGTERM"); } catch {} }
-  const gone = await Promise.race([proc.exited.then(() => true), sleep(10000).then(() => false)]);
-  if (!gone) { try { process.kill(proc.pid, "SIGKILL"); } catch {} await proc.exited; }
-  for (const m of read(log).matchAll(/^START (\d+)/gm)) { try { process.kill(Number(m[1]), "SIGKILL"); } catch {} }
-  return gone;
-};
-
-let drove = false;
-try {
-  check(!!(await until(30000, hello)), "hub answers /hello");
-  const seen: any[] = [];
-  const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
-  ws.binaryType = "arraybuffer";
-  ws.onmessage = (e) => {
-    let o: any = null;
-    try { o = JSON.parse(typeof e.data === "string" ? (e.data as string) : W.decode(new Uint8Array(e.data as ArrayBuffer))); } catch {}
-    for (const c of o?.items ?? []) seen.push(typeof c === "string" ? JSON.parse(c) : c);
+  const env = {
+    ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_TELEMETRY: "off", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "",
+    BACKPLANE_GOOGLE_BAKE: "0", FAKE_LOG: log, BACKPLANE_LOCK_DIR: join(root, "locks"), BACKPLANE_DEPLOY_LOCKS: join(root, "none.lock"),
+    BACKPLANE_AGENTS: fake, PATH: `${fake}:${process.env.PATH}`, TMPDIR: join(root, "tmp"),
   };
-  await new Promise((r, j) => { ws.onopen = r; ws.onerror = j; });
-  let id = 0;
-  const send = (m: string, p: object) => ws.send(W.encode(JSON.stringify({ id: ++id, m, p })));
-  const wait = (what: string, f: (x: any) => boolean, ms = 15000) => until(ms, () => seen.find(f)).then((x) => { check(!!x, what); return x; });
-
-  send("project.add", { path: proj });
-  const pc: any = await wait("a project is added", (x) => x.$ === "ProjectCreated" && x.root === proj);
-  const made = async (title: string) => {
-    send("thread.create", { project: pc?.id, title, env: "local", provider: "claude" });
-    return (await wait(`thread ${title} is created`, (x) => x.$ === "ThreadCreated" && x.title === title))?.id as string;
+  delete (env as any).BACKPLANE_HOME;
+  const proc = Bun.spawn([exe, "--home", home, "--port", String(PORT), "--no-tailscale", "--foreground", "--web", web],
+    { env, stdout: Bun.file(join(root, "hub.out")), stderr: Bun.file(join(root, "hub.err")) });
+  const hello = async () => { try { const r = await fetch(`http://127.0.0.1:${PORT}/hello`); return r.status === 200 ? true : undefined; } catch { return undefined; } };
+  // stop the hub we started (its PID only), then the stand-ins it ran (their
+  // PIDs from the stand-in's own log)
+  const stop = async () => {
+    if (proc.exitCode === null) { try { process.kill(proc.pid, "SIGTERM"); } catch {} }
+    const gone = await Promise.race([proc.exited.then(() => true), sleep(10000).then(() => false)]);
+    if (!gone) { try { process.kill(proc.pid, "SIGKILL"); } catch {} await proc.exited; }
+    for (const m of read(log).matchAll(/^START (\d+)/gm)) { try { process.kill(Number(m[1]), "SIGKILL"); } catch {} }
+    return gone;
   };
-  const A = await made("alpha");
-  const B = await made("beta");
-  // a turn that holds (the stand-in works until interrupted), and a second
-  // message into it (Claude takes it on its input: no TurnQueued)
-  send("turn.start", { thread: A, text: "mode:stop hold on", msg: "a-1" });
-  await wait("a message runs a turn", (x) => x.$ === "TurnChanged" && x.thread === A && x.state === "running", 20000);
-  send("turn.start", { thread: A, text: "later, please", msg: "a-2" });
-  await wait("a second message reaches the running turn", (x) => x.$ === "MessagePosted" && x.thread === A && x.msg === "a-2");
-  send("setting.set", { key: "e2e.store", value: "one\ttwo\nthree" });
-  await wait("a setting is set", (x) => x.$ === "SettingSet" && x.key === "e2e.store");
-  send("setting.set", { key: "e2e.hash", value: "#42" });
-  await wait("a setting that looks like an integer is set", (x) => x.$ === "SettingSet" && x.key === "e2e.hash");
-  // a turn that ends, so B has a reply
-  send("turn.start", { thread: B, text: "mode:plain hello", msg: "b-1" });
-  await wait("B's turn ends", (x) => x.$ === "TurnChanged" && x.thread === B && x.state === "completed", 20000);
-  // a provider switch queues what the new agent missed (TurnQueued
-  // handoff:switch:..., Switch.go in hub.bend): the queue table's row
-  send("thread.provider", { thread: B, provider: "codex" });
-  await wait("a message is queued (provider switch)", (x) => x.$ === "TurnQueued" && x.thread === B);
-  send("thread.rename", { thread: B, title: "beta renamed" });
-  await wait("a thread is renamed", (x) => x.$ === "ThreadRenamed" && x.id === B);
-  send("thread.archive", { thread: B });
-  await wait("a thread is archived", (x) => /Archiv/.test(String(x.$)) && (x.id === B || x.thread === B));
-  await sleep(1500);
-  ws.close();
-  drove = true;
-} finally {
-  const gone = await stop();
-  check(gone, "the hub stops on SIGTERM");
+
+  try {
+    check(!!(await until(30000, hello)), "hub answers /hello");
+    const seen: any[] = [];
+    const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
+    ws.binaryType = "arraybuffer";
+    ws.onmessage = (e) => {
+      let o: any = null;
+      try { o = JSON.parse(typeof e.data === "string" ? (e.data as string) : W.decode(new Uint8Array(e.data as ArrayBuffer))); } catch {}
+      for (const c of o?.items ?? []) seen.push(typeof c === "string" ? JSON.parse(c) : c);
+    };
+    await new Promise((r, j) => { ws.onopen = r; ws.onerror = j; });
+    let id = 0;
+    const send = (m: string, p: object) => ws.send(W.encode(JSON.stringify({ id: ++id, m, p })));
+    const wait = (what: string, f: (x: any) => boolean, ms = 15000) => until(ms, () => seen.find(f)).then((x) => { check(!!x, what); return x; });
+
+    send("project.add", { path: proj });
+    const pc: any = await wait("a project is added", (x) => x.$ === "ProjectCreated" && x.root === proj);
+    const made = async (title: string) => {
+      send("thread.create", { project: pc?.id, title, env: "local", provider: "claude" });
+      return (await wait(`thread ${title} is created`, (x) => x.$ === "ThreadCreated" && x.title === title))?.id as string;
+    };
+    const A = await made("alpha");
+    const B = await made("beta");
+    // a turn that holds (the stand-in works until interrupted), and a second
+    // message into it (Claude takes it on its input: no TurnQueued)
+    send("turn.start", { thread: A, text: "mode:stop hold on", msg: "a-1" });
+    await wait("a message runs a turn", (x) => x.$ === "TurnChanged" && x.thread === A && x.state === "running", 20000);
+    send("turn.start", { thread: A, text: "later, please", msg: "a-2" });
+    await wait("a second message reaches the running turn", (x) => x.$ === "MessagePosted" && x.thread === A && x.msg === "a-2");
+    send("setting.set", { key: "e2e.store", value: "one\ttwo\nthree" });
+    await wait("a setting is set", (x) => x.$ === "SettingSet" && x.key === "e2e.store");
+    send("setting.set", { key: "e2e.hash", value: "#42" });
+    await wait("a setting that looks like an integer is set", (x) => x.$ === "SettingSet" && x.key === "e2e.hash");
+    // a turn that ends, so B has a reply
+    send("turn.start", { thread: B, text: "mode:plain hello", msg: "b-1" });
+    await wait("B's turn ends", (x) => x.$ === "TurnChanged" && x.thread === B && x.state === "completed", 20000);
+    // a provider switch queues what the new agent missed (TurnQueued
+    // handoff:switch:..., Switch.go in hub.bend): the queue table's row
+    send("thread.provider", { thread: B, provider: "codex" });
+    await wait("a message is queued (provider switch)", (x) => x.$ === "TurnQueued" && x.thread === B);
+    send("thread.rename", { thread: B, title: "beta renamed" });
+    await wait("a thread is renamed", (x) => x.$ === "ThreadRenamed" && x.id === B);
+    send("thread.archive", { thread: B });
+    await wait("a thread is archived", (x) => /Archiv/.test(String(x.$)) && (x.id === B || x.thread === B));
+    await sleep(1500);
+    ws.close();
+    drove = true;
+  } finally {
+    const gone = await stop();
+    check(gone, "the hub stops on SIGTERM");
+  }
 }
+if (checkOnly) { home = resolve(argv[1]); drove = true; } else await drive();
 
 // The fold's records, from store_dump
 const dumpCmd = dump.endsWith(".js") ? [process.execPath, resolve(dump), home] : dump.endsWith(".bend") ? ["bend", resolve(dump), home] : [resolve(dump), home];
@@ -197,7 +210,9 @@ else {
     for (const [k, v] of w) if (got.get(k) !== v) diffs.push(k);
     for (const k of got.keys()) if (!w.has(k)) diffs.push(k);
     if (!diffs.length) ok(`records ${t} (${got.size} rows)`);
-    for (const k of diffs.slice(0, 20)) bad(`records ${t} ${JSON.stringify(k)}`, got.get(k) ?? "<no row>", w.get(k) ?? "<no row>");
+    // columns shown as a JSON array (an integer column reads "#<n>")
+    const show = (v: string | undefined) => (v === undefined ? "<no row>" : JSON.stringify(v.split(SEP)));
+    for (const k of diffs.slice(0, 20)) bad(`records ${t} ${JSON.stringify(k.split(SEP))}`, show(got.get(k)), show(w.get(k)));
     if (diffs.length > 20) console.log(`     ... ${diffs.length - 20} more in ${t}`);
   }
   for (const t of want.keys()) if (!(t in COLS)) bad(`records: the dump's table ${t} is checked`, "unchecked", Object.keys(COLS));
@@ -217,7 +232,7 @@ else {
   db.close();
 }
 check(drove, "the hub was driven to the end");
-if (fail || process.env.KEEP) console.log(`kept ${root} (hub.err, home/events.jsonl, home/store.db there)`);
-else rmSync(root, { recursive: true, force: true });
+if (root && (fail || process.env.KEEP)) console.log(`kept ${root} (hub.err, home/events.jsonl, home/store.db there)`);
+else if (root) rmSync(root, { recursive: true, force: true });
 console.log(fail ? `${fail} failed` : "all ok");
 process.exit(fail ? 1 : 0);
