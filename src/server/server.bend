@@ -427,7 +427,7 @@ def Cfg.thin.committed(+cfg: Cfg, +changes: List<&2, M.Change>, st: M.State) -> 
 # Valid unknown JSON remains a wire line without changing State.seq.
 # Count the actual replay wire once, then only actual successful fresh lines.
 def LogCount.of(ls: List<&2, String>) -> Nat:
-  List.length(&2, String, ls)
+  ST.Store.size(ls)
 
 def LogCount.n(c: Cfg) -> Nat:
   match c:
@@ -903,7 +903,7 @@ type All is Data:
 # before the changes. Counted only for such a client: counting the whole
 # log (100k lines) for every step cost ~30 ms each
 def All.at(+log: List<&2, String>, +fresh: Nat) -> Nat:
-  Nat.sub(List.length(&2, String, log), fresh)
+  Nat.sub(ST.Store.size(log), fresh)
 
 # A message the hub sends itself. The hub fiber is the inbox's only
 # reader, so a send into a full inbox (4096 slots) would park it for good:
@@ -1883,7 +1883,7 @@ def Hub.log_msg.k(+n: Nat, +ls: List<&2, String>, +cfg: Cfg, +since: Nat) -> Str
 # reconnect sends only what it missed; a client ahead of the log, as after
 # a server reset, gets everything, since 0)
 def Hub.log_msg(+ls: List<&2, String>, +cfg: Cfg, +since: Nat) -> String:
-  Hub.log_msg.k(List.length(&2, String, ls), ls, cfg, Bool.pick(Nat, Nat.is_le(since, List.length(&2, String, ls)), since, 0n))
+  Hub.log_msg.k(ST.Store.size(ls), ls, cfg, Bool.pick(Nat, Nat.is_le(since, ST.Store.size(ls)), since, 0n))
 
 # the first frame of a join: the log message with the first chunk of what
 # the client lacks; "more": the rest follows a chunk at a time
@@ -7701,7 +7701,7 @@ def Far.history(+ls: List<&2, String>) -> String:
 # at start: lines the log holds that this build cannot decode give the
 # history a new identity (Fr.history.body)
 def Far.history.at(+ls: List<&2, String>, +seq: Nat) -> String:
-  Bool.pick(String, List.is_empty(&2, String, ls), "", SG.Sign.header("00", 0n, FR.Fr.history.body(Maybe.default(&2, String, List.last(&2, String, ls), ""), List.length(&2, String, ls), seq)))
+  Bool.pick(String, List.is_empty(&2, String, ls), "", SG.Sign.header("00", 0n, FR.Fr.history.body(Maybe.default(&2, String, List.last(&2, String, ls), ""), ST.Store.size(ls), seq)))
 
 def Far.push.body(+s: FR.Send, +name: String) -> String:
   Bool.pick(String, Nat.is_gt(String.length(FR.Send.body(s, name)), 200000n), FR.Send.body(FR.Send.gap(s), name), FR.Send.body(s, name))
@@ -10987,7 +10987,7 @@ def Hub.tick(h: Hub, +now: Nat) -> IO(Hub):
         +cl : List<&2, Client> <- Desk.say(DK.Desk.text(Clients.looks(cl0), Nat.sub(now, 60n)), cl0, now)
         PS.Perf.set("hub.clients", U32.from_nat(List.length(&2, Client, cl)))
         PS.Perf.set("hub.agents", U32.from_nat(List.length(&2, Agent, as)))
-        PS.Perf.set("hub.changes", U32.from_nat(List.length(&2, String, ls)))
+        PS.Perf.set("hub.changes", U32.from_nat(ST.Store.size(ls)))
         PS.Perf.set("hub.busy", U32.from_nat(M.Work.threads(st)))
         # children the last exec handed over that ended meanwhile are waited
         # for (effects/adopt.c), so none stays a zombie
@@ -15025,7 +15025,7 @@ def Hub.join.k(+n: Nat, +s0: Nat, +xs: List<&2, String>, h: Hub, +client: U32, +
 def Hub.join(h: Hub, +client: U32, +out: Chan(Wire), +since: Nat, +origin: String, +gen: U32, +sock: U32, +legacy: Bool, +now: Nat) -> IO(Hub):
   match h:
     case Hub{st, f, +ls, cl, as, inbox, cfg, note}:
-      +n = List.length(&2, String, ls)
+      +n = ST.Store.size(ls)
       +o = Hub.origin(ls)
       +s0 = Bool.pick(Nat, Bool.and(String.eq(origin, o), Nat.is_le(since, n)), since, 0n)
       Hub.join.k(n, s0, OB.Join.window(ls, n, s0), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, out, o, gen, sock, legacy, now)
@@ -15476,16 +15476,19 @@ def Main.boot(cfg: Cfg, need: Bool, front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
         H.Env.put("BACKPLANE_HOME", home)
         Agents.only(home)
         t0 : U32 <- PS.Perf.us()
-        +bs : List<&2, U32> <- Files.read(Store.path(home))
+        # the lines straight from the file (no List cell per byte, which
+        # was most of the JS hub's memory), then only the lines are kept
+        +rd : List<&2, String> <- H.EvLog.read_from(Store.path(home), "0")
         t1 : U32 <- PS.Perf.span("boot.read", t0)
-        +ld : ST.Loaded = ST.Store.load(Store.lines(bs), ST.Loaded{M.State.empty(), Nil{}})
+        +torn : String = ST.Store.read.tail(rd)
+        +ld : ST.Loaded = ST.Store.load(ST.Store.read.body(rd), ST.Loaded{M.State.empty(), Nil{}})
         +st : M.State = ST.Loaded.st(ld)
         +ls : List<&2, String> = ST.Loaded.wire(ld)
         t2 : U32 <- PS.Perf.span("boot.replay", t1)
-        Log.info("replayed " ++ Nat.show(List.length(&2, String, ls)) ++ " changes from " ++ Store.path(home))
+        Log.info("replayed " ++ Nat.show(ST.Store.size(ls)) ++ " changes from " ++ Store.path(home))
         GT.Git.step.migrate(home, HistReg.roots(st))
         f0 : Result<&1, &1, U32 & String, File> <- File.open(Store.path(home), "a")
-        f : Result<&1, &1, U32 & String, File> <- Main.torn(f0, ST.Store.tail_fix(bs))
+        f : Result<&1, &1, U32 & String, File> <- Main.torn(f0, torn)
         tok : String <- Token.load(home)
         +mc : String <- Files.text(Models.cache(home))
         +bc : String <- BN.Bf.text(BN.Bn.cache(home))

@@ -7,6 +7,17 @@ def Clock.epoch() -> IO(U32):
   import "./effects/host.c"
   import "./effects/host.js"
 
+# The event log from byte offset off (decimal text; "0" for all of it,
+# a line's start for a tail) to its end, read in one go: the text that
+# closes off a torn tail, the offset past the last whole line, then the
+# whole lines; exactly core/store.bend's Store.read.from over the bytes
+# from off (test/evlog_read_test.bend), without a List cell per byte (252M
+# of them on a real log, the JS hub's 25 GB). A file that cannot be read,
+# or an offset at or past its end, is ["", off].
+def EvLog.read_from(path: String, off: String) -> IO(List<&2, String>):
+  import "./effects/evlog.c"
+  import "./effects/evlog.js"
+
 # up to max bytes as they arrive; [] means the peer closed
 def Sock.recv_bytes(sock: Socket, max: U32) ->
   IO(Socket & Result<&1, &1, U32 & String, List<&2, U32>>):
@@ -107,7 +118,6 @@ def Proc.kill(pid: U32, sig: U32) -> IO(Unit):
 
 # whether a child has exited, without reaping it (the reader's wait does):
 # its exit code (128 + signal when killed), or 4294967295 while it runs.
-# The JS host starts no processes, so there it is always running.
 def Proc.exited(pid: U32) -> IO(U32):
   import "./effects/host.c"
   import "./effects/host.js"

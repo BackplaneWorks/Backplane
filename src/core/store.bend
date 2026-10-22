@@ -2,6 +2,7 @@ import Base
 import ./json.bend as J
 import ./model.bend as M
 import ./codec.bend as C
+import ./utf8.bend as UT
 
 # The event log read at start-up in one pass: each line is parsed once,
 # folded into the read model and kept (as clients may see it) for the
@@ -44,6 +45,19 @@ def Store.load(ls: List<&2, String>, a: Loaded) -> Loaded:
       a
     case +l <> t:
       Store.load(t, Store.step(J.Json.parse(l), l, a))
+
+# How many lines a log holds: List.length, counted in a tail call. Base's
+# List.length adds after its recursive call, so on the JS target a log of
+# a few hundred thousand lines overflows the stack (law store_size_is_length).
+def Store.size.go(ls: List<&2, String>, n: Nat) -> Nat:
+  match ls:
+    case Nil{}:
+      n
+    case _ <> t:
+      Store.size.go(t, 1n+n)
+
+def Store.size(ls: List<&2, String>) -> Nat:
+  Store.size.go(ls, 0n)
 
 # The log's changes in order (what Store.load folds; for the laws)
 # ----------------------------------------------------------------
@@ -101,6 +115,56 @@ def Store.tail_fix(bs: List<&2, U32>) -> String:
       ""
     case +b <> t:
       Bool.pick(String, U32.is_eq(Store.last.go(t, b), 10), "", "\n")
+
+# What the hub's EvLog.read_from effect answers for a log whose bytes
+# from offset `off` on are bs, made there without a List cell per byte
+# (test/evlog_read_test.bend compares the two). One List, so it can be
+# kept: the text that closes off a torn tail ("\n" when the last byte is
+# not one, else ""), the offset just past the last whole line (decimal;
+# where the next read starts), then the whole lines, as utf8.bend's Lines
+# and Utf8.decode read them. A hot boot reads the log's tail after what its
+# store applied; a cold one reads from 0.
+def Store.read.lines(r: UT.Lines & List<&2, String>) -> List<&2, String>:
+  (_, ls) = r
+  ls
+
+# how many bytes up to and with the last newline, in a tail call
+def Store.read.whole.go(bs: List<&2, U32>, +i: Nat, +last: Nat) -> Nat:
+  match bs:
+    case Nil{}:
+      last
+    case +b <> t:
+      Store.read.whole.go(t, 1n+i, Bool.pick(Nat, U32.is_eq(b, 10), 1n+i, last))
+
+def Store.read.from(+off: Nat, +bs: List<&2, U32>) -> List<&2, String>:
+  Store.tail_fix(bs) <> Nat.show(Nat.add(off, Store.read.whole.go(bs, 0n, 0n))) <> Store.read.lines(UT.Lines.feed(UT.Lines.new(), bs))
+
+def Store.read.of(+bs: List<&2, U32>) -> List<&2, String>:
+  Store.read.from(0n, bs)
+
+# the lines of what Store.read.from answers
+def Store.read.body(r: List<&2, String>) -> List<&2, String>:
+  match r:
+    case _ <> _ <> ls:
+      ls
+    case _:
+      Nil{}
+
+# the tail's fix of what Store.read.from answers
+def Store.read.tail(r: List<&2, String>) -> String:
+  match r:
+    case t <> _:
+      t
+    case Nil{}:
+      ""
+
+# the offset past its last whole line (decimal text)
+def Store.read.end(r: List<&2, String>) -> String:
+  match r:
+    case _ <> e <> _:
+      e
+    case _:
+      "0"
 
 # a failed write may have left a cut line: the log is closed off with a
 # newline before anything else is written, and the failure says when that

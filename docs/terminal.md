@@ -25,10 +25,20 @@ Pty.resize(s: Socket, cols: U32, rows: U32) -> IO(Socket)
   `H.Proc.kill` signals it. `Sock.shutdown` does nothing on a pty (send ^D).
 - `Pty.resize` sets the window size; the kernel sends SIGWINCH.
 - Linux and macOS (posix_openpt, fork, TIOCSCTTY). Windows builds answer
-  ENOSYS; the JS twin answers ENOSYS.
+  ENOSYS.
+- The JS twin (`effects/pty.js`, the hub under Bun) cannot fork: it uses
+  posix_spawn through bun:ffi with POSIX_SPAWN_SETSID. On Linux the child
+  opens the slave as fd 0, which a session leader takes as its controlling
+  terminal. On macOS the slave is opened first (macOS refuses TIOCSWINSZ on
+  a master whose slave nobody has open) and the child is `/usr/bin/perl`,
+  which takes fd 0 with TIOCSCTTY and execs the program. Linux needs glibc
+  2.29+ (`addchdir_np`); 2.34+ closes our other fds with `addclosefrom_np`.
+  `host.js`'s `Proc.wait` parks on a pidfd (Linux) or a 20 ms timer, so the
+  loop never blocks. Test: `bend test/js_pty_test.bend`.
 
-`host.c`'s `Sock.recv_bytes`/`send_bytes` fall back from `recv`/`send` to
-`read`/`write` on ENOTSOCK, and read EIO (a pty's hang-up) as end of stream.
+`host.c`'s and `host.js`'s `Sock.recv_bytes`/`send_bytes` fall back from
+`recv`/`send` to `read`/`write` on ENOTSOCK, and read EIO (a pty's hang-up)
+as end of stream.
 
 ## Emulator (`src/core/vt.bend`)
 
