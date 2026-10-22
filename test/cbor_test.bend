@@ -76,8 +76,23 @@ def changes(n: Nat) -> String:
 def size(name: String, +j: J.Json) -> IO(Unit):
   IO.print("size " ++ name ++ ": json " ++ U32.show(u32len(U.Utf8.encode(J.Json.show(j)), 0)) ++ " bytes, cbor " ++ U32.show(u32len(B.Cbor.encode(j), 0)) ++ " bytes")
 
+# the tree's answer for each probe equals Cbor.find's in the list
+def same.find(xs: List<&2, String>, +names: List<&2, String>, +t: B.CTree, ok: Bool) -> Bool:
+  match xs:
+    case Nil{}:
+      ok
+    case +x <> rest:
+      same.find(rest, names, t, Bool.and(ok, U32.is_eq(Maybe.default(&2, U32, B.Cbor.find(names, x), 999), Maybe.default(&2, U32, B.CTree.find(t, x), 999))))
+
+def probes() -> List<&2, String>:
+  List.append(&2, String, List.append(&2, String, B.Cbor.keys(), B.Cbor.words()),
+    ["", "a", "zz", "User", "user ", "Thread", "ThreadZ", "~", "\u{1F600}", "itemsx", "$$", "assistan", "assistantt", "Message", "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"])
+
 def main() -> IO(Unit):
   do IO<Unit>:
+    C.Check.str("trees hold the lists", Bool.show(Bool.and(B.CTree.ok(B.Cbor.keys(), B.Cbor.keys.tree()), B.CTree.ok(B.Cbor.words(), B.Cbor.words.tree()))), "True")
+    C.Check.str("tree finds as the list (keys)", Bool.show(same.find(probes(), B.Cbor.keys(), B.Cbor.keys.tree(), True{})), "True")
+    C.Check.str("tree finds as the list (words)", Bool.show(same.find(probes(), B.Cbor.words(), B.Cbor.words.tree(), True{})), "True")
     C.Check.str("null", enc("null"), "246")
     C.Check.str("true", enc("true"), "245")
     C.Check.str("false", enc("false"), "244")
