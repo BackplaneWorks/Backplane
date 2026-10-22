@@ -16275,6 +16275,28 @@ def Boot.state(+home: String) -> IO(HB.Hot):
     +on : String <- Env.get("BACKPLANE_HOT_BOOT", "1")
     Boot.state.on(Bool.not(String.eq(on, "0")), home)
 
+# Only after the exclusive home lock: append-open creates a fresh
+# journal without truncating an existing one. Any open error stays fatal;
+# the builder must never reinterpret an unreadable journal as empty.
+def Boot.journal.opened(r: Result<&1, &1, U32 & String, File>) -> IO(Result<&1, &1, U32 & String, Unit>):
+  match r:
+    case Done{f}:
+      do IO<Result<&1, &1, U32 & String, Unit>>:
+        File.close(f)
+        return Done{Unit{}}
+    case Fail{e}:
+      IO.pure(Result<&1, &1, U32 & String, Unit>, Fail{e})
+
+def Boot.journal(+home: String) -> IO(Result<&1, &1, U32 & String, Unit>):
+  IO.bind(Result<&1, &1, U32 & String, File>, Result<&1, &1, U32 & String, Unit>, File.open(Store.path(home), "a"), Boot.journal.opened)
+
+def Boot.journal.need(r: Result<&1, &1, U32 & String, Unit>) -> IO(Unit):
+  match r:
+    case Done{_}:
+      IO.pure(Unit, Unit{})
+    case Fail{e}:
+      Main.nolog(e)
+
 def Main.boot(cfg: Cfg, +need: Bool, front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
   match cfg:
     case Cfg{+home, w, +h, +p, pr, ds, v, +nt, +tcfg, +views}:
@@ -16282,6 +16304,8 @@ def Main.boot(cfg: Cfg, +need: Bool, front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
         # the home's lock first: a second hub ends before the event store
         +held : String <- Lock.take(home, p)
         Lock.refuse(String.is_empty(held), held, home)
+        journal : Result<&1, &1, U32 & String, Unit> <- Boot.journal(home)
+        Boot.journal.need(journal)
         H.Env.put("BACKPLANE_HOME", home)
         Agents.only(home)
         # the port first: until the hub is ready every request gets a 503
