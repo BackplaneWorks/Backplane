@@ -7,6 +7,7 @@ import ../../src/server/host.bend as H
 import ../../src/server/botnet.bend as BN
 import ../../src/core/store.bend as ST
 import ../../src/core/model.bend as M
+import ../../src/server/storedb.bend as SO
 
 def reset_done(r: File & Result<&1, &1, U32 & String, Unit>) -> IO(Unit):
   (f, got) = r
@@ -27,7 +28,7 @@ def checked(r: S.Hub & S.Wrote, +want: String, +want_n: Nat) -> IO(Unit):
       do IO<Unit>:
         C.Check.str("actual write success flag " ++ want, Bool.show(ok), want)
         T.count("actual write updates count only on success " ++ want, cfg, want_n)
-        C.Check.str("actual Hub wire equals cached count " ++ want, Nat.show(List.length(&2, String, ls)), Nat.show(S.LogCount.n(cfg)))
+        C.Check.str("actual Hub wire equals cached count " ++ want, Nat.show(SO.Lg.n(ls)), Nat.show(S.LogCount.n(cfg)))
         C.Check.str("actual fresh lines " ++ want, Nat.show(List.length(&2, String, fresh)), Nat.show(Nat.sub(want_n, 3n)))
         File.close(f)
         Chan.close(S.Msg, inbox)
@@ -38,7 +39,8 @@ def run(+home: String, mode: String, cs: List<&2, M.Change>, want: String, want_
     f : File <- IO.try(File, File.open(S.Store.path(home), mode))
     inbox : Chan(S.Msg) <- Chan.new(S.Msg, 8)
     +ld : ST.Loaded = T.loaded()
-    +ls : List<&2, String> = ST.Loaded.wire(ld)
+    # the hub holds no lines: their count (no store.db here: SO.Lg.empty's)
+    +ls : SO.Lg = SO.Lg{"", S.Store.path(home), List.length(&2, String, ST.Loaded.wire(ld)), 1n, ""}
     r : S.Hub & S.Wrote <- S.Hub.commit.w(cs,
       S.Hub{ST.Loaded.st(ld), f, ls, Nil{}, Nil{}, inbox, S.LogCount.init(T.cfg(home, BN.Bn.empty()), ls), ""})
     checked(r, want, want_n)
