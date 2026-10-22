@@ -1,5 +1,5 @@
 #!/bin/sh
-# The JS service's smoke test: a backplane-serve that scripts/build-js.sh
+# The hub's quick smoke test: a backplane-serve that scripts/build-js.sh
 # made, run on a throwaway home and a spare port, stopped by its PID.
 #
 #   scripts/js-smoke.sh BINARY [WEB_DIR]
@@ -7,7 +7,7 @@
 # Checks --version, an unknown flag (exit 2), the hub answering /hello
 # within BACKPLANE_SMOKE_SECS (default 20) and, with WEB_DIR, serving the
 # web client's page. BACKPLANE_SMOKE_FULL=1 also runs test/smoke.ts (as
-# scripts/smoke.sh does for C; it needs build/wire). POSIX sh, curl and
+# scripts/smoke.sh does; it needs build/wire). POSIX sh, curl and
 # nothing GNU: it runs on the Linux and macOS runners as is.
 set -eu
 bin=$1

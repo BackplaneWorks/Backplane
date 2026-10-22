@@ -78,3 +78,46 @@ def Cache.refresh(+cache: Cache, +u: U.Ui, +old: U.Ui) -> U.Ui:
     ML.Mail.id(ML.Box.newest(M.State.mail(U.Ui.state(old)), conv)),
     ML.Mail.id(ML.Box.newest(M.State.mail(U.Ui.state(u)), conv))))), Cache.install(cache, u))
 
+
+# ---- the cache on demand ----
+# Cache.of walks every conversation: the hub must not do it before it
+# listens. Later keeps the state the hub booted with and, in order, each
+# commit since with the state after it; Lazy.force gives what the eager
+# boot (Cache.of) followed by each Cache.committed would have held (laws
+# thin_mail_lazy_*).
+type Pending is Data:
+  Pending{cs: List<&2, M.Change>, st: M.State}
+
+type Lazy is Data:
+  Built{cache: Cache}
+  Later{st: M.State, done: List<&2, Pending>}
+
+def Lazy.of(st: M.State) -> Lazy:
+  Later{st, Nil{}}
+
+def Lazy.replay(ps: List<&2, Pending>, c: Cache) -> Cache:
+  match ps:
+    case Nil{}: c
+    case Pending{cs, st} <> tail: Lazy.replay(tail, Cache.committed(cs, st, c))
+
+def Lazy.committed(cs: List<&2, M.Change>, st: M.State, l: Lazy) -> Lazy:
+  match l:
+    case Built{c}: Built{Cache.committed(cs, st, c)}
+    case Later{base, done}: Later{base, List.append(&2, Pending, done, [Pending{cs, st}])}
+
+def Lazy.force(l: Lazy) -> Cache:
+  match l:
+    case Built{c}: c
+    case Later{st, done}: Lazy.replay(done, Cache.of(st))
+
+def Lazy.ready(l: Lazy) -> Bool:
+  match l:
+    case Built{_}: True{}
+    case Later{_, _}: False{}
+
+# `c` is Cache.of(the boot state), built away from the hub: the commits it
+# missed are applied on arrival; a cache already built is kept
+def Lazy.warm(c: Cache, l: Lazy) -> Lazy:
+  match l:
+    case Built{b}: Built{b}
+    case Later{_, done}: Built{Lazy.replay(done, c)}

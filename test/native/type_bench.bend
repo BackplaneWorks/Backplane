@@ -22,7 +22,7 @@ import ../../src/core/emb.bend as EMB
 # bots (their cats move) in two rooms; or a real event log with one of its
 # threads open. Also times a caret blink: the same frame, the clock moved
 # half a blink on.
-#   scripts/build-app.sh test/native/type_bench.bend build/type_bench
+#   scripts/build-js.sh test/native/type_bench.bend build/type_bench
 #   build/type_bench [EVENTS THREAD [W H [PASSES]]]   ("" "" W H: the made-up log at W x H;
 #   the parts' x50 lines stay at 1400 x 900)
 

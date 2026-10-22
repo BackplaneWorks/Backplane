@@ -18,7 +18,7 @@ import ../../src/server/argv.bend as AV
 # the way the app hears it (N.Nui.hear), and after each whether it asks for
 # a frame, and the frame (memo, layout, tiles) timed. Once with a quiet
 # thread open, once with one of the streaming threads open.
-#   scripts/build-app.sh test/native/agents_bench.bend build/agents_bench
+#   scripts/build-js.sh test/native/agents_bench.bend build/agents_bench
 #   build/agents_bench [MESSAGES [ENTRIES PER THREAD]]
 
 def para(+i: Nat) -> String:

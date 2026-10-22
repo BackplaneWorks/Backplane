@@ -10,8 +10,8 @@
 //
 //   bun test/tools/bots_e2e.ts [BINARY] [WIREDIR] [--quick]
 //
-// BINARY defaults to build/backplane (scripts/build-app.sh
-// src/app/main.bend build/backplane); WIREDIR to build/wire (bend
+// BINARY defaults to build/backplane (scripts/build-js.sh
+// src/server/main.bend build/backplane); WIREDIR to build/wire (bend
 // test/wire/index.html -o build/wire), the hub's own CBOR codec. --quick
 // skips the checks that wait for the minute tick.
 import { createHmac } from "node:crypto";

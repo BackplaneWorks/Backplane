@@ -4,9 +4,10 @@ import ../src/server/host.bend as H
 import ../src/core/store.bend as ST
 import ../src/core/thin.bend as TH
 
-# H.EvLog.read (effects/evlog.c, evlog.js) answers what ST.Store.read.of
-# answers over the same file's bytes: the whole lines, decoded as
-# utf8.bend's Utf8.decode (malformed bytes included), and the tail's fix.
+# H.EvLog.read_from (effects/evlog.c, evlog.js) answers what
+# ST.Store.read.from answers over the same file's bytes from that offset:
+# the whole lines, decoded as utf8.bend's Utf8.decode (malformed bytes
+# included), the tail's fix and the offset past the last whole line.
 # Then the walks the JS hub makes over a long log and a long message
 # (ST.Store.size, TH.Words.of) at sizes Bun's stack never held as plain
 # recursion. Run on both targets: `bend test/evlog_read_test.bend` (JS)
@@ -28,7 +29,7 @@ def show.lines.go(ls: List<&2, String>, acc: String) -> String:
       show.lines.go(t, acc ++ "[" ++ show.cps.go(l, "") ++ "]")
 
 def show.read(+r: List<&2, String>) -> String:
-  show.lines.go(ST.Store.read.body(r), "") ++ " tail " ++ show.cps.go(ST.Store.read.tail(r), "")
+  show.lines.go(ST.Store.read.body(r), "") ++ " tail " ++ show.cps.go(ST.Store.read.tail(r), "") ++ " end " ++ ST.Store.read.end(r)
 
 type Case is Data:
   Case{name: String, bytes: List<&2, U32>}
@@ -64,11 +65,13 @@ def fixture.k(r: Result<&1, &1, U32 & String, File>, +bs: List<&2, U32>) -> IO(U
 def fixture(+path: String, +bs: List<&2, U32>) -> IO(Unit):
   IO.bind(Result<&1, &1, U32 & String, File>, Unit, File.open(path, "w"), r => fixture.k(r, bs))
 
-def case.read(name: String, +bs: List<&2, U32>, +path: String) -> IO(Unit):
+def case.read(+name: String, +bs: List<&2, U32>, +path: String) -> IO(Unit):
   do IO<Unit>:
     fixture(path, bs)
-    got : List<&2, String> <- H.EvLog.read(path)
+    got : List<&2, String> <- H.EvLog.read_from(path, "0")
     C.Check.str("read " ++ name, show.read(got), show.read(ST.Store.read.of(bs)))
+    at2 : List<&2, String> <- H.EvLog.read_from(path, "2")
+    C.Check.str("read " ++ name ++ " from 2", show.read(at2), show.read(ST.Store.read.from(2n, List.drop(&2, U32, bs, 2n))))
 
 def case.run(c: Case, +path: String) -> IO(Unit):
   match c:
@@ -116,10 +119,12 @@ def main() -> IO(Unit):
     +n : U32 = Result.default(&1, &1, U32 & String, U32, r, 0)
     +path : String = tmp ++ "/evlog-test-" ++ U32.show(n) ++ ".jsonl"
     all(cases(), path)
-    nf : List<&2, String> <- H.EvLog.read(tmp ++ "/evlog-test-none-" ++ U32.show(n))
-    C.Check.str("a missing file", show.read(nf), " tail ")
+    nf : List<&2, String> <- H.EvLog.read_from(tmp ++ "/evlog-test-none-" ++ U32.show(n), "7")
+    C.Check.str("a missing file", show.read(nf), " tail  end 7")
     fixture(path, many.go(500000n, []))
-    big : List<&2, String> <- H.EvLog.read(path)
+    big : List<&2, String> <- H.EvLog.read_from(path, "0")
     C.Check.str("500k lines counted in a tail call", Nat.show(count(big)), "500000")
+    tl : List<&2, String> <- H.EvLog.read_from(path, "999996")
+    C.Check.str("the tail after an offset", show.read(tl), "[120.][120.] tail  end 1000000")
     IO.bind(Result<&1, &1, U32 & String, Unit>, Unit, H.FS.remove(path), gone)
     C.Check.str("a 500k-letter message indexed", has(Map.has(&2, Bool, TH.Words.of(long.go(500000n, "")), "aaaaaaa")), "True")

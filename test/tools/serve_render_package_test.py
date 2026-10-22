@@ -175,7 +175,8 @@ def dev_stage(t):
     (tree / 'scripts/verified.sh').write_text('#!/bin/sh\nexit 1\n')
     for f in ('js-unmarshal.py', 'js-native.py', 'cef-runtime.py'):
         (tree / 'scripts' / f).write_text(f'import sys\nopen({str(log)!r},"a").write({f!r}+" "+" ".join(sys.argv[1:])+"\\n")\n')
-    (tree / 'scripts/build-app.sh').write_text(f'#!/bin/sh\necho "build-app $1 $2 stamp=${{BACKPLANE_VERSION_STAMP:-}}" >> "{log}"\necho bin > "$2"\n')
+    (tree / 'scripts/build-js.sh').write_text(f'#!/bin/sh\necho "build-js $1 $2 stamp=${{BACKPLANE_VERSION_STAMP:-}}" >> "{log}"\necho bin > "$2"\n')
+    (tree / 'scripts/js-licenses.sh').write_text(f'#!/bin/sh\necho "js-licenses $1" >> "{log}"\nmkdir -p "$1/bun" "$1/bend"\n')
     (tree / 'scripts/build-kistack.sh').write_text(f'#!/bin/sh\necho "kistack" >> "{log}"\nmkdir -p "$1"\n')
     (tree / 'scripts/build-browser.sh').write_text('#!/bin/sh\nexit 1\n')
     (home / '.bend/bin/bend').write_text(
@@ -194,16 +195,16 @@ def dev_stage(t):
         return r, (log.read_text() if log.exists() else ''), sorted(p.name for p in out.iterdir()) if out.is_dir() else []
 
     r, calls, staged = stage({'BACKPLANE_VERSION_STAMP': '0.12.1-main.1'})
-    check('dev stage: default builds only the server root, stamped',
-          r.returncode == 0 and 'build-app src/server/main.bend dist/backplane-serve stamp=0.12.1-main.1' in calls
-          and calls.count('build-app ') == 1)
+    check('dev stage: default builds only the server root, on Bun, stamped',
+          r.returncode == 0 and 'build-js src/server/main.bend dist/backplane-serve stamp=0.12.1-main.1' in calls
+          and calls.count('build-js ') == 1)
     check('dev stage: never checks or builds src/app/main.bend or a render root', 'src/app/main.bend' not in calls and 'src/render' not in calls)
     check('dev stage: default still builds KiStack and helpers, looks for CEF', 'kistack' in calls and 'bun build.ts' in calls and 'cef-runtime.py discover' in calls)
     check('dev stage: default stages launcher and serve, no renderer',
-          {'backplane', 'backplane-serve', 'kistack', 'web'} <= set(staged) and 'backplane-render' not in staged)
+          {'backplane', 'backplane-serve', 'kistack', 'web', 'licenses'} <= set(staged) and 'backplane-render' not in staged)
     r, calls, staged = stage({'BACKPLANE_DEV_SERVICE_ONLY': '1', 'BACKPLANE_VERSION_STAMP': '0.12.1-main.2'})
-    check('dev stage: service-only stages launcher, serve, web, LICENSE',
-          r.returncode == 0 and staged == ['LICENSE', 'backplane', 'backplane-serve', 'web'])
+    check('dev stage: service-only stages launcher, serve, web, LICENSE and the notices',
+          r.returncode == 0 and staged == ['LICENSE', 'backplane', 'backplane-serve', 'licenses', 'web'])
     check('dev stage: service-only skips KiStack, helpers and CEF', not any(k in calls for k in ('kistack', 'bun ', 'cef-runtime')))
     r, calls, _ = stage({'BACKPLANE_DEV_SERVICE_ONLY': '1'})
     check('dev stage: no caller stamp keeps the generated dev stamp', 'stamp=0.11.2-dev.' in calls)

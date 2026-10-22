@@ -198,9 +198,8 @@ def Gs.client(s: GSec) -> G.Client:
     case GSec{id, secret, _, _, _, _, _, _, _}:
       G.Client{id, secret}
 
-# a value scripts/build-app.sh baked in from .env, or "" (effects/google.c)
+# a value scripts/build-js.sh baked in from .env, or "" (effects/google.js)
 def Gf.baked(name: String) -> IO(String):
-  import "./effects/google.c"
   import "./effects/google.js"
 
 # the environment's value, else the baked one, else d

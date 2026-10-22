@@ -75,7 +75,9 @@ class CandidateTests(unittest.TestCase):
         self.manifest = self.root / "release-inputs.json"
         self.manifest.write_bytes(encoded(self.inputs))
 
-    def target(self, target, mutation=None, proof_mutation=None, resident=False):
+    def target(self, target, mutation=None, proof_mutation=None, resident=None):
+        # Windows ships only the resident policy: the JS service has no managed control there.
+        resident = target == "windows-x64" if resident is None else resident
         desktop = assets.RELEASE_TARGETS[target] == "desktop"
         if desktop:
             root = "backplane-" + target
@@ -95,27 +97,10 @@ class CandidateTests(unittest.TestCase):
                         root + "/Backplane.exe" if target == "windows-x64" else root + "/backplane-open")
             payload[launcher] = b'not a product launcher'
             if target == "windows-x64":
-                source = {"schema": 3, "kind": "windows-service-emission", "commit": SHA, "tree": TREE,
-                          "entrypoint": "src/server/main.bend", "target": target, "version": VERSION,
-                          "versionStamp": VERSION, "telemetry_channel": "release"}
-                payload[service + "/SOURCE.json"] = encoded(source)
-                payload[service + "/RUNTIME.json"] = encoded({"fixture": True})
-                payload[service + "/CLOSURE.json"] = encoded({"fixture": True})
-                build.update(schema=3, kind="windows-service-resources", target=target,
-                             roles={"service": "backplane-serve.exe", "runtimeBin": "runtime/bin", "web": "web"})
-                payload[service + '/MANAGED-CONTROL.json']=encoded({'scope':'OFFLINE FIXTURE ONLY'})
-                build['managedControl']={'status':'IMPLEMENTED','protocol':1,'validationReceipt':'MANAGED-CONTROL.json',
-                                         'validationReceiptSha256':item(payload[service+'/MANAGED-CONTROL.json'])['sha256']}
+                build.update(serviceRuntime="bun", service="backplane-serve.exe")
             payload[service + "/WEB.json"] = encoded(wr)
             if mutation:
                 mutation(payload, build, service)
-            if target == "windows-x64":
-                for key, name in (("sourceReceiptSha256", "SOURCE.json"), ("webManifestSha256", "WEB.json"),
-                                  ("runtimeManifestSha256", "RUNTIME.json"), ("closureSha256", "CLOSURE.json")):
-                    build[key] = item(payload[service + "/" + name])["sha256"]
-                own = {p[len(service) + 1:]: b for p, b in payload.items() if p.startswith(service + "/")}
-                build['sha256'] = {p: item(b)['sha256'] for p, b in own.items()}
-                build['sizes'] = {p: len(b) for p, b in own.items()}
             payload[service + "/BUILD.json"] = encoded(build)
             payload[root + "/NOTICES.json"] = encoded({"fixture": "not real redistribution evidence"})
             receipt = {"schema": 1, "kind": "backplane-electron-desktop-package", "target": target,
@@ -333,15 +318,22 @@ class CandidateTests(unittest.TestCase):
         self.target('linux-x64',lambda p,b,s:p.update({s+'/web/index.html.gz':gzip.compress(b'wrong')}))
         with self.assertRaises(ValueError):self.check()
 
-    def test_windows_raw_receipt_schema_is_not_legacy_app(self):
-        def mutate(p,b,s):
-            r=json.loads(p[s+'/SOURCE.json']);r['schema']=2;p[s+'/SOURCE.json']=encoded(r)
-        self.target('windows-x64',mutate)
-        with self.assertRaises(ValueError):self.check()
+    def test_windows_service_is_the_js_one(self):
+        for mutate in (lambda p,b,s:b.update(serviceRuntime='native-c'), lambda p,b,s:b.pop('serviceRuntime'),
+                       lambda p,b,s:b.update(service='backplane-serve')):
+            self.target('windows-x64',mutate)
+            with self.assertRaisesRegex(ValueError,'JS service'):self.check()
+        self.target('linux-x64',lambda p,b,s:b.update(serviceRuntime='native-c'))
+        with self.assertRaisesRegex(ValueError,'JS service'):self.check()
+        self.target('linux-x64',lambda p,b,s:b.update(serviceRuntime='bun',service='backplane-serve'))
+        self.target('windows-x64')
+        self.check()
 
-    def test_windows_unsupported_control_cannot_be_a_final_desktop(self):
-        self.target('windows-x64',lambda p,b,s:b.update(managedControl={'status':'UNSUPPORTED'}))
-        with self.assertRaises(ValueError):self.check()
+    def test_windows_without_managed_control_ships_only_resident(self):
+        self.target('windows-x64',resident=False)
+        with self.assertRaisesRegex(ValueError,'managed service control'):self.check()
+        self.target('windows-x64',lambda p,b,s:b.update(managedControl={'status':'IMPLEMENTED','protocol':1}))
+        with self.assertRaisesRegex(ValueError,'unsupported control'):self.check()
 
     def test_mobile_old_version_or_debug_signing_refused(self):
         for target in ('android','ios'):
@@ -386,9 +378,9 @@ class CandidateTests(unittest.TestCase):
         with self.assertRaises(ValueError):self.check()
 
     def test_explicit_resident_unsigned_windows_does_not_require_optional_stop(self):
-        self.target('windows-x64',lambda p,b,s:b.update(managedControl={'status':'UNSUPPORTED','protocol':None}),resident=True)
+        self.target('windows-x64',resident=True)
         self.check()
-        self.target('windows-x64',lambda p,b,s:b.update(managedControl={'status':'UNSUPPORTED','protocol':None}),
+        self.target('windows-x64',
                     proof_mutation=lambda k,r:r.update(managedStopAdvertised=True)if k=='lifecycle'else None,resident=True)
         with self.assertRaises(ValueError):self.check()
 

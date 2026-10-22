@@ -322,7 +322,10 @@ def locks(+dir: String) -> IO(Unit):
     C.Check.str("Guard.take by another holder", Bool.show(g2), "False")
     g3 : String <- sh.out("flock -n " ++ dir ++ "/bp-jst.lock true; echo $?")
     C.Check.str("guard holds the flock", g3, "1")
-    fds : String <- sh.out("ls /proc/$$/fd | tr '\\n' ' '")
+    # what a child of the spawned shell inherits from it, as ls lists its
+    # own descriptors (less the one it reads the listing through): listing
+    # the shell's from outside raced its own pipes and saved descriptors
+    fds : String <- sh.out("ls -l /proc/self/fd | awk '$NF !~ /^\\/proc\\/[0-9]+\\/fd$/ && NF > 3 {printf \"%s \", $(NF-2)}'")
     C.Check.str("a child gets only 0-2 (no lock, socket or Bun descriptor)", fds, "0 1 2")
     sp : Result<&1, &1, U32 & String, U32 & Socket> <- H.Proc.spawn("cat", ["/proc/self/status"], "", 0)
     +sig : String <- spawned.ran(sp)
@@ -456,7 +459,7 @@ def after.mode(+dir: String) -> IO(Unit):
     +cat : U32 = Maybe.default(&2, U32, U32.read(pidt), 0)
     s : Result<&1, &1, U32 & String, Socket> <- A.Adopt.take(pid)
     echo : String <- after.sock(s)
-    fds : String <- sh.out("ls /proc/$$/fd | tr '\\n' ' '")
+    fds : String <- sh.out("ls -l /proc/self/fd | awk '$NF !~ /^\\/proc\\/[0-9]+\\/fd$/ && NF > 3 {printf \"%s \", $(NF-2)}'")
     w : U32 <- H.Proc.wait(cat)
     IO.print("after lock=" ++ l ++ " agent=" ++ echo ++ " fds=" ++ fds ++ " child=" ++ Bool.show(Bool.not(U32.is_eq(w, 255))))
 

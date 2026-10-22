@@ -1,14 +1,16 @@
-# Unix service runtime preparation
+# Service runtime preparation
 
-Run this on the same native Linux x64, Linux ARM64 or Apple ARM64 host after the
-configured native build succeeds. It performs no compile, emission, server
-startup, UI test, install or publication. It takes the original BUILD and
-generates the missing runtime/component inputs for `service-release.component`.
+The service is a Bun binary (`scripts/service-release.py js`, BUILD.json
+`serviceRuntime: "bun"`), cross-built from one host. Run this on a host of the
+target itself (Linux x64 or ARM64, a Mac of either kind, or Windows x64) after
+the build. It performs no compile, emission, server startup, UI test, install
+or publication. It takes the original BUILD and generates the missing
+runtime/component inputs for `service-release.component`.
 
 ```sh
 python3 /absolute/trusted-tools/scripts/service-runtime.py \
   --source-root "$GITHUB_WORKSPACE" \
-  --build "$GITHUB_WORKSPACE/build/bootstrap-native" \
+  --build "$GITHUB_WORKSPACE/build/bootstrap-js" \
   --producer /absolute/trusted-tools/scripts/service-release.py \
   --producer-sha256 ACTUAL_APPROVED_HELPER_SHA256 \
   --out "$GITHUB_WORKSPACE/build/bootstrap-service"
@@ -32,9 +34,9 @@ Outputs under the new absolute output directory are:
 
 Give the desktop stage producer `component/SERVICE.json` as its service receipt
 and `component/payload/` as its service payload. Include the entire output in
-the native job's artifact upload. Linux ARM64 can immediately stage and smoke
+the job's artifact upload. Linux ARM64 can immediately stage and smoke
 that component on the same ARM64 runner. There is no new request template to
-fill and no private input is needed after native compilation.
+fill and no private input is needed after the build.
 
 Linux measurement runs the actual ELF interpreter's `--list`, reads the service
 and every resolved system library's dynamic table, checks their architectures,
@@ -73,6 +75,17 @@ tools, optional CAD/browser helpers and installed product workflows are not
 qualified by this command. `runtimeAcceptance:PENDING` and `published:false`
 remain explicit; the desktop owner performs actual stage/startup/auth/reconnect,
 OS enforcement and UI acceptance afterward.
+
+Bun opens libraries itself through `bun:ffi` (Bend's JS runtime makes its
+syscalls that way). Those loads are declared, not measured: the C library on
+Linux, libSystem on macOS, nothing on Windows; any other `dlopen` target fails.
+TODO (fast-hub L1/J4): measure them instead, from the running service on each
+target (the libraries it actually maps), and compare with the declared list.
+
+Windows measurement reads the PE's normal and delay imports and requires each
+to be a Windows system DLL or API set present in System32. No system DLL is
+copied. On Windows the service's `--version` is report-only until Bend's JS
+runtime has Win32 syscalls (fast-hub J4).
 
 Offline parser controls:
 

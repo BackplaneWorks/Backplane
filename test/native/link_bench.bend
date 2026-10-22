@@ -9,7 +9,7 @@ import ../../src/server/argv.bend as AV
 # What switching the window to another machine's hub costs: a link
 # (src/app/link.bend) joined as the window joins it, timed until the hub's
 # log arrives, then the window's parse and replay of it.
-#   scripts/build-app.sh test/native/link_bench.bend build/link_bench
+#   scripts/build-js.sh test/native/link_bench.bend build/link_bench
 #   build/link_bench http://127.0.0.1:3790
 
 def seen(+n: Nat, +what: String, +a: Nat, +b: Nat) -> IO(Unit):

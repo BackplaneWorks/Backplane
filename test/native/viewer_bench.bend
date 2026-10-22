@@ -27,7 +27,7 @@ import ../../src/server/argv.bend as AV
 # times the parts of a base drawn from scratch (FR.Fresh.frame), and
 # writes the base a pan left and one drawn from scratch at the same view
 # (/tmp/vb-panned.ppm, /tmp/vb-fresh.ppm) to compare.
-#   scripts/build-app.sh test/native/viewer_bench.bend build/viewer_bench
+#   scripts/build-js.sh test/native/viewer_bench.bend build/viewer_bench
 #   build/viewer_bench FILE.kicad_pcb|FILE.kicad_sch [W H]
 
 def para(+i: Nat) -> String:

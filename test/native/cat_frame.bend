@@ -7,7 +7,7 @@ import ../../src/server/argv.bend as AV
 
 # Every mood for a few looks, at 96 and 32 pixels, posed at a time, into a
 # PPM (default /tmp/cat_frame.ppm). Also times one cat's frame work.
-#   scripts/build-app.sh test/native/cat_frame.bend build/cat_frame
+#   scripts/build-js.sh test/native/cat_frame.bend build/cat_frame
 #   build/cat_frame [ms] [out.ppm]
 #   scripts/ppm-to-png.py /tmp/cat_frame.ppm /tmp/cat_frame.png
 

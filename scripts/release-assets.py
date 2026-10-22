@@ -521,37 +521,38 @@ def original_resource_web(package, root, service_root, receipt, source, tree, ta
         if (set(member) != {"sha256", "bytes"} or type(member["bytes"]) is not int
                 or member["bytes"] <= 0 or not re.fullmatch(r"[a-f0-9]{64}", member["sha256"])):
             raise ValueError("invalid original resource web member")
-    if receipt["target"] == "windows-x64":
-        verify_windows_members(package, service_root + "/BUILD.json", source, tree, tag, original_web=original)
-        build = packaged_reference(package, root, receipt["components"]["service"])
-        if build != load_json(package.read(service_root + "/BUILD.json")):
-            raise ValueError("original Windows native BUILD differs from provenance")
-    else:
-        service = packaged_reference(package, root, receipt["components"]["service"])
-        if (service.get("kind"), service.get("status"), service.get("sourceCommit"),
-                service.get("sourceTree"), service.get("target"), service.get("entrypoint"),
-                service.get("genuineService")) != (
-                "backplane-bend-service", "VERIFIED", source, tree, receipt["target"], "src/server/main.bend", True):
-            raise ValueError("original native SERVICE identity changed")
-        declared = service.get("members", {})
-        actual = {n[len(service_root) + 1:]: v for n, v in package.inventory().items()
-                  if n.startswith(service_root + "/") and not n.startswith(service_root + "/web/")}
-        old_declared = {n[4:]: {k: v.get(k) for k in ("sha256", "bytes")}
-                        for n, v in declared.items() if n.startswith("web/")}
-        if old_declared != old:
-            raise ValueError("original SERVICE web differs from resource manifest")
-        native_declared = {n: v for n, v in declared.items() if not n.startswith("web/")}
-        expected = {n: ({"symlink": v.get("target")} if v.get("type") == "symlink"
-                        else {k: v.get(k) for k in ("sha256", "bytes")}) for n, v in native_declared.items()}
-        if actual != expected:
-            raise ValueError("original native SERVICE closure changed")
+    service = packaged_reference(package, root, receipt["components"]["service"])
+    if (service.get("kind"), service.get("status"), service.get("sourceCommit"),
+            service.get("sourceTree"), service.get("target"), service.get("entrypoint"),
+            service.get("genuineService")) != (
+            "backplane-bend-service", "VERIFIED", source, tree, receipt["target"], "src/server/main.bend", True):
+        raise ValueError("original native SERVICE identity changed")
+    if service.get("roles", {}).get("service") != ("backplane-serve.exe" if receipt["target"] == "windows-x64" else "backplane-serve"):
+        raise ValueError("original SERVICE service role mismatch")
+    declared = service.get("members", {})
+    actual = {n[len(service_root) + 1:]: v for n, v in package.inventory().items()
+              if n.startswith(service_root + "/") and not n.startswith(service_root + "/web/")}
+    old_declared = {n[4:]: {k: v.get(k) for k in ("sha256", "bytes")}
+                    for n, v in declared.items() if n.startswith("web/")}
+    if old_declared != old:
+        raise ValueError("original SERVICE web differs from resource manifest")
+    native_declared = {n: v for n, v in declared.items() if not n.startswith("web/")}
+    expected = {n: ({"symlink": v.get("target")} if v.get("type") == "symlink"
+                    else {k: v.get(k) for k in ("sha256", "bytes")}) for n, v in native_declared.items()}
+    if actual != expected:
+        raise ValueError("original native SERVICE closure changed")
+    # A Windows ZIP carries no POSIX modes; the desktop producer checks them where they exist.
+    # TODO (fast-hub J4): with the Win32 JS runtime, bring back the Windows
+    # service member closure check the C producer had (verify_windows_members)
+    # for packages without a selected browser.
+    if receipt["target"] != "windows-x64":
         for n, v in native_declared.items():
             if v.get("type") == "file" and v.get("mode") != package.mode(service_root + "/" + n):
                 raise ValueError("original native resource mode changed")
-        build = packaged_reference(package, root, receipt["components"]["serviceBuild"])
-        if (build != load_json(package.read(service_root + "/BUILD.json"))
-                or not same_reference(service.get("buildReceipt"), receipt["components"]["serviceBuild"])):
-            raise ValueError("original native BUILD differs from SERVICE provenance")
+    build = packaged_reference(package, root, receipt["components"]["serviceBuild"])
+    if (build != load_json(package.read(service_root + "/BUILD.json"))
+            or not same_reference(service.get("buildReceipt"), receipt["components"]["serviceBuild"])):
+        raise ValueError("original native BUILD differs from SERVICE provenance")
 
 
 # Shared with the selected-browser producer/fixture; archive bounds, not new UI gates.
@@ -644,8 +645,8 @@ def selected_browser(package, root, service_root, receipt, target, version):
             or policy.get("compileInputs") != load_json(package.read(service_root + "/BUILD.json")).get("compileInputs")):
         raise ValueError("actual root policy does not authorize this native/browser freeze")
     pins = freeze.get("components", {}).get(target, {})
-    service_key = "serviceArchiveSha256" if target == "windows-x64" else "serviceReceiptSha256"
-    service_ref = receipt.get("components", {}).get("windowsResourceArchive" if target == "windows-x64" else "service", {})
+    service_key = "serviceReceiptSha256"
+    service_ref = receipt.get("components", {}).get("service", {})
     if (not allowed.get(service_key) or allowed[service_key] != pins.get(service_key)
             or allowed[service_key] != service_ref.get("sha256")):
         raise ValueError("actual root policy original native service/archive mismatch")
@@ -752,7 +753,7 @@ def composite_acceptance(package, root, resources, receipt, target, source, tree
             or old.get("windowsShellSource") != receipt.get("windowsShellSource")):
         raise ValueError("composite changed native policies/source")
     immutable = {k: v for k, v in old.get("components", {}).items()
-                 if k in {"shell", "electron", "service", "serviceBuild", "windowsResourceArchive"}}
+                 if k in {"shell", "electron", "service", "serviceBuild"}}
     if acceptance.get("immutableComponents") != immutable or acceptance.get("selectedBrowser") != receipt["selectedBrowser"]:
         raise ValueError("composite immutable component lineage changed")
     for key, ref in immutable.items():
@@ -870,6 +871,10 @@ def verify_target(directory, target, row, source, tree, tag, *, browser_required
             configured_service(build, version, channel)
             if (build.get("commit", build.get("source_commit")), build.get("tree", build.get("source_tree"))) != (source, tree):
                 raise ValueError("service build source mismatch")
+            # The service is the JS one (Bun); Windows has had no other since the C service went.
+            if (build.get("serviceRuntime", "bun" if target != "windows-x64" else None) != "bun"
+                    or build.get("service", posixpath.basename(service)) != posixpath.basename(service)):
+                raise ValueError("desktop service is not the configured JS service of its target")
             web_data = package.read(service_root + "/WEB.json")
             selected = receipt.get("selectedBrowser")
             if browser_required and not selected:
@@ -887,21 +892,14 @@ def verify_target(directory, target, row, source, tree, tag, *, browser_required
                     raise ValueError("desktop web receipt changed")
                 verify_web(package, dict(load_json(web_data), root=service_root + "/web"), source, tree)
             if target == "windows-x64":
-                if not selected:
-                    verify_windows_members(package, service_root + "/BUILD.json", source, tree, tag)
-                control = build.get("managedControl", {})
+                # The JS service has no Windows managed-control protocol: only the
+                # resident policy (no managed stop or update) can ship, and the BUILD
+                # may not claim one.
                 resident = {"mode": "resident-service", "managedStop": False, "managedUpdate": False}
-                if receipt.get("lifecyclePolicy") == resident:
-                    if not isinstance(control, dict) or control.get("status") != "UNSUPPORTED" or control.get("protocol") is not None:
-                        raise ValueError("resident Windows policy requires truthful unsupported control")
-                else:
-                    if (not isinstance(control, dict) or control.get("status") != "IMPLEMENTED"
-                            or not control.get("protocol") or not control.get("validationReceiptSha256")):
-                        raise ValueError("Windows managed service control remains unsupported")
-                    name = safe_name(control.get("validationReceipt"))
-                    data = package.read(service_root + "/" + name)
-                    if hashlib.sha256(data).hexdigest() != control["validationReceiptSha256"]:
-                        raise ValueError("Windows managed-control acceptance changed")
+                if receipt.get("lifecyclePolicy") != resident:
+                    raise ValueError("Windows managed service control remains unsupported")
+                if "managedControl" in build:
+                    raise ValueError("resident Windows policy requires truthful unsupported control")
             if selected and receipt.get("acceptance"):
                 composite_acceptance(package, root, resources, receipt, target, source, tree, version)
             else:
@@ -990,42 +988,6 @@ def member_map_matches(declared, inventory, root, excluded, package=None):
             if package is not None and "mode" in value and (path not in inventory or value["mode"] != package.mode(path)):
                 return False
     return actual == normalized
-
-
-def verify_windows_members(package, build_path, source, tree, tag, *, original_web=None):
-    version, channel = identity(source, tag)
-    build = load_json(package.read(build_path))
-    root = posixpath.dirname(build_path)
-    emitted = load_json(package.read(root + "/SOURCE.json"))
-    web = load_json(package.read(root + "/WEB.json"))
-    if (build.get("schema"), build.get("kind"), emitted.get("schema"), emitted.get("kind")) != (
-            3, "windows-service-resources", 3, "windows-service-emission"):
-        raise ValueError("Windows genuine service SOURCE3/BUILD3 required")
-    for r in (build, emitted):
-        if (r.get("commit"), r.get("tree"), r.get("entrypoint"), r.get("target")) != (
-                source, tree, "src/server/main.bend", "windows-x64"):
-            raise ValueError("Windows service frozen source/entry mismatch")
-        if r.get("versionStamp") != version:
-            raise ValueError("Windows source stamp mismatch")
-    if (emitted.get("version"), emitted.get("telemetry_channel"), build.get("serviceVersion"), build.get("telemetryChannel")) != (version, channel, version, channel):
-        raise ValueError("Windows source/version/channel mismatch")
-    for key, name in (("sourceReceiptSha256", "SOURCE.json"), ("webManifestSha256", "WEB.json"),
-                      ("runtimeManifestSha256", "RUNTIME.json"), ("closureSha256", "CLOSURE.json")):
-        if build.get(key) != hashlib.sha256(package.read(root + "/" + name)).hexdigest():
-            raise ValueError("Windows raw producer receipt changed")
-    configured_service(build, version, channel)
-    inventory = package.inventory()
-    actual = {p[len(root) + 1:]: x for p, x in inventory.items() if p.startswith(root + "/") and p != build_path}
-    if original_web is not None:
-        actual = {p: x for p, x in actual.items() if not p.startswith("web/")}
-        actual.update({"web/" + n: v for n, v in original_web["members"].items()})
-    if (build.get("sha256") != {p: x.get("sha256") for p, x in actual.items()}
-            or build.get("sizes") != {p: x.get("bytes") for p, x in actual.items()}):
-        raise ValueError("Windows service resource closure mismatch")
-    if build.get("roles", {}).get("service") != "backplane-serve.exe":
-        raise ValueError("Windows service role mismatch")
-    if original_web is None:
-        verify_web(package, dict(web, root=root + "/web"), source, tree)
 
 
 def component_sources(directory, inputs, source, tree, tag):
@@ -1222,13 +1184,12 @@ def verify_final(directory, qualification, manifest, source, tag):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["collect", "verify", "check-bake", "coverage-plan", "check-coverage", "check-inputs", "check-windows-resources", "check-final"])
+    parser.add_argument("command", choices=["collect", "verify", "check-bake", "coverage-plan", "check-coverage", "check-inputs", "check-final"])
     parser.add_argument("--directory", type=Path)
     parser.add_argument("--source")
     parser.add_argument("--tag", required=True)
     parser.add_argument("--run-id")
     parser.add_argument("--manifest", type=Path)
-    parser.add_argument("--archive", type=Path)
     parser.add_argument("--tree")
     parser.add_argument("--qualification-directory", type=Path)
     args = parser.parse_args()
@@ -1244,15 +1205,6 @@ def main():
         _, channel = identity(args.source, args.tag)
         if args.command == "check-bake":
             check_bake(os.environ, channel)
-        elif args.command == "check-windows-resources":
-            if args.archive is None or not args.tree or not SOURCE_RE.fullmatch(args.tree):
-                raise ValueError("Windows resource archive and full tree required")
-            package = Package(args.archive)
-            try:
-                package.inventory()
-                verify_windows_members(package, "backplane-service/BUILD.json", args.source, args.tree, args.tag)
-            finally:
-                package.close()
         elif args.command == "check-final":
             if args.directory is None or args.qualification_directory is None or args.manifest is None:
                 raise ValueError("candidate and qualification directories/manifest required")

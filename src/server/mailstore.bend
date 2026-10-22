@@ -16,11 +16,9 @@ type StoreResult<-A: Data> is Data:
 # Base.close cannot report errors; finish owns truncate/write/close together.
 # The new open also rejects symlinks and nonregular files (including FIFOs).
 def MailFile.open(path: String, write: U32) -> IO(Result<&1, &1, U32 & String, File>):
-  import "./effects/mailstore.c"
   import "./effects/mailstore.js"
 
 def MailFile.finish(file: File, cut: U32, text: String) -> IO(Result<&1, &1, U32 & String, Unit>):
-  import "./effects/mailstore.c"
   import "./effects/mailstore.js"
 
 def MailStore.error(-A: Data, path: String, e: U32 & String) -> StoreResult<A>:
@@ -451,11 +449,9 @@ def MailStore.recover(+home: String, box: ML.Box) -> IO(StoreResult<List<&2, M.C
 # bucket-head check. The journal is authoritative; indexes are disposable.
 
 def MailFile.text(+path: String, +at: U32, +size: U32) -> IO(Result<&1, &1, U32 & String, String>):
-  import "./effects/mailstore.c"
   import "./effects/mailstore.js"
 
 def MailFile.patch(+path: String, +at: U32, +text: String, +truncate: U32) -> IO(Result<&1, &1, U32 & String, Unit>):
-  import "./effects/mailstore.c"
   import "./effects/mailstore.js"
 
 def MI.then(-A: Data, -B: Data, +r: StoreResult<A>, k: A -> IO(StoreResult<B>)) -> IO(StoreResult<B>):
@@ -858,7 +854,6 @@ def MailStore.append(home: String, +body: MB.Body) -> IO(StoreResult<Bool>):
 # One bounded IO request for a page's exact body ranges. Decode the rows on a
 # flat balanced tree: the first forks distribute all page parsing over cores.
 def MailFile.texts(path: String, ranges: List<&2, U32>) -> IO(Result<&1, &1, U32 & String, List<&2, String>>):
-  import "./effects/mailstore.c"
   import "./effects/mailstore.js"
 
 def MI.ranges(rows: List<&2, MIndexRow>) -> List<&2, U32>:

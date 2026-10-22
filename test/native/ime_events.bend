@@ -4,7 +4,7 @@ import ../../src/app/win.bend as W
 # The window's input events, with a real X window (run under Xvfb): ime
 # events queued before the app drains them each keep their own text, in
 # order; a long commit arrives whole; no unknown event is a quit.
-#   scripts/build-app.sh test/native/ime_events.bend build/ime_events
+#   scripts/build-js.sh test/native/ime_events.bend build/ime_events
 #   DISPLAY=:91 BACKPLANE_NO_IME=1 build/ime_events
 
 def ok(+name: String, +got: String, +want: String) -> IO(Unit):

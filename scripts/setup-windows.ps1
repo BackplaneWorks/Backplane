@@ -10,7 +10,7 @@ $setup = Join-Path $cache 'setup-x86_64.exe'
 Invoke-WebRequest 'https://cygwin.com/setup-x86_64.exe' -OutFile $setup
 Get-FileHash $setup -Algorithm SHA256 | Format-List
 $packages = 'bash,coreutils,findutils,git,curl,fontconfig,libfontconfig1,libfreetype6,dejavu-fonts'
-if ($BuildTools) { $packages += ',clang,python3,make' }
+if ($BuildTools) { $packages += ',python3,make' }
 # Setup verifies the mirror's package signatures by default. No elevation,
 # shortcuts or changes to another Cygwin installation are requested.
 $options = @('-q','-n','-N','-B','-O','-R',$Root,'-l',$cache,

@@ -3,7 +3,6 @@
 const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),assert=require('node:assert/strict');
 const p=require('./produce-release.cjs'),browserOverlay=require('./selected-browser.cjs');
 const POLICY='fee94f08b3ce7d909a1265d9f33820ea816887703e940ca0d7a57374f9509314';
-const WINDOWS='1c12bd80b6f994ecd0d68d06b8ada98e1958de725d33f6380da3c0243ad099e3';
 const ref=file=>({path:path.resolve(file),sha256:p.digest(file),bytes:fs.statSync(file).size});
 function options(argv){const keys=['--policy','--components','--service','--out'],optional='--selected-browser';assert([8,10].includes(argv.length),'Use '+keys.join(', '));const a={};for(let i=0;i<argv.length;i+=2){assert((keys.includes(argv[i])||argv[i]===optional)&&!a[argv[i]],'Unknown/duplicate option');assert(path.isAbsolute(argv[i+1]),'Absolute paths required');a[argv[i]]=argv[i+1];}assert(keys.every(k=>a[k]),'Missing required option');return a;}
 function policyIdentity(policy,components,policySha){
@@ -23,14 +22,10 @@ function compose(a){
   assert.equal(p.digest(path.join(__dirname,'prepare-native-stage.cjs')),policy.tooling.stageAdapterSha256,'Stage execution tool differs from root policy');assert.equal(p.digest(path.join(__dirname,'test/release-smoke.cjs')),policy.tooling.nativeSmokeSha256,'Smoke execution tool differs from root policy');
   const temp=fs.mkdtempSync(path.join(os.tmpdir(),'bp-target-freeze-'));
   try{
-    let service,web;
-    if(target==='windows-x64'){
-      service={archive:ref(a['--service']),contractSha256:WINDOWS};const extract=path.join(temp,'windows-input');p.runPython(['extract',a['--service'],extract]);assert.deepEqual(fs.readdirSync(extract),['backplane-service']);web=path.join(extract,'backplane-service/WEB.json');
-    }else{
-      service={receipt:ref(a['--service']),payload:{directory:path.join(path.dirname(a['--service']),'payload')}};web=path.join(service.payload.directory,'WEB.json');
-      assert.equal(p.digest(path.join(service.payload.directory,'EXECUTION-HELPER.py')),policy.tooling.serviceComponentProducerSha256,'Configured native helper differs from root policy');assert.equal(p.digest(path.join(service.payload.directory,'runtime-evidence/SERVICE-RUNTIME-PRODUCER.py')),executionTooling.serviceRuntimeFactorySha256,'Runtime factory differs from root policy');
-    }
-    const pins={shellReceiptSha256:shell.receipt.sha256,electronReceiptSha256:electron.receipt.sha256,...(target==='windows-x64'?{serviceArchiveSha256:service.archive.sha256}:{serviceReceiptSha256:service.receipt.sha256}),webManifestSha256:p.digest(web)};
+    // Every target, Windows included, binds the JS service's SERVICE.json component.
+    const service={receipt:ref(a['--service']),payload:{directory:path.join(path.dirname(a['--service']),'payload')}},web=path.join(service.payload.directory,'WEB.json');
+    assert.equal(p.digest(path.join(service.payload.directory,'EXECUTION-HELPER.py')),policy.tooling.serviceComponentProducerSha256,'Configured native helper differs from root policy');assert.equal(p.digest(path.join(service.payload.directory,'runtime-evidence/SERVICE-RUNTIME-PRODUCER.py')),executionTooling.serviceRuntimeFactorySha256,'Runtime factory differs from root policy');
+    const pins={shellReceiptSha256:shell.receipt.sha256,electronReceiptSha256:electron.receipt.sha256,serviceReceiptSha256:service.receipt.sha256,webManifestSha256:p.digest(web)};
     const selectedBrowser=a['--selected-browser']?browserOverlay.input(a['--selected-browser'],p,ref(a['--policy'])):null;
     assert(Boolean(selectedBrowser)===Boolean(allowed.selectedBrowser),'Root selected browser/input must both be present');
     if(selectedBrowser){browserOverlay.nativeServicePin(allowed,target,pins);assert.equal(allowed.selectedBrowser.resourceWebManifestSha256,pins.webManifestSha256,'Root must retain original resourceWeb');pins.selectedBrowserReceiptSha256=allowed.selectedBrowser.receipt.sha256;}
@@ -43,6 +38,6 @@ function compose(a){
     fs.copyFileSync(candidate,out,fs.constants.COPYFILE_EXCL);return {target,status:'FROZEN_ACTUAL_ARTIFACT_BINDINGS_NOT_RUNTIME_ACCEPTANCE',freeze:ref(out),components:pins,published:false};
   }finally{fs.rmSync(temp,{recursive:true,force:true});}
 }
-function main(argv){if(argv.length===1&&argv[0]==='--help'){console.log('node desktop/compose-target-freeze.cjs --policy ABS_ROOT_DISPOSITION --components ABS_PREPARED_COMPONENT_INPUTS --service ABS_SERVICE_JSON_OR_WINDOWS_ZIP --out NEW_ABS_FREEZE_JSON [--selected-browser ABS_BROWSER_INPUT_JSON]\nPins authorized actual artifact bytes after existing complete stager validation. No runtime or acceptance claim.');return;}console.log(JSON.stringify(compose(options(argv)),null,2));}
+function main(argv){if(argv.length===1&&argv[0]==='--help'){console.log('node desktop/compose-target-freeze.cjs --policy ABS_ROOT_DISPOSITION --components ABS_PREPARED_COMPONENT_INPUTS --service ABS_SERVICE_JSON --out NEW_ABS_FREEZE_JSON [--selected-browser ABS_BROWSER_INPUT_JSON]\nPins authorized actual artifact bytes after existing complete stager validation. No runtime or acceptance claim.');return;}console.log(JSON.stringify(compose(options(argv)),null,2));}
 module.exports={options,policyIdentity,compose};
 if(require.main===module)try{main(process.argv.slice(2));}catch(e){console.error('Target freeze: '+e.message);process.exitCode=1;}

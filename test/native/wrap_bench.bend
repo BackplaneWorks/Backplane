@@ -9,7 +9,7 @@ import ../../src/server/argv.bend as AV
 # Each invocation measures one fresh process, with ASCII warmed as in the
 # window. Construction/font loading are outside the timer; all lines are
 # consumed inside it. Width is the investigation's 780 px.
-# scripts/build-app.sh test/native/wrap_bench.bend build/wrap_bench
+# scripts/build-js.sh test/native/wrap_bench.bend build/wrap_bench
 # build/wrap_bench [10000|90000] [token|normal|cache|current]
 
 def word(n: Nat, acc: String) -> String:

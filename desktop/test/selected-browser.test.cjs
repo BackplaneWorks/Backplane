@@ -17,7 +17,7 @@ const fixtureFile=path.join(__dirname,'release-producer.test.cjs'),source=fs.rea
 const {fixture,evidence,put,write,ref}=vm.runInThisContext('(function(require){'+source.slice(0,stop)+';return{fixture,evidence,put,write,ref};})', {filename:fixtureFile})(createRequire(fixtureFile));
 const utils=()=>p.browserUtilities();
 function authorize(f){
- const r=f.request.release,allowed={selectedBrowser:f.freeze.selectedBrowser,signingPolicy:f.freeze.signingPolicy[f.target],lifecyclePolicy:f.freeze.lifecyclePolicy?.[f.target],shellReceiptSha256:f.freeze.components[f.target].shellReceiptSha256,electronReceiptSha256:f.freeze.components[f.target].electronReceiptSha256,...(f.target==='windows-x64'?{serviceArchiveSha256:f.freeze.components[f.target].serviceArchiveSha256}:{serviceReceiptSha256:f.freeze.components[f.target].serviceReceiptSha256}),...(f.freeze.windowsShellSource?{windowsShellSource:f.freeze.windowsShellSource}:{})};
+ const r=f.request.release,allowed={selectedBrowser:f.freeze.selectedBrowser,signingPolicy:f.freeze.signingPolicy[f.target],lifecyclePolicy:f.freeze.lifecyclePolicy?.[f.target],shellReceiptSha256:f.freeze.components[f.target].shellReceiptSha256,electronReceiptSha256:f.freeze.components[f.target].electronReceiptSha256,serviceReceiptSha256:f.freeze.components[f.target].serviceReceiptSha256,...(f.freeze.windowsShellSource?{windowsShellSource:f.freeze.windowsShellSource}:{})};
  const policy={schema:1,kind:'backplane-root-staging-disposition',status:'AUTHORIZED_STAGING_POLICY_PENDING_ACTUAL_SERVICE_BINDINGS',publicationOwner:'root',version:r.version,tag:r.tag,channel:r.channel,commit:r.commit,tree:r.tree,electronVersion:'44.9.2',sourceDateEpoch:f.freeze.sourceDateEpoch,compileInputs:f.freeze.compileInputs,targets:{[f.target]:allowed}};
  const policyRef=ref(write(path.join(f.root,'root-policy.json'),policy));f.request.selectedBrowser.rootDisposition=policyRef;f.freeze.rootStagingDisposition={sha256:policyRef.sha256,bytes:policyRef.bytes};trustSyntheticPolicy(policyRef.sha256);f.refresh();
 }
@@ -125,7 +125,8 @@ test('current stage provenance carries the exact raw receipt and independently v
 test('composer and direct producer require the root-selected native service artifact pin',()=>{
  const sha='a'.repeat(64);
  for(const target of ['linux-x64','linux-arm64','darwin-arm64','windows-x64']){
-  const key=target==='windows-x64'?'serviceArchiveSha256':'serviceReceiptSha256';
+  // every target, Windows included, pins the service component's SERVICE.json
+  const key='serviceReceiptSha256';
   overlay.nativeServicePin({[key]:sha},target,{[key]:sha});
   assert.throws(()=>overlay.nativeServicePin({},target,{[key]:sha}),/native service/);
   assert.throws(()=>overlay.nativeServicePin({[key]:sha},target,{[key]:'b'.repeat(64)}),/native service/);

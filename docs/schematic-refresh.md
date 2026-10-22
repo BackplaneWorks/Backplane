@@ -86,15 +86,14 @@ including chunk reuse and monotonic final geometry. Second rapid edits
 arrived in 151.949 ms (root) and 150.547 ms (child) on Boat, under the test's
 500 ms bound. No HTTP/browser/device package acceptance is implied.
 
-Build the small components with the normal admitted build workflow:
+Build the small components with the normal admitted build workflow (on Bun):
 
 ```sh
-scripts/build-app.sh test/native/schematic_refresh_probe.bend build/refresh-native
-scripts/build-app.sh test/native/refresh_plot_probe.bend build/refresh-plot
+scripts/build-js.sh test/native/schematic_refresh_probe.bend build/refresh-native
+scripts/build-js.sh test/native/refresh_plot_probe.bend build/refresh-plot
 python3 test/tools/refresh_plot_test.py build/refresh-plot build/refresh-root
 python3 test/tools/refresh_plot_test.py build/refresh-plot build/refresh-child --child
 bun test/tools/refresh_effects_test.ts
-python3 test/tools/refresh_effect_c_test.py
 ```
 
 For a reserved local display timing slot, set `SCHEMATIC_REFRESH_XVFB` to

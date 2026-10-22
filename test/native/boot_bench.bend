@@ -15,7 +15,7 @@ import ../../src/server/argv.bend as AV
 # Start-up, timed step by step on a real event log, as the app does it
 # before its first frame: read, parse, replay, the log message for the
 # window, the window's own replay of it, fonts, the first layout and tiles.
-#   scripts/build-app.sh test/native/boot_bench.bend build/boot_bench
+#   scripts/build-js.sh test/native/boot_bench.bend build/boot_bench
 #   build/boot_bench ~/.backplane-bend/events.jsonl   (only reads it)
 
 def ops(o: L.Out) -> List<&2, R.Op>:
