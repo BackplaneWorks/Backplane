@@ -2,7 +2,9 @@
 // poor connection shows the page and its read-only focused picture. Hashed
 // chunks never change under their name (cache first); the page itself is
 // fetched fresh when the network answers, else served from cache. The
-// socket and MCP never pass through here.
+// socket and MCP never pass through here. Each fresh page names the assets
+// of its build; cached assets it no longer names (an earlier deploy's) are
+// deleted then, so the cache holds one build, not one per deploy.
 
 const SHELL = "backplane-shell-v1";
 
@@ -31,10 +33,27 @@ self.addEventListener("fetch", (e) => {
   e.respondWith(caches.open(SHELL).then(async (c) => {
     try {
       const r = await fetch(e.request);
-      if (r.ok) c.put(e.request, r.clone());
+      if (r.ok) {
+        c.put(e.request, r.clone());
+        if (page) e.waitUntil(r.clone().text().then((html) => prune(c, html)).catch(() => {}));
+      }
       return r;
     } catch {
       return (await c.match(e.request)) ?? (page ? await c.match("/") : null) ?? Response.error();
     }
   }));
 });
+
+const ASSET = /^\/(?:chunk-|favicon-|apple-touch-icon-)[a-zA-Z0-9_-]+\.(?:js|css|svg|png|woff2?)$/;
+
+// Keep only the hashed assets this page's build names. A page that names
+// none (an error page, a proxy's) leaves the cache alone.
+async function prune(c, html) {
+  const named = new Set();
+  for (const m of html.matchAll(/(?:src|href)="\.?\/?((?:chunk-|favicon-|apple-touch-icon-)[a-zA-Z0-9_-]+\.[a-z0-9]+)"/g)) named.add("/" + m[1]);
+  if (![...named].some((n) => n.startsWith("/chunk-"))) return;
+  for (const req of await c.keys()) {
+    const path = new URL(req.url).pathname;
+    if (ASSET.test(path) && !named.has(path)) await c.delete(req);
+  }
+}

@@ -7,6 +7,7 @@ import ./mail.bend as ML
 import ./ubop.bend as UO
 import ./thin.bend as THIN
 import ./locks.bend as LK
+import ./sha1.bend as SH
 
 # The indexed store (store.db, docs: bp-coord/store/S1-SCHEMA.md)
 # ---------------------------------------------------------------
@@ -1336,6 +1337,59 @@ def Tab.entries(fs: Map<&2, String>) -> List<&2, String>:
 
 def Tab.mine(fs: Map<&2, String>, +th: String) -> List<&2, M.Entry>:
   Tab.mine.go(Tab.entries(fs), th, Nil{})
+
+# A log's identity
+# ----------------
+# store.db belongs to one log: meta log_id is "sha1:" and the hex SHA-1 of
+# the log's first line (its bytes before the first newline, at most 4096),
+# "" for an empty log. The build and the hub's open both use this one
+# definition; a store whose log_id differs from its log's is made again.
+
+def Id.upto.t(nl: Bool, t: List<&2, U32>) -> List<&2, U32>:
+  match nl:
+    case True{}:
+      Nil{}
+    case False{}:
+      t
+
+def Id.upto.x(nl: Bool, +x: U32, acc: List<&2, U32>) -> List<&2, U32>:
+  match nl:
+    case True{}:
+      acc
+    case False{}:
+      x <> acc
+
+# the bytes before the first newline, at most n of them
+def Id.upto(n: Nat, bs: List<&2, U32>, acc: List<&2, U32>) -> List<&2, U32>:
+  match n bs:
+    case _ Nil{}:
+      List.reverse(&2, U32, acc)
+    case 0n +x <> +t:
+      List.reverse(&2, U32, acc)
+    case 1n+k +x <> +t:
+      Id.upto(k, Id.upto.t(U32.is_eq(x, 10), t), Id.upto.x(U32.is_eq(x, 10), x, acc))
+
+def Id.nib(+x: U32) -> String:
+  String.take(String.drop("0123456789abcdef", U32.to_nat(x)), 1n)
+
+# (a digest: 20 bytes, so no deeper than that)
+def Id.hex(bs: List<&2, U32>) -> String:
+  match bs:
+    case Nil{}:
+      ""
+    case +b <> t:
+      Id.nib(U32.shrn(b, 4n)) ++ Id.nib(U32.and(b, 15)) ++ Id.hex(t)
+
+def Id.k(bs: List<&2, U32>) -> String:
+  match bs:
+    case Nil{}:
+      ""
+    case +b <> t:
+      "sha1:" ++ Id.hex(SH.Sha1.hash(b <> t))
+
+# the identity of a log whose file starts with these bytes
+def Sdb.log_id(bs: List<&2, U32>) -> String:
+  Id.k(Id.upto(4096n, bs, Nil{}))
 
 # A demo log for the laws
 # -----------------------
