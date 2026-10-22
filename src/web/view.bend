@@ -98,7 +98,7 @@ def VLabel.option.k(+lc: I.Loc, known: Bool, +v: String) -> String:
     case False{}: Bool.pick(String, String.is_empty(v), MSG.T.common.default(lc), v)
 
 def VLabel.option(+lc: I.Loc, +key: String, v: String) -> String:
-  VLabel.option.k(lc, Bool.or(Bool.or(String.eq(key, "order.enabled"), String.eq(key, "order.estimates")), Bool.or(String.eq(key, "restart.continue"), Bool.or(String.eq(key, "ui.theme"), Bool.or(String.eq(key, "sidebar.view"), Bool.or(String.eq(key, "update.channel"), Bool.or(String.eq(key, "kicad.ipc"), Bool.or(String.starts_with(key, "notify."), String.starts_with(key, "sync.")))))))), v)
+  VLabel.option.k(lc, Bool.or(Bool.or(String.eq(key, "order.enabled"), String.eq(key, "order.estimates")), Bool.or(String.eq(key, "restart.continue"), Bool.or(String.eq(key, "ui.theme"), Bool.or(String.eq(key, "sidebar.view"), Bool.or(String.eq(key, "update.channel"), Bool.or(Bool.or(String.eq(key, "kicad.ipc"), String.eq(key, "uber.ctx")), Bool.or(String.starts_with(key, "notify."), String.starts_with(key, "sync.")))))))), v)
 
 # Display labels only: metadata keys and submitted chip values stay unchanged.
 def VLabel.effort(+lc: I.Loc, +e: String) -> String:
@@ -1371,6 +1371,8 @@ def View.settings.rows.k(i: Nat, +lc: I.Loc, +u: U.Ui, +st: M.State, +nf: Map<&2
     case 10n: View.usage.page(lc, u)
     case 11n: List.concat(&2, D.Node, [[View.setrow(MSG.T.settings.tour(lc), MSG.T.settings.tour.note(lc), [D.Dom.button("", "ob-open", "", MSG.T.settings.tour.again(lc), MSG.T.settings.tour.show(lc))])]])
     case 12n: View.agy.rows(U.Share.rows(u))
+    # Beta: the uberbot's infinite context (core/uctx.bend), off by default
+    case 13n: [View.setrow(MSG.T.settings.uctx(lc), MSG.T.settings.uctx.note(lc), View.chips.loc(lc, ["on", "off"], M.Setting.get(st, "uber.ctx", "off"), "uber.ctx"))]
     case _: Nil{}
 
 def View.settings.rows(i: Nat, +lc: I.Loc, +u: U.Ui, +st: M.State, +nf: Map<&2, String>, +v: String, +note: String) -> List<&2, D.Node>:

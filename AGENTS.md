@@ -109,6 +109,8 @@ scripts/build-js.sh src/server/main.bend dist/backplane-serve   # only the hub
 dist/backplane        # run it (opens http://127.0.0.1:3787)
 ```
 
+Local CI (bp-coord's `local-ci.sh`) runs `scripts/ci-fast.py`: each test, each file's type-check, the proof and the js step are keyed by the bytes they read (`scripts/ci-keys.py`: import closure, driver, `test/fixtures/`, `# test-inputs:` lines, the gate scripts) and the runner's toolchain (`scripts/ci-runner-id.sh`); a pass recorded under that key in `~/.cache/backplane-bend/verified/` is reused, the rest runs on Boat slots kept warm (`boat-job.sh --slot`), in up to 16 shards (`TEST_ONLY` for test.sh, `CHECK_FILES` for check.sh), here through bp-admit when Boat refuses. A verdict that never came is INCOMPLETE, never FAIL. `scripts/focus.sh BASE [HEAD]` runs only what a diff can reach. A test that reads a repo file at run time that is not in its closure, driver or fixtures declares it: `# test-inputs: PATH | DIR/ | closure:PROG.bend`. Test: `bash test/tools/ci_fast_test.sh`.
+
 `scripts/test.sh` uses the same bounded stack settings as `scripts/check.sh`.
 For `test/NAME_test.bend`, a matching `test/tools/NAME.mjs` driver receives the
 emitted module's absolute path. A file with an IO `main` and a driver runs both;

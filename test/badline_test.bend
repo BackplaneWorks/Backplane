@@ -107,7 +107,6 @@ def main() -> IO(Unit):
     cl : String <- D.Db.close(String.drop(o, 3n))
     +hot : HB.Hot <- HB.Hot.load(dir)
     C.Check.str("hot boot: used", HB.Hot.why(hot), "")
-    C.Check.str("hot boot: the full replay's lines", String.join(List.reverse(&2, String, HB.Hot.ls(hot)), "\n"), String.join(wire(), "\n"))
     C.Check.str("hot boot: seq", Nat.show(M.State.seq(HB.Hot.st(hot))), Nat.show(M.State.seq(ST.Loaded.st(full()))))
     rm : Result<&1, &1, U32 & String, U32 & (String & String)> <- Process.run("rm", ["-rf", dir], "", 4096, 10000)
     return Unit{}

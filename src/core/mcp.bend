@@ -22,6 +22,7 @@ import ./sched.bend as SC
 import ./tz.bend as TZ
 import ./mail.bend as ML
 import ./uber.bend as UBM
+import ./uctx.bend as UC
 
 # The Backplane MCP server, as a decider. Each agent session gets its own
 # endpoint (/mcp/<thread>), so every call knows which thread is asking. A
@@ -1343,6 +1344,20 @@ def Mcp.tools.live(live: Bool, on: Bool) -> J.Json:
     case False{}: Mcp.tools.on(on)
     case True{}: J.Json.obj([J.KV{"tools", J.Json.arr(List.append(&2, J.Json, J.Json.elems(J.Json.get_obj(Mcp.tools.on(on), "tools")), Mcp.dispose.tools()))}])
 
+# the uberbot's infinite context (core/uctx.bend), only while it is on
+def Mcp.uctx.tools() -> List<&2, J.Json>:
+  [Tool.def("memory_zoom", "Open line id+n of your memory view into the two lines of n/2 messages it was made from; n = 1 gives message id whole, with who wrote it and when. A long message comes in pages from character at.",
+     [Tool.prop("id", "integer", "The line's first message."), Tool.prop("n", "integer", "How many messages the line covers (a power of 2)."), Tool.prop("at", "integer", "For n = 1: the character to start from (default 0).")], ["id", "n"]),
+   Tool.def("memory_search", "Find words anywhere in your conversation with the person, older than your memory view too: up to 20 messages, newest first, each with its id (memory_zoom(id, 1) gives it whole).",
+     [Tool.prop("query", "string", "The words to find (all of them).")], ["query"])]
+
+def Mcp.uctx.with(on: Bool, tools: J.Json) -> J.Json:
+  match on:
+    case False{}:
+      tools
+    case True{}:
+      J.Json.obj([J.KV{"tools", J.Json.arr(List.append(&2, J.Json, J.Json.elems(J.Json.get_obj(tools, "tools")), Mcp.uctx.tools()))}])
+
 def Mcp.tools.named.k(keep: Bool, +t: J.Json, +rest: List<&2, J.Json>) -> List<&2, J.Json>:
   match keep:
     case True{}: t <> rest
@@ -1375,7 +1390,7 @@ def Mcp.tools.pick(uber: Bool, +s: M.State, +thread: String) -> J.Json:
     case False{}: Mcp.tools.live(MD.Disposition.launch(s, thread), String.eq(M.Setting.get(s, "mail.on", "off"), "on"))
 
 def Mcp.tools.for(+s: M.State, +thread: String) -> J.Json:
-  Mcp.tools.pick(Bool.and(Bool.not(String.eq(M.Setting.get(s, "mail.on", "off"), "on")), Mcp.mail.uber(s, thread)), s, thread)
+  Mcp.uctx.with(UC.Uctx.on(s, thread), Mcp.tools.pick(Bool.and(Bool.not(String.eq(M.Setting.get(s, "mail.on", "off"), "on")), Mcp.mail.uber(s, thread)), s, thread))
 
 def Mcp.method.k(i: Nat, +s: M.State, +now: Nat, +thread: String, +models: J.Json, +version: String, +id: J.Json, +p: J.Json) -> McpOut:
   match i:

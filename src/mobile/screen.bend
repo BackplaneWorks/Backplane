@@ -1592,6 +1592,7 @@ def Mob.settings.rows.k(i: Nat, +lc: I.Loc, +u: U.Ui, +st: M.State, +nf: Map<&2,
     case 11n: List.concat(&2, J.Json, [[Mob.set.row.l(MSG.T.settings.tour(lc), MSG.T.settings.tour.note(lc), [Mob.set.btn(MSG.T.settings.tour.show(lc), "ob-open", "", False{})])],
       more])
     case 12n: Mob.agy.rows(U.Share.rows(u))
+    case 13n: [Mob.set.row(MSG.T.settings.uctx(lc), MSG.T.settings.uctx.note(lc), Mob.set.chips.loc(lc, ["on", "off"], M.Setting.get(st, "uber.ctx", "off"), "uber.ctx"))]
     case _: Nil{}
 
 def Mob.settings.menu(ps: List<&2, String>, +lc: I.Loc) -> List<&2, J.Json>:

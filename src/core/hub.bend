@@ -34,6 +34,7 @@ import ./adopt.bend as AD
 import ./cmds.bend as CM
 import ./order.bend as OR
 import ./fallback.bend as FB
+import ./uctx.bend as UC
 
 # The decider. Requests from clients and lines from agents come in; changes
 # (persisted, folded into the read model) and effects (run by the server)
@@ -870,7 +871,7 @@ def Sum.got(+s: M.State, +now: Nat, +client: U32, +id: String, +p: J.Json) -> St
 
 # agent features (skills, effort, naming)
 def Hub.methods.agent() -> List<&2, String>:
-  ["thread.branch", "skills.list", "thread.effort", "thread.local", "thread.merged", "thread.unrooted", "thread.titled", "thread.btw", "summary.set"]
+  ["thread.branch", "skills.list", "thread.effort", "thread.local", "thread.merged", "thread.unrooted", "thread.titled", "thread.btw", "summary.set", "uctx.node", "uctx.start", "uctx.done"]
 
 # a side question (/btw {thread, q}): the writing model answers it off
 # the hub (Git job "btw": a is the question, b what it reads), only to the
@@ -2131,6 +2132,40 @@ def Wt.start(+s: M.State, +now: Nat, +thread: String, +first: Bool) -> Step:
 def Wt.ready(+s: M.State, +now: Nat, +client: U32, +id: String, +thread: String, +c: M.Change) -> Step:
   Step.before([c], [Reply.ok(client, id)], Wt.start(M.State.replay([c], s), now, thread, String.is_empty(M.Merge.branch(Hub.thread(s, thread)))))
 
+# The uberbot's infinite context: the compaction run's requests (the rest
+# is after the fallback pass, below)
+
+# a compaction run asked for (the server's UctxJob)
+def Uc.kick.cs(go: Bool, +th: String, +now: Nat) -> List<&2, M.Change>:
+  match go:
+    case True{}: [M.SettingSet{UC.Uctx.busy.key(th), Nat.show(now), now}]
+    case False{}: Nil{}
+
+def Uc.kick.os(go: Bool, +th: String) -> List<&2, Out>:
+  match go:
+    case True{}: [Git{0, "", "uctx", th, "", "", ""}]
+    case False{}: Nil{}
+
+# what the compaction run says: a line written {thread, l, i, text}
+def Uc.node(+s: M.State, +now: Nat, +client: U32, +id: String, +p: J.Json) -> Step:
+  Step.reply(client, id, Bool.pick(List<&2, M.Change>,
+    Bool.and(UC.Uctx.on(s, J.Json.get_str(p, "thread", "")), Bool.not(String.is_empty(J.Json.get_str(p, "text", "")))),
+    [M.CtxNoted{J.Json.get_str(p, "thread", ""), J.Json.get_nat(p, "l", 0n), J.Json.get_nat(p, "i", 0n), J.Json.get_str(p, "text", ""), now}], Nil{}))
+
+# where the thread's tree starts {thread, ord}: kept once
+def Uc.start.set(+s: M.State, +now: Nat, +client: U32, +id: String, +p: J.Json) -> Step:
+  Step.reply(client, id, Bool.pick(List<&2, M.Change>,
+    Bool.and(UC.Uctx.on(s, J.Json.get_str(p, "thread", "")), String.is_empty(UC.Uctx.start(s, J.Json.get_str(p, "thread", "")))),
+    [M.SettingSet{UC.Uctx.start.key(J.Json.get_str(p, "thread", "")), J.Json.get_str(p, "ord", "0"), now}], Nil{}))
+
+# a compaction run ended {thread, more}: its place is free, and another
+# starts at once when it left work
+def Uc.run.done(+s: M.State, +now: Nat, +client: U32, +id: String, +p: J.Json) -> Step:
+  +th = J.Json.get_str(p, "thread", "")
+  +more = Bool.and(UC.Uctx.on(s, th), String.eq(J.Json.get_str(p, "more", ""), "1"))
+  Step{Bool.pick(List<&2, M.Change>, more, Uc.kick.cs(True{}, th, now), [M.SettingSet{UC.Uctx.busy.key(th), "", now}]),
+    Reply.ok(client, id) <> Uc.kick.os(more, th)}
+
 def Hub.agentm(i: Nat, +s: M.State, +now: Nat, +client: U32, +id: String, +p: J.Json, +m: String) -> Step:
   match i:
     case 0n:
@@ -2151,6 +2186,12 @@ def Hub.agentm(i: Nat, +s: M.State, +now: Nat, +client: U32, +id: String, +p: J.
       Hub.btw(s, client, id, J.Json.get_str(p, "thread", ""), J.Json.get_str(p, "q", ""))
     case 8n:
       Sum.got(s, now, client, id, p)
+    case 9n:
+      Uc.node(s, now, client, id, p)
+    case 10n:
+      Uc.start.set(s, now, client, id, p)
+    case 11n:
+      Uc.run.done(s, now, client, id, p)
     case _:
       Hub.media(C.Codec.pos(Hub.methods.media(), m), s, now, client, id, p, m)
 
@@ -5976,6 +6017,8 @@ def Commit.line(+c: M.Change, +disk: String) -> String:
       J.Json.show(C.Change.wire(c))
     case M.DeviceDropped{_, _}:
       J.Json.show(C.Change.wire(c))
+    case M.CtxNoted{_, _, _, _, _}:
+      J.Json.show(C.Change.wire(c))
     case _:
       disk
 
@@ -6004,6 +6047,8 @@ def Busy.inert(c: M.Change) -> Bool:
     case M.DeployAsked{_, _, _, _, _}:
       True{}
     case M.DeployBuilt{_, _, _, _, _}:
+      True{}
+    case M.CtxNoted{_, _, _, _, _}:
       True{}
     case M.TodosSet{_, _, _}:
       True{}
@@ -8137,6 +8182,86 @@ def Fallback.validated(ok: Bool, +s: M.State, caps: J.Json, now: Nat, step: Step
 
 def Fallback.validate(+s: M.State, +caps: J.Json, now: Nat, +step: Step) -> Step:
   Fallback.validated(Fallback.settings.ok(Queue.changes(step), s, caps), s, caps, now, step)
+
+# The uberbot's infinite context (core/uctx.bend; beta, setting uber.ctx)
+# ---------------------------------------------------------------------
+# After the fallback pass, on every step: each turn of the uberbot starts a
+# fresh provider session (Claude's process stopped and started again with
+# no --resume; the others' session ""), and the server gives it the view
+# from store.db; a turn of it that ends starts a compaction run when none
+# is live (uctx.busy.<thread>). With the setting off the step is as it was
+# (laws uctx_off_*).
+
+# the thread a turn's effect starts, "" for any other effect
+def Uc.turn.of(o: Out) -> String:
+  match o:
+    case AgentStart{t, _, _, _, _, _, _}: t
+    case CodexTurn{t, _, _, _, _, _}: t
+    case GrokTurn{t, _, _, _, _, _}: t
+    case MuseTurn{t, _, _, _, _, _}: t
+    case AgyTurn{t, _, _, _, _, _}: t
+    case OcTurn{t, _, _, _, _, _}: t
+    case _: ""
+
+def Uc.fresh(o: Out) -> List<&2, Out>:
+  match o:
+    case AgentStart{+t, cwd, p, m, _, r, i}: [AgentStop{t}, AgentStart{t, cwd, p, m, "", r, i}]
+    case other: [Run.fresh.out(other)]
+
+def Uc.out.k(mine: Bool, o: Out) -> List<&2, Out>:
+  match mine:
+    case True{}: Uc.fresh(o)
+    case False{}: [o]
+
+def Uc.outs(os: List<&2, Out>, +th: String) -> List<&2, Out>:
+  match os:
+    case Nil{}: Nil{}
+    case +o <> t: List.append(&2, Out, Uc.out.k(Bool.and(Bool.not(String.is_empty(th)), String.eq(Uc.turn.of(o), th)), o), Uc.outs(t, th))
+
+def Uc.done.state(t: M.TurnState) -> Bool:
+  match t:
+    case M.Running{}: False{}
+    case M.Idle{}: False{}
+    case _: True{}
+
+# a step's changes end a turn of th
+def Uc.ended(cs: List<&2, M.Change>, +th: String) -> Bool:
+  match cs:
+    case Nil{}: False{}
+    case M.TurnChanged{+t, st, _} <> rest: Bool.or(Bool.and(String.eq(t, th), Uc.done.state(st)), Uc.ended(rest, th))
+    case _ <> rest: Uc.ended(rest, th)
+
+def Uc.after.go(+th: String, +s: M.State, +now: Nat, st: Step) -> Step:
+  match st:
+    case Step{+cs, os}:
+      +go = Bool.and(Bool.not(String.is_empty(th)), Bool.and(Uc.ended(cs, th), Bool.not(UC.Uctx.busy(s, th, now))))
+      Step{List.append(&2, M.Change, cs, Uc.kick.cs(go, th, now)), List.append(&2, Out, Uc.outs(os, th), Uc.kick.os(go, th))}
+
+def Uc.after.k(on: Bool, +s: M.State, +now: Nat, st: Step) -> Step:
+  match on:
+    case False{}: st
+    case True{}: Uc.after.go(UC.Uctx.thread(s), s, now, st)
+
+# a step as the uberbot's infinite context needs it (the identity while
+# uber.ctx is off)
+def Uc.after(+s: M.State, +now: Nat, st: Step) -> Step:
+  Uc.after.k(UC.Uctx.flag(s), s, now, st)
+
+# For the laws (uctx_*; test/uctx_test.bend): Kit (b1, thread t1) is the
+# uberbot, Pip (b2, t2) another bot; uber.ctx on when `on`
+def Uc.demo(+on: Bool) -> M.State:
+  M.State.replay(List.append(&2, M.Change, [M.ThreadCreated{"t1", "", "Kit", M.Local{}, "", "", "claude", "", 100n}, M.BotSet{"b1", "Kit", "t1", 7n, "", 100n},
+    M.ThreadCreated{"t2", "", "Pip", M.Local{}, "", "", "claude", "", 101n}, M.BotSet{"b2", "Pip", "t2", 8n, "", 101n}, M.SettingSet{"uber.bot", "b1", 102n}],
+    Bool.pick(List<&2, M.Change>, on, [M.SettingSet{"uber.ctx", "on", 103n}], Nil{})), M.State.empty())
+
+# a turn of th that ends, and the next one's Claude effects
+def Uc.demo.turn(+th: String) -> Step:
+  Step{[M.TurnChanged{th, M.Completed{}, 50n}], [AgentStart{th, "/w", "claude", "", "sess", M.FullAccess{}, M.DefaultMode{}}, AgentSend{th, "hi"}]}
+
+def Uc.demo.fresh() -> Step:
+  Step{[M.TurnChanged{"t1", M.Completed{}, 50n}, M.SettingSet{UC.Uctx.busy.key("t1"), "60", 60n}],
+    [AgentStop{"t1"}, AgentStart{"t1", "/w", "claude", "", "", M.FullAccess{}, M.DefaultMode{}}, AgentSend{"t1", "hi"}, Git{0, "", "uctx", "t1", "", "", ""}]}
+
 
 # Operational reports, for the laws (oprep_*; test/oprep_test.bend): a task
 # of t1 for t0, t0 the bot "bu"'s thread, made the uberbot when `on`

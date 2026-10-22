@@ -83,7 +83,8 @@ def Sdb.schema() -> String:
     "CREATE INDEX IF NOT EXISTS mark_bot ON mark(bot)",
     "CREATE TABLE IF NOT EXISTS far_line(seq INTEGER PRIMARY KEY, scope TEXT)",
     "CREATE INDEX IF NOT EXISTS far_line_scope ON far_line(scope, seq)",
-    "CREATE TABLE IF NOT EXISTS obj(domain TEXT, key TEXT, json TEXT, PRIMARY KEY(domain, key)) WITHOUT ROWID"
+    "CREATE TABLE IF NOT EXISTS obj(domain TEXT, key TEXT, json TEXT, PRIMARY KEY(domain, key)) WITHOUT ROWID",
+    "CREATE TABLE IF NOT EXISTS ctx(k TEXT PRIMARY KEY, thread TEXT, l INTEGER, i INTEGER, text TEXT, at INTEGER) WITHOUT ROWID"
   ], ";\n") ++ ";"
 
 # a table's columns, key first (obj: anything not listed)
@@ -121,11 +122,13 @@ def Sdb.cols.k(i: Nat) -> List<&2, String>:
       ["id", "kind", "project", "last", "want", "parts", "json"]
     case 15n:
       ["k", "bot", "conv", "status", "json"]
+    case 16n:
+      ["k", "thread", "l", "i", "text", "at"]
     case _:
       ["domain", "key", "json"]
 
 def Sdb.cols(+t: String) -> List<&2, String>:
-  Sdb.cols.k(C.Codec.pos(["line", "entry", "term", "post", "mail", "project", "thread", "task", "ask", "queue", "setting", "bot", "room", "routine", "conv", "mark"], t))
+  Sdb.cols.k(C.Codec.pos(["line", "entry", "term", "post", "mail", "project", "thread", "task", "ask", "queue", "setting", "bot", "room", "routine", "conv", "mark", "ctx"], t))
 
 # how many of a table's first columns are its key
 def Tab.keyn(+t: String) -> Nat:
@@ -133,7 +136,7 @@ def Tab.keyn(+t: String) -> Nat:
 
 # facts are never replaced: a line written again keeps its row
 def Sdb.fact(+t: String) -> Bool:
-  Bool.or(Bool.or(String.eq(t, "line"), String.eq(t, "entry")), Bool.or(Bool.or(String.eq(t, "term"), String.eq(t, "post")), String.eq(t, "mail")))
+  Bool.or(Bool.or(Bool.or(String.eq(t, "line"), String.eq(t, "entry")), Bool.or(Bool.or(String.eq(t, "term"), String.eq(t, "post")), String.eq(t, "mail"))), String.eq(t, "ctx"))
 
 # Parameters
 # ----------
@@ -847,6 +850,8 @@ def Sdb.keys(+pre: M.State, +post: M.State, c: M.Change) -> List<&2, RK>:
       [K.set("deploy.ship")]
     case M.DeployBuilt{_, _, _, _, _}:
       [K.set("deploy.ship")]
+    case M.CtxNoted{_, _, _, _, _}:
+      Nil{}
 
 # Facts
 # -----
@@ -911,12 +916,19 @@ def F.room.mail(on: Bool, +pre: M.State, +seq: Nat, +id: String, +room: String, 
       +b = M.State.mail(pre)
       F.mail(Bool.not(ML.Box.has(b, id)), seq, ML.Mail{id, "room:" ++ room, ML.Box.sender(b, from), "room:" ++ room, "room", room, "fyi", ML.Mail.head(text), ML.Mail.text_size(text), at})
 
+# a line of the uberbot's memory tree (core/uctx.bend): its key names its
+# thread and node, so a node noted twice keeps its first line
+def F.ctx.key(+th: String, +l: Nat, +i: Nat) -> String:
+  th ++ "/" ++ Nat.show(l) ++ "/" ++ Nat.show(i)
+
 def F.other(+pre: M.State, +seq: Nat, c: M.Change) -> List<&2, Op>:
   match c:
     case M.RoomPosted{+id, +room, +from, +text, +hop, +at}:
       Put{"post", [S.n(seq), id, room, from, text, S.n(hop), S.n(at)]} <> F.room.mail(String.eq(M.Setting.get(pre, "mail.on", "off"), "on"), pre, seq, id, room, from, text, at)
     case M.MailPosted{+id, c2, f, t, k, r, w, h, sz, at}:
       F.mail(Bool.not(ML.Box.has(M.State.mail(pre), id)), seq, ML.Mail{id, c2, f, t, k, r, w, h, sz, at})
+    case M.CtxNoted{+th, +l, +i, text, at}:
+      [Put{"ctx", [F.ctx.key(th, l, i), th, S.n(l), S.n(i), text, S.n(at)]}]
     case _:
       Nil{}
 
@@ -935,6 +947,8 @@ def F.wire(c: M.Change) -> String:
       J.Json.show(C.Change.wire(M.DeviceRegistered{tok, p, k, th, e, b, at}))
     case M.DeviceDropped{tok, at}:
       J.Json.show(C.Change.wire(M.DeviceDropped{tok, at}))
+    case M.CtxNoted{th, l, i, text, at}:
+      J.Json.show(C.Change.wire(M.CtxNoted{th, l, i, text, at}))
     case _:
       ""
 
