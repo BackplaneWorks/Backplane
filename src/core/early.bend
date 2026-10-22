@@ -75,3 +75,15 @@ def Early.response(+version: String, +build: String) -> List<&2, U32>:
 # the file the store builder writes its progress to
 def Early.build.path(+home: String) -> String:
   home ++ "/store.build"
+
+# BACKPLANE_BOOT_DELAY_MS (tests only: a boot made slow on purpose, so the
+# early listener can be seen): milliseconds, anything else 0
+def Early.delay.k(m: Maybe<&2, Nat>) -> U32:
+  match m:
+    case Some{+n}:
+      Bool.pick(U32, Nat.is_ge(n, 3600000n), 3600000, U32.from_nat(n))
+    case None{}:
+      0
+
+def Early.delay(+s: String) -> U32:
+  Early.delay.k(Early.word(s))

@@ -128,6 +128,7 @@ import ../core/usage.bend as UZ
 import ./thinstore.bend as TSTO
 import ../core/copy.bend as CP # BACKPLANE_COPY
 import ../core/copynet.bend as CN
+import ../core/early.bend as EA
 
 # The server. One hub computation owns the read model and the event log;
 # every connection and agent process is its own computation and talks to
@@ -13476,21 +13477,159 @@ def Accept.loop(fuel: Nat, l: Listener, +id: U32, +web: String, +inbox: Chan(Msg
       IO.bind(Listener & Result<&1, &1, U32 & String, Socket>, Unit, TCP.accept(l),
         r => Accept.got(r, id, web, inbox, trusted, token, owner, l2 => Accept.loop(f, l2, (id + 1 : U32), web, inbox, trusted, token, owner)))
 
+# The early listener
+# ------------------
+# Main.boot binds the hub's port before it loads its state (which can take
+# minutes while store.db is first built from the log). Until the hub is
+# ready the listener's accept loop answers every request, a WebSocket
+# upgrade too, with core/early.bend's 503 (Retry-After: 2, the build's
+# progress from <home>/store.build), so clients wait instead of failing.
+# When the hub is ready it sends the loop EarlyGo on its channel, and the
+# same fiber goes on as Accept.loop over the same listener: never closed,
+# never bound twice. The loop looks at the channel after each accept, so a
+# connection accepted before the go gets its 503 and every later one is
+# served; none is dropped.
+
+# Accept.loop's arguments, known once the hub is up
+type EarlyGo is Data:
+  EarlyGo{web: String, inbox: Chan(Msg), trusted: Bool, token: String, owner: String}
+
+# a listener bound early (its loop waiting for the go), or the bind's error
+type Early is Data:
+  EarlyUp{ctl: Chan(EarlyGo)}
+  EarlyDown{e: U32 & String}
+
+def Early.answer(s: Socket, +home: String) -> IO(Unit):
+  do IO<Unit>:
+    +b : String <- Files.text(EA.Early.build.path(home))
+    Conn.finish(s, EA.Early.response(Main.version(), b))
+
+def Early.head.k(m: Maybe<&2, W.Split>, s: Socket, buf: List<&2, U32>, +home: String, k: Socket -> List<&2, U32> -> IO(Unit)) -> IO(Unit):
+  match m:
+    case Some{_}:
+      Early.answer(s, home)
+    case None{}:
+      IO.bind(Socket & Result<&1, &1, U32 & String, List<&2, U32>>, Unit, H.Sock.recv_bytes(s, 65536), r => Conn.head.got(r, buf, k))
+
+# the request's head is read first (closing on unread bytes would reset
+# the connection before the client reads the answer)
+def Early.head(fuel: Nat, s: Socket, +buf: List<&2, U32>, +home: String) -> IO(Unit):
+  match fuel:
+    case 0n:
+      Early.answer(s, home)
+    case 1n+f:
+      Early.head.k(W.Http.split(buf), s, buf, home, s2 => b2 => Early.head(f, s2, b2, home))
+
+def Early.got(r: Listener & Result<&1, &1, U32 & String, Socket>, +home: String, k: Listener -> IO(Unit)) -> IO(Unit):
+  (l, res) = r
+  match res:
+    case Done{s}:
+      do IO<Unit>:
+        IO.spawn(Unit, Early.head(64n, s, Nil{}, home))
+        k(l)
+    case Fail{_}:
+      k(l)
+
+def Early.step(p: Poll<&1, &1, Maybe<&1, EarlyGo>, Unit>, r: Listener & Result<&1, &1, U32 & String, Socket>, f: Nat, +id: U32, +home: String, k: Listener -> IO(Unit)) -> IO(Unit):
+  match p:
+    case Ready{Some{EarlyGo{+web, +inbox, +trusted, +token, +owner}}}:
+      Accept.got(r, id, web, inbox, trusted, token, owner, l2 => Accept.loop(f, l2, (id + 1 : U32), web, inbox, trusted, token, owner))
+    case _:
+      Early.got(r, home, k)
+
+def Early.loop(+fuel: Nat, l: Listener, +id: U32, +home: String, +ctl: Chan(EarlyGo)) -> IO(Unit):
+  match fuel:
+    case 0n:
+      Listener.close(l)
+    case 1n+f:
+      IO.bind(Listener & Result<&1, &1, U32 & String, Socket>, Unit, TCP.accept(l),
+        r => IO.bind(Poll<&1, &1, Maybe<&1, EarlyGo>, Unit>, Unit, Chan.try_recv(EarlyGo, ctl, 0),
+          p => Early.step(p, r, f, id, home, l2 => Early.loop(f, l2, id, home, ctl))))
+
+# a bound listener starts answering 503 at once; ids as Accept.loop's
+def Early.up(r: Result<&1, &1, U32 & String, Listener>, +id: U32, +home: String) -> IO(Early):
+  match r:
+    case Done{l}:
+      do IO<Early>:
+        +ctl : Chan(EarlyGo) <- Chan.new(EarlyGo, 1)
+        IO.spawn(Unit, Early.loop(Fuel.forever(), l, id, home, ctl))
+        return EarlyUp{ctl}
+    case Fail{e}:
+      IO.pure(Early, EarlyDown{e})
+
+def Early.bind(+host: String, +port: U32, +id: U32, +home: String) -> IO(Early):
+  IO.bind(Result<&1, &1, U32 & String, Listener>, Early, H.Net.listen(host, port), r => Early.up(r, id, home))
+
+def Early.is_up(e: Early) -> Bool:
+  match e:
+    case EarlyUp{_}:
+      True{}
+    case EarlyDown{_}:
+      False{}
+
+# the hub is ready: the loop serves from its next accept on
+def Early.go(+ctl: Chan(EarlyGo), g: EarlyGo) -> IO(Unit):
+  do IO<Unit>:
+    r : Result<&1, &1, EarlyGo, Unit> <- Chan.send(EarlyGo, ctl, g)
+    return Unit{}
+
+# a hub that must listen (backplane-serve, --headless) stops at once when
+# its port is taken, before it loads anything
+def Early.need.die(e: U32 & String, +addr: String) -> IO(Early):
+  (_, msg) = e
+  IO.die(Early, 1, "backplane: cannot listen on " ++ addr ++ ": " ++ msg)
+
+def Early.need(e: Early, need: Bool, +addr: String) -> IO(Early):
+  match e need:
+    case EarlyDown{er} True{}:
+      Early.need.die(er, addr)
+    case EarlyDown{er} False{}:
+      IO.pure(Early, EarlyDown{er})
+    case EarlyUp{c} _:
+      IO.pure(Early, EarlyUp{c})
+
+# the tailnet address's listener, bound early beside the main one (only
+# when that one is up: otherwise the tailnet waits for it, Listen.up)
+type TEarly is Data:
+  TEarly{ip: String, e: Early}
+
+def Early.tail.ip.k(none: Bool, +ip: String, +port: U32, +home: String) -> IO(TEarly):
+  match none:
+    case True{}:
+      IO.pure(TEarly, TEarly{"", EarlyDown{(0, "no tailnet address")}})
+    case False{}:
+      IO.bind(Early, TEarly, Early.bind(ip, port, 2147483648, home), e => IO.pure(TEarly, TEarly{ip, e}))
+
+def Early.tail.ip(+ip: String, +port: U32, +home: String) -> IO(TEarly):
+  Early.tail.ip.k(String.is_empty(ip), ip, port, home)
+
+def Early.tail(on: Bool, +port: U32, +home: String) -> IO(TEarly):
+  match on:
+    case True{}:
+      IO.bind(P.Ran, TEarly, P.Proc.run("tailscale", ["ip", "-4"], ""), r => Early.tail.ip(Tailnet.first(r), port, home))
+    case False{}:
+      IO.pure(TEarly, TEarly{"", EarlyDown{(0, "off")}})
+
+def Net.tailnet(n: Net) -> Bool:
+  match n:
+    case Net{t, _, _, _, _, _, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}:
+      t
+
 # the tailnet address answers when the main listener already covers it
 # (--host 0.0.0.0, or the address itself): the extra bind then fails by design
 def Tailnet.covered(+host: String, +ip: String) -> Bool:
   Bool.or(String.eq(host, "0.0.0.0"), String.eq(host, ip))
 
-def Tailnet.listened(r: Result<&1, &1, U32 & String, Listener>, +host: String, +ip: String, +port: U32, +web: String, +inbox: Chan(Msg), +token: String) -> IO(Unit):
+def Tailnet.listened(r: Early, +host: String, +ip: String, +port: U32, +web: String, +inbox: Chan(Msg), +token: String) -> IO(Unit):
   match r:
-    case Done{l}:
+    case EarlyUp{ctl}:
       do IO<Unit>:
         w : P.Ran <- P.Proc.run("tailscale", ["whois", "--json", ip], "/")
         +owner : String = TN.Tailnet.login(Tailnet.out(w))
         IO.print("Backplane on your tailnet: http://" ++ ip ++ ":" ++ U32.show(port) ++ "/ (" ++ Bool.pick(String, String.is_empty(owner), "pair in Settings", owner ++ "'s devices; pair in Settings") ++ ")")
         ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, LinkFound{TN.Tailnet.report("reachable", TN.Tailnet.link("http://" ++ ip ++ ":" ++ U32.show(port), token))})
-        IO.spawn(Unit, Accept.loop(Fuel.forever(), l, 2147483648, web, inbox, False{}, token, owner))
-    case Fail{_}:
+        Early.go(ctl, EarlyGo{web, inbox, False{}, token, owner})
+    case EarlyDown{_}:
       do IO<Unit>:
         Log.info("could not listen on the tailnet address " ++ ip)
         ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, LinkFound{TN.Tailnet.report(Bool.pick(String, Tailnet.covered(host, ip), "reachable", "unavailable"), "")})
@@ -13504,7 +13643,7 @@ def Tailnet.listen.k(none: Bool, +host: String, +ip: String, +port: U32, +web: S
         ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, LinkFound{TN.Tailnet.report("unavailable", "")})
         return Unit{}
     case False{}:
-      IO.bind(Result<&1, &1, U32 & String, Listener>, Unit, H.Net.listen(ip, port), r => Tailnet.listened(r, host, ip, port, web, inbox, token))
+      IO.bind(Early, Unit, Early.bind(ip, port, 2147483648, ""), r => Tailnet.listened(r, host, ip, port, web, inbox, token))
 
 # listen on the tailnet address too (clients there need the token), and
 # serve HTTPS through `tailscale serve` when asked
@@ -13515,6 +13654,29 @@ def Tailnet.start(n: Net, +host: String, +port: U32, +web: String, +inbox: Chan(
         r : P.Ran <- P.Proc.run("tailscale", ["ip", "-4"], "")
         +ip : String = Tailnet.first(r)
         Tailnet.listen.k(String.is_empty(ip), host, ip, port, web, inbox, token)
+        Tailnet.https(https, port, token, inbox)
+    case Net{False{}, _, _, _, _, _, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}:
+      IO.pure(Unit, Unit{})
+
+# the same with the listener Main.boot bound early (TEarly): no second
+# probe, no second bind
+def Tailnet.early.ip(none: Bool, +ip: String, e: Early, +host: String, +port: U32, +web: String, +inbox: Chan(Msg), +token: String) -> IO(Unit):
+  match none:
+    case True{}:
+      Tailnet.listen.k(True{}, host, ip, port, web, inbox, token)
+    case False{}:
+      Tailnet.listened(e, host, ip, port, web, inbox, token)
+
+def Tailnet.early.k(te: TEarly, +host: String, +port: U32, +web: String, +inbox: Chan(Msg), +token: String) -> IO(Unit):
+  match te:
+    case TEarly{+ip, e}:
+      Tailnet.early.ip(String.is_empty(ip), ip, e, host, port, web, inbox, token)
+
+def Tailnet.start.early(n: Net, te: TEarly, +host: String, +port: U32, +web: String, +inbox: Chan(Msg)) -> IO(Unit):
+  match n:
+    case Net{True{}, https, +token, _, _, _, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}:
+      do IO<Unit>:
+        Tailnet.early.k(te, host, port, web, inbox, token)
         Tailnet.https(https, port, token, inbox)
     case Net{False{}, _, _, _, _, _, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}:
       IO.pure(Unit, Unit{})
@@ -15951,10 +16113,11 @@ def Main.headless(h: Hub, +inbox: Chan(Msg), +cfg: Cfg, +tok: Chan(Unit), front:
     Upgrade.start(cfg, inbox)
     front(inbox)
 
-def Main.serve(l: Listener, h: Hub, +web: String, +inbox: Chan(Msg), +cfg: Cfg, +tok: Chan(Unit), front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
+# the listeners Main.boot bound early serve from here on (Early.go)
+def Main.serve(+ctl: Chan(EarlyGo), te: TEarly, h: Hub, +web: String, +inbox: Chan(Msg), +cfg: Cfg, +tok: Chan(Unit), front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
   do IO<Unit>:
-    IO.spawn(Unit, Accept.loop(Fuel.forever(), l, 1, web, inbox, True{}, Net.token(Cfg.net(cfg)), ""))
-    Tailnet.start(Cfg.net(cfg), Cfg.host(cfg), Cfg.port(cfg), web, inbox)
+    Early.go(ctl, EarlyGo{web, inbox, True{}, Net.token(Cfg.net(cfg)), ""})
+    Tailnet.start.early(Cfg.net(cfg), te, Cfg.host(cfg), Cfg.port(cfg), web, inbox)
     IO.spawn(Unit, Ticker.loop(Fuel.forever(), inbox))
     IO.spawn(Unit, Beat.loop(Fuel.forever(), inbox))
     IO.spawn(Unit, Heart.loop(Fuel.forever(), inbox))
@@ -15966,15 +16129,15 @@ def Main.serve(l: Listener, h: Hub, +web: String, +inbox: Chan(Msg), +cfg: Cfg, 
     Upgrade.start(cfg, inbox)
     front(inbox)
 
-def Main.listened(r: Result<&1, &1, U32 & String, Listener>, h: Hub, +web: String, +inbox: Chan(Msg), +addr: String, need: Bool, +cfg: Cfg, +tok: Chan(Unit), front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
+def Main.listened(r: Early, te: TEarly, h: Hub, +web: String, +inbox: Chan(Msg), +addr: String, need: Bool, +cfg: Cfg, +tok: Chan(Unit), front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
   match r need:
-    case Done{l} _:
+    case EarlyUp{ctl} _:
       do IO<Unit>:
         IO.print("Backplane listening on http://" ++ addr)
-        Main.serve(l, h, web, inbox, cfg, tok, front)
-    case Fail{e} True{}:
+        Main.serve(ctl, te, h, web, inbox, cfg, tok, front)
+    case EarlyDown{e} True{}:
       Main.failed(e, h, addr)
-    case Fail{_} False{}:
+    case EarlyDown{_} False{}:
       do IO<Unit>:
         Log.info("web server off: " ++ addr ++ " is taken; trying again every 2 s")
         IO.spawn(Unit, Listen.retry(Fuel.forever(), web, inbox, cfg, addr))
@@ -16028,7 +16191,7 @@ def Thin.store.if(none: Bool, +cfg: Cfg, +st: M.State, +h: String) -> IO(Cfg):
     case False{}:
       Thin.store.open(cfg, st, h)
 
-def Main.opened(r: Result<&1, &1, U32 & String, File>, +st: M.State, ls: SO.Lg, cfg: Cfg, need: Bool, front: Chan(Msg) -> IO(Unit), t0: U32) -> IO(Unit):
+def Main.opened(r: Result<&1, &1, U32 & String, File>, +st: M.State, ls: SO.Lg, cfg: Cfg, need: Bool, front: Chan(Msg) -> IO(Unit), t0: U32, el: Early, te: TEarly) -> IO(Unit):
   match r cfg:
     case Done{f} Cfg{+home, +web, +host, +port, +pr, +ds, +v, nt0, +tcfg, +views}:
       do IO<Unit>:
@@ -16069,10 +16232,9 @@ def Main.opened(r: Result<&1, &1, U32 & String, File>, +st: M.State, ls: SO.Lg, 
         +now : Nat <- Now.nat()
         h0 : Hub <- Hub.adopt(Hub{st, f, ls, Nil{}, Nil{}, inbox, Cfg{home, web, host, port, pr, ds, v, nt, tcfg, views}, ""}, now)
         t2 : U32 <- PS.Perf.span("boot.adopt", t1)
-        l : Result<&1, &1, U32 & String, Listener> <- H.Net.listen(host, port)
-        t3 : U32 <- PS.Perf.span("boot.listen", t2)
+        # the port was bound at the start of the boot (Early.*)
         Thin.warm(ThinCache.first(views), inbox)
-        Main.listened(l, h0, web, pri, host ++ ":" ++ U32.show(port), need, Cfg{home, web, host, port, pr, ds, v, nt, tcfg, views}, tok, front)
+        Main.listened(el, te, h0, web, pri, host ++ ":" ++ U32.show(port), need, Cfg{home, web, host, port, pr, ds, v, nt, tcfg, views}, tok, front)
     case Fail{e} _:
       Main.nolog(e)
 
@@ -16114,15 +16276,23 @@ def Boot.state(+home: String) -> IO(HB.Hot):
     +on : String <- Env.get("BACKPLANE_HOT_BOOT", "1")
     Boot.state.on(Bool.not(String.eq(on, "0")), home)
 
-def Main.boot(cfg: Cfg, need: Bool, front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
+def Main.boot(cfg: Cfg, +need: Bool, front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
   match cfg:
-    case Cfg{+home, w, h, +p, pr, ds, v, nt, +tcfg, +views}:
+    case Cfg{+home, w, +h, +p, pr, ds, v, +nt, +tcfg, +views}:
       do IO<Unit>:
         # the home's lock first: a second hub ends before the event store
         +held : String <- Lock.take(home, p)
         Lock.refuse(String.is_empty(held), held, home)
         H.Env.put("BACKPLANE_HOME", home)
         Agents.only(home)
+        # the port first: until the hub is ready every request gets a 503
+        # that says it is starting (Early.*), so clients wait
+        el0 : Early <- Early.bind(h, p, 1, home)
+        +el : Early <- Early.need(el0, need, h ++ ":" ++ U32.show(p))
+        te : TEarly <- Early.tail(Bool.and(Early.is_up(el), Net.tailnet(nt)), p, home)
+        # BACKPLANE_BOOT_DELAY_MS: tests only (test/tools/early_listener_e2e.ts)
+        +dl : String <- Env.get("BACKPLANE_BOOT_DELAY_MS", "0")
+        IO.sleep(EA.Early.delay(dl))
         t0 : U32 <- PS.Perf.us()
         # store.db's records and the log's tail (hotboot.bend), or the
         # whole log replayed when there is no usable store
@@ -16163,4 +16333,4 @@ def Main.boot(cfg: Cfg, need: Bool, front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
         # the thin views read store.db once it is open and written on every
         # commit (Thin.store.open: the index keeps only recent threads)
         cfg2 : Cfg <- Thin.store.if(String.is_empty(SO.Lg.db(ls)), Cfg.with_thin_cache(cfg1, ThinCache{ti, org, 1n, Map.new(&2, TLIVE.Stream), tmc, Nil{}, TPACE.Notes.empty(), ""}), st, SO.Lg.db(ls))
-        Main.opened(f, st, ls, cfg2, need, front, t8)
+        Main.opened(f, st, ls, cfg2, need, front, t8, el, te)
