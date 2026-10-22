@@ -122,8 +122,10 @@ def procs(+dir: String) -> IO(Unit):
   do IO<Unit>:
     r1 : P.Ran <- sh("echo hi; exit 3")
     C.Check.str("run status and output", ran.show(r1), "3:hi")
-    r2 : P.Ran <- P.Proc.run("pwd", [], dir)
-    C.Check.str("run in cwd", ran.show(r2), "0:" ++ dir)
+    +r2 : P.Ran <- P.Proc.run("pwd", [], dir)
+    # the folder's own path, whatever is in front of it (Cygwin's pwd on
+    # Windows says /cygdrive/c/tmp/... for /tmp/...)
+    C.Check.str("run in cwd", Bool.show(Bool.and(String.starts_with(ran.show(r2), "0:"), String.ends_with(ran.show(r2), String.drop(dir, 4n)))), "True")
     s3 : Result<&1, &1, U32 & String, U32 & Socket> <- H.Proc.spawn("/nonexistent/bp-js-x", [], "", 0)
     c3 : String <- spawned.code(s3)
     C.Check.str("spawn of a missing program fails ENOENT", c3, "fail 2")
@@ -274,9 +276,21 @@ def hup.k(r: Result<&1, &1, U32 & String, U32 & Socket>, +rt: String) -> IO(Unit
     case Done{started}:
       hup.go(started, rt)
 
+# on Windows a child's stdin hang-up reaches the send as the pipe write's
+# own failure (node's child_process), not a readiness wake: the sync
+# loop's bound applies
+def hup.rt(win: Result<&1, &1, U32 & String, String>, +rt: String) -> String:
+  match win:
+    case Done{os}:
+      Bool.pick(String, String.eq(os, "Windows_NT"), "windows", rt)
+    case Fail{_}:
+      rt
+
 def hup() -> IO(Unit):
   do IO<Unit>:
-    +rt : String <- LP.Rt.loop()
+    rt0 : String <- LP.Rt.loop()
+    os : Result<&1, &1, U32 & String, String> <- IO.get_env("OS")
+    +rt : String = hup.rt(os, rt0)
     r : Result<&1, &1, U32 & String, U32 & Socket> <- H.Proc.spawn("sh", ["-c", "sleep 0.3; exec 0<&- 1>&-; sleep 5"], "", 0)
     hup.k(r, rt)
 

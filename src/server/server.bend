@@ -11032,22 +11032,46 @@ def Hub.thin.fetch(memory: Bool, +cfg: Cfg, +thread: String, +anchor: Nat) -> IO
     case True{}: IO.pure(TSTO.Page, TSTO.Page{Cfg.thin(cfg), THIN.Index.page(Cfg.thin(cfg), thread, anchor, 32n)})
     case False{}: TSTO.Ts.page(Cfg.thin.store(cfg), thread, anchor, 32n, Cfg.thin(cfg))
 
-def Hub.thin.render.page(+pg: TSTO.Page, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, +context: ThinContext, +p: J.Json) -> IO(Hub):
+def Hub.thin.render.page(+pg: TSTO.Page, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, +context: ThinContext, +p: J.Json, +key: String, +ms: Nat) -> IO(Hub):
   match h:
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
       +web = String.eq(Client.thin.mode(c), "view-web")
+      +stream = TLIVE.Stream.get(Cfg.thin.streams(cfg), TV.Target.thread(st, J.Json.get_obj(p, "target")))
       +actor = TA.Actor.mail_cache(TA.Actor.refresh(ThinContext.actors(context), web, st, Hub.info(cfg),
         J.Json.obj([J.KV{"t", J.Str{"live"}}, J.KV{"items", J.Json.arr(Nil{})}]), now, p, ThinContext.view(context)), ThinContext.actors(context), Cfg.thin.mail(cfg))
-      Hub.thin.rendered(TA.Actor.render(actor, web, st, TSTO.Page.index(pg), p, Cfg.thin.epoch(cfg), now, TSTO.Page.ids(pg), TLIVE.Stream.get(Cfg.thin.streams(cfg), TV.Target.thread(st, J.Json.get_obj(p, "target")))),
+      Hub.thin.rendered(TA.Rendered.remember(TA.Actor.render(actor, web, st, TSTO.Page.index(pg), p, Cfg.thin.epoch(cfg), now, TSTO.Page.ids(pg), stream), key, ms, stream),
         Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now, context)
 
-def Hub.thin.render(h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, +context: ThinContext, +anchor: Nat) -> IO(Hub):
+def Hub.thin.render.full(h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, +context: ThinContext, +anchor: Nat, +p: J.Json, +key: String, +ms: Nat) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
+      do IO<Hub>:
+        +pg : TSTO.Page <- Hub.thin.fetch(String.is_empty(Cfg.thin.store(cfg)), cfg, TV.Target.thread(st, J.Json.get_obj(p, "target")), anchor)
+        Hub.thin.render.page(pg, Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now, context, p, key, ms)
+
+# a view.update whose render memo still holds (thin-actor.bend's
+# Memo.reply: only the live row can have changed) answers with it spliced
+# (thin-splice.bend); anything else renders in full and is remembered
+def Hub.thin.render.memo(+m: Maybe<&2, J.Json>, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, +context: ThinContext, +anchor: Nat, +p: J.Json, +key: String, +ms: Nat) -> IO(Hub):
+  match m:
+    case Some{+res}:
+      Hub.thin.respond(h, client, o, res, c, context, now)
+    case None{}:
+      Hub.thin.render.full(h, client, o, c, now, context, anchor, p, key, ms)
+
+def Hub.thin.render.at(h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, +context: ThinContext, +anchor: Nat, +ms: Nat) -> IO(Hub):
   match h:
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
       +p = Hub.thin.input(String.eq(J.Json.get_str(o, "m", ""), "view.action"), J.Json.get_obj(o, "p"), ThinContext.cid(context))
-      do IO<Hub>:
-        +pg : TSTO.Page <- Hub.thin.fetch(String.is_empty(Cfg.thin.store(cfg)), cfg, TV.Target.thread(st, J.Json.get_obj(p, "target")), anchor)
-        Hub.thin.render.page(pg, Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now, context, p)
+      +web = String.eq(Client.thin.mode(c), "view-web")
+      +thread = TV.Target.thread(st, J.Json.get_obj(p, "target"))
+      +key = TA.Memo.key(M.State.seq(st), J.Json.show(Hub.info(cfg)), p, anchor, ThinContext.view(context), web, thread)
+      Hub.thin.render.memo(TA.Memo.reply(TA.Actor.memos(ThinContext.actors(context)), String.eq(J.Json.get_str(o, "m", ""), "view.update"), key, ms, web,
+        TLIVE.Stream.get(Cfg.thin.streams(cfg), thread), thread, Cfg.thin.epoch(cfg), J.Json.get_obj(p, "target"), TA.Actor.loc(ThinContext.actors(context))),
+        Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now, context, anchor, p, key, ms)
+
+def Hub.thin.render(h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, +context: ThinContext, +anchor: Nat) -> IO(Hub):
+  IO.bind(Nat, Hub, IO.now(), +ms => Hub.thin.render.at(h, client, o, c, now, context, anchor, ms))
 
 # a search page: over the whole index, or (with a store) over the
 # candidates it fetched (TSTO.Ts.search); the same rows either way
@@ -11181,10 +11205,25 @@ def Hub.thin.answer(ws: List<&2, ThinWait>, h: Hub) -> IO(Hub):
         h2 : Hub <- Hub.thin.rpc.now(h, client, o, now)
         Hub.thin.answer(tail, h2)
 
-def Hub.thin.warmed(h: Hub, i: THIN.Index, m: TMAIL.Cache) -> IO(Hub):
+def Mem.settled.k(none: Bool, +line: String) -> IO(Unit):
+  match none:
+    case True{}:
+      IO.pure(Unit, Unit{})
+    case False{}:
+      Log.info(line)
+
+def Mem.settled(+line: String) -> IO(Unit):
+  Mem.settled.k(String.is_empty(line), line)
+
+def Hub.thin.warmed.k(h: Hub, i: THIN.Index, m: TMAIL.Cache) -> IO(Hub):
   match h:
     case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
       Hub.thin.answer(List.reverse(&2, ThinWait, Cfg.thin.waiting(cfg)), Hub{st, f, ls, cl, as, inbox, Cfg.thin.warm(cfg, i, m), note})
+
+# the boot's thin index arrived: the JS heap is settled once (H.Mem.settle,
+# until store mode keeps the index small), then the waiting reads answered
+def Hub.thin.warmed(h: Hub, i: THIN.Index, m: TMAIL.Cache) -> IO(Hub):
+  IO.bind(String, Hub, H.Mem.settle(), line => IO.bind(Unit, Hub, Mem.settled(line), _ => Hub.thin.warmed.k(h, i, m)))
 
 def Hub.thin.read_guard(valid: Bool, h: Hub, +client: U32, +text: String, +now: Nat) -> IO(Hub):
   match valid:
@@ -11229,10 +11268,20 @@ def Hub.rpc.thin_cap(thin: Bool, h: Hub, +client: U32, +text: String, +now: Nat)
     case True{}: Hub.rpc.thin_short(TVW.Wire.within(text, 262144n), h, client, text, now)
     case False{}: Hub.rpc.parse(h, client, text, now)
 
+# A request from no connected client is dropped (a client that left),
+# except client 0: the hub's own jobs (GitJob.say: a thread's worktree, its
+# notes; a dead push token) and the in-process window send theirs as 0, and
+# a headless hub has no client 0. Dropping those lost every new thread's
+# worktree, so its first turn never started (far_e2e on a headless hub).
+def Hub.rpc.own(own: Bool, h: Hub, +client: U32, +text: String, +now: Nat) -> IO(Hub):
+  match own:
+    case True{}: Hub.rpc.thin_cap(False{}, h, client, text, now)
+    case False{}: IO.pure(Hub, h)
+
 def Hub.rpc.client(c: Maybe<&2, Client>, h: Hub, +client: U32, +text: String, +now: Nat) -> IO(Hub):
   match c:
     case Some{c}: Hub.rpc.thin_cap(Client.thin(c), h, client, text, now)
-    case None{}: IO.pure(Hub, h)
+    case None{}: Hub.rpc.own(U32.is_eq(client, 0), h, client, text, now)
 
 def Hub.rpc(h: Hub, +client: U32, +text: String, +now: Nat) -> IO(Hub):
   match h:
