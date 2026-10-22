@@ -11950,14 +11950,12 @@ def Laws.mail_global_primary(): {==}
 
 def Laws.mail_log_count_set(c, n):
   match c:
-    case MPCREDIT.Cfg{home, web, host, port, prompt, dirs, version, MPCREDIT.Net{tailnet, https, token, models, mtext, rt, br, pk, tm, machines, pv, MPLOG.Bn{dir, seen, work, far, live, broken, fl, tools, tch, cef, wire_n, pair, auth, mtext, mjson}, managed, link, freecad, ks}, telemetry, views}:
-    case MPCREDIT.Cfg{home, web, host, port, prompt, dirs, version, MPCREDIT.Net{tailnet, https, token, models, mtext, rt, br, pk, tm, machines, pv, MPLOG.Bn{dir, seen, work, far, live, broken, fl, tools, tch, wire_n}, managed, link, freecad, ks}, telemetry, views}:
+    case MPCREDIT.Cfg{home, web, host, port, prompt, dirs, version, MPCREDIT.Net{tailnet, https, token, models, mtext, rt, br, pk, tm, machines, pv, MPLOG.Bn{dir, seen, work, far, live, broken, fl, tools, tch, wire_n, pair, auth, mtext, mjson}, managed, link, freecad, ks}, telemetry, views}:
       {==}
 
 def Laws.mail_log_count_committed(c, fresh):
   match c:
-    case MPCREDIT.Cfg{home, web, host, port, prompt, dirs, version, MPCREDIT.Net{tailnet, https, token, models, mtext, rt, br, pk, tm, machines, pv, MPLOG.Bn{dir, seen, work, far, live, broken, fl, tools, tch, cef, wire_n, pair, auth, mtext, mjson}, managed, link, freecad, ks}, telemetry, views}:
-    case MPCREDIT.Cfg{home, web, host, port, prompt, dirs, version, MPCREDIT.Net{tailnet, https, token, models, mtext, rt, br, pk, tm, machines, pv, MPLOG.Bn{dir, seen, work, far, live, broken, fl, tools, tch, wire_n}, managed, link, freecad, ks}, telemetry, views}:
+    case MPCREDIT.Cfg{home, web, host, port, prompt, dirs, version, MPCREDIT.Net{tailnet, https, token, models, mtext, rt, br, pk, tm, machines, pv, MPLOG.Bn{dir, seen, work, far, live, broken, fl, tools, tch, wire_n, pair, auth, mtext, mjson}, managed, link, freecad, ks}, telemetry, views}:
       {==}
 
 # ---- native phone i18n ----
