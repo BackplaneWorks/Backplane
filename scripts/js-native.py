@@ -23,6 +23,13 @@ defs with the same answers computed natively:
   Http.response.c measured a multi-MB body that way and overflowed the JS
   hub's stack the moment the desktop app loaded the web client)
 
+- `String.starts_with(s, p)` and `String.contains(s, p)`: startsWith and
+  indexOf, kept to code point boundaries as Base walks them (a match that
+  starts or ends inside a surrogate pair of s is none). Base's walk a char at
+  a time, slicing: the hub's request routing tests the raw text of every
+  request with contains, and a 16 KB terminal paste held the hub 1.3 s, 64 KB
+  for 12 s.
+
 Each is found by its shape and must be found exactly once, else the build
 stops (a new Bend that emits them otherwise needs this looked at again).
 With --server (scripts/build-js.sh: one bundle) that holds for every def;
@@ -47,7 +54,10 @@ HELPERS = (
     "return((c.codePointAt(0)>>>(31-(off-1)))&1)!==0}n++}return false}"
     "function __bpSplit(s,sep){let ps;const u=sep.charCodeAt(0);if(sep.length===1&&(u<0xd800||u>0xdfff))ps=s.split(sep);"
     "else{ps=[];let cur=\"\";for(const c of s){if(c===sep){ps.push(cur);cur=\"\"}else cur+=c}ps.push(cur)}"
-    "let xs={$:\"Nil\"};for(let i=ps.length-1;i>=0;i--)xs={$:\"Con\",head:ps[i],tail:xs};return xs}\n"
+    "let xs={$:\"Nil\"};for(let i=ps.length-1;i>=0;i--)xs={$:\"Con\",head:ps[i],tail:xs};return xs}"
+    "function __bpCut(s,i){const a=s.charCodeAt(i-1),b=s.charCodeAt(i);return i>0&&i<s.length&&a>=0xd800&&a<=0xdbff&&b>=0xdc00&&b<=0xdfff}"
+    "function __bpPre(s,p){return s.startsWith(p)&&!__bpCut(s,p.length)}"
+    "function __bpHas(s,p){for(let i=s.indexOf(p);i>=0;i=s.indexOf(p,i+1))if(!__bpCut(s,i)&&!__bpCut(s,i+p.length))return true;return false}\n"
 )
 
 # String.cmp: function F(a,b){if(a==="")if(b==="")return{$:"Tuple",fst:{$:"Tuple",fst:"",snd:""},snd:{$:"EQ"}};...
@@ -69,19 +79,29 @@ LEN = re.compile(
     r'function (' + I + r')\((' + I + r')\)\{if\(\2\.\$==="Nil"\)return 0;else\{let (' + I + r')=\2\.tail;return (nat_chk)\(\1\(\3\)\+1\)\}\}'
 )
 
+# String.starts_with: function F(s,p,t){let pc=0;for(;;)switch(pc){case 0:{let a=s,b=p;if(a==="")if(b==="")return!0;else return!1;
+PRE = re.compile(
+    r'function (' + I + r')\((' + I + r'),(' + I + r'),' + I + r'\)\{(?=let (' + I + r')=0;for\(;;\)switch\(\4\)\{case 0:\{let (' + I + r')=\2,(' + I + r')=\3;if\(\5===""\)if\(\6===""\)return!0;else return!1;)'
+)
+# String.contains: function F(s,p,t){let pc=0;for(;;)switch(pc){case 0:{let a=s,b=p;if(a==="")return E(b);else{let h=a.codePointAt(0)>65535?
+HAS = re.compile(
+    r'function (' + I + r')\((' + I + r'),(' + I + r'),' + I + r'\)\{(?=let (' + I + r')=0;for\(;;\)switch\(\4\)\{case 0:\{let (' + I + r')=\2,(' + I + r')=\3;if\(\5===""\)return ' + I + r'\(\6\);else\{let ' + I + r'=\5\.codePointAt\(0\)>65535\?)'
+)
+
 args = sys.argv[1:]
 server = "--server" in args
 files = [a for a in args if a != "--server"]
 srcs = {f: open(f, encoding="utf-8").read() for f in files}
 found = {}
 for name, rx, required in (("String.cmp", CMP, True), ("Map.bit.go", BIT, True),
-                           ("String.split", SPLIT, server), ("List.length", LEN, server)):
+                           ("String.split", SPLIT, server), ("List.length", LEN, server),
+                           ("String.starts_with", PRE, server), ("String.contains", HAS, server)):
     n = sum(len(rx.findall(s)) for s in srcs.values())
     if n != 1 and (required or n > 1):
         sys.exit(f"js-native: {name} found {n} times, not once")
     found[name] = n
 for f, s in srcs.items():
-    hit = CMP.search(s) or BIT.search(s) or SPLIT.search(s) or LEN.search(s)
+    hit = CMP.search(s) or BIT.search(s) or SPLIT.search(s) or LEN.search(s) or PRE.search(s) or HAS.search(s)
     if not hit:
         continue
     # one pass down the list; nat_chk once (the count only grows)
@@ -89,6 +109,8 @@ for f, s in srcs.items():
     s = CMP.sub(lambda m: m.group(0) + 'return{$:"Tuple",fst:{$:"Tuple",fst:%s,snd:%s},snd:{$:__bpOrd(%s,%s)}};' % (m.group(2), m.group(3), m.group(2), m.group(3)), s)
     s = BIT.sub(lambda m: m.group(0) + 'return{$:"Tuple",fst:%s,snd:__bpBit(%s,%s,%s)};' % (m.group(2), m.group(2), m.group(3), m.group(4)), s)
     s = SPLIT.sub(lambda m: m.group(0) + 'return __bpSplit(%s,%s);' % (m.group(2), m.group(3)), s)
+    s = PRE.sub(lambda m: m.group(0) + 'return __bpPre(%s,%s);' % (m.group(2), m.group(3)), s)
+    s = HAS.sub(lambda m: m.group(0) + 'return __bpHas(%s,%s);' % (m.group(2), m.group(3)), s)
     # (a module's imports may come after it: they are hoisted)
     s = HELPERS + s
     open(f, "w", encoding="utf-8").write(s)
@@ -96,7 +118,8 @@ for f, s in srcs.items():
 # matched but was not rewritten, or rewritten twice, stops the build too)
 outs = "".join(open(f, encoding="utf-8").read() for f in files)
 for name, call in (("String.cmp", "snd:{$:__bpOrd("), ("Map.bit.go", "snd:__bpBit("),
-                   ("String.split", "return __bpSplit("), ("List.length", 'x.$!=="Nil";x=x.tail)n++;return ')):
+                   ("String.split", "return __bpSplit("), ("List.length", 'x.$!=="Nil";x=x.tail)n++;return '),
+                   ("String.starts_with", "return __bpPre("), ("String.contains", "return __bpHas(")):
     n = outs.count(call)
     if n != found[name]:
         sys.exit(f"js-native: {name}'s native body is in the output {n} times, not {found[name]}")

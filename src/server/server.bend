@@ -1497,6 +1497,20 @@ def Conn.frame(fr: W.Frame, +id: U32, +inbox: Chan(Msg), +last: Nat, +now: Nat) 
     case W.Frame{_, +op, p}:
       Conn.frame.k(U32.is_eq(op, 2), U32.is_eq(op, 8), U32.is_eq(op, 9), p, id, inbox, last, now)
 
+# a's bytes then b's, in tail calls only: Base's List.append keeps a stack
+# frame per element of a, and a socket's buffered bytes grow past what the
+# JS stack holds (a 64 KB paste into a terminal is a ~200 KB WebSocket frame
+# read in pieces: the hub died at the second piece)
+def Bytes.rev(xs: List<&2, U32>, acc: List<&2, U32>) -> List<&2, U32>:
+  match xs:
+    case Nil{}:
+      acc
+    case x <> t:
+      Bytes.rev(t, x <> acc)
+
+def Bytes.cat(a: List<&2, U32>, b: List<&2, U32>) -> List<&2, U32>:
+  Bytes.rev(Bytes.rev(a, Nil{}), b)
+
 def Conn.more(r: Socket & Result<&1, &1, U32 & String, List<&2, U32>>, buf: List<&2, U32>, +id: U32, +inbox: Chan(Msg), +last: Nat,
     k: Socket -> List<&2, U32> -> Nat -> Nat -> IO(Unit)) -> IO(Unit):
   (s, res) = r
@@ -1504,7 +1518,7 @@ def Conn.more(r: Socket & Result<&1, &1, U32 & String, List<&2, U32>>, buf: List
     case Done{Nil{}}:
       Conn.leave(s, id, inbox)
     case Done{bs}:
-      IO.bind(Nat, Unit, IO.now(), now => k(s, List.append(&2, U32, buf, bs), last, now))
+      IO.bind(Nat, Unit, IO.now(), now => k(s, Bytes.cat(buf, bs), last, now))
     case Fail{_}:
       Conn.leave(s, id, inbox)
 
@@ -1638,7 +1652,7 @@ def Mcp.got(r: Socket & Result<&1, &1, U32 & String, List<&2, U32>>, buf: List<&
     case Done{Nil{}}:
       Socket.close(s)
     case Done{bs}:
-      k(s, List.append(&2, U32, buf, bs))
+      k(s, Bytes.cat(buf, bs))
     case Fail{_}:
       Socket.close(s)
 
@@ -1716,7 +1730,7 @@ def Conn.head.got(r: Socket & Result<&1, &1, U32 & String, List<&2, U32>>, buf: 
     case Done{Nil{}}:
       Socket.close(s)
     case Done{bs}:
-      k(s, List.append(&2, U32, buf, bs))
+      k(s, Bytes.cat(buf, bs))
     case Fail{_}:
       Socket.close(s)
 
