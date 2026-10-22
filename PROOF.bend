@@ -12696,3 +12696,38 @@ def Laws.thin_mail_lazy_committed(cs, st, l):
 
 def Laws.thin_mail_lazy_warm(st, done): {==}
 # ---- end S3 ----
+
+# --- J2: HTTP and WebSocket bodies counted and unmasked in tail calls ---
+
+def Laws.http_count_go_succ(bs, n):
+  match bs:
+    case Nil{}:
+      {==}
+    case _ <> t:
+      Laws.http_count_go_succ(t, 1n+n)
+
+def Laws.http_count_is_length(bs):
+  match bs:
+    case Nil{}:
+      {==}
+    case _ <> t:
+      %Equal.sym(Nat, HTTPAUTH.Http.count.go(t, 1n+0n), 1n+HTTPAUTH.Http.count.go(t, 0n), Laws.http_count_go_succ(t, 0n)) : {_ == 1n+List.length(&2, U32, t) : Nat}
+      %Laws.http_count_is_length(t) : {1n+HTTPAUTH.Http.count.go(t, 0n) == 1n+_ : Nat}
+      {==}
+
+def Laws.ws_unmask_go(bs, key, i, acc):
+  match bs:
+    case Nil{}:
+      {==}
+    case x <> t:
+      Laws.ws_unmask_go(t, key, 1n+i, HTTPAUTH.Ws.unmask.k(x, key, i) <> acc)
+
+def Laws.ws_unmask_take_go(bs, n, key, i, acc):
+  match bs n:
+    case Nil{} _:
+      {==}
+    case _ <> _ 0n:
+      {==}
+    case x <> t 1n+m:
+      Laws.ws_unmask_take_go(t, m, key, 1n+i, HTTPAUTH.Ws.unmask.k(x, key, i) <> acc)
+

@@ -9,6 +9,7 @@ import ../src/server/castio.bend as K
 import ../src/server/perf.bend as F
 import ../src/core/exe.bend as EX
 import ../src/core/utf8.bend as U
+import ../src/server/jsloop.bend as LP
 
 # The server's host effects on the target the test runs on (JS through
 # bun under `bend test/js_host_effects_test.bend`, or native): children
@@ -234,6 +235,89 @@ def slow() -> IO(Unit):
     r : Result<&1, &1, U32 & String, U32 & Socket> <- H.Proc.spawn("sh", ["-c", "sleep 0.5; wc -c | tr -d ' '"], "", 0)
     slow.k(r, ch)
 
+# a send parked on a full socketpair whose peer hangs up (the child closes
+# its end after 0.3 s and lives on): it fails at once, as poll() reports the
+# hang-up (select() never puts such a socket in the write set). Within 80 ms
+# on the Bun loop; the sync loop's retry takes up to a second.
+def hup.limit.k(bun: Bool) -> Nat:
+  match bun:
+    case True{}:
+      380n
+    case False{}:
+      1500n
+
+def hup.limit(rt: String) -> Nat:
+  hup.limit.k(String.eq(rt, "bun"))
+
+def hup.sent(r: Socket & Result<&1, &1, U32 & String, Unit>, +t0: Nat, +pid: U32, +rt: String) -> IO(Unit):
+  (s, res) = r
+  do IO<Unit>:
+    +t1 : Nat <- IO.now()
+    C.Check.str("a parked send fails when the peer hangs up", sent.ok(res), "fail 32")
+    C.Check.str("it fails within " ++ Nat.show(Nat.sub(hup.limit(rt), 300n)) ++ " ms of the hang-up", Bool.show(Nat.is_lt(Nat.sub(t1, t0), hup.limit(rt))), "True")
+    Socket.close(s)
+    H.Proc.kill(pid, 9)
+    c : U32 <- H.Proc.wait(pid)
+    return Unit{}
+
+def hup.go(started: U32 & Socket, +rt: String) -> IO(Unit):
+  (pid, s) = started
+  do IO<Unit>:
+    +t0 : Nat <- IO.now()
+    r : Socket & Result<&1, &1, U32 & String, Unit> <- H.Sock.send_text(s, big(21n, "x"))
+    hup.sent(r, t0, pid, rt)
+
+def hup.k(r: Result<&1, &1, U32 & String, U32 & Socket>, +rt: String) -> IO(Unit):
+  match r:
+    case Fail{(c, _)}:
+      C.Check.str("hang-up child spawned", U32.show(c), "started")
+    case Done{started}:
+      hup.go(started, rt)
+
+def hup() -> IO(Unit):
+  do IO<Unit>:
+    +rt : String <- LP.Rt.loop()
+    r : Result<&1, &1, U32 & String, U32 & Socket> <- H.Proc.spawn("sh", ["-c", "sleep 0.3; exec 0<&- 1>&-; sleep 5"], "", 0)
+    hup.k(r, rt)
+
+# a send parked on a full socket while another computation cuts the
+# connection through its raw descriptor (Sock.raw + Fd.shut: how the hub
+# drops a client whose writer waits): the send fails, at once, and the
+# program runs on
+def cut.later(+fd: U32) -> IO(Unit):
+  do IO<Unit>:
+    IO.sleep(300)
+    H.Fd.shut(fd)
+
+def cut.sent(r: Socket & Result<&1, &1, U32 & String, Unit>, +t0: Nat, +pid: U32) -> IO(Unit):
+  (s2, res) = r
+  do IO<Unit>:
+    +t1 : Nat <- IO.now()
+    C.Check.str("a parked send cut by Fd.shut fails", Bool.show(String.starts_with(sent.ok(res), "fail")), "True")
+    C.Check.str("the cut send ended at the cut", Bool.show(Bool.and(Nat.is_ge(Nat.sub(t1, t0), 200n), Nat.is_lt(Nat.sub(t1, t0), 3000n))), "True")
+    Socket.close(s2)
+    H.Proc.kill(pid, 15)
+    code : U32 <- H.Proc.wait(pid)
+    return Unit{}
+
+def cut.raw(r: Socket & U32, +pid: U32) -> IO(Unit):
+  (s, +fd) = r
+  do IO<Unit>:
+    IO.spawn(Unit, cut.later(fd))
+    +t0 : Nat <- IO.now()
+    r2 : Socket & Result<&1, &1, U32 & String, Unit> <- H.Sock.send_text(s, big(21n, "x"))
+    cut.sent(r2, t0, pid)
+
+def cut.k(r: Result<&1, &1, U32 & String, U32 & Socket>) -> IO(Unit):
+  match r:
+    case Fail{(c, _)}:
+      C.Check.str("non-reader spawned", U32.show(c), "started")
+    case Done{(+pid, s)}:
+      IO.bind(Socket & U32, Unit, H.Sock.raw(s), raw => cut.raw(raw, pid))
+
+def cut() -> IO(Unit):
+  IO.bind(Result<&1, &1, U32 & String, U32 & Socket>, Unit, H.Proc.spawn("sleep", ["10"], "", 0), cut.k)
+
 def dup.show(r: Result<&1, &1, U32 & String, Socket>) -> IO(String):
   match r:
     case Done{d}:
@@ -330,6 +414,10 @@ def locks(+dir: String) -> IO(Unit):
     sp : Result<&1, &1, U32 & String, U32 & Socket> <- H.Proc.spawn("cat", ["/proc/self/status"], "", 0)
     +sig : String <- spawned.ran(sp)
     C.Check.str("a child starts with no signal ignored or blocked", Bool.show(Bool.and(String.contains(sig, "SigIgn:\t0000000000000000"), String.contains(sig, "SigBlk:\t0000000000000000"))), "True")
+    # (the hub may run with a large stack limit; a child starts with 8 MiB
+    # at most, or the hub's own when that is less)
+    stk : String <- sh.out("c=$(ulimit -s); p=$(awk '/Max stack size/{print $4}' /proc/$PPID/limits); if [ \"$p\" = unlimited ] || [ \"$p\" -gt 8388608 ]; then w=8192; else w=$((p/1024)); fi; [ \"$c\" = \"$w\" ] && echo stack-ok || echo \"child $c hub $p\"")
+    C.Check.str("a child starts with a soft stack of 8 MiB at most", stk, "stack-ok")
     G.Guard.drop("jst", "h1")
     g4 : String <- sh.out("cat " ++ dir ++ "/guard-h1")
     C.Check.str("Guard.drop waits for the cleanup", g4, "done")
@@ -491,6 +579,8 @@ def tests() -> IO(Unit):
     +dir : String <- scratch(t, r)
     procs(dir)
     slow()
+    hup()
+    cut()
     net((30000 + (r % 20000 : U32) : U32))
     locks(dir)
     cast()
@@ -516,6 +606,7 @@ def main.k(+mode: String, +dir: String) -> IO(Unit):
 
 def main() -> IO(Unit):
   do IO<Unit>:
+    rt : String <- LP.Rt.loop()
     raw : List<String> <- IO.args()
     +args : List<&2, String> = copy(raw)
     main.k(arg(args, 1n), arg(args, 2n))

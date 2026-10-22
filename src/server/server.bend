@@ -984,6 +984,8 @@ def Wire.all.legacy.k2(kind: Nat, booting: Bool, +c: Client, +a: All, +text: Str
   match kind booting:
     case 0n _:
       Wire.all.as(Wire.native(c), c, text, bs, n)
+    case 3n _:
+      Wire.all.as(Wire.native(c), c, text, bs, n)
     case _ True{}:
       IO.pure(Maybe<&2, Client>, Some{c})
     case 1n False{}:
@@ -991,9 +993,17 @@ def Wire.all.legacy.k2(kind: Nat, booting: Bool, +c: Client, +a: All, +text: Str
     case _ False{}:
       Wire.all.as(Wire.native(c), c, text, bs, n)
 
+# a thin (view) client takes no broadcast but the heartbeat (kind 3): it
+# hears its own view's changes, and the heartbeat tells it the link lives
+# (without it an idle page took a healthy link for dead after Alive.limit)
+def Wire.all.thin.k(kind: Nat, +c: Client, +text: String, +bs: List<&2, U32>, +n: Nat) -> IO(Maybe<&2, Client>):
+  match kind:
+    case 3n: Wire.all.as(Wire.native(c), c, text, bs, n)
+    case _: IO.pure(Maybe<&2, Client>, Some{c})
+
 def Wire.all.thin(thin: Bool, kind: Nat, booting: Bool, c: Client, a: All, text: String, bs: List<&2, U32>, n: Nat) -> IO(Maybe<&2, Client>):
   match thin:
-    case True{}: IO.pure(Maybe<&2, Client>, Some{c})
+    case True{}: Wire.all.thin.k(kind, c, text, bs, n)
     case False{}: Wire.all.legacy.k2(kind, booting, c, a, text, bs, n)
 
 def Wire.all.k2(kind: Nat, booting: Bool, +c: Client, a: All, text: String, bs: List<&2, U32>, n: Nat) -> IO(Maybe<&2, Client>):
@@ -1030,6 +1040,10 @@ def Wire.all.of(+cs: List<&2, Client>, +text: String, +a: All) -> IO(List<&2, Cl
 
 def Wire.all(+cs: List<&2, Client>, +text: String) -> IO(List<&2, Client>):
   Wire.all.of(cs, text, All{0n, 0n, 0n, 0n, Nil{}})
+
+# the heartbeat: every client, thin (view) ones too (Wire.all.thin)
+def Wire.beat(+cs: List<&2, Client>, +text: String) -> IO(List<&2, Client>):
+  Wire.all.of(cs, text, All{3n, Nil{}, 0n, 0n, Nil{}})
 
 def Client.legacy(c: Client) -> Bool:
   match c:
@@ -6317,6 +6331,14 @@ def Hub.broadcast(h: Hub, +text: String) -> IO(Hub):
     case Hub{st, f, ls, cl, as, inbox, cfg, note}:
       do IO<Hub>:
         cl2 : List<&2, Client> <- Wire.all(cl, text)
+        return Hub{st, f, ls, cl2, as, inbox, cfg, note}
+
+# the heartbeat to every client, view clients included (Wire.beat)
+def Hub.beat.all(h: Hub, +text: String) -> IO(Hub):
+  match h:
+    case Hub{st, f, ls, cl, as, inbox, cfg, note}:
+      do IO<Hub>:
+        cl2 : List<&2, Client> <- Wire.beat(cl, text)
         return Hub{st, f, ls, cl2, as, inbox, cfg, note}
 
 # a thread's browser page: a bot's is named by the bot, any other
@@ -15204,7 +15226,7 @@ def Hub.handle(h: Hub, m: Msg, +now: Nat) -> IO(Hub):
     case Tick{}:
       Hub.tick(h, now)
     case Heart{}:
-      IO.bind(Hub, Hub, IO.bind(Hub, Hub, IO.bind(Hub, Hub, Hub.step(h, B.Step.none()), h1 => Hub.broadcast(h1, DK.Alive.frame())), h2 => Hub.uber.beat(h2, now)), h3 => Hub.deploy_poll(h3, now))
+      IO.bind(Hub, Hub, IO.bind(Hub, Hub, IO.bind(Hub, Hub, Hub.step(h, B.Step.none()), h1 => Hub.beat.all(h1, DK.Alive.frame())), h2 => Hub.uber.beat(h2, now)), h3 => Hub.deploy_poll(h3, now))
     case AutoView{thread, fs}:
       Hub.autoview(h, thread, fs)
     case ClaudePid{thread, pid, gen}:
