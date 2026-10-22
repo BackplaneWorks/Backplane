@@ -11316,3 +11316,85 @@ law sdb_eq_fold_small:
 law sdb_entries_mine_small:
   {SDB.Tab.mine(SDB.Mat.facts(SDB.Mat.replay(SDB.Demo.small.log(), SDB.Mat.empty())), "t1") == M.State.mine(M.State.replay(SDB.Demo.small(), M.State.empty()), "t1") : List<&2, M.Entry>}
 # ---- end S1 indexed store ----
+
+# ---- S1 entries (3a) ----
+# The hub's bounded fold (model.bend's Win.*: State.bounded) keeps no log
+# and a window per thread; every reader the hub has answers as the whole
+# fold does, on a log whose window of 1 lost the thread's oldest entries
+# and first request (M.Win.demo). Test: test/win_test.bend.
+
+law win_no_log:
+  {List.length(&2, M.Entry, M.State.entries.all(M.Win.demo(1n))) == 1n : Nat}
+
+law win_trimmed:
+  {List.length(&2, M.Entry, M.State.mine(M.Win.demo(1n), "t1")) == 10n : Nat}
+
+law win_client_whole:
+  {M.State.win(M.Win.demo(0n)) == 0n : Nat}
+
+law win_count_own:
+  {M.Switch.count(M.Win.demo(1n), "t1") == M.Switch.count(M.Win.demo(0n), "t1") : Nat}
+
+law win_count_other:
+  {M.Switch.count(M.Win.demo(1n), "t2") == M.Switch.count(M.Win.demo(0n), "t2") : Nat}
+
+law win_switch_seen:
+  {M.Setting.get(M.Win.demo(1n), "seen.t1.claude", "") == M.Setting.get(M.Win.demo(0n), "seen.t1.claude", "") : String}
+
+law win_answer:
+  {H.Answer.of(M.State.mine(M.Win.demo(1n), "t1"), "t1") == H.Answer.of(M.State.mine(M.Win.demo(0n), "t1"), "t1") : H.Answer}
+
+law win_trigger:
+  {H.Lr.trig(M.State.mine(M.Win.demo(1n), "t1"), "t1") == H.Lr.trig(M.State.mine(M.Win.demo(0n), "t1"), "t1") : String}
+
+law win_last_reply:
+  {MC.Mcp.last(M.State.mine(M.Win.demo(1n), "t1"), "t1") == MC.Mcp.last(M.State.mine(M.Win.demo(0n), "t1"), "t1") : String}
+
+law win_sum_user:
+  {RF.Sum.last(M.Win.demo(1n), "t1", True{}) == RF.Sum.last(M.Win.demo(0n), "t1", True{}) : String}
+
+law win_sum_reply:
+  {RF.Sum.last(M.Win.demo(1n), "t1", False{}) == RF.Sum.last(M.Win.demo(0n), "t1", False{}) : String}
+
+law win_first:
+  {MC.Mcp.first(M.State.own(M.Win.demo(1n), "t1"), "t1", "") == "first ask" : String}
+
+law win_first_whole:
+  {MC.Mcp.first(M.State.own(M.Win.demo(0n), "t1"), "t1", "") == "first ask" : String}
+
+law win_fork:
+  {HD.Hand.fork(M.State.own(M.Win.demo(1n), "t1"), "t1", "A") == HD.Hand.fork(M.State.entries.all(M.Win.demo(0n)), "t1", "A") : String}
+
+law win_btw:
+  {HD.Hand.btw(H.Hub.entries(M.Win.demo(1n)), "t1", "A", "q") == HD.Hand.btw(H.Hub.entries(M.Win.demo(0n)), "t1", "A", "q") : String}
+
+law win_switch_missed:
+  {HD.Hand.switch(M.State.own(M.Win.demo(1n), "t1"), "t1", "codex", "claude", 11n) == HD.Hand.switch(M.State.own(M.Win.demo(0n), "t1"), "t1", "codex", "claude", 11n) : String}
+
+law win_switch_all:
+  {HD.Hand.switch(M.State.own(M.Win.demo(1n), "t1"), "t1", "codex", "claude", 0n) == HD.Hand.switch(M.State.own(M.Win.demo(0n), "t1"), "t1", "codex", "claude", 0n) : String}
+
+law win_dup_recent:
+  {H.Hub.dup(True{}, M.Win.demo(1n), "m3") == True{} : Bool}
+
+law win_term:
+  {EMB.Emb.sum(M.State.terms(M.Win.demo(1n), "t1"), "k1") == EMB.Emb.sum(M.State.mine(M.Win.demo(0n), "t1"), "k1") : String}
+
+law win_read_window:
+  {MC.Mcp.read.k(True{}, M.Win.demo(1n), "t1", 5n) == MC.Mcp.read.k(True{}, M.Win.demo(0n), "t1", 5n) : MC.Res}
+
+law win_read_need:
+  {Bool.and(Bool.not(MC.Mcp.read.need(M.Win.demo(1n), "t1", 5n)), MC.Mcp.read.need(M.Win.demo(1n), "t1", 40n)) == True{} : Bool}
+
+law win_read_rows:
+  {MC.Mcp.read.rows(M.State.mine(M.Win.demo(0n), "t1"), "t1", 40n) == MC.Mcp.read.k(True{}, M.Win.demo(0n), "t1", 40n) : MC.Res}
+
+law win_hand_budget:
+  {M.Win.budget() == HD.Hand.budget() : Nat}
+
+law win_cost_act:
+  {Nat.is_le(M.Win.cost(M.Act{"x", "t", "error", "shell", "make", 1n}), 1n+String.length(HD.Hand.line(M.Act{"x", "t", "error", "shell", "make", 1n}))) == True{} : Bool}
+
+law win_cost_msg:
+  {Nat.is_le(M.Win.cost(M.Msg{"x", "t", M.Assistant{}, "hi", 1n}), 1n+String.length(HD.Hand.line(M.Msg{"x", "t", M.Assistant{}, "hi", 1n}))) == True{} : Bool}
+# ---- end S1 entries (3a) ----

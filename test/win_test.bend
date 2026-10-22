@@ -40,8 +40,8 @@ def res(r: MC.Res) -> String:
 def main() -> IO(Unit):
   do IO<Unit>:
     C.Check.str("no log in a hub's state", n(List.length(&2, M.Entry, M.State.entries.all(win()))), "1")
-    C.Check.str("the window was trimmed", ids(M.State.mine(win(), "t1")), "x3,m3,a6,k1,x2,a5,a4,a3,a2,")
-    C.Check.str("whole fold keeps all", n(List.length(&2, M.Entry, M.State.mine(full(), "t1"))), "14")
+    C.Check.str("the window was trimmed", ids(M.State.mine(win(), "t1")), "x4,x3,m3,a6,k1,x2,a5,a4,a3,a2,")
+    C.Check.str("whole fold keeps all", n(List.length(&2, M.Entry, M.State.mine(full(), "t1"))), "15")
     C.Check.str("count", n(M.Switch.count(win(), "t1")), n(M.Switch.count(full(), "t1")))
     C.Check.str("count t2", n(M.Switch.count(win(), "t2")), n(M.Switch.count(full(), "t2")))
     C.Check.str("seen at the switch", M.Setting.get(win(), "seen.t1.claude", "?"), M.Setting.get(full(), "seen.t1.claude", "?"))
