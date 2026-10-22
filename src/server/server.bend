@@ -1087,7 +1087,7 @@ def Wire.all(+cs: List<&2, Client>, +text: String) -> IO(List<&2, Client>):
 
 # the heartbeat: every client, thin (view) ones too (Wire.all.thin)
 def Wire.beat(+cs: List<&2, Client>, +text: String) -> IO(List<&2, Client>):
-  Wire.all.of(cs, text, All{3n, Nil{}, 0n, 0n, Nil{}})
+  Wire.all.of(cs, text, All{3n, 0n, 0n, 0n, Nil{}})
 
 def Client.legacy(c: Client) -> Bool:
   match c:
@@ -15861,7 +15861,7 @@ def Main.boot(cfg: Cfg, need: Bool, front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
         +mc : String <- Files.text(Models.cache(home))
         +bc : String <- BN.Bf.text(BN.Bn.cache(home))
         exe : String <- H.Sys.exe_dir()
-        t3 : U32 <- PS.Perf.span("boot.files", t2)
+        t3 : U32 <- PS.Perf.span("boot.files", ts)
         rt0 : K.Rt <- K.Rt.boot(home, M.Setting.get(st, "kicad.path", ""), exe)
         t4 : U32 <- PS.Perf.span("boot.kicad", t3)
         +rt : K.Rt = K.Rt.set(rt0, "ipc", J.Str{""})
