@@ -2611,7 +2611,7 @@ def UctxJob.again(fits: Bool, empty: Bool, +tx: AG.Tx, +l: Nat, +i: Nat, +src: S
       IO.pure(String, "")
     case False{} False{}:
       IO.bind(String, String, OneShot.run(tx, UCX.Uctx.system(), UCX.Uctx.task(l, i, src) ++ UCX.Uctx.over(a)),
-        a2 => IO.pure(String, UCX.Uctx.line(Bool.pick(String, String.is_empty(String.trim(a2)), a, a2))))
+        +a2 => IO.pure(String, UCX.Uctx.line(Bool.pick(String, String.is_empty(String.trim(a2)), a, a2))))
 
 def UctxJob.line(fits: Bool, +tx: AG.Tx, +l: Nat, +i: Nat, +src: String) -> IO(String):
   match fits:
@@ -2619,7 +2619,7 @@ def UctxJob.line(fits: Bool, +tx: AG.Tx, +l: Nat, +i: Nat, +src: String) -> IO(S
       IO.pure(String, UCX.Uctx.line(src))
     case False{}:
       IO.bind(String, String, OneShot.run(tx, UCX.Uctx.system(), UCX.Uctx.task(l, i, src)),
-        a => UctxJob.again(UCX.Uctx.short(a), String.is_empty(String.trim(a)), tx, l, i, src, a))
+        +a => UctxJob.again(UCX.Uctx.short(a), String.is_empty(String.trim(a)), tx, l, i, src, a))
 
 # one node written and told to the hub; False when the writer gave nothing
 def UctxJob.node(+tx: AG.Tx, +h: String, +th: String, +start: String, +l: Nat, +i: Nat, +inbox: Chan(Msg)) -> IO(Bool):
@@ -2661,7 +2661,7 @@ def UctxJob.read(bad: Bool, rs: List<&2, List<&2, String>>, +tx: AG.Tx, +h: Stri
 def UctxJob.run(+tx: AG.Tx, +h: String, +st: M.State, +th: String, +inbox: Chan(Msg)) -> IO(Unit):
   do IO<Unit>:
     +start : String <- Ucs.start(h, st, th, inbox)
-    rs : List<&2, List<&2, String>> <- UXIO.Ux.q(h, UCX.Uctx.sql.msgs(), [UDB.DbText{th}, UDB.DbInt{start}])
+    +rs : List<&2, List<&2, String>> <- UXIO.Ux.q(h, UCX.Uctx.sql.msgs(), [UDB.DbText{th}, UDB.DbInt{start}])
     UctxJob.read(UXIO.Ux.failed(rs), rs, tx, h, th, start, inbox)
 
 # memory_zoom and memory_search

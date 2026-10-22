@@ -70,7 +70,7 @@ def Ux.view.k(bad: Bool, +h: String, +th: String, +start: String, rs: List<&2, L
 # the view a fresh turn of the uberbot starts with (its own new messages
 # left out: they come whole)
 def Ux.view(+h: String, +th: String, +start: String) -> IO(String):
-  IO.bind(List<&2, List<&2, String>>, String, Ux.q(h, UC.Uctx.sql.msgs(), [D.DbText{th}, D.DbInt{start}]), rs => Ux.view.k(Ux.failed(rs), h, th, start, rs))
+  IO.bind(List<&2, List<&2, String>>, String, Ux.q(h, UC.Uctx.sql.msgs(), [D.DbText{th}, D.DbInt{start}]), +rs => Ux.view.k(Ux.failed(rs), h, th, start, rs))
 
 # Compaction sources
 # ------------------
@@ -90,7 +90,7 @@ def Ux.pair(+k: Nat, +i: Nat, +texts: Map<&2, String>) -> String:
   UC.Uctx.flat(UC.Uctx.got(texts, UC.Uctx.key(k, Nat.mul(2n, i)))) ++ "\n" ++ UC.Uctx.flat(UC.Uctx.got(texts, UC.Uctx.key(k, Nat.add(Nat.mul(2n, i), 1n))))
 
 # what node (l, i) compresses: message i whole, or its halves' lines
-def Ux.source(l: Nat, +h: String, +th: String, +start: String, +i: Nat) -> IO(String):
+def Ux.source(+l: Nat, +h: String, +th: String, +start: String, +i: Nat) -> IO(String):
   match l:
     case 0n:
       IO.bind(List<&2, List<&2, String>>, String, Ux.q(h, UC.Uctx.sql.leaves(), [D.DbText{th}, D.DbInt{start}, Ux.json([J.Num{Nat.show(i)}])]), rs => IO.pure(String, Ux.whole(rs)))
@@ -141,7 +141,7 @@ def Ux.hits(rs: List<&2, List<&2, String>>, +st: M.State) -> List<&2, String>:
     case Nil{}:
       Nil{}
 
-def Ux.found(rs: List<&2, List<&2, String>>, +st: M.State) -> String:
+def Ux.found(+rs: List<&2, List<&2, String>>, +st: M.State) -> String:
   Bool.pick(String, Ux.failed(rs), "The search failed: " ++ Ux.why(rs),
     Bool.pick(String, List.is_empty(&2, List<&2, String>, rs), "Nothing found.", String.join(Ux.hits(rs, st), "\n")))
 
