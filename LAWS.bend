@@ -28,6 +28,7 @@ import ./src/server/server.bend as MPCREDIT # mail perf
 import ./src/web/view.bend as WPH
 # ---- end i18n web phone imports ----
 import ./src/core/schematic.bend as SC # kicad fork viewers
+import ./src/core/uctx.bend as UCXL # uniichat infinite context
 import ./src/core/charter.bend as CH # mail 2c
 import ./src/core/mailrun.bend as MRUN # mail 2c
 import ./src/app/mailroom.bend as MRUI # mail ui
@@ -11580,3 +11581,43 @@ law auth_beat_kept:
 
 law auth_beat_asked:
   {MPCREDIT.Auth.kept("7 1", M.State.empty()) == False{} : Bool}
+
+# ---- uniichat: the uberbot's infinite context (core/uctx.bend, beta) ----
+# with uber.ctx off a step passes as it was: no fresh session, no
+# compaction run, no busy mark (hub.bend's Uc.after)
+law uctx_off_after_same:
+  {H.Uc.after(H.Uc.demo(False{}), 60n, H.Uc.demo.turn("t1")) == H.Uc.demo.turn("t1") : H.Step}
+
+# off: no thread runs with infinite context, the uberbot's included
+law uctx_off_no_thread:
+  {UCXL.Uctx.on(H.Uc.demo(False{}), "t1") == False{} : Bool}
+
+# off: the tool list gains nothing
+law uctx_off_tools_same:
+  {MC.Mcp.uctx.with(UCXL.Uctx.on(H.Uc.demo(False{}), "t1"), J.Null{}) == J.Null{} : J.Json}
+
+# on: the uberbot's turn starts a fresh Claude process with no session, and
+# the turn's end starts one compaction run, marked busy
+law uctx_on_fresh_session:
+  {H.Uc.after(H.Uc.demo(True{}), 60n, H.Uc.demo.turn("t1")) == H.Uc.demo.fresh() : H.Step}
+
+# on: another bot's thread is untouched
+law uctx_on_other_same:
+  {H.Uc.after(H.Uc.demo(True{}), 60n, H.Uc.demo.turn("t2")) == H.Uc.demo.turn("t2") : H.Step}
+
+# the tree's roots: a node per power of two, largest first
+law uctx_roots:
+  {UCXL.Uctx.refs(UCXL.Uctx.roots(13n)) == ["0+8", "8+4", "12+1"] : List<&2, String>}
+
+# with no line written, every message is its own line in the view
+law uctx_view_leaves:
+  {UCXL.Uctx.refs(UCXL.Uctx.view(5n, Map.new(&2, Bool))) == ["0+1", "1+1", "2+1", "3+1", "4+1"] : List<&2, String>}
+
+# the turn's own messages (the person's at the end) are left out of its view
+law uctx_own_trailing:
+  {UCXL.Uctx.own([UCXL.UMsg{"you", 1n}, UCXL.UMsg{"user", 1n}, UCXL.UMsg{"user", 1n}]) == 2n : Nat}
+
+# a memory line never goes to clients
+law uctx_wire_hides_text:
+  {String.contains(J.Json.show(C.Change.wire(M.CtxNoted{"t1", 1n, 0n, "secret", 9n})), "secret") == False{} : Bool}
+# ---- end uniichat ----
