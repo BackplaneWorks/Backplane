@@ -14,8 +14,8 @@ import ../src/core/utf8.bend as U
 # line, and a store.db holding what S1's pure materializer makes of its
 # first lines (facts, records, and meta as stobuild writes it).
 # HB.Hot.load must answer the full replay's records (but the cold
-# settings) and its wire lines, for cuts before and after the torn line
-# and at the end; a store with another codec or of another log is refused.
+# settings), retaining no wire lines, for cuts before and after the torn
+# line and at the end; a store with another codec or of another log is refused.
 
 def text.of(c: M.Change) -> String:
   J.Json.show(CO.Change.encode(c))
