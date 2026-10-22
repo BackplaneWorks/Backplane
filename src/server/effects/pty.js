@@ -363,7 +363,26 @@ function bp_conpty(argv, cwd, env, cols, rows) {
   // STARTUPINFOEXW: STARTUPINFOW (104 bytes on x64) then the list pointer
   const si = new Uint8Array(112);
   const pi = new Uint8Array(24);
-  new DataView(si.buffer).setUint32(0, 112, true);
+  const sv = new DataView(si.buffer);
+  sv.setUint32(0, 112, true);
+  // A parent whose own stdio is redirected (the hub, a service) passes those
+  // handles on unless STARTF_USESTDHANDLES says otherwise: the child then
+  // wrote to them and the pseudoconsole saw nothing (session 7: cmd's and
+  // bash's echo on the probe's own stdout). With the flag and null handles
+  // the child takes the console's (node-pty's ConPTY does the same). Session
+  // 6's crash with it came with a wrong attribute value (no console at all).
+  // BACKPLANE_CONPTY_STDHANDLES=invalid passes INVALID_HANDLE_VALUE, =none
+  // leaves the flag off, to compare on a machine.
+  const how = process.env.BACKPLANE_CONPTY_STDHANDLES || "null";
+  if (how !== "none") {
+    sv.setUint32(60, 0x100, true);
+    if (how === "invalid") {
+      for (const off of [80, 88, 96]) {
+        sv.setBigUint64(off, 0xffffffffffffffffn, true);
+      }
+    }
+  }
+  dbg("std handles", how);
   if (!k.InitializeProcThreadAttributeList(ptr(list), 1, 0, ptr(need))
     // the attribute's value is the HPCON itself (not a pointer to it): passed
     // a pointer, the child got no pseudoconsole and its output went nowhere
@@ -492,6 +511,13 @@ function bp_conpty_wire(child, h) {
 // ("/bin/bash", the hub's default SHELL; "/bin/sh") is the program of that
 // name on PATH outside the system's folders: the Windows package ships its
 // runtime's bin (bash.exe, sh.exe) there. Anything else is left as it is.
+// PATH by any case of its name: Windows keeps it as "Path", and the
+// environment object need not match names case-insensitively
+function bp_pty_path() {
+  const key = Object.keys(process.env).find((k) => k.toUpperCase() === "PATH");
+  return key === undefined ? "" : String(process.env[key] ?? "");
+}
+
 function bp_pty_win_cmd(cmd) {
   if (process.platform !== "win32" || !cmd.startsWith("/") || require("fs").existsSync(cmd)) {
     return cmd;
@@ -505,7 +531,7 @@ function bp_pty_win_cmd(cmd) {
   // distribution; the package's runtime bin has the real one
   const sys = String(process.env.SystemRoot || process.env.windir || "C:\\Windows").toLowerCase();
   const fs = require("fs");
-  for (const dir of String(process.env.PATH ?? "").split(";")) {
+  for (const dir of bp_pty_path().split(";")) {
     if (dir === "" || dir.toLowerCase().startsWith(sys) || /\\windowsapps\\?$/i.test(dir)) {
       continue;
     }
@@ -529,7 +555,10 @@ function bp_pty_spawn(cmd, args, cwd, cols, rows) {
   if (cmd === "" || argv.some((a) => a.includes("\0")) || cwd.includes("\0")) {
     return io_fail(process.platform === "darwin" ? 92 : 84);
   }
-  if (Bun.which(cmd, { PATH: process.env.PATH ?? "" }) === null
+  if (process.env.BACKPLANE_DEBUG_CONPTY === "1") {
+    require("fs").writeSync(2, "pty: " + JSON.stringify(cmd) + " -> " + JSON.stringify(Bun.which(cmd, { PATH: bp_pty_path() })) + " (PATH " + bp_pty_path() + ")\n");
+  }
+  if (Bun.which(cmd, { PATH: bp_pty_path() }) === null
     && !((cmd.includes("/") || cmd.includes("\\")) && fs.existsSync(cmd))) {
     return io_fail(globalThis.BP_H.ERRNO.ENOENT);
   }
@@ -555,7 +584,7 @@ function bp_pty_spawn(cmd, args, cwd, cols, rows) {
   let child;
   try {
     child = process.platform === "win32"
-      ? bp_conpty_wire(bp_conpty([Bun.which(cmd, { PATH: process.env.PATH ?? "" }) ?? cmd, ...args], cwd, env,
+      ? bp_conpty_wire(bp_conpty([Bun.which(cmd, { PATH: bp_pty_path() }) ?? cmd, ...args], cwd, env,
         bp_pty_size(Number(cols), 80), bp_pty_size(Number(rows), 24)), h)
       : Bun.spawn(argv, {
       cwd: cwd === "" ? undefined : cwd,

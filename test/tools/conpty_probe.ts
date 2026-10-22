@@ -45,7 +45,11 @@ async function run(label: string, argv: string[]) {
 }
 
 const root = process.env.SystemRoot || "C:\\Windows";
-await run("cmd", [root + "\\System32\\cmd.exe", "/c", "echo conpty-cmd-ok"]);
 const bash = process.argv[2] || (Bun.which("bash") ?? "bash.exe");
-await run("bash", [bash, "-lc", "echo conpty-bash-ok"]);
+// each way of handing the child its std handles (pty.js's default is null)
+for (const how of ["null", "invalid", "none"]) {
+  process.env.BACKPLANE_CONPTY_STDHANDLES = how;
+  await run(`cmd [${how}]`, [root + "\\System32\\cmd.exe", "/c", "echo conpty-cmd-ok"]);
+  await run(`bash [${how}]`, [bash, "-lc", "echo conpty-bash-ok"]);
+}
 process.exit(0);

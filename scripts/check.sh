@@ -68,6 +68,17 @@ check_one() {
 
 fail=0
 start=$(date +%s)
+# A leftover merge conflict fails at once, by name, before any bend runs
+# (one uploaded to Boat sent the check into its per-file fallback for hours)
+# (plain grep, not git grep: a Boat sandbox gets the files without .git)
+conf=$(grep -rnI -E '^(<<<<<<<|>>>>>>>)( |$)' --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=build --exclude-dir=dist \
+  --include='*.bend' --include='*.c' --include='*.h' --include='*.js' --include='*.ts' --include='*.mjs' \
+  --include='*.py' --include='*.sh' --include='*.yml' --include='*.json' . 2>/dev/null || true)
+if [ -n "$conf" ]; then
+  echo "check.sh: merge conflict markers:"
+  echo "$conf"
+  exit 1
+fi
 # the inputs' key, taken before anything is checked (scripts/verified.sh)
 vkey=""
 [ "$mode" = all ] && vkey=$(scripts/verified.sh key check 2>/dev/null || true)
@@ -124,12 +135,22 @@ if [ "$mode" != proof ]; then
   cat "$work/laws.out"
   if [ "$(cat "$work/laws.rc" 2>/dev/null || echo missing)" != 0 ]; then fail=1; fi
   if [ $bad = 1 ]; then
-    echo "check.sh: a manifest check failed; re-checking every file to name it"
-    fail=0
-    while IFS= read -r f; do
-      check_one "$f" || fail=1
-    done <"$work/files.txt"
-    if [ "$(cat "$work/laws.rc" 2>/dev/null || echo missing)" != 0 ]; then fail=1; fi
+    fail=1
+    # Re-checking every file one at a time took hours and looked like a
+    # hang; the manifest's own error above names the cause. Opt in to it
+    # with CHECK_FALLBACK=1 (at most CHECK_FALLBACK_MAX files, default 40).
+    if [ "${CHECK_FALLBACK:-0}" = 1 ]; then
+      max=${CHECK_FALLBACK_MAX:-40}
+      echo "check.sh: a manifest check failed; re-checking at most $max files to name it"
+      n=0
+      while IFS= read -r f; do
+        [ "$n" -ge "$max" ] && { echo "check.sh: stopped after $max files"; break; }
+        check_one "$f" || true
+        n=$(( n + 1 ))
+      done <"$work/files.txt"
+    else
+      echo "check.sh: a manifest check failed (its error is above); CHECK_FALLBACK=1 re-checks files one by one"
+    fi
   fi
   echo "check: $(( $(date +%s) - start ))s"
 fi

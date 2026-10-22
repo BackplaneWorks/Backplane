@@ -571,22 +571,40 @@ def self.at(+exe: String, +dir: String) -> IO(Unit):
 def self(+dir: String) -> IO(Unit):
   IO.bind(String, Unit, H.Sys.exe_path(), exe => self.at(exe, dir))
 
+# the checks that need a POSIX host (flock(1), /proc, an exec in place)
+# run off Windows; there they are named as skipped
+def tests.posix(win: Bool, +dir: String) -> IO(Unit):
+  match win:
+    case True{}:
+      IO.print("ok locks, log file, adopt and self/exec checks skipped on Windows (flock(1), /proc, exec in place)")
+    case False{}:
+      do IO<Unit>:
+        locks(dir)
+        perf(dir)
+        adopt(dir)
+        self(dir)
+
+def tests.win(r: Result<&1, &1, U32 & String, String>) -> Bool:
+  match r:
+    case Done{os}:
+      String.eq(os, "Windows_NT")
+    case Fail{_}:
+      False{}
+
 def tests() -> IO(Unit):
   do IO<Unit>:
     t : U32 <- H.Clock.epoch()
     n : Result<&1, &1, U32 & String, U32> <- IO.random_u32()
     +r : U32 = rand(n)
     +dir : String <- scratch(t, r)
+    os : Result<&1, &1, U32 & String, String> <- IO.get_env("OS")
     procs(dir)
     slow()
     hup()
     cut()
     net((30000 + (r % 20000 : U32) : U32))
-    locks(dir)
     cast()
-    perf(dir)
-    adopt(dir)
-    self(dir)
+    tests.posix(tests.win(os), dir)
     out : String <- sh.out("rm -rf " ++ dir ++ " && echo gone")
     C.Check.str("scratch removed", out, "gone")
 

@@ -156,6 +156,10 @@ jobs:
       # children back at 8 MiB
       - name: Hub stack
         run: bun test/tools/js_stack_test.ts dist-js/linux-x64/backplane-serve
+      # the host effects and ptys on the loop the hub ships (Bun's event
+      # loop): test.sh runs these in-process, on the runtime's sync loop
+      - name: Effects on the Bun loop
+        run: scripts/js-effects-bun.sh
       - name: Bake and release producer
         run: |
           bun test/tools/js_bake_test.ts

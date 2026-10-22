@@ -11549,3 +11549,34 @@ law far_fact_shared:
 law far_fact_private:
   {FR.Fr.fact(FR.Fr.feed.demo.st(), M.SettingSet{"k", "v", 9n}, 8n) == Nil{} : List<&2, FR.Fact>}
 # ---- end F1 feed ----
+
+# --- fast hub R1: per-frame reads that do not grow with the log (locks_idle_*) ---
+# a lock never set, and a lock released, are idle (M.Locks.idle: read from
+# the setting's text, not parsed)
+law locks_idle_never_set:
+  {M.Locks.idle(M.State.empty(), "bend") == True{} : Bool}
+
+law locks_idle_released:
+  {M.Locks.idle(M.State.replay([M.LockChanged{"bend", LCK.Lock.empty(), 1n}], M.State.empty()), "bend") == True{} : Bool}
+
+# a lock that is held is not idle
+law locks_idle_held_not:
+  {M.Locks.idle(M.State.replay([M.LockChanged{"bend", LCK.Lock.promote([LCK.LockParty{"t1", "thread", "t1", "", 1n, 0n}]), 1n}], M.State.empty()), "bend") == False{} : Bool}
+
+# what Locks.after skips: an idle lock that the step does not touch answers
+# Step.none() from Locks.after.one
+law locks_after_idle_none:
+  {H.Locks.after.one(M.State.replay([M.LockChanged{"bend", LCK.Lock.empty(), 1n}], M.State.empty()), M.State.replay([M.LockChanged{"bend", LCK.Lock.empty(), 1n}], M.State.empty()), 5n, "bend") == H.Step.none() : H.Step}
+
+# the idle lock's text, written out (Locks.idle reads it for every lock on
+# every step): the empty lock exactly as Locks.fold writes it
+law locks_idle_text_exact:
+  {M.Locks.idle.text() == J.Json.show(LCK.Lock.json(LCK.Lock.empty())) : String}
+# --- J2: the sign-in wait asked again only when the log moved ---
+# (Hub.auth.beat: a settings lookup per thread at every beat was most of an
+# idle JS hub's CPU)
+law auth_beat_kept:
+  {MPCREDIT.Auth.kept("1 1", M.State.empty()) == True{} : Bool}
+
+law auth_beat_asked:
+  {MPCREDIT.Auth.kept("7 1", M.State.empty()) == False{} : Bool}
