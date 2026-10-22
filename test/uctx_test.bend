@@ -27,7 +27,7 @@ def all.lv(c: Nat, +l: Nat, +i: Nat, +m: Map<&2, Bool>) -> Map<&2, Bool>:
     case 0n: m
     case 1n+k: all.lv(k, l, Nat.add(i, 1n), Map.set(&2, Bool, m, U.Uctx.key(l, i), True{}))
 
-def all.go(l: Nat, +n: Nat, +m: Map<&2, Bool>) -> Map<&2, Bool>:
+def all.go(+l: Nat, +n: Nat, +m: Map<&2, Bool>) -> Map<&2, Bool>:
   match l:
     case 0n: all.lv(n, 0n, 0n, m)
     case 1n+k: all.go(k, n, all.lv(Nat.div(n, U.Uctx.pow(1n+k)), 1n+k, 0n, m))
@@ -112,7 +112,8 @@ def main() -> IO(Unit):
     C.Check.str("block", U.Uctx.block([U.UNode{1n, 0n}, U.UNode{0n, 2n}], Map.set(&2, String, Map.set(&2, String, Map.new(&2, String), "1/0", "user: a; you: b"), "0/2", "tool: ls"), 3n),
       U.Uctx.doc() ++ "\n<chat>\n0+2|user: a; you: b\n2+1|tool: ls\n</chat>")
     C.Check.str("a line not written yet", U.Uctx.got(Map.new(&2, String), "1/0"), "(not summarized yet: zoom it)")
-    C.Check.str("bound: oldest lines left out", Nat.show(List.length(&2, String, U.Uctx.bound(String.lines(String.repeat(String.repeat("y", 999n) ++ "\n", 300n)), True{}, 300000n))), "128")
+    +big : List<&2, String> = String.lines(String.repeat(String.repeat("y", 999n) ++ "\n", 300n))
+    C.Check.str("bound: oldest lines left out", Nat.show(List.length(&2, String, U.Uctx.bound(big, True{}, U.Uctx.size(big, 0n)))), "128")
     C.Check.str("fts", U.Uctx.fts("  zoom   the \"tree\" "), "\"zoom\" \"the\" \"tree\"")
     C.Check.str("fts empty", U.Uctx.fts("   "), "")
     C.Check.str("whole: a page", U.Uctx.whole(5n, "user", "Mon", "hello", 0n), "5+1|user (Mon): hello")

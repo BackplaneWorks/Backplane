@@ -164,7 +164,7 @@ def Uctx.roots.push(fit: Bool, +l: Nat, +id: Nat, acc: List<&2, UNode>) -> List<
     case False{}:
       acc
 
-def Uctx.roots.go(l: Nat, +n: Nat, +id: Nat, acc: List<&2, UNode>) -> List<&2, UNode>:
+def Uctx.roots.go(+l: Nat, +n: Nat, +id: Nat, acc: List<&2, UNode>) -> List<&2, UNode>:
   match l:
     case 0n:
       List.reverse(&2, UNode, Uctx.roots.push(Nat.is_le(Nat.add(id, 1n), n), 0n, id, acc))
@@ -194,7 +194,7 @@ def Uctx.take(+l: Nat, +i: Nat, +t: Nat, +built: Map<&2, Bool>) -> Bool:
 
 # the lines covering a node: itself when it may stand and is written, else
 # its halves' (a leaf is always its own line)
-def Uctx.cover(l: Nat, take: Bool, +i: Nat, +t: Nat, +built: Map<&2, Bool>) -> List<&2, UNode>:
+def Uctx.cover(+l: Nat, take: Bool, +i: Nat, +t: Nat, +built: Map<&2, Bool>) -> List<&2, UNode>:
   match l take:
     case 0n _:
       [UNode{0n, i}]
@@ -374,12 +374,23 @@ def Uctx.want.leaves(ns: List<&2, UNode>, +lined: Map<&2, Bool>) -> List<&2, J.J
 # Text
 # ----
 
+def Uctx.flat.c.k(nl: Bool, +c: U32) -> U32:
+  match nl:
+    case True{}:
+      32
+    case False{}:
+      c
+
+# a newline or carriage return as a space
+def Uctx.flat.c(+c: U32) -> U32:
+  Uctx.flat.c.k(Bool.or(U32.is_eq(c, 10), U32.is_eq(c, 13)), c)
+
 def Uctx.flat.go(s: String, acc: String) -> String:
   match s:
     case SNil{}:
       String.reverse(acc)
     case SCon{Chr{+c}, t}:
-      Uctx.flat.go(t, SCon{Chr{Bool.pick(U32, Bool.or(U32.is_eq(c, 10), U32.is_eq(c, 13)), 32, c)}, acc))
+      Uctx.flat.go(t, SCon{Chr{Uctx.flat.c(c)}, acc})
 
 # one line: newlines become spaces
 def Uctx.flat(s: String) -> String:
