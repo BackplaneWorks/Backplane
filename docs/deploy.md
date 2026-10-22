@@ -138,24 +138,3 @@ failed, skipped, live), folded into the setting `deploy.ship`.
 `deploy_status` (and the `deploy.status` request) answer it under `main`.
 
 Laws `ship_*`; tests `test/ship_test.bend`, `bun test/tools/deploy_main_e2e.ts BINARY`.
-
-Optional CEF runtimes use the same staged deployment. `scripts/dev.sh stage`
-only builds/stages a CEF host if this machine already has the optional runtime;
-Chrome-only installations do not fetch or install CEF. The pinned CEF libraries
-are reused and checked against the distribution used to build the small host.
-A staged `browser-runtime/manifest.json` covers the host, helper and all runtime
-files by SHA256, with a content-derived identity. The normal swap validates the
-payload before moving the app/web files, copies it into an immutable
-`browser-runtimes/<identity>/`, and promotes one `browser-current` symlink for
-the matched helper and sibling `cef` runtime. Previous bundles remain available
-under `browser-previous`, including a snapshot of a pre-manifest installation;
-the original runtime cache is untouched. The isolated lifecycle tests are
-`uv run --no-project python test/tools/cef_runtime_test.py`. An incompatible
-existing directory at an alias path is rejected before activation.
-
-This support must itself be live before a later deployment can activate a new
-CEF host through it. An older hub's fixed-file swap cannot install optional
-payloads. Bootstrap uses two separate normal hub deployments: install support,
-verify that commit live, then deploy the matched helper/host change. Do not
-claim the host fix live just because the helper or staging build is newer.
-Explicit `BACKPLANE_CEF` overrides still select the user's supplied runtime.
