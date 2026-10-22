@@ -6,8 +6,14 @@ stack, matching `scripts/check.sh`. The test shards and the hub's build pin
 Bun 1.4.3. Each of the four test shards uses two workers, leaving headroom
 for the larger render tests on the 16 GiB runners.
 
-The jobs are `check`, `proof` (joined as `laws`), `test`, `js` and
-`js-native`. The hub has no C build. `js` emits it as JS once, cross-builds
+The jobs are `check`, `proof` (joined as `laws`), `test`, `bridge`, `js`
+and `js-native`. `bridge` emits the phone bridge as the apps load it
+(`scripts/build-mobile.sh --js`) and drives it with its emitted-bundle tests
+(`ios_mailroom_bridge_test.ts`, `native_thin_emitted_307265.mjs` on
+`test/thin_emitted_fixture.bend`'s output, `native_thin_actual07_307265.mjs`),
+runs the web/mobile export wire (`test/thin_host_wire.html`) and the native
+sources' paging checks (`test/phone-cache/thin/check_paging_successor.py`).
+The hub has no C build. `js` emits it as JS once, cross-builds
 `backplane-serve` for every target with `bun build --compile`, and runs the
 Linux one through `scripts/js-smoke.sh` and the whole of `test/smoke.ts`.
 `js-native` smoke-tests the other targets on their own runners: arm64
