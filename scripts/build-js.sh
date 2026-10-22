@@ -63,7 +63,9 @@ if [ -n "$key" ] && [ -f "$EMIT_CACHE/$key.js" ] && [ -f "$EMIT_CACHE/$key.js.ok
   touch "$EMIT_CACHE/$key.js" "$EMIT_CACHE/$key.js.ok"
   how=reused
 else
-  if [ -x /usr/bin/time ]; then
+  if [ "$(uname -s)" = Darwin ]; then
+    scripts/mac-rss.sh "$work/emit.rss" nice -n 19 bend "$src" -o "$work/all.tmp.js" >/dev/null
+  elif [ -x /usr/bin/time ]; then
     /usr/bin/time -f %M -o "$work/emit.rss" nice -n 19 bend "$src" -o "$work/all.tmp.js" >/dev/null
   else
     nice -n 19 bend "$src" -o "$work/all.tmp.js" >/dev/null
