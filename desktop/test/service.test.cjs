@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { hello, lockLine, Service, preferredPort, servicePort } = require('../service.cjs');
+const { hello, lockLine, Service, preferredPort, servicePort, startingNote } = require('../service.cjs');
 test('decodes the real hello wire shape and rejects alien greetings', () => {
   assert.deepEqual(hello(Buffer.from('a1696261636b706c616e6565312e322e33', 'hex')), { backplane: '1.2.3' });
   assert.throws(() => hello(Buffer.from('a0', 'hex')));
@@ -52,4 +52,31 @@ test('authenticates the endpoint without treating POSIX lock IDs as native PIDs'
     await fs.writeFile(path.join(home,'token'),'b'.repeat(32));
     await assert.rejects(()=>service.discover(),/does not authenticate/);
   } finally { await new Promise(resolve=>server.close(resolve)); await fs.rm(home,{recursive:true,force:true}); }
+});
+test('the waiting screen reads a starting hub\'s note', () => {
+  assert.equal(startingNote({status:'starting',note:'building store 42%'}),'Building the database… 42%');
+  assert.equal(startingNote({status:'starting'}),'Starting your service…');
+  assert.equal(startingNote(null),'Starting your service…');
+});
+test('a hub answering 503 starting is waited for past the 45 s limit, with its note shown', async () => {
+  const http=require('node:http'),fs=require('node:fs/promises'),path=require('node:path'),os=require('node:os');
+  const home=await fs.mkdtemp(path.join(os.tmpdir(),'bp-starting-')),token='a'.repeat(32);
+  // each 503 moves the clock 20 s: six of them are two minutes, past any fixed deadline
+  const now=Date.now;let skew=0,busy=6;Date.now=()=>now()+skew;
+  const server=http.createServer((req,res)=>{
+    if(req.url==='/hello'){
+      if(busy>0){busy--;skew+=20000;res.statusCode=503;res.setHeader('Content-Type','application/json');res.end(JSON.stringify({status:'starting',note:`building store ${(6-busy)*10}%`}));return;}
+      res.end(Buffer.from('a1696261636b706c616e6565312e322e33','hex'));return;
+    }
+    res.statusCode=req.headers.authorization===`Bearer ${token}`?200:401;res.end();
+  });
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  try {
+    await fs.writeFile(path.join(home,'token'),token);
+    await fs.writeFile(path.join(home,'hub.lock'),`123 ${server.address().port} flock\n`);
+    const seen=[],service=new Service({home,expectedVersion:'1.2.3'});
+    const connection=await service.start({onStatus:m=>seen.push(m)});
+    assert.equal(connection.version,'1.2.3');assert.equal(service.child,null);
+    assert.deepEqual(seen,[10,20,30,40,50,60].map(n=>`Building the database… ${n}%`));
+  } finally { Date.now=now;await new Promise(resolve=>server.close(resolve));await fs.rm(home,{recursive:true,force:true}); }
 });
