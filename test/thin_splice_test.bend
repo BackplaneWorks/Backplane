@@ -7,6 +7,7 @@ import ../src/core/thin-live.bend as TL
 import ../src/core/i18n.bend as I
 import ../src/server/thin-view.bend as V
 import ../src/server/thin-splice.bend as S
+import ../src/core/cbor.bend as CB
 
 # A thin reply spliced with a new live row (thin-splice.bend) is the full
 # render of the same inputs at the same clock: web and mobile, plain and
@@ -53,8 +54,36 @@ def shown(m: Maybe<&2, J.Json>) -> String:
 def spliced(+web: Bool, +a: TL.Stream, +b: TL.Stream) -> String:
   shown(S.Splice.reply(web, full(web, a), b, "t1", "1", J.Json.get_obj(p(web), "target"), I.En{}))
 
+def bytes.show(bs: List<&2, U32>, acc: String) -> String:
+  match bs:
+    case Nil{}:
+      acc
+    case b <> t:
+      bytes.show(t, acc ++ "," ++ U32.show(b))
+
+def bytes.sp(sp: S.Spliced) -> String:
+  match sp:
+    case S.Spliced{+res, +holes, +json, +names}:
+      Nat.show(Nat.sub(Nat.add(J.Json.bytes(res), json), names)) ++ "|" ++ bytes.show(CB.Cbor.encode.holes(res, holes), "")
+
+def bytes.k(m: Maybe<&2, S.Cuts>, +web: Bool, +b: TL.Stream) -> String:
+  match m:
+    case Some{+cuts}:
+      bytes.sp(S.Cuts.splice(cuts, web, b, "t1", "1", J.Json.get_obj(p(web), "target"), I.En{}))
+    case None{}:
+      "(no cuts)"
+
+# the kept bytes spliced: the full render's CBOR and JSON size, exactly
+def bytes(+web: Bool, +a: TL.Stream, +b: TL.Stream) -> String:
+  bytes.k(S.Cuts.of(web, full(web, a), "t1"), web, b)
+
+def bytes.full(+web: Bool, +b: TL.Stream) -> String:
+  Nat.show(J.Json.bytes(full(web, b))) ++ "|" ++ bytes.show(CB.Cbor.encode(full(web, b)), "")
+
 def same(+name: String, +web: Bool, +a: TL.Stream, +b: TL.Stream) -> IO(Unit):
-  C.Check.str(name, spliced(web, a, b), J.Json.show(full(web, b)))
+  do IO<Unit>:
+    C.Check.str(name, spliced(web, a, b), J.Json.show(full(web, b)))
+    C.Check.str(name ++ ": bytes and JSON size", bytes(web, a, b), bytes.full(web, b))
 
 def big(n: Nat, acc: String) -> String:
   match n:
@@ -73,3 +102,4 @@ def main() -> IO(Unit):
     same("web: chunk marker on, new version", True{}, stream(big(140n, ""), True{}, 5n), stream(big(150n, "x"), True{}, 6n))
     C.Check.str("no live row: none (a full render)", spliced(True{}, TL.Stream.blank(), stream("hi", False{}, 1n)), "(none)")
     C.Check.str("no live row, mobile: none", spliced(False{}, TL.Stream.blank(), stream("hi", False{}, 1n)), "(none)")
+    C.Check.str("no live row: no cuts kept", bytes(True{}, TL.Stream.blank(), stream("hi", False{}, 1n)), "(no cuts)")
