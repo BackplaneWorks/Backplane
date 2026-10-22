@@ -307,6 +307,29 @@ ok $rc 75 "start guard: new create refused"; case $out in *"start guard"*) ok 1 
 tj tG -- true >/dev/null 2>&1; ok $? 0 "start guard: the warm sandbox is still reused"
 BACKPLANE_THREAD=tG "$J" --no-setup-bend --idle 0 -- true >/dev/null 2>&1; rm -rf "$F/boxes"/*; : > "$F/starts"
 
+# ---- slots: a warm sandbox per named slot, whatever thread (or none) asks; its tree kept and synced ----
+fresh s; limits 100 90000 true; echo "12 60 200" > "$F/startlimits"; c3=$(newcalls)
+out=$("$J" --no-setup-bend --slot ci-1 -- sh -c 'cat src/a.sh; echo junk > junk.txt; mkdir -p build; echo b > build/x' 2>&1); ok $? 0 "slot: first job (no thread)"
+ok "$(boxes)" 1 "slot: kept warm without a thread"; ok $(( $(newcalls) - c3 )) 1 "slot: one create"
+case $out in *"kept warm for this slot (ci-1)"*) ok 1 1 "slot: says it is the slot's" ;; *) ok 0 1 "slot: says it is the slot's" ;; esac
+BACKPLANE_THREAD=tS "$J" --no-setup-bend -- true >/dev/null 2>&1; ok $(( $(newcalls) - c3 )) 2 "slot: a thread never takes a slot's sandbox"
+"$J" --no-setup-bend --slot ci-2 -- true >/dev/null 2>&1; ok $(( $(newcalls) - c3 )) 3 "slot: another slot makes its own"
+echo 'echo changed' > src/a.sh
+out=$(BACKPLANE_THREAD=tS "$J" --no-setup-bend --slot ci-1 -- sh -c 'cat src/a.sh; test ! -e junk.txt && test ! -e build/x && echo clean-tree' 2>&1); ok $? 0 "slot: second job"
+ok $(( $(newcalls) - c3 )) 3 "slot: reused, no new create"
+case $out in *"delta: 1 of "*"files sent, 3 removed"*"synced the slot's kept tree"*"echo changed"*clean-tree*) ok 1 1 "slot: only the changed file sent, leftovers removed, tree exact" ;; *) ok 0 1 "slot: only the changed file sent, leftovers removed, tree exact"; echo "$out" ;; esac
+git checkout -q src/a.sh
+out=$("$J" --no-setup-bend --slot ci-1 --keep-build -- sh -c 'mkdir -p build; echo y > build/y' 2>&1); ok $? 0 "slot: keep-build job"
+out=$("$J" --no-setup-bend --slot ci-1 --keep-build -- sh -c 'test -e build/y && cat src/a.sh' 2>&1); ok $? 0 "slot: --keep-build keeps build/"
+case $out in *"delta: 1 of "*"files sent, 0 removed"*"echo hello"*) ok 1 1 "slot: reverted file synced back" ;; *) ok 0 1 "slot: reverted file synced back"; echo "$out" ;; esac
+# a kept tree that cannot be synced (the exec that hashes it fails): wiped, all pushed, the job still runs
+for b in "$F"/boxes/*/home/proj; do rm -rf "$b"; done
+out=$("$J" --no-setup-bend --slot ci-1 -- cat src/a.sh 2>&1); ok $? 0 "slot: unsyncable tree falls back to a full push"
+case $out in *"could not be synced"*"pushed in"*"echo hello"*) ok 1 1 "slot: fallback says so" ;; *) ok 0 1 "slot: fallback says so"; echo "$out" ;; esac
+"$J" --no-setup-bend --slot bad/name -- true >/dev/null 2>&1; ok $? 75 "slot: bad name refused"
+for x in ci-1 ci-2; do "$J" --no-setup-bend --slot $x --idle 0 -- true >/dev/null 2>&1; done
+BACKPLANE_THREAD=tS "$J" --no-setup-bend --idle 0 -- true >/dev/null 2>&1; rm -rf "$F/boxes"/*; : > "$F/starts"
+
 st=$("$J" status --json)
 ok "$(printf '%s' "$st" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["running"], d["orphans"], all(j["state"] in ("ended","swept","refused","reconciled") for j in d["jobs"]), any(j.get("cost_cs",0)>0 and j.get("runtime_s",-1)>=0 and j.get("sandbox") for j in d["jobs"]))')" "0 0 True True" "status --json"
 
