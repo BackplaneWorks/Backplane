@@ -27,6 +27,7 @@ What a test's key covers (scripts/test.sh runs it):
   - its driver test/tools/<name>.mjs when there is one, and the local files
     that driver imports (relative import/require, transitively);
   - every file under test/fixtures/ (tests read fixtures at run time);
+  - bunfig.toml, package.json and the like at the root, when there are any;
   - the files it declares: lines "# test-inputs: PATH..." in the test (or
     "// test-inputs: PATH..." in its driver). PATH is a file, a folder
     ending in "/" (every checkout file under it) or "closure:PROG.bend"
@@ -200,6 +201,7 @@ def all_tests():
     return sorted(t for t in glob.glob("test/*_test.bend") if t != RED)
 
 
+ROOT_CONFIG = ["bunfig.toml", "package.json", "tsconfig.json", "jsconfig.json", ".npmrc", "bend.toml"]
 TEST_GATE = ["scripts/test.sh", "scripts/test-shard.py", "scripts/ci-keys.py", "scripts/ci-runner-id.sh"]
 CHECK_GATE = ["scripts/check.sh", "scripts/check-manifest.py", "scripts/bendok.sh", "scripts/i18n-gen.py",
               "scripts/ci-keys.py", "scripts/ci-runner-id.sh"]
@@ -214,6 +216,9 @@ def test_inputs(t, files):
         s |= declared(d, files)
     s |= set(under("test/fixtures/", files))
     s |= declared(t, files)
+    # config bun and bend look for at the root (bun probes bunfig.toml): when
+    # one appears or goes, the set of inputs changes, and so the key
+    s |= {f for f in ROOT_CONFIG if os.path.isfile(f)}
     s |= set(TEST_GATE)
     return s
 
