@@ -156,6 +156,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang-19 libx11-dev
           sudo ln -sf /usr/bin/clang-19 /usr/local/bin/clang
+      - name: Preserve ignored tracked files in checkpoints
+        run: |
+          set -euo pipefail
+          scripts/build-app.sh test/native/checkpoint_ignored_test.bend build/checkpoint_ignored_test
+          build/checkpoint_ignored_test | tee build/checkpoint-ignored.log
+          if grep -q '^FAIL ' build/checkpoint-ignored.log; then exit 1; fi
+          test "$(grep -c '^ok ' build/checkpoint-ignored.log)" -eq 53
       - name: Object cache
         # the compiled C units, by hash of their text (scripts/cc-unit.sh): an
         # unchanged unit is not compiled again. Never holds the Google client
