@@ -60,7 +60,26 @@ JS_CMD = ("BACKPLANE_JS_TARGET=linux-x64 scripts/build-js.sh src/server/main.ben
 MEM = {"check": 12, "proof": 16, "js": 13, "tests": 12}
 RUNNER = re.compile(r"^\[ci-runner\] (.*)$")
 VERDICT = re.compile(r"^(test/[^ :]+_test\.bend):(.*)$")
-OK = re.compile(r"^ ok \(([0-9.]+)s")
+OK = re.compile(r"^ ok \(([0-9.]+)s(?:, ([0-9.]+) GB)?\)")
+BOAT_ROOT = os.environ.get("BOAT_JOB_ROOT") or os.path.join(
+    os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "backplane", "boat")
+MAX_NEW = int(os.environ.get("LOCAL_CI_MAX_NEW", "16"))  # new Boat sandboxes a run may start
+PRIORITY = os.environ.get("LOCAL_CI_PRIORITY") == "1"     # a merge gate: bp-admit --priority
+
+
+def warm_slots():
+    """our ci-* slots with a warm sandbox now (boat-job.sh's status.json), longest left first"""
+    try:
+        d = json.load(open(os.path.join(BOAT_ROOT, "status.json")))
+    except (OSError, ValueError):
+        return []
+    now = time.time()
+    got = {}
+    for x in d.get("sandboxes", []):
+        sl = x.get("slot") or ""
+        if x.get("state") == "warm" and sl.startswith("ci-") and (x.get("idle_until") or 0) > now + 120 and x.get("size") == "large":
+            got[sl] = max(got.get(sl, 0), x["idle_until"])
+    return sorted(got, key=lambda k: -got[k])
 
 
 def say(*a):
@@ -123,6 +142,28 @@ def save_timings(new):
     os.replace(tmp, os.path.join(CACHE, "timings.txt"))
 
 
+def peaks():
+    return K_timings_file(os.path.join(CACHE, "peaks.txt"))
+
+
+def save_peaks(new):
+    if not new:
+        return
+    t = peaks()
+    t.update(new)
+    tmp = os.path.join(CACHE, ".peaks.%d" % os.getpid())
+    with open(tmp, "w") as f:
+        for n, s in sorted(t.items(), key=lambda x: (-x[1], x[0])):
+            f.write("%.1f %s\n" % (s, n))
+    os.replace(tmp, os.path.join(CACHE, "peaks.txt"))
+
+
+def shard_mem(tests, pk):
+    """a shard's real peak here: its TEST_JOBS largest tests at once, and a GB over"""
+    top = sorted((pk.get(t, 7.0) for t in tests), reverse=True)[: int(TEST_JOBS)]
+    return max(2, min(16, math.ceil(sum(top) + 1)))
+
+
 def deal(tests, times, n):
     """longest first, each to the shard with the least so far"""
     fill = sorted(times.values())[len(times) // 2] if times else 20.0
@@ -142,25 +183,45 @@ class Job:
         self.name, self.slot, self.cmd, self.timeout, self.mem = name, slot, cmd, timeout, mem
         self.log = os.path.join(logs, name + ".log")
         self.local, self.rc, self.secs, self.where = local, None, 0, ""
+        self.waited, self.ran = 0.0, 0.0
 
     def argv(self, local):
         inner = "set -o pipefail; scripts/ci-runner-id.sh | sed 's/^/[ci-runner] /'; " + self.cmd
         if local:
-            return [ADMIT, "--mem", str(self.mem), "--cores", "2", "--", "bash", "-c", inner]
-        return ["scripts/boat-job.sh", "--size", "large", "--slot", self.slot, "--idle", "3600",
+            return [ADMIT] + (["--priority"] if PRIORITY else []) + ["--mem", str(self.mem), "--cores", "2", "--", "bash", "-c", inner]
+        return [os.environ.get("CI_FAST_BOAT_JOB", "scripts/boat-job.sh"), "--size", "large", "--slot", self.slot, "--idle", "3600",
                 "--timeout", str(self.timeout), "--budget-usd", "25", "--wait", "900", "--", "bash", "-c", inner]
 
     def run(self):
         t0 = time.time()
         tries = 0
         local = self.local
+        self.waited = 0.0
         while True:
             tries += 1
             self.where = "local" if local else "boat:" + self.slot
             with open(self.log, "a") as f:
                 f.write("[ci-fast] %s try %d on %s\n" % (self.name, tries, self.where))
                 f.flush()
-                self.rc = subprocess.call(self.argv(local), stdout=f, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
+                at = f.tell()
+                ts = time.time()
+                p = subprocess.Popen(self.argv(local), stdout=f, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
+                # the wait ends when bp-admit admits it, or when Boat starts the command;
+                # nothing here has a deadline: a queue is waited for, however long
+                mark = "bp-admit: admitted" if local else "running: "
+                began = None
+                while p.poll() is None:
+                    if began is None:
+                        try:
+                            with open(self.log, encoding="utf-8", errors="replace") as g:
+                                g.seek(at)
+                                if mark in g.read():
+                                    began = time.time()
+                        except OSError:
+                            pass
+                    time.sleep(1)
+                self.rc = p.returncode
+                self.waited += (began or time.time()) - ts
             # Boat's own trouble (no exit status 70, setup 76): once more; refused (75): here
             if not local and self.rc in (70, 76) and tries == 1:
                 continue
@@ -169,6 +230,17 @@ class Job:
                 continue
             break
         self.secs = time.time() - t0
+        self.ran = self.secs - self.waited
+
+    # exit codes that are not the gate's verdict: Boat refused (75), lost the
+    # status (70), failed setup (76) or cleanup (77); cancelled (143), killed
+    # (137), timed out (124), or a signal. Such a job is incomplete, never failed.
+    NOVERDICT = {70, 75, 76, 77, 124, 137, 143}
+
+    def state(self):
+        if self.rc is None or self.rc < 0 or self.rc in self.NOVERDICT or self.rc >= 128:
+            return "incomplete"
+        return "ok" if self.rc == 0 else "fail"
 
     def text(self):
         try:
@@ -211,7 +283,10 @@ def main():
         fcntl.flock(lock, fcntl.LOCK_EX)
     t0 = time.time()
     kind = "local" if a.local else "boat-large"
-    known = runner_known(kind) or "unknown runner\n"
+    # a pass counts from any runner local CI runs on (Boat's large sandboxes, or here
+    # when Boat refuses): each record is keyed by the toolchain that made it, and
+    # the gate itself runs on either. LOCAL_CI_RUNNERS=boat-large reuses only Boat's.
+    runners = [r for r in (runner_known(k) for k in os.environ.get("LOCAL_CI_RUNNERS", "boat-large local").split()) if r]
     files = K.checkout_files()
 
     # what each gate reads, hashed now (and again after the jobs)
@@ -261,10 +336,11 @@ def main():
         names = want[g]
         if full or inputs is None:
             return list(names), []
-        run = [n for n in names if not has(g, keyof(g, n, known))]
+        run = [n for n in names if not any(has(g, keyof(g, n, r)) for r in runners)]
         return run, [n for n in names if n not in run]
 
     summary, jobs = {}, []
+    warm = [] if a.local else warm_slots()
     if "check" in steps:
         # the parts of check.sh that are not bend, cheap: always, here
         pre = subprocess.run(["sh", "-c", "python3 scripts/i18n-gen.py --check && ! grep -rnI -E '^(<<<<<<<|>>>>>>>)( |$)' --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=build --exclude-dir=dist --include='*.bend' --include='*.c' --include='*.h' --include='*.js' --include='*.ts' --include='*.mjs' --include='*.py' --include='*.sh' --include='*.yml' --include='*.json' ."], capture_output=True, text=True)
@@ -273,12 +349,16 @@ def main():
         summary["check"] = {"run": run, "cached": cached, "pre": pre.returncode}
         if run:
             sel = "" if sorted(run) == sorted(K.check_files(files)) else "CHECK_FILES=%s " % shlex.quote(" ".join(run))
-            jobs.append(Job("check", "ci-check", "CHECK_JOBS=1 %sscripts/check.sh check" % sel, 1800, MEM["check"], logs, a.local))
+            # its real peak: the full check (server.bend among it) about 10 GB; a
+            # selection without the big programs far less
+            big = {"LAWS.bend", "src/server/server.bend", "src/server/main.bend", "src/app/main.bend"}
+            mem = MEM["check"] if not sel or big & set(run) or len(run) > 40 else 6
+            jobs.append(Job("check", "", "CHECK_JOBS=1 %sscripts/check.sh check" % sel, 1800, mem, logs, a.local))
     if "proof" in steps:
         run, cached = todo("proof")
         summary["proof"] = {"run": run, "cached": cached}
         if run:
-            jobs.append(Job("proof", "ci-proof", "scripts/check.sh proof", 1800, MEM["proof"], logs, a.local))
+            jobs.append(Job("proof", "", "scripts/check.sh proof", 1800, MEM["proof"], logs, a.local))
     shards = []
     if "tests" in steps:
         run, cached = todo("test")
@@ -288,9 +368,15 @@ def main():
             fill = sorted(times.values())[len(times) // 2] if times else 20.0
             total = sum(times.get(t, fill) for t in run)
             n = max(1, min(a.shards, len(run), math.ceil(total / TARGET)))
+            if not a.local:
+                # warm slots first; new sandboxes only as the work needs, at most MAX_NEW
+                # a run (the other steps take theirs first)
+                cap = len(warm) + MAX_NEW - len(jobs) - (1 if "js" in steps and todo("js")[0] else 0)
+                n = max(1, min(n, cap))
+            pk = peaks()
             for i, (g, secs) in enumerate(deal(run, times, n), 1):
                 cmd = "TEST_JOBS=%s TEST_ONLY=%s scripts/test.sh" % (TEST_JOBS, shlex.quote(" ".join(g)))
-                j = Job("tests-%d" % i, "ci-t%d" % i, cmd, 1800, MEM["tests"], logs, a.local)
+                j = Job("tests-%d" % i, "", cmd, 1800, shard_mem(g, pk), logs, a.local)
                 j.tests, j.est = g, secs
                 shards.append(j)
                 jobs.append(j)
@@ -299,7 +385,7 @@ def main():
         run, cached = todo("js")
         summary["js"] = {"run": run, "cached": cached}
         if run:
-            jobs.append(Job("js", "ci-js", JS_CMD, 1800, MEM["js"], logs, a.local))
+            jobs.append(Job("js", "", JS_CMD, 1800, MEM["js"], logs, a.local))
     for g in ("check", "proof"):
         if g in summary:
             s = summary[g]
@@ -307,6 +393,20 @@ def main():
     if "js" in summary:
         say("js: %s" % ("runs" if summary["js"]["run"] else "reused"))
 
+    # every job takes a slot: the warm ones first (no Boat start), then fresh names
+    used = set()
+    free = list(warm)
+    k = 1
+    for j in jobs:
+        if free:
+            j.slot = free.pop(0)
+        else:
+            while "ci-%d" % k in warm or "ci-%d" % k in used:
+                k += 1
+            j.slot = "ci-%d" % k
+        used.add(j.slot)
+    if not a.local:
+        say("Boat: %d warm slots reused, %d new sandboxes at most" % (min(len(warm), len(jobs)), max(0, len(jobs) - len(warm))))
     ts = [threading.Thread(target=j.run) for j in jobs]
     for t in ts:
         t.start()
@@ -341,74 +441,90 @@ def main():
             mark(g, keyof(g, n, r), "%s %s %s %s %s" % (g, n, commit, stamp, job.where))
         return len(names)
 
-    results = {}
-    newtimes = {}
+    states = {}
+    newtimes, newpeaks = {}, {}
     for j in jobs:
-        if j.name == "check":
-            results["check"] = j.rc
-            record("check", summary["check"]["run"], j)
-        elif j.name == "proof":
-            results["proof"] = j.rc
-            record("proof", ["PROOF.bend"], j)
-        elif j.name == "js":
-            results["js"] = j.rc
-            record("js", ["js"], j)
-    tok, tfail = 0, []
+        if j.name in ("check", "proof", "js"):
+            states[j.name] = [j.state()]
+            record(j.name, summary[j.name]["run"] if j.name != "proof" else ["PROOF.bend"], j)
+    tok, tfail, tmissing = 0, [], 0
     for j in shards:
         verdict = {}
         for l in j.last().splitlines():
             m = VERDICT.match(l)
             if m and m.group(1) in j.tests:
                 verdict.setdefault(m.group(1), []).append(m.group(2))
-        good = []
+        good, bad = [], []
         for t in j.tests:
             v = verdict.get(t, [])
             m = OK.match(v[0]) if len(v) == 1 else None
             if m:
                 good.append(t)
                 newtimes[t] = float(m.group(1))
-            else:
-                tfail.append(t)
+                if m.group(2):
+                    newpeaks[t] = float(m.group(2))
+            elif v:
+                bad.append(t)  # it ran to a verdict, and the verdict is not ok
         tok += len(good)
-        if j.rc == 0 and len(good) == len(j.tests):
+        tfail += bad
+        tmissing += len(j.tests) - len(good) - len(bad)
+        st = j.state()
+        if bad:
+            j.verdict = "fail"
+        elif st == "ok" and len(good) == len(j.tests):
+            j.verdict = "ok"
             record("test", good, j)
-        elif j.rc == 0:
-            # exit 0 without a verdict for each test is not a pass
-            j.rc = 1
+        elif st == "fail":
+            j.verdict = "fail"  # test.sh itself refused the run (exit 2)
+        else:
+            j.verdict = "incomplete"
+        states.setdefault("tests", []).append(j.verdict)
     save_timings(newtimes)
-    if shards:
-        results["tests"] = max(j.rc for j in shards)
+    save_peaks(newpeaks)
+    if "check" in summary and summary["check"]["pre"] != 0:
+        states.setdefault("check", []).append("fail")
 
-    # the logs as local-ci.sh reads them
-    lines = []
+    def worst(xs):
+        return "fail" if "fail" in xs else ("incomplete" if "incomplete" in xs else "ok")
+
+    # the logs as local-ci.sh reads them: summary.txt, one line per step, then the jobs
+    lines, overall = [], []
     for g in ("check", "proof", "tests", "js"):
         if g not in summary:
             continue
         s = summary[g]
-        rc = results.get(g, 0)
-        if g == "check" and s["pre"] != 0:
-            rc = rc or 1
-        open(os.path.join(logs, g + ".rc"), "w").write("%d\n" % rc)
+        st = worst(states.get(g, []))
+        overall.append(st)
+        open(os.path.join(logs, g + ".rc"), "w").write({"ok": "0", "fail": "1", "incomplete": "3"}[st] + "\n")
+        mine = [j for j in jobs if (j.name.startswith("tests-") if g == "tests" else j.name == g)]
         if g == "tests":
-            word = "%d run (%d ok, %d fail) in %d shards, %d cached" % (len(s["run"]), tok, len(tfail), len(shards), len(s["cached"]))
+            word = "%d run (%d ok, %d fail, %d no verdict) in %d shards, %d cached" % (len(s["run"]), tok, len(tfail), tmissing, len(shards), len(s["cached"]))
             with open(os.path.join(logs, "tests.log"), "w") as f:
                 for t in s["cached"]:
                     f.write("%s: cached ok\n" % t)
                 for j in shards:
-                    f.write("== %s (%s, rc %s, %.0fs, est %.0f test-s): %s\n" % (j.name, j.where, j.rc, j.secs, j.est, " ".join(j.tests)))
-                    f.write("\n".join(l for l in j.last().splitlines() if VERDICT.match(l) or l.startswith("FAIL") or l.startswith("[boat-job]") or "synced" in l or "pushed in" in l or "sandbox bx" in l) + "\n")
+                    f.write("== %s (%s, %s, rc %s, waited %.0fs, ran %.0fs, est %.0f test-s): %s\n" % (j.name, j.where, j.verdict, j.rc, j.waited, j.ran, j.est, " ".join(j.tests)))
+                    f.write("\n".join(l for l in j.last().splitlines() if VERDICT.match(l) or l.startswith("FAIL") or l.startswith("[boat-job]") or "synced" in l or "pushed in" in l or "sandbox bx" in l or l.startswith("bp-admit: admitted")) + "\n")
         else:
             word = "%d run, %d cached" % (len(s["run"]), len(s["cached"])) if g == "check" else ("run" if s["run"] else "cached")
             if not s["run"]:
                 open(os.path.join(logs, g + ".log"), "w").write("%s: cached ok (%s)\n" % (g, ", ".join(s["cached"]) if g != "check" else "%d files" % len(s["cached"])))
-        lines.append("%s=%s %s" % (g, "ok" if rc == 0 else "FAIL(rc %d)" % rc, word))
+        if mine:
+            nb = sum(1 for j in mine if j.where.startswith("boat"))
+            word += "; %s, waited %.0fs, ran %.0fs" % (
+                ", ".join(x for x in ("%d on Boat" % nb if nb else "", "%d here" % (len(mine) - nb) if len(mine) > nb else "") if x),
+                max(j.waited for j in mine), max(j.ran for j in mine))
+        tag = {"ok": "ok", "fail": "FAIL", "incomplete": "INCOMPLETE"}[st]
+        lines.append("%s=%s %s" % (g, tag, word))
     for j in jobs:
-        lines.append("  %s on %s: rc %s in %.0fs" % (j.name, j.where, j.rc, j.secs))
+        lines.append("  %s on %s: %s, rc %s, waited %.0fs, ran %.0fs" % (j.name, j.where, getattr(j, "verdict", j.state()), j.rc, j.waited, j.ran))
+    verdict = worst(overall)
+    lines.append("verdict %s" % {"ok": "PASS", "fail": "FAIL", "incomplete": "INCOMPLETE"}[verdict])
     lines.append("wall %.0fs" % (time.time() - t0))
     open(os.path.join(logs, "summary.txt"), "w").write("\n".join(lines) + "\n")
     print("\n".join(lines), flush=True)
-    return 0 if all(results.get(g, 0) == 0 for g in results) and summary.get("check", {}).get("pre", 0) == 0 else 1
-
+    # 0 pass, 1 a gate's own verdict failed, 3 a verdict never came (queued, refused, killed)
+    return {"ok": 0, "fail": 1, "incomplete": 3}[verdict]
 
 if __name__ == "__main__":
     sys.exit(main())
