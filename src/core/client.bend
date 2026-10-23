@@ -6037,17 +6037,24 @@ def Sch.got.k(take: Bool, u: Ui, +k: String, +o: J.Json) -> Ui:
   match take:
     case True{}:
       Ui.info_set(Ui.info_set(Ui.info_set(Ui.info_set(Ui.info_set(u, "sheets:" ++ k, J.Json.get_str(o, "rows", "")), "sheetbox:" ++ k, J.Json.get_str(o, "boxes", "")),
-        "sheetid:" ++ k, J.Json.get_str(o, "ids", "")), "sheettop:" ++ k, J.Json.get_str(o, "top", "")), "sheetgen:" ++ k, J.Json.as_raw(J.Json.get(o, "gen"), "0"))
+        "sheetid:" ++ k, J.Json.get_str(o, "ids", "")), "sheettop:" ++ k, J.Json.get_str(o, "top", "")), "sheetgen:" ++ k, J.Json.get_str(o, "gen", ""))
     case False{}:
       u
 
+# a reply is taken when its slot holds none yet, or its generation (the
+# plot actor's request order, a decimal string) is greater than the one held
+def Sch.newer(+gen: String, +held: String) -> Bool:
+  Bool.or(String.is_empty(held), Nat.is_gt(Sch.num(gen), Sch.num(held)))
+
 def Sch.got.at(+u: Ui, +k: String, +o: J.Json) -> Ui:
-  Sch.got.k(Bool.not(Nat.is_lt(Sch.num(J.Json.as_raw(J.Json.get(o, "gen"), "0")), Sch.num(Ui.info(u, "sheetgen:" ++ k)))), u, k, o)
+  Sch.got.k(Sch.newer(J.Json.get_str(o, "gen", ""), Ui.info(u, "sheetgen:" ++ k)), u, k, o)
 
 # a schematic's sheets as the hub sends them ({"t":"sheets", root, slot,
 # gen, rows, boxes, ids, top}), kept under its project root and slot, all
-# together, and only when no older than the slot's last (a stale reply
-# leaves the hierarchy and the sheet on show as they are)
+# together, and only when newer than the slot's last: a reply to an earlier
+# request (even one asked in the same second) leaves the hierarchy and the
+# sheet on show as they are, and a reply for another root or version never
+# touches this one's
 def Sch.got(+u: Ui, +o: J.Json) -> Ui:
   Sch.got.at(u, J.Json.get_str(o, "root", "") ++ Sch.sfx(J.Json.get_str(o, "slot", "")), o)
 
