@@ -358,16 +358,26 @@ def Actor.info(a: Actor, o: J.Json) -> Actor:
     case Actor{u, view, target, pending, reads, _, _}:
       Actor{U.Ui.info_merge(u, J.Json.get_obj(o, "info")), view, target, pending, reads, True{}, Nil{}}
 
-# A thin socket receives rendered views, not raw info notifications. The
-# server folds those privately and sends its normal bounded invalidation.
+# A thin socket receives rendered views, not raw info notifications or a
+# schematic's sheets. The server folds those privately and sends its
+# normal bounded invalidation.
 def Message.on_wire(+o: J.Json) -> Bool:
-  Bool.not(String.eq(J.Json.get_str(o, "t", ""), "info"))
+  Bool.not(Bool.or(String.eq(J.Json.get_str(o, "t", ""), "info"), String.eq(J.Json.get_str(o, "t", ""), "sheets")))
+
+# A schematic's sheets (the plot actor's {"t":"sheets"} for this socket's
+# watch) are folded into this connection's Ui like targeted info: the
+# rendered viewer lists and navigates them (client.bend's Sch).
+def Actor.sheets(a: Actor, +o: J.Json) -> Actor:
+  match a:
+    case Actor{u, view, target, pending, reads, _, _}:
+      Actor{U.Sch.got(u, o), view, target, pending, reads, True{}, Nil{}}
 
 def Actor.message.kind(kind: String, a: Actor, web: Bool, key: String, o: J.Json) -> Actor:
   match kind:
     case "term": Actor.terminal(a, web, key, o)
     case "reply": Actor.reply(a, web, key, o)
     case "info": Actor.info(a, o)
+    case "sheets": Actor.sheets(a, o)
     case _: a
 
 def Actor.message(a: Actor, web: Bool, key: String, +o: J.Json) -> Actor:

@@ -830,6 +830,8 @@ function dispatch(action, value, timer) {
 
 // a right click on the plot starts a review note there (client.bend's Rc)
 Plot2d.onPlace((place) => dispatch("rv-note", place));
+// a tap on a sheet symbol opens that sheet instance (client.bend's Sch)
+Plot2d.onSheet((value) => dispatch("sch-go", value));
 
 // how many terminal cells fit: the thread pane's width, 40% of the height
 function termSize() {

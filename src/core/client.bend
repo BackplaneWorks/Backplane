@@ -38,6 +38,7 @@ import ./farlive.bend as FLV
 import ./desk.bend as DK
 import ./notice.bend as NO
 import ./hist.bend as HI
+import ./hier.bend as HR
 import ./review.bend as RVW
 import ./release.bend as REL
 import ./links.bend as LK
@@ -5285,6 +5286,367 @@ def Rv.sheet.k(cmp: Bool, +cur: String, +file: String) -> String:
 def Rv.sheet(+cur: String, +file: String) -> String:
   Rv.sheet.k(Bool.and(Nat.is_eq(HI.Hist.kind(cur), 2n), Bool.not(String.is_empty(file))), cur, file)
 
+# Sheet navigation
+# ----------------
+# A hierarchical schematic's sheets (hier.bend's rows, info
+# "sheets:<root>"; each file's child sheet boxes, "sheetbox:<root>"),
+# navigated by instance on every client. Per thread: the row on show as
+# "@sch:<t>" ("<row>\t<place>": the place wins when the rows change, the
+# row tells apart two siblings of one name), the rows shown before and
+# after as "@sch.back:<t>"/"@sch.fwd:<t>" (newest first, a line each, at
+# most 32), a branch folded as "@sch.fold:<t>:<place>", and "@sch.note:<t>"
+# "gone" when a sheet asked for is no longer there (nothing else changes).
+# "@sch.tree" "0" puts the tree away. Actions: "sch-go" ("<row>\t<place>"
+# or "<row>": a tree row, a crumb, a sheet here, a sheet symbol), "sch-up",
+# "sch-root", "sch-back", "sch-fwd", "sch-fold" (a place), "sch-tree".
+
+# a row as a client lists it: state 0 plain, 1 above the one on show (an
+# ancestor), 2 on show; kids: rows under it; open: not folded
+type SchRow is Data:
+  SchRow{i: Nat, depth: Nat, name: String, value: String, state: Nat, kids: Bool, open: Bool, loop: Bool}
+
+# what a client draws: the tree's visible rows, the trail from the root to
+# the row on show, the sheets under it, its row (count when the file on
+# show is not in the hierarchy: out), its place, whether Back and Forward
+# have somewhere to go, whether the tree shows, the sheet symbols' boxes
+# for the canvas ("<row>\t<place>\t<x0 y0 x1 y1>" lines) and the note
+type SchView is Data:
+  SchView{rows: List<&2, SchRow>, trail: List<&2, SchRow>, here: List<&2, SchRow>, at: Nat, count: Nat, place: String, back: Bool, fwd: Bool, out: Bool, tree: Bool, boxes: String, note: String}
+
+def Sch.rows(+u: Ui) -> List<&2, HR.Row>:
+  HR.Hier.read(Ui.info(u, "sheets:" ++ Ui.root(u)))
+
+def Sch.fam(+p: String) -> String:
+  HI.Hist.family(p)
+
+# the live file on show ("" is the project's own: the root's)
+def Sch.file(+u: Ui, +rs: List<&2, HR.Row>) -> String:
+  Sch.fam(Bool.pick(String, String.is_empty(Ui.view_get(u, "view.path")), HR.Hier.file(rs, 0n), Ui.view_get(u, "view.path")))
+
+def Sch.num(+s: String) -> Nat:
+  Maybe.default(&2, Nat, Nat.read(s), 0n)
+
+def Sch.key(+u: Ui) -> String:
+  "@sch:" ++ Ui.sel(u)
+
+def Sch.back.key(+u: Ui) -> String:
+  "@sch.back:" ++ Ui.sel(u)
+
+def Sch.fwd.key(+u: Ui) -> String:
+  "@sch.fwd:" ++ Ui.sel(u)
+
+def Sch.note.key(+u: Ui) -> String:
+  "@sch.note:" ++ Ui.sel(u)
+
+def Sch.fold.key(+u: Ui, +p: String) -> String:
+  "@sch.fold:" ++ Ui.sel(u) ++ ":" ++ p
+
+def Sch.with.go(rs: List<&2, HR.Row>, +j: Nat, +f: String) -> Maybe<&2, Nat>:
+  match rs:
+    case Nil{}:
+      None{}
+    case HR.Row{_, _, g, _} <> t:
+      HR.Hier.seek.k(String.eq(Sch.fam(g), f), j, Sch.with.go(t, 1n+j, f))
+
+def Sch.find.k(keep: Bool, +rs: List<&2, HR.Row>, +i: Nat, +p: String) -> Maybe<&2, Nat>:
+  match keep:
+    case True{}:
+      Some{i}
+    case False{}:
+      HR.Hier.seek(rs, p)
+
+# an entry's row: its row while that is still its place (or it names no
+# place), else the first row at its place, else none
+def Sch.find(+rs: List<&2, HR.Row>, +e: String) -> Maybe<&2, Nat>:
+  Sch.find.k(Bool.or(String.is_empty(HI.Hist.field(e, 1n)), String.eq(HR.Hier.path(rs, Sch.num(HI.Hist.field(e, 0n))), HI.Hist.field(e, 1n))),
+    rs, Sch.num(HI.Hist.field(e, 0n)), HI.Hist.field(e, 1n))
+
+def Sch.entry(+rs: List<&2, HR.Row>, +j: Nat) -> String:
+  Nat.show(j) ++ "\t" ++ HR.Hier.path(rs, j)
+
+def Sch.first(+rs: List<&2, HR.Row>, +file: String) -> Nat:
+  Maybe.default(&2, Nat, Sch.with.go(rs, 0n, file), List.length(&2, HR.Row, rs))
+
+def Sch.at.j(same: Bool, +j: Nat, +rs: List<&2, HR.Row>, +file: String) -> Nat:
+  match same:
+    case True{}:
+      j
+    case False{}:
+      Sch.first(rs, file)
+
+def Sch.at.k(m: Maybe<&2, Nat>, +rs: List<&2, HR.Row>, +file: String) -> Nat:
+  match m:
+    case Some{+j}:
+      Sch.at.j(String.eq(Sch.fam(HR.Hier.file(rs, j)), file), j, rs, file)
+    case None{}:
+      Sch.first(rs, file)
+
+# the row on show: the instance kept while it shows the file on show, else
+# the first row of that file; the rows' count when the file is not in the
+# hierarchy (an agent showed another schematic)
+def Sch.at(+u: Ui, +rs: List<&2, HR.Row>) -> Nat:
+  Sch.at.k(Sch.find(rs, Ui.scratch(u, Sch.key(u))), rs, Sch.file(u, rs))
+
+def Sch.inside(+rs: List<&2, HR.Row>, +j: Nat) -> Bool:
+  Nat.is_lt(j, List.length(&2, HR.Row, rs))
+
+# History: a line per entry, newest first
+def Sch.cap(+s: String) -> String:
+  String.join(List.take(&2, String, String.split(s, '\n'), 31n), "\n")
+
+def Sch.cons(+e: String, +s: String) -> String:
+  Bool.pick(String, String.is_empty(s), e, e ++ "\n" ++ Sch.cap(s))
+
+def Sch.head(+s: String) -> String:
+  HI.Hist.at(String.split(s, '\n'), 0n)
+
+def Sch.tail(+s: String) -> String:
+  String.join(List.drop(&2, String, String.split(s, '\n'), 1n), "\n")
+
+# the entry of the row on show put in front of a history (nothing when the
+# file on show is not in the hierarchy)
+def Sch.mark(+rs: List<&2, HR.Row>, +at: Nat, +s: String) -> String:
+  Bool.pick(String, Sch.inside(rs, at), Sch.cons(Sch.entry(rs, at), s), s)
+
+# the file row j shows: the project's own ("") for the root of the live
+# design, else its file (a version's file while a version shows)
+def Sch.value(+cur: String, +rs: List<&2, HR.Row>, +j: Nat) -> String:
+  Bool.pick(String, Bool.and(Nat.is_eq(j, 0n), Nat.is_eq(HI.Hist.kind(cur), 0n)), "", HR.Hier.file(rs, j))
+
+# row j on show (a comparison keeps comparing that sheet: Rv.sheet), kept
+# as the instance, the note cleared
+def Sch.show(+u: Ui, +rs: List<&2, HR.Row>, +j: Nat) -> Ui:
+  Ui.scratch_set(Ui.scratch_set(Ui.view_put(u, "schematic", Rv.sheet(Ui.view_get(u, "view.path"), Sch.value(Ui.view_get(u, "view.path"), rs, j))),
+    Sch.key(u), Sch.entry(rs, j)), Sch.note.key(u), "")
+
+def Sch.gone(+u: Ui) -> Ui:
+  Ui.scratch_set(u, Sch.note.key(u), "gone")
+
+def Sch.visit.k(moved: Bool, +u: Ui, +rs: List<&2, HR.Row>, +j: Nat) -> Ui:
+  match moved:
+    case True{}:
+      Sch.show(Ui.scratch_set(Ui.scratch_set(u, Sch.back.key(u), Sch.mark(rs, Sch.at(u, rs), Ui.scratch(u, Sch.back.key(u)))), Sch.fwd.key(u), ""), rs, j)
+    case False{}:
+      Sch.show(u, rs, j)
+
+# a new place: the one on show goes on Back, Forward is cleared (going to
+# the sheet already on show changes no history)
+def Sch.visit(+u: Ui, +rs: List<&2, HR.Row>, +j: Nat) -> Ui:
+  Sch.visit.k(Bool.not(Nat.is_eq(j, Sch.at(u, rs))), u, rs, j)
+
+def Sch.go.in(ok: Bool, +u: Ui, +rs: List<&2, HR.Row>, +j: Nat) -> Ui:
+  match ok:
+    case True{}:
+      Sch.visit(u, rs, j)
+    case False{}:
+      Sch.gone(u)
+
+def Sch.go.k(m: Maybe<&2, Nat>, +u: Ui, +rs: List<&2, HR.Row>) -> Ui:
+  match m:
+    case Some{+j}:
+      Sch.go.in(Sch.inside(rs, j), u, rs, j)
+    case None{}:
+      Sch.gone(u)
+
+# Back or Forward: the newest entry of one history comes on show and the
+# one on show goes on the other; an entry no longer there is dropped with
+# the note, and the sheet on show stays
+def Sch.step.in(ok: Bool, +u: Ui, +rs: List<&2, HR.Row>, +j: Nat, +from: String, +to: String) -> Ui:
+  match ok:
+    case True{}:
+      Sch.show(Ui.scratch_set(Ui.scratch_set(u, to, Sch.mark(rs, Sch.at(u, rs), Ui.scratch(u, to))), from, Sch.tail(Ui.scratch(u, from))), rs, j)
+    case False{}:
+      Sch.gone(Ui.scratch_set(u, from, Sch.tail(Ui.scratch(u, from))))
+
+def Sch.step.k(m: Maybe<&2, Nat>, +u: Ui, +rs: List<&2, HR.Row>, +from: String, +to: String) -> Ui:
+  match m:
+    case Some{+j}:
+      Sch.step.in(Sch.inside(rs, j), u, rs, j, from, to)
+    case None{}:
+      Sch.step.in(False{}, u, rs, 0n, from, to)
+
+def Sch.step.e(none: Bool, +u: Ui, +rs: List<&2, HR.Row>, +from: String, +to: String) -> Ui:
+  match none:
+    case True{}:
+      u
+    case False{}:
+      Sch.step.k(Sch.find(rs, Sch.head(Ui.scratch(u, from))), u, rs, from, to)
+
+def Sch.step(+u: Ui, +rs: List<&2, HR.Row>, +from: String, +to: String) -> Ui:
+  Sch.step.e(String.is_empty(Ui.scratch(u, from)), u, rs, from, to)
+
+def Sch.root(+u: Ui, +rs: List<&2, HR.Row>) -> Ui:
+  Sch.go.in(Sch.inside(rs, 0n), u, rs, 0n)
+
+def Sch.up.in(top: Bool, +u: Ui, +rs: List<&2, HR.Row>, +at: Nat) -> Ui:
+  match top:
+    case True{}:
+      u
+    case False{}:
+      Sch.visit(u, rs, HR.Hier.parent(rs, at))
+
+# Up: the parent of the row on show; at the root nothing; from a file
+# outside the hierarchy, the root
+def Sch.up.k(inside: Bool, +u: Ui, +rs: List<&2, HR.Row>, +at: Nat) -> Ui:
+  match inside:
+    case True{}:
+      Sch.up.in(Nat.is_eq(at, 0n), u, rs, at)
+    case False{}:
+      Sch.root(u, rs)
+
+def Sch.up(+u: Ui, +rs: List<&2, HR.Row>) -> Ui:
+  Sch.up.k(Sch.inside(rs, Sch.at(u, rs)), u, rs, Sch.at(u, rs))
+
+def Sch.shut(+u: Ui, +p: String) -> Bool:
+  String.eq(Ui.scratch(u, Sch.fold.key(u, p)), "1")
+
+def Sch.fold(+u: Ui, +p: String) -> Ui:
+  Ui.scratch_set(u, Sch.fold.key(u, p), Bool.pick(String, Sch.shut(u, p), "", "1"))
+
+def Sch.tree.on(+u: Ui) -> Bool:
+  Bool.not(String.eq(Ui.scratch(u, "@sch.tree"), "0"))
+
+def Sch.tree.flip(+u: Ui) -> Ui:
+  Ui.scratch_set(u, "@sch.tree", Bool.pick(String, Sch.tree.on(u), "0", ""))
+
+def Sch.act.k(i: Nat, +u: Ui, +rs: List<&2, HR.Row>, +value: String) -> Ui:
+  match i:
+    case 0n:
+      Sch.go.k(Sch.find(rs, value), u, rs)
+    case 1n:
+      Sch.up(u, rs)
+    case 2n:
+      Sch.root(u, rs)
+    case 3n:
+      Sch.step(u, rs, Sch.back.key(u), Sch.fwd.key(u))
+    case 4n:
+      Sch.step(u, rs, Sch.fwd.key(u), Sch.back.key(u))
+    case 5n:
+      Sch.fold(u, value)
+    case 6n:
+      Sch.tree.flip(u)
+    case _:
+      u
+
+def Sch.actions() -> List<&2, String>:
+  ["sch-go", "sch-up", "sch-root", "sch-back", "sch-fwd", "sch-fold", "sch-tree"]
+
+def Sch.act(+u: Ui, +action: String, +value: String) -> Act:
+  Act{Sch.act.k(C.Codec.pos(Sch.actions(), action), u, Sch.rows(u), value), Nil{}}
+
+# "view-sheet": "#<row>" a row (the phones' menu), else a file (the
+# instance kept is then the first row of that file)
+def Sch.sheet(row: Bool, +u: Ui, +value: String) -> Act:
+  match row:
+    case True{}:
+      Act{Sch.act.k(0n, u, Sch.rows(u), String.drop(value, 1n)), Nil{}}
+    case False{}:
+      Act{Ui.scratch_set(Ui.view_put(u, "schematic", Rv.sheet(Ui.view_get(u, "view.path"), value)), Sch.key(u), ""), Nil{}}
+
+# The view
+def Sch.has(xs: List<&2, Nat>, +n: Nat) -> Bool:
+  match xs:
+    case Nil{}:
+      False{}
+    case x <> t:
+      Bool.or(Nat.is_eq(x, n), Sch.has(t, n))
+
+def Sch.state(+chain: List<&2, Nat>, +cur: Nat, +j: Nat) -> Nat:
+  Bool.pick(Nat, Nat.is_eq(j, cur), 2n, Bool.pick(Nat, Sch.has(chain, j), 1n, 0n))
+
+def Sch.kids(+rs: List<&2, HR.Row>, +j: Nat, +e: Nat) -> Bool:
+  Nat.is_eq(HR.Hier.depth(rs, 1n+j), 1n+e)
+
+# folded, unless it is above the row on show (that one always shows)
+def Sch.closed(+u: Ui, +p: String, +st: Nat) -> Bool:
+  Bool.and(Sch.shut(u, p), Bool.not(Nat.is_eq(st, 1n)))
+
+# h: 0, or one past the depth of the folded row whose subtree is hidden
+def Sch.vis(+h: Nat, +e: Nat) -> Bool:
+  Bool.or(Nat.is_eq(h, 0n), Nat.is_lt(e, h))
+
+def Sch.hide(vis: Bool, +h: Nat, +e: Nat, +kids: Bool, +closed: Bool) -> Nat:
+  match vis:
+    case True{}:
+      Bool.pick(Nat, Bool.and(kids, closed), 1n+e, 0n)
+    case False{}:
+      h
+
+def Sch.keep(vis: Bool, r: SchRow, rest: List<&2, SchRow>) -> List<&2, SchRow>:
+  match vis:
+    case True{}:
+      r <> rest
+    case False{}:
+      rest
+
+def Sch.row(+j: Nat, +e: Nat, n: String, l: Bool, +p: String, +st: Nat, +kids: Bool, +closed: Bool) -> SchRow:
+  SchRow{j, e, n, Nat.show(j) ++ "\t" ++ p, st, kids, Bool.not(closed), l}
+
+def Sch.rows.go(rs: List<&2, HR.Row>, +all: List<&2, HR.Row>, +ps: List<&2, String>, +j: Nat, +h: Nat, +u: Ui, +chain: List<&2, Nat>, +cur: Nat) -> List<&2, SchRow>:
+  match rs:
+    case Nil{}:
+      Nil{}
+    case HR.Row{+e, n, _, l} <> t:
+      Sch.keep(Sch.vis(h, e), Sch.row(j, e, n, l, HI.Hist.at(ps, j), Sch.state(chain, cur, j), Sch.kids(all, j, e), Sch.closed(u, HI.Hist.at(ps, j), Sch.state(chain, cur, j))),
+        Sch.rows.go(t, all, ps, 1n+j, Sch.hide(Sch.vis(h, e), h, e, Sch.kids(all, j, e), Sch.closed(u, HI.Hist.at(ps, j), Sch.state(chain, cur, j))), u, chain, cur))
+
+def Sch.loop.k(m: Maybe<&2, HR.Row>) -> Bool:
+  match m:
+    case Some{HR.Row{_, _, _, l}}:
+      l
+    case None{}:
+      False{}
+
+def Sch.trail.go(cs: List<&2, Nat>, +rs: List<&2, HR.Row>, +ps: List<&2, String>, +cur: Nat) -> List<&2, SchRow>:
+  match cs:
+    case Nil{}:
+      Nil{}
+    case +c <> t:
+      SchRow{c, HR.Hier.depth(rs, c), HR.Hier.name(rs, c), Nat.show(c) ++ "\t" ++ HI.Hist.at(ps, c), Bool.pick(Nat, Nat.is_eq(c, cur), 2n, 1n), False{}, True{}, False{}}
+        <> Sch.trail.go(t, rs, ps, cur)
+
+def Sch.here.go(js: List<&2, Nat>, +rs: List<&2, HR.Row>, +ps: List<&2, String>) -> List<&2, SchRow>:
+  match js:
+    case Nil{}:
+      Nil{}
+    case +j <> t:
+      SchRow{j, HR.Hier.depth(rs, j), HR.Hier.name(rs, j), Nat.show(j) ++ "\t" ++ HI.Hist.at(ps, j), 0n, Sch.kids(rs, j, HR.Hier.depth(rs, j)), True{}, Sch.loop.k(HR.Hier.row(rs, j))}
+        <> Sch.here.go(t, rs, ps)
+
+def Sch.box.go(js: List<&2, Nat>, +k: Nat, +bs: List<&2, String>, +ps: List<&2, String>) -> List<&2, String>:
+  match js:
+    case Nil{}:
+      Nil{}
+    case +j <> t:
+      (Nat.show(j) ++ "\t" ++ HI.Hist.at(ps, j) ++ "\t" ++ HI.Hist.at(bs, k)) <> Sch.box.go(t, 1n+k, bs, ps)
+
+def Sch.view.at(+cur: Nat, +ps: List<&2, String>, +rs: List<&2, HR.Row>, +u: Ui) -> SchView:
+  SchView{Sch.rows.go(rs, rs, ps, 0n, 0n, u, HR.Hier.chain(rs, cur), cur),
+    Sch.trail.go(HR.Hier.chain(rs, cur), rs, ps, cur),
+    Sch.here.go(HR.Hier.under(rs, cur), rs, ps),
+    cur, List.length(&2, HR.Row, rs), HI.Hist.at(ps, cur),
+    Bool.not(String.is_empty(Ui.scratch(u, Sch.back.key(u)))), Bool.not(String.is_empty(Ui.scratch(u, Sch.fwd.key(u)))),
+    Bool.not(Sch.inside(rs, cur)), Sch.tree.on(u),
+    String.join(Sch.box.go(HR.Hier.under(rs, cur), 0n, HR.Hier.boxes.of(Ui.info(u, "sheetbox:" ++ Ui.root(u)), Sch.fam(HR.Hier.file(rs, cur))), ps), "\n"),
+    Ui.scratch(u, Sch.note.key(u))}
+
+def Sch.view.k(+rs: List<&2, HR.Row>, +u: Ui) -> SchView:
+  Sch.view.at(Sch.at(u, rs), HR.Hier.paths(rs), rs, u)
+
+# the schematic's navigation as the client shows it
+def Sch.view(+u: Ui) -> SchView:
+  Sch.view.k(Sch.rows(u), u)
+
+# whether there is a hierarchy to navigate (more than one sheet)
+def Sch.many(+u: Ui) -> Bool:
+  Nat.is_gt(List.length(&2, HR.Row, Sch.rows(u)), 1n)
+
+def Sch.boxes.v(v: SchView) -> String:
+  match v:
+    case SchView{_, _, _, _, _, _, _, _, _, _, b, _}:
+      b
+
+
 # back on the Board or Schematic tab while a comparison of that kind is
 # open (the Review tab between): it shows again as it was (Old, Diff or
 # New); else the project's own file ("")
@@ -5397,7 +5759,7 @@ def Mpage.act(i: Nat, +u: Ui, +value: String) -> Act:
     case 6n:
       Act{Ui.view_put(u, value, Bd.or(Rv.back(u, value), Bd.keep(u, value, Bd.shown(u, Ui.view_get(u, "view.path"))))), Nil{}}
     case 7n:
-      Act{Ui.view_put(u, "schematic", Rv.sheet(Ui.view_get(u, "view.path"), value)), Nil{}}
+      Sch.sheet(String.starts_with(value, "#"), u, value)
     case 8n:
       Act{Ui.scratch_set(u, Solid.off.key(u), U32.show(U32.xor(Solid.off(u), U32.shln(1, U32.to_nat(Maybe.default(&2, U32, U32.read(value), 31)))))), Nil{}}
     # (past the table: an action no one takes)
@@ -5572,6 +5934,22 @@ def Mpage.sync(a: Act) -> Act:
 def Solid.kind(+u: Ui) -> String:
   Bool.pick(String, String.is_empty(Ui.view_get(u, "view.kind")),
     Bool.pick(String, Nat.is_eq(HI.Hist.ext(HI.Hist.family(Ui.view_get(u, "view.path"))), 1n), "schematic", "board"), Ui.view_get(u, "view.kind"))
+
+def Sch.boxes.k(on: Bool, +u: Ui) -> String:
+  match on:
+    case True{}:
+      Sch.boxes.v(Sch.view(u))
+    case False{}:
+      ""
+
+# the sheet symbols a click on the schematic on show opens (none on a board)
+def Sch.boxes(+u: Ui) -> String:
+  Sch.boxes.k(Bool.and(String.eq(Solid.kind(u), "schematic"), Sch.many(u)), u)
+
+# a schematic's sheets as the hub sends them ({"t":"sheets", root, rows,
+# boxes}), kept under its project root
+def Sch.got(u: Ui, +o: J.Json) -> Ui:
+  Ui.info_set(Ui.info_set(u, "sheets:" ++ J.Json.get_str(o, "root", ""), J.Json.get_str(o, "rows", "")), "sheetbox:" ++ J.Json.get_str(o, "root", ""), J.Json.get_str(o, "boxes", ""))
 
 def Solid.num(+k: String) -> String:
   Bool.pick(String, String.eq(k, "board"), "0", Bool.pick(String, String.eq(k, "schematic"), "1", Bool.pick(String, String.eq(k, "3d"), "2", "")))
@@ -12724,12 +13102,20 @@ def Ui.act.g(agy: Bool, +u: Ui, +action: String, +value: String) -> Act:
       Ui.act.r(String.starts_with(action, "rv-"), u, action, value)
 
 # (browser tasks' "tk-" and "bb-" actions: Teach.act)
+# (the schematic's sheet navigation, "sch-": Sch.act)
+def Ui.act.sch(sch: Bool, +u: Ui, +action: String, +value: String) -> Act:
+  match sch:
+    case True{}:
+      Sch.act(u, action, value)
+    case False{}:
+      Ui.act.g(String.starts_with(action, "agy-"), u, action, value)
+
 def Ui.act.tk(tk: Bool, +u: Ui, +action: String, +value: String) -> Act:
   match tk:
     case True{}:
       Teach.act(u, action, value)
     case False{}:
-      Ui.act.g(String.starts_with(action, "agy-"), u, action, value)
+      Ui.act.sch(String.starts_with(action, "sch-"), u, action, value)
 
 def Ui.act.s(close: Bool, +u: Ui, +action: String, +value: String) -> Act:
   match close:

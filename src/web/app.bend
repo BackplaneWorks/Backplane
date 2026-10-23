@@ -50,12 +50,13 @@ def recv.k(shot: Bool, u: U.Ui, +o: J.Json) -> U.Act:
 
 # a 3D model's note ({"t":"plotnote", key, text}: parts with no model),
 # kept under its source's key for the 3D pane
-# a schematic's sheets ({"t":"sheets", root, rows}: core/hier.bend's rows),
-# kept under the project root for the Schematic tab's sheet chips
+# a schematic's sheets ({"t":"sheets", root, rows, boxes}: core/hier.bend's
+# rows and sheet boxes), kept under the project root for the Schematic
+# tab's navigation (client.bend's Sch)
 def recv.sheets(hit: Bool, u: U.Ui, +o: J.Json) -> U.Act:
   match hit:
     case True{}:
-      U.Act{U.Ui.info_set(u, "sheets:" ++ J.Json.get_str(o, "root", ""), J.Json.get_str(o, "rows", "")), Nil{}}
+      U.Act{U.Sch.got(u, o), Nil{}}
     case False{}:
       recv.k(String.eq(J.Json.get_str(o, "t", ""), "shot"), u, o)
 

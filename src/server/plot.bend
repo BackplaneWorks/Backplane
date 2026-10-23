@@ -646,18 +646,37 @@ def Tree.root(f: K.Files, +path: String) -> String:
     case K.Files{_, _, +sch, _}:
       Bool.pick(String, String.is_empty(sch), path, HS.Hist.rebase(path, sch))
 
-# `backplane --plot-tree ROOT`: the rows, as Hier.show writes them
+# each file the tree read, a line of its sheets' boxes (hier.bend's
+# Hier.boxes.line, keyed by the live file)
+def Tree.boxes(tab: List<&2, HI.Kids>, +acc: String) -> IO(String):
+  match tab:
+    case Nil{}:
+      IO.pure(String, acc)
+    case HI.Kids{+f, _} <> t:
+      do IO<String>:
+        bs : List<&2, U32> <- GT.Git.version(f)
+        Tree.boxes(t, acc ++ HI.Hier.boxes.line(HS.Hist.family(f), bs) ++ "\n")
+
+# `backplane --plot-tree ROOT`: {"rows": the rows as Hier.show writes them,
+# "boxes": where each file's child sheets sit}
 def Pv.child.tree(+root: String) -> IO(Unit):
   do IO<Unit>:
-    tab : List<&2, HI.Kids> <- Tree.load(64n, [root], Nil{})
-    IO.print(HI.Hier.show(HI.Hier.rows(tab, root)))
+    +tab : List<&2, HI.Kids> <- Tree.load(64n, [root], Nil{})
+    bx : String <- Tree.boxes(tab, "")
+    IO.print(J.Json.show(J.Json.obj([J.KV{"rows", J.Str{HI.Hier.show(HI.Hier.rows(tab, root))}}, J.KV{"boxes", J.Str{String.trim_end(bx)}}])))
 
-# a phone watching a project's schematic hears its sheets ("" rows for a
-# schematic of one sheet, or one the child could not read)
+# a phone or page watching a project's schematic hears its sheets ("" rows
+# for a schematic of one sheet, or one the child could not read) and the
+# boxes a click on a sheet symbol opens (an older child's plain rows still
+# read as rows)
+def Pv.tree.json(+root: String, +o: J.Json, +text: String) -> String:
+  J.Json.show(J.Json.obj([J.KV{"t", J.Str{"sheets"}}, J.KV{"root", J.Str{root}},
+    J.KV{"rows", J.Str{J.Json.get_str(o, "rows", String.trim_end(text))}}, J.KV{"boxes", J.Str{J.Json.get_str(o, "boxes", "")}}]))
+
 def Pv.tree.say(r: PR.Ran, +client: U32, +root: String, +out: Chan(POut)) -> IO(Unit):
   match r:
     case PR.Ran{0, +text}:
-      Pv.say(out, client, J.Json.show(J.Json.obj([J.KV{"t", J.Str{"sheets"}}, J.KV{"root", J.Str{root}}, J.KV{"rows", J.Str{String.trim_end(text)}}])))
+      Pv.say(out, client, Pv.tree.json(root, Maybe.default(&2, J.Json, J.Json.parse(String.trim(text)), J.Null{}), text))
     case _:
       IO.pure(Unit, Unit{})
 

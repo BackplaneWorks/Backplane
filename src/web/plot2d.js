@@ -110,6 +110,10 @@ class View {
     this.fade = 220;
     this.fam = "";
     this.drag = null;
+    this.tap = null;
+    this.sheets = [];
+    this.sheetText = "";
+    this.back = null;
     // one finger (or the mouse) pans; two pinch to zoom about their middle
     // and move the view with it
     this.pts = new Map();
@@ -121,13 +125,17 @@ class View {
     canvas.addEventListener("pointerdown", (e) => {
       try { canvas.setPointerCapture(e.pointerId); } catch {}
       this.pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      // a press that stays put is a tap (a sheet symbol opens), unless a
+      // second finger joins it
+      this.tap = this.pts.size === 1 && e.button === 0 ? { x: e.clientX, y: e.clientY } : null;
       this.drag = this.pts.size === 1 ? { x: e.clientX, y: e.clientY } : null;
       this.pinch = this.pts.size === 2 ? mid() : null;
       canvas.classList.add("dragging");
     });
     canvas.addEventListener("pointermove", (e) => {
-      if (!this.pts.has(e.pointerId)) return;
+      if (!this.pts.has(e.pointerId)) { this.hover(e);return; }
       this.pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (this.tap && Math.hypot(e.clientX - this.tap.x, e.clientY - this.tap.y) > 5) this.tap = null;
       if (this.pinch && this.pts.size === 2) {
         const m = mid(), f = m.d / Math.max(this.pinch.d, 1);
         this.ox = m.x - (this.pinch.x - this.ox) * f; this.oy = m.y - (this.pinch.y - this.oy) * f;
@@ -141,7 +149,10 @@ class View {
       this.later();
     });
     const up = (e) => {
+      const tap = e.type === "pointerup" && this.tap && this.pts.size === 1 ? this.tap : null;
+      this.tap = null;
       this.pts.delete(e.pointerId);
+      if (tap) { const s = this.sheetAt(e.clientX, e.clientY);if (s && sheeted) sheeted(s.value); }
       this.pinch = null;
       // the finger left behind carries on panning from where it is
       const [rest] = [...this.pts.values()];
@@ -181,6 +192,25 @@ class View {
     new ResizeObserver(() => { if (!this.fitted || !this.touched) this.fit(); else this.later(); }).observe(canvas);
   }
 
+  // the sheet symbol (client.bend's Sch.boxes, the canvas's data-sheets)
+  // under a point on the page; the smallest when boxes nest
+  sheetAt(cx, cy) {
+    if (!this.sheets.length || !this.plot || !this.plot.chunks) return null;
+    const b = this.canvas.getBoundingClientRect();
+    const x = (cx - b.left - this.ox) / this.scale / 1000, y = (cy - b.top - this.oy) / this.scale / 1000;
+    let best = null;
+    for (const s of this.sheets) {
+      if (x < s.x0 || x > s.x1 || y < s.y0 || y > s.y1) continue;
+      if (!best || (s.x1 - s.x0) * (s.y1 - s.y0) < (best.x1 - best.x0) * (best.y1 - best.y0)) best = s;
+    }
+    return best;
+  }
+
+  hover(e) {
+    const on = !!this.sheetAt(e.clientX, e.clientY);
+    if (on !== this.canvas.classList.contains("on-sheet")) this.canvas.classList.toggle("on-sheet", on);
+  }
+
   // the whole plot in view, centred, with a margin
   fit() {
     const w = this.canvas.clientWidth, h = this.canvas.clientHeight;
@@ -197,7 +227,9 @@ class View {
   show(p) {
     const first = !this.plot || !this.plot.box;
     this.plot = p;
-    if (first) this.fit(); else this.later();
+    // a sheet seen before comes back as it was left
+    if (first && this.back && p && p.box) { this.scale = this.back.scale;this.ox = this.back.ox;this.oy = this.back.oy;this.fitted = true;this.touched = true;this.back = null;this.later(); }
+    else if (first) this.fit(); else this.later();
   }
 
   later() {
@@ -282,6 +314,27 @@ class View {
 
 let view = null;
 let placed = null;
+let sheeted = null;
+// where the view was left on each source moved by hand (a few dozen kept)
+const left = new Map();
+
+// the page's answer to a tap on a sheet symbol (host.js)
+export function onSheet(fn) {
+  sheeted = fn;
+}
+
+// "<row>\t<place>\t<x0 y0 x1 y1>" lines, mm on the sheet on show
+function sheetBoxes(text) {
+  const out = [];
+  for (const line of String(text || "").split("\n")) {
+    const f = line.split("\t");
+    if (f.length < 3) continue;
+    const n = f[2].trim().split(/\s+/).map(Number);
+    if (n.length !== 4 || !n.every(Number.isFinite)) continue;
+    out.push({ value: `${f[0]}\t${f[1]}`, x0: Math.min(n[0], n[2]), y0: Math.min(n[1], n[3]), x1: Math.max(n[0], n[2]), y1: Math.max(n[1], n[3]) });
+  }
+  return out;
+}
 let noteSeen = false;
 
 // the page's answer to a right click (host.js)
@@ -309,15 +362,20 @@ export function mount(canvas) {
   if (note && !noteSeen) note.focus();
   noteSeen = !!note;
   view.fade = Number(canvas.dataset.fade || 0);
+  if (view.sheetText !== (canvas.dataset.sheets || "")) { view.sheetText = canvas.dataset.sheets || "";view.sheets = sheetBoxes(view.sheetText); }
   const key = canvas.dataset.key || "";
   if (key !== view.key) {
+    if (view.key && view.plot && view.plot.chunks && view.touched) {
+      left.delete(view.key);left.set(view.key, { scale: view.scale, ox: view.ox, oy: view.oy });
+      if (left.size > 48) left.delete(left.keys().next().value);
+    }
     // another version of the same file keeps its view, and the last one
     // stays up until the next comes
     const same = view.plot && view.plot.chunks && canvas.dataset.fam && canvas.dataset.fam === view.fam;
     view.key = key;
     view.fam = canvas.dataset.fam || "";
     view.asked = performance.now();
-    if (!same) { view.plot = null; view.fitted = false; }
+    if (!same) { view.plot = null; view.fitted = false; view.back = left.get(key) || null; }
     if (plots.has(key)) view.show(plots.get(key)); else view.later();
   }
 }
