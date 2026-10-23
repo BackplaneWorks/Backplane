@@ -247,6 +247,10 @@ plane.deploy.sub = {line} · キャンセル
 plane.machine.other = 別のマシン
 plane.count.need = {n}件が要対応
 plane.count.run = {n}件が実行中
+plane.count.failed = {n}件が失敗
+plane.why.approval = 承認待ち
+plane.why.question = 質問
+plane.why.failed = 失敗した実行
 plane.home.line = ホーム：{name}
 plane.home.make = ここをホームにする
 

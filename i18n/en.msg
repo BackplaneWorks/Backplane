@@ -235,6 +235,10 @@ plane.deploy.sub = {line} · Cancel
 plane.machine.other = another machine
 plane.count.need = {n} need you
 plane.count.run = {n} running
+plane.count.failed = {n} failed
+plane.why.approval = Approval
+plane.why.question = Question
+plane.why.failed = Failed run
 plane.home.line = Home: {name}
 plane.home.make = Make this the home
 

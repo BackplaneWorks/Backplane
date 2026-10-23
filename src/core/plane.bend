@@ -186,13 +186,96 @@ def Plane.signal.blocked(p: M.Phase) -> String:
     case M.PhFailed{}: "failed"
     case _: "approval"
 
-def Plane.signal.current(+n: Nat, +t: M.Thread, +phase: M.Phase) -> String:
-  Bool.pick(String, SG.Signal.blocked(n), Plane.signal.blocked(phase),
-    Bool.pick(String, SG.Signal.active(n), Bool.pick(String, M.State.running.k(t), "working", "waiting"), Plane.signal.state(n)))
+# What blocks a thread itself, "" when nothing does: an ask or pending tool
+# (its phase), a failed turn, a sign-in it waits for or a held message.
+def Plane.own.phase(p: M.Phase) -> String:
+  match p:
+    case M.PhApproval{}: "approval"
+    case M.PhInput{}: "question"
+    case M.PhFailed{}: "failed"
+    case _: ""
+
+def Plane.own.extra(+st: M.State, +id: String) -> String:
+  Bool.pick(String, Bool.or(Bool.not(String.is_empty(M.Setting.get(st, "auth.wait." ++ id, ""))), SG.Signal.held(M.Queue.items(st, id))), "approval", "")
+
+def Plane.own.k(+a: String, +st: M.State, +id: String) -> String:
+  Bool.pick(String, String.is_empty(a), Plane.own.extra(st, id), a)
+
+def Plane.own(+st: M.State, +phase: M.Phase, +id: String) -> String:
+  Plane.own.k(Plane.own.phase(phase), st, id)
+
+def Plane.own.of(+st: M.State, +id: String) -> String:
+  Plane.own(st, U.Side.phase(st, U.Ui.thread(st, id)), id)
+
+# Inherited blocks. signal.bend spreads a blocked bit from a launched thread
+# or a delegated task up to its parent (the sidebar's dot). The plane counts
+# the person's attention once, at its source. A launched thread is a row of
+# its own, so its launcher does not count it again (law plane_launch_once).
+# A delegated task's child shows only under its parent, so the parent stands
+# for it, with the child's state (a question stays a question, a failure a
+# failure), and its row opens that child (Plane.jump). Plane.via.src is the
+# source thread, "" when every source is a row of its own.
+def Plane.keep.text(yes: Bool, x: String, rest: List<&2, String>) -> List<&2, String>:
+  match yes:
+    case True{}: x <> rest
+    case False{}: rest
+
+def Plane.via.tasks(ts: List<&2, M.Task>, +launched: List<&2, String>) -> List<&2, String>:
+  match ts:
+    case Nil{}: Nil{}
+    case M.Task{_, _, +child, _, state, _, _, _, _} <> rest:
+      Plane.keep.text(Bool.and(Bool.not(M.TaskState.terminal(state)), Bool.not(M.Launch.has(launched, child))), child, Plane.via.tasks(rest, launched))
+
+def Plane.via.kids(+st: M.State, +id: String) -> List<&2, String>:
+  Plane.via.tasks(U.Tasks.of(st, id), M.Launch.of(st, id))
+
+def Plane.via.at(+own: String, +c: String) -> String:
+  Bool.pick(String, String.is_empty(own), "", c)
+
+def Plane.via.hit(+found: String, +c: String, +st: M.State) -> String:
+  Bool.pick(String, String.is_empty(found), Plane.via.at(Plane.own.of(st, c), c), found)
+
+def Plane.via.next(none: Bool, +c: String, rest: List<&2, String>, +st: M.State) -> List<&2, String>:
+  match none:
+    case True{}: List.append(&2, String, rest, Plane.via.kids(st, c))
+    case False{}: Nil{}
+
+def Plane.via.go(fuel: Nat, ids: List<&2, String>, +found: String, +st: M.State) -> String:
+  match fuel ids:
+    case 0n _: found
+    case 1n+_ Nil{}: found
+    case 1n+k +c <> rest:
+      +f = Plane.via.hit(found, c, st)
+      Plane.via.go(k, Plane.via.next(String.is_empty(f), c, rest, st), f, st)
+
+def Plane.via.src(+st: M.State, +id: String) -> String:
+  Plane.via.go(64n, Plane.via.kids(st, id), "", st)
+
+# not blocked: working, waiting on owned work, settled or idle
+def Plane.signal.free(+n: Nat, +t: M.Thread) -> String:
+  Bool.pick(String, SG.Signal.active(n), Bool.pick(String, M.State.running.k(t), "working", "waiting"), Plane.signal.state(Bool.pick(Nat, SG.Signal.blocked(n), 0n, n)))
+
+def Plane.signal.via.k(none: Bool, +src: String, +n: Nat, +t: M.Thread, +st: M.State) -> String:
+  match none:
+    case True{}: Plane.signal.free(n, t)
+    case False{}: Plane.own.of(st, src)
+
+def Plane.signal.why(none: Bool, +own: String, +n: Nat, +t: M.Thread, +st: M.State) -> String:
+  match none:
+    case False{}: own
+    case True{}: Plane.signal.via.k(String.is_empty(Plane.via.src(st, M.Thread.id(t))), Plane.via.src(st, M.Thread.id(t)), n, t, st)
+
+def Plane.signal.current.k(blocked: Bool, +n: Nat, +t: M.Thread, +phase: M.Phase, +st: M.State) -> String:
+  match blocked:
+    case True{}: Plane.signal.why(String.is_empty(Plane.own(st, phase, M.Thread.id(t))), Plane.own(st, phase, M.Thread.id(t)), n, t, st)
+    case False{}: Plane.signal.free(n, t)
+
+def Plane.signal.current(+n: Nat, +t: M.Thread, +phase: M.Phase, +st: M.State) -> String:
+  Plane.signal.current.k(SG.Signal.blocked(n), n, t, phase, st)
 
 def Plane.signal.pick(present: Bool, +ix: U.SIx, +st: M.State, +t: M.Thread) -> String:
   match present:
-    case True{}: Plane.signal.current(U.Side.signal.ix(ix, t), t, U.Side.phase.ix(ix, st, t))
+    case True{}: Plane.signal.current(U.Side.signal.ix(ix, t), t, U.Side.phase.ix(ix, st, t), st)
     case False{}: Plane.state(U.Side.phase.ix(ix, st, t))
 
 def Plane.signal(+ix: U.SIx, +st: M.State, +t: M.Thread) -> String:
@@ -214,11 +297,29 @@ def Plane.asking(+s: String, +ix: U.SIx, +id: String) -> String:
   Bool.pick(String, Bool.and(String.eq(s, "approval"), Bool.and(Bool.not(U.Asks.kind(U.SIx.open(ix, id), "approval")),
     Bool.or(U.Asks.kind(U.SIx.open(ix, id), "input"), U.Asks.kind(U.SIx.open(ix, id), "plan")))), "question", s)
 
-def Plane.thread.k(+away: Bool, +id: String, +title: String, +sub: String, +machine: String, +phase: String, +at: Nat) -> PRow:
-  PRow{"thread", id, "select", id, title, sub, machine, Bool.pick(String, away, "away", phase), at, away}
+# what a thread row's click opens: the thread, or for one that needs the
+# person only through a child task, that child (Plane.via.src)
+def Plane.jump.to(+src: String, +id: String) -> String:
+  Bool.pick(String, String.is_empty(src), id, src)
+
+def Plane.jump.k(none: Bool, +st: M.State, +id: String) -> String:
+  match none:
+    case False{}: id
+    case True{}: Plane.jump.to(Plane.via.src(st, id), id)
+
+def Plane.jump.s(need: Bool, +st: M.State, +id: String) -> String:
+  match need:
+    case False{}: id
+    case True{}: Plane.jump.k(String.is_empty(Plane.own.of(st, id)), st, id)
+
+def Plane.jump(+st: M.State, +id: String, +state: String) -> String:
+  Plane.jump.s(Nat.is_eq(Plane.sec(state), 0n), st, id)
+
+def Plane.thread.k(+away: Bool, +id: String, +title: String, +sub: String, +machine: String, +phase: String, +at: Nat, +st: M.State) -> PRow:
+  PRow{"thread", id, "select", Plane.jump(st, id, Bool.pick(String, away, "away", phase)), title, sub, machine, Bool.pick(String, away, "away", phase), at, away}
 
 def Plane.thread.t(+t: M.Thread, +at: Nat, +pt: String, +u: U.Ui, +ix: U.SIx, +st: M.State) -> PRow:
-  Plane.thread.k(U.Ui.far.away(u, M.Thread.id(t)), M.Thread.id(t), U.Active.title(t), pt, U.Ui.far.name(u, M.Thread.id(t)), Plane.asking(Plane.signal(ix, st, t), ix, M.Thread.id(t)), at)
+  Plane.thread.k(U.Ui.far.away(u, M.Thread.id(t)), M.Thread.id(t), U.Active.title(t), pt, U.Ui.far.name(u, M.Thread.id(t)), Plane.asking(Plane.signal(ix, st, t), ix, M.Thread.id(t)), at, st)
 
 def Plane.thread(r: U.ARow, +u: U.Ui, +ix: U.SIx, +st: M.State) -> PRow:
   match r:
@@ -474,7 +575,7 @@ def Plane.of.k(+all: List<&2, PRow>, +u: U.Ui, +ix: U.SIx, +now: Nat) -> Plane:
 def Plane.thread.t.s(r: U.ARow, +state: String, +u: U.Ui, +st: M.State) -> PRow:
   match r:
     case U.ARow{_, +at, +t, _, +pt, _}:
-      Plane.thread.k(U.Ui.far.away(u, M.Thread.id(t)), M.Thread.id(t), U.Active.title(t), pt, U.Ui.far.name(u, M.Thread.id(t)), state, at)
+      Plane.thread.k(U.Ui.far.away(u, M.Thread.id(t)), M.Thread.id(t), U.Active.title(t), pt, U.Ui.far.name(u, M.Thread.id(t)), state, at, st)
 
 def Plane.thread.st(r: U.ARow, +ix: U.SIx, +st: M.State) -> String:
   match r:
@@ -580,8 +681,35 @@ def Plane.counts.run(+l: I.Loc, +n: Nat) -> String:
 def Plane.counts.join(+a: String, +b: String) -> String:
   Bool.pick(String, String.is_empty(a), b, Bool.pick(String, String.is_empty(b), a, a ++ " · " ++ b))
 
+# what a row in need asks of the person, in words: an approval, a question
+# or a failed run ("" for any other state); every client shows it beside the
+# title so a count can be read row by row
+def Plane.why(+l: I.Loc, +state: String) -> String:
+  Bool.pick(String, String.eq(state, "approval"), MSG.T.plane.why.approval(l), Bool.pick(String, String.eq(state, "question"), MSG.T.plane.why.question(l),
+    Bool.pick(String, String.eq(state, "failed"), MSG.T.plane.why.failed(l), "")))
+
+# a failed run is told apart from an ask: "1 need you · 2 failed · 7 running"
+# (need counts every row of the section; the words split it, law
+# plane_counts_split)
+def Plane.counts.failed(+l: I.Loc, +n: Nat) -> String:
+  Bool.pick(String, Nat.is_eq(n, 0n), "", MSG.T.plane.count.failed(l, Nat.show(n)))
+
+def Plane.counts.of(+l: I.Loc, +need: Nat, +failed: Nat, +run: Nat) -> String:
+  Plane.counts.join(Plane.counts.join(Plane.counts.need(l, Nat.sub(need, failed)), Plane.counts.failed(l, failed)), Plane.counts.run(l, run))
+
+def Plane.failed.k(hit: Bool, +n: Nat) -> Nat:
+  match hit:
+    case True{}: 1n+n
+    case False{}: n
+
+# the rows that are failed runs, not asks
+def Plane.failed(rs: List<&2, PRow>) -> Nat:
+  match rs:
+    case Nil{}: 0n
+    case +r <> t: Plane.failed.k(String.eq(PRow.state(r), "failed"), Plane.failed(t))
+
 def Plane.counts(+l: I.Loc, +p: Plane) -> String:
-  Plane.counts.join(Plane.counts.need(l, List.length(&2, PRow, Plane.need(p))), Plane.counts.run(l, List.length(&2, PRow, Plane.run(p))))
+  Plane.counts.of(l, List.length(&2, PRow, Plane.need(p)), Plane.failed(Plane.need(p)), List.length(&2, PRow, Plane.run(p)))
 
 # ids in the three thread sections, for law plane_each_once
 def Plane.ids(rs: List<&2, PRow>) -> List<&2, String>:
@@ -645,6 +773,16 @@ def Plane.demo() -> U.Ui:
     M.RoomSet{"r1", "ops", "b1", 150n}, M.RoomPosted{"m1", "r1", "b1", "hello", 0n, 199800n},
     M.RoutineSet{"rt1", "b1", "Digest", "0 9 * * *", "sum up", True{}, 160n}], M.State.empty()))
 
+# a client for the laws on inherited blocks: a launcher at work, a thread it
+# launched whose turn failed, and a child task of the launcher asking a
+# question (law plane_launch_once)
+def Plane.demo.launch() -> U.Ui:
+  U.Ui.far.st(U.Ui.init(200000n), M.State.replay([M.ProjectCreated{"p1", "One", "/a", 1n},
+    M.ThreadCreated{"l", "p1", "Launcher", M.Local{}, "", "", "claude", "", 199000n}, M.TurnChanged{"l", M.Running{}, 199001n},
+    M.ThreadCreated{"f", "p1", "Launched", M.Local{}, "", "", "claude", "", 199100n}, M.ThreadLaunched{"f", "l", True{}, 199100n}, M.TurnChanged{"f", M.Failed{}, 199101n},
+    M.ThreadCreated{"c", "p1", "Child", M.Local{}, "", "", "claude", "", 199200n}, M.TaskDelegated{"k1", "l", "c", 1n, "claude", "", 199200n},
+    M.AskOpened{"a1", "c", "input", "", "?", "", 199201n}], M.State.empty()))
+
 # The count alone
 # ---------------
 # The phones' list shows only "3 need you · 7 running" of the plane, so it
@@ -656,27 +794,43 @@ def Plane.demo() -> U.Ui:
 # thread's phase is complete, stopped or idle. Law plane_tally_counts.
 
 type PTally is Data:
-  PTally{need: Nat, run: Nat}
+  PTally{need: Nat, run: Nat, failed: Nat}
 
 def PTally.need(t: PTally) -> Nat:
   match t:
-    case PTally{n, _}:
+    case PTally{n, _, _}:
       n
 
 def PTally.run(t: PTally) -> Nat:
   match t:
-    case PTally{_, r}:
+    case PTally{_, r, _}:
       r
+
+def PTally.failed(t: PTally) -> Nat:
+  match t:
+    case PTally{_, _, f}:
+      f
 
 # a state counted into the tally: need (0), run (1), the rest (2) as Plane.sec
 def Plane.tally.add(n: Nat, t: PTally) -> PTally:
   match n t:
-    case 0n PTally{+a, +b}:
-      PTally{1n+a, b}
-    case 1n PTally{+a, +b}:
-      PTally{a, 1n+b}
+    case 0n PTally{+a, +b, +f}:
+      PTally{1n+a, b, f}
+    case 1n PTally{+a, +b, +f}:
+      PTally{a, 1n+b, f}
     case _ x:
       x
+
+def Plane.tally.fail(hit: Bool, t: PTally) -> PTally:
+  match hit t:
+    case True{} PTally{+a, +b, +f}:
+      PTally{a, b, 1n+f}
+    case False{} x:
+      x
+
+# a row's state into the tally, a failed run counted apart too
+def Plane.tally.state(+s: String, t: PTally) -> PTally:
+  Plane.tally.fail(String.eq(s, "failed"), Plane.tally.add(Plane.sec(s), t))
 
 def Plane.hot.put.k(none: Bool, +id: String, m: Map<&2, Bool>) -> Map<&2, Bool>:
   match none:
@@ -742,7 +896,7 @@ def Plane.maybe(t: M.Thread, m: Map<&2, Bool>) -> Bool:
 def Plane.tally.t(r: Bool, +t: M.Thread, +ix: U.SIx, +st: M.State, acc: PTally) -> PTally:
   match r:
     case True{}:
-      Plane.tally.add(Plane.sec(Plane.asking(Plane.signal(ix, st, t), ix, M.Thread.id(t))), acc)
+      Plane.tally.state(Plane.asking(Plane.signal(ix, st, t), ix, M.Thread.id(t)), acc)
     case False{}:
       acc
 
@@ -767,16 +921,16 @@ def Plane.tally.bots(rs: List<&2, PRow>, acc: PTally) -> PTally:
     case Nil{}:
       acc
     case +r <> t:
-      Plane.tally.bots(t, Plane.tally.add(Plane.sec(PRow.state(r)), acc))
+      Plane.tally.bots(t, Plane.tally.state(PRow.state(r), acc))
 
 # what the plane would count as needing the person and running, from the
 # sidebar's rows (Side.rows.ix, which the screen has made)
 def Plane.tally(+u: U.Ui, +ix: U.SIx, +rows: List<&2, U.SRow>) -> PTally:
   Plane.tally.bots(Plane.bots.go(BT.World.bots(M.State.bots(U.Ui.state(u))), u, ix, U.Ui.state(u)),
-    Plane.tally.rows(rows, ix, U.Ui.state(u), Plane.hot(U.Ui.state(u), ix), PTally{0n, 0n}))
+    Plane.tally.rows(rows, ix, U.Ui.state(u), Plane.hot(U.Ui.state(u), ix), PTally{0n, 0n, 0n}))
 
 def Plane.counts.t(+l: I.Loc, +t: PTally) -> String:
-  Plane.counts.join(Plane.counts.need(l, PTally.need(t)), Plane.counts.run(l, PTally.run(t)))
+  Plane.counts.of(l, PTally.need(t), PTally.failed(t), PTally.run(t))
 
 # a client for the count's laws: what each way to be need or run looks like
 # (an open approval, a question, a failed turn, a pending tool, a turn at work,
@@ -994,7 +1148,7 @@ def Plane.home.words(+u: U.Ui) -> String:
 # or run (Plane.maybe). Law plane_list_same.
 
 def Plane.list.row(+state: String, +t: M.Thread, +pt: String, +u: U.Ui, rest: List<&2, PRow>) -> List<&2, PRow>:
-  Plane.keep(Nat.is_gt(Plane.sec(state), 1n), Plane.thread.k(U.Ui.far.away(u, M.Thread.id(t)), M.Thread.id(t), U.Active.title(t), pt, U.Ui.far.name(u, M.Thread.id(t)), state, U.Active.activity(t)), rest)
+  Plane.keep(Nat.is_gt(Plane.sec(state), 1n), Plane.thread.k(U.Ui.far.away(u, M.Thread.id(t)), M.Thread.id(t), U.Active.title(t), pt, U.Ui.far.name(u, M.Thread.id(t)), state, U.Active.activity(t), U.Ui.state(u)), rest)
 
 def Plane.list.keep(r: Bool, +t: M.Thread, +pt: String, +ix: U.SIx, +st: M.State, +u: U.Ui, rest: List<&2, PRow>) -> List<&2, PRow>:
   match r:
@@ -1033,7 +1187,7 @@ def Plane.signals.bot(r: PRow, +u: U.Ui) -> PRow:
   match r:
     case PRow{k, +id, a, v, ti, sub, ma, +state, at, +away}:
       +thread = BT.Bot.thread(BT.World.bot(M.State.bots(U.Ui.state(u)), id))
-      PRow{k, id, a, v, ti, sub, ma, Bool.pick(String, away, state, Plane.signal.current(SG.Signal.cached(U.Ui.infos(u), thread), U.Ui.thread(U.Ui.state(u), thread), U.Side.phase(U.Ui.state(u), U.Ui.thread(U.Ui.state(u), thread)))), at, away}
+      PRow{k, id, a, v, ti, sub, ma, Bool.pick(String, away, state, Plane.signal.current(SG.Signal.cached(U.Ui.infos(u), thread), U.Ui.thread(U.Ui.state(u), thread), U.Side.phase(U.Ui.state(u), U.Ui.thread(U.Ui.state(u), thread)), U.Ui.state(u))), at, away}
 
 def Plane.signals.bots.rows(rs: List<&2, PRow>, +u: U.Ui) -> List<&2, PRow>:
   match rs:
@@ -1044,11 +1198,6 @@ def Plane.signals.bots(p: Plane, +u: U.Ui) -> Plane:
   match p:
     case Plane{ne, ru, bots, ro, rt, id, n, ma, lo}:
       Plane{ne, ru, Plane.signals.bots.rows(bots, u), ro, rt, id, n, ma, lo}
-
-def Plane.keep.text(yes: Bool, x: String, rest: List<&2, String>) -> List<&2, String>:
-  match yes:
-    case True{}: x <> rest
-    case False{}: rest
 
 # Show identities/titles, never a watched command or inferred progress. Ended
 # rows may still await delivery; they are deliberately absent from active work.
@@ -1128,3 +1277,12 @@ def Plane.of.st(+st: M.State, +now: Nat) -> Plane:
 
 def Plane.read(+st: M.State, +now: Nat, +pre: String, +name: String, +idle: Bool) -> String:
   Plane.text(Plane.of.st(st, now), pre, name, now, idle)
+
+# the need rows of the current plane, "id=state" in order (laws, tests)
+def Plane.need.states.go(rs: List<&2, PRow>) -> List<&2, String>:
+  match rs:
+    case Nil{}: Nil{}
+    case r <> t: (PRow.id(r) ++ "=" ++ PRow.state(r)) <> Plane.need.states.go(t)
+
+def Plane.need.states(u: U.Ui, now: Nat) -> String:
+  String.join(Plane.need.states.go(Plane.need(Plane.signals.of(u, now, True{}))), ",")

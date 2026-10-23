@@ -7,6 +7,7 @@ import ./mail-actions.bend as MA
 import ../core/model.bend as M
 import ../core/bot.bend as BT
 import ../core/mail.bend as ML
+import ../core/i18n.bend as I
 
 # Draw the existing shared Mailv cache and actions. No separate mailbox store,
 # request protocol or frontend interpretation of reply/needs-attention state.
@@ -83,11 +84,16 @@ def WM.reader(open: Bool, +u: U.Ui) -> List<&2, D.Node>:
     case False{}: Nil{}
     case True{}: [WM.conversation(u)]
 
+# a pin says what the row asks first (Plane.why: approval, question, failed
+# run), then the title, its project and machine; a click opens the thread
+def WM.pin.text(+why: String, +title: String, +state: String, +machine: String, +note: String) -> String:
+  Bool.pick(String, String.is_empty(why), title ++ " · " ++ state, why ++ " · " ++ title) ++ Bool.pick(String, String.is_empty(machine), "", " · " ++ machine) ++ Bool.pick(String, String.is_empty(note), "", " · " ++ note)
+
 def WM.pins(rs: List<&2, P.PRow>) -> List<&2, D.Node>:
   match rs:
     case Nil{}: Nil{}
-    case P.PRow{_, +id, action, value, title, note, machine, state, _, _} <> t:
-      D.El{"button", "mail-pin:" ++ id, [D.At{"class", "mail-pin"}, D.At{"data-value", value}, D.On{"click", action}], [D.Txt{title ++ " · " ++ state ++ " · " ++ machine ++ " " ++ note}]} <> WM.pins(t)
+    case P.PRow{_, +id, action, value, title, note, machine, +state, _, _} <> t:
+      D.El{"button", "mail-pin:" ++ id, [D.At{"class", "mail-pin " ++ state}, D.At{"data-value", value}, D.On{"click", action}], [D.Txt{WM.pin.text(P.Plane.why(I.En{}, state), title, state, machine, note)}]} <> WM.pins(t)
 
 def WM.bots(rs: List<&2, P.PRow>, +u: U.Ui) -> List<&2, D.Node>:
   match rs:
@@ -153,10 +159,15 @@ def WM.running_if(open: Bool, rs: List<&2, P.PRow>) -> List<&2, D.Node>:
     case True{}: WM.pins(rs)
     case False{}: Nil{}
 
+# every row that needs the person, whatever bot or machine the mail shows:
+# the same rows the uberbot's count counts, asks told from failed runs
+def WM.need.words(+need: List<&2, P.PRow>) -> String:
+  Bool.pick(String, List.is_empty(&2, P.PRow, need), "0", P.Plane.counts.of(I.En{}, List.length(&2, P.PRow, need), P.Plane.failed(need), 0n))
+
 def WM.attention(+p: P.Plane, +u: U.Ui) -> D.Node:
-  +need = WM.for_bot(P.Plane.need(p), u)
+  +need = P.Plane.need(p)
   +running = List.append(&2, P.PRow, WM.for_bot(WM.running(p), u), WM.live_runs(Map.values(&2, ML.Run, ML.Box.runs(M.State.mail(U.Ui.state(u)))), u, WM.running(p)))
-  D.Dom.div("mail-pins", List.concat(&2, D.Node, [[D.Dom.span("mail-meta", "Needs you · " ++ Nat.show(List.length(&2, P.PRow, need)))], WM.pins(need),
+  D.Dom.div("mail-pins", List.concat(&2, D.Node, [[D.Dom.span("mail-meta", "Needs you · " ++ WM.need.words(need))], WM.pins(need),
     [D.Dom.button("chip", "mail-run", "", "Show running work", Nat.show(List.length(&2, P.PRow, running)) ++ " running · " ++ Nat.show(List.length(&2, P.PRow, P.Plane.locks(p))) ++ " locks")],
     WM.running_if(U.Mailv.run_open(u), running), WM.pins(WM.for_bot(WM.secondary(U.Ui.scratch(u, "@mr.status"), p), u))]))
 

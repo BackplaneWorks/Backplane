@@ -8816,6 +8816,12 @@ def Laws.plane_list_same():
 def Laws.plane_list_same_rich():
   {==}
 
+def Laws.plane_launch_once():
+  {==}
+
+def Laws.plane_counts_split():
+  {==}
+
 def Laws.launch_reports_turn_end():
   {==}
 

@@ -7152,6 +7152,16 @@ law plane_list_same:
 law plane_list_same_rich:
   {PLN.Plane.list.same(PLN.Plane.demo.rich(), 200000n) == True{} : Bool}
 
+# A blocked bit a launcher only inherits is not counted again: the launched
+# thread that failed is its own row, and the launcher's child task asking a
+# question shows at the launcher as a question, never as an approval
+law plane_launch_once:
+  {PLN.Plane.need.states(PLN.Plane.demo.launch(), 200000n) == "l=question,f=failed" : String}
+
+# the count words tell asks from failed runs
+law plane_counts_split:
+  {PLN.Plane.counts.of(I18.En{}, 3n, 2n, 1n) == "1 need you · 2 failed · 1 running" : String}
+
 # Launched threads report back (hub.bend's Launch.tell, Lr.*)
 # ----------------------------------------------------------
 

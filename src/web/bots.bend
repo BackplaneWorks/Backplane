@@ -937,11 +937,12 @@ def WB.body(+lc: I.Loc, +u: U.Ui, +b: BT.Bot, +tab: String) -> D.Node:
 # --------------------------
 
 # its sidebar row, pinned above the search: its cat, its name and what
-# waits on the person (Plane.counts); a click does action "uber"
+# waits on the person (Plane.counts); a click, or Enter/Space on it (a
+# button, so Tab reaches it), does action "uber", which opens the rows
 def WB.uber.k(+lc: I.Loc, r: BI.BRow, +counts: String) -> D.Node:
   match r:
     case BI.BRow{+id, +name, _, +look, +mood, _, sel, _, _, _}:
-      D.El{"div", "uber:" ++ id, [D.At{"class", Bool.pick(String, sel, "bot-row uber-row on", "bot-row uber-row")}, D.At{"title", id}, D.At{"data-value", id}, D.On{"click", "uber"}],
+      D.El{"button", "uber:" ++ id, [D.At{"type", "button"}, D.At{"class", Bool.pick(String, sel, "bot-row uber-row on", "bot-row uber-row")}, D.At{"title", id}, D.At{"aria-label", name ++ Bool.pick(String, String.is_empty(counts), "", ": " ++ counts)}, D.At{"data-value", id}, D.On{"click", "uber"}],
         [WC.WCat.img(look, mood, 28), WB.div("bot-text", [D.Dom.span("bot-name", name), D.Dom.span("uber-counts", Bool.pick(String, String.is_empty(counts), BI.Mood.note.loc(lc, mood), counts))])]}
 
 # (the counts are Plane.tally.words with the sidebar's index, made once a
@@ -1000,7 +1001,8 @@ def WB.prow(+lc: I.Loc, r: PL.PRow, +now: Nat) -> D.Node:
   match r:
     case PL.PRow{+kind, +id, +act, +val, +title, +sub, +machine, +state, +at, away}:
       D.El{"button", kind ++ ":" ++ id, [D.At{"class", Bool.pick(String, away, "plane-row away", "plane-row")}, D.At{"title", title}, D.At{"data-value", val}, D.On{"click", act}],
-        [WB.pmark.loc(lc, state), D.Dom.span("title", PL.Plane.title.shown(lc, kind, title)), D.Dom.span("sub", sub), D.Dom.span("mach", machine), D.Dom.span("ago", WB.pago.loc(lc, kind, now, at))]}
+        List.concat(&2, D.Node, [[WB.pmark.loc(lc, state)], D.Dom.when(Bool.not(String.is_empty(PL.Plane.why(lc, state))), D.Dom.span("why " ++ state, PL.Plane.why(lc, state))),
+          [D.Dom.span("title", PL.Plane.title.shown(lc, kind, title)), D.Dom.span("sub", sub), D.Dom.span("mach", machine), D.Dom.span("ago", WB.pago.loc(lc, kind, now, at))]])}
 
 def WB.prows(+lc: I.Loc, rs: List<&2, PL.PRow>, +now: Nat) -> List<&2, D.Node>:
   match rs:
