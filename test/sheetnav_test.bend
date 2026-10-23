@@ -55,7 +55,12 @@ def sheets(+u: U.Ui) -> J.Json:
   J.Json.obj([J.KV{"t", J.Str{"sheets"}}, J.KV{"root", J.Str{U.Ui.root(u)}}, J.KV{"rows", J.Str{H.Hier.show(rows())}}, J.KV{"boxes", J.Str{boxes()}}])
 
 def tree.json(+u: U.Ui, +rs: List<&2, H.Row>, +slot: String, +gen: String) -> J.Json:
-  J.Json.obj([J.KV{"t", J.Str{"sheets"}}, J.KV{"root", J.Str{U.Ui.root(u)}}, J.KV{"slot", J.Str{slot}}, J.KV{"gen", J.Num{gen}},
+  tree.at(U.Ui.root(u), rs, slot, gen)
+
+# a reply as the plot actor sends it for a root (gen: its start second times
+# 2^32 plus its message count, server/plot.bend's Pv.tree.gen)
+def tree.at(+root: String, +rs: List<&2, H.Row>, +slot: String, +gen: String) -> J.Json:
+  J.Json.obj([J.KV{"t", J.Str{"sheets"}}, J.KV{"root", J.Str{root}}, J.KV{"slot", J.Str{slot}}, J.KV{"gen", J.Str{gen}},
     J.KV{"rows", J.Str{H.Hier.show(rs)}}, J.KV{"boxes", J.Str{boxes()}}, J.KV{"ids", J.Str{ids()}}, J.KV{"top", J.Str{top()}}])
 
 # thread a with uuids known (generation 5)
@@ -167,6 +172,15 @@ def main() -> IO(Unit):
   +kren = U.Sch.got(kch2, tree.json(kch2, renamed(), "", "6"))
   +kstale = U.Sch.got(kren, tree.json(kren, rows(), "", "4"))
   +kver = U.Sch.got(kren, tree.json(kren, rows(), "/g\tc1", "9"))
+  # two watches in one second (actor started at second 1000: messages 7
+  # and 8), their replies delivered in reverse order, then in order
+  +s1 = U.Sch.got(on(U.Ui.init(0n), "a"), tree.json(on(U.Ui.init(0n), "a"), renamed(), "", "4294967296008"))
+  +s2 = U.Sch.got(s1, tree.json(s1, rows(), "", "4294967296007"))
+  +s3 = U.Sch.got(U.Sch.got(on(U.Ui.init(0n), "a"), tree.json(on(U.Ui.init(0n), "a"), rows(), "", "4294967296007")), tree.json(on(U.Ui.init(0n), "a"), renamed(), "", "4294967296008"))
+  # a restarted actor (second 1001, message 0) after the first one's message 8
+  +s4 = U.Sch.got(s1, tree.json(s1, rows(), "", "4299262263296"))
+  # another project's tree on the same client
+  +s5 = U.Sch.got(act(s1, "sch-go", "4\t/Chan2/\t/U3/"), tree.at("/elsewhere", rows(), "", "4294967296009"))
   +other = U.Ui.recv(amp2, json("{\"t\":\"view\",\"thread\":\"a\",\"path\":\"/q/other.kicad_sch\",\"kind\":\"schematic\"}"))
   do IO<Unit>:
     C.Check.str("places", Show.strs(H.Hier.paths(rs)), "/ /Power/ /Ch1/ /Ch1/Amp/ /Ch2/ /Ch2/Amp/")
@@ -223,3 +237,11 @@ def main() -> IO(Unit):
     C.Check.str("and the sheet on show stays", at(kstale), "4")
     C.Check.str("a version's tree is kept apart", rowtext(kver), H.Hier.show(renamed()))
     C.Check.str("its generation is its own", U.Ui.info(kver, "sheetgen:" ++ U.Ui.root(kver)) ++ "|" ++ U.Ui.info(kver, "sheetgen:" ++ U.Ui.root(kver) ++ "\t/g\tc1"), "6|9")
+    C.Check.str("same second, reversed: the later request's reply stays", rowtext(s2), H.Hier.show(renamed()))
+    C.Check.str("same second, reversed: its generation stays", U.Ui.info(s2, "sheetgen:" ++ U.Ui.root(s2)), "4294967296008")
+    C.Check.str("same second, in order: the later is taken", rowtext(s3), H.Hier.show(renamed()))
+    C.Check.str("a restarted actor's reply is newer", rowtext(s4), H.Hier.show(rows()))
+    C.Check.str("a same reply again changes nothing", rowtext(U.Sch.got(s1, tree.json(s1, rows(), "", "4294967296008"))), H.Hier.show(renamed()))
+    C.Check.str("another root's tree leaves this one", rowtext(s5) ++ "|" ++ at(s5), H.Hier.show(renamed()) ++ "|4")
+    C.Check.str("and is kept under its own root", U.Ui.info(s5, "sheetgen:/elsewhere"), "4294967296009")
+    C.Check.str("a thread switch reads its own instance of the same tree", at(on(s5, "b")) ++ "|" ++ at(on(on(s5, "b"), "a")), "0|4")
