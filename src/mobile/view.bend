@@ -477,11 +477,15 @@ def View.sheets(+u: U.Ui, +o: J.Json) -> U.Ui:
 def View.note(+u: U.Ui) -> String:
   Bool.pick(String, String.eq(U.Ui.scratch(u, "@view.note.key"), View.want(u)), U.Ui.scratch(u, "@view.note"), "")
 
+# (a phone the hub renders for gets them folded into its Ui's info by the
+# thin actor, as the web does: client.bend's Sch.got)
 def View.rows(+u: U.Ui) -> List<&2, HI.Row>:
-  Bool.pick(List<&2, HI.Row>, String.eq(U.Ui.scratch(u, "@view.tree.root"), U.Ui.root(u)), HI.Hier.read(U.Ui.scratch(u, "@view.tree")), Nil{})
+  Bool.pick(List<&2, HI.Row>, String.eq(U.Ui.scratch(u, "@view.tree.root"), U.Ui.root(u)), HI.Hier.read(U.Ui.scratch(u, "@view.tree")), U.Sch.rows(u))
 
+# (the row is kept beside the file, "@view.sheet.i:<t>", so a file used by
+# two sheet instances lights the one picked)
 def View.sheet.go(+u: U.Ui, +i: Nat, +file: String) -> U.Act:
-  View.sync(U.Act{Pick.clear(U.Ui.scratch_set(u, "@view.sheet:" ++ U.Ui.sel(u), Bool.pick(String, Nat.is_eq(i, 0n), "", file))), Nil{}})
+  View.sync(U.Act{Pick.clear(U.Ui.scratch_set(U.Ui.scratch_set(u, "@view.sheet:" ++ U.Ui.sel(u), Bool.pick(String, Nat.is_eq(i, 0n), "", file)), "@view.sheet.i:" ++ U.Ui.sel(u), Nat.show(i))), Nil{}})
 
 def View.sheet.pick.u(+u: U.Ui, +v: String) -> U.Act:
   View.sheet.go(u, Maybe.default(&2, Nat, Nat.read(v), 0n), HI.Hier.file(View.rows(u), Maybe.default(&2, Nat, Nat.read(v), 0n)))
@@ -522,17 +526,25 @@ def View.board.pick(+u: U.Ui, +rel: String) -> U.Act:
 def View.sheet.pick(+u: U.Ui, +v: String) -> U.Act:
   Bool.pick(U.Act, String.starts_with(v, "b:"), View.board.pick(u, String.drop(v, 2n)), View.sheet.pick.s(u, v))
 
-def View.sheet.row(r: HI.Row, +i: Nat, +cur: String) -> J.Json:
+def View.sheet.row(r: HI.Row, +i: Nat, +at: Nat) -> J.Json:
   match r:
-    case HI.Row{+d, n, +f, l}:
-      J.Json.obj([J.KV{"label", J.Str{String.repeat("  ", d) ++ n}}, J.KV{"value", J.Str{Nat.show(i)}}, J.KV{"on", J.Flag{String.eq(f, cur)}}, J.KV{"loop", J.Flag{l}}])
+    case HI.Row{+d, n, _, l}:
+      J.Json.obj([J.KV{"label", J.Str{String.repeat("  ", d) ++ n}}, J.KV{"value", J.Str{Nat.show(i)}}, J.KV{"on", J.Flag{Nat.is_eq(i, at)}}, J.KV{"loop", J.Flag{l}}])
 
-def View.sheet.rows(rs: List<&2, HI.Row>, +i: Nat, +cur: String) -> List<&2, J.Json>:
+def View.sheet.rows(rs: List<&2, HI.Row>, +i: Nat, +at: Nat) -> List<&2, J.Json>:
   match rs:
     case Nil{}:
       Nil{}
     case r <> t:
-      View.sheet.row(r, i, cur) <> View.sheet.rows(t, 1n+i, cur)
+      View.sheet.row(r, i, at) <> View.sheet.rows(t, 1n+i, at)
+
+# the row on show: the one picked while it shows the file on show, else
+# the first row of that file (the root when none)
+def View.sheet.i(+u: U.Ui) -> Nat:
+  Maybe.default(&2, Nat, Nat.read(U.Ui.scratch(u, "@view.sheet.i:" ++ U.Ui.sel(u))), 0n)
+
+def View.sheet.at(+u: U.Ui, +rs: List<&2, HI.Row>, +cur: String) -> Nat:
+  Bool.pick(Nat, String.eq(HI.Hier.file(rs, View.sheet.i(u)), cur), View.sheet.i(u), HI.Hier.at(rs, 0n, cur))
 
 # the project's boards for the same menu, when it has several
 def View.board.rows(fs: List<&2, String>, +cur: String) -> List<&2, J.Json>:
@@ -549,7 +561,7 @@ def View.board.list(+u: U.Ui) -> List<&2, J.Json>:
 # the schematic's sheets for the phone's Sheet menu (none with one sheet)
 def View.sheet.list(+u: U.Ui) -> List<&2, J.Json>:
   Bool.pick(List<&2, J.Json>, Bool.and(String.eq(View.kind(u), "schematic"), Nat.is_gt(List.length(&2, HI.Row, View.rows(u)), 1n)),
-    View.sheet.rows(View.rows(u), 0n, Bool.pick(String, String.is_empty(View.sheet(u)), HI.Hier.file(View.rows(u), 0n), View.sheet(u))), Nil{})
+    View.sheet.rows(View.rows(u), 0n, View.sheet.at(u, View.rows(u), Bool.pick(String, String.is_empty(View.sheet(u)), HI.Hier.file(View.rows(u), 0n), View.sheet(u)))), Nil{})
 
 # the 3D model with its parts or the board alone ("view-parts")
 def View.parts(+u: U.Ui) -> U.Act:

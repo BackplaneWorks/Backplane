@@ -2606,10 +2606,139 @@ def View.boards(+u: U.Ui, +what: String) -> List<&2, D.Node>:
 def View.sheet.chips(rs: List<&2, HI.Row>, +i: Nat, +cur: String) -> List<&2, D.Node>:
   View.sheet.chips.loc(I.En{}, rs, i, cur)
 
-def View.sheets.loc(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
+# The schematic's sheet navigation (client.bend's Sch), by instance: in
+# the bar Back, Forward, Up and Top, the hierarchy's toggle, the trail from
+# the top sheet to the one on show and where it sits; under the bar why a
+# sheet asked for is not there, the hierarchy (a branch folds; the path to
+# the sheet on show stays open) and the sheets inside the one on show.
+# Every control is a button (keyboard and touch alike, nothing on hover
+# only); a click on a sheet symbol on the canvas opens it too (plot2d.js,
+# the canvas's data-sheets).
+def View.sch.label(+lc: I.Loc, +i: Nat, +name: String) -> String:
+  Bool.pick(String, Nat.is_eq(i, 0n), MSG.T.viewer.sheet.top(lc), name)
 
-  Bool.pick(List<&2, D.Node>, Nat.is_gt(List.length(&2, HI.Row, HI.Hier.read(U.Ui.info(u, "sheets:" ++ U.Ui.root(u)))), 1n),
-    View.sheet.chips.loc(lc, HI.Hier.read(U.Ui.info(u, "sheets:" ++ U.Ui.root(u))), 0n, U.Ui.view_get(u, "view.path")), [D.Dom.span("what", MSG.T.viewer.schematic.tip(lc))])
+def View.sch.off(on: Bool) -> List<&2, D.Attr>:
+  match on:
+    case True{}:
+      Nil{}
+    case False{}:
+      [D.At{"disabled", "disabled"}, D.At{"aria-disabled", "true"}]
+
+def View.sch.btn(+key: String, on: Bool, +title: String, +label: String) -> D.Node:
+  D.El{"button", key, List.append(&2, D.Attr, [D.At{"class", "sch-btn"}, D.At{"title", title}, D.At{"aria-label", title}, D.At{"data-value", ""}, D.On{"click", key}], View.sch.off(on)), [D.Txt{label}]}
+
+def View.sch.toggle(+lc: I.Loc, +on: Bool) -> D.Node:
+  D.El{"button", "sch-tree", [D.At{"class", "sch-btn" ++ Bool.pick(String, on, " on", "")}, D.At{"title", MSG.T.viewer.sch.tree.tip(lc)},
+    D.At{"aria-pressed", Bool.pick(String, on, "true", "false")}, D.At{"aria-controls", "sch-tree"}, D.At{"data-value", ""}, D.On{"click", "sch-tree"}], [D.Txt{MSG.T.viewer.sch.tree(lc)}]}
+
+def View.sch.current(+st: Nat) -> String:
+  Bool.pick(String, Nat.is_eq(st, 2n), "page", "false")
+
+def View.sch.crumbs(+lc: I.Loc, rs: List<&2, U.SchRow>) -> List<&2, D.Node>:
+  match rs:
+    case Nil{}:
+      Nil{}
+    case U.SchRow{+i, _, +n, +v, +st, _, _, _} <> t:
+      D.El{"button", "", [D.At{"class", "sch-crumb" ++ Bool.pick(String, Nat.is_eq(st, 2n), " on", "")}, D.At{"title", HS.Hist.field(v, 1n)},
+        D.At{"aria-current", View.sch.current(st)}, D.At{"data-value", v}, D.On{"click", "sch-go"}], [D.Txt{View.sch.label(lc, i, n)}]}
+        <> View.sch.crumbs(lc, t)
+
+def View.sch.pos(+lc: I.Loc, out: Bool, +at: Nat, +count: Nat) -> String:
+  match out:
+    case True{}:
+      MSG.T.viewer.sch.outside(lc)
+    case False{}:
+      MSG.T.viewer.sch.position(lc, Nat.show(1n+at), Nat.show(count))
+
+def View.sch.bar(+lc: I.Loc, v: U.SchView) -> List<&2, D.Node>:
+  match v:
+    case U.SchView{_, trail, _, +at, count, _, back, fwd, out, tree, _, _}:
+      [View.sch.btn("sch-back", back, MSG.T.viewer.sch.back.tip(lc), "‹ " ++ MSG.T.viewer.sch.back(lc)),
+       View.sch.btn("sch-fwd", fwd, MSG.T.viewer.sch.forward.tip(lc), MSG.T.viewer.sch.forward(lc) ++ " ›"),
+       View.sch.btn("sch-up", Bool.not(Nat.is_eq(at, 0n)), MSG.T.viewer.sch.up.tip(lc), "↑ " ++ MSG.T.viewer.sch.up(lc)),
+       View.sch.btn("sch-root", Bool.not(Nat.is_eq(at, 0n)), MSG.T.viewer.sch.root.tip(lc), MSG.T.viewer.sheet.top(lc)),
+       View.sch.toggle(lc, tree),
+       D.El{"nav", "", [D.At{"class", "sch-trail"}, D.At{"aria-label", MSG.T.viewer.sch.trail(lc)}], View.sch.crumbs(lc, trail)},
+       D.El{"span", "", [D.At{"class", "sch-pos"}, D.At{"role", "status"}], [D.Txt{View.sch.pos(lc, out, at, count)}]}]
+
+def View.sch.cls(+st: Nat) -> String:
+  Bool.pick(String, Nat.is_eq(st, 2n), " on", Bool.pick(String, Nat.is_eq(st, 1n), " above", ""))
+
+def View.sch.fold(kids: Bool, +lc: I.Loc, +open: Bool, +name: String, +place: String) -> D.Node:
+  match kids:
+    case True{}:
+      D.El{"button", "", [D.At{"class", "sch-fold"}, D.At{"title", Bool.pick(String, open, MSG.T.viewer.sch.fold(lc, name), MSG.T.viewer.sch.unfold(lc, name))},
+        D.At{"aria-label", Bool.pick(String, open, MSG.T.viewer.sch.fold(lc, name), MSG.T.viewer.sch.unfold(lc, name))}, D.At{"aria-expanded", Bool.pick(String, open, "true", "false")},
+        D.At{"data-value", place}, D.On{"click", "sch-fold"}], [D.Txt{Bool.pick(String, open, "▾", "▸")}]}
+    case False{}:
+      D.El{"span", "", [D.At{"class", "sch-fold none"}, D.At{"aria-hidden", "true"}], Nil{}}
+
+def View.sch.rows(+lc: I.Loc, rs: List<&2, U.SchRow>) -> List<&2, D.Node>:
+  match rs:
+    case Nil{}:
+      Nil{}
+    case U.SchRow{+i, +d, +n, +v, +st, kids, open, l} <> t:
+      D.El{"div", "", [D.At{"class", "sch-row" ++ View.sch.cls(st)}, D.At{"style", "--d:" ++ Nat.show(d)}],
+        [View.sch.fold(kids, lc, open, View.sch.label(lc, i, n), HS.Hist.field(v, 1n)),
+         D.El{"button", "", [D.At{"class", "sch-name"}, D.At{"title", HS.Hist.field(v, 1n)}, D.At{"aria-current", View.sch.current(st)}, D.At{"data-value", v}, D.On{"click", "sch-go"}],
+           [D.Txt{MSG.T.viewer.sheet.title(lc, View.sch.label(lc, i, n), Bool.pick(String, l, "loop", ""))}]}]}
+        <> View.sch.rows(lc, t)
+
+def View.sch.here(+lc: I.Loc, rs: List<&2, U.SchRow>) -> List<&2, D.Node>:
+  match rs:
+    case Nil{}:
+      Nil{}
+    case U.SchRow{_, _, +n, +v, _, _, _, l} <> t:
+      D.El{"button", "", [D.At{"class", "sch-kid"}, D.At{"title", HS.Hist.field(v, 1n)}, D.At{"data-value", v}, D.On{"click", "sch-go"}],
+        [D.Txt{MSG.T.viewer.sheet.title(lc, n, Bool.pick(String, l, "loop", ""))}]} <> View.sch.here(lc, t)
+
+def View.sch.say(+lc: I.Loc, +out: Bool, +note: String) -> List<&2, D.Node>:
+  Bool.pick(List<&2, D.Node>, String.eq(note, "gone"), [D.El{"div", "", [D.At{"class", "sch-say"}, D.At{"role", "status"}], [D.Txt{MSG.T.viewer.sch.gone(lc)}]}],
+    D.Dom.when(out, D.El{"div", "", [D.At{"class", "sch-say"}, D.At{"role", "status"}], [D.Txt{MSG.T.viewer.sch.outside(lc)}]}))
+
+def View.sch.tree(+lc: I.Loc, on: Bool, rows: List<&2, U.SchRow>, +here: List<&2, U.SchRow>) -> List<&2, D.Node>:
+  match on:
+    case True{}:
+      [D.El{"div", "sch-panel", [D.At{"class", "sch-panel"}, D.At{"id", "sch-tree"}],
+        D.El{"div", "", [D.At{"class", "sch-tree"}, D.At{"aria-label", MSG.T.viewer.sch.tree(lc)}], View.sch.rows(lc, rows)}
+        <> D.Dom.when(Nat.is_gt(List.length(&2, U.SchRow, here), 0n),
+          D.El{"div", "", [D.At{"class", "sch-here"}, D.At{"aria-label", MSG.T.viewer.sch.inside(lc)}], D.Dom.span("sch-here-head", MSG.T.viewer.sch.inside(lc)) <> View.sch.here(lc, here)})}]
+    case False{}:
+      Nil{}
+
+def View.sch.panel(+lc: I.Loc, v: U.SchView) -> List<&2, D.Node>:
+  match v:
+    case U.SchView{rows, _, here, _, _, _, _, _, +out, tree, _, note}:
+      List.append(&2, D.Node, View.sch.say(lc, out, note), View.sch.tree(lc, tree, rows, here))
+
+def View.sch.below.k(many: Bool, +lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
+  match many:
+    case True{}:
+      View.sch.panel(lc, U.Sch.view(u))
+    case False{}:
+      Nil{}
+
+# what goes under the bar of a schematic with several sheets
+def View.sch.below(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
+  View.sch.below.k(U.Sch.many(u), lc, u)
+
+# nodes put right after the first (the viewer's bar)
+def View.sch.after(nodes: List<&2, D.Node>, extra: List<&2, D.Node>) -> List<&2, D.Node>:
+  match nodes:
+    case Nil{}:
+      extra
+    case h <> t:
+      h <> List.append(&2, D.Node, extra, t)
+
+def View.sheets.k(many: Bool, +lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
+  match many:
+    case True{}:
+      View.sch.bar(lc, U.Sch.view(u))
+    case False{}:
+      [D.Dom.span("what", MSG.T.viewer.schematic.tip(lc))]
+
+def View.sheets.loc(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
+  View.sheets.k(U.Sch.many(u), lc, u)
 
 # the Layers menu (core/layers.bend): each layer shown by default, in
 # KiCad's order (plot2d.js hides those the file has nothing on), a row of
@@ -2956,7 +3085,7 @@ def View.plot(+lc: I.Loc, +u: U.Ui, +what: List<&2, D.Node>) -> List<&2, D.Node>
    <> D.El{"div", "", [D.At{"class", "viewer-stage"}], D.El{"canvas", "plot", [D.At{"id", "plot"}, D.At{"data-key", U.Solid.want(u)},
         D.At{"data-off", U32.show(LY.Masks.off(LY.Lyr.masks(U.Lfocus.kind(u), U.Solid.off(u), U.Lfocus.of(u))))},
         D.At{"data-dim", U32.show(LY.Masks.dim(LY.Lyr.masks(U.Lfocus.kind(u), U.Solid.off(u), U.Lfocus.of(u))))}, D.At{"data-lift", U32.show(LY.Lyr.top(U.Lfocus.of(u)))},
-        D.At{"data-fade", Nat.show(U.Hs.fade())}, D.At{"data-fam", HS.Hist.key.family(U.Solid.want(u))}], Nil{}} <> (View.hist.menu(lc, u) <> View.rc.loc(lc, u))}
+        D.At{"data-fade", Nat.show(U.Hs.fade())}, D.At{"data-fam", HS.Hist.key.family(U.Solid.want(u))}, D.At{"data-sheets", U.Sch.boxes(u)}], Nil{}} <> (View.hist.menu(lc, u) <> View.rc.loc(lc, u))}
    <> View.hist(lc, U.Hs.bar.loc(lc, u), u)
 
 # over a part in 3D: the thread's parts and Renders; the board: its name
@@ -3138,7 +3267,8 @@ def View.aside.k(+lc: I.Loc, i: Nat, +u: U.Ui) -> List<&2, D.Node>:
     case 3n:
       View.solid.loc(lc, u)
     case 4n:
-      View.plot(lc, u, List.append(&2, D.Node, Bool.pick(List<&2, D.Node>, U.Bd.many(u), View.board.chips(U.Bd.files(u), U.Bd.shown(u, U.Ui.view_get(u, "view.path"))), Nil{}), List.append(&2, D.Node, View.sheets.loc(lc, u), [View.kicad.loc(lc)])))
+      View.sch.after(View.plot(lc, u, List.append(&2, D.Node, Bool.pick(List<&2, D.Node>, U.Bd.many(u), View.board.chips(U.Bd.files(u), U.Bd.shown(u, U.Ui.view_get(u, "view.path"))), Nil{}), List.append(&2, D.Node, View.sheets.loc(lc, u), [View.kicad.loc(lc)]))),
+        View.sch.below(lc, u))
 
     case 6n:
       View.files(lc, u)

@@ -308,3 +308,151 @@ def Hier.kids.sheets(k: Kids) -> List<&2, Sheet>:
   match k:
     case Kids{_, ss}:
       ss
+
+# Instances
+# ---------
+# A row's place, as KiCad names a sheet instance: the sheet names from the
+# root down, "/" for the root, "/Power/LDO/" under it. A file used twice
+# is two rows with two places, so the viewer keeps the instance, never
+# only the file. (KiCad keeps a sheet's name unique under its parent; two
+# siblings with one name are told apart by their row.)
+
+type PAt is Data:
+  PAt{depth: Nat, path: String}
+
+def Hier.ppop(st: List<&2, PAt>, +d: Nat) -> List<&2, PAt>:
+  match st:
+    case Nil{}:
+      Nil{}
+    case PAt{+e, +q} <> +t:
+      Bool.pick(List<&2, PAt>, Nat.is_ge(e, d), Hier.ppop(t, d), PAt{e, q} <> t)
+
+def Hier.ptop(st: List<&2, PAt>) -> String:
+  match st:
+    case Nil{}:
+      "/"
+    case PAt{_, q} <> _:
+      q
+
+def Hier.place(+st: List<&2, PAt>, +d: Nat, +n: String) -> String:
+  Bool.pick(String, Nat.is_eq(d, 0n), "/", Hier.ptop(Hier.ppop(st, d)) ++ n ++ "/")
+
+def Hier.paths.go(rs: List<&2, Row>, +st: List<&2, PAt>) -> List<&2, String>:
+  match rs:
+    case Nil{}:
+      Nil{}
+    case Row{+d, +n, _, _} <> t:
+      Hier.place(st, d, n) <> Hier.paths.go(t, PAt{d, Hier.place(st, d, n)} <> Hier.ppop(st, d))
+
+# every row's place, in row order
+def Hier.paths(rs: List<&2, Row>) -> List<&2, String>:
+  Hier.paths.go(rs, Nil{})
+
+# row i's place ("" when there is no row i)
+def Hier.path(+rs: List<&2, Row>, +i: Nat) -> String:
+  Maybe.default(&2, String, List.head(&2, String, List.drop(&2, String, Hier.paths(rs), i)), "")
+
+def Hier.seek.k(hit: Bool, +j: Nat, rest: Maybe<&2, Nat>) -> Maybe<&2, Nat>:
+  match hit:
+    case True{}:
+      Some{j}
+    case False{}:
+      rest
+
+def Hier.seek.go(ps: List<&2, String>, +j: Nat, +p: String) -> Maybe<&2, Nat>:
+  match ps:
+    case Nil{}:
+      None{}
+    case q <> t:
+      Hier.seek.k(String.eq(q, p), j, Hier.seek.go(t, 1n+j, p))
+
+# the first row at a place
+def Hier.seek(+rs: List<&2, Row>, +p: String) -> Maybe<&2, Nat>:
+  Hier.seek.go(Hier.paths(rs), 0n, p)
+
+def Hier.under.kid(kid: Bool, +j: Nat, rest: List<&2, Nat>) -> List<&2, Nat>:
+  match kid:
+    case True{}:
+      j <> rest
+    case False{}:
+      rest
+
+def Hier.under.k(stop: Bool, kid: Bool, +j: Nat, rest: List<&2, Nat>) -> List<&2, Nat>:
+  match stop:
+    case True{}:
+      Nil{}
+    case False{}:
+      Hier.under.kid(kid, j, rest)
+
+def Hier.under.go(rs: List<&2, Row>, +j: Nat, +d: Nat) -> List<&2, Nat>:
+  match rs:
+    case Nil{}:
+      Nil{}
+    case Row{+e, _, _, _} <> t:
+      Hier.under.k(Nat.is_le(e, d), Nat.is_eq(e, 1n+d), j, Hier.under.go(t, 1n+j, d))
+
+# the rows directly under row i, in the order its file lists their sheets
+# (a row that loops back has none)
+def Hier.under(+rs: List<&2, Row>, +i: Nat) -> List<&2, Nat>:
+  Hier.under.go(List.drop(&2, Row, rs, 1n+i), 1n+i, Hier.depth(rs, i))
+
+# Sheet boxes
+# -----------
+# Where each child sheet sits on its parent ("x0 y0 x1 y1", mm on the
+# parent, as the plot's coordinates are), so a click on a sheet symbol
+# opens that instance: the k-th row under a row is the k-th box of its
+# file, both in the file's order of sheet forms.
+
+def Hier.box.at(+at: S.Sx, +sz: S.Sx) -> String:
+  F32.show(S.Sx.f(at, 0n)) ++ " " ++ F32.show(S.Sx.f(at, 1n)) ++ " " ++ F32.show(F32.add(S.Sx.f(at, 0n), S.Sx.f(sz, 0n))) ++ " " ++ F32.show(F32.add(S.Sx.f(at, 1n), S.Sx.f(sz, 1n)))
+
+def Hier.box(+x: S.Sx) -> String:
+  Hier.box.at(S.Sx.get(x, "at"), S.Sx.get(x, "size"))
+
+def Hier.box.k(hit: Bool, +bs: List<&2, U32>, rest: List<&2, String>) -> List<&2, String>:
+  match hit:
+    case True{}:
+      Hier.box(S.Sx.parse(bs)) <> rest
+    case False{}:
+      rest
+
+def Hier.boxes.go(fs: List<&2, List<&2, U32>>) -> List<&2, String>:
+  match fs:
+    case Nil{}:
+      Nil{}
+    case +f <> t:
+      Hier.box.k(String.eq(SC.Sch.head(f), "sheet"), f, Hier.boxes.go(t))
+
+def Hier.boxes.k(m: Maybe<&2, List<&2, List<&2, U32>>>) -> List<&2, String>:
+  match m:
+    case Some{fs}:
+      Hier.boxes.go(fs)
+    case None{}:
+      Nil{}
+
+# the boxes of the child sheets a file lists, in its order
+def Hier.boxes(bs: List<&2, U32>) -> List<&2, String>:
+  Hier.boxes.k(S.Sx.forms(bs))
+
+# a file's line: its key (the live file, core/hist.bend's family, which has
+# no tabs), then each box, split by tabs
+def Hier.boxes.line(+key: String, bs: List<&2, U32>) -> String:
+  String.join(key <> Hier.boxes(bs), "\t")
+
+def Hier.boxes.pick(hit: Bool, +l: String, rest: List<&2, String>) -> List<&2, String>:
+  match hit:
+    case True{}:
+      List.drop(&2, String, String.split(l, '\t'), 1n)
+    case False{}:
+      rest
+
+def Hier.boxes.find(ls: List<&2, String>, +key: String) -> List<&2, String>:
+  match ls:
+    case Nil{}:
+      Nil{}
+    case +l <> t:
+      Hier.boxes.pick(String.starts_with(l, key ++ "\t"), l, Hier.boxes.find(t, key))
+
+# the boxes the lines name for a file's key, in its order
+def Hier.boxes.of(+text: String, +key: String) -> List<&2, String>:
+  Hier.boxes.find(String.split(text, '\n'), key)

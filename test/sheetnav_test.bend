@@ -1,0 +1,171 @@
+import Base
+import ./check.bend as C
+import ../src/core/hier.bend as H
+import ../src/core/client.bend as U
+import ../src/core/json.bend as J
+import ../src/core/utf8.bend as T
+
+# Hierarchical schematic navigation by sheet instance (client.bend's Sch,
+# hier.bend's places, boxes and children). Synthetic, read-only fixtures:
+# /p/top has Power and two instances of one file, chan (Ch1, Ch2), each
+# holding Amp; so chan and amp are each two instances.
+
+def tab() -> List<&2, H.Kids>:
+  [H.Kids{"/p/top.kicad_sch", [H.Sheet{"Power", "/p/power.kicad_sch"}, H.Sheet{"Ch1", "/p/chan.kicad_sch"}, H.Sheet{"Ch2", "/p/chan.kicad_sch"}]},
+   H.Kids{"/p/chan.kicad_sch", [H.Sheet{"Amp", "/p/amp.kicad_sch"}]}]
+
+def rows() -> List<&2, H.Row>:
+  H.Hier.rows(tab(), "/p/top.kicad_sch")
+
+def boxes() -> String:
+  "/p/top.kicad_sch\t1 1 2 2\t3 3 4 4\t5 5 6 6\n/p/chan.kicad_sch\t7 7 8 8"
+
+def ui(a: U.Act) -> U.Ui:
+  match a:
+    case U.Act{u, _}:
+      u
+
+def json(+s: String) -> J.Json:
+  Maybe.default(&2, J.Json, J.Json.parse(s), J.Null{})
+
+def on(u: U.Ui, +id: String) -> U.Ui:
+  ui(U.Ui.act(u, "select", id))
+
+def act(u: U.Ui, +a: String, +v: String) -> U.Ui:
+  ui(U.Ui.act(u, a, v))
+
+def sheets(+u: U.Ui) -> J.Json:
+  J.Json.obj([J.KV{"t", J.Str{"sheets"}}, J.KV{"root", J.Str{U.Ui.root(u)}}, J.KV{"rows", J.Str{H.Hier.show(rows())}}, J.KV{"boxes", J.Str{boxes()}}])
+
+# thread a, its project's sheets known
+def start() -> U.Ui:
+  U.Sch.got(on(U.Ui.init(0n), "a"), sheets(on(U.Ui.init(0n), "a")))
+
+def Show.nats(xs: List<&2, Nat>) -> String:
+  match xs:
+    case Nil{}:
+      ""
+    case x <> t:
+      Nat.show(x) ++ " " ++ Show.nats(t)
+
+def Show.strs(xs: List<&2, String>) -> String:
+  String.join(xs, " ")
+
+def Show.ids(rs: List<&2, U.SchRow>) -> String:
+  match rs:
+    case Nil{}:
+      ""
+    case U.SchRow{i, _, _, _, st, _, _, _} <> t:
+      Nat.show(i) ++ ":" ++ Nat.show(st) ++ " " ++ Show.ids(t)
+
+def at.v(v: U.SchView) -> String:
+  match v:
+    case U.SchView{_, _, _, a, _, _, _, _, o, _, _, _}:
+      Nat.show(a) ++ Bool.pick(String, o, " out", "")
+
+def at(+u: U.Ui) -> String:
+  at.v(U.Sch.view(u))
+
+def trail.v(v: U.SchView) -> String:
+  match v:
+    case U.SchView{_, t, _, _, _, _, _, _, _, _, _, _}:
+      Show.ids(t)
+
+def trail(+u: U.Ui) -> String:
+  trail.v(U.Sch.view(u))
+
+def tree.v(v: U.SchView) -> String:
+  match v:
+    case U.SchView{r, _, _, _, _, _, _, _, _, _, _, _}:
+      Show.ids(r)
+
+def tree(+u: U.Ui) -> String:
+  tree.v(U.Sch.view(u))
+
+def here.v(v: U.SchView) -> String:
+  match v:
+    case U.SchView{_, _, h, _, _, _, _, _, _, _, _, _}:
+      Show.ids(h)
+
+def here(+u: U.Ui) -> String:
+  here.v(U.Sch.view(u))
+
+def hist.v(v: U.SchView) -> String:
+  match v:
+    case U.SchView{_, _, _, _, _, _, b, f, _, _, _, _}:
+      Bool.pick(String, b, "back", "-") ++ " " ++ Bool.pick(String, f, "fwd", "-")
+
+def hist(+u: U.Ui) -> String:
+  hist.v(U.Sch.view(u))
+
+def note.v(v: U.SchView) -> String:
+  match v:
+    case U.SchView{_, _, _, _, _, _, _, _, _, _, _, n}:
+      n
+
+def note(+u: U.Ui) -> String:
+  note.v(U.Sch.view(u))
+
+def shown.v(v: U.SchView) -> String:
+  match v:
+    case U.SchView{_, _, _, _, _, _, _, _, _, s, _, _}:
+      Bool.pick(String, s, "tree", "no tree")
+
+def shown(+u: U.Ui) -> String:
+  shown.v(U.Sch.view(u))
+
+def path(+u: U.Ui) -> String:
+  U.Ui.view_get(u, "view.path")
+
+def main() -> IO(Unit):
+  +rs = rows()
+  +u0 = start()
+  +ch2 = act(u0, "sch-go", "4\t/Ch2/")
+  +amp2 = act(ch2, "sch-go", "5\t/Ch2/Amp/")
+  +up = act(amp2, "sch-up", "")
+  +back = act(up, "sch-back", "")
+  +fwd = act(back, "sch-fwd", "")
+  +top = act(fwd, "sch-root", "")
+  +other = U.Ui.recv(amp2, json("{\"t\":\"view\",\"thread\":\"a\",\"path\":\"/q/other.kicad_sch\",\"kind\":\"schematic\"}"))
+  do IO<Unit>:
+    C.Check.str("places", Show.strs(H.Hier.paths(rs)), "/ /Power/ /Ch1/ /Ch1/Amp/ /Ch2/ /Ch2/Amp/")
+    C.Check.str("place of a repeated instance", H.Hier.path(rs, 5n), "/Ch2/Amp/")
+    C.Check.str("no row, no place", H.Hier.path(rs, 9n), "")
+    C.Check.str("seek the second instance", Nat.show(Maybe.default(&2, Nat, H.Hier.seek(rs, "/Ch2/Amp/"), 99n)), "5")
+    C.Check.str("under the root", Show.nats(H.Hier.under(rs, 0n)), "1 2 4 ")
+    C.Check.str("under Ch2", Show.nats(H.Hier.under(rs, 4n)), "5 ")
+    C.Check.str("under a leaf", Show.nats(H.Hier.under(rs, 5n)), "")
+    C.Check.str("boxes of a file", Show.strs(H.Hier.boxes.of(boxes(), "/p/chan.kicad_sch")), "7 7 8 8")
+    C.Check.str("boxes: a key is a whole file", Show.strs(H.Hier.boxes.of(boxes(), "/p/chan")), "")
+    C.Check.str("boxes read from sheet forms", Nat.show(List.length(&2, String, H.Hier.boxes(T.Utf8.encode("(kicad_sch (sheet (at 10 10) (size 20 20) (property \"Sheetname\" \"A\") (property \"Sheetfile\" \"a.kicad_sch\")) (sheet (at 40 10) (size 5 5) (property \"Sheetname\" \"B\") (property \"Sheetfile\" \"b.kicad_sch\")))")))), "2")
+    C.Check.str("starts at the root", at(u0), "0")
+    C.Check.str("the root's sheets here", here(u0), "1:0 2:0 4:0 ")
+    C.Check.str("Ch2's sheet symbols", U.Sch.boxes(ch2), "5\t/Ch2/Amp/\t7 7 8 8")
+    C.Check.str("the root's sheet symbols", U.Sch.boxes(top), "1\t/Power/\t1 1 2 2\n2\t/Ch1/\t3 3 4 4\n4\t/Ch2/\t5 5 6 6")
+    C.Check.str("a repeated instance is itself, not the first of its file", at(ch2), "4")
+    C.Check.str("its file on show", path(ch2), "/p/chan.kicad_sch")
+    C.Check.str("trail to it", trail(amp2), "0:1 4:1 5:2 ")
+    C.Check.str("tree marks the path", tree(amp2), "0:1 1:0 2:0 3:0 4:1 5:2 ")
+    C.Check.str("up goes to its own parent", at(up), "4")
+    C.Check.str("back returns", at(back), "5")
+    C.Check.str("back leaves forward", hist(back), "back fwd")
+    C.Check.str("forward", at(fwd), "4")
+    C.Check.str("root", at(top) ++ "|" ++ path(top), "0|")
+    C.Check.str("up at the root stays", at(act(top, "sch-up", "")), "0")
+    C.Check.str("back from the root", at(act(top, "sch-back", "")), "4")
+    C.Check.str("a new place clears forward", hist(act(back, "sch-go", "1\t/Power/")), "back -")
+    C.Check.str("going where it is keeps history", hist(act(u0, "sch-go", "0\t/")), "- -")
+    C.Check.str("a stale row goes by its place", at(act(u0, "sch-go", "3\t/Ch2/Amp/")), "5")
+    C.Check.str("a place that is gone changes nothing", at(act(ch2, "sch-go", "9\t/Gone/")) ++ "|" ++ note(act(ch2, "sch-go", "9\t/Gone/")), "4|gone")
+    C.Check.str("the note clears on the next sheet", note(act(act(ch2, "sch-go", "9\t/Gone/"), "sch-root", "")), "")
+    C.Check.str("a file outside the hierarchy", at(other), "6 out")
+    C.Check.str("up from outside goes to the root", at(act(other, "sch-up", "")), "0")
+    C.Check.str("a folded branch hides its rows", tree(act(amp2, "sch-fold", "/Ch1/")), "0:1 1:0 2:0 4:1 5:2 ")
+    C.Check.str("the path on show never folds", tree(act(amp2, "sch-fold", "/Ch2/")), "0:1 1:0 2:0 3:0 4:1 5:2 ")
+    C.Check.str("fold twice opens", tree(act(act(amp2, "sch-fold", "/Ch1/"), "sch-fold", "/Ch1/")), "0:1 1:0 2:0 3:0 4:1 5:2 ")
+    C.Check.str("the tree puts away", shown(act(u0, "sch-tree", "")), "no tree")
+    C.Check.str("each thread keeps its own instance", at(on(amp2, "b")) ++ "|" ++ hist(on(amp2, "b")), "0|- -")
+    C.Check.str("and gets it back", at(on(on(amp2, "b"), "a")), "5")
+    C.Check.str("the phones' menu picks a row", at(act(u0, "view-sheet", "#4")), "4")
+    C.Check.str("a file picks its first instance", at(act(u0, "view-sheet", "/p/chan.kicad_sch")), "2")
+    C.Check.str("no boxes on a board", U.Sch.boxes(U.Ui.view_pick(ch2, "board")), "")
