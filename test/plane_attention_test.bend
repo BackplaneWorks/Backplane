@@ -41,9 +41,15 @@ def states(cs: List<&2, M.Change>) -> String:
 def counts(cs: List<&2, M.Change>) -> String:
   P.Plane.counts(I.En{}, plane(cs))
 
-# the sidebar's count, made without rows
+# the sidebar's count, made without rows, as the web's uber row makes it
+# (WB.uber.m): the frame's Ui with its signals, and the index decorated with
+# them (U.Side.signals.ix), the same projection the list is made from.
+# Plane.tally.words is the legacy one (no signals) and matches Plane.of instead.
+def tally.ix(+u: U.Ui) -> String:
+  P.Plane.counts.t(I.En{}, P.Plane.tally(u, U.Side.signals.ix(U.Side.ix(U.Ui.state(u)), u), U.Side.rows.ix(U.Ui.state(u), U.Side.signals.ix(U.Side.ix(U.Ui.state(u)), u), 20n)))
+
 def tally(cs: List<&2, M.Change>) -> String:
-  P.Plane.tally.words(ui(cs), 20n)
+  tally.ix(U.Side.with_signals(ui(cs)))
 
 # the failures today: DeepSeek's turn failed (a funds decision), the old Pi
 # run failed and was replaced by a working owner
