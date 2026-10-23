@@ -63,6 +63,10 @@ def tree.json(+u: U.Ui, +rs: List<&2, H.Row>, +slot: String, +gen: String) -> J.
 def gen(+boot: U32, +n: Nat) -> String:
   Nat.show(PV.Pv.tree.gen(boot, n))
 
+# a hub's join (full from 0, or a resume from since) from origin
+def join(+origin: String, +since: String) -> J.Json:
+  json("{\"t\":\"log\",\"since\":" ++ since ++ ",\"origin\":\"" ++ origin ++ "\",\"info\":{},\"items\":[]}")
+
 # a reply as the plot actor sends it for a root (gen: its start second times
 # 2^32 plus its message count, server/plot.bend's Pv.tree.gen)
 def tree.at(+root: String, +rs: List<&2, H.Row>, +slot: String, +gen: String) -> J.Json:
@@ -187,6 +191,10 @@ def main() -> IO(Unit):
   +s4 = U.Sch.got(s1, tree.json(s1, rows(), "", gen(1001, 0n)))
   # another project's tree on the same client
   +s5 = U.Sch.got(act(s1, "sch-go", "4\t/Chan2/\t/U3/"), tree.at("/elsewhere", rows(), "", gen(1000, 9n)))
+  # the cache belongs to the connection: a join drops it, so a new hub's
+  # replies (whatever its clock: here an earlier start second) are taken
+  +j1 = U.Ui.recv(act(s1, "sch-go", "4\t/Chan2/\t/U3/"), join("O", "4"))
+  +j2 = U.Sch.got(j1, tree.json(j1, rows(), "", gen(999, 0n)))
   +other = U.Ui.recv(amp2, json("{\"t\":\"view\",\"thread\":\"a\",\"path\":\"/q/other.kicad_sch\",\"kind\":\"schematic\"}"))
   do IO<Unit>:
     C.Check.str("places", Show.strs(H.Hier.paths(rs)), "/ /Power/ /Ch1/ /Ch1/Amp/ /Ch2/ /Ch2/Amp/")
@@ -257,3 +265,7 @@ def main() -> IO(Unit):
     C.Check.str("generation: the same is not newer", Bool.show(U.Sch.newer(gen(1000, 8n), gen(1000, 8n))), "False")
     C.Check.str("generation: a later start beats any count before it", Bool.show(U.Sch.newer(gen(1001, 0n), gen(1000, 4294967295n))), "True")
     C.Check.str("generation: anything is newer than none held", Bool.show(U.Sch.newer(gen(1000, 0n), "")), "True")
+    C.Check.str("a join drops the sheets and their generation", U.Ui.info(j1, "sheets:" ++ U.Ui.root(j1)) ++ "|" ++ U.Ui.info(j1, "sheetgen:" ++ U.Ui.root(j1)), "|")
+    C.Check.str("a join from another hub drops them too", U.Ui.info(U.Ui.recv(s1, join("P", "0")), "sheetgen:" ++ U.Ui.root(s1)), "")
+    C.Check.str("after a join any reply is taken, whatever its clock", rowtext(j2), H.Hier.show(rows()))
+    C.Check.str("a join keeps the instance on show", U.Ui.scratch(j1, "@sch:a"), "4\t/Chan2/\t/U3/")
