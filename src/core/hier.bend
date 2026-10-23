@@ -456,3 +456,183 @@ def Hier.boxes.find(ls: List<&2, String>, +key: String) -> List<&2, String>:
 # the boxes the lines name for a file's key, in its order
 def Hier.boxes.of(+text: String, +key: String) -> List<&2, String>:
   Hier.boxes.find(String.split(text, '\n'), key)
+
+# Sheet instance UUIDs
+# --------------------
+# Beside the rows (whose types the laws pin), each file's child sheets as
+# KiCad keeps them: "<uuid>|<path>=<page>|..." per sheet form, in its order
+# (the same order as Hier.boxes), the pairs from the form's (instances
+# (project (path P (page N)))) (KiCad 7+: P is the parent's instance path
+# from the root's uuid); and the root's "<uuid>|<path>=<page>|..." from its
+# own (uuid) and (sheet_instances) (KiCad 6 keeps the pages there). A row's
+# instance is then its uuid path from the root ("/", "/<uuid>/<uuid>/"),
+# stable across renames and moves, and its page what KiCad numbers it.
+
+def Hier.page.of(+pt: S.Sx) -> String:
+  S.Sx.arg(pt, 0n) ++ "=" ++ S.Sx.attr(pt, "page")
+
+def Hier.pages.go(ps: List<&2, S.Sx>) -> List<&2, String>:
+  match ps:
+    case Nil{}:
+      Nil{}
+    case +p <> t:
+      Hier.page.of(p) <> Hier.pages.go(t)
+
+def Hier.projects.go(prs: List<&2, S.Sx>) -> List<&2, String>:
+  match prs:
+    case Nil{}:
+      Nil{}
+    case +p <> t:
+      List.append(&2, String, Hier.pages.go(S.Sx.all(S.Sx.args(p), "path")), Hier.projects.go(t))
+
+def Hier.uid.form(+x: S.Sx) -> String:
+  String.join(S.Sx.attr(x, "uuid") <> Hier.projects.go(S.Sx.all(S.Sx.args(S.Sx.get(x, "instances")), "project")), "|")
+
+def Hier.uid.k(hit: Bool, +bs: List<&2, U32>, rest: List<&2, String>) -> List<&2, String>:
+  match hit:
+    case True{}:
+      Hier.uid.form(S.Sx.parse(bs)) <> rest
+    case False{}:
+      rest
+
+def Hier.uids.forms(fs: List<&2, List<&2, U32>>) -> List<&2, String>:
+  match fs:
+    case Nil{}:
+      Nil{}
+    case +f <> t:
+      Hier.uid.k(String.eq(SC.Sch.head(f), "sheet"), f, Hier.uids.forms(t))
+
+def Hier.uids.k(m: Maybe<&2, List<&2, List<&2, U32>>>) -> List<&2, String>:
+  match m:
+    case Some{fs}:
+      Hier.uids.forms(fs)
+    case None{}:
+      Nil{}
+
+# a file's line of its child sheets' uuids and pages, keyed as Hier.boxes.line
+def Hier.uids.line(+key: String, bs: List<&2, U32>) -> String:
+  String.join(key <> Hier.uids.k(S.Sx.forms(bs)), "\t")
+
+def Hier.first.k(hit: Bool, +f: List<&2, U32>, rest: Maybe<&2, S.Sx>) -> Maybe<&2, S.Sx>:
+  match hit:
+    case True{}:
+      Some{S.Sx.parse(f)}
+    case False{}:
+      rest
+
+def Hier.form.go(fs: List<&2, List<&2, U32>>, +name: String) -> Maybe<&2, S.Sx>:
+  match fs:
+    case Nil{}:
+      None{}
+    case +f <> t:
+      Hier.first.k(String.eq(SC.Sch.head(f), name), f, Hier.form.go(t, name))
+
+def Hier.top.uid(m: Maybe<&2, S.Sx>) -> String:
+  match m:
+    case Some{+x}:
+      S.Sx.arg(x, 0n)
+    case None{}:
+      ""
+
+def Hier.top.pages(m: Maybe<&2, S.Sx>) -> List<&2, String>:
+  match m:
+    case Some{x}:
+      Hier.pages.go(S.Sx.all(S.Sx.args(x), "path"))
+    case None{}:
+      Nil{}
+
+def Hier.top.k(m: Maybe<&2, List<&2, List<&2, U32>>>) -> String:
+  match m:
+    case Some{+fs}:
+      String.join(Hier.top.uid(Hier.form.go(fs, "uuid")) <> Hier.top.pages(Hier.form.go(fs, "sheet_instances")), "|")
+    case None{}:
+      ""
+
+# the root file's own uuid and its sheet_instances pages
+def Hier.top(bs: List<&2, U32>) -> String:
+  Hier.top.k(S.Sx.forms(bs))
+
+# Instance paths per row. A stack of the rows above, each with the uuid path
+# KiCad writes without the trailing slash ("" the root, "?" unknown) and the
+# entries of its file not yet given to a child.
+
+type UAt is Data:
+  UAt{depth: Nat, kp: String, rest: List<&2, String>}
+
+def Hier.upop(st: List<&2, UAt>, +d: Nat) -> List<&2, UAt>:
+  match st:
+    case Nil{}:
+      Nil{}
+    case UAt{+e, +k, +r} <> +t:
+      Bool.pick(List<&2, UAt>, Nat.is_ge(e, d), Hier.upop(t, d), UAt{e, k, r} <> t)
+
+def Hier.ukpt(st: List<&2, UAt>) -> String:
+  match st:
+    case Nil{}:
+      ""
+    case UAt{_, k, _} <> _:
+      k
+
+def Hier.urest(st: List<&2, UAt>) -> List<&2, String>:
+  match st:
+    case Nil{}:
+      Nil{}
+    case UAt{_, _, r} <> _:
+      r
+
+def Hier.uhead(+xs: List<&2, String>) -> String:
+  Maybe.default(&2, String, List.head(&2, String, xs), "")
+
+# a row below the parent's: the parent's place, then the next entry's uuid
+def Hier.upush(st: List<&2, UAt>, +d: Nat, +kp: String, +own: List<&2, String>) -> List<&2, UAt>:
+  match st:
+    case Nil{}:
+      [UAt{d, kp, own}]
+    case UAt{e, k, r} <> t:
+      UAt{d, kp, own} <> UAt{e, k, List.drop(&2, String, r, 1n)} <> t
+
+def Hier.ukp(+d: Nat, +pkp: String, +uid: String) -> String:
+  Bool.pick(String, Nat.is_eq(d, 0n), "", Bool.pick(String, Bool.or(String.eq(pkp, "?"), String.is_empty(uid)), "?", pkp ++ "/" ++ uid))
+
+def Hier.ume(+st: List<&2, UAt>, +d: Nat) -> String:
+  Hier.ukp(d, Hier.ukpt(st), Hier.uhead(String.split(Hier.uhead(Hier.urest(st)), '|')))
+
+def Hier.pair.k(hit: Bool, +x: String, +n: Nat, rest: String) -> String:
+  match hit:
+    case True{}:
+      String.drop(x, n)
+    case False{}:
+      rest
+
+def Hier.pair.go(xs: List<&2, String>, +p: String) -> String:
+  match xs:
+    case Nil{}:
+      ""
+    case +x <> t:
+      Hier.pair.k(String.starts_with(x, p ++ "="), x, Nat.add(1n, String.length(p)), Hier.pair.go(t, p))
+
+def Hier.upage.k(+p7: String, +top: String, +kp: String) -> String:
+  Bool.pick(String, String.is_empty(p7), Hier.pair.go(List.drop(&2, String, String.split(top, '|'), 1n), Bool.pick(String, String.is_empty(kp), "/", kp)), p7)
+
+# a row's page: KiCad 7+'s pair for its parent's path, else KiCad 6's for its own
+def Hier.upage(+e: String, +top: String, +pkp: String, +kp: String) -> String:
+  Hier.upage.k(Hier.pair.go(List.drop(&2, String, String.split(e, '|'), 1n), "/" ++ Hier.uhead(String.split(top, '|')) ++ pkp), top, kp)
+
+def Hier.uout(+me: String, +e: String, +top: String, +pkp: String) -> String:
+  Bool.pick(String, String.eq(me, "?"), "", me ++ "/") ++ "\t" ++ Hier.upage(e, top, pkp, me)
+
+def Hier.uget(+ids: List<&2, List<&2, String>>, +j: Nat) -> List<&2, String>:
+  Maybe.default(&2, List<&2, String>, List.head(&2, List<&2, String>, List.drop(&2, List<&2, String>, ids, j)), Nil{})
+
+def Hier.uids.go(rs: List<&2, Row>, +j: Nat, +ids: List<&2, List<&2, String>>, +st: List<&2, UAt>, +top: String) -> List<&2, String>:
+  match rs:
+    case Nil{}:
+      Nil{}
+    case Row{+d, _, _, _} <> t:
+      Hier.uout(Hier.ume(Hier.upop(st, d), d), Hier.uhead(Hier.urest(Hier.upop(st, d))), top, Hier.ukpt(Hier.upop(st, d)))
+        <> Hier.uids.go(t, 1n+j, ids, Hier.upush(Hier.upop(st, d), d, Hier.ume(Hier.upop(st, d), d), Hier.uget(ids, j)), top)
+
+# each row's "<uuid path>\t<page>" ("" where the files did not say), given
+# each row's file entries (ids, in row order) and the root's line (top)
+def Hier.uids(rs: List<&2, Row>, +ids: List<&2, List<&2, String>>, +top: String) -> List<&2, String>:
+  Hier.uids.go(rs, 0n, ids, Nil{}, top)

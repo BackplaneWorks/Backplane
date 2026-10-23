@@ -275,7 +275,9 @@ data class MechPage(
 
 data class MechShot(val view: String, val url: String)
 
-data class Sheet(val label: String, val value: String, val on: Boolean, val loop: Boolean)
+// box: its sheet symbol on the sheet on show ("x0 y0 x1 y1" mm) when it is
+// directly under it; a tap there opens it (mobile/view.bend)
+data class Sheet(val label: String, val value: String, val on: Boolean, val loop: Boolean, val box: String = "")
 
 data class LayerRow(val layer: Int, val name: String, val on: Boolean, val active: Boolean = false)
 
@@ -603,7 +605,7 @@ private fun viewer(o: JSONObject) = Viewer(
         Card(c.optString("info"), c.optString("title"), c.optJSONArray("rows").map { it.optString("k") to it.optString("v") })
     },
     o.optBoolean("light"), ints(o.optJSONArray("look")),
-    o.optJSONArray("sheets").map { Sheet(it.optString("label"), it.optString("value"), it.optBoolean("on"), it.optBoolean("loop")) },
+    o.optJSONArray("sheets").map { Sheet(it.optString("label"), it.optString("value"), it.optBoolean("on"), it.optBoolean("loop"), it.optString("box")) },
     o.optJSONArray("layerList").map { LayerRow(it.optInt("layer"), it.optString("name"), it.optBoolean("on"), it.optBoolean("active")) },
     o.optInt("off"), o.optBoolean("parts", true), o.optString("note"),
     o.optJSONObject("mech")?.let { p ->

@@ -515,6 +515,9 @@ final class PlotCanvas: MTKView {
     var fadeMs: Double = 220
     var chunks: [PlotChunk] = []
     var onPick: (String) -> Void = { _ in }
+    // a schematic's sheet symbols (micrometres) and what a tap on one opens
+    var sheetHits: [(value: String, box: [Float])] = []
+    var onSheet: (String) -> Void = { _ in }
     // review comments: a long press at a place (mm of the file) asks for a
     // note; a pin is a button over the plot that follows the camera
     var onNote: (Double, Double) -> Void = { _, _ in }
@@ -795,6 +798,12 @@ final class PlotCanvas: MTKView {
     // what lies under a point, for Bend to pick from (View.pick)
     func tap(at p: CGPoint) {
         guard let (q, face) = board(p) else { onPick("[]"); return }
+        // a sheet symbol opens that sheet (the smallest when they nest)
+        if !three, let hit = sheetHits.filter({ q.x >= $0.box[0] && q.x <= $0.box[2] && q.y >= $0.box[1] && q.y <= $0.box[3] })
+            .min(by: { ($0.box[2] - $0.box[0]) * ($0.box[3] - $0.box[1]) < ($1.box[2] - $1.box[0]) * ($1.box[3] - $1.box[1]) }) {
+            onSheet(hit.value)
+            return
+        }
         // the finger's reach, in micrometres
         let tol: Float
         if three {
@@ -867,6 +876,7 @@ struct PlotCanvasView: UIViewRepresentable {
     let mesh: MeshFrame?
     let viewer: Viewer
     let pick: (String) -> Void
+    var sheet: (String) -> Void = { _ in }
     var onNote: (Double, Double) -> Void = { _, _ in }
     var onPin: (String) -> Void = { _ in }
 
@@ -891,6 +901,12 @@ struct PlotCanvasView: UIViewRepresentable {
         c.tap = viewer.tap
         c.fadeMs = Double(viewer.fade)
         c.onPick = pick
+        c.onSheet = sheet
+        c.sheetHits = (viewer.sheets ?? []).compactMap { s in
+            let n = (s.box ?? "").split(separator: " ").compactMap { Float($0) }
+            guard n.count == 4 else { return nil }
+            return (s.value, [min(n[0], n[2]) * 1000, min(n[1], n[3]) * 1000, max(n[0], n[2]) * 1000, max(n[1], n[3]) * 1000])
+        }
         c.onNote = onNote
         c.onPin = onPin
         c.setPins(viewer.comments?.pins ?? [], lang: lang)
@@ -1065,6 +1081,7 @@ struct PlotScreen: View {
         ZStack(alignment: .top) {
             Color(rgb: viewer.bg).ignoresSafeArea()
             PlotCanvasView(frame: f?.none.isEmpty == true ? f : nil, mesh: m, viewer: viewer, pick: { model.act("view-pick", $0) },
+                           sheet: { model.act("view-sheet", $0) },
                            onNote: { x, y in model.act("rv-note", String(format: "%.3f\t%.3f\t\t", x, y)) },
                            onPin: { model.act("rv-pin", $0) })
                 .id(viewer.layers.isEmpty ? viewer.key : "")

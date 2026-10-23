@@ -636,6 +636,9 @@ class PlotSurface(context: Context) : GLSurfaceView(context) {
     var fadeMs = 220f
     var chunks: List<PlotChunk> = emptyList()
     var onPick: (String) -> Unit = {}
+    // a schematic's sheet symbols (micrometres: x0 y0 x1 y1) and what a tap on one opens
+    var sheetHits: List<Pair<String, FloatArray>> = emptyList()
+    var onSheet: (String) -> Unit = {}
     // review comments: a long press at a place (mm of the file) asks for a
     // note; the pins follow the camera (offX, offY, scale) via onCamera
     var onNote: (Float, Float) -> Unit = { _, _ -> }
@@ -801,6 +804,12 @@ class PlotSurface(context: Context) : GLSurfaceView(context) {
     // what lies under a point, for Bend to pick from (View.pick)
     fun pick(px: Float, py: Float) {
         val (q, face) = board(px, py) ?: run { onPick("[]"); return }
+        // a sheet symbol opens that sheet (the smallest when they nest)
+        if (!three) {
+            val hit = sheetHits.filter { (_, b) -> q[0] >= b[0] && q[0] <= b[2] && q[1] >= b[1] && q[1] <= b[3] }
+                .minByOrNull { (_, b) -> (b[2] - b[0]) * (b[3] - b[1]) }
+            if (hit != null) { onSheet(hit.first); return }
+        }
         // the finger's reach, in micrometres
         val tol = if (three) tap * density * renderer.orbit.unit(height)
         else tap * density / renderer.scale

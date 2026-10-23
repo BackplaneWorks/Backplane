@@ -455,10 +455,12 @@ def View.layer.list(+u: U.Ui) -> List<&2, J.Json>:
 # "sheets", root, rows as Hier.show writes them}); "view-sheet" picks one
 # by its row, the root being row 0.
 
+# (kept as the web keeps them, by root and slot, a late reply never over
+# a newer one: client.bend's Sch.got)
 def View.sheets.k(hit: Bool, +u: U.Ui, +o: J.Json) -> U.Ui:
   match hit:
     case True{}:
-      U.Ui.scratch_set(U.Ui.scratch_set(u, "@view.tree", J.Json.get_str(o, "rows", "")), "@view.tree.root", J.Json.get_str(o, "root", ""))
+      U.Sch.got(u, o)
     case False{}:
       u
 
@@ -477,15 +479,50 @@ def View.sheets(+u: U.Ui, +o: J.Json) -> U.Ui:
 def View.note(+u: U.Ui) -> String:
   Bool.pick(String, String.eq(U.Ui.scratch(u, "@view.note.key"), View.want(u)), U.Ui.scratch(u, "@view.note"), "")
 
-# (a phone the hub renders for gets them folded into its Ui's info by the
-# thin actor, as the web does: client.bend's Sch.got)
+# the tree the phone's source wants (a version's, once it came), else the
+# live design's; a phone the hub renders for gets them folded in by the
+# thin actor the same way
+def View.tk.k(none: Bool, +u: U.Ui, +want: String) -> String:
+  match none:
+    case True{}:
+      U.Ui.root(u)
+    case False{}:
+      want
+
+def View.tk.w(+u: U.Ui, +want: String) -> String:
+  View.tk.k(String.is_empty(U.Ui.info(u, "sheets:" ++ want)), u, want)
+
+def View.tk(+u: U.Ui) -> String:
+  View.tk.w(u, U.Ui.root(u) ++ U.Sch.sfx(U.Sch.slot.of(View.src(u))))
+
 def View.rows(+u: U.Ui) -> List<&2, HI.Row>:
-  Bool.pick(List<&2, HI.Row>, String.eq(U.Ui.scratch(u, "@view.tree.root"), U.Ui.root(u)), HI.Hier.read(U.Ui.scratch(u, "@view.tree")), U.Sch.rows(u))
+  HI.Hier.read(U.Ui.info(u, "sheets:" ++ View.tk(u)))
+
+# the row on show: the instance picked (by its uuid path, else its place,
+# client.bend's Sch.find) while it shows the file on show, else the first
+# row of that file (the root when none)
+def View.sheet.i(+u: U.Ui) -> Nat:
+  Maybe.default(&2, Nat, U.Sch.find(u, View.rows(u), U.Ui.scratch(u, "@view.sheet.i:" ++ U.Ui.sel(u))), 0n)
+
+def View.sheet.at(+u: U.Ui, +rs: List<&2, HI.Row>, +cur: String) -> Nat:
+  Bool.pick(Nat, String.eq(HI.Hier.file(rs, View.sheet.i(u)), cur), View.sheet.i(u), HI.Hier.at(rs, 0n, cur))
+
+# the project's boards for the same menu, when it has several
+def View.board.rows(fs: List<&2, String>, +cur: String) -> List<&2, J.Json>:
+  match fs:
+    case Nil{}:
+      Nil{}
+    case +f <> t:
+      J.Json.obj([J.KV{"label", J.Str{U.Bd.name(f)}}, J.KV{"value", J.Str{"b:" ++ f}}, J.KV{"on", J.Flag{U.Bd.on(cur, f)}}, J.KV{"loop", J.Flag{False{}}}]) <> View.board.rows(t, cur)
+
+def View.board.list(+u: U.Ui) -> List<&2, J.Json>:
+  Bool.pick(List<&2, J.Json>, Bool.and(U.Bd.many(u), Bool.or(String.eq(View.kind(u), "board"), Bool.or(String.eq(View.kind(u), "schematic"), String.eq(View.kind(u), "3d")))),
+    View.board.rows(U.Bd.files(u), U.Bd.shown(u, View.file(u))), Nil{})
 
 # (the row is kept beside the file, "@view.sheet.i:<t>", so a file used by
 # two sheet instances lights the one picked)
 def View.sheet.go(+u: U.Ui, +i: Nat, +file: String) -> U.Act:
-  View.sync(U.Act{Pick.clear(U.Ui.scratch_set(U.Ui.scratch_set(u, "@view.sheet:" ++ U.Ui.sel(u), Bool.pick(String, Nat.is_eq(i, 0n), "", file)), "@view.sheet.i:" ++ U.Ui.sel(u), Nat.show(i))), Nil{}})
+  View.sync(U.Act{Pick.clear(U.Ui.scratch_set(U.Ui.scratch_set(u, "@view.sheet:" ++ U.Ui.sel(u), Bool.pick(String, Nat.is_eq(i, 0n), "", file)), "@view.sheet.i:" ++ U.Ui.sel(u), U.Sch.entry(u, View.rows(u), i))), Nil{}})
 
 def View.sheet.pick.u(+u: U.Ui, +v: String) -> U.Act:
   View.sheet.go(u, Maybe.default(&2, Nat, Nat.read(v), 0n), HI.Hier.file(View.rows(u), Maybe.default(&2, Nat, Nat.read(v), 0n)))
@@ -523,45 +560,58 @@ def View.sheet.pick.s(+u: U.Ui, +v: String) -> U.Act:
 def View.board.pick(+u: U.Ui, +rel: String) -> U.Act:
   View.fm.to(U.Act{U.Ui.scratch_set(u, "@view.sheet:" ++ U.Ui.sel(u), ""), Nil{}}, U.Bd.kind(View.kind(u)), FM.Fm.abs(U.Ui.root(u), U.Bd.path(U.Bd.kind(View.kind(u)), rel)))
 
-def View.sheet.pick(+u: U.Ui, +v: String) -> U.Act:
-  Bool.pick(U.Act, String.starts_with(v, "b:"), View.board.pick(u, String.drop(v, 2n)), View.sheet.pick.s(u, v))
+# "^up": the parent of the row on show
+def View.sheet.up(+u: U.Ui) -> String:
+  Nat.show(HI.Hier.parent(View.rows(u), View.sheet.at(u, View.rows(u), Bool.pick(String, String.is_empty(View.sheet(u)), HI.Hier.file(View.rows(u), 0n), View.sheet(u)))))
 
-def View.sheet.row(r: HI.Row, +i: Nat, +at: Nat) -> J.Json:
+def View.sheet.pick.v(up: Bool, +u: U.Ui, +v: String) -> U.Act:
+  match up:
+    case True{}:
+      View.sheet.pick.s(u, View.sheet.up(u))
+    case False{}:
+      View.sheet.pick.s(u, v)
+
+def View.sheet.pick(+u: U.Ui, +v: String) -> U.Act:
+  Bool.pick(U.Act, String.starts_with(v, "b:"), View.board.pick(u, String.drop(v, 2n)), View.sheet.pick.v(String.eq(v, "^up"), u, v))
+
+# a row's sheet symbol on the sheet on show ("x0 y0 x1 y1" mm; "" unless
+# it is directly under it): a tap there opens it (PlotView)
+def View.sheet.box.go(js: List<&2, Nat>, +k: Nat, +bs: List<&2, String>, +i: Nat) -> String:
+  match js:
+    case Nil{}:
+      ""
+    case +j <> t:
+      Bool.pick(String, Nat.is_eq(j, i), HS.Hist.at(bs, k), View.sheet.box.go(t, 1n+k, bs, i))
+
+def View.sheet.row(r: HI.Row, +i: Nat, +at: Nat, +js: List<&2, Nat>, +bs: List<&2, String>) -> J.Json:
   match r:
     case HI.Row{+d, n, _, l}:
-      J.Json.obj([J.KV{"label", J.Str{String.repeat("  ", d) ++ n}}, J.KV{"value", J.Str{Nat.show(i)}}, J.KV{"on", J.Flag{Nat.is_eq(i, at)}}, J.KV{"loop", J.Flag{l}}])
+      J.Json.obj([J.KV{"label", J.Str{String.repeat("  ", d) ++ n}}, J.KV{"value", J.Str{Nat.show(i)}}, J.KV{"on", J.Flag{Nat.is_eq(i, at)}}, J.KV{"loop", J.Flag{l}},
+        J.KV{"box", J.Str{View.sheet.box.go(js, 0n, bs, i)}}])
 
-def View.sheet.rows(rs: List<&2, HI.Row>, +i: Nat, +at: Nat) -> List<&2, J.Json>:
+def View.sheet.rows(rs: List<&2, HI.Row>, +i: Nat, +at: Nat, +js: List<&2, Nat>, +bs: List<&2, String>) -> List<&2, J.Json>:
   match rs:
     case Nil{}:
       Nil{}
     case r <> t:
-      View.sheet.row(r, i, at) <> View.sheet.rows(t, 1n+i, at)
+      View.sheet.row(r, i, at, js, bs) <> View.sheet.rows(t, 1n+i, at, js, bs)
 
-# the row on show: the one picked while it shows the file on show, else
-# the first row of that file (the root when none)
-def View.sheet.i(+u: U.Ui) -> Nat:
-  Maybe.default(&2, Nat, Nat.read(U.Ui.scratch(u, "@view.sheet.i:" ++ U.Ui.sel(u))), 0n)
-
-def View.sheet.at(+u: U.Ui, +rs: List<&2, HI.Row>, +cur: String) -> Nat:
-  Bool.pick(Nat, String.eq(HI.Hier.file(rs, View.sheet.i(u)), cur), View.sheet.i(u), HI.Hier.at(rs, 0n, cur))
-
-# the project's boards for the same menu, when it has several
-def View.board.rows(fs: List<&2, String>, +cur: String) -> List<&2, J.Json>:
-  match fs:
-    case Nil{}:
+# Up (value "^up") heads the menu below the top sheet
+def View.sheet.up.row(+lc: I.Loc, below: Bool) -> List<&2, J.Json>:
+  match below:
+    case True{}:
+      [J.Json.obj([J.KV{"label", J.Str{"↑ " ++ MSG.T.viewer.sch.up(lc)}}, J.KV{"value", J.Str{"^up"}}, J.KV{"on", J.Flag{False{}}}, J.KV{"loop", J.Flag{False{}}}, J.KV{"box", J.Str{""}}])]
+    case False{}:
       Nil{}
-    case +f <> t:
-      J.Json.obj([J.KV{"label", J.Str{U.Bd.name(f)}}, J.KV{"value", J.Str{"b:" ++ f}}, J.KV{"on", J.Flag{U.Bd.on(cur, f)}}, J.KV{"loop", J.Flag{False{}}}]) <> View.board.rows(t, cur)
 
-def View.board.list(+u: U.Ui) -> List<&2, J.Json>:
-  Bool.pick(List<&2, J.Json>, Bool.and(U.Bd.many(u), Bool.or(String.eq(View.kind(u), "board"), Bool.or(String.eq(View.kind(u), "schematic"), String.eq(View.kind(u), "3d")))),
-    View.board.rows(U.Bd.files(u), U.Bd.shown(u, View.file(u))), Nil{})
+def View.sheet.menu(+u: U.Ui, +rs: List<&2, HI.Row>, +at: Nat) -> List<&2, J.Json>:
+  List.append(&2, J.Json, View.sheet.up.row(U.Lang.loc(u), Bool.and(Nat.is_gt(at, 0n), Nat.is_lt(at, List.length(&2, HI.Row, rs)))),
+    View.sheet.rows(rs, 0n, at, HI.Hier.under(rs, at), HI.Hier.boxes.of(U.Ui.info(u, "sheetbox:" ++ View.tk(u)), HS.Hist.family(HI.Hier.file(rs, at)))))
 
 # the schematic's sheets for the phone's Sheet menu (none with one sheet)
 def View.sheet.list(+u: U.Ui) -> List<&2, J.Json>:
   Bool.pick(List<&2, J.Json>, Bool.and(String.eq(View.kind(u), "schematic"), Nat.is_gt(List.length(&2, HI.Row, View.rows(u)), 1n)),
-    View.sheet.rows(View.rows(u), 0n, View.sheet.at(u, View.rows(u), Bool.pick(String, String.is_empty(View.sheet(u)), HI.Hier.file(View.rows(u), 0n), View.sheet(u)))), Nil{})
+    View.sheet.menu(u, View.rows(u), View.sheet.at(u, View.rows(u), Bool.pick(String, String.is_empty(View.sheet(u)), HI.Hier.file(View.rows(u), 0n), View.sheet(u)))), Nil{})
 
 # the 3D model with its parts or the board alone ("view-parts")
 def View.parts(+u: U.Ui) -> U.Act:

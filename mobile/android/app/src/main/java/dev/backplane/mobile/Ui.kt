@@ -1150,6 +1150,12 @@ private fun PlotScreen(m: AppModel, v: Viewer) {
             s.tap = v.tap
             s.fadeMs = v.fade
             s.onPick = { m.act("view-pick", it) }
+            s.onSheet = { m.act("view-sheet", it) }
+            s.sheetHits = v.sheets.mapNotNull { sh ->
+                val n = sh.box.split(' ').mapNotNull { it.toFloatOrNull() }
+                if (n.size != 4) null
+                else sh.value to floatArrayOf(minOf(n[0], n[2]) * 1000f, minOf(n[1], n[3]) * 1000f, maxOf(n[0], n[2]) * 1000f, maxOf(n[1], n[3]) * 1000f)
+            }
             s.onNote = { x, y -> m.act("rv-note", "%.3f\t%.3f\t\t".format(java.util.Locale.ROOT, x, y)) }
             s.onCamera = { x, y, k -> cam = floatArrayOf(x, y, k) }
             s.renderer.top = v.top
