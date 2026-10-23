@@ -2147,8 +2147,16 @@ def Hubs.pl.working(rs: List<&2, J.Json>) -> Nat:
     case +r <> t:
       Hubs.pl.working.k(Bool.or(String.eq(J.Json.get_str(r, "state", ""), "work"), String.eq(J.Json.get_str(r, "state", ""), "talk")), Hubs.pl.working(t))
 
+# the merged need rows that are failed runs (core's Plane.failed)
+def Hubs.pl.failed(rs: List<&2, J.Json>) -> Nat:
+  match rs:
+    case Nil{}:
+      0n
+    case +r <> t:
+      Hubs.pl.working.k(String.eq(J.Json.get_str(r, "state", ""), "failed"), Hubs.pl.failed(t))
+
 def Hubs.pl.json(+lc: I.Loc, +need: List<&2, J.Json>, +run: List<&2, J.Json>, +idle: List<&2, J.Json>, +idle_n: Nat, +ss: List<&2, Shown>, +hs: List<&2, Hub>, +many: Bool, +uber: J.Json) -> MPL.MUber:
-  MPL.MUber{MPL.MPlane.card.k(uber, PL.Plane.counts.join(PL.Plane.counts.need(lc, List.length(&2, J.Json, need)), PL.Plane.counts.run(lc, List.length(&2, J.Json, run)))),
+  MPL.MUber{MPL.MPlane.card.k(uber, PL.Plane.counts.of(lc, List.length(&2, J.Json, need), Hubs.pl.failed(need), List.length(&2, J.Json, run))),
     J.Json.obj([J.KV{"need", J.Json.arr(need)}, J.KV{"run", J.Json.arr(run)}, J.KV{"idle", J.Json.arr(List.take(&2, J.Json, idle, PL.Plane.idle.max()))},
       J.KV{"idleN", J.Json.nat(idle_n)},
       J.KV{"working", J.Json.nat(Hubs.pl.working(Hubs.pl.once(Hubs.pl.all(ss, hs, "bots", many))))},

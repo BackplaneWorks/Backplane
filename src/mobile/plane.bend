@@ -56,12 +56,17 @@ def MPlane.nav.k(room: Bool, +kind: String, +id: String, +value: String, +st: M.
 def MPlane.nav(+kind: String, +id: String, +value: String, +st: M.State) -> String:
   MPlane.nav.k(String.eq(kind, "room"), kind, id, value, st)
 
+# what a row in need asks (Plane.why) leads its line, so the phones' list
+# tells an approval or a question from a failed run with no native change
+def MPlane.sub(+lc: I.Loc, +state: String, +sub: String) -> String:
+  Bool.pick(String, String.is_empty(PL.Plane.why(lc, state)), sub, PL.Plane.why(lc, state) ++ Bool.pick(String, String.is_empty(sub), "", " · " ++ sub))
+
 def MPlane.row(+lc: I.Loc, r: PL.PRow, +now: Nat, +st: M.State) -> J.Json:
   match r:
     case PL.PRow{+kind, +id, +act, +val, +title, +sub, +machine, +state, +at, +away}:
       J.Json.obj(List.append(&2, J.KV,
         [J.KV{"kind", J.Json.str(kind)}, J.KV{"id", J.Json.str(id)}, J.KV{"act", J.Json.str(act)}, J.KV{"value", J.Json.str(MPlane.value(act, val, id))},
-         J.KV{"title", J.Json.str(PL.Plane.title.shown(lc, kind, title))}, J.KV{"sub", J.Json.str(sub)}, J.KV{"state", J.Json.str(state)},
+         J.KV{"title", J.Json.str(PL.Plane.title.shown(lc, kind, title))}, J.KV{"sub", J.Json.str(MPlane.sub(lc, state, sub))}, J.KV{"why", J.Json.str(PL.Plane.why(lc, state))}, J.KV{"state", J.Json.str(state)},
          J.KV{"ago", J.Json.str(MPlane.ago.loc(lc, kind, now, at))}, J.KV{"at", J.Json.nat(at)}, J.KV{"away", J.Json.bool(away)}, J.KV{"nav", J.Json.str(MPlane.nav(kind, id, val, st))}],
         MPlane.machine(machine)))
 
