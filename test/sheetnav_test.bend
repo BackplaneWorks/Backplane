@@ -5,6 +5,7 @@ import ../src/core/client.bend as U
 import ../src/core/json.bend as J
 import ../src/core/utf8.bend as T
 import ../src/core/sexpr.bend as S2
+import ../src/server/plot.bend as PV
 
 # Hierarchical schematic navigation by sheet instance (client.bend's Sch,
 # hier.bend's places, boxes and children). Synthetic, read-only fixtures:
@@ -56,6 +57,11 @@ def sheets(+u: U.Ui) -> J.Json:
 
 def tree.json(+u: U.Ui, +rs: List<&2, H.Row>, +slot: String, +gen: String) -> J.Json:
   tree.at(U.Ui.root(u), rs, slot, gen)
+
+# the generation the plot actor gives its n-th message after starting at
+# second boot (server/plot.bend's Pv.tree.gen, the real constructor)
+def gen(+boot: U32, +n: Nat) -> String:
+  Nat.show(PV.Pv.tree.gen(boot, n))
 
 # a reply as the plot actor sends it for a root (gen: its start second times
 # 2^32 plus its message count, server/plot.bend's Pv.tree.gen)
@@ -174,13 +180,13 @@ def main() -> IO(Unit):
   +kver = U.Sch.got(kren, tree.json(kren, rows(), "/g\tc1", "9"))
   # two watches in one second (actor started at second 1000: messages 7
   # and 8), their replies delivered in reverse order, then in order
-  +s1 = U.Sch.got(on(U.Ui.init(0n), "a"), tree.json(on(U.Ui.init(0n), "a"), renamed(), "", "4294967296008"))
-  +s2 = U.Sch.got(s1, tree.json(s1, rows(), "", "4294967296007"))
-  +s3 = U.Sch.got(U.Sch.got(on(U.Ui.init(0n), "a"), tree.json(on(U.Ui.init(0n), "a"), rows(), "", "4294967296007")), tree.json(on(U.Ui.init(0n), "a"), renamed(), "", "4294967296008"))
+  +s1 = U.Sch.got(on(U.Ui.init(0n), "a"), tree.json(on(U.Ui.init(0n), "a"), renamed(), "", gen(1000, 8n)))
+  +s2 = U.Sch.got(s1, tree.json(s1, rows(), "", gen(1000, 7n)))
+  +s3 = U.Sch.got(U.Sch.got(on(U.Ui.init(0n), "a"), tree.json(on(U.Ui.init(0n), "a"), rows(), "", gen(1000, 7n))), tree.json(on(U.Ui.init(0n), "a"), renamed(), "", gen(1000, 8n)))
   # a restarted actor (second 1001, message 0) after the first one's message 8
-  +s4 = U.Sch.got(s1, tree.json(s1, rows(), "", "4299262263296"))
+  +s4 = U.Sch.got(s1, tree.json(s1, rows(), "", gen(1001, 0n)))
   # another project's tree on the same client
-  +s5 = U.Sch.got(act(s1, "sch-go", "4\t/Chan2/\t/U3/"), tree.at("/elsewhere", rows(), "", "4294967296009"))
+  +s5 = U.Sch.got(act(s1, "sch-go", "4\t/Chan2/\t/U3/"), tree.at("/elsewhere", rows(), "", gen(1000, 9n)))
   +other = U.Ui.recv(amp2, json("{\"t\":\"view\",\"thread\":\"a\",\"path\":\"/q/other.kicad_sch\",\"kind\":\"schematic\"}"))
   do IO<Unit>:
     C.Check.str("places", Show.strs(H.Hier.paths(rs)), "/ /Power/ /Ch1/ /Ch1/Amp/ /Ch2/ /Ch2/Amp/")
@@ -238,10 +244,16 @@ def main() -> IO(Unit):
     C.Check.str("a version's tree is kept apart", rowtext(kver), H.Hier.show(renamed()))
     C.Check.str("its generation is its own", U.Ui.info(kver, "sheetgen:" ++ U.Ui.root(kver)) ++ "|" ++ U.Ui.info(kver, "sheetgen:" ++ U.Ui.root(kver) ++ "\t/g\tc1"), "6|9")
     C.Check.str("same second, reversed: the later request's reply stays", rowtext(s2), H.Hier.show(renamed()))
-    C.Check.str("same second, reversed: its generation stays", U.Ui.info(s2, "sheetgen:" ++ U.Ui.root(s2)), "4294967296008")
+    C.Check.str("same second, reversed: its generation stays", U.Ui.info(s2, "sheetgen:" ++ U.Ui.root(s2)), gen(1000, 8n))
     C.Check.str("same second, in order: the later is taken", rowtext(s3), H.Hier.show(renamed()))
     C.Check.str("a restarted actor's reply is newer", rowtext(s4), H.Hier.show(rows()))
-    C.Check.str("a same reply again changes nothing", rowtext(U.Sch.got(s1, tree.json(s1, rows(), "", "4294967296008"))), H.Hier.show(renamed()))
+    C.Check.str("a same reply again changes nothing", rowtext(U.Sch.got(s1, tree.json(s1, rows(), "", gen(1000, 8n)))), H.Hier.show(renamed()))
     C.Check.str("another root's tree leaves this one", rowtext(s5) ++ "|" ++ at(s5), H.Hier.show(renamed()) ++ "|4")
-    C.Check.str("and is kept under its own root", U.Ui.info(s5, "sheetgen:/elsewhere"), "4294967296009")
+    C.Check.str("and is kept under its own root", U.Ui.info(s5, "sheetgen:/elsewhere"), gen(1000, 9n))
     C.Check.str("a thread switch reads its own instance of the same tree", at(on(s5, "b")) ++ "|" ++ at(on(on(s5, "b"), "a")), "0|4")
+    C.Check.str("generation: start second and message count", gen(1000, 7n), "4294967296007")
+    C.Check.str("generation: the next message is newer in the same second", Bool.show(U.Sch.newer(gen(1000, 8n), gen(1000, 7n))), "True")
+    C.Check.str("generation: an earlier message is not newer", Bool.show(U.Sch.newer(gen(1000, 7n), gen(1000, 8n))), "False")
+    C.Check.str("generation: the same is not newer", Bool.show(U.Sch.newer(gen(1000, 8n), gen(1000, 8n))), "False")
+    C.Check.str("generation: a later start beats any count before it", Bool.show(U.Sch.newer(gen(1001, 0n), gen(1000, 4294967295n))), "True")
+    C.Check.str("generation: anything is newer than none held", Bool.show(U.Sch.newer(gen(1000, 0n), "")), "True")
