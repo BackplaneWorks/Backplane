@@ -67,6 +67,35 @@ def tag(n: D.Node) -> String:
     case D.El{t, _, _, _}: t
     case _: ""
 
+# the uber row's buttons: "tag action value" for each, in order
+def on.of(as: List<&2, D.Attr>) -> String:
+  match as:
+    case Nil{}: ""
+    case D.On{_, +act} <> _: act
+    case _ <> t: on.of(t)
+
+def val.of(as: List<&2, D.Attr>) -> String:
+  match as:
+    case Nil{}: ""
+    case D.At{+k, +v} <> t: Bool.pick(String, String.eq(k, "data-value"), v, val.of(t))
+    case _ <> t: val.of(t)
+
+def btn(+n: D.Node) -> String:
+  tag(n) ++ " " ++ on.of(attrs(n)) ++ " " ++ val.of(attrs(n))
+
+def btns(ns: List<&2, D.Node>) -> List<&2, String>:
+  match ns:
+    case Nil{}: Nil{}
+    case +n <> t: btn(n) <> btns(t)
+
+def kids(n: D.Node) -> List<&2, D.Node>:
+  match n:
+    case D.El{_, _, _, ks}: ks
+    case _: Nil{}
+
+def uber(+counts: String) -> String:
+  String.join(btns(kids(WB.WB.uber.k(I.En{}, BU.BRow{"b1", "Bub", "bt", 0n, "idle", "", False{}, False{}, "", ""}, counts))), ",")
+
 def first(rs: List<&2, P.PRow>) -> P.PRow:
   match rs:
     case r <> _: r
@@ -97,4 +126,5 @@ def main() -> IO(Unit):
     C.Check.str("why: failed", P.Plane.why(I.En{}, "failed"), "Failed run")
     C.Check.str("why: none for running", P.Plane.why(I.En{}, "working"), "")
     C.Check.str("phone row leads with why", J.Json.get_str(MP.MPlane.row(I.En{}, first(P.Plane.need(plane(failed()))), 20n, U.Ui.state(ui(failed()))), "why", "missing"), "Failed run")
-    C.Check.str("web uber row is a button", tag(WB.WB.uber.k(I.En{}, BU.BRow{"b1", "Bub", "bt", 0n, "idle", "", False{}, False{}, "", ""}, "2 failed")), "button")
+    C.Check.str("web uber count is its own button that opens Status, not Chat", uber("2 failed"), "button uber b1,button uber-bot b1|status")
+    C.Check.str("web uber row with nothing counted has no count button", uber(""), "button uber b1")

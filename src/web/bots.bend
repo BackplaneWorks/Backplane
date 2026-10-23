@@ -936,14 +936,25 @@ def WB.body(+lc: I.Loc, +u: U.Ui, +b: BT.Bot, +tab: String) -> D.Node:
 # The uberbot (docs/uber.md)
 # --------------------------
 
-# its sidebar row, pinned above the search: its cat, its name and what
-# waits on the person (Plane.counts); a click, or Enter/Space on it (a
-# button, so Tab reaches it), does action "uber", which opens the rows
+# its sidebar row, pinned above the search: two buttons, so Tab reaches
+# each and Enter/Space does its click. Its cat and name do action "uber"
+# (Chat with the Mailroom on, else Status: Uber.show). What waits on the
+# person (Plane.counts) is a button of its own that always opens the Status
+# tab, where the counted rows are listed and each opens its thread
+# ("uber-bot <bot>|status", Uber.bot.at): a count always leads to its rows.
+def WB.uber.counts(none: Bool, +id: String, +name: String, +counts: String) -> List<&2, D.Node>:
+  match none:
+    case True{}: Nil{}
+    case False{}:
+      [D.El{"button", "uber-counts:" ++ id, [D.At{"type", "button"}, D.At{"class", "uber-counts"}, D.At{"title", name ++ ": " ++ counts}, D.At{"aria-label", name ++ " status: " ++ counts}, D.At{"data-value", id ++ "|status"}, D.On{"click", "uber-bot"}], [D.Txt{counts}]}]
+
 def WB.uber.k(+lc: I.Loc, r: BI.BRow, +counts: String) -> D.Node:
   match r:
     case BI.BRow{+id, +name, _, +look, +mood, _, sel, _, _, _}:
-      D.El{"button", "uber:" ++ id, [D.At{"type", "button"}, D.At{"class", Bool.pick(String, sel, "bot-row uber-row on", "bot-row uber-row")}, D.At{"title", id}, D.At{"aria-label", name ++ Bool.pick(String, String.is_empty(counts), "", ": " ++ counts)}, D.At{"data-value", id}, D.On{"click", "uber"}],
-        [WC.WCat.img(look, mood, 28), WB.div("bot-text", [D.Dom.span("bot-name", name), D.Dom.span("uber-counts", Bool.pick(String, String.is_empty(counts), BI.Mood.note.loc(lc, mood), counts))])]}
+      D.El{"div", "uber:" ++ id, [D.At{"class", Bool.pick(String, sel, "bot-row uber-row on", "bot-row uber-row")}], List.append(&2, D.Node,
+        [D.El{"button", "uber-open:" ++ id, [D.At{"type", "button"}, D.At{"class", "uber-open"}, D.At{"title", id}, D.At{"aria-label", name}, D.At{"data-value", id}, D.On{"click", "uber"}],
+          [WC.WCat.img(look, mood, 28), WB.div("bot-text", [D.Dom.span("bot-name", name), D.Dom.span("uber-mood", Bool.pick(String, String.is_empty(counts), BI.Mood.note.loc(lc, mood), ""))])]}],
+        WB.uber.counts(String.is_empty(counts), id, name, counts))}
 
 # (the counts are Plane.tally.words with the sidebar's index, made once a
 # frame for both)
