@@ -2643,23 +2643,24 @@ def View.sch.crumbs(+lc: I.Loc, rs: List<&2, U.SchRow>) -> List<&2, D.Node>:
         D.At{"aria-current", View.sch.current(st)}, D.At{"data-value", v}, D.On{"click", "sch-go"}], [D.Txt{View.sch.label(lc, i, n)}]}
         <> View.sch.crumbs(lc, t)
 
-def View.sch.pos(+lc: I.Loc, out: Bool, +at: Nat, +count: Nat) -> String:
+# (KiCad's page number when the files give it, else the row's place in the tree)
+def View.sch.pos(+lc: I.Loc, out: Bool, +at: Nat, +count: Nat, +page: String) -> String:
   match out:
     case True{}:
       MSG.T.viewer.sch.outside(lc)
     case False{}:
-      MSG.T.viewer.sch.position(lc, Nat.show(1n+at), Nat.show(count))
+      MSG.T.viewer.sch.position(lc, Bool.pick(String, String.is_empty(page), Nat.show(1n+at), page), Nat.show(count))
 
 def View.sch.bar(+lc: I.Loc, v: U.SchView) -> List<&2, D.Node>:
   match v:
-    case U.SchView{_, trail, _, +at, count, _, back, fwd, out, tree, _, _}:
+    case U.SchView{_, trail, _, +at, count, _, back, fwd, out, tree, _, _, page}:
       [View.sch.btn("sch-back", back, MSG.T.viewer.sch.back.tip(lc), "‹ " ++ MSG.T.viewer.sch.back(lc)),
        View.sch.btn("sch-fwd", fwd, MSG.T.viewer.sch.forward.tip(lc), MSG.T.viewer.sch.forward(lc) ++ " ›"),
        View.sch.btn("sch-up", Bool.not(Nat.is_eq(at, 0n)), MSG.T.viewer.sch.up.tip(lc), "↑ " ++ MSG.T.viewer.sch.up(lc)),
        View.sch.btn("sch-root", Bool.not(Nat.is_eq(at, 0n)), MSG.T.viewer.sch.root.tip(lc), MSG.T.viewer.sheet.top(lc)),
        View.sch.toggle(lc, tree),
        D.El{"nav", "", [D.At{"class", "sch-trail"}, D.At{"aria-label", MSG.T.viewer.sch.trail(lc)}], View.sch.crumbs(lc, trail)},
-       D.El{"span", "", [D.At{"class", "sch-pos"}, D.At{"role", "status"}], [D.Txt{View.sch.pos(lc, out, at, count)}]}]
+       D.El{"span", "", [D.At{"class", "sch-pos"}, D.At{"role", "status"}], [D.Txt{View.sch.pos(lc, out, at, count, page)}]}]
 
 def View.sch.cls(+st: Nat) -> String:
   Bool.pick(String, Nat.is_eq(st, 2n), " on", Bool.pick(String, Nat.is_eq(st, 1n), " above", ""))
@@ -2679,7 +2680,7 @@ def View.sch.rows(+lc: I.Loc, rs: List<&2, U.SchRow>) -> List<&2, D.Node>:
       Nil{}
     case U.SchRow{+i, +d, +n, +v, +st, kids, open, l} <> t:
       D.El{"div", "", [D.At{"class", "sch-row" ++ View.sch.cls(st)}, D.At{"style", "--d:" ++ Nat.show(d)}],
-        [View.sch.fold(kids, lc, open, View.sch.label(lc, i, n), HS.Hist.field(v, 1n)),
+        [View.sch.fold(kids, lc, open, View.sch.label(lc, i, n), U.Sch.vkey(v)),
          D.El{"button", "", [D.At{"class", "sch-name"}, D.At{"title", HS.Hist.field(v, 1n)}, D.At{"aria-current", View.sch.current(st)}, D.At{"data-value", v}, D.On{"click", "sch-go"}],
            [D.Txt{MSG.T.viewer.sheet.title(lc, View.sch.label(lc, i, n), Bool.pick(String, l, "loop", ""))}]}]}
         <> View.sch.rows(lc, t)
@@ -2708,7 +2709,7 @@ def View.sch.tree(+lc: I.Loc, on: Bool, rows: List<&2, U.SchRow>, +here: List<&2
 
 def View.sch.panel(+lc: I.Loc, v: U.SchView) -> List<&2, D.Node>:
   match v:
-    case U.SchView{rows, _, here, _, _, _, _, _, +out, tree, _, note}:
+    case U.SchView{rows, _, here, _, _, _, _, _, +out, tree, _, note, _}:
       List.append(&2, D.Node, View.sch.say(lc, out, note), View.sch.tree(lc, tree, rows, here))
 
 def View.sch.below.k(many: Bool, +lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:

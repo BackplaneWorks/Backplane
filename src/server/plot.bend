@@ -657,35 +657,60 @@ def Tree.boxes(tab: List<&2, HI.Kids>, +acc: String) -> IO(String):
         bs : List<&2, U32> <- GT.Git.version(f)
         Tree.boxes(t, acc ++ HI.Hier.boxes.line(HS.Hist.family(f), bs) ++ "\n")
 
+# each file the tree read, a line of its sheets' uuids and pages
+# (Hier.uids.line, keyed the same way)
+def Tree.ids(tab: List<&2, HI.Kids>, +acc: String) -> IO(String):
+  match tab:
+    case Nil{}:
+      IO.pure(String, acc)
+    case HI.Kids{+f, _} <> t:
+      do IO<String>:
+        bs : List<&2, U32> <- GT.Git.version(f)
+        Tree.ids(t, acc ++ HI.Hier.uids.line(HS.Hist.family(f), bs) ++ "\n")
+
 # `backplane --plot-tree ROOT`: {"rows": the rows as Hier.show writes them,
-# "boxes": where each file's child sheets sit}
+# "boxes": where each file's child sheets sit, "ids": their uuids and
+# pages, "top": the root's uuid and pages}
 def Pv.child.tree(+root: String) -> IO(Unit):
   do IO<Unit>:
     +tab : List<&2, HI.Kids> <- Tree.load(64n, [root], Nil{})
     bx : String <- Tree.boxes(tab, "")
-    IO.print(J.Json.show(J.Json.obj([J.KV{"rows", J.Str{HI.Hier.show(HI.Hier.rows(tab, root))}}, J.KV{"boxes", J.Str{String.trim_end(bx)}}])))
+    ix : String <- Tree.ids(tab, "")
+    rb : List<&2, U32> <- GT.Git.version(root)
+    IO.print(J.Json.show(J.Json.obj([J.KV{"rows", J.Str{HI.Hier.show(HI.Hier.rows(tab, root))}}, J.KV{"boxes", J.Str{String.trim_end(bx)}},
+      J.KV{"ids", J.Str{String.trim_end(ix)}}, J.KV{"top", J.Str{HI.Hier.top(rb)}}])))
 
 # a phone or page watching a project's schematic hears its sheets ("" rows
 # for a schematic of one sheet, or one the child could not read) and the
 # boxes a click on a sheet symbol opens (an older child's plain rows still
 # read as rows)
-def Pv.tree.json(+root: String, +o: J.Json, +text: String) -> String:
-  J.Json.show(J.Json.obj([J.KV{"t", J.Str{"sheets"}}, J.KV{"root", J.Str{root}},
-    J.KV{"rows", J.Str{J.Json.get_str(o, "rows", String.trim_end(text))}}, J.KV{"boxes", J.Str{J.Json.get_str(o, "boxes", "")}}]))
+# (slot: which tree it is, "" the live design's, else "<gitdir>\t<commit>"
+# of the version watched; gen: when it was asked for, in seconds, so a
+# client keeps a slot's newest and never takes an older reply over it)
+def Pv.tree.json(+root: String, +slot: String, +gen: U32, +o: J.Json, +text: String) -> String:
+  J.Json.show(J.Json.obj([J.KV{"t", J.Str{"sheets"}}, J.KV{"root", J.Str{root}}, J.KV{"slot", J.Str{slot}}, J.KV{"gen", J.Num{U32.show(gen)}},
+    J.KV{"rows", J.Str{J.Json.get_str(o, "rows", String.trim_end(text))}}, J.KV{"boxes", J.Str{J.Json.get_str(o, "boxes", "")}},
+    J.KV{"ids", J.Str{J.Json.get_str(o, "ids", "")}}, J.KV{"top", J.Str{J.Json.get_str(o, "top", "")}}]))
 
-def Pv.tree.say(r: PR.Ran, +client: U32, +root: String, +out: Chan(POut)) -> IO(Unit):
+def Pv.tree.say(r: PR.Ran, +client: U32, +root: String, +slot: String, +gen: U32, +out: Chan(POut)) -> IO(Unit):
   match r:
     case PR.Ran{0, +text}:
-      Pv.say(out, client, Pv.tree.json(root, Maybe.default(&2, J.Json, J.Json.parse(String.trim(text)), J.Null{}), text))
+      Pv.say(out, client, Pv.tree.json(root, slot, gen, Maybe.default(&2, J.Json, J.Json.parse(String.trim(text)), J.Null{}), text))
     case _:
       IO.pure(Unit, Unit{})
 
-def Pv.tree.k(+file: String, +client: U32, +root: String, +out: Chan(POut)) -> IO(Unit):
+def Pv.tree.k(+file: String, +client: U32, +root: String, +slot: String, +gen: U32, +out: Chan(POut)) -> IO(Unit):
   Bool.pick(IO(Unit), String.is_empty(file), IO.pure(Unit, Unit{}),
-    IO.bind(String, Unit, H.Sys.exe_path(), exe => IO.bind(PR.Ran, Unit, PR.Proc.run(EX.Exe.child(exe), ["--plot-tree", file], "/"), r => Pv.tree.say(r, client, root, out))))
+    IO.bind(String, Unit, H.Sys.exe_path(), exe => IO.bind(PR.Ran, Unit, PR.Proc.run(EX.Exe.child(exe), ["--plot-tree", file], "/"), r => Pv.tree.say(r, client, root, slot, gen, out))))
+
+def Pv.tree.slot(+path: String) -> String:
+  Bool.pick(String, Nat.is_eq(HS.Hist.kind(path), 1n), HS.Hist.git.dir(path) ++ "\t" ++ HS.Hist.git.commit(path), "")
 
 def Pv.tree(+client: U32, +root: String, +path: String, +out: Chan(POut)) -> IO(Unit):
-  IO.bind(K.Files, Unit, K.Files.read(root), f => Pv.tree.k(Tree.root(f, Bool.pick(String, Nat.is_eq(HS.Hist.kind(path), 1n), path, "")), client, root, out))
+  do IO<Unit>:
+    gen : U32 <- H.Clock.epoch()
+    f : K.Files <- K.Files.read(root)
+    Pv.tree.k(Tree.root(f, Bool.pick(String, Nat.is_eq(HS.Hist.kind(path), 1n), path, "")), client, root, Pv.tree.slot(path), gen, out)
 
 def Pv.args.copy(xs: List<String>) -> List<&2, String>:
   match xs:

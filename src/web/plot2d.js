@@ -323,15 +323,16 @@ export function onSheet(fn) {
   sheeted = fn;
 }
 
-// "<row>\t<place>\t<x0 y0 x1 y1>" lines, mm on the sheet on show
+// "<row>\t<place>\t<uuid path>\t<x0 y0 x1 y1>" lines, mm on the sheet on
+// show; the value sent back is the instance (all but the box)
 function sheetBoxes(text) {
   const out = [];
   for (const line of String(text || "").split("\n")) {
     const f = line.split("\t");
-    if (f.length < 3) continue;
-    const n = f[2].trim().split(/\s+/).map(Number);
+    if (f.length < 4) continue;
+    const n = f[3].trim().split(/\s+/).map(Number);
     if (n.length !== 4 || !n.every(Number.isFinite)) continue;
-    out.push({ value: `${f[0]}\t${f[1]}`, x0: Math.min(n[0], n[2]), y0: Math.min(n[1], n[3]), x1: Math.max(n[0], n[2]), y1: Math.max(n[1], n[3]) });
+    out.push({ value: `${f[0]}\t${f[1]}\t${f[2]}`, x0: Math.min(n[0], n[2]), y0: Math.min(n[1], n[3]), x1: Math.max(n[0], n[2]), y1: Math.max(n[1], n[3]) });
   }
   return out;
 }

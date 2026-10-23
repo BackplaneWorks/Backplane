@@ -439,6 +439,9 @@ struct MechShot: Decodable, Hashable {
 struct SheetRow: Decodable, Hashable {
     let label, value: String
     let on, loop: Bool
+    // its sheet symbol on the sheet on show ("x0 y0 x1 y1" mm), when it is
+    // directly under it: a tap there opens it (mobile/view.bend)
+    let box: String?
 }
 
 struct LayerRow: Decodable, Hashable {

@@ -5296,9 +5296,18 @@ def Rv.sheet(+cur: String, +file: String) -> String:
 # after as "@sch.back:<t>"/"@sch.fwd:<t>" (newest first, a line each, at
 # most 32), a branch folded as "@sch.fold:<t>:<place>", and "@sch.note:<t>"
 # "gone" when a sheet asked for is no longer there (nothing else changes).
-# "@sch.tree" "0" puts the tree away. Actions: "sch-go" ("<row>\t<place>"
-# or "<row>": a tree row, a crumb, a sheet here, a sheet symbol), "sch-up",
-# "sch-root", "sch-back", "sch-fwd", "sch-fold" (a place), "sch-tree".
+# "@sch.tree" "0" puts the tree away. Actions: "sch-go" ("<row>\t<place>
+# \t<uuid path>", or less: a tree row, a crumb, a sheet here, a sheet
+# symbol), "sch-up", "sch-root", "sch-back", "sch-fwd", "sch-fold" (a row's
+# key: its uuid path, else its place), "sch-tree".
+# An instance is its KiCad uuid path when the files give one (hier.bend's
+# Hier.uids: stable across renames and moves), else its place by names.
+# Each tree the hub sends names its slot (the live design, or a version's
+# commit) and when it was asked for: a client keeps each root and slot
+# apart and takes a slot's reply only when it is no older than the one it
+# holds, so a late reply never replaces the hierarchy or the sheet on show
+# (Sch.got). A version with no tree yet navigates the live one's, mapped
+# into the version (Sch.value).
 
 # a row as a client lists it: state 0 plain, 1 above the one on show (an
 # ancestor), 2 on show; kids: rows under it; open: not folded
@@ -5311,13 +5320,62 @@ type SchRow is Data:
 # have somewhere to go, whether the tree shows, the sheet symbols' boxes
 # for the canvas ("<row>\t<place>\t<x0 y0 x1 y1>" lines) and the note
 type SchView is Data:
-  SchView{rows: List<&2, SchRow>, trail: List<&2, SchRow>, here: List<&2, SchRow>, at: Nat, count: Nat, place: String, back: Bool, fwd: Bool, out: Bool, tree: Bool, boxes: String, note: String}
+  SchView{rows: List<&2, SchRow>, trail: List<&2, SchRow>, here: List<&2, SchRow>, at: Nat, count: Nat, place: String, back: Bool, fwd: Bool, out: Bool, tree: Bool, boxes: String, note: String, page: String}
+
+def Sch.sfx(+slot: String) -> String:
+  Bool.pick(String, String.is_empty(slot), "", "\t" ++ slot)
+
+# the tree the view on show wants: the live design's, or a version's
+def Sch.slot.of(+p: String) -> String:
+  Bool.pick(String, Nat.is_eq(HI.Hist.kind(p), 1n), HI.Hist.git.dir(p) ++ "\t" ++ HI.Hist.git.commit(p), "")
+
+def Sch.want(+u: Ui) -> String:
+  Ui.root(u) ++ Sch.sfx(Sch.slot.of(Ui.view_get(u, "view.path")))
+
+def Sch.tk.k(none: Bool, +u: Ui) -> String:
+  match none:
+    case True{}:
+      Ui.root(u)
+    case False{}:
+      Sch.want(u)
+
+# the tree read: the one wanted once it came, else the live design's
+def Sch.tk(+u: Ui) -> String:
+  Sch.tk.k(String.is_empty(Ui.info(u, "sheets:" ++ Sch.want(u))), u)
 
 def Sch.rows(+u: Ui) -> List<&2, HR.Row>:
-  HR.Hier.read(Ui.info(u, "sheets:" ++ Ui.root(u)))
+  HR.Hier.read(Ui.info(u, "sheets:" ++ Sch.tk(u)))
 
 def Sch.fam(+p: String) -> String:
   HI.Hist.family(p)
+
+def Sch.ids.go(rs: List<&2, HR.Row>, +text: String) -> List<&2, List<&2, String>>:
+  match rs:
+    case Nil{}:
+      Nil{}
+    case HR.Row{_, _, g, _} <> t:
+      HR.Hier.boxes.of(text, Sch.fam(g)) <> Sch.ids.go(t, text)
+
+# each row's "<uuid path>\t<page>" (hier.bend's Hier.uids)
+def Sch.us(+u: Ui, +rs: List<&2, HR.Row>) -> List<&2, String>:
+  HR.Hier.uids(rs, Sch.ids.go(rs, Ui.info(u, "sheetid:" ++ Sch.tk(u))), Ui.info(u, "sheettop:" ++ Sch.tk(u)))
+
+def Sch.uid(+us: List<&2, String>, +j: Nat) -> String:
+  HI.Hist.field(HI.Hist.at(us, j), 0n)
+
+def Sch.page(+us: List<&2, String>, +j: Nat) -> String:
+  HI.Hist.field(HI.Hist.at(us, j), 1n)
+
+def Sch.useek.go(us: List<&2, String>, +j: Nat, +id: String) -> Maybe<&2, Nat>:
+  match us:
+    case Nil{}:
+      None{}
+    case x <> t:
+      HR.Hier.seek.k(String.eq(HI.Hist.field(x, 0n), id), j, Sch.useek.go(t, 1n+j, id))
+
+# a row's key for its folds: its uuid path, else its place
+def Sch.vkey(+v: String) -> String:
+  Bool.pick(String, String.is_empty(HI.Hist.field(v, 2n)), HI.Hist.field(v, 1n), HI.Hist.field(v, 2n))
 
 # the live file on show ("" is the project's own: the root's)
 def Sch.file(+u: Ui, +rs: List<&2, HR.Row>) -> String:
@@ -5355,14 +5413,36 @@ def Sch.find.k(keep: Bool, +rs: List<&2, HR.Row>, +i: Nat, +p: String) -> Maybe<
     case False{}:
       HR.Hier.seek(rs, p)
 
-# an entry's row: its row while that is still its place (or it names no
-# place), else the first row at its place, else none
-def Sch.find(+rs: List<&2, HR.Row>, +e: String) -> Maybe<&2, Nat>:
+# by names: its row while that is still its place (or it names no place),
+# else the first row at its place, else none
+def Sch.find.p(+rs: List<&2, HR.Row>, +e: String) -> Maybe<&2, Nat>:
   Sch.find.k(Bool.or(String.is_empty(HI.Hist.field(e, 1n)), String.eq(HR.Hier.path(rs, Sch.num(HI.Hist.field(e, 0n))), HI.Hist.field(e, 1n))),
     rs, Sch.num(HI.Hist.field(e, 0n)), HI.Hist.field(e, 1n))
 
-def Sch.entry(+rs: List<&2, HR.Row>, +j: Nat) -> String:
-  Nat.show(j) ++ "\t" ++ HR.Hier.path(rs, j)
+def Sch.find.v(m: Maybe<&2, Nat>, +rs: List<&2, HR.Row>, +e: String) -> Maybe<&2, Nat>:
+  match m:
+    case Some{+j}:
+      Some{j}
+    case None{}:
+      Sch.find.p(rs, e)
+
+def Sch.find.i(+us: List<&2, String>, +i: Nat, +id: String) -> Maybe<&2, Nat>:
+  Bool.pick(Maybe<&2, Nat>, String.eq(Sch.uid(us, i), id), Some{i}, Sch.useek.go(us, 0n, id))
+
+def Sch.find.u(none: Bool, +u: Ui, +rs: List<&2, HR.Row>, +e: String) -> Maybe<&2, Nat>:
+  match none:
+    case True{}:
+      Sch.find.p(rs, e)
+    case False{}:
+      Sch.find.v(Sch.find.i(Sch.us(u, rs), Sch.num(HI.Hist.field(e, 0n)), HI.Hist.field(e, 2n)), rs, e)
+
+# an entry's row ("<row>\t<place>\t<uuid path>"): by its uuid path when it
+# has one and a row still has it, else by its place, else none
+def Sch.find(+u: Ui, +rs: List<&2, HR.Row>, +e: String) -> Maybe<&2, Nat>:
+  Sch.find.u(String.is_empty(HI.Hist.field(e, 2n)), u, rs, e)
+
+def Sch.entry(+u: Ui, +rs: List<&2, HR.Row>, +j: Nat) -> String:
+  Nat.show(j) ++ "\t" ++ HR.Hier.path(rs, j) ++ "\t" ++ Sch.uid(Sch.us(u, rs), j)
 
 def Sch.first(+rs: List<&2, HR.Row>, +file: String) -> Nat:
   Maybe.default(&2, Nat, Sch.with.go(rs, 0n, file), List.length(&2, HR.Row, rs))
@@ -5385,7 +5465,7 @@ def Sch.at.k(m: Maybe<&2, Nat>, +rs: List<&2, HR.Row>, +file: String) -> Nat:
 # the first row of that file; the rows' count when the file is not in the
 # hierarchy (an agent showed another schematic)
 def Sch.at(+u: Ui, +rs: List<&2, HR.Row>) -> Nat:
-  Sch.at.k(Sch.find(rs, Ui.scratch(u, Sch.key(u))), rs, Sch.file(u, rs))
+  Sch.at.k(Sch.find(u, rs, Ui.scratch(u, Sch.key(u))), rs, Sch.file(u, rs))
 
 def Sch.inside(+rs: List<&2, HR.Row>, +j: Nat) -> Bool:
   Nat.is_lt(j, List.length(&2, HR.Row, rs))
@@ -5405,19 +5485,21 @@ def Sch.tail(+s: String) -> String:
 
 # the entry of the row on show put in front of a history (nothing when the
 # file on show is not in the hierarchy)
-def Sch.mark(+rs: List<&2, HR.Row>, +at: Nat, +s: String) -> String:
-  Bool.pick(String, Sch.inside(rs, at), Sch.cons(Sch.entry(rs, at), s), s)
+def Sch.mark(+u: Ui, +rs: List<&2, HR.Row>, +at: Nat, +s: String) -> String:
+  Bool.pick(String, Sch.inside(rs, at), Sch.cons(Sch.entry(u, rs, at), s), s)
 
 # the file row j shows: the project's own ("") for the root of the live
-# design, else its file (a version's file while a version shows)
+# design; while a version shows, that file in the same version (its own
+# tree's rows, or the live tree's mapped in); else its file
 def Sch.value(+cur: String, +rs: List<&2, HR.Row>, +j: Nat) -> String:
-  Bool.pick(String, Bool.and(Nat.is_eq(j, 0n), Nat.is_eq(HI.Hist.kind(cur), 0n)), "", HR.Hier.file(rs, j))
+  Bool.pick(String, Bool.and(Nat.is_eq(j, 0n), Nat.is_eq(HI.Hist.kind(cur), 0n)), "",
+    Bool.pick(String, Nat.is_eq(HI.Hist.kind(cur), 1n), HI.Hist.rebase(cur, Sch.fam(HR.Hier.file(rs, j))), HR.Hier.file(rs, j)))
 
 # row j on show (a comparison keeps comparing that sheet: Rv.sheet), kept
 # as the instance, the note cleared
 def Sch.show(+u: Ui, +rs: List<&2, HR.Row>, +j: Nat) -> Ui:
   Ui.scratch_set(Ui.scratch_set(Ui.view_put(u, "schematic", Rv.sheet(Ui.view_get(u, "view.path"), Sch.value(Ui.view_get(u, "view.path"), rs, j))),
-    Sch.key(u), Sch.entry(rs, j)), Sch.note.key(u), "")
+    Sch.key(u), Sch.entry(u, rs, j)), Sch.note.key(u), "")
 
 def Sch.gone(+u: Ui) -> Ui:
   Ui.scratch_set(u, Sch.note.key(u), "gone")
@@ -5425,7 +5507,7 @@ def Sch.gone(+u: Ui) -> Ui:
 def Sch.visit.k(moved: Bool, +u: Ui, +rs: List<&2, HR.Row>, +j: Nat) -> Ui:
   match moved:
     case True{}:
-      Sch.show(Ui.scratch_set(Ui.scratch_set(u, Sch.back.key(u), Sch.mark(rs, Sch.at(u, rs), Ui.scratch(u, Sch.back.key(u)))), Sch.fwd.key(u), ""), rs, j)
+      Sch.show(Ui.scratch_set(Ui.scratch_set(u, Sch.back.key(u), Sch.mark(u, rs, Sch.at(u, rs), Ui.scratch(u, Sch.back.key(u)))), Sch.fwd.key(u), ""), rs, j)
     case False{}:
       Sch.show(u, rs, j)
 
@@ -5454,7 +5536,7 @@ def Sch.go.k(m: Maybe<&2, Nat>, +u: Ui, +rs: List<&2, HR.Row>) -> Ui:
 def Sch.step.in(ok: Bool, +u: Ui, +rs: List<&2, HR.Row>, +j: Nat, +from: String, +to: String) -> Ui:
   match ok:
     case True{}:
-      Sch.show(Ui.scratch_set(Ui.scratch_set(u, to, Sch.mark(rs, Sch.at(u, rs), Ui.scratch(u, to))), from, Sch.tail(Ui.scratch(u, from))), rs, j)
+      Sch.show(Ui.scratch_set(Ui.scratch_set(u, to, Sch.mark(u, rs, Sch.at(u, rs), Ui.scratch(u, to))), from, Sch.tail(Ui.scratch(u, from))), rs, j)
     case False{}:
       Sch.gone(Ui.scratch_set(u, from, Sch.tail(Ui.scratch(u, from))))
 
@@ -5470,7 +5552,7 @@ def Sch.step.e(none: Bool, +u: Ui, +rs: List<&2, HR.Row>, +from: String, +to: St
     case True{}:
       u
     case False{}:
-      Sch.step.k(Sch.find(rs, Sch.head(Ui.scratch(u, from))), u, rs, from, to)
+      Sch.step.k(Sch.find(u, rs, Sch.head(Ui.scratch(u, from))), u, rs, from, to)
 
 def Sch.step(+u: Ui, +rs: List<&2, HR.Row>, +from: String, +to: String) -> Ui:
   Sch.step.e(String.is_empty(Ui.scratch(u, from)), u, rs, from, to)
@@ -5512,7 +5594,7 @@ def Sch.tree.flip(+u: Ui) -> Ui:
 def Sch.act.k(i: Nat, +u: Ui, +rs: List<&2, HR.Row>, +value: String) -> Ui:
   match i:
     case 0n:
-      Sch.go.k(Sch.find(rs, value), u, rs)
+      Sch.go.k(Sch.find(u, rs, value), u, rs)
     case 1n:
       Sch.up(u, rs)
     case 2n:
@@ -5579,16 +5661,20 @@ def Sch.keep(vis: Bool, r: SchRow, rest: List<&2, SchRow>) -> List<&2, SchRow>:
     case False{}:
       rest
 
-def Sch.row(+j: Nat, +e: Nat, n: String, l: Bool, +p: String, +st: Nat, +kids: Bool, +closed: Bool) -> SchRow:
-  SchRow{j, e, n, Nat.show(j) ++ "\t" ++ p, st, kids, Bool.not(closed), l}
+def Sch.row(+j: Nat, +e: Nat, n: String, l: Bool, +v: String, +st: Nat, +kids: Bool, +closed: Bool) -> SchRow:
+  SchRow{j, e, n, v, st, kids, Bool.not(closed), l}
 
-def Sch.rows.go(rs: List<&2, HR.Row>, +all: List<&2, HR.Row>, +ps: List<&2, String>, +j: Nat, +h: Nat, +u: Ui, +chain: List<&2, Nat>, +cur: Nat) -> List<&2, SchRow>:
+# a row's value: "<row>\t<place>\t<uuid path>"
+def Sch.val(+ps: List<&2, String>, +us: List<&2, String>, +j: Nat) -> String:
+  Nat.show(j) ++ "\t" ++ HI.Hist.at(ps, j) ++ "\t" ++ Sch.uid(us, j)
+
+def Sch.rows.go(rs: List<&2, HR.Row>, +all: List<&2, HR.Row>, +ps: List<&2, String>, +us: List<&2, String>, +j: Nat, +h: Nat, +u: Ui, +chain: List<&2, Nat>, +cur: Nat) -> List<&2, SchRow>:
   match rs:
     case Nil{}:
       Nil{}
     case HR.Row{+e, n, _, l} <> t:
-      Sch.keep(Sch.vis(h, e), Sch.row(j, e, n, l, HI.Hist.at(ps, j), Sch.state(chain, cur, j), Sch.kids(all, j, e), Sch.closed(u, HI.Hist.at(ps, j), Sch.state(chain, cur, j))),
-        Sch.rows.go(t, all, ps, 1n+j, Sch.hide(Sch.vis(h, e), h, e, Sch.kids(all, j, e), Sch.closed(u, HI.Hist.at(ps, j), Sch.state(chain, cur, j))), u, chain, cur))
+      Sch.keep(Sch.vis(h, e), Sch.row(j, e, n, l, Sch.val(ps, us, j), Sch.state(chain, cur, j), Sch.kids(all, j, e), Sch.closed(u, Sch.vkey(Sch.val(ps, us, j)), Sch.state(chain, cur, j))),
+        Sch.rows.go(t, all, ps, us, 1n+j, Sch.hide(Sch.vis(h, e), h, e, Sch.kids(all, j, e), Sch.closed(u, Sch.vkey(Sch.val(ps, us, j)), Sch.state(chain, cur, j))), u, chain, cur))
 
 def Sch.loop.k(m: Maybe<&2, HR.Row>) -> Bool:
   match m:
@@ -5597,41 +5683,42 @@ def Sch.loop.k(m: Maybe<&2, HR.Row>) -> Bool:
     case None{}:
       False{}
 
-def Sch.trail.go(cs: List<&2, Nat>, +rs: List<&2, HR.Row>, +ps: List<&2, String>, +cur: Nat) -> List<&2, SchRow>:
+def Sch.trail.go(cs: List<&2, Nat>, +rs: List<&2, HR.Row>, +ps: List<&2, String>, +us: List<&2, String>, +cur: Nat) -> List<&2, SchRow>:
   match cs:
     case Nil{}:
       Nil{}
     case +c <> t:
-      SchRow{c, HR.Hier.depth(rs, c), HR.Hier.name(rs, c), Nat.show(c) ++ "\t" ++ HI.Hist.at(ps, c), Bool.pick(Nat, Nat.is_eq(c, cur), 2n, 1n), False{}, True{}, False{}}
-        <> Sch.trail.go(t, rs, ps, cur)
+      SchRow{c, HR.Hier.depth(rs, c), HR.Hier.name(rs, c), Sch.val(ps, us, c), Bool.pick(Nat, Nat.is_eq(c, cur), 2n, 1n), False{}, True{}, False{}}
+        <> Sch.trail.go(t, rs, ps, us, cur)
 
-def Sch.here.go(js: List<&2, Nat>, +rs: List<&2, HR.Row>, +ps: List<&2, String>) -> List<&2, SchRow>:
+def Sch.here.go(js: List<&2, Nat>, +rs: List<&2, HR.Row>, +ps: List<&2, String>, +us: List<&2, String>) -> List<&2, SchRow>:
   match js:
     case Nil{}:
       Nil{}
     case +j <> t:
-      SchRow{j, HR.Hier.depth(rs, j), HR.Hier.name(rs, j), Nat.show(j) ++ "\t" ++ HI.Hist.at(ps, j), 0n, Sch.kids(rs, j, HR.Hier.depth(rs, j)), True{}, Sch.loop.k(HR.Hier.row(rs, j))}
-        <> Sch.here.go(t, rs, ps)
+      SchRow{j, HR.Hier.depth(rs, j), HR.Hier.name(rs, j), Sch.val(ps, us, j), 0n, Sch.kids(rs, j, HR.Hier.depth(rs, j)), True{}, Sch.loop.k(HR.Hier.row(rs, j))}
+        <> Sch.here.go(t, rs, ps, us)
 
-def Sch.box.go(js: List<&2, Nat>, +k: Nat, +bs: List<&2, String>, +ps: List<&2, String>) -> List<&2, String>:
+# "<row>\t<place>\t<uuid path>\t<x0 y0 x1 y1>" per sheet symbol
+def Sch.box.go(js: List<&2, Nat>, +k: Nat, +bs: List<&2, String>, +ps: List<&2, String>, +us: List<&2, String>) -> List<&2, String>:
   match js:
     case Nil{}:
       Nil{}
     case +j <> t:
-      (Nat.show(j) ++ "\t" ++ HI.Hist.at(ps, j) ++ "\t" ++ HI.Hist.at(bs, k)) <> Sch.box.go(t, 1n+k, bs, ps)
+      (Sch.val(ps, us, j) ++ "\t" ++ HI.Hist.at(bs, k)) <> Sch.box.go(t, 1n+k, bs, ps, us)
 
-def Sch.view.at(+cur: Nat, +ps: List<&2, String>, +rs: List<&2, HR.Row>, +u: Ui) -> SchView:
-  SchView{Sch.rows.go(rs, rs, ps, 0n, 0n, u, HR.Hier.chain(rs, cur), cur),
-    Sch.trail.go(HR.Hier.chain(rs, cur), rs, ps, cur),
-    Sch.here.go(HR.Hier.under(rs, cur), rs, ps),
+def Sch.view.at(+cur: Nat, +ps: List<&2, String>, +us: List<&2, String>, +rs: List<&2, HR.Row>, +u: Ui) -> SchView:
+  SchView{Sch.rows.go(rs, rs, ps, us, 0n, 0n, u, HR.Hier.chain(rs, cur), cur),
+    Sch.trail.go(HR.Hier.chain(rs, cur), rs, ps, us, cur),
+    Sch.here.go(HR.Hier.under(rs, cur), rs, ps, us),
     cur, List.length(&2, HR.Row, rs), HI.Hist.at(ps, cur),
     Bool.not(String.is_empty(Ui.scratch(u, Sch.back.key(u)))), Bool.not(String.is_empty(Ui.scratch(u, Sch.fwd.key(u)))),
     Bool.not(Sch.inside(rs, cur)), Sch.tree.on(u),
-    String.join(Sch.box.go(HR.Hier.under(rs, cur), 0n, HR.Hier.boxes.of(Ui.info(u, "sheetbox:" ++ Ui.root(u)), Sch.fam(HR.Hier.file(rs, cur))), ps), "\n"),
-    Ui.scratch(u, Sch.note.key(u))}
+    String.join(Sch.box.go(HR.Hier.under(rs, cur), 0n, HR.Hier.boxes.of(Ui.info(u, "sheetbox:" ++ Sch.tk(u)), Sch.fam(HR.Hier.file(rs, cur))), ps, us), "\n"),
+    Ui.scratch(u, Sch.note.key(u)), Sch.page(us, cur)}
 
 def Sch.view.k(+rs: List<&2, HR.Row>, +u: Ui) -> SchView:
-  Sch.view.at(Sch.at(u, rs), HR.Hier.paths(rs), rs, u)
+  Sch.view.at(Sch.at(u, rs), HR.Hier.paths(rs), Sch.us(u, rs), rs, u)
 
 # the schematic's navigation as the client shows it
 def Sch.view(+u: Ui) -> SchView:
@@ -5643,7 +5730,7 @@ def Sch.many(+u: Ui) -> Bool:
 
 def Sch.boxes.v(v: SchView) -> String:
   match v:
-    case SchView{_, _, _, _, _, _, _, _, _, _, b, _}:
+    case SchView{_, _, _, _, _, _, _, _, _, _, b, _, _}:
       b
 
 
@@ -5946,10 +6033,23 @@ def Sch.boxes.k(on: Bool, +u: Ui) -> String:
 def Sch.boxes(+u: Ui) -> String:
   Sch.boxes.k(Bool.and(String.eq(Solid.kind(u), "schematic"), Sch.many(u)), u)
 
-# a schematic's sheets as the hub sends them ({"t":"sheets", root, rows,
-# boxes}), kept under its project root
-def Sch.got(u: Ui, +o: J.Json) -> Ui:
-  Ui.info_set(Ui.info_set(u, "sheets:" ++ J.Json.get_str(o, "root", ""), J.Json.get_str(o, "rows", "")), "sheetbox:" ++ J.Json.get_str(o, "root", ""), J.Json.get_str(o, "boxes", ""))
+def Sch.got.k(take: Bool, u: Ui, +k: String, +o: J.Json) -> Ui:
+  match take:
+    case True{}:
+      Ui.info_set(Ui.info_set(Ui.info_set(Ui.info_set(Ui.info_set(u, "sheets:" ++ k, J.Json.get_str(o, "rows", "")), "sheetbox:" ++ k, J.Json.get_str(o, "boxes", "")),
+        "sheetid:" ++ k, J.Json.get_str(o, "ids", "")), "sheettop:" ++ k, J.Json.get_str(o, "top", "")), "sheetgen:" ++ k, J.Json.as_raw(J.Json.get(o, "gen"), "0"))
+    case False{}:
+      u
+
+def Sch.got.at(+u: Ui, +k: String, +o: J.Json) -> Ui:
+  Sch.got.k(Bool.not(Nat.is_lt(Sch.num(J.Json.as_raw(J.Json.get(o, "gen"), "0")), Sch.num(Ui.info(u, "sheetgen:" ++ k)))), u, k, o)
+
+# a schematic's sheets as the hub sends them ({"t":"sheets", root, slot,
+# gen, rows, boxes, ids, top}), kept under its project root and slot, all
+# together, and only when no older than the slot's last (a stale reply
+# leaves the hierarchy and the sheet on show as they are)
+def Sch.got(+u: Ui, +o: J.Json) -> Ui:
+  Sch.got.at(u, J.Json.get_str(o, "root", "") ++ Sch.sfx(J.Json.get_str(o, "slot", "")), o)
 
 def Solid.num(+k: String) -> String:
   Bool.pick(String, String.eq(k, "board"), "0", Bool.pick(String, String.eq(k, "schematic"), "1", Bool.pick(String, String.eq(k, "3d"), "2", "")))
