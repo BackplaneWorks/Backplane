@@ -1,143 +1,52 @@
-name: Desktop release smoke (evidence only)
-
-# The launch-and-connect smoke of one staged desktop target, on that target's
-# own hosted runner, with the OS sandbox on. The stage and the smoke tools come
-# from HTTPS URLs pinned by sha256 (a release's hand-off, docs/release-desktop.md);
-# the stage's bytes are not changed (macOS's ad-hoc re-seal of the .app only
-# with reseal: true, which the smoke's payload guard refuses today). Uploads the evidence folder as it is, pass
-# or fail. Dispatch only: contents: read, no secrets, no publish, tag or push.
+name: Windows0.12.2 icon resource generation only
 on:
   workflow_dispatch:
     inputs:
-      target:
-        type: choice
-        options: [linux-x64, linux-arm64, darwin-arm64, windows-x64]
-        required: true
-      stage_url:
-        type: string
-        required: true
-      stage_sha256:
-        type: string
-        required: true
-      tools_url:
-        type: string
-        required: true
-      tools_sha256:
-        type: string
-        required: true
-      smoke_sha256:
-        description: sha256 of tools/desktop/test/release-smoke.cjs (the one the freeze names)
-        type: string
-        required: true
-      reseal:
-        description: macOS only, re-seal the .app ad hoc first. Off for 0.12.x (unsigned-portable-allowed, as 0.12.0); the smoke's payload guard refuses a re-sealed stage
-        type: boolean
-        default: false
-permissions:
-  contents: read
+      input_url: {type: string, required: true}
+      input_sha256: {type: string, required: true}
+      product_commit: {type: string, required: true}
+permissions: {contents: read}
 concurrency:
-  group: desktop-smoke-${{ inputs.target }}-${{ inputs.stage_sha256 }}
+  group: windows-brand-${{ inputs.input_sha256 }}
   cancel-in-progress: false
-
 jobs:
-  smoke:
-    runs-on: ${{ inputs.target == 'linux-x64' && 'ubuntu-24.04' || inputs.target == 'linux-arm64' && 'ubuntu-24.04-arm' || inputs.target == 'windows-x64' && 'windows-2025' || 'macos-15' }}
-    timeout-minutes: 30
+  brand:
+    runs-on: windows-2025
+    timeout-minutes: 20
     env:
-      TARGET: ${{ inputs.target }}
-      STAGE_URL: ${{ inputs.stage_url }}
-      STAGE_SHA: ${{ inputs.stage_sha256 }}
-      TOOLS_URL: ${{ inputs.tools_url }}
-      TOOLS_SHA: ${{ inputs.tools_sha256 }}
-      SMOKE_SHA: ${{ inputs.smoke_sha256 }}
-      W: ${{ github.workspace }}/smoke
+      INPUT_URL: ${{ inputs.input_url }}
+      INPUT_SHA: ${{ inputs.input_sha256 }}
+      PRODUCT_COMMIT: ${{ inputs.product_commit }}
     steps:
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-      - name: Download, check and unpack the stage and tools
-        shell: bash
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - name: Fetch exact executable and apply native icon resources
+        shell: python
         run: |
-          set -euo pipefail
-          for v in "$STAGE_SHA" "$TOOLS_SHA" "$SMOKE_SHA"; do [[ $v =~ ^[0-9a-f]{64}$ ]] || { echo "bad sha256"; exit 1; }; done
-          for u in "$STAGE_URL" "$TOOLS_URL"; do [[ $u =~ ^https:// ]] || { echo "https only"; exit 1; }; done
-          mkdir -p "$W"
-          cd "$W"
-          sum() { if command -v sha256sum >/dev/null; then sha256sum "$1"; else shasum -a 256 "$1"; fi | cut -d' ' -f1; }
-          curl --proto '=https' --tlsv1.2 -fsSL -o stage.tar.gz "$STAGE_URL"
-          curl --proto '=https' --tlsv1.2 -fsSL -o tools.tar.gz "$TOOLS_URL"
-          [ "$(sum stage.tar.gz)" = "$STAGE_SHA" ] || { echo "stage sha256 mismatch"; exit 1; }
-          [ "$(sum tools.tar.gz)" = "$TOOLS_SHA" ] || { echo "tools sha256 mismatch"; exit 1; }
-          # -p: keep the stage's recorded modes (the runner's umask 022 would turn its
-          # 0664 files into 0644, and the stage's payload manifest would differ)
-          tar -xpzf stage.tar.gz
-          tar -xpzf tools.tar.gz
-          [ "$(sum tools/desktop/test/release-smoke.cjs)" = "$SMOKE_SHA" ] || { echo "release-smoke.cjs is not the frozen one"; exit 1; }
-          python3 -c "import json,sys; s=json.load(open('stage/STAGE.json')); assert s['target']==sys.argv[1], s['target']; print('stage', s['target'], s['release']['version'], s['release']['commit'])" "$TARGET"
-          (cd tools/desktop && npm ci --ignore-scripts --no-audit --no-fund)
-      - name: Let the staged app use user namespaces (ephemeral Linux runner)
-        if: startsWith(inputs.target, 'linux-')
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$RUNNER_ENVIRONMENT" = github-hosted
-          # global userns restrictions stay; only the staged app and the probe are allowed
-          app="$W/stage/runtime/backplane-desktop"
-          [[ $app =~ ^/[-A-Za-z0-9_/.]+$ ]]
-          printf 'abi <abi/4.0>,\nprofile backplane-release-electron %s flags=(unconfined) {\n  userns,\n}\nprofile backplane-release-probe /usr/bin/unshare flags=(unconfined) {\n  userns,\n}\n' "$app" > "$RUNNER_TEMP/backplane-userns.profile"
-          sudo apparmor_parser --replace "$RUNNER_TEMP/backplane-userns.profile"
-          unshare --user --map-root-user /bin/true
-          sudo apt-get install -y -q xvfb >/dev/null
-      - name: Re-seal the .app ad hoc (macOS, only when asked)
-        if: startsWith(inputs.target, 'darwin-') && inputs.reseal
-        shell: bash
-        run: |
-          set -euo pipefail
-          app=$(find "$W/stage" -maxdepth 1 -name '*.app' -type d | head -1)
-          [ -n "$app" ]
-          codesign --force --deep -s - "$app"
-          codesign --verify --deep --strict "$app"
-          codesign -dv "$app" 2>&1 | tee "$W/codesign.txt"
-          # the archive is made from the stage the smoke ran: keep the re-sealed one
-          # (tar: an artifact zip would drop the .app's symlinks and modes)
-          (cd "$W" && tar -czf stage-resealed.tar.gz stage && shasum -a 256 stage-resealed.tar.gz | tee stage-resealed.sha256)
-      - name: Smoke
-        shell: bash
-        # as the 0.12.0 hosted runtime did: the hub the smoke starts serves the
-        # app's Direct Browser (the app sets this only for a hub it starts
-        # itself), and sends no telemetry
-        env:
-          BACKPLANE_DESKTOP_BROWSER: '1'
-          BACKPLANE_TELEMETRY: 'off'
-        run: |
-          set -euo pipefail
-          cd "$W"
-          if [[ $TARGET == linux-* ]]; then
-            xvfb-run --auto-servernum --server-args='-screen 0 1280x900x24 -nolisten tcp' node tools/desktop/test/release-smoke.cjs --stage "$W/stage" --out "$W/evidence-$TARGET"
-          else
-            node tools/desktop/test/release-smoke.cjs --stage "$W/stage" --out "$W/evidence-$TARGET"
-          fi
-      - name: Keep the smoke homes' logs (on failure; no secrets live there)
-        if: failure()
-        shell: bash
-        run: |
-          set -u
-          # the smoke's temporary homes: the hub's own log, its events and the app's logs
-          find /tmp "${TMPDIR:-/tmp}" -maxdepth 1 -name 'Backplane smoke*' -type d 2>/dev/null | sort -u | while IFS= read -r d; do
-            n=$(basename "$d" | tr ' ' '_')
-            mkdir -p "$W/homes/$n"
-            find "$d" -maxdepth 3 -type f \( -name '*.log' -o -name '*.jsonl' -o -name '*.txt' -o -name 'hub.lock' \) -size -20M -exec cp --parents {} "$W/homes/$n/" \; 2>/dev/null || true
-          done
-          ls -R "$W/homes" 2>/dev/null | head -50 || true
+          from pathlib import Path
+          import os,hashlib,json,urllib.request,zipfile,subprocess,sys,time
+          started=time.monotonic()
+          assert os.environ['PRODUCT_COMMIT']=='5fb5c082a1876228bb3e108cd2bc391be84be936'
+          archive=Path('inputs.zip')
+          with urllib.request.urlopen(os.environ['INPUT_URL'],timeout=300) as src, archive.open('wb') as dst:
+              while block:=src.read(1048576):dst.write(block)
+          digest=lambda p:hashlib.sha256(p.read_bytes()).hexdigest()
+          assert digest(archive)==os.environ['INPUT_SHA']
+          with zipfile.ZipFile(archive) as z:
+              assert set(z.namelist())=={'Backplane.exe','brand-windows.py','backplane.ico'}
+              z.extractall('inputs')
+          exe=Path('inputs/Backplane.exe'); original=digest(exe)
+          subprocess.run([sys.executable,'inputs/brand-windows.py',str(exe),'inputs/backplane.ico'],check=True)
+          out=Path('branded');out.mkdir();exe.rename(out/'Backplane.exe')
+          receipt={'status':'GENERATED_NATIVE_WINDOWS_ICON_RESOURCES','version':'0.12.2','sourceCommit':os.environ['PRODUCT_COMMIT'],
+                   'inputArchiveSha256':os.environ['INPUT_SHA'],'originalExecutableSha256':original,'brandedExecutableSha256':digest(out/'Backplane.exe'),
+                   'iconSha256':digest(Path('inputs/backplane.ico')),'helperSha256':digest(Path('inputs/brand-windows.py')),
+                   'signed':False,'runtimeAcceptance':'USER_WAIVED_NOT_PASS','seconds':time.monotonic()-started}
+          (out/'WINDOWS-BRANDING.json').write_text(json.dumps(receipt,indent=2)+'\n')
+          print(json.dumps(receipt))
       - uses: actions/upload-artifact@v4
-        if: always()
         with:
-          name: desktop-smoke-${{ inputs.target }}
-          path: |
-            smoke/evidence-${{ inputs.target }}/
-            smoke/codesign.txt
-            smoke/stage-resealed.tar.gz
-            smoke/stage-resealed.sha256
-            smoke/homes/
-          if-no-files-found: warn
-          retention-days: 30
+          name: branded-windows-0122
+          path: branded/
+          if-no-files-found: error
+          retention-days: 14
