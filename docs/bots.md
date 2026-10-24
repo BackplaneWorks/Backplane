@@ -282,17 +282,28 @@ empty kind: a stop, an intermediate end, a routine, a launched report, or a
 channel switched off) posts nothing. A desk that holds the phone push does
 not hold the webhook. Unset, nothing is sent and nothing else changes.
 
+A turn that breaks always goes out as a failure while **Settled**
+(`notify.settled`) is on, even when the policy keeps it quiet (a turn no
+fresh message started, a bot's or a queued one): a turn that failed (an
+error, a usage limit) or one the agent cut off (`state` `interrupted`)
+posts `turn.ended` with kind `fail`. A Stop the person asked for stays
+quiet.
+
 ```
-{"event":"turn.ended","kind":"done","thread":"…","state":"completed","title":"…","text":"…"}
+{"event":"turn.ended","kind":"done","thread":"…","state":"completed","reason":"","title":"…","text":"…"}
+{"event":"turn.ended","kind":"fail","thread":"…","state":"failed","reason":"limit","title":"…","text":"Claude AI usage limit reached…"}
 ```
 
 `event` is `turn.ended` for a settle or a failure, and otherwise the kind
 itself (`ask`, `merged`, `reminder`, `note`). `kind` is that alert's kind.
 `state` for a turn end is the word the turn ended with: `completed`,
-`failed`, or `stopped`. A message already waiting does not replace it when
+`failed`, `interrupted`, or `stopped`. `reason` says why a broken turn
+ended: `limit` (a usage, rate or quota limit), `error` (any other
+failure) or `interrupted`; it is empty otherwise. A message already waiting does not replace it when
 it starts the next turn. For the other alerts, `state` is the thread's turn
 at the time (`running`, `idle`, …). `text` for a settle or a failure is
-`Failed`, or the first line of the last reply; for the others it is the
+the first line of the error the turn logged, else `Failed`, or the first
+line of the last reply; for the others it is the
 record's own text (the ask, the merge url, the reminder, the note). A POST
 that fails is logged (`backplane: push webhook -> …`) and does not affect
 the turn. With `notify.all` on, a room exchange the older rule alerts is a

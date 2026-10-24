@@ -3,6 +3,7 @@ import ./json.bend as J
 import ./model.bend as M
 import ./notice.bend as NO
 import ./sign.bend as SG
+import ./fallback.bend as FB
 
 # An outbound notice posted to push.webhook.url (server/push.bend). It
 # follows Notify me for (notice.bend's Policy): a post goes out only for
@@ -100,7 +101,7 @@ def Wn.outcome(t: M.TurnState) -> String:
       "idle"
 
 def Wn.known(+s: String) -> Bool:
-  Bool.or(Bool.or(String.eq(s, "completed"), String.eq(s, "failed")), String.eq(s, "stopped"))
+  Bool.or(Bool.or(String.eq(s, "completed"), String.eq(s, "failed")), Bool.or(String.eq(s, "stopped"), String.eq(s, "interrupted")))
 
 # the end the hub reported, or the thread's turn when that word is absent
 # (a queued message can start the next turn before the notice is posted)
@@ -192,18 +193,50 @@ def Wn.other(route: Nat) -> Bool:
 def Wn.due.turn(+kind: String) -> Bool:
   Wn.turn(Wn.route(kind))
 
+# a turn that broke: it failed (an error, a usage limit) or the agent cut
+# it off. A Stop the person asked for ("stopped") is not one.
+def Wn.broke(+state: String) -> Bool:
+  Bool.or(String.eq(state, "failed"), String.eq(state, "interrupted"))
+
+# A broken turn is posted as a failure whenever Notify me for would tell
+# of a failure (settled: notify.settled), even when the policy kept it
+# quiet: a turn no fresh message started (a bot's, a queued one) or an
+# interrupted one. A limit or an error is never only in the log.
+def Wn.due.end(+kind: String, +state: String, settled: Bool) -> Bool:
+  Bool.or(Wn.due.turn(kind), Bool.and(settled, Wn.broke(state)))
+
+# the kind a turn end posts under: the policy's, or "fail" for a broken
+# turn the policy kept quiet
+def Wn.end.kind(+kind: String, +state: String) -> String:
+  Bool.pick(String, Wn.due.turn(kind), kind, Bool.pick(String, Wn.broke(state), "fail", kind))
+
+# why a turn ended: "limit" (a usage, rate or quota limit, by the words
+# fallback.bend's Error.words knows), "error" (any other failure),
+# "interrupted", or "" (a settle, a stop, or not a turn end)
+def Wn.reason.k(+limit: Bool, +state: String) -> String:
+  Bool.pick(String, String.eq(state, "failed"), Bool.pick(String, limit, "limit", "error"),
+    Bool.pick(String, String.eq(state, "interrupted"), Bool.pick(String, limit, "limit", "interrupted"), ""))
+
+def Wn.reason(+state: String, +err: String) -> String:
+  Wn.reason.k(FB.Error.words(String.to_lower(err)), state)
+
 # Alerted posts the other kinds (so a settle is not sent twice)
 def Wn.due.alert(+kind: String) -> Bool:
   Wn.other(Wn.route(kind))
 
-def Wn.body(+kind: String, +thread: String, +state: String, +title: String, +text: String) -> String:
+# reason: Wn.reason's word ("" when the notice is not a broken turn)
+def Wn.body.r(+kind: String, +thread: String, +state: String, +reason: String, +title: String, +text: String) -> String:
   J.Json.show(J.Json.obj([
     J.KV{"event", J.Str{Wn.event(kind)}},
     J.KV{"kind", J.Str{kind}},
     J.KV{"thread", J.Str{thread}},
     J.KV{"state", J.Str{state}},
+    J.KV{"reason", J.Str{reason}},
     J.KV{"title", J.Str{title}},
     J.KV{"text", J.Str{text}}]))
+
+def Wn.body(+kind: String, +thread: String, +state: String, +title: String, +text: String) -> String:
+  Wn.body.r(kind, thread, state, "", title, text)
 
 def Wn.signed(+secret: String) -> Bool:
   Bool.not(String.is_empty(secret))

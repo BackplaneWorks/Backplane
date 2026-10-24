@@ -3543,16 +3543,24 @@ def Queue.changes(st: Step) -> List<&2, M.Change>:
       cs
 
 # the turn ended with messages waiting: start the next turn with them
-def Ended.state(cs: List<&2, M.Change>, +thread: String) -> String:
-  match cs:
-    case Nil{}:
+# how the changes end the thread's turn: "completed", "failed", or "" (no
+# end), and where a running turn the agent cut off (Claude cancelling its
+# own command, Claude.line.v.k's 5) ends "interrupted", so the server
+# hears of it as it does of a failure. Only a turn still running counts:
+# a Stop already ended its turn "stopped" (Retire.turn.f), and the
+# cancel that follows it is not a second end.
+def Ended.state(cs: List<&2, M.Change>, +thread: String, run: Bool) -> String:
+  match cs run:
+    case Nil{} _:
       ""
-    case M.TurnChanged{+th, M.Completed{}, _} <> t:
-      Bool.pick(String, String.eq(th, thread), "completed", Ended.state(t, thread))
-    case M.TurnChanged{+th, M.Failed{}, _} <> t:
-      Bool.pick(String, String.eq(th, thread), "failed", Ended.state(t, thread))
-    case _ <> t:
-      Ended.state(t, thread)
+    case M.TurnChanged{+th, M.Completed{}, _} <> t _:
+      Bool.pick(String, String.eq(th, thread), "completed", Ended.state(t, thread, run))
+    case M.TurnChanged{+th, M.Failed{}, _} <> t _:
+      Bool.pick(String, String.eq(th, thread), "failed", Ended.state(t, thread, run))
+    case M.TurnChanged{+th, M.Interrupted{}, _} <> t True{}:
+      Bool.pick(String, String.eq(th, thread), "interrupted", Ended.state(t, thread, True{}))
+    case _ <> t _:
+      Ended.state(t, thread, run)
 
 # Answers to a person elsewhere
 # ----------------------------
@@ -3666,7 +3674,7 @@ def Ended.out.s(+s: M.State, +now: Nat, +state: String, +thread: String, +cwd: S
 # a turn that ends tells the server (phone notifications hang off this),
 # and has the thread summarized when its summary is due
 def Ended.out(+s: M.State, +now: Nat, +thread: String, +st: Step) -> Step:
-  Ended.out.s(s, now, Ended.state(Queue.changes(st), thread), thread, Hub.cwd(s, Hub.thread(s, thread)), st)
+  Ended.out.s(s, now, Ended.state(Queue.changes(st), thread, Hub.running(Hub.thread(s, thread))), thread, Hub.cwd(s, Hub.thread(s, thread)), st)
 
 def Queue.drain(+s: M.State, +now: Nat, +thread: String, +st: Step) -> Step:
   Queue.drain.k(Bool.and(Queue.ended(Queue.changes(st), thread), M.Queue.waiting(s, thread)), st,
