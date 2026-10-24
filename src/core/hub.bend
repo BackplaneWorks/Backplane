@@ -422,6 +422,14 @@ def Claude.interrupt(+id: String) -> String:
     J.KV{"request_id", J.Str{id}},
     J.KV{"request", J.Json.obj([J.KV{"subtype", J.Str{"interrupt"}}])}]))
 
+# stop one background task Claude runs (a shell, a monitor, a subagent):
+# the CLI kills it and answers ok even when it is already gone
+def Claude.stop_task(+id: String, +task: String) -> String:
+  J.Json.show(J.Json.obj([
+    J.KV{"type", J.Str{"control_request"}},
+    J.KV{"request_id", J.Str{id}},
+    J.KV{"request", J.Json.obj([J.KV{"subtype", J.Str{"stop_task"}}, J.KV{"task_id", J.Str{task}}])}]))
+
 # a user message for Claude: straight in, or, when it attaches images, by
 # the server, which reads them into image content blocks first
 def Claude.send(+thread: String, +cwd: String, +text: String, +uuid: String) -> Out:
@@ -3298,6 +3306,23 @@ def Hub.switch(+s: M.State, +now: Nat, +client: U32, +id: String, +th: String, +
 def Stop.outs(+provider: String, +thread: String, +rid: String) -> List<&2, Out>:
   Bool.pick(List<&2, Out>, String.eq(provider, "claude"), [AgentSend{thread, Claude.interrupt(rid)}], [AgentStop{thread}])
 
+# A Claude turn that ends interrupted, stopped or failed takes the
+# background tasks it left running with it. Left alone, each one that
+# finishes hands the CLI a notification and Claude starts a turn by
+# itself (Claude.line.v.k's 6, "Woken: background work"): a thread the
+# person stopped, or one out of quota, comes back on its own. Only rows
+# still at work are stopped; a Codex or Grok turn's process is already
+# stopped whole (AgentStop).
+def Bg.stops(ls: List<&2, String>, +thread: String, +rid: String) -> List<&2, Out>:
+  match ls:
+    case Nil{}:
+      Nil{}
+    case +l <> t:
+      AgentSend{thread, Claude.stop_task(rid ++ "-" ++ M.Bg.field(l, 0n), M.Bg.field(l, 0n))} <> Bg.stops(t, thread, rid)
+
+def Bg.stop.outs(+s: M.State, +th: String, +rid: String) -> List<&2, Out>:
+  Bool.pick(List<&2, Out>, String.eq(Hub.provider(Hub.thread(s, th)), "claude"), Bg.stops(M.Bg.unended(M.Bg.of(s, th)), th, rid), Nil{})
+
 # the held queue of an idle thread (kept across a restart, or after a
 # stop) starts now
 def Hub.resume(+s: M.State, +now: Nat, +client: U32, +id: String, +thread: String) -> Step:
@@ -5175,7 +5200,7 @@ def Run.queue.hold(+s: M.State, +now: Nat, +th: String) -> List<&2, M.Change>:
 # Stop: the running turn is interrupted (Stop.outs), its asks close
 def Retire.stop.f(+s: M.State, +now: Nat, +th: String, +from: String, os: List<&2, Out>) -> Step:
   Retire.turn.f(True{}, s, now, th, from, Step{M.SettingSet{"restart.retry." ++ th, "", now} <> M.SettingSet{"provider.resume." ++ th, "", now} <> List.append(&2, M.Change, Run.queue.hold(s, now, th), Retire.asks(M.Asks.all(s), th, now)),
-    List.append(&2, Out, os, List.append(&2, Out, Stop.outs(Hub.provider(Hub.thread(s, th)), th, Hub.id("i", now, Hub.seq(s))), Retire.answers(M.Asks.all(s), th)))})
+    List.append(&2, Out, os, List.append(&2, Out, List.append(&2, Out, Stop.outs(Hub.provider(Hub.thread(s, th)), th, Hub.id("i", now, Hub.seq(s))), Bg.stop.outs(s, th, Hub.id("b", now, Hub.seq(s)))), Retire.answers(M.Asks.all(s), th)))})
 
 def Retire.stop(+s: M.State, +now: Nat, +th: String, os: List<&2, Out>) -> Step:
   Retire.stop.f(s, now, th, "", os)
@@ -6541,9 +6566,9 @@ def Claude.line.v.k(v: Nat, +s: M.State, +thread: String, +now: Nat, +o: J.Json,
     case 3n:
       Step.after(Step.after(Claude.result.k(False{}, thread, now, text), Usage.result(s, thread, now, o)), Bg.settle(s, thread, now))
     case 4n:
-      Step.after(Step.after(Claude.result.k(True{}, thread, now, text), Usage.result(s, thread, now, o)), Bg.settle(s, thread, now))
+      Step.also(Step.after(Step.after(Claude.result.k(True{}, thread, now, text), Usage.result(s, thread, now, o)), Bg.settle(s, thread, now)), Bg.stop.outs(s, thread, Hub.id("b", now, Hub.seq(s))))
     case 5n:
-      Step{List.append(&2, M.Change, [M.TurnChanged{thread, M.Interrupted{}, now}], Bg.settle(s, thread, now)), Nil{}}
+      Step{List.append(&2, M.Change, [M.TurnChanged{thread, M.Interrupted{}, now}], Bg.settle(s, thread, now)), Bg.stop.outs(s, thread, Hub.id("b", now, Hub.seq(s)))}
     case 6n:
       Step.before(Wake.start(s, thread, now, Wake.text(String.eq(J.Json.get_str(o, "type", ""), "command_lifecycle"), s, thread, o)), Nil{},
         Claude.line.o(True{}, s, thread, now, o))
