@@ -52,10 +52,10 @@ import org.json.JSONObject
 import kotlin.math.PI
 import kotlin.math.sin
 
-data class BubMove(val id: String, val from: String, val to: String, val rig: List<CatPart>, val duration: Int, val expires: Long)
+data class BubMove(val id: String, val from: String, val to: String, val rig: List<CatPart>, val duration: Int, val expires: Long, val title: String = "Bub’s moving")
 
 fun parseBubMove(o: JSONObject) = BubMove(o.optString("id"), o.optString("from"), o.optString("to"),
-    catRig(o.optJSONArray("rig") ?: JSONArray()), o.optInt("duration", 2000), o.optLong("expires"))
+    catRig(o.optJSONArray("rig") ?: JSONArray()), o.optInt("duration", 2000), o.optLong("expires"), o.optString("title", "Bub’s moving"))
 
 @Composable
 fun BubMoveOverlay(move: BubMove?) {
@@ -105,10 +105,10 @@ private fun BubMoveCard(move: BubMove) {
         alpha = when { p < 0.12f -> p / 0.12f; p > 0.85f -> (1f - p) / 0.15f; else -> 1f }
     }.background(MaterialTheme.colorScheme.surface).border(1.dp, MaterialTheme.colorScheme.outlineVariant)
         .padding(horizontal = 16.dp, vertical = 12.dp).clearAndSetSemantics {
-            contentDescription = "Bub’s moving: ${move.from} to ${move.to}"
+            contentDescription = "${move.title}: ${move.from} to ${move.to}"
             liveRegion = LiveRegionMode.Polite
         }, horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("Bub’s moving", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(move.title, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
         Box(Modifier.width(248.dp).height(96.dp)) {
             Row(Modifier.width(248.dp).padding(top = 36.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                 BubMoveMachine(move.from)

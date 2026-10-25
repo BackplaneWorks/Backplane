@@ -3,6 +3,7 @@ import SwiftUI
 // A transient presentation event, never part of the kept canonical state.
 struct BubMove: Decodable {
     let id, from, to: String
+    let title: String?
     let rig: [CatPart]
     let duration: Int
     let expires: Double
@@ -48,7 +49,7 @@ private struct BubMoveCard: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Text("Bub’s moving").font(.system(size: 12)).foregroundStyle(.secondary)
+            Text(move.title ?? "Bub’s moving").font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(2)
             ZStack(alignment: .topLeading) {
                 HStack(alignment: .top) {
                     machine(move.from)
@@ -85,6 +86,6 @@ private struct BubMoveCard: View {
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Bub’s moving: \(move.from) to \(move.to)")
+        .accessibilityLabel("\(move.title ?? "Bub’s moving"): \(move.from) to \(move.to)")
     }
 }
