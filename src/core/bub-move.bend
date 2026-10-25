@@ -17,6 +17,7 @@ def Hop.snapshot(+u: U.Ui) -> J.Json:
   J.Json.obj([J.KV{"uid", J.Str{uid}}, J.KV{"holder", J.Str{US.Ub.holder(st)}},
     J.KV{"term", J.Str{Nat.show(US.Ub.term(st))}}, J.KV{"stamp", J.Str{M.Setting.get(st, "uber.rs." ++ uid ++ ".lease", "")}},
     J.KV{"name", J.Str{PL.Plane.home.of(US.Ub.holder.me(st), u)}},
+    J.KV{"botName", J.Str{BT.Bot.name(BT.World.bot(M.State.bots(st), UB.Uber.bot(st)))}},
     J.KV{"look", J.Json.nat(BT.Bot.look(BT.World.bot(M.State.bots(st), UB.Uber.bot(st))))}])
 
 # The register is ordered by term first, then stamp (concurrent takeovers
@@ -43,6 +44,14 @@ def Hop.rig(look: Nat) -> List<&2, C.Part>:
 def Hop.cat(look: Nat) -> String:
   "data:image/svg+xml;utf8," ++ C.Cat.uri("<svg xmlns='http://www.w3.org/2000/svg' width='48' height='48' viewBox='0 0 64 64'>" ++ String.concat(C.Cat.svg.parts(Hop.rig(look))) ++ "</svg>")
 
+def Hop.title.k(blank: Bool, name: String) -> String:
+  match blank:
+    case True{}: "Bub’s moving"
+    case False{}: name ++ "’s moving"
+
+def Hop.title(+name: String) -> String:
+  Hop.title.k(String.is_empty(String.trim(name)), String.trim(name))
+
 def Hop.result(changed: Bool, +before: J.Json, +after: J.Json) -> J.Json:
   match changed:
     case False{}: J.Json.obj([J.KV{"advance", J.Flag{True{}}}, J.KV{"changed", J.Flag{False{}}}])
@@ -50,6 +59,7 @@ def Hop.result(changed: Bool, +before: J.Json, +after: J.Json) -> J.Json:
       J.Json.obj([J.KV{"advance", J.Flag{True{}}}, J.KV{"changed", J.Flag{True{}}},
         J.KV{"id", J.Str{J.Json.get_str(after, "uid", "") ++ ":" ++ J.Json.get_str(after, "term", "") ++ ":" ++ J.Json.get_str(after, "stamp", "")}},
         J.KV{"from", J.Str{J.Json.get_str(before, "name", "")}}, J.KV{"to", J.Str{J.Json.get_str(after, "name", "")}},
+        J.KV{"title", J.Str{Hop.title(J.Json.get_str(after, "botName", ""))}},
         J.KV{"cat", J.Str{Hop.cat(J.Json.get_nat(after, "look", 0n))}},
         J.KV{"rig", J.Json.arr(C.Cat.parts.json(Hop.rig(J.Json.get_nat(after, "look", 0n))))},
         J.KV{"duration", J.Json.nat(2000n)}])

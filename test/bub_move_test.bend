@@ -23,10 +23,13 @@ def move(before: String, after: String) -> String:
 def sample() -> String:
   move(lease("bub", "desktop", "1", "0000000001.000000.desktop", "desktop"), lease("bub", "boat", "2", "0000000002.000000.boat", "the Boat"))
 
-def actual() -> U.Ui:
-  U.Ui.fold([M.ThreadCreated{"t", "", "Bub", M.Local{}, "", "", "claude", "", 1n}, M.BotSet{"b", "Bub", "t", 7n, "", 1n},
+def actual_named(name: String) -> U.Ui:
+  U.Ui.fold([M.ThreadCreated{"t", "", "Bub", M.Local{}, "", "", "claude", "", 1n}, M.BotSet{"b", name, "t", 7n, "", 1n},
     M.SettingSet{"machine.id", "desktop", 1n}, M.UberSet{"b", "uid-bub", 1n},
     M.UberOp{"uid-bub", "desktop", 1n, "0000000002.000000.desktop", UO.Ub.b.lease("desktop", 1n), 2n}], U.Ui.init(2n))
+
+def actual() -> U.Ui:
+  actual_named("Bub")
 
 def changed(+uid: String, +holder: String, +term: Nat, +stamp: String, +next_uid: String, +next_holder: String, +next_term: Nat, +next_stamp: String) -> String:
   Bool.show(H.Hop.changed(uid, holder, term, stamp, next_uid, next_holder, next_term, next_stamp))
@@ -49,6 +52,12 @@ def main() -> IO(Unit):
     C.Check.str("snapshot reads committed holder", J.Json.get_str(H.Hop.snapshot(actual()), "holder", ""), "desktop")
     C.Check.str("snapshot reads winning stamp", J.Json.get_str(H.Hop.snapshot(actual()), "stamp", ""), "0000000002.000000.desktop")
     C.Check.str("snapshot uses Bub look", Nat.show(J.Json.get_nat(H.Hop.snapshot(actual()), "look", 0n)), "7")
+    C.Check.str("snapshot keeps machine and bot names separate", J.Json.get_str(H.Hop.snapshot(actual_named("Tub")), "botName", ""), "Tub")
+    C.Check.str("title uses current uberbot name", H.Hop.title("Tub"), "Tub’s moving")
+    C.Check.str("title trims uberbot name", H.Hop.title(" Tub "), "Tub’s moving")
+    C.Check.str("blank name falls back to Bub", H.Hop.title("  "), "Bub’s moving")
+    C.Check.str("older snapshot falls back to Bub", J.Json.get_str(H.Hop.text(lease("bub", "desktop", "1", "001", "desktop"), lease("bub", "boat", "2", "002", "the Boat")), "title", ""), "Bub’s moving")
+    C.Check.str("move title comes from destination bot snapshot", J.Json.get_str(H.Hop.result(True{}, J.Null{}, J.Json.obj([J.KV{"botName", J.Str{"Tub"}}])), "title", ""), "Tub’s moving")
     C.Check.str("web projects snapshot in every page", Bool.show(String.contains(J.Json.show(P.Node.write(WV.View.page(actual()))), "data-bub-home")), "True")
     C.Check.str("phone projects snapshot without Status tab", J.Json.get_str(J.Json.get_obj(MS.Mob.screen(actual()), "bubHome"), "holder", ""), "desktop")
     C.Check.str("thin phone keeps lease snapshot", J.Json.get_str(J.Json.get_obj(MT.Partial.screen(MS.Mob.screen(actual()), J.Json.obj(Nil{})), "bubHome"), "holder", ""), "desktop")
