@@ -297,10 +297,31 @@ try {
     if (m.body?.machines?.find?.((x: any) => x.machine === "beta")?.state === "away") break;
     await sleep(250);
   }
+  // the bound is the stored call's UTF-8 bytes, keyed (fmcp.bend's Fm.later.res)
   const big = await mcp(a, ta, "thread_launch", { machine: "beta", project: "board", prompt: "x".repeat(70000) });
-  check("(c) a call over 64 KB is refused", big.isError && JSON.stringify(big.body).includes("full"), JSON.stringify(big.body).slice(0, 200));
-  let queued = 0;
-  for (let i = 0; i < 100; i++) {
+  check("(c) a call over 64 KiB is refused", big.isError && JSON.stringify(big.body).includes("full"), JSON.stringify(big.body).slice(0, 200));
+  const emoji = await mcp(a, ta, "thread_send", { threadId: farId, text: "\u{1F600}".repeat(16400) });
+  check("(c) multibyte: 16400 emoji (65600 UTF-8 bytes, far fewer characters) are refused", emoji.isError && JSON.stringify(emoji.body).includes("full"), JSON.stringify(emoji.body).slice(0, 160));
+  const quotes = await mcp(a, ta, "thread_send", { threadId: farId, text: '"'.repeat(33000) });
+  check("(c) escaped: 33000 quotes (66000 bytes once JSON-escaped) are refused", quotes.isError && JSON.stringify(quotes.body).includes("full"), JSON.stringify(quotes.body).slice(0, 160));
+  const qlines = () => String([...ca3.seen].reverse().find((c) => c.$ === "SettingSet" && c.key === "far.queue")?.value ?? "").split("\n").filter(Boolean);
+  // the exact edge: the longest ASCII text whose keyed call still fits
+  let lo = 60000, hi = 65536, best = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const r = await mcp(a, ta, "thread_send", { threadId: farId, text: `E${mid}:` + "a".repeat(mid) });
+    if (!r.isError && r.body?.queued === true) { best = mid; lo = mid + 1; } else hi = mid - 1;
+  }
+  await sleep(1000);
+  const edge = qlines().find((l) => l.includes(`E${best}:`)) ?? "";
+  const edgeBody = edge.split("\t").slice(5).join("\t");
+  const edgeBytes = Buffer.byteLength(edgeBody, "utf8");
+  check("(c) envelope: the largest call kept is at most 64 KiB as stored, keyed, and the bound is tight", best > 0 && edgeBytes <= 65536 && edgeBytes > 65536 - 16 && JSON.parse(edgeBody).p?.key?.length > 0, { best, edgeBytes });
+  const past = await mcp(a, ta, "thread_send", { threadId: farId, text: `E${best + 1}:` + "a".repeat(best + 1) });
+  check("(c) one byte past that edge is refused", past.isError && JSON.stringify(past.body).includes("full"), JSON.stringify(past.body).slice(0, 160));
+  check("(c) a refused call is never kept", !qlines().some((l) => l.includes("\u{1F600}\u{1F600}") || l.includes(`E${best + 1}:`)), qlines().length);
+  let queued = qlines().length;
+  for (let i = queued; i < 100; i++) {
     const q = await mcp(a, ta, "thread_send", { threadId: farId, text: `fill ${i}` });
     if (!q.isError && q.body?.queued === true) queued++;
   }

@@ -12322,4 +12322,11 @@ law fq_window:
 # message reached t0, the second time made no change
 law fq_replay_once:
   {FMC.Fm.replay.demo() == ["1", "0", "same"] : List<&2, String>}
+
+# the bound counts UTF-8 bytes, and of the request as keyed
+law fq_bytes_utf8:
+  {[H.Fq.utf8("a\u{e9}\u{20ac}\u{1f600}", 0n), H.Fq.utf8("", 0n)] == [10n, 0n] : List<&2, Nat>}
+
+law fq_room_keyed:
+  {Nat.is_gt(FMC.Fm.later.size("{\"id\":0,\"m\":\"mcp.call\",\"p\":{\"tool\":\"thread_send\"}}", "q1"), H.Fq.utf8("{\"id\":0,\"m\":\"mcp.call\",\"p\":{\"tool\":\"thread_send\"}}", 0n)) == True{} : Bool}
 # ---- end far queue ----

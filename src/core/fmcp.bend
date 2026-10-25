@@ -368,18 +368,32 @@ def Fm.keyed(+rq: String, +key: String) -> String:
   J.Json.show(J.Json.obj([J.KV{"id", J.Num{"0"}}, J.KV{"m", J.Str{"mcp.call"}},
     J.KV{"p", J.Obj{J.Field{"key", J.Str{key}, FR.Fr.obj.fields(J.Json.get_obj(Maybe.default(&2, J.Json, J.Json.parse(rq), J.Null{}), "p"))}}}]))
 
-def Fm.later.k(room: Bool, +s: M.State, +now: Nat, +key: String, +link: String, +name: String, +tool: String, +thread: String, +rq: String) -> MC.Res:
+# (body: the request already keyed, exactly what is stored and sent)
+def Fm.later.k(room: Bool, +s: M.State, +now: Nat, +key: String, +link: String, +name: String, +tool: String, +thread: String, +body: String) -> MC.Res:
   match room:
     case True{}:
       MC.Res{True{}, J.Json.obj([J.KV{"queued", J.Json.bool(True{})}, J.KV{"machine", J.Str{name}},
         J.KV{"note", J.Str{name ++ " is away: this " ++ tool ++ " is queued and goes there, in order, when it is back (kept a day). You will be told what came of it."}}]),
-        B.Fq.queue(s, now, key, link, thread, tool, Fm.keyed(rq, key))}
+        B.Fq.queue(s, now, key, link, thread, tool, body)}
     case False{}:
       MC.Res.fail(name ++ " is away and the queue for machines that are away is full (at most " ++ Nat.show(B.Fq.max()) ++ " calls of at most " ++ Nat.show(B.Fq.bytes()) ++ " bytes); try again when it is back")
 
-# (its step keeps the call in the queue: B.Fq.queue; a full queue refuses)
+# (its step keeps the call in the queue: B.Fq.queue; a full queue, or a
+# call whose keyed request is over the bound in UTF-8 bytes, is refused
+# before anything is kept)
+def Fm.later.kb(+key: String, +s: M.State, +now: Nat, +link: String, +name: String, +tool: String, +thread: String, +body: String) -> MC.Res:
+  Fm.later.k(B.Fq.room(s, body), s, now, key, link, name, tool, thread, body)
+
+def Fm.later.key(+key: String, +s: M.State, +now: Nat, +link: String, +name: String, +tool: String, +thread: String, +rq: String) -> MC.Res:
+  Fm.later.kb(key, s, now, link, name, tool, thread, Fm.keyed(rq, key))
+
 def Fm.later.res(+s: M.State, +now: Nat, +link: String, +name: String, +tool: String, +thread: String, +rq: String) -> MC.Res:
-  Fm.later.k(B.Fq.room(s, rq), s, now, B.Hub.id("q", now, B.Hub.seq(s)), link, name, tool, thread, rq)
+  Fm.later.key(B.Hub.id("q", now, B.Hub.seq(s)), s, now, link, name, tool, thread, rq)
+
+# what a later call's bound measures: the keyed request's UTF-8 bytes (law
+# fq_room_keyed)
+def Fm.later.size(+rq: String, +key: String) -> Nat:
+  B.Fq.utf8(Fm.keyed(rq, key), 0n)
 
 # one machine as the agent sees it
 # (a mirror's projects, from its fold kept with it: FR.In.view)

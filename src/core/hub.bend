@@ -4380,7 +4380,8 @@ def Fq.queue(+s: M.State, +now: Nat, +key: String, +link: String, +thread: Strin
   Step{[Fq.add(s, Fq.line(key, link, thread, tool, now, body), now)], [FarQueued{}]}
 
 # The queue is bounded: at most Fq.max() calls, each at most Fq.bytes()
-# (one over is refused, and the agent told). Its machine keeps more
+# UTF-8 bytes of the call as stored (keyed: Fm.keyed), checked before it is
+# queued (one over is refused, and the agent told). Its machine keeps more
 # receipts per link than this (Fm.seen.max(), law fq_window), so a call the
 # sender can still send again always finds its answer there.
 def Fq.max() -> Nat:
@@ -4392,8 +4393,21 @@ def Fq.bytes() -> Nat:
 def Fq.room.n(+n: Nat, +size: Nat) -> Bool:
   Bool.and(Nat.is_lt(n, Fq.max()), Nat.is_le(size, Fq.bytes()))
 
+# a text's size as stored and sent: its UTF-8 bytes (not its characters)
+def Fq.utf8.k(+c: U32) -> Nat:
+  Bool.pick(Nat, U32.is_lt(c, 128), 1n, Bool.pick(Nat, U32.is_lt(c, 2048), 2n, Bool.pick(Nat, U32.is_lt(c, 65536), 3n, 4n)))
+
+def Fq.utf8(s: String, +acc: Nat) -> Nat:
+  match s:
+    case SNil{}:
+      acc
+    case SCon{Chr{+c}, t}:
+      Fq.utf8(t, Nat.add(acc, Fq.utf8.k(c)))
+
+# room for one more call, its body the exact keyed request that is stored
+# and sent (fmcp.bend's Fm.later.res measures it after Fm.keyed)
 def Fq.room(+s: M.State, +body: String) -> Bool:
-  Fq.room.n(List.length(&2, String, Fq.lines(s)), String.length(body))
+  Fq.room.n(List.length(&2, String, Fq.lines(s)), Fq.utf8(body, 0n))
 
 # the fields of a line
 def Fq.f.key(+l: String) -> String:

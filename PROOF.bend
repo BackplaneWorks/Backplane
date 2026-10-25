@@ -13219,4 +13219,6 @@ def Laws.fq_queue(): {==}
 def Laws.fq_room(): {==}
 def Laws.fq_window(): {==}
 def Laws.fq_replay_once(): {==}
+def Laws.fq_bytes_utf8(): {==}
+def Laws.fq_room_keyed(): {==}
 # ---- end far queue ----
