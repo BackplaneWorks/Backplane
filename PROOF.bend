@@ -13216,4 +13216,7 @@ def Laws.fq_done_drops(): {==}
 def Laws.fq_done_once(): {==}
 def Laws.fq_old(): {==}
 def Laws.fq_queue(): {==}
+def Laws.fq_room(): {==}
+def Laws.fq_window(): {==}
+def Laws.fq_replay_once(): {==}
 # ---- end far queue ----

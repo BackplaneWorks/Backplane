@@ -151,9 +151,14 @@ try {
   const ca = await connect(a);
   let cb = await connect(b);
   clients.push(ca, cb);
+  // as far_e2e: the machines lists first (probed every 2 minutes), then the
+  // pairing ask at a minute's tick
+  const knows = (c: Client, port: number) => String(c.info?.machines ?? "").includes(`127.0.0.1:${port}`);
+  check("each hub lists the other", !!await until(150000, () => knows(ca, pb) && knows(cb, pa)), [ca.info?.machines, cb.info?.machines]);
   const peer = await until(150000, () => cb.seen.find((c) => c.$ === "PeerSet" && !c.revoked));
   const link = peer?.id as string;
   check("they pair by themselves", typeof link === "string" && link.length > 0, peer);
+  if (!link) throw new Error("no link: nothing after this can be tested");
 
   const boardPath = join(root, "board");
   mkdirSync(boardPath);
@@ -220,6 +225,88 @@ try {
   check("delivered exactly once", r2 && ev.length === 1, ev.length);
   const toldN = readFileSync(join(a.home, "events.jsonl"), "utf8").split("\n").filter((l) => l.includes("Your queued thread_send for beta") && l.includes('"MessagePosted"'));
   check("told exactly once", toldN.length === 1, toldN.length);
+
+  // --- at most once end to end: the queue key is the request's p.key, and
+  // beta keeps its answer under it (fmcp.bend's Fm.seen.*) ---
+  const secret = JSON.parse(readFileSync(join(a.home, "secrets", "peers", link), "utf8")).secret;
+  let nonce = 0;
+  const signed = async (raw: string) => {
+    // as the sender signs every attempt: a fresh nonce first (far.bend's Fr.nonced)
+    const bodyText = `{"n":"t${Date.now()}-${++nonce}",` + raw.slice(1);
+    const ts = Math.floor(Date.now() / 1000);
+    const sig = "sha256=" + createHmac("sha256", Buffer.from(secret, "hex")).update(`${ts}.${bodyText}`).digest("hex");
+    const r = await fetch(`http://127.0.0.1:${pb}/far/rpc`, { method: "POST", body: bodyText,
+      headers: { "content-type": "application/json", "x-backplane-peer": link, "x-backplane-timestamp": String(ts), "x-backplane-signature": sig } });
+    return { status: r.status, text: await r.text() };
+  };
+  const onBeta = (needle: string) => readFileSync(join(b.home, "events.jsonl"), "utf8").split("\n").filter((l) => l.includes(needle) && l.includes('"MessagePosted"')).length;
+
+  // (a) a reply lost, then the same call again: delivered once, the same answer
+  const keyed = JSON.stringify({ id: 0, m: "mcp.call", p: { key: "lost-1", tool: "thread_send", from: `${link}~${ta}`, args: { threadId: pt, text: "lost reply once" } } });
+  const la1 = await signed(keyed);
+  const la2 = await signed(keyed);
+  await sleep(1500);
+  check("(a) a keyed call sent again after its reply was lost is answered the same", la1.status === 200 && la2.status === 200 && la1.text === la2.text && JSON.parse(la1.text).mcp?.ok === true, [la1, la2]);
+  check("(a) and delivered once", onBeta("lost reply once") === 1, onBeta("lost reply once"));
+  const unkeyed = JSON.stringify({ id: 0, m: "mcp.call", p: { tool: "thread_list", from: `${link}~${ta}`, args: {} } });
+  const u1 = await signed(unkeyed);
+  check("(a) an unkeyed call is served as before", u1.status === 200 && JSON.parse(u1.text).mcp?.ok === true, u1);
+
+  // (b) the sender crashes after its call got there, then sends it again
+  cb.ws.close();
+  b.proc!.kill();
+  await b.proc!.exited;
+  for (let i = 0; i < 400; i++) {
+    const m = await mcp(a, ta, "machine_list", {});
+    if (m.body?.machines?.find?.((x: any) => x.machine === "beta")?.state === "away") break;
+    await sleep(250);
+  }
+  const qb = await mcp(a, ta, "thread_send", { threadId: farId, text: "crash after send once" });
+  check("(b) queued while beta is away", !qb.isError && qb.body?.queued === true, qb.body);
+  const qline = await until(5000, () => [...ca.seen].reverse().find((c) => c.$ === "SettingSet" && c.key === "far.queue" && String(c.value).includes("crash after send once")));
+  const line = String(qline?.value ?? "").split("\n").find((l: string) => l.includes("crash after send once")) ?? "";
+  const qkey = line.split("\t")[0];
+  const qbody = line.split("\t").slice(5).join("\t");
+  check("(b) the queued request carries its queue key", qkey.length > 0 && JSON.parse(qbody || "{}").p?.key === qkey, [qkey, qbody.slice(0, 200)]);
+  // beta comes back; the call reaches it (sent as alpha would, with its key)
+  // and alpha dies before it learns the outcome
+  spawn(b);
+  await up(b);
+  const cbx = await connect(b);
+  clients.push(cbx);
+  await until(150000, () => String(cbx.info?.machines ?? "").includes(`127.0.0.1:${pa}`));
+  const delivered = await signed(qbody);
+  a.proc!.kill();
+  await a.proc!.exited;
+  check("(b) the call got there, then the sender died", delivered.status === 200 && JSON.parse(delivered.text).mcp?.ok === true, delivered);
+  // alpha restarts with the call still in its queue (unless it took the answer first) and sends it again
+  spawn(a);
+  await up(a);
+  const ca3 = await connect(a);
+  clients.push(ca3);
+  const toldB = await until(240000, () => readFileSync(join(a.home, "events.jsonl"), "utf8").split("\n").some((l) => l.includes("Your queued thread_send for beta reached it") && l.includes(qkey)) || ca3.seen.find((c) => c.$ === "MessagePosted" && c.thread === ta && String(c.msg).includes(qkey)));
+  check("(b) the restarted sender sends it again and is told", !!toldB, toldB);
+  await sleep(2000);
+  check("(b) delivered once", onBeta("crash after send once") === 1, onBeta("crash after send once"));
+
+  // (c) the queue is bounded: 100 calls wait, the 101st is refused
+  b.proc!.kill();
+  await b.proc!.exited;
+  for (let i = 0; i < 400; i++) {
+    const m = await mcp(a, ta, "machine_list", {});
+    if (m.body?.machines?.find?.((x: any) => x.machine === "beta")?.state === "away") break;
+    await sleep(250);
+  }
+  const big = await mcp(a, ta, "thread_launch", { machine: "beta", project: "board", prompt: "x".repeat(70000) });
+  check("(c) a call over 64 KB is refused", big.isError && JSON.stringify(big.body).includes("full"), JSON.stringify(big.body).slice(0, 200));
+  let queued = 0;
+  for (let i = 0; i < 100; i++) {
+    const q = await mcp(a, ta, "thread_send", { threadId: farId, text: `fill ${i}` });
+    if (!q.isError && q.body?.queued === true) queued++;
+  }
+  const over = await mcp(a, ta, "thread_send", { threadId: farId, text: "one too many" });
+  check("(c) 100 calls wait for an away machine", queued === 100, queued);
+  check("(c) the 101st is refused: the queue is full", over.isError && JSON.stringify(over.body).includes("full"), over.body);
 } catch (e) {
   console.log("FAIL threw: " + String(e));
   failed = true;

@@ -4373,9 +4373,27 @@ def Fq.lines(+s: M.State) -> List<&2, String>:
 def Fq.add(+s: M.State, +line: String, +now: Nat) -> M.Change:
   M.SettingSet{Fq.key(), Bool.pick(String, String.is_empty(M.Setting.get(s, Fq.key(), "")), line, M.Setting.get(s, Fq.key(), "") ++ "\n" ++ line), now}
 
-# a call queued: kept, and the queue sent at once (the machine may be back)
-def Fq.queue(+s: M.State, +now: Nat, +link: String, +thread: String, +tool: String, +body: String) -> Step:
-  Step{[Fq.add(s, Fq.line(Hub.id("q", now, Hub.seq(s)), link, thread, tool, now, body), now)], [FarQueued{}]}
+# a call queued under its key (the request carries it too: fmcp.bend's
+# Fm.keyed, so its machine answers a call sent again from its receipt):
+# kept, and the queue sent at once (the machine may be back)
+def Fq.queue(+s: M.State, +now: Nat, +key: String, +link: String, +thread: String, +tool: String, +body: String) -> Step:
+  Step{[Fq.add(s, Fq.line(key, link, thread, tool, now, body), now)], [FarQueued{}]}
+
+# The queue is bounded: at most Fq.max() calls, each at most Fq.bytes()
+# (one over is refused, and the agent told). Its machine keeps more
+# receipts per link than this (Fm.seen.max(), law fq_window), so a call the
+# sender can still send again always finds its answer there.
+def Fq.max() -> Nat:
+  100n
+
+def Fq.bytes() -> Nat:
+  65536n
+
+def Fq.room.n(+n: Nat, +size: Nat) -> Bool:
+  Bool.and(Nat.is_lt(n, Fq.max()), Nat.is_le(size, Fq.bytes()))
+
+def Fq.room(+s: M.State, +body: String) -> Bool:
+  Fq.room.n(List.length(&2, String, Fq.lines(s)), String.length(body))
 
 # the fields of a line
 def Fq.f.key(+l: String) -> String:
