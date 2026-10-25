@@ -50,6 +50,13 @@ law fq_window:
 # message reached t0, the second time made no change
 law fq_replay_once:
   {F.Fm.replay.demo() == ["1", "0", "same"] : List<&2, String>}
+
+# the bound counts UTF-8 bytes, and of the request as keyed
+law fq_bytes_utf8:
+  {[B.Fq.utf8("a\u{e9}\u{20ac}\u{1f600}", 0n), B.Fq.utf8("", 0n)] == [10n, 0n] : List<&2, Nat>}
+
+law fq_room_keyed:
+  {Nat.is_gt(F.Fm.later.size("{\"id\":0,\"m\":\"mcp.call\",\"p\":{\"tool\":\"thread_send\"}}", "q1"), B.Fq.utf8("{\"id\":0,\"m\":\"mcp.call\",\"p\":{\"tool\":\"thread_send\"}}", 0n)) == True{} : Bool}
 # ---- end far queue ----
 
 def fq_tools(): {==}
@@ -73,3 +80,7 @@ def fq_room(): {==}
 def fq_window(): {==}
 
 def fq_replay_once(): {==}
+
+def fq_bytes_utf8(): {==}
+
+def fq_room_keyed(): {==}
