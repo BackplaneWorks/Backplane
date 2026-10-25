@@ -552,7 +552,7 @@ def KiCad.open.k(fork: Bool, +cli: String, +fs: Files) -> IO(String):
     case True{} Files{+pro, +pcb, +sch, _}:
       do IO<String>:
         r : P.Ran <- P.Proc.run("sh", ["-c",
-          "r=\"$1\"; if [ -n \"$2\" ]; then set -- kicad \"$2\"; elif [ -n \"$3\" ]; then set -- pcbnew \"$3\"; elif [ -n \"$4\" ]; then set -- eeschema \"$4\"; else echo \"no KiCad project here\"; exit 1; fi; [ -x \"$r/bin/$1\" ] || { echo \"Backplane KiCad has no $1\"; exit 1; }; setsid -f \"$r/bin/$1\" \"$2\" </dev/null >/dev/null 2>&1",
+          "r=\"$1\"; if [ -n \"$2\" ]; then set -- kicad \"$2\"; elif [ -n \"$3\" ]; then set -- pcbnew \"$3\"; elif [ -n \"$4\" ]; then set -- eeschema \"$4\"; else echo \"no KiCad project here\"; exit 1; fi; if [ \"$(uname)\" = Darwin ]; then a=\"$r/KiCad.app\"; [ \"$1\" = kicad ] || a=\"$a/Contents/Applications/$1.app\"; [ -d \"$a\" ] || { echo \"Backplane KiCad has no $1\"; exit 1; }; exec open -a \"$a\" \"$2\"; fi; [ -x \"$r/bin/$1\" ] || { echo \"Backplane KiCad has no $1\"; exit 1; }; setsid -f \"$r/bin/$1\" \"$2\" </dev/null >/dev/null 2>&1",
           "sh", Rt.root(cli), pro, pcb, sch], "/")
         return KiCad.open.said(r)
     case False{} _:
@@ -560,6 +560,8 @@ def KiCad.open.k(fork: Bool, +cli: String, +fs: Files) -> IO(String):
 
 # open a project's .kicad_pro in the bundled KiCad (its board or schematic
 # editor when there is no .kicad_pro), detached; answers "" or an error.
+# macOS has no bin/ launcher: the editors are apps in KiCad.app, opened
+# with open -a.
 # Only the Backplane fork: its launcher brings the official libraries
 def KiCad.open(rt: Rt, +fs: Files) -> IO(String):
   match rt:
