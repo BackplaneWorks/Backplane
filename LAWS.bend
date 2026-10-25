@@ -12189,3 +12189,10 @@ law sidebar_draft_settings_separate:
   for view: String
   for revision: Nat
   {CHATSIDE.SidebarImage.key.input(True{}, u, epoch, view, revision) == "" : String}
+
+# ---- pairing without tailscale (persistent-bub) ----
+# a hub off the tailnet names itself where it listens, never by the
+# tailnet address its machines list found (its peers found it at the former)
+law tailnet_announce_off:
+  {[TN.Tailnet.announce(True{}, "http://100.64.0.1:3787"), TN.Tailnet.announce(False{}, "http://100.64.0.1:3787")] == ["http://100.64.0.1:3787", ""] : List<&2, String>}
+# ---- end pairing without tailscale ----
