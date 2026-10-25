@@ -1,6 +1,7 @@
 import Base
 import ../src/core/model.bend as M
 import ../src/core/hub.bend as B
+import ../src/core/fmcp.bend as F
 
 # The far queue's laws on their own (bend test/far_queue_proof.bend)
 # ---- far queue: calls for the owner's machines that are away (hub.bend's Fq.*) ----
@@ -34,7 +35,21 @@ law fq_old:
 
 # a call queued keeps what was there and asks for the queue to be sent
 law fq_queue:
-  {B.Fq.step.sets(B.Fq.queue(B.Fq.demo.s(), 5n, "p3", "t1", "thread_send", "{}")) == [B.Fq.demo.l1() ++ "\n" ++ B.Fq.demo.l2() ++ "\n" ++ B.Fq.line(B.Hub.id("q", 5n, B.Hub.seq(B.Fq.demo.s())), "p3", "t1", "thread_send", 5n, "{}")] : List<&2, String>}
+  {B.Fq.step.sets(B.Fq.queue(B.Fq.demo.s(), 5n, "q3", "p3", "t1", "thread_send", "{}")) == [B.Fq.demo.l1() ++ "\n" ++ B.Fq.demo.l2() ++ "\n" ++ B.Fq.line("q3", "p3", "t1", "thread_send", 5n, "{}")] : List<&2, String>}
+
+# the queue is bounded in calls and in bytes per call
+law fq_room:
+  {[B.Fq.room.n(99n, 10n), B.Fq.room.n(100n, 10n), B.Fq.room.n(0n, 65536n), B.Fq.room.n(0n, 65537n)] == [True{}, False{}, True{}, False{}] : List<&2, Bool>}
+
+# its machine keeps more receipts per link than the queue holds calls, so a
+# call sent again always finds its answer
+law fq_window:
+  {Nat.is_lt(B.Fq.max(), F.Fm.seen.max()) == True{} : Bool}
+
+# a keyed call that comes again is answered the same and runs nothing: one
+# message reached t0, the second time made no change
+law fq_replay_once:
+  {F.Fm.replay.demo() == ["1", "0", "same"] : List<&2, String>}
 # ---- end far queue ----
 
 def fq_tools(): {==}
@@ -52,3 +67,9 @@ def fq_done_once(): {==}
 def fq_old(): {==}
 
 def fq_queue(): {==}
+
+def fq_room(): {==}
+
+def fq_window(): {==}
+
+def fq_replay_once(): {==}

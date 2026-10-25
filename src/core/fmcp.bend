@@ -210,17 +210,112 @@ def Fm.call.k(i: Nat, +s: M.State, +now: Nat, +from: String, +a: J.Json, +id: St
 def Fm.call(+s: M.State, +now: Nat, +tool: String, +from: String, +a: J.Json) -> MC.Res:
   Fm.call.k(C.Codec.pos(Fm.names(), tool), s, now, from, a, J.Json.get_str(a, "threadId", ""), FR.Fr.thread.shared(s, J.Json.get_str(a, "threadId", "")))
 
+# the reply to a remote agent's call, as sent
+def Fm.reply.text(ok: Bool, body: J.Json) -> String:
+  J.Json.show(J.Json.obj([J.KV{"t", J.Str{"reply"}}, J.KV{"id", J.Num{"0"}}, J.KV{"ok", J.Flag{True{}}},
+    J.KV{"mcp", J.Json.obj([J.KV{"ok", J.Flag{ok}}, J.KV{"body", body}])}]))
+
 def Fm.serve.k(r: MC.Res, +client: U32) -> B.Step:
   match r:
     case MC.Res{ok, body, B.Step{cs, os}}:
-      B.Step{cs, B.Send{client, J.Json.show(J.Json.obj([J.KV{"t", J.Str{"reply"}}, J.KV{"id", J.Num{"0"}}, J.KV{"ok", J.Flag{True{}}},
-        J.KV{"mcp", J.Json.obj([J.KV{"ok", J.Flag{ok}}, J.KV{"body", body}])}]))} <> os}
+      B.Step{cs, B.Send{client, Fm.reply.text(ok, body)} <> os}
+
+# Receipts for queued calls (hub.bend's Fq.*)
+# -------------------------------------------
+# A queued call carries the key it has in its sender's queue (p.key). Its
+# machine keeps the answer it gave under that key, per link, in the setting
+# fq.seen.<link> ("key\treply" lines, newest last, at most Fm.seen.max()),
+# written in the same step as the call's own changes: one commit holds
+# both. A call that comes again under a key kept here (its answer was lost,
+# or its sender restarted before it took it) is answered the same and runs
+# nothing (law fq_replay_once). An unkeyed call runs as before.
+def Fm.seen.max() -> Nat:
+  200n
+
+def Fm.seen.key(+from: String) -> String:
+  "fq.seen." ++ FR.Fr.link(from)
+
+def Fm.seen.lines(+s: M.State, +from: String) -> List<&2, String>:
+  M.Launch.lines(M.Setting.get(s, Fm.seen.key(from), ""))
+
+def Fm.seen.find.k(hit: Bool, +l: String, +key: String, rest: Maybe<&2, String>) -> Maybe<&2, String>:
+  match hit:
+    case True{}:
+      Some{String.drop(l, 1n+String.length(key))}
+    case False{}:
+      rest
+
+def Fm.seen.find(ls: List<&2, String>, +key: String) -> Maybe<&2, String>:
+  match ls:
+    case Nil{}:
+      None{}
+    case +l <> t:
+      Fm.seen.find.k(String.starts_with(l, key ++ "\t"), l, key, Fm.seen.find(t, key))
+
+def Fm.seen.get(+s: M.State, +from: String, +key: String) -> Maybe<&2, String>:
+  Fm.seen.find(Fm.seen.lines(s, from), key)
+
+# the receipts once this one is kept: the newest Fm.seen.max()
+def Fm.seen.put(+s: M.State, +from: String, +key: String, +reply: String, +now: Nat) -> M.Change:
+  +ls = List.append(&2, String, Fm.seen.lines(s, from), [key ++ "\t" ++ reply])
+  M.SettingSet{Fm.seen.key(from), String.join(List.drop(&2, String, ls, Nat.sub(List.length(&2, String, ls), Fm.seen.max())), "\n"), now}
+
+def Fm.serve.keyed(r: MC.Res, +client: U32, +s: M.State, +now: Nat, +from: String, +key: String) -> B.Step:
+  match r:
+    case MC.Res{ok, body, B.Step{cs, os}}:
+      +t = Fm.reply.text(ok, body)
+      B.Step{List.append(&2, M.Change, cs, [Fm.seen.put(s, from, key, t, now)]), B.Send{client, t} <> os}
+
+def Fm.serve.m(none: Bool, m: Maybe<&2, String>, +s: M.State, +now: Nat, +client: U32, +p: J.Json) -> B.Step:
+  match none m:
+    case True{} _:
+      Fm.serve.k(Fm.call(s, now, J.Json.get_str(p, "tool", ""), J.Json.get_str(p, "from", ""), J.Json.get_obj(p, "args")), client)
+    case False{} Some{+t}:
+      B.Step{Nil{}, [B.Send{client, t}]}
+    case False{} None{}:
+      Fm.serve.keyed(Fm.call(s, now, J.Json.get_str(p, "tool", ""), J.Json.get_str(p, "from", ""), J.Json.get_obj(p, "args")), client, s, now,
+        J.Json.get_str(p, "from", ""), J.Json.get_str(p, "key", ""))
 
 # the step answering a remote agent's call (its reply first, which is the
-# one the route sends back)
+# one the route sends back); a keyed one at most once (receipts above)
 def Fm.serve(+s: M.State, +now: Nat, +client: U32, +o: J.Json) -> B.Step:
-  Fm.serve.k(Fm.call(s, now, J.Json.get_str(J.Json.get_obj(o, "p"), "tool", ""), J.Json.get_str(J.Json.get_obj(o, "p"), "from", ""),
-    J.Json.get_obj(J.Json.get_obj(o, "p"), "args")), client)
+  +p = J.Json.get_obj(o, "p")
+  Fm.serve.m(String.is_empty(J.Json.get_str(p, "key", "")), Fm.seen.get(s, J.Json.get_str(p, "from", ""), J.Json.get_str(p, "key", "")), s, now, client, p)
+
+# A keyed call served twice, the second on the state the first left: how
+# many messages reached t0, how many changes the second made, whether the
+# two answers are the same (law fq_replay_once)
+def Fm.replay.o() -> J.Json:
+  J.Json.obj([J.KV{"id", J.Num{"0"}}, J.KV{"m", J.Str{"mcp.call"}}, J.KV{"p", J.Json.obj([J.KV{"key", J.Str{"q1"}}, J.KV{"tool", J.Str{"thread_send"}},
+    J.KV{"from", J.Str{"L~t1"}}, J.KV{"args", J.Json.obj([J.KV{"threadId", J.Str{"t0"}}, J.KV{"text", J.Str{"hi"}}])}])}])
+
+def Fm.step.cs(st: B.Step) -> List<&2, M.Change>:
+  match st:
+    case B.Step{cs, _}:
+      cs
+
+def Fm.step.sent(os: List<&2, B.Out>) -> String:
+  match os:
+    case Nil{}:
+      ""
+    case B.Send{_, +t} <> _:
+      t
+    case _ <> t:
+      Fm.step.sent(t)
+
+def Fm.step.reply(st: B.Step) -> String:
+  match st:
+    case B.Step{_, os}:
+      Fm.step.sent(os)
+
+def Fm.replay.k(+s: M.State, +first: B.Step) -> List<&2, String>:
+  +second = Fm.serve(M.State.replay(Fm.step.cs(first), s), 10n, 7, Fm.replay.o())
+  [Nat.show(B.Lr.count(Fm.step.cs(first), "t0")), Nat.show(List.length(&2, M.Change, Fm.step.cs(second))),
+    Bool.pick(String, String.eq(Fm.step.reply(first), Fm.step.reply(second)), "same", "differs")]
+
+def Fm.replay.demo() -> List<&2, String>:
+  +s = B.Lr.demo(True{})
+  Fm.replay.k(s, Fm.serve(s, 9n, 7, Fm.replay.o()))
 
 # On the calling hub
 # ------------------
@@ -267,11 +362,24 @@ type Plan is Data:
   PLater{link: String, name: String, tool: String, body: String}
 
 # what the agent is told when its call waits for a machine
-# (its step keeps the call in the queue: B.Fq.queue)
+# the request with the key it has in the queue (p.key: its machine keeps
+# the answer under it, Fm.seen.*)
+def Fm.keyed(+rq: String, +key: String) -> String:
+  J.Json.show(J.Json.obj([J.KV{"id", J.Num{"0"}}, J.KV{"m", J.Str{"mcp.call"}},
+    J.KV{"p", J.Obj{J.Field{"key", J.Str{key}, FR.Fr.obj.fields(J.Json.get_obj(Maybe.default(&2, J.Json, J.Json.parse(rq), J.Null{}), "p"))}}}]))
+
+def Fm.later.k(room: Bool, +s: M.State, +now: Nat, +key: String, +link: String, +name: String, +tool: String, +thread: String, +rq: String) -> MC.Res:
+  match room:
+    case True{}:
+      MC.Res{True{}, J.Json.obj([J.KV{"queued", J.Json.bool(True{})}, J.KV{"machine", J.Str{name}},
+        J.KV{"note", J.Str{name ++ " is away: this " ++ tool ++ " is queued and goes there, in order, when it is back (kept a day). You will be told what came of it."}}]),
+        B.Fq.queue(s, now, key, link, thread, tool, Fm.keyed(rq, key))}
+    case False{}:
+      MC.Res.fail(name ++ " is away and the queue for machines that are away is full (at most " ++ Nat.show(B.Fq.max()) ++ " calls of at most " ++ Nat.show(B.Fq.bytes()) ++ " bytes); try again when it is back")
+
+# (its step keeps the call in the queue: B.Fq.queue; a full queue refuses)
 def Fm.later.res(+s: M.State, +now: Nat, +link: String, +name: String, +tool: String, +thread: String, +rq: String) -> MC.Res:
-  MC.Res{True{}, J.Json.obj([J.KV{"queued", J.Json.bool(True{})}, J.KV{"machine", J.Str{name}},
-    J.KV{"note", J.Str{name ++ " is away: this " ++ tool ++ " is queued and goes there, in order, when it is back (kept a day). You will be told what came of it."}}]),
-    B.Fq.queue(s, now, link, thread, tool, rq)}
+  Fm.later.k(B.Fq.room(s, rq), s, now, B.Hub.id("q", now, B.Hub.seq(s)), link, name, tool, thread, rq)
 
 # one machine as the agent sees it
 # (a mirror's projects, from its fold kept with it: FR.In.view)
