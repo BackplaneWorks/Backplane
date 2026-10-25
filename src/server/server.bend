@@ -12268,7 +12268,7 @@ def Pair.go(ms: List<&2, UC.MRow>, +inbox: Chan(Msg), +cfg: Cfg) -> IO(Unit):
       IO.pure(Unit, Unit{})
     case UC.MRow{_, +url, _} <> t:
       do IO<Unit>:
-        IO.spawn(Unit, Pair.ask(url, J.Json.get_str(J.Json.get_obj(Far.machines(cfg), "self"), "url", ""), inbox, Cfg.home(cfg), Cfg.tailnet(cfg), Cfg.host(cfg), Cfg.port(cfg)))
+        IO.spawn(Unit, Pair.ask(url, TN.Tailnet.announce(Cfg.tailnet(cfg), J.Json.get_str(J.Json.get_obj(Far.machines(cfg), "self"), "url", "")), inbox, Cfg.home(cfg), Cfg.tailnet(cfg), Cfg.host(cfg), Cfg.port(cfg)))
         Pair.go(t, inbox, cfg)
 
 def Hub.pair(h: Hub) -> IO(Hub):

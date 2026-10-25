@@ -19,6 +19,21 @@ def Tailnet.login(+whois: String) -> String:
 def Tailnet.trusts(+owner: String, +login: String) -> Bool:
   Bool.and(Bool.and(Bool.not(String.is_empty(owner)), String.eq(owner, login)), Bool.not(String.eq(login, "tagged-devices")))
 
+# The address a hub names itself by when it asks another of the owner's
+# machines to pair (server.bend's Pair.go): the one its machines list found
+# for it only while it is on the tailnet. A hub started with --no-tailscale
+# pairs only with the hubs BACKPLANE_PEERS names, which reach it where it
+# listens; its machines list may still carry the tailnet's address of the
+# machine it runs on, which those hubs never found, so they refused it (403
+# "not one of the machines this hub found"). "" lets the caller use the
+# listen address (Pair.here).
+def Tailnet.announce(on: Bool, +url: String) -> String:
+  match on:
+    case True{}:
+      url
+    case False{}:
+      ""
+
 # the pairing link a phone or browser pastes (the Settings screen shows
 # it): the hub's address with the token after "#", so it never reaches a
 # server's logs

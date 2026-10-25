@@ -13184,3 +13184,7 @@ def Laws.sidebar_draft_scratch_input(key, value, rest, h):
   SIDEDRAFTPROOF.scratch_keep(key, value, rest, h)
 def Laws.sidebar_draft_settings_separate(u, epoch, view, revision):
   SIDEDRAFTPROOF.settings_separate(u, epoch, view, revision)
+
+# ---- pairing without tailscale ----
+def Laws.tailnet_announce_off(): {==}
+# ---- end pairing without tailscale ----
