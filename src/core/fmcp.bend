@@ -263,6 +263,15 @@ type Plan is Data:
   PHere{}
   PAnswer{r: MC.Res}
   PFar{link: String, body: String}
+  # for a machine that is away: queued (hub.bend's Fq.*), sent when it is back
+  PLater{link: String, name: String, tool: String, body: String}
+
+# what the agent is told when its call waits for a machine
+# (its step keeps the call in the queue: B.Fq.queue)
+def Fm.later.res(+s: M.State, +now: Nat, +link: String, +name: String, +tool: String, +thread: String, +rq: String) -> MC.Res:
+  MC.Res{True{}, J.Json.obj([J.KV{"queued", J.Json.bool(True{})}, J.KV{"machine", J.Str{name}},
+    J.KV{"note", J.Str{name ++ " is away: this " ++ tool ++ " is queued and goes there, in order, when it is back (kept a day). You will be told what came of it."}}]),
+    B.Fq.queue(s, now, link, thread, tool, rq)}
 
 # one machine as the agent sees it
 # (a mirror's projects, from its fold kept with it: FR.In.view)
@@ -290,11 +299,20 @@ def Fm.word(+i: Nat, +a: J.Json) -> String:
     Bool.pick(String, FR.Fr.is(J.Json.get_str(a, "threadId", "")), FR.Fr.link(J.Json.get_str(a, "threadId", "")), ""),
     Bool.pick(String, FR.Fr.is(J.Json.get_str(a, "project", "")), FR.Fr.link(J.Json.get_str(a, "project", "")), J.Json.get_str(a, "machine", "")))
 
+# a machine that is away: thread_send and thread_launch wait for it
+# (B.Fq.*), anything else is refused
+def Fm.plan.away(later: Bool, +i: FR.In, +tool: String, +rq: String) -> Plan:
+  match later:
+    case True{}:
+      PLater{FR.In.link(i), FR.In.name.of(i), tool, rq}
+    case False{}:
+      PAnswer{MC.Res.fail("the machine " ++ FR.In.name.of(i) ++ " is away; try again when it is back")}
+
 def Fm.plan.i(m: Maybe<&2, FR.In>, +word: String, +tool: String, +thread: String, a: J.Json) -> Plan:
   match m:
     case Some{+i}:
-      Bool.pick(Plan, FR.In.away(i), PAnswer{MC.Res.fail("the machine " ++ FR.In.name.of(i) ++ " is away; try again when it is back")},
-        PFar{FR.In.link(i), Fm.request(FR.In.link(i), tool, FR.Fr.id(FR.In.link(i), thread), a)})
+      +rq = Fm.request(FR.In.link(i), tool, FR.Fr.id(FR.In.link(i), thread), a)
+      Bool.pick(Plan, FR.In.away(i), Fm.plan.away(B.Fq.tool(tool), i, tool, rq), PFar{FR.In.link(i), rq})
     case None{}:
       PAnswer{MC.Res.fail("no machine of yours called " ++ word ++ " is linked here (machine_list shows them)")}
 
@@ -553,6 +571,8 @@ def Fm.plan.name(p: Plan) -> String:
       "answer"
     case PFar{_, _}:
       "far"
+    case PLater{_, _, _, _}:
+      "later"
 
 # the plans' names, in order (laws)
 def Fm.give.names(ps: List<&2, Plan>) -> String:

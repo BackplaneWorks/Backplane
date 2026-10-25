@@ -12275,3 +12275,37 @@ law hot_demo_threads:
     HOTF.Hot.thread.of(FSNAP.Snap.demo(), "t10"), HOTF.Hot.thread.of(FSNAP.Snap.demo(), "t2"), HOTF.Hot.thread.of(FSNAP.Snap.demo(), "t4")]
     == [False{}, False{}, False{}, True{}, True{}, True{}] : List<&2, Bool>}
 # ---- end F1 ----
+
+# ---- far queue: calls for the owner's machines that are away (hub.bend's Fq.*) ----
+# thread_send and thread_launch wait for a machine that is away; nothing else does
+law fq_tools:
+  {[H.Fq.tool("thread_send"), H.Fq.tool("thread_launch"), H.Fq.tool("thread_interrupt"), H.Fq.tool("thread_read")] == [True{}, True{}, False{}, False{}] : List<&2, Bool>}
+
+# a line keeps each field
+law fq_fields:
+  {[H.Fq.f.key(H.Fq.demo.l1()), H.Fq.f.link(H.Fq.demo.l1()), H.Fq.f.thread(H.Fq.demo.l1()), H.Fq.f.tool(H.Fq.demo.l1()), H.Fq.f.body(H.Fq.demo.l1())]
+    == ["q1", "p1", "t1", "thread_send", "{}"] : List<&2, String>}
+
+law fq_at:
+  {H.Fq.f.at(H.Fq.demo.l2()) == 200n : Nat}
+
+# queued calls are sent in the order they were queued
+law fq_order:
+  {H.Fq.lines(H.Fq.demo.s()) == [H.Fq.demo.l1(), H.Fq.demo.l2()] : List<&2, String>}
+
+# a call answered leaves the queue, the others stay in order
+law fq_done_drops:
+  {H.Fq.step.sets(H.Fq.done(H.Fq.demo.s(), 300n, "q1", "t1", "ok")) == [H.Fq.demo.l2()] : List<&2, String>}
+
+# and its thread is told once: a key no longer queued does nothing
+law fq_done_once:
+  {H.Fq.step.n(H.Fq.done(H.Fq.demo.s(), 300n, "q9", "t1", "ok")) == 0n : Nat}
+
+# a call older than a day is not sent
+law fq_old:
+  {[H.Fq.old(H.Fq.demo.l1(), 86500n), H.Fq.old(H.Fq.demo.l1(), 86501n)] == [False{}, True{}] : List<&2, Bool>}
+
+# a call queued keeps what was there and asks for the queue to be sent
+law fq_queue:
+  {H.Fq.step.sets(H.Fq.queue(H.Fq.demo.s(), 5n, "p3", "t1", "thread_send", "{}")) == [H.Fq.demo.l1() ++ "\n" ++ H.Fq.demo.l2() ++ "\n" ++ H.Fq.line(H.Hub.id("q", 5n, H.Hub.seq(H.Fq.demo.s())), "p3", "t1", "thread_send", 5n, "{}")] : List<&2, String>}
+# ---- end far queue ----

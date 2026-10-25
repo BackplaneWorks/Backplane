@@ -345,6 +345,11 @@ type Msg is Data:
   # a report to a launcher on another machine was taken there (hub.bend's
   # Lr.far.*): its line leaves the outbox
   LaunchSent{key: String}
+  # a queued call for a machine that was away was answered there, or
+  # expired (hub.bend's Fq.*): its line leaves the queue, its thread is told
+  FarQueueSent{key: String, thread: String, text: String}
+  # the far queue's sender ended: another may start
+  FarQueueIdle{}
   # time to start the threads a restart left marked (B.Rec.release): after
   # each turn's end and each minute
   Release{}
@@ -8120,6 +8125,17 @@ def Far.own.go(ps: List<&2, BO.Peer>, +st: M.State, +cfg: Cfg) -> List<&2, BO.Pe
 def Far.own.id(+st: M.State, +cfg: Cfg, +id: String) -> Bool:
   Bool.and(Bot.peer.live(st, id), Far.own(st, cfg, BO.World.peer(M.State.bots(st), id)))
 
+# a link to one of the owner's machines that may be away (not found now):
+# the peer is kept, not revoked, and sync with it is not off; what a call
+# may be queued for (hub.bend's Fq.*), sent only once Far.own.id holds
+def Far.kept.p(+st: M.State, p: BO.Peer) -> Bool:
+  match p:
+    case BO.Peer{_, +n, _, _, r}:
+      Bool.and(Bool.not(r), Bool.not(UC.Mate.off(st, n)))
+
+def Far.kept.id(+st: M.State, +id: String) -> Bool:
+  Bool.and(Bot.peer.live(st, id), Far.kept.p(st, BO.World.peer(M.State.bots(st), id)))
+
 def Far.dir(+home: String) -> String:
   home ++ "/far"
 
@@ -9266,6 +9282,94 @@ def Lr.far.run(ls: List<&2, String>, +bad: List<&2, String>, +st: M.State, +cfg:
         Lr.far.done(err, M.Bg.field(l, 0n), inbox)
         Lr.far.run(t, Bool.pick(List<&2, String>, String.is_empty(err), bad, FR.Fr.link(M.Bg.field(l, 1n)) <> bad), st, cfg, inbox)
 
+# The queue for machines that are away (hub.bend's Fq.*): sent in order,
+# each line to its machine; a machine that gives no answer keeps all of its
+# lines back (held, as Lr.far.run); a line answered, or too old, is posted
+# back as FarQueueSent and leaves the queue in the hub's step.
+def Fq.reply(m: Maybe<&2, J.Json>) -> Bool & String:
+  match m:
+    case Some{+o}:
+      (J.Json.get_bool(J.Json.get_obj(o, "mcp"), "ok", False{}), String.take(J.Json.show(J.Json.get_obj(J.Json.get_obj(o, "mcp"), "body")), 600n))
+    case None{}:
+      (False{}, "its answer was not understood")
+
+def Fq.answered(r: Bool & String, +l: String, +name: String, +inbox: Chan(Msg)) -> IO(Unit):
+  (ok, +detail) = r
+  Far.send(inbox, FarQueueSent{B.Fq.f.key(l), B.Fq.f.thread(l), B.Fq.said(B.Fq.f.tool(l), name, ok, detail)})
+
+def Fq.code(+code: Nat, +body: String, +l: String, +name: String, +inbox: Chan(Msg)) -> IO(String):
+  Bool.pick(IO(String), Nat.is_eq(code, 0n), IO.pure(String, "away"),
+    IO.bind(Unit, String, Bool.pick(IO(Unit), Nat.is_eq(code, 200n), Fq.answered(Fq.reply(J.Json.parse(body)), l, name, inbox),
+      Far.send(inbox, FarQueueSent{B.Fq.f.key(l), B.Fq.f.thread(l), B.Fq.said(B.Fq.f.tool(l), name, False{}, "it answered " ++ Nat.show(code) ++ ": " ++ String.take(body, 200n))})),
+      _ => IO.pure(String, "")))
+
+# "" when the machine answered (any answer), "away" when it gave none
+def Fq.send(+l: String, +name: String, +home: String, +url: String, +inbox: Chan(Msg)) -> IO(String):
+  do IO<String>:
+    now : Nat <- Now.nat()
+    +n : String <- BN.Bn.random(4n)
+    +r : BN.Resp <- BN.Bn.to_peer(home, url, B.Fq.f.link(l), now, "/far/rpc", True{}, FR.Fr.nonced(B.Fq.f.body(l), n))
+    Fq.code(Far.code(r), Far.body(r), l, name, inbox)
+
+def Fq.name.k(m: Maybe<&2, FR.In>, +link: String) -> String:
+  match m:
+    case Some{i}:
+      FR.In.name.of(i)
+    case None{}:
+      link
+
+def Fq.name(+st: M.State, +link: String, +cfg: Cfg) -> String:
+  Fq.name.k(FR.Ins.find(Far.mirrors(cfg), link), link)
+
+def Fq.one(old: Bool, +l: String, +st: M.State, +cfg: Cfg, +inbox: Chan(Msg), +now: Nat) -> IO(String):
+  match old:
+    case True{}:
+      IO.bind(Unit, String, Far.send(inbox, FarQueueSent{B.Fq.f.key(l), B.Fq.f.thread(l), B.Fq.expired(B.Fq.f.tool(l), Fq.name(st, B.Fq.f.link(l), cfg))}), _ => IO.pure(String, ""))
+    case False{}:
+      Bool.pick(IO(String), Far.own.id(st, cfg, B.Fq.f.link(l)), Fq.send(l, Fq.name(st, B.Fq.f.link(l), cfg), Cfg.home(cfg), Bot.peer.url(st, B.Fq.f.link(l)), inbox), IO.pure(String, "off"))
+
+def Fq.try(held: Bool, +l: String, +st: M.State, +cfg: Cfg, +inbox: Chan(Msg), +now: Nat) -> IO(String):
+  match held:
+    case True{}:
+      IO.pure(String, "held")
+    case False{}:
+      Fq.one(B.Fq.old(l, now), l, st, cfg, inbox, now)
+
+def Fq.run(ls: List<&2, String>, +bad: List<&2, String>, +st: M.State, +cfg: Cfg, +inbox: Chan(Msg), +now: Nat) -> IO(Unit):
+  match ls:
+    case Nil{}:
+      IO.pure(Unit, Unit{})
+    case +l <> t:
+      do IO<Unit>:
+        +err : String <- Fq.try(Lr.far.held(bad, B.Fq.f.link(l)), l, st, cfg, inbox, now)
+        Fq.run(t, Bool.pick(List<&2, String>, String.is_empty(err), bad, B.Fq.f.link(l) <> bad), st, cfg, inbox, now)
+
+def Fq.job(+st: M.State, +cfg: Cfg, +inbox: Chan(Msg)) -> IO(Unit):
+  do IO<Unit>:
+    now : Nat <- Now.nat()
+    Fq.run(B.Fq.lines(st), Nil{}, st, cfg, inbox, now)
+    Far.send(inbox, FarQueueIdle{})
+
+# one sender at a time (a line is never sent twice at once: the owner keeps
+# no record of what it took); a FarQueued meanwhile is left to the next
+# minute's
+def Fq.start.k(busy: Bool, fh: FR.Fh, h: Hub) -> IO(Hub):
+  match busy h:
+    case True{} h2:
+      IO.pure(Hub, Far.with(h2, fh))
+    case False{} Hub{+st, f, ls, cl, as, +inbox, +cfg, note}:
+      do IO<Hub>:
+        IO.spawn(Unit, Fq.job(st, cfg, inbox))
+        return Far.with(Hub{st, f, ls, cl, as, inbox, cfg, note}, FR.Fh.pull.on(fh, FR.Fh.fq.key()))
+
+def Fq.start(p: FR.Fh & Hub) -> IO(Hub):
+  (+fh, h) = p
+  Fq.start.k(FR.Fh.busy(fh, FR.Fh.fq.key()), fh, h)
+
+def Fq.idle(p: FR.Fh & Hub) -> IO(Hub):
+  (fh, h) = p
+  IO.pure(Hub, Far.with(h, FR.Fh.pull.off(fh, FR.Fh.fq.key())))
+
 # One bounded job per distinct target, outside the hub loop.
 def WakeJob.pr.sent(+r: P.Ran, +target: String, +inbox: Chan(Msg)) -> IO(Unit):
   match r:
@@ -9663,6 +9767,8 @@ def Hub.out(h: Hub, o: B.Out) -> IO(Hub):
       do IO<Hub>:
         IO.spawn(Unit, Lr.far.run(B.Lr.far.lines(st), Nil{}, st, cfg, inbox))
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
+    case Hub{st, f, ls, cl, as, inbox, cfg, note} B.FarQueued{}:
+      Fq.start(Far.fh(Hub{st, f, ls, cl, as, inbox, cfg, note}))
     case Hub{st, f, ls, cl, as, +inbox, cfg, note} B.BotReply{+thread, +to, +text, _}:
       do IO<Hub>:
         Self.post(inbox, Replied{thread, to, text})
@@ -14821,6 +14927,15 @@ def Hub.mcp.far(own: Bool, h: Hub, +link: String, +rq: String, +o: J.Json, body:
     case False{} _:
       Hub.mcp.k(MC.Mcp.reply(Maybe.default(&2, J.Json, J.Json.get(o, "id"), J.Null{}), MC.Res.fail("sync with that machine is off here")), h, reply, body)
 
+# a call for a machine that is away waits for it (hub.bend's Fq.*): kept
+# in the queue by the answer's own step (only with sync on, as Hub.mcp.far)
+def Hub.mcp.later(own: Bool, h: Hub, +link: String, +name: String, +tool: String, +rq: String, +thread: String, +o: J.Json, body: String, +reply: Chan(String), +now: Nat) -> IO(Hub):
+  match own h:
+    case True{} Hub{+st, f, ls, cl, as, inbox, cfg, note}:
+      Hub.mcp.k(MC.Mcp.reply(Maybe.default(&2, J.Json, J.Json.get(o, "id"), J.Null{}), FM.Fm.later.res(st, now, link, name, tool, thread, rq)), Hub{st, f, ls, cl, as, inbox, cfg, note}, reply, body)
+    case False{} _:
+      Hub.mcp.k(MC.Mcp.reply(Maybe.default(&2, J.Json, J.Json.get(o, "id"), J.Null{}), MC.Res.fail("sync with that machine is off here")), h, reply, body)
+
 # a tool call for a machine of the owner's goes there (fmcp.bend); machine_list
 # is answered here; any other runs as before
 def Hub.mcp.f(p: FM.Plan, h: Hub, +thread: String, +o: J.Json, body: String, +reply: Chan(String), +now: Nat) -> IO(Hub):
@@ -14831,6 +14946,8 @@ def Hub.mcp.f(p: FM.Plan, h: Hub, +thread: String, +o: J.Json, body: String, +re
       Hub.mcp.k(MC.Mcp.reply(Maybe.default(&2, J.Json, J.Json.get(o, "id"), J.Null{}), r), h, reply, body)
     case FM.PFar{+link, +rq} Hub{+st, f, ls, cl, as, +inbox, +cfg, note}:
       Hub.mcp.far(Far.own.id(st, cfg, link), Hub{st, f, ls, cl, as, inbox, cfg, note}, link, rq, o, body, reply)
+    case FM.PLater{+link, +name, +tool, +rq} Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
+      Hub.mcp.later(Far.kept.id(st, link), Hub{st, f, ls, cl, as, inbox, cfg, note}, link, name, tool, rq, thread, o, body, reply, now)
 
 def Hub.mcp.p(+o: J.Json, h: Hub, +thread: String, body: String, +reply: Chan(String), +now: Nat) -> IO(Hub):
   match h:
@@ -15041,6 +15158,10 @@ def Msg.kind(m: Msg) -> String:
       "replied"
     case LaunchSent{_}:
       "launch_sent"
+    case FarQueueSent{_, _, _}:
+      "far_queue_sent"
+    case FarQueueIdle{}:
+      "far_queue_idle"
     case Release{}:
       "release"
     case SpawnFailed{_, _, _}:
@@ -15448,6 +15569,10 @@ def Hub.ship.done(h: Hub, +commit: String, +out: String, +now: Nat) -> IO(Hub):
 def Hub.launch.sent(p: M.State & Hub, +key: String, +now: Nat) -> IO(Hub):
   (st, h) = p
   Hub.step(h, B.Lr.far.sent(st, now, key))
+
+def Hub.far.queue.sent(p: M.State & Hub, +key: String, +thread: String, +text: String, +now: Nat) -> IO(Hub):
+  (st, h) = p
+  Hub.step(h, B.Fq.done(st, now, key, thread, text))
 
 def Hub.lock.probe.after.k(pending: Bool, h: Hub, +name: String, +holder: String) -> IO(Hub):
   match pending h:
@@ -16323,6 +16448,10 @@ def Hub.handle(h: Hub, m: Msg, +now: Nat) -> IO(Hub):
       Hub.replied(Hub.state(h), thread, to, text, now)
     case LaunchSent{+key}:
       Hub.launch.sent(Hub.state(h), key, now)
+    case FarQueueSent{+key, +thread, +text}:
+      Hub.far.queue.sent(Hub.state(h), key, thread, text, now)
+    case FarQueueIdle{}:
+      Fq.idle(Far.fh(h))
     case Release{}:
       Hub.release(Hub.state(h), now)
     case SpawnFailed{thread, gen, line}:

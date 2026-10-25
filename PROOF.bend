@@ -13206,3 +13206,14 @@ def Laws.far_v3_lasts(): {==}
 def Laws.far_items_projects(): {==}
 def Laws.hot_demo_threads(): {==}
 # ---- end F1 ----
+
+# ---- far queue ----
+def Laws.fq_tools(): {==}
+def Laws.fq_fields(): {==}
+def Laws.fq_at(): {==}
+def Laws.fq_order(): {==}
+def Laws.fq_done_drops(): {==}
+def Laws.fq_done_once(): {==}
+def Laws.fq_old(): {==}
+def Laws.fq_queue(): {==}
+# ---- end far queue ----
