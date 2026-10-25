@@ -70,6 +70,7 @@ def Copy.out(o: B.Out) -> List<&2, B.Out>:
     case B.ShipRun{_}: Nil{}
     case B.ShipNext{_}: Nil{}
     case B.Teach{_, _, _, _}: Nil{}
+    case B.FarQueued{}: Nil{}
     case B.Git{+client, +id, +job, th, cwd, a, b}: Copy.git.k(Copy.git.reads(job), B.Git{client, id, job, th, cwd, a, b}, client, id)
     case B.BotFx{+kind, a, b, c}: Copy.fx.k(Copy.fx.home(kind), B.BotFx{kind, a, b, c})
     case _: [o]

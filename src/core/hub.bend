@@ -155,6 +155,9 @@ type Out is Data:
   # the server keeps the driver and the draft, so it answers (m is
   # bots.browser or bots.teach, p the request's params as JSON text)
   Teach{client: U32, id: String, m: String, p: String}
+  # the queue for the owner's machines that are away (the setting
+  # far.queue, Fq.*) is due to be sent, in order
+  FarQueued{}
 
 type Step is Data:
   Step{changes: List<&2, M.Change>, outs: List<&2, Out>}
@@ -4338,6 +4341,174 @@ def Lr.send.k(far: Bool, +s: M.State, +now: Nat, +thread: String, +to: String, +
 def Lr.send(+s: M.State, +now: Nat, +thread: String, +to: String, +text: String) -> Step:
   Lr.send.k(FR.Fr.is(to), s, now, thread, to, text)
 
+# The queue for the owner's machines that are away
+# --------------------------------------------------
+# A thread_send or thread_launch for one of the owner's machines that is
+# away (fmcp.bend's Fm.plan.i) is not refused: it waits in the setting
+# far.queue, a line each, oldest first: "key\tlink\tthread\ttool\tat\tbody"
+# (body: the request as the machine takes it, Fm.request; JSON, so no tab).
+# The server sends the lines in order (FarQueued: when one is queued and on
+# each minute while any waits), each machine's after its earlier ones: a
+# machine that does not answer keeps all of its lines back. A line its
+# machine answered (taken or refused) leaves the queue, and in the same
+# step the thread that queued it is told what came of it (Fq.done, laws
+# fq_*); so is one older than Fq.ttl(), which is never sent. At most once:
+# a line is sent again only when its machine gave no answer at all.
+def Fq.key() -> String:
+  "far.queue"
+
+def Fq.ttl() -> Nat:
+  86400n
+
+# the tools that wait for a machine that is away (others are refused)
+def Fq.tool(+tool: String) -> Bool:
+  Bool.or(String.eq(tool, "thread_send"), String.eq(tool, "thread_launch"))
+
+def Fq.line(+key: String, +link: String, +thread: String, +tool: String, +at: Nat, +body: String) -> String:
+  key ++ "\t" ++ link ++ "\t" ++ thread ++ "\t" ++ tool ++ "\t" ++ Nat.show(at) ++ "\t" ++ body
+
+def Fq.lines(+s: M.State) -> List<&2, String>:
+  M.Launch.lines(M.Setting.get(s, Fq.key(), ""))
+
+def Fq.add(+s: M.State, +line: String, +now: Nat) -> M.Change:
+  M.SettingSet{Fq.key(), Bool.pick(String, String.is_empty(M.Setting.get(s, Fq.key(), "")), line, M.Setting.get(s, Fq.key(), "") ++ "\n" ++ line), now}
+
+# a call queued: kept, and the queue sent at once (the machine may be back)
+def Fq.queue(+s: M.State, +now: Nat, +link: String, +thread: String, +tool: String, +body: String) -> Step:
+  Step{[Fq.add(s, Fq.line(Hub.id("q", now, Hub.seq(s)), link, thread, tool, now, body), now)], [FarQueued{}]}
+
+# the fields of a line
+def Fq.f.key(+l: String) -> String:
+  M.Bg.field(l, 0n)
+
+def Fq.f.link(+l: String) -> String:
+  M.Bg.field(l, 1n)
+
+def Fq.f.thread(+l: String) -> String:
+  M.Bg.field(l, 2n)
+
+def Fq.f.tool(+l: String) -> String:
+  M.Bg.field(l, 3n)
+
+def Fq.f.body(+l: String) -> String:
+  M.Bg.field(l, 5n)
+
+def Fq.num.k(skip: Bool, +c: U32, +acc: Nat) -> Nat:
+  match skip:
+    case True{}:
+      acc
+    case False{}:
+      Nat.add(Nat.mul(acc, 10n), U32.to_nat((c - 48 : U32)))
+
+def Fq.num(s: String, +acc: Nat) -> Nat:
+  match s:
+    case SNil{}:
+      acc
+    case SCon{Chr{+c}, t}:
+      Fq.num(t, Fq.num.k(Bool.or(U32.is_lt(c, 48), U32.is_gt(c, 57)), c, acc))
+
+def Fq.f.at(+l: String) -> Nat:
+  Fq.num(M.Bg.field(l, 4n), 0n)
+
+# a line too old to send
+def Fq.old(+l: String, +now: Nat) -> Bool:
+  Nat.is_gt(now, Nat.add(Fq.f.at(l), Fq.ttl()))
+
+def Fq.keep.k(drop: Bool, +l: String, rest: List<&2, String>) -> List<&2, String>:
+  match drop:
+    case True{}:
+      rest
+    case False{}:
+      l <> rest
+
+def Fq.keep(ls: List<&2, String>, +key: String) -> List<&2, String>:
+  match ls:
+    case Nil{}:
+      Nil{}
+    case +l <> t:
+      Fq.keep.k(String.starts_with(l, key ++ "\t"), l, Fq.keep(t, key))
+
+def Fq.has(ls: List<&2, String>, +key: String) -> Bool:
+  match ls:
+    case Nil{}:
+      False{}
+    case +l <> t:
+      Bool.or(String.starts_with(l, key ++ "\t"), Fq.has(t, key))
+
+# what the thread is told
+def Fq.said(+tool: String, +machine: String, ok: Bool, +detail: String) -> String:
+  "Your queued " ++ tool ++ " for " ++ machine ++ Bool.pick(String, ok, " reached it: ", " did not go through: ") ++ detail
+
+def Fq.expired(+tool: String, +machine: String) -> String:
+  "Your queued " ++ tool ++ " for " ++ machine ++ " expired: that machine stayed away for a day, so it was not sent."
+
+def Fq.told(go: Bool, +s: M.State, +now: Nat, +key: String, +thread: String, +text: String) -> Step:
+  match go:
+    case True{}:
+      Hub.inbox.id(s, now, "far", thread, M.User{}, text, "fq-" ++ key)
+    case False{}:
+      Step.none()
+
+def Fq.done.k(had: Bool, +s: M.State, +now: Nat, +key: String, +thread: String, +text: String) -> Step:
+  match had:
+    case True{}:
+      Step.before([M.SettingSet{Fq.key(), String.join(Fq.keep(Fq.lines(s), key), "\n"), now}], Nil{}, Fq.told(Lr.exists(s, thread), s, now, key, thread, text))
+    case False{}:
+      Step.none()
+
+# a line its machine answered, or that expired: it leaves the queue and its
+# thread is told, once (a key no longer queued does nothing: law fq_done_once)
+def Fq.done(+s: M.State, +now: Nat, +key: String, +thread: String, +text: String) -> Step:
+  Fq.done.k(Fq.has(Fq.lines(s), key), s, now, key, thread, text)
+
+# for laws: a queue of two lines (machines p1 and p2), and what a step
+# writes to the queue
+def Fq.demo.l1() -> String:
+  Fq.line("q1", "p1", "t1", "thread_send", 100n, "{}")
+
+def Fq.demo.l2() -> String:
+  Fq.line("q2", "p2", "t1", "thread_launch", 200n, "{}")
+
+def Fq.demo.s() -> M.State:
+  M.State.replay([M.ThreadCreated{"t1", "", "Bub", M.Local{}, "", "", "claude", "", 1n}, M.SettingSet{Fq.key(), Fq.demo.l1() ++ "\n" ++ Fq.demo.l2(), 2n}], M.State.empty())
+
+def Fq.sets.k(mine: Bool, +v: String, rest: List<&2, String>) -> List<&2, String>:
+  match mine:
+    case True{}:
+      v <> rest
+    case False{}:
+      rest
+
+def Fq.sets(cs: List<&2, M.Change>) -> List<&2, String>:
+  match cs:
+    case Nil{}:
+      Nil{}
+    case M.SettingSet{+k, +v, _} <> t:
+      Fq.sets.k(String.eq(k, Fq.key()), v, Fq.sets(t))
+    case _ <> t:
+      Fq.sets(t)
+
+def Fq.step.sets(st: Step) -> List<&2, String>:
+  match st:
+    case Step{cs, _}:
+      Fq.sets(cs)
+
+def Fq.step.n(st: Step) -> Nat:
+  match st:
+    case Step{cs, _}:
+      List.length(&2, M.Change, cs)
+
+# each minute: sent again while anything waits
+def Fq.tick.k(none: Bool) -> Step:
+  match none:
+    case True{}:
+      Step.none()
+    case False{}:
+      Step.outs([FarQueued{}])
+
+def Fq.tick(+s: M.State) -> Step:
+  Fq.tick.k(String.is_empty(M.Setting.get(s, Fq.key(), "")))
+
 def Lr.end.n(stop: Bool, +s: M.State, +now: Nat, +thread: String, +by: String, +to: String, +n: Nat, +text: String) -> Step:
   match stop:
     case True{}:
@@ -6369,7 +6540,7 @@ def Hub.tick.k(+s: M.State, +now: Nat, +kids: Map<&2, Nat>) -> Step:
         Wt.stale(Map.values(&2, M.Thread, ts), s, now))
 
 def Hub.tick(+s: M.State, +now: Nat) -> Step:
-  Step.join(Step.join(Step.join(Step.join(Hub.tick.k(s, now, M.Work.kids.map(s)), Update.due(s, now)), Update.held(s, now)), Step.cat(Lr.far.tick(s), Wake.poll(s))), Step.cat(Deploy.tick(s, now), Ship.tick(s, now)))
+  Step.join(Step.join(Step.join(Step.join(Hub.tick.k(s, now, M.Work.kids.map(s)), Update.due(s, now)), Update.held(s, now)), Step.cat(Step.cat(Lr.far.tick(s), Fq.tick(s)), Wake.poll(s))), Step.cat(Deploy.tick(s, now), Ship.tick(s, now)))
 
 # A commit's lines
 # ----------------

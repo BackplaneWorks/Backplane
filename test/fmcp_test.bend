@@ -63,6 +63,8 @@ def body(p: F.Plan) -> String:
       "answer " ++ J.Json.show(rb(r))
     case F.PHere{}:
       "here"
+    case F.PLater{l, n, t, _}:
+      "later " ++ l ++ " " ++ n ++ " " ++ t
 
 def main() -> IO(Unit):
   do IO<Unit>:
@@ -92,7 +94,9 @@ def main() -> IO(Unit):
       "p1 {\"id\":0,\"m\":\"mcp.call\",\"p\":{\"tool\":\"thread_launch\",\"from\":\"p1~t0\",\"args\":{\"project\":\"p\",\"prompt\":\"go\"}}}")
     C.Check.str("a machine not linked here is an error, nothing sent", body(plan("thread_list", [J.KV{"machine", J.Str{"gamma"}}], ins)),
       "answer {\"error\":\"no machine of yours called gamma is linked here (machine_list shows them)\"}")
-    C.Check.str("a machine away is an error, nothing sent", body(plan("thread_send", [J.KV{"threadId", J.Str{"p1~pt"}}], [FR.In.away.set(mirror(), True{})])),
+    C.Check.str("a send to a machine away waits for it (the far queue)", body(plan("thread_send", [J.KV{"threadId", J.Str{"p1~pt"}}], [FR.In.away.set(mirror(), True{})])),
+      "later p1 box thread_send")
+    C.Check.str("an interrupt to a machine away is still an error", body(plan("thread_interrupt", [J.KV{"threadId", J.Str{"p1~pt"}}], [FR.In.away.set(mirror(), True{})])),
       "answer {\"error\":\"the machine box is away; try again when it is back\"}")
     C.Check.str("machine_list names the machines and their projects", body(plan("machine_list", Nil{}, ins)),
       "answer {\"machines\":[{\"machine\":\"this\",\"state\":\"here\",\"projects\":[]},{\"machine\":\"box\",\"link\":\"p1\",\"state\":\"here\",\"projects\":[{\"id\":\"p1~p\",\"name\":\"board\",\"folder\":\"/b\"}]}],\"note\":\"Name a machine in thread_list and thread_launch (`machine`), or use the ids shown here (<link>~<id>) with thread_send, thread_read, thread_wait and thread_interrupt.\"}")

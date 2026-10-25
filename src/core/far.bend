@@ -2127,6 +2127,16 @@ def Fh.pull.on(f: Fh, +link: String) -> Fh:
     case Fh{ms, os, fd, e, p, ep, cx}:
       Fh{ms, os, fd, e, link <> p, ep, cx}
 
+# a job of the hub's that must not run twice at once (a key beside the
+# pulls: the far queue's sender, hub.bend's Fq.*)
+def Fh.busy(f: Fh, +key: String) -> Bool:
+  match f:
+    case Fh{_, _, _, _, p, _, _}:
+      Fr.may.go(p, key)
+
+def Fh.fq.key() -> String:
+  "\u{0}fq"
+
 def Fh.pull.off.go(ps: List<&2, String>, +link: String) -> List<&2, String>:
   match ps:
     case Nil{}:
