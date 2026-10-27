@@ -15,8 +15,21 @@ final class AppearanceAccessibilityUITests: XCTestCase {
     }
 
     private func reveal(_ button: XCUIElement, in app: XCUIApplication) {
-        if !button.isHittable { app.swipeLeft() }
-        if !button.isHittable { app.swipeRight() }
+        // Start on a visible tab, so the drag belongs to the horizontal strip.
+        let names = ["home", "threads", "bots", "routines", "settings"]
+        func visibleTab() -> XCUIElement? {
+            names.map { app.buttons["tab." + $0] }.first { $0.isHittable }
+        }
+        for _ in 0..<4 {
+            if button.isHittable { return }
+            guard let visible = visibleTab() else { return }
+            visible.swipeLeft()
+        }
+        for _ in 0..<4 {
+            if button.isHittable { return }
+            guard let visible = visibleTab() else { return }
+            visible.swipeRight()
+        }
     }
 
     func testCompactTabLabelsAndSelection() {
@@ -40,6 +53,14 @@ final class AppearanceAccessibilityUITests: XCTestCase {
         XCTAssertTrue(threads.isHittable)
         threads.tap()
         let search = app.textFields["projects.search"]
+        // Back only while a thread composer proves this is a thread stack.
+        for _ in 0..<3 {
+            if search.waitForExistence(timeout: 2) { break }
+            guard app.descendants(matching: .any)["thread.composer"].exists else { break }
+            let back = app.navigationBars.buttons.firstMatch
+            guard back.exists && back.isHittable else { break }
+            back.tap()
+        }
         XCTAssertTrue(search.waitForExistence(timeout: 30))
         XCTAssertTrue(search.isHittable)
         search.tap()
