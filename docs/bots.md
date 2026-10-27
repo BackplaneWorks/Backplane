@@ -305,8 +305,10 @@ itself (`ask`, `merged`, `reminder`, `note`). `kind` is that alert's kind.
 `state` for a turn end is the word the turn ended with: `completed`,
 `failed`, `interrupted`, or `stopped`. `reason` says why a broken turn
 ended: `limit` (a usage, rate or quota limit), `error` (any other
-failure) or `interrupted`, read only from an error the ending turn
-logged (never an older turn's, nor the reply's prose); it is empty otherwise. A message already waiting does not replace it when
+failure) or `interrupted`. The hub reads it when the turn ends and
+carries it, with the turn's error, in `TurnEnded`: from an error the
+ending turn logged, or, with none, a limit's words in that turn's own
+reply (never an older turn's); it is empty otherwise. A message already waiting does not replace it when
 it starts the next turn. For the other alerts, `state` is the thread's turn
 at the time (`running`, `idle`, …). `text` for a settle or a failure is
 the first line of the error the turn logged, else `Failed`, or the first

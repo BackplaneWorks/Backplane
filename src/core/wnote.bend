@@ -238,6 +238,44 @@ def Wn.reason.k(+limit: Bool, +state: String) -> String:
 def Wn.reason(+state: String, +err: String) -> String:
   Wn.reason.k(FB.Error.words(String.to_lower(err)), state)
 
+# The ending turn's error and reply, read by the hub when the turn ends
+# (hub.bend's Ended.out.p) and carried in TurnEnded, so the webhook never
+# searches history. The entries are newest first; the thread's newest
+# message from the user started the ending turn, so a scan stops there and
+# never takes an older turn's.
+
+# the newest error the ending turn logged (an Act of tone "error": a
+# failed result's text, an exit), "" when none
+def Wn.err(es: List<&2, M.Entry>, +thread: String) -> String:
+  match es:
+    case Nil{}:
+      ""
+    case M.Msg{_, +th, M.User{}, _, _} <> t:
+      Bool.pick(String, String.eq(th, thread), "", Wn.err(t, thread))
+    case M.Act{_, +th, +tone, _, +summary, _} <> t:
+      Bool.pick(String, Bool.and(String.eq(th, thread), String.eq(tone, "error")), summary, Wn.err(t, thread))
+    case _ <> t:
+      Wn.err(t, thread)
+
+# the ending turn's newest reply, "" when it gave none
+def Wn.reply(es: List<&2, M.Entry>, +thread: String) -> String:
+  match es:
+    case Nil{}:
+      ""
+    case M.Msg{_, +th, M.User{}, _, _} <> t:
+      Bool.pick(String, String.eq(th, thread), "", Wn.reply(t, thread))
+    case M.Msg{_, +th, M.Assistant{}, +text, _} <> t:
+      Bool.pick(String, String.eq(th, thread), text, Wn.reply(t, thread))
+    case _ <> t:
+      Wn.reply(t, thread)
+
+# why the turn ended (Wn.reason): from its logged error; with none, its own
+# reply is read, and only a limit's words (fallback.bend's Error.words)
+# there change anything, so a reply never makes up an error. "" for a
+# settle or a stop.
+def Wn.end.reason(+state: String, +err: String, +reply: String) -> String:
+  Wn.reason(state, Bool.pick(String, String.is_empty(err), reply, err))
+
 # Alerted posts the other kinds (so a settle is not sent twice)
 def Wn.due.alert(+kind: String) -> Bool:
   Wn.other(Wn.route(kind))

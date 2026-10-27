@@ -5,7 +5,6 @@ import ../src/core/model.bend as M
 import ../src/core/notice.bend as NO
 import ../src/core/sign.bend as SG
 import ../src/core/wnote.bend as WN
-import ../src/server/push.bend as PU
 
 # The outbound webhook (core/wnote.bend): it posts only for an alert the
 # notification policy would raise, the JSON carries that kind, and the
@@ -44,6 +43,12 @@ def older() -> List<&2, M.Entry>:
 def current() -> List<&2, M.Entry>:
   [M.Act{"e2", "t1", "error", "result", "API Error: 500", 22n}, M.Msg{"m2", "t1", M.User{}, "next", 20n},
    M.Act{"e1", "t1", "error", "result", "Claude AI usage limit reached|1792800000", 11n}]
+
+# a turn whose reply reports a limit, with no error logged, after an older
+# turn's reply
+def limited() -> List<&2, M.Entry>:
+  [M.Msg{"a3", "t1", M.Assistant{}, "Claude AI usage limit reached|1792800000", 31n}, M.Msg{"m3", "t1", M.User{}, "go on", 30n},
+   M.Msg{"a1", "t1", M.Assistant{}, "an older reply", 12n}]
 
 def main() -> IO(Unit):
   do IO<Unit>:
@@ -129,13 +134,22 @@ def main() -> IO(Unit):
     C.Check.str("private failure posts nothing", yn(WN.Wn.due.end(NO.Policy.kind(NO.Policy.end(managed(), 4n, "worker", "failed")), "failed", True{}, WN.Wn.private(managed(), "worker"))), "no")
     C.Check.str("private interrupt posts nothing", yn(WN.Wn.due.end("", "interrupted", True{}, True{})), "no")
     C.Check.str("the person's thread is not private", yn(WN.Wn.private(s1, "t1")), "no")
-    C.Check.str("older turn's error not taken", PU.Push.hook.err(older(), "t1"), "")
-    C.Check.str("interrupt keeps its own reason", WN.Wn.reason("interrupted", PU.Push.hook.err(older(), "t1")), "interrupted")
-    C.Check.str("this turn's error taken", PU.Push.hook.err(current(), "t1"), "API Error: 500")
-    C.Check.str("this turn's error classified", WN.Wn.reason("failed", PU.Push.hook.err(current(), "t1")), "error")
+    C.Check.str("older turn's error not taken", WN.Wn.err(older(), "t1"), "")
+    C.Check.str("interrupt keeps its own reason", WN.Wn.reason("interrupted", WN.Wn.err(older(), "t1")), "interrupted")
+    C.Check.str("this turn's error taken", WN.Wn.err(current(), "t1"), "API Error: 500")
+    C.Check.str("this turn's error classified", WN.Wn.reason("failed", WN.Wn.err(current(), "t1")), "error")
     C.Check.str("absent default is unsigned", Nat.show(WN.Wn.mode(WN.Wn.wants("", False{}), "")), "1")
     C.Check.str("unreadable default posts nothing", Nat.show(WN.Wn.mode(WN.Wn.wants("", True{}), "")), "0")
     C.Check.str("readable default signs", Nat.show(WN.Wn.mode(WN.Wn.wants(" ", True{}), "k")), "2")
     C.Check.str("named empty file posts nothing", Nat.show(WN.Wn.mode(WN.Wn.wants("/tmp/s", True{}), "")), "0")
     C.Check.str("short hex is raw bytes", WN.Wn.sig("deadbeef", 10n, body), "sha256=068662f0b5260bd58dfcd9a4df964a0b956e7a36d24dfe5430ff2ffe6f74a351")
     C.Check.str("odd-length hex is text", WN.Wn.sig("deadbee", 10n, body), "sha256=b76febb25b10ab2e866cdf2b62c0a360a30ffa30286401d08f7f5ed7972de0b2")
+    C.Check.str("reply is this turn's", WN.Wn.reply(limited(), "t1"), "Claude AI usage limit reached|1792800000")
+    C.Check.str("no reply in this turn", WN.Wn.reply(older(), "t1"), "working on it")
+    C.Check.str("limit kept from the reply", WN.Wn.end.reason("interrupted", WN.Wn.err(limited(), "t1"), WN.Wn.reply(limited(), "t1")), "limit")
+    C.Check.str("failed with a limit reply", WN.Wn.end.reason("failed", "", "You've hit your limit · resets 8pm"), "limit")
+    C.Check.str("ordinary reply is no error word", WN.Wn.end.reason("failed", "", "I could not finish"), "error")
+    C.Check.str("ordinary reply on an interrupt", WN.Wn.end.reason("interrupted", "", "working on it"), "interrupted")
+    C.Check.str("logged error wins over the reply", WN.Wn.end.reason("failed", "API Error: 500", "usage limit reached"), "error")
+    C.Check.str("older turn's limit not taken", WN.Wn.end.reason("interrupted", WN.Wn.err(older(), "t1"), WN.Wn.reply(older(), "t1")), "interrupted")
+    C.Check.str("a stop has no reason", WN.Wn.end.reason("stopped", "", "usage limit reached"), "")
