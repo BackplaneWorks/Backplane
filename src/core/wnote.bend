@@ -243,38 +243,89 @@ def Wn.reason(+state: String, +err: String) -> String:
 # searches history. The entries are newest first; the thread's newest
 # message from the user started the ending turn, so a scan stops there and
 # never takes an older turn's.
+#
+# One scan finds both, and stops at the boundary or as soon as both are
+# found: each step's stop is decided before the next call, and the call is
+# in tail position, so a long history is neither walked to its end nor
+# held on the stack.
 
-# the newest error the ending turn logged (an Act of tone "error": a
-# failed result's text, an exit), "" when none
-def Wn.err(es: List<&2, M.Entry>, +thread: String) -> String:
+# what a turn's scan found: its newest error (an Act of tone "error": a
+# failed result's text, an exit, an API error) and its newest reply, ""
+# when none
+type Got is Data:
+  Got{err: String, reply: String}
+
+def Wn.got.err(g: Got) -> String:
+  match g:
+    case Got{+err, _}:
+      err
+
+def Wn.got.reply(g: Got) -> String:
+  match g:
+    case Got{_, +reply}:
+      reply
+
+def Wn.got.none() -> Got:
+  Got{"", ""}
+
+def Wn.got.done(g: Got) -> Bool:
+  match g:
+    case Got{+err, +reply}:
+      Bool.and(Bool.not(String.is_empty(err)), Bool.not(String.is_empty(reply)))
+
+# the first of each kind wins (the scan runs newest first)
+def Wn.got.keep(take: Bool, +found: String, +had: String) -> String:
+  Bool.pick(String, Bool.and(take, String.is_empty(had)), found, had)
+
+def Wn.got(e: M.Entry, +thread: String, +g: Got) -> Got:
+  match e:
+    case M.Act{_, +th, +tone, _, +summary, _}:
+      Got{Wn.got.keep(Bool.and(String.eq(th, thread), String.eq(tone, "error")), summary, Wn.got.err(g)), Wn.got.reply(g)}
+    case M.Msg{_, +th, M.Assistant{}, +text, _}:
+      Got{Wn.got.err(g), Wn.got.keep(String.eq(th, thread), text, Wn.got.reply(g))}
+    case _:
+      g
+
+# whether the scan stops before es: at the thread's message from the user
+# that started the turn, at the end, or with both found
+def Wn.stop(es: List<&2, M.Entry>, +thread: String, g: Got) -> Bool:
   match es:
+    case M.Msg{_, +th, M.User{}, _, _} <> _:
+      Bool.or(String.eq(th, thread), Wn.got.done(g))
+    case _ <> _:
+      Wn.got.done(g)
     case Nil{}:
-      ""
-    case M.Msg{_, +th, M.User{}, _, _} <> t:
-      Bool.pick(String, String.eq(th, thread), "", Wn.err(t, thread))
-    case M.Act{_, +th, +tone, _, +summary, _} <> t:
-      Bool.pick(String, Bool.and(String.eq(th, thread), String.eq(tone, "error")), summary, Wn.err(t, thread))
-    case _ <> t:
-      Wn.err(t, thread)
+      True{}
 
-# the ending turn's newest reply, "" when it gave none
-def Wn.reply(es: List<&2, M.Entry>, +thread: String) -> String:
-  match es:
-    case Nil{}:
-      ""
-    case M.Msg{_, +th, M.User{}, _, _} <> t:
-      Bool.pick(String, String.eq(th, thread), "", Wn.reply(t, thread))
-    case M.Msg{_, +th, M.Assistant{}, +text, _} <> t:
-      Bool.pick(String, String.eq(th, thread), text, Wn.reply(t, thread))
-    case _ <> t:
-      Wn.reply(t, thread)
+def Wn.scan(es: List<&2, M.Entry>, stop: Bool, +thread: String, +g: Got) -> Got:
+  match es stop:
+    case +e <> +t False{}:
+      Wn.scan(t, Wn.stop(t, thread, Wn.got(e, thread, g)), thread, Wn.got(e, thread, g))
+    case _ _:
+      g
 
-# why the turn ended (Wn.reason): from its logged error; with none, its own
-# reply is read, and only a limit's words (fallback.bend's Error.words)
-# there change anything, so a reply never makes up an error. An
-# interrupted turn that logged an error of its own (a model or API error,
-# hub.bend's Claude.api.err) ended on that error: "error", not
-# "interrupted". "" for a settle or a stop.
+# the ending turn's error and reply
+def Wn.span(+es: List<&2, M.Entry>, +thread: String) -> Got:
+  Wn.scan(es, Wn.stop(es, thread, Wn.got.none()), thread, Wn.got.none())
+
+def Wn.err(+es: List<&2, M.Entry>, +thread: String) -> String:
+  Wn.got.err(Wn.span(es, thread))
+
+def Wn.reply(+es: List<&2, M.Entry>, +thread: String) -> String:
+  Wn.got.reply(Wn.span(es, thread))
+
+def Wn.cap.k(on: Bool, +s: M.State, +thread: String) -> Got:
+  match on:
+    case True{}:
+      Wn.span(M.State.mine(s, thread), thread)
+    case False{}:
+      Wn.got.none()
+
+# what TurnEnded carries: the scan runs once, and only when a webhook is
+# set (push.webhook.url); with none, nothing is read and nothing carried
+def Wn.cap(+s: M.State, +thread: String) -> Got:
+  Wn.cap.k(Wn.on(String.trim(M.Setting.get(s, Wn.url.key(), ""))), s, thread)
+
 # a turn end's text from its own reply's first line: "Failed" for a
 # failed turn (its error takes over when it logged one) or a broken one
 # that gave no reply, "Finished" for a settle with none, else the line
@@ -282,6 +333,12 @@ def Wn.end.text(+state: String, +line: String) -> String:
   Bool.pick(String, Bool.or(String.eq(state, "failed"), Bool.and(Wn.broke(state), String.is_empty(line))), "Failed",
     Bool.pick(String, String.is_empty(line), "Finished", line))
 
+# why the turn ended (Wn.reason): from its logged error; with none, its own
+# reply is read, and only a limit's words (fallback.bend's Error.words)
+# there change anything, so a reply never makes up an error. An
+# interrupted turn that logged an error of its own (a model or API error,
+# hub.bend's Claude.api.err) ended on that error: "error", not
+# "interrupted". "" for a settle or a stop.
 def Wn.end.reason.k(said: Bool, +r: String) -> String:
   Bool.pick(String, Bool.and(said, String.eq(r, "interrupted")), "error", r)
 

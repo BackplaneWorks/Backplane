@@ -3685,12 +3685,19 @@ def Answer.demo(busy: Bool) -> M.State:
 def Run.settle(+s: M.State, +now: Nat, +th: String) -> List<&2, M.Change>:
   Bool.pick(List<&2, M.Change>, MR.Run.is(s, th), [M.ThreadSettled{th, False{}, now}], Nil{})
 
+# what a turn end tells the server: the end's own alert kind, and the
+# turn's error and why it ended, found by one scan (wnote.bend's Wn.cap;
+# none when no webhook is set)
+def Ended.turn(+thread: String, +state: String, +alert: String, g: WN.Got) -> Out:
+  match g:
+    case WN.Got{+err, +reply}:
+      TurnEnded{thread, state, alert, err, WN.Wn.end.reason(state, err, reply)}
+
 # post: the state after the step; the policy's record (core/notice.bend)
 # is written with it
 def Ended.out.p(+post: M.State, +s: M.State, +now: Nat, +state: String, +thread: String, +cwd: String, +cs: List<&2, M.Change>, os: List<&2, Out>) -> Step:
   Step{List.append(&2, M.Change, List.append(&2, M.Change, List.append(&2, M.Change, cs, Run.settle(s, now, thread)), Sum.at(RF.Sum.due(s, thread, now), thread, now)), NO.Policy.end(post, now, thread, state)),
-    List.append(&2, Out, os, TurnEnded{thread, state, NO.Policy.kind(NO.Policy.end(post, now, thread, state)), WN.Wn.err(M.State.mine(post, thread), thread),
-      WN.Wn.end.reason(state, WN.Wn.err(M.State.mine(post, thread), thread), WN.Wn.reply(M.State.mine(post, thread), thread))} <> Git{0, "", "step", thread, cwd, "", ""} <> Git{0, "", "checkpoint", thread, cwd, "", ""}
+    List.append(&2, Out, os, Ended.turn(thread, state, NO.Policy.kind(NO.Policy.end(post, now, thread, state)), WN.Wn.cap(post, thread)) <> Git{0, "", "step", thread, cwd, "", ""} <> Git{0, "", "checkpoint", thread, cwd, "", ""}
       <> List.append(&2, Out, Sum.out(RF.Sum.due(s, thread, now), s, thread, "thread"), Answer.out(String.eq(state, "completed"), post, thread)))}
 
 def Ended.out.k(none: Bool, +s: M.State, +now: Nat, +state: String, +thread: String, +cwd: String, st: Step) -> Step:

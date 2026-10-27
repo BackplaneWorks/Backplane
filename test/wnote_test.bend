@@ -61,6 +61,26 @@ def limited() -> List<&2, M.Entry>:
   [M.Msg{"a3", "t1", M.Assistant{}, "Claude AI usage limit reached|1792800000", 31n}, M.Msg{"m3", "t1", M.User{}, "go on", 30n},
    M.Msg{"a1", "t1", M.Assistant{}, "an older reply", 12n}]
 
+# a long history, newest first: n older entries of an info tone, after
+# the oldest (last) entry
+def long.go(n: Nat, acc: List<&2, M.Entry>) -> List<&2, M.Entry>:
+  match n:
+    case 0n:
+      acc
+    case 1n+p:
+      long.go(p, M.Act{"o", "t1", "info", "tool", "older work", 5n} <> acc)
+
+def long(n: Nat, +last: M.Entry) -> List<&2, M.Entry>:
+  long.go(n, [last])
+
+# a turn that failed (its error logged), with push.webhook.url as given
+def hooked(+url: String) -> M.State:
+  M.State.replay([M.ProjectCreated{"p", "P", "/tmp/p", 1n},
+    M.ThreadCreated{"t1", "p", "Work", M.Local{}, "", "/tmp/p", "claude", "", 1n},
+    M.SettingSet{"push.webhook.url", url, 1n},
+    M.MessagePosted{"t1", "m1", M.User{}, "go", 2n}, M.TurnChanged{"t1", M.Running{}, 2n},
+    M.ActivityLogged{"t1", "e1", "error", "result", "API Error: 500", 3n}, M.TurnChanged{"t1", M.Failed{}, 3n}], M.State.empty())
+
 def main() -> IO(Unit):
   do IO<Unit>:
     +body : String = WN.Wn.body("fail", "t1", "failed", "Board", "Failed")
@@ -174,3 +194,10 @@ def main() -> IO(Unit):
     C.Check.str("settled with no reply", WN.Wn.end.text("completed", ""), "Finished")
     C.Check.str("settled with its reply", WN.Wn.end.text("completed", "done"), "done")
     C.Check.str("a stop has no reason", WN.Wn.end.reason("stopped", "", "usage limit reached"), "")
+    C.Check.str("long history: stops at the turn's start", WN.Wn.err(M.Act{"e9", "t1", "error", "result", "now failing", 10n} <> (M.Msg{"m9", "t1", M.User{}, "go", 9n} <> long(20000n, M.Act{"e0", "t1", "error", "result", "oldest", 0n})), "t1"), "now failing")
+    C.Check.str("long history: an empty turn reads none", WN.Wn.err(M.Msg{"m9", "t1", M.User{}, "go", 9n} <> long(20000n, M.Act{"e0", "t1", "error", "result", "oldest", 0n}), "t1"), "")
+    C.Check.str("long history: walked to its end without the stack", WN.Wn.err(long(20000n, M.Act{"e0", "t1", "error", "result", "oldest", 0n}), "t1"), "oldest")
+    C.Check.str("long history: reply found once both are", WN.Wn.reply(M.Msg{"a9", "t1", M.Assistant{}, "done", 11n} <> (M.Act{"e9", "t1", "error", "result", "now failing", 10n} <> long(20000n, M.Msg{"m0", "t1", M.User{}, "go", 0n})), "t1"), "done")
+    C.Check.str("webhook off: nothing read", WN.Wn.got.err(WN.Wn.cap(hooked(""), "t1")), "")
+    C.Check.str("webhook blank: nothing read", WN.Wn.got.err(WN.Wn.cap(hooked("  "), "t1")), "")
+    C.Check.str("webhook on: the turn's error", WN.Wn.got.err(WN.Wn.cap(hooked("https://example.com/h"), "t1")), "API Error: 500")
