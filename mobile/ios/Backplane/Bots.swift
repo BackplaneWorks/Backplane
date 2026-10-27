@@ -192,7 +192,7 @@ struct BotScreen: View {
                                         }
                                 }
                                 .foregroundStyle(on ? .primary : .secondary)
-                                .disabled(t.id == "mail" && mailWaiting)
+                                .disabled(!live || (t.id == "mail" && mailWaiting))
                                 .accessibilityAddTraits(on ? .isSelected : [])
                                 .accessibilityIdentifier("bot.tab." + t.id)
                             }
@@ -210,7 +210,7 @@ struct BotScreen: View {
                                             .padding(.horizontal, 12).padding(.vertical, 8)
                                     }
                                     .foregroundStyle(on ? .primary : .secondary)
-                                    .disabled(t.id == "mail" && mailWaiting)
+                                    .disabled(!live || (t.id == "mail" && mailWaiting))
                                     .accessibilityAddTraits(on ? .isSelected : [])
                                     .accessibilityIdentifier("bot.section." + t.id)
                                 }
@@ -224,11 +224,12 @@ struct BotScreen: View {
             content.frame(maxWidth: .infinity, maxHeight: .infinity)
         }
             .toolbar {
-                if model.mailroomReturn != nil, bot.tab != "chat" {
+                if model.mailroomReturn != nil, (bot.tab ?? "chat") != "chat" {
                     ToolbarItem(placement: .topBarLeading) {
                         Button { model.backToMailroom() } label: {
                             Label(NativeMessages.native_mailroom_title(model.screen?.locale ?? "en"), systemImage: "chevron.left")
                         }.accessibilityIdentifier("mailroom.return")
+                            .disabled(!live)
                     }
                 }
             }

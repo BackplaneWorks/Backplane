@@ -977,11 +977,13 @@ struct ThreadDestination: View {
         VStack(spacing: 0) {
         Group {
             if let b = (selected ? model.screen?.bot : nil) ?? model.seenBots[id] {
+                let cachedThread = selected ? model.screen?.thread : model.seen[id]
+                let readableChat = b.kind == "bot" && (b.tab ?? "chat") == "chat" && cachedThread?.id == id
                 BotDestination(model: model, bot: b, live: ready,
-                               cachedThread: selected ? model.screen?.thread : model.seen[id],
+                               cachedThread: cachedThread,
                                cachedPlane: selected ? model.screen.flatMap { model.plane($0) } : model.seenPlanes[id])
-                    .allowsHitTesting(ready)
-                    .disabled(!ready)
+                    .allowsHitTesting(ready || readableChat)
+                    .disabled(!(ready || readableChat))
                     .overlay(alignment: .top) { if !ready { loadingStatus } }
             } else if let t = (selected ? model.screen?.thread : nil) ?? model.seen[id] {
                 ThreadScreen(model: model, thread: t, live: ready).id(id)
@@ -1242,6 +1244,7 @@ struct ThreadScreen: View {
                     Button { model.backToMailroom() } label: {
                         Label(NativeMessages.native_mailroom_title(lang), systemImage: "chevron.left")
                     }.accessibilityIdentifier("mailroom.return")
+                        .disabled(!live)
                 }
             }
             if !thread.branch.isEmpty || !(thread.boat ?? "").isEmpty {
