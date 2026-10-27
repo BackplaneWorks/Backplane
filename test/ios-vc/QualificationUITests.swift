@@ -532,6 +532,107 @@ final class QualificationUITests: XCTestCase {
         app.buttons["viewer.close"].tap()
     }
 
+    func testExternallyLaunchedBoard3DZoom() {
+        let app = XCUIApplication()
+        app.activate()
+        closeRestoredViewer(app)
+        let ready = app.descendants(matching: .any)["qualification.connection.ready"].waitForExistence(timeout: 60)
+        qualificationStatus(app, label: "external-zoom-initial")
+        XCTAssertTrue(ready, "Externally launched real thread must be ready")
+        XCTAssertTrue(app.descendants(matching: .any)["thread.composer"].waitForExistence(timeout: 15))
+        let open = app.buttons["viewer.open"]
+        XCTAssertTrue(open.waitForExistence(timeout: 15)); open.tap()
+        let choice = app.buttons["viewer.choice.3d"]
+        XCTAssertTrue(choice.waitForExistence(timeout: 10)); choice.tap()
+        let close = app.buttons["viewer.close"]
+        XCTAssertTrue(close.waitForExistence(timeout: 20))
+        let mesh = app.descendants(matching: .any)["viewer.mesh.ready"]
+        XCTAssertTrue(mesh.waitForExistence(timeout: 90))
+        let before = XCTAttachment(screenshot: app.screenshot()); before.name = "external-zoom-before"; before.lifetime = .keepAlways; add(before)
+        app.pinch(withScale: 1.7, velocity: 1.0)
+        XCTAssertTrue(mesh.waitForExistence(timeout: 20))
+        let after = XCTAttachment(screenshot: app.screenshot()); after.name = "external-zoom-after"; after.lifetime = .keepAlways; add(after)
+        XCTAssertTrue(close.isHittable); close.tap()
+    }
+
+    func testObserved3DDeadlineAndRetry() {
+        let app = XCUIApplication()
+        app.activate()
+        closeRestoredViewer(app)
+        let ready = app.descendants(matching: .any)["qualification.connection.ready"].waitForExistence(timeout: 60)
+        qualificationStatus(app, label: "3d-budget-initial")
+        XCTAssertTrue(ready, "The selected real thread must be fresh before opening 3D")
+        let open = app.buttons["viewer.open"]
+        XCTAssertTrue(open.waitForExistence(timeout: 15)); open.tap()
+        let choice = app.buttons["viewer.choice.3d"]
+        XCTAssertTrue(choice.waitForExistence(timeout: 10)); choice.tap()
+        let close = app.buttons["viewer.close"]
+        XCTAssertTrue(close.waitForExistence(timeout: 20))
+        let mesh = app.descendants(matching: .any)["viewer.mesh.ready"]
+        let error = app.descendants(matching: .any)["viewer.error"]
+        let loading = app.descendants(matching: .any)["viewer.loading"]
+        let retry = app.buttons["viewer.retry"]
+        let observedAt = ProcessInfo.processInfo.systemUptime
+        let timedOut = error.waitForExistence(timeout: 40)
+        let loaded = mesh.exists
+        print("safe-3d-budget elapsed=\(ProcessInfo.processInfo.systemUptime - observedAt) mesh=\(loaded) loading=\(loading.exists) error=\(timedOut) retry=\(retry.exists) close=\(close.exists)")
+        qualificationStatus(app, label: "3d-budget-observed")
+        if !app.textFields["pair.address"].exists { let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "3d-budget-observed"; shot.lifetime = .keepAlways; add(shot) }
+        var recovered = loaded
+        if !loaded && timedOut && retry.isHittable {
+            retry.tap()
+            recovered = mesh.waitForExistence(timeout: 60)
+            print("safe-3d-budget-retry mesh=\(recovered) loading=\(loading.exists) error=\(error.exists) close=\(close.exists)")
+            qualificationStatus(app, label: "3d-budget-after-retry")
+            if !app.textFields["pair.address"].exists { let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "3d-budget-after-retry"; shot.lifetime = .keepAlways; add(shot) }
+        }
+        let closeWorks = close.exists && close.isHittable
+        if closeWorks { close.tap() }
+        XCTAssertTrue(closeWorks, "Close must remain available")
+        XCTAssertTrue(recovered, "Real mesh must load initially or after an actionable Retry")
+    }
+
+    func testObserveNormalLaunchedUI() {
+        let app = XCUIApplication()
+        app.activate()
+        closeRestoredViewer(app)
+        XCTAssertFalse(app.buttons["viewer.close"].exists, "Thread observation requires the restored viewer to be closed")
+        let composer = app.descendants(matching: .any)["thread.composer"]
+        let threads = app.buttons["tab.threads"]
+        let composerPresent = composer.waitForExistence(timeout: 30)
+        let threadsPresent = threads.waitForExistence(timeout: 10)
+        print("safe-normal-ui foreground=\(app.state == .runningForeground) pair-field=\(app.textFields["pair.address"].exists) thread-composer=\(composerPresent) threads-tab=\(threadsPresent)")
+        XCTAssertTrue(app.state == .runningForeground && (composerPresent || threadsPresent), "Normal app UI must be visible")
+        XCTAssertFalse(app.textFields["pair.address"].exists)
+        if threadsPresent { threads.tap() }
+        let visibleThread = composer.waitForExistence(timeout: 15)
+        let project = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "project.header.")).firstMatch.waitForExistence(timeout: 15)
+        print("safe-normal-threads composer=\(visibleThread) project-header=\(project)")
+        XCTAssertTrue(visibleThread || project, "Threads must show an existing thread or project")
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "normal-no-env-ui"; shot.lifetime = .keepAlways; add(shot)
+    }
+
+    func testPairedHubsPasteControl() {
+        let app = XCUIApplication()
+        app.terminate()
+        app.launchEnvironment["BACKPLANE_QUALIFICATION"] = "1"
+        app.launch()
+        closeRestoredViewer(app)
+        XCTAssertTrue(app.descendants(matching: .any)["qualification.connection.ready"].waitForExistence(timeout: 60))
+        let threads = app.buttons["tab.threads"]
+        XCTAssertTrue(threads.waitForExistence(timeout: 15)); threads.tap()
+        let hubs = app.buttons["navigation.hubs"]
+        if !hubs.waitForExistence(timeout: 5) {
+            let back = app.navigationBars.buttons.firstMatch
+            XCTAssertTrue(back.waitForExistence(timeout: 10)); back.tap()
+        }
+        XCTAssertTrue(hubs.waitForExistence(timeout: 15)); hubs.tap()
+        let paste = app.descendants(matching: .any)["hubs.paste"]
+        XCTAssertTrue(paste.waitForExistence(timeout: 15), "Paired Hubs must expose the native Paste control")
+        XCTAssertTrue(paste.isHittable, "The Paste control must be reachable")
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "paired-hubs-paste-control"; shot.lifetime = .keepAlways; add(shot)
+    }
+
     func testInvalidSessionOnFreshSimulator() {
         let app = XCUIApplication()
         app.launchEnvironment["BACKPLANE_QUALIFICATION"] = "1"
