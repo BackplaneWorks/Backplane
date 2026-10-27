@@ -95,6 +95,16 @@ assert.equal(rpc.m, 'secret.set');
 assert.deepEqual(rpc.p, { name: 'tailscale-bub', purpose: 'join the tailnet', thread: 't1', value: F1 });
 assert.match(JSON.parse(raw.req('n\u001fp\u001ft\u001fshort')).error, /at least 8/);
 assert.ok(JSON.parse(raw.req('garbage')).error);
+// Settings' API key Save on the web: one api-add request with the value,
+// the name as an environment variable, or why nothing goes (Keys.bad)
+const key = JSON.parse(raw.key_req(`openai key\u001f${F1}`));
+assert.equal(key.name, 'OPENAI_KEY');
+const keyRpc = JSON.parse(key.rpc);
+assert.equal(keyRpc.m, 'bots.voice');
+assert.deepEqual(keyRpc.p, { op: 'api-add', name: 'openai key', value: F1 });
+assert.equal(JSON.parse(raw.key_req(`  \u001f${F1}`)).error, 'Give the key a name');
+assert.equal(JSON.parse(raw.key_req('NAME\u001f  ')).error, 'Paste the key itself');
+assert.equal(JSON.parse(raw.key_req('garbage')).error, 'Give the key a name');
 assert.match(raw.prompt('[{"name":"tailscale-bub","purpose":"p"}]'), /`tailscale-bub`/);
 assert.match(raw.prompt('[]'), /secret_request/);
 assert.ok(!raw.prompt('[]').includes('Set now'));

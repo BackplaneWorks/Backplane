@@ -301,6 +301,11 @@ def asks(+u: U.Ui) -> D.Node:
 def secret_req(+packed: String) -> String:
   U.Sbox.req(packed)
 
+# Settings' API key Save (host.js's keySave): "<name>\u001f<value>" to
+# {"rpc": the api-add request, "name"} or {"error"}
+def key_req(+packed: String) -> String:
+  U.ApiKeys.req(packed)
+
 # A value of each Json constructor, for wire.js: bend 2.0.36 tags a module's
 # constructors with their file ("../core/json.Str"), so the JavaScript that
 # builds Json learns the tags from Bend instead of spelling them.

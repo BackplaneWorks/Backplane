@@ -34,6 +34,11 @@ def bad(n: String, v: String) -> String:
 def req(packed: String) -> String:
   U.Sbox.req(packed)
 
+# Settings' API key Save on the web, built the same way (client.bend's
+# ApiKeys.req): the value only in the request, never in a view action
+def key_req(packed: String) -> String:
+  U.ApiKeys.req(packed)
+
 def handle(n: String) -> String:
   J.Json.show(S.Sec.handle(n, True{}))
 

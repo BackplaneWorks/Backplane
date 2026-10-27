@@ -963,8 +963,27 @@ function secretSave(packed) {
   return dispatch("secret-sent", "");
 }
 
+// Settings' API key Save (Enter in its fields too), as the secret box's:
+// the key's field has no binding, so its value is read here once, with the
+// name beside it, and emptied; Bend builds and checks the api-add request
+// (app.bend's key_req) and it goes straight to the hub, never through a
+// view action, the outbox, a draft or the client's state. The names come
+// back when "key-sent" asks for them.
+function keySave() {
+  const name = document.getElementById("kname"), field = document.getElementById("kval");
+  let r;
+  try { r = JSON.parse(App.key_req((name?.value ?? "") + "\u001f" + (field?.value ?? ""))); } catch { return true; }
+  if (r.error) return dispatch("key-err", r.error);
+  if (!socket || socket.readyState !== 1) return dispatch("key-err", "Not connected to the hub");
+  if (field) field.value = "";
+  socket.send(fromList(App.wire_out(r.rpc)));
+  r = null;
+  return dispatch("key-sent", "");
+}
+
 function dispatch(action, value, timer) {
   if (action === "secret-save") return secretSave(value);
+  if (action === "key-save") return keySave();
   if (["send", "send-alt"].includes(action)) historyClear();
   if (action === "side-toggle" || action === "rail-toggle") return foldToggle(action === "side-toggle" ? "side" : "rail");
   if (["term-toggle", "ws-term-hide", "ws-term-here"].includes(action) || action === "ws-go" && value === "term") terminalOutput.retire();

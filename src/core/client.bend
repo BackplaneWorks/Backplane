@@ -8822,6 +8822,38 @@ def ApiKeys.add(+u: Ui) -> Act:
 def ApiKeys.del(+u: Ui, +name: String) -> Act:
   Voice.rpc(u, "api-del", [J.KV{"name", J.Str{name}}])
 
+# The web's Save (host.js's keySave), as the secret box's: the key's field
+# has no binding, so its value is never in this state, a view action or a
+# draft; the host reads it once, at Save, with the name beside it
+# ("<name>\u001f<value>"), and sends the api-add request this builds
+# straight to the hub ({"rpc", "name"}, or {"error"}: Keys.bad). Then
+# "key-sent" shuts the form and asks for the names again, and "key-err"
+# says why nothing went (@keys.err, in the form's note).
+def ApiKeys.req.k(+bad: String, +name: String, +value: String) -> String:
+  Bool.pick(String, String.is_empty(bad),
+    J.Json.show(J.Json.obj([J.KV{"rpc", J.Str{Rpc.text(0n, "bots.voice", [J.KV{"op", J.Str{"api-add"}}, J.KV{"name", J.Str{name}}, J.KV{"value", J.Str{value}}])}}, J.KV{"name", J.Str{AK.Keys.name(name)}}])),
+    J.Json.show(J.Json.obj([J.KV{"error", J.Str{bad}}])))
+
+def ApiKeys.req.ps(ps: List<&2, String>) -> String:
+  match ps:
+    case +n <> +v <> _:
+      ApiKeys.req.k(AK.Keys.bad(n, v), n, v)
+    case _:
+      J.Json.show(J.Json.obj([J.KV{"error", J.Str{AK.Keys.bad("", "")}}]))
+
+def ApiKeys.req(+packed: String) -> String:
+  ApiKeys.req.ps(String.split(packed, Chr{31}))
+
+def ApiKeys.sent(+u: Ui) -> Act:
+  Voice.rpc(Ui.flag_off(Ui.scratch_set(Ui.scratch_set(u, "@f.kname", ""), "@keys.err", ""), "keyform"), "status", Nil{})
+
+def ApiKeys.after(sent: Bool, +u: Ui, +why: String) -> Act:
+  match sent:
+    case True{}:
+      ApiKeys.sent(u)
+    case False{}:
+      Act{Ui.scratch_set(u, "@keys.err", why), Nil{}}
+
 # what Settings says about them (every client)
 def ApiKeys.note.loc(+l: I.Loc, +u: Ui) -> String:
   Bool.pick(String, List.is_empty(&2, String, ApiKeys.names(u)), MSG.T.apikeys.none(l),
@@ -9096,6 +9128,10 @@ def Sbox.reply(+o: J.Json, u: Ui) -> Ui:
 
 def ApiKeys.form.note(+l: I.Loc) -> String:
   MSG.T.apikeys.form(l)
+
+# the form's note, or why its Save sent nothing (the web's "key-err")
+def ApiKeys.form.say(+l: I.Loc, +u: Ui) -> String:
+  Bool.pick(String, String.is_empty(Ui.scratch(u, "@keys.err")), ApiKeys.form.note(l), Ui.scratch(u, "@keys.err"))
 
 # a secret as it shows while typed: a dot a character
 def ApiKeys.dots(s: String) -> String:
@@ -13593,12 +13629,20 @@ def Ui.act.sec(sec: Bool, +u: Ui, +action: String, +value: String) -> Act:
     case False{}:
       Ui.act.r(String.starts_with(action, "rv-"), u, action, value)
 
+# (the web's API key Save, after host.js's keySave: "key-sent", "key-err")
+def Ui.act.key(key: Bool, +u: Ui, +action: String, +value: String) -> Act:
+  match key:
+    case True{}:
+      ApiKeys.after(String.eq(action, "key-sent"), u, value)
+    case False{}:
+      Ui.act.sec(String.starts_with(action, "secret-"), u, action, value)
+
 def Ui.act.g(agy: Bool, +u: Ui, +action: String, +value: String) -> Act:
   match agy:
     case True{}:
       Agv.act(u, action, value)
     case False{}:
-      Ui.act.sec(String.starts_with(action, "secret-"), u, action, value)
+      Ui.act.key(Nat.is_lt(C.Codec.pos(["key-sent", "key-err"], action), 2n), u, action, value)
 
 # (browser tasks' "tk-" and "bb-" actions: Teach.act)
 # (the schematic's sheet navigation, "sch-": Sch.act)
