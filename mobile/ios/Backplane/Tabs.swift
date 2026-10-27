@@ -65,6 +65,7 @@ struct AppTabs: View {
                 tabs
             }
         }
+        .tint(PhaseColor.accent)
         .sheet(isPresented: Binding(get: { screen.newBot != nil }, set: { if !$0 { model.act("form-close", "@bnew") } })) {
             if let f = model.screen?.newBot { NewBotSheet(model: model, form: f) }
         }
