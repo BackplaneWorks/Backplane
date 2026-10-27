@@ -119,7 +119,9 @@ final class Hub {
     private var task: URLSessionWebSocketTask?
     private var backoff: Double = 0.25
     private var retry: DispatchWorkItem?
-    private var stopped = false
+    private var stopped = true
+    private var discovering = false
+    private var discoveryStarted = Date()
     private var generation = 0
     // When a frame (a heartbeat included) last arrived. The hub sends one
     // every 15 s (core/desk.bend's Alive.every); a link silent for more
@@ -139,6 +141,7 @@ final class Hub {
     }
 
     func start() {
+        guard stopped else { return }
         stopped = false
         heard = Date()
         watch?.invalidate()
@@ -171,6 +174,12 @@ final class Hub {
             r.cancel()
             retry = nil
             connect()
+        } else if !discovering || Date().timeIntervalSince(discoveryStarted) > quiet {
+            // Discovery may have parked on an older hub without view support.
+            // Recheck when the app returns or the network changes: the hub
+            // may have been upgraded. A suspended discovery may also be stale;
+            // its generation fence prevents its eventual answer from opening.
+            connect()
         }
     }
 
@@ -181,6 +190,7 @@ final class Hub {
         watch?.invalidate()
         watch = nil
         generation += 1
+        discovering = false
         task?.cancel(with: .goingAway, reason: nil)
         task = nil
     }
@@ -201,19 +211,30 @@ final class Hub {
 
     // every frame is binary CBOR, both ways
     func send(_ data: Data) {
-        task?.send(.data(data)) { _ in }
+        guard let t = task else { return }
+        let gen = generation
+        t.send(.data(data)) { [weak self] error in
+            guard let error else { return }
+            Task { @MainActor in
+                guard let self, !self.stopped, self.generation == gen, self.task === t else { return }
+                self.lost(.classify(error))
+            }
+        }
     }
 
     private func connect() {
         guard !stopped else { return }
         generation += 1
         let gen = generation
+        discovering = true
+        discoveryStarted = Date()
         onConnecting()
         retry?.cancel()
         retry = nil
         Task {
             let next = await url()
             guard gen == generation, !stopped else { return }
+            discovering = false
             let u: URL
             switch next {
             case .go(let to): u = to
@@ -253,7 +274,9 @@ final class Hub {
     }
 
     private func lost(_ failure: ConnectionFailure) {
+        task?.cancel(with: .goingAway, reason: nil)
         task = nil
+        discovering = false
         generation += 1
         onClose(failure)
         guard !stopped else { return }

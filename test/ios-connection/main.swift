@@ -42,6 +42,40 @@ func check(_ condition: @autoclosure () -> Bool, _ label: String) {
             check(failure == expected && !failure.reason.contains("PRIVATE") && !failure.code.contains("PRIVATE"), "Foundation error \(code) retains only its safe cause")
         }
 
+        // A discovery parked on an unsupported hub must be retried after a
+        // foreground/network wake: the same host may have been upgraded.
+        var parkedAttempts = 0
+        let parked = Hub(url: { parkedAttempts += 1; return .stop }, onConnecting: {}, onOpen: {}, onMessage: { _ in }, onClose: { _ in })
+        parked.start()
+        parked.start()
+        try? await Task.sleep(for: .milliseconds(100))
+        check(parkedAttempts == 1, "starting an active hub twice does not duplicate discovery")
+        parked.wake()
+        try? await Task.sleep(for: .milliseconds(100))
+        check(parkedAttempts == 2, "wake rechecks a parked hub after an upgrade")
+        parked.stop()
+        parked.wake()
+        try? await Task.sleep(for: .milliseconds(100))
+        check(parkedAttempts == 2, "wake cannot revive a stopped hub")
+
+        // A wake replaces an old in-flight discovery. Its late answer cannot
+        // open a socket or report a failure in the new generation.
+        var pending: CheckedContinuation<Hub.Next, Never>?
+        var generations = 0, staleFailures = 0
+        let fenced = Hub(url: {
+            generations += 1
+            if generations == 1 { return await withCheckedContinuation { pending = $0 } }
+            return .stop
+        }, onConnecting: {}, onOpen: {}, onMessage: { _ in }, onClose: { _ in staleFailures += 1 })
+        fenced.start()
+        try? await Task.sleep(for: .milliseconds(100))
+        fenced.wake(quiet: -1)
+        try? await Task.sleep(for: .milliseconds(100))
+        pending?.resume(returning: .later(.network))
+        try? await Task.sleep(for: .milliseconds(100))
+        check(generations == 2 && staleFailures == 0, "wake fences a retired discovery")
+        fenced.stop()
+
         // The actual Hub retries failed discovery, reads a real WebSocket frame,
         // and stops cleanly. No bridge, stored account, or user app participates.
         var attempts = 0, opens = 0, frames = 0
