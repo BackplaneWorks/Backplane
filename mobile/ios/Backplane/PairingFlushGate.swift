@@ -19,6 +19,15 @@ final class PairingFlushGate: @unchecked Sendable {
         lock.withLock { suspended ? nil : generation }
     }
 
+    // Linearize a captured private edit/send against account invalidation.
+    // Hold the lock through the short JS call, not across network IO.
+    func perform(_ expected: UInt64, _ operation: () -> String) -> String? {
+        lock.withLock {
+            guard !suspended, generation == expected else { return nil }
+            return operation()
+        }
+    }
+
     // An older reconcile cannot release a newer identity change.
     func resume(_ expected: UInt64) -> Bool {
         lock.withLock {

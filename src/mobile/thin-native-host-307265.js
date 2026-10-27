@@ -123,7 +123,7 @@ export class NativeThinHost307265 {
         // pages a send overtook (their replies are dropped)
         cursor: '', back: [], paging: null, overtaken: new Set(),
         revision: 0, drafts, queue: [], active: null, messages: new MessageParts(), findRevision: 0, findCloseOnce: false, registrations: new Map(),
-        shownTarget: null, deferredNavigation: null, projectQuery: null, projectApplied: null, followup: null };
+        shownTarget: null, deferredNavigation: null, attachmentEnds: [], projectQuery: null, projectApplied: null, followup: null };
       this.states.set(hub, value);
     }
     return value;
@@ -244,7 +244,7 @@ export class NativeThinHost307265 {
     for (const [id, call] of this.ordinary) if (call.hub === hub) this.ordinary.delete(id);
     if (s) {
       s.ready = false; s.greeted = false; s.active = null; s.queue = []; s.messages.clear();
-      s.deferredNavigation = null; s.projectQuery = null; s.projectApplied = null; s.shownTarget = null; s.followup = null;
+      s.deferredNavigation = null; s.attachmentEnds = []; s.projectQuery = null; s.projectApplied = null; s.shownTarget = null; s.followup = null;
       s.registrations.clear();
     }
   }
@@ -252,7 +252,7 @@ export class NativeThinHost307265 {
   fail(hub, reason) {
     if (this.projectSearch?.owners.has(hub)) this.projectSearchEnd(this.projectSearch.scope);
     const s = this.states.get(hub);
-    if (s) { s.ready = false; s.queue = []; s.deferredNavigation = null; s.projectQuery = null; s.followup = null; }
+    if (s) { s.ready = false; s.queue = []; s.deferredNavigation = null; s.attachmentEnds = []; s.projectQuery = null; s.followup = null; }
     this.sync.push({ hub, phase: 'failed', mode: 'view-v1', detail: String(reason), remoteReady: false });
   }
 
@@ -299,7 +299,7 @@ export class NativeThinHost307265 {
 
   select(s, target, session) {
     if (this.projectSearch?.owners.has(s.hub)) this.projectSearchEnd(this.projectSearch.scope);
-    s.deferredNavigation = null;
+    s.deferredNavigation = null; s.attachmentEnds = [];
     s.projectQuery = null;
     s.projectApplied = null;
     s.followup = null;
@@ -309,13 +309,13 @@ export class NativeThinHost307265 {
     return this.issue(s, this.client.select(s.hub, s.target, this.requestSession(s.session, 'view.open', s.target), this.api.cid()));
   }
 
-  request(hub, action, value, keepFocus = false, viewerIntent = undefined) {
+  request(hub, action, value, keepFocus = false, viewerIntent = undefined, capture = null) {
     const s = this.states.get(hub);
     if (!s || s.mode !== 'view-v1') return false;
     // An explicit new owner or a hub switch supersedes any held tap, even
     // one belonging to a different hub whose refresh is still in flight.
     if (!keepFocus && (this.current !== hub || ['select', 'bot', 'uber', 'uber-bot', 'room', 'remote'].includes(action)))
-      for (const state of this.states.values()) state.deferredNavigation = null;
+      for (const state of this.states.values()) { state.deferredNavigation = null; state.attachmentEnds = []; }
     if (!keepFocus) this.current = hub;
     if (['select', 'bot', 'uber', 'uber-bot', 'room', 'remote'].includes(action) && this.projectSearch) this.projectSearchEnd(this.projectSearch.scope);
     const intent = this.api.intent(hub, copy(s.session), copy(s.target), action, value);
@@ -342,7 +342,7 @@ export class NativeThinHost307265 {
       return true;
     }
     if (intent.kind === 'select') {
-      s.deferredNavigation = null;
+      s.deferredNavigation = null; s.attachmentEnds = [];
       const unchanged = s.session.sel === intent.session.sel;
       // Bootstrap preselect of the restored owner is no-effect and preserves
       // the compact route/open choices. A real selection after greeting opens.
@@ -401,8 +401,48 @@ export class NativeThinHost307265 {
     }
     // Keep the latest intended route separately from display authority.
     if (intent.session) { s.revision++; s.session = copy(intent.session); }
-    s.queue.push({ action, value, viewerIntent, input: copy(s.session), revision: s.revision });
+    const input = copy(s.session);
+    if (capture) input.drafts = { ...input.drafts, [thread]: capture.text };
+    s.queue.push({ action, value, viewerIntent, input, revision: capture ? capture.revision : s.revision });
     this.pump(s); return true;
+  }
+
+  attachmentEnd(hub, thread, value) {
+    const s = this.states.get(hub);
+    if (!s || this.current !== hub || !this.paired.has(hub) || s.mode !== 'view-v1' || s.session.sel !== thread ||
+        !s.greeted || !s.shown || !same(s.target, s.shownTarget) || typeof value !== 'string' || utf8Bytes(value) > 65536) return false;
+    if (s.attachmentEnds.some(x => x.value === value) || s.queue.some(x => x.action === 'attach-end' && x.value === value) ||
+        (this.pending.get(s.active)?.operation?.action === 'attach-end' && this.pending.get(s.active)?.operation?.value === value)) return true;
+    if (s.attachmentEnds.length >= 10) return false;
+    s.attachmentEnds.push({ epoch: s.epoch, sel: thread, target: copy(s.target), value });
+    this.pumpAttachmentEnd(s);
+    return true;
+  }
+
+  pumpAttachmentEnd(s) {
+    if (s.active || !s.ready || this.current !== s.hub || s.queue.length >= 7) return;
+    const completion = s.attachmentEnds.shift();
+    if (!completion) return;
+    if (completion.epoch === s.epoch && completion.sel === s.session.sel && same(completion.target, s.target))
+      this.request(s.hub, 'attach-end', completion.value);
+  }
+
+  draftAt(hub, thread, text) {
+    const s = this.states.get(hub);
+    if (!s || !this.paired.has(hub) || s.mode !== 'view-v1') return false;
+    s.revision++;
+    s.drafts.set(thread, { revision: s.revision, text });
+    s.session.drafts = { ...s.session.drafts, [thread]: text };
+    this.enqueue(hub, { type: 'keep', thread: hub + '|' + thread, text });
+    return true;
+  }
+
+  sendAt(hub, thread, action, text, currentDraft) {
+    const s = this.states.get(hub);
+    if (!s || this.current !== hub || !this.paired.has(hub) || s.mode !== 'view-v1' || s.session.sel !== thread ||
+        !s.greeted || !s.ready || s.active || s.queue.length >= 7) return false;
+    const revision = currentDraft ? s.drafts.get(thread)?.revision ?? 0 : 0;
+    return this.request(hub, action, '', false, undefined, action === 'interrupt' ? null : { text, revision });
   }
 
   viewerAction(hub, nav, serial, value) {
@@ -633,6 +673,7 @@ export class NativeThinHost307265 {
       if (pending.epoch === s.epoch && pending.sel === s.session.sel && same(pending.target, s.target))
         this.request(hub, pending.action, pending.value, false, pending.viewerIntent);
     }
+    this.pumpAttachmentEnd(s);
     this.pump(s);
     this.pumpProjectGo();
     // Person work gets the next request; ThinViews retains invalidation until

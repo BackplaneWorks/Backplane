@@ -83,7 +83,9 @@ final class AppModel {
     // the board viewer's plots, which come straight from the socket
     let plots = PlotStore()
     // the composer's text, owned here so typing never waits on Bend
-    var composer = ""
+    private(set) var composer = ""
+    private var composerDrafts = ComposerDrafts()
+    private var composerOwner = ""
     private(set) var scrolls = 0
     // an entry of the open thread to show (a "jump"): n counts the jumps, so
     // the same entry shown twice scrolls twice
@@ -232,7 +234,6 @@ final class AppModel {
     @ObservationIgnored private var lastInterfaces: [String] = []
     // drafts sent to Bend and not yet answered: until then a screen may
     // carry an older draft than the one on screen
-    @ObservationIgnored private var typing = 0
     #if DEBUG
     // headless checks: SIMCTL_CHILD_BACKPLANE_SELECT=<thread id> opens it
     @ObservationIgnored private var opening = ProcessInfo.processInfo.environment["BACKPLANE_SELECT"]
@@ -286,7 +287,11 @@ final class AppModel {
             reconcileViewer(cached)
             cachedPresentation = true
             let drafts = (try? JSONSerialization.jsonObject(with: Data((UserDefaults.standard.string(forKey: "drafts") ?? "{}").utf8))) as? [String: String] ?? [:]
-            composer = drafts[cached.sel] ?? ""
+            composerOwner = cached.thread?.id ?? ""
+            if !composerOwner.isEmpty {
+                _ = composerDrafts.receive(composerOwner, drafts[composerOwner] ?? cached.thread?.draft ?? "", edit: nil)
+                composer = composerDrafts.text(for: composerOwner) ?? ""
+            }
             lastUber = cached.uber
             lastPlane = cached.plane
             if let thread = cached.thread, !cached.sel.isEmpty { remember(cached.sel, thread) }
@@ -416,6 +421,8 @@ final class AppModel {
         seenPlanes = seenPlanes.filter { !$0.key.hasPrefix(prefix) }
         botOrder.removeAll { $0.hasPrefix(prefix) }
         localDrafts = localDrafts.filter { !$0.key.hasPrefix(prefix) }
+        composerDrafts.forget(key)
+        if composerOwner.hasPrefix(prefix) { composerOwner = ""; composer = "" }
         readingPages = readingPages.filter { !$0.key.hasPrefix(prefix) }
         earlyActions.removeAll { $0.1.hasPrefix(prefix) }
         outgoing.removeAll { $0.thread.hasPrefix(prefix) }
@@ -1042,8 +1049,8 @@ final class AppModel {
     // a file for the next message: one POST /attach to the thread's hub with
     // the file as the body (no base64, no pieces through the engine); the
     // hub's answer goes back as "attach-end", as an attach.put's would
-    func attach(_ data: Data, name: String) {
-        guard contentReady else { return }
+    func attach(_ data: Data, name: String, for owner: String? = nil) {
+        guard let owner = owner ?? screen?.thread?.id, canSendComposer(for: owner) else { return }
         guard !data.isEmpty, let s = screen, let named = s.thread?.id,
               let l = links.first(where: { Pairing.key($0) == s.hub }) else { return }
         let epoch = conn[s.hub]?.epoch
@@ -1057,7 +1064,7 @@ final class AppModel {
         req.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
         // the engine decides: one over the cap it refuses, and nothing goes
         let up = (try? JSONSerialization.data(withJSONObject: ["name": name, "size": data.count] as [String: Any])).flatMap { String(data: $0, encoding: .utf8) } ?? ""
-        act("attach-up", up)
+        actComposer("attach-up", up, for: owner)
         guard data.count <= s.thread?.cap ?? 10_485_760 else { return }
         Task {
             var answer = ""
@@ -1069,14 +1076,14 @@ final class AppModel {
             }
             // Finishing an upload never applies its result to a replacement
             // pairing or to a different conversation opened in the meantime.
-            guard contentReady, screen?.hub == s.hub, screen?.thread?.id == named,
+            guard canEditComposer(for: owner), screen?.hub == s.hub, screen?.thread?.id == named,
                   conn[s.hub]?.epoch == epoch, links.contains(l) else { return }
             let answered = (try? JSONSerialization.jsonObject(with: Data(answer.utf8))) is [String: Any]
             if !answered {
                 let o: [String: Any] = ["uiError": "upload.network", "thread": thread, "upload": true]
                 answer = (try? JSONSerialization.data(withJSONObject: o)).flatMap { String(data: $0, encoding: .utf8) } ?? ""
             }
-            act("attach-end", answer)
+            actComposer("attach-end", answer, for: owner)
         }
     }
 
@@ -1294,44 +1301,92 @@ final class AppModel {
         return s.sel
     }
 
-    // the composer's text sent now: it shows at once as sending and the
-    // composer empties; the client's answer carries it on (its own sending
-    // row, then the hub's message)
-    func send(_ action: String = "send") {
-        guard contentReady else { return }
-        sendFailure = nil
-        let text = composer.trimmingCharacters(in: .whitespacesAndNewlines)
-        let thread = screen?.thread?.id ?? ""
-        if !text.isEmpty { outgoing.append(Outgoing(thread: thread, text: text)) }
-        composer = ""
-        typing += 1
-        let e = engine
-        let generation = pairingGeneration
-        Task {
-            guard generation == pairingGeneration else { typing -= 1; return }
-            let out = await e.act(action, "")
-            typing -= 1
-            guard generation == pairingGeneration else { return }
-            apply(out, sent: text)
-        }
+    func composerText(for thread: ThreadView) -> String {
+        composerDrafts.text(for: thread.id) ?? localDrafts[thread.id] ?? thread.draft
     }
 
-    func draft(_ text: String) {
-        composer = text
-        if !contentReady, let sel = screen?.sel, !sel.isEmpty {
-            localDrafts[sel] = text
-            Self.keep(sel, text)
-            return
-        }
-        typing += 1
-        let e = engine
+    func canEditComposer(for thread: String) -> Bool {
+        guard !thread.isEmpty, let s = screen, s.thread?.id == thread,
+              Self.nav(s) == thread, path.last == thread,
+              awaitedNav == nil || awaitedNav == thread,
+              links.contains(where: { Pairing.key($0) == s.hub }) else { return false }
+        if let bot = s.bot, bot.kind != "bot" || (bot.tab ?? "chat") != "chat" { return false }
+        return true
+    }
+    func canSendComposer(for thread: String) -> Bool { canEditComposer(for: thread) && contentReady }
+    func composerStatus(for thread: String) -> HubConn? {
+        guard let split = thread.firstIndex(of: "|") else { return nil }
+        return conn[String(thread[..<split])]
+    }
+
+    private func publishDraft(_ thread: String, text: String, edit: UInt64) {
         let generation = pairingGeneration
-        Task {
-            guard generation == pairingGeneration else { typing -= 1; return }
-            let out = await e.quiet("draft", text)
-            typing -= 1
-            apply(out, generation: generation)
+        engine.draftAtNow(thread, text: text, edit: edit, generation: generation) { [weak self] out in
+            Task { @MainActor [weak self] in self?.apply(out, generation: generation) }
         }
+    }
+    func editComposer(_ text: String, for thread: String) {
+        guard canEditComposer(for: thread) else { return }
+        let edit = composerDrafts.change(thread, text)
+        composerOwner = thread
+        composer = text
+        Self.keep(thread, text)
+        // This private write never sends a network request, even while offline.
+        localDrafts[thread] = text
+        publishDraft(thread, text: text, edit: edit)
+    }
+    func sendComposer(_ action: String = "send", for thread: String) {
+        guard canSendComposer(for: thread), ["send", "send-alt"].contains(action) else { return }
+        let text = composerDrafts.text(for: thread) ?? ""
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        sendFailure = nil
+        let edit = composerDrafts.edit(for: thread), generation = pairingGeneration
+        outgoing.append(Outgoing(thread: thread, text: text.trimmingCharacters(in: .whitespacesAndNewlines)))
+        // Enqueue before clearing so the captured message precedes later edits.
+        engine.sendAtNow(thread, action: action, text: text, edit: edit, generation: generation) { [weak self] out in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if out == nil, generation == self.pairingGeneration { self.restoreComposer(thread, text: text, edit: edit) }
+                self.apply(out, generation: generation)
+            }
+        }
+        let clearedEdit = composerDrafts.change(thread, "")
+        composer = ""
+        localDrafts[thread] = ""
+        Self.keep(thread, "")
+        publishDraft(thread, text: "", edit: clearedEdit)
+    }
+    func interruptComposer(for thread: String) {
+        guard canSendComposer(for: thread) else { return }
+        let generation = pairingGeneration
+        engine.sendAtNow(thread, action: "interrupt", text: "", edit: composerDrafts.edit(for: thread), generation: generation) { [weak self] out in
+            Task { @MainActor [weak self] in self?.apply(out, generation: generation) }
+        }
+    }
+    func actComposer(_ action: String, _ value: String = "", for thread: String) {
+        guard action == "attach-end" ? canEditComposer(for: thread) : canSendComposer(for: thread) else { return }
+        let generation = pairingGeneration
+        engine.composerActNow(thread, action: action, value: value, generation: generation) { [weak self] out in
+            Task { @MainActor [weak self] in self?.apply(out, generation: generation) }
+        }
+    }
+    private func restoreComposer(_ thread: String, text: String, edit: UInt64) {
+        outgoing.removeAll { $0.thread == thread && $0.text == text.trimmingCharacters(in: .whitespacesAndNewlines) }
+        sendFailure = thread
+        guard let next = composerDrafts.failed(thread, text, sentEdit: edit) else { return }
+        localDrafts[thread] = text
+        Self.keep(thread, text)
+        if composerOwner == thread { composer = text }
+        publishDraft(thread, text: text, edit: next)
+    }
+    // Existing completion helpers use the current owner's private editor.
+    func send(_ action: String = "send") {
+        guard let thread = screen?.thread?.id else { return }
+        if action == "interrupt" { interruptComposer(for: thread) } else { sendComposer(action, for: thread) }
+    }
+    func draft(_ text: String) {
+        guard let thread = screen?.thread?.id else { return }
+        editComposer(text, for: thread)
     }
 
     // Both external URL entry and links tapped in a message use shared Bend
@@ -1505,7 +1560,7 @@ final class AppModel {
             let commands = out?.cmds.filter { command in
                 let owner: String?
                 if command.type == "send" { owner = command.hub }
-                else if command.type == "keep", let thread = command.thread, let split = thread.firstIndex(of: "|") { owner = String(thread[..<split]) }
+                else if ["keep", "draft-kept", "send-issued", "send-failed"].contains(command.type), let thread = command.thread, let split = thread.firstIndex(of: "|") { owner = String(thread[..<split]) }
                 else { owner = nil }
                 guard let owner, links.contains(where: { Pairing.key($0) == owner }) else { return false }
                 return (retiredPairings[owner] ?? 0) <= generation
@@ -1593,7 +1648,19 @@ final class AppModel {
            (!cachedPresentation || cacheFresh), thinFresh {
             cachedPresentation = false
             cachedReadiness.clear()
-            if typing == 0 { composer = localDrafts[s.sel] ?? s.thread?.draft ?? "" }
+            if let thread = s.thread {
+                let previous = composerDrafts.text(for: thread.id)
+                let adopted = composerDrafts.receive(thread.id, thread.draft, edit: o.composerEdit)
+                // A hub completion (skills, suggestions, attachments) is a new
+                // editor version too; it must not reuse an already sent edit.
+                if adopted, let previous, previous != thread.draft, composerDrafts.edit(for: thread.id) > 0 {
+                    let edit = composerDrafts.change(thread.id, thread.draft)
+                    publishDraft(thread.id, text: thread.draft, edit: edit)
+                }
+                composerOwner = thread.id
+                composer = composerDrafts.text(for: thread.id) ?? ""
+                Self.keep(thread.id, composer)
+            } else { composerOwner = ""; composer = "" }
             screen = s
             reconcileViewer(s)
             if let text = o.screenJSON, !cleared, awaitedNav == nil || awaitedNav == Self.nav(s) {
@@ -1745,17 +1812,20 @@ final class AppModel {
                     }
                 }
             case "jump": if let id = c.id, !id.isEmpty { jumping = (id, 4) }
-            case "keep": Self.keep(c.thread ?? "", c.text ?? "")
+            case "keep":
+                let thread = c.thread ?? ""
+                Self.keep(thread, composerDrafts.text(for: thread) ?? c.text ?? "")
+            case "draft-kept":
+                if let thread = c.thread, let edit = c.edit {
+                    composerDrafts.acknowledged(thread, edit: edit)
+                    if composerDrafts.pending(for: thread) == nil { localDrafts[thread] = nil }
+                }
             case "send-issued":
                 if let i = outgoing.firstIndex(where: { $0.thread == c.thread && $0.text == c.text }) { outgoing.remove(at: i) }
             case "send-failed":
-                if let i = outgoing.firstIndex(where: { $0.thread == c.thread && $0.text == c.text }) { outgoing.remove(at: i) }
                 let thread = c.thread ?? "", text = c.text ?? ""
-                sendFailure = thread
-                if screen?.thread?.id != thread || composer.isEmpty {
-                    Self.keep(thread, text)
-                    if screen?.thread?.id == thread { composer = text }
-                }
+                if c.action != "interrupt" { restoreComposer(thread, text: text, edit: c.edit ?? composerDrafts.edit(for: thread)) }
+                else { sendFailure = thread }
             // while asleep the hub's push carries the alert instead
             case "notify": if active { notifier.post(thread: c.thread ?? "", key: c.key ?? "", title: c.title ?? "", body: c.body ?? "") }
             default: break
@@ -1763,8 +1833,9 @@ final class AppModel {
         }
         advanceViewerClose()
         advanceProjectSearch()
-        if contentReady, let sel = screen?.sel, let text = localDrafts.removeValue(forKey: sel) {
-            run { await $0.quiet("draft", text) }
+        if contentReady, let thread = screen?.thread?.id, let text = localDrafts[thread], composerDrafts.pending(for: thread) != nil {
+            localDrafts[thread] = nil
+            publishDraft(thread, text: text, edit: composerDrafts.edit(for: thread))
         }
         let intentContext = screen.flatMap { s in conn[s.hub].map { status in
             PresentationIntent.Context(hub: s.hub, selection: s.sel, nav: Self.nav(s), epoch: status.epoch, pairing: pairingGeneration)

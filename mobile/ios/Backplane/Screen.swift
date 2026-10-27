@@ -963,6 +963,7 @@ struct Cmd: Decodable {
     // later: an action (with its value) to send after ms; jump: the entry to show
     let ms: Double?
     let action, value, id: String?
+    let edit: UInt64?
 }
 
 struct Resume: Decodable {
@@ -993,12 +994,14 @@ struct Out: Decodable, @unchecked Sendable {
     var sync: [SyncUpdate]? = nil
     var deadline: Double? = nil
     var inert = false
+    var composerEdit: UInt64? = nil
 
     private struct Cmds: Decodable {
         let cmds: [Cmd]
         let sync: [SyncUpdate]?
         let deadline: Double?
         let inert: Bool?
+        let composerEdit: UInt64?
     }
 
     // an answer; with screen false only its commands (a newer screen follows)
@@ -1012,13 +1015,13 @@ struct Out: Decodable, @unchecked Sendable {
             NSLog("Backplane decode answer %@", WireDecodeDiagnostic.summary(error))
             return nil
         }
-        guard screen else { return Out(screen: nil, cmds: answer.cmds, sync: answer.sync, deadline: answer.deadline, inert: answer.inert == true) }
+        guard screen else { return Out(screen: nil, cmds: answer.cmds, sync: answer.sync, deadline: answer.deadline, inert: answer.inert == true, composerEdit: answer.composerEdit) }
         do {
             let s = try JSONDecoder().decode(ScreenOnly.self, from: d)
-            return Out(screen: s.screen, cmds: answer.cmds, screenJSON: s.screen == nil ? nil : text, sync: answer.sync, deadline: answer.deadline, inert: answer.inert == true)
+            return Out(screen: s.screen, cmds: answer.cmds, screenJSON: s.screen == nil ? nil : text, sync: answer.sync, deadline: answer.deadline, inert: answer.inert == true, composerEdit: answer.composerEdit)
         } catch {
             NSLog("Backplane decode screen %@", WireDecodeDiagnostic.summary(error))
-            return Out(screen: nil, cmds: answer.cmds, sync: answer.sync, deadline: answer.deadline, inert: answer.inert == true)
+            return Out(screen: nil, cmds: answer.cmds, sync: answer.sync, deadline: answer.deadline, inert: answer.inert == true, composerEdit: answer.composerEdit)
         }
     }
 

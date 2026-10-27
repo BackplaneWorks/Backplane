@@ -35,7 +35,7 @@ export async function registerBridgeChecks(check,stage,root){
  check('busy upload completions are bounded and generic actions are not replayed',()=>{
   const update=busyComposer();for(let i=0;i<11;i++)B.composerAction('h|a','attach-end',JSON.stringify({id:'fixture-'+i}));
   B.composerAction('h|a','skill','fixture');let out=answer(update),values=[];
-  while(out.cmds.some(c=>c.type==='send')) {const next=request(out);assert.equal(next.p.action,'attach-end');values.push(next.p.value);assert(values.length<=10);out=answer(next);}
+  while(out.cmds.some(c=>c.type==='send')) {const next=request(out);if(next.m==='view.update')break;assert.equal(next.p.action,'attach-end');values.push(next.p.value);assert(values.length<=10);out=answer(next);}
   assert.equal(values.length,10);assert.equal(new Set(values).size,10);
  });
  check('captured draft follows A after B becomes foreground without changing focus',()=>{
