@@ -110,8 +110,9 @@ struct RootView: View {
 // First connection stays actionable while the hub is loading or retrying.
 private struct ConnectionStartupView: View {
     let model: AppModel
-    private var link: String { model.links.first ?? "" }
-    private var key: String { Pairing.key(link) ?? "" }
+    @State private var addingAddress = false
+    @State private var chosenKey: String?
+    private var key: String { chosenKey ?? model.links.first.flatMap(Pairing.key) ?? "" }
     private var connection: HubConn { model.conn[key] ?? HubConn() }
     private var tag: String { model.screen?.locale ?? "en" }
 
@@ -131,16 +132,30 @@ private struct ConnectionStartupView: View {
                     } else {
                         ProgressView().accessibilityIdentifier("pair.connection.progress")
                     }
-                    Button("Retry") { model.retryConnection(key) }
+                    Button(tag == "ja" ? "再試行" : "Retry") { model.retryConnection(key) }
                         .buttonStyle(PairActionStyle())
                         .accessibilityIdentifier("pair.connection.retry")
-                    Button("Use another address") { model.unpair(key) }
+                    Button(NativeMessages.native_pair_another(tag)) { addingAddress = true }
                         .accessibilityIdentifier("pair.connection.change")
                 }
                 .frame(maxWidth: 520, alignment: .leading)
                 .padding(24)
             }
-            .background(Color(uiColor: .systemBackground))
+            .background(BackplaneDesign.background)
+            .sheet(isPresented: $addingAddress) {
+                NavigationStack {
+                    PairView(tag: tag, link: "") { address in
+                        chosenKey = Pairing.key(address)
+                        _ = model.pair(address)
+                        addingAddress = false
+                    }
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button(NativeMessages.common_cancel(tag)) { addingAddress = false }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -150,8 +165,8 @@ private struct PairActionStyle: ButtonStyle {
         configuration.label
             .font(.body.weight(.semibold))
             .frame(maxWidth: .infinity, minHeight: 48)
-            .foregroundStyle(Color.black)
-            .background(PhaseColor.accent.opacity(configuration.isPressed ? 0.7 : 1))
+            .foregroundStyle(BackplaneDesign.onAccent)
+            .background(BackplaneDesign.accent.opacity(configuration.isPressed ? 0.7 : 1))
             .contentShape(Rectangle())
     }
 }
@@ -193,8 +208,8 @@ struct PairView: View {
                         .submitLabel(.go)
                         .onSubmit { connect(link) }
                         .padding(14)
-                        .background(Color(uiColor: .secondarySystemBackground))
-                        .overlay(Rectangle().stroke(invalid ? PhaseColor.bad : Color.secondary.opacity(0.35), lineWidth: 1))
+                        .background(BackplaneDesign.panel)
+                        .overlay(Rectangle().stroke(invalid ? PhaseColor.bad : BackplaneDesign.line, lineWidth: 1))
                         .accessibilityIdentifier("pair.address")
                     Text(NativeMessages.native_pair_instructions(tag)).font(.footnote).foregroundStyle(.secondary)
                     if invalid {
@@ -212,7 +227,7 @@ struct PairView: View {
             .frame(maxWidth: 520, alignment: .leading)
             .padding(24)
         }
-        .background(Color(uiColor: .systemBackground))
+        .background(BackplaneDesign.background)
         .navigationBarTitleDisplayMode(.inline)
         .fullScreenCover(isPresented: $scanning) { ScanView(tag: tag) { connect($0) } }
     }
@@ -350,7 +365,9 @@ struct HubsPill: View {
                 ForEach(hubs.prefix(4), id: \.key) { h in HubDot(phase: model.conn[h.key]?.phase ?? .connecting) }
                 if hubs.count > 4 { Text("+\(hubs.count - 4)") }
             }
-            .font(.system(size: 9))
+            .font(.system(size: 10))
+            .frame(minWidth: 44, minHeight: 44)
+            .contentShape(Rectangle())
         }
         .accessibilityIdentifier("navigation.hubs")
         .accessibilityLabel(hubs.map { NativeMessages.native_hub_accessibility(model.screen?.locale ?? "en", $0.name, HubDot.word(model.conn[$0.key]?.phase ?? .connecting, model.screen?.locale ?? "en")) }.joined(separator: ", "))
@@ -394,6 +411,7 @@ private struct SwipeButton: View {
 // gestures (not a NavigationLink) so a long press never also opens it.
 private struct ThreadRow: View {
     @Environment(\.backplaneLanguage) private var lang
+    @Environment(\.dynamicTypeSize) private var typeSize
     let model: AppModel
     let row: Row
     var hierarchy = true
@@ -421,24 +439,31 @@ private struct ThreadRow: View {
                 HStack(spacing: 10) {
                     StatusDot(state: row.state, status: row.status).frame(width: 18)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(row.title).lineLimit(1)
+                        Text(row.title).font(.body.weight(.medium))
+                            .lineLimit(typeSize.isAccessibilitySize ? 3 : 2)
                         if let p = row.project, !p.isEmpty {
-                            Text(p).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            Text(p).font(.caption).foregroundStyle(.secondary).lineLimit(typeSize.isAccessibilitySize ? 2 : 1)
+                        }
+                        if typeSize.isAccessibilitySize {
+                            Text(row.agents.flatMap { $0.isEmpty ? nil : $0 } ?? row.ago)
+                                .font(.caption).foregroundStyle(.secondary)
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .layoutPriority(1)
-                    if row.pinned { Image(systemName: "pin.fill").font(.caption).foregroundStyle(.secondary) }
-                    if let n = row.agents, !n.isEmpty {
-                        Text(n).font(.caption).foregroundStyle(PhaseColor.accent).lineLimit(1)
-                            .frame(maxWidth: 80, alignment: .trailing)
-                    } else {
-                        Text(row.ago).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                            .frame(maxWidth: 72, alignment: .trailing)
+                    if row.pinned { Image(systemName: "pin.fill").font(.caption).foregroundStyle(.secondary).accessibilityLabel(lang == "ja" ? "ピン留め" : "Pinned") }
+                    if !typeSize.isAccessibilitySize {
+                        if let n = row.agents, !n.isEmpty {
+                            Text(n).font(.caption).foregroundStyle(PhaseColor.accent).lineLimit(1)
+                                .frame(maxWidth: 80, alignment: .trailing)
+                        } else {
+                            Text(row.ago).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                .frame(maxWidth: 72, alignment: .trailing)
+                        }
                     }
                     Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
                 }
-                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
                 .contentShape(Rectangle())
                 .onTapGesture { model.open(nav: row.id, action: "select", value: row.id, title: row.title) }
                 .onLongPressGesture(minimumDuration: 0.4) {
@@ -447,6 +472,7 @@ private struct ThreadRow: View {
                 }
                 .accessibilityElement(children: .combine)
                 .accessibilityAddTraits(.isButton)
+                .accessibilityAction { model.open(nav: row.id, action: "select", value: row.id, title: row.title) }
                 .accessibilityAction(named: NativeMessages.native_thread_menu(lang)) { model.act("row-menu", row.id) }
                 .accessibilityIdentifier("thread.row." + row.id)
             }
@@ -463,6 +489,8 @@ private struct ThreadRow: View {
             }
         }
         .padding(.leading, CGFloat(min(max(row.depth ?? 0, 0), 4) * 12))
+        .listRowBackground(BackplaneDesign.background)
+        .listRowSeparatorTint(BackplaneDesign.line)
         .opacity(row.faded == true ? 0.45 : 1)
         .swipeActions(edge: .leading) {
             ForEach(row.lead, id: \.self) { SwipeButton(model: model, swipe: $0, choose: choose) }
@@ -534,16 +562,21 @@ struct ProjectsView: View {
                 }
             }
         }
+        .modifier(BackplaneListSurface())
         .overlay {
             if screen.projects.isEmpty && (screen.legacy ?? []).isEmpty && (screen.active ?? []).isEmpty {
                 // a hub still catching up has not said what there is yet
                 if let h = screen.hubs.first(where: { (model.conn[$0.key]?.phase ?? .connecting) != .online }), !screen.online {
                     VStack(spacing: 12) {
-                        ProgressView()
+                        if model.conn[h.key]?.failure == nil {
+                            ProgressView().accessibilityLabel(HubDot.word(model.conn[h.key]?.phase ?? .connecting, lang))
+                        }
                         Text(model.conn[h.key]?.failure.map { NativeMessages.native_hub_failure(lang, $0.reason, $0.code) }
                              ?? NativeMessages.native_hub_connection(lang, HubDot.word(model.conn[h.key]?.phase ?? .connecting, lang), h.name))
                             .foregroundStyle(.secondary).multilineTextAlignment(.center)
                     }
+                    .padding()
+                    .accessibilityIdentifier("projects.connection.status")
                 } else {
                     ContentUnavailableView(screen.empty, systemImage: "folder")
                 }
@@ -565,8 +598,7 @@ struct ProjectsView: View {
                 } else {
                     Button { model.act("picker-open") } label: { Image(systemName: "folder.badge.plus") }.accessibilityLabel(NativeMessages.sidebar_add_project(lang))
                 }
-                Button { pairing = true } label: { Image(systemName: "link") }.accessibilityLabel(NativeMessages.native_settings_hubs(lang))
-                Button { model.switchTab(.settings) } label: { Image(systemName: "gear") }
+                Button { model.switchTab(.settings) } label: { Image(systemName: "gearshape") }
                     .accessibilityLabel(NativeMessages.palette_settings(lang))
                 Menu {
                     Button(NativeMessages.palette_search(lang), systemImage: "magnifyingglass") { model.act("find-open", "search") }
@@ -651,7 +683,7 @@ struct ProjectsView: View {
         } header: {
             HStack {
                 VStack(alignment: .leading) {
-                    Text(p.title)
+                    Text(p.title).font(.subheadline.weight(.semibold)).textCase(nil)
                     Text(p.machine.isEmpty ? p.root : p.machine + ": " + p.root)
                         .font(.caption2).textCase(nil).lineLimit(1).truncationMode(.head)
                 }
@@ -661,12 +693,17 @@ struct ProjectsView: View {
                     .accessibilityLabel(NativeMessages.thread_new(lang))
                     .accessibilityIdentifier("project.new-thread." + p.id)
             }
+            .padding(.vertical, 8)
+            .padding(.horizontal, 12)
+            .background(BackplaneDesign.panel)
+            .overlay(alignment: .leading) { Rectangle().fill(BackplaneDesign.accent).frame(width: 2) }
             .contentShape(Rectangle())
             .onLongPressGesture(minimumDuration: 0.4) {
                 Haptics.impact()
                 model.act("proj-menu", p.id)
             }
             .accessibilityAction(named: NativeMessages.native_thread_menu(lang)) { model.act("proj-menu", p.id) }
+            .accessibilityIdentifier("project.header." + p.id)
         }
     }
 }
@@ -687,6 +724,7 @@ private struct SearchField: View {
         HStack {
             Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
             TextField(search.hint, text: $text)
+                .accessibilityIdentifier("projects.search")
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .submitLabel(.go)
@@ -783,9 +821,12 @@ struct ThreadDestination: View {
         if selected, let b = model.screen?.bot {
             BotDestination(model: model, bot: b)
         } else if !selected, let b = model.seenBots[id] {
-            BotDestination(model: model, bot: b, live: false, cachedThread: model.seen[id], cachedPlane: model.seenPlanes[id]).allowsHitTesting(false)
+            BotDestination(model: model, bot: b, live: false, cachedThread: model.seen[id], cachedPlane: model.seenPlanes[id])
+                .allowsHitTesting(false)
+                .overlay(alignment: .top) { loadingStatus }
         } else if let t = selected ? model.screen?.thread : model.seen[id] {
             ThreadScreen(model: model, thread: t, live: selected).id(id).allowsHitTesting(selected)
+                .overlay(alignment: .top) { if !selected { loadingStatus } }
         } else {
             VStack(alignment: .leading, spacing: 20) {
                 HStack(spacing: 12) {
@@ -794,11 +835,13 @@ struct ThreadDestination: View {
                     }
                     Text(title).font(.headline)
                 }
+                ProgressView(loadingLabel)
+                    .accessibilityIdentifier("thread.loading")
                 ForEach(0..<6) { _ in
                     VStack(alignment: .leading, spacing: 8) {
                         Text(NativeMessages.native_thread_content(lang)).font(.headline)
                         Text(NativeMessages.native_thread_content_note(lang))
-                    }.redacted(reason: .placeholder)
+                    }.redacted(reason: .placeholder).accessibilityHidden(true)
                 }
                 Spacer()
             }
@@ -807,6 +850,20 @@ struct ThreadDestination: View {
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
         }
+    }
+
+    private var loadingLabel: String {
+        if id == AppModel.making { return lang == "ja" ? "スレッドを作成中…" : "Creating thread…" }
+        return lang == "ja" ? "会話を開いています…" : "Opening conversation…"
+    }
+
+    private var loadingStatus: some View {
+        ProgressView(loadingLabel)
+            .font(.caption)
+            .padding(8)
+            .frame(maxWidth: .infinity)
+            .background(.bar)
+            .accessibilityIdentifier("thread.loading")
     }
 
     // the row's title in the list, while nothing of the thread is known
