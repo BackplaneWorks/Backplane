@@ -91,6 +91,7 @@ struct Thumb: View {
 // pinch to zoom, drag to pan, double-tap to zoom in or back, tap Done to close
 struct Lightbox: View {
     @Environment(\.backplaneLanguage) private var lang
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let shown: Shown
     let close: () -> Void
     @State private var scale: CGFloat = 1
@@ -125,7 +126,7 @@ struct Lightbox: View {
                 .onChanged { offset = CGSize(width: moved.width + $0.translation.width, height: moved.height + $0.translation.height) }
                 .onEnded { _ in moved = offset })
             .onTapGesture(count: 2) {
-                withAnimation {
+                withAnimation(reduceMotion ? nil : .default) {
                     scale = scale > 1 ? 1 : 2.5
                     base = scale
                     if scale == 1 { offset = .zero; moved = .zero }
@@ -502,6 +503,7 @@ struct FlowButtons: View {
 // and what the word being typed completes to: a `$` skill, an `@` bot,
 // a `>` thread, a `%` project or a `#` room, each with its summary
 struct ComposerExtras: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let thread: ThreadView
@@ -561,7 +563,7 @@ struct ComposerExtras: View {
                     ScrollViewReader { proxy in
                         ScrollView { rows }
                             .frame(height: short ? 72 : 5 * 48)
-                            .onChange(of: hot) { _, i in withAnimation { proxy.scrollTo(i) } }
+                            .onChange(of: hot) { _, i in withAnimation(reduceMotion ? nil : .default) { proxy.scrollTo(i) } }
                     }
                 }
             }

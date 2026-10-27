@@ -557,6 +557,7 @@ private struct SettingsTab: View {
 // composer (field is its "bfield", send the action that posts it)
 struct TalkScreen: View {
     @Environment(\.backplaneLanguage) private var lang
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let model: AppModel
     let bot: BotView
     let field: String
@@ -586,7 +587,7 @@ struct TalkScreen: View {
             }
             .defaultScrollAnchor(.bottom)
             .scrollDismissesKeyboard(.interactively)
-            .onChange(of: bot.posts?.count) { withAnimation { proxy.scrollTo("end", anchor: .bottom) } }
+            .onChange(of: bot.posts?.count) { withAnimation(reduceMotion ? nil : .default) { proxy.scrollTo("end", anchor: .bottom) } }
             .onChange(of: model.scrolls) { proxy.scrollTo("end", anchor: .bottom) }
         }
         .overlay { if (bot.posts ?? []).isEmpty { ContentUnavailableView(NativeMessages.native_bot_messages_empty(lang), systemImage: "bubble.left.and.bubble.right") } }

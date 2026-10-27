@@ -1027,11 +1027,29 @@ struct ThreadDestination: View {
 
     private var loadingLabel: String {
         if id == AppModel.making { return lang == "ja" ? "スレッドを作成中…" : "Creating thread…" }
+        if hasKnownContent {
+            if offline { return lang == "ja" ? "オフライン・前回の会話を表示中" : "Offline · showing previous conversation" }
+            return lang == "ja" ? "会話を更新しています…" : "Updating conversation…"
+        }
         return lang == "ja" ? "会話を開いています…" : "Opening conversation…"
+    }
+
+    private var hasKnownContent: Bool {
+        if selected, let screen = model.screen, screen.thread?.id == id || screen.bot != nil { return true }
+        return model.seen[id] != nil || model.seenBots[id] != nil
+    }
+
+    private var offline: Bool {
+        let owner = model.links.compactMap(Pairing.key).first { id.hasPrefix($0 + "|") }
+            ?? (selected ? model.screen?.hub : nil)
+        return owner.flatMap { model.conn[$0] }?.phase == .offline
     }
 
     private var loadingStatus: some View {
         VStack(alignment: .leading, spacing: 8) {
+            if hasKnownContent && offline {
+                Label(loadingLabel, systemImage: "wifi.slash").accessibilityIdentifier("thread.loading.offline")
+            }
             if timedOut {
                 Text(failureMessage).accessibilityIdentifier("thread.loading.error")
                 if id != AppModel.making {
@@ -1043,7 +1061,7 @@ struct ThreadDestination: View {
                     }
                     .accessibilityIdentifier("thread.loading.retry")
                 }
-            } else {
+            } else if !(hasKnownContent && offline) {
                 ProgressView(loadingLabel).accessibilityIdentifier("thread.loading")
             }
         }
@@ -1088,6 +1106,7 @@ private struct SendingBubble: View {
 
 struct ThreadScreen: View {
     @Environment(\.backplaneLanguage) private var lang
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Bindable var model: AppModel
     let thread: ThreadView
     // A last-seen thread remains scrollable while selection or reconnect is
@@ -1136,7 +1155,7 @@ struct ThreadScreen: View {
                     // not answered yet, by place: one handed over keeps its place
                     ForEach(Array(sending.enumerated()), id: \.offset) { _, text in
                         SendingBubble(text: text, note: sendNote)
-                            .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .opacity))
+                            .transition(reduceMotion ? .identity : .asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .opacity))
                     }
                     if !thread.live.isEmpty {
                         MarkdownView(blocks: thread.live)
@@ -1181,7 +1200,7 @@ struct ThreadScreen: View {
             lit = j.id
             Task { @MainActor in
                 try? await Task.sleep(for: .milliseconds(400))
-                withAnimation(.easeOut(duration: 2)) { if lit == j.id { lit = nil } }
+                withAnimation(reduceMotion ? nil : .easeOut(duration: 2)) { if lit == j.id { lit = nil } }
             }
         }
       }

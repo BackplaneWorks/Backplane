@@ -77,6 +77,7 @@ struct AppTabs: View {
                 Text(title).font(.caption2.weight(selected ? .semibold : .regular))
                     .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
                     .multilineTextAlignment(.center)
+                    .foregroundStyle(selected ? BackplaneDesign.accentText : Color.primary)
             }
             .frame(maxWidth: .infinity, minHeight: 48)
             .padding(.horizontal, 3).padding(.vertical, 5)
