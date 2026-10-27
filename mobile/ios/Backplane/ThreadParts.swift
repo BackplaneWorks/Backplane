@@ -426,13 +426,36 @@ struct SubsSheet: View {
 struct AskCard: View {
     let model: AppModel
     let ask: Ask
+    var owner: String? = nil
+
+    private func answer(_ action: String, _ value: String) {
+        if let owner { model.actComposer(action, value, for: owner) }
+        else { model.act(action, value) }
+    }
 
     var body: some View {
-        if ask.kind == "browser" {
+        if ask.kind == "browser", owner != nil {
+            browser
+        } else if ask.kind == "browser" {
             BrowserAskCard(model: model, ask: ask)
         } else {
             standard
         }
+    }
+
+    private var browser: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(ask.head, systemImage: "hand.raised").font(.subheadline.bold())
+            if !ask.detail.isEmpty { Text(ask.detail).font(.callout) }
+            if let path = ask.image, !path.isEmpty { HubPicture(model: model, path: path) }
+            FlowButtons(buttons: ask.buttons) { button in
+                let action = button.action ?? ""
+                answer(action.isEmpty ? "answer" : action, button.value)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(red: 0.96, green: 0.49, blue: 0).opacity(0.12), in: .rect(cornerRadius: 4))
     }
 
     private var standard: some View {
@@ -444,7 +467,7 @@ struct AskCard: View {
             } else if !ask.detail.isEmpty {
                 ScrollView { Text(ask.detail).font(.caption.monospaced()).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }.frame(maxHeight: 300)
             }
-            FlowButtons(buttons: ask.buttons) { model.act("answer", $0.value) }
+            FlowButtons(buttons: ask.buttons) { answer("answer", $0.value) }
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -494,7 +517,7 @@ struct ComposerExtras: View {
                 HStack {
                     Text(NativeMessages.native_composer_btw(lang, b.q)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     Spacer()
-                    Button { model.act("btw-close") } label: { Image(systemName: "xmark") }.buttonStyle(.borderless)
+                    Button { model.actComposer("btw-close", for: thread.id) } label: { Image(systemName: "xmark") }.buttonStyle(.borderless)
                 }
                 ScrollView { Text(b.a).font(.callout).frame(maxWidth: .infinity, alignment: .leading) }.frame(maxHeight: 200)
             }
@@ -514,7 +537,7 @@ struct ComposerExtras: View {
                 let rows =
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(Array(skills.enumerated()), id: \.element) { i, k in
-                            Button { model.act("skill", k.name) } label: {
+                            Button { model.actComposer("skill", k.name, for: thread.id) } label: {
                                 VStack(alignment: .leading, spacing: 1) {
                                     Text(k.name).font(.subheadline.monospaced().weight(.semibold)).lineLimit(1)
                                     if !k.desc.isEmpty {
@@ -543,7 +566,7 @@ struct ComposerExtras: View {
                 }
             }
             .overlay(alignment: .topTrailing) {
-                Button { model.act("skill-close") } label: {
+                Button { model.actComposer("skill-close", for: thread.id) } label: {
                     Image(systemName: "xmark").font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
                         .frame(width: 44, height: 44).contentShape(Rectangle())
                 }
@@ -556,7 +579,7 @@ struct ComposerExtras: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
                     ForEach(atts, id: \.self) { c in
-                        Button { model.act("detach", c.path) } label: {
+                        Button { model.actComposer("detach", c.path, for: thread.id) } label: {
                             if c.image, let url = model.web(c.url) {
                                 AsyncImage(url: url) { phase in
                                     if let image = phase.image { image.resizable().scaledToFit() }
@@ -590,22 +613,30 @@ struct ComposerExtras: View {
 struct AttachButton: View {
     @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
+    var owner: String? = nil
+    @State private var photoOwner: String? = nil
+    @State private var fileOwner: String? = nil
     @State private var photos: [PhotosPickerItem] = []
     @State private var picking = false
     @State private var importing = false
     @State private var hasImages = UIPasteboard.general.hasImages
 
+    private func attach(_ data: Data, name: String, owner: String?) {
+        if let owner { model.attach(data, name: name, for: owner) }
+        else { model.attach(data, name: name) }
+    }
+
     var body: some View {
         Menu {
-            Button(NativeMessages.native_attach_photos(lang), systemImage: "photo.on.rectangle") { picking = true }
-            Button(NativeMessages.viewer_files(lang), systemImage: "folder") { importing = true }
+            Button(NativeMessages.native_attach_photos(lang), systemImage: "photo.on.rectangle") { photoOwner = owner; picking = true }
+            Button(NativeMessages.viewer_files(lang), systemImage: "folder") { fileOwner = owner; importing = true }
             if hasImages {
                 Button(NativeMessages.native_attach_paste(lang), systemImage: "doc.on.clipboard") {
                     // Read only after the person chooses Paste; use the same
                     // upload and size check as the photo picker.
                     for (i, image) in (UIPasteboard.general.images ?? []).enumerated() {
                         if let data = image.pngData() {
-                            model.attach(data, name: "pasted-\(i + 1).png")
+                            attach(data, name: "pasted-\(i + 1).png", owner: owner)
                         }
                     }
                 }
@@ -625,25 +656,27 @@ struct AttachButton: View {
         .onChange(of: photos) { _, items in
             guard !items.isEmpty else { return }
             photos = []
+            let capturedOwner = photoOwner
             Task {
                 for (i, it) in items.enumerated() {
                     guard let data = try? await it.loadTransferable(type: Data.self) else { continue }
                     let ext = it.supportedContentTypes.first?.preferredFilenameExtension ?? "jpg"
                     // HEIC becomes JPEG, which every agent reads
                     if ext == "heic", let img = UIImage(data: data), let jpg = img.jpegData(compressionQuality: 0.85) {
-                        model.attach(jpg, name: "photo-\(i + 1).jpg")
+                        attach(jpg, name: "photo-\(i + 1).jpg", owner: capturedOwner)
                     } else {
-                        model.attach(data, name: "photo-\(i + 1).\(ext)")
+                        attach(data, name: "photo-\(i + 1).\(ext)", owner: capturedOwner)
                     }
                 }
             }
         }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.item], allowsMultipleSelection: true) { r in
+            let capturedOwner = fileOwner
             guard case .success(let urls) = r else { return }
             for u in urls {
                 let ok = u.startAccessingSecurityScopedResource()
                 defer { if ok { u.stopAccessingSecurityScopedResource() } }
-                if let data = try? Data(contentsOf: u) { model.attach(data, name: u.lastPathComponent) }
+                if let data = try? Data(contentsOf: u) { attach(data, name: u.lastPathComponent, owner: capturedOwner) }
             }
         }
     }
@@ -883,10 +916,15 @@ struct EmbView: View {
     let model: AppModel
     let emb: Emb
     var top = false
+    var owner: String? = nil
     @FocusState private var typing: Bool
     @State private var width = UIScreen.main.bounds.width - 32
 
-    private func key(_ k: String, _ mods: Int) { model.act("emb-key", "\(emb.key)\t\(k)\t\(mods)") }
+    private func act(_ action: String, _ value: String) {
+        if let owner { model.actComposer(action, value, for: owner) }
+        else { model.act(action, value) }
+    }
+    private func key(_ k: String, _ mods: Int) { act("emb-key", "\(emb.key)\t\(k)\t\(mods)") }
 
     var body: some View {
         let fg = emb.term.map { termColor($0.fg) } ?? .primary
@@ -895,7 +933,7 @@ struct EmbView: View {
                 Image(systemName: "terminal").foregroundStyle(fg.opacity(0.7))
                 Text(emb.title).lineLimit(1).foregroundStyle(fg)
                 Spacer(minLength: 0)
-                Button { model.act("emb-pin", emb.key) } label: {
+                Button { act("emb-pin", emb.key) } label: {
                     Image(systemName: emb.pinned ? "pin.fill" : "pin")
                         .foregroundStyle(emb.pinned ? AnyShapeStyle(PhaseColor.accent) : AnyShapeStyle(fg.opacity(0.5)))
                         .frame(width: 32, height: 28)
@@ -920,7 +958,7 @@ struct EmbView: View {
                     }
                 }
                 .onTapGesture { typing = true }
-                .background(TermField(typing: $typing, key: { key($0, $1) }, paste: { model.act("emb-paste", "\(emb.key)\t\($0)") }))
+                .background(TermField(typing: $typing, key: { key($0, $1) }, paste: { act("emb-paste", "\(emb.key)\t\($0)") }))
             }
             if typing { TermKeys(typing: $typing, key: { key($0, $1) }) }
         }
