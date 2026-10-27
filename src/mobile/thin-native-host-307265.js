@@ -302,7 +302,7 @@ export class NativeThinHost307265 {
     if (!s || s.mode !== 'view-v1') return false;
     // An explicit new owner or a hub switch supersedes any held tap, even
     // one belonging to a different hub whose refresh is still in flight.
-    if (this.current !== hub || ['select', 'bot', 'uber', 'uber-bot'].includes(action))
+    if (this.current !== hub || ['select', 'bot', 'uber', 'uber-bot', 'room', 'remote'].includes(action))
       for (const state of this.states.values()) state.deferredNavigation = null;
     this.current = hub;
     const intent = this.api.intent(hub, copy(s.session), copy(s.target), action, value);
