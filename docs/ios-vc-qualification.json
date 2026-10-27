@@ -1,0 +1,243 @@
+{
+  "status": "SIMULATOR_CORE_FLOWS_PASS_PACKAGED_WITH_DOCUMENTED_LIMITS",
+  "source_commit": "34de3a6f308f16f5a163161bd2c120c92ce4ddb5",
+  "bridge_sha256": "d4d3eaa649c060694a53eecbfc01c7f3cac908c778c4495ba4364f12bea53e13",
+  "app_executable_sha256": "1d95ecf87787afb4313270fc918d88967587aa90f6aefe9daae5afd1e2cc6429",
+  "source_and_emitted_checks": {
+    "work": "697470",
+    "bridge_sha256": "d4d3eaa649c060694a53eecbfc01c7f3cac908c778c4495ba4364f12bea53e13",
+    "source_checks": 126,
+    "actual_emitted_fixture_checks": 105,
+    "captured07_checks": 15,
+    "outbox": "PASS",
+    "mobile_typecheck": "PASS before emission",
+    "global_proof": "Existing Laws.post_running_delivers red; plotrevision-proof.log",
+    "final_precommit_proof": {
+      "work": "698709",
+      "result": "Existing Laws.post_running_delivers red",
+      "log": "build/ios-qualification/final-delivery-proof.log",
+      "sha256": "6b7edcd4656515102383138560387d5173eed929209cb61a5d3efbf52026f08d"
+    }
+  },
+  "sdk": {
+    "work": "697584",
+    "result": "PASS SDK/86Foundation/both data-preserving installs",
+    "executable_sha256": "1d95ecf87787afb4313270fc918d88967587aa90f6aefe9daae5afd1e2cc6429",
+    "bridge_sha256": "d4d3eaa649c060694a53eecbfc01c7f3cac908c778c4495ba4364f12bea53e13"
+  },
+  "actual_live_protocol_probe": {
+    "work": "697569",
+    "result": "PASS live-protocol only",
+    "geometry_wire_bytes": 113073,
+    "metadata": {
+      "wire_bytes": 135,
+      "inert": true,
+      "deadline_unchanged": true,
+      "commands": 0,
+      "sync": 0,
+      "screen": null
+    },
+    "mesh": {
+      "wire_bytes": 471037,
+      "mesh_payload_bytes": 470946,
+      "none": false,
+      "arrived_seconds": 10.052
+    },
+    "later_view_update": "revision6 accepted without hostfailure",
+    "hello_before_after": "HTTP200 basec084 stable; executable separately measuredae735",
+    "scope": "Not native mesh decode, renderer, gestures or simulator UI acceptance"
+  },
+  "current_running_hub_evidence": {
+    "observed_at_utc": "2026-10-27T21:15:36.263376+00:00",
+    "pid": 3859,
+    "running_executable": "/home/h/.local/share/backplane/backplane-serve",
+    "running_executable_sha256": "ae735e6da2bb9faa75db0a34ec782b648ed8920ca5aaccdc169cec7c185aaa28",
+    "authority": "Direct read of running Linux /proc executable; separate from /hello base commit"
+  },
+  "hub_deployment_provenance": {
+    "receipt_path": "/home/h/Documents/i2cjak/backplane-bend/.backplane/worktrees/backplane-614db080/build/viewer/local-delivery-solder-fixed/post-forward-initial.json",
+    "receipt_sha256": "9098fb851b33cf6ebf13c6f13e83a8428fac2a61fe1a88e5c3935a0c62d9bee2",
+    "verified_at": "2026-10-27T20:54:55.772Z",
+    "service_sha256": "ae735e6da2bb9faa75db0a34ec782b648ed8920ca5aaccdc169cec7c185aaa28",
+    "hub_pid": 3859,
+    "hello": {
+      "backplane": "0.12.4-dev.viewer.v7.3fa0591ffd56",
+      "busy": 12,
+      "commit": "c0844250d3c4f5c0289549a40af57b4651049a54"
+    },
+    "hello_commit_authority": "Base stamp only; accepted dirty source snapshot is separately pinned",
+    "source_snapshot": "6f32eac9b1fa341647d45738960eb8c5ec2bd2e7a752dcfb77e0a29f224ec77a",
+    "candidate_receipt_sha256": "62ba49a0eca01a85cdd729bd20f7461375068a789af6bd47bd3877d102e49189",
+    "installed_runtime_boundary": "Supported viewer-owned Linux service/web update; no iOS/native source mutation",
+    "native_shell_unchanged": {
+      "pid": 2254420,
+      "exe": "/home/h/.local/share/backplane-local/20261026-203927/stage/desktop/runtime/backplane-desktop",
+      "sha256": "84fa94067d7122fbc52adbbe9d0f89c2decb95da1e94cfac0ce79274b2d3aec5"
+    },
+    "frontend_adopted": true,
+    "exact_exec_instant": "unmeasured",
+    "ios_post_boundary_tests": "All final 34de SDK/protocol/native UI checks were after deployment boundary"
+  },
+  "board_sha256": "ce3ac2dd3e0e782d4f8f1266d29bb8c8ea843e588d0ae7d86be5b3d05aab5630",
+  "native_ui": "PASS decoded mesh/orbit/pinch/Close/reopen, Bub/thread navigation, offline Close and explicit reconnect; normal visible thread/composer with loading labels absent at fixed45s observation",
+  "package": {
+    "zip": "build/ios-qualification/Backplane-34de3a6f-simulator.zip",
+    "bytes": 6579274,
+    "sha256": "594080ed32675fe8463bfe365cfe4066fbb4f834c275f6dbb7d4ebcd703e38ce",
+    "integrity": null,
+    "entries": 24,
+    "app_only": true,
+    "no_xctest": true,
+    "bundle_id": "dev.backplane.mobile",
+    "platform": [
+      "iPhoneSimulator"
+    ],
+    "executable_sha256": "1d95ecf87787afb4313270fc918d88967587aa90f6aefe9daae5afd1e2cc6429",
+    "bridge_sha256": "d4d3eaa649c060694a53eecbfc01c7f3cac908c778c4495ba4364f12bea53e13",
+    "macho_header_hex": "cffaedfe0c00000100000000",
+    "architecture": "arm64; little-endian Mach-O cputype 0x0100000c",
+    "parent_verified": true
+  },
+  "prior_evidence": "candidate-composer-receipt.json retains all source-specific failures and passes",
+  "limitations": [
+    "Simulator only, no physical device signing/networking/Metal thermals qualification",
+    "No native original GLB/PBR/material parity acceptance",
+    "UI secret paste untested; nonsecret simctl pbcopy crashed139",
+    "Live message sends and attachment uploads not exercised against shared hub",
+    "iPad and comprehensive VoiceOver unqualified",
+    "Repository proof remains red on existing Laws.post_running_delivers; no law weakened",
+    "Normal cold-launch exact time-to-ready and continuous freshness unmeasured; fixed45s visual observation only",
+    "Custom/history/parts/layers/sheet restore conservative; claimed-restore late-receipt runtime case unqualified",
+    "Earlier light/dark/small accessibility-size and draft edit evidence source-specific, not all rerun on34de"
+  ],
+  "protocol_evidence": [
+    {
+      "path": "build/ios-qualification/protocol-evidence/live-d4d3-protocol.log",
+      "sha256": "955d8683497dc8a24e55e5eee34b1595eef63cdcd41ab80f38cde9a7c1da6311",
+      "original_path": "/home/h/.backplane-bend/work/w-t1793120742-656154-697569/out"
+    },
+    {
+      "path": "build/ios-qualification/protocol-evidence/live-d4d3-probe.mjs",
+      "sha256": "5f1414822042e4686af077e8092b27c9e12dab8c302109b4b93901223c4447bb",
+      "original_path": "/tmp/backplane-ios-vc-transport-655983/test/ios-connection/read-view-failure-live.mjs"
+    }
+  ],
+  "native_mesh_gestures": {
+    "work": "697779",
+    "result": "PASS actual decoded mesh, orbit, pinch, Close and reopen mesh",
+    "seconds": 42.211,
+    "source": "34de3a6f308f16f5a163161bd2c120c92ce4ddb5",
+    "executable_sha256": "1d95ecf87787afb4313270fc918d88967587aa90f6aefe9daae5afd1e2cc6429",
+    "bridge_sha256": "d4d3eaa649c060694a53eecbfc01c7f3cac908c778c4495ba4364f12bea53e13",
+    "launch": "Nonsecret simctl launch then XCTest activation; separately classified from XCTest launch",
+    "reopened": {
+      "epoch": 1,
+      "plot_generation": 1,
+      "mesh_present": true,
+      "mesh_decoding": false,
+      "plot_present": true,
+      "thin_failure": "none",
+      "connection": "syncing/contentReady false at capture",
+      "scope": "Not continuous freshness proof"
+    },
+    "hello_before_after": "HTTP200 basec084/version0.12.4-dev.viewer.v7.3fa0591ffd56 stable",
+    "visual_review": {
+      "result": "PASS parent reviewed actual populated board/components, changed perspective and visible magnification, Close visible; no loading/error overlay",
+      "screenshots": [
+        {
+          "path": "build/ios-qualification/shots/34de3a6f/3d-before.png",
+          "sha256": "f4b353f84d5a98004ebcc35e77770ac39b4d1552f8d0108b9f1ca129308b4998"
+        },
+        {
+          "path": "build/ios-qualification/shots/34de3a6f/3d-after-orbit.png",
+          "sha256": "c3c7a012f006e7e32d4add65da230576d89437d2f36f262cf98c4b9872d142fa"
+        },
+        {
+          "path": "build/ios-qualification/shots/34de3a6f/3d-after-pinch.png",
+          "sha256": "bfcfdc32b0e2692acb9afaec1c951c7f004dde56694b673dfc339e9c23ee3868"
+        }
+      ],
+      "limits": "Catchingup label in before/pinch captures; not continuousfreshness or material-parity acceptance"
+    }
+  },
+  "ui_test_source_commit": "19d654375688fef93665760a5fa745d608dbf85b",
+  "ui_test_sha256": "9e6111b7f7855cfffdb6fa78c4fbc3c3df43e2154b731e59fb88131c1febe628",
+  "final_navigation": {
+    "work": "697967",
+    "result": "PASS actual Bub/chat and thread navigation, repeated switches, keyboard, foreground, Back/reopen",
+    "seconds": 77.651,
+    "final": {
+      "bot": "b1790292962-8017",
+      "bot_tab": "chat",
+      "content_ready": true,
+      "socket": "online",
+      "epoch": 1,
+      "cached": false,
+      "viewer": ""
+    },
+    "scope": "No send performed; existing drafts preserved; final snapshot proves freshness at capture, not continuous readiness"
+  },
+  "final_offline_close": {
+    "work": "698081",
+    "result": "PASS client-only disconnect, local viewerClose and parked relaunch remains closed",
+    "seconds": 38.543,
+    "park_url_delivered": true,
+    "close_enabled": true,
+    "close_hittable": true,
+    "scope": "Isolated app session only; no shared hub restart"
+  },
+  "final_explicit_reconnect": {
+    "work": "698176",
+    "result": "PASS explicit reconnect, fresh same-board content, viewer closed, pairing retained",
+    "seconds": 27.513,
+    "reconnect_url_delivered": true,
+    "content_ready": true,
+    "socket": "online",
+    "viewer_closed": true,
+    "pairing_retained": true
+  },
+  "final_normal_launch": {
+    "work": "698264",
+    "result": "PASS visible-content assertions; freshness unqualified",
+    "seconds": 20.899,
+    "foreground": true,
+    "pair_field": false,
+    "viewer_closed": true,
+    "thread_composer": true,
+    "threads_tab": true,
+    "paired": true,
+    "parked": false,
+    "parent_visual_review": "Actual real thread and composer visible, viewer absent; Opening conversation and Loading older messages remain in capture",
+    "screenshot": "build/ios-qualification/shots/34de3a6f/normal-no-env.png",
+    "screenshot_sha256": "46cd91fa25b17a8d50c32f1c3da55762cd385574659d5f127b9c86a8635ecd8d"
+  },
+  "invalid_normal_settling_test": {
+    "work": "698475",
+    "xctest_reported": "PASS 1.977 seconds",
+    "acceptance": "INVALID false-positive predicate; not a settling pass",
+    "reason": "Visual screenshot still shows Opening conversation and Loading older messages; AX text query missed them",
+    "test_commit": "2ec35b49707f7afe7d86bc4cc6fb2e602a64be56",
+    "test_sha256": "988c6396aee98bb0c6cd9d04db8744ea95ca56702652724ee97c972ad88f3fa3",
+    "integrated_as_acceptance": false,
+    "screenshot": "build/ios-qualification/shots/34de3a6f/normal-no-env-settled-observation.png",
+    "screenshot_sha256": "03bcedfdc3b9592786510ebc99ec981589394f6b35353458d1a9a40de9d411a1"
+  },
+  "final_normal_observation": {
+    "work": "698725",
+    "xctest_duration_seconds": 45.792,
+    "fixed_observation_seconds": 45,
+    "result": "Parent visual review: real board thread and composer visible; Opening conversation and Loading older messages absent in observed frame",
+    "scope": "Appearance after fixed interval; not exact time-to-ready or continuous freshness",
+    "composer_enabled": true,
+    "composer_hittable": true,
+    "typing": false,
+    "screenshot": "build/ios-qualification/shots/34de3a6f/normal-no-env-after45.png",
+    "screenshot_sha256": "b0a75659f1192f483e67ecb1a2f07121f2d4165165cc1355c19fa7871333f749",
+    "final_normal_relaunch": {
+      "pairing_present": true,
+      "parked": false
+    },
+    "test_source_commit": "19d654375688fef93665760a5fa745d608dbf85b",
+    "test_sha256": "9e6111b7f7855cfffdb6fa78c4fbc3c3df43e2154b731e59fb88131c1febe628"
+  }
+}
