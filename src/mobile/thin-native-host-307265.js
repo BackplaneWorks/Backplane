@@ -300,6 +300,10 @@ export class NativeThinHost307265 {
   request(hub, action, value) {
     const s = this.states.get(hub);
     if (!s || s.mode !== 'view-v1') return false;
+    // An explicit new owner or a hub switch supersedes any held tap, even
+    // one belonging to a different hub whose refresh is still in flight.
+    if (this.current !== hub || ['select', 'bot', 'uber', 'uber-bot'].includes(action))
+      for (const state of this.states.values()) state.deferredNavigation = null;
     this.current = hub;
     const intent = this.api.intent(hub, copy(s.session), copy(s.target), action, value);
     if (!intent || intent.kind === 'blocked') return true;
@@ -336,10 +340,10 @@ export class NativeThinHost307265 {
       return true;
     }
     if (!s.greeted || !s.ready) {
-      // Only an already shown owner may retain a read-navigation tap while
-      // its current view refreshes. Never carry it into a new selection.
+      // Only an already shown owner may retain the latest read-navigation tap
+      // while its current view refreshes. Never carry it into a new selection.
       if (s.greeted && s.shown && same(s.target, s.shownTarget) && intent.kind === 'action' &&
-          ['view', 'bot-tab'].includes(action) && typeof value === 'string' && utf8Bytes(value) <= 1024)
+          ['view', 'bot-tab', 'bot', 'uber', 'uber-bot'].includes(action) && typeof value === 'string' && utf8Bytes(value) <= 1024)
         s.deferredNavigation = { action, value, target: copy(s.target), sel: s.session.sel, epoch: s.epoch };
       return true;
     }

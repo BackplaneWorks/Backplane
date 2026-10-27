@@ -66,6 +66,30 @@ check('compact load never rewinds a running connection',()=>{const x=harness();x
 check('same bot tab action advances presentation and retires ready',()=>{const x=harness();x.open();const s=x.h.states.get('h');s.target={kind:'bot',id:'bot'};x.h.client.links.get('h').target=clone(s.target);x.h.request('h','bot-tab','space');const o=x.h.drain();assert.equal(o.sync[0].phase,'presenting');assert(o.sync[0].requestRevision>1);assert.equal(s.ready,false);assert.equal(o.cmds[0].request.m,'view.action');assert.equal(o.cmds[0].request.p.session.route.tab,'space');});
 check('coalesced update issues no command or presenting transition',()=>{const x=harness();x.open();const s=x.h.states.get('h');x.h.update(s);const first=x.h.drain();const rev=first.sync[0].requestRevision;x.h.update(s);const second=x.h.drain();assert.deepEqual(second.cmds,[]);assert.deepEqual(second.sync,[]);assert.equal(x.h.client.links.get('h').revision,rev);});
 check('latest viewer intent waits for current presentation and issues once',()=>{const x=harness();x.open();const s=x.h.states.get('h');x.h.update(s);const update=x.h.drain().cmds[0].request;x.h.request('h','view','board');x.h.request('h','view','3d');assert.deepEqual(x.h.drain().cmds,[]);const done=x.answer(update.id);assert.equal(done.cmds.length,1);assert.equal(done.cmds[0].request.m,'view.action');assert.equal(done.cmds[0].request.p.action,'view');assert.equal(done.cmds[0].request.p.value,'3d');assert.deepEqual(x.h.drain().cmds,[]);});
+check('busy recent Home retains latest Bub open once through nextTarget',()=>{
+ const x=harness();x.api.session=()=>({sel:'',drafts:{},open:{},adding:false,panel:false,info:{},rid:1});
+ x.h.hubs(['h']);x.h.connection('h','1','view-v1');const first=x.greeting().cmds[0].request;
+ const home=x.screen('h','');home.thread=null;home.sel='';x.answer(first.id,{shown:home,overlay:{key:'h',name:'h',j:clone(home)}});
+ const s=x.h.states.get('h');assert.equal(s.target.kind,'recent');x.h.update(s);const refresh=x.h.drain().cmds[0].request;
+ x.h.request('h','bot','h|other');x.h.request('h','uber','h|bub');x.h.request('h','send','');assert.deepEqual(x.h.drain().cmds,[]);
+ const resumed=x.answer(refresh.id,{shown:home,overlay:{key:'h',name:'h',j:clone(home)}});assert.equal(resumed.cmds.length,1);
+ const action=resumed.cmds[0].request;assert.equal(action.m,'view.action');assert.equal(action.p.action,'uber');assert.equal(action.p.value,'h|bub');
+ const session={...clone(s.session),sel:'bub-thread'};const next=x.answer(action.id,{session,nextTarget:{kind:'thread',id:'bub-thread'}});
+ assert.equal(next.cmds.length,1);assert.equal(next.cmds[0].request.m,'view.open');assert.equal(next.cmds[0].request.p.target.id,'bub-thread');
+ const presented=x.answer(next.cmds[0].request.id);assert(x.h.states.get('h').ready);assert.equal(x.h.states.get('h').session.sel,'bub-thread');assert.equal(presented.cmds.length,0);
+});
+check('deferred Bub open is cancelled by selection or connection replacement',()=>{
+ for(const change of ['select','disconnect','forget']){const x=harness();x.open();const s=x.h.states.get('h');x.h.update(s);const old=x.h.drain().cmds[0].request;x.h.request('h','uber','h|bub');
+  if(change==='select'){x.h.request('h','select','h|other');const next=x.h.drain().cmds[0].request;assert(!x.answer(next.id).cmds.some(c=>c.request?.p?.action==='uber'));assert(!x.answer(old.id).cmds.some(c=>c.request?.p?.action==='uber'));}
+  else {if(change==='forget'){x.h.forgetHub('h');x.h.hubs(['h']);}x.h.connection('h','2','view-v1');const next=x.greeting('h','2').cmds[0].request;assert(!x.answer(next.id).cmds.some(c=>c.request?.p?.action==='uber'));}}
+});
+check('only explicit bot navigation opens are deferred',()=>{
+ for(const action of ['bot','uber','uber-bot']){const x=harness();x.open();const s=x.h.states.get('h');x.h.update(s);const refresh=x.h.drain().cmds[0].request;x.h.request('h',action,'h|fixture');const out=x.answer(refresh.id);assert.equal(out.cmds.length,1);assert.equal(out.cmds[0].request.p.action,action);}
+});
+check('newer open on another hub cancels held Bub intent',()=>{
+ const x=harness();x.open('a');x.open('b');x.h.current='a';const a=x.h.states.get('a');x.h.update(a);const old=x.h.drain().cmds[0].request;
+ x.h.request('a','uber','a|bub');x.h.request('b','bot','b|other');x.h.drain();const stale=x.answer(old.id,{},'a');assert(!stale.cmds.some(c=>c.request?.p?.action==='uber'));
+});
 check('bot tab waits for presentation and does not admit arbitrary action',()=>{const x=harness();x.open();const s=x.h.states.get('h');s.target={kind:'bot',id:'bot'};s.shownTarget={kind:'bot',id:'bot'};x.h.client.links.get('h').target=clone(s.target);x.h.update(s);const update=x.h.drain().cmds[0].request;x.h.request('h','bot-tab','space');x.h.request('h','send','');assert.deepEqual(x.h.drain().cmds,[]);const out=x.answer(update.id);assert.equal(out.cmds.length,1);assert.equal(out.cmds[0].request.p.action,'bot-tab');assert.equal(out.cmds[0].request.p.value,'space');});
 check('selection change cancels held viewer intent and stale reply cannot run it',()=>{const x=harness();x.open();const s=x.h.states.get('h');x.h.update(s);const old=x.h.drain().cmds[0].request;x.h.request('h','view','board');x.h.request('h','select','h|b');const selection=x.h.drain().cmds[0].request;const fresh=x.answer(selection.id);assert(!fresh.cmds.some(c=>c.request?.p?.action==='view'));const late=x.answer(old.id);assert(!late.cmds.some(c=>c.request?.p?.action==='view'));});
 check('connection replacement and forget discard held viewer intent',()=>{for(const forget of [false,true]){const x=harness();x.open();const s=x.h.states.get('h');x.h.update(s);x.h.drain();x.h.request('h','view','board');if(forget){x.h.forgetHub('h');x.h.hubs(['h']);}x.h.connection('h','2','view-v1');const greeting=x.greeting('h','2');const fresh=x.answer(greeting.cmds[0].request.id);assert(!fresh.cmds.some(c=>c.request?.p?.action==='view'));}});
