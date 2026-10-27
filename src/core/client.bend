@@ -2012,10 +2012,10 @@ def SIx.asks.go(as: List<&2, M.Ask>, m: Map<&2, List<&2, M.Ask>>) -> Map<&2, Lis
     case M.Ask{i, +th, k, t, d, o, +op, an} <> rest:
       SIx.asks.go(rest, SIx.ask(op, m, th, M.Ask{i, th, k, t, d, o, op, an}))
 
-# the index of a state (Kids.keep: delegated children live under their
-# parent, not in their project)
+# Keep child metadata until Tree.shelves projects it onto its parent.
+# Early filtering loses detached children and active-child shelf priority.
 def Side.ix(+st: M.State) -> SIx:
-  SIx{SIx.by.go(List.reverse(&2, M.Thread, Kids.keep(Ui.threads(st), Kids.set(st))), Map.new(&2, List<&2, M.Thread>)),
+  SIx{SIx.by.go(List.reverse(&2, M.Thread, Ui.threads(st)), Map.new(&2, List<&2, M.Thread>)),
     SIx.asks.go(List.reverse(&2, M.Ask, M.Asks.all(st)), Map.new(&2, List<&2, M.Ask>)), M.Work.kids.map(st), M.Work.rows.map(st)}
 
 # Typed canonical input for the plain metadata index. World/mail are needed
@@ -2134,7 +2134,7 @@ def Side.sorted.ix(+st: M.State, +ix: SIx, +now: Nat) -> List<&2, SRow>:
 # the projects by order key, then creation time and ID, their threads on
 # shelves (delegated child threads live under their parent instead)
 def Side.sorted(+st: M.State, +now: Nat) -> List<&2, SRow>:
-  PSlot.rows(List.sort(~PSlot, ~PSlot.before, Side.rows.go(Side.projs(st), st, Kids.keep(Ui.threads(st), Kids.set(st)), M.State.navs(st), now)))
+  PSlot.rows(List.sort(~PSlot, ~PSlot.before, Side.rows.go(Side.projs(st), st, Ui.threads(st), M.State.navs(st), now)))
 
 # Quiet projects
 # --------------
@@ -2320,7 +2320,7 @@ def Side.section.k(s: M.Shelves, +id: String) -> Sect:
 # the shelf a thread can be dragged within, with its threads in order
 # ("" for a shelf without manual order)
 def Side.section(+st: M.State, +now: Nat, +id: String) -> Sect:
-  Side.section.k(M.Sidebar.at(M.Thread.filter_project(Kids.keep(Ui.threads(st), Kids.set(st)), Ui.thread_project(Ui.thread(st, id))), M.State.navs(st), now), id)
+  Side.section.k(ST.Tree.shelves(st, M.Sidebar.at(M.Thread.filter_project(Ui.threads(st), Ui.thread_project(Ui.thread(st, id))), M.State.navs(st), now)), id)
 
 # Reordering, snoozing, mentions
 # ------------------------------
@@ -6456,7 +6456,7 @@ def Todos.pick(show: Bool, ts: List<&2, TD.Todo>) -> List<&2, TD.Todo>:
       Nil{}
 
 def Todos.shown(+st: M.State, +th: String, +run: Bool) -> List<&2, TD.Todo>:
-  Todos.pick(TD.Todo.shown(Todos.of(st, th), run), Todos.of(st, th))
+  Todos.pick(TD.Todo.shown(Todos.of(st, th), Bool.and(run, String.eq(M.Setting.get(st, "todos.live." ++ th, ""), "on"))), Todos.of(st, th))
 
 # The card's two controls, on all four clients: its head opens or shuts it
 # (the "fold" action, key todos:<thread>; open until shut), and a list too

@@ -5,6 +5,7 @@ import ./ubop.bend as UO
 import ./locks.bend as LK
 import ./mail.bend as ML
 import ./ship.bend as SH
+import ./todo.bend as TD
 
 # The product's state, event-sourced. Every change is a Change appended to
 # the log; the read model is `replay(log)`. Events are persisted forever:
@@ -2129,6 +2130,32 @@ def State.mail_post(+s: State, +id: String, +room: String, +from: String, +text:
   State.world((w => BT.World.posted(w, BT.Post{id, room, from, text, hop, at})),
     State.mail_post.box(String.eq(Setting.get(s, "mail.on", "off"), "on"), s, id, room, from, text, at))
 
+# A stored plan survives its turn for unfinished work and history. Only a
+# plan updated in the current turn may use Running to show completed steps.
+# Repeated Running (steering) is still the same ownership interval.
+def State.todos.turn.keep(keep: Bool, s: State, +th: String) -> State:
+  match keep:
+    case True{}: s
+    case False{}: State.setting(s, "todos.live." ++ th, "")
+
+def State.todos.turn(+s: State, +th: String, st: TurnState) -> State:
+  match st:
+    case Running{}:
+      State.todos.turn.keep(State.running.k(State.thread.get(s, th)), s, th)
+    case _:
+      State.setting(s, "todos.live." ++ th, "")
+
+# Provider reconnects can repeat a session's whole plan. Compare the
+# normalized stored fields so whitespace/key order cannot reclaim it.
+def State.todos.same(+old: String, +fresh: String) -> Bool:
+  String.eq(TD.Todo.show(TD.Todo.read(old)), TD.Todo.show(TD.Todo.read(fresh)))
+
+def State.todos.set(+s: State, +th: String, +todos: String) -> State:
+  State.setting(State.setting(s, "todos.live." ++ th,
+    Bool.pick(String, Bool.and(State.running.k(State.thread.get(s, th)),
+      Bool.or(String.eq(Setting.get(s, "todos.live." ++ th, ""), "on"),
+        Bool.not(State.todos.same(Setting.get(s, "todos." ++ th, ""), todos)))), "on", "")), "todos." ++ th, todos)
+
 def State.apply.go(s: State, e: Change) -> State:
   match e:
     case ProjectCreated{id, title, root, at}:
@@ -2142,7 +2169,7 @@ def State.apply.go(s: State, e: Change) -> State:
     case MessagePosted{+thread, msg, role, text, +at}:
       State.message(s, thread, msg, role, text, at)
     case TurnChanged{+thread, +state, +at}:
-      State.mail_end(state, State.thread((t => Thread.turned(state, at, t)), s, thread), thread)
+      State.mail_end(state, State.thread((t => Thread.turned(state, at, t)), State.todos.turn(s, thread, state), thread), thread)
     case PendingChanged{+thread, count, _}:
       State.thread((t => Thread.pending_set(count, t)), s, thread)
     case ActivityLogged{thread, act, tone, kind, summary, at}:
@@ -2280,7 +2307,7 @@ def State.apply.go(s: State, e: Change) -> State:
     case Reminded{+id, _, thread, text, +at}:
       State.post(s, Act{"remind:" ++ id ++ ":" ++ Nat.show(at), thread, "remind", "reminder", text, at})
     case TodosSet{+th, todos, _}:
-      State.setting(s, "todos." ++ th, todos)
+      State.todos.set(s, th, todos)
     case ProviderSet{+id, +p, m, _}:
       State.switch(s, id, p, m)
     case ThreadForked{+id, +src, _}:

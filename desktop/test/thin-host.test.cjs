@@ -569,3 +569,21 @@ test('refresh launch: compact input does not consume scheduled output invalidati
  f.host.request('flag','models');const action=f.sent.at(-1),r=f.reply(action,{modelMenuInput:true,viewRevision:'2',session:{...action.p.session,open:{models:true}}});delete r.result.shown;delete r.result.window;f.host.receive(r);
  scheduled.shift()();assert.equal(f.sent.at(-1).m,'view.update');assert.equal(f.sent.at(-1).p.session.open.models,true);assert.equal(f.host.ready,true);
 });
+test('retained fold: restore its adjacent page, then toggle exactly once on validated current coverage',async()=>{
+ const f=await fixture({foldPresent:(_node,id)=>id==='run'});f.open();f.host.page();f.host.receive(f.reply());
+ assert.equal(f.host.retainedFold('1run','newer'),true);const page=f.sent.at(-1);assert.equal(page.m,'view.page');assert.equal(page.p.cursor,'');
+ assert.equal(f.host.retainedFold('1run','newer'),false,'one restore at a time');f.host.request('draft','still unsent');
+ f.host.receive(f.reply(page));const action=f.sent.at(-1);assert.equal(action.m,'view.action');assert.equal(action.p.action,'fold');assert.equal(action.p.value,'1run');assert.equal(action.p.session.drafts.A,'still unsent');
+ assert.equal(f.sent.filter(x=>x.p.action==='fold').length,1);assert.equal(f.host.receive(f.reply(page)),false,'late page cannot replay the toggle');
+ f.host.receive(f.reply(action));f.host.request('fold','0run');assert.equal(f.sent.at(-1).p.value,'0run');
+});
+test('retained fold: changed head, failure, timeout, navigation and another action cancel the deferred toggle',async()=>{
+ for(const cancel of ['changed','failure','timeout','select','stop','disconnect']){
+  const f=await fixture({foldPresent:()=>cancel!=='changed'});f.open();f.host.page();f.host.receive(f.reply());
+  assert.equal(f.host.retainedFold('1old-head','newer'),true);const page=f.sent.at(-1);
+  if(cancel==='failure')f.host.receive({t:'reply',id:page.id,ok:false,error:{code:'STALE_CURSOR'}});
+  else if(cancel==='timeout')f.tick(5001);
+  else {if(cancel==='select')f.host.request('select','B');if(cancel==='stop')f.host.request('stop','');if(cancel==='disconnect')f.host.disconnect();f.host.receive(f.reply(page));}
+  assert.equal(f.sent.filter(x=>x.p.action==='fold').length,0,cancel+' cannot toggle a different run');assert.equal(f.host.foldAfterPage,null);
+ }
+});

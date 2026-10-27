@@ -2170,12 +2170,35 @@ def View.entry.k(+lc: I.Loc, mine: Bool, e: M.Entry, +st: M.State, +ec: U.Ec, +s
 def View.entry(+lc: I.Loc, +e: M.Entry, +st: M.State, +sel: String, +ec: U.Ec, +sp: STP.Stamps) -> List<&2, D.Node>:
   View.entry.k(lc, String.eq(View.entry_thread(e), sel), e, st, ec, sp)
 
+# Coverage is actual entry identity, never the ordinal cursor ids. Only the
+# current window is described (at most 32 entries), without hidden call text.
+def View.fold.tail(fuel: Nat, es: List<&2, M.Entry>, rs: List<&2, FO.Role>) -> List<&2, String>:
+  match fuel es rs:
+    case 1n+k e <> t FO.RIn{_} <> rt:
+      FO.Fold.id(e) <> View.fold.tail(k, t, rt)
+    case _ _ _:
+      Nil{}
+
+def View.fold.covered(row: D.Node, ids: List<&2, String>) -> D.Node:
+  match row:
+    case D.El{tag, key, attrs, kids}:
+      D.El{tag, key, D.At{"data-fold-ids", J.Json.show(J.Json.arr(U.Side.strs(ids)))} <> attrs, kids}
+    case D.Txt{t}:
+      D.Txt{t}
+
+def View.entries.role(+lc: I.Loc, r: FO.Role, es: List<&2, M.Entry>, rs: List<&2, FO.Role>, ns: List<&2, D.Node>) -> List<&2, D.Node>:
+  match r es:
+    case FO.RHead{+id, +label, +open} e <> t:
+      View.fold.covered(View.fold.row.loc(lc, id, label, open), FO.Fold.id(e) <> View.fold.tail(31n, t, rs)) <> View.fold.shown(open, ns)
+    case +r _:
+      View.role.loc(lc, r, ns)
+
 def View.entries.r(+lc: I.Loc, es: List<&2, M.Entry>, rs: List<&2, FO.Role>, +st: M.State, +sel: String, +ec: U.Ec, +sp: STP.Stamps) -> List<&2, D.Node>:
   match es rs:
     case Nil{} _:
       Nil{}
-    case e <> t r <> rt:
-      List.append(&2, D.Node, View.role.loc(lc, r, View.entry(lc, e, st, sel, ec, sp)), View.entries.r(lc, t, rt, st, sel, ec, sp))
+    case +e <> +t r <> +rt:
+      List.append(&2, D.Node, View.entries.role(lc, r, e <> t, rt, View.entry(lc, e, st, sel, ec, sp)), View.entries.r(lc, t, rt, st, sel, ec, sp))
     case e <> t Nil{}:
       List.append(&2, D.Node, View.entry(lc, e, st, sel, ec, sp), View.entries.r(lc, t, Nil{}, st, sel, ec, sp))
 
