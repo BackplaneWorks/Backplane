@@ -435,6 +435,25 @@ let cacheReady = false;
 let queued = false;
 let scroll = false;
 let focus = null;
+// the field that had the keyboard when the link to the hub dropped (its
+// id and selection): the view drawn again after the reconnect (a hub
+// restart builds it afresh) gives it back, unless the person put the
+// keyboard elsewhere meanwhile
+let refocus = null;
+function refocusKeep() {
+  const el = document.activeElement;
+  if (!el || el === document.body || !el.id || !el.closest?.("main, aside, .app")) return;
+  refocus = { id: el.id, start: el.selectionStart ?? null, end: el.selectionEnd ?? null };
+}
+function refocusGive() {
+  if (!refocus || !remoteReady) return;
+  const want = refocus, el = document.getElementById(want.id);
+  refocus = null;
+  if (!el || document.activeElement && document.activeElement !== document.body) return;
+  el.focus({ preventScroll: true });
+  const n = typeof el.value === "string" ? el.value.length : 0;
+  if (want.start !== null && typeof el.setSelectionRange === "function") try { el.setSelectionRange(Math.min(want.start, n), Math.min(want.end ?? want.start, n)); } catch {}
+}
 let jump = null;
 // a search result opened: its entry, brought into view and flashed once its
 // thread shows it, paging back through the history while it is not there
@@ -783,6 +802,7 @@ function render() {
     document.getElementById(focus)?.focus();
     focus = null;
   }
+  refocusGive();
   tourSync();
   settingsSync();
   saveFocusedSoon();
@@ -2065,6 +2085,7 @@ async function startThin(again = false, reason = "initial") {
     if (typeof event === "string") diagnostic.initiate(event);
     trace("thin-disconnect", { reason: typeof event === "string" ? event : event?.type || "connection-ended", code: event?.code });
     ended = true;
+    refocusKeep();
     bubMoves.disconnect(location.origin);
     terminalOutput.clear();
     checkpointFocused();remoteReady = false;desktopBrowser.hide();Plot2d.reset();Solid.reset();
