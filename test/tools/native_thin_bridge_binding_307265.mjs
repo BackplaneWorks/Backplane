@@ -17,6 +17,27 @@ export async function registerBridgeChecks(check,stage,root){
  function answer(req=last,changes={},quiet=false){const local=screen('h',req.p.session?.sel||'a');if(local.thread)local.thread.id='h|'+local.thread.id;const shown={...local,sel:'h|'+local.sel};const result={version:1,hub:'h',generation:'1',epoch:'origin',requestRevision:req.p.requestRevision,target:req.p.target,viewId:req.p.viewId||'view',viewRevision:'1',renderer:'mobile',remoteReady:true,session:req.p.session||{sel:'a',drafts:{},rid:1,open:{},info:{},adding:false,panel:false},shown,overlay:{key:'h',name:'hub',j:local},window:{ids:['e'],older:'older',hasMore:true,anchor:{id:'e',offset:0},partial:[]},cmds:[],...changes};return receive({t:'reply',id:req.id,ok:true,result},quiet);}
  function selectB(){const changed=read(B.act('select','h|b'));const call=request(changed);answer(call);return call;}
  function failures(out,owner,text){return out.cmds.some(c=>c.type==='send-failed'&&c.thread===owner&&c.text===text);}
+ function busyComposer(){boot();answer();const changed={t:'view.changed',version:1,generation:'1',epoch:'origin',viewId:'view',target:last.p.target,viewRevision:'2'};return request(receive(changed));}
+ check('same-owner upload completion waits for refresh and identical completion coalesces',()=>{
+  const update=busyComposer(),value='{"id":"fixture-upload"}';
+  assert.equal(read(B.composerAction('h|a','attach-end',value)).cmds.length,0);
+  assert.equal(read(B.composerAction('h|a','attach-end',value)).cmds.length,0);
+  const next=request(answer(update));assert.equal(next.p.action,'attach-end');assert.equal(next.p.value,value);
+  const done=answer(next);assert(!done.cmds.some(c=>c.type==='send'&&JSON.parse(c.data).p?.action==='attach-end'));
+ });
+ check('pending upload completion is cancelled on selection connection or forget',()=>{
+  for(const change of ['select','connection','forget']){
+   const update=busyComposer();B.composerAction('h|a','attach-end','{"id":"fixture-upload"}');
+   if(change==='select'){const selected=request(read(B.act('select','h|b')));const result=answer(selected);assert(!result.cmds.some(c=>c.type==='send'&&JSON.parse(c.data).p?.action==='attach-end'));answer(update);}
+   else {if(change==='forget'){B.forgetHub('h');B.hubs(['h']);}B.connection('h','2','view-v1');B.act('select','h|a');const opened=read(B.recv('h',encode(greeting).toString('base64'),'2',false,false));assert(!opened.cmds.some(c=>c.type==='send'&&JSON.parse(c.data).p?.action==='attach-end'));}
+  }
+ });
+ check('busy upload completions are bounded and generic actions are not replayed',()=>{
+  const update=busyComposer();for(let i=0;i<11;i++)B.composerAction('h|a','attach-end',JSON.stringify({id:'fixture-'+i}));
+  B.composerAction('h|a','skill','fixture');let out=answer(update),values=[];
+  while(out.cmds.some(c=>c.type==='send')) {const next=request(out);assert.equal(next.p.action,'attach-end');values.push(next.p.value);assert(values.length<=10);out=answer(next);}
+  assert.equal(values.length,10);assert.equal(new Set(values).size,10);
+ });
  check('captured draft follows A after B becomes foreground without changing focus',()=>{
   boot();answer();selectB();const saved=read(B.draftAt('h|a','draft A',2));
   assert(saved.cmds.some(c=>c.type==='keep'&&c.thread==='h|a'&&c.text==='draft A'));
