@@ -1337,6 +1337,31 @@ def Claude.assistant(+thread: String, +now: Nat, +seq: Nat, +m: J.Json, +uuid: S
   Step{Claude.blocks(J.Json.elems(J.Json.get_obj(m, "content")), thread, J.Json.get_str(m, "id", "msg"), 0n, now, seq, uuid, think),
     [Broadcast{J.Json.show(J.Json.obj([J.KV{"t", J.Str{"delta_end"}}, J.KV{"thread", J.Str{thread}}]))}]}
 
+# A model or API error Claude Code reports for the running turn (a bad
+# model name, a server or billing error, a rate limit) comes as an
+# assistant line whose "error" names it, its text the message. It is logged
+# as the turn's own error (tone "error", kind "api"), as a failed result
+# is, so a turn that then ends without a failed result still says it
+# failed by its own error (wnote.bend's Wn.err). Lines for a turn no
+# longer running log nothing.
+def Claude.api.text(bs: List<&2, J.Json>) -> String:
+  match bs:
+    case Nil{}:
+      ""
+    case +b <> t:
+      Bool.pick(String, String.eq(J.Json.get_str(b, "type", ""), "text"), J.Json.get_str(b, "text", ""), Claude.api.text(t))
+
+def Claude.api.err.k(said: Bool, +thread: String, +now: Nat, +seq: Nat, +code: String, +text: String) -> List<&2, M.Change>:
+  match said:
+    case True{}:
+      [M.ActivityLogged{thread, Hub.id("api", now, seq), "error", "api", Bool.pick(String, String.is_empty(String.trim(text)), code, text), now}]
+    case False{}:
+      Nil{}
+
+def Claude.api.err(run: Bool, +thread: String, +now: Nat, +seq: Nat, +o: J.Json) -> List<&2, M.Change>:
+  Claude.api.err.k(Bool.and(run, Bool.not(String.is_empty(J.Json.get_str(o, "error", "")))), thread, now, seq, J.Json.get_str(o, "error", ""),
+    Claude.api.text(J.Json.elems(J.Json.get_obj(J.Json.get_obj(o, "message"), "content"))))
+
 def Claude.result.k(err: Bool, +thread: String, +now: Nat, text: String) -> Step:
   match err:
     case True{}:
@@ -2245,7 +2270,8 @@ def Claude.line.k(i: Nat, +s: M.State, +thread: String, +now: Nat, +o: J.Json) -
     case 1n:
       Claude.stream.if(Hub.running(Hub.thread(s, thread)), thread, J.Json.get_obj(o, "event"))
     case 2n:
-      Tools.step(Claude.assistant.t(s, thread, now, J.Json.get_obj(o, "message"), J.Json.get_str(o, "uuid", "")), thread)
+      Step.after(Tools.step(Claude.assistant.t(s, thread, now, J.Json.get_obj(o, "message"), J.Json.get_str(o, "uuid", "")), thread),
+        Claude.api.err(Hub.running(Hub.thread(s, thread)), thread, now, Hub.seq(s), o))
     case 3n:
       Step.after(Claude.result.if(Hub.running(Hub.thread(s, thread)), thread, now, o), Usage.result(s, thread, now, o))
     case 5n:

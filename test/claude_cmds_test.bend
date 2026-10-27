@@ -348,6 +348,24 @@ def held() -> IO(Unit):
     C.Check.str("ids: a line with no uuid keeps the old id", mid(B.Claude.block.k(0n, "t1", "m", 0n, 1n, 0n, "", tb(), False{})), "m:0")
     C.Check.str("WorkSet stored and read back", Bool.show(store.back(C2.Change.decode(C2.Change.encode(M.WorkSet{"t1", "bg", "a\tx", 7n})))), "True")
 
+def api.show(cs: List<&2, M.Change>) -> String:
+  match cs:
+    case M.ActivityLogged{_, _, +tone, +kind, +summary, _} <> _:
+      tone ++ "|" ++ kind ++ "|" ++ summary
+    case _:
+      ""
+
+def api.line(+s: String) -> J.Json:
+  Maybe.default(&2, J.Json, J.Json.parse(s), J.Null{})
+
+def api_errs() -> IO(Unit):
+  do IO<Unit>:
+    +bad = api.line("{\"type\":\"assistant\",\"error\":\"invalid_request\",\"message\":{\"model\":\"<synthetic>\",\"content\":[{\"type\":\"text\",\"text\":\"There's an issue with the selected model (no-such-model-webhook-test)\"}]}}")
+    C.Check.str("api error: logged as the turn's", api.show(B.Claude.api.err(True{}, "t1", 5n, 0n, bad)), "error|api|There's an issue with the selected model (no-such-model-webhook-test)")
+    C.Check.str("api error: none once the turn is over", api.show(B.Claude.api.err(False{}, "t1", 5n, 0n, bad)), "")
+    C.Check.str("api error: an ordinary reply logs none", api.show(B.Claude.api.err(True{}, "t1", 5n, 0n, api.line("{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}}"))), "")
+    C.Check.str("api error: no text says the code", api.show(B.Claude.api.err(True{}, "t1", 5n, 0n, api.line("{\"type\":\"assistant\",\"error\":\"server_error\",\"message\":{\"content\":[]}}"))), "error|api|server_error")
+
 def main() -> IO(Unit):
   do IO<Unit>:
     +f1 : List<&2, String> <- file("test/fixtures/claude/bg-wake.jsonl")
@@ -364,3 +382,4 @@ def main() -> IO(Unit):
     run(old(), Nil{}, sim0(), "old CLI", s => IO.pure(Unit, Unit{}))
     run(fails(), Nil{}, sim0(), "a failed command", s => IO.pure(Unit, Unit{}))
     held()
+    api_errs()

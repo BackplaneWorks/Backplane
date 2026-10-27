@@ -128,7 +128,7 @@
     "src/core/vt.bend": "931708652e96ec2db30f3a5a69dc4c90a98e15fc6e5fbbd8e441475626198581",
     "src/core/wake.bend": "074b0501f0db23a207e835beea1de5a5c11dc770287beef06c4d20be0da93a67",
     "src/core/when.bend": "0c97fbba571d99a50a4977c5a3c6916ade1c64196173c20e959d8848d751476f",
-    "src/core/wnote.bend": "3b9c4f83f0f919e764834d0ed562f826fef505cfff69dabf7d540d9f330066c8",
+    "src/core/wnote.bend": "d146facec453c6f4094b898b1505d7044b65c09d8ae377f3092cbb5a0a71f3f3",
     "src/server/thin-actor.bend": "1bbc42271627d4747dba80228812000366b5437e76bb75af003e6fe3b08ed98a",
     "src/server/thin-mirror.bend": "b488dc7c45fe49bb1aa17966f454f1ee0e9cfef7db4d619c265c298c9bc94e92",
     "src/server/thin-sidebar.bend": "3f4f103551054d92d10a3d7d355f1b8db948900b83e2942009cb7d0e1e1cf5c7",

@@ -44,6 +44,13 @@ def current() -> List<&2, M.Entry>:
   [M.Act{"e2", "t1", "error", "result", "API Error: 500", 22n}, M.Msg{"m2", "t1", M.User{}, "next", 20n},
    M.Act{"e1", "t1", "error", "result", "Claude AI usage limit reached|1792800000", 11n}]
 
+# a turn whose model call failed: Claude Code's API error, logged as the
+# turn's own (hub.bend's Claude.api.err), then an interrupted end
+def badmodel() -> List<&2, M.Entry>:
+  [M.Act{"api1", "t1", "error", "api", "There's an issue with the selected model (no-such-model-webhook-test)", 41n},
+   M.Msg{"a4", "t1", M.Assistant{}, "There's an issue with the selected model (no-such-model-webhook-test)", 41n}, M.Msg{"m4", "t1", M.User{}, "hi", 40n},
+   M.Act{"e1", "t1", "error", "result", "older failure", 11n}]
+
 # a turn whose reply reports a limit, with no error logged, after an older
 # turn's reply
 def limited() -> List<&2, M.Entry>:
@@ -152,4 +159,9 @@ def main() -> IO(Unit):
     C.Check.str("ordinary reply on an interrupt", WN.Wn.end.reason("interrupted", "", "working on it"), "interrupted")
     C.Check.str("logged error wins over the reply", WN.Wn.end.reason("failed", "API Error: 500", "usage limit reached"), "error")
     C.Check.str("older turn's limit not taken", WN.Wn.end.reason("interrupted", WN.Wn.err(older(), "t1"), WN.Wn.reply(older(), "t1")), "interrupted")
+    C.Check.str("model error is the turn's", WN.Wn.err(badmodel(), "t1"), "There's an issue with the selected model (no-such-model-webhook-test)")
+    C.Check.str("interrupt on a model error is an error", WN.Wn.end.reason("interrupted", WN.Wn.err(badmodel(), "t1"), WN.Wn.reply(badmodel(), "t1")), "error")
+    C.Check.str("failed on a model error is an error", WN.Wn.end.reason("failed", WN.Wn.err(badmodel(), "t1"), ""), "error")
+    C.Check.str("interrupt with a limit error stays limit", WN.Wn.end.reason("interrupted", "usage limit reached", ""), "limit")
+    C.Check.str("plain interrupt stays interrupted", WN.Wn.end.reason("interrupted", "", ""), "interrupted")
     C.Check.str("a stop has no reason", WN.Wn.end.reason("stopped", "", "usage limit reached"), "")

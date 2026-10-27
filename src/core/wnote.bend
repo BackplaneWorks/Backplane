@@ -271,10 +271,15 @@ def Wn.reply(es: List<&2, M.Entry>, +thread: String) -> String:
 
 # why the turn ended (Wn.reason): from its logged error; with none, its own
 # reply is read, and only a limit's words (fallback.bend's Error.words)
-# there change anything, so a reply never makes up an error. "" for a
-# settle or a stop.
+# there change anything, so a reply never makes up an error. An
+# interrupted turn that logged an error of its own (a model or API error,
+# hub.bend's Claude.api.err) ended on that error: "error", not
+# "interrupted". "" for a settle or a stop.
+def Wn.end.reason.k(said: Bool, +r: String) -> String:
+  Bool.pick(String, Bool.and(said, String.eq(r, "interrupted")), "error", r)
+
 def Wn.end.reason(+state: String, +err: String, +reply: String) -> String:
-  Wn.reason(state, Bool.pick(String, String.is_empty(err), reply, err))
+  Wn.end.reason.k(Bool.not(String.is_empty(err)), Wn.reason(state, Bool.pick(String, String.is_empty(err), reply, err)))
 
 # Alerted posts the other kinds (so a settle is not sent twice)
 def Wn.due.alert(+kind: String) -> Bool:
