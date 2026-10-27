@@ -45,6 +45,7 @@ private final class Worker: Thread, @unchecked Sendable {
 final class Engine: @unchecked Sendable {
     private let queue = Worker()
     private let priority = WirePriority()
+    private let pairingFlush = PairingFlushGate()
     private var ctx: JSContext?
 
     private func context() -> JSContext {
@@ -74,7 +75,14 @@ final class Engine: @unchecked Sendable {
     private static let burst: UInt64 = 1_000_000_000
     private var built: UInt64 = 0
     private var flushPending = false
-    var onFlush: (@Sendable (Out?) -> Void)?
+    var onFlush: (@Sendable (Out?, UInt64) -> Void)?
+
+    // Called synchronously when the person's pairing changes. Reconciliation
+    // releases this generation only after retired state has been removed.
+    func invalidatePairing() -> UInt64 { pairingFlush.invalidate() }
+    func resumePairing(_ generation: UInt64) {
+        if pairingFlush.resume(generation) { scheduleFlush() }
+    }
 
     private func scheduleFlush() {
         let delay: UInt64? = lock.withLock {
@@ -98,15 +106,18 @@ final class Engine: @unchecked Sendable {
             return DispatchTime.now().uptimeNanoseconds &- built >= Self.window
         }
         guard ready, !queue.personWaiting else { scheduleFlush(); return }
+        // While reconciliation runs, leave bridge queues untouched. The
+        // matching resume schedules another attempt, even if this was the last.
+        guard let generation = pairingFlush.stamp() else { return }
         let began = DispatchTime.now().uptimeNanoseconds
         let forced = lock.withLock { owe }
         let text = context().objectForKeyedSubscript("Backplane")?.invokeMethod("flush", withArguments: [forced])?.toString() ?? "{}"
         let out = Out.decode(text, screen: true)
-        guard out?.screen != nil else { onFlush?(out); return }
+        guard out?.screen != nil else { onFlush?(out, generation); return }
         let stale = queue.personWaiting
         lock.withLock { built = began; owe = stale }
         if stale { scheduleFlush() }
-        onFlush?(stale ? Out.decode(text, screen: false) : out)
+        onFlush?(stale ? Out.decode(text, screen: false) : out, generation)
     }
 
     // late: the arguments decided on the queue, as the call runs
