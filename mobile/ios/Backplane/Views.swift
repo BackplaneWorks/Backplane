@@ -24,7 +24,7 @@ struct RootView: View {
 
     @ViewBuilder private var content: some View {
         if model.links.isEmpty {
-            NavigationStack { PairView(tag: model.screen?.locale ?? "en", link: "") { model.pair($0) } }
+            NavigationStack { PairView(tag: model.screen?.locale ?? "en", link: "") { _ = model.pair($0) } }
         } else if let s = model.screen {
             asked(s)
                 .sheet(isPresented: findShown) {
@@ -41,7 +41,7 @@ struct RootView: View {
                 }
                 .task(id: "\(model.screen?.tour != nil)|\(pairing)") { await tourWait() }
         } else {
-            ProgressView()
+            ConnectionStartupView(model: model)
         }
     }
 
@@ -107,33 +107,114 @@ struct RootView: View {
     }
 }
 
+// First connection stays actionable while the hub is loading or retrying.
+private struct ConnectionStartupView: View {
+    let model: AppModel
+    private var link: String { model.links.first ?? "" }
+    private var key: String { Pairing.key(link) ?? "" }
+    private var connection: HubConn { model.conn[key] ?? HubConn() }
+    private var tag: String { model.screen?.locale ?? "en" }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    Text("BACKPLANE").font(.system(.caption, design: .monospaced).weight(.bold))
+                        .tracking(2).foregroundStyle(PhaseColor.accent)
+                    Text(HubDot.word(connection.phase, tag))
+                        .font(.title2.weight(.semibold))
+                    Text(key).font(.system(.body, design: .monospaced)).textSelection(.enabled)
+                    if let failure = connection.failure {
+                        Text(NativeMessages.native_hub_failure(tag, failure.reason, failure.code))
+                            .foregroundStyle(PhaseColor.bad)
+                            .accessibilityIdentifier("pair.connection.error")
+                    } else {
+                        ProgressView().accessibilityIdentifier("pair.connection.progress")
+                    }
+                    Button("Retry") { model.retryConnection(key) }
+                        .buttonStyle(PairActionStyle())
+                        .accessibilityIdentifier("pair.connection.retry")
+                    Button("Use another address") { model.unpair(key) }
+                        .accessibilityIdentifier("pair.connection.change")
+                }
+                .frame(maxWidth: 520, alignment: .leading)
+                .padding(24)
+            }
+            .background(Color(uiColor: .systemBackground))
+        }
+    }
+}
+
+private struct PairActionStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.body.weight(.semibold))
+            .frame(maxWidth: .infinity, minHeight: 48)
+            .foregroundStyle(Color.black)
+            .background(PhaseColor.accent.opacity(configuration.isPressed ? 0.7 : 1))
+            .contentShape(Rectangle())
+    }
+}
+
 struct PairView: View {
     let tag: String
     @State var link: String
     let done: (String) -> Void
     @State private var scanning = false
+    @State private var invalid = false
+
+    private func connect(_ text: String) {
+        guard Pairing.key(text) != nil else { invalid = true; return }
+        invalid = false
+        done(text)
+    }
 
     var body: some View {
-        Form {
-            Section {
-                Button { scanning = true } label: { Label(NativeMessages.native_pair_scan(tag), systemImage: "qrcode.viewfinder") }
-            } footer: {
-                Text(NativeMessages.native_pair_computer(tag))
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("BACKPLANE")
+                        .font(.system(.caption, design: .monospaced).weight(.bold))
+                        .tracking(2).foregroundStyle(PhaseColor.accent)
+                    Text(NativeMessages.native_pair_title(tag)).font(.largeTitle.weight(.bold))
+                    Text(NativeMessages.native_pair_computer(tag)).foregroundStyle(.secondary)
+                }
+                Button { scanning = true } label: {
+                    Label(NativeMessages.native_pair_scan(tag), systemImage: "qrcode.viewfinder")
+                }
+                .buttonStyle(PairActionStyle())
+                .accessibilityIdentifier("pair.scan")
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(NativeMessages.settings_pair(tag)).font(.headline)
+                    TextField(NativeMessages.settings_pair(tag), text: $link, prompt: Text(verbatim: "http://host:3787/#token=…"))
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.URL)
+                        .submitLabel(.go)
+                        .onSubmit { connect(link) }
+                        .padding(14)
+                        .background(Color(uiColor: .secondarySystemBackground))
+                        .overlay(Rectangle().stroke(invalid ? PhaseColor.bad : Color.secondary.opacity(0.35), lineWidth: 1))
+                        .accessibilityIdentifier("pair.address")
+                    Text(NativeMessages.native_pair_instructions(tag)).font(.footnote).foregroundStyle(.secondary)
+                    if invalid {
+                        Text(tag == "ja" ? "有効な接続アドレスを入力してください。" : "Enter a valid hub address or pairing link.")
+                            .font(.footnote).foregroundStyle(PhaseColor.bad)
+                            .accessibilityIdentifier("pair.address.error")
+                    }
+                }
+                Button(NativeMessages.native_pair_connect(tag)) { connect(link) }
+                    .buttonStyle(PairActionStyle())
+                    .disabled(link.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .opacity(link.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.5 : 1)
+                    .accessibilityIdentifier("pair.connect")
             }
-            Section {
-                TextField(NativeMessages.settings_pair(tag), text: $link, prompt: Text(verbatim: "http://host:3787/#token=…"))
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .keyboardType(.URL)
-            } header: {
-                Text(NativeMessages.settings_pair(tag))
-            } footer: {
-                Text(NativeMessages.native_pair_instructions(tag))
-            }
-            Button(NativeMessages.native_pair_connect(tag)) { done(link) }.disabled(link.trimmingCharacters(in: .whitespaces).isEmpty)
+            .frame(maxWidth: 520, alignment: .leading)
+            .padding(24)
         }
-        .navigationTitle(NativeMessages.native_pair_title(tag))
-        .fullScreenCover(isPresented: $scanning) { ScanView(tag: tag) { done($0) } }
+        .background(Color(uiColor: .systemBackground))
+        .navigationBarTitleDisplayMode(.inline)
+        .fullScreenCover(isPresented: $scanning) { ScanView(tag: tag) { connect($0) } }
     }
 }
 
@@ -145,6 +226,14 @@ struct HubsView: View {
     private var tag: String { screen.locale ?? "en" }
     @State private var link = ""
     @State private var scanning = false
+    @State private var invalid = false
+
+    private func add(_ text: String) {
+        guard Pairing.key(text) != nil else { invalid = true; return }
+        invalid = false
+        _ = model.pair(text)
+        link = ""
+    }
 
     var body: some View {
         Form {
@@ -183,7 +272,14 @@ struct HubsView: View {
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .keyboardType(.URL)
-                Button(NativeMessages.native_pair_add(tag)) { model.pair(link); link = "" }.disabled(link.trimmingCharacters(in: .whitespaces).isEmpty)
+                if invalid {
+                    Text(tag == "ja" ? "有効な接続アドレスを入力してください。" : "Enter a valid hub address or pairing link.")
+                        .foregroundStyle(PhaseColor.bad).font(.footnote)
+                        .accessibilityIdentifier("hubs.address.error")
+                }
+                Button(NativeMessages.native_pair_add(tag)) { add(link) }
+                    .disabled(link.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .accessibilityIdentifier("hubs.add")
                 Button { scanning = true } label: { Label(NativeMessages.native_pair_scan(tag), systemImage: "qrcode.viewfinder") }
             } header: {
                 Text(NativeMessages.native_pair_another(tag))
@@ -192,7 +288,7 @@ struct HubsView: View {
             }
         }
         .navigationTitle(NativeMessages.native_settings_hubs(tag))
-        .fullScreenCover(isPresented: $scanning) { ScanView(tag: tag) { model.pair($0) } }
+        .fullScreenCover(isPresented: $scanning) { ScanView(tag: tag) { add($0) } }
     }
 
     // host:port · version · changes held · when it last said anything
@@ -256,6 +352,7 @@ struct HubsPill: View {
             }
             .font(.system(size: 9))
         }
+        .accessibilityIdentifier("navigation.hubs")
         .accessibilityLabel(hubs.map { NativeMessages.native_hub_accessibility(model.screen?.locale ?? "en", $0.name, HubDot.word(model.conn[$0.key]?.phase ?? .connecting, model.screen?.locale ?? "en")) }.joined(separator: ", "))
     }
 }
@@ -351,6 +448,7 @@ private struct ThreadRow: View {
                 .accessibilityElement(children: .combine)
                 .accessibilityAddTraits(.isButton)
                 .accessibilityAction(named: NativeMessages.native_thread_menu(lang)) { model.act("row-menu", row.id) }
+                .accessibilityIdentifier("thread.row." + row.id)
             }
             if hierarchy && row.expanded == true && row.canChild == true {
                 Button { model.act("thread-child", row.id) } label: {
@@ -452,6 +550,7 @@ struct ProjectsView: View {
             }
         }
         .navigationTitle(NativeMessages.tour_title_threads(lang))
+        .accessibilityIdentifier("navigation.threads")
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 HubsPill(model: model, hubs: screen.hubs) { pairing = true }
@@ -560,6 +659,7 @@ struct ProjectsView: View {
                 Spacer()
                 Button { model.act("new-thread", p.id) } label: { Image(systemName: "square.and.pencil") }
                     .accessibilityLabel(NativeMessages.thread_new(lang))
+                    .accessibilityIdentifier("project.new-thread." + p.id)
             }
             .contentShape(Rectangle())
             .onLongPressGesture(minimumDuration: 0.4) {

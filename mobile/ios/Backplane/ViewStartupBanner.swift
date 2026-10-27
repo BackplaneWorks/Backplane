@@ -16,9 +16,13 @@ struct ViewStartupBanner: View {
                 Text("This hub needs an update · " + key).font(.caption)
                 HStack {
                     Button("Retry") { model.retryView(key) }
+                        .accessibilityIdentifier("startup.compatibility.retry")
                     Spacer()
                 }.font(.caption)
-            }.padding(10).background(.bar)
+            }.padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                .background(PhaseColor.warn.opacity(0.14))
+                .overlay(alignment: .leading) { Rectangle().fill(PhaseColor.warn).frame(width: 3) }
+                .accessibilityIdentifier("startup.compatibility")
         }
     }
 }
