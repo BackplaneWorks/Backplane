@@ -7,7 +7,7 @@ function store_temp(home) {
 }
 function store_sync(path) {
   const fs = require('fs'); let fd;
-  try { fd=fs.openSync(path,'r');fs.fsyncSync(fd);return 'ok'; }
+  try { fd=fs.openSync(path,'r+');fs.fsyncSync(fd);return 'ok'; }
   catch(e) { return 'fail '+e.message; }
   finally { if(fd!==undefined)fs.closeSync(fd); }
 }
