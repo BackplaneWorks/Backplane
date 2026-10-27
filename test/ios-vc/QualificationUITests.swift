@@ -549,9 +549,22 @@ final class QualificationUITests: XCTestCase {
         let mesh = app.descendants(matching: .any)["viewer.mesh.ready"]
         XCTAssertTrue(mesh.waitForExistence(timeout: 90))
         let before = XCTAttachment(screenshot: app.screenshot()); before.name = "external-zoom-before"; before.lifetime = .keepAlways; add(before)
+        let orbitStart = app.coordinate(withNormalizedOffset: CGVector(dx: 0.38, dy: 0.50))
+        let orbitEnd = app.coordinate(withNormalizedOffset: CGVector(dx: 0.67, dy: 0.56))
+        orbitStart.press(forDuration: 0.2, thenDragTo: orbitEnd)
+        XCTAssertTrue(mesh.waitForExistence(timeout: 20))
+        let orbit = XCTAttachment(screenshot: app.screenshot()); orbit.name = "external-orbit-after"; orbit.lifetime = .keepAlways; add(orbit)
         app.pinch(withScale: 1.7, velocity: 1.0)
         XCTAssertTrue(mesh.waitForExistence(timeout: 20))
         let after = XCTAttachment(screenshot: app.screenshot()); after.name = "external-zoom-after"; after.lifetime = .keepAlways; add(after)
+        XCTAssertTrue(close.isHittable); close.tap()
+        XCTAssertFalse(close.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.descendants(matching: .any)["qualification.connection.ready"].waitForExistence(timeout: 60))
+        XCTAssertTrue(open.waitForExistence(timeout: 15)); open.tap()
+        XCTAssertTrue(choice.waitForExistence(timeout: 10)); choice.tap()
+        XCTAssertTrue(close.waitForExistence(timeout: 20))
+        XCTAssertTrue(mesh.waitForExistence(timeout: 90), "Reopened viewer must recover the real mesh")
+        qualificationStatus(app, label: "external-3d-reopened")
         XCTAssertTrue(close.isHittable); close.tap()
     }
 
@@ -610,6 +623,18 @@ final class QualificationUITests: XCTestCase {
         print("safe-normal-threads composer=\(visibleThread) project-header=\(project)")
         XCTAssertTrue(visibleThread || project, "Threads must show an existing thread or project")
         let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "normal-no-env-ui"; shot.lifetime = .keepAlways; add(shot)
+    }
+
+    func testNormalLaunchAfter45Seconds() {
+        let app = XCUIApplication()
+        app.activate()
+        closeRestoredViewer(app)
+        let elapsed = expectation(description: "45 second observation interval")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 45) { elapsed.fulfill() }
+        wait(for: [elapsed], timeout: 55)
+        let composer = app.descendants(matching: .any)["thread.composer"]
+        print("safe-normal-after-45 foreground=\(app.state == .runningForeground) composer-exists=\(composer.exists) composer-enabled=\(composer.exists && composer.isEnabled) composer-hittable=\(composer.exists && composer.isHittable)")
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "normal-no-env-after-45"; shot.lifetime = .keepAlways; add(shot)
     }
 
     func testPairedHubsPasteControl() {
