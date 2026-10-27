@@ -1,4 +1,4 @@
-# iOS simulator qualification
+# iOS product qualification
 
 The private simulator build uses source `946efaf686302efccf9569abf4af157d501fd774` and the emitted bridge SHA-256 `be82d28cde401b4497a0c7dcb94b9fd809905303b4531e9c9c5cd0eeda86164c`. The XCTest-built app executable SHA-256 is `ab8d2deaa881678c625402e0edb71ac896f7014823e5ef4d1fb25511261bef23`. The normal simulator app ZIP is `build/ios-qualification/Backplane-946efaf6-simulator.zip`, SHA-256 `4422052fcfe27e30eb43f6c4e8d1c852b6634ab11e05f6697effe1e7a2fa9be8`; it contains only `Backplane.app`. This is a simulator app, not a signed physical-device build.
 
@@ -6,7 +6,7 @@ Use Xcode 26.6 and iOS Simulator 26.5. Keep the ZIP, result bundles and screensh
 
 For a repeat run, use an isolated source copy from the exact integrated commit, verify the bridge hash, and hold the `ios-vc-mac` named lock for Mac builds and UI tests. Install only on dedicated simulator devices and preserve their application data. The UI target generator changes only a disposable copy; run XCTest with `-collect-test-diagnostics never -parallel-testing-enabled NO`. The simulator-only qualification URLs park and reconnect only the isolated app's client sockets.
 
-## Demo on the prepared Mac
+## Supplemental meeting walkthrough on the prepared Mac
 
 The existing private hub is `http://desktop.tail9e0cf2.ts.net:3787`. The prepared iPhone 17 Pro simulator is `D73B6652-765E-4C7C-AB09-1F13522FCEAC`; it is already paired and unparked. No pairing link needs to be re-entered. The second, smaller test simulator is `6AA4F268-08F6-4E9B-BBD2-C9FF58AB5DB1` (iPhone 17e).
 
@@ -21,6 +21,8 @@ To reinstall the supplied ZIP, extract `Backplane.app` on the Mac and use `xcrun
 
 Private review artifacts are in `build/ios-qualification`: `final-946efaf6-receipt.json`, the simulator ZIP, and `shots/946efaf6/` (2D reopen, decoded 3D mesh, orbit before/after, light/dark prompt and keyboard, small large-type layouts and Settings). The Bub keyboard screenshots are under `shots/509011d7/`, and the owner-specific draft screenshot under `shots/266f70f5/`; preserve those source distinctions.
 
+`Backplane-946efaf6-orbit-demo.mp4` records the actual real-board 3D mesh/orbit test (49.618 seconds, work `685573`; test passed in 46.354 seconds). Its SHA-256 is `78841074bd95097e3cdaa58f9dae333477fd7dfae647b7dff6adfce3e05ed5df`. Sampled frames show private thread content and the populated board, with no pairing field observed. The normal app was relaunched afterward with pairing retained and the client unparked. The recording also retains the preceding launch/loading period; it is runtime evidence, not a continuous-readiness claim.
+
 ## Observed results
 
 The dedicated iPhone 17 Pro and 17e simulators used a real existing hub. Before and after the final UI batch, read-only `/hello` returned HTTP 200, commit `b6cc6ed9abfdf15e272ed6dd59225fc4829b1f28`, version `0.12.4-dev.chat.f54c6ed34.6ae0d568`. A separately owned chat deployment changed the hub version earlier in qualification; that external boundary is not the app-only interruption. The saved PoE_LoRa_Tube board used for viewer checks had SHA-256 `ce3ac2dd3e0e782d4f8f1266d29bb8c8ea843e588d0ae7d86be5b3d05aab5630`.
@@ -28,7 +30,7 @@ The dedicated iPhone 17 Pro and 17e simulators used a real existing hub. Before 
 * On final `946efaf6`, the SDK build and simulator installs passed; Foundation draft-state and flush-gate runners passed 12 and 13 checks. Real 2D geometry opened, closed and reopened; the real 3D viewer reported decoded mesh readiness. A drag changed the visible board perspective while the mesh remained loaded. Zoom was not tested.
 * On final `946efaf6`, a client-only disconnect was delivered with the real board viewer open. Close remained enabled and hittable; the viewer remained closed after a parked relaunch. Explicit reconnect restored fresh content for the same existing thread, and the next relaunch remained fresh and closed.
 * On final `946efaf6`, light and dark composer/keyboard checks passed on Pro. The 17e accessibility-size view showed larger text, and the horizontal tab strip exposed Settings; the test opened it and returned to the Threads composer without changing settings. These observations do not qualify iPad or general VoiceOver behavior.
-* On `509011d7`, strict real Bub/chat and ordinary-thread navigation, keyboard, repeated switches, foreground, Back and reopen passed. On `266f70f5`, the local draft test verified distinct Bub and board-thread drafts, including a local edit during observed refresh, repeated owner switches, foreground and cleanup. No message was sent; both test markers were cleared. The final source differs from these observations in diagnostics and prompt colors; they are not reruns of those flows on `946efaf6`.
+* On final `946efaf6`, work `685884` reran strict real Bub/chat and ordinary-thread navigation, keyboard, repeated switches, foreground, Back and reopen (96.987 seconds), plus distinct local Bub and board-thread draft ownership through observed refresh and cleanup (75.878 seconds). No message was sent; both owner-bound empty preconditions passed and both test markers were cleared. Earlier passing observations on `509011d7` and `266f70f5` remain recorded separately.
 * On `16819ddf`, one guarded normal project Return selected the verified existing PoE thread and reached fresh content. This was not rerun on final `946efaf6`.
 
 Some failed attempts exposed test-launch state or blocked safely before actions; retain their private result bundles and do not replace them with a later pass. In particular, the first final 3D attempt lacked the qualification launch flags and stopped before choosing 3D; an explicit termination before test launch preceded the successful 3D run. An initial offline attempt stopped before delivering disconnect while a restored Close control was in transition; the bounded retry passed.

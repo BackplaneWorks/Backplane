@@ -857,6 +857,14 @@ final class AppModel {
         engine.viewerToken(token, closing: true)
         advanceViewerClose()
     }
+    func retryViewer(_ token: ViewerCloseIntent.Token) {
+        guard visibleViewerToken(for: token.owner.nav) == token,
+              links.contains(where: { Pairing.key($0) == token.owner.hub }) else { return }
+        // Reconnect this app's socket: the hub must discard its plot delta
+        // holders too. Repeating the same viewer choice need not resend it.
+        plots.resumeQualificationDelivery()
+        retryConnection(token.owner.hub)
+    }
     private func advanceViewerClose() {
         guard let token = viewerClose.pending, viewerCloseSending == nil, let s = screen, let thread = s.thread,
               viewerClose.canSend(token, owner: viewerOwner(s), source: viewerSource(thread.viewer), ready: contentReady) else { return }
