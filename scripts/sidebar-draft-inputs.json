@@ -28,7 +28,7 @@
     "src/core/cat.bend": "0130231a18e515a94d40d7584d19a9b5a2d1663f9601fbff944bf97e37f9fd6b",
     "src/core/cef.bend": "f2d3fa4c991d0e341620fe634ddb4e08da97f8e471ec46afac0b3de471cc69fb",
     "src/core/charter.bend": "7f906bdea712f6ff6162735c8cc133767ec0f9289c3d0bee6dfedbd4d75ad981",
-    "src/core/client.bend": "d60808cbcf6912ab62301f09321bdf2ead2e85a5121e090985a1d542e555f121",
+    "src/core/client.bend": "4cc5f41643b8ab0c23b300a6957bda5821a2f2a11f4c6fad95b6916864506a7d",
     "src/core/codec.bend": "33cb35c55f3712a18734e76e1149763001a9388af27948f0da4ead2c13d48b6f",
     "src/core/cron.bend": "6f89a001df0261a25c878616ea66c235e169f7fc1c726d39e695fce8adb57332",
     "src/core/deploy.bend": "ebee4e63a52cf41ae001bebcdbb7fb010ad71c1e04e481292585740d88a39cc4",
@@ -69,7 +69,7 @@
     "src/core/mailview.bend": "e1cac757c5f34457a745f095642f6675befed68d5b87aae30f14b706dff015b1",
     "src/core/mech.bend": "79fb3307d0d6868a777924d4b934ac8a1671937e265942467f6c60cc4db82efb",
     "src/core/menu.bend": "807668923de70eaabb72ddb760f808cbf6d786b70822ba6a1180776758af7eee",
-    "src/core/model.bend": "3d66f2339799f2dc8c5353f9e45066b79fc5a401cc59a9f6fdf6dfd7916c8c71",
+    "src/core/model.bend": "5bcb957764260ed0a7708e2e5a739e7fdd7f842457747a2fed3b2283b0b479be",
     "src/core/msgs.bend": "dfc361d44ee34a12f8ba8628498032f6943668c3428c00db25ef9cb7477f4f3c",
     "src/core/notice.bend": "ee87318c1f12fc6cfb23bb5e24e90709e1f9a2eadfd2832581d21590f596e5e0",
     "src/core/onboard.bend": "55ccccf20f706a0acad492de20e23aedc751c7e9ce61b6f3430bfd65796e9232",
@@ -104,7 +104,7 @@
     "src/core/store.bend": "037f48017d9b9c1b6ed24d750bc898dc62200635d95fecc627f2196fd79d89d5",
     "src/core/strokefont.bend": "a5d15a2a0c28e9b24673d41bd31a283b8b9df71b1d40524b4bfb689b3ff964bb",
     "src/core/subs.bend": "695a9eedce4bbc7eafd13a9435c77d33a3066f8a2d961086200ca08f91a37a0f",
-    "src/core/subthreads.bend": "13e42cf12eee61526c333a91d15e18c29319906c6c486b9e4c06bf81d379b046",
+    "src/core/subthreads.bend": "af8ab8116eccc0eae0f7c49e596904a66088662d263fe34de99507e020ec8342",
     "src/core/svg.bend": "dc334fd62bc35e0fa3c9cdac414ee563a31f99a3fd538810d42d35c148c30c14",
     "src/core/task.bend": "8280585ed265c028ae6fa6bc72be4b56e527e4f162262e1a4a61401d693457b2",
     "src/core/telemetry.bend": "459638fea434c79b7965a9947ca6e9554208fc7c63c7cadb7f2a22b2e5ce6187",
@@ -141,7 +141,7 @@
     "src/web/space.bend": "b86a265e41a900498bc33c37c0404c4d6678554efe3d9054f329beb2cf35ee63",
     "src/web/usage-graph.bend": "fa06f7d2bf855a396a5f7a7b4725dfaa990145fbbcefe7ad21ae8f9a698a2679",
     "src/web/usage-page.bend": "706e3f17a4a3e5f159656d47aeb76a940d4825421f5c33228f9aef692ec926e3",
-    "src/web/view.bend": "d6dff90380bf3cf909efea54201b313d54f8be2ba2a1410ac905b682b90c6ffe"
+    "src/web/view.bend": "57e5a58abe23266b7edd2f3e191edef7760a8f8f7cd2fc4e5872ad3eac03e7ae"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -249,7 +249,24 @@
       "kind": "Conservative source reference graph, not compiler AST proof. New Shelve helpers are outside sidebar projection; model change is comment-only; draft readers/unknown@ policy unchanged.",
       "fullOutputAssertions": 24,
       "sourceSnapshot": "/home/h/Documents/i2cjak/bp-coord/settle-fresh-work/SOURCE-structural-correction.json"
+    },
+    "chatTodoPagingAndDelegatedTree": {
+      "base": "b6cc6ed9abfdf15e272ed6dd59225fc4829b1f28",
+      "changedClosureFiles": [
+        "src/core/model.bend",
+        "src/core/client.bend",
+        "src/core/subthreads.bend",
+        "src/web/view.bend"
+      ],
+      "scope": "Todo ownership derives from canonical state/settings only. Delegated-child parent projection reads task/thread/bot/settings metadata, not Ui drafts. Sidebar shelf inputs retain child metadata until tree projection. Transcript fold coverage adds bounded actual entry IDs outside sidebar rendering. No new non-@ draft body reader, no private image key/fallback/full picture or unknown-@ retention change. Existing guard scope/scanner and fail-closed behavior retained.",
+      "fullOutputCheck": "test/sidebar_draft_image_test.bend",
+      "assertions": 24,
+      "additionalChecks": {
+        "delegatedSubthreads": 20,
+        "existingTree": 22,
+        "indexedDisplay": 14
+      }
     }
   },
-  "reviewNote": "Fresh owned-work settlement: new Shelve helpers outside unchanged sidebar projection; model comment only. Conservative graph and24 full-output checks retain draft/unknown@/picture semantics."
+  "reviewNote": "Chat todo/paging/delegated-tree integration: reviewed changed readers;24full-output draft/privacy cases passed; unknown@ and full main/picture inputs retained. No guard bypass."
 }

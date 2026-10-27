@@ -448,6 +448,12 @@ let earlierAsked = false;
 // is taller than half a page. It never becomes session or request authority.
 let historyBase = null, historySpare = [], historyPage = null, historyRestored = null;
 let historyStatus = null;
+let historyRunwayOwner = null;
+// Cursor intent can change before its reply. Resize/scroll repairs use the
+// page actually patched into this timeline, not that pending destination.
+let historyAcceptedNewest = true, historyPresentedNewest = true;
+function historyAccepted() { historyAcceptedNewest = thin?.atNewest?.() !== false; }
+function historyPresented() { historyPresentedNewest = historyAcceptedNewest; }
 const historyBridges = new Map();let historyBridgeBytes = 0;
 function historyBridgeKey(target = thin?.target, conversation = thin?.conversation) {
   return JSON.stringify([location.origin, cacheIdentity(document.cookie), App.lang(ui), thin?.epoch, target, conversation]);
@@ -471,9 +477,64 @@ function historyRestoreBridge(detail) {
   if (saved) { historyRestored = saved.rows;historyPage = null; }
 }
 function historyClear() {
+  historyRunwayClear();
+  historyAcceptedNewest = historyPresentedNewest = true;
   historyBase = null;historySpare = [];historyPage = null;historyRestored = null;
   olderGestureUntil = newerGestureUntil = 0;stationaryPages = 0;
   historyPageState(null);
+}
+// Give only the scroll range needed to hold this row or enter a short
+// canonical page. Unneeded tail on rich pages lets momentum pass their real
+// end and makes Current cleanup clamp the reader. This is layout only.
+function historyRunwayClear() {
+  historyRunwayOwner?.querySelector("[data-history-runway]")?.remove();
+  historyRunwayOwner = null;
+}
+function historyRunway(tl) {
+  if (historyRunwayOwner && historyRunwayOwner !== tl) historyRunwayClear();
+  if (!tl || tl.id !== "timeline" || viewMode !== "view-v1" || !frontendNode || historyPresentedNewest) {
+    historyRunwayClear();return;
+  }
+  const rows = [...tl.querySelectorAll("[data-id], button.fold")];
+  const last = rows.reverse().find(row => row.getBoundingClientRect().height > 0);
+  if (!last) { historyRunwayClear();return; }
+  let el = tl.querySelector(":scope > [data-history-runway]");
+  const style = getComputedStyle(tl), gap = parseFloat(style.rowGap) || 0, pad = parseFloat(style.paddingBottom) || 0;
+  const origin = tl.getBoundingClientRect().top + tl.clientTop - tl.scrollTop;
+  // A spacer's start is in normal flow, including any sticky footer's real
+  // position. Without one, scrollHeight measures overflowing content; its
+  // viewport floor needs the last child's box on pages that do not overflow.
+  const end = el ? el.getBoundingClientRect().top - gap - (parseFloat(el.style.marginTop) || 0)
+    : tl.lastElementChild.getBoundingClientRect().bottom + (parseFloat(getComputedStyle(tl.lastElementChild).marginBottom) || 0);
+  const natural = !el && tl.scrollHeight > tl.clientHeight ? tl.scrollHeight : end - origin + pad;
+  const naturalMax = Math.max(0, natural - tl.clientHeight);
+  const anchor = held && anchorElement(tl, held.id);
+  let target = anchor ? tl.scrollTop + anchor.getBoundingClientRect().top - held.off : 0;
+  for (const node of historyBase || []) {
+    const id = historyRow(node);if (!id) continue;
+    const first = anchorElement(tl, (historyFold(node) ? "fold:" : "") + id);
+    if (first?.getBoundingClientRect().height > 0) {
+      target = Math.max(target, first.getBoundingClientRect().top - origin - 1);break;
+    }
+  }
+  const needed = target > naturalMax ? Math.ceil(target + tl.clientHeight - natural) : 0;
+  if (needed <= 0) { historyRunwayClear();return; }
+  // Keep two pixels of the final real row visible at maximum scroll: the
+  // inert tail must not grant paging via an empty/no-anchor viewport.
+  const tail = Math.max(0, natural - (last.getBoundingClientRect().bottom - origin));
+  const height = Math.max(0, Math.min(needed, tl.clientHeight, tl.clientHeight - tail - 2)) + "px";
+  if (!el) {
+    el = document.createElement("div");el.setAttribute("data-history-runway", "");
+    el.setAttribute("aria-hidden", "true");el.setAttribute("inert", "");el.setAttribute("role", "presentation");
+    el.style.cssText = "flex:0 0 auto;pointer-events:none";
+  }
+  // Cancel the spacer's own flex gap so its measured height is its exact
+  // contribution, including when less than a gap's worth of space is needed.
+  const margin = -gap + "px";
+  if (el.style.marginTop !== margin) el.style.marginTop = margin;
+  if (el.style.height !== height) el.style.height = height;
+  if (tl.lastElementChild !== el) tl.appendChild(el);
+  historyRunwayOwner = tl;
 }
 function historyPageState(state) {
   historyStatus = state;
@@ -501,6 +562,32 @@ function historyRow(node) {
     return attrs.find(a => is(a, "At") && a.name === "data-value")?.value.slice(1) || "";
   return "";
 }
+function historyFold(node) {
+  return is(node, "El") && [...each(node.attrs)].some(a => !is(a, "At") && a.event === "click" && a.action === "fold");
+}
+function historyCoverage(node) {
+  if (historyFold(node)) {
+    const raw = [...each(node.attrs)].find(a => is(a, "At") && a.name === "data-fold-ids")?.value;
+    if (raw && raw.length <= 65536) try {
+      const ids = JSON.parse(raw);
+      if (Array.isArray(ids) && ids.length > 0 && ids.length <= 32 && ids[0] === historyRow(node) && new Set(ids).size === ids.length && ids.every(id => typeof id === "string" && id && id.length <= 1024)) return ids;
+    } catch { /* An older hub supplies only the rendered head's identity. */ }
+  }
+  const id = historyRow(node);return id ? [id] : [];
+}
+function historyHasFold(node, id) {
+  if (!is(node, "El")) return false;
+  return historyFold(node) && historyRow(node) === id || [...each(node.kids)].some(n => historyHasFold(n, id));
+}
+function historyRetainedFold(value) {
+  const id = value.slice(1);
+  if (historyBase?.some(n => historyFold(n) && historyRow(n) === id)) return false;
+  if (!historySpare.some(n => historyFold(n) && historyRow(n) === id)) return false;
+  // A retained picture is not action authority. Restore its adjacent issued
+  // page, then toggle only if that page still presents the requested run.
+  thin.retainedFold(value, historySpare.direction === "older" ? "newer" : "older");
+  return true;
+}
 function historySnapshotRow(node) {
   if (!is(node, "El")) return false;
   const attrs = [...each(node.attrs)], classes = attrs.find(a => is(a, "At") && a.name === "class")?.value.split(/\s+/) || [];
@@ -512,20 +599,32 @@ function historyProject(node) {
   const kids = [...each(node.kids)];
   if ([...each(node.attrs)].some(a => is(a, "At") && a.name === "id" && a.value === "timeline")) {
     const ids = new Set(kids.map(historyRow).filter(Boolean));
+    const covered = new Set(kids.flatMap(historyCoverage));
+    const sharedRow = n => historyCoverage(n).some(id => covered.has(id));
     if (historyRestored) {
       const rows = historyRestored;historyRestored = null;
-      const shared = rows.map((n, i) => ids.has(historyRow(n)) ? i : -1).filter(i => i >= 0);
+      const shared = rows.map((n, i) => sharedRow(n) ? i : -1).filter(i => i >= 0);
       if (shared.length) {
-        const newer = rows.slice(shared.at(-1) + 1).filter(n => !ids.has(historyRow(n)));
-        historySpare = newer.length ? newer : rows.slice(0, shared[0]).filter(n => !ids.has(historyRow(n)));
+        const newer = rows.slice(shared.at(-1) + 1).filter(n => !sharedRow(n));
+        historySpare = newer.length ? newer : rows.slice(0, shared[0]).filter(n => !sharedRow(n));
         historySpare.direction = newer.length ? "older" : "newer";
       }
     }
     if (historyPage) {
       const previous = historyBase || [];
-      const shared = previous.map((n, i) => ids.has(historyRow(n)) ? i : -1).filter(i => i >= 0);
+      const shared = previous.map((n, i) => sharedRow(n) ? i : -1).filter(i => i >= 0);
       const outgoing = !shared.length ? previous : historyPage.direction === "older" ? previous.slice(shared.at(-1) + 1) : previous.slice(0, shared[0]);
-      historySpare = outgoing.filter(n => historyRow(n) && !ids.has(historyRow(n)));
+      historySpare = outgoing.filter(n => historyRow(n) && !sharedRow(n));
+      // Coverage identifies a changed head even when the whole overlap is
+      // folded and there is no shared following message. Canonical groups win;
+      // unique calls outside this window remain on the issued adjacent page.
+      if (held && !kids.some(n => (historyFold(n) ? "fold:" : "") + historyRow(n) === held.id)
+          && !historySpare.some(n => (historyFold(n) ? "fold:" : "") + historyRow(n) === held.id)) {
+        const old = previous.find(n => (historyFold(n) ? "fold:" : "") + historyRow(n) === held.id);
+        const oldIds = new Set(old ? historyCoverage(old) : [held.id.replace(/^fold:/, "")]);
+        const replacement = kids.find(n => historyCoverage(n).some(id => oldIds.has(id)));
+        if (replacement) held = { ...held, id: (historyFold(replacement) ? "fold:" : "") + historyRow(replacement) };
+      }
       // A run cut at the old page boundary can gain an earlier fold head.
       // Its following shared message identifies the same visible run.
       if (held?.id.startsWith("fold:") && !ids.has(held.id.slice(5)) && !historySpare.some(n => historyRow(n) === held.id.slice(5))) {
@@ -541,7 +640,7 @@ function historyProject(node) {
       historySpare.direction = historyPage.direction;historyPage = null;
     }
     historyBase = kids.slice();
-    const spare = historySpare.filter(n => !ids.has(historyRow(n)));
+    const spare = historySpare.filter(n => !sharedRow(n));
     // Place spare entries with the body, inside the existing scroll track.
     // Work/fab controls and live/sending rows come only from the current view.
     if (spare.length) {
@@ -595,6 +694,7 @@ function holdEnd(tl) {
   return App.hold_at_end(BigInt(Math.max(0, Math.round(tl.scrollHeight - tl.scrollTop - tl.clientHeight))));
 }
 function holdFix(tl) {
+  historyRunway(tl);
   if (!tl || tl.id !== "timeline") return;
   heldSize = holdSize(tl);
   if (!held) {
@@ -638,7 +738,11 @@ function holdRead(tl) {
   // end catches up: a reply streaming faster than the wheel moves left the
   // view a few lines short of the end for good
   const nearEnd = holdEnd(tl) || (performance.now() < towardEndUntil && tl.scrollHeight - tl.scrollTop - tl.clientHeight <= tl.clientHeight / 3);
-  held = nearEnd && performance.now() > leavingEndUntil && !(thin && thin.atNewest?.() === false) ? null : anchorOf(tl);
+  const historical = viewMode === "view-v1" && frontendNode && !historyPresentedNewest;
+  held = nearEnd && performance.now() > leavingEndUntil && !historical ? null : anchorOf(tl);
+  // Genuine reader motion can release a layout reserve. Repair using the new
+  // anchor, so shrinking it neither moves that row nor issues a page request.
+  if (historical) holdFix(tl);
   holdSay(held ? App.sel(ui) : "");
 }
 const holdSizes = typeof ResizeObserver === "function" ? new ResizeObserver(() => holdFix(document.getElementById("timeline"))) : null;
@@ -724,6 +828,8 @@ function render() {
   desktopBrowser.sync();
   memoSweep();
   const tl2 = document.getElementById("timeline");
+  if (frontendNode) historyPresented();
+  historyRunway(tl2);
   if (focusedNode && !frontendNode && tl !== tl2 && focusedAtEnd && tl2) tl2.scrollTop = tl2.scrollHeight;
   // another timeline (or a send, a new thread: ScrollEnd) starts at its end
   if (scroll || tl !== tl2) {
@@ -994,6 +1100,7 @@ function dispatch(action, value, timer) {
     }
     if (thin?.ready) {
       if (action === "earlier" || action === "view-page") return thin.page();
+      if (action === "fold" && historyRetainedFold(value)) return true;
       if (action === "thin-search") return thin.search(value);
       if (action === "thin-message-more") {
         try { const input = JSON.parse(value);return thin.message(input.entryId, input.cursor); } catch { return true; }
@@ -2117,9 +2224,11 @@ async function startThin(again = false, reason = "initial") {
       viewerChoice: choice => viewerFeedback.choice(choice),
       warning: message => showViewStatus(message),
       pageState: historyPageState,
+      foldPresent: (node, id) => historyHasFold(node, id),
       search: showThinSearch, message: showThinMessage,
       view: (node, detail) => {
         if (!current()) return;
+        historyAccepted();
         if (detail.page) historyPage = detail.page;
         historyRestoreBridge(detail);
         if (detail.page && !held) { const tl = document.getElementById("timeline");if (tl) { held = anchorOf(tl);heldSize = holdSize(tl); } }

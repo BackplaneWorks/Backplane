@@ -4,10 +4,10 @@ const fs = require('node:fs'), path = require('node:path'), vm = require('node:v
 const list = xs => xs.reduceRight((tail, head) => ({ $: 'Con', head, tail }), { $: 'Nil' });
 function* each(xs) { for (; xs?.$ === 'Con'; xs = xs.tail) yield xs.head; }
 const row = id => ({ $: 'El', tag: 'div', key: id, attrs: list([{ $: 'At', name: 'data-id', value: id }, { $: 'At', name: 'class', value: 'msg assistant' }]), kids: list([]) });
-const fold = id => ({ $: 'El', tag: 'button', key: '', attrs: list([{ $: 'At', name: 'data-value', value: '1' + id }, { $: 'On', event: 'click', action: 'fold' }]), kids: list([]) });
+const fold = (id, ids) => ({ $: 'El', tag: 'button', key: '', attrs: list([{ $: 'At', name: 'data-value', value: '1' + id }, { $: 'On', event: 'click', action: 'fold' }, ...(ids ? [{$:'At',name:'data-fold-ids',value:JSON.stringify(ids)}] : [])]), kids: list([]) });
 const timeline = kids => ({ $: 'El', tag: 'div', key: 'timeline', attrs: list([{ $: 'At', name: 'id', value: 'timeline' }]), kids: list(kids) });
 function fixture() {
-  const source = fs.readFileSync(path.resolve(__dirname, '../../src/web/host.js'), 'utf8');
+  const source = fs.readFileSync(process.env.HISTORY_HOST_SOURCE || path.resolve(__dirname, '../../src/web/host.js'), 'utf8');
   const context = vm.createContext({ each, is: (x, kind) => x.$ === kind, held: null, TextEncoder,
     location:{origin:'https://fixture'},document:{cookie:'identity'},cacheIdentity:x=>x,App:{lang:()=> 'en'},ui:null,
     thin:{epoch:'epoch',target:{kind:'thread',id:'A'},conversation:'A'} });
@@ -80,4 +80,42 @@ for (const transient of ['live','sending']) test('visual bridge snapshots never 
 test('visual bridge snapshots require a stable message id or fold head', () => {
   const f=fixture(), unstable={...row(''),attrs:list([{$:'At',name:'class',value:'msg assistant'}])};
   assert.equal(f.context.historySnapshotRow(unstable),false);assert.equal(f.context.historySnapshotRow(row('stable')),true);assert.equal(f.context.historySnapshotRow(fold('head')),true);
+});
+
+const ids = (start, count = 32) => Array.from({length:count}, (_,i) => 'entry-'+String(start+i).padStart(3,'0'));
+const coverage = (f, n) => [...each(n.kids)].flatMap(f.context.historyCoverage);
+test('history coverage coalesces a changed tool head without a shared following message and holds its offset', () => {
+  const f = fixture();f.show([fold('entry-016',ids(16))]);f.context.held = { id: 'fold:entry-016', off: 30 };
+  const shown = f.show([fold('entry-000',ids(0))], 'older');
+  assert.deepEqual(f.ids(shown), ['entry-000']);assert.deepEqual(coverage(f,shown),ids(0));
+  assert.equal(f.context.held.id, 'fold:entry-000');assert.equal(f.context.held.off, 30);
+  // The adjacent issued page still exposes its unique calls when reversed.
+  const newer=f.show([fold('entry-016',ids(16))],'newer');assert.deepEqual(coverage(f,newer),ids(16));
+  assert.deepEqual([...new Set([...coverage(f,shown),...coverage(f,newer)])].sort(),ids(0,48));
+});
+test('history coverage removes the exact duplicated subset and preserves unique messages and disjoint calls', () => {
+  const f=fixture(),rows=ids(720,6).map(row);
+  f.show([fold('entry-704',ids(704,16)),...rows,fold('entry-726',ids(726,10))]);
+  const shown=f.show([fold('entry-688',ids(688,8)),...ids(696,6).map(row),fold('entry-702',ids(702,18))],'older');
+  assert.deepEqual(f.ids(shown),['entry-688',...ids(696,6),'entry-702',...ids(720,6),'entry-726']);
+  const seen=coverage(f,shown);assert.equal(new Set(seen).size,seen.length);assert.deepEqual(seen,ids(688,48));
+});
+test('retained fold returns to its issued adjacent page before toggling, then opens and closes the correct unique calls', () => {
+  const f=fixture(),calls=[];f.context.thin.retainedFold=(...args)=>calls.push(args);
+  f.show([row('entry-032'),fold('entry-033',ids(33,15))]);
+  f.show([fold('entry-000',ids(0,16)),...ids(16,16).map(row)],'older');
+  assert.equal(f.context.historyRetainedFold('1entry-033'),true);assert.deepEqual(calls,[['1entry-033','newer']]);
+  f.show([row('entry-032'),fold('entry-033',ids(33,15)),...ids(33,15).map(row)],'newer');
+  assert.equal(f.context.historyRetainedFold('0entry-033'),false,'canonical fold toggles directly');
+  const opened=f.show([row('entry-032'),fold('entry-033',ids(33,15)),...ids(33,15).map(row)]);
+  assert.deepEqual(f.ids(opened).filter(id=>id>='entry-033'),['entry-033',...ids(33,15)]);
+  const closed=f.show([row('entry-032'),fold('entry-033',ids(33,15))]);assert.deepEqual(f.ids(closed).slice(-2),['entry-032','entry-033']);
+});
+test('history coverage respects messages and requires bounded actual-entry metadata', () => {
+  const f=fixture();assert.deepEqual(Array.from(f.context.historyCoverage(fold('x',[]))),['x']);
+  assert.deepEqual(Array.from(f.context.historyCoverage(fold('x',ids(0,33)))),['x']);
+  assert.deepEqual(Array.from(f.context.historyCoverage(fold('x',['x','x']))),['x']);
+  assert.deepEqual(Array.from(f.context.historyCoverage(fold('x',['unrelated']))),['x']);
+  f.show([fold('a',['a','b']),row('c'),fold('d',['d'])]);
+  const shown=f.show([fold('0',['0','1']),row('2')],'older');assert.deepEqual(f.ids(shown),['0','2','a','c','d']);
 });

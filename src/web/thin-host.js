@@ -59,7 +59,7 @@ export class ThinHost {
     this.viewerRevision = 0;this.localRevision = 0;this.selectionRevision = 0;this.drafts = new Map();this.draftChanges = new Map();this.fields = new Map();this.pending = new Map();this.actions = [];this.active = null;
     this.terminalBytes = 0;
     this.messages = new MessageParts();this.ordinary = new Map();this.refreshScheduled = null;this.pageError = null;
-    this.pagePositions = new Map();this.pagePositionBytes = 0;this.restorePage = null;this.conversation = '';
+    this.foldAfterPage = null;this.pagePositions = new Map();this.pagePositionBytes = 0;this.restorePage = null;this.conversation = '';
     this.client = new Views({ now: api.now,
       sidebarRegions: (api.renderer || 'web') === 'web',
       send: (_hub, request) => ({ type: 'request', request: request.p.session ? { ...request,
@@ -93,7 +93,7 @@ export class ThinHost {
     this.select(this.api.target(this.session));
   }
   select(target) {
-    this.rememberPage();
+    this.rememberPage();this.foldAfterPage = null;
     this.restorePage = this.pagePositions.get(JSON.stringify([this.hub, this.epoch, target])) || null;
     this.retireTerminal('Queued terminal input was cancelled when the view changed.');
     this.refreshScheduled = null;
@@ -146,6 +146,7 @@ export class ThinHost {
     if (retired) this.api.warning?.(reason);
   }
   request(action, value, settled) {
+    if (action !== 'draft') this.foldAfterPage = null;
     const terminalInput = action === 'term-key' || action === 'term-paste';
     const retire = ['select','bot','bot-tab','uber','uber-bot','remote','ws-term-hide','term-toggle','ws-term-here'].includes(action) || action === 'ws-go' && value === 'term';
     if (retire) this.retireTerminal('Queued terminal input was cancelled when the view changed.');
@@ -292,7 +293,15 @@ export class ThinHost {
     this.cursor = this.back.pop();
     return this.pageTo(this.cursor, undo, 'newer');
   }
+  retainedFold(value, direction) {
+    if (!this.ready || this.active || this.actions.length || this.paging || this.pageError || !/^[01].+/.test(value)) return false;
+    const accepted = direction === 'newer' ? this.newer() : direction === 'older' ? this.page() : false;
+    if (!accepted) return false;
+    this.foldAfterPage = { id: this.paging.id, value, selection: this.selectionRevision };
+    return true;
+  }
   pageFailed(page, reason) {
+    this.foldAfterPage = null;
     this.cursor = page.undo.cursor;this.back = page.undo.back;
     if (page.direction === 'restore' && reason === 'STALE_CURSOR') {
       const key = JSON.stringify([this.hub, this.epoch, this.target]), old = this.pagePositions.get(key);
@@ -422,6 +431,8 @@ export class ThinHost {
     this.pending.delete(envelope.id);
     if (this.active === envelope.id) this.active = null;
     const paged = this.paging?.id === envelope.id ? this.paging : null;
+    const fold = paged && this.foldAfterPage?.id === envelope.id ? this.foldAfterPage : null;
+    if (fold) this.foldAfterPage = null;
     if (paged) this.paging = null;
     if (this.overtaken.delete(envelope.id)) { this.pump(true);return true; }
     if (paged && result.failed) {
@@ -537,6 +548,10 @@ export class ThinHost {
       if ((metadata?.viewerRevision ?? 0) === this.viewerRevision) this.api.viewerChoice?.(null);
       this.api.state({ phase: 'presented', remoteReady: true, requestRevision: r.requestRevision, viewRevision: r.viewRevision, viewId: r.viewId });
     } else if (result.current) this.fail('Current view is not ready');
+    if (fold && result.current && result.remoteReady && fold.selection === this.selectionRevision) {
+      if (this.api.foldPresent?.(node, fold.value.slice(1)) === true) this.request('fold', fold.value);
+      else this.api.warning?.('The tool run changed. Choose its current heading to open it.');
+    }
     // Send queued navigation before a background read can snapshot its old route.
     this.pump(true);
     if (result.refreshDue || paged && !result.current) this.refreshSoon();
@@ -569,6 +584,7 @@ export class ThinHost {
     if (!expired.length) return;
     let current = false, pageExpired = false;
     for (const call of expired) {
+      if (this.foldAfterPage?.id === call.id) this.foldAfterPage = null;
       const metadata = this.pending.get(call.id);
       if (this.paging?.id === call.id) {
         pageExpired = true;
@@ -597,6 +613,7 @@ export class ThinHost {
     return !!metadata && !!link && metadata.wireRevision === (metadata.pictureAuthority ? link.pictureRevision : link.revision) && metadata.target?.kind === link.target?.kind && metadata.target?.id === link.target?.id;
   }
   fail(reason) {
+    this.foldAfterPage = null;
     this.api.pageState?.(null);
     this.retireTerminal('Queued terminal input was not sent because the connection failed.');
     this.refreshScheduled = null;
@@ -606,6 +623,7 @@ export class ThinHost {
     this.ready = false;this.api.state({ phase: 'error', remoteReady: false, reason });
   }
   disconnect() {
+    this.foldAfterPage = null;
     this.api.pageState?.(null);
     this.retireTerminal('Queued terminal input was not sent because the connection closed.');
     this.refreshScheduled = null;
