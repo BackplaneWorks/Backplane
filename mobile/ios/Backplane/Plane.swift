@@ -283,13 +283,16 @@ struct PlaneSections: View {
 // counters, then the machines and where the conversation is held, in one card
 private struct PlaneStrip: View {
     @Environment(\.backplaneLanguage) private var lang
+    @Environment(\.dynamicTypeSize) private var typeSize
     let model: AppModel
     let plane: PlaneModel
 
-    private func counter(_ n: Int, _ label: String, _ tint: Color) -> some View {
+    private func counter(_ n: Int, _ label: String, _ tint: Color, id: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text("\(n)").font(.title2.weight(.semibold)).monospacedDigit().foregroundStyle(n > 0 ? tint : Color.secondary)
-            Text(label).font(.caption2).textCase(.uppercase).foregroundStyle(.secondary).lineLimit(2).fixedSize(horizontal: false, vertical: true)
+            Text(label).font(.caption2).textCase(.uppercase).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("home.metric.label." + id)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -304,11 +307,20 @@ private struct PlaneStrip: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 8) {
-                counter(plane.need.count, NativeMessages.plane_need(lang), PhaseColor.warn)
-                counter(plane.run.count, NativeMessages.plane_running(lang), PhaseColor.accent)
-                counter(plane.working, NativeMessages.plane_bots_working(lang), PhaseColor.ok)
-                counter(plane.rooms.count, NativeMessages.plane_rooms_unread(lang), PhaseColor.input)
+            if typeSize.isAccessibilitySize {
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible())], alignment: .leading, spacing: 12) {
+                    counter(plane.need.count, NativeMessages.plane_need(lang), PhaseColor.warn, id: "need")
+                    counter(plane.run.count, NativeMessages.plane_running(lang), PhaseColor.accent, id: "running")
+                    counter(plane.working, NativeMessages.plane_bots_working(lang), PhaseColor.ok, id: "working")
+                    counter(plane.rooms.count, NativeMessages.plane_rooms_unread(lang), PhaseColor.input, id: "rooms")
+                }
+            } else {
+                HStack(alignment: .top, spacing: 8) {
+                    counter(plane.need.count, NativeMessages.plane_need(lang), PhaseColor.warn, id: "need")
+                    counter(plane.run.count, NativeMessages.plane_running(lang), PhaseColor.accent, id: "running")
+                    counter(plane.working, NativeMessages.plane_bots_working(lang), PhaseColor.ok, id: "working")
+                    counter(plane.rooms.count, NativeMessages.plane_rooms_unread(lang), PhaseColor.input, id: "rooms")
+                }
             }
             if plane.machines.count > 1 {
                 ScrollView(.horizontal, showsIndicators: false) {
