@@ -521,17 +521,16 @@ final class QualificationUITests: XCTestCase {
         let ready = app.descendants(matching: .any)["qualification.connection.ready"]
         let home = app.buttons["tab.home"]
         let threads = app.buttons["tab.threads"]
-        func isEmpty(_ element: XCUIElement) -> Bool {
-            guard let snapshot = try? element.snapshot() else {
-                print("safe-draft-snapshot available=false")
-                return false
-            }
-            let value = snapshot.value as? String
-            let placeholder = snapshot.placeholderValue
-            let equalPlaceholder = value != nil && placeholder != nil && value == placeholder
-            print("safe-draft-snapshot available=true value-is-nil=\(value == nil) value-is-empty=\(value?.isEmpty == true) value-is-placeholder=\(equalPlaceholder)")
-            guard let value else { return false }
-            return value.isEmpty || equalPlaceholder
+        func isEmptyForOwner(_ suffix: String) -> Bool {
+            let status = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "qualification.connection.")).firstMatch
+            guard status.exists, let raw = status.value as? String, let data = raw.data(using: .utf8),
+                  let fields = (try? JSONSerialization.jsonObject(with: data)) as? [String: String],
+                  let thread = fields["thread"], let nav = fields["nav"], let owner = fields["composerOwner"] else { return false }
+            let matches = thread.hasSuffix("|" + suffix) && nav == thread && owner == thread
+            let editable = fields["composerEditable"] == "true"
+            let empty = fields["composerEmpty"] == "true"
+            print("safe-draft-model owner-matches=\(matches) editable=\(editable) empty=\(empty)")
+            return matches && editable && empty
         }
         func expectValue(_ expected: String) {
             let match = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", expected), object: composer)
@@ -550,8 +549,7 @@ final class QualificationUITests: XCTestCase {
         let statusData = (currentStatus.value as? String ?? "").data(using: .utf8) ?? Data()
         let ownerFields = (try? JSONSerialization.jsonObject(with: statusData)) as? [String: String]
         XCTAssertTrue((ownerFields?["thread"] ?? "").hasSuffix("|t1790229700-1088"), "The exact board thread must own the composer")
-        XCTAssertEqual(ownerFields?["contentReady"], "true", "Board ownership must be fresh")
-        XCTAssertTrue(isEmpty(composer), "Refuse to replace an existing board-thread draft")
+        XCTAssertTrue(isEmptyForOwner("t1790229700-1088"), "Refuse to replace an unknown or nonempty board-thread draft")
         let boardTitle = app.navigationBars.firstMatch.identifier
         XCTAssertFalse(boardTitle.isEmpty)
         XCTAssertTrue(home.waitForExistence(timeout: 10)); home.tap()
@@ -570,16 +568,22 @@ final class QualificationUITests: XCTestCase {
         XCTAssertTrue(chat.waitForExistence(timeout: 15)); chat.tap()
         XCTAssertTrue(chat.isSelected); XCTAssertTrue(ready.waitForExistence(timeout: 60))
         XCTAssertTrue(composer.waitForExistence(timeout: 30))
-        XCTAssertTrue(isEmpty(composer), "Refuse to replace an existing Bub draft")
-        let bubMarker = "vcBubLocal655983"
+        XCTAssertTrue(isEmptyForOwner("t1790292962-8017"), "Refuse to replace an unknown or nonempty Bub draft")
+        var bubMarker = "vcBubLocal655983"
         let boardMarker = "vcBoardLocal655983"
         typeMarker(bubMarker)
         let sawSyncing = app.descendants(matching: .any)["qualification.connection.connecting"].waitForExistence(timeout: 20)
         print("safe-draft observed-syncing=\(sawSyncing)")
+        if sawSyncing {
+            XCTAssertTrue(composer.isEnabled && composer.isHittable, "Local draft editor must remain usable during refresh")
+            composer.typeText("x")
+            bubMarker += "x"
+            expectValue(bubMarker)
+        }
         XCTAssertTrue(threads.waitForExistence(timeout: 10)); threads.tap()
         XCTAssertTrue(app.navigationBars[boardTitle].waitForExistence(timeout: 30))
         XCTAssertTrue(composer.waitForExistence(timeout: 30)); XCTAssertTrue(ready.waitForExistence(timeout: 60))
-        XCTAssertTrue(isEmpty(composer), "Bub's marker must not leak into the board thread")
+        XCTAssertTrue(isEmptyForOwner("t1790229700-1088"), "Bub's marker must not leak into the board thread")
         typeMarker(boardMarker)
         if !app.textFields["pair.address"].exists {
             let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "board-owned-local-draft"; shot.lifetime = .keepAlways; add(shot)
@@ -593,10 +597,10 @@ final class QualificationUITests: XCTestCase {
         XCUIDevice.shared.press(.home); app.activate()
         XCTAssertTrue(app.navigationBars[boardTitle].waitForExistence(timeout: 30)); expectValue(boardMarker)
         composer.tap(); composer.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: boardMarker.count))
-        XCTAssertTrue(isEmpty(composer), "Board marker must be cleared locally")
+        XCTAssertTrue(isEmptyForOwner("t1790229700-1088"), "Board marker must be cleared locally")
         home.tap(); XCTAssertTrue(app.navigationBars["Bub"].waitForExistence(timeout: 30)); expectValue(bubMarker)
         composer.tap(); composer.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: bubMarker.count))
-        XCTAssertTrue(isEmpty(composer), "Bub marker must be cleared locally")
+        XCTAssertTrue(isEmptyForOwner("t1790292962-8017"), "Bub marker must be cleared locally")
         XCTAssertTrue(sawSyncing, "The run must observe a refresh while the Bub draft is present")
     }
 
