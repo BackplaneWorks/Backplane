@@ -635,6 +635,40 @@ def Push.hook.read(+path: String) -> IO(String):
     bs : List<&2, U32> <- Push.read(path)
     return String.trim(U.Utf8.decode(bs))
 
+# one delivery in its own directory: mktemp -d makes it new and 0700
+# with a random suffix, so overlapping posts for one thread (each Alerted
+# and TurnEnded is its own spawned job) never share or remove each
+# other's body, config or output
+def Push.hook.dir(r: P.Ran) -> String:
+  match r:
+    case P.Ran{c, o}:
+      Bool.pick(String, U32.is_eq(c, 0), String.trim(o), "")
+
+def Push.hook.post.in(+d: String, +st: M.State, +thread: String, +kind: String, +state: String, +url: String, +secret: String, +now: Nat) -> IO(Unit):
+  do IO<Unit>:
+    +word : String = Push.hook.word(st, thread, state)
+    +body : String = Push.hook.note(kind, st, thread, word)
+    +file : String = d ++ "/body.json"
+    +out : String = d ++ "/out"
+    +cfg : String = d ++ "/curl"
+    Push.write(file, body)
+    Push.write(cfg, Curl.config(url, WN.Wn.headers(secret, now, body), file, out))
+    r : P.Ran <- P.Proc.run("curl", ["-sS", "--proto", "=http,https", "--max-redirs", "0", "--max-time", "15", "-X", "POST", "-K", cfg], d)
+    +code : String = Curl.code(Push.ran(r))
+    Push.rm(cfg)
+    Push.rm(file)
+    Push.rm(out)
+    Push.rm(d)
+    IO.print_err("backplane: push webhook -> " ++ code)
+    return Unit{}
+
+def Push.hook.post.k(none: Bool, +d: String, +st: M.State, +thread: String, +kind: String, +state: String, +url: String, +secret: String, +now: Nat) -> IO(Unit):
+  match none:
+    case True{}:
+      IO.print_err("backplane: push webhook: no delivery directory")
+    case False{}:
+      Push.hook.post.in(d, st, thread, kind, state, url, secret, now)
+
 def Push.hook.post(+home: String, +st: M.State, +thread: String, +kind: String, +state: String, +url: String, +secret: String) -> IO(Unit):
   do IO<Unit>:
     +dir : String = home ++ "/tmp"
@@ -642,21 +676,9 @@ def Push.hook.post(+home: String, +st: M.State, +thread: String, +kind: String, 
     m : Result<&1, &1, U32 & String, Unit> <- H.FS.chmod(dir, 448)
     t : U32 <- H.Clock.epoch()
     +now : Nat = U32.to_nat(t)
-    +word : String = Push.hook.word(st, thread, state)
-    +body : String = Push.hook.note(kind, st, thread, word)
-    +name : String = "hook-" ++ Nat.show(now) ++ "-" ++ WN.Wn.safe(thread)
-    +file : String = dir ++ "/" ++ name ++ ".json"
-    +out : String = dir ++ "/" ++ name ++ ".out"
-    +cfg : String = dir ++ "/" ++ name ++ ".curl"
-    Push.write(file, body)
-    Push.write(cfg, Curl.config(url, WN.Wn.headers(secret, now, body), file, out))
-    r : P.Ran <- P.Proc.run("curl", ["-sS", "--proto", "=http,https", "--max-redirs", "0", "--max-time", "15", "-X", "POST", "-K", cfg], dir)
-    +code : String = Curl.code(Push.ran(r))
-    Push.rm(cfg)
-    Push.rm(file)
-    Push.rm(out)
-    IO.print_err("backplane: push webhook -> " ++ code)
-    return Unit{}
+    r : P.Ran <- P.Proc.run("mktemp", ["-d", dir ++ "/hook-" ++ Nat.show(now) ++ "-" ++ WN.Wn.safe(thread) ++ ".XXXXXXXX"], dir)
+    +d : String = Push.hook.dir(r)
+    Push.hook.post.k(String.is_empty(d), d, st, thread, kind, state, url, secret, now)
 
 def Push.hook.act(mode: Nat, +home: String, +st: M.State, +thread: String, +kind: String, +state: String, +url: String, +secret: String) -> IO(Unit):
   match mode:
