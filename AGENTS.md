@@ -138,6 +138,8 @@ Many agents at once: `bun test/tools/agents_load.ts build/backplane build/wire -
 
 Headless UI checks go through the web client and the phones (`bun test/tools/web_load.ts`, the phone benches); the native window is no longer built.
 
+User stories end to end (a release check, or "run the user stories"/"run e2e"): follow `skills/backplane-e2e/SKILL.md`. It first brings `stories.md` up to date with the commits since its last edit, then drives every story through the real web page, desktop app and Android app against isolated test hubs with stand-in agents, timing each press.
+
 ## Bend traps (learned here, keep adding)
 
 - A `match` scrutinee must be a parameter or pattern-bound variable, even in a multi-match. Pass computed values (`String.eq(a, b)`) to a helper def that matches on its parameters.

@@ -11,6 +11,39 @@ each step, check that the right thing happened and time how long it took. You
 end up with one JSON result per story and run, plus a report with the totals
 and every failure.
 
+A run, in order:
+
+1. Catch the stories up with what changed since they were last edited (below).
+2. Build what you test: `scripts/build.sh`, or take a release's
+   `backplane-serve`. Note its `/hello` version: that is the run's `build`.
+3. Run one agent per story, with the hubs from `hub.sh` ("Running them all").
+4. Write the report, and stop everything you started.
+
+## Before you start: catch the stories up
+
+Features land faster than the stories change. Before a run, list the commits
+since `stories.md` was last edited:
+
+```sh
+S=$(git log -1 --format=%H -- skills/backplane-e2e/stories.md)
+git log --no-merges --format='%h %s' "$S"..HEAD
+```
+
+Read the titles, and open a commit (`git show --stat <hash>`, then the diff)
+when the title doesn't tell you what a person would see. For each change a
+person can see (a button, view, setting, shortcut, gesture, or what one of
+them now does):
+
+- a new feature: add a step to the story it belongs to, or write a new story
+  (the next free number, with its platforms) if none fits;
+- changed behaviour: rewrite the steps that describe the old behaviour;
+- a removed feature: drop its steps.
+
+Skip what nobody sees: tests, refactors, CI, docs, and fixes inside the hub.
+Keep each story as brief as the others. Commit `stories.md` on its own
+(`backplane-e2e: stories for <what>`) before the run, so the next run starts
+counting from there. If nothing visible changed, say so and go on.
+
 ## Rules
 
 - Never touch the person's own Backplane: `~/.backplane-bend`, port 3787, or
