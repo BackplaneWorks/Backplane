@@ -37,8 +37,12 @@ import Foundation
         check(budget.remainingMilliseconds(a, now: 8_000) == 0 && budget.status(a, now: 8_000) == .idle, "retired ticket cannot complete or sleep")
         check(budget.status(b, now: 8_001) == .loading && budget.remainingMilliseconds(b, now: 8_000) == 22_000, "continuation clears prior availability")
         let c = budget.start(id, geometry: true, mesh: true, now: 16_000, preservingDeadline: true)
-        let d = budget.start(id, geometry: true, mesh: true, now: 24_000, preservingDeadline: true)
+        let resumedID = ViewerLoadState.Identity(hub: id.hub, navigation: id.navigation, kind: id.kind,
+            key: id.key, layers: id.layers, pairing: id.pairing, epoch: id.epoch + 1, presentation: id.presentation + 1)
+        let d = budget.start(resumedID, geometry: true, mesh: true, now: 24_000, preservingDeadline: true)
         budget.geometryReady(c); budget.meshReady(c)
+        check(budget.remainingMilliseconds(c, now: 24_000) == 0 && budget.status(c, now: 24_000) == .idle,
+              "automatic restore retires previous presentation ticket")
         check(budget.remainingMilliseconds(d, now: 29_999) == 1 && budget.status(d, now: 29_999) == .loading, "reconnects retain original deadline")
         check(budget.remainingMilliseconds(d, now: 30_000) == 0 && budget.status(d, now: 30_000) == .timedOut, "reconnects time out at thirty seconds")
         let fresh = budget.start(id, geometry: true, mesh: true, now: 31_000)

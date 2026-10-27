@@ -1170,7 +1170,8 @@ struct PlotScreen: View {
               epoch: model.conn[presentation.owner.hub]?.epoch ?? 0, presentation: presentation.presentation)
     }
     private struct LoadAttempt: Equatable {
-        let presentation: ViewerCloseIntent.Token
+        let owner: ViewerCloseIntent.Owner
+        let logical: UInt64
         let kind, key, layers: String
         let retry: UInt64
     }
@@ -1181,7 +1182,7 @@ struct PlotScreen: View {
     }
     private var loadWatch: LoadWatch {
         .init(identity: loadIdentity, plotGeneration: model.plots.generation,
-              attempt: .init(presentation: presentation, kind: viewer.open, key: viewer.key,
+              attempt: .init(owner: presentation.owner, logical: model.viewerLoadAttempt, kind: viewer.open, key: viewer.key,
                              layers: viewer.layers, retry: model.viewerLoadRetry))
     }
     private struct Availability: Equatable { let geometry, mesh: Bool }
