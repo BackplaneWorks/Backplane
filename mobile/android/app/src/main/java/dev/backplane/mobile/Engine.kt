@@ -343,6 +343,9 @@ class Engine(private val app: android.content.Context, source: () -> String, pri
     // a hub marked offline with no screen of its own (after load())
     suspend fun offline(key: String) = out("Backplane.online(${q(key)}, false, true)", screen = false)
     suspend fun tick(now: Long) = out("Backplane.tick($now)")
+    suspend fun reflowDefaults() = call("Backplane.reflowDefaults()", person = true)
+    suspend fun reflowAlloys() = call("Backplane.reflowAlloys()", person = true)
+    suspend fun reflow(profile: String, alloy: String) = call("Backplane.reflow(${q(profile)}, ${q(alloy)})", person = true)
     // a catalog text by key, in the device's language
     suspend fun t(key: String) = call("Backplane.t(${q(key)})", person = true)
     // a cat's rig (JSON text) for its key ("look:mood")

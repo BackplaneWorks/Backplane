@@ -828,6 +828,9 @@ globalThis.Backplane = {
   liveHalves(text) {
     return JSON.stringify({ kept: liveNodes(String(text)), whole: plain(App.live_nodes(String(text))) });
   },
+  reflowDefaults() { return App.reflow_defaults(); },
+  reflowAlloys() { return App.reflow_alloys(); },
+  reflow(profile, alloy) { return App.reflow_plan(String(profile), String(alloy)); },
   headerKeys() { return JSON.stringify({ keys: KEYS, words: WORDS }); },
   pulse() { return direct(expired(), false); },
   connection(key, epoch, mode) {

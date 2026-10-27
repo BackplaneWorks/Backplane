@@ -1166,31 +1166,34 @@ struct PlotScreen: View {
                            onNote: { x, y in model.act("rv-note", String(format: "%.3f\t%.3f\t\t", x, y)) },
                            onPin: { model.act("rv-pin", $0) })
                 .id(viewer.layers.isEmpty ? viewer.key : "")
+                .accessibilityIdentifier(((viewer.open == "3d" || viewer.open == "mech") && m?.mesh != nil && m?.none.isEmpty == true) ? "viewer.mesh.ready" : ((viewer.layers.isEmpty ? m != nil && m?.none.isEmpty == true : f != nil && f?.none.isEmpty == true) ? "viewer.ready" : "viewer.canvas"))
                 .ignoresSafeArea()
             // Mech with no part to show: what the page says
             if viewer.open == "mech", viewer.key.isEmpty {
                 Text(viewer.mech.map { $0.say.isEmpty ? $0.note : $0.say } ?? "").foregroundStyle(.secondary).padding().frame(maxHeight: .infinity)
             } else if viewer.layers.isEmpty, m == nil {
-                ProgressView().tint(.white).frame(maxHeight: .infinity)
+                ProgressView().tint(.white).frame(maxHeight: .infinity).accessibilityIdentifier("viewer.loading")
             } else if viewer.layers.isEmpty, let why = m?.none, !why.isEmpty {
-                Text(why).foregroundStyle(.secondary).frame(maxHeight: .infinity)
+                Text(why).foregroundStyle(.secondary).frame(maxHeight: .infinity).accessibilityIdentifier("viewer.error")
             } else if viewer.layers.isEmpty {
                 EmptyView()
             } else if f == nil {
-                ProgressView().tint(.white).frame(maxHeight: .infinity)
+                ProgressView().tint(.white).frame(maxHeight: .infinity).accessibilityIdentifier("viewer.loading")
             } else if let why = f?.none, !why.isEmpty {
-                Text(why).foregroundStyle(.secondary).frame(maxHeight: .infinity)
+                Text(why).foregroundStyle(.secondary).frame(maxHeight: .infinity).accessibilityIdentifier("viewer.error")
             } else if viewer.open == "3d", let why = m?.none, !why.isEmpty {
                 Text(why).font(.caption).foregroundStyle(.secondary).padding().frame(maxHeight: .infinity, alignment: .bottom)
+                    .accessibilityIdentifier("viewer.mesh.status")
             } else if viewer.open == "3d", viewer.parts ?? true, let note = viewer.note, !note.isEmpty {
                 Text(note).font(.caption).foregroundStyle(.secondary).padding().frame(maxHeight: .infinity, alignment: .bottom)
             }
             VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Picker(NativeMessages.native_viewer_source(lang), selection: Binding(get: { viewer.open }, set: { model.act("view", $0) })) {
-                    ForEach(viewer.choices, id: \.value) { Text($0.label).tag($0.value) }
+                    ForEach(viewer.choices, id: \.value) { Text($0.label).tag($0.value).accessibilityIdentifier("viewer.choice." + $0.value) }
                 }
                 .pickerStyle(.segmented)
+                .accessibilityIdentifier("viewer.source")
                 .frame(maxWidth: 300)
                 Spacer()
                 if viewer.open == "3d" || viewer.open == "mech" {
@@ -1201,6 +1204,7 @@ struct PlotScreen: View {
                     .accessibilityLabel(viewer.light == true ? NativeMessages.native_viewer_ground_dark(lang) : NativeMessages.native_viewer_ground_light(lang))
                 Button { model.act("view", "") } label: { Image(systemName: "xmark.circle.fill").font(.title2) }
                     .accessibilityLabel(NativeMessages.common_close(lang))
+                    .accessibilityIdentifier("viewer.close")
             }
             .padding(.horizontal)
             .padding(.top, 6)

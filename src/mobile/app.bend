@@ -10,8 +10,18 @@ import ./bots.bend as MB
 import ../core/msgs.bend as MSG
 import ./session.bend as PS
 import ./thin.bend as TH
-
+import ../core/reflow.bend as RF
 import ../core/bub-move.bend as HOP
+
+# Native presentation shares the same bounded illustrative numeric planner.
+def reflow_defaults() -> String:
+  RF.defaults()
+
+def reflow_alloys() -> String:
+  RF.alloys()
+
+def reflow_plan(profile: String, alloy: String) -> String:
+  RF.plan(profile, alloy)
 
 # Resolve the native host's language once when device settings change. This uses
 # the same normalization and preview gate as each hub's Ui, including no hubs.
