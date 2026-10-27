@@ -38,6 +38,12 @@ struct ViewerResumeIntent {
         token.source == accepted
     }
 
+    // The server displays a history bar even for a live board with no saved
+    // steps. Its presence is not a historical source; position zero is live.
+    static func liveHistory(at: Int, playing: Bool, diff: Bool, comparing: Bool, menuOpen: Bool) -> Bool {
+        at == 0 && !playing && !diff && !comparing && !menuOpen
+    }
+
     // A normal view(kind) can reconstruct only a project's default source.
     // File, sheet, history and variant details need a separate restore path.
     static func canRestoreDefault(_ source: ViewerCloseIntent.Source) -> Bool {

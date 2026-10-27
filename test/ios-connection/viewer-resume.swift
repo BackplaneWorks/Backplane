@@ -19,6 +19,14 @@ import Foundation
         let claimed = resume.claim(current: token, epoch: 11, ready: true, allowed: allowed)
         check(claimed == token, "new epoch claims full captured source and owner")
         check(ViewerResumeIntent.matchesSource(token, accepted: source), "same complete source accepted")
+        // Hs.bar.k emits an enabled, nonnil bar at position zero even when
+        // there are no history steps. This real default must remain resumable.
+        check(ViewerResumeIntent.liveHistory(at: 0, playing: false, diff: false, comparing: false, menuOpen: false), "present live history bar permits default restore")
+        check(!ViewerResumeIntent.liveHistory(at: 1, playing: false, diff: false, comparing: false, menuOpen: false), "saved history step cannot restore as live")
+        check(!ViewerResumeIntent.liveHistory(at: 0, playing: false, diff: false, comparing: true, menuOpen: false), "comparison at zero cannot restore as live")
+        check(!ViewerResumeIntent.liveHistory(at: 0, playing: false, diff: true, comparing: false, menuOpen: false), "history diff cannot restore as live")
+        check(!ViewerResumeIntent.liveHistory(at: 0, playing: true, diff: false, comparing: false, menuOpen: false), "playing history cannot restore as live")
+        check(!ViewerResumeIntent.liveHistory(at: 0, playing: false, diff: false, comparing: false, menuOpen: true), "version menu cannot restore as live")
         check(!ViewerResumeIntent.matchesSource(token, accepted: .init(kind: "board", key: "different-file", layers: "layers")), "different file is not restored")
         check(!ViewerResumeIntent.matchesSource(token, accepted: .init(kind: "board", key: "key", layers: "different-sheet")), "different layer or history source is not restored")
         check(!ViewerResumeIntent.matchesSource(token, accepted: .init(kind: "3d", key: "key", layers: "layers")), "different kind is not restored")

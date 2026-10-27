@@ -208,6 +208,11 @@ final class AppModel {
             "viewerResumeFailed": String(viewerResumeFailed != nil),
             "markEpoch": mark.map { String($0.epoch) } ?? "none", "markNav": mark?.nav ?? "none"
         ]
+        if let viewerPublished {
+            for (name, valid) in Self.defaultViewerChecks(viewerPublished) {
+                values["viewerDefault." + name] = String(valid)
+            }
+        }
         for (key, value) in qualificationIncoming { values["incoming." + key] = value }
         guard let data = try? JSONSerialization.data(withJSONObject: values, options: [.sortedKeys]) else { return "unavailable" }
         return String(decoding: data, as: UTF8.self)
@@ -910,11 +915,16 @@ final class AppModel {
         retryConnection(token.owner.hub)
     }
     private static func defaultViewer(_ viewer: Viewer) -> Bool {
-        ViewerResumeIntent.canRestoreDefault(.init(kind: viewer.open, key: viewer.key, layers: viewer.layers)) &&
-        viewer.hist == nil && viewer.parts != false && viewer.picked.isEmpty &&
-        (viewer.off ?? 0) == 0 && (viewer.dim ?? 0) == 0 && (viewer.lift ?? 255) == 255 &&
-        (viewer.layerMode ?? 0) == 0 &&
-        (viewer.open != "schematic" || !(viewer.sheets ?? []).contains(where: { $0.on && $0.value != "0" }))
+        defaultViewerChecks(viewer).values.allSatisfy { $0 }
+    }
+    private static func defaultViewerChecks(_ viewer: Viewer) -> [String: Bool] {
+        ["source": ViewerResumeIntent.canRestoreDefault(.init(kind: viewer.open, key: viewer.key, layers: viewer.layers)),
+         "history": viewer.hist.map { ViewerResumeIntent.liveHistory(at: $0.at, playing: $0.playing, diff: $0.diff,
+            comparing: $0.cmp, menuOpen: !$0.side.isEmpty || $0.menu != nil) } ?? true,
+         "parts": viewer.parts != false,
+         "selection": viewer.picked.isEmpty,
+         "layers": (viewer.off ?? 0) == 0 && (viewer.dim ?? 0) == 0 && (viewer.lift ?? 255) == 255 && (viewer.layerMode ?? 0) == 0,
+         "sheet": viewer.open != "schematic" || !(viewer.sheets ?? []).contains(where: { $0.on && $0.value != "0" })]
     }
     private func captureViewerResume(_ hub: String) {
         guard let current = viewerClose.current, current.owner.hub == hub,
