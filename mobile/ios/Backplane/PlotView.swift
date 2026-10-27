@@ -17,6 +17,11 @@ private struct Uniforms {
     var color: SIMD4<Float>
     var mvp = matrix_identity_float4x4
     var light = SIMD4<Float>(0, 0, 1, 0)
+    var eye = SIMD4<Float>(0, 0, 0, 0)
+    var right = SIMD4<Float>(1, 0, 0, 0)
+    var up = SIMD4<Float>(0, 0, 1, 0)
+    var forward = SIMD4<Float>(0, 1, 0, 0)
+    var thermal = SIMD4<Float>(0, 25, 0, 0)
 }
 
 // one layer's share of the buffers: capsules and fill vertices, the chunks
@@ -153,6 +158,7 @@ final class PlotRenderer: NSObject, MTKViewDelegate {
     // 3D
     var three = false
     var orbit = Orbit()
+    var thermal = SIMD4<Float>(0, 25, 0, 0)
     var thick: Float = 1600
     var top: [Int] = []
     var bottom: [Int] = []
@@ -430,8 +436,9 @@ final class PlotRenderer: NSObject, MTKViewDelegate {
         if three {
             u.mvp = orbit.mvp(Float(w) / Float(h))
             u.focal = 1 / tan(orbit.fov * .pi / 360) * Float(h) / 2
-            // lit from the viewer (model space: y flipped)
-            u.light = SIMD4(-orbit.f.x, orbit.f.y, -orbit.f.z, 0)
+            u.eye = SIMD4(orbit.eye, 0); u.right = SIMD4(orbit.r, 0)
+            u.up = SIMD4(orbit.u, 0); u.forward = SIMD4(orbit.f, 0)
+            u.thermal = thermal
             // the model (or a slab) with depth, then the faces' layers over it
             let (mb, cbuf, mc) = meshCount > 0 ? (meshBuf, colorBuf, meshCount) : (slabBuf, colorSlab, slabCount)
             let dw = depthWrite
@@ -441,6 +448,7 @@ final class PlotRenderer: NSObject, MTKViewDelegate {
                 e.setDepthStencilState(dw)
                 e.setRenderPipelineState(p)
                 e.setVertexBytes(&u, length: MemoryLayout<Uniforms>.stride, index: 1)
+                e.setFragmentBytes(&u, length: MemoryLayout<Uniforms>.stride, index: 1)
                 guard mc > 0, let mb, let cbuf else { return }
                 e.setVertexBuffer(mb, offset: 0, index: 0)
                 e.setVertexBuffer(cbuf, offset: 0, index: 2)
@@ -532,6 +540,40 @@ final class PlotCanvas: MTKView {
     private var link: CADisplayLink?
     private var lastTick = CACurrentMediaTime()
 
+    private struct Pose { let scale: Float; let off: SIMD2<Float>; let orbit: Orbit; let size: CGSize }
+    private static var poses: [String: Pose] = [:]
+    private static var poseOrder: [String] = []
+    private var stateKey = ""
+    private var pendingPose: Pose?
+
+    private func savePose() {
+        guard fitted, !stateKey.isEmpty else { return }
+        Self.poses[stateKey] = Pose(scale: renderer.scale, off: renderer.off, orbit: renderer.orbit, size: bounds.size)
+        Self.poseOrder.removeAll { $0 == stateKey }; Self.poseOrder.append(stateKey)
+        while Self.poseOrder.count > 64 { Self.poses.removeValue(forKey: Self.poseOrder.removeFirst()) }
+    }
+    func bindSource(_ key: String) {
+        guard key != stateKey else { return }
+        savePose(); stateKey = key; pendingPose = Self.poses[key]
+        fitted = false; box = []; edge = []; solid = []; chunks = []
+        renderer.load([], fresh: []); renderer.load(mesh: nil); renderer.slab([], color: 0)
+        renderer.highlight(nil, nil); fling = .zero
+    }
+    private func restorePose() {
+        guard let pose = pendingPose, bounds.width > 0 else { return }
+        renderer.scale = pose.scale
+        renderer.off = pose.off + SIMD2(Float(bounds.width - pose.size.width), Float(bounds.height - pose.size.height)) / 2
+        renderer.orbit = pose.orbit; fitted = true; pendingPose = nil
+    }
+    func showMesh(_ frame: MeshFrame, standalone: Bool) {
+        renderer.load(mesh: frame.mesh)
+        if standalone, let b = frame.mesh?.box, b.count == 6 {
+            solid = b
+            if !fitted { fitSolid(b) }
+        }
+        restorePose(); setNeedsDisplay()
+    }
+
     init?(canvas frame: CGRect) {
         super.init(frame: frame, device: nil)
         guard let r = PlotRenderer(view: self) else { return nil }
@@ -563,6 +605,34 @@ final class PlotCanvas: MTKView {
     override func didMoveToWindow() {
         super.didMoveToWindow()
         if let s = window?.windowScene?.screen { contentScaleFactor = s.nativeScale }
+    }
+
+    override var canBecomeFirstResponder: Bool { true }
+    override var keyCommands: [UIKeyCommand]? {
+        let arrows = [UIKeyCommand.inputLeftArrow, UIKeyCommand.inputRightArrow, UIKeyCommand.inputUpArrow, UIKeyCommand.inputDownArrow]
+        return arrows.flatMap { input in [UIKeyCommand(input: input, modifierFlags: [], action: #selector(keyPressed(_:))), UIKeyCommand(input: input, modifierFlags: .shift, action: #selector(keyPressed(_:)))] }
+            + ["+", "-", "=", "f"].map { UIKeyCommand(input: $0, modifierFlags: [], action: #selector(keyPressed(_:))) }
+    }
+    @objc private func keyPressed(_ key: UIKeyCommand) {
+        let delta: SIMD2<Float>
+        switch key.input {
+        case UIKeyCommand.inputLeftArrow: delta = SIMD2(-12, 0)
+        case UIKeyCommand.inputRightArrow: delta = SIMD2(12, 0)
+        case UIKeyCommand.inputUpArrow: delta = SIMD2(0, -12)
+        case UIKeyCommand.inputDownArrow: delta = SIMD2(0, 12)
+        case "+", "=": zoom(by: 1.15, at: CGPoint(x: bounds.midX, y: bounds.midY)); setNeedsDisplay(); return
+        case "-": zoom(by: 1 / 1.15, at: CGPoint(x: bounds.midX, y: bounds.midY)); setNeedsDisplay(); return
+        case "f": if box.count < 4, solid.count == 6 { fitSolid(solid) } else { refit() }; setNeedsDisplay(); return
+        default: return
+        }
+        if three {
+            var camera = renderer.orbit
+            let units = camera.unit(Float(bounds.height))
+            if key.modifierFlags.contains(.shift) { camera.move(delta, units) }
+            else { camera.spin(delta, 0.008) }
+            renderer.orbit = camera
+        } else { renderer.off += delta }
+        setNeedsDisplay()
     }
 
     private var three: Bool { renderer.three }
@@ -616,6 +686,7 @@ final class PlotCanvas: MTKView {
     override func layoutSubviews() {
         super.layoutSubviews()
         if !fitted { if box.count < 4, solid.count == 6 { fitSolid(solid) } else { refit() } }
+        if pendingPose != nil { restorePose(); setNeedsDisplay() }
     }
 
     func show(_ f: PlotFrame, bg: UInt32, slab: UInt32, look: [UInt32]) {
@@ -632,8 +703,10 @@ final class PlotCanvas: MTKView {
         edge = f.edge.count == 4 && f.edge[0] <= f.edge[2] ? f.edge : f.box
         renderer.slab(edge, color: slab)
         if first { fitted = false; setNeedsLayout() }
-        fadeFrom = f.fresh.isEmpty ? nil : f.at
-        renderer.fade = f.fresh.isEmpty ? 1 : 0
+        let animate = !f.fresh.isEmpty && !UIAccessibility.isReduceMotionEnabled
+        fadeFrom = animate ? f.at : nil
+        renderer.fade = animate ? 0 : 1
+        restorePose()
         run()
         setNeedsDisplay()
     }
@@ -671,6 +744,7 @@ final class PlotCanvas: MTKView {
     }
 
     @objc private func panned(_ g: UIPanGestureRecognizer) {
+        if g.state == .began { becomeFirstResponder() }
         let t = g.translation(in: self)
         g.setTranslation(.zero, in: self)
         if three {
@@ -684,7 +758,7 @@ final class PlotCanvas: MTKView {
         }
         renderer.off += SIMD2(Float(t.x), Float(t.y))
         if g.state == .began { fling = .zero }
-        if g.state == .ended {
+        if g.state == .ended && !UIAccessibility.isReduceMotionEnabled {
             let v = g.velocity(in: self)
             fling = SIMD2(Float(v.x), Float(v.y))
             run()
@@ -860,6 +934,7 @@ final class PlotCanvas: MTKView {
     }
 
     override func removeFromSuperview() {
+        savePose()
         link?.invalidate()
         link = nil
         super.removeFromSuperview()
@@ -874,6 +949,8 @@ struct PlotCanvasView: UIViewRepresentable {
     @Environment(\.backplaneLanguage) private var lang
     let frame: PlotFrame?
     let mesh: MeshFrame?
+    var scope = ""
+    var thermal = SIMD4<Float>(0, 25, 0, 0)
     let viewer: Viewer
     let pick: (String) -> Void
     var sheet: (String) -> Void = { _ in }
@@ -895,6 +972,12 @@ struct PlotCanvasView: UIViewRepresentable {
             (v as? UILabel)?.text = NativeMessages.native_viewer_metal(lang)
             return
         }
+        let source = scope + "\0" + (viewer.key.isEmpty ? viewer.layers : viewer.key) + "\0" + viewer.open
+        if source != context.coordinator.source {
+            context.coordinator.source = source; context.coordinator.shown = nil; context.coordinator.mesh = nil; context.coordinator.picked = ""
+            c.bindSource(source)
+        }
+        if c.renderer.thermal != thermal { c.renderer.thermal = thermal; c.setNeedsDisplay() }
         c.margin = viewer.margin
         c.zmin = viewer.zmin
         c.zmax = viewer.zmax
@@ -916,7 +999,6 @@ struct PlotCanvasView: UIViewRepresentable {
         let three = viewer.open == "3d" || viewer.open == "mech"
         if c.renderer.three != three {
             c.renderer.three = three
-            c.refit()
         }
         if c.renderer.hiddenLayers != (viewer.off ?? 0) || c.renderer.dimLayers != (viewer.dim ?? 0) || c.renderer.liftLayer != (viewer.lift ?? 255) {
             c.renderer.hiddenLayers = viewer.off ?? 0
@@ -945,10 +1027,7 @@ struct PlotCanvasView: UIViewRepresentable {
         }
         if three, let m = mesh, m.at != context.coordinator.mesh {
             context.coordinator.mesh = m.at
-            c.renderer.load(mesh: m.mesh)
-            // a part alone (no board plot under it) is fitted by its own box
-            if frame == nil, let b = m.mesh?.box, b.count == 6 { c.solid = b; c.fitSolid(b) }
-            c.setNeedsDisplay()
+            c.showMesh(m, standalone: frame == nil)
         }
         if viewer.picked != context.coordinator.picked {
             context.coordinator.picked = viewer.picked
@@ -959,6 +1038,7 @@ struct PlotCanvasView: UIViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     final class Coordinator {
+        var source = ""
         var shown: Date?
         var look: [UInt32] = []
         var mesh: Date?
@@ -1067,6 +1147,7 @@ struct ViewerControls: View {
 // The viewer over the thread: the plot of the screen's source, the source
 // choices, the card of what was tapped, and a way back.
 struct PlotScreen: View {
+    @State private var showReflow = false
     @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let viewer: Viewer
@@ -1076,11 +1157,11 @@ struct PlotScreen: View {
         // while the design history shows, the last version of this kind and
         // project: it stays until the next arrives (no blank between steps)
         let f = model.plots.frame.flatMap { $0.key == viewer.layers || (viewer.hist != nil && $0.none.isEmpty && Self.head($0.key) == Self.head(viewer.layers)) ? $0 : nil }
-        let m = model.plots.mesh.flatMap { $0.key == viewer.key ? $0 : nil }
+        let m = model.plots.mesh.flatMap { $0.key == viewer.key ? $0 : nil } ?? model.plots.cachedMesh(viewer.key)
         VStack(spacing: 0) {
         ZStack(alignment: .top) {
             Color(rgb: viewer.bg).ignoresSafeArea()
-            PlotCanvasView(frame: f?.none.isEmpty == true ? f : nil, mesh: m, viewer: viewer, pick: { model.act("view-pick", $0) },
+            PlotCanvasView(frame: f?.none.isEmpty == true ? f : nil, mesh: m, scope: model.screen?.sel ?? "", thermal: model.reflowThermal, viewer: viewer, pick: { model.act("view-pick", $0) },
                            sheet: { model.act("view-sheet", $0) },
                            onNote: { x, y in model.act("rv-note", String(format: "%.3f\t%.3f\t\t", x, y)) },
                            onPin: { model.act("rv-pin", $0) })
@@ -1112,6 +1193,9 @@ struct PlotScreen: View {
                 .pickerStyle(.segmented)
                 .frame(maxWidth: 300)
                 Spacer()
+                if viewer.open == "3d" || viewer.open == "mech" {
+                    Button("Reflow") { showReflow = true }.accessibilityLabel("Illustrative reflow preview")
+                }
                 // the viewer's own light or dark ground
                 Button { model.act("vw-light") } label: { Image(systemName: viewer.light == true ? "moon.fill" : "sun.max.fill").font(.title2) }
                     .accessibilityLabel(viewer.light == true ? NativeMessages.native_viewer_ground_dark(lang) : NativeMessages.native_viewer_ground_light(lang))
@@ -1130,6 +1214,7 @@ struct PlotScreen: View {
         // the design history under the plot, which gives it the room
         if let h = viewer.hist { HistBarView(model: model, hist: h) }
         }
+        .sheet(isPresented: $showReflow) { ReflowView(model: model) }
         .preferredColorScheme(viewer.light == true ? .light : .dark)
         .statusBarHidden()
         // a note for a new comment, and the comment open
