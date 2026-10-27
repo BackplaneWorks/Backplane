@@ -11,6 +11,11 @@ import UIKit
 @Observable
 final class AppModel {
     private let engine = Engine()
+    // Display-only tint; temperatures and fractions come from the shared planner.
+    var reflowThermal = SIMD4<Float>(0, 25, 0, 0)
+    func reflowDefaults() async -> String { await engine.reflowDefaults() }
+    func reflowAlloys() async -> String { await engine.reflowAlloys() }
+    func reflow(_ profile: String, alloy: String) async -> String { await engine.reflow(profile, alloy: alloy) }
     // the client's state, kept for the next launch (StateStore)
     @ObservationIgnored private lazy var kept = StateStore()
     @ObservationIgnored private let recentScreen = ScreenCache()
@@ -39,6 +44,10 @@ final class AppModel {
     // something changed since the state was last kept
     @ObservationIgnored private var dirty = false
     @ObservationIgnored private var hubs: [String: Hub] = [:]
+    @ObservationIgnored private var connectGeneration: UInt64 = 0
+    @ObservationIgnored private var pairingGeneration: UInt64 = 0
+    @ObservationIgnored private var retiredPairings: [String: UInt64] = [:]
+    @ObservationIgnored private var pendingPairingResets: Set<String> = []
     // push tokens by kind, sent again to a hub paired later
     @ObservationIgnored private var tokens: [String: String] = [:]
     // each hub's Live Activity token, sent again when that hub reconnects
@@ -89,7 +98,6 @@ final class AppModel {
     // notification's select still moves the stack
     @ObservationIgnored private var awaitedNav: String?
     @ObservationIgnored private var awaitedAt = Date.distantPast
-    @ObservationIgnored private var pushed = Date.distantPast
     #if DEBUG
     @ObservationIgnored private var tapStart: (nav: String, at: UInt64, first: Int?, full: Int?)?
     private(set) var tapTimes: [String] = []
@@ -142,6 +150,39 @@ final class AppModel {
     // the hub whose plots are drawn: frames from any other are dropped
     @ObservationIgnored private var shownHub = ""
     var active = true
+    #if DEBUG && targetEnvironment(simulator)
+    private(set) var qualificationDisconnected = UserDefaults.standard.bool(forKey: "qualification.connection.parked")
+    var qualificationConnection: String {
+        if qualificationDisconnected { return "parked" }
+        if links.isEmpty { return "unpaired" }
+        if contentReady { return "ready" }
+        let key = screen?.hub ?? links.first.flatMap(Pairing.key) ?? ""
+        return conn[key]?.phase == .offline ? "offline" : "connecting"
+    }
+
+    private func qualification(_ url: URL) -> Bool {
+        guard url.scheme == "backplane", url.host == "qualification",
+              let op = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "op" })?.value,
+              ["disconnect", "reconnect"].contains(op) else { return false }
+        qualificationDisconnected = op == "disconnect"
+        UserDefaults.standard.set(qualificationDisconnected, forKey: "qualification.connection.parked")
+        if qualificationDisconnected {
+            connectGeneration &+= 1
+            for (key, hub) in hubs {
+                hub.stop()
+                conn[key, default: HubConn()].epoch &+= 1
+                conn[key, default: HubConn()].phase = .offline
+                cachedReadiness.retire(key)
+                thinReady[key] = nil
+                thinRequests[key] = nil
+                run { await $0.online(key, false, epoch: String(self.conn[key]?.epoch ?? 0)) }
+            }
+            hubs.removeAll()
+            keep()
+        } else { connect() }
+        return true
+    }
+    #endif
     // when the app last left the front (a suspension may kill its sockets)
     @ObservationIgnored private var awayAt: Date?
     // network changes (Wi-Fi to cellular, back online): sockets are tried now
@@ -190,8 +231,8 @@ final class AppModel {
     }
 
     init() {
-        engine.onFlush = { [weak self] out in
-            Task { @MainActor [weak self] in self?.apply(out) }
+        engine.onFlush = { [weak self] out, generation in
+            Task { @MainActor [weak self] in self?.apply(out, generation: generation) }
         }
         #if DEBUG
         if let l = ProcessInfo.processInfo.environment["BACKPLANE_LINK"] { links = l.split(separator: " ").map(String.init) }
@@ -241,7 +282,8 @@ final class AppModel {
             // Bounded choices only; a miss never opens the canonical StateStore.
             let paired = links, profile = Self.cid, store = presentationStore
             if let text = await Task.detached(priority: .userInitiated, operation: { store.load(links: paired, profile: profile) }).value, paired == links {
-                apply(await e.loadPresentation(text))
+                let restored = await e.loadPresentation(text)
+                if paired == links { apply(restored) }
             }
             ready = true
             island = IslandController { [weak self] kind, token, hub in self?.register(kind, token, hub: hub) }
@@ -256,19 +298,26 @@ final class AppModel {
         Task {
             while true {
                 try? await Task.sleep(for: .seconds(30))
-                if ready { apply(await e.tick(Int(Date().timeIntervalSince1970))) }
+                if ready {
+                    let generation = pairingGeneration
+                    apply(await e.tick(Int(Date().timeIntervalSince1970)), generation: generation)
+                }
                 keep()
             }
         }
     }
 
     // a new hub, or a new link to one already paired (it replaces the old)
-    func pair(_ text: String) {
+    @discardableResult func pair(_ text: String) -> Bool {
         let l = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let k = Pairing.key(l) else { return }
+        guard let k = Pairing.key(l) else { return false }
+        pairingGeneration = engine.invalidatePairing()
+        retiredPairings[k] = pairingGeneration
+        if links.contains(where: { Pairing.key($0) == k }) { forgetPresentation(k) }
         retireScreenCache()
         hubs.removeValue(forKey: k)?.stop()
         thinReady[k] = nil
+        thinRequests[k] = nil
         cachedReadiness.retire(k)
         startup[k] = .discovering
         conn[k, default: HubConn()].epoch += 1
@@ -277,11 +326,16 @@ final class AppModel {
         save()
         notifier.setUp()
         connect()
+        return true
     }
 
     func unpair(_ key: String) {
+        pairingGeneration = engine.invalidatePairing()
+        retiredPairings[key] = pairingGeneration
+        forgetPresentation(key)
         cachedReadiness.retire(key)
         thinReady[key] = nil
+        thinRequests[key] = nil
         startup[key] = nil
         mailroomPositions = mailroomPositions.filter { $0.key.hub != key }
         if mailroomReturn?.hub == key { mailroomReturn = nil }
@@ -289,6 +343,43 @@ final class AppModel {
         links = links.filter { Pairing.key($0) != key }
         save()
         connect()
+    }
+
+    // An explicitly replaced pairing is a new account boundary, even when its
+    // address is unchanged. Network reconnects preserve these choices instead.
+    private func forgetPresentation(_ key: String) {
+        pendingPairingResets.insert(key)
+        let prefix = key + "|"
+        seen = seen.filter { !$0.key.hasPrefix(prefix) }
+        seenOrder.removeAll { $0.hasPrefix(prefix) }
+        seenBots = seenBots.filter { !$0.key.hasPrefix(prefix) }
+        seenPlanes = seenPlanes.filter { !$0.key.hasPrefix(prefix) }
+        botOrder.removeAll { $0.hasPrefix(prefix) }
+        localDrafts = localDrafts.filter { !$0.key.hasPrefix(prefix) }
+        readingPages = readingPages.filter { !$0.key.hasPrefix(prefix) }
+        earlyActions.removeAll { $0.1.hasPrefix(prefix) }
+        outgoing.removeAll { $0.thread.hasPrefix(prefix) }
+        hubSettings[key] = nil
+        keepHubSettings()
+        let defaults = UserDefaults.standard
+        if let text = defaults.string(forKey: "drafts"),
+           let drafts = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: String],
+           let data = try? JSONSerialization.data(withJSONObject: drafts.filter { !$0.key.hasPrefix(prefix) }),
+           let filtered = String(data: data, encoding: .utf8) { defaults.set(filtered, forKey: "drafts") }
+        for tab in Array(stacks.keys) { stacks[tab]?.removeAll { $0.hasPrefix(prefix) || $0 == "@hub:" + key } }
+        if screen?.hub == key {
+            earlyActions.removeAll()
+            screen = nil
+            composer = ""
+            destination = nil
+            awaitedNav = nil
+            pending = nil
+            shownSel = ""
+            shownHub = ""
+            lastUber = nil
+            lastPlane = nil
+            plots.reset()
+        }
     }
 
     private func save() {
@@ -315,6 +406,11 @@ final class AppModel {
 
     // one socket per paired hub: new hubs connect, unpaired ones hang up
     private func connect() {
+        connectGeneration &+= 1
+        let generation = connectGeneration
+        #if DEBUG && targetEnvironment(simulator)
+        guard !qualificationDisconnected else { return }
+        #endif
         guard ready else { return }
         var keyed: [String: String] = [:]
         var keys: [String] = []
@@ -331,14 +427,30 @@ final class AppModel {
         let e = engine
         let fresh = keys.contains { hubs[$0] == nil }
         Task {
-            apply(await e.hubs(keys))
-            apply(await e.local("view", settings.threadList))
-            await languageLocal(e)
-            apply(await e.local("usage", wantsUsage ? "1" : ""))
-            for (thread, page) in readingPages {
-                apply(await e.reading(thread, seen: page.seen, count: page.count, away: page.away))
+            guard generation == connectGeneration else { return }
+            for key in pendingPairingResets.sorted() {
+                _ = await e.forgetHub(key)
+                guard generation == connectGeneration else { return }
+                pendingPairingResets.remove(key)
             }
-            for (k, l) in keyed where hubs[k] == nil { open(k, l) }
+            let reconciled = await e.hubs(keys)
+            guard generation == connectGeneration else { return }
+            e.resumePairing(pairingGeneration)
+            apply(reconciled)
+            let view = await e.local("view", settings.threadList)
+            guard generation == connectGeneration else { return }
+            apply(view)
+            await languageLocal(e)
+            guard generation == connectGeneration else { return }
+            let usage = await e.local("usage", wantsUsage ? "1" : "")
+            guard generation == connectGeneration else { return }
+            apply(usage)
+            for (thread, page) in readingPages {
+                let reading = await e.reading(thread, seen: page.seen, count: page.count, away: page.away)
+                guard generation == connectGeneration else { return }
+                apply(reading)
+            }
+            for (k, l) in keyed where hubs[k] == nil && links.contains(l) { open(k, l) }
             // a hub paired later learns this phone's push tokens too
             if fresh {
                 for (kind, token) in tokens { register(kind, token) }
@@ -352,9 +464,11 @@ final class AppModel {
         let h = Hub(url: { [weak self] in
                 guard let self else { return Hub.Next.stop }
                 let epoch = String(self.conn[key]?.epoch ?? 0)
+                let pairing = self.pairingGeneration
                 self.startup[key] = .discovering
                 let found = await ViewCapability.find(link)
                 guard self.links.contains(link), self.conn[key]?.epoch == UInt64(epoch) else { return .stop }
+                guard pairing == self.pairingGeneration else { return .later(.connection) }
                 // a hub that is down or restarting is asked again after the
                 // backoff; only a hub that answers without views parks
                 if case .retry(let failure) = found { return .later(failure) }
@@ -366,18 +480,30 @@ final class AppModel {
                     return .stop
                 }
                 self.startup[key] = .thin
-                self.apply(await e.connection(key, epoch, mode: "view-v1"))
+                let connected = await e.connection(key, epoch, mode: "view-v1")
+                guard self.links.contains(link), self.conn[key]?.epoch == UInt64(epoch) else { return .stop }
+                self.apply(connected, generation: pairing)
+                guard pairing == self.pairingGeneration else { return .later(.connection) }
                 if let pending = self.earlyActions.last(where: { $0.0 != "tz-report" && ($0.1.hasPrefix(key + "|") || ($0.1.isEmpty && self.screen?.hub == key)) }) {
                     self.earlyActions.removeAll { $0.0 == pending.0 && $0.1 == pending.1 }
-                    self.apply(await e.act(pending.0, pending.1))
+                    let selectingPairing = self.pairingGeneration
+                    let selected = await e.act(pending.0, pending.1)
+                    guard self.links.contains(link), self.conn[key]?.epoch == UInt64(epoch) else { return .stop }
+                    self.apply(selected, generation: selectingPairing)
+                    guard selectingPairing == self.pairingGeneration else { return .later(.connection) }
                 } else if let cached = self.screen, cached.hub == key {
-                    self.apply(await e.act("select", cached.sel))
+                    let selectingPairing = self.pairingGeneration
+                    let selected = await e.act("select", cached.sel)
+                    guard self.links.contains(link), self.conn[key]?.epoch == UInt64(epoch) else { return .stop }
+                    self.apply(selected, generation: selectingPairing)
+                    guard selectingPairing == self.pairingGeneration else { return .later(.connection) }
                 }
                 return Pairing.viewSocket(link).map { Hub.Next.go($0) } ?? Hub.Next.stop
             },
             onConnecting: { [weak self] in
                 self?.cachedReadiness.retire(key)
                 self?.thinReady[key] = nil
+                self?.thinRequests[key] = nil
                 self?.conn[key, default: HubConn()].phase = .connecting
                 self?.conn[key, default: HubConn()].epoch += 1
             },
@@ -423,8 +549,11 @@ final class AppModel {
         let e = engine
         let person = e.priorityFrame(d)
         let epoch = conn[key]?.epoch ?? 0
+        let pairing = pairingGeneration
         Task {
+            guard pairing == pairingGeneration else { return }
             let result = await e.recv(key, d.base64EncodedString(), epoch: String(epoch), person: person)
+            guard pairing == pairingGeneration else { apply(result, generation: pairing); return }
             guard hubs[key] != nil, links.contains(where: { Pairing.key($0) == key }), conn[key]?.epoch == epoch else { return }
             for update in result?.sync ?? [] where update.hub == key {
                 let thin = startup[key] == .thin
@@ -448,9 +577,11 @@ final class AppModel {
                result?.sync?.contains(where: { $0.hub == key && ($0.phase == "recent" || $0.phase == "live") }) == true {
                 restoredAt[key] = epoch
                 let selection = earlyActions.last(where: { $0.0 == "select" })?.1 ?? screen?.sel ?? ""
+                let selectingPairing = pairingGeneration
                 let selected = await e.act("select", selection)
                 guard conn[key]?.epoch == epoch, hubs[key] != nil else { return }
-                apply(selected)
+                apply(selected, generation: selectingPairing)
+                guard selectingPairing == pairingGeneration else { return }
             }
             if needsFrame { run { await $0.screen() } }
         }
@@ -458,7 +589,12 @@ final class AppModel {
 
     private func run(_ f: @escaping (Engine) async -> Out?) {
         let e = engine
-        Task { apply(await f(e)) }
+        let generation = pairingGeneration
+        Task {
+            guard generation == pairingGeneration else { return }
+            let out = await f(e)
+            apply(out, generation: generation)
+        }
     }
 
     // what was typed in the secret box's value field (SetFieldView, a vault
@@ -495,9 +631,12 @@ final class AppModel {
             let configured = targetHub.map { startup[$0] == .thin || startup[$0] == .compatibilityChosen } ?? false
             if ready, configured, action != "tz-report" {
                 let e = engine
+                let generation = pairingGeneration
                 Task {
+                    guard generation == pairingGeneration else { return }
                     let out = await e.act(action, value)
-                    apply(out)
+                    apply(out, generation: generation)
+                    guard generation == pairingGeneration else { return }
                     dirty = true
                     keep()
                 }
@@ -509,9 +648,12 @@ final class AppModel {
         if Self.opens.contains(action) { tapped = value }
         let navigation = action == "select" || Self.opens.contains(action)
         let e = engine
+        let generation = pairingGeneration
         Task {
+            guard generation == pairingGeneration else { return }
             let out = await e.act(action, value)
-            apply(out)
+            apply(out, generation: generation)
+            guard generation == pairingGeneration else { return }
             if navigation { dirty = true; keep() }
         }
     }
@@ -583,7 +725,7 @@ final class AppModel {
 
     // where the hub in focus serves a path ("/img?path=…"), with its token
     func web(_ path: String) -> URL? {
-        guard let s = screen, let l = links.first(where: { Pairing.key($0) == s.hub }) ?? links.first else { return nil }
+        guard let s = screen, let l = links.first(where: { Pairing.key($0) == s.hub }) else { return nil }
         return Pairing.web(l, path)
     }
 
@@ -593,7 +735,8 @@ final class AppModel {
     func attach(_ data: Data, name: String) {
         guard contentReady else { return }
         guard !data.isEmpty, let s = screen, let named = s.thread?.id,
-              let l = links.first(where: { Pairing.key($0) == s.hub }) ?? links.first else { return }
+              let l = links.first(where: { Pairing.key($0) == s.hub }) else { return }
+        let epoch = conn[s.hub]?.epoch
         // the hub's own id: over several hubs the screen names it "<hub>|<id>"
         let thread = named.split(separator: "|").last.map(String.init) ?? named
         let key = String(format: "%08x", UInt32.random(in: 0 ... UInt32.max))
@@ -614,6 +757,10 @@ final class AppModel {
             } catch {
                 answer = ""
             }
+            // Finishing an upload never applies its result to a replacement
+            // pairing or to a different conversation opened in the meantime.
+            guard contentReady, screen?.hub == s.hub, screen?.thread?.id == named,
+                  conn[s.hub]?.epoch == epoch, links.contains(l) else { return }
             let answered = (try? JSONSerialization.jsonObject(with: Data(answer.utf8))) is [String: Any]
             if !answered {
                 let o: [String: Any] = ["uiError": "upload.network", "thread": thread, "upload": true]
@@ -627,9 +774,7 @@ final class AppModel {
     func open(nav: String, action: String, value: String, title: String, cat: String = "", kind: String = "thread") {
         // a row from an older bridge has no nav: its page opens when its screen comes
         guard !nav.isEmpty else { act(action, value); return }
-        guard path.last != nav, pending?.last != nav,
-              Date().timeIntervalSince(pushed) >= 0.35 else { return }
-        pushed = Date()
+        guard path.last != nav, pending?.last != nav else { return }
         let dest = destination(kind: kind, action: action)
         opened = (nav, dest)
         if dest != tab { switchTab(dest) }
@@ -851,9 +996,12 @@ final class AppModel {
         composer = ""
         typing += 1
         let e = engine
+        let generation = pairingGeneration
         Task {
+            guard generation == pairingGeneration else { typing -= 1; return }
             let out = await e.act(action, "")
             typing -= 1
+            guard generation == pairingGeneration else { return }
             apply(out, sent: text)
         }
     }
@@ -867,10 +1015,12 @@ final class AppModel {
         }
         typing += 1
         let e = engine
+        let generation = pairingGeneration
         Task {
+            guard generation == pairingGeneration else { typing -= 1; return }
             let out = await e.quiet("draft", text)
             typing -= 1
-            apply(out)
+            apply(out, generation: generation)
         }
     }
 
@@ -878,6 +1028,9 @@ final class AppModel {
     // reference resolution, with the message's hub kept outside the URI.
     @discardableResult
     func open(_ url: URL, sourceHub: String? = nil) -> Bool {
+        #if DEBUG && targetEnvironment(simulator)
+        if qualification(url) { return true }
+        #endif
         switch InternalURLRoute.route(url) {
         case let .reference(uri, origin):
             act("ref-open", InternalURLRoute.request(uri, origin: origin, sourceHub: sourceHub))
@@ -924,10 +1077,19 @@ final class AppModel {
 
     func retryView(_ key: String) {
         guard links.contains(where: { Pairing.key($0) == key }), startup[key] == .compatibilityRequired else { return }
+        retryConnection(key)
+    }
+
+    func retryConnection(_ key: String) {
+        guard links.contains(where: { Pairing.key($0) == key }) else { return }
         hubs.removeValue(forKey: key)?.stop()
         thinReady[key] = nil
+        thinRequests[key] = nil
         cachedReadiness.retire(key)
         startup[key] = .discovering
+        conn[key, default: HubConn()].epoch &+= 1
+        conn[key, default: HubConn()].phase = .connecting
+        conn[key, default: HubConn()].failure = nil
         connect()
     }
 
@@ -958,10 +1120,11 @@ final class AppModel {
 
     // the thread list's view, for Bend to draw (the device's own choice)
     private func languageLocal(_ e: Engine) async {
-        apply(await e.local("mailroom-renderer", "ios-v1"))
-        apply(await e.local("lang-preview", settings.langPreview ? "1" : ""))
-        apply(await e.local("lang", settings.lang))
-        apply(await e.local("lang-os", Locale.preferredLanguages.first ?? ""))
+        let generation = pairingGeneration
+        for (key, value) in [("mailroom-renderer", "ios-v1"), ("lang-preview", settings.langPreview ? "1" : ""), ("lang", settings.lang), ("lang-os", Locale.preferredLanguages.first ?? "")] {
+            guard generation == pairingGeneration else { return }
+            apply(await e.local(key, value), generation: generation)
+        }
     }
 
     func language(_ v: String) {
@@ -1023,6 +1186,25 @@ final class AppModel {
         update.thinPresented && thinRequests[update.hub]?.accepts(epoch: epoch, revision: update.requestRevision!) == true
     }
 
+    private func apply(_ out: Out?, generation: UInt64) {
+        guard generation == pairingGeneration else {
+            // A retired flush may already have drained effects for another hub.
+            // Keep only effects with a positive, still-valid owner. Navigation,
+            // unqualified UI effects and retired credentials have no authority.
+            let commands = out?.cmds.filter { command in
+                let owner: String?
+                if command.type == "send" { owner = command.hub }
+                else if command.type == "keep", let thread = command.thread, let split = thread.firstIndex(of: "|") { owner = String(thread[..<split]) }
+                else { owner = nil }
+                guard let owner, links.contains(where: { Pairing.key($0) == owner }) else { return false }
+                return (retiredPairings[owner] ?? 0) <= generation
+            } ?? []
+            if !commands.isEmpty { apply(Out(screen: nil, cmds: commands)) }
+            return
+        }
+        apply(out)
+    }
+
     private func apply(_ out: Out?, sent: String? = nil) {
         guard let o = out else {
             if let t = sent, let i = outgoing.firstIndex(where: { $0.text == t }) { outgoing.remove(at: i) }
@@ -1062,7 +1244,8 @@ final class AppModel {
                 Task { [weak self] in
                     try? await Task.sleep(for: .seconds(delay))
                     guard let self, self.requestDeadline == deadline else { return }
-                    self.apply(await self.engine.pulse())
+                    let generation = self.pairingGeneration
+                    self.apply(await self.engine.pulse(), generation: generation)
                 }
             }
         }

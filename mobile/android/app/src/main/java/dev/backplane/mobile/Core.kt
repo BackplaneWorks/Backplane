@@ -31,6 +31,10 @@ class Core(private val app: Application) : Application.ActivityLifecycleCallback
     private val prefs = app.getSharedPreferences("backplane", Context.MODE_PRIVATE)
     private val bridge by lazy { app.assets.open("bridge.js").bufferedReader().readText() }
     private val engine by lazy { Engine(app, { bridge }, cid(), prefs.getString("drafts", "{}") ?: "{}", app.filesDir) }
+    var reflowThermal by mutableStateOf(floatArrayOf(0f, 25f, 0f))
+    suspend fun reflowDefaults() = engine.reflowDefaults()
+    suspend fun reflowAlloys() = engine.reflowAlloys()
+    suspend fun reflow(profile: String, alloy: String) = engine.reflow(profile, alloy)
     private val hubs = mutableMapOf<String, Hub>()
     // the client's state, kept for the next launch (StateStore)
     private val kept by lazy { StateStore(app.filesDir, bridge) }
