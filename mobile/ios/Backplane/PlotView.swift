@@ -1179,6 +1179,7 @@ struct PlotScreen: View {
                     .background(BackplaneDesign.raised)
                 }
                 .accessibilityLabel(NativeMessages.native_viewer_source(lang))
+                .accessibilityValue(viewer.choices.first(where: { $0.value == viewer.open })?.label ?? "")
                 .accessibilityIdentifier("viewer.source")
                 Spacer(minLength: 0)
                 if viewer.open == "3d" || viewer.open == "mech" {
