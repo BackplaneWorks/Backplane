@@ -236,6 +236,8 @@ struct AppSettingsTab: View {
     let screen: Screen
     @Bindable private var settings = AppSettings.shared
     @State private var notifications: UNAuthorizationStatus = .notDetermined
+    @State private var notificationsLoaded = false
+    @State private var requestingNotifications = false
     @State private var cacheBytes = 0
     @State private var confirmClear = false
 
@@ -306,10 +308,23 @@ struct AppSettingsTab: View {
                 HStack {
                     Text(NativeMessages.native_settings_notifications(tag))
                     Spacer()
-                    Text(notificationWord).foregroundStyle(.secondary)
+                    if notificationsLoaded { Text(notificationWord).foregroundStyle(.secondary) }
                 }
-                Button(NativeMessages.native_settings_system_open(tag)) {
-                    if let u = URL(string: UIApplication.openNotificationSettingsURLString) { UIApplication.shared.open(u) }
+                if notificationsLoaded && notifications == .notDetermined {
+                    Button(tag == "ja" ? "通知を有効にする" : "Enable notifications") {
+                        requestingNotifications = true
+                        Task {
+                            await model.enableNotifications()
+                            notifications = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
+                            requestingNotifications = false
+                        }
+                    }
+                    .disabled(requestingNotifications)
+                    .accessibilityIdentifier("settings.notifications.enable")
+                } else if notificationsLoaded {
+                    Button(NativeMessages.native_settings_system_open(tag)) {
+                        if let u = URL(string: UIApplication.openNotificationSettingsURLString) { UIApplication.shared.open(u) }
+                    }
                 }
                 // what the hub alerts for: its settings, from the last screen that carried them
                 if let r = notifyRows { HubSettingsRows(model: model, rows: r, notify: true) }
@@ -380,7 +395,10 @@ struct AppSettingsTab: View {
             }
         }
         .navigationTitle(NativeMessages.palette_settings(tag))
-        .task { notifications = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus }
+        .task {
+            notifications = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
+            notificationsLoaded = true
+        }
         .onAppear {
             model.usage(true)
             cacheBytes = model.cacheSize()
