@@ -1404,3 +1404,22 @@ kbd { font: calc(10px * var(--text-scale, 100) / 100)/1 var(--mono); color: var(
   .kvs { order: 10; flex: 1 0 100%; min-height: 32px; margin: 0 -4px 0 0; border-left: 0; border-top: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
   .app.top.tour-settings .tour { right: auto; left: 50%; transform: translateX(-50%); }
 }
+
+/* Buy it at the rail's foot (view.bend's View.workspace.buy), apart from
+   the views: a line and some room above it, the price under its words */
+.workspace-bar > .workspace-close { order: 1; }
+.workspace-bar > .workspace-buy { order: 2; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+.workspace-bar > .rail-toggle { order: 3; }
+.workspace-bar > .workspace-feedback { order: 4; }
+.workspace-buy button.buy { width: 100%; flex-direction: column; justify-content: center; gap: 2px; min-height: 54px; padding: 6px 2px; font-size: calc(10px * var(--text-scale, 100) / 100); line-height: 1.3; color: var(--accent); border-color: var(--line); }
+.workspace-buy button.buy:hover { color: var(--text); border-color: var(--accent); }
+.workspace-buy .price { color: var(--dim); font-size: calc(9px * var(--text-scale, 100) / 100); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+@media (min-width: 761px) {
+  html[data-rail="compact"] .workspace-buy button.buy { font-size: 0; gap: 0; min-height: 38px; }
+  html[data-rail="compact"] .workspace-buy .price { display: none; }
+}
+@media (max-width: 760px) {
+  .workspace-bar > .workspace-buy { margin: 0 0 0 6px; padding: 0; border: 0; }
+  .workspace-buy button.buy { flex-direction: row; gap: 6px; min-height: 42px; padding: 0 10px; font-size: calc(12px * var(--text-scale, 100) / 100); }
+  .workspace-buy .price { display: none; }
+}

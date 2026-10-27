@@ -6619,7 +6619,7 @@ def Fab.set.order.note() -> String:
 
 # Settings' Ordering page opens with how ordering works
 def Fab.set.about() -> String:
-  "With Ordering on, a project whose design is ready shows Buy it: in the Ready to order bar above the composer, or in the thread's header. Buy it opens a buy thread. Its agent checks that every board and part is ready, asks you anything missing (quantities, finishes, where to ship), exports the manufacturing files into the project's mfg/ folder and sends them to Backplane's order server, which measures them and prices the exact order: manufacturing (boards, assembly, components and parts, with Backplane's fee included), shipping, and duties and taxes. The quote shows in the thread, and nothing is charged until you press Buy now and pay on Stripe's checkout page. A quote holds for 3 days. Prices are estimates: if the real cost turns out higher, you are asked before anything more is charged and can have a full refund instead; if it is lower, the difference is refunded. Once paid, the thread shows the order's progress (placed, shipped, tracking). With Ordering off, nothing about your projects leaves this machine for ordering. Price estimates add a rough \"from $X\" to Buy it, worked out from each part's size and options without sending any files."
+  "With Ordering on, a project whose design is ready shows Buy it: in the Ready to order bar above the composer, and with the thread's tools (on a computer, at the foot of the tool rail beside the conversation). Buy it opens a buy thread. Its agent checks that every board and part is ready, asks you anything missing (quantities, finishes, where to ship), exports the manufacturing files into the project's mfg/ folder and sends them to Backplane's order server, which measures them and prices the exact order: manufacturing (boards, assembly, components and parts, with Backplane's fee included), shipping, and duties and taxes. The quote shows in the thread, and nothing is charged until you press Buy now and pay on Stripe's checkout page. A quote holds for 3 days. Prices are estimates: if the real cost turns out higher, you are asked before anything more is charged and can have a full refund instead; if it is lower, the difference is refunded. Once paid, the thread shows the order's progress (placed, shipped, tracking). With Ordering off, nothing about your projects leaves this machine for ordering. Price estimates add a rough \"from $X\" to Buy it, worked out from each part's size and options without sending any files."
 
 def Fab.set.label() -> String:
   "Price estimates"
@@ -6726,6 +6726,19 @@ def Fab.ready.all(+u: Ui) -> String:
 
 def Fab.ready(+u: Ui) -> String:
   Fab.ready.shown.k(Fab.min.of(Ui.state.of(u), Ui.sel(u)), Fab.ready.all(u))
+
+# Buy it in the web's tool rail: the Ready to order bar's button, there
+# whenever it has one (ordering on, not a buy thread), the bar shown, put
+# away or waiting for the turn; its words and its price apart, so the rail
+# can stack them ("Buy it" over "from $5.00"; "Buy again" alone)
+def Fab.rail(+u: Ui) -> String:
+  Fab.ready.btn(u)
+
+def Fab.rail.word(+label: String) -> String:
+  Bool.pick(String, String.starts_with(label, "Buy it · "), "Buy it", label)
+
+def Fab.rail.price(+label: String) -> String:
+  Bool.pick(String, String.starts_with(label, "Buy it · "), String.drop(label, 9n), "")
 
 # the header's tools for the open thread ([] or its Buy it)
 def Fab.mini.tools(+u: Ui) -> List<&2, TO.Tool>:

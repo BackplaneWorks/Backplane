@@ -921,8 +921,8 @@ def View.header(+lc: I.Loc, t: M.Thread, +st: M.State, +chip: String, mini: List
         D.El{"span", "", [D.At{"class", "badge"}], [WI.WIcon.svg(BG.Badge.icon(st, p), 16)]},
         D.El{"div", "", [D.At{"class", "title-box"}], View.title.k.loc(lc, String.eq(ren, id), id, U.Label.title(st, id, TTL.Title.shown(lc, title)), rtext)},
         D.Dom.span("meta", Bool.pick(String, String.is_empty(branch), "", branch))], View.boat.chip.loc(lc, chip), [
-        D.El{"div", "", [D.At{"class", "tools thread-controls"}], List.append(&2, D.Node, View.tools(mini), [
-          View.thread.actions(lc, [D.Dom.span("menu-dots", "⋯")], st, id, TO.Tools.settled(override, Nat.is_gt(sa, ua)), pinned, snoozed, archived, del, term, panel)])}]])}
+        D.El{"div", "", [D.At{"class", "tools thread-controls"}], [
+          View.thread.actions(lc, [D.Dom.span("menu-dots", "⋯")], st, id, TO.Tools.settled(override, Nat.is_gt(sa, ua)), pinned, snoozed, archived, del, term, panel)]}]])}
 
 def View.header.legacy(+lc: I.Loc, t: M.Thread, +st: M.State, +chip: String, mini: List<&2, TO.Tool>, +panel: Bool, snoozed: Bool, picking: Bool, term: Bool, +diff: Bool, del: Bool, +ren: String, +rtext: String) -> D.Node:
   match t:
@@ -2695,8 +2695,11 @@ def View.asks.u(+lc: I.Loc, u: U.Ui) -> D.Node:
 
 # The project card (client.bend's Fab.*, core/order.bend): the intent's
 # goal (a click opens the whole intent), Edit, and Buy it with its price
+def View.fab.buy.tip() -> String:
+  "Order this project's parts in a thread that asks what's missing, exports the files and quotes them. The price is the bare parts at the smallest order; the quote adds assembly, components, shipping and duties."
+
 def View.fab.buy(+label: String) -> List<&2, D.Node>:
-  Bool.pick(List<&2, D.Node>, String.is_empty(label), Nil{}, [D.Dom.button("fab-buy", "buy", "", "Order this project's parts in a thread that asks what's missing, exports the files and quotes them. The price is the bare parts at the smallest order; the quote adds assembly, components, shipping and duties.", label)])
+  Bool.pick(List<&2, D.Node>, String.is_empty(label), Nil{}, [D.Dom.button("fab-buy", "buy", "", View.fab.buy.tip(), label)])
 
 def View.fab.body(open: Bool, +intent: String) -> List<&2, D.Node>:
   match open:
@@ -2720,13 +2723,16 @@ def View.fab(+u: U.Ui) -> List<&2, D.Node>:
 
 # Ready to order: what there is to buy and Buy it, above the message box
 # (U.Fab.ready), once the agent's turn is over; it glows as it comes
-def View.ready.k(+line: String, +buy: String) -> List<&2, D.Node>:
+def View.ready.r(+line: String, +buy: String, rail: Bool) -> List<&2, D.Node>:
   Bool.pick(List<&2, D.Node>, String.is_empty(line), Nil{},
     [D.El{"div", "ready", [D.At{"class", "fab-ready"}], D.Dom.cat([D.Dom.span("fab-ready-text", line)], List.append(&2, D.Node, View.fab.buy(buy),
-      [D.Dom.button("fab-x", "fab-hide", "", "Put this away: Buy it stays in the thread's header", "×")]))}])
+      [D.Dom.button("fab-x", "fab-hide", "", Bool.pick(String, rail, "Put this away: Buy it stays in the tool rail", "Put this away: Buy it stays in the thread's header"), "×")]))}])
+
+def View.ready.k(+line: String, +buy: String) -> List<&2, D.Node>:
+  View.ready.r(line, buy, False{})
 
 def View.ready(+u: U.Ui) -> List<&2, D.Node>:
-  View.ready.k(U.Fab.ready(u), U.Fab.ready.btn(u))
+  View.ready.r(U.Fab.ready(u), U.Fab.ready.btn(u), View.rail(u))
 
 # Away from the timeline's end with something new below (client.bend's
 # Hold.pill): "3 new ↓" stuck to the timeline's foot, a click back down
@@ -2832,6 +2838,23 @@ def View.workspace(+lc: I.Loc, +cur: String, +panel: Bool, +term: Bool) -> D.Nod
     WI.WIcon.button("rail-toggle", "rail-toggle", "", "Compact or full rail", "chevron-left", 14, ""),
     D.El{"span", "viewer-feedback", [D.At{"class", "workspace-feedback"}, D.At{"role", "status"}], Nil{}}]}
 
+# Buy it at the rail's foot (client.bend's Fab.rail, ordering on), apart
+# from the views: a cart, the words and the price under them while the
+# rail is wide; the whole label is its tooltip. It does what the Ready to
+# order bar's Buy it does.
+def View.workspace.buy(+label: String) -> List<&2, D.Node>:
+  D.Dom.when(Bool.not(String.is_empty(label)), D.El{"div", "", [D.At{"class", "workspace-buy"}], [
+    D.El{"button", "buy", [D.At{"type", "button"}, D.At{"class", "buy"}, D.At{"aria-label", label}, D.At{"title", label ++ ". " ++ View.fab.buy.tip()}, D.At{"data-value", ""}, D.On{"click", "buy"}],
+      List.append(&2, D.Node, [WI.WIcon.svg("shopping-cart", 18), D.Dom.span("workspace-label", U.Fab.rail.word(label))],
+        D.Dom.when(Bool.not(String.is_empty(U.Fab.rail.price(label))), D.Dom.span("price", U.Fab.rail.price(label))))}]})
+
+# the rail with what goes at its foot (Buy it); a flat bar gets nothing
+def View.workspace.foot(rail: Bool, n: D.Node, foot: List<&2, D.Node>) -> D.Node:
+  match rail n:
+    case True{} D.El{tag, key, attrs, kids}: D.El{tag, key, attrs, List.append(&2, D.Node, kids, foot)}
+    case False{} D.El{tag, key, attrs, kids}: D.El{tag, key, attrs, kids}
+    case _ D.Txt{text}: D.Txt{text}
+
 def View.tabs.loc(+lc: I.Loc, +cur: String) -> D.Node:
   D.El{"nav", "", [D.At{"class", "viewer-tabs"}, D.At{"aria-label", MSG.T.thread.viewer(lc)}], [
     View.workspace.menu(lc, cur, False{}), WI.WIcon.button("icon", "panel", "", MSG.T.viewer.close(lc), "x", 18, MSG.T.viewer.close(lc))]}
@@ -2911,7 +2934,7 @@ def View.thread.p(+lc: I.Loc, +u: U.Ui, t: M.Thread, pend: List<&2, String>, +at
       +own = Bool.and(View.chrome(u), List.is_empty(&2, D.Node, hd))
       View.thread.frame(View.rail(u), [D.At{"class", Bool.pick(String, View.rail(u), Bool.pick(String, term, "thread-view workspace-thread with-term", "thread-view workspace-thread"), Bool.pick(String, term, "thread-view with-term", "thread-view")) ++ Bool.pick(String, U.Flag.get(op, "drop"), " dropping", "")},
         D.At{"data-thread", id}, D.At{"data-drop", "attach"}, D.At{"data-drop-hover", "drop-hover"}],
-        View.workspace.for(View.rail(u), lc, U.Fm.tab(U.Str.get(nf, "view.kind:" ++ id)), panel, term), List.concat(&2, D.Node, [
+        View.workspace.foot(View.rail(u), View.workspace.for(View.rail(u), lc, U.Fm.tab(U.Str.get(nf, "view.kind:" ++ id)), panel, term), View.workspace.buy(U.Fab.rail(u))), List.concat(&2, D.Node, [
         View.top.own(own, View.rail(u), lc, hd, M.Thread{id, p, ti, c, a, turn, pe, ar, o, sa, ua, pi, en, br, wt, pr, mo, rm, im, se, de}, st, UZ.Chip.of(st, id, now), mini, panel, M.Snooze.on(now, U.Side.until(st, id)), U.Flag.get(op, "snooze"), term, String.eq(U.Str.get(nf, "view.kind:" ++ id), "diff"), String.eq(U.Str.get(drafts, "@del"), id), U.Str.get(drafts, "@ren"), U.Str.get(drafts, "@f.title")),
         View.kx.note(U.KX.note(nf, sel), nf, sel), View.kn.loc(lc, U.KN.thread(nf, st, sel), True{}),
         View.thread.workbar.own(own, lc, BI.BU.chat.summary(st, id), nf, id, View.running(turn)),
@@ -4028,8 +4051,7 @@ def View.chrome.thread(+lc: I.Loc, +u: U.Ui, t: M.Thread) -> List<&2, D.Node>:
          View.chrome.subs(lc, st, nf, id, SB.Subs.rows(st, nf, id, now)),
          View.chrome.changes(lc, List.length(&2, M.Entry, M.State.steps(st, id))),
          View.chrome.branch(branch),
-         View.boat.chip.loc(lc, UZ.Chip.of(st, id, now)),
-         View.tools(U.Fab.mini.tools(u))])}]
+         View.boat.chip.loc(lc, UZ.Chip.of(st, id, now))])}]
 
 def View.chrome.selected(none: Bool, +lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
   match none:

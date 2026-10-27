@@ -72,6 +72,7 @@ def Icon.all() -> List<&2, IDef>:
    IDef{"terminal", [Icon.s("m4 17 6-6-6-6"), Icon.s("M12 19h8")]},
    IDef{"git-branch", [Icon.s("M6 3v12"), Icon.s("M15 6a3 3 0 1 0 6 0a3 3 0 1 0-6 0"), Icon.s("M3 18a3 3 0 1 0 6 0a3 3 0 1 0-6 0"), Icon.s("M18 9a9 9 0 0 1-9 9")]},
    IDef{"panel-right", [Icon.s("M3 3h18v18H3z"), Icon.s("M15 3v18")]},
+   IDef{"shopping-cart", [Icon.s("M7 21a1 1 0 1 0 2 0a1 1 0 1 0-2 0"), Icon.s("M18 21a1 1 0 1 0 2 0a1 1 0 1 0-2 0"), Icon.s("M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12")]},
    IDef{"link", [Icon.s("M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"), Icon.s("M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71")]},
    IDef{"external-link", [Icon.s("M15 3h6v6"), Icon.s("M10 14 21 3"), Icon.s("M18 13v8H3V6h8")]},
    IDef{"zoom-in", [Icon.s("M3 11a8 8 0 1 0 16 0a8 8 0 1 0-16 0"), Icon.s("m21 21-4.35-4.35"), Icon.s("M11 8v6"), Icon.s("M8 11h6")]},
@@ -141,7 +142,7 @@ def Icon.used() -> List<&2, String>:
   ["plus", "x", "chevron-down", "chevron-right", "settings", "paperclip", "arrow-up", "stop", "mic", "search", "sun", "moon",
    "play", "pause", "chevron-left", "skip-back", "skip-forward", "history", "git-compare", "message-square",
    "pin", "circle-check", "clock", "archive", "trash", "git-fork", "undo", "terminal", "panel-right", "diff",
-   "folder", "file", "file-text", "image", "circuit-board", "cpu", "box", "bell", "repeat", "square-pen", "gauge"]
+   "folder", "file", "file-text", "image", "circuit-board", "cpu", "box", "bell", "repeat", "square-pen", "gauge", "shopping-cart"]
 
 def Icon.missing.k(none: Bool, +n: String, rest: List<&2, String>) -> List<&2, String>:
   match none:
