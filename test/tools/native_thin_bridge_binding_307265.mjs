@@ -15,6 +15,34 @@ export async function registerBridgeChecks(check,stage,root){
  let last;
  function boot(drafts={}){B.start('install',JSON.stringify(drafts));B.hubs(['h']);B.local('mailroom-renderer','ios-v1');B.connection('h','1','view-v1');B.act('select','h|a');const out=receive(greeting);last=request(out);return out;}
  function answer(req=last,changes={},quiet=false){const local=screen('h',req.p.session?.sel||'a');if(local.thread)local.thread.id='h|'+local.thread.id;const shown={...local,sel:'h|'+local.sel};const result={version:1,hub:'h',generation:'1',epoch:'origin',requestRevision:req.p.requestRevision,target:req.p.target,viewId:req.p.viewId||'view',viewRevision:'1',renderer:'mobile',remoteReady:true,session:req.p.session||{sel:'a',drafts:{},rid:1,open:{},info:{},adding:false,panel:false},shown,overlay:{key:'h',name:'hub',j:local},window:{ids:['e'],older:'older',hasMore:true,anchor:{id:'e',offset:0},partial:[]},cmds:[],...changes};return receive({t:'reply',id:req.id,ok:true,result},quiet);}
+ function selectB(){const changed=read(B.act('select','h|b'));const call=request(changed);answer(call);return call;}
+ function failures(out,owner,text){return out.cmds.some(c=>c.type==='send-failed'&&c.thread===owner&&c.text===text);}
+ check('captured draft follows A after B becomes foreground without changing focus',()=>{
+  boot();answer();selectB();const saved=read(B.draftAt('h|a','draft A',2));
+  assert(saved.cmds.some(c=>c.type==='keep'&&c.thread==='h|a'&&c.text==='draft A'));
+  assert(!saved.cmds.some(c=>c.type==='send'));assert.equal(read(B.screen()).screen.sel,'h|b');
+  const selected=request(read(B.act('select','h|a')));const shown=answer(selected);assert.equal(shown.screen.thread.draft,'draft A');
+ });
+ check('captured send to A after switching to B fails for A with original text',()=>{
+  boot();answer();selectB();const out=read(B.sendAt('h|a','send','text A',1));
+  assert(failures(out,'h|a','text A'));assert(!out.cmds.some(c=>c.type==='send'));assert.equal(read(B.screen()).screen.sel,'h|b');
+ });
+ check('stale draft serial cannot replace the latest full draft',()=>{
+  boot();answer();B.draftAt('h|a','newer',4);const stale=read(B.draftAt('h|a','older',3));
+  assert(!stale.cmds.some(c=>c.type==='keep'&&c.text==='older'));assert.equal(read(B.screen()).screen.thread.draft,'newer');
+ });
+ check('newer draft survives delayed send completion and duplicate submit',()=>{
+  boot();answer();B.draftAt('h|a','old',1);const first=read(B.sendAt('h|a','send','old',1));const sent=request(first);
+  assert.equal(sent.p.action,'send');assert.equal(sent.p.session.drafts.a,'old');
+  const duplicate=read(B.sendAt('h|a','send','old',1));assert(!duplicate.cmds.some(c=>c.type==='send'));
+  B.draftAt('h|a','newer',2);const completed=answer(sent,{cmds:[{type:'keep',thread:'h|a',text:''}]});
+  assert(!completed.cmds.some(c=>c.type==='keep'&&c.thread==='h|a'&&c.text===''));assert.equal(read(B.screen()).screen.thread.draft,'newer');
+ });
+ check('pairing retirement clears the old owner draft before same-address rejoin',()=>{
+  boot();answer();B.draftAt('h|a','old account draft',3);B.forgetHub('h');B.hubs(['h']);B.connection('h','2','view-v1');B.act('select','h|a');
+  const opened=read(B.recv('h',encode(greeting).toString('base64'),'2',false,false));const req=request(opened);
+  assert(!JSON.stringify(req).includes('old account draft'));
+ });
  check('project search API retains only latest full query through busy presentation',()=>{boot();answer();const changed={t:'view.changed',version:1,generation:'1',epoch:'origin',viewId:'view',target:last.p.target,viewRevision:'2'};const update=request(receive(changed));assert.equal(read(B.projectSearchQuery(1,1,'older')).cmds.length,0);assert.equal(read(B.projectSearchQuery(1,2,'')).cmds.length,0);const next=request(answer(update));assert.equal(next.p.action,'proj-find-q');assert.equal(next.p.value,'');});
  check('ending a scope retires an unissued committed project go',()=>{boot();answer();const changed={t:'view.changed',version:1,generation:'1',epoch:'origin',viewId:'view',target:last.p.target,viewRevision:'2'};const update=request(receive(changed));B.projectSearchQuery(1,1,'wanted');B.projectSearchGo(1,1,'wanted','h|p');B.projectSearchEnd(1);const done=answer(update);assert(!done.cmds.some(c=>c.type==='send'&&JSON.parse(c.data).p?.action==='proj-go'));});
  check('same-edit go rejects changed submitted text',()=>{boot();answer();B.projectSearchQuery(1,1,'wanted');const out=read(B.projectSearchGo(1,1,'different','h|p'));assert(!out.cmds.some(c=>c.type==='send'&&JSON.parse(c.data).p?.action==='proj-go'));});
