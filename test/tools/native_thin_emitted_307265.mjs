@@ -57,6 +57,17 @@ function respond(c,request,payload,quiet=false){
  const accepted=respond(p,request,fixture.open,true);
  checked(accepted.screen===null&&accepted.sync.some(s=>s.phase==='presented'&&s.viewerIntent===2),'quiet accepted viewer receipt survives without decoded picture');
 }
+{
+ const p=client();start(p);const first=begin(p);respond(p,first,fixture.open);
+ const old=p.out('draftAt','h|other','private-other',1);
+ checked(old.cmds.some(x=>x.type==='keep'&&x.thread==='h|other'&&x.text==='private-other'),'emitted draft retains captured other owner');
+ checked(p.requests(old).length===0,'other owner draft emits no wire request');
+ const failed=p.out('sendAt','h|other','send','private-message',1);
+ checked(failed.cmds.some(x=>x.type==='send-failed'&&x.thread==='h|other'&&x.text==='private-message'),'emitted stale owner send returns captured text');
+ checked(p.requests(failed).length===0,'emitted stale owner send does not target current thread');
+ p.out('draftAt','h|t','latest',2);p.out('draftAt','h|t','older',1);
+ checked(p.out('screen').screen?.thread?.draft==='latest','emitted stale serial cannot replace current draft');
+}
 for(const quiet of [false,true]) {
  const p=client();p.call('publicationAck');start(p);const first=begin(p);respond(p,first,fixture.open);
  const changed={t:'view.changed',version:1,generation:greeting.generation,epoch:greeting.epoch,viewId:'fixture-view',target:first.p.target,viewRevision:'2'};
