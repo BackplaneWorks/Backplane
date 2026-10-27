@@ -1159,15 +1159,64 @@ struct PlotScreen: View {
         let f = model.plots.frame.flatMap { $0.key == viewer.layers || (viewer.hist != nil && $0.none.isEmpty && Self.head($0.key) == Self.head(viewer.layers)) ? $0 : nil }
         let m = model.plots.mesh.flatMap { $0.key == viewer.key ? $0 : nil } ?? model.plots.cachedMesh(viewer.key)
         VStack(spacing: 0) {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Menu {
+                    ForEach(viewer.choices, id: \.value) { choice in
+                        Button { model.act("view", choice.value) } label: {
+                            if choice.value == viewer.open { Label(choice.label, systemImage: "checkmark") }
+                            else { Text(choice.label) }
+                        }
+                        .accessibilityIdentifier("viewer.choice." + choice.value)
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Text(viewer.choices.first(where: { $0.value == viewer.open })?.label ?? NativeMessages.native_viewer_source(lang))
+                            .font(.subheadline.weight(.semibold)).lineLimit(1)
+                        Image(systemName: "chevron.down").font(.caption)
+                    }
+                    .padding(.horizontal, 10).frame(minHeight: 44)
+                    .background(BackplaneDesign.raised)
+                }
+                .accessibilityLabel(NativeMessages.native_viewer_source(lang))
+                .accessibilityIdentifier("viewer.source")
+                Spacer(minLength: 0)
+                if viewer.open == "3d" || viewer.open == "mech" {
+                    Button { showReflow = true } label: {
+                        Image(systemName: "thermometer").frame(width: 44, height: 44)
+                    }
+                    .accessibilityLabel("Illustrative reflow preview")
+                    .accessibilityIdentifier("viewer.reflow")
+                }
+                Button { model.act("vw-light") } label: {
+                    Image(systemName: viewer.light == true ? "moon" : "sun.max").frame(width: 44, height: 44)
+                }
+                .accessibilityLabel(viewer.light == true ? NativeMessages.native_viewer_ground_dark(lang) : NativeMessages.native_viewer_ground_light(lang))
+                .accessibilityIdentifier("viewer.appearance")
+                Button { model.act("view", "") } label: {
+                    Image(systemName: "xmark").frame(width: 44, height: 44)
+                }
+                .accessibilityLabel(NativeMessages.common_close(lang))
+                .accessibilityIdentifier("viewer.close")
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 12).padding(.vertical, 4)
+            ScrollView(.horizontal, showsIndicators: false) {
+                ViewerControls(model: model, viewer: viewer, present: Set(f?.chunks.map { $0.layer } ?? []))
+                    .buttonStyle(.plain).padding(.vertical, 4)
+            }
+            if viewer.open == "mech", let page = viewer.mech { MechBar(model: model, page: page) }
+        }
+        .background(BackplaneDesign.panel)
+        .overlay(alignment: .bottom) { Rectangle().fill(BackplaneDesign.line).frame(height: 1) }
         ZStack(alignment: .top) {
-            Color(rgb: viewer.bg).ignoresSafeArea()
+            Color(rgb: viewer.bg)
             PlotCanvasView(frame: f?.none.isEmpty == true ? f : nil, mesh: m, scope: model.screen?.sel ?? "", thermal: model.reflowThermal, viewer: viewer, pick: { model.act("view-pick", $0) },
                            sheet: { model.act("view-sheet", $0) },
                            onNote: { x, y in model.act("rv-note", String(format: "%.3f\t%.3f\t\t", x, y)) },
                            onPin: { model.act("rv-pin", $0) })
                 .id(viewer.layers.isEmpty ? viewer.key : "")
                 .accessibilityIdentifier(((viewer.open == "3d" || viewer.open == "mech") && m?.mesh != nil && m?.none.isEmpty == true) ? "viewer.mesh.ready" : ((viewer.layers.isEmpty ? m != nil && m?.none.isEmpty == true : f != nil && f?.none.isEmpty == true) ? "viewer.ready" : "viewer.canvas"))
-                .ignoresSafeArea()
             // Mech with no part to show: what the page says
             if viewer.open == "mech", viewer.key.isEmpty {
                 Text(viewer.mech.map { $0.say.isEmpty ? $0.note : $0.say } ?? "").foregroundStyle(.secondary).padding().frame(maxHeight: .infinity)
@@ -1187,34 +1236,12 @@ struct PlotScreen: View {
             } else if viewer.open == "3d", viewer.parts ?? true, let note = viewer.note, !note.isEmpty {
                 Text(note).font(.caption).foregroundStyle(.secondary).padding().frame(maxHeight: .infinity, alignment: .bottom)
             }
-            VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Picker(NativeMessages.native_viewer_source(lang), selection: Binding(get: { viewer.open }, set: { model.act("view", $0) })) {
-                    ForEach(viewer.choices, id: \.value) { Text($0.label).tag($0.value).accessibilityIdentifier("viewer.choice." + $0.value) }
-                }
-                .pickerStyle(.segmented)
-                .accessibilityIdentifier("viewer.source")
-                .frame(maxWidth: 300)
-                Spacer()
-                if viewer.open == "3d" || viewer.open == "mech" {
-                    Button("Reflow") { showReflow = true }.accessibilityLabel("Illustrative reflow preview")
-                }
-                // the viewer's own light or dark ground
-                Button { model.act("vw-light") } label: { Image(systemName: viewer.light == true ? "moon.fill" : "sun.max.fill").font(.title2) }
-                    .accessibilityLabel(viewer.light == true ? NativeMessages.native_viewer_ground_dark(lang) : NativeMessages.native_viewer_ground_light(lang))
-                Button { model.act("view", "") } label: { Image(systemName: "xmark.circle.fill").font(.title2) }
-                    .accessibilityLabel(NativeMessages.common_close(lang))
-                    .accessibilityIdentifier("viewer.close")
-            }
-            .padding(.horizontal)
-            .padding(.top, 6)
-            ViewerControls(model: model, viewer: viewer, present: Set(f?.chunks.map { $0.layer } ?? []))
-            if viewer.open == "mech", let p = viewer.mech { MechBar(model: model, page: p) }
-            }
             if let c = viewer.card {
                 CardView(card: c, model: model).frame(maxHeight: .infinity, alignment: .bottom)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipped()
         // the design history under the plot, which gives it the room
         if let h = viewer.hist { HistBarView(model: model, hist: h) }
         }
