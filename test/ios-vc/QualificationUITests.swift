@@ -15,9 +15,11 @@ final class QualificationUITests: XCTestCase {
         let connect = app.buttons["pair.connect"]
         XCTAssertTrue(connect.exists)
         address.tap()
-        address.typeText("invalid")
+        address.typeText("ftp://invalid")
         connect.tap()
         XCTAssertTrue(app.staticTexts["pair.address.error"].waitForExistence(timeout: 5))
+        address.tap()
+        address.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: "ftp://invalid".count))
     }
 
     // Run after pairing through the app UI. No credential is passed to XCTest.
