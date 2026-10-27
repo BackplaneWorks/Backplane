@@ -152,6 +152,7 @@ final class AppModel {
     @ObservationIgnored private var shownHub = ""
     var active = true
     #if DEBUG && targetEnvironment(simulator)
+    private(set) var qualificationIncoming: [String: String] = [:]
     private(set) var qualificationDisconnected = UserDefaults.standard.bool(forKey: "qualification.connection.parked")
     var qualificationConnection: String {
         if qualificationDisconnected { return "parked" }
@@ -159,6 +160,29 @@ final class AppModel {
         if contentReady { return "ready" }
         let key = screen?.hub ?? links.first.flatMap(Pairing.key) ?? ""
         return conn[key]?.phase == .offline ? "offline" : "connecting"
+    }
+
+    // IDs and typed state only. Never include links, drafts, message bodies,
+    // Foundation errors or the presentation JSON in qualification output.
+    var qualificationDetails: String {
+        let key = screen?.hub ?? links.first.flatMap(Pairing.key) ?? ""
+        let status = conn[key]
+        let mark = thinReady[key]
+        var values: [String: String] = [
+            "hub": key, "socket": status.map { String(describing: $0.phase) } ?? "none",
+            "epoch": status.map { String($0.epoch) } ?? "none",
+            "failure": status?.failure?.reason ?? "none",
+            "startup": startup[key].map { String(describing: $0) } ?? "none",
+            "cached": String(cachedPresentation), "engineReady": String(ready),
+            "contentReady": String(contentReady), "tab": tab.rawValue,
+            "nav": screen.map(Self.nav) ?? "none", "awaited": awaitedNav ?? "none",
+            "path": path.last ?? "none", "thread": screen?.thread?.id ?? "none",
+            "bot": screen?.bot?.id ?? "none", "botTab": screen?.bot?.tab ?? "none",
+            "markEpoch": mark.map { String($0.epoch) } ?? "none", "markNav": mark?.nav ?? "none"
+        ]
+        for (key, value) in qualificationIncoming { values["incoming." + key] = value }
+        guard let data = try? JSONSerialization.data(withJSONObject: values, options: [.sortedKeys]) else { return "unavailable" }
+        return String(decoding: data, as: UTF8.self)
     }
 
     private func qualification(_ url: URL) -> Bool {
@@ -1290,6 +1314,16 @@ final class AppModel {
             guard !(o.sync ?? []).contains(where: { $0.hub == next.hub && ($0.phase == "presented" || $0.phase == "presenting") && !currentThinReply($0, epoch: mark.epoch) }) else { return false }
             return mark.nav == Self.nav(next) && (awaitedNav == nil || awaitedNav == Self.nav(next))
         } ?? false
+        #if DEBUG && targetEnvironment(simulator)
+        if let next = o.screen {
+            qualificationIncoming = [
+                "hub": next.hub, "nav": Self.nav(next), "thread": next.thread?.id ?? "none",
+                "bot": next.bot?.id ?? "none", "thinFresh": String(thinFresh),
+                "cacheAllowed": String(!cachedPresentation || cacheFresh),
+                "paired": String(next.hub.isEmpty || links.contains { Pairing.key($0) == next.hub })
+            ]
+        }
+        #endif
         if let s = o.screen, s.hub.isEmpty || links.contains(where: { Pairing.key($0) == s.hub }),
            (!cachedPresentation || cacheFresh), thinFresh {
             cachedPresentation = false
