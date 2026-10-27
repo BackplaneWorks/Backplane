@@ -3,12 +3,28 @@ import XCTest
 // Runs against a dedicated simulator only. Never launch with BACKPLANE_LINK:
 // the initial pairing must use the normal UI and survive a subsequent launch.
 final class QualificationUITests: XCTestCase {
+    private func qualificationStatus(_ app: XCUIApplication, label: String) {
+        let status = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "qualification.connection.")).firstMatch
+        if status.exists {
+            print("qualification-status \(label) value=\(status.value as? String ?? "unavailable")")
+            return
+        }
+        print("qualification-status \(label) absent")
+    }
+    private func closeRestoredViewer(_ app: XCUIApplication) {
+        let close = app.buttons["viewer.close"]
+        if close.exists {
+            XCTAssertTrue(close.isHittable, "A restored viewer must allow returning to its thread")
+            close.tap()
+        }
+    }
     override func setUp() {
         continueAfterFailure = false
     }
 
     func testFreshSimulatorShowsPairing() {
         let app = XCUIApplication()
+        app.launchEnvironment["BACKPLANE_QUALIFICATION"] = "1"
         app.launch()
         XCTAssertTrue(app.textFields["pair.address"].waitForExistence(timeout: 20))
         let address = app.textFields["pair.address"]
@@ -25,8 +41,9 @@ final class QualificationUITests: XCTestCase {
     // Run after pairing through the app UI. No credential is passed to XCTest.
     func testPersistedPairingAndNavigation() {
         let app = XCUIApplication()
+        app.launchEnvironment["BACKPLANE_QUALIFICATION"] = "1"
         app.launch()
-        XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 45), "A paired hub should reach the app")
+        XCTAssertTrue(app.buttons["tab.threads"].waitForExistence(timeout: 45), "A paired hub should reach the app")
         XCTAssertFalse(app.textFields["pair.address"].exists, "Pairing must persist across launches")
         let threads = app.buttons["tab.threads"]
         if threads.waitForExistence(timeout: 5) { threads.tap() }
@@ -36,7 +53,7 @@ final class QualificationUITests: XCTestCase {
         XCTAssertTrue(app.textViews["thread.composer"].waitForExistence(timeout: 20) || app.descendants(matching: .any)["thread.composer"].waitForExistence(timeout: 5))
         app.terminate()
         app.launch()
-        XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 45), "Warm launch must reconnect without a pairing override")
+        XCTAssertTrue(app.buttons["tab.threads"].waitForExistence(timeout: 45), "Warm launch must reconnect without a pairing override")
         XCTAssertFalse(app.textFields["pair.address"].exists)
     }
     private func tab(_ name: String, label: String, in app: XCUIApplication) -> XCUIElement {
@@ -47,8 +64,9 @@ final class QualificationUITests: XCTestCase {
 
     func testRepeatedNavigationViewerAndForeground() {
         let app = XCUIApplication()
+        app.launchEnvironment["BACKPLANE_QUALIFICATION"] = "1"
         app.launch()
-        XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 45))
+        XCTAssertTrue(app.buttons["tab.threads"].waitForExistence(timeout: 45))
         let home = tab("home", label: "Home", in: app)
         let threads = tab("threads", label: "Threads", in: app)
         for _ in 0..<3 {
@@ -62,14 +80,42 @@ final class QualificationUITests: XCTestCase {
         XCUIDevice.shared.press(.home)
         app.activate()
         XCTAssertTrue(app.descendants(matching: .any)["thread.composer"].waitForExistence(timeout: 30), "Foreground should restore the thread")
-        // The selected real thread must belong to a project with a saved board.
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "real-thread"
+        shot.lifetime = .keepAlways
+        add(shot)
+    }
+
+    func testBoardViewerForSelectedThread() {
+        let app = XCUIApplication()
+        app.launchEnvironment["BACKPLANE_QUALIFICATION"] = "1"
+        app.launch()
+        XCTAssertTrue(app.descendants(matching: .any)["qualification.connection.ready"].waitForExistence(timeout: 60))
+        let threads = tab("threads", label: "Threads", in: app)
+        XCTAssertTrue(threads.waitForExistence(timeout: 5)); threads.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["qualification.connection.ready"].waitForExistence(timeout: 60))
+        let search = app.textFields["projects.search"]
+        XCTAssertTrue(search.waitForExistence(timeout: 10)); search.tap(); search.typeText("PoE")
+        let project = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "project.row.")).firstMatch
+        let found = project.waitForExistence(timeout: 20)
+        let evidence = XCTAttachment(screenshot: app.screenshot()); evidence.name = "board-project-search"; evidence.lifetime = .keepAlways; add(evidence)
+        XCTAssertTrue(found, "Saved board project must be listed")
+        var rows = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "thread.row."))
+        if !rows.firstMatch.waitForExistence(timeout: 5) {
+            let settled = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Settled")).firstMatch
+            if settled.waitForExistence(timeout: 5) { settled.tap() }
+        }
+        rows = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "thread.row."))
+        XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 15), "An existing thread for the board project is required")
+        rows.firstMatch.tap()
         let open = app.buttons["viewer.open"]
-        XCTAssertTrue(open.waitForExistence(timeout: 15), "Select a real board project thread before running this test")
+        XCTAssertTrue(open.waitForExistence(timeout: 15))
         for _ in 0..<2 {
             open.tap()
             let board = app.buttons["viewer.choice.board"]
             XCTAssertTrue(board.waitForExistence(timeout: 10)); board.tap()
             XCTAssertTrue(app.descendants(matching: .any)["viewer.ready"].waitForExistence(timeout: 60), "Board geometry should arrive")
+            let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "real-board"; shot.lifetime = .keepAlways; add(shot)
             let close = app.buttons["viewer.close"]
             XCTAssertTrue(close.waitForExistence(timeout: 10)); close.tap()
             XCTAssertTrue(app.descendants(matching: .any)["thread.composer"].waitForExistence(timeout: 15))
@@ -80,20 +126,443 @@ final class QualificationUITests: XCTestCase {
     // parked state must survive the launch XCTest performs here.
     func testClientRemainsParkedAfterRelaunch() {
         let app = XCUIApplication()
-        app.launch()
-        XCTAssertTrue(app.descendants(matching: .any)["qualification.connection.parked"].waitForExistence(timeout: 20))
+        app.launchEnvironment["BACKPLANE_QUALIFICATION"] = "1"
+        let open = XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.buttons["Open"]
+        if open.waitForExistence(timeout: 5) { open.tap() }
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 20))
+        XCTAssertTrue(app.descendants(matching: .any)["qualification.connection.parked"].waitForExistence(timeout: 30), "Observe park before termination")
         app.terminate()
         app.launch()
-        XCTAssertTrue(app.descendants(matching: .any)["qualification.connection.parked"].waitForExistence(timeout: 20), "A foreground or relaunch must not unpark the client")
+        XCTAssertTrue(app.descendants(matching: .any)["qualification.connection.parked"].waitForExistence(timeout: 20), "Park must survive relaunch")
     }
 
     // Invoke the nonsecret simulator reconnect URL before this test.
     func testClientRecoversAfterReconnect() {
         let app = XCUIApplication()
+        app.launchEnvironment["BACKPLANE_QUALIFICATION"] = "1"
+        let open = XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.buttons["Open"]
+        if open.waitForExistence(timeout: 5) { open.tap() }
+        app.terminate()
         app.launch()
-        XCTAssertTrue(app.descendants(matching: .any)["qualification.connection.ready"].waitForExistence(timeout: 60), "The real hub must provide fresh content after reconnect")
+        closeRestoredViewer(app)
+        let ready = app.descendants(matching: .any)["qualification.connection.ready"].waitForExistence(timeout: 60)
+        qualificationStatus(app, label: "relaunch-ready-wait")
+        XCTAssertTrue(ready, "The real hub must provide fresh content after reconnect")
         XCTAssertFalse(app.descendants(matching: .any)["qualification.connection.parked"].exists)
         XCTAssertFalse(app.textFields["pair.address"].exists, "Reconnect should retain pairing")
+    }
+
+    // Pasteboard is populated separately over private stdin. Never type a link,
+    // attach screenshots, print the accessibility tree, or pass a credential.
+    func testPairViaPrivatePasteboard() {
+        let app = XCUIApplication()
+        app.launchEnvironment["BACKPLANE_QUALIFICATION"] = "1"
+        app.launch()
+        let field = app.textFields["pair.address"]
+        XCTAssertTrue(field.waitForExistence(timeout: 20))
+        field.press(forDuration: 1.2)
+        let paste = app.menuItems["Paste"]
+        XCTAssertTrue(paste.waitForExistence(timeout: 5))
+        paste.tap()
+        let allowPaste = app.alerts.buttons["Allow Paste"]
+        if allowPaste.waitForExistence(timeout: 3) { allowPaste.tap() }
+        let connect = app.buttons["pair.connect"]
+        XCTAssertTrue(connect.waitForExistence(timeout: 5)); connect.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["qualification.connection.ready"].waitForExistence(timeout: 90))
+        XCTAssertFalse(field.exists)
+    }
+
+    func testShowRealProjects() {
+        let app = XCUIApplication()
+        app.launchEnvironment["BACKPLANE_QUALIFICATION"] = "1"
+        app.launch()
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let decline = springboard.alerts.buttons["Don’t Allow"]
+        if decline.waitForExistence(timeout: 3) { decline.tap() }
+        XCTAssertTrue(app.descendants(matching: .any)["qualification.connection.ready"].waitForExistence(timeout: 60))
+        let threads = tab("threads", label: "Threads", in: app)
+        XCTAssertTrue(threads.waitForExistence(timeout: 10)); threads.tap()
+        XCTAssertFalse(app.tabBars.firstMatch.exists, "Compact navigation must not also show the native tab bar")
+        let rows = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "thread.row."))
+        XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 30), "Real project thread rows must be visible")
+        XCTAssertTrue(app.descendants(matching: .any)["qualification.connection.ready"].waitForExistence(timeout: 60))
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "real-projects"
+        shot.lifetime = .keepAlways
+        add(shot)
+        let search = app.textFields["projects.search"]
+        XCTAssertTrue(search.waitForExistence(timeout: 10)); search.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10))
+        let keyboard = XCTAttachment(screenshot: app.screenshot()); keyboard.name = "projects-keyboard"; keyboard.lifetime = .keepAlways; add(keyboard)
+        search.typeText("PoE")
+        XCTAssertEqual(search.value as? String, "PoE", "Search must display the typed filter")
+        let filtered = XCTAttachment(screenshot: app.screenshot()); filtered.name = "projects-typed-filter"; filtered.lifetime = .keepAlways; add(filtered)
+        search.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 3))
+    }
+
+    func testReturnToVerifiedExistingBoardHome() {
+        let app = XCUIApplication()
+        app.launchEnvironment["BACKPLANE_QUALIFICATION"] = "1"
+        app.launch()
+        closeRestoredViewer(app)
+        let threads = app.buttons["tab.threads"]
+        XCTAssertTrue(threads.waitForExistence(timeout: 45)); threads.tap()
+        let rootReady = app.descendants(matching: .any)["qualification.connection.ready"].waitForExistence(timeout: 60)
+        qualificationStatus(app, label: "project-root-ready")
+        XCTAssertTrue(rootReady)
+        let search = app.textFields["projects.search"]
+        if !search.exists {
+            closeRestoredViewer(app)
+            let buttons = app.navigationBars.buttons
+            for button in buttons.allElementsBoundByIndex {
+                let label = ["Back", "Threads"].contains(button.label) ? button.label : "other"
+                print("safe-nav label=\(label) enabled=\(button.isEnabled) hittable=\(button.isHittable)")
+            }
+            let back = buttons.firstMatch
+            let hasBack = back.waitForExistence(timeout: 10)
+            qualificationStatus(app, label: "threads-root-setup")
+            if !app.textFields["pair.address"].exists {
+                let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "threads-root-setup"; shot.lifetime = .keepAlways; add(shot)
+            }
+            XCTAssertTrue(hasBack, "A restored thread must expose its navigation Back control")
+            XCTAssertTrue(back.isEnabled && back.isHittable, "Back must remain usable while the thread loads")
+            back.tap()
+        }
+        XCTAssertTrue(search.waitForExistence(timeout: 15)); search.tap()
+        search.typeText("PoE_LoRa_Tube")
+        let project = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@ AND identifier ENDSWITH %@", "project.header.", "p1790229698-1087")).firstMatch
+        let found = project.waitForExistence(timeout: 40)
+        qualificationStatus(app, label: "board-project-filter")
+        print("safe-search expected-project=\(found)")
+        if !app.textFields["pair.address"].exists { let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "board-project-filter"; shot.lifetime = .keepAlways; add(shot) }
+        XCTAssertTrue(found, "The filtered real board project must appear")
+        let fresh = app.descendants(matching: .any)["qualification.connection.ready"].waitForExistence(timeout: 45)
+        qualificationStatus(app, label: "board-filter-after-wait")
+        XCTAssertTrue(fresh, "Filtered presentation must become fresh")
+        let settled = app.buttons["Settled 1"]
+        XCTAssertTrue(settled.waitForExistence(timeout: 20), "The filtered project must have its known nonempty Settled shelf")
+        XCTAssertTrue(app.descendants(matching: .any)["qualification.connection.ready"].waitForExistence(timeout: 45), "The filtered presentation must be fresh before Return")
+        XCTAssertTrue(project.exists && settled.exists, "The same board project and nonempty Settled shelf must still be present")
+        qualificationStatus(app, label: "before-verified-project-return")
+        search.tap()
+        search.typeText(XCUIKeyboardKey.return.rawValue)
+        XCTAssertTrue(app.descendants(matching: .any)["thread.composer"].waitForExistence(timeout: 30))
+        XCTAssertTrue(app.descendants(matching: .any)["qualification.connection.ready"].waitForExistence(timeout: 60))
+        qualificationStatus(app, label: "board-thread-after-return")
+        let status = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "qualification.connection.")).firstMatch
+        let data = (status.value as? String ?? "").data(using: .utf8) ?? Data()
+        let fields = (try? JSONSerialization.jsonObject(with: data)) as? [String: String]
+        XCTAssertTrue((fields?["nav"] ?? "").hasSuffix("|t1790229700-1088"), "Return must select the known existing board thread")
+        if !app.textFields["pair.address"].exists { let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "board-home-after-return"; shot.lifetime = .keepAlways; add(shot) }
+    }
+
+    func testViewerMenuBoundaryDiagnostic() {
+        let app = XCUIApplication()
+        app.launchEnvironment["BACKPLANE_QUALIFICATION"] = "1"
+        app.launchEnvironment["BACKPLANE_SELECT"] = "t1790229700-1088"
+        app.launch()
+        closeRestoredViewer(app)
+        XCTAssertTrue(app.descendants(matching: .any)["thread.composer"].waitForExistence(timeout: 60))
+        XCTAssertTrue(app.descendants(matching: .any)["qualification.connection.ready"].waitForExistence(timeout: 60))
+        qualificationStatus(app, label: "before-view-menu")
+        let open = app.buttons["viewer.open"]
+        XCTAssertTrue(open.waitForExistence(timeout: 15)); open.tap()
+        let choices = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "viewer.choice."))
+        for choice in choices.allElementsBoundByIndex { print("safe-choice id=\(choice.identifier) enabled=\(choice.isEnabled) hittable=\(choice.isHittable)") }
+        let board = app.buttons["viewer.choice.board"]
+        let hasBoard = board.waitForExistence(timeout: 10)
+        qualificationStatus(app, label: "after-view-menu")
+        print("safe-menu board-exists=\(hasBoard) open-enabled=\(open.isEnabled) open-hittable=\(open.isHittable)")
+        if !app.textFields["pair.address"].exists {
+            let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "viewer-menu-boundary"; shot.lifetime = .keepAlways; add(shot)
+        }
+        XCTAssertTrue(hasBoard, "Board menu choice must appear")
+        print("safe-choice board enabled=\(board.isEnabled) hittable=\(board.isHittable)")
+        qualificationStatus(app, label: "before-board-choice")
+        board.tap()
+        let presented = app.buttons["viewer.close"].waitForExistence(timeout: 20)
+        qualificationStatus(app, label: "after-board-choice")
+        print("safe-viewer modal=\(presented) ready=\(app.descendants(matching: .any)["viewer.ready"].exists)")
+        if !app.textFields["pair.address"].exists {
+            let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "viewer-open-diagnostic"; shot.lifetime = .keepAlways; add(shot)
+        }
+        XCTAssertTrue(presented, "Board viewer must open")
+    }
+
+    func testExistingBoardViaDebugSelection() {
+        let app = XCUIApplication()
+        app.launchEnvironment["BACKPLANE_QUALIFICATION"] = "1"
+        app.launchEnvironment["BACKPLANE_SELECT"] = "t1790229700-1088"
+        app.launch()
+        closeRestoredViewer(app)
+        XCTAssertTrue(app.descendants(matching: .any)["thread.composer"].waitForExistence(timeout: 60), "Existing board thread must open")
+        XCTAssertTrue(app.descendants(matching: .any)["qualification.connection.ready"].waitForExistence(timeout: 60))
+        let open = app.buttons["viewer.open"]
+        XCTAssertTrue(open.waitForExistence(timeout: 15)); open.tap()
+        let choice = app.buttons["viewer.choice.board"]
+        XCTAssertTrue(choice.waitForExistence(timeout: 10))
+        qualificationStatus(app, label: "board-before-choice")
+        print("safe-choice board enabled=\(choice.isEnabled) hittable=\(choice.isHittable)")
+        choice.tap()
+        let close = app.buttons["viewer.close"]
+        let presented = close.waitForExistence(timeout: 15)
+        qualificationStatus(app, label: "board-after-open-wait")
+        let early = XCTAttachment(screenshot: app.screenshot()); early.name = "saved-board-initial"; early.lifetime = .keepAlways; add(early)
+        let loaded = app.descendants(matching: .any)["viewer.ready"].waitForExistence(timeout: 35)
+        for id in ["viewer.ready", "viewer.canvas", "viewer.loading", "viewer.error", "viewer.mesh.ready", "viewer.mesh.status", "viewer.open", "viewer.close", "qualification.connection.ready"] {
+            print("diagnostic \(id)=\(app.descendants(matching: .any)[id].exists)")
+        }
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "saved-board"; shot.lifetime = .keepAlways; add(shot)
+        XCTAssertTrue(presented, "Board viewer must open after UI tap")
+        XCTAssertTrue(loaded, "Saved board geometry must arrive")
+        print("viewer-close initial enabled=\(close.isEnabled) hittable=\(close.isHittable)")
+        XCTAssertTrue(close.isEnabled && close.isHittable)
+        close.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["thread.composer"].waitForExistence(timeout: 20))
+        open.tap(); XCTAssertTrue(choice.waitForExistence(timeout: 10)); choice.tap()
+        let reopened = app.descendants(matching: .any)["viewer.ready"].waitForExistence(timeout: 60)
+        for id in ["viewer.close", "viewer.ready", "viewer.loading", "viewer.error", "viewer.mesh.ready", "qualification.connection.ready"] {
+            print("reopen-state \(id)=\(app.descendants(matching: .any)[id].exists)")
+        }
+        let reopenshot = XCTAttachment(screenshot: app.screenshot()); reopenshot.name = "board-reopen"; reopenshot.lifetime = .keepAlways; add(reopenshot)
+        XCTAssertTrue(reopened, "The board must reopen with geometry")
+    }
+
+    func testExplicitReconnectAfterOfflineClose() {
+        let app = XCUIApplication()
+        app.launchEnvironment["BACKPLANE_QUALIFICATION"] = "1"
+        app.launch()
+        XCTAssertTrue(app.descendants(matching: .any)["qualification.connection.parked"].waitForExistence(timeout: 20))
+        XCTAssertFalse(app.buttons["viewer.close"].exists)
+        XCTContext.runActivity(named: "QUALIFICATION_RECONNECT_NOW") { _ in }
+        let open = XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.buttons["Open"]
+        if open.waitForExistence(timeout: 10) { open.tap() }
+        let ready = app.descendants(matching: .any)["qualification.connection.ready"].waitForExistence(timeout: 60)
+        qualificationStatus(app, label: "explicit-reconnect")
+        XCTAssertTrue(ready, "Explicit reconnect must restore fresh content")
+        XCTAssertFalse(app.descendants(matching: .any)["qualification.connection.parked"].exists)
+        XCTAssertFalse(app.textFields["pair.address"].exists)
+        app.terminate(); app.launch()
+        XCTAssertTrue(app.descendants(matching: .any)["qualification.connection.ready"].waitForExistence(timeout: 60))
+        XCTAssertFalse(app.buttons["viewer.close"].exists)
+    }
+
+    func testOfflineViewerClose() {
+        let app = XCUIApplication()
+        app.launchEnvironment["BACKPLANE_QUALIFICATION"] = "1"
+        app.launchEnvironment["BACKPLANE_SELECT"] = "t1790229700-1088"
+        app.launch()
+        closeRestoredViewer(app)
+        XCTAssertTrue(app.descendants(matching: .any)["thread.composer"].waitForExistence(timeout: 60))
+        XCTAssertTrue(app.descendants(matching: .any)["qualification.connection.ready"].waitForExistence(timeout: 60))
+        let open = app.buttons["viewer.open"]
+        XCTAssertTrue(open.waitForExistence(timeout: 15)); open.tap()
+        let board = app.buttons["viewer.choice.board"]
+        XCTAssertTrue(board.waitForExistence(timeout: 10)); board.tap()
+        let close = app.buttons["viewer.close"]
+        XCTAssertTrue(close.waitForExistence(timeout: 20))
+        XCTAssertTrue(app.descendants(matching: .any)["viewer.ready"].waitForExistence(timeout: 60))
+        XCTContext.runActivity(named: "QUALIFICATION_PARK_NOW") { _ in }
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let confirm = springboard.alerts.buttons["Open"]
+        if confirm.waitForExistence(timeout: 10) { confirm.tap() }
+        XCTAssertTrue(close.waitForExistence(timeout: 15), "Viewer remains open after isolated disconnect")
+        print("safe-offline-close enabled=\(close.isEnabled) hittable=\(close.isHittable)")
+        XCTAssertTrue(close.isEnabled && close.isHittable, "Close must work while the client is parked")
+        close.tap()
+        XCTAssertFalse(close.waitForExistence(timeout: 5), "Close must dismiss locally")
+        let parked = app.descendants(matching: .any)["qualification.connection.parked"]
+        XCTAssertTrue(parked.waitForExistence(timeout: 20), "The isolated client must actually be parked")
+        if !app.textFields["pair.address"].exists { let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "viewer-offline-closed"; shot.lifetime = .keepAlways; add(shot) }
+        app.terminate(); app.launch()
+        XCTAssertTrue(app.descendants(matching: .any)["qualification.connection.parked"].waitForExistence(timeout: 20))
+        XCTAssertFalse(app.buttons["viewer.close"].exists, "A closed viewer must stay closed after parked relaunch")
+    }
+
+    func testExistingBoard3DMesh() {
+        let app = XCUIApplication()
+        app.launchEnvironment["BACKPLANE_QUALIFICATION"] = "1"
+        app.launchEnvironment["BACKPLANE_SELECT"] = "t1790229700-1088"
+        app.launch()
+        closeRestoredViewer(app)
+        XCTAssertTrue(app.descendants(matching: .any)["thread.composer"].waitForExistence(timeout: 60))
+        XCTAssertTrue(app.descendants(matching: .any)["qualification.connection.ready"].waitForExistence(timeout: 60))
+        let open = app.buttons["viewer.open"]
+        XCTAssertTrue(open.waitForExistence(timeout: 15)); open.tap()
+        let choice = app.buttons["viewer.choice.3d"]
+        XCTAssertTrue(choice.waitForExistence(timeout: 10))
+        qualificationStatus(app, label: "3d-before-choice")
+        choice.tap()
+        let presented = app.buttons["viewer.close"].waitForExistence(timeout: 15)
+        qualificationStatus(app, label: "3d-after-open-wait")
+        XCTAssertTrue(presented)
+        let mesh = app.descendants(matching: .any)["viewer.mesh.ready"]
+        let loaded = mesh.waitForExistence(timeout: 90)
+        for id in ["viewer.mesh.ready", "viewer.mesh.status", "viewer.loading", "viewer.error", "viewer.ready", "viewer.canvas"] { print("diagnostic \(id)=\(app.descendants(matching: .any)[id].exists)") }
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "saved-board-3d"; shot.lifetime = .keepAlways; add(shot)
+        XCTAssertTrue(loaded, "Decoded 3D mesh required; slab/canvas readiness alone is insufficient")
+    }
+
+    func testInvalidSessionOnFreshSimulator() {
+        let app = XCUIApplication()
+        app.launchEnvironment["BACKPLANE_QUALIFICATION"] = "1"
+        app.launch()
+        XCTAssertTrue(app.descendants(matching: .any)["pair.connection.error"].waitForExistence(timeout: 60), "Real hub must reject the deliberately invalid credential")
+        XCTAssertTrue(app.buttons["pair.connection.retry"].exists)
+        XCTAssertTrue(app.buttons["pair.connection.change"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["qualification.connection.ready"].exists)
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        XCTAssertFalse(springboard.alerts.buttons["Allow"].exists, "Fresh pairing should not prompt for notifications")
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "invalid-session"; shot.lifetime = .keepAlways; add(shot)
+    }
+
+    func testSmallSessionDiagnostic() {
+        let app = XCUIApplication()
+        app.launchEnvironment["BACKPLANE_QUALIFICATION"] = "1"
+        app.launch()
+        _ = app.descendants(matching: .any)["pair.connection.error"].waitForExistence(timeout: 15)
+        for id in ["pair.address", "pair.connection.error", "pair.connection.progress", "pair.connection.retry", "pair.connection.change", "qualification.connection.unpaired", "qualification.connection.connecting", "qualification.connection.offline", "qualification.connection.ready"] {
+            print("diagnostic \(id)=\(app.descendants(matching: .any)[id].exists)")
+        }
+        if !app.textFields["pair.address"].exists {
+            let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "small-offline"; shot.lifetime = .keepAlways; add(shot)
+        }
+    }
+
+    func testViewerChoiceDiagnostic() {
+        let app = XCUIApplication()
+        app.launchEnvironment["BACKPLANE_QUALIFICATION"] = "1"
+        app.launchEnvironment["BACKPLANE_SELECT"] = "t1790229700-1088"
+        app.launch()
+        XCTAssertTrue(app.descendants(matching: .any)["thread.composer"].waitForExistence(timeout: 60))
+        let ready = app.descendants(matching: .any)["qualification.connection.ready"]
+        XCTAssertTrue(ready.waitForExistence(timeout: 60))
+        app.buttons["viewer.open"].tap()
+        let choice = app.buttons["viewer.choice.board"]
+        XCTAssertTrue(choice.waitForExistence(timeout: 10))
+        print("viewer-choice-before ready=\(ready.exists) hittable=\(choice.isHittable)")
+        choice.tap()
+        let close = app.buttons["viewer.close"]
+        let opened = close.waitForExistence(timeout: 20)
+        print("viewer-choice-after ready=\(ready.exists) opened=\(opened) connecting=\(app.descendants(matching: .any)["qualification.connection.connecting"].exists)")
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "viewer-choice-diagnostic"; shot.lifetime = .keepAlways; add(shot)
+        XCTAssertTrue(opened, "The board viewer must open")
+    }
+
+    func testBubNavigationDiagnostic() {
+        let app = XCUIApplication()
+        app.launchEnvironment["BACKPLANE_QUALIFICATION"] = "1"
+        app.launch()
+        XCTAssertTrue(app.descendants(matching: .any)["qualification.connection.ready"].waitForExistence(timeout: 60))
+        app.buttons["tab.home"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["qualification.connection.ready"].waitForExistence(timeout: 60))
+        let card = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS[cd] %@", "home.uber.", "Bub")).firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 30))
+        print("bub-card-before ready=\(app.descendants(matching: .any)["qualification.connection.ready"].exists) hittable=\(card.isHittable)")
+        card.tap()
+        let chat = app.buttons["bot.tab.chat"]
+        _ = chat.waitForExistence(timeout: 20)
+        for prefix in ["bot.screen.", "bot.tab.", "thread.composer", "qualification.connection."] {
+            for item in app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", prefix)).allElementsBoundByIndex {
+                print("safe-id \(item.identifier) selected=\(item.isSelected)")
+            }
+        }
+        if !app.textFields["pair.address"].exists {
+            let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "bub-diagnostic"; shot.lifetime = .keepAlways; add(shot)
+        }
+    }
+
+    func testRealThreadAndBubNavigation() {
+        let app = XCUIApplication()
+        addTeardownBlock {
+            self.qualificationStatus(app, label: "navigation-final")
+            if app.state == .runningForeground && !app.textFields["pair.address"].exists {
+                let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "navigation-final"; shot.lifetime = .keepAlways; self.add(shot)
+            }
+        }
+        app.launchEnvironment["BACKPLANE_QUALIFICATION"] = "1"
+        app.launchEnvironment["BACKPLANE_SELECT"] = "t1793120668-655983"
+        app.launch()
+        closeRestoredViewer(app)
+        let composer = app.descendants(matching: .any)["thread.composer"]
+        XCTAssertTrue(composer.waitForExistence(timeout: 60), "Real integration thread must open")
+        XCTAssertTrue(app.descendants(matching: .any)["qualification.connection.ready"].waitForExistence(timeout: 60))
+        print("thread-composer frame=\(composer.frame) hittable=\(composer.isHittable)")
+        XCTAssertTrue(composer.isHittable, "The real thread composer must be visible and hittable")
+        qualificationStatus(app, label: "initial-thread")
+        let threadTitle = app.navigationBars.firstMatch.identifier
+        XCTAssertFalse(threadTitle.isEmpty, "The selected thread must have a navigation title")
+        let homeTab = app.buttons["tab.home"]
+        let threadTab = app.buttons["tab.threads"]
+        XCTAssertTrue(homeTab.waitForExistence(timeout: 10)); homeTab.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["qualification.connection.ready"].waitForExistence(timeout: 60))
+        qualificationStatus(app, label: "home-after-switch")
+        if app.navigationBars["Bub"].exists || app.buttons["bot.tab.chat"].exists {
+            XCTAssertTrue(app.navigationBars["Bub"].exists, "Home must restore its existing Bub destination")
+            let back = app.navigationBars.buttons.firstMatch
+            XCTAssertTrue(back.waitForExistence(timeout: 10)); back.tap()
+            XCTAssertTrue(app.descendants(matching: .any)["qualification.connection.ready"].waitForExistence(timeout: 60))
+            qualificationStatus(app, label: "home-after-back")
+        }
+        let bub = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS[cd] %@", "home.uber.", "Bub")).firstMatch
+        XCTAssertTrue(bub.waitForExistence(timeout: 30), "The real Home card must identify Bub")
+        bub.tap()
+        let bubTitle = app.navigationBars["Bub"]
+        XCTAssertTrue(bubTitle.waitForExistence(timeout: 30), "The Bub conversation must open")
+        qualificationStatus(app, label: "bub-after-open")
+        let bubReady = app.descendants(matching: .any)["qualification.connection.ready"].waitForExistence(timeout: 60)
+        qualificationStatus(app, label: "bub-ready-wait")
+        XCTAssertTrue(bubReady, "Bub's actual presentation must finish before choosing Chat")
+        let botScreen = app.descendants(matching: .any)["bot.screen.b1790292962-8017"]
+        XCTAssertTrue(botScreen.waitForExistence(timeout: 15), "The real Bub bot screen must be displayed")
+        let chat = app.buttons["bot.tab.chat"]
+        XCTAssertTrue(chat.waitForExistence(timeout: 10), "Bub's actual Chat tab must appear")
+        chat.tap()
+        XCTAssertTrue(chat.isSelected, "Bub chat must be selected")
+        XCTAssertTrue(app.descendants(matching: .any)["qualification.connection.ready"].waitForExistence(timeout: 60), "Bub chat must finish presenting")
+        let hasComposer = composer.waitForExistence(timeout: 30)
+        if hasComposer { print("bub-composer frame=\(composer.frame) hittable=\(composer.isHittable)") }
+        XCTAssertTrue(hasComposer, "Bub's real chat composer must appear")
+        XCTAssertTrue(composer.isHittable, "Bub's real chat composer must be visible and hittable")
+        XCTAssertTrue(app.descendants(matching: .any)["qualification.connection.ready"].waitForExistence(timeout: 60))
+        let screenshot = XCTAttachment(screenshot: app.screenshot()); screenshot.name = "real-bub-chat"; screenshot.lifetime = .keepAlways; add(screenshot)
+        let usable = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == YES AND hittable == YES"), object: composer)
+        let usability = XCTWaiter.wait(for: [usable], timeout: 45)
+        qualificationStatus(app, label: "bub-composer-usability")
+        XCTAssertEqual(usability, .completed, "Bub composer must become enabled and hittable after a refresh")
+        composer.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10), "Tapping the existing composer must open the keyboard")
+        XCTAssertTrue(composer.isHittable, "The composer must remain visible with the keyboard open")
+        let keyboardShot = XCTAttachment(screenshot: app.screenshot()); keyboardShot.name = "bub-keyboard"; keyboardShot.lifetime = .keepAlways; add(keyboardShot)
+        for _ in 0..<2 {
+            XCTAssertTrue(threadTab.waitForExistence(timeout: 10)); threadTab.tap()
+            XCTAssertTrue(threadTab.isSelected, "Threads must be selected")
+            XCTAssertFalse(bubTitle.exists, "Bub must no longer be the visible screen")
+            XCTAssertTrue(composer.waitForExistence(timeout: 30), "The thread stack must return to its composer")
+            XCTAssertTrue(app.navigationBars[threadTitle].waitForExistence(timeout: 20), "The same real thread must be restored")
+            XCTAssertTrue(app.descendants(matching: .any)["qualification.connection.ready"].waitForExistence(timeout: 60))
+            qualificationStatus(app, label: "thread-restored")
+            XCTAssertTrue(homeTab.waitForExistence(timeout: 10)); homeTab.tap()
+            XCTAssertTrue(bubTitle.waitForExistence(timeout: 30), "Returning to Home must restore Bub's stack")
+            XCTAssertTrue(botScreen.waitForExistence(timeout: 15))
+            XCTAssertTrue(chat.isSelected)
+            XCTAssertTrue(composer.waitForExistence(timeout: 30))
+            XCTAssertTrue(app.descendants(matching: .any)["qualification.connection.ready"].waitForExistence(timeout: 60))
+            qualificationStatus(app, label: "bub-restored")
+        }
+        XCUIDevice.shared.press(.home)
+        app.activate()
+        XCTAssertTrue(bubTitle.waitForExistence(timeout: 30), "Foreground must restore Bub")
+        XCTAssertTrue(composer.waitForExistence(timeout: 30))
+        XCTAssertTrue(app.descendants(matching: .any)["qualification.connection.ready"].waitForExistence(timeout: 60))
+        qualificationStatus(app, label: "bub-after-reopen")
+        let back = app.navigationBars.buttons.firstMatch
+        XCTAssertTrue(back.waitForExistence(timeout: 10)); back.tap()
+        XCTAssertTrue(bub.waitForExistence(timeout: 20), "Back must return to the Bub card")
+        bub.tap()
+        XCTAssertTrue(bubTitle.waitForExistence(timeout: 30), "The existing Bub must reopen")
+        XCTAssertTrue(composer.waitForExistence(timeout: 30))
+        XCTAssertTrue(app.descendants(matching: .any)["qualification.connection.ready"].waitForExistence(timeout: 60))
     }
 
 }

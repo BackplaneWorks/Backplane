@@ -6,7 +6,9 @@ if len(sys.argv) != 3:
     sys.exit('usage: add-ui-test-target.py DISPOSABLE_IOS_COPY QualificationUITests.swift')
 root = pathlib.Path(sys.argv[1]).resolve()
 test = pathlib.Path(sys.argv[2]).resolve()
-if not root.name.startswith('backplane-ios-vc-655983'):
+dedicated = root.name.startswith('backplane-ios-vc-655983')
+nested = root.name == 'ios' and root.parent.name == 'mobile' and root.parent.parent.name.startswith('backplane-ios-vc-655983')
+if not (dedicated or nested):
     sys.exit('refusing to change a non-dedicated source copy')
 project = root / 'Backplane.xcodeproj' / 'project.pbxproj'
 if not project.is_file() or not test.is_file():
