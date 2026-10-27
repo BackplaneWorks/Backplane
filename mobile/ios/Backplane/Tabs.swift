@@ -178,6 +178,7 @@ struct BotsTab: View {
                         // plain: a List's button tints its whole label (names read as links)
                         .buttonStyle(.plain)
                         .opacity(b.mood == "away" ? 0.5 : 1)
+                        .accessibilityIdentifier("bot.row." + b.id)
                     }
                 }
             } else {

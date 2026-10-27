@@ -191,6 +191,7 @@ struct BotScreen: View {
                                 }
                                 .foregroundStyle(on ? .primary : .secondary)
                                 .disabled(t.id == "mail" && mailWaiting)
+                                .accessibilityAddTraits(on ? .isSelected : [])
                                 .accessibilityIdentifier("bot.tab." + t.id)
                             }
                         }
@@ -208,6 +209,7 @@ struct BotScreen: View {
                                     }
                                     .foregroundStyle(on ? .primary : .secondary)
                                     .disabled(t.id == "mail" && mailWaiting)
+                                    .accessibilityAddTraits(on ? .isSelected : [])
                                     .accessibilityIdentifier("bot.section." + t.id)
                                 }
                             }.padding(.horizontal, 4)
@@ -227,6 +229,7 @@ struct BotScreen: View {
                     }
                 }
             }
+            .accessibilityIdentifier("bot.screen." + bot.id)
     }
 
     @ViewBuilder private var content: some View {
