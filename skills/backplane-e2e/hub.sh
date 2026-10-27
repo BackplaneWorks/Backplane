@@ -74,6 +74,9 @@ start() {
   [ -d "$web" ] && set -- "$@" --web "$web"
   n=${BP_E2E_STREAM:-60}; ms=50
   case $n in *" "*) ms=${n#* }; n=${n%% *};; esac
+  # (from its own folder: a hub started inside a git checkout must not
+  # make its worktrees there)
+  cd "$root"
   env HOME="$root/userhome" PATH="$root/fake:$PATH" DISPLAY= WAYLAND_DISPLAY= BACKPLANE_NO_UPDATE=1 BACKPLANE_PEERS= \
     BACKPLANE_AGENTS="$root/fake" BACKPLANE_VAULT_KEYRING=file BP_STANDIN_USAGE=1 BP_STANDIN_MODE=stream BP_STREAM_N="$n" \
     BP_STREAM_MS="$ms" BP_STREAM_SEP="
