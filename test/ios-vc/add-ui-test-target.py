@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Add an XCTest UI target to a *disposable Mac copy* of the iOS project."""
-import pathlib, plistlib, subprocess, sys
+import hashlib, pathlib, plistlib, subprocess, sys
 
 if len(sys.argv) != 3:
     sys.exit('usage: add-ui-test-target.py DISPOSABLE_IOS_COPY QualificationUITests.swift')
@@ -16,7 +16,22 @@ if not project.is_file() or not test.is_file():
 xml = subprocess.check_output(['plutil', '-convert', 'xml1', '-o', '-', str(project)])
 p = plistlib.loads(xml); o = p['objects']
 ids = {name: f'F655983000000000000000{i:02X}' for i, name in enumerate(('target','product','source','buildfile','sources','frameworks','resources','debug','release','configlist','proxy','dependency'), 1)}
-if any(i in o for i in ids.values()): sys.exit('test target already exists')
+existing = [i in o for i in ids.values()]
+if any(existing):
+    if not all(existing): sys.exit('incomplete or colliding test target; refusing source replacement')
+    source = o[ids['source']]
+    target = o[ids['target']]
+    if not (source.get('path') == 'QualificationUITests.swift'
+            and target.get('productType') == 'com.apple.product-type.bundle.ui-testing'
+            and ids['sources'] in target.get('buildPhases', [])
+            and ids['buildfile'] in o[ids['sources']].get('files', [])
+            and o[ids['buildfile']].get('fileRef') == ids['source']
+            and (root / 'Backplane.xcodeproj/xcshareddata/xcschemes/Qualification.xcscheme').is_file()):
+        sys.exit('existing test target does not match the dedicated layout')
+    (root / 'QualificationUITests.swift').write_bytes(test.read_bytes())
+    actual = hashlib.sha256((root / 'QualificationUITests.swift').read_bytes()).hexdigest()
+    print('Updated existing QualificationUITests source; compiled-source SHA256 ' + actual)
+    sys.exit(0)
 (root / 'QualificationUITests.swift').write_bytes(test.read_bytes())
 o[ids['source']] = dict(isa='PBXFileReference', lastKnownFileType='sourcecode.swift', path='QualificationUITests.swift', sourceTree='<group>')
 o[ids['product']] = dict(isa='PBXFileReference', explicitFileType='wrapper.cfbundle', includeInIndex='0', path='QualificationUITests.xctest', sourceTree='BUILT_PRODUCTS_DIR')
@@ -38,3 +53,4 @@ scheme.parent.mkdir(parents=True, exist_ok=True)
 scheme.write_text(f'''<?xml version="1.0" encoding="UTF-8"?>
 <Scheme LastUpgradeVersion="2600" version="1.7"><BuildAction parallelizeBuildables="YES" buildImplicitDependencies="YES"><BuildActionEntries><BuildActionEntry buildForTesting="YES" buildForRunning="YES" buildForProfiling="NO" buildForArchiving="NO" buildForAnalyzing="NO"><BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="{ids['target']}" BuildableName="QualificationUITests.xctest" BlueprintName="QualificationUITests" ReferencedContainer="container:Backplane.xcodeproj"/></BuildActionEntry></BuildActionEntries></BuildAction><TestAction buildConfiguration="Debug" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier="Xcode.DebuggerFoundation.Launcher.LLDB" shouldUseLaunchSchemeArgsEnv="YES"><Testables><TestableReference skipped="NO"><BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="{ids['target']}" BuildableName="QualificationUITests.xctest" BlueprintName="QualificationUITests" ReferencedContainer="container:Backplane.xcodeproj"/></TestableReference></Testables></TestAction><LaunchAction buildConfiguration="Debug"/><ProfileAction buildConfiguration="Release"/><AnalyzeAction buildConfiguration="Debug"/><ArchiveAction buildConfiguration="Release"/></Scheme>''')
 print('Added isolated QualificationUITests target; product project remains untouched.')
+print('Compiled-source SHA256 ' + hashlib.sha256((root / 'QualificationUITests.swift').read_bytes()).hexdigest())
