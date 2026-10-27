@@ -926,13 +926,13 @@ struct ThreadDestination: View {
 
     var body: some View {
         Group {
-            if ready, let b = model.screen?.bot {
-                BotDestination(model: model, bot: b)
-            } else if let b = (selected ? model.screen?.bot : nil) ?? model.seenBots[id] {
-                BotDestination(model: model, bot: b, live: false, cachedThread: model.seen[id], cachedPlane: model.seenPlanes[id])
-                    .allowsHitTesting(false)
-                    .disabled(true)
-                    .overlay(alignment: .top) { loadingStatus }
+            if let b = (selected ? model.screen?.bot : nil) ?? model.seenBots[id] {
+                BotDestination(model: model, bot: b, live: ready,
+                               cachedThread: selected ? model.screen?.thread : model.seen[id],
+                               cachedPlane: selected ? model.screen.flatMap { model.plane($0) } : model.seenPlanes[id])
+                    .allowsHitTesting(ready)
+                    .disabled(!ready)
+                    .overlay(alignment: .top) { if !ready { loadingStatus } }
             } else if let t = (selected ? model.screen?.thread : nil) ?? model.seen[id] {
                 ThreadScreen(model: model, thread: t, live: ready).id(id).allowsHitTesting(ready)
                     .disabled(!ready)
