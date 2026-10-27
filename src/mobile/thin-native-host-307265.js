@@ -19,6 +19,13 @@ export function inertAncillary307265(envelope) {
   if (!plainObject(envelope)) return false;
   const keys = Reflect.ownKeys(envelope);
   if (envelope.t === 'hb') return keys.length === 1 && keys[0] === 't';
+  // Server source revision is a plot side channel, not a presentation or
+  // geometry frame. Do not retain it or let it affect a pending deadline.
+  if (envelope.t === 'plotrevision') return keys.length === 3 &&
+    keys.includes('t') && keys.includes('key') && keys.includes('revision') &&
+    typeof envelope.key === 'string' && /^[0-4]\|[^|]+\|/.test(envelope.key) &&
+    typeof envelope.revision === 'string' && envelope.revision.length > 0 &&
+    utf8Bytes(JSON.stringify(envelope)) <= 65536;
   // a 3D model's note (server plot.bend's Pv.note: parts with no model) to
   // the phones watching it: not a view frame. Taken for a stray frame it
   // failed the view once a model loaded, and every tap after was dropped.

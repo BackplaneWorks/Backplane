@@ -4,9 +4,11 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 export async function registerAncillaryChecks(check, harness, stage) {
  const empty={t:'info',info:{pair:'','pair.qr':''}},pair={t:'info',info:{pair:'synthetic-private-link','pair.qr':'synthetic-private-qr'}},hb={t:'hb'};
+ const plotRevision={t:'plotrevision',key:'2|fixture-root|',revision:'fixture-revision'};
  const stable=v=>JSON.stringify(v,(_k,x)=>x instanceof Map?{map:[...x]}:x instanceof Set?{set:[...x]}:x);
  const snapshot=h=>stable({states:h.states,pending:h.pending,ordinary:h.ordinary,client:h.client,commands:h.commands,sync:h.sync,paired:h.paired,current:h.current});
- for(const [name,value] of [['empty pair info',empty],['nonempty private pair info',pair],['heartbeat',hb]]) {
+ for(const [name,value] of [['empty pair info',empty],['nonempty private pair info',pair],['heartbeat',hb],
+  ...['0','1','2','3','4'].map(kind=>['plot revision kind '+kind,{...plotRevision,key:kind+'|fixture-root|'}])]) {
   check('inert '+name+' preserves pending and ready snapshots',()=>{
    const x=harness();x.h.hubs(['h']);x.h.connection('h','1','view-v1');const request=x.greeting().cmds[0].request;
    let before=snapshot(x.h);assert.equal(x.h.receive('h',value,'1'),true);assert.equal(snapshot(x.h),before);
@@ -25,13 +27,14 @@ export async function registerAncillaryChecks(check, harness, stage) {
  });
  check('inert frames cannot renew deadline or rescue expired request',()=>{
   const x=harness();x.h.hubs(['h']);x.h.connection('h','1','view-v1');const r=x.greeting().cmds[0].request,deadline=x.h.deadline();
-  x.advance(4999);x.h.receive('h',hb,'1');x.h.receive('h',empty,'1');assert.equal(x.h.deadline(),deadline);
+  x.advance(4999);x.h.receive('h',hb,'1');x.h.receive('h',empty,'1');x.h.receive('h',plotRevision,'1');assert.equal(x.h.deadline(),deadline);
   x.advance(2);x.h.expire();const expired=x.h.drain();assert.equal(expired.sync[0].phase,'failed');assert.equal(expired.cmds.length,0);
   x.h.receive('h',{t:'reply',id:r.id,ok:true,result:{}},'1');assert(!x.h.states.get('h').ready);assert.equal(x.h.drain().cmds.length,0);
  });
  check('stale epoch and unpaired ancillary cannot affect current pending',()=>{
   const x=harness();x.open();const before=snapshot(x.h);
-  assert.equal(x.h.receive('h',empty,'old'),false);assert.equal(x.h.receive('foreign',hb,'1'),false);assert.equal(snapshot(x.h),before);
+  assert.equal(x.h.receive('h',empty,'old'),false);assert.equal(x.h.receive('h',plotRevision,'old'),false);
+  assert.equal(x.h.receive('foreign',hb,'1'),false);assert.equal(x.h.receive('foreign',plotRevision,'1'),false);assert.equal(snapshot(x.h),before);
  });
  const malformed=[{t:'hb',id:1},{t:'hb',info:{}},{t:'info'},{t:'info',info:[]},{t:'info',info:null},
   {t:'info',info:{pair:''}},{t:'info',info:{pair:'','pair.qr':'',other:''}},
@@ -39,7 +42,13 @@ export async function registerAncillaryChecks(check, harness, stage) {
   {t:'info',info:{pair:'','pair.qr':''},result:{}},
   {t:'info',info:{pair:'界'.repeat(90000),'pair.qr':''}},
   JSON.parse('{"t":"info","info":{"pair":"","pair.qr":"","__proto__":"x"}}'),
-  {t:'info',info:{pair:'','pair.qr':'',constructor:''}}, {t:'log',items:[]}];
+  {t:'info',info:{pair:'','pair.qr':'',constructor:''}}, {t:'log',items:[]},
+  {t:'plotrevision',key:'2|fixture-root|'}, {t:'plotrevision',revision:'r'},
+  {t:'plotrevision',key:'',revision:'r'}, {t:'plotrevision',key:'0|fixture-root|',revision:''},
+  {t:'plotrevision',key:'0|fixture-root|',revision:1}, {t:'plotrevision',key:'0|fixture-root|',revision:'r',extra:true},
+  {t:'plotrevision',key:'5|fixture-root|',revision:'r'}, {t:'plotrevision',key:'0||',revision:'r'},
+  {t:'plotrevision',key:'0|fixture-root',revision:'r'},
+  {t:'plotrevision',key:'0|fixture-root|',revision:'x'.repeat(65536)}];
  malformed.forEach((frame,i)=>check('malformed/unknown ancillary remains refused '+i,()=>{
   const x=harness();x.open();x.h.receive('h',frame,'1');const out=x.h.drain();
   assert.equal(out.sync[0]?.phase,'failed');assert.deepEqual(out.cmds,[]);assert(!x.h.states.get('h').ready);
@@ -58,7 +67,7 @@ export async function registerAncillaryChecks(check, harness, stage) {
  }
  check('actual bridge inert output preserves timer, commands and cached draw boundary',()=>{
   const r=boot(),deadline=JSON.parse(B.pulse()).deadline,compact=B.savePresentation();
-  for(const frame of [empty,pair,hb]){const o=recv(frame);assert.deepEqual(o,{screen:null,cmds:[],sync:[],deadline,inert:true});assert.equal(B.savePresentation(),compact);assert(!JSON.stringify(o).includes('synthetic-private'));}
+  for(const frame of [empty,pair,hb,plotRevision]){const o=recv(frame);assert.deepEqual(o,{screen:null,cmds:[],sync:[],deadline,inert:true});assert.equal(B.savePresentation(),compact);assert(!JSON.stringify(o).includes('synthetic-private'));}
   assert.equal(reply(r).sync[0].phase,'presented');assert.equal(recv(empty).screen,null);
   assert.equal(request(JSON.parse(B.act('earlier',''))).m,'view.page');
  });
