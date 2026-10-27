@@ -97,8 +97,9 @@ type Out is Data:
   # the kind of the record this end wrote (notice.bend's Policy.end), ""
   # when it wrote none or a quiet one; never an older record's. error and
   # reason: the ending turn's own logged error and why it ended
-  # (wnote.bend's Wn.err, Wn.end.reason), "" when none, read as it ends
-  TurnEnded{thread: String, state: String, alert: String, error: String, reason: String}
+  # (wnote.bend's Wn.cap, Wn.end.reason), "" when none, read as it ends;
+  # text: that turn's own newest reply, "" when it gave none
+  TurnEnded{thread: String, state: String, alert: String, error: String, reason: String, text: String}
   # the phones' island (Live Activity) is pushed again, no alert: a turn
   # started or changed, a thread went (Island.outs)
   IslandSync{}
@@ -209,7 +210,7 @@ def Island.told(os: List<&2, Out>) -> Bool:
   match os:
     case Nil{}:
       False{}
-    case TurnEnded{_, _, _, _, _} <> _:
+    case TurnEnded{_, _, _, _, _, _} <> _:
       True{}
     case _ <> t:
       Island.told(t)
@@ -3685,13 +3686,57 @@ def Answer.demo(busy: Bool) -> M.State:
 def Run.settle(+s: M.State, +now: Nat, +th: String) -> List<&2, M.Change>:
   Bool.pick(List<&2, M.Change>, MR.Run.is(s, th), [M.ThreadSettled{th, False{}, now}], Nil{})
 
+# Turn starts
+# ----------
+# A turn is known by where it started, not by a message from the user (a
+# wake starts one with none; a message queued while a turn runs is logged
+# inside it). Every step stored passes through Turn.marks (the server's
+# Hub.commit.w): each TurnChanged to Running is followed by
+# turn.from.<thread>, the thread's newest entry at that point (wnote.bend's
+# Wn.mark), which the turn's end scans back to (Wn.cap).
+
+def Turn.mark(+s: M.State, c: M.Change) -> List<&2, M.Change>:
+  match c:
+    case M.TurnChanged{+th, M.Running{}, +at}:
+      [M.SettingSet{WN.Wn.from.key(th), WN.Wn.mark(M.State.mine(s, th)), at}]
+    case _:
+      Nil{}
+
+def Turn.starts(cs: List<&2, M.Change>) -> Bool:
+  match cs:
+    case Nil{}:
+      False{}
+    case M.TurnChanged{_, M.Running{}, _} <> _:
+      True{}
+    case _ <> t:
+      Turn.starts(t)
+
+# s: the state as of c (the step's earlier changes folded in)
+def Turn.marks.go(cs: List<&2, M.Change>, +s: M.State, acc: List<&2, M.Change>) -> List<&2, M.Change>:
+  match cs:
+    case Nil{}:
+      List.reverse(&2, M.Change, acc)
+    case +c <> t:
+      Turn.marks.go(t, M.State.apply(s, c), List.append(&2, M.Change, Turn.mark(s, c), c <> acc))
+
+def Turn.marks.k(starts: Bool, +s: M.State, cs: List<&2, M.Change>) -> List<&2, M.Change>:
+  match starts:
+    case True{}:
+      Turn.marks.go(cs, s, Nil{})
+    case False{}:
+      cs
+
+# s: the state before the step
+def Turn.marks(+s: M.State, +cs: List<&2, M.Change>) -> List<&2, M.Change>:
+  Turn.marks.k(Turn.starts(cs), s, cs)
+
 # what a turn end tells the server: the end's own alert kind, and the
-# turn's error and why it ended, found by one scan (wnote.bend's Wn.cap;
-# none when no webhook is set)
+# turn's error, why it ended and its own reply, found by one scan from
+# the turn's start (wnote.bend's Wn.cap; none when no webhook is set)
 def Ended.turn(+thread: String, +state: String, +alert: String, g: WN.Got) -> Out:
   match g:
     case WN.Got{+err, +reply}:
-      TurnEnded{thread, state, alert, err, WN.Wn.end.reason(state, err, reply)}
+      TurnEnded{thread, state, alert, err, WN.Wn.end.reason(state, err, reply), reply}
 
 # post: the state after the step; the policy's record (core/notice.bend)
 # is written with it
@@ -4972,7 +5017,7 @@ def Launch.tell(+s: M.State, +now: Nat, +thread: String, st: Step) -> Step:
 def Retire.turn.f(run: Bool, +s: M.State, +now: Nat, +th: String, +from: String, st: Step) -> Step:
   match run:
     case True{}:
-      Launch.tell.from(s, now, th, from, Task.finish(s, now, th, Step.before([M.TurnChanged{th, M.Interrupted{}, now}], [TurnEnded{th, "stopped", "", "", ""}], st)))
+      Launch.tell.from(s, now, th, from, Task.finish(s, now, th, Step.before([M.TurnChanged{th, M.Interrupted{}, now}], [TurnEnded{th, "stopped", "", "", "", ""}], st)))
     case False{}:
       st
 
@@ -8166,7 +8211,7 @@ def Ended.stopped(os: List<&2, Out>, +th: String) -> Bool:
   match os:
     case Nil{}:
       False{}
-    case TurnEnded{+t, +state, _, _, _} <> r:
+    case TurnEnded{+t, +state, _, _, _, _} <> r:
       Bool.or(Bool.and(String.eq(t, th), String.eq(state, "stopped")), Ended.stopped(r, th))
     case _ <> r:
       Ended.stopped(r, th)

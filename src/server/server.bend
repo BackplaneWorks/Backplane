@@ -4066,8 +4066,8 @@ def Hub.drop_dead(ts: List<&2, String>, +inbox: Chan(Msg)) -> IO(Unit):
 def Hub.island(+home: String, st: M.State, +inbox: Chan(Msg)) -> IO(Unit):
   IO.bind(List<&2, String>, Unit, PU.Push.island.dead(home, st), ds => Hub.drop_dead(ds, inbox))
 
-def Hub.phone(+home: String, st: M.State, +thread: String, +state: String, +alert: String, +err: String, +reason: String, +inbox: Chan(Msg)) -> IO(Unit):
-  IO.bind(List<&2, String>, Unit, PU.Push.turn_ended.dead(home, st, thread, state, alert, err, reason), ds => Hub.drop_dead(ds, inbox))
+def Hub.phone(+home: String, st: M.State, +thread: String, +state: String, +alert: String, +err: String, +reason: String, +reply: String, +inbox: Chan(Msg)) -> IO(Unit):
+  IO.bind(List<&2, String>, Unit, PU.Push.turn_ended.dead(home, st, thread, state, alert, err, reason, reply), ds => Hub.drop_dead(ds, inbox))
 
 # an ask, a merge, a reminder or a note: the webhook, off the hub loop.
 # a settle or a failure is posted from TurnEnded, which has the end word
@@ -6965,7 +6965,7 @@ def Hub.commit.w(+cs: List<&2, M.Change>, h: Hub) -> IO(Hub & Wrote):
     case Nil{} _:
       IO.pure(Hub & Wrote, (h, Wrote{Nil{}, True{}, ""}))
     case _ Hub{+st, f, ls, cl, as, +inbox, +cfg, note}:
-      Hub.commit.gate(String.is_empty(BN.Bn.broken(Cfg.bn(cfg))), STR.Steer.all(cs, st, Live.of(cfg)), st, f, ls, cl, as, inbox, cfg, note)
+      Hub.commit.gate(String.is_empty(BN.Bn.broken(Cfg.bn(cfg))), B.Turn.marks(st, STR.Steer.all(cs, st, Live.of(cfg))), st, f, ls, cl, as, inbox, cfg, note)
 
 def Hub.commit.b(r: Hub & List<&2, String>, moved: Bool) -> IO(Hub & List<&2, String>):
   (h, fr) = r
@@ -10035,9 +10035,9 @@ def Hub.out(h: Hub, o: B.Out) -> IO(Hub):
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
     # the island only: the alert, if the turn raised one, is its own out
     # (Alerted), written with the thread's record
-    case Hub{+st, f, ls, cl, as, +inbox, +cfg, note} B.TurnEnded{+thread, +state, +alert, +err, +reason}:
+    case Hub{+st, f, ls, cl, as, +inbox, +cfg, note} B.TurnEnded{+thread, +state, +alert, +err, +reason, +reply}:
       do IO<Hub>:
-        IO.spawn(Unit, Hub.phone(Cfg.home(cfg), st, thread, state, alert, err, reason, inbox))
+        IO.spawn(Unit, Hub.phone(Cfg.home(cfg), st, thread, state, alert, err, reason, reply, inbox))
         Self.post(inbox, KProbe{False{}})
         Self.post(inbox, Release{})
         return Hub{st, f, ls, cl, as, inbox, cfg, note}

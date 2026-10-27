@@ -6,6 +6,7 @@ import ../src/core/model.bend as M
 import ../src/core/hub.bend as B
 import ../src/core/cmds.bend as CM
 import ../src/core/codec.bend as C2
+import ../src/core/wnote.bend as WN
 
 # Claude's turns by the command ledger (core/cmds.bend): both recorded
 # Claude Code 2.1.286 streams (test/fixtures/claude/) replayed line by line
@@ -61,7 +62,7 @@ def ends(os: List<&2, B.Out>) -> Nat:
   match os:
     case Nil{}:
       0n
-    case B.TurnEnded{_, _, _, _, _} <> t:
+    case B.TurnEnded{_, _, _, _, _, _} <> t:
       1n+ends(t)
     case _ <> t:
       ends(t)
@@ -369,6 +370,64 @@ def api_errs() -> IO(Unit):
     C.Check.str("api error: an ordinary reply logs none", api.show(B.Claude.api.err(True{}, "t1", 5n, 0n, api.line("{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}}"))), "")
     C.Check.str("api error: no text says the code", api.show(B.Claude.api.err(True{}, "t1", 5n, 0n, api.line("{\"type\":\"assistant\",\"error\":\"server_error\",\"message\":{\"content\":[]}}"))), "error|api|server_error")
 
+# Turn identity (hub.bend's Turn.marks, wnote.bend's Wn.cap): a turn is
+# known by where it started, whatever user messages it holds
+
+# a step stored as the server stores it (Hub.commit.w marks turn starts)
+def marked(+s: M.State, +cs: List<&2, M.Change>) -> M.State:
+  M.State.replay(B.Turn.marks(s, cs), s)
+
+def ended.show(o: B.Out) -> String:
+  match o:
+    case B.TurnEnded{_, +st, _, +e, +r, +x}:
+      st ++ "|" ++ e ++ "|" ++ r ++ "|" ++ x
+    case _:
+      ""
+
+def ended.of(+s: M.State, +state: String) -> String:
+  ended.show(B.Ended.turn("t1", state, "", WN.Wn.cap(s, "t1")))
+
+# a turn a person started hit a usage limit and was cut off
+def turns.first() -> List<&2, M.Change>:
+  [M.ProjectCreated{"p1", "p", "/p", 1n}, M.ThreadCreated{"t1", "p1", "x", M.Local{}, "", "", "claude", "", 1n},
+   M.SettingSet{"push.webhook.url", "https://example.com/h", 1n},
+   M.MessagePosted{"t1", "m1", M.User{}, "go", 2n}, M.TurnChanged{"t1", M.Running{}, 2n},
+   M.MessagePosted{"t1", "a1", M.Assistant{}, "an old reply", 3n},
+   M.ActivityLogged{"t1", "e1", "error", "result", "Claude AI usage limit reached|1792800000", 3n}, M.TurnChanged{"t1", M.Interrupted{}, 3n}]
+
+# then a wake (Wake.start: no message from the user) resumed it, and it
+# was cut off again with no error and no reply of its own
+def turns.wake() -> List<&2, M.Change>:
+  [M.TurnChanged{"t1", M.Running{}, 5n}, M.ActivityLogged{"t1", "k1", "info", "wake", "woke", 5n}, M.TurnChanged{"t1", M.Interrupted{}, 6n}]
+
+def turns.woke() -> M.State:
+  marked(marked(M.State.empty(), turns.first()), turns.wake())
+
+# a turn where the person queued a message while it ran (Hub.post.go logs
+# it at once), and which then failed on a model error
+def turns.queued() -> List<&2, M.Change>:
+  [M.ProjectCreated{"p1", "p", "/p", 1n}, M.ThreadCreated{"t1", "p1", "x", M.Local{}, "", "", "claude", "", 1n},
+   M.SettingSet{"push.webhook.url", "https://example.com/h", 1n},
+   M.MessagePosted{"t1", "m0", M.User{}, "earlier", 1n}, M.TurnChanged{"t1", M.Running{}, 1n},
+   M.ActivityLogged{"t1", "e0", "error", "result", "API Error: 500", 1n}, M.TurnChanged{"t1", M.Failed{}, 1n},
+   M.MessagePosted{"t1", "m1", M.User{}, "go", 2n}, M.TurnChanged{"t1", M.Running{}, 2n},
+   M.MessagePosted{"t1", "a1", M.Assistant{}, "There's an issue with the selected model (no-such-model)", 3n},
+   M.MessagePosted{"t1", "m2", M.User{}, "and then this", 4n},
+   M.ActivityLogged{"t1", "api1", "error", "api", "There's an issue with the selected model (no-such-model)", 5n}, M.TurnChanged{"t1", M.Interrupted{}, 5n}]
+
+def turns.mark(+s: M.State) -> String:
+  M.Setting.get(s, WN.Wn.from.key("t1"), "")
+
+def turns() -> IO(Unit):
+  do IO<Unit>:
+    C.Check.str("turns: a start is marked", turns.mark(marked(M.State.empty(), turns.first())), "@m1")
+    C.Check.str("turns: no start, no mark", Nat.show(List.length(&2, M.Change, B.Turn.marks(M.State.empty(), [M.TurnChanged{"t1", M.Failed{}, 1n}]))), "1")
+    C.Check.str("turns: the first turn's own end", ended.of(marked(M.State.empty(), turns.first()), "interrupted"), "interrupted|Claude AI usage limit reached|1792800000|limit|an old reply")
+    C.Check.str("turns: a wake is marked at its start", turns.mark(turns.woke()), "@e1")
+    C.Check.str("turns: a resumed wake is not the old limit", ended.of(turns.woke(), "interrupted"), "interrupted|||interrupted|")
+    C.Check.str("turns: a queued message keeps the model error", ended.of(marked(M.State.empty(), turns.queued()), "interrupted"), "interrupted|There's an issue with the selected model (no-such-model)|error|There's an issue with the selected model (no-such-model)")
+    C.Check.str("turns: a queued message does not start a turn", turns.mark(marked(M.State.empty(), turns.queued())), "@m1")
+
 def main() -> IO(Unit):
   do IO<Unit>:
     +f1 : List<&2, String> <- file("test/fixtures/claude/bg-wake.jsonl")
@@ -386,3 +445,4 @@ def main() -> IO(Unit):
     run(fails(), Nil{}, sim0(), "a failed command", s => IO.pure(Unit, Unit{}))
     held()
     api_errs()
+    turns()

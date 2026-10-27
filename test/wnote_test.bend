@@ -73,13 +73,17 @@ def long.go(n: Nat, acc: List<&2, M.Entry>) -> List<&2, M.Entry>:
 def long(n: Nat, +last: M.Entry) -> List<&2, M.Entry>:
   long.go(n, [last])
 
-# a turn that failed (its error logged), with push.webhook.url as given
-def hooked(+url: String) -> M.State:
+# a turn that failed (its error logged), with push.webhook.url and the
+# turn's start mark as given
+def hooked.m(+url: String, +mark: String) -> M.State:
   M.State.replay([M.ProjectCreated{"p", "P", "/tmp/p", 1n},
     M.ThreadCreated{"t1", "p", "Work", M.Local{}, "", "/tmp/p", "claude", "", 1n},
-    M.SettingSet{"push.webhook.url", url, 1n},
+    M.SettingSet{"push.webhook.url", url, 1n}, M.SettingSet{WN.Wn.from.key("t1"), mark, 2n},
     M.MessagePosted{"t1", "m1", M.User{}, "go", 2n}, M.TurnChanged{"t1", M.Running{}, 2n},
     M.ActivityLogged{"t1", "e1", "error", "result", "API Error: 500", 3n}, M.TurnChanged{"t1", M.Failed{}, 3n}], M.State.empty())
+
+def hooked(+url: String) -> M.State:
+  hooked.m(url, "@m1")
 
 def main() -> IO(Unit):
   do IO<Unit>:
@@ -165,39 +169,42 @@ def main() -> IO(Unit):
     C.Check.str("private failure posts nothing", yn(WN.Wn.due.end(NO.Policy.kind(NO.Policy.end(managed(), 4n, "worker", "failed")), "failed", True{}, WN.Wn.private(managed(), "worker"))), "no")
     C.Check.str("private interrupt posts nothing", yn(WN.Wn.due.end("", "interrupted", True{}, True{})), "no")
     C.Check.str("the person's thread is not private", yn(WN.Wn.private(s1, "t1")), "no")
-    C.Check.str("older turn's error not taken", WN.Wn.err(older(), "t1"), "")
-    C.Check.str("interrupt keeps its own reason", WN.Wn.reason("interrupted", WN.Wn.err(older(), "t1")), "interrupted")
-    C.Check.str("this turn's error taken", WN.Wn.err(current(), "t1"), "API Error: 500")
-    C.Check.str("this turn's error classified", WN.Wn.reason("failed", WN.Wn.err(current(), "t1")), "error")
+    C.Check.str("older turn's error not taken", WN.Wn.err(older(), "@m2", "t1"), "")
+    C.Check.str("interrupt keeps its own reason", WN.Wn.reason("interrupted", WN.Wn.err(older(), "@m2", "t1")), "interrupted")
+    C.Check.str("this turn's error taken", WN.Wn.err(current(), "@m2", "t1"), "API Error: 500")
+    C.Check.str("this turn's error classified", WN.Wn.reason("failed", WN.Wn.err(current(), "@m2", "t1")), "error")
     C.Check.str("absent default is unsigned", Nat.show(WN.Wn.mode(WN.Wn.wants("", False{}), "")), "1")
     C.Check.str("unreadable default posts nothing", Nat.show(WN.Wn.mode(WN.Wn.wants("", True{}), "")), "0")
     C.Check.str("readable default signs", Nat.show(WN.Wn.mode(WN.Wn.wants(" ", True{}), "k")), "2")
     C.Check.str("named empty file posts nothing", Nat.show(WN.Wn.mode(WN.Wn.wants("/tmp/s", True{}), "")), "0")
     C.Check.str("short hex is raw bytes", WN.Wn.sig("deadbeef", 10n, body), "sha256=068662f0b5260bd58dfcd9a4df964a0b956e7a36d24dfe5430ff2ffe6f74a351")
     C.Check.str("odd-length hex is text", WN.Wn.sig("deadbee", 10n, body), "sha256=b76febb25b10ab2e866cdf2b62c0a360a30ffa30286401d08f7f5ed7972de0b2")
-    C.Check.str("reply is this turn's", WN.Wn.reply(limited(), "t1"), "Claude AI usage limit reached|1792800000")
-    C.Check.str("no reply in this turn", WN.Wn.reply(older(), "t1"), "working on it")
-    C.Check.str("limit kept from the reply", WN.Wn.end.reason("interrupted", WN.Wn.err(limited(), "t1"), WN.Wn.reply(limited(), "t1")), "limit")
+    C.Check.str("reply is this turn's", WN.Wn.reply(limited(), "@m3", "t1"), "Claude AI usage limit reached|1792800000")
+    C.Check.str("no reply in this turn", WN.Wn.reply(older(), "@m2", "t1"), "working on it")
+    C.Check.str("limit kept from the reply", WN.Wn.end.reason("interrupted", WN.Wn.err(limited(), "@m3", "t1"), WN.Wn.reply(limited(), "@m3", "t1")), "limit")
     C.Check.str("failed with a limit reply", WN.Wn.end.reason("failed", "", "You've hit your limit · resets 8pm"), "limit")
     C.Check.str("ordinary reply is no error word", WN.Wn.end.reason("failed", "", "I could not finish"), "error")
     C.Check.str("ordinary reply on an interrupt", WN.Wn.end.reason("interrupted", "", "working on it"), "interrupted")
     C.Check.str("logged error wins over the reply", WN.Wn.end.reason("failed", "API Error: 500", "usage limit reached"), "error")
-    C.Check.str("older turn's limit not taken", WN.Wn.end.reason("interrupted", WN.Wn.err(older(), "t1"), WN.Wn.reply(older(), "t1")), "interrupted")
-    C.Check.str("model error is the turn's", WN.Wn.err(badmodel(), "t1"), "There's an issue with the selected model (no-such-model-webhook-test)")
-    C.Check.str("interrupt on a model error is an error", WN.Wn.end.reason("interrupted", WN.Wn.err(badmodel(), "t1"), WN.Wn.reply(badmodel(), "t1")), "error")
-    C.Check.str("failed on a model error is an error", WN.Wn.end.reason("failed", WN.Wn.err(badmodel(), "t1"), ""), "error")
+    C.Check.str("older turn's limit not taken", WN.Wn.end.reason("interrupted", WN.Wn.err(older(), "@m2", "t1"), WN.Wn.reply(older(), "@m2", "t1")), "interrupted")
+    C.Check.str("model error is the turn's", WN.Wn.err(badmodel(), "@m4", "t1"), "There's an issue with the selected model (no-such-model-webhook-test)")
+    C.Check.str("interrupt on a model error is an error", WN.Wn.end.reason("interrupted", WN.Wn.err(badmodel(), "@m4", "t1"), WN.Wn.reply(badmodel(), "@m4", "t1")), "error")
+    C.Check.str("failed on a model error is an error", WN.Wn.end.reason("failed", WN.Wn.err(badmodel(), "@m4", "t1"), ""), "error")
     C.Check.str("interrupt with a limit error stays limit", WN.Wn.end.reason("interrupted", "usage limit reached", ""), "limit")
     C.Check.str("plain interrupt stays interrupted", WN.Wn.end.reason("interrupted", "", ""), "interrupted")
-    C.Check.str("no reply of its own: not the older turn's", WN.Wn.end.text("interrupted", WN.Wn.reply(noreply(), "t1")), "Failed")
-    C.Check.str("interrupted with its own reply", WN.Wn.end.text("interrupted", WN.Wn.reply(older(), "t1")), "working on it")
+    C.Check.str("no reply of its own: not the older turn's", WN.Wn.end.text("interrupted", WN.Wn.reply(noreply(), "@m5", "t1")), "Failed")
+    C.Check.str("interrupted with its own reply", WN.Wn.end.text("interrupted", WN.Wn.reply(older(), "@m2", "t1")), "working on it")
     C.Check.str("failed says Failed", WN.Wn.end.text("failed", "working on it"), "Failed")
     C.Check.str("settled with no reply", WN.Wn.end.text("completed", ""), "Finished")
     C.Check.str("settled with its reply", WN.Wn.end.text("completed", "done"), "done")
     C.Check.str("a stop has no reason", WN.Wn.end.reason("stopped", "", "usage limit reached"), "")
-    C.Check.str("long history: stops at the turn's start", WN.Wn.err(M.Act{"e9", "t1", "error", "result", "now failing", 10n} <> (M.Msg{"m9", "t1", M.User{}, "go", 9n} <> long(20000n, M.Act{"e0", "t1", "error", "result", "oldest", 0n})), "t1"), "now failing")
-    C.Check.str("long history: an empty turn reads none", WN.Wn.err(M.Msg{"m9", "t1", M.User{}, "go", 9n} <> long(20000n, M.Act{"e0", "t1", "error", "result", "oldest", 0n}), "t1"), "")
-    C.Check.str("long history: walked to its end without the stack", WN.Wn.err(long(20000n, M.Act{"e0", "t1", "error", "result", "oldest", 0n}), "t1"), "oldest")
-    C.Check.str("long history: reply found once both are", WN.Wn.reply(M.Msg{"a9", "t1", M.Assistant{}, "done", 11n} <> (M.Act{"e9", "t1", "error", "result", "now failing", 10n} <> long(20000n, M.Msg{"m0", "t1", M.User{}, "go", 0n})), "t1"), "done")
+    C.Check.str("long history: stops at the turn's start", WN.Wn.err(M.Act{"e9", "t1", "error", "result", "now failing", 10n} <> (M.Msg{"m9", "t1", M.User{}, "go", 9n} <> long(20000n, M.Act{"e0", "t1", "error", "result", "oldest", 0n})), "@m9", "t1"), "now failing")
+    C.Check.str("long history: an empty turn reads none", WN.Wn.err(M.Msg{"m9", "t1", M.User{}, "go", 9n} <> long(20000n, M.Act{"e0", "t1", "error", "result", "oldest", 0n}), "@m9", "t1"), "")
+    C.Check.str("long history: walked to its end without the stack", WN.Wn.err(long(20000n, M.Act{"e0", "t1", "error", "result", "oldest", 0n}), "@none", "t1"), "oldest")
+    C.Check.str("long history: reply found once both are", WN.Wn.reply(M.Msg{"a9", "t1", M.Assistant{}, "done", 11n} <> (M.Act{"e9", "t1", "error", "result", "now failing", 10n} <> long(20000n, M.Msg{"m0", "t1", M.User{}, "go", 0n})), "@m0", "t1"), "done")
     C.Check.str("webhook off: nothing read", WN.Wn.got.err(WN.Wn.cap(hooked(""), "t1")), "")
     C.Check.str("webhook blank: nothing read", WN.Wn.got.err(WN.Wn.cap(hooked("  "), "t1")), "")
     C.Check.str("webhook on: the turn's error", WN.Wn.got.err(WN.Wn.cap(hooked("https://example.com/h"), "t1")), "API Error: 500")
+    C.Check.str("no start mark: nothing guessed", WN.Wn.got.err(WN.Wn.cap(hooked.m("https://example.com/h", ""), "t1")), "")
+    C.Check.str("mark of an empty thread", WN.Wn.mark(Nil{}), "@")
+    C.Check.str("mark is the newest entry", WN.Wn.mark(older()), "@a2")

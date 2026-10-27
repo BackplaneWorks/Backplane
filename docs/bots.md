@@ -306,13 +306,18 @@ itself (`ask`, `merged`, `reminder`, `note`). `kind` is that alert's kind.
 `failed`, `interrupted`, or `stopped`. `reason` says why a broken turn
 ended: `limit` (a usage, rate or quota limit), `error` (any other
 failure) or `interrupted`. The hub reads it when the turn ends and
-carries it, with the turn's error, in `TurnEnded`: from an error the
-ending turn logged, or, with none, a limit's words in that turn's own
-reply (never an older turn's); it is empty otherwise. A message already waiting does not replace it when
+carries it, with the turn's error and its own reply, in `TurnEnded`:
+from an error the ending turn logged, or, with none, a limit's words in
+that turn's own reply (never an older turn's); it is empty otherwise. A
+turn is where it started: each start is recorded (the setting
+`turn.from.<thread>`, the thread's newest entry then), so a wake that
+starts one with no message, or a message queued while it runs, does not
+move it; a turn with no start recorded carries nothing. This is read only
+when a webhook is set. A message already waiting does not replace it when
 it starts the next turn. For the other alerts, `state` is the thread's turn
 at the time (`running`, `idle`, …). `text` for a settle or a failure is
 the first line of the error the turn logged, else `Failed`, or the first
-line of the last reply; for the others it is the
+line of that turn's own reply; for the others it is the
 record's own text (the ask, the merge url, the reminder, the note). A POST
 that fails is logged (`backplane: push webhook -> …`) and does not affect
 the turn. With `notify.all` on, a room exchange the older rule alerts is a

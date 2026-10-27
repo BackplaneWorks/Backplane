@@ -240,9 +240,13 @@ def Wn.reason(+state: String, +err: String) -> String:
 
 # The ending turn's error and reply, read by the hub when the turn ends
 # (hub.bend's Ended.out.p) and carried in TurnEnded, so the webhook never
-# searches history. The entries are newest first; the thread's newest
-# message from the user started the ending turn, so a scan stops there and
-# never takes an older turn's.
+# searches history. The entries are newest first. A turn's identity is
+# its start, not a message from the user: a wake starts a turn with none,
+# and a message queued while a turn runs is logged inside it. So when a
+# turn starts (any TurnChanged to Running, hub.bend's Turn.marks) the hub
+# records the newest entry the thread had then, as turn.from.<thread> =
+# "@<id>" ("@" when it had none). A scan stops at that entry and never
+# takes an older turn's error or reply.
 #
 # One scan finds both, and stops at the boundary or as soon as both are
 # found: each step's stop is decided before the next call, and the call is
@@ -286,38 +290,67 @@ def Wn.got(e: M.Entry, +thread: String, +g: Got) -> Got:
     case _:
       g
 
-# whether the scan stops before es: at the thread's message from the user
-# that started the turn, at the end, or with both found
-def Wn.stop(es: List<&2, M.Entry>, +thread: String, g: Got) -> Bool:
+def Wn.id(e: M.Entry) -> String:
+  match e:
+    case M.Msg{+id, _, _, _, _}:
+      id
+    case M.Act{+id, _, _, _, _, _}:
+      id
+
+# the setting a turn's start is kept under
+def Wn.from.key(+thread: String) -> String:
+  "turn.from." ++ thread
+
+# a turn's start mark from the thread's entries as it starts (newest first)
+def Wn.mark(es: List<&2, M.Entry>) -> String:
   match es:
-    case M.Msg{_, +th, M.User{}, _, _} <> _:
-      Bool.or(String.eq(th, thread), Wn.got.done(g))
-    case _ <> _:
-      Wn.got.done(g)
+    case Nil{}:
+      "@"
+    case e <> _:
+      "@" ++ Wn.id(e)
+
+# whether the scan stops before es: at the entry that was newest when the
+# turn started (mark), at the end, or with both found
+def Wn.stop(es: List<&2, M.Entry>, +mark: String, g: Got) -> Bool:
+  match es:
+    case e <> _:
+      Bool.or(String.eq("@" ++ Wn.id(e), mark), Wn.got.done(g))
     case Nil{}:
       True{}
 
-def Wn.scan(es: List<&2, M.Entry>, stop: Bool, +thread: String, +g: Got) -> Got:
+def Wn.scan(es: List<&2, M.Entry>, stop: Bool, +mark: String, +thread: String, +g: Got) -> Got:
   match es stop:
     case +e <> +t False{}:
-      Wn.scan(t, Wn.stop(t, thread, Wn.got(e, thread, g)), thread, Wn.got(e, thread, g))
+      Wn.scan(t, Wn.stop(t, mark, Wn.got(e, thread, g)), mark, thread, Wn.got(e, thread, g))
     case _ _:
       g
 
-# the ending turn's error and reply
-def Wn.span(+es: List<&2, M.Entry>, +thread: String) -> Got:
-  Wn.scan(es, Wn.stop(es, thread, Wn.got.none()), thread, Wn.got.none())
+# the error and reply of the turn that started at mark
+def Wn.span(+es: List<&2, M.Entry>, +mark: String, +thread: String) -> Got:
+  Wn.scan(es, Wn.stop(es, mark, Wn.got.none()), mark, thread, Wn.got.none())
 
-def Wn.err(+es: List<&2, M.Entry>, +thread: String) -> String:
-  Wn.got.err(Wn.span(es, thread))
+def Wn.err(+es: List<&2, M.Entry>, +mark: String, +thread: String) -> String:
+  Wn.got.err(Wn.span(es, mark, thread))
 
-def Wn.reply(+es: List<&2, M.Entry>, +thread: String) -> String:
-  Wn.got.reply(Wn.span(es, thread))
+def Wn.reply(+es: List<&2, M.Entry>, +mark: String, +thread: String) -> String:
+  Wn.got.reply(Wn.span(es, mark, thread))
+
+# a turn with no start mark (one that started before marks were kept) is
+# not guessed at: nothing is carried, and the notice says its state
+def Wn.cap.m(known: Bool, +mark: String, +s: M.State, +thread: String) -> Got:
+  match known:
+    case True{}:
+      Wn.span(M.State.mine(s, thread), mark, thread)
+    case False{}:
+      Wn.got.none()
+
+def Wn.cap.mk(+mark: String, +s: M.State, +thread: String) -> Got:
+  Wn.cap.m(Bool.not(String.is_empty(mark)), mark, s, thread)
 
 def Wn.cap.k(on: Bool, +s: M.State, +thread: String) -> Got:
   match on:
     case True{}:
-      Wn.span(M.State.mine(s, thread), thread)
+      Wn.cap.mk(M.Setting.get(s, Wn.from.key(thread), ""), s, thread)
     case False{}:
       Wn.got.none()
 
