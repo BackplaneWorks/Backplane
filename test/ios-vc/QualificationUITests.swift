@@ -14,8 +14,18 @@ final class QualificationUITests: XCTestCase {
     private func closeRestoredViewer(_ app: XCUIApplication) {
         let close = app.buttons["viewer.close"]
         if close.exists {
-            XCTAssertTrue(close.isHittable, "A restored viewer must allow returning to its thread")
-            close.tap()
+            let settled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == NO OR (enabled == YES AND hittable == YES)"), object: close)
+            let result = XCTWaiter.wait(for: [settled], timeout: 10)
+            let visible = close.exists
+            print("safe-restored-viewer wait-complete=\(result == .completed) close-exists=\(visible)")
+            if result != .completed && app.state == .runningForeground && !app.textFields["pair.address"].exists {
+                let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "restored-viewer-stuck"; shot.lifetime = .keepAlways; add(shot)
+            }
+            XCTAssertEqual(result, .completed, "A restored viewer must become dismissible or disappear")
+            if visible {
+                XCTAssertTrue(close.isEnabled && close.isHittable, "A restored viewer must allow returning to its thread")
+                close.tap()
+            }
         }
     }
     override func setUp() {
@@ -330,6 +340,7 @@ final class QualificationUITests: XCTestCase {
 
     func testExplicitReconnectAfterOfflineClose() {
         let app = XCUIApplication()
+        app.terminate()
         app.launchEnvironment["BACKPLANE_QUALIFICATION"] = "1"
         app.launch()
         XCTAssertTrue(app.descendants(matching: .any)["qualification.connection.parked"].waitForExistence(timeout: 20))
@@ -349,6 +360,7 @@ final class QualificationUITests: XCTestCase {
 
     func testOfflineViewerClose() {
         let app = XCUIApplication()
+        app.terminate()
         app.launchEnvironment["BACKPLANE_QUALIFICATION"] = "1"
         app.launchEnvironment["BACKPLANE_SELECT"] = "t1790229700-1088"
         app.launch()
@@ -381,6 +393,14 @@ final class QualificationUITests: XCTestCase {
 
     func testExistingBoard3DMesh() {
         let app = XCUIApplication()
+        addTeardownBlock {
+            self.qualificationStatus(app, label: "3d-final")
+            print("safe-3d-final foreground=\(app.state == .runningForeground) viewer-close=\(app.buttons["viewer.close"].exists)")
+            if app.state == .runningForeground && !app.textFields["pair.address"].exists {
+                let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "3d-final"; shot.lifetime = .keepAlways; self.add(shot)
+            }
+        }
+        app.terminate()
         app.launchEnvironment["BACKPLANE_QUALIFICATION"] = "1"
         app.launchEnvironment["BACKPLANE_SELECT"] = "t1790229700-1088"
         app.launch()
