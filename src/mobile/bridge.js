@@ -319,8 +319,8 @@ function direct(cmds, draw, updates = []) {
   return JSON.stringify({ screen: canDraw ? bubMovingScreen() : null, cmds, sync: syncUpdates.splice(0).concat(updates), deadline: currentDeadline() });
 }
 
-function expired() {
-  thin.expire();
+function expired(followups = false) {
+  thin.expire(followups);
   const cs = [];
   for (const failure of recent.expire()) {
     cs.push(...failure.cmds);
@@ -832,7 +832,11 @@ globalThis.Backplane = {
   reflowAlloys() { return App.reflow_alloys(); },
   reflow(profile, alloy) { return App.reflow_plan(String(profile), String(alloy)); },
   headerKeys() { return JSON.stringify({ keys: KEYS, words: WORDS }); },
-  pulse() { return direct(expired(), false); },
+  // Older native engines retain the existing immediate-refresh protocol.
+  publicationAck() { thin.publicationAck = true; },
+  // Engine calls this only after it hands a decoded current screen out.
+  published() { return thin.published(); },
+  pulse() { return direct(expired(true), false); },
   connection(key, epoch, mode) {
     bubLive.delete(key);bubMoves.disconnect(key);
     thin.connection(key, String(epoch), mode);

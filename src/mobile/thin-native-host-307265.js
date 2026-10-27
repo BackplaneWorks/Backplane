@@ -88,6 +88,8 @@ export class NativeThinHost307265 {
     this.states = new Map(); this.paired = new Set(); this.current = '';
     this.pending = new Map(); this.ordinary = new Map(); this.commands = []; this.sync = [];
     this.commandOwners = new WeakMap();
+    // Opted in only by a native engine that acknowledges delivered screens.
+    this.publicationAck = false;
     // The outbox: a message sent is kept until its hub answers. A drop
     // before the answer (or a send while the socket is down, which the app
     // cannot deliver) leaves it here; each view connection that presents
@@ -120,7 +122,7 @@ export class NativeThinHost307265 {
         // pages a send overtook (their replies are dropped)
         cursor: '', back: [], paging: null, overtaken: new Set(),
         revision: 0, drafts, queue: [], active: null, messages: new MessageParts(), findRevision: 0, findCloseOnce: false, registrations: new Map(),
-        shownTarget: null, deferredNavigation: null };
+        shownTarget: null, deferredNavigation: null, followup: null };
       this.states.set(hub, value);
     }
     return value;
@@ -238,14 +240,14 @@ export class NativeThinHost307265 {
     for (const [id, call] of this.ordinary) if (call.hub === hub) this.ordinary.delete(id);
     if (s) {
       s.ready = false; s.greeted = false; s.active = null; s.queue = []; s.messages.clear();
-      s.deferredNavigation = null; s.shownTarget = null;
+      s.deferredNavigation = null; s.shownTarget = null; s.followup = null;
       s.registrations.clear();
     }
   }
 
   fail(hub, reason) {
     const s = this.states.get(hub);
-    if (s) { s.ready = false; s.queue = []; s.deferredNavigation = null; }
+    if (s) { s.ready = false; s.queue = []; s.deferredNavigation = null; s.followup = null; }
     this.sync.push({ hub, phase: 'failed', mode: 'view-v1', detail: String(reason), remoteReady: false });
   }
 
@@ -256,6 +258,7 @@ export class NativeThinHost307265 {
     if (!call) { this.fail(s.hub, 'Missing shared request'); return false; }
     this.pending.set(result.id, { hub: s.hub, epoch: s.epoch, revision: s.revision, input: copy(call.input), acks: [], ...extra });
     if (presentation(call.method)) {
+      s.followup = null;
       s.ready = false;
       this.sync.push({ hub: s.hub, phase: 'presenting', detail: 'view-v1', mode: 'view-v1',
         requestRevision: call.revision, remoteReady: false });
@@ -291,6 +294,7 @@ export class NativeThinHost307265 {
 
   select(s, target, session) {
     s.deferredNavigation = null;
+    s.followup = null;
     s.target = copy(target); s.session = copy(session); s.window = null;
     s.cursor = ''; s.back = []; s.paging = null;
     s.queue = []; s.messages.clear();
@@ -413,7 +417,7 @@ export class NativeThinHost307265 {
     if (envelope?.t === 'view') return this.greeting(hub, envelope, epoch);
     if (envelope?.t === 'view.changed') {
       if (s.greeted && this.client.links.get(hub)?.viewId) this.issue(s, this.client.changed(hub, envelope, this.requestSession(s.session, 'view.update', s.target), s.anchor,
-        !!s.active || !!s.deferredNavigation || s.queue.length > 0));
+        !!s.active || !!s.deferredNavigation || s.queue.length > 0 || !!s.followup));
       return true;
     }
     if (envelope?.t !== 'reply') {
@@ -449,7 +453,7 @@ export class NativeThinHost307265 {
           } catch { this.api.warning?.(hub, 'Message continuation is stale'); }
         }
       }
-      if (result.refreshDue && s.ready && !s.active && !s.deferredNavigation && !s.queue.length) this.update(s);
+      if (result.refreshDue && s.ready && !s.active && !s.deferredNavigation && !s.queue.length) this.deferRefresh(s);
       return true;
     }
     let response = copy(r.session);
@@ -517,7 +521,7 @@ export class NativeThinHost307265 {
     this.pump(s);
     // Person work gets the next request; ThinViews retains invalidation until
     // a later accepted picture covers it, or a new selection retires it.
-    if (result.refreshDue && s.ready) this.update(s);
+    if (result.refreshDue && s.ready) this.deferRefresh(s);
     return true;
   }
 
@@ -564,6 +568,24 @@ export class NativeThinHost307265 {
     if (s.greeted && l?.viewId) this.issue(s, this.client.request(s.hub, 'view.update', { session: this.requestSession(s.session, 'view.update', s.target), anchor: s.anchor, viewRevision: l.viewRevision }));
   }
 
+  // Do not retire an accepted picture until the native worker has handed a
+  // screen out. A quiet or discarded screen waits for the next real flush.
+  deferRefresh(s) {
+    if (!this.publicationAck) { this.update(s); return; }
+    const link = this.client.links.get(s.hub);
+    if (s.followup && s.followup.epoch === s.epoch && same(s.followup.target, s.target) && s.followup.revision === link?.revision) return;
+    if (link && s.ready) s.followup = { epoch: s.epoch, target: copy(s.target), revision: link.revision, at: null };
+  }
+
+  published() {
+    for (const s of this.states.values()) {
+      const f = s.followup, link = this.client.links.get(s.hub);
+      if (f && f.at === null && s.ready && s.epoch === f.epoch && same(s.target, f.target) && link?.revision === f.revision)
+        f.at = this.api.now();
+    }
+    return this.deadline();
+  }
+
   register(hub, args) {
     const s = this.states.get(hub);
     if (!s || s.mode !== 'view-v1') return false;
@@ -587,7 +609,7 @@ export class NativeThinHost307265 {
     this.enqueue(s.hub, this.api.command(s.hub, command, {}, false));
   }
 
-  expire() {
+  expire(followups = false) {
     for (const call of this.client.expire()) {
       const metadata = this.pending.get(call.id), s = this.states.get(call.hub);
       this.pending.delete(call.id);
@@ -595,11 +617,20 @@ export class NativeThinHost307265 {
       if (metadata && presentation(call.method) && this.isCurrent(metadata)) this.fail(call.hub, 'View request timed out; not resent');
       else if (s) this.pump(s);
     }
+    if (followups) for (const s of this.states.values()) {
+      const f = s.followup, link = this.client.links.get(s.hub);
+      if (!f || f.at === null || f.at > this.api.now()) continue;
+      s.followup = null;
+      if (s.ready && !s.active && !s.deferredNavigation && !s.queue.length && s.epoch === f.epoch &&
+          same(s.target, f.target) && link?.revision === f.revision && link.invalidated) this.update(s);
+    }
   }
 
   deadline() {
     const calls = [...this.client.calls.values()];
-    return calls.length ? Math.min(...calls.map(c => c.began + 5000)) : null;
+    const deadlines = calls.map(c => c.began + 5000);
+    for (const s of this.states.values()) if (s.followup?.at != null) deadlines.push(s.followup.at);
+    return deadlines.length ? Math.min(...deadlines) : null;
   }
 
   savePresentation() {
