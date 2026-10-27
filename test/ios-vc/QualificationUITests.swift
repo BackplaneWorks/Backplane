@@ -406,7 +406,11 @@ final class QualificationUITests: XCTestCase {
         app.launch()
         closeRestoredViewer(app)
         XCTAssertTrue(app.descendants(matching: .any)["thread.composer"].waitForExistence(timeout: 60))
-        XCTAssertTrue(app.descendants(matching: .any)["qualification.connection.ready"].waitForExistence(timeout: 60))
+        let ready = app.descendants(matching: .any)["qualification.connection.ready"].waitForExistence(timeout: 60)
+        qualificationStatus(app, label: "3d-initial-readiness")
+        print("safe-3d-initial foreground=\(app.state == .runningForeground) pair-field=\(app.textFields["pair.address"].exists) ready=\(ready) close=\(app.buttons["viewer.close"].exists)")
+        if app.state == .runningForeground && !app.textFields["pair.address"].exists { let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "3d-initial-readiness"; shot.lifetime = .keepAlways; add(shot) }
+        XCTAssertTrue(ready, "Initial real thread must become ready before opening the viewer")
         let open = app.buttons["viewer.open"]
         XCTAssertTrue(open.waitForExistence(timeout: 15)); open.tap()
         let choice = app.buttons["viewer.choice.3d"]
@@ -426,6 +430,106 @@ final class QualificationUITests: XCTestCase {
         from.press(forDuration: 0.2, thenDragTo: to)
         XCTAssertTrue(mesh.waitForExistence(timeout: 20), "3D mesh must remain loaded after the orbit gesture")
         let after = XCTAttachment(screenshot: app.screenshot()); after.name = "saved-board-3d-after-orbit"; after.lifetime = .keepAlways; add(after)
+    }
+
+    func testExistingBoard3DZoom() {
+        let app = XCUIApplication()
+        app.terminate()
+        app.launchEnvironment["BACKPLANE_QUALIFICATION"] = "1"
+        app.launchEnvironment["BACKPLANE_SELECT"] = "t1790229700-1088"
+        app.launch()
+        closeRestoredViewer(app)
+        XCTAssertTrue(app.descendants(matching: .any)["thread.composer"].waitForExistence(timeout: 60))
+        XCTAssertTrue(app.descendants(matching: .any)["qualification.connection.ready"].waitForExistence(timeout: 60))
+        let open = app.buttons["viewer.open"]
+        XCTAssertTrue(open.waitForExistence(timeout: 15)); open.tap()
+        let choice = app.buttons["viewer.choice.3d"]
+        XCTAssertTrue(choice.waitForExistence(timeout: 10)); choice.tap()
+        let close = app.buttons["viewer.close"]
+        XCTAssertTrue(close.waitForExistence(timeout: 15))
+        let mesh = app.descendants(matching: .any)["viewer.mesh.ready"]
+        XCTAssertTrue(mesh.waitForExistence(timeout: 90), "The decoded mesh must be loaded before zoom")
+        let before = XCTAttachment(screenshot: app.screenshot()); before.name = "saved-board-3d-before-zoom"; before.lifetime = .keepAlways; add(before)
+        app.pinch(withScale: 1.7, velocity: 1.0)
+        XCTAssertTrue(mesh.waitForExistence(timeout: 20), "The decoded mesh must remain loaded after zoom")
+        let after = XCTAttachment(screenshot: app.screenshot()); after.name = "saved-board-3d-after-zoom"; after.lifetime = .keepAlways; add(after)
+        XCTAssertTrue(close.isEnabled && close.isHittable)
+        close.tap()
+        XCTAssertFalse(close.waitForExistence(timeout: 5))
+    }
+
+    private func openDroppedViewer(_ kind: String, drop: String) -> XCUIApplication {
+        let app = XCUIApplication()
+        app.terminate()
+        app.launchEnvironment["BACKPLANE_QUALIFICATION"] = "1"
+        app.launchEnvironment["BACKPLANE_QUALIFICATION_DROP_PLOTS"] = drop
+        app.launchEnvironment["BACKPLANE_SELECT"] = "t1790229700-1088"
+        app.launch()
+        closeRestoredViewer(app)
+        XCTAssertTrue(app.descendants(matching: .any)["thread.composer"].waitForExistence(timeout: 60))
+        XCTAssertTrue(app.descendants(matching: .any)["qualification.connection.ready"].waitForExistence(timeout: 60))
+        let open = app.buttons["viewer.open"]
+        XCTAssertTrue(open.waitForExistence(timeout: 15)); open.tap()
+        let choice = app.buttons["viewer.choice." + kind]
+        XCTAssertTrue(choice.waitForExistence(timeout: 10)); choice.tap()
+        XCTAssertTrue(app.buttons["viewer.close"].waitForExistence(timeout: 20))
+        return app
+    }
+
+    func testMissingBoardTimeoutAndRetry() {
+        let app = openDroppedViewer("board", drop: "all")
+        XCTAssertTrue(app.descendants(matching: .any)["viewer.loading"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.descendants(matching: .any)["viewer.error"].waitForExistence(timeout: 45), "Missing geometry must time out")
+        qualificationStatus(app, label: "missing-board-error")
+        let retry = app.buttons["viewer.retry"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 5) && retry.isHittable)
+        if !app.textFields["pair.address"].exists { let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "missing-board-timeout"; shot.lifetime = .keepAlways; add(shot) }
+        retry.tap()
+        qualificationStatus(app, label: "missing-board-after-tap")
+        let recovered = app.descendants(matching: .any)["viewer.ready"].waitForExistence(timeout: 90)
+        qualificationStatus(app, label: "missing-board-recovered")
+        print("safe-board-retry ready=\(recovered) close=\(app.buttons["viewer.close"].exists) error=\(app.descendants(matching: .any)["viewer.error"].exists) loading=\(app.descendants(matching: .any)["viewer.loading"].exists)")
+        if !app.textFields["pair.address"].exists { let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "missing-board-after-retry"; shot.lifetime = .keepAlways; add(shot) }
+        XCTAssertTrue(recovered, "Retry must load real board geometry")
+        XCTAssertFalse(app.descendants(matching: .any)["viewer.error"].exists)
+        app.buttons["viewer.close"].tap()
+    }
+
+    func testMissingMeshTimeoutAndRetry() {
+        let app = openDroppedViewer("3d", drop: "mesh")
+        XCTAssertTrue(app.descendants(matching: .any)["viewer.ready"].waitForExistence(timeout: 30), "Real base geometry must arrive")
+        XCTAssertTrue(app.descendants(matching: .any)["viewer.loading"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.descendants(matching: .any)["viewer.mesh.ready"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["viewer.error"].waitForExistence(timeout: 45), "Missing mesh must time out")
+        qualificationStatus(app, label: "missing-mesh-error")
+        let retry = app.buttons["viewer.retry"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 5) && retry.isHittable)
+        if !app.textFields["pair.address"].exists { let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "missing-mesh-timeout"; shot.lifetime = .keepAlways; add(shot) }
+        retry.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["viewer.mesh.ready"].waitForExistence(timeout: 90), "Retry must load the real mesh")
+        qualificationStatus(app, label: "missing-mesh-recovered")
+        XCTAssertFalse(app.descendants(matching: .any)["viewer.error"].exists)
+        app.buttons["viewer.close"].tap()
+    }
+
+    func testMissingBoardCloseAndReopenDeadline() {
+        let app = openDroppedViewer("board", drop: "all")
+        XCTAssertTrue(app.descendants(matching: .any)["viewer.loading"].waitForExistence(timeout: 15))
+        let oldError = expectation(for: NSPredicate(format: "exists == true"), evaluatedWith: app.descendants(matching: .any)["viewer.error"])
+        oldError.isInverted = true
+        wait(for: [oldError], timeout: 10)
+        app.buttons["viewer.close"].tap()
+        XCTAssertFalse(app.buttons["viewer.close"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["viewer.open"].waitForExistence(timeout: 15)); app.buttons["viewer.open"].tap()
+        let board = app.buttons["viewer.choice.board"]
+        XCTAssertTrue(board.waitForExistence(timeout: 10)); board.tap()
+        XCTAssertTrue(app.buttons["viewer.close"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.descendants(matching: .any)["viewer.loading"].waitForExistence(timeout: 10))
+        let reopenedAt = ProcessInfo.processInfo.systemUptime
+        XCTAssertTrue(app.descendants(matching: .any)["viewer.error"].waitForExistence(timeout: 45), "Reopened presentation must have its own deadline")
+        XCTAssertGreaterThan(ProcessInfo.processInfo.systemUptime - reopenedAt, 20, "The retired presentation's deadline must not expire the reopened viewer")
+        XCTAssertTrue(app.buttons["viewer.close"].isHittable)
+        app.buttons["viewer.close"].tap()
     }
 
     func testInvalidSessionOnFreshSimulator() {
