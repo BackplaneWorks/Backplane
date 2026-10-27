@@ -24,7 +24,7 @@ struct RootView: View {
             .environment(\.backplaneLanguage, model.screen?.locale ?? "en")
             .environment(\.locale, Locale(identifier: model.screen?.locale ?? "en"))
             .onChange(of: authKey, initial: true) { _, key in
-                if let key, !hasUsableContent { recoveryKey = key }
+                if let key, recoveryKey == nil, !hasUsableContent { recoveryKey = key }
             }
             .onChange(of: model.contentReady) { _, ready in
                 if ready { recoveryKey = nil; recoverySheet = false }
@@ -169,7 +169,13 @@ private struct ConnectionStartupView: View {
     var initialKey: String? = nil
     @State private var addingAddress = false
     @State private var chosenKey: String?
-    private var key: String { chosenKey ?? initialKey ?? model.links.first.flatMap(Pairing.key) ?? "" }
+    private var pairedKeys: [String] { model.links.compactMap(Pairing.key) }
+    private var failedKeys: [String] { pairedKeys.filter { model.conn[$0]?.failure == .authentication } }
+    private var key: String {
+        if let chosenKey, pairedKeys.contains(chosenKey) { return chosenKey }
+        if let initialKey, pairedKeys.contains(initialKey) { return initialKey }
+        return failedKeys.first ?? pairedKeys.first ?? ""
+    }
     private var connection: HubConn { model.conn[key] ?? HubConn() }
     private var tag: String { model.screen?.locale ?? "en" }
 
@@ -182,6 +188,15 @@ private struct ConnectionStartupView: View {
                     Text(HubDot.word(connection.phase, tag))
                         .font(.title2.weight(.semibold))
                     Text(key).font(.system(.body, design: .monospaced)).textSelection(.enabled)
+                    if failedKeys.count > 1 {
+                        Menu(NativeMessages.native_settings_hubs(tag)) {
+                            ForEach(failedKeys, id: \.self) { failed in
+                                Button(failed) { chosenKey = failed }
+                                    .accessibilityIdentifier("pair.connection.hub." + failed)
+                            }
+                        }
+                        .accessibilityIdentifier("pair.connection.hubs")
+                    }
                     if let failure = connection.failure {
                         Text(NativeMessages.native_hub_failure(tag, failure.reason, failure.code))
                             .foregroundStyle(PhaseColor.bad)
