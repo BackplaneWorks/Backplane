@@ -712,8 +712,10 @@ def Push.hook.when(go: Bool, +home: String, +st: M.State, +thread: String, +kind
 def Push.hook.turn.k(+kind: String, +home: String, +st: M.State, +thread: String, +state: String) -> IO(Unit):
   Push.hook.when(WN.Wn.due.end(kind, state, NO.Policy.on(st, "settled")), home, st, thread, WN.Wn.end.kind(kind, state), state)
 
-def Push.hook.turn(+home: String, +st: M.State, +thread: String, +state: String) -> IO(Unit):
-  Push.hook.turn.k(Push.hook.kind(st, thread), home, st, thread, state)
+# alert: the kind of the record this end wrote (TurnEnded's), never the
+# thread's persisted alert.<thread>, which a quiet end leaves as it was
+def Push.hook.turn(+home: String, +st: M.State, +thread: String, +state: String, +alert: String) -> IO(Unit):
+  Push.hook.turn.k(alert, home, st, thread, state)
 
 # an ask, a merge, a reminder or a note, from Alerted (a settle is left to TurnEnded)
 def Push.hook.alert(+home: String, +st: M.State, +thread: String) -> IO(Unit):
@@ -721,10 +723,10 @@ def Push.hook.alert(+home: String, +st: M.State, +thread: String) -> IO(Unit):
 
 # the island push for a turn that ended; answers the tokens APNs reported dead.
 # the webhook runs after it and cannot drop the tokens it found
-def Push.turn_ended.dead(+home: String, +st: M.State, +thread: String, +state: String) -> IO(List<&2, String>):
+def Push.turn_ended.dead(+home: String, +st: M.State, +thread: String, +state: String, +alert: String) -> IO(List<&2, String>):
   do IO<List<&2, String>>:
     dead : List<&2, String> <- Push.start(home, st, thread, M.Setting.get(st, "push.apns.key", ""), M.Setting.get(st, "push.apns.keyid", ""), M.Setting.get(st, "push.apns.team", ""))
-    Push.hook.turn(home, st, thread, state)
+    Push.hook.turn(home, st, thread, state, alert)
     return dead
 
 # the request that forgets a dead token (for the hub's inbox, as a client
@@ -737,8 +739,8 @@ def Push.turn_ended.done(dead: List<&2, String>) -> IO(Unit):
 
 # without the hub's inbox: dead tokens are found but not dropped (the hub
 # calls Push.turn_ended.dead and posts Push.drop_request for each)
-def Push.turn_ended(+home: String, st: M.State, +thread: String, +state: String) -> IO(Unit):
-  IO.bind(List<&2, String>, Unit, Push.turn_ended.dead(home, st, thread, state), Push.turn_ended.done)
+def Push.turn_ended(+home: String, st: M.State, +thread: String, +state: String, +alert: String) -> IO(Unit):
+  IO.bind(List<&2, String>, Unit, Push.turn_ended.dead(home, st, thread, state, alert), Push.turn_ended.done)
 
 # (a far turn's end is an alert only: each hub's Live Activity is its own
 # threads', so this hub never ends or rewrites it for another's)

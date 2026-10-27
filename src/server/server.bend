@@ -4066,8 +4066,8 @@ def Hub.drop_dead(ts: List<&2, String>, +inbox: Chan(Msg)) -> IO(Unit):
 def Hub.island(+home: String, st: M.State, +inbox: Chan(Msg)) -> IO(Unit):
   IO.bind(List<&2, String>, Unit, PU.Push.island.dead(home, st), ds => Hub.drop_dead(ds, inbox))
 
-def Hub.phone(+home: String, st: M.State, +thread: String, +state: String, +inbox: Chan(Msg)) -> IO(Unit):
-  IO.bind(List<&2, String>, Unit, PU.Push.turn_ended.dead(home, st, thread, state), ds => Hub.drop_dead(ds, inbox))
+def Hub.phone(+home: String, st: M.State, +thread: String, +state: String, +alert: String, +inbox: Chan(Msg)) -> IO(Unit):
+  IO.bind(List<&2, String>, Unit, PU.Push.turn_ended.dead(home, st, thread, state, alert), ds => Hub.drop_dead(ds, inbox))
 
 # an ask, a merge, a reminder or a note: the webhook, off the hub loop.
 # a settle or a failure is posted from TurnEnded, which has the end word
@@ -10035,9 +10035,9 @@ def Hub.out(h: Hub, o: B.Out) -> IO(Hub):
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
     # the island only: the alert, if the turn raised one, is its own out
     # (Alerted), written with the thread's record
-    case Hub{+st, f, ls, cl, as, +inbox, +cfg, note} B.TurnEnded{+thread, +state}:
+    case Hub{+st, f, ls, cl, as, +inbox, +cfg, note} B.TurnEnded{+thread, +state, +alert}:
       do IO<Hub>:
-        IO.spawn(Unit, Hub.phone(Cfg.home(cfg), st, thread, state, inbox))
+        IO.spawn(Unit, Hub.phone(Cfg.home(cfg), st, thread, state, alert, inbox))
         Self.post(inbox, KProbe{False{}})
         Self.post(inbox, Release{})
         return Hub{st, f, ls, cl, as, inbox, cfg, note}

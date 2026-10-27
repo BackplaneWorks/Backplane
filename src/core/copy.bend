@@ -57,7 +57,7 @@ def Copy.out(o: B.Out) -> List<&2, B.Out>:
     case B.Restart{}: Nil{}
     case B.KiCadInstall{}: Nil{}
     case B.KiCadRetry{}: Nil{}
-    case B.TurnEnded{_, _}: Nil{}
+    case B.TurnEnded{_, _, _}: Nil{}
     case B.IslandSync{}: Nil{}
     case B.TermRun{_, _, _, _, _, _, _}: Nil{}
     case B.BotReply{_, _, _, _}: Nil{}

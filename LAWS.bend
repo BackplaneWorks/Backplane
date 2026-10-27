@@ -2462,7 +2462,7 @@ law island_sync_on_delete:
   {H.Island.outs([M.ThreadDeleted{"t1", 1n}], []) == [H.IslandSync{}] : List<&2, H.Out>}
 
 law island_sync_not_twice:
-  {H.Island.outs([M.TurnChanged{"t1", M.Interrupted{}, 1n}], [H.TurnEnded{"t1", "stopped"}]) == [H.TurnEnded{"t1", "stopped"}] : List<&2, H.Out>}
+  {H.Island.outs([M.TurnChanged{"t1", M.Interrupted{}, 1n}], [H.TurnEnded{"t1", "stopped", ""}]) == [H.TurnEnded{"t1", "stopped", ""}] : List<&2, H.Out>}
 
 law island_sync_quiet:
   {H.Island.outs([M.ThreadRenamed{"t1", "x", 1n}], []) == [] : List<&2, H.Out>}

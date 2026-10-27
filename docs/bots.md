@@ -281,6 +281,9 @@ a kind of `done` or `fail` goes out from `TurnEnded`, and a kind of `ask`,
 empty kind: a stop, an intermediate end, a routine, a launched report, or a
 channel switched off) posts nothing. A desk that holds the phone push does
 not hold the webhook. Unset, nothing is sent and nothing else changes.
+`TurnEnded` carries the kind of the record that end wrote, so an end the
+policy keeps quiet, or a Stop, never re-sends the thread's older
+`alert.<thread>` record.
 
 A turn that breaks always goes out as a failure while **Settled**
 (`notify.settled`) is on, even when the policy keeps it quiet (a turn no

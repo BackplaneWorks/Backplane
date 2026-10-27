@@ -61,7 +61,7 @@ def ends(os: List<&2, B.Out>) -> Nat:
   match os:
     case Nil{}:
       0n
-    case B.TurnEnded{_, _} <> t:
+    case B.TurnEnded{_, _, _} <> t:
       1n+ends(t)
     case _ <> t:
       ends(t)

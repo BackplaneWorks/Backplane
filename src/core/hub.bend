@@ -92,8 +92,10 @@ type Out is Data:
   PiTurn{thread: String, cwd: String, model: String, session: String, runtime: M.RuntimeMode, text: String}
   OmpTurn{thread: String, cwd: String, model: String, session: String, runtime: M.RuntimeMode, text: String}
   # a turn ended: "completed", "failed", or "stopped" (Stop, archive,
-  # delete: no alert, but the phones' island still hears of it)
-  TurnEnded{thread: String, state: String}
+  # delete: no alert, but the phones' island still hears of it). alert:
+  # the kind of the record this end wrote (notice.bend's Policy.end), ""
+  # when it wrote none or a quiet one; never an older record's
+  TurnEnded{thread: String, state: String, alert: String}
   # the phones' island (Live Activity) is pushed again, no alert: a turn
   # started or changed, a thread went (Island.outs)
   IslandSync{}
@@ -204,7 +206,7 @@ def Island.told(os: List<&2, Out>) -> Bool:
   match os:
     case Nil{}:
       False{}
-    case TurnEnded{_, _} <> _:
+    case TurnEnded{_, _, _} <> _:
       True{}
     case _ <> t:
       Island.told(t)
@@ -3658,7 +3660,7 @@ def Run.settle(+s: M.State, +now: Nat, +th: String) -> List<&2, M.Change>:
 # is written with it
 def Ended.out.p(+post: M.State, +s: M.State, +now: Nat, +state: String, +thread: String, +cwd: String, +cs: List<&2, M.Change>, os: List<&2, Out>) -> Step:
   Step{List.append(&2, M.Change, List.append(&2, M.Change, List.append(&2, M.Change, cs, Run.settle(s, now, thread)), Sum.at(RF.Sum.due(s, thread, now), thread, now)), NO.Policy.end(post, now, thread, state)),
-    List.append(&2, Out, os, TurnEnded{thread, state} <> Git{0, "", "step", thread, cwd, "", ""} <> Git{0, "", "checkpoint", thread, cwd, "", ""}
+    List.append(&2, Out, os, TurnEnded{thread, state, NO.Policy.kind(NO.Policy.end(post, now, thread, state))} <> Git{0, "", "step", thread, cwd, "", ""} <> Git{0, "", "checkpoint", thread, cwd, "", ""}
       <> List.append(&2, Out, Sum.out(RF.Sum.due(s, thread, now), s, thread, "thread"), Answer.out(String.eq(state, "completed"), post, thread)))}
 
 def Ended.out.k(none: Bool, +s: M.State, +now: Nat, +state: String, +thread: String, +cwd: String, st: Step) -> Step:
@@ -4933,7 +4935,7 @@ def Launch.tell(+s: M.State, +now: Nat, +thread: String, st: Step) -> Step:
 def Retire.turn.f(run: Bool, +s: M.State, +now: Nat, +th: String, +from: String, st: Step) -> Step:
   match run:
     case True{}:
-      Launch.tell.from(s, now, th, from, Task.finish(s, now, th, Step.before([M.TurnChanged{th, M.Interrupted{}, now}], [TurnEnded{th, "stopped"}], st)))
+      Launch.tell.from(s, now, th, from, Task.finish(s, now, th, Step.before([M.TurnChanged{th, M.Interrupted{}, now}], [TurnEnded{th, "stopped", ""}], st)))
     case False{}:
       st
 
@@ -8127,7 +8129,7 @@ def Ended.stopped(os: List<&2, Out>, +th: String) -> Bool:
   match os:
     case Nil{}:
       False{}
-    case TurnEnded{+t, +state} <> r:
+    case TurnEnded{+t, +state, _} <> r:
       Bool.or(Bool.and(String.eq(t, th), String.eq(state, "stopped")), Ended.stopped(r, th))
     case _ <> r:
       Ended.stopped(r, th)
