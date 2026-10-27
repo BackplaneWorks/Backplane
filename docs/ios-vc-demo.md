@@ -1,6 +1,6 @@
 # iOS VC demo — 2026-10-28
 
-The simulator app is built and installed on the two dedicated simulators, paired with the existing Tailnet hub and real saved projects. Final source is `34de3a6f308f16f5a163161bd2c120c92ce4ddb5`. This delivers persistent pairing and reconnect fencing, owner-bound drafts, branded compact navigation and icons, opt-in notifications, auth recovery, native pairing Paste controls, bounded viewer loading with Retry, offline Close and guarded default-source restoration.
+This runbook preserves the frozen simulator milestone at source `34de3a6f308f16f5a163161bd2c120c92ce4ddb5`, built and exercised on the two dedicated simulators with the existing Tailnet hub and real saved projects. Ongoing product work and the newer 77aba package are recorded in [iOS loading performance](ios-loading-performance.md). This milestone delivers persistent pairing and reconnect fencing, owner-bound drafts, branded compact navigation and icons, opt-in notifications, auth recovery, native pairing Paste controls, bounded viewer loading with Retry, offline Close and guarded default-source restoration.
 
 ## Exact artifact
 
