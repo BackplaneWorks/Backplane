@@ -170,8 +170,10 @@ struct BotScreen: View {
     }
 
     var body: some View {
-        content
-            .safeAreaInset(edge: .top, spacing: 0) {
+        // Give the chat an explicitly smaller viewport. A top safe-area
+        // inset around its UIKit timeline can displace the bottom composer
+        // below the app's tab strip instead of reducing the timeline height.
+        VStack(spacing: 0) {
                 VStack(spacing: 6) {
                     BotHeader(model: model, bot: bot, size: 64).padding(.horizontal)
                     ScrollView(.horizontal, showsIndicators: false) {
@@ -219,7 +221,8 @@ struct BotScreen: View {
                 }
                 .padding(.top, 8)
                 .background(.bar)
-            }
+            content.frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
             .toolbar {
                 if model.mailroomReturn != nil, bot.tab != "chat" {
                     ToolbarItem(placement: .topBarLeading) {
