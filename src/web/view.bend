@@ -3117,11 +3117,13 @@ def View.board.rows(fs: List<&2, String>, +cur: String, +own: String, +seen: Lis
 def View.board.chips(+fs: List<&2, String>, +cur: String) -> List<&2, D.Node>:
   View.board.rows(fs, View.board.current(fs, cur), "", Nil{})
 
+# (a design-history step or a comparison names its board by the live file
+# it is a version of, HS.Hist.family, never by its raw version path)
 def View.boards.selector(fs: List<&2, String>, +path: String, +own: String, +root: String) -> List<&2, D.Node>:
   match fs:
-    case Nil{}: [D.Dom.span("what", MC.Mech.last(path))]
+    case Nil{}: [D.Dom.span("what", MC.Mech.last(HS.Hist.family(path)))]
     case +f <> +t:
-      +cur = View.board.current(f <> t, View.board.relative(path, root))
+      +cur = View.board.current(f <> t, View.board.relative(HS.Hist.family(path), root))
       [D.El{"details", "board-selector", [D.At{"class", "local-menu board-selector"}], [
         D.El{"summary", "", [D.At{"aria-label", "Select board"}, D.At{"title", cur}], [WI.WIcon.svg("circuit-board", 16),
           D.El{"span", "", [D.At{"class", "board-current"}], [D.Dom.span("", Bool.pick(String, String.is_empty(cur), "Select board", MC.Mech.stem(cur))), D.El{"small", "", Nil{}, [D.Txt{MC.Mech.parent(cur)}]}]}, WI.WIcon.svg("chevron-down", 14)]},
