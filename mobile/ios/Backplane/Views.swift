@@ -202,6 +202,7 @@ struct PairView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     Text(NativeMessages.settings_pair(tag)).font(.headline)
                     TextField(NativeMessages.settings_pair(tag), text: $link, prompt: Text(verbatim: "http://host:3787/#token=…"))
+                        .privacySensitive()
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .keyboardType(.URL)
@@ -284,6 +285,7 @@ struct HubsView: View {
             }
             Section {
                 TextField(NativeMessages.settings_pair(tag), text: $link, prompt: Text(verbatim: "http://host:3787/#token=…"))
+                    .privacySensitive()
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .keyboardType(.URL)
