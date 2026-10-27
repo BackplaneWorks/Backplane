@@ -687,15 +687,17 @@ def Push.hook.post(+home: String, +st: M.State, +thread: String, +kind: String, 
 def Push.hook.act(mode: Nat, +home: String, +st: M.State, +thread: String, +kind: String, +state: String, +url: String, +secret: String) -> IO(Unit):
   match mode:
     case 0n:
-      IO.print_err("backplane: push webhook: push.webhook.secret could not be read")
+      IO.print_err("backplane: push webhook: the signing secret could not be read or is empty; not posted")
     case _:
       Push.hook.post(home, st, thread, kind, state, url, secret)
 
 def Push.hook.send(+home: String, +st: M.State, +thread: String, +kind: String, +state: String, +url: String) -> IO(Unit):
   do IO<Unit>:
     +set : String = M.Setting.get(st, WN.Wn.secret.key(), "")
-    +text : String <- Push.hook.read(WN.Wn.path(home, set))
-    Push.hook.act(WN.Wn.mode(WN.Wn.asked(set), text), home, st, thread, kind, state, url, text)
+    +path : String = WN.Wn.path(home, set)
+    present : Bool <- Push.exists(path)
+    +text : String <- Push.hook.read(path)
+    Push.hook.act(WN.Wn.mode(WN.Wn.wants(set, present), text), home, st, thread, kind, state, url, text)
 
 def Push.hook.bad() -> IO(Unit):
   IO.print_err("backplane: push webhook: push.webhook.url is not an http address")

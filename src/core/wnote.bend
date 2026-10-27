@@ -18,8 +18,9 @@ import ./mailtriage.bend as TRI
 #   X-Backplane-Timestamp: <unix seconds>
 #   X-Backplane-Signature: sha256=<hex HMAC-SHA256(secret, ts + "." + body)>
 #
-# The secret is optional. With none, the notice goes out unsigned. A
-# secret the caller asked for and could not read is mode 0: nothing is
+# The secret is optional. With none (no setting, no default file), the
+# notice goes out unsigned. A secret the setting names, or a default file
+# that is there, that cannot be read or is empty is mode 0: nothing is
 # posted, so an unsigned notice is never sent in its place.
 
 def Wn.url.key() -> String:
@@ -34,6 +35,13 @@ def Wn.file(+home: String) -> String:
 
 def Wn.asked(+set: String) -> Bool:
   Bool.not(String.is_empty(String.trim(set)))
+
+# a secret is wanted when the setting names a file, or when the default
+# file is there (present): only a default that is absent leaves the
+# notice unsigned. One there that cannot be read, or holds no key (a
+# rotation half done), is mode 0, not a quiet downgrade to unsigned
+def Wn.wants(+set: String, present: Bool) -> Bool:
+  Bool.or(Wn.asked(set), present)
 
 def Wn.path.k(empty: Bool, +home: String, +set: String) -> String:
   match empty:

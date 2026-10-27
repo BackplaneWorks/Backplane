@@ -329,8 +329,10 @@ X-Backplane-Signature: sha256=<hex HMAC-SHA256(secret, timestamp + "." + body)>
 
 A secret of 64 hex digits is the raw 32 bytes; any other text is the key as
 written. With no secret the notice is still posted, without those headers.
-A secret path that cannot be read is logged and nothing is posted, so an
-unsigned notice is never sent in place of a signed one. The address, the
+A secret path that cannot be read, or a file that is there but cannot be
+read or holds no key (the default one too), is logged and nothing is
+posted, so an unsigned notice is never sent in place of a signed one;
+only a default file that is absent leaves the notice unsigned. The address, the
 body and the signature go to `curl` in a config file, never on its command
 line.
 

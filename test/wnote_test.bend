@@ -133,3 +133,7 @@ def main() -> IO(Unit):
     C.Check.str("interrupt keeps its own reason", WN.Wn.reason("interrupted", PU.Push.hook.err(older(), "t1")), "interrupted")
     C.Check.str("this turn's error taken", PU.Push.hook.err(current(), "t1"), "API Error: 500")
     C.Check.str("this turn's error classified", WN.Wn.reason("failed", PU.Push.hook.err(current(), "t1")), "error")
+    C.Check.str("absent default is unsigned", Nat.show(WN.Wn.mode(WN.Wn.wants("", False{}), "")), "1")
+    C.Check.str("unreadable default posts nothing", Nat.show(WN.Wn.mode(WN.Wn.wants("", True{}), "")), "0")
+    C.Check.str("readable default signs", Nat.show(WN.Wn.mode(WN.Wn.wants(" ", True{}), "k")), "2")
+    C.Check.str("named empty file posts nothing", Nat.show(WN.Wn.mode(WN.Wn.wants("/tmp/s", True{}), "")), "0")
