@@ -29,6 +29,14 @@ struct RootView: View {
             .onChange(of: model.contentReady) { _, ready in
                 if ready { recoveryKey = nil; recoverySheet = false }
             }
+            .onChange(of: model.links) { _, links in
+                let keys = links.compactMap(Pairing.key)
+                if let key = recoveryKey, !keys.contains(key) { recoveryKey = nil }
+                if let key = recoverySheetKey, !keys.contains(key) {
+                    recoverySheetKey = nil
+                    recoverySheet = false
+                }
+            }
     }
 
     private var authKey: String? {
@@ -37,8 +45,7 @@ struct RootView: View {
         if let focused = model.screen?.hub, !focused.isEmpty {
             return keys.contains(focused) && model.conn[focused]?.failure == .authentication ? focused : nil
         }
-        let failed = keys.filter { model.conn[$0]?.failure == .authentication }
-        return failed.count == 1 ? failed.first : nil
+        return keys.first { model.conn[$0]?.failure == .authentication }
     }
 
     private var hasUsableContent: Bool {
