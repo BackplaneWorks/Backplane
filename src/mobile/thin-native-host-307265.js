@@ -125,11 +125,24 @@ export class NativeThinHost307265 {
   }
 
   hubs(keys) {
-    this.paired = new Set(keys);
-    for (const key of this.states.keys()) if (!this.paired.has(key)) {
-      this.disconnect(key); this.states.delete(key);
-    }
+    const next = new Set(keys);
+    for (const key of new Set([...this.paired, ...this.states.keys(), ...[...this.outbox.values()].map(o => o.hub)]))
+      if (!next.has(key)) this.forgetHub(key);
+    this.paired = next;
     if (!this.paired.has(this.current)) this.current = keys[0] || '';
+  }
+
+  // A pairing change is an identity boundary, unlike a network reconnect.
+  // Never carry pending sends or local presentation state to a new pairing at
+  // the same address. No credential is passed into this adapter.
+  forgetHub(hub) {
+    this.disconnect(hub);
+    this.states.delete(hub);
+    this.paired.delete(hub);
+    for (const [msg, item] of this.outbox) if (item.hub === hub) this.outbox.delete(msg);
+    this.commands = this.commands.filter(c => c.hub !== hub);
+    this.sync = this.sync.filter(s => s.hub !== hub);
+    if (this.current === hub) this.current = '';
   }
 
   reset() {

@@ -174,6 +174,7 @@ final class Engine: @unchecked Sendable {
         await out("reading", [thread, seen, count, away], screen: false, person: true)
     }
     func hubs(_ keys: [String]) async -> Out? { await out("hubs", [keys]) }
+    func forgetHub(_ key: String) async -> Out? { await out("forgetHub", [key], screen: false, person: true) }
     func connection(_ key: String, _ epoch: String, mode: String? = nil) async -> Out? {
         await out("connection", mode.map { [key, epoch, $0] } ?? [key, epoch], screen: false, person: true)
     }
