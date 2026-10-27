@@ -3,6 +3,9 @@ import SwiftUI
 struct RootView: View {
     @Bindable var model: AppModel
     @State private var pairing = false
+    @State private var recoveryKey: String?
+    @State private var recoverySheet = false
+    @State private var recoverySheetKey: String?
     // the delete (or remove) just answered: its dialog stays down until the screen drops it
     @State private var answered = ""
     @State private var removed = ""
@@ -20,13 +23,59 @@ struct RootView: View {
             .overlay(alignment: .top) { BubMoveOverlay(move: model.contentReady ? model.screen?.bubMove : nil) }
             .environment(\.backplaneLanguage, model.screen?.locale ?? "en")
             .environment(\.locale, Locale(identifier: model.screen?.locale ?? "en"))
+            .onChange(of: authKey, initial: true) { _, key in
+                if let key, !hasUsableContent { recoveryKey = key }
+            }
+            .onChange(of: model.contentReady) { _, ready in
+                if ready { recoveryKey = nil; recoverySheet = false }
+            }
+    }
+
+    private var authKey: String? {
+        guard !model.contentReady else { return nil }
+        let keys = model.links.compactMap(Pairing.key)
+        if let focused = model.screen?.hub, !focused.isEmpty {
+            return keys.contains(focused) && model.conn[focused]?.failure == .authentication ? focused : nil
+        }
+        let failed = keys.filter { model.conn[$0]?.failure == .authentication }
+        return failed.count == 1 ? failed.first : nil
+    }
+
+    private var hasUsableContent: Bool {
+        guard let s = model.screen else { return false }
+        let shown = !s.projects.isEmpty || !(s.active ?? []).isEmpty || !(s.legacy ?? []).isEmpty ||
+                    !s.bots.isEmpty || !s.rooms.isEmpty || s.thread != nil || s.bot != nil || s.uber != nil
+        let otherOnline = model.links.compactMap(Pairing.key).contains { key in
+            key != authKey && (model.conn[key]?.phase == .online || model.conn[key]?.phase == .syncing)
+        }
+        return shown || otherOnline
     }
 
     @ViewBuilder private var content: some View {
         if model.links.isEmpty {
             NavigationStack { PairView(tag: model.screen?.locale ?? "en", link: "") { _ = model.pair($0) } }
+        } else if !hasUsableContent, let key = recoveryKey ?? authKey {
+            ConnectionStartupView(model: model, initialKey: key)
         } else if let s = model.screen {
             asked(s)
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    if let key = authKey {
+                        Button {
+                            recoverySheetKey = key
+                            recoverySheet = true
+                        } label: {
+                            HStack {
+                                Text(NativeMessages.native_hub_failure(s.locale ?? "en", "authentication", ""))
+                                Spacer()
+                                Text(s.locale == "ja" ? "再試行" : "Retry")
+                            }.padding(12)
+                        }
+                        .accessibilityIdentifier("pair.connection.error")
+                    }
+                }
+                .sheet(isPresented: $recoverySheet) {
+                    ConnectionStartupView(model: model, initialKey: recoverySheetKey)
+                }
                 .sheet(isPresented: findShown) {
                     if let f = model.screen?.find { FindSheet(model: model, find: f) }
                 }
@@ -41,7 +90,7 @@ struct RootView: View {
                 }
                 .task(id: "\(model.screen?.tour != nil)|\(pairing)") { await tourWait() }
         } else {
-            ConnectionStartupView(model: model)
+            ConnectionStartupView(model: model, initialKey: authKey)
         }
     }
 
@@ -110,9 +159,10 @@ struct RootView: View {
 // First connection stays actionable while the hub is loading or retrying.
 private struct ConnectionStartupView: View {
     let model: AppModel
+    var initialKey: String? = nil
     @State private var addingAddress = false
     @State private var chosenKey: String?
-    private var key: String { chosenKey ?? model.links.first.flatMap(Pairing.key) ?? "" }
+    private var key: String { chosenKey ?? initialKey ?? model.links.first.flatMap(Pairing.key) ?? "" }
     private var connection: HubConn { model.conn[key] ?? HubConn() }
     private var tag: String { model.screen?.locale ?? "en" }
 
