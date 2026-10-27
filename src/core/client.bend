@@ -11011,6 +11011,12 @@ def Hookv.act.k(url: Bool, +u: Ui, +value: String) -> Act:
 def Hookv.act(+u: Ui, +action: String, +value: String) -> Act:
   Hookv.act.k(String.eq(action, "hook-url"), u, value)
 
+# the outgoing webhook's two actions; every other hook-* action (Create,
+# Revoke, the token's show, rotate and off) is an incoming hook's and
+# goes on to the bot-action table
+def Hookv.ours(+action: String) -> Bool:
+  Bool.or(String.eq(action, "hook-url"), String.eq(action, "hook-secret"))
+
 def Settings.page(+u: Ui) -> String:
   Settings.clean(Ui.scratch(u, "@settings.page"))
 
@@ -14524,7 +14530,7 @@ def Hookv.dispatch(hit: Bool, +u: Ui, +action: String, +value: String) -> Act:
 def Settings.dispatch(nav: Bool, +u: Ui, +action: String, +value: String) -> Act:
   match nav:
     case True{}: Settings.nav(u, value)
-    case False{}: Hookv.dispatch(String.starts_with(action, "hook-"), u, action, value)
+    case False{}: Hookv.dispatch(Hookv.ours(action), u, action, value)
 
 def ThreadTree.can_create(+st: M.State, +id: String) -> Bool:
   Bool.and(ST.Tree.alive(Ui.thread(st, id)), Bool.and(Bool.not(String.is_empty(ST.Tree.project(Ui.thread(st, id)))), Bool.not(M.Scratch.is(FR.Fr.local(ST.Tree.project(Ui.thread(st, id)))))))

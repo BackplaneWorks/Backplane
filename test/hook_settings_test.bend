@@ -87,6 +87,25 @@ def window(o: L.Out) -> String:
     case L.Out{_, hs}:
       hits(hs)
 
+def sends(a: U.Act) -> String:
+  match a:
+    case U.Act{_, cs}:
+      sent(cs)
+
+def sent(cs: List<&2, U.Cmd>) -> String:
+  match cs:
+    case Nil{}:
+      ""
+    case U.Send{s} <> t:
+      s ++ "\n" ++ sent(t)
+    case _ <> t:
+      sent(t)
+
+# through Ui.act, as a click arrives: an incoming hook's action reaches
+# the bot-action table and leaves the webhook's settings alone
+def acted(+action: String, +value: String) -> U.Act:
+  U.Ui.act(opened(), action, value)
+
 def main() -> IO(Unit):
   do IO<Unit>:
     +u : U.Ui = opened()
@@ -117,3 +136,12 @@ def main() -> IO(Unit):
     C.Check.str("secret path saved", M.Setting.get(U.Ui.state.of(sec), WN.Wn.secret.key(), ""), "/var/hook.secret")
     C.Check.str("rows never carry a secret", Bool.show(String.contains(rowtext(U.Hookv.rows(sec)) ++ rowfields(U.Hookv.rows(sec)), "s3cret-value")), "False")
     C.Check.str("window save hit", Bool.show(String.contains(window(L.Set.hook(L.Ty.none(), N.Nui.init(u, 1400, 1000), 20, 680, 20)), "hook-url:")), "True")
+    C.Check.str("act revoke reaches hook_revoke", Bool.show(String.contains(sends(acted("hook-revoke", "h1")), "bots.hook_revoke")), "True")
+    C.Check.str("act revoke keeps the secret", M.Setting.get(U.Ui.state.of(after(acted("hook-revoke", "h1"))), WN.Wn.secret.key(), ""), "/tmp/hook.secret")
+    C.Check.str("act revoke sets nothing", Bool.show(String.contains(sends(acted("hook-revoke", "h1")), "setting.set")), "False")
+    C.Check.str("act token keeps the secret", M.Setting.get(U.Ui.state.of(after(acted("hook-token", "h1"))), WN.Wn.secret.key(), ""), "/tmp/hook.secret")
+    C.Check.str("act retoken keeps the secret", M.Setting.get(U.Ui.state.of(after(acted("hook-retoken", "h1"))), WN.Wn.secret.key(), ""), "/tmp/hook.secret")
+    C.Check.str("act untoken keeps the secret", M.Setting.get(U.Ui.state.of(after(acted("hook-untoken", "h1"))), WN.Wn.secret.key(), ""), "/tmp/hook.secret")
+    C.Check.str("act new keeps the secret", M.Setting.get(U.Ui.state.of(after(acted("hook-new", ""))), WN.Wn.secret.key(), ""), "/tmp/hook.secret")
+    C.Check.str("act url saves", M.Setting.get(U.Ui.state.of(after(acted("hook-url", "https://hooks.example/a"))), WN.Wn.url.key(), ""), "https://hooks.example/a")
+    C.Check.str("act secret saves", M.Setting.get(U.Ui.state.of(after(acted("hook-secret", "/var/b.secret"))), WN.Wn.secret.key(), ""), "/var/b.secret")
