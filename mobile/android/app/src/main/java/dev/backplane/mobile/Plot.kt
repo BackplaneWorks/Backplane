@@ -60,18 +60,21 @@ object Cbor {
 // Varints (7 bits a byte, low first) and zigzag, as Enc writes them.
 class Varints(private val b: ByteArray) {
     private var i = 0
-    val more get() = i < b.size
+    var valid = true
+        private set
+    val more get() = valid && i < b.size
 
     fun next(): Int {
         var acc = 0
-        var sh = 0
-        while (i < b.size) {
+        for (sh in 0..28 step 7) {
+            if (i >= b.size) { valid = false; return 0 }
             val v = b[i++].toInt() and 255
+            if (sh == 28 && v and 0xF0 != 0) { valid = false; return 0 }
             acc = acc or ((v and 127) shl sh)
-            if (v < 128) break
-            sh += 7
+            if (v < 128) return acc
         }
-        return acc
+        valid = false
+        return 0
     }
 
     fun signed(): Int { val z = next(); return (z ushr 1) xor -(z and 1) }
@@ -200,9 +203,11 @@ class Floats {
 // each; normals are the triangles' own.
 class PlotMesh(val verts: FloatArray, val colors: IntArray, val box: FloatArray) {
     companion object {
-        fun decode(o: Map<String, Any?>): PlotMesh {
+        fun decode(o: Map<String, Any?>, cancelled: () -> Boolean = { false }): PlotMesh {
             val n = o.int("n")
-            val b = (o["box3"] as? List<*>)?.map { ((it as? Long) ?: 0L) * 10f } ?: emptyList()
+            val bytes = o["mesh"] as? ByteArray ?: ByteArray(0)
+            require(n > 0 && n <= (64 shl 20) / 84 && bytes.size >= n * 10) { "Invalid or oversized model" }
+            val b = (o["box3"] as? List<*>)?.map { ((it as? Long) ?: 0L).toInt() * 10f } ?: emptyList()
             val v = Varints(o["mesh"] as? ByteArray ?: ByteArray(0))
             val verts = FloatArray(n * 18)
             val colors = IntArray(n * 3)
@@ -211,12 +216,13 @@ class PlotMesh(val verts: FloatArray, val colors: IntArray, val box: FloatArray)
             var w = 0
             val p = FloatArray(9)
             for (t in 0 until n) {
-                if (!v.more) break
+                if (t % 256 == 0 && cancelled()) throw java.util.concurrent.CancellationException()
                 color = color xor v.next()
                 for (k in 0 until 3) {
                     px += v.signed(); py += v.signed(); pz += v.signed()
                     p[3 * k] = px * 10f; p[3 * k + 1] = py * 10f; p[3 * k + 2] = pz * 10f
                 }
+                require(v.valid) { "Incomplete model" }
                 val ux = p[3] - p[0]; val uy = p[4] - p[1]; val uz = p[5] - p[2]
                 val vx = p[6] - p[0]; val vy = p[7] - p[1]; val vz = p[8] - p[2]
                 var nx = uy * vz - uz * vy; var ny = uz * vx - ux * vz; var nz = ux * vy - uy * vx
@@ -229,7 +235,8 @@ class PlotMesh(val verts: FloatArray, val colors: IntArray, val box: FloatArray)
                     w++
                 }
             }
-            return PlotMesh(verts.copyOf(w * 6), colors.copyOf(w), if (b.size == 6) b.toFloatArray() else FloatArray(0))
+            require(!v.more && v.valid) { "Unexpected model bytes" }
+            return PlotMesh(verts, colors, if (b.size == 6) b.toFloatArray() else FloatArray(0))
         }
     }
 }
@@ -246,6 +253,32 @@ class PlotFrame(
 
 class MeshFrame(val key: String, val mesh: PlotMesh?, val none: String, val at: Long)
 
+// Exact bytes identify a revision; no hash collision can reuse old geometry.
+// The demultiplexer stays free to cancel work while one mesh is being built.
+private class PlotMeshAssets {
+    private data class Entry(val n: Int, val bytes: ByteArray, val frame: MeshFrame)
+    private val entries = LinkedHashMap<String, Entry>(8, 0.75f, true)
+    private val tickets = HashMap<String, Long>()
+    private var serial = 0L
+    private var generation = 0
+    @Synchronized fun epoch() = generation
+    @Synchronized fun reset() { generation++; serial++; entries.clear(); tickets.clear() }
+    @Synchronized fun issue(key: String, epoch: Int): Long? {
+        if (generation != epoch) return null
+        serial++; tickets[key] = serial; return serial
+    }
+    @Synchronized fun current(key: String, ticket: Long) = tickets[key] == ticket
+    @Synchronized fun frame(key: String) = entries[key]?.frame
+    @Synchronized fun same(key: String, n: Int, bytes: ByteArray): PlotMesh? =
+        entries[key]?.takeIf { it.n == n && it.bytes.contentEquals(bytes) }?.frame?.mesh
+    @Synchronized fun put(key: String, n: Int, bytes: ByteArray, mesh: PlotMesh, ticket: Long) {
+        if (!current(key, ticket)) return
+        entries[key] = Entry(n, bytes, MeshFrame(key, mesh, "", System.currentTimeMillis()))
+        fun size() = entries.values.sumOf { it.bytes.size.toLong() + (it.frame.mesh?.verts?.size ?: 0) * 4L + (it.frame.mesh?.colors?.size ?: 0) * 4L }
+        while (entries.size > 4 || (size() > (64L shl 20) && entries.size > 1)) entries.remove(entries.keys.first())
+    }
+}
+
 class PlotStore {
     var frame by mutableStateOf<PlotFrame?>(null)
         private set
@@ -253,6 +286,9 @@ class PlotStore {
         private set
     private var held: List<PlotChunk> = emptyList()
     private var generation = 0
+    private val assets = PlotMeshAssets()
+    private val meshQueue = Executors.newSingleThreadExecutor()
+    fun cachedMesh(key: String): MeshFrame? = assets.frame(key)
     private val main = Handler(Looper.getMainLooper())
     // one plot at a time, in arrival order; its new chunks decode side by side
     private val queue = Executors.newSingleThreadExecutor()
@@ -261,6 +297,7 @@ class PlotStore {
     // a new connection holds nothing
     fun reset() {
         generation += 1
+        assets.reset()
         held = emptyList()
         frame = null
         mesh = null
@@ -269,17 +306,23 @@ class PlotStore {
     @Suppress("UNCHECKED_CAST")
     fun receive(b: ByteArray) {
         val gen = generation
+        val epoch = assets.epoch()
         queue.execute {
             val o = runCatching { Cbor.decode(b) as? Map<String, Any?> }.getOrNull() ?: return@execute
             val key = o["key"] as? String ?: ""
             val fam = (o["fam"] as? String)?.takeIf { it.isNotEmpty() } ?: key
             // a 3D model: with its parts (2) or the board alone (3)
-            val solid = key.startsWith("2|") || key.startsWith("3|")
+            val solid = key.startsWith("2|") || key.startsWith("3|") || key.startsWith("4|")
             val why = o["none"] as? String
             if (why != null) {
+                val ticket = if (solid) assets.issue(key, epoch) ?: return@execute else 0L
                 main.post {
                     if (gen != generation) return@post
-                    if (solid) { mesh = MeshFrame(key, null, why, System.currentTimeMillis()); return@post }
+                    if (solid) {
+                        if (!assets.current(key, ticket)) return@post
+                        val previous = assets.frame(key)?.mesh
+                        mesh = MeshFrame(key, previous, why + if (previous == null) "" else " — previous saved revision shown", System.currentTimeMillis()); return@post
+                    }
                     held = emptyList()
                     frame = PlotFrame(key, FloatArray(0), FloatArray(0), 0f, emptyList(), emptySet(), why, System.currentTimeMillis(), fam)
                 }
@@ -288,8 +331,26 @@ class PlotStore {
             if (solid) {
                 // a note about the model (parts with no 3D model) is not a model
                 if (o["mesh"] == null) return@execute
-                val m = PlotMesh.decode(o)
-                main.post { if (gen == generation) mesh = MeshFrame(key, m, "", System.currentTimeMillis()) }
+                val ticket = assets.issue(key, epoch) ?: return@execute
+                val previous = assets.frame(key)?.mesh
+                main.post {
+                    if (gen == generation && assets.current(key, ticket))
+                        mesh = MeshFrame(key, previous, "Received model; decoding…" + if (previous == null) "" else " — previous saved revision shown", System.currentTimeMillis())
+                }
+                meshQueue.execute meshJob@ {
+                    if (!assets.current(key, ticket)) return@meshJob
+                    val bytes = o["mesh"] as? ByteArray ?: ByteArray(0)
+                    val n = o.int("n")
+                    val result = runCatching { assets.same(key, n, bytes) ?: PlotMesh.decode(o) { !assets.current(key, ticket) } }
+                    if (!assets.current(key, ticket)) return@meshJob
+                    val m = result.getOrNull()
+                    if (m != null) assets.put(key, n, bytes, m, ticket)
+                    main.post {
+                        if (gen != generation || !assets.current(key, ticket)) return@post
+                        mesh = MeshFrame(key, m ?: previous,
+                            if (m != null) "" else "Unable to decode model" + if (previous == null) "" else " — previous saved revision shown", System.currentTimeMillis())
+                    }
+                }
                 return@execute
             }
             val refs = o["cs"] as? List<Any?> ?: emptyList()

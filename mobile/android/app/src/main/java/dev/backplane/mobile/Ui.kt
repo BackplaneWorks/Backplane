@@ -1155,18 +1155,24 @@ fun ThreadScreen(m: AppModel, s: Screen, t: ThreadView, below: (@Composable () -
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun PlotScreen(m: AppModel, v: Viewer) {
+    var showReflow by remember { mutableStateOf(false) }
+    if (showReflow) ReflowSheet(m) { showReflow = false }
     val lang = LocalBackplaneLanguage.current
     // a plot for any other source is stale (a switch in flight), except,
     // while the design history shows, the last version of this kind and
     // project: it stays until the next arrives (no blank between steps)
     val f = m.plots.frame?.takeIf { it.key == v.layers || (v.hist != null && it.none.isEmpty() && plotHead(it.key) == plotHead(v.layers)) }
-    val mesh = m.plots.mesh?.takeIf { it.key == v.key }
+    val mesh = m.plots.mesh?.takeIf { it.key == v.key } ?: m.plots.cachedMesh(v.key)
     Column(Modifier.fillMaxSize().background(Color(0xFF000000.toInt() or v.bg))) {
     var cam by remember { mutableStateOf(floatArrayOf(0f, 0f, 0f)) }
+    if (v.open == "3d" || v.open == "mech") TextButton(onClick = { showReflow = true }) { Text("Reflow preview · illustrative") }
     Box(Modifier.weight(1f).fillMaxWidth()) {
         // a part alone gets a surface of its own: nothing of a board is left on it
         key(if (v.layers.isEmpty()) v.key else "") {
         AndroidView(factory = { PlotSurface(it) }, modifier = Modifier.fillMaxSize(), update = { s ->
+            val thermal = m.reflowThermal
+            if (!thermal.contentEquals(s.renderer.thermal)) { s.renderer.thermal = thermal.copyOf(); s.requestRender() }
+            s.bindSource((m.screen?.sel ?: "") + "\u0000" + v.key.ifEmpty { v.layers } + "\u0000" + v.open)
             s.margin = v.margin
             s.zmin = v.zmin
             s.zmax = v.zmax

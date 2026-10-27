@@ -118,23 +118,84 @@ uniform float fade;
 out vec4 o;
 void main() { o = vec4(fade); }"""
 
+// Same linear-colour studio estimates as the web; not measured materials.
 private const val MESH_V = """#version 300 es
+precision highp float;
 layout(location = 0) in vec3 pos;
 layout(location = 1) in vec3 nrm;
 layout(location = 2) in vec3 col;
 uniform mat4 mvp;
-uniform vec3 light;
-out vec3 c;
-void main() {
-  c = col * (0.35 + 0.65 * abs(dot(normalize(nrm), light)));
-  gl_Position = mvp * vec4(pos, 1.0);
-}"""
+out vec3 vc; out vec3 vn; out vec3 vp; out vec3 vm;
+vec3 estimate(vec3 c) {
+  float hi=max(c.r,max(c.g,c.b)), lo=min(c.r,min(c.g,c.b));
+  if(hi<0.12 && hi-lo<max(0.015,hi*0.45)) return vec3(0.63,0.0,0.12);
+  if(lo>0.9) return vec3(0.82,0.0,0.0);
+  if(c.r>0.18 && c.g>c.r*0.55 && c.g<c.r*1.02 && c.b<c.g*0.45) return vec3(0.3,0.86,0.0);
+  if(hi-lo<hi*0.16 && lo>0.18 && hi<0.9) return vec3(0.28,0.82,0.0);
+  if(c.r>c.b*1.25 && c.g>c.b*1.12 && c.r>0.06) return vec3(0.72,0.0,0.0);
+  if(hi-lo>max(0.015,hi*0.28)) return vec3(0.36,0.0,0.35);
+  return vec3(0.55,0.0,0.0);
+}
+void main() { gl_Position=mvp*vec4(pos,1.0); vc=col; vn=nrm*vec3(1.0,-1.0,1.0); vp=pos*vec3(1.0,-1.0,1.0); vm=estimate(col); }"""
 
 private const val MESH_F = """#version 300 es
+
+#ifdef GL_FRAGMENT_PRECISION_HIGH
+precision highp float;
+#else
 precision mediump float;
-in vec3 c;
+#endif
+in vec3 vc; in vec3 vn; in vec3 vp; in vec3 vm;
 out vec4 o;
-void main() { o = vec4(c, 1.0); }"""
+uniform vec3 eye; uniform vec3 right; uniform vec3 up; uniform vec3 forward;
+uniform float exposure; uniform float orthographic; uniform vec3 thermal;
+const float PI = 3.14159265;
+vec3 fresnel(vec3 f0, float h) { return f0 + (1.0 - f0) * pow(1.0 - h, 5.0); }
+vec3 light(vec3 N, vec3 V, vec3 L, vec3 base, vec3 f0, float rough, float metal) {
+  vec3 H = normalize(V + L);
+  float nl = max(dot(N,L), 0.0), nv = max(dot(N,V), 0.001), nh = max(dot(N,H), 0.0);
+  float a = rough * rough, a2 = a * a, d = nh * nh * (a2 - 1.0) + 1.0;
+  float D = a2 / max(PI * d * d, 0.0001), k = (rough + 1.0) * (rough + 1.0) / 8.0;
+  float G = (nl / (nl * (1.0-k) + k)) * (nv / (nv * (1.0-k) + k));
+  vec3 F = fresnel(f0, max(dot(V,H), 0.0));
+  return (base * (1.0-metal) * (1.0-F) / PI + F * D * G / max(4.0*nl*nv, 0.001)) * nl;
+}
+// An analytic studio environment: broad neutral panels, darker between them.
+// Rough surfaces widen the panels; metals reflect them instead of turning gray.
+vec3 studio(vec3 R, float rough, float metal) {
+  vec3 q = vec3(dot(R,right), dot(R,up), dot(R,-forward));
+  float power = mix(110.0, 3.0, rough * rough);
+  float key = pow(max(dot(q, normalize(vec3(-0.55,0.75,0.65))),0.0),power);
+  float fill = pow(max(dot(q, normalize(vec3(0.85,0.25,0.35))),0.0),power*0.65);
+  float sky=0.08+0.2*smoothstep(-0.4,0.25,q.y)+0.7*smoothstep(0.45,0.85,q.y);
+  return vec3(sky*mix(0.15,1.0,metal)) + vec3(1.5,1.48,1.42)*key + vec3(0.65,0.72,0.85)*fill;
+}
+vec3 srgb(vec3 x) {
+  return mix(12.92*x, 1.055*pow(max(x,vec3(0.0)),vec3(1.0/2.4))-0.055, step(vec3(0.0031308),x));
+}
+void main() {
+  vec3 V = orthographic > 0.5 ? normalize(-forward) : normalize(eye-vp), N = normalize(vn);
+  // The wire has double-sided CAD faces. Light whichever side is visible;
+  // this does not change winding, handedness, geometry or silk orientation.
+  if(dot(N,V)<0.0) N=-N;
+  float rough=vm.x, metal=vm.y, nv=max(dot(N,V),0.0);
+  vec3 base=max(vc,vec3(0.0)), f0=mix(vec3(0.04),base,metal);
+  vec3 key=normalize(-right*0.55+up*0.75-forward*0.65);
+  vec3 fill=normalize(right*0.85+up*0.25-forward*0.35);
+  vec3 rgb=base*(1.0-metal)*(mix(0.27,0.74,step(0.8,rough))+0.08*max(dot(N,up),0.0));
+  rgb+=light(N,V,key,base,f0,rough,metal)*1.5;
+  rgb+=light(N,V,fill,base,f0,rough,metal)*0.65;
+  rgb+=studio(reflect(-V,N),rough,metal)*fresnel(f0,nv)*(1.0-rough*0.35);
+  rgb+=studio(reflect(-V,N),0.3,0.0)*fresnel(vec3(0.04),nv)*vm.z;
+  // A display-only thermal overlay. No claim of per-part temperature/flow.
+  float heat=clamp((thermal.y-25.0)/235.0,0.0,1.0);
+  vec3 tint=mix(vec3(0.12,0.32,0.85),vec3(1.0,0.15,0.02),heat);
+  rgb=mix(rgb,mix(rgb,tint,0.44)+vec3(0.1)*thermal.z*metal,thermal.x);
+  rgb*=exp2(exposure);
+  // Soft highlight shoulder; retain diffuse whites and dark material detail.
+  rgb=rgb/(vec3(1.0)+max(rgb-vec3(0.8),vec3(0.0))*0.28);
+  o=vec4(clamp(srgb(rgb),0.0,1.0),1.0);
+}"""
 
 private const val QUAD_V = """#version 300 es
 void main() {
@@ -174,6 +235,8 @@ private class Program(v: String, f: String) {
             glAttachShader(id, s)
         }
         glLinkProgram(id)
+        val linked = IntArray(1); glGetProgramiv(id, GL_LINK_STATUS, linked, 0)
+        check(linked[0] != 0) { "plot program: " + glGetProgramInfoLog(id) }
     }
     fun at(name: String) = at.getOrPut(name) { glGetUniformLocation(id, name) }
 }
@@ -285,6 +348,8 @@ class PlotRenderer : GLSurfaceView.Renderer {
     private fun dimmed(layer: Int) = layer in 0..31 && (dim shr layer) and 1 == 1
     @Volatile var three = false
     @Volatile var orbit = Orbit()
+    @Volatile var thermal = floatArrayOf(0f, 25f, 0f)
+    @Volatile var exposure = 0f
     @Volatile var thick = 1600f
     @Volatile var top = IntArray(0)
     @Volatile var bottom = IntArray(0)
@@ -548,9 +613,10 @@ class PlotRenderer : GLSurfaceView.Renderer {
     private fun model(buf: Int, count: Int) {
         glUseProgram(meshP.id)
         glUniformMatrix4fv(meshP.at("mvp"), 1, false, mvp, 0)
-        // lit from the viewer (model space: y flipped)
-        val f = cam.f
-        glUniform3f(meshP.at("light"), -f[0], f[1], -f[2])
+        for ((name, v) in listOf("eye" to cam.eye(), "right" to cam.r, "up" to cam.u, "forward" to cam.f, "thermal" to thermal))
+            glUniform3f(meshP.at(name), v[0], v[1], v[2])
+        glUniform1f(meshP.at("exposure"), exposure)
+        glUniform1f(meshP.at("orthographic"), 0f)
         glBindBuffer(GL_ARRAY_BUFFER, buf)
         for (k in 0..2) { glEnableVertexAttribArray(k); glVertexAttribDivisor(k, 0) }
         glVertexAttribPointer(0, 3, GL_FLOAT, false, 36, 0)
@@ -655,10 +721,39 @@ class PlotSurface(context: Context) : GLSurfaceView(context) {
     private var picked = ""
     private val density = context.resources.displayMetrics.density
 
+    private data class Pose(val scale: Float, val x: Float, val y: Float, val orbit: Orbit, val width: Int, val height: Int)
+    private companion object { val poses = LinkedHashMap<String, Pose>() }
+    private var stateKey = ""
+    private var pendingPose: Pose? = null
+    private fun savePose() {
+        if (!fitted || stateKey.isEmpty()) return
+        poses.remove(stateKey); poses[stateKey] = Pose(renderer.scale, renderer.offX, renderer.offY, renderer.orbit.copy(), width, height)
+        while (poses.size > 64) poses.remove(poses.keys.first())
+    }
+    fun bindSource(key: String) {
+        if (key == stateKey) return
+        savePose(); stateKey = key; pendingPose = poses[key]
+        fitted = false; box = FloatArray(0); edge = FloatArray(0); chunks = emptyList(); shown = null; shownMesh = null; picked = ""
+        flingX = 0f; flingY = 0f
+        queueEvent { renderer.load(emptyList(), emptySet()); renderer.mesh(null); renderer.highlight(null, null); renderer.slab(FloatArray(0), 0) }
+    }
+    private fun restorePose() {
+        val pose = pendingPose ?: return
+        if (width <= 0) return
+        renderer.scale = pose.scale; renderer.offX = pose.x + (width - pose.width) / 2f; renderer.offY = pose.y + (height - pose.height) / 2f
+        renderer.orbit = pose.orbit.copy(); fitted = true; pendingPose = null
+    }
+    override fun onDetachedFromWindow() {
+        savePose(); Choreographer.getInstance().removeFrameCallback(frame); ticking = false
+        super.onDetachedFromWindow()
+    }
+
     init {
         setEGLContextClientVersion(3)
         setEGLConfigChooser(8, 8, 8, 8, 0, 0)
         preserveEGLContextOnPause = true
+        isFocusable = true; isFocusableInTouchMode = true
+        contentDescription = "Board and model viewer. Arrow keys orbit, shift arrows pan, plus and minus zoom, F fits."
         setRenderer(renderer)
         renderMode = RENDERMODE_WHEN_DIRTY
     }
@@ -699,12 +794,13 @@ class PlotSurface(context: Context) : GLSurfaceView(context) {
         super.onSizeChanged(w, h, ow, oh)
         val b = shownMesh?.mesh?.box
         if (!fitted) { if (box.size < 4 && b != null && b.size == 6) fitSolid(b) else refit() }
+        restorePose()
     }
 
     fun setThree(on: Boolean) {
         if (renderer.three == on) return
         renderer.three = on
-        refit()
+        if (!fitted) refit()
     }
 
     fun show(f: PlotFrame, bg: Int, slab: Int, look: IntArray) {
@@ -723,8 +819,10 @@ class PlotSurface(context: Context) : GLSurfaceView(context) {
         box = f.box
         edge = e
         if (first) { fitted = false; refit() }
-        fadeFrom = if (f.fresh.isEmpty()) 0 else f.at
-        renderer.fade = if (f.fresh.isEmpty()) 1f else 0f
+        restorePose()
+        val animate = f.fresh.isNotEmpty() && android.animation.ValueAnimator.areAnimatorsEnabled()
+        fadeFrom = if (animate) f.at else 0
+        renderer.fade = if (animate) 0f else 1f
         run()
         requestRender()
     }
@@ -735,7 +833,8 @@ class PlotSurface(context: Context) : GLSurfaceView(context) {
         queueEvent { renderer.mesh(m.mesh) }
         // a part alone (no board plot under it) is fitted by its own box
         val b = m.mesh?.box
-        if (box.size < 4 && b != null && b.size == 6 && width > 0) fitSolid(b)
+        if (!fitted && box.size < 4 && b != null && b.size == 6 && width > 0) fitSolid(b)
+        restorePose()
         requestRender()
     }
 
@@ -897,8 +996,33 @@ class PlotSurface(context: Context) : GLSurfaceView(context) {
         requestRender()
     }
 
+    override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent): Boolean {
+        val delta = when (keyCode) {
+            android.view.KeyEvent.KEYCODE_DPAD_LEFT -> -12f to 0f
+            android.view.KeyEvent.KEYCODE_DPAD_RIGHT -> 12f to 0f
+            android.view.KeyEvent.KEYCODE_DPAD_UP -> 0f to -12f
+            android.view.KeyEvent.KEYCODE_DPAD_DOWN -> 0f to 12f
+            else -> null
+        }
+        if (delta != null) {
+            if (three) renderer.orbit = renderer.orbit.copy().let {
+                if (event.isShiftPressed) it.pan(delta.first, delta.second, it.unit(height)) else it.spin(delta.first, delta.second, .008f)
+            } else { renderer.offX += delta.first; renderer.offY += delta.second }
+        } else when (keyCode) {
+            android.view.KeyEvent.KEYCODE_PLUS, android.view.KeyEvent.KEYCODE_EQUALS -> zoom(1.15f, width / 2f, height / 2f)
+            android.view.KeyEvent.KEYCODE_MINUS -> zoom(1 / 1.15f, width / 2f, height / 2f)
+            android.view.KeyEvent.KEYCODE_F, android.view.KeyEvent.KEYCODE_MOVE_HOME -> {
+                val b = shownMesh?.mesh?.box
+                if (box.size < 4 && b != null && b.size == 6) fitSolid(b) else refit()
+            }
+            else -> return super.onKeyDown(keyCode, event)
+        }
+        requestRender(); return true
+    }
+
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(e: MotionEvent): Boolean {
+        if (e.actionMasked == MotionEvent.ACTION_DOWN) requestFocus()
         twisted(e)
         scaler.onTouchEvent(e)
         gestures.onTouchEvent(e)
@@ -915,7 +1039,7 @@ class PlotSurface(context: Context) : GLSurfaceView(context) {
                 renderer.fade = f
                 if (f >= 1f) fadeFrom = 0 else busy = true
             }
-            if (hypot(flingX, flingY) > 8f) {
+            if (android.animation.ValueAnimator.areAnimatorsEnabled() && hypot(flingX, flingY) > 8f) {
                 renderer.offX += flingX * dt
                 renderer.offY += flingY * dt
                 val k = exp(-5.5f * dt)

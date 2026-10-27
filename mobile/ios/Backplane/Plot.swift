@@ -74,18 +74,21 @@ struct Varints {
 
     init(_ d: Data) { b = [UInt8](d) }
 
-    var more: Bool { i < b.count }
+    private(set) var valid = true
+    var more: Bool { valid && i < b.count }
 
     mutating func next() -> UInt32 {
-        var acc: UInt32 = 0, sh: UInt32 = 0
-        while i < b.count {
-            let v = b[i]
-            i += 1
-            acc |= UInt32(v & 127) << sh
-            if v < 128 { break }
-            sh += 7
+        var acc: UInt32 = 0
+        for index in 0..<5 {
+            let shift = UInt32(index * 7)
+            guard i < b.count else { valid = false; return 0 }
+            let v = b[i]; i += 1
+            guard shift < 28 || (v & 0xF0) == 0 else { valid = false; return 0 }
+            acc |= UInt32(v & 127) << shift
+            if v < 128 { return acc }
         }
-        return acc
+        valid = false
+        return 0
     }
 
     mutating func signed() -> Int32 {
@@ -220,25 +223,31 @@ struct PlotMesh: @unchecked Sendable {
     let colors: [UInt32]    // per vertex, 0xRRGGBB
     let box: [Float]        // x0 y0 z0 x1 y1 z1
 
-    static func decode(_ o: [String: Any]) -> PlotMesh {
+    static func decode(_ o: [String: Any], cancelled: () -> Bool = { false }) throws -> PlotMesh {
         let n = o["n"] as? Int ?? 0
-        let b = (o["box3"] as? [Int] ?? []).map { Float($0) * 10 }
+        guard n > 0, n <= (64 << 20) / 84, let bytes = o["mesh"] as? Data, bytes.count >= n * 10 else {
+            throw NSError(domain: "PlotMesh", code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid or oversized model"])
+        }
+        let b = (o["box3"] as? [Int] ?? []).map { Float(Int32(truncatingIfNeeded: $0)) * 10 }
         var v = Varints(o["mesh"] as? Data ?? Data())
         var verts: [Float] = [], colors: [UInt32] = []
         verts.reserveCapacity(n * 18)
         colors.reserveCapacity(n * 3)
         var color: UInt32 = 0, px: Int32 = 0, py: Int32 = 0, pz: Int32 = 0
-        for _ in 0..<n where v.more {
+        for triangle in 0..<n {
+            if triangle % 256 == 0 && cancelled() { throw CancellationError() }
             color ^= v.next()
             var p: [SIMD3<Float>] = []
             for _ in 0..<3 {
                 px = px &+ v.signed(); py = py &+ v.signed(); pz = pz &+ v.signed()
                 p.append(SIMD3(Float(px), Float(py), Float(pz)) * 10)
             }
+            guard v.valid else { throw NSError(domain: "PlotMesh", code: 2, userInfo: [NSLocalizedDescriptionKey: "Incomplete model"]) }
             let nrm = simd_normalize(simd_cross(p[1] - p[0], p[2] - p[0]))
             let nn = nrm.x.isNaN ? SIMD3<Float>(0, 0, 1) : nrm
             for q in p { verts += [q.x, q.y, q.z, nn.x, nn.y, nn.z]; colors.append(color) }
         }
+        guard !v.more, v.valid else { throw NSError(domain: "PlotMesh", code: 3, userInfo: [NSLocalizedDescriptionKey: "Unexpected model bytes"]) }
         return PlotMesh(verts: verts, colors: colors, box: b.count == 6 ? b : [])
     }
 }
@@ -267,6 +276,35 @@ struct MeshFrame {
     let at: Date
 }
 
+// Exact wire revision cache, independent of view lifetime. Locks protect reset,
+// demultiplexing and the dedicated mesh queue; immutable geometry is shared.
+private final class PlotMeshAssets: @unchecked Sendable {
+    private struct Entry { let n: Int; let bytes: Data; let frame: MeshFrame }
+    private let lock = NSLock()
+    private var entries: [String: Entry] = [:]
+    private var order: [String] = []
+    private var tickets: [String: UInt64] = [:]
+    private var serial: UInt64 = 0
+    private var generation = 0
+    func epoch() -> Int { lock.withLock { generation } }
+    func reset() { lock.withLock { serial &+= 1; generation += 1; tickets = [:]; entries = [:]; order = [] } }
+    func issue(_ key: String, epoch: Int) -> UInt64? { lock.withLock { guard generation == epoch else { return nil }; serial &+= 1; tickets[key] = serial; return serial } }
+    func current(_ key: String, _ ticket: UInt64) -> Bool { lock.withLock { tickets[key] == ticket } }
+    func frame(_ key: String) -> MeshFrame? { lock.withLock { entries[key]?.frame } }
+    func same(_ key: String, n: Int, bytes: Data) -> PlotMesh? {
+        lock.withLock { guard let e = entries[key], e.n == n, e.bytes == bytes else { return nil }; return e.frame.mesh }
+    }
+    func put(_ key: String, n: Int, bytes: Data, mesh: PlotMesh, ticket: UInt64) {
+        lock.withLock {
+            guard tickets[key] == ticket else { return }
+            entries[key] = Entry(n: n, bytes: bytes, frame: MeshFrame(key: key, mesh: mesh, none: "", at: Date()))
+            order.removeAll { $0 == key }; order.append(key)
+            func size() -> Int { entries.values.reduce(0) { $0 + $1.bytes.count + ($1.frame.mesh?.verts.count ?? 0) * 4 + ($1.frame.mesh?.colors.count ?? 0) * 4 } }
+            while order.count > 4 || (size() > 64 << 20 && order.count > 1) { entries.removeValue(forKey: order.removeFirst()) }
+        }
+    }
+}
+
 @MainActor
 @Observable
 final class PlotStore {
@@ -275,6 +313,10 @@ final class PlotStore {
     @ObservationIgnored private var held: [PlotChunk] = []
     @ObservationIgnored private let queue = DispatchQueue(label: "plot", qos: .userInitiated)
     @ObservationIgnored private var generation = 0
+    @ObservationIgnored private let assets = PlotMeshAssets()
+    @ObservationIgnored private let meshQueue = DispatchQueue(label: "plot.mesh", qos: .userInitiated)
+
+    func cachedMesh(_ key: String) -> MeshFrame? { assets.frame(key) }
 
     // a plot frame: a map whose first key is 1 ("t") and value "plot"
     static func isPlot(_ d: Data) -> Bool {
@@ -285,6 +327,7 @@ final class PlotStore {
     // a new connection holds nothing
     func reset() {
         generation += 1
+        assets.reset()
         held = []
         frame = nil
         mesh = nil
@@ -293,17 +336,23 @@ final class PlotStore {
     // decoded off the main thread, applied in arrival order
     func receive(_ d: Data) {
         let gen = generation
+        let assets = self.assets, meshQueue = self.meshQueue, epoch = assets.epoch()
         queue.async {
             guard let o = Cbor.decode(d) as? [String: Any] else { return }
             let key = o["key"] as? String ?? ""
             let fam = (o["fam"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? key
             // a 3D model: with its parts (2) or the board alone (3)
-            let solid = key.hasPrefix("2|") || key.hasPrefix("3|")
+            let solid = key.hasPrefix("2|") || key.hasPrefix("3|") || key.hasPrefix("4|")
             if let why = o["none"] as? String {
+                guard let ticket = solid ? assets.issue(key, epoch: epoch) : 0 else { return }
                 DispatchQueue.main.async {
                     MainActor.assumeIsolated {
                         guard gen == self.generation else { return }
-                        if solid { self.mesh = MeshFrame(key: key, mesh: nil, none: why, at: Date()); return }
+                        if solid {
+                            guard assets.current(key, ticket) else { return }
+                            let previous = assets.frame(key)?.mesh
+                            self.mesh = MeshFrame(key: key, mesh: previous, none: why + (previous == nil ? "" : " — previous saved revision shown"), at: Date()); return
+                        }
                         self.held = []
                         self.frame = PlotFrame(key: key, fam: fam, box: [], edge: [], thick: 0, chunks: [], fresh: [], none: why, at: Date())
                     }
@@ -313,11 +362,34 @@ final class PlotStore {
             // a note about the model (parts with no 3D model) is not a model
             if solid, o["mesh"] == nil { return }
             if solid {
-                let m = PlotMesh.decode(o)
+                guard let ticket = assets.issue(key, epoch: epoch) else { return }
+                let previous = assets.frame(key)?.mesh
                 DispatchQueue.main.async {
                     MainActor.assumeIsolated {
-                        guard gen == self.generation else { return }
-                        self.mesh = MeshFrame(key: key, mesh: m, none: "", at: Date())
+                        guard gen == self.generation, assets.current(key, ticket) else { return }
+                        self.mesh = MeshFrame(key: key, mesh: previous, none: "Received model; decoding…" + (previous == nil ? "" : " — previous saved revision shown"), at: Date())
+                    }
+                }
+                meshQueue.async {
+                    guard assets.current(key, ticket) else { return }
+                    do {
+                        let bytes = o["mesh"] as? Data ?? Data(), n = o["n"] as? Int ?? 0
+                        let m = try assets.same(key, n: n, bytes: bytes) ?? PlotMesh.decode(o, cancelled: { !assets.current(key, ticket) })
+                        guard assets.current(key, ticket) else { return }
+                        assets.put(key, n: n, bytes: bytes, mesh: m, ticket: ticket)
+                        DispatchQueue.main.async {
+                            MainActor.assumeIsolated {
+                                guard gen == self.generation, assets.current(key, ticket) else { return }
+                                self.mesh = MeshFrame(key: key, mesh: m, none: "", at: Date())
+                            }
+                        }
+                    } catch {
+                        DispatchQueue.main.async {
+                            MainActor.assumeIsolated {
+                                guard gen == self.generation, assets.current(key, ticket) else { return }
+                                self.mesh = MeshFrame(key: key, mesh: previous, none: "Unable to decode model" + (previous == nil ? "" : " — previous saved revision shown"), at: Date())
+                            }
+                        }
                     }
                 }
                 return
