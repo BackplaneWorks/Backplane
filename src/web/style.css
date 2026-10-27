@@ -53,6 +53,40 @@ html:has(.app.light), html:has(.app.light) body { background: #fafaf8; color: #1
 html.light, html.light body { background: #fafaf8; color: #1b1d21; color-scheme: light; }
 
 * { box-sizing: border-box; border-radius: 0; }
+/* App scrollbars follow the panel palette, including nested editors and menus.
+   Keep touch and forced-colour controls native. Low specificity leaves
+   deliberate per-surface hiding alone; data-native-scrollbar opts out a subtree.
+   Select popups and single-line inputs always keep their platform controls. */
+@media (hover: hover) and (pointer: fine) and (forced-colors: none) {
+  .app { --scroll-thumb: var(--faint); --scroll-hover: var(--dim); }
+  .app.light { --scroll-thumb: var(--dim); --scroll-hover: var(--text); }
+  /* Non-auto standard properties override WebKit pseudo-elements in Chromium.
+     Use them only in engines without that API (Firefox). */
+  @supports not selector(::-webkit-scrollbar) {
+    :where(.app, .app *) { scrollbar-width: thin; scrollbar-color: var(--scroll-thumb) var(--bg); }
+    :where(.app select, .app option, .app optgroup, .app input, .app [data-native-scrollbar], .app [data-native-scrollbar] *) {
+      scrollbar-width: auto; scrollbar-color: auto;
+    }
+  }
+  :where(.app, .app *):not(:where(select, option, optgroup, input, [data-native-scrollbar], [data-native-scrollbar] *))::-webkit-scrollbar {
+    width: 10px; height: 10px;
+  }
+  :where(.app, .app *):not(:where(select, option, optgroup, input, [data-native-scrollbar], [data-native-scrollbar] *))::-webkit-scrollbar-track {
+    background: var(--bg); box-shadow: inset 0 0 0 1px var(--line);
+  }
+  :where(.app, .app *):not(:where(select, option, optgroup, input, [data-native-scrollbar], [data-native-scrollbar] *))::-webkit-scrollbar-thumb {
+    background: var(--scroll-thumb); border: 2px solid var(--bg); min-width: 24px; min-height: 24px;
+  }
+  :where(.app, .app *):not(:where(select, option, optgroup, input, [data-native-scrollbar], [data-native-scrollbar] *))::-webkit-scrollbar-thumb:hover {
+    background: var(--scroll-hover);
+  }
+  :where(.app, .app *):not(:where(select, option, optgroup, input, [data-native-scrollbar], [data-native-scrollbar] *))::-webkit-scrollbar-thumb:active {
+    background: var(--accent);
+  }
+  :where(.app, .app *):not(:where(select, option, optgroup, input, [data-native-scrollbar], [data-native-scrollbar] *))::-webkit-scrollbar-corner {
+    background: var(--bg);
+  }
+}
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 13px/1.5 var(--sans); }
 button, input, textarea { font: inherit; color: inherit; }
 /* the page never zooms on a phone: no double-tap zoom, no text inflation,
@@ -1116,7 +1150,7 @@ html:lang(ja) :is(.set-text, .set-ctl) { min-width: 0; }
    pointer. Square, every control a real button, nothing on hover only. */
 .viewer-bar .sch-btn { padding: 3px 9px; white-space: nowrap; }
 .viewer-bar .sch-btn[disabled] { opacity: 0.4; cursor: default; }
-.viewer-bar .sch-trail { display: flex; align-items: center; min-width: 0; max-width: 100%; overflow-x: auto; scrollbar-width: thin; }
+.viewer-bar .sch-trail { display: flex; align-items: center; min-width: 0; max-width: 100%; overflow-x: auto; }
 .sch-crumb { border: 0; background: none; color: var(--dim); padding: 3px 4px; white-space: nowrap; max-width: 18em; overflow: hidden; text-overflow: ellipsis; }
 .sch-crumb + .sch-crumb::before { content: "›"; color: var(--faint); margin-right: 6px; }
 .sch-crumb.on { color: var(--text); }
