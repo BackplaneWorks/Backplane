@@ -6,6 +6,21 @@ Use Xcode 26.6 and iOS Simulator 26.5. Keep the ZIP, result bundles and screensh
 
 For a repeat run, use an isolated source copy from the exact integrated commit, verify the bridge hash, and hold the `ios-vc-mac` named lock for Mac builds and UI tests. Install only on dedicated simulator devices and preserve their application data. The UI target generator changes only a disposable copy; run XCTest with `-collect-test-diagnostics never -parallel-testing-enabled NO`. The simulator-only qualification URLs park and reconnect only the isolated app's client sockets.
 
+## Demo on the prepared Mac
+
+The existing private hub is `http://desktop.tail9e0cf2.ts.net:3787`. The prepared iPhone 17 Pro simulator is `D73B6652-765E-4C7C-AB09-1F13522FCEAC`; it is already paired and unparked. No pairing link needs to be re-entered. The second, smaller test simulator is `6AA4F268-08F6-4E9B-BBD2-C9FF58AB5DB1` (iPhone 17e).
+
+1. Open the dedicated Pro in Simulator. Launch Backplane normally, without pairing, selection or qualification environment variables. The existing pairing should resume. A refresh can briefly show loading while the last real content remains visible; that is not a continuous-ready guarantee.
+2. In Threads, return to the project list and find **PoE_LoRa_Tube**. Expand its existing Settled shelf and open the board review thread. Use the viewer button, choose Board, then Close and choose 3D. Drag the populated board to orbit; Close returns to the conversation.
+3. Open Home and Bub (or use its restored destination), then Chat. Open the keyboard. Switch between Home/Bub and Threads to demonstrate the preserved stacks. Any demo text should remain an unsent local draft and be cleared afterward; qualification sent no live messages.
+4. Use the screenshots and receipt for the isolated disconnect/reconnect demonstration. Do not restart the shared hub. The simulator qualification disconnect deliberately stays parked until explicit reconnect, including across relaunch; leave the prepared app unparked for the meeting.
+
+The saved design belongs to project `p1790229698-1087`, thread `t1790229700-1088`. Its canonical file is `/home/h/Documents/i2cjak/PoE_LoRa_Tube/hardware/PoE_LoRa_Tube.kicad_pcb`; use its recorded file SHA below as provenance. No Git design revision is invented for this non-Git project. Bub's existing conversation is `t1790292962-8017`.
+
+To reinstall the supplied ZIP, extract `Backplane.app` on the Mac and use `xcrun simctl install D73B6652-765E-4C7C-AB09-1F13522FCEAC /path/to/Backplane.app` under the Mac lock. This updates only the dedicated simulator and preserves its app data. Launch with `xcrun simctl launch --terminate-running-process D73B6652-765E-4C7C-AB09-1F13522FCEAC dev.backplane.mobile` from a normal environment. Do not use `booted`, erase a simulator or install onto a physical phone as part of this runbook.
+
+Private review artifacts are in `build/ios-qualification`: `final-946efaf6-receipt.json`, the simulator ZIP, and `shots/946efaf6/` (2D reopen, decoded 3D mesh, orbit before/after, light/dark prompt and keyboard, small large-type layouts and Settings). The Bub keyboard screenshots are under `shots/509011d7/`, and the owner-specific draft screenshot under `shots/266f70f5/`; preserve those source distinctions.
+
 ## Observed results
 
 The dedicated iPhone 17 Pro and 17e simulators used a real existing hub. Before and after the final UI batch, read-only `/hello` returned HTTP 200, commit `b6cc6ed9abfdf15e272ed6dd59225fc4829b1f28`, version `0.12.4-dev.chat.f54c6ed34.6ae0d568`. A separately owned chat deployment changed the hub version earlier in qualification; that external boundary is not the app-only interruption. The saved PoE_LoRa_Tube board used for viewer checks had SHA-256 `ce3ac2dd3e0e782d4f8f1266d29bb8c8ea843e588d0ae7d86be5b3d05aab5630`.
@@ -18,4 +33,4 @@ The dedicated iPhone 17 Pro and 17e simulators used a real existing hub. Before 
 
 Some failed attempts exposed test-launch state or blocked safely before actions; retain their private result bundles and do not replace them with a later pass. In particular, the first final 3D attempt lacked the qualification launch flags and stopped before choosing 3D; an explicit termination before test launch preceded the successful 3D run. An initial offline attempt stopped before delivering disconnect while a restored Close control was in transition; the bounded retry passed.
 
-UI paste pairing, physical-device performance and thermals, native material/GLB parity, zoom, full loader timeout/cancel, and comprehensive accessibility remain unqualified. A read-only signing inventory found no Apple Development identity. Repository-wide Bend proof remains red on the separately recorded existing `post_running_delivers` law failure; mobile-specific checks are not a full proof pass.
+Live message sending and attachment upload were not exercised against the shared hub; ownership and queue regressions were checked in source/emitted controls. UI paste pairing, physical-device performance and thermals, native material/GLB parity, zoom, full loader timeout/cancel, and comprehensive accessibility remain unqualified. A read-only signing inventory found no Apple Development identity. Repository-wide Bend proof remains red on the separately recorded existing `post_running_delivers` law failure; mobile-specific checks are not a full proof pass.
