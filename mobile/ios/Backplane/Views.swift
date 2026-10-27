@@ -121,7 +121,7 @@ private struct ConnectionStartupView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     Text("BACKPLANE").font(.system(.caption, design: .monospaced).weight(.bold))
-                        .tracking(2).foregroundStyle(PhaseColor.accent)
+                        .tracking(2).foregroundStyle(BackplaneDesign.accent)
                     Text(HubDot.word(connection.phase, tag))
                         .font(.title2.weight(.semibold))
                     Text(key).font(.system(.body, design: .monospaced)).textSelection(.enabled)
@@ -190,7 +190,7 @@ struct PairView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("BACKPLANE")
                         .font(.system(.caption, design: .monospaced).weight(.bold))
-                        .tracking(2).foregroundStyle(PhaseColor.accent)
+                        .tracking(2).foregroundStyle(BackplaneDesign.accent)
                     Text(NativeMessages.native_pair_title(tag)).font(.largeTitle.weight(.bold))
                     Text(NativeMessages.native_pair_computer(tag)).foregroundStyle(.secondary)
                 }
