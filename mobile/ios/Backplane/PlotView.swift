@@ -1155,6 +1155,7 @@ struct PlotScreen: View {
     let presentation: ViewerCloseIntent.Token
     @State private var load = ViewerLoadState()
     @State private var loadTimedOut = false
+    @State private var loadAttempt: LoadAttempt?
 
     private var plotFrame: PlotFrame? {
         model.plots.frame.flatMap { $0.key == viewer.layers || (viewer.hist != nil && $0.none.isEmpty && Self.head($0.key) == Self.head(viewer.layers)) ? $0 : nil }
@@ -1168,11 +1169,21 @@ struct PlotScreen: View {
               key: viewer.key, layers: viewer.layers, pairing: presentation.owner.pairing,
               epoch: model.conn[presentation.owner.hub]?.epoch ?? 0, presentation: presentation.presentation)
     }
+    private struct LoadAttempt: Equatable {
+        let presentation: ViewerCloseIntent.Token
+        let kind, key, layers: String
+        let retry: UInt64
+    }
     private struct LoadWatch: Equatable {
         let identity: ViewerLoadState.Identity
         let plotGeneration: Int
+        let attempt: LoadAttempt
     }
-    private var loadWatch: LoadWatch { .init(identity: loadIdentity, plotGeneration: model.plots.generation) }
+    private var loadWatch: LoadWatch {
+        .init(identity: loadIdentity, plotGeneration: model.plots.generation,
+              attempt: .init(presentation: presentation, kind: viewer.open, key: viewer.key,
+                             layers: viewer.layers, retry: model.viewerLoadRetry))
+    }
     private struct Availability: Equatable { let geometry, mesh: Bool }
     private var availability: Availability {
         .init(geometry: plotFrame?.none.isEmpty == true, mesh: meshFrame?.mesh != nil && meshFrame?.none.isEmpty == true)
@@ -1309,17 +1320,26 @@ struct PlotScreen: View {
         }
         .task(id: loadWatch) {
             let watch = loadWatch
-            let ticket = load.start(watch.identity, geometry: !viewer.layers.isEmpty, mesh: needsMesh, now: Self.now)
+            // An unresolved presentation keeps its deadline through socket and
+            // plot resets. Its new ticket still rejects all retired callbacks.
+            // A completed view may start a new budget when reconnect reloads it.
+            let preserving = loadAttempt == watch.attempt && load.ticket.map { load.status($0, now: Self.now) != .ready } == true
+            loadAttempt = watch.attempt
+            let ticket = load.start(watch.identity, geometry: !viewer.layers.isEmpty, mesh: needsMesh,
+                                    now: Self.now, preservingDeadline: preserving)
             loadTimedOut = false
             markAvailable()
             guard load.status(ticket, now: Self.now) != .ready else { return }
-            do { try await Task.sleep(for: .seconds(30)) } catch { return }
+            let remaining = load.remainingMilliseconds(ticket, now: Self.now)
+            if remaining > 0 {
+                do { try await Task.sleep(for: .milliseconds(Int64(remaining))) } catch { return }
+            }
             guard !Task.isCancelled, loadWatch == watch, load.ticket == ticket else { return }
             markAvailable()
             loadTimedOut = load.status(ticket, now: Self.now) == .timedOut
         }
         .onChange(of: availability) { _, _ in markAvailable() }
-        .onDisappear { load.reset(); loadTimedOut = false }
+        .onDisappear { load.reset(); loadTimedOut = false; loadAttempt = nil }
         .sheet(isPresented: $showReflow) { ReflowView(model: model) }
         .preferredColorScheme(viewer.light == true ? .light : .dark)
         .statusBarHidden()
