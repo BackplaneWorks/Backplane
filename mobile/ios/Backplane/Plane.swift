@@ -93,6 +93,7 @@ struct UberCardRow: View {
         .buttonStyle(.plain)
         .listRowBackground(Color.accentColor.opacity(card.sel ? 0.22 : 0.10))
         .accessibilityLabel(NativeMessages.native_plane_card(lang, card.name, card.counts ?? ""))
+        .accessibilityIdentifier("home.uber." + card.id)
     }
 }
 
