@@ -22,6 +22,19 @@ import Foundation
         check(!ViewerResumeIntent.matchesSource(token, accepted: .init(kind: "board", key: "different-file", layers: "layers")), "different file is not restored")
         check(!ViewerResumeIntent.matchesSource(token, accepted: .init(kind: "board", key: "key", layers: "different-sheet")), "different layer or history source is not restored")
         check(!ViewerResumeIntent.matchesSource(token, accepted: .init(kind: "3d", key: "key", layers: "layers")), "different kind is not restored")
+        func source(_ kind: String, _ key: String, _ layers: String) -> ViewerCloseIntent.Source { .init(kind: kind, key: key, layers: layers) }
+        check(ViewerResumeIntent.canRestoreDefault(source("board", "0|/project|", "0|/project|")), "default board is restorable")
+        check(ViewerResumeIntent.canRestoreDefault(source("schematic", "1|/project|", "1|/project|")), "default schematic is restorable")
+        check(ViewerResumeIntent.canRestoreDefault(source("3d", "2|/project|", "0|/project|")), "default 3d is restorable")
+        for suffix in ["file.kicad_pcb", "#sheet", "history:abc"] {
+            check(!ViewerResumeIntent.canRestoreDefault(source("board", "0|/project|" + suffix, "0|/project|" + suffix)), "nondefault suffix rejected")
+        }
+        check(!ViewerResumeIntent.canRestoreDefault(source("board", "0||", "0||")), "empty project root rejected")
+        check(!ViewerResumeIntent.canRestoreDefault(source("3d", "2|/project|", "0|/other|")), "cross-root layers rejected")
+        check(!ViewerResumeIntent.canRestoreDefault(source("3d", "3|/project|", "0|/project|")), "bare variant rejected")
+        check(!ViewerResumeIntent.canRestoreDefault(source("3d", "4|/project|", "0|/project|")), "full variant rejected")
+        check(!ViewerResumeIntent.canRestoreDefault(source("mech", "4|/project|", "")), "mechanical source rejected")
+        check(!ViewerResumeIntent.canRestoreDefault(source("board", "0|/project|", "0|/other|")), "board layer mismatch rejected")
         check(resume.claim(current: token, epoch: 11, ready: true, allowed: allowed) == nil && !resume.preserves(token), "claim occurs once")
 
         resume.capture(token, fromEpoch: 10)
