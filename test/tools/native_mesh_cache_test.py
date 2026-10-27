@@ -39,6 +39,9 @@ fun main(args: Array<String>) {
     check(cache.same("board", n.toInt(), changed) == null)
     val b = cache.issue("board", epoch)!!
     check(!cache.current("board", a) && cache.current("board", b))
+    val selected = cache.issue("new selected source", epoch)!!
+    check(!cache.current("board", b) && cache.current("new selected source", selected)) { "Switch A to B did not cancel A" }
+    check(cache.frame("board")?.mesh === mesh) { "Selection switch must keep completed assets for warm reopen" }
     cache.reset()
     check(!cache.current("board", b) && cache.frame("board") == null)
     check(cache.issue("board", epoch) == null) { "A queued message from a retired hub issued a current ticket" }

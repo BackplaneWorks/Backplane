@@ -265,7 +265,7 @@ private class PlotMeshAssets {
     @Synchronized fun reset() { generation++; serial++; entries.clear(); tickets.clear() }
     @Synchronized fun issue(key: String, epoch: Int): Long? {
         if (generation != epoch) return null
-        serial++; tickets[key] = serial; return serial
+        serial++; tickets.clear(); tickets[key] = serial; return serial
     }
     @Synchronized fun current(key: String, ticket: Long) = tickets[key] == ticket
     @Synchronized fun frame(key: String) = entries[key]?.frame

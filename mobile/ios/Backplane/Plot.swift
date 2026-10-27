@@ -288,7 +288,7 @@ private final class PlotMeshAssets: @unchecked Sendable {
     private var generation = 0
     func epoch() -> Int { lock.withLock { generation } }
     func reset() { lock.withLock { serial &+= 1; generation += 1; tickets = [:]; entries = [:]; order = [] } }
-    func issue(_ key: String, epoch: Int) -> UInt64? { lock.withLock { guard generation == epoch else { return nil }; serial &+= 1; tickets[key] = serial; return serial } }
+    func issue(_ key: String, epoch: Int) -> UInt64? { lock.withLock { guard generation == epoch else { return nil }; serial &+= 1; tickets.removeAll(keepingCapacity: true); tickets[key] = serial; return serial } }
     func current(_ key: String, _ ticket: UInt64) -> Bool { lock.withLock { tickets[key] == ticket } }
     func frame(_ key: String) -> MeshFrame? { lock.withLock { entries[key]?.frame } }
     func same(_ key: String, n: Int, bytes: Data) -> PlotMesh? {
