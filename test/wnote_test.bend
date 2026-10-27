@@ -137,3 +137,5 @@ def main() -> IO(Unit):
     C.Check.str("unreadable default posts nothing", Nat.show(WN.Wn.mode(WN.Wn.wants("", True{}), "")), "0")
     C.Check.str("readable default signs", Nat.show(WN.Wn.mode(WN.Wn.wants(" ", True{}), "k")), "2")
     C.Check.str("named empty file posts nothing", Nat.show(WN.Wn.mode(WN.Wn.wants("/tmp/s", True{}), "")), "0")
+    C.Check.str("short hex is raw bytes", WN.Wn.sig("deadbeef", 10n, body), "sha256=068662f0b5260bd58dfcd9a4df964a0b956e7a36d24dfe5430ff2ffe6f74a351")
+    C.Check.str("odd-length hex is text", WN.Wn.sig("deadbee", 10n, body), "sha256=b76febb25b10ab2e866cdf2b62c0a360a30ffa30286401d08f7f5ed7972de0b2")

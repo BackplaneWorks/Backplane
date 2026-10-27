@@ -327,8 +327,12 @@ X-Backplane-Timestamp: <unix seconds>
 X-Backplane-Signature: sha256=<hex HMAC-SHA256(secret, timestamp + "." + body)>
 ```
 
-A secret of 64 hex digits is the raw 32 bytes; any other text is the key as
-written. With no secret the notice is still posted, without those headers.
+The key is read as `Sign.key` reads an inbound webhook's secret: text that
+is all hex digits (either case) and of even length, of any length, is
+decoded to its raw bytes (`deadbeef` is the four bytes `de ad be ef`, not
+eight ASCII characters; 64 digits are 32 bytes); any other text (an odd
+length, a character that is not a hex digit) is the key as written, in
+UTF-8. Surrounding whitespace in the file is trimmed first. With no secret the notice is still posted, without those headers.
 A secret path that cannot be read, or a file that is there but cannot be
 read or holds no key (the default one too), is logged and nothing is
 posted, so an unsigned notice is never sent in place of a signed one;
