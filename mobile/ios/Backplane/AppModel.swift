@@ -863,6 +863,7 @@ final class AppModel {
         // Reconnect this app's socket: the hub must discard its plot delta
         // holders too. Repeating the same viewer choice need not resend it.
         plots.resumeQualificationDelivery()
+        plots.reset()
         retryConnection(token.owner.hub)
     }
     private func advanceViewerClose() {
