@@ -257,6 +257,7 @@ struct PairView: View {
     private func connect(_ text: String) {
         guard Pairing.key(text) != nil else { invalid = true; return }
         invalid = false
+        link = ""
         done(text)
     }
 
@@ -275,6 +276,17 @@ struct PairView: View {
                 }
                 .buttonStyle(PairActionStyle())
                 .accessibilityIdentifier("pair.scan")
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(tag == "ja" ? "コピーした接続リンクをペーストして接続します。" : "Paste a copied pairing link to connect.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                    PasteButton(payloadType: String.self) { values in
+                        if let value = values.first { connect(value) } else { invalid = true }
+                    }
+                    .tint(BackplaneDesign.accent)
+                    .buttonBorderShape(.roundedRectangle(radius: 0))
+                    .accessibilityHint(tag == "ja" ? "ペーストしたリンクで接続します。" : "Connects using the pasted pairing link.")
+                    .accessibilityIdentifier("pair.paste")
+                }
                 VStack(alignment: .leading, spacing: 10) {
                     Text(NativeMessages.settings_pair(tag)).font(.headline)
                     TextField(NativeMessages.settings_pair(tag), text: $link, prompt: Text(verbatim: "http://host:3787/#token=…"))
@@ -360,6 +372,15 @@ struct HubsView: View {
                 }
             }
             Section {
+                Text(tag == "ja" ? "コピーした接続リンクをペーストして追加します。" : "Paste a copied pairing link to add a hub.")
+                    .font(.footnote).foregroundStyle(.secondary)
+                PasteButton(payloadType: String.self) { values in
+                    if let value = values.first { add(value) } else { invalid = true }
+                }
+                .tint(BackplaneDesign.accent)
+                .buttonBorderShape(.roundedRectangle(radius: 0))
+                .accessibilityHint(tag == "ja" ? "ペーストしたリンクでハブを追加します。" : "Adds a hub using the pasted pairing link.")
+                .accessibilityIdentifier("hubs.paste")
                 TextField(NativeMessages.settings_pair(tag), text: $link, prompt: Text(verbatim: "http://host:3787/#token=…"))
                     .privacySensitive()
                     .textInputAutocapitalization(.never)
