@@ -68,6 +68,7 @@ check('coalesced update issues no command or presenting transition',()=>{const x
 check('latest viewer intent waits for current presentation and issues once',()=>{const x=harness();x.open();const s=x.h.states.get('h');x.h.update(s);const update=x.h.drain().cmds[0].request;x.h.request('h','view','board');x.h.request('h','view','3d');assert.deepEqual(x.h.drain().cmds,[]);const done=x.answer(update.id);assert.equal(done.cmds.length,1);assert.equal(done.cmds[0].request.m,'view.action');assert.equal(done.cmds[0].request.p.action,'view');assert.equal(done.cmds[0].request.p.value,'3d');assert.deepEqual(x.h.drain().cmds,[]);});
 check('held Bub open runs before a coalesced background refresh',()=>{
  const x=harness();x.api.session=()=>({sel:'',drafts:{},open:{},adding:false,panel:false,info:{},rid:1});
+ x.h.publicationAck=true;
  x.h.hubs(['h']);x.h.connection('h','1','view-v1');const first=x.greeting().cmds[0].request;
  const home=x.screen('h','');home.thread=null;home.sel='';x.answer(first.id,{shown:home,overlay:{key:'h',name:'h',j:clone(home)}});
  const s=x.h.states.get('h'),link=x.h.client.links.get('h');x.h.update(s);const refresh=x.h.drain().cmds[0].request;
@@ -81,9 +82,28 @@ check('held Bub open runs before a coalesced background refresh',()=>{
  x.h.receive('h',{t:'view.changed',version:1,generation:'1',epoch:'origin',viewId:link.viewId,target:clone(link.target),viewRevision:'3'},'1');
  assert.deepEqual(x.h.drain().cmds,[],'a new background change cannot overtake an active person action');
  const after=x.answer(action.id,{shown:home,overlay:{key:'h',name:'h',j:clone(home)},viewRevision:'1'});
- assert.equal(after.cmds.length,1);assert.equal(after.cmds[0].request.m,'view.update');
- const final=x.answer(after.cmds[0].request.id,{shown:home,overlay:{key:'h',name:'h',j:clone(home)},viewRevision:'3'});
+ assert.equal(after.cmds.length,0);assert(after.sync.some(s=>s.phase==='presented'));assert.equal(x.h.deadline(),null);
+ x.h.published();x.h.expire(true);const follow=x.h.drain();assert.equal(follow.cmds.length,1);assert.equal(follow.cmds[0].request.m,'view.update');
+ const final=x.answer(follow.cmds[0].request.id,{shown:home,overlay:{key:'h',name:'h',j:clone(home)},viewRevision:'3'});
  assert.equal(final.cmds.length,0);assert.equal(link.invalidated,false,'background change eventually covered');
+});
+check('unpublished follow-up cannot cross selection or epoch',()=>{
+ for(const change of ['select','epoch','forget']){const x=harness();x.h.publicationAck=true;x.open();const s=x.h.states.get('h'),link=x.h.client.links.get('h');x.h.update(s);const old=x.h.drain().cmds[0].request;
+  x.h.receive('h',{t:'view.changed',version:1,generation:'1',epoch:'origin',viewId:link.viewId,target:clone(link.target),viewRevision:'2'},'1');x.h.drain();const shown=x.answer(old.id);assert(shown.sync.some(v=>v.phase==='presented'));assert.equal(shown.cmds.length,0);
+  if(change==='select'){x.h.request('h','select','h|other');const next=x.h.drain().cmds[0].request;x.answer(next.id);}
+  else {if(change==='forget'){x.h.forgetHub('h');x.h.hubs(['h']);}x.h.connection('h','2','view-v1');const next=x.greeting('h','2').cmds[0].request;x.answer(next.id);}
+  x.h.published();x.h.expire(true);assert.equal(x.h.drain().cmds.length,0);
+ }
+});
+check('legacy engines continue immediate refresh without publication opt-in',()=>{
+ const x=harness();x.open();const s=x.h.states.get('h'),link=x.h.client.links.get('h');x.h.update(s);const old=x.h.drain().cmds[0].request;
+ x.h.receive('h',{t:'view.changed',version:1,generation:'1',epoch:'origin',viewId:link.viewId,target:clone(link.target),viewRevision:'2'},'1');x.h.drain();
+ const out=x.answer(old.id);assert.equal(out.cmds.length,1);assert.equal(out.cmds[0].request.m,'view.update');
+});
+check('publication acknowledgment never consumes other hub commands',()=>{
+ const x=harness();x.h.publicationAck=true;x.open('a');x.open('b');const a=x.h.states.get('a'),link=x.h.client.links.get('a');x.h.update(a);const old=x.h.drain().cmds[0].request;
+ x.h.receive('a',{t:'view.changed',version:1,generation:'1',epoch:'origin',viewId:link.viewId,target:clone(link.target),viewRevision:'2'},'1');x.h.drain();x.answer(old.id,{},'a');
+ x.h.enqueue('b',{type:'send',hub:'b',data:'fixture'});x.h.published();const out=x.h.drain();assert.deepEqual(out.cmds,[{type:'send',hub:'b',data:'fixture'}]);assert.deepEqual(x.h.drain().cmds,[]);
 });
 check('busy recent Home retains latest Bub open once through nextTarget',()=>{
  const x=harness();x.api.session=()=>({sel:'',drafts:{},open:{},adding:false,panel:false,info:{},rid:1});

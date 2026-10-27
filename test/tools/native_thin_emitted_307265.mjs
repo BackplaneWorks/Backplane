@@ -19,15 +19,28 @@ function client(epoch='1'){
  const out=(method,...args)=>JSON.parse(call(method,...args));
  const dictionaries=JSON.parse(call('headerKeys'));checked(dictionaries.keys.length>0&&dictionaries.words.length>0,'real emitted dictionaries required');
  const requests=o=>o.cmds.filter(c=>c.type==='send').map(c=>plain(cbor(new Uint8Array(Buffer.from(c.data,'base64')),dictionaries.keys,dictionaries.words)));
- const recv=(message,tag=epoch)=>out('recv',hub,encode(message).toString('base64'),tag,false,false);
+ const recv=(message,tag=epoch,quiet=false)=>out('recv',hub,encode(message).toString('base64'),tag,quiet,false);
  return{call,out,requests,recv,epoch};
 }
 const greeting=fixture.greeting||{t:'view',version:1,renderer:'mobile',generation:'1',epoch:'origin',limits:{replyBytes:262144,entries:32,recent:24,searchResults:25,searchCandidates:128,chunkBytes:65536}};
 function start(c,drafts={}){c.call('start','native-emitted-test',JSON.stringify(drafts));c.call('hubs',[hub]);c.call('local','mailroom-renderer','ios-v1');c.call('connection',hub,c.epoch,'view-v1');const selected=c.out('act','select','h|t');checked(c.requests(selected).length===0,'pre-greeting selection has no effects');}
 function begin(c){const o=c.recv(greeting),requests=c.requests(o);checked(o.sync.some(s=>s.phase==='presenting'&&s.mode==='view-v1'&&s.remoteReady===false),'presenting emitted before current request');checked(requests.length===1&&requests[0].m==='view.open','only bounded view.open on startup');checked(requests[0].p.target.id==='t','actual selected target');return requests[0];}
-function respond(c,request,payload){
+function respond(c,request,payload,quiet=false){
  const result={...payload,version:1,hub,generation:greeting.generation,epoch:greeting.epoch,target:request.p.target,requestRevision:request.p.requestRevision,viewId:request.p.viewId||'fixture-view',viewRevision:payload.viewRevision||'1',renderer:'mobile'};
- return c.recv({t:'reply',id:request.id,ok:true,result});
+ return c.recv({t:'reply',id:request.id,ok:true,result},c.epoch,quiet);
+}
+for(const quiet of [false,true]) {
+ const p=client();p.call('publicationAck');start(p);const first=begin(p);respond(p,first,fixture.open);
+ const changed={t:'view.changed',version:1,generation:greeting.generation,epoch:greeting.epoch,viewId:'fixture-view',target:first.p.target,viewRevision:'2'};
+ const update=p.requests(p.recv(changed))[0];checked(update?.m==='view.update','actual emitted change requests bounded update');
+ checked(p.requests(p.recv({...changed,viewRevision:'3'})).length===0,'actual emitted newer change coalesces');
+ const picture=respond(p,update,{...fixture.open,viewRevision:'1'},quiet);
+ checked(p.requests(picture).length===0&&!picture.sync.some(x=>x.phase==='presenting'),'actual emitted accepted picture precedes follow-up');
+ checked(quiet ? picture.screen===null : !!picture.screen?.thread,'actual emitted current picture draw honors quiet');
+ checked(p.requests(p.out('pulse')).length===0,'actual emitted unacknowledged picture prevents follow-up');
+ if(quiet){const flushed=p.out('flush',false);checked(!!flushed.screen?.thread&&p.requests(flushed).length===0,'actual emitted flush publishes withheld picture without retiring it');}
+ p.call('published');const follow=p.requests(p.out('pulse'));checked(follow.length===1&&follow[0].m==='view.update','actual emitted acknowledgment schedules one follow-up');
+ const completed=respond(p,follow[0],{...fixture.open,viewRevision:'3'});checked(p.requests(completed).length===0,'actual emitted newest revision ends refresh');
 }
 const c=client();start(c,{'h|t':'private draft','h|other':'other draft'});const open=begin(c);
 const ancillary=[{t:'info',info:{pair:'','pair.qr':''}},{t:'hb'},

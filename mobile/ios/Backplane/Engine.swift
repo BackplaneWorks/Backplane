@@ -54,6 +54,7 @@ final class Engine: @unchecked Sendable {
         c.exceptionHandler = { _, e in NSLog("bridge.js: %@", e?.toString() ?? "?") }
         let url = Bundle.main.url(forResource: "bridge", withExtension: "js")!
         c.evaluateScript(try! String(contentsOf: url, encoding: .utf8), withSourceURL: url)
+        c.objectForKeyedSubscript("Backplane")?.invokeMethod("publicationAck", withArguments: [])
         if let text = c.objectForKeyedSubscript("Backplane")?.invokeMethod("headerKeys", withArguments: [])?.toString() {
             priority.install(text)
         }
@@ -117,7 +118,21 @@ final class Engine: @unchecked Sendable {
         let stale = queue.personWaiting
         lock.withLock { built = began; owe = stale }
         if stale { scheduleFlush() }
-        onFlush?(stale ? Out.decode(text, screen: false) : out, generation)
+        let result = stale ? Out.decode(text, screen: false) : out
+        onFlush?(stale || pairingFlush.stamp() != generation ? result : published(result), generation)
+    }
+
+    // On the engine worker, acknowledge only a decoded screen that is not
+    // being discarded. The bridge then exposes any on-demand follow-up in
+    // this same Out's deadline; quiet and discarded screens remain pending.
+    private func published(_ candidate: Out?) -> Out? {
+        guard var out = candidate, out.screen != nil, pairingFlush.stamp() != nil else { return candidate }
+        if let value = context().objectForKeyedSubscript("Backplane")?.invokeMethod("published", withArguments: []),
+           !value.isNull, !value.isUndefined {
+            let deadline = value.toDouble()
+            if deadline.isFinite { out.deadline = deadline }
+        }
+        return out
     }
 
     // late: the arguments decided on the queue, as the call runs
@@ -174,7 +189,8 @@ final class Engine: @unchecked Sendable {
                 return drop
             }
             if metadata?.inert != true && (withheld || stale) { self.scheduleFlush() }
-            return metadata ?? Out.decode(text, screen: !stale && screen)
+            let result = metadata ?? Out.decode(text, screen: !stale && screen)
+            return stale ? result : self.published(result)
         }
     }
 
