@@ -16,7 +16,12 @@ import Foundation
         check(resume.claim(current: token, epoch: 9, ready: true, allowed: allowed) == nil, "old epoch cannot claim")
         check(resume.claim(current: token, epoch: 10, ready: true, allowed: allowed) == nil, "same epoch cannot claim")
         check(resume.claim(current: token, epoch: 11, ready: false, allowed: allowed) == nil && resume.preserves(token), "wait for fresh readiness")
-        check(resume.claim(current: token, epoch: 11, ready: true, allowed: allowed) == "board", "new epoch claims captured kind")
+        let claimed = resume.claim(current: token, epoch: 11, ready: true, allowed: allowed)
+        check(claimed == token, "new epoch claims full captured source and owner")
+        check(ViewerResumeIntent.matchesSource(token, accepted: source), "same complete source accepted")
+        check(!ViewerResumeIntent.matchesSource(token, accepted: .init(kind: "board", key: "different-file", layers: "layers")), "different file is not restored")
+        check(!ViewerResumeIntent.matchesSource(token, accepted: .init(kind: "board", key: "key", layers: "different-sheet")), "different layer or history source is not restored")
+        check(!ViewerResumeIntent.matchesSource(token, accepted: .init(kind: "3d", key: "key", layers: "layers")), "different kind is not restored")
         check(resume.claim(current: token, epoch: 11, ready: true, allowed: allowed) == nil && !resume.preserves(token), "claim occurs once")
 
         resume.capture(token, fromEpoch: 10)

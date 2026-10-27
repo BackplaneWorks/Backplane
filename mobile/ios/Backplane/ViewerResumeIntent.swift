@@ -25,12 +25,16 @@ struct ViewerResumeIntent {
 
     // Pass nil for a locally closed or no-longer-current presentation.
     // A mismatched owner, source or presentation retires the old request.
-    mutating func claim(current: ViewerCloseIntent.Token?, epoch: UInt64, ready: Bool, allowed: Set<String>) -> String? {
+    mutating func claim(current: ViewerCloseIntent.Token?, epoch: UInt64, ready: Bool, allowed: Set<String>) -> ViewerCloseIntent.Token? {
         guard let saved = pending else { return nil }
         guard current == saved.token else { pending = nil; return nil }
         guard ready, epoch > saved.fromEpoch else { return nil }
         guard allowed.contains(saved.token.source.kind) else { pending = nil; return nil }
         pending = nil
-        return saved.token.source.kind
+        return saved.token
+    }
+
+    static func matchesSource(_ token: ViewerCloseIntent.Token, accepted: ViewerCloseIntent.Source) -> Bool {
+        token.source == accepted
     }
 }
