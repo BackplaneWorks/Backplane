@@ -361,6 +361,15 @@ final class PlotStore {
             let fam = (o["fam"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? key
             // a 3D model: with its parts (2) or the board alone (3)
             let solid = key.hasPrefix("2|") || key.hasPrefix("3|") || key.hasPrefix("4|")
+            #if DEBUG && targetEnvironment(simulator)
+            if ProcessInfo.processInfo.environment["BACKPLANE_QUALIFICATION"] == "1" {
+                // Counts and a fixed kind only; no source paths, payloads or errors.
+                let kind = solid ? "mesh" : "geometry"
+                NSLog("Backplane simulator plot kind=%@ bytes=%lu meshBytes=%lu none=%@ generation=%ld",
+                      kind, d.count, (o["mesh"] as? Data)?.count ?? 0,
+                      String(o["none"] != nil), gen)
+            }
+            #endif
             guard drop != "all", !(drop == "mesh" && solid) else { return }
             if let why = o["none"] as? String {
                 guard let ticket = solid ? assets.issue(key, epoch: epoch) : 0 else { return }

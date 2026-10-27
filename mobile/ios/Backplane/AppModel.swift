@@ -41,6 +41,8 @@ final class AppModel {
     @ObservationIgnored private var viewerResumeDefault = false
     @ObservationIgnored private var viewerResumeExpected: (request: ViewerCloseIntent.Token, captured: ViewerCloseIntent.Token)?
     private var viewerResumeFailed: ViewerCloseIntent.Token?
+    // Explicit Retry starts a new loading budget; transport reconnects do not.
+    private(set) var viewerLoadRetry: UInt64 = 0
     @ObservationIgnored private var projectSearch = ProjectSearchIntent()
     @ObservationIgnored private var projectSearchOwner: UInt64 = 0
     @ObservationIgnored private var projectSearchGo: ProjectSearchIntent.Go?
@@ -184,10 +186,23 @@ final class AppModel {
         let key = screen?.hub ?? links.first.flatMap(Pairing.key) ?? ""
         let status = conn[key]
         let mark = thinReady[key]
+        let thinFailure: String
+        switch status?.detail {
+        case "View request timed out; not resent": thinFailure = "request-timeout"
+        case "Current view is not ready": thinFailure = "not-ready"
+        case "Invalid native materialization": thinFailure = "materialization"
+        case "Ordinary reply backlog limit": thinFailure = "backlog"
+        case "STALE_VIEW": thinFailure = "stale-view"
+        default: thinFailure = status?.stage == "failed" ? "other" : "none"
+        }
         var values: [String: String] = [
             "hub": key, "socket": status.map { String(describing: $0.phase) } ?? "none",
             "epoch": status.map { String($0.epoch) } ?? "none",
             "failure": status?.failure?.reason ?? "none",
+            "thinFailure": thinFailure,
+            "plotGeneration": String(plots.generation),
+            "plotPresent": String(plots.frame != nil), "meshPresent": String(plots.mesh?.mesh != nil),
+            "meshDecoding": String(plots.mesh?.decoding == true), "viewerLoadRetry": String(viewerLoadRetry),
             "startup": startup[key].map { String(describing: $0) } ?? "none",
             "cached": String(cachedPresentation), "engineReady": String(ready),
             "contentReady": String(contentReady), "tab": tab.rawValue,
@@ -900,6 +915,7 @@ final class AppModel {
     func retryViewer(_ token: ViewerCloseIntent.Token) {
         guard visibleViewerToken(for: token.owner.nav) == token,
               links.contains(where: { Pairing.key($0) == token.owner.hub }) else { return }
+        viewerLoadRetry &+= 1
         // Reconnect this app's socket: the hub must discard its plot delta
         // holders too. Repeating the same viewer choice need not resend it.
         // Retire a previous in-flight restore before starting an explicit retry.
