@@ -76,4 +76,24 @@ final class QualificationUITests: XCTestCase {
         }
     }
 
+    // Invoke the nonsecret simulator disconnect URL before this test. The
+    // parked state must survive the launch XCTest performs here.
+    func testClientRemainsParkedAfterRelaunch() {
+        let app = XCUIApplication()
+        app.launch()
+        XCTAssertTrue(app.descendants(matching: .any)["qualification.connection.parked"].waitForExistence(timeout: 20))
+        app.terminate()
+        app.launch()
+        XCTAssertTrue(app.descendants(matching: .any)["qualification.connection.parked"].waitForExistence(timeout: 20), "A foreground or relaunch must not unpark the client")
+    }
+
+    // Invoke the nonsecret simulator reconnect URL before this test.
+    func testClientRecoversAfterReconnect() {
+        let app = XCUIApplication()
+        app.launch()
+        XCTAssertTrue(app.descendants(matching: .any)["qualification.connection.ready"].waitForExistence(timeout: 60), "The real hub must provide fresh content after reconnect")
+        XCTAssertFalse(app.descendants(matching: .any)["qualification.connection.parked"].exists)
+        XCTAssertFalse(app.textFields["pair.address"].exists, "Reconnect should retain pairing")
+    }
+
 }
