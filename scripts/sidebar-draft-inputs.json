@@ -28,7 +28,7 @@
     "src/core/cat.bend": "0130231a18e515a94d40d7584d19a9b5a2d1663f9601fbff944bf97e37f9fd6b",
     "src/core/cef.bend": "f2d3fa4c991d0e341620fe634ddb4e08da97f8e471ec46afac0b3de471cc69fb",
     "src/core/charter.bend": "7f906bdea712f6ff6162735c8cc133767ec0f9289c3d0bee6dfedbd4d75ad981",
-    "src/core/client.bend": "0a7202dab1f6a2b0fbc5f201c22afd4e0f8775b39103d7c583e7fdf848f38dad",
+    "src/core/client.bend": "660f07bd192272b33f3dd80db5057884dbc5693ca8a838e896576b96c9fb4c2e",
     "src/core/codec.bend": "33cb35c55f3712a18734e76e1149763001a9388af27948f0da4ead2c13d48b6f",
     "src/core/cron.bend": "6f89a001df0261a25c878616ea66c235e169f7fc1c726d39e695fce8adb57332",
     "src/core/deploy.bend": "ebee4e63a52cf41ae001bebcdbb7fb010ad71c1e04e481292585740d88a39cc4",
@@ -50,7 +50,7 @@
     "src/core/hist.bend": "fac0d2e2231ad699476497c173d4d97b78551c3c65c207b974721f956105b5f2",
     "src/core/hot.bend": "d1d28df84cf63261cb39a5e69d4fe84228933901e5030d730454f2c27cc270d3",
     "src/core/i18n.bend": "92cae5df736659757d9a2a4cf44931b34f618220b78440711a4afecb2cf8d867",
-    "src/core/icons.bend": "062e88ba962783470080f53522ce4277540686cf872051677668231a5c3af64a",
+    "src/core/icons.bend": "e61b8148f134319cf75771f45715032cc2aebc0d10e76d6690f8a2d547324172",
     "src/core/images.bend": "a54d91708c69be1453dc434e9166d16b2398c96745125f6f5c31cbc3cd33d966",
     "src/core/json.bend": "60ea726052fded72970f3be2784d09fbff0baa4a98a47ac82d00a4a311dc242d",
     "src/core/kexport.bend": "e7c768d51b7909761458296102e9aefb66d8ffd9ea37c3487ccc7fdb2defc86d",
@@ -142,7 +142,7 @@
     "src/web/space.bend": "b86a265e41a900498bc33c37c0404c4d6678554efe3d9054f329beb2cf35ee63",
     "src/web/usage-graph.bend": "fa06f7d2bf855a396a5f7a7b4725dfaa990145fbbcefe7ad21ae8f9a698a2679",
     "src/web/usage-page.bend": "706e3f17a4a3e5f159656d47aeb76a940d4825421f5c33228f9aef692ec926e3",
-    "src/web/view.bend": "fd669b3aaf8b53bc51071d193121c9646841103d6fc3aa27488b14909b0e7327"
+    "src/web/view.bend": "8bfb59d3aaa1580b77820be0114203c0faf65a1e54f2787fbb966f4f39715960"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -252,5 +252,5 @@
       "sourceSnapshot": "/home/h/Documents/i2cjak/bp-coord/settle-fresh-work/SOURCE-structural-correction.json"
     }
   },
-  "reviewNote": "Model picker: three columns (agent | model | effort) with a keyboard cursor; sidebar drafts unchanged"
+  "reviewNote": "combined view (Split): new viewer kind, Sch.path/Sch.put for its sheet; sidebar rows unchanged"
 }

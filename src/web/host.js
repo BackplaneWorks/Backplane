@@ -801,7 +801,8 @@ function render() {
     } else if (thin?.ready) searchJump = null;
   }
   Solid.mount(document.getElementById("solid"));
-  Plot2d.mount(document.getElementById("plot"));
+  Plot2d.mount([...document.querySelectorAll("canvas.plot2d")]);
+  viewerSplit();
   earlierAsked = false;
   laterAsked = false;
   if (tl2 && thin?.atNewest?.() === false && tl2.scrollHeight - tl2.scrollTop - tl2.clientHeight <= tl2.clientHeight * 2) requestAnimationFrame(() => laterCheck(document.getElementById("timeline")));
@@ -1800,6 +1801,22 @@ function viewerClamp(w) {
   return Math.max(320, Math.min(w, max));
 }
 try { const w = Number(localStorage.getItem(VIEWER_W)); if (w > 0) viewerWidth(viewerClamp(w)); } catch {}
+// The combined view (Split) shows three panes and takes more room: its
+// own width, kept apart in this browser; by default all but a narrow
+// thread. Leaving it gives the usual width back.
+const VIEWER_W_SPLIT = "backplane-viewer-w.split";
+let splitOn = false;
+const viewerKey = () => (splitOn ? VIEWER_W_SPLIT : VIEWER_W);
+function viewerSplit() {
+  const on = !!document.querySelector("#viewer.split");
+  if (on === splitOn) return;
+  splitOn = on;
+  let w = 0;
+  try { w = Number(localStorage.getItem(viewerKey())); } catch {}
+  if (w > 0) viewerWidth(viewerClamp(w));
+  else if (on) viewerWidth(viewerClamp((document.querySelector(".app")?.getBoundingClientRect().width ?? window.innerWidth) - (document.querySelector(".app .sidebar")?.getBoundingClientRect().width ?? 264) - 420));
+  else viewerWidth(null);
+}
 document.addEventListener("pointerdown", (e) => {
   const edge = e.target instanceof Element ? e.target.closest(".viewer-split") : null;
   if (!edge || e.button !== 0) return;
@@ -1817,7 +1834,7 @@ document.addEventListener("pointerdown", (e) => {
     edge.removeEventListener("pointercancel", done);
     edge.classList.remove("on");
     document.body.classList.remove("resizing");
-    try { localStorage.setItem(VIEWER_W, String(Math.round(w))); } catch {}
+    try { localStorage.setItem(viewerKey(), String(Math.round(w))); } catch {}
   };
   edge.addEventListener("pointermove", move);
   edge.addEventListener("pointerup", done);
@@ -1825,8 +1842,8 @@ document.addEventListener("pointerdown", (e) => {
 });
 document.addEventListener("dblclick", (e) => {
   if (!(e.target instanceof Element) || !e.target.closest(".viewer-split")) return;
-  viewerWidth(null);
-  try { localStorage.removeItem(VIEWER_W); } catch {}
+  try { localStorage.removeItem(viewerKey()); } catch {}
+  if (splitOn) { splitOn = false; viewerSplit(); } else viewerWidth(null);
 });
 window.addEventListener("resize", () => {
   const w = parseFloat(document.documentElement.style.getPropertyValue("--viewer-w"));

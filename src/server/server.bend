@@ -4371,6 +4371,43 @@ def Plot.watch(+client: U32, +kind: String, +root: String, +path: String, +tree:
         Bool.pick(PV.PMsg, String.eq(kind, "3d-bare"), PV.PWatch{client, 3, root, path, tree},
           Bool.pick(PV.PMsg, String.eq(kind, "3d-full"), PV.PWatch{client, 4, root, path, tree}, PV.PStop{client})))))
 
+# the combined view ("split:" and its panes, s b 3): its schematic's sheet,
+# the board's 3D model (which watches the board) or the board alone, the
+# client's other views kept, then all but these dropped
+def Plot.split.add(+m: PV.PMsg, +key: String, rest: List<&2, PV.PMsg> & List<&2, String>) -> List<&2, PV.PMsg> & List<&2, String>:
+  (ms, ks) = rest
+  (m <> ms, key <> ks)
+
+def Plot.split.on(on: Bool, +m: PV.PMsg, +key: String, rest: List<&2, PV.PMsg> & List<&2, String>) -> List<&2, PV.PMsg> & List<&2, String>:
+  match on:
+    case True{}:
+      Plot.split.add(m, key, rest)
+    case False{}:
+      rest
+
+def Plot.split.fin(r: List<&2, PV.PMsg> & List<&2, String>, +client: U32) -> List<&2, PV.PMsg>:
+  (ms, ks) = r
+  List.append(&2, PV.PMsg, ms, [PV.PKeep{client, ks}])
+
+def Plot.split(+client: U32, +kind: String, +root: String, +path: String, +tree: String, +sheet: String) -> List<&2, PV.PMsg>:
+  Plot.split.fin(Plot.split.on(String.contains(kind, "s"), PV.PAlso{client, 1, root, sheet, tree}, PV.Src.key(1, root, sheet),
+    Plot.split.on(String.contains(kind, "3"), PV.PAlso{client, 2, root, path, tree}, PV.Src.key(2, root, path),
+      Plot.split.on(Bool.or(String.contains(kind, "b"), String.contains(kind, "3")), PV.PAlso{client, 0, root, path, tree}, PV.Src.key(0, root, path), (Nil{}, Nil{})))), client)
+
+def Plot.watch.all(split: Bool, +client: U32, +kind: String, +root: String, +path: String, +tree: String, +sheet: String) -> List<&2, PV.PMsg>:
+  match split:
+    case True{}:
+      Plot.split(client, String.drop(kind, 6n), root, path, tree, sheet)
+    case False{}:
+      [Plot.watch(client, kind, root, path, tree)]
+
+def Plot.puts(ms: List<&2, PV.PMsg>, +m: Maybe<&2, Chan(PV.PMsg)>) -> IO(Unit):
+  match ms:
+    case Nil{}:
+      IO.pure(Unit, Unit{})
+    case x <> t:
+      IO.bind(Unit, Unit, Plot.put(m, x), u => Plot.puts(t, m))
+
 def Term.msg(+op: String, +thread: String, +cwd: String, data: List<&2, U32>, +cols: U32, +rows: U32) -> TM.TMsg:
   Bool.pick(TM.TMsg, String.eq(op, "open"), TM.TOpen{thread, cwd, cols, rows},
     Bool.pick(TM.TMsg, String.eq(op, "resize"), TM.TSize{thread, cols, rows}, TM.TIn{thread, data}))
@@ -9867,9 +9904,9 @@ def Hub.out(h: Hub, o: B.Out) -> IO(Hub):
       do IO<Hub>:
         Plot.put(Cfg.pv(cfg), PV.PInfo{client, id, key, at, idx})
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
-    case Hub{st, f, ls, cl, as, inbox, +cfg, note} B.Watch{+client, +kind, +root, +path, +tree}:
+    case Hub{st, f, ls, cl, as, inbox, +cfg, note} B.Watch{+client, +kind, +root, +path, +tree, +sheet}:
       do IO<Hub>:
-        Plot.put(Cfg.pv(cfg), Plot.watch(client, kind, root, path, tree))
+        Plot.puts(Plot.watch.all(String.starts_with(kind, "split:"), client, kind, root, path, tree, sheet), Cfg.pv(cfg))
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
     case Hub{+st, f, ls, cl, as, +inbox, +cfg, note} B.CodexTurn{+thread, +cwd, +model, +session, r, text}:
       do IO<Hub>:

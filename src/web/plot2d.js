@@ -61,15 +61,16 @@ function chunk(o) {
   return { fill, line, dots, r, color, layer: o.l ?? 0, born: performance.now() };
 }
 
-// what this connection holds: the chunks of the last plot, in its order
-let held = [];
-// the newest plot of each source (or why there is none), by its key
+// the newest plot of each source (or why there is none), by its key; a
+// plot's kept chunks index the one its "base" names (an older hub names
+// none: the last plot applied, whichever source)
 const plots = new Map();
+let lastKey = "";
 
 // a new connection holds nothing
 export function reset() {
-  held = [];
   plots.clear();
+  lastKey = "";
 }
 
 // how each plot came: its size on the wire and how long after it was asked for
@@ -78,22 +79,22 @@ const mb = (n) => (n >= 1 << 20 ? `${(n / (1 << 20)).toFixed(1)} MB` : `${Math.m
 
 export function got(o, at = { bytes: 0, t: performance.now() }) {
   const key = typeof o.key === "string" ? o.key : "";
-  if (view && view.key === key && view.asked && !stats.has(key)) stats.set(key, { bytes: at.bytes, waited: (at.t - view.asked) / 1000 });
+  for (const v of views.values()) if (v.key === key && v.asked && !stats.has(key)) stats.set(key, { bytes: at.bytes, waited: (at.t - v.asked) / 1000 });
   if (typeof o.none === "string") {
-    held = [];
     plots.set(key, { none: o.none });
   } else {
+    const held = plots.get(typeof o.base === "string" ? o.base : lastKey)?.chunks ?? [];
     const refs = Array.isArray(o.cs) ? o.cs : [];
     const all = [];
     for (const r of refs) {
       const c = typeof r === "number" ? held[r] : r && typeof r === "object" ? chunk(r) : null;
       if (c) all.push(c);
     }
-    held = all;
     const box = Array.isArray(o.box) && o.box.length === 4 ? o.box : [0, 0, 1, 1];
     plots.set(key, { chunks: all, box, fam: typeof o.fam === "string" ? o.fam : key });
   }
-  if (view && view.key === key) { view.show(plots.get(key)); present(plots.get(key)); }
+  lastKey = key;
+  for (const v of views.values()) if (v.key === key) { v.show(plots.get(key)); present(v); }
 }
 
 class View {
@@ -312,7 +313,8 @@ class View {
   }
 }
 
-let view = null;
+// the views on the page, by canvas (the combined view shows two plots)
+const views = new Map();
 let placed = null;
 let sheeted = null;
 // where the view was left on each source moved by hand (a few dozen kept)
@@ -344,32 +346,32 @@ export function onPlace(fn) {
 }
 
 // the Layers menu lists only the layers the plot has something on
-function present(p) {
+function present(view) {
+  const p = view.plot;
   const has = new Set(p && p.chunks ? p.chunks.map((c) => c.layer) : []);
   for (const b of document.querySelectorAll(".layer-list [data-layer]")) b.hidden = has.size > 0 && !has.has(Number(b.dataset.layer));
 }
 
-// after each render: the canvas on the page (if any) shows the source its
-// data-key names, once the hub has sent it
-export function mount(canvas) {
-  if (!canvas) { view = null; return; }
-  if (!view || view.canvas !== canvas) view = new View(canvas, canvas.dataset.bg || "#0d0f12");
+// where a view was left on its source, kept for when it comes back
+function park(view) {
+  if (view.key && view.plot && view.plot.chunks && view.touched) {
+    left.delete(view.key);left.set(view.key, { scale: view.scale, ox: view.ox, oy: view.oy });
+    if (left.size > 48) left.delete(left.keys().next().value);
+  }
+}
+
+function mountOne(canvas) {
+  let view = views.get(canvas);
+  if (!view) views.set(canvas, (view = new View(canvas, canvas.dataset.bg || "#0d0f12")));
   const off = Number(canvas.dataset.off || 0), dim = Number(canvas.dataset.dim || 0), lift = Number(canvas.dataset.lift ?? 255);
   if (off !== view.off || dim !== view.dim || lift !== view.lift) { view.off = off; view.dim = dim; view.lift = lift; view.later(); }
-  present(view.plot);
+  present(view);
   view.pins();
-  // a note form that has just come up takes the keyboard
-  const note = document.querySelector(".rc-note input");
-  if (note && !noteSeen) note.focus();
-  noteSeen = !!note;
   view.fade = Number(canvas.dataset.fade || 0);
   if (view.sheetText !== (canvas.dataset.sheets || "")) { view.sheetText = canvas.dataset.sheets || "";view.sheets = sheetBoxes(view.sheetText); }
   const key = canvas.dataset.key || "";
   if (key !== view.key) {
-    if (view.key && view.plot && view.plot.chunks && view.touched) {
-      left.delete(view.key);left.set(view.key, { scale: view.scale, ox: view.ox, oy: view.oy });
-      if (left.size > 48) left.delete(left.keys().next().value);
-    }
+    park(view);
     // another version of the same file keeps its view, and the last one
     // stays up until the next comes
     const same = view.plot && view.plot.chunks && canvas.dataset.fam && canvas.dataset.fam === view.fam;
@@ -381,6 +383,19 @@ export function mount(canvas) {
   }
 }
 
+// after each render: each canvas on the page (the board's or schematic's
+// tab, or the combined view's two) shows the source its data-key names,
+// once the hub has sent it
+export function mount(canvases) {
+  const list = canvases.filter(Boolean);
+  for (const [c, v] of [...views]) if (!list.includes(c)) { park(v); views.delete(c); }
+  for (const c of list) mountOne(c);
+  // a note form that has just come up takes the keyboard
+  const note = document.querySelector(".rc-note input");
+  if (note && !noteSeen) note.focus();
+  noteSeen = !!note;
+}
+
 export function fit() {
-  view?.fit();
+  for (const v of views.values()) v.fit();
 }

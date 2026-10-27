@@ -62,8 +62,9 @@ type Out is Data:
   # show a client a project's board or schematic (kind "board",
   # "schematic"; anything else stops), or the file at path when set; tree:
   # the root sheet the schematic's hierarchy starts from ("" the project's
-  # own; a project with several boards names the board's)
-  Watch{client: U32, kind: String, root: String, path: String, tree: String}
+  # own; a project with several boards names the board's); sheet: the
+  # combined view's schematic (kind "split:" and its panes)
+  Watch{client: U32, kind: String, root: String, path: String, tree: String, sheet: String}
   # install the latest release and restart
   Upgrade{}
   # the same, asked on purpose (update.now) or after the wait ran out: its
@@ -8814,7 +8815,7 @@ def Hub.request.k(i: Nat, +s: M.State, +now: Nat, +client: U32, +id: String, +p:
     case 12n:
       Step.cat(Retire.archive(s, now, J.Json.get_str(p, "thread", ""), Step{[M.ThreadDeleted{J.Json.get_str(p, "thread", ""), now}], [Reply.ok(client, id), AgentStop{J.Json.get_str(p, "thread", "")}, BotFx{"gone", J.Json.get_str(p, "thread", ""), "", ""}]}), Watch.retire(s, now, J.Json.get_str(p, "thread", "")))
     case 13n:
-      Step.outs([Reply.ok(client, id), Watch{client, J.Json.get_str(p, "kind", ""), J.Json.get_str(p, "root", ""), J.Json.get_str(p, "path", ""), J.Json.get_str(p, "tree", "")}])
+      Step.outs([Reply.ok(client, id), Watch{client, J.Json.get_str(p, "kind", ""), J.Json.get_str(p, "root", ""), J.Json.get_str(p, "path", ""), J.Json.get_str(p, "tree", ""), J.Json.get_str(p, "sheet", "")}])
     case 14n:
       Hub.modes(s, now, client, id, p, Hub.thread(s, J.Json.get_str(p, "thread", "")))
     case 15n:

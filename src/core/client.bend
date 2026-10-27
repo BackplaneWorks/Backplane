@@ -5494,6 +5494,14 @@ def Solid.off.key(+u: Ui) -> String:
 def Solid.off(+u: Ui) -> U32:
   Maybe.default(&2, U32, U32.read(Ui.scratch(u, Solid.off.key(u))), 0)
 
+# the layers turned off and the focus a kind keeps (the combined view's
+# panes show each as its own tab does)
+def Solid.off.of(+u: Ui, +kind: String) -> U32:
+  Maybe.default(&2, U32, U32.read(Ui.scratch(u, "@off." ++ kind)), 0)
+
+def Lfocus.of.at(+u: Ui, +kind: String) -> LY.Focus:
+  LY.Lyr.read(Ui.scratch(u, "@focus." ++ kind))
+
 # a sheet picked while a comparison shows: that sheet compared (the same
 # versions, the same layers); anything else as picked
 def Rv.sheet.k(cmp: Bool, +cur: String, +file: String) -> String:
@@ -5540,7 +5548,7 @@ def Bd.cur(fs: List<&2, String>, +path: String) -> String:
       Bool.pick(String, Bd.on(path, f), f, Bd.cur(t, path))
 
 def Bd.keep.k(+cur: String, +kind: String, +root: String) -> String:
-  Bool.pick(String, Bool.and(Bool.not(String.is_empty(cur)), Bool.or(String.eq(kind, "board"), Bool.or(String.eq(kind, "schematic"), String.eq(kind, "3d")))),
+  Bool.pick(String, Bool.and(Bool.not(String.is_empty(cur)), Bool.or(Bool.or(String.eq(kind, "board"), String.eq(kind, "split")), Bool.or(String.eq(kind, "schematic"), String.eq(kind, "3d")))),
     FM.Fm.abs(root, Bd.path(kind, cur)), "")
 
 def Bd.keep(+u: Ui, +kind: String, +path: String) -> String:
@@ -5565,6 +5573,96 @@ def Bd.tree.k(+cur: String, +root: String) -> String:
 
 def Bd.tree(+u: Ui, +path: String) -> String:
   Bool.pick(String, Bd.many(u), Bd.tree.k(Bd.cur(Bd.files(u), Bd.shown(u, path)), Ui.root(u)), "")
+
+# The combined view
+# -----------------
+# Kind "split": the schematic beside the board and its 3D model at once,
+# each pane named, put away and brought back on its own (the setting
+# "split.hide": the panes put away, words of "sch pcb 3d"; one always
+# stays, test/split_test.bend). Its board is the viewer's file, as the Board tab's
+# (the board picked, else the project's own); its sheet is kept per thread
+# ("@split.sheet:<t>"): the board's own schematic until another is opened
+# there.
+
+def Split.panes() -> List<&2, String>:
+  ["sch", "pcb", "3d"]
+
+def Split.hide(+u: Ui) -> String:
+  M.Setting.get(Ui.state(u), "split.hide", "")
+
+def Split.has(+hide: String, +p: String) -> Bool:
+  String.contains(" " ++ hide ++ " ", " " ++ p ++ " ")
+
+def Split.flip.keep(on: Bool, +q: String, rest: List<&2, String>) -> List<&2, String>:
+  match on:
+    case True{}:
+      q <> rest
+    case False{}:
+      rest
+
+def Split.flip.go(ps: List<&2, String>, +hide: String, +p: String) -> List<&2, String>:
+  match ps:
+    case Nil{}:
+      Nil{}
+    case +q <> t:
+      Split.flip.keep(Bool.xor(Split.has(hide, q), String.eq(q, p)), q, Split.flip.go(t, hide, p))
+
+def Split.flip.k(+hs: List<&2, String>, +hide: String) -> String:
+  Bool.pick(String, Nat.is_ge(List.length(&2, String, hs), 3n), hide, String.join(hs, " "))
+
+# the panes put away once pane p is flipped, in order; the last one shown
+# stays
+def Split.flip(+hide: String, +p: String) -> String:
+  Split.flip.k(Split.flip.go(Split.panes(), hide, p), hide)
+
+def Split.on(+u: Ui, +p: String) -> Bool:
+  Bool.not(Split.has(Split.hide(u), p))
+
+def Split.is(+u: Ui) -> Bool:
+  String.eq(Ui.view_get(u, "view.kind"), "split")
+
+def Split.key(+u: Ui) -> String:
+  "@split.sheet:" ++ Ui.sel(u)
+
+# (many: the project has several boards, root: the board's own schematic;
+# a sheet of another board's folder is left for the board's own)
+def Split.sheet.k(+kept: String, +root: String, many: Bool) -> String:
+  Bool.pick(String, Bool.or(String.is_empty(kept), Bool.and(many, Bool.not(String.eq(MC.Mech.parent(kept), MC.Mech.parent(root))))), root, kept)
+
+def Split.sheet(+u: Ui) -> String:
+  Split.sheet.k(Ui.scratch(u, Split.key(u)), Bd.tree(u, Ui.view_get(u, "view.path")), Bd.many(u))
+
+# the panes the hub watches for it: "s" the schematic, "b" the board, "3"
+# its 3D model
+def Split.letters(+u: Ui) -> String:
+  Bool.pick(String, Split.on(u, "sch"), "s", "") ++ Bool.pick(String, Split.on(u, "pcb"), "b", "") ++ Bool.pick(String, Split.on(u, "3d"), "3", "")
+
+# a pane's source: "<kind>|<root>|<path>", as the hub keys it
+def Split.src(+u: Ui, +n: String, +path: String) -> String:
+  n ++ "|" ++ Ui.root(u) ++ "|" ++ path
+
+def Split.src.sch(+u: Ui) -> String:
+  Split.src(u, "1", Split.sheet(u))
+
+def Split.src.pcb(+u: Ui) -> String:
+  Split.src(u, "0", Ui.view_get(u, "view.path"))
+
+def Split.src.solid(+u: Ui) -> String:
+  Split.src(u, "2", Ui.view_get(u, "view.path"))
+
+# the sheet the schematic's navigation moves: the combined view's, else the
+# viewer's file
+def Sch.path(+u: Ui) -> String:
+  Bool.pick(String, Split.is(u), Split.sheet(u), Ui.view_get(u, "view.path"))
+
+# a sheet put on show: in the combined view its pane's, else the
+# Schematic tab's
+def Sch.put(split: Bool, +u: Ui, +file: String) -> Ui:
+  match split:
+    case True{}:
+      Ui.scratch_set(u, Split.key(u), file)
+    case False{}:
+      Ui.view_put(u, "schematic", file)
 
 # Sheet navigation
 # ----------------
@@ -5610,7 +5708,7 @@ def Sch.slot.of(+p: String) -> String:
   Bool.pick(String, Nat.is_eq(HI.Hist.kind(p), 1n), HI.Hist.git.dir(p) ++ "\t" ++ HI.Hist.git.commit(p), "")
 
 def Sch.want(+u: Ui) -> String:
-  Ui.root(u) ++ Sch.sfx(Sch.slot.of(Ui.view_get(u, "view.path")))
+  Ui.root(u) ++ Sch.sfx(Sch.slot.of(Sch.path(u)))
 
 def Sch.tk.k(none: Bool, +u: Ui) -> String:
   match none:
@@ -5659,7 +5757,7 @@ def Sch.vkey(+v: String) -> String:
 
 # the live file on show ("" is the project's own: the root's)
 def Sch.file(+u: Ui, +rs: List<&2, HR.Row>) -> String:
-  Sch.fam(Bool.pick(String, String.is_empty(Ui.view_get(u, "view.path")), HR.Hier.file(rs, 0n), Ui.view_get(u, "view.path")))
+  Sch.fam(Bool.pick(String, String.is_empty(Sch.path(u)), HR.Hier.file(rs, 0n), Sch.path(u)))
 
 def Sch.num(+s: String) -> Nat:
   Maybe.default(&2, Nat, Nat.read(s), 0n)
@@ -5779,8 +5877,8 @@ def Sch.value(own: Bool, +cur: String, +rs: List<&2, HR.Row>, +j: Nat) -> String
 # row j on show (a comparison keeps comparing that sheet: Rv.sheet), kept
 # as the instance, the note cleared
 def Sch.show(+u: Ui, +rs: List<&2, HR.Row>, +j: Nat) -> Ui:
-  Ui.scratch_set(Ui.scratch_set(Ui.view_put(u, "schematic", Rv.sheet(Ui.view_get(u, "view.path"),
-    Sch.value(String.is_empty(Bd.tree(u, Ui.view_get(u, "view.path"))), Ui.view_get(u, "view.path"), rs, j))),
+  Ui.scratch_set(Ui.scratch_set(Sch.put(Split.is(u), u, Rv.sheet(Sch.path(u),
+    Sch.value(String.is_empty(Bd.tree(u, Ui.view_get(u, "view.path"))), Sch.path(u), rs, j))),
     Sch.key(u), Sch.entry(u, rs, j)), Sch.note.key(u), "")
 
 def Sch.gone(+u: Ui) -> Ui:
@@ -5905,7 +6003,7 @@ def Sch.sheet(row: Bool, +u: Ui, +value: String) -> Act:
     case True{}:
       Act{Sch.act.k(0n, u, Sch.rows(u), String.drop(value, 1n)), Nil{}}
     case False{}:
-      Act{Ui.scratch_set(Ui.view_put(u, "schematic", Rv.sheet(Ui.view_get(u, "view.path"), value)), Sch.key(u), ""), Nil{}}
+      Act{Ui.scratch_set(Sch.put(Split.is(u), u, Rv.sheet(Sch.path(u), value)), Sch.key(u), ""), Nil{}}
 
 # The view
 def Sch.has(xs: List<&2, Nat>, +n: Nat) -> Bool:
@@ -6046,10 +6144,24 @@ def Ui.view_pick.bd(+u: Ui, +kind: String) -> Ui:
   Ui.view_pick.p(u, kind, Bd.or(Rv.back(u, kind), Bd.keep(u, kind, Bd.shown(u, Ui.view_get(u, "view.path")))))
 
 def Bd.kind(+k: String) -> String:
-  Bool.pick(String, Bool.or(String.eq(k, "schematic"), String.eq(k, "3d")), k, "board")
+  Bool.pick(String, Bool.or(Bool.or(String.eq(k, "schematic"), String.eq(k, "split")), String.eq(k, "3d")), k, "board")
 
 def Bd.pick(+u: Ui, +rel: String) -> Act:
   Act{Ui.view_put(u, Bd.kind(Ui.view_get(u, "view.kind")), FM.Fm.abs(Ui.root(u), Bd.path(Bd.kind(Ui.view_get(u, "view.kind")), rel))), Nil{}}
+
+# a viewer tab's file: a comparison kept (Rv.back), else the board picked
+# (Bd.keep); the Schematic tab from the combined view shows its sheet
+def View.kind.path(+u: Ui, +value: String) -> String:
+  Bd.or(Rv.back(u, value), Bool.pick(String, Bool.and(Split.is(u), String.eq(value, "schematic")), Split.sheet(u),
+    Bd.keep(u, value, Bd.shown(u, Ui.view_get(u, "view.path")))))
+
+# into the combined view from the Schematic tab: its sheet comes along
+def Split.enter(sch: Bool, +u: Ui) -> Ui:
+  match sch:
+    case True{}:
+      Ui.scratch_set(u, Split.key(u), Ui.view_get(u, "view.path"))
+    case False{}:
+      u
 
 # "mech" opens Mech (the part in 3D), "mech-part" shows another part,
 # "mech-3d" a part in 3D, "mech-refresh" asks for the parts again,
@@ -6074,7 +6186,7 @@ def Mpage.act(i: Nat, +u: Ui, +value: String) -> Act:
       Ui.rpc(Ui.scratch_set(Ui.scratch_set(u, "@mech.busy:" ++ Ui.sel(u), value), "@mech.err:" ++ Ui.sel(u), ""), "mech.render",
         [J.KV{"thread", J.Str{Ui.sel(u)}}, J.KV{"path", J.Str{value}}])
     case 6n:
-      Act{Ui.view_put(u, value, Bd.or(Rv.back(u, value), Bd.keep(u, value, Bd.shown(u, Ui.view_get(u, "view.path"))))), Nil{}}
+      Act{Ui.view_put(Split.enter(Bool.and(String.eq(value, "split"), String.eq(Ui.view_get(u, "view.kind"), "schematic")), u), value, View.kind.path(u, value)), Nil{}}
     case 7n:
       Sch.sheet(String.starts_with(value, "#"), u, value)
     case 8n:
@@ -6289,29 +6401,34 @@ def Sch.got(+u: Ui, +o: J.Json) -> Ui:
   Sch.got.at(u, J.Json.get_str(o, "root", "") ++ Sch.sfx(J.Json.get_str(o, "slot", "")), o)
 
 def Solid.num(+k: String) -> String:
-  Bool.pick(String, String.eq(k, "board"), "0", Bool.pick(String, String.eq(k, "schematic"), "1", Bool.pick(String, String.eq(k, "3d"), "2", "")))
+  Bool.pick(String, String.eq(k, "board"), "0", Bool.pick(String, String.eq(k, "schematic"), "1", Bool.pick(String, String.eq(k, "3d"), "2",
+    Bool.pick(String, String.eq(k, "split"), "s", ""))))
 
 def Solid.ask(+k: String) -> String:
   k
 
+# (the combined view's names its sheet and the panes shown too)
 def Solid.want(+u: Ui) -> String:
   Bool.pick(String, Bool.or(Bool.or(Bool.not(Ui.panel(u)), String.is_empty(Ui.root(u))), String.is_empty(Solid.num(Solid.kind(u)))), "",
-    Solid.num(Solid.kind(u)) ++ "|" ++ Ui.root(u) ++ "|" ++ Ui.view_get(u, "view.path"))
+    Solid.num(Solid.kind(u)) ++ "|" ++ Ui.root(u) ++ "|" ++ Ui.view_get(u, "view.path")
+      ++ Bool.pick(String, Split.is(u), "|" ++ Split.sheet(u) ++ "|" ++ Split.letters(u), ""))
 
-# (tree: where the schematic's hierarchy starts, Bd.tree)
-def Solid.sync.k(same: Bool, u: Ui, +want: String, +kind: String, +path: String, +root: String, +tree: String, cmds: List<&2, Cmd>) -> Act:
+# (tree: where the schematic's hierarchy starts, Bd.tree; sheet: the
+# combined view's, whose kind names the panes it shows, "split:sb3")
+def Solid.sync.k(same: Bool, u: Ui, +want: String, +kind: String, +path: String, +root: String, +tree: String, +sheet: String, cmds: List<&2, Cmd>) -> Act:
   match same:
     case True{}:
       Act{u, cmds}
     case False{}:
       Ui.also(Ui.rpc(Ui.scratch_set(u, "@solid.at", want), "kicad.watch",
-        [J.KV{"kind", J.Str{Bool.pick(String, String.is_empty(want), "", Solid.ask(kind))}}, J.KV{"root", J.Str{root}}, J.KV{"path", J.Str{path}}, J.KV{"tree", J.Str{tree}}]), cmds)
+        [J.KV{"kind", J.Str{Bool.pick(String, String.is_empty(want), "", Solid.ask(kind))}}, J.KV{"root", J.Str{root}}, J.KV{"path", J.Str{path}}, J.KV{"tree", J.Str{tree}},
+         J.KV{"sheet", J.Str{sheet}}]), cmds)
 
 def Solid.sync.m(a: Act) -> Act:
   match a:
     case Act{+u, cmds}:
-      Solid.sync.k(String.eq(Solid.want(u), Ui.scratch(u, "@solid.at")), u, Solid.want(u), Solid.kind(u), Ui.view_get(u, "view.path"), Ui.root(u),
-        Bd.tree(u, Ui.view_get(u, "view.path")), cmds)
+      Solid.sync.k(String.eq(Solid.want(u), Ui.scratch(u, "@solid.at")), u, Solid.want(u), Bool.pick(String, Split.is(u), "split:" ++ Split.letters(u), Solid.kind(u)),
+        Ui.view_get(u, "view.path"), Ui.root(u), Bd.tree(u, Ui.view_get(u, "view.path")), Split.sheet(u), cmds)
 
 def Solid.sync(a: Act) -> Act:
   Fv.sync(Solid.sync.m(a))
@@ -13818,12 +13935,21 @@ def Ui.act.sch(sch: Bool, +u: Ui, +action: String, +value: String) -> Act:
     case False{}:
       Ui.act.g(String.starts_with(action, "agy-"), u, action, value)
 
+# (the combined view's "split-pane": a pane put away or back, kept as the
+# setting split.hide for every client of the hub)
+def Ui.act.split(on: Bool, +u: Ui, +action: String, +value: String) -> Act:
+  match on:
+    case True{}:
+      Ui.setting(u, "split.hide=" ++ Split.flip(Split.hide(u), value))
+    case False{}:
+      Ui.act.sch(String.starts_with(action, "sch-"), u, action, value)
+
 def Ui.act.tk(tk: Bool, +u: Ui, +action: String, +value: String) -> Act:
   match tk:
     case True{}:
       Teach.act(u, action, value)
     case False{}:
-      Ui.act.sch(String.starts_with(action, "sch-"), u, action, value)
+      Ui.act.split(String.eq(action, "split-pane"), u, action, value)
 
 def Ui.act.s(close: Bool, +u: Ui, +action: String, +value: String) -> Act:
   match close:

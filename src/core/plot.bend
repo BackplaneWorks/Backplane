@@ -986,10 +986,11 @@ def Plot.msg(+key: String, b: Box, +thick: U32, e: Box, +rs: List<&2, Ref>) -> L
 
 # the same with "fam": the file the source is a version of (core/hist.bend's
 # Hist.key.family): a viewer moving between versions of one file keeps its
-# view instead of fitting the new plot
-def Plot.msg.fam(+key: String, +fam: String, b: Box, +thick: U32, e: Box, +rs: List<&2, Ref>) -> List<&2, U32>:
-  Cb.head(160, 7, Cb.uint(1, Cb.key("plot", Cb.uint(31, Cb.text(String.reverse(key), Cb.key("fam", Cb.text(String.reverse(fam), Cb.key("box", Out.box(b,
-    Cb.key("thick", Cb.uint(thick, Cb.key("edge", Out.box(e, Cb.key("cs", Cb.head(128, U32.from_nat(List.length(&2, Ref, rs)), Out.refs(List.reverse(&2, Ref, rs), Nil{}))))))))))))))))
+# view instead of fitting the new plot; and "base": the source whose plot
+# the kept indexes are of ("" none; a web page shows several at once)
+def Plot.msg.fam(+key: String, +fam: String, +base: String, b: Box, +thick: U32, e: Box, +rs: List<&2, Ref>) -> List<&2, U32>:
+  Cb.head(160, 8, Cb.uint(1, Cb.key("plot", Cb.uint(31, Cb.text(String.reverse(key), Cb.key("fam", Cb.text(String.reverse(fam), Cb.key("base", Cb.text(String.reverse(base), Cb.key("box", Out.box(b,
+    Cb.key("thick", Cb.uint(thick, Cb.key("edge", Out.box(e, Cb.key("cs", Cb.head(128, U32.from_nat(List.length(&2, Ref, rs)), Out.refs(List.reverse(&2, Ref, rs), Nil{}))))))))))))))))))
 
 # s in front of acc, given s backwards
 def Out.pre(rs: String, acc: String) -> String:

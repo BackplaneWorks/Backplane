@@ -2830,6 +2830,7 @@ def View.destinations(+lc: I.Loc, +cur: String) -> List<&2, D.Node>:
     View.tab(cur, "board", "view-kind", "board", MSG.T.viewer.board.tip(lc), MSG.T.viewer.board(lc)),
     View.tab(cur, "schematic", "view-kind", "schematic", MSG.T.viewer.schematic.tip(lc), MSG.T.viewer.schematic(lc)),
     View.tab(cur, "3d", "view-kind", "3d", MSG.T.viewer.parts3d.tip(lc), "3D"),
+    View.tab(cur, "split", "view-kind", "split", "Schematic, board and 3D side by side", "Split"),
     View.tab(cur, "mech", "mech", "", MSG.T.viewer.mech.tip(lc), MSG.T.viewer.mech(lc)),
     View.tab(cur, "files", "fm", "", MSG.T.viewer.files.tip(lc), MSG.T.viewer.files(lc)),
     View.tab(cur, "diff", "diff", "", MSG.T.viewer.diff.tip(lc), MSG.T.viewer.diff(lc)),
@@ -2847,6 +2848,7 @@ def View.workspace.icon(kind: String) -> String:
     case "board": "circuit-board"
     case "schematic": "cpu"
     case "3d": "box"
+    case "split": "layout-panel-left"
     case "mech": "layers"
     case "files": "folder"
     case "diff": "diff"
@@ -2860,6 +2862,7 @@ def View.workspace.label(+lc: I.Loc, kind: String) -> String:
     case "board": MSG.T.viewer.board(lc)
     case "schematic": MSG.T.viewer.schematic(lc)
     case "3d": "3D"
+    case "split": "Split"
     case "mech": MSG.T.viewer.mech(lc)
     case "files": MSG.T.viewer.files(lc)
     case "diff": MSG.T.viewer.diff(lc)
@@ -2880,7 +2883,7 @@ def View.workspace.choices(+lc: I.Loc, +cur: String, term: Bool) -> List<&2, D.N
     View.workspace.button(lc, "", "commands", "ws-palette-open", "") ]},
    D.El{"div", "", [D.At{"class", "workspace-group"}, D.At{"role", "group"}, D.At{"aria-label", "Design"}], [
     View.workspace.button(lc, cur, "board", "view-kind", "board"), View.workspace.button(lc, cur, "schematic", "view-kind", "schematic"),
-    View.workspace.button(lc, cur, "3d", "view-kind", "3d"), View.workspace.button(lc, cur, "mech", "mech", "")]},
+    View.workspace.button(lc, cur, "3d", "view-kind", "3d"), View.workspace.button(lc, cur, "split", "view-kind", "split"), View.workspace.button(lc, cur, "mech", "mech", "")]},
    D.El{"div", "", [D.At{"class", "workspace-group"}, D.At{"role", "group"}, D.At{"aria-label", "Inspect"}], [
     View.workspace.button(lc, cur, "files", "fm", ""), View.workspace.button(lc, cur, "diff", "diff", ""),
     View.workspace.button(lc, cur, "review", "rv-page", "bom"), View.workspace.button(lc, cur, "browser", "view-kind", "browser")]}]
@@ -3185,10 +3188,14 @@ def View.board.on(+path: String, +f: String) -> Bool:
 def View.board.relative(+path: String, +root: String) -> String:
   Bool.pick(String, String.starts_with(path, root ++ "/"), String.drop(path, 1n+String.length(root)), path)
 
+# (a sheet of a board's schematic in its folder is that board's)
+def View.board.near(+path: String, +f: String) -> Bool:
+  Bool.or(View.board.on(path, f), Bool.and(Bool.not(String.is_empty(MC.Mech.parent(f))), U.Bd.on("/" ++ path, f)))
+
 def View.board.current(fs: List<&2, String>, +path: String) -> String:
   match fs:
     case Nil{}: path
-    case +f <> t: Bool.pick(String, View.board.on(path, f), f, View.board.current(t, path))
+    case +f <> t: Bool.pick(String, View.board.near(path, f), f, View.board.current(t, path))
 
 def View.board.rows(fs: List<&2, String>, +cur: String, +own: String, +seen: List<&2, String>) -> List<&2, D.Node>:
   match fs:
@@ -3723,7 +3730,7 @@ def View.rc.checks(+u: U.Ui) -> List<&2, D.Node>:
 
 def View.plot(+lc: I.Loc, +u: U.Ui, +what: List<&2, D.Node>) -> List<&2, D.Node>:
   View.bar.loc(lc, List.append(&2, D.Node, what, [View.layers.loc(lc, String.eq(U.Solid.kind(u), "schematic"), Nat.is_eq(HS.Hist.kind(U.Ui.view_get(u, "view.path")), 2n), U.Solid.off(u), U.Lfocus.of(u))]), MSG.T.viewer.pan.tip(lc))
-   <> D.El{"div", "", [D.At{"class", "viewer-stage"}], D.El{"canvas", "plot", [D.At{"id", "plot"}, D.At{"data-key", U.Solid.want(u)},
+   <> D.El{"div", "", [D.At{"class", "viewer-stage"}], D.El{"canvas", "plot", [D.At{"id", "plot"}, D.At{"class", "plot2d"}, D.At{"data-key", U.Solid.want(u)},
         D.At{"data-off", U32.show(LY.Masks.off(LY.Lyr.masks(U.Lfocus.kind(u), U.Solid.off(u), U.Lfocus.of(u))))},
         D.At{"data-dim", U32.show(LY.Masks.dim(LY.Lyr.masks(U.Lfocus.kind(u), U.Solid.off(u), U.Lfocus.of(u))))}, D.At{"data-lift", U32.show(LY.Lyr.top(U.Lfocus.of(u)))},
         D.At{"data-fade", Nat.show(U.Hs.fade())}, D.At{"data-fam", HS.Hist.key.family(U.Solid.want(u))}, D.At{"data-sheets", U.Sch.boxes(u)}], Nil{}} <> (View.hist.menu(lc, u) <> View.rc.loc(lc, u))}
@@ -3761,6 +3768,96 @@ def View.solid.loc(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
     <> List.append(&2, D.Node, D.Dom.when(Bool.not(String.is_empty(U.Ui.info(u, "plotnote:" ++ U.Solid.want(u)))), D.Dom.span("viewer-say", U.Ui.info(u, "plotnote:" ++ U.Solid.want(u)))),
       [D.El{"div", "", [D.At{"class", "viewer-stage"}], [D.El{"canvas", "solid", [D.At{"id", "solid"}, D.At{"data-key", U.Solid.want(u)}], Nil{}},
         D.El{"div", "", [D.At{"class", "viewer-note"}], Nil{}}, D.El{"div", "", [D.At{"class", "viewer-stat"}], Nil{}}]}])
+
+# The combined view (client.bend's Split): the schematic beside the board
+# and its 3D model, each pane under a head that names it, with a button
+# that puts it away (the bar's toggles bring it back). The panes draw as on
+# their own tabs (plot2d.js, solid.js), with the layers those show; the
+# schematic's head navigates its sheets.
+
+def View.combo.hide(+pane: String, +name: String) -> D.Node:
+  D.El{"button", "", [D.At{"type", "button"}, D.At{"class", "icon combo-hide"}, D.At{"title", "Hide the " ++ name}, D.At{"aria-label", "Hide the " ++ name},
+    D.At{"data-value", pane}, D.On{"click", "split-pane"}], [WI.WIcon.svg("x", 14)]}
+
+def View.combo.head(+pane: String, +name: String, more: List<&2, D.Node>) -> D.Node:
+  D.El{"div", "", [D.At{"class", "combo-head"}], List.append(&2, D.Node, D.Dom.span("combo-name", name) <> more, [View.combo.hide(pane, name)])}
+
+def View.combo.toggle(+u: U.Ui, +pane: String, +name: String) -> D.Node:
+  D.El{"button", "", [D.At{"type", "button"}, D.At{"class", Bool.pick(String, U.Split.on(u, pane), "combo-pick on", "combo-pick")},
+    D.At{"aria-pressed", Bool.pick(String, U.Split.on(u, pane), "true", "false")}, D.At{"title", Bool.pick(String, U.Split.on(u, pane), "Hide the ", "Show the ") ++ name},
+    D.At{"data-value", pane}, D.On{"click", "split-pane"}], [D.Txt{name}]}
+
+# a plot pane's canvas: its source, and the layers its kind shows (k 0 a
+# board, 1 a schematic, as the single tabs keep them)
+def View.combo.canvas(+id: String, +key: String, +kind: String, +k: U32, +u: U.Ui, +sheets: String) -> D.Node:
+  D.El{"canvas", id, [D.At{"id", id}, D.At{"class", "plot2d"}, D.At{"data-key", key},
+    D.At{"data-off", U32.show(LY.Masks.off(LY.Lyr.masks(k, U.Solid.off.of(u, kind), U.Lfocus.of.at(u, kind))))},
+    D.At{"data-dim", U32.show(LY.Masks.dim(LY.Lyr.masks(k, U.Solid.off.of(u, kind), U.Lfocus.of.at(u, kind))))}, D.At{"data-lift", U32.show(LY.Lyr.top(U.Lfocus.of.at(u, kind)))},
+    D.At{"data-fade", Nat.show(U.Hs.fade())}, D.At{"data-fam", HS.Hist.key.family(key)}, D.At{"data-sheets", sheets}], Nil{}}
+
+def View.combo.trail(+lc: I.Loc, v: U.SchView) -> List<&2, D.Node>:
+  match v:
+    case U.SchView{rows, trail, _, +at, _, _, _, _, _, _, _, _, _}:
+      [View.sch.btn("sch-up", Bool.not(Nat.is_eq(at, 0n)), MSG.T.viewer.sch.up.tip(lc), "↑"),
+       D.El{"nav", "", [D.At{"class", "sch-trail"}, D.At{"aria-label", MSG.T.viewer.sch.trail(lc)}], View.sch.crumbs(lc, trail)},
+       D.El{"details", "combo-sheets", [D.At{"class", "local-menu combo-sheets"}], [
+         D.El{"summary", "", [D.At{"title", MSG.T.viewer.sch.tree.tip(lc)}], [D.Txt{MSG.T.viewer.sch.tree(lc)}]},
+         D.El{"div", "", [D.At{"class", "local-menu-body"}], [D.El{"div", "", [D.At{"class", "sch-tree"}], View.sch.rows(lc, rows)}]}]}]
+
+def View.combo.nav(many: Bool, +lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
+  match many:
+    case True{}:
+      View.combo.trail(lc, U.Sch.view(u))
+    case False{}:
+      Nil{}
+
+def View.combo.boxes(many: Bool, +u: U.Ui) -> String:
+  match many:
+    case True{}:
+      U.Sch.boxes.v(U.Sch.view(u))
+    case False{}:
+      ""
+
+def View.combo.sch(+lc: I.Loc, +u: U.Ui) -> D.Node:
+  D.El{"section", "combo-sch", [D.At{"class", "combo-pane combo-main"}, D.At{"aria-label", MSG.T.viewer.schematic(lc)}], [
+    View.combo.head("sch", MSG.T.viewer.schematic(lc), View.combo.nav(U.Sch.many(u), lc, u)),
+    D.El{"div", "", [D.At{"class", "viewer-stage"}], [View.combo.canvas("plot-sch", U.Split.src.sch(u), "schematic", 1, u, View.combo.boxes(U.Sch.many(u), u))]}]}
+
+def View.combo.pcb(+lc: I.Loc, +u: U.Ui) -> D.Node:
+  D.El{"section", "combo-pcb", [D.At{"class", "combo-pane"}, D.At{"aria-label", MSG.T.viewer.board(lc)}], [
+    View.combo.head("pcb", MSG.T.viewer.board(lc), Nil{}),
+    D.El{"div", "", [D.At{"class", "viewer-stage"}], [View.combo.canvas("plot-pcb", U.Split.src.pcb(u), "board", 0, u, "")]}]}
+
+def View.combo.solid(+lc: I.Loc, +u: U.Ui) -> D.Node:
+  D.El{"section", "combo-3d", [D.At{"class", "combo-pane"}, D.At{"aria-label", "3D"}], [
+    View.combo.head("3d", "3D", Nil{}),
+    D.El{"div", "", [D.At{"class", "viewer-stage"}], [D.El{"canvas", "solid", [D.At{"id", "solid"}, D.At{"data-key", U.Split.src.solid(u)}], Nil{}},
+      D.El{"div", "", [D.At{"class", "viewer-note"}], Nil{}}, D.El{"div", "", [D.At{"class", "viewer-stat"}], Nil{}}]}]}
+
+def View.combo.pane(i: Nat, +lc: I.Loc, +u: U.Ui) -> D.Node:
+  match i:
+    case 0n:
+      View.combo.sch(lc, u)
+    case 1n:
+      View.combo.pcb(lc, u)
+    case _:
+      View.combo.solid(lc, u)
+
+# a pane shown, or nothing (matched, so a pane put away is never laid out)
+def View.combo.if(on: Bool, +lc: I.Loc, +u: U.Ui, +i: Nat) -> List<&2, D.Node>:
+  match on:
+    case True{}:
+      [View.combo.pane(i, lc, u)]
+    case False{}:
+      Nil{}
+
+def View.combo(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
+  [View.bar.loc(lc, List.append(&2, D.Node, View.boards(u, "Split"), [D.El{"span", "", [D.At{"class", "combo-picks"}, D.At{"role", "group"}, D.At{"aria-label", "Panes"}], [
+      View.combo.toggle(u, "sch", MSG.T.viewer.schematic(lc)), View.combo.toggle(u, "pcb", MSG.T.viewer.board(lc)), View.combo.toggle(u, "3d", "3D")]}]),
+     MSG.T.viewer.pan.tip(lc)),
+   D.El{"div", "combo", [D.At{"class", "combo"}], [D.El{"div", "", [D.At{"class", "combo-in"}],
+     List.append(&2, D.Node, View.combo.if(U.Split.on(u, "sch"), lc, u, 0n),
+       [D.El{"div", "", [D.At{"class", "combo-side"}], List.append(&2, D.Node, View.combo.if(U.Split.on(u, "pcb"), lc, u, 1n), View.combo.if(U.Split.on(u, "3d"), lc, u, 2n))}])}]}]
 
 # The viewer pane: a tab for each thing it shows (the one on show lit),
 # Close, then that thing
@@ -3919,13 +4016,16 @@ def View.aside.k(+lc: I.Loc, i: Nat, +u: U.Ui) -> List<&2, D.Node>:
       View.pdf.loc(lc, u)
     case 9n:
       View.review(lc, u)
+    case 10n:
+      View.combo(lc, u)
     case _:
       View.plot(lc, u, List.append(&2, D.Node, View.boards(u, MSG.T.viewer.board.tip(lc)), [View.kicad.loc(lc)]))
 
 def View.aside.n(+kind: String) -> Nat:
   Bool.pick(Nat, String.eq(kind, "diff"), 0n, Bool.pick(Nat, String.eq(kind, "browser"), 1n, Bool.pick(Nat, String.eq(kind, "mech"), 2n,
     Bool.pick(Nat, String.eq(kind, "3d"), 3n, Bool.pick(Nat, String.eq(kind, "schematic"), 4n,
-      Bool.pick(Nat, String.eq(kind, "files"), 6n, Bool.pick(Nat, String.eq(kind, "image"), 7n, Bool.pick(Nat, String.eq(kind, "pdf"), 8n, Bool.pick(Nat, String.eq(kind, "review"), 9n, 5n)))))))))
+      Bool.pick(Nat, String.eq(kind, "files"), 6n, Bool.pick(Nat, String.eq(kind, "image"), 7n, Bool.pick(Nat, String.eq(kind, "pdf"), 8n, Bool.pick(Nat, String.eq(kind, "review"), 9n,
+        Bool.pick(Nat, String.eq(kind, "split"), 10n, 5n))))))))))
 
 # the side pane of the selected thread: the tabs, then what they show. Its
 # left edge is a handle that resizes it (host.js keeps the width per

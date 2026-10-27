@@ -401,6 +401,37 @@ button.fold span { overflow: hidden; text-overflow: ellipsis; white-space: nowra
 .viewer-note:empty { display: none; }
 .viewer-stat { position: absolute; left: 8px; bottom: 6px; color: var(--faint); font-size: calc(11px * var(--text-scale, 100) / 100); pointer-events: none; }
 .viewer-stat:empty { display: none; }
+/* the combined view (Split): the schematic beside the board and its 3D
+   model, stacked the other way on a pane taller than wide; each pane under
+   a head that names it and puts it away */
+.viewer.split .combo { flex: 1; min-height: 0; container-type: size; }
+.combo-in { display: flex; width: 100%; height: 100%; }
+.combo-side { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
+.combo-side:empty { display: none; }
+.combo-pane { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
+.combo-main { flex: 1.15; }
+.combo-main + .combo-side { border-left: 1px solid var(--line); }
+.combo-side > .combo-pane + .combo-pane { border-top: 1px solid var(--line); }
+@container (orientation: portrait) {
+  .combo-in { flex-direction: column; }
+  .combo-side { flex-direction: row; }
+  .combo-main + .combo-side { border-left: 0; border-top: 1px solid var(--line); }
+  .combo-side > .combo-pane + .combo-pane { border-top: 0; border-left: 1px solid var(--line); }
+}
+.combo-head { display: flex; align-items: center; gap: 6px; min-height: 30px; padding: 2px 4px 2px 10px; border-bottom: 1px solid var(--line); background: var(--panel); flex: none; min-width: 0; font-size: calc(12px * var(--text-scale, 100) / 100); }
+.combo-name { color: var(--dim); text-transform: uppercase; letter-spacing: 0.06em; font-size: calc(11px * var(--text-scale, 100) / 100); flex: none; }
+.combo-head .sch-trail { flex: 1; min-width: 0; }
+.combo-head .sch-btn { padding: 1px 7px; }
+.combo-head .combo-hide { margin-left: auto; padding: 2px 4px; }
+.combo-head .sch-trail + .combo-sheets { margin-left: auto; }
+.combo-sheets > summary { min-height: 24px; padding: 1px 8px; }
+.combo-sheets .local-menu-body { width: 240px; }
+.combo-sheets .sch-tree { display: grid; }
+.combo-sheets .sch-tree button { width: auto; min-height: 28px; }
+.combo-sheets .sch-fold { flex: none; width: 22px; padding: 0; }
+.combo-sheets .sch-name { flex: 1; }
+.combo-picks { display: inline-flex; gap: 2px; }
+.combo-pick { color: var(--faint); }
 
 /* Mechanical: a part's renders, and a part in 3D */
 .viewer.mech .mech-page { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; background: var(--bg); }
