@@ -53,6 +53,79 @@ function harness(){
  function open(hub='h'){h.hubs([...new Set([...h.paired,hub])]);h.connection(hub,'1','view-v1');const out=greeting(hub);const id=out.cmds[0].request.id;answer(id,{},hub);return out;}
  return{h,api,calls,greeting,answer,open,screen,advance:n=>now+=n};
 }
+check('busy project query retains the latest full value including empty clear',()=>{
+ const x=harness();x.open();const s=x.h.states.get('h');x.h.update(s);const update=x.h.drain().cmds[0].request;
+ x.h.request('h','proj-find-q','older');x.h.request('h','proj-find-q','');assert.deepEqual(x.h.drain().cmds,[]);
+ const out=x.answer(update.id);assert.equal(out.cmds.length,1);assert.equal(out.cmds[0].request.p.action,'proj-find-q');assert.equal(out.cmds[0].request.p.value,'');
+});
+function projectPicture(x, hub, query, ids) {
+ const shown = x.screen(hub, x.h.states.get(hub).session.sel);
+ shown.search = {open:true, query, hint:'Search'};
+ shown.projects = ids.map(id => ({id}));
+ return {shown, overlay:{key:hub,name:hub,j:clone(shown)}};
+}
+check('project Go waits exact query and strips only the owning hub prefix',()=>{
+ const x=harness();x.open();x.h.projectSearchQuery(1,1,'PoE');const query=x.h.drain().cmds[0].request;
+ assert(x.h.projectSearchGo(1,1,'PoE','h|p'));assert.deepEqual(x.h.drain().cmds,[]);
+ const out=x.answer(query.id,projectPicture(x,'h','PoE',['p']));
+ assert.equal(out.cmds.length,1);assert.equal(out.cmds[0].request.p.action,'proj-go');assert.equal(out.cmds[0].request.p.value,'p');
+});
+check('old prefix project cannot invoke Find.go fallback or create a thread',()=>{
+ const x=harness();x.open();x.h.projectSearchQuery(1,1,'new');const query=x.h.drain().cmds[0].request;
+ x.h.projectSearchGo(1,1,'new','h|old');const out=x.answer(query.id,projectPicture(x,'h','new',['new']));
+ assert.deepEqual(out.cmds,[]);
+});
+check('new typing back to acknowledged prefix remains a full edit',()=>{
+ const x=harness();x.open();x.h.projectSearchQuery(1,1,'a');let call=x.h.drain().cmds[0].request;
+ x.answer(call.id,projectPicture(x,'h','a',['p']));
+ x.h.projectSearchQuery(1,2,'ab');call=x.h.drain().cmds[0].request;
+ x.h.projectSearchQuery(1,3,'a');const out=x.answer(call.id,projectPicture(x,'h','ab',['other']));
+ assert.equal(out.cmds[0].request.p.value,'a');
+});
+check('project query fans out without stealing focus and Go waits every hub',()=>{
+ const x=harness();x.open('a');x.open('b');const focus=x.h.current;
+ x.h.projectSearchQuery(1,1,'match');const calls=x.h.drain().cmds;assert.equal(calls.length,2);assert.equal(x.h.current,focus);
+ x.h.projectSearchGo(1,1,'match','a|p');assert.deepEqual(x.h.drain().cmds,[]);
+ const ac=calls.find(c=>c.hub==='a').request,bc=calls.find(c=>c.hub==='b').request;
+ assert.deepEqual(x.answer(ac.id,projectPicture(x,'a','match',['p']),'a').cmds,[]);
+ const done=x.answer(bc.id,projectPicture(x,'b','match',['q']),'b');
+ assert(done.cmds.some(c=>c.hub==='a'&&c.request.p.action==='proj-go'));
+ assert(done.cmds.some(c=>c.hub==='b'&&c.request.p.action==='proj-find'&&c.request.p.value==='off'));
+});
+check('end tombstone and later scope defeat delayed old queries and go',()=>{
+ const x=harness();x.open();x.h.projectSearchEnd(2);
+ assert.equal(x.h.projectSearchQuery(1,1,'old'),false);assert.equal(x.h.projectSearchQuery(2,1,'ended'),false);
+ x.h.projectSearchQuery(3,1,'new');const call=x.h.drain().cmds[0].request;x.h.projectSearchEnd(2);
+ x.h.projectSearchGo(3,1,'new','h|p');x.h.projectSearchEnd(3);
+ assert.deepEqual(x.answer(call.id,projectPicture(x,'h','new',['p'])).cmds,[]);
+});
+check('query survives generic queue saturation and selection retires pending go',()=>{
+ const x=harness();x.open();const state=x.h.states.get('h');x.h.update(state);const call=x.h.drain().cmds[0].request;
+ state.queue=Array.from({length:7},()=>({action:'view',value:'board',input:clone(state.session),revision:state.revision}));
+ x.h.projectSearchQuery(1,1,'latest');const out=x.answer(call.id);assert.equal(out.cmds[0].request.p.action,'proj-find-q');
+ x.h.projectSearchGo(1,1,'latest','h|p');x.h.request('h','select','h|other');x.h.drain();
+ assert(x.h.projectSearch.ended);
+});
+check('newer end tombstone retires older queued work before refresh completes',()=>{
+ const x=harness();x.open();x.h.update(x.h.states.get('h'));const call=x.h.drain().cmds[0].request;
+ x.h.projectSearchQuery(1,1,'old');x.h.projectSearchEnd(2);
+ assert.deepEqual(x.answer(call.id).cmds,[]);
+});
+check('a paired hub entering thin mode cancels an incomplete participant scope',()=>{
+ const x=harness();x.open('a');x.h.hubs(['a','b']);
+ x.h.projectSearchQuery(1,1,'match');const call=x.h.drain().cmds[0].request;
+ x.h.connection('b','1','view-v1');x.greeting('b');
+ assert(x.h.projectSearch.ended);assert.equal(x.h.projectSearchGo(1,1,'match',''),false);
+ const out=x.answer(call.id,projectPicture(x,'a','match',['p']),'a');assert(!out.cmds.some(c=>c.request.p?.action==='proj-go'));
+});
+check('Return resolves the current merged first project only after every query',()=>{
+ const x=harness();x.open('a');x.open('b');x.api.firstProject=()=> 'b|new-first';
+ x.h.projectSearchGo(1,1,'match','');const calls=x.h.drain().cmds;
+ const a=calls.find(c=>c.hub==='a').request,b=calls.find(c=>c.hub==='b').request;
+ x.answer(a.id,projectPicture(x,'a','match',['old-first']),'a');
+ const out=x.answer(b.id,projectPicture(x,'b','match',['new-first']),'b');
+ assert(out.cmds.some(c=>c.hub==='b'&&c.request.p.action==='proj-go'&&c.request.p.value==='new-first'));
+});
 check('pre-greeting select issues zero commands and no readiness',()=>{const x=harness();x.h.hubs(['h']);x.h.connection('h','1','view-v1');x.h.request('h','select','h|a');assert.deepEqual(x.h.drain().cmds,[]);assert.equal(x.h.states.get('h').ready,false);});
 check('restored bot target and Browser route survive bootstrap select',()=>{const x=harness();const saved={version:1,current:'h',hubs:[{hub:'h',target:{kind:'bot',id:'bot'},session:{sel:'bot-thread',open:{p:true},adding:false,panel:true,info:{'fold:e':'on'},route:{kind:'bot-tab',bot:'bot',tab:'browser'}},anchor:{id:'e',offset:0}}]};assert(x.h.loadPresentation(JSON.stringify(saved)));x.h.hubs(['h']);x.h.connection('h','1','view-v1');x.h.request('h','select','h|bot-thread');const out=x.greeting();assert.equal(out.cmds[0].request.p.target.kind,'bot');assert.equal(out.cmds[0].request.p.session.route.tab,'browser');assert.equal(out.cmds[0].request.p.session.open.p,true);});
 check('greeting emits presenting before one bounded open, never history',()=>{const x=harness();const out=x.open();assert.equal(out.sync[0].phase,'presenting');assert.equal(out.sync[0].remoteReady,false);assert.equal(out.cmds.length,1);assert.equal(out.cmds[0].request.m,'view.open');assert.equal(out.cmds[0].request.p.nativeRenderer,'ios-v1');});

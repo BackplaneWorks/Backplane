@@ -31,6 +31,10 @@ final class AppModel {
     @ObservationIgnored private var lastScreenJSON: String?
     @ObservationIgnored private var earlyActions: [(String, String)] = []
     @ObservationIgnored private var presentationIntent = PresentationIntent()
+    @ObservationIgnored private var projectSearch = ProjectSearchIntent()
+    @ObservationIgnored private var projectSearchOwner: UInt64 = 0
+    @ObservationIgnored private var projectSearchGo: ProjectSearchIntent.Go?
+    private(set) var projectSearchRevision = 0
     @ObservationIgnored private var localDrafts: [String: String] = [:]
     @ObservationIgnored private var restoredAt: [String: UInt64] = [:]
     @ObservationIgnored private var wantsUsage = false
@@ -344,6 +348,7 @@ final class AppModel {
     @discardableResult func pair(_ text: String) -> Bool {
         let l = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let k = Pairing.key(l) else { return false }
+        endProjectSearch()
         presentationIntent.clear()
         pairingGeneration = engine.invalidatePairing()
         retiredPairings[k] = pairingGeneration
@@ -364,6 +369,7 @@ final class AppModel {
     }
 
     func unpair(_ key: String) {
+        endProjectSearch()
         presentationIntent.clear()
         pairingGeneration = engine.invalidatePairing()
         retiredPairings[key] = pairingGeneration
@@ -521,6 +527,7 @@ final class AppModel {
                 guard self.links.contains(link), self.conn[key]?.epoch == UInt64(epoch) else { return .stop }
                 self.apply(connected, generation: pairing)
                 guard pairing == self.pairingGeneration else { return .later(.connection) }
+                self.projectSearchRevision += 1
                 if let pending = self.earlyActions.last(where: { $0.0 != "tz-report" && ($0.1.hasPrefix(key + "|") || ($0.1.isEmpty && self.screen?.hub == key)) }) {
                     self.earlyActions.removeAll { $0.0 == pending.0 && $0.1 == pending.1 }
                     let selectingPairing = self.pairingGeneration
@@ -538,6 +545,7 @@ final class AppModel {
                 return Pairing.viewSocket(link).map { Hub.Next.go($0) } ?? Hub.Next.stop
             },
             onConnecting: { [weak self] in
+                self?.endProjectSearch()
                 if self?.screen?.hub == key { self?.presentationIntent.clear() }
                 self?.cachedReadiness.retire(key)
                 self?.thinReady[key] = nil
@@ -641,6 +649,7 @@ final class AppModel {
     @ObservationIgnored var vaultText = ""
 
     func act(_ action: String, _ value: String = "") {
+        if action == "select" || Self.opens.contains(action) || (action == "proj-find" && value == "off") { endProjectSearch() }
         if action == "select" || Self.opens.contains(action) { presentationIntent.clear() }
         // the secret box's Save: the value joins the box's name, purpose and
         // thread and leaves in one secret.set request (Engine.secret)
@@ -705,6 +714,109 @@ final class AppModel {
             guard generation == pairingGeneration else { return }
             if navigation { dirty = true; keep() }
         }
+    }
+
+    // Search input has a separate lifetime from mutations. A refresh can
+    // coalesce edits, but must not lose the final complete query or clear.
+    func beginProjectSearch(_ text: String) -> ProjectSearchIntent.Query {
+        if showingProjectSearch,
+           let current = projectSearch.editing ?? projectSearch.committed ?? projectSearchGo?.query,
+           current.owner.generation == projectSearchOwner { return current }
+        endProjectSearch()
+        return projectSearch.begin(text: text, owner: .init(generation: projectSearchOwner))
+    }
+
+    func endProjectSearch(scope: UInt64? = nil) {
+        if let scope {
+            // View disappearance cannot cancel Return's committed selection.
+            guard projectSearch.editing?.scope == scope else { return }
+            projectSearch.disappear(scope: scope)
+            run { await $0.projectSearchEnd(scope: Int(scope)) }
+        } else {
+            let scopes = Set([projectSearch.editing?.scope, projectSearch.committed?.scope, projectSearchGo?.query.scope].compactMap { $0 })
+            projectSearch.cancel()
+            projectSearchGo = nil
+            projectSearchOwner += 1
+            for scope in scopes { run { await $0.projectSearchEnd(scope: Int(scope)) } }
+        }
+    }
+
+    private var showingProjectSearch: Bool {
+        tab == .threads && path.isEmpty && screen?.search != nil && !links.isEmpty
+    }
+
+    private func sendProjectSearch(_ query: ProjectSearchIntent.Query) {
+        let generation = pairingGeneration
+        Task {
+            guard generation == pairingGeneration, showingProjectSearch,
+                  query.owner.generation == projectSearchOwner,
+                  projectSearch.editing == query || projectSearch.committed == query else { return }
+            if let hub = screen?.hub, startup[hub] == .compatibilityChosen {
+                apply(await engine.act("proj-find-q", query.text), generation: generation)
+            } else {
+                apply(await engine.projectSearchQuery(scope: Int(query.scope), edit: Int(query.edit), text: query.text), generation: generation)
+            }
+        }
+    }
+
+    func searchProjects(_ text: String, scope: UInt64) -> UInt64? {
+        guard showingProjectSearch else { return nil }
+        let old = projectSearch.committed?.scope ?? projectSearchGo?.query.scope
+        let owner = ProjectSearchIntent.Owner(generation: projectSearchOwner)
+        let query: ProjectSearchIntent.Query?
+        if projectSearch.editing == nil, projectSearchGo?.query.scope == scope {
+            let initial = projectSearch.begin(text: text, owner: owner)
+            query = projectSearch.edit(text, scope: initial.scope, owner: owner)
+        } else if projectSearch.editing == nil, projectSearch.committed == nil, projectSearchGo == nil {
+            // A reconnect can retire the lifetime while its field remains
+            // on screen. The next visible edit starts a fresh owner scope.
+            let initial = projectSearch.begin(text: text, owner: owner)
+            query = projectSearch.edit(text, scope: initial.scope, owner: owner)
+        } else { query = projectSearch.edit(text, scope: scope, owner: owner) }
+        guard let query else { return nil }
+        if let old, old != query.scope {
+            projectSearchGo = nil
+            run { await $0.projectSearchEnd(scope: Int(old)) }
+        }
+        sendProjectSearch(query)
+        return query.scope
+    }
+
+    func resumeProjectSearch(_ text: String, scope: UInt64) -> UInt64? {
+        guard projectSearch.committed == nil, projectSearchGo == nil else { return nil }
+        return searchProjects(text, scope: scope)
+    }
+
+    func submitProjectSearch(_ text: String, scope: UInt64) {
+        guard showingProjectSearch else { return }
+        // Capture the final text even if Return arrives before onChange.
+        var submitting = scope
+        if projectSearch.editing?.text != text {
+            guard let latest = searchProjects(text, scope: scope) else { return }
+            submitting = latest
+        }
+        guard let current = projectSearch.editing,
+              current.scope == submitting,
+              let query = projectSearch.submit(scope: current.scope, owner: .init(generation: projectSearchOwner)) else { return }
+        sendProjectSearch(query)
+        advanceProjectSearch()
+    }
+
+    private func advanceProjectSearch() {
+        guard showingProjectSearch, projectSearchGo == nil,
+              let query = projectSearch.committed, query.owner.generation == projectSearchOwner else { return }
+        if let hub = screen?.hub, startup[hub] == .thin, let go = projectSearch.forward(query) {
+            projectSearchGo = go
+            run { await $0.projectSearchGo(scope: Int(query.scope), edit: Int(query.edit), text: query.text, project: "") }
+            return
+        }
+        guard contentReady, let hub = screen?.hub, startup[hub] == .compatibilityChosen,
+              screen?.search?.query == query.text else { return }
+        // The explicitly chosen compatibility lane keeps its existing
+        // action path, after the accepted full query is visible.
+        guard let go = projectSearch.accept(query, projects: screen?.projects.map(\.id) ?? []) else { return }
+        projectSearchGo = go
+        run { await $0.act("proj-go", go.project) }
     }
 
     // Synchronous acceptance for the real-drag latch. An inert cached page
@@ -1131,6 +1243,7 @@ final class AppModel {
 
     func retryConnection(_ key: String) {
         guard links.contains(where: { Pairing.key($0) == key }) else { return }
+        endProjectSearch()
         hubs.removeValue(forKey: key)?.stop()
         thinReady[key] = nil
         thinRequests[key] = nil
@@ -1495,6 +1608,7 @@ final class AppModel {
             default: break
             }
         }
+        advanceProjectSearch()
         if contentReady, let sel = screen?.sel, let text = localDrafts.removeValue(forKey: sel) {
             run { await $0.quiet("draft", text) }
         }

@@ -604,7 +604,7 @@ struct ProjectsView: View {
             // the search is always the list's first row (projects, or in the
             // active view threads by title or project)
             if let f = screen.search {
-                Section { SearchField(model: model, search: f, first: screen.projects.first?.id) }
+                Section { SearchField(model: model, search: f) }
             }
             if screen.view == "active" {
                 let rows = screen.active ?? []
@@ -791,35 +791,51 @@ private struct SearchField: View {
     @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let search: Search
-    let first: String?
     @State private var text = ""
-    // what was typed here: a screen still echoing it never overwrites the field
-    @State private var typed: Set<String> = []
+    @State private var scope: UInt64?
+    @State private var edited = false
+
+    private func edit(_ value: String) {
+        text = value
+        edited = true
+        if let scope { self.scope = model.searchProjects(value, scope: scope) ?? scope }
+    }
 
     var body: some View {
         HStack {
             Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-            TextField(search.hint, text: $text, prompt: Text(search.hint).foregroundColor(.secondary))
+            TextField(search.hint, text: Binding(get: { text }, set: { edit($0) }), prompt: Text(search.hint).foregroundColor(.secondary))
                 .foregroundColor(.primary)
                 .accessibilityIdentifier("projects.search")
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .submitLabel(.go)
-                .onChange(of: text) { _, t in
-                    guard t != search.query else { return }
-                    typed.insert(t)
-                    model.act("proj-find-q", t)
-                }
-                .onSubmit { if let f = first { model.act("proj-go", f) } }
+                .onSubmit { if let scope { model.submitProjectSearch(text, scope: scope) } }
             if !text.isEmpty {
-                Button { text = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
+                Button { edit("") } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
                     .buttonStyle(.plain)
                     .accessibilityLabel(NativeMessages.native_thread_search_clear(lang))
             }
         }
-        .onAppear { text = search.query }
+        .onAppear {
+            let query = model.beginProjectSearch(search.query)
+            scope = query.scope
+            text = query.text
+            edited = edited || query.edit > 0 || text != search.query
+        }
+        .onDisappear { if let scope { model.endProjectSearch(scope: scope) }; scope = nil }
+        .onChange(of: model.contentReady) { _, ready in
+            if ready, text != search.query, let scope {
+                self.scope = model.resumeProjectSearch(text, scope: scope) ?? scope
+            }
+        }
+        .onChange(of: model.projectSearchRevision) { _, _ in
+            if model.contentReady, let scope {
+                self.scope = model.resumeProjectSearch(text, scope: scope) ?? scope
+            }
+        }
         .onChange(of: search.query) { _, q in
-            if !typed.contains(q) { typed = []; text = q }
+            if !edited { text = q }
         }
     }
 }

@@ -271,6 +271,8 @@ const thin = new NativeThinHost307265({
   drafts: key => Object.fromEntries(Object.entries(kept).filter(([qualified]) => qualified.startsWith(key + "|")).map(([qualified, text]) => [qualified.slice(key.length + 1), text])),
   target: session => plain(App.thin_target(JSON.stringify(session))),
   intent: thinIntent,
+  focus: key => { previewCur = key; },
+  firstProject: () => bubMovingScreen()?.projects?.[0]?.id || '',
   prepare: (session, input, action) => thinRoute(plain(App.session_prepare(JSON.stringify(session), JSON.stringify(input), action)), input),
   ack: (session, envelope) => thinRoute(plain(App.session_reply(JSON.stringify(session), envelope.bend || bendJson(envelope))), session),
   send: sendWire,
@@ -737,6 +739,18 @@ globalThis.Backplane = {
   registerAt(hub, platform, token, kind, thread, env, bundle) {
     if (thin.register(hub, [platform, token, kind, thread, env, bundle])) return direct([], false);
     return step(App.register_at(hubs, hub, platform, token, kind, thread, env, bundle), true);
+  },
+  projectSearchQuery(scope, edit, text) {
+    thin.projectSearchQuery(scope, edit, text);
+    return direct([], true);
+  },
+  projectSearchEnd(scope) {
+    thin.projectSearchEnd(scope);
+    return direct([], false);
+  },
+  projectSearchGo(scope, edit, text, project) {
+    thin.projectSearchGo(scope, edit, text, project);
+    return direct([], true);
   },
   act(action, value) {
     const key = App.session_target(hubs, previewCur || App.current(hubs), action, value);

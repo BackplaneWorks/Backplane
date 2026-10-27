@@ -33,8 +33,8 @@ struct ProjectSearchIntent {
         return q
     }
 
-    // An edit after Return starts a new scope, while the committed Return
-    // remains ordered ahead of it. Old owners cannot edit the new field.
+    // New typing supersedes a pending Return. It must never navigate to
+    // the old query after the person has started a different search.
     mutating func edit(_ text: String, scope: UInt64?, owner: Owner) -> Query? {
         if let current = editing {
             guard current.scope == scope, current.owner == owner else { return nil }
@@ -44,7 +44,11 @@ struct ProjectSearchIntent {
         }
         // A post-submit edit must name that submitted scope, not a stale view.
         guard let pending = committed ?? resumable, pending.scope == scope, pending.owner == owner else { return nil }
-        return begin(text: text, owner: owner)
+        committed = nil
+        let initial = begin(text: text, owner: owner)
+        let q = Query(scope: initial.scope, edit: 1, text: text, owner: owner)
+        editing = q
+        return q
     }
 
     // Return captures the exact query, never a project from the current UI.
@@ -65,6 +69,15 @@ struct ProjectSearchIntent {
         guard let project = projects.first, !project.isEmpty else { return nil }
         resumable = nil
         return Go(query: query, project: project)
+    }
+
+    // Thin hubs resolve the first project from their accepted merged
+    // projection after the exact edit barrier. Empty means that first row.
+    mutating func forward(_ query: Query) -> Go? {
+        guard committed == query else { return nil }
+        committed = nil
+        resumable = query
+        return Go(query: query, project: "")
     }
 
     mutating func disappear(scope: UInt64) {
