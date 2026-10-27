@@ -891,41 +891,83 @@ struct ThreadDestination: View {
     @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let id: String
+    @State private var attempt = 0
+    @State private var timedOut = false
+
+    private struct WatchKey: Equatable {
+        let id: String
+        let attempt: Int
+        let active: Bool
+        let ready: Bool
+        let links: [String]
+    }
 
     private var selected: Bool { model.screen.map { AppModel.nav($0) == id } ?? false }
+    private var active: Bool { model.path.last == id }
+    private var ready: Bool {
+        selected && model.contentReady && (model.screen?.bot != nil || model.screen?.thread != nil)
+    }
+    private var watchKey: WatchKey {
+        WatchKey(id: id, attempt: attempt, active: active, ready: ready, links: model.links)
+    }
+    private var hub: String? {
+        model.links.compactMap(Pairing.key).first { id.hasPrefix($0 + "|") }
+            ?? (model.screen?.hub.isEmpty == false ? model.screen?.hub : nil)
+    }
+    private var failureMessage: String {
+        if let hub, let failure = model.conn[hub]?.failure {
+            return NativeMessages.native_hub_failure(lang, failure.reason, failure.code)
+        }
+        if id == AppModel.making {
+            return lang == "ja" ? "スレッドの作成に時間がかかっています。" : "Creating this thread timed out."
+        }
+        return lang == "ja" ? "会話を開くのに時間がかかっています。" : "Opening this conversation timed out."
+    }
 
     var body: some View {
-        if selected, let b = model.screen?.bot {
-            BotDestination(model: model, bot: b)
-        } else if !selected, let b = model.seenBots[id] {
-            BotDestination(model: model, bot: b, live: false, cachedThread: model.seen[id], cachedPlane: model.seenPlanes[id])
-                .allowsHitTesting(false)
-                .overlay(alignment: .top) { loadingStatus }
-        } else if let t = selected ? model.screen?.thread : model.seen[id] {
-            ThreadScreen(model: model, thread: t, live: selected).id(id).allowsHitTesting(selected)
-                .overlay(alignment: .top) { if !selected { loadingStatus } }
-        } else {
-            VStack(alignment: .leading, spacing: 20) {
-                HStack(spacing: 12) {
-                    if let d = model.destination, d.nav == id, !d.cat.isEmpty {
-                        BotCat(model: model, key: d.cat, size: 48)
+        Group {
+            if ready, let b = model.screen?.bot {
+                BotDestination(model: model, bot: b)
+            } else if let b = (selected ? model.screen?.bot : nil) ?? model.seenBots[id] {
+                BotDestination(model: model, bot: b, live: false, cachedThread: model.seen[id], cachedPlane: model.seenPlanes[id])
+                    .allowsHitTesting(false)
+                    .disabled(true)
+                    .overlay(alignment: .top) { loadingStatus }
+            } else if let t = (selected ? model.screen?.thread : nil) ?? model.seen[id] {
+                ThreadScreen(model: model, thread: t, live: ready).id(id).allowsHitTesting(ready)
+                    .disabled(!ready)
+                    .overlay(alignment: .top) { if !ready { loadingStatus } }
+            } else {
+                VStack(alignment: .leading, spacing: 20) {
+                    HStack(spacing: 12) {
+                        if let d = model.destination, d.nav == id, !d.cat.isEmpty {
+                            BotCat(model: model, key: d.cat, size: 48)
+                        }
+                        Text(title).font(.headline)
                     }
-                    Text(title).font(.headline)
+                    loadingStatus
+                    if !timedOut {
+                        ForEach(0..<6) { _ in
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(NativeMessages.native_thread_content(lang)).font(.headline)
+                                Text(NativeMessages.native_thread_content_note(lang))
+                            }.redacted(reason: .placeholder).accessibilityHidden(true)
+                        }
+                    }
+                    Spacer()
                 }
-                ProgressView(loadingLabel)
-                    .accessibilityIdentifier("thread.loading")
-                ForEach(0..<6) { _ in
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(NativeMessages.native_thread_content(lang)).font(.headline)
-                        Text(NativeMessages.native_thread_content_note(lang))
-                    }.redacted(reason: .placeholder).accessibilityHidden(true)
-                }
-                Spacer()
+                .padding().frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .navigationTitle(title)
+                .navigationBarTitleDisplayMode(.inline)
             }
-            .padding().frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .allowsHitTesting(false)
-            .navigationTitle(title)
-            .navigationBarTitleDisplayMode(.inline)
+        }
+        .task(id: watchKey) {
+            let started = watchKey
+            timedOut = false
+            guard started.active, !started.ready else { return }
+            do { try await Task.sleep(for: .seconds(20)) } catch { return }
+            guard !Task.isCancelled, watchKey == started, active, !ready else { return }
+            timedOut = true
         }
     }
 
@@ -935,12 +977,26 @@ struct ThreadDestination: View {
     }
 
     private var loadingStatus: some View {
-        ProgressView(loadingLabel)
-            .font(.caption)
-            .padding(8)
-            .frame(maxWidth: .infinity)
-            .background(.bar)
-            .accessibilityIdentifier("thread.loading")
+        VStack(alignment: .leading, spacing: 8) {
+            if timedOut {
+                Text(failureMessage).accessibilityIdentifier("thread.loading.error")
+                if id != AppModel.making {
+                    Button(lang == "ja" ? "再試行" : "Retry") {
+                        guard active, !ready, let hub, model.links.contains(where: { Pairing.key($0) == hub }) else { return }
+                        timedOut = false
+                        attempt += 1
+                        model.act("select", id)
+                    }
+                    .accessibilityIdentifier("thread.loading.retry")
+                }
+            } else {
+                ProgressView(loadingLabel).accessibilityIdentifier("thread.loading")
+            }
+        }
+        .font(.caption)
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(BackplaneDesign.panel)
     }
 
     // the row's title in the list, while nothing of the thread is known
