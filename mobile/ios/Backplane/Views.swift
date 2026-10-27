@@ -940,7 +940,16 @@ struct ThreadDestination: View {
         return lang == "ja" ? "会話を開くのに時間がかかっています。" : "Opening this conversation timed out."
     }
 
+    private var composerThread: ThreadView? {
+        let bot = (selected ? model.screen?.bot : nil) ?? model.seenBots[id]
+        if let bot, bot.kind != "bot" || (bot.tab ?? "chat") != "chat" { return nil }
+        let thread = (selected ? model.screen?.thread : nil) ?? model.seen[id]
+        guard let thread, thread.id == id else { return nil }
+        return thread
+    }
+
     var body: some View {
+        VStack(spacing: 0) {
         Group {
             if let b = (selected ? model.screen?.bot : nil) ?? model.seenBots[id] {
                 BotDestination(model: model, bot: b, live: ready,
@@ -976,6 +985,10 @@ struct ThreadDestination: View {
                 .navigationTitle(title)
                 .navigationBarTitleDisplayMode(.inline)
             }
+        }
+        if let thread = composerThread {
+            ThreadComposer(model: model, thread: thread)
+        }
         }
         .modifier(ViewerPresentationHost(model: model, thread: id))
         .task(id: watchKey) {
@@ -1056,7 +1069,6 @@ struct ThreadScreen: View {
     // the client has this thread selected (else it shows as last seen,
     // for the moment the select takes, and takes no input)
     var live = true
-    @FocusState private var focused: Bool
     // the image open in the lightbox
     @State private var shown: Shown?
     @State private var position = TimelinePosition()
@@ -1066,7 +1078,6 @@ struct ThreadScreen: View {
     @State private var shutFile: RowMenu?
     // the subagents sheet (the top bar's button) is up
     @State private var showSubs = false
-    @State private var showPermissions = false
 
     var body: some View {
       VStack(spacing: 0) {
@@ -1141,190 +1152,7 @@ struct ThreadScreen: View {
                 withAnimation(.easeOut(duration: 2)) { if lit == j.id { lit = nil } }
             }
         }
-        // Keep the composer in the proposed viewport, including when this
-        // chat is nested below a bot header and above the app's tab strip.
-          VStack(spacing: 0) {
-            // the terminals pinned to the top of the thread
-            ForEach((thread.embs ?? []).filter { $0.pinned }, id: \.key) { e in
-                EmbView(model: model, emb: e, top: true).padding(.horizontal).padding(.top, 8)
-            }
-            ForEach(thread.asks ?? []) { a in
-                AskCard(model: model, ask: a).padding(.horizontal).padding(.top, 8)
-            }
-            if let td = thread.todos {
-                VStack(alignment: .leading, spacing: 2) {
-                    // the head opens and shuts the card
-                    Button { if let t = td.toggle, !t.isEmpty { model.act("fold", t) } } label: {
-                        HStack {
-                            Text(td.head).bold()
-                            Spacer(minLength: 0)
-                            Image(systemName: (td.open ?? true) ? "chevron.down" : "chevron.right").foregroundStyle(.secondary)
-                        }
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    // every step scrolls within a third of the screen
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 2) {
-                            ForEach(Array(td.lines.enumerated()), id: \.offset) { _, l in
-                                Text(l.text).lineLimit(1).foregroundStyle(l.status == "completed" ? .secondary : .primary)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                        }
-                    }
-                    .frame(maxHeight: 220)
-                    .fixedSize(horizontal: false, vertical: true)
-                    if let more = td.more, !more.isEmpty {
-                        Button(more) { model.act("fold", td.moreValue ?? "") }.buttonStyle(.borderless)
-                    }
-                }
-                .font(.caption)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal).padding(.top, 8)
-            }
-            ForEach(thread.queue ?? [], id: \.msg) { q in
-                HStack(spacing: 6) {
-                    Text(q.tag).bold()
-                    Text(q.text).lineLimit(1)
-                    Spacer(minLength: 0)
-                    ForEach(q.buttons, id: \.label) { b in
-                        Button(b.label) { model.act(b.action, b.value) }.buttonStyle(.borderless)
-                    }
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal).padding(.top, 8)
-            }
-            HStack {
-                Menu {
-                    Section(NativeMessages.native_thread_model(lang)) {
-                        ForEach(thread.picker.models, id: \.value) { c in
-                            Button { model.act("model", c.value) } label: {
-                                if c.on { Label(c.label, systemImage: "checkmark") } else { Text(c.label) }
-                            }
-                        }
-                    }
-                    if !thread.picker.efforts.isEmpty {
-                        Section(NativeMessages.native_thread_effort(lang)) {
-                            ForEach(thread.picker.efforts, id: \.value) { c in
-                                Button { model.act("effort", c.value) } label: {
-                                    if c.on { Label(c.label, systemImage: "checkmark") } else { Text(c.label) }
-                                }
-                            }
-                        }
-                    }
-                    if let ps = thread.picker.providers, !ps.isEmpty {
-                        Section(NativeMessages.native_bot_provider(lang)) {
-                            ForEach(ps, id: \.value) { c in
-                                Button { model.act("effort", c.value) } label: {
-                                    if c.on { Label(c.label, systemImage: "checkmark") } else { Text(c.label) }
-                                }
-                            }
-                        }
-                    }
-                } label: {
-                    HStack(spacing: 4) {
-                        Text(thread.picker.label).lineLimit(1)
-                        Image(systemName: "chevron.down")
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                }
-                .accessibilityLabel(NativeMessages.native_thread_model_effort(lang, thread.picker.label))
-                if let permissions = thread.permissions {
-                  HStack(spacing: 0) {
-                    Button {
-                        showPermissions = true
-                    } label: {
-                        Image(systemName: "lock.shield")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    .accessibilityLabel(permissions.current)
-                    .accessibilityIdentifier("thread.permissions")
-                    .disabled(!live || !model.contentReady || model.conn[model.screen?.hub ?? ""]?.phase == .offline || model.conn[model.screen?.hub ?? ""]?.phase == .connecting)
-                  }
-                    .popover(isPresented: $showPermissions, arrowEdge: .bottom) {
-                        VStack(alignment: .leading, spacing: 0) {
-                            ForEach(permissions.choices, id: \.value) { choice in
-                                Button {
-                                    showPermissions = false
-                                    model.act("thread-permissions", choice.value)
-                                } label: {
-                                    HStack {
-                                        Text(choice.label)
-                                        Spacer()
-                                        if choice.on { Image(systemName: "checkmark") }
-                                    }
-                                    .padding(.horizontal, 16).padding(.vertical, 12)
-                                    .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
-                                .accessibilityIdentifier("thread.permission.choice." + choice.value)
-                                .disabled(!live)
-                            }
-                        }
-                        .frame(width: 260)
-                        .presentationCompactAdaptation(.popover)
-                    }
-                }
-                // the link is down, or coming back after it was up (a reconnect,
-                // not the first connect): say so, not "loading"
-                if let status = model.conn[model.screen?.hub ?? ""], status.phase == .offline {
-                    HStack(spacing: 4) {
-                        HubDot(phase: .offline)
-                        Text(status.failure.map { NativeMessages.native_hub_failure(lang, $0.reason, $0.code) }
-                             ?? HubDot.word(.offline, lang)).lineLimit(2)
-                    }
-                    .font(.caption2).foregroundStyle(.secondary)
-                    .accessibilityIdentifier("thread.reconnecting")
-                } else if let status = model.conn[model.screen?.hub ?? ""], status.phase == .syncing || status.phase == .connecting {
-                    HStack(spacing: 4) {
-                        ProgressView().controlSize(.mini)
-                        Text(status.stage == "recent" || status.phase == .connecting ? NativeMessages.native_thread_loading_recent(lang) : NativeMessages.native_thread_loading_older(lang))
-                            .lineLimit(1)
-                    }
-                    .font(.caption2).foregroundStyle(.secondary)
-                    .accessibilityIdentifier("thread.loading")
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal).padding(.top, 8)
-            ComposerExtras(model: model, thread: thread)
-            if model.sendFailure == thread.id {
-                Text(NativeMessages.native_thread_send_failed(lang))
-                    .font(.caption).foregroundStyle(.red).padding(.horizontal)
-                    .accessibilityIdentifier("thread.send-failed")
-            }
-            HStack(alignment: .bottom, spacing: 8) {
-                AttachButton(model: model).disabled(!model.contentReady)
-                TextField(NativeMessages.native_thread_composer(lang), text: Binding(get: { model.composer }, set: { model.draft($0) }), axis: .vertical)
-                    .lineLimit(1...6)
-                    .focused($focused)
-                    .accessibilityIdentifier("thread.composer")
-                    .padding(.horizontal, 12).padding(.vertical, 8)
-                    .background(Color(.secondarySystemBackground), in: .rect(cornerRadius: 18))
-                // a long press sends with the other follow-up mode (queue or steer);
-                // while a turn runs with nothing typed the button stops it
-                let blank = model.composer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                let stop = thread.sendAct == "interrupt" && blank
-                Image(systemName: stop ? "stop.circle.fill" : "arrow.up.circle.fill").font(.system(size: 32))
-                    .foregroundStyle(stop ? Color.red : blank ? Color.secondary : Color.accentColor)
-                    .onTapGesture {
-                        if stop { model.act("interrupt") } else if !blank { model.send() }
-                    }
-                    .onLongPressGesture {
-                        if !model.composer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { model.send("send-alt") }
-                    }
-                    .accessibilityLabel(thread.send)
-                    .accessibilityIdentifier("thread.send")
-                    .accessibilityAddTraits(.isButton)
-            }
-            .padding(.horizontal).padding(.vertical, 8)
-          }
-          .disabled(!live)
-          .background(.bar)
-        }
+      }
         .navigationTitle(thread.title)
         .navigationBarTitleDisplayMode(.inline)
         // a file link tapped in a message asks for its menu (Open and Show
