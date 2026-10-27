@@ -671,6 +671,17 @@ function holdWatch(tl) {
   for (const c of tl.children) holdSizes.observe(c);
 }
 document.addEventListener("scroll", (e) => holdRead(e.target), true);
+// a viewer's Layers list opens leftward from its button (style.css: the
+// button sits at the bar's right end); where that would leave the window,
+// the button wrapped to the start of a narrow bar, it opens rightward
+document.addEventListener("toggle", (e) => {
+  const d = e.target;
+  if (!d?.open || !d.classList?.contains("layers")) return;
+  const list = d.querySelector(".layer-list");
+  if (!list) return;
+  list.style.left = "";list.style.right = "";
+  if (list.getBoundingClientRect().left < 0) { list.style.left = "0";list.style.right = "auto"; }
+}, true);
 
 const thinMailDraft = new ThinMailDraft({
   identity: () => cacheIdentity(document.cookie),

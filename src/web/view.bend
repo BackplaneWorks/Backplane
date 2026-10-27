@@ -3357,9 +3357,17 @@ def View.layer.head(+k: U32, +f: LY.Focus) -> String:
 def View.layer.kind(sch: Bool, cmp: Bool) -> U32:
   U32.or(Bool.pick(U32, sch, 1, 0), Bool.pick(U32, cmp, LO.Look.diff(), 0))
 
+# the menu's button reads "Layers", or the active layer's name alone (lit)
+# while one is singled out, its title saying both: a long head ("Layers ·
+# User.Comments") made the viewer's bar wrap and the board jump
+def View.layer.button.loc(+lc: I.Loc, +k: U32, +f: LY.Focus) -> D.Node:
+  Bool.pick(D.Node, LY.Lyr.on(f),
+    D.El{"summary", "", [D.At{"class", "on"}, D.At{"title", View.layer.head.loc(lc, k, f)}], [D.Txt{LY.Lyr.name(k, LY.Lyr.active(f))}]},
+    D.El{"summary", "", [D.At{"title", MSG.T.viewer.layers.tip(lc)}], [D.Txt{MSG.T.viewer.layers(lc)}]})
+
 def View.layers.loc(+lc: I.Loc, +sch: Bool, +cmp: Bool, +off: U32, +f: LY.Focus) -> D.Node:
   +k = View.layer.kind(sch, cmp)
-  D.El{"details", "", [D.At{"class", "layers"}], [D.El{"summary", "", [D.At{"title", MSG.T.viewer.layers.tip(lc)}], [D.Txt{View.layer.head.loc(lc, k, f)}]},
+  D.El{"details", "", [D.At{"class", "layers"}], [View.layer.button.loc(lc, k, f),
     D.El{"div", "", [D.At{"class", "layer-list"}], List.append(&2, D.Node, View.layer.modes.loc(lc, sch, f), View.layer.rows.loc(lc, LY.Lyr.order(k), k, off, f))}]}
 
 # The design history bar (client.bend's Hs.bar): the arrows, play and

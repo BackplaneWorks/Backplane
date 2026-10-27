@@ -332,10 +332,19 @@ button.fold span { overflow: hidden; text-overflow: ellipsis; white-space: nowra
 .viewer-bar button.on { border-color: var(--accent); color: var(--text); }
 .viewer-stage { position: relative; flex: 1; min-height: 0; }
 .layers { position: relative; }
-.layers summary { list-style: none; cursor: pointer; border: 1px solid var(--line); background: var(--raise); padding: 3px 10px; }
+/* the button reads the active layer's name while one is singled out (cut
+   short if long), and the board picker beside it gives way first (it may
+   shrink to its floor before the bar wraps): picking a layer leaves the
+   bar on one line and the board where it was */
+.layers summary { list-style: none; cursor: pointer; border: 1px solid var(--line); background: var(--raise); padding: 3px 10px;
+  max-width: 18ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.layers summary.on { color: var(--accent); }
 .layers summary::-webkit-details-marker { display: none; }
 .layers[open] summary { border-color: var(--accent); }
-.layer-list { position: absolute; top: 100%; left: 0; z-index: 4; margin-top: 4px; display: grid; gap: 2px; padding: 6px; min-width: 150px; max-height: 60vh; overflow: auto;
+.viewer-bar > .board-selector { flex: 1 1 0; min-width: 96px; }
+/* (it opens leftward from the button's right edge: the button sits at the
+   bar's right end, by the window's edge) */
+.layer-list { position: absolute; top: 100%; left: auto; right: 0; z-index: 4; margin-top: 4px; display: grid; gap: 2px; padding: 6px; min-width: 150px; max-height: 60vh; overflow: auto;
   background: var(--panel); border: 1px solid var(--line); box-shadow: 0 6px 18px rgba(0,0,0,0.35); }
 .layer-list { gap: 0; min-width: 190px; }
 .layer-row { display: flex; align-items: center; gap: 8px; }
