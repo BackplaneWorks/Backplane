@@ -472,7 +472,7 @@ final class QualificationUITests: XCTestCase {
         }
     }
 
-    func testBoardDraftEmptyAccessibilityDiagnostic() {
+    func testBoardDraftOwnerAccessibilityDiagnostic() {
         let app = XCUIApplication()
         app.launchEnvironment["BACKPLANE_QUALIFICATION"] = "1"
         app.launchEnvironment["BACKPLANE_SELECT"] = "t1790229700-1088"
@@ -481,6 +481,7 @@ final class QualificationUITests: XCTestCase {
         let composer = app.textFields["thread.composer"]
         XCTAssertTrue(composer.waitForExistence(timeout: 60))
         XCTAssertTrue(app.descendants(matching: .any)["qualification.connection.ready"].waitForExistence(timeout: 60))
+        qualificationStatus(app, label: "draft-precondition-owner")
         let value = composer.value as? String
         let placeholder = composer.placeholderValue
         print("safe-draft-state value-is-nil=\(value == nil) value-is-empty=\(value?.isEmpty == true) placeholder-present=\(placeholder != nil) value-is-placeholder=\(value != nil && value == placeholder)")
@@ -497,8 +498,16 @@ final class QualificationUITests: XCTestCase {
         let home = app.buttons["tab.home"]
         let threads = app.buttons["tab.threads"]
         func isEmpty(_ element: XCUIElement) -> Bool {
-            guard let value = element.value as? String else { return false }
-            return value.isEmpty || (element.placeholderValue != nil && value == element.placeholderValue)
+            guard let snapshot = try? element.snapshot() else {
+                print("safe-draft-snapshot available=false")
+                return false
+            }
+            let value = snapshot.value as? String
+            let placeholder = snapshot.placeholderValue
+            let equalPlaceholder = value != nil && placeholder != nil && value == placeholder
+            print("safe-draft-snapshot available=true value-is-nil=\(value == nil) value-is-empty=\(value?.isEmpty == true) value-is-placeholder=\(equalPlaceholder)")
+            guard let value else { return false }
+            return value.isEmpty || equalPlaceholder
         }
         func expectValue(_ expected: String) {
             let match = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", expected), object: composer)
@@ -512,6 +521,12 @@ final class QualificationUITests: XCTestCase {
             expectValue(marker)
         }
         XCTAssertTrue(composer.waitForExistence(timeout: 60)); XCTAssertTrue(ready.waitForExistence(timeout: 60))
+        qualificationStatus(app, label: "board-draft-owner")
+        let currentStatus = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "qualification.connection.")).firstMatch
+        let statusData = (currentStatus.value as? String ?? "").data(using: .utf8) ?? Data()
+        let ownerFields = (try? JSONSerialization.jsonObject(with: statusData)) as? [String: String]
+        XCTAssertTrue((ownerFields?["thread"] ?? "").hasSuffix("|t1790229700-1088"), "The exact board thread must own the composer")
+        XCTAssertEqual(ownerFields?["contentReady"], "true", "Board ownership must be fresh")
         XCTAssertTrue(isEmpty(composer), "Refuse to replace an existing board-thread draft")
         let boardTitle = app.navigationBars.firstMatch.identifier
         XCTAssertFalse(boardTitle.isEmpty)
