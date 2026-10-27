@@ -144,6 +144,21 @@ check('viewer action cannot target a stale owner and close needs actual reply',(
  x.h.viewerAction('h','h|a',2,'');const issued=x.h.drain();assert(!issued.sync.some(s=>s.phase==='presented'));
  const done=x.answer(issued.cmds[0].request.id);assert(done.sync.some(s=>s.viewerIntent===2&&s.phase==='presented'));
 });
+check('full generic queue cannot discard accepted upload completion',()=>{
+ const x=harness();x.open();const s=x.h.states.get('h');x.h.update(s);const update=x.h.drain().cmds[0].request;
+ s.queue=Array.from({length:7},(_,i)=>({action:'view',value:'board'+i,input:clone(s.session),revision:s.revision}));
+ assert(x.h.attachmentEnd('h','a','upload-one'));let out=x.answer(update.id),ends=[];
+ for(let i=0;i<10&&out.cmds.length;i++){const call=out.cmds[0].request;if(call.p.action==='attach-end')ends.push(call.p.value);out=x.answer(call.id);}
+ assert.deepEqual(ends,['upload-one']);assert.equal(s.attachmentEnds.length,0);
+});
+check('upload duplicate coalesces while its completion is behind another queued action',()=>{
+ const x=harness();x.open();const s=x.h.states.get('h');x.h.update(s);const update=x.h.drain().cmds[0].request;
+ s.queue.push({action:'view',value:'board',input:clone(s.session),revision:s.revision});
+ assert(x.h.attachmentEnd('h','a','upload-one'));let out=x.answer(update.id);const prior=out.cmds[0].request;assert.equal(prior.p.action,'view');
+ assert(x.h.attachmentEnd('h','a','upload-one'));assert.deepEqual(x.h.drain().cmds,[]);
+ out=x.answer(prior.id);const completion=out.cmds[0].request;assert.equal(completion.p.action,'attach-end');assert.equal(completion.p.value,'upload-one');
+ out=x.answer(completion.id);assert(!out.cmds.some(c=>c.request?.p?.action==='attach-end'));
+});
 check('pre-greeting select issues zero commands and no readiness',()=>{const x=harness();x.h.hubs(['h']);x.h.connection('h','1','view-v1');x.h.request('h','select','h|a');assert.deepEqual(x.h.drain().cmds,[]);assert.equal(x.h.states.get('h').ready,false);});
 check('restored bot target and Browser route survive bootstrap select',()=>{const x=harness();const saved={version:1,current:'h',hubs:[{hub:'h',target:{kind:'bot',id:'bot'},session:{sel:'bot-thread',open:{p:true},adding:false,panel:true,info:{'fold:e':'on'},route:{kind:'bot-tab',bot:'bot',tab:'browser'}},anchor:{id:'e',offset:0}}]};assert(x.h.loadPresentation(JSON.stringify(saved)));x.h.hubs(['h']);x.h.connection('h','1','view-v1');x.h.request('h','select','h|bot-thread');const out=x.greeting();assert.equal(out.cmds[0].request.p.target.kind,'bot');assert.equal(out.cmds[0].request.p.session.route.tab,'browser');assert.equal(out.cmds[0].request.p.session.open.p,true);});
 check('greeting emits presenting before one bounded open, never history',()=>{const x=harness();const out=x.open();assert.equal(out.sync[0].phase,'presenting');assert.equal(out.sync[0].remoteReady,false);assert.equal(out.cmds.length,1);assert.equal(out.cmds[0].request.m,'view.open');assert.equal(out.cmds[0].request.p.nativeRenderer,'ios-v1');});
