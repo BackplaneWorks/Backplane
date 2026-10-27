@@ -50,6 +50,7 @@ struct AppTabs: View {
             ForEach(AppTab.allCases) { t in
                 stack(t)
                     .tabItem { Label(t.title(screen.locale ?? "en"), systemImage: t.icon) }
+                    .accessibilityIdentifier("tab." + t.rawValue)
                     .badge(badge(t))
                     .tag(t)
             }
@@ -65,7 +66,9 @@ struct AppTabs: View {
                 tabs
             }
         }
-        .tint(PhaseColor.accent)
+        .tint(BackplaneDesign.accent)
+        .toolbarBackground(BackplaneDesign.panel, for: .tabBar)
+        .toolbarBackground(.visible, for: .tabBar)
         .sheet(isPresented: Binding(get: { screen.newBot != nil }, set: { if !$0 { model.act("form-close", "@bnew") } })) {
             if let f = model.screen?.newBot { NewBotSheet(model: model, form: f) }
         }
@@ -137,6 +140,7 @@ struct BotsTab: View {
                 }
             }
         }
+        .modifier(BackplaneListSurface())
         .overlay {
             if part == "bots" && screen.bots.isEmpty {
                 ContentUnavailableView(NativeMessages.native_bot_empty(lang), systemImage: "pawprint", description: Text(NativeMessages.native_bot_create_hint(lang)))
@@ -212,6 +216,7 @@ struct RoutinesPage: View {
                 .opacity((r.away ?? false) || r.state == "off" || r.state == "done" ? 0.5 : 1)
             }
         }
+        .modifier(BackplaneListSurface())
         .overlay {
             if rows.isEmpty {
                 ContentUnavailableView(NativeMessages.native_routines_empty(lang), systemImage: "clock.arrow.circlepath", description: Text(NativeMessages.native_routines_note(lang)))
