@@ -28,7 +28,7 @@
     "src/core/cat.bend": "0130231a18e515a94d40d7584d19a9b5a2d1663f9601fbff944bf97e37f9fd6b",
     "src/core/cef.bend": "f2d3fa4c991d0e341620fe634ddb4e08da97f8e471ec46afac0b3de471cc69fb",
     "src/core/charter.bend": "7f906bdea712f6ff6162735c8cc133767ec0f9289c3d0bee6dfedbd4d75ad981",
-    "src/core/client.bend": "6a080683116351d01ed06c17b9f33094fb112448fd1284d786a9a6e69250cd3b",
+    "src/core/client.bend": "8e558337da1c41a949b2725aba09ed56b1b2d8cdff5ecc797a9fd3cd4d05caba",
     "src/core/codec.bend": "33cb35c55f3712a18734e76e1149763001a9388af27948f0da4ead2c13d48b6f",
     "src/core/cron.bend": "6f89a001df0261a25c878616ea66c235e169f7fc1c726d39e695fce8adb57332",
     "src/core/deploy.bend": "ebee4e63a52cf41ae001bebcdbb7fb010ad71c1e04e481292585740d88a39cc4",
@@ -251,5 +251,5 @@
       "sourceSnapshot": "/home/h/Documents/i2cjak/bp-coord/settle-fresh-work/SOURCE-structural-correction.json"
     }
   },
-  "reviewNote": "Settle when done setting (settle.done, off by default): a Settings row, Lifecycle.on and new strings; none of it reaches the sidebar draft projection; 24 draft image checks pass."
+  "reviewNote": "multi-board schematic: the hierarchy starts at the picked board's own schematic (client sends the tree root)"
 }

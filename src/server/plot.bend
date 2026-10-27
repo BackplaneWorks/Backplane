@@ -30,8 +30,9 @@ import ./git.bend as GT
 type PMsg is Data:
   # show a phone the board (kind 0), schematic (1) or 3D model (2: the
   # board's body and parts, with the board's plot for its layers) of a
-  # project, or the file at path when set
-  PWatch{client: U32, kind: U32, root: String, path: String}
+  # project, or the file at path when set (tree: the root sheet of the
+  # schematic's hierarchy, "" for the project's own)
+  PWatch{client: U32, kind: U32, root: String, path: String, tree: String}
   PStop{client: U32}
   PPoll{}
   # a file read: its size and mtime then, and its plot (None while it is
@@ -639,12 +640,17 @@ def Tree.load(fuel: Nat, +todo: List<&2, String>, +tab: List<&2, HI.Kids>) -> IO
     case 1n+f:
       Tree.next(todo, tab, t2 => d2 => Tree.load(f, d2, t2))
 
-# the root sheet: the project's schematic (in the same commit when the
-# file shown is a version, core/hist.bend), else the file shown
-def Tree.root(f: K.Files, +path: String) -> String:
+# the root sheet: the one the client named (a project with several boards
+# shows the board's own hierarchy), else the project's schematic (in the
+# same commit when the file shown is a version, core/hist.bend), else the
+# file shown
+def Tree.root.of(+sch: String, +tree: String) -> String:
+  Bool.pick(String, String.is_empty(tree), sch, tree)
+
+def Tree.root(f: K.Files, +path: String, +tree: String) -> String:
   match f:
     case K.Files{_, _, +sch, _}:
-      Bool.pick(String, String.is_empty(sch), path, HS.Hist.rebase(path, sch))
+      Bool.pick(String, String.is_empty(Tree.root.of(sch, tree)), path, HS.Hist.rebase(path, Tree.root.of(sch, tree)))
 
 # each file the tree read, a line of its sheets' boxes (hier.bend's
 # Hier.boxes.line, keyed by the live file)
@@ -715,10 +721,10 @@ def Pv.tree.slot(+path: String) -> String:
 def Pv.tree.gen(+n: Nat) -> String:
   Nat.show(n)
 
-def Pv.tree(+client: U32, +root: String, +path: String, +gen: String, +out: Chan(POut)) -> IO(Unit):
+def Pv.tree(+client: U32, +root: String, +path: String, +tree: String, +gen: String, +out: Chan(POut)) -> IO(Unit):
   do IO<Unit>:
     f : K.Files <- K.Files.read(root)
-    Pv.tree.k(Tree.root(f, Bool.pick(String, Nat.is_eq(HS.Hist.kind(path), 1n), path, "")), client, root, Pv.tree.slot(path), gen, out)
+    Pv.tree.k(Tree.root(f, Bool.pick(String, Nat.is_eq(HS.Hist.kind(path), 1n), path, ""), tree), client, root, Pv.tree.slot(path), gen, out)
 
 def Pv.args.copy(xs: List<String>) -> List<&2, String>:
   match xs:
@@ -1032,11 +1038,11 @@ def Pv.info(+client: U32, +id: String, +file: String, +sig: U32, +idx: Nat, +out
 # before this one, Pv.tree.gen)
 def Pv.handle(st: PSt, m: PMsg, +q: Chan(PMsg), +out: Chan(POut), +dir: String, +n: String) -> IO(PSt):
   match st m:
-    case _ PWatch{+client, +kind, +root, +path}:
+    case _ PWatch{+client, +kind, +root, +path, +tree}:
       do IO<PSt>:
         +file : String <- Pv.file(kind, root, path)
         st2 : PSt <- Pv.watch.k(String.is_empty(file), False{}, st, client, kind, Src.key(kind, root, path), file, q, out)
-        Bool.pick(IO(Unit), U32.is_eq(kind, 1), IO.spawn(Unit, Pv.tree(client, root, path, n, out)), IO.pure(Unit, Unit{}))
+        Bool.pick(IO(Unit), U32.is_eq(kind, 1), IO.spawn(Unit, Pv.tree(client, root, path, tree, n, out)), IO.pure(Unit, Unit{}))
         Pv.watch.board(Bool.and(Pv.solid.kind(kind), String.ends_with(file, ".kicad_pcb")), st2, client, root, path, file, q, out)
     case PSt{ss, +subs, polling} PStop{+client}:
       do IO<PSt>:

@@ -4362,13 +4362,14 @@ def Hub.leave(h: Hub, +client: U32, +now: Nat) -> IO(Hub):
         return Hub{st, f, ls, cl3, as, inbox, CefCfg.depart(cfg, client), note}
 
 # kicad.watch: kind "board", "schematic", "3d", "3d-bare" or "3d-full"
-# shows it, anything else stops
-def Plot.watch(+client: U32, +kind: String, +root: String, +path: String) -> PV.PMsg:
-  Bool.pick(PV.PMsg, String.eq(kind, "board"), PV.PWatch{client, 0, root, path},
-    Bool.pick(PV.PMsg, String.eq(kind, "schematic"), PV.PWatch{client, 1, root, path},
-      Bool.pick(PV.PMsg, String.eq(kind, "3d"), PV.PWatch{client, 2, root, path},
-        Bool.pick(PV.PMsg, String.eq(kind, "3d-bare"), PV.PWatch{client, 3, root, path},
-          Bool.pick(PV.PMsg, String.eq(kind, "3d-full"), PV.PWatch{client, 4, root, path}, PV.PStop{client})))))
+# shows it, anything else stops (tree: where a schematic's hierarchy
+# starts, "" for the project's own)
+def Plot.watch(+client: U32, +kind: String, +root: String, +path: String, +tree: String) -> PV.PMsg:
+  Bool.pick(PV.PMsg, String.eq(kind, "board"), PV.PWatch{client, 0, root, path, tree},
+    Bool.pick(PV.PMsg, String.eq(kind, "schematic"), PV.PWatch{client, 1, root, path, tree},
+      Bool.pick(PV.PMsg, String.eq(kind, "3d"), PV.PWatch{client, 2, root, path, tree},
+        Bool.pick(PV.PMsg, String.eq(kind, "3d-bare"), PV.PWatch{client, 3, root, path, tree},
+          Bool.pick(PV.PMsg, String.eq(kind, "3d-full"), PV.PWatch{client, 4, root, path, tree}, PV.PStop{client})))))
 
 def Term.msg(+op: String, +thread: String, +cwd: String, data: List<&2, U32>, +cols: U32, +rows: U32) -> TM.TMsg:
   Bool.pick(TM.TMsg, String.eq(op, "open"), TM.TOpen{thread, cwd, cols, rows},
@@ -9866,9 +9867,9 @@ def Hub.out(h: Hub, o: B.Out) -> IO(Hub):
       do IO<Hub>:
         Plot.put(Cfg.pv(cfg), PV.PInfo{client, id, key, at, idx})
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
-    case Hub{st, f, ls, cl, as, inbox, +cfg, note} B.Watch{+client, +kind, +root, +path}:
+    case Hub{st, f, ls, cl, as, inbox, +cfg, note} B.Watch{+client, +kind, +root, +path, +tree}:
       do IO<Hub>:
-        Plot.put(Cfg.pv(cfg), Plot.watch(client, kind, root, path))
+        Plot.put(Cfg.pv(cfg), Plot.watch(client, kind, root, path, tree))
         return Hub{st, f, ls, cl, as, inbox, cfg, note}
     case Hub{+st, f, ls, cl, as, +inbox, +cfg, note} B.CodexTurn{+thread, +cwd, +model, +session, r, text}:
       do IO<Hub>:

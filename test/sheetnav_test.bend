@@ -275,3 +275,13 @@ def main() -> IO(Unit):
     C.Check.str("a join from another hub drops them too", U.Ui.info(U.Ui.recv(s1, join("P", "0")), "sheetgen:" ++ U.Ui.root(s1)), "")
     C.Check.str("after a join any reply is taken, whatever its clock", rowtext(j2), H.Hier.show(rows()))
     C.Check.str("a join keeps the instance on show", U.Ui.scratch(j1, "@sch:a"), "4\t/Chan2/\t/U3/")
+    # a project with several boards: each board's schematic is the root of
+    # its own hierarchy (the hub reads the tree from where the client says),
+    # and its top sheet is that file, never the project's own ("")
+    C.Check.str("a board's tree starts at its schematic", U.Bd.tree.k("boards/beta/beta.kicad_pcb", "/p"), "/p/boards/beta/beta.kicad_sch")
+    C.Check.str("no board picked: the project's own tree", U.Bd.tree.k("", "/p"), "")
+    C.Check.str("the hub reads the tree named", PV.Tree.root.of("/p/a.kicad_sch", "/p/boards/beta/beta.kicad_sch"), "/p/boards/beta/beta.kicad_sch")
+    C.Check.str("else the project's schematic", PV.Tree.root.of("/p/a.kicad_sch", ""), "/p/a.kicad_sch")
+    C.Check.str("a board's top sheet is its own file", U.Sch.value(False{}, "", rows(), 0n), "/p/top.kicad_sch")
+    C.Check.str("the project top sheet is its own, empty", U.Sch.value(True{}, "", rows(), 0n), "")
+    C.Check.str("a board's sub-sheet is its file", U.Sch.value(False{}, "", rows(), 1n), "/p/power.kicad_sch")

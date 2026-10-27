@@ -5367,6 +5367,66 @@ def Rv.sheet.k(cmp: Bool, +cur: String, +file: String) -> String:
 def Rv.sheet(+cur: String, +file: String) -> String:
   Rv.sheet.k(Bool.and(Nat.is_eq(HI.Hist.kind(cur), 2n), Bool.not(String.is_empty(file))), cur, file)
 
+# The project's boards (the card's board files, from its folder, kept as
+# "fab.boards:<t>"): with more than one, the viewer's Board, Schematic and
+# 3D tabs offer each by its folder's name (chips on the web and in the
+# window, the Sheet menu on phones); "board-pick" shows one (laws bd_*)
+def Bd.files(+u: Ui) -> List<&2, String>:
+  Att.nonblank(String.lines(Ui.info(u, "fab.boards:" ++ Ui.sel(u))))
+
+def Bd.many(+u: Ui) -> Bool:
+  Nat.is_gt(List.length(&2, String, Bd.files(u)), 1n)
+
+def Bd.name(+rel: String) -> String:
+  Bool.pick(String, String.is_empty(MC.Mech.parent(rel)), MC.Mech.stem(rel), MC.Mech.last(MC.Mech.parent(rel)))
+
+# what a kind shows of a board: its schematic beside it, else the board
+def Bd.path(+kind: String, +rel: String) -> String:
+  Bool.pick(String, String.eq(kind, "schematic"), MC.Mech.in(MC.Mech.parent(rel), MC.Mech.stem(rel) ++ ".kicad_sch"), rel)
+
+# the board on show: the viewer's file is in its folder (or is it)
+def Bd.on(+path: String, +rel: String) -> Bool:
+  Bool.pick(Bool, String.is_empty(MC.Mech.parent(rel)), String.ends_with(path, "/" ++ rel),
+    String.contains(path, "/" ++ MC.Mech.parent(rel) ++ "/"))
+
+# the board on show: the one whose folder holds the viewer's file ("" for
+# none), and what another tab shows of it (Bd.keep: switching between
+# Board, Schematic and 3D stays on the board picked; "" when the project
+# has one board or the viewer is on none of them, for the project's own)
+def Bd.cur(fs: List<&2, String>, +path: String) -> String:
+  match fs:
+    case Nil{}:
+      ""
+    case +f <> t:
+      Bool.pick(String, Bd.on(path, f), f, Bd.cur(t, path))
+
+def Bd.keep.k(+cur: String, +kind: String, +root: String) -> String:
+  Bool.pick(String, Bool.and(Bool.not(String.is_empty(cur)), Bool.or(String.eq(kind, "board"), Bool.or(String.eq(kind, "schematic"), String.eq(kind, "3d")))),
+    FM.Fm.abs(root, Bd.path(kind, cur)), "")
+
+def Bd.keep(+u: Ui, +kind: String, +path: String) -> String:
+  Bd.keep.k(Bool.pick(String, Bd.many(u), Bd.cur(Bd.files(u), path), ""), kind, Ui.root(u))
+
+def Bd.or(+a: String, +b: String) -> String:
+  Bool.pick(String, String.is_empty(a), b, a)
+
+# the file the viewer shows: the one picked, else the project's own board
+# (the card's board_default, "fab.board:<t>"), so its chip is lit too
+def Bd.shown.k(+path: String, +root: String, +own: String) -> String:
+  Bd.or(path, Bool.pick(String, Bool.or(String.is_empty(own), String.is_empty(root)), "", FM.Fm.abs(root, own)))
+
+def Bd.shown(+u: Ui, +path: String) -> String:
+  Bd.shown.k(path, Ui.root(u), Ui.info(u, "fab.board:" ++ Ui.sel(u)))
+
+# the root sheet of the board on show where a project has several: its
+# own hierarchy (the hub reads the tree from there); "" for the project's
+# own (path: the file on show)
+def Bd.tree.k(+cur: String, +root: String) -> String:
+  Bool.pick(String, String.is_empty(cur), "", FM.Fm.abs(root, Bd.path("schematic", cur)))
+
+def Bd.tree(+u: Ui, +path: String) -> String:
+  Bool.pick(String, Bd.many(u), Bd.tree.k(Bd.cur(Bd.files(u), Bd.shown(u, path)), Ui.root(u)), "")
+
 # Sheet navigation
 # ----------------
 # A hierarchical schematic's sheets (hier.bend's rows, info
@@ -5570,16 +5630,18 @@ def Sch.mark(+u: Ui, +rs: List<&2, HR.Row>, +at: Nat, +s: String) -> String:
   Bool.pick(String, Sch.inside(rs, at), Sch.cons(Sch.entry(u, rs, at), s), s)
 
 # the file row j shows: the project's own ("") for the root of the live
-# design; while a version shows, that file in the same version (its own
-# tree's rows, or the live tree's mapped in); else its file
-def Sch.value(+cur: String, +rs: List<&2, HR.Row>, +j: Nat) -> String:
-  Bool.pick(String, Bool.and(Nat.is_eq(j, 0n), Nat.is_eq(HI.Hist.kind(cur), 0n)), "",
+# design (own: the tree is the project's, not a board's of several);
+# while a version shows, that file in the same version (its own tree's
+# rows, or the live tree's mapped in); else its file
+def Sch.value(own: Bool, +cur: String, +rs: List<&2, HR.Row>, +j: Nat) -> String:
+  Bool.pick(String, Bool.and(own, Bool.and(Nat.is_eq(j, 0n), Nat.is_eq(HI.Hist.kind(cur), 0n))), "",
     Bool.pick(String, Nat.is_eq(HI.Hist.kind(cur), 1n), HI.Hist.rebase(cur, Sch.fam(HR.Hier.file(rs, j))), HR.Hier.file(rs, j)))
 
 # row j on show (a comparison keeps comparing that sheet: Rv.sheet), kept
 # as the instance, the note cleared
 def Sch.show(+u: Ui, +rs: List<&2, HR.Row>, +j: Nat) -> Ui:
-  Ui.scratch_set(Ui.scratch_set(Ui.view_put(u, "schematic", Rv.sheet(Ui.view_get(u, "view.path"), Sch.value(Ui.view_get(u, "view.path"), rs, j))),
+  Ui.scratch_set(Ui.scratch_set(Ui.view_put(u, "schematic", Rv.sheet(Ui.view_get(u, "view.path"),
+    Sch.value(String.is_empty(Bd.tree(u, Ui.view_get(u, "view.path"))), Ui.view_get(u, "view.path"), rs, j))),
     Sch.key(u), Sch.entry(u, rs, j)), Sch.note.key(u), "")
 
 def Sch.gone(+u: Ui) -> Ui:
@@ -5840,57 +5902,6 @@ def Ui.view_pick.p(u: Ui, +kind: String, +path: String) -> Ui:
 def Ui.view_pick.back(+u: Ui, +kind: String) -> Ui:
   Ui.view_pick.p(u, kind, Rv.back(u, kind))
 
-# The project's boards (the card's board files, from its folder, kept as
-# "fab.boards:<t>"): with more than one, the viewer's Board, Schematic and
-# 3D tabs offer each by its folder's name (chips on the web and in the
-# window, the Sheet menu on phones); "board-pick" shows one (laws bd_*)
-def Bd.files(+u: Ui) -> List<&2, String>:
-  Att.nonblank(String.lines(Ui.info(u, "fab.boards:" ++ Ui.sel(u))))
-
-def Bd.many(+u: Ui) -> Bool:
-  Nat.is_gt(List.length(&2, String, Bd.files(u)), 1n)
-
-def Bd.name(+rel: String) -> String:
-  Bool.pick(String, String.is_empty(MC.Mech.parent(rel)), MC.Mech.stem(rel), MC.Mech.last(MC.Mech.parent(rel)))
-
-# what a kind shows of a board: its schematic beside it, else the board
-def Bd.path(+kind: String, +rel: String) -> String:
-  Bool.pick(String, String.eq(kind, "schematic"), MC.Mech.in(MC.Mech.parent(rel), MC.Mech.stem(rel) ++ ".kicad_sch"), rel)
-
-# the board on show: the viewer's file is in its folder (or is it)
-def Bd.on(+path: String, +rel: String) -> Bool:
-  Bool.pick(Bool, String.is_empty(MC.Mech.parent(rel)), String.ends_with(path, "/" ++ rel),
-    String.contains(path, "/" ++ MC.Mech.parent(rel) ++ "/"))
-
-# the board on show: the one whose folder holds the viewer's file ("" for
-# none), and what another tab shows of it (Bd.keep: switching between
-# Board, Schematic and 3D stays on the board picked; "" when the project
-# has one board or the viewer is on none of them, for the project's own)
-def Bd.cur(fs: List<&2, String>, +path: String) -> String:
-  match fs:
-    case Nil{}:
-      ""
-    case +f <> t:
-      Bool.pick(String, Bd.on(path, f), f, Bd.cur(t, path))
-
-def Bd.keep.k(+cur: String, +kind: String, +root: String) -> String:
-  Bool.pick(String, Bool.and(Bool.not(String.is_empty(cur)), Bool.or(String.eq(kind, "board"), Bool.or(String.eq(kind, "schematic"), String.eq(kind, "3d")))),
-    FM.Fm.abs(root, Bd.path(kind, cur)), "")
-
-def Bd.keep(+u: Ui, +kind: String, +path: String) -> String:
-  Bd.keep.k(Bool.pick(String, Bd.many(u), Bd.cur(Bd.files(u), path), ""), kind, Ui.root(u))
-
-def Bd.or(+a: String, +b: String) -> String:
-  Bool.pick(String, String.is_empty(a), b, a)
-
-# the file the viewer shows: the one picked, else the project's own board
-# (the card's board_default, "fab.board:<t>"), so its chip is lit too
-def Bd.shown.k(+path: String, +root: String, +own: String) -> String:
-  Bd.or(path, Bool.pick(String, Bool.or(String.is_empty(own), String.is_empty(root)), "", FM.Fm.abs(root, own)))
-
-def Bd.shown(+u: Ui, +path: String) -> String:
-  Bd.shown.k(path, Ui.root(u), Ui.info(u, "fab.board:" ++ Ui.sel(u)))
-
 # the window's tab picked: a comparison kept (Rv.back), else the board picked
 def Ui.view_pick.bd(+u: Ui, +kind: String) -> Ui:
   Ui.view_pick.p(u, kind, Bd.or(Rv.back(u, kind), Bd.keep(u, kind, Bd.shown(u, Ui.view_get(u, "view.path")))))
@@ -6148,18 +6159,20 @@ def Solid.want(+u: Ui) -> String:
   Bool.pick(String, Bool.or(Bool.or(Bool.not(Ui.panel(u)), String.is_empty(Ui.root(u))), String.is_empty(Solid.num(Solid.kind(u)))), "",
     Solid.num(Solid.kind(u)) ++ "|" ++ Ui.root(u) ++ "|" ++ Ui.view_get(u, "view.path"))
 
-def Solid.sync.k(same: Bool, u: Ui, +want: String, +kind: String, +path: String, +root: String, cmds: List<&2, Cmd>) -> Act:
+# (tree: where the schematic's hierarchy starts, Bd.tree)
+def Solid.sync.k(same: Bool, u: Ui, +want: String, +kind: String, +path: String, +root: String, +tree: String, cmds: List<&2, Cmd>) -> Act:
   match same:
     case True{}:
       Act{u, cmds}
     case False{}:
       Ui.also(Ui.rpc(Ui.scratch_set(u, "@solid.at", want), "kicad.watch",
-        [J.KV{"kind", J.Str{Bool.pick(String, String.is_empty(want), "", Solid.ask(kind))}}, J.KV{"root", J.Str{root}}, J.KV{"path", J.Str{path}}]), cmds)
+        [J.KV{"kind", J.Str{Bool.pick(String, String.is_empty(want), "", Solid.ask(kind))}}, J.KV{"root", J.Str{root}}, J.KV{"path", J.Str{path}}, J.KV{"tree", J.Str{tree}}]), cmds)
 
 def Solid.sync.m(a: Act) -> Act:
   match a:
     case Act{+u, cmds}:
-      Solid.sync.k(String.eq(Solid.want(u), Ui.scratch(u, "@solid.at")), u, Solid.want(u), Solid.kind(u), Ui.view_get(u, "view.path"), Ui.root(u), cmds)
+      Solid.sync.k(String.eq(Solid.want(u), Ui.scratch(u, "@solid.at")), u, Solid.want(u), Solid.kind(u), Ui.view_get(u, "view.path"), Ui.root(u),
+        Bd.tree(u, Ui.view_get(u, "view.path")), cmds)
 
 def Solid.sync(a: Act) -> Act:
   Fv.sync(Solid.sync.m(a))
