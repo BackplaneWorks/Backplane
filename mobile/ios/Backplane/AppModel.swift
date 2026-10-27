@@ -31,6 +31,12 @@ final class AppModel {
     @ObservationIgnored private var lastScreenJSON: String?
     @ObservationIgnored private var earlyActions: [(String, String)] = []
     @ObservationIgnored private var presentationIntent = PresentationIntent()
+    private var viewerClose = ViewerCloseIntent()
+    @ObservationIgnored private var viewerOpening: ViewerCloseIntent.Token?
+    @ObservationIgnored private var viewerReceipt: (intent: UInt64, hub: String, epoch: UInt64)?
+    private var viewerPublished: Viewer?
+    @ObservationIgnored private var viewerCloseSending: ViewerCloseIntent.Token?
+    @ObservationIgnored private var viewerClosedStamp = ViewerClosedStamp.load()
     @ObservationIgnored private var projectSearch = ProjectSearchIntent()
     @ObservationIgnored private var projectSearchOwner: UInt64 = 0
     @ObservationIgnored private var projectSearchGo: ProjectSearchIntent.Go?
@@ -182,6 +188,12 @@ final class AppModel {
             "nav": screen.map(Self.nav) ?? "none", "awaited": awaitedNav ?? "none",
             "path": path.last ?? "none", "thread": screen?.thread?.id ?? "none",
             "bot": screen?.bot?.id ?? "none", "botTab": screen?.bot?.tab ?? "none",
+            "viewer": screen?.thread?.viewer.open ?? "none",
+            "viewerPresentation": viewerClose.current.map { String($0.presentation) } ?? "none",
+            "viewerLocallyClosed": String(viewerClose.locallyClosed),
+            "viewerClosePending": String(viewerClose.pending != nil),
+            "viewerRequested": viewerOpening?.source.kind ?? "none",
+            "viewerAcceptedIntent": viewerReceipt.map { String($0.intent) } ?? "none",
             "markEpoch": mark.map { String($0.epoch) } ?? "none", "markNav": mark?.nav ?? "none"
         ]
         for (key, value) in qualificationIncoming { values["incoming." + key] = value }
@@ -271,6 +283,7 @@ final class AppModel {
         if cachedData != nil, cachedScreen == nil { NSLog("Backplane screen-cache miss_native_decode") }
         if let cached = cachedScreen {
             screen = cached
+            reconcileViewer(cached)
             cachedPresentation = true
             let drafts = (try? JSONSerialization.jsonObject(with: Data((UserDefaults.standard.string(forKey: "drafts") ?? "{}").utf8))) as? [String: String] ?? [:]
             composer = drafts[cached.sel] ?? ""
@@ -349,6 +362,7 @@ final class AppModel {
         let l = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let k = Pairing.key(l) else { return false }
         endProjectSearch()
+        cancelViewer()
         presentationIntent.clear()
         pairingGeneration = engine.invalidatePairing()
         retiredPairings[k] = pairingGeneration
@@ -370,6 +384,7 @@ final class AppModel {
 
     func unpair(_ key: String) {
         endProjectSearch()
+        cancelViewer()
         presentationIntent.clear()
         pairingGeneration = engine.invalidatePairing()
         retiredPairings[key] = pairingGeneration
@@ -389,6 +404,10 @@ final class AppModel {
     // An explicitly replaced pairing is a new account boundary, even when its
     // address is unchanged. Network reconnects preserve these choices instead.
     private func forgetPresentation(_ key: String) {
+        if viewerClosedStamp?.hub == key {
+            viewerClosedStamp = nil
+            ViewerClosedStamp.clear()
+        }
         pendingPairingResets.insert(key)
         let prefix = key + "|"
         seen = seen.filter { !$0.key.hasPrefix(prefix) }
@@ -545,6 +564,8 @@ final class AppModel {
                 return Pairing.viewSocket(link).map { Hub.Next.go($0) } ?? Hub.Next.stop
             },
             onConnecting: { [weak self] in
+                self?.viewerCloseSending = nil
+                self?.viewerReceipt = nil
                 self?.endProjectSearch()
                 if self?.screen?.hub == key { self?.presentationIntent.clear() }
                 self?.cachedReadiness.retire(key)
@@ -649,6 +670,12 @@ final class AppModel {
     @ObservationIgnored var vaultText = ""
 
     func act(_ action: String, _ value: String = "") {
+        if action == "view", value.isEmpty {
+            if let token = viewerClose.current { closeViewer(token) }
+            return
+        }
+        if action == "select" || Self.opens.contains(action) { cancelViewer() }
+        let viewerRequest = action == "view" ? beginViewerOpen(value) : nil
         if action == "select" || Self.opens.contains(action) || (action == "proj-find" && value == "off") { endProjectSearch() }
         if action == "select" || Self.opens.contains(action) { presentationIntent.clear() }
         // the secret box's Save: the value joins the box's name, purpose and
@@ -692,7 +719,9 @@ final class AppModel {
                 let generation = pairingGeneration
                 Task {
                     guard generation == pairingGeneration else { return }
-                    let out = await e.act(action, value)
+                    let out: Out?
+                    if let viewerRequest { out = await e.viewerAct(value, token: viewerRequest) }
+                    else { out = await e.act(action, value) }
                     apply(out, generation: generation)
                     guard generation == pairingGeneration else { return }
                     dirty = true
@@ -709,10 +738,130 @@ final class AppModel {
         let generation = pairingGeneration
         Task {
             guard generation == pairingGeneration else { return }
-            let out = await e.act(action, value)
+            let out: Out?
+            if let viewerRequest { out = await e.viewerAct(value, token: viewerRequest) }
+            else { out = await e.act(action, value) }
             apply(out, generation: generation)
             guard generation == pairingGeneration else { return }
             if navigation { dirty = true; keep() }
+        }
+    }
+
+    func viewerChoices(for thread: String) -> [Choice] {
+        guard !cachedPresentation, let s = screen, let current = s.thread, current.id == thread,
+              Self.nav(s) == thread, path.last == thread, awaitedNav == nil || awaitedNav == thread,
+              hubs[s.hub] != nil, links.contains(where: { Pairing.key($0) == s.hub }),
+              let status = conn[s.hub], status.phase == .online || status.phase == .syncing else { return [] }
+        return current.viewer.choices
+    }
+    func openViewer(_ kind: String, for thread: String) {
+        // Recheck the actual owner at the tap boundary; a cached destination
+        // must never send an action through another ready conversation.
+        guard viewerChoices(for: thread).contains(where: { $0.value == kind }) else { return }
+        act("view", kind)
+    }
+
+    private func viewerOwner(_ s: Screen) -> ViewerCloseIntent.Owner {
+        .init(hub: s.hub, nav: Self.nav(s), pairing: pairingGeneration)
+    }
+    private func viewerSource(_ v: Viewer) -> ViewerCloseIntent.Source {
+        .init(kind: v.open, key: v.key, layers: v.layers)
+    }
+    private func cancelViewer() {
+        viewerClose.cancel()
+        viewerOpening = nil
+        viewerReceipt = nil
+        viewerPublished = nil
+        viewerCloseSending = nil
+        engine.viewerToken(nil)
+    }
+    private func beginViewerOpen(_ kind: String) -> ViewerCloseIntent.Token? {
+        guard let s = screen, let thread = s.thread, !s.hub.isEmpty else { return nil }
+        viewerClosedStamp = nil
+        ViewerClosedStamp.clear()
+        let token = viewerClose.reserve(owner: viewerOwner(s), source: .init(kind: kind, key: thread.viewer.key, layers: thread.viewer.layers))
+        viewerOpening = token
+        viewerReceipt = nil
+        viewerCloseSending = nil
+        engine.viewerToken(token)
+        return token
+    }
+    private func reconcileViewer(_ s: Screen) {
+        guard let thread = s.thread else { cancelViewer(); return }
+        let owner = viewerOwner(s), source = viewerSource(thread.viewer)
+        if let requested = viewerOpening, requested.owner == owner {
+            // A same-kind cached/refresh picture is not an acknowledgement of
+            // this open. Receipt comes only from its accepted host operation.
+            guard source.kind == requested.source.kind else { return }
+            if startup[owner.hub] == .thin {
+                guard let receipt = viewerReceipt, receipt.intent == requested.presentation,
+                      receipt.hub == owner.hub, receipt.epoch == conn[owner.hub]?.epoch else { return }
+            } else {
+                guard startup[owner.hub] == .compatibilityChosen, !cachedPresentation,
+                      conn[owner.hub]?.phase == .online, conn[owner.hub]?.stage == "live" else { return }
+            }
+            let accepted = ViewerCloseIntent.Token(owner: owner, source: source, presentation: requested.presentation)
+            viewerClose.accept(accepted)
+            viewerPublished = thread.viewer
+            viewerOpening = nil
+            viewerReceipt = nil
+            engine.viewerToken(accepted)
+            return
+        }
+        guard !source.kind.isEmpty else { cancelViewer(); return }
+        if let current = viewerClose.current, current.owner == owner, viewerClose.locallyClosed {
+            // Passive source/revision changes do not reopen a locally closed
+            // panel. Conservatively retire its old deferred remote close.
+            if current.source != source { viewerClose.sent(current); engine.viewerToken(nil) }
+            return
+        }
+        viewerPublished = thread.viewer
+        if viewerClose.current?.owner != owner || viewerClose.current?.source != source {
+            let token = viewerClose.open(owner: owner, source: source)
+            if let stamp = viewerClosedStamp, stamp.matches(owner, identity: ScreenCache.identity(links, profile: Self.cid)) {
+                viewerClose.close(token)
+                if stamp.source == source { engine.viewerToken(token, closing: true) }
+                else { viewerClose.sent(token); engine.viewerToken(nil) }
+            } else { engine.viewerToken(token) }
+        }
+    }
+    func viewerData(for thread: String) -> Viewer? {
+        guard viewerClose.current?.owner.nav == thread else { return nil }
+        return viewerPublished
+    }
+    func visibleViewerToken(for thread: String) -> ViewerCloseIntent.Token? {
+        guard !viewerClose.locallyClosed, let token = viewerClose.current, token.owner.nav == thread,
+              let data = viewerData(for: thread), !data.open.isEmpty, token.source == viewerSource(data) else { return nil }
+        return token
+    }
+    func closeViewer(_ token: ViewerCloseIntent.Token) {
+        guard viewerClose.close(token) else { return }
+        viewerOpening = nil
+        viewerReceipt = nil
+        presentationIntent.clear()
+        if let identity = ScreenCache.identity(links, profile: Self.cid) {
+            let stamp = ViewerClosedStamp(identity: identity, hub: token.owner.hub, nav: token.owner.nav, source: token.source)
+            viewerClosedStamp = stamp
+            stamp.save()
+        }
+        engine.viewerToken(token, closing: true)
+        advanceViewerClose()
+    }
+    private func advanceViewerClose() {
+        guard let token = viewerClose.pending, viewerCloseSending == nil, let s = screen, let thread = s.thread,
+              viewerClose.canSend(token, owner: viewerOwner(s), source: viewerSource(thread.viewer), ready: contentReady) else { return }
+        viewerCloseSending = token
+        let generation = pairingGeneration, e = engine
+        Task {
+            guard generation == pairingGeneration, viewerClose.current == token, viewerClose.locallyClosed else {
+                if viewerCloseSending == token { viewerCloseSending = nil }
+                return
+            }
+            let out = await e.viewerAct("", token: token)
+            apply(out, generation: generation)
+            // A valid Out can mean merely queued/deferred. Keep the close
+            // pending until an accepted empty viewer or an epoch retires it.
+            if out == nil, viewerCloseSending == token { viewerCloseSending = nil }
         }
     }
 
@@ -1375,6 +1524,9 @@ final class AppModel {
         for update in o.sync ?? [] {
             let epoch = conn[update.hub]?.epoch ?? 0
             observeThinPresenting(update, epoch: epoch)
+            if let intent = update.viewerIntent, currentThinReply(update, epoch: epoch) {
+                viewerReceipt = (intent, update.hub, epoch)
+            }
             if startup[update.hub] == .thin {
                 if update.phase == "presented", !currentThinReply(update, epoch: epoch) { continue }
                 if update.phase == "presenting",
@@ -1431,7 +1583,7 @@ final class AppModel {
         if let next = o.screen {
             qualificationIncoming = [
                 "hub": next.hub, "nav": Self.nav(next), "thread": next.thread?.id ?? "none",
-                "bot": next.bot?.id ?? "none", "thinFresh": String(thinFresh),
+                "bot": next.bot?.id ?? "none", "viewer": next.thread?.viewer.open ?? "none", "thinFresh": String(thinFresh),
                 "cacheAllowed": String(!cachedPresentation || cacheFresh),
                 "paired": String(next.hub.isEmpty || links.contains { Pairing.key($0) == next.hub })
             ]
@@ -1443,6 +1595,7 @@ final class AppModel {
             cachedReadiness.clear()
             if typing == 0 { composer = localDrafts[s.sel] ?? s.thread?.draft ?? "" }
             screen = s
+            reconcileViewer(s)
             if let text = o.screenJSON, !cleared, awaitedNav == nil || awaitedNav == Self.nav(s) {
                 lastScreenJSON = text
                 cacheGeneration += 1
@@ -1608,6 +1761,7 @@ final class AppModel {
             default: break
             }
         }
+        advanceViewerClose()
         advanceProjectSearch()
         if contentReady, let sel = screen?.sel, let text = localDrafts.removeValue(forKey: sel) {
             run { await $0.quiet("draft", text) }

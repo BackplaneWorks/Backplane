@@ -309,7 +309,7 @@ export class NativeThinHost307265 {
     return this.issue(s, this.client.select(s.hub, s.target, this.requestSession(s.session, 'view.open', s.target), this.api.cid()));
   }
 
-  request(hub, action, value, keepFocus = false) {
+  request(hub, action, value, keepFocus = false, viewerIntent = undefined) {
     const s = this.states.get(hub);
     if (!s || s.mode !== 'view-v1') return false;
     // An explicit new owner or a hub switch supersedes any held tap, even
@@ -362,7 +362,7 @@ export class NativeThinHost307265 {
       // while its current view refreshes. Never carry it into a new selection.
       if (s.greeted && s.shown && same(s.target, s.shownTarget) && intent.kind === 'action' &&
           ['view', 'bot-tab', 'bot', 'uber', 'uber-bot'].includes(action) && typeof value === 'string' && utf8Bytes(value) <= 1024)
-        s.deferredNavigation = { action, value, target: copy(s.target), sel: s.session.sel, epoch: s.epoch };
+        s.deferredNavigation = { action, value, viewerIntent, target: copy(s.target), sel: s.session.sel, epoch: s.epoch };
       return true;
     }
     // One page request at a time, each taken from the page shown. 'later'
@@ -401,8 +401,15 @@ export class NativeThinHost307265 {
     }
     // Keep the latest intended route separately from display authority.
     if (intent.session) { s.revision++; s.session = copy(intent.session); }
-    s.queue.push({ action, value, input: copy(s.session), revision: s.revision });
+    s.queue.push({ action, value, viewerIntent, input: copy(s.session), revision: s.revision });
     this.pump(s); return true;
+  }
+
+  viewerAction(hub, nav, serial, value) {
+    const s = this.states.get(hub);
+    if (!s || !this.paired.has(hub) || s.mode !== 'view-v1' || typeof nav !== 'string' ||
+        nav !== hub + '|' + s.session.sel || !Number.isSafeInteger(serial) || serial < 1 || typeof value !== 'string') return false;
+    return this.request(hub, 'view', value, false, serial);
   }
 
   pump(s) {
@@ -615,7 +622,8 @@ export class NativeThinHost307265 {
         s.projectApplied = { scope: metadata.operation.projectScope, edit: metadata.operation.projectEdit, epoch: s.epoch, target: copy(s.target) };
       if (!s.flushed) { s.flushed = true; this.outboxFlush(hub); }
       this.sync.push({ hub, phase: 'presented', detail: 'view-v1', mode: 'view-v1', viewId: r.viewId,
-        requestRevision: r.requestRevision, viewRevision: r.viewRevision, remoteReady: true });
+        requestRevision: r.requestRevision, viewRevision: r.viewRevision, remoteReady: true,
+        ...(metadata.operation?.viewerIntent === undefined ? {} : { viewerIntent: metadata.operation.viewerIntent }) });
       for (const args of s.registrations.values()) this.sendRegistration(s, args);
       s.registrations.clear();
     } else if (result.current) this.fail(hub, 'Current view is not ready');
@@ -623,7 +631,7 @@ export class NativeThinHost307265 {
     if (s.ready && s.deferredNavigation) {
       const pending = s.deferredNavigation; s.deferredNavigation = null;
       if (pending.epoch === s.epoch && pending.sel === s.session.sel && same(pending.target, s.target))
-        this.request(hub, pending.action, pending.value);
+        this.request(hub, pending.action, pending.value, false, pending.viewerIntent);
     }
     this.pump(s);
     this.pumpProjectGo();

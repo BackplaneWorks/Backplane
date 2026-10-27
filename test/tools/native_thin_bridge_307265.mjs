@@ -126,6 +126,24 @@ check('Return resolves the current merged first project only after every query',
  const out=x.answer(b.id,projectPicture(x,'b','match',['new-first']),'b');
  assert(out.cmds.some(c=>c.hub==='b'&&c.request.p.action==='proj-go'&&c.request.p.value==='new-first'));
 });
+check('viewer receipts identify the exact accepted explicit action',()=>{
+ const x=harness();x.open();assert(x.h.viewerAction('h','h|a',41,'board'));
+ const call=x.h.drain().cmds[0].request;assert.equal(call.p.action,'view');
+ assert(!x.h.drain().sync.some(s=>s.viewerIntent===41));
+ const result=x.answer(call.id);assert(result.sync.some(s=>s.phase==='presented'&&s.viewerIntent===41));
+});
+check('deferred latest viewer token survives refresh without acknowledging old open',()=>{
+ const x=harness();x.open();x.h.update(x.h.states.get('h'));const update=x.h.drain().cmds[0].request;
+ x.h.viewerAction('h','h|a',1,'board');x.h.viewerAction('h','h|a',2,'3d');
+ const next=x.answer(update.id);assert(!next.sync.some(s=>s.viewerIntent!==undefined));
+ const call=next.cmds[0].request;assert.equal(call.p.value,'3d');
+ const accepted=x.answer(call.id);assert(accepted.sync.some(s=>s.viewerIntent===2));assert(!accepted.sync.some(s=>s.viewerIntent===1));
+});
+check('viewer action cannot target a stale owner and close needs actual reply',()=>{
+ const x=harness();x.open();assert.equal(x.h.viewerAction('h','h|other',1,''),false);assert.deepEqual(x.h.drain().cmds,[]);
+ x.h.viewerAction('h','h|a',2,'');const issued=x.h.drain();assert(!issued.sync.some(s=>s.phase==='presented'));
+ const done=x.answer(issued.cmds[0].request.id);assert(done.sync.some(s=>s.viewerIntent===2&&s.phase==='presented'));
+});
 check('pre-greeting select issues zero commands and no readiness',()=>{const x=harness();x.h.hubs(['h']);x.h.connection('h','1','view-v1');x.h.request('h','select','h|a');assert.deepEqual(x.h.drain().cmds,[]);assert.equal(x.h.states.get('h').ready,false);});
 check('restored bot target and Browser route survive bootstrap select',()=>{const x=harness();const saved={version:1,current:'h',hubs:[{hub:'h',target:{kind:'bot',id:'bot'},session:{sel:'bot-thread',open:{p:true},adding:false,panel:true,info:{'fold:e':'on'},route:{kind:'bot-tab',bot:'bot',tab:'browser'}},anchor:{id:'e',offset:0}}]};assert(x.h.loadPresentation(JSON.stringify(saved)));x.h.hubs(['h']);x.h.connection('h','1','view-v1');x.h.request('h','select','h|bot-thread');const out=x.greeting();assert.equal(out.cmds[0].request.p.target.kind,'bot');assert.equal(out.cmds[0].request.p.session.route.tab,'browser');assert.equal(out.cmds[0].request.p.session.open.p,true);});
 check('greeting emits presenting before one bounded open, never history',()=>{const x=harness();const out=x.open();assert.equal(out.sync[0].phase,'presenting');assert.equal(out.sync[0].remoteReady,false);assert.equal(out.cmds.length,1);assert.equal(out.cmds[0].request.m,'view.open');assert.equal(out.cmds[0].request.p.nativeRenderer,'ios-v1');});

@@ -977,6 +977,7 @@ struct ThreadDestination: View {
                 .navigationBarTitleDisplayMode(.inline)
             }
         }
+        .modifier(ViewerPresentationHost(model: model, thread: id))
         .task(id: watchKey) {
             let started = watchKey
             timedOut = false
@@ -1341,14 +1342,6 @@ struct ThreadScreen: View {
             Button(NativeMessages.common_cancel(lang), role: .cancel) {}
         }
         .onChange(of: fileMenu) { _, m in if m == nil { shutFile = nil } }
-        .fullScreenCover(isPresented: Binding(get: { !thread.viewer.open.isEmpty }, set: { if !$0 { model.act("view", "") } })) {
-            if let v = model.screen?.thread?.viewer {
-                if v.open == "files", let f = v.files { FilesScreen(model: model, viewer: v, page: f) }
-                else if v.open == "image" || v.open == "pdf", let f = v.file { FileScreen(model: model, viewer: v, file: f) }
-                else if v.open == "review", let r = v.review { ReviewScreen(model: model, viewer: v, page: r) }
-                else if v.open == "renders", let p = v.mech { MechScreen(model: model, viewer: v, page: p) } else { PlotScreen(model: model, viewer: v) }
-            }
-        }
         .fullScreenCover(item: $shown) { s in Lightbox(shown: s) { shown = nil } }
         .sheet(isPresented: $showSubs) { SubsSheet(model: model) }
         .sheet(isPresented: Binding(get: { thread.diff != nil }, set: { if !$0, model.screen?.thread?.diff != nil { model.act("panel") } })) {
@@ -1391,18 +1384,6 @@ struct ThreadScreen: View {
                         .foregroundStyle(u.busy.isEmpty ? Color.secondary : PhaseColor.accent)
                     }
                     .accessibilityLabel(NativeMessages.native_thread_subagents(lang, u.word ?? u.busy))
-                }
-                if !thread.viewer.choices.isEmpty {
-                    Menu {
-                        ForEach(thread.viewer.choices, id: \.value) { c in
-                            Button(c.label) { model.act("view", c.value) }
-                                .accessibilityIdentifier("viewer.choice." + c.value)
-                        }
-                    } label: {
-                        Image(systemName: "cpu")
-                    }
-                    .accessibilityLabel(NativeMessages.native_thread_board(lang))
-                    .accessibilityIdentifier("viewer.open")
                 }
                 ForEach(thread.tools.filter { $0.action == "interrupt" }, id: \.self) { t in
                     Button(t.label, systemImage: "stop.fill") { model.act(t.action) }

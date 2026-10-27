@@ -974,6 +974,7 @@ struct SyncUpdate: Decodable, Sendable {
     let detail: String?
     let mode, viewId, viewRevision: String?
     let requestRevision: UInt32?
+    let viewerIntent: UInt64?
     let remoteReady: Bool?
     var thinPresenting: Bool {
         phase == "presenting" && detail == "view-v1" && mode == "view-v1" && remoteReady == false

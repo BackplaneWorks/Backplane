@@ -46,6 +46,7 @@ final class Engine: @unchecked Sendable {
     private let queue = Worker()
     private let priority = WirePriority()
     private let pairingFlush = PairingFlushGate()
+    private let viewerDispatch = ViewerDispatchGate()
     private var ctx: JSContext?
 
     private func context() -> JSContext {
@@ -136,12 +137,17 @@ final class Engine: @unchecked Sendable {
     }
 
     // late: the arguments decided on the queue, as the call runs
-    private func call<T>(_ name: String, _ args: [Any], person: Bool = false, late: (() -> [Any])? = nil, _ finish: @escaping (String) -> T) async -> T {
+    private func call<T>(_ name: String, _ args: [Any], person: Bool = false, late: (() -> [Any])? = nil, authorize: ((() -> String) -> String?)? = nil, _ finish: @escaping (String) -> T) async -> T {
         await withCheckedContinuation { k in
             queue.async(person: person) {
                 let b = self.context().objectForKeyedSubscript("Backplane")!
                 let t0 = DispatchTime.now().uptimeNanoseconds
-                let text = b.invokeMethod(name, withArguments: late?() ?? args)?.toString() ?? "{}"
+                let invoke = { b.invokeMethod(name, withArguments: late?() ?? args)?.toString() ?? "{}" }
+                let text: String
+                if let authorize {
+                    guard let allowed = authorize(invoke) else { k.resume(returning: finish("null")); return }
+                    text = allowed
+                } else { text = invoke() }
                 // a slow step of the Bend client, for finding what to make faster (as Android's)
                 let ms = (DispatchTime.now().uptimeNanoseconds - t0) / 1_000_000
                 if ms > 100 { NSLog("Backplane slow %@: %llu ms", name, ms) }
@@ -152,7 +158,7 @@ final class Engine: @unchecked Sendable {
 
     // Commands are always delivered. Screens become stale only for newer
     // person work, never because hub frames wait behind a tap.
-    private func out(_ name: String, _ args: [Any], screen: Bool = true, person: Bool = false, quiet: Bool = false) async -> Out? {
+    private func out(_ name: String, _ args: [Any], screen: Bool = true, person: Bool = false, quiet: Bool = false, authorize: ((() -> String) -> String?)? = nil) async -> Out? {
         if screen { lock.withLock { if person { personAhead += 1 } else { backgroundAhead += 1 } } }
         var withheld = false
         var began: UInt64 = 0
@@ -171,7 +177,11 @@ final class Engine: @unchecked Sendable {
                 return args + [withheld, o]
             }
         } : nil
-        return await call(name, args, person: person, late: late) { text in
+        return await call(name, args, person: person, late: late, authorize: authorize) { text in
+            if text == "null" {
+                self.lock.withLock { if screen { if person { self.personAhead -= 1 } else { self.backgroundAhead -= 1 } } }
+                return nil
+            }
             // (bridge.js writes the screen first: a null one is cheap to see)
             let hasScreen = screen && !text.hasPrefix("{\"screen\":null")
             let metadata = hasScreen ? nil : Out.decode(text, screen: false)
@@ -223,6 +233,11 @@ final class Engine: @unchecked Sendable {
     func act(_ action: String, _ value: String) async -> Out? {
         let answer = await out("act", [action, value], person: true)
         return answer
+    }
+    func viewerToken(_ token: ViewerCloseIntent.Token?, closing: Bool = false) { viewerDispatch.install(token, closing: closing) }
+    func viewerAct(_ value: String, token: ViewerCloseIntent.Token) async -> Out? {
+        await out("viewerAction", [token.owner.hub, token.owner.nav, Int(token.presentation), value], person: true,
+                  authorize: { self.viewerDispatch.perform(token, value: value, $0) })
     }
     func quiet(_ action: String, _ value: String) async -> Out? { await out("quiet", [action, value], screen: false, person: true) }
     func projectSearchQuery(scope: Int, edit: Int, text: String) async -> Out? {

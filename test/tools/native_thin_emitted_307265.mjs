@@ -48,6 +48,15 @@ function respond(c,request,payload,quiet=false){
  p.out('projectSearchEnd',2);
  checked(p.requests(p.out('projectSearchQuery',1,3,'stale')).length===0,'actual emitted scope tombstone refuses old edit');
 }
+{
+ const p=client();start(p);const first=begin(p);respond(p,first,fixture.open);
+ checked(p.requests(p.out('viewerAction',hub,'h|other',1,'board')).length===0,'emitted viewer rejects stale native owner');
+ const out=p.out('viewerAction',hub,'h|t',2,'board'),request=p.requests(out)[0];
+ checked(request?.p.action==='view'&&request.p.value==='board','emitted viewer requests exact owned source');
+ checked(!out.sync.some(s=>s.viewerIntent!==undefined),'invocation is not viewer acceptance');
+ const accepted=respond(p,request,fixture.open,true);
+ checked(accepted.screen===null&&accepted.sync.some(s=>s.phase==='presented'&&s.viewerIntent===2),'quiet accepted viewer receipt survives without decoded picture');
+}
 for(const quiet of [false,true]) {
  const p=client();p.call('publicationAck');start(p);const first=begin(p);respond(p,first,fixture.open);
  const changed={t:'view.changed',version:1,generation:greeting.generation,epoch:greeting.epoch,viewId:'fixture-view',target:first.p.target,viewRevision:'2'};
