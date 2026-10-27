@@ -222,12 +222,12 @@ private struct PlaneLabel: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Text(text)
-            if let c = count { Text("\(c)").monospacedDigit() }
+            Text(text).accessibilityIdentifier("home.section.title")
+            if let c = count { Text("\(c)").monospacedDigit().accessibilityIdentifier("home.section.count") }
         }
         .font(.caption.weight(.semibold))
         .textCase(.uppercase)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(BackplaneDesign.secondaryText)
     }
 }
 
