@@ -14,7 +14,7 @@ export async function registerBridgeChecks(check,stage,root){
  const greeting={t:'view',version:1,renderer:'mobile',generation:'1',epoch:'origin',limits:{replyBytes:262144,entries:32,recent:24,searchResults:25,searchCandidates:128,chunkBytes:65536}};
  let last;
  function boot(drafts={}){B.start('install',JSON.stringify(drafts));B.hubs(['h']);B.local('mailroom-renderer','ios-v1');B.connection('h','1','view-v1');B.act('select','h|a');const out=receive(greeting);last=request(out);return out;}
- function answer(req=last,changes={},quiet=false){const local=screen('h',req.p.session?.sel||'a');if(local.thread)local.thread.id='h|'+local.thread.id;const shown={...local,sel:'h|'+local.sel};const result={version:1,hub:'h',generation:'1',epoch:'origin',requestRevision:req.p.requestRevision,target:req.p.target,viewId:req.p.viewId||'view',viewRevision:'1',renderer:'mobile',remoteReady:true,session:req.p.session||{sel:'a',drafts:{},rid:1,open:{},info:{},adding:false,panel:false},shown,overlay:{key:'h',name:'hub',j:local},window:{ids:['e'],older:'older',hasMore:true,anchor:{id:'e',offset:0},partial:[]},cmds:[],...changes};return receive({t:'reply',id:req.id,ok:true,result},quiet);}
+ function answer(req=last,changes={},quiet=false,epoch='1'){const local=screen('h',req.p.session?.sel||'a');if(local.thread)local.thread.id='h|'+local.thread.id;const shown={...local,sel:'h|'+local.sel};const result={version:1,hub:'h',generation:'1',epoch:'origin',requestRevision:req.p.requestRevision,target:req.p.target,viewId:req.p.viewId||'view',viewRevision:'1',renderer:'mobile',remoteReady:true,session:req.p.session||{sel:'a',drafts:{},rid:1,open:{},info:{},adding:false,panel:false},shown,overlay:{key:'h',name:'hub',j:local},window:{ids:['e'],older:'older',hasMore:true,anchor:{id:'e',offset:0},partial:[]},cmds:[],...changes};return read(B.recv('h',encode({t:'reply',id:req.id,ok:true,result}).toString('base64'),epoch,quiet,false));}
  function selectB(){const changed=read(B.act('select','h|b'));const call=request(changed);answer(call);return call;}
  function failures(out,owner,text){return out.cmds.some(c=>c.type==='send-failed'&&c.thread===owner&&c.text===text);}
  function busyComposer(){boot();answer();const changed={t:'view.changed',version:1,generation:'1',epoch:'origin',viewId:'view',target:last.p.target,viewRevision:'2'};return request(receive(changed));}
@@ -29,7 +29,7 @@ export async function registerBridgeChecks(check,stage,root){
   for(const change of ['select','connection','forget']){
    const update=busyComposer();B.composerAction('h|a','attach-end','{"id":"fixture-upload"}');
    if(change==='select'){const selected=request(read(B.act('select','h|b')));const result=answer(selected);assert(!result.cmds.some(c=>c.type==='send'&&JSON.parse(c.data).p?.action==='attach-end'));answer(update);}
-   else {if(change==='forget'){B.forgetHub('h');B.hubs(['h']);}B.connection('h','2','view-v1');B.act('select','h|a');const opened=read(B.recv('h',encode(greeting).toString('base64'),'2',false,false));assert(!opened.cmds.some(c=>c.type==='send'&&JSON.parse(c.data).p?.action==='attach-end'));}
+   else {if(change==='forget'){B.forgetHub('h');B.hubs(['h']);}B.connection('h','2','view-v1');B.act('select','h|a');const opened=read(B.recv('h',encode(greeting).toString('base64'),'2',false,false));const presented=answer(request(opened),{},false,'2');assert(!presented.cmds.some(c=>c.type==='send'&&JSON.parse(c.data).p?.action==='attach-end'));}
   }
  });
  check('busy upload completions are bounded and generic actions are not replayed',()=>{
