@@ -45,7 +45,7 @@ type Seen is Data:
   SeenFail{code: U32}
 
 # a stat that failed, by its errno: only ENOENT is "not there"
-def Wn.seen.fail(code: U32) -> Seen:
+def Wn.seen.fail(+code: U32) -> Seen:
   Bool.pick(Seen, U32.is_eq(code, 2), SeenNone{}, SeenFail{code})
 
 def Wn.absent(seen: Seen) -> Bool:

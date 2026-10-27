@@ -467,17 +467,26 @@ def vault.os.text(os: List<&2, B.Out>) -> String:
       vault.os.text(t)
 
 def vault.stored() -> String:
-  match vault.end():
+  vault.stored.k(vault.end())
+
+def vault.stored.k(st: B.Step) -> String:
+  match st:
     case B.Step{+cs, _}:
       vault.cs.text(B.Secret.changes(vault.v(), cs))
 
 def vault.raw() -> String:
-  match vault.end():
+  vault.raw.k(vault.end())
+
+def vault.raw.k(st: B.Step) -> String:
+  match st:
     case B.Step{_, +os}:
       vault.os.text(os)
 
 def vault.sent() -> String:
-  match vault.end():
+  vault.sent.k(vault.end())
+
+def vault.sent.k(st: B.Step) -> String:
+  match st:
     case B.Step{_, +os}:
       vault.os.text(B.Secret.outs(vault.v(), os))
 
