@@ -107,7 +107,7 @@ def Before.thread.p(+lc: I.Loc, u: U.Ui, t: M.Thread, pend: List<&2, String>, +a
           [D.El{"div", "work", [D.At{"class", "work"}], V.View.pins.loc(lc, U.Ec.pins(U.Ec.make(U.MailvLocal.terms(tr), st, id, now), st, id), U.Ec.make(U.MailvLocal.terms(tr), st, id, now))}],
           V.View.paged(lc, drafts, M.State.mine(st, id), st, id, nf, V.View.running(turn), U.Ec.make(U.MailvLocal.terms(tr), st, id, now)),
           V.View.sending.loc(lc, pend), Before.thread.live.loc(lc, st, nf, live, id), V.View.hold.pill(pill)])},
-         V.View.asks.box(lc, st, id, U.Str.get(drafts, sel), nf),
+         V.View.asks.box(lc, st, id, U.Str.get(drafts, sel), nf, drafts),
          V.View.todos(lc, nf, id, U.Todos.shown(st, id, V.View.running(turn))),
          V.View.queued(lc, M.Queue.context(M.Queue.items(st, id)), V.View.running(turn))],
         rd, [V.View.composer.t(lc, st, sel, drafts, op, nf, turn, pr, mo, atts, up, vo, mic)]])}

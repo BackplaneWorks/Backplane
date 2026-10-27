@@ -61,7 +61,7 @@ def Probe.accepted(r: Listener & Result<&1, &1, U32 & String, Socket>) -> IO(Uni
       do IO<Unit>:
         Listener.close(listener)
         +inbox : Chan(S.Msg) <- Chan.new(S.Msg, 16)
-        S.Accept.whois((s, "127.0.0.1"), "owner@test", 7, "", inbox, "pairing-token")
+        S.Accept.whois((s, "127.0.0.1"), "owner@test", 7, "", inbox, "pairing-token", ["owner@test"])
     case Fail{_}:
       Listener.close(listener)
 

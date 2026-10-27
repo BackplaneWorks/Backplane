@@ -193,6 +193,16 @@ import ./src/core/onehub.bend as OHB # one-hub
 import ./src/core/standin.bend as SIN # one-hub
 import ./src/core/thin.bend as JTHIN # J2: JS stack
 
+import ./src/server/thin-content-eq.bend as CONTENTEQ
+import ./src/web/sidebar-slot.bend as FULLSLOT
+import ./src/server/thin-still-picture.bend as STILLPICTURE
+import ./src/core/sidebar-drafts.bend as SIDEDRAFTS
+import ./src/core/secret.bend as SEC
+import ./src/server/thin-mirror.bend as TMR
+import ./src/core/subthreads.bend as LEG
+import ./src/core/ref-origin.bend as O
+import ./src/server/hotboot.bend as BOOTWARM
+import ./src/core/snapshot.bend as BOOTSNAP
 # Backplane's rules, stated over the real code. `bend PROOF.bend` proves each
 # one. Humans own this file: an agent may add laws, never weaken or delete
 # one without the user's explicit consent.
@@ -12144,7 +12154,6 @@ law sidebar_shared_key_settings:
   {CHATSIDE.SidebarImage.key.shared(True{}, u, epoch, view, revision, picture) == "" : String}
 
 # Exact actual-sidebar comparison is independent of metadata/image keys.
-import ./src/server/thin-content-eq.bend as CONTENTEQ
 law sidebar_content_exact_sound:
   for a: J.Json
   for b: J.Json
@@ -12163,7 +12172,6 @@ law sidebar_sent_no_picture_authority:
   for +rest: List<&2, CHATSIDE.Memo>
   {SWR.Region.key(CHATSIDE.SidebarSent{scope, token, node} <> rest) == SWR.Region.key(rest) : String}
 
-import ./src/web/sidebar-slot.bend as FULLSLOT
 # Full sidebar frames do not construct an unused reference rewrite.
 law sidebar_full_branch_identity:
   for shown: J.Json
@@ -12173,7 +12181,6 @@ law sidebar_full_branch_exact:
   for +shown: J.Json
   {SWR.Region.shown(reuse, shown) == Bool.pick(J.Json, reuse, SWR.Region.replace.go(shown, FULLSLOT.Slot.is(shown, "aside")), shown) : J.Json}
 
-import ./src/server/thin-still-picture.bend as STILLPICTURE
 # A still picture is private, exact-input/clock reuse; disabled work has no authority.
 law still_picture_disabled:
   for key: String
@@ -12186,7 +12193,6 @@ law still_picture_exact:
   for +res: J.Json
   {STILLPICTURE.Picture.select(True{}, res) == Some{res} : Maybe<&2, J.Json>}
 
-import ./src/core/sidebar-drafts.bend as SIDEDRAFTS
 # Only the private sidebar-image input excludes non-scratch draft bodies.
 # These filter laws preserve arbitrary ordered tails and all @ values.
 # Full picture/transport keys and the current main Ui retain every draft.
@@ -12294,7 +12300,6 @@ law hot_demo_threads:
 # ---- end F1 ----
 
 # ---- secret box (src/core/secret.bend, docs/secrets.md) ----
-import ./src/core/secret.bend as SEC
 # A stored value lives only in a SecVal inside a Vault, and only the masks
 # take one apart. No stored value occurs in masked text, masking twice is
 # masking once, clean text is left alone, an empty vault masks nothing, and
@@ -12434,7 +12439,6 @@ law fq_room_keyed:
 law queue_copy_refuses_network:
   {JCOPY.Copy.outs(True{}, [H.FarQueued{}]) == [] : List<&2, H.Out>}
 
-import ./src/server/thin-mirror.bend as TMR
 
 # ---- selected mirrored thin conversation ----
 law mirror_no_authority:
@@ -12455,7 +12459,6 @@ law mirror_changed_basis_anchor:
   {TMR.Mirror.anchor("old", "new", 37n) == 0n : Nat}
 # ---- end selected mirrored thin conversation ----
 
-import ./src/core/subthreads.bend as LEG
 
 law retired_scratch_launch_refused:
   for s: M.State
@@ -12471,7 +12474,6 @@ law retired_scratch_id:
 law legacy_active_visible:
   {LEG.Legacy.unsettled(M.Active{}) == True{} : Bool}
 
-import ./src/core/ref-origin.bend as O
 
 law ref_origin_no_link:
   for s: String
@@ -12487,8 +12489,6 @@ law ref_origin_foreign_untouched:
   {O.Origin.id("other~t", "peer") == "other~t" : String}
 
 # Boot-only decoded threads never cross a checkpoint mismatch.
-import ./src/server/hotboot.bend as BOOTWARM
-import ./src/core/snapshot.bend as BOOTSNAP
 law startup_warm_accepted:
   for +w: BOOTWARM.Warm
   for +rows: List<&2, List<&2, String>>
