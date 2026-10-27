@@ -37,4 +37,25 @@ struct ViewerResumeIntent {
     static func matchesSource(_ token: ViewerCloseIntent.Token, accepted: ViewerCloseIntent.Source) -> Bool {
         token.source == accepted
     }
+
+    // A normal view(kind) can reconstruct only a project's default source.
+    // File, sheet, history and variant details need a separate restore path.
+    static func canRestoreDefault(_ source: ViewerCloseIntent.Source) -> Bool {
+        func root(_ key: String, kind: Substring) -> Substring? {
+            let fields = key.split(separator: "|", maxSplits: 2, omittingEmptySubsequences: false)
+            guard fields.count == 3, fields[0] == kind, !fields[1].isEmpty, fields[2].isEmpty else { return nil }
+            return fields[1]
+        }
+        switch source.kind {
+        case "board":
+            return root(source.key, kind: "0") != nil && source.key == source.layers
+        case "schematic":
+            return root(source.key, kind: "1") != nil && source.key == source.layers
+        case "3d":
+            guard let modelRoot = root(source.key, kind: "2"), let boardRoot = root(source.layers, kind: "0") else { return false }
+            return modelRoot == boardRoot
+        default:
+            return false
+        }
+    }
 }
