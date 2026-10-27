@@ -5,6 +5,7 @@ import ../src/core/model.bend as M
 import ../src/core/notice.bend as NO
 import ../src/core/sign.bend as SG
 import ../src/core/wnote.bend as WN
+import ../src/server/push.bend as PU
 
 # The outbound webhook (core/wnote.bend): it posts only for an alert the
 # notification policy would raise, the JSON carries that kind, and the
@@ -33,6 +34,16 @@ def managed() -> M.State:
     M.ThreadLaunched{"worker", "foh", True{}, 1n},
     M.MessagePosted{"worker", "m1", M.User{}, "check the board", 2n}, M.TurnChanged{"worker", M.Running{}, 2n},
     M.TurnChanged{"worker", M.Failed{}, 3n}], M.State.empty())
+
+# newest first: an interrupted turn that logged no error, after an older
+# turn that hit a usage limit
+def older() -> List<&2, M.Entry>:
+  [M.Msg{"a2", "t1", M.Assistant{}, "working on it", 21n}, M.Msg{"m2", "t1", M.User{}, "next", 20n},
+   M.Act{"e1", "t1", "error", "result", "Claude AI usage limit reached|1792800000", 11n}, M.Msg{"m1", "t1", M.User{}, "do it", 10n}]
+
+def current() -> List<&2, M.Entry>:
+  [M.Act{"e2", "t1", "error", "result", "API Error: 500", 22n}, M.Msg{"m2", "t1", M.User{}, "next", 20n},
+   M.Act{"e1", "t1", "error", "result", "Claude AI usage limit reached|1792800000", 11n}]
 
 def main() -> IO(Unit):
   do IO<Unit>:
@@ -118,3 +129,7 @@ def main() -> IO(Unit):
     C.Check.str("private failure posts nothing", yn(WN.Wn.due.end(NO.Policy.kind(NO.Policy.end(managed(), 4n, "worker", "failed")), "failed", True{}, WN.Wn.private(managed(), "worker"))), "no")
     C.Check.str("private interrupt posts nothing", yn(WN.Wn.due.end("", "interrupted", True{}, True{})), "no")
     C.Check.str("the person's thread is not private", yn(WN.Wn.private(s1, "t1")), "no")
+    C.Check.str("older turn's error not taken", PU.Push.hook.err(older(), "t1"), "")
+    C.Check.str("interrupt keeps its own reason", WN.Wn.reason("interrupted", PU.Push.hook.err(older(), "t1")), "interrupted")
+    C.Check.str("this turn's error taken", PU.Push.hook.err(current(), "t1"), "API Error: 500")
+    C.Check.str("this turn's error classified", WN.Wn.reason("failed", PU.Push.hook.err(current(), "t1")), "error")

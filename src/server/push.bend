@@ -608,12 +608,16 @@ def Push.hook.line(ended: Bool, +st: M.State, +thread: String, +state: String) -
     case False{}:
       Push.alert.body(st, thread, NO.Alert.get(st, thread))
 
-# the newest error the thread logged (an Act of tone "error": a failed
-# result's text, an exit), "" when none
+# the newest error the ending turn logged (an Act of tone "error": a
+# failed result's text, an exit), "" when none. The entries are newest
+# first; the thread's newest message from the user starts that turn, so
+# the scan stops there and never takes an older turn's error
 def Push.hook.err(es: List<&2, M.Entry>, +thread: String) -> String:
   match es:
     case Nil{}:
       ""
+    case M.Msg{_, +th, M.User{}, _, _} <> t:
+      Bool.pick(String, String.eq(th, thread), "", Push.hook.err(t, thread))
     case M.Act{_, +th, +tone, _, +summary, _} <> t:
       Bool.pick(String, Bool.and(String.eq(th, thread), String.eq(tone, "error")), summary, Push.hook.err(t, thread))
     case _ <> t:
@@ -624,7 +628,7 @@ def Push.hook.said(broke: Bool, +err: String, +line: String) -> String:
   Bool.pick(String, Bool.and(broke, Bool.not(String.is_empty(err))), Push.first(err), line)
 
 def Push.hook.note.e(+err: String, +kind: String, +st: M.State, +thread: String, +state: String) -> String:
-  WN.Wn.body.r(kind, thread, state, WN.Wn.reason(state, err ++ "\n" ++ B.Task.last(st, thread)), Push.title(B.Hub.thread(st, thread)),
+  WN.Wn.body.r(kind, thread, state, WN.Wn.reason(state, err), Push.title(B.Hub.thread(st, thread)),
     Push.hook.said(WN.Wn.broke(state), err, Push.hook.line(WN.Wn.ended(kind), st, thread, state)))
 
 def Push.hook.note(+kind: String, +st: M.State, +thread: String, +state: String) -> String:
