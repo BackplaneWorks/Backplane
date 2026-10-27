@@ -585,6 +585,7 @@ struct ProjectsView: View {
             }
         }
         .navigationTitle(NativeMessages.tour_title_threads(lang))
+        .navigationBarTitleDisplayMode(.inline)
         .accessibilityIdentifier("navigation.threads")
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {

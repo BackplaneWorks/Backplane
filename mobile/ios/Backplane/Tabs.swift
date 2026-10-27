@@ -10,6 +10,7 @@ struct AppTabs: View {
     @Bindable var model: AppModel
     let screen: Screen
     @Binding var pairing: Bool
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     private func badge(_ t: AppTab) -> Int {
         switch t {
@@ -49,26 +50,72 @@ struct AppTabs: View {
         TabView(selection: Binding(get: { model.tab }, set: { model.switchTab($0) })) {
             ForEach(AppTab.allCases) { t in
                 stack(t)
+                    .toolbar(.hidden, for: .tabBar)
                     .tabItem { Label(t.title(screen.locale ?? "en"), systemImage: t.icon) }
-                    .accessibilityIdentifier("tab." + t.rawValue)
-                    .badge(badge(t))
                     .tag(t)
             }
         }
     }
 
-    var body: some View {
-        // (iPad, iOS 18: the same tabs as a sidebar)
+    private func tabButton(_ t: AppTab) -> some View {
+        let selected = model.tab == t
+        let count = badge(t)
+        let title = t.title(screen.locale ?? "en")
+        return Button { model.switchTab(t) } label: {
+            VStack(spacing: 4) {
+                HStack(spacing: 3) {
+                    Image(systemName: t.icon).font(.body)
+                    if count > 0 {
+                        Text(String(count)).font(.caption2.weight(.bold).monospacedDigit())
+                            .foregroundStyle(BackplaneDesign.onAccent)
+                            .padding(.horizontal, 4).padding(.vertical, 1)
+                            .background(BackplaneDesign.accent)
+                    }
+                }
+                Text(title).font(.caption2.weight(selected ? .semibold : .regular))
+                    .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity, minHeight: 48)
+            .padding(.horizontal, 3).padding(.vertical, 5)
+            .foregroundStyle(selected ? BackplaneDesign.accent : Color.primary)
+            .background(selected ? BackplaneDesign.raised : BackplaneDesign.panel)
+            .overlay(alignment: .top) {
+                if selected { Rectangle().fill(BackplaneDesign.accent).frame(height: 2) }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityValue(count > 0 ? String(count) : "")
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityIdentifier("tab." + t.rawValue)
+    }
+
+    private var tabStrip: some View {
         Group {
-            if #available(iOS 18.0, *) {
-                tabs.tabViewStyle(.sidebarAdaptable)
+            if typeSize.isAccessibilitySize {
+                ScrollView(.horizontal) {
+                    HStack(spacing: 0) {
+                        ForEach(AppTab.allCases) { t in tabButton(t).frame(minWidth: 90) }
+                    }
+                }
+                .scrollIndicators(.hidden)
             } else {
-                tabs
+                HStack(spacing: 0) {
+                    ForEach(AppTab.allCases) { t in tabButton(t) }
+                }
             }
         }
+        .background(BackplaneDesign.panel)
+        .overlay(alignment: .top) { Rectangle().fill(BackplaneDesign.line).frame(height: 1) }
+        .background(BackplaneDesign.panel.ignoresSafeArea(edges: .bottom))
+    }
+
+    var body: some View {
+        tabs
         .tint(BackplaneDesign.accent)
-        .toolbarBackground(BackplaneDesign.panel, for: .tabBar)
-        .toolbarBackground(.visible, for: .tabBar)
+        .safeAreaInset(edge: .bottom, spacing: 0) { tabStrip }
         .sheet(isPresented: Binding(get: { screen.newBot != nil }, set: { if !$0 { model.act("form-close", "@bnew") } })) {
             if let f = model.screen?.newBot { NewBotSheet(model: model, form: f) }
         }
