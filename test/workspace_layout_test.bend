@@ -7,9 +7,16 @@ import ../src/server/thin-view.bend as S
 import ../src/server/thin-actor.bend as TA
 import ../src/web/view.bend as V
 import ../src/web/app.bend as A
+import ../src/web/presentation.bend as P
 
 def layout(+kind: String, +bot: Bool) -> U.Ui:
   S.Session.renderer(True{}, F.start(bot, ""), J.Json.obj([J.KV{"workspaceLayout", J.Str{kind}}]))
+
+def chrome(+kind: String, +top: String, +bot: Bool) -> U.Ui:
+  S.Session.renderer(True{}, F.start(bot, ""), J.Json.obj([J.KV{"workspaceLayout", J.Str{kind}}, J.KV{"workspaceChrome", J.Str{top}}]))
+
+def page(+u: U.Ui) -> String:
+  J.Json.show(P.Node.write(V.View.page(u)))
 
 def has_wrapper(+u: U.Ui) -> String:
   Bool.show(String.contains(F.frame(False{}, False{}, u), "thread-content"))
@@ -46,4 +53,15 @@ def main() -> IO(Unit):
     C.Check.str("rail actor info refresh stays rail", rail(actor([actor(Nil{}, "rail-v1", "")], "rail-v1", "legacy")), "True")
     C.Check.str("actor rail to legacy restamp on reconnect", rail(actor([actor(Nil{}, "rail-v1", "")], "", "rail-v1")), "False")
     C.Check.str("fresh legacy actor cannot inherit another session rail", rail(actor(Nil{}, "", "rail-v1")), "False")
+    C.Check.str("absent top capability keeps the thread's header", Bool.show(String.contains(F.frame(False{}, False{}, layout("rail-v1", False{})), "thread-head")), "True")
+    C.Check.str("absent top capability draws no top bar", Bool.show(String.contains(page(layout("rail-v1", False{})), "topbar")), "False")
+    C.Check.str("top capability selects the top bar", Bool.show(V.View.chrome(chrome("rail-v1", "top-v1", False{}))), "True")
+    C.Check.str("top bar names the thread and its state", Bool.show(Bool.and(String.contains(page(chrome("rail-v1", "top-v1", False{})), "\"topbar\""), Bool.and(String.contains(page(chrome("rail-v1", "top-v1", False{})), "Navigation fixture"), String.contains(page(chrome("rail-v1", "top-v1", False{})), "kv state")))), "True")
+    C.Check.str("top bar replaces the thread's header", Bool.show(String.contains(F.frame(False{}, False{}, chrome("rail-v1", "top-v1", False{})), "thread-head")), "False")
+    C.Check.str("top bar replaces the sidebar's brand", Bool.show(String.contains(page(chrome("rail-v1", "top-v1", False{})), "\"brand\"")), "False")
+    C.Check.str("top bar keeps a bot's own header", Bool.show(String.contains(F.frame(False{}, True{}, chrome("rail-v1", "top-v1", True{})), "bot-head")), "True")
+    C.Check.str("unknown top capability is off", Bool.show(V.View.chrome(chrome("rail-v1", "top-v2", False{}))), "False")
+    C.Check.str("top bar needs the rail", Bool.show(V.View.chrome(chrome("legacy", "top-v1", False{}))), "False")
+    C.Check.str("local fresh renderer uses the top bar", Bool.show(V.View.chrome(A.stamp(U.Ui.init(1n)))), "True")
+    C.Check.str("reconnect without opt-in drops the top bar", Bool.show(V.View.chrome(S.Session.renderer(True{}, chrome("rail-v1", "top-v1", False{}), request("rail-v1")))), "False")
     C.Check.str("actor refresh retains caller draft", U.Ui.scratch(TA.Actor.ui(actor([actor(Nil{}, "rail-v1", "")], "", "rail-v1")), "t"), "Unsent fixture draft")

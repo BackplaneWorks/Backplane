@@ -216,7 +216,8 @@ def Session.native_local(+u: U.Ui, +p: J.Json) -> U.Ui:
 def Session.renderer( +web: Bool, +u: U.Ui, +p: J.Json) -> U.Ui:
   match web:
     case True{}:
-      A.stamp(U.Ui.info_set(U.Ui.info_set(u, "local.terminal.output", Bool.pick(String, String.eq(J.Json.get_str(p, "terminalOutput", ""), "pane-v1"), "pane-v1", "")), "local.workspace.layout", Bool.pick(String, String.eq(J.Json.get_str(p, "workspaceLayout", ""), "rail-v1"), "rail-v1", "legacy")))
+      A.stamp(U.Ui.info_set(U.Ui.info_set(U.Ui.info_set(u, "local.terminal.output", Bool.pick(String, String.eq(J.Json.get_str(p, "terminalOutput", ""), "pane-v1"), "pane-v1", "")), "local.workspace.layout", Bool.pick(String, String.eq(J.Json.get_str(p, "workspaceLayout", ""), "rail-v1"), "rail-v1", "legacy")),
+        "local.workspace.chrome", Bool.pick(String, String.eq(J.Json.get_str(p, "workspaceChrome", ""), "top-v1"), "top-v1", "none")))
     case False{}: Session.native_local(u, p)
 
 def Session.input(+st: M.State, +info: J.Json, +live: J.Json, +now: Nat, +p: J.Json) -> U.Ui:

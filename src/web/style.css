@@ -795,7 +795,7 @@ button.mic.starting, button.mic.stopping { border-color: var(--bad); color: var(
 .tour-btns { display: flex; align-items: center; gap: 6px; margin-top: 4px; position: sticky; bottom: -14px; padding: 8px 0 0; background: var(--raise); }
 .tour button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .tour-btns .gap { flex: 1; }
-.app.tour-sidebar .sidebar, .app.tour-add .sidebar .brand .icon, .app.tour-head .thread-head, .app.tour-settings .sidebar .sidebar-tools { position: relative; z-index: 31; outline: 2px solid var(--accent); outline-offset: -2px; background: var(--panel); }
+.app.tour-sidebar .sidebar, .app.tour-add .sidebar .brand .icon, .app.tour-head .thread-head, .app:not(.top).tour-settings .sidebar .sidebar-tools { position: relative; z-index: 31; outline: 2px solid var(--accent); outline-offset: -2px; background: var(--panel); }
 .app.tour-add .sidebar .brand .icon { background: var(--raise); }
 .app.tour-sidebar .tour, .app.tour-add .tour, .app.tour-settings .tour { left: 288px; transform: none; }
 @media (max-width: 760px) {
@@ -1298,3 +1298,100 @@ html:lang(ja) :is(.set-text, .set-ctl) { min-width: 0; }
   html[data-rail="compact"] .rail-toggle svg { transform: scaleX(-1); }
 }
 @media (max-width: 760px) { .rail-toggle, .sidebar .side-toggle { display: none; } }
+
+/* The top bar (view.bend's View.chrome.bar, for a host that asks for it,
+   .app.top): the window's one bar across the top. The mark, where you are as
+   crumbs, the shown thread's state as key/value cells, the command field,
+   then the sidebar fold, search and Settings. The sidebar under it starts
+   with its filter and the add-project +. */
+.app.top { grid-template-rows: auto minmax(0, 1fr); grid-template-areas: "top top" "side main"; }
+.app.top.panel { grid-template-areas: "top top top" "side main view"; }
+.app.top > .topbar { grid-area: top; }
+.app.top > .sidebar { grid-area: side; }
+.app.top > main { grid-area: main; }
+.app.top > .viewer { grid-area: view; }
+.topbar { display: flex; align-items: center; gap: 10px; min-width: 0; min-height: calc(36px * var(--text-scale, 100) / 100); padding: 0 6px 0 10px; background: var(--panel); border-bottom: 1px solid var(--line); position: relative; }
+.topbar .brand-mark { width: 18px; height: 18px; flex: 0 0 18px; }
+.topbar .name { font-weight: 600; letter-spacing: 0.02em; white-space: nowrap; }
+.topbar .back { display: none; }
+.topbar .grow { flex: 1 1 0; min-width: 0; }
+.crumbs { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 0 1 auto; color: var(--dim); }
+.crumbs .sep { color: var(--faint); flex: none; }
+.crumbs .crumb { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.crumbs .crumb:last-child { color: var(--text); }
+.crumbs .crumb.proj { display: inline-flex; align-items: center; gap: 6px; flex: 0 1 auto; max-width: 180px; font-size: calc(11px * var(--text-scale, 100) / 100); text-transform: uppercase; letter-spacing: 0.06em; }
+.crumbs .sw { width: 8px; height: 8px; flex: none; background: var(--tint, var(--accent)); }
+.crumbs button.crumb.link { background: none; border: 0; padding: 0; color: var(--dim); }
+.crumbs button.crumb.link:hover { color: var(--text); text-decoration: underline; }
+.crumbs .title-box { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 0 1 auto; }
+.crumbs .title { color: var(--text); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.crumbs .title.rename { cursor: text; }
+.crumbs .title.rename:hover { text-decoration: underline dotted var(--faint); }
+.crumbs .title-box .field { width: min(420px, 36vw); padding: 2px 6px; }
+.crumbs .title-box button { padding: 1px 8px; }
+.crumbs .thread-actions > summary { min-height: 24px; min-width: 22px; padding: 0 3px; border-color: transparent; background: none; }
+.crumbs .thread-actions[open] > summary { border-color: var(--accent); }
+.crumbs .thread-actions .local-menu-body { left: 0; right: auto; }
+.kvs { display: flex; align-items: stretch; align-self: stretch; flex: 0 0 auto; min-width: 0; border-left: 1px solid var(--line); }
+.topbar .kv { display: inline-flex; align-items: center; gap: 6px; width: auto; min-height: 0; padding: 0 10px; border: 0; border-right: 1px solid var(--line); background: none; color: var(--text); font-size: calc(11px * var(--text-scale, 100) / 100); white-space: nowrap; min-width: 0; text-align: left; }
+.topbar .kv .k { color: var(--faint); font-size: calc(10px * var(--text-scale, 100) / 100); letter-spacing: 0.08em; text-transform: uppercase; }
+.topbar .kv .v { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.topbar button.kv { cursor: pointer; }
+.topbar button.kv:hover { background: var(--raise); }
+.topbar .kv.subs-head svg { margin: 0; color: var(--faint); }
+.topbar .kv.subs-head[aria-expanded="true"] svg { transform: rotate(180deg); }
+.topbar .kv.subs-head.busy .v { color: var(--accent); }
+.topbar .kv.state button.tool { padding: 1px 7px 1px 5px; margin-left: 2px; font-size: calc(11px * var(--text-scale, 100) / 100); display: inline-flex; align-items: center; gap: 4px; color: var(--bad); border-color: var(--bad); background: none; }
+.topbar .kv.branch { gap: 5px; color: var(--dim); max-width: 220px; }
+.topbar .kv.branch svg { flex: none; color: var(--faint); }
+.kvs > .boat-chip, .kvs > button.tool { align-self: center; margin: 0 8px; padding: 2px 8px; white-space: nowrap; font-size: calc(11px * var(--text-scale, 100) / 100); }
+.kvs > .boat-chip { color: var(--accent); background: none; border: 1px solid var(--line); }
+.kvs > button.tool { display: inline-flex; align-items: center; gap: 5px; }
+.topbar .cmd { display: flex; align-items: center; gap: 8px; height: 26px; width: 260px; flex: 0 1 260px; min-width: 0; padding: 0 5px 0 8px; background: var(--bg); color: var(--faint); border: 1px solid var(--line); text-align: left; }
+.topbar .cmd:hover { color: var(--dim); border-color: var(--faint); }
+.topbar .cmd svg { flex: none; }
+.topbar .cmd-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+kbd { font: calc(10px * var(--text-scale, 100) / 100)/1 var(--mono); color: var(--faint); border: 1px solid var(--line); border-bottom-width: 2px; padding: 2px 4px; background: var(--bg); display: inline-block; white-space: nowrap; }
+.topbar .tb { display: flex; flex: none; }
+.topbar .tb button { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 26px; padding: 0; background: none; color: var(--dim); }
+.topbar .tb button + button { border-left: 0; }
+.topbar .tb button:hover { color: var(--text); }
+.topbar .tb button.on { color: var(--accent); }
+.topbar .side-toggle svg { transform: scaleX(-1); }
+.app.top .sidebar .find.with-add { position: sticky; top: 0; z-index: 6; background: var(--panel); display: flex; align-items: center; gap: 4px; padding: 8px 6px 8px 12px; }
+.app.top .sidebar .find.with-add input { flex: 1; min-width: 0; width: auto; }
+.app.top .sidebar .find .add-project { flex: none; height: 26px; padding: 0 5px; }
+.app.top .sidebar-tools { position: static; }
+.thread-content > .subs.dock { border-bottom: 1px solid var(--line); }
+.thread-content > .subs.dock .subs-body { border-top: 0; }
+@media (max-width: 1300px) { .topbar .kv.branch { display: none; } }
+@media (max-width: 1180px) { .topbar .cmd { width: auto; flex: none; } .topbar .cmd-text { display: none; } }
+@media (max-width: 960px) { .topbar .name, .topbar .kv.changes { display: none; } }
+@media (min-width: 761px) {
+  html[data-side="shut"] .app.top { grid-template-columns: 0 minmax(0, 1fr); }
+  html[data-side="shut"] .app.top.panel { grid-template-columns: 0 minmax(0, 1fr) var(--viewer-w, minmax(0, 1.1fr)); }
+  html[data-side="shut"] .app.top .sidebar { display: none; }
+  html[data-side="shut"] .topbar .side-toggle svg { transform: none; }
+}
+/* the tour lifts the part of the bar it points at */
+.app.top.tour-add .sidebar .find.with-add, .app.top.tour-head .topbar .crumbs, .app.top.tour-head .topbar .kvs, .app.top.tour-settings .topbar .tb { position: relative; z-index: 31; background: var(--panel); }
+.app.top.tour-add .sidebar .find .add-project, .app.top.tour-head .topbar .crumbs, .app.top.tour-head .topbar .kvs, .app.top.tour-settings .topbar .gear { outline: 2px solid var(--accent); outline-offset: -2px; }
+.app.top.tour-settings .tour { left: auto; right: 12px; top: 48px; transform: none; }
+.app.top.tour-head .tour { top: 64px; }
+/* Phones: the bar keeps the place and Settings; a thread's cells take a line under it */
+@media (max-width: 760px) {
+  .app.top, .app.top.panel { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); grid-template-areas: "top" "body"; }
+  .app.top > .sidebar, .app.top > main { grid-area: body; }
+  .topbar { flex-wrap: wrap; gap: 0 8px; min-height: 48px; padding: env(safe-area-inset-top) 4px 0 10px; }
+  .topbar .crumbs { flex: 1 1 0; min-height: 48px; }
+  .topbar .grow { display: none; }
+  .app.picked .topbar { padding-left: 0; }
+  .app.picked .topbar .back { display: inline-flex; align-items: center; justify-content: center; min-width: 40px; min-height: 44px; padding: 0 8px; background: none; border: 0; font-size: calc(18px * var(--text-scale, 100) / 100); color: var(--dim); }
+  .app.picked .topbar .brand-mark, .app.picked .topbar .name, .app.picked .crumbs > .sep:first-child { display: none; }
+  .topbar .tb .side-toggle, .crumbs .crumb.proj, .crumbs .crumb.proj + .sep, .topbar .cmd { display: none; }
+  .crumbs .thread-actions > summary { min-height: 40px; min-width: 36px; }
+  .topbar .tb button { width: 42px; height: 40px; }
+  .crumbs .thread-actions .local-menu-body { left: auto; right: 0; }
+  .kvs { order: 10; flex: 1 0 100%; min-height: 32px; margin: 0 -4px 0 0; border-left: 0; border-top: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
+  .app.top.tour-settings .tour { right: auto; left: 50%; transform: translateX(-50%); }
+}

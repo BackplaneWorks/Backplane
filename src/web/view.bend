@@ -55,6 +55,12 @@ import ../core/order.bend as OR
 def View.rail(+u: U.Ui) -> Bool:
   String.eq(U.Ui.info(u, "local.workspace.layout"), "rail-v1")
 
+# The top bar is a second opt-in on top of the rail ("top-v1", host.js):
+# its page draws the window's chrome in one bar (View.chrome.bar) instead
+# of the sidebar's brand and Settings rows and the thread's own header.
+def View.chrome(+u: U.Ui) -> Bool:
+  Bool.and(View.rail(u), String.eq(U.Ui.info(u, "local.workspace.chrome"), "top-v1"))
+
 # Ui -> Node. Every decision (order, shelf, status) comes from core defs
 # with laws behind them; this file only lays them out.
 
@@ -567,9 +573,12 @@ def View.machines(many: Bool, +open: Bool, +rs: List<&2, U.MRow>) -> List<&2, D.
 
 # the head's last button folds the sidebar to a strip (host.js, kept in
 # this browser; Ctrl+B too)
-def View.sidebar.body(+lc: I.Loc, +ms: List<&2, U.MRow>, +ix: U.SIx, +st: M.State, +sel: String, +open: Map<&2, Bool>, +on: Bool, +now: Nat, adding: Bool, v: String, +look: String, +rm: String, +q: String, mi: List<&2, U.MItem>, bots: List<&2, D.Node>, uber: List<&2, D.Node>, items: List<&2, D.Node>) -> D.Node:
-  D.El{"aside", "sidebar", [D.At{"class", "sidebar"}],
-        D.Dom.cat([D.El{"div", "", [D.At{"class", "brand"}], [
+def View.sidebar.head(top: Bool, +lc: I.Loc, +ms: List<&2, U.MRow>, +open: Map<&2, Bool>, +on: Bool, v: String) -> List<&2, D.Node>:
+  match top:
+    case True{}:
+      D.Dom.when(Nat.is_gt(List.length(&2, U.MRow, ms), 1n), D.El{"div", "", [D.At{"class", "sidebar-tools"}], View.machines.loc(lc, True{}, U.Flag.get(open, "machines"), ms)})
+    case False{}:
+      [D.El{"div", "", [D.At{"class", "brand"}], [
             D.El{"span", "", [D.At{"class", "brand-mark"}], [D.El{"span", "", [D.At{"class", Bool.pick(String, on, "conn on", "conn")},
               D.At{"role", "img"}, D.At{"title", MSG.T.native.hub.state(lc, Bool.pick(String, on, "online", "offline"))},
               D.At{"aria-label", MSG.T.native.hub.state(lc, Bool.pick(String, on, "online", "offline"))}], Nil{}}]},
@@ -578,19 +587,42 @@ def View.sidebar.body(+lc: I.Loc, +ms: List<&2, U.MRow>, +ix: U.SIx, +st: M.Stat
             WI.WIcon.button("icon", "proj-open", "", MSG.T.sidebar.add.project(lc), "plus", 16, ""),
             WI.WIcon.button("icon side-toggle", "side-toggle", "", "Hide or show the sidebar · Ctrl+B", "panel-right", 16, "")]},
           D.El{"div", "", [D.At{"class", "sidebar-tools"}], WI.WIcon.button("settings-link", "flag", "settings", MSG.T.palette.settings(lc), "settings", 16, MSG.T.palette.settings(lc))
-              <> View.machines.loc(lc, Nat.is_gt(List.length(&2, U.MRow, ms), 1n), U.Flag.get(open, "machines"), ms)}],
-          D.Dom.cat(uber, D.Dom.cat(View.add.loc(lc, adding), D.Dom.cat(View.find.loc(lc, String.eq(U.Side.view(st), "active"), q),
-            D.Dom.cat(items, D.Dom.cat(bots, D.Dom.cat(View.rmenu(mi),
-Nil{})))))))}
+              <> View.machines.loc(lc, Nat.is_gt(List.length(&2, U.MRow, ms), 1n), U.Flag.get(open, "machines"), ms)}]
+
+# Under the top bar the sidebar starts with its filter and the add-project
+# + beside it; else the filter follows the brand, Settings and the uberbot
+def View.sidebar.find(top: Bool, +lc: I.Loc, +active: Bool, +q: String) -> List<&2, D.Node> & List<&2, D.Node>:
+  match top:
+    case True{}:
+      ([D.El{"div", "", [D.At{"class", "find with-add"}], [WB.WB.input("proj-find", "pq", q, Bool.pick(String, active, MSG.T.palette.search(lc), MSG.T.sidebar.search.projects(lc)), "proj-go"),
+        WI.WIcon.button("icon add-project", "proj-open", "", MSG.T.sidebar.add.project(lc), "plus", 16, "")]}], Nil{})
+    case False{}:
+      (Nil{}, View.find.loc(lc, active, q))
+
+def View.sidebar.top(found: List<&2, D.Node> & List<&2, D.Node>, head: List<&2, D.Node>, uber: List<&2, D.Node>, add: List<&2, D.Node>, rest: List<&2, D.Node>) -> List<&2, D.Node>:
+  (first, later) = found
+  D.Dom.cat(first, D.Dom.cat(head, D.Dom.cat(uber, D.Dom.cat(add, D.Dom.cat(later, rest)))))
+
+def View.sidebar.body.k(+top: Bool, +lc: I.Loc, +ms: List<&2, U.MRow>, +ix: U.SIx, +st: M.State, +sel: String, +open: Map<&2, Bool>, +on: Bool, +now: Nat, adding: Bool, v: String, +look: String, +rm: String, +q: String, mi: List<&2, U.MItem>, bots: List<&2, D.Node>, uber: List<&2, D.Node>, items: List<&2, D.Node>) -> D.Node:
+  D.El{"aside", "sidebar", [D.At{"class", "sidebar"}],
+    View.sidebar.top(View.sidebar.find(top, lc, String.eq(U.Side.view(st), "active"), q), View.sidebar.head(top, lc, ms, open, on, v), uber, View.add.loc(lc, adding),
+      D.Dom.cat(items, D.Dom.cat(bots, View.rmenu(mi))))}
+
+def View.sidebar.body(+lc: I.Loc, +ms: List<&2, U.MRow>, +ix: U.SIx, +st: M.State, +sel: String, +open: Map<&2, Bool>, +on: Bool, +now: Nat, adding: Bool, v: String, +look: String, +rm: String, +q: String, mi: List<&2, U.MItem>, bots: List<&2, D.Node>, uber: List<&2, D.Node>, items: List<&2, D.Node>) -> D.Node:
+  View.sidebar.body.k(False{}, lc, ms, ix, st, sel, open, on, now, adding, v, look, rm, q, mi, bots, uber, items)
 
 def View.sidebar.k(+lc: I.Loc, +ms: List<&2, U.MRow>, +ix: U.SIx, +st: M.State, +sel: String, +open: Map<&2, Bool>, +on: Bool, +now: Nat, adding: Bool, v: String, +look: String, +rm: String, +q: String, mi: List<&2, U.MItem>, bots: List<&2, D.Node>, uber: List<&2, D.Node>) -> D.Node:
   View.sidebar.body(lc, ms, ix, st, sel, open, on, now, adding, v, look, rm, q, mi, bots, uber,
     View.list(lc, String.eq(U.Side.view(st), "active"), q, open, ix, st, sel, now, look, rm))
 
-def View.sidebar.w(+lc: I.Loc, bots: List<&2, D.Node>, uber: List<&2, D.Node>, ms: List<&2, U.MRow>, mi: List<&2, U.MItem>, +ix: U.SIx, u: U.Ui) -> D.Node:
+def View.sidebar.k.top(+top: Bool, +lc: I.Loc, +ms: List<&2, U.MRow>, +ix: U.SIx, +st: M.State, +sel: String, +open: Map<&2, Bool>, +on: Bool, +now: Nat, adding: Bool, v: String, +look: String, +rm: String, +q: String, mi: List<&2, U.MItem>, bots: List<&2, D.Node>, uber: List<&2, D.Node>) -> D.Node:
+  View.sidebar.body.k(top, lc, ms, ix, st, sel, open, on, now, adding, v, look, rm, q, mi, bots, uber,
+    View.list(lc, String.eq(U.Side.view(st), "active"), q, open, ix, st, sel, now, look, rm))
+
+def View.sidebar.w(+lc: I.Loc, bots: List<&2, D.Node>, uber: List<&2, D.Node>, ms: List<&2, U.MRow>, mi: List<&2, U.MItem>, +ix: U.SIx, +u: U.Ui) -> D.Node:
   match u:
     case U.Ui{+st, +sel, +d, _, +open, +on, +now, +adding, _, +v, _, _, _, _, _, _, _}:
-      View.sidebar.k(lc, ms, ix, st, sel, open, on, now, adding, v, U.Str.get(d, "@look"), U.Str.get(d, "@rm"), U.Find.q(open, d), mi, bots, uber)
+      View.sidebar.k.top(View.chrome(u), lc, ms, ix, st, sel, open, on, now, adding, v, U.Str.get(d, "@look"), U.Str.get(d, "@rm"), U.Find.q(open, d), mi, bots, uber)
 
 # the sidebar's index (Side.ix: every thread and ask of the state) is made
 # once a frame, for the list and the uberbot's counts both
@@ -614,10 +646,10 @@ def View.list.projected(+lc: I.Loc, active: Bool, +rows: List<&2, U.SRow>, raw: 
     case False{}:
       List.append(&2, D.Node, View.groups(lc, U.Side.groups(rows, now), q, open, ix, st, sel, now, look, rm), View.history(lc, q, open, ix, st, sel, now))
 
-def View.sidebar.projected(+lc: I.Loc, bots: List<&2, D.Node>, uber: List<&2, D.Node>, ms: List<&2, U.MRow>, mi: List<&2, U.MItem>, +ix: U.SIx, u: U.Ui, rows: List<&2, U.SRow>, raw: List<&2, U.SRow>) -> D.Node:
+def View.sidebar.projected(+lc: I.Loc, bots: List<&2, D.Node>, uber: List<&2, D.Node>, ms: List<&2, U.MRow>, mi: List<&2, U.MItem>, +ix: U.SIx, +u: U.Ui, rows: List<&2, U.SRow>, raw: List<&2, U.SRow>) -> D.Node:
   match u:
     case U.Ui{+st, +sel, +d, _, +open, +on, +now, +adding, _, +v, _, _, _, _, _, _, _}:
-      View.sidebar.body(lc, ms, ix, st, sel, open, on, now, adding, v, U.Str.get(d, "@look"), U.Str.get(d, "@rm"), U.Find.q(open, d), mi, bots, uber,
+      View.sidebar.body.k(View.chrome(u), lc, ms, ix, st, sel, open, on, now, adding, v, U.Str.get(d, "@look"), U.Str.get(d, "@rm"), U.Find.q(open, d), mi, bots, uber,
         View.list.projected(lc, String.eq(U.Side.view(st), "active"), rows, raw, U.Find.q(open, d), open, ix, st, sel, now, U.Str.get(d, "@look"), U.Str.get(d, "@rm")))
 
 def View.sidebar.threads.kind(active: Bool, +u: U.Ui, ix: U.SIx, rows: List<&2, U.SRow>, raw: List<&2, U.SRow>) -> List<&2, String>:
@@ -870,6 +902,17 @@ def View.group.label(lc: I.Loc, snooze: Bool) -> String:
     case I.En{}: Bool.pick(String, snooze, "Snooze thread", "Thread")
     case I.Ja{}: Bool.pick(String, snooze, "スヌーズ", "スレッド")
 
+# the thread's menu (the header's ⋯, the top bar's ▾): where it sits in the
+# list, fork, a subthread, the snooze choices; open while a delete is armed
+def View.thread.actions(+lc: I.Loc, summary: List<&2, D.Node>, +st: M.State, +id: String, settled: Bool, pinned: Bool, snoozed: Bool, archived: Bool, +del: Bool, term: Bool, +panel: Bool) -> D.Node:
+  D.El{"details", "thread-actions:" ++ id, List.append(&2, D.Attr, [D.At{"class", "local-menu thread-actions"}], Bool.pick(List<&2, D.Attr>, del, [D.At{"open", ""}], Nil{})), [
+    D.El{"summary", "", [D.At{"aria-label", "Thread actions"}, D.At{"title", "Thread actions"}], summary},
+    D.El{"div", "", [D.At{"class", "local-menu-body"}], List.concat(&2, D.Node, [
+      View.header.tools(lc, TO.Tools.head.loc(lc, TO.Head{False{}, settled, pinned, snoozed, archived, del,
+        Bool.not(String.is_empty(M.Fork.source(st, id))), term, panel}, "flag", "snooze", "term-toggle", "@term-size")),
+      D.Dom.when(U.ThreadTree.can_route(st, id), D.Dom.button("", "thread-child", id, "Create a conversation beneath this thread", "+ New subthread")),
+      [D.Dom.span("control-label", View.group.label(lc, True{}))], List.take(&2, D.Node, View.snoozes.loc(lc, True{}), 3n)])}]}
+
 def View.header(+lc: I.Loc, t: M.Thread, +st: M.State, +chip: String, mini: List<&2, TO.Tool>, +panel: Bool, snoozed: Bool, picking: Bool, term: Bool, +diff: Bool, +del: Bool, +ren: String, +rtext: String) -> D.Node:
   match t:
     case M.Thread{+id, +p, title, _, _, turn, _, archived, override, +sa, +ua, pinned, _, +branch, _, _, model, _, _, _, _}:
@@ -879,13 +922,7 @@ def View.header(+lc: I.Loc, t: M.Thread, +st: M.State, +chip: String, mini: List
         D.El{"div", "", [D.At{"class", "title-box"}], View.title.k.loc(lc, String.eq(ren, id), id, U.Label.title(st, id, TTL.Title.shown(lc, title)), rtext)},
         D.Dom.span("meta", Bool.pick(String, String.is_empty(branch), "", branch))], View.boat.chip.loc(lc, chip), [
         D.El{"div", "", [D.At{"class", "tools thread-controls"}], List.append(&2, D.Node, View.tools(mini), [
-          D.El{"details", "thread-actions:" ++ id, List.append(&2, D.Attr, [D.At{"class", "local-menu thread-actions"}], Bool.pick(List<&2, D.Attr>, del, [D.At{"open", ""}], Nil{})), [
-            D.El{"summary", "", [D.At{"aria-label", "Thread actions"}, D.At{"title", "Thread actions"}], [D.Dom.span("menu-dots", "⋯")]},
-            D.El{"div", "", [D.At{"class", "local-menu-body"}], List.concat(&2, D.Node, [
-              View.header.tools(lc, TO.Tools.head.loc(lc, TO.Head{False{}, TO.Tools.settled(override, Nat.is_gt(sa, ua)), pinned, snoozed, archived, del,
-                Bool.not(String.is_empty(M.Fork.source(st, id))), term, panel}, "flag", "snooze", "term-toggle", "@term-size")),
-              D.Dom.when(U.ThreadTree.can_route(st, id), D.Dom.button("", "thread-child", id, "Create a conversation beneath this thread", "+ New subthread")),
-              [D.Dom.span("control-label", View.group.label(lc, True{}))], List.take(&2, D.Node, View.snoozes.loc(lc, True{}), 3n)])}]}])}]])}
+          View.thread.actions(lc, [D.Dom.span("menu-dots", "⋯")], st, id, TO.Tools.settled(override, Nat.is_gt(sa, ua)), pinned, snoozed, archived, del, term, panel)])}]])}
 
 def View.header.legacy(+lc: I.Loc, t: M.Thread, +st: M.State, +chip: String, mini: List<&2, TO.Tool>, +panel: Bool, snoozed: Bool, picking: Bool, term: Bool, +diff: Bool, del: Bool, +ren: String, +rtext: String) -> D.Node:
   match t:
@@ -1712,16 +1749,23 @@ def View.settings.body(root: Bool, +lc: I.Loc, +u: U.Ui, +st: M.State, +nf: Map<
     case True{}: View.settings.root(lc, u)
     case False{}: List.append(&2, D.Node, SM.Menu.context(lc, U.Settings.page(u)), View.settings.rows(C.Codec.pos(U.Settings.pages(), U.Settings.page(u)), lc, u, st, nf, v, note))
 
+# Settings' own head (its name, Close); under the top bar, whose crumb names
+# it and whose gear closes it, there is none
+def View.settings.head(top: Bool, +lc: I.Loc) -> List<&2, D.Node>:
+  match top:
+    case True{}: Nil{}
+    case False{}:
+      [D.El{"header", "", [D.At{"class", "thread-head settings-head"}], [
+        D.Dom.span("title", MSG.T.palette.settings(lc)), D.Dom.span("meta", ""),
+        D.Dom.button("", "flag", "settings", MSG.T.settings.close(lc), MSG.T.common.close(lc))]}]
+
 def View.settings.loc(+lc: I.Loc, +u: U.Ui, +st: M.State, +nf: Map<&2, String>, +v: String, +note: String) -> D.Node:
   +page = U.Settings.page(u)
-  D.El{"main", "settings", [D.At{"class", "settings-view"}], [
-    D.El{"header", "", [D.At{"class", "thread-head settings-head"}], [
-      D.Dom.span("title", MSG.T.palette.settings(lc)), D.Dom.span("meta", ""),
-      D.Dom.button("", "flag", "settings", MSG.T.settings.close(lc), MSG.T.common.close(lc))]},
+  D.El{"main", "settings", [D.At{"class", "settings-view"}], List.append(&2, D.Node, View.settings.head(View.chrome(u), lc), [
     D.El{"nav", "settings-path", [D.At{"class", "settings-path"}, D.At{"aria-label", MSG.T.palette.settings(lc)}],
       D.Dom.cat(D.Dom.when(Bool.not(String.is_empty(page)), D.Dom.button("", "settings-page", "", MSG.T.palette.settings(lc), "‹ " ++ MSG.T.palette.settings(lc))),
         [D.El{"h2", "settings-title", [D.At{"id", "settings-title"}, D.At{"tabindex", "-1"}], [D.Txt{U.Settings.title(lc, page)}]}])},
-    D.El{"div", "settings-content", [D.At{"id", "settings-content"}, D.At{"class", "settings"}, D.At{"data-settings-page", page}], View.settings.body(String.is_empty(page), lc, u, st, nf, v, note)}]}
+    D.El{"div", "settings-content", [D.At{"id", "settings-content"}, D.At{"class", "settings"}, D.At{"data-settings-page", page}], View.settings.body(String.is_empty(page), lc, u, st, nf, v, note)}])}
 
 def View.settings(+u: U.Ui, +st: M.State, +nf: Map<&2, String>, +v: String, +note: String) -> D.Node:
   View.settings.loc(U.Lang.loc(u), u, st, nf, v, note)
@@ -2695,6 +2739,18 @@ def View.hold.pill(+label: String) -> List<&2, D.Node>:
 def View.thread.subs(+lc: I.Loc, +st: M.State, +nf: Map<&2, String>, +id: String, now: Nat) -> List<&2, D.Node>:
   Bool.pick(List<&2, D.Node>, US.Ub.chat.is(st, id), Nil{}, View.subs(lc, nf, id, SB.Subs.rows(st, nf, id, now)))
 
+# Under the top bar its Subagents cell is the dock's head: the dock is only
+# its rows, while that cell has them open
+def View.subs.dock.k(open: Bool, +lc: I.Loc, +info: Map<&2, String>, +rs: List<&2, SB.SubRow>) -> List<&2, D.Node>:
+  match open:
+    case True{}:
+      [D.El{"section", "subs", [D.At{"aria-label", MSG.T.thread.subagents(lc)}, D.At{"class", "subs dock"}], [View.subs.body(True{}, View.subs.signals.go(lc, SB.Subs.panel.rows(True{}, rs), info))]}]
+    case False{}:
+      Nil{}
+
+def View.subs.dock(+lc: I.Loc, +st: M.State, +info: Map<&2, String>, +th: String, +rs: List<&2, SB.SubRow>) -> List<&2, D.Node>:
+  View.subs.dock.k(Bool.and(Bool.not(List.is_empty(&2, SB.SubRow, rs)), Bool.and(Bool.not(US.Ub.chat.is(st, th)), SB.Subs.panel.open(info, th, rs))), lc, info, rs)
+
 def View.tab(+cur: String, +kind: String, +action: String, +value: String, +title: String, +label: String) -> D.Node:
   D.El{"button", "", [D.At{"class", Bool.pick(String, String.eq(cur, kind), "tab on", "tab")}, D.At{"type", "button"},
     D.At{"aria-current", Bool.pick(String, String.eq(cur, kind), "page", "false")}, D.At{"data-value", value}, D.At{"title", title}, D.On{"click", action}], [D.Txt{label}]}
@@ -2823,6 +2879,23 @@ def View.thread.workbar(+lc: I.Loc, summary: Bool, +info: Map<&2, String>, +id: 
 def View.tabs(+cur: String) -> D.Node:
   View.tabs.loc(I.En{}, cur)
 
+# what the thread's page draws of its own head: nothing a top bar shows
+# (own: the bar shows this thread), else its header, work line and dock
+def View.top.own(own: Bool, rail: Bool, +lc: I.Loc, hd: List<&2, D.Node>, t: M.Thread, +st: M.State, +chip: String, mini: List<&2, TO.Tool>, +panel: Bool, snoozed: Bool, picking: Bool, term: Bool, +diff: Bool, +del: Bool, +ren: String, +rtext: String) -> List<&2, D.Node>:
+  match own:
+    case True{}: Nil{}
+    case False{}: View.top(rail, lc, hd, t, st, chip, mini, panel, snoozed, picking, term, diff, del, ren, rtext)
+
+def View.thread.workbar.own(own: Bool, +lc: I.Loc, summary: Bool, +info: Map<&2, String>, +id: String, running: Bool) -> List<&2, D.Node>:
+  match own:
+    case True{}: Nil{}
+    case False{}: View.thread.workbar(lc, summary, info, id, running)
+
+def View.thread.subs.own(own: Bool, +lc: I.Loc, +st: M.State, +nf: Map<&2, String>, +id: String, now: Nat) -> List<&2, D.Node>:
+  match own:
+    case True{}: View.subs.dock(lc, st, nf, id, SB.Subs.rows(st, nf, id, now))
+    case False{}: View.thread.subs(lc, st, nf, id, now)
+
 def View.thread.frame(rail: Bool, +attrs: List<&2, D.Attr>, +nav: D.Node, +content: List<&2, D.Node>) -> D.Node:
   match rail:
     case True{}:
@@ -2832,16 +2905,17 @@ def View.thread.frame(rail: Bool, +attrs: List<&2, D.Attr>, +nav: D.Node, +conte
       # its absolute box so measuring terminal cells cannot extend the page.
       D.El{"main", "thread", attrs, D.El{"style", "workspace-compat", Nil{}, [D.Txt{".term-probe { top: 0; left: 0; }"}]} <> nav <> content}
 
-def View.thread.p(+lc: I.Loc, +u: U.Ui, t: M.Thread, pend: List<&2, String>, +atts: List<&2, String>, +up: String, +term: Bool, hd: List<&2, D.Node>, vo: List<&2, D.Node>, +mic: String, fab: List<&2, D.Node>, rd: List<&2, D.Node>, mini: List<&2, TO.Tool>, +pill: String) -> D.Node:
+def View.thread.p(+lc: I.Loc, +u: U.Ui, t: M.Thread, pend: List<&2, String>, +atts: List<&2, String>, +up: String, +term: Bool, +hd: List<&2, D.Node>, vo: List<&2, D.Node>, +mic: String, fab: List<&2, D.Node>, rd: List<&2, D.Node>, mini: List<&2, TO.Tool>, +pill: String) -> D.Node:
   match u t:
     case U.Ui{+st, +sel, +drafts, +live, +op, _, +now, _, +panel, _, _, _, _, _, +nf, _, +tr} M.Thread{+id, p, ti, c, a, +turn, pe, ar, o, sa, ua, pi, en, br, wt, +pr, +mo, rm, im, se, de}:
+      +own = Bool.and(View.chrome(u), List.is_empty(&2, D.Node, hd))
       View.thread.frame(View.rail(u), [D.At{"class", Bool.pick(String, View.rail(u), Bool.pick(String, term, "thread-view workspace-thread with-term", "thread-view workspace-thread"), Bool.pick(String, term, "thread-view with-term", "thread-view")) ++ Bool.pick(String, U.Flag.get(op, "drop"), " dropping", "")},
         D.At{"data-thread", id}, D.At{"data-drop", "attach"}, D.At{"data-drop-hover", "drop-hover"}],
         View.workspace.for(View.rail(u), lc, U.Fm.tab(U.Str.get(nf, "view.kind:" ++ id)), panel, term), List.concat(&2, D.Node, [
-        View.top(View.rail(u), lc, hd, M.Thread{id, p, ti, c, a, turn, pe, ar, o, sa, ua, pi, en, br, wt, pr, mo, rm, im, se, de}, st, UZ.Chip.of(st, id, now), mini, panel, M.Snooze.on(now, U.Side.until(st, id)), U.Flag.get(op, "snooze"), term, String.eq(U.Str.get(nf, "view.kind:" ++ id), "diff"), String.eq(U.Str.get(drafts, "@del"), id), U.Str.get(drafts, "@ren"), U.Str.get(drafts, "@f.title")),
+        View.top.own(own, View.rail(u), lc, hd, M.Thread{id, p, ti, c, a, turn, pe, ar, o, sa, ua, pi, en, br, wt, pr, mo, rm, im, se, de}, st, UZ.Chip.of(st, id, now), mini, panel, M.Snooze.on(now, U.Side.until(st, id)), U.Flag.get(op, "snooze"), term, String.eq(U.Str.get(nf, "view.kind:" ++ id), "diff"), String.eq(U.Str.get(drafts, "@del"), id), U.Str.get(drafts, "@ren"), U.Str.get(drafts, "@f.title")),
         View.kx.note(U.KX.note(nf, sel), nf, sel), View.kn.loc(lc, U.KN.thread(nf, st, sel), True{}),
-        View.thread.workbar(lc, BI.BU.chat.summary(st, id), nf, id, View.running(turn)),
-        View.thread.subs(lc, st, nf, id, now),
+        View.thread.workbar.own(own, lc, BI.BU.chat.summary(st, id), nf, id, View.running(turn)),
+        View.thread.subs.own(own, lc, st, nf, id, now),
         [D.El{"div", "timeline", [D.At{"class", "timeline"}, D.At{"id", "timeline"}], List.concat(&2, D.Node, [
           fab, View.parent(st, id, U.Tasks.up(st, id)),
           [D.El{"div", "work", [D.At{"class", "work"}], View.pins.loc(lc, U.Ec.pins(U.Ec.make(U.MailvLocal.terms(tr), st, id, now), st, id), U.Ec.make(U.MailvLocal.terms(tr), st, id, now))}],
@@ -3840,16 +3914,181 @@ def View.tour.cls.k(on: Bool, +g: String) -> String:
 def View.tour.cls(+u: U.Ui) -> String:
   View.tour.cls.k(U.Tour.on(u), U.Tour.target(1n, u))
 
+# The window's top bar (View.chrome): the mark with the hub's dot, where you
+# are as a breadcrumb (a thread: its project, its title, which a click
+# renames, and ▾ its menu; else Settings, a bot, a room or the projects),
+# the shown thread's state as key/value cells, the command field, then the
+# sidebar fold, search and Settings. On a phone-sized page a ‹ before the
+# crumbs goes back to the list.
+def View.chrome.state.k(lc: I.Loc) -> String:
+  match lc:
+    case I.Ja{}: "状態"
+    case _: "State"
+
+# the state's word in its cell; the whole sentence is the cell's tooltip
+def View.chrome.state.word(lc: I.Loc, +name: String) -> String:
+  match lc:
+    case I.Ja{}:
+      Bool.pick(String, String.eq(name, "blocked"), "対応待ち", Bool.pick(String, String.eq(name, "active"), "作業中", Bool.pick(String, String.eq(name, "settled"), "完了", "待機")))
+    case _:
+      Bool.pick(String, String.eq(name, "blocked"), "needs you", Bool.pick(String, String.eq(name, "active"), "working", Bool.pick(String, String.eq(name, "settled"), "settled", "idle")))
+
+def View.chrome.changes.k(lc: I.Loc) -> String:
+  match lc:
+    case I.Ja{}: "変更"
+    case _: "Changes"
+
+def View.chrome.changes.tip(lc: I.Loc) -> String:
+  match lc:
+    case I.Ja{}: "このスレッドでエージェントが設計に加えた変更（ビューアの履歴で再生できます）"
+    case _: "Design changes the agents made in this thread (the viewer's history plays them)"
+
+def View.chrome.jump(lc: I.Loc) -> String:
+  match lc:
+    case I.Ja{}: "移動・コマンド実行"
+    case _: "Jump or run a command"
+
+def View.chrome.jump.tip(lc: I.Loc) -> String:
+  match lc:
+    case I.Ja{}: "コマンドパレット: スレッド、プロジェクト、コマンド · Ctrl+K"
+    case _: "Command palette: threads, projects and commands · Ctrl+K"
+
+def View.chrome.where(lc: I.Loc) -> String:
+  match lc:
+    case I.Ja{}: "現在地"
+    case _: "Where you are"
+
+def View.chrome.sep() -> D.Node:
+  D.El{"span", "", [D.At{"class", "sep"}, D.At{"aria-hidden", "true"}], [D.Txt{"/"}]}
+
+# crumbs that only name a place
+def View.chrome.crumbs(ns: List<&2, String>) -> List<&2, D.Node>:
+  match ns:
+    case Nil{}: Nil{}
+    case n <> t: View.chrome.sep() <> D.Dom.span("crumb", n) <> View.chrome.crumbs(t)
+
+def View.chrome.nav(+lc: I.Loc, kids: List<&2, D.Node>) -> D.Node:
+  D.El{"nav", "crumbs", [D.At{"class", "crumbs"}, D.At{"aria-label", View.chrome.where(lc)}], kids}
+
+def View.chrome.back(+lc: I.Loc, +action: String, +value: String) -> D.Node:
+  D.Dom.button("back", action, value, MSG.T.tour.back(lc), "‹")
+
+# a key/value cell: the key small and faint, then what it says
+def View.chrome.kv(+cls: String, +title: String, +k: String, vs: List<&2, D.Node>) -> D.Node:
+  D.El{"span", "", [D.At{"class", "kv " ++ cls}, D.At{"title", title}], D.Dom.span("k", k) <> vs}
+
+# the thread's state (the work line's signal), Stop beside it while a turn runs
+def View.chrome.state(+lc: I.Loc, +info: Map<&2, String>, +id: String, running: Bool) -> D.Node:
+  +signal = SG.Signal.cached(info, id)
+  D.El{"span", "work", [D.At{"class", "kv state"}, D.At{"role", "group"}, D.At{"aria-label", View.work.label(lc)}, D.At{"title", SG.Signal.label(lc, signal)}],
+    List.append(&2, D.Node, [D.Dom.span("k", View.chrome.state.k(lc)), View.dot(lc, SG.Signal.name(signal)), D.Dom.span("v work-state", View.chrome.state.word(lc, SG.Signal.name(signal)))],
+      View.tools(TO.Tools.stop.loc(lc, running)))}
+
+# the subagents: a click opens or shuts their rows under the bar (View.subs.dock)
+def View.chrome.subs.k(+lc: I.Loc, +open: Bool, +th: String, +rs: List<&2, SB.SubRow>, +info: Map<&2, String>) -> D.Node:
+  D.El{"button", "subs-head", [D.At{"class", "kv subs-head" ++ Bool.pick(String, String.is_empty(View.sub.busy(lc, SB.Subs.active(rs, info))), "", " busy")}, D.At{"type", "button"},
+    D.At{"aria-expanded", Bool.pick(String, open, "true", "false")}, D.At{"aria-controls", "subagent-rows"},
+    D.At{"data-value", SB.Subs.panel.ask(open, th, rs)}, D.On{"click", SB.Subs.panel.action(open)},
+    D.At{"title", Bool.pick(String, open, MSG.T.subagents.hide(lc), MSG.T.subagents.show(lc))}],
+    [D.Dom.span("k", MSG.T.thread.subagents(lc)), D.Dom.span("v", View.sub.signal.panel(lc, rs, info)), WI.WIcon.svg("chevron-down", 12)]}
+
+def View.chrome.subs(+lc: I.Loc, +st: M.State, +info: Map<&2, String>, +th: String, +rs: List<&2, SB.SubRow>) -> List<&2, D.Node>:
+  D.Dom.when(Bool.and(Bool.not(List.is_empty(&2, SB.SubRow, rs)), Bool.not(US.Ub.chat.is(st, th))), View.chrome.subs.k(lc, SB.Subs.panel.open(info, th, rs), th, rs, info))
+
+def View.chrome.changes(+lc: I.Loc, +n: Nat) -> List<&2, D.Node>:
+  D.Dom.when(Nat.is_gt(n, 0n), View.chrome.kv("changes", View.chrome.changes.tip(lc), View.chrome.changes.k(lc), [D.Dom.span("v", Nat.show(n))]))
+
+def View.chrome.branch(+b: String) -> List<&2, D.Node>:
+  D.Dom.when(Bool.not(String.is_empty(b)), D.El{"span", "", [D.At{"class", "kv branch"}, D.At{"title", b}], [WI.WIcon.svg("git-branch", 12), D.Dom.span("v", b)]})
+
+# a thread: its project, its title (a click renames it) and ▾ its menu, then
+# its cells
+def View.chrome.thread(+lc: I.Loc, +u: U.Ui, t: M.Thread) -> List<&2, D.Node>:
+  match u t:
+    case U.Ui{+st, _, +drafts, _, _, _, +now, _, +panel, _, _, _, _, _, +nf, _, _} M.Thread{+id, +p, title, _, _, turn, _, archived, override, +sa, +ua, pinned, _, +branch, _, _, _, _, _, _, _}:
+      [View.chrome.nav(lc, [
+        View.chrome.sep(),
+        D.El{"span", "", [D.At{"class", "crumb proj"}, D.At{"style", "--tint:" ++ BG.Badge.css_of(st, p)}], [D.El{"i", "", [D.At{"class", "sw"}], Nil{}}, D.Txt{U.Label.title(st, p, U.Ui.project_title(st, p))}]},
+        View.chrome.sep(),
+        D.El{"div", "", [D.At{"class", "title-box"}], View.title.k.loc(lc, String.eq(U.Str.get(drafts, "@ren"), id), id, U.Label.title(st, id, TTL.Title.shown(lc, title)), U.Str.get(drafts, "@f.title"))},
+        View.thread.actions(lc, [WI.WIcon.svg("chevron-down", 14)], st, id, TO.Tools.settled(override, Nat.is_gt(sa, ua)), pinned, M.Snooze.on(now, U.Side.until(st, id)), archived,
+          String.eq(U.Str.get(drafts, "@del"), id), U.Ui.flag(u, "term"), panel)]),
+       D.El{"div", "kvs", [D.At{"class", "kvs"}], List.concat(&2, D.Node, [
+         [View.chrome.state(lc, nf, id, View.running(turn))],
+         View.chrome.subs(lc, st, nf, id, SB.Subs.rows(st, nf, id, now)),
+         View.chrome.changes(lc, List.length(&2, M.Entry, M.State.steps(st, id))),
+         View.chrome.branch(branch),
+         View.boat.chip.loc(lc, UZ.Chip.of(st, id, now)),
+         View.tools(U.Fab.mini.tools(u))])}]
+
+def View.chrome.selected(none: Bool, +lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
+  match none:
+    case True{}: [View.chrome.nav(lc, View.chrome.crumbs([MSG.T.tour.title.projects(lc)]))]
+    case False{}: View.chrome.back(lc, "select", "") <> View.chrome.thread(lc, u, U.Ui.thread(U.Ui.state(u), U.Ui.sel(u)))
+
+# Settings, and the page open in it (its name goes back to the menu)
+def View.chrome.settings.k(root: Bool, +lc: I.Loc, +page: String) -> List<&2, D.Node>:
+  match root:
+    case True{}: View.chrome.crumbs([MSG.T.palette.settings(lc)])
+    case False{}: View.chrome.sep() <> D.Dom.button("crumb link", "settings-page", "", MSG.T.palette.settings(lc), MSG.T.palette.settings(lc)) <> View.chrome.crumbs([U.Settings.title(lc, page)])
+
+def View.chrome.settings(+lc: I.Loc, +page: String) -> List<&2, D.Node>:
+  View.chrome.settings.k(String.is_empty(page), lc, page)
+
+# where you are: Settings over all, then what the main area shows
+def View.chrome.place(+lc: I.Loc, settings: Bool, bv: BI.View, +u: U.Ui) -> List<&2, D.Node>:
+  match settings bv:
+    case True{} _:
+      [View.chrome.back(lc, "flag", "settings"), View.chrome.nav(lc, View.chrome.settings(lc, U.Settings.page(u)))]
+    case False{} BI.VBot{b}:
+      [View.chrome.nav(lc, View.chrome.crumbs([MSG.T.tour.title.bots(lc), BI.Head.title(BI.BU.head.bot(u, b))]))]
+    case False{} BI.VRoom{r}:
+      [View.chrome.nav(lc, View.chrome.crumbs([MSG.T.bots.rooms(lc), "# " ++ BT.Room.name(r)]))]
+    case False{} BI.VRemote{id}:
+      [View.chrome.nav(lc, View.chrome.crumbs([BI.Head.title(BI.BU.head(u, BI.VRemote{id}))]))]
+    case False{} BI.VThread{}:
+      View.chrome.selected(String.is_empty(U.Ui.sel(u)), lc, u)
+
+def View.chrome.brand(+lc: I.Loc, +on: Bool, +v: String) -> List<&2, D.Node>:
+  [D.El{"span", "", [D.At{"class", "brand-mark"}], [D.El{"span", "", [D.At{"class", Bool.pick(String, on, "conn on", "conn")},
+     D.At{"role", "img"}, D.At{"title", MSG.T.native.hub.state(lc, Bool.pick(String, on, "online", "offline"))},
+     D.At{"aria-label", MSG.T.native.hub.state(lc, Bool.pick(String, on, "online", "offline"))}], Nil{}}]},
+   D.El{"span", "", [D.At{"class", "name"}, D.At{"title", "Backplane " ++ v}], [D.Txt{"Backplane"}]}]
+
+# the command palette's field (WS.palette, Ctrl+K)
+def View.chrome.cmd(+lc: I.Loc) -> D.Node:
+  D.El{"button", "", [D.At{"class", "cmd"}, D.At{"type", "button"}, D.At{"title", View.chrome.jump.tip(lc)}, D.At{"data-value", ""}, D.On{"click", "ws-palette-open"}],
+    [WI.WIcon.svg("chevron-right", 13), D.Dom.span("cmd-text", View.chrome.jump(lc)), D.El{"kbd", "", Nil{}, [D.Txt{"Ctrl K"}]}]}
+
+# the sidebar's fold (Ctrl+B), search (Ctrl+Shift+F) and Settings, on while open
+def View.chrome.tools(+lc: I.Loc, settings: Bool) -> D.Node:
+  D.El{"div", "", [D.At{"class", "tb"}], [
+    WI.WIcon.button("side-toggle", "side-toggle", "", "Hide or show the sidebar · Ctrl+B", "panel-right", 15, ""),
+    WI.WIcon.button("find-open", "thin-search-open", "", "Search conversations · Ctrl+Shift+F", "search", 15, ""),
+    WI.WIcon.button(Bool.pick(String, settings, "gear on", "gear"), "flag", "settings", MSG.T.palette.settings(lc), "settings", 15, "")]}
+
+def View.chrome.bar(+lc: I.Loc, +settings: Bool, bv: BI.View, +u: U.Ui) -> D.Node:
+  match u:
+    case U.Ui{_, _, _, _, _, +on, _, _, _, +v, _, _, _, _, _, _, _}:
+      D.El{"header", "topbar", [D.At{"class", "topbar"}], List.concat(&2, D.Node, [
+        View.chrome.brand(lc, on, v), View.chrome.place(lc, settings, bv, u),
+        [D.Dom.span("grow", ""), View.chrome.cmd(lc), View.chrome.tools(lc, settings)]])}
+
+def View.chrome.if(top: Bool, +lc: I.Loc, +settings: Bool, bv: BI.View, +u: U.Ui) -> List<&2, D.Node>:
+  match top:
+    case True{}: [View.chrome.bar(lc, settings, bv, u)]
+    case False{}: Nil{}
+
 # the whole page
 def View.page.b.sidebar(+lc: I.Loc, +bv: BI.View, u: U.Ui, sidebar: D.Node) -> D.Node:
   match u:
     case U.Ui{+st, +sel, +d, +l, +o, +on, +now, +ad, +pa, +v, +r, +w, +e, +note, +nf, +ob, +tr}:
       D.El{"div", "app", [D.At{"data-bub-home", J.Json.show(HOP.Hop.snapshot(U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}))}, D.At{"style", "--text-scale:" ++ U32.show(TS.Scale.of(st))}, D.At{"class", Bool.pick(String, pa, "app panel", "app") ++ Bool.pick(String, Bool.or(Bool.or(Bool.not(String.is_empty(sel)), U.Flag.get(o, "settings")), WB.WB.shown(bv)), " picked", "")
-        ++ Bool.pick(String, String.eq(M.Setting.get(st, "ui.theme", ""), "light"), " light", "") ++ View.tour.cls(U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr})}],
-        D.Dom.cat([sidebar,
+        ++ Bool.pick(String, String.eq(M.Setting.get(st, "ui.theme", ""), "light"), " light", "") ++ Bool.pick(String, View.chrome(U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}), " top", "") ++ View.tour.cls(U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr})}],
+        D.Dom.cat(View.chrome.if(View.chrome(U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}), lc, U.Flag.get(o, "settings"), bv, U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}), D.Dom.cat([sidebar,
           View.main.b(lc, U.Flag.get(o, "settings"), bv, U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}, sel, List.length(&2, M.Project, U.Ui.projects(st)))],
           D.Dom.cat(View.aside.if(lc, pa, U.Str.get(nf, "view.kind:" ++ sel), U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}),
-            D.Dom.cat(View.picker(lc, U.Flag.get(o, "proj"), U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}), D.Dom.cat(View.error(e), View.tour(lc, U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr})))))}
+            D.Dom.cat(View.picker(lc, U.Flag.get(o, "proj"), U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}), D.Dom.cat(View.error(e), View.tour(lc, U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}))))))}
 
 def View.page.sidebar.node(reuse: Bool, +lc: I.Loc, u: U.Ui) -> D.Node:
   match reuse:

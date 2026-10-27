@@ -27,9 +27,12 @@ def lang(u: U.Ui) -> String:
 def lang_preview(u: U.Ui) -> U.Ui:
   U.Ui.scratch_set(u, "@lang.preview", "1")
 
+# a page this build drew itself uses the rail and the top bar; a hub's
+# session keeps what its host asked for (thin-view's Session.renderer)
 def stamp(+u: U.Ui) -> U.Ui:
-  U.Ui.info_set(U.Ui.info_set(u, "local.mailroom", "on"), "local.workspace.layout",
-    Bool.pick(String, String.is_empty(U.Ui.info(u, "local.workspace.layout")), "rail-v1", U.Ui.info(u, "local.workspace.layout")))
+  U.Ui.info_set(U.Ui.info_set(U.Ui.info_set(u, "local.mailroom", "on"), "local.workspace.layout",
+    Bool.pick(String, String.is_empty(U.Ui.info(u, "local.workspace.layout")), "rail-v1", U.Ui.info(u, "local.workspace.layout"))), "local.workspace.chrome",
+    Bool.pick(String, String.is_empty(U.Ui.info(u, "local.workspace.chrome")), "top-v1", U.Ui.info(u, "local.workspace.chrome")))
 
 def ready(a: U.Act) -> U.Act:
   match a:
