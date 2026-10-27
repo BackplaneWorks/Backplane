@@ -398,6 +398,9 @@ def Stb.build(+home: String, +chunk: U32) -> IO(Built):
     rm : Result<&1, &1, U32 & String, U32 & (String & String)> <- Process.run("rm", ["-f", db, db ++ "-wal", db ++ "-shm", db ++ "-journal"], "", 4096, 30000)
     o : String <- D.Db.open(db)
     +h : String <- Stb.open(o)
+    # The offline build must be a standalone file before atomic promotion.
+    journal : String <- D.Db.exec(h, "PRAGMA journal_mode = DELETE")
+    Stb.check("build journal", journal)
     sch : String <- D.Db.exec(h, SDB.Sdb.schema())
     Stb.check("schema", sch)
     sy : String <- D.Db.exec(h, "PRAGMA synchronous = OFF")
