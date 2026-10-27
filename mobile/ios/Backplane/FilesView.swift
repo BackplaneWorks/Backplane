@@ -20,6 +20,7 @@ private func fileSymbol(_ name: String) -> String {
 
 // the viewer's choices (Board, Schematic, 3D, Mech, Files) and its close button
 struct ViewerChoices: View {
+    @Environment(\.dismissBackplaneViewer) private var dismissViewer
     @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let viewer: Viewer
@@ -30,9 +31,12 @@ struct ViewerChoices: View {
                 ForEach(viewer.choices, id: \.value) { Text($0.label).tag($0.value) }
             }
             .pickerStyle(.segmented)
+            .disabled(!model.contentReady)
+            ViewerConnectionStatus(model: model)
             Spacer()
-            Button { model.act("view", "") } label: { Image(systemName: "xmark.circle.fill").font(.title2) }
+            Button { dismissViewer() } label: { Image(systemName: "xmark.circle.fill").font(.title2) }
                 .accessibilityLabel(NativeMessages.common_close(lang))
+                .accessibilityIdentifier("viewer.close")
         }
         .padding(.horizontal)
         .padding(.vertical, 6)

@@ -6,7 +6,7 @@ export async function registerBridgeChecks(check,stage,root){
  const stub=path.join(stage,'src/mobile/app-stub.mjs');fs.copyFileSync(path.join(root,'test/tools/native_thin_app_stub_307265.mjs'),stub);
  const code=fs.readFileSync(process.env.BP_NATIVE_BRIDGE_SOURCE||path.join(root,'src/mobile/bridge.js'),'utf8').replace('import App from "./app.bend";','import App from "./app-stub.mjs";');
  fs.writeFileSync(path.join(stage,'src/mobile/bridge.js'),code);await import(pathToFileURL(path.join(stage,'src/mobile/bridge.js')));
- const {observed,screen}=await import(pathToFileURL(stub));const B=globalThis.Backplane;
+ const {observed,screen,j,default:stubApp}=await import(pathToFileURL(stub));const B=globalThis.Backplane;
  const bhead=(major,n)=>n<24?Buffer.from([(major<<5)|n]):n<256?Buffer.from([(major<<5)|24,n]):n<65536?Buffer.from([(major<<5)|25,n>>8,n&255]):Buffer.from([(major<<5)|26,n>>>24,(n>>>16)&255,(n>>>8)&255,n&255]);
  const encode=v=>v===null?Buffer.from([246]):typeof v==='boolean'?Buffer.from([v?245:244]):typeof v==='number'?(v>4294967295?Buffer.concat([Buffer.from([199]),encode(String(v))]):bhead(0,v)):typeof v==='string'?Buffer.concat([bhead(3,Buffer.byteLength(v)),Buffer.from(v)]):Array.isArray(v)?Buffer.concat([bhead(4,v.length),...v.map(encode)]):Buffer.concat([bhead(5,Object.keys(v).length),...Object.entries(v).flatMap(([k,x])=>[encode(k),encode(x)])]);
  const read=text=>JSON.parse(text),receive=(o,quiet=false)=>read(B.recv('h',encode(o).toString('base64'),'1',quiet,false));
@@ -18,6 +18,17 @@ export async function registerBridgeChecks(check,stage,root){
  check('project search API retains only latest full query through busy presentation',()=>{boot();answer();const changed={t:'view.changed',version:1,generation:'1',epoch:'origin',viewId:'view',target:last.p.target,viewRevision:'2'};const update=request(receive(changed));assert.equal(read(B.projectSearchQuery(1,1,'older')).cmds.length,0);assert.equal(read(B.projectSearchQuery(1,2,'')).cmds.length,0);const next=request(answer(update));assert.equal(next.p.action,'proj-find-q');assert.equal(next.p.value,'');});
  check('ending a scope retires an unissued committed project go',()=>{boot();answer();const changed={t:'view.changed',version:1,generation:'1',epoch:'origin',viewId:'view',target:last.p.target,viewRevision:'2'};const update=request(receive(changed));B.projectSearchQuery(1,1,'wanted');B.projectSearchGo(1,1,'wanted','h|p');B.projectSearchEnd(1);const done=answer(update);assert(!done.cmds.some(c=>c.type==='send'&&JSON.parse(c.data).p?.action==='proj-go'));});
  check('same-edit go rejects changed submitted text',()=>{boot();answer();B.projectSearchQuery(1,1,'wanted');const out=read(B.projectSearchGo(1,1,'different','h|p'));assert(!out.cmds.some(c=>c.type==='send'&&JSON.parse(c.data).p?.action==='proj-go'));});
+ check('owned legacy viewer retains open and close action path',()=>{
+  B.start('install','{}');B.hubs(['h']);B.connection('h','1');
+  const session=stubApp.session,act=stubApp.act,actions=[];
+  stubApp.session=()=>j({sel:'a',drafts:{},open:{},info:{},adding:false,panel:false,rid:1,outbox:{}});
+  stubApp.act=(hubs,action,value)=>{actions.push([action,value]);return{hubs,cmds:null};};
+  try {
+   B.viewerAction('h','h|other',1,'');assert.equal(actions.length,0);
+   B.viewerAction('h','h|a',2,'board');B.viewerAction('h','h|a',3,'');
+   assert.deepEqual(actions,[['view','board'],['view','']]);
+  } finally {stubApp.session=session;stubApp.act=act;}
+ });
  check('actual bridge ordinary cold route never calls canonical recv/online/tick',()=>{const o=boot();assert.equal(o.sync[0].phase,'presenting');assert.equal(o.screen,null);const ready=answer();assert.equal(ready.screen.thread.entries[0].text,'current');B.online('h',true,true,'1');B.tick(1000);assert.equal(observed.recv,0);assert.equal(observed.tick,0);assert.equal(observed.act,0);});
  check('actual bridge keeps all drafts local on read and only captures selected draft on action',()=>{boot({'h|a':'selected secret','h|b':'other secret'});assert(!JSON.stringify(last).includes('secret'));answer();const action=request(read(B.act('send','')));assert.equal(action.p.session.drafts.a,'selected secret');assert(!JSON.stringify(action).includes('other secret'));});
  check('actual bridge quiet draft avoids stale screen and later screen projects current local composer',()=>{boot();answer();const changed=read(B.quiet('draft','new local'));assert.equal(changed.screen,null);assert(changed.cmds.some(c=>c.type==='keep'&&c.thread==='h|a'&&c.text==='new local'));assert.equal(read(B.screen()).screen.thread.draft,'new local');});

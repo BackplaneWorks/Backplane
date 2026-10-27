@@ -1147,6 +1147,7 @@ struct ViewerControls: View {
 // The viewer over the thread: the plot of the screen's source, the source
 // choices, the card of what was tapped, and a way back.
 struct PlotScreen: View {
+    @Environment(\.dismissBackplaneViewer) private var dismissViewer
     @State private var showReflow = false
     @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
@@ -1181,6 +1182,8 @@ struct PlotScreen: View {
                 .accessibilityLabel(NativeMessages.native_viewer_source(lang))
                 .accessibilityValue(viewer.choices.first(where: { $0.value == viewer.open })?.label ?? "")
                 .accessibilityIdentifier("viewer.source")
+                .disabled(!model.contentReady)
+                ViewerConnectionStatus(model: model)
                 Spacer(minLength: 0)
                 if viewer.open == "3d" || viewer.open == "mech" {
                     Button { showReflow = true } label: {
@@ -1194,7 +1197,8 @@ struct PlotScreen: View {
                 }
                 .accessibilityLabel(viewer.light == true ? NativeMessages.native_viewer_ground_dark(lang) : NativeMessages.native_viewer_ground_light(lang))
                 .accessibilityIdentifier("viewer.appearance")
-                Button { model.act("view", "") } label: {
+                .disabled(!model.contentReady)
+                Button { dismissViewer() } label: {
                     Image(systemName: "xmark").frame(width: 44, height: 44)
                 }
                 .accessibilityLabel(NativeMessages.common_close(lang))
@@ -1203,7 +1207,7 @@ struct PlotScreen: View {
             .buttonStyle(.plain)
             .padding(.horizontal, 12).padding(.vertical, 4)
             ScrollView(.horizontal, showsIndicators: false) {
-                ViewerControls(model: model, viewer: viewer, present: Set(f?.chunks.map { $0.layer } ?? []))
+                ViewerControls(model: model, viewer: viewer, present: Set(f?.chunks.map { $0.layer } ?? [])).disabled(!model.contentReady)
                     .buttonStyle(.plain).padding(.vertical, 4)
             }
             if viewer.open == "mech", let page = viewer.mech { MechBar(model: model, page: page) }
@@ -1465,6 +1469,7 @@ struct MechBar: View {
 // Open in 3D and Refresh, then the part's renders (a tap opens one full
 // screen), and where to get FreeCAD when the hub has none
 struct MechScreen: View {
+    @Environment(\.dismissBackplaneViewer) private var dismissViewer
     @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let viewer: Viewer
@@ -1478,10 +1483,13 @@ struct MechScreen: View {
                     ForEach(viewer.choices, id: \.value) { Text($0.label).tag($0.value) }
                 }
                 .pickerStyle(.segmented)
+                .disabled(!model.contentReady)
                 .frame(maxWidth: 300)
+                ViewerConnectionStatus(model: model)
                 Spacer()
-                Button { model.act("view", "") } label: { Image(systemName: "xmark.circle.fill").font(.title2) }
+                Button { dismissViewer() } label: { Image(systemName: "xmark.circle.fill").font(.title2) }
                     .accessibilityLabel(NativeMessages.common_close(lang))
+                    .accessibilityIdentifier("viewer.close")
             }
             .padding(.horizontal)
             .padding(.vertical, 6)

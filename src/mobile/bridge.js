@@ -740,6 +740,19 @@ globalThis.Backplane = {
     if (thin.register(hub, [platform, token, kind, thread, env, bundle])) return direct([], false);
     return step(App.register_at(hubs, hub, platform, token, kind, thread, env, bundle), true);
   },
+  viewerAction(hub, nav, serial, value) {
+    if (thin.thin(hub)) {
+      thin.viewerAction(hub, nav, serial, value);
+      return direct([], true);
+    }
+    // An explicitly chosen older lane keeps its existing action protocol.
+    // Never reroute a late close through another hub's foreground session.
+    const session = recent.links.get(hub)?.session || plain(App.session(hubs, hub));
+    if (Number.isSafeInteger(serial) && serial > 0 && typeof value === "string" &&
+        foregroundHub() === hub && thin.paired.has(hub) && nav === hub + "|" + session.sel)
+      return this.act("view", value);
+    return direct([], false);
+  },
   projectSearchQuery(scope, edit, text) {
     thin.projectSearchQuery(scope, edit, text);
     return direct([], true);
