@@ -116,7 +116,10 @@ struct AppTabs: View {
 
     @ViewBuilder private var navigation: some View {
         if horizontalSizeClass == .compact {
-            tabs.safeAreaInset(edge: .bottom, spacing: 0) { tabStrip }
+            VStack(spacing: 0) {
+                tabs.frame(maxWidth: .infinity, maxHeight: .infinity)
+                tabStrip
+            }
         } else if #available(iOS 18.0, *) {
             tabs.tabViewStyle(.sidebarAdaptable)
         } else {
