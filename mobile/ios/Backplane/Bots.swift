@@ -232,6 +232,7 @@ struct BotScreen: View {
                     }
                 }
             }
+            .accessibilityElement(children: .contain)
             .accessibilityIdentifier("bot.screen." + bot.id)
     }
 
