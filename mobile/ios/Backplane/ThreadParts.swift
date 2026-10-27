@@ -8,7 +8,9 @@ import UniformTypeIdentifiers
 // choice comes from the screen (src/mobile/screen.bend); these only draw
 // them and send back the action each names.
 
-// the hub's palette for a thread's phase (src/web/style.css, src/app/theme.bend)
+// the hub's palette for a thread's phase (src/web/style.css, src/app/theme.bend);
+// a thread's activity: working accent (blue), finished ok (green), wanting
+// you bad (red), stopped, idle or settled faint (grey) (style.css's --st-*)
 enum PhaseColor {
     static func rgb(_ hex: UInt32) -> Color {
         Color(red: Double(hex >> 16 & 0xff) / 255, green: Double(hex >> 8 & 0xff) / 255, blue: Double(hex & 0xff) / 255)
@@ -24,6 +26,7 @@ private func threadStatusSignal(_ state: String, _ status: String?) -> String {
     case "": return state == "run" ? "active" : state == "fail" ? "blocked" : "inactive"
     case "blocked", "needs you", "approval", "input", "failed": return "blocked"
     case "active", "running", "watching", "cancelling", "working", "monitoring": return "active"
+    case "finished", "complete": return "finished"
     case "settled", "done", "completed", "cancelled": return "settled"
     default: return "inactive"
     }
@@ -41,6 +44,7 @@ struct StatusDot: View {
         case "blocked": return lang == "ja" ? "対応が必要です" : "Blocked: needs interaction"
         case "active": return lang == "ja" ? "作業中" : "Working: agent or owned work active"
         case "settled": return lang == "ja" ? "完了済み" : "Settled"
+        case "finished": return lang == "ja" ? "完了しました" : "Finished: ready for you to look at"
         default: return lang == "ja" ? "非稼働・実行中の作業は未確認です" : "Inactive: no confirmed active work"
         }
     }
@@ -49,9 +53,10 @@ struct StatusDot: View {
         Group {
             switch signal {
             case "blocked": Image(systemName: "exclamationmark.octagon.fill").foregroundStyle(PhaseColor.bad).font(.caption)
-            case "active": ProgressView().controlSize(.mini).tint(PhaseColor.ok)
+            case "active": ProgressView().controlSize(.mini).tint(PhaseColor.accent)
+            case "finished": Image(systemName: "checkmark.circle.fill").foregroundStyle(PhaseColor.ok).font(.caption)
             case "settled": Image(systemName: "checkmark.circle.fill").foregroundStyle(PhaseColor.faint).font(.caption)
-            default: Image(systemName: "pause.circle.fill").foregroundStyle(PhaseColor.warn).font(.caption)
+            default: Image(systemName: "pause.circle.fill").foregroundStyle(PhaseColor.faint).font(.caption)
             }
         }
         .accessibilityElement(children: .ignore)
@@ -327,10 +332,10 @@ struct EntryRow: View {
 
 private func subColor(_ state: String) -> Color {
     switch state {
-    case "active", "running", "watching", "cancelling": PhaseColor.ok
+    case "active", "running", "watching", "cancelling": PhaseColor.accent
     case "blocked", "needs you": PhaseColor.bad
-    case "settled", "done", "completed", "stopped", "cancelled", "": PhaseColor.faint
-    default: PhaseColor.warn
+    case "finished": PhaseColor.ok
+    default: PhaseColor.faint
     }
 }
 
@@ -448,7 +453,7 @@ struct AskCard: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.orange.opacity(0.12), in: .rect(cornerRadius: 12))
+        .background(Color.red.opacity(0.12), in: .rect(cornerRadius: 12))
     }
 }
 

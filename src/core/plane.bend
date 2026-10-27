@@ -175,7 +175,8 @@ def Plane.state(p: M.Phase) -> String:
 # Display callers opt into the activity projection with decorated Ui/SIx.
 # Legacy callers/laws retain their Phase protocol until they opt in.
 def Plane.signal.state(+n: Nat) -> String:
-  Bool.pick(String, SG.Signal.blocked(n), "approval", Bool.pick(String, SG.Signal.active(n), "working", Bool.pick(String, Nat.is_eq(n, 4n), "settled", "idle")))
+  Bool.pick(String, SG.Signal.blocked(n), "approval", Bool.pick(String, SG.Signal.active(n), "working", Bool.pick(String, Nat.is_eq(n, 4n), "settled",
+    Bool.pick(String, Nat.is_eq(n, 5n), "finished", "idle"))))
 
 # The activity bit includes owned work. Only the thread's own Running turn
 # means its agent is working; a completed coordinator can be waiting on work.

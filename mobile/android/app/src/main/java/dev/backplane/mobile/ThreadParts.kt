@@ -56,6 +56,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CheckCircleOutline
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.automirrored.filled.CallSplit
@@ -175,10 +176,11 @@ import java.net.URL
 // each names.
 
 private val corner = RoundedCornerShape(4.dp)
-private val orange = Color(0xFFF57C00)
 private val mono = FontFamily.Monospace
 
-// the hub's palette for a thread's phase (src/web/style.css, src/app/theme.bend)
+// the hub's palette for a thread's phase (src/web/style.css, src/app/theme.bend);
+// a thread's activity: working accent (blue), finished ok (green), wanting
+// you bad (red), stopped, idle or settled faint (grey) (style.css's --st-*)
 object PhaseColor {
     val accent = Color(0xFF5FB3FF)
     val ok = Color(0xFF58C28A)
@@ -196,6 +198,7 @@ private fun threadStatusSignal(state: String, status: String): String = when (st
     "" -> when (state) { "run" -> "active"; "fail" -> "blocked"; else -> "inactive" }
     "blocked", "needs you", "approval", "input", "failed" -> "blocked"
     "active", "running", "watching", "cancelling", "working", "monitoring" -> "active"
+    "finished", "complete" -> "finished"
     "settled", "done", "completed", "cancelled" -> "settled"
     else -> "inactive"
 }
@@ -208,14 +211,16 @@ fun StatusDot(state: String, status: String) {
         "blocked" -> if (lang == "ja") "対応が必要です" else "Blocked: needs interaction"
         "active" -> if (lang == "ja") "作業中" else "Working: agent or owned work active"
         "settled" -> if (lang == "ja") "完了済み" else "Settled"
+        "finished" -> if (lang == "ja") "完了しました" else "Finished: ready for you to look at"
         else -> if (lang == "ja") "非稼働・実行中の作業は未確認です" else "Inactive: no confirmed active work"
     }
     Box(Modifier.size(24.dp).semantics(mergeDescendants = true) { contentDescription = label }, contentAlignment = Alignment.Center) {
         when (signal) {
             "blocked" -> Icon(Icons.Filled.Error, null, Modifier.size(18.dp), tint = PhaseColor.bad)
-            "active" -> CircularProgressIndicator(Modifier.size(16.dp), color = PhaseColor.ok, strokeWidth = 2.dp)
+            "active" -> CircularProgressIndicator(Modifier.size(16.dp), color = PhaseColor.accent, strokeWidth = 2.dp)
+            "finished" -> Icon(Icons.Filled.CheckCircle, null, Modifier.size(16.dp), tint = PhaseColor.ok)
             "settled" -> Icon(Icons.Filled.CheckCircleOutline, null, Modifier.size(16.dp), tint = PhaseColor.faint)
-            else -> Icon(Icons.Filled.Pause, null, Modifier.size(16.dp), tint = PhaseColor.warn)
+            else -> Icon(Icons.Filled.Pause, null, Modifier.size(16.dp), tint = PhaseColor.faint)
         }
     }
 }
@@ -487,10 +492,10 @@ fun EntryRow(m: AppModel, e: Entry, show: (String) -> Unit) {
 }
 
 private fun subColor(state: String) = when (state) {
-    "active", "running", "watching", "cancelling" -> PhaseColor.ok
+    "active", "running", "watching", "cancelling" -> PhaseColor.accent
     "blocked", "needs you" -> PhaseColor.bad
-    "settled", "done", "completed", "stopped", "cancelled", "" -> PhaseColor.faint
-    else -> PhaseColor.warn
+    "finished" -> PhaseColor.ok
+    else -> PhaseColor.faint
 }
 
 // the subagent panel: what this thread delegated (a tap opens its thread)
@@ -540,11 +545,11 @@ fun SubsView(m: AppModel, subs: Subs) {
 @Composable
 fun AskCard(m: AppModel, a: Ask) {
     if (a.kind == "browser") { BrowserAsk(m, a); return }
-    Surface(color = orange.copy(alpha = 0.14f), shape = corner, modifier = Modifier.fillMaxWidth()) {
+    Surface(color = PhaseColor.bad.copy(alpha = 0.14f), shape = corner, modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Icon(when (a.kind) { "plan" -> Icons.Filled.Checklist; "input" -> Icons.Filled.QuestionAnswer; else -> Icons.Filled.PanTool },
-                    null, Modifier.size(18.dp), tint = orange)
+                    null, Modifier.size(18.dp), tint = PhaseColor.bad)
                 Text(a.head, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
             }
             if (a.blocks.isNotEmpty()) Box(Modifier.heightIn(max = 220.dp).verticalScroll(rememberScrollState())) { Markdown(a.blocks) }

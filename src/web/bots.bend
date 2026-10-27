@@ -1000,7 +1000,7 @@ def WB.pago(+kind: String, +now: Nat, +at: Nat) -> String:
 
 def WB.pactivity(+state: String) -> String:
   Bool.pick(String, Bool.or(String.eq(state, "approval"), Bool.or(String.eq(state, "question"), String.eq(state, "failed"))), "blocked",
-    Bool.pick(String, String.eq(state, "working"), "active", Bool.pick(String, String.eq(state, "settled"), "settled", "inactive")))
+    Bool.pick(String, Bool.or(String.eq(state, "working"), String.eq(state, "waiting")), "active", Bool.pick(String, String.eq(state, "settled"), "settled", Bool.pick(String, String.eq(state, "finished"), "finished", "inactive"))))
 
 def WB.pmark.signal(+lc: I.Loc, +state: String) -> D.Node:
   D.El{"span", "", [D.At{"class", "dot " ++ WB.pactivity(state)}, D.At{"role", "img"},

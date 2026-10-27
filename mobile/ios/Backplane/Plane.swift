@@ -50,7 +50,6 @@ struct PlaneModel: Decodable {
 private func planeStatus(_ s: String) -> String {
     switch s {
     case "question": "input"
-    case "finished": "complete"
     case "away": "idle"
     default: s
     }
@@ -304,9 +303,9 @@ private struct PlaneStrip: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 8) {
-                counter(plane.need.count, NativeMessages.plane_need(lang), PhaseColor.warn)
+                counter(plane.need.count, NativeMessages.plane_need(lang), PhaseColor.bad)
                 counter(plane.run.count, NativeMessages.plane_running(lang), PhaseColor.accent)
-                counter(plane.working, NativeMessages.plane_bots_working(lang), PhaseColor.ok)
+                counter(plane.working, NativeMessages.plane_bots_working(lang), PhaseColor.accent)
                 counter(plane.rooms.count, NativeMessages.plane_rooms_unread(lang), PhaseColor.input)
             }
             if plane.machines.count > 1 {

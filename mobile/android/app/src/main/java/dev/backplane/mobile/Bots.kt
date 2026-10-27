@@ -97,8 +97,8 @@ private val square = RoundedCornerShape(4.dp)
 // how a mood looks next to a cat
 @Composable
 internal fun moodTint(mood: String): Color = when (mood) {
-    "wait" -> Color(0xFFFF9F0A)
-    "work", "talk" -> Color(0xFF30D158)
+    "wait" -> PhaseColor.bad
+    "work", "talk" -> PhaseColor.accent
     "think" -> Color(0xFF0A84FF)
     "error" -> MaterialTheme.colorScheme.error
     "idle" -> Color(0xFF63E6BE)

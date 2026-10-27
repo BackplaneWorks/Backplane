@@ -12009,6 +12009,22 @@ law signal_given_mine:
   for +pid: String
   {U.SIx.mine(U.Side.signals.ix.given(ix, u, signals), pid) == U.SIx.mine(ix, pid) : List<&2, M.Thread>}
 
+# A thread's activity (signal.bend's Signal.done): a completed turn with
+# nothing else to show is finished (green), never over work, an ask or the
+# settled shelf, and finished is neither working nor blocked
+law signal_finished_named:
+  {SIGREV.Signal.name(SIGREV.Signal.done(True{}, 0n)) == "finished" : String}
+
+law signal_finished_keeps_rest:
+  {[SIGREV.Signal.done(True{}, 1n), SIGREV.Signal.done(True{}, 2n), SIGREV.Signal.done(True{}, 3n), SIGREV.Signal.done(True{}, 4n)] == [1n, 2n, 3n, 4n] : List<&2, Nat>}
+
+law signal_finished_needs_completed:
+  for n: Nat
+  {SIGREV.Signal.done(False{}, n) == n : Nat}
+
+law signal_finished_quiet:
+  {Bool.or(SIGREV.Signal.active(5n), SIGREV.Signal.blocked(5n)) == False{} : Bool}
+
 # Typed signal inputs prove the only canonical-history exemptions.
 law signal_activity_input:
   for +st: M.State

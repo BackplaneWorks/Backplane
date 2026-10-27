@@ -27,7 +27,9 @@ def SignalInput.asks(st: SignalInput) -> List<&2, M.Ask>:
 # Visible activity, separate from persisted turn state and readiness. A result
 # owed to an agent is not running work. No clock, transcript, notices, provider
 # calls or cache readiness enter this projection. Bits 1/2 record actual work /
-# unresolved interaction; 4 is settled only when neither bit is present.
+# unresolved interaction; 4 is settled only when neither bit is present, and
+# 5 finished: neither bit, not settled, and its last turn completed (done,
+# for the person to look at; Signal.done). A stopped or idle thread is 0.
 # The index is transient: do not persist it or change the event/state codecs.
 
 def Signal.compose(blocked: Bool, active: Bool, settled: Bool) -> Nat:
@@ -37,6 +39,12 @@ def Signal.compose(blocked: Bool, active: Bool, settled: Bool) -> Nat:
     case False{} True{} _: 1n
     case False{} False{} True{}: 4n
     case False{} False{} False{}: 0n
+
+# a thread whose last turn completed and that has nothing else to show
+# (no work, no ask, nothing queued, not settled) is finished, apart from a
+# stopped or idle one
+def Signal.done(finished: Bool, +n: Nat) -> Nat:
+  Bool.pick(Nat, Bool.and(finished, Nat.is_eq(n, 0n)), 5n, n)
 
 def Signal.bits(+n: Nat) -> Nat:
   Bool.pick(Nat, Nat.is_lt(n, 4n), n, 0n)
@@ -51,15 +59,22 @@ def Signal.merge(+a: Nat, +b: Nat) -> Nat:
   Nat.add(Bool.pick(Nat, Bool.or(Signal.active(a), Signal.active(b)), 1n, 0n),
     Bool.pick(Nat, Bool.or(Signal.blocked(a), Signal.blocked(b)), 2n, 0n))
 
+# the word for a value, which is also its colour everywhere (style.css's
+# --st-*, the phones' PhaseColor): blocked red (an approval, a question, a
+# failure: it wants the person), active blue (working), finished green
+# (done), settled and inactive grey (stopped, idle, put away)
 def Signal.name(+n: Nat) -> String:
-  Bool.pick(String, Signal.blocked(n), "blocked", Bool.pick(String, Signal.active(n), "active", Bool.pick(String, Nat.is_eq(n, 4n), "settled", "inactive")))
+  Bool.pick(String, Signal.blocked(n), "blocked", Bool.pick(String, Signal.active(n), "active", Bool.pick(String, Nat.is_eq(n, 4n), "settled",
+    Bool.pick(String, Nat.is_eq(n, 5n), "finished", "inactive"))))
 
 def Signal.label.loc(lc: I.Loc, +name: String) -> String:
   match lc:
     case I.Ja{}:
-      Bool.pick(String, String.eq(name, "blocked"), "対応が必要です", Bool.pick(String, String.eq(name, "active"), "作業中", Bool.pick(String, String.eq(name, "settled"), "完了済み", "非稼働・実行中の作業は未確認です")))
+      Bool.pick(String, String.eq(name, "blocked"), "対応が必要です", Bool.pick(String, String.eq(name, "active"), "作業中", Bool.pick(String, String.eq(name, "settled"), "完了済み",
+        Bool.pick(String, String.eq(name, "finished"), "完了しました", "非稼働・実行中の作業は未確認です"))))
     case _:
-      Bool.pick(String, String.eq(name, "blocked"), "Blocked: needs interaction", Bool.pick(String, String.eq(name, "active"), "Working: agent or owned work active", Bool.pick(String, String.eq(name, "settled"), "Settled", "Inactive: no confirmed active work")))
+      Bool.pick(String, String.eq(name, "blocked"), "Blocked: needs interaction", Bool.pick(String, String.eq(name, "active"), "Working: agent or owned work active", Bool.pick(String, String.eq(name, "settled"), "Settled",
+        Bool.pick(String, String.eq(name, "finished"), "Finished: ready for you to look at", "Inactive: no confirmed active work"))))
 
 def Signal.label(+lc: I.Loc, +n: Nat) -> String:
   Signal.label.loc(lc, Signal.name(n)) ++ Bool.pick(String, Bool.and(Signal.blocked(n), Signal.active(n)),
@@ -77,6 +92,11 @@ def Signal.asks(xs: List<&2, M.Ask>, +m: Map<&2, Nat>) -> Map<&2, Nat>:
     case Nil{}: m
     case M.Ask{_, +th, _, _, _, _, open, _} <> rest:
       Signal.asks(rest, Map.set(&2, Nat, m, th, Bool.pick(Nat, open, 2n, Signal.at(m, th))))
+
+def Signal.completed(t: M.TurnState) -> Bool:
+  match t:
+    case M.Completed{}: True{}
+    case _: False{}
 
 def Signal.failed(t: M.TurnState) -> Bool:
   match t:
@@ -108,7 +128,7 @@ def Signal.own(+st: SignalInput, +asks: Map<&2, Nat>, +t: M.Thread) -> Nat:
       +owned = Bool.or(Nat.is_gt(M.Bg.running(M.Bg.lines(SignalInput.setting(st, M.Bg.key(id)))), 0n), Signal.watch(M.Bg.lines(SignalInput.setting(st, M.Work.watch.key(id)))))
       +blocked = Bool.or(Signal.failed(turn), Bool.or(Nat.is_gt(pending, 0n), Bool.or(Signal.blocked(Signal.at(asks, id)),
         Bool.or(Bool.not(String.is_empty(SignalInput.setting(st, "auth.wait." ++ id))), Signal.held(SignalInput.queue(st, id))))))
-      Bool.pick(Nat, deleted, 0n, Signal.compose(blocked, Bool.or(owned, Bool.and(M.State.running.k(t), Bool.not(blocked))), Signal.shelf(M.Shelf.of(t))))
+      Bool.pick(Nat, deleted, 0n, Signal.done(Bool.and(Signal.completed(turn), List.is_empty(&2, M.QItem, SignalInput.queue(st, id))), Signal.compose(blocked, Bool.or(owned, Bool.and(M.State.running.k(t), Bool.not(blocked))), Signal.shelf(M.Shelf.of(t)))))
 
 def Signal.owns(ts: List<&2, M.Thread>, +st: SignalInput, +asks: Map<&2, Nat>, m: Map<&2, Nat>) -> Map<&2, Nat>:
   match ts:

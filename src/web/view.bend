@@ -4126,9 +4126,11 @@ def View.chrome.state.k(lc: I.Loc) -> String:
 def View.chrome.state.word(lc: I.Loc, +name: String) -> String:
   match lc:
     case I.Ja{}:
-      Bool.pick(String, String.eq(name, "blocked"), "対応待ち", Bool.pick(String, String.eq(name, "active"), "作業中", Bool.pick(String, String.eq(name, "settled"), "完了", "待機")))
+      Bool.pick(String, String.eq(name, "blocked"), "対応待ち", Bool.pick(String, String.eq(name, "active"), "作業中", Bool.pick(String, String.eq(name, "settled"), "完了",
+        Bool.pick(String, String.eq(name, "finished"), "作業完了", "待機"))))
     case _:
-      Bool.pick(String, String.eq(name, "blocked"), "needs you", Bool.pick(String, String.eq(name, "active"), "working", Bool.pick(String, String.eq(name, "settled"), "settled", "idle")))
+      Bool.pick(String, String.eq(name, "blocked"), "needs you", Bool.pick(String, String.eq(name, "active"), "working", Bool.pick(String, String.eq(name, "settled"), "settled",
+        Bool.pick(String, String.eq(name, "finished"), "finished", "idle"))))
 
 def View.chrome.changes.k(lc: I.Loc) -> String:
   match lc:

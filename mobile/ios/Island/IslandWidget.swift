@@ -14,7 +14,7 @@ private struct Mark: View {
 
     var body: some View {
         Image(systemName: running > 0 ? "cpu" : "checkmark.circle.fill")
-            .foregroundStyle(running > 0 ? Color.green : Color.secondary)
+            .foregroundStyle(running > 0 ? Color.blue : Color.secondary)
     }
 }
 

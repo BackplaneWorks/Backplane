@@ -37,7 +37,8 @@ def main():
         "cancelling": "active", "working": "active", "monitoring": "active",
         "settled": "settled", "done": "settled", "completed": "settled", "cancelled": "settled",
         "inactive": "inactive", "queued": "inactive", "waiting": "inactive",
-        "complete": "inactive", "stopped": "inactive", "idle": "inactive", "ready": "inactive",
+        "finished": "finished", "complete": "finished",
+        "stopped": "inactive", "idle": "inactive", "ready": "inactive",
         "held": "inactive", "reporting": "inactive", "unknown": "inactive",
         "launching": "inactive", "future-status": "inactive",
     }

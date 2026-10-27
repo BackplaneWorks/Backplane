@@ -10,8 +10,8 @@ private let sep = "\u{1f}"
 // how a mood looks next to a cat
 func moodTint(_ mood: String) -> Color {
     switch mood {
-    case "wait": .orange
-    case "work", "talk": .green
+    case "wait": PhaseColor.bad
+    case "work", "talk": PhaseColor.accent
     case "think": .blue
     case "error": .red
     case "idle": .mint

@@ -47,6 +47,18 @@
   --sel: rgba(0,0,0,.06);
   color-scheme: light;
 }
+/* A thread's activity, one colour each wherever it shows (the sidebar's
+   dots, the phase line, the header's status, the plane, subagents, bot
+   moods; core/signal.bend's Signal.name says which): working blue, finished
+   green, wanting the person (an approval, a question, a failure) red, and
+   stopped, idle or settled grey. Set again under the light theme so they
+   follow its palette. */
+:root, .app.light, .bub-move.light {
+  --st-work: var(--accent);
+  --st-done: var(--ok);
+  --st-need: var(--bad);
+  --st-idle: var(--faint);
+}
 .app.light { background: var(--bg); color: var(--text); }
 html:has(.app.light), html:has(.app.light) body { background: #fafaf8; color: #1b1d21; }
 /* before the first frame: the theme the last one painted (host.js themeDocument) */
@@ -104,11 +116,10 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .thread.on { background: var(--raise); box-shadow: inset 2px 0 var(--tint, var(--accent)); }
 .thread .title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .thread .ago { color: var(--faint); font-size: calc(11px * var(--text-scale, 100) / 100); }
-.dot { width: 6px; height: 6px; background: var(--faint); flex: none; }
-.dot.run, .dot.working { background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
-.dot.fail, .dot.failed { background: var(--bad); }
-.dot.stop, .dot.approval { background: var(--warn); }
-.dot.input { background: var(--input); }
+.dot { width: 6px; height: 6px; background: var(--st-idle); flex: none; }
+.dot.run, .dot.working { background: var(--st-work); animation: pulse 1.2s ease-in-out infinite; }
+.dot.fail, .dot.failed, .dot.approval, .dot.input { background: var(--st-need); }
+.dot.stop { background: var(--st-idle); }
 .dot.queued { background: var(--queued); }
 .dot.waiting { background: var(--waiting); animation: pulse 1.2s ease-in-out infinite; }
 .thread .moves { display: none; gap: 2px; }
@@ -198,9 +209,9 @@ button.fold:hover { color: var(--text); }
 button.fold span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .working { color: var(--faint); font-size: calc(12px * var(--text-scale, 100) / 100); }
 .phase { display: flex; align-items: center; gap: 8px; color: var(--faint); font-size: calc(12px * var(--text-scale, 100) / 100); }
-.dot.monitoring { background: var(--waiting); animation: pulse 1.2s ease-in-out infinite; }
-.dot.complete { background: var(--ok); }
-.dot.stopped { background: var(--faint); }
+.dot.monitoring { background: var(--st-work); animation: pulse 1.2s ease-in-out infinite; }
+.dot.complete { background: var(--st-done); }
+.dot.stopped { background: var(--st-idle); }
 .composer { position: relative; display: flex; flex-direction: column; gap: 6px; padding: 10px 16px 14px; border-top: 1px solid var(--line); }
 .composer textarea { resize: none; background: var(--panel); border: 1px solid var(--line); padding: 8px 10px; min-height: 60px; max-height: 40vh; field-sizing: content; overflow-y: auto; }
 .composer-foot { display: flex; justify-content: space-between; align-items: center; }
@@ -290,7 +301,7 @@ button.fold span { overflow: hidden; text-overflow: ellipsis; white-space: nowra
 .sub .title { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .sub.live .title { color: var(--text); }
 .sub .state { color: var(--dim); font-size: calc(12px * var(--text-scale, 100) / 100); flex: none; max-width: 30%; overflow-wrap: anywhere; }
-.sub.running .state { color: var(--accent); } .sub.done .state { color: var(--ok); } .sub.failed .state { color: var(--bad); }
+.sub.running .state { color: var(--st-work); } .sub.done .state { color: var(--st-done); } .sub.failed .state { color: var(--st-need); }
 .sub .doing { display: block; padding: 0 16px 8px 32px; color: var(--accent); font-size: calc(12px * var(--text-scale, 100) / 100); overflow-wrap: anywhere; }
 .sub-step { display: flex; gap: 12px; padding: 4px 16px 4px 32px; font: calc(12px * var(--text-scale, 100) / 100)/1.5 var(--mono); color: var(--dim); }
 .sub-step .kind { color: var(--faint); flex: none; width: 8ch; overflow-wrap: anywhere; }
@@ -564,8 +575,8 @@ button.chip:hover { border-color: var(--bad); color: var(--bad); }
 /* Asks: approvals, questions, proposed plans */
 .asks { display: flex; flex-direction: column; gap: 8px; padding: 0 16px; }
 .asks:empty { display: none; }
-.ask { border: 1px solid var(--warn); background: var(--panel); padding: 8px 12px; display: flex; flex-direction: column; gap: 6px; max-width: 860px; }
-.ask-head { color: var(--warn); font-size: calc(12px * var(--text-scale, 100) / 100); }
+.ask { border: 1px solid var(--st-need); background: var(--panel); padding: 8px 12px; display: flex; flex-direction: column; gap: 6px; max-width: 860px; }
+.ask-head { color: var(--st-need); font-size: calc(12px * var(--text-scale, 100) / 100); }
 .ask-detail { font-family: var(--mono); font-size: calc(12px * var(--text-scale, 100) / 100); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 50vh; overflow: auto; }
 .ask .body { max-height: 40vh; overflow: auto; }
 .ask-btns { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
@@ -662,9 +673,9 @@ button.icon { display: inline-flex; align-items: center; justify-content: center
 .bot-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
 .bot-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mood { color: var(--faint); font-size: calc(11px * var(--text-scale, 100) / 100); }
-.mood.wait { color: var(--warn); }
-.mood.work, .mood.talk { color: var(--accent); }
-.mood.error { color: var(--bad); }
+.mood.wait { color: var(--st-need); }
+.mood.work, .mood.talk { color: var(--st-work); }
+.mood.error { color: var(--st-need); }
 .room-row { display: flex; align-items: center; gap: 6px; padding: 4px 12px; cursor: pointer; }
 .room-row:hover { background: var(--raise); }
 .room-row.on { background: var(--raise); box-shadow: inset 2px 0 var(--accent); }
@@ -906,7 +917,7 @@ button.mic.starting, button.mic.stopping { border-color: var(--bad); color: var(
 .plane-row:hover { background: var(--raise); }
 .plane-row.away { color: var(--faint); }
 .plane-row .why { flex: none; font-size: calc(11px * var(--text-scale, 100) / 100); color: var(--dim); }
-.plane-row .why.approval, .plane-row .why.question { color: var(--accent); }
+.plane-row .why.approval, .plane-row .why.question, .plane-row .why.failed { color: var(--st-need); }
 .plane-row .title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .plane-row .sub { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dim); font-size: calc(12px * var(--text-scale, 100) / 100); }
 .plane-row .mach { color: var(--faint); font-size: calc(11px * var(--text-scale, 100) / 100); white-space: nowrap; }
@@ -1073,16 +1084,18 @@ html:lang(ja) :is(.set-text, .set-ctl) { min-width: 0; }
 @media(max-width:700px) { .mailroom.reading .mail-list { display:none; } .mailroom { padding:8px; } }
 
 /* Thread activity: the shared Signal projection supplies these classes. */
-.dot.blocked { background: var(--bad); border-radius: 0; }
-.dot.active { background: var(--ok); border-radius: 50%; animation: pulse 1.2s ease-in-out infinite; }
-.dot.inactive { background: var(--warn); border-radius: 50%; }
-.dot.settled { background: var(--faint); border-radius: 50%; }
+.dot.blocked { background: var(--st-need); border-radius: 0; }
+.dot.active { background: var(--st-work); border-radius: 50%; animation: pulse 1.2s ease-in-out infinite; }
+.dot.finished { background: var(--st-done); border-radius: 50%; }
+.dot.inactive { background: var(--st-idle); border-radius: 50%; }
+.dot.settled { background: var(--st-idle); border-radius: 50%; }
 @media (prefers-reduced-motion: reduce) { .dot.active { animation: none; } }
 
-.sub-signal-active .state { color: var(--ok); }
-.sub-signal-inactive .state { color: var(--warn); }
-.sub-signal-blocked .state { color: var(--bad); }
-.sub-signal-settled .state { color: var(--faint); }
+.sub-signal-active .state { color: var(--st-work); }
+.sub-signal-finished .state { color: var(--st-done); }
+.sub-signal-inactive .state { color: var(--st-idle); }
+.sub-signal-blocked .state { color: var(--st-need); }
+.sub-signal-settled .state { color: var(--st-idle); }
 /* the draw board (draw.js) and its button beside Attach */
 .composer-foot .attach.draw { margin-right: 6px; font: inherit; }
 .composer-foot .attach.draw + .attach { margin-left: 0; }

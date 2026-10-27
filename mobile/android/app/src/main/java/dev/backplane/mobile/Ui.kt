@@ -1141,7 +1141,7 @@ fun ThreadScreen(m: AppModel, s: Screen, t: ThreadView, below: (@Composable () -
                         StatusDot(t.state, t.phase)
                         Text(t.working, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.outline)
                     }
-                    if (t.phase == "active") LinearProgressIndicator(Modifier.width(120.dp), color = PhaseColor.ok)
+                    if (t.phase == "active") LinearProgressIndicator(Modifier.width(120.dp), color = PhaseColor.accent)
                 }
             }
         }

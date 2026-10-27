@@ -77,7 +77,7 @@
     "src/core/once.bend": "c12f375e09045a035cfc66c87d73197f3348b2998fa0e0bb6c9876fca870577c",
     "src/core/order.bend": "5ab5bb40153398e171c60cbde5f7fc89dfc122e72a06e3923a09760f623bf19e",
     "src/core/outbox.bend": "7e90d003d01434d86c041b83d837f8a85d9f39c7ae380d840e07bb141f3dd677",
-    "src/core/plane.bend": "b6a488af9db204ab580d52b3dc438239141722eb955be21a2bf92aceb4ba8702",
+    "src/core/plane.bend": "ac2a6be2c14c774b93f5b596178031b3fa485db82a60bcad4fa2590fc3c5717c",
     "src/core/presentation.bend": "d45548e844aeb3a3d36e4fda89bb8b8c48c8366c06fcf5114b5b38df548823d9",
     "src/core/prompt.bend": "6ecdb20260b8d54caeb63233b7c5568eddbe827cbca74fff54d2ed6dcfb78774",
     "src/core/qr.bend": "42aae4f454bbf55b201e8913e517b6dec531424b6cace582a4726e189636fbcc",
@@ -98,7 +98,7 @@
     "src/core/sidebar-drafts.bend": "694c4a21ae82cdbb4eb5cdf451128acb16eb2638b9594a062edd01da4725fef3",
     "src/core/sidebar-read.bend": "8b9952dbbe0c9ae89bf808e995b8ce643f20102587238724c9156076dd21419d",
     "src/core/sign.bend": "f6c4b636f7be64f7a4a03e8cc4d0b19eae2696e8c08a92236ad7e378d7120edc",
-    "src/core/signal.bend": "b0c3979e7eaad7dc5c7a052027ea44b03af3d125d45e4a837fed5ec7b4e4db07",
+    "src/core/signal.bend": "bdb7f1b5b32eed57e9f743dd91fe4ca8fb098b213b88093343afabe815496b3d",
     "src/core/slash.bend": "4b88f73566a9b3694a888ede21f2117157df9449c50c52806648e4795d298932",
     "src/core/space.bend": "0caea2f71303b476291b0e9570459ce12c8fe58b81aefccb2bd935fe4bd56c3a",
     "src/core/stamp.bend": "21137c2cb8111703477fc28b50e3b978fed1ff1ffed809b7522b0f2d291a0312",
@@ -132,7 +132,7 @@
     "src/server/thin-mirror.bend": "b488dc7c45fe49bb1aa17966f454f1ee0e9cfef7db4d619c265c298c9bc94e92",
     "src/server/thin-sidebar.bend": "3f4f103551054d92d10a3d7d355f1b8db948900b83e2942009cb7d0e1e1cf5c7",
     "src/server/thin-view.bend": "913619edff9416442b6cdc0f1360bb78fc4d29253a26737ac953a3bf78d148f2",
-    "src/web/bots.bend": "b1f06390676fae6bc6fd2170bc3d59da2b56a75f56e8b0df05ff480f7852dcba",
+    "src/web/bots.bend": "d75c85b0f251cd6e11bbda1ef8a2e19e27a233fe1f757718473aeb7910d933f6",
     "src/web/cat.bend": "301a7ba925f92fc25bdc35b63f79bcf8bf7b72619106c826c471247a0ace85ba",
     "src/web/dom.bend": "a564bbb014b7247fc3cd670a427bf13782e8f6217b3c32abadb91efc13d5cf7e",
     "src/web/icon.bend": "2abbb4ca75c31da241fa4d09431f517ee8b864de20ce5e15204d40701877d221",
@@ -143,7 +143,7 @@
     "src/web/space.bend": "b86a265e41a900498bc33c37c0404c4d6678554efe3d9054f329beb2cf35ee63",
     "src/web/usage-graph.bend": "fa06f7d2bf855a396a5f7a7b4725dfaa990145fbbcefe7ad21ae8f9a698a2679",
     "src/web/usage-page.bend": "706e3f17a4a3e5f159656d47aeb76a940d4825421f5c33228f9aef692ec926e3",
-    "src/web/view.bend": "8bfb59d3aaa1580b77820be0114203c0faf65a1e54f2787fbb966f4f39715960"
+    "src/web/view.bend": "1b9e35301509cfa93cc3be5df5aab84b6b17c32217e51ccf1cd8ee66a890943a"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -253,5 +253,5 @@
       "sourceSnapshot": "/home/h/Documents/i2cjak/bp-coord/settle-fresh-work/SOURCE-structural-correction.json"
     }
   },
-  "reviewNote": "steer: Stamp skips a reply posted ahead of a message (timeline stamps only), no sidebar change"
+  "reviewNote": "Activity colours: a finished thread's dot is Signal 5 \"finished\" (green), working blue, needs-you red, stopped/idle grey; rows render the new class only"
 }

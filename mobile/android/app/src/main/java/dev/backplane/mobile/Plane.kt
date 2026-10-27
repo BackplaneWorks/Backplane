@@ -106,7 +106,6 @@ fun parsePlane(o: JSONObject) = PlaneModel(
 // a thread row's dot, from the plane's states
 private fun planeStatus(s: String) = when (s) {
     "question" -> "input"
-    "finished" -> "complete"
     "away" -> "idle"
     else -> s
 }
@@ -243,9 +242,9 @@ private fun PlaneStrip(m: AppModel, p: PlaneModel) {
     val lang = LocalBackplaneLanguage.current
     Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Counter(p.need.size, NativeMessages.plane_need(lang), PhaseColor.warn, Modifier.weight(1f))
+            Counter(p.need.size, NativeMessages.plane_need(lang), PhaseColor.bad, Modifier.weight(1f))
             Counter(p.run.size, NativeMessages.plane_running(lang), PhaseColor.accent, Modifier.weight(1f))
-            Counter(p.working, NativeMessages.plane_bots_working(lang), PhaseColor.ok, Modifier.weight(1f))
+            Counter(p.working, NativeMessages.plane_bots_working(lang), PhaseColor.accent, Modifier.weight(1f))
             Counter(p.rooms.size, NativeMessages.native_plane_unread(lang), PhaseColor.input, Modifier.weight(1f))
         }
         if (p.machines.size > 1) {
