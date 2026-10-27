@@ -11,6 +11,7 @@ struct AppTabs: View {
     let screen: Screen
     @Binding var pairing: Bool
     @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     private func badge(_ t: AppTab) -> Int {
         switch t {
@@ -50,8 +51,9 @@ struct AppTabs: View {
         TabView(selection: Binding(get: { model.tab }, set: { model.switchTab($0) })) {
             ForEach(AppTab.allCases) { t in
                 stack(t)
-                    .toolbar(.hidden, for: .tabBar)
+                    .toolbar(horizontalSizeClass == .compact ? .hidden : .automatic, for: .tabBar)
                     .tabItem { Label(t.title(screen.locale ?? "en"), systemImage: t.icon) }
+                    .badge(badge(t))
                     .tag(t)
             }
         }
@@ -112,10 +114,19 @@ struct AppTabs: View {
         .background(BackplaneDesign.panel.ignoresSafeArea(edges: .bottom))
     }
 
+    @ViewBuilder private var navigation: some View {
+        if horizontalSizeClass == .compact {
+            tabs.safeAreaInset(edge: .bottom, spacing: 0) { tabStrip }
+        } else if #available(iOS 18.0, *) {
+            tabs.tabViewStyle(.sidebarAdaptable)
+        } else {
+            tabs
+        }
+    }
+
     var body: some View {
-        tabs
+        navigation
         .tint(BackplaneDesign.accent)
-        .safeAreaInset(edge: .bottom, spacing: 0) { tabStrip }
         .sheet(isPresented: Binding(get: { screen.newBot != nil }, set: { if !$0 { model.act("form-close", "@bnew") } })) {
             if let f = model.screen?.newBot { NewBotSheet(model: model, form: f) }
         }
