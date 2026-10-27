@@ -13362,6 +13362,8 @@ def Laws.ref_origin_foreign_untouched(): {==}
 def startup_warm_accepted(w, rows):
   {==}
 def startup_warm_fallback(w, rows):
+  {==}
+
 def Laws.hook_off_unset():
   {==}
 
@@ -13438,6 +13440,8 @@ def Laws.life_fresh_child_wakes():
   {==}
 
 def Laws.life_later_manual_settle_held():
+  {==}
+
 def Laws.hook_report_keeps_end():
   {==}
 
