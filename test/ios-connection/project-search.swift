@@ -23,10 +23,10 @@ import Foundation
         let next = state.begin(text: "old", owner: owner)
         let waiting = state.submit(scope: next.scope, owner: owner)!
         let changed = state.edit("new", scope: next.scope, owner: owner)!
-        check(changed.scope > next.scope && state.committed == waiting, "edit after return owns newer scope")
+        check(changed.scope > next.scope && state.committed == nil, "new typing supersedes pending return")
         state.disappear(scope: next.scope)
         check(state.editing == changed, "old disappearance cannot cancel newer field")
-        check(state.accept(waiting, projects: []) == nil && state.editing == changed, "empty result retires go but retains edit")
+        check(state.accept(waiting, projects: ["hub|old"]) == nil && state.editing == changed, "superseded result cannot navigate")
         let newGo = state.submit(scope: changed.scope, owner: owner)!
         check(state.accept(newGo, projects: ["hub|new"])?.project == "hub|new", "return works after no match")
 
@@ -43,6 +43,12 @@ import Foundation
         check(state.edit("wrong", scope: s.scope, owner: other) == nil, "different owner cannot revive submitted scope")
         state.cancel()
         check(state.accept(pending, projects: ["hub|x"]) == nil, "navigation or pairing cancellation prevents go")
+        let forwarded = state.begin(text: "latest", owner: owner)
+        let request = state.submit(scope: forwarded.scope, owner: owner)!
+        let delegated = state.forward(request)
+        check(delegated?.query == request && delegated?.project == "", "thin return delegates fresh first selection")
+        check(state.forward(request) == nil, "thin return forwards once")
+        state.cancel()
         let last = state.begin(text: "clear", owner: owner)
         let clear = state.edit("", scope: last.scope, owner: owner)!
         check(clear.text.isEmpty, "empty clear is a full query")

@@ -225,6 +225,15 @@ final class Engine: @unchecked Sendable {
         return answer
     }
     func quiet(_ action: String, _ value: String) async -> Out? { await out("quiet", [action, value], screen: false, person: true) }
+    func projectSearchQuery(scope: Int, edit: Int, text: String) async -> Out? {
+        await out("projectSearchQuery", [scope, edit, text], person: true)
+    }
+    func projectSearchEnd(scope: Int) async -> Out? {
+        await out("projectSearchEnd", [scope], screen: false, person: true)
+    }
+    func projectSearchGo(scope: Int, edit: Int, text: String, project: String) async -> Out? {
+        await out("projectSearchGo", [scope, edit, text, project], person: true)
+    }
     // the secret box's Save: the value goes in one request built by Bend
     // (bridge.js's Backplane.secret), never as an action or a form field
     func secret(_ packed: String) async -> Out? { await out("secret", [packed], person: true) }

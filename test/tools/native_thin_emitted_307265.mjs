@@ -29,6 +29,25 @@ function respond(c,request,payload,quiet=false){
  const result={...payload,version:1,hub,generation:greeting.generation,epoch:greeting.epoch,target:request.p.target,requestRevision:request.p.requestRevision,viewId:request.p.viewId||'fixture-view',viewRevision:payload.viewRevision||'1',renderer:'mobile'};
  return c.recv({t:'reply',id:request.id,ok:true,result},c.epoch,quiet);
 }
+{
+ const p=client();start(p);const first=begin(p);respond(p,first,fixture.open);
+ const changed={t:'view.changed',version:1,generation:greeting.generation,epoch:greeting.epoch,viewId:'fixture-view',target:first.p.target,viewRevision:'2'};
+ const update=p.requests(p.recv(changed))[0];
+ checked(p.requests(p.out('projectSearchQuery',1,1,'older')).length===0,'busy query waits for current presentation');
+ checked(p.requests(p.out('projectSearchQuery',1,2,'')).length===0,'empty query replaces old pending query');
+ const resumed=p.requests(respond(p,update,fixture.open));
+ checked(resumed.length===1&&resumed[0].m==='view.action'&&resumed[0].p.action==='proj-find-q'&&resumed[0].p.value==='','actual emitted bridge sends latest full empty query once');
+}
+{
+ const p=client();start(p);const first=begin(p);respond(p,first,fixture.open);
+ const query=p.requests(p.out('projectSearchQuery',1,1,''))[0];
+ checked(query?.p.action==='proj-find-q','actual emitted empty full query requests filter');
+ checked(p.requests(p.out('projectSearchGo',1,1,'','h|missing')).length===0,'actual emitted Go waits its accepted query');
+ const result=respond(p,query,fixture.open);
+ checked(!p.requests(result).some(r=>r.p.action==='proj-go'),'actual emitted missing project cannot invoke creating fallback');
+ p.out('projectSearchEnd',2);
+ checked(p.requests(p.out('projectSearchQuery',1,3,'stale')).length===0,'actual emitted scope tombstone refuses old edit');
+}
 for(const quiet of [false,true]) {
  const p=client();p.call('publicationAck');start(p);const first=begin(p);respond(p,first,fixture.open);
  const changed={t:'view.changed',version:1,generation:greeting.generation,epoch:greeting.epoch,viewId:'fixture-view',target:first.p.target,viewRevision:'2'};

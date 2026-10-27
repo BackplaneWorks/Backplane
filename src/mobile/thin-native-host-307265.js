@@ -90,6 +90,7 @@ export class NativeThinHost307265 {
     this.commandOwners = new WeakMap();
     // Opted in only by a native engine that acknowledges delivered screens.
     this.publicationAck = false;
+    this.projectSearch = null;
     // The outbox: a message sent is kept until its hub answers. A drop
     // before the answer (or a send while the socket is down, which the app
     // cannot deliver) leaves it here; each view connection that presents
@@ -122,7 +123,7 @@ export class NativeThinHost307265 {
         // pages a send overtook (their replies are dropped)
         cursor: '', back: [], paging: null, overtaken: new Set(),
         revision: 0, drafts, queue: [], active: null, messages: new MessageParts(), findRevision: 0, findCloseOnce: false, registrations: new Map(),
-        shownTarget: null, deferredNavigation: null, followup: null };
+        shownTarget: null, deferredNavigation: null, projectQuery: null, projectApplied: null, followup: null };
       this.states.set(hub, value);
     }
     return value;
@@ -152,6 +153,7 @@ export class NativeThinHost307265 {
   reset() {
     for (const key of this.states.keys()) this.client.disconnect(key);
     this.states.clear(); this.paired.clear(); this.current = '';
+    this.projectSearch = null;
     this.pending.clear(); this.ordinary.clear(); this.commands = []; this.sync = [];
     this.outbox.clear();
   }
@@ -196,6 +198,7 @@ export class NativeThinHost307265 {
 
   connection(hub, epoch, mode) {
     if (!this.paired.has(hub)) return;
+    if (this.projectSearch && !this.projectSearch.ended) this.projectSearchEnd(this.projectSearch.scope);
     this.disconnect(hub);
     const s = this.state(hub);
     s.mode = mode === 'view-v1' ? 'view-v1' : mode === undefined ? 'compatibility' : 'blocked';
@@ -234,20 +237,22 @@ export class NativeThinHost307265 {
   }
 
   disconnect(hub) {
+    if (this.projectSearch?.owners.has(hub)) this.projectSearchEnd(this.projectSearch.scope);
     const s = this.states.get(hub);
     this.client.disconnect(hub);
     for (const [id, call] of this.pending) if (call.hub === hub) this.pending.delete(id);
     for (const [id, call] of this.ordinary) if (call.hub === hub) this.ordinary.delete(id);
     if (s) {
       s.ready = false; s.greeted = false; s.active = null; s.queue = []; s.messages.clear();
-      s.deferredNavigation = null; s.shownTarget = null; s.followup = null;
+      s.deferredNavigation = null; s.projectQuery = null; s.projectApplied = null; s.shownTarget = null; s.followup = null;
       s.registrations.clear();
     }
   }
 
   fail(hub, reason) {
+    if (this.projectSearch?.owners.has(hub)) this.projectSearchEnd(this.projectSearch.scope);
     const s = this.states.get(hub);
-    if (s) { s.ready = false; s.queue = []; s.deferredNavigation = null; s.followup = null; }
+    if (s) { s.ready = false; s.queue = []; s.deferredNavigation = null; s.projectQuery = null; s.followup = null; }
     this.sync.push({ hub, phase: 'failed', mode: 'view-v1', detail: String(reason), remoteReady: false });
   }
 
@@ -293,7 +298,10 @@ export class NativeThinHost307265 {
   }
 
   select(s, target, session) {
+    if (this.projectSearch?.owners.has(s.hub)) this.projectSearchEnd(this.projectSearch.scope);
     s.deferredNavigation = null;
+    s.projectQuery = null;
+    s.projectApplied = null;
     s.followup = null;
     s.target = copy(target); s.session = copy(session); s.window = null;
     s.cursor = ''; s.back = []; s.paging = null;
@@ -301,16 +309,22 @@ export class NativeThinHost307265 {
     return this.issue(s, this.client.select(s.hub, s.target, this.requestSession(s.session, 'view.open', s.target), this.api.cid()));
   }
 
-  request(hub, action, value) {
+  request(hub, action, value, keepFocus = false) {
     const s = this.states.get(hub);
     if (!s || s.mode !== 'view-v1') return false;
     // An explicit new owner or a hub switch supersedes any held tap, even
     // one belonging to a different hub whose refresh is still in flight.
-    if (this.current !== hub || ['select', 'bot', 'uber', 'uber-bot', 'room', 'remote'].includes(action))
+    if (!keepFocus && (this.current !== hub || ['select', 'bot', 'uber', 'uber-bot', 'room', 'remote'].includes(action)))
       for (const state of this.states.values()) state.deferredNavigation = null;
-    this.current = hub;
+    if (!keepFocus) this.current = hub;
+    if (['select', 'bot', 'uber', 'uber-bot', 'room', 'remote'].includes(action) && this.projectSearch) this.projectSearchEnd(this.projectSearch.scope);
     const intent = this.api.intent(hub, copy(s.session), copy(s.target), action, value);
     if (!intent || intent.kind === 'blocked') return true;
+    if (action === 'proj-find-q' && intent.kind === 'action' && typeof value === 'string' && utf8Bytes(value) <= 4096) {
+      s.projectQuery = { value, target: copy(s.target), sel: s.session.sel, epoch: s.epoch };
+      this.pumpProjectQuery(s);
+      return true;
+    }
     if (intent.kind === 'draft') {
       s.revision++;
       s.session = copy(intent.session);
@@ -392,12 +406,102 @@ export class NativeThinHost307265 {
   }
 
   pump(s) {
+    if (!s.active && s.ready && s.projectQuery) { this.pumpProjectQuery(s); return; }
     if (s.active || !s.ready || !s.queue.length) return;
     const operation = s.queue.shift();
     const session = this.api.prepare(s.session, operation.input, operation.action);
     const result = this.client.request(s.hub, 'view.action', { session: this.requestSession(session, 'view.action', s.target), action: operation.action, value: operation.value });
     s.active = result.id || null;
     this.issue(s, result, { operation, revision: operation.revision });
+  }
+
+  pumpProjectQuery(s) {
+    const pending = s.projectQuery;
+    if (!pending || !s.greeted || !s.ready || s.active) return;
+    s.projectQuery = null;
+    if (pending.epoch !== s.epoch || pending.sel !== s.session.sel || !same(pending.target, s.target)) { this.pump(s); return; }
+    s.queue = s.queue.filter(op => op.projectScope === undefined);
+    s.queue.unshift({ action: 'proj-find-q', value: pending.value, projectScope: pending.scope, projectEdit: pending.edit,
+      input: copy(s.session), revision: s.revision });
+    this.pump(s);
+  }
+
+  projectSearchEnd(scope) {
+    if (!Number.isSafeInteger(scope) || scope < 1) return;
+    if (!this.projectSearch || scope > this.projectSearch.scope)
+      this.projectSearch = { scope, edit: -1, text: '', ended: true, owners: new Map(), go: null };
+    else if (scope === this.projectSearch.scope) { this.projectSearch.ended = true; this.projectSearch.go = null; }
+    for (const s of this.states.values()) {
+      if (s.projectQuery?.scope <= scope) s.projectQuery = null;
+      s.queue = s.queue.filter(op => op.projectScope === undefined || op.projectScope > scope);
+    }
+  }
+
+  projectSearchQuery(scope, edit, text) {
+    if (!Number.isSafeInteger(scope) || scope < 1 || !Number.isSafeInteger(edit) || edit < 0 ||
+        typeof text !== 'string' || utf8Bytes(text) > 4096) return false;
+    let q = this.projectSearch;
+    if (q && (scope < q.scope || (scope === q.scope && (q.ended || edit < q.edit || (edit === q.edit && text !== q.text))))) return false;
+    if (q && scope === q.scope && edit === q.edit) return true;
+    if (!q || scope > q.scope) {
+      if (q) this.projectSearchEnd(q.scope);
+      q = { scope, edit, text, ended: false, owners: new Map(), go: null };
+      for (const hub of this.paired) {
+        const s = this.states.get(hub);
+        if (s?.mode === 'view-v1') q.owners.set(hub, { epoch: s.epoch, sel: s.session.sel, target: copy(s.target) });
+      }
+      this.projectSearch = q;
+    }
+    q.edit = edit; q.text = text; q.go = null;
+    for (const hub of this.paired) {
+      const s = this.states.get(hub);
+      if (s?.mode === 'view-v1' && !q.owners.has(hub))
+        q.owners.set(hub, { epoch: s.epoch, sel: s.session.sel, target: copy(s.target) });
+    }
+    for (const [hub, owner] of q.owners) {
+      const s = this.states.get(hub);
+      if (!s || s.epoch !== owner.epoch || s.session.sel !== owner.sel || !same(s.target, owner.target)) { this.projectSearchEnd(scope); return false; }
+      s.projectApplied = null;
+      s.projectQuery = { scope, edit, value: text, ...copy(owner) };
+      s.queue = s.queue.filter(op => op.projectScope === undefined);
+      this.pumpProjectQuery(s);
+    }
+    return true;
+  }
+
+  projectSearchGo(scope, edit, text, project) {
+    if (!this.projectSearchQuery(scope, edit, text)) return false;
+    const q = this.projectSearch;
+    if (typeof project !== 'string' || (project !== '' && ![...q.owners.keys()].some(hub => project.startsWith(hub + '|')))) return false;
+    q.go = { project };
+    this.pumpProjectGo();
+    return true;
+  }
+
+  pumpProjectGo() {
+    const q = this.projectSearch;
+    if (!q || q.ended || !q.go || !q.owners.size) return;
+    for (const [hub, owner] of q.owners) {
+      const s = this.states.get(hub), accepted = s?.projectApplied;
+      if (!s || s.epoch !== owner.epoch || s.session.sel !== owner.sel || !same(s.target, owner.target)) { this.projectSearchEnd(q.scope); return; }
+      if (!s.ready || s.active || s.projectQuery || s.queue.length || accepted?.scope !== q.scope || accepted.edit !== q.edit ||
+          accepted.epoch !== owner.epoch || !same(accepted.target, owner.target) || s.shown?.search?.query !== q.text) return;
+    }
+    const first = this.api.firstProject ? this.api.firstProject() : [...q.owners.keys()].flatMap(hub =>
+      (this.states.get(hub).shown.projects || []).map(p => p.id.startsWith(hub + '|') ? p.id : hub + '|' + p.id))[0];
+    const project = q.go.project || first;
+    const hub = typeof project === 'string' && [...q.owners.keys()].find(key => project.startsWith(key + '|'));
+    if (!hub || project !== first) { q.go = null; return; }
+    const s = this.states.get(hub), raw = project.slice(hub.length + 1);
+    // Never pass an earlier-prefix or missing project to Find.go: its fallback
+    // can create a thread. Only the exact freshly filtered project is eligible.
+    if (!s.shown.projects?.some(p => p.id === project || p.id === raw)) { q.go = null; return; }
+    q.ended = true;
+    q.go = null;
+    for (const other of q.owners.keys()) if (other !== hub) this.request(other, 'proj-find', 'off', true);
+    this.current = hub;
+    this.api.focus?.(hub);
+    this.request(hub, 'proj-go', raw);
   }
 
   validate(result, input) {
@@ -507,18 +611,22 @@ export class NativeThinHost307265 {
       }
       if (view.shown?.thread) view.shown.thread.later = s.back.length;
       s.shown = view.shown; s.overlay = view.overlay; s.shownTarget = copy(s.target);
+      if (metadata.operation?.projectScope !== undefined)
+        s.projectApplied = { scope: metadata.operation.projectScope, edit: metadata.operation.projectEdit, epoch: s.epoch, target: copy(s.target) };
       if (!s.flushed) { s.flushed = true; this.outboxFlush(hub); }
       this.sync.push({ hub, phase: 'presented', detail: 'view-v1', mode: 'view-v1', viewId: r.viewId,
         requestRevision: r.requestRevision, viewRevision: r.viewRevision, remoteReady: true });
       for (const args of s.registrations.values()) this.sendRegistration(s, args);
       s.registrations.clear();
     } else if (result.current) this.fail(hub, 'Current view is not ready');
+    this.pumpProjectQuery(s);
     if (s.ready && s.deferredNavigation) {
       const pending = s.deferredNavigation; s.deferredNavigation = null;
       if (pending.epoch === s.epoch && pending.sel === s.session.sel && same(pending.target, s.target))
         this.request(hub, pending.action, pending.value);
     }
     this.pump(s);
+    this.pumpProjectGo();
     // Person work gets the next request; ThinViews retains invalidation until
     // a later accepted picture covers it, or a new selection retires it.
     if (result.refreshDue && s.ready) this.deferRefresh(s);
