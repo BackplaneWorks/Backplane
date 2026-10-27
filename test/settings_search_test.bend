@@ -57,6 +57,7 @@ def main() -> IO(Unit):
     C.Check.str("nothing found", found("zzzz"), "")
     C.Check.str("the hint names the rows that matched", U.Settings.hint(I.En{}, "ordering", "price"), "Price estimates")
     C.Check.str("no hint without a query", U.Settings.hint(I.En{}, "ordering", ""), "")
+    C.Check.str("settle when done is on Threads", found("when done") ++ " " ++ U.Settings.hint(I.En{}, "threads", "when done"), "threads Settle when done")
     C.Check.str("Enter opens the first page found", U.Settings.page(act(typed("dictation"), "settings-page", "?")), "voice")
     C.Check.str("Enter with nothing found stays on the menu", U.Settings.page(act(typed("zzzz"), "settings-page", "?")), "")
     C.Check.str("a page is still opened by name", U.Settings.page(act(base(), "settings-page", "ordering")), "ordering")

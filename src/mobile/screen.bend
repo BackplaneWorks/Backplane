@@ -1768,6 +1768,7 @@ def Mob.settings.rows.k(i: Nat, +lc: I.Loc, +u: U.Ui, +st: M.State, +nf: Map<&2,
       Mob.lang.rows(lc, u),
       [Mob.set.row.l(MSG.T.settings.sidebar(lc), MSG.T.settings.sidebar.note(lc), Mob.set.chips.loc(lc, ["projects", "active"], U.Side.view(st), "sidebar.view"))]])
     case 1n: List.concat(&2, J.Json, [[Mob.set.row(Mob.set.days.label.loc(lc, M.Setting.get(st, "settle.days", "3")), MSG.T.settings.settle.note(lc), Mob.set.days(M.Setting.get(st, "settle.days", "3")))],
+      [Mob.set.row(MSG.T.settings.settle.done(lc), MSG.T.settings.settle.done.note(lc), Mob.set.chips.loc(lc, ["on", "off"], Bool.pick(String, M.Lifecycle.on(st), "on", "off"), M.Lifecycle.key()))],
       [Mob.set.row(MSG.T.settings.restart(lc), MSG.T.settings.restart.note(lc), Mob.set.chips.loc(lc, ["on", "off"], Bool.pick(String, M.Carry.on(st), "on", "off"), "restart.continue"))],
       Mob.agy.rows(U.Fallbackv.rows(u))])
     case 2n: List.concat(&2, J.Json, [[Mob.set.row(MSG.T.settings.provider(lc), Bool.pick(String, String.is_empty(U.Models.cli(models, prov)), MSG.T.settings.provider.missing(lc, prov), U.Models.cli(models, prov)), Mob.set.chips.loc(lc, ["claude", "codex", "grok", "muse", "antigravity", "opencode", "pi", "omp"], prov, "agent.provider"))],

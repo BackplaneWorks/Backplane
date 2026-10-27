@@ -7295,6 +7295,30 @@ def Laws.life_message_wakes():
 def Laws.life_reply_held():
   {==}
 
+def Laws.life_off_by_default():
+  {==}
+
+def Laws.life_off_never_done(kids, s, t, navs, th, at):
+  {==}
+
+def Laws.life_off_finished_stays():
+  {==}
+
+def Laws.life_off_owned_work_done_stays():
+  {==}
+
+def Laws.life_off_tick_stays():
+  {==}
+
+def Laws.life_off_window_settles():
+  {==}
+
+def Laws.life_on_tick_settles():
+  {==}
+
+def Laws.life_off_message_wakes():
+  {==}
+
 def Laws.scratch_busy_kept(now, w, t, n):
   and_false_r(M.Scratch.expired(now, w, t))
 

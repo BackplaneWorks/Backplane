@@ -303,7 +303,8 @@ type Change is Data:
   DeployBuilt{commit: String, state: String, version: String, detail: String, at: Nat}
   # the hub saw real work start on a thread that was settled (or that the
   # person brought back): it is back on the active shelf with no override,
-  # so it settles by itself once that work is done (Lifecycle.*, laws life_*)
+  # so it settles once that work is done (at once with settle.done on, else
+  # by the person or the inactivity window; Lifecycle.*, laws life_*)
   ThreadWoke{id: String, at: Nat}
 
 # the later of two times. Base's Nat.max recurses once per unit and
@@ -3318,7 +3319,8 @@ def Work.busy.m(+kids: Map<&2, Nat>, +rows: Map<&2, Nat>, +th: String) -> Nat:
 
 # Lifecycle
 # ---------
-# A thread settles by itself once the work it owns is done, and wakes
+# A thread settles by itself once the work it owns is done (with the
+# setting settle.done on, Lifecycle.on), and wakes
 # (ThreadWoke) when real work starts on it again; hub.bend's Shelve.*
 # applies these to every step and every tick (laws life_*). A thread works
 # while a turn runs or waits in its queue, an ask waits on the person, or
@@ -3378,6 +3380,17 @@ def Lifecycle.done.c(turn: TurnState, sh: Shelf, o: Override, snoozed: Bool, +ki
 # not snoozed. The cheap tests go first: the tick asks it of every thread
 def Lifecycle.done(+kids: Map<&2, Nat>, +s: State, +t: Thread, snoozed: Bool) -> Bool:
   Lifecycle.done.c(Thread.turn(t), Shelf.of(t), Lifecycle.override(t), snoozed, kids, s, t)
+
+# The "settle.done" setting (Settings, Threads): a done thread settles at
+# once (Lifecycle.done, hub.bend's Shelve) only when "on". Off, the
+# default, a finished thread stays on the active shelf, done, until the
+# person settles it or Settle.auto's inactivity window passes. Waking is
+# the same either way (laws life_*, life_off_*)
+def Lifecycle.key() -> String:
+  "settle.done"
+
+def Lifecycle.on(+s: State) -> Bool:
+  String.eq(Setting.get(s, Lifecycle.key(), "off"), "on")
 
 # a step's wake: the thread went from idle to working, and it was settled
 # (by itself or by the person) or brought back by the person (whose hold

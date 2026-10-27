@@ -5123,17 +5123,18 @@ law wt_first_waits:
   {M.Worktree.waits(M.State.replay([M.ProjectCreated{"p1", "p", "/p", 1n}, M.ThreadCreated{"t1", "p1", "x", M.Worktree{}, "", "", "claude", "", 1n}], M.State.empty()),
     M.State.thread.get(M.State.replay([M.ProjectCreated{"p1", "p", "/p", 1n}, M.ThreadCreated{"t1", "p1", "x", M.Worktree{}, "", "", "claude", "", 1n}], M.State.empty()), "t1"), 50n) == True{} : Bool}
 
-# a turn that completed with nothing else out settles its thread
+# with the setting settle.done on, a turn that completed with nothing else
+# out settles its thread
 law life_finished_settles:
-  {H.Shelve.step(H.Shelve.demo(Nil{}), [M.TurnChanged{"t1", M.Completed{}, 5n}]) == [M.ThreadSettled{"t1", False{}, 5n}] : List<&2, M.Change>}
+  {H.Shelve.step(H.Shelve.demo.on(Nil{}), [M.TurnChanged{"t1", M.Completed{}, 5n}]) == [M.ThreadSettled{"t1", False{}, 5n}] : List<&2, M.Change>}
 
 # a turn that ends with its background work still out does not
 law life_owned_work_held:
   {H.Shelve.step(H.Shelve.demo([M.WorkSet{"t1", "bg", "a\tx", 3n}]), [M.TurnChanged{"t1", M.Completed{}, 5n}]) == [] : List<&2, M.Change>}
 
-# and settles when that work is done
+# and settles when that work is done (settle.done on)
 law life_owned_work_done:
-  {H.Shelve.step(H.Shelve.demo([M.WorkSet{"t1", "bg", "a\tx", 3n}, M.TurnChanged{"t1", M.Completed{}, 5n}]), [M.WorkSet{"t1", "bg", "", 6n}]) == [M.ThreadSettled{"t1", False{}, 6n}] : List<&2, M.Change>}
+  {H.Shelve.step(H.Shelve.demo.on([M.WorkSet{"t1", "bg", "a\tx", 3n}, M.TurnChanged{"t1", M.Completed{}, 5n}]), [M.WorkSet{"t1", "bg", "", 6n}]) == [M.ThreadSettled{"t1", False{}, 6n}] : List<&2, M.Change>}
 
 # a new turn on a settled thread wakes it
 law life_new_turn_wakes:
@@ -5155,6 +5156,48 @@ law life_reply_held:
 # the person settled a running thread: its own events do not undo that
 law life_manual_settle_held:
   {H.Shelve.step(H.Shelve.demo([M.ThreadSettled{"t1", True{}, 3n}]), [M.TurnChanged{"t1", M.Running{}, 4n}]) == [] : List<&2, M.Change>}
+
+# The setting settle.done off (the default, model.bend's Lifecycle.on): a
+# finished thread stays on the active shelf, done, until the person
+# settles it or the inactivity window passes. Waking is the same (the
+# wake laws above hold with it off)
+
+law life_off_by_default:
+  {M.Lifecycle.on(M.State.empty()) == False{} : Bool}
+
+# off, nothing is settled by its work
+law life_off_never_done:
+  for +kids: Map<&2, Nat>
+  for +s: M.State
+  for +t: M.Thread
+  for +navs: Map<&2, M.Nav>
+  for +th: String
+  for +at: Nat
+  {H.Shelve.done(False{}, kids, s, t, navs, th, at) == False{} : Bool}
+
+# a turn that completed with nothing else out leaves its thread active
+law life_off_finished_stays:
+  {H.Shelve.step(H.Shelve.demo(Nil{}), [M.TurnChanged{"t1", M.Completed{}, 5n}]) == [] : List<&2, M.Change>}
+
+# and so does the end of the work it owned
+law life_off_owned_work_done_stays:
+  {H.Shelve.step(H.Shelve.demo([M.WorkSet{"t1", "bg", "a\tx", 3n}, M.TurnChanged{"t1", M.Completed{}, 5n}]), [M.WorkSet{"t1", "bg", "", 6n}]) == [] : List<&2, M.Change>}
+
+# the tick leaves a finished thread until the window passes
+law life_off_tick_stays:
+  {H.Shelve.ticked(H.Shelve.demo([M.TurnChanged{"t1", M.Completed{}, 5n}]), 100n) == [] : List<&2, M.Change>}
+
+# and settles it by inactivity once it has (settle.days, 3 by default)
+law life_off_window_settles:
+  {H.Shelve.ticked(H.Shelve.demo([M.TurnChanged{"t1", M.Completed{}, 5n}]), 300000n) == [M.ThreadSettled{"t1", False{}, 300000n}] : List<&2, M.Change>}
+
+# with settle.done on, the tick settles it at once
+law life_on_tick_settles:
+  {H.Shelve.ticked(H.Shelve.demo.on([M.TurnChanged{"t1", M.Completed{}, 5n}]), 100n) == [M.ThreadSettled{"t1", False{}, 100n}] : List<&2, M.Change>}
+
+# off, a thread the person settled still wakes when they write to it again
+law life_off_message_wakes:
+  {H.Shelve.step(H.Shelve.demo([M.TurnChanged{"t1", M.Completed{}, 5n}, M.ThreadSettled{"t1", True{}, 6n}]), [M.MessagePosted{"t1", "m2", M.User{}, "again", 7n}, M.TurnChanged{"t1", M.Running{}, 7n}]) == [M.ThreadWoke{"t1", 7n}] : List<&2, M.Change>}
 
 law scratch_busy_kept:
   for +now: Nat

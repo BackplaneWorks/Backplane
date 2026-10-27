@@ -155,3 +155,5 @@ def main() -> IO(Unit):
     C.Check.str("web lead", Bool.show(String.contains(texts([web]), U.Notify.lead(I.En{}))), "True")
     C.Check.str("phone lead", Bool.show(String.contains(phone, U.Notify.lead(I.En{}))), "True")
     controls(["notify.needs", "notify.settled", "notify.reminders", "notify.all"], out, web, phone)
+    names(texts([web]), phone, glyphs(ops(out)), ["Settle when done"])
+    controls(["settle.done"], out, web, phone)

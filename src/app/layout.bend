@@ -3697,6 +3697,15 @@ def Set.carry(+ty: Ty, +on: Bool, +x: U32, +w: U32, +y: U32) -> Out:
     Lay.chip(ty, (x + w - 16 - Lay.button.w(ty, label0) - 6 - Lay.button.w(ty, label1) : U32), (y + 14 : U32), label1, on, "setting", "restart.continue=on"),
     Lay.chip(ty, (x + w - 16 - Lay.button.w(ty, label0) : U32), (y + 14 : U32), label0, Bool.not(on), "setting", "restart.continue=off")])
 
+# the "settle.done" row (model.bend's Lifecycle.on): on or off
+def Set.settle.done(+ty: Ty, +on: Bool, +x: U32, +w: U32, +y: U32) -> Out:
+  +label0 = MSG.T.settings.lang.off(Ty.loc(ty))
+  +label1 = MSG.T.settings.lang.on(Ty.loc(ty))
+  Out.all([
+    Set.row.r(ty, MSG.T.settings.settle.done(Ty.loc(ty)), MSG.T.settings.settle.done.note(Ty.loc(ty)), x, y, w, Set.pairw(ty, label0, label1, 150)),
+    Lay.chip(ty, (x + w - 16 - Lay.button.w(ty, label0) - 6 - Lay.button.w(ty, label1) : U32), (y + 14 : U32), label1, on, "setting", M.Lifecycle.key() ++ "=on"),
+    Lay.chip(ty, (x + w - 16 - Lay.button.w(ty, label0) : U32), (y + 14 : U32), label0, Bool.not(on), "setting", M.Lifecycle.key() ++ "=off")])
+
 def Set.voice.h(+ty: Ty, +n: S.Nui, +x: U32, +w: U32) -> U32:
   +u = S.Nui.ui(n)
   +devs = Vx.devs.loc(Ty.loc(ty), u)
@@ -4162,12 +4171,13 @@ def Set.fallback(+ty: Ty, +n: S.Nui, +x: U32, +w: U32, +y: U32) -> Out:
 def Set.threads(+ty: Ty, +st: M.State, +n: S.Nui, +x: U32, +w: U32, +b: U32) -> Out:
   Out.all([
     Set.head(ty, MSG.T.tour.title.threads(Ty.loc(ty)), x, (b + 76 : U32)),
-    Set.card(x, (b + 108 : U32), w, 128),
+    Set.card(x, (b + 108 : U32), w, 192),
     Set.row.r(ty, MSG.T.settings.settle(Ty.loc(ty)), MSG.T.settings.settle.note(Ty.loc(ty)), x, (b + 110 : U32), w, 190),
     Set.days(ty, M.Setting.get(st, "settle.days", "3"), (x + w - 172 : U32), (b + 126 : U32)),
-    Set.carry(ty, M.Carry.on(st), x, w, (b + 174 : U32)),
-    Set.notify(st, ty, x, w, (b + 256 : U32)),
-    Set.fallback(ty, n, x, w, (b + 256 + Set.notify.h(st, ty, w) : U32))])
+    Set.settle.done(ty, M.Lifecycle.on(st), x, w, (b + 174 : U32)),
+    Set.carry(ty, M.Carry.on(st), x, w, (b + 238 : U32)),
+    Set.notify(st, ty, x, w, (b + 320 : U32)),
+    Set.fallback(ty, n, x, w, (b + 320 + Set.notify.h(st, ty, w) : U32))])
 
 # Settings' model search (the picker's field, "mq"), once the provider
 # lists many models
@@ -4198,7 +4208,7 @@ def Set.page.threads(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +
 
 def Set.page.threads.h(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x: U32, +w: U32) -> U32:
 
-  (200 + Set.notify.h(st, ty, w) + Set.fallback.h(ty, n, x, w) : U32)
+  (264 + Set.notify.h(st, ty, w) + Set.fallback.h(ty, n, x, w) : U32)
 
 def Set.page.agents(+ty: Ty, +st: M.State, +n: S.Nui, +info: Map<&2, String>, +v: String, +note: String, +x: U32, +w: U32, +y: U32) -> Out:
   +prov = M.Setting.get(st, "agent.provider", "claude")

@@ -10306,7 +10306,7 @@ def Settings.q(+u: Ui) -> String:
 def Settings.rows.of(i: Nat, +l: I.Loc) -> List<&2, String>:
   match i:
     case 0n: [MSG.T.settings.theme(l), MSG.T.settings.lang(l), MSG.T.settings.sidebar(l), MSG.T.settings.textsize(l)]
-    case 1n: [MSG.T.settings.settle(l), MSG.T.settings.restart(l)]
+    case 1n: [MSG.T.settings.settle(l), MSG.T.settings.settle.done(l), MSG.T.settings.restart(l)]
     case 2n: [MSG.T.settings.provider(l), MSG.T.settings.model(l), Think.label()]
     case 3n: [MSG.T.settings.writing.provider(l)]
     case 4n: ["KiCad", "FreeCAD", "KiCad IPC"]
@@ -10320,7 +10320,7 @@ def Settings.rows.of(i: Nat, +l: I.Loc) -> List<&2, String>:
 def Settings.words(i: Nat) -> String:
   match i:
     case 0n: "appearance dark light theme font text size zoom scale language sidebar"
-    case 1n: "threads settle restart continue notifications alerts notify"
+    case 1n: "threads settle done finished restart continue notifications alerts notify"
     case 2n: "agents provider model claude codex grok opencode muse pi omp effort thinking reasoning chain of thought"
     case 3n: "writing titles summaries text model"
     case 4n: "cad kicad freecad ipc path schematic board"

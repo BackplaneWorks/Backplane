@@ -6406,9 +6406,10 @@ def Pend.fix(+s: M.State, +cs: List<&2, M.Change>) -> List<&2, M.Change>:
 # ----------------
 # Every step passes through here before it is stored (the server's
 # Hub.step.go, after the pending counts): a thread the step leaves done
-# settles, and one it sets working again wakes (model.bend's Lifecycle.*,
-# laws life_*). Only the threads a change can move are asked, each once,
-# stamped with that change's time; a step that names none costs no replay.
+# settles (with the setting settle.done on, Shelve.done), and one it sets
+# working again wakes (model.bend's Lifecycle.*, laws life_*). Only the
+# threads a change can move are asked, each once, stamped with that
+# change's time; a step that names none costs no replay.
 # The tick (Shelve.tick) asks every thread, for state no step corrected.
 
 type SvAt is Data:
@@ -6636,6 +6637,16 @@ def Shelve.fresh.on(sh: M.Shelf, cs: List<&2, M.Change>, +pre: M.State, +th: Str
     case M.Settled{}: Shelve.fresh.go(cs, pre, th, False{})
     case _: False{}
 
+# whether a done thread settles now: only with the setting settle.done on
+# (model.bend's Lifecycle.on); off, it stays active, done, until the person
+# settles it or the inactivity window does (Hub.settle.go; laws life_off_*)
+def Shelve.done(on: Bool, +kids: Map<&2, Nat>, +s: M.State, +t: M.Thread, +navs: Map<&2, M.Nav>, +th: String, +at: Nat) -> Bool:
+  match on:
+    case True{}:
+      M.Lifecycle.done(kids, s, t, M.Snooze.on(at, M.Nav.until(M.Nav.get(navs, th))))
+    case False{}:
+      False{}
+
 def Shelve.one.k(wake: Bool, done: Bool, +th: String, +at: Nat, +t: M.Thread, rest: List<&2, M.Change>) -> List<&2, M.Change>:
   match wake done:
     case True{} _:
@@ -6655,7 +6666,7 @@ def Shelve.wake(+pre: M.State, +post: M.State, +k0: Map<&2, Nat>, +k1: Map<&2, N
 
 def Shelve.one(+cs: List<&2, M.Change>, +pre: M.State, +post: M.State, +k0: Map<&2, Nat>, +k1: Map<&2, Nat>, +navs: Map<&2, M.Nav>, +th: String, +at: Nat, rest: List<&2, M.Change>) -> List<&2, M.Change>:
   Shelve.one.k(Bool.or(Bool.and(Bool.and(Bool.not(Shelve.held(cs, th)), Shelve.recent(pre, th, at)), Shelve.wake(pre, post, k0, k1, th, False{})),
-      M.Lifecycle.wake.fresh(Shelve.fresh.on(M.Shelf.of(M.State.thread.get(post, th)), cs, pre, th), M.Lifecycle.working(k1, post, M.State.thread.get(post, th)), M.Shelf.of(M.State.thread.get(post, th)))), M.Lifecycle.done(k1, post, M.State.thread.get(post, th), M.Snooze.on(at, M.Nav.until(M.Nav.get(navs, th)))),
+      M.Lifecycle.wake.fresh(Shelve.fresh.on(M.Shelf.of(M.State.thread.get(post, th)), cs, pre, th), M.Lifecycle.working(k1, post, M.State.thread.get(post, th)), M.Shelf.of(M.State.thread.get(post, th)))), Shelve.done(M.Lifecycle.on(post), k1, post, M.State.thread.get(post, th), navs, th, at),
     th, at, M.State.thread.get(post, th), rest)
 
 def Shelve.go(xs: List<&2, SvAt>, +cs: List<&2, M.Change>, +pre: M.State, +post: M.State, +k0: Map<&2, Nat>, +k1: Map<&2, Nat>, +navs: Map<&2, M.Nav>) -> List<&2, M.Change>:
@@ -6693,6 +6704,10 @@ def Shelve.demo(cs: List<&2, M.Change>) -> M.State:
   M.State.replay(List.append(&2, M.Change, [M.ProjectCreated{"p1", "p", "/p", 1n}, M.ThreadCreated{"t1", "p1", "x", M.Local{}, "", "", "claude", "", 1n},
     M.MessagePosted{"t1", "m1", M.User{}, "go", 2n}, M.TurnChanged{"t1", M.Running{}, 2n}], cs), M.State.empty())
 
+# the same with the setting settle.done on: a done thread settles at once
+def Shelve.demo.on(cs: List<&2, M.Change>) -> M.State:
+  Shelve.demo(M.SettingSet{M.Lifecycle.key(), "on", 1n} <> cs)
+
 def Shelve.tick.k(wake: Bool, done: Bool, +t: M.Thread, +now: Nat, rest: List<&2, M.Change>) -> List<&2, M.Change>:
   match wake done:
     case True{} _:
@@ -6702,16 +6717,20 @@ def Shelve.tick.k(wake: Bool, done: Bool, +t: M.Thread, +now: Nat, rest: List<&2
     case False{} False{}:
       rest
 
-# every thread's settle or wake that no step made: a settled thread that
-# works (Lifecycle.stale) wakes, a done one settles (Lifecycle.done). This
-# is what corrects a log written before the rule, or after a restart
-def Shelve.tick(ts: List<&2, M.Thread>, +navs: Map<&2, M.Nav>, +kids: Map<&2, Nat>, +s: M.State, +now: Nat) -> List<&2, M.Change>:
+def Shelve.tick.go(+on: Bool, ts: List<&2, M.Thread>, +navs: Map<&2, M.Nav>, +kids: Map<&2, Nat>, +s: M.State, +now: Nat) -> List<&2, M.Change>:
   match ts:
     case Nil{}:
       Nil{}
     case +t <> rest:
-      Shelve.tick.k(M.Lifecycle.stale(kids, s, t), M.Lifecycle.done(kids, s, t, M.Snooze.on(now, M.Nav.until(M.Nav.get(navs, M.Thread.id(t))))), t, now,
-        Shelve.tick(rest, navs, kids, s, now))
+      Shelve.tick.k(M.Lifecycle.stale(kids, s, t), Shelve.done(on, kids, s, t, navs, M.Thread.id(t), now), t, now,
+        Shelve.tick.go(on, rest, navs, kids, s, now))
+
+# every thread's settle or wake that no step made: a settled thread that
+# works (Lifecycle.stale) wakes, a done one settles (Lifecycle.done, with
+# settle.done on). This is what corrects a log written before the rule,
+# or after a restart
+def Shelve.tick(ts: List<&2, M.Thread>, +navs: Map<&2, M.Nav>, +kids: Map<&2, Nat>, +s: M.State, +now: Nat) -> List<&2, M.Change>:
+  Shelve.tick.go(M.Lifecycle.on(s), ts, navs, kids, s, now)
 
 def Shelve.threads(+s: M.State) -> List<&2, M.Thread>:
   match s:
@@ -6725,6 +6744,11 @@ def Shelve.tick.post(+post: M.State, +now: Nat, +kids: Map<&2, Nat>) -> List<&2,
 # after them, the settles and wakes by work, so no thread settles twice
 def Shelve.after(+cs: List<&2, M.Change>, +s: M.State, +now: Nat, +kids: Map<&2, Nat>) -> List<&2, M.Change>:
   List.append(&2, M.Change, cs, Shelve.tick.post(M.State.replay(cs, s), now, kids))
+
+# the tick's settles and wakes of a state (Hub.tick.k's first part), for
+# the laws and tests
+def Shelve.ticked(+s: M.State, +now: Nat) -> List<&2, M.Change>:
+  Shelve.after(Hub.settle.go(Shelve.threads(s), M.State.navs(s), M.Work.kids.map(s), s, now, Hub.settle.window(s)), s, now, M.Work.kids.map(s))
 
 # every thread that should settle now, settled (a snoozed one never is);
 # gh asked about due merges; worktrees put away long enough removed;

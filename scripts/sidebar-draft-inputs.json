@@ -28,7 +28,7 @@
     "src/core/cat.bend": "0130231a18e515a94d40d7584d19a9b5a2d1663f9601fbff944bf97e37f9fd6b",
     "src/core/cef.bend": "f2d3fa4c991d0e341620fe634ddb4e08da97f8e471ec46afac0b3de471cc69fb",
     "src/core/charter.bend": "7f906bdea712f6ff6162735c8cc133767ec0f9289c3d0bee6dfedbd4d75ad981",
-    "src/core/client.bend": "933348f591ddd3decf900507037b08ec0b4d5fbd7bd7251d7cd731c9bd5dedbd",
+    "src/core/client.bend": "6a080683116351d01ed06c17b9f33094fb112448fd1284d786a9a6e69250cd3b",
     "src/core/codec.bend": "33cb35c55f3712a18734e76e1149763001a9388af27948f0da4ead2c13d48b6f",
     "src/core/cron.bend": "6f89a001df0261a25c878616ea66c235e169f7fc1c726d39e695fce8adb57332",
     "src/core/deploy.bend": "ebee4e63a52cf41ae001bebcdbb7fb010ad71c1e04e481292585740d88a39cc4",
@@ -69,8 +69,8 @@
     "src/core/mailview.bend": "e1cac757c5f34457a745f095642f6675befed68d5b87aae30f14b706dff015b1",
     "src/core/mech.bend": "79fb3307d0d6868a777924d4b934ac8a1671937e265942467f6c60cc4db82efb",
     "src/core/menu.bend": "807668923de70eaabb72ddb760f808cbf6d786b70822ba6a1180776758af7eee",
-    "src/core/model.bend": "3d66f2339799f2dc8c5353f9e45066b79fc5a401cc59a9f6fdf6dfd7916c8c71",
-    "src/core/msgs.bend": "dfc361d44ee34a12f8ba8628498032f6943668c3428c00db25ef9cb7477f4f3c",
+    "src/core/model.bend": "96a7baa0b71bb5efa085ee9259a126738623e87984596bed8e772ae30f0750e8",
+    "src/core/msgs.bend": "a366a0483ca361f68403762d8ee3e44cf22832cfa71dcaf7bdd1e03bfa88a0ae",
     "src/core/notice.bend": "ee87318c1f12fc6cfb23bb5e24e90709e1f9a2eadfd2832581d21590f596e5e0",
     "src/core/onboard.bend": "55ccccf20f706a0acad492de20e23aedc751c7e9ce61b6f3430bfd65796e9232",
     "src/core/once.bend": "c12f375e09045a035cfc66c87d73197f3348b2998fa0e0bb6c9876fca870577c",
@@ -141,7 +141,7 @@
     "src/web/space.bend": "b86a265e41a900498bc33c37c0404c4d6678554efe3d9054f329beb2cf35ee63",
     "src/web/usage-graph.bend": "fa06f7d2bf855a396a5f7a7b4725dfaa990145fbbcefe7ad21ae8f9a698a2679",
     "src/web/usage-page.bend": "706e3f17a4a3e5f159656d47aeb76a940d4825421f5c33228f9aef692ec926e3",
-    "src/web/view.bend": "e1eb4995a72cb0488f2fddb9c6d03f54539ef3b7108d7371cae1a60044706ffd"
+    "src/web/view.bend": "4d176d87b2c846c381695ca5a282f1aec079a993a773741cc8800a60b7206c94"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -251,5 +251,5 @@
       "sourceSnapshot": "/home/h/Documents/i2cjak/bp-coord/settle-fresh-work/SOURCE-structural-correction.json"
     }
   },
-  "reviewNote": "API key Save reads the masked field once in host.js (web), no sidebar change"
+  "reviewNote": "Settle when done setting (settle.done, off by default): a Settings row, Lifecycle.on and new strings; none of it reaches the sidebar draft projection; 24 draft image checks pass."
 }

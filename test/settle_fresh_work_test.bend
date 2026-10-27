@@ -111,4 +111,6 @@ def main() -> IO(Unit):
     C.Check.str("long history mixed running heartbeat and assistant remain passive", L.step(long, [M.TurnChanged{"t1", M.Running{}, 6n}, M.MessagePosted{"t1", "passive-reply", M.Assistant{}, "reply", 6n}]), "")
     C.Check.str("different seconds later manual settle wins over fresh work", L.shelf_at(L.after(held(), [M.WorkSet{"t1", "bg", "new\tworking", 6n}, M.ThreadSettled{"t1", True{}, 7n}]), "t1"), "settled")
     C.Check.str("different seconds fresh work after manual settle wins", L.shelf_at(L.after(held(), [M.ThreadSettled{"t1", True{}, 6n}, M.WorkSet{"t1", "bg", "new\tworking", 8n}]), "t1"), "active")
+    C.Check.str("off: a finished thread stays active and shows complete", L.shelf_at(L.after(L.off(Nil{}), L.done()), "t1") ++ " " ++ phase(L.after(L.off(Nil{}), L.done())), "active complete")
+    C.Check.str("off: all owned work completed leaves it active", L.shelf_at(L.after(L.after(L.off([M.WorkSet{"t1", "bg", "old\tworking", 3n}, M.TurnChanged{"t1", M.Completed{}, 5n}]), job(6n)), [M.WorkSet{"t1", "bg", "", 7n}]), "t1"), "active")
     C.Check.str("different seconds fresh then manual then fresh reopens", L.shelf_at(L.after(held(), [M.WorkSet{"t1", "bg", "first\tworking", 6n}, M.ThreadSettled{"t1", True{}, 7n}, M.WorkSet{"t1", "bg", "second\tworking", 8n}]), "t1"), "active")
