@@ -43,6 +43,9 @@ final class AppModel {
     private var viewerResumeFailed: ViewerCloseIntent.Token?
     // Explicit Retry starts a new loading budget; transport reconnects do not.
     private(set) var viewerLoadRetry: UInt64 = 0
+    // Automatic restoration gets a new dispatch/close token but continues the
+    // same logical loading attempt. User opens and owner changes retire it.
+    private(set) var viewerLoadAttempt: UInt64 = 0
     @ObservationIgnored private var projectSearch = ProjectSearchIntent()
     @ObservationIgnored private var projectSearchOwner: UInt64 = 0
     @ObservationIgnored private var projectSearchGo: ProjectSearchIntent.Go?
@@ -708,12 +711,15 @@ final class AppModel {
     @ObservationIgnored var vaultText = ""
 
     func act(_ action: String, _ value: String = "") {
+        act(action, value, continuingViewerLoad: false)
+    }
+    private func act(_ action: String, _ value: String, continuingViewerLoad: Bool) {
         if action == "view", value.isEmpty {
             if let token = viewerClose.current { closeViewer(token) }
             return
         }
         if action == "select" || Self.opens.contains(action) { cancelViewer() }
-        let viewerRequest = action == "view" ? beginViewerOpen(value) : nil
+        let viewerRequest = action == "view" ? beginViewerOpen(value, continuingLoad: continuingViewerLoad) : nil
         if action == "select" || Self.opens.contains(action) || (action == "proj-find" && value == "off") { endProjectSearch() }
         if action == "select" || Self.opens.contains(action) { presentationIntent.clear() }
         // the secret box's Save: the value joins the box's name, purpose and
@@ -808,6 +814,7 @@ final class AppModel {
         .init(kind: v.open, key: v.key, layers: v.layers)
     }
     private func cancelViewer() {
+        viewerLoadAttempt &+= 1
         viewerResume.cancel()
         viewerResumeExpected = nil
         viewerResumeFailed = nil
@@ -818,8 +825,9 @@ final class AppModel {
         viewerCloseSending = nil
         engine.viewerToken(nil)
     }
-    private func beginViewerOpen(_ kind: String) -> ViewerCloseIntent.Token? {
+    private func beginViewerOpen(_ kind: String, continuingLoad: Bool = false) -> ViewerCloseIntent.Token? {
         guard let s = screen, let thread = s.thread, !s.hub.isEmpty else { return nil }
+        if !continuingLoad { viewerLoadAttempt &+= 1 }
         viewerResume.cancel()
         viewerResumeExpected = nil
         viewerResumeFailed = nil
@@ -879,6 +887,7 @@ final class AppModel {
         }
         viewerPublished = thread.viewer
         if viewerClose.current?.owner != owner || viewerClose.current?.source != source {
+            viewerLoadAttempt &+= 1
             let token = viewerClose.open(owner: owner, source: source)
             if let stamp = viewerClosedStamp, stamp.matches(owner, identity: ScreenCache.identity(links, profile: Self.cid)) {
                 viewerClose.close(token)
@@ -898,6 +907,7 @@ final class AppModel {
     }
     func closeViewer(_ token: ViewerCloseIntent.Token) {
         guard viewerClose.close(token) else { return }
+        viewerLoadAttempt &+= 1
         viewerResume.cancel()
         viewerResumeExpected = nil
         viewerResumeFailed = nil
@@ -973,7 +983,7 @@ final class AppModel {
         guard viewerResumeDefault else { viewerResumeFailed = current; return }
         // Use the normal token-fenced read-navigation action, so the new
         // server actor requests its geometry. Never replay a mutation.
-        act("view", captured.source.kind)
+        act("view", captured.source.kind, continuingViewerLoad: true)
         if let request = viewerOpening {
             viewerResumeExpected = (request, captured)
             Task { [weak self] in
