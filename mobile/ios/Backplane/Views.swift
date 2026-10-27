@@ -1052,6 +1052,7 @@ struct ThreadScreen: View {
     @State private var showPermissions = false
 
     var body: some View {
+      VStack(spacing: 0) {
         TimelineScroll(position: position, ids: thread.entries.map(\.id), earlier: thread.earlier ?? 0,
                        loadEarlier: { live && model.loadEarlier(thread.id) },
                        earlierEnabled: live && model.contentReady && model.screen?.thread?.id == thread.id) {
@@ -1095,6 +1096,7 @@ struct ThreadScreen: View {
                 .padding()
                 .environment(\.backplaneLanguage, lang)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .overlay(alignment: .bottomTrailing) {
             if !position.following {
                 Button { position.latest?() } label: {
@@ -1122,7 +1124,8 @@ struct ThreadScreen: View {
                 withAnimation(.easeOut(duration: 2)) { if lit == j.id { lit = nil } }
             }
         }
-        .safeAreaInset(edge: .bottom) {
+        // Keep the composer in the proposed viewport, including when this
+        // chat is nested below a bot header and above the app's tab strip.
           VStack(spacing: 0) {
             // the terminals pinned to the top of the thread
             ForEach((thread.embs ?? []).filter { $0.pinned }, id: \.key) { e in
