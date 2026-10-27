@@ -11,6 +11,19 @@ function pending(home,codec='5'){const dir=path.join(home,'.store-next');fs.mkdi
 function fixture(run){const h=fs.mkdtempSync(path.join(os.tmpdir(),'bp-checkpoint-'));try{fs.writeFileSync(path.join(h,'events.jsonl'),'');db(path.join(h,'store.db'),'old');run(h)}finally{fs.rmSync(h,{recursive:true})}}
 function marker(home){const d=new Database(path.join(home,'store.db'),{readonly:true});try{return d.query("SELECT v FROM setting WHERE k='test.marker'").get().v}finally{d.close()}}
 let n=0;function test(name,run){fixture(run);console.log('ok '+name);n++;}
+test('promotion preserves WAL-only changes and permits a read-only reopen',h=>{
+  const c=effects(),temp=c.store_temp(h),writer=path.join(h,'writer.db');
+  db(writer,'before');
+  const d=new Database(writer);
+  try {
+    d.exec("PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0; PRAGMA wal_checkpoint(TRUNCATE); UPDATE setting SET v='after' WHERE k='test.marker'");
+    for(const suffix of ['','-wal','-shm'])fs.copyFileSync(writer+suffix,path.join(temp,'store.db')+suffix);
+  } finally {d.close()}
+  assert.equal(c.store_promote(h,temp),'ok');
+  assert(!fs.existsSync(temp));
+  assert.equal(marker(h),'after');
+  assert.equal(c.store_validate(path.join(h,'store.db')).codec,'5');
+});
 test('valid current cache is unchanged without an offered checkpoint',h=>{const before=hash(path.join(h,'store.db'));assert.equal(effects().store_prepare(h),'ok');assert.equal(hash(path.join(h,'store.db')),before)});
 test('exact hash/prefix checkpoint promotes atomically with rollback copy',h=>{const before=hash(path.join(h,'store.db'));pending(h);assert.equal(effects().store_prepare(h),'ok');assert.equal(marker(h),'new');assert.equal(fs.readFileSync(path.join(h,'events.jsonl'),'utf8'),'');assert(fs.readdirSync(h).some(n=>n.startsWith('store.db.previous-')&&hash(path.join(h,n))===before))});
 for(const kind of ['hash','prefix','codec'])test('rejected '+kind+' offer leaves current cache untouched',h=>{const before=hash(path.join(h,'store.db')),m=pending(h,kind==='codec'?'0':'5');if(kind==='hash')m.storeSha256='0'.repeat(64);if(kind==='prefix')m.prefixSha256='0'.repeat(64);fs.writeFileSync(path.join(h,'.store-next/READY.json'),JSON.stringify(m));assert.equal(effects().store_prepare(h),'ok');assert.equal(hash(path.join(h,'store.db')),before);assert.equal(marker(h),'old');assert(fs.readdirSync(h).some(n=>n.startsWith('.store-next.rejected-')))});
