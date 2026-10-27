@@ -2635,8 +2635,22 @@ def GitJob.text.k(+inbox: Chan(Msg), +client: U32, +id: String, +thread: String,
 def GitJob.diff.k(+inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +r: String) -> IO(Unit):
   GitJob.reply(inbox, client, id, Bool.not(GT.Git.failed(r)), J.Json.obj([J.KV{"diff", J.Str{r}}, J.KV{"thread", J.Str{thread}}]))
 
+# Before a thread's first turn there is no checkpoint yet (the turn takes
+# checkpoint 0 as it starts): nothing has changed since the thread began,
+# and Diff says so rather than failing. git answers 1 for a missing ref;
+# a folder that is no repository (128) still gets git's error.
+def GitJob.diff.since(r: P.Ran, +cwd: String, +thread: String, +n: Nat) -> IO(String):
+  match r:
+    case P.Ran{1, _}:
+      IO.pure(String, "")
+    case _:
+      GT.Git.checkpoint.diff_worktree(cwd, thread, n)
+
+def GitJob.diff.now(+cwd: String, +thread: String, +n: Nat) -> IO(String):
+  IO.bind(P.Ran, String, GT.Git.run(cwd, ["rev-parse", "--verify", "-q", GT.Git.checkpoint.ref(thread, n)]), r => GitJob.diff.since(r, cwd, thread, n))
+
 def GitJob.diff(+cwd: String, +thread: String, +a: String, +b: String) -> IO(String):
-  Bool.pick(IO(String), String.eq(b, "-1"), GT.Git.checkpoint.diff_worktree(cwd, thread, Maybe.default(&2, Nat, Nat.read(a), 0n)),
+  Bool.pick(IO(String), String.eq(b, "-1"), GitJob.diff.now(cwd, thread, Maybe.default(&2, Nat, Nat.read(a), 0n)),
     GT.Git.checkpoint.diff(cwd, thread, Maybe.default(&2, Nat, Nat.read(a), 0n), Maybe.default(&2, Nat, Nat.read(b), 0n)))
 
 # One-shot writing (thread titles, branch names, commit messages)
