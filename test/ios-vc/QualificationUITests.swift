@@ -421,6 +421,11 @@ final class QualificationUITests: XCTestCase {
         for id in ["viewer.mesh.ready", "viewer.mesh.status", "viewer.loading", "viewer.error", "viewer.ready", "viewer.canvas"] { print("diagnostic \(id)=\(app.descendants(matching: .any)[id].exists)") }
         let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "saved-board-3d"; shot.lifetime = .keepAlways; add(shot)
         XCTAssertTrue(loaded, "Decoded 3D mesh required; slab/canvas readiness alone is insufficient")
+        let from = app.coordinate(withNormalizedOffset: CGVector(dx: 0.38, dy: 0.50))
+        let to = app.coordinate(withNormalizedOffset: CGVector(dx: 0.67, dy: 0.56))
+        from.press(forDuration: 0.2, thenDragTo: to)
+        XCTAssertTrue(mesh.waitForExistence(timeout: 20), "3D mesh must remain loaded after the orbit gesture")
+        let after = XCTAttachment(screenshot: app.screenshot()); after.name = "saved-board-3d-after-orbit"; after.lifetime = .keepAlways; add(after)
     }
 
     func testInvalidSessionOnFreshSimulator() {
@@ -491,6 +496,27 @@ final class QualificationUITests: XCTestCase {
             let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "bub-diagnostic"; shot.lifetime = .keepAlways; add(shot)
         }
     }
+
+    private func captureComposerAppearance(largeType: Bool) {
+        let app = XCUIApplication()
+        app.terminate()
+        app.launchEnvironment["BACKPLANE_SELECT"] = "t1790229700-1088"
+        if largeType { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityM"] }
+        app.launch()
+        closeRestoredViewer(app)
+        let composer = app.textFields["thread.composer"]
+        XCTAssertTrue(composer.waitForExistence(timeout: 60))
+        let usable = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == YES AND hittable == YES"), object: composer)
+        XCTAssertEqual(XCTWaiter.wait(for: [usable], timeout: 60), .completed)
+        XCTAssertFalse(app.textFields["pair.address"].exists)
+        let before = XCTAttachment(screenshot: app.screenshot()); before.name = largeType ? "large-type-composer" : "composer-prompt"; before.lifetime = .keepAlways; add(before)
+        composer.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 15))
+        XCTAssertTrue(composer.isHittable)
+        let keyboard = XCTAttachment(screenshot: app.screenshot()); keyboard.name = largeType ? "large-type-keyboard" : "composer-keyboard"; keyboard.lifetime = .keepAlways; add(keyboard)
+    }
+    func testComposerAppearance() { captureComposerAppearance(largeType: false) }
+    func testLargeTypeComposerAppearance() { captureComposerAppearance(largeType: true) }
 
     func testInitialThreadLaunchObservations() {
         let app = XCUIApplication()
