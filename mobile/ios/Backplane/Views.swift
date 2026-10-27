@@ -688,6 +688,7 @@ struct ProjectsView: View {
                         .font(.caption2).textCase(nil).lineLimit(1).truncationMode(.head)
                 }
                 .opacity(p.quiet == true ? 0.5 : 1)
+                .accessibilityIdentifier("project.row." + p.id)
                 Spacer()
                 Button { model.act("new-thread", p.id) } label: { Image(systemName: "square.and.pencil") }
                     .accessibilityLabel(NativeMessages.thread_new(lang))
