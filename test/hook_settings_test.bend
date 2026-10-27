@@ -87,19 +87,19 @@ def window(o: L.Out) -> String:
     case L.Out{_, hs}:
       hits(hs)
 
-def sends(a: U.Act) -> String:
-  match a:
-    case U.Act{_, cs}:
-      sent(cs)
-
-def sent(cs: List<&2, U.Cmd>) -> String:
+def cmd.sends(cs: List<&2, U.Cmd>) -> String:
   match cs:
     case Nil{}:
       ""
     case U.Send{s} <> t:
-      s ++ "\n" ++ sent(t)
+      s ++ "\n" ++ cmd.sends(t)
     case _ <> t:
-      sent(t)
+      cmd.sends(t)
+
+def sends(a: U.Act) -> String:
+  match a:
+    case U.Act{_, cs}:
+      cmd.sends(cs)
 
 # through Ui.act, as a click arrives: an incoming hook's action reaches
 # the bot-action table and leaves the webhook's settings alone

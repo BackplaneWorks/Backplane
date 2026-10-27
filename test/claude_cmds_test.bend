@@ -358,11 +358,14 @@ def api.show(cs: List<&2, M.Change>) -> String:
 def api.line(+s: String) -> J.Json:
   Maybe.default(&2, J.Json, J.Json.parse(s), J.Null{})
 
+# a Claude Code line for a model it cannot use
+def api.bad() -> J.Json:
+  api.line("{\"type\":\"assistant\",\"error\":\"invalid_request\",\"message\":{\"model\":\"<synthetic>\",\"content\":[{\"type\":\"text\",\"text\":\"There's an issue with the selected model (no-such-model-webhook-test)\"}]}}")
+
 def api_errs() -> IO(Unit):
   do IO<Unit>:
-    +bad = api.line("{\"type\":\"assistant\",\"error\":\"invalid_request\",\"message\":{\"model\":\"<synthetic>\",\"content\":[{\"type\":\"text\",\"text\":\"There's an issue with the selected model (no-such-model-webhook-test)\"}]}}")
-    C.Check.str("api error: logged as the turn's", api.show(B.Claude.api.err(True{}, "t1", 5n, 0n, bad)), "error|api|There's an issue with the selected model (no-such-model-webhook-test)")
-    C.Check.str("api error: none once the turn is over", api.show(B.Claude.api.err(False{}, "t1", 5n, 0n, bad)), "")
+    C.Check.str("api error: logged as the turn's", api.show(B.Claude.api.err(True{}, "t1", 5n, 0n, api.bad())), "error|api|There's an issue with the selected model (no-such-model-webhook-test)")
+    C.Check.str("api error: none once the turn is over", api.show(B.Claude.api.err(False{}, "t1", 5n, 0n, api.bad())), "")
     C.Check.str("api error: an ordinary reply logs none", api.show(B.Claude.api.err(True{}, "t1", 5n, 0n, api.line("{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}}"))), "")
     C.Check.str("api error: no text says the code", api.show(B.Claude.api.err(True{}, "t1", 5n, 0n, api.line("{\"type\":\"assistant\",\"error\":\"server_error\",\"message\":{\"content\":[]}}"))), "error|api|server_error")
 
