@@ -290,7 +290,10 @@ A turn that breaks always goes out as a failure while **Settled**
 fresh message started, a bot's or a queued one): a turn that failed (an
 error, a usage limit) or one the agent cut off (`state` `interrupted`)
 posts `turn.ended` with kind `fail`. A Stop the person asked for stays
-quiet.
+quiet. A thread the policy keeps private (`Policy.end.managed`: a
+Mailroom triage run, another bot while triage is on, a worker triage
+launched) keeps that guard: its failures reach the person only through
+the coordinator's own alert path.
 
 ```
 {"event":"turn.ended","kind":"done","thread":"…","state":"completed","reason":"","title":"…","text":"…"}

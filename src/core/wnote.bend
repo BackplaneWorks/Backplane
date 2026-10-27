@@ -4,6 +4,7 @@ import ./model.bend as M
 import ./notice.bend as NO
 import ./sign.bend as SG
 import ./fallback.bend as FB
+import ./mailtriage.bend as TRI
 
 # An outbound notice posted to push.webhook.url (server/push.bend). It
 # follows Notify me for (notice.bend's Policy): a post goes out only for
@@ -198,12 +199,21 @@ def Wn.due.turn(+kind: String) -> Bool:
 def Wn.broke(+state: String) -> Bool:
   Bool.or(String.eq(state, "failed"), String.eq(state, "interrupted"))
 
+# a thread whose ends the policy never alerts on (notice.bend's
+# Policy.end.managed): a run of the private Mailroom triage, another bot
+# while triage is on, a worker triage launched. Its failures reach the
+# person only through the coordinator's own alert path.
+def Wn.private(+s: M.State, +thread: String) -> Bool:
+  TRI.Triage.managed(s, thread)
+
 # A broken turn is posted as a failure whenever Notify me for would tell
 # of a failure (settled: notify.settled), even when the policy kept it
 # quiet: a turn no fresh message started (a bot's, a queued one) or an
-# interrupted one. A limit or an error is never only in the log.
-def Wn.due.end(+kind: String, +state: String, settled: Bool) -> Bool:
-  Bool.or(Wn.due.turn(kind), Bool.and(settled, Wn.broke(state)))
+# interrupted one. A limit or an error is never only in the log. A
+# private thread (Wn.private) keeps the policy's guard: only a record the
+# policy wrote for it posts.
+def Wn.due.end(+kind: String, +state: String, settled: Bool, private: Bool) -> Bool:
+  Bool.or(Wn.due.turn(kind), Bool.and(Bool.and(settled, Bool.not(private)), Wn.broke(state)))
 
 # the kind a turn end posts under: the policy's, or "fail" for a broken
 # turn the policy kept quiet

@@ -710,7 +710,7 @@ def Push.hook.when(go: Bool, +home: String, +st: M.State, +thread: String, +kind
 # turn that failed (an error, a limit) or was cut off, as a failure,
 # whenever notify.settled would tell of one (wnote.bend's Wn.due.end)
 def Push.hook.turn.k(+kind: String, +home: String, +st: M.State, +thread: String, +state: String) -> IO(Unit):
-  Push.hook.when(WN.Wn.due.end(kind, state, NO.Policy.on(st, "settled")), home, st, thread, WN.Wn.end.kind(kind, state), state)
+  Push.hook.when(WN.Wn.due.end(kind, state, NO.Policy.on(st, "settled"), WN.Wn.private(st, thread)), home, st, thread, WN.Wn.end.kind(kind, state), state)
 
 # alert: the kind of the record this end wrote (TurnEnded's), never the
 # thread's persisted alert.<thread>, which a quiet end leaves as it was

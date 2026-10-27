@@ -24,6 +24,16 @@ def field(+body: String, +key: String) -> String:
 def hdr(+secret: String, +ts: Nat, +body: String) -> String:
   String.join(WN.Wn.headers(secret, ts, body), "\n")
 
+# a worker the private Mailroom triage (Bub, thread foh) launched, its turn failed
+def managed() -> M.State:
+  M.State.replay([M.ProjectCreated{"p", "P", "/tmp/p", 1n},
+    M.ThreadCreated{"foh", "", "Bub", M.Local{}, "", "/tmp/b", "claude", "", 1n},
+    M.ThreadCreated{"worker", "p", "Worker", M.Local{}, "", "/tmp/p", "claude", "", 1n},
+    M.BotSet{"b", "Bub", "foh", 0n, "", 1n}, M.SettingSet{"uber.bot", "b", 1n},
+    M.ThreadLaunched{"worker", "foh", True{}, 1n},
+    M.MessagePosted{"worker", "m1", M.User{}, "check the board", 2n}, M.TurnChanged{"worker", M.Running{}, 2n},
+    M.TurnChanged{"worker", M.Failed{}, 3n}], M.State.empty())
+
 def main() -> IO(Unit):
   do IO<Unit>:
     +body : String = WN.Wn.body("fail", "t1", "failed", "Board", "Failed")
@@ -84,10 +94,10 @@ def main() -> IO(Unit):
     C.Check.str("interrupted reason", WN.Wn.reason("interrupted", ""), "interrupted")
     C.Check.str("interrupted by a limit", WN.Wn.reason("interrupted", "usage limit reached"), "limit")
     C.Check.str("no reason on a stop", WN.Wn.reason("stopped", "usage limit reached"), "")
-    C.Check.str("quiet failure posts", yn(WN.Wn.due.end("", "failed", True{})), "yes")
-    C.Check.str("quiet interrupt posts", yn(WN.Wn.due.end("", "interrupted", True{})), "yes")
-    C.Check.str("stop still quiet", yn(WN.Wn.due.end("", "stopped", True{})), "no")
-    C.Check.str("settled off: quiet failure", yn(WN.Wn.due.end("", "failed", False{})), "no")
+    C.Check.str("quiet failure posts", yn(WN.Wn.due.end("", "failed", True{}, False{})), "yes")
+    C.Check.str("quiet interrupt posts", yn(WN.Wn.due.end("", "interrupted", True{}, False{})), "yes")
+    C.Check.str("stop still quiet", yn(WN.Wn.due.end("", "stopped", True{}, False{})), "no")
+    C.Check.str("settled off: quiet failure", yn(WN.Wn.due.end("", "failed", False{}, False{})), "no")
     C.Check.str("broken turn is a fail", WN.Wn.end.kind("", "interrupted"), "fail")
     C.Check.str("policy kind kept", WN.Wn.end.kind("done", "completed"), "done")
     C.Check.str("interrupted word kept", WN.Wn.report("interrupted", M.Idle{}), "interrupted")
@@ -101,5 +111,10 @@ def main() -> IO(Unit):
     C.Check.str("safe slash", WN.Wn.safe("a/b c"), "a_b_c")
     C.Check.str("stale record is kept", NO.Alert.kind(NO.Alert.get(s2, "t1")), "done")
     C.Check.str("a quiet end writes no kind", later, "")
-    C.Check.str("a quiet end posts nothing", yn(WN.Wn.due.end(later, "completed", True{})), "no")
-    C.Check.str("a quiet end with settled off", yn(WN.Wn.due.end(later, "completed", False{})), "no")
+    C.Check.str("a quiet end posts nothing", yn(WN.Wn.due.end(later, "completed", True{}, False{})), "no")
+    C.Check.str("a quiet end with settled off", yn(WN.Wn.due.end(later, "completed", False{}, False{})), "no")
+    C.Check.str("triage worker is private", yn(WN.Wn.private(managed(), "worker")), "yes")
+    C.Check.str("policy keeps it quiet", NO.Policy.kind(NO.Policy.end(managed(), 4n, "worker", "failed")), "")
+    C.Check.str("private failure posts nothing", yn(WN.Wn.due.end(NO.Policy.kind(NO.Policy.end(managed(), 4n, "worker", "failed")), "failed", True{}, WN.Wn.private(managed(), "worker"))), "no")
+    C.Check.str("private interrupt posts nothing", yn(WN.Wn.due.end("", "interrupted", True{}, True{})), "no")
+    C.Check.str("the person's thread is not private", yn(WN.Wn.private(s1, "t1")), "no")
