@@ -472,6 +472,30 @@ final class QualificationUITests: XCTestCase {
         }
     }
 
+    func testInitialThreadLaunchObservations() {
+        let app = XCUIApplication()
+        var outcomes: [Bool] = []
+        for (label, selection) in [("board", "t1790229700-1088"), ("integration", "t1793120668-655983")] {
+            app.launchEnvironment["BACKPLANE_QUALIFICATION"] = "1"
+            app.launchEnvironment["BACKPLANE_SELECT"] = selection
+            app.launch()
+            closeRestoredViewer(app)
+            let ready = app.descendants(matching: .any)["qualification.connection.ready"].waitForExistence(timeout: 60)
+            qualificationStatus(app, label: "launch-" + label)
+            let status = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "qualification.connection.")).firstMatch
+            let data = (status.exists ? (status.value as? String ?? "") : "").data(using: .utf8) ?? Data()
+            let fields = (try? JSONSerialization.jsonObject(with: data)) as? [String: String]
+            let matching = (fields?["thread"] ?? "").hasSuffix("|" + selection)
+            print("safe-launch-state phase=\(label) foreground=\(app.state == .runningForeground) pairing-field=\(app.textFields["pair.address"].exists) ready=\(ready) matching-thread=\(matching) viewer-close=\(app.buttons["viewer.close"].exists)")
+            if app.state == .runningForeground && !app.textFields["pair.address"].exists {
+                let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "launch-" + label; shot.lifetime = .keepAlways; add(shot)
+            }
+            outcomes.append(ready && matching)
+            app.terminate()
+        }
+        XCTAssertTrue(outcomes.allSatisfy { $0 }, "Both selected thread launches must reach fresh content")
+    }
+
     func testBoardDraftOwnerAccessibilityDiagnostic() {
         let app = XCUIApplication()
         app.launchEnvironment["BACKPLANE_QUALIFICATION"] = "1"
