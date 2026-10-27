@@ -305,6 +305,14 @@ final class AppModel {
                 keep()
             }
         }
+        #if DEBUG && targetEnvironment(simulator)
+        // CoreSimulator's pasteboard can be unavailable. A private launch
+        // environment can exercise the normal pairing path without putting
+        // the credential in URL command arguments or UI-test recordings.
+        if let link = ProcessInfo.processInfo.environment["BACKPLANE_PAIR_LINK"] {
+            pair(link)
+        }
+        #endif
     }
 
     // a new hub, or a new link to one already paired (it replaces the old)
