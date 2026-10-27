@@ -1245,11 +1245,13 @@ struct ThreadScreen: View {
                     Menu {
                         ForEach(thread.viewer.choices, id: \.value) { c in
                             Button(c.label) { model.act("view", c.value) }
+                                .accessibilityIdentifier("viewer.choice." + c.value)
                         }
                     } label: {
                         Image(systemName: "cpu")
                     }
                     .accessibilityLabel(NativeMessages.native_thread_board(lang))
+                    .accessibilityIdentifier("viewer.open")
                 }
                 ForEach(thread.tools.filter { $0.action == "interrupt" }, id: \.self) { t in
                     Button(t.label, systemImage: "stop.fill") { model.act(t.action) }
