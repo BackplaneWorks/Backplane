@@ -1193,12 +1193,14 @@ struct PlotScreen: View {
                 .accessibilityIdentifier("viewer.loading")
         }
     }
-    private func errorState(_ message: String) -> some View {
+    private func errorState(_ message: String, retry: Bool = true) -> some View {
         VStack(spacing: 12) {
             Text(message).multilineTextAlignment(.center).accessibilityIdentifier("viewer.error")
-            Button(lang == "ja" ? "再試行" : "Retry") { model.retryViewer(presentation) }
-                .buttonStyle(.bordered)
-                .accessibilityIdentifier("viewer.retry")
+            if retry {
+                Button(lang == "ja" ? "再試行" : "Retry") { model.retryViewer(presentation) }
+                    .buttonStyle(.bordered)
+                    .accessibilityIdentifier("viewer.retry")
+            }
         }.padding(16).background(BackplaneDesign.panel)
     }
 
@@ -1272,7 +1274,10 @@ struct PlotScreen: View {
                 .id(viewer.layers.isEmpty ? viewer.key : "")
                 .accessibilityIdentifier(((viewer.open == "3d" || viewer.open == "mech") && m?.mesh != nil && m?.none.isEmpty == true) ? "viewer.mesh.ready" : ((viewer.layers.isEmpty ? m != nil && m?.none.isEmpty == true : f != nil && f?.none.isEmpty == true) ? "viewer.ready" : "viewer.canvas"))
             // Mech with no part to show: what the page says
-            if viewer.open == "mech", viewer.key.isEmpty {
+            if model.viewerNeedsSelection(presentation) {
+                errorState(lang == "ja" ? "この保存済みビューを復元できませんでした。閉じて同じソースを選択してください。" : "This saved view could not be restored. Close and select the same source again.", retry: false)
+                    .frame(maxHeight: .infinity)
+            } else if viewer.open == "mech", viewer.key.isEmpty {
                 Text(viewer.mech.map { $0.say.isEmpty ? $0.note : $0.say } ?? "").foregroundStyle(.secondary).padding().frame(maxHeight: .infinity)
             } else if needsMesh, m?.decoding == true {
                 loadingState.frame(maxHeight: .infinity, alignment: .bottom)
