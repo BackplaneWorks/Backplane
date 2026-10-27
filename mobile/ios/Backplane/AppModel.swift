@@ -27,7 +27,11 @@ final class AppModel {
     @ObservationIgnored private var cachedPresentation = false
     @ObservationIgnored private var cachedReadiness = PresentationReadiness()
     @ObservationIgnored private var cacheGeneration: UInt64 = 0
-    @ObservationIgnored private var cacheTask: Task<Void, Never>?
+    @ObservationIgnored private lazy var cacheSaveWindow = CacheSaveWindow { [weak self] in
+        guard let self, !self.cleared, self.lastScreenJSON != nil else { return }
+        self.dirty = true
+        self.keep()
+    }
     @ObservationIgnored private var lastScreenJSON: String?
     @ObservationIgnored private var earlyActions: [(String, String)] = []
     @ObservationIgnored private var presentationIntent = PresentationIntent()
@@ -1616,7 +1620,7 @@ final class AppModel {
     }
 
     private func retireScreenCache() {
-        cacheTask?.cancel()
+        cacheSaveWindow.cancel()
         lastScreenJSON = nil
         cacheGeneration += 1
         recentScreen.clear(through: cacheGeneration)
@@ -1680,7 +1684,7 @@ final class AppModel {
         mailroomPositions.removeAll()
         mailroomReturn = nil
         cleared = true
-        cacheTask?.cancel()
+        cacheSaveWindow.cancel()
         lastScreenJSON = nil
         cacheGeneration += 1
         recentScreen.clear(through: cacheGeneration)
@@ -1876,15 +1880,7 @@ final class AppModel {
             if let text = o.screenJSON, !cleared, awaitedNav == nil || awaitedNav == Self.nav(s) {
                 lastScreenJSON = text
                 cacheGeneration += 1
-                let generation = cacheGeneration, links = self.links, profile = Self.cid, store = recentScreen
-                cacheTask?.cancel()
-                cacheTask = Task {
-                    try? await Task.sleep(for: .milliseconds(300))
-                    guard !Task.isCancelled else { return }
-                    self.dirty = true
-                    self.keep()
-                    await Task.detached(priority: .utility) { store.save(text, links: links, profile: profile, generation: generation) }.value
-                }
+                cacheSaveWindow.offer()
             }
             let label = s.lang?.rows.first?.label
             if label != langLabel { langLabel = label; refreshTexts() }

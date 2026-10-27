@@ -114,7 +114,8 @@ private struct PlaneThread: View {
                     if !line.isEmpty { Text(line).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
                 }
                 Spacer()
-                Text(row.ago).font(.caption).foregroundStyle(.secondary)
+                Text(row.ago).font(.caption).foregroundStyle(BackplaneDesign.secondaryText)
+                    .accessibilityIdentifier("home.row.age")
                 Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
             }
         }
@@ -143,7 +144,10 @@ private struct PlaneBot: View {
                     if !line.isEmpty { Text(line).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
                 }
                 Spacer()
-                if !row.ago.isEmpty { Text(row.ago).font(.caption).foregroundStyle(.secondary) }
+                if !row.ago.isEmpty {
+                    Text(row.ago).font(.caption).foregroundStyle(BackplaneDesign.secondaryText)
+                        .accessibilityIdentifier("home.row.age")
+                }
                 Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
             }
         }

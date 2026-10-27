@@ -18,6 +18,7 @@ enum BackplaneDesign {
     static let secondaryText = color(0x595b61, 0xb7bec9)
     static let line = color(0xd3d1ca, 0x262b34)
     static let accent = color(0x1f6fd1, 0x5fb3ff)
+    static let accentText = color(0x205da8, 0x5fb3ff)
     static let onAccent = color(0xffffff, 0x06121f)
 }
 
