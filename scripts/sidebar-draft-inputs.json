@@ -28,7 +28,7 @@
     "src/core/cat.bend": "0130231a18e515a94d40d7584d19a9b5a2d1663f9601fbff944bf97e37f9fd6b",
     "src/core/cef.bend": "f2d3fa4c991d0e341620fe634ddb4e08da97f8e471ec46afac0b3de471cc69fb",
     "src/core/charter.bend": "7f906bdea712f6ff6162735c8cc133767ec0f9289c3d0bee6dfedbd4d75ad981",
-    "src/core/client.bend": "f3346eee174640d7598f9463f1c91873e87e55e2ca72ceab179233ba1a1879b1",
+    "src/core/client.bend": "0a7202dab1f6a2b0fbc5f201c22afd4e0f8775b39103d7c583e7fdf848f38dad",
     "src/core/codec.bend": "33cb35c55f3712a18734e76e1149763001a9388af27948f0da4ead2c13d48b6f",
     "src/core/cron.bend": "6f89a001df0261a25c878616ea66c235e169f7fc1c726d39e695fce8adb57332",
     "src/core/deploy.bend": "ebee4e63a52cf41ae001bebcdbb7fb010ad71c1e04e481292585740d88a39cc4",
@@ -70,7 +70,8 @@
     "src/core/mech.bend": "79fb3307d0d6868a777924d4b934ac8a1671937e265942467f6c60cc4db82efb",
     "src/core/menu.bend": "807668923de70eaabb72ddb760f808cbf6d786b70822ba6a1180776758af7eee",
     "src/core/model.bend": "96a7baa0b71bb5efa085ee9259a126738623e87984596bed8e772ae30f0750e8",
-    "src/core/msgs.bend": "a366a0483ca361f68403762d8ee3e44cf22832cfa71dcaf7bdd1e03bfa88a0ae",
+    "src/core/modelpick.bend": "397d7f278b28aca991b5521bea257d58e5fa4498f21888de4fc96d4481e4f9f4",
+    "src/core/msgs.bend": "96e7ae8bffd901943a37ac7dfb1c9f1ef6c5b1560ae8a322560055b42bba2fe6",
     "src/core/notice.bend": "ee87318c1f12fc6cfb23bb5e24e90709e1f9a2eadfd2832581d21590f596e5e0",
     "src/core/onboard.bend": "55ccccf20f706a0acad492de20e23aedc751c7e9ce61b6f3430bfd65796e9232",
     "src/core/once.bend": "c12f375e09045a035cfc66c87d73197f3348b2998fa0e0bb6c9876fca870577c",
@@ -141,7 +142,7 @@
     "src/web/space.bend": "b86a265e41a900498bc33c37c0404c4d6678554efe3d9054f329beb2cf35ee63",
     "src/web/usage-graph.bend": "fa06f7d2bf855a396a5f7a7b4725dfaa990145fbbcefe7ad21ae8f9a698a2679",
     "src/web/usage-page.bend": "706e3f17a4a3e5f159656d47aeb76a940d4825421f5c33228f9aef692ec926e3",
-    "src/web/view.bend": "4913ea394cadd0432a5c7d80ccbc85b707a2039c4a3cced6d51103bd517646b3"
+    "src/web/view.bend": "fd669b3aaf8b53bc51071d193121c9646841103d6fc3aa27488b14909b0e7327"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -251,5 +252,5 @@
       "sourceSnapshot": "/home/h/Documents/i2cjak/bp-coord/settle-fresh-work/SOURCE-structural-correction.json"
     }
   },
-  "reviewNote": "Buy it moves to the tool rail (Fab.rail, cart icon); header and top bar lose their copy; draft rows unchanged"
+  "reviewNote": "Model picker: three columns (agent | model | effort) with a keyboard cursor; sidebar drafts unchanged"
 }

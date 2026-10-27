@@ -4893,6 +4893,15 @@ def Laws.switch_hands_new_provider():
 def Laws.switch_back_missed_nothing():
   {==}
 
+def Laws.switch_takes_model_effort():
+  {==}
+
+def Laws.switch_effort_offered():
+  {==}
+
+def Laws.switch_model_between_turns():
+  {==}
+
 def Laws.mcp_launch_in_project():
   {==}
 

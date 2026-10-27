@@ -40,10 +40,10 @@ async function ready(id){await page.waitForFunction(id=>document.documentElement
   assert(rows().some(e=>e.$==='SettingSet'&&e.key==='agent.provider'&&e.value===provider));assert(rows().some(e=>e.$==='SettingSet'&&e.key==='agent.model'&&e.value===model));if(provider!=='pi')checks.push(provider+' actual CLI catalog/default Settings selection persists');
   await page.locator('.settings-view [data-on-click="flag"][data-value="settings"]').click();await ready(provider);
   step=provider+'-picker';await page.locator('.model-chip[data-on-click="flag"][data-value="models"]').click();await page.locator('.model-menu').waitFor({state:'visible'});
-  const choice=page.locator('.model-menu [data-on-click="model"][data-value="'+model+'"]');await choice.waitFor({state:'visible'});
+  const choice=page.locator('.model-menu [data-on-click="mp-model"][data-value="'+model+'"]');await choice.waitFor({state:'visible'});
   if(provider==='omp')assert((await page.locator('.model-menu').textContent()).includes('Fake OMP'));
-  await choice.click();await ready(provider);await page.waitForFunction(model=>document.querySelector('.model-layer .row.on')?.dataset.value===model,model);assert(await page.locator('.model-menu').isVisible(),'the picker stays open after a choice');
-  if(provider==='pi')assert.equal(await page.locator('.model-layer [data-on-click="effort"]:not([data-value^="@"])').count(),0);else assert(await page.locator('.model-layer [data-on-click="effort"][data-value="high"]').count());
+  await choice.click();await ready(provider);await page.waitForFunction(model=>document.querySelector('.model-layer .mp-models .row.on')?.dataset.value===model,model);assert(await page.locator('.model-menu').isVisible(),'the picker stays open after a choice');
+  if(provider==='pi')assert.equal(await page.locator('.model-layer [data-on-click="mp-effort"]').count(),0);else assert(await page.locator('.model-layer [data-on-click="mp-effort"][data-value="high"]').count());
   await page.locator('.shade[data-value="models"]').click();await page.locator('.model-menu').waitFor({state:'hidden'});
   assert.equal(await page.locator('#composer').inputValue(),'Unsent synthetic '+provider+' draft');assert(rows().some(e=>e.$==='ModesSet'&&e.id===provider&&e.model===model));checks.push(provider+' composer model selection persists with draft; catalog label/thinking shape correct');
  }

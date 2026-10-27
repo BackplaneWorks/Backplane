@@ -206,14 +206,49 @@ button.fold span { overflow: hidden; text-overflow: ellipsis; white-space: nowra
 .composer-foot { display: flex; justify-content: space-between; align-items: center; }
 .model-chip { background: none; border-color: transparent; color: var(--dim); padding-left: 0; }
 .shade { position: fixed; inset: 0; z-index: 30; }
-.model-menu { position: absolute; bottom: calc(100% - 4px); left: 16px; z-index: 31; display: flex; flex-direction: column; min-width: 280px; max-width: calc(100% - 32px); max-height: 60vh; background: var(--panel); border: 1px solid var(--line); padding: 6px; }
-.model-menu .rows { overflow-y: auto; display: flex; flex-direction: column; }
-.model-menu .row { display: grid; grid-template-columns: minmax(0, var(--namew)) minmax(0, 1fr); gap: 16px; text-align: left; border-color: transparent; background: none; padding: 4px 10px; }
+/* the model picker: agent | model | effort, a column each (view.bend's
+   View.mp.*); the keys' column has its head lit, the cursor's row the
+   accent edge, the thread's own row a faint one */
+.model-menu { position: absolute; bottom: calc(100% - 4px); left: 16px; z-index: 31; display: grid; grid-template-columns: minmax(150px, 200px) minmax(0, 1fr) 216px; width: min(800px, calc(100% - 32px)); max-height: 60vh; background: var(--panel); border: 1px solid var(--accent); box-shadow: 0 12px 40px rgba(0, 0, 0, .5); }
+.model-menu .mp-col { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid var(--line); padding-bottom: 6px; }
+.model-menu .mp-col:last-child { border-right: 0; }
+.model-menu .mp-h { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 10px; margin-bottom: 4px; border-bottom: 1px solid var(--line); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); white-space: nowrap; }
+.model-menu .mp-h.on { color: var(--accent); }
+.model-menu kbd, .model-chip kbd { font: 10px/1 var(--mono); letter-spacing: 0; text-transform: none; color: var(--faint); background: var(--bg); border: 1px solid var(--line); border-bottom-width: 2px; padding: 2px 4px; white-space: nowrap; }
+.model-menu .mp-h.on kbd { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+.model-menu .rows { overflow-y: auto; display: flex; flex-direction: column; min-height: 0; }
+.model-menu .row { display: grid; grid-template-columns: minmax(0, var(--namew, 11ch)) minmax(0, 1fr); gap: 10px; text-align: left; border: 0; background: none; padding: 3px 10px; color: var(--text); font-size: calc(12px * var(--text-scale, 100) / 100); }
+.model-menu .mp-agents { --namew: 11ch; }
 .model-menu .row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.model-menu .row .label { color: var(--faint); font-size: calc(12px * var(--text-scale, 100) / 100); }
-.model-menu .row.on { color: var(--text); background: var(--sel, var(--raise)); }
-.model-menu .efforts { display: flex; flex-wrap: wrap; gap: 4px; padding-bottom: 6px; margin-bottom: 6px; border-bottom: 1px solid var(--line); }
-.model-menu .efforts button { padding: 2px 10px; }
+.model-menu .row .label { color: var(--faint); }
+.model-menu .row:hover { background: var(--raise); }
+.model-menu .row.own { box-shadow: inset 2px 0 var(--faint); }
+.model-menu .row.on { color: var(--accent); background: var(--sel, var(--raise)); box-shadow: inset 2px 0 var(--accent); }
+.model-menu .meter { display: flex; gap: 4px; align-items: stretch; height: 92px; padding: 12px 10px 4px; }
+.model-menu .step { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 4px; padding: 0; border: 0; background: none; color: var(--faint); font-size: 10px; }
+.model-menu .step i { display: block; width: 100%; height: var(--h); background: var(--raise); border: 1px solid var(--line); }
+.model-menu .step .lv { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model-menu .step:hover:not(:disabled) i { border-color: var(--faint); }
+.model-menu .step.fill i { background: color-mix(in srgb, var(--accent) 27%, transparent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+.model-menu .step.on i { background: var(--accent); border-color: var(--accent); }
+.model-menu .step.on { color: var(--accent); }
+.model-menu .step:disabled { opacity: .35; cursor: default; }
+.model-menu .note { padding: 6px 10px 0; color: var(--faint); font-size: 10px; line-height: 1.4; }
+/* a narrow thread column (the viewer open beside it, a phone): the agents
+   wrap in a row over the models and the meter, then everything stacks */
+@container (max-width: 700px) {
+  .model-menu { grid-template-columns: minmax(0, 1fr) 190px; }
+  .model-menu .mp-agents { grid-column: 1 / -1; border-right: 0; border-bottom: 1px solid var(--line); }
+  .model-menu .mp-agents .rows { flex-direction: row; flex-wrap: wrap; gap: 2px 4px; padding: 0 8px; }
+  .model-menu .mp-agents .row { display: inline-flex; align-items: center; padding: 2px 8px; }
+  .model-menu .mp-agents .row .label { display: none; }
+}
+@container (max-width: 440px) {
+  .model-menu { grid-template-columns: minmax(0, 1fr); overflow-y: auto; }
+  .model-menu .mp-col { border-right: 0; border-bottom: 1px solid var(--line); }
+  .model-menu .mp-col:last-child { border-bottom: 0; }
+  .model-menu .mp-models .rows { max-height: 34dvh; }
+}
 .project-head .badge { background: none; border: none; padding: 0 6px 0 0; color: var(--tint); display: inline-flex; }
 .thread-head .badge { color: var(--tint); display: inline-flex; }
 .project .look { position: relative; z-index: 31; margin: 2px 8px 6px; padding: 8px 10px; background: var(--raise); border: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
@@ -959,7 +994,7 @@ a.ref { color: inherit; text-decoration: none; cursor: text; overflow-wrap: anyw
 html:lang(ja) { line-break: strict; word-break: normal; }
 html:lang(ja) :is(.body, .set-label, .set-note, .bot-note, .ask-head, .ask-detail, .tour-body, .fm-note, .secret-line, .item-text) { overflow-wrap: anywhere; }
 html:lang(ja) :is(.set-text, .set-ctl) { min-width: 0; }
-.model-menu .find { padding: 2px 2px 8px; border-bottom: none; }
+.model-menu .find { padding: 2px 8px 6px; border-bottom: none; }
 
 .browser-tabs { display:flex; gap:4px; overflow-x:auto; align-items:center; padding:6px; flex-shrink:0; }
 .browser-tab { display:flex; flex-shrink:0; border:1px solid var(--line); max-width:220px; }
@@ -1219,8 +1254,13 @@ html:lang(ja) :is(.set-text, .set-ctl) { min-width: 0; }
 .board-origin { padding: 5px 8px; }
 .board-option[hidden] { display: none; }
 .composer-foot, .composer .foot-end { min-width: 0; gap: 5px; }
-.composer-foot .model-chip { min-width: 0; flex: 1 1 auto; max-width: 100%; display: flex; gap: 4px; align-items: center; }
-.composer-foot .model-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* the chip that opens the model picker: agent / model / effort in a box,
+   its key, then the context the thread holds */
+.composer-foot .model-chip { min-width: 0; flex: 0 1 auto; max-width: 100%; margin-right: auto; display: flex; gap: 8px; align-items: center; height: 28px; padding: 0 8px; background: var(--bg); border: 1px solid var(--line); color: var(--text); font-size: 12px; }
+.composer-foot .model-chip:hover { border-color: var(--faint); }
+.composer:has(.model-layer[aria-hidden="false"]) .model-chip { border-color: var(--accent); }
+.composer-foot .model-chip .mp-sel { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.composer-foot .model-ctx { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--faint); font-size: 11px; }
 .composer-foot .attach { margin-left: 0; margin-right: 0; flex: none; }
 .composer textarea { min-width: 0; max-width: 100%; }
 .thread-content .timeline { min-height: 0; min-width: 0; }
@@ -1261,7 +1301,12 @@ html:lang(ja) :is(.set-text, .set-ctl) { min-width: 0; }
   .thread-content .subs-head { min-height: 40px; padding: 5px 10px; }
   .composer { padding-bottom: max(8px, env(safe-area-inset-bottom)); }
   .composer-foot { flex-wrap: wrap; }
-  .composer-foot .model-chip { flex-basis: calc(100% - 44px); }
+  .composer-foot .model-chip { max-width: calc(100% - 10px); }
+  .composer-foot .model-chip kbd { display: none; }
+  .model-menu { left: 8px; right: 8px; width: auto; max-height: 72dvh; }
+  .model-menu kbd { display: none; }
+  .model-menu .row { min-height: 40px; align-items: center; }
+  .model-menu .mp-agents .row { min-height: 36px; }
   .composer .foot-end { display: inline-flex; margin-left: auto; }
   .composer-foot button, .composer-foot .attach { min-height: 40px; }
   .composer-foot .attach { padding: 8px; }

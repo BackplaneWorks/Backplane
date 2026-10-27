@@ -110,6 +110,7 @@ def WS.commands(+u: U.Ui) -> List<&2, U.PItem>:
    U.PItem{"Board viewer", "view-kind", "board"}, U.PItem{"Schematic viewer", "view-kind", "schematic"},
    U.PItem{"3D viewer", "view-kind", "3d"}, U.PItem{"Mechanical parts", "mech", ""}, U.PItem{"Browser", "view-kind", "browser"},
    U.PItem{"Diff · Ctrl+D", "diff", ""}, U.PItem{"Design review", "rv-page", "bom"},
+   U.PItem{"Agent, model and effort · Ctrl+M", "flag", "models"},
    U.PItem{"Show / hide viewer", "panel", ""}, U.PItem{"Settings", "flag", "settings"},
    U.PItem{"Snooze thread for 1 hour", "snooze", "1h"}, U.PItem{"Snooze thread until tomorrow", "snooze", "tomorrow"}, U.PItem{"Wake thread", "snooze", "off"}])
 
@@ -207,7 +208,7 @@ def WS.palette(on: Bool, +u: U.Ui) -> List<&2, D.Node>:
             Bool.pick(List<&2, D.Node>, List.is_empty(&2, U.PItem, WS.items(u)), [D.Dom.span("workspace-empty", "No matching commands")], WS.rows(WS.items(u), U.Palette.index(u), 0n))},
           D.El{"footer", "", Nil{}, [D.Txt{"↑↓ choose · Enter run · Esc close. Ctrl/Cmd+Shift+P (Ctrl+K also opens)."},
             D.El{"details", "", Nil{}, [D.El{"summary", "", Nil{}, [D.Txt{"Keyboard shortcuts"}]},
-              D.El{"p", "", Nil{}, [D.Txt{"Alt+1…9 project · Ctrl+1…9 thread · Ctrl+Shift+[ / ] previous / next thread · Ctrl+Shift+U uberbot chat · Ctrl+N new thread · Ctrl+Shift+S settle · Ctrl+P files · Ctrl+D diff."}]},
+              D.El{"p", "", Nil{}, [D.Txt{"Alt+1…9 project · Ctrl+1…9 thread · Ctrl+Shift+[ / ] previous / next thread · Ctrl+Shift+U uberbot chat · Ctrl+N new thread · Ctrl+Shift+S settle · Ctrl+P files · Ctrl+D diff · Ctrl+M agent, model and effort."}]},
               D.El{"p", "", Nil{}, [D.Txt{"Backtick (`) toggles Terminal from the workspace or composer. In the shell and other text fields, backtick types normally; use Ctrl+J to toggle. Super+grave / tilde also works if your desktop delivers it. Navigation shortcuts leave editors, IME and PTYs alone. Pin is in Commands (its former Ctrl+Shift+P opens this palette)."}]}]}]}]}]}]
 
 def WS.terminal(on: Bool, +u: U.Ui, screen: D.Node) -> List<&2, D.Node>:

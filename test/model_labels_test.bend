@@ -16,7 +16,7 @@ def old.rows(+lc: I.Loc, ms: List<&2, String>, +cur: String, +info: String, +pro
   match ms:
     case Nil{}: Nil{}
     case +m <> tail:
-      D.El{"button", "", [D.At{"class", Bool.pick(String, String.eq(m, cur), "row on", "row")}, D.At{"title", MSG.T.model.choose(lc, Bool.pick(String, String.is_empty(m), MSG.T.model.default.article(lc), m))}, D.At{"data-value", m}, D.On{"click", "model"}],
+      D.El{"button", "", [D.At{"class", Bool.pick(String, String.eq(m, cur), "row on own", "row")}, D.At{"title", MSG.T.model.choose(lc, Bool.pick(String, String.is_empty(m), MSG.T.model.default.article(lc), m))}, D.At{"data-value", m}, D.On{"click", "mp-model"}],
         [D.Dom.span("name", Bool.pick(String, String.is_empty(m), MSG.T.common.default(lc), m)), D.Dom.span("label", old.label(info, prov, m))]} <> old.rows(lc, tail, cur, info, prov)
 
 def nodes(ns: List<&2, D.Node>) -> String:
@@ -26,20 +26,19 @@ def same(a: String, b: String) -> String:
   Bool.pick(String, C.Check.same(a, b), "same", "different")
 
 def exact(+lc: I.Loc, +ms: List<&2, String>, +cur: String, +info: String, +prov: String) -> String:
-  same(nodes(V.View.models.loc(lc, ms, cur, info, prov)), nodes(old.rows(lc, ms, cur, info, prov)))
+  same(nodes(V.View.models.loc(lc, ms, cur, cur, info, prov)), nodes(old.rows(lc, ms, cur, info, prov)))
 
 def catalog() -> String:
   "{\"codex\":[\"a\",\"b\"],\"about\":{\"codex\":{\"labels\":{\"default\":\"Default name\",\"a\":\"日本語 · A\",\"b\":\"B & <label>\",\"wrong\":17}},\"claude\":{\"labels\":{\"a\":\"Other provider\"}}}}"
 
-def old.menu(+lc: I.Loc, +ms: List<&2, String>, +info: String, +cur: String, +prov: String, +es: List<&2, String>, +effort: String, +q: String) -> List<&2, D.Node>:
-  +mi = U.Models.view(info, prov, ms)
-  [D.El{"div", "", [D.At{"class", "shade"}, D.At{"data-value", "models"}, D.On{"click", "flag"}], Nil{}},
-   D.El{"div", "", [D.At{"class", "model-menu"}, D.At{"style", "--namew:" ++ Nat.show(V.View.namew(ms)) ++ "ch"}],
-     D.Dom.cat(V.View.effort_row.loc(lc, es, effort, prov), D.Dom.cat(V.View.menu.find(lc, U.Models.search(U.Models.menu(info, prov)), q), [D.El{"div", "", [D.At{"class", "rows"}], old.rows(lc, ms, cur, mi, prov)}]))}]
-
+# the whole picker (view.bend's View.mp.*): its model column holds the
+# rows exactly, the agents beside it and the meter after
 def menu(+lc: I.Loc, +info: String, +prov: String, +q: String) -> String:
   +ms = U.Models.shown(info, prov, q)
-  same(nodes(V.View.menu.shown(lc, ms, info, "a", prov, ["@codex", "high"], "high", q)), nodes(old.menu(lc, ms, info, "a", prov, ["@codex", "high"], "high", q)))
+  +whole = nodes(V.View.menu.loc(lc, True{}, Nil{}, "a", info, prov, Nil{}, "high", q, False{}))
+  +rows = nodes(old.rows(lc, ms, "a", U.Models.view(info, prov, ms), prov))
+  Bool.pick(String, Bool.and(String.contains(whole, String.drop(String.take(rows, Nat.sub(String.length(rows), 2n)), 62n)),
+    Bool.and(String.contains(whole, "mp-agent"), String.contains(whole, "mp-effort"))), "same", "different")
 
 def main() -> IO(Unit):
   do IO<Unit>:

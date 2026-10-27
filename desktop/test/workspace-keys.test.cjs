@@ -121,3 +121,44 @@ test('Ctrl+B (Cmd+B on a Mac) folds the sidebar, from the composer too; Shift or
   assert.equal(key(event('B', { ctrlKey: true, shiftKey: true }), 'Linux'), null);
   assert.equal(key(event('b', { ctrlKey: true, altKey: true }), 'Linux'), null);
 });
+
+test('Ctrl+M opens the model picker from the workspace and the composer, never from a PTY or another field', async () => {
+  const { workspaceShortcut: key } = await import('../../src/web/workspace-keys.js');
+  const field = (tagName, id) => { const f = { tagName, id, closest: () => f }; return f; };
+  assert.deepEqual(key(event('m', { ctrlKey: true }), 'Linux'), ['flag', 'models']);
+  assert.deepEqual(key(event('m', { ctrlKey: true, target: field('TEXTAREA', 'composer') }), 'Linux'), ['flag', 'models']);
+  assert.deepEqual(key(event('m', { ctrlKey: true, target: field('INPUT', 'model-q') }), 'Linux'), ['flag', 'models']);
+  assert.deepEqual(key(event('m', { ctrlKey: true }), 'MacIntel'), ['flag', 'models']);
+  assert.equal(key(event('m', { metaKey: true }), 'MacIntel'), null); // Cmd+M minimizes the desktop window
+  for (const f of [field('TEXTAREA', 'term'), field('INPUT', 'search'), field('DIV', 'editor')])
+    assert.equal(key(event('m', { ctrlKey: true, target: f }), 'Linux'), null);
+  for (const fields of [{ shiftKey: true }, { altKey: true }, { metaKey: true }, { isComposing: true }])
+    assert.equal(key(event('m', { ctrlKey: true, ...fields }), 'Linux'), null);
+});
+
+test('the open model picker owns Tab, the arrows, Enter and Escape wherever the focus is', async () => {
+  const { installWorkspaceKeys } = await import('../../src/web/workspace-keys.js');
+  const h = composerHarness(installWorkspaceKeys);
+  const layer = { style: { display: 'contents' } };
+  h.doc.querySelector = selector => selector === '[data-local-models="1"]' ? layer : null;
+  const keys = [['Tab'], ['Tab', { shiftKey: true }], ['ArrowUp'], ['ArrowDown'], ['ArrowLeft'], ['ArrowRight'], ['Enter'], ['Escape']];
+  for (const [k, fields] of keys) assert.equal(h.press(k, fields).defaultPrevented, true);
+  assert.deepEqual(h.actions, [['mp-key', 'tab'], ['mp-key', 'stab'], ['mp-key', 'up'], ['mp-key', 'down'], ['mp-key', 'left'], ['mp-key', 'right'], ['mp-key', 'enter'], ['flag', 'models']]);
+  h.actions.length = 0;
+  // the search field keeps its caret keys; typing and chords go on as before
+  const search = { tagName: 'INPUT', id: 'model-q', closest: () => search };
+  h.doc.activeElement = search;
+  assert.equal(h.press('ArrowLeft').defaultPrevented, false);
+  assert.equal(h.press('ArrowDown').defaultPrevented, true);
+  h.doc.activeElement = h.composer;
+  assert.equal(h.press('a').defaultPrevented, false);
+  assert.equal(h.press('Enter', { shiftKey: true }).defaultPrevented, false);
+  assert.equal(h.press('Enter', { isComposing: true }).defaultPrevented, false);
+  assert.equal(h.press('m', { ctrlKey: true }).defaultPrevented, true);
+  assert.deepEqual(h.actions, [['mp-key', 'down'], ['flag', 'models']]);
+  // shut: the keys are the composer's again
+  h.actions.length = 0;layer.style.display = 'none';
+  assert.equal(h.press('Enter').defaultPrevented, false);
+  assert.equal(h.press('Tab').defaultPrevented, false);
+  assert.deepEqual(h.actions, []);
+});

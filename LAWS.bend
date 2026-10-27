@@ -2736,6 +2736,18 @@ law switch_hands_new_provider:
 law switch_back_missed_nothing:
   {List.length(&2, M.QItem, M.Queue.items(M.State.replay(H.Queue.changes(H.Hub.switch(H.Demo.switched(), 6n, 0, "1", "t1", "claude")), H.Demo.switched()), "t1")) == 0n : Nat}
 
+# the model picker's switch carries the model and the effort: between
+# turns all of it at once (the effort as a level the new provider offers),
+# during one none of it
+law switch_takes_model_effort:
+  {List.take(&2, M.Change, H.Queue.changes(H.Hub.switch.as(H.Demo.state("claude", M.Completed{}), 5n, 0, "1", "t1", "codex", "gpt-5", ["high"])), 2n) == [M.ProviderSet{"t1", "codex", "gpt-5", 5n}, M.SettingSet{"effort.t1", "high", 5n}] : List<&2, M.Change>}
+
+law switch_effort_offered:
+  {List.take(&2, M.Change, H.Queue.changes(H.Hub.switch.as(H.Demo.state("claude", M.Completed{}), 5n, 0, "1", "t1", "codex", "", ["max"])), 2n) == [M.ProviderSet{"t1", "codex", "", 5n}, M.SettingSet{"effort.t1", "", 5n}] : List<&2, M.Change>}
+
+law switch_model_between_turns:
+  {H.Queue.changes(H.Hub.switch.as(H.Demo.state("claude", M.Running{}), 5n, 0, "1", "t1", "codex", "gpt-5", ["high"])) == [] : List<&2, M.Change>}
+
 # The orchestrator's thread tools
 # -------------------------------
 

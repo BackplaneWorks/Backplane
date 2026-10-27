@@ -3108,26 +3108,55 @@ def Switch.ctx(none: Bool, +th: String, +msg: String, +text: String, +now: Nat) 
     case False{}:
       [M.TurnQueued{th, msg, text, now}]
 
-def Switch.go(+s: M.State, +now: Nat, +client: U32, +id: String, +th: String, +from: String, +to: String) -> Step:
+# the effort a switch was asked for, kept as a level the new provider
+# offers ("" its default); none when the request names no effort
+def Switch.effort(es: List<&2, String>, +th: String, +to: String, +now: Nat) -> List<&2, M.Change>:
+  match es:
+    case Nil{}:
+      Nil{}
+    case +e <> t:
+      M.SettingSet{AG.Effort.key(th), AG.Effort.of(to, e), now} <> Switch.effort(t, th, to, now)
+
+def Switch.effort.str(j: J.Json) -> List<&2, String>:
+  match j:
+    case J.Str{e}:
+      [e]
+    case _:
+      Nil{}
+
+def Switch.effort.of(m: Maybe<&2, J.Json>) -> List<&2, String>:
+  match m:
+    case Some{j}:
+      Switch.effort.str(j)
+    case None{}:
+      Nil{}
+
+def Switch.go(+s: M.State, +now: Nat, +client: U32, +id: String, +th: String, +from: String, +to: String, +model: String, es: List<&2, String>) -> Step:
   +seen = M.Switch.seen(s, th, to)
   +missed = Nat.sub(M.Switch.count(s, th), seen)
-  Step{List.concat(&2, M.Change, [Switch.old(M.Queue.items(s, th), th, now), [M.ProviderSet{th, to, "", now}],
+  Step{List.concat(&2, M.Change, [Switch.old(M.Queue.items(s, th), th, now), [M.ProviderSet{th, to, model, now}], Switch.effort(es, th, to, now),
       Switch.ctx(Nat.is_eq(missed, 0n), th, HD.Hand.prefix() ++ "switch:" ++ Nat.show(Hub.seq(s)), HD.Hand.switch(Hub.entries(s), th, from, to, seen), now),
       [M.ActivityLogged{th, Hub.id("p", now, Hub.seq(s)), "info", "provider", "Now on " ++ to ++ Bool.pick(String, Nat.is_eq(missed, 0n), "", "; it gets what it missed with the next message"), now}]]),
     [Reply.ok(client, id), AgentStop{th}]}
 
-def Switch.k(run: Bool, same: Bool, +s: M.State, +now: Nat, +client: U32, +id: String, +th: String, +from: String, +to: String) -> Step:
+def Switch.k(run: Bool, same: Bool, +s: M.State, +now: Nat, +client: U32, +id: String, +th: String, +from: String, +to: String, +model: String, es: List<&2, String>) -> Step:
   match run same:
     case True{} _:
       Step.outs([Reply.err(client, id, "a provider changes between turns: stop this one first")])
     case False{} True{}:
       Step.outs([Reply.ok(client, id)])
     case False{} False{}:
-      Switch.go(s, now, client, id, th, from, to)
+      Switch.go(s, now, client, id, th, from, to, model, es)
 
-# the thread goes on with provider `to` from its next turn
+# the thread goes on with provider `to` from its next turn, on model
+# `model` ("" its default) and, when es names one, that effort: all of it
+# between turns or none of it (the model picker's one request, modelpick.bend)
+def Hub.switch.as(+s: M.State, +now: Nat, +client: U32, +id: String, +th: String, +to: String, +model: String, es: List<&2, String>) -> Step:
+  Switch.k(Hub.running(Hub.thread(s, th)), String.eq(Hub.provider(Hub.thread(s, th)), to), s, now, client, id, th, Hub.provider(Hub.thread(s, th)), to, model, es)
+
+# the thread goes on with provider `to` (its default model) from its next turn
 def Hub.switch(+s: M.State, +now: Nat, +client: U32, +id: String, +th: String, +to: String) -> Step:
-  Switch.k(Hub.running(Hub.thread(s, th)), String.eq(Hub.provider(Hub.thread(s, th)), to), s, now, client, id, th, Hub.provider(Hub.thread(s, th)), to)
+  Hub.switch.as(s, now, client, id, th, to, "", Nil{})
 
 # Stopping a turn
 # ---------------
@@ -8818,7 +8847,7 @@ def Hub.request.k(i: Nat, +s: M.State, +now: Nat, +client: U32, +id: String, +p:
     case 28n:
       Hub.back(s, now, client, id, J.Json.get_str(p, "thread", ""))
     case 29n:
-      Hub.switch(s, now, client, id, J.Json.get_str(p, "thread", ""), J.Json.get_str(p, "provider", ""))
+      Hub.switch.as(s, now, client, id, J.Json.get_str(p, "thread", ""), J.Json.get_str(p, "provider", ""), J.Json.get_str(p, "model", ""), Switch.effort.of(J.Json.get(p, "effort")))
     case 30n:
       Step{[M.SettingSet{"update.wait", "", now}], [Reply.ok(client, id), UpgradeForce{}]}
     # the person stops watched work or a delegated task from its row

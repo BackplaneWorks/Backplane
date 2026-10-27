@@ -112,13 +112,42 @@ def Node.overlay.attrs(key: String, +attrs: List<&2, D.Attr>, text: String, open
     case "model-layer": Node.models.attrs(attrs, open)
     case _: Node.draft.attrs(Node.composer(attrs), attrs, text)
 
+# The model picker shown here before the hub draws it open has the shade
+# behind it too (a click off the picker shuts it), and one shut here has
+# none (a closed picker has no modal backdrop; view.bend's View.mp.loc).
+def Node.models.shade() -> D.Node:
+  D.El{"div", "", [D.At{"class", "shade"}, D.At{"data-value", "models"}, D.On{"click", "flag"}], Nil{}}
+
+def Node.models.shaded(attrs: List<&2, D.Attr>) -> Bool:
+  match attrs:
+    case Nil{}: False{}
+    case D.At{"class", "shade"} <> _: True{}
+    case _ <> tail: Node.models.shaded(tail)
+
+def Node.models.kids.k(open: Bool, shaded: Bool, head: D.Node, tail: List<&2, D.Node>) -> List<&2, D.Node>:
+  match open shaded:
+    case True{} False{}: Node.models.shade() <> head <> tail
+    case False{} True{}: tail
+    case _ _: head <> tail
+
+def Node.models.kids(+open: Bool, kids: List<&2, D.Node>) -> List<&2, D.Node>:
+  match kids:
+    case Nil{}: Nil{}
+    case D.El{tag, key, +attrs, ks} <> tail: Node.models.kids.k(open, Node.models.shaded(attrs), D.El{tag, key, attrs, ks}, tail)
+    case head <> tail: head <> tail
+
+def Node.overlay.kids(key: String, +open: Bool, kids: List<&2, D.Node>) -> List<&2, D.Node>:
+  match key:
+    case "model-layer": Node.models.kids(open, kids)
+    case _: kids
+
 def Node.overlay.go(nodes: List<&2, D.Node>, +text: String, +open: Bool, acc: List<&2, D.Node>) -> List<&2, D.Node>:
   match nodes:
     case Nil{}: acc
     case D.Txt{value} <> tail: Node.overlay.go(tail, text, open, D.Txt{value} <> acc)
     case D.El{tag, +key, attrs, kids} <> tail:
       Node.overlay.go(tail, text, open, D.El{tag, key, Node.overlay.attrs(key, attrs, text, open),
-        List.reverse(&2, D.Node, Node.overlay.go(kids, text, open, Nil{}))} <> acc)
+        Node.overlay.kids(key, open, List.reverse(&2, D.Node, Node.overlay.go(kids, text, open, Nil{})))} <> acc)
 
 def Node.overlay(node: D.Node, text: String, open: Bool) -> D.Node:
   Node.read.first(Node.overlay.go([node], text, open, Nil{}))

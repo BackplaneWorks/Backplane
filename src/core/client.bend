@@ -63,6 +63,7 @@ import ./mailview.bend as MV
 import ./mail.bend as ML
 import ./thin-chat.bend as TC
 import ./secret.bend as SEC
+import ./modelpick.bend as MPK
 
 # The client state, Elm-style, shared by the native window and the web
 # page: a host feeds server messages to Ui.recv and user actions to Ui.act,
@@ -4251,17 +4252,23 @@ def Models.phone(+nf: Map<&2, String>, +prov: String, +q: String) -> String:
 def Models.opened.k(open: Bool, oc: Bool, +u: Ui, cs: List<&2, Cmd>) -> Act:
   match open oc:
     case True{} True{}:
-      Ui.also(Ui.rpc(Ui.scratch_set(u, "@f.mq", ""), "models.refresh", Nil{}), List.append(&2, Cmd, cs, [Focus{"model-q"}]))
+      Ui.also(Ui.rpc(Ui.scratch_set(Ui.scratch_set(u, "@f.mq", ""), "@mp", ""), "models.refresh", Nil{}), List.append(&2, Cmd, cs, [Focus{"model-q"}]))
     case True{} False{}:
-      Act{Ui.scratch_set(u, "@f.mq", ""), cs}
+      Act{Ui.scratch_set(Ui.scratch_set(u, "@f.mq", ""), "@mp", ""), cs}
     case False{} _:
       Act{u, cs}
 
-# (shut, the keys go back to the composer, not a search no longer shown)
+def Models.shut.drop(a: Act) -> Act:
+  match a:
+    case Act{u, cs}:
+      Act{Ui.scratch_set(u, "@mp", ""), cs}
+
+# (shut, the keys go back to the composer, not a search no longer shown,
+# and the picker's cursor goes: Mpk.*)
 def Models.shut.k(shut: Bool, a: Act) -> Act:
   match shut:
     case True{}:
-      Ui.also(a, [Focus{"composer"}])
+      Ui.also(Models.shut.drop(a), [Focus{"composer"}])
     case False{}:
       a
 
@@ -4270,6 +4277,138 @@ def Models.opened(+value: String, a: Act) -> Act:
     case Act{+u, cs}:
       Models.shut.k(Bool.and(String.eq(value, "models"), Bool.not(Ui.flag(u, "models"))),
         Models.opened.k(Bool.and(String.eq(value, "models"), Ui.flag(u, "models")), String.eq(M.Thread.provider(Ui.thread(Ui.state(u), Ui.sel(u))), "opencode"), u, cs))
+
+# The model picker's cursor (web and desktop; core/modelpick.bend)
+# ----------------------------------------------------------------
+# Kept in the scratch "@mp" for the thread it was moved on, once a key or
+# a click moved it while the picker is open; none is the thread's own
+# agent, model and effort. Shutting the picker drops it (Models.shut.k,
+# Mpk.shut). Actions: mp-key (tab, stab, up, down, left, right, enter,
+# esc), and the clicks mp-agent, mp-model, mp-effort, which apply at once
+# and leave the picker open. The phones and the old model/effort actions
+# never see it.
+
+def Mpk.now.t(t: M.Thread, +e: String) -> MPK.MpCur:
+  match t:
+    case M.Thread{_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, pr, mo, _, _, _, _}:
+      MPK.MpCur{1n, pr, mo, e}
+
+# the selected thread's own agent, model and effort
+def Mpk.now(+st: M.State, +sel: String) -> MPK.MpCur:
+  Mpk.now.t(Ui.thread(st, sel), Effort.of(st, sel))
+
+# the cursor, from the scratch the picker keeps it in (drafts, "@mp")
+def Mpk.cur.of(+st: M.State, +sel: String, +dr: Map<&2, String>) -> MPK.MpCur:
+  MPK.ModelPick.read(Str.get(dr, "@mp"), sel, Mpk.now(st, sel))
+
+def Mpk.cur(+u: Ui) -> MPK.MpCur:
+  MPK.ModelPick.read(Ui.scratch(u, "@mp"), Ui.sel(u), Mpk.now(Ui.state(u), Ui.sel(u)))
+
+def Mpk.agents.go(cs: List<&2, String>) -> List<&2, String>:
+  match cs:
+    case Nil{}:
+      Nil{}
+    case +c <> t:
+      String.drop(c, 1n) <> Mpk.agents.go(t)
+
+# the agent column's rows
+def Mpk.agents() -> List<&2, String>:
+  Mpk.agents.go(Chip.providers())
+
+def Mpk.models.k(own: Bool, ms: List<&2, String>, +m: String) -> List<&2, String>:
+  match own:
+    case True{}:
+      Models.with(m, ms)
+    case False{}:
+      ms
+
+# the model column's rows for cursor c: its agent's models (what the
+# search finds, Models.shown), with the thread's own model when c is on
+# the thread's agent and its CLI does not list that model
+def Mpk.models(+nf: Map<&2, String>, +c: MPK.MpCur, +now: MPK.MpCur, +q: String) -> List<&2, String>:
+  Mpk.models.k(Bool.and(String.eq(MPK.MpCur.agent(c), MPK.MpCur.agent(now)), String.is_empty(String.trim(q))),
+    Models.shown(Models.of(nf, MPK.MpCur.agent(c)), MPK.MpCur.agent(c), q), MPK.MpCur.model(now))
+
+# the effort meter for cursor c's agent and model
+def Mpk.steps(+nf: Map<&2, String>, +c: MPK.MpCur) -> List<&2, MPK.MpStep>:
+  MPK.ModelPick.steps(Effort.chips(Str.get(nf, "models"), MPK.MpCur.agent(c), MPK.MpCur.model(c)))
+
+def Mpk.nf(u: Ui) -> Map<&2, String>:
+  match u:
+    case Ui{_, _, _, _, _, _, _, _, _, _, _, _, _, _, nf, _, _}:
+      nf
+
+def Mpk.keep(+u: Ui, +c: MPK.MpCur) -> Ui:
+  Ui.scratch_set(u, "@mp", MPK.ModelPick.show(Ui.sel(u), c))
+
+def Mpk.send.cat(cs: List<&2, Cmd>, a: Act) -> Act:
+  match a:
+    case Act{u, ds}:
+      Act{u, List.append(&2, Cmd, cs, ds)}
+
+def Mpk.send.one(a: Act, m: String, args: List<&2, J.KV>) -> Act:
+  match a:
+    case Act{u, cs}:
+      Mpk.send.cat(cs, Ui.on_thread.p(u, m, args))
+
+def Mpk.send(rs: List<&2, MPK.MpReq>, a: Act) -> Act:
+  match rs:
+    case Nil{}:
+      a
+    case MPK.MpReq{m, args} <> t:
+      Mpk.send(t, Mpk.send.one(a, m, args))
+
+# apply cursor c (what changed against the thread's own: ModelPick.plan)
+# and keep it as the picker's
+def Mpk.apply(+u: Ui, +c: MPK.MpCur) -> Act:
+  Mpk.send(MPK.ModelPick.plan(c, Mpk.now(Ui.state(u), Ui.sel(u))), Act{Mpk.keep(u, c), Nil{}})
+
+# the picker shut, its cursor and search dropped, the keys back to the composer
+def Mpk.shut(u: Ui) -> Act:
+  Act{Ui.scratch_set(Ui.scratch_set(Ui.flag_off(u, "models"), "@mp", ""), "@f.mq", ""), [Focus{"composer"}]}
+
+def Mpk.enter(a: Act) -> Act:
+  match a:
+    case Act{u, cs}:
+      Mpk.send.cat(cs, Mpk.shut(u))
+
+def Mpk.move(+u: Ui, +k: String, +c: MPK.MpCur, +now: MPK.MpCur) -> Act:
+  Act{Mpk.keep(u, MPK.ModelPick.key(k, c, Mpk.agents(), Mpk.models(Mpk.nf(u), c, now, Ui.scratch(u, "@f.mq")), Mpk.steps(Mpk.nf(u), c), now)), Nil{}}
+
+def Mpk.key.k(+u: Ui, +k: String) -> Act:
+  match k:
+    case "enter":
+      Mpk.enter(Mpk.apply(u, Mpk.cur(u)))
+    case "esc":
+      Mpk.shut(u)
+    case _:
+      Mpk.move(u, k, Mpk.cur(u), Mpk.now(Ui.state(u), Ui.sel(u)))
+
+# a key in the picker (only while it is open)
+def Mpk.key.on(open: Bool, +u: Ui, +k: String) -> Act:
+  match open:
+    case True{}:
+      Mpk.key.k(u, k)
+    case False{}:
+      Act{u, Nil{}}
+
+def Mpk.key(+u: Ui, +k: String) -> Act:
+  Mpk.key.on(Ui.flag(u, "models"), u, k)
+
+# a click on a row of column col (0 agent, 1 model, 2 effort): the cursor
+# moves there and is applied; a model's click hands the keys back to the
+# composer, as the old picker did
+def Mpk.click.k(col: Nat, +u: Ui, +v: String, c: MPK.MpCur, +now: MPK.MpCur) -> Act:
+  match col:
+    case 0n:
+      Mpk.apply(u, MPK.ModelPick.col(MPK.ModelPick.agent(c, v, now), 0n))
+    case 1n:
+      Ui.also(Mpk.apply(u, MPK.ModelPick.col(MPK.ModelPick.model(c, v), 1n)), [Focus{"composer"}])
+    case _:
+      Mpk.apply(u, MPK.ModelPick.col(MPK.ModelPick.effort(c, v), 2n))
+
+def Mpk.click(+u: Ui, +col: Nat, +v: String) -> Act:
+  Mpk.click.k(col, u, v, Mpk.cur(u), Mpk.now(Ui.state(u), Ui.sel(u)))
 
 # Project picker
 # --------------
@@ -13837,13 +13976,22 @@ def Menu.items(+u: Ui, rich: Bool) -> List<&2, MItem>:
 def ThreadTree.target(+u: Ui, +id: String) -> String:
   Bool.pick(String, String.is_empty(id), Ui.sel(u), id)
 
+# the model picker's actions (Mpk.*)
+def Mpk.dispatch(i: Nat, +u: Ui, +value: String, +action: String) -> Act:
+  match i:
+    case 0n: Mpk.key(u, value)
+    case 1n: Mpk.click(u, 0n, value)
+    case 2n: Mpk.click(u, 1n, value)
+    case 3n: Mpk.click(u, 2n, value)
+    case _: Settings.dispatch(String.eq(action, "settings-page"), u, action, value)
+
 def ThreadTree.dispatch(i: Nat, +u: Ui, +value: String, +action: String) -> Act:
   match i:
     case 0n: ThreadTree.create(u, ThreadTree.target(u, value))
     case 1n: Ui.setting(u, ST.Tree.open_key(value) ++ "=" ++ Bool.pick(String, ST.Tree.open(Ui.state(u), value, ""), "0", "1"))
     case 2n: Ui.rpc(Ui.scratch_set(u, "@menu", ""), "thread.detach", [J.KV{"thread", J.Str{value}}])
     case 3n: Ui.toggle_settled(u, "conversation-history")
-    case _: Settings.dispatch(String.eq(action, "settings-page"), u, action, value)
+    case _: Mpk.dispatch(C.Codec.pos(["mp-key", "mp-agent", "mp-model", "mp-effort"], action), u, value, action)
 
 def Ui.act(+u: Ui, +action: String, +value: String) -> Act:
   ThreadTree.dispatch(C.Codec.pos(["thread-child", "thread-tree", "thread-detach", "thread-history"], action), u, value, action)

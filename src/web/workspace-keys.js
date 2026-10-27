@@ -9,6 +9,13 @@ export function workspaceShortcut(event, platform = '') {
       (event.code === 'Backquote' || key === '`' || key === '~')) return ['ws-key', 'term'];
   if (command && !event.shiftKey && !event.altKey && key === 'j') return ['ws-key', 'term'];
   if (command && !event.shiftKey && !event.altKey && key === 'b') return ['side-toggle', ''];
+  // Ctrl+M (Ctrl on every platform: Cmd+M minimizes on macOS) toggles the
+  // model picker from the workspace or the composer, never from a PTY
+  // (Ctrl+M is Enter there) or another field.
+  if (event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && key === 'm') {
+    const field = event.target?.closest?.('input,textarea,select,[contenteditable]:not([contenteditable="false"]),[role="textbox"],[data-keys],[data-keyto]');
+    if (!field || (field.tagName === 'TEXTAREA' && field.id === 'composer') || field.id === 'model-q') return ['flag', 'models'];
+  }
   const editor = event.target?.closest?.('input,textarea,select,[contenteditable]:not([contenteditable="false"]),[role="textbox"],[data-keys],[data-keyto]');
   // The requested bare backtick works from the composer/workspace. Keep
   // literal backticks available in shells and other text fields.
@@ -32,10 +39,29 @@ export function workspaceShortcut(event, platform = '') {
   return null;
 }
 
+// The open model picker owns these keys wherever the focus is (the
+// composer, its search, the chip): Bend moves its cursor (mp-key, core's
+// modelpick.bend). Escape shuts it like a click on the chip; in its search
+// field the side arrows stay with the text.
+export function modelPickerKey(event) {
+  if (event.ctrlKey || event.metaKey || event.altKey) return null;
+  if (event.key === 'Escape' && !event.shiftKey) return ['flag', 'models'];
+  if (event.key === 'Tab') return ['mp-key', event.shiftKey ? 'stab' : 'tab'];
+  if (event.shiftKey) return null;
+  const inSearch = event.target?.id === 'model-q';
+  const key = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: inSearch ? '' : 'left', ArrowRight: inSearch ? '' : 'right', Enter: 'enter' }[event.key];
+  return key ? ['mp-key', key] : null;
+}
+
 export function installWorkspaceKeys({ dispatch, document: doc = document, platform = navigator.platform }) {
   doc.addEventListener('keydown', event => {
     if (event.isComposing || event.keyCode === 229 || event.defaultPrevented) return;
     if (doc.querySelector('.tour,.lightbox')) return; // The active overlay owns every key.
+    const models = doc.querySelector('[data-local-models="1"]');
+    if (models && models.style.display !== 'none') {
+      const action = modelPickerKey(event);
+      if (action) { event.preventDefault(); event.stopImmediatePropagation(); dispatch(...action); return; }
+    }
     const palette = doc.querySelector('.workspace-palette');
     if (palette) {
       const action = { Escape: 'ws-palette-close', Enter: 'ws-palette-enter', ArrowUp: 'ws-palette-move', ArrowDown: 'ws-palette-move' }[event.key];

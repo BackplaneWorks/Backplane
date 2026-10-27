@@ -49,6 +49,7 @@ import ../core/sched.bend as SCH
 import ../core/tz.bend as TZ
 import ../core/stamp.bend as STP
 import ../core/order.bend as OR
+import ../core/modelpick.bend as MPK
 
 # Each web connection explicitly opts into the rail's DOM/CSS contract.
 # An old loaded host must keep the flat layout its stylesheet understands.
@@ -937,25 +938,40 @@ def View.header.legacy(+lc: I.Loc, t: M.Thread, +st: M.State, +chip: String, min
             Bool.not(String.is_empty(M.Fork.source(st, id))), term, panel}, "flag", "snooze", "term-toggle", "@term-size"))),
           D.Dom.span("control-label", View.group.label(lc, True{})) <> List.take(&2, D.Node, View.snoozes.loc(lc, True{}), 3n))}]])}
 
-# the model menu's rows: each model's name, then what its CLI calls it,
+# The model picker (core/modelpick.bend, client.bend's Mpk.*): three
+# columns, agent | model | effort, over the composer. The keys' column
+# has its head lit; in each column the cursor's row has the accent edge
+# and the thread's own one a faint edge. A click applies at once and the
+# picker stays open; the keys move the cursor, Enter applies it.
+
+def View.mp.cls(on: Bool, own: Bool) -> String:
+  "row" ++ Bool.pick(String, on, " on", "") ++ Bool.pick(String, own, " own", "")
+
+# the agent column: each agent, what it is dim beside it
+def View.mp.agents(+lc: I.Loc, ags: List<&2, String>, +on: String, +own: String) -> List<&2, D.Node>:
+  match ags:
+    case Nil{}:
+      Nil{}
+    case +a <> t:
+      D.El{"button", "", [D.At{"class", View.mp.cls(String.eq(a, on), String.eq(a, own))}, D.At{"title", MSG.T.model.effort.next(lc, a)}, D.At{"data-value", a}, D.On{"click", "mp-agent"}],
+        [D.Dom.span("name", a), D.Dom.span("label", MPK.ModelPick.product(a))]} <> View.mp.agents(lc, t, on, own)
+
+# the model column's rows: each model's name, then what its CLI calls it,
 # in two columns (the names' as wide as the longest, --namew)
-def View.models.labels.loc(+lc: I.Loc, ms: List<&2, String>, +cur: String, +labels: J.Json) -> List<&2, D.Node>:
+def View.models.labels.loc(+lc: I.Loc, ms: List<&2, String>, +cur: String, +own: String, +labels: J.Json) -> List<&2, D.Node>:
   match ms:
     case Nil{}:
       Nil{}
     case +m <> t:
-      D.El{"button", "", [D.At{"class", Bool.pick(String, String.eq(m, cur), "row on", "row")}, D.At{"title", MSG.T.model.choose(lc, Bool.pick(String, String.is_empty(m), MSG.T.model.default.article(lc), m))}, D.At{"data-value", m}, D.On{"click", "model"}],
-        [D.Dom.span("name", Bool.pick(String, String.is_empty(m), MSG.T.common.default(lc), m)), D.Dom.span("label", U.Models.label.given(labels, m))]} <> View.models.labels.loc(lc, t, cur, labels)
+      D.El{"button", "", [D.At{"class", View.mp.cls(String.eq(m, cur), String.eq(m, own))}, D.At{"title", MSG.T.model.choose(lc, Bool.pick(String, String.is_empty(m), MSG.T.model.default.article(lc), m))}, D.At{"data-value", m}, D.On{"click", "mp-model"}],
+        [D.Dom.span("name", Bool.pick(String, String.is_empty(m), MSG.T.common.default(lc), m)), D.Dom.span("label", U.Models.label.given(labels, m))]} <> View.models.labels.loc(lc, t, cur, own, labels)
 
 # Resolve this render's provider metadata once for the bounded row list.
 # The hidden menu remains ready; no catalog or picture is retained here.
-def View.models.loc(lc: I.Loc, ms: List<&2, String>, cur: String, info: String, prov: String) -> List<&2, D.Node>:
+def View.models.loc(lc: I.Loc, ms: List<&2, String>, cur: String, own: String, info: String, prov: String) -> List<&2, D.Node>:
   match ms:
     case Nil{}: Nil{}
-    case m <> tail: View.models.labels.loc(lc, m <> tail, cur, U.Models.labels(info, prov))
-
-def View.models(ms: List<&2, String>, +cur: String, +info: String, +prov: String) -> List<&2, D.Node>:
-  View.models.loc(I.En{}, ms, cur, info, prov)
+    case m <> tail: View.models.labels.loc(lc, m <> tail, cur, own, U.Models.labels(info, prov))
 
 def View.namew(ms: List<&2, String>) -> Nat:
   match ms:
@@ -964,28 +980,40 @@ def View.namew(ms: List<&2, String>) -> Nat:
     case +m <> t:
       Nat.max(String.length(m), View.namew(t))
 
-# reasoning effort chips, the provider's default first
-def View.efforts.loc(+lc: I.Loc, es: List<&2, String>, +cur: String, +prov: String) -> List<&2, D.Node>:
-  match es:
+# a step's word under its bar (short: the column is narrow)
+def VLabel.step(+lc: I.Loc, +e: String) -> String:
+  match e:
+    case "medium": MSG.T.model.step.medium(lc)
+    case "minimal": MSG.T.model.step.minimal(lc)
+    case x: VLabel.effort(lc, x)
+
+def View.mp.press(on: Bool) -> List<&2, D.Attr>:
+  match on:
+    case True{}: [D.On{"click", "mp-effort"}]
+    case False{}: [D.At{"disabled", "disabled"}]
+
+# the effort meter: a bar a step, higher to the right, the chosen one lit
+# and those below it filled; a step the agent's model does not take is
+# drawn disabled
+def View.mp.bars(+lc: I.Loc, bs: List<&2, MPK.MpBar>) -> List<&2, D.Node>:
+  match bs:
     case Nil{}:
       Nil{}
-    case +e <> t:
-      D.Dom.button(Bool.pick(String, U.Chip.on(e, cur, prov), "on", ""), "effort", e,
-        Bool.pick(String, String.starts_with(e, "@"), MSG.T.model.effort.next(lc, VLabel.chip(lc, e)), MSG.T.model.effort.tip(lc, VLabel.chip(lc, e))), VLabel.chip(lc, e)) <> View.efforts.loc(lc, t, cur, prov)
+    case MPK.MpBar{+l, on, lit, fill, i} <> t:
+      D.El{"button", "", List.append(&2, D.Attr, [D.At{"class", "step" ++ Bool.pick(String, lit, " on", "") ++ Bool.pick(String, fill, " fill", "")},
+        D.At{"title", MSG.T.model.effort.tip(lc, VLabel.effort(lc, l))}, D.At{"data-value", l}, D.At{"style", "--h:" ++ Nat.show(Nat.add(6n, Nat.mul(5n, i))) ++ "px"}], View.mp.press(on)),
+        [D.El{"i", "", Nil{}, Nil{}}, D.Dom.span("lv", VLabel.step(lc, l))]} <> View.mp.bars(lc, t)
 
-def View.efforts(es: List<&2, String>, +cur: String, +prov: String) -> List<&2, D.Node>:
-  View.efforts.loc(I.En{}, es, cur, prov)
+# a column's head: its name, and the keys that work in it as keycaps
+def View.mp.head(+label: String, +keys: String, on: Bool) -> D.Node:
+  D.El{"div", "", [D.At{"class", Bool.pick(String, on, "mp-h on", "mp-h")}], [D.Dom.span("", label), D.El{"kbd", "", Nil{}, [D.Txt{keys}]}]}
 
-def View.effort_row.loc(+lc: I.Loc, +es: List<&2, String>, +cur: String, +prov: String) -> List<&2, D.Node>:
-  Bool.pick(List<&2, D.Node>, List.is_empty(&2, String, es), Nil{}, [D.El{"div", "", [D.At{"class", "efforts"}], View.efforts.loc(lc, es, cur, prov)}])
+def View.mp.note(+lc: I.Loc, none: Bool, +agent: String, +own: String) -> String:
+  match none:
+    case True{}: MSG.T.model.effort.none(lc, agent)
+    case False{}: MSG.T.model.effort.note(lc, VLabel.effort(lc, own))
 
-# the model menu over the composer, and a shade behind it: a click
-# anywhere off the menu lands on the shade and closes it
-
-def View.effort_row(+es: List<&2, String>, +cur: String, +prov: String) -> List<&2, D.Node>:
-  View.effort_row.loc(I.En{}, es, cur, prov)
-
-# the picker's search field, once the provider lists many models
+# the picker's search field, once the agent lists many models
 # (client.bend's Models.search)
 def View.menu.find(+lc: I.Loc, srch: Bool, +q: String) -> List<&2, D.Node>:
   match srch:
@@ -994,34 +1022,64 @@ def View.menu.find(+lc: I.Loc, srch: Bool, +q: String) -> List<&2, D.Node>:
     case False{}:
       Nil{}
 
-# (ms: the models the search finds, at most Models.cap(); mi: the models
-# info cut to them, so each row's label is read from a few KB: Models.view;
-# made only while the menu is open)
-def View.menu.open(+lc: I.Loc, +ms: List<&2, String>, +mi: String, +cur: String, +prov: String, +es: List<&2, String>, +effort: String, +q: String, srch: Bool) -> List<&2, D.Node>:
+# the picker open over the composer, and a shade behind it: a click
+# anywhere off the picker lands on the shade and shuts it. ms: the models
+# of the cursor's agent the search finds (Mpk.models), mi the models info
+# cut to them, so each row's label is read from a few KB (Models.view);
+# ss its meter (Mpk.steps)
+def View.mp.open(+lc: I.Loc, +ms: List<&2, String>, +mi: String, +c: MPK.MpCur, +now: MPK.MpCur, +ss: List<&2, MPK.MpStep>, +q: String, srch: Bool) -> List<&2, D.Node>:
   [D.El{"div", "", [D.At{"class", "shade"}, D.At{"data-value", "models"}, D.On{"click", "flag"}], Nil{}},
-   D.El{"div", "", [D.At{"class", "model-menu"}, D.At{"style", "--namew:" ++ Nat.show(View.namew(ms)) ++ "ch"}],
-     D.Dom.cat(View.effort_row.loc(lc, es, effort, prov), D.Dom.cat(View.menu.find(lc, srch, q), [D.El{"div", "", [D.At{"class", "rows"}], View.models.loc(lc, ms, cur, mi, prov)}]))}]
+   D.El{"div", "", [D.At{"class", "model-menu mp"}, D.At{"role", "dialog"}, D.At{"aria-label", MSG.T.composer.model.tip(lc)}, D.At{"title", MSG.T.model.keys(lc)}], [
+     D.El{"div", "", [D.At{"class", "mp-col mp-agents"}], [View.mp.head(MSG.T.model.col.agent(lc), "Tab", Nat.is_eq(MPK.MpCur.col(c), 0n)),
+       D.El{"div", "", [D.At{"class", "rows"}], View.mp.agents(lc, U.Mpk.agents(), MPK.MpCur.agent(c), MPK.MpCur.agent(now))}]},
+     D.El{"div", "", [D.At{"class", "mp-col mp-models"}, D.At{"style", "--namew:" ++ Nat.show(View.namew(ms)) ++ "ch"}], D.Dom.cat(
+       [View.mp.head(MSG.T.model.col.model(lc), "↑↓", Nat.is_eq(MPK.MpCur.col(c), 1n))], D.Dom.cat(View.menu.find(lc, srch, q),
+       [D.El{"div", "", [D.At{"class", "rows"}], View.models.loc(lc, ms, MPK.MpCur.model(c), Bool.pick(String, String.eq(MPK.MpCur.agent(c), MPK.MpCur.agent(now)), MPK.MpCur.model(now), "\u{1f}"), mi, MPK.MpCur.agent(c))}]))},
+     D.El{"div", "", [D.At{"class", "mp-col mp-effort"}], [View.mp.head(MSG.T.model.col.effort(lc), "←→", Nat.is_eq(MPK.MpCur.col(c), 2n)),
+       D.El{"div", "", [D.At{"class", "meter"}], View.mp.bars(lc, MPK.ModelPick.bars(ss, MPK.MpCur.effort(c)))},
+       D.Dom.span("note", View.mp.note(lc, List.is_empty(&2, String, MPK.ModelPick.levels(ss)), MPK.MpCur.agent(c), MPK.MpCur.effort(now)))]}]}]
 
-def View.menu.shown(+lc: I.Loc, +ms: List<&2, String>, +info: String, +cur: String, +prov: String, +es: List<&2, String>, +effort: String, +q: String) -> List<&2, D.Node>:
-  View.menu.open(lc, ms, U.Models.view(info, prov, ms), cur, prov, es, effort, q, U.Models.search(U.Models.menu(info, prov)))
+def View.mp.shown(+lc: I.Loc, +nf: Map<&2, String>, +c: MPK.MpCur, +now: MPK.MpCur, +q: String) -> List<&2, D.Node>:
+  +ms = U.Mpk.models(nf, c, now, q)
+  View.mp.open(lc, ms, U.Models.view(U.Models.of(nf, MPK.MpCur.agent(c)), MPK.MpCur.agent(c), ms), c, now, U.Mpk.steps(nf, c), q,
+    U.Models.search(U.Models.menu(U.Models.of(nf, MPK.MpCur.agent(c)), MPK.MpCur.agent(c))))
 
-def View.menu.loc(+lc: I.Loc, +open: Bool, ms: List<&2, String>, +cur: String, +info: String, +prov: String, +es: List<&2, String>, +effort: String, +q: String, srch: Bool) -> List<&2, D.Node>:
+# the picker, open or not, with cursor c over the thread's own (now); its
+# layer carries data-draft while a cursor is kept, so the web shuts and
+# opens it through the hub (host.js's modelMenuReady), never over a
+# picture of a cursor dropped since
+def View.mp.loc(+lc: I.Loc, +open: Bool, +nf: Map<&2, String>, +c: MPK.MpCur, +now: MPK.MpCur, +q: String, kept: Bool) -> List<&2, D.Node>:
   # Keep only the existing bounded model rows ready in the authenticated tree.
   # Opening can paint immediately; choosing still takes the ordinary hub path.
   +query = Bool.pick(String, open, q, "")
-  [D.El{"div", "model-layer", [D.At{"class", "model-layer"}, D.At{"data-local-models", "1"},
+  [D.El{"div", "model-layer", List.append(&2, D.Attr, [D.At{"class", "model-layer"}, D.At{"data-local-models", "1"},
     D.At{"style", Bool.pick(String, open, "display:contents", "display:none")}, D.At{"aria-hidden", Bool.pick(String, open, "false", "true")}],
+    Bool.pick(List<&2, D.Attr>, kept, [D.At{"data-draft", "1"}], Nil{})),
     # Prewarm model rows, but a closed picker has no modal backdrop. Retained
     # hosts use backdrop presence to defer their quiet deployment reload.
-    List.drop(&2, D.Node, View.menu.shown(lc, U.Models.shown(info, prov, query), info, cur, prov, es, effort, query), Bool.pick(Nat, open, 0n, 1n))}]
+    List.drop(&2, D.Node, View.mp.shown(lc, nf, c, now, query), Bool.pick(Nat, open, 0n, 1n))}]
+
+# the same from one provider's info (tests and the older callers): the
+# thread's own provider, model and effort, no cursor kept
+def View.menu.loc(+lc: I.Loc, +open: Bool, ms: List<&2, String>, +cur: String, +info: String, +prov: String, +es: List<&2, String>, +effort: String, +q: String, srch: Bool) -> List<&2, D.Node>:
+  View.mp.loc(lc, open, Map.set(&2, String, Map.set(&2, String, Map.new(&2, String), "models", info), "models.oc", info),
+    MPK.MpCur{1n, prov, cur, effort}, MPK.MpCur{1n, prov, cur, effort}, q, False{})
+
+# the chip under the composer that opens the picker: agent / model /
+# effort in a box with its key (Ctrl+M, workspace-keys.js), then how much
+# of the model's window the thread holds (ctx)
+def View.mp.chip(+lc: I.Loc, +text: String, +ctx: String) -> List<&2, D.Node>:
+  D.El{"button", "", [D.At{"class", "model-chip"}, D.At{"title", MSG.T.composer.model.tip(lc) ++ " · Ctrl+M"}, D.At{"data-value", "models"}, D.On{"click", "flag"}],
+    [D.Dom.span("mp-sel", text), D.El{"kbd", "", Nil{}, [D.Txt{"Ctrl M"}]}]} <> Bool.pick(List<&2, D.Node>, String.is_empty(String.trim(ctx)), Nil{}, [D.Dom.span("model-ctx", String.trim(String.drop(String.trim(ctx), Bool.pick(Nat, String.starts_with(String.trim(ctx), "·"), 1n, 0n))))])
+
+# the chip's words: "claude / opus / high" (the effort left out when the
+# agent's model takes none)
+def View.mp.text(+lc: I.Loc, +agent: String, +model: String, +effort: String, efforts: Bool) -> String:
+  agent ++ " / " ++ Bool.pick(String, String.is_empty(model), MSG.T.common.default(lc), model) ++ Bool.pick(String, efforts, " / " ++ VLabel.effort(lc, effort), "")
 
 # the skills a `$` being typed may complete to, or the bots, threads,
 # projects and rooms a `@`, `>`, `%` or `#` may (the arrow keys move the
 # highlight, Tab or Enter takes it)
-
-def View.menu(open: Bool, +ms: List<&2, String>, +cur: String, +info: String, +prov: String, +es: List<&2, String>, +effort: String) -> List<&2, D.Node>:
-  View.menu.loc(I.En{}, open, ms, cur, info, prov, es, effort, "", False{})
-
 def View.skills.go(rs: List<&2, U.SkillRow>) -> List<&2, D.Node>:
   match rs:
     case Nil{}:
@@ -2623,20 +2681,24 @@ def View.tok.pop(open: Bool, +st: M.State, +th: String, +prov: String) -> List<&
     case False{}:
       Nil{}
 
-def View.composer.loc(+lc: I.Loc, +draft: String, +send: String, +act: String, +label: String, +ctx: String, +picking: Bool, +ms: List<&2, String>, +model: String, +info: String, +prov: String, +es: List<&2, String>, +effort: String, +rs: List<&2, U.SkillRow>,
-    +atts: List<&2, String>, +up: String, vo: List<&2, D.Node>, +mic: String, +q: String, srch: Bool, tk: List<&2, D.Node>, tp: List<&2, D.Node>, run: Bool) -> D.Node:
+def View.composer.p(+lc: I.Loc, +draft: String, +send: String, +act: String, +prov: String, menu: List<&2, D.Node>, chip: List<&2, D.Node>, +rs: List<&2, U.SkillRow>,
+    +atts: List<&2, String>, +up: String, vo: List<&2, D.Node>, +mic: String, tk: List<&2, D.Node>, tp: List<&2, D.Node>, run: Bool) -> D.Node:
   D.El{"div", "", [D.At{"class", "composer"}, D.At{"data-run", Bool.pick(String, run, "1", "")}, D.At{"data-atts", Nat.show(List.length(&2, String, atts))},
     D.At{"data-claude", Bool.pick(String, String.eq(prov, "claude"), "1", "")}, D.At{"data-lang", I.I18n.tag(lc)}], D.Dom.cat(
-    View.menu.loc(lc, picking, ms, model, info, prov, es, effort, q, srch), D.Dom.cat(tp, D.Dom.cat(View.skills(rs), D.Dom.cat(vo, D.Dom.cat(View.attaching.loc(lc, atts, up), [
+    menu, D.Dom.cat(tp, D.Dom.cat(View.skills(rs), D.Dom.cat(vo, D.Dom.cat(View.attaching.loc(lc, atts, up), [
     D.El{"textarea", "composer", [D.At{"id", "composer"}, D.At{"rows", "3"}, D.At{"placeholder", MSG.T.composer.placeholder(lc)}, D.At{"value", draft}, D.On{"input", "draft"},
       D.At{"data-enter", Bool.pick(String, List.is_empty(&2, U.SkillRow, rs), "send", "skill")}, D.At{"data-enter-alt", "send-alt"}, D.At{"data-tab", Bool.pick(String, List.is_empty(&2, U.SkillRow, rs), "", "skill")}, D.At{"data-arrows", Bool.pick(String, List.is_empty(&2, U.SkillRow, rs), "", "skill-move")}, D.At{"data-esc", Bool.pick(String, List.is_empty(&2, U.SkillRow, rs), "", "skill-close")}, D.At{"data-paste", "attach"}], Nil{}},
-    D.El{"div", "", [D.At{"class", "composer-foot"}], [
-      WI.WIcon.after("model-chip", "flag", "models", MSG.T.composer.model.tip(lc), VLabel.effort.label(lc, label, effort) ++ ctx, "chevron-down", 14),
+    D.El{"div", "", [D.At{"class", "composer-foot"}], List.append(&2, D.Node, chip, [
       View.draw.loc(lc),
       D.El{"label", "", [D.At{"class", "attach"}, D.At{"title", MSG.T.composer.attach.tip(lc)}], [WI.WIcon.svg("paperclip", 16),
         D.El{"input", "attach-file", [D.At{"type", "file"}, D.At{"multiple", ""}, D.At{"data-attach", "attach"}], Nil{}}]},
       D.El{"span", "", [D.At{"class", "foot-end"}], D.Dom.cat(tk, [View.mic.loc(lc, mic),
-        View.send.loc(lc, act, send)])}]}])))))}
+        View.send.loc(lc, act, send)])}])}])))))}
+
+def View.composer.loc(+lc: I.Loc, +draft: String, +send: String, +act: String, +label: String, +ctx: String, +picking: Bool, +ms: List<&2, String>, +model: String, +info: String, +prov: String, +es: List<&2, String>, +effort: String, +rs: List<&2, U.SkillRow>,
+    +atts: List<&2, String>, +up: String, vo: List<&2, D.Node>, +mic: String, +q: String, srch: Bool, tk: List<&2, D.Node>, tp: List<&2, D.Node>, run: Bool) -> D.Node:
+  View.composer.p(lc, draft, send, act, prov, View.menu.loc(lc, picking, ms, model, info, prov, es, effort, q, srch), View.mp.chip(lc, VLabel.effort.label(lc, label, effort), ctx),
+    rs, atts, up, vo, mic, tk, tp, run)
 
 # the thread's header, or the one given (a bot's)
 
@@ -2669,8 +2731,10 @@ def View.composer.t(+lc: I.Loc, +st: M.State, +sel: String, +drafts: Map<&2, Str
     +atts: List<&2, String>, +up: String, vo: List<&2, D.Node>, +mic: String) -> D.Node:
   +stop = U.Follow.stop(View.running(turn), U.Str.get(drafts, sel), atts)
   +tok = UZ.Ts.on(st)
-  View.composer.loc(lc, U.Str.get(drafts, sel), U.Follow.button(lc, st, sel, View.running(turn), stop, U.Str.get(drafts, sel)), U.Follow.act(stop), VLabel.model(lc, pr, mo), Bool.pick(String, tok, "", U.Usage.tail(st, sel)), U.Flag.get(op, "models"), Nil{}, mo, U.Models.of(nf, pr), pr,
-    U.Chip.all(U.Str.get(nf, "models"), pr, mo), U.Effort.of(st, sel), U.Skills.shown(st, sel, drafts, nf), atts, up, vo, mic, U.Str.get(drafts, "@f.mq"), False{},
+  View.composer.p(lc, U.Str.get(drafts, sel), U.Follow.button(lc, st, sel, View.running(turn), stop, U.Str.get(drafts, sel)), U.Follow.act(stop), pr,
+    View.mp.loc(lc, U.Flag.get(op, "models"), nf, U.Mpk.cur.of(st, sel, drafts), U.Mpk.now(st, sel), U.Str.get(drafts, "@f.mq"), MPK.ModelPick.kept(U.Str.get(drafts, "@mp"), sel)),
+    View.mp.chip(lc, View.mp.text(lc, pr, mo, U.Effort.of(st, sel), Bool.not(List.is_empty(&2, String, U.Effort.chips(U.Str.get(nf, "models"), pr, mo)))), Bool.pick(String, tok, "", U.Usage.tail(st, sel))),
+    U.Skills.shown(st, sel, drafts, nf), atts, up, vo, mic,
     View.tok.chip(tok, UZ.Ts.chip(st, sel), U.Flag.get(op, "tokstats")), View.tok.pop(Bool.and(tok, U.Flag.get(op, "tokstats")), st, sel, pr), View.running(turn))
 
 def View.asks.box(+lc: I.Loc, +st: M.State, +id: String, +draft: String, +nf: Map<&2, String>, +dr: Map<&2, String>) -> D.Node:
