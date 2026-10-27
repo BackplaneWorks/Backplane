@@ -93,6 +93,20 @@ def Push.exists(path: String) -> IO(Bool):
     r : Result<&1, &1, U32 & String, U32 & U32 & U32> <- H.FS.stat(path)
     return Push.exists.k(r)
 
+# the default webhook secret as a stat finds it (wnote.bend's Seen): a
+# failure is "not there" only on ENOENT
+def Push.stat.k(r: Result<&1, &1, U32 & String, U32 & U32 & U32>) -> WN.Seen:
+  match r:
+    case Done{_}:
+      WN.SeenFile{}
+    case Fail{(+code, _)}:
+      WN.Wn.seen.fail(code)
+
+def Push.seen(path: String) -> IO(WN.Seen):
+  do IO<WN.Seen>:
+    r : Result<&1, &1, U32 & String, U32 & U32 & U32> <- H.FS.stat(path)
+    return Push.stat.k(r)
+
 def Push.env.k(r: Result<&1, &1, U32 & String, String>) -> String:
   match r:
     case Done{v}:
@@ -683,9 +697,9 @@ def Push.hook.send(+home: String, +st: M.State, +thread: String, +kind: String, 
   do IO<Unit>:
     +set : String = M.Setting.get(st, WN.Wn.secret.key(), "")
     +path : String = WN.Wn.path(home, set)
-    present : Bool <- Push.exists(path)
+    seen : WN.Seen <- Push.seen(path)
     +text : String <- Push.hook.read(path)
-    Push.hook.act(WN.Wn.mode(WN.Wn.wants(set, present), text), home, st, thread, kind, state, err, reason, reply, url, text)
+    Push.hook.act(WN.Wn.mode(WN.Wn.wants(set, seen), text), home, st, thread, kind, state, err, reason, reply, url, text)
 
 def Push.hook.bad() -> IO(Unit):
   IO.print_err("backplane: push webhook: push.webhook.url is not an http address")

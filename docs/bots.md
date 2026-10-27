@@ -343,7 +343,9 @@ UTF-8. Surrounding whitespace in the file is trimmed first. With no secret the n
 A secret path that cannot be read, or a file that is there but cannot be
 read or holds no key (the default one too), is logged and nothing is
 posted, so an unsigned notice is never sent in place of a signed one;
-only a default file that is absent leaves the notice unsigned. The address, the
+only a default file that is absent (its stat fails with ENOENT) leaves the
+notice unsigned; any other stat failure, such as a permission error, posts
+nothing. The address, the
 body and the signature go to `curl` in a config file, never on its command
 line.
 

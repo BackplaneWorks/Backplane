@@ -36,12 +36,32 @@ def Wn.file(+home: String) -> String:
 def Wn.asked(+set: String) -> Bool:
   Bool.not(String.is_empty(String.trim(set)))
 
-# a secret is wanted when the setting names a file, or when the default
-# file is there (present): only a default that is absent leaves the
-# notice unsigned. One there that cannot be read, or holds no key (a
-# rotation half done), is mode 0, not a quiet downgrade to unsigned
-def Wn.wants(+set: String, present: Bool) -> Bool:
-  Bool.or(Wn.asked(set), present)
+# what a stat of the default secret file found: the file, nothing there
+# (ENOENT, errno 2, only), or a failure that says nothing of whether it is
+# there (EACCES, EIO, ...), kept with its errno
+type Seen is Data:
+  SeenFile{}
+  SeenNone{}
+  SeenFail{code: U32}
+
+# a stat that failed, by its errno: only ENOENT is "not there"
+def Wn.seen.fail(code: U32) -> Seen:
+  Bool.pick(Seen, U32.is_eq(code, 2), SeenNone{}, SeenFail{code})
+
+def Wn.absent(seen: Seen) -> Bool:
+  match seen:
+    case SeenNone{}:
+      True{}
+    case _:
+      False{}
+
+# a secret is wanted when the setting names a file, or unless the default
+# file is surely absent (seen): only a default that is not there leaves
+# the notice unsigned. One there that cannot be read, holds no key (a
+# rotation half done), or whose stat failed any other way is mode 0, not
+# a quiet downgrade to unsigned
+def Wn.wants(+set: String, seen: Seen) -> Bool:
+  Bool.or(Wn.asked(set), Bool.not(Wn.absent(seen)))
 
 def Wn.path.k(empty: Bool, +home: String, +set: String) -> String:
   match empty:
