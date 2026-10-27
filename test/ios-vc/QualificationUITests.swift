@@ -472,6 +472,20 @@ final class QualificationUITests: XCTestCase {
         }
     }
 
+    func testBoardDraftEmptyAccessibilityDiagnostic() {
+        let app = XCUIApplication()
+        app.launchEnvironment["BACKPLANE_QUALIFICATION"] = "1"
+        app.launchEnvironment["BACKPLANE_SELECT"] = "t1790229700-1088"
+        app.launch()
+        closeRestoredViewer(app)
+        let composer = app.textFields["thread.composer"]
+        XCTAssertTrue(composer.waitForExistence(timeout: 60))
+        XCTAssertTrue(app.descendants(matching: .any)["qualification.connection.ready"].waitForExistence(timeout: 60))
+        let value = composer.value as? String
+        let placeholder = composer.placeholderValue
+        print("safe-draft-state value-is-nil=\(value == nil) value-is-empty=\(value?.isEmpty == true) placeholder-present=\(placeholder != nil) value-is-placeholder=\(value != nil && value == placeholder)")
+    }
+
     func testDraftOwnershipAcrossLiveRefresh() {
         let app = XCUIApplication()
         app.launchEnvironment["BACKPLANE_QUALIFICATION"] = "1"
@@ -484,7 +498,7 @@ final class QualificationUITests: XCTestCase {
         let threads = app.buttons["tab.threads"]
         func isEmpty(_ element: XCUIElement) -> Bool {
             guard let value = element.value as? String else { return false }
-            return value.isEmpty
+            return value.isEmpty || (element.placeholderValue != nil && value == element.placeholderValue)
         }
         func expectValue(_ expected: String) {
             let match = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", expected), object: composer)
@@ -528,6 +542,9 @@ final class QualificationUITests: XCTestCase {
         XCTAssertTrue(composer.waitForExistence(timeout: 30)); XCTAssertTrue(ready.waitForExistence(timeout: 60))
         XCTAssertTrue(isEmpty(composer), "Bub's marker must not leak into the board thread")
         typeMarker(boardMarker)
+        if !app.textFields["pair.address"].exists {
+            let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "board-owned-local-draft"; shot.lifetime = .keepAlways; add(shot)
+        }
         for _ in 0..<2 {
             home.tap(); XCTAssertTrue(app.navigationBars["Bub"].waitForExistence(timeout: 30))
             XCTAssertTrue(chat.isSelected); expectValue(bubMarker)
