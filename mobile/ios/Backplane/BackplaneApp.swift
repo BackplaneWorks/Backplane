@@ -25,12 +25,14 @@ struct BackplaneApp: App {
             RootView(model: model)
                 .overlay(alignment: .topLeading) {
                     #if DEBUG && targetEnvironment(simulator)
-                    Text("Simulator connection: " + model.qualificationConnection)
-                        .font(.caption2.monospaced())
-                        .padding(3)
-                        .background(.ultraThinMaterial)
-                        .allowsHitTesting(false)
-                        .accessibilityIdentifier("qualification.connection." + model.qualificationConnection)
+                    if ProcessInfo.processInfo.environment["BACKPLANE_QUALIFICATION"] == "1" {
+                        Text("Simulator connection: " + model.qualificationConnection)
+                            .font(.caption2.monospaced())
+                            .padding(3)
+                            .background(.ultraThinMaterial)
+                            .allowsHitTesting(false)
+                            .accessibilityIdentifier("qualification.connection." + model.qualificationConnection)
+                    }
                     #endif
                 }
                 // this device's appearance (App settings); the hub's theme is not read
