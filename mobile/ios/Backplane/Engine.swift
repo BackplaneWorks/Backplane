@@ -204,6 +204,9 @@ final class Engine: @unchecked Sendable {
     // a hub marked offline with no screen of its own (after load())
     func offline(_ key: String) async -> Out? { await out("online", [key, false, true], screen: false) }
     func tick(_ now: Int) async -> Out? { await out("tick", [now]) }
+    func reflowDefaults() async -> String { await call("reflowDefaults", [], person: true) { $0 } }
+    func reflowAlloys() async -> String { await call("reflowAlloys", [], person: true) { $0 } }
+    func reflow(_ profile: String, alloy: String) async -> String { await call("reflow", [profile, alloy], person: true) { $0 } }
     // a catalog text by key, in the device's language
     func t(_ key: String) async -> String { await call("t", [key], person: true) { $0 } }
     // a cat's rig for its key ("look:mood")
