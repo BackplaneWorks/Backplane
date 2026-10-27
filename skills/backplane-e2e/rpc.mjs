@@ -1,7 +1,6 @@
 // node rpc.mjs PORT TOKEN METHOD 'JSON params' : one call to a hub over its
 // /ws (CBOR frames, src/core/cbor.bend), its reply printed as JSON. Known map
 // keys travel as their index in Cbor.keys(); the rest as strings.
-const [port, token, method, params = '{}'] = process.argv.slice(2);
 const KEYS = ['$', 't', 'id', 'm', 'p', 'ok', 'error', 'items', 'thread'];
 const enc = (v) => {
   const out = [];
@@ -43,13 +42,32 @@ const dec = (b) => {
   };
   return go();
 };
-const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${token}`);
-ws.binaryType = 'arraybuffer';
-let sent = false;
-ws.onmessage = (e) => {
-  const o = dec(new Uint8Array(e.data));
-  if (o && o.id === 1) { console.log(JSON.stringify(o)); process.exit(o.ok === false ? 1 : 0); }
-  if (!sent) { sent = true; ws.send(enc({ id: 1, m: method, p: JSON.parse(params) })); }
-};
-ws.onerror = (e) => { console.error('ws error', e.message ?? e); process.exit(1); };
-setTimeout(() => { console.error('no reply'); process.exit(1); }, 20000);
+// connect(port, token): one /ws for many calls; call(method, params) is the
+// reply's JSON, and throws on {ok: false}
+export const connect = (port, token) => new Promise((ready, fail) => {
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${token}`);
+  ws.binaryType = 'arraybuffer';
+  const waiting = new Map();
+  let n = 0, up = false;
+  const call = (m, p = {}) => new Promise((ok, no) => {
+    const id = ++n;
+    waiting.set(id, (o) => o.ok === false ? no(new Error(`${m}: ${JSON.stringify(o.error ?? o)}`)) : ok(o));
+    ws.send(enc({ id, m, p }));
+  });
+  ws.onmessage = (e) => {
+    const o = dec(new Uint8Array(e.data));
+    if (!up) { up = true; ready({ call, close: () => ws.close() }); }
+    const w = o && waiting.get(o.id);
+    if (w) { waiting.delete(o.id); w(o); }
+  };
+  ws.onerror = (e) => fail(new Error(`ws error ${e.message ?? e}`));
+});
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  const [port, token, method, params = '{}'] = process.argv.slice(2);
+  setTimeout(() => { console.error('no reply'); process.exit(1); }, 20000);
+  connect(port, token)
+    .then((h) => h.call(method, JSON.parse(params)))
+    .then((o) => { console.log(JSON.stringify(o)); process.exit(0); },
+          (e) => { console.error(e.message); process.exit(1); });
+}

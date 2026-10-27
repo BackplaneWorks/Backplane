@@ -30,7 +30,8 @@
 //   stream       each command streams BP_STREAM_N (40) text deltas
 //                "<tag>0 <tag>1 ..." (tag: the message's last word),
 //                BP_STREAM_MS (150) apart, then posts them whole (each
-//                followed by BP_STREAM_SEP, " "; "\n\n" makes lines)
+//                followed by BP_STREAM_SEP, " "; "\n\n" makes lines);
+//                "tools:N" in the message runs N Bash calls first
 //   delegate     the first command calls the hub's delegate_task (its MCP
 //                URL from --mcp-config) for a child "mode:plain child
 //                work", then ends; later commands as plain
@@ -313,6 +314,15 @@ async function run(c: Cmd, firstOne: boolean) {
     const tag = c.text.trim().split(/\s+/).pop() ?? "w";
     const n = Number(process.env.BP_STREAM_N ?? 40);
     const ms = Number(process.env.BP_STREAM_MS ?? 150);
+    // "tools:N" in the message: N Bash calls, each answered, before the text
+    const tools = Number(/tools:(\d+)/.exec(c.text)?.[1] ?? 0);
+    for (let k = 1; k <= tools; k++) {
+      const id = `toolu_${rnd()}`;
+      emit({ type: "assistant", message: { id: `msg_${rnd()}`, type: "message", role: "assistant", model: "claude-haiku-4-5-20251001",
+        content: [{ type: "tool_use", id, name: "Bash", input: { command: `grep -n ${tag} board.kicad_pcb # ${k}` } }], usage: { input_tokens: 10, output_tokens: 5 } }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
+      await sleep(ms);
+      emit({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content: `${k}: (footprint "${tag}" (layer "F.Cu"))` }] }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
+    }
     let full = "";
     emit({ type: "stream_event", event: { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
     for (let i = 0; i < n; i++) {

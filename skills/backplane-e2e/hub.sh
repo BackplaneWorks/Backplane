@@ -7,6 +7,10 @@
 #                          PAIR= HOME_DIR= PROJ= MULTI= THREAD= PID=
 #   hub.sh long NAME [N]   a thread of N (80) exchanges in the fixture
 #                          project (the history-paging stories); prints LONG=
+#   hub.sh trial NAME      a workspace that looks used, to try things by hand
+#                          or for stories that want one: 5 projects, ~20
+#                          threads (3 long), some pinned, settled, snoozed,
+#                          archived (~3 min; starts the hub if needed)
 #   hub.sh stop NAME       stop it (the PID it started, nothing else)
 #   hub.sh restart NAME    stop and start it again on the same home and port
 #
@@ -81,6 +85,11 @@ start() {
     rpc project.add "{\"path\":\"$root/proj\"}" | python3 -c 'import json,sys;print(json.load(sys.stdin).get("thread",""))' > "$root/thread"
     rpc project.add "{\"path\":\"$root/multi\"}" > /dev/null
   fi
+  start_lines
+}
+
+start_lines() {
+  port=$(cat "$root/port"); token=$(cat "$root/home/token")
   echo "PORT=$port"
   echo "TOKEN=$token"
   echo "URL=http://127.0.0.1:$port/#token=$token"
@@ -110,6 +119,12 @@ long() { # N exchanges queued; the stand-in answers each in ~3 s (~4 min for 80)
   done
   echo "LONG=$t"
 }
+trial() {
+  [ -f "$root/pid" ] && kill -0 "$(cat "$root/pid")" 2>/dev/null || start > /dev/null
+  for d in amp sensor-node psu; do copy_kicad "$fixture" "$root/$d" "$d"; done
+  node "$here/trial.mjs" "$(cat "$root/port")" "$(cat "$root/home/token")" "$root/home" "$root" > "$root/trial"
+  start_lines
+}
 rpc_project() { grep -o '"ProjectCreated","id":"[^"]*","title":"proj"' "$root/home/events.jsonl" | head -1 | sed 's/.*"id":"\([^"]*\)".*/\1/'; }
 
 case $cmd in
@@ -117,5 +132,6 @@ case $cmd in
   stop) stop ;;
   restart) stop; start ;;
   long) long "$@" ;;
-  *) sed -n '2,20p' "$0"; exit 2 ;;
+  trial) trial ;;
+  *) sed -n '2,24p' "$0"; exit 2 ;;
 esac

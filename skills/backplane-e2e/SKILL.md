@@ -71,12 +71,21 @@ export BP_E2E_BIN=/path/to/backplane-serve      # the build under test (web/ bes
 export BP_E2E_FIXTURE=/usr/share/kicad/demos/ecc83   # any KiCad project folder
 skills/backplane-e2e/hub.sh start S04-W         # prints PORT= TOKEN= URL= PAIR= ... PID=
 skills/backplane-e2e/hub.sh long S04-W          # only for S07: an 80-exchange thread, ~4 min
+skills/backplane-e2e/hub.sh trial try           # a workspace that looks used, ~3 min (below)
 skills/backplane-e2e/hub.sh restart S31-W       # S31
 skills/backplane-e2e/hub.sh stop S04-W
 ```
 
 Give every story its own hub (the name is the story and platform), so that
 stories never see each other's threads.
+
+`hub.sh trial NAME` fills a hub (starting it if needed) with a workspace
+that looks used: five projects (`proj`, `multi`, `amp`, `sensor-node`,
+`psu`), about twenty threads of 1-5 exchanges, three long ones (24-36), and
+replies that start with tool calls. Some threads are pinned, settled,
+snoozed or archived; `$BP_E2E_ROOT/NAME/trial` lists them. Use it to try
+things by hand (open its `URL`), or for a story that needs a lived-in
+sidebar. The seeding is in `trial.mjs`.
 
 ## Driving each platform
 
