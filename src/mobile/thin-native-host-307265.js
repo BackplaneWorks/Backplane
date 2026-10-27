@@ -412,7 +412,8 @@ export class NativeThinHost307265 {
     if (this.inert(hub, envelope, epoch)) return true;
     if (envelope?.t === 'view') return this.greeting(hub, envelope, epoch);
     if (envelope?.t === 'view.changed') {
-      if (s.greeted && this.client.links.get(hub)?.viewId) this.issue(s, this.client.changed(hub, envelope, this.requestSession(s.session, 'view.update', s.target), s.anchor));
+      if (s.greeted && this.client.links.get(hub)?.viewId) this.issue(s, this.client.changed(hub, envelope, this.requestSession(s.session, 'view.update', s.target), s.anchor,
+        !!s.active || !!s.deferredNavigation || s.queue.length > 0));
       return true;
     }
     if (envelope?.t !== 'reply') {
@@ -448,7 +449,7 @@ export class NativeThinHost307265 {
           } catch { this.api.warning?.(hub, 'Message continuation is stale'); }
         }
       }
-      if (result.refreshDue) this.update(s);
+      if (result.refreshDue && s.ready && !s.active && !s.deferredNavigation && !s.queue.length) this.update(s);
       return true;
     }
     let response = copy(r.session);
@@ -508,13 +509,16 @@ export class NativeThinHost307265 {
       for (const args of s.registrations.values()) this.sendRegistration(s, args);
       s.registrations.clear();
     } else if (result.current) this.fail(hub, 'Current view is not ready');
-    if (result.refreshDue) this.update(s);
     if (s.ready && s.deferredNavigation) {
       const pending = s.deferredNavigation; s.deferredNavigation = null;
       if (pending.epoch === s.epoch && pending.sel === s.session.sel && same(pending.target, s.target))
         this.request(hub, pending.action, pending.value);
     }
-    this.pump(s); return true;
+    this.pump(s);
+    // Person work gets the next request; ThinViews retains invalidation until
+    // a later accepted picture covers it, or a new selection retires it.
+    if (result.refreshDue && s.ready) this.update(s);
+    return true;
   }
 
   ack(hub, envelope) {

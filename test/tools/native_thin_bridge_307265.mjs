@@ -66,6 +66,25 @@ check('compact load never rewinds a running connection',()=>{const x=harness();x
 check('same bot tab action advances presentation and retires ready',()=>{const x=harness();x.open();const s=x.h.states.get('h');s.target={kind:'bot',id:'bot'};x.h.client.links.get('h').target=clone(s.target);x.h.request('h','bot-tab','space');const o=x.h.drain();assert.equal(o.sync[0].phase,'presenting');assert(o.sync[0].requestRevision>1);assert.equal(s.ready,false);assert.equal(o.cmds[0].request.m,'view.action');assert.equal(o.cmds[0].request.p.session.route.tab,'space');});
 check('coalesced update issues no command or presenting transition',()=>{const x=harness();x.open();const s=x.h.states.get('h');x.h.update(s);const first=x.h.drain();const rev=first.sync[0].requestRevision;x.h.update(s);const second=x.h.drain();assert.deepEqual(second.cmds,[]);assert.deepEqual(second.sync,[]);assert.equal(x.h.client.links.get('h').revision,rev);});
 check('latest viewer intent waits for current presentation and issues once',()=>{const x=harness();x.open();const s=x.h.states.get('h');x.h.update(s);const update=x.h.drain().cmds[0].request;x.h.request('h','view','board');x.h.request('h','view','3d');assert.deepEqual(x.h.drain().cmds,[]);const done=x.answer(update.id);assert.equal(done.cmds.length,1);assert.equal(done.cmds[0].request.m,'view.action');assert.equal(done.cmds[0].request.p.action,'view');assert.equal(done.cmds[0].request.p.value,'3d');assert.deepEqual(x.h.drain().cmds,[]);});
+check('held Bub open runs before a coalesced background refresh',()=>{
+ const x=harness();x.api.session=()=>({sel:'',drafts:{},open:{},adding:false,panel:false,info:{},rid:1});
+ x.h.hubs(['h']);x.h.connection('h','1','view-v1');const first=x.greeting().cmds[0].request;
+ const home=x.screen('h','');home.thread=null;home.sel='';x.answer(first.id,{shown:home,overlay:{key:'h',name:'h',j:clone(home)}});
+ const s=x.h.states.get('h'),link=x.h.client.links.get('h');x.h.update(s);const refresh=x.h.drain().cmds[0].request;
+ x.h.request('h','uber','h|bub');assert.deepEqual(x.h.drain().cmds,[]);
+ x.h.receive('h',{t:'view.changed',version:1,generation:'1',epoch:'origin',viewId:link.viewId,target:clone(link.target),viewRevision:'2'},'1');
+ assert.equal(link.invalidated,true);assert.deepEqual(x.h.drain().cmds,[]);
+ const out=x.answer(refresh.id,{shown:home,overlay:{key:'h',name:'h',j:clone(home)},viewRevision:'1'});
+ console.log('TRACE priority sync='+out.sync.map(v=>v.phase+':'+v.requestRevision).join(',')+' methods='+out.cmds.map(c=>c.request?.m||c.type).join(','));
+ assert.equal(out.cmds.length,1);assert.equal(out.cmds[0].request.m,'view.action');assert.equal(out.cmds[0].request.p.action,'uber');
+ const action=out.cmds[0].request;
+ x.h.receive('h',{t:'view.changed',version:1,generation:'1',epoch:'origin',viewId:link.viewId,target:clone(link.target),viewRevision:'3'},'1');
+ assert.deepEqual(x.h.drain().cmds,[],'a new background change cannot overtake an active person action');
+ const after=x.answer(action.id,{shown:home,overlay:{key:'h',name:'h',j:clone(home)},viewRevision:'1'});
+ assert.equal(after.cmds.length,1);assert.equal(after.cmds[0].request.m,'view.update');
+ const final=x.answer(after.cmds[0].request.id,{shown:home,overlay:{key:'h',name:'h',j:clone(home)},viewRevision:'3'});
+ assert.equal(final.cmds.length,0);assert.equal(link.invalidated,false,'background change eventually covered');
+});
 check('busy recent Home retains latest Bub open once through nextTarget',()=>{
  const x=harness();x.api.session=()=>({sel:'',drafts:{},open:{},adding:false,panel:false,info:{},rid:1});
  x.h.hubs(['h']);x.h.connection('h','1','view-v1');const first=x.greeting().cmds[0].request;
