@@ -396,6 +396,8 @@ final class AppModel {
     }
 
     // an APNs token for this device's alerts (from the app delegate)
+    func enableNotifications() async { await notifier.enable() }
+
     func registered(_ token: Data) {
         register("alert", token.map { String(format: "%02x", $0) }.joined())
     }
