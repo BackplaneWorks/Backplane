@@ -113,7 +113,7 @@ def Before.thread.p(+lc: I.Loc, u: U.Ui, t: M.Thread, pend: List<&2, String>, +a
         rd, [V.View.composer.t(lc, st, sel, drafts, op, nf, turn, pr, mo, atts, up, vo, mic)]])}
 
 def Before.thread.h(+lc: I.Loc, +u: U.Ui, +t: M.Thread, hd: List<&2, D.Node>) -> D.Node:
-  Before.thread.p(lc, u, t, U.Ui.pending(u, U.Ui.sel(u)), U.Ui.atts(u, U.Ui.sel(u)), U.Ui.uploading(u, U.Ui.sel(u)), U.Ui.flag(u, "term"), hd, D.Dom.cat(V.View.btw(lc, u), V.View.voice.loc(lc, u, U.Ui.sel(u))), V.View.mic.of(u, U.Ui.sel(u)), V.View.fab(u), V.View.ready(u), U.Fab.mini.tools(u), U.Hold.pill(u, M.Thread.id(t)))
+  Before.thread.p(lc, u, t, U.Ui.pending(u, U.Ui.sel(u)), U.Ui.atts(u, U.Ui.sel(u)), U.Ui.uploading(u, U.Ui.sel(u)), U.Ui.flag(u, "term"), hd, D.Dom.cat(V.View.btw(lc, u), V.View.voice.loc(lc, u, U.Ui.sel(u))), V.View.mic.of(u, U.Ui.sel(u)), Nil{}, V.View.ready(u), U.Fab.mini.tools(u), U.Hold.pill(u, M.Thread.id(t)))
 
 def Before.bar.loc(+lc: I.Loc, kids: List<&2, D.Node>, +hint: String) -> D.Node:
   D.El{"div", "", [D.At{"class", "viewer-bar"}], List.append(&2, D.Node, kids, [D.Dom.span("hint", hint), V.View.fit.loc(lc)])}

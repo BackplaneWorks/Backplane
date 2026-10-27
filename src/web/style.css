@@ -999,17 +999,18 @@ button.dim { opacity: 0.5; pointer-events: none; }
 
 /* Spec 1: refs remain plain labels until navigation is implemented. */
 a.ref { color: inherit; text-decoration: none; cursor: text; overflow-wrap: anywhere; }
-/* the project card (view.bend's View.fab): goal, Edit, Buy it */
-.fab-card { align-self: stretch; margin: 0 0 8px; border: 1px solid var(--line); background: var(--raise); font-size: calc(13px * var(--text-scale, 100) / 100); position: sticky; top: 0; z-index: 4; box-shadow: 0 6px 14px rgba(0,0,0,.18); }
-.fab-row { display: flex; gap: 6px; align-items: center; padding: 4px 6px 4px 10px; }
-.fab-goal { flex: 1; min-width: 0; text-align: left; background: none; border: 0; padding: 4px 0; color: inherit; cursor: pointer; font-size: inherit; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fab-card.open .fab-goal { white-space: normal; }
-.fab-edit { font-size: calc(12px * var(--text-scale, 100) / 100); padding: 3px 10px; }
+/* Buy it (view.bend's View.fab.buy) */
 .fab-buy { font-size: calc(12px * var(--text-scale, 100) / 100); padding: 3px 12px; background: var(--accent); border-color: var(--accent); color: var(--on-accent, #fff); font-weight: 600; white-space: nowrap; }
-.fab-intent { border-top: 1px solid var(--line); padding: 6px 12px 8px; max-height: 40vh; overflow-y: auto; }
-.fab-intent h1, .fab-intent h2, .fab-intent h3 { font-size: calc(12px * var(--text-scale, 100) / 100); margin: 8px 0 2px; color: var(--faint); text-transform: uppercase; letter-spacing: .04em; }
-/* the subagents and pins stick just under the project card */
-.fab-card ~ .work { top: 40px; }
+/* a project's intent (view.bend's View.intent, its menu's Intent…): over
+   the page, its Markdown as a message's, Edit and Close in its head */
+.intent { position: fixed; z-index: 21; top: 10vh; left: 50%; transform: translateX(-50%); width: min(640px, calc(100vw - 24px)); max-height: 76vh; display: flex; flex-direction: column; background: var(--raise); border: 1px solid var(--line); outline: none; }
+.intent-head { display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 14px; border-bottom: 1px solid var(--line); }
+.intent-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.intent-edit { font-size: calc(12px * var(--text-scale, 100) / 100); padding: 3px 10px; }
+.intent-body { padding: 10px 14px 6px; overflow-y: auto; min-height: 0; }
+.intent-body h1, .intent-body h2, .intent-body h3 { font-size: calc(12px * var(--text-scale, 100) / 100); margin: 10px 0 4px; color: var(--faint); text-transform: uppercase; letter-spacing: .04em; }
+.intent-body h1:first-child, .intent-body h2:first-child, .intent-body h3:first-child { margin-top: 0; }
+.intent-note { display: block; color: var(--dim); padding-bottom: 8px; }
 /* Ready to order (View.ready): the parts and Buy it above the message box
    once the agent's turn is over; it glows once as it comes */
 .fab-ready { display: flex; align-items: center; gap: 10px; margin: 0 16px 8px; padding: 6px 6px 6px 12px; border: 1px solid var(--accent); background: var(--raise); font-size: calc(13px * var(--text-scale, 100) / 100); }

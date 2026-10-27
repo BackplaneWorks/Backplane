@@ -3918,6 +3918,17 @@ law rail_part_lights_mech:
 law rail_palette_shuts:
   {U.Rail.palette(True{}) == "ws-palette-close" : String}
 
+# A project's intent (client.bend's Intent.*): on show only over the thread
+# it was opened for; Close or another thread puts it away
+law intent_on_its_thread:
+  {U.Intent.on(U.Ui.scratch_set(U.Ui.select.k(U.Ui.init(0n), "t1"), "@intent", "t1")) == True{} : Bool}
+
+law intent_close_puts_away:
+  {U.Intent.on(U.Act.ui(U.Intent.close(U.Ui.scratch_set(U.Ui.select.k(U.Ui.init(0n), "t1"), "@intent", "t1")))) == False{} : Bool}
+
+law intent_select_puts_away:
+  {U.Intent.on(U.Ui.select.k(U.Ui.select.k(U.Ui.scratch_set(U.Ui.select.k(U.Ui.init(0n), "t1"), "@intent", "t1"), "t2"), "t1")) == False{} : Bool}
+
 # a room's posts are lines the tiles slide with, so a wheel notch reuses
 # what the last frame drew
 law hits_chat_line_slides:

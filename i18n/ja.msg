@@ -59,6 +59,7 @@ menu.unarchive = アーカイブを解除
 menu.wake = 再開
 menu.settle = 完了
 menu.look = 色とアイコン
+menu.intent = 意図…
 menu.remove.confirm = もう一度クリックで削除
 menu.project.remove = プロジェクトを削除
 menu.file.open = 開く
@@ -1334,3 +1335,10 @@ secret.open.tip = チャットに貼らずにエージェントへシークレ�
 image.copy = 画像をコピー
 image.show = ファイルを表示
 image.share = 画像を共有
+
+# a project's intent (its menu's Intent…)
+intent.title = 意図
+intent.none = まだ意図がありません。編集して、このプロジェクトの目的を書いてください。
+intent.loading = 意図を読み込み中…
+intent.edit = 編集
+intent.edit.tip = メッセージ欄で変更し、送信で保存します

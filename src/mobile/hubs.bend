@@ -764,19 +764,19 @@ def Hubs.register.at(hs: Hubs, +key: String, p: String, t: String, k: String, th
 
 # actions whose value names a row, a project, a bot or room, or (opening
 # the project picker or a bot or room form, adding a project) a hub: they
-# go to the hub it names; the first twelve also bring it into focus, so the
+# go to the hub it names; the first thirteen also bring it into focus, so the
 # picker's, the bot's and the forms' own actions follow it (the history's
 # playback ticks go to the hub that asked: bridge.js names it)
 def Hubs.routed(+action: String) -> Nat:
-  C.Codec.pos(["select", "new-thread", "picker-open", "bot", "room", "remote", "uber", "uber-bot", "bot-new", "room-new", "proj-go", "hub-settings",
+  C.Codec.pos(["select", "new-thread", "picker-open", "bot", "room", "remote", "uber", "uber-bot", "bot-new", "room-new", "proj-go", "hub-settings", "proj-intent",
     "row-settle", "row-unsettle", "row-snooze", "row-delete", "toggle-settled", "add-project", "proj-remove",
-    "row-menu", "proj-menu", "row-pin", "row-unpin", "row-archive", "row-unarchive", "hist-tick", "row-rename", "rename-save", "uber-promote", "uber-home", "fab-open", "fab-edit", "buy", "fab-hide", "fab-show", "deploy-cancel", "thread-tree", "thread-child", "thread-detach"], action)
+    "row-menu", "proj-menu", "row-pin", "row-unpin", "row-archive", "row-unarchive", "hist-tick", "row-rename", "rename-save", "uber-promote", "uber-home", "fab-open", "fab-edit", "buy", "fab-hide", "fab-show", "deploy-cancel", "thread-tree", "thread-child", "thread-detach", "intent-close", "intent-look"], action)
 
 def Hubs.moves() -> Nat:
-  12n
+  13n
 
 def Hubs.routes() -> Nat:
-  39n
+  42n
 
 # answers to what any hub may be showing (its error, a delete or remove
 # to confirm); the project search is every hub's at once, since the list

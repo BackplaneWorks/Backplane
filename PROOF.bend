@@ -6483,6 +6483,15 @@ def Laws.rail_part_lights_mech():
 def Laws.rail_palette_shuts():
   {==}
 
+def Laws.intent_on_its_thread():
+  {==}
+
+def Laws.intent_close_puts_away():
+  {==}
+
+def Laws.intent_select_puts_away():
+  {==}
+
 def Laws.hits_chat_line_slides(x0):
   {==}
 

@@ -59,6 +59,7 @@ menu.unarchive = Unarchive
 menu.wake = Wake
 menu.settle = Settle
 menu.look = Colour and icon
+menu.intent = Intent…
 menu.remove.confirm = Click again to remove
 menu.project.remove = Remove project
 menu.file.open = Open
@@ -1311,3 +1312,10 @@ secret.open.tip = Give an agent a secret without pasting it into the chat
 image.copy = Copy image
 image.show = Show file
 image.share = Share image
+
+# a project's intent (its menu's Intent…)
+intent.title = Intent
+intent.none = No intent yet. Edit to say what this project is for.
+intent.loading = Loading the intent…
+intent.edit = Edit
+intent.edit.tip = Change it in the message box; Send saves it

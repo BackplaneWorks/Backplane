@@ -2757,33 +2757,40 @@ def View.asks.u(+lc: I.Loc, u: U.Ui) -> D.Node:
     case U.Ui{+st, +sel, +drafts, _, _, _, _, _, _, _, _, _, _, _, +nf, _, _}:
       View.asks.box(lc, st, sel, U.Str.get(drafts, sel), nf, drafts)
 
-# The project card (client.bend's Fab.*, core/order.bend): the intent's
-# goal (a click opens the whole intent), Edit, and Buy it with its price
+# Buy it with its price (client.bend's Fab.*, core/order.bend)
 def View.fab.buy.tip() -> String:
   "Order this project's parts in a thread that asks what's missing, exports the files and quotes them. The price is the bare parts at the smallest order; the quote adds assembly, components, shipping and duties."
 
 def View.fab.buy(+label: String) -> List<&2, D.Node>:
   Bool.pick(List<&2, D.Node>, String.is_empty(label), Nil{}, [D.Dom.button("fab-buy", "buy", "", View.fab.buy.tip(), label)])
 
-def View.fab.body(open: Bool, +intent: String) -> List<&2, D.Node>:
-  match open:
+# The project's intent (client.bend's Intent.*), opened from its menu's
+# Intent…: what the project is for, as Markdown, over the page, with Edit
+# (the composer gets it) and Close; a click beside it or Esc closes it too
+def View.intent.body(+lc: I.Loc, got: Bool, +text: String) -> List<&2, D.Node>:
+  match got:
+    case False{}:
+      [D.Dom.span("intent-note", MSG.T.intent.loading(lc))]
     case True{}:
-      [D.Dom.div("fab-intent md", D.Md.render(intent))]
+      Bool.pick(List<&2, D.Node>, String.is_empty(String.trim(text)), [D.Dom.span("intent-note", MSG.T.intent.none(lc))], D.Md.render.loc(lc, text))
+
+def View.intent.k(+lc: I.Loc, on: Bool, +u: U.Ui) -> List<&2, D.Node>:
+  match on:
+    case True{}:
+      [D.El{"div", "", [D.At{"class", "modal-back"}, D.On{"click", "intent-close"}], Nil{}},
+       D.El{"section", "intent", [D.At{"class", "intent"}, D.At{"id", "intent"}, D.At{"tabindex", "-1"}, D.At{"role", "dialog"}, D.At{"aria-modal", "true"},
+           D.At{"aria-labelledby", "intent-title"}, D.At{"data-esc", "intent-close"}], [
+         D.El{"header", "", [D.At{"class", "intent-head"}], [
+           D.El{"span", "intent-title", [D.At{"class", "intent-title"}, D.At{"id", "intent-title"}],
+             [D.Txt{MSG.T.intent.title(lc) ++ " · " ++ U.Ui.project_title(U.Ui.state(u), U.Ui.thread_project(U.Ui.thread(U.Ui.state(u), U.Ui.sel(u))))}]},
+           D.Dom.button("intent-edit", "fab-edit", U.Ui.sel(u), MSG.T.intent.edit.tip(lc), MSG.T.intent.edit(lc)),
+           WI.WIcon.button("icon", "intent-close", U.Ui.sel(u), MSG.T.common.close(lc), "x", 16, "")]},
+         D.El{"div", "", [D.At{"class", "intent-body body"}], View.intent.body(lc, U.Intent.got(u), U.Intent.text(u))}]}]
     case False{}:
       Nil{}
 
-def View.fab.k(shown: Bool, +u: U.Ui) -> List<&2, D.Node>:
-  match shown:
-    case True{}:
-      [D.El{"div", "fab", [D.At{"class", Bool.pick(String, U.Fab.open(u), "fab-card open", "fab-card")}], D.Dom.cat(
-        [D.Dom.div("fab-row", [D.Dom.button("fab-goal", "fab-open", "", "The project's intent: what it is for and what it is made of", U.Fab.line(u)),
-          D.Dom.button("fab-edit", "fab-edit", "", "Change the project's intent (it goes in the message box; Save sends it)", "Edit")])],
-        View.fab.body(U.Fab.open(u), U.Fab.intent(u, U.Ui.sel(u))))}]
-    case False{}:
-      Nil{}
-
-def View.fab(+u: U.Ui) -> List<&2, D.Node>:
-  View.fab.k(U.Fab.shown(u), u)
+def View.intent(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
+  View.intent.k(lc, U.Intent.on(u), u)
 
 # Ready to order: what there is to buy and Buy it, above the message box
 # (U.Fab.ready), once the agent's turn is over; it glows as it comes
@@ -3020,7 +3027,7 @@ def View.thread.p(+lc: I.Loc, +u: U.Ui, t: M.Thread, pend: List<&2, String>, +at
         rd, [View.composer.t(lc, st, sel, drafts, op, nf, turn, pr, mo, atts, up, vo, mic)]]))
 
 def View.thread.h(+lc: I.Loc, +u: U.Ui, +t: M.Thread, hd: List<&2, D.Node>) -> D.Node:
-  View.thread.p(lc, u, t, U.Ui.pending(u, U.Ui.sel(u)), U.Ui.atts(u, U.Ui.sel(u)), U.Ui.uploading(u, U.Ui.sel(u)), U.Ui.flag(u, "term"), hd, D.Dom.cat(View.btw(lc, u), View.voice.loc(lc, u, U.Ui.sel(u))), View.mic.of(u, U.Ui.sel(u)), View.fab(u), View.ready(u), U.Fab.mini.tools(u), U.Hold.pill(u, M.Thread.id(t)))
+  View.thread.p(lc, u, t, U.Ui.pending(u, U.Ui.sel(u)), U.Ui.atts(u, U.Ui.sel(u)), U.Ui.uploading(u, U.Ui.sel(u)), U.Ui.flag(u, "term"), hd, D.Dom.cat(View.btw(lc, u), View.voice.loc(lc, u, U.Ui.sel(u))), View.mic.of(u, U.Ui.sel(u)), Nil{}, View.ready(u), U.Fab.mini.tools(u), U.Hold.pill(u, M.Thread.id(t)))
 
 def View.thread(+lc: I.Loc, +u: U.Ui, t: M.Thread) -> D.Node:
   View.thread.h(lc, u, t, Nil{})
@@ -4289,7 +4296,8 @@ def View.page.b.sidebar(+lc: I.Loc, +bv: BI.View, u: U.Ui, sidebar: D.Node) -> D
         D.Dom.cat(View.chrome.if(View.chrome(U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}), lc, U.Flag.get(o, "settings"), bv, U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}), D.Dom.cat([sidebar,
           View.main.b(lc, U.Flag.get(o, "settings"), bv, U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}, sel, List.length(&2, M.Project, U.Ui.projects(st)))],
           D.Dom.cat(View.aside.if(lc, pa, U.Str.get(nf, "view.kind:" ++ sel), U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}),
-            D.Dom.cat(View.picker(lc, U.Flag.get(o, "proj"), U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}), D.Dom.cat(View.error(e), View.tour(lc, U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}))))))}
+            D.Dom.cat(View.picker(lc, U.Flag.get(o, "proj"), U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}), D.Dom.cat(View.intent(lc, U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}),
+              D.Dom.cat(View.error(e), View.tour(lc, U.Ui{st, sel, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr})))))))}
 
 def View.page.sidebar.node(reuse: Bool, +lc: I.Loc, u: U.Ui) -> D.Node:
   match reuse:

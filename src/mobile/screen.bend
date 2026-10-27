@@ -1212,9 +1212,10 @@ def Mob.fab.buy(+buy: String, +id: String) -> List<&2, J.Json>:
     # its ×: put away (client.bend's Fab.min), Buy it stays in the menu
     J.Json.obj([J.KV{"label", J.Json.str("×")}, J.KV{"action", J.Json.str("fab-hide")}, J.KV{"value", J.Json.str(id)}])])
 
-# the project card (Goal, Edit) and, once the turn is over and there is
-# something to buy, Ready to order with Buy it (U.Fab.ready), as queue rows
-# above the message box
+# the project's intent while it is asked for (its menu's Intent…,
+# client.bend's Intent.*: Goal, Edit, ×) and, once the turn is over and
+# there is something to buy, Ready to order with Buy it (U.Fab.ready), as
+# queue rows above the message box
 # (the row's tag says Ready, or Ordered once something is paid for: the
 # text is what there is to order, or how the order stands)
 def Mob.fab.ready.text(+line: String) -> String:
@@ -1228,17 +1229,26 @@ def Mob.fab.ready(+line: String, +buy: String, +id: String) -> List<&2, J.Json>:
   Bool.pick(List<&2, J.Json>, String.is_empty(line), Nil{},
     [J.Json.obj([J.KV{"msg", J.Json.str("ready:" ++ id)}, J.KV{"text", J.Json.str(Mob.fab.ready.text(line))}, J.KV{"tag", J.Json.str(Mob.fab.ready.tag(line))}, J.KV{"buttons", J.Json.arr(Mob.fab.buy(buy, id))}])])
 
-def Mob.fab.k(shown: Bool, +st: M.State, +nf: Map<&2, String>, +id: String, run: Bool) -> List<&2, J.Json>:
-  match shown:
+def Mob.fab.goal(asked: Bool, +lc: I.Loc, +nf: Map<&2, String>, +id: String) -> List<&2, J.Json>:
+  match asked:
     case True{}:
-      J.Json.obj([J.KV{"msg", J.Json.str("fab:" ++ id)}, J.KV{"text", J.Json.str(U.Str.get(nf, "fab.line:" ++ id))}, J.KV{"tag", J.Json.str("Goal")},
-        J.KV{"buttons", J.Json.arr([J.Json.obj([J.KV{"label", J.Json.str("Edit")}, J.KV{"action", J.Json.str("fab-edit")}, J.KV{"value", J.Json.str(id)}])])}])
-        <> Mob.fab.ready(U.Fab.ready.shown.k(U.Fab.min.of(st, id), U.Fab.ready.k(U.Fab.buy.of(st, nf, id), U.Str.get(nf, "fab.ready:" ++ id), run)), U.Fab.ready.btn.of(st, nf, id), id)
+      [J.Json.obj([J.KV{"msg", J.Json.str("fab:" ++ id)}, J.KV{"text", J.Json.str(Bool.pick(String, String.is_empty(U.Str.get(nf, "fab.line:" ++ id)), MSG.T.intent.loading(lc), U.Str.get(nf, "fab.line:" ++ id)))},
+        J.KV{"tag", J.Json.str(MSG.T.intent.title(lc))},
+        J.KV{"buttons", J.Json.arr([J.Json.obj([J.KV{"label", J.Json.str(MSG.T.intent.edit(lc))}, J.KV{"action", J.Json.str("fab-edit")}, J.KV{"value", J.Json.str(id)}]),
+          J.Json.obj([J.KV{"label", J.Json.str("×")}, J.KV{"action", J.Json.str("intent-close")}, J.KV{"value", J.Json.str(id)}])])}])]
     case False{}:
       Nil{}
 
-def Mob.fab(+st: M.State, +nf: Map<&2, String>, +id: String, run: Bool) -> List<&2, J.Json>:
-  Mob.fab.k(String.eq(U.Str.get(nf, "fab.shown:" ++ id), "1"), st, nf, id, run)
+def Mob.fab.k(shown: Bool, +st: M.State, +nf: Map<&2, String>, +id: String, run: Bool) -> List<&2, J.Json>:
+  match shown:
+    case True{}:
+      Mob.fab.ready(U.Fab.ready.shown.k(U.Fab.min.of(st, id), U.Fab.ready.k(U.Fab.buy.of(st, nf, id), U.Str.get(nf, "fab.ready:" ++ id), run)), U.Fab.ready.btn.of(st, nf, id), id)
+    case False{}:
+      Nil{}
+
+# (asked: the intent is on show for this thread, U.Intent.on)
+def Mob.fab(+lc: I.Loc, asked: Bool, +st: M.State, +nf: Map<&2, String>, +id: String, run: Bool) -> List<&2, J.Json>:
+  List.append(&2, J.Json, Mob.fab.goal(asked, lc, nf, id), Mob.fab.k(String.eq(U.Str.get(nf, "fab.shown:" ++ id), "1"), st, nf, id, run))
 
 # a thread's request, a queue row above the message box (Set opens the box
 # in Settings)
@@ -1271,7 +1281,7 @@ def Mob.thread(+lc: I.Loc, render: Bool, u: U.Ui, t: M.Thread, pend: List<&2, St
         J.KV{"sending", J.Json.arr(Mob.strs(pend))},
         J.KV{"asks", J.Json.arr(Mob.asks(lc, U.Asks.open(st, id), U.Str.get(drafts, sel), nf))},
         J.KV{"queued", J.Json.str("")},
-        J.KV{"queue", J.Json.arr(List.append(&2, J.Json, Mob.sbox.q(lc, st, U.Sbox.ask.in(U.Sbox.asks(st), id)), List.append(&2, J.Json, Mob.fab(st, nf, id, V.View.running(turn)), Mob.queue(lc, M.Queue.context(M.Queue.items(st, id)), True{}, V.View.running(turn)))))},
+        J.KV{"queue", J.Json.arr(List.append(&2, J.Json, Mob.sbox.q(lc, st, U.Sbox.ask.in(U.Sbox.asks(st), id)), List.append(&2, J.Json, Mob.fab(lc, String.eq(U.Str.get(drafts, "@intent"), id), st, nf, id, V.View.running(turn)), Mob.queue(lc, M.Queue.context(M.Queue.items(st, id)), True{}, V.View.running(turn)))))},
         J.KV{"todos", Mob.todos(lc, nf, id, U.Todos.shown(st, id, V.View.running(turn)))},
         J.KV{"live", Mob.live.k.loc(lc, render, U.Str.get(live, id))},
         J.KV{"working", J.Json.str(Bool.pick(String, String.is_empty(U.Str.get(live, id)), SG.Signal.label(lc, ph), ""))},

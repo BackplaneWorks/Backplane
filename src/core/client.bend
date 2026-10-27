@@ -1084,7 +1084,7 @@ def Ui.on_thread(u: Ui, m: String) -> Act:
 def Ui.select.k(u: Ui, +id: String) -> Ui:
   match u:
     case Ui{st, _, dr, live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}:
-      Ui{st, id, Map.set(&2, String, Map.set(&2, String, Map.set(&2, String, Map.set(&2, String, Map.set(&2, String, Map.set(&2, String, dr, "@del", ""), "@bot", ""), "@room", ""), "@remote", ""), "@bot.want", ""), "@thread.want", ""), live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}
+      Ui{st, id, Map.set(&2, String, Map.set(&2, String, Map.set(&2, String, Map.set(&2, String, Map.set(&2, String, Map.set(&2, String, Map.set(&2, String, dr, "@del", ""), "@bot", ""), "@room", ""), "@remote", ""), "@bot.want", ""), "@thread.want", ""), "@intent", ""), live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}
 
 # Drafts kept
 # -----------
@@ -3771,9 +3771,10 @@ def Menu.look(+l: I.Loc, rich: Bool, +id: String) -> List<&2, MItem>:
       Nil{}
 
 # a project's menu (rich: the window and the web, which have the badge
-# editor; armed: Remove was picked once)
+# editor; armed: Remove was picked once). Intent… shows what the project is
+# for (Intent.open)
 def Menu.project(+l: I.Loc, +id: String, armed: Bool, rich: Bool) -> List<&2, MItem>:
-  List.concat(&2, MItem, [[MItem{MSG.T.thread.new(l), "new-thread", id, ""}], Menu.look(l, rich, id),
+  List.concat(&2, MItem, [[MItem{MSG.T.thread.new(l), "new-thread", id, ""}, MItem{MSG.T.menu.intent(l), "proj-intent", id, ""}], Menu.look(l, rich, id),
     [MItem{Bool.pick(String, armed, MSG.T.menu.remove.confirm(l), MSG.T.menu.project.remove(l)), "proj-remove", id, "danger"}, Menu.ref(l, R.Ref.project(id))]])
 
 # a file link's menu ("file-menu path", kept as "f:<path>"; a click on the
@@ -7054,14 +7055,88 @@ def Fab.min.set.k(none: Bool, +u: Ui, +project: String, +v: String) -> Act:
 def Fab.min.set(+u: Ui, +th: String, +v: String) -> Act:
   Fab.min.set.k(String.is_empty(Fab.project(Ui.thread(Ui.state.of(u), th))), u, Fab.project(Ui.thread(Ui.state.of(u), th)), v)
 
+# what was last asked for: the thread and where its turn stands
+def Fab.at(+u: Ui) -> String:
+  Fab.set.enabled(Ui.state.of(u)) ++ Fab.set.on(Ui.state.of(u)) ++ "#" ++ Ui.sel(u) ++ "#" ++ Fab.turn(Ui.thread(Ui.state.of(u), Ui.sel(u)))
+
+# The intent (core/order.bend's .backplane/intent.md) says what the project
+# is for. The agent keeps it up to date, so it is not on show all the time:
+# a project's menu has "Intent…" ("proj-intent <project>"), which opens the
+# project's thread (Side.home: the selected one when it is in that project,
+# else its top one) with the intent over it, looked up afresh ("@intent"
+# names the thread; "intent-close" or picking another thread puts it away).
+# Its Edit is the card's: the intent in the composer as "/intent ...",
+# which Send writes (laws intent_*).
+def Intent.look(+u: Ui) -> Act:
+  Ui.also(Ui.rpc(Ui.scratch_set(u, "@fab.at", Fab.at(u)), "fab.look", [J.KV{"thread", J.Str{Ui.sel(u)}}]), [Focus{"intent"}])
+
+# the intent is on show over the selected thread
+def Intent.on(+u: Ui) -> Bool:
+  Bool.and(Bool.not(String.is_empty(Ui.sel(u))), String.eq(Ui.scratch(u, "@intent"), Ui.sel(u)))
+
+# what it shows: the intent (Markdown); "" while it is looked up or when
+# there is none (Intent.got tells which)
+def Intent.text(+u: Ui) -> String:
+  Fab.intent(u, Ui.sel(u))
+
+# the hub has answered for this thread (its card's line is never blank)
+def Intent.got(+u: Ui) -> Bool:
+  Bool.not(String.is_empty(Ui.info(u, "fab.line:" ++ Ui.sel(u))))
+
+# Another thread is looked up once it is on show: an action that moves the
+# selection cannot ask the hub as well, since the web's hub-drawn page takes
+# the answer for the view it left. "intent-look" comes a moment later and
+# again until the answer is in, Intent.tries() times at most (laws intent_*)
+def Intent.wait() -> Nat:
+  300n
+
+def Intent.tries() -> Nat:
+  8n
+
+def Intent.later(+u: Ui, +th: String) -> Act:
+  Act{u, [Later{Intent.wait(), "intent-look", th}]}
+
+def Intent.retry.k(go: Bool, +u: Ui, +th: String, +n: Nat) -> Act:
+  match go:
+    case True{}:
+      Ui.also(Intent.look(Ui.scratch_set(u, "@intent.try", Nat.show(1n+n))), [Later{Intent.wait(), "intent-look", th}])
+    case False{}:
+      Act{u, Nil{}}
+
+# (the first look always goes; the later ones only while none has come)
+def Intent.retry.n(+u: Ui, +th: String, +n: Nat) -> Act:
+  Intent.retry.k(Bool.and(Bool.and(Intent.on(u), String.eq(Ui.sel(u), th)), Bool.and(Nat.is_lt(n, Intent.tries()), Bool.or(Nat.is_eq(n, 0n), Bool.not(Intent.got(u))))), u, th, n)
+
+def Intent.retry(+u: Ui, +th: String) -> Act:
+  Intent.retry.n(u, th, M.Switch.num(Ui.scratch(u, "@intent.try"), 0n))
+
+# (nothing for a project with no thread, or one on another machine, whose
+# files are there; the Fab actions route before the menus' own, so the menu
+# is shut here, and the thread's viewer comes with it as Ui.act's select's)
+def Intent.open.k(none: Bool, here: Bool, +u: Ui, +th: String) -> Act:
+  match none here:
+    case True{} _:
+      Act{u, Nil{}}
+    case False{} True{}:
+      Intent.look(Ui.scratch_set(Ui.select.nav(u, th), "@intent", th))
+    case False{} False{}:
+      Intent.later(Ui.scratch_set(Ui.scratch_set(Ui.reselect(Ui.sel(u), Ui.select.nav(u, th)), "@intent", th), "@intent.try", "0"), th)
+
+def Intent.open(+u: Ui, +pid: String) -> Act:
+  Intent.open.k(Bool.or(String.is_empty(Side.home(u, pid)), FR.Fr.is(pid)), String.eq(Side.home(u, pid), Ui.sel(u)), Ui.scratch_set(u, "@menu", ""), Side.home(u, pid))
+
+def Intent.close(+u: Ui) -> Act:
+  Act{Ui.scratch_set(u, "@intent", ""), [Focus{"composer"}]}
+
 def Fab.act.k(i: Nat, +u: Ui, +th: String) -> Act:
   match i:
     # the card opened or shut
     case 0n:
       Act{Ui.info_set(u, "fab.open:" ++ th, Bool.pick(String, String.eq(Ui.info(u, "fab.open:" ++ th), "1"), "", "1")), Nil{}}
-    # the intent into the composer, to change and send
+    # the intent into the composer, to change and send (the intent on show
+    # goes away)
     case 1n:
-      Ui.draft(u, OR.Intent.edit(Fab.intent(u, th)))
+      Ui.also(Ui.draft(Ui.scratch_set(u, "@intent", ""), OR.Intent.edit(Fab.intent(u, th))), [Focus{"composer"}])
     # Buy it: the hub makes the buy thread and this client goes to it
     case 2n:
       Ui.rpc(Made.want(u), "order.buy", [J.KV{"thread", J.Str{th}}])
@@ -7074,24 +7149,26 @@ def Fab.act.k(i: Nat, +u: Ui, +th: String) -> Act:
       Act{u, Nil{}}
 
 def Fab.actions() -> List<&2, String>:
-  ["fab-open", "fab-edit", "buy", "board-pick", "fab-hide", "fab-show"]
+  ["fab-open", "fab-edit", "buy", "board-pick", "fab-hide", "fab-show", "proj-intent", "intent-close", "intent-look"]
 
 def Fab.is(+action: String) -> Bool:
-  Nat.is_lt(C.Codec.pos(Fab.actions(), action), 6n)
+  Nat.is_lt(C.Codec.pos(Fab.actions(), action), 9n)
 
 def Fab.act.v(+i: Nat, +u: Ui, +value: String) -> Act:
   match i:
     case 3n:
       Bd.pick(u, value)
+    case 6n:
+      Intent.open(u, value)
+    case 7n:
+      Intent.close(u)
+    case 8n:
+      Intent.retry(u, value)
     case _:
       Fab.act.k(i, u, Fab.th(u, value))
 
 def Fab.act(+u: Ui, +action: String, +value: String) -> Act:
   Fab.act.v(C.Codec.pos(Fab.actions(), action), u, value)
-
-# what was last asked for: the thread and where its turn stands
-def Fab.at(+u: Ui) -> String:
-  Fab.set.enabled(Ui.state.of(u)) ++ Fab.set.on(Ui.state.of(u)) ++ "#" ++ Ui.sel(u) ++ "#" ++ Fab.turn(Ui.thread(Ui.state.of(u), Ui.sel(u)))
 
 # asked again when the turn moves on; while it runs only if this thread has
 # no card yet (a thread opened mid-turn), since its files are changing;
