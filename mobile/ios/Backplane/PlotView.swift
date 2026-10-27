@@ -1168,6 +1168,11 @@ struct PlotScreen: View {
               key: viewer.key, layers: viewer.layers, pairing: presentation.owner.pairing,
               epoch: model.conn[presentation.owner.hub]?.epoch ?? 0, presentation: presentation.presentation)
     }
+    private struct LoadWatch: Equatable {
+        let identity: ViewerLoadState.Identity
+        let plotGeneration: Int
+    }
+    private var loadWatch: LoadWatch { .init(identity: loadIdentity, plotGeneration: model.plots.generation) }
     private struct Availability: Equatable { let geometry, mesh: Bool }
     private var availability: Availability {
         .init(geometry: plotFrame?.none.isEmpty == true, mesh: meshFrame?.mesh != nil && meshFrame?.none.isEmpty == true)
@@ -1297,14 +1302,14 @@ struct PlotScreen: View {
         // the design history under the plot, which gives it the room
         if let h = viewer.hist { HistBarView(model: model, hist: h) }
         }
-        .task(id: loadIdentity) {
-            let identity = loadIdentity
-            let ticket = load.start(identity, geometry: !viewer.layers.isEmpty, mesh: needsMesh, now: Self.now)
+        .task(id: loadWatch) {
+            let watch = loadWatch
+            let ticket = load.start(watch.identity, geometry: !viewer.layers.isEmpty, mesh: needsMesh, now: Self.now)
             loadTimedOut = false
             markAvailable()
             guard load.status(ticket, now: Self.now) != .ready else { return }
             do { try await Task.sleep(for: .seconds(30)) } catch { return }
-            guard !Task.isCancelled, loadIdentity == identity, load.ticket == ticket else { return }
+            guard !Task.isCancelled, loadWatch == watch, load.ticket == ticket else { return }
             markAvailable()
             loadTimedOut = load.status(ticket, now: Self.now) == .timedOut
         }

@@ -313,7 +313,7 @@ final class PlotStore {
     private(set) var mesh: MeshFrame?
     @ObservationIgnored private var held: [PlotChunk] = []
     @ObservationIgnored private let queue = DispatchQueue(label: "plot", qos: .userInitiated)
-    @ObservationIgnored private var generation = 0
+    private(set) var generation = 0
     @ObservationIgnored private let assets = PlotMeshAssets()
     @ObservationIgnored private let meshQueue = DispatchQueue(label: "plot.mesh", qos: .userInitiated)
     #if DEBUG && targetEnvironment(simulator)
