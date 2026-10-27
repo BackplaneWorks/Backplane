@@ -9,17 +9,17 @@ struct ThreadComposer: View {
     private var canSend: Bool { model.canSendComposer(for: thread.id) }
     private func perform(_ action: String, _ value: String = "") {
         guard model.canSendComposer(for: thread.id) else { return }
-        model.act(action, value)
+        model.actComposer(action, value, for: thread.id)
     }
     var body: some View {
           VStack(spacing: 0) {
             Group {
             // the terminals pinned to the top of the thread
             ForEach((thread.embs ?? []).filter { $0.pinned }, id: \.key) { e in
-                EmbView(model: model, emb: e, top: true).padding(.horizontal).padding(.top, 8)
+                EmbView(model: model, emb: e, top: true, owner: thread.id).padding(.horizontal).padding(.top, 8)
             }
             ForEach(thread.asks ?? []) { a in
-                AskCard(model: model, ask: a).padding(.horizontal).padding(.top, 8)
+                AskCard(model: model, ask: a, owner: thread.id).padding(.horizontal).padding(.top, 8)
             }
             if let td = thread.todos {
                 VStack(alignment: .leading, spacing: 2) {
@@ -170,7 +170,7 @@ struct ThreadComposer: View {
                     .accessibilityIdentifier("thread.send-failed")
             }
             HStack(alignment: .bottom, spacing: 8) {
-                AttachButton(model: model).disabled(!canSend)
+                AttachButton(model: model, owner: thread.id).disabled(!canSend)
                 TextField("", text: Binding(get: { model.composerText(for: thread) }, set: { model.editComposer($0, for: thread.id) }), prompt: Text(NativeMessages.native_thread_composer(lang)).foregroundStyle(.secondary), axis: .vertical)
                     .disabled(!model.canEditComposer(for: thread.id))
                     .lineLimit(1...6)
