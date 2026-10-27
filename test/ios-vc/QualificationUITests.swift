@@ -472,6 +472,78 @@ final class QualificationUITests: XCTestCase {
         }
     }
 
+    func testDraftOwnershipAcrossLiveRefresh() {
+        let app = XCUIApplication()
+        app.launchEnvironment["BACKPLANE_QUALIFICATION"] = "1"
+        app.launchEnvironment["BACKPLANE_SELECT"] = "t1790229700-1088"
+        app.launch()
+        closeRestoredViewer(app)
+        let composer = app.textFields["thread.composer"]
+        let ready = app.descendants(matching: .any)["qualification.connection.ready"]
+        let home = app.buttons["tab.home"]
+        let threads = app.buttons["tab.threads"]
+        func isEmpty(_ element: XCUIElement) -> Bool {
+            guard let value = element.value as? String else { return false }
+            return value.isEmpty
+        }
+        func expectValue(_ expected: String) {
+            let match = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", expected), object: composer)
+            XCTAssertEqual(XCTWaiter.wait(for: [match], timeout: 30), .completed, "The visible owner's local draft must match")
+        }
+        func typeMarker(_ marker: String) {
+            XCTAssertTrue(composer.isEnabled && composer.isHittable)
+            composer.tap()
+            XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 15))
+            composer.typeText(marker)
+            expectValue(marker)
+        }
+        XCTAssertTrue(composer.waitForExistence(timeout: 60)); XCTAssertTrue(ready.waitForExistence(timeout: 60))
+        XCTAssertTrue(isEmpty(composer), "Refuse to replace an existing board-thread draft")
+        let boardTitle = app.navigationBars.firstMatch.identifier
+        XCTAssertFalse(boardTitle.isEmpty)
+        XCTAssertTrue(home.waitForExistence(timeout: 10)); home.tap()
+        XCTAssertTrue(ready.waitForExistence(timeout: 60))
+        if app.navigationBars["Bub"].exists {
+            let back = app.navigationBars.buttons.firstMatch
+            XCTAssertTrue(back.waitForExistence(timeout: 10)); back.tap()
+            XCTAssertTrue(ready.waitForExistence(timeout: 60))
+        }
+        let bub = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS[cd] %@", "home.uber.", "Bub")).firstMatch
+        XCTAssertTrue(bub.waitForExistence(timeout: 30)); bub.tap()
+        XCTAssertTrue(app.navigationBars["Bub"].waitForExistence(timeout: 30))
+        XCTAssertTrue(app.descendants(matching: .any)["bot.screen.b1790292962-8017"].waitForExistence(timeout: 30))
+        XCTAssertTrue(ready.waitForExistence(timeout: 60))
+        let chat = app.buttons["bot.tab.chat"]
+        XCTAssertTrue(chat.waitForExistence(timeout: 15)); chat.tap()
+        XCTAssertTrue(chat.isSelected); XCTAssertTrue(ready.waitForExistence(timeout: 60))
+        XCTAssertTrue(composer.waitForExistence(timeout: 30))
+        XCTAssertTrue(isEmpty(composer), "Refuse to replace an existing Bub draft")
+        let bubMarker = "vcBubLocal655983"
+        let boardMarker = "vcBoardLocal655983"
+        typeMarker(bubMarker)
+        let sawSyncing = app.descendants(matching: .any)["qualification.connection.connecting"].waitForExistence(timeout: 20)
+        print("safe-draft observed-syncing=\(sawSyncing)")
+        XCTAssertTrue(threads.waitForExistence(timeout: 10)); threads.tap()
+        XCTAssertTrue(app.navigationBars[boardTitle].waitForExistence(timeout: 30))
+        XCTAssertTrue(composer.waitForExistence(timeout: 30)); XCTAssertTrue(ready.waitForExistence(timeout: 60))
+        XCTAssertTrue(isEmpty(composer), "Bub's marker must not leak into the board thread")
+        typeMarker(boardMarker)
+        for _ in 0..<2 {
+            home.tap(); XCTAssertTrue(app.navigationBars["Bub"].waitForExistence(timeout: 30))
+            XCTAssertTrue(chat.isSelected); expectValue(bubMarker)
+            threads.tap(); XCTAssertTrue(app.navigationBars[boardTitle].waitForExistence(timeout: 30))
+            expectValue(boardMarker)
+        }
+        XCUIDevice.shared.press(.home); app.activate()
+        XCTAssertTrue(app.navigationBars[boardTitle].waitForExistence(timeout: 30)); expectValue(boardMarker)
+        composer.tap(); composer.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: boardMarker.count))
+        XCTAssertTrue(isEmpty(composer), "Board marker must be cleared locally")
+        home.tap(); XCTAssertTrue(app.navigationBars["Bub"].waitForExistence(timeout: 30)); expectValue(bubMarker)
+        composer.tap(); composer.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: bubMarker.count))
+        XCTAssertTrue(isEmpty(composer), "Bub marker must be cleared locally")
+        XCTAssertTrue(sawSyncing, "The run must observe a refresh while the Bub draft is present")
+    }
+
     func testRealThreadAndBubNavigation() {
         let app = XCUIApplication()
         addTeardownBlock {
