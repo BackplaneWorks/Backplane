@@ -540,6 +540,22 @@ globalThis.Backplane = {
     restore();
     return out(null);
   },
+  // Explicit pairing retirement; ordinary socket reconnects do not call it.
+  forgetHub(key) {
+    thin.forgetHub(key);
+    // Remove the compact Bend client as well; a new pairing at the same
+    // address starts from a new client, not the previous account's choices.
+    hubs = App.hubs(hubs, JSON.stringify([...thin.paired]));
+    if (previewCur === key) previewCur = thin.current;
+    for (const draft of Object.keys(kept)) if (draft.startsWith(key + "|")) delete kept[draft];
+    recent.close(key);
+    booting.delete(key);
+    transportEpoch.delete(key);
+    bubLive.delete(key);
+    bubMoves.disconnect(key);
+    syncUpdates = syncUpdates.filter(s => s.hub !== key);
+    return direct([], false);
+  },
   // a choice that belongs to this device, not the hub (the thread list's
   // "view": "projects" or "active"; "" leaves it to the hub's setting)
   local(key, value) {
