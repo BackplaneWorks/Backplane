@@ -44,6 +44,10 @@ def current() -> List<&2, M.Entry>:
   [M.Act{"e2", "t1", "error", "result", "API Error: 500", 22n}, M.Msg{"m2", "t1", M.User{}, "next", 20n},
    M.Act{"e1", "t1", "error", "result", "Claude AI usage limit reached|1792800000", 11n}]
 
+# a turn that ended before it replied, after an older turn's reply
+def noreply() -> List<&2, M.Entry>:
+  [M.Msg{"m5", "t1", M.User{}, "again", 50n}, M.Msg{"a2", "t1", M.Assistant{}, "an older reply", 21n}, M.Msg{"m2", "t1", M.User{}, "next", 20n}]
+
 # a turn whose model call failed: Claude Code's API error, logged as the
 # turn's own (hub.bend's Claude.api.err), then an interrupted end
 def badmodel() -> List<&2, M.Entry>:
@@ -164,4 +168,9 @@ def main() -> IO(Unit):
     C.Check.str("failed on a model error is an error", WN.Wn.end.reason("failed", WN.Wn.err(badmodel(), "t1"), ""), "error")
     C.Check.str("interrupt with a limit error stays limit", WN.Wn.end.reason("interrupted", "usage limit reached", ""), "limit")
     C.Check.str("plain interrupt stays interrupted", WN.Wn.end.reason("interrupted", "", ""), "interrupted")
+    C.Check.str("no reply of its own: not the older turn's", WN.Wn.end.text("interrupted", WN.Wn.reply(noreply(), "t1")), "Failed")
+    C.Check.str("interrupted with its own reply", WN.Wn.end.text("interrupted", WN.Wn.reply(older(), "t1")), "working on it")
+    C.Check.str("failed says Failed", WN.Wn.end.text("failed", "working on it"), "Failed")
+    C.Check.str("settled with no reply", WN.Wn.end.text("completed", ""), "Finished")
+    C.Check.str("settled with its reply", WN.Wn.end.text("completed", "done"), "done")
     C.Check.str("a stop has no reason", WN.Wn.end.reason("stopped", "", "usage limit reached"), "")

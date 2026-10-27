@@ -597,8 +597,11 @@ def Push.hook.kind(+st: M.State, +thread: String) -> String:
 def Push.hook.word(+st: M.State, +thread: String, +state: String) -> String:
   WN.Wn.report(state, M.Thread.turn(B.Hub.thread(st, thread)))
 
+# the ending turn's own reply (wnote.bend's Wn.reply), never one from
+# before its opening user message: a turn that gave none says "Failed"
+# when broken (or its error, Push.hook.said), "Finished" when settled
 def Push.hook.text(+st: M.State, +thread: String, +state: String) -> String:
-  Push.body(String.eq(state, "failed"), Push.first(B.Task.last(st, thread)))
+  WN.Wn.end.text(state, Push.first(WN.Wn.reply(M.State.mine(st, thread), thread)))
 
 # a settle or a failure uses the last reply; any other alert uses the record's text
 def Push.hook.line(ended: Bool, +st: M.State, +thread: String, +state: String) -> String:

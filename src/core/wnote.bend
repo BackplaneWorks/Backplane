@@ -275,6 +275,13 @@ def Wn.reply(es: List<&2, M.Entry>, +thread: String) -> String:
 # interrupted turn that logged an error of its own (a model or API error,
 # hub.bend's Claude.api.err) ended on that error: "error", not
 # "interrupted". "" for a settle or a stop.
+# a turn end's text from its own reply's first line: "Failed" for a
+# failed turn (its error takes over when it logged one) or a broken one
+# that gave no reply, "Finished" for a settle with none, else the line
+def Wn.end.text(+state: String, +line: String) -> String:
+  Bool.pick(String, Bool.or(String.eq(state, "failed"), Bool.and(Wn.broke(state), String.is_empty(line))), "Failed",
+    Bool.pick(String, String.is_empty(line), "Finished", line))
+
 def Wn.end.reason.k(said: Bool, +r: String) -> String:
   Bool.pick(String, Bool.and(said, String.eq(r, "interrupted")), "error", r)
 
