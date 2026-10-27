@@ -32,6 +32,7 @@ struct BackplaneApp: App {
                             .background(.ultraThinMaterial)
                             .allowsHitTesting(false)
                             .accessibilityIdentifier("qualification.connection." + model.qualificationConnection)
+                            .accessibilityValue(model.qualificationDetails)
                     }
                     #endif
                 }
