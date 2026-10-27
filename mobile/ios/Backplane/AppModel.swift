@@ -76,6 +76,51 @@ final class AppModel {
     @ObservationIgnored private var island: IslandController?
     @ObservationIgnored private var ready = false
 
+    // Diagnostic intervals never participate in view authority. Owner strings
+    // stay private in memory; the trace emits numeric stages and times only.
+    private struct PerformanceAttempt {
+        let started: UInt64
+        let operation: PerformanceTrace.Operation
+        var nav: String?
+        var modelReady = false
+        var usefulDisplay = false
+        var freshDisplay = false
+    }
+    @ObservationIgnored private var performanceAttempt: PerformanceAttempt?
+    @ObservationIgnored private(set) var performanceRevision: UInt64 = 0
+
+    private func performanceStart(_ operation: PerformanceTrace.Operation, nav: String? = nil) {
+        guard let started = PerformanceTrace.shared.begin() else { return }
+        performanceAttempt = PerformanceAttempt(started: started, operation: operation, nav: nav)
+    }
+
+    private func performanceReady() {
+        guard var attempt = performanceAttempt, !attempt.modelReady, contentReady,
+              let screen, attempt.nav == nil || attempt.nav == Self.nav(screen) else { return }
+        attempt.modelReady = true
+        performanceAttempt = attempt
+        PerformanceTrace.shared.end(.modelReady, operation: attempt.operation, started: attempt.started)
+    }
+
+    // Called after a matching, laid-out timeline gets a display opportunity.
+    // This is a compositor scheduling bound, not proof of physical pixels;
+    // simulator screenshots/video independently verify useful painted content.
+    func performanceDisplayed(thread: String, fresh: Bool, revision: UInt64) {
+        guard var attempt = performanceAttempt, active, path.last == thread,
+              attempt.nav == nil || attempt.nav == thread else { return }
+        let isFresh = fresh && contentReady && screen?.thread?.id == thread && revision == performanceRevision
+        if !attempt.usefulDisplay {
+            attempt.usefulDisplay = true
+            attempt.freshDisplay = isFresh
+            PerformanceTrace.shared.end(.display, operation: attempt.operation, started: attempt.started,
+                                        outcome: isFresh ? .success : .stale)
+        } else if isFresh, !attempt.freshDisplay {
+            attempt.freshDisplay = true
+            PerformanceTrace.shared.end(.display, operation: attempt.operation, started: attempt.started)
+        }
+        performanceAttempt = attempt
+    }
+
     // the pairing links, one per hub, in the order they were paired
     private(set) var links: [String] = UserDefaults.standard.stringArray(forKey: "links")
         ?? UserDefaults.standard.string(forKey: "link").map { [$0] } ?? []
@@ -306,14 +351,18 @@ final class AppModel {
     }
 
     init() {
+        performanceStart(.startup)
         engine.onFlush = { [weak self] out, generation in
             Task { @MainActor [weak self] in self?.apply(out, generation: generation) }
         }
         #if DEBUG
         if let l = ProcessInfo.processInfo.environment["BACKPLANE_LINK"] { links = l.split(separator: " ").map(String.init) }
         #endif
+        let cacheStarted = PerformanceTrace.shared.begin()
         let cachedData = recentScreen.load(links: links, profile: Self.cid)
         let cachedScreen = cachedData.flatMap { try? JSONDecoder().decode(Screen.self, from: $0) }
+        PerformanceTrace.shared.end(.cache, operation: .startup, started: cacheStarted,
+                                    bytes: UInt64(cachedData?.count ?? 0), outcome: cachedScreen == nil ? .skipped : .success)
         if cachedData != nil, cachedScreen == nil { NSLog("Backplane screen-cache miss_native_decode") }
         if let cached = cachedScreen {
             screen = cached
@@ -329,6 +378,7 @@ final class AppModel {
             lastPlane = cached.plane
             if let thread = cached.thread, !cached.sel.isEmpty { remember(cached.sel, thread) }
             let nav = Self.nav(cached)
+            performanceAttempt?.nav = nav
             if !nav.isEmpty {
                 tab = destination(cached, nav)
                 stacks[tab] = [nav]
@@ -568,7 +618,10 @@ final class AppModel {
                 let epoch = String(self.conn[key]?.epoch ?? 0)
                 let pairing = self.pairingGeneration
                 self.startup[key] = .discovering
+                let discoveryStarted = PerformanceTrace.shared.begin()
                 let found = await ViewCapability.find(link)
+                PerformanceTrace.shared.end(.discovery, operation: .connection, started: discoveryStarted,
+                                            outcome: found == .supported ? .success : .failed)
                 guard self.links.contains(link), self.conn[key]?.epoch == UInt64(epoch) else { return .stop }
                 guard pairing == self.pairingGeneration else { return .later(.connection) }
                 // a hub that is down or restarting is asked again after the
@@ -736,6 +789,12 @@ final class AppModel {
         if action == "open-url" {
             if let u = URL(string: value), u.scheme == "https" || u.scheme == "http" { UIApplication.shared.open(u) }
             return
+        }
+        if action == "select" {
+            performanceStart(.navigation, nav: value)
+        } else if Self.opens.contains(action) {
+            if let target = awaitedNav, !target.isEmpty { performanceStart(.navigation, nav: target) }
+            else { performanceAttempt = nil } // no invented destination for a direct bot action
         }
         if action == "select" {
             if value.isEmpty || links.contains(where: { value.hasPrefix((Pairing.key($0) ?? "") + "|") }) {
@@ -1673,6 +1732,7 @@ final class AppModel {
     }
 
     func foreground(_ yes: Bool) {
+        if yes, awayAt != nil { performanceStart(.foreground, nav: path.last) }
         active = yes
         if !yes { keep(); awayAt = Date() }
         // back in front: a socket the suspension may have killed is replaced
@@ -1683,6 +1743,7 @@ final class AppModel {
             for h in hubs.values { h.wake(quiet: away > 20 ? 3 : 40) }
         }
         if yes, contentReady, let s = screen { island?.show(s.islands ?? [], foreground: true) }
+        if yes { performanceReady() }
     }
 
     private func observeThinPresenting(_ update: SyncUpdate, epoch: UInt64) {
@@ -1810,6 +1871,7 @@ final class AppModel {
                 Self.keep(thread.id, composer)
             } else { composerOwner = ""; composer = "" }
             screen = s
+            if performanceAttempt != nil { performanceRevision &+= 1 }
             reconcileViewer(s)
             if let text = o.screenJSON, !cleared, awaitedNav == nil || awaitedNav == Self.nav(s) {
                 lastScreenJSON = text
@@ -1979,6 +2041,7 @@ final class AppModel {
             default: break
             }
         }
+        performanceReady()
         advanceViewerResume()
         advanceViewerClose()
         advanceProjectSearch()
