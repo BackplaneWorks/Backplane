@@ -201,6 +201,10 @@ private struct ConnectionStartupView: View {
                         Text(NativeMessages.native_hub_failure(tag, failure.reason, failure.code))
                             .foregroundStyle(PhaseColor.bad)
                             .accessibilityIdentifier("pair.connection.error")
+                    } else if model.startup[key] == .compatibilityRequired {
+                        Text(tag == "ja" ? "このハブは更新が必要です。" : "This hub needs an update.")
+                            .foregroundStyle(PhaseColor.warn)
+                            .accessibilityIdentifier("pair.connection.updateRequired")
                     } else {
                         ProgressView().accessibilityIdentifier("pair.connection.progress")
                     }

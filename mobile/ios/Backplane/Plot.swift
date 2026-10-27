@@ -274,6 +274,7 @@ struct MeshFrame {
     let mesh: PlotMesh?
     let none: String
     let at: Date
+    var decoding = false
 }
 
 // Exact wire revision cache, independent of view lifetime. Locks protect reset,
@@ -315,6 +316,18 @@ final class PlotStore {
     @ObservationIgnored private var generation = 0
     @ObservationIgnored private let assets = PlotMeshAssets()
     @ObservationIgnored private let meshQueue = DispatchQueue(label: "plot.mesh", qos: .userInitiated)
+    #if DEBUG && targetEnvironment(simulator)
+    @ObservationIgnored private var qualificationDrop = ProcessInfo.processInfo.environment["BACKPLANE_QUALIFICATION"] == "1"
+        ? ProcessInfo.processInfo.environment["BACKPLANE_QUALIFICATION_DROP_PLOTS"] ?? "" : ""
+    #endif
+
+    // A dedicated simulator may withhold incoming geometry to qualify actual
+    // loading UX while the real socket remains healthy. Retry ends the drop.
+    func resumeQualificationDelivery() {
+        #if DEBUG && targetEnvironment(simulator)
+        qualificationDrop = ""
+        #endif
+    }
 
     func cachedMesh(_ key: String) -> MeshFrame? { assets.frame(key) }
 
@@ -337,12 +350,18 @@ final class PlotStore {
     func receive(_ d: Data) {
         let gen = generation
         let assets = self.assets, meshQueue = self.meshQueue, epoch = assets.epoch()
+        #if DEBUG && targetEnvironment(simulator)
+        let drop = qualificationDrop
+        #else
+        let drop = ""
+        #endif
         queue.async {
             guard let o = Cbor.decode(d) as? [String: Any] else { return }
             let key = o["key"] as? String ?? ""
             let fam = (o["fam"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? key
             // a 3D model: with its parts (2) or the board alone (3)
             let solid = key.hasPrefix("2|") || key.hasPrefix("3|") || key.hasPrefix("4|")
+            guard drop != "all", !(drop == "mesh" && solid) else { return }
             if let why = o["none"] as? String {
                 guard let ticket = solid ? assets.issue(key, epoch: epoch) : 0 else { return }
                 DispatchQueue.main.async {
@@ -367,7 +386,7 @@ final class PlotStore {
                 DispatchQueue.main.async {
                     MainActor.assumeIsolated {
                         guard gen == self.generation, assets.current(key, ticket) else { return }
-                        self.mesh = MeshFrame(key: key, mesh: previous, none: "Received model; decoding…" + (previous == nil ? "" : " — previous saved revision shown"), at: Date())
+                        self.mesh = MeshFrame(key: key, mesh: previous, none: "Received model; decoding…" + (previous == nil ? "" : " — previous saved revision shown"), at: Date(), decoding: true)
                     }
                 }
                 meshQueue.async {
@@ -411,7 +430,12 @@ final class PlotStore {
                 MainActor.assumeIsolated {
                     guard gen == self.generation else { return }
                     for (i, r) in refs.enumerated() {
-                        if let k = r as? Int, k < self.held.count { cs[i] = self.held[k] }
+                        if let k = r as? Int, k >= 0, k < self.held.count { cs[i] = self.held[k] }
+                    }
+                    guard cs.allSatisfy({ $0 != nil }) else {
+                        self.held = []
+                        self.frame = PlotFrame(key: key, fam: fam, box: [], edge: [], thick: 0, chunks: [], fresh: [], none: "Invalid geometry reference. Retry to reload this view.", at: Date())
+                        return
                     }
                     let all = cs.compactMap { $0 }
                     self.held = all

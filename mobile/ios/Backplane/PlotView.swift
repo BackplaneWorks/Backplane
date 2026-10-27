@@ -1152,13 +1152,57 @@ struct PlotScreen: View {
     @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     let viewer: Viewer
+    let presentation: ViewerCloseIntent.Token
+    @State private var load = ViewerLoadState()
+    @State private var loadTimedOut = false
+
+    private var plotFrame: PlotFrame? {
+        model.plots.frame.flatMap { $0.key == viewer.layers || (viewer.hist != nil && $0.none.isEmpty && Self.head($0.key) == Self.head(viewer.layers)) ? $0 : nil }
+    }
+    private var meshFrame: MeshFrame? {
+        model.plots.mesh.flatMap { $0.key == viewer.key ? $0 : nil } ?? model.plots.cachedMesh(viewer.key)
+    }
+    private var needsMesh: Bool { (viewer.open == "3d" || viewer.open == "mech") && !viewer.key.isEmpty }
+    private var loadIdentity: ViewerLoadState.Identity {
+        .init(hub: presentation.owner.hub, navigation: presentation.owner.nav, kind: viewer.open,
+              key: viewer.key, layers: viewer.layers, pairing: presentation.owner.pairing,
+              epoch: model.conn[presentation.owner.hub]?.epoch ?? 0, presentation: presentation.presentation)
+    }
+    private struct Availability: Equatable { let geometry, mesh: Bool }
+    private var availability: Availability {
+        .init(geometry: plotFrame?.none.isEmpty == true, mesh: meshFrame?.mesh != nil && meshFrame?.none.isEmpty == true)
+    }
+    private static var now: UInt64 { UInt64(ProcessInfo.processInfo.systemUptime * 1000) }
+    private func markAvailable() {
+        guard let ticket = load.ticket, ticket.identity == loadIdentity else { return }
+        if availability.geometry { load.geometryReady(ticket) }
+        if availability.mesh { load.meshReady(ticket) }
+        if load.status(ticket, now: Self.now) == .ready { loadTimedOut = false }
+    }
+    @ViewBuilder private var loadingState: some View {
+        if loadTimedOut {
+            errorState(lang == "ja" ? "ビューの読み込みがタイムアウトしました。" : "Loading this view timed out.")
+        } else {
+            ProgressView(needsMesh ? (lang == "ja" ? "3Dモデルを読み込み中…" : "Loading 3D model…") : NativeMessages.viewer_loading(lang))
+                .padding(16).background(BackplaneDesign.panel)
+                .accessibilityIdentifier("viewer.loading")
+        }
+    }
+    private func errorState(_ message: String) -> some View {
+        VStack(spacing: 12) {
+            Text(message).multilineTextAlignment(.center).accessibilityIdentifier("viewer.error")
+            Button(lang == "ja" ? "再試行" : "Retry") { model.retryViewer(presentation) }
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier("viewer.retry")
+        }.padding(16).background(BackplaneDesign.panel)
+    }
 
     var body: some View {
         // a plot for any other source is stale (a switch in flight), except,
         // while the design history shows, the last version of this kind and
         // project: it stays until the next arrives (no blank between steps)
-        let f = model.plots.frame.flatMap { $0.key == viewer.layers || (viewer.hist != nil && $0.none.isEmpty && Self.head($0.key) == Self.head(viewer.layers)) ? $0 : nil }
-        let m = model.plots.mesh.flatMap { $0.key == viewer.key ? $0 : nil } ?? model.plots.cachedMesh(viewer.key)
+        let f = plotFrame
+        let m = meshFrame
         VStack(spacing: 0) {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
@@ -1225,19 +1269,22 @@ struct PlotScreen: View {
             // Mech with no part to show: what the page says
             if viewer.open == "mech", viewer.key.isEmpty {
                 Text(viewer.mech.map { $0.say.isEmpty ? $0.note : $0.say } ?? "").foregroundStyle(.secondary).padding().frame(maxHeight: .infinity)
+            } else if needsMesh, m?.decoding == true {
+                loadingState.frame(maxHeight: .infinity, alignment: .bottom)
             } else if viewer.layers.isEmpty, m == nil {
-                ProgressView().tint(.white).frame(maxHeight: .infinity).accessibilityIdentifier("viewer.loading")
+                loadingState.frame(maxHeight: .infinity)
             } else if viewer.layers.isEmpty, let why = m?.none, !why.isEmpty {
-                Text(why).foregroundStyle(.secondary).frame(maxHeight: .infinity).accessibilityIdentifier("viewer.error")
+                errorState(why).frame(maxHeight: .infinity)
             } else if viewer.layers.isEmpty {
                 EmptyView()
             } else if f == nil {
-                ProgressView().tint(.white).frame(maxHeight: .infinity).accessibilityIdentifier("viewer.loading")
+                loadingState.frame(maxHeight: .infinity)
             } else if let why = f?.none, !why.isEmpty {
-                Text(why).foregroundStyle(.secondary).frame(maxHeight: .infinity).accessibilityIdentifier("viewer.error")
+                errorState(why).frame(maxHeight: .infinity)
             } else if viewer.open == "3d", let why = m?.none, !why.isEmpty {
-                Text(why).font(.caption).foregroundStyle(.secondary).padding().frame(maxHeight: .infinity, alignment: .bottom)
-                    .accessibilityIdentifier("viewer.mesh.status")
+                errorState(why).frame(maxHeight: .infinity, alignment: .bottom)
+            } else if needsMesh, m?.mesh == nil {
+                loadingState.frame(maxHeight: .infinity, alignment: .bottom)
             } else if viewer.open == "3d", viewer.parts ?? true, let note = viewer.note, !note.isEmpty {
                 Text(note).font(.caption).foregroundStyle(.secondary).padding().frame(maxHeight: .infinity, alignment: .bottom)
             }
@@ -1250,6 +1297,19 @@ struct PlotScreen: View {
         // the design history under the plot, which gives it the room
         if let h = viewer.hist { HistBarView(model: model, hist: h) }
         }
+        .task(id: loadIdentity) {
+            let identity = loadIdentity
+            let ticket = load.start(identity, geometry: !viewer.layers.isEmpty, mesh: needsMesh, now: Self.now)
+            loadTimedOut = false
+            markAvailable()
+            guard load.status(ticket, now: Self.now) != .ready else { return }
+            do { try await Task.sleep(for: .seconds(30)) } catch { return }
+            guard !Task.isCancelled, loadIdentity == identity, load.ticket == ticket else { return }
+            markAvailable()
+            loadTimedOut = load.status(ticket, now: Self.now) == .timedOut
+        }
+        .onChange(of: availability) { _, _ in markAvailable() }
+        .onDisappear { load.reset(); loadTimedOut = false }
         .sheet(isPresented: $showReflow) { ReflowView(model: model) }
         .preferredColorScheme(viewer.light == true ? .light : .dark)
         .statusBarHidden()

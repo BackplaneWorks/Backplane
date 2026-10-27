@@ -28,7 +28,7 @@ struct ViewerPresentationContent: View {
                 else if v.open == "image" || v.open == "pdf", let f = v.file { FileScreen(model: model, viewer: v, file: f) }
                 else if v.open == "review", let page = v.review { ReviewScreen(model: model, viewer: v, page: page) }
                 else if v.open == "renders", let page = v.mech { MechScreen(model: model, viewer: v, page: page) }
-                else { PlotScreen(model: model, viewer: v) }
+                else { PlotScreen(model: model, viewer: v, presentation: token) }
             }
             .interactiveDismissDisabled()
             .accessibilityAction(.escape) { model.closeViewer(token) }
