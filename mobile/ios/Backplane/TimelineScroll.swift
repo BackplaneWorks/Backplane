@@ -42,6 +42,8 @@ struct TimelineScroll<Content: View>: UIViewControllerRepresentable {
     let loadEarlier: () -> Bool
     var earlierEnabled = true
     var startsAtLatest = true
+    // Optional diagnostic callback; normal builds install none.
+    var onDisplay: (() -> Void)? = nil
     @ViewBuilder let content: () -> Content
 
     func makeUIViewController(context: Context) -> TimelineController<Content> {
@@ -49,7 +51,7 @@ struct TimelineScroll<Content: View>: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ controller: TimelineController<Content>, context: Context) {
-        controller.configure(ids: ids, earlier: earlier, enabled: earlierEnabled, loadEarlier: loadEarlier, content: content())
+        controller.configure(ids: ids, earlier: earlier, enabled: earlierEnabled, loadEarlier: loadEarlier, onDisplay: onDisplay, content: content())
     }
 }
 
@@ -87,6 +89,12 @@ final class TimelineController<Content: View>: UIViewController, UIScrollViewDel
     private var reportPending = false
     private var initialized = false
     private var awaitingBeginning = false
+    private var onDisplay: (() -> Void)?
+    private var displayLink: CADisplayLink?
+    private var displayTicks = 0
+    private var displayConfiguration: UInt64 = 0
+    private var displayLayout: UInt64?
+    private var displayObservation: (configuration: UInt64, callback: () -> Void)?
 
     init(position: TimelinePosition, startsAtLatest: Bool = true, content: Content) {
         self.position = position
@@ -136,10 +144,15 @@ final class TimelineController<Content: View>: UIViewController, UIScrollViewDel
             host.view.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor),
             host.view.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor)
         ])
-        host.laidOut = { [weak self] in self?.reconcile() }
+        host.laidOut = { [weak self] in
+            guard let self else { return }
+            self.reconcile()
+            if self.onDisplay != nil { self.displayLayout = self.displayConfiguration }
+            self.scheduleDisplayObservation()
+        }
     }
 
-    func configure(ids next: [String], earlier: Int, enabled: Bool, loadEarlier: @escaping () -> Bool, content: Content) {
+    func configure(ids next: [String], earlier: Int, enabled: Bool, loadEarlier: @escaping () -> Bool, onDisplay: (() -> Void)?, content: Content) {
         // Count only entries appended after the old tail, never history prepends.
         if !following, let last = ids.last, let at = next.firstIndex(of: last) {
             unread += next.distance(from: next.index(after: at), to: next.endIndex)
@@ -148,12 +161,73 @@ final class TimelineController<Content: View>: UIViewController, UIScrollViewDel
         self.earlier = earlier
         earlierGate.configure(enabled: enabled)
         self.loadEarlier = loadEarlier
+        if onDisplay != nil || self.onDisplay != nil {
+            displayLink?.invalidate()
+            displayLink = nil
+            displayObservation = nil
+            displayConfiguration &+= 1
+            displayLayout = nil
+        }
+        self.onDisplay = onDisplay
         host.rootView = content
+        if onDisplay != nil { host.view.setNeedsLayout() }
         view.setNeedsLayout()
         report()
     }
 
-    override func viewDidLayoutSubviews() { super.viewDidLayoutSubviews(); reconcile() }
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        reconcile()
+        scheduleDisplayObservation()
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        scheduleDisplayObservation()
+    }
+
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        displayLink?.invalidate()
+        displayLink = nil
+        displayObservation = nil
+    }
+
+    private var canObserveDisplay: Bool {
+        guard onDisplay != nil, displayLayout == displayConfiguration, initialized, let window = view.window,
+              view.bounds.width > 0, view.bounds.height > 0,
+              view.convert(view.bounds, to: window).intersects(window.bounds) else { return false }
+        var ancestor: UIView? = view
+        while let current = ancestor {
+            if current.isHidden || current.alpha <= 0.01 { return false }
+            ancestor = current.superview
+        }
+        return frames().contains { ids.contains($0.0) && $0.1.intersects(scroll.bounds) }
+    }
+
+    private func scheduleDisplayObservation() {
+        guard displayLink == nil, canObserveDisplay, let callback = onDisplay else { return }
+        displayObservation = (displayConfiguration, callback)
+        displayTicks = 0
+        let link = CADisplayLink(target: self, selector: #selector(observeDisplay))
+        displayLink = link
+        link.add(to: .main, forMode: .common)
+    }
+
+    @objc private func observeDisplay() {
+        guard canObserveDisplay, let observation = displayObservation,
+              observation.configuration == displayConfiguration else {
+            displayLink?.invalidate(); displayLink = nil; displayObservation = nil; return
+        }
+        displayTicks += 1
+        // Let one complete frame opportunity pass after visible layout. The
+        // second tick bounds scheduling; screenshots still verify the pixels.
+        guard displayTicks >= 2 else { return }
+        displayLink?.invalidate()
+        displayLink = nil
+        displayObservation = nil
+        observation.callback()
+    }
 
     private func marks(_ view: UIView) -> [TimelineMark] {
         if let mark = view as? TimelineMark { return [mark] }

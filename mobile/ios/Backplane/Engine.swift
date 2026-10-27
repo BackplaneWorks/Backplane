@@ -51,6 +51,8 @@ final class Engine: @unchecked Sendable {
 
     private func context() -> JSContext {
         if let ctx { return ctx }
+        let started = PerformanceTrace.shared.begin()
+        defer { PerformanceTrace.shared.end(.context, operation: .startup, started: started) }
         let c = JSContext()!
         c.exceptionHandler = { _, e in NSLog("bridge.js: %@", e?.toString() ?? "?") }
         let url = Bundle.main.url(forResource: "bridge", withExtension: "js")!
@@ -113,13 +115,16 @@ final class Engine: @unchecked Sendable {
         guard let generation = pairingFlush.stamp() else { return }
         let began = DispatchTime.now().uptimeNanoseconds
         let forced = lock.withLock { owe }
-        let text = context().objectForKeyedSubscript("Backplane")?.invokeMethod("flush", withArguments: [forced])?.toString() ?? "{}"
-        let out = Out.decode(text, screen: true)
+        let bridge = context().objectForKeyedSubscript("Backplane")
+        let invoked = PerformanceTrace.shared.begin()
+        let text = bridge?.invokeMethod("flush", withArguments: [forced])?.toString() ?? "{}"
+        PerformanceTrace.shared.end(.invoke, operation: .flush, started: invoked, bytes: UInt64(text.utf8.count))
+        let out = decode(text, screen: true, operation: .flush)
         guard out?.screen != nil else { onFlush?(out, generation); return }
         let stale = queue.personWaiting
         lock.withLock { built = began; owe = stale }
         if stale { scheduleFlush() }
-        let result = stale ? Out.decode(text, screen: false) : out
+        let result = stale ? decode(text, screen: false, operation: .flush) : out
         onFlush?(stale || pairingFlush.stamp() != generation ? result : published(result), generation)
     }
 
@@ -139,10 +144,19 @@ final class Engine: @unchecked Sendable {
     // Enqueue captured editor work synchronously with the main-actor edit.
     // An async Task created for each keystroke could reorder draft/send calls.
     private func enqueue<T>(_ name: String, _ args: [Any], person: Bool = false, late: (() -> [Any])? = nil, authorize: ((() -> String) -> String?)? = nil, _ finish: @escaping (String) -> T, completion: @escaping (T) -> Void) {
+        let queued = PerformanceTrace.shared.begin()
+        let operation = Self.performanceOperation(name)
         queue.async(person: person) {
+            PerformanceTrace.shared.end(.queueWait, operation: operation, started: queued)
             let b = self.context().objectForKeyedSubscript("Backplane")!
             let t0 = DispatchTime.now().uptimeNanoseconds
-            let invoke = { b.invokeMethod(name, withArguments: late?() ?? args)?.toString() ?? "{}" }
+            let invoke = {
+                let arguments = late?() ?? args
+                let started = PerformanceTrace.shared.begin()
+                let text = b.invokeMethod(name, withArguments: arguments)?.toString() ?? "{}"
+                PerformanceTrace.shared.end(.invoke, operation: operation, started: started, bytes: UInt64(text.utf8.count))
+                return text
+            }
             let text: String
             if let authorize {
                 guard let allowed = authorize(invoke) else { completion(finish("null")); return }
@@ -153,6 +167,31 @@ final class Engine: @unchecked Sendable {
             completion(finish(text))
         }
     }
+    private static func performanceOperation(_ name: String) -> PerformanceTrace.Operation {
+        switch name {
+        case "start": .startup
+        case "loadPresentation": .loadPresentation
+        case "connection", "online", "hubs": .connection
+        case "recv": .receive
+        case "flush": .flush
+        case "act": .navigation
+        case "viewerAction": .viewerRestore
+        case "local": .local
+        case "reading": .reading
+        case "pulse", "tick": .pulse
+        case "screen": .screen
+        default: .other
+        }
+    }
+
+    private func decode(_ text: String, screen: Bool, operation: PerformanceTrace.Operation) -> Out? {
+        let started = PerformanceTrace.shared.begin()
+        let result = Out.decode(text, screen: screen)
+        PerformanceTrace.shared.end(.decode, operation: operation, started: started,
+                                    bytes: UInt64(text.utf8.count), outcome: result == nil ? .failed : .success)
+        return result
+    }
+
     private func call<T>(_ name: String, _ args: [Any], person: Bool = false, late: (() -> [Any])? = nil, authorize: ((() -> String) -> String?)? = nil, _ finish: @escaping (String) -> T) async -> T {
         await withCheckedContinuation { k in
             enqueue(name, args, person: person, late: late, authorize: authorize, finish, completion: { k.resume(returning: $0) })
@@ -187,7 +226,7 @@ final class Engine: @unchecked Sendable {
             }
             // (bridge.js writes the screen first: a null one is cheap to see)
             let hasScreen = screen && !text.hasPrefix("{\"screen\":null")
-            let metadata = hasScreen ? nil : Out.decode(text, screen: false)
+            let metadata = hasScreen ? nil : self.decode(text, screen: false, operation: Self.performanceOperation(name))
             let stale = self.lock.withLock {
                 if screen { if person { self.personAhead -= 1 } else { self.backgroundAhead -= 1 } }
                 if metadata?.inert == true {
@@ -202,7 +241,7 @@ final class Engine: @unchecked Sendable {
                 return drop
             }
             if metadata?.inert != true && (withheld || stale) { self.scheduleFlush() }
-            let result = metadata ?? Out.decode(text, screen: !stale && screen)
+            let result = metadata ?? self.decode(text, screen: !stale && screen, operation: Self.performanceOperation(name))
             return stale ? result : self.published(result)
         }, completion: completion)
     }
