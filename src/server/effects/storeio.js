@@ -29,11 +29,13 @@ function store_promote(home,temp) {
     if(path.dirname(temp)!==home || !path.basename(temp).startsWith('.store-rebuild-'))throw Error('invalid rebuild directory');
     const next=path.join(temp,'store.db'),target=path.join(home,'store.db');
     const sync=store_sync(next);if(sync!=='ok')return sync;
+    // Committed pages may still be in the WAL after the builder closes.
+    if(fs.existsSync(next+'-wal')){const saved=store_sync(next+'-wal');if(saved!=='ok')return saved;}
     const backup=target+'.previous-'+Date.now();
     for(const suffix of ['','-wal','-shm'])if(fs.existsSync(target+suffix)){fs.copyFileSync(target+suffix,backup+suffix,fs.constants.COPYFILE_EXCL);const saved=store_sync(backup+suffix);if(saved!=='ok')return saved;}
     // No old connection remains at boot. Keep its WAL evidence beside backup.
     for(const suffix of ['-wal','-shm'])if(fs.existsSync(target+suffix))fs.renameSync(target+suffix,backup+suffix+'.retired');
-    fs.renameSync(next,target);
+    for(const suffix of ['','-wal','-shm'])if(fs.existsSync(next+suffix))fs.renameSync(next+suffix,target+suffix);
     store_sync_dir(home);
     fs.unlinkSync(path.join(temp,'events.jsonl'));fs.rmdirSync(temp);
     return 'ok';
