@@ -7,6 +7,7 @@ import ../src/core/hub.bend as B
 import ../src/core/cmds.bend as CM
 import ../src/core/codec.bend as C2
 import ../src/core/wnote.bend as WN
+import ../src/core/secret.bend as SEC
 
 # Claude's turns by the command ledger (core/cmds.bend): both recorded
 # Claude Code 2.1.286 streams (test/fixtures/claude/) replayed line by line
@@ -428,6 +429,66 @@ def turns() -> IO(Unit):
     C.Check.str("turns: a queued message keeps the model error", ended.of(marked(M.State.empty(), turns.queued()), "interrupted"), "interrupted|There's an issue with the selected model (no-such-model)|error|There's an issue with the selected model (no-such-model)")
     C.Check.str("turns: a queued message does not start a turn", turns.mark(marked(M.State.empty(), turns.queued())), "@m1")
 
+# The vault (hub.bend's Secret.changes, Secret.outs): a turn that ends on
+# an error holding a stored value carries it neither where it is stored
+# nor out to the server (the webhook)
+
+def vault.value() -> String:
+  "sk-synthetic-7Qx9vWm2LpR4"
+
+def vault.v() -> SEC.Vault:
+  SEC.Sec.vault([vault.value()])
+
+def vault.running() -> M.State:
+  marked(M.State.empty(), [M.ProjectCreated{"p1", "p", "/p", 1n}, M.ThreadCreated{"t1", "p1", "x", M.Local{}, "", "", "claude", "", 1n},
+    M.SettingSet{"push.webhook.url", "https://example.com/h", 1n},
+    M.MessagePosted{"t1", "m1", M.User{}, "go", 2n}, M.TurnChanged{"t1", M.Running{}, 2n},
+    M.MessagePosted{"t1", "a1", M.Assistant{}, "using " ++ vault.value(), 3n}])
+
+def vault.end() -> B.Step:
+  B.Ended.out(vault.running(), 4n, "t1", B.Hub.agent_gone.k(True{}, "t1", 4n, 1, "boom " ++ vault.value()))
+
+def vault.cs.text(cs: List<&2, M.Change>) -> String:
+  match cs:
+    case Nil{}:
+      ""
+    case M.ActivityLogged{_, _, _, _, +summary, _} <> t:
+      summary ++ "\n" ++ vault.cs.text(t)
+    case _ <> t:
+      vault.cs.text(t)
+
+def vault.os.text(os: List<&2, B.Out>) -> String:
+  match os:
+    case Nil{}:
+      ""
+    case B.TurnEnded{_, _, _, +e, _, +x} <> t:
+      e ++ "\n" ++ x ++ "\n" ++ vault.os.text(t)
+    case _ <> t:
+      vault.os.text(t)
+
+def vault.stored() -> String:
+  match vault.end():
+    case B.Step{+cs, _}:
+      vault.cs.text(B.Secret.changes(vault.v(), cs))
+
+def vault.raw() -> String:
+  match vault.end():
+    case B.Step{_, +os}:
+      vault.os.text(os)
+
+def vault.sent() -> String:
+  match vault.end():
+    case B.Step{_, +os}:
+      vault.os.text(B.Secret.outs(vault.v(), os))
+
+def vault() -> IO(Unit):
+  do IO<Unit>:
+    C.Check.str("vault: the end read the value (the case covered)", Bool.show(String.contains(vault.raw(), vault.value())), "True")
+    C.Check.str("vault: not stored", Bool.show(String.contains(vault.stored(), vault.value())), "False")
+    C.Check.str("vault: not sent", Bool.show(String.contains(vault.sent(), vault.value())), "False")
+    C.Check.str("vault: the rest of the error kept", Bool.show(String.contains(vault.sent(), "boom ")), "True")
+    C.Check.str("vault: an empty vault leaves outs as they are", vault.os.text(B.Secret.outs(SEC.Sec.vault(Nil{}), [B.TurnEnded{"t1", "failed", "", "e", "error", "x"}])), "e\nx\n")
+
 def main() -> IO(Unit):
   do IO<Unit>:
     +f1 : List<&2, String> <- file("test/fixtures/claude/bg-wake.jsonl")
@@ -446,3 +507,4 @@ def main() -> IO(Unit):
     held()
     api_errs()
     turns()
+    vault()

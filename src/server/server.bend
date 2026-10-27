@@ -10556,7 +10556,7 @@ def Hub.step.go(+st: M.State, h: Hub, cs: List<&2, M.Change>, os: List<&2, B.Out
     t1 : U32 <- PS.Perf.span("hub.step.pend", t0)
     r : Hub & Wrote <- Hub.commit.w(cs2, h)
     t2 : U32 <- PS.Perf.span("hub.step.commit", t1)
-    Hub.step.wrote(r, cs2, os, M.State.seq(st))
+    Hub.step.wrote(r, cs2, B.Secret.outs(v, os), M.State.seq(st))
 
 def Hub.step.b(st: M.State, h: Hub, +cs: List<&2, M.Change>, os: List<&2, B.Out>) -> IO(Hub & Bool):
   Hub.step.go(st, h, cs, B.Island.outs(cs, B.Alerts.outs(cs, B.Tools.outs(cs, os))))

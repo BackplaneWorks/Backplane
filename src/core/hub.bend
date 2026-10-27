@@ -9241,6 +9241,29 @@ def Secret.changes.k(empty: Bool, +v: SEC.Vault, cs: List<&2, M.Change>) -> List
 def Secret.changes(+v: SEC.Vault, cs: List<&2, M.Change>) -> List<&2, M.Change>:
   Secret.changes.k(SEC.Sec.empty(v), v, cs)
 
+# A step's outs with the same values masked: a turn's end carries text
+# read from the thread (its error and reply) to the server, which sends it
+# on (the webhook), so it is covered here as the stored change it was
+# read from is. No other out carries stored text out of the hub.
+def Secret.outs.go(os: List<&2, Out>, +v: SEC.Vault, acc: List<&2, Out>) -> List<&2, Out>:
+  match os:
+    case Nil{}:
+      List.reverse(&2, Out, acc)
+    case TurnEnded{+th, +state, +alert, +err, +reason, +text} <> t:
+      Secret.outs.go(t, v, TurnEnded{th, state, alert, SEC.Sec.mask(v, err), reason, SEC.Sec.mask(v, text)} <> acc)
+    case +o <> t:
+      Secret.outs.go(t, v, o <> acc)
+
+def Secret.outs.k(empty: Bool, +v: SEC.Vault, os: List<&2, Out>) -> List<&2, Out>:
+  match empty:
+    case True{}:
+      os
+    case False{}:
+      Secret.outs.go(os, v, Nil{})
+
+def Secret.outs(+v: SEC.Vault, os: List<&2, Out>) -> List<&2, Out>:
+  Secret.outs.k(SEC.Sec.empty(v), v, os)
+
 # the thread that asked for a secret (secret_request), or ""
 def Secret.ask.thread(+s: M.State, +name: String) -> String:
   J.Json.get_str(Maybe.default(&2, J.Json, J.Json.parse(M.Setting.get(s, SEC.Sec.ask.key(name), "")), J.Null{}), "thread", "")
