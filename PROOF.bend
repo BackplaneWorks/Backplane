@@ -90,7 +90,6 @@ import ./src/core/space.bend as SPC
 import ./src/core/client.bend as U
 import ./src/core/menu.bend as MN
 import ./src/core/hier.bend as HI
-
 import ./src/core/boot.bend as BT
 import ./src/core/store.bend as ST
 import ./src/core/thin.bend as JTHIN # J2: JS stack
@@ -108,6 +107,11 @@ import ./src/core/plane.bend as PLN
 import ./src/core/uber.bend as UBR
 import ./src/core/ubersync.bend as UBS
 import ./src/core/ubop.bend as UBO
+import ./test/sidebar_content_proof.bend as CONTENTPROOF
+import ./test/sidebar_full_branch_test.bend as FULLBRANCH
+import ./test/sidebar_draft_image_test.bend as SIDEDRAFTPROOF
+import ./test/secret_proof.bend as SECPROOF
+
 
 # Lemmas
 # ------
@@ -13170,7 +13174,6 @@ def Laws.sidebar_shared_key_settings(u, epoch, view, revision, picture):
   {==}
 
 # Exact actual-sidebar comparison and separate receipt ownership.
-import ./test/sidebar_content_proof.bend as CONTENTPROOF
 
 def Laws.sidebar_content_exact_sound(a, b, h):
   CONTENTPROOF.exact_sound(a, b, h)
@@ -13179,7 +13182,6 @@ def Laws.sidebar_content_wrong_scope(old, node): {==}
 def Laws.sidebar_sent_no_picture_authority(scope, token, node, rest): {==}
 
 # Full sidebar branch: identical expression, explicit evaluation guard.
-import ./test/sidebar_full_branch_test.bend as FULLBRANCH
 def Laws.sidebar_full_branch_identity(shown): {==}
 def Laws.sidebar_full_branch_exact(reuse, shown):
   FULLBRANCH.shown_exact(reuse, shown)
@@ -13189,7 +13191,6 @@ def Laws.still_picture_disabled(key, res): {==}
 def Laws.still_picture_miss(res): {==}
 def Laws.still_picture_exact(res): {==}
 
-import ./test/sidebar_draft_image_test.bend as SIDEDRAFTPROOF
 def Laws.sidebar_draft_body_not_input(key, value, rest, h):
   SIDEDRAFTPROOF.body_drop(key, value, rest, h)
 def Laws.sidebar_draft_scratch_input(key, value, rest, h):
@@ -13219,7 +13220,6 @@ def Laws.far_items_projects(): {==}
 def Laws.hot_demo_threads(): {==}
 # ---- end F1 ----
 # ---- secret box ----
-import ./test/secret_proof.bend as SECPROOF
 def Laws.sec_mask_total(v, s, h):
   SECPROOF.secp_mask_total(v, s, h)
 def Laws.sec_vault_valid(ts):
@@ -13281,19 +13281,19 @@ def Laws.ref_origin_return_local(): {==}
 def Laws.ref_origin_owner_remote(): {==}
 def Laws.ref_origin_foreign_untouched(): {==}
 
-def startup_warm_accepted(w, rows):
+def Laws.startup_warm_accepted(w, rows):
   {==}
-def startup_warm_fallback(w, rows):
+def Laws.startup_warm_fallback(w, rows):
   {==}
 
-def mail_empty_success_quiet(): {==}
-def mail_failed_empty_preserved(): {==}
-def mail_no_triage_grants_outside_run(): {==}
-def mail_silent_bot_envelope(s, now, th, text): {==}
+def Laws.mail_empty_success_quiet(): {==}
+def Laws.mail_failed_empty_preserved(): {==}
+def Laws.mail_no_triage_grants_outside_run(): {==}
+def Laws.mail_silent_bot_envelope(s, now, th, text): {==}
 
 
-def codex_error_notice_kind(): {==}
-def codex_error_notice_no_effects(s, th, now, o): {==}
+def Laws.codex_error_notice_kind(): {==}
+def Laws.codex_error_notice_no_effects(s, th, now, o): {==}
 
 def Laws.life_fresh_owned_wakes():
   {==}
