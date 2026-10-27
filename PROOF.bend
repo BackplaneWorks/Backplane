@@ -6459,6 +6459,30 @@ def Laws.select_same_keeps_thread():
 def Laws.room_leaves_settings():
   {==}
 
+def Laws.made_leaves_settings():
+  {==}
+
+def Laws.rail_shown_shuts():
+  {==}
+
+def Laws.rail_shown_no_value():
+  {==}
+
+def Laws.rail_other_shows():
+  {==}
+
+def Laws.rail_shut_shows():
+  {==}
+
+def Laws.rail_shut_lights_none(k, p):
+  {==}
+
+def Laws.rail_part_lights_mech():
+  {==}
+
+def Laws.rail_palette_shuts():
+  {==}
+
 def Laws.hits_chat_line_slides(x0):
   {==}
 

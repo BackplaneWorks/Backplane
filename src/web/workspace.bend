@@ -45,6 +45,21 @@ def WS.palette.open(+u: U.Ui, +mode: String) -> U.Act:
 def WS.palette.close(u: U.Ui) -> U.Act:
   U.Act{U.Ui.flag_off(u, "palette"), [U.Focus{"composer"}]}
 
+# Commands toggles: pressed (or ctrl+shift+P) while open it shuts the palette
+# (client.bend's Rail.palette)
+def WS.palette.press.k(open: Bool, +u: U.Ui) -> U.Act:
+  match open:
+    case True{}: WS.palette.close(u)
+    case False{}: WS.palette.open(u, "")
+
+def WS.palette.press(+u: U.Ui) -> U.Act:
+  WS.palette.press.k(U.Ui.flag(u, "palette"), u)
+
+# a view's key toggles as its rail button does: ctrl+D on the diff on show
+# (ctrl+P on the files) shuts the viewer (client.bend's Rail.act)
+def WS.view.key(+u: U.Ui, +kind: String, +action: String) -> U.Act:
+  U.Ui.act(u, U.Rail.act(U.Rail.tab(u), kind, action), U.Rail.value(U.Rail.tab(u), kind, ""))
+
 def WS.term.hide(u: U.Ui) -> U.Act:
   U.Act{U.Ui.flag_off(u, "term"), [U.Focus{"composer"}]}
 
@@ -162,8 +177,8 @@ def WS.key(+combo: String, +u: U.Ui) -> U.Act:
     case "next": WS.neighbour(u, True{})
     case "new": U.Ui.act(u, "new-thread", WS.pid(u))
     case "settle": U.Ui.act(u, "settle", "")
-    case "diff": U.Ui.act(u, "diff", "")
-    case "files": U.Ui.act(u, "fm", "")
+    case "diff": WS.view.key(u, "diff", "diff")
+    case "files": WS.view.key(u, "files", "fm")
     case _: WS.key.digit(combo, u)
 
 def WS.handles(+action: String) -> Bool:
@@ -171,7 +186,7 @@ def WS.handles(+action: String) -> Bool:
 
 def WS.act(action: String, +u: U.Ui, +value: String) -> U.Act:
   match action:
-    case "ws-palette-open": WS.palette.open(u, "")
+    case "ws-palette-open": WS.palette.press(u)
     case "ws-palette-close": WS.palette.close(u)
     case "ws-palette-query": WS.none(U.Palette.set(u, value, 0n))
     case "bfield": WS.none(U.Palette.set(u, String.drop(value, 10n), 0n))

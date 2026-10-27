@@ -2871,36 +2871,39 @@ def View.workspace.label(+lc: I.Loc, kind: String) -> String:
     case "commands": View.commands.label(lc)
     case _: MSG.T.palette.terminal(lc)
 
-def View.workspace.button(+lc: I.Loc, +cur: String, +kind: String, +action: String, value: String) -> D.Node:
+# (tog: the rail's own buttons toggle, client.bend's Rail.*: the view on show
+# shuts the viewer; the menu's pick a view)
+def View.workspace.button(+tog: Bool, +lc: I.Loc, +cur: String, +kind: String, +action: String, +value: String) -> D.Node:
   D.El{"button", kind, [D.At{"type", "button"}, D.At{"class", Bool.pick(String, String.eq(cur, kind), "tab on", "tab")},
     D.At{"aria-label", View.workspace.label(lc, kind)}, D.At{"aria-current", Bool.pick(String, String.eq(cur, kind), "page", "false")},
-    D.At{"title", View.workspace.label(lc, kind)}, D.At{"data-value", value}, D.On{"click", action}],
+    D.At{"aria-pressed", Bool.pick(String, Bool.and(tog, String.eq(cur, kind)), "true", "false")},
+    D.At{"title", View.workspace.label(lc, kind)}, D.At{"data-value", Bool.pick(String, tog, U.Rail.value(cur, kind, value), value)}, D.On{"click", Bool.pick(String, tog, U.Rail.act(cur, kind, action), action)}],
     [WI.WIcon.svg(View.workspace.icon(kind), 18), D.Dom.span("workspace-label", View.workspace.label(lc, kind))]}
 
-def View.workspace.choices(+lc: I.Loc, +cur: String, term: Bool) -> List<&2, D.Node>:
+def View.workspace.choices(+tog: Bool, +lc: I.Loc, +cur: String, term: Bool, +palette: Bool) -> List<&2, D.Node>:
   [D.El{"div", "", [D.At{"class", "workspace-group"}, D.At{"role", "group"}, D.At{"aria-label", "Tools"}], [
-    View.workspace.button(lc, Bool.pick(String, term, "terminal", ""), "terminal", "term-toggle", "@term-size"),
-    View.workspace.button(lc, "", "commands", "ws-palette-open", "") ]},
+    View.workspace.button(False{}, lc, Bool.pick(String, term, "terminal", ""), "terminal", "term-toggle", "@term-size"),
+    View.workspace.button(False{}, lc, Bool.pick(String, palette, "commands", ""), "commands", U.Rail.palette(palette), "") ]},
    D.El{"div", "", [D.At{"class", "workspace-group"}, D.At{"role", "group"}, D.At{"aria-label", "Design"}], [
-    View.workspace.button(lc, cur, "board", "view-kind", "board"), View.workspace.button(lc, cur, "schematic", "view-kind", "schematic"),
-    View.workspace.button(lc, cur, "3d", "view-kind", "3d"), View.workspace.button(lc, cur, "split", "view-kind", "split"), View.workspace.button(lc, cur, "mech", "mech", "")]},
+    View.workspace.button(tog, lc, cur, "board", "view-kind", "board"), View.workspace.button(tog, lc, cur, "schematic", "view-kind", "schematic"),
+    View.workspace.button(tog, lc, cur, "3d", "view-kind", "3d"), View.workspace.button(tog, lc, cur, "split", "view-kind", "split"), View.workspace.button(tog, lc, cur, "mech", "mech", "")]},
    D.El{"div", "", [D.At{"class", "workspace-group"}, D.At{"role", "group"}, D.At{"aria-label", "Inspect"}], [
-    View.workspace.button(lc, cur, "files", "fm", ""), View.workspace.button(lc, cur, "diff", "diff", ""),
-    View.workspace.button(lc, cur, "review", "rv-page", "bom"), View.workspace.button(lc, cur, "browser", "view-kind", "browser")]}]
+    View.workspace.button(tog, lc, cur, "files", "fm", ""), View.workspace.button(tog, lc, cur, "diff", "diff", ""),
+    View.workspace.button(tog, lc, cur, "review", "rv-page", "bom"), View.workspace.button(tog, lc, cur, "browser", "view-kind", "browser")]}]
 
-def View.workspace.menu(+lc: I.Loc, +cur: String, term: Bool) -> D.Node:
+def View.workspace.menu(+lc: I.Loc, +cur: String, term: Bool, palette: Bool) -> D.Node:
   D.El{"details", "view-menu", [D.At{"class", "local-menu workspace-menu"}], [
     D.El{"summary", "", [D.At{"aria-label", "Workspace views and tools"}, D.At{"title", "Workspace views and tools"}], [
       WI.WIcon.svg(Bool.pick(String, String.is_empty(cur), "message-square", View.workspace.icon(cur)), 16),
       D.Dom.span("workspace-current", Bool.pick(String, String.is_empty(cur), MSG.T.bots.tab.chat(lc), View.workspace.label(lc, cur))), WI.WIcon.svg("chevron-down", 14)]},
-    D.El{"div", "", [D.At{"class", "local-menu-body"}], View.workspace.choices(lc, cur, term)}]}
+    D.El{"div", "", [D.At{"class", "local-menu-body"}], View.workspace.choices(False{}, lc, cur, term, palette)}]}
 
 # the rail's foot: a toggle host.js answers, its buttons icons only (their
 # names as tooltips), kept in this browser
-def View.workspace(+lc: I.Loc, +cur: String, +panel: Bool, +term: Bool) -> D.Node:
+def View.workspace(+lc: I.Loc, +cur: String, +panel: Bool, +term: Bool, +palette: Bool) -> D.Node:
   D.El{"nav", "workspace", [D.At{"class", "workspace-bar"}, D.At{"data-loading", MSG.T.viewer.loading(lc)}, D.At{"aria-label", MSG.T.thread.viewer(lc)}], [
-    D.El{"div", "", [D.At{"class", "workspace-rail"}], View.workspace.choices(lc, Bool.pick(String, panel, cur, ""), term)},
-    View.workspace.menu(lc, Bool.pick(String, panel, cur, ""), term),
+    D.El{"div", "", [D.At{"class", "workspace-rail"}], View.workspace.choices(True{}, lc, Bool.pick(String, panel, cur, ""), term, palette)},
+    View.workspace.menu(lc, Bool.pick(String, panel, cur, ""), term, palette),
     D.El{"div", "", [D.At{"class", "workspace-close"}], D.Dom.when(panel, WI.WIcon.button("viewer-close", "panel", "", MSG.T.viewer.close(lc), "panel-right", 18, MSG.T.viewer.close(lc)))},
     WI.WIcon.button("rail-toggle", "rail-toggle", "", "Compact or full rail", "chevron-left", 14, ""),
     D.El{"span", "viewer-feedback", [D.At{"class", "workspace-feedback"}, D.At{"role", "status"}], Nil{}}]}
@@ -2924,7 +2927,7 @@ def View.workspace.foot(rail: Bool, n: D.Node, foot: List<&2, D.Node>) -> D.Node
 
 def View.tabs.loc(+lc: I.Loc, +cur: String) -> D.Node:
   D.El{"nav", "", [D.At{"class", "viewer-tabs"}, D.At{"aria-label", MSG.T.thread.viewer(lc)}], [
-    View.workspace.menu(lc, cur, False{}), WI.WIcon.button("icon", "panel", "", MSG.T.viewer.close(lc), "x", 18, MSG.T.viewer.close(lc))]}
+    View.workspace.menu(lc, cur, False{}, False{}), WI.WIcon.button("icon", "panel", "", MSG.T.viewer.close(lc), "x", 18, MSG.T.viewer.close(lc))]}
 
 def View.workspace.legacy(+lc: I.Loc, +cur: String, +panel: Bool, term: Bool) -> D.Node:
   D.El{"nav", "workspace", [D.At{"class", "workspace-bar"}, D.At{"data-loading", MSG.T.viewer.loading(lc)}, D.At{"aria-label", MSG.T.thread.viewer(lc)}],
@@ -2933,9 +2936,9 @@ def View.workspace.legacy(+lc: I.Loc, +cur: String, +panel: Bool, term: Bool) ->
     List.append(&2, D.Node, View.destinations(lc, Bool.pick(String, panel, cur, "")),
       List.append(&2, D.Node, D.Dom.when(panel, D.Dom.button("viewer-close", "panel", "", MSG.T.viewer.close(lc), MSG.T.viewer.close(lc))), [D.El{"span", "viewer-feedback", [D.At{"class", "workspace-feedback"}, D.At{"role", "status"}], Nil{}}]))}
 
-def View.workspace.for(rail: Bool, +lc: I.Loc, +cur: String, +panel: Bool, +term: Bool) -> D.Node:
+def View.workspace.for(rail: Bool, +lc: I.Loc, +cur: String, +panel: Bool, +term: Bool, +palette: Bool) -> D.Node:
   match rail:
-    case True{}: View.workspace(lc, cur, panel, term)
+    case True{}: View.workspace(lc, cur, panel, term, palette)
     case False{}: View.workspace.legacy(lc, cur, panel, term)
 
 def View.tabs.for(rail: Bool, +lc: I.Loc, +cur: String) -> D.Node:
@@ -3001,7 +3004,7 @@ def View.thread.p(+lc: I.Loc, +u: U.Ui, t: M.Thread, pend: List<&2, String>, +at
       +own = Bool.and(View.chrome(u), List.is_empty(&2, D.Node, hd))
       View.thread.frame(View.rail(u), [D.At{"class", Bool.pick(String, View.rail(u), Bool.pick(String, term, "thread-view workspace-thread with-term", "thread-view workspace-thread"), Bool.pick(String, term, "thread-view with-term", "thread-view")) ++ Bool.pick(String, U.Flag.get(op, "drop"), " dropping", "")},
         D.At{"data-thread", id}, D.At{"data-drop", "attach"}, D.At{"data-drop-hover", "drop-hover"}],
-        View.workspace.foot(View.rail(u), View.workspace.for(View.rail(u), lc, U.Fm.tab(U.Str.get(nf, "view.kind:" ++ id)), panel, term), View.workspace.buy(U.Fab.rail(u))), List.concat(&2, D.Node, [
+        View.workspace.foot(View.rail(u), View.workspace.for(View.rail(u), lc, U.Rail.tab.of(panel, U.Str.get(nf, "view.kind:" ++ id), U.Str.get(nf, "view.path:" ++ id)), panel, term, U.Flag.get(op, "palette")), View.workspace.buy(U.Fab.rail(u))), List.concat(&2, D.Node, [
         View.top.own(own, View.rail(u), lc, hd, M.Thread{id, p, ti, c, a, turn, pe, ar, o, sa, ua, pi, en, br, wt, pr, mo, rm, im, se, de}, st, UZ.Chip.of(st, id, now), mini, panel, M.Snooze.on(now, U.Side.until(st, id)), U.Flag.get(op, "snooze"), term, String.eq(U.Str.get(nf, "view.kind:" ++ id), "diff"), String.eq(U.Str.get(drafts, "@del"), id), U.Str.get(drafts, "@ren"), U.Str.get(drafts, "@f.title")),
         View.kx.note(U.KX.note(nf, sel), nf, sel), View.kn.loc(lc, U.KN.thread(nf, st, sel), True{}),
         View.thread.workbar.own(own, lc, BI.BU.chat.summary(st, id), nf, id, View.running(turn)),

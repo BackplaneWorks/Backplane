@@ -3886,6 +3886,38 @@ law select_same_keeps_thread:
 law room_leaves_settings:
   {U.Ui.flag(U.Act.ui(U.Bots.room.select(U.Ui.flag_on(U.Ui.init(0n), "settings"), "r1")), "settings") == False{} : Bool}
 
+# a thread asked for in Settings (New thread) opens as it arrives and
+# Settings goes, as a click on it in the sidebar does
+law made_leaves_settings:
+  {U.Ui.flag(U.Ui.recv(U.Ui.recv(U.Act.ui(U.Ui.new_thread(U.Ui.flag_on(U.Ui.init(0n), "settings"), "p1")), U.Made.made("changes", "t9")), U.Made.demo("0", "t9")), "settings") == False{} : Bool}
+
+# The rail (client.bend's Rail.*): the button of the view on show shuts the
+# viewer, another view's shows its own, and with the viewer shut every
+# button shows its own view
+law rail_shown_shuts:
+  {U.Rail.act("board", "board", "view-kind") == "panel" : String}
+
+law rail_shown_no_value:
+  {U.Rail.value("diff", "diff", "x") == "" : String}
+
+law rail_other_shows:
+  {U.Rail.act("board", "schematic", "view-kind") == "view-kind" : String}
+
+law rail_shut_shows:
+  {U.Rail.act("", "board", "view-kind") == "view-kind" : String}
+
+law rail_shut_lights_none:
+  for k: String
+  for p: String
+  {U.Rail.tab.of(False{}, k, p) == "" : String}
+
+# a part shown in 3D lights Mech, as the viewer's own tabs say
+law rail_part_lights_mech:
+  {U.Rail.tab.of(True{}, "3d", "/p/mech/case.step") == "mech" : String}
+
+law rail_palette_shuts:
+  {U.Rail.palette(True{}) == "ws-palette-close" : String}
+
 # a room's posts are lines the tiles slide with, so a wheel notch reuses
 # what the last frame drew
 law hits_chat_line_slides:

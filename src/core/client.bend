@@ -5436,6 +5436,45 @@ def Mpage.base(+u: Ui) -> String:
 def Mpage.onpart(+u: Ui) -> Bool:
   Bool.and(String.eq(Ui.view_get(u, "view.kind"), "3d"), MC.Mech.is_model(Ui.view_get(u, "view.path")))
 
+# The rail
+# --------
+# The web's tool rail (view.bend's View.workspace): a button for each view
+# (Board, Schematic, 3D, Mech, Files, Diff, Review, Browser) and the tools
+# (Terminal, Commands). A button toggles what it opens: a view's button
+# pressed while its view is on show shuts the viewer (the "panel" action),
+# pressed otherwise it shows its view; Terminal and Commands open and shut
+# theirs. The keys do the same (ctrl+D Diff, ctrl+P Files; workspace.bend's
+# WS.key). Laws rail_*.
+
+# the view the rail lights: the one on show, "" while the viewer is shut (a
+# part shown in 3D is Mech's, an image or a PDF Files', as the viewer's own
+# tabs say)
+def Rail.tab.of(open: Bool, +kind: String, +path: String) -> String:
+  match open:
+    case True{}:
+      Bool.pick(String, Bool.and(String.eq(kind, "3d"), MC.Mech.is_model(path)), "mech", Fm.tab(kind))
+    case False{}:
+      ""
+
+def Rail.tab(+u: Ui) -> String:
+  Rail.tab.of(Ui.panel(u), Ui.view_get(u, "view.kind"), Ui.view_get(u, "view.path"))
+
+# a view's button shuts the viewer when its view is the one on show
+def Rail.shuts(+cur: String, +kind: String) -> Bool:
+  Bool.and(Bool.not(String.is_empty(cur)), String.eq(cur, kind))
+
+# what the button of view `kind` sends: its own action and value, or
+# "panel" (the viewer shut) while its view is on show
+def Rail.act(+cur: String, +kind: String, +act: String) -> String:
+  Bool.pick(String, Rail.shuts(cur, kind), "panel", act)
+
+def Rail.value(+cur: String, +kind: String, +value: String) -> String:
+  Bool.pick(String, Rail.shuts(cur, kind), "", value)
+
+# Commands: pressed (or its keys) while the palette is open, it shuts it
+def Rail.palette(open: Bool) -> String:
+  Bool.pick(String, open, "ws-palette-close", "ws-palette-open")
+
 # the model on show, from the project root when it is under it
 def Mpage.shown(+u: Ui) -> String:
   Bool.pick(String, String.starts_with(Ui.view_get(u, "view.path"), Mpage.base(u) ++ "/"),
@@ -9926,17 +9965,20 @@ def Ui.connection(+u: Ui, +generation: String) -> Ui:
 def Ui.installed(+u: Ui) -> Ui:
   Ui.info_set(Ui.info_set(u, "local.state.hub", Ui.info(u, "local.machine")), "local.state.gen", Ui.info(u, "local.generation"))
 
+# A thread or bot the person asked for (New thread, Fork, a machine's
+# thread or bot) opens as it arrives and leaves Settings, as a click on it
+# in the sidebar does (law made_leaves_settings)
 def Bots.wanted.m(m: Maybe<&2, BT.Bot>, u: Ui) -> Ui:
   match m:
     case Some{BT.Bot{+i, _, +th, _, _, _, _}}:
-      Bots.views(Bots.sel.set(u, th), i, "", "")
+      Ui.flag_off(Bots.views(Bots.sel.set(u, th), i, "", ""), "settings")
     case None{}:
       u
 
 def Want.thread.k(found: Bool, u: Ui, id: String) -> Ui:
   match found:
     case True{}:
-      Ui.scratch_set(Bots.views(Bots.sel.set(u, id), "", "", ""), "@thread.want", "")
+      Ui.flag_off(Ui.scratch_set(Bots.views(Bots.sel.set(u, id), "", "", ""), "@thread.want", ""), "settings")
     case False{}:
       u
 
