@@ -30,6 +30,7 @@ final class AppModel {
     @ObservationIgnored private var cacheTask: Task<Void, Never>?
     @ObservationIgnored private var lastScreenJSON: String?
     @ObservationIgnored private var earlyActions: [(String, String)] = []
+    @ObservationIgnored private var presentationIntent = PresentationIntent()
     @ObservationIgnored private var localDrafts: [String: String] = [:]
     @ObservationIgnored private var restoredAt: [String: UInt64] = [:]
     @ObservationIgnored private var wantsUsage = false
@@ -319,6 +320,7 @@ final class AppModel {
     @discardableResult func pair(_ text: String) -> Bool {
         let l = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let k = Pairing.key(l) else { return false }
+        presentationIntent.clear()
         pairingGeneration = engine.invalidatePairing()
         retiredPairings[k] = pairingGeneration
         if links.contains(where: { Pairing.key($0) == k }) { forgetPresentation(k) }
@@ -338,6 +340,7 @@ final class AppModel {
     }
 
     func unpair(_ key: String) {
+        presentationIntent.clear()
         pairingGeneration = engine.invalidatePairing()
         retiredPairings[key] = pairingGeneration
         forgetPresentation(key)
@@ -511,6 +514,7 @@ final class AppModel {
                 return Pairing.viewSocket(link).map { Hub.Next.go($0) } ?? Hub.Next.stop
             },
             onConnecting: { [weak self] in
+                if self?.screen?.hub == key { self?.presentationIntent.clear() }
                 self?.cachedReadiness.retire(key)
                 self?.thinReady[key] = nil
                 self?.thinRequests[key] = nil
@@ -536,6 +540,7 @@ final class AppModel {
                 }
             },
             onClose: { [weak self] failure in
+                if self?.screen?.hub == key { self?.presentationIntent.clear() }
                 if self?.conn[key]?.failure != failure {
                     NSLog("Backplane connection retry cause=%@ http=%@", failure.reason, failure.code)
                 }
@@ -612,6 +617,7 @@ final class AppModel {
     @ObservationIgnored var vaultText = ""
 
     func act(_ action: String, _ value: String = "") {
+        if action == "select" || Self.opens.contains(action) { presentationIntent.clear() }
         // the secret box's Save: the value joins the box's name, purpose and
         // thread and leaves in one secret.set request (Engine.secret)
         if action == "secret-save" {
@@ -635,6 +641,15 @@ final class AppModel {
         }
         if action == "select" || Self.opens.contains(action) { retireScreenCache() }
         if !contentReady {
+            if (action == "view" || action == "bot-tab"), let s = screen,
+               !cachedPresentation, !s.hub.isEmpty, startup[s.hub] == .thin,
+               hubs[s.hub] != nil, let status = conn[s.hub], status.phase == .syncing || status.phase == .online,
+               thinRequests[s.hub] != nil, (awaitedNav == nil || awaitedNav == Self.nav(s)),
+               ((action == "view" && s.thread != nil) || (action == "bot-tab" && s.bot != nil)) {
+                presentationIntent.offer(action, value, context: PresentationIntent.Context(hub: s.hub, selection: s.sel,
+                    nav: Self.nav(s), epoch: status.epoch, pairing: pairingGeneration))
+                return
+            }
             guard ["select", "bot", "room", "remote", "uber", "uber-bot", "tz-report"].contains(action) else { return }
             earlyActions.removeAll { $0.0 == action }
             let targetHub = links.compactMap(Pairing.key).first { value.hasPrefix($0 + "|") } ?? screen?.hub
@@ -1449,6 +1464,10 @@ final class AppModel {
         if contentReady, let sel = screen?.sel, let text = localDrafts.removeValue(forKey: sel) {
             run { await $0.quiet("draft", text) }
         }
+        let intentContext = screen.flatMap { s in conn[s.hub].map { status in
+            PresentationIntent.Context(hub: s.hub, selection: s.sel, nav: Self.nav(s), epoch: status.epoch, pairing: pairingGeneration)
+        } }
+        if let (action, value) = presentationIntent.take(context: intentContext, ready: contentReady) { act(action, value) }
         if fresh || cacheFresh, contentReady, !earlyActions.isEmpty {
             let actions = earlyActions
             earlyActions.removeAll()

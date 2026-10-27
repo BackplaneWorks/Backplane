@@ -119,7 +119,8 @@ export class NativeThinHost307265 {
         // newest), the cursors that led here, the one page on its way, and
         // pages a send overtook (their replies are dropped)
         cursor: '', back: [], paging: null, overtaken: new Set(),
-        revision: 0, drafts, queue: [], active: null, messages: new MessageParts(), findRevision: 0, findCloseOnce: false, registrations: new Map() };
+        revision: 0, drafts, queue: [], active: null, messages: new MessageParts(), findRevision: 0, findCloseOnce: false, registrations: new Map(),
+        shownTarget: null, deferredNavigation: null };
       this.states.set(hub, value);
     }
     return value;
@@ -237,13 +238,14 @@ export class NativeThinHost307265 {
     for (const [id, call] of this.ordinary) if (call.hub === hub) this.ordinary.delete(id);
     if (s) {
       s.ready = false; s.greeted = false; s.active = null; s.queue = []; s.messages.clear();
+      s.deferredNavigation = null; s.shownTarget = null;
       s.registrations.clear();
     }
   }
 
   fail(hub, reason) {
     const s = this.states.get(hub);
-    if (s) { s.ready = false; s.queue = []; }
+    if (s) { s.ready = false; s.queue = []; s.deferredNavigation = null; }
     this.sync.push({ hub, phase: 'failed', mode: 'view-v1', detail: String(reason), remoteReady: false });
   }
 
@@ -288,6 +290,7 @@ export class NativeThinHost307265 {
   }
 
   select(s, target, session) {
+    s.deferredNavigation = null;
     s.target = copy(target); s.session = copy(session); s.window = null;
     s.cursor = ''; s.back = []; s.paging = null;
     s.queue = []; s.messages.clear();
@@ -317,6 +320,7 @@ export class NativeThinHost307265 {
       return true;
     }
     if (intent.kind === 'select') {
+      s.deferredNavigation = null;
       const unchanged = s.session.sel === intent.session.sel;
       // Bootstrap preselect of the restored owner is no-effect and preserves
       // the compact route/open choices. A real selection after greeting opens.
@@ -331,7 +335,14 @@ export class NativeThinHost307265 {
       if (pending && pending.hub === hub && !pending.operation) this.issue(s, this.client.request(hub, 'view.cancel', intent.args));
       return true;
     }
-    if (!s.greeted || !s.ready) return true;
+    if (!s.greeted || !s.ready) {
+      // Only an already shown owner may retain a read-navigation tap while
+      // its current view refreshes. Never carry it into a new selection.
+      if (s.greeted && s.shown && same(s.target, s.shownTarget) && intent.kind === 'action' &&
+          ['view', 'bot-tab'].includes(action) && typeof value === 'string' && utf8Bytes(value) <= 1024)
+        s.deferredNavigation = { action, value, target: copy(s.target), sel: s.session.sel, epoch: s.epoch };
+      return true;
+    }
     // One page request at a time, each taken from the page shown. 'later'
     // retraces the trail back down to the newest: without it a phone that
     // paged up could never page back down (the list ended on the old page)
@@ -486,7 +497,7 @@ export class NativeThinHost307265 {
         if (old?.partial?.version !== entry.partial?.version) s.messages.reset(entry.id);
       }
       if (view.shown?.thread) view.shown.thread.later = s.back.length;
-      s.shown = view.shown; s.overlay = view.overlay;
+      s.shown = view.shown; s.overlay = view.overlay; s.shownTarget = copy(s.target);
       if (!s.flushed) { s.flushed = true; this.outboxFlush(hub); }
       this.sync.push({ hub, phase: 'presented', detail: 'view-v1', mode: 'view-v1', viewId: r.viewId,
         requestRevision: r.requestRevision, viewRevision: r.viewRevision, remoteReady: true });
@@ -494,6 +505,11 @@ export class NativeThinHost307265 {
       s.registrations.clear();
     } else if (result.current) this.fail(hub, 'Current view is not ready');
     if (result.refreshDue) this.update(s);
+    if (s.ready && s.deferredNavigation) {
+      const pending = s.deferredNavigation; s.deferredNavigation = null;
+      if (pending.epoch === s.epoch && pending.sel === s.session.sel && same(pending.target, s.target))
+        this.request(hub, pending.action, pending.value);
+    }
     this.pump(s); return true;
   }
 
