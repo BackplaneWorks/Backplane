@@ -727,7 +727,8 @@ private struct SearchField: View {
     var body: some View {
         HStack {
             Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-            TextField(search.hint, text: $text)
+            TextField(search.hint, text: $text, prompt: Text(search.hint).foregroundColor(.secondary))
+                .foregroundColor(.primary)
                 .accessibilityIdentifier("projects.search")
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
