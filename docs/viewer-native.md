@@ -7,8 +7,8 @@ board-axis transforms, native per-piece picking and Bend selection decisions
 are preserved.
 
 Both PlotStore implementations now demultiplex solids onto a separate serial
-mesh queue. A newer revision of the same source or a connection reset cancels
-outdated decode/publication. Cancellation is checked every 256 triangles. Exact
+mesh queue. Any newer solid response (including a source switch A → B), or a connection
+reset, cancels outdated decode/publication while completed source caches remain. Cancellation is checked every 256 triangles. Exact
 mesh bytes plus triangle count identify reusable geometry; the cache targets
 64 MiB and four sources, allowing one current model over the budget when wire
 bytes are included. `cachedMesh(key)` supplies immediate warm reopen without
