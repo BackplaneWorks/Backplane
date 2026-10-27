@@ -11,7 +11,13 @@ final class QualificationUITests: XCTestCase {
         let app = XCUIApplication()
         app.launch()
         XCTAssertTrue(app.textFields["pair.address"].waitForExistence(timeout: 20))
-        XCTAssertTrue(app.buttons["pair.connect"].exists)
+        let address = app.textFields["pair.address"]
+        let connect = app.buttons["pair.connect"]
+        XCTAssertTrue(connect.exists)
+        address.tap()
+        address.typeText("invalid")
+        connect.tap()
+        XCTAssertTrue(app.staticTexts["pair.address.error"].waitForExistence(timeout: 5))
     }
 
     // Run after pairing through the app UI. No credential is passed to XCTest.
