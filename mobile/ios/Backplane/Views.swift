@@ -984,8 +984,7 @@ struct ThreadDestination: View {
                     .disabled(!ready)
                     .overlay(alignment: .top) { if !ready { loadingStatus } }
             } else if let t = (selected ? model.screen?.thread : nil) ?? model.seen[id] {
-                ThreadScreen(model: model, thread: t, live: ready).id(id).allowsHitTesting(ready)
-                    .disabled(!ready)
+                ThreadScreen(model: model, thread: t, live: ready).id(id)
                     .overlay(alignment: .top) { if !ready { loadingStatus } }
             } else {
                 VStack(alignment: .leading, spacing: 20) {
@@ -1091,8 +1090,8 @@ struct ThreadScreen: View {
     @Environment(\.backplaneLanguage) private var lang
     @Bindable var model: AppModel
     let thread: ThreadView
-    // the client has this thread selected (else it shows as last seen,
-    // for the moment the select takes, and takes no input)
+    // A last-seen thread remains scrollable while selection or reconnect is
+    // pending. Entry actions and hub controls require the fresh selection.
     var live = true
     // the image open in the lightbox
     @State private var shown: Shown?
@@ -1152,6 +1151,10 @@ struct ThreadScreen: View {
                 }
                 .padding()
                 .environment(\.backplaneLanguage, lang)
+                // Gate the hosted controls, leaving the enclosing UIKit
+                // scroll view available for reading the matching cached thread.
+                .disabled(!live)
+                .allowsHitTesting(live)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .overlay(alignment: .bottomTrailing) {
@@ -1187,6 +1190,7 @@ struct ThreadScreen: View {
         // a file link tapped in a message asks for its menu (Open and Show
         // in folder act on the hub's machine, Copy path here)
         .environment(\.openURL, OpenURLAction { url in
+            guard live else { return .discarded }
             if model.open(url, sourceHub: model.screen?.hub) { return .handled }
             guard let p = FileLink.path(url) else { return .systemAction }
             model.act("file-menu", p)
@@ -1194,18 +1198,24 @@ struct ThreadScreen: View {
         })
         .confirmationDialog(fileMenu?.title ?? "", isPresented: fileUp, titleVisibility: .visible, presenting: fileMenu) { m in
             ForEach(m.items, id: \.self) { i in
-                Button(i.label) { shutFile = m; model.act(i.action, i.value) }
+                Button(i.label) { shutFile = m; model.act(i.action, i.value) }.disabled(!live)
             }
             Button(NativeMessages.common_cancel(lang), role: .cancel) {}
         }
         .onChange(of: fileMenu) { _, m in if m == nil { shutFile = nil } }
         .fullScreenCover(item: $shown) { s in Lightbox(shown: s) { shown = nil } }
-        .sheet(isPresented: $showSubs) { SubsSheet(model: model) }
-        .sheet(isPresented: Binding(get: { thread.diff != nil }, set: { if !$0, model.screen?.thread?.diff != nil { model.act("panel") } })) {
-            if let d = model.screen?.thread?.diff { DiffSheet(model: model, diff: d) }
+        .sheet(isPresented: $showSubs) { SubsSheet(model: model).disabled(!live) }
+        .sheet(isPresented: Binding(get: { thread.diff != nil }, set: {
+            if !$0, live, model.contentReady, model.screen?.thread?.id == thread.id,
+               model.screen?.thread?.diff != nil { model.act("panel") }
+        })) {
+            if let d = thread.diff { DiffSheet(model: model, diff: d).disabled(!live) }
         }
-        .sheet(isPresented: Binding(get: { thread.term != nil }, set: { if !$0, model.screen?.thread?.term != nil { model.act("term-toggle") } })) {
-            if let t = model.screen?.thread?.term { TermSheet(model: model, term: t).presentationDetents([.large]) }
+        .sheet(isPresented: Binding(get: { thread.term != nil }, set: {
+            if !$0, live, model.contentReady, model.screen?.thread?.id == thread.id,
+               model.screen?.thread?.term != nil { model.act("term-toggle") }
+        })) {
+            if let t = thread.term { TermSheet(model: model, term: t).disabled(!live).presentationDetents([.large]) }
         }
         .toolbar {
             if model.mailroomReturn != nil {
@@ -1224,7 +1234,7 @@ struct ThreadScreen: View {
                         }
                         // the thread's Boat chip: a tap opens Settings (Usage)
                         if let b = thread.boat, !b.isEmpty {
-                            Button(b) { model.act("usage-open") }.font(.caption2).lineLimit(1)
+                            Button(b) { model.act("usage-open") }.font(.caption2).lineLimit(1).disabled(!live)
                         }
                     }
                 }
@@ -1241,9 +1251,12 @@ struct ThreadScreen: View {
                         .foregroundStyle(u.busy.isEmpty ? Color.secondary : PhaseColor.accent)
                     }
                     .accessibilityLabel(NativeMessages.native_thread_subagents(lang, u.word ?? u.busy))
+                    .disabled(!live)
                 }
                 ForEach(thread.tools.filter { $0.action == "interrupt" }, id: \.self) { t in
                     Button(t.label, systemImage: "stop.fill") { model.act(t.action) }
+                        .disabled(!live)
+                        .accessibilityIdentifier("thread.interrupt")
                 }
                 Menu {
                     if thread.canChild == true {
@@ -1273,13 +1286,16 @@ struct ThreadScreen: View {
                 } label: {
                     Image(systemName: "ellipsis.circle")
                 }
+                .disabled(!live)
+                .accessibilityIdentifier("thread.tools")
             }
         }
     }
 
     // the screen's menu when it is a file link's
     private var fileMenu: RowMenu? {
-        model.screen?.rowMenu.flatMap { $0.kind == "f" ? $0 : nil }
+        guard live, model.screen?.thread?.id == thread.id else { return nil }
+        return model.screen?.rowMenu.flatMap { $0.kind == "f" ? $0 : nil }
     }
 
     // shown until picked from or let go of; let go with no pick, it is closed
@@ -1287,9 +1303,10 @@ struct ThreadScreen: View {
         Binding(get: { fileMenu.map { $0 != shutFile } ?? false }, set: { up in
             guard !up, let m = fileMenu else { return }
             shutFile = m
-            let model = self.model
+            let model = self.model, owner = thread.id
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                if model.screen?.rowMenu == m { model.act("menu-close", "") }
+                if model.contentReady, model.screen?.thread?.id == owner,
+                   model.screen?.rowMenu == m { model.act("menu-close", "") }
             }
         })
     }

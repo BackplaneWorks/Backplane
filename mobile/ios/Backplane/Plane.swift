@@ -284,17 +284,33 @@ struct PlaneSections: View {
 private struct PlaneStrip: View {
     @Environment(\.backplaneLanguage) private var lang
     @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.colorScheme) private var colorScheme
     let model: AppModel
     let plane: PlaneModel
 
     private func counter(_ n: Int, _ label: String, _ tint: Color, id: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text("\(n)").font(.title2.weight(.semibold)).monospacedDigit().foregroundStyle(n > 0 ? tint : Color.secondary)
-            Text(label).font(.caption2).textCase(.uppercase).foregroundStyle(.secondary)
+            Text("\(n)").font(.title2.weight(.semibold)).monospacedDigit()
+                .foregroundStyle(n > 0 ? metricTint(tint, id: id) : BackplaneDesign.secondaryText)
+                .accessibilityIdentifier("home.metric.value." + id)
+            Text(label).font(.caption2).textCase(.uppercase).foregroundStyle(BackplaneDesign.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("home.metric.label." + id)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func metricTint(_ dark: Color, id: String) -> Color {
+        guard colorScheme != .dark else { return dark }
+        // The phase hues stay recognizable on the light List card while
+        // reaching readable contrast for both counts and enlarged text.
+        switch id {
+        case "need": return PhaseColor.rgb(0x795513)
+        case "running": return PhaseColor.rgb(0x205da8)
+        case "working": return PhaseColor.rgb(0x27693f)
+        case "rooms": return PhaseColor.rgb(0x7440ad)
+        default: return BackplaneDesign.secondaryText
+        }
     }
 
     private func dot(_ s: String) -> Color {
