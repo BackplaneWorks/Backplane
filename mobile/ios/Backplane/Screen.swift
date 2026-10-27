@@ -1008,7 +1008,7 @@ struct Out: Decodable, @unchecked Sendable {
         let d = Data(text.utf8)
         let answer: Cmds
         do { answer = try JSONDecoder().decode(Cmds.self, from: d) } catch {
-            NSLog("Backplane answer unreadable: %@", String(describing: error))
+            NSLog("Backplane decode answer %@", WireDecodeDiagnostic.summary(error))
             return nil
         }
         guard screen else { return Out(screen: nil, cmds: answer.cmds, sync: answer.sync, deadline: answer.deadline, inert: answer.inert == true) }
@@ -1016,7 +1016,7 @@ struct Out: Decodable, @unchecked Sendable {
             let s = try JSONDecoder().decode(ScreenOnly.self, from: d)
             return Out(screen: s.screen, cmds: answer.cmds, screenJSON: s.screen == nil ? nil : text, sync: answer.sync, deadline: answer.deadline, inert: answer.inert == true)
         } catch {
-            NSLog("Backplane screen unreadable: %@", String(describing: error))
+            NSLog("Backplane decode screen %@", WireDecodeDiagnostic.summary(error))
             return Out(screen: nil, cmds: answer.cmds, sync: answer.sync, deadline: answer.deadline, inert: answer.inert == true)
         }
     }
@@ -1032,8 +1032,7 @@ struct Lossy<T: Decodable>: Decodable {
     let value: T?
     init(from decoder: Decoder) throws {
         do { value = try T(from: decoder) } catch {
-            NSLog("Backplane skipped %@ at %@: %@", String(describing: T.self),
-                  decoder.codingPath.map(\.stringValue).joined(separator: "."), String(describing: error))
+            NSLog("Backplane decode skipped %@ %@", String(describing: T.self), WireDecodeDiagnostic.summary(error))
             value = nil
         }
     }
