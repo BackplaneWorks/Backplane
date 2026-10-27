@@ -82,7 +82,7 @@ for(const quiet of [false,true]) {
  const completed=respond(p,follow[0],{...fixture.open,viewRevision:'3'});checked(p.requests(completed).length===0,'actual emitted newest revision ends refresh');
 }
 const c=client();start(c,{'h|t':'private draft','h|other':'other draft'});const open=begin(c);
-const ancillary=[{t:'info',info:{pair:'','pair.qr':''}},{t:'hb'},
+const ancillary=[{t:'info',info:{pair:'','pair.qr':''}},{t:'hb'},{t:'plotrevision',key:'2|fixture-root|',revision:'fixture-revision'},
  {t:'info',info:{pair:'sanitized-fixture-link','pair.qr':'sanitized-fixture-qr'}}];
 const pendingDeadline=c.out('pulse').deadline, pendingCompact=c.call('savePresentation');
 for(const frame of ancillary){const inert=c.recv(frame);
