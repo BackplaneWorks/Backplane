@@ -87,6 +87,7 @@ export class NativeThinHost307265 {
     this.api = api;
     this.states = new Map(); this.paired = new Set(); this.current = '';
     this.pending = new Map(); this.ordinary = new Map(); this.commands = []; this.sync = [];
+    this.commandOwners = new WeakMap();
     // The outbox: a message sent is kept until its hub answers. A drop
     // before the answer (or a send while the socket is down, which the app
     // cannot deliver) leaves it here; each view connection that presents
@@ -140,7 +141,7 @@ export class NativeThinHost307265 {
     this.states.delete(hub);
     this.paired.delete(hub);
     for (const [msg, item] of this.outbox) if (item.hub === hub) this.outbox.delete(msg);
-    this.commands = this.commands.filter(c => c.hub !== hub);
+    this.commands = this.commands.filter(c => this.commandOwners.get(c) !== hub);
     this.sync = this.sync.filter(s => s.hub !== hub);
     if (this.current === hub) this.current = '';
   }
@@ -150,6 +151,11 @@ export class NativeThinHost307265 {
     this.states.clear(); this.paired.clear(); this.current = '';
     this.pending.clear(); this.ordinary.clear(); this.commands = []; this.sync = [];
     this.outbox.clear();
+  }
+
+  enqueue(hub, ...commands) {
+    for (const command of commands) this.commandOwners.set(command, hub);
+    this.commands.push(...commands);
   }
 
   outboxKeep(hub, rpc) {
@@ -165,7 +171,7 @@ export class NativeThinHost307265 {
       if (envelope.ok === false) {
         const thread = String(o.rpc.p.thread || ''), s = this.states.get(hub);
         if (thread && s && !s.session.drafts[thread]) {
-          this.commands.push({ type: 'keep', thread: hub + '|' + thread, text: String(o.rpc.p.text || '') });
+          this.enqueue(hub, { type: 'keep', thread: hub + '|' + thread, text: String(o.rpc.p.text || '') });
           s.session.drafts = { ...s.session.drafts, [thread]: String(o.rpc.p.text || '') };
         }
       }
@@ -180,7 +186,7 @@ export class NativeThinHost307265 {
     for (const [msg, o] of this.outbox) {
       if (o.hub !== hub) continue;
       if (now - o.at > 86400000) { this.outbox.delete(msg); continue; }
-      this.commands.push(this.api.command(hub, { type: 'send', text: JSON.stringify(o.rpc) }, {}, false));
+      this.enqueue(hub, this.api.command(hub, { type: 'send', text: JSON.stringify(o.rpc) }, {}, false));
     }
   }
 
@@ -258,7 +264,7 @@ export class NativeThinHost307265 {
       this.fail(s.hub, 'Invalid request adapter'); return false;
     }
     const descriptors = result.cmds.map(c => this.api.send(c.hub, c.request));
-    this.commands.push(...descriptors);
+    this.enqueue(s.hub, ...descriptors);
     return true;
   }
 
@@ -298,7 +304,7 @@ export class NativeThinHost307265 {
       s.revision++;
       s.session = copy(intent.session);
       s.drafts.set(s.session.sel, { revision: s.revision, text: value });
-      this.commands.push({ type: 'keep', thread: hub + '|' + s.session.sel, text: value });
+      this.enqueue(hub, { type: 'keep', thread: hub + '|' + s.session.sel, text: value });
       return true;
     }
     if (intent.kind === 'find') {
@@ -470,7 +476,7 @@ export class NativeThinHost307265 {
         s.drafts.set(thread, { revision: metadata.revision, text: c.text });
       }
     }
-    this.commands.push(...commands);
+    this.enqueue(hub, ...commands);
     if (result.current && r.nextTarget) { this.select(s, r.nextTarget, s.session); return true; }
     if (result.current && result.remoteReady) {
       for (const old of s.window?.partial || []) if (!result.window.partial.some(p => p.id === old.id && p.version === old.version)) s.messages.reset(old.id);
@@ -500,7 +506,7 @@ export class NativeThinHost307265 {
     s.session.rid = Math.max(s.session.rid, acknowledged.rid);
     if (original.thread && (s.drafts.get(original.thread)?.revision || 0) <= original.revision) {
       const text = acknowledged.drafts[original.thread] || '';
-      if (text !== s.session.drafts[original.thread]) this.commands.push({ type: 'keep', thread: hub + '|' + original.thread, text });
+      if (text !== s.session.drafts[original.thread]) this.enqueue(hub, { type: 'keep', thread: hub + '|' + original.thread, text });
       s.session.drafts = { ...s.session.drafts, [original.thread]: text };
       s.drafts.set(original.thread, { revision: original.revision, text });
     }
@@ -554,7 +560,7 @@ export class NativeThinHost307265 {
         this.ordinary.size >= 128 || this.ordinary.has(ordinaryKey(s.hub, rpc.id))) return;
     s.session.rid = Math.max(s.session.rid, prepared.session.rid);
     this.ordinary.set(ordinaryKey(s.hub, rpc.id), { hub: s.hub, epoch: s.epoch, revision: s.revision, thread: '', session: { ...s.session, outbox: {} } });
-    this.commands.push(this.api.command(s.hub, command, {}, false));
+    this.enqueue(s.hub, this.api.command(s.hub, command, {}, false));
   }
 
   expire() {

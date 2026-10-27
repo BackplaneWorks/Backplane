@@ -554,7 +554,9 @@ globalThis.Backplane = {
     bubLive.delete(key);
     bubMoves.disconnect(key);
     syncUpdates = syncUpdates.filter(s => s.hub !== key);
-    return direct([], false);
+    // Do not drain another hub's queued commands or status into a discarded
+    // retirement reply; the next ordinary bridge call delivers those.
+    return JSON.stringify({ screen: null, cmds: [], sync: [], deadline: currentDeadline() });
   },
   // a choice that belongs to this device, not the hub (the thread list's
   // "view": "projects" or "active"; "" leaves it to the hub's setting)
