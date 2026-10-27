@@ -517,6 +517,44 @@ final class QualificationUITests: XCTestCase {
     }
     func testComposerAppearance() { captureComposerAppearance(largeType: false) }
     func testLargeTypeComposerAppearance() { captureComposerAppearance(largeType: true) }
+    func testLargeTypeSettingsTabReachability() {
+        let app = XCUIApplication()
+        app.terminate()
+        app.launchEnvironment["BACKPLANE_SELECT"] = "t1790229700-1088"
+        app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityM"]
+        app.launch(); closeRestoredViewer(app)
+        let composer = app.textFields["thread.composer"]
+        XCTAssertTrue(composer.waitForExistence(timeout: 60))
+        let routines = app.buttons["tab.routines"]
+        let settings = app.buttons["tab.settings"]
+        let threads = app.buttons["tab.threads"]
+        XCTAssertTrue(routines.waitForExistence(timeout: 15)); routines.swipeLeft()
+        XCTAssertTrue(settings.waitForExistence(timeout: 15)); XCTAssertTrue(settings.isHittable)
+        XCTAssertTrue(app.frame.contains(settings.frame), "Settings tab must be fully inside the screen")
+        settings.tap(); XCTAssertTrue(settings.isSelected)
+        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 20), "The Settings screen must open")
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "large-type-settings"; shot.lifetime = .keepAlways; add(shot)
+        if !threads.isHittable { routines.swipeRight() }
+        XCTAssertTrue(threads.waitForExistence(timeout: 10)); XCTAssertTrue(threads.isHittable)
+        threads.tap(); XCTAssertTrue(threads.isSelected)
+        XCTAssertTrue(composer.waitForExistence(timeout: 30), "Returning to Threads must restore its composer")
+    }
+    func testLeaveDedicatedProReady() {
+        let app = XCUIApplication()
+        app.terminate()
+        app.launchEnvironment["BACKPLANE_QUALIFICATION"] = "1"
+        app.launch()
+        closeRestoredViewer(app)
+        XCTAssertTrue(app.descendants(matching: .any)["qualification.connection.ready"].waitForExistence(timeout: 60))
+        XCTAssertFalse(app.descendants(matching: .any)["qualification.connection.parked"].exists)
+        XCTAssertFalse(app.textFields["pair.address"].exists)
+        app.terminate()
+        app.launchEnvironment.removeAll()
+        app.launch()
+        closeRestoredViewer(app)
+        XCTAssertTrue(app.buttons["tab.threads"].waitForExistence(timeout: 45))
+        XCTAssertFalse(app.textFields["pair.address"].exists)
+    }
 
     func testInitialThreadLaunchObservations() {
         let app = XCUIApplication()
