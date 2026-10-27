@@ -44,9 +44,11 @@ struct ViewerConnectionStatus: View {
     @Environment(\.backplaneLanguage) private var lang
     let model: AppModel
     var body: some View {
-        if model.conn[hub]?.phase == .offline {
-            Text(HubDot.word(.offline, lang)).font(.caption).foregroundStyle(.secondary)
-                .accessibilityIdentifier("viewer.connection.offline")
+        let phase = model.conn[hub]?.phase ?? .offline
+        if phase != .online || !model.contentReady {
+            let shown = phase == .online ? HubConn.Phase.syncing : phase
+            Text(HubDot.word(shown, lang)).font(.caption).foregroundStyle(.secondary)
+                .accessibilityIdentifier("viewer.connection." + String(describing: shown))
         }
     }
 }

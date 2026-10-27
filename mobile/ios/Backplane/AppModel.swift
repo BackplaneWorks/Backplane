@@ -37,6 +37,10 @@ final class AppModel {
     private var viewerPublished: Viewer?
     @ObservationIgnored private var viewerCloseSending: ViewerCloseIntent.Token?
     @ObservationIgnored private var viewerClosedStamp = ViewerClosedStamp.load()
+    @ObservationIgnored private var viewerResume = ViewerResumeIntent()
+    @ObservationIgnored private var viewerResumeDefault = false
+    @ObservationIgnored private var viewerResumeExpected: (request: ViewerCloseIntent.Token, captured: ViewerCloseIntent.Token)?
+    private var viewerResumeFailed: ViewerCloseIntent.Token?
     @ObservationIgnored private var projectSearch = ProjectSearchIntent()
     @ObservationIgnored private var projectSearchOwner: UInt64 = 0
     @ObservationIgnored private var projectSearchGo: ProjectSearchIntent.Go?
@@ -199,6 +203,9 @@ final class AppModel {
             "viewerClosePending": String(viewerClose.pending != nil),
             "viewerRequested": viewerOpening?.source.kind ?? "none",
             "viewerAcceptedIntent": viewerReceipt.map { String($0.intent) } ?? "none",
+            "viewerResumePending": String(viewerResume.preserves(viewerClose.current)),
+            "viewerResumeClaimed": String(viewerResumeExpected != nil),
+            "viewerResumeFailed": String(viewerResumeFailed != nil),
             "markEpoch": mark.map { String($0.epoch) } ?? "none", "markNav": mark?.nav ?? "none"
         ]
         for (key, value) in qualificationIncoming { values["incoming." + key] = value }
@@ -574,6 +581,7 @@ final class AppModel {
                 return Pairing.viewSocket(link).map { Hub.Next.go($0) } ?? Hub.Next.stop
             },
             onConnecting: { [weak self] in
+                self?.captureViewerResume(key)
                 self?.viewerCloseSending = nil
                 self?.viewerReceipt = nil
                 self?.endProjectSearch()
@@ -734,6 +742,7 @@ final class AppModel {
                     else { out = await e.act(action, value) }
                     apply(out, generation: generation)
                     guard generation == pairingGeneration else { return }
+                    if out == nil, let viewerRequest { failViewerResume(viewerRequest) }
                     dirty = true
                     keep()
                 }
@@ -753,6 +762,7 @@ final class AppModel {
             else { out = await e.act(action, value) }
             apply(out, generation: generation)
             guard generation == pairingGeneration else { return }
+            if out == nil, let viewerRequest { failViewerResume(viewerRequest) }
             if navigation { dirty = true; keep() }
         }
     }
@@ -778,6 +788,9 @@ final class AppModel {
         .init(kind: v.open, key: v.key, layers: v.layers)
     }
     private func cancelViewer() {
+        viewerResume.cancel()
+        viewerResumeExpected = nil
+        viewerResumeFailed = nil
         viewerClose.cancel()
         viewerOpening = nil
         viewerReceipt = nil
@@ -787,6 +800,9 @@ final class AppModel {
     }
     private func beginViewerOpen(_ kind: String) -> ViewerCloseIntent.Token? {
         guard let s = screen, let thread = s.thread, !s.hub.isEmpty else { return nil }
+        viewerResume.cancel()
+        viewerResumeExpected = nil
+        viewerResumeFailed = nil
         viewerClosedStamp = nil
         ViewerClosedStamp.clear()
         let token = viewerClose.reserve(owner: viewerOwner(s), source: .init(kind: kind, key: thread.viewer.key, layers: thread.viewer.layers))
@@ -811,11 +827,27 @@ final class AppModel {
                       conn[owner.hub]?.phase == .online, conn[owner.hub]?.stage == "live" else { return }
             }
             let accepted = ViewerCloseIntent.Token(owner: owner, source: source, presentation: requested.presentation)
+            if let expected = viewerResumeExpected, expected.request == requested {
+                viewerResumeExpected = nil
+                guard ViewerResumeIntent.matchesSource(expected.captured, accepted: source), Self.defaultViewer(thread.viewer) else {
+                    viewerOpening = nil
+                    viewerReceipt = nil
+                    viewerResumeFailed = viewerClose.current
+                    engine.viewerToken(viewerClose.current)
+                    return
+                }
+            }
             viewerClose.accept(accepted)
             viewerPublished = thread.viewer
             viewerOpening = nil
             viewerReceipt = nil
             engine.viewerToken(accepted)
+            return
+        }
+        if let current = viewerClose.current, current.owner == owner, !viewerClose.locallyClosed,
+           viewerResume.preserves(current) || viewerResumeFailed == current {
+            // A fresh connection-local actor has not restored its viewer yet.
+            // Retain only this presentation; it is not freshness authority.
             return
         }
         guard !source.kind.isEmpty else { cancelViewer(); return }
@@ -846,6 +878,9 @@ final class AppModel {
     }
     func closeViewer(_ token: ViewerCloseIntent.Token) {
         guard viewerClose.close(token) else { return }
+        viewerResume.cancel()
+        viewerResumeExpected = nil
+        viewerResumeFailed = nil
         viewerOpening = nil
         viewerReceipt = nil
         presentationIntent.clear()
@@ -862,9 +897,74 @@ final class AppModel {
               links.contains(where: { Pairing.key($0) == token.owner.hub }) else { return }
         // Reconnect this app's socket: the hub must discard its plot delta
         // holders too. Repeating the same viewer choice need not resend it.
+        // Retire a previous in-flight restore before starting an explicit retry.
+        viewerOpening = nil
+        viewerReceipt = nil
+        viewerResumeExpected = nil
+        viewerResumeFailed = nil
+        engine.viewerToken(token)
+        viewerResume.capture(token, fromEpoch: conn[token.owner.hub]?.epoch ?? 0)
+        viewerResumeDefault = viewerPublished.map(Self.defaultViewer) ?? false
         plots.resumeQualificationDelivery()
         plots.reset()
         retryConnection(token.owner.hub)
+    }
+    private static func defaultViewer(_ viewer: Viewer) -> Bool {
+        ViewerResumeIntent.canRestoreDefault(.init(kind: viewer.open, key: viewer.key, layers: viewer.layers)) &&
+        viewer.hist == nil && viewer.parts != false && viewer.picked.isEmpty &&
+        (viewer.off ?? 0) == 0 && (viewer.dim ?? 0) == 0 && (viewer.lift ?? 255) == 255 &&
+        (viewer.layerMode ?? 0) == 0 &&
+        (viewer.open != "schematic" || !(viewer.sheets ?? []).contains(where: { $0.on && $0.value != "0" }))
+    }
+    private func captureViewerResume(_ hub: String) {
+        guard let current = viewerClose.current, current.owner.hub == hub,
+              visibleViewerToken(for: current.owner.nav) == current, screen?.hub == hub,
+              screen.map(Self.nav) == current.owner.nav else { return }
+        if let expected = viewerResumeExpected, viewerOpening == expected.request {
+            // A claimed request belongs to the connection being retired. Do
+            // not silently replay it through another connection incarnation.
+            failViewerResume(expected.request)
+            return
+        }
+        guard viewerOpening == nil, viewerResumeFailed != current else { return }
+        guard !viewerResume.preserves(current) else { return }
+        viewerResume.capture(current, fromEpoch: conn[hub]?.epoch ?? 0)
+        viewerResumeDefault = viewerPublished.map(Self.defaultViewer) ?? false
+        viewerResumeFailed = nil
+    }
+    func viewerNeedsSelection(_ token: ViewerCloseIntent.Token) -> Bool { viewerResumeFailed == token }
+    private func advanceViewerResume() {
+        guard let s = screen, let thread = s.thread, let status = conn[s.hub],
+              let current = visibleViewerToken(for: thread.id), current.owner == viewerOwner(s),
+              path.last == current.owner.nav, awaitedNav == nil else { return }
+        let allowed = Set(thread.viewer.choices.map(\.value))
+        if contentReady, viewerResume.preserves(current), !allowed.contains(current.source.kind) {
+            viewerResume.cancel()
+            viewerResumeFailed = current
+            return
+        }
+        guard let captured = viewerResume.claim(current: current, epoch: status.epoch, ready: contentReady, allowed: allowed) else { return }
+        guard viewerResumeDefault else { viewerResumeFailed = current; return }
+        // Use the normal token-fenced read-navigation action, so the new
+        // server actor requests its geometry. Never replay a mutation.
+        act("view", captured.source.kind)
+        if let request = viewerOpening {
+            viewerResumeExpected = (request, captured)
+            Task { [weak self] in
+                do { try await Task.sleep(for: .seconds(30)) } catch { return }
+                self?.failViewerResume(request)
+            }
+        } else { viewerResumeFailed = current }
+    }
+    private func failViewerResume(_ request: ViewerCloseIntent.Token) {
+        guard let expected = viewerResumeExpected, expected.request == request,
+              viewerOpening == request, viewerClose.current == expected.captured, !viewerClose.locallyClosed else { return }
+        viewerResume.cancel()
+        viewerResumeExpected = nil
+        viewerOpening = nil
+        viewerReceipt = nil
+        viewerResumeFailed = expected.captured
+        engine.viewerToken(expected.captured)
     }
     private func advanceViewerClose() {
         guard let token = viewerClose.pending, viewerCloseSending == nil, let s = screen, let thread = s.thread,
@@ -1843,6 +1943,7 @@ final class AppModel {
             default: break
             }
         }
+        advanceViewerResume()
         advanceViewerClose()
         advanceProjectSearch()
         if contentReady, let thread = screen?.thread?.id, let text = localDrafts[thread], composerDrafts.pending(for: thread) != nil {
