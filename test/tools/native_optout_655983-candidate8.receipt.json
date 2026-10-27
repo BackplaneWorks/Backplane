@@ -1,0 +1,23 @@
+{
+  "scope": "Synthetic captured candidate 8 old-native opt-out; source validators and actual emitted bridges only. No live hub, native UI, performance, or deployment claim.",
+  "handoff": {"path": "/home/h/Documents/i2cjak/backplane-bend/.backplane/worktrees/chat-loading-v2-679512/build/chat-loading-v2/HANDOFF.json", "sha256": "9c12794e277563a944879ecbf6264962eaef22cb3215ef3268230d5a02e8c940"},
+  "manifest": {"path": "/home/h/Documents/i2cjak/backplane-bend/.backplane/worktrees/chat-loading-v2-679512/build/chat-loading-v2/NATIVE-OPTOUT-8.json", "sha256": "912816f40286a70da12e9333757cd4798d19fcf868a6e8138ff91ebbdb3a0aff"},
+  "fixtures": {
+    "closed": "b6f260015109b1fa2e4fd550d64a87f3dd1811f67cd91d4710de835c48184ce5",
+    "expanded": "ae088a5a26ba91bd0cd3f5f797fdc7837772e75e0df09d5ef5049d08818165da",
+    "explicit-body": "3302e64f76fe28981b9a67061765aec327848be0ac26100ac510a54d95ce9c6f"
+  },
+  "fixtureSourceHead": "4116fb58c77d879f57206da76e5e0ac07a9a86b2",
+  "fixtureServiceSha256": "b15b9b228e8d8fddb564e4a5f7f589ac2cd5162d817d7fab943d88eae2fe3d9c",
+  "cborSourceSha256": "81463f1d4ad8c0d99cb71f35caa50742e4009f57e196f70075a02a08d139a56c",
+  "scriptSha256": "c98c2f08273f4adb2aff9c6ad97c129f30f0aae7c6c8a942e470425df7bcce6b",
+  "nativeValidatorSha256": "1076ca11d6f13e79cf73fd2255f25a7cfe4a9d0e208b0ec6369e29aba1533045",
+  "messageValidatorSha256": "a2cda8a64c882a554e314aa1931d6efdc3ccc3eed7d4f5dd8a740c509aa155dd",
+  "bundles": [
+    {"sha256": "d4d3eaa649c060694a53eecbfc01c7f3cac908c778c4495ba4364f12bea53e13", "checks": 16, "result": "pass"},
+    {"sha256": "c7aab6184cab1d8b5484fd22325797ff5d7325086292fea80f68961f34bebf4a", "checks": 16, "result": "pass"}
+  ],
+  "routingRebase": "Only outer reply id and result.requestRevision; generated request target, hub, generation, epoch and applicable viewId checked against captured response. Payload preserved.",
+  "commandDescriptors": "Expanded reply produced fab.look descriptor in each replay; recorded only, never dispatched.",
+  "checksInclude": "Closed fold and six hidden bodies, explicit expansion and captured partial prefix, explicit body assembly without auto-read or readiness, stale epoch, malformed partial, no new opt-in fields."
+}
