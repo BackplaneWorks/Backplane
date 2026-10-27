@@ -458,7 +458,7 @@ final class AppModel {
         presentationIntent.clear()
         pairingGeneration = engine.invalidatePairing()
         retiredPairings[k] = pairingGeneration
-        if links.contains(where: { Pairing.key($0) == k }) { forgetPresentation(k) }
+        forgetPresentation(links.contains(where: { Pairing.key($0) == k }) ? k : nil)
         retireScreenCache()
         hubs.removeValue(forKey: k)?.stop()
         thinReady[k] = nil
@@ -485,8 +485,6 @@ final class AppModel {
         thinReady[key] = nil
         thinRequests[key] = nil
         startup[key] = nil
-        mailroomPositions = mailroomPositions.filter { $0.key.hub != key }
-        if mailroomReturn?.hub == key { mailroomReturn = nil }
         retireScreenCache()
         links = links.filter { Pairing.key($0) != key }
         save()
@@ -495,39 +493,59 @@ final class AppModel {
 
     // An explicitly replaced pairing is a new account boundary, even when its
     // address is unchanged. Network reconnects preserve these choices instead.
-    private func forgetPresentation(_ key: String) {
-        if viewerClosedStamp?.hub == key {
-            viewerClosedStamp = nil
-            ViewerClosedStamp.clear()
+    private func forgetPresentation(_ key: String?) {
+        let retirement = PresentationRetirement(hub: key)
+        if let key {
+            if viewerClosedStamp?.hub == key {
+                viewerClosedStamp = nil
+                ViewerClosedStamp.clear()
+            }
+            pendingPairingResets.insert(key)
+            composerDrafts.forget(key)
+            hubSettings[key] = nil
+            keepHubSettings()
+            mailroomPositions = mailroomPositions.filter { $0.key.hub != key }
+            if mailroomReturn?.hub == key { mailroomReturn = nil }
         }
-        pendingPairingResets.insert(key)
-        let prefix = key + "|"
-        seen = seen.filter { !$0.key.hasPrefix(prefix) }
-        seenOrder.removeAll { $0.hasPrefix(prefix) }
-        seenBots = seenBots.filter { !$0.key.hasPrefix(prefix) }
-        seenPlanes = seenPlanes.filter { !$0.key.hasPrefix(prefix) }
-        botOrder.removeAll { $0.hasPrefix(prefix) }
-        localDrafts = localDrafts.filter { !$0.key.hasPrefix(prefix) }
-        composerDrafts.forget(key)
-        if composerOwner.hasPrefix(prefix) { composerOwner = ""; composer = "" }
-        readingPages = readingPages.filter { !$0.key.hasPrefix(prefix) }
-        earlyActions.removeAll { $0.1.hasPrefix(prefix) }
-        outgoing.removeAll { $0.thread.hasPrefix(prefix) }
-        hubSettings[key] = nil
-        keepHubSettings()
+        seen = retirement.keeping(seen)
+        seenOrder = retirement.keeping(seenOrder)
+        seenBots = retirement.keeping(seenBots)
+        seenPlanes = retirement.keeping(seenPlanes)
+        botOrder = retirement.keeping(botOrder)
+        localDrafts = retirement.keeping(localDrafts)
+        if retirement.retires(composerOwner) { composerOwner = ""; composer = "" }
+        readingPages = retirement.keeping(readingPages)
+        outgoing.removeAll { retirement.retires($0.thread) }
         let defaults = UserDefaults.standard
         if let text = defaults.string(forKey: "drafts"),
            let drafts = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: String],
-           let data = try? JSONSerialization.data(withJSONObject: drafts.filter { !$0.key.hasPrefix(prefix) }),
+           let data = try? JSONSerialization.data(withJSONObject: retirement.keeping(drafts)),
            let filtered = String(data: data, encoding: .utf8) { defaults.set(filtered, forKey: "drafts") }
-        for tab in Array(stacks.keys) { stacks[tab]?.removeAll { $0.hasPrefix(prefix) || $0 == "@hub:" + key } }
-        if screen?.hub == key {
-            earlyActions.removeAll()
+        for tab in Array(stacks.keys) {
+            stacks[tab] = retirement.keeping(stacks[tab] ?? []).filter { $0 != Self.making }
+        }
+        if retirement.retires(shownSel) { shownSel = "" }
+        // Raw navigation values do not carry an owner, so an explicit account
+        // change cancels transitional selection instead of replaying it later.
+        earlyActions.removeAll()
+        opened = nil
+        tapped = nil
+        destination = nil
+        awaitedNav = nil
+        awaitedAt = .distantPast
+        pending = nil
+        jump = nil
+        jumping = nil
+        performanceAttempt = nil
+        #if DEBUG
+        tapStart = nil
+        #endif
+        if let current = screen,
+           (key.map { current.hub == $0 } ?? false) || retirement.retires(Self.nav(current)) {
+            cachedPresentation = false
+            cachedReadiness.clear()
             screen = nil
             composer = ""
-            destination = nil
-            awaitedNav = nil
-            pending = nil
             shownSel = ""
             shownHub = ""
             lastUber = nil
@@ -1492,8 +1510,10 @@ final class AppModel {
             return
         }
         pending = p
+        let generation = pairingGeneration, targetTab = tab
         DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [weak self] in
-            guard let self, self.pending == p else { return }
+            guard let self, self.pairingGeneration == generation, self.tab == targetTab,
+                  self.pending == p else { return }
             self.pending = nil
             self.path = p
             #if DEBUG
