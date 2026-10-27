@@ -136,29 +136,32 @@ final class Engine: @unchecked Sendable {
         return out
     }
 
-    // late: the arguments decided on the queue, as the call runs
+    // Enqueue captured editor work synchronously with the main-actor edit.
+    // An async Task created for each keystroke could reorder draft/send calls.
+    private func enqueue<T>(_ name: String, _ args: [Any], person: Bool = false, late: (() -> [Any])? = nil, authorize: ((() -> String) -> String?)? = nil, _ finish: @escaping (String) -> T, completion: @escaping (T) -> Void) {
+        queue.async(person: person) {
+            let b = self.context().objectForKeyedSubscript("Backplane")!
+            let t0 = DispatchTime.now().uptimeNanoseconds
+            let invoke = { b.invokeMethod(name, withArguments: late?() ?? args)?.toString() ?? "{}" }
+            let text: String
+            if let authorize {
+                guard let allowed = authorize(invoke) else { completion(finish("null")); return }
+                text = allowed
+            } else { text = invoke() }
+            let ms = (DispatchTime.now().uptimeNanoseconds - t0) / 1_000_000
+            if ms > 100 { NSLog("Backplane slow %@: %llu ms", name, ms) }
+            completion(finish(text))
+        }
+    }
     private func call<T>(_ name: String, _ args: [Any], person: Bool = false, late: (() -> [Any])? = nil, authorize: ((() -> String) -> String?)? = nil, _ finish: @escaping (String) -> T) async -> T {
         await withCheckedContinuation { k in
-            queue.async(person: person) {
-                let b = self.context().objectForKeyedSubscript("Backplane")!
-                let t0 = DispatchTime.now().uptimeNanoseconds
-                let invoke = { b.invokeMethod(name, withArguments: late?() ?? args)?.toString() ?? "{}" }
-                let text: String
-                if let authorize {
-                    guard let allowed = authorize(invoke) else { k.resume(returning: finish("null")); return }
-                    text = allowed
-                } else { text = invoke() }
-                // a slow step of the Bend client, for finding what to make faster (as Android's)
-                let ms = (DispatchTime.now().uptimeNanoseconds - t0) / 1_000_000
-                if ms > 100 { NSLog("Backplane slow %@: %llu ms", name, ms) }
-                k.resume(returning: finish(text))
-            }
+            enqueue(name, args, person: person, late: late, authorize: authorize, finish, completion: { k.resume(returning: $0) })
         }
     }
 
     // Commands are always delivered. Screens become stale only for newer
     // person work, never because hub frames wait behind a tap.
-    private func out(_ name: String, _ args: [Any], screen: Bool = true, person: Bool = false, quiet: Bool = false, authorize: ((() -> String) -> String?)? = nil) async -> Out? {
+    private func enqueueOut(_ name: String, _ args: [Any], screen: Bool = true, person: Bool = false, quiet: Bool = false, authorize: ((() -> String) -> String?)? = nil, completion: @escaping (Out?) -> Void) {
         if screen { lock.withLock { if person { personAhead += 1 } else { backgroundAhead += 1 } } }
         var withheld = false
         var began: UInt64 = 0
@@ -177,7 +180,7 @@ final class Engine: @unchecked Sendable {
                 return args + [withheld, o]
             }
         } : nil
-        return await call(name, args, person: person, late: late, authorize: authorize) { text in
+        enqueue(name, args, person: person, late: late, authorize: authorize, { text in
             if text == "null" {
                 self.lock.withLock { if screen { if person { self.personAhead -= 1 } else { self.backgroundAhead -= 1 } } }
                 return nil
@@ -201,7 +204,26 @@ final class Engine: @unchecked Sendable {
             if metadata?.inert != true && (withheld || stale) { self.scheduleFlush() }
             let result = metadata ?? Out.decode(text, screen: !stale && screen)
             return stale ? result : self.published(result)
+        }, completion: completion)
+    }
+
+    private func out(_ name: String, _ args: [Any], screen: Bool = true, person: Bool = false, quiet: Bool = false, authorize: ((() -> String) -> String?)? = nil) async -> Out? {
+        await withCheckedContinuation { k in
+            enqueueOut(name, args, screen: screen, person: person, quiet: quiet, authorize: authorize, completion: { k.resume(returning: $0) })
         }
+    }
+
+    func draftAtNow(_ thread: String, text: String, edit: UInt64, generation: UInt64, completion: @escaping (Out?) -> Void) {
+        enqueueOut("draftAt", [thread, text, edit], screen: false, person: true,
+                   authorize: { self.pairingFlush.perform(generation, $0) }, completion: completion)
+    }
+    func sendAtNow(_ thread: String, action: String, text: String, edit: UInt64, generation: UInt64, completion: @escaping (Out?) -> Void) {
+        enqueueOut("sendAt", [thread, action, text, edit], person: true,
+                   authorize: { self.pairingFlush.perform(generation, $0) }, completion: completion)
+    }
+    func composerActNow(_ thread: String, action: String, value: String, generation: UInt64, completion: @escaping (Out?) -> Void) {
+        enqueueOut("composerAction", [thread, action, value], person: true,
+                   authorize: { self.pairingFlush.perform(generation, $0) }, completion: completion)
     }
 
     func start(_ cid: String, _ drafts: String) async -> Out? { await out("start", [cid, drafts]) }

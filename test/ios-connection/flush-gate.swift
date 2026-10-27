@@ -24,6 +24,14 @@ final class GenerationRecorder: @unchecked Sendable {
         check(old != gate.stamp(), "in-flight old output carries a stale stamp")
         check(!gate.resume(second), "duplicate resume does not schedule a second release")
 
+        var privateWrites = 0
+        check(gate.perform(second, { privateWrites += 1; return "owned" }) == "owned", "current captured editor runs under identity gate")
+        let replacement = gate.invalidate()
+        check(gate.perform(second, { privateWrites += 1; return "leak" }) == nil, "queued old editor cannot run during replacement")
+        check(gate.resume(replacement), "replacement completes")
+        check(gate.perform(second, { privateWrites += 1; return "leak" }) == nil, "queued old editor cannot run after same-address replacement")
+        check(privateWrites == 1, "retired editor operations never enter JS")
+
         let concurrent = PairingFlushGate()
         let recorder = GenerationRecorder()
         DispatchQueue.concurrentPerform(iterations: 1000) { _ in

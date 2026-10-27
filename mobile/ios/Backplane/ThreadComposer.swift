@@ -185,6 +185,7 @@ struct ThreadComposer: View {
                 let blank = model.composerText(for: thread).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 let stop = thread.sendAct == "interrupt" && blank
                 Image(systemName: stop ? "stop.circle.fill" : "arrow.up.circle.fill").font(.system(size: 32))
+                    .frame(minWidth: 44, minHeight: 44)
                     .foregroundStyle(stop ? Color.red : blank ? Color.secondary : Color.accentColor)
                     .onTapGesture {
                         if model.canSendComposer(for: thread.id) { if stop { model.interruptComposer(for: thread.id) } else if !blank { model.sendComposer(for: thread.id) } }
