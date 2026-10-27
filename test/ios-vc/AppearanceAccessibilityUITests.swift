@@ -74,7 +74,35 @@ final class AppearanceAccessibilityUITests: XCTestCase {
     @available(iOS 17.0, *)
     func testCurrentScreenAccessibilityAudit() throws {
         let app = launchPaired()
-        // XCTest's automated checks do not substitute for VoiceOver navigation.
-        try app.performAccessibilityAudit()
+        // Aggregate every issue into a failing test without printing XCTest's
+        // issue descriptions, which may contain live labels or values.
+        var issues = 0
+        do {
+            try app.performAccessibilityAudit(for: .all) { issue in
+                issues += 1
+                let element = issue.element
+                let identifier = element?.identifier ?? ""
+                let category: String
+                if identifier.hasPrefix("tab.") { category = "tab" }
+                else if identifier == "projects.search" { category = "projects.search" }
+                else if identifier == "thread.composer" { category = "thread.composer" }
+                else if identifier.hasPrefix("thread.entry.") { category = "thread.entry" }
+                else { category = "other" }
+                let type = element.map { Int($0.elementType.rawValue) } ?? -1
+                let frame = element?.frame ?? .null
+                let geometry: String
+                if !frame.isNull && !frame.isInfinite && frame.origin.x.isFinite && frame.origin.y.isFinite && frame.width.isFinite && frame.height.isFinite {
+                    geometry = "\(frame.origin.x),\(frame.origin.y),\(frame.width),\(frame.height)"
+                } else { geometry = "unavailable" }
+                print("accessibility-audit type=\(issue.auditType.rawValue) elementType=\(type) category=\(category) frame=\(geometry)")
+                // Avoid framework-rendered issue descriptions; the aggregate
+                // assertion below still fails for every reported issue.
+                return true
+            }
+        } catch {
+            XCTFail("Accessibility audit could not complete")
+            return
+        }
+        XCTAssertEqual(issues, 0, "Accessibility audit reported issues; see sanitized records")
     }
 }
