@@ -171,7 +171,7 @@ struct ThreadComposer: View {
             }
             HStack(alignment: .bottom, spacing: 8) {
                 AttachButton(model: model, owner: thread.id).disabled(!canSend)
-                TextField("", text: Binding(get: { model.composerText(for: thread) }, set: { model.editComposer($0, for: thread.id) }), prompt: Text(NativeMessages.native_thread_composer(lang)).foregroundStyle(.secondary), axis: .vertical)
+                TextField("", text: Binding(get: { model.composerText(for: thread) }, set: { model.editComposer($0, for: thread.id) }), prompt: Text(NativeMessages.native_thread_composer(lang)).foregroundStyle(BackplaneDesign.secondaryText), axis: .vertical)
                     .disabled(!model.canEditComposer(for: thread.id))
                     .lineLimit(1...6)
                     .focused($focused)
