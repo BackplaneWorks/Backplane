@@ -513,6 +513,12 @@ button.chip:hover { border-color: var(--bad); color: var(--bad); }
 #workspace-commands { min-height: 0; overflow: auto; overscroll-behavior: contain; }
 .workspace-command { display: block; width: 100%; text-align: left; padding: 9px 12px; border: 0; border-top: 1px solid var(--line); border-radius: 0; white-space: normal; }
 .workspace-command.on, .workspace-command:focus { background: var(--accent); color: var(--bg); outline: none; }
+/* a thread among the commands: its mark, its title, its project at the right */
+.workspace-command.thread { display: flex; align-items: center; gap: 8px; }
+.workspace-command.thread svg { flex: none; color: var(--dim); }
+.workspace-command.thread .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-command.thread .where { margin-left: auto; flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--faint); font-size: calc(11px * var(--text-scale, 100) / 100); text-transform: uppercase; letter-spacing: 0.06em; }
+.workspace-command.thread.on svg, .workspace-command.thread.on .where, .workspace-command.thread:focus svg, .workspace-command.thread:focus .where { color: inherit; opacity: 0.75; }
 .workspace-palette footer { flex: none; padding: 8px 12px; font-size: 11px; border-top: 1px solid var(--line); }
 .workspace-palette footer p { margin: 6px 0; }
 .workspace-empty { display: block; padding: 16px; opacity: .65; }

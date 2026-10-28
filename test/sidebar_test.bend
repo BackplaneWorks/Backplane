@@ -162,3 +162,5 @@ def main() -> IO(Unit):
     C.Check.str("copy path", copied(U.Ui.act(act(base(), "select", "b"), "file-copy", "./README.md")), "/tmp/board/README.md")
     C.Check.str("close disarms", U.Ui.scratch(act(act(act(base(), "row-menu", "d"), "row-delete", "d"), "menu-close", ""), "@del"), "")
     C.Check.str("enter opens first active", U.Ui.sel(act(act(U.Ui.fold(List.append(&2, M.Change, log(), [M.SettingSet{"sidebar.view", "active", 1n}]), U.Ui.init(now())), "bfield", "pq\u{1f}pin swap"), "proj-go", "")), "b")
+    C.Check.str("palette: a thread names its project", U.Palette.place(st(), "select", "a"), "board")
+    C.Check.str("palette: a command names none", U.Palette.place(st(), "new-thread", "p1"), "")

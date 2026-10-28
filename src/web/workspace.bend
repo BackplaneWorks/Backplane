@@ -7,6 +7,7 @@ import ../core/vt.bend as VT
 import ../core/far.bend as FR
 import ../core/tools.bend as TO
 import ./dom.bend as D
+import ./icon.bend as WI
 
 # Web desktop commands reuse the native sidebar keymap and normal actions.
 # The actor owns the query and PTY owner; no canonical log or shell bytes
@@ -253,13 +254,21 @@ def WS.act(action: String, +u: U.Ui, +value: String) -> U.Act:
     case "term-paste": WS.term.send(u, VT.Vt.paste(U.Ui.term(u, WS.owner(u)), value))
     case _: WS.none(u)
 
-def WS.rows(xs: List<&2, U.PItem>, +chosen: Nat, +i: Nat) -> List<&2, D.Node>:
+# a row's face: a command is its label; a thread is a thread's mark, its
+# title and its project (U.Palette.place), so it can't pass for a command
+def WS.row.face(thread: Bool, +label: String, +place: String) -> List<&2, D.Node>:
+  match thread:
+    case False{}: [D.Txt{label}]
+    case True{}: [WI.WIcon.svg("message-square", 13), D.Dom.span("name", label), D.Dom.span("where", place)]
+
+def WS.rows(xs: List<&2, U.PItem>, +st: M.State, +chosen: Nat, +i: Nat) -> List<&2, D.Node>:
   match xs:
     case Nil{}: Nil{}
-    case U.PItem{label, _, _} <> tail:
+    case U.PItem{+label, +a, +v} <> tail:
+      +thread = String.eq(a, "select")
       D.El{"button", "command:" ++ Nat.show(i), [D.At{"type", "button"}, D.At{"role", "option"}, D.At{"id", "workspace-command-" ++ Nat.show(i)},
-        D.At{"aria-selected", Bool.pick(String, Nat.is_eq(chosen, i), "true", "false")}, D.At{"class", Bool.pick(String, Nat.is_eq(chosen, i), "workspace-command on", "workspace-command")},
-        D.At{"data-value", Nat.show(i)}, D.On{"click", "ws-palette-run"}], [D.Txt{label}]} <> WS.rows(tail, chosen, 1n+i)
+        D.At{"aria-selected", Bool.pick(String, Nat.is_eq(chosen, i), "true", "false")}, D.At{"class", Bool.pick(String, Nat.is_eq(chosen, i), "workspace-command on", "workspace-command") ++ Bool.pick(String, thread, " thread", "")},
+        D.At{"title", Bool.pick(String, thread, "Thread · " ++ U.Palette.place(st, a, v), label)}, D.At{"data-value", Nat.show(i)}, D.On{"click", "ws-palette-run"}], WS.row.face(thread, label, U.Palette.place(st, a, v))} <> WS.rows(tail, st, chosen, 1n+i)
 
 def WS.palette(on: Bool, +u: U.Ui) -> List<&2, D.Node>:
   match on:
@@ -272,7 +281,7 @@ def WS.palette(on: Bool, +u: U.Ui) -> List<&2, D.Node>:
             D.At{"value", U.Palette.query(u)}, D.At{"data-bfield", "wspalette"}, D.At{"role", "combobox"}, D.At{"aria-label", "Search commands"}, D.At{"aria-expanded", "true"}, D.At{"aria-controls", "workspace-commands"},
             D.At{"aria-activedescendant", "workspace-command-" ++ Nat.show(U.Palette.index(u))}, D.On{"input", "bfield"}], Nil{}},
           D.El{"div", "workspace-commands", [D.At{"id", "workspace-commands"}, D.At{"role", "listbox"}],
-            Bool.pick(List<&2, D.Node>, List.is_empty(&2, U.PItem, WS.items(u)), [D.Dom.span("workspace-empty", "No matching commands")], WS.rows(WS.items(u), U.Palette.index(u), 0n))},
+            Bool.pick(List<&2, D.Node>, List.is_empty(&2, U.PItem, WS.items(u)), [D.Dom.span("workspace-empty", "No matching commands")], WS.rows(WS.items(u), U.Ui.state(u), U.Palette.index(u), 0n))},
           D.El{"footer", "", Nil{}, [D.Txt{"↑↓ choose · Enter run · Esc close. Ctrl/Cmd+Shift+P (Ctrl+K also opens)."},
             D.El{"details", "", Nil{}, [D.El{"summary", "", Nil{}, [D.Txt{"Keyboard shortcuts"}]},
               D.El{"p", "", Nil{}, [D.Txt{"Alt+1…9 project · Ctrl+1…9 thread · Ctrl+Shift+[ / ] previous / next thread · Ctrl+Shift+U uberbot chat · Ctrl+N new thread · Ctrl+Shift+S settle · Ctrl+P files · Ctrl+D diff · Ctrl+M agent, model and effort."}]},

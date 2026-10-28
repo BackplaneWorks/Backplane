@@ -3296,6 +3296,16 @@ def Palette.items(+u: Ui) -> List<&2, PItem>:
 def Palette.kind(+a: String) -> String:
   Bool.pick(String, String.eq(a, "select"), "thread", Bool.pick(String, String.eq(a, "mention"), "file", "action"))
 
+def Palette.place.k(thread: Bool, +st: M.State, +v: String) -> String:
+  match thread:
+    case True{}: Ui.project_title(st, Ui.thread_project(Ui.thread(st, v)))
+    case False{}: ""
+
+# the project a thread's row names beside its title ("" for any other row),
+# so a thread called "New thread" never reads as the New thread command
+def Palette.place(+st: M.State, +a: String, +v: String) -> String:
+  Palette.place.k(String.eq(a, "select"), st, v)
+
 # Row status
 # ----------
 
