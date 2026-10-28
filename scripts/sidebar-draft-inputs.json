@@ -143,7 +143,7 @@
     "src/web/space.bend": "b86a265e41a900498bc33c37c0404c4d6678554efe3d9054f329beb2cf35ee63",
     "src/web/usage-graph.bend": "fa06f7d2bf855a396a5f7a7b4725dfaa990145fbbcefe7ad21ae8f9a698a2679",
     "src/web/usage-page.bend": "706e3f17a4a3e5f159656d47aeb76a940d4825421f5c33228f9aef692ec926e3",
-    "src/web/view.bend": "88347b9b09a047e2964c0b272e60e9b54070669c8351fe5809a80d612d26980e"
+    "src/web/view.bend": "3674a5dafae86eca6fc038fd7a8a81e1b7ba342c085898b4b9b2799149c1878f"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -253,5 +253,5 @@
       "sourceSnapshot": "/home/h/Documents/i2cjak/bp-coord/settle-fresh-work/SOURCE-structural-correction.json"
     }
   },
-  "reviewNote": "viewer status line in plain words (no sidebar draft change)"
+  "reviewNote": "composer chips shorten in a narrow column (no sidebar draft change)"
 }

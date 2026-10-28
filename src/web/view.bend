@@ -1137,14 +1137,27 @@ def View.menu.loc(+lc: I.Loc, +open: Bool, ms: List<&2, String>, +cur: String, +
 # the chip under the composer that opens the picker: agent / model /
 # effort in a box with its key (Ctrl+M, workspace-keys.js), then how much
 # of the model's window the thread holds (ctx)
+# (tail: the effort's " / high", its own span, which a narrow composer
+# puts away with the key, style.css, so agent and model still read whole)
+def View.mp.chip.k(+lc: I.Loc, +text: String, +tail: String, +ctx: String) -> List<&2, D.Node>:
+  D.El{"button", "", [D.At{"class", "model-chip"}, D.At{"title", text ++ tail ++ " · " ++ MSG.T.composer.model.tip(lc) ++ " · Ctrl+M"}, D.At{"data-value", "models"}, D.On{"click", "flag"}],
+    [D.El{"span", "", [D.At{"class", "mp-sel"}], D.Dom.cat([D.Txt{text}], Bool.pick(List<&2, D.Node>, String.is_empty(tail), Nil{}, [D.Dom.span("mp-eff", tail)]))},
+     D.El{"kbd", "", Nil{}, [D.Txt{"Ctrl M"}]}]} <> Bool.pick(List<&2, D.Node>, String.is_empty(String.trim(ctx)), Nil{}, [D.Dom.span("model-ctx", String.trim(String.drop(String.trim(ctx), Bool.pick(Nat, String.starts_with(String.trim(ctx), "·"), 1n, 0n))))])
+
 def View.mp.chip(+lc: I.Loc, +text: String, +ctx: String) -> List<&2, D.Node>:
-  D.El{"button", "", [D.At{"class", "model-chip"}, D.At{"title", MSG.T.composer.model.tip(lc) ++ " · Ctrl+M"}, D.At{"data-value", "models"}, D.On{"click", "flag"}],
-    [D.Dom.span("mp-sel", text), D.El{"kbd", "", Nil{}, [D.Txt{"Ctrl M"}]}]} <> Bool.pick(List<&2, D.Node>, String.is_empty(String.trim(ctx)), Nil{}, [D.Dom.span("model-ctx", String.trim(String.drop(String.trim(ctx), Bool.pick(Nat, String.starts_with(String.trim(ctx), "·"), 1n, 0n))))])
+  View.mp.chip.k(lc, text, "", ctx)
 
 # the chip's words: "claude / opus / high" (the effort left out when the
-# agent's model takes none)
+# agent's model takes none); View.mp.am the agent and model, View.mp.tail
+# the effort
+def View.mp.am(+lc: I.Loc, +agent: String, +model: String) -> String:
+  agent ++ " / " ++ Bool.pick(String, String.is_empty(model), MSG.T.common.default(lc), model)
+
+def View.mp.tail(+lc: I.Loc, +effort: String, efforts: Bool) -> String:
+  Bool.pick(String, efforts, " / " ++ VLabel.effort(lc, effort), "")
+
 def View.mp.text(+lc: I.Loc, +agent: String, +model: String, +effort: String, efforts: Bool) -> String:
-  agent ++ " / " ++ Bool.pick(String, String.is_empty(model), MSG.T.common.default(lc), model) ++ Bool.pick(String, efforts, " / " ++ VLabel.effort(lc, effort), "")
+  View.mp.am(lc, agent, model) ++ View.mp.tail(lc, effort, efforts)
 
 # the skills a `$` being typed may complete to, or the bots, threads,
 # projects and rooms a `@`, `>`, `%` or `#` may (the arrow keys move the
@@ -2826,7 +2839,7 @@ def View.composer.t(+lc: I.Loc, +st: M.State, +sel: String, +drafts: Map<&2, Str
   +tok = UZ.Ts.on(st)
   View.composer.p(lc, U.Str.get(drafts, sel), U.Follow.button(lc, st, sel, View.running(turn), stop, U.Str.get(drafts, sel)), U.Follow.act(stop), pr,
     View.mp.loc(lc, U.Flag.get(op, "models"), nf, U.Mpk.cur.of(st, sel, drafts), U.Mpk.now(st, sel), U.Str.get(drafts, "@f.mq"), MPK.ModelPick.kept(U.Str.get(drafts, "@mp"), sel)),
-    View.mp.chip(lc, View.mp.text(lc, pr, mo, U.Effort.of(st, sel), Bool.not(List.is_empty(&2, String, U.Effort.chips(U.Str.get(nf, "models"), pr, mo)))), Bool.pick(String, tok, "", U.Usage.tail(st, sel))),
+    View.mp.chip.k(lc, View.mp.am(lc, pr, mo), View.mp.tail(lc, U.Effort.of(st, sel), Bool.not(List.is_empty(&2, String, U.Effort.chips(U.Str.get(nf, "models"), pr, mo)))), Bool.pick(String, tok, "", U.Usage.tail(st, sel))),
     U.Skills.shown(st, sel, drafts, nf), atts, up, vo, mic,
     View.tok.chip(tok, UZ.Ts.chip(st, sel), U.Flag.get(op, "tokstats")), View.tok.pop(Bool.and(tok, U.Flag.get(op, "tokstats")), st, sel, pr), View.running(turn))
 
