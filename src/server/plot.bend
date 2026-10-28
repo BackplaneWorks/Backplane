@@ -974,18 +974,39 @@ def Pv.stamp.of(+path: String) -> IO(U32 & String):
   Pv.stamp.of.k(Nat.is_eq(HS.Hist.kind(path), 2n), path)
 
 # the child, or at low priority (nice) when it reads ahead of a view
-def Pv.run(low: Bool, +exe: String, +args: List<&2, String>) -> IO(PR.Ran):
+def Pv.argv(low: Bool, +exe: String, +args: List<&2, String>) -> List<&2, String>:
   match low:
     case True{}:
-      PR.Proc.run("nice", "-n" <> "10" <> exe <> args, "/")
+      "nice" <> "-n" <> "10" <> exe <> args
     case False{}:
-      PR.Proc.run(exe, args, "/")
+      exe <> args
+
+# a 3D model's child runs holding the plot folder's solid.lock (flock, where
+# there is one): reading a model takes gigabytes, so two at once (a model
+# prepared ahead and its view, or one board asked for by two names) would
+# add up; the second waits, then finds the first one's plot kept
+def Pv.lock.sh() -> String:
+  "if command -v flock >/dev/null 2>&1; then exec flock \"$0\" \"$@\"; fi; exec \"$@\""
+
+def Pv.locked(solid: Bool, +dir: String, +argv: List<&2, String>) -> List<&2, String>:
+  match solid:
+    case True{}:
+      "sh" <> "-c" <> Pv.lock.sh() <> (dir ++ "/solid.lock") <> argv
+    case False{}:
+      argv
+
+def Pv.run(argv: List<&2, String>) -> IO(PR.Ran):
+  match argv:
+    case Nil{}:
+      PR.Proc.run("true", Nil{}, "/")
+    case +p <> t:
+      PR.Proc.run(p, t, "/")
 
 def Pv.read.at(low: Bool, +key: String, +kind: U32, +path: String, +q: Chan(PMsg), +dir: String) -> IO(Unit):
   do IO<Unit>:
     st : U32 & String <- Pv.stamp.of(path)
     exe : String <- H.Sys.exe_path()
-    r : PR.Ran <- Pv.run(low, EX.Exe.child(exe), ["--plot", U32.show(kind), path, Pv.infos(dir, key)])
+    r : PR.Ran <- Pv.run(Pv.locked(Pv.solid.kind(kind), dir, Pv.argv(low, EX.Exe.child(exe), ["--plot", U32.show(kind), path, Pv.infos(dir, key)])))
     Pv.read.k(st, r, key, kind, q)
 
 def Pv.read(+key: String, +kind: U32, +path: String, +q: Chan(PMsg), +dir: String) -> IO(Unit):
