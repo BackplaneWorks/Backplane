@@ -536,13 +536,33 @@ def Pv.solid.up(step: Bool, ts: List<&2, G.Tri3>) -> List<&2, G.Tri3>:
     case False{}:
       ts
 
-def Pv.solid.done(r: PR.Ran, +glb: String, +note: String, +step: Bool) -> IO(Unit):
+# a model's plot as lines, from its GLB
+def Pv.solid.text(+glb: String, +step: Bool) -> IO(String):
+  IO.bind(List<&2, U32>, String, K.Io.bytes(glb), bs => IO.pure(String, P.Line.plot(P.Plot.of.solid(P.Solid.of(P.Solid.thin(Pv.solid.up(step, G.Mesh.tris(G.Glb.parse(bs)))))))))
+
+# a cached GLB's plot is kept beside it (keep), per build of the hub, so a
+# hub started again, or one that let the model go, does not build it again
+# (a .glb of the project's own is never written beside)
+def Pv.solid.kept(cache: Bool, have: Bool, +glb: String, +step: Bool, +keep: String) -> IO(String):
+  match cache have:
+    case True{} True{}:
+      K.Io.text(keep)
+    case True{} False{}:
+      do IO<String>:
+        +t : String <- Pv.solid.text(glb, step)
+        Pv.write(keep, t)
+        return t
+    case False{} _:
+      Pv.solid.text(glb, step)
+
+def Pv.solid.done(r: PR.Ran, +glb: String, +note: String, +step: Bool, +cache: Bool, +keep: String) -> IO(Unit):
   match r:
     case PR.Ran{0, +log}:
       do IO<Unit>:
         Pv.write(note, Pv.missing.note(Pv.missing(String.lines(log), 0n)))
-        bs : List<&2, U32> <- K.Io.bytes(glb)
-        IO.print(P.Line.plot(P.Plot.of.solid(P.Solid.of(P.Solid.thin(Pv.solid.up(step, G.Mesh.tris(G.Glb.parse(bs))))))))
+        have : Bool <- K.Io.is_file(keep)
+        t : String <- Pv.solid.kept(cache, have, glb, step, keep)
+        IO.print(t)
     case PR.Ran{_, out}:
       IO.die(Unit, 3, "3D export failed: " ++ String.take(String.trim(out), 160n))
 
@@ -604,7 +624,10 @@ def Pv.child.solid(+bare: Bool, +full: Bool, +path: String, +note: String) -> IO
     +out : String <- Pv.solid.out(isglb, Pv.is_step(path), bare, full, path)
     have : Bool <- K.Io.is_file(out)
     r : PR.Ran <- Pv.glb.run(Bool.or(isglb, have), Pv.is_step(path), bare, full, path, out)
-    Pv.solid.done(r, out, note, Pv.is_step(path))
+    exe : String <- H.Sys.exe_path()
+    st : Result<&1, &1, U32 & String, U32 & U32 & U32> <- H.FS.stat(exe)
+    +v : String = Pv.ver(st)
+    Pv.solid.done(r, out, note, Pv.is_step(path), Bool.and(Bool.not(isglb), Bool.not(String.eq(v, "0"))), out ++ "." ++ v ++ ".plot")
 
 def Pv.unread() -> String:
   "This version of the file cannot be read."
