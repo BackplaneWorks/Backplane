@@ -21,7 +21,7 @@ import urllib.parse
 import urllib.request
 import zipfile
 
-VERSION = '0.12.3'
+VERSION = '0.13.0'
 OPERATIONS = ('js', 'android')
 MAX_BYTES = 4 * 1024**3
 # The Bun every JS service is built with, and each target's runtime it is
