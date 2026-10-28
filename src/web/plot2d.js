@@ -494,7 +494,9 @@ class View {
       const ps = pieces(k).filter((pc) => on[pc.i]);
       if (!ps.length) continue;
       for (const pc of ps) { box[0] = Math.min(box[0], pc.box[0]); box[1] = Math.min(box[1], pc.box[1]); box[2] = Math.max(box[2], pc.box[2]); box[3] = Math.max(box[3], pc.box[3]); }
-      out.push({ ...paths(ps, k.mode, k.r), r: k.r, color: k.color, layer: k.layer });
+      // (the light edge goes round small fills, pads, not a net's pours)
+      const small = k.mode === 0 ? ps.filter((pc) => (pc.box[2] - pc.box[0]) * (pc.box[3] - pc.box[1]) < EDGED) : [];
+      out.push({ ...paths(ps, k.mode, k.r), edge: paths(small, 0, 0).fill, r: k.r, color: k.color, layer: k.layer });
     }
     this.hl = { stamp, parts: out, box: out.length ? box : null, kind: pr.kind };
     return this.hl;
@@ -641,7 +643,7 @@ class View {
       g.lineWidth = 1.5 * thin;
       for (const k of hl.parts) {
         if (Math.floor(this.off / 2 ** k.layer) % 2) continue;
-        g.stroke(k.fill);
+        g.stroke(k.edge);
         g.stroke(k.dots);
       }
     }
@@ -662,6 +664,8 @@ class View {
 
 // how far the rest dims under a probe, and the edge drawn round what it lights
 const DIM = 0.28;
+// fills under this many square micrometres (25 mm²) get the edge
+const EDGED = 25e6;
 const EDGE = "rgba(255,255,255,0.85)";
 
 // the views on the page, by canvas
