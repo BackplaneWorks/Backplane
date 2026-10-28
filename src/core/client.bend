@@ -8020,8 +8020,10 @@ def Bots.google.at(+op: String) -> Nat:
     Bool.pick(Nat, String.starts_with(op, "connect@"), 1n, Bool.pick(Nat, String.starts_with(op, "done:"), 2n,
       Bool.pick(Nat, String.starts_with(op, "sig-edit:"), 3n, Bool.pick(Nat, String.eq(op, "sig-save"), 4n, Bool.pick(Nat, String.eq(op, "sig-cancel"), 5n, 6n))))))
 
+# (what the web's last sealed Save of Google's own client or its way back
+# said goes)
 def Bots.google(+u: Ui, +op: String) -> Act:
-  Bots.google.op(Bots.google.at(op), u, op)
+  Bots.google.op(Bots.google.at(op), Sealed.forget(Sealed.forget(u, "google"), "gpaste"), op)
 
 def Bots.google.keep(empty: Bool, x: String, rest: List<&2, String>) -> List<&2, String>:
   match empty:
@@ -9905,6 +9907,28 @@ def Sealed.agy(+u: Ui, +action: String) -> String:
   Bool.pick(String, String.eq(action, "agy-key"), "agykey:" ++ AGY.Agy.key(Agv.method(u)),
     Bool.pick(String, String.eq(action, "agy-back"), "agyback", ""))
 
+def Bots.google.req(+op: String, +id: String, +secret: String, +pasted: String) -> String:
+  Rpc.text(0n, "bots.google", [J.KV{"op", J.Str{op}}, J.KV{"clientId", J.Str{String.trim(id)}}, J.KV{"clientSecret", J.Str{String.trim(secret)}},
+    J.KV{"pasted", J.Str{String.trim(pasted)}}, J.KV{"account", J.Str{""}}, J.KV{"redirect", J.Str{""}}])
+
+# Google's own OAuth client ("google": its id and secret; the hub keeps
+# them only together, Google.configure)
+def Bots.google.own.req(+id: String, +secret: String) -> String:
+  Sealed.out(Bool.pick(String, Bool.or(String.is_empty(String.trim(id)), String.is_empty(String.trim(secret))), "Give both the client id and its secret", ""),
+    Bots.google.req("config", id, secret, ""))
+
+def Bots.google.own.ps(ps: List<&2, String>) -> String:
+  match ps:
+    case +id <> +secret <> _:
+      Bots.google.own.req(id, secret)
+    case _:
+      Bots.google.own.req("", "")
+
+# the address Google's sign-in landed on ("gpaste")
+def Bots.google.paste.req(+pasted: String) -> String:
+  Sealed.out(Bool.pick(String, String.is_empty(String.trim(pasted)), "Paste the address the sign-in ended on", ""),
+    Bots.google.req("finish", "", "", pasted))
+
 def Sealed.none() -> String:
   J.Json.show(J.Json.obj([J.KV{"error", J.Str{"Nothing to save"}}]))
 
@@ -9918,6 +9942,10 @@ def Sealed.req.k(i: Nat, +arg: String, +vs: List<&2, String>) -> String:
       Agv.key.req(arg, Sealed.first(vs))
     case 3n:
       Agv.back.req(Sealed.first(vs))
+    case 4n:
+      Bots.google.own.ps(vs)
+    case 5n:
+      Bots.google.paste.req(Sealed.first(vs))
     case _:
       Sealed.none()
 
@@ -9926,7 +9954,7 @@ def Sealed.arg(+form: String) -> String:
   String.drop(form, Nat.add(String.length(Sealed.base(form)), 1n))
 
 def Sealed.forms() -> List<&2, String>:
-  ["key", "vkey", "agykey", "agyback"]
+  ["key", "vkey", "agykey", "agyback", "google", "gpaste"]
 
 def Sealed.req.ps(ps: List<&2, String>) -> String:
   match ps:
@@ -9941,8 +9969,9 @@ def Sealed.req(+packed: String) -> String:
   Sealed.req.ps(String.split(packed, Chr{31}))
 
 # once the hub has a form's value: the API key's form shuts; what the
-# voice key and Antigravity's key show is asked again (the way back
-# reports through the sign-in's own news)
+# voice key and Antigravity's key show is asked again (Antigravity's way
+# back reports through the sign-in's own news); Google's own client form
+# shuts and Google's status is asked
 def Sealed.sent.k(i: Nat, +u: Ui) -> Act:
   match i:
     case 0n:
@@ -9951,6 +9980,10 @@ def Sealed.sent.k(i: Nat, +u: Ui) -> Act:
       Voice.rpc(u, "status", Nil{})
     case 2n:
       Voice.rpc(u, "status", Nil{})
+    case 4n:
+      Bots.google.rpc(Ui.scratch_set(u, "@f.gown", ""), "status", "")
+    case 5n:
+      Bots.google.rpc(u, "status", "")
     case _:
       Act{u, Nil{}}
 

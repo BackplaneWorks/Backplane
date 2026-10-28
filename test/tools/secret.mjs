@@ -139,6 +139,16 @@ const BACK = `http://localhost:1234/callback?state=s&code=${F1}`;
 assert.deepEqual(sealedRpc('agyback', BACK).p, { op: 'agy', do: 'back', url: BACK });
 assert.ok(sealed('agyback', '').error);
 refusals.push(['agykey', F1]);
+const gown = sealedRpc('google', 'id.apps.googleusercontent.com', F1);
+assert.equal(gown.m, 'bots.google');
+assert.deepEqual(gown.p, { op: 'config', clientId: 'id.apps.googleusercontent.com', clientSecret: F1, pasted: '', account: '', redirect: '' });
+assert.ok(sealed('google', 'id', '').error);
+assert.ok(sealed('google', '', F1).error);
+assert.ok(sealed('google').error);
+const GBACK = `http://127.0.0.1:1/oauth/google?state=s&code=${F2}`;
+assert.deepEqual(sealedRpc('gpaste', GBACK).p, { op: 'finish', clientId: '', clientSecret: '', pasted: GBACK, account: '', redirect: '' });
+assert.ok(sealed('gpaste', ' ').error);
+refusals.push(['google', '', F1], ['google', F1, '']);
 // no refusal carries the value it was given
 for (const ps of refusals) assert.ok(!sealed(...ps).error.includes(F1), 'a refusal never carries the value');
 assert.match(raw.prompt('[{"name":"tailscale-bub","purpose":"p"}]'), /`tailscale-bub`/);

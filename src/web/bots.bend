@@ -42,10 +42,6 @@ def WB.input(+id: String, +field: String, +value: String, +ph: String, +act: Str
   D.El{"input", id, List.append(&2, D.Attr, [D.At{"id", id}, D.At{"class", "field"}, D.At{"placeholder", ph}, D.At{"autocomplete", "off"}, D.At{"spellcheck", "false"},
     D.At{"value", value}, D.At{"data-bfield", field}, D.On{"input", "bfield"}], WB.enter(act)), Nil{}}
 
-def WB.secret(+id: String, +field: String, +value: String, +ph: String) -> D.Node:
-  D.El{"input", id, [D.At{"id", id}, D.At{"class", "field"}, D.At{"type", "password"}, D.At{"placeholder", ph}, D.At{"autocomplete", "off"},
-    D.At{"value", value}, D.At{"data-bfield", field}, D.On{"input", "bfield"}], Nil{}}
-
 # a field that takes a secret (client.bend's Sealed): no binding and no
 # value, so what is typed stays in the page; Enter, like the form's Save,
 # is "sealed" with the form, and host.js reads every field of the form
@@ -811,9 +807,9 @@ def WB.gurl(+url: String) -> List<&2, D.Node>:
 def WB.gown.k.loc(+lc: I.Loc, open: Bool, +u: U.Ui) -> List<&2, D.Node>:
   match open:
     case True{}:
-      [WB.input("google-id", "gid", BI.BU.field(u, "gid"), MSG.T.web.google.client.id(lc), ""),
-       WB.secret("google-secret", "gsecret", BI.BU.field(u, "gsecret"), MSG.T.google.client.secret(lc)),
-       WB.btns([D.Dom.button("", "google", "config", MSG.T.web.google.client.save(lc), MSG.T.google.client.save(lc)),
+      [WB.sealed("google-id", "google", "text", MSG.T.web.google.client.id(lc)),
+       WB.sealed("google-secret", "google", "password", MSG.T.google.client.secret(lc)),
+       WB.btns([D.Dom.button("", "sealed", "google", MSG.T.web.google.client.save(lc), MSG.T.google.client.save(lc)),
          D.Dom.button("", "bfield", WB.bf("gown", ""), MSG.T.google.client.hide(lc), MSG.T.common.hide(lc))])]
     case False{}:
       Nil{}
@@ -850,8 +846,9 @@ def WB.gaccts(xs: List<&2, String>, +u: U.Ui) -> List<&2, D.Node>:
   WB.gaccts.loc(I.En{}, xs, u)
 
 def WB.google.loc(+lc: I.Loc, +u: U.Ui) -> D.Node:
+  +note = U.Sealed.say(u, "google", U.Sealed.say(u, "gpaste", U.Ui.scratch(u, "@google")))
   WB.set("Google", List.concat(&2, D.Node, [
-    Bool.pick(List<&2, D.Node>, String.is_empty(U.Ui.scratch(u, "@google")), Nil{}, [D.Dom.span("set-note", U.Ui.scratch(u, "@google"))]),
+    Bool.pick(List<&2, D.Node>, String.is_empty(note), Nil{}, [D.Dom.span("set-note", note)]),
     [WB.btns([D.Dom.button("primary", "google", "connect", MSG.T.agy.google.signin(lc), Bool.pick(String, List.is_empty(&2, String, U.Bots.google.accts(u)), MSG.T.google.connect(lc), MSG.T.agy.account.add(lc))),
        D.Dom.button("", "google", "status", MSG.T.google.status.tip(lc), MSG.T.bots.tab.status(lc)),
        D.Dom.button("", "bfield", WB.bf("gown", "1"), MSG.T.google.own.tip(lc), MSG.T.google.client.own(lc))])],
@@ -859,8 +856,8 @@ def WB.google.loc(+lc: I.Loc, +u: U.Ui) -> D.Node:
     WB.gown.k.loc(lc, Bool.not(String.is_empty(BI.BU.field(u, "gown"))), u),
     WB.gurl.loc(lc, U.Ui.scratch(u, "@google.url")),
     Bool.pick(List<&2, D.Node>, String.is_empty(U.Ui.scratch(u, "@google.url")), Nil{}, [
-      WB.div("bform wide row", [WB.input("google-paste", "gpaste", BI.BU.field(u, "gpaste"), MSG.T.web.google.callback(lc), "google"),
-        D.Dom.button("", "google", "finish", MSG.T.google.finish.tip(lc), MSG.T.common.finish(lc))])])]))
+      WB.div("bform wide row", [WB.sealed("google-paste", "gpaste", "text", MSG.T.web.google.callback(lc)),
+        D.Dom.button("", "sealed", "gpaste", MSG.T.google.finish.tip(lc), MSG.T.common.finish(lc))])])]))
 
 def WB.google(+u: U.Ui) -> D.Node:
   WB.google.loc(I.En{}, u)
