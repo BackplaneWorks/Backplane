@@ -109,8 +109,11 @@ Open the Schematic: the root sheet draws. Click a sheet symbol: that sheet
 opens and the trail shows where you are; Up/Back return to the root.
 
 **S15 3D** (W D A)
-Open 3D: the board's model draws; drag turns it, the wheel zooms, Fit
-recentres.
+Open 3D: the board's model draws, lit from above on a soft spot of light
+(the board stands out from the background); drag turns it, the wheel
+zooms, Fit recentres. Opened again after a reload it shows at once (kept
+on the hub). A model file over 12 MB says it is too big to show, and the
+hub's memory stays low.
 
 **S16 Pick a board** (W D A)
 In `multi`, open the board picker: it offers `alpha` and `beta` only (not the
@@ -143,9 +146,10 @@ the web it is a preview, opened with `?lang=ja`) and back, and the sidebar
 to Active (one list of live threads).
 
 **S21 Folding the sidebars** (W D)
-Ctrl+B (Cmd+B), or the fold button in the top bar, folds the sidebar to a
+Ctrl+B (Cmd+B), or the "‹" beside "Search projects" (the top bar has no fold
+button), folds the sidebar to a
 44 px strip of project icons (the open one outlined; a click opens that
-project) and back; the rail's chevron makes the rail icons only. Both stay after
+project; each project shows its icon or initials) and its "›" brings it back; the rail's chevron makes the rail icons only. Both stay after
 a reload.
 
 **S22 Command palette and shortcuts** (W D)
@@ -158,8 +162,10 @@ open it goes to the uberbot's chat), Ctrl+J opens the floating terminal (it runs
 to the first thread, Ctrl+Shift+S settles it. With no field focused (click
 the timeline), the bare keys on the rail's keycaps press their buttons: B
 Board, S Schematic, 3 3D, V Split (twice: on, off); typing "bsd3" in the
-composer only types. Holding Ctrl lights the first nine threads' digit
-keycaps. The legend at the sidebar's foot: its "all shortcuts" row opens the
+composer only types. Keycaps are hidden until Ctrl is held: holding Ctrl
+shows the rail's keycaps, the top bar's Ctrl K, the model chip's Ctrl M,
+the first nine threads' digits and the legend, and nothing moves when they
+appear or go. The legend at the sidebar's foot: its "all shortcuts" row opens the
 palette.
 
 **S23 API keys** (W D A)
@@ -170,7 +176,11 @@ never the value, and after Save the list shows the new name; Delete asks
 type the value fast: the whole value is kept.
 
 **S24 Settings stick** (W D)
-Change Threads → notifications and Time zone; reload: both kept. On a fresh
+At 1920x1080 Settings fills the width: its groups flow into up to four
+columns, the search spans them; a page (Appearance, API keys...) has the
+category list on its left and each row's controls beside its label; at 420
+px it is one column. Change Threads → notifications and Time zone; reload:
+both kept. On a fresh
 hub the Time zone page has no empty row, and Automatic shows chosen, its
 tooltip naming what it follows (this machine).
 
@@ -315,3 +325,15 @@ settled ones folded. Open each long thread ("Route the USB-C connector",
 "Alpha: power tree review", "Bring-up notes"): it opens at its newest
 message; scroll to its first message and back down: every notch moves,
 nothing jumps, no stall.
+
+**S45 The keyboard stays in the composer** (W D)
+Open a thread from the sidebar and type at once: the text lands in its
+composer; reload: the keyboard is in the composer with the draft back. The
+same after Ctrl+1, Ctrl+N, closing the palette, Settings or a menu (the caret
+where it was). Open Board, press Esc: the viewer closes (under 300 ms) and
+typing goes to the composer; the same for Schematic, 3D, Split, Mech, Files,
+Diff. In Split with a probe, the first Esc clears the chip, the second
+closes the viewer. Open the terminal (`): Esc stays in the shell, Shift+Esc
+hides it and the composer has the keyboard. Click in the timeline, press
+"/": the keyboard is at the end of the draft and no "/" was typed. A rename
+field or a Settings field keeps the keyboard while you type in it.
