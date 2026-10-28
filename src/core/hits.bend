@@ -219,6 +219,24 @@ def Snip.of.k(w: SnipWalk, +terms: Map<&2, Bool>, +text: String) -> List<&2, Str
 def Snip.of(+terms: Map<&2, Bool>, +text: String) -> List<&2, String>:
   Snip.of.k(Snip.go(text, terms, SnipRead{"", "", "", Snip.budget()}), terms, text)
 
+# Whose a result is
+# -----------------
+# A subagent's steps are logged off their thread's timeline, as entries of
+# "@sub:<thread>" (model.bend's Bg.log), which is no thread: the hub
+# refuses a view of it. A result there is its thread's, and opening it
+# shows the call that started the subagent (the step's tone).
+def Hits.owner(+th: String) -> String:
+  Bool.pick(String, String.starts_with(th, "@sub:"), String.drop(th, 5n), th)
+
+def Hits.jump.k(sub: Bool, +e: M.Entry) -> String:
+  match sub e:
+    case True{} M.Act{_, _, +call, _, _, _}: call
+    case _ _: M.Idx.id(e)
+
+# the entry a result is brought into view at in its thread
+def Hits.jump(+e: M.Entry) -> String:
+  Hits.jump.k(String.starts_with(M.Idx.thread(e), "@sub:"), e)
+
 # Grouping
 # --------
 # a result as the grouping sees it: its row (thin.bend's ordinal key), its

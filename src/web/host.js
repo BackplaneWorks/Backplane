@@ -847,7 +847,7 @@ let searchLit = null;
 function searchLight(tl) {
   if (!searchLit || !tl) return;
   if (performance.now() > searchLit.until) { searchLit = null;CSS.highlights?.delete("search-word");return; }
-  const el = tl.querySelector(`[data-id="${CSS.escape(searchLit.id)}"]`);
+  const el = tl.querySelector(`[data-id="${CSS.escape(searchLit.id)}"]`) || anchorElement(tl, "fold:" + searchLit.id);
   if (!el) return;
   if (performance.now() < searchLit.flash && !el.classList.contains("jumped")) el.classList.add("jumped");
   const range = wordRange(el, searchLit.word);
@@ -938,7 +938,8 @@ function render() {
     jump = null;
   }
   if (searchJump && tl2 && searchJump.thread === (thin?.session?.sel ?? App.sel(ui))) {
-    const el = tl2.querySelector(`[data-id="${CSS.escape(searchJump.id)}"]`);
+    // (a tool call shut in its fold: the fold it starts)
+    const el = tl2.querySelector(`[data-id="${CSS.escape(searchJump.id)}"]`) || anchorElement(tl2, "fold:" + searchJump.id);
     if (el) {
       jumpTo(tl2, el, searchJump.word);
       searchLit = { id: searchJump.id, word: searchJump.word, flash: performance.now() + 2400, until: performance.now() + 15000 };
@@ -2378,7 +2379,9 @@ function showThinSearch(search) {
     // the word lit in its snippet (else, a match past what the hub reads
     // for snippets, the first word asked)
     const word = Array.isArray(row.snip) && row.snip[1] || (query.value.match(/[\p{L}\p{N}]+/u)?.[0] ?? "");
-    searchJump = row.id ? { id: row.id, thread: row.thread, pages: 0, asked: false, word } : null;
+    // (jump: the entry shown for it, a subagent's step at the call that
+    // started it, server/thin-view.bend's Search.row)
+    searchJump = row.id ? { id: row.jump || row.id, thread: row.thread, pages: 0, asked: false, word } : null;
     dispatch("select", row.thread);later();
   };
   const ask = (text, cursor) => {
