@@ -21,9 +21,12 @@ function harness(installWorkspaceHints) {
   sidebar.querySelectorAll = selector => selector.startsWith('.project-head') ? [head('p1', p1), head('p2', p2)] :
     [row('child', child, 'p2'), row('excluded', excluded), row('parent', parent)];
   const body = { closest: () => null };
-  const doc = emitter({ activeElement:body, visibilityState:'visible', focused:true, blocked:false,
+  // dialogs in the page: shown ones have boxes, hidden ones (display:none) none
+  const dialog = shown => ({ getClientRects: () => shown ? [{}] : [] });
+  const doc = emitter({ activeElement:body, visibilityState:'visible', focused:true, blocked:false, hiddenDialog:false,
     documentElement:{dataset:{backplaneRemoteReady:'true'}}, hasFocus: () => doc.focused,
-    querySelector: selector => selector === '.sidebar' ? sidebar : doc.blocked ? {} : null });
+    querySelector: selector => selector === '.sidebar' ? sidebar : null,
+    querySelectorAll: () => [...(doc.hiddenDialog ? [dialog(false)] : []), ...(doc.blocked ? [dialog(true)] : [])] });
   let observer;
   const win = emitter({ navigator:{platform:'Linux'}, MutationObserver:class {
     constructor(callback) { observer = callback; } observe() {} disconnect() {}
@@ -96,4 +99,16 @@ test('modifier hints clear on keyup, focus, blur, visibility, dialogs and discon
   h.doc.visibilityState = 'visible';h.doc.documentElement.dataset.backplaneRemoteReady = 'false';h.refresh();assert.equal(h.mode(), null);
   h.doc.documentElement.dataset.backplaneRemoteReady = 'true';h.key('keydown', {altKey:true});assert.equal(h.mode(), 'projects');
   h.key('keyup', {});assert.equal(h.mode(), null);h.dispose();
+});
+
+test('a dialog kept hidden in the page (the model picker) leaves the hints on; a shown one turns them off', async () => {
+  const { installWorkspaceHints } = await import('../../src/web/workspace-hints.js');
+  const h = harness(installWorkspaceHints);
+  h.doc.hiddenDialog = true;
+  h.key('keydown', {ctrlKey:true});assert.equal(h.mode(), 'threads');
+  h.key('keyup', {});assert.equal(h.mode(), null);
+  h.key('keydown', {altKey:true});assert.equal(h.mode(), 'projects');
+  h.doc.blocked = true;h.refresh();assert.equal(h.mode(), null);
+  h.doc.blocked = false;h.refresh();assert.equal(h.mode(), 'projects');
+  h.dispose();
 });

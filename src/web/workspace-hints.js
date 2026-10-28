@@ -32,10 +32,14 @@ export function installWorkspaceHints({ document: doc = document, window: win = 
       if (value === null) element.removeAttribute(name); else element.setAttribute(name, value);
     }
   };
+  // Only a dialog on screen covers the sidebar: the model picker stays in
+  // the page, display:none, while a thread is open.
+  const covered = () => [...doc.querySelectorAll('.tour,.workspace-palette,[role="dialog"],[aria-modal="true"]')]
+    .some(element => element.getClientRects().length > 0);
   const mode = () => {
-    if (composing || !doc.hasFocus() || doc.visibilityState !== 'visible' || doc.documentElement.dataset.backplaneRemoteReady === 'false' ||
-        doc.querySelector('.tour,.workspace-palette,[role="dialog"],[aria-modal="true"]')) return '';
-    return shortcutHintMode(held, doc.activeElement, platform);
+    if (composing || !doc.hasFocus() || doc.visibilityState !== 'visible' || doc.documentElement.dataset.backplaneRemoteReady === 'false') return '';
+    const hint = shortcutHintMode(held, doc.activeElement, platform);
+    return hint && !covered() ? hint : '';
   };
   const sync = () => {
     const next = doc.querySelector('.sidebar');
