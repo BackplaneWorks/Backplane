@@ -81,3 +81,34 @@ test('visual bridge snapshots require a stable message id or fold head', () => {
   const f=fixture(), unstable={...row(''),attrs:list([{$:'At',name:'class',value:'msg assistant'}])};
   assert.equal(f.context.historySnapshotRow(unstable),false);assert.equal(f.context.historySnapshotRow(row('stable')),true);assert.equal(f.context.historySnapshotRow(fold('head')),true);
 });
+// S07 on the desktop app: two pages asked for before the first was drawn,
+// the second dropped the rows on screen and the text jumped 1865 px
+const rows = (from, to) => Array.from({ length: to - from + 1 }, (_, i) => row(String(from + i).padStart(3, '0')));
+const ids3 = (from, to) => Array.from({ length: to - from + 1 }, (_, i) => String(from + i).padStart(3, '0'));
+test('scrolling down, a second newer page keeps the rows on screen in the spare above', () => {
+  const f = fixture();f.show(rows(0, 31));f.show(rows(16, 47), 'newer');
+  f.context.held = { id: '010', off: 40 };vm.runInContext('historyKeep = ["010", "013"]', f.context);
+  const ids = f.ids(f.show(rows(32, 63), 'newer'));
+  assert.deepEqual(ids, ids3(10, 63), 'the rows on screen and those down to the new page stay, in order');
+  vm.runInContext('historyKeep = ["040", "043"]', f.context);
+  assert.deepEqual(f.ids(f.show(rows(48, 79), 'newer')), ids3(32, 79), 'read into the page, the usual half page is spare');
+});
+test('scrolling up, a second older page keeps the rows on screen in the spare below', () => {
+  const f = fixture();f.show(rows(32, 63));f.show(rows(16, 47), 'older');
+  f.context.held = { id: '050', off: 40 };vm.runInContext('historyKeep = ["050", "055"]', f.context);
+  assert.deepEqual(f.ids(f.show(rows(0, 31), 'older')), ids3(0, 55), 'everything down to the last row on screen stays below');
+});
+test('a refresh that drew a page an action overtook keeps the rows on screen', () => {
+  const f = fixture();f.show(rows(0, 31));
+  f.context.held = { id: '005', off: 0 };vm.runInContext('historyKeep = ["005", "008"]', f.context);
+  assert.deepEqual(f.ids(f.show(rows(16, 47))), ids3(5, 47));
+  vm.runInContext('historyKeep = null', f.context);f.context.held = null;
+  assert.deepEqual(f.ids(f.show(rows(16, 47))), ids3(5, 47), 'a later refresh keeps the spare');
+});
+test('nothing held, or all on screen still shown: the spare is the usual one', () => {
+  const f = fixture();f.show(rows(0, 31));
+  vm.runInContext('historyKeep = ["020", "024"]', f.context);f.context.held = { id: '020', off: 0 };
+  assert.deepEqual(f.ids(f.show(rows(16, 47), 'newer')), ids3(0, 47));
+  vm.runInContext('historyKeep = null', f.context);f.context.held = null;
+  assert.deepEqual(f.ids(f.show(rows(32, 63), 'newer')), ids3(16, 63));
+});

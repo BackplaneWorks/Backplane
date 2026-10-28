@@ -236,9 +236,10 @@ export class ThinHost {
       this.terminalBytes += bytes;
       this.actions.push({ action, value, input, terminal: true, bytes, scope, revision: this.localRevision, settled });
     } else {
-      const operation = { action, value, viewer, viewerRevision: this.viewerRevision, input: clone(this.session), revision: this.localRevision, settled, scope };
+      const urgent = retire || action === 'stop' || action === 'interrupt';
+      const operation = { action, value, viewer, viewerRevision: this.viewerRevision, input: clone(this.session), revision: this.localRevision, settled, scope, urgent };
       // Stop and explicit close/switch controls remain responsive during input.
-      if (retire || action === 'stop' || action === 'interrupt') this.actions.unshift(operation);
+      if (urgent) this.actions.unshift(operation);
       else this.actions.push(operation);
     }
     this.pump(true);return true;
@@ -264,6 +265,10 @@ export class ThinHost {
   }
   pump(flushFields = false) {
     if (this.active || !this.ready || !this.actions.length) return;
+    // A page on its way is shown first (its reply pumps again): an action
+    // sent meanwhile made it stale, and the refresh that drew it instead
+    // drew no bridge from the page on screen. Stop and switches do not wait.
+    if (this.paging && !this.actions[0].urgent) return;
     if (this.actions[0].action === 'bfield' && !flushFields) return;
     const operation = this.actions.shift();
     if (operation.terminal) this.terminalBytes -= operation.bytes;

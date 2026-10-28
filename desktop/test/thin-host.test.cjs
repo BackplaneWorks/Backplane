@@ -620,3 +620,10 @@ test('refresh launch: compact input does not consume scheduled output invalidati
  f.host.request('flag','models');const action=f.sent.at(-1),r=f.reply(action,{modelMenuInput:true,viewRevision:'2',session:{...action.p.session,open:{models:true}}});delete r.result.shown;delete r.result.window;f.host.receive(r);
  scheduled.shift()();assert.equal(f.sent.at(-1).m,'view.update');assert.equal(f.sent.at(-1).p.session.open.models,true);assert.equal(f.host.ready,true);
 });
+test('history ordering: an action waits for a page on its way, so the page is still shown as one; Stop does not wait',async()=>{
+ const f=await fixture();f.open();f.host.page();const req=f.sent.at(-1),count=f.sent.length;
+ f.host.request('fab-look','');assert.equal(f.sent.length,count,'the action waits for the page');
+ f.host.receive(f.reply(req));assert.equal(f.views.at(-1).detail.page.direction,'older','the page is drawn as a page, its bridge kept');
+ assert.equal(f.sent.at(-1).p.action,'fab-look','then the action goes');
+ f.host.receive(f.reply());f.host.page();f.host.request('stop','');assert.equal(f.sent.at(-1).p.action,'stop','Stop overtakes a page');
+});

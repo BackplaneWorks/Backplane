@@ -479,6 +479,8 @@ let earlierAsked = false;
 // visible message when a page is short, a tool run is folded, or the viewport
 // is taller than half a page. It never becomes session or request authority.
 let historyBase = null, historySpare = [], historyPage = null, historyRestored = null;
+// the rows the timeline drew last, in order (the page's and the spare's)
+let historyShown = [];
 let historyStatus = null;
 const historyBridges = new Map();let historyBridgeBytes = 0;
 function historyBridgeKey(target = thin?.target, conversation = thin?.conversation) {
@@ -503,7 +505,7 @@ function historyRestoreBridge(detail) {
   if (saved) { historyRestored = saved.rows;historyPage = null; }
 }
 function historyClear() {
-  historyBase = null;historySpare = [];historyPage = null;historyRestored = null;
+  historyBase = null;historySpare = [];historyPage = null;historyRestored = null;historyShown = [];
   olderGestureUntil = newerGestureUntil = 0;stationaryPages = 0;
   historyPageState(null);
 }
@@ -573,7 +575,9 @@ function historyProject(node) {
       historySpare.direction = historyPage.direction;historyPage = null;
     }
     historyBase = kids.slice();
-    const spare = historySpare.filter(n => !ids.has(historyRow(n)));
+    let spare = historySpare.filter(n => !ids.has(historyRow(n)));
+    const bridge = historyHeld(ids, spare);
+    if (bridge) { historySpare = spare = bridge.rows;historySpare.direction = bridge.direction; }
     // Place spare entries with the body, inside the existing scroll track.
     // Work/fab controls and live/sending rows come only from the current view.
     if (spare.length) {
@@ -581,11 +585,50 @@ function historyProject(node) {
       const at = historySpare.direction === "older" ? (rowIndexes.at(-1) ?? kids.length - 1) + 1 : (rowIndexes[0] ?? kids.length);
       kids.splice(at, 0, ...spare);
     }
+    historyShown = kids.filter(n => historyRow(n));
   } else {
     for (let i = 0; i < kids.length; i++) kids[i] = historyProject(kids[i]);
   }
   let list = { $: "Nil" };for (let i = kids.length - 1; i >= 0; i--) list = { $: "Con", head: kids[i], tail: list };
   return { ...node, kids: list };
+}
+
+// What is on screen never leaves under the reader. A reply whose rows and
+// spare leave out a row the reader sees (a second page asked for before
+// the first was drawn, a page an action overtook and a refresh then drew)
+// keeps the rows the timeline drew from the new rows out to the farthest
+// one on screen, on that side, as the spare: holdFix finds the held entry
+// with the rows under it still there, and nothing moves. null: all that is
+// on screen is shown anyway (or nothing is held, or nothing is shared).
+let historyKeep = null; // [first, last] row on screen when a held render began
+function historyHeld(ids, spare) {
+  if (!historyKeep || !historyShown.length) return null;
+  const index = id => historyShown.findIndex(n => historyRow(n) === id);
+  const a = index(historyKeep[0]), b = index(historyKeep[1]);
+  if (a < 0 || b < a) return null;
+  const kept = new Set(spare.map(historyRow));
+  if (historyShown.slice(a, b + 1).every(n => ids.has(historyRow(n)) || kept.has(historyRow(n)))) return null;
+  const shared = historyShown.map((n, i) => ids.has(historyRow(n)) ? i : -1).filter(i => i >= 0);
+  if (!shared.length) return null;
+  const at = spare.map(n => index(historyRow(n))).filter(i => i >= 0), first = shared[0], last = shared.at(-1);
+  const rows = (from, to) => historyShown.slice(from, to).filter(n => !ids.has(historyRow(n)));
+  if (a < first) return { rows: rows(Math.min(a, ...at.filter(i => i < first)), first), direction: "newer" };
+  if (b > last) return { rows: rows(last + 1, Math.max(b, ...at.filter(i => i > last)) + 1), direction: "older" };
+  return null;
+}
+// the rows on screen, first and last (as historyRow names them)
+function historySpan(tl) {
+  const box = tl.getBoundingClientRect();
+  let first = null, last = null;
+  for (const el of tl.children) {
+    const id = el.getAttribute("data-id") || (el.matches("button.fold") ? el.getAttribute("data-value")?.slice(1) : "");
+    if (!id) continue;
+    const r = el.getBoundingClientRect();
+    if (r.height <= 0 || r.bottom <= box.top + 1) continue;
+    if (r.top >= box.bottom - 1) break;
+    first ??= id;last = id;
+  }
+  return first ? [first, last] : null;
 }
 
 // the entry at the top of the timeline's view, and where it is in the
@@ -795,6 +838,7 @@ function render() {
   // A wheel/touch may have moved since the last scroll event or page request.
   // Capture at application time, before pruning or inserting any rows.
   if (held && tl) held = anchorOf(tl) || held;
+  historyKeep = held && tl ? historySpan(tl) : null;
   if (frontendNode) page = historyProject(page);
   const t1 = PERF ? pnow() : 0;
   patch(root, { $: T.El, tag: "div", key: "", attrs: { $: "Nil" }, kids: { $: "Con", head: page, tail: { $: "Nil" } } });
@@ -1806,6 +1850,10 @@ function laterCheck(tl) {
 }
 let olderGestureUntil = 0, olderTouchY = null, stationaryPages = 0, historyFrame = false, historyScrollOwner = null, historyScrollTop = 0;
 function historyCanPage(tl, direction) {
+  // A page that came is drawn first: asked for from the page still on
+  // screen, the next one left out the rows being read (the spare it was
+  // judged against was about to go).
+  if (historyPage) return false;
   if (!historyBase) return true;
   const anchor = anchorOf(tl);
   // The spare is only a visual bridge. Read into the canonical page before
