@@ -150,6 +150,14 @@ def ModelPick.col.next(+c: Nat) -> Nat:
 def ModelPick.col.prev(+c: Nat) -> Nat:
   Nat.mod(Nat.add(c, 2n), 3n)
 
+# the keycap in column col's head, read from the column the keys are in
+# (at): there, what moves within it (↑↓; the effort's ←→); the effort's
+# ←→ anywhere (they move it from every column); else the key that goes
+# to it, Tab to the next column, ⇧Tab to the one before
+def ModelPick.cap(+col: Nat, +at: Nat) -> String:
+  Bool.pick(String, Nat.is_eq(col, 2n), "←→",
+    Bool.pick(String, Nat.is_eq(col, at), "↑↓", Bool.pick(String, Nat.is_eq(col, ModelPick.col.next(at)), "Tab", "⇧Tab")))
+
 # the cursor on agent a: another agent starts on its default model, or on
 # the thread's own model when a is the thread's agent (now)
 def ModelPick.agent(c: MpCur, +a: String, +now: MpCur) -> MpCur:

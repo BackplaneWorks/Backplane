@@ -82,3 +82,9 @@ def main() -> IO(Unit):
     C.Check.str("kept: this thread", Bool.show(MP.ModelPick.kept("t\t1\tclaude\t\t", "t")), "True")
     C.Check.str("kept: not another", Bool.show(MP.ModelPick.kept("tt\t1\tclaude\t\t", "t")), "False")
     C.Check.str("products", MP.ModelPick.product("claude") ++ "," ++ MP.ModelPick.product("codex") ++ "," ++ MP.ModelPick.product("x"), "Claude Code,Codex CLI,")
+    # the heads' keycaps read from the column the keys are in: it says ↑↓,
+    # Tab names the next column, ⇧Tab the one before, the effort ←→
+    C.Check.str("caps on the model column (it opens there)", MP.ModelPick.cap(0n, 1n) ++ " " ++ MP.ModelPick.cap(1n, 1n) ++ " " ++ MP.ModelPick.cap(2n, 1n), "⇧Tab ↑↓ ←→")
+    C.Check.str("caps on the agent column", MP.ModelPick.cap(0n, 0n) ++ " " ++ MP.ModelPick.cap(1n, 0n) ++ " " ++ MP.ModelPick.cap(2n, 0n), "↑↓ Tab ←→")
+    C.Check.str("caps on the effort column", MP.ModelPick.cap(0n, 2n) ++ " " ++ MP.ModelPick.cap(1n, 2n) ++ " " ++ MP.ModelPick.cap(2n, 2n), "Tab ⇧Tab ←→")
+    C.Check.str("Tab goes where its cap is", Nat.show(MP.MpCur.col(MP.ModelPick.key("tab", MP.ModelPick.col(now(), 0n), agents(), ["", "opus"], MP.ModelPick.steps(claude()), now()))), "1")
