@@ -1,6 +1,13 @@
 const { test } = require('node:test'), assert = require('node:assert/strict');
 const { installShortcuts } = require('../window.cjs');
 const event = (key, fields = {}) => ({ key, code: '', ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, target: { closest: () => null }, ...fields });
+// A stand-in element: closest(selector) finds it when the selector names its
+// tag or one of its attributes (the PTY is a textarea with data-keys).
+const element = (tagName, id = '', attrs = []) => {
+  const el = { tagName: tagName.toUpperCase(), id, hasAttribute: name => attrs.includes(name),
+    closest: selector => selector.split(',').some(s => s === tagName || attrs.some(a => s === `[${a}]`)) ? el : null };
+  return el;
+};
 
 test('restored navigation chords respect editors, IME, PTYs and platform modifiers', async () => {
   const { workspaceShortcut: key } = await import('../../src/web/workspace-keys.js');
@@ -8,9 +15,10 @@ test('restored navigation chords respect editors, IME, PTYs and platform modifie
   assert.deepEqual(key(event('2', { ctrlKey: true }), 'Linux'), ['ws-key', 'ctrl+2']);
   assert.deepEqual(key(event('}', { ctrlKey: true, shiftKey: true, code: 'BracketRight' }), 'Linux'), ['ws-key', 'next']);
   assert.deepEqual(key(event('U', { ctrlKey: true, shiftKey: true }), 'Linux'), ['ws-key', 'uber']);
-  const editor = { closest: () => ({}) };
+  const editor = element('textarea', 'term', ['data-keys']);
   for (const input of [event('2', { altKey: true, target: editor }), event('2', { ctrlKey: true, target: editor }),
     event('}', { ctrlKey: true, shiftKey: true, target: editor }), event('U', { ctrlKey: true, shiftKey: true, target: editor }),
+    event('2', { altKey: true, target: element('textarea', 'composer') }),
     event('P', { ctrlKey: true, shiftKey: true, isComposing: true }), event('2', { altKey: true, getModifierState: () => true })]) assert.equal(key(input, 'Linux'), null);
   assert.deepEqual(key(event('P', { ctrlKey: true, shiftKey: true, target: editor }), 'Linux'), ['ws-palette-open', '']);
   assert.deepEqual(key(event('P', { metaKey: true, shiftKey: true }), 'MacIntel'), ['ws-palette-open', '']);
@@ -35,9 +43,8 @@ function composerHarness(installWorkspaceKeys) {
   const actions = [], doc = { querySelector: () => null, activeElement: null,
     addEventListener: (name, callback) => { assert.equal(name, 'keydown'); listener = callback; } };
   const body = { tagName: 'BODY', closest: () => null };
-  const composer = { tagName: 'TEXTAREA', id: 'composer', value: 'unsent draft', completion: '',
-    closest: () => composer, getAttribute: () => composer.completion,
-    blur: () => { doc.activeElement = body; } };
+  const composer = Object.assign(element('textarea', 'composer'), { value: 'unsent draft', completion: '',
+    getAttribute: () => composer.completion, blur: () => { doc.activeElement = body; } });
   doc.activeElement = composer;
   installWorkspaceKeys({ dispatch: (...action) => actions.push(action), document: doc, platform: 'Linux' });
   const press = (key, fields = {}) => {
@@ -48,16 +55,17 @@ function composerHarness(installWorkspaceKeys) {
   return { doc, composer, body, actions, press };
 }
 
-test('composer Escape restores focus-free navigation and preserves the unsent draft', async () => {
+test('composer Escape leaves the field and preserves the unsent draft; Ctrl+2 jumps from either side', async () => {
   const { installWorkspaceKeys } = await import('../../src/web/workspace-keys.js');
   const h = composerHarness(installWorkspaceKeys);
-  h.press('2', { ctrlKey: true });
-  assert.deepEqual(h.actions, []);
+  assert.equal(h.press('2', { ctrlKey: true }).defaultPrevented, true);
+  assert.deepEqual(h.actions, [['ws-key', 'ctrl+2']]);
+  assert.equal(h.composer.value, 'unsent draft');
   assert.equal(h.press('Escape').defaultPrevented, true);
   assert.equal(h.doc.activeElement, h.body);
   assert.equal(h.composer.value, 'unsent draft');
   h.press('2', { ctrlKey: true });
-  assert.deepEqual(h.actions, [['ws-key', 'ctrl+2']]);
+  assert.deepEqual(h.actions, [['ws-key', 'ctrl+2'], ['ws-key', 'ctrl+2']]);
 });
 
 test('composer Escape leaves completion, IME and PTY input ownership intact', async () => {
@@ -183,7 +191,7 @@ function railHarness(installWorkspaceKeys, { overlay = false } = {}) {
     querySelector: (sel) => sel === '.tour,.lightbox' ? (overlay ? {} : null) : (/data-keycap="(.)"/.exec(sel) ? buttons[/data-keycap="(.)"/.exec(sel)[1]] || null : null),
     addEventListener: (_name, callback) => { listener = callback; } };
   installWorkspaceKeys({ dispatch: (...action) => actions.push(action), document: doc, platform: 'Linux' });
-  const body = { tagName: 'BODY', closest: () => null }, composer = { tagName: 'TEXTAREA', id: 'composer', closest: () => composer, getAttribute: () => '' };
+  const body = { tagName: 'BODY', closest: () => null }, composer = Object.assign(element('textarea', 'composer'), { getAttribute: () => '' });
   const press = (key, fields = {}) => {
     const input = event(key, { target: body, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; }, stopImmediatePropagation() {}, ...fields });
     listener(input); return input;
@@ -207,4 +215,55 @@ test('a rail keycap presses its button once; typing, other keys and overlays are
   const shut = railHarness(installWorkspaceKeys, { overlay: true });
   assert.equal(shut.press('b').defaultPrevented, false);
   assert.deepEqual(shut.clicks, []);
+});
+
+test('Ctrl/Cmd workspace chords work from the composer and other text fields, not from a PTY', async () => {
+  const { workspaceShortcut: key } = await import('../../src/web/workspace-keys.js');
+  const composer = element('textarea', 'composer'), search = element('input', 'side-search'), title = element('input', 'title');
+  const chords = [[event('k', { ctrlKey: true }), ['ws-key', 'palette']], [event('1', { ctrlKey: true }), ['ws-key', 'ctrl+1']],
+    [event('9', { ctrlKey: true }), ['ws-key', 'ctrl+9']], [event('S', { ctrlKey: true, shiftKey: true }), ['ws-key', 'settle']],
+    [event('n', { ctrlKey: true }), ['ws-key', 'new']], [event('d', { ctrlKey: true }), ['ws-key', 'diff']], [event('p', { ctrlKey: true }), ['ws-key', 'files']],
+    [event('{', { ctrlKey: true, shiftKey: true, code: 'BracketLeft' }), ['ws-key', 'prev']], [event('U', { ctrlKey: true, shiftKey: true }), ['ws-key', 'uber']],
+    [event('F', { ctrlKey: true, shiftKey: true }), ['thin-search-open', '']]];
+  for (const target of [composer, search, title])
+    for (const [input, action] of chords) assert.deepEqual(key({ ...input, target }, 'Linux'), action, `${input.key} in ${target.id}`);
+  // Cmd on a Mac, from the composer too
+  assert.deepEqual(key(event('k', { metaKey: true, target: composer }), 'MacIntel'), ['ws-key', 'palette']);
+  assert.deepEqual(key(event('3', { metaKey: true, target: composer }), 'MacIntel'), ['ws-key', 'ctrl+3']);
+  assert.equal(key(event('k', { ctrlKey: true, target: composer }), 'MacIntel'), null);
+  // what edits text stays the field's
+  for (const [k, fields] of [['a', {}], ['c', {}], ['v', {}], ['x', {}], ['z', {}], ['y', {}], ['Z', { shiftKey: true }], ['Enter', {}],
+    ['Backspace', {}], ['Delete', {}], ['ArrowLeft', {}], ['ArrowRight', { shiftKey: true }], ['Home', {}], ['End', {}]])
+    assert.equal(key(event(k, { ctrlKey: true, target: composer, ...fields }), 'Linux'), null, 'Ctrl+' + k);
+  for (const k of ['Home', 'End', 'ArrowUp', 'Backspace', 'Enter']) assert.equal(key(event(k, { target: composer }), 'Linux'), null);
+  // a PTY keeps its control keys; IME composition is left alone
+  const pty = element('textarea', 'term', ['data-keys']), frame = element('div', '', ['data-keyto']);
+  for (const target of [pty, frame]) for (const [input] of chords) assert.equal(key({ ...input, target }, 'Linux'), null);
+  assert.equal(key(event('k', { ctrlKey: true, target: composer, isComposing: true }), 'Linux'), null);
+  assert.equal(key(event('1', { ctrlKey: true, target: composer, keyCode: 229 }), 'Linux'), null);
+});
+
+test('bare keys and Alt+digit stay with a text field', async () => {
+  const { workspaceShortcut: key, railKey } = await import('../../src/web/workspace-keys.js');
+  const composer = element('textarea', 'composer');
+  for (const k of ['b', 's', '3', 'v', 'd']) {
+    assert.equal(key(event(k, { target: composer }), 'Linux'), null);
+    assert.equal(railKey(event(k, { target: composer })), '');
+  }
+  assert.equal(key(event('1', { altKey: true, target: composer }), 'MacIntel'), null);
+  assert.deepEqual(key(event('1', { altKey: true }), 'MacIntel'), ['ws-key', 'alt+1']);
+});
+
+test('Ctrl+K from the composer opens the palette once and keeps the draft', async () => {
+  const { installWorkspaceKeys } = await import('../../src/web/workspace-keys.js');
+  const h = composerHarness(installWorkspaceKeys);
+  assert.equal(h.press('k', { ctrlKey: true }).defaultPrevented, true);
+  assert.equal(h.press('k', { ctrlKey: true, repeat: true }).defaultPrevented, true);
+  assert.equal(h.press('S', { ctrlKey: true, shiftKey: true }).defaultPrevented, true);
+  assert.equal(h.press('a', { ctrlKey: true }).defaultPrevented, false);
+  assert.equal(h.press('v', { ctrlKey: true }).defaultPrevented, false);
+  assert.equal(h.press('s').defaultPrevented, false);
+  assert.deepEqual(h.actions, [['ws-key', 'palette'], ['ws-key', 'settle']]);
+  assert.equal(h.doc.activeElement, h.composer);
+  assert.equal(h.composer.value, 'unsent draft');
 });

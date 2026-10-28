@@ -1,5 +1,8 @@
 // Event normalization only; Bend owns navigation order and action decisions.
 const EDITOR = 'input,textarea,select,[contenteditable]:not([contenteditable="false"]),[role="textbox"],[data-keys],[data-keyto]';
+// A PTY (the terminal, an embedded one) or a bot's browser frame: every key
+// it gets is its own (Ctrl+K kills a line, Ctrl+D ends the shell).
+const PTY = '[data-keys],[data-keyto]';
 
 // A bare letter or digit (no modifier, outside every editor) may be one of
 // the rail's keycaps (view.bend writes data-keycap on the button that shows
@@ -36,7 +39,12 @@ export function workspaceShortcut(event, platform = '') {
   if (key === '`' && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey &&
       (!editor || (editor.tagName === 'TEXTAREA' && editor.id === 'composer' &&
         !editor.hasAttribute?.('data-keys') && !editor.hasAttribute?.('data-keyto')))) return ['ws-key', 'term'];
-  if (editor) return null;
+  // The Ctrl/Cmd chords below work from the composer and every other text
+  // field too: none of them edits text there (Ctrl+A/C/V/X/Z/Y, the arrows,
+  // Home/End, Backspace/Delete and Ctrl+Enter stay the field's). A PTY keeps
+  // all of them; bare keys and Alt+digit (Option+1 types ¡ on a Mac) stay
+  // off in every field.
+  if (editor && event.target?.closest?.(PTY)) return null;
   if (command && !event.altKey && event.shiftKey) {
     if (key === 'u') return ['ws-key', 'uber'];
     if (event.code === 'BracketLeft' || key === '[' || key === '{') return ['ws-key', 'prev'];
@@ -49,7 +57,7 @@ export function workspaceShortcut(event, platform = '') {
     if (action) return ['ws-key', action];
     if (/^[1-9]$/.test(key)) return ['ws-key', 'ctrl+' + key];
   }
-  if (event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && /^[1-9]$/.test(key)) return ['ws-key', 'alt+' + key];
+  if (!editor && event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && /^[1-9]$/.test(key)) return ['ws-key', 'alt+' + key];
   return null;
 }
 

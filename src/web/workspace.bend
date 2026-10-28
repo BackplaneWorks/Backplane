@@ -168,9 +168,8 @@ def WS.key.digit(+combo: String, +u: U.Ui) -> U.Act:
   +digit = Maybe.default(&2, Nat, Nat.read(String.drop(combo, Bool.pick(Nat, String.starts_with(combo, "alt+"), 4n, 5n))), 0n)
   WS.key.digit.valid(Bool.and(Bool.or(String.starts_with(combo, "alt+"), String.starts_with(combo, "ctrl+")), Bool.and(Nat.is_ge(digit, 1n), Nat.is_le(digit, 9n))), combo, u, digit)
 
-def WS.key(+combo: String, +u: U.Ui) -> U.Act:
+def WS.key.go(+combo: String, +u: U.Ui) -> U.Act:
   match combo:
-    case "palette": WS.palette.open(u, "")
     case "uber": U.Ui.act(u, "uber", "")
     case "term": WS.term.toggle(u, "")
     case "prev": WS.neighbour(u, False{})
@@ -180,6 +179,13 @@ def WS.key(+combo: String, +u: U.Ui) -> U.Act:
     case "diff": WS.view.key(u, "diff", "diff")
     case "files": WS.view.key(u, "files", "fm")
     case _: WS.key.digit(combo, u)
+
+# Ctrl+K opens the palette and, pressed in it, shuts it (as Ctrl+Shift+P);
+# any other workspace key works from the palette's field too, and shuts it
+def WS.key(+combo: String, +u: U.Ui) -> U.Act:
+  match combo:
+    case "palette": WS.palette.press(u)
+    case _: WS.key.go(combo, U.Ui.flag_off(u, "palette"))
 
 def WS.handles(+action: String) -> Bool:
   Bool.or(String.starts_with(action, "ws-"), Bool.or(String.eq(action, "term-toggle"), Bool.or(String.eq(action, "term-key"), String.eq(action, "term-paste"))))

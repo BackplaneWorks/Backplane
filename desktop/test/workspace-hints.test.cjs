@@ -72,11 +72,17 @@ test('modifier hints inherit navigation editor/PTY/IME/platform guards without c
     {ctrlKey:true,isComposing:true}, {ctrlKey:true,keyCode:229}, {altKey:true,getModifierState:() => true}]) {
     h.key('keydown', fields);assert.equal(h.mode(), null);
   }
-  for (const id of ['composer','term','search']) {
-    h.doc.activeElement = {id, closest:() => ({})};
-    h.key('keydown', {ctrlKey:true});assert.equal(h.mode(), null);
+  // Ctrl+1..9 works from the composer and other text fields, so Ctrl lights
+  // the thread digits there; Alt+digit stays with the field, and a PTY keeps both
+  const field = (id, pty) => ({id, closest:selector => !pty && selector === '[data-keys],[data-keyto]' ? null : {}});
+  for (const id of ['composer','search']) {
+    h.doc.activeElement = field(id, false);
+    h.key('keydown', {ctrlKey:true});assert.equal(h.mode(), 'threads');
     h.key('keydown', {altKey:true});assert.equal(h.mode(), null);
   }
+  h.doc.activeElement = field('term', true);
+  h.key('keydown', {ctrlKey:true});assert.equal(h.mode(), null);
+  h.key('keydown', {altKey:true});assert.equal(h.mode(), null);
   h.doc.activeElement = h.body;
   h.doc.emit('compositionstart');h.key('keydown', {ctrlKey:true});assert.equal(h.mode(), null);
   h.doc.emit('compositionend');assert.equal(h.mode(), null);
