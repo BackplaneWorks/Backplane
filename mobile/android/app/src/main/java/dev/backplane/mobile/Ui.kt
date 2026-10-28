@@ -1102,10 +1102,13 @@ fun ThreadScreen(m: AppModel, s: Screen, t: ThreadView, below: (@Composable () -
                         AttachButton(m)
                         ImageComposer(m, Modifier.weight(1f))
                         // a long press sends with the other follow-up mode (queue or steer);
-                        // while a turn runs with nothing typed the button stops it
+                        // while a turn runs with nothing typed the button stops it, at once,
+                        // as the top bar's Stop does (not held to contentReady: that is down
+                        // while the Send that started the turn settles, and half the presses
+                        // were lost; m.act still drops it on a page not yet live)
                         val stop = t.sendAct == "interrupt" && m.composer.isBlank()
                         Box(Modifier.size(48.dp).combinedClickableCompat(onLong = { if (m.contentReady && m.composer.isNotBlank()) m.act("send-alt") }) {
-                            if (m.contentReady) { if (stop) m.act("interrupt") else if (m.composer.isNotBlank()) m.act("send") }
+                            if (stop) m.act("interrupt") else if (m.contentReady && m.composer.isNotBlank()) m.act("send")
                         }, contentAlignment = Alignment.Center) {
                             if (stop) Icon(Icons.Filled.Stop, t.send, tint = MaterialTheme.colorScheme.error)
                             else Icon(Icons.AutoMirrored.Filled.Send, t.send,
