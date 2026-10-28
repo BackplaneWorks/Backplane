@@ -8786,6 +8786,21 @@ def Auth.cancel(+s: M.State, +now: Nat, +th: String) -> List<&2, M.Change>:
 def Hub.interrupt(+s: M.State, +now: Nat, +client: U32, +id: String, +thread: String) -> Step:
   Step.after(Hub.interrupt.k(Hub.running(Hub.thread(s, thread)), s, now, client, id, thread), Auth.cancel(s, now, thread))
 
+# an archived thread waits on no clock: archiving a snoozed one wakes it, so
+# its row and header no longer say it is snoozed (law archive_wakes)
+def Archive.wake.k(snoozed: Bool, +now: Nat, +th: String) -> List<&2, M.Change>:
+  match snoozed:
+    case True{}:
+      [M.ThreadSnoozed{th, 0n, now}]
+    case False{}:
+      Nil{}
+
+def Archive.wake(+until: Nat, +now: Nat, +th: String) -> List<&2, M.Change>:
+  Archive.wake.k(M.Snooze.on(now, until), now, th)
+
+def Archive.changes(+s: M.State, +now: Nat, +th: String) -> List<&2, M.Change>:
+  M.ThreadArchived{th, True{}, now} <> Archive.wake(M.Nav.until(M.Nav.get(M.State.navs(s), th)), now, th)
+
 def Hub.request.k(i: Nat, +s: M.State, +now: Nat, +client: U32, +id: String, +p: J.Json, +m: String) -> Step:
   match i:
     case 0n:
@@ -8804,7 +8819,7 @@ def Hub.request.k(i: Nat, +s: M.State, +now: Nat, +client: U32, +id: String, +p:
     case 6n:
       Step.reply(client, id, [M.ThreadUnsettled{J.Json.get_str(p, "thread", ""), now}])
     case 7n:
-      Step.cat(Retire.archive(s, now, J.Json.get_str(p, "thread", ""), Step{[M.ThreadArchived{J.Json.get_str(p, "thread", ""), True{}, now}], [Reply.ok(client, id), AgentStop{J.Json.get_str(p, "thread", "")}]}), Watch.retire(s, now, J.Json.get_str(p, "thread", "")))
+      Step.cat(Retire.archive(s, now, J.Json.get_str(p, "thread", ""), Step{Archive.changes(s, now, J.Json.get_str(p, "thread", "")), [Reply.ok(client, id), AgentStop{J.Json.get_str(p, "thread", "")}]}), Watch.retire(s, now, J.Json.get_str(p, "thread", "")))
     case 8n:
       Step.reply(client, id, [M.ThreadArchived{J.Json.get_str(p, "thread", ""), False{}, now}])
     case 9n:
