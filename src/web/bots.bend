@@ -895,8 +895,9 @@ def WB.machines.loc(+lc: I.Loc, +u: U.Ui) -> D.Node:
     [WB.div("bform wide row", [WB.input("peer-url", "purl", BI.BU.field(u, "purl"), MSG.T.machines.url(lc), "peer-invite"),
       D.Dom.button("", "peer-invite", "", MSG.T.machines.invite.tip(lc), MSG.T.machines.invite(lc))])],
     WB.invite.loc(lc, U.Ui.scratch(u, "@peer.invite")),
-    [WB.div("bform wide row", [WB.input("peer-join", "invite", BI.BU.field(u, "invite"), MSG.T.machines.invite.paste(lc), "peer-join"),
-      D.Dom.button("", "peer-join", "", MSG.T.machines.join.tip(lc), MSG.T.bots.invite.join(lc))])]]))
+    [WB.div("bform wide row", [WB.sealed("peer-join", "invite", "text", MSG.T.machines.invite.paste(lc)),
+      D.Dom.button("", "sealed", "invite", MSG.T.machines.join.tip(lc), MSG.T.bots.invite.join(lc))])],
+    Bool.pick(List<&2, D.Node>, String.is_empty(U.Sealed.err(u, "invite")), Nil{}, [D.Dom.span("set-note", U.Sealed.err(u, "invite"))])]))
 
 def WB.machines(+u: U.Ui) -> D.Node:
   WB.machines.loc(I.En{}, u)

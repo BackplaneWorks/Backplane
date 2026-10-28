@@ -149,6 +149,10 @@ const GBACK = `http://127.0.0.1:1/oauth/google?state=s&code=${F2}`;
 assert.deepEqual(sealedRpc('gpaste', GBACK).p, { op: 'finish', clientId: '', clientSecret: '', pasted: GBACK, account: '', redirect: '' });
 assert.ok(sealed('gpaste', ' ').error);
 refusals.push(['google', '', F1], ['google', F1, '']);
+assert.deepEqual(sealedRpc('invite', ` ${F2} `), { id: 0, m: 'bots.join', p: { invite: F2 } });
+assert.ok(sealed('invite', '').error);
+assert.equal(raw.sealed_after('sealed-sent', 'invite', 'invite'), '|');
+assert.ok(raw.sealed_after('sealed-err', 'invitenot an invite', 'invite').startsWith('not an invite|'));
 // no refusal carries the value it was given
 for (const ps of refusals) assert.ok(!sealed(...ps).error.includes(F1), 'a refusal never carries the value');
 assert.match(raw.prompt('[{"name":"tailscale-bub","purpose":"p"}]'), /`tailscale-bub`/);

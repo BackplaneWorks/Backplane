@@ -9929,6 +9929,11 @@ def Bots.google.paste.req(+pasted: String) -> String:
   Sealed.out(Bool.pick(String, String.is_empty(String.trim(pasted)), "Paste the address the sign-in ended on", ""),
     Bots.google.req("finish", "", "", pasted))
 
+# another machine's invite ("invite")
+def Bots.join.req(+invite: String) -> String:
+  Sealed.out(Bool.pick(String, String.is_empty(String.trim(invite)), "Paste the invite the other machine made", ""),
+    Rpc.text(0n, "bots.join", [J.KV{"invite", J.Str{String.trim(invite)}}]))
+
 def Sealed.none() -> String:
   J.Json.show(J.Json.obj([J.KV{"error", J.Str{"Nothing to save"}}]))
 
@@ -9946,6 +9951,8 @@ def Sealed.req.k(i: Nat, +arg: String, +vs: List<&2, String>) -> String:
       Bots.google.own.ps(vs)
     case 5n:
       Bots.google.paste.req(Sealed.first(vs))
+    case 6n:
+      Bots.join.req(Sealed.first(vs))
     case _:
       Sealed.none()
 
@@ -9954,7 +9961,7 @@ def Sealed.arg(+form: String) -> String:
   String.drop(form, Nat.add(String.length(Sealed.base(form)), 1n))
 
 def Sealed.forms() -> List<&2, String>:
-  ["key", "vkey", "agykey", "agyback", "google", "gpaste"]
+  ["key", "vkey", "agykey", "agyback", "google", "gpaste", "invite"]
 
 def Sealed.req.ps(ps: List<&2, String>) -> String:
   match ps:
