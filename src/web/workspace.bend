@@ -5,6 +5,7 @@ import ../core/model.bend as M
 import ../core/json.bend as J
 import ../core/vt.bend as VT
 import ../core/far.bend as FR
+import ../core/tools.bend as TO
 import ./dom.bend as D
 
 # Web desktop commands reuse the native sidebar keymap and normal actions.
@@ -109,25 +110,69 @@ def WS.term.key.parts(ps: List<&2, String>, u: U.Ui) -> U.Act:
 def WS.term.key(+u: U.Ui, value: String) -> U.Act:
   WS.term.key.parts(String.split(value, '\t'), u)
 
-def WS.commands(+u: U.Ui) -> List<&2, U.PItem>:
+# The open thread's commands list only what applies to it, as its ▾ does:
+# Pin or Unpin, Settle or Mark active, Archive or Unarchive, the snoozes or
+# Wake (test/palette_state_test.bend)
+def WS.cmd.pin(pinned: Bool) -> U.PItem:
+  match pinned:
+    case True{}: U.PItem{"Unpin thread", "unpin", ""}
+    case False{}: U.PItem{"Pin thread", "pin", ""}
+
+def WS.cmd.settle(settled: Bool) -> U.PItem:
+  match settled:
+    case True{}: U.PItem{"Mark thread active", "unsettle", ""}
+    case False{}: U.PItem{"Settle thread · Ctrl+Shift+S", "settle", ""}
+
+def WS.cmd.archive(archived: Bool) -> U.PItem:
+  match archived:
+    case True{}: U.PItem{"Unarchive thread", "unarchive", ""}
+    case False{}: U.PItem{"Archive thread", "archive", ""}
+
+def WS.cmd.snooze(snoozed: Bool) -> List<&2, U.PItem>:
+  match snoozed:
+    case True{}: [U.PItem{"Wake thread", "snooze", "off"}]
+    case False{}: [U.PItem{"Snooze thread for 1 hour", "snooze", "1h"}, U.PItem{"Snooze thread until tomorrow", "snooze", "tomorrow"}]
+
+# (where the palette lists them: pin, settle and archive with the others,
+# the snoozes last)
+type WSCmds is Data:
+  WSCmds{shelf: List<&2, U.PItem>, snooze: List<&2, U.PItem>}
+
+def WS.cmds.of(t: M.Thread, snoozed: Bool) -> WSCmds:
+  match t:
+    case M.Thread{_, _, _, _, _, _, _, archived, override, +sa, +ua, pinned, _, _, _, _, _, _, _, _, _}:
+      WSCmds{[WS.cmd.pin(pinned), WS.cmd.settle(TO.Tools.settled(override, Nat.is_gt(sa, ua))), WS.cmd.archive(archived)], WS.cmd.snooze(snoozed)}
+
+def WS.cmds(+u: U.Ui) -> WSCmds:
+  WS.cmds.of(U.Ui.thread(U.Ui.state(u), U.Ui.sel(u)), M.Snooze.on(U.Side.now(u), U.Side.until(U.Ui.state(u), U.Ui.sel(u))))
+
+def WS.cmds.shelf(c: WSCmds) -> List<&2, U.PItem>:
+  match c:
+    case WSCmds{s, _}: s
+
+def WS.cmds.snooze(c: WSCmds) -> List<&2, U.PItem>:
+  match c:
+    case WSCmds{_, z}: z
+
+def WS.commands.k(+u: U.Ui, +c: WSCmds) -> List<&2, U.PItem>:
   List.append(&2, U.PItem, Bool.pick(List<&2, U.PItem>, U.ThreadTree.can_route(U.Ui.state(u), U.Ui.sel(u)),
     [U.PItem{Bool.pick(String, U.ThreadTree.can_create(U.Ui.state(u), U.Ui.sel(u)), "New subthread of current thread", "Choose project conversation…"), "thread-child", U.Ui.sel(u)}], Nil{}),
-  [U.PItem{"Uberbot chat · Ctrl+Shift+U", "uber", ""},
+  List.concat(&2, U.PItem, [[U.PItem{"Uberbot chat · Ctrl+Shift+U", "uber", ""},
    U.PItem{"Floating terminal here · Backtick (`) · Ctrl+J", "ws-term-here", ""},
    U.PItem{"Hide terminal (keep shell running)", "ws-term-hide", ""},
    U.PItem{"Previous thread · Ctrl+Shift+[", "ws-prev", ""}, U.PItem{"Next thread · Ctrl+Shift+]", "ws-next", ""},
    U.PItem{"New thread · Ctrl+N", "new-thread", WS.pid(u)},
-   U.PItem{"Rename thread", "row-rename", U.Ui.sel(u)}, U.PItem{"Fork thread", "fork", ""},
-   U.PItem{"Pin thread", "pin", ""}, U.PItem{"Unpin thread", "unpin", ""}, U.PItem{"Settle thread · Ctrl+Shift+S", "settle", ""},
-   U.PItem{"Archive thread", "archive", ""}, U.PItem{"Unarchive thread", "unarchive", ""}, U.PItem{"Delete thread…", "delete", ""},
+   U.PItem{"Rename thread", "row-rename", U.Ui.sel(u)}, U.PItem{"Fork thread", "fork", ""}], WS.cmds.shelf(c), [U.PItem{"Delete thread…", "delete", ""},
    U.PItem{"Add project…", "proj-open", ""}, U.PItem{"Remove current project…", "proj-remove", WS.pid(u)},
    U.PItem{"Find file · Ctrl+P", "fm", ""},
    U.PItem{"Board viewer", "view-kind", "board"}, U.PItem{"Schematic viewer", "view-kind", "schematic"},
    U.PItem{"3D viewer", "view-kind", "3d"}, U.PItem{"Mechanical parts", "mech", ""}, U.PItem{"Browser", "view-kind", "browser"},
    U.PItem{"Diff · Ctrl+D", "diff", ""}, U.PItem{"Design review", "rv-page", "bom"},
    U.PItem{"Agent, model and effort · Ctrl+M", "flag", "models"},
-   U.PItem{"Show / hide viewer", "panel", ""}, U.PItem{"Settings", "flag", "settings"},
-   U.PItem{"Snooze thread for 1 hour", "snooze", "1h"}, U.PItem{"Snooze thread until tomorrow", "snooze", "tomorrow"}, U.PItem{"Wake thread", "snooze", "off"}])
+   U.PItem{"Show / hide viewer", "panel", ""}, U.PItem{"Settings", "flag", "settings"}], WS.cmds.snooze(c)]))
+
+def WS.commands(+u: U.Ui) -> List<&2, U.PItem>:
+  WS.commands.k(u, WS.cmds(u))
 
 def WS.projects(xs: List<&2, M.Project>) -> List<&2, U.PItem>:
   match xs:
