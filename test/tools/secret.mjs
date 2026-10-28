@@ -132,6 +132,13 @@ assert.match(sealed('vkey', SK + F1 + ' 0123456789').error, /not an OpenAI API k
 refusals.push(['vkey', F1]);
 assert.ok(raw.sealed_after('sealed-err', 'vkeyno', 'vkey').startsWith('no|'));
 assert.ok(raw.sealed_after('sealed-sent', 'vkey', 'vkey').includes('"op":"status"'));
+assert.deepEqual(sealedRpc('agykey:GEMINI_API_KEY', F1).p, { op: 'api-add', name: 'GEMINI_API_KEY', value: F1 });
+assert.equal(sealed('agykey:GEMINI_API_KEY', ' ').error, 'Paste the key itself');
+assert.equal(sealed('agykey', F1).error, 'Give the key a name');
+const BACK = `http://localhost:1234/callback?state=s&code=${F1}`;
+assert.deepEqual(sealedRpc('agyback', BACK).p, { op: 'agy', do: 'back', url: BACK });
+assert.ok(sealed('agyback', '').error);
+refusals.push(['agykey', F1]);
 // no refusal carries the value it was given
 for (const ps of refusals) assert.ok(!sealed(...ps).error.includes(F1), 'a refusal never carries the value');
 assert.match(raw.prompt('[{"name":"tailscale-bub","purpose":"p"}]'), /`tailscale-bub`/);

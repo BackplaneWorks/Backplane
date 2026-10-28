@@ -9755,8 +9755,8 @@ def Agv.methods(ms: List<&2, String>, +cur: String) -> List<&2, AgBtn>:
 # the key the method reads, from the API keys (names only)
 def Agv.key.row(+l: I.Loc, +u: Ui) -> List<&2, AgRow>:
   Bool.pick(List<&2, AgRow>, String.is_empty(AGY.Agy.key(Agv.method(u))), Nil{},
-    [AgRow{AGY.Agy.key(Agv.method(u)), Bool.pick(String, Agv.has(ApiKeys.names(u), AGY.Agy.key(Agv.method(u))), MSG.T.agy.key.saved(l),
-        MSG.T.agy.key.unsaved(l)),
+    [AgRow{AGY.Agy.key(Agv.method(u)), Sealed.say(u, "agykey", Bool.pick(String, Agv.has(ApiKeys.names(u), AGY.Agy.key(Agv.method(u))), MSG.T.agy.key.saved(l),
+        MSG.T.agy.key.unsaved(l))),
       [AgField{"agykey", MSG.T.agy.key.paste(l), True{}, Ui.scratch(u, "@f.agykey"), "agy-key"}],
       [AgBtn{MSG.T.agy.key.save(l), "agy-key", "", False{}}, AgBtn{MSG.T.agy.key.check(l), "agy-signin", "", True{}}]}])
 
@@ -9797,7 +9797,7 @@ def Agv.job.k(i: Nat, +l: I.Loc, +u: Ui, +j: J.Json) -> List<&2, AgRow>:
     case 0n:
       [AgRow{MSG.T.agy.signin(l), J.Json.get_str(j, "msg", ""), Nil{}, [AgBtn{MSG.T.common.cancel(l), "agy-cancel", "", False{}}]}]
     case 1n:
-      [AgRow{MSG.T.agy.signin(l), J.Json.get_str(j, "msg", ""), [AgField{"agyback", MSG.T.agy.signin.back(l), False{}, Ui.scratch(u, "@f.agyback"), "agy-back"}],
+      [AgRow{MSG.T.agy.signin(l), Sealed.say(u, "agyback", J.Json.get_str(j, "msg", "")), [AgField{"agyback", MSG.T.agy.signin.back(l), False{}, Ui.scratch(u, "@f.agyback"), "agy-back"}],
         [AgBtn{MSG.T.agy.signin.open(l), "open-url", J.Json.get_str(j, "url", ""), True{}}, AgBtn{MSG.T.agy.signin.next(l), "agy-back", "", False{}}, AgBtn{MSG.T.common.cancel(l), "agy-cancel", "", False{}}]}]
     case 2n:
       [AgRow{MSG.T.agy.signin(l), J.Json.get_str(j, "msg", ""), Nil{}, Nil{}}]
@@ -9870,9 +9870,11 @@ def Agv.act.k(i: Nat, +u: Ui, +value: String) -> Act:
     case _:
       Agv.rpc(u, "status", Nil{})
 
-# an "agy-" action
+# an "agy-" action (what the web's last sealed Save of the key or the way
+# back said goes)
 def Agv.act(+u: Ui, +action: String, +value: String) -> Act:
-  Agv.act.k(C.Codec.pos(["agy-install", "agy-signin", "agy-back", "agy-cancel", "agy-signout", "agy-forget", "agy-key", "agy-gcp", "agy-acct"], action), u, value)
+  Agv.act.k(C.Codec.pos(["agy-install", "agy-signin", "agy-back", "agy-cancel", "agy-signout", "agy-forget", "agy-key", "agy-gcp", "agy-acct"], action),
+    Sealed.forget(Sealed.forget(u, "agykey"), "agyback"), value)
 
 # The web's sealed forms (Sealed.*, above): each form's request, built
 # from its fields as host.js read them ("<form>\u001f<field>..."), and
@@ -9886,6 +9888,23 @@ def Voice.key.bad(+k: String) -> String:
 def Voice.key.req(+k: String) -> String:
   Sealed.out(Voice.key.bad(k), Rpc.text(0n, "bots.voice", [J.KV{"op", J.Str{"key"}}, J.KV{"key", J.Str{String.trim(k)}}]))
 
+# Antigravity's key ("agykey:<NAME>"): kept in the API keys under the
+# method's name, as Agv.key does
+def Agv.key.req(+name: String, +k: String) -> String:
+  Sealed.out(AK.Keys.bad(name, k), Rpc.text(0n, "bots.voice", [J.KV{"op", J.Str{"api-add"}}, J.KV{"name", J.Str{name}}, J.KV{"value", J.Str{String.trim(k)}}]))
+
+# the address Antigravity's sign-in landed on ("agyback"): the hub takes
+# it only for the sign-in that asked (AgyJob.back)
+def Agv.back.req(+url: String) -> String:
+  Sealed.out(Bool.pick(String, String.is_empty(String.trim(url)), "Paste the address Google sent you to", ""),
+    Rpc.text(0n, "bots.voice", [J.KV{"op", J.Str{"agy"}}, J.KV{"do", J.Str{"back"}}, J.KV{"url", J.Str{String.trim(url)}}]))
+
+# the web's form for an Antigravity row's field or button: its key and its
+# way back are sealed ("" for the rest, which stay view actions)
+def Sealed.agy(+u: Ui, +action: String) -> String:
+  Bool.pick(String, String.eq(action, "agy-key"), "agykey:" ++ AGY.Agy.key(Agv.method(u)),
+    Bool.pick(String, String.eq(action, "agy-back"), "agyback", ""))
+
 def Sealed.none() -> String:
   J.Json.show(J.Json.obj([J.KV{"error", J.Str{"Nothing to save"}}]))
 
@@ -9895,6 +9914,10 @@ def Sealed.req.k(i: Nat, +arg: String, +vs: List<&2, String>) -> String:
       ApiKeys.req.ps(vs)
     case 1n:
       Voice.key.req(Sealed.first(vs))
+    case 2n:
+      Agv.key.req(arg, Sealed.first(vs))
+    case 3n:
+      Agv.back.req(Sealed.first(vs))
     case _:
       Sealed.none()
 
@@ -9903,7 +9926,7 @@ def Sealed.arg(+form: String) -> String:
   String.drop(form, Nat.add(String.length(Sealed.base(form)), 1n))
 
 def Sealed.forms() -> List<&2, String>:
-  ["key", "vkey"]
+  ["key", "vkey", "agykey", "agyback"]
 
 def Sealed.req.ps(ps: List<&2, String>) -> String:
   match ps:
@@ -9918,12 +9941,15 @@ def Sealed.req(+packed: String) -> String:
   Sealed.req.ps(String.split(packed, Chr{31}))
 
 # once the hub has a form's value: the API key's form shuts; what the
-# voice key shows is asked again
+# voice key and Antigravity's key show is asked again (the way back
+# reports through the sign-in's own news)
 def Sealed.sent.k(i: Nat, +u: Ui) -> Act:
   match i:
     case 0n:
       ApiKeys.sent(u)
     case 1n:
+      Voice.rpc(u, "status", Nil{})
+    case 2n:
       Voice.rpc(u, "status", Nil{})
     case _:
       Act{u, Nil{}}

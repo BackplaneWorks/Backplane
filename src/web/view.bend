@@ -1500,39 +1500,49 @@ def View.keys.form(+lc: I.Loc, open: Bool, +u: U.Ui) -> List<&2, D.Node>:
       Nil{}
 
 # Antigravity (client.bend's Agv.rows): a row's fields and buttons; its
-# "open-url" button is a link that opens in a new tab
-def View.agy.btn(+b: U.AgBtn) -> D.Node:
+# "open-url" button is a link that opens in a new tab. The key and the
+# sign-in's way back are sealed (U.Sealed.agy names their form): their
+# Save is "sealed" and their fields have no binding.
+def View.agy.btn.k(+l: String, +a: String, +v: String, +cls: String, +form: String) -> D.Node:
+  Bool.pick(D.Node, String.eq(a, "open-url"),
+    D.El{"a", "", [D.At{"class", "btn primary"}, D.At{"href", v}, D.At{"target", "_blank"}, D.At{"rel", "noopener noreferrer"}], [D.Txt{l}]},
+    Bool.pick(D.Node, String.is_empty(form), D.Dom.button(cls, a, v, l, l), D.Dom.button(cls, "sealed", form, l, l)))
+
+def View.agy.btn(+u: U.Ui, +b: U.AgBtn) -> D.Node:
   match b:
     case U.AgBtn{+l, +a, +v, on}:
-      Bool.pick(D.Node, String.eq(a, "open-url"),
-        D.El{"a", "", [D.At{"class", "btn primary"}, D.At{"href", v}, D.At{"target", "_blank"}, D.At{"rel", "noopener noreferrer"}], [D.Txt{l}]},
-        D.Dom.button(Bool.pick(String, on, "on", ""), a, v, l, l))
+      View.agy.btn.k(l, a, v, Bool.pick(String, on, "on", ""), U.Sealed.agy(u, a))
 
-def View.agy.btns(bs: List<&2, U.AgBtn>) -> List<&2, D.Node>:
+def View.agy.btns(+u: U.Ui, bs: List<&2, U.AgBtn>) -> List<&2, D.Node>:
   match bs:
     case Nil{}:
       Nil{}
     case +b <> t:
-      View.agy.btn(b) <> View.agy.btns(t)
+      View.agy.btn(u, b) <> View.agy.btns(u, t)
 
-def View.agy.field(+f: U.AgField) -> D.Node:
+# (a secret field with no form of its own is sealed too: its Save says
+# there is nothing to save rather than its value going anywhere)
+def View.agy.field.k(sealed: Bool, +n: String, +h: String, +kind: String, +v: String, +e: String, +form: String) -> D.Node:
+  Bool.pick(D.Node, sealed, WB.WB.sealed("agy-" ++ n, form, kind, h), WB.WB.input("agy-" ++ n, n, v, h, e))
+
+def View.agy.field(+u: U.Ui, +f: U.AgField) -> D.Node:
   match f:
-    case U.AgField{+n, +h, sec, +v, +e}:
-      Bool.pick(D.Node, sec, WB.WB.secret("agy-" ++ n, n, v, h), WB.WB.input("agy-" ++ n, n, v, h, e))
+    case U.AgField{+n, +h, +sec, +v, +e}:
+      View.agy.field.k(Bool.or(sec, Bool.not(String.is_empty(U.Sealed.agy(u, e)))), n, h, Bool.pick(String, sec, "password", "text"), v, e, U.Sealed.agy(u, e))
 
-def View.agy.fields(fs: List<&2, U.AgField>) -> List<&2, D.Node>:
+def View.agy.fields(+u: U.Ui, fs: List<&2, U.AgField>) -> List<&2, D.Node>:
   match fs:
     case Nil{}:
       Nil{}
     case +f <> t:
-      View.agy.field(f) <> View.agy.fields(t)
+      View.agy.field(u, f) <> View.agy.fields(u, t)
 
-def View.agy.rows(rs: List<&2, U.AgRow>) -> List<&2, D.Node>:
+def View.agy.rows(+u: U.Ui, rs: List<&2, U.AgRow>) -> List<&2, D.Node>:
   match rs:
     case Nil{}:
       Nil{}
     case U.AgRow{+l, +n, fs, bs} <> t:
-      View.setrow(l, n, List.append(&2, D.Node, View.agy.fields(fs), View.agy.btns(bs))) <> View.agy.rows(t)
+      View.setrow(l, n, List.append(&2, D.Node, View.agy.fields(u, fs), View.agy.btns(u, bs))) <> View.agy.rows(u, t)
 
 # the time zone: where the person is (their phone reports it, or they set
 # it); a field for a zone name, Set, and Automatic (on while one is set)
@@ -1772,7 +1782,7 @@ def View.settings.rows.k(i: Nat, +lc: I.Loc, +u: U.Ui, +st: M.State, +nf: Map<&2
       [View.setrow(MSG.T.settings.settle.done(lc), MSG.T.settings.settle.done.note(lc), View.chips.loc(lc, ["on", "off"], Bool.pick(String, M.Lifecycle.on(st), "on", "off"), M.Lifecycle.key()))],
       [View.setrow(MSG.T.settings.restart(lc), MSG.T.settings.restart.note(lc), View.chips.loc(lc, ["on", "off"], Bool.pick(String, M.Carry.on(st), "on", "off"), "restart.continue"))],
       View.notify(lc, st),
-      View.agy.rows(U.Fallbackv.rows(u))])
+      View.agy.rows(u, U.Fallbackv.rows(u))])
     case 2n: List.concat(&2, D.Node, [[View.setrow(MSG.T.settings.provider(lc), MSG.T.settings.agents.note(lc, Bool.pick(String, String.is_empty(U.Models.cli(U.Str.get(nf, "models"), prov)), MSG.T.settings.provider.missing(lc, prov), U.Models.cli(U.Str.get(nf, "models"), prov))), View.chips.loc(lc, ["claude", "codex", "grok", "muse", "antigravity", "opencode", "pi", "omp"], prov, "agent.provider"))],
       [View.setrow(MSG.T.settings.model(lc), Bool.pick(String, String.is_empty(M.Setting.get(st, "agent.model", "")), MSG.T.common.default(lc), M.Setting.get(st, "agent.model", "")) ++ ": " ++ U.Models.label_of(U.Models.of(nf, prov), prov, M.Setting.get(st, "agent.model", "")),
         D.Dom.cat(View.menu.find(lc, U.Models.search(U.Models.menu(U.Models.of(nf, prov), prov)), U.Ui.scratch(u, "@f.mq")),
@@ -1793,11 +1803,11 @@ def View.settings.rows.k(i: Nat, +lc: I.Loc, +u: U.Ui, +st: M.State, +nf: Map<&2
       [View.setrow("Backplane " ++ v, U.Update.line.w(lc, st, nf, note), View.update.btn.loc(lc, U.Update.btn(st, nf, note)))]])
     case 6n: List.concat(&2, D.Node, [View.voice.set.loc(lc, u, st)])
     case 7n: List.concat(&2, D.Node, [View.keys.set(lc, u), View.secrets.set(lc, u)])
-    case 8n: List.concat(&2, D.Node, [View.agy.rows(U.Agv.rows.loc(lc, u))])
+    case 8n: List.concat(&2, D.Node, [View.agy.rows(u, U.Agv.rows.loc(lc, u))])
     case 9n: List.concat(&2, D.Node, [View.tz.set(lc, u)])
     case 10n: View.tok.set(lc, st) <> View.usage.page(lc, u)
     case 11n: List.concat(&2, D.Node, [[View.setrow(MSG.T.settings.tour(lc), MSG.T.settings.tour.note(lc), [D.Dom.button("", "ob-open", "", MSG.T.settings.tour.again(lc), MSG.T.settings.tour.show(lc))])]])
-    case 12n: View.agy.rows(U.Share.rows(u))
+    case 12n: View.agy.rows(u, U.Share.rows(u))
     case 13n: List.concat(&2, D.Node, [[D.El{"p", "", [D.At{"class", "set-about"}], [D.Txt{U.Fab.set.about()}]}],
       [View.setrow(U.Fab.set.order.label(), U.Fab.set.order.note(), View.chips.loc(lc, ["on", "off"], U.Fab.set.enabled(st), "order.enabled"))],
       [View.setrow(U.Fab.set.label(), U.Fab.set.note.k(U.Fab.enabled(st)), Bool.pick(List<&2, D.Node>, U.Fab.enabled(st), View.chips.loc(lc, ["on", "off"], U.Fab.set.on(st), "order.estimates"), Nil{}))]])
