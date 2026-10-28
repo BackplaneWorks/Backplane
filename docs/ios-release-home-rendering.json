@@ -147,8 +147,8 @@
     }
   ],
   "nextCandidate": {
-    "source": "81dbd1dbc3d7c5725fe9af4919f901ba010db596",
-    "status": "frozen corrective candidate; fresh cold URL, all tabs and lifecycle acceptance pending"
+    "source": "2a3df06e9c87963a4fa8525933c8ebb927621af1",
+    "status": "normal Release early-tab regression, fresh pairing and safe timeline paint pending; prior 81db paint and lifecycle results remain separate"
   },
   "releaseQualified": false,
   "conclusion": "Bounding only the tab button backgrounds removes the stripe; additionally bounding the strip background restores Home. Production data, geometry and bridge paths are unchanged.",
@@ -157,5 +157,21 @@
     "exitCode": 1,
     "failure": "pre-existing Laws.post_running_delivers mismatch; no laws changed",
     "logSha256": "6b7edcd4656515102383138560387d5173eed929209cb61a5d3efbf52026f08d"
+  },
+  "startupSelectionRegression": {
+    "source": "81dbd1dbc3d7c5725fe9af4919f901ba010db596",
+    "receipt": "build/ios-qualification/release-home-repro/81db-early-switch.json",
+    "receiptSha256": "39e0af9c8d7e38374541fc247a698e323aeb179f034ee8c0fae8e8536da7ff5e",
+    "observation": {
+      "homeSelectedAfterWait": true,
+      "homeSelectedImmediately": false,
+      "observationDurationSeconds": 21.641168291680515,
+      "rowsObserved": false,
+      "tapDurationSeconds": 1.209673916688189,
+      "tapPerformed": true,
+      "threadsSelectedAfterWait": false,
+      "threadsSelectedImmediately": true
+    },
+    "classification": "Threads choice reversed to Home without another input; corrective source 2a3df06e9 awaits runtime verification"
   }
 }
