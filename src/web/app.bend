@@ -151,6 +151,14 @@ def act(u: U.Ui, +action: String, +value: String) -> U.Act:
 def hold_at_end(gap: Nat) -> Bool:
   U.Hold.at_end(gap)
 
+# a downward gesture that brings a timeline within a third of its height
+# (view px) of the end catches up with it only while a reply streams in
+# (live): a reply growing faster than the wheel moves never lets it reach
+# the end. A finished thread's end is reached by scrolling to it: the last
+# notch of a slow scroll was yanked the rest of the way down mid-scroll
+def hold_catch_up(gap: Nat, view: Nat, live: Bool) -> Bool:
+  Bool.and(live, Nat.is_le(Nat.mul(gap, 3n), view))
+
 # The ordinary view and the output-only lane use the same keyed pane.
 def terminal_node.attrs(+u: U.Ui, node: D.Node) -> D.Node:
   match node:

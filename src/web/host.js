@@ -748,10 +748,14 @@ function holdRead(tl) {
   // thread's: it holds like anywhere else, and newer rows come by scrolling
   // while an upward gesture lasts the end does not catch the view again:
   // a smooth scroll's first frames are still within the end's few px
-  // and a downward gesture that brings it within a third of a screen of the
-  // end catches up: a reply streaming faster than the wheel moves left the
-  // view a few lines short of the end for good
-  const nearEnd = holdEnd(tl) || (performance.now() < towardEndUntil && tl.scrollHeight - tl.scrollTop - tl.clientHeight <= tl.clientHeight / 3);
+  // and while a reply streams in (its row: the page's "live", the hub's
+  // "@live:<thread>"), a downward gesture that brings it within a third of
+  // a screen of the end catches up (App.hold_catch_up): a reply
+  // streaming faster than the wheel moves left the view a few lines short
+  // of the end for good. Finished, the end is where the scroll lands: the
+  // catch-up's render yanked a slow scroll's last notch down mid-scroll
+  const nearEnd = holdEnd(tl) || (performance.now() < towardEndUntil
+    && App.hold_catch_up(BigInt(Math.max(0, Math.round(tl.scrollHeight - tl.scrollTop - tl.clientHeight))), BigInt(tl.clientHeight), !!tl.querySelector(':scope > .msg.live, :scope > [data-id^="@live:"]')));
   held = nearEnd && performance.now() > leavingEndUntil && !(thin && thin.atNewest?.() === false) ? null : anchorOf(tl);
   holdSay(held ? App.sel(ui) : "");
 }
