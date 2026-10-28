@@ -34,6 +34,9 @@ final class AppModel {
     }
     @ObservationIgnored private var lastScreenJSON: String?
     @ObservationIgnored private var earlyActions: [(String, String)] = []
+    @ObservationIgnored private var navigationResume = NavigationResumeIntent()
+    @ObservationIgnored private var navigationToken: NavigationResumeIntent.Token?
+    @ObservationIgnored private var navigationGeneration: UInt64 = 0
     @ObservationIgnored private var presentationIntent = PresentationIntent()
     private var viewerClose = ViewerCloseIntent()
     @ObservationIgnored private var viewerOpening: ViewerCloseIntent.Token?
@@ -63,7 +66,11 @@ final class AppModel {
         if startup[screen.hub] == .compatibilityChosen { return conn[screen.hub]?.phase == .online && conn[screen.hub]?.stage == "live" }
         guard let mark = thinReady[screen.hub], mark.epoch == conn[screen.hub]?.epoch,
               conn[screen.hub]?.phase == .online else { return false }
-        return mark.nav == (awaitedNav ?? Self.nav(screen))
+        guard PresentationReadiness.matches(displayed: Self.nav(screen), mark: mark.nav, awaited: awaitedNav) else { return false }
+        if let token = navigationToken, token.pairing == pairingGeneration, token.tab == tab.rawValue {
+            return navigationPictureMatches(token, screen)
+        }
+        return true
     }
     // something changed since the state was last kept
     @ObservationIgnored private var dirty = false
@@ -535,6 +542,7 @@ final class AppModel {
         // Raw navigation values do not carry an owner, so an explicit account
         // change cancels transitional selection instead of replaying it later.
         earlyActions.removeAll()
+        cancelNavigationResume()
         opened = nil
         tapped = nil
         destination = nil
@@ -618,6 +626,12 @@ final class AppModel {
             guard generation == connectGeneration else { return }
             e.resumePairing(pairingGeneration)
             apply(reconciled)
+            if let token = navigationToken, hubs[token.hub] != nil, startup[token.hub] == .thin,
+               let status = conn[token.hub], status.phase == .online || (token.action == .select && status.phase == .syncing) {
+                let selected = await dispatchNavigation(token, epoch: status.epoch)
+                guard generation == connectGeneration else { return }
+                apply(selected, generation: token.pairing)
+            }
             let view = await e.local("view", settings.threadList)
             guard generation == connectGeneration else { return }
             apply(view)
@@ -669,23 +683,42 @@ final class AppModel {
                 self.apply(connected, generation: pairing)
                 guard pairing == self.pairingGeneration else { return .later(.connection) }
                 self.projectSearchRevision += 1
-                if let pending = self.earlyActions.last(where: { $0.0 != "tz-report" && ($0.1.hasPrefix(key + "|") || ($0.1.isEmpty && self.screen?.hub == key)) }) {
+                if let intent = self.navigationToken {
+                    if intent.action == .select, intent.hub == key,
+                       self.navigationResume.current(intent, hub: key, pairing: pairing, tab: self.tab.rawValue),
+                       let currentEpoch = UInt64(epoch) {
+                        let selected = await self.dispatchNavigation(intent, epoch: currentEpoch)
+                        guard self.links.contains(link), self.conn[key]?.epoch == currentEpoch else { return .stop }
+                        self.apply(selected, generation: pairing)
+                        guard pairing == self.pairingGeneration else { return .later(.connection) }
+                    }
+                    // A newer pending owner always wins over a cached route.
+                } else if let pending = self.earlyActions.last(where: { $0.0 != "tz-report" && ($0.1.hasPrefix(key + "|") || ($0.1.isEmpty && self.screen?.hub == key)) }) {
                     self.earlyActions.removeAll { $0.0 == pending.0 && $0.1 == pending.1 }
                     let selectingPairing = self.pairingGeneration
-                    let selected = await e.act(pending.0, pending.1)
+                    self.navigationGeneration = e.invalidateNavigation()
+                    let navigationGeneration = self.navigationGeneration
+                    e.resumeNavigation(navigationGeneration)
+                    let selected = await e.navigation(pending.0, pending.1, hub: key, epoch: epoch, pairing: selectingPairing, generation: navigationGeneration)
                     guard self.links.contains(link), self.conn[key]?.epoch == UInt64(epoch) else { return .stop }
-                    self.apply(selected, generation: selectingPairing)
+                    if navigationGeneration == self.navigationGeneration { self.apply(selected, generation: selectingPairing) }
+                    else { self.applyNavigationCommands(selected, pairing: selectingPairing, retiredHub: key) }
                     guard selectingPairing == self.pairingGeneration else { return .later(.connection) }
                 } else if let cached = self.screen, cached.hub == key {
                     let selectingPairing = self.pairingGeneration
-                    let selected = await e.act("select", cached.sel)
+                    self.navigationGeneration = e.invalidateNavigation()
+                    let navigationGeneration = self.navigationGeneration
+                    e.resumeNavigation(navigationGeneration)
+                    let selected = await e.navigation("select", cached.sel, hub: key, epoch: epoch, pairing: selectingPairing, generation: navigationGeneration)
                     guard self.links.contains(link), self.conn[key]?.epoch == UInt64(epoch) else { return .stop }
-                    self.apply(selected, generation: selectingPairing)
+                    if navigationGeneration == self.navigationGeneration { self.apply(selected, generation: selectingPairing) }
+                    else { self.applyNavigationCommands(selected, pairing: selectingPairing, retiredHub: key) }
                     guard selectingPairing == self.pairingGeneration else { return .later(.connection) }
                 }
                 return Pairing.viewSocket(link).map { Hub.Next.go($0) } ?? Hub.Next.stop
             },
             onConnecting: { [weak self] in
+                if let self, self.navigationToken?.hub == key { self.navigationGeneration = self.engine.invalidateNavigation() }
                 self?.captureViewerResume(key)
                 self?.viewerCloseSending = nil
                 self?.viewerReceipt = nil
@@ -746,11 +779,13 @@ final class AppModel {
             let result = await e.recv(key, d.base64EncodedString(), epoch: String(epoch), person: person)
             guard pairing == pairingGeneration else { apply(result, generation: pairing); return }
             guard hubs[key] != nil, links.contains(where: { Pairing.key($0) == key }), conn[key]?.epoch == epoch else { return }
+            var navigationPresented = false
             for update in result?.sync ?? [] where update.hub == key {
                 let thin = startup[key] == .thin
                 observeThinPresenting(update, epoch: epoch)
                 let presented = thin && currentThinReply(update, epoch: epoch)
                 if presented {
+                    navigationPresented = true
                     let nav = awaitedNav ?? (cachedPresentation ? screen.map(Self.nav) : nil) ?? result?.screen.map(Self.nav) ?? screen.map(Self.nav) ?? ""
                     thinReady[key] = (epoch, nav)
                 }
@@ -764,6 +799,17 @@ final class AppModel {
                 return status.epoch
             }
             apply(result)
+            // Bot/room actions need a greeted, presented host. Unlike select,
+            // they cannot preselect its session before the socket greeting.
+            if navigationPresented, let token = navigationToken, token.hub == key,
+               navigationIsCurrent(token, epoch: epoch) {
+                let selected = await dispatchNavigation(token, epoch: epoch)
+                guard pairing == pairingGeneration, hubs[key] != nil, conn[key]?.epoch == epoch else {
+                    applyNavigationCommands(selected, pairing: pairing, retiredHub: key)
+                    return
+                }
+                apply(selected, generation: pairing)
+            }
             if startup[key] == .compatibilityChosen, cachedPresentation, screen?.hub == key, restoredAt[key] != epoch,
                result?.sync?.contains(where: { $0.hub == key && ($0.phase == "recent" || $0.phase == "live") }) == true {
                 restoredAt[key] = epoch
@@ -791,6 +837,102 @@ final class AppModel {
     // what was typed in the secret box's value field (SetFieldView, a vault
     // field): held here only until Save, then handed to the engine once
     @ObservationIgnored var vaultText = ""
+
+    private func cancelNavigationResume() {
+        navigationResume.cancel()
+        navigationToken = nil
+        navigationGeneration = engine.invalidateNavigation()
+    }
+
+    private func captureNavigation(_ action: String, _ value: String) -> NavigationResumeIntent.Token? {
+        cancelNavigationResume()
+        earlyActions.removeAll { $0.0 == "select" || Self.opens.contains($0.0) }
+        guard let kind = NavigationResumeIntent.Action(rawValue: action) else { return nil }
+        let nav: String
+        if action == "select" { nav = value }
+        else if let destination, destination.nav == awaitedNav, opened?.nav == destination.nav { nav = destination.nav }
+        else { return nil } // Do not guess the destination of an uncorrelated action.
+        let hub = links.compactMap(Pairing.key).first { nav.hasPrefix($0 + "|") }
+            ?? (nav.isEmpty ? screen?.hub : nil)
+        guard let hub, links.contains(where: { Pairing.key($0) == hub }), startup[hub] != .compatibilityChosen else { return nil }
+        let token = navigationResume.capture(hub: hub, pairing: pairingGeneration, tab: tab.rawValue,
+                                             action: kind, value: value, nav: nav)
+        navigationToken = token
+        return token
+    }
+
+    private func navigationPictureMatches(_ token: NavigationResumeIntent.Token, _ screen: Screen) -> Bool {
+        guard screen.hub == token.hub, Self.nav(screen) == token.nav else { return false }
+        switch token.action {
+        case .select: return true
+        case .bot, .uber, .uberBot: return screen.bot?.kind == "bot"
+        case .room: return screen.bot?.kind == "room"
+        case .remote: return screen.bot?.kind == "remote"
+        }
+    }
+
+    private func navigationIsCurrent(_ token: NavigationResumeIntent.Token, epoch: UInt64) -> Bool {
+        navigationResume.current(token, hub: token.hub, pairing: pairingGeneration, tab: tab.rawValue)
+            && links.contains(where: { Pairing.key($0) == token.hub }) && conn[token.hub]?.epoch == epoch
+    }
+
+    private func applyNavigationCommands(_ out: Out?, pairing: UInt64, retiredHub: String) {
+        guard let out else { return }
+        let paired = Set(links.compactMap(Pairing.key))
+        let commands = out.cmds.filter { command in
+            guard NavigationCommandPolicy.preserves(type: command.type, hub: command.hub, thread: command.thread,
+                                                     retiredHub: retiredHub, paired: paired),
+                  let owner = NavigationCommandPolicy.owner(type: command.type, hub: command.hub, thread: command.thread) else { return false }
+            return (retiredPairings[owner] ?? 0) <= pairing
+        }
+        if !commands.isEmpty { apply(Out(screen: nil, cmds: commands), generation: pairing) }
+    }
+
+    private func dispatchNavigation(_ token: NavigationResumeIntent.Token, epoch: UInt64, requirePresentation: Bool = false) async -> Out? {
+        guard navigationIsCurrent(token, epoch: epoch), engine.navigationPermitted(token.pairing),
+              navigationResume.claim(token, hub: token.hub, pairing: pairingGeneration, tab: tab.rawValue, epoch: epoch) != nil else { return nil }
+        let generation = navigationGeneration
+        let claim = navigationResume.claimID!
+        guard engine.resumeNavigation(generation) else { return nil }
+        traceNavigation(.navigationQueued, target: token.nav)
+        let out = await engine.navigation(token.action.rawValue, token.value, hub: token.hub, epoch: String(epoch), pairing: token.pairing, generation: generation,
+                                          presentedNav: requirePresentation ? token.nav : nil)
+        guard generation == navigationGeneration, navigationIsCurrent(token, epoch: epoch) else {
+            applyNavigationCommands(out, pairing: token.pairing, retiredHub: token.hub)
+            return nil
+        }
+        if out?.navigationAccepted == false {
+            let released = navigationResume.rejected(token, hub: token.hub, pairing: pairingGeneration, tab: tab.rawValue,
+                                                     epoch: epoch, claim: claim)
+            traceNavigation(.navigationRejected, target: token.nav)
+            if released, token.action != .select,
+               navigationResume.beginPrime(token, hub: token.hub, pairing: pairingGeneration, tab: tab.rawValue, epoch: epoch) {
+                // Resolve only the explicitly requested qualified owner. The
+                // original bot/room action waits for its current presentation.
+                apply(out, generation: token.pairing)
+                guard generation == navigationGeneration, navigationIsCurrent(token, epoch: epoch) else { return nil }
+                traceNavigation(.navigationPrimed, target: token.nav)
+                let primed = await engine.navigation("select", token.nav, hub: token.hub, epoch: String(epoch),
+                                                     pairing: token.pairing, generation: generation)
+                guard generation == navigationGeneration, navigationIsCurrent(token, epoch: epoch) else {
+                    applyNavigationCommands(primed, pairing: token.pairing, retiredHub: token.hub)
+                    return nil
+                }
+                apply(primed, generation: token.pairing)
+                let finished = navigationResume.finishPrime(token, hub: token.hub, pairing: pairingGeneration, tab: tab.rawValue, epoch: epoch)
+                if finished, primed?.navigationAccepted == true {
+                    // A presentation may already have run while the prime await
+                    // was suspended, including a coalesced select or refresh.
+                    // Recheck current owner and presentation revision atomically
+                    // in JS instead of borrowing the consumed callback's proof.
+                    return await dispatchNavigation(token, epoch: epoch, requirePresentation: true)
+                }
+                return nil
+            }
+        }
+        traceNavigation(.navigationCompleted, target: token.nav)
+        return out
+    }
 
     func act(_ action: String, _ value: String = "") {
         act(action, value, continuingViewerLoad: false)
@@ -832,6 +974,9 @@ final class AppModel {
             }
         }
         if action == "select" || Self.opens.contains(action) { retireScreenCache() }
+        let isNavigation = action == "select" || Self.opens.contains(action)
+        let resumeToken = isNavigation ? captureNavigation(action, value) : nil
+        let navigationEpoch = resumeToken.flatMap { conn[$0.hub]?.epoch }
         if !contentReady {
             if (action == "view" || action == "bot-tab"), let s = screen,
                !cachedPresentation, !s.hub.isEmpty, startup[s.hub] == .thin,
@@ -852,7 +997,11 @@ final class AppModel {
                 Task {
                     guard generation == pairingGeneration else { return }
                     let out: Out?
-                    if let viewerRequest { out = await e.viewerAct(value, token: viewerRequest) }
+                    if let resumeToken {
+                        guard let navigationEpoch else { return }
+                        out = await self.dispatchNavigation(resumeToken, epoch: navigationEpoch)
+                    }
+                    else if let viewerRequest { out = await e.viewerAct(value, token: viewerRequest) }
                     else { out = await e.act(action, value) }
                     apply(out, generation: generation)
                     guard generation == pairingGeneration else { return }
@@ -860,7 +1009,7 @@ final class AppModel {
                     dirty = true
                     keep()
                 }
-            } else {
+            } else if resumeToken == nil {
                 earlyActions.append((action, value))
             }
             return
@@ -872,7 +1021,11 @@ final class AppModel {
         Task {
             guard generation == pairingGeneration else { return }
             let out: Out?
-            if let viewerRequest { out = await e.viewerAct(value, token: viewerRequest) }
+            if let resumeToken {
+                guard let navigationEpoch else { return }
+                out = await self.dispatchNavigation(resumeToken, epoch: navigationEpoch)
+            }
+            else if let viewerRequest { out = await e.viewerAct(value, token: viewerRequest) }
             else { out = await e.act(action, value) }
             apply(out, generation: generation)
             guard generation == pairingGeneration else { return }
@@ -1325,6 +1478,7 @@ final class AppModel {
 
     enum NavigationTraceEvent: String {
         case open, incoming, applied, destinationStart, destinationCancelled, destinationTimeout
+        case navigationQueued, navigationCompleted, navigationAccepted, navigationRejected, navigationPrimed
     }
 
     // Opt-in Release simulator diagnostics. Only flags, counts and closed
@@ -1342,6 +1496,9 @@ final class AppModel {
         var fields: [String: Any] = [
             "event": event.rawValue, "tracked": expected == navigationTraceTarget,
             "tab": tab.rawValue, "engineReady": ready, "contentReady": contentReady,
+            "intentPresent": navigationToken != nil, "intentMatches": navigationToken?.nav == expected,
+            "intentNonce": navigationToken?.nonce ?? 0, "intentAction": navigationToken?.action.rawValue ?? "none",
+            "navigationGeneration": navigationGeneration,
             "cached": cachedPresentation, "started": started, "explicitTab": startupTabChosen,
             "paired": hub != nil, "pathCount": path.count, "pathMatches": path.last == expected,
             "pendingMatches": pending?.last == expected, "awaitedNone": awaitedNav == nil,
@@ -2009,6 +2166,14 @@ final class AppModel {
                         if opened?.nav == nav { opened = nil }
                     }
                 }
+            }
+            if let token = navigationToken, let epoch = conn[s.hub]?.epoch,
+               navigationPictureMatches(token, s),
+               navigationResume.accept(token, hub: s.hub, pairing: pairingGeneration, tab: tab.rawValue,
+                                       epoch: epoch, nav: nav, fresh: contentReady) {
+                traceNavigation(.navigationAccepted, target: token.nav)
+                navigationToken = nil
+                navigationGeneration = engine.invalidateNavigation()
             }
             // New Thread: its page opens at once and waits there for the
             // hub's thread (the selection above replaces it); a failure

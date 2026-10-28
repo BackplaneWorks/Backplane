@@ -995,6 +995,7 @@ struct Out: Decodable, @unchecked Sendable {
     var deadline: Double? = nil
     var inert = false
     var composerEdit: UInt64? = nil
+    var navigationAccepted: Bool? = nil
 
     private struct Cmds: Decodable {
         let cmds: [Cmd]
@@ -1002,6 +1003,7 @@ struct Out: Decodable, @unchecked Sendable {
         let deadline: Double?
         let inert: Bool?
         let composerEdit: UInt64?
+        let navigationAccepted: Bool?
     }
 
     // an answer; with screen false only its commands (a newer screen follows)
@@ -1015,13 +1017,13 @@ struct Out: Decodable, @unchecked Sendable {
             NSLog("Backplane decode answer %@", WireDecodeDiagnostic.summary(error))
             return nil
         }
-        guard screen else { return Out(screen: nil, cmds: answer.cmds, sync: answer.sync, deadline: answer.deadline, inert: answer.inert == true, composerEdit: answer.composerEdit) }
+        guard screen else { return Out(screen: nil, cmds: answer.cmds, sync: answer.sync, deadline: answer.deadline, inert: answer.inert == true, composerEdit: answer.composerEdit, navigationAccepted: answer.navigationAccepted) }
         do {
             let s = try JSONDecoder().decode(ScreenOnly.self, from: d)
-            return Out(screen: s.screen, cmds: answer.cmds, screenJSON: s.screen == nil ? nil : text, sync: answer.sync, deadline: answer.deadline, inert: answer.inert == true, composerEdit: answer.composerEdit)
+            return Out(screen: s.screen, cmds: answer.cmds, screenJSON: s.screen == nil ? nil : text, sync: answer.sync, deadline: answer.deadline, inert: answer.inert == true, composerEdit: answer.composerEdit, navigationAccepted: answer.navigationAccepted)
         } catch {
             NSLog("Backplane decode screen %@", WireDecodeDiagnostic.summary(error))
-            return Out(screen: nil, cmds: answer.cmds, sync: answer.sync, deadline: answer.deadline, inert: answer.inert == true, composerEdit: answer.composerEdit)
+            return Out(screen: nil, cmds: answer.cmds, sync: answer.sync, deadline: answer.deadline, inert: answer.inert == true, composerEdit: answer.composerEdit, navigationAccepted: answer.navigationAccepted)
         }
     }
 

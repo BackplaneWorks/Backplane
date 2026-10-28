@@ -124,7 +124,7 @@ export class NativeThinHost307265 {
       const drafts = new Map(Object.entries(this.api.drafts?.(hub) || {}).map(([thread, text]) => [thread, { revision: 0, text }]));
       session.drafts = { ...session.drafts, ...Object.fromEntries([...drafts].map(([thread, d]) => [thread, d.text])) };
       value = { hub, session, target: this.api.target(session), anchor: { id: '', offset: 0 },
-        mode: '', epoch: '', greeted: false, ready: false, shown: null, window: null,
+        mode: '', epoch: '', greeted: false, ready: false, presentedRevision: 0, shown: null, window: null,
         // history pages (as the web's thin-host): the cursor shown ('' the
         // newest), the cursors that led here, the one page on its way, and
         // pages a send overtook (their replies are dropped)
@@ -316,16 +316,40 @@ export class NativeThinHost307265 {
     return this.issue(s, this.client.select(s.hub, s.target, this.requestSession(s.session, 'view.open', s.target), this.api.cid()));
   }
 
-  request(hub, action, value, keepFocus = false, viewerIntent = undefined, capture = null) {
+  // Atomic local admission for native read-navigation; no wire/schema change.
+  navigation(hub, action, value, presentedNav = null) {
+    if (!['select', 'bot', 'room', 'remote', 'uber', 'uber-bot'].includes(action) ||
+        typeof value !== 'string' || utf8Bytes(value) > 1024 || !this.paired.has(hub)) return false;
+    if (presentedNav !== null) {
+      const s = this.states.get(hub), link = this.client.links.get(hub);
+      // Post-prime continuation is authorized by the current validated host
+      // presentation, never a consumed native callback or cached shown view.
+      if (typeof presentedNav !== 'string' || presentedNav !== hub + '|' + s?.session.sel ||
+          !s?.ready || !s.greeted || !s.shown || !same(s.target, s.shownTarget) ||
+          !link || link.revision !== s.presentedRevision || !same(link.target, s.target)) return false;
+    }
+    return this.request(hub, action, value, false, undefined, null, true);
+  }
+
+  request(hub, action, value, keepFocus = false, viewerIntent = undefined, capture = null, admission = false) {
     const s = this.states.get(hub);
     if (!s || s.mode !== 'view-v1') return false;
+    // For admission, validate without changing focus or cancelling held work.
+    // Legacy request retains its original ordering of those side effects.
+    let intent = admission ? this.api.intent(hub, copy(s.session), copy(s.target), action, value) : null;
+    if (admission && (!intent || intent.kind !== (action === 'select' ? 'select' : 'action'))) return false;
+    if (admission && intent.kind === 'action') {
+      if (!s.greeted) return false;
+      if (!s.ready && !(s.shown && same(s.target, s.shownTarget) && ['bot', 'uber', 'uber-bot'].includes(action))) return false;
+      if (s.ready && s.queue.length >= 7) return false;
+    }
     // An explicit new owner or a hub switch supersedes any held tap, even
     // one belonging to a different hub whose refresh is still in flight.
     if (!keepFocus && (this.current !== hub || ['select', 'bot', 'uber', 'uber-bot', 'room', 'remote'].includes(action)))
       for (const state of this.states.values()) { state.deferredNavigation = null; state.attachmentEnds = []; }
     if (!keepFocus) this.current = hub;
     if (['select', 'bot', 'uber', 'uber-bot', 'room', 'remote'].includes(action) && this.projectSearch) this.projectSearchEnd(this.projectSearch.scope);
-    const intent = this.api.intent(hub, copy(s.session), copy(s.target), action, value);
+    if (!admission) intent = this.api.intent(hub, copy(s.session), copy(s.target), action, value);
     if (!intent || intent.kind === 'blocked') return true;
     if (action === 'proj-find-q' && intent.kind === 'action' && typeof value === 'string' && utf8Bytes(value) <= 4096) {
       s.projectQuery = { value, target: copy(s.target), sel: s.session.sel, epoch: s.epoch };
@@ -356,7 +380,10 @@ export class NativeThinHost307265 {
       if (!s.greeted && unchanged) return true;
       s.revision++; s.target = copy(intent.target); s.session = copy(intent.session);
       s.ready = false; s.window = null; s.messages.clear(); s.queue = [];
-      if (s.greeted) this.select(s, s.target, s.session);
+      if (s.greeted) {
+        const selected = this.select(s, s.target, s.session);
+        if (admission && !selected) return false;
+      }
       return true;
     }
     if (s.greeted && intent.kind === 'cancel') {
@@ -367,10 +394,11 @@ export class NativeThinHost307265 {
     if (!s.greeted || !s.ready) {
       // Only an already shown owner may retain the latest read-navigation tap
       // while its current view refreshes. Never carry it into a new selection.
-      if (s.greeted && s.shown && same(s.target, s.shownTarget) && intent.kind === 'action' &&
-          ['view', 'bot-tab', 'bot', 'uber', 'uber-bot'].includes(action) && typeof value === 'string' && utf8Bytes(value) <= 1024)
+      const retain = s.greeted && s.shown && same(s.target, s.shownTarget) && intent.kind === 'action' &&
+          ['view', 'bot-tab', 'bot', 'uber', 'uber-bot'].includes(action) && typeof value === 'string' && utf8Bytes(value) <= 1024;
+      if (retain)
         s.deferredNavigation = { action, value, viewerIntent, target: copy(s.target), sel: s.session.sel, epoch: s.epoch };
-      return true;
+      return admission ? !!retain : true;
     }
     // One page request at a time, each taken from the page shown. 'later'
     // retraces the trail back down to the newest: without it a phone that
@@ -397,7 +425,7 @@ export class NativeThinHost307265 {
           (expected === undefined && intent.args.cursor !== part.cursor && intent.args.cursor !== '')) return true;
       this.issue(s, this.client.request(hub, 'view.message', { ...intent.args, cursor: expected === undefined ? '' : expected })); return true;
     }
-    if (intent.kind !== 'action' || s.queue.length >= 7) return true;
+    if (intent.kind !== 'action' || s.queue.length >= 7) return !admission;
     const thread = s.session.sel;
     if (['send', 'send-alt'].includes(action)) {
       if (s.paging) s.overtaken.add(s.paging.id);
@@ -410,8 +438,10 @@ export class NativeThinHost307265 {
     if (intent.session) { s.revision++; s.session = copy(intent.session); }
     const input = copy(s.session);
     if (capture) input.drafts = { ...input.drafts, [thread]: capture.text };
-    s.queue.push({ action, value, viewerIntent, input, revision: capture ? capture.revision : s.revision });
-    this.pump(s); return true;
+    const operation = { action, value, viewerIntent, input, revision: capture ? capture.revision : s.revision };
+    s.queue.push(operation);
+    this.pump(s);
+    return admission ? s.queue.includes(operation) || this.pending.get(s.active)?.operation === operation : true;
   }
 
   attachmentEnd(hub, thread, value) {
@@ -658,6 +688,7 @@ export class NativeThinHost307265 {
     if (result.current && r.nextTarget) { this.select(s, r.nextTarget, s.session); return true; }
     if (result.current && result.remoteReady) {
       for (const old of s.window?.partial || []) if (!result.window.partial.some(p => p.id === old.id && p.version === old.version)) s.messages.reset(old.id);
+      s.presentedRevision = r.requestRevision;
       s.ready = true; s.window = copy(result.window); s.anchor = copy(result.window.anchor);
       for (const entry of view.shown.thread?.entries || []) {
         const old = s.shown?.thread?.entries?.find(e => e.id === entry.id);

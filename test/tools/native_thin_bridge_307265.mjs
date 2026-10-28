@@ -53,6 +53,30 @@ function harness(){
  function open(hub='h'){h.hubs([...new Set([...h.paired,hub])]);h.connection(hub,'1','view-v1');const out=greeting(hub);const id=out.cmds[0].request.id;answer(id,{},hub);return out;}
  return{h,api,calls,greeting,answer,open,screen,advance:n=>now+=n};
 }
+check('navigation admission reflects pre-greeting, ready, deferred and blocked cases',()=>{
+ const x=harness();x.h.hubs(['h']);x.h.connection('h','1','view-v1');
+ assert.equal(x.h.navigation('h','uber','bot'),false);assert.deepEqual(x.h.drain().cmds,[]);
+ assert.equal(x.h.navigation('h','select','h|a'),true);const root=x.greeting().cmds[0].request;x.answer(root.id);
+ assert.equal(x.h.navigation('h','uber','bot'),true);let issued=x.h.drain().cmds[0].request;assert.equal(issued.p.action,'uber');x.answer(issued.id);
+ const s=x.h.states.get('h');x.h.update(s);const update=x.h.drain().cmds[0].request;
+ assert.equal(x.h.navigation('h','uber','bot'),true);assert.equal(x.h.navigation('h','room','room'),false);
+ issued=x.answer(update.id).cmds[0].request;assert.equal(issued.p.action,'uber');
+ assert.equal(x.h.navigation('h','send','bad'),false);assert.equal(x.h.navigation('other','select','x'),false);
+});
+check('navigation admission rejects queue saturation and blocked intent',()=>{
+ const x=harness();x.open();const s=x.h.states.get('h');s.queue=Array.from({length:7},()=>({}));
+ assert.equal(x.h.navigation('h','uber','bot'),false);s.queue=[];
+ x.api.intent=()=>({kind:'blocked'});assert.equal(x.h.navigation('h','uber','bot'),false);
+});
+check('admitted held navigation is retired by selection, connection or forget',()=>{
+ for(const change of ['select','connection','forget']) {
+  const x=harness();x.open();const s=x.h.states.get('h');x.h.update(s);const call=x.h.drain().cmds[0].request;
+  assert.equal(x.h.navigation('h','uber','bot'),true);
+  if(change==='select') { assert.equal(x.h.navigation('h','select','h|other'),true);x.h.drain(); }
+  else { if(change==='forget') x.h.forgetHub('h'); else x.h.connection('h','2','view-v1');assert.equal(s.deferredNavigation,null);assert.deepEqual(x.h.drain().cmds,[]);continue; }
+  const out=x.answer(call.id);assert(!out.cmds.some(c=>c.request?.p?.action==='uber'));
+ }
+});
 check('busy project query retains the latest full value including empty clear',()=>{
  const x=harness();x.open();const s=x.h.states.get('h');x.h.update(s);const update=x.h.drain().cmds[0].request;
  x.h.request('h','proj-find-q','older');x.h.request('h','proj-find-q','');assert.deepEqual(x.h.drain().cmds,[]);

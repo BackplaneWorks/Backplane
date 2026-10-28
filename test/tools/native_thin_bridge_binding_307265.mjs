@@ -18,6 +18,15 @@ export async function registerBridgeChecks(check,stage,root){
  function selectB(){const changed=read(B.act('select','h|b'));const call=request(changed);answer(call);return call;}
  function failures(out,owner,text){return out.cmds.some(c=>c.type==='send-failed'&&c.thread===owner&&c.text===text);}
  function busyComposer(){boot();answer();const changed={t:'view.changed',version:1,generation:'1',epoch:'origin',viewId:'view',target:last.p.target,viewRevision:'2'};return request(receive(changed));}
+ check('bridge navigation reports actual local admission without changing act',()=>{
+  B.start('install','{}');B.hubs(['h']);B.connection('h','1','view-v1');
+  assert.equal(read(B.navigation('uber','bot')).navigationAccepted,false);
+  assert.equal(read(B.navigation('select','h|a')).navigationAccepted,true);
+  const root=read(B.recv('h',encode(greeting).toString('base64'),'1',false,false));last=request(root);answer();
+  const admitted=read(B.navigation('uber','bot'));assert.equal(admitted.navigationAccepted,true);assert.equal(request(admitted).p.action,'uber');
+  assert.equal(read(B.navigation('send','x')).navigationAccepted,false);
+  assert.equal(Object.hasOwn(read(B.act('draft','x')),'navigationAccepted'),false);
+ });
  check('same-owner upload completion waits for refresh and identical completion coalesces',()=>{
   const update=busyComposer(),value='{"id":"fixture-upload"}';
   assert.equal(read(B.composerAction('h|a','attach-end',value)).cmds.length,0);

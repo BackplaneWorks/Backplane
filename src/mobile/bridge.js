@@ -846,6 +846,18 @@ globalThis.Backplane = {
     thin.projectSearchGo(scope, edit, text, project);
     return direct([], true);
   },
+  // Native-only local admission. It does not grant presentation authority.
+  navigation(action, value, expectedHub = undefined, expectedEpoch = undefined, presentedNav = null) {
+    if (!['select', 'bot', 'room', 'remote', 'uber', 'uber-bot'].includes(action) || typeof value !== 'string')
+      return JSON.stringify({ ...JSON.parse(direct([], false)), navigationAccepted: false });
+    const key = App.session_target(hubs, previewCur || App.current(hubs), action, value);
+    if ((expectedHub !== undefined || expectedEpoch !== undefined) &&
+        (expectedHub !== key || typeof expectedEpoch !== "string" || thin.states.get(key)?.epoch !== expectedEpoch))
+      return JSON.stringify({ ...JSON.parse(direct([], false)), navigationAccepted: false });
+    const accepted = thin.thin(key) && thin.navigation(key, action, value, presentedNav);
+    if (accepted) previewCur = key;
+    return JSON.stringify({ ...JSON.parse(direct([], true)), navigationAccepted: !!accepted });
+  },
   act(action, value) {
     const key = App.session_target(hubs, previewCur || App.current(hubs), action, value);
     if (thin.thin(key)) {

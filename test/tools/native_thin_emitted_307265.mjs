@@ -29,6 +29,69 @@ function respond(c,request,payload,quiet=false){
  const result={...payload,version:1,hub,generation:greeting.generation,epoch:greeting.epoch,target:request.p.target,requestRevision:request.p.requestRevision,viewId:request.p.viewId||'fixture-view',viewRevision:payload.viewRevision||'1',renderer:'mobile'};
  return c.recv({t:'reply',id:request.id,ok:true,result},c.epoch,quiet);
 }
+// Actual emitted local admission must distinguish a held read-navigation
+// action from an intentionally dropped pre-greeting or busy action.
+{
+ const n=client();start(n);const opened=begin(n);respond(n,opened,fixture.open);
+ // Hold the native prime completion while its wire reply is already consumed.
+ const primed=n.out('navigation','select','h|t',hub,n.epoch);
+ const primeRequest=n.requests(primed)[0],revision=primeRequest.p.requestRevision;
+ checked(primed.navigationAccepted===true&&primeRequest.m==='view.open','emitted prime issues a real qualified selection');
+ const delivered=respond(n,primeRequest,fixture.open);
+ checked(delivered.sync.some(s=>s.phase==='presented'&&s.requestRevision===revision),'prime presentation arrives before native prime completion is applied');
+ const stale=n.out('navigation','uber','h|bub',hub,n.epoch,'h|other');
+ checked(stale.navigationAccepted===false&&n.requests(stale).length===0,'wrong presented owner cannot authorize post-finish continuation');
+ const changed={t:'view.changed',version:1,generation:greeting.generation,epoch:greeting.epoch,viewId:'fixture-view',target:primeRequest.p.target,viewRevision:'2'};
+ const refresh=n.requests(n.recv(changed))[0];
+ checked(refresh?.m==='view.update','prime presentation may be superseded by an actual refresh during native await');
+ const busy=n.out('navigation','uber','h|bub',hub,n.epoch,'h|t');
+ checked(busy.navigationAccepted===false&&n.requests(busy).length===0,'old shown presentation cannot authorize post-prime busy retention');
+ const refreshed=respond(n,refresh,{...fixture.open,viewRevision:'2'});
+ checked(refreshed.sync.some(s=>s.phase==='presented'&&s.requestRevision===refresh.p.requestRevision)&&n.requests(refreshed).length===0,'newer refresh settles at its advertised view revision before continuation');
+ const resumed=n.out('navigation','uber','h|bub',hub,n.epoch,'h|t');
+ checked(resumed.navigationAccepted===true&&n.requests(resumed).length===1&&n.requests(resumed)[0].p.action==='uber','newer current prime-owner presentation permits one exact original action');
+ const repeated=n.out('navigation','uber','h|bub',hub,n.epoch,'h|t');
+ checked(repeated.navigationAccepted===false&&n.requests(repeated).length===0,'consumed presentation cannot authorize a duplicate or busy retention');
+}
+{
+ const n=client();start(n);
+ const coalesced=n.out('navigation','select','h|t',hub,n.epoch);
+ checked(coalesced.navigationAccepted===true&&!coalesced.sync.some(s=>s.phase==='presenting'),'coalesced pre-greeting prime has no presentation revision');
+ const early=n.out('navigation','uber','h|bub',hub,n.epoch,'h|t');
+ checked(early.navigationAccepted===false&&n.requests(early).length===0,'coalesced prime cannot borrow a pre-greeting presentation');
+ const opened=begin(n);respond(n,opened,fixture.open);
+ const resumed=n.out('navigation','uber','h|bub',hub,n.epoch,'h|t');
+ checked(resumed.navigationAccepted===true&&n.requests(resumed).length===1&&n.requests(resumed)[0].p.action==='uber','greeting presented before coalesced-prime native completion still permits exact continuation');
+}
+{
+ const n=client();n.call('start','native-admission-test','{}');n.call('hubs',[hub]);n.call('connection',hub,n.epoch,'view-v1');
+ const wrongHub=n.out('navigation','select','h|t','other',n.epoch);
+ checked(wrongHub.navigationAccepted===false&&n.requests(wrongHub).length===0,'emitted navigation rejects a mismatched captured hub');
+ const oldEpoch=n.out('navigation','select','h|t',hub,'old');
+ checked(oldEpoch.navigationAccepted===false&&n.requests(oldEpoch).length===0,'emitted navigation rejects a retired captured socket epoch');
+ const selected=n.out('navigation','select','h|t',hub,n.epoch);
+ checked(selected.navigationAccepted===true&&n.requests(selected).length===0,'emitted select is admitted before greeting without sending');
+ const early=n.out('navigation','uber','h|bub');
+ checked(early.navigationAccepted===false&&n.requests(early).length===0,'emitted pre-greeting bot action is explicitly rejected');
+ const mutation=n.out('navigation','send','fixture');
+ checked(mutation.navigationAccepted===false&&n.requests(mutation).length===0,'emitted navigation cannot admit a message send');
+ const malformed=n.out('navigation','select',{});
+ checked(malformed.navigationAccepted===false&&n.requests(malformed).length===0,'emitted malformed navigation is rejected');
+ const opened=begin(n);respond(n,opened,fixture.open);
+ const immediate=n.out('navigation','uber','h|bub'),requests=n.requests(immediate);
+ checked(immediate.navigationAccepted===true&&requests.length===1&&requests[0].m==='view.action'&&requests[0].p.action==='uber'&&requests[0].p.value==='h|bub','emitted ready host admits exact bot read action once');
+}
+{
+ const n=client();start(n);const opened=begin(n);respond(n,opened,fixture.open);
+ const changed={t:'view.changed',version:1,generation:greeting.generation,epoch:greeting.epoch,viewId:'fixture-view',target:opened.p.target,viewRevision:'2'};
+ const update=n.requests(n.recv(changed))[0];checked(update?.m==='view.update','emitted admission test starts a real refresh');
+ const held=n.out('navigation','uber','h|bub');
+ checked(held.navigationAccepted===true&&n.requests(held).length===0,'emitted busy same-owner bot tap is admitted by retention');
+ const blocked=n.out('navigation','room','h|room');
+ checked(blocked.navigationAccepted===false&&n.requests(blocked).length===0,'emitted busy room is explicitly rejected without replacing held bot');
+ const completed=n.requests(respond(n,update,fixture.open));
+ checked(completed.length===1&&completed[0].m==='view.action'&&completed[0].p.action==='uber'&&completed[0].p.value==='h|bub','emitted retained bot read dispatches exactly once after current presentation');
+}
 {
  const p=client();start(p);const first=begin(p);respond(p,first,fixture.open);
  const changed={t:'view.changed',version:1,generation:greeting.generation,epoch:greeting.epoch,viewId:'fixture-view',target:first.p.target,viewRevision:'2'};
