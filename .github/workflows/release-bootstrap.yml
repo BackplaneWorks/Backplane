@@ -36,6 +36,9 @@ jobs:
           run-id: 40748872940
           github-token: ${{ github.token }}
           path: retained
+      - name: Restore exact service executable modes from retained component receipt
+        shell: bash
+        run: node source/desktop/restore-modes.cjs retained/bootstrap-service/component/SERVICE.json retained/bootstrap-service/component/payload
       - name: Capture only bounded owned-child startup failures with redacted output
         shell: bash
         env:
