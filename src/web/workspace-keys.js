@@ -1,4 +1,18 @@
 // Event normalization only; Bend owns navigation order and action decisions.
+const EDITOR = 'input,textarea,select,[contenteditable]:not([contenteditable="false"]),[role="textbox"],[data-keys],[data-keyto]';
+
+// A bare letter or digit (no modifier, outside every editor) may be one of
+// the rail's keycaps (view.bend writes data-keycap on the button that shows
+// it): the host presses that button, so the key does what a click does.
+// '' for any other key.
+export function railKey(event) {
+  if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || event.repeat || event.getModifierState?.('AltGraph')) return '';
+  if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return '';
+  const key = typeof event.key === 'string' ? event.key.toLowerCase() : '';
+  if (!/^[a-z0-9]$/.test(key) || event.target?.closest?.(EDITOR)) return '';
+  return key;
+}
+
 export function workspaceShortcut(event, platform = '') {
   if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || event.getModifierState?.('AltGraph')) return null;
   const key = event.key?.toLowerCase(), mac = /mac/i.test(platform);
@@ -16,7 +30,7 @@ export function workspaceShortcut(event, platform = '') {
     const field = event.target?.closest?.('input,textarea,select,[contenteditable]:not([contenteditable="false"]),[role="textbox"],[data-keys],[data-keyto]');
     if (!field || (field.tagName === 'TEXTAREA' && field.id === 'composer') || field.id === 'model-q') return ['flag', 'models'];
   }
-  const editor = event.target?.closest?.('input,textarea,select,[contenteditable]:not([contenteditable="false"]),[role="textbox"],[data-keys],[data-keyto]');
+  const editor = event.target?.closest?.(EDITOR);
   // The requested bare backtick works from the composer/workspace. Keep
   // literal backticks available in shells and other text fields.
   if (key === '`' && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey &&
@@ -84,7 +98,11 @@ export function installWorkspaceKeys({ dispatch, document: doc = document, platf
       event.preventDefault(); event.stopImmediatePropagation(); event.target.blur(); return;
     }
     const action = workspaceShortcut(event, platform);
-    if (!action) return;
+    if (!action) {
+      const key = railKey(event), button = key && doc.querySelector(`.workspace-bar [data-keycap="${key}"]`);
+      if (button) { event.preventDefault(); event.stopImmediatePropagation(); button.click(); }
+      return;
+    }
     event.preventDefault(); event.stopImmediatePropagation();
     if (event.repeat && (action[0] === 'ws-palette-open' || action[1] === 'palette' || action[1] === 'term')) return;
     dispatch(...action);

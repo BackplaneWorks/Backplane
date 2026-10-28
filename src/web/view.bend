@@ -604,10 +604,39 @@ def View.sidebar.top(found: List<&2, D.Node> & List<&2, D.Node>, head: List<&2, 
   (first, later) = found
   D.Dom.cat(first, D.Dom.cat(head, D.Dom.cat(uber, D.Dom.cat(add, D.Dom.cat(later, rest)))))
 
+# The sidebar's foot under the top bar: the keys to move between threads,
+# dim (R05); the last row opens the command palette, which lists them all
+def View.legend.word(lc: I.Loc, +k: String) -> String:
+  match lc:
+    case I.Ja{}:
+      Bool.pick(String, String.eq(k, "move"), "前／次のスレッド", Bool.pick(String, String.eq(k, "new"), "ここに新しいスレッド", Bool.pick(String, String.eq(k, "jump"), "このプロジェクトのスレッドへ", Bool.pick(String, String.eq(k, "all"), "すべてのショートカット", "キーボードショートカット"))))
+    case _:
+      Bool.pick(String, String.eq(k, "move"), "prev / next thread", Bool.pick(String, String.eq(k, "new"), "new thread here", Bool.pick(String, String.eq(k, "jump"), "jump to a thread here", Bool.pick(String, String.eq(k, "all"), "all shortcuts", "Keyboard shortcuts"))))
+
+def View.legend.keys(ks: List<&2, String>) -> List<&2, D.Node>:
+  match ks:
+    case Nil{}: Nil{}
+    case k <> t: D.El{"kbd", "", Nil{}, [D.Txt{k}]} <> View.legend.keys(t)
+
+def View.legend.row(ks: List<&2, String>, +what: String) -> List<&2, D.Node>:
+  [D.El{"span", "", [D.At{"class", "keys"}], View.legend.keys(ks)}, D.Dom.span("what", what)]
+
+def View.sidebar.legend(top: Bool, +lc: I.Loc) -> List<&2, D.Node>:
+  match top:
+    case True{}:
+      [D.El{"div", "keys-legend", [D.At{"class", "keys-legend"}, D.At{"role", "note"}, D.At{"aria-label", View.legend.word(lc, "")}], List.concat(&2, D.Node, [
+        View.legend.row(["Ctrl ⇧", "[", "]"], View.legend.word(lc, "move")),
+        View.legend.row(["Ctrl", "N"], View.legend.word(lc, "new")),
+        View.legend.row(["Ctrl", "1–9"], View.legend.word(lc, "jump")),
+        [D.El{"button", "", [D.At{"class", "legend-all"}, D.At{"type", "button"}, D.At{"title", "Command palette · Ctrl+K"}, D.At{"data-value", ""}, D.On{"click", "ws-palette-open"}],
+          View.legend.row(["Ctrl", "K"], View.legend.word(lc, "all"))}]])}]
+    case False{}:
+      Nil{}
+
 def View.sidebar.body.k(+top: Bool, +lc: I.Loc, +ms: List<&2, U.MRow>, +ix: U.SIx, +st: M.State, +sel: String, +open: Map<&2, Bool>, +on: Bool, +now: Nat, adding: Bool, v: String, +look: String, +rm: String, +q: String, mi: List<&2, U.MItem>, bots: List<&2, D.Node>, uber: List<&2, D.Node>, items: List<&2, D.Node>) -> D.Node:
   D.El{"aside", "sidebar", [D.At{"class", "sidebar"}],
     View.sidebar.top(View.sidebar.find(top, lc, String.eq(U.Side.view(st), "active"), q), View.sidebar.head(top, lc, ms, open, on, v), uber, View.add.loc(lc, adding),
-      D.Dom.cat(items, D.Dom.cat(bots, View.rmenu(mi))))}
+      D.Dom.cat(items, D.Dom.cat(bots, D.Dom.cat(View.sidebar.legend(top, lc), View.rmenu(mi)))))}
 
 def View.sidebar.body(+lc: I.Loc, +ms: List<&2, U.MRow>, +ix: U.SIx, +st: M.State, +sel: String, +open: Map<&2, Bool>, +on: Bool, +now: Nat, adding: Bool, v: String, +look: String, +rm: String, +q: String, mi: List<&2, U.MItem>, bots: List<&2, D.Node>, uber: List<&2, D.Node>, items: List<&2, D.Node>) -> D.Node:
   View.sidebar.body.k(False{}, lc, ms, ix, st, sel, open, on, now, adding, v, look, rm, q, mi, bots, uber, items)
@@ -2878,14 +2907,38 @@ def View.workspace.label(+lc: I.Loc, kind: String) -> String:
     case "commands": View.commands.label(lc)
     case _: MSG.T.palette.terminal(lc)
 
+# the key that presses a rail button (R05's keycaps): a bare letter or
+# digit outside any field (workspace-keys.js presses the button showing
+# it), the terminal's backtick its own; "" for none
+def View.workspace.key(kind: String) -> String:
+  match kind:
+    case "board": "b"
+    case "schematic": "s"
+    case "3d": "3"
+    case "split": "v"
+    case "mech": "m"
+    case "files": "f"
+    case "diff": "d"
+    case "review": "r"
+    case "browser": "w"
+    case "terminal": "`"
+    case _: ""
+
+def View.workspace.keycap(+key: String) -> List<&2, D.Node>:
+  D.Dom.when(Bool.not(String.is_empty(key)), D.El{"kbd", "", [D.At{"class", "keycap"}, D.At{"aria-hidden", "true"}], [D.Txt{String.to_upper(key)}]})
+
+def View.workspace.key.attrs(+key: String) -> List<&2, D.Attr>:
+  Bool.pick(List<&2, D.Attr>, String.is_empty(key), Nil{}, [D.At{"data-keycap", key}, D.At{"aria-keyshortcuts", String.to_upper(key)}])
+
 # (tog: the rail's own buttons toggle, client.bend's Rail.*: the view on show
 # shuts the viewer; the menu's pick a view)
 def View.workspace.button(+tog: Bool, +lc: I.Loc, +cur: String, +kind: String, +action: String, +value: String) -> D.Node:
-  D.El{"button", kind, [D.At{"type", "button"}, D.At{"class", Bool.pick(String, String.eq(cur, kind), "tab on", "tab")},
+  +key = View.workspace.key(kind)
+  D.El{"button", kind, List.append(&2, D.Attr, [D.At{"type", "button"}, D.At{"class", Bool.pick(String, String.eq(cur, kind), "tab on", "tab")},
     D.At{"aria-label", View.workspace.label(lc, kind)}, D.At{"aria-current", Bool.pick(String, String.eq(cur, kind), "page", "false")},
     D.At{"aria-pressed", Bool.pick(String, Bool.and(tog, String.eq(cur, kind)), "true", "false")},
-    D.At{"title", View.workspace.label(lc, kind)}, D.At{"data-value", Bool.pick(String, tog, U.Rail.value(cur, kind, value), value)}, D.On{"click", Bool.pick(String, tog, U.Rail.act(cur, kind, action), action)}],
-    [WI.WIcon.svg(View.workspace.icon(kind), 18), D.Dom.span("workspace-label", View.workspace.label(lc, kind))]}
+    D.At{"title", View.workspace.label(lc, kind) ++ Bool.pick(String, String.is_empty(key), "", " · " ++ String.to_upper(key))}, D.At{"data-value", Bool.pick(String, tog, U.Rail.value(cur, kind, value), value)}, D.On{"click", Bool.pick(String, tog, U.Rail.act(cur, kind, action), action)}], View.workspace.key.attrs(key)),
+    List.append(&2, D.Node, [WI.WIcon.svg(View.workspace.icon(kind), 18), D.Dom.span("workspace-label", View.workspace.label(lc, kind))], View.workspace.keycap(key))}
 
 def View.workspace.choices(+tog: Bool, +lc: I.Loc, +cur: String, term: Bool, +palette: Bool) -> List<&2, D.Node>:
   [D.El{"div", "", [D.At{"class", "workspace-group"}, D.At{"role", "group"}, D.At{"aria-label", "Tools"}], [

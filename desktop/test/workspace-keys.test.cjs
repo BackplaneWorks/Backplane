@@ -162,3 +162,49 @@ test('the open model picker owns Tab, the arrows, Enter and Escape wherever the 
   assert.equal(h.press('Tab').defaultPrevented, false);
   assert.deepEqual(h.actions, []);
 });
+
+test('a bare letter or digit names a rail keycap only outside editors and without modifiers', async () => {
+  const { railKey } = await import('../../src/web/workspace-keys.js');
+  const editor = { closest: () => ({}) };
+  assert.equal(railKey(event('b')), 'b');
+  assert.equal(railKey(event('3')), '3');
+  assert.equal(railKey(event('S')), 's');
+  for (const input of [event('B', { shiftKey: true }), event('b', { ctrlKey: true }), event('b', { metaKey: true }), event('b', { altKey: true }),
+    event('b', { target: editor }), event('b', { isComposing: true }), event('b', { keyCode: 229 }), event('b', { repeat: true }),
+    event('b', { getModifierState: () => true }), event('b', { defaultPrevented: true }), event('`'), event('Enter'), event(' '), event('é')]) assert.equal(railKey(input), '');
+});
+
+// The installed listener presses the rail button that shows the key, and
+// leaves every other key (and every key typed into a field) alone.
+function railHarness(installWorkspaceKeys, { overlay = false } = {}) {
+  let listener;
+  const clicks = [], actions = [], buttons = { b: { click: () => clicks.push('b') }, d: { click: () => clicks.push('d') } };
+  const doc = { activeElement: null,
+    querySelector: (sel) => sel === '.tour,.lightbox' ? (overlay ? {} : null) : (/data-keycap="(.)"/.exec(sel) ? buttons[/data-keycap="(.)"/.exec(sel)[1]] || null : null),
+    addEventListener: (_name, callback) => { listener = callback; } };
+  installWorkspaceKeys({ dispatch: (...action) => actions.push(action), document: doc, platform: 'Linux' });
+  const body = { tagName: 'BODY', closest: () => null }, composer = { tagName: 'TEXTAREA', id: 'composer', closest: () => composer, getAttribute: () => '' };
+  const press = (key, fields = {}) => {
+    const input = event(key, { target: body, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; }, stopImmediatePropagation() {}, ...fields });
+    listener(input); return input;
+  };
+  return { clicks, actions, press, body, composer };
+}
+
+test('a rail keycap presses its button once; typing, other keys and overlays are untouched', async () => {
+  const { installWorkspaceKeys } = await import('../../src/web/workspace-keys.js');
+  const h = railHarness(installWorkspaceKeys);
+  assert.equal(h.press('b').defaultPrevented, true);
+  assert.deepEqual(h.clicks, ['b']);
+  assert.equal(h.press('b', { repeat: true }).defaultPrevented, false);
+  assert.equal(h.press('x').defaultPrevented, false);
+  assert.equal(h.press('d', { target: h.composer }).defaultPrevented, false);
+  assert.equal(h.press('D', { shiftKey: true }).defaultPrevented, false);
+  assert.deepEqual(h.clicks, ['b']);
+  h.press('d', { ctrlKey: true });
+  assert.deepEqual(h.actions, [['ws-key', 'diff']]);
+  assert.deepEqual(h.clicks, ['b']);
+  const shut = railHarness(installWorkspaceKeys, { overlay: true });
+  assert.equal(shut.press('b').defaultPrevented, false);
+  assert.deepEqual(shut.clicks, []);
+});

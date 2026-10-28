@@ -18,6 +18,17 @@ def chrome(+kind: String, +top: String, +bot: Bool) -> U.Ui:
 def page(+u: U.Ui) -> String:
   J.Json.show(P.Node.write(V.View.page(u)))
 
+# the rail's keys, each its own (a bare key presses exactly one button)
+def keys.has(xs: List<&2, String>, +k: String) -> Bool:
+  match xs:
+    case Nil{}: False{}
+    case x <> t: Bool.or(String.eq(x, k), keys.has(t, k))
+
+def keys.distinct(ks: List<&2, String>) -> Bool:
+  match ks:
+    case Nil{}: True{}
+    case +k <> +t: Bool.and(Bool.not(keys.has(t, k)), keys.distinct(t))
+
 def has_wrapper(+u: U.Ui) -> String:
   Bool.show(String.contains(F.frame(False{}, False{}, u), "thread-content"))
 
@@ -34,6 +45,8 @@ def rail(a: TA.Actor) -> String:
   Bool.show(V.View.rail(TA.Actor.ui(a)))
 
 def main() -> IO(Unit):
+  +tp = page(chrome("rail-v1", "top-v1", False{}))
+  +tf = F.frame(False{}, False{}, chrome("rail-v1", "top-v1", False{}))
   do IO<Unit>:
     C.Check.str("absent capability selects flat DOM", has_wrapper(S.Session.renderer(True{}, F.start(False{}, ""), J.Json.obj(Nil{}))), "False")
     C.Check.str("unknown capability selects flat DOM", has_wrapper(layout("rail-v2", False{})), "False")
@@ -56,12 +69,16 @@ def main() -> IO(Unit):
     C.Check.str("absent top capability keeps the thread's header", Bool.show(String.contains(F.frame(False{}, False{}, layout("rail-v1", False{})), "thread-head")), "True")
     C.Check.str("absent top capability draws no top bar", Bool.show(String.contains(page(layout("rail-v1", False{})), "topbar")), "False")
     C.Check.str("top capability selects the top bar", Bool.show(V.View.chrome(chrome("rail-v1", "top-v1", False{}))), "True")
-    C.Check.str("top bar names the thread and its state", Bool.show(Bool.and(String.contains(page(chrome("rail-v1", "top-v1", False{})), "\"topbar\""), Bool.and(String.contains(page(chrome("rail-v1", "top-v1", False{})), "Navigation fixture"), String.contains(page(chrome("rail-v1", "top-v1", False{})), "kv state")))), "True")
-    C.Check.str("top bar replaces the thread's header", Bool.show(String.contains(F.frame(False{}, False{}, chrome("rail-v1", "top-v1", False{})), "thread-head")), "False")
-    C.Check.str("top bar replaces the sidebar's brand", Bool.show(String.contains(page(chrome("rail-v1", "top-v1", False{})), "\"brand\"")), "False")
+    C.Check.str("top bar names the thread and its state", Bool.show(Bool.and(String.contains(tp, "\"topbar\""), Bool.and(String.contains(tp, "Navigation fixture"), String.contains(tp, "kv state")))), "True")
+    C.Check.str("top bar replaces the thread's header", Bool.show(String.contains(tf, "thread-head")), "False")
+    C.Check.str("top bar replaces the sidebar's brand", Bool.show(String.contains(tp, "\"brand\"")), "False")
     C.Check.str("top bar keeps a bot's own header", Bool.show(String.contains(F.frame(False{}, True{}, chrome("rail-v1", "top-v1", True{})), "bot-head")), "True")
     C.Check.str("unknown top capability is off", Bool.show(V.View.chrome(chrome("rail-v1", "top-v2", False{}))), "False")
     C.Check.str("top bar needs the rail", Bool.show(V.View.chrome(chrome("legacy", "top-v1", False{}))), "False")
     C.Check.str("local fresh renderer uses the top bar", Bool.show(V.View.chrome(A.stamp(U.Ui.init(1n)))), "True")
     C.Check.str("reconnect without opt-in drops the top bar", Bool.show(V.View.chrome(S.Session.renderer(True{}, chrome("rail-v1", "top-v1", False{}), request("rail-v1")))), "False")
+    C.Check.str("rail views carry their keycaps", Bool.show(Bool.and(String.contains(tf, "Board · B"), String.contains(tf, "3D · 3"))), "True")
+    C.Check.str("rail keys are each their own", Bool.show(keys.distinct([V.View.workspace.key("terminal"), V.View.workspace.key("commands"), V.View.workspace.key("board"), V.View.workspace.key("schematic"), V.View.workspace.key("3d"), V.View.workspace.key("split"),
+      V.View.workspace.key("mech"), V.View.workspace.key("files"), V.View.workspace.key("diff"), V.View.workspace.key("review"), V.View.workspace.key("browser")])), "True")
+    C.Check.str("top bar sidebar ends with the keys' legend", Bool.show(String.contains(tp, "keys-legend")), "True")
     C.Check.str("actor refresh retains caller draft", U.Ui.scratch(TA.Actor.ui(actor([actor(Nil{}, "rail-v1", "")], "", "rail-v1")), "t"), "Unsent fixture draft")

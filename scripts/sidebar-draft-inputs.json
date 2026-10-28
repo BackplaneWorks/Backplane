@@ -143,7 +143,7 @@
     "src/web/space.bend": "b86a265e41a900498bc33c37c0404c4d6678554efe3d9054f329beb2cf35ee63",
     "src/web/usage-graph.bend": "fa06f7d2bf855a396a5f7a7b4725dfaa990145fbbcefe7ad21ae8f9a698a2679",
     "src/web/usage-page.bend": "706e3f17a4a3e5f159656d47aeb76a940d4825421f5c33228f9aef692ec926e3",
-    "src/web/view.bend": "3f750fe1aed9ac6a098c320ff2a66c64d86caaec7546f52921901e73c060ee71"
+    "src/web/view.bend": "f227fbdd30d539b01949ec4ff517f7fc6e290233b4582ac97ad1e46131a544e9"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -253,5 +253,5 @@
       "sourceSnapshot": "/home/h/Documents/i2cjak/bp-coord/settle-fresh-work/SOURCE-structural-correction.json"
     }
   },
-  "reviewNote": "Intent: the project card leaves the timeline; the project menu gains Intent\u2026 (one more menu row), its dialog sits outside the sidebar"
+  "reviewNote": "Rail keycaps (View.workspace.key) and the sidebar's shortcut legend under the top bar; draft rows unchanged"
 }
