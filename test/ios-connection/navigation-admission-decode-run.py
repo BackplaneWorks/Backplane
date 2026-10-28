@@ -6,6 +6,7 @@ declarations. This checks decoding only, not those frameworks or an app build.
 """
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 
 root = Path(__file__).resolve().parents[2]
@@ -42,4 +43,4 @@ with tempfile.TemporaryDirectory(prefix="bp-ios-navigation-admission-decode-") a
                     str(root / "mobile/ios/Backplane/WireDecodeDiagnostic.swift"),
                     str(root / "test/ios-connection/navigation-admission-decode.swift"),
                     "-o", str(binary)], check=True)
-    subprocess.run([str(binary)], check=True, timeout=10)
+    subprocess.run([str(binary), *sys.argv[1:]], check=True, timeout=10)
