@@ -111,7 +111,7 @@ def main() -> IO(Unit):
     +u : U.Ui = opened()
     +rs : List<&2, U.AgRow> = U.Hookv.rows.loc(I.En{}, u)
     +ja : List<&2, U.AgRow> = U.Hookv.rows.loc(I.Ja{}, u)
-    +web : String = texts(W.View.agy.rows(rs))
+    +web : String = texts(W.View.agy.rows(u, rs))
     +phone : String = J.Json.show(J.Json.arr(P.Mob.agy.rows(rs)))
     +shown : String = rowfields(rs)
     +bad : U.Ui = after(U.Hookv.act(u, "hook-url", "file:///etc/passwd"))
