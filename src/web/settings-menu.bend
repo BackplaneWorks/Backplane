@@ -92,12 +92,32 @@ def Menu.results(none: Bool, ps: List<&2, String>, +lc: I.Loc, +q: String) -> Li
     case True{}: [D.Dom.el("p", [D.At{"class", "set-about"}, D.At{"role", "status"}], [D.Txt{MSG.T.settings.search.none(lc)}])]
     case False{}: [D.Dom.div("settings-grid", Menu.cards(ps, lc, q))]
 
+# the groups in one block, which a wide page flows into columns (style.css)
 def Menu.body(searching: Bool, +lc: I.Loc, +q: String) -> List<&2, D.Node>:
   match searching:
-    case False{}: [Menu.group(0n, lc), Menu.group(1n, lc), Menu.group(2n, lc), Menu.group(3n, lc)]
+    case False{}: [D.Dom.div("settings-groups", [Menu.group(0n, lc), Menu.group(1n, lc), Menu.group(2n, lc), Menu.group(3n, lc)])]
     case True{}:
       +ps = U.Settings.found(U.Settings.menu.pages(), lc, q)
       Menu.results(List.is_empty(&2, String, ps), ps, lc, q)
+
+# beside an open page, on a wide page only (style.css): every category under
+# its group's name, the open one marked; a click opens it as its card does
+def Menu.side.item(+lc: I.Loc, +cur: String, +page: String) -> D.Node:
+  D.El{"button", "settings-side-" ++ page, [D.At{"class", Bool.pick(String, String.eq(page, cur), "settings-side-item on", "settings-side-item")}, D.At{"data-value", page},
+    D.On{"click", "settings-page"}, D.At{"aria-current", Bool.pick(String, String.eq(page, cur), "page", "false")}],
+    [W.WIcon.svg(Menu.icon(page), 16), D.Dom.span("", U.Settings.title(lc, page))]}
+
+def Menu.side.items(ps: List<&2, String>, +lc: I.Loc, +cur: String) -> List<&2, D.Node>:
+  match ps:
+    case Nil{}: Nil{}
+    case +p <> tail: Menu.side.item(lc, cur, p) <> Menu.side.items(tail, lc, cur)
+
+def Menu.side.group(+i: Nat, +lc: I.Loc, +cur: String) -> List<&2, D.Node>:
+  D.Dom.span("settings-side-h", Menu.group.title(i, lc)) <> Menu.side.items(Menu.group.pages(i), lc, cur)
+
+def Menu.side(+lc: I.Loc, +cur: String) -> D.Node:
+  D.El{"nav", "settings-side", [D.At{"class", "settings-side"}, D.At{"aria-label", Menu.text(lc, "Categories", "カテゴリ")}],
+    List.concat(&2, D.Node, [Menu.side.group(0n, lc, cur), Menu.side.group(1n, lc, cur), Menu.side.group(2n, lc, cur), Menu.side.group(3n, lc, cur)])}
 
 def Menu.context(+lc: I.Loc, +page: String) -> List<&2, D.Node>:
   [D.Dom.div("settings-context", [W.WIcon.svg(Menu.icon(page), 20), D.Dom.el("p", Nil{}, [D.Txt{Menu.note(lc, page)}])])]

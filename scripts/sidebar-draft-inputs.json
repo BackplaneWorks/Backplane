@@ -138,12 +138,12 @@
     "src/web/icon.bend": "2abbb4ca75c31da241fa4d09431f517ee8b864de20ce5e15204d40701877d221",
     "src/web/mail-actions.bend": "da52f4d849410a7dbfe2484db0d1d07b010ff99e126668fdd05b30b12f495c8f",
     "src/web/mailroom.bend": "2b3fee92a16cc6f11df0fdcddecd19c2ec5f7e2212fefe72c300e198870c9270",
-    "src/web/settings-menu.bend": "409595078c8021ef8d4d768b49e6685edc051cc211fa3dcbfd645d61cb94fe29",
+    "src/web/settings-menu.bend": "c4091ccb3527e23eb5b7ccfab3efd0da16508d5f6b1f42fad18b4644ac348a17",
     "src/web/sidebar-slot.bend": "1104967b7a84470cb9afcf6e1efdd911469de1cbef52c7ad34a16cad73754950",
     "src/web/space.bend": "b86a265e41a900498bc33c37c0404c4d6678554efe3d9054f329beb2cf35ee63",
     "src/web/usage-graph.bend": "fa06f7d2bf855a396a5f7a7b4725dfaa990145fbbcefe7ad21ae8f9a698a2679",
     "src/web/usage-page.bend": "706e3f17a4a3e5f159656d47aeb76a940d4825421f5c33228f9aef692ec926e3",
-    "src/web/view.bend": "0969a602d66224f7165e9aa4415b3cecd1d877def24c9574fa837e8f9e7edccb"
+    "src/web/view.bend": "72fa7a5a271172b6712fe4e33bff827f99b0b9915f72ae376b3b99c36b3f323c"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -253,5 +253,5 @@
       "sourceSnapshot": "/home/h/Documents/i2cjak/bp-coord/settle-fresh-work/SOURCE-structural-correction.json"
     }
   },
-  "reviewNote": "view.bend's sidebar find row gains its own fold chevron (side-toggle) and the folded strip's unfold button becomes a chevron-right; neither is read by the sidebar draft renderer. 24 full-output draft/IME/search/info fallback cases passed on current source."
+  "reviewNote": "Settings fills a wide page: view.bend wraps the open page and settings-menu.bend's new Menu.side (the categories beside it) in settings-split, and the menu's groups in settings-groups; only Settings' DOM changes, never read by the sidebar draft renderer. 24 full-output draft/IME/search/info fallback cases passed on current source."
 }

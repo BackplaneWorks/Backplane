@@ -1934,13 +1934,16 @@ def View.settings.head(top: Bool, +lc: I.Loc) -> List<&2, D.Node>:
         D.Dom.span("title", MSG.T.palette.settings(lc)), D.Dom.span("meta", ""),
         D.Dom.button("", "flag", "settings", MSG.T.settings.close(lc), MSG.T.common.close(lc))]}]
 
+# Settings: its path, then the menu, or the open page beside the categories
+# (settings-menu.bend's Menu.side, shown on a wide page only)
 def View.settings.loc(+lc: I.Loc, +u: U.Ui, +st: M.State, +nf: Map<&2, String>, +v: String, +note: String) -> D.Node:
   +page = U.Settings.page(u)
   D.El{"main", "settings", [D.At{"class", "settings-view"}], List.append(&2, D.Node, View.settings.head(View.chrome(u), lc), [
     D.El{"nav", "settings-path", [D.At{"class", "settings-path"}, D.At{"aria-label", MSG.T.palette.settings(lc)}],
       D.Dom.cat(D.Dom.when(Bool.not(String.is_empty(page)), D.Dom.button("", "settings-page", "", MSG.T.palette.settings(lc), "‹ " ++ MSG.T.palette.settings(lc))),
         [D.El{"h2", "settings-title", [D.At{"id", "settings-title"}, D.At{"tabindex", "-1"}], [D.Txt{U.Settings.title(lc, page)}]}])},
-    D.El{"div", "settings-content", [D.At{"id", "settings-content"}, D.At{"class", "settings"}, D.At{"data-settings-page", page}], View.settings.body(String.is_empty(page), lc, u, st, nf, v, note)}])}
+    D.El{"div", "settings-split", [D.At{"class", "settings-split"}], D.Dom.cat(D.Dom.when(Bool.not(String.is_empty(page)), SM.Menu.side(lc, page)), [
+      D.El{"div", "settings-content", [D.At{"id", "settings-content"}, D.At{"class", "settings"}, D.At{"data-settings-page", page}], View.settings.body(String.is_empty(page), lc, u, st, nf, v, note)}])}])}
 
 def View.settings(+u: U.Ui, +st: M.State, +nf: Map<&2, String>, +v: String, +note: String) -> D.Node:
   View.settings.loc(U.Lang.loc(u), u, st, nf, v, note)

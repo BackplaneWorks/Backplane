@@ -350,7 +350,7 @@ button.fold span { overflow: hidden; text-overflow: ellipsis; white-space: nowra
 .parent { align-self: flex-start; background: none; border: 0; color: var(--accent); padding: 0; }
 .settings-link { display: block; width: 100%; text-align: left; background: none; border: 0; border-top: 1px solid var(--line); color: var(--dim); padding: 12px; margin-top: 16px; }
 .settings-view { display: flex; flex-direction: column; min-height: 0; height: 100%; }
-.settings { overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 8px; max-width: 760px; }
+.settings { overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 8px; }
 .set-row { display: flex; gap: 16px; align-items: center; justify-content: space-between; border: 1px solid var(--line); background: var(--panel); padding: 10px 12px; flex-wrap: wrap; }
 .set-text { display: flex; flex-direction: column; min-width: 0; flex: 1 1 260px; }
 .set-note { color: var(--faint); font-size: calc(12px * var(--text-scale, 100) / 100); overflow-wrap: anywhere; }
@@ -1280,6 +1280,30 @@ html:lang(ja) :is(.set-text, .set-ctl) { min-width: 0; }
 @media (max-width: 560px) {
   .settings-grid { grid-template-columns: minmax(0, 1fr); }
   .settings-grid .settings-category { min-height: 80px; }
+}
+/* Settings fills a wide page: the menu's groups flow into as many columns as
+   fit, under a search as wide as they are; an open page sits beside the
+   categories, each row's label beside its controls. Narrow keeps one column. */
+.settings-view { container: settings / inline-size; }
+.settings-split { display: flex; flex: 1; min-width: 0; min-height: 0; }
+.settings-view .settings > * { max-width: 1600px; }
+.settings-groups { column-width: 320px; column-count: 4; column-gap: 16px; }
+.settings-groups .settings-group { break-inside: avoid; margin: 0; padding-top: 12px; }
+.settings-groups .settings-grid { grid-template-columns: minmax(0, 1fr); }
+.settings > .settings-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); }
+.settings-side { display: none; }
+.settings-side-h { padding: 14px 16px 6px; font-size: .85em; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+.settings-side .settings-side-item { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 32px; padding: 5px 14px; border: 0; border-left: 2px solid transparent; background: none; color: var(--dim); text-align: left; }
+.settings-side-item .ico { flex: 0 0 16px; color: var(--faint); }
+.settings-side .settings-side-item:hover { background: var(--raise); color: var(--text); }
+.settings-side .settings-side-item.on { background: var(--raise); border-left-color: var(--accent); color: var(--text); }
+.settings-side-item.on .ico { color: var(--accent); }
+@container settings (min-width: 700px) {
+  .settings-view .settings { padding: 16px 24px 24px; }
+  .settings-view .set-row { display: grid; grid-template-columns: minmax(180px, 360px) minmax(0, 1fr); column-gap: 24px; row-gap: 8px; }
+}
+@container settings (min-width: 980px) {
+  .settings-side { display: flex; flex-direction: column; flex: 0 0 220px; min-height: 0; overflow-y: auto; padding-bottom: 16px; border-right: 1px solid var(--line); }
 }
 /* A conversation tree remains readable on a narrow sidebar. */
 .thread-tree-row { display:grid; grid-template-columns:24px minmax(0,1fr); align-items:center; min-width:0; margin-left:calc(var(--depth,0)*12px); }
