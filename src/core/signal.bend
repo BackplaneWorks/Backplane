@@ -80,6 +80,25 @@ def Signal.label(+lc: I.Loc, +n: Nat) -> String:
   Signal.label.loc(lc, Signal.name(n)) ++ Bool.pick(String, Bool.and(Signal.blocked(n), Signal.active(n)),
     Bool.pick(String, String.eq(I.I18n.tag(lc), "ja"), "（実行中の作業もあります）", "; work also active"), "")
 
+# What a thread's State cell says (the web's top bar and work line): the
+# signal's name, or how its last turn ended when that says more. A turn
+# the person stopped, with nothing else going on, is "stopped" (grey, as
+# inactive). The dot keeps the signal's colour (Signal.name).
+def Signal.shown.k(+name: String, turn: M.TurnState, +pending: Nat) -> String:
+  match turn:
+    case M.Interrupted{}:
+      Bool.pick(String, String.eq(name, "inactive"), "stopped", name)
+    case _:
+      name
+
+def Signal.shown(+n: Nat, turn: M.TurnState, +pending: Nat) -> String:
+  Signal.shown.k(Signal.name(n), turn, pending)
+
+# the cell's sentence
+def Signal.label.shown(+lc: I.Loc, +n: Nat, +shown: String) -> String:
+  Bool.pick(String, String.eq(shown, "stopped"), Bool.pick(String, String.eq(I.I18n.tag(lc), "ja"), "停止しました・実行中の作業はありません", "Stopped: nothing is running"),
+    Signal.label(lc, n))
+
 def Signal.at.k(r: Map<&2, Nat> & Nat) -> Nat:
   (_, n) = r
   n

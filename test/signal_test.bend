@@ -16,6 +16,21 @@ def signal(+st: M.State, +id: String) -> String:
 def check(name: String, cs: List<&2, M.Change>, want: String) -> IO(Unit):
   C.Check.str(name, signal(state(cs), "p"), want)
 
+# what the State cell says (Signal.shown): the word, then its sentence
+def shown.w(+n: Nat, +w: String) -> String:
+  w ++ " | " ++ S.Signal.label.shown(I.En{}, n, w)
+
+def shown.t(+st: M.State, +id: String, t: M.Thread) -> String:
+  match t:
+    case M.Thread{_, _, _, _, _, +turn, +pending, _, _, _, _, _, _, _, _, _, _, _, _, _, _}:
+      shown.w(S.Signal.of(st, M.State.thread.get(st, id)), S.Signal.shown(S.Signal.of(st, M.State.thread.get(st, id)), turn, pending))
+
+def shown(+st: M.State, +id: String) -> String:
+  shown.t(st, id, M.State.thread.get(st, id))
+
+def cell(name: String, cs: List<&2, M.Change>, want: String) -> IO(Unit):
+  C.Check.str(name, shown(state(cs), "p"), want)
+
 def delegated() -> M.Change:
   M.TaskDelegated{"task", "p", "c", 1n, "claude", "", 2n}
 
@@ -31,6 +46,11 @@ def bg(+word: String) -> M.Change:
 def main() -> IO(Unit):
   do IO<Unit>:
     C.Check.str("blue active + red interaction bits retained", S.Signal.label(I.En{}, 3n), "Blocked: needs interaction; work also active")
+    cell("a stopped turn says stopped", [M.TurnChanged{"p", M.Running{}, 2n}, M.TurnChanged{"p", M.Interrupted{}, 3n}], "stopped | Stopped: nothing is running")
+    cell("a stopped and settled thread says settled", [M.TurnChanged{"p", M.Interrupted{}, 3n}, M.ThreadSettled{"p", True{}, 4n}], "settled | Settled")
+    cell("a stopped thread with a question says needs you", [M.TurnChanged{"p", M.Interrupted{}, 3n}, ask("p", "input")], "blocked | Blocked: needs interaction")
+    cell("a finished turn says finished", [M.TurnChanged{"p", M.Completed{}, 5n}], "finished | Finished: ready for you to look at")
+    cell("a new thread is idle", Nil{}, "inactive | Inactive: no confirmed active work")
     check("idle is gray", Nil{}, "inactive")
     check("queued without worker is gray", [M.TurnQueued{"p", "m", "go", 2n}], "inactive")
     check("running agent is blue", [M.TurnChanged{"p", M.Running{}, 2n}], "active")

@@ -3027,17 +3027,18 @@ def View.work.label(lc: I.Loc) -> String:
     case I.En{}: "Work"
     case I.Ja{}: "作業"
 
-def View.workbar(+lc: I.Loc, +info: Map<&2, String>, +id: String, running: Bool) -> D.Node:
+def View.workbar(+lc: I.Loc, +st: M.State, +info: Map<&2, String>, +id: String, +turn: M.TurnState, +pending: Nat, running: Bool) -> D.Node:
   +signal = SG.Signal.cached(info, id)
+  +shown = SG.Signal.shown(signal, turn, pending)
   D.El{"div", "workbar", [D.At{"class", "thread-workbar"}, D.At{"role", "group"}, D.At{"aria-label", View.work.label(lc)}],
-    List.append(&2, D.Node, [View.dot(lc, SG.Signal.name(signal)), D.Dom.span("work-state", SG.Signal.label(lc, signal))], View.tools(TO.Tools.stop.loc(lc, running)))}
+    List.append(&2, D.Node, [View.dot(lc, SG.Signal.name(signal)), D.Dom.span("work-state", SG.Signal.label.shown(lc, signal, shown))], View.tools(TO.Tools.stop.loc(lc, running)))}
 
 # Keep a running Stop control, but never reserve a status strip for an
 # idle bot conversation. Ordinary thread workbars retain their summaries.
-def View.thread.workbar(+lc: I.Loc, summary: Bool, +info: Map<&2, String>, +id: String, running: Bool) -> List<&2, D.Node>:
+def View.thread.workbar(+lc: I.Loc, summary: Bool, +st: M.State, +info: Map<&2, String>, +id: String, +turn: M.TurnState, +pending: Nat, running: Bool) -> List<&2, D.Node>:
   match summary running:
     case True{} _:
-      [View.workbar(lc, info, id, running)]
+      [View.workbar(lc, st, info, id, turn, pending, running)]
     case False{} True{}:
       [D.El{"div", "workbar", [D.At{"class", "thread-workbar"}, D.At{"role", "group"}, D.At{"aria-label", View.work.label(lc)}], View.tools(TO.Tools.stop.loc(lc, True{}))}]
     case False{} False{}:
@@ -3053,10 +3054,10 @@ def View.top.own(own: Bool, rail: Bool, +lc: I.Loc, hd: List<&2, D.Node>, t: M.T
     case True{}: Nil{}
     case False{}: View.top(rail, lc, hd, t, st, chip, mini, panel, snoozed, picking, term, diff, del, ren, rtext)
 
-def View.thread.workbar.own(own: Bool, +lc: I.Loc, summary: Bool, +info: Map<&2, String>, +id: String, running: Bool) -> List<&2, D.Node>:
+def View.thread.workbar.own(own: Bool, +lc: I.Loc, summary: Bool, +st: M.State, +info: Map<&2, String>, +id: String, +turn: M.TurnState, +pending: Nat, running: Bool) -> List<&2, D.Node>:
   match own:
     case True{}: Nil{}
-    case False{}: View.thread.workbar(lc, summary, info, id, running)
+    case False{}: View.thread.workbar(lc, summary, st, info, id, turn, pending, running)
 
 def View.thread.subs.own(own: Bool, +lc: I.Loc, +st: M.State, +nf: Map<&2, String>, +id: String, now: Nat) -> List<&2, D.Node>:
   match own:
@@ -3074,14 +3075,14 @@ def View.thread.frame(rail: Bool, +attrs: List<&2, D.Attr>, +nav: D.Node, +conte
 
 def View.thread.p(+lc: I.Loc, +u: U.Ui, t: M.Thread, pend: List<&2, String>, +atts: List<&2, String>, +up: String, +term: Bool, +hd: List<&2, D.Node>, vo: List<&2, D.Node>, +mic: String, fab: List<&2, D.Node>, rd: List<&2, D.Node>, mini: List<&2, TO.Tool>, +pill: String) -> D.Node:
   match u t:
-    case U.Ui{+st, +sel, +drafts, +live, +op, _, +now, _, +panel, _, _, _, _, _, +nf, _, +tr} M.Thread{+id, p, ti, c, a, +turn, pe, ar, o, sa, ua, pi, en, br, wt, +pr, +mo, rm, im, se, de}:
+    case U.Ui{+st, +sel, +drafts, +live, +op, _, +now, _, +panel, _, _, _, _, _, +nf, _, +tr} M.Thread{+id, p, ti, c, a, +turn, +pe, ar, o, sa, ua, pi, en, br, wt, +pr, +mo, rm, im, se, de}:
       +own = Bool.and(View.chrome(u), List.is_empty(&2, D.Node, hd))
       View.thread.frame(View.rail(u), [D.At{"class", Bool.pick(String, View.rail(u), Bool.pick(String, term, "thread-view workspace-thread with-term", "thread-view workspace-thread"), Bool.pick(String, term, "thread-view with-term", "thread-view")) ++ Bool.pick(String, U.Flag.get(op, "drop"), " dropping", "")},
         D.At{"data-thread", id}, D.At{"data-drop", "attach"}, D.At{"data-drop-hover", "drop-hover"}],
         View.workspace.foot(View.rail(u), View.workspace.for(View.rail(u), lc, U.Rail.tab.of(panel, U.Str.get(nf, "view.kind:" ++ id), U.Str.get(nf, "view.path:" ++ id)), panel, term, U.Flag.get(op, "palette")), View.workspace.buy(U.Fab.rail(u))), List.concat(&2, D.Node, [
         View.top.own(own, View.rail(u), lc, hd, M.Thread{id, p, ti, c, a, turn, pe, ar, o, sa, ua, pi, en, br, wt, pr, mo, rm, im, se, de}, st, UZ.Chip.of(st, id, now), mini, panel, M.Snooze.on(now, U.Side.until(st, id)), U.Flag.get(op, "snooze"), term, String.eq(U.Str.get(nf, "view.kind:" ++ id), "diff"), String.eq(U.Str.get(drafts, "@del"), id), U.Str.get(drafts, "@ren"), U.Str.get(drafts, "@f.title")),
         View.kx.note(U.KX.note(nf, sel), nf, sel), View.kn.loc(lc, U.KN.thread(nf, st, sel), True{}),
-        View.thread.workbar.own(own, lc, BI.BU.chat.summary(st, id), nf, id, View.running(turn)),
+        View.thread.workbar.own(own, lc, BI.BU.chat.summary(st, id), st, nf, id, turn, pe, View.running(turn)),
         View.thread.subs.own(own, lc, st, nf, id, now),
         [D.El{"div", "timeline", [D.At{"class", "timeline"}, D.At{"id", "timeline"}], List.concat(&2, D.Node, [
           fab, View.parent(st, id, U.Tasks.up(st, id)),
@@ -4266,10 +4267,10 @@ def View.chrome.state.word(lc: I.Loc, +name: String) -> String:
   match lc:
     case I.Ja{}:
       Bool.pick(String, String.eq(name, "blocked"), "対応待ち", Bool.pick(String, String.eq(name, "active"), "作業中", Bool.pick(String, String.eq(name, "settled"), "完了",
-        Bool.pick(String, String.eq(name, "finished"), "作業完了", "待機"))))
+        Bool.pick(String, String.eq(name, "finished"), "作業完了", Bool.pick(String, String.eq(name, "stopped"), "停止", "待機")))))
     case _:
       Bool.pick(String, String.eq(name, "blocked"), "needs you", Bool.pick(String, String.eq(name, "active"), "working", Bool.pick(String, String.eq(name, "settled"), "settled",
-        Bool.pick(String, String.eq(name, "finished"), "finished", "idle"))))
+        Bool.pick(String, String.eq(name, "finished"), "finished", Bool.pick(String, String.eq(name, "stopped"), "stopped", "idle")))))
 
 def View.chrome.changes.k(lc: I.Loc) -> String:
   match lc:
@@ -4321,12 +4322,15 @@ def View.chrome.back(+lc: I.Loc, +action: String, +value: String) -> D.Node:
 def View.chrome.kv(+cls: String, +title: String, +k: String, vs: List<&2, D.Node>) -> D.Node:
   D.El{"span", "", [D.At{"class", "kv " ++ cls}, D.At{"title", title}], D.Dom.span("k", k) <> vs}
 
-# the thread's state (the work line's signal), Stop beside it while a turn runs
-def View.chrome.state(+lc: I.Loc, +info: Map<&2, String>, +id: String, running: Bool) -> D.Node:
+# the thread's state (the work line's signal, or how its last turn ended:
+# SG.Signal.shown), Stop beside it while a turn runs
+def View.chrome.state(+lc: I.Loc, +st: M.State, +info: Map<&2, String>, +id: String, +turn: M.TurnState, +pending: Nat) -> D.Node:
   +signal = SG.Signal.cached(info, id)
-  D.El{"span", "work", [D.At{"class", "kv state"}, D.At{"role", "group"}, D.At{"aria-label", View.work.label(lc)}, D.At{"title", SG.Signal.label(lc, signal)}],
-    List.append(&2, D.Node, [D.Dom.span("k", View.chrome.state.k(lc)), View.dot(lc, SG.Signal.name(signal)), D.Dom.span("v work-state", View.chrome.state.word(lc, SG.Signal.name(signal)))],
-      View.tools(TO.Tools.stop.loc(lc, running)))}
+  +shown = SG.Signal.shown(signal, turn, pending)
+  D.El{"span", "work", [D.At{"class", "kv state"}, D.At{"role", "group"}, D.At{"aria-label", View.work.label(lc)},
+    D.At{"title", SG.Signal.label.shown(lc, signal, shown)}],
+    List.append(&2, D.Node, [D.Dom.span("k", View.chrome.state.k(lc)), View.dot(lc, SG.Signal.name(signal)), D.Dom.span("v work-state", View.chrome.state.word(lc, shown))],
+      View.tools(TO.Tools.stop.loc(lc, View.running(turn))))}
 
 # the subagents: a click opens or shuts their rows under the bar (View.subs.dock)
 def View.chrome.subs.k(+lc: I.Loc, +open: Bool, +th: String, +rs: List<&2, SB.SubRow>, +info: Map<&2, String>) -> D.Node:
@@ -4349,13 +4353,13 @@ def View.chrome.branch(+b: String) -> List<&2, D.Node>:
 # none for a thread this client has not got yet (gone: U.Ui.thread's
 # blank, as on the page the browser draws while the hub's is on its way),
 # so the State cell never says "idle" for a thread it knows nothing of
-def View.chrome.cells(gone: Bool, +lc: I.Loc, +st: M.State, +nf: Map<&2, String>, +id: String, turn: M.TurnState, +branch: String, +now: Nat) -> List<&2, D.Node>:
+def View.chrome.cells(gone: Bool, +lc: I.Loc, +st: M.State, +nf: Map<&2, String>, +id: String, turn: M.TurnState, +pending: Nat, +branch: String, +now: Nat) -> List<&2, D.Node>:
   match gone:
     case True{}:
       Nil{}
     case False{}:
       List.concat(&2, D.Node, [
-        [View.chrome.state(lc, nf, id, View.running(turn))],
+        [View.chrome.state(lc, st, nf, id, turn, pending)],
         View.chrome.subs(lc, st, nf, id, SB.Subs.rows(st, nf, id, now)),
         View.chrome.changes(lc, HS.Hist.changes(M.State.steps(st, id))),
         View.chrome.branch(branch),
@@ -4365,7 +4369,7 @@ def View.chrome.cells(gone: Bool, +lc: I.Loc, +st: M.State, +nf: Map<&2, String>
 # its cells
 def View.chrome.thread(+lc: I.Loc, +u: U.Ui, t: M.Thread) -> List<&2, D.Node>:
   match u t:
-    case U.Ui{+st, _, +drafts, _, _, _, +now, _, +panel, _, _, _, _, _, +nf, _, _} M.Thread{+id, +p, title, _, _, turn, _, archived, override, +sa, +ua, pinned, _, +branch, _, _, _, _, _, _, gone}:
+    case U.Ui{+st, _, +drafts, _, _, _, +now, _, +panel, _, _, _, _, _, +nf, _, _} M.Thread{+id, +p, title, _, _, turn, pending, archived, override, +sa, +ua, pinned, _, +branch, _, _, _, _, _, _, gone}:
       [View.chrome.nav(lc, [
         View.chrome.sep(),
         D.El{"span", "", [D.At{"class", "crumb proj"}, D.At{"style", "--tint:" ++ BG.Badge.css_of(st, p)}], [D.El{"i", "", [D.At{"class", "sw"}], Nil{}}, D.Txt{U.Label.title(st, p, U.Ui.project_title(st, p))}]},
@@ -4373,7 +4377,7 @@ def View.chrome.thread(+lc: I.Loc, +u: U.Ui, t: M.Thread) -> List<&2, D.Node>:
         D.El{"div", "", [D.At{"class", "title-box"}], View.title.k.loc(lc, String.eq(U.Str.get(drafts, "@ren"), id), id, U.Label.title(st, id, TTL.Title.shown(lc, title)), U.Str.get(drafts, "@f.title"))},
         View.thread.actions(lc, [WI.WIcon.svg("chevron-down", 14)], st, id, TO.Tools.settled(override, Nat.is_gt(sa, ua)), pinned, M.Snooze.on(now, U.Side.until(st, id)), archived,
           String.eq(U.Str.get(drafts, "@del"), id), U.Ui.flag(u, "term"), panel)]),
-       D.El{"div", "kvs", [D.At{"class", "kvs"}], View.chrome.cells(gone, lc, st, nf, id, turn, branch, now)}]
+       D.El{"div", "kvs", [D.At{"class", "kvs"}], View.chrome.cells(gone, lc, st, nf, id, turn, pending, branch, now)}]
 
 def View.chrome.selected(none: Bool, +lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
   match none:
