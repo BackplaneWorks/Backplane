@@ -1609,4 +1609,17 @@ kbd { font: calc(10px * var(--text-scale, 100) / 100)/1 var(--mono); color: var(
 .keys-legend button.legend-all:hover, .keys-legend button.legend-all:hover kbd { color: var(--text); }
 @media (min-width: 761px) { html[data-rail="compact"] .workspace-rail button .keycap { display: none; } }
 @media (max-width: 760px), (max-height: 560px) { .keys-legend { display: none; } }
+/* the legend keeps to the sidebar's foot: under the top bar the sidebar is a
+   column, and the legend's auto margin takes the room left above it (wide
+   screens: a phone shows no legend, and hides the sidebar once a thread is
+   picked) */
+@media (min-width: 761px) {
+  .app.top .sidebar { display: flex; flex-direction: column; }
+  .app.top .sidebar > * { flex: none; }
+  .app.top .sidebar > .keys-legend { margin-top: auto; }
+}
+/* the tour's sidebar step frames it over everything in it (the sticky
+   search and legend paint over an outline of the sidebar's own) */
+.app.top.tour-sidebar .sidebar { outline: none; }
+.app.top.tour-sidebar::after { content: ""; grid-area: side; z-index: 32; pointer-events: none; box-shadow: inset 0 0 0 2px var(--accent); }
 @media (max-width: 760px) { .workspace-bar .keycap { display: none; } }
