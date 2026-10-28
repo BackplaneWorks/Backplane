@@ -21,7 +21,7 @@ function bubMoveSync() {
 }
 document.addEventListener("visibilitychange", () => { bubMoves.disconnect(location.origin); });
 import { installUsageTabs } from "./usage-tabs.js";
-import { installWorkspaceKeys } from "./workspace-keys.js";
+import { installWorkspaceKeys, installComposerFocus } from "./workspace-keys.js";
 import { installFloatingTerminal } from "./floating-terminal.js";
 installUsageTabs();
 import { installWorkspaceMenus } from "./workspace-menus.js";
@@ -31,7 +31,12 @@ installSubagentInspector();
 import { installViewerFeedback } from "./viewer-feedback.js";
 const viewerFeedback = installViewerFeedback();
 import { installWorkspaceHints } from "./workspace-hints.js";
-installWorkspaceKeys({ dispatch });
+// the keyboard kept in the open thread's composer (workspace-keys.js) and
+// Esc's choice of what to put away (workspace.bend's WS.esc.next); the
+// probe goes off its plots at once, as its chip's x does through the hub
+const composerKeeper = installComposerFocus({ phone: () => composerPhone() });
+installWorkspaceKeys({ dispatch, escNext: (term, probe, viewer) => App.esc_next(term, probe, viewer), composer: composerKeeper,
+  clearProbe: () => { Plot2d.setProbe("");Solid.setProbe("");dispatch("probe", ""); } });
 installWorkspaceHints();
 installFloatingTerminal({ dispatch });
 import { ConnectionLog } from "./connection-log.js";
@@ -472,8 +477,9 @@ let focus = null;
 // id and selection): the view drawn again after the reconnect (a hub
 // restart builds it afresh) gives it back, unless the person put the
 // keyboard elsewhere meanwhile
-let refocus = null;
+let refocus = null, reclaim = false;
 function refocusKeep() {
+  reclaim = true;
   const el = document.activeElement;
   if (!el || el === document.body || !el.id || !el.closest?.("main, aside, .app")) return;
   refocus = { id: el.id, start: el.selectionStart ?? null, end: el.selectionEnd ?? null };
@@ -953,6 +959,7 @@ function render() {
     focus = null;
   }
   refocusGive();
+  if (reclaim && remoteReady) { reclaim = false;composerKeeper.claim(); } else composerKeeper.check();
   tourSync();
   settingsSync();
   saveFocusedSoon();
@@ -1180,26 +1187,12 @@ function sealedReply(envelope) {
   return true;
 }
 
-// A thread opened by a click (the hub-drawn page opens it here, with no
-// Focus from the hub) takes the keyboard into its composer once its view
-// is on show: on a wide page only (a phone's keyboard would cover it), and
-// not while the person types in another field meanwhile.
-let composerWant = null;
-const composerPhone = () => matchMedia("(max-width: 760px), (hover: none) and (pointer: coarse)").matches;
-function composerTyping() {
-  const el = document.activeElement;
-  return !!el && el !== document.body && el.id !== "composer" &&
-    !!el.matches?.('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [data-keys], [data-keyto]');
-}
-function composerTake(target) {
-  if (!composerWant || target?.kind !== "thread" || target.id !== composerWant) return;
-  composerWant = null;
-  if (!composerTyping()) focus = "composer";
-}
+// a phone-sized or touch page: the composer never takes the keyboard by
+// itself there (its keyboard would cover the thread)
+function composerPhone() { return matchMedia("(max-width: 760px), (hover: none) and (pointer: coarse)").matches; }
 
 function dispatch(action, value, timer) {
   if (action === "secret-save") return secretSave(value);
-  if (action === "select") composerWant = !timer && !composerPhone() ? value : null;
   if (action === "sealed") return sealedSave(value);
   if (["send", "send-alt"].includes(action)) historyClear();
   if (action === "side-toggle" || action === "rail-toggle") return foldToggle(action === "side-toggle" ? "side" : "rail");
@@ -1307,15 +1300,7 @@ document.addEventListener("click", (e) => {
   Plot2d.showProbe();
   Solid.showProbe();
 });
-// Esc clears the probe, unless a field, a menu or a dialog has it
-document.addEventListener("keydown", (e) => {
-  if (e.key !== "Escape" || e.defaultPrevented || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
-  if (!document.querySelector(".probe-chip") || document.querySelector("details[open], dialog[open]")) return;
-  if (e.target?.closest?.("input, textarea, select, [contenteditable]")) return;
-  Plot2d.setProbe("");
-  Solid.setProbe("");
-  dispatch("probe", "");
-});
+// (Esc clears the probe: workspace-keys.js, before it shuts the viewer)
 
 // how many terminal cells fit: the thread pane's width, 40% of the height
 function termSize() {
@@ -1774,6 +1759,7 @@ function lbClose() {
   lb = null;
   if (focus?.isConnected) focus.focus({ preventScroll: true });
   desktopBrowser.sync();
+  composerKeeper.check();
 }
 
 function lbPinch() {
@@ -2592,7 +2578,6 @@ async function startThin(again = false, reason = "initial") {
         else if (!remoteReady) transitionPosition = transitionViews.position(transitionScope(detail.target)) || {atEnd:true};
         focusedView.remote(detail.epoch);remoteEpoch = detail.epoch;frontendNode = node;transitionNode = null;transitionFor = "";heldAt = 0;
         shownFor = targetKey(detail.target);transitionViews.put(transitionScope(detail.target), detail.shown);
-        composerTake(detail.target);
         trace("thin-view", { entries: detail.window?.ids?.length || 0 });later();
         fabLook(detail.target);
       },

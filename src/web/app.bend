@@ -441,6 +441,11 @@ def lb_release(lb: LB.Lb, x: Nat, y: Nat, b: LB.LbBox, now: Nat) -> LB.Lb:
 def lb_closes(lb: LB.Lb, x: Nat, y: Nat) -> Bool:
   LB.Lb.closes(lb, x, y)
 
+# what Esc puts away next (workspace.bend's WS.esc.next): "term", "probe",
+# "viewer" or ""
+def esc_next(term: Bool, probe: Bool, viewer: Bool) -> String:
+  WS.WS.esc.next(term, probe, viewer)
+
 def lb_key(k: String) -> Bool:
   String.eq(k, "Escape")
 

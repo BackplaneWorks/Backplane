@@ -287,7 +287,9 @@ test('Escape closes the open menu or dialog wherever the focus is', async () => 
     listener(input); return input;
   };
   assert.equal(overlayEscape(doc), null);
-  assert.equal(press(body).defaultPrevented, false);
+  // nothing over the page: Esc is the page's own (it puts nothing away here)
+  assert.equal(press(body).defaultPrevented, true);
+  assert.deepEqual(actions, []);
   shades = [shade('', 'row menu')];
   assert.equal(press(body).defaultPrevented, true);
   assert.deepEqual(clicked, ['row menu']);
@@ -323,4 +325,148 @@ test('Escape shuts the token stats panel, from the composer too; nothing when it
   open = false;
   press('Escape');
   assert.deepEqual(actions, [['flag', 'tokstats'], ['flag', 'tokstats']]);
+});
+
+// Esc once no menu, picker or palette took it: the installed listener asks
+// escNext (workspace.bend's WS.esc.next, mirrored here) what to put away
+// from what the page shows, and the keyboard goes back to the composer.
+function escHarness(installWorkspaceKeys) {
+  let listener;
+  const actions = [], claims = [], page = { term: false, probe: false, viewer: false, dialog: false };
+  const doc = { activeElement: null, addEventListener: (_name, callback) => { listener = callback; },
+    querySelector: sel => sel === '.floating-terminal' ? (page.term ? {} : null) : sel === '.probe-chip' ? (page.probe ? {} : null)
+      : sel.includes('[data-on-click="panel"]') ? (page.viewer ? {} : null) : null,
+    querySelectorAll: sel => sel.includes('[role="dialog"]') && page.dialog ? [{ getClientRects: () => [{}] }] : [] };
+  const escNext = (term, probe, viewer) => term ? 'term' : probe ? 'probe' : viewer ? 'viewer' : '';
+  const composerFocus = { claim: () => claims.push('claim'), end: () => { claims.push('end'); return true; } };
+  installWorkspaceKeys({ dispatch: (...action) => actions.push(action), document: doc, platform: 'Linux', escNext, composer: composerFocus });
+  const body = { tagName: 'BODY', closest: () => null };
+  let blurred = 0;
+  const composer = Object.assign(element('textarea', 'composer'), { completion: '', getAttribute: () => composer.completion, blur: () => { blurred++; } });
+  const press = (key, fields = {}) => {
+    const input = event(key, { target: body, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; }, stopImmediatePropagation() {}, ...fields });
+    listener(input); return input;
+  };
+  return { actions, claims, page, press, body, composer, blurred: () => blurred };
+}
+
+test('Esc puts away the terminal, then the probe, then the viewer, and the keyboard goes back to the composer', async () => {
+  const { installWorkspaceKeys } = await import('../../src/web/workspace-keys.js');
+  const h = escHarness(installWorkspaceKeys);
+  Object.assign(h.page, { term: true, probe: true, viewer: true });
+  assert.equal(h.press('Escape', { target: h.composer }).defaultPrevented, true);
+  h.page.term = false;h.press('Escape', { target: h.composer });
+  h.page.probe = false;h.press('Escape');
+  assert.deepEqual(h.actions, [['ws-term-hide', ''], ['probe', ''], ['panel', '']]);
+  assert.deepEqual(h.claims, ['claim', 'claim', 'claim']);
+  // nothing open: from the page the keyboard goes to the composer; in the
+  // composer Esc leaves it (a bare key then presses its rail button) and
+  // the draft is untouched
+  h.page.viewer = false;h.press('Escape');
+  assert.deepEqual(h.claims, ['claim', 'claim', 'claim', 'claim']);
+  h.press('Escape', { target: h.composer });
+  assert.equal(h.blurred(), 1);
+  assert.equal(h.actions.length, 3);
+  // a held Esc puts away one thing, not all of them
+  Object.assign(h.page, { term: true, viewer: true });
+  h.press('Escape', { repeat: true });
+  assert.equal(h.actions.length, 3);
+});
+
+test('Esc stays with a PTY, another field, the completions and a dialog; Shift+Esc hides the terminal from inside it', async () => {
+  const { installWorkspaceKeys } = await import('../../src/web/workspace-keys.js');
+  const h = escHarness(installWorkspaceKeys);
+  Object.assign(h.page, { term: true, viewer: true });
+  const pty = { tagName: 'TEXTAREA', id: 'term', closest: sel => sel === '.floating-terminal' || sel.includes('[data-keys]') ? pty : null, getAttribute: () => '' };
+  assert.equal(h.press('Escape', { target: pty }).defaultPrevented, false);
+  const rename = { tagName: 'INPUT', id: 'thread-title', closest: sel => sel.includes('input') ? rename : null };
+  assert.equal(h.press('Escape', { target: rename }).defaultPrevented, false);
+  h.composer.completion = 'skill-close';
+  assert.equal(h.press('Escape', { target: h.composer }).defaultPrevented, false);
+  h.composer.completion = '';
+  h.page.dialog = true;
+  assert.equal(h.press('Escape').defaultPrevented, false);
+  h.page.dialog = false;
+  for (const fields of [{ ctrlKey: true }, { altKey: true }, { metaKey: true }, { isComposing: true }])
+    assert.equal(h.press('Escape', fields).defaultPrevented, false);
+  assert.deepEqual(h.actions, []);
+  assert.equal(h.press('Escape', { target: pty, shiftKey: true }).defaultPrevented, true);
+  assert.equal(h.press('Escape', { shiftKey: true }).defaultPrevented, false);
+  assert.deepEqual(h.actions, [['ws-term-hide', '']]);
+});
+
+test('a bare / outside every field puts the keyboard in the composer; in a field it types', async () => {
+  const { installWorkspaceKeys, slashKey } = await import('../../src/web/workspace-keys.js');
+  const h = escHarness(installWorkspaceKeys);
+  assert.equal(h.press('/').defaultPrevented, true);
+  assert.equal(h.press('/', { shiftKey: true }).defaultPrevented, true);
+  assert.deepEqual(h.claims, ['end', 'end']);
+  assert.equal(h.press('/', { target: h.composer }).defaultPrevented, false);
+  for (const fields of [{ ctrlKey: true }, { altKey: true }, { metaKey: true }, { repeat: true }, { isComposing: true }])
+    assert.equal(slashKey(event('/', fields)), false);
+  assert.equal(h.claims.length, 2);
+});
+
+// The composer keeper over a stand-in page: a thread on show, what covers
+// it, the viewer's close, the person's press and selection.
+function keeperHarness(installComposerFocus, { phone = false } = {}) {
+  const listeners = new Map();
+  const page = { thread: 't1', over: false, viewer: false, selection: true };
+  const body = { tagName: 'BODY', closest: () => null };
+  const doc = { body, activeElement: body,
+    addEventListener: (type, handler) => { if (!listeners.has(type)) listeners.set(type, []);listeners.get(type).push(handler); },
+    getElementById: id => id === 'composer' ? composer : null,
+    querySelector: sel => sel.startsWith('main.thread-view') ? (page.thread ? { getAttribute: () => page.thread } : null)
+      : sel.includes('[data-on-click="panel"]') ? (page.viewer ? {} : null) : null,
+    querySelectorAll: sel => sel.includes('.workspace-palette') && page.over ? [{ getClientRects: () => [{}] }] : [] };
+  const composer = { tagName: 'TEXTAREA', id: 'composer', value: 'a draft', selectionStart: 0, selectionEnd: 0, disabled: false,
+    getClientRects: () => [{}], contains: () => false, closest: () => composer,
+    focus() { doc.activeElement = composer; }, setSelectionRange(s, e) { composer.selectionStart = s;composer.selectionEnd = e; } };
+  const win = { matchMedia: () => ({ matches: phone }), setTimeout: f => f(), getSelection: () => ({ isCollapsed: page.selection, anchorNode: {} }) };
+  const keeper = installComposerFocus({ document: doc, window: win });
+  const fire = (type, target = doc.activeElement) => { for (const handler of listeners.get(type) || []) handler({ target }); };
+  return { doc, body, composer, page, keeper, fire };
+}
+
+test('the composer takes the keyboard on load, when another thread shows, when a cover goes or the viewer shuts, caret kept', async () => {
+  const { installComposerFocus } = await import('../../src/web/workspace-keys.js');
+  const h = keeperHarness(installComposerFocus);
+  h.keeper.check();
+  assert.equal(h.doc.activeElement, h.composer);
+  assert.deepEqual([h.composer.selectionStart, h.composer.selectionEnd], [7, 7]);
+  // the caret where the person left it in t1's draft
+  h.composer.setSelectionRange(2, 2);h.fire('keyup');
+  // a click on the timeline leaves the page with the keyboard: kept there
+  h.fire('pointerdown', h.body);h.doc.activeElement = h.body;h.fire('pointerup', h.body);h.keeper.check();
+  assert.equal(h.doc.activeElement, h.body);
+  // the palette opens and shuts: back to the composer, caret where it was
+  h.page.over = true;h.keeper.check();h.page.over = false;h.keeper.check();
+  assert.equal(h.doc.activeElement, h.composer);
+  assert.deepEqual([h.composer.selectionStart, h.composer.selectionEnd], [2, 2]);
+  // the viewer shuts (its rail button kept the keyboard)
+  const rail = { tagName: 'BUTTON', closest: () => null };
+  h.page.viewer = true;h.keeper.check();h.doc.activeElement = rail;h.page.viewer = false;h.keeper.check();
+  assert.equal(h.doc.activeElement, h.composer);
+  // another thread on show
+  h.doc.activeElement = h.body;h.page.thread = 't2';h.keeper.check();
+  assert.equal(h.doc.activeElement, h.composer);
+  // Esc (claim) from the page
+  h.doc.activeElement = h.body;h.keeper.claim();
+  assert.equal(h.doc.activeElement, h.composer);
+});
+
+test('the composer never takes the keyboard from a field, during a press, over a selection or on a phone', async () => {
+  const { installComposerFocus } = await import('../../src/web/workspace-keys.js');
+  const h = keeperHarness(installComposerFocus);
+  const rename = { tagName: 'INPUT', closest: () => rename };
+  h.doc.activeElement = rename;h.keeper.check();
+  assert.equal(h.doc.activeElement, rename);
+  h.doc.activeElement = h.body;h.page.thread = 't2';h.fire('pointerdown', h.body);h.keeper.check();
+  assert.equal(h.doc.activeElement, h.body);
+  h.page.selection = false;h.fire('pointerup', h.body);
+  assert.equal(h.doc.activeElement, h.body);
+  const phone = keeperHarness(installComposerFocus, { phone: true });
+  phone.keeper.check();phone.keeper.claim();
+  assert.equal(phone.doc.activeElement, phone.body);
+  assert.equal(phone.keeper.end(), false);
 });

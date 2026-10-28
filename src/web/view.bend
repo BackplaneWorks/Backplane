@@ -633,14 +633,15 @@ def View.sidebar.top(found: List<&2, D.Node> & List<&2, D.Node>, head: List<&2, 
   (first, later) = found
   D.Dom.cat(first, D.Dom.cat(head, D.Dom.cat(uber, D.Dom.cat(add, D.Dom.cat(later, rest)))))
 
-# The sidebar's foot under the top bar: the keys to move between threads,
-# dim (R05); the last row opens the command palette, which lists them all
+# The sidebar's foot under the top bar: the keys to move between threads
+# and "/" back to the composer, shown while Ctrl is held (R05,
+# style.css); the last row opens the command palette, which lists them all
 def View.legend.word(lc: I.Loc, +k: String) -> String:
   match lc:
     case I.Ja{}:
-      Bool.pick(String, String.eq(k, "move"), "前／次のスレッド", Bool.pick(String, String.eq(k, "new"), "ここに新しいスレッド", Bool.pick(String, String.eq(k, "jump"), "ここのスレッドへ移動", Bool.pick(String, String.eq(k, "all"), "すべてのショートカット", "キーボードショートカット"))))
+      Bool.pick(String, String.eq(k, "move"), "前／次のスレッド", Bool.pick(String, String.eq(k, "new"), "ここに新しいスレッド", Bool.pick(String, String.eq(k, "jump"), "ここのスレッドへ移動", Bool.pick(String, String.eq(k, "all"), "すべてのショートカット", Bool.pick(String, String.eq(k, "type"), "入力欄へ", "キーボードショートカット")))))
     case _:
-      Bool.pick(String, String.eq(k, "move"), "prev / next thread", Bool.pick(String, String.eq(k, "new"), "new thread here", Bool.pick(String, String.eq(k, "jump"), "jump to a thread here", Bool.pick(String, String.eq(k, "all"), "all shortcuts", "Keyboard shortcuts"))))
+      Bool.pick(String, String.eq(k, "move"), "prev / next thread", Bool.pick(String, String.eq(k, "new"), "new thread here", Bool.pick(String, String.eq(k, "jump"), "jump to a thread here", Bool.pick(String, String.eq(k, "all"), "all shortcuts", Bool.pick(String, String.eq(k, "type"), "write a message", "Keyboard shortcuts")))))
 
 def View.legend.keys(ks: List<&2, String>) -> List<&2, D.Node>:
   match ks:
@@ -657,6 +658,7 @@ def View.sidebar.legend(top: Bool, +lc: I.Loc) -> List<&2, D.Node>:
         View.legend.row(["Ctrl ⇧", "[", "]"], View.legend.word(lc, "move")),
         View.legend.row(["Ctrl", "N"], View.legend.word(lc, "new")),
         View.legend.row(["Ctrl", "1–9"], View.legend.word(lc, "jump")),
+        View.legend.row(["/"], View.legend.word(lc, "type")),
         [D.El{"button", "", [D.At{"class", "legend-all"}, D.At{"type", "button"}, D.At{"title", "Command palette · Ctrl+K"}, D.At{"data-value", ""}, D.On{"click", "ws-palette-open"}],
           View.legend.row(["Ctrl", "K"], View.legend.word(lc, "all"))}]])}]
     case False{}:

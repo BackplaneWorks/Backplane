@@ -65,6 +65,17 @@ def WS.view.key(+u: U.Ui, +kind: String, +action: String) -> U.Act:
 def WS.term.hide(u: U.Ui) -> U.Act:
   U.Act{U.Ui.flag_off(u, "term"), [U.Focus{"composer"}]}
 
+# What Esc puts away next once no menu, dialog, picker or palette is open
+# (workspace-keys.js asks, from what the page shows): the floating
+# terminal (Esc inside it stays with its program), else the probe whose
+# chip is on show, else the viewer, whichever tab it shows, as its rail
+# button shut does; "" when nothing is, and the keyboard just goes back to
+# the composer (test/workspace_esc_test.bend)
+def WS.esc.next(term: Bool, probe: Bool, viewer: Bool) -> String:
+  match term:
+    case True{}: "term"
+    case False{}: Bool.pick(String, probe, "probe", Bool.pick(String, viewer, "viewer", ""))
+
 def WS.term.size(+u: U.Ui, +owner: String, cols: U32, rows: U32, +method: String) -> U.Act:
   +c = U32.max(20, U32.min(cols, 400))
   +r = U32.max(5, U32.min(rows, 150))
@@ -284,7 +295,8 @@ def WS.palette(on: Bool, +u: U.Ui) -> List<&2, D.Node>:
             Bool.pick(List<&2, D.Node>, List.is_empty(&2, U.PItem, WS.items(u)), [D.Dom.span("workspace-empty", "No matching commands")], WS.rows(WS.items(u), U.Ui.state(u), U.Palette.index(u), 0n))},
           D.El{"footer", "", Nil{}, [D.Txt{"↑↓ choose · Enter run · Esc close. Ctrl/Cmd+Shift+P (Ctrl+K also opens)."},
             D.El{"details", "", Nil{}, [D.El{"summary", "", Nil{}, [D.Txt{"Keyboard shortcuts"}]},
-              D.El{"p", "", Nil{}, [D.Txt{"Alt+1…9 project · Ctrl+1…9 thread · Ctrl+Shift+[ / ] previous / next thread · Ctrl+Shift+U uberbot chat · Ctrl+N new thread · Ctrl+Shift+S settle · Ctrl+P files · Ctrl+D diff · Ctrl+M agent, model and effort."}]},
+              D.El{"p", "", Nil{}, [D.Txt{"Alt+1…9 project · Ctrl+1…9 thread · Ctrl+Shift+[ / ] previous / next thread · Ctrl+Shift+U uberbot chat · Ctrl+N new thread · Ctrl+Shift+S settle · Ctrl+P files · Ctrl+D diff · Ctrl+M agent, model and effort · / composer."}]},
+              D.El{"p", "", Nil{}, [D.Txt{"Esc puts away the floating terminal, else the probe, else the viewer, and puts the keyboard back in the composer; in the composer with nothing to put away it leaves the composer, so a bare key presses its rail button (hold Ctrl to see the keys). Shift+Esc hides the terminal from inside it. / outside a text field puts the keyboard in the composer."}]},
               D.El{"p", "", Nil{}, [D.Txt{"Backtick (`) toggles Terminal from the workspace or composer. In the shell and other text fields, backtick types normally; use Ctrl+J to toggle. Super+grave / tilde also works if your desktop delivers it. Navigation shortcuts leave editors, IME and PTYs alone. Pin is in Commands (its former Ctrl+Shift+P opens this palette)."}]}]}]}]}]}]
 
 def WS.terminal(on: Bool, +u: U.Ui, screen: D.Node) -> List<&2, D.Node>:
@@ -293,7 +305,7 @@ def WS.terminal(on: Bool, +u: U.Ui, screen: D.Node) -> List<&2, D.Node>:
     case True{}:
       [D.El{"section", "floating-terminal", [D.At{"class", "floating-terminal"}, D.At{"role", "region"}, D.At{"aria-label", "Floating interactive terminal"}, D.At{"data-terminal-owner", WS.owner(u)}], [
         D.El{"header", "", [D.At{"class", "floating-terminal-handle"}], [D.El{"span", "", [D.At{"class", "floating-terminal-title"}],
-          [D.Txt{"Terminal · " ++ U.Ui.scratch(u, "@terminal.title")}]}, D.Dom.button("", "ws-term-hide", "", "Hide terminal; shell keeps running · Ctrl+J", "Hide")]},
+          [D.Txt{"Terminal · " ++ U.Ui.scratch(u, "@terminal.title")}]}, D.Dom.button("", "ws-term-hide", "", "Hide terminal; shell keeps running · Ctrl+J · Shift+Esc", "Hide")]},
         D.El{"div", "", [D.At{"class", "floating-terminal-path"}, D.At{"title", U.Ui.scratch(u, "@terminal.cwd")}], [D.Txt{U.Ui.scratch(u, "@terminal.cwd")}]}, screen,
         D.El{"footer", "", Nil{}, [D.Txt{"Interactive shell · Hide keeps the session · type exit to end · drag to move, resize from corner"}]}]}]
 
