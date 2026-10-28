@@ -522,8 +522,10 @@ def Search.row.kind(+e: M.Entry) -> String:
     case M.Msg{_, _, _, _, _}: "message"
     case _: "activity"
 
+# a row names the thread it opens (a subagent's step its thread's,
+# hits.bend's Hits.owner) and the entry shown there (jump)
 def Search.row(+r: T.Row) -> J.Json:
-  J.Json.obj([J.KV{"id", J.Str{M.Idx.id(T.Row.entry(r))}}, J.KV{"thread", J.Str{M.Idx.thread(T.Row.entry(r))}}, J.KV{"ordinal", J.Str{Nat.show(T.Row.n(r))}},
+  J.Json.obj([J.KV{"id", J.Str{M.Idx.id(T.Row.entry(r))}}, J.KV{"thread", J.Str{HT.Hits.owner(M.Idx.thread(T.Row.entry(r)))}}, J.KV{"jump", J.Str{HT.Hits.jump(T.Row.entry(r))}}, J.KV{"ordinal", J.Str{Nat.show(T.Row.n(r))}},
     J.KV{"kind", J.Str{Search.row.kind(T.Row.entry(r))}}, J.KV{"text", J.Str{String.take(T.Blocks.get(T.Row.blocks(r), 0n), 256n)}}, J.KV{"partial", J.Flag{Nat.is_gt(T.Blocks.n(T.Row.blocks(r)), 1n)}}])
 
 def Search.rows(+ids: List<&2, String>, +index: T.Index) -> List<&2, J.Json>:
@@ -562,7 +564,7 @@ def Search.entry.at(+e: M.Entry) -> Nat:
     case M.Act{_, _, _, _, _, at}: at
 
 def Search.hit(+id: String, +index: T.Index, +st: M.State) -> HT.HitAt:
-  +th = M.Idx.thread(T.Row.entry(T.Index.row.k(Map.get(T.Row, T.Row.blank(), T.Index.rows(index), id))))
+  +th = HT.Hits.owner(M.Idx.thread(T.Row.entry(T.Index.row.k(Map.get(T.Row, T.Row.blank(), T.Index.rows(index), id)))))
   HT.HitAt{id, th, Search.thread.project(HB.Hub.thread(st, th))}
 
 def Search.hits(+ids: List<&2, String>, +index: T.Index, +st: M.State) -> List<&2, HT.HitAt>:
@@ -576,12 +578,12 @@ def Search.snip(ps: List<&2, String>) -> List<&2, J.Json>:
     case p <> tail: J.Str{p} <> Search.snip(tail)
 
 def Search.row.found(+r: T.Row, +st: M.State, +now: Nat, +here: String, +terms: Map<&2, Bool>) -> J.Json:
-  +th = HB.Hub.thread(st, M.Idx.thread(T.Row.entry(r)))
+  +th = HB.Hub.thread(st, HT.Hits.owner(M.Idx.thread(T.Row.entry(r))))
   Obj.put(Obj.put(Obj.put(Obj.put(Obj.put(Search.row(r),
     "title", J.Str{Search.title(th)}),
     "project", J.Str{Search.project(HB.Hub.project(st, Search.thread.project(th)))}),
     "when", J.Str{HT.Hits.when(st, now, Search.entry.at(T.Row.entry(r)))}),
-    "here", J.Flag{String.eq(M.Idx.thread(T.Row.entry(r)), here)}),
+    "here", J.Flag{String.eq(HT.Hits.owner(M.Idx.thread(T.Row.entry(r))), here)}),
     "snip", J.Json.arr(Search.snip(HT.Snip.of(terms, T.Entry.text(T.Row.entry(r))))))
 
 def Search.rows.found(+hs: List<&2, HT.HitAt>, +index: T.Index, +st: M.State, +now: Nat, +here: String, +terms: Map<&2, Bool>) -> List<&2, J.Json>:

@@ -52,6 +52,16 @@ export function presentationTarget(session) {
   const route = compactRoute(session?.route);
   return route ? { kind: 'bot', id: route.bot } : session?.sel ? { kind: 'thread', id: session.sel } : { kind: 'recent', id: '' };
 }
+// Where a refused view (ThinHost.refuse) leaves the page, as a selection:
+// the thread on show before, unless that is the one refused or was refused
+// itself, else the project list (''); null once the project list itself
+// was refused (the page then says the conversation is unavailable).
+// refused: the keys ("kind:id") of the views refused so far.
+export function refusedFallback(target, shown, refused) {
+  const key = t => t ? t.kind + ':' + t.id : '';
+  if (!target || target.kind === 'recent' || refused.has('recent:')) return null;
+  return shown?.kind === 'thread' && shown.id && key(shown) !== key(target) && !refused.has(key(shown)) ? shown.id : '';
+}
 
 // Renderer session/draft and effect adapter. Views is the shared ThinViews;
 // it alone validates transport identity, generations, targets and RPC ids.
@@ -485,6 +495,7 @@ export class ThinHost {
       // a search refused (a query the hub does not take) is the search's
       // to say, not the view's: the view stays
       if (result.method === 'view.search') { this.api.searchFailed?.(result.failed);this.pump(true);return true; }
+      if (this.refuse(metadata, result.failed, this.isCurrent(metadata))) return true;
       if (this.abortField(metadata) || this.isCurrent(metadata)) this.fail(result.failed);
       else this.api.warning?.(result.failed);
       this.pump(true);return true;
@@ -513,6 +524,7 @@ export class ThinHost {
     } catch {
       metadata?.operation?.settled?.(false);
       if (paged && result.current) this.pageFailed(paged, 'Invalid rendered view');
+      else if (this.refuse(metadata, 'Invalid rendered view', result.current)) return true;
       else if (this.abortField(metadata) || result.current) this.fail('Invalid rendered view');
       else this.api.warning?.('Old action reply rejected');
       this.pump(true);return true;
@@ -598,7 +610,7 @@ export class ThinHost {
       if ((metadata?.viewerRevision ?? 0) === this.viewerRevision) this.api.viewerChoice?.(null);
       this.api.state({ phase: 'presented', remoteReady: true, requestRevision: r.requestRevision, viewRevision: r.viewRevision, viewId: r.viewId });
       this.handOver();
-    } else if (result.current) this.fail('Current view is not ready');
+    } else if (result.current && !this.refuse(metadata, 'Current view is not ready', true)) this.fail('Current view is not ready');
     // Send queued navigation before a background read can snapshot its old route.
     this.pump(true);
     if (result.refreshDue || paged && !result.current) this.refreshSoon();
@@ -669,6 +681,19 @@ export class ThinHost {
   isCurrent(metadata) {
     const link = this.client.links.get(this.hub);
     return !!metadata && !!link && metadata.wireRevision === (metadata.pictureAuthority ? link.pictureRevision : link.revision) && metadata.target?.kind === link.target?.kind && metadata.target?.id === link.target?.id;
+  }
+  // The view a selection asked for, refused by the hub (STALE_VIEW: it has
+  // no such thread, as a search result in a subagent's log once named) or
+  // not one the page can show, is not asked for again, nor kept: the page
+  // goes where it can (api.refused selects it) rather than stopping on
+  // "Conversation unavailable", which every reload asked for again. Too
+  // big a view (LIMIT) still says so.
+  refuse(metadata, reason, current) {
+    if (metadata?.selection !== true || reason === 'LIMIT' || !current || !this.api.refused) return false;
+    this.api.pageState?.(null);this.forView = null;this.opening = false;this.restorePage = null;
+    for (const operation of this.actions) operation.settled?.(false);
+    this.actions = [];this.ready = false;
+    return this.api.refused(metadata.target, reason) === true;
   }
   fail(reason) {
     this.api.pageState?.(null);this.forView = null;this.opening = false;
