@@ -11,7 +11,8 @@ snapshot), stand-in agents only.
 ## Getting started
 
 **S01 First run** (W D A)
-Open the hub fresh. The guided tour shows; Skip closes it. Settings → Tour →
+Open the hub fresh. D: started from the desktop app with no hub running, its
+hub joins the tailnet (Settings → Network: "Tailscale: on"). The guided tour shows; Skip closes it. Settings → Tour →
 Show the tour opens it again; Done closes it and it stays closed after a
 reload. The KiCad notice waits until the tour is over (none under the card).
 
@@ -235,7 +236,9 @@ are back.
 With Settings open (the top bar's gear), click a thread: it opens and
 Settings is gone; open Settings again and press + by a project: the new
 thread opens, Settings gone. A press on the gear right after opening a
-thread works the first time. Press Board: the viewer shows the board, Board
+thread works the first time. With Board open, the gear (or the palette's
+Settings) shows Settings over the whole area and closes the viewer; clicking
+the thread shows it without the viewer. Press Board: the viewer shows the board, Board
 lit; press Board again: the viewer closes. Schematic, then Board: it switches.
 Ctrl+P twice opens then closes Files; Commands then Ctrl+Shift+P closes the
 palette.
