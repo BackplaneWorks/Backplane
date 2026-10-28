@@ -21,6 +21,7 @@ import ./thin-splice.bend as S
 import ./thin-still-picture.bend as ST
 import ../core/i18n.bend as I
 import ../core/emb.bend as E
+import ../core/native-sidebar.bend as NS
 
 # Private, connection-owned UI state. It never enters a client snapshot or
 # persisted event. Keep it behind a List in the connection context so the
@@ -44,6 +45,10 @@ type Actor is Data:
 
 type Rendered is Data:
   Rendered{actor: Actor, result: J.Json}
+
+def Rendered.result(r: Rendered) -> J.Json:
+  match r:
+    case Rendered{_, result}: result
 
 def Actor.ui( +a: Actor) -> U.Ui:
   match a:
@@ -666,6 +671,92 @@ def Actor.render.result(input: Bool, +updated: Actor, +action: V.ActResult, +web
   match input:
     case True{}: Rendered{updated, TerminalInput.result(action)}
     case False{}: Actor.render.picture(ModelMenu.allowed(web, p, action), updated, action, web, st, index, p, epoch, now, rows, stream, revision)
+
+def Actor.native.prepare(a: Actor, web: Bool, p: J.Json, epoch: String, view: String, revision: Nat, key: String) -> Actor:
+  match a:
+    case Actor{u, v, target, pending, reads, dirty, memo}: Actor{NS.Ns.prepare(u, web, p, epoch, view, revision, key), v, target, pending, reads, dirty, memo}
+
+def Actor.native.key(xs: List<&2, Actor>) -> String:
+  match xs:
+    case Nil{}: ""
+    case a <> _: NS.Ns.memo_key(Actor.ui(a))
+
+def Actor.native.valid(xs: List<&2, Actor>, p: J.Json) -> Bool:
+  match xs:
+    case Nil{}: False{}
+    case a <> _: NS.Ns.valid(Actor.ui(a), J.Json.get_str(p, "value", ""))
+
+def Actor.native.action(native: Bool, +a: Actor, +web: Bool, +p: J.Json, now: Nat) -> V.ActResult:
+  match native:
+    case True{}: V.ActResult{NS.Ns.accept(Actor.ui(a), J.Json.get_str(p, "value", "")), Nil{}}
+    case False{}: TerminalInput.run(TerminalInput.request(web, p), TerminalInput.owner(Actor.ui(a), p), web, Actor.ui(a), p, now)
+
+# A read-only paging reply is not a publication channel for ordinary jobs
+# which completed since the captured client session. Values come only from
+# the server actor; request keys are a projection mask, never adopted data.
+def Actor.native.fields.keep(keep: Bool, key: String, value: J.Json, rest: J.Json) -> J.Json:
+  match keep:
+    case True{}: J.Field{key, value, rest}
+    case False{}: rest
+
+def Actor.native.fields(fields: J.Json, +mask: J.Json) -> J.Json:
+  match fields:
+    case J.Obj{fs}: J.Obj{Actor.native.fields(fs, mask)}
+    case J.Field{+key, value, rest}:
+      Actor.native.fields.keep(Maybe.is_some(&2, J.Json, J.Json.get(mask, key)), key, value, Actor.native.fields(rest, mask))
+    case _: J.End{}
+
+def Actor.native.fields.without_notes(j: J.Json) -> J.Json:
+  match j:
+    case J.Obj{fs}: J.Obj{V.Obj.drop(V.Obj.drop(fs, "error"), "note")}
+    case _: j
+
+def Actor.native.page_result.page(page: Bool, +result: J.Json, +p: J.Json) -> J.Json:
+  match page:
+    case False{}: result
+    case True{}:
+      +actual = J.Json.get_obj(result, "session")
+      +captured = J.Json.get_obj(p, "session")
+      V.Obj.put(result, "session", V.Obj.put(V.Obj.put(V.Obj.put(
+        Actor.native.fields.without_notes(actual),
+        "drafts", Actor.native.fields(J.Json.get_obj(actual, "drafts"), J.Json.get_obj(captured, "drafts"))),
+        "info", Actor.native.fields(J.Json.get_obj(actual, "info"), J.Json.get_obj(captured, "info"))),
+        "outbox", Actor.native.fields(J.Json.get_obj(actual, "outbox"), J.Json.get_obj(captured, "outbox"))))
+
+def Actor.native.page_result(+web: Bool, +p: J.Json, r: Rendered) -> Rendered:
+  match r:
+    case Rendered{actor, result}:
+      Rendered{actor, Actor.native.page_result.page(Bool.and(NS.Ns.offered(web, p), String.eq(J.Json.get_str(p, "action", ""), "native-sidebar-page")), result, p)}
+
+def Actor.native.reconcile(r: Rendered) -> Rendered:
+  match r:
+    case Rendered{Actor{+u, v, target, pending, reads, dirty, memo}, +result}:
+      Rendered{Actor{NS.Ns.reconcile(u, J.Json.get_obj(result, "shown")), v, target, pending, reads, dirty, memo}, result}
+
+# Keep the post-action value separate from projection. A byte-budget trial
+# may render fewer rows, but must never execute an action twice.
+type Acted is Data:
+  Acted{actor: Actor, action: V.ActResult}
+
+def Acted.reduce(a: Acted) -> Acted:
+  match a:
+    case Acted{Actor{u, v, target, pending, reads, dirty, memo}, V.ActResult{ui, cmds}}:
+      Acted{Actor{NS.Ns.reduce(u), v, target, pending, reads, dirty, memo}, V.ActResult{NS.Ns.reduce(ui), cmds}}
+
+def Acted.pressure(native: Bool, a: Acted) -> Acted:
+  match native:
+    case True{}: Acted.reduce(a)
+    case False{}: a
+
+def Actor.acted(+a: Actor, +web: Bool, +p: J.Json, +epoch: String, +now: Nat) -> Acted:
+  +ready = Actor.mail_ready(Actor.origin(a, epoch))
+  +action = Actor.native.action(Bool.and(NS.Ns.offered(web, p), String.eq(J.Json.get_str(p, "action", ""), "native-sidebar-page")), ready, web, p, now)
+  Acted{Actor.accept(ready, action, False{}), action}
+
+def Actor.render.acted(acted: Acted, +web: Bool, +st: M.State, index: T.Index, +p: J.Json, epoch: String, now: Nat, +rows: List<&2, String>, stream: TL.Stream, revision: Nat) -> Rendered:
+  match acted:
+    case Acted{updated, +action}:
+      Actor.native.reconcile(Actor.native.page_result(web, p, Actor.render.result(TerminalInput.allowed(web, p, action), updated, action, web, st, index, p, epoch, now, rows, stream, revision)))
 
 def Actor.render.revision(+a: Actor, +web: Bool, +st: M.State, +index: T.Index, +p: J.Json, +epoch: String, +now: Nat, +rows: List<&2, String>, +stream: TL.Stream, revision: Nat) -> Rendered:
   +ready = Actor.mail_ready(Actor.origin(a, epoch))

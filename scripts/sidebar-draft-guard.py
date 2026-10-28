@@ -19,6 +19,10 @@ BRIDGES = (
     "src/server/thin-mirror.bend",
     "src/server/thin-sidebar.bend",
     "src/core/sidebar-drafts.bend",
+    "src/core/native-sidebar.bend",
+    "src/mobile/screen.bend",
+    "src/mobile/hubs.bend",
+    "src/core/thin-wire.bend",
 )
 MANIFEST = "scripts/sidebar-draft-inputs.json"
 
