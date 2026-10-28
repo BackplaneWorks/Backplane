@@ -82,7 +82,7 @@ struct AppTabs: View {
             .frame(maxWidth: .infinity, minHeight: 48)
             .padding(.horizontal, 3).padding(.vertical, 5)
             .foregroundStyle(selected ? BackplaneDesign.accent : Color.primary)
-            .background(selected ? BackplaneDesign.raised : BackplaneDesign.panel)
+            .background(selected ? BackplaneDesign.raised : BackplaneDesign.panel, ignoresSafeAreaEdges: [])
             .overlay(alignment: .top) {
                 if selected { Rectangle().fill(BackplaneDesign.accent).frame(height: 2) }
             }
