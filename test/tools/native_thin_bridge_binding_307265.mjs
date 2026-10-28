@@ -2,7 +2,7 @@
 import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {pathToFileURL} from 'node:url';
 export async function registerBridgeChecks(check,stage,root){
  const packet=path.join(root,'build/phone-cache/native-thin-bridge-proposal-01');
- for(const n of ['src/web/wire.js','src/mobile/recent.js']){const q=path.join(stage,n);fs.mkdirSync(path.dirname(q),{recursive:true});fs.copyFileSync((process.env.BP_NATIVE_THIN_SOURCE_ROOT ? path.join(process.env.BP_NATIVE_THIN_SOURCE_ROOT,n) : path.join(packet,fs.existsSync(path.join(packet,'qualified-dependencies'))?'qualified-dependencies':'dependencies',n)),q);}
+ for(const n of ['src/web/wire.js','src/web/bub-move.js','src/mobile/recent.js']){const q=path.join(stage,n);fs.mkdirSync(path.dirname(q),{recursive:true});fs.copyFileSync((process.env.BP_NATIVE_THIN_SOURCE_ROOT ? path.join(process.env.BP_NATIVE_THIN_SOURCE_ROOT,n) : path.join(packet,fs.existsSync(path.join(packet,'qualified-dependencies'))?'qualified-dependencies':'dependencies',n)),q);}
  const stub=path.join(stage,'src/mobile/app-stub.mjs');fs.copyFileSync(path.join(root,'test/tools/native_thin_app_stub_307265.mjs'),stub);
  const code=fs.readFileSync(process.env.BP_NATIVE_BRIDGE_SOURCE||path.join(root,'src/mobile/bridge.js'),'utf8').replace('import App from "./app.bend";','import App from "./app-stub.mjs";');
  fs.writeFileSync(path.join(stage,'src/mobile/bridge.js'),code);await import(pathToFileURL(path.join(stage,'src/mobile/bridge.js')));

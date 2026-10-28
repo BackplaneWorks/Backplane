@@ -11,6 +11,8 @@ const presentation = method => ['view.open', 'view.page', 'view.update', 'view.a
 const same = (a, b) => a?.kind === b?.kind && a?.id === b?.id;
 const counter = n => Number.isSafeInteger(n) && n >= 0 && n < 2 ** 47;
 const ordinaryKey = (hub, id) => JSON.stringify([hub, id]);
+// a typed field's name ("bfield" is "<name>\u001f<text>"), null for none
+const fieldName = value => { const i = typeof value === 'string' ? value.indexOf('\u001f') : -1; return i > 0 ? value.slice(0, i) : null; };
 const rawThread = (hub, qualified) => qualified.startsWith(hub + '|') ? qualified.slice(hub.length + 1) : null;
 const plainObject = value => object(value) && [Object.prototype, null].includes(Object.getPrototypeOf(value));
 // Ordinary transport side channels are not presentation authority. Never
@@ -312,7 +314,11 @@ export class NativeThinHost307265 {
       if (pending && pending.hub === hub && !pending.operation) this.issue(s, this.client.request(hub, 'view.cancel', intent.args));
       return true;
     }
-    if (!s.greeted || !s.ready) return true;
+    // An action asked for while the page's own last action or update is on
+    // its way waits its turn (pump sends it once that is answered). It was
+    // dropped: a field typed faster than the hub answered kept only its
+    // first letter (an API key named "E2E_KEY" saved as "E").
+    if (!s.greeted || (!s.ready && !(intent.kind === 'action' && this.presenting(s)))) return true;
     // One page request at a time, each taken from the page shown. 'later'
     // retraces the trail back down to the newest: without it a phone that
     // paged up could never page back down (the list ended on the old page)
@@ -338,7 +344,16 @@ export class NativeThinHost307265 {
           (expected === undefined && intent.args.cursor !== part.cursor && intent.args.cursor !== '')) return true;
       this.issue(s, this.client.request(hub, 'view.message', { ...intent.args, cursor: expected === undefined ? '' : expected })); return true;
     }
-    if (intent.kind !== 'action' || s.queue.length >= 7) return true;
+    if (intent.kind !== 'action') return true;
+    // a field's edits not sent yet are one, its newest text (as the web's
+    // thin-host): a burst of keys never fills the queue
+    const tail = s.queue[s.queue.length - 1];
+    if (action === 'bfield' && tail?.action === 'bfield' && fieldName(tail.value) !== null && fieldName(tail.value) === fieldName(value)) {
+      if (intent.session) { s.revision++; s.session = copy(intent.session); }
+      tail.value = value; tail.input = copy(s.session); tail.revision = s.revision;
+      return true;
+    }
+    if (s.queue.length >= 7) return true;
     const thread = s.session.sel;
     if (['send', 'send-alt'].includes(action)) {
       if (s.paging) s.overtaken.add(s.paging.id);
@@ -351,6 +366,15 @@ export class NativeThinHost307265 {
     if (intent.session) { s.revision++; s.session = copy(intent.session); }
     s.queue.push({ action, value, input: copy(s.session), revision: s.revision });
     this.pump(s); return true;
+  }
+
+  // the page on show has its own request on its way (an action, an update,
+  // a page): not a view still opening (select() clears the window)
+  presenting(s) {
+    if (!s.window) return false;
+    for (const [id, call] of this.pending)
+      if (call.hub === s.hub && call.epoch === s.epoch && presentation(this.client.calls.get(id)?.method)) return true;
+    return false;
   }
 
   pump(s) {

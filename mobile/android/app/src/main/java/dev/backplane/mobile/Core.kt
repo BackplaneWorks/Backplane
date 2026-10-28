@@ -69,6 +69,19 @@ class Core(private val app: Application) : Application.ActivityLifecycleCallback
         return current.hub in connected && mark.first == epochs[current.hub] &&
             mark.second == (pendingNav ?: opening?.nav ?: nav(current))
     }
+    // the page on show, presented, whose own action or update is on its way
+    // (its ready mark is down until the hub answers): what the person types
+    // or taps there still goes, and waits its turn in the bridge. Dropped, a
+    // field typed faster than the hub answered kept only its first letter.
+    private val settling = mutableMapOf<String, Pair<Long, String>>()
+    private val acting get(): Boolean {
+        if (contentReady) return true
+        val current = screen ?: return false
+        if (!engineReady || cachedPresentation || pendingNav != null || opening != null) return false
+        if (startup[current.hub] != StartupPolicy.THIN || current.hub !in connected) return false
+        val mark = settling[current.hub] ?: return false
+        return mark.first == epochs[current.hub] && mark.second == nav(current)
+    }
     // something changed since the state was last kept
     private var dirty = false
     // the hub whose plots are drawn: frames from any other are dropped
@@ -394,7 +407,7 @@ class Core(private val app: Application) : Application.ActivityLifecycleCallback
     fun unpair(key: String) {
         retireScreenCache()
         startup.remove(key)
-        thinReady.remove(key)
+        thinReady.remove(key); settling.remove(key)
         legacyReady.remove(key)
         epochs[key] = (epochs[key] ?: 0L) + 1
         connected.remove(key)
@@ -420,7 +433,7 @@ class Core(private val app: Application) : Application.ActivityLifecycleCallback
     fun retryView(key: String) {
         if (links.none { Pairing.key(it) == key } || startup[key] !in setOf(StartupPolicy.COMPATIBILITY_REQUIRED, StartupPolicy.PAIRING_REFUSED)) return
         hubs.remove(key)?.stop()
-        thinReady.remove(key)
+        thinReady.remove(key); settling.remove(key)
         presentationEpochs.remove(key)
         startup[key] = StartupPolicy.DISCOVERING
         connect()
@@ -435,7 +448,7 @@ class Core(private val app: Application) : Application.ActivityLifecycleCallback
                 connected.remove(key)
                 presentationEpochs.remove(key)
                 requestedFrameAt.remove(key)
-                thinReady.remove(key)
+                thinReady.remove(key); settling.remove(key)
                 legacyReady.remove(key)
                 run {
                     startup[key] = StartupPolicy.DISCOVERING
@@ -516,7 +529,7 @@ class Core(private val app: Application) : Application.ActivityLifecycleCallback
                 connected.remove(key)
                 linkUp[key] = false
                 legacyReady.remove(key)
-                thinReady.remove(key)
+                thinReady.remove(key); settling.remove(key)
                 presentationEpochs.remove(key)
                 val epoch = epochs[key] ?: 0L
                 scope.launch { apply(engine.online(key, false, epoch.toString())) }
@@ -527,7 +540,9 @@ class Core(private val app: Application) : Application.ActivityLifecycleCallback
     private fun dispatch(action: String, value: String) {
         if (action == "select" && (value.isEmpty() || links.any { value.startsWith((Pairing.key(it) ?: "") + "|") })) pendingNav = value
         if (action == "select" || action in setOf("bot", "room", "remote", "uber", "uber-bot")) retireScreenCache()
-        if (!contentReady) {
+        // (an action on the page on show still goes while its own last one is
+        // answered: acting)
+        if (!contentReady && (action in setOf("select", "bot", "room", "remote", "uber", "uber-bot") || !acting)) {
             if (action in setOf("select", "bot", "room", "remote", "uber", "uber-bot")) {
                 earlyActions.removeAll { it.first == action }
                 val targetHub = links.mapNotNull { Pairing.key(it) }.firstOrNull { value.startsWith("$it|") } ?: screen?.hub
@@ -571,7 +586,7 @@ class Core(private val app: Application) : Application.ActivityLifecycleCallback
         if (action == "secret-save") {
             val v = vaultText
             vaultText = ""
-            if (!contentReady) return
+            if (!acting) return
             scope.launch { apply(engine.secret(value + "\u001f" + v)) }
             return
         }
@@ -598,7 +613,7 @@ class Core(private val app: Application) : Application.ActivityLifecycleCallback
     // out, and the screen waits for the answer, so fast typing never
     // queues a screen per key
     fun quiet(action: String, value: String) {
-        if (!contentReady) return
+        if (!acting) return
         scope.launch { apply(engine.quiet(action, value)) }
     }
 
@@ -658,7 +673,7 @@ class Core(private val app: Application) : Application.ActivityLifecycleCallback
     // a bot form's field ("bfield"), typed: Bend keeps it without a new
     // screen, the field on screen already shows it
     fun field(name: String, text: String) {
-        if (!contentReady) return
+        if (!acting) return
         scope.launch { apply(engine.quiet("bfield", name + "\u001f" + text)) }
     }
 
@@ -735,7 +750,7 @@ class Core(private val app: Application) : Application.ActivityLifecycleCallback
     private fun observeThinPresenting(update: SyncUpdate, epoch: Long) {
         if (startup[update.hub] != StartupPolicy.THIN || !update.thinPresenting || epochs[update.hub] != epoch) return
         if (thinRequests.getOrPut(update.hub) { ThinPresentationFence() }.observe(update, epoch)) {
-            thinReady.remove(update.hub)
+            thinReady.remove(update.hub)?.let { if (it.first == epoch) settling[update.hub] = it }
             presentationEpochs.remove(update.hub)
             requestedFrameAt.remove(update.hub)
         }
@@ -752,6 +767,7 @@ class Core(private val app: Application) : Application.ActivityLifecycleCallback
             presentationEpochs.remove(update.hub)
             requestedFrameAt.remove(update.hub)
             thinReady.remove(update.hub)
+            settling.remove(update.hub)
             thinRequests[update.hub]?.invalidate()
             legacyReady.remove(update.hub)
         }
