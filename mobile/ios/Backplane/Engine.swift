@@ -59,6 +59,7 @@ final class Engine: @unchecked Sendable {
         let url = Bundle.main.url(forResource: "bridge", withExtension: "js")!
         c.evaluateScript(try! String(contentsOf: url, encoding: .utf8), withSourceURL: url)
         c.objectForKeyedSubscript("Backplane")?.invokeMethod("publicationAck", withArguments: [])
+        c.objectForKeyedSubscript("Backplane")?.invokeMethod("nativeSidebar", withArguments: [1])
         if let text = c.objectForKeyedSubscript("Backplane")?.invokeMethod("headerKeys", withArguments: [])?.toString() {
             priority.install(text)
         }

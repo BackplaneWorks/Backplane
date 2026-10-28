@@ -39,6 +39,7 @@ import ../core/tz.bend as TZ
 import ../core/stamp.bend as STP
 import ./permissions.bend as PM
 import ../core/subthreads.bend as ST
+import ../core/native-sidebar.bend as NS
 
 # Ui -> the screen the phone apps draw, as JSON. SwiftUI and Compose map
 # it onto native lists, toolbars and text fields; every decision (order,
@@ -1998,9 +1999,211 @@ def Mob.signal.compact(heard: Bool, ts: List<&2, M.Thread>, +st: M.State, info: 
     case True{}:
       Mob.signal.compact.go(SG.Signal.island.threads(ts, info), st, NO.Island.compact.children(st), NO.Compact{0n, "", 0n})
 
+# Native v1 summary projection: plan identity ranges before Mob.row builds
+# swipes, labels or nested JSON. Legacy renderers keep the original path.
+type NRows is Data:
+  NRows{rows: List<&2, J.Json>, pager: J.Json}
+
+def NRows.rows(r: NRows) -> List<&2, J.Json>:
+  match r:
+    case NRows{rows, _}: rows
+
+def NRows.pager(r: NRows) -> J.Json:
+  match r:
+    case NRows{_, pager}: pager
+
+def Mob.native.project_id(+r: U.SRow) -> String:
+  match r:
+    case U.SRow{_, M.Project{id, _, _, _, _}, _}: id
+
+def Mob.native.project_ids(+rs: List<&2, U.SRow>) -> List<&2, String>:
+  match rs:
+    case Nil{}: Nil{}
+    case r <> rest: Mob.native.project_id(r) <> Mob.native.project_ids(rest)
+
+def Mob.native.selected(+u: U.Ui) -> String:
+  U.Ui.thread_project(U.Ui.thread(U.Ui.state(u), U.Ui.sel(u)))
+
+def Mob.native.find_project(+rs: List<&2, U.SRow>, +id: String) -> List<&2, U.SRow>:
+  match rs:
+    case Nil{}: Nil{}
+    case +r <> rest:
+      Bool.pick(List<&2, U.SRow>, String.eq(Mob.native.project_id(r), id), [r], Mob.native.find_project(rest, id))
+
+def Mob.native.force_project(+found: Bool, +rs: List<&2, U.SRow>, +u: U.Ui) -> List<&2, U.SRow>:
+  match found:
+    case True{}: rs
+    case False{}: List.append(&2, U.SRow, rs, Mob.native.find_project(U.Side.rows.ix(U.Ui.state(u), U.Side.ix(U.Ui.state(u)), U.Side.now(u)), Mob.native.selected(u)))
+
+def Mob.native.source(+g: U.SGroups, +u: U.Ui) -> List<&2, U.SRow>:
+  match g:
+    case U.SGroups{live, quiet, old}:
+      +rs = List.concat(&2, U.SRow, [live, quiet, Bool.pick(List<&2, U.SRow>, Bool.or(U.Ui.flag(u, "old-projects"), Bool.not(String.is_empty(U.Ui.scratch(u, "@f.pq")))), old, Nil{})])
+      rs
+
+def Mob.native.keep_projects(+rs: List<&2, U.SRow>, +ids: List<&2, String>) -> List<&2, U.SRow>:
+  match rs:
+    case Nil{}: Nil{}
+    case +r <> rest:
+      List.append(&2, U.SRow, Bool.pick(List<&2, U.SRow>, NS.Ns.has(ids, Mob.native.project_id(r)), [r], Nil{}), Mob.native.keep_projects(rest, ids))
+
+def Mob.native.n(+on: Bool, +empty: Bool) -> Nat:
+  Bool.pick(Nat, Bool.and(on, Bool.not(empty)), 1n, 0n)
+
+def Mob.native.list_count(+rs: List<&2, U.SRow>, +u: U.Ui) -> Nat:
+  match rs:
+    case Nil{}: 0n
+    case U.SRow{_, M.Project{+id, _, _, _, _}, M.Shelves{p, a, s, h, sn}} <> rest:
+      Nat.add(Nat.add(Mob.native.n(True{}, Bool.and(List.is_empty(&2, M.Thread, p), List.is_empty(&2, M.Thread, a))), Mob.native.n(True{}, List.is_empty(&2, M.Thread, sn))),
+        Nat.add(Nat.add(Mob.native.n(U.Ui.flag(u, id), List.is_empty(&2, M.Thread, s)), Mob.native.n(U.Ui.flag(u, "arch:" ++ id), List.is_empty(&2, M.Thread, M.Archive.of(h)))), Mob.native.list_count(rest, u)))
+
+def Mob.native.tree_rows(+rs: List<&2, ST.TRow>, +ids: List<&2, String>) -> List<&2, ST.TRow>:
+  match rs:
+    case Nil{}: Nil{}
+    case +r <> rest:
+      List.append(&2, ST.TRow, Bool.pick(List<&2, ST.TRow>, NS.Ns.has(ids, Maybe.default(&2, String, List.head(&2, String, ST.Tree.row_ids([r])), "")), [r], Nil{}), Mob.native.tree_rows(rest, ids))
+
+def Mob.native.thread_ids(+ts: List<&2, M.Thread>) -> List<&2, String>:
+  match ts:
+    case Nil{}: Nil{}
+    case t <> rest: M.Thread.id(t) <> Mob.native.thread_ids(rest)
+
+def Mob.native.list(+on: Bool, +lc: I.Loc, +ts: List<&2, M.Thread>, +u: U.Ui, +ix: U.SIx, +kind: String, +owner: String, +limit: Nat) -> NRows:
+  match on:
+    case False{}: NRows{Nil{}, J.Null{}}
+    case True{}:
+      +rows = ST.Tree.rows(U.Ui.state(u), ts, U.Ui.sel(u))
+      +part = NS.Ns.slice(u, ST.Tree.row_ids(rows), kind, owner, limit, Bool.pick(String, NS.Ns.has(ST.Tree.row_ids(rows), U.Ui.sel(u)), U.Ui.sel(u), ""))
+      NRows{Mob.trows(Mob.native.tree_rows(rows, NS.Slice.ids(part)), lc, ix, U.Ui.state(u), U.Side.now(u)), NS.Slice.pager(part)}
+
+def Mob.native.project(+lc: I.Loc, +r: U.SRow, +u: U.Ui, +ix: U.SIx, +limit: Nat) -> J.Json:
+  match r:
+    case U.SRow{_, M.Project{+id, title, root, _, _}, M.Shelves{pinned, active, +settled, +hidden, snoozed}}:
+      +threads = Mob.native.list(True{}, lc, List.append(&2, M.Thread, pinned, active), u, ix, "threads", id, limit)
+      +sleeping = Mob.native.list(True{}, lc, snoozed, u, ix, "snoozed", id, limit)
+      +done = Mob.native.list(U.Ui.flag(u, id), lc, settled, u, ix, "settled", id, limit)
+      +archive = Mob.native.list(U.Ui.flag(u, "arch:" ++ id), lc, M.Archive.of(hidden), u, ix, "archived", id, limit)
+      J.Json.obj([J.KV{"id", J.Str{id}}, J.KV{"title", J.Str{U.Label.title(U.Ui.state(u), id, title)}}, J.KV{"root", J.Str{root}},
+        J.KV{"open", J.Flag{U.Ui.flag(u, id)}}, J.KV{"threads", J.Json.arr(NRows.rows(threads))}, J.KV{"threadsPage", NRows.pager(threads)},
+        J.KV{"snoozedShelf", J.Str{MSG.T.sidebar.snoozed(lc)}}, J.KV{"snoozed", J.Json.arr(NRows.rows(sleeping))}, J.KV{"snoozedPage", NRows.pager(sleeping)},
+        J.KV{"shelf", J.Str{MSG.T.sidebar.settled.count(lc, Nat.show(List.length(&2, M.Thread, settled)))}},
+        J.KV{"settledCount", J.Json.nat(List.length(&2, M.Thread, settled))}, J.KV{"settled", J.Json.arr(NRows.rows(done))}, J.KV{"settledPage", NRows.pager(done)},
+        J.KV{"value", J.Str{"arch:" ++ id}}, J.KV{"archOpen", J.Flag{U.Ui.flag(u, "arch:" ++ id)}},
+        J.KV{"archivedCount", J.Json.nat(List.length(&2, M.Thread, M.Archive.of(hidden)))}, J.KV{"archived", J.Json.arr(NRows.rows(archive))}, J.KV{"archivedPage", NRows.pager(archive)}])
+
+def Mob.native.projects(+rs: List<&2, U.SRow>, +lc: I.Loc, +u: U.Ui, +ix: U.SIx, +limit: Nat) -> List<&2, J.Json>:
+  match rs:
+    case Nil{}: Nil{}
+    case +r <> rest:
+      Mob.quiet(Mob.native.project(lc, r, u, ix, limit), Bool.or(Bool.not(U.SRow.live(r)), Mob.syncing(r, U.Ui.state(u)))) <> Mob.native.projects(rest, lc, u, ix, limit)
+
+def Mob.native.thread_rows(+ts: List<&2, M.Thread>, +ids: List<&2, String>) -> List<&2, M.Thread>:
+  match ts:
+    case Nil{}: Nil{}
+    case +t <> rest:
+      List.append(&2, M.Thread, Bool.pick(List<&2, M.Thread>, NS.Ns.has(ids, M.Thread.id(t)), [t], Nil{}), Mob.native.thread_rows(rest, ids))
+
+def Mob.native.legacy(+lc: I.Loc, +u: U.Ui, +ix: U.SIx, +limit: Nat) -> NRows:
+  +ts = U.Side.legacy.filtered(ST.Legacy.threads(U.Ui.state(u)), U.Ui.scratch(u, "@f.pq"))
+  +part = NS.Ns.slice(u, Mob.native.thread_ids(ts), "legacy", "", limit, "")
+  NRows{Mob.legacy(Mob.native.thread_rows(ts, NS.Slice.ids(part)), lc, ix, U.Ui.state(u), U.Side.now(u)), NS.Slice.pager(part)}
+
+def Mob.native.atrow(+show: Bool, +lc: I.Loc, +r: ST.TRow, +anchor: U.ARow, +ix: U.SIx, +st: M.State, +now: Nat) -> List<&2, J.Json>:
+  match show:
+    case False{}: Nil{}
+    case True{}: [Mob.atrow(lc, r, anchor, ix, st, now)]
+
+def Mob.native.atrows(+rs: List<&2, ST.TRow>, +ids: List<&2, String>, +lc: I.Loc, +anchors: List<&2, U.ARow>, +anchor: U.ARow, +ix: U.SIx, +st: M.State, +now: Nat) -> List<&2, J.Json>:
+  match rs:
+    case Nil{}: Nil{}
+    case +r <> rest:
+      +step = Mob.anchor.data(Mob.anchor.step(Mob.trow.root(r), anchors, anchor))
+      +a = Mob.anchor.current(step)
+      List.append(&2, J.Json, Mob.native.atrow(NS.Ns.has(ids, Maybe.default(&2, String, List.head(&2, String, ST.Tree.row_ids([r])), "")), lc, r, a, ix, st, now), Mob.native.atrows(rest, ids, lc, Mob.anchor.next(step), a, ix, st, now))
+
+def Mob.native.active.roots(+rs: List<&2, U.ARow>, +lc: I.Loc, +u: U.Ui, +ix: U.SIx, +limit: Nat) -> NRows:
+  match rs:
+    case Nil{}: NRows{Nil{}, J.Null{}}
+    case +r <> +rest:
+      +rows = ST.Tree.rows_search(U.Ui.state(u), Mob.aroots(r <> rest), U.Ui.sel(u), U.Ui.scratch(u, "@f.pq"))
+      +part = NS.Ns.slice(u, ST.Tree.row_ids(rows), "active", "", limit, U.Ui.sel(u))
+      NRows{Mob.native.atrows(rows, NS.Slice.ids(part), lc, r <> rest, r, ix, U.Ui.state(u), U.Side.now(u)), NS.Slice.pager(part)}
+
+def Mob.native.active(+on: Bool, +lc: I.Loc, +u: U.Ui, +ix: U.SIx, +limit: Nat) -> NRows:
+  match on:
+    case False{}: NRows{Nil{}, J.Null{}}
+    case True{}:
+      +q = U.Ui.scratch(u, "@f.pq")
+      Mob.native.active.roots(U.Active.folded(U.Active.open(U.Side.open(u), q), U.Active.parts(U.Active.rows.ix(U.Ui.state(u), ix, U.Side.now(u), q))), lc, u, ix, limit)
+
+type NPack is Data:
+  NPack{projects: List<&2, J.Json>, legacy: List<&2, J.Json>, active: List<&2, J.Json>, settled: J.Json, descriptor: J.Json}
+
+def NPack.projects(p: NPack) -> List<&2, J.Json>:
+  match p:
+    case NPack{projects, _, _, _, _}: projects
+
+def NPack.legacy(p: NPack) -> List<&2, J.Json>:
+  match p:
+    case NPack{_, legacy, _, _, _}: legacy
+
+def NPack.active(p: NPack) -> List<&2, J.Json>:
+  match p:
+    case NPack{_, _, active, _, _}: active
+
+def NPack.settled(p: NPack) -> J.Json:
+  match p:
+    case NPack{_, _, _, settled, _}: settled
+
+def NPack.descriptor(p: NPack) -> J.Json:
+  match p:
+    case NPack{_, _, _, _, descriptor}: descriptor
+
+# A selected project excluded by the filter is a separate exception, never
+# an ordinary source member. With no matching source the empty result stays
+# empty and the currently selected conversation remains in the main view.
+def Mob.native.selected_project_exists(+u: U.Ui) -> Bool:
+  +id = Mob.native.selected(u)
+  Bool.and(Bool.not(String.is_empty(id)), Nat.is_eq(List.length(&2, U.SRow, Mob.native.find_project(U.Side.rows.ix(U.Ui.state(u), U.Side.ix(U.Ui.state(u)), U.Side.now(u)), id)), 1n))
+
+def Mob.native.project_extra(add: Bool, part: NS.Slice, selected: String) -> NS.Slice:
+  match add part:
+    case True{} NS.Slice{ids, J.Obj{fs}}:
+      NS.Slice{List.append(&2, String, ids, [selected]), NS.Obj.put(J.Obj{fs}, "selectedOutside", J.Flag{True{}})}
+    case _ p: p
+
+def Mob.native.pack(+on: Bool, +lc: I.Loc, +u: U.Ui, +ix: U.SIx, +g: U.SGroups, +side: MSide, +focus: Bool) -> NPack:
+  match on:
+    case False{}:
+      NPack{Mob.grouped(lc, g, U.Side.open(u), ix, U.Ui.state(u), U.Side.now(u), U.Ui.scratch(u, "@f.pq"), Bool.pick(String, focus, U.Ui.sel(u), "")), Mob.legacy(ST.Legacy.threads(U.Ui.state(u)), lc, ix, U.Ui.state(u), U.Side.now(u)), MSide.rows(side), MSide.settled(side), J.Null{}}
+    case True{}:
+      +activeMode = String.eq(NS.Ns.mode(u), "active")
+      +source = Mob.native.source(g, u)
+      +sourceIds = Bool.pick(List<&2, String>, activeMode, Nil{}, Mob.native.project_ids(source))
+      +projectPart = Mob.native.project_extra(Bool.and(Mob.native.selected_project_exists(u), Bool.and(Bool.not(activeMode), Bool.and(Bool.not(List.is_empty(&2, String, sourceIds)), Bool.not(NS.Ns.has(sourceIds, Mob.native.selected(u)))))),
+        NS.Ns.slice(u, sourceIds, "projects", "", NS.Ns.project_limit(u), Mob.native.selected(u)), Mob.native.selected(u))
+      +projects = Mob.native.keep_projects(Mob.native.force_project(NS.Ns.has(Mob.native.project_ids(source), Mob.native.selected(u)), source, u), NS.Slice.ids(projectPart))
+      +lists = Nat.add(Mob.native.list_count(projects, u), Nat.add(Bool.pick(Nat, activeMode, 1n, 0n), Mob.native.n(True{}, List.is_empty(&2, M.Thread, ST.Legacy.threads(U.Ui.state(u))))))
+      +limit = Nat.max(1n, Nat.div(NS.Ns.row_budget(u), Bool.pick(Nat, Nat.is_eq(lists, 0n), 1n, lists)))
+      +legacy = Mob.native.legacy(lc, u, ix, limit)
+      +active = Mob.native.active(activeMode, lc, u, ix, limit)
+      NPack{Mob.native.projects(projects, lc, u, ix, limit), NRows.rows(legacy), NRows.rows(active), Mob.settled.if(activeMode, U.Ui.state(u), U.Side.now(u), U.Ui.scratch(u, "@f.pq"), U.Side.open(u)),
+        J.Json.obj([J.KV{"version", J.Num{"1"}}, J.KV{"hub", J.Str{J.Json.get_str(NS.Ns.ctx(u), "hub", "")}}, J.KV{"projects", NS.Slice.pager(projectPart)}, J.KV{"active", NRows.pager(active)}, J.KV{"legacy", NRows.pager(legacy)}])}
+
+def Mob.native.finish(+on: Bool, +screen: J.Json, +pack: NPack) -> J.Json:
+  match on:
+    case False{}: screen
+    case True{}: NS.Obj.put(NS.Obj.put(screen, "nativeSidebar", J.Num{"1"}), "sidebarPages", J.Json.arr([NPack.descriptor(pack)]))
+
+def Mob.side.legacy(+native: Bool, +lc: I.Loc, +on: Bool, +ix: U.SIx, +st: M.State, +now: Nat, +q: String, +o: Map<&2, Bool>, +selected: String) -> MSide:
+  match native:
+    case True{}: MSide{Nil{}, J.Null{}}
+    case False{}: Mob.side(lc, on, ix, st, now, q, o, selected)
+
 def Mob.screen.go(+lc: I.Loc, +focus: Bool, +u: U.Ui, +ix: U.SIx, +g: U.SGroups, +side: MSide) -> J.Json:
   match u:
     case U.Ui{+st, +sel, +dr, _, +o, +on, +now, _, _, +v, _, _, +e, +note, +nf, _, _}:
+      +native = Mob.native.pack(NS.Ns.enabled(u), lc, u, ix, g, side, focus)
       +compact = Mob.signal.compact(N.Note.heard(on, now, Mob.heard(u)), U.Ui.threads(st), st, nf)
       +rmenu = Mob.rmenu(lc, u)
       +deleting = Mob.deleting(lc, u)
@@ -2013,15 +2216,15 @@ def Mob.screen.go(+lc: I.Loc, +focus: Bool, +u: U.Ui, +ix: U.SIx, +g: U.SGroups,
       +newroom = MB.MBots.rnew(u)
       +thread = Mob.focus.thread(lc, focus, u, sel)
       +bot = Mob.focus.bot(lc, focus, u)
-      J.Json.obj([J.KV{"online", J.Json.bool(on)}, J.KV{"version", J.Json.str(v)}, J.KV{"seq", J.Json.nat(U.Ui.seq(u))}, J.KV{"error", J.Json.str(e)},
+      Mob.native.finish(NS.Ns.enabled(u), J.Json.obj([J.KV{"online", J.Json.bool(on)}, J.KV{"version", J.Json.str(v)}, J.KV{"seq", J.Json.nat(U.Ui.seq(u))}, J.KV{"error", J.Json.str(e)},
         J.KV{"bubHome", HOP.Hop.snapshot(u)}, J.KV{"lang", Mob.lang.loc(lc, u)}, J.KV{"note", J.Json.str(note)}, J.KV{"sel", J.Json.str(sel)}, J.KV{"making", J.Json.bool(U.Made.waiting(u))}, J.KV{"theme", J.Json.str(M.Setting.get(st, "ui.theme", ""))},
         J.KV{"empty", J.Json.str(Mob.empty.loc(lc, List.length(&2, M.Project, U.Ui.projects(st))))},
-        J.KV{"projects", J.Json.arr(Mob.grouped(lc, g, o, ix, st, now, U.Find.q(o, dr), Bool.pick(String, focus, sel, "")))},
-        J.KV{"legacy", J.Json.arr(Mob.legacy(ST.Legacy.threads(st), lc, ix, st, now))},
+        J.KV{"projects", J.Json.arr(NPack.projects(native))},
+        J.KV{"legacy", J.Json.arr(NPack.legacy(native))},
         J.KV{"older", Mob.older(g, o, U.Find.q(o, dr))},
         J.KV{"view", J.Json.str(Mob.view(u))},
-        J.KV{"active", J.Json.arr(MSide.rows(side))},
-        J.KV{"settled", MSide.settled(side)},
+        J.KV{"active", J.Json.arr(NPack.active(native))},
+        J.KV{"settled", NPack.settled(native)},
         J.KV{"rowMenu", rmenu},
         J.KV{"search", Mob.search.loc(lc, u)},
         J.KV{"deleting", deleting},
@@ -2040,12 +2243,12 @@ def Mob.screen.go(+lc: I.Loc, +focus: Bool, +u: U.Ui, +ix: U.SIx, +g: U.SGroups,
         J.KV{"rooms", J.Json.arr(MB.MBots.rooms(B.BU.rooms(u)))},
         J.KV{"newBot", newbot},
         J.KV{"newRoom", newroom},
-        J.KV{"bot", bot}])
+        J.KV{"bot", bot}]), native)
 
 # (the sidebar's rows, Side.rows.ix, made by the caller when it needs them too)
 def Mob.screen.signals.go(+lc: I.Loc, +focus: Bool, +u: U.Ui, +ix: U.SIx, +rows: List<&2, U.SRow>) -> J.Json:
   Mob.screen.go(lc, focus, u, ix, U.Side.groups(U.Find.rows(rows, U.Find.q(Mob.open(u), Mob.scratch(u))), Mob.now(u)),
-    Mob.side(lc, String.eq(Mob.view(u), "active"), ix, U.Ui.state.of(u), Mob.now(u), U.Find.q(Mob.open(u), Mob.scratch(u)), Mob.open(u), Bool.pick(String, focus, U.Ui.sel(u), "")))
+    Mob.side.legacy(NS.Ns.enabled(u), lc, String.eq(Mob.view(u), "active"), ix, U.Ui.state.of(u), Mob.now(u), U.Find.q(Mob.open(u), Mob.scratch(u)), Mob.open(u), Bool.pick(String, focus, U.Ui.sel(u), "")))
 
 def Mob.screen.signals(+lc: I.Loc, +focus: Bool, +u: U.Ui, ix: U.SIx, rows: List<&2, U.SRow>) -> J.Json:
   Mob.screen.signals.go(lc, focus, u, U.Side.signals.ix(ix, u), rows)

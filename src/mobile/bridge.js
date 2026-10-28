@@ -469,6 +469,9 @@ function screenText() {
     if (!overlays) return "null";
     const drafts = overlays.map(overlay => plain(App.thin_shown_draft(bendJson(overlay), JSON.stringify(thin.state(overlay.key).session))));
     const screen = plain(App.thin_presentation(hubs, bendJson(drafts), cur));
+    // Negotiation markers belong to each validated hub reply. A merged
+    // client screen exposes the per-hub descriptors, never a global offer.
+    delete screen.nativeSidebar;
     screen.locale = nativeLocale;
     // paged up into the history: how many pages lie below (the native
     // list's bottom trigger asks for "later"; the host keeps the trail)
