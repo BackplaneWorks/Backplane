@@ -75,6 +75,21 @@ export function modelPickerKey(event) {
   return key ? ['mp-key', key] : null;
 }
 
+// Esc puts away what is open over the page wherever the keyboard is: what
+// the hub drew with a shade or a backdrop that a click beside it presses (a
+// row's or a project's menu, the badge editor, a project's Intent), the
+// topmost (the last) first; else an open ▾ menu. The model picker keeps its
+// own Escape. The answer closes it, or is null when nothing is open.
+export function overlayEscape(doc) {
+  const shades = [...(doc.querySelectorAll?.('.shade[data-on-click], .modal-back[data-on-click]') || [])]
+    .filter(el => el.getAttribute('data-value') !== 'models');
+  const shade = shades.at(-1);
+  if (shade) return () => shade.click();
+  const menu = doc.querySelector?.('.local-menu[open]');
+  if (menu) return () => { menu.open = false; };
+  return null;
+}
+
 export function installWorkspaceKeys({ dispatch, document: doc = document, platform = navigator.platform }) {
   doc.addEventListener('keydown', event => {
     if (event.isComposing || event.keyCode === 229 || event.defaultPrevented) return;
@@ -97,6 +112,10 @@ export function installWorkspaceKeys({ dispatch, document: doc = document, platf
         if (fields.length) { event.preventDefault(); event.stopImmediatePropagation();fields[next].focus(); }
         return;
       }
+    }
+    if (event.key === 'Escape' && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
+      const close = overlayEscape(doc);
+      if (close) { event.preventDefault(); event.stopImmediatePropagation(); close(); return; }
     }
     // Match the native composer: Escape leaves it once completions are closed.
     // Keep editor navigation guarded until focus has actually left the field.

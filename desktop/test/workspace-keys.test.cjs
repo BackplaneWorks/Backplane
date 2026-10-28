@@ -267,3 +267,40 @@ test('Ctrl+K from the composer opens the palette once and keeps the draft', asyn
   assert.equal(h.doc.activeElement, h.composer);
   assert.equal(h.composer.value, 'unsent draft');
 });
+
+// Esc puts away the menu or dialog over the page wherever the keyboard is
+// (a row's menu opened from the sidebar, a project's Intent opened while
+// another project's thread had the focus), the topmost first, and never
+// the model picker's own shade.
+test('Escape closes the open menu or dialog wherever the focus is', async () => {
+  const { installWorkspaceKeys, overlayEscape } = await import('../../src/web/workspace-keys.js');
+  let listener, shades = [], menus = [];
+  const clicked = [], actions = [];
+  const shade = (value, name) => ({ getAttribute: k => k === 'data-value' ? value : null, click: () => clicked.push(name) });
+  const doc = { activeElement: null, querySelector: q => q === '.local-menu[open]' ? menus[0] || null : null,
+    querySelectorAll: () => shades, addEventListener: (_n, callback) => { listener = callback; } };
+  installWorkspaceKeys({ dispatch: (...a) => actions.push(a), document: doc, platform: 'Linux' });
+  const body = { tagName: 'BODY', closest: () => null, getAttribute: () => null };
+  const composer = { tagName: 'TEXTAREA', id: 'composer', closest: () => composer, getAttribute: () => '', blur: () => assert.fail('the menu goes first') };
+  const press = (target, fields = {}) => {
+    const input = event('Escape', { target, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; }, stopImmediatePropagation() {}, ...fields });
+    listener(input); return input;
+  };
+  assert.equal(overlayEscape(doc), null);
+  assert.equal(press(body).defaultPrevented, false);
+  shades = [shade('', 'row menu')];
+  assert.equal(press(body).defaultPrevented, true);
+  assert.deepEqual(clicked, ['row menu']);
+  shades = [shade('models', 'model picker'), shade('', 'badge editor'), shade('t1', 'intent')];
+  assert.equal(press(composer).defaultPrevented, true);
+  assert.deepEqual(clicked, ['row menu', 'intent']);
+  shades = [shade('models', 'model picker')];
+  assert.equal(overlayEscape(doc), null);
+  const details = { open: true };menus = [details];
+  assert.equal(press(body).defaultPrevented, true);
+  assert.equal(details.open, false);
+  menus = [];shades = [shade('', 'row menu')];
+  for (const fields of [{ ctrlKey: true }, { shiftKey: true }, { isComposing: true }]) assert.equal(press(body, fields).defaultPrevented, false);
+  assert.deepEqual(clicked, ['row menu', 'intent']);
+  assert.deepEqual(actions, []);
+});
