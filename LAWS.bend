@@ -9113,9 +9113,10 @@ law tok_add_no_cost:
   {M.Tok.part(M.Tok.add("", 1n, 0n, 0n, 1n, 0n, 0n, False{}), 7n) == 0n : Nat}
 
 # ---- usage-token-stats ----
-# the composer's token chip is opt-in: off on a fresh hub
-law tokstats_off_by_default:
-  {UZ.Ts.on(M.State.empty()) == False{} : Bool}
+# the composer's token chip is on by default: on on a fresh hub (and for
+# anyone who never turned it off); only an explicit "off" hides it
+law tokstats_on_by_default:
+  {UZ.Ts.on(M.State.empty()) == True{} : Bool}
 
 # a Claude session already running when first seen gets no speed: its
 # running totals are only the baseline

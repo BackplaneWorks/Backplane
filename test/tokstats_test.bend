@@ -48,7 +48,8 @@ def show(ss: List<&2, UZ.TsSec>) -> String:
 def main() -> IO(Unit):
   do IO<Unit>:
     +s0 : M.State = M.State.replay(log(), M.State.empty())
-    C.Check.str("off unless turned on", Bool.show(UZ.Ts.on(s0)), "False")
+    C.Check.str("on unless turned off", Bool.show(UZ.Ts.on(s0)), "True")
+    C.Check.str("off when turned off", Bool.show(UZ.Ts.on(then(s0, [M.SettingSet{"ui.tokstats", "off", 3n}]))), "False")
     C.Check.str("on", Bool.show(UZ.Ts.on(then(s0, [M.SettingSet{"ui.tokstats", "on", 3n}]))), "True")
     +s1 : M.State = cl(then(s0, List.append(&2, M.Change, H.Turn.claude.start(False{}, "t1", "sess1", 2n), H.Speed.start(s0, False{}, "t1", "sess1", 2n))),
       result("r1", "0.0180473", "1276", "1955", "52", "67"))

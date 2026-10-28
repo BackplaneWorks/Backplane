@@ -11101,7 +11101,7 @@ def Laws.tok_add_one_turn():
 def Laws.tok_add_no_cost():
   {==}
 
-def Laws.tokstats_off_by_default():
+def Laws.tokstats_on_by_default():
   {==}
 
 def Laws.speed_unseen_untold():

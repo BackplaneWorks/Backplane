@@ -120,7 +120,7 @@
     "src/core/uber.bend": "b86d13523ed4fd08006c8cb1f00d00712c4ab3cdc13b7b03dc2808cc72d09938",
     "src/core/ubersync.bend": "1e94a7d5d085e876ba91eca8a04d960ddfb405db9f62b64d73a70055812dbdc1",
     "src/core/ubop.bend": "e06413a86ecc1dbe4082109bd2deef6769644f9c22538771c78c81ac4c6d25fa",
-    "src/core/usage.bend": "ac9ced975bc65427d5cd273f91e0af7858aa8bf5a7e3a95ddd7e1a46b043a531",
+    "src/core/usage.bend": "dc1514142132c9d83a0e75b0e0cc346d2b627c75d208b66993728be8002e2bec",
     "src/core/usage_graph.bend": "c4a30aff87e9a9ff0d9bea0ef11d0ab0655f816c4aeb904f667031a63b7745e5",
     "src/core/usage_page.bend": "05f675351e885ee368dd9db73b9e3739d04c9225a1f1c0d8ced43b53d98615f7",
     "src/core/utf8.bend": "0202c5087fd255df10413080cda57f2a4a00aa9b90b5b425a00a729f9563627b",
@@ -143,7 +143,7 @@
     "src/web/space.bend": "b86a265e41a900498bc33c37c0404c4d6678554efe3d9054f329beb2cf35ee63",
     "src/web/usage-graph.bend": "fa06f7d2bf855a396a5f7a7b4725dfaa990145fbbcefe7ad21ae8f9a698a2679",
     "src/web/usage-page.bend": "706e3f17a4a3e5f159656d47aeb76a940d4825421f5c33228f9aef692ec926e3",
-    "src/web/view.bend": "359e3d3df0091468fde57af0b912aa7c3fd23855afb734dc8aaa59d714c0123a"
+    "src/web/view.bend": "c65a5f26dc144195339319efb9c82219369949c861f2d64ba9536f9358383670"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -253,5 +253,5 @@
       "sourceSnapshot": "/home/h/Documents/i2cjak/bp-coord/settle-fresh-work/SOURCE-structural-correction.json"
     }
   },
-  "reviewNote": "Settings opened shuts the viewer (client.bend's Settings.on, the flag action): sidebar drafts render the same, sidebar_draft_image_test 24 ok"
+  "reviewNote": "usage.bend Ts.on defaults to on (token chip on unless turned off); view.bend comment; sidebar_draft_image_test 24 ok"
 }

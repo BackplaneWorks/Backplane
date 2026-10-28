@@ -718,8 +718,9 @@ def Ts.blurb() -> String:
 def Ts.tip() -> String:
   "Token use: click for the details"
 
+# on unless the person turned it off (on by default since 0.13)
 def Ts.on(+st: M.State) -> Bool:
-  String.eq(M.Setting.get(st, Ts.key(), "off"), "on")
+  Bool.not(String.eq(M.Setting.get(st, Ts.key(), "on"), "off"))
 
 def Ts.pad3(+n: Nat) -> String:
   Bool.pick(String, Nat.is_lt(n, 10n), "00" ++ Nat.show(n), Bool.pick(String, Nat.is_lt(n, 100n), "0" ++ Nat.show(n), Nat.show(n)))

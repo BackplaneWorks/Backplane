@@ -91,7 +91,8 @@ message shows the image; clicking it opens the lightbox; "Copy image" puts it
 on the clipboard (D: and a button shows the file in its folder); Esc closes it.
 
 **S12 Token stats** (W D)
-Settings → Usage → turn Token stats on. The chip beside Send shows tokens,
+Token stats are on by default (Settings → Usage shows On; Off hides the chip
+and On brings it back). The chip beside Send shows tokens,
 cost (when known) and context, rounded to the nearest (5,950 reads "6k");
 clicking it opens the panel with the last turn's and the thread's totals,
 each model a line with its cost and its tokens under it; Esc closes it.

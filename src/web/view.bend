@@ -2808,7 +2808,7 @@ def View.local.go(nodes: List<&2, D.Node>, +draft: String, acc: List<&2, D.Node>
 def View.local(node: D.Node, +draft: String) -> List<&2, D.Node>:
   View.local.go([node], draft, Nil{})
 
-# The token chip (opt-in, usage.bend's Ts): the thread's token use by the
+# The token chip (on unless turned off, usage.bend's Ts): the thread's token use by the
 # send button; a click opens the panel with all its provider told, and a
 # click outside or on the chip again closes it (the flag "tokstats")
 def View.tok.chip(on: Bool, +text: String, +open: Bool) -> List<&2, D.Node>:
