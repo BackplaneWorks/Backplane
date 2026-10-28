@@ -7,7 +7,9 @@ function store_temp(home) {
 }
 function store_sync(path) {
   const fs = require('fs'); let fd;
-  try { fd=fs.openSync(path,'r');fs.fsyncSync(fd);return 'ok'; }
+  // Windows FlushFileBuffers needs a writable file handle. Keep POSIX file
+  // opening and the separate directory-sync policy unchanged.
+  try { fd=fs.openSync(path,process.platform==='win32'?'r+':'r');fs.fsyncSync(fd);return 'ok'; }
   catch(e) { return 'fail '+e.message; }
   finally { if(fd!==undefined)fs.closeSync(fd); }
 }
@@ -28,6 +30,18 @@ function store_promote(home,temp) {
   try {
     if(path.dirname(temp)!==home || !path.basename(temp).startsWith('.store-rebuild-'))throw Error('invalid rebuild directory');
     const next=path.join(temp,'store.db'),target=path.join(home,'store.db');
+    // Db.close can leave an empty WAL and its disposable shared index on
+    // macOS. Refuse uncheckpointed data or unexpected members before moving
+    // the current database; never recursively discard a rebuild directory.
+    const sidecars=[];
+    for(const name of fs.readdirSync(temp)) {
+      if(name==='store.db'||name==='events.jsonl')continue;
+      if(name!=='store.db-wal'&&name!=='store.db-shm')throw Error('unexpected rebuild member retained: '+name);
+      const file=path.join(temp,name),st=fs.lstatSync(file);
+      if(!st.isFile()||st.isSymbolicLink())throw Error('invalid rebuild sidecar retained: '+name);
+      if(name==='store.db-wal'&&st.size!==0)throw Error('uncheckpointed rebuild WAL retained');
+      sidecars.push(file);
+    }
     const sync=store_sync(next);if(sync!=='ok')return sync;
     const backup=target+'.previous-'+Date.now();
     for(const suffix of ['','-wal','-shm'])if(fs.existsSync(target+suffix)){fs.copyFileSync(target+suffix,backup+suffix,fs.constants.COPYFILE_EXCL);const saved=store_sync(backup+suffix);if(saved!=='ok')return saved;}
@@ -35,6 +49,7 @@ function store_promote(home,temp) {
     for(const suffix of ['-wal','-shm'])if(fs.existsSync(target+suffix))fs.renameSync(target+suffix,backup+suffix+'.retired');
     fs.renameSync(next,target);
     store_sync_dir(home);
+    for(const file of sidecars)fs.rmSync(file,{force:true});
     fs.unlinkSync(path.join(temp,'events.jsonl'));fs.rmdirSync(temp);
     return 'ok';
   }catch(e){return 'fail '+e.message;}
