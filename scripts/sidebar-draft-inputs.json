@@ -253,5 +253,5 @@
       "sourceSnapshot": "/home/h/Documents/i2cjak/bp-coord/settle-fresh-work/SOURCE-structural-correction.json"
     }
   },
-  "reviewNote": "Show each project's initials in the folded sidebar strip"
+  "reviewNote": "Keep a short project name whole in the breadcrumb, cut the title first"
 }
