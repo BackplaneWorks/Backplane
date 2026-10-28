@@ -107,11 +107,11 @@ def main() -> IO(Unit):
     C.Check.str("limits value", M.Setting.get(l1, "limit.claude.five_hour", ""), "180/1792105200/allowed_warning")
     C.Check.str("rows", show(UZ.Tk.rows(l1, U.Ui.threads(l1), U.Ui.projects(l1), 1792101000n)),
       "Claude plan | 5 h: 18% used, resets in 1 h 10 min · 7 d: 55% used, resets in 5 d · allowed_warning (as Claude last said)\n" ++
-      "Today (UTC) | 6 turns · 17k in, 21k cache read, 3k cache write · 18 out (0 reasoning) · $0.0009 for 3 of them\n" ++
-      "This month | 6 turns · 17k in, 21k cache read, 3k cache write · 18 out (0 reasoning) · $0.0009 for 3 of them\n" ++
-      "claude · claude-opus-5-5 this month | 3 turns · 9 in, 4k cache read, 3k cache write · 7 out (0 reasoning) · $0.0009\n" ++
-      "codex · gpt-6.1-sol this month | 3 turns · 17k in, 17k cache read, 0 cache write · 11 out (0 reasoning) · cost not reported\n" ++
-      "demo this month | 6 turns · 17k in, 21k cache read, 3k cache write · 18 out (0 reasoning) · $0.0009 for 3 of them\n" ++
-      "Codex work so far | 3 turns · 17k in, 17k cache read, 0 cache write · 11 out (0 reasoning) · cost not reported\n" ++
-      "Claude work so far | 3 turns · 9 in, 4k cache read, 3k cache write · 7 out (0 reasoning) · $0.0009\n" ++
+      "Today (UTC) | 6 turns · 18k in, 21k cache read, 3.9k cache write · 18 out (0 reasoning) · $0.0009 for 3 of them\n" ++
+      "This month | 6 turns · 18k in, 21k cache read, 3.9k cache write · 18 out (0 reasoning) · $0.0009 for 3 of them\n" ++
+      "claude · claude-opus-5-5 this month | 3 turns · 9 in, 4.2k cache read, 3.9k cache write · 7 out (0 reasoning) · $0.0009\n" ++
+      "codex · gpt-6.1-sol this month | 3 turns · 18k in, 17k cache read, 0 cache write · 11 out (0 reasoning) · cost not reported\n" ++
+      "demo this month | 6 turns · 18k in, 21k cache read, 3.9k cache write · 18 out (0 reasoning) · $0.0009 for 3 of them\n" ++
+      "Codex work so far | 3 turns · 18k in, 17k cache read, 0 cache write · 11 out (0 reasoning) · cost not reported\n" ++
+      "Claude work so far | 3 turns · 9 in, 4.2k cache read, 3.9k cache write · 7 out (0 reasoning) · $0.0009\n" ++
       "Counted since | 2026-10-15 (UTC); earlier turns were not recorded. Costs are Claude's own figures at API prices, not a bill; Codex reports none.\n")

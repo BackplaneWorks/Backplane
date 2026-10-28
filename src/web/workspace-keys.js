@@ -99,6 +99,11 @@ export function installWorkspaceKeys({ dispatch, document: doc = document, platf
       const action = modelPickerKey(event);
       if (action) { event.preventDefault(); event.stopImmediatePropagation(); dispatch(...action); return; }
     }
+    // The token stats panel (view.bend's View.tok.pop) shuts on Escape like
+    // the picker, as a click on its chip does
+    if (event.key === 'Escape' && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey && doc.querySelector('.tok-pop')) {
+      event.preventDefault(); event.stopImmediatePropagation(); dispatch('flag', 'tokstats'); return;
+    }
     const palette = doc.querySelector('.workspace-palette');
     if (palette) {
       const action = { Escape: 'ws-palette-close', Enter: 'ws-palette-enter', ArrowUp: 'ws-palette-move', ArrowDown: 'ws-palette-move' }[event.key];

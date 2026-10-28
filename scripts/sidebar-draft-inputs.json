@@ -120,7 +120,7 @@
     "src/core/uber.bend": "b86d13523ed4fd08006c8cb1f00d00712c4ab3cdc13b7b03dc2808cc72d09938",
     "src/core/ubersync.bend": "1e94a7d5d085e876ba91eca8a04d960ddfb405db9f62b64d73a70055812dbdc1",
     "src/core/ubop.bend": "e06413a86ecc1dbe4082109bd2deef6769644f9c22538771c78c81ac4c6d25fa",
-    "src/core/usage.bend": "daa867929d6624e718605560f4116fdee90e499cf2d79e4b2b0caafca23ddcab",
+    "src/core/usage.bend": "ac9ced975bc65427d5cd273f91e0af7858aa8bf5a7e3a95ddd7e1a46b043a531",
     "src/core/usage_graph.bend": "c4a30aff87e9a9ff0d9bea0ef11d0ab0655f816c4aeb904f667031a63b7745e5",
     "src/core/usage_page.bend": "05f675351e885ee368dd9db73b9e3739d04c9225a1f1c0d8ced43b53d98615f7",
     "src/core/utf8.bend": "0202c5087fd255df10413080cda57f2a4a00aa9b90b5b425a00a729f9563627b",
@@ -253,5 +253,5 @@
       "sourceSnapshot": "/home/h/Documents/i2cjak/bp-coord/settle-fresh-work/SOURCE-structural-correction.json"
     }
   },
-  "reviewNote": "API keys: Delete asks first, Save opens the list (no sidebar draft change)"
+  "reviewNote": "token stats: counts rounded to the nearest, by-model rows (no sidebar draft change)"
 }

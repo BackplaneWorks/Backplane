@@ -71,15 +71,19 @@ def main() -> IO(Unit):
       "Last turn\n  Model: claude · claude-haiku-4-5-20251001\n  Input: 10\n  Cache read: 13,803\n  Cache write: 0\n  Output: 40\n  Cost: not reported\n  Turn time: 9.0 s\n")
     C.Check.str("secs", UZ.Ts.secs(1366n) ++ " " ++ UZ.Ts.secs(125000n), "1.3 s 2m 05s")
     +c2 : M.State = then(s2, [M.UsageSet{"t1", 62000n, 200000n, 5n}])
-    C.Check.str("chip: the thread's tokens, their cost and the context held", UZ.Ts.chip(c2, "t1"), "27k tok · $0.0225 · 31%")
-    C.Check.str("chip: before a context reading, the thread's tokens and cost", UZ.Ts.chip(s2, "t1"), "27k tok · $0.0225")
+    C.Check.str("chip: the thread's tokens, their cost and the context held", UZ.Ts.chip(c2, "t1"), "28k tok · $0.0225 · 31%")
+    C.Check.str("chip: before a context reading, the thread's tokens and cost", UZ.Ts.chip(s2, "t1"), "28k tok · $0.0225")
     C.Check.str("chip: nothing yet", UZ.Ts.chip(s0, "t2"), "")
+    # counts round to the nearest, a tenth while short (5,950 read "5k")
+    C.Check.str("tokens rounded", String.join([UZ.Use.tokens(950n), UZ.Use.tokens(1000n), UZ.Use.tokens(5950n), UZ.Use.tokens(5949n), UZ.Use.tokens(9949n), UZ.Use.tokens(9950n),
+      UZ.Use.tokens(62400n), UZ.Use.tokens(999499n), UZ.Use.tokens(999500n), UZ.Use.tokens(1250000n), UZ.Use.tokens(9950000n), UZ.Use.tokens(34400000n)], " "),
+      "950 1k 6k 5.9k 9.9k 10k 62k 999k 1M 1.3M 10M 34M")
     C.Check.str("panel, claude", show(UZ.Ts.sections(c2, "t1", "claude")),
       "Context\n  Held now: 62,000 of 200,000 (31%)\n  Room left: 138,000\n" ++
       "Last turn\n  Model: claude · claude-haiku-4-5-20251001\n  Input: 10\n  Cache read: 13,803\n  Cache write: 0\n  Output: 133\n  Cost: $0.0045\n" ++
       "  Output speed: 97.3 tok/s\n  Model time: 1.3 s over 1 step\n  Turn time: 1.3 s\n" ++
       "This thread\n  Turns: 2\n  Input: 20\n  Cache read: 27,606\n  Cache write: 0\n  Output: 185\n  Cache hits: 99% of input\n  Cost: $0.0225\n  Average speed: 60.2 tok/s\n" ++
-      "This session by model\n  claude-haiku-4-5-20251001: 910 in · 13k cache read · 0 cache write · 200 out · $0.0225\n" ++
+      "This session by model\n  claude-haiku-4-5-20251001: $0.0225\n  : 910 in · 200 out · 14k cache read · 0 cache write\n" ++
       "\n  : Speed is output tokens over the time Claude's model calls took, as Claude reports it: the wait for the first token is in it (so short replies read slow), tool runs are not.\n")
     C.Check.str("panel, a provider that reports nothing yet", show(UZ.Ts.sections(s0, "t2", "codex")),
       "Context\n  Held now: not reported by codex\nLast turn\n  : no turn counted yet\nThis thread\n  : no turns counted yet\n")

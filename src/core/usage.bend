@@ -24,9 +24,18 @@ def Use.reports(+provider: String) -> Bool:
 def Use.pct(+used: Nat, +window: Nat) -> Nat:
   Bool.pick(Nat, Nat.is_eq(window, 0n), 0n, Nat.div(Nat.mul(used, 100n), window))
 
+# tenths x10 as "5.9", "6" when there are none
+def Use.tenths(+x10: Nat) -> String:
+  Nat.show(Nat.div(x10, 10n)) ++ Bool.pick(String, Nat.is_eq(Nat.mod(x10, 10n), 0n), "", "." ++ Nat.show(Nat.mod(x10, 10n)))
+
+# a count of tokens, short and rounded to the nearest: 950, 5.9k, 62k,
+# 1.2M, 34M (5,950 is "6k", not "5k")
 def Use.tokens(+n: Nat) -> String:
-  Bool.pick(String, Nat.is_ge(n, 1000000n), Nat.show(Nat.div(n, 1000000n)) ++ "M",
-    Bool.pick(String, Nat.is_ge(n, 1000n), Nat.show(Nat.div(n, 1000n)) ++ "k", Nat.show(n)))
+  Bool.pick(String, Nat.is_lt(n, 1000n), Nat.show(n),
+    Bool.pick(String, Nat.is_lt(n, 9950n), Use.tenths(Nat.div(Nat.add(n, 50n), 100n)) ++ "k",
+      Bool.pick(String, Nat.is_lt(n, 999500n), Nat.show(Nat.div(Nat.add(n, 500n), 1000n)) ++ "k",
+        Bool.pick(String, Nat.is_lt(n, 9950000n), Use.tenths(Nat.div(Nat.add(n, 50000n), 100000n)) ++ "M",
+          Nat.show(Nat.div(Nat.add(n, 500000n), 1000000n)) ++ "M"))))
 
 def Use.tail.k(has: Bool, +provider: String, +text: String) -> String:
   match has:
@@ -827,17 +836,21 @@ def Ts.thread(+tv: String, +sp: String) -> TsSec:
 def Ts.mu.part(+ps: List<&2, String>, +i: Nat) -> Nat:
   M.Switch.num(Chip.part(ps, i), 0n)
 
+# a model's two rows: its name and cost, then its tokens on a line of
+# their own under them (one row wrapped the tokens into a narrow column)
 def Ts.mu.row(+ps: List<&2, String>) -> TsRow:
-  TsRow{Chip.part(ps, 0n), Use.tokens(Ts.mu.part(ps, 1n)) ++ " in · " ++ Use.tokens(Ts.mu.part(ps, 3n)) ++ " cache read · " ++ Use.tokens(Ts.mu.part(ps, 4n)) ++ " cache write · " ++
-    Use.tokens(Ts.mu.part(ps, 2n)) ++ " out · " ++ Tk.usd(Ts.mu.part(ps, 5n)) ++
-    Bool.pick(String, Nat.is_eq(Ts.mu.part(ps, 6n), 0n), "", " · " ++ Nat.show(Ts.mu.part(ps, 6n)) ++ " web searches")}
+  TsRow{Chip.part(ps, 0n), Tk.usd(Ts.mu.part(ps, 5n))}
+
+def Ts.mu.use(+ps: List<&2, String>) -> TsRow:
+  TsRow{"", Use.tokens(Ts.mu.part(ps, 1n)) ++ " in · " ++ Use.tokens(Ts.mu.part(ps, 2n)) ++ " out · " ++ Use.tokens(Ts.mu.part(ps, 3n)) ++ " cache read · " ++
+    Use.tokens(Ts.mu.part(ps, 4n)) ++ " cache write" ++ Bool.pick(String, Nat.is_eq(Ts.mu.part(ps, 6n), 0n), "", " · " ++ Nat.show(Ts.mu.part(ps, 6n)) ++ " web searches")}
 
 def Ts.mu.rows(ls: List<&2, String>, +acc: List<&2, TsRow>) -> List<&2, TsRow>:
   match ls:
     case Nil{}:
       List.reverse(&2, TsRow, acc)
     case +l <> t:
-      Ts.mu.rows(t, Bool.pick(List<&2, TsRow>, String.is_empty(l), acc, Ts.mu.row(String.split(l, '|')) <> acc))
+      Ts.mu.rows(t, Bool.pick(List<&2, TsRow>, String.is_empty(l), acc, Ts.mu.use(String.split(l, '|')) <> Ts.mu.row(String.split(l, '|')) <> acc))
 
 def Ts.models(+v: String) -> List<&2, TsSec>:
   Bool.pick(List<&2, TsSec>, String.is_empty(v), Nil{}, [TsSec{"This session by model", Ts.mu.rows(String.split(v, '\n'), Nil{})}])

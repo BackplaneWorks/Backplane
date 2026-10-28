@@ -304,3 +304,23 @@ test('Escape closes the open menu or dialog wherever the focus is', async () => 
   assert.deepEqual(clicked, ['row menu', 'intent']);
   assert.deepEqual(actions, []);
 });
+
+test('Escape shuts the token stats panel, from the composer too; nothing when it is shut', async () => {
+  const { installWorkspaceKeys } = await import('../../src/web/workspace-keys.js');
+  let listener, open = true;
+  const actions = [], doc = { activeElement: null, querySelector: (sel) => sel === '.tok-pop' && open ? {} : null,
+    addEventListener: (_name, callback) => { listener = callback; } };
+  installWorkspaceKeys({ dispatch: (...action) => actions.push(action), document: doc, platform: 'Linux' });
+  const chip = { tagName: 'BUTTON', closest: () => null }, composer = { tagName: 'TEXTAREA', id: 'composer', closest: () => composer, getAttribute: () => '', blur: () => {} };
+  const press = (key, fields = {}) => {
+    const input = event(key, { target: chip, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; }, stopImmediatePropagation() {}, ...fields });
+    listener(input); return input;
+  };
+  assert.equal(press('Escape').defaultPrevented, true);
+  assert.equal(press('Escape', { target: composer }).defaultPrevented, true);
+  assert.deepEqual(actions, [['flag', 'tokstats'], ['flag', 'tokstats']]);
+  assert.equal(press('Escape', { shiftKey: true }).defaultPrevented, false);
+  open = false;
+  press('Escape');
+  assert.deepEqual(actions, [['flag', 'tokstats'], ['flag', 'tokstats']]);
+});
