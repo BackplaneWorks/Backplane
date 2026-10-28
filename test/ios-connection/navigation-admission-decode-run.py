@@ -34,6 +34,8 @@ with tempfile.TemporaryDirectory(prefix="bp-ios-navigation-admission-decode-") a
     ]))
     subprocess.run(["swiftc", "-parse-as-library",
                     str(root / "mobile/ios/Backplane/Screen.swift"),
+                    str(root / "mobile/ios/Backplane/MailroomAction.swift"),
+                    str(root / "mobile/ios/Backplane/NavigationPresentationReadiness.swift"),
                     str(root / "mobile/ios/Backplane/MessagePartial.swift"),
                     str(models),
                     str(root / "mobile/ios/Backplane/WireDecodeDiagnostic.swift"),
