@@ -319,10 +319,11 @@ export class NativeThinHost307265 {
       return true;
     }
     // An action asked for while the page's own last action or update is on
-    // its way waits its turn (pump sends it once that is answered). It was
-    // dropped: a field typed faster than the hub answered kept only its
-    // first letter (an API key named "E2E_KEY" saved as "E").
-    if (!s.greeted || (!s.ready && !(intent.kind === 'action' && this.presenting(s)))) return true;
+    // its way waits its turn (pump sends it once that is answered), and a
+    // search goes at once. Both were dropped: a field typed faster than the
+    // hub answered kept only its first letter (an API key named "E2E_KEY"
+    // saved as "E").
+    if (!s.greeted || (!s.ready && !((intent.kind === 'action' || intent.kind === 'search') && this.presenting(s)))) return true;
     // One page request at a time, each taken from the page shown. 'later'
     // retraces the trail back down to the newest: without it a phone that
     // paged up could never page back down (the list ended on the old page)
@@ -339,7 +340,12 @@ export class NativeThinHost307265 {
           typeof intent.args.cursor !== 'string' || utf8Bytes(intent.args.cursor) > 1024) return true;
       s.findRevision++;
       s.findCloseOnce = action === 'thin-search-more';
-      this.issue(s, this.client.request(hub, 'view.search', intent.args), { findRevision: s.findRevision }); return true;
+      // one search on its way at a time: a query typed meanwhile waits, the
+      // newest only, and goes when that one is answered. A request per key
+      // ran past the hub's eight in flight, which failed the whole view:
+      // nothing tapped did anything after
+      if (s.searching && this.pending.has(s.searching)) { s.searchNext = intent.args; return true; }
+      this.search(s, intent.args); return true;
     }
     if (intent.kind === 'message') {
       const part = s.window?.partial?.find(p => p.id === intent.args.entryId);
@@ -376,6 +382,20 @@ export class NativeThinHost307265 {
   // or still waiting (undefined: nothing typed); forget lets it go
   typed(hub, name) { return this.states.get(hub)?.typed?.get(name); }
   forget(hub, name) { this.states.get(hub)?.typed?.delete(name); }
+
+  search(s, args) {
+    s.searchNext = null;
+    const result = this.client.request(s.hub, 'view.search', args);
+    s.searching = result?.id || null;
+    this.issue(s, result, { findRevision: s.findRevision });
+  }
+
+  // the search on its way answered (or gone): the query typed meanwhile goes
+  searched(s, id) {
+    if (!s || s.searching !== id) return;
+    s.searching = null;
+    if (s.searchNext && s.greeted) this.search(s, s.searchNext);
+  }
 
   // the page on show has its own request on its way (an action, an update,
   // a page): not a view still opening (select() clears the window)
@@ -421,6 +441,7 @@ export class NativeThinHost307265 {
     const result = this.client.reply(hub, envelope);
     if (!result) return this.ack(hub, envelope);
     this.pending.delete(envelope.id);
+    this.searched(s, envelope.id);
     if (s.active === envelope.id) s.active = null;
     const paged = s.paging?.id === envelope.id ? s.paging : null;
     if (paged) s.paging = null;
@@ -581,6 +602,7 @@ export class NativeThinHost307265 {
     for (const call of this.client.expire()) {
       const metadata = this.pending.get(call.id), s = this.states.get(call.hub);
       this.pending.delete(call.id);
+      this.searched(s, call.id);
       if (s?.active === call.id) s.active = null;
       if (metadata && presentation(call.method) && this.isCurrent(metadata)) this.fail(call.hub, 'View request timed out; not resent');
       else if (s) this.pump(s);

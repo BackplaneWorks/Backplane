@@ -106,6 +106,10 @@ check('a field typed while its first key is answered keeps every key, as one edi
  let out=x.answer(first[0].request.id);assert.equal(out.cmds.length,1);assert.equal(out.cmds[0].request.p.value,'kname\u001fE2E_KEY12');
  out=x.answer(out.cmds[0].request.id);assert.equal(out.cmds[0].request.p.value,'kval\u001fs');out=x.answer(out.cmds[0].request.id);assert.equal(out.cmds[0].request.p.action,'key-add');});
 check('a view still opening takes no action meanwhile',()=>{const x=harness();x.open();x.h.request('h','select','h|b');x.h.drain();x.h.request('h','bfield','kname\u001fE');assert.deepEqual(x.h.drain().cmds,[]);assert.equal(x.h.states.get('h').queue.length,0);});
+check('a burst of search keys keeps one search on its way, then the newest',()=>{const x=harness();x.open();const q=s=>x.h.request('h','thin-search',JSON.stringify({query:s,cursor:''}));q('z');const first=x.h.drain().cmds;assert.equal(first.length,1);
+ for(const s of ['ze','zeb','zebr','zebra','zebraf','zebrafi','zebrafin','zebrafinc','zebrafinch','zebrafinch3','zebrafinch37'])q(s);assert.deepEqual(x.h.drain().cmds,[]);assert(x.h.states.get('h').ready);
+ const out=x.answer(first[0].request.id,{search:{query:'z',rows:[],cursor:'',hasMore:false,visited:1}});assert.equal(x.calls.search.length,0);assert.equal(out.cmds.length,1);assert.equal(out.cmds[0].request.p.query,'zebrafinch37');
+ x.answer(out.cmds[0].request.id,{search:{query:'zebrafinch37',rows:[],cursor:'',hasMore:false,visited:1}});assert.equal(x.calls.search.length,1);assert.equal(x.calls.search[0][1].query,'zebrafinch37');assert(x.h.states.get('h').ready);});
 check('registration counter exhaustion is refused before calling Bend builder',()=>{const x=harness();x.open();x.h.states.get('h').session.rid=2**47-1;let invoked=0;x.api.registration=()=>{invoked++;return null;};x.h.register('h',['ios','token','alert','','env','bundle']);assert.equal(invoked,0);assert.equal(x.h.drain().cmds.length,0);});
 const {registerBridgeChecks}=await import('./native_thin_bridge_binding_307265.mjs');
 await registerBridgeChecks(check,stage,root);
