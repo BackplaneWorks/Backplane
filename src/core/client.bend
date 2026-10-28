@@ -748,12 +748,36 @@ def Ui.view_pick(u: Ui, +kind: String) -> Ui:
     case Ui{st, +sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, +nf, ob, tr}:
       Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, Viewer.put(nf, sel, kind, ""), ob, tr}
 
-# a diff opens its thread's viewer on it (on screen when that thread is)
+# A diff is kept as "diff:t". An open Diff follows its thread (Dv.sync):
+# "diff.at:t" is the thread's turn and step count the diff on show was
+# asked at (Dv.at), and an answer to Diff's own ask ("diff.auto:t" "1")
+# only puts the text in place, leaving the panel as the person has it by
+# then.
+def Dv.at(+st: M.State, +th: String) -> String:
+  C.Turn.name(M.Thread.turn(M.State.thread.get(st, th))) ++ "|" ++ Nat.show(List.length(&2, M.Entry, M.State.steps(st, th)))
+
+def Dv.text(+nf: Map<&2, String>, +th: String, +r: J.Json) -> Map<&2, String>:
+  Map.set(&2, String, nf, "diff:" ++ th, J.Json.get_str(r, "diff", ""))
+
+# a diff asked for by hand opens its thread's viewer on it (on screen when
+# that thread is)
 def Ui.diff.k(u: Ui, +th: String, +r: J.Json) -> Ui:
   match u:
-    case Ui{st, +sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, +nf, ob, tr}:
+    case Ui{+st, +sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, +nf, ob, tr}:
       Ui{st, sel, dr, live, op, on, now, ad, Bool.or(pa, String.eq(th, sel)), v, rid, w, er, note,
-        Viewer.put(Map.set(&2, String, Map.set(&2, String, nf, "diff:" ++ th, J.Json.get_str(r, "diff", "")), "panel:" ++ th, "1"), th, "diff", ""), ob, tr}
+        Viewer.put(Map.set(&2, String, Map.set(&2, String, Dv.text(nf, th, r), "diff.at:" ++ th, Dv.at(st, th)), "panel:" ++ th, "1"), th, "diff", ""), ob, tr}
+
+def Ui.diff.quiet(u: Ui, +th: String, +r: J.Json) -> Ui:
+  match u:
+    case Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, +nf, ob, tr}:
+      Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, Map.set(&2, String, Dv.text(nf, th, r), "diff.auto:" ++ th, ""), ob, tr}
+
+def Ui.diff.by(auto: Bool, u: Ui, +th: String, +r: J.Json) -> Ui:
+  match auto:
+    case True{}:
+      Ui.diff.quiet(u, th, r)
+    case False{}:
+      Ui.diff.k(u, th, r)
 
 def Files.strs(xs: List<&2, J.Json>) -> List<&2, String>:
   match xs:
@@ -1571,7 +1595,8 @@ def Ui.view_get(+u: Ui, +k: String) -> String:
   Ui.view_get.far(FR.Fr.is(Ui.sel(u)), u, k)
 
 def Ui.diff(+u: Ui, +r: J.Json) -> Ui:
-  Ui.diff.k(u, Viewer.of(J.Json.get_str(r, "thread", ""), Ui.sel(u)), r)
+  +th = Viewer.of(J.Json.get_str(r, "thread", ""), Ui.sel(u))
+  Ui.diff.by(String.eq(Ui.info(u, "diff.auto:" ++ th), "1"), u, th, r)
 
 def Ui.reply.diff(has: Bool, u: Ui, +o: J.Json) -> Ui:
   match has:
@@ -6609,6 +6634,36 @@ def Mpage.sync.m(a: Act) -> Act:
 def Mpage.sync(a: Act) -> Act:
   Fv.sync(Mpage.sync.m(a))
 
+# Diff asked for by hand (the rail, ctrl+d, the palette): its answer opens
+# the viewer on it, even with one of Diff's own asks still out
+def Dv.ask(+u: Ui) -> Act:
+  Ui.on_thread.p(Ui.info_set(u, "diff.auto:" ++ Ui.sel(u), ""), "git.diff", [J.KV{"from", J.Num{"0"}}, J.KV{"to", J.Num{"-1"}}])
+
+# An open Diff follows the thread's changes: when the selected thread's
+# panel shows its Diff and the thread's turn or steps moved on from what
+# the diff on show was asked at ("diff.at:t", Dv.at: a turn started or
+# ended, a step changed a design file), it is asked again, quietly. Every
+# client runs this after each action and message.
+def Dv.sync.k(go: Bool, +u: Ui, +at: String, cmds: List<&2, Cmd>) -> Act:
+  match go:
+    case True{}:
+      Ui.also(Ui.on_thread.p(Ui.info_set(Ui.info_set(u, "diff.at:" ++ Ui.sel(u), at), "diff.auto:" ++ Ui.sel(u), "1"), "git.diff",
+        [J.KV{"from", J.Num{"0"}}, J.KV{"to", J.Num{"-1"}}]), cmds)
+    case False{}:
+      Act{u, cmds}
+
+def Dv.sync.on(on: Bool, a: Act) -> Act:
+  match on a:
+    case True{} Act{+u, cmds}:
+      Dv.sync.k(Bool.not(String.eq(Dv.at(Ui.state(u), Ui.sel(u)), Ui.info(u, "diff.at:" ++ Ui.sel(u)))), u, Dv.at(Ui.state(u), Ui.sel(u)), cmds)
+    case False{} _:
+      a
+
+def Dv.sync(a: Act) -> Act:
+  match a:
+    case Act{+u, cmds}:
+      Dv.sync.on(Bool.and(Ui.panel(u), String.eq(Ui.view_get(u, "view.kind"), "diff")), Act{u, cmds})
+
 # Cross-probing
 # -------------
 # The part or net probed (the web's probe.js picks it from a click and
@@ -7016,7 +7071,7 @@ def Ui.key.k(i: Nat, +u: Ui, +size: String) -> Act:
     case 0n:
       Ui.term_toggle(u, size)
     case 1n:
-      Ui.on_thread.p(u, "git.diff", [J.KV{"from", J.Num{"0"}}, J.KV{"to", J.Num{"-1"}}])
+      Dv.ask(u)
     case _:
       Act{u, Nil{}}
 
@@ -13911,7 +13966,7 @@ def Ui.recv_act.n(notify: Bool, u: Ui, +o: J.Json) -> Act:
     case True{}:
       Act{u, [Notify{J.Json.get_str(o, "thread", ""), J.Json.get_str(o, "title", ""), J.Json.get_str(o, "body", ""), J.Json.get_str(o, "key", "")}]}
     case False{}:
-      Emb.sync.if(C.Codec.pos(["log", "changes", "view"], J.Json.get_str(o, "t", "")), Fab.sync(Mpage.sync(Ui.recv_act.go(u, o))))
+      Emb.sync.if(C.Codec.pos(["log", "changes", "view"], J.Json.get_str(o, "t", "")), Fab.sync(Dv.sync(Mpage.sync(Ui.recv_act.go(u, o)))))
 
 # a frame of a page ({"t":"shot","bot":page,"n":n}) where the client keeps
 # it (the phones): its number as info "shot.<page>", seen when on show
@@ -14472,7 +14527,7 @@ def Ui.act.k(+i: Nat, +u: Ui, +value: String) -> Act:
     case 23n:
       Ui.on_thread.p(u, "git.act", [J.KV{"action", J.Str{value}}])
     case 24n:
-      Ui.on_thread.p(u, "git.diff", [J.KV{"from", J.Num{"0"}}, J.KV{"to", J.Num{"-1"}}])
+      Dv.ask(u)
     case 25n:
       Ui.on_thread.p(u, "git.revert", [J.KV{"turn", J.Num{Bool.pick(String, String.is_empty(value), "0", value)}}])
     case 26n:
@@ -14598,7 +14653,7 @@ def Ui.act.e(emb: Bool, +u: Ui, +action: String, +value: String) -> Act:
     case True{}:
       Emb.act(u, action, value)
     case False{}:
-      Emb.sync.sel(Ui.sel(u), Fab.sync(Mpage.sync(Ui.act.m(Nat.is_lt(C.Codec.pos(Menu.actions(), action), 17n), C.Codec.pos(Menu.actions(), action), u, action, value))))
+      Emb.sync.sel(Ui.sel(u), Fab.sync(Dv.sync(Mpage.sync(Ui.act.m(Nat.is_lt(C.Codec.pos(Menu.actions(), action), 17n), C.Codec.pos(Menu.actions(), action), u, action, value)))))
 
 # the picker's machine row (routed before the action table)
 def Ui.act.p(pick: Bool, +u: Ui, +action: String, +value: String) -> Act:
