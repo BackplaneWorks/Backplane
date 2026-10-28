@@ -66,7 +66,7 @@ final class AppModel {
         if startup[screen.hub] == .compatibilityChosen { return conn[screen.hub]?.phase == .online && conn[screen.hub]?.stage == "live" }
         guard let mark = thinReady[screen.hub], mark.epoch == conn[screen.hub]?.epoch,
               conn[screen.hub]?.phase == .online else { return false }
-        guard PresentationReadiness.matches(displayed: Self.nav(screen), mark: mark.nav, awaited: awaitedNav) else { return false }
+        guard NavigationPresentationReadiness.matches(displayed: Self.nav(screen), mark: mark.nav, awaited: awaitedNav) else { return false }
         if let token = navigationToken, token.pairing == pairingGeneration, token.tab == tab.rawValue {
             return navigationPictureMatches(token, screen)
         }
