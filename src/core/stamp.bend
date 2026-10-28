@@ -17,11 +17,11 @@ import ./steer.bend as STR
 # message to count from, so its last reply says only when it finished.
 
 # today: the day it is now on the person's wall clock (days since the
-# epoch), worked out once a page; stop: the reply that ends a turn the
-# person stopped ("" for none), which says "Stopped" where the others say
+# epoch), worked out once a page; stops: the replies that end a turn the
+# person stopped (to 1), which say "Stopped" where the others say
 # "Finished"
 type Stamps is Data:
-  Stamps{rule: TZ.TzRule, today: Nat, ends: Map<&2, Nat>, stop: String}
+  Stamps{rule: TZ.TzRule, today: Nat, ends: Map<&2, Nat>, stops: Map<&2, Nat>}
 
 # Turns' last replies
 # -------------------
@@ -62,11 +62,11 @@ def Stamp.ends.go(es: List<&2, M.Entry>, +open: Bool, +held: String, ends: Map<&
 def Stamp.ends(+es: List<&2, M.Entry>, +running: Bool) -> Map<&2, Nat>:
   Stamp.ends.go(List.reverse(&2, M.Entry, es), Bool.not(running), "", Map.new(&2, Nat))
 
-def Stamps.at.s(+r: TZ.TzRule, +now: Nat, ends: Map<&2, Nat>, +stop: String) -> Stamps:
-  Stamps{r, Nat.div(TZ.Tz.wall(r, now), 86400n), ends, stop}
+def Stamps.at.s(+r: TZ.TzRule, +now: Nat, ends: Map<&2, Nat>, stops: Map<&2, Nat>) -> Stamps:
+  Stamps{r, Nat.div(TZ.Tz.wall(r, now), 86400n), ends, stops}
 
 def Stamps.at(+r: TZ.TzRule, +now: Nat, ends: Map<&2, Nat>) -> Stamps:
-  Stamps.at.s(r, now, ends, "")
+  Stamps.at.s(r, now, ends, Map.new(&2, Nat))
 
 # the last turn's last reply, entries newest first ("" when the newest is
 # the person's: that turn has no reply)
@@ -94,11 +94,90 @@ def Stamp.stopped(t: M.Thread) -> Bool:
     case M.Thread{_, _, _, _, _, turn, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _}:
       Stamp.interrupted(turn)
 
+# Stopped turns
+# -------------
+# A turn keeps its own ending after the next one starts: when a turn is
+# stopped the hub sets "stopped.<message>" for the person's message that
+# started it (Stamp.stop.mark, from hub.bend's Retire.turn.f), a setting
+# like any other, so every client has it and it outlives a restart. A
+# reply still landing after the Stop is in the same turn, so it is the
+# message, not the reply, that is marked.
+
+def Stamp.stop.key(+msg: String) -> String:
+  "stopped." ++ msg
+
+# a person's message of the thread (its id), "" for any other entry
+def Stamp.user(e: M.Entry, +th: String) -> String:
+  match e:
+    case M.Msg{+id, +t, M.User{}, _, _}:
+      Bool.pick(String, String.eq(t, th), id, "")
+    case _:
+      ""
+
+# entries newest first; n: how many more to look at (0 once found)
+def Stamp.turn.go(es: List<&2, M.Entry>, +th: String, n: Nat, +found: String) -> String:
+  match es n:
+    case +_ 0n:
+      found
+    case Nil{} 1n+_:
+      found
+    case +e <> t 1n+k:
+      Stamp.turn.go(t, th, Bool.pick(Nat, String.is_empty(Stamp.user(e, th)), k, 0n), Stamp.user(e, th))
+
+# the person's message that started the thread's turn ("" for none among
+# its newest 5000 entries)
+def Stamp.turn(+st: M.State, +th: String) -> String:
+  Stamp.turn.go(M.State.mine(st, th), th, 5000n, "")
+
+def Stamp.stop.mark.k(+msg: String, +now: Nat) -> List<&2, M.Change>:
+  Bool.pick(List<&2, M.Change>, String.is_empty(msg), Nil{}, [M.SettingSet{Stamp.stop.key(msg), "1", now}])
+
+# what the hub logs as it stops a thread's turn
+def Stamp.stop.mark(+st: M.State, +th: String, +now: Nat) -> List<&2, M.Change>:
+  Stamp.stop.mark.k(Stamp.turn(st, th), now)
+
+def Stamp.stops.close(stopped: Bool, +held: String, stops: Map<&2, Nat>) -> Map<&2, Nat>:
+  match stopped:
+    case True{}:
+      Map.set(&2, Nat, stops, held, 1n)
+    case False{}:
+      stops
+
+def Stamp.marked(+st: M.State, +msg: String) -> Bool:
+  String.eq(M.Setting.get(st, Stamp.stop.key(msg), ""), "1")
+
+# entries newest first, walked as Stamp.ends.go: at a person's message the
+# reply held ends its turn, stopped when the message is marked
+def Stamp.stops.go(es: List<&2, M.Entry>, +st: M.State, +open: Bool, +held: String, stops: Map<&2, Nat>) -> Map<&2, Nat>:
+  match es:
+    case Nil{}:
+      stops
+    case M.Msg{+id, _, M.User{}, _, _} <> t:
+      Stamp.stops.go(t, st, True{}, "", Stamp.stops.close(Bool.and(Bool.not(String.is_empty(held)), Stamp.marked(st, id)), held, stops))
+    case M.Msg{+id, _, M.Assistant{}, _, _} <> t:
+      Stamp.stops.go(t, st, Bool.and(open, STR.Steer.ahead.is(id)), Bool.pick(String, STR.Steer.ahead.is(id), held, Stamp.held(open, held, id)), stops)
+    case _ <> t:
+      Stamp.stops.go(t, st, open, held, stops)
+
+# the stopped turns' last replies on a page (entries oldest first)
+def Stamp.stops(+es: List<&2, M.Entry>, +st: M.State, +running: Bool) -> Map<&2, Nat>:
+  Stamp.stops.go(List.reverse(&2, M.Entry, es), st, Bool.not(running), "", Map.new(&2, Nat))
+
+# the last turn, stopped (its message may not be marked: a log from before
+# the marks, or an interrupt that marks none) and over
+def Stamp.stops.last(stopped: Bool, +es: List<&2, M.Entry>, stops: Map<&2, Nat>) -> Map<&2, Nat>:
+  match stopped:
+    case True{}:
+      Stamp.stops.close(Bool.not(String.is_empty(Stamp.last.go(List.reverse(&2, M.Entry, es)))), Stamp.last.go(List.reverse(&2, M.Entry, es)), stops)
+    case False{}:
+      stops
+
 # what a client needs to stamp a page of entries: the person's zone, the
-# time now (seconds), the turns' ends and whether the last was stopped
+# time now (seconds), the turns' ends and which of them were stopped
+# (stopped: the thread's last turn was)
 def Stamps.of.s(+es: List<&2, M.Entry>, +st: M.State, +now: Nat, +running: Bool, +stopped: Bool) -> Stamps:
   Stamps.at.s(SCH.Sched.person(st, 0n, True{}), now, Stamp.ends(es, running),
-    Bool.pick(String, Bool.and(stopped, Bool.not(running)), Stamp.last.go(List.reverse(&2, M.Entry, es)), ""))
+    Stamp.stops.last(Bool.and(stopped, Bool.not(running)), es, Stamp.stops(es, st, running)))
 
 def Stamps.of(+es: List<&2, M.Entry>, +st: M.State, +now: Nat, +running: Bool) -> Stamps:
   Stamps.of.s(es, st, now, running, False{})
@@ -152,13 +231,17 @@ def Stamp.start(r: Map<&2, Nat> & Nat) -> Nat:
   (_, v) = r
   v
 
+def Stamp.has(r: Map<&2, Nat> & Bool) -> Bool:
+  (_, yes) = r
+  yes
+
 # what shows under an entry: a message's time, nothing for the rest
 def Stamp.text.loc(+l: I.Loc, +s: Stamps, e: M.Entry) -> String:
   match s e:
     case Stamps{+r, +today, _, _} M.Msg{_, _, M.User{}, _, +at}:
       Stamp.clock(r, today, at)
-    case Stamps{+r, +today, +ends, +stop} M.Msg{+id, _, M.Assistant{}, _, +at}:
-      Stamp.reply.s(String.eq(id, stop), l, Stamp.start(Map.get(Nat, 0n, ends, id)), Stamp.clock(r, today, at), at)
+    case Stamps{+r, +today, +ends, +stops} M.Msg{+id, _, M.Assistant{}, _, +at}:
+      Stamp.reply.s(Stamp.has(Map.has(&2, Nat, stops, id)), l, Stamp.start(Map.get(Nat, 0n, ends, id)), Stamp.clock(r, today, at), at)
     case _ _:
       ""
 

@@ -36,10 +36,46 @@ def st(+es: List<&2, M.Entry>, +r: Z.TzRule, +now: Nat, +running: Bool, +i: Nat)
 
 # the last turn stopped (the person's Stop): its last reply says so
 def ss.stop(+es: List<&2, M.Entry>, +r: Z.TzRule, +now: Nat) -> S.Stamps:
-  S.Stamps.at.s(r, now, S.Stamp.ends(es, False{}), S.Stamp.last.go(List.reverse(&2, M.Entry, es)))
+  S.Stamps.at.s(r, now, S.Stamp.ends(es, False{}), Map.set(&2, Nat, Map.new(&2, Nat), S.Stamp.last.go(List.reverse(&2, M.Entry, es)), 1n))
 
 def st.stop(+es: List<&2, M.Entry>, +r: Z.TzRule, +now: Nat, +i: Nat) -> String:
   S.Stamp.text(ss.stop(es, r, now), Maybe.default(&2, M.Entry, List.get(&2, M.Entry, es, i), act("none", 0n)))
+
+# a thread whose changes are cs (the stopped marks are settings)
+def state(cs: List<&2, M.Change>) -> M.State:
+  M.State.replay(cs, M.State.empty())
+
+# the stamp of entry i as a client makes it: the state's marks, and
+# whether the thread's last turn is stopped now
+def st.of(+es: List<&2, M.Entry>, +s: M.State, +running: Bool, +stopped: Bool, +i: Nat) -> String:
+  S.Stamp.text(S.Stamps.of.s(es, s, at(3600n), running, stopped), Maybe.default(&2, M.Entry, List.get(&2, M.Entry, es, i), act("none", 0n)))
+
+# a thread's entries as the hub posts them, for Stamp.stop.mark
+def posted(es: List<&2, M.Entry>) -> List<&2, M.Change>:
+  match es:
+    case Nil{}:
+      Nil{}
+    case M.Msg{id, th, r, x, t} <> rest:
+      M.MessagePosted{th, id, r, x, t} <> posted(rest)
+    case M.Act{id, th, tone, k, x, t} <> rest:
+      M.ActivityLogged{th, id, tone, k, x, t} <> posted(rest)
+
+def marks(cs: List<&2, M.Change>) -> String:
+  match cs:
+    case Nil{}:
+      ""
+    case M.SettingSet{k, v, _} <> rest:
+      k ++ "=" ++ v ++ " " ++ marks(rest)
+    case _ <> rest:
+      marks(rest)
+
+# three turns: the first stopped, the second finished, the third stopped
+# with a reply that landed after the Stop
+def es3() -> List<&2, M.Entry>:
+  [u("u1", 0n), a("a1", 5n), u("u2", 60n), a("a2", 70n), u("u3", 120n), a("a3", 130n), a("a4", 131n)]
+
+def marked() -> M.State:
+  state([M.SettingSet{"stopped.u1", "1", 6n}, M.SettingSet{"stopped.u3", "1", 130n}])
 
 def utc() -> Z.TzRule:
   Z.Tz.utc0()
@@ -60,3 +96,14 @@ def main() -> IO(Unit):
     C.Check.str("the turns before it still say Finished", st.stop(es(), utc(), at(3600n), 3n), "Finished 09:07 · 7m 13s")
     C.Check.str("a stop with no reply yet marks nothing", S.Stamp.last.go(List.reverse(&2, M.Entry, [u("u1", 0n), a("a1", 30n), u("u2", 60n)])), "")
     C.Check.str("a turn with no reply finishes nothing", st([u("u1", 0n), act("x1", 5n), u("u2", 60n)], utc(), at(3600n), False{}, 0n), "09:00")
+    C.Check.str("a stopped turn still says Stopped once the next has started", st.of(es3(), marked(), True{}, False{}, 1n), "Stopped 09:00 · 5s")
+    C.Check.str("and once the next has finished", st.of(es3(), marked(), False{}, False{}, 1n), "Stopped 09:00 · 5s")
+    C.Check.str("a finished turn between them says Finished", st.of(es3(), marked(), False{}, False{}, 3n), "Finished 09:01 · 10s")
+    C.Check.str("a reply landing after the Stop ends its stopped turn", st.of(es3(), marked(), False{}, False{}, 6n), "Stopped 09:02 · 11s")
+    C.Check.str("the reply before it is not the turn's last", st.of(es3(), marked(), False{}, False{}, 5n), "09:02")
+    C.Check.str("an unmarked last turn the thread stopped says Stopped", st.of(es(), state(Nil{}), False{}, True{}, 6n), "Stopped 09:16 · 10s")
+    C.Check.str("with no mark, the turns before it say Finished", st.of(es(), state(Nil{}), False{}, True{}, 3n), "Finished 09:07 · 7m 13s")
+    C.Check.str("the turn still running says nothing yet", st.of(es3(), marked(), True{}, False{}, 6n), "09:02")
+    C.Check.str("a Stop marks the message that started the turn", marks(S.Stamp.stop.mark(state(posted(es3())), "t", at(140n))), "stopped.u3=1 ")
+    C.Check.str("a reply sent to another thread is not its message", marks(S.Stamp.stop.mark(state(posted([u("u1", 0n), a("a1", 5n), M.Msg{"x", "t2", M.User{}, "hi", at(6n)}])), "t", at(10n))), "stopped.u1=1 ")
+    C.Check.str("a turn with no message of the person marks nothing", marks(S.Stamp.stop.mark(state(posted([a("a1", 5n)])), "t", at(10n))), "")

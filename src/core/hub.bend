@@ -38,6 +38,7 @@ import ./cmds.bend as CM
 import ./order.bend as OR
 import ./fallback.bend as FB
 import ./secret.bend as SEC
+import ./stamp.bend as STP
 
 # The decider. Requests from clients and lines from agents come in; changes
 # (persisted, folded into the read model) and effects (run by the server)
@@ -4919,13 +4920,14 @@ def Launch.tell(+s: M.State, +now: Nat, +thread: String, st: Step) -> Step:
 
 # a turn still running ends as interrupted, and its task with it; the
 # server is told, so a phone's Live Activity drops it (law
-# retire_stop_tells)
+# retire_stop_tells); the turn's message is marked stopped, so its last
+# reply keeps saying so (core/stamp.bend)
 # (a launched thread's launcher hears of it, unless it stopped it itself:
 # from, the thread whose call stopped it)
 def Retire.turn.f(run: Bool, +s: M.State, +now: Nat, +th: String, +from: String, st: Step) -> Step:
   match run:
     case True{}:
-      Launch.tell.from(s, now, th, from, Task.finish(s, now, th, Step.before([M.TurnChanged{th, M.Interrupted{}, now}], [TurnEnded{th, "stopped"}], st)))
+      Launch.tell.from(s, now, th, from, Task.finish(s, now, th, Step.before(M.TurnChanged{th, M.Interrupted{}, now} <> STP.Stamp.stop.mark(s, th, now), [TurnEnded{th, "stopped"}], st)))
     case False{}:
       st
 
@@ -6944,7 +6946,7 @@ def Rec.note(+th: String, +now: Nat, +seq: Nat, +text: String) -> M.Change:
 def Rec.turn.k(run: Bool, will: Bool, +s: M.State, +now: Nat, +th: String) -> Step:
   match run will:
     case True{} False{}:
-      Launch.tell(s, now, th, Task.finish(s, now, th, Step{[Rec.note(th, now, Hub.seq(s), "Backplane restarted before this turn finished"), M.TurnChanged{th, M.Interrupted{}, now}], Nil{}}))
+      Launch.tell(s, now, th, Task.finish(s, now, th, Step{Rec.note(th, now, Hub.seq(s), "Backplane restarted before this turn finished") <> M.TurnChanged{th, M.Interrupted{}, now} <> STP.Stamp.stop.mark(s, th, now), Nil{}}))
     case True{} True{}:
       Step{[Rec.note(th, now, Hub.seq(s), "Backplane restarted before this turn finished"), M.TurnChanged{th, M.Interrupted{}, now}], Nil{}}
     case False{} _:

@@ -101,7 +101,7 @@
     "src/core/signal.bend": "bdb7f1b5b32eed57e9f743dd91fe4ca8fb098b213b88093343afabe815496b3d",
     "src/core/slash.bend": "4b88f73566a9b3694a888ede21f2117157df9449c50c52806648e4795d298932",
     "src/core/space.bend": "0caea2f71303b476291b0e9570459ce12c8fe58b81aefccb2bd935fe4bd56c3a",
-    "src/core/stamp.bend": "21137c2cb8111703477fc28b50e3b978fed1ff1ffed809b7522b0f2d291a0312",
+    "src/core/stamp.bend": "aa17c4ef7492aab853c19c465f5e9e65e4484b496736d4da6a059ef121d76965",
     "src/core/steer.bend": "546cb2efcb0a35d6686570358b06e7b7e285a3e06031d79e97750e42d515e9aa",
     "src/core/store.bend": "037f48017d9b9c1b6ed24d750bc898dc62200635d95fecc627f2196fd79d89d5",
     "src/core/strokefont.bend": "a5d15a2a0c28e9b24673d41bd31a283b8b9df71b1d40524b4bfb689b3ff964bb",
@@ -253,5 +253,5 @@
       "sourceSnapshot": "/home/h/Documents/i2cjak/bp-coord/settle-fresh-work/SOURCE-structural-correction.json"
     }
   },
-  "reviewNote": "Time zone row: Automatic says what it follows, no empty error row (client.bend, view.bend, msgs); sidebar drafts unchanged"
+  "reviewNote": "Stamps: a stopped turn's message marked; the sidebar draft does not read it"
 }
