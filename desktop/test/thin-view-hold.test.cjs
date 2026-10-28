@@ -1,7 +1,7 @@
 'use strict';
-// Nothing is drawn in between two hub views: a thread picked and a hub
-// restart's reconnect go from one whole picture to the next
-// (host.js's holdPicture/restoreTransition, style.css's held rules).
+// Nothing is drawn in between two hub views: a thread picked, a hub
+// restart's reconnect and a page load go from one whole picture to the next
+// (host.js's holdPicture/restoreTransition, style.css's held/wait rules).
 // Before, each showed a made-up "Loading conversation…" page for a few
 // frames: no rail, no composer, an empty breadcrumb, State "idle".
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
@@ -62,13 +62,34 @@ test('a reconnect keeps the last view of the same thread, with no loading page',
  h.ctx.epoch='e2';assert.equal(vm.runInContext("restoreTransition({kind:'thread',id:'A'})",h.ctx),false);
  assert.equal(h.ctx.transitionNode,'A view');assert.equal(h.ctx.transitionFor,'thread:A');assert.equal(h.ctx.heldAt,0);assert.equal(h.timers.length,0);
 });
-test('nothing in the page makes up a loading page; render marks held pictures for style.css',()=>{
+test('nothing in the page makes up a loading page; render marks held and waiting pictures for style.css',()=>{
  for(const f of fs.readdirSync(path.resolve(__dirname,'../../src/web')).filter(f=>f.endsWith('.js')))
   assert(!fs.readFileSync(path.resolve(__dirname,'../../src/web',f),'utf8').includes('Loading conversation'),f);
  assert.match(source,/dataset\.backplaneHeld = !heldFor \? "false" : heldAt && performance\.now\(\) - heldAt >= QUIET_MS \? "quiet" : "true";/);
+ assert.match(source,/dataset\.backplaneWait = String\(!frontendNode && !transitionNode && !focusedNode && !canonicalBoot\);/);
  // a new view drops what was kept and says what it was drawn for
  assert.match(source,/frontendNode = node;transitionNode = null;transitionFor = "";heldAt = 0;\n\s*shownFor = targetKey\(detail\.target\);/);
  assert.match(css,/html\[data-backplane-held="true"\][^{]*\{ pointer-events: none; \}/);
  assert.match(css,/html\[data-backplane-held="quiet"\][^{]*\{ visibility: hidden; \}/);
+ assert.match(css,/html\[data-backplane-wait="true"\][^{]*\.model-chip[^{]*\{ visibility: hidden; \}/);
 });
 
+test('the first connection says Connecting only when it takes a while',()=>{
+ const a=source.indexOf('let connectingTimer = 0;'),b=source.indexOf('// Reconnecting',a);assert(a>0&&b>a);
+ const status=[],timers=new Map();let next=0;
+ const ctx={QUIET_MS:1200,remoteReady:false,downSince:0,showViewStatus:m=>{timers.clear();status.push(m);},
+  setTimeout:(f,ms)=>{timers.set(++next,{f,ms});return next;},clearTimeout:id=>timers.delete(id)};
+ vm.createContext(ctx);vm.runInContext(source.slice(a,b).replace('let connectingTimer','var connectingTimer'),ctx);
+ const fire=()=>{for(const [id,t] of [...timers]){timers.delete(id);t.f();}};
+ vm.runInContext('connectingStatus()',ctx);assert.deepEqual(status,[]);assert.equal([...timers.values()][0].ms,1200);
+ fire();assert.deepEqual(status,['Connecting…']);
+ // the view came first: nothing is said
+ status.length=0;vm.runInContext('connectingStatus()',ctx);ctx.remoteReady=true;fire();assert.deepEqual(status,[]);
+ // a reconnect's own words win
+ ctx.remoteReady=false;vm.runInContext('connectingStatus()',ctx);ctx.downSince=1;fire();assert.deepEqual(status,[]);
+ // startThin asks for it instead of the bar at once
+ assert.match(source,/if \(downSince\) downStatus\(downNote\);\n\s*else connectingStatus\(\);/);
+ assert(!/else showViewStatus\("Connecting…"\)/.test(source));
+ // any status shown cancels a pending one
+ assert.match(source,/function showViewStatus\(message\) \{\n\s*clearTimeout\(connectingTimer\);connectingTimer = 0;/);
+});

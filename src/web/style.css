@@ -173,6 +173,9 @@ html[data-backplane-held="true"] :is(.topbar .back, .topbar .crumbs, .topbar .kv
 html[data-backplane-held="quiet"] :is(.topbar .back, .topbar .crumbs, .topbar .kvs, main > :not(.workspace-bar, .thread-content), main .thread-content > :not(.composer), .composer .model-chip, .app > aside.viewer) { pointer-events: none; }
 html[data-backplane-held="quiet"] :is(.topbar .back, .topbar .crumbs, .topbar .kvs, main > :not(.workspace-bar, .thread-content), main .thread-content > :not(.composer), .composer .model-chip, .composer .model-ctx, .app > aside.viewer) { visibility: hidden; }
 html[data-backplane-held="quiet"] .sidebar .thread.on { background: none; box-shadow: none; }
+/* The page before the hub's first view (host.js's wait shell): the frame
+   where everything will be, nothing in it half-filled. */
+html[data-backplane-wait="true"] :is(.topbar .back, .topbar .crumbs, .topbar .kvs, .sidebar > :not(.find), .composer .model-chip, .composer .model-ctx) { visibility: hidden; }
 @media (max-width: 760px) {
   .workspace-bar { padding: 6px 10px; gap: 2px; }
   .workspace-bar button { min-height: 36px; padding: 5px 7px; }

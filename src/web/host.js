@@ -810,9 +810,11 @@ function render() {
   document.documentElement.dataset.backplaneRemoteReady = String(remoteReady);
   document.documentElement.dataset.backplaneCached = String(!!(focusedNode || transitionNode) && !frontendNode);
   // what style.css quiets: a picture kept for another target than the one
-  // picked (true, then quiet past QUIET_MS)
+  // picked (true, then quiet past QUIET_MS), and the page before the hub's
+  // first view (its frame only, nothing half-filled)
   const heldFor = !frontendNode && !!transitionNode && transitionFor !== targetKey(presentationTarget(currentSession()));
   document.documentElement.dataset.backplaneHeld = !heldFor ? "false" : heldAt && performance.now() - heldAt >= QUIET_MS ? "quiet" : "true";
+  document.documentElement.dataset.backplaneWait = String(!frontendNode && !transitionNode && !focusedNode && !canonicalBoot);
   trace("dom", { seq: App.seq(ui) });
   if (PERF?.trace) requestAnimationFrame(() => trace("paint", { seq: App.seq(ui) }));
   mailRestore(mail);
@@ -2024,6 +2026,7 @@ function presentationCommand(command) {
 // Shared thin transport -> platform IO and the existing normal Bend renderer.
 // Neither this path nor its error/retry state touches canonical history.
 function showViewStatus(message) {
+  clearTimeout(connectingTimer);connectingTimer = 0;
   let box = document.getElementById("view-connection");
   if (!box) {
     box = document.createElement("aside");box.id = "view-connection";box.setAttribute("role", "status");
@@ -2039,6 +2042,14 @@ function showViewStatus(message) {
   document.getElementById("view-connection-text").textContent = message;
   // The page shrinks above the bar instead of sliding under it.
   document.documentElement.style.setProperty("--status-h", message ? box.offsetHeight + "px" : "0px");
+}
+
+// A first connection says so only past QUIET_MS (connectingStatus): a bar
+// that came and went in a moment moved the whole page twice on every load.
+let connectingTimer = 0;
+function connectingStatus() {
+  clearTimeout(connectingTimer);
+  connectingTimer = setTimeout(() => { connectingTimer = 0;if (!remoteReady && !downSince) showViewStatus("Connecting…"); }, QUIET_MS);
 }
 
 // Reconnecting
@@ -2324,7 +2335,7 @@ async function startThin(again = false, reason = "initial") {
   stopThin(again || downSince > 0, reason);const attempt = thinAttempt;
   viewMode = "discovering";
   if (downSince) downStatus(downNote);
-  else showViewStatus("Connecting…");
+  else connectingStatus();
   later();
   const capability = await discoverViews({ fetch: window.fetch.bind(window), validate: viewCapability });
   if (attempt !== thinAttempt || viewMode === "compatibility") return;
