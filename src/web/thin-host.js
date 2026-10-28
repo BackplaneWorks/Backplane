@@ -60,6 +60,9 @@ export class ThinHost {
     this.terminalBytes = 0;
     this.messages = new MessageParts();this.ordinary = new Map();this.refreshScheduled = null;this.pageError = null;
     this.pagePositions = new Map();this.pagePositionBytes = 0;this.restorePage = null;this.conversation = '';
+    // the reader away from the end: the thread and the newest entry its page
+    // showed then (host.js's hold), which the hub's "N new" pill counts from
+    this.awayMark = null;
     // a moving action's Focus and Jump, for the view it moves to (handOver)
     this.forView = null;
     // a view asked for and on its way (select): a press meanwhile waits for it
@@ -67,7 +70,7 @@ export class ThinHost {
     this.client = new Views({ now: api.now,
       sidebarRegions: (api.renderer || 'web') === 'web',
       send: (_hub, request) => ({ type: 'request', request: request.p.session ? { ...request,
-        p: { ...request.p, session: requestSession(request.p.session, request.m === 'view.action', request.p.target) } } : request }),
+        p: { ...request.p, session: requestSession(request.p.session, request.m === 'view.action', request.p.target), away: this.awayOf(request.p.session.sel) } } : request }),
       command: (command, input) => ({ type: 'command', command, input }),
       validateResult: api.validateResult || validateThinResult,
     }, next);
@@ -109,7 +112,7 @@ export class ThinHost {
     for (const operation of this.actions) operation.settled?.(false);
     this.actions = [];this.terminalBytes = 0;this.fields.clear();
     this.messages.clear();this.target = target;
-    this.ready = false;this.window = null;this.cursor = '';this.back = [];this.paging = null;this.pageError = null;this.api.pageState?.(null);this.api.state({ phase: 'loading', remoteReady: false });
+    this.ready = false;this.window = null;this.cursor = '';this.back = [];this.paging = null;this.pageError = null;this.awayMark = null;this.api.pageState?.(null);this.api.state({ phase: 'loading', remoteReady: false });
     this.api.selection?.(target, this.session);
     const sent = this.flush(this.client.select(this.hub, target, requestSession(this.session, false, target), this.api.cid), { selection: true });
     this.opening = sent;
@@ -137,6 +140,18 @@ export class ThinHost {
     while (this.pagePositions.size > 8 || this.pagePositionBytes > 65536) {
       const oldest = this.pagePositions.keys().next().value;this.pagePositionBytes -= this.pagePositions.get(oldest).bytes;this.pagePositions.delete(oldest);
     }
+  }
+  // Every view request names the shown thread's away mark ("" at the end),
+  // so the hub draws the pill over the newest page and any other.
+  awayOf(thread) {
+    return this.awayMark?.thread === thread ? this.awayMark.mark : '';
+  }
+  // The reader left the end (mark: the newest entry shown) or came back
+  // (''): the view is asked for again, with the pill or without it.
+  away(thread, mark) {
+    const was = this.awayMark?.thread === thread ? this.awayMark.mark : '';
+    this.awayMark = mark ? { thread, mark } : this.awayMark?.thread === thread ? null : this.awayMark;
+    if (was !== mark && thread === this.session.sel) this.update();
   }
   terminalScope() {
     const link = this.client.links.get(this.hub);
@@ -309,6 +324,14 @@ export class ThinHost {
     this.cursor = this.back.pop();
     return this.pageTo(this.cursor, undo, 'newer');
   }
+  // Straight to the newest page (the "new" pill on an earlier page): the
+  // trail is let go, as a send does.
+  newest() {
+    if (!this.ready || this.atNewest() || this.paging || this.refreshPending()) return false;
+    const undo = { cursor: this.cursor, back: this.back.slice() };
+    this.cursor = '';this.back = [];
+    return this.pageTo('', undo, 'newest');
+  }
   pageFailed(page, reason) {
     this.cursor = page.undo.cursor;this.back = page.undo.back;
     if (page.direction === 'restore' && reason === 'STALE_CURSOR') {
@@ -328,7 +351,7 @@ export class ThinHost {
       this.cursor = destination.cursor;this.back = destination.back.slice();
       return this.pageTo(this.cursor, undo, 'restore', position);
     }
-    return this.pageError?.direction === 'newer' ? this.newer() : this.pageError ? this.page() : false;
+    return this.pageError?.direction === 'newer' ? this.newer() : this.pageError?.direction === 'newest' ? this.newest() : this.pageError ? this.page() : false;
   }
   atNewest() { return this.back.length === 0; }
   search(query, cursor = '') {

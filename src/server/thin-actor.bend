@@ -94,7 +94,7 @@ def Actor.draft.safe( +valid: Bool, +thread: String, +drafts: J.Json) -> J.Json:
     case True{}: Actor.draft.value(J.Json.get(drafts, thread), thread)
 
 def Actor.local.key(+key: String) -> Bool:
-  Nat.is_lt(U.Keys.pos(["@lang", "@lang.os", "@lang.tag", "@lang.preview", "@local.view", "@local.usage", "@desktop.browser"], key), 7n)
+  Bool.or(String.starts_with(key, "@away."), Nat.is_lt(U.Keys.pos(["@lang", "@lang.os", "@lang.tag", "@lang.preview", "@local.view", "@local.usage", "@desktop.browser"], key), 7n))
 
 def Actor.local.bounded(valid: Bool, key: String, text: String, out: J.Json) -> J.Json:
   match valid:
@@ -116,14 +116,24 @@ def Actor.local.copy(xs: List<&2, Sigma<&2, &2, String, _ => String>>, dr: Map<&
     case Nil{}: dr
     case (+key, value) <> tail: Actor.local.copy(tail, Actor.pref.put(Actor.local.key(key), dr, key, value))
 
-# Only ordinary current-thread draft, bounded device language/display choices
-# and fold/subscription preferences may be
+# Away from the end, the page names the newest entry it had then (host.js's
+# hold, the request's "away"; "" back at the end), kept as the shown
+# thread's "@away.<thread>", as bounded as the other choices; a request
+# without it leaves the mark as it was. thin-view.bend's Render.pill reads it.
+def Actor.away.input(valid: Bool, +thread: String, +p: J.Json, out: J.Json) -> J.Json:
+  match valid:
+    case False{}: out
+    case True{}: Actor.local.field(True{}, "@away." ++ thread, J.Json.get_obj(p, "away"), out)
+
+# Only ordinary current-thread draft, the away mark, bounded device
+# language/display choices and fold/subscription preferences may be
 # supplied by the renderer. Typed mail stores, request markers, form fields
 # and outbox are retained from this actor, never reconstructed from the wire.
 def Actor.safe_input(+st: M.State, +p: J.Json) -> J.Json:
   +thread = V.Target.thread(st, J.Json.get_obj(p, "target"))
   +session = J.Json.get_obj(p, "session")
-  +drafts = Actor.local.input(["@lang", "@lang.os", "@lang.tag", "@lang.preview", "@local.view", "@local.usage", "@desktop.browser"], J.Json.get_obj(session, "drafts"), Actor.draft.safe(Bool.and(Bool.not(String.is_empty(thread)), Bool.not(String.starts_with(thread, "@"))), thread, J.Json.get_obj(session, "drafts")))
+  +drafts = Actor.away.input(Bool.and(Bool.not(String.is_empty(thread)), Bool.not(String.starts_with(thread, "@"))), thread, p,
+    Actor.local.input(["@lang", "@lang.os", "@lang.tag", "@lang.preview", "@local.view", "@local.usage", "@desktop.browser"], J.Json.get_obj(session, "drafts"), Actor.draft.safe(Bool.and(Bool.not(String.is_empty(thread)), Bool.not(String.starts_with(thread, "@"))), thread, J.Json.get_obj(session, "drafts"))))
   V.Obj.put(p, "session", V.Obj.put(V.Obj.put(V.Obj.put(session, "drafts", drafts), "outbox", J.Json.obj(Nil{})), "info",
     J.Json.obj(P.Session.strings(Map.to_list(&2, String, Actor.prefs(Map.to_list(&2, String, P.Session.read.strings(J.Json.get_obj(session, "info"), Map.new(&2, String))), Map.new(&2, String)))))))
 

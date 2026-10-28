@@ -18,6 +18,7 @@ import ../core/msgs.bend as MSG
 import ../core/thin-wire.bend as W
 import ../core/mail.bend as ML
 import ../web/app.bend as A
+import ../web/view.bend as VW
 import ../mobile/session.bend as MS
 import ../mobile/hubs.bend as H
 import ../mobile/folded-actions.bend as FA
@@ -327,8 +328,24 @@ def Window.live(+window: J.Json, +parts: List<&2, J.Json>) -> J.Json:
 def Render.window(+s: TL.Stream, +index: T.Index, +thread: String, +p: J.Json, +epoch: String, +rows: List<&2, String>) -> J.Json:
   Window.live(Page.window(index, thread, p, epoch, rows), Partial.live(s, thread, epoch, J.Json.get_obj(p, "target")))
 
+# Away from the end (host.js's hold), the page says what came after the
+# newest entry the reader had then ("@away.<thread>", sent by the page):
+# client.bend's "N new ↓" (Hold.label), counted over the whole thread, not
+# the page on show, a reply streaming in counting as new; "" for nothing
+def Render.pill.k(away: Bool, +st: M.State, +thread: String, +seen: String, +live: String) -> String:
+  match away:
+    case False{}: ""
+    case True{}: U.Hold.label(U.Hold.count.k(M.State.mine(st, thread), seen), U.Hold.any.k(M.State.mine(st, thread), seen, live))
+
+def Render.pill(+st: M.State, +thread: String, +seen: String, +stream: TL.Stream) -> String:
+  Render.pill.k(Bool.not(String.is_empty(seen)), st, thread, seen, Bool.pick(String, Nat.is_gt(TL.Stream.size(stream), 0n), "1", ""))
+
+# The page's own window decides what is drawn, so the view's own pill (over
+# the page's entries) stays off: the pill the hub works out goes in "@pill"
 def Render.ui(+u: U.Ui, +st: M.State, +index: T.Index, +target: J.Json, +rows: List<&2, String>, +stream: TL.Stream, +now: Nat) -> U.Ui:
-  U.Ui.adopt.raw(U.Ui.scratch_set(U.Ui.scratch_set(u, "@more." ++ Target.thread(st, target), "1"), "@away." ++ Target.thread(st, target), ""), State.window.add(TL.Stream.entries(Nat.is_gt(TL.Stream.size(stream), 0n), stream, Target.thread(st, target), now), State.window(st, index, target, rows)))
+  U.Ui.adopt.raw(U.Ui.scratch_set(U.Ui.scratch_set(U.Ui.scratch_set(u, "@more." ++ Target.thread(st, target), "1"), "@away." ++ Target.thread(st, target), ""),
+    "@pill", Render.pill(st, Target.thread(st, target), U.Ui.scratch(u, "@away." ++ Target.thread(st, target)), stream)),
+    State.window.add(TL.Stream.entries(Nat.is_gt(TL.Stream.size(stream), 0n), stream, Target.thread(st, target), now), State.window(st, index, target, rows)))
 
 def Partial.buttons( +parts: List<&2, J.Json>, +u: U.Ui) -> List<&2, D.Node>:
   match parts:
@@ -336,6 +353,11 @@ def Partial.buttons( +parts: List<&2, J.Json>, +u: U.Ui) -> List<&2, D.Node>:
     case +part <> tail:
       D.Dom.button("thin-message-more", "thin-message-more", J.Json.show(J.Json.obj([J.KV{"entryId", J.Str{J.Json.get_str(part, "id", "")}}, J.KV{"cursor", J.Str{""}}])),
         MSG.T.common.more(U.Lang.loc(u)), MSG.T.common.more(U.Lang.loc(u))) <> Partial.buttons(tail, u)
+
+# what follows the timeline's rows: a partial entry's buttons, then the
+# pill (Render.pill), last so it sticks to the timeline's foot
+def Render.after(+window: J.Json, +u: U.Ui) -> List<&2, D.Node>:
+  List.append(&2, D.Node, Partial.buttons(J.Json.elems(J.Json.get_obj(window, "partial")), u), VW.View.hold.pill(U.Ui.scratch(u, "@pill")))
 
 # Earlier rows come in as the reader scrolls up (no button): the mark at
 # the timeline's top is what host.js's earlierCheck looks for when the view
@@ -370,7 +392,7 @@ def Render.timeline(node: D.Node, before: List<&2, D.Node>, after: List<&2, D.No
   WP.Node.read.first(Render.timeline.go([node], before, after, Nil{}))
 
 def Render.web(+u: U.Ui, +window: J.Json) -> J.Json:
-  WP.Node.write(Render.timeline(A.view(u), Render.older(J.Json.get_bool(window, "hasMore", False{}), u), Partial.buttons(J.Json.elems(J.Json.get_obj(window, "partial")), u)))
+  WP.Node.write(Render.timeline(A.view(u), Render.older(J.Json.get_bool(window, "hasMore", False{}), u), Render.after(window, u)))
 
 def Render.web.cached.checked(valid: Bool, shown: J.Json, sidebar: J.Json, u: U.Ui, window: J.Json) -> J.Json:
   match valid:
@@ -381,7 +403,7 @@ def Render.web.cached(+u: U.Ui, +window: J.Json, +sidebar: J.Json) -> J.Json:
   match sidebar:
     case J.Null{}: Render.web(u, window)
     case _:
-      +shown = WP.Node.write(Render.timeline(A.view_sidebar(u, True{}), Render.older(J.Json.get_bool(window, "hasMore", False{}), u), Partial.buttons(J.Json.elems(J.Json.get_obj(window, "partial")), u)))
+      +shown = WP.Node.write(Render.timeline(A.view_sidebar(u, True{}), Render.older(J.Json.get_bool(window, "hasMore", False{}), u), Render.after(window, u)))
       Render.web.cached.checked(Bool.and(Nat.is_eq(SS.Slot.count(shown), 1n), SS.Slot.is(sidebar, "aside")), shown, sidebar, u, window)
 
 # A normal complete reply with a server-owned, unchanged sidebar region.
@@ -393,7 +415,7 @@ def Render.web.prepared(+a: ActResult, prepared: U.Ui, +window: J.Json, sidebar:
         "remoteReady", J.Flag{True{}}), "session", Route.pack(u)), "cmds", J.Json.arr(cmds)), "window", window)
 
 def Render.web.indexed.full(+u: U.Ui, +window: J.Json, signals: Map<&2, Nat>) -> J.Json:
-  WP.Node.write(Render.timeline(A.view_sidebar_indexed(u, False{}, signals), Render.older(J.Json.get_bool(window, "hasMore", False{}), u), Partial.buttons(J.Json.elems(J.Json.get_obj(window, "partial")), u)))
+  WP.Node.write(Render.timeline(A.view_sidebar_indexed(u, False{}, signals), Render.older(J.Json.get_bool(window, "hasMore", False{}), u), Render.after(window, u)))
 
 def Render.web.indexed.checked(valid: Bool, shown: J.Json, sidebar: J.Json, u: U.Ui, window: J.Json, signals: Map<&2, Nat>) -> J.Json:
   match valid:
@@ -404,7 +426,7 @@ def Render.web.indexed(+u: U.Ui, +window: J.Json, +sidebar: J.Json, +signals: Ma
   match sidebar:
     case J.Null{}: Render.web.indexed.full(u, window, signals)
     case _:
-      +shown = WP.Node.write(Render.timeline(A.view_sidebar_indexed(u, True{}, signals), Render.older(J.Json.get_bool(window, "hasMore", False{}), u), Partial.buttons(J.Json.elems(J.Json.get_obj(window, "partial")), u)))
+      +shown = WP.Node.write(Render.timeline(A.view_sidebar_indexed(u, True{}, signals), Render.older(J.Json.get_bool(window, "hasMore", False{}), u), Render.after(window, u)))
       Render.web.indexed.checked(Bool.and(Nat.is_eq(SS.Slot.count(shown), 1n), SS.Slot.is(sidebar, "aside")), shown, sidebar, u, window, signals)
 
 def Render.web.prepared.indexed(+a: ActResult, prepared: U.Ui, +window: J.Json, sidebar: J.Json, signals: Map<&2, Nat>) -> J.Json:
@@ -414,7 +436,7 @@ def Render.web.prepared.indexed(+a: ActResult, prepared: U.Ui, +window: J.Json, 
         "remoteReady", J.Flag{True{}}), "session", Route.pack(u)), "cmds", J.Json.arr(cmds)), "window", window)
 
 def Render.web.metadata.full(+u: U.Ui, +window: J.Json, signals: Map<&2, Nat>, +plain: U.SIx) -> J.Json:
-  WP.Node.write(Render.timeline(A.view_sidebar_metadata(u, False{}, plain, signals), Render.older(J.Json.get_bool(window, "hasMore", False{}), u), Partial.buttons(J.Json.elems(J.Json.get_obj(window, "partial")), u)))
+  WP.Node.write(Render.timeline(A.view_sidebar_metadata(u, False{}, plain, signals), Render.older(J.Json.get_bool(window, "hasMore", False{}), u), Render.after(window, u)))
 
 def Render.web.metadata.checked(valid: Bool, shown: J.Json, sidebar: J.Json, u: U.Ui, window: J.Json, signals: Map<&2, Nat>, +plain: U.SIx) -> J.Json:
   match valid:
@@ -425,7 +447,7 @@ def Render.web.metadata(+u: U.Ui, +window: J.Json, +sidebar: J.Json, +signals: M
   match sidebar:
     case J.Null{}: Render.web.metadata.full(u, window, signals, plain)
     case _:
-      +shown = WP.Node.write(Render.timeline(A.view_sidebar_metadata(u, True{}, plain, signals), Render.older(J.Json.get_bool(window, "hasMore", False{}), u), Partial.buttons(J.Json.elems(J.Json.get_obj(window, "partial")), u)))
+      +shown = WP.Node.write(Render.timeline(A.view_sidebar_metadata(u, True{}, plain, signals), Render.older(J.Json.get_bool(window, "hasMore", False{}), u), Render.after(window, u)))
       Render.web.metadata.checked(Bool.and(Nat.is_eq(SS.Slot.count(shown), 1n), SS.Slot.is(sidebar, "aside")), shown, sidebar, u, window, signals, plain)
 
 def Render.web.prepared.metadata(+a: ActResult, prepared: U.Ui, +window: J.Json, sidebar: J.Json, signals: Map<&2, Nat>, +plain: U.SIx) -> J.Json:
@@ -436,7 +458,7 @@ def Render.web.prepared.metadata(+a: ActResult, prepared: U.Ui, +window: J.Json,
 
 # Current recipient info overlays a canonical-only signal text map.
 def Render.web.materialized.full(+u: U.Ui, +window: J.Json, signals: Map<&2, Nat>, +plain: U.SIx, +text: Map<&2, String>) -> J.Json:
-  WP.Node.write(Render.timeline(A.view_sidebar_materialized(u, False{}, plain, signals, text), Render.older(J.Json.get_bool(window, "hasMore", False{}), u), Partial.buttons(J.Json.elems(J.Json.get_obj(window, "partial")), u)))
+  WP.Node.write(Render.timeline(A.view_sidebar_materialized(u, False{}, plain, signals, text), Render.older(J.Json.get_bool(window, "hasMore", False{}), u), Render.after(window, u)))
 
 def Render.web.materialized.checked(valid: Bool, shown: J.Json, sidebar: J.Json, u: U.Ui, window: J.Json, signals: Map<&2, Nat>, +plain: U.SIx, +text: Map<&2, String>) -> J.Json:
   match valid:
@@ -447,7 +469,7 @@ def Render.web.materialized(+u: U.Ui, +window: J.Json, +sidebar: J.Json, +signal
   match sidebar:
     case J.Null{}: Render.web.materialized.full(u, window, signals, plain, text)
     case _:
-      +shown = WP.Node.write(Render.timeline(A.view_sidebar_materialized(u, True{}, plain, signals, text), Render.older(J.Json.get_bool(window, "hasMore", False{}), u), Partial.buttons(J.Json.elems(J.Json.get_obj(window, "partial")), u)))
+      +shown = WP.Node.write(Render.timeline(A.view_sidebar_materialized(u, True{}, plain, signals, text), Render.older(J.Json.get_bool(window, "hasMore", False{}), u), Render.after(window, u)))
       Render.web.materialized.checked(Bool.and(Nat.is_eq(SS.Slot.count(shown), 1n), SS.Slot.is(sidebar, "aside")), shown, sidebar, u, window, signals, plain, text)
 
 def Render.web.prepared.materialized(+a: ActResult, prepared: U.Ui, +window: J.Json, sidebar: J.Json, signals: Map<&2, Nat>, +plain: U.SIx, +text: Map<&2, String>) -> J.Json:

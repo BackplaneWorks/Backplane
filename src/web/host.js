@@ -518,7 +518,7 @@ function historyPageState(state) {
   el.style.cssText = "position:fixed;z-index:12;max-width:calc(100vw - 32px);background:var(--panel);color:var(--text);border:1px solid var(--line);padding:4px 8px;font-size:12px";
   const box = document.getElementById("timeline")?.getBoundingClientRect();
   el.style.top = Math.max(0, box?.top || 0) + "px";el.style.right = Math.max(8, innerWidth - (box?.right || innerWidth) + 8) + "px";
-  el.replaceChildren(document.createTextNode(state.phase === "error" ? "Messages couldn’t load. " : state.direction === "newer" ? "Loading newer messages…" : "Loading earlier messages…"));
+  el.replaceChildren(document.createTextNode(state.phase === "error" ? "Messages couldn’t load. " : state.direction !== "older" ? "Loading newer messages…" : "Loading earlier messages…"));
   if (state.phase === "error") {
     olderGestureUntil = newerGestureUntil = 0;earlierAsked = laterAsked = false;
     const button = document.createElement("button");button.textContent = "Retry";
@@ -689,6 +689,19 @@ function holdSay(now) {
   const was = away;
   away = now;
   queueMicrotask(() => dispatch(now ? "hold-away" : "hold-end", now || was));
+}
+// the newest entry the timeline shows (not a reply streaming in or a
+// message being sent): what comes after it is new (thin-view's Render.pill)
+function holdMark() {
+  const tl = document.getElementById("timeline");
+  const rows = tl ? [...tl.children].filter(el => el.getAttribute("data-id") && !el.getAttribute("data-id").startsWith("@") && !el.classList.contains("live") && !el.classList.contains("sending")) : [];
+  return rows.at(-1)?.getAttribute("data-id") || "";
+}
+// the pill's click: back to the end, which follows again (on an earlier
+// page, the newest page first)
+function holdBottom() {
+  if (thin && thin.atNewest?.() === false) { thin.newest();return; }
+  scroll = true;later();
 }
 // the person scrolled the timeline: the end follows, elsewhere holds
 function holdRead(tl) {
@@ -1202,7 +1215,9 @@ function dispatch(action, value, timer) {
         const field = document.getElementById("mail-reply");
         if (!field || !thin.request("bfield", "mrreply\u001f" + field.value)) return true;
       }
-      if (action === "hold-away" || action === "hold-end") return true;
+      // the hub draws the "N new" pill: it is told what the reader had
+      if (action === "hold-away" || action === "hold-end") { thin.away?.(value, action === "hold-away" ? holdMark() : "");return true; }
+      if (action === "hold-bottom") { holdBottom();return true; }
       const layer = document.querySelector('[data-local-models="1"]');
       const settled = layer ? modelFeedback.choice(action, value, layer.style.display !== "none") : undefined;
       return thin.request(action, value, settled);
@@ -2525,7 +2540,9 @@ async function startThin(again = false, reason = "initial") {
       search: thinSearchAnswer, searchFailed: thinSearchFailed, message: showThinMessage,
       view: (node, detail) => {
         if (!current()) return;
-        if (detail.page) historyPage = detail.page;
+        // the newest page at once (holdBottom): no bridge to it, its end
+        if (detail.page?.direction === "newest") { historyClear();scroll = true; }
+        else if (detail.page) historyPage = detail.page;
         historyRestoreBridge(detail);
         if (detail.page && !held) { const tl = document.getElementById("timeline");if (tl) { held = anchorOf(tl);heldSize = holdSize(tl); } }
         terminalOutput.rebind();

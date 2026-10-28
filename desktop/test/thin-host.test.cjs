@@ -627,3 +627,15 @@ test('history ordering: an action waits for a page on its way, so the page is st
  assert.equal(f.sent.at(-1).p.action,'fab-look','then the action goes');
  f.host.receive(f.reply());f.host.page();f.host.request('stop','');assert.equal(f.sent.at(-1).p.action,'stop','Stop overtakes a page');
 });
+test('the away mark rides on every view request for the shown thread; a switch lets it go',async()=>{
+ const f=await fixture();f.open();assert.equal(f.sent.at(-1).p.away,'');
+ f.host.away('A','m7');assert.equal(f.sent.at(-1).m,'view.update');assert.equal(f.sent.at(-1).p.away,'m7');f.host.receive(f.reply());
+ const n=f.sent.length;f.host.away('A','m7');assert.equal(f.sent.length,n,'the same mark asks for nothing');
+ f.host.away('A','');assert.equal(f.sent.at(-1).p.away,'','back at the end');f.host.receive(f.reply());
+ f.host.away('A','m9');f.host.receive(f.reply());f.host.request('select','B');assert.equal(f.sent.at(-1).m,'view.open');assert.equal(f.sent.at(-1).p.away,'');assert.equal(f.host.awayMark,null);
+});
+test('the new-messages pill on an earlier page goes straight to the newest page',async()=>{
+ const f=await fixture();f.open();f.host.page();f.host.receive(f.reply());f.host.page();f.host.receive(f.reply());assert.equal(f.host.atNewest(),false);
+ assert.equal(f.host.newest(),true);const req=f.sent.at(-1);assert.equal(req.m,'view.page');assert.equal(req.p.cursor,'');assert.equal(f.host.atNewest(),true);
+ f.host.receive(f.reply(req));assert.equal(f.views.at(-1).detail.page.direction,'newest');assert.equal(f.host.newest(),false,'at the newest there is nowhere to go');
+});
