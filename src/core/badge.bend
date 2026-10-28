@@ -90,6 +90,52 @@ def Badge.color(+st: M.State, +id: String) -> String:
 def Badge.icon(+st: M.State, +id: String) -> String:
   Badge.icon.of(M.Setting.get(st, Badge.icon_key(id), ""))
 
+# a project whose icon was picked (not the folder every project starts with)
+def Badge.picked(+st: M.State, +id: String) -> Bool:
+  Bool.not(String.eq(Badge.icon(st, id), "folder"))
+
+def Badge.split.all(ws: List<&2, String>, +c: Char) -> List<&2, String>:
+  match ws:
+    case Nil{}:
+      Nil{}
+    case w <> t:
+      List.append(&2, String, String.split(w, c), Badge.split.all(t, c))
+
+def Badge.words.k(empty: Bool, w: String, rest: List<&2, String>) -> List<&2, String>:
+  match empty:
+    case True{}:
+      rest
+    case False{}:
+      w <> rest
+
+def Badge.words.keep(ws: List<&2, String>) -> List<&2, String>:
+  match ws:
+    case Nil{}:
+      Nil{}
+    case +w <> t:
+      Badge.words.k(String.is_empty(w), w, Badge.words.keep(t))
+
+# a title's words, parted at spaces, '-', '_' and '.'
+def Badge.words(+title: String) -> List<&2, String>:
+  Badge.words.keep(Badge.split.all(Badge.split.all(Badge.split.all(String.split(String.trim(title), ' '), '-'), '_'), '.'))
+
+def Badge.initials.k(ws: List<&2, String>) -> String:
+  match ws:
+    case Nil{}:
+      ""
+    case +a <> t:
+      match t:
+        case Nil{}:
+          String.take(a, 2n)
+        case b <> _:
+          String.take(a, 1n) ++ String.take(b, 1n)
+
+# what a project's badge shows where only a letter or two fit (the folded
+# sidebar): the first letters of its first two words, or a one-word title's
+# first two, in capitals ("sensor-node" SN, "PROJ" PR)
+def Badge.initials(+title: String) -> String:
+  String.to_upper(Badge.initials.k(Badge.words(title)))
+
 def Badge.find(ts: List<&2, Tint>, +name: String, +d: Tint) -> Tint:
   match ts:
     case Nil{}:

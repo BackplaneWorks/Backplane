@@ -718,6 +718,14 @@ def View.sidebar.threads(+u: U.Ui, ix: U.SIx, rows: List<&2, U.SRow>, raw: List<
 # shows it), the sidebar is a 44 px strip: the button that unfolds it, then
 # each project's badge in its colour, which opens the project (its thread,
 # as Alt+digit does); the open thread's project is marked
+# a project's face in the strip: the icon picked for it, else its initials
+# (core's Badge.initials), so projects left on the folder differ by more
+# than their colour
+def View.strip.face(picked: Bool, +st: M.State, +p: String) -> D.Node:
+  match picked:
+    case True{}: WI.WIcon.svg(BG.Badge.icon(st, p), 16)
+    case False{}: D.Dom.span("ini", BG.Badge.initials(U.Ui.project_title(st, p)))
+
 def View.strip.projects(ps: List<&2, String>, +st: M.State, +cur: String) -> List<&2, D.Node>:
   match ps:
     case Nil{}:
@@ -725,7 +733,7 @@ def View.strip.projects(ps: List<&2, String>, +st: M.State, +cur: String) -> Lis
     case +p <> t:
       D.El{"button", "strip:" ++ p, [D.At{"class", Bool.pick(String, String.eq(p, cur), "strip-project on", "strip-project")}, D.At{"type", "button"},
         D.At{"style", "--tint:" ++ BG.Badge.css_of(st, p)}, D.At{"title", U.Label.title(st, p, U.Ui.project_title(st, p))}, D.At{"aria-label", U.Label.title(st, p, U.Ui.project_title(st, p))},
-        D.At{"data-value", p}, D.On{"click", "ws-project"}], [WI.WIcon.svg(BG.Badge.icon(st, p), 16)]} <> View.strip.projects(t, st, cur)
+        D.At{"data-value", p}, D.On{"click", "ws-project"}], [View.strip.face(BG.Badge.picked(st, p), st, p)]} <> View.strip.projects(t, st, cur)
 
 def View.strip(+lc: I.Loc, ps: List<&2, String>, +st: M.State, +cur: String) -> D.Node:
   D.El{"nav", "side-strip", [D.At{"class", "side-strip"}, D.At{"aria-label", MSG.T.tour.title.projects(lc)}],

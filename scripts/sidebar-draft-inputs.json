@@ -18,7 +18,7 @@
     "src/core/agy.bend": "ec8c54a6e7d6fc9abd27476b48d76669393fc59d5ee8141bff3c699e3d476fab",
     "src/core/apikeys.bend": "f825918814d94d15afbec4056ca7dce297d59ab70ef390ef916abe751d911237",
     "src/core/attach.bend": "d455a495d29974fee95a5daa4c0eb1058b6c5de212c4088fc0374c927bd03fd8",
-    "src/core/badge.bend": "ae24dc658a4d7b8ba115d83249fda932694bb0f6f6d57e03ddd4eeef0dd0e306",
+    "src/core/badge.bend": "8c9269d9d4528b549b34ceeab348c7bc14d1c146cb7cf5918bf0b01265e79b99",
     "src/core/board.bend": "040ef813ec0257f837a94bfe7f48292397787fbb89558d506835314bdadb3aad",
     "src/core/bot.bend": "0b7815bd2284ec6fba68c771edf0293b445571773d30f8f2e70f7b7ff8d1be8b",
     "src/core/botui.bend": "24053ae1a601d1b84ef480361a447c9d3cf927ccee80d89fc1b1a6672504bd95",
@@ -143,7 +143,7 @@
     "src/web/space.bend": "b86a265e41a900498bc33c37c0404c4d6678554efe3d9054f329beb2cf35ee63",
     "src/web/usage-graph.bend": "fa06f7d2bf855a396a5f7a7b4725dfaa990145fbbcefe7ad21ae8f9a698a2679",
     "src/web/usage-page.bend": "706e3f17a4a3e5f159656d47aeb76a940d4825421f5c33228f9aef692ec926e3",
-    "src/web/view.bend": "9a454d5df6990674d4201f978717e95167cf21fc4e7057a353916fb6c1ec8c0b"
+    "src/web/view.bend": "4fd055bd4dc42fb587cb8c480a4e541ca30bcf0c9138181e623618c9fa5a47d5"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -253,5 +253,5 @@
       "sourceSnapshot": "/home/h/Documents/i2cjak/bp-coord/settle-fresh-work/SOURCE-structural-correction.json"
     }
   },
-  "reviewNote": "Draw thin themed scrollbars, and keep the sidebar's room for its own"
+  "reviewNote": "Show each project's initials in the folded sidebar strip"
 }

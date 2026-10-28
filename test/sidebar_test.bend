@@ -2,6 +2,7 @@ import Base
 import ./check.bend as C
 import ../src/core/model.bend as M
 import ../src/core/client.bend as U
+import ../src/core/badge.bend as BG
 import ../src/core/i18n.bend as I
 
 # The simpler sidebar: quiet projects sink and fold away, the active view
@@ -167,3 +168,8 @@ def main() -> IO(Unit):
     C.Check.str("palette: a command names none", U.Palette.place(st(), "new-thread", "p1"), "")
     C.Check.str("shut fold, nothing shown", U.Shelf.words(I.En{}, "Settled 2", 0n), "Settled 2")
     C.Check.str("shut fold, the open row shown", U.Shelf.words(I.En{}, "Settled 2", 1n), "Settled 2 · 1 shown")
+    C.Check.str("initials: one word", BG.Badge.initials("PROJ"), "PR")
+    C.Check.str("initials: two words", BG.Badge.initials("sensor-node"), "SN")
+    C.Check.str("initials: spaces and dots", BG.Badge.initials("  my board.v2"), "MB")
+    C.Check.str("initials: one letter", BG.Badge.initials("x"), "X")
+    C.Check.str("initials: none", BG.Badge.initials(""), "")
