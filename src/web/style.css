@@ -195,8 +195,11 @@ html[data-backplane-wait="true"] :is(.topbar .back, .topbar .crumbs, .topbar .kv
   .viewer > .viewer-tabs { display: flex; position: relative; z-index: 4; }
 }
 .timeline { flex: 1; overflow-y: auto; overflow-anchor: none; padding: 16px 16px 8px; display: flex; flex-direction: column; gap: 10px; }
-/* away from the end with something new below (client.bend's Hold.pill) */
-.hold-pill { position: sticky; bottom: 8px; align-self: center; z-index: 4; flex: none; background: var(--raise); color: var(--text); border: 1px solid var(--accent); border-radius: 0; padding: 4px 12px; font-size: calc(13px * var(--text-scale, 100) / 100); cursor: pointer; }
+/* away from the end with something new below (client.bend's Hold.pill).
+   It takes no room in the timeline (its height and the gap before it given
+   back by its margin), so its coming and going never changes how far the
+   timeline scrolls: at the end, its going clamped the view a few lines up */
+.hold-pill { position: sticky; bottom: 8px; align-self: center; z-index: 4; flex: none; box-sizing: border-box; height: 2em; margin-top: calc(-2em - 10px); line-height: calc(2em - 2px); background: var(--raise); color: var(--text); border: 1px solid var(--accent); border-radius: 0; padding: 0 12px; font-size: calc(13px * var(--text-scale, 100) / 100); cursor: pointer; }
 .msg { position: relative; max-width: 860px; width: 100%; }
 .msg .body { min-width: 0; overflow-wrap: anywhere; }
 .msg .copy { position: absolute; top: 4px; right: 4px; opacity: 0; font-size: calc(11px * var(--text-scale, 100) / 100); padding: 1px 6px; }
