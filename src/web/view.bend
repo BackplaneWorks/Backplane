@@ -2474,15 +2474,22 @@ def View.dfiles(fs: List<&2, DF.DFile>) -> List<&2, D.Node>:
     case DF.DFile{_, +nw, st, hs} <> t:
       D.El{"div", nw, [D.At{"class", "dfile"}], D.El{"div", "", [D.At{"class", "dhead"}], [D.Dom.span("name", nw), D.Dom.span("status", st)]} <> View.dhunks(hs)} <> View.dfiles(t)
 
+# a git action of the diff's head; with no changes there is nothing to
+# commit, push or put back, and it is shown disabled (no accent)
+def View.diff.btn(+none: Bool, +cls: String, +action: String, +value: String, +tip: String, +label: String) -> D.Node:
+  D.El{"button", "", List.append(&2, D.Attr, [D.At{"class", Bool.pick(String, none, "", cls)}, D.At{"title", tip}, D.At{"data-value", value}, D.On{"click", action}],
+    Bool.pick(List<&2, D.Attr>, none, [D.At{"disabled", "true"}], Nil{})), [D.Txt{label}]}
+
 # what this thread changed, with the git actions (as the native Lay.diff)
 def View.diff.loc(+lc: I.Loc, +text: String) -> List<&2, D.Node>:
   +fs = DF.Diff.parse(text)
+  +none = List.is_empty(&2, DF.DFile, fs)
   [D.El{"div", "", [D.At{"class", "diff-head"}], [
-      D.Dom.span("summary", Bool.pick(String, List.is_empty(&2, DF.DFile, fs), MSG.T.viewer.diff.empty(lc), DF.Diff.summary(fs))),
+      D.Dom.span("summary", Bool.pick(String, none, MSG.T.viewer.diff.empty(lc), DF.Diff.summary(fs))),
       D.El{"div", "", [D.At{"class", "diff-btns"}], [
-        D.Dom.button("", "revert", "0", MSG.T.diff.revert.tip(lc), MSG.T.palette.revert(lc)),
-        D.Dom.button("", "git", "commit_push_pr", MSG.T.diff.pr.tip(lc), MSG.T.viewer.diff.pr(lc)),
-        D.Dom.button("primary", "git", "commit_push", MSG.T.diff.commit.tip(lc), MSG.T.palette.commit(lc))]}]},
+        View.diff.btn(none, "", "revert", "0", MSG.T.diff.revert.tip(lc), MSG.T.palette.revert(lc)),
+        View.diff.btn(none, "", "git", "commit_push_pr", MSG.T.diff.pr.tip(lc), MSG.T.viewer.diff.pr(lc)),
+        View.diff.btn(none, "primary", "git", "commit_push", MSG.T.diff.commit.tip(lc), MSG.T.palette.commit(lc))]}]},
     D.El{"div", "", [D.At{"class", "diff-body"}], View.dfiles(fs)}]
 
 def View.diff(+text: String) -> List<&2, D.Node>:

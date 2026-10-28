@@ -577,6 +577,8 @@ button.chip:hover { border-color: var(--bad); color: var(--bad); }
 .diff-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid var(--line); }
 .diff-head .summary { color: var(--dim); }
 .diff-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+.diff-btns button[disabled] { opacity: .45; cursor: default; }
+.diff-btns button[disabled]:hover { border-color: var(--line); }
 .diff-none { padding: 12px; color: var(--dim); }
 .diff-none p { margin: 0 0 8px; overflow-wrap: anywhere; }
 .diff-none pre { margin: 0; padding: 8px 10px; background: var(--raise); border: 1px solid var(--line); color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
