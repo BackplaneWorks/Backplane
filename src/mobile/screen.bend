@@ -1194,8 +1194,10 @@ def Mob.page.from(+es: List<&2, M.Entry>, +drafts: Map<&2, String>, +id: String,
 def Mob.page(+drafts: Map<&2, String>, +id: String, +st: M.State) -> U.Win:
   Mob.page.from(M.State.mine(st, id), drafts, id, st)
 
+# (the design as it was before the edits is no change: HS.Hist.seen, as
+# on the web; it showed as "1 design change" when nothing changed)
 def Mob.paged.es(+lc: I.Loc, w: U.Win, +st: M.State, +sel: String, +info: Map<&2, String>, +dr: Map<&2, String>, +running: Bool) -> List<&2, J.Json>:
-  Mob.entries(lc, U.Win.shown(w), st, sel, info, dr, running)
+  Mob.entries(lc, HS.Hist.seen(U.Win.shown(w)), st, sel, info, dr, running)
 
 # a side question (/btw) and its answer, over the composer until closed
 def Mob.btw(+lc: I.Loc, +u: U.Ui) -> J.Json:
@@ -1280,9 +1282,18 @@ def Mob.sbox.q(+lc: I.Loc, +st: M.State, m: Maybe<&2, U.SAsk>) -> List<&2, J.Jso
     case None{}:
       Nil{}
 
+# the line under a thread's last reply (the web's work cell): a failed
+# turn with nothing waiting says "Failed" and why, not "Blocked: needs
+# interaction" (SG.Signal.shown)
+def Mob.working.k(+lc: I.Loc, +st: M.State, +id: String, +ph: Nat, +shown: String) -> String:
+  SG.Signal.label.shown(lc, ph, shown, SG.Signal.why.if(String.eq(shown, "failed"), st, id))
+
+def Mob.working(+lc: I.Loc, +st: M.State, +id: String, +ph: Nat, turn: M.TurnState, +pe: Nat) -> String:
+  Mob.working.k(lc, st, id, ph, SG.Signal.shown(ph, turn, pe))
+
 def Mob.thread(+lc: I.Loc, render: Bool, u: U.Ui, t: M.Thread, pend: List<&2, String>, vw: J.Json, +atts: List<&2, String>, +up: String, term: J.Json, skills: List<&2, J.Json>, +ph: Nat, btw: J.Json, embs: J.Json) -> J.Json:
   match u t:
-    case U.Ui{+st, +sel, +drafts, +live, _, _, +now, _, pa, _, _, _, _, _, +nf, _, _} M.Thread{+id, _, title, _, _, +turn, _, archived, o, +sa, +ua, pinned, _, branch, _, +pr, +mo, rt, _, _, _}:
+    case U.Ui{+st, +sel, +drafts, +live, _, _, +now, _, pa, _, _, _, _, _, +nf, _, _} M.Thread{+id, _, title, _, _, +turn, +pe, archived, o, +sa, +ua, pinned, _, branch, _, +pr, +mo, rt, _, _, _}:
       +pg = Mob.page(drafts, id, st)
       J.Json.obj([J.KV{"id", J.Json.str(id)}, J.KV{"title", J.Json.str(U.Label.title(st, id, TTL.Title.shown(lc, title)))}, J.KV{"branch", J.Json.str(branch)},
         J.KV{"boat", J.Json.str(UZ.Chip.of(st, id, now))},
@@ -1303,7 +1314,7 @@ def Mob.thread(+lc: I.Loc, render: Bool, u: U.Ui, t: M.Thread, pend: List<&2, St
         J.KV{"queue", J.Json.arr(List.append(&2, J.Json, Mob.sbox.q(lc, st, U.Sbox.ask.in(U.Sbox.asks(st), id)), List.append(&2, J.Json, Mob.fab(lc, String.eq(U.Str.get(drafts, "@intent"), id), st, nf, id, V.View.running(turn)), Mob.queue(lc, M.Queue.context(M.Queue.items(st, id)), True{}, V.View.running(turn)))))},
         J.KV{"todos", Mob.todos(lc, nf, id, U.Todos.shown(st, id, V.View.running(turn)))},
         J.KV{"live", Mob.live.k.loc(lc, render, U.Str.get(live, id))},
-        J.KV{"working", J.Json.str(Bool.pick(String, String.is_empty(U.Str.get(live, id)), SG.Signal.label(lc, ph), ""))},
+        J.KV{"working", J.Json.str(Bool.pick(String, String.is_empty(U.Str.get(live, id)), Mob.working(lc, st, id, ph, turn, pe), ""))},
         J.KV{"phase", J.Json.str(SG.Signal.name(ph))},
         J.KV{"draft", J.Json.str(U.Str.get(drafts, sel))},
         J.KV{"send", J.Json.str(U.Follow.button(lc, st, sel, V.View.running(turn), U.Follow.stop(V.View.running(turn), U.Str.get(drafts, sel), atts), U.Str.get(drafts, sel)))},

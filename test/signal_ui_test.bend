@@ -27,6 +27,9 @@ def child() -> List<&2, M.Change>:
 def screen(+u: U.Ui) -> String:
   J.Json.get_str(J.Json.get_obj(MB.Mob.screen(u), "thread"), "phase", "missing")
 
+def working(+u: U.Ui) -> String:
+  J.Json.get_str(J.Json.get_obj(MB.Mob.screen(u), "thread"), "working", "missing")
+
 def attrs(n: D.Node) -> List<&2, D.Attr>:
   match n:
     case D.El{_, _, as, _}: as
@@ -73,6 +76,10 @@ def main() -> IO(Unit):
     C.Check.str("active accessible label", V.View.attr(attrs(V.View.dot(I.En{}, "active")), "aria-label"), "Working: agent or owned work active")
     C.Check.str("finished accessible label", V.View.attr(attrs(V.View.dot(I.En{}, "finished")), "aria-label"), "Finished: ready for you to look at")
     C.Check.str("phone finished green", screen(ui([M.TurnChanged{"p", M.Completed{}, 3n}], True{})), "finished")
+    # a failed turn says failed and why on the phone too, not "Blocked: needs interaction"
+    C.Check.str("phone failed says why", working(U.Side.with_signals(ui([M.MessagePosted{"p", "u2", M.User{}, "go", 2n}, M.ActivityLogged{"p", "e3", "error", "codex", "codex exited (exit 127)", 3n}, M.TurnChanged{"p", M.Failed{}, 3n}], True{}))),
+      "Failed: codex exited (exit 127)")
+    C.Check.str("phone failed still red", screen(ui([M.TurnChanged{"p", M.Failed{}, 3n}], True{})), "blocked")
     C.Check.str("phone stopped gray", screen(ui([M.TurnChanged{"p", M.Interrupted{}, 3n}], True{})), "inactive")
     C.Check.str("plane finished row", P.Plane.signal.state(5n), "finished")
     C.Check.str("held lock gray", SB.Subs.signal.of(info, held), "inactive")
