@@ -1917,7 +1917,9 @@ final class AppModel {
                 shownHub = s.hub
                 plots.reset()
             }
-            if !started {
+            // Bootstrap and hub catalogs are provisional. Only a fresh paired
+            // presentation may consume this launch's default and migration.
+            if !started, !s.hub.isEmpty, contentReady {
                 started = true
                 settings.migrate(theme: s.theme, view: s.view)
                 if !startupTabChosen, Self.nav(s).isEmpty, path.isEmpty {
