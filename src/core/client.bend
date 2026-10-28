@@ -3021,12 +3021,76 @@ def Palette.filter.k(keep: Bool, p: PItem, rest: List<&2, PItem>) -> List<&2, PI
     case False{}:
       rest
 
-def Palette.filter(ps: List<&2, PItem>, +q: String) -> List<&2, PItem>:
+def Palette.keep(ps: List<&2, PItem>, +q: String) -> List<&2, PItem>:
   match ps:
     case Nil{}:
       Nil{}
     case PItem{+l, a, v} <> t:
-      Palette.filter.k(Palette.hit(q, l), PItem{l, a, v}, Palette.filter(t, q))
+      Palette.filter.k(Palette.hit(q, l), PItem{l, a, v}, Palette.keep(t, q))
+
+# a row's name: its label before its keys ("New thread · Ctrl+N")
+def Palette.name(+label: String) -> String:
+  String.trim(Maybe.default(&2, String, List.head(&2, String, String.split(label, '·')), label))
+
+# does every word of the (lower-case) query start a word of the label?
+def Palette.starts(ws: List<&2, String>, +l: String) -> Bool:
+  match ws:
+    case Nil{}:
+      True{}
+    case +w <> t:
+      Bool.and(Bool.or(String.is_empty(w), Bool.or(String.starts_with(l, w), Bool.or(String.contains(l, " " ++ w),
+        Bool.or(String.contains(l, "/" ++ w), Bool.or(String.contains(l, "-" ++ w), String.contains(l, "(" ++ w)))))), Palette.starts(t, l))
+
+def Palette.rank.k(+q: String, +name: String, +l: String) -> Nat:
+  Bool.pick(Nat, String.eq(name, q), 0n, Bool.pick(Nat, String.starts_with(name, q), 1n,
+    Bool.pick(Nat, Palette.starts(String.split(q, ' '), l), 2n, 3n)))
+
+# how well a label the query hits answers it, best first: 0 its name is the
+# query, 1 its name starts with it, 2 every word of the query starts a word
+# of it, 3 the words are only inside it (any case)
+def Palette.rank(+q: String, +label: String) -> Nat:
+  Palette.rank.k(String.trim(String.to_lower(q)), String.to_lower(Palette.name(label)), String.to_lower(label))
+
+type PRanked is Data:
+  PRanked{rank: Nat, item: PItem}
+
+def Palette.scored(ps: List<&2, PItem>, +q: String) -> List<&2, PRanked>:
+  match ps:
+    case Nil{}:
+      Nil{}
+    case PItem{+l, a, v} <> t:
+      PRanked{Palette.rank(q, l), PItem{l, a, v}} <> Palette.scored(t, q)
+
+def Palette.tier.k(keep: Bool, p: PItem, rest: List<&2, PItem>) -> List<&2, PItem>:
+  match keep:
+    case True{}:
+      p <> rest
+    case False{}:
+      rest
+
+# the rows of one rank, in the list's own order
+def Palette.tier(rs: List<&2, PRanked>, +n: Nat) -> List<&2, PItem>:
+  match rs:
+    case Nil{}:
+      Nil{}
+    case PRanked{r, p} <> t:
+      Palette.tier.k(Nat.is_eq(r, n), p, Palette.tier(t, n))
+
+def Palette.tiers(+rs: List<&2, PRanked>) -> List<&2, PItem>:
+  List.concat(&2, PItem, [Palette.tier(rs, 0n), Palette.tier(rs, 1n), Palette.tier(rs, 2n), Palette.tier(rs, 3n)])
+
+def Palette.ranked(empty: Bool, ps: List<&2, PItem>, +q: String) -> List<&2, PItem>:
+  match empty:
+    case True{}:
+      ps
+    case False{}:
+      Palette.tiers(Palette.scored(Palette.keep(ps, q), q))
+
+# the rows whose label holds every word of the query, the best answers
+# first (Palette.rank: the exact name, then names that start with it, then
+# word starts, then the rest), each rank in the list's own order
+def Palette.filter(ps: List<&2, PItem>, +q: String) -> List<&2, PItem>:
+  Palette.ranked(String.is_empty(String.trim(q)), ps, q)
 
 # what the command palette offers for this query, actions first
 def Palette.cmds.loc(+l: I.Loc, +u: Ui) -> List<&2, PItem>:
