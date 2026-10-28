@@ -27,6 +27,12 @@ Type part of a project name in the sidebar search: only matching projects
 stay; clearing it brings all back. The search icon (Ctrl+Shift+F) finds a
 word from an earlier reply in any thread (the open one's results first);
 clicking a result opens that thread at that message, highlighted.
+Then go to another thread and open a second result in the same thread as the
+first: it lands on the new message and stays there (known bug, found
+2026-10-28 and present since the search work: the view jumps to the new
+message, then snaps back within ~100 ms to where the first jump left it;
+without an earlier jump into that thread it lands and stays). A result in a
+subagent's steps is listed under its thread and opens that thread.
 
 ## Talking to an agent
 
