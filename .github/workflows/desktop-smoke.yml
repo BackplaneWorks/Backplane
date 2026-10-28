@@ -1,4 +1,5 @@
 name: Frozen 0.13 desktop packaging (no compiler or administrator commands)
+run-name: Frozen final 0.13 ${{ inputs.target }} native package
 on:
   workflow_dispatch:
     inputs:
