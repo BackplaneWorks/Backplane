@@ -28,7 +28,7 @@
     "src/core/cat.bend": "0130231a18e515a94d40d7584d19a9b5a2d1663f9601fbff944bf97e37f9fd6b",
     "src/core/cef.bend": "f2d3fa4c991d0e341620fe634ddb4e08da97f8e471ec46afac0b3de471cc69fb",
     "src/core/charter.bend": "7f906bdea712f6ff6162735c8cc133767ec0f9289c3d0bee6dfedbd4d75ad981",
-    "src/core/client.bend": "ea950a9ba234edb1ea03b5ec414cb0bf3a0261b337875a8e8962834c199868a8",
+    "src/core/client.bend": "70832af6b2e57b98ef4d87fac5a6398b3c3702264039f80054b9cd09be920a29",
     "src/core/codec.bend": "33cb35c55f3712a18734e76e1149763001a9388af27948f0da4ead2c13d48b6f",
     "src/core/cron.bend": "6f89a001df0261a25c878616ea66c235e169f7fc1c726d39e695fce8adb57332",
     "src/core/deploy.bend": "ebee4e63a52cf41ae001bebcdbb7fb010ad71c1e04e481292585740d88a39cc4",
@@ -47,7 +47,7 @@
     "src/core/google.bend": "196ba6d77f7c0e4b8d982d3fb259302752db1f27974b2d49a0123d092fbbb09e",
     "src/core/handoff.bend": "690d78b37f32187a3356d3df2ccb90aafa6d8b1f7234a5583dcbd55baadb55e4",
     "src/core/hier.bend": "c472552a9386d19ace94db4fa82c1a805452f9c3b2fe1f2850fbbc83018255dc",
-    "src/core/hist.bend": "e4fabad6cde2af311b8526a88b404d53fb92b481084eccea6ec424602d9a1c75",
+    "src/core/hist.bend": "64eca8728749943d10b983b8612028a2e835bc8348672e790ee4ec411a08fb37",
     "src/core/hot.bend": "d1d28df84cf63261cb39a5e69d4fe84228933901e5030d730454f2c27cc270d3",
     "src/core/i18n.bend": "92cae5df736659757d9a2a4cf44931b34f618220b78440711a4afecb2cf8d867",
     "src/core/icons.bend": "e61b8148f134319cf75771f45715032cc2aebc0d10e76d6690f8a2d547324172",
@@ -71,7 +71,7 @@
     "src/core/menu.bend": "807668923de70eaabb72ddb760f808cbf6d786b70822ba6a1180776758af7eee",
     "src/core/model.bend": "96a7baa0b71bb5efa085ee9259a126738623e87984596bed8e772ae30f0750e8",
     "src/core/modelpick.bend": "7a04676ab0f5e312e175347f4386b2dd53c69b35071bcdc3c70384d100d0b32f",
-    "src/core/msgs.bend": "815a2b1b8ac01a6c0f6fa7a5f793f397cd2f1e9345092e7b012241e77b649551",
+    "src/core/msgs.bend": "e549dbc88818e83967ffb94baf0d04dc0b7ffbc48bde35030c43491217887836",
     "src/core/notice.bend": "ee87318c1f12fc6cfb23bb5e24e90709e1f9a2eadfd2832581d21590f596e5e0",
     "src/core/onboard.bend": "55ccccf20f706a0acad492de20e23aedc751c7e9ce61b6f3430bfd65796e9232",
     "src/core/once.bend": "c12f375e09045a035cfc66c87d73197f3348b2998fa0e0bb6c9876fca870577c",
@@ -253,5 +253,5 @@
       "sourceSnapshot": "/home/h/Documents/i2cjak/bp-coord/settle-fresh-work/SOURCE-structural-correction.json"
     }
   },
-  "reviewNote": "Play waits for each step to draw: Hs.drawn and Later's after in presentation.bend; Solid.fam gives the live board its versions' family (view.bend data-fam); sidebar drafts unchanged"
+  "reviewNote": "The history bar counts changes without the design as it was before (Hist.track.changes, Hs.bar.k); sidebar drafts unchanged"
 }

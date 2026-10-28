@@ -1476,7 +1476,7 @@ def T.history.live.note(l: I.Loc) -> String:
 def T.history.live.steps(l: I.Loc, +arg0: String, arg1: String) -> String:
   match l:
     case I.En{}:
-      "Live · " ++ arg0 ++ " " ++ I.I18n.sel(arg1, "one", "step", "steps")
+      "Live · " ++ arg0 ++ " " ++ I.I18n.sel(arg1, "one", "change", "changes")
     case I.Ja{}:
       I.I18n.sel(arg1, "one", "現在 · 変更" ++ arg0 ++ "件", "現在 · 変更" ++ arg0 ++ "件")
 

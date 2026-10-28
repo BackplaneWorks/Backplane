@@ -810,6 +810,41 @@ def Hist.changes.go(es: List<&2, M.Entry>, +n: Nat) -> Nat:
 def Hist.changes(es: List<&2, M.Entry>) -> Nat:
   Hist.changes.go(es, 0n)
 
+# the same for a viewer's track (Hist.track: the steps of the kind on
+# show), so the history bar's "Live · N changes" agrees with the top bar
+# and the timeline: every step but the design as it was before, told by
+# the thread's step entries (M.State.steps) (test/hist_test.bend)
+def Hist.base.ids.k(base: Bool, +id: String, rest: List<&2, String>) -> List<&2, String>:
+  match base:
+    case True{}:
+      id <> rest
+    case False{}:
+      rest
+
+def Hist.base.ids(es: List<&2, M.Entry>) -> List<&2, String>:
+  match es:
+    case Nil{}:
+      Nil{}
+    case +e <> t:
+      Hist.base.ids.k(Step.base(e), M.Idx.id(e), Hist.base.ids(t))
+
+def Hist.has.id(xs: List<&2, String>, +id: String) -> Bool:
+  match xs:
+    case Nil{}:
+      False{}
+    case +x <> t:
+      Bool.or(String.eq(x, id), Hist.has.id(t, id))
+
+def Hist.track.changes.go(tr: List<&2, Step>, +bs: List<&2, String>, +n: Nat) -> Nat:
+  match tr:
+    case Nil{}:
+      n
+    case +s <> t:
+      Hist.track.changes.go(t, bs, Bool.pick(Nat, Hist.has.id(bs, Step.id(s)), n, 1n+n))
+
+def Hist.track.changes(tr: List<&2, Step>, es: List<&2, M.Entry>) -> Nat:
+  Hist.track.changes.go(tr, Hist.base.ids(es), 0n)
+
 # Comparing by layer and by sheet (docs/design-review.md)
 # --------------------------------------------------------
 # A comparison may name the layers it is about: a fourth line, their bits

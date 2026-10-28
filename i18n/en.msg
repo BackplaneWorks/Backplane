@@ -301,7 +301,7 @@ history.position = Step {step} of {total}
 history.position.first = Step {step} of {total} · before the agent's edits
 history.comparing = Comparing
 history.live = Live
-history.live.steps = Live · {count} {plural, select, one {step} other {steps}}
+history.live.steps = Live · {count} {plural, select, one {change} other {changes}}
 
 # review panel
 review.bom = BOM

@@ -150,7 +150,8 @@ def main() -> IO(Unit):
   +live = act(second, "hist-live", "")
   +cmp = act(act(u, "cmp", ""), "cmp-pick", "a\tc1\tStep 1\t/r/.git\t/r")
   do IO<Unit>:
-    C.Check.str("bar live", bar(u), "True|3|0|Live · 3 steps||||FalseFalseFalse||Working copy|")
+    C.Check.str("bar live: its changes, less the design before", bar(u), "True|3|0|Live · 2 changes||||FalseFalseFalse||Working copy|")
+    C.Check.str("a track's changes agree with the top bar's", Nat.show(H.Hist.track.changes(H.Hist.track(H.Hist.steps(state(), "t"), 0n), M.State.steps(state(), "t"))) ++ "," ++ Nat.show(H.Hist.track.changes(H.Hist.track(H.Hist.steps(state(), "t"), 1n), M.State.steps(state(), "t"))), "2,1")
     C.Check.str("a tick waits for the viewer to draw, nothing else does", yes(U.Hs.drawn("hist-tick")) ++ yes(U.Hs.drawn("intent-saved-off")), "yesno")
     C.Check.str("the project's own board is its versions' family", U.Solid.fam.k("0|/r|", "0", "/r", "/r/b.kicad_pcb") ++ "," ++ H.Hist.key.family("0|/r|" ++ H.Hist.git("/r/.git", "c2", "/r", "b.kicad_pcb")), "0|/r|/r/b.kicad_pcb,0|/r|/r/b.kicad_pcb")
     C.Check.str("its schematic's is the root sheet beside it", U.Solid.fam.k("1|/r|", "1", "/r", "/r/b.kicad_pcb"), "1|/r|/r/b.kicad_sch")

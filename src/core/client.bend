@@ -9500,14 +9500,14 @@ def Hs.bar.pos(+l: I.Loc, first: Bool, +at: Nat, +n: Nat) -> String:
     case True{}: MSG.T.history.position.first(l, Nat.show(at), Nat.show(n))
     case False{}: MSG.T.history.position(l, Nat.show(at), Nat.show(n))
 
-def Hs.bar.k(+l: I.Loc, m: Maybe<&2, HI.Step>, +u: Ui, +n: Nat, +at: Nat, +es: List<&2, M.Entry>) -> HBar:
+def Hs.bar.k(+l: I.Loc, m: Maybe<&2, HI.Step>, +u: Ui, +n: Nat, +at: Nat, +es: List<&2, M.Entry>, +c: Nat) -> HBar:
   match m:
     case Some{+s}:
       HBar{True{}, n, at, Hs.bar.pos(l, HI.Step.first(s), at, n),
         HI.Hist.anchor(es, s), HI.Hist.label(es, HI.Hist.anchor(es, s)), Hs.said.line(HI.Hist.said(es, HI.Hist.anchor(es, s))),
         Hs.playing(u), Hs.diff(u), False{}, "", "", Ui.scratch(u, "@cmp.menu")}
     case None{}:
-      HBar{True{}, n, 0n, Bool.pick(String, Hs.cmp(u), MSG.T.history.comparing(l), Bool.pick(String, Nat.is_eq(n, 0n), MSG.T.history.live(l), MSG.T.history.live.steps(l, Nat.show(n), Bool.pick(String, Nat.is_eq(n, 1n), "one", "other")))),
+      HBar{True{}, n, 0n, Bool.pick(String, Hs.cmp(u), MSG.T.history.comparing(l), Bool.pick(String, Nat.is_eq(c, 0n), MSG.T.history.live(l), MSG.T.history.live.steps(l, Nat.show(c), Bool.pick(String, Nat.is_eq(c, 1n), "one", "other")))),
         "", "", "", Hs.playing(u), Hs.diff(u), Hs.cmp(u), Hs.label.shown(l, Hs.get(u, "cmp.al")), Hs.label.shown(l, Bool.pick(String, String.is_empty(Hs.get(u, "cmp.bl")), "Working copy", Hs.get(u, "cmp.bl"))), Ui.scratch(u, "@cmp.menu")}
 
 def HBar.on(b: HBar) -> Bool:
@@ -9532,7 +9532,7 @@ def Hs.fade() -> Nat:
 
 # (the track made once: each Hs.track parses every step's record)
 def Hs.bar.t(+l: I.Loc, +tr: List<&2, HI.Step>, +u: Ui) -> HBar:
-  Hs.bar.k(l, HI.Hist.nth(tr, Hs.at(u, tr)), u, Hs.n(tr), Hs.at(u, tr), M.State.mine(Ui.state(u), Ui.sel(u)))
+  Hs.bar.k(l, HI.Hist.nth(tr, Hs.at(u, tr)), u, Hs.n(tr), Hs.at(u, tr), M.State.mine(Ui.state(u), Ui.sel(u)), HI.Hist.track.changes(tr, M.State.steps(Ui.state(u), Ui.sel(u))))
 
 def Hs.bar.on(+l: I.Loc, on: Bool, +u: Ui) -> HBar:
   match on:
