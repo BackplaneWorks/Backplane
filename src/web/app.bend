@@ -9,6 +9,7 @@ import ./view.bend as V
 import ../core/cbor.bend as C
 import ../core/attach.bend as AT
 import ../core/lightbox.bend as LB
+import ../core/panes.bend as PN
 import ../core/desk.bend as DK
 import ./mail-actions.bend as MA
 import ./presentation.bend as P
@@ -445,6 +446,15 @@ def lb_css(lb: LB.Lb, b: LB.LbBox, now: Nat) -> String:
 # the tour's action for a key while its dialog is up ("" for any other)
 def tour_key(key: String) -> String:
   OB.Ob.dom(key)
+
+# The panes of a wide page (core/panes.bend decides; host.js measures the
+# page, the sidebar as the person left it and the rail): whether the
+# sidebar folds by itself beside the viewer, and the viewer's width
+def panes_fold(w: Nat, side: Nat, strip: Nat, rail: Nat, keep: Bool) -> Bool:
+  PN.Panes.fold(w, side, strip, rail, keep)
+
+def panes_viewer(w: Nat, side: Nat, strip: Nat, rail: Nat, drag: Nat, split: Bool, keep: Bool) -> Nat:
+  PN.Panes.viewer(w, side, strip, rail, drag, split, keep)
 
 # The host passes the frame's already resolved language tag.
 def lb_node_in(tag: String, url: String) -> D.Node:

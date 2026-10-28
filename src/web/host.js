@@ -863,7 +863,7 @@ function render() {
   searchLight(tl2);
   Solid.mount(document.getElementById("solid"));
   Plot2d.mount([...document.querySelectorAll("canvas.plot2d")]);
-  viewerSplit();
+  panes();
   earlierAsked = false;
   laterAsked = false;
   if (tl2 && thin?.atNewest?.() === false && tl2.scrollHeight - tl2.scrollTop - tl2.clientHeight <= tl2.clientHeight * 2) requestAnimationFrame(() => laterCheck(document.getElementById("timeline")));
@@ -1903,44 +1903,74 @@ function foldSet(which, on) {
   else delete document.documentElement.dataset[which];
 }
 function foldToggle(which) {
+  // the sidebar folded by itself beside the viewer (panes below): the
+  // button brings it back, and folds it again, for as long as the viewer
+  // stays open; the person's own choice is left as it was
+  if (which === "side" && (document.documentElement.dataset.fold || sideKept)) {
+    sideKept = !sideKept;
+    panes();
+    return true;
+  }
   const on = !document.documentElement.dataset[which];
   foldSet(which, on);
   try { localStorage.setItem(FOLDS[which][0], on ? "1" : "0"); } catch {}
+  // a sidebar opened by hand while the viewer is open stays open
+  if (which === "side" && !on) sideKept = true;
+  panes();
   return true;
 }
 for (const which of Object.keys(FOLDS)) { try { foldSet(which, localStorage.getItem(FOLDS[which][0]) === "1"); } catch {} }
 
-// The viewer's width: its left edge (view.bend's View.split) drags it, the
-// width is kept in this browser, and a double-click on the edge gives the
-// pane its usual share back. The thread keeps at least 360 px.
+// The panes of a wide page (core/panes.bend decides, app.bend's panes_*):
+// with the viewer open, the sidebar folds by itself where the window
+// cannot hold it, the thread at its minimum and a fair viewer, and comes
+// back when the viewer closes or the window grows; the viewer takes its
+// width (dragged, or its share) but never the thread's minimum. Layout
+// only, like the folds above: data-fold on <html> and --viewer-w. The
+// viewer's left edge (view.bend's View.split) drags its width, kept in
+// this browser; a double-click on the edge gives the pane its share back.
+// The combined view (Split) keeps a width of its own, by default all but
+// the thread's minimum.
 const VIEWER_W = "backplane-viewer-w";
+const VIEWER_W_SPLIT = "backplane-viewer-w.split";
+// the sidebar's width open (style.css's .app columns)
+const SIDE_W = 264;
+let sideKept = false;
+const wide = () => window.matchMedia("(min-width: 761px)").matches;
+const splitOn = () => !!document.querySelector("#viewer.split");
+const viewerKey = () => (splitOn() ? VIEWER_W_SPLIT : VIEWER_W);
 function viewerWidth(w) {
   const root = document.documentElement;
   if (w == null) { root.style.removeProperty("--viewer-w"); return; }
   root.style.setProperty("--viewer-w", `${Math.round(w)}px`);
 }
-function viewerClamp(w) {
-  const app = document.querySelector(".app");
-  const side = app?.querySelector(".sidebar")?.getBoundingClientRect().width ?? 264;
-  const max = (app?.getBoundingClientRect().width ?? window.innerWidth) - side - 360;
-  return Math.max(320, Math.min(w, max));
-}
-try { const w = Number(localStorage.getItem(VIEWER_W)); if (w > 0) viewerWidth(viewerClamp(w)); } catch {}
-// The combined view (Split) shows three panes and takes more room: its
-// own width, kept apart in this browser; by default all but a narrow
-// thread. Leaving it gives the usual width back.
-const VIEWER_W_SPLIT = "backplane-viewer-w.split";
-let splitOn = false;
-const viewerKey = () => (splitOn ? VIEWER_W_SPLIT : VIEWER_W);
-function viewerSplit() {
-  const on = !!document.querySelector("#viewer.split");
-  if (on === splitOn) return;
-  splitOn = on;
+function viewerDrag() {
   let w = 0;
-  try { w = Number(localStorage.getItem(viewerKey())); } catch {}
-  if (w > 0) viewerWidth(viewerClamp(w));
-  else if (on) viewerWidth(viewerClamp((document.querySelector(".app")?.getBoundingClientRect().width ?? window.innerWidth) - (document.querySelector(".app .sidebar")?.getBoundingClientRect().width ?? 264) - 420));
-  else viewerWidth(null);
+  try { w = Number(localStorage.getItem(viewerKey())) || 0; } catch {}
+  return w;
+}
+// what the panes are measured with: the page, the sidebar as the person
+// left it and folded, the rail
+function panesSize() {
+  const app = document.querySelector(".app");
+  const strip = 44; // folded, the sidebar is a strip (style.css)
+  const rail = document.querySelector(".workspace-thread > .workspace-bar")?.getBoundingClientRect().width ?? 0;
+  return { app, w: app?.getBoundingClientRect().width ?? window.innerWidth,
+    side: document.documentElement.dataset.side ? strip : SIDE_W, strip, rail };
+}
+const panesN = (x) => BigInt(Math.max(0, Math.round(x)));
+function panes() {
+  const root = document.documentElement;
+  if (!document.querySelector(".app.panel") || !wide()) {
+    // the viewer shut (or a phone-sized page): the sidebar as it was
+    sideKept = false;
+    delete root.dataset.fold;
+    return;
+  }
+  const s = panesSize();
+  const fold = App.panes_fold(panesN(s.w), panesN(s.side), panesN(s.strip), panesN(s.rail), sideKept);
+  if (fold) root.dataset.fold = "auto"; else delete root.dataset.fold;
+  viewerWidth(Number(App.panes_viewer(panesN(s.w), panesN(s.side), panesN(s.strip), panesN(s.rail), panesN(viewerDrag()), splitOn(), sideKept)));
 }
 document.addEventListener("pointerdown", (e) => {
   const edge = e.target instanceof Element ? e.target.closest(".viewer-split") : null;
@@ -1952,7 +1982,14 @@ document.addEventListener("pointerdown", (e) => {
   edge.classList.add("on");
   document.body.classList.add("resizing");
   let w = pane.getBoundingClientRect().width;
-  const move = (m) => { w = viewerClamp(right - m.clientX); viewerWidth(w); };
+  // a drag moves the viewer's edge beside the sidebar as it is now (it
+  // never folds or brings back the sidebar), the thread kept its minimum
+  const s = panesSize();
+  const side = document.documentElement.dataset.fold ? s.strip : s.side;
+  const move = (m) => {
+    w = Number(App.panes_viewer(panesN(s.w), panesN(side), panesN(s.strip), panesN(s.rail), panesN(Math.max(1, right - m.clientX)), splitOn(), true));
+    viewerWidth(w);
+  };
   const done = () => {
     edge.removeEventListener("pointermove", move);
     edge.removeEventListener("pointerup", done);
@@ -1968,12 +2005,9 @@ document.addEventListener("pointerdown", (e) => {
 document.addEventListener("dblclick", (e) => {
   if (!(e.target instanceof Element) || !e.target.closest(".viewer-split")) return;
   try { localStorage.removeItem(viewerKey()); } catch {}
-  if (splitOn) { splitOn = false; viewerSplit(); } else viewerWidth(null);
+  panes();
 });
-window.addEventListener("resize", () => {
-  const w = parseFloat(document.documentElement.style.getPropertyValue("--viewer-w"));
-  if (w > 0) viewerWidth(viewerClamp(w));
-});
+window.addEventListener("resize", () => panes());
 
 // Socket
 // ------
