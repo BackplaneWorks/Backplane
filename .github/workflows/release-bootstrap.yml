@@ -83,7 +83,18 @@ jobs:
         run: |
           set -euo pipefail
           node inputs/owned-startup.cjs "$GITHUB_WORKSPACE/package/stage" "$GITHUB_WORKSPACE/source" "$GITHUB_WORKSPACE/package/evidence-ascii/RESULT.json"
-          node source/desktop/test/release-smoke.cjs --stage "$GITHUB_WORKSPACE/package/stage" --out "$GITHUB_WORKSPACE/package/evidence"
+          # The unmodified fixture copies process.env into a plain object and
+          # reads SystemRoot. Preserve its real OS value with canonical casing;
+          # plain JS objects do not retain Windows env case-insensitivity.
+          node - <<'JS'
+          const cp=require('node:child_process'),path=require('node:path'),fs=require('node:fs');
+          const env={...process.env},keys=Object.keys(env).filter(k=>k.toLowerCase()==='systemroot');
+          if(keys.length!==1||!path.win32.isAbsolute(env[keys[0]]))throw Error('Expected one real native SystemRoot');
+          const value=env[keys[0]];for(const k of keys)delete env[k];env.SystemRoot=value;
+          const root=process.cwd();fs.writeFileSync('package/FIXTURE-ENVIRONMENT.json',JSON.stringify({scope:'Harness environment key casing only; unmodified product/fixture/compiler bytes',originalKey:keys[0],canonicalKey:'SystemRoot',sameValue:true,originalFailedRun:40759221150},null,2)+'\n');
+          const result=cp.spawnSync(process.execPath,['source/desktop/test/release-smoke.cjs','--stage',path.join(root,'package/stage'),'--out',path.join(root,'package/evidence')],{env,stdio:'inherit'});
+          if(result.error)throw result.error;process.exitCode=result.status===null?1:result.status;
+          JS
       - name: Strict archive after actual native acceptance
         shell: bash
         run: node source/desktop/archive-after-smoke.cjs --stage "$GITHUB_WORKSPACE/package/stage" --evidence "$GITHUB_WORKSPACE/package/evidence" --out "$GITHUB_WORKSPACE/package/acceptance" --dist "$GITHUB_WORKSPACE/package/dist"
@@ -92,6 +103,7 @@ jobs:
         with:
           name: packaged-desktop-windows-x64
           path: |
+            package/FIXTURE-ENVIRONMENT.json
             package/evidence-ascii/
             package/evidence/
             package/acceptance/
