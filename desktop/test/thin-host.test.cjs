@@ -639,3 +639,43 @@ test('the new-messages pill on an earlier page goes straight to the newest page'
  assert.equal(f.host.newest(),true);const req=f.sent.at(-1);assert.equal(req.m,'view.page');assert.equal(req.p.cursor,'');assert.equal(f.host.atNewest(),true);
  f.host.receive(f.reply(req));assert.equal(f.views.at(-1).detail.page.direction,'newest');assert.equal(f.host.newest(),false,'at the newest there is nowhere to go');
 });
+// A search result once named a subagent's log ("@sub:<thread>"), which the
+// hub has no view of: the page stopped on "Conversation unavailable", and
+// every reload asked for it again. A refused selection now goes where the
+// page can show (api.refused), and only a view too big still stops.
+test('a refused selection goes back to a view the page can show, and is not retried',async()=>{
+ const refused=[];let f;f=await fixture({refused:(target,reason)=>{refused.push([target,reason]);return f.host.request('select','A');}});
+ f.open();f.host.request('select','@sub:A');const open=f.sent.at(-1);assert.equal(open.m,'view.open');assert.deepEqual(open.p.target,{kind:'thread',id:'@sub:A'});
+ f.host.receive({t:'reply',id:open.id,ok:false,error:{code:'STALE_VIEW',retryable:false}});
+ assert.deepEqual(refused,[[{kind:'thread',id:'@sub:A'},'STALE_VIEW']]);
+ assert.equal(f.states.some(s=>s.phase==='error'),false,'no stuck "Conversation unavailable"');
+ const back=f.sent.at(-1);assert.equal(back.m,'view.open');assert.deepEqual(back.p.target,{kind:'thread',id:'A'});
+ f.host.receive(f.reply(back));assert.equal(f.host.ready,true);assert.equal(f.getSession().sel,'A');
+ assert.equal(f.sent.filter(x=>x.p.target?.id==='@sub:A').length,1,'the refused view is asked for once');
+});
+test('a refused first view (a reload of a saved selection) falls back too',async()=>{
+ const refused=[];let f;f=await fixture({refused:(target,reason)=>{refused.push(target.id);return f.host.request('select','');}});
+ f.host.greeting(f.greeting);const open=f.sent.at(-1);f.host.receive({t:'reply',id:open.id,ok:false,error:{code:'STALE_VIEW'}});
+ assert.deepEqual(refused,['A']);assert.deepEqual(f.sent.at(-1).p.target,{kind:'recent',id:''});assert.equal(f.states.some(s=>s.phase==='error'),false);
+});
+test('a view too big, or one refused with no way back, still says so',async()=>{
+ const f=await fixture({refused:()=>{throw Error('not asked');}});f.host.greeting(f.greeting);
+ f.host.receive({t:'reply',id:f.sent.at(-1).id,ok:false,error:{code:'LIMIT'}});assert.equal(f.states.at(-1).phase,'error');assert.equal(f.states.at(-1).reason,'LIMIT');
+ const g=await fixture({refused:()=>false});g.host.greeting(g.greeting);
+ g.host.receive({t:'reply',id:g.sent.at(-1).id,ok:false,error:{code:'STALE_VIEW'}});assert.equal(g.states.at(-1).phase,'error');assert.equal(g.states.at(-1).reason,'STALE_VIEW');
+});
+test('an action refused on a view on show is not a refused selection',async()=>{
+ const refused=[],f=await fixture({refused:t=>{refused.push(t);return true;}});f.open();f.host.request('flag','settings');const req=f.sent.at(-1);
+ f.host.receive({t:'reply',id:req.id,ok:false,error:{code:'STALE_VIEW'}});assert.deepEqual(refused,[]);assert.equal(f.states.at(-1).phase,'error');
+});
+test('refusedFallback: the thread on show before, else the project list, never a refused one',async()=>{
+ const {refusedFallback}=await import(process.env.THIN_HOST_MODULE||'../../src/web/thin-host.js');
+ const thread=id=>({kind:'thread',id});
+ assert.equal(refusedFallback(thread('@sub:a'),thread('a'),new Set(['thread:@sub:a'])),'a');
+ assert.equal(refusedFallback(thread('@sub:a'),null,new Set(['thread:@sub:a'])),'');
+ assert.equal(refusedFallback(thread('b'),thread('b'),new Set(['thread:b'])),'');
+ assert.equal(refusedFallback(thread('c'),thread('b'),new Set(['thread:b','thread:c'])),'');
+ assert.equal(refusedFallback(thread('c'),{kind:'bot',id:'x'},new Set(['thread:c'])),'');
+ assert.equal(refusedFallback({kind:'recent',id:''},thread('b'),new Set(['recent:'])),null);
+ assert.equal(refusedFallback(thread('c'),null,new Set(['recent:','thread:c'])),null);
+});

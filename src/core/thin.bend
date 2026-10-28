@@ -409,10 +409,11 @@ def Search.none() -> SearchPage:
 def Search.gone.but(+gone: Map<&2, Bool>, +th: String) -> Map<&2, Bool>:
   Bool.pick(Map<&2, Bool>, String.is_empty(th), gone, Map.set(&2, Bool, gone, th, True{}))
 
-# the threads a search over every thread leaves out: deleted ones
+# the threads a search over every thread leaves out: deleted ones, and
+# their subagents' logs (model.bend's Bg.log)
 def Search.gone.k(gone: Bool, +id: String, acc: Map<&2, Bool>) -> Map<&2, Bool>:
   match gone:
-    case True{}: Map.set(&2, Bool, acc, id, True{})
+    case True{}: Map.set(&2, Bool, Map.set(&2, Bool, acc, id, True{}), M.Bg.log(id), True{})
     case False{}: acc
 
 def Search.gone.go(ts: List<&2, M.Thread>, acc: Map<&2, Bool>) -> Map<&2, Bool>:

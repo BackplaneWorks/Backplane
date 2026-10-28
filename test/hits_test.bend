@@ -105,6 +105,17 @@ def main() -> IO(Unit):
     C.Check.str("the open thread's own result is still found", search.ids(T.Index.search.in(b, "needle", "a")), "1,")
     C.Check.str("and comes first, a page still 25", search.ids(T.Search.join(T.Index.search.in(b, "needle", "a"), T.Index.search.rest(b, "needle", T.Search.gone.but(Map.new(&2, Bool), "a"), T.Search.left(T.Index.search.in(b, "needle", "a")), 0n))),
       "1,201,200,199,198,197,196,195,194,193,192,191,190,189,188,187,186,185,184,183,182,181,180,179,178,")
+    # a subagent's step (logged under "@sub:<thread>", model.bend's
+    # Bg.log) opens its thread, at the call that started the subagent;
+    # the hub refused a view of "@sub:a" (the page stuck on "Conversation
+    # unavailable", and again after every reload)
+    C.Check.str("a subagent's step is its thread's", H.Hits.owner("@sub:a"), "a")
+    C.Check.str("a thread is its own", H.Hits.owner("a"), "a")
+    C.Check.str("a subagent's step shows its call", H.Hits.jump(M.Act{"call1/m:0", "@sub:a", "call1", "say", "the narwhal", 5n}), "call1")
+    C.Check.str("an entry of a thread shows itself", H.Hits.jump(M.Act{"call1", "a", "tool", "Agent", "the narwhal", 5n}), "call1")
+    C.Check.str("a message shows itself", H.Hits.jump(M.Msg{"m1", "a", M.User{}, "the narwhal", 1n}), "m1")
+    +subs : T.Index = T.Index.post(T.Index.post(i, M.Act{"c1/m:0", "@sub:a", "c1", "say", "a narwhal in a", 4n}), M.Act{"c2/m:0", "@sub:b", "c2", "say", "a narwhal in b", 5n})
+    C.Check.str("a deleted thread's subagents are left out too", search.ids(T.Index.search.all(subs, "narwhal", T.Search.gone(st), 0n)), "4,3,1,")
     +many : T.Index = busy.in(30n, "d", busy(30n, T.Index.empty()))
     C.Check.str("at most ten of the open thread's", ids2(T.Index.search.in(many, "needle", "c")), "10")
     C.Check.str("and the others' fill the page", search.ids(T.Search.join(T.Index.search.in(many, "needle", "c"), T.Index.search.rest(many, "needle", T.Search.gone.but(Map.new(&2, Bool), "c"), T.Search.left(T.Index.search.in(many, "needle", "c")), 0n))),
