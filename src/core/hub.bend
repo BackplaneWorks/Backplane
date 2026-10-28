@@ -478,7 +478,7 @@ def Hub.post.go(wait: Bool, +t: M.Thread, +cwd: String, +queued: String, +now: N
       Step{List.concat(&2, M.Change, [[M.MessagePosted{thread, msg, role, text, now}],
           Bool.pick(List<&2, M.Change>, String.is_empty(queued), Nil{}, [M.QueueTaken{thread, now}]),
           [M.TurnChanged{thread, M.Running{}, now}]]),
-        Git{0, "", "checkpoint0", thread, cwd, "", ""} <> Git{0, "", "step", thread, cwd, msg, ""} <> Hub.run(t, cwd, M.Queue.join(queued, text), Hub.uuid(now, thread ++ "/" ++ msg))}
+        Git{0, "", "checkpoint0", thread, cwd, "", ""} <> Git{0, "", "step", thread, cwd, msg, "start"} <> Hub.run(t, cwd, M.Queue.join(queued, text), Hub.uuid(now, thread ++ "/" ++ msg))}
 
 def Step.after(st: Step, more: List<&2, M.Change>) -> Step:
   match st:
@@ -1011,7 +1011,7 @@ def Wt.start.k(go: Bool, +first: Bool, +t: M.Thread, +cwd: String, +queued: Stri
   match go:
     case True{}:
       Step{[M.QueueTaken{thread, now}, M.TurnChanged{thread, M.Running{}, now}],
-        Git{0, "", "checkpoint0", thread, cwd, "", ""} <> Git{0, "", "step", thread, cwd, "", ""} <> List.append(&2, Out, Wt.name(first, t, queued), Hub.run(t, cwd, queued, Hub.uuid(now, thread ++ "/w/" ++ Nat.show(seq))))}
+        Git{0, "", "checkpoint0", thread, cwd, "", ""} <> Git{0, "", "step", thread, cwd, "", "start"} <> List.append(&2, Out, Wt.name(first, t, queued), Hub.run(t, cwd, queued, Hub.uuid(now, thread ++ "/w/" ++ Nat.show(seq))))}
     case False{}:
       Step.none()
 
@@ -2440,7 +2440,7 @@ def Ride.taken(+s: M.State, +now: Nat, +thread: String) -> List<&2, M.Change>:
 # a turn started with the ride (after the legacy queue, if any)
 def Ride.run(+t: M.Thread, +cwd: String, +queued: String, +v: String, +now: Nat, +thread: String) -> Step:
   Step{List.concat(&2, M.Change, [Ride.done(v, now, thread, "with a new turn"), Bool.pick(List<&2, M.Change>, String.is_empty(queued), Nil{}, [M.QueueTaken{thread, now}]), [M.TurnChanged{thread, M.Running{}, now}]]),
-    Git{0, "", "checkpoint0", thread, cwd, "", ""} <> Git{0, "", "step", thread, cwd, Ride.last(v), ""} <> Hub.run(t, cwd, M.Queue.join(queued, RD.Ride.input(v)), Hub.uuid(now, thread ++ "/r/" ++ Ride.last(v)))}
+    Git{0, "", "checkpoint0", thread, cwd, "", ""} <> Git{0, "", "step", thread, cwd, Ride.last(v), "start"} <> Hub.run(t, cwd, M.Queue.join(queued, RD.Ride.input(v)), Hub.uuid(now, thread ++ "/r/" ++ Ride.last(v)))}
 
 def Ride.start.k(empty: Bool, +s: M.State, +now: Nat, +th: String) -> Step:
   match empty:
@@ -3009,7 +3009,7 @@ def Queue.steer.k(m: Maybe<&2, M.QItem>, +run: Bool, +s: M.State, +now: Nat, +cl
       Step.before([M.QueueTakenOne{thread, msg, now}], [Reply.ok(client, id)], Steer.go(Hub.thread(s, thread), Hub.cwd(s, Hub.thread(s, thread)), now, Hub.seq(s), thread, text))
     case Some{M.QItem{+msg, +text}} False{}:
       Step{[M.QueueTakenOne{thread, msg, now}, M.TurnChanged{thread, M.Running{}, now}],
-        Reply.ok(client, id) <> Git{0, "", "checkpoint0", thread, Hub.cwd(s, Hub.thread(s, thread)), "", ""} <> Git{0, "", "step", thread, Hub.cwd(s, Hub.thread(s, thread)), "", ""} <> Hub.run(Hub.thread(s, thread), Hub.cwd(s, Hub.thread(s, thread)), text, Hub.uuid(now, thread ++ "/" ++ msg))}
+        Reply.ok(client, id) <> Git{0, "", "checkpoint0", thread, Hub.cwd(s, Hub.thread(s, thread)), "", ""} <> Git{0, "", "step", thread, Hub.cwd(s, Hub.thread(s, thread)), "", "start"} <> Hub.run(Hub.thread(s, thread), Hub.cwd(s, Hub.thread(s, thread)), text, Hub.uuid(now, thread ++ "/" ++ msg))}
     case None{} _:
       Step.outs([Reply.err(client, id, "no such queued message")])
 
@@ -7048,7 +7048,7 @@ def Task.repair.has(has: Bool, wake: Bool, +s: M.State, +now: Nat, +id: String, 
   match has wake:
     case True{} True{}:
       Step{[M.TurnChanged{parent, M.Running{}, now}, M.TaskDelivered{id, now}],
-        Git{0, "", "checkpoint0", parent, Hub.cwd(s, Hub.thread(s, parent)), "", ""} <> Git{0, "", "step", parent, Hub.cwd(s, Hub.thread(s, parent)), "", ""}
+        Git{0, "", "checkpoint0", parent, Hub.cwd(s, Hub.thread(s, parent)), "", ""} <> Git{0, "", "step", parent, Hub.cwd(s, Hub.thread(s, parent)), "", "start"}
           <> Hub.run(Hub.thread(s, parent), Hub.cwd(s, Hub.thread(s, parent)), text, Hub.uuid(now, parent ++ "/r/" ++ id))}
     case True{} False{}:
       Step{[M.TaskDelivered{id, now}], Nil{}}

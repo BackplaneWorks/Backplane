@@ -3007,14 +3007,15 @@ def StepJob.log(+inbox: Chan(Msg), +thread: String, +id: String, +rec: String) -
     ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, Commit{[M.ActivityLogged{thread, id, HI.Step.tone(), "kicad", rec, now}]})
     return Unit{}
 
-def StepJob.done(+inbox: Chan(Msg), +thread: String, +entry: String, +out: String) -> IO(Unit):
-  +rec = HI.Hist.record(out, entry)
+def StepJob.done(+inbox: Chan(Msg), +thread: String, +entry: String, +when: String, +out: String) -> IO(Unit):
+  +rec = HI.Hist.record.at(out, entry, when)
   Bool.pick(IO(Unit), String.is_empty(rec), IO.pure(Unit, Unit{}),
     StepJob.log(inbox, thread, "step:" ++ String.trim(HI.Hist.at(String.split(out, '\n'), 0n)), rec))
 
-def StepJob.run(+inbox: Chan(Msg), +thread: String, +cwd: String, +entry: String, +home: String) -> IO(Unit):
+# (when: "start" at a turn's start, core/hist.bend's Step.base)
+def StepJob.run(+inbox: Chan(Msg), +thread: String, +cwd: String, +entry: String, +when: String, +home: String) -> IO(Unit):
   Bool.pick(IO(Unit), String.is_empty(cwd), IO.pure(Unit, Unit{}),
-    IO.bind(String, Unit, GT.Git.step.capture(cwd, thread, GT.Git.step.reg(home)), out => StepJob.done(inbox, thread, entry, out)))
+    IO.bind(String, Unit, GT.Git.step.capture(cwd, thread, GT.Git.step.reg(home)), out => StepJob.done(inbox, thread, entry, when, out)))
 
 def RefsJob.files(f: K.Files) -> List<&2, J.KV>:
   match f:
@@ -3107,7 +3108,7 @@ def GitJob.run.k(i: Nat, +tx: AG.Tx, +job: String, +inbox: Chan(Msg), +client: U
     case 10n:
       Mech.render(inbox, client, id, thread, cwd, a)
     case 11n:
-      StepJob.run(inbox, thread, cwd, a, home)
+      StepJob.run(inbox, thread, cwd, a, b, home)
     case 12n:
       RefsJob.run(inbox, client, id, thread, cwd)
     case 13n:

@@ -47,7 +47,7 @@
     "src/core/google.bend": "196ba6d77f7c0e4b8d982d3fb259302752db1f27974b2d49a0123d092fbbb09e",
     "src/core/handoff.bend": "690d78b37f32187a3356d3df2ccb90aafa6d8b1f7234a5583dcbd55baadb55e4",
     "src/core/hier.bend": "c472552a9386d19ace94db4fa82c1a805452f9c3b2fe1f2850fbbc83018255dc",
-    "src/core/hist.bend": "fac0d2e2231ad699476497c173d4d97b78551c3c65c207b974721f956105b5f2",
+    "src/core/hist.bend": "e4fabad6cde2af311b8526a88b404d53fb92b481084eccea6ec424602d9a1c75",
     "src/core/hot.bend": "d1d28df84cf63261cb39a5e69d4fe84228933901e5030d730454f2c27cc270d3",
     "src/core/i18n.bend": "92cae5df736659757d9a2a4cf44931b34f618220b78440711a4afecb2cf8d867",
     "src/core/icons.bend": "e61b8148f134319cf75771f45715032cc2aebc0d10e76d6690f8a2d547324172",
@@ -143,7 +143,7 @@
     "src/web/space.bend": "b86a265e41a900498bc33c37c0404c4d6678554efe3d9054f329beb2cf35ee63",
     "src/web/usage-graph.bend": "fa06f7d2bf855a396a5f7a7b4725dfaa990145fbbcefe7ad21ae8f9a698a2679",
     "src/web/usage-page.bend": "706e3f17a4a3e5f159656d47aeb76a940d4825421f5c33228f9aef692ec926e3",
-    "src/web/view.bend": "08d7c38814e60895401ac7a6f9de9897cb35a52c3a6933b19a1afadbbd664e7a"
+    "src/web/view.bend": "0f9fdce7b4b0c77da59c547b333e182b9b53c0bd85ce189d47c63d6d03adc4cf"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -253,5 +253,5 @@
       "sourceSnapshot": "/home/h/Documents/i2cjak/bp-coord/settle-fresh-work/SOURCE-structural-correction.json"
     }
   },
-  "reviewNote": "Stamps: a stopped turn's message marked; the sidebar draft does not read it"
+  "reviewNote": "Design changes: the design before the edits is no change (Hist.seen, Hist.changes); the sidebar draft does not read steps"
 }

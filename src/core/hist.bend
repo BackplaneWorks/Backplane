@@ -197,17 +197,23 @@ def SFile.pairs(xs: List<&2, String>) -> List<&2, SFile>:
     case _:
       Nil{}
 
-def Hist.record.k(+ls: List<&2, String>, +entry: String) -> String:
+def Hist.record.k(+ls: List<&2, String>, +entry: String, +ws: List<&2, J.KV>) -> String:
   Bool.pick(String, String.is_empty(String.trim(Hist.at(ls, 0n))), "",
-    J.Json.show(J.Json.obj([J.KV{"e", J.Str{entry}}, J.KV{"c", J.Str{String.trim(Hist.at(ls, 0n))}}, J.KV{"p", J.Str{String.trim(Hist.at(ls, 1n))}},
+    J.Json.show(J.Json.obj(List.append(&2, J.KV, [J.KV{"e", J.Str{entry}}, J.KV{"c", J.Str{String.trim(Hist.at(ls, 0n))}}, J.KV{"p", J.Str{String.trim(Hist.at(ls, 1n))}},
       J.KV{"g", J.Str{String.trim(Hist.at(ls, 2n))}}, J.KV{"t", J.Str{String.trim(Hist.at(ls, 3n))}},
-      J.KV{"f", J.Json.arr(SFile.lines(SFile.pairs(String.split(String.join(List.drop(&2, String, ls, 4n), "\n"), Chr{0}))))}])))
+      J.KV{"f", J.Json.arr(SFile.lines(SFile.pairs(String.split(String.join(List.drop(&2, String, ls, 4n), "\n"), Chr{0}))))}], ws))))
 
 # the capture script's output (commit, previous commit, git dir and top a
 # line each, then git's NUL-separated status and path of each file
 # changed) as a step's record; "" when nothing changed
 def Hist.record(+out: String, +entry: String) -> String:
-  Hist.record.k(String.split(out, '\n'), entry)
+  Hist.record.k(String.split(out, '\n'), entry, Nil{})
+
+# the same, saying when it was taken ("w": "start" at a turn's start,
+# before the agent runs; "" after a tool call or at the turn's end), so
+# the design as it was before is told from a first edit (Step.base)
+def Hist.record.at(+out: String, +entry: String, +when: String) -> String:
+  Hist.record.k(String.split(out, '\n'), entry, [J.KV{"w", J.Str{when}}])
 
 def Step.read(+id: String, +at: Nat, +o: J.Json) -> Step:
   Step{id, J.Json.get_str(o, "e", ""), J.Json.get_str(o, "c", ""), J.Json.get_str(o, "p", ""), J.Json.get_str(o, "g", ""), J.Json.get_str(o, "t", ""),
@@ -753,6 +759,56 @@ def Step.row.k(m: Maybe<&2, Step>) -> String:
 # step is the design as it was before)
 def Hist.row(e: M.Entry) -> String:
   Step.row.k(Step.of(e))
+
+# The design as it was before
+# ---------------------------
+# A thread's first step (no step before it) taken at a turn's start is
+# the design as the agent found it: every file shows as new, yet nothing
+# changed. It stays a version for the viewer's history to compare with,
+# but it is no design change: the timeline leaves it out (Hist.seen) and
+# the top bar's count does not count it (Hist.changes). A first step taken
+# after a tool call (the agent made the first board) is a change. Records
+# from before "w" was written say only that they are first.
+
+def Step.base.k(first: Bool, +summary: String) -> Bool:
+  match first:
+    case True{}:
+      Bool.or(String.contains(summary, "\"w\":\"start\""), Bool.not(String.contains(summary, "\"w\":")))
+    case False{}:
+      False{}
+
+def Step.base(e: M.Entry) -> Bool:
+  match e:
+    case M.Act{_, _, +tone, _, +summary, _}:
+      Bool.and(String.eq(tone, Step.tone()), Step.base.k(String.contains(summary, "\"p\":\"\""), summary))
+    case M.Msg{_, _, _, _, _}:
+      False{}
+
+def Hist.seen.k(base: Bool, e: M.Entry, rest: List<&2, M.Entry>) -> List<&2, M.Entry>:
+  match base:
+    case True{}:
+      rest
+    case False{}:
+      e <> rest
+
+# entries without the design as it was before (in order)
+def Hist.seen(es: List<&2, M.Entry>) -> List<&2, M.Entry>:
+  match es:
+    case Nil{}:
+      Nil{}
+    case +e <> t:
+      Hist.seen.k(Step.base(e), e, Hist.seen(t))
+
+def Hist.changes.go(es: List<&2, M.Entry>, +n: Nat) -> Nat:
+  match es:
+    case Nil{}:
+      n
+    case +e <> t:
+      Hist.changes.go(t, Bool.pick(Nat, Step.base(e), n, 1n+n))
+
+# how many design changes a thread's steps (M.State.steps) are
+def Hist.changes(es: List<&2, M.Entry>) -> Nat:
+  Hist.changes.go(es, 0n)
 
 # Comparing by layer and by sheet (docs/design-review.md)
 # --------------------------------------------------------

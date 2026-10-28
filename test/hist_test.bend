@@ -70,6 +70,20 @@ def Show.ids(ss: List<&2, H.Step>) -> String:
     case +s <> t:
       H.Step.id(s) ++ " " ++ Show.ids(t)
 
+def yes(b: Bool) -> String:
+  match b:
+    case True{}:
+      "yes"
+    case False{}:
+      "no"
+
+def Show.ids.e(xs: List<&2, M.Entry>) -> String:
+  match xs:
+    case Nil{}:
+      ""
+    case +e <> +t:
+      Bool.pick(String, List.is_empty(&2, M.Entry, t), M.Idx.id(e), M.Idx.id(e) ++ "," ++ Show.ids.e(t))
+
 def newest() -> List<&2, M.Entry>:
   List.reverse(&2, M.Entry, es())
 
@@ -158,6 +172,14 @@ def main() -> IO(Unit):
     C.Check.str("record empty", H.Hist.record("", "x"), "")
     C.Check.str("record: a path with a newline", H.Hist.record("c\n\n/g\n/t\n" ++ z("A") ++ z("a\nb.kicad_pcb"), ""), "{\"e\":\"\",\"c\":\"c\",\"p\":\"\",\"g\":\"/g\",\"t\":\"/t\",\"f\":[\"A\\ta\\nb.kicad_pcb\"]}")
     C.Check.str("record", H.Hist.record(out2(), "a1"), "{\"e\":\"a1\",\"c\":\"c2\",\"p\":\"c1\",\"g\":\"/r/.git\",\"t\":\"/r\",\"f\":[\"M\\tb.kicad_pcb\"]}")
+    C.Check.str("record: when it was taken", H.Hist.record.at(out2(), "a1", "start"), "{\"e\":\"a1\",\"c\":\"c2\",\"p\":\"c1\",\"g\":\"/r/.git\",\"t\":\"/r\",\"f\":[\"M\\tb.kicad_pcb\"],\"w\":\"start\"}")
+    C.Check.str("the design before the edits: a first step at a turn's start", yes(H.Step.base(step("s", H.Hist.record.at(out1(), "u", "start"), 2n))), "yes")
+    C.Check.str("a first step after a tool call is a change", yes(H.Step.base(step("s", H.Hist.record.at(out1(), "a1", ""), 2n))), "no")
+    C.Check.str("a later step at a turn's start is a change", yes(H.Step.base(step("s", H.Hist.record.at(out2(), "u", "start"), 2n))), "no")
+    C.Check.str("an older record's first step is the design before", yes(H.Step.base(step("s", H.Hist.record(out1(), "u"), 2n))), "yes")
+    C.Check.str("an older record's later step is a change", yes(H.Step.base(step("s", H.Hist.record(out2(), "a1"), 2n))), "no")
+    C.Check.str("the timeline leaves the design before out", Show.ids.e(H.Hist.seen(es())), "u,m1,a1,step:c2,a2,step:c3,m2,step:c4")
+    C.Check.str("changes: the steps less the design before", Nat.show(H.Hist.changes(M.State.steps(state(), "t"))), "3")
     C.Check.str("steps", Show.ids(H.Hist.steps(state(), "t")), "step:c1 step:c2 step:c3 step:c4 ")
     C.Check.str("board track", Show.ids(H.Hist.track(H.Hist.steps(state(), "t"), 0n)), "step:c1 step:c2 step:c4 ")
     C.Check.str("schematic track (a deletion shows nothing)", Show.ids(H.Hist.track(H.Hist.steps(state(), "t"), 1n)), "step:c1 step:c3 ")
