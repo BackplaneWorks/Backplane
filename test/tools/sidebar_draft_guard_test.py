@@ -25,10 +25,8 @@ class SidebarDraftGuard(unittest.TestCase):
 
     def inject_body_read(self, root):
         path = root / "src/web/view.bend"
-        original = "  View.sidebar.frame.raw(lc, bots, u, plain, signals, U.Side.rows.ix(U.Ui.state(u), plain, U.Side.now(u)))"
-        injected = ('  D.El{"div", "", Nil{}, [D.Txt{U.Draft.of(u)}, '
-                    'View.sidebar.frame.raw(lc, bots, u, plain, signals, '
-                    'U.Side.rows.ix(U.Ui.state(u), plain, U.Side.now(u)))]}')
+        original = "  View.sidebar.frame.raw(lc, bots, u, plain, signals, U.Side.rows.ix.at(U.Ui.state(u), plain, U.Side.now(u), U.Side.cur.held(U.Ui.state(u), U.Ui.sel(u), U.Side.now(u))))"
+        injected = '  D.El{"div", "", Nil{}, [D.Txt{U.Draft.of(u)}, ' + original.strip() + ']}'
         source = path.read_text()
         self.assertEqual(source.count(original), 1)
         path.write_text(source.replace(original, injected))
@@ -80,6 +78,25 @@ class SidebarDraftGuard(unittest.TestCase):
             path.write_text(path.read_text() + "\n# selected projection dependency changed\n")
             with self.assertRaisesRegex(guard.GuardError, "thin-mirror.bend"):
                 guard.check(root)
+
+    def test_native_bound_bridges_mutation_and_missing_pin_fail_closed(self):
+        for name in ["src/core/native-sidebar.bend", "src/mobile/screen.bend",
+                     "src/mobile/hubs.bend", "src/core/thin-wire.bend"]:
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                self.copy_review(root)
+                guard.check(root)
+                path = root / name
+                path.write_text(path.read_text() + "\n# unreviewed native dependency change\n")
+                with self.assertRaises(guard.GuardError):
+                    guard.check(root)
+                self.copy_review(root)
+                manifest = root / guard.MANIFEST
+                reviewed = json.loads(manifest.read_text())
+                del reviewed["files"][name]
+                manifest.write_text(json.dumps(reviewed))
+                with self.assertRaises(guard.GuardError):
+                    guard.check(root)
 
     def test_build_and_cached_key_reject_body_read_before_any_tool_or_output(self):
         with tempfile.TemporaryDirectory() as temp:

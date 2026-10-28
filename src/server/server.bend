@@ -1,5 +1,6 @@
 import Base
 import ../core/signal.bend as SGR
+import ../core/native-sidebar.bend as NATIVE_SIDE
 import ./mailcontext.bend as MCTX
 import ./telemetry.bend as TI
 import ./telemetry-ui.bend as TUI
@@ -11834,6 +11835,61 @@ def Hub.thin.fetch.source(far: Bool, memory: Bool, +cfg: Cfg, +st: M.State, +hid
 def Hub.thin.fetch(memory: Bool, +cfg: Cfg, +st: M.State, +hide: Bool, +thread: String, +anchor: Nat) -> IO(TSTO.Page):
   Hub.thin.fetch.source(FR.Fr.is(thread), memory, cfg, st, hide, thread, anchor)
 
+# Negotiated native metadata is fitted before the normal mandatory reply
+# gate. Trials share a single post-action value and cannot repeat commands.
+def Hub.thin.native_fit.envelope(+o: J.Json, result: J.Json, context: ThinContext, revision: Nat) -> J.Json:
+  J.Json.obj([J.KV{"t", J.Str{"reply"}}, J.KV{"id", Maybe.default(&2, J.Json, J.Json.get(o, "id"), J.Null{})}, J.KV{"ok", J.Flag{True{}}},
+    J.KV{"result", Hub.thin.result(result, J.Json.get_obj(o, "p"), ThinContext.view(context), "mobile", revision)}])
+
+def Hub.thin.native_fit.anchor(ids: List<&2, String>, +index: THIN.Index, +anchor: String, +position: Nat) -> Nat:
+  match ids:
+    case Nil{}: 0n
+    case id <> tail:
+      Bool.pick(Nat, String.eq(M.Idx.id(THIN.Row.entry(THIN.Index.row(index, TV.Page.number(id)))), anchor), Nat.add(position, 1n), Hub.thin.native_fit.anchor(tail, index, anchor, Nat.add(position, 1n)))
+
+def Hub.thin.native_fit.rows(+rows: List<&2, String>, index: THIN.Index, p: J.Json) -> List<&2, String>:
+  List.take(&2, String, rows, Nat.max(Hub.thin.native_fit.anchor(rows, index, J.Json.get_str(J.Json.get_obj(p, "anchor"), "id", ""), 0n), Nat.max(1n, Nat.div(List.length(&2, String, rows), 2n))))
+
+def Hub.thin.native_fit.loop(fuel: Nat, fits: Bool, rendered: TA.Rendered, +acted: TA.Acted, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat,
+    +context: ThinContext, +p: J.Json, +key: String, +ms: Nat, +shown: M.State, +index: THIN.Index, +epoch: String, +rows: List<&2, String>, +stream: TLIVE.Stream, +revision: Nat, +version: Nat) -> IO(Hub):
+  match fuel fits:
+    case 0n _:
+      Hub.thin.rendered(rendered, h, client, o, c, now, context)
+    case _ True{}:
+      Hub.thin.rendered(rendered, h, client, o, c, now, context)
+    case 1n+k False{}:
+      +a2 = TA.Acted.reduce(acted)
+      +next = Hub.thin.native_fit.rows(rows, index, p)
+      +trial = TA.Rendered.remember.clock(TA.Actor.render.acted(a2, False{}, shown, index, p, epoch, now, next, stream, revision), key, ms, now, stream, False{}, p)
+      Hub.thin.native_fit.loop(k, Nat.is_le(J.Json.bytes(Hub.thin.native_fit.envelope(o, TA.Rendered.result(trial), context, version)), 262144n), trial,
+        a2, h, client, o, c, now, context, p, key, ms, shown, index, epoch, next, stream, revision, version)
+
+def Hub.thin.native_fit.start(+acted: TA.Acted, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, +context: ThinContext, +p: J.Json,
+    +key: String, +ms: Nat, +shown: M.State, +index: THIN.Index, +epoch: String, +rows: List<&2, String>, +stream: TLIVE.Stream, +revision: Nat, +version: Nat) -> IO(Hub):
+  +trial = TA.Rendered.remember.clock(TA.Actor.render.acted(acted, False{}, shown, index, p, epoch, now, rows, stream, revision), key, ms, now, stream, False{}, p)
+  Hub.thin.native_fit.loop(8n, Nat.is_le(J.Json.bytes(Hub.thin.native_fit.envelope(o, TA.Rendered.result(trial), context, version)), 262144n), trial,
+    acted, h, client, o, c, now, context, p, key, ms, shown, index, epoch, rows, stream, revision, version)
+
+def Hub.thin.native_fit.choose(native: Bool, actor: TA.Actor, +web: Bool, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, +context: ThinContext, +p: J.Json,
+    +key: String, +ms: Nat, +shown: M.State, +index: THIN.Index, +epoch: String, +rows: List<&2, String>, +stream: TLIVE.Stream, +revision: Nat, version: Nat) -> IO(Hub):
+  match native:
+    case True{}:
+      Hub.thin.native_fit.start(TA.Actor.acted(actor, False{}, p, epoch, now), h, client, o, c, now, context, p, key, ms, shown, index, epoch, rows, stream, revision, version)
+    case False{}:
+      Hub.thin.rendered(TA.Rendered.remember.clock(TA.Actor.render.revision(actor, web, shown, index, p, epoch, now, rows, stream, revision), key, ms, now, stream, web, p), h, client, o, c, now, context)
+
+def Hub.thin.native_key.fresh(fresh: Bool, old: String) -> IO(String):
+  match fresh:
+    case True{}: Token.fresh()
+    case False{}: IO.pure(String, old)
+
+def Hub.thin.native_key(on: Bool, a: TA.Actor, p: J.Json, epoch: String, view: String) -> IO(String):
+  match on:
+    case False{}: IO.pure(String, "")
+    case True{}:
+      +old = NATIVE_SIDE.Ns.retained_key(TA.Actor.ui(a), p, epoch, view)
+      Hub.thin.native_key.fresh(Bool.not(NATIVE_SIDE.Ns.key_valid(old)), old)
+
 def Hub.thin.render.page.v(+v: SEC.Vault, +pg: TSTO.Page, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, +context: ThinContext, +p: J.Json, +key: String, +ms: Nat) -> IO(Hub):
   match h:
     case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
@@ -11844,8 +11900,11 @@ def Hub.thin.render.page.v(+v: SEC.Vault, +pg: TSTO.Page, h: Hub, +client: U32, 
       +stream = TLIVE.Stream.get(Cfg.thin.streams(cfg), TV.Target.thread(st, J.Json.get_obj(p, "target")))
       +actor = TA.Actor.mail_cache(TA.Actor.refresh(ThinContext.actors(context), web, shown, SEC.Sec.json(v, Hub.info(cfg)),
         J.Json.obj([J.KV{"t", J.Str{"live"}}, J.KV{"items", J.Json.arr(Nil{})}]), now, p, ThinContext.view(context)), ThinContext.actors(context), Cfg.thin.mail(cfg))
-      Hub.thin.rendered(TA.Rendered.remember.clock(TA.Actor.render.revision(actor, web, shown, TSTO.Page.index(pg), p, epoch, now, TSTO.Page.ids(pg), stream, Hub.thin.view_revision(cfg, thread)), key, ms, now, stream, web, p),
-        Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now, context)
+      do IO<Hub>:
+        +secret : String <- Hub.thin.native_key(NATIVE_SIDE.Ns.offered(web, p), actor, p, epoch, ThinContext.view(context))
+        +prepared : TA.Actor = TA.Actor.native.prepare(actor, web, p, epoch, ThinContext.view(context), Cfg.thin.signal_seq(cfg), secret)
+        Hub.thin.native_fit.choose(NATIVE_SIDE.Ns.offered(web, p), prepared, web, Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now, context, p,
+          key, ms, shown, TSTO.Page.index(pg), epoch, TSTO.Page.ids(pg), stream, Hub.thin.view_revision(cfg, thread), Cfg.thin.revision(cfg))
 
 # (the info the view is made from, masked with the vault as it is now)
 def Hub.thin.render.page(+pg: TSTO.Page, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, +context: ThinContext, +p: J.Json, +key: String, +ms: Nat) -> IO(Hub):
@@ -11878,7 +11937,7 @@ def Hub.thin.render.current(h: Hub, +client: U32, +o: J.Json, +c: Client, +now: 
       +p = Hub.thin.input(String.eq(J.Json.get_str(o, "m", ""), "view.action"), J.Json.get_obj(o, "p"), ThinContext.cid(context))
       +web = String.eq(Client.thin.mode(c), "view-web")
       +thread = TV.Target.thread(st, J.Json.get_obj(p, "target"))
-      +key = TA.Memo.key(M.State.seq(st), Hub.thin.view_key(st, cfg, thread), p, anchor, ThinContext.view(context), web, thread)
+      +key = TA.Memo.key(M.State.seq(st), Hub.thin.view_key(st, cfg, thread), p, anchor, ThinContext.view(context), web, thread) ++ TA.Actor.native.key(ThinContext.actors(context))
       Hub.thin.render.memo(TA.Memo.reply.clock(TA.Actor.memos(ThinContext.actors(context)), String.eq(J.Json.get_str(o, "m", ""), "view.update"), key, ms, now, web,
         TLIVE.Stream.get(Cfg.thin.streams(cfg), thread), thread, Hub.thin.view_epoch(st, cfg, thread), J.Json.get_obj(p, "target"), TA.Actor.loc(ThinContext.actors(context))),
         Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, c, now, context, anchor, p, key, ms)
@@ -12001,10 +12060,21 @@ def Hub.thin.message(h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat) ->
 def Hub.thin.sends(+action: String) -> Bool:
   Bool.or(String.eq(action, "send"), String.eq(action, "send-alt"))
 
-def Hub.thin.act(send: Bool, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat) -> IO(Hub):
+def Hub.thin.act.ordinary(send: Bool, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat) -> IO(Hub):
   match send:
     case True{}: Hub.thin.render(h, client, o, c, now, Hub.thin.context.for(False{}, J.Json.get_obj(o, "p"), c, "", 0n), 0n)
     case False{}: Hub.thin.render(h, client, o, c, now, Client.thin.context(c), ThinContext.anchor(Client.thin.context(c)))
+
+def Hub.thin.act.native(valid: Bool, send: Bool, h: Hub, client: U32, o: J.Json, c: Client, now: Nat) -> IO(Hub):
+  match valid:
+    case False{}: Hub.thin.error(h, client, o, "INVALID_REQUEST")
+    case True{}: Hub.thin.act.ordinary(send, h, client, o, c, now)
+
+def Hub.thin.act(+send: Bool, h: Hub, client: U32, +o: J.Json, +c: Client, now: Nat) -> IO(Hub):
+  +p = J.Json.get_obj(o, "p")
+  Hub.thin.act.native(Bool.or(Bool.not(String.eq(J.Json.get_str(p, "action", ""), "native-sidebar-page")),
+    Bool.and(NATIVE_SIDE.Ns.offered(String.eq(Client.thin.mode(c), "view-web"), p), TA.Actor.native.valid(ThinContext.actors(Client.thin.context(c)), p))), send, h, client, o, c, now)
+
 
 def Hub.thin.dispatch(+kind: Nat, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat) -> IO(Hub):
   match kind h:
