@@ -18,6 +18,7 @@ jobs:
     timeout-minutes: 15
     env:
       PYTHONUTF8: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
       PYTHON: python
       BACKPLANE_TELEMETRY: 'off'
       BACKPLANE_DESKTOP_BROWSER: '1'
@@ -69,13 +70,14 @@ jobs:
           set -euo pipefail
           python - <<'PY'
           import pathlib,subprocess,hashlib,json,os
-          root=pathlib.Path.cwd();s=root/'source';raw=s/'build/bootstrap-js';binary=raw/'backplane-serve.exe';before=hashlib.sha256(binary.read_bytes()).hexdigest()
+          root=pathlib.Path.cwd();s=root/'source';raw=s/'build/bootstrap-js';binary=raw/'backplane-serve.exe';before=hashlib.sha256(binary.read_bytes()).hexdigest();out=root/'package';out.mkdir()
+          (out/'SOURCE-STATUS.txt').write_text(subprocess.check_output(['git','-C',str(s),'status','--porcelain','--untracked-files=all'],text=True))
           assert subprocess.check_output(['git','-C',str(s),'rev-parse','HEAD'],text=True).strip()=='74d943b7db3ceab37893b350308cf1802f38fe6b'
           assert subprocess.check_output(['git','-C',str(s),'rev-parse','HEAD^{tree}'],text=True).strip()=='a9231b10c14aeb0af2306dd7ee022922802d6e53'
           run=lambda *args:subprocess.run(list(map(str,args)),check=True)
           run('python',s/'scripts/service-runtime.py','--windows-runtime',root/'inputs/runtime','--source-root',s,'--build',raw,'--producer',s/'scripts/service-release.py','--producer-sha256','6dff1255e45b84df922e37ae984f9655583f1c0e6deac74cc2a5b5f9af654568','--out',s/'build/bootstrap-service')
           assert hashlib.sha256(binary.read_bytes()).hexdigest()==before
-          out=root/'package';out.mkdir();service=s/'build/bootstrap-service/component/SERVICE.json';payload=service.parent/'payload'
+          service=s/'build/bootstrap-service/component/SERVICE.json';payload=service.parent/'payload'
           run('node',s/'desktop/restore-modes.cjs',service,payload)
           run('python',s/'desktop/freeze-target.py',s,root/'inputs/components/components',service,out/'freeze')
           run('node',s/'desktop/produce-release.cjs','stage','--request',out/'freeze/stage.request.json','--output',out/'stage')
@@ -94,6 +96,7 @@ jobs:
           path: |
             source/build/bootstrap-service/
             package/RECOVERY.json
+            package/SOURCE-STATUS.txt
             package/freeze/
             package/evidence/
             package/acceptance/
