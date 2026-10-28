@@ -17,6 +17,9 @@ import Foundation
         let pager = decode(NativeSidebarPager.self, page)!
         precondition(pager.belongs(to: "h") && pager.previous?.label == "Previous" && pager.next?.label == "Next" && !pager.belongs(to: "other"))
         precondition(decode(NativeSidebarHubPage.self, #"{"version":1,"hub":"h","projects":null,"active":null,"legacy":null}"#) != nil)
+        let projectPage = page.replacingOccurrences(of: "\"limit\":4", with: "\"limit\":9")
+            .replacingOccurrences(of: "\"next\":{\"label\":\"Next\",\"action\":\"native-sidebar-page\",\"value\":\"h|opaque-b\"}", with: "\"next\":null")
+        precondition(decode(NativeSidebarHubPage.self, #"{"version":1,"hub":"h","projects":\#(projectPage),"active":null,"legacy":null}"#) == nil)
         for invalid in [page.replacingOccurrences(of: "\"limit\":4", with: "\"limit\":0"),
                         page.replacingOccurrences(of: "\"total\":11", with: "\"total\":-1"),
                         page.replacingOccurrences(of: "\"total\":11", with: "\"total\":9007199254740992"),

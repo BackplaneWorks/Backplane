@@ -1083,11 +1083,22 @@ extension Screen {
         usageMachines = c.lossyList(.usageMachines)
         found = c.lossyList(.found)
         // Reject malformed negotiated metadata without changing legacy row decoding.
+        let sidebarProjects: [NativeSidebarProjectValidation]
         if (try? c.nestedUnkeyedContainer(forKey: .projects)) != nil {
-            _ = try c.decode([NativeSidebarProjectValidation].self, forKey: .projects)
-        }
+            sidebarProjects = try c.decode([NativeSidebarProjectValidation].self, forKey: .projects)
+        } else { sidebarProjects = [] }
         projects = c.lossyList(.projects)
         sidebarPages = try c.decodeIfPresent([NativeSidebarHubPage].self, forKey: .sidebarPages)
+        if let sidebarPages, Set(sidebarPages.map(\.hub)).count != sidebarPages.count {
+            throw DecodingError.dataCorruptedError(forKey: .sidebarPages, in: c, debugDescription: "Duplicate sidebar owner")
+        }
+        let sidebarOwners = Set((sidebarPages ?? []).map(\.hub))
+        for project in sidebarProjects {
+            if project.hasMetadata && !sidebarOwners.contains(project.owner ?? "") ||
+                project.owner.map({ sidebarOwners.contains($0) }) == true && !project.hasMetadata {
+                throw DecodingError.dataCorruptedError(forKey: .projects, in: c, debugDescription: "Unnegotiated sidebar project")
+            }
+        }
         lang = c.lossy(.lang)
         view = c.lossy(.view)
         making = c.lossy(.making)

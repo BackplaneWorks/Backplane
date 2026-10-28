@@ -12,7 +12,7 @@ for(const n of ['src/web/bub-move.js','src/web/thin.js','src/web/thin-results.js
 fs.mkdirSync(path.join(stage,'src/mobile'),{recursive:true});
 fs.copyFileSync(process.env.BP_NATIVE_THIN_HELPER_SOURCE||path.join(root,'src/mobile/thin-native-host-307265.js'),path.join(stage,'src/mobile/thin-native-host-307265.js'));
 fs.writeFileSync(path.join(stage,'package.json'),'{"type":"module"}');
-const {NativeThinHost307265:Host}=await import(pathToFileURL(path.join(stage,'src/mobile/thin-native-host-307265.js')));
+const {NativeThinHost307265:Host,validateNativeSidebar307265:validateSidebar,validateNativeSidebarAction307265:validateSidebarAction}=await import(pathToFileURL(path.join(stage,'src/mobile/thin-native-host-307265.js')));
 const {VIEW_LIMITS,VIEW_ID_BASE}=await import(pathToFileURL(path.join(stage,'src/web/thin.js')));
 const clone=x=>JSON.parse(JSON.stringify(x));
 const tests=[],check=(name,fn)=>tests.push([name,fn]);
@@ -53,6 +53,21 @@ function harness(){
  function open(hub='h'){h.hubs([...new Set([...h.paired,hub])]);h.connection(hub,'1','view-v1');const out=greeting(hub);const id=out.cmds[0].request.id;answer(id,{},hub);return out;}
  return{h,api,calls,greeting,answer,open,screen,advance:n=>now+=n};
 }
+check('native sidebar support is opt-in and recorded for the exact offered request',()=>{
+ const x=harness();x.h.hubs(['h']);x.h.connection('h','1','view-v1');
+ let req=x.greeting().cmds[0].request;
+ assert(!Object.hasOwn(req.p,'nativeSidebar'));
+ const before=x.h.client.calls.get(req.id).input;
+ x.h.nativeSidebar=true;
+ assert(!x.h.sidebarOffers.has(before));
+ x.answer(req.id);x.h.update(x.h.states.get('h'));
+ req=x.h.drain().cmds[0].request;
+ assert.equal(req.p.nativeSidebar,1);
+ assert(x.h.sidebarOffers.has(x.h.client.calls.get(req.id).input));
+ assert(!x.h.sidebarOffers.has(before));
+ // A hub that ignores the offer still answers the original native schema.
+ const out=x.answer(req.id);assert.equal(out.sync.at(-1).phase,'presented');
+});
 check('navigation admission reflects pre-greeting, ready, deferred and blocked cases',()=>{
  const x=harness();x.h.hubs(['h']);x.h.connection('h','1','view-v1');
  assert.equal(x.h.navigation('h','uber','bot'),false);assert.deepEqual(x.h.drain().cmds,[]);
@@ -305,6 +320,8 @@ const {registerBridgeChecks}=await import('./native_thin_bridge_binding_307265.m
 await registerBridgeChecks(check,stage,root);
 const {registerAncillaryChecks}=await import('./native_thin_ancillary_307265.mjs');
 await registerAncillaryChecks(check,harness,stage);
+const {registerSidebarChecks}=await import('./native_thin_sidebar_307265.mjs');
+registerSidebarChecks(check,harness,validateSidebar,validateSidebarAction);
 let failed=0;
 try{for(const [name,fn]of tests){try{fn();console.log('PASS',name);}catch(e){failed++;console.log('FAIL',name,e.stack);}}console.log(JSON.stringify({scope:'Native source adapter + actual shared18da transport only; stub Bend renderer, no emitted/native/service/UI acceptance',checks:tests.length,failed}));}finally{fs.rmSync(stage,{recursive:true,force:true});}
 if(failed)process.exitCode=1;
