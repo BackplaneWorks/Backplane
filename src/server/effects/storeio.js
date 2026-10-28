@@ -7,7 +7,9 @@ function store_temp(home) {
 }
 function store_sync(path) {
   const fs = require('fs'); let fd;
-  try { fd=fs.openSync(path,'r');fs.fsyncSync(fd);return 'ok'; }
+  // Windows FlushFileBuffers needs a writable file handle. Keep POSIX file
+  // opening and the separate directory-sync policy unchanged.
+  try { fd=fs.openSync(path,process.platform==='win32'?'r+':'r');fs.fsyncSync(fd);return 'ok'; }
   catch(e) { return 'fail '+e.message; }
   finally { if(fd!==undefined)fs.closeSync(fd); }
 }
