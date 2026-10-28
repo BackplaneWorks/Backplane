@@ -44,6 +44,9 @@ def texts(ns: List<&2, D.Node>) -> String:
 def web(+q: String) -> String:
   texts([V.View.settings.loc(I.En{}, typed(q), U.Ui.state.of(typed(q)), Map.new(&2, String), "test", "")])
 
+def opened(+p: String) -> String:
+  texts([V.View.settings.loc(I.En{}, act(base(), "settings-page", p), U.Ui.state.of(act(base(), "settings-page", p)), Map.new(&2, String), "test", "")])
+
 def phone(+q: String) -> String:
   J.Json.show(MB.Mob.settings.of.loc(I.En{}, typed(q), U.Ui.state.of(typed(q)), Map.new(&2, String), "test", "", Nil{}))
 
@@ -62,8 +65,11 @@ def main() -> IO(Unit):
     C.Check.str("Enter with nothing found stays on the menu", U.Settings.page(act(typed("zzzz"), "settings-page", "?")), "")
     C.Check.str("a page is still opened by name", U.Settings.page(act(base(), "settings-page", "ordering")), "ordering")
     C.Check.str("the web menu has the search field", Bool.show(String.contains(web(""), "Search settings")), "True")
-    C.Check.str("and lists only what it finds", Bool.show(Bool.and(String.contains(web("stripe"), "Ordering ›"), Bool.not(String.contains(web("stripe"), "Appearance ›")))), "True")
+    C.Check.str("and lists only what it finds", Bool.show(Bool.and(String.contains(web("stripe"), "Ordering\n"), Bool.not(String.contains(web("stripe"), "Appearance\n")))), "True")
     C.Check.str("and says when nothing matches", Bool.show(String.contains(web("zzzz"), "No setting matches.")), "True")
+    C.Check.str("the menu's groups are one block, for a wide page's columns", Bool.show(String.contains(web(""), "settings-groups\n")), "True")
+    C.Check.str("the menu has no categories beside it", Bool.show(String.contains(web(""), "settings-side\n")), "False")
+    C.Check.str("an open page has every category beside it, itself marked", Bool.show(Bool.and(String.contains(opened("ordering"), "Network and updates\n"), String.contains(opened("ordering"), "settings-side-item on\n"))), "True")
     C.Check.str("phones have the search field", Bool.show(String.contains(phone(""), "\"name\":\"setq\"")), "True")
     C.Check.str("and list only what it finds", Bool.show(Bool.and(String.contains(phone("stripe"), "Ordering ›"), Bool.not(String.contains(phone("stripe"), "Appearance ›")))), "True")
     C.Check.str("phones list no Appearance page: its rows are the phone's own", Bool.show(Bool.and(String.contains(phone(""), "Threads ›"), Bool.not(String.contains(phone(""), "Appearance ›")))), "True")
