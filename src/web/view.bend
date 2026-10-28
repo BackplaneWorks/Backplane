@@ -4345,11 +4345,27 @@ def View.chrome.changes(+lc: I.Loc, +n: Nat) -> List<&2, D.Node>:
 def View.chrome.branch(+b: String) -> List<&2, D.Node>:
   D.Dom.when(Bool.not(String.is_empty(b)), D.El{"span", "", [D.At{"class", "kv branch"}, D.At{"title", b}], [WI.WIcon.svg("git-branch", 12), D.Dom.span("v", b)]})
 
+# a thread's cells: its state, subagents, design changes, branch and chip;
+# none for a thread this client has not got yet (gone: U.Ui.thread's
+# blank, as on the page the browser draws while the hub's is on its way),
+# so the State cell never says "idle" for a thread it knows nothing of
+def View.chrome.cells(gone: Bool, +lc: I.Loc, +st: M.State, +nf: Map<&2, String>, +id: String, turn: M.TurnState, +branch: String, +now: Nat) -> List<&2, D.Node>:
+  match gone:
+    case True{}:
+      Nil{}
+    case False{}:
+      List.concat(&2, D.Node, [
+        [View.chrome.state(lc, nf, id, View.running(turn))],
+        View.chrome.subs(lc, st, nf, id, SB.Subs.rows(st, nf, id, now)),
+        View.chrome.changes(lc, HS.Hist.changes(M.State.steps(st, id))),
+        View.chrome.branch(branch),
+        View.boat.chip.loc(lc, UZ.Chip.of(st, id, now))])
+
 # a thread: its project, its title (a click renames it) and ▾ its menu, then
 # its cells
 def View.chrome.thread(+lc: I.Loc, +u: U.Ui, t: M.Thread) -> List<&2, D.Node>:
   match u t:
-    case U.Ui{+st, _, +drafts, _, _, _, +now, _, +panel, _, _, _, _, _, +nf, _, _} M.Thread{+id, +p, title, _, _, turn, _, archived, override, +sa, +ua, pinned, _, +branch, _, _, _, _, _, _, _}:
+    case U.Ui{+st, _, +drafts, _, _, _, +now, _, +panel, _, _, _, _, _, +nf, _, _} M.Thread{+id, +p, title, _, _, turn, _, archived, override, +sa, +ua, pinned, _, +branch, _, _, _, _, _, _, gone}:
       [View.chrome.nav(lc, [
         View.chrome.sep(),
         D.El{"span", "", [D.At{"class", "crumb proj"}, D.At{"style", "--tint:" ++ BG.Badge.css_of(st, p)}], [D.El{"i", "", [D.At{"class", "sw"}], Nil{}}, D.Txt{U.Label.title(st, p, U.Ui.project_title(st, p))}]},
@@ -4357,12 +4373,7 @@ def View.chrome.thread(+lc: I.Loc, +u: U.Ui, t: M.Thread) -> List<&2, D.Node>:
         D.El{"div", "", [D.At{"class", "title-box"}], View.title.k.loc(lc, String.eq(U.Str.get(drafts, "@ren"), id), id, U.Label.title(st, id, TTL.Title.shown(lc, title)), U.Str.get(drafts, "@f.title"))},
         View.thread.actions(lc, [WI.WIcon.svg("chevron-down", 14)], st, id, TO.Tools.settled(override, Nat.is_gt(sa, ua)), pinned, M.Snooze.on(now, U.Side.until(st, id)), archived,
           String.eq(U.Str.get(drafts, "@del"), id), U.Ui.flag(u, "term"), panel)]),
-       D.El{"div", "kvs", [D.At{"class", "kvs"}], List.concat(&2, D.Node, [
-         [View.chrome.state(lc, nf, id, View.running(turn))],
-         View.chrome.subs(lc, st, nf, id, SB.Subs.rows(st, nf, id, now)),
-         View.chrome.changes(lc, HS.Hist.changes(M.State.steps(st, id))),
-         View.chrome.branch(branch),
-         View.boat.chip.loc(lc, UZ.Chip.of(st, id, now))])}]
+       D.El{"div", "kvs", [D.At{"class", "kvs"}], View.chrome.cells(gone, lc, st, nf, id, turn, branch, now)}]
 
 def View.chrome.selected(none: Bool, +lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
   match none:

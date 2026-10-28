@@ -143,7 +143,7 @@
     "src/web/space.bend": "b86a265e41a900498bc33c37c0404c4d6678554efe3d9054f329beb2cf35ee63",
     "src/web/usage-graph.bend": "fa06f7d2bf855a396a5f7a7b4725dfaa990145fbbcefe7ad21ae8f9a698a2679",
     "src/web/usage-page.bend": "706e3f17a4a3e5f159656d47aeb76a940d4825421f5c33228f9aef692ec926e3",
-    "src/web/view.bend": "0f9fdce7b4b0c77da59c547b333e182b9b53c0bd85ce189d47c63d6d03adc4cf"
+    "src/web/view.bend": "a379602ddc8ad10fa8a1f8bb5cf9bdf557143df9f5dd49d771a407f2ad8977d5"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -253,5 +253,5 @@
       "sourceSnapshot": "/home/h/Documents/i2cjak/bp-coord/settle-fresh-work/SOURCE-structural-correction.json"
     }
   },
-  "reviewNote": "Design changes: the design before the edits is no change (Hist.seen, Hist.changes); the sidebar draft does not read steps"
+  "reviewNote": "Top bar: no cells for a thread the page has not got yet (View.chrome.cells); sidebar untouched"
 }
