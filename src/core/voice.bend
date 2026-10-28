@@ -826,3 +826,22 @@ def Voice.firm.go(ds: List<&2, String>, +s: String, acc: Bool) -> Bool:
 # the segment opens with a dictionary term, whose capital stays
 def Voice.firm(ds: List<&2, String>, text: String) -> Bool:
   Voice.firm.go(ds, String.to_lower(String.trim(text)), False{})
+
+# The OpenAI key
+# --------------
+
+def Voice.openai.blank(+c: U32) -> Bool:
+  Bool.or(U32.is_le(c, 32), U32.is_eq(c, 127))
+
+def Voice.openai.blanks(s: String) -> Bool:
+  match s:
+    case SNil{}:
+      False{}
+    case SCon{Chr{c}, t}:
+      Bool.or(Voice.openai.blank(c), Voice.openai.blanks(t))
+
+# an OpenAI key: "sk-", over 20 characters, no spaces or control
+# characters (the only kind the hub keeps: server voice.bend's Vo.set_key;
+# the web's Save checks it before anything is sent)
+def Voice.openai.ok(+k: String) -> Bool:
+  Bool.and(String.starts_with(k, "sk-"), Bool.and(Nat.is_gt(String.length(k), 20n), Bool.not(Voice.openai.blanks(k))))

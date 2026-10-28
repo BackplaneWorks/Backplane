@@ -28,7 +28,7 @@
     "src/core/cat.bend": "0130231a18e515a94d40d7584d19a9b5a2d1663f9601fbff944bf97e37f9fd6b",
     "src/core/cef.bend": "f2d3fa4c991d0e341620fe634ddb4e08da97f8e471ec46afac0b3de471cc69fb",
     "src/core/charter.bend": "7f906bdea712f6ff6162735c8cc133767ec0f9289c3d0bee6dfedbd4d75ad981",
-    "src/core/client.bend": "02602440491a7752aa631f43c79e6adab9f25bb84f23a79d679308132f236e9f",
+    "src/core/client.bend": "2781fb7f587b9053a8cbc29097324446856610fedc2504d2794ea3759f7d8d8b",
     "src/core/codec.bend": "33cb35c55f3712a18734e76e1149763001a9388af27948f0da4ead2c13d48b6f",
     "src/core/cron.bend": "6f89a001df0261a25c878616ea66c235e169f7fc1c726d39e695fce8adb57332",
     "src/core/deploy.bend": "ebee4e63a52cf41ae001bebcdbb7fb010ad71c1e04e481292585740d88a39cc4",
@@ -124,7 +124,7 @@
     "src/core/usage_graph.bend": "c4a30aff87e9a9ff0d9bea0ef11d0ab0655f816c4aeb904f667031a63b7745e5",
     "src/core/usage_page.bend": "05f675351e885ee368dd9db73b9e3739d04c9225a1f1c0d8ced43b53d98615f7",
     "src/core/utf8.bend": "0202c5087fd255df10413080cda57f2a4a00aa9b90b5b425a00a729f9563627b",
-    "src/core/voice.bend": "331b40d082bd7e93e51a4ced0abf69042377e9edbb1d03631a970a2410307807",
+    "src/core/voice.bend": "d1efb9a32ce7cda16b1db170f1b9fa5059777fc97f3a4f8d080d1e37072e0213",
     "src/core/vt.bend": "931708652e96ec2db30f3a5a69dc4c90a98e15fc6e5fbbd8e441475626198581",
     "src/core/wake.bend": "074b0501f0db23a207e835beea1de5a5c11dc770287beef06c4d20be0da93a67",
     "src/core/when.bend": "0c97fbba571d99a50a4977c5a3c6916ade1c64196173c20e959d8848d751476f",
@@ -143,7 +143,7 @@
     "src/web/space.bend": "b86a265e41a900498bc33c37c0404c4d6678554efe3d9054f329beb2cf35ee63",
     "src/web/usage-graph.bend": "fa06f7d2bf855a396a5f7a7b4725dfaa990145fbbcefe7ad21ae8f9a698a2679",
     "src/web/usage-page.bend": "706e3f17a4a3e5f159656d47aeb76a940d4825421f5c33228f9aef692ec926e3",
-    "src/web/view.bend": "0651ef315ed9145f5de0bdd606aff8305e8c10c5e255f10030fc2b76445e9fa3"
+    "src/web/view.bend": "2c3baeb1627048934008937de5cb2e75eee70b13bfdbdd5f1b1e38fc5dfc1142"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -253,5 +253,5 @@
       "sourceSnapshot": "/home/h/Documents/i2cjak/bp-coord/settle-fresh-work/SOURCE-structural-correction.json"
     }
   },
-  "reviewNote": "Seal the web's API key form, Save waits for the hub's answer (Settings forms only, no sidebar draft change)"
+  "reviewNote": "Seal the web's voice key field (Settings forms only, no sidebar draft change)"
 }

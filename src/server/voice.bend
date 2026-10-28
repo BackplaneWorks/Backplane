@@ -48,19 +48,10 @@ def Vo.mask(+k: String) -> String:
   Bool.pick(String, Nat.is_lt(String.length(k), 12n), Bool.pick(String, String.is_empty(k), "", "set"),
     String.take(k, 3n) ++ "…" ++ String.drop(k, Nat.sub(String.length(k), 4n)))
 
-def Vo.blank.c(+c: U32) -> Bool:
-  Bool.or(U32.is_le(c, 32), U32.is_eq(c, 127))
-
-def Vo.blank.go(s: String) -> Bool:
-  match s:
-    case SNil{}:
-      False{}
-    case SCon{Chr{c}, t}:
-      Bool.or(Vo.blank.c(c), Vo.blank.go(t))
-
-# an OpenAI key: "sk-" and no spaces or control characters
+# an OpenAI key: "sk-" and no spaces or control characters (core
+# voice.bend's, which the web's Save checks too)
 def Vo.key.ok(+k: String) -> Bool:
-  Bool.and(String.starts_with(k, "sk-"), Bool.and(Nat.is_gt(String.length(k), 20n), Bool.not(Vo.blank.go(k))))
+  V.Voice.openai.ok(k)
 
 def Vo.write.opened(r: Result<&1, &1, U32 & String, File>, text: String) -> IO(Bool):
   BN.Bf.write.opened(r, text)

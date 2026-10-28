@@ -123,6 +123,15 @@ for (const [a, v] of [['sealed-sent', 'key'], ['key-sent', '']]) {
   const after = raw.sealed_after(a, v, 'key');
   assert.ok(after.startsWith('|') && after.includes('"op":"status"'), after);
 }
+const SK = 's' + 'k-', OK = SK + F1 + '-0123456789';
+assert.deepEqual(sealedRpc('vkey', `  ${OK} `), { id: 0, m: 'bots.voice', p: { op: 'key', key: OK } });
+assert.equal(sealed('vkey', '  ').error, 'Paste the key itself');
+assert.match(sealed('vkey', F1).error, /not an OpenAI API key/);
+assert.match(sealed('vkey', SK + 'short').error, /not an OpenAI API key/);
+assert.match(sealed('vkey', SK + F1 + ' 0123456789').error, /not an OpenAI API key/);
+refusals.push(['vkey', F1]);
+assert.ok(raw.sealed_after('sealed-err', 'vkeyno', 'vkey').startsWith('no|'));
+assert.ok(raw.sealed_after('sealed-sent', 'vkey', 'vkey').includes('"op":"status"'));
 // no refusal carries the value it was given
 for (const ps of refusals) assert.ok(!sealed(...ps).error.includes(F1), 'a refusal never carries the value');
 assert.match(raw.prompt('[{"name":"tailscale-bub","purpose":"p"}]'), /`tailscale-bub`/);

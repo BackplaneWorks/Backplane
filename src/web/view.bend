@@ -1447,10 +1447,12 @@ def View.terms.loc(+lc: I.Loc, ts: List<&2, String>) -> List<&2, D.Node>:
 def View.terms(ts: List<&2, String>) -> List<&2, D.Node>:
   View.terms.loc(I.En{}, ts)
 
+# (the key's field is sealed, client.bend's Sealed: its value never
+# reaches the client's state, a view action or a draft)
 def View.voice.set.loc(+lc: I.Loc, +u: U.Ui, +st: M.State) -> List<&2, D.Node>:
-  [View.setrow(MSG.T.settings.voice.key(lc), Bool.pick(String, String.is_empty(U.Ui.scratch(u, "@voice.key")), MSG.T.settings.voice.key.note(lc),
-      MSG.T.settings.voice.key.saved(lc, U.Ui.scratch(u, "@voice.key"))),
-     [WB.WB.secret("voice-key", "vkey", U.Ui.scratch(u, "@f.vkey"), "sk-…"), D.Dom.button("primary", "voice-key", "", MSG.T.settings.key.keep(lc), MSG.T.common.save(lc)),
+  [View.setrow(MSG.T.settings.voice.key(lc), U.Sealed.say(u, "vkey", Bool.pick(String, String.is_empty(U.Ui.scratch(u, "@voice.key")), MSG.T.settings.voice.key.note(lc),
+      MSG.T.settings.voice.key.saved(lc, U.Ui.scratch(u, "@voice.key")))),
+     [WB.WB.sealed("voice-key", "vkey", "password", "sk-…"), D.Dom.button("primary", "sealed", "vkey", MSG.T.settings.key.keep(lc), MSG.T.common.save(lc)),
       D.Dom.button("", "voice-unkey", "", MSG.T.settings.key.forget(lc), MSG.T.common.remove(lc))]),
    View.setrow(MSG.T.settings.voice.microphone(lc), MSG.T.voice.device.note(lc, Bool.pick(String, String.is_empty(M.Setting.get(st, "voice.device", "")), MSG.T.voice.device.default(lc, U.Voice.label(u, U.Voice.default(u))), U.Voice.label(u, M.Setting.get(st, "voice.device", "")))),
      D.Dom.button(Bool.pick(String, String.is_empty(M.Setting.get(st, "voice.device", "")), "on", ""), "setting", "voice.device=", MSG.T.settings.voice.default.tip(lc), MSG.T.voice.default(lc)) <>

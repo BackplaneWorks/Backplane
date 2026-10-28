@@ -9878,6 +9878,14 @@ def Agv.act(+u: Ui, +action: String, +value: String) -> Act:
 # from its fields as host.js read them ("<form>\u001f<field>..."), and
 # what its Save leads to once the hub has answered.
 
+# Dictation's key ("vkey"): the hub keeps only an OpenAI key (Vo.set_key)
+def Voice.key.bad(+k: String) -> String:
+  Bool.pick(String, String.is_empty(String.trim(k)), "Paste the key itself",
+    Bool.pick(String, VC.Voice.openai.ok(String.trim(k)), "", "That is not an OpenAI API key (they start with sk-)"))
+
+def Voice.key.req(+k: String) -> String:
+  Sealed.out(Voice.key.bad(k), Rpc.text(0n, "bots.voice", [J.KV{"op", J.Str{"key"}}, J.KV{"key", J.Str{String.trim(k)}}]))
+
 def Sealed.none() -> String:
   J.Json.show(J.Json.obj([J.KV{"error", J.Str{"Nothing to save"}}]))
 
@@ -9885,6 +9893,8 @@ def Sealed.req.k(i: Nat, +arg: String, +vs: List<&2, String>) -> String:
   match i:
     case 0n:
       ApiKeys.req.ps(vs)
+    case 1n:
+      Voice.key.req(Sealed.first(vs))
     case _:
       Sealed.none()
 
@@ -9893,7 +9903,7 @@ def Sealed.arg(+form: String) -> String:
   String.drop(form, Nat.add(String.length(Sealed.base(form)), 1n))
 
 def Sealed.forms() -> List<&2, String>:
-  ["key"]
+  ["key", "vkey"]
 
 def Sealed.req.ps(ps: List<&2, String>) -> String:
   match ps:
@@ -9907,11 +9917,14 @@ def Sealed.req.ps(ps: List<&2, String>) -> String:
 def Sealed.req(+packed: String) -> String:
   Sealed.req.ps(String.split(packed, Chr{31}))
 
-# once the hub has a form's value: the API key's form shuts
+# once the hub has a form's value: the API key's form shuts; what the
+# voice key shows is asked again
 def Sealed.sent.k(i: Nat, +u: Ui) -> Act:
   match i:
     case 0n:
       ApiKeys.sent(u)
+    case 1n:
+      Voice.rpc(u, "status", Nil{})
     case _:
       Act{u, Nil{}}
 
@@ -13793,7 +13806,7 @@ def Voice.act(i: Nat, +u: Ui, +value: String) -> Act:
     case 1n:
       Voice.rpc(Ui.scratch_set(u, "@f.vkey", ""), "key", [J.KV{"key", J.Str{Ui.scratch(u, "@f.vkey")}}])
     case 2n:
-      Voice.rpc(u, "unkey", Nil{})
+      Voice.rpc(Sealed.forget(u, "vkey"), "unkey", Nil{})
     case 3n:
       Voice.rpc(u, "dict", [J.KV{"dict", J.Str{Ui.scratch(u, "@f.vdict")}}])
     case 4n:
