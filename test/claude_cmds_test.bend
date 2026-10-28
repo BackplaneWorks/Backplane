@@ -425,7 +425,7 @@ def turns() -> IO(Unit):
     C.Check.str("turns: no start, no mark", Nat.show(List.length(&2, M.Change, B.Turn.marks(M.State.empty(), [M.TurnChanged{"t1", M.Failed{}, 1n}]))), "1")
     C.Check.str("turns: the first turn's own end", ended.of(marked(M.State.empty(), turns.first()), "interrupted"), "interrupted|Claude AI usage limit reached|1792800000|limit|an old reply")
     C.Check.str("turns: a wake is marked at its start", turns.mark(turns.woke()), "@e1")
-    C.Check.str("turns: a resumed wake is not the old limit", ended.of(turns.woke(), "interrupted"), "interrupted|||interrupted|")
+    C.Check.str("turns: a resumed wake is not the old limit", ended.of(turns.woke(), "interrupted"), "interrupted||interrupted|")
     C.Check.str("turns: a queued message keeps the model error", ended.of(marked(M.State.empty(), turns.queued()), "interrupted"), "interrupted|There's an issue with the selected model (no-such-model)|error|There's an issue with the selected model (no-such-model)")
     C.Check.str("turns: a queued message does not start a turn", turns.mark(marked(M.State.empty(), turns.queued())), "@m1")
 
