@@ -165,8 +165,9 @@ Board, S Schematic, 3 3D, V Split (twice: on, off); typing "bsd3" in the
 composer only types. Keycaps are hidden until Ctrl is held: holding Ctrl
 shows the rail's keycaps, the top bar's Ctrl K, the model chip's Ctrl M,
 the first nine threads' digits and the legend, and nothing moves when they
-appear or go. The legend at the sidebar's foot: its "all shortcuts" row opens the
-palette.
+appear or go. The legend at the sidebar's foot (shown while Ctrl is held):
+Ctrl+click on its "all shortcuts" row opens the palette. Open the top bar's
+▾, press Esc and type: the text goes into the composer.
 
 **S23 API keys** (W D A)
 Settings → API keys: add `E2E_KEY` with a value. Only the name is listed,
