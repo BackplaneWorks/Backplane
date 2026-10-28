@@ -1495,10 +1495,15 @@ html:lang(ja) :is(.set-text, .set-ctl) { min-width: 0; }
 .kvs > .boat-chip, .kvs > button.tool { align-self: center; margin: 0 8px; padding: 2px 8px; white-space: nowrap; font-size: calc(11px * var(--text-scale, 100) / 100); }
 .kvs > .boat-chip { color: var(--accent); background: none; border: 1px solid var(--line); }
 .kvs > button.tool { display: inline-flex; align-items: center; gap: 5px; }
-.topbar .cmd { display: flex; align-items: center; gap: 8px; height: 26px; width: 260px; flex: 0 1 260px; min-width: 0; padding: 0 5px 0 8px; background: var(--bg); color: var(--faint); border: 1px solid var(--line); text-align: left; }
+/* the palette's field grows with the text size; where it is squeezed (a
+   crowded bar, a big text size) it says "Commands" rather than cut its
+   sentence */
+.topbar .cmd { display: flex; align-items: center; gap: 8px; height: 26px; width: calc(260px * var(--text-scale, 100) / 100); flex: 0 1 calc(260px * var(--text-scale, 100) / 100); min-width: 0; padding: 0 5px 0 8px; background: var(--bg); color: var(--faint); border: 1px solid var(--line); text-align: left; container-type: inline-size; }
 .topbar .cmd:hover { color: var(--dim); border-color: var(--faint); }
 .topbar .cmd svg { flex: none; }
 .topbar .cmd-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topbar .cmd-short { display: none; }
+@container (max-width: calc(13em + 42px)) { .topbar .cmd-long { display: none; } .topbar .cmd-short { display: inline; } }
 kbd { font: calc(10px * var(--text-scale, 100) / 100)/1 var(--mono); color: var(--faint); border: 1px solid var(--line); border-bottom-width: 2px; padding: 2px 4px; background: var(--bg); display: inline-block; white-space: nowrap; }
 .topbar .tb { display: flex; flex: none; }
 .topbar .tb button { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 26px; padding: 0; background: none; color: var(--dim); }
@@ -1513,7 +1518,7 @@ kbd { font: calc(10px * var(--text-scale, 100) / 100)/1 var(--mono); color: var(
 .thread-content > .subs.dock { border-bottom: 1px solid var(--line); }
 .thread-content > .subs.dock .subs-body { border-top: 0; }
 @media (max-width: 1300px) { .topbar .kv.branch { display: none; } }
-@media (max-width: 1180px) { .topbar .cmd { width: auto; flex: none; } .topbar .cmd-text { display: none; } }
+@media (max-width: 1180px) { .topbar .cmd { width: auto; flex: none; container-type: normal; } .topbar .cmd-text { display: none; } }
 @media (max-width: 960px) { .topbar .name, .topbar .kv.changes { display: none; } }
 @media (min-width: 761px) {
   html[data-side="shut"] .app.top { grid-template-columns: 0 minmax(0, 1fr); }

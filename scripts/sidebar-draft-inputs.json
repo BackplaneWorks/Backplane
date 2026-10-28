@@ -143,7 +143,7 @@
     "src/web/space.bend": "b86a265e41a900498bc33c37c0404c4d6678554efe3d9054f329beb2cf35ee63",
     "src/web/usage-graph.bend": "fa06f7d2bf855a396a5f7a7b4725dfaa990145fbbcefe7ad21ae8f9a698a2679",
     "src/web/usage-page.bend": "706e3f17a4a3e5f159656d47aeb76a940d4825421f5c33228f9aef692ec926e3",
-    "src/web/view.bend": "0cecd379d414c82d831d3743cdc7f275cd99f338a2460733755c6d3a0a826774"
+    "src/web/view.bend": "89ff165358b93811d84ef70ae5e0eff369846abd14ddedb993519741d6d20f4b"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -253,5 +253,5 @@
       "sourceSnapshot": "/home/h/Documents/i2cjak/bp-coord/settle-fresh-work/SOURCE-structural-correction.json"
     }
   },
-  "reviewNote": "Palette.filter ranks its matches (client.bend); sidebar drafts unchanged"
+  "reviewNote": "View.chrome.cmd says Commands where squeezed (view.bend); sidebar drafts unchanged"
 }

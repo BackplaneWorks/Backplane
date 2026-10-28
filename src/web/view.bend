@@ -4283,6 +4283,12 @@ def View.chrome.jump(lc: I.Loc) -> String:
     case I.Ja{}: "移動・コマンド実行"
     case _: "Jump or run a command"
 
+# the field's words where the whole sentence does not fit
+def View.chrome.jump.short(lc: I.Loc) -> String:
+  match lc:
+    case I.Ja{}: "コマンド"
+    case _: "Commands"
+
 def View.chrome.jump.tip(lc: I.Loc) -> String:
   match lc:
     case I.Ja{}: "コマンドパレット: スレッド、プロジェクト、コマンド · Ctrl+K"
@@ -4392,7 +4398,8 @@ def View.chrome.brand(+lc: I.Loc, +on: Bool, +v: String) -> List<&2, D.Node>:
 # the command palette's field (WS.palette, Ctrl+K)
 def View.chrome.cmd(+lc: I.Loc) -> D.Node:
   D.El{"button", "", [D.At{"class", "cmd"}, D.At{"type", "button"}, D.At{"title", View.chrome.jump.tip(lc)}, D.At{"data-value", ""}, D.On{"click", "ws-palette-open"}],
-    [WI.WIcon.svg("chevron-right", 13), D.Dom.span("cmd-text", View.chrome.jump(lc)), D.El{"kbd", "", Nil{}, [D.Txt{"Ctrl K"}]}]}
+    [WI.WIcon.svg("chevron-right", 13), D.El{"span", "", [D.At{"class", "cmd-text"}], [D.Dom.span("cmd-long", View.chrome.jump(lc)), D.Dom.span("cmd-short", View.chrome.jump.short(lc))]},
+     D.El{"kbd", "", Nil{}, [D.Txt{"Ctrl K"}]}]}
 
 # the sidebar's fold (Ctrl+B), search (Ctrl+Shift+F) and Settings, on while open
 def View.chrome.tools(+lc: I.Loc, settings: Bool) -> D.Node:
