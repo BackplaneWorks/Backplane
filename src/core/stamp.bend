@@ -5,6 +5,7 @@ import ./model.bend as M
 import ./cron.bend as CR
 import ./tz.bend as TZ
 import ./sched.bend as SCH
+import ./steer.bend as STR
 
 # When messages were sent (pure)
 # ===============================
@@ -43,14 +44,16 @@ def Stamp.held(open: Bool, +held: String, +id: String) -> String:
     case False{}:
       held
 
-def Stamp.ends.go(es: List<&2, M.Entry>, open: Bool, +held: String, ends: Map<&2, Nat>) -> Map<&2, Nat>:
+# (a reply posted ahead of a message sent while it streamed, steer.bend's,
+# ends no turn: the agent went on with it after the message)
+def Stamp.ends.go(es: List<&2, M.Entry>, +open: Bool, +held: String, ends: Map<&2, Nat>) -> Map<&2, Nat>:
   match es:
     case Nil{}:
       Stamp.close(String.is_empty(held), held, 1n, ends)
     case M.Msg{_, _, M.User{}, _, +at} <> t:
       Stamp.ends.go(t, True{}, "", Stamp.close(String.is_empty(held), held, at, ends))
     case M.Msg{+id, _, M.Assistant{}, _, _} <> t:
-      Stamp.ends.go(t, False{}, Stamp.held(open, held, id), ends)
+      Stamp.ends.go(t, Bool.and(open, STR.Steer.ahead.is(id)), Bool.pick(String, STR.Steer.ahead.is(id), held, Stamp.held(open, held, id)), ends)
     case _ <> t:
       Stamp.ends.go(t, open, held, ends)
 

@@ -122,6 +122,7 @@ import ./adoptio.bend as AIO
 import ./castio.bend as CST
 import ../core/outbox.bend as OB
 import ../core/live.bend as LV
+import ../core/steer.bend as STR
 import ../core/farlive.bend as FLV
 import ../core/qr.bend as QR
 import ../core/order.bend as OR
@@ -6855,7 +6856,7 @@ def Hub.commit.stored.result(ok: Bool, post: M.State, +result: String, +disk: Li
     case True{}:
       do IO<Hub & Wrote>:
         Bot.dir.changed.all(cs, inbox)
-        return Hub.commit.k(Hub.fold.state(Hub.fold(cs, disk, Folded{st, ls, Nil{}}), post), cs, f, cl, as, inbox, Cfg.telemetry.privacy_committed(cs, Live.with(cfg, LV.Live.ends(cs, Live.of(cfg)))), note)
+        return Hub.commit.k(Hub.fold.state(Hub.fold(cs, disk, Folded{st, ls, Nil{}}), post), cs, f, cl, as, inbox, Cfg.telemetry.privacy_committed(cs, Live.with(cfg, STR.Steer.keep(cs, Live.of(cfg), LV.Live.ends(cs, Live.of(cfg))))), note)
     case False{}:
       do IO<Hub & Wrote>:
         cut : Bool <- Hub.cut(len, cfg)
@@ -6918,13 +6919,14 @@ def Hub.commit.gate(ok: Bool, +cs: List<&2, M.Change>, st: M.State, f: File, ls:
         cut : Bool <- Hub.cut(ST.Store.hold.len(hold), cfg)
         Hub.commit.heal(cut, hold, cs, st, f, ls, cl, as, inbox, cfg, note)
 
-# persist a step's changes in one write, then fold them in
+# persist a step's changes in one write, then fold them in (a person's
+# message into a Claude reply that streams lands under it: core/steer.bend)
 def Hub.commit.w(+cs: List<&2, M.Change>, h: Hub) -> IO(Hub & Wrote):
   match cs h:
     case Nil{} _:
       IO.pure(Hub & Wrote, (h, Wrote{Nil{}, True{}, ""}))
-    case _ Hub{st, f, ls, cl, as, +inbox, +cfg, note}:
-      Hub.commit.gate(String.is_empty(BN.Bn.broken(Cfg.bn(cfg))), cs, st, f, ls, cl, as, inbox, cfg, note)
+    case _ Hub{+st, f, ls, cl, as, +inbox, +cfg, note}:
+      Hub.commit.gate(String.is_empty(BN.Bn.broken(Cfg.bn(cfg))), STR.Steer.all(cs, st, Live.of(cfg)), st, f, ls, cl, as, inbox, cfg, note)
 
 def Hub.commit.b(r: Hub & List<&2, String>, moved: Bool) -> IO(Hub & List<&2, String>):
   (h, fr) = r
