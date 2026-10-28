@@ -25,6 +25,26 @@ def Steer.mark() -> String:
 def Steer.ahead.is(+id: String) -> Bool:
   String.ends_with(id, Steer.mark())
 
+# A turn stopped while its reply streams (Stop, or any interrupt): what
+# streamed so far is posted as its reply in the same step, so the text
+# the person was reading stays and gains its "Stopped" stamp, where it
+# used to go blank until (or unless) the agent's own message landed. Its
+# id ends ":stopped"; it ends its turn (Stamp.ends). Claude's message for
+# it may still land after the Stop: like a reply after one posted ahead
+# of a message, it adds only what streamed after (nothing, a stopped turn
+# streams no more). A buffer cut at Live.cap() is not posted.
+def Steer.stop.mark() -> String:
+  ":stopped"
+
+def Steer.stop.is(+id: String) -> Bool:
+  String.ends_with(id, Steer.stop.mark())
+
+# posted ahead of the agent's own message: for a message sent while it
+# streamed, or as its turn stopped when no message of the person came
+# since (user: one did; that reply was an earlier turn's)
+def Steer.posted.is(+id: String, +user: Bool) -> Bool:
+  Bool.or(Steer.ahead.is(id), Bool.and(Bool.not(user), Steer.stop.is(id)))
+
 def Steer.cut(tr: Bool, cs: List<&2, String>) -> String:
   match tr:
     case True{}: ""
@@ -85,22 +105,30 @@ def Steer.claude(+s: M.State, +id: String) -> Bool:
 # what was posted ahead since the agent's last whole reply (the thread's
 # entries newest first: the person's messages are passed over, the replies
 # posted ahead gathered, anything else ends it)
-def Steer.ahead.on(e: M.Entry) -> Bool:
+def Steer.ahead.on(e: M.Entry, +user: Bool) -> Bool:
   match e:
     case M.Msg{_, _, M.User{}, _, _}: True{}
-    case M.Msg{+id, _, M.Assistant{}, _, _}: Steer.ahead.is(id)
+    case M.Msg{+id, _, M.Assistant{}, _, _}: Steer.posted.is(id, user)
     case _: False{}
 
-def Steer.ahead.add(e: M.Entry, +acc: String) -> String:
+def Steer.ahead.add(e: M.Entry, +user: Bool, +acc: String) -> String:
   match e:
-    case M.Msg{+id, _, M.Assistant{}, +text, _}: Bool.pick(String, Steer.ahead.is(id), text ++ acc, acc)
+    case M.Msg{+id, _, M.Assistant{}, +text, _}: Bool.pick(String, Steer.posted.is(id, user), text ++ acc, acc)
     case _: acc
 
-def Steer.ahead(es: List<&2, M.Entry>, go: Bool, +acc: String) -> String:
+def Steer.asked(e: M.Entry) -> Bool:
+  match e:
+    case M.Msg{_, _, M.User{}, _, _}: True{}
+    case _: False{}
+
+def Steer.ahead.u(es: List<&2, M.Entry>, go: Bool, +user: Bool, +acc: String) -> String:
   match es go:
     case Nil{} _: acc
-    case +e <> +t True{}: Steer.ahead(t, Steer.ahead.on(e), Steer.ahead.add(e, acc))
+    case +e <> +t True{}: Steer.ahead.u(t, Steer.ahead.on(e, user), Bool.or(user, Steer.asked(e)), Steer.ahead.add(e, user, acc))
     case +e <> +t False{}: acc
+
+def Steer.ahead(es: List<&2, M.Entry>, go: Bool, +acc: String) -> String:
+  Steer.ahead.u(es, go, False{}, acc)
 
 def Steer.user(go: Bool, +t: String, +m: String, +text: String, +at: Nat, +head: String) -> List<&2, M.Change>:
   match go:
@@ -112,11 +140,30 @@ def Steer.whole(cut: Bool, +t: String, +m: String, +text: String, +at: Nat, +res
     case True{}: Bool.pick(List<&2, M.Change>, String.is_empty(String.trim(rest)), Nil{}, [M.MessagePosted{t, m, M.Assistant{}, rest, at}])
     case False{}: [M.MessagePosted{t, m, M.Assistant{}, text, at}]
 
+def Steer.gen.k(hit: Bool, b: L.Buf, +rest: Nat) -> Nat:
+  match hit b:
+    case True{} L.Buf{_, _, _, _, g}: g
+    case False{} _: rest
+
+# the thread's buffer's gen (each clearing bumps it: an id that is new)
+def Steer.gen(bs: List<&2, L.Buf>, +thread: String) -> Nat:
+  match bs:
+    case Nil{}: 0n
+    case +b <> t: Steer.gen.k(L.Live.is(b, thread), b, Steer.gen(t, thread))
+
+def Steer.stopped(none: Bool, +t: String, +gen: Nat, +at: Nat, +text: String) -> List<&2, M.Change>:
+  match none:
+    case True{}: [M.TurnChanged{t, M.Interrupted{}, at}]
+    case False{}: [M.MessagePosted{t, "live:" ++ t ++ ":" ++ Nat.show(gen) ++ Steer.stop.mark(), M.Assistant{}, text, at}, M.TurnChanged{t, M.Interrupted{}, at}]
+
 # one change as written: the person's message into a streaming Claude
 # reply with the reply so far ahead of it; a whole reply after that with
-# only what streamed after the cut
+# only what streamed after the cut; a turn stopped with what it streamed
+# posted first
 def Steer.change(+s: M.State, +bs: List<&2, L.Buf>, +c: M.Change) -> List<&2, M.Change>:
   match c:
+    case M.TurnChanged{+t, M.Interrupted{}, +at}:
+      Steer.stopped(String.is_empty(String.trim(Steer.text(bs, t))), t, Steer.gen(bs, t), at, Steer.text(bs, t))
     case M.MessagePosted{+t, +m, M.User{}, +text, +at}:
       Steer.user(Bool.and(Steer.claude(s, t), Bool.not(String.is_empty(Steer.head(Steer.text(bs, t))))), t, m, text, at, Steer.head(Steer.text(bs, t)))
     case M.MessagePosted{+t, +m, M.Assistant{}, +text, +at}:

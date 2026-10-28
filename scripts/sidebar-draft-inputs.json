@@ -102,7 +102,7 @@
     "src/core/slash.bend": "4b88f73566a9b3694a888ede21f2117157df9449c50c52806648e4795d298932",
     "src/core/space.bend": "0caea2f71303b476291b0e9570459ce12c8fe58b81aefccb2bd935fe4bd56c3a",
     "src/core/stamp.bend": "aa17c4ef7492aab853c19c465f5e9e65e4484b496736d4da6a059ef121d76965",
-    "src/core/steer.bend": "546cb2efcb0a35d6686570358b06e7b7e285a3e06031d79e97750e42d515e9aa",
+    "src/core/steer.bend": "e3bf553f18763459bd46637a4a02150ce610aa65136581804474399611576f74",
     "src/core/store.bend": "037f48017d9b9c1b6ed24d750bc898dc62200635d95fecc627f2196fd79d89d5",
     "src/core/strokefont.bend": "a5d15a2a0c28e9b24673d41bd31a283b8b9df71b1d40524b4bfb689b3ff964bb",
     "src/core/subs.bend": "695a9eedce4bbc7eafd13a9435c77d33a3066f8a2d961086200ca08f91a37a0f",
@@ -253,5 +253,5 @@
       "sourceSnapshot": "/home/h/Documents/i2cjak/bp-coord/settle-fresh-work/SOURCE-structural-correction.json"
     }
   },
-  "reviewNote": "Top bar: State says failed and why for a failed turn (Signal.shown, Signal.why); the sidebar draft keeps Signal.name"
+  "reviewNote": "Steer: a stopped turn's streamed text posted as it stops; the sidebar draft does not read it"
 }

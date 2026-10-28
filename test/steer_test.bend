@@ -57,6 +57,13 @@ def ends(+es: List<&2, M.Entry>, +id: String) -> String:
 def turn() -> List<&2, M.Entry>:
   [M.Msg{"q1", "t1", M.User{}, "first", 3n}, M.Msg{"q2:before", "t1", M.Assistant{}, "one\n", 5n}, M.Msg{"q2", "t1", M.User{}, "steer it", 5n}, M.Msg{"a1", "t1", M.Assistant{}, "rest", 6n}]
 
+# a turn stopped while it streams
+def stop(+t: String) -> List<&2, M.Change>:
+  [M.TurnChanged{t, M.Interrupted{}, 7n}]
+
+def stopped() -> List<&2, M.Change>:
+  [M.MessagePosted{"t1", "live:t1:0:stopped", M.Assistant{}, "one\ntwo\nthr", 7n}]
+
 def main() -> IO(Unit):
   do IO<Unit>:
     C.Check.str("the reply so far goes ahead, up to its last line break", cs.show(S.Steer.all(q2("t1"), made(Nil{}), bufs("t1", "one\ntwo\nthr"))), "q2:before|A|one\ntwo\n;q2|U|steer it;")
@@ -69,4 +76,15 @@ def main() -> IO(Unit):
     C.Check.str("nothing after the cut: nothing more", whole("one\ntwo\n", ""), "")
     C.Check.str("no cut before: the whole reply", cs.show(S.Steer.all([M.MessagePosted{"t1", "a1", M.Assistant{}, "all of it", 6n}], made(Nil{}), bufs("t1", "all of it"))), "a1|A|all of it;")
     C.Check.str("a reply posted ahead ends no turn", ends(turn(), "q2:before"), "0")
+    C.Check.str("a stopped turn: what streamed is posted as it stops", cs.show(S.Steer.all(stop("t1"), made(Nil{}), bufs("t1", "one\ntwo\nthr"))), "live:t1:0:stopped|A|one\ntwo\nthr;other;")
+    C.Check.str("any agent's", cs.show(S.Steer.all(stop("t2"), made(Nil{}), bufs("t2", "one\ntwo"))), "live:t2:0:stopped|A|one\ntwo;other;")
+    C.Check.str("nothing streamed: the stop alone", cs.show(S.Steer.all(stop("t1"), made(Nil{}), Nil{})), "other;")
+    C.Check.str("only blanks streamed: the stop alone", cs.show(S.Steer.all(stop("t1"), made(Nil{}), bufs("t1", "  \n"))), "other;")
+    C.Check.str("another thread's stream stays", cs.show(S.Steer.all(stop("t1"), made(Nil{}), bufs("t2", "one\ntwo"))), "other;")
+    C.Check.str("Claude's message landing after the Stop adds nothing", cs.show(S.Steer.all([M.MessagePosted{"t1", "a1", M.Assistant{}, "one\ntwo\nthr", 8n}], made(stopped()), Nil{})), "")
+    C.Check.str("nor one with more than streamed", cs.show(S.Steer.all([M.MessagePosted{"t1", "a1", M.Assistant{}, "one\ntwo\nthree", 8n}], made(stopped()), Nil{})), "")
+    C.Check.str("the next turn's reply is whole", cs.show(S.Steer.all([M.MessagePosted{"t1", "a2", M.Assistant{}, "four", 9n}], made(List.append(&2, M.Change, stopped(), [M.MessagePosted{"t1", "q3", M.User{}, "go on", 8n}])), bufs("t1", "four"))), "a2|A|four;")
+    C.Check.str("a reply an earlier turn posted as it stopped is not counted", cs.show(S.Steer.all([M.MessagePosted{"t1", "a2", M.Assistant{}, "four\nfive", 9n}],
+      made(List.append(&2, M.Change, stopped(), [M.MessagePosted{"t1", "q3", M.User{}, "go on", 8n}, M.MessagePosted{"t1", "live:t1:1:stopped", M.Assistant{}, "four\nfive", 9n}])), Nil{})), "")
+    C.Check.str("the reply posted as it stopped ends its turn", ends([M.Msg{"q1", "t1", M.User{}, "first", 3n}, M.Msg{"live:t1:0:stopped", "t1", M.Assistant{}, "one", 7n}], "live:t1:0:stopped"), "3")
     C.Check.str("the reply after the message ends its turn", ends(turn(), "a1"), "5")
