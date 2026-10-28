@@ -309,7 +309,8 @@ def Session.command(c: U.Cmd) -> J.Json:
     case U.Connect{url}: J.Json.obj([J.KV{"type", J.Str{"connect"}}, J.KV{"url", J.Str{url}}])
     case U.Keep{thread, text}: J.Json.obj([J.KV{"type", J.Str{"keep"}}, J.KV{"thread", J.Str{thread}}, J.KV{"text", J.Str{text}}])
     case U.Notify{thread, title, body, key}: J.Json.obj([J.KV{"type", J.Str{"notify"}}, J.KV{"thread", J.Str{thread}}, J.KV{"title", J.Str{title}}, J.KV{"body", J.Str{body}}, J.KV{"key", J.Str{key}}])
-    case U.Later{ms, action, value}: J.Json.obj([J.KV{"type", J.Str{"later"}}, J.KV{"ms", J.Json.nat(ms)}, J.KV{"action", J.Str{action}}, J.KV{"value", J.Str{value}}])
+    case U.Later{ms, +action, value}: J.Json.obj([J.KV{"type", J.Str{"later"}}, J.KV{"ms", J.Json.nat(ms)}, J.KV{"action", J.Str{action}}, J.KV{"value", J.Str{value}},
+      J.KV{"after", J.Str{Bool.pick(String, U.Hs.drawn(action), "drawn", "")}}])
     case U.Jump{id}: J.Json.obj([J.KV{"type", J.Str{"jump"}}, J.KV{"id", J.Str{id}}])
 
 def Session.commands(cs: List<&2, U.Cmd>) -> List<&2, J.Json>:

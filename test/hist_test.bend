@@ -151,6 +151,10 @@ def main() -> IO(Unit):
   +cmp = act(act(u, "cmp", ""), "cmp-pick", "a\tc1\tStep 1\t/r/.git\t/r")
   do IO<Unit>:
     C.Check.str("bar live", bar(u), "True|3|0|Live · 3 steps||||FalseFalseFalse||Working copy|")
+    C.Check.str("a tick waits for the viewer to draw, nothing else does", yes(U.Hs.drawn("hist-tick")) ++ yes(U.Hs.drawn("intent-saved-off")), "yesno")
+    C.Check.str("the project's own board is its versions' family", U.Solid.fam.k("0|/r|", "0", "/r", "/r/b.kicad_pcb") ++ "," ++ H.Hist.key.family("0|/r|" ++ H.Hist.git("/r/.git", "c2", "/r", "b.kicad_pcb")), "0|/r|/r/b.kicad_pcb,0|/r|/r/b.kicad_pcb")
+    C.Check.str("its schematic's is the root sheet beside it", U.Solid.fam.k("1|/r|", "1", "/r", "/r/b.kicad_pcb"), "1|/r|/r/b.kicad_sch")
+    C.Check.str("a file picked keeps its own family", U.Solid.fam.k("0|/r|/r/x.kicad_pcb", "0", "/r", "/r/b.kicad_pcb") ++ "," ++ U.Solid.fam.k("0|/r|", "0", "/r", ""), "0|/r|/r/x.kicad_pcb,0|/r|")
     C.Check.str("a viewer kept comes back after a reload", path(reload(U.Viewer.keep(sheet()))) ++ "|"
       ++ U.Ui.view_get(reload(U.Viewer.keep(sheet())), "view.kind") ++ "|"
       ++ yes(U.Ui.panel(reload(U.Viewer.keep(sheet())))) ++ "|"

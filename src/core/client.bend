@@ -6755,6 +6755,20 @@ def Solid.want(+u: Ui) -> String:
     Solid.num(Solid.kind(u)) ++ "|" ++ Ui.root(u) ++ "|" ++ Ui.view_get(u, "view.path")
       ++ Bool.pick(String, Split.is(u), "|" ++ Split.sheet(u) ++ "|" ++ Split.letters(u), ""))
 
+# a source key's family (plot2d.js's data-fam: a key of the same family
+# keeps the view and the last plot until the next comes): the live file
+# its version or comparison is of, and for the project's own file (no
+# path in the key) that file itself (its board, Bd.shown; the root sheet
+# beside it), as a step's version names it, so stepping from the live
+# board to a step keeps the board and fades the change in
+# (test/hist_test.bend)
+def Solid.fam.k(+fam: String, +kind: String, +root: String, +own: String) -> String:
+  Bool.pick(String, Bool.or(Bool.not(String.eq(fam, kind ++ "|" ++ root ++ "|")), Bool.or(String.is_empty(own), String.is_empty(root))), fam,
+    fam ++ Bool.pick(String, String.eq(kind, "1"), Bd.path("schematic", own), own))
+
+def Solid.fam(+u: Ui, +key: String) -> String:
+  Solid.fam.k(HI.Hist.key.family(key), HI.Hist.at(String.split(key, '|'), 0n), Ui.root(u), Bd.shown(u, ""))
+
 # (tree: where the schematic's hierarchy starts, Bd.tree; sheet: the
 # combined view's, whose kind names the panes it shows, "split:sb3")
 def Solid.sync.k(same: Bool, u: Ui, +want: String, +kind: String, +path: String, +root: String, +tree: String, +sheet: String, cmds: List<&2, Cmd>) -> Act:
@@ -8634,6 +8648,13 @@ def Hs.step(fwd: Bool, +u: Ui) -> Ui:
 
 def Hs.beat() -> Nat:
   1400n
+
+# a step is shown its beat once the viewer has drawn it: the tick waits
+# for the page's plots before its beat starts (presentation.bend's Later
+# "after" "drawn"; plot2d.js's whenDrawn), so a step that takes the hub
+# a while to read is still seen (test/hist_test.bend)
+def Hs.drawn(+action: String) -> Bool:
+  String.eq(action, "hist-tick")
 
 def Hs.tick(+u: Ui, +token: String) -> Cmd:
   Later{Hs.beat(), "hist-tick", Ui.sel(u) ++ "\t" ++ token}

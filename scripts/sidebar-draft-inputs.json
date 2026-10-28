@@ -28,7 +28,7 @@
     "src/core/cat.bend": "0130231a18e515a94d40d7584d19a9b5a2d1663f9601fbff944bf97e37f9fd6b",
     "src/core/cef.bend": "f2d3fa4c991d0e341620fe634ddb4e08da97f8e471ec46afac0b3de471cc69fb",
     "src/core/charter.bend": "7f906bdea712f6ff6162735c8cc133767ec0f9289c3d0bee6dfedbd4d75ad981",
-    "src/core/client.bend": "ee39c4136f061c5ae069b337bfd8afe1de880846426513d61e332bf0794434bf",
+    "src/core/client.bend": "ea950a9ba234edb1ea03b5ec414cb0bf3a0261b337875a8e8962834c199868a8",
     "src/core/codec.bend": "33cb35c55f3712a18734e76e1149763001a9388af27948f0da4ead2c13d48b6f",
     "src/core/cron.bend": "6f89a001df0261a25c878616ea66c235e169f7fc1c726d39e695fce8adb57332",
     "src/core/deploy.bend": "ebee4e63a52cf41ae001bebcdbb7fb010ad71c1e04e481292585740d88a39cc4",
@@ -78,7 +78,7 @@
     "src/core/order.bend": "9297a602b2029c879442d145d24dd7a3dbe3d28dcbeeb30cfb9fc7295a489504",
     "src/core/outbox.bend": "7e90d003d01434d86c041b83d837f8a85d9f39c7ae380d840e07bb141f3dd677",
     "src/core/plane.bend": "ac2a6be2c14c774b93f5b596178031b3fa485db82a60bcad4fa2590fc3c5717c",
-    "src/core/presentation.bend": "fc2f28e25863ab2a72a4f8638e1af2f7a64c8e54465d21b32c674c8e2da8cd2d",
+    "src/core/presentation.bend": "345abf721cf37ca86de1f1052fa2edab17a57b3f8eb692de74c0352a3dcc3933",
     "src/core/prompt.bend": "6ecdb20260b8d54caeb63233b7c5568eddbe827cbca74fff54d2ed6dcfb78774",
     "src/core/qr.bend": "42aae4f454bbf55b201e8913e517b6dec531424b6cace582a4726e189636fbcc",
     "src/core/ref-origin.bend": "933dae7741d19f4c68b3d34de827fe42f490deb222282e4e185640a0eb4677fa",
@@ -143,7 +143,7 @@
     "src/web/space.bend": "b86a265e41a900498bc33c37c0404c4d6678554efe3d9054f329beb2cf35ee63",
     "src/web/usage-graph.bend": "fa06f7d2bf855a396a5f7a7b4725dfaa990145fbbcefe7ad21ae8f9a698a2679",
     "src/web/usage-page.bend": "706e3f17a4a3e5f159656d47aeb76a940d4825421f5c33228f9aef692ec926e3",
-    "src/web/view.bend": "3674a5dafae86eca6fc038fd7a8a81e1b7ba342c085898b4b9b2799149c1878f"
+    "src/web/view.bend": "162716a3c47ed2221dd0390a22850483432e6f0fad649c2c5746fe073ad21df0"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -253,5 +253,5 @@
       "sourceSnapshot": "/home/h/Documents/i2cjak/bp-coord/settle-fresh-work/SOURCE-structural-correction.json"
     }
   },
-  "reviewNote": "A reload keeps each thread's viewer: Session.info.key keeps panel:/view.kind:/view.path:, thin-actor seeds a fresh actor (Actor.seed.key, Actor.seed.view), Session.select brings the thread's own panel; sidebar drafts unchanged"
+  "reviewNote": "Play waits for each step to draw: Hs.drawn and Later's after in presentation.bend; Solid.fam gives the live board its versions' family (view.bend data-fam); sidebar drafts unchanged"
 }

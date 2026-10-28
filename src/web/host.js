@@ -1046,8 +1046,11 @@ function run(cmds) {
     } else if (is(c, "Notify")) {
       notify(c);
     } else if (is(c, "Later")) {
-      // a client action come due (the history playing)
-      setTimeout(() => dispatch(c.action, c.value, true), Number(c.ms));
+      // a client action come due (the history playing); one "after"
+      // "drawn" counts its time from when the viewer has drawn what the
+      // view it came with shows (each step is seen for its beat)
+      const due = () => setTimeout(() => dispatch(c.action, c.value, true), Number(c.ms));
+      if (c.after === "drawn") Plot2d.whenDrawn(due); else due();
     } else if (is(c, "Jump")) {
       jump = c.id; // after the next render, which opens its folds
       later();

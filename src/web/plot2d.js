@@ -144,6 +144,27 @@ export function got(o, at = { bytes: 0, t: performance.now() }) {
 function changed(key) {
   for (const v of views.values()) v.relight();
   for (const f of onPlot) f(key);
+  drawnCheck();
+}
+
+// Waiting for what is on show to be drawn (the history playing: a step is
+// seen for its beat once drawn, host.js's Later "after" "drawn"). A wait
+// starts at the next mount, the render of the view it came with, and ends
+// once every canvas has its plot (or the hub's word that there is none),
+// or after DRAWN_MS whatever comes
+const DRAWN_MS = 30000;
+const drawnWaits = [];
+export function whenDrawn(f) {
+  drawnWaits.push({ f, mounted: false, at: performance.now() });
+  setTimeout(drawnCheck, DRAWN_MS + 10);
+}
+function drawnCheck() {
+  if (!drawnWaits.length) return;
+  const ready = [...views.values()].every((v) => !v.key || plots.has(v.key)), now = performance.now();
+  for (const w of drawnWaits.splice(0)) {
+    if ((w.mounted && ready) || now - w.at >= DRAWN_MS) w.f();
+    else drawnWaits.push(w);
+  }
 }
 
 // Infos
@@ -730,6 +751,8 @@ export function mount(canvases) {
   const note = document.querySelector(".rc-note input");
   if (note && !noteSeen) note.focus();
   noteSeen = !!note;
+  for (const w of drawnWaits) w.mounted = true;
+  drawnCheck();
 }
 
 function park(v) {
