@@ -482,6 +482,11 @@ def solid_stats(tag: String, size: String, triangles: String, waited: String, bu
 def plot_stats(tag: String, size: String, waited: String, delayed: Bool) -> String:
   MSG.T.viewer.plot.stats(I.I18n.of_tag(tag), size, Bool.pick(String, delayed, "yes", "no"), waited)
 
+# the same corner while another version of the file on show is read (a
+# step of the design history): the last one stays up until it comes
+def plot_loading(tag: String) -> String:
+  MSG.T.viewer.loading(I.I18n.of_tag(tag))
+
 # The host persists only this conversation's draft/receipt, never commands.
 def mail_identity(+u: U.Ui) -> String:
   Bool.pick(String, String.is_empty(U.Ui.scratch(u, "@mr.conv")), "", MA.MA.key(u))

@@ -693,16 +693,22 @@ class View {
     // only while something fades in does it ask for the next frame
     if (fading) this.later();
     // how it came, small in a corner, on the page's background so a board
-    // panned under it never shows through
-    const st = stats.get(this.key);
-    if (st) {
+    // panned under it never shows through; while another version of the
+    // same file is read (a step of the design history: the last one stays
+    // up meanwhile) the corner says it is loading, in the accent, once it
+    // has taken longer than a blink
+    const st = stats.get(this.key), waited = this.key && !plots.has(this.key) ? performance.now() - this.asked : -1;
+    const loading = waited >= LOADING_MS;
+    if (waited >= 0 && !loading) setTimeout(() => this.later(), LOADING_MS - waited);
+    if (st || loading) {
       g.setTransform(1, 0, 0, 1, 0, 0);
       g.font = font(this.canvas, 11 * dpr);
       g.textAlign = "left";
-      const text = App.plot_stats(document.documentElement.lang, mb(st.bytes), st.waited.toFixed(1), st.waited > 0.5);
+      const lang = document.documentElement.lang;
+      const text = loading ? App.plot_loading(lang) : App.plot_stats(lang, mb(st.bytes), st.waited.toFixed(1), st.waited > 0.5);
       g.fillStyle = this.bg;
       g.fillRect(4 * dpr, h - 20 * dpr, g.measureText(text).width + 8 * dpr, 16 * dpr);
-      g.fillStyle = "rgba(138,143,152,0.9)";
+      g.fillStyle = loading ? ACCENT : "rgba(138,143,152,0.9)";
       g.fillText(text, 8 * dpr, h - 8 * dpr);
     }
   }
@@ -713,6 +719,10 @@ const DIM = 0.28;
 // fills under this many square micrometres (25 mm²) get the edge
 const EDGED = 25e6;
 const EDGE = "rgba(255,255,255,0.85)";
+// a step still loading says so in this (style.css's --accent), after this
+// many ms
+const ACCENT = "#5fb3ff";
+const LOADING_MS = 250;
 
 // the views on the page, by canvas
 const views = new Map();
