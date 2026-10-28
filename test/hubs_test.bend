@@ -58,6 +58,18 @@ def cmds(cs: List<&2, H.HCmd>) -> String:
     case H.HCmd{k, _} <> t:
       "cmd@" ++ k ++ " " ++ cmds(t)
 
+# what the commands send and copy, each with its hub
+def said(cs: List<&2, H.HCmd>) -> String:
+  match cs:
+    case Nil{}:
+      ""
+    case H.HCmd{k, U.Send{t}} <> r:
+      k ++ " " ++ t ++ " " ++ said(r)
+    case H.HCmd{k, U.Copy{t}} <> r:
+      k ++ " copy " ++ t ++ " " ++ said(r)
+    case _ <> r:
+      said(r)
+
 def sel(+h: H.Hubs, +k: String) -> String:
   U.Ui.sel(H.Hubs.ui(h, k))
 
@@ -187,6 +199,12 @@ def main() -> IO(Unit):
       M.Setting.get(U.Ui.state.of(H.Hubs.ui(H.Hubs.after(H.Hubs.act(two(), "fab-hide", "box:3787|t2")), "box:3787")), "fab.min.p2", ""), "1")
     C.Check.str("the menu's Buy it brings it back",
       M.Setting.get(U.Ui.state.of(H.Hubs.ui(H.Hubs.after(H.Hubs.act(H.Hubs.after(H.Hubs.act(two(), "fab-hide", "box:3787|t2")), "fab-show", "box:3787|t2")), "box:3787")), "fab.min.p2", ""), "0")
+    # a row's menu names its thread with its hub: the hub gets the plain id
+    C.Check.str("a row's fork names the plain thread", said(H.Hubs.cmds(H.Hubs.act(two(), "fork", "box:3787|t2"))), "box:3787 {\"id\":0,\"m\":\"thread.fork\",\"p\":{\"thread\":\"t2\"}} ")
+    C.Check.str("the fork opens on its hub", H.Hubs.cur(H.Hubs.after(H.Hubs.act(two(), "fork", "box:3787|t2"))), "box:3787")
+    C.Check.str("the header's fork is the open thread's", said(H.Hubs.cmds(H.Hubs.act(H.Hubs.after(H.Hubs.act(two(), "select", "box:3787|t2")), "fork", ""))), "box:3787 {\"id\":1,\"m\":\"thread.fork\",\"p\":{\"thread\":\"t2\"}} ")
+    C.Check.str("a row's merge back names the plain thread", said(H.Hubs.cmds(H.Hubs.act(two(), "back", "box:3787|t2"))), "box:3787 {\"id\":0,\"m\":\"thread.back\",\"p\":{\"thread\":\"t2\"}} ")
+    C.Check.str("a row's link is copied without its hub", said(H.Hubs.cmds(H.Hubs.act(two(), "ref-copy", "box:3787|backplane://thread/t2"))), "box:3787 copy backplane://thread/t2 ")
     C.Check.str("a row's action keeps the current hub", H.Hubs.cur(H.Hubs.after(H.Hubs.act(two(), "row-settle", "box:3787|t2"))), "100.1.1.1:3787")
     C.Check.str("unknown hub: the current", cmds(H.Hubs.cmds(H.Hubs.act(two(), "add-project", "/some/path"))), "send@100.1.1.1:3787 ")
     C.Check.str("add a project on a hub", cmds(H.Hubs.cmds(H.Hubs.act(two(), "add-project", "box:3787|/some/path"))), "send@box:3787 ")

@@ -766,17 +766,21 @@ def Hubs.register.at(hs: Hubs, +key: String, p: String, t: String, k: String, th
 # the project picker or a bot or room form, adding a project) a hub: they
 # go to the hub it names; the first thirteen also bring it into focus, so the
 # picker's, the bot's and the forms' own actions follow it (the history's
-# playback ticks go to the hub that asked: bridge.js names it)
+# playback ticks go to the hub that asked: bridge.js names it); a menu's
+# items name their row too (a row's Fork and Merge into source thread, a
+# link's or a file's copy and open), so they go as plain ids, never with
+# the hub in front (a hub took "host:port|id" for a thread and forked none)
 def Hubs.routed(+action: String) -> Nat:
   C.Codec.pos(["select", "new-thread", "picker-open", "bot", "room", "remote", "uber", "uber-bot", "bot-new", "room-new", "proj-go", "hub-settings", "proj-intent",
     "row-settle", "row-unsettle", "row-snooze", "row-delete", "toggle-settled", "add-project", "proj-remove",
-    "row-menu", "proj-menu", "row-pin", "row-unpin", "row-archive", "row-unarchive", "hist-tick", "row-rename", "rename-save", "uber-promote", "uber-home", "fab-open", "fab-edit", "buy", "fab-hide", "fab-show", "deploy-cancel", "thread-tree", "thread-child", "thread-detach", "intent-close"], action)
+    "row-menu", "proj-menu", "row-pin", "row-unpin", "row-archive", "row-unarchive", "hist-tick", "row-rename", "rename-save", "uber-promote", "uber-home", "fab-open", "fab-edit", "buy", "fab-hide", "fab-show", "deploy-cancel", "thread-tree", "thread-child", "thread-detach", "intent-close",
+    "fork", "back", "ref-copy", "file-open", "file-reveal", "file-copy"], action)
 
 def Hubs.moves() -> Nat:
   13n
 
 def Hubs.routes() -> Nat:
-  41n
+  47n
 
 # answers to what any hub may be showing (its error, a delete or remove
 # to confirm); the project search is every hub's at once, since the list
@@ -829,12 +833,17 @@ def Hubs.focus(move: Bool, hs: Hubs, +key: String, +op: Op) -> HAct:
     case False{} Hubs{+cid, +now, +cur, list}:
       Hubs.step(Hubs{cid, now, cur, list}, Hubs.every.op(op), key, op)
 
+# a row's actions that open a thread of their own on the row's hub (a new
+# subthread, a fork), so the hub comes into focus with it
+def Hubs.opens(+action: String) -> Bool:
+  Bool.or(String.eq(action, "thread-child"), String.eq(action, "fork"))
+
 # (matches, not Bool.pick: an unrouted value, which may be a big piece of
 # an upload, is never split)
 def Hubs.act.k(+hs: Hubs, +cur: String, known: Bool, +action: String, +value: String) -> HAct:
   match known:
     case True{}:
-      Hubs.focus(Bool.and(Bool.or(Nat.is_lt(Hubs.routed(action), Hubs.moves()), String.eq(action, "thread-child")), Bool.not(String.eq(Hubs.key_of(value), cur))), hs, Hubs.key_of(value), Do{action, Hubs.rest(value)})
+      Hubs.focus(Bool.and(Bool.or(Nat.is_lt(Hubs.routed(action), Hubs.moves()), Hubs.opens(action)), Bool.not(String.eq(Hubs.key_of(value), cur))), hs, Hubs.key_of(value), Do{action, Hubs.rest(value)})
     case False{}:
       Hubs.focus(False{}, hs, cur, Do{action, value})
 

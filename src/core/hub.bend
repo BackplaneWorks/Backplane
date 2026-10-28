@@ -3069,9 +3069,18 @@ def Hub.fork.k(t: M.Thread, +s: M.State, +now: Nat, +client: U32, +id: String, +
           M.ActivityLogged{src, Hub.id("k", now, Hub.seq(s)), "info", "fork", "Forked into \"Fork: " ++ ti ++ "\"", now}],
         Reply.made(client, id, th) <> Fork.outs.s(M.Scratch.is(p), wt, th, Hub.project.root(Hub.project(s, p)), src)}
 
-# a new thread that goes on from this one
+def Hub.fork.if(known: Bool, +s: M.State, +now: Nat, +client: U32, +id: String, +src: String) -> Step:
+  match known:
+    case True{}:
+      Hub.fork.k(Hub.thread(s, src), s, now, client, id, src)
+    case False{}:
+      Step.outs([Reply.err(client, id, "no such thread")])
+
+# a new thread that goes on from this one (only from a thread the log
+# knows: a name it never made forked a blank one, "Fork: " in no project
+# with no agent, listed nowhere)
 def Hub.fork(+s: M.State, +now: Nat, +client: U32, +id: String, +src: String) -> Step:
-  Hub.fork.k(Hub.thread(s, src), s, now, client, id, src)
+  Hub.fork.if(Hub.owns(s, src), s, now, client, id, src)
 
 def Hub.back.k(none: Bool, +s: M.State, +now: Nat, +client: U32, +id: String, +fork: String, +src: String) -> Step:
   match none:

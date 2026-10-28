@@ -77,6 +77,9 @@ def main() -> IO(Unit):
     C.Check.str("works locally", tags(mk), "ThreadCreated")
     C.Check.str("in its folder from the start", H.Hub.cwd(state(List.append(&2, M.Change, base(), H.Queue.changes(mk))), H.Hub.thread(state(List.append(&2, M.Change, base(), H.Queue.changes(mk))), "t30-6")), "/h/scratch/t30-6")
     C.Check.str("a fork gets a folder of its own", outs(H.Hub.request_text(state(base()), 30n, 1, "{\"id\":1,\"m\":\"thread.fork\",\"p\":{\"thread\":\"t1\"}}")), "reply scratch:t30-6")
+    # a thread the log never made (a phone once sent its row as "host:port|t1") forks nothing
+    C.Check.str("a fork of no thread is refused", outs(H.Hub.request_text(state(base()), 30n, 1, "{\"id\":1,\"m\":\"thread.fork\",\"p\":{\"thread\":\"10.0.2.2:41693|t1\"}}")), "err")
+    C.Check.str("and logs nothing", tags(H.Hub.request_text(state(base()), 30n, 1, "{\"id\":1,\"m\":\"thread.fork\",\"p\":{\"thread\":\"10.0.2.2:41693|t1\"}}")), "")
     C.Check.str("a project thread still gets a worktree", outs(H.Hub.request_text(state(base()), 30n, 1, "{\"id\":1,\"m\":\"thread.create\",\"p\":{\"project\":\"p1\",\"env\":\"worktree\"}}")),
       "reply git:worktree@/r/board")
     +week : Nat = Nat.add(12n, 604800n)
