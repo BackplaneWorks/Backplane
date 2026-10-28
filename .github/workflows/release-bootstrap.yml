@@ -1,265 +1,104 @@
-name: Configured release producer bootstrap (artifact only)
-
-# First producer run: no fictitious prior successful artifact run is required.
-# The JS service is emitted and cross-built per target on Linux, with the
-# protected inputs baked into a private prelude, onto each target's pinned Bun
-# runtime; each target's own runner then checks it and measures its runtime.
-# No push/tag trigger, publication, install, runner registration or write token.
+name: Frozen 0.13 Windows runtime and desktop packaging recovery
 on:
   workflow_dispatch:
     inputs:
-      ref:
-        description: Full root-frozen source commit containing these producers
-        type: string
-        required: true
-      targets:
-        description: JSON service target list for this artifact-only build
-        type: string
-        required: false
-        default: '["linux-x64","linux-arm64","darwin-x64","darwin-arm64","windows-x64"]'
-      runtime_targets:
-        description: JSON matching-host runtime include rows for selected service targets
-        type: string
-        required: false
-        default: '[{"target":"linux-x64","runner":"ubuntu-24.04","service":"backplane-serve","version":true},{"target":"linux-arm64","runner":"ubuntu-24.04-arm","service":"backplane-serve","version":true},{"target":"darwin-x64","runner":"macos-15-intel","service":"backplane-serve","version":true},{"target":"darwin-arm64","runner":"macos-15","service":"backplane-serve","version":true},{"target":"windows-x64","runner":"windows-2025","service":"backplane-serve.exe","version":false}]'
-      operation:
-        type: choice
-        options: [js, android, android-signing-info]
-        required: true
-      packet_url:
-        description: Public source-bound input URL; unused for android-signing-info
-        type: string
-        required: false
-        default: ''
-      packet_sha256:
-        description: Trusted input SHA256; unused for android-signing-info
-        type: string
-        required: false
-        default: ''
-      windows_runtime_url:
-        description: js, windows-x64 only. The portable Cygwin runtime bundle (.tar.gz of RUNTIME.json, CLOSURE.json and their members); its contents are pinned in service-runtime.py
-        type: string
-        required: false
-        default: ''
-      windows_runtime_sha256:
-        description: SHA256 of that .tar.gz
-        type: string
-        required: false
-        default: ''
+      runtime_url: {type: string, required: true}
+      runtime_sha256: {type: string, required: true}
+      components_url: {type: string, required: true}
+      components_sha256: {type: string, required: true}
 permissions:
   contents: read
+  actions: read
 concurrency:
-  group: release-bootstrap-${{ inputs.ref }}-${{ inputs.operation }}
+  group: frozen013-windows-recovery-74d943
   cancel-in-progress: false
-
-env:
-  BACKPLANE_FROZEN_COMMIT: ${{ inputs.ref }}
-  BACKPLANE_VERSION: v0.13.0
-  BACKPLANE_VERSION_STAMP: '0.13.0'
-  BACKPLANE_TELEMETRY_CHANNEL: release
-
 jobs:
-  js:
-    if: inputs.operation == 'js'
-    strategy:
-      fail-fast: false
-      matrix:
-        target: ${{ fromJSON(inputs.targets) }}
-    # every target cross-builds here: bun links the emitted JS onto the
-    # target's own Bun runtime, pinned in scripts/release-bootstrap.py
-    runs-on: ubuntu-24.04
-    timeout-minutes: 60
+  package-windows:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    env:
+      PYTHONUTF8: '1'
+      PYTHON: python
+      BACKPLANE_TELEMETRY: 'off'
+      BACKPLANE_DESKTOP_BROWSER: '1'
+      RUNTIME_URL: ${{ inputs.runtime_url }}
+      RUNTIME_SHA: ${{ inputs.runtime_sha256 }}
+      COMPONENTS_URL: ${{ inputs.components_url }}
+      COMPONENTS_SHA: ${{ inputs.components_sha256 }}
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.ref }}
-          persist-credentials: false
-      - name: Check out trusted workflow tools separately from frozen product
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.sha }}
-          path: build/bootstrap-tools
-          persist-credentials: false
-      - uses: ./build/bootstrap-tools/.github/actions/setup-bend
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: '1.4.3'
-      - name: Record workflow tools separately; require frozen product source; fetch verified public JS inputs
-        env:
-          WORKFLOW_SHA: ${{ github.sha }}
-          PACKET_URL: ${{ inputs.packet_url }}
-          PACKET_SHA: ${{ inputs.packet_sha256 }}
-        shell: bash
-        run: |
-          python3 build/bootstrap-tools/scripts/release-bootstrap.py fetch --source "$BACKPLANE_FROZEN_COMMIT" --operation js --url "$PACKET_URL" --sha256 "$PACKET_SHA" --directory "$RUNNER_TEMP/release-inputs"
-      - name: Build the JS service with configured protected release inputs
-        shell: bash
-        env:
-          BACKPLANE_GOOGLE_BAKE: '1'
-          BACKPLANE_GOOGLE_CLIENT_ID: ${{ secrets.BACKPLANE_GOOGLE_CLIENT_ID }}
-          BACKPLANE_GOOGLE_CLIENT_SECRET: ${{ secrets.BACKPLANE_GOOGLE_CLIENT_SECRET }}
-          BACKPLANE_TELEMETRY_BAKE: '1'
-          BACKPLANE_TELEMETRY_URL: https://backplaneworks.com/api/v1/events
-          BACKPLANE_TELEMETRY_KID: ${{ secrets.BACKPLANE_TELEMETRY_KID }}
-          BACKPLANE_TELEMETRY_KEY: ${{ secrets.BACKPLANE_TELEMETRY_KEY }}
-          TARGET: ${{ matrix.target }}
-        run: |
-          python3 build/bootstrap-tools/scripts/release-bootstrap.py run --source "$BACKPLANE_FROZEN_COMMIT" --operation js --target "$TARGET" --directory "$RUNNER_TEMP/release-inputs"
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: configured-service-build-${{ matrix.target }}
-          path: |
-            build/bootstrap-js/
-            build/bootstrap-execution.json
-          if-no-files-found: warn
-          retention-days: 14
-
-  js-runtime:
-    if: inputs.operation == 'js'
-    needs: js
-    strategy:
-      fail-fast: false
-      matrix:
-        include: ${{ fromJSON(inputs.runtime_targets) }}
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
-    steps:
-      - name: Keep frozen source bytes as committed
+      - name: Preserve committed source bytes on Windows
         shell: bash
         run: git config --global core.autocrlf false
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.ref }}
+          ref: 74d943b7db3ceab37893b350308cf1802f38fe6b
+          path: source
           persist-credentials: false
-      - name: Check out trusted workflow tools separately from frozen product
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.sha }}
-          path: build/bootstrap-tools
-          persist-credentials: false
-      # Linux measures with the runner's own python3 (Ubuntu 24.04: 3.12):
-      # setup-python puts LD_LIBRARY_PATH in the job's environment, and the
-      # measurement refuses an ambient loader override
       - uses: actions/setup-python@v5
-        if: runner.os != 'Linux'
         with:
           python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
       - uses: actions/download-artifact@v4
         with:
-          name: configured-service-build-${{ matrix.target }}
-          path: build
-      - name: Run the service on its own target
+          name: configured-service-build-windows-x64
+          run-id: 40748872940
+          github-token: ${{ github.token }}
+          path: source/build
+      - name: Fetch exact retained runtime and current shell components
         shell: bash
-        continue-on-error: ${{ !matrix.version }}
-        env:
-          SERVICE: build/bootstrap-js/${{ matrix.service }}
         run: |
           set -euo pipefail
-          chmod 755 "$SERVICE"  # artifacts drop file modes
-          v=$("$SERVICE" --version)
-          echo "$v"
-          [ "$v" = "backplane 0.13.0" ]
-      - name: Measure matching-host system ABI and assemble genuine service component
+          python - <<'PY'
+          import pathlib,os,urllib.request,hashlib,tarfile
+          base=pathlib.Path('inputs');base.mkdir()
+          for name in ['RUNTIME','COMPONENTS']:
+              u=os.environ[name+'_URL'];h=os.environ[name+'_SHA'];assert u.startswith('https://') and len(h)==64
+              p=base/(name.lower()+'.tar.gz')
+              with urllib.request.urlopen(u,timeout=90) as response,p.open('wb') as f:
+                  while b:=response.read(1024*1024):f.write(b)
+              with p.open('rb') as f:assert hashlib.file_digest(f,'sha256').hexdigest()==h
+              dest=base/name.lower();dest.mkdir()
+              with tarfile.open(p) as tar:tar.extractall(dest,filter='fully_trusted')
+          PY
+          (cd source/desktop && npm ci --ignore-scripts --no-audit --no-fund)
+      - name: Retry only actual Windows ABI/component assembly with UTF8 locale
         shell: bash
-        env:
-          WINRT_URL: ${{ inputs.windows_runtime_url }}
-          WINRT_SHA: ${{ inputs.windows_runtime_sha256 }}
         run: |
-          chmod 755 build/bootstrap-js/${{ matrix.service }}
-          py=python; [ "$RUNNER_OS" = Linux ] && py=/usr/bin/python3
-          # Windows: the hub's shell (sh, bash, coreutils) ships beside it
-          set --
-          if [ "${{ matrix.target }}" = windows-x64 ]; then
-            [ -n "$WINRT_URL" ] && [ -n "$WINRT_SHA" ] || { echo "windows-x64 needs windows_runtime_url and windows_runtime_sha256"; exit 1; }
-            curl -fsSL "$WINRT_URL" -o "$RUNNER_TEMP/winrt.tar.gz"
-            echo "$WINRT_SHA  $RUNNER_TEMP/winrt.tar.gz" | sha256sum -c -
-            # (Git Bash tar takes "D:..." for a remote host: work relative to the folder)
-            mkdir -p "$RUNNER_TEMP/winrt" && (cd "$RUNNER_TEMP" && tar -xzf winrt.tar.gz -C winrt)
-            set -- --windows-runtime "$RUNNER_TEMP/winrt"
-          fi
-          "$py" build/bootstrap-tools/scripts/service-runtime.py "$@" --source-root "$GITHUB_WORKSPACE" --build "$GITHUB_WORKSPACE/build/bootstrap-js" --producer "$GITHUB_WORKSPACE/build/bootstrap-tools/scripts/service-release.py" --producer-sha256 6dff1255e45b84df922e37ae984f9655583f1c0e6deac74cc2a5b5f9af654568 --out "$GITHUB_WORKSPACE/build/bootstrap-service"
+          set -euo pipefail
+          python - <<'PY'
+          import pathlib,subprocess,hashlib,json,os
+          root=pathlib.Path.cwd();s=root/'source';raw=s/'build/bootstrap-js';binary=raw/'backplane-serve.exe';before=hashlib.sha256(binary.read_bytes()).hexdigest()
+          assert subprocess.check_output(['git','-C',str(s),'rev-parse','HEAD'],text=True).strip()=='74d943b7db3ceab37893b350308cf1802f38fe6b'
+          assert subprocess.check_output(['git','-C',str(s),'rev-parse','HEAD^{tree}'],text=True).strip()=='a9231b10c14aeb0af2306dd7ee022922802d6e53'
+          run=lambda *args:subprocess.run(list(map(str,args)),check=True)
+          run('python',s/'scripts/service-runtime.py','--windows-runtime',root/'inputs/runtime','--source-root',s,'--build',raw,'--producer',s/'scripts/service-release.py','--producer-sha256','6dff1255e45b84df922e37ae984f9655583f1c0e6deac74cc2a5b5f9af654568','--out',s/'build/bootstrap-service')
+          assert hashlib.sha256(binary.read_bytes()).hexdigest()==before
+          out=root/'package';out.mkdir();service=s/'build/bootstrap-service/component/SERVICE.json';payload=service.parent/'payload'
+          run('node',s/'desktop/restore-modes.cjs',service,payload)
+          run('python',s/'desktop/freeze-target.py',s,root/'inputs/components/components',service,out/'freeze')
+          run('node',s/'desktop/produce-release.cjs','stage','--request',out/'freeze/stage.request.json','--output',out/'stage')
+          (out/'RECOVERY.json').write_text(json.dumps({'sourceCommit':'74d943b7db3ceab37893b350308cf1802f38fe6b','sourceTree':'a9231b10c14aeb0af2306dd7ee022922802d6e53','originalBuildRun':40748872940,'binarySha256':before,'toolingCommit':os.environ['GITHUB_SHA'],'compilerInvoked':False,'change':'PYTHONUTF8=1 for Windows locale; existing service binary retained; actual native icon branding and stage generation'},indent=2)+'\n')
+          PY
+      - name: Bounded native Windows desktop smoke with OS sandbox
+        shell: bash
+        run: node source/desktop/test/release-smoke.cjs --stage "$GITHUB_WORKSPACE/package/stage" --out "$GITHUB_WORKSPACE/package/evidence"
+      - name: Strict archive from actual native evidence
+        shell: bash
+        run: node source/desktop/archive-after-smoke.cjs --stage "$GITHUB_WORKSPACE/package/stage" --evidence "$GITHUB_WORKSPACE/package/evidence" --out "$GITHUB_WORKSPACE/package/acceptance" --dist "$GITHUB_WORKSPACE/package/dist"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: configured-service-${{ matrix.target }}
+          name: windows013-recovered-component-and-desktop
           path: |
-            build/bootstrap-js/
-            build/bootstrap-service/
-            build/bootstrap-execution.json
-          if-no-files-found: warn
-          retention-days: 14
-
-  android:
-    if: inputs.operation == 'android'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 75
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.ref }}
-          persist-credentials: false
-      - name: Check out trusted workflow tools separately from frozen product
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.sha }}
-          path: build/bootstrap-tools
-          persist-credentials: false
-      - name: Require frozen product source; fetch actual native-owner inputs and qualified bridge
-        shell: bash
-        env:
-          WORKFLOW_SHA: ${{ github.sha }}
-          PACKET_URL: ${{ inputs.packet_url }}
-          PACKET_SHA: ${{ inputs.packet_sha256 }}
-        run: |
-          python3 build/bootstrap-tools/scripts/release-bootstrap.py fetch --source "$BACKPLANE_FROZEN_COMMIT" --operation android --url "$PACKET_URL" --sha256 "$PACKET_SHA" --directory "$RUNNER_TEMP/release-inputs"
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-      - name: Produce signed Release APK and AAB through the native owner's exact producer
-        shell: bash
-        env:
-          BACKPLANE_ANDROID_KEYSTORE_BASE64: ${{ secrets.BACKPLANE_ANDROID_KEYSTORE_BASE64 }}
-          KEYSTORE_PASSWORD: ${{ secrets.BACKPLANE_ANDROID_KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.BACKPLANE_ANDROID_KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.BACKPLANE_ANDROID_KEY_PASSWORD }}
-        run: |
-          python3 build/bootstrap-tools/scripts/release-bootstrap.py run --source "$BACKPLANE_FROZEN_COMMIT" --operation android --directory "$RUNNER_TEMP/release-inputs"
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: configured-android-release
-          path: |
-            build/bootstrap-android/
-            build/bootstrap-execution.json
-          if-no-files-found: warn
-          retention-days: 14
-
-  android-signing-info:
-    if: inputs.operation == 'android-signing-info'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-      - name: Export only configured keystore public certificate identity
-        shell: bash
-        env:
-          BACKPLANE_ANDROID_KEYSTORE_BASE64: ${{ secrets.BACKPLANE_ANDROID_KEYSTORE_BASE64 }}
-          KEYSTORE_PASSWORD: ${{ secrets.BACKPLANE_ANDROID_KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.BACKPLANE_ANDROID_KEY_ALIAS }}
-        run: |
-          python3 scripts/android-signing-info.py --source "$BACKPLANE_FROZEN_COMMIT" --out "$RUNNER_TEMP/android-public-signer.json"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: android-configured-public-signer
-          path: ${{ runner.temp }}/android-public-signer.json
-          if-no-files-found: error
+            source/build/bootstrap-service/
+            package/RECOVERY.json
+            package/freeze/
+            package/evidence/
+            package/acceptance/
+            package/dist/*.zip
+            package/dist/*.sha256
+            package/dist/**/DESKTOP.json
+            package/dist/**/MANIFEST.json
           retention-days: 14
