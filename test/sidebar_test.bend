@@ -64,6 +64,10 @@ def copied(a: U.Act) -> String:
 def base() -> U.Ui:
   U.Ui.fold(log(), U.Ui.init(now()))
 
+# b made as a fork of a
+def forked() -> U.Ui:
+  U.Ui.fold(List.append(&2, M.Change, log(), [M.SettingSet{"fork.b", "a", 999600n}]), U.Ui.init(now()))
+
 def st() -> M.State:
   M.State.replay(log(), M.State.empty())
 
@@ -118,14 +122,20 @@ def main() -> IO(Unit):
     C.Check.str("view swap keeps the sequence", Nat.show(U.Ui.seq(act(base(), "setting", "sidebar.view=active"))), Nat.show(U.Ui.seq(base())))
     C.Check.str("menu opens", U.Ui.scratch(act(base(), "row-menu", "d"), "@menu"), "t:d")
     C.Check.str("same again shuts", U.Ui.scratch(act(act(base(), "row-menu", "d"), "row-menu", "d"), "@menu"), "")
-    C.Check.str("settled menu", menu(act(base(), "row-menu", "d")), "Bring back,Rename,Archive,Delete,Copy link")
-    C.Check.str("open menu", menu(act(base(), "row-menu", "a")), "Pin,Rename,Settle,Snooze 1 hour,Snooze until tomorrow,Snooze 1 week,Archive,Delete,Copy link")
+    C.Check.str("settled menu", menu(act(base(), "row-menu", "d")), "New subthread,Fork thread,Bring back,Rename,Archive,Delete,Copy link")
+    C.Check.str("open menu", menu(act(base(), "row-menu", "a")), "New subthread,Fork thread,Pin,Rename,Settle,Snooze 1 hour,Snooze until tomorrow,Snooze 1 week,Archive,Delete,Copy link")
+    # the row menu offers what the header's ▾ does: a fork of the row's own thread, and a fork's way back
+    C.Check.str("fork from a row", sent(U.Ui.act(act(base(), "row-menu", "b"), "fork", "b")), "{\"id\":0,\"m\":\"thread.fork\",\"p\":{\"thread\":\"b\"}}")
+    C.Check.str("fork shuts", U.Ui.scratch(act(act(base(), "row-menu", "b"), "fork", "b"), "@menu"), "")
+    C.Check.str("the header's fork is the open thread's", sent(U.Ui.act(act(base(), "select", "c"), "fork", "")), "{\"id\":1,\"m\":\"thread.fork\",\"p\":{\"thread\":\"c\"}}")
+    C.Check.str("a fork's menu", menu(act(forked(), "row-menu", "b")), "New subthread,Fork thread,Bring back to its source,Pin,Rename,Settle,Snooze 1 hour,Snooze until tomorrow,Snooze 1 week,Archive,Delete,Copy link")
+    C.Check.str("back from a row", sent(U.Ui.act(act(forked(), "row-menu", "b"), "back", "b")), "{\"id\":0,\"m\":\"thread.back\",\"p\":{\"thread\":\"b\"}}")
     C.Check.str("rename opens on the title", U.Ui.scratch(act(base(), "row-rename", "d"), "@ren") ++ "|" ++ U.Ui.scratch(act(base(), "row-rename", "d"), "@f.title"), "d|" ++ U.Active.title(U.Ui.thread(st(), "d")))
     C.Check.str("rename sends the edited title", sent(U.Ui.act(act(act(base(), "row-rename", "d"), "bfield", "title\u{1f}  Enclosure v2 "), "rename-save", "")), "{\"id\":0,\"m\":\"thread.rename\",\"p\":{\"thread\":\"d\",\"title\":\"Enclosure v2\"}}")
     C.Check.str("a phone's rename names the thread", sent(U.Ui.act(base(), "rename-save", "f\u{1f}Fixture")), "{\"id\":0,\"m\":\"thread.rename\",\"p\":{\"thread\":\"f\",\"title\":\"Fixture\"}}")
     C.Check.str("a blank title is not sent", sent(U.Ui.act(act(act(base(), "row-rename", "d"), "bfield", "title\u{1f}   "), "rename-save", "")), "")
     C.Check.str("cancel leaves it", U.Ui.scratch(act(act(base(), "row-rename", "d"), "rename-no", ""), "@ren"), "")
-    C.Check.str("delete asks, menu stays", menu(act(act(base(), "row-menu", "d"), "row-delete", "d")), "Bring back,Rename,Archive,Click again to delete,Copy link")
+    C.Check.str("delete asks, menu stays", menu(act(act(base(), "row-menu", "d"), "row-delete", "d")), "New subthread,Fork thread,Bring back,Rename,Archive,Click again to delete,Copy link")
     C.Check.str("delete twice deletes", sent(U.Ui.act(act(act(base(), "row-menu", "d"), "row-delete", "d"), "row-delete", "d")), "{\"id\":0,\"m\":\"thread.delete\",\"p\":{\"thread\":\"d\"}}")
     C.Check.str("deleted shuts", U.Ui.scratch(act(act(act(base(), "row-menu", "d"), "row-delete", "d"), "row-delete", "d"), "@menu"), "")
     C.Check.str("pin sends", sent(U.Ui.act(act(base(), "row-menu", "a"), "row-pin", "a")), "{\"id\":0,\"m\":\"thread.pin\",\"p\":{\"thread\":\"a\"}}")

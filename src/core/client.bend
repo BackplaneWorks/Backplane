@@ -3503,8 +3503,13 @@ def Ui.new_thread.project(u: Ui, +pid: String) -> Act:
 
 # a fork of the selected thread; the new thread is selected when the
 # hub's answer names it
-def Ui.fork(+u: Ui) -> Act:
-  Ui.rpc(Made.want(u), "thread.fork", [J.KV{"thread", J.Str{Ui.sel(u)}}])
+# (a row's menu names its thread; the header's ▾ and the palette name none:
+# the selected one)
+def Ui.fork.of(+u: Ui, +value: String) -> String:
+  Bool.pick(String, String.is_empty(value), Ui.sel(u), value)
+
+def Ui.fork(+u: Ui, +value: String) -> Act:
+  Ui.rpc(Made.want(u), "thread.fork", [J.KV{"thread", J.Str{Ui.fork.of(u, value)}}])
 
 # State put back from a cache (a page's saved log, a phone's saved state)
 # is not this connection's: only a live log sets "@sync" again (Ui.reset),
@@ -14313,9 +14318,9 @@ def Ui.act.k(+i: Nat, +u: Ui, +value: String) -> Act:
     case 74n:
       Ui.send(u, True{})
     case 75n:
-      Ui.fork(u)
+      Ui.fork(u, value)
     case 76n:
-      Ui.on_thread(u, "thread.back")
+      Ui.on_row(u, Ui.fork.of(u, value), "thread.back")
     case _:
       Ui.act.far(Nat.is_ge(i, 178n), i, u, value)
 
@@ -14562,9 +14567,19 @@ def ThreadTree.menu(+st: M.State, +id: String) -> List<&2, MItem>:
   List.append(&2, MItem, ThreadTree.menu.child(ThreadTree.can_route(st, id), id),
     Bool.pick(List<&2, MItem>, String.is_empty(ST.Tree.parent(st, id)), Nil{}, [MItem{"Move to top level", "thread-detach", id, ""}]))
 
+# Fork thread, and a fork's way back to its source: what the header's ▾
+# offers, for the row's own thread (its value names it)
+def Menu.fork(+l: I.Loc, forked: Bool, +id: String) -> List<&2, MItem>:
+  match forked:
+    case True{}:
+      [MItem{MSG.T.tools.forkthread(l), "fork", id, ""}, MItem{MSG.T.menu.forkback(l), "back", id, ""}]
+    case False{}:
+      [MItem{MSG.T.tools.forkthread(l), "fork", id, ""}]
+
 # a thread's menu (armed: its Delete was picked once)
 def Menu.thread(+l: I.Loc, +st: M.State, +now: Nat, +id: String, armed: Bool) -> List<&2, MItem>:
-  List.concat(&2, MItem, [ThreadTree.menu(st, id), Menu.thread.k.loc(l, M.Shelf.at(Ui.thread(st, id), Side.until(st, id), now), Active.pinned(Ui.thread(st, id)), id, armed), [Menu.ref(l, R.Ref.thread(id))]])
+  List.concat(&2, MItem, [ThreadTree.menu(st, id), Menu.fork(l, Bool.not(String.is_empty(M.Fork.source(st, id))), id),
+    Menu.thread.k.loc(l, M.Shelf.at(Ui.thread(st, id), Side.until(st, id), now), Active.pinned(Ui.thread(st, id)), id, armed), [Menu.ref(l, R.Ref.thread(id))]])
 
 def Menu.items.b(+l: I.Loc, bot: Bool, +u: Ui, +id: String) -> List<&2, MItem>:
   match bot:
