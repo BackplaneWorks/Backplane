@@ -19,6 +19,9 @@ for(const label of ['ascii','日本語 space']){
   }
   assert.equal(effects().store_sync(target),'ok');assert.equal(hash(target),oldHash);count++;
   const temp=path.join(home,'.store-rebuild-positive');fs.mkdirSync(temp);fs.symlinkSync(log,path.join(temp,'events.jsonl'));const next=path.join(temp,'store.db');database(next,'new');
+  // Actual Mac startup retained this exact closed-cache residue: empty WAL
+  // plus a 32 KiB shared index. Neither contains pending authoritative data.
+  fs.writeFileSync(next+'-wal',Buffer.alloc(0));fs.writeFileSync(next+'-shm',Buffer.alloc(32768));
   const trace=[],opened=new Map(),io=Object.create(fs);
   io.openSync=(p,...args)=>{const fd=fs.openSync(p,...args);opened.set(fd,p);return fd;};
   io.fsyncSync=fd=>{fs.fsyncSync(fd);trace.push({kind:'sync',path:opened.get(fd)});};
@@ -29,6 +32,13 @@ for(const label of ['ascii','日本語 space']){
   const failTemp=path.join(home,'.store-rebuild-rejected');fs.mkdirSync(failTemp);fs.symlinkSync(log,path.join(failTemp,'events.jsonl'));database(path.join(failTemp,'store.db'),'must-not-promote');const currentHash=hash(target),failing=Object.create(fs);failing.fsyncSync=()=>{throw Object.assign(Error('injected real sync failure'),{code:'EPERM'});};
   assert.match(effects(failing).store_promote(home,failTemp),/^fail injected real sync failure/);assert.equal(hash(target),currentHash);assert.equal(value(target),'new');assert(fs.existsSync(path.join(failTemp,'store.db')));assert.equal(hash(log),logBefore);count++;
   assert.match(effects().store_sync(path.join(home,'missing.db')),/^fail /);count++;
+  for(const kind of ['nonempty-wal','unexpected-file','sidecar-directory']){
+   const rejected=path.join(home,'.store-rebuild-'+kind);fs.mkdirSync(rejected);fs.symlinkSync(log,path.join(rejected,'events.jsonl'));database(path.join(rejected,'store.db'),'must-stay-staged');
+   if(kind==='nonempty-wal')fs.writeFileSync(path.join(rejected,'store.db-wal'),'uncheckpointed bytes');
+   if(kind==='unexpected-file')fs.writeFileSync(path.join(rejected,'keep.me'),'retained');
+   if(kind==='sidecar-directory')fs.mkdirSync(path.join(rejected,'store.db-shm'));
+   const current=hash(target),names=fs.readdirSync(rejected).sort();assert.match(effects().store_promote(home,rejected),/^fail /);assert.equal(hash(target),current);assert.equal(value(target),'new');assert.deepEqual(fs.readdirSync(rejected).sort(),names);assert.equal(hash(log),logBefore);count++;
+  }
   console.log('PASS '+label+': real file flush, ordered atomic promotion/backup, fatal sync errors, unchanged log');
  }finally{fs.rmSync(home,{recursive:true,force:true});}
 }
