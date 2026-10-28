@@ -443,6 +443,8 @@ button.fold span { overflow: hidden; text-overflow: ellipsis; white-space: nowra
 .viewer-say { display: block; padding: 6px 10px; color: var(--faint); font-size: calc(12px * var(--text-scale, 100) / 100); border-bottom: 1px solid var(--line); }
 .viewer-stage canvas { position: absolute; inset: 0; touch-action: none; cursor: grab; }
 .viewer-stage canvas.dragging { cursor: grabbing; }
+/* the 3D model over a soft spot of light, so a dark board stands out */
+.viewer-stage canvas#solid { background: radial-gradient(ellipse at 50% 45%, color-mix(in srgb, var(--text) 22%, var(--bg)) 0%, color-mix(in srgb, var(--text) 6%, var(--bg)) 85%); }
 .viewer-note { position: absolute; inset: 0; display: grid; place-items: center; color: var(--faint); pointer-events: none; padding: 24px; text-align: center; }
 .viewer-note:empty { display: none; }
 /* the 3D model's load line, on the viewer's background so the model

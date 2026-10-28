@@ -152,16 +152,21 @@ export function fit() {
 // a probed part (hon) lights the model within its box on the board (hl:
 // x0 y0 x1 y1, hz: its side's heights) and dims the rest
 const VS = `attribute vec3 p; attribute vec3 n; attribute vec3 c; uniform mat4 m; uniform vec3 eye;
-varying vec3 vc; varying float vl; varying vec3 vp;
-void main() { gl_Position = m * vec4(p, 1.0); vc = c; vp = p; vl = abs(dot(normalize(n), normalize(eye - p))); }`;
+varying vec3 vc; varying float vl; varying vec3 vp; varying vec3 vn;
+void main() { gl_Position = m * vec4(p, 1.0); vc = c; vp = p; vn = n; vl = abs(dot(normalize(n), normalize(eye - p))); }`;
 const FS = `#ifdef GL_FRAGMENT_PRECISION_HIGH
 precision highp float;
 #else
 precision mediump float;
 #endif
-varying vec3 vc; varying float vl; varying vec3 vp; uniform vec4 hl; uniform vec2 hz; uniform float hon;
+varying vec3 vc; varying float vl; varying vec3 vp; varying vec3 vn; uniform vec4 hl; uniform vec2 hz; uniform float hon;
 void main() {
-  vec3 col = min(vc * (0.5 + 0.6 * vl), 1.0);
+  // a key light from above (z up, two-sided) over an ambient floor and the
+  // headlight; dark colours (a solder mask) lifted so the board reads
+  // against the background
+  float key = abs(dot(normalize(vn), normalize(vec3(-0.35, -0.45, 1.0))));
+  vec3 col = vc * (0.55 + 0.8 * key + 0.25 * vl);
+  col = min(mix(col, sqrt(max(col, 0.0)), 0.4), 1.0);
   if (hon > 0.5) {
     bool inb = vp.x >= hl.x && vp.x <= hl.z && vp.y >= hl.y && vp.y <= hl.w && vp.z >= hz.x && vp.z <= hz.y;
     col = inb ? min(mix(col, vec3(1.0, 0.85, 0.4), 0.3) * 1.25, 1.0) : col * 0.4;
