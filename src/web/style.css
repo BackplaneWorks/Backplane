@@ -445,7 +445,9 @@ button.fold span { overflow: hidden; text-overflow: ellipsis; white-space: nowra
 .viewer-stage canvas.dragging { cursor: grabbing; }
 .viewer-note { position: absolute; inset: 0; display: grid; place-items: center; color: var(--faint); pointer-events: none; padding: 24px; text-align: center; }
 .viewer-note:empty { display: none; }
-.viewer-stat { position: absolute; left: 8px; bottom: 6px; color: var(--faint); font-size: calc(11px * var(--text-scale, 100) / 100); pointer-events: none; }
+/* the 3D model's load line, on the viewer's background so the model
+   never shows through it (as plot2d.js draws the board's) */
+.viewer-stat { position: absolute; left: 4px; bottom: 4px; padding: 2px 4px; background: var(--view); color: var(--faint); font-size: calc(11px * var(--text-scale, 100) / 100); pointer-events: none; }
 .viewer-stat:empty { display: none; }
 /* the combined view (Split): the schematic beside the board and its 3D
    model, stacked the other way on a pane taller than wide; each pane under
