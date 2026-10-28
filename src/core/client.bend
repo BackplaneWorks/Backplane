@@ -6391,6 +6391,139 @@ def Mpage.sync.m(a: Act) -> Act:
 def Mpage.sync(a: Act) -> Act:
   Fv.sync(Mpage.sync.m(a))
 
+# Cross-probing
+# -------------
+# The part or net probed (the web's probe.js picks it from a click and
+# lights it in every view) is kept per project and board as the setting
+# "probe:<root>|<board>" (probe.js's text: "c\t<ref>" a part, "n\t<net>
+# \t<pins>" a net), so it holds across the views, the viewer shut and a
+# reload, and on every client of the hub. A part on another sheet than the
+# one on show is named with its sheet and opens it with a click
+# (Probe.away, the tree's parts per sheet, hier.bend's Hier.refs); in the
+# combined view a part probed on the board or in 3D opens its sheet at
+# once (laws probe_*).
+
+# the board the probe is kept for: the one picked where a project has
+# several, else the project's own ("")
+def Probe.board(+u: Ui) -> String:
+  Bool.pick(String, Bd.many(u), Bd.cur(Bd.files(u), Bd.shown(u, Ui.view_get(u, "view.path"))), "")
+
+def Probe.key(+u: Ui) -> String:
+  "probe:" ++ Ui.root(u) ++ "|" ++ Probe.board(u)
+
+def Probe.get(+u: Ui) -> String:
+  Bool.pick(String, String.is_empty(Ui.root(u)), "", M.Setting.get(Ui.state(u), Probe.key(u), ""))
+
+# a part's ref ("" for a net, or none)
+def Probe.ref(+v: String) -> String:
+  Bool.pick(String, String.starts_with(v, "c\t"), HI.Hist.field(v, 1n), "")
+
+def Probe.first(+s: String) -> String:
+  Maybe.default(&2, String, List.head(&2, String, String.split(s, ' ')), "")
+
+# a net's name as the chip says it (KiCad's own for an unlabelled net,
+# "Net-(R1-Pad2)", already says what it is)
+def Probe.net(+n: String) -> String:
+  Bool.pick(String, String.starts_with(n, "Net-"), n, "Net " ++ n)
+
+# the chip's words: the part's ref, or "Net" and its name (one of its pins
+# while the board names none)
+def Probe.label(+v: String) -> String:
+  Bool.pick(String, String.starts_with(v, "c\t"), HI.Hist.field(v, 1n),
+    Bool.pick(String, String.starts_with(v, "n\t"), Probe.net(Bd.or(HI.Hist.field(v, 1n), Probe.first(HI.Hist.field(v, 2n)))), ""))
+
+# the board's source a schematic's net is found on ("0|<root>|<board>",
+# as the Board tab's)
+def Probe.board.src(+u: Ui) -> String:
+  "0|" ++ Ui.root(u) ++ "|" ++ Bd.keep(u, "board", Bd.shown(u, Ui.view_get(u, "view.path")))
+
+def Probe.has(rs: List<&2, String>, +ref: String) -> Bool:
+  match rs:
+    case Nil{}:
+      False{}
+    case r <> t:
+      Bool.or(String.eq(r, ref), Probe.has(t, ref))
+
+def Probe.row.k(hit: Bool, +j: Nat, rest: Maybe<&2, Nat>) -> Maybe<&2, Nat>:
+  match hit:
+    case True{}:
+      Some{j}
+    case False{}:
+      rest
+
+# the first row whose file places the part (text: the tree's refs lines)
+def Probe.row(rs: List<&2, HR.Row>, +j: Nat, +text: String, +ref: String) -> Maybe<&2, Nat>:
+  match rs:
+    case Nil{}:
+      None{}
+    case HR.Row{_, _, f, _} <> t:
+      Probe.row.k(Probe.has(HR.Hier.boxes.of(text, Sch.fam(f)), ref), j, Probe.row(t, 1n+j, text, ref))
+
+def Probe.where.k(none: Bool, +u: Ui, +ref: String) -> Maybe<&2, Nat>:
+  match none:
+    case True{}:
+      None{}
+    case False{}:
+      Probe.row(Sch.rows(u), 0n, Ui.info(u, "sheetrefs:" ++ Sch.tk(u)), ref)
+
+# the row of the sheet a part is on
+def Probe.where(+u: Ui, +ref: String) -> Maybe<&2, Nat>:
+  Probe.where.k(String.is_empty(ref), u, ref)
+
+def Probe.away.k(m: Maybe<&2, Nat>, +at: Nat) -> Maybe<&2, Nat>:
+  match m:
+    case Some{+j}:
+      Bool.pick(Maybe<&2, Nat>, Nat.is_eq(j, at), None{}, Some{j})
+    case None{}:
+      None{}
+
+# the probed part's sheet when it is not the one on show
+def Probe.away(+u: Ui) -> Maybe<&2, Nat>:
+  Probe.away.k(Probe.where(u, Probe.ref(Probe.get(u))), Sch.at(u, Sch.rows(u)))
+
+# what the schematic says of it: the part, its sheet's name, and the value
+# "sch-go" opens it with ("" when it is on show, or on no sheet known)
+type ProbeAway is Data:
+  ProbeAway{ref: String, sheet: String, value: String}
+
+def Probe.note.k(m: Maybe<&2, Nat>, +u: Ui) -> ProbeAway:
+  match m:
+    case Some{+j}:
+      ProbeAway{Probe.ref(Probe.get(u)), HR.Hier.name(Sch.rows(u), j), Sch.entry(u, Sch.rows(u), j)}
+    case None{}:
+      ProbeAway{"", "", ""}
+
+def Probe.note(+u: Ui) -> ProbeAway:
+  Probe.note.k(Probe.away(u), u)
+
+def Probe.go(m: Maybe<&2, Nat>, +u: Ui) -> Ui:
+  match m:
+    case Some{+j}:
+      Sch.visit(u, Sch.rows(u), j)
+    case None{}:
+      u
+
+# (in the combined view a part probed elsewhere opens its sheet)
+def Probe.open(on: Bool, a: Act) -> Act:
+  match on a:
+    case True{} Act{+u, cmds}:
+      Act{Probe.go(Probe.away(u), u), cmds}
+    case False{} _:
+      a
+
+def Probe.set.k(same: Bool, +u: Ui, +v: String) -> Act:
+  match same:
+    case True{}:
+      Probe.open(Split.is(u), Act{u, Nil{}})
+    case False{}:
+      Probe.open(Split.is(u), Ui.rpc(Ui.setting.here(u, [Probe.key(u), v]), "setting.set", [J.KV{"key", J.Str{Probe.key(u)}}, J.KV{"value", J.Str{v}}]))
+
+# "probe": the probe a click made (probe.js's text; "" clears it), kept for
+# the project and board, applied here at once (the same again is kept as
+# it is, and in the combined view still opens its part's sheet)
+def Probe.set(+u: Ui, +v: String) -> Act:
+  Probe.set.k(String.eq(Probe.get(u), v), u, v)
+
 # The web's viewer: the board, the schematic and a 3D model (the board's,
 # or a part's) come as they come to the phones. The page asks the hub for
 # the source on screen (kicad.watch) whenever it changes, and host.js
@@ -6418,8 +6551,9 @@ def Sch.boxes(+u: Ui) -> String:
 def Sch.got.k(take: Bool, u: Ui, +k: String, +o: J.Json) -> Ui:
   match take:
     case True{}:
-      Ui.info_set(Ui.info_set(Ui.info_set(Ui.info_set(Ui.info_set(u, "sheets:" ++ k, J.Json.get_str(o, "rows", "")), "sheetbox:" ++ k, J.Json.get_str(o, "boxes", "")),
-        "sheetid:" ++ k, J.Json.get_str(o, "ids", "")), "sheettop:" ++ k, J.Json.get_str(o, "top", "")), "sheetgen:" ++ k, J.Json.get_str(o, "gen", ""))
+      Ui.info_set(Ui.info_set(Ui.info_set(Ui.info_set(Ui.info_set(Ui.info_set(u, "sheets:" ++ k, J.Json.get_str(o, "rows", "")), "sheetbox:" ++ k, J.Json.get_str(o, "boxes", "")),
+        "sheetid:" ++ k, J.Json.get_str(o, "ids", "")), "sheettop:" ++ k, J.Json.get_str(o, "top", "")), "sheetgen:" ++ k, J.Json.get_str(o, "gen", "")),
+        "sheetrefs:" ++ k, J.Json.get_str(o, "refs", ""))
     case False{}:
       u
 
@@ -14027,11 +14161,14 @@ def Ui.act.sch(sch: Bool, +u: Ui, +action: String, +value: String) -> Act:
 
 # (the combined view's "split-pane": a pane put away or back, kept as the
 # setting split.hide for every client of the hub)
-def Ui.act.split(on: Bool, +u: Ui, +action: String, +value: String) -> Act:
-  match on:
-    case True{}:
+# (and the probe's "probe": Probe.set)
+def Ui.act.split(i: Nat, +u: Ui, +action: String, +value: String) -> Act:
+  match i:
+    case 0n:
       Ui.setting(u, "split.hide=" ++ Split.flip(Split.hide(u), value))
-    case False{}:
+    case 1n:
+      Probe.set(u, value)
+    case _:
       Ui.act.sch(String.starts_with(action, "sch-"), u, action, value)
 
 def Ui.act.tk(tk: Bool, +u: Ui, +action: String, +value: String) -> Act:
@@ -14039,7 +14176,7 @@ def Ui.act.tk(tk: Bool, +u: Ui, +action: String, +value: String) -> Act:
     case True{}:
       Teach.act(u, action, value)
     case False{}:
-      Ui.act.split(String.eq(action, "split-pane"), u, action, value)
+      Ui.act.split(C.Codec.pos(["split-pane", "probe"], action), u, action, value)
 
 def Ui.act.s(close: Bool, +u: Ui, +action: String, +value: String) -> Act:
   match close:

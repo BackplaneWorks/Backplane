@@ -5910,6 +5910,38 @@ def Debug.serve(allowed: Bool, +i: Nat, s: Socket) -> IO(Unit):
     case False{}:
       Conn.finish(s, W.Http.text("401 Unauthorized", "this Backplane needs its pairing token"))
 
+# GET /plot/info?h=<the FNV-1a of a source's key, decimal>: the info file
+# the reading child wrote beside the source's newest plot (core/plot.bend's
+# Infos.file, server/plot.bend's Pv.infos), for the web's cross-probing,
+# to a client the hub lets in; only a number names a file
+def Info.digits(s: String) -> Bool:
+  match s:
+    case SNil{}:
+      True{}
+    case SCon{Chr{+c}, t}:
+      Bool.and(Bool.and(U32.is_ge(c, 48), U32.is_le(c, 57)), Info.digits(t))
+
+def Info.sent(bs: List<&2, U32>, s: Socket) -> IO(Unit):
+  match bs:
+    case Nil{}:
+      Conn.finish(s, W.Http.text("404 Not Found", "no info"))
+    case b <> t:
+      Conn.finish(s, W.Http.response.c("200 OK", "text/plain; charset=utf-8", b <> t, "no-store", ""))
+
+def Info.serve.k(ok: Bool, s: Socket, +h: String) -> IO(Unit):
+  match ok:
+    case True{}:
+      IO.bind(String, Unit, Env.get("BACKPLANE_HOME", ""), home => IO.bind(List<&2, U32>, Unit, Files.read(home ++ "/plot/" ++ h ++ ".info"), bs => Info.sent(bs, s)))
+    case False{}:
+      Conn.finish(s, W.Http.text("404 Not Found", "no info"))
+
+def Info.serve(allowed: Bool, s: Socket, +h: String) -> IO(Unit):
+  match allowed:
+    case True{}:
+      Info.serve.k(Bool.and(Bool.not(String.is_empty(h)), Bool.and(Nat.is_le(String.length(h), 10n), Info.digits(h))), s, h)
+    case False{}:
+      Conn.finish(s, W.Http.text("401 Unauthorized", "this Backplane needs its pairing token"))
+
 def Conn.get.k(i: Nat, s: Socket, +web: String, +p: String, gz: Bool, +allowed: Bool) -> IO(Unit):
   match i:
     case 0n:
@@ -5922,6 +5954,8 @@ def Conn.get.k(i: Nat, s: Socket, +web: String, +p: String, gz: Bool, +allowed: 
       Debug.serve(allowed, 3n, s)
     case 4n:
       Debug.serve(allowed, 4n, s)
+    case 5n:
+      Info.serve(allowed, s, W.Http.param(p, "h"))
     case _:
       Conn.get(False{}, s, web, W.Http.route(p), gz)
 
@@ -5936,7 +5970,7 @@ def Conn.route.k(ws: Bool, s: Socket, req: W.Request, rest: List<&2, U32>, +web:
       Conn.gate(Conn.allowed(trusted, hs, p, token), CF.Cef.link(W.Http.header_of(hs, "tailscale-user-login"), W.Http.header_of(hs, "origin")), s, W.Http.header_of(hs, "sec-websocket-key"), rest, id, inbox,
         Maybe.default(&2, Nat, Nat.read(W.Http.param(p, "since")), 0n), W.Http.param(p, "origin"), AUTH.Auth.legacy(trusted, hs, p, token), Conn.view.mode(W.Http.param(p, "view"), W.Http.param(p, "mobile"), W.Http.param(p, "frontend")))
     case False{} W.Request{_, +p, +hs}:
-      Conn.get.k(Conn.pos(["/hello", "/img", "/debug/perf", "/debug/perf.json", "/debug/log"], W.Http.route(p), 0n), s, web, p, String.contains(W.Http.header_of(hs, "accept-encoding"), "gzip"), Conn.allowed(trusted, hs, p, token))
+      Conn.get.k(Conn.pos(["/hello", "/img", "/debug/perf", "/debug/perf.json", "/debug/log", "/plot/info"], W.Http.route(p), 0n), s, web, p, String.contains(W.Http.header_of(hs, "accept-encoding"), "gzip"), Conn.allowed(trusted, hs, p, token))
 
 def LockHttp.wait.next(waiting: Bool, s: Socket, +text: String, +body: String, +inbox: Chan(Msg), k: Maybe<&1, String> -> Socket -> IO(Unit)) -> IO(Unit):
   match waiting:

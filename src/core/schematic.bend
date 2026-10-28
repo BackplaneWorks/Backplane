@@ -631,6 +631,15 @@ def Lib.find.go(ls: List<&2, Lib>, hit: Bool, +id: String) -> Maybe<&2, Lib>:
 def Lib.find(+ls: List<&2, Lib>, +id: String) -> Maybe<&2, Lib>:
   Lib.find.go(ls, Lib.hit(ls, id), id)
 
+# an item's connected group in its info, ";g=<tag>" (Conn, below: "" when
+# it has none)
+def Conn.tag.k(r: Map<&2, String> & String) -> String:
+  (_, v) = r
+  v
+
+def Conn.tag(+nets: Map<&2, String>, +id: String) -> String:
+  B.Info.kv("g", Conn.tag.k(Map.get(String, "", nets, id)))
+
 # Pins
 # ----
 
@@ -693,7 +702,7 @@ def Pin.body(+k: Nat, +p: B.Pt, +e: B.Pt, +d: B.Pt, +w: F32, +key: String, +sig:
     B.Item{key ++ "/o", sig, L.pin(), B.PCirc{Pt.sub(e, Pt.scale(d, Pin.deco())), Pin.deco(), w, False{}}, info},
     B.Item{key ++ "/c", sig, L.pin(), B.PLine{Pin.clock(e, d), w}, info})
 
-def Pin.show(hide: Bool, +x: S.Sx, +t: Xf, +lib: Lib, +key: String, +sig: U32, +ref: String) -> List<&2, B.Item>:
+def Pin.show(hide: Bool, +x: S.Sx, +t: Xf, +lib: Lib, +key: String, +sig: U32, +ref: String, +nets: Map<&2, String>) -> List<&2, B.Item>:
   match hide lib:
     case True{} _:
       Nil{}
@@ -707,60 +716,60 @@ def Pin.show(hide: Bool, +x: S.Sx, +t: Xf, +lib: Lib, +key: String, +sig: U32, +
       +name = S.Sx.arg(S.Sx.get(x, "name"), 0n)
       +num = S.Sx.arg(S.Sx.get(x, "number"), 0n)
       +pk = key ++ "/pin/" ++ num
-      +info = "pin " ++ num ++ B.Info.kv("name", name) ++ B.Info.kv("type", S.Sx.arg(x, 0n)) ++ B.Info.kv("symbol", ref)
+      +info = "pin " ++ num ++ B.Info.kv("name", name) ++ B.Info.kv("type", S.Sx.arg(x, 0n)) ++ B.Info.kv("symbol", ref) ++ Conn.tag(nets, pk)
       List.append(&2, B.Item, Pin.body(Pin.shape(S.Sx.arg(x, 1n)), p, e, d, 0.1524, pk, sig, info),
         Pin.texts(PinT{name, num, Tx.of(S.Sx.get(x, "name")), Tx.of(S.Sx.get(x, "number")), off, names, nums},
           e, Pt.add(p, Pt.scale(d, F32.div(len, 2.0))), d, pk, sig, info))
 
-def Pin.of(+x: S.Sx, +t: Xf, +lib: Lib, +key: String, +sig: U32, +ref: String) -> List<&2, B.Item>:
-  Pin.show(Sch.flag(x, "hide"), x, t, lib, key, sig, ref)
+def Pin.of(+x: S.Sx, +t: Xf, +lib: Lib, +key: String, +sig: U32, +ref: String, +nets: Map<&2, String>) -> List<&2, B.Item>:
+  Pin.show(Sch.flag(x, "hide"), x, t, lib, key, sig, ref, nets)
 
 # Symbols
 # -------
 
-def Sym.item.k(pin: Bool, +x: S.Sx, +t: Xf, +lib: Lib, +key: String, +sig: U32, +i: Nat, +ref: String, +info: String) -> List<&2, B.Item>:
+def Sym.item.k(pin: Bool, +x: S.Sx, +t: Xf, +lib: Lib, +key: String, +sig: U32, +i: Nat, +ref: String, +info: String, +nets: Map<&2, String>) -> List<&2, B.Item>:
   match pin:
     case True{}:
-      Pin.of(x, t, lib, key, sig, ref)
+      Pin.of(x, t, lib, key, sig, ref, nets)
     case False{}:
       Sch.shape(x, t, key ++ "/g" ++ Nat.show(i), sig, L.body(), L.body_fill(), info)
 
-def Sym.items(xs: List<&2, S.Sx>, +t: Xf, +lib: Lib, +key: String, +sig: U32, +i: Nat, +ref: String, +info: String) -> List<&2, B.Item>:
+def Sym.items(xs: List<&2, S.Sx>, +t: Xf, +lib: Lib, +key: String, +sig: U32, +i: Nat, +ref: String, +info: String, +nets: Map<&2, String>) -> List<&2, B.Item>:
   match xs:
     case Nil{}:
       Nil{}
     case +x <> r:
-      List.append(&2, B.Item, Sym.item.k(String.eq(S.Sx.name(x), "pin"), x, t, lib, key, sig, i, ref, info),
-        Sym.items(r, t, lib, key, sig, 1n+i, ref, info))
+      List.append(&2, B.Item, Sym.item.k(String.eq(S.Sx.name(x), "pin"), x, t, lib, key, sig, i, ref, info, nets),
+        Sym.items(r, t, lib, key, sig, 1n+i, ref, info, nets))
 
 def Sym.wants(+v: U32, +want: U32) -> Bool:
   Bool.or(U32.is_eq(v, 0), U32.is_eq(v, want))
 
-def Sym.part.k(on: Bool, xs: List<&2, S.Sx>, +t: Xf, +lib: Lib, +key: String, +sig: U32, +i: Nat, +ref: String, +info: String) -> List<&2, B.Item>:
+def Sym.part.k(on: Bool, xs: List<&2, S.Sx>, +t: Xf, +lib: Lib, +key: String, +sig: U32, +i: Nat, +ref: String, +info: String, +nets: Map<&2, String>) -> List<&2, B.Item>:
   match on:
     case True{}:
-      Sym.items(xs, t, lib, key, sig, i, ref, info)
+      Sym.items(xs, t, lib, key, sig, i, ref, info, nets)
     case False{}:
       Nil{}
 
 # the sections of the chosen unit and body style (and the shared ones)
-def Sym.parts(ps: List<&2, Part>, +unit: U32, +style: U32, +t: Xf, +lib: Lib, +key: String, +sig: U32, +i: Nat, +ref: String, +info: String) -> List<&2, B.Item>:
+def Sym.parts(ps: List<&2, Part>, +unit: U32, +style: U32, +t: Xf, +lib: Lib, +key: String, +sig: U32, +i: Nat, +ref: String, +info: String, +nets: Map<&2, String>) -> List<&2, B.Item>:
   match ps:
     case Nil{}:
       Nil{}
     case Part{+u, +s, xs} <> r:
-      List.append(&2, B.Item, Sym.part.k(Bool.and(Sym.wants(u, unit), Sym.wants(s, style)), xs, t, lib, key, sig, Nat.mul(i, 1000n), ref, info),
-        Sym.parts(r, unit, style, t, lib, key, sig, 1n+i, ref, info))
+      List.append(&2, B.Item, Sym.part.k(Bool.and(Sym.wants(u, unit), Sym.wants(s, style)), xs, t, lib, key, sig, Nat.mul(i, 1000n), ref, info, nets),
+        Sym.parts(r, unit, style, t, lib, key, sig, 1n+i, ref, info, nets))
 
 def Sch.lib.parts(l: Lib) -> List<&2, Part>:
   match l:
     case Lib{_, _, _, _, _, ps}:
       ps
 
-def Sym.body(m: Maybe<&2, Lib>, +unit: U32, +style: U32, +t: Xf, +key: String, +sig: U32, +ref: String, +info: String) -> List<&2, B.Item>:
+def Sym.body(m: Maybe<&2, Lib>, +unit: U32, +style: U32, +t: Xf, +key: String, +sig: U32, +ref: String, +info: String, +nets: Map<&2, String>) -> List<&2, B.Item>:
   match m:
     case Some{+lib}:
-      Sym.parts(Sch.lib.parts(lib), unit, style, t, lib, key, sig, 1n, ref, info)
+      Sym.parts(Sch.lib.parts(lib), unit, style, t, lib, key, sig, 1n, ref, info, nets)
     case None{}:
       Nil{}
 
@@ -906,7 +915,7 @@ def Sch.cache.id(+x: S.Sx) -> String:
   Sch.cache.name(S.Sx.attr(x, "lib_name"), S.Sx.attr(x, "lib_id"))
 
 # a placed symbol: its unit's drawing and pins, and its fields
-def Sch.symbol(+x: S.Sx, +key: String, +sig: U32, +lib: List<&2, Lib>) -> List<&2, B.Item>:
+def Sch.symbol(+x: S.Sx, +key: String, +sig: U32, +lib: List<&2, Lib>, +nets: Map<&2, String>) -> List<&2, B.Item>:
   +id = S.Sx.attr(x, "lib_id")
   +m = Lib.find(lib, Sch.cache.id(x))
   +t = Sym.xf(S.Sx.get(x, "at"), Sym.mirror(S.Sx.attr(x, "mirror")))
@@ -914,8 +923,8 @@ def Sch.symbol(+x: S.Sx, +key: String, +sig: U32, +lib: List<&2, Lib>) -> List<&
   +style = F32.to_u32(Sch.or.f(S.Sx.f(S.Sx.get(x, "body_style"), 0n), Sch.or.f(S.Sx.f(S.Sx.get(x, "convert"), 0n), 1.0)))
   +ref = B.Info.prop(x, "Reference") ++ Sym.suffix(Sch.lib.units(m), unit)
   +info = "symbol" ++ B.Info.kv("ref", ref) ++ B.Info.kv("value", B.Info.prop(x, "Value")) ++ B.Info.kv("lib", id)
-    ++ B.Info.kv("footprint", B.Info.prop(x, "Footprint")) ++ Bool.pick(String, Sch.flag(x, "dnp"), ";dnp=yes", "")
-  Dnp.k(Sch.flag(x, "dnp"), Sym.body(m, unit, style, t, key, sig, ref, info), key, sig, info,
+    ++ B.Info.kv("footprint", B.Info.prop(x, "Footprint")) ++ Bool.pick(String, Sch.flag(x, "dnp"), ";dnp=yes", "") ++ Conn.tag(nets, key)
+  Dnp.k(Sch.flag(x, "dnp"), Sym.body(m, unit, style, t, key, sig, ref, info, nets), key, sig, info,
     Fld.all(S.Sx.args(x), t, Sym.suffix(Sch.lib.units(m), unit), key, sig, info))
 
 # Wires, junctions, labels
@@ -928,8 +937,8 @@ def Sch.entry(+x: S.Sx, +key: String, +sig: U32) -> List<&2, B.Item>:
   +a = Sch.pt(x, "at")
   [B.Item{key, sig, L.bus_entry(), B.PSeg{a, Pt.add(a, Sch.pt(x, "size")), Sch.width(x, 0.1524)}, "bus entry"}]
 
-def Sch.junction(+x: S.Sx, +key: String, +sig: U32) -> List<&2, B.Item>:
-  [B.Item{key, sig, L.junction(), B.PCirc{Sch.pt(x, "at"), F32.div(Sch.or.f(S.Sx.f(S.Sx.get(x, "diameter"), 0n), 1.016), 2.0), 0.0, True{}}, "junction"}]
+def Sch.junction(+x: S.Sx, +key: String, +sig: U32, +tag: String) -> List<&2, B.Item>:
+  [B.Item{key, sig, L.junction(), B.PCirc{Sch.pt(x, "at"), F32.div(Sch.or.f(S.Sx.f(S.Sx.get(x, "diameter"), 0n), 1.016), 2.0), 0.0, True{}}, "junction" ++ tag}]
 
 def Sch.nc.k(p: B.Pt, +key: String, +sig: U32) -> List<&2, B.Item>:
   match p:
@@ -961,13 +970,13 @@ def Lbl.shape(+s: String) -> Nat:
     Bool.pick(Nat, Bool.or(String.eq(s, "bidirectional"), String.eq(s, "tri_state")), 3n, 0n)))
 
 # a local label: its text just above the wire
-def Sch.label(+x: S.Sx, +key: String, +sig: U32) -> List<&2, B.Item>:
+def Sch.label(+x: S.Sx, +key: String, +sig: U32, +tag: String) -> List<&2, B.Item>:
   +at = S.Sx.get(x, "at")
   +tx = Tx.of(x)
   +v = Sch.vertical(S.Sx.f(at, 2n))
   +off = F32.add(F32.mul(0.15, Tx.h(tx)), Tx.pen.of(tx))
   Sch.text.items(S.Sx.arg(x, 0n), F32.sub(S.Sx.f(at, 0n), Bool.pick(F32, v, off, 0.0)), F32.sub(S.Sx.f(at, 1n), Bool.pick(F32, v, 0.0, off)),
-    Sch.readable(v), tx, key, sig, L.label(), "label" ++ B.Info.kv("text", S.Sx.arg(x, 0n)), Nil{})
+    Sch.readable(v), tx, key, sig, L.label(), "label" ++ B.Info.kv("text", S.Sx.arg(x, 0n)) ++ tag, Nil{})
 
 # a label's text, `u` along from its anchor, centred across; it reads away
 # from the anchor
@@ -994,7 +1003,7 @@ def Glb.arrow(+k: Nat) -> Bool:
   Bool.or(Nat.is_eq(k, 1n), Nat.is_eq(k, 3n))
 
 # a global label: its text in an outline shaped by its direction
-def Sch.global(+x: S.Sx, +key: String, +sig: U32) -> List<&2, B.Item>:
+def Sch.global(+x: S.Sx, +key: String, +sig: U32, +tag: String) -> List<&2, B.Item>:
   +at = S.Sx.get(x, "at")
   +ax = S.Sx.f(at, 0n)
   +ay = S.Sx.f(at, 1n)
@@ -1006,7 +1015,7 @@ def Sch.global(+x: S.Sx, +key: String, +sig: U32) -> List<&2, B.Item>:
   +margin = F32.mul(0.375, h)
   +hs = F32.add(F32.div(h, 2.0), margin)
   +pen = {0.1524 : F32}
-  +info = "global label" ++ B.Info.kv("text", s) ++ B.Info.kv("shape", S.Sx.attr(x, "shape"))
+  +info = "global label" ++ B.Info.kv("text", s) ++ B.Info.kv("shape", S.Sx.attr(x, "shape")) ++ tag
   B.Item{key, sig, L.global(), B.PPoly{Lbl.pts(Glb.outline(k, F32.add(ST.Stroke.width(s, Tx.w(tx)), F32.add(F32.mul(2.0, margin), pen)), F32.add(hs, pen), hs), ax, ay, B.Geo.rad(deg)), pen, False{}}, info}
   <> Lbl.text(s, ax, ay, deg, F32.add(Bool.pick(F32, Glb.arrow(k), hs, 0.0), F32.add(margin, pen)), tx, key ++ "/t", sig, L.global(), info, Nil{})
 
@@ -1031,10 +1040,10 @@ def Hier.draw(+s: String, +ax: F32, +ay: F32, +deg: F32, +k: Nat, +tx: Tx, +key:
   B.Item{key, sig, layer, B.PPoly{Lbl.pts(Hier.outline(k, F32.div(h, 2.0)), ax, ay, B.Geo.rad(deg)), 0.1524, False{}}, info}
   <> Lbl.text(s, ax, ay, deg, F32.add(h, F32.mul(0.3, h)), tx, key ++ "/t", sig, layer, info, Nil{})
 
-def Sch.hier(+x: S.Sx, +key: String, +sig: U32) -> List<&2, B.Item>:
+def Sch.hier(+x: S.Sx, +key: String, +sig: U32, +tag: String) -> List<&2, B.Item>:
   +at = S.Sx.get(x, "at")
   Hier.draw(S.Sx.arg(x, 0n), S.Sx.f(at, 0n), S.Sx.f(at, 1n), S.Sx.f(at, 2n), Lbl.shape(S.Sx.attr(x, "shape")), Tx.of(x), key, sig, L.hier(),
-    "hier label" ++ B.Info.kv("text", S.Sx.arg(x, 0n)) ++ B.Info.kv("shape", S.Sx.attr(x, "shape")))
+    "hier label" ++ B.Info.kv("text", S.Sx.arg(x, 0n)) ++ B.Info.kv("shape", S.Sx.attr(x, "shape")) ++ tag)
 
 # Notes
 # -----
@@ -1083,7 +1092,7 @@ def Sheet.prop.k(+x: S.Sx, is_name: Bool, is_file: Bool, +key: String, +sig: U32
 def Sheet.pin.shape(+k: Nat) -> Nat:
   Bool.pick(Nat, Nat.is_eq(k, 1n), 2n, Bool.pick(Nat, Nat.is_eq(k, 2n), 1n, k))
 
-def Sheet.child(+x: S.Sx, +key: String, +sig: U32, +info: String, +sname: String) -> List<&2, B.Item>:
+def Sheet.child(+x: S.Sx, +key: String, +sig: U32, +info: String, +sname: String, +nets: Map<&2, String>) -> List<&2, B.Item>:
   +n = S.Sx.name(x)
   +at = S.Sx.get(x, "at")
   +pn = S.Sx.arg(x, 0n)
@@ -1092,28 +1101,28 @@ def Sheet.child(+x: S.Sx, +key: String, +sig: U32, +info: String, +sname: String
       Bool.or(String.eq(S.Sx.arg(x, 0n), "Sheetfile"), String.eq(S.Sx.arg(x, 0n), "Sheet file")), key, sig, info, at, S.Sx.arg(x, 1n)),
     Bool.pick(List<&2, B.Item>, String.eq(n, "pin"),
       Hier.draw(pn, S.Sx.f(at, 0n), S.Sx.f(at, 1n), F32.add(S.Sx.f(at, 2n), 180.0), Sheet.pin.shape(Lbl.shape(S.Sx.arg(x, 1n))), Tx.of(x),
-        key ++ "/pin/" ++ pn, sig, L.sheet_pin(), "sheet pin" ++ B.Info.kv("name", pn) ++ B.Info.kv("shape", S.Sx.arg(x, 1n)) ++ B.Info.kv("sheet", sname)),
+        key ++ "/pin/" ++ pn, sig, L.sheet_pin(), "sheet pin" ++ B.Info.kv("name", pn) ++ B.Info.kv("shape", S.Sx.arg(x, 1n)) ++ B.Info.kv("sheet", sname) ++ Conn.tag(nets, key ++ "/pin/" ++ pn)),
       Nil{}))
 
-def Sheet.children(xs: List<&2, S.Sx>, +key: String, +sig: U32, +info: String, +sname: String) -> List<&2, B.Item>:
+def Sheet.children(xs: List<&2, S.Sx>, +key: String, +sig: U32, +info: String, +sname: String, +nets: Map<&2, String>) -> List<&2, B.Item>:
   match xs:
     case Nil{}:
       Nil{}
     case x <> t:
-      List.append(&2, B.Item, Sheet.child(x, key, sig, info, sname), Sheet.children(t, key, sig, info, sname))
+      List.append(&2, B.Item, Sheet.child(x, key, sig, info, sname, nets), Sheet.children(t, key, sig, info, sname, nets))
 
 def Sheet.prop(+x: S.Sx, +a: String, +b: String) -> String:
   B.Info.kv.k(B.Info.prop(x, a), B.Info.prop(x, b))
 
 # a hierarchical sheet: its box, name and file, and its pins
-def Sch.sheet(+x: S.Sx, +key: String, +sig: U32) -> List<&2, B.Item>:
+def Sch.sheet(+x: S.Sx, +key: String, +sig: U32, +nets: Map<&2, String>) -> List<&2, B.Item>:
   +a = Sch.pt(x, "at")
   +ps = Sch.rect(a, Pt.add(a, Sch.pt(x, "size")))
   +sname = Sheet.prop(x, "Sheetname", "Sheet name")
   +info = "sheet" ++ B.Info.kv("name", sname) ++ B.Info.kv("file", Sheet.prop(x, "Sheetfile", "Sheet file"))
   B.Item{key ++ "/f", sig, L.sheet_fill(), B.PPoly{ps, 0.0, True{}}, info}
   <> B.Item{key, sig, L.sheet(), B.PPoly{ps, Sch.width(x, 0.1524), False{}}, info}
-  <> Sheet.children(S.Sx.args(x), key, sig, info, sname)
+  <> Sheet.children(S.Sx.args(x), key, sig, info, sname, nets)
 
 # Directive labels
 # ----------------
@@ -1311,32 +1320,32 @@ def Sch.head(bs: List<&2, U32>) -> String:
     case Nil{}:
       ""
 
-def Sch.form.k(i: Nat, +x: S.Sx, +key: String, +sig: U32, +lib: List<&2, Lib>) -> List<&2, B.Item>:
+def Sch.form.k(i: Nat, +x: S.Sx, +key: String, +sig: U32, +lib: List<&2, Lib>, +nets: Map<&2, String>) -> List<&2, B.Item>:
   match i:
     case 0n:
-      Sch.wire(x, key, sig, L.wire(), 0.1524, "wire")
+      Sch.wire(x, key, sig, L.wire(), 0.1524, "wire" ++ Conn.tag(nets, key))
     case 1n:
       Sch.wire(x, key, sig, L.bus(), 0.3048, "bus")
     case 2n:
       Sch.entry(x, key, sig)
     case 3n:
-      Sch.junction(x, key, sig)
+      Sch.junction(x, key, sig, Conn.tag(nets, key))
     case 4n:
       Sch.nc(x, key, sig)
     case 5n:
-      Sch.label(x, key, sig)
+      Sch.label(x, key, sig, Conn.tag(nets, key))
     case 6n:
-      Sch.global(x, key, sig)
+      Sch.global(x, key, sig, Conn.tag(nets, key))
     case 7n:
-      Sch.hier(x, key, sig)
+      Sch.hier(x, key, sig, Conn.tag(nets, key))
     case 8n:
       Sch.note(x, key, sig)
     case 9n:
       Sch.textbox(x, key, sig)
     case 15n:
-      Sch.symbol(x, key, sig, lib)
+      Sch.symbol(x, key, sig, lib, nets)
     case 16n:
-      Sch.sheet(x, key, sig)
+      Sch.sheet(x, key, sig, nets)
     case 17n:
       Sch.netflag(x, key, sig)
     case 99n:
@@ -1344,38 +1353,38 @@ def Sch.form.k(i: Nat, +x: S.Sx, +key: String, +sig: U32, +lib: List<&2, Lib>) -
     case _:
       Sch.top(x, key, sig)
 
-def Sch.form.go(skip: Bool, +i: Nat, +bs: List<&2, U32>, +n: Nat, +lib: List<&2, Lib>, +lsig: U32) -> List<&2, B.Item>:
+def Sch.form.go(skip: Bool, +i: Nat, +bs: List<&2, U32>, +n: Nat, +lib: List<&2, Lib>, +lsig: U32, +nets: Map<&2, String>) -> List<&2, B.Item>:
   match skip:
     case True{}:
       Nil{}
     case False{}:
       +x = S.Sx.parse(bs)
       +h = B.Board.hash(bs, 2166136261)
-      Sch.form.k(i, x, B.Board.key(x, "n" ++ Nat.show(n)), Bool.pick(U32, Nat.is_eq(i, 15n), U32.xor(h, lsig), h), lib)
+      Sch.form.k(i, x, B.Board.key(x, "n" ++ Nat.show(n)), Bool.pick(U32, Nat.is_eq(i, 15n), U32.xor(h, lsig), h), lib, nets)
 
 # a form's items; forms the viewer does not draw are never parsed
-def Sch.form(+i: Nat, +bs: List<&2, U32>, +n: Nat, +lib: List<&2, Lib>, +lsig: U32) -> List<&2, B.Item>:
-  Sch.form.go(Nat.is_eq(i, 99n), i, bs, n, lib, lsig)
+def Sch.form(+i: Nat, +bs: List<&2, U32>, +n: Nat, +lib: List<&2, Lib>, +lsig: U32, +nets: Map<&2, String>) -> List<&2, B.Item>:
+  Sch.form.go(Nat.is_eq(i, 99n), i, bs, n, lib, lsig, nets)
 
-def Sch.one(+bs: List<&2, U32>, +n: Nat, +lib: List<&2, Lib>, +lsig: U32) -> List<&2, B.Item>:
-  Sch.form(Sch.index(Sch.forms(), Sch.head(bs)), bs, n, lib, lsig)
+def Sch.one(+bs: List<&2, U32>, +n: Nat, +lib: List<&2, Lib>, +lsig: U32, +nets: Map<&2, String>) -> List<&2, B.Item>:
+  Sch.form(Sch.index(Sch.forms(), Sch.head(bs)), bs, n, lib, lsig, nets)
 
-def Sch.seq(fs: List<&2, B.Form>, +lib: List<&2, Lib>, +lsig: U32) -> List<&2, B.Item>:
+def Sch.seq(fs: List<&2, B.Form>, +lib: List<&2, Lib>, +lsig: U32, +nets: Map<&2, String>) -> List<&2, B.Item>:
   match fs:
     case Nil{}:
       Nil{}
     case B.Form{+i, bs} <> t:
-      List.append(&2, B.Item, Sch.one(bs, i, lib, lsig), Sch.seq(t, lib, lsig))
+      List.append(&2, B.Item, Sch.one(bs, i, lib, lsig, nets), Sch.seq(t, lib, lsig, nets))
 
 # convert both hands at once, d levels deep (see Board.par)
-def Sch.par(d: Nat, fs: List<&2, B.Form>, +lib: List<&2, Lib>, +lsig: U32) -> List<&2, B.Item>:
+def Sch.par(d: Nat, fs: List<&2, B.Form>, +lib: List<&2, Lib>, +lsig: U32, +nets: Map<&2, String>) -> List<&2, B.Item>:
   match d:
     case 0n:
-      Sch.seq(fs, lib, lsig)
+      Sch.seq(fs, lib, lsig, nets)
     case 1n+e0:
       +e = e0
       B.Board.split(fs, a => b => (
-        x y = Sch.par(e, a, lib, lsig) Sch.par(e, b, lib, lsig)
+        x y = Sch.par(e, a, lib, lsig, nets) Sch.par(e, b, lib, lsig, nets)
         List.append(&2, B.Item, x, y)))
 
 def Sch.find.hit(fs: List<&2, List<&2, U32>>, +n: String) -> Bool:
@@ -1404,12 +1413,463 @@ def Sch.page(+paper: List<&2, U32>, +tb: List<&2, U32>) -> List<&2, B.Item>:
   Sch.put(Page.prims(Page.size(px), S.Sx.parse(tb), Bool.pick(String, String.is_empty(S.Sx.arg(px, 0n)), "A4", S.Sx.arg(px, 0n))),
     "page", B.Board.hash(tb, B.Board.hash(paper, 2166136261)), L.page(), "page", 0n, Nil{})
 
+# Connections
+# -----------
+# Which of a sheet's wires, junctions, labels, pins and sheet pins are
+# connected, by KiCad's rules within one sheet: things whose points meet
+# (a wire's ends, a pin, a label, a junction), a point lying along a wire
+# (a T, a label or pin on a wire's middle; two wires crossing are not
+# connected), and labels of one name (local and hierarchical ones on the
+# sheet, global ones and power symbols by name). Each group is tagged with
+# a number, and every item of it says so in its info (";g=N"), so a viewer
+# can light a whole net on the sheet (the web's probe.js).
+
+# a connection thing: a wire's points; a point (junction, label, pin,
+# sheet pin) and the name it connects by ("" none; "l:X" a local label,
+# "h:X" a hierarchical one, "g:X" a global label or a power symbol's value);
+# a power symbol itself, joined by name only
+type CN is Data:
+  CW{id: String, pts: List<&2, B.Pt>}
+  CP{id: String, at: B.Pt, name: String}
+  CK{id: String, name: String}
+
+# two connected things
+type CE is Data:
+  CE{a: String, b: String}
+
+# a point that may lie along a wire, and the thing it is of
+type CQ is Data:
+  CQ{id: String, x: F32, y: F32}
+
+# a wire's segment and its box
+type CS is Data:
+  CS{id: String, ax: F32, ay: F32, bx: F32, by: F32}
+
+def Conn.um(+v: F32) -> U32:
+  Bool.pick(U32, F32.is_lt(v, 0.0), U32.sub(0, F32.to_u32(F32.round(F32.mul(F32.neg(v), 1000.0)))), F32.to_u32(F32.round(F32.mul(v, 1000.0))))
+
+def Conn.key(p: B.Pt) -> String:
+  match p:
+    case B.Pt{+x, +y}:
+      U32.show(Conn.um(x)) ++ "," ++ U32.show(Conn.um(y))
+
+def Conn.hash(s: String, +h: U32) -> U32:
+  match s:
+    case SNil{}:
+      h
+    case SCon{Chr{+c}, t}:
+      Conn.hash(t, (U32.xor(h, c) * 16777619 : U32))
+
+# Things
+# ------
+
+def Conn.pin(+x: S.Sx, +t: Xf, +key: String, +name: String) -> CN:
+  CP{key ++ "/pin/" ++ S.Sx.arg(S.Sx.get(x, "number"), 0n), Xf.sx(t, S.Sx.get(x, "at")), name}
+
+def Conn.pins.k(pin: Bool, +x: S.Sx, +t: Xf, +key: String, +name: String, rest: List<&2, CN>) -> List<&2, CN>:
+  match pin:
+    case True{}:
+      Conn.pin(x, t, key, name) <> rest
+    case False{}:
+      rest
+
+# a section's pins (hidden ones too: a power symbol's is)
+def Conn.pins(xs: List<&2, S.Sx>, +t: Xf, +key: String, +name: String) -> List<&2, CN>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case +x <> r:
+      Conn.pins.k(String.eq(S.Sx.name(x), "pin"), x, t, key, name, Conn.pins(r, t, key, name))
+
+def Conn.part.k(on: Bool, xs: List<&2, S.Sx>, +t: Xf, +key: String, +name: String) -> List<&2, CN>:
+  match on:
+    case True{}:
+      Conn.pins(xs, t, key, name)
+    case False{}:
+      Nil{}
+
+def Conn.parts(ps: List<&2, Part>, +unit: U32, +style: U32, +t: Xf, +key: String, +name: String) -> List<&2, CN>:
+  match ps:
+    case Nil{}:
+      Nil{}
+    case Part{+u, +s, xs} <> r:
+      List.append(&2, CN, Conn.part.k(Bool.and(Sym.wants(u, unit), Sym.wants(s, style)), xs, t, key, name),
+        Conn.parts(r, unit, style, t, key, name))
+
+def Conn.body(m: Maybe<&2, Lib>, +unit: U32, +style: U32, +t: Xf, +key: String, +name: String) -> List<&2, CN>:
+  match m:
+    case Some{+lib}:
+      Conn.parts(Sch.lib.parts(lib), unit, style, t, key, name)
+    case None{}:
+      Nil{}
+
+# a power symbol (its ref "#PWR..", not KiCad's "#FLG" flag) names its
+# net by its value, everywhere
+def Conn.power(+ref: String) -> Bool:
+  Bool.and(String.starts_with(ref, "#"), Bool.not(String.starts_with(ref, "#FLG")))
+
+def Conn.style(+x: S.Sx) -> U32:
+  F32.to_u32(Sch.or.f(S.Sx.f(S.Sx.get(x, "body_style"), 0n), Sch.or.f(S.Sx.f(S.Sx.get(x, "convert"), 0n), 1.0)))
+
+# a placed symbol's pins where its unit puts them
+def Conn.sym.pins(+x: S.Sx, +key: String, +lib: List<&2, Lib>, +name: String) -> List<&2, CN>:
+  Conn.body(Lib.find(lib, Sch.cache.id(x)), Sym.num(x, "unit"), Conn.style(x), Sym.xf(S.Sx.get(x, "at"), Sym.mirror(S.Sx.attr(x, "mirror"))), key, name)
+
+def Conn.sym.k(power: Bool, +x: S.Sx, +key: String, +lib: List<&2, Lib>, +name: String) -> List<&2, CN>:
+  match power:
+    case True{}:
+      CK{key, name} <> Conn.sym.pins(x, key, lib, name)
+    case False{}:
+      Conn.sym.pins(x, key, lib, "")
+
+def Conn.sym(+x: S.Sx, +key: String, +lib: List<&2, Lib>) -> List<&2, CN>:
+  Conn.sym.k(Conn.power(B.Info.prop(x, "Reference")), x, key, lib, "g:" ++ B.Info.prop(x, "Value"))
+
+def Conn.sheet.k(pin: Bool, +x: S.Sx, +key: String, rest: List<&2, CN>) -> List<&2, CN>:
+  match pin:
+    case True{}:
+      CP{key ++ "/pin/" ++ S.Sx.arg(x, 0n), Sch.pt(x, "at"), ""} <> rest
+    case False{}:
+      rest
+
+# a sheet symbol's pins
+def Conn.sheet(xs: List<&2, S.Sx>, +key: String) -> List<&2, CN>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case +x <> r:
+      Conn.sheet.k(String.eq(S.Sx.name(x), "pin"), x, key, Conn.sheet(r, key))
+
+def Conn.label(+x: S.Sx, +key: String, +pre: String) -> List<&2, CN>:
+  [CP{key, Sch.pt(x, "at"), pre ++ S.Sx.arg(x, 0n)}]
+
+def Conn.form.k(i: Nat, +x: S.Sx, +key: String, +lib: List<&2, Lib>) -> List<&2, CN>:
+  match i:
+    case 0n:
+      [CW{key, Sch.pts(S.Sx.args(S.Sx.get(x, "pts")), Xf.home())}]
+    case 3n:
+      [CP{key, Sch.pt(x, "at"), ""}]
+    case 5n:
+      Conn.label(x, key, "l:")
+    case 6n:
+      Conn.label(x, key, "g:")
+    case 7n:
+      Conn.label(x, key, "h:")
+    case 15n:
+      Conn.sym(x, key, lib)
+    case 16n:
+      Conn.sheet(S.Sx.args(x), key)
+    case _:
+      Nil{}
+
+# whether a form can connect anything (wires, junctions, labels, symbols,
+# sheets); the others are never parsed here
+def Conn.wants(+i: Nat) -> Bool:
+  Bool.or(Bool.or(Nat.is_eq(i, 0n), Nat.is_eq(i, 3n)), Bool.or(Bool.or(Nat.is_eq(i, 5n), Nat.is_eq(i, 6n)), Bool.or(Nat.is_eq(i, 7n), Bool.or(Nat.is_eq(i, 15n), Nat.is_eq(i, 16n)))))
+
+def Conn.form.go(on: Bool, +i: Nat, +bs: List<&2, U32>, +n: Nat, +lib: List<&2, Lib>) -> List<&2, CN>:
+  match on:
+    case True{}:
+      +x = S.Sx.parse(bs)
+      Conn.form.k(i, x, B.Board.key(x, "n" ++ Nat.show(n)), lib)
+    case False{}:
+      Nil{}
+
+def Conn.form(+i: Nat, +bs: List<&2, U32>, +n: Nat, +lib: List<&2, Lib>) -> List<&2, CN>:
+  Conn.form.go(Conn.wants(i), i, bs, n, lib)
+
+def Conn.things(fs: List<&2, B.Form>, +lib: List<&2, Lib>, acc: List<&2, CN>) -> List<&2, CN>:
+  match fs:
+    case Nil{}:
+      acc
+    case B.Form{+n, +bs} <> t:
+      Conn.things(t, lib, List.append(&2, CN, Conn.form(Sch.index(Sch.forms(), Sch.head(bs)), bs, n, lib), acc))
+
+# Edges
+# -----
+
+# a key's first thing, or the edge to it (the map keeps the first)
+def Conn.meet.b(first: Bool, m: Map<&2, String>, +k: String, +id: String, +v: String, es: List<&2, CE>) -> Map<&2, String> & List<&2, CE>:
+  match first:
+    case True{}:
+      (Map.set(&2, String, m, k, id), es)
+    case False{}:
+      (m, CE{id, v} <> es)
+
+def Conn.meet.k(r: Map<&2, String> & String, +k: String, +id: String, es: List<&2, CE>) -> Map<&2, String> & List<&2, CE>:
+  (m, +v) = r
+  Conn.meet.b(String.is_empty(v), m, k, id, v, es)
+
+def Conn.meet(m: Map<&2, String>, +k: String, +id: String, es: List<&2, CE>) -> Map<&2, String> & List<&2, CE>:
+  Conn.meet.k(Map.get(String, "", m, k), k, id, es)
+
+def Conn.meet.r(r: Map<&2, String> & List<&2, CE>, +k: String, +id: String) -> Map<&2, String> & List<&2, CE>:
+  (m, es) = r
+  Conn.meet(m, k, id, es)
+
+def Conn.meet.pts(ps: List<&2, B.Pt>, +id: String, r: Map<&2, String> & List<&2, CE>) -> Map<&2, String> & List<&2, CE>:
+  match ps:
+    case Nil{}:
+      r
+    case p <> t:
+      Conn.meet.pts(t, id, Conn.meet.r(r, Conn.key(p), id))
+
+# things whose points meet
+def Conn.at.one(c: CN, r: Map<&2, String> & List<&2, CE>) -> Map<&2, String> & List<&2, CE>:
+  match c:
+    case CW{+id, ps}:
+      Conn.meet.pts(ps, id, r)
+    case CP{+id, +p, _}:
+      Conn.meet.r(r, Conn.key(p), id)
+    case CK{_, _}:
+      r
+
+def Conn.at(cs: List<&2, CN>, r: Map<&2, String> & List<&2, CE>) -> Map<&2, String> & List<&2, CE>:
+  match cs:
+    case Nil{}:
+      r
+    case c <> t:
+      Conn.at(t, Conn.at.one(c, r))
+
+# things of one name
+def Conn.name.k(none: Bool, +id: String, +name: String, r: Map<&2, String> & List<&2, CE>) -> Map<&2, String> & List<&2, CE>:
+  match none:
+    case True{}:
+      r
+    case False{}:
+      Conn.meet.r(r, name, id)
+
+def Conn.name.one(c: CN, r: Map<&2, String> & List<&2, CE>) -> Map<&2, String> & List<&2, CE>:
+  match c:
+    case CW{_, _}:
+      r
+    case CP{+id, _, +name}:
+      Conn.name.k(String.is_empty(name), id, name, r)
+    case CK{+id, +name}:
+      Conn.name.k(String.is_empty(name), id, name, r)
+
+def Conn.names(cs: List<&2, CN>, r: Map<&2, String> & List<&2, CE>) -> Map<&2, String> & List<&2, CE>:
+  match cs:
+    case Nil{}:
+      r
+    case c <> t:
+      Conn.names(t, Conn.name.one(c, r))
+
+def Conn.edges.of(r: Map<&2, String> & List<&2, CE>) -> List<&2, CE>:
+  (_, es) = r
+  es
+
+# A point along a wire: strictly between its ends (the ends are a meeting
+# of points), within a micrometre of it
+def Conn.along(+px: F32, +py: F32, +ax: F32, +ay: F32, +bx: F32, +by: F32) -> Bool:
+  +dx = F32.sub(bx, ax)
+  +dy = F32.sub(by, ay)
+  +l2 = F32.add(F32.mul(dx, dx), F32.mul(dy, dy))
+  +qx = F32.sub(px, ax)
+  +qy = F32.sub(py, ay)
+  +f = F32.div(F32.add(F32.mul(qx, dx), F32.mul(qy, dy)), F32.max(l2, 0.000001))
+  +cr = F32.sub(F32.mul(dx, qy), F32.mul(dy, qx))
+  Bool.and(F32.is_gt(l2, 0.000001), Bool.and(Bool.and(F32.is_gt(f, 0.0001), F32.is_lt(f, 0.9999)), F32.is_lt(F32.mul(cr, cr), F32.mul(0.000001, l2))))
+
+# (a box test first: most pairs are far apart)
+def Conn.near(+px: F32, +py: F32, +ax: F32, +ay: F32, +bx: F32, +by: F32) -> Bool:
+  Bool.and(Bool.and(F32.is_ge(px, F32.sub(F32.min(ax, bx), 0.001)), F32.is_le(px, F32.add(F32.max(ax, bx), 0.001))),
+    Bool.and(F32.is_ge(py, F32.sub(F32.min(ay, by), 0.001)), F32.is_le(py, F32.add(F32.max(ay, by), 0.001))))
+
+def Conn.on.k(hit: Bool, +a: String, +b: String, es: List<&2, CE>) -> List<&2, CE>:
+  match hit:
+    case True{}:
+      CE{a, b} <> es
+    case False{}:
+      es
+
+def Conn.on.near(near: Bool, +id: String, +sid: String, +px: F32, +py: F32, +ax: F32, +ay: F32, +bx: F32, +by: F32, es: List<&2, CE>) -> List<&2, CE>:
+  match near:
+    case True{}:
+      Conn.on.k(Bool.and(Bool.not(String.eq(id, sid)), Conn.along(px, py, ax, ay, bx, by)), id, sid, es)
+    case False{}:
+      es
+
+def Conn.on.seg(q: CQ, s: CS, es: List<&2, CE>) -> List<&2, CE>:
+  match q s:
+    case CQ{+id, +px, +py} CS{+sid, +ax, +ay, +bx, +by}:
+      Conn.on.near(Conn.near(px, py, ax, ay, bx, by), id, sid, px, py, ax, ay, bx, by, es)
+
+def Conn.on.segs(ss: List<&2, CS>, +q: CQ, es: List<&2, CE>) -> List<&2, CE>:
+  match ss:
+    case Nil{}:
+      es
+    case s <> t:
+      Conn.on.segs(t, q, Conn.on.seg(q, s, es))
+
+def Conn.on(qs: List<&2, CQ>, +ss: List<&2, CS>, es: List<&2, CE>) -> List<&2, CE>:
+  match qs:
+    case Nil{}:
+      es
+    case q <> t:
+      Conn.on(t, ss, Conn.on.segs(ss, q, es))
+
+def Conn.q.pt(+id: String, p: B.Pt) -> CQ:
+  match p:
+    case B.Pt{x, y}:
+      CQ{id, x, y}
+
+def Conn.q.pts(ps: List<&2, B.Pt>, +id: String, acc: List<&2, CQ>) -> List<&2, CQ>:
+  match ps:
+    case Nil{}:
+      acc
+    case p <> t:
+      Conn.q.pts(t, id, Conn.q.pt(id, p) <> acc)
+
+def Conn.q.one(c: CN, acc: List<&2, CQ>) -> List<&2, CQ>:
+  match c:
+    case CW{+id, ps}:
+      Conn.q.pts(ps, id, acc)
+    case CP{+id, p, _}:
+      Conn.q.pt(id, p) <> acc
+    case CK{_, _}:
+      acc
+
+# every point that may lie along a wire
+def Conn.qs(cs: List<&2, CN>, acc: List<&2, CQ>) -> List<&2, CQ>:
+  match cs:
+    case Nil{}:
+      acc
+    case c <> t:
+      Conn.qs(t, Conn.q.one(c, acc))
+
+def Conn.seg(+id: String, a: B.Pt, b: B.Pt) -> CS:
+  match a b:
+    case B.Pt{ax, ay} B.Pt{bx, by}:
+      CS{id, ax, ay, bx, by}
+
+def Conn.segs.of(ps: List<&2, B.Pt>, +id: String, acc: List<&2, CS>) -> List<&2, CS>:
+  match ps:
+    case +a <> +b <> t:
+      Conn.segs.of(b <> t, id, Conn.seg(id, a, b) <> acc)
+    case _:
+      acc
+
+def Conn.segs.one(c: CN, acc: List<&2, CS>) -> List<&2, CS>:
+  match c:
+    case CW{+id, ps}:
+      Conn.segs.of(ps, id, acc)
+    case _:
+      acc
+
+# every wire's segments
+def Conn.segs(cs: List<&2, CN>, acc: List<&2, CS>) -> List<&2, CS>:
+  match cs:
+    case Nil{}:
+      acc
+    case c <> t:
+      Conn.segs(t, Conn.segs.one(c, acc))
+
+# Groups
+# ------
+# The edges as each thing's neighbours, then a walk from each thing not yet
+# reached marking all it reaches with one tag (the first thing's id,
+# hashed short).
+
+def Conn.id(c: CN) -> String:
+  match c:
+    case CW{id, _}:
+      id
+    case CP{id, _, _}:
+      id
+    case CK{id, _}:
+      id
+
+def Conn.ids(cs: List<&2, CN>) -> List<&2, String>:
+  match cs:
+    case Nil{}:
+      Nil{}
+    case c <> t:
+      Conn.id(c) <> Conn.ids(t)
+
+def Conn.adj.get.k(r: Map<&2, List<&2, String>> & List<&2, String>) -> List<&2, String>:
+  (_, v) = r
+  v
+
+def Conn.adj.get(+m: Map<&2, List<&2, String>>, +k: String) -> List<&2, String>:
+  Conn.adj.get.k(Map.get(List<&2, String>, Nil{}, m, k))
+
+def Conn.adj.put.k(r: Map<&2, List<&2, String>> & List<&2, String>, +k: String, +v: String) -> Map<&2, List<&2, String>>:
+  (m, vs) = r
+  Map.set(&2, List<&2, String>, m, k, v <> vs)
+
+def Conn.adj.put(m: Map<&2, List<&2, String>>, +k: String, +v: String) -> Map<&2, List<&2, String>>:
+  Conn.adj.put.k(Map.get(List<&2, String>, Nil{}, m, k), k, v)
+
+def Conn.adj(es: List<&2, CE>, m: Map<&2, List<&2, String>>) -> Map<&2, List<&2, String>>:
+  match es:
+    case Nil{}:
+      m
+    case CE{+a, +b} <> t:
+      Conn.adj(t, Conn.adj.put(Conn.adj.put(m, a, b), b, a))
+
+# the walk: what is left to visit, and each thing reached with its tag
+type CWalk is Data:
+  CWalk{todo: List<&2, String>, seen: Map<&2, String>}
+
+def Conn.visit.b(fresh: Bool, +x: String, t: List<&2, String>, seen: Map<&2, String>, +adj: Map<&2, List<&2, String>>, +tag: String) -> CWalk:
+  match fresh:
+    case True{}:
+      CWalk{List.append(&2, String, Conn.adj.get(adj, x), t), Map.set(&2, String, seen, x, tag)}
+    case False{}:
+      CWalk{t, seen}
+
+def Conn.visit.k(r: Map<&2, String> & String, +x: String, t: List<&2, String>, +adj: Map<&2, List<&2, String>>, +tag: String) -> CWalk:
+  (seen, +v) = r
+  Conn.visit.b(String.is_empty(v), x, t, seen, adj, tag)
+
+def Conn.visit(+x: String, t: List<&2, String>, seen: Map<&2, String>, +adj: Map<&2, List<&2, String>>, +tag: String) -> CWalk:
+  Conn.visit.k(Map.get(String, "", seen, x), x, t, adj, tag)
+
+def Conn.walk(fuel: Nat, st: CWalk, +adj: Map<&2, List<&2, String>>, +tag: String) -> Map<&2, String>:
+  match fuel st:
+    case 0n CWalk{_, seen}:
+      seen
+    case 1n+f CWalk{Nil{}, seen}:
+      seen
+    case 1n+f CWalk{+x <> t, seen}:
+      Conn.walk(f, Conn.visit(x, t, seen, adj, tag), adj, tag)
+
+def Conn.start.b(fresh: Bool, seen: Map<&2, String>, +x: String, +fuel: Nat, +adj: Map<&2, List<&2, String>>) -> Map<&2, String>:
+  match fresh:
+    case True{}:
+      Conn.walk(fuel, CWalk{[x], seen}, adj, U32.show(Conn.hash(x, 2166136261)))
+    case False{}:
+      seen
+
+def Conn.start.k(r: Map<&2, String> & String, +x: String, +fuel: Nat, +adj: Map<&2, List<&2, String>>) -> Map<&2, String>:
+  (seen, +v) = r
+  Conn.start.b(String.is_empty(v), seen, x, fuel, adj)
+
+def Conn.groups(xs: List<&2, String>, +fuel: Nat, +adj: Map<&2, List<&2, String>>, seen: Map<&2, String>) -> Map<&2, String>:
+  match xs:
+    case Nil{}:
+      seen
+    case +x <> t:
+      Conn.groups(t, fuel, adj, Conn.start.k(Map.get(String, "", seen, x), x, fuel, adj))
+
+# each connection thing's group tag, by its id
+def Conn.of.k(+cs: List<&2, CN>) -> Map<&2, String>:
+  +es = Conn.on(Conn.qs(cs, Nil{}), Conn.segs(cs, Nil{}), List.append(&2, CE, Conn.edges.of(Conn.at(cs, (Map.new(&2, String), Nil{}))), Conn.edges.of(Conn.names(cs, (Map.new(&2, String), Nil{})))))
+  Conn.groups(Conn.ids(cs), Nat.add(Nat.add(List.length(&2, CN, cs), Nat.mul(2n, List.length(&2, CE, es))), 1n), Conn.adj(es, Map.new(&2, List<&2, String>)), Map.new(&2, String))
+
+def Conn.of(fs: List<&2, B.Form>, +lib: List<&2, Lib>) -> Map<&2, String>:
+  Conn.of.k(Conn.things(fs, lib, Nil{}))
+
+def Sch.items.at(+fs: List<&2, List<&2, U32>>, +lb: List<&2, U32>, +lib: List<&2, Lib>, +ns: List<&2, B.Form>) -> List<&2, B.Item>:
+  List.append(&2, B.Item, Sch.page(Sch.find(fs, "paper"), Sch.find(fs, "title_block")),
+    Sch.par(8n, ns, lib, B.Board.hash(lb, 2166136261), Conn.of(ns, lib)))
+
 def Sch.items.k(m: Maybe<&2, List<&2, List<&2, U32>>>) -> Maybe<&2, List<&2, B.Item>>:
   match m:
     case Some{+fs}:
       +lb = Sch.find(fs, "lib_symbols")
-      Some{List.append(&2, B.Item, Sch.page(Sch.find(fs, "paper"), Sch.find(fs, "title_block")),
-        Sch.par(8n, B.Board.number(fs, 0n), Lib.table(S.Sx.parse(lb)), B.Board.hash(lb, 2166136261)))}
+      Some{Sch.items.at(fs, lb, Lib.table(S.Sx.parse(lb)), B.Board.number(fs, 0n))}
     case None{}:
       None{}
 

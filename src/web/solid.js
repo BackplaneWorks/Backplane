@@ -149,11 +149,25 @@ export function fit() {
   if (view && view.box) { view.fit(); view.later(); }
 }
 
+// a probed part (hon) lights the model within its box on the board (hl:
+// x0 y0 x1 y1, hz: its side's heights) and dims the rest
 const VS = `attribute vec3 p; attribute vec3 n; attribute vec3 c; uniform mat4 m; uniform vec3 eye;
-varying vec3 vc; varying float vl;
-void main() { gl_Position = m * vec4(p, 1.0); vc = c; vl = abs(dot(normalize(n), normalize(eye - p))); }`;
-const FS = `precision mediump float; varying vec3 vc; varying float vl;
-void main() { gl_FragColor = vec4(min(vc * (0.5 + 0.6 * vl), 1.0), 1.0); }`;
+varying vec3 vc; varying float vl; varying vec3 vp;
+void main() { gl_Position = m * vec4(p, 1.0); vc = c; vp = p; vl = abs(dot(normalize(n), normalize(eye - p))); }`;
+const FS = `#ifdef GL_FRAGMENT_PRECISION_HIGH
+precision highp float;
+#else
+precision mediump float;
+#endif
+varying vec3 vc; varying float vl; varying vec3 vp; uniform vec4 hl; uniform vec2 hz; uniform float hon;
+void main() {
+  vec3 col = min(vc * (0.5 + 0.6 * vl), 1.0);
+  if (hon > 0.5) {
+    bool inb = vp.x >= hl.x && vp.x <= hl.z && vp.y >= hl.y && vp.y <= hl.w && vp.z >= hz.x && vp.z <= hz.y;
+    col = inb ? min(mix(col, vec3(1.0, 0.85, 0.4), 0.3) * 1.25, 1.0) : col * 0.4;
+  }
+  gl_FragColor = vec4(col, 1.0);
+}`;
 
 function persp(fov, a, near, far) {
   const f = 1 / Math.tan(fov / 2), nf = 1 / (near - far);
@@ -290,6 +304,8 @@ class View {
       try { canvas.setPointerCapture(e.pointerId); } catch {}
       this.pts.set(e.pointerId, local(e));
       const p = local(e);
+      // a press that stays put is a tap: it probes the part under it
+      this.tap = this.pts.size === 1 && e.button === 0 ? { x: e.clientX, y: e.clientY } : null;
       const mode = e.pointerType === "touch" ? "turn"
         : e.button === 1 || e.button === 2 || e.shiftKey || e.ctrlKey || e.metaKey ? "pan" : e.altKey ? "roll" : "turn";
       this.drag = this.pts.size === 1 ? { x: p.x, y: p.y, mode } : null;
@@ -312,6 +328,7 @@ class View {
         return;
       }
       if (!this.drag) return;
+      if (this.tap && Math.hypot(e.clientX - this.tap.x, e.clientY - this.tap.y) > 5) this.tap = null;
       const p = local(e), dx = p.x - this.drag.x, dy = p.y - this.drag.y;
       this.drag.x = p.x; this.drag.y = p.y;
       if (this.drag.mode === "pan") this.cam.pan(dx, dy, this.cam.unit(h));
@@ -320,6 +337,9 @@ class View {
       this.later();
     });
     const up = (e) => {
+      const tap = e.type === "pointerup" && this.tap && this.pts.size === 1 ? this.tap : null;
+      this.tap = null;
+      if (tap) this.pick(e.clientX, e.clientY);
       this.pts.delete(e.pointerId);
       this.gesture = null;
       const [rest] = [...this.pts.values()];
@@ -362,10 +382,68 @@ class View {
     this.cam = cam;
   }
 
+  // the part under a tap (a ray from the eye through it, to the nearest
+  // triangle; then the smallest part whose box on that side of the board
+  // holds the point), probed; nothing under it clears the probe
+  pick(cx, cy) {
+    if (!probed || !this.pos || !board) return;
+    const c = this.canvas, b = c.getBoundingClientRect(), w = c.clientWidth, h = c.clientHeight;
+    const cam = this.cam, s = cam.unit(h), eye = cam.eye(), t = cam.target();
+    const px = (cx - b.left - w / 2) * s, py = (h / 2 - (cy - b.top)) * s;
+    const q = [0, 1, 2].map((i) => t[i] + cam.r[i] * px + cam.u[i] * py);
+    const d = V3.norm([q[0] - eye[0], q[1] - eye[1], q[2] - eye[2]]);
+    const hit = rayHit(this.pos, eye, d);
+    const key = boardOf(this.key);
+    if (!hit) { probed(""); return; }
+    // board coordinates: micrometres, y down
+    const bx = hit[0] * 10, by = -hit[1] * 10, back = hit[2] * 10 < board.thick(key) / 2;
+    Promise.resolve(board.need(key)).then(() => {
+      const ps = board.parts(key);
+      let best = "", a = Infinity;
+      if (ps) for (const [ref, e] of ps) {
+        const bb = e.box, m = 300;
+        if ((e.back > e.front) !== back) continue;
+        if (bx < bb[0] - m || bx > bb[2] + m || by < bb[1] - m || by > bb[3] + m) continue;
+        const ar = (bb[2] - bb[0]) * (bb[3] - bb[1]);
+        if (ar < a) { a = ar; best = ref; }
+      }
+      const v = best ? `c\t${best}` : "";
+      this.probe = v;
+      this.later();
+      probed(v);
+    });
+  }
+
+  // the probed part's box on the model (or none): x0 y0 x1 y1 in the
+  // model's axes (y up), and the heights of its side of the board
+  lit() {
+    const ref = this.probe.startsWith("c\t") ? this.probe.slice(2) : "";
+    if (!ref || !board) return null;
+    const key = boardOf(this.key), ps = board.parts(key);
+    if (!ps) { board.need(key); return null; }
+    const e = ps.get(ref);
+    if (!e) return null;
+    const m = 25, th = board.thick(key) / 10;
+    return { box: [e.box[0] / 10 - m, -e.box[3] / 10 - m, e.box[2] / 10 + m, -e.box[1] / 10 + m], z: e.back > e.front ? [-1e7, 4] : [th - 4, 1e7] };
+  }
+
+  // the probed part brought into view: turned about its middle, close
+  show_probe() {
+    const l = this.lit();
+    if (!l) return;
+    const [x0, y0, x1, y1] = l.box;
+    const cam = this.cam;
+    cam.pivot = [(x0 + x1) / 2, (y0 + y1) / 2, l.z[0] > 0 ? l.z[0] : 0];
+    cam.sx = 0; cam.sy = 0;
+    cam.dist = Math.max(Math.hypot(x1 - x0, y1 - y0) * 2.5, (cam.home || 1) / 20);
+    this.later();
+  }
+
   show(m) {
     this.saying = false;
     this.ticking(false);
     if (!this.gl || !m) return;
+    this.pos = m.pos;
     const gl = this.gl;
     [m.pos, m.nrm, m.col].forEach((d, k) => { gl.bindBuffer(gl.ARRAY_BUFFER, this.bufs[k].b); gl.bufferData(gl.ARRAY_BUFFER, d, gl.STATIC_DRAW); });
     const first = this.count === 0;
@@ -400,6 +478,10 @@ class View {
     const m = mul(persp(cam.fov, w / h, Math.max(cam.dist / 100, this.r / 1000), reach), look(eye, cam.target(), cam.u));
     gl.uniformMatrix4fv(gl.getUniformLocation(this.prog, "m"), false, m);
     gl.uniform3fv(gl.getUniformLocation(this.prog, "eye"), eye);
+    const lit = this.lit();
+    gl.uniform1f(gl.getUniformLocation(this.prog, "hon"), lit ? 1 : 0);
+    gl.uniform4fv(gl.getUniformLocation(this.prog, "hl"), lit ? lit.box : [0, 0, 0, 0]);
+    gl.uniform2fv(gl.getUniformLocation(this.prog, "hz"), lit ? lit.z : [0, 0]);
     for (const { a, b } of this.bufs) {
       gl.bindBuffer(gl.ARRAY_BUFFER, b);
       gl.enableVertexAttribArray(a);
@@ -435,11 +517,59 @@ View.prototype.ticking = function (on) {
 
 let view = null;
 
+// Cross-probing (probe.js): a board model's parts are found on the board's
+// own plot (plot2d.js, through host.js: parts(key), thick(key), need(key)),
+// and a tap's probe goes to the page (host.js tells the hub)
+let board = null;
+let probed = null;
+export function useBoard(b) { board = b; }
+export function onProbe(fn) { probed = fn; }
+const boardOf = (key) => `0|${key.slice(2)}`;
+
+// the nearest triangle a ray from o along d meets (Möller–Trumbore), its
+// point, or null
+function rayHit(pos, o, d) {
+  let best = Infinity;
+  for (let i = 0; i + 8 < pos.length; i += 9) {
+    const ax = pos[i], ay = pos[i + 1], az = pos[i + 2];
+    const e1x = pos[i + 3] - ax, e1y = pos[i + 4] - ay, e1z = pos[i + 5] - az;
+    const e2x = pos[i + 6] - ax, e2y = pos[i + 7] - ay, e2z = pos[i + 8] - az;
+    const px = d[1] * e2z - d[2] * e2y, py = d[2] * e2x - d[0] * e2z, pz = d[0] * e2y - d[1] * e2x;
+    const det = e1x * px + e1y * py + e1z * pz;
+    if (Math.abs(det) < 1e-12) continue;
+    const inv = 1 / det, tx = o[0] - ax, ty = o[1] - ay, tz = o[2] - az;
+    const u = (tx * px + ty * py + tz * pz) * inv;
+    if (u < 0 || u > 1) continue;
+    const qx = ty * e1z - tz * e1y, qy = tz * e1x - tx * e1z, qz = tx * e1y - ty * e1x;
+    const v = (d[0] * qx + d[1] * qy + d[2] * qz) * inv;
+    if (v < 0 || u + v > 1) continue;
+    const t = (e2x * qx + e2y * qy + e2z * qz) * inv;
+    if (t > 0 && t < best) best = t;
+  }
+  return best < Infinity ? [o[0] + d[0] * best, o[1] + d[1] * best, o[2] + d[2] * best] : null;
+}
+
+// the probed part in view (the chip's name)
+export function showProbe() {
+  view?.show_probe();
+}
+
+export function relight() {
+  view?.later();
+}
+
+// a probe made elsewhere (a plot's tap, Esc), shown at once
+export function setProbe(v) {
+  if (view) { view.probe = v; view.later(); }
+}
+
 // after each render: the canvas on the page (if any) shows the model its
 // data-key names, once the hub has sent it
 export function mount(canvas) {
   if (!canvas) { view = null; return; }
-  if (!view || view.canvas !== canvas) view = new View(canvas);
+  if (!view || view.canvas !== canvas) { view = new View(canvas); view.probe = ""; }
+  const probe = canvas.dataset.probe ?? "";
+  if (probe !== view.hubProbe) { view.hubProbe = probe; view.probe = probe; view.later(); }
   view.note = canvas.parentElement?.querySelector(".viewer-note") ?? null;
   view.stat = canvas.parentElement?.querySelector(".viewer-stat") ?? null;
   const key = canvas.dataset.key || "";

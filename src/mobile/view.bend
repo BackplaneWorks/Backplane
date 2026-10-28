@@ -750,12 +750,21 @@ def Insp.row(kv: List<&2, String>) -> J.Json:
     case Nil{}:
       J.Json.obj([J.KV{"k", J.Str{""}}, J.KV{"v", J.Str{""}}])
 
+# (a schematic item's connected group, "g", is the web's cross-probing
+# business, no row of the card)
+def Insp.keep(g: Bool, +p: String, rest: List<&2, J.Json>) -> List<&2, J.Json>:
+  match g:
+    case True{}:
+      rest
+    case False{}:
+      Insp.row(String.split(p, '=')) <> rest
+
 def Insp.rows(ps: List<&2, String>) -> List<&2, J.Json>:
   match ps:
     case Nil{}:
       Nil{}
-    case p <> t:
-      Insp.row(String.split(p, '=')) <> Insp.rows(t)
+    case +p <> t:
+      Insp.keep(String.starts_with(p, "g="), p, Insp.rows(t))
 
 # an item's card: its kind, then key = value rows (net, ref, value,
 # footprint, pin, label...), as the window's inspector

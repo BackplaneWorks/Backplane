@@ -701,17 +701,29 @@ def Tree.ids(tab: List<&2, HI.Kids>, +acc: String) -> IO(String):
         bs : List<&2, U32> <- GT.Git.version(f)
         Tree.ids(t, acc ++ HI.Hier.uids.line(HS.Hist.family(f), bs) ++ "\n")
 
+# each file the tree read, a line of the parts placed on it
+# (Hier.refs.line, keyed the same way)
+def Tree.refs(tab: List<&2, HI.Kids>, +acc: String) -> IO(String):
+  match tab:
+    case Nil{}:
+      IO.pure(String, acc)
+    case HI.Kids{+f, _} <> t:
+      do IO<String>:
+        bs : List<&2, U32> <- GT.Git.version(f)
+        Tree.refs(t, acc ++ HI.Hier.refs.line(HS.Hist.family(f), bs) ++ "\n")
+
 # `backplane --plot-tree ROOT`: {"rows": the rows as Hier.show writes them,
 # "boxes": where each file's child sheets sit, "ids": their uuids and
-# pages, "top": the root's uuid and pages}
+# pages, "top": the root's uuid and pages, "refs": the parts on each}
 def Pv.child.tree(+root: String) -> IO(Unit):
   do IO<Unit>:
     +tab : List<&2, HI.Kids> <- Tree.load(64n, [root], Nil{})
     bx : String <- Tree.boxes(tab, "")
     ix : String <- Tree.ids(tab, "")
+    rx : String <- Tree.refs(tab, "")
     rb : List<&2, U32> <- GT.Git.version(root)
     IO.print(J.Json.show(J.Json.obj([J.KV{"rows", J.Str{HI.Hier.show(HI.Hier.rows(tab, root))}}, J.KV{"boxes", J.Str{String.trim_end(bx)}},
-      J.KV{"ids", J.Str{String.trim_end(ix)}}, J.KV{"top", J.Str{HI.Hier.top(rb)}}])))
+      J.KV{"ids", J.Str{String.trim_end(ix)}}, J.KV{"top", J.Str{HI.Hier.top(rb)}}, J.KV{"refs", J.Str{String.trim_end(rx)}}])))
 
 # a phone or page watching a project's schematic hears its sheets ("" rows
 # for a schematic of one sheet, or one the child could not read) and the
@@ -729,7 +741,7 @@ def Pv.child.tree(+root: String) -> IO(Unit):
 def Pv.tree.json(+root: String, +slot: String, +gen: String, +o: J.Json, +text: String) -> String:
   J.Json.show(J.Json.obj([J.KV{"t", J.Str{"sheets"}}, J.KV{"root", J.Str{root}}, J.KV{"slot", J.Str{slot}}, J.KV{"gen", J.Str{gen}},
     J.KV{"rows", J.Str{J.Json.get_str(o, "rows", String.trim_end(text))}}, J.KV{"boxes", J.Str{J.Json.get_str(o, "boxes", "")}},
-    J.KV{"ids", J.Str{J.Json.get_str(o, "ids", "")}}, J.KV{"top", J.Str{J.Json.get_str(o, "top", "")}}]))
+    J.KV{"ids", J.Str{J.Json.get_str(o, "ids", "")}}, J.KV{"top", J.Str{J.Json.get_str(o, "top", "")}}, J.KV{"refs", J.Str{J.Json.get_str(o, "refs", "")}}]))
 
 def Pv.tree.say(r: PR.Ran, +client: U32, +root: String, +slot: String, +gen: String, +out: Chan(POut)) -> IO(Unit):
   match r:

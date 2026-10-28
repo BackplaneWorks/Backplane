@@ -442,6 +442,16 @@ button.fold span { overflow: hidden; text-overflow: ellipsis; white-space: nowra
 .combo-sheets .sch-fold { flex: none; width: 22px; padding: 0; }
 .combo-sheets .sch-name { flex: 1; }
 .combo-picks { display: inline-flex; gap: 2px; }
+/* cross-probing: the probed part or net as a chip in the viewer's bar (its
+   name brings it into view, its x clears it), and where a part on another
+   sheet is */
+.probe-chip { display: inline-flex; align-items: stretch; border: 1px solid var(--accent); min-width: 0; flex: none; }
+.probe-chip .probe-name { border: 0; background: none; color: var(--text); padding: 3px 4px 3px 9px; max-width: 18em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.probe-chip .probe-name::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 7px; background: var(--accent); vertical-align: 1px; }
+.probe-chip .probe-clear { padding: 0 6px; border: 0; }
+.viewer-stage > .probe-chip { position: absolute; top: 8px; left: 8px; z-index: 3; background: var(--panel); max-width: calc(100% - 16px); }
+.probe-away { display: flex; align-items: center; gap: 8px; padding: 4px 10px; border-bottom: 1px solid var(--line); color: var(--dim); background: var(--panel); flex: none; font-size: calc(12px * var(--text-scale, 100) / 100); }
+.probe-away button { padding: 1px 8px; }
 .combo-pick { color: var(--faint); }
 
 /* Mechanical: a part's renders, and a part in 3D */

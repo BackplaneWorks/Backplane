@@ -3785,6 +3785,67 @@ def View.rc.checks.k(on: Bool, +u: U.Ui) -> List<&2, D.Node>:
 def View.rc.checks.loc(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
   View.rc.checks.k.loc(lc, Bool.and(String.eq(U.Rp.page(u), "checks"), Bool.not(String.is_empty(U.RpView.md(U.Rp.view.loc(lc, u))))), u)
 
+# Cross-probing (client.bend's Probe, the web's probe.js): the probed part
+# or net as a chip over the plot (in the combined view's bar), its name
+# bringing it into view and its x clearing it (Esc too); a part on another
+# sheet is said with its sheet over the schematic, which a click opens.
+# Each plot's canvas carries the probe, its side, its sheet's place and its
+# board's source.
+
+def View.probe.chip.k(none: Bool, +v: String) -> List<&2, D.Node>:
+  match none:
+    case True{}:
+      Nil{}
+    case False{}:
+      [D.El{"span", "probe-chip", [D.At{"class", "probe-chip"}, D.At{"role", "group"}, D.At{"aria-label", "Probed"}], [
+        D.El{"button", "", [D.At{"type", "button"}, D.At{"class", "probe-name"}, D.At{"data-view", "probe"}, D.At{"title", "Bring it into view"}], [D.Txt{U.Probe.label(v)}]},
+        D.El{"button", "", [D.At{"type", "button"}, D.At{"class", "icon probe-clear"}, D.At{"title", "Clear (Esc)"}, D.At{"aria-label", "Clear the probe"},
+          D.At{"data-value", ""}, D.On{"click", "probe"}], [WI.WIcon.svg("x", 14)]}]}]
+
+def View.probe.chip(+u: U.Ui) -> List<&2, D.Node>:
+  View.probe.chip.k(String.is_empty(U.Probe.get(u)), U.Probe.get(u))
+
+def View.probe.away.k(a: U.ProbeAway) -> List<&2, D.Node>:
+  match a:
+    case U.ProbeAway{+ref, +sheet, +value}:
+      D.Dom.when(Bool.not(String.is_empty(value)), D.El{"div", "probe-away", [D.At{"class", "probe-away"}, D.At{"role", "status"}], [
+        D.Txt{ref ++ " is on the sheet " ++ sheet}, D.El{"button", "", [D.At{"type", "button"}, D.At{"data-value", value}, D.On{"click", "sch-go"}], [D.Txt{"Open it"}]}]})
+
+def View.probe.away.if(on: Bool, +u: U.Ui) -> List<&2, D.Node>:
+  match on:
+    case True{}:
+      View.probe.away.k(U.Probe.note(u))
+    case False{}:
+      Nil{}
+
+# (only a probed part, on a schematic of several sheets, is looked for)
+def View.probe.away(+u: U.Ui) -> List<&2, D.Node>:
+  View.probe.away.if(Bool.and(Bool.not(String.is_empty(U.Probe.ref(U.Probe.get(u)))), U.Sch.many(u)), u)
+
+def View.probe.place.k(v: U.SchView) -> String:
+  match v:
+    case U.SchView{_, _, _, _, _, +place, _, _, _, _, _, _, _}:
+      Bool.pick(String, String.is_empty(place), "/", place)
+
+def View.probe.place(many: Bool, +u: U.Ui) -> String:
+  match many:
+    case True{}:
+      View.probe.place.k(U.Sch.view(u))
+    case False{}:
+      "/"
+
+# what a plot's canvas tells probe.js: the probe, which side it is, the
+# sheet's place, and the board a schematic's nets are found on
+def View.probe.attrs.k(sch: Bool, +u: U.Ui) -> List<&2, D.Attr>:
+  match sch:
+    case True{}:
+      [D.At{"data-probe", U.Probe.get(u)}, D.At{"data-side", "schematic"}, D.At{"data-place", View.probe.place(U.Sch.many(u), u)}, D.At{"data-board", U.Probe.board.src(u)}]
+    case False{}:
+      [D.At{"data-probe", U.Probe.get(u)}, D.At{"data-side", "board"}]
+
+def View.probe.attrs(+u: U.Ui, sch: Bool) -> List<&2, D.Attr>:
+  View.probe.attrs.k(sch, u)
+
 # a board or schematic: host.js (plot2d.js) draws the hub's plot of it on
 # the canvas whose data-key it carries, less the layers data-off names
 
@@ -3793,10 +3854,11 @@ def View.rc.checks(+u: U.Ui) -> List<&2, D.Node>:
 
 def View.plot(+lc: I.Loc, +u: U.Ui, +what: List<&2, D.Node>) -> List<&2, D.Node>:
   View.bar.loc(lc, List.append(&2, D.Node, what, [View.layers.loc(lc, String.eq(U.Solid.kind(u), "schematic"), Nat.is_eq(HS.Hist.kind(U.Ui.view_get(u, "view.path")), 2n), U.Solid.off(u), U.Lfocus.of(u))]), MSG.T.viewer.pan.tip(lc))
-   <> D.El{"div", "", [D.At{"class", "viewer-stage"}], D.El{"canvas", "plot", [D.At{"id", "plot"}, D.At{"class", "plot2d"}, D.At{"data-key", U.Solid.want(u)},
+   <> D.El{"div", "", [D.At{"class", "viewer-stage"}], D.El{"canvas", "plot", List.append(&2, D.Attr, [D.At{"id", "plot"}, D.At{"class", "plot2d"}, D.At{"data-key", U.Solid.want(u)},
         D.At{"data-off", U32.show(LY.Masks.off(LY.Lyr.masks(U.Lfocus.kind(u), U.Solid.off(u), U.Lfocus.of(u))))},
         D.At{"data-dim", U32.show(LY.Masks.dim(LY.Lyr.masks(U.Lfocus.kind(u), U.Solid.off(u), U.Lfocus.of(u))))}, D.At{"data-lift", U32.show(LY.Lyr.top(U.Lfocus.of(u)))},
-        D.At{"data-fade", Nat.show(U.Hs.fade())}, D.At{"data-fam", HS.Hist.key.family(U.Solid.want(u))}, D.At{"data-sheets", U.Sch.boxes(u)}], Nil{}} <> (View.hist.menu(lc, u) <> View.rc.loc(lc, u))}
+        D.At{"data-fade", Nat.show(U.Hs.fade())}, D.At{"data-fam", HS.Hist.key.family(U.Solid.want(u))}, D.At{"data-sheets", U.Sch.boxes(u)}], View.probe.attrs(u, String.eq(U.Solid.kind(u), "schematic"))), Nil{}}
+        <> List.append(&2, D.Node, View.probe.chip(u), View.hist.menu(lc, u) <> View.rc.loc(lc, u))}
    <> View.hist(lc, U.Hs.bar.loc(lc, u), u)
 
 # over a part in 3D: the thread's parts and Renders; the board: its name
@@ -3829,8 +3891,8 @@ def View.solid.what(on: Bool, +u: U.Ui) -> List<&2, D.Node>:
 def View.solid.loc(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
   View.bar.loc(lc, View.solid.what.loc(lc, U.Mpage.onpart(u), u), MSG.T.viewer.orbit.tip(lc))
     <> List.append(&2, D.Node, D.Dom.when(Bool.not(String.is_empty(U.Ui.info(u, "plotnote:" ++ U.Solid.want(u)))), D.Dom.span("viewer-say", U.Ui.info(u, "plotnote:" ++ U.Solid.want(u)))),
-      [D.El{"div", "", [D.At{"class", "viewer-stage"}], [D.El{"canvas", "solid", [D.At{"id", "solid"}, D.At{"data-key", U.Solid.want(u)}], Nil{}},
-        D.El{"div", "", [D.At{"class", "viewer-note"}], Nil{}}, D.El{"div", "", [D.At{"class", "viewer-stat"}], Nil{}}]}])
+      [D.El{"div", "", [D.At{"class", "viewer-stage"}], List.append(&2, D.Node, [D.El{"canvas", "solid", [D.At{"id", "solid"}, D.At{"data-key", U.Solid.want(u)}, D.At{"data-probe", U.Probe.get(u)}], Nil{}},
+        D.El{"div", "", [D.At{"class", "viewer-note"}], Nil{}}, D.El{"div", "", [D.At{"class", "viewer-stat"}], Nil{}}], View.probe.chip(u))}])
 
 # The combined view (client.bend's Split): the schematic beside the board
 # and its 3D model, each pane under a head that names it, with a button
@@ -3853,10 +3915,10 @@ def View.combo.toggle(+u: U.Ui, +pane: String, +name: String) -> D.Node:
 # a plot pane's canvas: its source, and the layers its kind shows (k 0 a
 # board, 1 a schematic, as the single tabs keep them)
 def View.combo.canvas(+id: String, +key: String, +kind: String, +k: U32, +u: U.Ui, +sheets: String) -> D.Node:
-  D.El{"canvas", id, [D.At{"id", id}, D.At{"class", "plot2d"}, D.At{"data-key", key},
+  D.El{"canvas", id, List.append(&2, D.Attr, View.probe.attrs(u, U32.is_eq(k, 1)), [D.At{"id", id}, D.At{"class", "plot2d"}, D.At{"data-key", key},
     D.At{"data-off", U32.show(LY.Masks.off(LY.Lyr.masks(k, U.Solid.off.of(u, kind), U.Lfocus.of.at(u, kind))))},
     D.At{"data-dim", U32.show(LY.Masks.dim(LY.Lyr.masks(k, U.Solid.off.of(u, kind), U.Lfocus.of.at(u, kind))))}, D.At{"data-lift", U32.show(LY.Lyr.top(U.Lfocus.of.at(u, kind)))},
-    D.At{"data-fade", Nat.show(U.Hs.fade())}, D.At{"data-fam", HS.Hist.key.family(key)}, D.At{"data-sheets", sheets}], Nil{}}
+    D.At{"data-fade", Nat.show(U.Hs.fade())}, D.At{"data-fam", HS.Hist.key.family(key)}, D.At{"data-sheets", sheets}]), Nil{}}
 
 def View.combo.trail(+lc: I.Loc, v: U.SchView) -> List<&2, D.Node>:
   match v:
@@ -3882,9 +3944,9 @@ def View.combo.boxes(many: Bool, +u: U.Ui) -> String:
       ""
 
 def View.combo.sch(+lc: I.Loc, +u: U.Ui) -> D.Node:
-  D.El{"section", "combo-sch", [D.At{"class", "combo-pane combo-main"}, D.At{"aria-label", MSG.T.viewer.schematic(lc)}], [
-    View.combo.head("sch", MSG.T.viewer.schematic(lc), View.combo.nav(U.Sch.many(u), lc, u)),
-    D.El{"div", "", [D.At{"class", "viewer-stage"}], [View.combo.canvas("plot-sch", U.Split.src.sch(u), "schematic", 1, u, View.combo.boxes(U.Sch.many(u), u))]}]}
+  D.El{"section", "combo-sch", [D.At{"class", "combo-pane combo-main"}, D.At{"aria-label", MSG.T.viewer.schematic(lc)}],
+    View.combo.head("sch", MSG.T.viewer.schematic(lc), View.combo.nav(U.Sch.many(u), lc, u)) <> List.append(&2, D.Node, View.probe.away(u),
+    [D.El{"div", "", [D.At{"class", "viewer-stage"}], [View.combo.canvas("plot-sch", U.Split.src.sch(u), "schematic", 1, u, View.combo.boxes(U.Sch.many(u), u))]}])}
 
 def View.combo.pcb(+lc: I.Loc, +u: U.Ui) -> D.Node:
   D.El{"section", "combo-pcb", [D.At{"class", "combo-pane"}, D.At{"aria-label", MSG.T.viewer.board(lc)}], [
@@ -3894,7 +3956,7 @@ def View.combo.pcb(+lc: I.Loc, +u: U.Ui) -> D.Node:
 def View.combo.solid(+lc: I.Loc, +u: U.Ui) -> D.Node:
   D.El{"section", "combo-3d", [D.At{"class", "combo-pane"}, D.At{"aria-label", "3D"}], [
     View.combo.head("3d", "3D", Nil{}),
-    D.El{"div", "", [D.At{"class", "viewer-stage"}], [D.El{"canvas", "solid", [D.At{"id", "solid"}, D.At{"data-key", U.Split.src.solid(u)}], Nil{}},
+    D.El{"div", "", [D.At{"class", "viewer-stage"}], [D.El{"canvas", "solid", [D.At{"id", "solid"}, D.At{"data-key", U.Split.src.solid(u)}, D.At{"data-probe", U.Probe.get(u)}], Nil{}},
       D.El{"div", "", [D.At{"class", "viewer-note"}], Nil{}}, D.El{"div", "", [D.At{"class", "viewer-stat"}], Nil{}}]}]}
 
 def View.combo.pane(i: Nat, +lc: I.Loc, +u: U.Ui) -> D.Node:
@@ -3915,8 +3977,8 @@ def View.combo.if(on: Bool, +lc: I.Loc, +u: U.Ui, +i: Nat) -> List<&2, D.Node>:
       Nil{}
 
 def View.combo(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
-  [View.bar.loc(lc, List.append(&2, D.Node, View.boards(u, "Split"), [D.El{"span", "", [D.At{"class", "combo-picks"}, D.At{"role", "group"}, D.At{"aria-label", "Panes"}], [
-      View.combo.toggle(u, "sch", MSG.T.viewer.schematic(lc)), View.combo.toggle(u, "pcb", MSG.T.viewer.board(lc)), View.combo.toggle(u, "3d", "3D")]}]),
+  [View.bar.loc(lc, List.append(&2, D.Node, View.boards(u, "Split"), D.El{"span", "", [D.At{"class", "combo-picks"}, D.At{"role", "group"}, D.At{"aria-label", "Panes"}], [
+      View.combo.toggle(u, "sch", MSG.T.viewer.schematic(lc)), View.combo.toggle(u, "pcb", MSG.T.viewer.board(lc)), View.combo.toggle(u, "3d", "3D")]} <> View.probe.chip(u)),
      MSG.T.viewer.pan.tip(lc)),
    D.El{"div", "combo", [D.At{"class", "combo"}], [D.El{"div", "", [D.At{"class", "combo-in"}],
      List.append(&2, D.Node, View.combo.if(U.Split.on(u, "sch"), lc, u, 0n),
@@ -4069,7 +4131,7 @@ def View.aside.k(+lc: I.Loc, i: Nat, +u: U.Ui) -> List<&2, D.Node>:
       View.solid.loc(lc, u)
     case 4n:
       View.sch.after(View.plot(lc, u, List.append(&2, D.Node, View.boards(u, MSG.T.viewer.schematic.tip(lc)), List.append(&2, D.Node, View.sheets.loc(lc, u), [View.kicad.loc(lc)]))),
-        View.sch.below(lc, u))
+        List.append(&2, D.Node, View.sch.below(lc, u), View.probe.away(u)))
 
     case 6n:
       View.files(lc, u)

@@ -873,8 +873,9 @@ def Plot.quiet(rs: List<&2, Ref>, +i: Nat, +n: Nat) -> Bool:
 # their dictionary indexes 1 and 31): {"t": "plot", "key", "box":
 # [x0, y0, x1, y1], "thick", "edge": [x0, y0, x1, y1], "cs": [...]},
 # each of cs an unsigned number (keep that chunk of the last plot) or {"l", "c", "a", "m", "w": numbers,
-# "d": the geometry bytes}. A chunk's info table stays on the hub: a phone
-# asks for one piece's info when it inspects a tap (Plot.info). Written as bytes
+# "d": the geometry bytes, "s": its sig}. A chunk's info table stays on the
+# hub: a phone asks for one piece's info when it inspects a tap
+# (Plot.info), the web for a plot's info file (GET /plot/info). Written as bytes
 # straight onto the frame, back to front with tail calls only, so a big
 # board is neither parsed again nor deepens the stack.
 
@@ -953,11 +954,13 @@ def Cb.text(+rs: String, acc: List<&2, U32>) -> List<&2, U32>:
 def Cb.key(+k: String, acc: List<&2, U32>) -> List<&2, U32>:
   Cb.text(String.reverse(k), acc)
 
+# (with "s", its sig: the web reads the chunk's infos from the hub's info
+# file by it, GET /plot/info)
 def Out.chunk(c: Chunk, acc: List<&2, U32>) -> List<&2, U32>:
   match c:
-    case Chunk{_, +l, +co, +a, +m, +w, +d, _}:
-      Cb.head(160, 6, Cb.key("l", Cb.uint(l, Cb.key("c", Cb.uint(co, Cb.key("a", Cb.uint(a, Cb.key("m", Cb.uint(m, Cb.key("w", Cb.uint(w,
-        Cb.key("d", Cb.head(64, Cb.count(d, 0), Cb.raw(d, acc))))))))))))))
+    case Chunk{+s, +l, +co, +a, +m, +w, +d, _}:
+      Cb.head(160, 7, Cb.key("s", Cb.uint(s, Cb.key("l", Cb.uint(l, Cb.key("c", Cb.uint(co, Cb.key("a", Cb.uint(a, Cb.key("m", Cb.uint(m, Cb.key("w", Cb.uint(w,
+        Cb.key("d", Cb.head(64, Cb.count(d, 0), Cb.raw(d, acc))))))))))))))))
 
 def Out.ref(r: Ref, acc: List<&2, U32>) -> List<&2, U32>:
   match r:

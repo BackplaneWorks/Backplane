@@ -457,6 +457,76 @@ def Hier.boxes.find(ls: List<&2, String>, +key: String) -> List<&2, String>:
 def Hier.boxes.of(+text: String, +key: String) -> List<&2, String>:
   Hier.boxes.find(String.split(text, '\n'), key)
 
+# The parts on each sheet
+# -----------------------
+# Each file's placed symbols' references ("R12"; not a library's "R", an
+# unannotated "R?" or a power symbol's "#PWR01"), found by a scan for
+# (property "Reference" "...") with no parse, a line per file like
+# Hier.boxes.line's: so a viewer can say which sheet a probed part is on.
+
+type RScan is Data:
+  RScan{m: Nat, on: Bool, cur: String, out: List<&2, String>}
+
+def Refs.mark() -> List<&2, U32>:
+  [40, 112, 114, 111, 112, 101, 114, 116, 121, 32, 34, 82, 101, 102, 101, 114, 101, 110, 99, 101, 34, 32, 34]
+
+def Refs.nth(xs: List<&2, U32>, +i: Nat) -> U32:
+  Maybe.default(&2, U32, List.head(&2, U32, List.drop(&2, U32, xs, i)), 0)
+
+def Refs.digit(s: String) -> Bool:
+  match s:
+    case SNil{}:
+      False{}
+    case SCon{Chr{+c}, t}:
+      Bool.or(Bool.and(U32.is_ge(c, 48), U32.is_le(c, 57)), Refs.digit(t))
+
+def Refs.ok(+s: String) -> Bool:
+  Bool.and(Bool.not(String.starts_with(s, "#")), Bool.and(Bool.not(String.contains(s, "?")), Refs.digit(s)))
+
+def Refs.keep(ok: Bool, +s: String, out: List<&2, String>) -> List<&2, String>:
+  match ok:
+    case True{}:
+      s <> out
+    case False{}:
+      out
+
+# (on: within the value; m: how much of the mark is matched)
+def Refs.step.k(on: Bool, quote: Bool, next: Bool, last: Bool, +c: U32, +m: Nat, +cur: String, out: List<&2, String>) -> RScan:
+  match on quote next last:
+    case True{} True{} _ _:
+      RScan{0n, False{}, SNil{}, Refs.keep(Refs.ok(String.reverse(cur)), String.reverse(cur), out)}
+    case True{} False{} _ _:
+      RScan{0n, True{}, SCon{Chr{c}, cur}, out}
+    case False{} _ True{} True{}:
+      RScan{0n, True{}, SNil{}, out}
+    case False{} _ True{} False{}:
+      RScan{1n+m, False{}, cur, out}
+    case False{} _ False{} _:
+      RScan{Bool.pick(Nat, U32.is_eq(c, 40), 1n, 0n), False{}, cur, out}
+
+def Refs.step(+c: U32, +mk: List<&2, U32>, st: RScan) -> RScan:
+  match st:
+    case RScan{+m, on, cur, out}:
+      Refs.step.k(on, U32.is_eq(c, 34), U32.is_eq(c, Refs.nth(mk, m)), Nat.is_eq(1n+m, 23n), c, m, cur, out)
+
+def Refs.go(bs: List<&2, U32>, +mk: List<&2, U32>, st: RScan) -> RScan:
+  match bs:
+    case Nil{}:
+      st
+    case +c <> t:
+      Refs.go(t, mk, Refs.step(c, mk, st))
+
+def Refs.out(st: RScan) -> List<&2, String>:
+  match st:
+    case RScan{_, _, _, out}:
+      List.reverse(&2, String, out)
+
+def Hier.refs(bs: List<&2, U32>) -> List<&2, String>:
+  Refs.out(Refs.go(bs, Refs.mark(), RScan{0n, False{}, SNil{}, Nil{}}))
+
+def Hier.refs.line(+key: String, bs: List<&2, U32>) -> String:
+  String.join(key <> Hier.refs(bs), "\t")
+
 # Sheet instance UUIDs
 # --------------------
 # Beside the rows (whose types the laws pin), each file's child sheets as

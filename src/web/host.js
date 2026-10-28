@@ -1111,6 +1111,27 @@ function dispatch(action, value, timer) {
 Plot2d.onPlace((place) => dispatch("rv-note", place));
 // a tap on a sheet symbol opens that sheet instance (client.bend's Sch)
 Plot2d.onSheet((value) => dispatch("sch-go", value));
+// a tap that probes a part or a net (probe.js) tells the hub, which keeps it
+// (client.bend's Probe); the 3D view finds parts on the board's plot
+Plot2d.onProbe((value) => { Solid.setProbe(value); dispatch("probe", value); });
+Solid.onProbe((value) => { Plot2d.setProbe(value); dispatch("probe", value); });
+Solid.useBoard({ parts: (key) => Plot2d.parts(key), thick: (key) => Plot2d.thick(key), need: (key) => Plot2d.need(key) });
+Plot2d.onPlotted(() => Solid.relight());
+// the probe's chip: its name brings it into view
+document.addEventListener("click", (e) => {
+  if (!e.target.closest?.('[data-view="probe"]')) return;
+  Plot2d.showProbe();
+  Solid.showProbe();
+});
+// Esc clears the probe, unless a field, a menu or a dialog has it
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape" || e.defaultPrevented || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (!document.querySelector(".probe-chip") || document.querySelector("details[open], dialog[open]")) return;
+  if (e.target?.closest?.("input, textarea, select, [contenteditable]")) return;
+  Plot2d.setProbe("");
+  Solid.setProbe("");
+  dispatch("probe", "");
+});
 
 // how many terminal cells fit: the thread pane's width, 40% of the height
 function termSize() {

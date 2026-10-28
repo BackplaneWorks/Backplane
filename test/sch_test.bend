@@ -66,6 +66,24 @@ def info(m: Maybe<&2, B.Item>) -> String:
     case None{}:
       "(missing)"
 
+# an info without its connected group (";g=<tag>", conn_test's business)
+def nog.k(g: Bool, +p: String, rest: List<&2, String>) -> List<&2, String>:
+  match g:
+    case True{}:
+      rest
+    case False{}:
+      p <> rest
+
+def nog.go(ps: List<&2, String>) -> List<&2, String>:
+  match ps:
+    case Nil{}:
+      Nil{}
+    case +p <> t:
+      nog.k(String.starts_with(p, "g="), p, nog.go(t))
+
+def nog(+s: String) -> String:
+  String.join(nog.go(String.split(s, ';')), ";")
+
 def rnd(+f: F32) -> String:
   Nat.show(F32.to_nat(F32.round(f)))
 
@@ -97,12 +115,12 @@ def main() -> IO(Unit):
   do IO<Unit>:
     C.Check.str("sch incomplete", some(Sch.Sch.items(U.Utf8.encode("(kicad_sch (wire (pts (xy 0 0)"))), "none")
     C.Check.str("sch complete", some(Sch.Sch.items(U.Utf8.encode(sheet()))), "some")
-    C.Check.str("sch wire", info(find(xs, "w1")), "wire")
+    C.Check.str("sch wire", nog(info(find(xs, "w1"))), "wire")
     C.Check.str("sch wire layer", layer(find(xs, "w1")), "14")
-    C.Check.str("sch junction", info(find(xs, "j1")), "junction")
-    C.Check.str("sch label", info(find(xs, "l1/0")), "label;text=SDA")
-    C.Check.str("sch body", info(find(xs, "s1/g1001")), "symbol;ref=R1;value=10k;lib=Device:R")
-    C.Check.str("sch pin", info(find(xs, "s1/pin/1")), "pin 1;name=A;type=passive;symbol=R1")
+    C.Check.str("sch junction", nog(info(find(xs, "j1"))), "junction")
+    C.Check.str("sch label", nog(info(find(xs, "l1/0"))), "label;text=SDA")
+    C.Check.str("sch body", nog(info(find(xs, "s1/g1001"))), "symbol;ref=R1;value=10k;lib=Device:R")
+    C.Check.str("sch pin", nog(info(find(xs, "s1/pin/1"))), "pin 1;name=A;type=passive;symbol=R1")
     C.Check.str("sch pin placed", start(find(xs, "s1/pin/1")), "96,50")
     C.Check.str("sch pin 2 placed", start(find(xs, "s1/pin/2")), "104,50")
     C.Check.str("sch pin name", layer(find(xs, "s1/pin/1/n/0")), "8")
