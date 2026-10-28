@@ -1,4 +1,4 @@
-name: Existing frozen Windows service startup diagnostic (no compiler)
+name: Existing frozen Mac service startup diagnostic (no compiler)
 on:
   workflow_dispatch:
     inputs:
@@ -10,11 +10,11 @@ permissions:
   contents: read
   actions: read
 concurrency:
-  group: frozen013-windows-startup-diagnostic
+  group: frozen013-mac-startup-diagnostic
   cancel-in-progress: false
 jobs:
   diagnose-owned-service:
-    runs-on: windows-2025
+    runs-on: macos-15
     timeout-minutes: 6
     env:
       PYTHONUTF8: '1'
@@ -32,8 +32,8 @@ jobs:
           node-version: '24'
       - uses: actions/download-artifact@v4
         with:
-          name: windows013-recovered-component-and-desktop
-          run-id: 40752153377
+          name: configured-service-darwin-arm64
+          run-id: 40748872940
           github-token: ${{ github.token }}
           path: retained
       - name: Capture only bounded owned-child startup failures with redacted output
@@ -48,16 +48,16 @@ jobs:
           const fs=require('fs'),path=require('path'),os=require('os'),crypto=require('crypto'),cp=require('child_process');
           const redactKeys=Object.keys(process.env).filter(k=>k.startsWith('DIAG_REDACT_')),secrets=redactKeys.map(k=>process.env[k]).filter(Boolean);if(secrets.length!==4)throw Error('Redaction inputs unavailable; no payload run');for(const k of redactKeys)delete process.env[k];
           const safe=text=>{let s=String(text);for(const v of secrets)s=s.split(v).join('<redacted>');return s.split(/\r?\n/).filter(l=>l.length<350&&!/^\s*\d+\s*\|/.test(l)).map(l=>l.replace(/\b[0-9a-f]{32,}\b/gi,'<redacted-hex>')).join('\n').slice(-6000);};
-          const root=process.cwd(),component=path.join(root,'retained/source/build/bootstrap-service/component'),payload=path.join(component,'payload'),binary=path.join(payload,'backplane-serve.exe'),receipt=JSON.parse(fs.readFileSync(path.join(component,'SERVICE.json'),'utf8'));
+          const root=process.cwd(),component=path.join(root,'retained/bootstrap-service/component'),payload=path.join(component,'payload'),binary=path.join(payload,'backplane-serve'),receipt=JSON.parse(fs.readFileSync(path.join(component,'SERVICE.json'),'utf8'));
           if(receipt.sourceCommit!=='74d943b7db3ceab37893b350308cf1802f38fe6b'||receipt.sourceTree!=='a9231b10c14aeb0af2306dd7ee022922802d6e53')throw Error('Wrong retained component');
-          const digest=p=>crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');if(digest(binary)!=='0b2e043551d65a32621770af265773fc12c5368a2c60f20f0341905ce1af9942')throw Error('Wrong existing binary');
+          const digest=p=>crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');if(digest(binary)!=='1c856db38318bf19dbcff67f6617da733d6a54f311afb7ee24b11266d28bc050')throw Error('Wrong existing binary');
           const captured=[],originalSpawn=cp.spawn;cp.spawn=function(file,args,opts){if(path.resolve(String(file)).toLowerCase()!==path.resolve(binary).toLowerCase())return originalSpawn.apply(this,arguments);const record={file:path.basename(file),args:args.map(String),stdout:'',stderr:''};const child=originalSpawn(file,args,{...opts,stdio:['ignore','pipe','pipe']});record.pid=child.pid;child.stdout.on('data',b=>record.stdout=(record.stdout+b).slice(-32768));child.stderr.on('data',b=>record.stderr=(record.stderr+b).slice(-32768));child.once('exit',(code,signal)=>{record.exit=code;record.signal=signal;});captured.push(record);return child;};
           const {Service}=require(path.join(root,'source/desktop/service.cjs'));
-          (async()=>{const results=[];for(const suffix of ['ascii','日本語']){const home=fs.mkdtempSync(path.join(os.tmpdir(),'Backplane-diagnostic-'+suffix+'-')),agents=path.join(home,'agents');fs.mkdirSync(agents);const at=Math.floor(Date.now()/1000);fs.writeFileSync(path.join(home,'events.jsonl'),['mail.on','restart.continue','telemetry.share'].map(key=>JSON.stringify({$:'SettingSet',key,value:'off',at})).join('\n')+'\n');const prior=process.env;process.env={...prior,BACKPLANE_HOME:home,BACKPLANE_AGENTS:agents,BACKPLANE_NO_UPDATE:'1',BACKPLANE_TELEMETRY:'off',BACKPLANE_PEERS:''};for(const key of Object.keys(process.env))if(/TOKEN|API_KEY|SECRET|PASSWORD|CREDENTIAL|AUTH_COOKIE/.test(key))delete process.env[key];const service=new Service({home,binary,web:path.join(payload,'web'),expectedVersion:'0.13.0',residentService:true});let timer,result={case:suffix};try{const connection=await Promise.race([service.start(),new Promise((_,reject)=>timer=setTimeout(()=>reject(Error('Bounded startup timeout')),20000))]);result.ready=true;result.version=connection.version;}catch(error){result.ready=false;result.error=safe(error.message);}finally{clearTimeout(timer);if(service.child&&service.child.exitCode===null){service.child.kill('SIGTERM');await Promise.race([new Promise(resolve=>service.child.once('exit',resolve)),new Promise(resolve=>setTimeout(resolve,3000))]);}result.captured=captured.splice(0).map(v=>({...v,stdout:safe(v.stdout),stderr:safe(v.stderr)}));result.childExited=!service.child||service.child.exitCode!==null||service.child.signalCode!==null;process.env=prior;}results.push(result);}fs.mkdirSync('diagnostic');fs.writeFileSync('diagnostic/RESULT.json',JSON.stringify({kind:'owned-Windows-startup-diagnostic-only',status:results.every(r=>r.ready)?'DIAGNOSTIC_STARTUP_PASS_NOT_DESKTOP_QUALIFICATION':'DIAGNOSTIC_CAPTURED_STARTUP_FAILURE',sourceCommit:receipt.sourceCommit,sourceTree:receipt.sourceTree,binarySha256:digest(binary),originalCompilerRun:40748872940,compilerInvoked:false,privateProfilesOrDeviceTouched:false,results},null,2)+'\n');console.log('Diagnostic recorded; no compiler, private profile or production action');})().catch(()=>{console.error('Diagnostic runner failed; raw child output not printed');process.exitCode=1;});
+          (async()=>{const results=[];for(const suffix of ['ascii','日本語']){const home=fs.mkdtempSync(path.join(os.tmpdir(),'Backplane-diagnostic-'+suffix+'-')),agents=path.join(home,'agents');fs.mkdirSync(agents);const at=Math.floor(Date.now()/1000);fs.writeFileSync(path.join(home,'events.jsonl'),['mail.on','restart.continue','telemetry.share'].map(key=>JSON.stringify({$:'SettingSet',key,value:'off',at})).join('\n')+'\n');const prior=process.env;process.env={...prior,BACKPLANE_HOME:home,BACKPLANE_AGENTS:agents,BACKPLANE_NO_UPDATE:'1',BACKPLANE_TELEMETRY:'off',BACKPLANE_PEERS:''};for(const key of Object.keys(process.env))if(/TOKEN|API_KEY|SECRET|PASSWORD|CREDENTIAL|AUTH_COOKIE/.test(key))delete process.env[key];const service=new Service({home,binary,web:path.join(payload,'web'),expectedVersion:'0.13.0',residentService:true});let timer,result={case:suffix};try{const connection=await Promise.race([service.start(),new Promise((_,reject)=>timer=setTimeout(()=>reject(Error('Bounded startup timeout')),20000))]);result.ready=true;result.version=connection.version;}catch(error){result.ready=false;result.error=safe(error.message);}finally{clearTimeout(timer);if(service.child&&service.child.exitCode===null){service.child.kill('SIGTERM');await Promise.race([new Promise(resolve=>service.child.once('exit',resolve)),new Promise(resolve=>setTimeout(resolve,3000))]);}result.captured=captured.splice(0).map(v=>({...v,stdout:safe(v.stdout),stderr:safe(v.stderr)}));result.childExited=!service.child||service.child.exitCode!==null||service.child.signalCode!==null;process.env=prior;}results.push(result);}fs.mkdirSync('diagnostic');fs.writeFileSync('diagnostic/RESULT.json',JSON.stringify({kind:'owned-Mac-startup-diagnostic-only',status:results.every(r=>r.ready)?'DIAGNOSTIC_STARTUP_PASS_NOT_DESKTOP_QUALIFICATION':'DIAGNOSTIC_CAPTURED_STARTUP_FAILURE',sourceCommit:receipt.sourceCommit,sourceTree:receipt.sourceTree,binarySha256:digest(binary),originalCompilerRun:40748872940,compilerInvoked:false,privateProfilesOrDeviceTouched:false,results},null,2)+'\n');console.log('Diagnostic recorded; no compiler, private profile or production action');})().catch(()=>{console.error('Diagnostic runner failed; raw child output not printed');process.exitCode=1;});
           JS
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: windows013-service-diagnostic
+          name: mac013-service-diagnostic
           path: diagnostic/
           retention-days: 14
