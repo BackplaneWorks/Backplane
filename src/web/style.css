@@ -201,6 +201,10 @@ html[data-backplane-wait="true"] :is(.topbar .back, .topbar .crumbs, .topbar .kv
 .msg .body { min-width: 0; overflow-wrap: anywhere; }
 .msg .copy { position: absolute; top: 4px; right: 4px; opacity: 0; font-size: calc(11px * var(--text-scale, 100) / 100); padding: 1px 6px; }
 .msg:hover > .copy { opacity: 1; }
+/* a reply is as wide as its text, so its Copy sits beside the lines it
+   copies (a short reply's chip floated 860 px away); the gutter keeps it
+   off the text */
+@media (min-width: 761px) { .msg.assistant { width: fit-content; min-width: 160px; padding-right: 56px; box-sizing: border-box; } }
 .msg.user { align-self: flex-end; width: auto; max-width: 720px; background: var(--raise); border: 1px solid var(--line); padding: 8px 12px; }
 .msg.user .body { white-space: pre-wrap; }
 .msg.assistant .body > :first-child { margin-top: 0; }
