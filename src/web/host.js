@@ -53,7 +53,7 @@ import { FocusedCache, FocusedView, captureFocused, cacheIdentity, mergeFocused,
 import { refreshCacheIdentity } from "./cache-identity.js";
 import { discoverViews } from "./thin-discovery.js";
 import { Backoff, Retry, watchWake, probeHub, bundleOf, deployed, QUIET_MS } from "./reconnect.js";
-import { ThinHost, preservePresentationRoute, presentationTarget } from "./thin-host.js";
+import { ThinHost, preservePresentationRoute, presentationTarget, refusedFallback } from "./thin-host.js";
 import { TerminalOutputPane } from "./terminal-output.js";
 import { ModelFeedback } from "./model-feedback.js";
 const modelFeedback = new ModelFeedback(() => later());
@@ -388,6 +388,11 @@ const transitionViews = new ViewTransition();
 // already showing, kept (holdPicture). What it was drawn for is
 // transitionFor; shownFor is what the hub's view on show was drawn for.
 let transitionNode = null, transitionFor = "", transitionPosition = null, shownFor = "";
+// the target of the hub's view on show (shownFor's), and the views the hub
+// refused this page (refusedView: never asked for again by themselves)
+// (viewNote: what the status bar says of the last refusal, for a while)
+let shownTarget = null, viewNote = "", viewNoteTimer = 0;
+const refusedViews = new Set();
 // since when a picture of another target has been kept (style.css's
 // data-backplane-held: its own content takes no clicks, and past QUIET_MS
 // it is put away, the frame left)
@@ -2182,9 +2187,29 @@ function showViewStatus(message) {
   }
   box.hidden = !message;
   box.style.display = message ? "flex" : "none";
+  box.querySelector("button").hidden = message === viewNote;
   document.getElementById("view-connection-text").textContent = message;
   // The page shrinks above the bar instead of sliding under it.
   document.documentElement.style.setProperty("--status-h", message ? box.offsetHeight + "px" : "0px");
+}
+
+// A view the hub refused (thin-host.js's refuse): a search result or a
+// reload that named something it has no view of. The page goes back to
+// the thread on show before, else the project list (refusedFallback), says
+// so for a while, and keeps nothing of the refused one: the selection
+// saved for a reload is the one gone back to.
+function refusedView(target, reason) {
+  refusedViews.add(targetKey(target));
+  trace("thin-refused", { reason });
+  const back = refusedFallback(target, shownTarget, refusedViews);
+  if (back === null || !thin) return false;
+  searchJump = null;
+  try { if (localStorage.getItem("backplane-selected") === target.id) localStorage.removeItem("backplane-selected"); } catch {}
+  clearTimeout(viewNoteTimer);
+  viewNote = back ? "That conversation can't be opened; back to the one before." : "That conversation can't be opened; here are your projects.";
+  viewNoteTimer = setTimeout(() => { viewNote = "";if (remoteReady) showViewStatus(""); }, 8000);
+  showViewStatus(viewNote);
+  return thin.request("select", back);
 }
 
 // A first connection says so only past QUIET_MS (connectingStatus): a bar
@@ -2597,6 +2622,7 @@ async function startThin(again = false, reason = "initial") {
       viewerChoice: choice => viewerFeedback.choice(choice),
       warning: message => showViewStatus(message),
       pageState: historyPageState,
+      refused: refusedView,
       search: thinSearchAnswer, searchFailed: thinSearchFailed, message: showThinMessage,
       view: (node, detail) => {
         if (!current()) return;
@@ -2613,7 +2639,7 @@ async function startThin(again = false, reason = "initial") {
         if (detail.position) transitionPosition = detail.position;
         else if (!remoteReady) transitionPosition = transitionViews.position(transitionScope(detail.target)) || {atEnd:true};
         focusedView.remote(detail.epoch);remoteEpoch = detail.epoch;frontendNode = node;transitionNode = null;transitionFor = "";heldAt = 0;
-        shownFor = targetKey(detail.target);transitionViews.put(transitionScope(detail.target), detail.shown);
+        shownFor = targetKey(detail.target);shownTarget = detail.target;transitionViews.put(transitionScope(detail.target), detail.shown);
         trace("thin-view", { entries: detail.window?.ids?.length || 0 });later();
         fabLook(detail.target);
       },
@@ -2637,6 +2663,7 @@ async function startThin(again = false, reason = "initial") {
         }
         else if (remoteReady && !s.up) { diagnostic.note("ready");s.up = true;upStatus();outboxFlush();void checkDeploy(); }
         else if (remoteReady) showViewStatus("");
+        if (remoteReady && viewNote) showViewStatus(viewNote);
         later();
       },
     }, ThinViews, next);
