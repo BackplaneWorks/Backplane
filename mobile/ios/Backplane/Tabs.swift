@@ -110,7 +110,7 @@ struct AppTabs: View {
                 }
             }
         }
-        .background(BackplaneDesign.panel)
+        .background(BackplaneDesign.panel, ignoresSafeAreaEdges: [])
         .overlay(alignment: .top) { Rectangle().fill(BackplaneDesign.line).frame(height: 1) }
         .background(BackplaneDesign.panel.ignoresSafeArea(edges: .bottom))
     }
