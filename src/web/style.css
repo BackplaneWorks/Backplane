@@ -1404,6 +1404,14 @@ html:lang(ja) :is(.set-text, .set-ctl) { min-width: 0; }
   .composer .foot-end { display: inline-flex; margin-left: auto; }
   .composer-foot button, .composer-foot .attach { min-height: 40px; }
   .composer-foot .attach { padding: 8px; }
+  /* a thread's foot on a phone: the context it holds goes under the model
+     chip, the buttons beside both, so neither is cut */
+  .composer-foot:has(> .model-chip) { display: grid; grid-template-columns: minmax(0, max-content) minmax(0, 1fr) repeat(3, auto); align-items: center; row-gap: 2px; }
+  .composer-foot:has(> .model-chip) > .model-chip { grid-area: 1 / 1; max-width: 100%; }
+  .composer-foot:has(> .model-chip) > .model-ctx { grid-area: 2 / 1; padding-left: 1px; line-height: 1.3; }
+  .composer-foot:has(> .model-chip) > .attach.draw { grid-area: 1 / 3 / 3; margin-right: 0; }
+  .composer-foot:has(> .model-chip) > label.attach { grid-area: 1 / 4 / 3; }
+  .composer-foot:has(> .model-chip) > .foot-end { grid-area: 1 / 5 / 3; margin-left: 0; }
   .local-menu > summary { min-height: 42px; }
   .local-menu-body { max-height: 68dvh; }
   .board-selector .local-menu-body { position: fixed; left: 10px; right: 10px; top: 100px; width: auto; max-width: none; }
