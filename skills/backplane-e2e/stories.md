@@ -215,6 +215,19 @@ message: the dot and the top bar's State turn blue "working", then green
 "finished". Stop a turn: grey. A thread whose agent fails (pick codex: no
 real codex here) turns red. A: the same colours.
 
+**S33 Split and cross-probing** (W D)
+In `proj` press Split (rail, key V): schematic, board and 3D draw side by
+side. × on 3D hides it, the bar's 3D brings it back; a reload keeps the
+choice. Sheets → Power opens Power in the pane, and the Schematic tab shows
+Power too. Click J1 on the board pane: J1 lights on the board, the schematic
+pane opens Power with J1 lit, 3D lights J1's spot, the bar shows "J1 ×".
+Click a GND wire in the schematic: the chip reads "Net GND", the board lights
+GND (pads, vias, pours) and dims the rest; Esc clears. Probe J1 on the Board
+tab, close the viewer, open Schematic: "J1 is on the sheet Power · Open it"
+opens it with J1 lit; after a reload the chip is still there. In `multi`,
+Split, pick `beta`: every pane shows beta, Sheets lists beta's sheets (no
+"Not in this project's hierarchy"). Pan and zoom stay smooth with GND lit.
+
 **S34 The top bar** (W D)
 Open a thread: the bar reads "Backplane / PROJ / title ▾" with a State cell
 and no separate thread header. ▾ lists Pin, Settle, Snooze, Archive, Delete,

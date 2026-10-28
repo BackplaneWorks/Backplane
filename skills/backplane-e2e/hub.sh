@@ -77,7 +77,10 @@ start() {
   # (from its own folder: a hub started inside a git checkout must not
   # make its worktrees there)
   cd "$root"
-  env HOME="$root/userhome" PATH="$root/fake:$PATH" DISPLAY= WAYLAND_DISPLAY= BACKPLANE_NO_UPDATE=1 BACKPLANE_PEERS= \
+  # its caches and config inside its own folder too, never the person's
+  # (~/.cache/backplane-bend holds 3D model caches)
+  env HOME="$root/userhome" XDG_CACHE_HOME="$root/userhome/.cache" XDG_CONFIG_HOME="$root/userhome/.config" \
+    XDG_DATA_HOME="$root/userhome/.local/share" XDG_STATE_HOME="$root/userhome/.local/state" PATH="$root/fake:$PATH" DISPLAY= WAYLAND_DISPLAY= BACKPLANE_NO_UPDATE=1 BACKPLANE_PEERS= \
     BACKPLANE_AGENTS="$root/fake" BACKPLANE_VAULT_KEYRING=file BP_STANDIN_USAGE=1 BP_STANDIN_MODE=stream BP_STREAM_N="$n" \
     BP_STREAM_MS="$ms" BP_STREAM_SEP="
 " "$@" > "$root/hub.log" 2>&1 &
