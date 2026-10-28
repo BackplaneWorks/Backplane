@@ -5,7 +5,7 @@
 #
 #   hub.sh start NAME      start one; prints shell lines: PORT= TOKEN= URL=
 #                          PAIR= HOME_DIR= PROJ= MULTI= THREAD= PID=
-#   hub.sh long NAME [N]   a thread of N (80) exchanges in the fixture
+#   hub.sh long NAME [N]   a thread of N (80) exchanges, one at a time, in the fixture
 #                          project (the history-paging stories); prints LONG=
 #   hub.sh trial NAME      a workspace that looks used, to try things by hand
 #                          or for stories that want one: 5 projects, ~20
@@ -115,13 +115,17 @@ stop() {
   rm -f "$root/pid"
 }
 
-long() { # N exchanges queued; the stand-in answers each in ~3 s (~4 min for 80)
+long() { # N exchanges, one after another: each waits for the last reply to
+  # end (~3.5 s each, ~5 min for 80), so none steers another
   n=${3:-80}
   t=$(rpc thread.create "{\"project\":\"$(rpc_project)\",\"title\":\"Long history\"}" | python3 -c 'import json,sys;print(json.load(sys.stdin).get("thread",""))')
+  ended() { grep -c "\"TurnChanged\",\"thread\":\"$t\",\"state\":\"[^r]" "$root/home/events.jsonl" || true; }
   i=1
   while [ $i -le "$n" ]; do
+    before=$(ended)
     rpc turn.start "{\"thread\":\"$t\",\"text\":\"mode:plain Question $i\",\"msg\":\"e2e-$t-$i\",\"mode\":\"\"}" > /dev/null || true
-    sleep 0.3; i=$((i+1))
+    w=0; while [ "$(ended)" -le "$before" ] && [ $w -lt 300 ]; do sleep 0.2; w=$((w+1)); done
+    i=$((i+1))
   done
   echo "LONG=$t"
 }
