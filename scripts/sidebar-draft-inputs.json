@@ -143,7 +143,7 @@
     "src/web/space.bend": "b86a265e41a900498bc33c37c0404c4d6678554efe3d9054f329beb2cf35ee63",
     "src/web/usage-graph.bend": "fa06f7d2bf855a396a5f7a7b4725dfaa990145fbbcefe7ad21ae8f9a698a2679",
     "src/web/usage-page.bend": "706e3f17a4a3e5f159656d47aeb76a940d4825421f5c33228f9aef692ec926e3",
-    "src/web/view.bend": "8e151e9b7be57961320763aa8471cb571a0748d2a1b3fc2edacf536b841e71a3"
+    "src/web/view.bend": "359e3d3df0091468fde57af0b912aa7c3fd23855afb734dc8aaa59d714c0123a"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -253,5 +253,5 @@
       "sourceSnapshot": "/home/h/Documents/i2cjak/bp-coord/settle-fresh-work/SOURCE-structural-correction.json"
     }
   },
-  "reviewNote": "Esc and composer focus: the sidebar legend lists / (write a message); sidebar drafts render unchanged"
+  "reviewNote": "Top bar loses its sidebar fold button (the sidebar's own chevron, the strip's and Ctrl+B stay); sidebar drafts render unchanged"
 }

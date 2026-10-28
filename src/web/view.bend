@@ -618,7 +618,7 @@ def View.sidebar.head(top: Bool, +lc: I.Loc, +ms: List<&2, U.MRow>, +open: Map<&
 
 # Under the top bar the sidebar starts with its filter, the add-project +
 # beside it and its own fold, a chevron like the rail's (host.js's
-# side-toggle, as the top bar's fold button and Ctrl+B do); else the filter
+# side-toggle, as the strip's chevron and Ctrl+B do); else the filter
 # follows the brand, Settings and the uberbot
 def View.sidebar.find(top: Bool, +lc: I.Loc, +active: Bool, +q: String) -> List<&2, D.Node> & List<&2, D.Node>:
   match top:
@@ -725,7 +725,7 @@ def View.sidebar.threads(+u: U.Ui, ix: U.SIx, rows: List<&2, U.SRow>, raw: List<
   List.append(&2, String, View.sidebar.threads.kind(String.eq(U.Side.view(U.Ui.state(u)), "active"), u, ix, rows, raw),
     U.Side.in_project(U.Side.legacy.shown(u), U.Ui.state(u), U.Side.cur(u)))
 
-# Folded (Ctrl+B, the top bar's fold button or the sidebar's own: host.js
+# Folded (Ctrl+B or the sidebar's own chevron: host.js
 # keeps it, style.css shows it), the sidebar is a 44 px strip: the chevron
 # that unfolds it, pointing out, then each project's badge in its colour,
 # which opens the project (its thread, as Alt+digit does); the open
@@ -4565,10 +4565,10 @@ def View.chrome.cmd(+lc: I.Loc) -> D.Node:
     [WI.WIcon.svg("chevron-right", 13), D.El{"span", "", [D.At{"class", "cmd-text"}], [D.Dom.span("cmd-long", View.chrome.jump(lc)), D.Dom.span("cmd-short", View.chrome.jump.short(lc))]},
      D.El{"kbd", "", Nil{}, [D.Txt{"Ctrl K"}]}]}
 
-# the sidebar's fold (Ctrl+B), search (Ctrl+Shift+F) and Settings, on while open
+# search (Ctrl+Shift+F) and Settings, on while open (the sidebar folds
+# from its own chevron and the strip's, and Ctrl+B)
 def View.chrome.tools(+lc: I.Loc, settings: Bool) -> D.Node:
   D.El{"div", "", [D.At{"class", "tb"}], [
-    WI.WIcon.button("side-toggle", "side-toggle", "", "Hide or show the sidebar · Ctrl+B", "panel-right", 15, ""),
     WI.WIcon.button("find-open", "thin-search-open", "", "Search conversations · Ctrl+Shift+F", "search", 15, ""),
     WI.WIcon.button(Bool.pick(String, settings, "gear on", "gear"), "flag", "settings", MSG.T.palette.settings(lc), "settings", 15, "")]}
 

@@ -1633,7 +1633,6 @@ kbd { font: calc(10px * var(--text-scale, 100) / 100)/1 var(--mono); color: var(
 .topbar .tb button + button { border-left: 0; }
 .topbar .tb button:hover { color: var(--text); }
 .topbar .tb button.on { color: var(--accent); }
-.topbar .side-toggle svg { transform: scaleX(-1); }
 .app.top .sidebar .find.with-add { position: sticky; top: 0; z-index: 6; background: var(--panel); display: flex; align-items: center; gap: 4px; padding: 8px 6px 8px 12px; }
 .app.top .sidebar .find.with-add input { flex: 1; min-width: 0; width: auto; }
 .app.top .sidebar .find .add-project { flex: none; height: 26px; padding: 0 5px; }
@@ -1656,8 +1655,7 @@ kbd { font: calc(10px * var(--text-scale, 100) / 100)/1 var(--mono); color: var(
   html[data-side="shut"] .app.top .sidebar, html[data-fold] .app.top.panel .sidebar { overflow-x: hidden; padding: 0; scrollbar-width: none; }
   html[data-side="shut"] .app.top .sidebar > :not(.side-strip), html[data-fold] .app.top.panel .sidebar > :not(.side-strip) { display: none; }
   html[data-side="shut"] .app.top .sidebar > .side-strip, html[data-fold] .app.top.panel .sidebar > .side-strip { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 0; }
-  html[data-side="shut"] .topbar .side-toggle svg, html[data-side="shut"] .side-strip .side-toggle svg,
-  html[data-fold] .app.top.panel .topbar .side-toggle svg, html[data-fold] .app.top.panel .side-strip .side-toggle svg { transform: none; }
+  html[data-side="shut"] .side-strip .side-toggle svg, html[data-fold] .app.top.panel .side-strip .side-toggle svg { transform: none; }
   .side-strip button { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0; background: none; border-color: transparent; color: var(--tint, var(--dim)); }
   .side-strip button:hover { border-color: var(--line); background: var(--raise); }
   .side-strip .side-toggle { color: var(--dim); margin-bottom: 4px; }
@@ -1680,7 +1678,7 @@ kbd { font: calc(10px * var(--text-scale, 100) / 100)/1 var(--mono); color: var(
   .app.picked .topbar { padding-left: 0; }
   .app.picked .topbar .back { display: inline-flex; align-items: center; justify-content: center; min-width: 40px; min-height: 44px; padding: 0 8px; background: none; border: 0; font-size: calc(18px * var(--text-scale, 100) / 100); color: var(--dim); }
   .app.picked .topbar .brand-mark, .app.picked .topbar .name, .app.picked .crumbs > .sep:first-child { display: none; }
-  .topbar .tb .side-toggle, .crumbs .crumb.proj, .crumbs .crumb.proj + .sep, .topbar .cmd { display: none; }
+  .crumbs .crumb.proj, .crumbs .crumb.proj + .sep, .topbar .cmd { display: none; }
   .crumbs .thread-actions > summary { min-height: 40px; min-width: 36px; }
   .topbar .tb button { width: 42px; height: 40px; }
   .crumbs .thread-actions .local-menu-body { left: auto; right: 0; }
