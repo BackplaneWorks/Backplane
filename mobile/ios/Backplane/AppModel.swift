@@ -200,6 +200,11 @@ final class AppModel {
     @ObservationIgnored private var started = false
     // A choice on the cached UI is newer than startup's automatic default.
     @ObservationIgnored private var startupTabChosen = false
+    #if targetEnvironment(simulator)
+    @ObservationIgnored private let navigationTraceEnabled = ProcessInfo.processInfo.environment["BACKPLANE_NAV_DIAGNOSTICS"] == "1"
+    @ObservationIgnored private var navigationTraceTarget: String?
+    @ObservationIgnored private var navigationTraceLast: [String: String] = [:]
+    #endif
     @ObservationIgnored private var sentView = false
     let settings = AppSettings.shared
     // the hub settings page: each hub's last rows, on disk beside the kept state
@@ -1318,6 +1323,52 @@ final class AppModel {
         }
     }
 
+    enum NavigationTraceEvent: String {
+        case open, incoming, applied, destinationStart, destinationCancelled, destinationTimeout
+    }
+
+    // Opt-in Release simulator diagnostics. Only flags, counts and closed
+    // enums leave this function; route strings are used solely for equality.
+    func traceNavigation(_ event: NavigationTraceEvent, target: String? = nil,
+                         incoming: Screen? = nil, fresh: Bool? = nil,
+                         active: Bool? = nil, destinationReady: Bool? = nil, known: Bool? = nil) {
+        #if targetEnvironment(simulator)
+        guard navigationTraceEnabled else { return }
+        if event == .open { navigationTraceTarget = target; navigationTraceLast.removeAll() }
+        guard let expected = target ?? navigationTraceTarget, !expected.isEmpty else { return }
+        let hub = links.compactMap(Pairing.key).first { expected.hasPrefix($0 + "|") }
+        let status = hub.flatMap { conn[$0] }
+        let mark = hub.flatMap { thinReady[$0] }
+        var fields: [String: Any] = [
+            "event": event.rawValue, "tracked": expected == navigationTraceTarget,
+            "tab": tab.rawValue, "engineReady": ready, "contentReady": contentReady,
+            "cached": cachedPresentation, "started": started, "explicitTab": startupTabChosen,
+            "paired": hub != nil, "pathCount": path.count, "pathMatches": path.last == expected,
+            "pendingMatches": pending?.last == expected, "awaitedNone": awaitedNav == nil,
+            "awaitedMatches": awaitedNav == expected, "selectedMatches": screen.map(Self.nav) == expected,
+            "threadMatches": screen?.thread?.id == expected, "seenThread": seen[expected] != nil,
+            "botPresent": screen?.bot != nil, "seenBot": seenBots[expected] != nil,
+            "phase": status.map { String(describing: $0.phase) } ?? "none",
+            "epoch": status?.epoch ?? 0, "failurePresent": status?.failure != nil,
+            "markPresent": mark != nil, "markMatches": mark?.nav == expected,
+            "markEpochMatches": mark != nil && mark?.epoch == status?.epoch,
+            "incomingPresent": incoming != nil, "incomingMatches": incoming.map(Self.nav) == expected,
+            "incomingThreadMatches": incoming?.thread?.id == expected, "incomingBotPresent": incoming?.bot != nil
+        ]
+        if let fresh { fields["incomingFresh"] = fresh }
+        if let active { fields["destinationActive"] = active }
+        if let destinationReady { fields["destinationReady"] = destinationReady }
+        if let known { fields["destinationKnown"] = known }
+        guard let data = try? JSONSerialization.data(withJSONObject: fields, options: [.sortedKeys]),
+              let text = String(data: data, encoding: .utf8) else { return }
+        if event == .incoming || event == .applied {
+            guard navigationTraceLast[event.rawValue] != text else { return }
+            navigationTraceLast[event.rawValue] = text
+        }
+        NSLog("Backplane navigation %@", text)
+        #endif
+    }
+
     // Every row opens through this point; Bend's nav is the destination key.
     func open(nav: String, action: String, value: String, title: String, cat: String = "", kind: String = "thread") {
         // a row from an older bridge has no nav: its page opens when its screen comes
@@ -1334,6 +1385,7 @@ final class AppModel {
         tapStart = (nav, DispatchTime.now().uptimeNanoseconds, nil, nil)
         #endif
         show([nav])
+        traceNavigation(.open, target: nav)
         act(action, value)
     }
 
@@ -1816,6 +1868,7 @@ final class AppModel {
             if let t = sent, let i = outgoing.firstIndex(where: { $0.text == t }) { outgoing.remove(at: i) }
             return
         }
+        defer { traceNavigation(.applied) }
         for update in o.sync ?? [] {
             let epoch = conn[update.hub]?.epoch ?? 0
             observeThinPresenting(update, epoch: epoch)
@@ -1884,6 +1937,7 @@ final class AppModel {
             ]
         }
         #endif
+        if let next = o.screen { traceNavigation(.incoming, incoming: next, fresh: thinFresh) }
         if let s = o.screen, s.hub.isEmpty || links.contains(where: { Pairing.key($0) == s.hub }),
            (!cachedPresentation || cacheFresh), thinFresh {
             cachedPresentation = false
