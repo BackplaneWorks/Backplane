@@ -116,6 +116,8 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .thread.on { background: var(--raise); box-shadow: inset 2px 0 var(--tint, var(--accent)); }
 .thread .title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .thread .ago { color: var(--faint); font-size: calc(11px * var(--text-scale, 100) / 100); }
+.thread .pin { flex: none; display: inline-flex; color: var(--faint); }
+.thread.on .pin { color: var(--dim); }
 .dot { width: 6px; height: 6px; background: var(--st-idle); flex: none; }
 .dot.run, .dot.working { background: var(--st-work); animation: pulse 1.2s ease-in-out infinite; }
 .dot.fail, .dot.failed, .dot.approval, .dot.input { background: var(--st-need); }
