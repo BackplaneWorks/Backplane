@@ -152,6 +152,7 @@ import ./src/core/hier.bend as HI
 import ./src/core/boot.bend as BT
 import ./src/core/store.bend as ST
 import ./src/core/sign.bend as SG
+import ./src/core/wnote.bend as WN
 import ./src/core/ring.bend as RG
 import ./src/core/cron.bend as CR
 import ./src/core/space.bend as SPC
@@ -2461,7 +2462,7 @@ law island_sync_on_delete:
   {H.Island.outs([M.ThreadDeleted{"t1", 1n}], []) == [H.IslandSync{}] : List<&2, H.Out>}
 
 law island_sync_not_twice:
-  {H.Island.outs([M.TurnChanged{"t1", M.Interrupted{}, 1n}], [H.TurnEnded{"t1", "stopped"}]) == [H.TurnEnded{"t1", "stopped"}] : List<&2, H.Out>}
+  {H.Island.outs([M.TurnChanged{"t1", M.Interrupted{}, 1n}], [H.TurnEnded{"t1", "stopped", "", "", "", ""}]) == [H.TurnEnded{"t1", "stopped", "", "", "", ""}] : List<&2, H.Out>}
 
 law island_sync_quiet:
   {H.Island.outs([M.ThreadRenamed{"t1", "x", 1n}], []) == [] : List<&2, H.Out>}
@@ -12664,3 +12665,139 @@ law life_fresh_child_wakes:
 # The person's later settle is authoritative within a transaction too.
 law life_later_manual_settle_held:
   {H.Shelve.step(H.Shelve.demo([]), [M.WorkSet{"t1", "bg", "new\tx", 4n}, M.ThreadSettled{"t1", True{}, 4n}]) == [] : List<&2, M.Change>}
+# Turn-end webhook (core/wnote.bend)
+# -----------------------------------
+# push.webhook.url posts a JSON notice from Push.turn_ended. Unset, or not
+# an http(s) address, nothing is sent. A secret is optional: missing when
+# one was configured posts nothing (never an unsigned notice instead), and
+# a stop is reported as "stopped".
+# Outbound webhook (core/wnote.bend)
+# ----------------------------------
+# push.webhook.url posts a JSON notice for an alert Notify me for would
+# raise (Policy.loud, the same classification as the phones). A settle or
+# a failure is event "turn.ended" and goes out from TurnEnded; an ask, a
+# merge, a reminder or a note uses its kind as the event and goes out from
+# Alerted. Unset, or not an http(s) address, nothing is sent. A secret is
+# optional: missing when one was configured posts nothing (never an
+# unsigned notice instead), and a stop is reported as "stopped" and, with
+# the policy, is not posted.
+
+law hook_off_unset:
+  {WN.Wn.on("") == False{} : Bool}
+
+law hook_on_set:
+  {WN.Wn.on("https://example.com/hook") == True{} : Bool}
+
+law hook_url_https:
+  {WN.Wn.url.ok("https://example.com/hook") == True{} : Bool}
+
+law hook_url_file:
+  {WN.Wn.url.ok("file:///etc/passwd") == False{} : Bool}
+
+law hook_url_space:
+  {WN.Wn.url.ok("https://example.com/a b") == False{} : Bool}
+
+law hook_live_blank:
+  {WN.Wn.live("  ") == False{} : Bool}
+
+law hook_mode_unsigned:
+  {WN.Wn.mode(False{}, "") == 1n : Nat}
+
+law hook_mode_default_file:
+  {WN.Wn.mode(False{}, "s") == 2n : Nat}
+
+law hook_mode_missing:
+  {WN.Wn.mode(True{}, "") == 0n : Nat}
+
+law hook_mode_configured:
+  {WN.Wn.mode(True{}, "s") == 2n : Nat}
+
+law hook_stopped_word:
+  {WN.Wn.outcome(M.Interrupted{}) == "stopped" : String}
+
+law hook_failed_word:
+  {WN.Wn.outcome(M.Failed{}) == "failed" : String}
+
+law hook_completed_word:
+  {WN.Wn.outcome(M.Completed{}) == "completed" : String}
+
+law hook_body_state:
+  {J.Json.get_str(Maybe.default(&2, J.Json, J.Json.parse(WN.Wn.body("fail", "t1", "failed", "Board", "Failed")), J.Null{}), "state", "") == "failed" : String}
+
+law hook_body_event:
+  {J.Json.get_str(Maybe.default(&2, J.Json, J.Json.parse(WN.Wn.body("done", "t1", "completed", "A", "ok")), J.Null{}), "event", "") == "turn.ended" : String}
+
+law hook_body_kind:
+  {J.Json.get_str(Maybe.default(&2, J.Json, J.Json.parse(WN.Wn.body("fail", "t1", "failed", "Board", "Failed")), J.Null{}), "kind", "") == "fail" : String}
+
+law hook_body_ask_event:
+  {J.Json.get_str(Maybe.default(&2, J.Json, J.Json.parse(WN.Wn.body("ask", "t1", "running", "Board", "Needs you")), J.Null{}), "event", "") == "ask" : String}
+
+law hook_unsigned_header:
+  {List.length(&2, String, WN.Wn.headers("", 1n, "{}")) == 1n : Nat}
+
+law hook_signed_header:
+  {List.length(&2, String, WN.Wn.headers("s", 1n, "{}")) == 3n : Nat}
+
+law hook_secret_default:
+  {WN.Wn.path("/h", "") == "/h/secrets/push.webhook" : String}
+
+law hook_secret_path:
+  {WN.Wn.path("/h", "/tmp/s") == "/tmp/s" : String}
+
+# a queued follow-up may already be running; the notice keeps the end word
+law hook_report_keeps_end:
+  {WN.Wn.report("completed", M.Running{}) == "completed" : String}
+
+law hook_report_keeps_fail:
+  {WN.Wn.report("failed", M.Running{}) == "failed" : String}
+
+law hook_report_fallback:
+  {WN.Wn.report("", M.Interrupted{}) == "stopped" : String}
+
+# the webhook posts exactly when the policy would notify
+law hook_follows_settle:
+  {WN.Wn.agrees(NO.Policy.end(NO.Policy.demo.s(NO.Policy.demo.ask()), 13n, "t1", "completed")) == True{} : Bool}
+
+law hook_follows_stop:
+  {WN.Wn.agrees(NO.Policy.end(NO.Policy.demo.s(NO.Policy.demo.cat([NO.Policy.demo.base(), NO.Policy.demo.run("t1", "m1", "do it", 10n), [M.TurnChanged{"t1", M.Interrupted{}, 12n}]])), 13n, "t1", "stopped")) == True{} : Bool}
+
+law hook_follows_ask:
+  {WN.Wn.agrees(NO.Policy.ask(NO.Policy.demo.s(NO.Policy.demo.ask()), 20n, "t1", "Bash", "ls")) == True{} : Bool}
+
+law hook_follows_ask_off:
+  {WN.Wn.agrees(NO.Policy.ask(NO.Policy.demo.fold(NO.Policy.demo.s(NO.Policy.demo.ask()), Nil{}, [M.SettingSet{"notify.needs", "off", 19n}]), 20n, "t1", "Bash", "ls")) == True{} : Bool}
+
+law hook_follows_settled_off:
+  {WN.Wn.agrees(NO.Policy.end(NO.Policy.demo.s(NO.Policy.demo.cat([[M.SettingSet{"notify.settled", "off", 1n}], NO.Policy.demo.ask()])), 13n, "t1", "completed")) == True{} : Bool}
+
+law hook_follows_fail:
+  {WN.Wn.agrees(NO.Policy.end(NO.Policy.demo.s(NO.Policy.demo.cat([NO.Policy.demo.base(), NO.Policy.demo.run("t1", "m1", "do it", 10n), NO.Policy.demo.fail("t1", 12n)])), 13n, "t1", "failed")) == True{} : Bool}
+
+law hook_follows_reminder:
+  {WN.Wn.agrees(NO.Policy.reminder(NO.Policy.demo.s(NO.Policy.demo.ask()), 40n, "t1", "r7", "Call the bank")) == True{} : Bool}
+
+law hook_follows_all:
+  {WN.Wn.agrees(NO.Policy.end(NO.Policy.demo.s(NO.Policy.demo.cat([[M.SettingSet{"notify.all", "on", 1n}], NO.Policy.demo.room()])), 1007n, "tb", "completed")) == True{} : Bool}
+
+# which path posts: 1 the turn end (done, fail), 2 the other alerts, 0 quiet
+law hook_route_done:
+  {WN.Wn.route("done") == 1n : Nat}
+
+law hook_route_fail:
+  {WN.Wn.route("fail") == 1n : Nat}
+
+law hook_route_ask:
+  {WN.Wn.route("ask") == 2n : Nat}
+
+law hook_route_merged:
+  {WN.Wn.route("merged") == 2n : Nat}
+
+law hook_route_reminder:
+  {WN.Wn.route("reminder") == 2n : Nat}
+
+law hook_route_note:
+  {WN.Wn.route("note") == 2n : Nat}
+
+law hook_route_quiet:
+  {WN.Wn.route("") == 0n : Nat}

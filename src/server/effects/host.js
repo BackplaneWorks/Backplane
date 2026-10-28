@@ -1248,6 +1248,14 @@ function fs_mkdirs(path) {
   }
 }
 
+function fs_mkdtemp(prefix) {
+  try {
+    return io_done(require("fs").mkdtempSync(prefix));
+  } catch (e) {
+    return io_fail(host_errno(e));
+  }
+}
+
 function fs_rename(from, to) {
   try {
     require("fs").renameSync(from, to);
@@ -1547,6 +1555,7 @@ io_eff(CID(FS.stat), fs_stat);
 io_eff(CID(FS.revision), fs_revision);
 io_eff(CID(FS.list), fs_list);
 io_eff(CID(FS.mkdirs), fs_mkdirs);
+io_eff(CID(FS.mkdtemp), fs_mkdtemp);
 io_eff(CID(FS.rename), fs_rename);
 io_eff(CID(FS.remove), fs_remove);
 io_eff(CID(FS.chmod), fs_chmod);

@@ -148,6 +148,11 @@ def FS.list(path: String) -> IO(Result<&1, &1, U32 & String, List<String>>):
 def FS.mkdirs(path: String) -> IO(Result<&1, &1, U32 & String, Unit>):
   import "./effects/host.js"
 
+# An exclusive private temporary directory with a random suffix. Uses the
+# host filesystem on every platform, without requiring a shell utility.
+def FS.mkdtemp(prefix: String) -> IO(Result<&1, &1, U32 & String, String>):
+  import "./effects/host.js"
+
 def FS.rename(from: String, to: String) -> IO(Result<&1, &1, U32 & String, Unit>):
   import "./effects/host.js"
 
