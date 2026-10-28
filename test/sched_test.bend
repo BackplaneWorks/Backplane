@@ -47,6 +47,10 @@ def next.s(+st: M.State, +id: String, +now: Nat) -> String:
 def next(cs: List<&2, M.Change>, +id: String, +now: Nat) -> String:
   next.s(world(cs), id, now)
 
+# the instant the hub wakes for between ticks (0: none)
+def soon(cs: List<&2, M.Change>, +now: Nat, +until: Nat) -> String:
+  Nat.show(S.Sched.soon(world(cs), now, 0n, True{}, until))
+
 def row.show(w: S.SRow) -> String:
   match w:
     case S.SRow{kind, label, when, next, rel, zone, done, dt}:
@@ -123,6 +127,15 @@ def main() -> IO(Unit):
     C.Check.str("next: done is none", next(List.append(&2, M.Change, mk("r1", "", "person", 1791979200n, "", 1791892800n), [M.RoutineDone{"r1", 1791979200n}]), "r1", 1791957600n), "0")
     C.Check.str("next: legacy in UTC", next([M.RoutineSet{"r1", "b1", "R", "30 9 * * *", "p", True{}, 1791892800n}], "r1", 1791957600n), "1791970200")
     C.Check.str("next: after firing, tomorrow", next(fire(mk("r1", "30 9 * * *", "person", 0n, "", 1791892800n), "r1", 1791959400n), "r1", 1791959460n), "1792045800")
+    C.Check.str("soon: a one-time routine due before the next tick", soon(mk("r1", "", "person", 1791979200n, "", 1791892800n), 1791979170n, 1791979230n), "1791979200")
+    C.Check.str("soon: one due after the next tick waits for it", soon(mk("r1", "", "person", 1791979200n, "", 1791892800n), 1791979100n, 1791979160n), "0")
+    C.Check.str("soon: one due now is the tick's own", soon(mk("r1", "", "person", 1791979200n, "", 1791892800n), 1791979200n, 1791979260n), "0")
+    C.Check.str("soon: the soonest of two", soon(List.append(&2, M.Change, mk("r1", "", "person", 1791979200n, "", 1791892800n), mk("r2", "", "person", 1791979190n, "", 1791892800n)), 1791979170n, 1791979230n), "1791979190")
+    C.Check.str("soon: a done one is none", soon(List.append(&2, M.Change, mk("r1", "", "person", 1791979200n, "", 1791892800n), [M.RoutineDone{"r1", 1791979200n}]), 1791979170n, 1791979230n), "0")
+    C.Check.str("soon: an off one is none", soon(List.append(&2, M.Change, mk("r1", "", "person", 1791979200n, "", 1791892800n), [M.RoutineSet{"r1", "b1", "R", "", "p", False{}, 1791900000n}]), 1791979170n, 1791979230n), "0")
+    C.Check.str("soon: every minute is woken for at the minute", soon(mk("r1", "* * * * *", "person", 0n, "", 1791892800n), 1791979170n, 1791979230n), "1791979200")
+    C.Check.str("soon: once it fired, not again before the next tick", soon(fire(mk("r1", "* * * * *", "person", 0n, "", 1791892800n), "r1", 1791979200n), 1791979201n, 1791979230n), "0")
+    C.Check.str("soon: woken at its minute it is due, and not again", due(mk("r1", "* * * * *", "person", 0n, "", 1791892800n), "r1", 1791979200n) ++ due(fire(mk("r1", "* * * * *", "person", 0n, "", 1791892800n), "r1", 1791979200n), "r1", 1791979240n), "TrueFalse")
     C.Check.str("row: daily", row(mk("r1", "30 9 * * *", "person", 0n, "", 1791892800n), "r1", 1791957600n), "routine|Repeats|daily at 09:30|Wed 14 Oct 09:30 EEST|in 30m|your time|False|")
     C.Check.str("row: once", row(mk("r1", "", "person", 1791979200n, "", 1791892800n), "r1", 1791957600n), "once|Once|Wed 14 Oct 15:00 EEST · in 6h||in 6h|your time|False|")
     C.Check.str("row: reminder", row(mk("r1", "", "person", 1791979200n, "remind", 1791892800n), "r1", 1791957600n), "reminder|Reminder|Wed 14 Oct 15:00 EEST · in 6h||in 6h|your time|False|")

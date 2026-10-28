@@ -87,7 +87,7 @@
     "src/core/refview.bend": "aad18d93039af1c4b83cd245200c051192609bf1a3a7dc261d2b2f4c1dbf97c0",
     "src/core/release.bend": "682768765cbc4c0ff436a54e69ef37926c25c6b68adcfbb5eb25e992ec648b29",
     "src/core/review.bend": "4b4c2a380e48007218f15ea51130303a7e9d055adb9145ccdf703c58ea5f8120",
-    "src/core/sched.bend": "4d3dd0c181030fb6050bfb951d2fa938bad106c9de8b1b34e65df0748b82a283",
+    "src/core/sched.bend": "9e52317b69cabd121e2653f163d701e58293da5e4d02c29320e0d0d395ec5c4b",
     "src/core/schematic.bend": "3280296fe33c84ae633405ed6bfbeb542f8260ccae3f91b55a5c2a044195aa89",
     "src/core/secret.bend": "2aa67d789bcaf5d4de369af089b533d2a3fdfc423d90e545f5d8a84423159bd6",
     "src/core/semver.bend": "a09f3e4f27f84287b5ee5e0c0840750017af34dda03dff67134958af096a4aee",
@@ -253,5 +253,5 @@
       "sourceSnapshot": "/home/h/Documents/i2cjak/bp-coord/settle-fresh-work/SOURCE-structural-correction.json"
     }
   },
-  "reviewNote": "Review body names its page (rp-<page>) for the BOM table's widths; sidebar drafts unchanged"
+  "reviewNote": "Sched.soon: the soonest routine due before the next tick; sidebar drafts unchanged (sidebar_draft_image_test 24 ok)"
 }

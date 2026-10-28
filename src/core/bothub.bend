@@ -1622,6 +1622,11 @@ def Bots.tick.go(rs: List<&2, BT.Routine>, +i: Nat, +s: M.State, +now: Nat, +tz:
       +one = Bots.tick.one(Bots.tick.due(s, r, now, tz), s, now, i, r, tz)
       Step.cat(one, Bots.tick.go(t, 1n+i, Bots.tick.state(one, s), now, tz))
 
+# a routine's time come between the minute's ticks (sched.bend's
+# Sched.soon, server.bend's BotDue): the routines alone, each due one once
+def Bots.tick.routines(+s: M.State, +now: Nat, +tz: Tz) -> B.Step:
+  Bots.tick.go(BT.World.routines.all(M.State.bots(s)), 0n, s, now, tz)
+
 # the minute tick: every due routine runs once
 def Bots.tick(+s: M.State, +now: Nat, +tz: Tz) -> B.Step:
   Step.cat(Bots.tick.go(BT.World.routines.all(M.State.bots(s)), 0n, s, now, tz), B.Step{List.append(&2, M.Change, TLD.Told.prune(s, now), B.Mail.due(s, now)), Nil{}})

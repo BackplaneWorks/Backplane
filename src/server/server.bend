@@ -288,6 +288,9 @@ type Msg is Data:
   # the minute tick for bots: routines and the linked machines' bots, with
   # this machine's UTC offset as `date +%z` prints it
   BotTick{tz: String}
+  # a routine's time come between two ticks (Hub.bot_wake): the routines
+  # alone, by the tick's offset; `until` is when the next tick comes
+  BotDue{tz: String, until: Nat}
   # the bots on linked machines (a JSON array)
   BotsFound{peer: String, url: String, result: Maybe<&2, List<&2, J.Json>>}
   # one peer, or every peer when empty; the hub coalesces active fetches
@@ -13175,15 +13178,46 @@ def Hub.uber.do.h(home: Bool, h: Hub, +what: String, +now: Nat) -> IO(Hub):
 def Hub.uber.do(h: Hub, +what: String, +now: Nat) -> IO(Hub):
   Hub.uber.do.h(String.starts_with(what, "home:"), h, what, now)
 
-# Routines keep their minute cadence; the ticker's first message also
-# refreshes directories immediately after the hub/window has opened.
+# A routine due before the next tick is woken for at its time (sched.bend's
+# Sched.soon), a moment after it so the hub's clock has reached it; each
+# wake asks for the next one before `until`, so a tick starts one chain of
+# wakes and a routine fires within a second or so of its time
+def Hub.bot_wake.at(go: Bool, +inbox: Chan(Msg), +tz: String, +until: Nat, +ms: U32) -> IO(Unit):
+  match go:
+    case True{}:
+      IO.spawn(Unit, Self.post.wait(inbox, BotDue{tz, until}, ms))
+    case False{}:
+      IO.pure(Unit, Unit{})
+
+def Hub.bot_wake(h: Hub, +tz: String, +until: Nat, +now: Nat) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, +inbox, cfg, note}:
+      do IO<Hub>:
+        +at : Nat = SCH.Sched.soon(st, now, M.Snooze.tz.secs(tz), M.Snooze.tz.east(tz), until)
+        Hub.bot_wake.at(Nat.is_gt(at, now), inbox, tz, until, U32.from_nat(Nat.add(Nat.mul(Nat.sub(at, now), 1000n), 500n)))
+        return Hub{st, f, ls, cl, as, inbox, cfg, note}
+
+# a routine's time come between two ticks: the routines due run, and the
+# next wake before the tick is asked for
+def Hub.bot_due(h: Hub, +tz: String, +until: Nat, +now: Nat) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
+      do IO<Hub>:
+        h2 : Hub <- Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, BH.Bots.tick.routines(st, now, BH.Tz{M.Snooze.tz.secs(tz), M.Snooze.tz.east(tz)}))
+        Hub.bot_wake(h2, tz, until, now)
+
+# Routines keep their minute cadence and are woken for between ticks
+# (Hub.bot_wake); the ticker's first message also refreshes directories
+# immediately after the hub/window has opened.
 def Hub.bot_tick(h: Hub, +tz: String, +now: Nat) -> IO(Hub):
   match h:
     case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
       do IO<Hub>:
         h2 : Hub <- Hub.dir.refresh(Hub{st, f, ls, cl, as, inbox, cfg, note}, "")
         h3 : Hub <- Hub.pair(h2)
-        h4 : Hub <- Hub.step(h3, BH.Bots.tick(st, now, BH.Tz{M.Snooze.tz.secs(tz), M.Snooze.tz.east(tz)}))
+        h4s : Hub <- Hub.step(h3, BH.Bots.tick(st, now, BH.Tz{M.Snooze.tz.secs(tz), M.Snooze.tz.east(tz)}))
+        +every : String <- Env.get("BACKPLANE_WAKE_TICK_MS", "60000")
+        h4 : Hub <- Hub.bot_wake(h4s, tz, Nat.add(now, Nat.div(U32.to_nat(WK.Wake.tick.ms(every)), 1000n)), now)
         h5 : Hub <- Hub.zone.tick(h4, now)
         h5t : Hub <- Hub.tch.ticks(h5, now)
         Hub.uber.tick(h5t, now)
@@ -15688,6 +15722,8 @@ def Msg.kind(m: Msg) -> String:
       "uber_answer"
     case BotTick{_}:
       "bot_tick"
+    case BotDue{_, _}:
+      "bot_due"
     case BotsFound{_, _, _}:
       "bots_found"
     case BotsRefresh{_}:
@@ -16980,6 +17016,8 @@ def Hub.handle(h: Hub, m: Msg, +now: Nat) -> IO(Hub):
       Hub.uber.answer(h, link, code, body, now)
     case BotTick{tz}:
       Hub.bot_tick(h, tz, now)
+    case BotDue{tz, until}:
+      Hub.bot_due(h, tz, until, now)
     case BotsFound{peer, url, result}:
       Hub.bots_found(h, peer, url, result)
     case BotsRefresh{peer}:

@@ -331,6 +331,31 @@ def Sched.next(+s: M.State, r: BT.Routine, +now: Nat, +mo: Nat, +me: Bool) -> Na
     case BT.Routine{_, _, _, cron, _, on, +last, _, deleted, +once, tz, _, done, +slot}:
       Sched.next.live(Bool.and(Bool.not(done), Bool.and(on, Bool.not(deleted))), s, cron, last, now, mo, me, once, tz, slot)
 
+# Waking for one
+# --------------
+# The hub ticks once a minute, so a routine due between two ticks waited
+# for the next one, up to a minute late. Each tick asks for the soonest
+# live routine due after now and no later than the next tick (`until`)
+# and wakes then (server.bend's BotDue), so it fires within a second or so
+# of its time. Whether it fires is still Sched.due's: a wake with nothing
+# due fires nothing, and a routine that fired is not due again until its
+# next time (law cron_due_fires_once). 0: none.
+
+def Sched.soon.k(+at: Nat, +now: Nat, +until: Nat, +best: Nat) -> Nat:
+  Bool.pick(Nat, Bool.and(Nat.is_gt(at, now), Bool.and(Nat.is_le(at, until), Bool.or(Nat.is_eq(best, 0n), Nat.is_lt(at, best)))), at, best)
+
+def Sched.soon.go(rs: List<&2, BT.Routine>, +s: M.State, +now: Nat, +mo: Nat, +me: Bool, +until: Nat, +best: Nat) -> Nat:
+  match rs:
+    case Nil{}:
+      best
+    case r <> t:
+      Sched.soon.go(t, s, now, mo, me, until, Sched.soon.k(Sched.next(s, r, now, mo, me), now, until, best))
+
+# the UTC instant the soonest live routine is due after now, at or before
+# until; 0 when none is
+def Sched.soon(+s: M.State, +now: Nat, +mo: Nat, +me: Bool, +until: Nat) -> Nat:
+  Sched.soon.go(BT.World.routines.all(M.State.bots(s)), s, now, mo, me, until, 0n)
+
 def Sched.dur.pair(+a: Nat, ua: String, +b: Nat, ub: String) -> String:
   Nat.show(a) ++ ua ++ Bool.pick(String, Nat.is_eq(b, 0n), "", " " ++ Nat.show(b) ++ ub)
 
