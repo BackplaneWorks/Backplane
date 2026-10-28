@@ -20,8 +20,13 @@
 // it probes (the canvas's data-probe comes back); the probed part or net is
 // drawn over the rest, which dims.
 
+import App from "./app.bend";
 import { wheelKind } from "./solid.js";
 import * as P from "./probe.js";
+
+// the page's own font (style.css's), for what is written on the canvas
+let family = "";
+const font = (el, px) => `${px}px ${family ||= getComputedStyle(el).fontFamily || "monospace"}`;
 
 // varints (7 bits a byte, low first) and zigzag, as the hub writes them
 function reader(bytes) {
@@ -588,7 +593,7 @@ class View {
     const p = this.plot;
     if (!p || !p.chunks) {
       g.fillStyle = "#8a8f98";
-      g.font = `${13 * dpr}px system-ui, sans-serif`;
+      g.font = font(c, 13 * dpr);
       g.textAlign = "center";
       // while the hub reads the file, the seconds count (a large board is a
       // few seconds the first time)
@@ -655,9 +660,9 @@ class View {
     if (st) {
       g.setTransform(1, 0, 0, 1, 0, 0);
       g.fillStyle = "rgba(138,143,152,0.9)";
-      g.font = `${11 * dpr}px system-ui, sans-serif`;
+      g.font = font(this.canvas, 11 * dpr);
       g.textAlign = "left";
-      g.fillText(`${mb(st.bytes)}` + (st.waited > 0.5 ? ` · came after ${st.waited.toFixed(1)} s` : ""), 8 * dpr, h - 8 * dpr);
+      g.fillText(App.plot_stats(document.documentElement.lang, mb(st.bytes), st.waited.toFixed(1), st.waited > 0.5), 8 * dpr, h - 8 * dpr);
     }
   }
 }

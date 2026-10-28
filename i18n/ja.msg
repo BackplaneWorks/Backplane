@@ -1077,7 +1077,8 @@ model.effort.note = 次のターンから適用。スレッドの既定：{name}
 model.effort.none = {name}には推論の強さの設定がありません。
 model.keys = Tab：列 · ↑↓：行 · ←→：推論の強さ · Enter：選んで閉じる · Esc：閉じる
 viewer.solid.waiting = ハブでモデルを準備中 · {seconds}秒{long, select, yes {（部品付き基板や大きなアセンブリは初回に時間がかかります。次回からはキャッシュを使います）} other {}}
-viewer.solid.stats = {size} · 三角形{triangles}個{delayed, select, yes { · 受信まで{waited}秒} other {}} · 描画準備{built}秒
+viewer.solid.stats = {size} · 三角形{triangles}個{delayed, select, yes { · 読み込み{waited}秒} other {}} · 描画準備{built}秒
+viewer.plot.stats = {size}{delayed, select, yes { · 読み込み{waited}秒} other {}}
 browser.handback.tip = 操作をエージェントに戻す
 
 # Ordering file-transfer confirmation.

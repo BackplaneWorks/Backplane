@@ -467,6 +467,11 @@ def solid_waiting(tag: String, +seconds: Nat) -> String:
 def solid_stats(tag: String, size: String, triangles: String, waited: String, built: String, delayed: Bool) -> String:
   MSG.T.viewer.solid.stats(I.I18n.of_tag(tag), size, triangles, Bool.pick(String, delayed, "yes", "no"), waited, built)
 
+# the board's or schematic's line in its corner (plot2d.js): its size and,
+# when it was slow to come, how long it took
+def plot_stats(tag: String, size: String, waited: String, delayed: Bool) -> String:
+  MSG.T.viewer.plot.stats(I.I18n.of_tag(tag), size, Bool.pick(String, delayed, "yes", "no"), waited)
+
 # The host persists only this conversation's draft/receipt, never commands.
 def mail_identity(+u: U.Ui) -> String:
   Bool.pick(String, String.is_empty(U.Ui.scratch(u, "@mr.conv")), "", MA.MA.key(u))

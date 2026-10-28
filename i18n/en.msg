@@ -1057,7 +1057,8 @@ model.effort.note = Applies from the next turn. Thread default: {name}.
 model.effort.none = {name} has no effort setting.
 model.keys = Tab: column · ↑↓: row · ←→: effort · Enter: pick and close · Esc: close
 viewer.solid.waiting = Preparing the model on the hub · {seconds} s{long, select, yes { (a board with its parts or a large assembly takes a while the first time; after that it is cached)} other {}}
-viewer.solid.stats = {size} · {triangles} triangles{delayed, select, yes { · came after {waited} s} other {}} · built in {built} s
+viewer.solid.stats = {size} · {triangles} triangles{delayed, select, yes { · loaded in {waited} s} other {}} · built in {built} s
+viewer.plot.stats = {size}{delayed, select, yes { · loaded in {waited} s} other {}}
 browser.handback.tip = Let the agent drive again
 
 # Ordering file-transfer confirmation.
