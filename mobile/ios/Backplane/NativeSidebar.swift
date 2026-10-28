@@ -73,6 +73,7 @@ struct NativeSidebarHubPage: Decodable {
         active = try c.decodeIfPresent(NativeSidebarPager.self, forKey: .active)
         legacy = try c.decodeIfPresent(NativeSidebarPager.self, forKey: .legacy)
         guard version == 1, !hub.isEmpty, !hub.contains("|"),
+              (projects?.limit ?? 1) <= 8,
               [projects, active, legacy].allSatisfy({ $0?.belongs(to: hub) ?? true }) else {
             throw DecodingError.dataCorruptedError(forKey: .hub, in: c, debugDescription: "Invalid sidebar owner")
         }
@@ -84,6 +85,12 @@ struct NativeSidebarProjectValidation: Decodable {
     let id: String?
     let settledCount, archivedCount: NativeSidebarCount?
     let threadsPage, snoozedPage, settledPage, archivedPage: NativeSidebarPager?
+    var hasMetadata: Bool { settledCount != nil || archivedCount != nil }
+    var owner: String? {
+        guard let id, let separator = id.firstIndex(of: "|"), separator != id.startIndex,
+              id.index(after: separator) != id.endIndex else { return nil }
+        return String(id[..<separator])
+    }
     private enum CodingKeys: String, CodingKey { case id, settledCount, archivedCount, threadsPage, snoozedPage, settledPage, archivedPage }
     init(from decoder: Decoder) throws {
         guard let c = try? decoder.container(keyedBy: CodingKeys.self) else {
@@ -103,9 +110,8 @@ struct NativeSidebarProjectValidation: Decodable {
         settledPage = try c.decodeIfPresent(NativeSidebarPager.self, forKey: .settledPage)
         archivedPage = try c.decodeIfPresent(NativeSidebarPager.self, forKey: .archivedPage)
         let pages = [threadsPage, snoozedPage, settledPage, archivedPage].compactMap { $0 }
-        if !pages.isEmpty {
-            guard let id, let separator = id.firstIndex(of: "|"), separator != id.startIndex,
-                  pages.allSatisfy({ $0.belongs(to: String(id[..<separator])) }) else {
+        if hasMetadata {
+            guard let owner, pages.allSatisfy({ $0.belongs(to: owner) }) else {
                 throw DecodingError.dataCorruptedError(forKey: .id, in: c, debugDescription: "Invalid sidebar project owner")
             }
         }

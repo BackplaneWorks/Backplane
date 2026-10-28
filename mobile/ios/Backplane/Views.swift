@@ -814,6 +814,7 @@ struct ProjectsView: View {
                     }
                 }
                 .tint(.secondary)
+                .accessibilityIdentifier("project.shelf.settled." + p.id)
                 if p.open {
                     ForEach(p.settled) { ThreadRow(model: model, row: $0) { choosing = $0 } }
                     pageControls(p.settledPage, scope: p.id + ".settled", context: context + ", " + p.shelf)
@@ -828,6 +829,7 @@ struct ProjectsView: View {
                     }
                 }
                 .tint(.secondary)
+                .accessibilityIdentifier("project.shelf.archived." + p.id)
                 if p.archOpen == true {
                     ForEach(p.archived ?? []) { ThreadRow(model: model, row: $0) { choosing = $0 } }
                     pageControls(p.archivedPage, scope: p.id + ".archived", context: context)

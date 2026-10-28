@@ -13,6 +13,142 @@ const counter = n => Number.isSafeInteger(n) && n >= 0 && n < 2 ** 47;
 const ordinaryKey = (hub, id) => JSON.stringify([hub, id]);
 const rawThread = (hub, qualified) => qualified.startsWith(hub + '|') ? qualified.slice(hub.length + 1) : null;
 const plainObject = value => object(value) && [Object.prototype, null].includes(Object.getPrototypeOf(value));
+const sidebarLists = ['threads', 'snoozed', 'settled', 'archived'];
+const sidebarProjectKeys = ['settledCount', 'archivedCount', ...sidebarLists.map(k => k + 'Page')];
+const exactKeys = (value, keys) => plainObject(value) && Reflect.ownKeys(value).length === keys.length && keys.every(k => Object.hasOwn(value, k));
+const safeCount = value => Number.isSafeInteger(value) && value >= 0;
+const sidebarString = (value, max) => typeof value === 'string' && value.length > 0 && utf8Bytes(value) <= max;
+const qualifiedSidebarID = (value, hub) => sidebarString(value, 2049) && value.startsWith(hub + '|') && value.length > hub.length + 1;
+const sidebarStable = value => JSON.stringify(value, (_, v) => plainObject(v) ? Object.fromEntries(Object.keys(v).sort().map(k => [k, v[k]])) : v);
+const hasSidebarMetadata = screen => object(screen) && (Object.hasOwn(screen, 'nativeSidebar') || Object.hasOwn(screen, 'sidebarPages') ||
+  (Array.isArray(screen.projects) && screen.projects.some(p => object(p) && sidebarProjectKeys.some(k => Object.hasOwn(p, k)))));
+
+function sidebarControl(control, hub) {
+  return control === null || exactKeys(control, ['label', 'action', 'value']) &&
+    sidebarString(control.label, 1024) && control.action === 'native-sidebar-page' &&
+    typeof control.value === 'string' && control.value.startsWith(hub + '|') &&
+    sidebarString(control.value.slice(hub.length + 1), 2048);
+}
+
+// These checks concern only a negotiated display extension. Tokens remain
+// opaque; the server authenticates their canonical membership and signature.
+function sidebarRange(page, rows, hub, selected, projects = false) {
+  if (!Array.isArray(rows)) throw Error('Invalid sidebar rows');
+  const ids = rows.map(row => row?.id);
+  if (ids.some(id => !qualifiedSidebarID(id, hub)) || new Set(ids).size !== ids.length) throw Error('Invalid sidebar identities');
+  if (page === null) {
+    if (rows.length) throw Error('Unpaged sidebar rows');
+    return { ordinary: 0, extra: 0 };
+  }
+  if (!exactKeys(page, ['version', 'total', 'offset', 'limit', 'selectedOutside', 'previous', 'next']) || page.version !== 1 ||
+      !safeCount(page.total) || page.total === 0 || !safeCount(page.offset) || page.offset >= page.total ||
+      !safeCount(page.limit) || page.limit < 1 || page.limit > (projects ? 8 : 48) ||
+      typeof page.selectedOutside !== 'boolean' || !sidebarControl(page.previous, hub) || !sidebarControl(page.next, hub))
+    throw Error('Invalid sidebar page');
+  const ordinary = Math.min(page.limit, page.total - page.offset), extra = page.selectedOutside ? 1 : 0;
+  if (rows.length !== ordinary + extra || (page.previous !== null) !== (page.offset > 0) ||
+      (page.next !== null) !== (ordinary < page.total - page.offset) ||
+      (extra && (!selected || (!projects && !ids.includes(selected))))) throw Error('Invalid sidebar range');
+  return { ordinary, extra };
+}
+
+function sidebarPicture(screen, hub, selected) {
+  if (!Array.isArray(screen.sidebarPages) || screen.sidebarPages.length !== 1) throw Error('Invalid sidebar owners');
+  const descriptor = screen.sidebarPages[0];
+  if (!exactKeys(descriptor, ['version', 'hub', 'projects', 'active', 'legacy']) || descriptor.version !== 1 || descriptor.hub !== hub)
+    throw Error('Invalid sidebar owner');
+  const projects = screen.projects, active = screen.active, legacy = screen.legacy;
+  const projectRange = sidebarRange(descriptor.projects, projects, hub, selected, true);
+  let ordinary = 0, extras = 0;
+  const allIDs = new Set(), projectShape = [];
+  const countRows = (page, rows) => {
+    const range = sidebarRange(page, rows, hub, selected);
+    ordinary += range.ordinary; extras += range.extra;
+    for (const row of rows) {
+      if (allIDs.has(row.id)) throw Error('Duplicate sidebar row');
+      allIDs.add(row.id);
+    }
+  };
+  let selectedProject = null;
+  for (const project of projects) {
+    if (!sidebarProjectKeys.every(k => Object.hasOwn(project, k)) ||
+        !safeCount(project.settledCount) || !safeCount(project.archivedCount) ||
+        typeof project.open !== 'boolean' || typeof project.archOpen !== 'boolean') throw Error('Invalid sidebar counts');
+    if (!project.open && (project.settledPage !== null || project.settled?.length !== 0) ||
+        !project.archOpen && (project.archivedPage !== null || project.archived?.length !== 0)) throw Error('Closed sidebar rows');
+    if (project.archivedCount > 0 && !qualifiedSidebarID(project.value, hub)) throw Error('Missing archive control');
+    for (const list of sidebarLists) {
+      countRows(project[list + 'Page'], project[list]);
+      if (project[list].some(row => row.id === selected)) selectedProject = project.id;
+    }
+    // Shelf counts describe source roots; expanded descendant totals can differ.
+    if (project.settledCount === 0 && project.settled.length || project.archivedCount === 0 && project.archived.length)
+      throw Error('Sidebar count mismatch');
+    projectShape.push([project.id, project.open, project.archOpen, project.settledCount, project.archivedCount,
+      ...sidebarLists.map(list => [project[list].map(row => row.id), project[list + 'Page']])]);
+  }
+  countRows(descriptor.active, active); countRows(descriptor.legacy, legacy);
+  if (ordinary > 48 || extras > 1 || projectRange.ordinary > 8 || projectRange.extra > 1 ||
+      (projectRange.extra && selectedProject && !projects.some(project => project.id === selectedProject))) throw Error('Sidebar budget exceeded');
+  // If the selected thread lives in a closed shelf, its project membership is
+  // known only to the authoritative planner. Do not invent a row to prove it.
+  return { descriptor, projects: projectShape, active: active.map(row => row.id), legacy: legacy.map(row => row.id) };
+}
+
+export function validateNativeSidebar307265(result, input, offered = false) {
+  try {
+    const shown = result.shown, overlay = result.overlay?.j;
+    const metadata = hasSidebarMetadata(shown) || hasSidebarMetadata(overlay);
+    if (!metadata) return true; // Older hubs keep their existing arrays.
+    if (!offered || !object(shown) || !object(overlay) || shown.nativeSidebar !== 1 || overlay.nativeSidebar !== 1)
+      return false;
+    const selected = typeof shown.sel === 'string' && shown.sel ? (shown.sel.startsWith(input.hub + '|') ? shown.sel : input.hub + '|' + shown.sel) : '';
+    const a = sidebarPicture(shown, input.hub, selected), b = sidebarPicture(overlay, input.hub, selected);
+    return sidebarStable(a) === sidebarStable(b);
+  } catch { return false; }
+}
+
+function sidebarPreservedMap(actual, captured, normalized = {}, known = {}) {
+  return plainObject(actual) && plainObject(captured) &&
+    Object.entries(captured).every(([key, value]) => Object.hasOwn(actual, key) && actual[key] === value) &&
+    Object.entries(actual).every(([key, value]) => Object.hasOwn(captured, key) ? value === captured[key] :
+      Object.hasOwn(normalized, key) ? value === normalized[key] :
+        Object.hasOwn(known, key) && value === known[key]);
+}
+
+// A sidebar read does not inherit the mutation/redirect permissions of other
+// view.action replies. Run this inside ThinViews' atomic validation callback,
+// before it installs a picture or returns any command dispatch descriptors.
+export function validateNativeSidebarAction307265(result, input, known = {}) {
+  if (input.action !== 'native-sidebar-page') return true;
+  try {
+    const session = result.session, captured = input.session;
+    if (!Array.isArray(result.cmds) || result.cmds.length || Object.hasOwn(result, 'nextTarget') ||
+        result.remoteReady !== true || !plainObject(session) || !plainObject(captured) ||
+        Object.keys(session).some(key => !['sel', 'drafts', 'open', 'adding', 'panel', 'rid', 'wantNew', 'error', 'note', 'info', 'outbox', 'route'].includes(key)) ||
+        session.sel !== captured.sel || session.rid !== captured.rid || session.adding !== captured.adding ||
+        session.panel !== captured.panel || session.wantNew !== captured.wantNew ||
+        sidebarStable(session.route) !== sidebarStable(captured.route) || sidebarStable(session.open) !== sidebarStable(captured.open) ||
+        !plainObject(session.outbox) || !Object.entries(session.outbox).every(([key, value]) =>
+          typeof value === 'string' && Object.hasOwn(known.outbox || {}, key) && known.outbox[key] === value)) return false;
+    // P.Session.input/Ui.online and the actor selector add these scratch
+    // values. Selector values are derived from the captured target/route;
+    // an arbitrary new @btab or @bot is not an allowed normalization.
+    const target = input.target, selectors = { '@presentation': '', '@bot': target?.kind === 'bot' ? target.id : '',
+      '@room': target?.kind === 'room' ? target.id : '', '@remote': '', '@btab': captured.route?.tab || '' };
+    if (!sidebarPreservedMap(session.drafts, captured.drafts,
+      { '@boot': '', '@sync': '1', '@mech.at': '', '@solid.at': '', '@desk': '', ...selectors }, known.drafts) ||
+        !sidebarPreservedMap(session.info, captured.info, {}, known.info)) return false;
+    const qualified = id => typeof id !== 'string' ? null : !id ? '' : id.startsWith(input.hub + '|') ? id : input.hub + '|' + id;
+    const selected = qualified(captured.sel);
+    for (const screen of [result.shown, result.overlay?.j]) {
+      if (!object(screen) || screen.nativeSidebar !== 1 || qualified(screen.sel) !== selected ||
+          (screen.thread != null && qualified(screen.thread.id) !== selected) ||
+          (input.target?.kind === 'bot' && screen.bot != null && qualified(screen.bot.id) !== qualified(input.target.id))) return false;
+    }
+    return true;
+  } catch { return false; }
+}
 // Ordinary transport side channels are not presentation authority. Never
 // retain, copy or log their values: pair/pair.qr can contain credentials.
 export function inertAncillary307265(envelope) {
@@ -97,6 +233,12 @@ export class NativeThinHost307265 {
     this.commandOwners = new WeakMap();
     // Opted in only by a native engine that acknowledges delivered screens.
     this.publicationAck = false;
+    // Offered only by an engine whose native views implement shelf counts
+    // and paging controls. Keep each offer tied to its exact request; enabling
+    // support cannot authorize metadata on an earlier in-flight response.
+    this.nativeSidebar = false;
+    this.sidebarOffers = new WeakSet();
+    this.sidebarCaptures = new WeakMap();
     this.projectSearch = null;
     // The outbox: a message sent is kept until its hub answers. A drop
     // before the answer (or a send while the socket is down, which the app
@@ -108,8 +250,20 @@ export class NativeThinHost307265 {
     this.client = new ThinViews({
       now: api.now,
       // Renderer hints are device-owned and never select another hub or owner.
-      send: (hub, request) => ({ type: 'request', hub, request: { ...request,
-        p: { ...request.p, ...(request.p.session ? { session: this.requestSession(request.p.session, request.m, request.p.target) } : {}), nativeRenderer: api.renderer() } } }),
+      send: (hub, request) => {
+        const sidebar = this.nativeSidebar && presentation(request.m);
+        const input = this.client.calls.get(request.id).input;
+        if (sidebar) this.sidebarOffers.add(input);
+        if (request.p.action === 'native-sidebar-page') {
+          const session = this.states.get(hub).session;
+          // Optional actor-owned fields may be echoed, never changed. This
+          // private baseline is not sent on the wire or persisted.
+          this.sidebarCaptures.set(input, { drafts: copy(session.drafts), info: copy(session.info), outbox: copy(session.outbox || {}) });
+        }
+        return { type: 'request', hub, request: { ...request,
+          p: { ...request.p, ...(request.p.session ? { session: this.requestSession(request.p.session, request.m, request.p.target) } : {}),
+            nativeRenderer: api.renderer(), ...(sidebar ? { nativeSidebar: 1 } : {}) } } };
+      },
       command: (command, input) => ({ type: 'command', command, input }),
       validateResult: (result, input) => this.validate(result, input),
     }, next);
@@ -329,6 +483,21 @@ export class NativeThinHost307265 {
           !link || link.revision !== s.presentedRevision || !same(link.target, s.target)) return false;
     }
     return this.request(hub, action, value, false, undefined, null, true);
+  }
+
+  sidebarPage(value) {
+    if (!this.nativeSidebar || typeof value !== 'string') return false;
+    const separator = value.indexOf('|'), hub = value.slice(0, separator);
+    const s = this.states.get(hub), link = this.client.links.get(hub);
+    if (separator < 1 || !this.paired.has(hub) || !s?.ready || !s.greeted || s.mode !== 'view-v1' ||
+        !s.shown || !same(s.target, s.shownTarget) || s.active || s.queue.length || !link ||
+        link.revision !== s.presentedRevision || s.overlay?.j?.nativeSidebar !== 1) return false;
+    const screen = s.overlay.j, pages = screen.sidebarPages.flatMap(d => [d.projects, d.active, d.legacy]);
+    for (const project of screen.projects) for (const list of sidebarLists) pages.push(project[list + 'Page']);
+    if (!pages.some(page => page && [page.previous, page.next].some(control => control?.value === value))) return false;
+    // Only an actually offered current control may issue a read. A different
+    // hub's sidebar page must not replace foreground selection or held intent.
+    return this.request(hub, 'native-sidebar-page', value, true);
   }
 
   request(hub, action, value, keepFocus = false, viewerIntent = undefined, capture = null, admission = false) {
@@ -595,7 +764,9 @@ export class NativeThinHost307265 {
       return thread?.id === input.hub + '|' + message.thread && thread.entries.some(e => e.id === message.id && e.partial?.version === message.version);
     }
     if ('query' in input || 'requestId' in input) return validateThinResult(result, input);
-    return validateNativeResult307265(result, input) && (!this.api.validate || this.api.validate(result, input) === true);
+    return validateNativeSidebarAction307265(result, input, this.sidebarCaptures.get(input)) && validateNativeResult307265(result, input) &&
+      validateNativeSidebar307265(result, input, this.sidebarOffers.has(input)) &&
+      (!this.api.validate || this.api.validate(result, input) === true);
   }
 
   receive(hub, envelope, epoch) {

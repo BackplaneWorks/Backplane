@@ -859,6 +859,10 @@ globalThis.Backplane = {
     return JSON.stringify({ ...JSON.parse(direct([], true)), navigationAccepted: !!accepted });
   },
   act(action, value) {
+    if (action === "native-sidebar-page") {
+      thin.sidebarPage(value);
+      return direct([], true);
+    }
     const key = App.session_target(hubs, previewCur || App.current(hubs), action, value);
     if (thin.thin(key)) {
       previewCur = key;
@@ -954,6 +958,8 @@ globalThis.Backplane = {
   headerKeys() { return JSON.stringify({ keys: KEYS, words: WORDS }); },
   // Older native engines retain the existing immediate-refresh protocol.
   publicationAck() { thin.publicationAck = true; },
+  // App-side opt-in, deliberately absent from older engines and Android.
+  nativeSidebar(version) { if (version !== 1) return false; thin.nativeSidebar = true; return true; },
   // Engine calls this only after it hands a decoded current screen out.
   published() { return thin.published(); },
   pulse() { return direct(expired(true), false); },
