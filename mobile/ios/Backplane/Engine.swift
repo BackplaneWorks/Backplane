@@ -46,6 +46,7 @@ final class Engine: @unchecked Sendable {
     private let queue = Worker()
     private let priority = WirePriority()
     private let pairingFlush = PairingFlushGate()
+    private let navigationFlush = PairingFlushGate()
     private let viewerDispatch = ViewerDispatchGate()
     private var ctx: JSContext?
 
@@ -174,7 +175,7 @@ final class Engine: @unchecked Sendable {
         case "connection", "online", "hubs": .connection
         case "recv": .receive
         case "flush": .flush
-        case "act": .navigation
+        case "act", "navigation": .navigation
         case "viewerAction": .viewerRestore
         case "local": .local
         case "reading": .reading
@@ -263,6 +264,19 @@ final class Engine: @unchecked Sendable {
     func composerActNow(_ thread: String, action: String, value: String, generation: UInt64, completion: @escaping (Out?) -> Void) {
         enqueueOut("composerAction", [thread, action, value], person: true,
                    authorize: { self.pairingFlush.perform(generation, $0) }, completion: completion)
+    }
+
+    func navigationPermitted(_ pairing: UInt64) -> Bool { pairingFlush.stamp() == pairing }
+    func invalidateNavigation() -> UInt64 { navigationFlush.invalidate() }
+    @discardableResult func resumeNavigation(_ generation: UInt64) -> Bool {
+        navigationFlush.stamp() == generation || navigationFlush.resume(generation)
+    }
+    func navigation(_ action: String, _ value: String, hub: String, epoch: String, pairing: UInt64, generation: UInt64, presentedNav: String? = nil) async -> Out? {
+        await out("navigation", [action, value, hub, epoch, presentedNav.map { $0 as Any } ?? NSNull()], person: true, authorize: { operation in
+            self.pairingFlush.perform(pairing) {
+                self.navigationFlush.perform(generation, operation) ?? "null"
+            }
+        })
     }
 
     func start(_ cid: String, _ drafts: String) async -> Out? { await out("start", [cid, drafts]) }
