@@ -1486,11 +1486,11 @@ def Mob.keys.form(+lc: I.Loc, open: Bool, +u: U.Ui) -> List<&2, J.Json>:
       Nil{}
 
 # the time zone (client.bend's Tzs): the row shows it; a field and Set; Automatic
-# while one is set; an error from the hub under it
+# while one is set; an error from the hub under it, while there is one
 def Mob.tz(+lc: I.Loc, +u: U.Ui) -> List<&2, J.Json>:
-  [Mob.set.row.f(MSG.T.settings.zone(lc), U.Tzs.line.loc(lc, u), [Mob.set.field("tzname", "Europe/Helsinki", False{}, U.Ui.scratch(u, "@f.tzname"))],
-     List.append(&2, J.Json, [Mob.set.btn(MSG.T.common.set(lc), "tz-set", "", True{})], Bool.pick(List<&2, J.Json>, U.Tzs.auto(u), [Mob.set.btn(MSG.T.settings.lang.auto(lc), "tz-auto", "", False{})], Nil{}))),
-   Mob.set.row("", U.Tzs.err(u), Nil{})]
+  Mob.set.row.f(MSG.T.settings.zone(lc), U.Tzs.line.loc(lc, u), [Mob.set.field("tzname", "Europe/Helsinki", False{}, U.Ui.scratch(u, "@f.tzname"))],
+     List.append(&2, J.Json, [Mob.set.btn(MSG.T.common.set(lc), "tz-set", "", True{})], Bool.pick(List<&2, J.Json>, U.Tzs.auto(u), [Mob.set.btn(MSG.T.settings.lang.auto(lc), "tz-auto", "", False{})], Nil{})))
+  <> Bool.pick(List<&2, J.Json>, String.is_empty(U.Tzs.err(u)), Nil{}, [Mob.set.row("", U.Tzs.err(u), Nil{})])
 
 # The secret box (client.bend's Sbox.*), as on the web. Settings shows the
 # vault, an open box (its value field is a "vault" field: the app keeps

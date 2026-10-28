@@ -12443,11 +12443,39 @@ def Tzs.line(+u: Ui) -> String:
 def Tzs.auto(+u: Ui) -> Bool:
   Bool.not(String.is_empty(M.Setting.get(Ui.state.of(u), "person.tz", "")))
 
+# what Automatic follows: the phone's zone, else this machine's, else UTC
+# (sched.bend's Zone.person with no zone set)
+def Tzs.auto.from(+s: M.State) -> String:
+  Bool.pick(String, String.is_empty(M.Setting.get(s, "person.tz.device", "")),
+    Bool.pick(String, String.is_empty(M.Setting.get(s, "tz.machine", "")), "utc", "machine"), "phone")
+
+def Tzs.auto.tip.k(+l: I.Loc, set: Bool, +from: String) -> String:
+  match set:
+    case True{}:
+      Bool.pick(String, String.eq(from, "phone"), MSG.T.settings.tz.follow.phone(l),
+        Bool.pick(String, String.eq(from, "machine"), MSG.T.settings.tz.follow.machine(l), MSG.T.settings.tz.follow.utc(l)))
+    case False{}:
+      Bool.pick(String, String.eq(from, "phone"), MSG.T.settings.tz.auto.phone(l),
+        Bool.pick(String, String.eq(from, "machine"), MSG.T.settings.tz.auto.machine(l), MSG.T.settings.tz.auto.utc(l)))
+
+# Automatic's words: what it follows while no zone is set (it is on), or
+# what it goes back to once one is
+def Tzs.auto.tip(+l: I.Loc, +u: Ui) -> String:
+  Tzs.auto.tip.k(l, Tzs.auto(u), Tzs.auto.from(Ui.state.of(u)))
+
 # the error shows only while the zone tried (@tz.try) is not the one set:
 # once the hub takes it, a later unrelated error stays off this row
 def Tzs.err(+u: Ui) -> String:
   Bool.pick(String, Bool.and(Bool.not(String.is_empty(Ui.scratch(u, "@tz.try"))),
     Bool.not(String.eq(Ui.scratch(u, "@tz.try"), M.Setting.get(Ui.state.of(u), "person.tz", "")))), Tzs.er(u), "")
+
+# Automatic: back to it while a zone is set; while none is, it already is
+def Tzs.automatic(set: Bool, +u: Ui) -> Act:
+  match set:
+    case True{}:
+      Ui.rpc(u, "zone.set", [J.KV{"zone", J.Str{"auto"}}])
+    case False{}:
+      Act{u, Nil{}}
 
 def Tzs.set.k(ok: Bool, +u: Ui, +zone: String) -> Act:
   match ok:
@@ -12464,7 +12492,7 @@ def Tzs.act.k(i: Nat, +u: Ui, +value: String) -> Act:
     case 0n:
       Tzs.set(u)
     case 1n:
-      Ui.rpc(Ui.scratch_set(Ui.scratch_set(u, "@f.tzname", ""), "@tz.try", ""), "zone.set", [J.KV{"zone", J.Str{"auto"}}])
+      Tzs.automatic(Tzs.auto(u), Ui.scratch_set(Ui.scratch_set(u, "@f.tzname", ""), "@tz.try", ""))
     case 2n:
       Ui.rpc(u, "zone.report", [J.KV{"zone", J.Str{value}}])
     case _:

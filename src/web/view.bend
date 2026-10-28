@@ -1545,17 +1545,17 @@ def View.agy.rows(+u: U.Ui, rs: List<&2, U.AgRow>) -> List<&2, D.Node>:
       View.setrow(l, n, List.append(&2, D.Node, View.agy.fields(u, fs), View.agy.btns(u, bs))) <> View.agy.rows(u, t)
 
 # the time zone: where the person is (their phone reports it, or they set
-# it); a field for a zone name, Set, and Automatic (on while one is set)
-# Automatic: off (disabled) while the zone already follows the phone
-def View.tz.auto.loc(+lc: I.Loc, on: Bool) -> D.Node:
-  match on:
-    case True{}:
-      D.Dom.button("", "tz-auto", "", MSG.T.settings.tz.follow(lc), MSG.T.settings.lang.auto(lc))
-    case False{}:
-      D.El{"button", "", [D.At{"class", ""}, D.At{"title", MSG.T.settings.tz.following(lc)}, D.At{"disabled", "disabled"}], [D.Txt{MSG.T.settings.lang.auto(lc)}]}
+# it); a field for a zone name, Set, and Automatic: on (like a chosen chip)
+# while no zone is set, its words saying what it follows (the phone, else
+# this machine: client.bend's Tzs.auto.tip); a click goes back to it once
+# one is
+def View.tz.auto.loc(+lc: I.Loc, +set: Bool, +tip: String) -> D.Node:
+  D.El{"button", "", [D.At{"class", Bool.pick(String, set, "", "on")}, D.At{"type", "button"}, D.At{"title", tip},
+    D.At{"aria-pressed", Bool.pick(String, set, "false", "true")}, D.At{"data-value", ""}, D.On{"click", "tz-auto"}], [D.Txt{MSG.T.settings.lang.auto(lc)}]}
 
-def View.tz.auto(on: Bool) -> D.Node:
-  View.tz.auto.loc(I.En{}, on)
+# the hub's answer to a zone it could not set, under the row; no row without one
+def View.tz.err(+err: String) -> List<&2, D.Node>:
+  Bool.pick(List<&2, D.Node>, String.is_empty(err), Nil{}, [View.setrow("", err, Nil{})])
 
 def View.usage.btn.loc(+lc: I.Loc, none: Bool, +act: String) -> List<&2, D.Node>:
   match none:
@@ -1615,10 +1615,9 @@ def View.tok.set(+lc: I.Loc, +st: M.State) -> D.Node:
   View.setrow(UZ.Ts.label(), UZ.Ts.blurb(), View.chips.loc(lc, ["on", "off"], Bool.pick(String, UZ.Ts.on(st), "on", "off"), UZ.Ts.key()))
 
 def View.tz.set(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
-  [View.setrow(MSG.T.settings.zone(lc), U.Tzs.line.loc(lc, u),
+  View.setrow(MSG.T.settings.zone(lc), U.Tzs.line.loc(lc, u),
     [WB.WB.input("tzname", "tzname", U.Ui.scratch(u, "@f.tzname"), "Europe/Helsinki", "tz-set"), D.Dom.button("primary", "tz-set", "", MSG.T.settings.tz.choose(lc), MSG.T.common.set(lc)),
-     View.tz.auto.loc(lc, U.Tzs.auto(u))]),
-   View.setrow("", U.Tzs.err(u), Nil{})]
+     View.tz.auto.loc(lc, U.Tzs.auto(u), U.Tzs.auto.tip(lc, u))]) <> View.tz.err(U.Tzs.err(u))
 
 def View.keys.set(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
   List.concat(&2, D.Node, [
