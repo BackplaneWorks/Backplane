@@ -66,3 +66,5 @@ def main() -> IO(Unit):
     C.Check.str("and says when nothing matches", Bool.show(String.contains(web("zzzz"), "No setting matches.")), "True")
     C.Check.str("phones have the search field", Bool.show(String.contains(phone(""), "\"name\":\"setq\"")), "True")
     C.Check.str("and list only what it finds", Bool.show(Bool.and(String.contains(phone("stripe"), "Ordering ›"), Bool.not(String.contains(phone("stripe"), "Appearance ›")))), "True")
+    C.Check.str("phones list no Appearance page: its rows are the phone's own", Bool.show(Bool.and(String.contains(phone(""), "Threads ›"), Bool.not(String.contains(phone(""), "Appearance ›")))), "True")
+    C.Check.str("so a phone's search for the text size finds nothing", Bool.show(String.contains(phone("text size"), "No setting matches.")), "True")

@@ -1837,9 +1837,21 @@ def Mob.settings.none(none: Bool, +lc: I.Loc) -> List<&2, J.Json>:
     case True{}: [Mob.set.row(MSG.T.settings.search.none(lc), "", Nil{})]
     case False{}: Nil{}
 
+# the hub's settings pages a phone lists: not Appearance, whose rows (the
+# theme, the language, the thread list's view) are the phone's own, in its
+# Settings tab, and left out here: the page was empty, and its search
+# offered Text size, which phones leave to the system's font size
+def Mob.settings.keep(+p: String, +rest: List<&2, String>) -> List<&2, String>:
+  Bool.pick(List<&2, String>, String.eq(p, "appearance"), rest, p <> rest)
+
+def Mob.settings.pages(ps: List<&2, String>) -> List<&2, String>:
+  match ps:
+    case Nil{}: Nil{}
+    case +p <> t: Mob.settings.keep(p, Mob.settings.pages(t))
+
 def Mob.settings.root(+lc: I.Loc, +u: U.Ui) -> List<&2, J.Json>:
   +q = U.Settings.q(u)
-  +ps = U.Settings.found(U.Settings.phone.pages(), lc, q)
+  +ps = U.Settings.found(Mob.settings.pages(U.Settings.phone.pages()), lc, q)
   Mob.set.row.f(MSG.T.settings.search(lc), "", [Mob.set.field("setq", MSG.T.settings.search(lc), False{}, U.Ui.scratch(u, "@f.setq"))], Nil{})
     <> List.append(&2, J.Json, Mob.settings.none(List.is_empty(&2, String, ps), lc), Mob.settings.found(ps, lc, q))
 
