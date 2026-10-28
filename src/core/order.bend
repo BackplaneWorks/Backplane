@@ -707,3 +707,39 @@ def Intent.is(+draft: String) -> Bool:
 
 def Intent.body(+draft: String) -> String:
   String.trim(String.drop(String.trim(draft), 7n))
+
+# What the intent shows: the file less the headings with nothing under
+# them (Edit's template saved with only a goal shows no empty "Parts" or
+# "Notes"; the file keeps them, for the next Edit). A heading is 1 to 6 #s
+# then a space or nothing; it is empty when no line of text comes before
+# the next heading of its level or above (test/intent_menu_test.bend).
+def Intent.hashes(+t: String) -> Nat:
+  Bool.pick(Nat, String.starts_with(t, "######"), 6n, Bool.pick(Nat, String.starts_with(t, "#####"), 5n, Bool.pick(Nat, String.starts_with(t, "####"), 4n,
+    Bool.pick(Nat, String.starts_with(t, "###"), 3n, Bool.pick(Nat, String.starts_with(t, "##"), 2n, Bool.pick(Nat, String.starts_with(t, "#"), 1n, 0n))))))
+
+def Intent.level.k(+n: Nat, +rest: String) -> Nat:
+  Bool.pick(Nat, Bool.and(Nat.is_gt(n, 0n), Bool.or(String.is_empty(rest), String.starts_with(rest, " "))), n, 0n)
+
+# a line's heading level ("## Parts" is 2), 0 for any other line
+def Intent.level(+l: String) -> Nat:
+  Intent.level.k(Intent.hashes(String.trim(l)), String.drop(String.trim(l), Intent.hashes(String.trim(l))))
+
+# whether a line of text comes under a heading of level k
+def Intent.filled(ls: List<&2, String>, +k: Nat) -> Bool:
+  match ls:
+    case Nil{}:
+      False{}
+    case +l <> t:
+      +lv = Intent.level(l)
+      Bool.pick(Bool, Bool.and(Nat.is_gt(lv, 0n), Nat.is_le(lv, k)), False{},
+        Bool.or(Bool.and(Nat.is_eq(lv, 0n), Bool.not(String.is_empty(String.trim(l)))), Intent.filled(t, k)))
+
+def Intent.shown.go(ls: List<&2, String>, +acc: List<&2, String>) -> List<&2, String>:
+  match ls:
+    case Nil{}:
+      List.reverse(&2, String, acc)
+    case +l <> +t:
+      Intent.shown.go(t, Bool.pick(List<&2, String>, Bool.and(Nat.is_gt(Intent.level(l), 0n), Bool.not(Intent.filled(t, Intent.level(l)))), acc, l <> acc))
+
+def Intent.shown(+text: String) -> String:
+  String.trim(String.join(Intent.shown.go(String.lines(text), Nil{}), "\n"))

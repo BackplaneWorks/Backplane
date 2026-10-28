@@ -1346,4 +1346,6 @@ intent.title = 意図
 intent.none = まだ意図がありません。編集して、このプロジェクトの目的を書いてください。
 intent.loading = 意図を読み込み中…
 intent.edit = 編集
-intent.edit.tip = メッセージ欄で変更し、送信で保存します
+intent.edit.tip = メッセージ欄で変更し、保存（Ctrl+Enter）で保存します
+intent.save.tip = 意図を保存（Ctrl+Enter）・Enterで改行
+intent.saved = 意図を保存しました

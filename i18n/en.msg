@@ -1323,4 +1323,6 @@ intent.title = Intent
 intent.none = No intent yet. Edit to say what this project is for.
 intent.loading = Loading the intent…
 intent.edit = Edit
-intent.edit.tip = Change it in the message box; Send saves it
+intent.edit.tip = Change it in the message box; Save (Ctrl+Enter) keeps it
+intent.save.tip = Save the intent (Ctrl+Enter); Enter starts a new line
+intent.saved = Intent saved

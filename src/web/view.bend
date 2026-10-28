@@ -2595,9 +2595,11 @@ def View.mic.of(+u: U.Ui, +sel: String) -> String:
   Bool.pick(String, Bool.or(String.eq(U.Ui.scratch(u, "@voice.th"), sel), String.is_empty(U.Ui.scratch(u, "@voice.th"))), U.Ui.scratch(u, "@voice"), "")
 
 # the send button, or Stop while a turn runs with nothing typed
+# (Save, an intent's: Enter is a new line there, U.Draft.enter)
 def View.send.loc(+lc: I.Loc, +act: String, +send: String) -> D.Node:
   Bool.pick(D.Node, String.eq(act, "interrupt"), D.Dom.button("primary stop", act, "", MSG.T.composer.stop.tip(lc), send),
-    D.Dom.button("primary", act, "", MSG.T.composer.enter.tip(lc, Bool.pick(String, String.eq(send, MSG.T.composer.queue(lc)), "steer", "queue")), send))
+    D.Dom.button("primary", act, "", Bool.pick(String, String.eq(send, MSG.T.common.save(lc)), MSG.T.intent.save.tip(lc),
+      MSG.T.composer.enter.tip(lc, Bool.pick(String, String.eq(send, MSG.T.composer.queue(lc)), "steer", "queue"))), send))
 
 # The composer as typed (app.bend's presentation_overlay, in the browser):
 # the hub drew it for the draft it last had, which lags what is typed while
@@ -2663,20 +2665,21 @@ def Local.send(+l: Local) -> D.Node:
       View.send.loc(lc, U.Follow.act(stop), U.Follow.button(lc, M.State.empty(), "", r, stop, d))
 
 # the textarea's keys, as View.composer.loc sets them, for rows shown or not
-def View.local.keys(as: List<&2, D.Attr>, +rows: Bool) -> List<&2, D.Attr>:
+# and draft d (U.Draft.enter)
+def View.local.keys(as: List<&2, D.Attr>, +rows: Bool, +d: String) -> List<&2, D.Attr>:
   match as:
     case Nil{}:
       Nil{}
     case D.At{"data-enter", _} <> t:
-      D.At{"data-enter", Bool.pick(String, rows, "skill", "send")} <> View.local.keys(t, rows)
+      D.At{"data-enter", U.Draft.enter(rows, d)} <> View.local.keys(t, rows, d)
     case D.At{"data-tab", _} <> t:
-      D.At{"data-tab", Bool.pick(String, rows, "skill", "")} <> View.local.keys(t, rows)
+      D.At{"data-tab", Bool.pick(String, rows, "skill", "")} <> View.local.keys(t, rows, d)
     case D.At{"data-arrows", _} <> t:
-      D.At{"data-arrows", Bool.pick(String, rows, "skill-move", "")} <> View.local.keys(t, rows)
+      D.At{"data-arrows", Bool.pick(String, rows, "skill-move", "")} <> View.local.keys(t, rows, d)
     case D.At{"data-esc", _} <> t:
-      D.At{"data-esc", Bool.pick(String, rows, "skill-close", "")} <> View.local.keys(t, rows)
+      D.At{"data-esc", Bool.pick(String, rows, "skill-close", "")} <> View.local.keys(t, rows, d)
     case h <> t:
-      h <> View.local.keys(t, rows)
+      h <> View.local.keys(t, rows, d)
 
 # the foot's send button (span.foot-end's last child) drawn for the draft
 def View.local.end(ks: List<&2, D.Node>, +l: Local) -> List<&2, D.Node>:
@@ -2712,7 +2715,7 @@ def View.local.kids(ks: List<&2, D.Node>, +l: Local, +had: Bool, +drawn: String)
       List.concat(&2, D.Node, [
         Bool.pick(List<&2, D.Node>, Bool.and(area, Bool.and(Bool.not(mine), Bool.not(had))), Local.slash(l), Nil{}),
         Bool.pick(List<&2, D.Node>, skills, Bool.pick(List<&2, D.Node>, mine, [D.El{tag, key, as, kids}], Local.slash(l)),
-          [D.El{tag, key, Bool.pick(List<&2, D.Attr>, area, View.local.keys(as, rows), as),
+          [D.El{tag, key, Bool.pick(List<&2, D.Attr>, area, View.local.keys(as, rows, Local.draft(l)), as),
             Bool.pick(List<&2, D.Node>, View.local.class(as, "composer-foot"), View.local.foot(kids, l), kids)}]),
         View.local.kids(t, l, had, drawn)])
     case +k <> t:
@@ -2774,7 +2777,7 @@ def View.composer.p(+lc: I.Loc, +draft: String, +send: String, +act: String, +pr
     D.At{"data-claude", Bool.pick(String, String.eq(prov, "claude"), "1", "")}, D.At{"data-lang", I.I18n.tag(lc)}], D.Dom.cat(
     menu, D.Dom.cat(tp, D.Dom.cat(View.skills(rs), D.Dom.cat(vo, D.Dom.cat(View.attaching.loc(lc, atts, up), [
     D.El{"textarea", "composer", [D.At{"id", "composer"}, D.At{"rows", "3"}, D.At{"placeholder", MSG.T.composer.placeholder(lc)}, D.At{"value", draft}, D.On{"input", "draft"},
-      D.At{"data-enter", Bool.pick(String, List.is_empty(&2, U.SkillRow, rs), "send", "skill")}, D.At{"data-enter-alt", "send-alt"}, D.At{"data-tab", Bool.pick(String, List.is_empty(&2, U.SkillRow, rs), "", "skill")}, D.At{"data-arrows", Bool.pick(String, List.is_empty(&2, U.SkillRow, rs), "", "skill-move")}, D.At{"data-esc", Bool.pick(String, List.is_empty(&2, U.SkillRow, rs), "", "skill-close")}, D.At{"data-paste", "attach"}], Nil{}},
+      D.At{"data-enter", U.Draft.enter(Bool.not(List.is_empty(&2, U.SkillRow, rs)), draft)}, D.At{"data-enter-alt", "send-alt"}, D.At{"data-tab", Bool.pick(String, List.is_empty(&2, U.SkillRow, rs), "", "skill")}, D.At{"data-arrows", Bool.pick(String, List.is_empty(&2, U.SkillRow, rs), "", "skill-move")}, D.At{"data-esc", Bool.pick(String, List.is_empty(&2, U.SkillRow, rs), "", "skill-close")}, D.At{"data-paste", "attach"}], Nil{}},
     D.El{"div", "", [D.At{"class", "composer-foot"}], List.append(&2, D.Node, chip, [
       View.draw.loc(lc),
       D.El{"label", "", [D.At{"class", "attach"}, D.At{"title", MSG.T.composer.attach.tip(lc)}], [WI.WIcon.svg("paperclip", 16),
@@ -2876,8 +2879,17 @@ def View.intent.k(+lc: I.Loc, on: Bool, +u: U.Ui) -> List<&2, D.Node>:
     case False{}:
       Nil{}
 
+# "Intent saved" for a few seconds once the hub has written it (client.bend's
+# Intent.saved); a click puts it away
+def View.intent.saved(+lc: I.Loc, saved: Bool) -> List<&2, D.Node>:
+  match saved:
+    case True{}:
+      [D.El{"div", "intent-saved", [D.At{"class", "toast ok"}, D.At{"role", "status"}, D.At{"data-value", ""}, D.On{"click", "intent-saved-off"}], [D.Txt{MSG.T.intent.saved(lc)}]}]
+    case False{}:
+      Nil{}
+
 def View.intent(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
-  View.intent.k(lc, U.Intent.on(u), u)
+  List.append(&2, D.Node, View.intent.k(lc, U.Intent.on(u), u), View.intent.saved(lc, U.Intent.saved(u)))
 
 # Ready to order: what there is to buy and Buy it, above the message box
 # (U.Fab.ready), once the agent's turn is over; it glows as it comes

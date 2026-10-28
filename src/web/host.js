@@ -1568,10 +1568,13 @@ document.addEventListener("keydown", (e) => {
   }
   const el = e.target.closest?.("[data-enter]");
   if (!el || e.key !== "Enter" || e.shiftKey || (e.isComposing || e.keyCode === 229)) return;
-  e.preventDefault();
-  // ctrl/cmd+Enter: the element's other action (send with the other follow-up mode)
+  // ctrl/cmd+Enter: the element's other action (send with the other follow-up mode);
+  // an empty data-enter leaves Enter to the field (a new line: an intent being edited)
   const alt = (e.ctrlKey || e.metaKey) && el.getAttribute("data-enter-alt");
-  dispatch(alt || el.getAttribute("data-enter"), valueOf(el));
+  const action = alt || el.getAttribute("data-enter");
+  if (!action) return;
+  e.preventDefault();
+  dispatch(action, valueOf(el));
 });
 
 // The first-run tour (view.bend's View.tour) is modal while its dialog is on

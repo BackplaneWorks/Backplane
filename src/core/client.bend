@@ -1348,6 +1348,12 @@ def Follow.button.k(+l: I.Loc, stop: Bool, +label: String) -> String:
 def Follow.button(+l: I.Loc, +st: M.State, +sel: String, run: Bool, stop: Bool, +draft: String) -> String:
   Follow.button.k(l, stop, Bool.pick(String, Btw.is(draft), MSG.T.composer.ask(l), Bool.pick(String, Give.is(draft), MSG.T.composer.give(l), Bool.pick(String, OR.Intent.is(draft), MSG.T.common.save(l), Follow.label(l, st, sel, run)))))
 
+# what Enter does in the composer (its data-enter): takes a popup's row,
+# else sends; while an intent is edited ("/intent ...", Edit's) it is the
+# text's own, a new line, and only Save (or Ctrl+Enter, send-alt) saves
+def Draft.enter(+rows: Bool, +draft: String) -> String:
+  Bool.pick(String, rows, "skill", Bool.pick(String, OR.Intent.is(draft), "", "send"))
+
 def Follow.act(stop: Bool) -> String:
   match stop:
     case True{}:
@@ -7370,10 +7376,11 @@ def Intent.look(+u: Ui) -> Act:
 def Intent.on(+u: Ui) -> Bool:
   Bool.and(Bool.not(String.is_empty(Ui.sel(u))), String.eq(Ui.scratch(u, "@intent"), Ui.sel(u)))
 
-# what it shows: the intent (Markdown); "" while it is looked up or when
-# there is none (Intent.got tells which)
+# what it shows: the intent (Markdown, less its empty headings,
+# OR.Intent.shown); "" while it is looked up or when there is none
+# (Intent.got tells which)
 def Intent.text(+u: Ui) -> String:
-  Fab.intent(u, Ui.sel(u))
+  OR.Intent.shown(Fab.intent(u, Ui.sel(u)))
 
 # the hub has answered for this thread (its card's line is never blank)
 def Intent.got(+u: Ui) -> Bool:
@@ -7397,6 +7404,15 @@ def Intent.open(+u: Ui, +pid: String) -> Act:
 def Intent.close(+u: Ui) -> Act:
   Act{Ui.scratch_set(u, "@intent", ""), [Focus{"composer"}]}
 
+# "Intent saved", once the hub has written it (Intent.send.go)
+def Intent.saved(+u: Ui) -> Bool:
+  String.eq(Ui.scratch(u, "@intent.saved"), "1")
+
+# the note goes ("intent-saved-off": its time is up, or a click), unless a
+# later Save waits for its own
+def Intent.saved.off(+u: Ui, +id: String) -> Act:
+  Act{Bool.pick(Ui, Bool.or(String.is_empty(id), String.eq(id, Ui.scratch(u, "@intent.saving"))), Ui.scratch_set(Ui.scratch_set(u, "@intent.saving", ""), "@intent.saved", ""), u), Nil{}}
+
 def Fab.act.k(i: Nat, +u: Ui, +th: String) -> Act:
   match i:
     # the card opened or shut
@@ -7418,10 +7434,10 @@ def Fab.act.k(i: Nat, +u: Ui, +th: String) -> Act:
       Act{u, Nil{}}
 
 def Fab.actions() -> List<&2, String>:
-  ["fab-open", "fab-edit", "buy", "board-pick", "fab-hide", "fab-show", "proj-intent", "intent-close"]
+  ["fab-open", "fab-edit", "buy", "board-pick", "fab-hide", "fab-show", "proj-intent", "intent-close", "intent-saved-off"]
 
 def Fab.is(+action: String) -> Bool:
-  Nat.is_lt(C.Codec.pos(Fab.actions(), action), 8n)
+  Nat.is_lt(C.Codec.pos(Fab.actions(), action), 9n)
 
 def Fab.act.v(+i: Nat, +u: Ui, +value: String) -> Act:
   match i:
@@ -7431,6 +7447,8 @@ def Fab.act.v(+i: Nat, +u: Ui, +value: String) -> Act:
       Intent.open(u, value)
     case 7n:
       Intent.close(u)
+    case 8n:
+      Intent.saved.off(u, value)
     case _:
       Fab.act.k(i, u, Fab.th(u, value))
 
@@ -7471,19 +7489,31 @@ def Fab.reply.r(u: Ui, +th: String, +r: J.Json) -> Ui:
   Fab.keep(Ui.info_set(Ui.info_set(Ui.info_set(Ui.info_set(u, "fab.ready:" ++ th, OR.Card.ready.or(OR.Card.ready.j(r), J.Json.get_str(r, "order", ""))), "fab.boards:" ++ th, OR.Card.boards.j(r)),
     "fab.board:" ++ th, J.Json.get_str(r, "board_default", "")), "fab.again:" ++ th, Bool.pick(String, OR.Order.ordered(J.Json.get_str(r, "order", "")), "1", "")), th, OR.Card.of.j(r))
 
+# the answer to the Save waited for: the intent is saved
+def Intent.saved.got(+u: Ui, +o: J.Json) -> Ui:
+  Bool.pick(Ui, Bool.and(Bool.not(String.is_empty(Ui.scratch(u, "@intent.saving"))), String.eq(J.Json.as_raw(J.Json.get(o, "id"), ""), Ui.scratch(u, "@intent.saving"))),
+    Ui.scratch_set(u, "@intent.saved", "1"), u)
+
 def Fab.reply(has: Bool, u: Ui, +o: J.Json) -> Ui:
   match has:
     case True{}:
-      Fab.reply.r(u, J.Json.get_str(J.Json.get_obj(o, "result"), "thread", ""), J.Json.get_obj(o, "result"))
+      Intent.saved.got(Fab.reply.r(u, J.Json.get_str(J.Json.get_obj(o, "result"), "thread", ""), J.Json.get_obj(o, "result")), o)
     case False{}:
       u
 
 # "/intent <text>" sent: the project's intent is that text (the hub writes
-# it and answers with the card)
+# it and answers with the card). The request's id waits in "@intent.saving"
+# for that answer, which says "Intent saved" (Intent.saved) until
+# "intent-saved-off" with the same id comes, a few seconds after Save (a
+# hub's answer brings no commands, so the action asks for it at once)
+def Intent.saved.ms() -> Nat:
+  4000n
+
 def Intent.send.go(u: Ui, +text: String) -> Act:
   match u:
-    case Ui{st, +sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}:
-      Ui.rpc(Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}, "fab.intent", [J.KV{"thread", J.Str{sel}}, J.KV{"text", J.Str{text}}])
+    case Ui{st, +sel, dr, live, op, on, now, ad, pa, v, +rid, w, er, note, nf, ob, tr}:
+      Ui.also(Ui.rpc(Ui.scratch_set(Ui.scratch_set(Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}, "@intent.saving", Nat.show(rid)), "@intent.saved", ""),
+        "fab.intent", [J.KV{"thread", J.Str{sel}}, J.KV{"text", J.Str{text}}]), [Later{Intent.saved.ms(), "intent-saved-off", Nat.show(rid)}])
 
 def Intent.send.d(a: Act, +text: String) -> Act:
   match a:
