@@ -36,5 +36,37 @@ import Foundation
         precondition(decodeScreen(closedProject.replacingOccurrences(of: "\"settledCount\":9", with: "\"settledCount\":null"), pages: "[" + descriptor + "]") == nil)
         precondition(decodeScreen(closedProject.replacingOccurrences(of: "h|p", with: ""), pages: "[" + descriptor + "]") == nil)
         print("PASS malformed new metadata cannot silently drop a project through legacy lossy decoding")
+        if CommandLine.arguments.count > 1 {
+            // Actual Bend Actor projection fixtures, supplied as a pinned
+            // artifact. No server, simulator, UI or signing is exercised.
+            let text = try! String(contentsOfFile: CommandLine.arguments[1], encoding: .utf8)
+            var pictures = 0, redirects = 0
+            for line in text.split(separator: "\n") where line.first == "{" {
+                let fixture = try! JSONSerialization.jsonObject(with: Data(line.utf8)) as! [String: Any]
+                let result = fixture["result"] as! [String: Any]
+                guard let shown = result["shown"] as? [String: Any] else {
+                    precondition(result["nextTarget"] is [String: Any])
+                    redirects += 1
+                    continue
+                }
+                let overlay = result["overlay"] as! [String: Any]
+                for picture in [shown, overlay["j"] as! [String: Any]] {
+                    let decoded = try! JSONDecoder().decode(Screen.self, from: JSONSerialization.data(withJSONObject: picture))
+                    let projects = picture["projects"] as! [[String: Any]]
+                    precondition(decoded.projects.count == projects.count, "Actual projection project was lost")
+                    precondition((decoded.sidebarPages?.count ?? 0) == (picture["sidebarPages"] as? [Any] ?? []).count)
+                    for (project, wire) in zip(decoded.projects, projects) {
+                        precondition(project.id == wire["id"] as? String)
+                        precondition(project.threads.count == (wire["threads"] as! [Any]).count)
+                        precondition(project.snoozed.count == (wire["snoozed"] as! [Any]).count)
+                        precondition(project.settled.count == (wire["settled"] as! [Any]).count)
+                        precondition((project.archived?.count ?? 0) == (wire["archived"] as? [Any] ?? []).count)
+                    }
+                    pictures += 1
+                }
+            }
+            precondition(pictures > 0)
+            print("PASS actual Actor projections decode without losing projects or rows: \(pictures) pictures; \(redirects) redirects excluded")
+        }
     }
 }
