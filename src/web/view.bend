@@ -694,9 +694,33 @@ def View.sidebar.threads(+u: U.Ui, ix: U.SIx, rows: List<&2, U.SRow>, raw: List<
   List.append(&2, String, View.sidebar.threads.kind(String.eq(U.Side.view(U.Ui.state(u)), "active"), u, ix, rows, raw),
     U.Side.in_project(U.Side.legacy.shown(u), U.Ui.state(u), U.Side.cur(u)))
 
+# Folded (Ctrl+B or the top bar's fold button: host.js keeps it, style.css
+# shows it), the sidebar is a 44 px strip: the button that unfolds it, then
+# each project's badge in its colour, which opens the project (its thread,
+# as Alt+digit does); the open thread's project is marked
+def View.strip.projects(ps: List<&2, String>, +st: M.State, +cur: String) -> List<&2, D.Node>:
+  match ps:
+    case Nil{}:
+      Nil{}
+    case +p <> t:
+      D.El{"button", "strip:" ++ p, [D.At{"class", Bool.pick(String, String.eq(p, cur), "strip-project on", "strip-project")}, D.At{"type", "button"},
+        D.At{"style", "--tint:" ++ BG.Badge.css_of(st, p)}, D.At{"title", U.Label.title(st, p, U.Ui.project_title(st, p))}, D.At{"aria-label", U.Label.title(st, p, U.Ui.project_title(st, p))},
+        D.At{"data-value", p}, D.On{"click", "ws-project"}], [WI.WIcon.svg(BG.Badge.icon(st, p), 16)]} <> View.strip.projects(t, st, cur)
+
+def View.strip(+lc: I.Loc, ps: List<&2, String>, +st: M.State, +cur: String) -> D.Node:
+  D.El{"nav", "side-strip", [D.At{"class", "side-strip"}, D.At{"aria-label", MSG.T.tour.title.projects(lc)}],
+    WI.WIcon.button("icon side-toggle", "side-toggle", "", "Show the sidebar · Ctrl+B", "panel-right", 16, "") <> View.strip.projects(ps, st, cur)}
+
+def View.sidebar.strip(n: D.Node, strip: D.Node) -> D.Node:
+  match n:
+    case D.El{tag, key, attrs, kids}:
+      D.El{tag, key, attrs, strip <> kids}
+    case D.Txt{text}:
+      D.Txt{text}
+
 def View.sidebar.frame.rows(+lc: I.Loc, bots: List<&2, D.Node>, +u: U.Ui, +plain: U.SIx, +signals: U.SIx, +rows: List<&2, U.SRow>, +unfolded: List<&2, U.SRow>, +raw: List<&2, U.SRow>) -> D.Node:
-  View.sidebar.keys(View.sidebar.projected(lc, bots, WB.WB.uber(lc, u, signals), U.Machines.rows.loc(lc, u), U.Menu.items.loc(lc, u, True{}), signals, u, rows, raw),
-    U.Side.pids(unfolded), View.sidebar.threads(u, plain, unfolded, raw))
+  View.sidebar.strip(View.sidebar.keys(View.sidebar.projected(lc, bots, WB.WB.uber(lc, u, signals), U.Machines.rows.loc(lc, u), U.Menu.items.loc(lc, u, True{}), signals, u, rows, raw),
+    U.Side.pids(unfolded), View.sidebar.threads(u, plain, unfolded, raw)), View.strip(lc, U.Side.pids(unfolded), U.Ui.state(u), U.Side.cur(u)))
 
 def View.sidebar.frame.shown(+lc: I.Loc, bots: List<&2, D.Node>, +u: U.Ui, +plain: U.SIx, signals: U.SIx, +rows: List<&2, U.SRow>, raw: List<&2, U.SRow>) -> D.Node:
   View.sidebar.frame.rows(lc, bots, u, plain, signals, rows, U.Side.unfolded(rows, U.Side.open(u), U.Ui.scratch(u, "@f.pq"), U.Side.now(u)), raw)

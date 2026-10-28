@@ -26,7 +26,8 @@ def same(+raw: U.Ui) -> String:
   +ix = U.Side.ix(U.Ui.state(u))
   +signals = U.Side.signals.ix(ix, u)
   +bots = WB.WB.side(I.En{}, u)
-  +before = V.View.sidebar.keys(V.View.sidebar.w(I.En{}, bots, WB.WB.uber(I.En{}, u, signals), U.Machines.rows.loc(I.En{}, u), U.Menu.items.loc(I.En{}, u, True{}), signals, u), U.Side.projects.ix(u, ix), U.Side.here.ix(u, ix))
+  +before = V.View.sidebar.strip(V.View.sidebar.keys(V.View.sidebar.w(I.En{}, bots, WB.WB.uber(I.En{}, u, signals), U.Machines.rows.loc(I.En{}, u), U.Menu.items.loc(I.En{}, u, True{}), signals, u), U.Side.projects.ix(u, ix), U.Side.here.ix(u, ix)),
+    V.View.strip(I.En{}, U.Side.projects.ix(u, ix), U.Ui.state(u), U.Side.cur(u)))
   +after = V.View.sidebar.frame(I.En{}, bots, u, ix, signals)
   Bool.pick(String, C.Check.same(J.Json.show(W.Node.write(before)), J.Json.show(W.Node.write(after))), "same", "DIFFERENT")
 

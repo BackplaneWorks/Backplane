@@ -1533,11 +1533,21 @@ kbd { font: calc(10px * var(--text-scale, 100) / 100)/1 var(--mono); color: var(
 @media (max-width: 1300px) { .topbar .kv.branch { display: none; } }
 @media (max-width: 1180px) { .topbar .cmd { width: auto; flex: none; container-type: normal; } .topbar .cmd-text { display: none; } }
 @media (max-width: 960px) { .topbar .name, .topbar .kv.changes { display: none; } }
+/* folded under the top bar: a 44 px strip (view.bend's View.strip), the
+   button that unfolds it over the projects' badges, each in its colour */
+.side-strip { display: none; }
 @media (min-width: 761px) {
-  html[data-side="shut"] .app.top { grid-template-columns: 0 minmax(0, 1fr); }
-  html[data-side="shut"] .app.top.panel { grid-template-columns: 0 minmax(0, 1fr) var(--viewer-w, minmax(0, 1.1fr)); }
-  html[data-side="shut"] .app.top .sidebar { display: none; }
-  html[data-side="shut"] .topbar .side-toggle svg { transform: none; }
+  html[data-side="shut"] .app.top { grid-template-columns: 44px minmax(0, 1fr); }
+  html[data-side="shut"] .app.top.panel { grid-template-columns: 44px minmax(0, 1fr) var(--viewer-w, minmax(0, 1.1fr)); }
+  html[data-side="shut"] .app.top .sidebar { overflow-x: hidden; padding: 0; scrollbar-width: none; }
+  html[data-side="shut"] .app.top .sidebar > :not(.side-strip) { display: none; }
+  html[data-side="shut"] .app.top .sidebar > .side-strip { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 0; }
+  html[data-side="shut"] .topbar .side-toggle svg, html[data-side="shut"] .side-strip .side-toggle svg { transform: none; }
+  .side-strip button { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0; background: none; border-color: transparent; color: var(--tint, var(--dim)); }
+  .side-strip button:hover { border-color: var(--line); background: var(--raise); }
+  .side-strip .side-toggle { color: var(--dim); margin-bottom: 4px; }
+  .side-strip .side-toggle:hover { color: var(--text); }
+  .side-strip .strip-project.on { border-color: var(--tint, var(--accent)); background: var(--raise); }
 }
 /* the tour lifts the part of the bar it points at */
 .app.top.tour-add .sidebar .find.with-add, .app.top.tour-head .topbar .crumbs, .app.top.tour-head .topbar .kvs, .app.top.tour-settings .topbar .tb { position: relative; z-index: 31; background: var(--panel); }

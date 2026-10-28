@@ -200,6 +200,7 @@ def WS.act(action: String, +u: U.Ui, +value: String) -> U.Act:
     case "ws-palette-enter": WS.palette.run(u, U.Palette.index(u))
     case "ws-palette-run": WS.palette.run(u, Maybe.default(&2, Nat, Nat.read(value), 0n))
     case "ws-key": WS.key(value, u)
+    case "ws-project": WS.project(u, value)
     case "term-toggle": WS.term.toggle(u, value)
     case "ws-term-hide": WS.term.hide(u)
     case "ws-term-resize": WS.term.resize(u, value)
