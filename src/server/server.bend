@@ -175,6 +175,18 @@ type Wire is Data:
   # At most one floating pane in flight; its writer reports credit at once.
   WTerminal{json: J.Json, charge: Nat}
 
+# Receipts from owned IO jobs are distinct from client RPC, including client 0.
+# Only completed local metadata effects belong here. Worktree readiness also
+# captures the provider/account owner before it may release queued model work.
+type JobReceipt is Data:
+  JobNote{thread: String, tone: String, summary: String}
+  JobBranch{thread: String, branch: String}
+  JobUnrooted{thread: String}
+  JobMerged{thread: String, url: String}
+  JobSnoozed{thread: String, until: Nat}
+  JobWorktree{thread: String, branch: String, path: String, provider: String, binding: String}
+  JobLocal{thread: String, provider: String, binding: String}
+
 type Msg is Data:
   Desktop{client: U32, kind: String, text: String, out: Chan(String), epoch: String, lease: String}
   MailRouted{body: MB.Body}
@@ -210,6 +222,7 @@ type Msg is Data:
   Ping{client: U32, payload: List<&2, U32>}
   Leave{client: U32}
   Rpc{client: U32, text: String}
+  JobReported{receipt: JobReceipt}
   AgentLine{thread: String, line: String}
   # why is the exit in words (B.Exit.why), made off the hub
   AgentGone{thread: String, code: U32, pid: U32, why: String}
@@ -2421,8 +2434,13 @@ def GitJob.say(+inbox: Chan(Msg), +m: String, p: List<&2, J.KV>) -> IO(Unit):
     ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, Rpc{0, J.Json.show(J.Json.obj([J.KV{"id", J.Num{"0"}}, J.KV{"m", J.Str{m}}, J.KV{"p", J.Json.obj(p)}]))})
     return Unit{}
 
+def GitJob.report(+inbox: Chan(Msg), receipt: JobReceipt) -> IO(Unit):
+  do IO<Unit>:
+    ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, JobReported{receipt})
+    return Unit{}
+
 def GitJob.note(+inbox: Chan(Msg), +thread: String, +tone: String, +summary: String) -> IO(Unit):
-  GitJob.say(inbox, "thread.note", [J.KV{"thread", J.Str{thread}}, J.KV{"tone", J.Str{tone}}, J.KV{"kind", J.Str{"git"}}, J.KV{"summary", J.Str{summary}}])
+  GitJob.report(inbox, JobNote{thread, tone, summary})
 
 def GitJob.reply(+inbox: Chan(Msg), +client: U32, +id: String, +ok: Bool, r: J.Json) -> IO(Unit):
   do IO<Unit>:
@@ -2509,24 +2527,24 @@ def GitJob.cp0.k(n: Nat, +cwd: String, +thread: String) -> IO(Unit):
 # the project folder (thread.local); only a worktree asked for by name
 # ("worktree" rather than the default "auto") reports that as an error.
 
-def WtJob.skip(+inbox: Chan(Msg), +thread: String, +tone: String, +why: String) -> IO(Unit):
+def WtJob.skip(+inbox: Chan(Msg), +thread: String, +tone: String, +why: String, +provider: String, +binding: String) -> IO(Unit):
   do IO<Unit>:
     GitJob.note(inbox, thread, tone, "working in the project folder: " ++ why)
-    GitJob.say(inbox, "thread.local", [J.KV{"thread", J.Str{thread}}])
+    GitJob.report(inbox, JobLocal{thread, provider, binding})
 
-def WtJob.made(+inbox: Chan(Msg), +thread: String, +branch: String, +path: String, carried: Bool) -> IO(Unit):
+def WtJob.made(+inbox: Chan(Msg), +thread: String, +branch: String, +path: String, carried: Bool, +provider: String, +binding: String) -> IO(Unit):
   do IO<Unit>:
-    GitJob.say(inbox, "thread.worktree", [J.KV{"thread", J.Str{thread}}, J.KV{"branch", J.Str{branch}}, J.KV{"path", J.Str{path}}])
+    GitJob.report(inbox, JobWorktree{thread, branch, path, provider, binding})
     GitJob.note(inbox, thread, "info", "worktree " ++ path ++ Bool.pick(String, carried, " (with the folder's uncommitted work)", ""))
 
-def WtJob.done(+r: String, +inbox: Chan(Msg), +thread: String, +mode: String, +branch: String, +carried: Bool) -> IO(Unit):
-  Bool.pick(IO(Unit), GT.Git.skipped(r), WtJob.skip(inbox, thread, Bool.pick(String, String.eq(mode, "worktree"), "error", "info"), String.drop(r, 6n)),
-    Bool.pick(IO(Unit), GT.Git.failed(r), WtJob.skip(inbox, thread, "error", String.trim(r)),
-      WtJob.made(inbox, thread, branch, r, carried)))
+def WtJob.done(+r: String, +inbox: Chan(Msg), +thread: String, +mode: String, +branch: String, +carried: Bool, +provider: String, +binding: String) -> IO(Unit):
+  Bool.pick(IO(Unit), GT.Git.skipped(r), WtJob.skip(inbox, thread, Bool.pick(String, String.eq(mode, "worktree"), "error", "info"), String.drop(r, 6n), provider, binding),
+    Bool.pick(IO(Unit), GT.Git.failed(r), WtJob.skip(inbox, thread, "error", String.trim(r), provider, binding),
+      WtJob.made(inbox, thread, branch, r, carried, provider, binding)))
 
-def WtJob.go(+hw: Bool, +inbox: Chan(Msg), +thread: String, +root: String, +mode: String) -> IO(Unit):
+def WtJob.go(+hw: Bool, +inbox: Chan(Msg), +thread: String, +root: String, +mode: String, +provider: String, +binding: String) -> IO(Unit):
   IO.bind(String, Unit, GT.Git.thread_wt(root, hw, GT.Git.branch.temp(B.Wt.seed(thread))),
-    r => WtJob.done(r, inbox, thread, mode, GT.Git.branch.sanitize(GT.Git.branch.temp(B.Wt.seed(thread))), hw))
+    r => WtJob.done(r, inbox, thread, mode, GT.Git.branch.sanitize(GT.Git.branch.temp(B.Wt.seed(thread))), hw, provider, binding))
 
 def WtJob.restore.k(n: Nat, +inbox: Chan(Msg), +thread: String, +path: String) -> IO(Unit):
   match n:
@@ -2537,26 +2555,26 @@ def WtJob.restore.k(n: Nat, +inbox: Chan(Msg), +thread: String, +path: String) -
 
 # a worktree made again gets back what it held when it was removed (the
 # checkpoint taken then), before anything that waited for it runs
-def WtJob.again.k(+r: String, +inbox: Chan(Msg), +thread: String, +branch: String) -> IO(Unit):
-  Bool.pick(IO(Unit), Bool.or(GT.Git.failed(r), GT.Git.skipped(r)), WtJob.done(r, inbox, thread, "worktree", branch, False{}),
-    IO.bind(Nat, Unit, GitJob.count(r, thread), n => IO.bind(Unit, Unit, WtJob.restore.k(n, inbox, thread, r), _ => WtJob.done(r, inbox, thread, "worktree", branch, False{}))))
+def WtJob.again.k(+r: String, +inbox: Chan(Msg), +thread: String, +branch: String, +provider: String, +binding: String) -> IO(Unit):
+  Bool.pick(IO(Unit), Bool.or(GT.Git.failed(r), GT.Git.skipped(r)), WtJob.done(r, inbox, thread, "worktree", branch, False{}, provider, binding),
+    IO.bind(Nat, Unit, GitJob.count(r, thread), n => IO.bind(Unit, Unit, WtJob.restore.k(n, inbox, thread, r), _ => WtJob.done(r, inbox, thread, "worktree", branch, False{}, provider, binding))))
 
 # a fork's worktree: a new branch like any thread's, then the source
 # thread's last checkpoint restored into it, so the fork starts from the
 # files as the source left them
-def WtJob.fork.k(+r: String, +inbox: Chan(Msg), +thread: String, +src: String, +branch: String) -> IO(Unit):
-  Bool.pick(IO(Unit), Bool.or(GT.Git.failed(r), GT.Git.skipped(r)), WtJob.done(r, inbox, thread, "fork", branch, False{}),
-    IO.bind(Nat, Unit, GitJob.count(r, src), n => IO.bind(Unit, Unit, WtJob.restore.k(n, inbox, src, r), _ => WtJob.done(r, inbox, thread, "fork", branch, False{}))))
+def WtJob.fork.k(+r: String, +inbox: Chan(Msg), +thread: String, +src: String, +branch: String, +provider: String, +binding: String) -> IO(Unit):
+  Bool.pick(IO(Unit), Bool.or(GT.Git.failed(r), GT.Git.skipped(r)), WtJob.done(r, inbox, thread, "fork", branch, False{}, provider, binding),
+    IO.bind(Nat, Unit, GitJob.count(r, src), n => IO.bind(Unit, Unit, WtJob.restore.k(n, inbox, src, r), _ => WtJob.done(r, inbox, thread, "fork", branch, False{}, provider, binding))))
 
-def WtJob.fork(+inbox: Chan(Msg), +thread: String, +root: String, +src: String) -> IO(Unit):
+def WtJob.fork(+inbox: Chan(Msg), +thread: String, +root: String, +src: String, +provider: String, +binding: String) -> IO(Unit):
   IO.bind(String, Unit, GT.Git.thread_wt(root, False{}, GT.Git.branch.temp(B.Wt.seed(thread))),
-    r => WtJob.fork.k(r, inbox, thread, src, GT.Git.branch.sanitize(GT.Git.branch.temp(B.Wt.seed(thread)))))
+    r => WtJob.fork.k(r, inbox, thread, src, GT.Git.branch.sanitize(GT.Git.branch.temp(B.Wt.seed(thread))), provider, binding))
 
-def WtJob.run(+inbox: Chan(Msg), +thread: String, +root: String, +mode: String, +branch: String) -> IO(Unit):
+def WtJob.run(+inbox: Chan(Msg), +thread: String, +root: String, +mode: String, +branch: String, +provider: String, +binding: String) -> IO(Unit):
   Bool.pick(IO(Unit), String.eq(mode, "again"),
-    IO.bind(String, Unit, GT.Git.thread_wt.again(root, branch), r => WtJob.again.k(r, inbox, thread, branch)),
-    Bool.pick(IO(Unit), String.eq(mode, "fork"), WtJob.fork(inbox, thread, root, branch),
-      IO.bind(List<&2, String>, Unit, K.Io.names(root), ns => WtJob.go(B.Wt.hardware(ns), inbox, thread, root, mode))))
+    IO.bind(String, Unit, GT.Git.thread_wt.again(root, branch), r => WtJob.again.k(r, inbox, thread, branch, provider, binding)),
+    Bool.pick(IO(Unit), String.eq(mode, "fork"), WtJob.fork(inbox, thread, root, branch, provider, binding),
+      IO.bind(List<&2, String>, Unit, K.Io.names(root), ns => WtJob.go(B.Wt.hardware(ns), inbox, thread, root, mode, provider, binding))))
 
 # Removing a thread's worktree (M.Worktree.drop): its state is kept first as
 # a checkpoint (a hidden ref, so nothing is lost; the branch stays too),
@@ -2566,7 +2584,7 @@ def WtJob.run(+inbox: Chan(Msg), +thread: String, +root: String, +mode: String, 
 def RmJob.done(+r: String, +inbox: Chan(Msg), +thread: String, +branch: String) -> IO(Unit):
   Bool.pick(IO(Unit), GT.Git.failed(r), Log.info("worktree not removed: " ++ r),
     do IO<Unit>:
-      GitJob.say(inbox, "thread.unrooted", [J.KV{"thread", J.Str{thread}}])
+      GitJob.report(inbox, JobUnrooted{thread})
       GitJob.note(inbox, thread, "info", "worktree removed; branch " ++ branch ++ " and its last state are kept"))
 
 def RmJob.top(+top: String, +inbox: Chan(Msg), +thread: String, +root: String, +branch: String) -> IO(Unit):
@@ -2589,7 +2607,7 @@ def RmJob.there(r: P.Ran, +inbox: Chan(Msg), +thread: String, +wt: String, +root
     case P.Ran{0, _}:
       IO.bind(String, Unit, GT.Git.root(wt), top => RmJob.ours(top, inbox, thread, wt, root, branch))
     case _:
-      GitJob.say(inbox, "thread.unrooted", [J.KV{"thread", J.Str{thread}}])
+      GitJob.report(inbox, JobUnrooted{thread})
 
 # a folder with no .git in it is no worktree (gone, or only an empty folder
 # left behind inside another checkout): the thread is unrooted as when the
@@ -2605,7 +2623,7 @@ def MergeJob.tell(hs: List<&2, J.KV>, +inbox: Chan(Msg)) -> IO(Unit):
     case Nil{}:
       IO.pure(Unit, Unit{})
     case J.KV{th, u} <> t:
-      IO.bind(Unit, Unit, GitJob.say(inbox, "thread.merged", [J.KV{"thread", J.Str{th}}, J.KV{"url", u}]), _ => MergeJob.tell(t, inbox))
+      IO.bind(Unit, Unit, GitJob.report(inbox, JobMerged{th, J.Json.as_str(Some{u}, "")}), _ => MergeJob.tell(t, inbox))
 
 # the commits a due thread's worktree made itself (its HEAD reflog's commits,
 # cherry-picks and rebased picks; never checkouts, so a branch it only
@@ -2685,7 +2703,7 @@ def GitJob.diff(+cwd: String, +thread: String, +a: String, +b: String) -> IO(Str
 
 # Keep profile metadata boxed so adding it cannot widen native/kept ABI records.
 type TextOwner is Data:
-  TextOwner{tx: AG.Tx, home: String, profile: String, epoch: String, binding: String}
+  TextOwner{tx: AG.Tx, home: String, profile: String, epoch: String, binding: String, threadProvider: String}
 
 type TextScope is Data:
   TextScope{owners: List<&2, TextOwner>}
@@ -2693,11 +2711,11 @@ type TextScope is Data:
 def TextScope.owner(t: TextScope) -> TextOwner:
   match t:
     case TextScope{o <> _}: o
-    case _: TextOwner{AG.Tx{"claude", ""}, "", "", "0", ""}
+    case _: TextOwner{AG.Tx{"claude", ""}, "", "", "0", "", "claude"}
 
 def TextScope.tx.owner(o: TextOwner) -> AG.Tx:
   match o:
-    case TextOwner{tx, _, _, _, _}: tx
+    case TextOwner{tx, _, _, _, _, _}: tx
 
 def TextScope.tx(t: TextScope) -> AG.Tx:
   TextScope.tx.owner(TextScope.owner(t))
@@ -2708,7 +2726,14 @@ def TextScope.provider(t: TextScope) -> String:
 def TextScope.of(+st: M.State, +home: String, +thread: String) -> TextScope:
   +p = M.Thread.provider(B.Hub.thread(st, thread))
   +profile = ACCT.Accounts.id(st, thread, p)
-  TextScope{[TextOwner{Bool.pick(AG.Tx, String.is_empty(profile), AG.Text.of(st), AG.Tx{p, B.Turn.model(B.Hub.thread(st, thread))}), home, profile, Nat.show(ACCT.Accounts.epoch(st, thread, p)), ACCT.Accounts.owner(st, thread)}]}
+  TextScope{[TextOwner{Bool.pick(AG.Tx, String.is_empty(profile), AG.Text.of(st), AG.Tx{p, B.Turn.model(B.Hub.thread(st, thread))}), home, profile, Nat.show(ACCT.Accounts.epoch(st, thread, p)), ACCT.Accounts.owner(st, thread), p}]}
+
+def TextScope.thread_provider.owner(o: TextOwner) -> String:
+  match o:
+    case TextOwner{_, _, _, _, _, provider}: provider
+
+def TextScope.thread_provider(t: TextScope) -> String:
+  TextScope.thread_provider.owner(TextScope.owner(t))
 
 def TextScope.args(xs: List<&2, String>) -> List<&2, String>:
   match xs:
@@ -2722,7 +2747,7 @@ def TextScope.spawn.legacy(legacy: Bool, +writer: AG.Tx, +home: String, +profile
 
 def TextScope.spawn.owner(+o: TextOwner, +system: String) -> IO(Result<&1, &1, U32 & String, U32 & Socket>):
   match o:
-    case TextOwner{+writer, +home, +profile, +epoch, _}:
+    case TextOwner{+writer, +home, +profile, +epoch, _, _}:
       TextScope.spawn.legacy(String.is_empty(profile), writer, home, profile, epoch, system)
 
 def TextScope.spawn(+t: TextScope, +system: String) -> IO(Result<&1, &1, U32 & String, U32 & Socket>):
@@ -2730,7 +2755,7 @@ def TextScope.spawn(+t: TextScope, +system: String) -> IO(Result<&1, &1, U32 & S
 
 def TextScope.binding.owner(o: TextOwner) -> String:
   match o:
-    case TextOwner{_, _, _, _, binding}: binding
+    case TextOwner{_, _, _, _, binding, _}: binding
 
 def TextScope.binding(t: TextScope) -> String:
   TextScope.binding.owner(TextScope.owner(t))
@@ -2787,7 +2812,7 @@ def SumJob.run(+tx: TextScope, +inbox: Chan(Msg), +id: String, +kind: String, +i
 
 def AgentJob.named(+r: String, +inbox: Chan(Msg), +thread: String) -> IO(Unit):
   Bool.pick(IO(Unit), GT.Git.failed(r), GitJob.note(inbox, thread, "error", "branch name: " ++ r),
-    GitJob.say(inbox, "thread.branch", [J.KV{"thread", J.Str{thread}}, J.KV{"branch", J.Str{r}}]))
+    GitJob.report(inbox, JobBranch{thread, r}))
 
 # a name another branch has already gets the temporary one's hex
 def AgentJob.renamed(+r: String, +cwd: String, +old: String, +frag: String, +inbox: Chan(Msg), +thread: String) -> IO(Unit):
@@ -2837,7 +2862,7 @@ def AgentJob.act(+tx: TextScope, +inbox: Chan(Msg), +client: U32, +id: String, +
 def GitJob.go(i: Nat, +tx: TextScope, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +a: String, +b: String, +home: String, +seed: Nat) -> IO(Unit):
   match i:
     case 0n:
-      WtJob.run(inbox, thread, cwd, a, b)
+      WtJob.run(inbox, thread, cwd, a, b, TextScope.thread_provider(tx), TextScope.binding(tx))
     case 1n:
       IO.bind(Nat, Unit, GitJob.count(cwd, thread), n => GitJob.cp0.k(n, cwd, thread))
     case 2n:
@@ -2998,7 +3023,7 @@ def Beat.loop(fuel: Nat, +inbox: Chan(Msg)) -> IO(Unit):
 def Snooze.tomorrow(+inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +now: String) -> IO(Unit):
   do IO<Unit>:
     r : P.Ran <- P.Proc.run("date", ["+%z"], "/")
-    GitJob.say(inbox, "thread.snooze", [J.KV{"thread", J.Str{thread}}, J.KV{"until", J.Num{Nat.show(M.Snooze.tomorrow(Maybe.default(&2, Nat, Nat.read(now), 0n), Snooze.tz(r)))}}])
+    GitJob.report(inbox, JobSnoozed{thread, M.Snooze.tomorrow(Maybe.default(&2, Nat, Nat.read(now), 0n), Snooze.tz(r))})
     GitJob.reply(inbox, client, id, True{}, J.Json.obj([J.KV{"thread", J.Str{thread}}]))
 
 def Env.or(r: Result<&1, &1, U32 & String, String>, d: String) -> String:
@@ -3173,7 +3198,7 @@ def GitJob.run.k(i: Nat, +tx: TextScope, +job: String, +inbox: Chan(Msg), +clien
     case 1n:
       Snooze.tomorrow(inbox, client, id, thread, a)
     case 2n:
-      WtJob.run(inbox, thread, cwd, a, b)
+      WtJob.run(inbox, thread, cwd, a, b, TextScope.thread_provider(tx), TextScope.binding(tx))
     case 3n:
       MergeJob.run(inbox, cwd, a)
     case 4n:
@@ -11422,6 +11447,40 @@ def Hub.rpc.k(p: M.State & Hub, +client: U32, +text: String, +now: Nat) -> IO(Hu
 def Hub.rpc.here(h: Hub, +client: U32, +text: String, +now: Nat) -> IO(Hub):
   Hub.rpc.k(Hub.state(h), client, text, now)
 
+# This fixed method set is constructible only by server IO jobs, never by a
+# JSON origin marker or a client id. Reuse the canonical metadata deciders.
+def Hub.job.metadata(h: Hub, +method: String, params: List<&2, J.KV>, +now: Nat) -> IO(Hub):
+  Hub.rpc.here(h, 0, J.Json.show(J.Json.obj([J.KV{"id", J.Num{"0"}}, J.KV{"m", J.Str{method}}, J.KV{"p", J.Json.obj(params)}])), now)
+
+# A stale completion still describes a real filesystem effect. Record it and
+# clear pending IO, but never let that old job start a different owner's turn.
+def Hub.job.ready.step(+st: M.State, +thread: String, +provider: String, +binding: String, +change: M.Change, +now: Nat) -> B.Step:
+  Bool.pick(B.Step, Bool.and(String.eq(M.Thread.provider(B.Hub.thread(st, thread)), provider), String.eq(ACCT.Accounts.owner(st, thread), binding)),
+    B.Wt.ready(st, now, 0, "0", thread, change),
+    B.Step{change <> B.Wt.answered(st, thread, now), Nil{}})
+
+def Hub.job.ready(h: Hub, +thread: String, +provider: String, +binding: String, change: M.Change, +now: Nat) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
+      Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, Hub.job.ready.step(st, thread, provider, binding, change, now))
+
+def Hub.job.report(h: Hub, receipt: JobReceipt, +now: Nat) -> IO(Hub):
+  match receipt:
+    case JobNote{thread, tone, summary}:
+      Hub.job.metadata(h, "thread.note", [J.KV{"thread", J.Str{thread}}, J.KV{"tone", J.Str{tone}}, J.KV{"kind", J.Str{"git"}}, J.KV{"summary", J.Str{summary}}], now)
+    case JobBranch{thread, branch}:
+      Hub.job.metadata(h, "thread.branch", [J.KV{"thread", J.Str{thread}}, J.KV{"branch", J.Str{branch}}], now)
+    case JobUnrooted{thread}:
+      Hub.job.metadata(h, "thread.unrooted", [J.KV{"thread", J.Str{thread}}], now)
+    case JobMerged{thread, url}:
+      Hub.job.metadata(h, "thread.merged", [J.KV{"thread", J.Str{thread}}, J.KV{"url", J.Str{url}}], now)
+    case JobSnoozed{thread, until}:
+      Hub.job.metadata(h, "thread.snooze", [J.KV{"thread", J.Str{thread}}, J.KV{"until", J.Num{Nat.show(until)}}], now)
+    case JobWorktree{+thread, branch, path, provider, binding}:
+      Hub.job.ready(h, thread, provider, binding, M.WorktreeSet{thread, branch, path, now}, now)
+    case JobLocal{+thread, provider, binding}:
+      Hub.job.ready(h, thread, provider, binding, M.WorktreeSkipped{thread, now}, now)
+
 # A client's request about something elsewhere goes to its machine; any
 # other stays here
 def Far.rpc.go(m: Maybe<&2, FR.Route>, h: Hub, +client: U32, +o: J.Json, +text: String, +now: Nat) -> IO(Hub):
@@ -12570,11 +12629,9 @@ def Hub.rpc.thin_cap(thin: Bool, h: Hub, +client: U32, +text: String, +now: Nat)
     case True{}: Hub.rpc.thin_short(TVW.Wire.within(text, 262144n), h, client, text, now)
     case False{}: Hub.rpc.parse(h, client, text, now)
 
-# A request from no connected client is dropped (a client that left),
-# except client 0: the hub's own jobs (GitJob.say: a thread's worktree, its
-# notes; a dead push token) and the in-process window send theirs as 0, and
-# a headless hub has no client 0. Dropping those lost every new thread's
-# worktree, so its first turn never started (far_e2e on a headless hub).
+# Client 0 is also the in-process window. It retains the same account fences
+# as all other RPC. Completed IO metadata uses typed JobReported messages;
+# writing-model callbacks (title/summary) remain RPC with captured ownership.
 def Hub.rpc.own(own: Bool, h: Hub, +client: U32, +text: String, +now: Nat) -> IO(Hub):
   match own:
     case True{}: Hub.rpc.thin_cap(False{}, h, client, text, now)
@@ -16016,6 +16073,8 @@ def Msg.kind(m: Msg) -> String:
       "leave"
     case ThinRead{_, _, _, _, _}:
       "thin-read"
+    case JobReported{_}:
+      "job_reported"
     case Rpc{_, _}:
       "rpc"
     case AgentLine{_, _}:
@@ -17312,6 +17371,8 @@ def Hub.handle(h: Hub, m: Msg, +now: Nat) -> IO(Hub):
       Hub.leave(h, client, now)
     case ThinRead{client, gen, view, target, text}:
       Hub.thin.read_job(h, client, gen, view, target, text, now)
+    case JobReported{receipt}:
+      Hub.job.report(h, receipt, now)
     case Rpc{client, text}:
       Hub.rpc(h, client, text, now)
     case AgentLine{tag, line}:
