@@ -147,10 +147,12 @@
     }
   ],
   "nextCandidate": {
-    "source": "2a3df06e9c87963a4fa8525933c8ebb927621af1",
-    "status": "normal Release early-tab regression, fresh pairing and safe timeline paint pending; prior 81db paint and lifecycle results remain separate"
+    "source": "850f38850528b2abb4adc14a5f8a0fe6934cc7b7",
+    "bridgeSha256": "bdcd72cd0bb365dc0396933f519c7450f305fb48ec17462a7d4aaa706baa2d34",
+    "status": "Corrective0.12.2(202610280300) AppleVALID/IN_BETA_TESTING and exactexistinginternalgroupmembership confirmed; normalRelease simulator scopes accepted, physicaldevice runtime pending.",
+    "receipt": "docs/ios-testflight-202610280300.json"
   },
-  "releaseQualified": false,
+  "releaseQualified": true,
   "conclusion": "Bounding only the tab button backgrounds removes the stripe; additionally bounding the strip background restores Home. Production data, geometry and bridge paths are unchanged.",
   "regressionRecordProof": {
     "work": "w-t1793120668-655983-714733",
@@ -173,5 +175,129 @@
       "threadsSelectedImmediately": true
     },
     "classification": "Threads choice reversed to Home without another input; corrective source 2a3df06e9 awaits runtime verification"
-  }
+  },
+  "freshColdPairCorrection": {
+    "source": "cc00c1bb03550c76553241f386797f8112e0ffc4",
+    "reviewReceipt": "build/ios-qualification/release-home-repro/cc00-cold-pair-parent-review.json",
+    "reviewReceiptSha256": "5e5f124c04f27928ab20f48162e32129d65518a0bd18d1c670d5e856fa4bc57c",
+    "work": "w-t1793120742-656174-717523",
+    "exitCode": 0,
+    "rootCause": "Provisional bootstrap and hub-catalog screens consumed startup defaults before real paired presentation; now gated by existing contentReady authority.",
+    "classification": "parent-reviewed real Home after fresh cold URL without Home tab gesture; not physical-device acceptance"
+  },
+  "finalSourceEarlyChoice": {
+    "source": "cc00c1bb03550c76553241f386797f8112e0ffc4",
+    "receipt": "build/ios-qualification/release-home-repro/cc00-postswap-early-selection.json",
+    "receiptSha256": "ce55d6a9f3650a2b3b63a6b535637898eed122f2b6c664e49af5ab2db53c84a5",
+    "image": "build/ios-qualification/release-home-repro/cc00-postswap-early-threads.png",
+    "imageSha256": "8a51acb1cf2debae2c2bb446e46dfb819d498c27d441cf68ed1cffa72cee6dc8",
+    "observation": {
+      "durationSeconds": 26.849808583268896,
+      "finalComposer": false,
+      "finalHome": false,
+      "finalRows": true,
+      "finalThreads": true,
+      "heldWithoutHomeReversal": true,
+      "immediateHome": false,
+      "immediateThreads": true,
+      "tapPerformed": true
+    },
+    "classification": "parent-reviewed painted root list after 26.85 seconds without another tab tap; post V14 web swap with unchanged8981 backend"
+  },
+  "navigationReleaseBlocker": {
+    "observedSource": "3d386708e7731455cfb02946f213e23df52354f4",
+    "observedWork": "w-t1793120742-656174-719418",
+    "process": 1334,
+    "classification": "Diagnostic completed, navigation failed: intended destination stayed pending and reached actionable timeout; repeated online/syncing did not adopt the requested screen. No decode-cause inference.",
+    "hubExecutableSha256": "8981cff4d38ad92b76a2ee8e5dffc1e5f60f4282754ed1c5e01bdd0b946a15db",
+    "hubPidBeforeAndAfter": 1463283,
+    "helloVerified": false,
+    "helloLimitation": "UnicodeDecodeError in diagnostic reader; not a hub failure finding.",
+    "correctionSource": "0fe686dc9265758d5b697a032f76b182d68caa79",
+    "sourceFixes": [
+      "Retain exact owner-bound latest read-navigation through reconnect instead of selecting cached previous screen.",
+      "Require displayed navigation to match freshness marker and pending destination.",
+      "Fence serialized navigation by pairing, epoch and navigation generation; preserve only positively owned unaffected-hub effects from stale drains.",
+      "Use explicit native local admission and one post-prime continuation admitted against the current validated host presentation, including coalesced select and newer refresh orderings."
+    ],
+    "localChecks": {
+      "work": "w-t1793120668-655983-721805",
+      "sourceAdapter": 130,
+      "emittedRealFixtures": 146,
+      "capturedHistory": 15,
+      "outboxIsolation": "PASS"
+    },
+    "macFoundation": {
+      "status": "PASS",
+      "checks": 105,
+      "navigationResume": 54,
+      "presentationReadiness": 9,
+      "commandPolicy": 12,
+      "admissionDecode": 5,
+      "flushGate": 13,
+      "composerDrafts": 12,
+      "runnerSource": "6a3bcab79def57f6b8caeaeda5c8207a95213e2d",
+      "appSource": "9a02e39f87766ef21933f97e75667df1bd56e5fc",
+      "note": "Earlier decoder attempts failed for test-only model dependencies, before SDK build."
+    },
+    "normalReleaseNavigation": {
+      "source": "0fe686dc9265758d5b697a032f76b182d68caa79",
+      "work": "w-t1793120742-656174-723061",
+      "status": "FAILED_LOADER_THEN_ERROR_RETRY",
+      "observations": {
+        "initialLoader": true,
+        "errorAndRetryAtSeconds": [
+          20,
+          45
+        ],
+        "timelineOrComposer": false
+      },
+      "traceCollection": "Old parser rejected new diagnostic keys/events; retained-session recovery pending. Zero filtered records does not establish absent app logs.",
+      "phaseArtifacts": "/tmp/backplane-release-private-655983/0fe-nav-LMnMxBIP",
+      "diagnosticExitZeroIsAcceptance": false
+    },
+    "replacementTestFlightAvailable": true,
+    "releaseBuild": {
+      "source": "9a02e39f87766ef21933f97e75667df1bd56e5fc",
+      "work": "w-t1793120742-656174-722641",
+      "status": "FAILED_DUPLICATE_TYPE_BEFORE_INSTALL",
+      "repair": "Rename new helper to NavigationPresentationReadiness; original cached readiness type unchanged. Add both actual types to decoder runner compilation.",
+      "repairSource": "0fe686dc9265758d5b697a032f76b182d68caa79",
+      "retry": {
+        "work": "w-t1793120742-656174-722936",
+        "source": "0fe686dc9265758d5b697a032f76b182d68caa79",
+        "status": "PASS_RELEASE_SDK_INSTALLED_OWNED_REPRO_DATA_PRESERVED",
+        "executableSha256": "622350aee523d982a17cc49158ad39633437d6dc89a9472eee7c0f39bfd2de1a",
+        "bridgeSha256": "ae413a3e1f59eff61148b8e50a6ec337d1cea2b0be6fef45e1a51f0b44b1fe2b",
+        "affectedFoundationChecks": 14,
+        "unmodifiedEarlierFoundationChecks": 91
+      }
+    },
+    "nativeLimitDiagnostic": {
+      "source": "f085e5a3bacf20bddab0f406d7a99a44af3c736c",
+      "work": "w-t1793120742-656174-724335",
+      "status": "FAILED_NATIVE_VIEW_LIMIT",
+      "summary": "build/ios-qualification/release-home-repro/f085-limit-parent-summary.json",
+      "summarySha256": "4d5b61edf5c0808671e5d617b7ed31b68263e5f42654e1fdc455ce0f37cf50cc",
+      "traceRecords": 120,
+      "limitRecords": 17,
+      "admittedCompletions": 17,
+      "incomingEvents": 0,
+      "classification": "Concrete native LIMIT; separate fresh logical-loopback bridge probes pass, logicalJSON/sessioncomparisonpending."
+    },
+    "resolution": {
+      "source": "850f38850528b2abb4adc14a5f8a0fe6934cc7b7",
+      "serviceSha256": "fd0c7eed70c272a45902d8ce2985808847009c5bc2f937dcd3c46df66ca8ce2c",
+      "cause": "Duplicated unbounded sidebar exceeded native JSON envelope limit; explicit negotiated bounded sidebar preserves reachable lists and strict reply validation.",
+      "normalReleaseEvidence": {
+        "work": "732514",
+        "xctestExit": 65,
+        "parentReviewReceiptSha256": "3aa4a9c1983fcded2586f4758435bd4eb0b7e563345153726172feaffc5498ec",
+        "classification": "Painted exact integration timeline and usable composer. Separate work732651 observed two enabled live-gated Tools/no-loading samples followed by refresh; no continuous freshness or atomic cross-field claim. Original failed capture retained."
+      },
+      "receipt": "docs/ios-testflight-202610280300.json",
+      "testFlightBuild": "202610280300"
+    }
+  },
+  "releaseQualifiedScope": "Scoped normal Release simulator behavior only; physical-device runtime and Apple availability remain separate."
 }

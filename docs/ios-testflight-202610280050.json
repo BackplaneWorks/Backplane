@@ -40,6 +40,8 @@
   },
   "runtimeQualificationStatus": "FAILED_FRESH_RELEASE_UI_REPRODUCTION",
   "knownReleaseDefect": "Compact tab backgrounds cover the body; user real iPhone report reproduced in exact Release simulator. Apple VALID/availability is separate from runtime acceptance.",
-  "correctiveCandidate": "2a3df06e9c87963a4fa8525933c8ebb927621af1",
-  "correctiveReleaseAvailable": false
+  "correctiveCandidate": "850f38850528b2abb4adc14a5f8a0fe6934cc7b7",
+  "correctiveReleaseAvailable": true,
+  "correctiveReceipt": "docs/ios-testflight-202610280300.json",
+  "correctiveReleaseBuild": "202610280300"
 }
