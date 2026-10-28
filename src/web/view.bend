@@ -616,13 +616,16 @@ def View.sidebar.head(top: Bool, +lc: I.Loc, +ms: List<&2, U.MRow>, +open: Map<&
           D.El{"div", "", [D.At{"class", "sidebar-tools"}], WI.WIcon.button("settings-link", "flag", "settings", MSG.T.palette.settings(lc), "settings", 16, MSG.T.palette.settings(lc))
               <> View.machines.loc(lc, Nat.is_gt(List.length(&2, U.MRow, ms), 1n), U.Flag.get(open, "machines"), ms)}]
 
-# Under the top bar the sidebar starts with its filter and the add-project
-# + beside it; else the filter follows the brand, Settings and the uberbot
+# Under the top bar the sidebar starts with its filter, the add-project +
+# beside it and its own fold, a chevron like the rail's (host.js's
+# side-toggle, as the top bar's fold button and Ctrl+B do); else the filter
+# follows the brand, Settings and the uberbot
 def View.sidebar.find(top: Bool, +lc: I.Loc, +active: Bool, +q: String) -> List<&2, D.Node> & List<&2, D.Node>:
   match top:
     case True{}:
       ([D.El{"div", "", [D.At{"class", "find with-add"}], [WB.WB.input("proj-find", "pq", q, Bool.pick(String, active, MSG.T.palette.search(lc), MSG.T.sidebar.search.projects(lc)), "proj-go"),
-        WI.WIcon.button("icon add-project", "proj-open", "", MSG.T.sidebar.add.project(lc), "plus", 16, "")]}], Nil{})
+        WI.WIcon.button("icon add-project", "proj-open", "", MSG.T.sidebar.add.project(lc), "plus", 16, ""),
+        WI.WIcon.button("icon side-fold", "side-toggle", "", "Fold the sidebar · Ctrl+B", "chevron-left", 16, "")]}], Nil{})
     case False{}:
       (Nil{}, View.find.loc(lc, active, q))
 
@@ -720,10 +723,11 @@ def View.sidebar.threads(+u: U.Ui, ix: U.SIx, rows: List<&2, U.SRow>, raw: List<
   List.append(&2, String, View.sidebar.threads.kind(String.eq(U.Side.view(U.Ui.state(u)), "active"), u, ix, rows, raw),
     U.Side.in_project(U.Side.legacy.shown(u), U.Ui.state(u), U.Side.cur(u)))
 
-# Folded (Ctrl+B or the top bar's fold button: host.js keeps it, style.css
-# shows it), the sidebar is a 44 px strip: the button that unfolds it, then
-# each project's badge in its colour, which opens the project (its thread,
-# as Alt+digit does); the open thread's project is marked
+# Folded (Ctrl+B, the top bar's fold button or the sidebar's own: host.js
+# keeps it, style.css shows it), the sidebar is a 44 px strip: the chevron
+# that unfolds it, pointing out, then each project's badge in its colour,
+# which opens the project (its thread, as Alt+digit does); the open
+# thread's project is marked
 # a project's face in the strip: the icon picked for it, else its initials
 # (core's Badge.initials), so projects left on the folder differ by more
 # than their colour
@@ -743,7 +747,7 @@ def View.strip.projects(ps: List<&2, String>, +st: M.State, +cur: String) -> Lis
 
 def View.strip(+lc: I.Loc, ps: List<&2, String>, +st: M.State, +cur: String) -> D.Node:
   D.El{"nav", "side-strip", [D.At{"class", "side-strip"}, D.At{"aria-label", MSG.T.tour.title.projects(lc)}],
-    WI.WIcon.button("icon side-toggle", "side-toggle", "", "Show the sidebar · Ctrl+B", "panel-right", 16, "") <> View.strip.projects(ps, st, cur)}
+    WI.WIcon.button("icon side-toggle", "side-toggle", "", "Unfold the sidebar · Ctrl+B", "chevron-right", 16, "") <> View.strip.projects(ps, st, cur)}
 
 def View.sidebar.strip(n: D.Node, strip: D.Node) -> D.Node:
   match n:

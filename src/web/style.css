@@ -1542,7 +1542,7 @@ html:lang(ja) :is(.set-text, .set-ctl) { min-width: 0; }
   html[data-rail="compact"] .workspace-feedback { display: none; }
   html[data-rail="compact"] .rail-toggle svg { transform: scaleX(-1); }
 }
-@media (max-width: 760px) { .rail-toggle, .sidebar .side-toggle { display: none; } }
+@media (max-width: 760px) { .rail-toggle, .sidebar .side-toggle, .sidebar .side-fold { display: none; } }
 
 /* The top bar (view.bend's View.chrome.bar, for a host that asks for it,
    .app.top): the window's one bar across the top. The mark, where you are as
@@ -1611,6 +1611,9 @@ kbd { font: calc(10px * var(--text-scale, 100) / 100)/1 var(--mono); color: var(
 .app.top .sidebar .find.with-add { position: sticky; top: 0; z-index: 6; background: var(--panel); display: flex; align-items: center; gap: 4px; padding: 8px 6px 8px 12px; }
 .app.top .sidebar .find.with-add input { flex: 1; min-width: 0; width: auto; }
 .app.top .sidebar .find .add-project { flex: none; height: 26px; padding: 0 5px; }
+/* the sidebar's own fold, a chevron like the rail's (view.bend's View.sidebar.find) */
+.app.top .sidebar .find .side-fold { flex: none; height: 26px; padding: 0 3px; margin-left: -2px; color: var(--faint); border-color: transparent; background: none; }
+.app.top .sidebar .find .side-fold:hover { color: var(--text); border-color: var(--line); }
 .app.top .sidebar-tools { position: static; }
 .thread-content > .subs.dock { border-bottom: 1px solid var(--line); }
 .thread-content > .subs.dock .subs-body { border-top: 0; }
