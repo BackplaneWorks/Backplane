@@ -3635,7 +3635,7 @@ def Hub.prompt.base(+cfg: Cfg, +st: M.State, +thread: String, +cwd: String, fs: 
   String.join([Cfg.prompt(cfg),
     Hub.prompt.kicad(Cfg.rt(cfg), Bool.not(String.eq(M.Setting.get(st, "kicad.ipc", "on"), "off"))),
     Hub.prompt.files(cwd, fs),
-    Q.Prompt.orchestration(M.Task.may_delegate(B.Task.depth(st, thread)), Cfg.mtext(cfg)), Q.Prompt.background(), OR.Order.prompt.project.k(OR.Order.enabled(M.Setting.get(st, "order.enabled", "off")))], "\n\n") ++ Bool.pick(String, String.is_empty(keys), "", "\n\n" ++ keys) ++ Hub.prompt.machines(cfg) ++ BH.Bots.prompt.for(st, thread, Cfg.home(cfg)) ++ Hub.prompt.buy(st, thread)
+    Q.Prompt.orchestration(M.Task.may_delegate(B.Task.depth(st, thread)), Cfg.mtext(cfg)), Q.Prompt.background(), OR.Order.prompt.project.k(OR.Order.enabled.of(st))], "\n\n") ++ Bool.pick(String, String.is_empty(keys), "", "\n\n" ++ keys) ++ Hub.prompt.machines(cfg) ++ BH.Bots.prompt.for(st, thread, Cfg.home(cfg)) ++ Hub.prompt.buy(st, thread)
 
 def Hub.prompt(+cfg: Cfg, +st: M.State, +thread: String, +cwd: String, fs: K.Files, +keys: String) -> String:
   Q.Prompt.lang.add(Hub.prompt.base(cfg, st, thread, cwd, fs, keys), M.Setting.get(st, "agent.lang", "off"))
@@ -15415,7 +15415,7 @@ def Hub.order.on(on: Bool, buy: Bool, h: Hub, +thread: String, +o: J.Json, +repl
 def Hub.mcp.od(od: Bool, h: Hub, +thread: String, +o: J.Json, body: String, +reply: Chan(String), +now: Nat) -> IO(Hub):
   match od h:
     case True{} Hub{+st, f, ls, cl, as, inbox, cfg, note}:
-      Hub.order.on(OR.Order.enabled(M.Setting.get(st, "order.enabled", "off")), Bool.or(BH.Bots.buy.is(st, thread), String.eq(Gg.tool(o), "order_review")), Hub{st, f, ls, cl, as, inbox, cfg, note}, thread, o, reply, now)
+      Hub.order.on(OR.Order.enabled.of(st), Bool.or(BH.Bots.buy.is(st, thread), String.eq(Gg.tool(o), "order_review")), Hub{st, f, ls, cl, as, inbox, cfg, note}, thread, o, reply, now)
     case False{} _:
       Hub.mcp.kexport(Bool.and(String.eq(J.Json.get_str(o, "method", ""), "tools/call"), String.eq(J.Json.get_str(J.Json.get_obj(o, "params"), "name", ""), "kicad_export10")), h, thread, o, body, reply, now)
 

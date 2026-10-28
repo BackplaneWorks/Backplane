@@ -8,7 +8,7 @@ import ../src/core/tools.bend as TO
 # fab.min.<project>), a Buy it in the thread's header while it is away,
 # and that Buy it brings the bar back (client.bend's Fab.min, Fab.mini)
 
-def log() -> List<&2, M.Change>:
+def log.plain() -> List<&2, M.Change>:
   [M.ProjectCreated{"p1", "lamp", "/tmp/lamp", 100n},
    M.ProjectCreated{"p2", "stand", "/tmp/stand", 200n},
    M.ThreadCreated{"a", "p1", "Shade", M.Local{}, "", "", "claude", "", 300n},
@@ -16,8 +16,11 @@ def log() -> List<&2, M.Change>:
    M.ThreadCreated{"c", "p2", "Stand", M.Local{}, "", "", "claude", "", 500n},
    M.TurnChanged{"a", M.Completed{}, 600n},
    M.TurnChanged{"b", M.Completed{}, 700n},
-   M.TurnChanged{"c", M.Completed{}, 800n},
-   M.SettingSet{"order.enabled", "on", 900n}]
+   M.TurnChanged{"c", M.Completed{}, 800n}]
+
+# the person turned Ordering on themselves
+def log() -> List<&2, M.Change>:
+  List.append(&2, M.Change, log.plain(), [M.SettingSet{"order.enabled", "on", 900n}])
 
 def ui(a: U.Act) -> U.Ui:
   match a:
@@ -44,6 +47,11 @@ def card(+u: U.Ui, +th: String) -> U.Ui:
 
 def base() -> U.Ui:
   card(card(card(U.Ui.fold(log(), U.Ui.init(1000n)), "c"), "b"), "a")
+
+# Ordering never set: on by default (a new install, or one updated from
+# when it was off by default)
+def plain() -> U.Ui:
+  card(card(card(U.Ui.fold(log.plain(), U.Ui.init(1000n)), "c"), "b"), "a")
 
 def labels(ts: List<&2, TO.Tool>) -> String:
   match ts:
@@ -76,6 +84,11 @@ def main() -> IO(Unit):
     C.Check.str("and with the bar put away", U.Fab.rail(hidden()), "Buy it · from $5.00")
     C.Check.str("the rail says Buy again once ordered", U.Fab.rail(U.Ui.info_set(base(), "fab.again:a", "1")), "Buy again")
     C.Check.str("no rail Buy it with ordering off", U.Fab.rail(U.Ui.fold([M.SettingSet{"order.enabled", "off", 1000n}], base())), "")
+    C.Check.str("ordering is on by default", U.Fab.set.enabled(U.Ui.state.of(plain())), "on")
+    C.Check.str("the rail has Buy it by default", U.Fab.rail(plain()), "Buy it · from $5.00")
+    C.Check.str("the bar shows by default", U.Fab.ready(plain()), "Ready to order · Lamp")
+    C.Check.str("the person's own Off keeps it off", U.Fab.rail(U.Ui.fold([M.SettingSet{"order.enabled", "off", 1000n}], plain())), "")
+    C.Check.str("and no bar", U.Fab.ready(U.Ui.fold([M.SettingSet{"order.enabled", "off", 1000n}], plain())), "")
     C.Check.str("the rail's words", U.Fab.rail.word("Buy it · from $5.00"), "Buy it")
     C.Check.str("the rail's price", U.Fab.rail.price("Buy it · from $5.00"), "from $5.00")
     C.Check.str("no price without an estimate", U.Fab.rail.price("Buy it"), "")

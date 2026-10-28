@@ -9609,8 +9609,9 @@ law order_state_cancelled:
 law order_state_paid:
   {ORD.Order.state.k("paid", "ready") == "paid" : String}
 
-# ordering is off until the person turns it on (order.enabled): no Buy it
-# anywhere, no order tools for any agent, even in a buy thread
+# ordering is on unless the person turns it off (order.enabled, on when
+# never set, for people updating too); off, no Buy it anywhere, no order
+# tools for any agent, even in a buy thread
 law fab_buy_off_hidden:
   for label: String
   {U.Fab.buy.k(True{}, label) == "" : String}
@@ -9619,8 +9620,19 @@ law order_off_no_tools:
   for buy: Bool
   {BHS.Bots.order.tools(False{}, buy) == [] : List<&2, J.Json>}
 
-law order_off_by_default:
-  {ORD.Order.enabled("") == False{} : Bool}
+law order_on_by_default:
+  {ORD.Order.enabled.of(M.State.empty()) == True{} : Bool}
+
+# Settings' Ordering row shows On with nothing set, on every client
+law order_settings_on_by_default:
+  {U.Fab.set.enabled(M.State.empty()) == "on" : String}
+
+# the person's own Off stays off
+law order_off_stays_off:
+  {ORD.Order.enabled.of(M.State.replay([M.SettingSet{"order.enabled", "off", 1n}], M.State.empty())) == False{} : Bool}
+
+law order_on_when_on:
+  {ORD.Order.enabled.of(M.State.replay([M.SettingSet{"order.enabled", "off", 1n}, M.SettingSet{"order.enabled", "on", 2n}], M.State.empty())) == True{} : Bool}
 
 # a review's issues: their lines trimmed, blank ones and non-strings left out
 law order_review_issues_kept:
@@ -11339,7 +11351,7 @@ law mail_disposition_plain_router_scoped_tools:
   for +o: J.Json
   {BHS.Bots.mcp.k(BHS.RPlain{}, s, now, thread, models, version, dir, extra, o) ==
     MC.McpOut{BHS.Bots.list.plain.using(MC.Mcp.tools.for(s, thread), J.Json.get_obj(o, "id"),
-      BHS.Bots.order.tools(ORD.Order.enabled(M.Setting.get(s, "order.enabled", "off")), BHS.Bots.buy.is(s, thread))), H.Step.none(), ""} : MC.McpOut}
+      BHS.Bots.order.tools(ORD.Order.enabled.of(s), BHS.Bots.buy.is(s, thread))), H.Step.none(), ""} : MC.McpOut}
 
 # Human Mailroom access remains usable while agent routing is paused.
 law mail_ui_dispatch_available:

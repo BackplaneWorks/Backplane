@@ -2738,7 +2738,7 @@ def Bots.mcp.k(r: Route, +s: M.State, +now: Nat, +thread: String, +models: J.Jso
       LG.Ledger.call(s, now, thread, J.Json.get_obj(o, "id"), J.Json.get_obj(o, "params"))
     case RPlain{}:
       MC.McpOut{Bots.list.plain.using(MC.Mcp.tools.for(s, thread), J.Json.get_obj(o, "id"),
-        Bots.order.tools(OR.Order.enabled(M.Setting.get(s, "order.enabled", "off")), Bots.buy.is(s, thread))), B.Step.none(), ""}
+        Bots.order.tools(OR.Order.enabled.of(s), Bots.buy.is(s, thread))), B.Step.none(), ""}
     case RPass{}:
       MC.Mcp.handle(s, now, thread, models, version, o)
 

@@ -1,6 +1,6 @@
 # Ordering: intent, Buy it, buy threads
 
-**Off until turned on.** Settings → Ordering (`order.enabled`, default off). Off, there is no Buy it or Ready bar on any client, the hub never contacts the order server (no estimates; it only keeps following quotes and orders made while it was on), `order.buy` and the order tools are refused (an agent that remembers them gets "Ordering is off"), and agents get no fab-file or review instructions and no order tools (laws `fab_buy_off_hidden`, `order_off_*`). The intent and the project layout stay on. With Ordering on, Settings → Price estimates turns the "from $X" off on its own.
+**On unless turned off.** Settings → Ordering (`order.enabled`, default on, for a new install and for one updated from a release where it was off by default: only the person's own Off, stored as `off`, keeps it off; one definition, order.bend's `Order.enabled.of`, law `order_on_by_default`). Off, there is no Buy it or Ready bar on any client, the hub never contacts the order server (no estimates; it only keeps following quotes and orders made while it was on), `order.buy` and the order tools are refused (an agent that remembers them gets "Ordering is off"), and agents get no fab-file or review instructions and no order tools (laws `fab_buy_off_hidden`, `order_off_*`). The intent and the project layout stay on. With Ordering on, Settings → Price estimates turns the "from $X" off on its own.
 
 A project says what it is for and what can be made of it. Backplane shows a price for it
 and orders it through a buy thread.
@@ -65,5 +65,5 @@ The agents' instructions are in `src/core/order.bend` (`Order.prompt.project`, `
 ## The server
 
 `order/` (Python): see `order/README.md` for the API, pricing, security and deployment.
-- The app's default server is `Order.server()`; the `order.server` setting replaces it.
+- The app's default server is `Order.server()`; the `order.server` setting replaces it. `BACKPLANE_ORDER_SERVER` in the hub's environment replaces only the default (orderio.bend's `Od.at`): every test hub (skills/backplane-e2e/hub.sh, test/tools and desktop/test harnesses, scripts/test.sh, the smoke scripts) sets it to a dead local address, so with Ordering on by default no test reaches the real server; hub.sh also starts with Ordering off, and a story that orders sets `order.server` to its own stand-in.
 - The fab's price models are a private pack (`FAB_VENDOR`), not in this repository.

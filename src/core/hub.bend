@@ -6013,7 +6013,7 @@ def Buy.server(+s: M.State) -> String:
 # (estimates are asked only with ordering on: off, the hub never contacts
 # the order server)
 def Buy.est(+s: M.State) -> String:
-  Bool.pick(String, OR.Order.enabled(M.Setting.get(s, "order.enabled", "off")), M.Setting.get(s, "order.estimates", "on"), "off")
+  Bool.pick(String, OR.Order.enabled.of(s), M.Setting.get(s, "order.estimates", "on"), "off")
 
 # the project's buy threads (their ids, comma-separated), so the card can
 # say what of it was ordered
@@ -6094,7 +6094,7 @@ def Buy.start.k(on: Bool, +s: M.State, +now: Nat, +client: U32, +id: String, +sr
 def Buy.start(known: Bool, +s: M.State, +now: Nat, +client: U32, +id: String, +src: String) -> Step:
   match known:
     case True{}:
-      Buy.start.k(OR.Order.enabled(M.Setting.get(s, "order.enabled", "off")), s, now, client, id, src)
+      Buy.start.k(OR.Order.enabled.of(s), s, now, client, id, src)
     case False{}:
       Step.outs([Reply.err(client, id, "no such thread")])
 

@@ -51,6 +51,11 @@ def base_tools() -> List<&2, J.Json>:
 def with_mail() -> List<&2, J.Json>:
   List.concat(&2, J.Json, [base_tools(), MC.Mcp.mail.tools(), MC.Mcp.run.tools()])
 
+# a plain listing ends with the order tools: Ordering is on by default
+# (order_review only, outside a buy thread)
+def on_order() -> List<&2, J.Json>:
+  BH.Bots.order.tools(True{}, False{})
+
 def bot_tail() -> List<&2, J.Json>:
   List.concat(&2, J.Json, [LG.Ledger.tools(), BH.Bots.tools(), BH.Bots.task.tools(), [BH.Bots.newproj.def()], extra()])
 
@@ -86,14 +91,14 @@ def main() -> IO(Unit):
     n("actual bot router advertises live disposition exactly once", tool_count(s, F.run(), "mail_dispose"), 1n)
     n("actual plain router advertises retained live disposition exactly once", tool_count(plain, F.run(), "mail_dispose"), 1n)
     exact("live bot full tool payload and order retained", s, F.run(), List.concat(&2, J.Json, [with_mail(), MC.Mcp.dispose.tools(), MC.Mcp.context.tools(), bot_tail()]))
-    exact("live plain full tool payload and order retained", plain, F.run(), List.concat(&2, J.Json, [with_mail(), MC.Mcp.dispose.tools(), MC.Mcp.context.tools(), LG.Ledger.tools()]))
+    exact("live plain full tool payload and order retained", plain, F.run(), List.concat(&2, J.Json, [with_mail(), MC.Mcp.dispose.tools(), MC.Mcp.context.tools(), LG.Ledger.tools(), on_order()]))
     no_grant("ordinary worker", s, F.worker())
     no_grant("ordinary FOH", s, "foh")
     exact("ordinary bot extras payload unchanged", s, "foh", List.concat(&2, J.Json, [with_mail(), bot_tail()]))
-    exact("ordinary plain payload unchanged", s, F.worker(), List.append(&2, J.Json, with_mail(), LG.Ledger.tools()))
+    exact("ordinary plain payload unchanged", s, F.worker(), List.concat(&2, J.Json, [with_mail(), LG.Ledger.tools(), on_order()]))
     +off : M.State = M.State.apply(s, M.SettingSet{"mail.on", "off", 9n})
     no_grant("mail off live run", off, F.run())
-    exact("mail off plain payload unchanged", off, F.run(), List.append(&2, J.Json, base_tools(), LG.Ledger.tools()))
+    exact("mail off plain payload unchanged", off, F.run(), List.concat(&2, J.Json, [base_tools(), LG.Ledger.tools(), on_order()]))
     exact("mail off FOH bot extras unchanged", off, "foh", List.append(&2, J.Json, base_tools(), bot_tail()))
     no_grant("completed run", M.State.apply(s, M.TurnChanged{F.run(), M.Completed{}, 9n}), F.run())
     no_grant("failed run", M.State.apply(s, M.TurnChanged{F.run(), M.Failed{}, 9n}), F.run())

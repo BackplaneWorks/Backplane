@@ -1,5 +1,6 @@
 import Base
 import ./json.bend as J
+import ./model.bend as M
 
 # Ordering a project (pure; docs/order.md)
 # =========================================
@@ -46,7 +47,7 @@ def Order.prompt.review() -> String:
 def Order.prompt.on() -> String:
   "Ordering happens only through Backplane: once a part's fab file is ready, the person presses Buy it (in the Ready to order bar above the composer, or Buy it in the thread's header when that bar is put away). It opens a buy thread that checks the design, gets the exact quote from Backplane's order server and takes payment. When the person asks to order, buy or price the project, tell them that. Never order yourself: never open, upload to or fill in a manufacturer's website (the Browser tab included), never ask for their payment details, and never start a thread to order with (thread_launch)."
 
-# with ordering off, only where to turn it on (law order_off_says_where)
+# with ordering off, only where to turn it back on (law order_off_says_where)
 def Order.prompt.off() -> String:
   "Ordering from Backplane is off. If the person asks to order, buy or price the project, say they can turn it on in Settings → Ordering (a Buy it button then appears once the design is ready), or take the design files to any manufacturer themselves."
 
@@ -157,11 +158,20 @@ def Order.quote.asked() -> String:
 def Order.quote.declined() -> String:
   "The person chose not to send the files (Not now). Ask whether anything should change first."
 
-# Ordering is off until the person turns it on in Settings (the setting
-# order.enabled): no Buy it, no prices asked, nothing sent to the order
-# server, no fab files or reviews asked of agents (laws order_off_*)
+# Ordering is on unless the person turns it off in Settings (the setting
+# order.enabled, "on" when never set: on for people updating too, since
+# nothing but their own Off ever wrote "off"). Off: no Buy it, no prices
+# asked, nothing sent to the order server, no fab files or reviews asked of
+# agents (laws order_off_*, order_on_by_default). Every client and the hub
+# ask Order.enabled.of, never the setting itself.
 def Order.enabled(+v: String) -> Bool:
-  String.eq(v, "on")
+  Bool.not(String.eq(v, "off"))
+
+def Order.enabled.default() -> String:
+  "on"
+
+def Order.enabled.of(+s: M.State) -> Bool:
+  Order.enabled(M.Setting.get(s, "order.enabled", Order.enabled.default()))
 
 # Tools
 # -----

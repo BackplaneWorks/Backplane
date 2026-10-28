@@ -11412,7 +11412,16 @@ def Laws.fab_buy_off_hidden(label):
 def Laws.order_off_no_tools(buy):
   {==}
 
-def Laws.order_off_by_default():
+def Laws.order_on_by_default():
+  {==}
+
+def Laws.order_settings_on_by_default():
+  {==}
+
+def Laws.order_off_stays_off():
+  {==}
+
+def Laws.order_on_when_on():
   {==}
 
 def Laws.order_review_issues_kept():

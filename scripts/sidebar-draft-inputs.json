@@ -28,7 +28,7 @@
     "src/core/cat.bend": "0130231a18e515a94d40d7584d19a9b5a2d1663f9601fbff944bf97e37f9fd6b",
     "src/core/cef.bend": "f2d3fa4c991d0e341620fe634ddb4e08da97f8e471ec46afac0b3de471cc69fb",
     "src/core/charter.bend": "7f906bdea712f6ff6162735c8cc133767ec0f9289c3d0bee6dfedbd4d75ad981",
-    "src/core/client.bend": "3dc10b72e77d67e766f3b3a0ef74dfa5ee7282c61a1f8c358d48cf5093b942a2",
+    "src/core/client.bend": "6638743ad19a08d2b9783f01bbc79d3340f580a5a98a8c7d5295c8bef706216d",
     "src/core/codec.bend": "33cb35c55f3712a18734e76e1149763001a9388af27948f0da4ead2c13d48b6f",
     "src/core/cron.bend": "6f89a001df0261a25c878616ea66c235e169f7fc1c726d39e695fce8adb57332",
     "src/core/deploy.bend": "ebee4e63a52cf41ae001bebcdbb7fb010ad71c1e04e481292585740d88a39cc4",
@@ -75,7 +75,7 @@
     "src/core/notice.bend": "ee87318c1f12fc6cfb23bb5e24e90709e1f9a2eadfd2832581d21590f596e5e0",
     "src/core/onboard.bend": "55ccccf20f706a0acad492de20e23aedc751c7e9ce61b6f3430bfd65796e9232",
     "src/core/once.bend": "c12f375e09045a035cfc66c87d73197f3348b2998fa0e0bb6c9876fca870577c",
-    "src/core/order.bend": "9297a602b2029c879442d145d24dd7a3dbe3d28dcbeeb30cfb9fc7295a489504",
+    "src/core/order.bend": "187ebb7ea65e758e0e042e8e8d537708efc6d0cd571db7ea0aa5aee22b9e3774",
     "src/core/outbox.bend": "7e90d003d01434d86c041b83d837f8a85d9f39c7ae380d840e07bb141f3dd677",
     "src/core/plane.bend": "ac2a6be2c14c774b93f5b596178031b3fa485db82a60bcad4fa2590fc3c5717c",
     "src/core/presentation.bend": "345abf721cf37ca86de1f1052fa2edab17a57b3f8eb692de74c0352a3dcc3933",
@@ -253,5 +253,5 @@
       "sourceSnapshot": "/home/h/Documents/i2cjak/bp-coord/settle-fresh-work/SOURCE-structural-correction.json"
     }
   },
-  "reviewNote": "thin-actor.bend's Actor.watch: a kicad.watch a reply made runs as the actor's followup (Mech's model is read); no sidebar renderer or draft reader uses it"
+  "reviewNote": "Ordering on by default (order.bend's Order.enabled.of, client.bend's Fab.enabled): sidebar drafts render the same, sidebar_draft_image_test 24 ok"
 }

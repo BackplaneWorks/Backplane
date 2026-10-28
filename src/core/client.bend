@@ -7350,11 +7350,12 @@ def Bots.say(u: Ui, +bot: String, text: String) -> Act:
 # its turn ends (Fab.sync after every action and message; "@fab.at" is
 # what was asked last).
 
-# Settings' rows on every client: Ordering (order.enabled, off until the
-# person turns it on: no Buy it, nothing sent to the order server) and,
-# with it on, the estimates sent or not (order.estimates)
+# Settings' rows on every client: Ordering (order.enabled, on unless the
+# person turns it off: off, no Buy it, nothing sent to the order server;
+# order.bend's Order.enabled.of) and, with it on, the estimates sent or not
+# (order.estimates)
 def Fab.enabled(+st: M.State) -> Bool:
-  OR.Order.enabled(M.Setting.get(st, "order.enabled", "off"))
+  OR.Order.enabled.of(st)
 
 def Fab.set.enabled(+st: M.State) -> String:
   Bool.pick(String, Fab.enabled(st), "on", "off")
