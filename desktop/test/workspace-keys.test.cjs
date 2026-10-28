@@ -453,6 +453,12 @@ test('the composer takes the keyboard on load, when another thread shows, when a
   // Esc (claim) from the page
   h.doc.activeElement = h.body;h.keeper.claim();
   assert.equal(h.doc.activeElement, h.composer);
+  // a ▾ menu opened and shut by Esc (no render, only its toggle): the
+  // keyboard left on its button goes back to the composer
+  const summary = { tagName: 'SUMMARY', closest: () => null };
+  h.page.over = true;h.fire('toggle');h.doc.activeElement = summary;
+  h.page.over = false;h.fire('toggle');
+  assert.equal(h.doc.activeElement, h.composer);
 });
 
 test('the composer never takes the keyboard from a field, during a press, over a selection or on a phone', async () => {

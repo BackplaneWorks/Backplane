@@ -171,6 +171,9 @@ export function installComposerFocus({ document: doc = document, window: win = w
     put(el, carets.get(now));
   };
   doc.addEventListener('pointerdown', () => { pressed = true; }, true);
+  // a menu (a <details>) opened or shut by Esc, a click or its own item:
+  // no render follows, so the cover is looked at once it has toggled
+  doc.addEventListener('toggle', () => win.setTimeout(check, 0), true);
   const up = () => { if (pressed) { pressed = false;win.setTimeout(check, 0); } };
   doc.addEventListener('pointerup', up, true);doc.addEventListener('pointercancel', up, true);
   for (const name of ['keyup', 'input', 'pointerup', 'focusout', 'select']) doc.addEventListener(name, event => { if (event.target === field()) keep(); }, true);
