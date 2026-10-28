@@ -57,6 +57,9 @@ env:
   BACKPLANE_VERSION: v0.13.0
   BACKPLANE_VERSION_STAMP: '0.13.0'
   BACKPLANE_TELEMETRY_CHANNEL: release
+  # Source scanners and receipts must use UTF-8 on Windows too.
+  PYTHONUTF8: '1'
+  PYTHONDONTWRITEBYTECODE: '1'
 
 jobs:
   js:
