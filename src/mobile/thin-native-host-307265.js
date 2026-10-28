@@ -816,6 +816,14 @@ export class NativeThinHost307265 {
       return true;
     }
     let response = copy(r.session);
+    if (metadata.operation?.action === 'native-sidebar-page') {
+      // Paging cannot clear or replace local status, including a legitimate
+      // update that arrived after dispatch. Preserve absence as well as values.
+      for (const key of ['error', 'note']) {
+        if (Object.hasOwn(s.session, key)) response[key] = s.session[key];
+        else delete response[key];
+      }
+    }
     for (const ack of metadata.acks) response = this.api.ack(response, ack);
     if (!counter(response.rid)) { this.fail(hub, 'Invalid ordinary counter'); return true; }
     s.session.rid = Math.max(s.session.rid, response.rid);

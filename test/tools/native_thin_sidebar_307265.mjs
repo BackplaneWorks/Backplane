@@ -140,6 +140,30 @@ export function registerSidebarChecks(check, harness, validate, validateAction) 
     assert.equal(s.session.info['fab.open:a'], '0'); assert.deepEqual(s.session.outbox, before.outbox);
     assert.equal(s.shown.projects[0].threads[0].id, 'b|next-row');
   });
+  check('native sidebar paging cannot overwrite current error or note, including concurrent updates', () => {
+    for (const incoming of [{ error: 'Unrelated response error', note: 'Unrelated response note' },
+      { error: '', note: '' }, {}]) {
+      for (const current of [{ error: 'Current local error', note: 'Current local note' }, {}]) {
+        const x = harness(); x.h.nativeSidebar = true; x.open();
+        const s = x.h.states.get('h'); x.h.update(s);
+        let req = x.h.drain().cmds[0].request;
+        const offered = picture(x); updateBoth(offered, screen => screen.projects[0].threadsPage = pager('h', 2, 0, 1));
+        x.answer(req.id, offered);
+        s.session.error = 'Earlier error'; s.session.note = 'Earlier note';
+        assert(x.h.sidebarPage('h|sealed-next')); req = x.h.drain().cmds[0].request;
+        // A legitimate local/ordinary reply update can occur after dispatch.
+        delete s.session.error; delete s.session.note;
+        Object.assign(s.session, current);
+        const reply = { ...picture(x), session: { ...clone(req.p.session), ...incoming }, cmds: [] };
+        x.answer(req.id, reply);
+        assert.equal(s.ready, true);
+        for (const key of ['error', 'note']) {
+          assert.equal(Object.hasOwn(s.session, key), Object.hasOwn(current, key));
+          assert.equal(s.session[key], current[key]);
+        }
+      }
+    }
+  });
   check('native sidebar paging replies reject commands, redirects and changed user choices atomically', () => {
     const corrupt = [
       reply => reply.cmds = [{ type: 'send', text: JSON.stringify({ id: 77, m: 'turn.start', p: {} }) }],
