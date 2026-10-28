@@ -97,6 +97,15 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .brand { position: sticky; top: 0; z-index: 6; background: var(--panel); min-height: 52px; display: flex; align-items: center; gap: 8px; padding: 12px 12px 10px; border-bottom: 1px solid var(--line); }
 .brand .name { font-weight: 600; letter-spacing: 0.02em; }
 .brand .ver { color: var(--faint); font-size: calc(11px * var(--text-scale, 100) / 100); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* thin scrollbars in the theme's colours everywhere (the desktop app drew
+   classic grey ones with arrow buttons); the sidebar keeps their room so
+   one never covers a row's text */
+::-webkit-scrollbar { width: 8px; height: 8px; background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--faint); border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background-color: var(--dim); }
+::-webkit-scrollbar-button, ::-webkit-scrollbar-corner { display: none; background: transparent; }
+@supports not selector(::-webkit-scrollbar) { * { scrollbar-width: thin; scrollbar-color: var(--faint) transparent; } }
+.sidebar { scrollbar-gutter: stable; }
 .conn { width: 7px; height: 7px; background: var(--bad); }
 .conn.on { background: var(--ok); }
 .hub-down .conn.on { background: var(--bad); }
