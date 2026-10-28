@@ -1,6 +1,6 @@
 'use strict';
 // Light/dark is one fact for the page: a picture retained for a thread (the
-// view-transition cache, the focused cache, the loading shell) shows the theme
+// view-transition cache, the focused cache) shows the theme
 // of the newest authoritative frame, never the one it was drawn with.
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const el=(tag,key,attrs=[],kids=[])=>({type:'element',tag,key,attrs,kids});
@@ -46,12 +46,11 @@ test('retained thread pictures come back in the current theme, light to dark and
  assert.equal(themeOf(cache.get(scope('A'))),'dark');
 });
 
-test('a never-seen thread loading shell and a cold focused picture take the current theme',async()=>{
- const {loadingShell,withTheme,themeOf}=await import('../../src/web/view-transition.js');
+test('a cold focused picture takes the current theme',async()=>{
+ const {withTheme,themeOf}=await import('../../src/web/view-transition.js');
  const {mergeFocused}=await import('../../src/web/focused-cache.js');
  // the local Ui waiting for the hub has no ui.theme: it renders dark
  const waiting=page('dark','N','');
- assert.equal(themeOf(withTheme(loadingShell(page('light','A','A'),waiting,'New'),'light')),'light');
  // a focused record saved while dark, shown after the theme went light (and the reverse)
  const record=t=>({shellAttrs:[cls('app picked'+(t==='light'?' light':'')),{name:'style',value:'--text-scale:110'}],main:el('main','thread',[],[el('div','timeline',[],[{type:'text',text:'saved'}])])});
  for(const [saved,now] of [['dark','light'],['light','dark']]){
@@ -84,7 +83,6 @@ test('the first paint has the last authoritative theme, and a frame order moves 
 test('host.js shows every retained or waiting picture through the theme, and learns it only from authoritative frames',()=>{
  const source=fs.readFileSync(path.resolve(__dirname,'../../src/web/host.js'),'utf8');
  assert.match(source,/transitionNode = shown \? App\.presentation_node\(presentationJson\(themed\(shown\)\)\)/);
- assert.match(source,/presentationJson\(themed\(loadingShell\(/);
  assert.match(source,/presentationJson\(themed\(mergeFocused\(shell, record\)\)\)/);
  assert.match(source,/presentationJson\(themed\(Wire\.plain\(App\.presentation_view\(App\.presentation_wait\(ui\)\)\)\)\)/);
  assert.match(source,/if \(frontendNode \|\| canonicalBoot && App\.synced\(ui\)\) themeSeen\(root\.querySelector\("\.app"\)\);/);

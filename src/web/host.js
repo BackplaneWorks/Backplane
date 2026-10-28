@@ -57,7 +57,7 @@ import { ThinMailDraft, mailReplyField } from "./mail-drafts.js";
 import { ThinViews, viewCapability } from "./thin.js";
 import * as Wire from "./wire.js";
 import { openDraw } from "./draw.js";
-import { ViewTransition, loadingShell, withTheme } from "./view-transition.js";
+import { ViewTransition, withTheme } from "./view-transition.js";
 import { T, is, learnJson, learnDom } from "./wire.js";
 
 const CONNECTION_BUNDLE = bundleOf(import.meta.url);
@@ -358,7 +358,15 @@ let frontend = null, frontendNode = null, wantFrontend = true, fallbackIntent = 
 let viewMode = "discovering", remoteReady = false, remoteEpoch = "", thinSession = null;
 let pairingAccepted = false;
 const transitionViews = new ViewTransition();
-let transitionNode = null, transitionShell = null, transitionTitle = "", transitionTitleTarget = "", transitionPosition = null;
+// The picture on screen while the next view is on its way: a retained
+// picture of the thread picked (put back as it was last seen), else the one
+// already showing, kept (holdPicture). What it was drawn for is
+// transitionFor; shownFor is what the hub's view on show was drawn for.
+let transitionNode = null, transitionFor = "", transitionPosition = null, shownFor = "";
+// since when a picture of another target has been kept (style.css's
+// data-backplane-held: its own content takes no clicks, and past QUIET_MS
+// it is put away, the frame left)
+let heldAt = 0;
 let focusedNode = null, focusedAtEnd = true, focusedSaveTimer = 0;
 let focusedRequestedKey = null;
 let thin = null, thinSocket = null, thinAttempt = 0, thinExpiry = 0, thinGreetingTimer = 0, thinDraftTimer = 0, thinFieldTimer = 0;
@@ -376,13 +384,18 @@ function transitionScope(target = presentationTarget(currentSession())) {
   return { origin: location.origin, identity: cacheIdentity(document.cookie), language: App.lang(ui),
     epoch: thin?.epoch || remoteEpoch, target, selected:currentSession().sel, settings:currentSession().open?.settings===true, route: currentSession().route || null };
 }
+const targetKey = target => target ? target.kind + ":" + target.id : "";
+// Nothing is drawn in between two views: a thread picked, a reconnect, a
+// failure keep the hub's last view on screen until the next one comes.
+function holdPicture() {
+  if (!frontendNode) return;
+  transitionNode = frontendNode;transitionFor = shownFor;frontendNode = null;
+}
 function restoreTransition(target) {
   const shown = transitionViews.get(transitionScope(target));
-  transitionPosition = transitionViews.position(transitionScope(target)) || {atEnd:true};
-  const title = transitionTitleTarget === target.kind + ":" + target.id ? transitionTitle : target.id;
-  const waiting = Wire.plain(App.presentation_view(App.presentation_wait(ui)));
-  transitionNode = shown ? App.presentation_node(presentationJson(themed(shown))) : transitionShell
-    ? App.presentation_node(presentationJson(themed(loadingShell(transitionShell, waiting, title || target.id)))) : null;
+  if (shown) { transitionFor = targetKey(target);heldAt = 0;transitionPosition = transitionViews.position(transitionScope(target)) || {atEnd:true}; }
+  else if (transitionNode && transitionFor !== targetKey(target) && !heldAt) { heldAt = performance.now();setTimeout(later, QUIET_MS + 20); }
+  transitionNode = shown ? App.presentation_node(presentationJson(themed(shown))) : transitionNode;
   return !!shown;
 }
 const focusedView = new FocusedView({
@@ -426,7 +439,7 @@ async function refreshFocusedIdentity() {
     showViewStatus("Pairing is required to reconnect.");later();return;
   }
   if (before !== cacheIdentity(document.cookie) || result.state === "denied" || result.state === "invalid") {
-    transitionViews.clear();transitionNode = null;transitionShell = null;focusedView.invalidate();
+    transitionViews.clear();transitionNode = null;transitionFor = "";focusedView.invalidate();
     if (!canonicalBoot && !remoteReady) void restoreFocused();
     else saveFocusedSoon();
   }
@@ -796,6 +809,10 @@ function render() {
   document.documentElement.dataset.backplaneMode = viewMode;
   document.documentElement.dataset.backplaneRemoteReady = String(remoteReady);
   document.documentElement.dataset.backplaneCached = String(!!(focusedNode || transitionNode) && !frontendNode);
+  // what style.css quiets: a picture kept for another target than the one
+  // picked (true, then quiet past QUIET_MS)
+  const heldFor = !frontendNode && !!transitionNode && transitionFor !== targetKey(presentationTarget(currentSession()));
+  document.documentElement.dataset.backplaneHeld = !heldFor ? "false" : heldAt && performance.now() - heldAt >= QUIET_MS ? "quiet" : "true";
   trace("dom", { seq: App.seq(ui) });
   if (PERF?.trace) requestAnimationFrame(() => trace("paint", { seq: App.seq(ui) }));
   mailRestore(mail);
@@ -1114,8 +1131,6 @@ function dispatch(action, value, timer) {
       transitionViews.savePosition(transitionScope(), {top:timeline.scrollTop, atEnd:holdEnd(timeline),
         anchor:anchor?.id || "", offset:anchor ? anchor.off - timeline.getBoundingClientRect().top : 0});
     }
-    transitionTitleTarget = action === "select" ? "thread:" + value : "";
-    if (action === "select") transitionTitle = document.querySelector(`[data-on-click="select"][data-value="${CSS.escape(value)}"] .title`)?.textContent || "";
   }
   if (action === "thin-search-open") {
     if (viewMode === "view-v1" && thin?.ready) showThinSearch({ query: "", rows: [], cursor: "", hasMore: false });
@@ -1977,7 +1992,7 @@ function localPresentation(action, value, session) {
   if (action === "select") {
     ui = App.presentation_select(ui, value);
     try { localStorage.setItem("backplane-selected", value); } catch {}
-    frontendNode = null;
+    holdPicture();
     remoteReady = false;
     if (!restoreTransition(presentationTarget(session))) void restoreFocused();
     later();
@@ -2424,8 +2439,8 @@ async function startThin(again = false, reason = "initial") {
         thinContinuations.bind(location.origin, detail);
         if (detail.position) transitionPosition = detail.position;
         else if (!remoteReady) transitionPosition = transitionViews.position(transitionScope(detail.target)) || {atEnd:true};
-        focusedView.remote(detail.epoch);remoteEpoch = detail.epoch;frontendNode = node;transitionNode = null;
-        transitionShell = detail.shown;transitionViews.put(transitionScope(detail.target), detail.shown);
+        focusedView.remote(detail.epoch);remoteEpoch = detail.epoch;frontendNode = node;transitionNode = null;transitionFor = "";heldAt = 0;
+        shownFor = targetKey(detail.target);transitionViews.put(transitionScope(detail.target), detail.shown);
         composerTake(detail.target);
         trace("thin-view", { entries: detail.window?.ids?.length || 0 });later();
         fabLook(detail.target);
@@ -2438,9 +2453,9 @@ async function startThin(again = false, reason = "initial") {
           // Keep the last validated tree as a read-only picture. The local Ui
           // has no canonical bot/catalog state in view mode. Falling back to
           // it here removed the sidebar and cats after a refusal or disconnect.
-          // A selection's callback replaces this picture before the next frame.
-          if (frontendNode) transitionNode = frontendNode;
-          frontendNode = null;desktopBrowser.hide();
+          // A selection's callback replaces it only with a retained picture of
+          // the thread picked; else it stays until the next view comes.
+          holdPicture();desktopBrowser.hide();
         }
         if (state.phase === "error") {
           diagnostic.note("view-error", { cause: state.reason === "LIMIT" ? "view-limit" : "view-refused" });

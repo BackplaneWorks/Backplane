@@ -9,10 +9,11 @@ export class ViewTransition {
   }
   put(scope, shown) {
     const key = this.key(scope);
-    const conversation = n => n?.type === 'element' && (
-      n.tag === 'main' && n.attrs.some(a => a.name === 'data-thread' && a.value === scope.selected)
-        && n.kids.some(c => c.type === 'element' && c.attrs.some(a => a.name === 'class' && a.value.split(/\s+/).includes('composer')))
-      || n.kids.some(conversation));
+    const has = (n, test) => n?.type === 'element' && (test(n) || n.kids.some(c => has(c, test)));
+    const composer = n => n.attrs.some(a => a.name === 'class' && a.value.split(/\s+/).includes('composer'));
+    // the selected thread's own view, its composer anywhere in it (the rail
+    // layout keeps it in .thread-content)
+    const conversation = n => has(n, m => m.tag === 'main' && m.attrs.some(a => a.name === 'data-thread' && a.value === scope.selected) && has(m, composer));
     // Settings, Mailroom and other forms retain their existing field ownership;
     // never restore their mutable fields as a conversation picture.
     if (!key || !scope.selected || !conversation(shown) || new TextEncoder().encode(JSON.stringify(shown)).length > this.bytes) return false;
@@ -27,28 +28,6 @@ export class ViewTransition {
   }
   position(scope) { return this.positions.get(this.key(scope)) || null; }
   clear() { this.views.clear();this.positions.clear(); }
-}
-
-// Keep the known sidebar while a never-seen target loads. The main area comes
-// from the current selection, never the departing thread's body or fields.
-export function loadingShell(previous, waiting, title) {
-  const find = (n, tag) => n?.type === 'element' ? n.tag === tag ? n : n.kids.map(c => find(c, tag)).find(Boolean) : null;
-  const sidebar = find(previous, 'aside');
-  const walk = n => {
-    if (n?.type !== 'element') return n;
-    if (n.tag === 'aside' && sidebar) return sidebar;
-    if (n.tag === 'main') {
-      const composer = n.kids.filter(c => c.type === 'element' && c.attrs?.some(a => a.name === 'class' && a.value.split(/\s+/).includes('composer')));
-      const el = (tag, key, attrs, kids) => ({type:'element', tag, key, attrs, kids});
-      return {...n, attrs:[...n.attrs, {name:'aria-busy', value:'true'}], kids:[
-        el('header','',[{name:'class',value:'thread-head'}],[el('span','',[{name:'class',value:'title'}],[{type:'text',text:title}])]),
-        el('div','timeline',[{name:'class',value:'timeline'},{name:'id',value:'timeline'},{name:'role',value:'status'}],[{type:'text',text:'Loading conversation…'}]),
-        ...composer
-      ]};
-    }
-    return {...n, kids:n.kids.map(walk)};
-  };
-  return walk(waiting);
 }
 
 // Light or dark is one fact for the whole page (the hub's ui.theme), never a

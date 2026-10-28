@@ -21,7 +21,8 @@ async function fixture(supported=false, legacyProbe=false){
   App:{wire_out:t=>encoder.encode(t),presentation_node:n=>n,presentation_prepare:(s,input)=>({...input,rid:s.rid}),presentation_reply:s=>s,presentation_select:(u,id)=>({...u,sel:id}),presentation_handoff:(u,s)=>({...u,sel:s.sel}),unsync:u=>u,lang:()=> 'en'},
   Wire:{cbor:b=>JSON.parse(decoder.decode(b)),plain:x=>x},document:{getElementById:()=>null,documentElement:{style:{setProperty(){}}}},pairingReady:Promise.resolve(true),
   fallbackIntent:null,wantFrontend:true,Backoff,Retry,probeHub,QUIET_MS,navigator:{onLine:true},thinContinuations:{clear(){},accept:()=>false,bind(){},project:x=>x},presentationTarget,preservePresentationRoute,checkDeploy:()=>{},outbox:new Map(),OUTBOX:'outbox',OUTBOX_DAY:86400000,DRAFT:'draft:',
-  fabLook(){},restoreTransition(){},transitionNode:null,transitionShell:null,transitionScope:()=>({}),transitionPosition:null,transitionViews:{put(){},position:()=>null},
+  fabLook(){},restoreTransition(){},transitionNode:null,transitionFor:'',shownFor:'',heldAt:0,transitionScope:()=>({}),transitionPosition:null,transitionViews:{put(){},position:()=>null},
+  targetKey:t=>t?t.kind+':'+t.id:'',holdPicture(){if(ctx.frontendNode){ctx.transitionNode=ctx.frontendNode;ctx.frontendNode=null;}},
   stopThin:undefined};
  vm.createContext(ctx);vm.runInContext(source.slice(a,b),ctx);ctx.showViewStatus=s=>status.push(s);
  return{ctx,calls,status,requests,sockets,VIEW_LIMITS,boot,runBoot:async()=>{let started;const start=ctx.startThin;ctx.startThin=()=>started=start();vm.runInContext(boot,ctx);await Promise.resolve();await started;},tick:ms=>{clock+=ms;for(const[id,t]of[...timers])if(t.at<=clock&&timers.has(id)){timers.delete(id);t.fn();}}};

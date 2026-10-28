@@ -39,10 +39,3 @@ test('warm switching is synchronous and bounded, and cannot cross target, epoch,
   cache.savePosition(scope,{top:240,atEnd:false,anchor:'row',offset:8});assert.equal(cache.position(scope).top,240);
   cache.put({...scope,target:{kind:'bot',id:'A'}},shown);cache.put({...scope,target:{kind:'bot',id:'B'}},shown);assert.equal(cache.get(scope),null);assert.equal(cache.position(scope),null);assert.equal(cache.put(scope,{text:'x'.repeat(2000)}),false);cache.clear();assert.equal(cache.views.size,0);assert.equal(cache.put(scope,{type:'element',tag:'textarea',attrs:[{name:'data-bfield',value:'mrreply'}],kids:[]}),false);
 });
-test('cold transition retains the sidebar and only the new selection composer; no old messages',async()=>{
-  const {loadingShell}=await import('../../src/web/view-transition.js');const el=(tag,key,attrs=[],kids=[])=>({type:'element',tag,key,attrs,kids});
-  const aside=el('aside','sidebar',[],[{type:'text',text:'all projects'}]),composer=el('form','new-draft',[{name:'class',value:'composer'}],[{type:'text',text:'new target draft'}]);
-  const old=el('div','app',[],[aside,el('main','thread',[],[{type:'text',text:'OLD PRIVATE THREAD'}])]);
-  const fresh=el('div','app',[],[el('aside','sidebar'),el('main','thread',[],[composer])]);const shown=loadingShell(old,fresh,'New thread');
-  assert.equal(shown.kids[0],aside);assert.equal(shown.kids[1].kids.at(-1),composer);assert(!JSON.stringify(shown).includes('OLD PRIVATE THREAD'));assert(JSON.stringify(shown).includes('New thread'));
-});

@@ -164,6 +164,15 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .workspace-bar [data-viewer-pending], .viewer-tabs [data-viewer-pending] { color: var(--accent); border-color: var(--accent); }
 .workspace-bar:has([data-viewer-pending]) .on:not([data-viewer-pending]), .viewer-tabs:has([data-viewer-pending]) .on:not([data-viewer-pending]) { color: var(--dim); background: none; border-color: transparent; }
 .viewer > .viewer-tabs { display: none; }
+/* A view kept on screen while the next one is on its way (host.js's
+   holdPicture), when it was drawn for another thread than the one picked:
+   the chrome stays live (sidebar, top bar's tools, rail, the composer's
+   field), what is the shown thread's own takes no clicks, and past QUIET_MS
+   it is put away, the frame left where it is. */
+html[data-backplane-held="true"] :is(.topbar .back, .topbar .crumbs, .topbar .kvs, main > :not(.workspace-bar, .thread-content), main .thread-content > :not(.composer), .composer .model-chip, .app > aside.viewer),
+html[data-backplane-held="quiet"] :is(.topbar .back, .topbar .crumbs, .topbar .kvs, main > :not(.workspace-bar, .thread-content), main .thread-content > :not(.composer), .composer .model-chip, .app > aside.viewer) { pointer-events: none; }
+html[data-backplane-held="quiet"] :is(.topbar .back, .topbar .crumbs, .topbar .kvs, main > :not(.workspace-bar, .thread-content), main .thread-content > :not(.composer), .composer .model-chip, .composer .model-ctx, .app > aside.viewer) { visibility: hidden; }
+html[data-backplane-held="quiet"] .sidebar .thread.on { background: none; box-shadow: none; }
 @media (max-width: 760px) {
   .workspace-bar { padding: 6px 10px; gap: 2px; }
   .workspace-bar button { min-height: 36px; padding: 5px 7px; }
