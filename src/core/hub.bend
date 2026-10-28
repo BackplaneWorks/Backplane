@@ -39,6 +39,7 @@ import ./order.bend as OR
 import ./fallback.bend as FB
 import ./secret.bend as SEC
 import ./stamp.bend as STP
+import ./wnote.bend as WN
 
 # The decider. Requests from clients and lines from agents come in; changes
 # (persisted, folded into the read model) and effects (run by the server)
@@ -93,8 +94,13 @@ type Out is Data:
   PiTurn{thread: String, cwd: String, model: String, session: String, runtime: M.RuntimeMode, text: String}
   OmpTurn{thread: String, cwd: String, model: String, session: String, runtime: M.RuntimeMode, text: String}
   # a turn ended: "completed", "failed", or "stopped" (Stop, archive,
-  # delete: no alert, but the phones' island still hears of it)
-  TurnEnded{thread: String, state: String}
+  # delete: no alert, but the phones' island still hears of it). alert:
+  # the kind of the record this end wrote (notice.bend's Policy.end), ""
+  # when it wrote none or a quiet one; never an older record's. error and
+  # reason: the ending turn's own logged error and why it ended
+  # (wnote.bend's Wn.cap, Wn.end.reason), "" when none, read as it ends;
+  # text: that turn's own newest reply, "" when it gave none
+  TurnEnded{thread: String, state: String, alert: String, error: String, reason: String, text: String}
   # the phones' island (Live Activity) is pushed again, no alert: a turn
   # started or changed, a thread went (Island.outs)
   IslandSync{}
@@ -205,7 +211,7 @@ def Island.told(os: List<&2, Out>) -> Bool:
   match os:
     case Nil{}:
       False{}
-    case TurnEnded{_, _} <> _:
+    case TurnEnded{_, _, _, _, _, _} <> _:
       True{}
     case _ <> t:
       Island.told(t)
@@ -1333,6 +1339,31 @@ def Claude.assistant(+thread: String, +now: Nat, +seq: Nat, +m: J.Json, +uuid: S
   Step{Claude.blocks(J.Json.elems(J.Json.get_obj(m, "content")), thread, J.Json.get_str(m, "id", "msg"), 0n, now, seq, uuid, think),
     [Broadcast{J.Json.show(J.Json.obj([J.KV{"t", J.Str{"delta_end"}}, J.KV{"thread", J.Str{thread}}]))}]}
 
+# A model or API error Claude Code reports for the running turn (a bad
+# model name, a server or billing error, a rate limit) comes as an
+# assistant line whose "error" names it, its text the message. It is logged
+# as the turn's own error (tone "error", kind "api"), as a failed result
+# is, so a turn that then ends without a failed result still says it
+# failed by its own error (wnote.bend's Wn.err). Lines for a turn no
+# longer running log nothing.
+def Claude.api.text(bs: List<&2, J.Json>) -> String:
+  match bs:
+    case Nil{}:
+      ""
+    case +b <> t:
+      Bool.pick(String, String.eq(J.Json.get_str(b, "type", ""), "text"), J.Json.get_str(b, "text", ""), Claude.api.text(t))
+
+def Claude.api.err.k(said: Bool, +thread: String, +now: Nat, +seq: Nat, +code: String, +text: String) -> List<&2, M.Change>:
+  match said:
+    case True{}:
+      [M.ActivityLogged{thread, Hub.id("api", now, seq), "error", "api", Bool.pick(String, String.is_empty(String.trim(text)), code, text), now}]
+    case False{}:
+      Nil{}
+
+def Claude.api.err(run: Bool, +thread: String, +now: Nat, +seq: Nat, +o: J.Json) -> List<&2, M.Change>:
+  Claude.api.err.k(Bool.and(run, Bool.not(String.is_empty(J.Json.get_str(o, "error", "")))), thread, now, seq, J.Json.get_str(o, "error", ""),
+    Claude.api.text(J.Json.elems(J.Json.get_obj(J.Json.get_obj(o, "message"), "content"))))
+
 def Claude.result.k(err: Bool, +thread: String, +now: Nat, text: String) -> Step:
   match err:
     case True{}:
@@ -2241,7 +2272,8 @@ def Claude.line.k(i: Nat, +s: M.State, +thread: String, +now: Nat, +o: J.Json) -
     case 1n:
       Claude.stream.if(Hub.running(Hub.thread(s, thread)), thread, J.Json.get_obj(o, "event"))
     case 2n:
-      Tools.step(Claude.assistant.t(s, thread, now, J.Json.get_obj(o, "message"), J.Json.get_str(o, "uuid", "")), thread)
+      Step.after(Tools.step(Claude.assistant.t(s, thread, now, J.Json.get_obj(o, "message"), J.Json.get_str(o, "uuid", "")), thread),
+        Claude.api.err(Hub.running(Hub.thread(s, thread)), thread, now, Hub.seq(s), o))
     case 3n:
       Step.after(Claude.result.if(Hub.running(Hub.thread(s, thread)), thread, now, o), Usage.result(s, thread, now, o))
     case 5n:
@@ -3553,16 +3585,24 @@ def Queue.changes(st: Step) -> List<&2, M.Change>:
       cs
 
 # the turn ended with messages waiting: start the next turn with them
-def Ended.state(cs: List<&2, M.Change>, +thread: String) -> String:
-  match cs:
-    case Nil{}:
+# how the changes end the thread's turn: "completed", "failed", or "" (no
+# end), and where a running turn the agent cut off (Claude cancelling its
+# own command, Claude.line.v.k's 5) ends "interrupted", so the server
+# hears of it as it does of a failure. Only a turn still running counts:
+# a Stop already ended its turn "stopped" (Retire.turn.f), and the
+# cancel that follows it is not a second end.
+def Ended.state(cs: List<&2, M.Change>, +thread: String, run: Bool) -> String:
+  match cs run:
+    case Nil{} _:
       ""
-    case M.TurnChanged{+th, M.Completed{}, _} <> t:
-      Bool.pick(String, String.eq(th, thread), "completed", Ended.state(t, thread))
-    case M.TurnChanged{+th, M.Failed{}, _} <> t:
-      Bool.pick(String, String.eq(th, thread), "failed", Ended.state(t, thread))
-    case _ <> t:
-      Ended.state(t, thread)
+    case M.TurnChanged{+th, M.Completed{}, _} <> t _:
+      Bool.pick(String, String.eq(th, thread), "completed", Ended.state(t, thread, run))
+    case M.TurnChanged{+th, M.Failed{}, _} <> t _:
+      Bool.pick(String, String.eq(th, thread), "failed", Ended.state(t, thread, run))
+    case M.TurnChanged{+th, M.Interrupted{}, _} <> t True{}:
+      Bool.pick(String, String.eq(th, thread), "interrupted", Ended.state(t, thread, True{}))
+    case _ <> t _:
+      Ended.state(t, thread, run)
 
 # Answers to a person elsewhere
 # ----------------------------
@@ -3656,11 +3696,63 @@ def Answer.demo(busy: Bool) -> M.State:
 def Run.settle(+s: M.State, +now: Nat, +th: String) -> List<&2, M.Change>:
   Bool.pick(List<&2, M.Change>, MR.Run.is(s, th), [M.ThreadSettled{th, False{}, now}], Nil{})
 
+# Turn starts
+# ----------
+# A turn is known by where it started, not by a message from the user (a
+# wake starts one with none; a message queued while a turn runs is logged
+# inside it). Every step stored passes through Turn.marks (the server's
+# Hub.commit.w): each TurnChanged to Running is followed by
+# turn.from.<thread>, the thread's newest entry at that point (wnote.bend's
+# Wn.mark), which the turn's end scans back to (Wn.cap).
+
+def Turn.mark(+s: M.State, c: M.Change) -> List<&2, M.Change>:
+  match c:
+    case M.TurnChanged{+th, M.Running{}, +at}:
+      [M.SettingSet{WN.Wn.from.key(th), WN.Wn.mark(M.State.mine(s, th)), at}]
+    case _:
+      Nil{}
+
+def Turn.starts(cs: List<&2, M.Change>) -> Bool:
+  match cs:
+    case Nil{}:
+      False{}
+    case M.TurnChanged{_, M.Running{}, _} <> _:
+      True{}
+    case _ <> t:
+      Turn.starts(t)
+
+# s: the state as of c (the step's earlier changes folded in)
+def Turn.marks.go(cs: List<&2, M.Change>, +s: M.State, acc: List<&2, M.Change>) -> List<&2, M.Change>:
+  match cs:
+    case Nil{}:
+      List.reverse(&2, M.Change, acc)
+    case +c <> t:
+      Turn.marks.go(t, M.State.apply(s, c), List.append(&2, M.Change, Turn.mark(s, c), c <> acc))
+
+def Turn.marks.k(starts: Bool, +s: M.State, cs: List<&2, M.Change>) -> List<&2, M.Change>:
+  match starts:
+    case True{}:
+      Turn.marks.go(cs, s, Nil{})
+    case False{}:
+      cs
+
+# s: the state before the step
+def Turn.marks(+s: M.State, +cs: List<&2, M.Change>) -> List<&2, M.Change>:
+  Turn.marks.k(Turn.starts(cs), s, cs)
+
+# what a turn end tells the server: the end's own alert kind, and the
+# turn's error, why it ended and its own reply, found by one scan from
+# the turn's start (wnote.bend's Wn.cap; none when no webhook is set)
+def Ended.turn(+thread: String, +state: String, +alert: String, g: WN.Got) -> Out:
+  match g:
+    case WN.Got{+err, +reply}:
+      TurnEnded{thread, state, alert, err, WN.Wn.end.reason(state, err, reply), reply}
+
 # post: the state after the step; the policy's record (core/notice.bend)
 # is written with it
 def Ended.out.p(+post: M.State, +s: M.State, +now: Nat, +state: String, +thread: String, +cwd: String, +cs: List<&2, M.Change>, os: List<&2, Out>) -> Step:
   Step{List.append(&2, M.Change, List.append(&2, M.Change, List.append(&2, M.Change, cs, Run.settle(s, now, thread)), Sum.at(RF.Sum.due(s, thread, now), thread, now)), NO.Policy.end(post, now, thread, state)),
-    List.append(&2, Out, os, TurnEnded{thread, state} <> Git{0, "", "step", thread, cwd, "", ""} <> Git{0, "", "checkpoint", thread, cwd, "", ""}
+    List.append(&2, Out, os, Ended.turn(thread, state, NO.Policy.kind(NO.Policy.end(post, now, thread, state)), WN.Wn.cap(post, thread)) <> Git{0, "", "step", thread, cwd, "", ""} <> Git{0, "", "checkpoint", thread, cwd, "", ""}
       <> List.append(&2, Out, Sum.out(RF.Sum.due(s, thread, now), s, thread, "thread"), Answer.out(String.eq(state, "completed"), post, thread)))}
 
 def Ended.out.k(none: Bool, +s: M.State, +now: Nat, +state: String, +thread: String, +cwd: String, st: Step) -> Step:
@@ -3676,7 +3768,7 @@ def Ended.out.s(+s: M.State, +now: Nat, +state: String, +thread: String, +cwd: S
 # a turn that ends tells the server (phone notifications hang off this),
 # and has the thread summarized when its summary is due
 def Ended.out(+s: M.State, +now: Nat, +thread: String, +st: Step) -> Step:
-  Ended.out.s(s, now, Ended.state(Queue.changes(st), thread), thread, Hub.cwd(s, Hub.thread(s, thread)), st)
+  Ended.out.s(s, now, Ended.state(Queue.changes(st), thread, Hub.running(Hub.thread(s, thread))), thread, Hub.cwd(s, Hub.thread(s, thread)), st)
 
 def Queue.drain(+s: M.State, +now: Nat, +thread: String, +st: Step) -> Step:
   Queue.drain.k(Bool.and(Queue.ended(Queue.changes(st), thread), M.Queue.waiting(s, thread)), st,
@@ -4936,7 +5028,7 @@ def Launch.tell(+s: M.State, +now: Nat, +thread: String, st: Step) -> Step:
 def Retire.turn.f(run: Bool, +s: M.State, +now: Nat, +th: String, +from: String, st: Step) -> Step:
   match run:
     case True{}:
-      Launch.tell.from(s, now, th, from, Task.finish(s, now, th, Step.before(M.TurnChanged{th, M.Interrupted{}, now} <> STP.Stamp.stop.mark(s, th, now), [TurnEnded{th, "stopped"}], st)))
+      Launch.tell.from(s, now, th, from, Task.finish(s, now, th, Step.before(M.TurnChanged{th, M.Interrupted{}, now} <> STP.Stamp.stop.mark(s, th, now), [TurnEnded{th, "stopped", "", "", "", ""}], st)))
     case False{}:
       st
 
@@ -8130,7 +8222,7 @@ def Ended.stopped(os: List<&2, Out>, +th: String) -> Bool:
   match os:
     case Nil{}:
       False{}
-    case TurnEnded{+t, +state} <> r:
+    case TurnEnded{+t, +state, _, _, _, _} <> r:
       Bool.or(Bool.and(String.eq(t, th), String.eq(state, "stopped")), Ended.stopped(r, th))
     case _ <> r:
       Ended.stopped(r, th)
@@ -9174,6 +9266,29 @@ def Secret.changes.k(empty: Bool, +v: SEC.Vault, cs: List<&2, M.Change>) -> List
 
 def Secret.changes(+v: SEC.Vault, cs: List<&2, M.Change>) -> List<&2, M.Change>:
   Secret.changes.k(SEC.Sec.empty(v), v, cs)
+
+# A step's outs with the same values masked: a turn's end carries text
+# read from the thread (its error and reply) to the server, which sends it
+# on (the webhook), so it is covered here as the stored change it was
+# read from is. No other out carries stored text out of the hub.
+def Secret.outs.go(os: List<&2, Out>, +v: SEC.Vault, acc: List<&2, Out>) -> List<&2, Out>:
+  match os:
+    case Nil{}:
+      List.reverse(&2, Out, acc)
+    case TurnEnded{+th, +state, +alert, +err, +reason, +text} <> t:
+      Secret.outs.go(t, v, TurnEnded{th, state, alert, SEC.Sec.mask(v, err), reason, SEC.Sec.mask(v, text)} <> acc)
+    case +o <> t:
+      Secret.outs.go(t, v, o <> acc)
+
+def Secret.outs.k(empty: Bool, +v: SEC.Vault, os: List<&2, Out>) -> List<&2, Out>:
+  match empty:
+    case True{}:
+      os
+    case False{}:
+      Secret.outs.go(os, v, Nil{})
+
+def Secret.outs(+v: SEC.Vault, os: List<&2, Out>) -> List<&2, Out>:
+  Secret.outs.k(SEC.Sec.empty(v), v, os)
 
 # the thread that asked for a secret (secret_request), or ""
 def Secret.ask.thread(+s: M.State, +name: String) -> String:

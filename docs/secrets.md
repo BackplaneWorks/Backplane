@@ -48,6 +48,7 @@ Every prompt carries a `<secrets>` block: the names set, how to use them, and "n
 
 - `Hub.tagged`: every agent output line as it's read;
 - `Hub.step.go`: every change before it is written and applied (`Secret.changes`: each change's JSON through `Sec.json`), so the log, the store, FTS, mail, the state and every client are covered;
+- `Hub.step.go`: a step's outs too (`Secret.outs`): a turn's end carries its error and reply to the server for the push webhook, and both are masked as the changes they were read from are;
 - `Mcp.ask.raw`: every MCP answer;
 - `Spawn.agent`: every agent's launch arguments (Claude, Codex, the ACP, MSP and RPC runners, the writer's one-shot), wherever the step or out that carried the text came from;
 - `Agent.write` and the one-shot's stdin: every line to an agent;

@@ -37,6 +37,7 @@ import ./fview.bend as FV
 import ./farlive.bend as FLV
 import ./desk.bend as DK
 import ./notice.bend as NO
+import ./wnote.bend as WN
 import ./hist.bend as HI
 import ./hier.bend as HR
 import ./review.bend as RVW
@@ -11339,6 +11340,78 @@ def Settings.known(ps: List<&2, String>, +page: String) -> Bool:
 def Settings.clean(+page: String) -> String:
   Bool.pick(String, Settings.known(Settings.pages(), page), page, "")
 
+# Webhook (core/wnote.bend) in Settings: the address and the secret
+# file's path, one list of rows all four clients draw. The secret's
+# contents are never read and never shown; only the path is.
+def Hookv.bad(+flag: String) -> Bool:
+  String.eq(flag, "bad")
+
+def Hookv.url.note.k(bad: Bool, +l: I.Loc) -> String:
+  match bad:
+    case True{}:
+      MSG.T.hook.url.bad(l)
+    case False{}:
+      MSG.T.hook.url.note(l)
+
+def Hookv.url.note(+l: I.Loc, +flag: String) -> String:
+  Hookv.url.note.k(Hookv.bad(flag), l)
+
+def Hookv.keep(+raw: String) -> Bool:
+  Bool.or(String.is_empty(raw), WN.Wn.url.ok(raw))
+
+def Hookv.rows.loc(+l: I.Loc, +u: Ui) -> List<&2, AgRow>:
+  [AgRow{MSG.T.hook.title(l), MSG.T.hook.lead(l), Nil{}, Nil{}},
+   AgRow{MSG.T.hook.url(l), Hookv.url.note(l, Ui.scratch(u, "@hook.err")),
+     [AgField{"whurl", MSG.T.hook.url.hint(l), False{}, Ui.scratch(u, "@f.whurl"), "hook-url"}],
+     [AgBtn{MSG.T.common.save(l), "hook-url", "", False{}}]},
+   AgRow{MSG.T.hook.secret(l), MSG.T.hook.secret.note(l),
+     [AgField{"whsec", MSG.T.hook.secret.hint(l), False{}, Ui.scratch(u, "@f.whsec"), "hook-secret"}],
+     [AgBtn{MSG.T.common.save(l), "hook-secret", "", False{}}]}]
+
+def Hookv.rows(+u: Ui) -> List<&2, AgRow>:
+  Hookv.rows.loc(Lang.loc(u), u)
+
+# a field's Enter sends its text; a Save button sends nothing and the scratch holds it
+def Hookv.take(empty: Bool, +u: Ui, +field: String, +value: String) -> Ui:
+  match empty:
+    case True{}:
+      u
+    case False{}:
+      Ui.scratch_set(u, field, value)
+
+def Hookv.url.k(ok: Bool, +u: Ui, +raw: String) -> Act:
+  match ok:
+    case True{}:
+      Ui.setting(Ui.scratch_set(Ui.scratch_set(u, "@hook.err", ""), "@f.whurl", raw), WN.Wn.url.key() ++ "=" ++ raw)
+    case False{}:
+      Act{Ui.scratch_set(u, "@hook.err", "bad"), Nil{}}
+
+def Hookv.url(+u: Ui, +value: String) -> Act:
+  +u2 = Hookv.take(String.is_empty(value), u, "@f.whurl", value)
+  +raw = String.trim(Ui.scratch(u2, "@f.whurl"))
+  Hookv.url.k(Hookv.keep(raw), u2, raw)
+
+def Hookv.secret(+u: Ui, +value: String) -> Act:
+  +u2 = Hookv.take(String.is_empty(value), u, "@f.whsec", value)
+  +raw = String.trim(Ui.scratch(u2, "@f.whsec"))
+  Ui.setting(Ui.scratch_set(u2, "@f.whsec", raw), WN.Wn.secret.key() ++ "=" ++ raw)
+
+def Hookv.act.k(url: Bool, +u: Ui, +value: String) -> Act:
+  match url:
+    case True{}:
+      Hookv.url(u, value)
+    case False{}:
+      Hookv.secret(u, value)
+
+def Hookv.act(+u: Ui, +action: String, +value: String) -> Act:
+  Hookv.act.k(String.eq(action, "hook-url"), u, value)
+
+# the outgoing webhook's two actions; every other hook-* action (Create,
+# Revoke, the token's show, rotate and off) is an incoming hook's and
+# goes on to the bot-action table
+def Hookv.ours(+action: String) -> Bool:
+  Bool.or(String.eq(action, "hook-url"), String.eq(action, "hook-secret"))
+
 def Settings.page(+u: Ui) -> String:
   Settings.clean(Ui.scratch(u, "@settings.page"))
 
@@ -11372,7 +11445,7 @@ def Settings.q(+u: Ui) -> String:
 def Settings.rows.of(i: Nat, +l: I.Loc) -> List<&2, String>:
   match i:
     case 0n: [MSG.T.settings.theme(l), MSG.T.settings.lang(l), MSG.T.settings.sidebar(l), MSG.T.settings.textsize(l)]
-    case 1n: [MSG.T.settings.settle(l), MSG.T.settings.settle.done(l), MSG.T.settings.restart(l)]
+    case 1n: [MSG.T.settings.settle(l), MSG.T.settings.settle.done(l), MSG.T.settings.restart(l), MSG.T.hook.title(l), MSG.T.hook.url(l), MSG.T.hook.secret(l)]
     case 2n: [MSG.T.settings.provider(l), MSG.T.settings.model(l), Think.label()]
     case 3n: [MSG.T.settings.writing.provider(l)]
     case 4n: ["KiCad", "FreeCAD", "KiCad IPC"]
@@ -11386,7 +11459,7 @@ def Settings.rows.of(i: Nat, +l: I.Loc) -> List<&2, String>:
 def Settings.words(i: Nat) -> String:
   match i:
     case 0n: "appearance dark light theme font text size zoom scale language sidebar"
-    case 1n: "threads settle done finished restart continue notifications alerts notify"
+    case 1n: "threads settle done finished restart continue notifications alerts notify webhook hook url address secret post"
     case 2n: "agents provider model claude codex grok opencode muse pi omp effort thinking reasoning chain of thought"
     case 3n: "writing titles summaries text model"
     case 4n: "cad kicad freecad ipc path schematic board"
@@ -11436,8 +11509,23 @@ def Settings.found(ps: List<&2, String>, +l: I.Loc, +q: String) -> List<&2, Stri
 def Settings.loc(+u: Ui) -> I.Loc:
   I.I18n.of_tag(Ui.scratch(u, "@lang.tag"))
 
+# opening Threads fills the webhook fields from the saved settings, so a
+# Save does not wipe an address the person has not retyped
+def Settings.seed(+u: Ui) -> Ui:
+  Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(u, "@f.whurl", M.Setting.get(Ui.state.of(u), WN.Wn.url.key(), "")), "@f.whsec", M.Setting.get(Ui.state.of(u), WN.Wn.secret.key(), "")), "@hook.err", "")
+
+def Settings.seed.k(threads: Bool, +u: Ui) -> Ui:
+  match threads:
+    case True{}:
+      Settings.seed(u)
+    case False{}:
+      u
+
+def Settings.go.k(+page: String, +u: Ui) -> Act:
+  Act{Settings.seed.k(String.eq(page, "threads"), Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.flag_off(u, "pairqr"), "@settings.page", page), "@set.sc", "0"), "@set.focus", "")), [Focus{""}]}
+
 def Settings.go(+u: Ui, +page: String) -> Act:
-  Act{Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.flag_off(u, "pairqr"), "@settings.page", Settings.clean(page)), "@set.sc", "0"), "@set.focus", ""), [Focus{""}]}
+  Settings.go.k(Settings.clean(page), u)
 
 def Settings.focus(a: Act, id: String) -> Act:
   match a:
@@ -14866,11 +14954,18 @@ def Browse.dispatch(browser: Bool, +u: Ui, +action: String, +value: String) -> A
     case True{}: Browse.act.k(C.Codec.pos(["br-go", "br-back", "br-forward", "br-reload", "br-new", "br-select", "br-close", "br-prev", "br-next"], action), u, value)
     case False{}: Mailv.dispatch(String.starts_with(action, "mail-"), u, action, value)
 
+def Hookv.dispatch(hit: Bool, +u: Ui, +action: String, +value: String) -> Act:
+  match hit:
+    case True{}:
+      Hookv.act(u, action, value)
+    case False{}:
+      Mailv.sync(Ui.cast.now(u, Browse.dispatch(String.starts_with(action, "br-"),
+        Browse.field.change(Bool.and(String.eq(action, "bfield"), String.starts_with(value, "brurl:")), u, value), action, value)))
+
 def Settings.dispatch(nav: Bool, +u: Ui, +action: String, +value: String) -> Act:
   match nav:
     case True{}: Settings.nav(u, value)
-    case False{}: Mailv.sync(Ui.cast.now(u, Browse.dispatch(String.starts_with(action, "br-"),
-        Browse.field.change(Bool.and(String.eq(action, "bfield"), String.starts_with(value, "brurl:")), u, value), action, value)))
+    case False{}: Hookv.dispatch(Hookv.ours(action), u, action, value)
 
 def ThreadTree.can_create(+st: M.State, +id: String) -> Bool:
   Bool.and(ST.Tree.alive(Ui.thread(st, id)), Bool.and(Bool.not(String.is_empty(ST.Tree.project(Ui.thread(st, id)))), Bool.not(M.Scratch.is(FR.Fr.local(ST.Tree.project(Ui.thread(st, id)))))))
