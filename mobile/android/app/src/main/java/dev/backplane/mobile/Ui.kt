@@ -81,6 +81,7 @@ import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.graphics.SolidColor
 import kotlinx.coroutines.launch
@@ -897,11 +898,31 @@ fun ThreadScreen(m: AppModel, s: Screen, t: ThreadView, below: (@Composable () -
         val head = (if (t.parent != null) 1 else 0) + (if (t.earlier > 0) 1 else 0)
         if (i >= 0) list.scrollToItem(head + i)
     }
+    // The newest line stays in view while the person is at the thread's end:
+    // a reply streams within its own row (no new row comes) and the keyboard
+    // coming up shortens the view; either left the view on the reply's first
+    // lines. Reaching the end takes it up; a drag up lets go (a reply read
+    // while it streams holds still).
+    var follow by remember(t.id) { mutableStateOf(false) }
+    val later by rememberUpdatedState(t.later)
+    LaunchedEffect(list, t.id) {
+        snapshotFlow { list.canScrollForward to userDragging }.collect { (more, drag) -> if (!more) follow = true else if (drag) follow = false }
+    }
+    LaunchedEffect(list, t.id) {
+        snapshotFlow { list.layoutInfo }.collect { li ->
+            if (follow && later == 0 && !userDragging && !list.isScrollInProgress && list.canScrollForward && li.totalItemsCount > 0)
+                list.scrollToItem(li.totalItemsCount - 1, Int.MAX_VALUE / 2)
+        }
+    }
     LaunchedEffect(count, t.live) {
         val last = list.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
         // an earlier page's end is not the thread's: it holds (the next page
         // down comes by scrolling on)
-        if (count > 0 && last >= count - 3 && t.later == 0) list.animateScrollToItem(count - 1)
+        if (count > 0 && last >= count - 3 && t.later == 0) {
+            list.animateScrollToItem(count - 1)
+            // a new row taller than the view: on to its end
+            if (follow && list.canScrollForward) list.scrollToItem(count - 1, Int.MAX_VALUE / 2)
+        }
     }
     // the design history's way back: the entry scrolled to (near the top)
     // and tinted, the tint fading out; after the rows the jump opened are laid out
@@ -912,6 +933,8 @@ fun ThreadScreen(m: AppModel, s: Screen, t: ThreadView, below: (@Composable () -
         val i = t.entries.indexOfFirst { it.id == j.id }
         if (i < 0) return@LaunchedEffect
         val head = (if (t.parent != null) 1 else 0) + (if (t.earlier > 0) 1 else 0)
+        // the entry stays where it was brought, whatever streams after it
+        follow = false
         list.animateScrollToItem(maxOf(0, head + i - 1))
         lit = j.id
         delay(400)
