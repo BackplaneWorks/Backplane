@@ -586,7 +586,7 @@ button.chip:hover { border-color: var(--bad); color: var(--bad); }
 .dl .no { flex: none; width: 4ch; text-align: right; color: var(--faint); padding-right: 6px; user-select: none; }
 .dl .sign { flex: none; width: 2ch; text-align: center; user-select: none; }
 .dl .code { flex: 1; min-width: 0; }
-.dl.add { background: var(--add-bg); } .dl.add .sign { color: var(--ok); }
+.dl.add { background: var(--add-bg); padding: 0; gap: 0; border-bottom: 0; } .dl.add .sign { color: var(--ok); }
 .dl.del { background: var(--del-bg); } .dl.del .sign { color: var(--bad); }
 .dl.meta { color: var(--faint); }
 
