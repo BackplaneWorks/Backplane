@@ -140,3 +140,22 @@ test('Ctrl held marks the page for every keycap; Alt, a PTY, a dialog or letting
   h.win.emit('blur');assert.equal(h.held(), null);
   h.key('keydown', {ctrlKey:true});h.dispose();assert.equal(h.held(), null);
 });
+
+// Holding Ctrl and clicking the legend's "all shortcuts": the press moves the
+// focus, which must not hide the legend before the click lands
+test('a press with Ctrl held keeps the hints through the focus it moves; a plain press clears them', async () => {
+  const { installWorkspaceHints } = await import('../../src/web/workspace-hints.js');
+  const h = harness(installWorkspaceHints);
+  h.key('keydown', {ctrlKey:true});assert.equal(h.held(), '1');
+  h.win.emit('pointerdown', input({ctrlKey:true}));
+  // (the composer's blur reaches the window's capturing listener too)
+  h.win.emit('blur', {target:{}});h.doc.emit('focusout');h.doc.emit('focusin');
+  assert.equal(h.held(), '1');assert.equal(h.mode(), 'threads');
+  h.win.emit('blur', {target:h.win});assert.equal(h.held(), null);
+  h.key('keydown', {ctrlKey:true});
+  h.key('keyup', {});assert.equal(h.held(), null);
+  h.key('keydown', {ctrlKey:true});
+  h.win.emit('pointerdown', input({}));assert.equal(h.held(), null);
+  h.doc.emit('focusin');assert.equal(h.held(), null);
+  h.dispose();
+});

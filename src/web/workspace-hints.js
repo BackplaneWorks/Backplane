@@ -21,7 +21,9 @@ export function shortcutHintMode(event, target, platform) {
 }
 
 export function installWorkspaceHints({ document: doc = document, window: win = window, platform = win.navigator.platform } = {}) {
-  let held, sidebar, composing = false;
+  // (modPress: a press with Ctrl/Cmd still held, as on the legend's "all
+  // shortcuts": the focus it moves keeps the hints up, so the click lands)
+  let held, sidebar, composing = false, modPress = false;
   const annotated = new Set(), listeners = [];
   const listen = (object, type, handler) => {
     object.addEventListener(type, handler, true);
@@ -77,10 +79,18 @@ export function installWorkspaceHints({ document: doc = document, window: win = 
     set(doc.documentElement, 'data-keys-held', hint === 'threads' ? '1' : null);
   };
   const reset = () => { held = null; if (sidebar) set(sidebar, 'data-shortcut-hints', null); set(doc.documentElement, 'data-keys-held', null); };
-  const keys = event => { held = event; sync(); };
-  listen(win, 'keydown', keys); listen(win, 'keyup', keys);
-  listen(win, 'blur', reset); listen(doc, 'visibilitychange', reset);
-  listen(doc, 'focusin', reset); listen(doc, 'focusout', reset);
+  const keys = event => { modPress = false; held = event; sync(); };
+  const press = event => {
+    modPress = !!(event.ctrlKey || event.metaKey);
+    if (modPress) { held = event; sync(); } else reset();
+  };
+  const moved = () => { if (modPress) sync(); else reset(); };
+  listen(win, 'keydown', keys); listen(win, 'keyup', keys); listen(win, 'pointerdown', press);
+  // (a capturing blur also hears each element's blur: only the window's own
+  // ends a press)
+  listen(win, 'blur', event => { if (event.target === win || event.target == null) { modPress = false; reset(); } else moved(); });
+  listen(doc, 'visibilitychange', () => { modPress = false; reset(); });
+  listen(doc, 'focusin', moved); listen(doc, 'focusout', moved);
   listen(doc, 'compositionstart', () => { composing = true; reset(); });
   listen(doc, 'compositionend', () => { composing = false; reset(); });
   const observer = new win.MutationObserver((records = []) => {
