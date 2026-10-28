@@ -21,6 +21,7 @@ import ../web/app.bend as A
 import ../mobile/session.bend as MS
 import ../mobile/hubs.bend as H
 import ../mobile/folded-actions.bend as FA
+import ../core/hits.bend as HT
 
 # Pure server projection. The authoritative state is used for normal action
 # decisions; only the bounded selected entry window reaches a renderer.
@@ -513,6 +514,65 @@ def Search.result(+page: T.SearchPage, +index: T.Index, +p: J.Json, +epoch: Stri
     case T.SearchPage{+ids, +visited, +last, +more}:
       J.Json.obj([J.KV{"remoteReady", J.Flag{False{}}}, J.KV{"cmds", J.Json.arr(Nil{})}, J.KV{"search", J.Json.obj([
         J.KV{"query", J.Str{J.Json.get_str(p, "query", "")}}, J.KV{"rows", J.Json.arr(Search.rows(ids, index))},
+        J.KV{"visited", J.Json.nat(visited)}, J.KV{"hasMore", J.Flag{more}}, J.KV{"cursor", J.Str{Bool.pick(String, more, W.Cursor.write(epoch, J.Json.get_obj(p, "target"), J.Json.get_str(p, "query", ""), Page.number(last)), "")}}])}])
+
+# A page of results as the top bar's search shows it (core/hits.bend):
+# each row also says its thread's title, its project's, when it was said,
+# whether it is in the open thread (here) and its snippet (snip: plain
+# text and the query's words by turns), in the order shown, the open
+# thread's first. The fields phones read (id, thread, text) stay as they
+# were.
+def Search.project(+p: M.Project) -> String:
+  match p:
+    case M.Project{_, title, _, _, _}: title
+
+def Search.title(+t: M.Thread) -> String:
+  match t:
+    case M.Thread{_, _, title, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _}: title
+
+def Search.thread.project(+t: M.Thread) -> String:
+  match t:
+    case M.Thread{_, project, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _}: project
+
+def Search.entry.at(+e: M.Entry) -> Nat:
+  match e:
+    case M.Msg{_, _, _, _, at}: at
+    case M.Act{_, _, _, _, _, at}: at
+
+def Search.hit(+id: String, +index: T.Index, +st: M.State) -> HT.HitAt:
+  +th = M.Idx.thread(T.Row.entry(T.Index.row.k(Map.get(T.Row, T.Row.blank(), T.Index.rows(index), id))))
+  HT.HitAt{id, th, Search.thread.project(HB.Hub.thread(st, th))}
+
+def Search.hits(+ids: List<&2, String>, +index: T.Index, +st: M.State) -> List<&2, HT.HitAt>:
+  match ids:
+    case Nil{}: Nil{}
+    case +id <> tail: Search.hit(id, index, st) <> Search.hits(tail, index, st)
+
+def Search.snip(ps: List<&2, String>) -> List<&2, J.Json>:
+  match ps:
+    case Nil{}: Nil{}
+    case p <> tail: J.Str{p} <> Search.snip(tail)
+
+def Search.row.found(+r: T.Row, +st: M.State, +now: Nat, +here: String, +terms: Map<&2, Bool>) -> J.Json:
+  +th = HB.Hub.thread(st, M.Idx.thread(T.Row.entry(r)))
+  Obj.put(Obj.put(Obj.put(Obj.put(Obj.put(Search.row(r),
+    "title", J.Str{Search.title(th)}),
+    "project", J.Str{Search.project(HB.Hub.project(st, Search.thread.project(th)))}),
+    "when", J.Str{HT.Hits.when(st, now, Search.entry.at(T.Row.entry(r)))}),
+    "here", J.Flag{String.eq(M.Idx.thread(T.Row.entry(r)), here)}),
+    "snip", J.Json.arr(Search.snip(HT.Snip.of(terms, T.Entry.text(T.Row.entry(r))))))
+
+def Search.rows.found(+hs: List<&2, HT.HitAt>, +index: T.Index, +st: M.State, +now: Nat, +here: String, +terms: Map<&2, Bool>) -> List<&2, J.Json>:
+  match hs:
+    case Nil{}: Nil{}
+    case +h <> tail: Search.row.found(T.Index.row.k(Map.get(T.Row, T.Row.blank(), T.Index.rows(index), HT.HitAt.id(h))), st, now, here, terms) <> Search.rows.found(tail, index, st, now, here, terms)
+
+def Search.found(+page: T.SearchPage, +index: T.Index, +p: J.Json, +epoch: String, +st: M.State, +now: Nat, +here: String) -> J.Json:
+  match page:
+    case T.SearchPage{+ids, +visited, +last, +more}:
+      J.Json.obj([J.KV{"remoteReady", J.Flag{False{}}}, J.KV{"cmds", J.Json.arr(Nil{})}, J.KV{"search", J.Json.obj([
+        J.KV{"query", J.Str{J.Json.get_str(p, "query", "")}},
+        J.KV{"rows", J.Json.arr(Search.rows.found(HT.Hits.order(Search.hits(ids, index, st), here), index, st, now, here, T.Words.of(J.Json.get_str(p, "query", ""))))},
         J.KV{"visited", J.Json.nat(visited)}, J.KV{"hasMore", J.Flag{more}}, J.KV{"cursor", J.Str{Bool.pick(String, more, W.Cursor.write(epoch, J.Json.get_obj(p, "target"), J.Json.get_str(p, "query", ""), Page.number(last)), "")}}])}])
 
 def Search.render(+index: T.Index, +st: M.State, +p: J.Json, +epoch: String, +before: Nat) -> J.Json:

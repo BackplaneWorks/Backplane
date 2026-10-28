@@ -128,7 +128,7 @@ def Found.index(f: Found) -> T.Index:
   match f:
     case Found{_, i}: i
 
-def Ts.search.terms(empty: Bool, +ts: List<&2, Sigma<&2, &2, String, _ => Bool>>, +h: String, +th: String, +before: Nat) -> IO(Found):
+def Ts.search.terms(empty: Bool, +ts: List<&2, Sigma<&2, &2, String, _ => Bool>>, +h: String, +th: String, +hide: Map<&2, Bool>, +before: Nat) -> IO(Found):
   match empty:
     case True{}: IO.pure(Found, Found{T.SearchPage{Nil{}, 0n, "", False{}}, T.Index.empty()})
     case False{}:
@@ -136,12 +136,47 @@ def Ts.search.terms(empty: Bool, +ts: List<&2, Sigma<&2, &2, String, _ => Bool>>
         ns : List<&2, Nat> <- Ts.counts(ts, h)
         +xs : List<&2, List<&2, String>> <- Ts.query(h, Q.Q.sql.search(), [Q.Q.base(ts, ns), Q.Q.n(Q.Q.before(before)), J.Json.show(J.Json.arr(Q.Q.words.json(ts)))], 129)
         +rs : List<&2, T.Row> = Q.Q.rows(xs)
-        return Found{Q.Q.search(ts, rs, th, before), Q.Q.search.index(rs)}
+        return Found{Q.Q.search.hid(ts, rs, th, hide, before), Q.Q.search.index(rs)}
 
-# T.Index.search over the store: the same rows, visits, cursor and more
-def Ts.search(+h: String, +q: String, +th: String, +before: Nat) -> IO(Found):
+# T.Index.search over the store: the same rows, visits, cursor and more;
+# hide: threads left out (T.Index.search.all)
+def Ts.search.hid(+h: String, +q: String, +th: String, +hide: Map<&2, Bool>, +before: Nat) -> IO(Found):
   +ts = Q.Q.terms.of(q)
-  Ts.search.terms(List.is_empty(&2, Sigma<&2, &2, String, _ => Bool>, ts), ts, h, th, before)
+  Ts.search.terms(List.is_empty(&2, Sigma<&2, &2, String, _ => Bool>, ts), ts, h, th, hide, before)
+
+def Ts.search(+h: String, +q: String, +th: String, +before: Nat) -> IO(Found):
+  Ts.search.hid(h, q, th, Map.new(&2, Bool), before)
+
+# the open thread's candidates (on the first page only)
+def Ts.rows.in(first: Bool, +h: String, +base: String, +words: String, +th: String) -> IO(List<&2, T.Row>):
+  match first:
+    case False{}: IO.pure(List<&2, T.Row>, Nil{})
+    case True{}:
+      do IO<List<&2, T.Row>>:
+        +xs : List<&2, List<&2, String>> <- Ts.query(h, Q.Q.sql.search.in(), [base, Q.Q.n(Q.Q.top()), words, th], 129)
+        return Q.Q.rows(xs)
+
+def Ts.search.top.terms(empty: Bool, +ts: List<&2, Sigma<&2, &2, String, _ => Bool>>, +h: String, +th: String, +hide: Map<&2, Bool>, +before: Nat) -> IO(Found):
+  match empty:
+    case True{}: IO.pure(Found, Found{T.Search.none(), T.Index.empty()})
+    case False{}:
+      do IO<Found>:
+        ns : List<&2, Nat> <- Ts.counts(ts, h)
+        +base : String = Q.Q.base(ts, ns)
+        +words : String = J.Json.show(J.Json.arr(Q.Q.words.json(ts)))
+        +here : List<&2, T.Row> <- Ts.rows.in(Bool.and(Nat.is_eq(before, 0n), Bool.not(String.is_empty(th))), h, base, words, th)
+        +hp : T.SearchPage = Q.Q.search.cap(ts, here, th, Map.new(&2, Bool), T.Search.here(), 0n)
+        +xs : List<&2, List<&2, String>> <- Ts.query(h, Q.Q.sql.search(), [base, Q.Q.n(Q.Q.before(before)), words], 129)
+        +rs : List<&2, T.Row> = Q.Q.rows(xs)
+        return Found{T.Search.join(hp, Q.Q.search.cap(ts, rs, "", T.Search.gone.but(hide, th), T.Search.left(hp), before)),
+          Q.Q.search.index(List.append(&2, T.Row, here, rs))}
+
+# the top bar's search over the store (T.Search.join): the open thread's
+# results first (on the first page), then every other thread's but the
+# deleted ones (hide)
+def Ts.search.top(+h: String, +q: String, +th: String, +hide: Map<&2, Bool>, +before: Nat) -> IO(Found):
+  +ts = Q.Q.terms.of(q)
+  Ts.search.top.terms(List.is_empty(&2, Sigma<&2, &2, String, _ => Bool>, ts), ts, h, th, hide, before)
 
 # the recent-only index (Index.of's recent order) from the store and st
 def Ts.recent(+h: String, +st: M.State) -> IO(T.Index):

@@ -223,6 +223,31 @@ def search.chain(+fuel: Nat, go: Bool, +h: String, +q: String, +th: String, +bef
           J.Json.show(V.Search.result(TS.Found.page(got), TS.Found.index(got), search.p(th, q), "ep")), J.Json.show(V.Search.result(want, i, search.p(th, q), "ep")))
         search.chain(f, Nat.is_gt(search.next(want), 0n), h, q, th, search.next(want), i, a)
 
+# the top bar's search (every thread, the open one's results first on
+# the first page): the store's (TS.Ts.search.top) is the index's
+def top.here(first: Bool, +i: T.Index, +q: String, +th: String) -> T.SearchPage:
+  match first:
+    case True{}: T.Index.search.in(i, q, th)
+    case False{}: T.Search.none()
+
+def top.both(+here: T.SearchPage, +i: T.Index, +q: String, +hide: Map<&2, Bool>, +before: Nat) -> T.SearchPage:
+  T.Search.join(here, T.Index.search.rest(i, q, hide, T.Search.left(here), before))
+
+def top.want(+i: T.Index, +q: String, +th: String, +hide: Map<&2, Bool>, +before: Nat) -> T.SearchPage:
+  top.both(top.here(Bool.and(Nat.is_eq(before, 0n), Bool.not(String.is_empty(th))), i, q, th), i, q, T.Search.gone.but(hide, th), before)
+
+def top.chain(+fuel: Nat, go: Bool, +h: String, +q: String, +th: String, +before: Nat, +i: T.Index, +hide: Map<&2, Bool>, +acc: Acc) -> IO(Acc):
+  match fuel go:
+    case 0n _: IO.pure(Acc, acc)
+    case _ False{}: IO.pure(Acc, acc)
+    case 1n+f True{}:
+      do IO<Acc>:
+        +want : T.SearchPage = top.want(i, q, th, hide, before)
+        +got : TS.Found <- TS.Ts.search.top(h, q, th, hide, before)
+        +a : Acc = Acc.see(acc, "every thread's search " ++ q ++ " from " ++ th ++ " before " ++ Nat.show(before),
+          J.Json.show(V.Search.result(TS.Found.page(got), TS.Found.index(got), search.p(th, q), "ep")), J.Json.show(V.Search.result(want, i, search.p(th, q), "ep")))
+        top.chain(f, Nat.is_gt(search.next(want), 0n), h, q, th, search.next(want), i, hide, a)
+
 def searches.th(ths: List<&2, String>, +h: String, +q: String, +i: T.Index, +acc: Acc) -> IO(Acc):
   match ths:
     case Nil{}: IO.pure(Acc, acc)
@@ -230,7 +255,8 @@ def searches.th(ths: List<&2, String>, +h: String, +q: String, +i: T.Index, +acc
       do IO<Acc>:
         +a : Acc <- search.chain(30n, True{}, h, q, th, 0n, i, acc)
         +a2 : Acc <- search.chain(3n, True{}, h, q, th, 77n, i, a)
-        searches.th(t, h, q, i, a2)
+        +a3 : Acc <- top.chain(30n, True{}, h, q, th, 0n, i, Map.set(&2, Bool, Map.new(&2, Bool), "tb", True{}), a2)
+        searches.th(t, h, q, i, a3)
 
 def searches(qs: List<&2, String>, +ths: List<&2, String>, +h: String, +i: T.Index, +acc: Acc) -> IO(Acc):
   match qs:

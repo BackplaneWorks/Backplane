@@ -112,7 +112,7 @@
     "src/core/telemetry.bend": "459638fea434c79b7965a9947ca6e9554208fc7c63c7cadb7f2a22b2e5ce6187",
     "src/core/textscale.bend": "6f3179e85bce1ed2f56191bcc25621fcd83dc4ecf239b60ceed9cb1fdf883b5c",
     "src/core/thin-chat.bend": "b654c26082a5b02b40a3eb6092744fd4e2f6befda5d4757eb2f8a55368fdceae",
-    "src/core/thin.bend": "edaca3892fcbf41f6bb051c5a1b5bc68b4c3f1328e1cc9968e6377818f8581d4",
+    "src/core/thin.bend": "6b48a12893f531f83895142955fd2f50d574724575d6ac965f01065d21074bc9",
     "src/core/title.bend": "bac62f410792eb2feff74985b63f950130d03d9de75dc78fb6ac5f1e97f6d5eb",
     "src/core/todo.bend": "32f4f5c5f49643edfbbf5cd61e389098d82ebb4fcc4798a616e3d25736ba5604",
     "src/core/tools.bend": "0a98141382a28eaf2c6d547b6a659ad9482e6894d97a6a90ad96e2b72b0ccf1a",
@@ -131,7 +131,7 @@
     "src/server/thin-actor.bend": "1bbc42271627d4747dba80228812000366b5437e76bb75af003e6fe3b08ed98a",
     "src/server/thin-mirror.bend": "b488dc7c45fe49bb1aa17966f454f1ee0e9cfef7db4d619c265c298c9bc94e92",
     "src/server/thin-sidebar.bend": "3f4f103551054d92d10a3d7d355f1b8db948900b83e2942009cb7d0e1e1cf5c7",
-    "src/server/thin-view.bend": "913619edff9416442b6cdc0f1360bb78fc4d29253a26737ac953a3bf78d148f2",
+    "src/server/thin-view.bend": "0dc540d25116b9be691b315b4cc97e713cb1f78cfbecdf296e5e70e3af8fba7c",
     "src/web/bots.bend": "6d14a9efa8931a741c5a7b25af9516565373aef01574e592ee192d211d89de9b",
     "src/web/cat.bend": "301a7ba925f92fc25bdc35b63f79bcf8bf7b72619106c826c471247a0ace85ba",
     "src/web/dom.bend": "a564bbb014b7247fc3cd670a427bf13782e8f6217b3c32abadb91efc13d5cf7e",
@@ -253,5 +253,5 @@
       "sourceSnapshot": "/home/h/Documents/i2cjak/bp-coord/settle-fresh-work/SOURCE-structural-correction.json"
     }
   },
-  "reviewNote": "client.bend's Find.go: Enter in the sidebar search takes a typed word for no project id (no sidebar draft reader touched); sidebar_draft_image_test 24 ok"
+  "reviewNote": "Search over every thread: Index.search.in/rest/cap, Search.join/gone in thin.bend, Search.found in thin-view.bend (core/hits.bend); sidebar drafts untouched"
 }

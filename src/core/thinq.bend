@@ -87,10 +87,18 @@ def Q.sql.count() -> String:
 # a term's postings older than ordinal ?2, newest first, at most 129 (the
 # walk looks at 128; a 129th says there are more), each with its row and
 # which of the query's words (?3, a JSON array) it has, joined by \u001f
-def Q.sql.search() -> String:
+def Q.sql.search.cols() -> String:
   "SELECT e.seq, e.ord, e.id, e.thread, e.src, e.kind, e.role, e.akind, CASE WHEN e.kind = 'msg' THEN e.text ELSE substr(e.text, 1, 513) END, e.at," ++
-  " (SELECT group_concat(u.word, char(31)) FROM term u WHERE u.ord = t.ord AND u.word IN (SELECT value FROM json_each(?3)))" ++
-  " FROM term t JOIN entry e ON e.ord = t.ord WHERE t.word = ?1 AND t.ord < ?2 ORDER BY t.ord DESC LIMIT 129"
+  " (SELECT group_concat(u.word, char(31)) FROM term u WHERE u.ord = t.ord AND u.word IN (SELECT value FROM json_each(?3)))"
+
+def Q.sql.search() -> String:
+  Q.sql.search.cols() ++ " FROM term t JOIN entry e ON e.ord = t.ord WHERE t.word = ?1 AND t.ord < ?2 ORDER BY t.ord DESC LIMIT 129"
+
+# the same within one thread ?4 (its own rows and what it sent): the open
+# thread's results, found even when a common word's newest uses are all
+# in other threads (T.Index.search.in)
+def Q.sql.search.in() -> String:
+  Q.sql.search.cols() ++ " FROM term t JOIN entry e ON e.ord = t.ord WHERE t.word = ?1 AND t.ord < ?2 AND (e.thread = ?4 OR (e.src = ?4 AND e.src <> '')) ORDER BY t.ord DESC LIMIT 129"
 
 # every thread with entries and its newest message from the person (0:
 # none): the recent order's ranks (T.Index.recent), before threads' seeds
@@ -196,8 +204,14 @@ def Q.cands(rs: List<&2, T.Row>, i: T.Index) -> T.Index:
     case +r <> t: Q.cands(t, T.Index.window.put(i, "", r))
 
 # the search answered over the fetched candidates (T.Index.search.on)
+def Q.search.cap(ts: List<&2, Sigma<&2, &2, String, _ => Bool>>, +rs: List<&2, T.Row>, th: String, +hide: Map<&2, Bool>, +cap: Nat, +before: Nat) -> T.SearchPage:
+  T.Index.search.cap(Q.order(rs, ML.OEmpty{}), Q.cands(rs, T.Index.empty()), ts, th, hide, cap, before)
+
+def Q.search.hid(ts: List<&2, Sigma<&2, &2, String, _ => Bool>>, +rs: List<&2, T.Row>, th: String, +hide: Map<&2, Bool>, +before: Nat) -> T.SearchPage:
+  Q.search.cap(ts, rs, th, hide, 25n, before)
+
 def Q.search(ts: List<&2, Sigma<&2, &2, String, _ => Bool>>, +rs: List<&2, T.Row>, th: String, +before: Nat) -> T.SearchPage:
-  T.Index.search.on(Q.order(rs, ML.OEmpty{}), Q.cands(rs, T.Index.empty()), ts, th, before)
+  Q.search.hid(ts, rs, th, Map.new(&2, Bool), before)
 
 def Q.search.index(+rs: List<&2, T.Row>) -> T.Index:
   Q.cands(rs, T.Index.empty())

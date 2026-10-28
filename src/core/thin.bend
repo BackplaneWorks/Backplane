@@ -307,14 +307,17 @@ def Search.include(keep: Bool, id: String, acc: List<&2, String>) -> List<&2, St
     case True{}: id <> acc
     case False{}: acc
 
-def Search.walk(xs: List<&2, String>, +i: Index, +terms: List<&2, Sigma<&2, &2, String, _ => Bool>>, +th: String, +n: Nat, +count: Nat, +last: String, acc: List<&2, String>) -> SearchPage:
-  match xs count:
-    case _ 25n: SearchPage{List.reverse(&2, String, acc), n, last, True{}}
+# hide: threads whose rows a search leaves out (a search over every
+# thread: the deleted ones, Search.gone); left: results still to find (a
+# page holds 25)
+def Search.walk(xs: List<&2, String>, +i: Index, +terms: List<&2, Sigma<&2, &2, String, _ => Bool>>, +th: String, +hide: Map<&2, Bool>, +n: Nat, +left: Nat, +last: String, acc: List<&2, String>) -> SearchPage:
+  match xs left:
+    case _ 0n: SearchPage{List.reverse(&2, String, acc), n, last, True{}}
     case Nil{} _: SearchPage{List.reverse(&2, String, acc), n, last, False{}}
     case +id <> tail _:
       +r = Index.row.k(Map.get(Row, Row.blank(), Index.rows(i), id))
-      +keep = Bool.and(Search.owner(th, Row.entry(r)), Search.all(terms, Row.terms(r), True{}))
-      Search.walk(tail, i, terms, th, Nat.add(n, 1n), Nat.add(count, Bool.pick(Nat, keep, 1n, 0n)), id, Search.include(keep, id, acc))
+      +keep = Bool.and(Bool.and(Search.owner(th, Row.entry(r)), Bool.not(Word.has(hide, M.Idx.thread(Row.entry(r))))), Search.all(terms, Row.terms(r), True{}))
+      Search.walk(tail, i, terms, th, hide, Nat.add(n, 1n), Nat.sub(left, Bool.pick(Nat, keep, 1n, 0n)), id, Search.include(keep, id, acc))
 
 def Search.bound(page: SearchPage, full: Bool) -> SearchPage:
   match page:
@@ -323,15 +326,102 @@ def Search.bound(page: SearchPage, full: Bool) -> SearchPage:
 # the walk over a posting list o (the smallest of the terms'); a store
 # hands in the candidates it fetched (ord < before, at most 129) and an
 # index holding just those rows
-def Index.search.on(+o: ML.Order, +i: Index, +terms: List<&2, Sigma<&2, &2, String, _ => Bool>>, th: String, +before: Nat) -> SearchPage:
+def Index.search.cap(+o: ML.Order, +i: Index, +terms: List<&2, Sigma<&2, &2, String, _ => Bool>>, th: String, +hide: Map<&2, Bool>, +cap: Nat, +before: Nat) -> SearchPage:
   +skip = Page.after(o, before)
-  Search.bound(Search.walk(ML.Order.slice(o, skip, 128n), i, terms, th, 0n, 0n, "", Nil{}), Nat.is_gt(ML.Order.count(o), Nat.add(skip, 128n)))
+  Search.bound(Search.walk(ML.Order.slice(o, skip, 128n), i, terms, th, hide, 0n, cap, "", Nil{}), Nat.is_gt(ML.Order.count(o), Nat.add(skip, 128n)))
 
-def Index.search.terms(+i: Index, +terms: List<&2, Sigma<&2, &2, String, _ => Bool>>, th: String, +before: Nat) -> SearchPage:
-  Index.search.on(Search.base(terms, i), i, terms, th, before)
+def Index.search.hid(+o: ML.Order, +i: Index, +terms: List<&2, Sigma<&2, &2, String, _ => Bool>>, th: String, +hide: Map<&2, Bool>, +before: Nat) -> SearchPage:
+  Index.search.cap(o, i, terms, th, hide, 25n, before)
+
+def Index.search.on(+o: ML.Order, +i: Index, +terms: List<&2, Sigma<&2, &2, String, _ => Bool>>, th: String, +before: Nat) -> SearchPage:
+  Index.search.hid(o, i, terms, th, Map.new(&2, Bool), before)
+
+def Index.search.terms(+i: Index, +terms: List<&2, Sigma<&2, &2, String, _ => Bool>>, th: String, +hide: Map<&2, Bool>, +cap: Nat, +before: Nat) -> SearchPage:
+  Index.search.cap(Search.base(terms, i), i, terms, th, hide, cap, before)
 
 def Index.search(i: Index, query: String, th: String, before: Nat) -> SearchPage:
-  Index.search.terms(i, Map.to_list(&2, Bool, Words.of(query)), th, before)
+  Index.search.terms(i, Map.to_list(&2, Bool, Words.of(query)), th, Map.new(&2, Bool), 25n, before)
+
+# every thread's rows but those of threads deleted (a search from the top
+# bar finds a word wherever it was said, Search.gone), at most cap
+def Index.search.rest(i: Index, query: String, +hide: Map<&2, Bool>, +cap: Nat, before: Nat) -> SearchPage:
+  Index.search.terms(i, Map.to_list(&2, Bool, Words.of(query)), "", hide, cap, before)
+
+def Index.search.all(i: Index, query: String, +hide: Map<&2, Bool>, before: Nat) -> SearchPage:
+  Index.search.rest(i, query, hide, 25n, before)
+
+# a thread's own rows (and what it sent) that have the query's words:
+# the walk goes over the word's uses in that thread, not over its newest
+# uses anywhere (in a busy hub those may all be elsewhere); the store asks
+# the same (thinq.bend's Q.sql.search.in)
+def Search.in.put(keep: Bool, +n: Nat, o: ML.Order) -> ML.Order:
+  match keep:
+    case True{}: ML.Order.put(o, n, Nat.show(n))
+    case False{}: o
+
+def Search.in.go(xs: List<&2, String>, +i: Index, +th: String, o: ML.Order) -> ML.Order:
+  match xs:
+    case Nil{}: o
+    case id <> tail:
+      +r = Index.row.k(Map.get(Row, Row.blank(), Index.rows(i), id))
+      Search.in.go(tail, i, th, Search.in.put(Search.owner(th, Row.entry(r)), Row.n(r), o))
+
+# the open thread's results on the top bar's first page: at most ten, so
+# the other threads' newest still show beside them
+def Search.here() -> Nat:
+  10n
+
+def Search.in.terms(+i: Index, +terms: List<&2, Sigma<&2, &2, String, _ => Bool>>, +th: String, +o: ML.Order) -> SearchPage:
+  Index.search.cap(Search.in.go(ML.Order.slice(o, 0n, ML.Order.count(o)), i, th, ML.OEmpty{}), i, terms, th, Map.new(&2, Bool), Search.here(), 0n)
+
+def Index.search.in(+i: Index, query: String, +th: String) -> SearchPage:
+  +terms = Map.to_list(&2, Bool, Words.of(query))
+  Search.in.terms(i, terms, th, Search.base(terms, i))
+
+# The top bar's search: the open thread's results (here: its first page),
+# then every other thread's (rest: their results but the ones here had);
+# the rest's walk goes on from its cursor (last, more) for the next pages
+def Search.not.in(xs: List<&2, String>, +seen: Map<&2, Bool>, acc: List<&2, String>) -> List<&2, String>:
+  match xs:
+    case Nil{}: List.reverse(&2, String, acc)
+    case +id <> tail: Search.not.in(tail, seen, Search.include(Bool.not(Word.has(seen, id)), id, acc))
+
+def Search.seen(xs: List<&2, String>, acc: Map<&2, Bool>) -> Map<&2, Bool>:
+  match xs:
+    case Nil{}: acc
+    case id <> tail: Search.seen(tail, Map.set(&2, Bool, acc, id, True{}))
+
+# a page is 25 results and 128 rows looked at, here's and the rest's
+# together (the rest asks for Search.left(here))
+def Search.join(+here: SearchPage, +rest: SearchPage) -> SearchPage:
+  match here rest:
+    case SearchPage{+hs, +hn, _, _} SearchPage{rs, +rn, last, more}:
+      SearchPage{List.append(&2, String, hs, Search.not.in(rs, Search.seen(hs, Map.new(&2, Bool)), Nil{})), Bool.pick(Nat, Nat.is_gt(Nat.add(hn, rn), 128n), 128n, Nat.add(hn, rn)), last, more}
+
+def Search.left(+here: SearchPage) -> Nat:
+  match here:
+    case SearchPage{hs, _, _, _}: Nat.sub(25n, List.length(&2, String, hs))
+
+def Search.none() -> SearchPage:
+  SearchPage{Nil{}, 0n, "", False{}}
+
+# the threads the rest leaves out: the deleted ones and the open one
+def Search.gone.but(+gone: Map<&2, Bool>, +th: String) -> Map<&2, Bool>:
+  Bool.pick(Map<&2, Bool>, String.is_empty(th), gone, Map.set(&2, Bool, gone, th, True{}))
+
+# the threads a search over every thread leaves out: deleted ones
+def Search.gone.k(gone: Bool, +id: String, acc: Map<&2, Bool>) -> Map<&2, Bool>:
+  match gone:
+    case True{}: Map.set(&2, Bool, acc, id, True{})
+    case False{}: acc
+
+def Search.gone.go(ts: List<&2, M.Thread>, acc: Map<&2, Bool>) -> Map<&2, Bool>:
+  match ts:
+    case Nil{}: acc
+    case M.Thread{+id, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, de} <> tail: Search.gone.go(tail, Search.gone.k(de, id, acc))
+
+def Search.gone(+st: M.State) -> Map<&2, Bool>:
+  Search.gone.go(State.threads(st), Map.new(&2, Bool))
 
 def Row.blocks(r: Row) -> Blocks:
   match r:

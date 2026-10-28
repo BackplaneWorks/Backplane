@@ -135,11 +135,39 @@ def Overlay.screen(+hs: H.Hubs, +js: J.Json, +cur: String) -> J.Json:
 # Selecting a row is an explicit normal thread choice, not an eager replay;
 # entry: the message found, which the phone then brings into view (paging
 # back to it) and lights, as the web does
+# a row's words: from a hub that sends snippets (a result may be in any
+# thread: server/thin-view.bend's Search.found), its thread's title and
+# the words around the match on one line; else its text
+def Search.space(c: Char) -> Char:
+  match c:
+    case Chr{+u}: Chr{Bool.pick(U32, U32.is_eq(u, 10), 32, u)}
+
+def Search.line(s: String, acc: String) -> String:
+  match s:
+    case SNil{}: String.reverse(acc)
+    case SCon{h, t}: Search.line(t, SCon{Search.space(h), acc})
+
+def Search.words(ps: List<&2, J.Json>, acc: String) -> String:
+  match ps:
+    case Nil{}: acc
+    case p <> t: Search.words(t, acc ++ J.Json.as_str(Some{p}, ""))
+
+def Search.titled(+title: String, +words: String) -> String:
+  Bool.pick(String, String.is_empty(title), words, title ++ " · " ++ words)
+
+def Search.label.k(+snip: List<&2, J.Json>, +row: J.Json) -> String:
+  match snip:
+    case Nil{}: J.Json.get_str(row, "text", "")
+    case _: Search.titled(J.Json.get_str(row, "title", ""), Search.line(Search.words(snip, ""), ""))
+
+def Search.label(+row: J.Json) -> String:
+  Search.label.k(J.Json.elems(J.Json.get_obj(row, "snip")), row)
+
 def Search.rows( +rows: List<&2, J.Json>, +hub: String) -> List<&2, J.Json>:
   match rows:
     case Nil{}: Nil{}
     case +row <> tail:
-      J.Json.obj([J.KV{"label", J.Str{J.Json.get_str(row, "text", "")}}, J.KV{"action", J.Str{"select"}},
+      J.Json.obj([J.KV{"label", J.Str{Search.label(row)}}, J.KV{"action", J.Str{"select"}},
         J.KV{"value", J.Str{hub ++ "|" ++ J.Json.get_str(row, "thread", "")}}, J.KV{"kind", J.Str{"thread"}},
         J.KV{"entry", J.Str{J.Json.get_str(row, "id", "")}}]) <> Search.rows(tail, hub)
 

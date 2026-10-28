@@ -40,3 +40,6 @@ def main() -> IO(Unit):
     +found : J.Json = Maybe.default(&2, J.Json, List.head(&2, J.Json, J.Json.elems(J.Json.get_obj(J.Json.get_obj(search, "find"), "rows"))), J.Null{})
     C.Check.str("a search row opens its thread", J.Json.get_str(found, "value", ""), "hub|t")
     C.Check.str("a search row names the message found", J.Json.get_str(found, "entry", ""), "m7")
+    +snipped : J.Json = A.thin_search("{\"hub\":\"hub\"}", "{\"query\":\"word\",\"rows\":[{\"thread\":\"t\",\"id\":\"m7\",\"text\":\"found\",\"title\":\"Power\",\"snip\":[\"a\\n\",\"word\",\" b\"]}],\"hasMore\":false}")
+    +snrow : J.Json = Maybe.default(&2, J.Json, List.head(&2, J.Json, J.Json.elems(J.Json.get_obj(J.Json.get_obj(snipped, "find"), "rows"))), J.Null{})
+    C.Check.str("a result from any thread names its thread, the words around the match on a line", J.Json.get_str(snrow, "label", ""), "Power · a word b")

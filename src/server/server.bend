@@ -11889,16 +11889,28 @@ def Hub.thin.render.at(h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, 
 def Hub.thin.render(h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat, +context: ThinContext, +anchor: Nat) -> IO(Hub):
   IO.bind(Nat, Hub, IO.now(), +ms => Hub.thin.render.at(h, client, o, c, now, context, anchor, ms))
 
-# a search page: over the whole index, or (with a store) over the
-# candidates it fetched (TSTO.Ts.search); the same rows either way
-def Hub.thin.find.local(memory: Bool, +cfg: Cfg, +q: String, +thread: String, +before: Nat) -> IO(TSTO.Found):
+# a search page over every thread here but the deleted ones, the open
+# thread's results first (on the first page: THIN.Search.join): over the
+# whole index, or (with a store) over the candidates it fetched
+# (TSTO.Ts.search.top); the same rows either way. A thread elsewhere
+# searches its mirror.
+def Hub.thin.find.here(first: Bool, +i: THIN.Index, +q: String, +thread: String) -> THIN.SearchPage:
+  match first:
+    case True{}: THIN.Index.search.in(i, q, thread)
+    case False{}: THIN.Search.none()
+
+def Hub.thin.find.both(+here: THIN.SearchPage, +i: THIN.Index, +q: String, +hide: Map<&2, Bool>, +before: Nat) -> THIN.SearchPage:
+  THIN.Search.join(here, THIN.Index.search.rest(i, q, hide, THIN.Search.left(here), before))
+
+def Hub.thin.find.local(memory: Bool, +cfg: Cfg, +st: M.State, +q: String, +thread: String, +before: Nat) -> IO(TSTO.Found):
   match memory:
-    case True{}: IO.pure(TSTO.Found, TSTO.Found{THIN.Index.search(Cfg.thin(cfg), q, thread, before), Cfg.thin(cfg)})
-    case False{}: TSTO.Ts.search(Cfg.thin.store(cfg), q, thread, before)
+    case True{}: IO.pure(TSTO.Found, TSTO.Found{Hub.thin.find.both(Hub.thin.find.here(Bool.and(Nat.is_eq(before, 0n), Bool.not(String.is_empty(thread))), Cfg.thin(cfg), q, thread),
+      Cfg.thin(cfg), q, THIN.Search.gone.but(THIN.Search.gone(st), thread), before), Cfg.thin(cfg)})
+    case False{}: TSTO.Ts.search.top(Cfg.thin.store(cfg), q, thread, THIN.Search.gone(st), before)
 
 def Hub.thin.find.source(far: Bool, memory: Bool, +cfg: Cfg, +st: M.State, +q: String, +thread: String, +before: Nat) -> IO(TSTO.Found):
   match far:
-    case False{}: Hub.thin.find.local(memory, cfg, q, thread, before)
+    case False{}: Hub.thin.find.local(memory, cfg, st, q, thread, before)
     case True{}: IO.pure(TSTO.Found, TMIR.Mirror.search(Hub.thin.mirror(st, cfg, thread), q, thread, before, Cfg.thin(cfg)))
 
 def Hub.thin.find(memory: Bool, +cfg: Cfg, +st: M.State, +q: String, +thread: String, +before: Nat) -> IO(TSTO.Found):
@@ -11912,7 +11924,7 @@ def Hub.thin.search.valid(+valid: Bool, h: Hub, +client: U32, +o: J.Json, +c: Cl
       +p = J.Json.get_obj(o, "p")
       do IO<Hub>:
         +found : TSTO.Found <- Hub.thin.find(String.is_empty(Cfg.thin.store(cfg)), cfg, st, J.Json.get_str(p, "query", ""), TV.Target.thread(st, J.Json.get_obj(p, "target")), before)
-        Hub.thin.respond(Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, TV.Search.result(TSTO.Found.page(found), TSTO.Found.index(found), p, Hub.thin.view_epoch(st, cfg, TV.Target.thread(st, J.Json.get_obj(p, "target")))), c, context, now)
+        Hub.thin.respond(Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, TV.Search.found(TSTO.Found.page(found), TSTO.Found.index(found), p, Hub.thin.view_epoch(st, cfg, TV.Target.thread(st, J.Json.get_obj(p, "target"))), st, now, TV.Target.thread(st, J.Json.get_obj(p, "target"))), c, context, now)
 
 def Hub.thin.page(+cursor: Maybe<&2, Nat>, h: Hub, +client: U32, +o: J.Json, +c: Client, +now: Nat) -> IO(Hub):
   match cursor:
