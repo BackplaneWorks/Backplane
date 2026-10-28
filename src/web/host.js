@@ -1081,8 +1081,26 @@ function sealedReply(envelope) {
   return true;
 }
 
+// A thread opened by a click (the hub-drawn page opens it here, with no
+// Focus from the hub) takes the keyboard into its composer once its view
+// is on show: on a wide page only (a phone's keyboard would cover it), and
+// not while the person types in another field meanwhile.
+let composerWant = null;
+const composerPhone = () => matchMedia("(max-width: 760px), (hover: none) and (pointer: coarse)").matches;
+function composerTyping() {
+  const el = document.activeElement;
+  return !!el && el !== document.body && el.id !== "composer" &&
+    !!el.matches?.('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [data-keys], [data-keyto]');
+}
+function composerTake(target) {
+  if (!composerWant || target?.kind !== "thread" || target.id !== composerWant) return;
+  composerWant = null;
+  if (!composerTyping()) focus = "composer";
+}
+
 function dispatch(action, value, timer) {
   if (action === "secret-save") return secretSave(value);
+  if (action === "select") composerWant = !timer && !composerPhone() ? value : null;
   if (action === "sealed") return sealedSave(value);
   if (["send", "send-alt"].includes(action)) historyClear();
   if (action === "side-toggle" || action === "rail-toggle") return foldToggle(action === "side-toggle" ? "side" : "rail");
@@ -2408,6 +2426,7 @@ async function startThin(again = false, reason = "initial") {
         else if (!remoteReady) transitionPosition = transitionViews.position(transitionScope(detail.target)) || {atEnd:true};
         focusedView.remote(detail.epoch);remoteEpoch = detail.epoch;frontendNode = node;transitionNode = null;
         transitionShell = detail.shown;transitionViews.put(transitionScope(detail.target), detail.shown);
+        composerTake(detail.target);
         trace("thin-view", { entries: detail.window?.ids?.length || 0 });later();
         fabLook(detail.target);
       },
