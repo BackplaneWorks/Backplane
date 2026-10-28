@@ -4838,10 +4838,19 @@ def Proj.items.q(+l: I.Loc, empty: Bool, +u: Ui, +q: String, +dir: String, +ns: 
           [PItem{MSG.T.proj.create(l, String.trim(q)), "proj-new", Proj.join(dir, String.trim(q))}, PItem{MSG.T.proj.mkdir(l, String.trim(q)), "proj-mkdir", Proj.join(dir, String.trim(q))}], Nil{}),
         Proj.add(l, u, dir)])
 
+# a typed path: a folder typed in full is added by Enter (its first row);
+# one ending in a slash is gone into first, to pick inside it
+def Proj.path.rows(into: Bool, +l: I.Loc, +q: String) -> List<&2, PItem>:
+  match into:
+    case True{}:
+      [PItem{MSG.T.proj.goto(l, q), "proj-cd", q}, PItem{MSG.T.proj.add(l, q), "proj-add", q}, PItem{MSG.T.proj.createat(l, q), "proj-new", q}]
+    case False{}:
+      [PItem{MSG.T.proj.add(l, q), "proj-add", q}, PItem{MSG.T.proj.goto(l, q), "proj-cd", q}, PItem{MSG.T.proj.createat(l, q), "proj-new", q}]
+
 def Proj.items.k(+l: I.Loc, path: Bool, +u: Ui, +q: String, +dir: String, +ns: List<&2, String>) -> List<&2, PItem>:
   match path:
     case True{}:
-      [PItem{MSG.T.proj.goto(l, q), "proj-cd", q}, PItem{MSG.T.proj.add(l, q), "proj-add", q}, PItem{MSG.T.proj.createat(l, q), "proj-new", q}]
+      Proj.path.rows(String.ends_with(q, "/"), l, q)
     case False{}:
       Proj.items.q(l, String.is_empty(q), u, q, dir, ns)
 
