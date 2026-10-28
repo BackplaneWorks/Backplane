@@ -1447,21 +1447,21 @@ def Mob.set.find(+lc: I.Loc, u: U.Ui, +nf: Map<&2, String>, +prov: String) -> Li
   Mob.set.find.k(U.Models.search(U.Models.menu(U.Models.of(nf, prov), prov)), lc, U.Ui.scratch(u, "@f.mq"))
 
 # API keys (client.bend's ApiKeys), as on the web: Add and View, the form,
-# the names each with Delete
-def Mob.keys.rows.loc(+lc: I.Loc, ns: List<&2, String>) -> List<&2, J.Json>:
+# the names each with Delete (pressed once, rm, it asks to be pressed again)
+def Mob.keys.rows.loc(+lc: I.Loc, ns: List<&2, String>, +rm: String) -> List<&2, J.Json>:
   match ns:
     case Nil{}:
       Nil{}
     case +n <> t:
-      Mob.set.row(n, "", [Mob.set.btn(MSG.T.common.delete(lc), "key-del", n, False{})]) <> Mob.keys.rows.loc(lc, t)
+      Mob.set.row(n, "", [Mob.set.btn(Bool.pick(String, String.eq(n, rm), MSG.T.menu.delete.confirm(lc), MSG.T.common.delete(lc)), "key-del", n, String.eq(n, rm))]) <> Mob.keys.rows.loc(lc, t, rm)
 
 def Mob.keys.rows(ns: List<&2, String>) -> List<&2, J.Json>:
-  Mob.keys.rows.loc(I.En{}, ns)
+  Mob.keys.rows.loc(I.En{}, ns, "")
 
 def Mob.keys.list.loc(+lc: I.Loc, open: Bool, +u: U.Ui) -> List<&2, J.Json>:
   match open:
     case True{}:
-      Bool.pick(List<&2, J.Json>, List.is_empty(&2, String, U.ApiKeys.names(u)), [Mob.set.row(MSG.T.settings.keys.empty(lc), "", Nil{})], Mob.keys.rows.loc(lc, U.ApiKeys.names(u)))
+      Bool.pick(List<&2, J.Json>, List.is_empty(&2, String, U.ApiKeys.names(u)), [Mob.set.row(MSG.T.settings.keys.empty(lc), "", Nil{})], Mob.keys.rows.loc(lc, U.ApiKeys.names(u), U.Ui.scratch(u, "@keys.rm")))
     case False{}:
       Nil{}
 

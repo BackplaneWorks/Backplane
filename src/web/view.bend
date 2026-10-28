@@ -1506,20 +1506,23 @@ def View.voice.set.loc(+lc: I.Loc, +u: U.Ui, +st: M.State) -> List<&2, D.Node>:
 def View.voice.set(+u: U.Ui, +st: M.State) -> List<&2, D.Node>:
   View.voice.set.loc(I.En{}, u, st)
 
-def View.keys.rows.loc(+lc: I.Loc, ns: List<&2, String>) -> List<&2, D.Node>:
+# (Delete asks first: the name pressed once, rm, reads "Click again to
+# delete", client.bend's ApiKeys.del)
+def View.keys.rows.loc(+lc: I.Loc, ns: List<&2, String>, +rm: String) -> List<&2, D.Node>:
   match ns:
     case Nil{}:
       Nil{}
     case +n <> t:
-      View.setrow(n, "", [D.Dom.button("danger", "key-del", n, MSG.T.settings.keys.forget(lc), MSG.T.common.delete(lc))]) <> View.keys.rows.loc(lc, t)
+      View.setrow(n, "", [D.Dom.button(Bool.pick(String, String.eq(n, rm), "danger on", "danger"), "key-del", n, MSG.T.settings.keys.forget(lc),
+        Bool.pick(String, String.eq(n, rm), MSG.T.menu.delete.confirm(lc), MSG.T.common.delete(lc)))]) <> View.keys.rows.loc(lc, t, rm)
 
 def View.keys.rows(ns: List<&2, String>) -> List<&2, D.Node>:
-  View.keys.rows.loc(I.En{}, ns)
+  View.keys.rows.loc(I.En{}, ns, "")
 
 def View.keys.list.loc(+lc: I.Loc, open: Bool, +u: U.Ui) -> List<&2, D.Node>:
   match open:
     case True{}:
-      Bool.pick(List<&2, D.Node>, List.is_empty(&2, String, U.ApiKeys.names(u)), [View.setrow(MSG.T.settings.keys.empty(lc), "", Nil{})], View.keys.rows.loc(lc, U.ApiKeys.names(u)))
+      Bool.pick(List<&2, D.Node>, List.is_empty(&2, String, U.ApiKeys.names(u)), [View.setrow(MSG.T.settings.keys.empty(lc), "", Nil{})], View.keys.rows.loc(lc, U.ApiKeys.names(u), U.Ui.scratch(u, "@keys.rm")))
     case False{}:
       Nil{}
 

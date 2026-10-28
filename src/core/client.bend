@@ -9546,18 +9546,31 @@ def Hs.act(i: Nat, +u: Ui, +value: String) -> Act:
 # "cap" says), and the hub answered (value: its JSON, as an attach.put's)
 # API keys (core/apikeys.bend): Settings keeps one ("key-add", from the
 # fields @f.kname and @f.kval; the secret leaves the client's state as it
-# is sent), forgets one ("key-del" with its name), and lists the names the
+# is sent), forgets one ("key-del" with its name: the first asks, "@keys.rm"
+# holding the name, the same again forgets it), and lists the names the
 # hub answers (@keys; opening Settings asks). Flags "keyform" and "keys"
-# open the form and the list.
+# open the form and the list; a key kept shuts the form and opens the list,
+# so its name shows.
 def ApiKeys.names(+u: Ui) -> List<&2, String>:
   AK.Keys.keep(String.lines(Ui.scratch(u, "@keys")))
 
 def ApiKeys.add(+u: Ui) -> Act:
-  Voice.rpc(Ui.flag_off(Ui.scratch_set(Ui.scratch_set(u, "@f.kval", ""), "@f.kname", ""), "keyform"), "api-add",
+  Voice.rpc(Ui.flag_on(Ui.flag_off(Ui.scratch_set(Ui.scratch_set(u, "@f.kval", ""), "@f.kname", ""), "keyform"), "keys"), "api-add",
     [J.KV{"name", J.Str{Ui.scratch(u, "@f.kname")}}, J.KV{"value", J.Str{Ui.scratch(u, "@f.kval")}}])
 
+# whether name's Delete was pressed once (its button asks to confirm)
+def ApiKeys.arming(+u: Ui, +name: String) -> Bool:
+  Bool.and(Bool.not(String.is_empty(name)), String.eq(Ui.scratch(u, "@keys.rm"), name))
+
+def ApiKeys.del.k(again: Bool, +u: Ui, +name: String) -> Act:
+  match again:
+    case True{}:
+      Voice.rpc(Ui.scratch_set(u, "@keys.rm", ""), "api-del", [J.KV{"name", J.Str{name}}])
+    case False{}:
+      Act{Ui.scratch_set(u, "@keys.rm", name), Nil{}}
+
 def ApiKeys.del(+u: Ui, +name: String) -> Act:
-  Voice.rpc(u, "api-del", [J.KV{"name", J.Str{name}}])
+  ApiKeys.del.k(ApiKeys.arming(u, name), u, name)
 
 # The API key's sealed form ("key"): the name and the value ("<name>
 # \u001f<value>") into the api-add request ({"rpc", "name"}, or {"error"}:
@@ -9579,7 +9592,7 @@ def ApiKeys.req(+packed: String) -> String:
   ApiKeys.req.ps(String.split(packed, Chr{31}))
 
 def ApiKeys.sent(+u: Ui) -> Act:
-  Voice.rpc(Ui.flag_off(Ui.scratch_set(u, "@f.kname", ""), "keyform"), "status", Nil{})
+  Voice.rpc(Ui.flag_on(Ui.flag_off(Ui.scratch_set(u, "@f.kname", ""), "keyform"), "keys"), "status", Nil{})
 
 # what Settings says about them (every client)
 def ApiKeys.note.loc(+l: I.Loc, +u: Ui) -> String:
