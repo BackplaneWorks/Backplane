@@ -188,7 +188,9 @@ class Service {
     const port = await servicePort(this.home);
     const launch = await launchPaths({ home: this.home, binary: this.binary, web: this.web,
       env: { ...process.env, BACKPLANE_HOME: this.home, ...(this.residentService ? { BACKPLANE_NO_UPDATE: '1' } : {}) } });
-    const args = ['--home', launch.home, '--port', String(port), '--host', '127.0.0.1', '--web', launch.web, '--foreground', '--no-tailscale'];
+    // Like `backplane --headless`: the listener stays on 127.0.0.1 and the
+    // hub's own tailnet handling decides whether the owner's phone reaches it.
+    const args = ['--home', launch.home, '--port', String(port), '--host', '127.0.0.1', '--web', launch.web, '--foreground'];
     this.child = spawn(this.binary, args, { stdio: ['ignore', 'ignore', 'ignore'], env: launch.env, ...(launch.cwd ? { cwd: launch.cwd } : {}), windowsHide: true, detached: true });
     this.child.unref();
     let failure;
