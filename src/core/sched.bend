@@ -452,7 +452,7 @@ def Sched.when(+l: I.Loc, cron: String, +once: Nat, rule: TZ.TzRule) -> String:
   Bool.pick(String, Nat.is_gt(once, 0n), TZ.Tz.show(rule, once), Sched.when.cron(l, cron))
 
 def Sched.done.text(+l: I.Loc, done: Bool, rule: TZ.TzRule, +last: Nat) -> String:
-  Bool.pick(String, done, MSG.T.sched.done(l, TZ.Tz.show.nz(rule, last)), "")
+  Bool.pick(String, done, MSG.T.sched.done(l, TZ.Tz.show(rule, last)), "")
 
 def Sched.row.k(+l: I.Loc, +kind: String, +once: Nat, cron: String, +tz: String, +done: Bool, +last: Nat, +nx: Nat, +now: Nat, +s: M.State, +mo: Nat, +me: Bool) -> SRow:
   SRow{Sched.kind(kind, once), Sched.label(l, Sched.kind(kind, once)),

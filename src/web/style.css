@@ -762,6 +762,8 @@ button.icon { display: inline-flex; align-items: center; justify-content: center
 .room-row .hash { color: var(--faint); }
 .room-row .title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .room-row .ago { color: var(--faint); font-size: calc(11px * var(--text-scale, 100) / 100); }
+/* a new bot's empty chat: what to do there */
+.bot-hint { margin: 16px; color: var(--dim); }
 .bform { display: flex; flex-direction: column; gap: 6px; margin: 2px 12px 8px; }
 .bform.wide { margin: 0; max-width: 640px; }
 .bform.row { flex-direction: row; align-items: center; }

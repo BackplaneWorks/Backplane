@@ -104,18 +104,18 @@ def WB.rows(+lc: I.Loc, rs: List<&2, BI.BRow>) -> List<&2, D.Node>:
     case r <> t:
       WB.row(lc, r) <> WB.rows(lc, t)
 
-def WB.rrow(r: BI.RRow) -> D.Node:
+def WB.rrow(+lc: I.Loc, r: BI.RRow) -> D.Node:
   match r:
     case BI.RRow{+id, name, +n, sel}:
       D.El{"div", "room:" ++ id, [D.At{"class", Bool.pick(String, sel, "room-row on", "room-row")}, D.At{"data-value", id}, D.On{"click", "room"}],
-        [D.Dom.span("hash", "#"), D.Dom.span("title", name), D.El{"span", "", [D.At{"class", "ago"}, D.At{"title", Nat.show(n) ++ " members"}], [D.Txt{Nat.show(n)}]}]}
+        [D.Dom.span("hash", "#"), D.Dom.span("title", name), D.El{"span", "", [D.At{"class", "ago"}, D.At{"title", MSG.T.room.members.count(lc, n)}], [D.Txt{Nat.show(n)}]}]}
 
-def WB.rrows(rs: List<&2, BI.RRow>) -> List<&2, D.Node>:
+def WB.rrows(+lc: I.Loc, rs: List<&2, BI.RRow>) -> List<&2, D.Node>:
   match rs:
     case Nil{}:
       Nil{}
     case r <> t:
-      WB.rrow(r) <> WB.rrows(t)
+      WB.rrow(lc, r) <> WB.rrows(lc, t)
 
 def WB.pchips(xs: List<&2, String>, +cur: String) -> List<&2, D.Node>:
   match xs:
@@ -175,7 +175,7 @@ def WB.side(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
     WB.rows(lc, BI.BU.rows(u)),
     [WB.shead(MSG.T.bots.rooms(lc), "room-new", MSG.T.rooms.new(lc))],
     WB.room.form.loc(lc, BI.BU.open(u, "@rnew"), u),
-    WB.rrows(BI.BU.rooms(u))])}]
+    WB.rrows(lc, BI.BU.rooms(u))])}]
 
 # whether the main area shows a bot, a room or a bot elsewhere
 def WB.shown(v: BI.View) -> Bool:
@@ -656,7 +656,7 @@ def WB.rform(+lc: I.Loc, +u: U.Ui) -> D.Node:
     WB.input("routine-name", "oname", BI.BU.field(u, "oname"), MSG.T.bots.name(lc), ""),
     WB.input("routine-cron", "ocron", BI.BU.field(u, "ocron"), "every 15m · daily 09:30 · tomorrow 9am · in 2h · cron", "")],
     D.Dom.cat(WB.cron.hint(lc, u), [
-    WB.area("routine-prompt", "oprompt", BI.BU.field(u, "oprompt"), MSG.T.web.routine.prompt(lc)),
+    WB.area("routine-prompt", "oprompt", BI.BU.field(u, "oprompt"), U.Routine.prompt(lc, u)),
     WB.btns([D.Dom.button("primary", "routine-save", "", MSG.T.routine.save.tip(lc), Bool.pick(String, String.is_empty(BI.BU.field(u, "oid")), MSG.T.routine.add(lc), MSG.T.routine.save(lc))),
       D.Dom.button("", "routine-edit", "", MSG.T.routine.clear.tip(lc), MSG.T.common.clear(lc))])])))
 

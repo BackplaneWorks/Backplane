@@ -3184,12 +3184,22 @@ def View.thread.h(+lc: I.Loc, +u: U.Ui, +t: M.Thread, hd: List<&2, D.Node>) -> D
 def View.thread(+lc: I.Loc, +u: U.Ui, t: M.Thread) -> D.Node:
   View.thread.h(lc, u, t, Nil{})
 
+# a bot's chat with nothing in it yet says what to do there
+def View.bot.hint(+lc: I.Loc, empty: Bool, +name: String) -> List<&2, D.Node>:
+  match empty:
+    case True{}: [D.El{"p", "", [D.At{"class", "bot-hint"}], [D.Txt{MSG.T.bots.chat.hint(lc, name)}]}]
+    case False{}: Nil{}
+
+def View.bot.chat(+lc: I.Loc, +u: U.Ui, +b: BT.Bot, +hd: BI.Head, +id: String) -> D.Node:
+  View.thread.h(lc, u, U.Ui.thread(U.Ui.state(u), id), List.append(&2, D.Node, [WB.WB.head.loc(lc, u, b, hd), WB.WB.tabs(lc, hd)],
+    View.bot.hint(lc, List.is_empty(&2, M.Entry, M.State.mine(U.Ui.state(u), id)), BT.Bot.name(b))))
+
 # a bot, here or mirrored from a linked machine: its header and tabs
 # (BU.head), then its thread (Chat) or another tab
 def View.bot.k(+lc: I.Loc, chat: Bool, +u: U.Ui, +b: BT.Bot, +hd: BI.Head) -> D.Node:
   match chat:
     case True{}:
-      View.thread.h(lc, u, U.Ui.thread(U.Ui.state(u), U.Bots.chat.of(U.Ui.state(u), BT.Bot.id(b), BT.Bot.thread(b))), [WB.WB.head.loc(lc, u, b, hd), WB.WB.tabs(lc, hd)])
+      View.bot.chat(lc, u, b, hd, U.Bots.chat.of(U.Ui.state(u), BT.Bot.id(b), BT.Bot.thread(b)))
     case False{}:
       D.El{"main", "bot", [D.At{"class", "thread-view bot-view"}], [WB.WB.head.loc(lc, u, b, hd), WB.WB.tabs(lc, hd), WB.WB.main(lc, u, b, BI.Head.tab(hd))]}
 

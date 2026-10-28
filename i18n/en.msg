@@ -252,7 +252,7 @@ sched.kind.once = Once
 sched.kind.repeat = Repeats
 sched.done = Done · {when}
 sched.hint.next = {text} · next {when}
-sched.hint.once = once · {when}
+sched.hint.once = Once · {when}
 sched.help.time = I can read: 2026-10-14T09:00+03:00, 2026-10-14 09:00, in 20m, in 1h30m, in 3d, today 17:30, tomorrow 9am, monday 09:00, or just 9am.
 
 # folded tool runs and turns
@@ -956,6 +956,7 @@ memory.forget.tip = Forget this
 memory.empty = Nothing remembered yet.
 routine.on.tip = Turn on
 web.routine.prompt = What to do each time
+web.routine.prompt.once = What to do
 routine.save.tip = Save the routine
 routine.save = Save routine
 routine.clear.tip = Clear the form
@@ -1163,6 +1164,8 @@ native.review.pin = Comment{kind, select, replies {, {count} replies} other {}}
 # Native bot, room and routine forms
 native.bot.provider = Provider
 native.room.members = Members
+bots.chat.hint = Write to {name} below: ask it something, or give it a job to look after.
+room.members.count = {n, plural, one {# member} other {# members}}
 native.room.member = In the room
 native.routine.timefield = When
 native.routine.prompt = Prompt

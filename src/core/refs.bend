@@ -613,11 +613,16 @@ def Refs.projects(+s: M.State, +sel: String, +q: String) -> List<&2, Cand>:
     case M.State{ps, _, _, _, _, _, _, _, _, _, _}:
       Refs.projects.go(Map.values(&2, M.Project, ps), s, Refs.t.project(Sum.thread.of(s, sel)), q)
 
+
+# a room's size where the composer offers it: "1 member", "3 members"
+def Refs.members(+n: Nat) -> String:
+  Bool.pick(String, Nat.is_eq(n, 1n), "1 member", Nat.show(n) ++ " members")
+
 def Refs.r.cand(+q: String, r: BT.Room, rest: List<&2, Cand>) -> List<&2, Cand>:
   match r:
     case BT.Room{+id, +name, ms, +at, _}:
       Refs.keep(Refs.score(Refs.t.slug(name, id), name, "", q),
-        Cand{"#" ++ Refs.t.slug(name, id), Nat.show(List.length(&2, String, ms)) ++ " members", Refs.score(Refs.t.slug(name, id), name, "", q), at},
+        Cand{"#" ++ Refs.t.slug(name, id), Refs.members(List.length(&2, String, ms)), Refs.score(Refs.t.slug(name, id), name, "", q), at},
         rest)
 
 def Refs.rooms.go(rs: List<&2, BT.Room>, +q: String) -> List<&2, Cand>:

@@ -976,6 +976,7 @@ memory.forget.tip = 記憶を削除
 memory.empty = 記憶はありません
 routine.on.tip = オンにする
 web.routine.prompt = 毎回行うこと
+web.routine.prompt.once = 行うこと
 routine.save.tip = ルーティンを保存
 routine.save = ルーティンを保存
 routine.clear.tip = 入力をクリア
@@ -1183,6 +1184,8 @@ native.review.pin = コメント{kind, select, replies {（返信{count}件）} 
 # Native bot, room and routine forms
 native.bot.provider = プロバイダー
 native.room.members = メンバー
+bots.chat.hint = 下の欄から{name}に話しかけるか、任せたい仕事を伝えてください。
+room.members.count = メンバー{n}人
 native.room.member = 参加中
 native.routine.timefield = 日時
 native.routine.prompt = プロンプト

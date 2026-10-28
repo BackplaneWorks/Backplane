@@ -8120,6 +8120,11 @@ def Routine.key.k(cron: Bool, at: Bool) -> String:
 def Routine.key(+u: Ui, +text: String) -> String:
   Routine.key.k(BT.Maybe.is(CR.Cron, CR.Cron.parse(text)), BT.Maybe.is(Nat, WH.When.parse(text, Side.now(u), SC.Sched.person(Ui.state.of(u), 0n, True{}))))
 
+# the routine form's What field: a one-time routine runs once, so it is not
+# asked what to do "each time"
+def Routine.prompt(+l: I.Loc, +u: Ui) -> String:
+  Bool.pick(String, String.eq(Routine.key(u, Bots.field(u, "ocron")), "at"), MSG.T.web.routine.prompt.once(l), MSG.T.web.routine.prompt(l))
+
 def Bots.routine.save(+u: Ui) -> Act:
   Ui.rpc(Bots.fields.clear(Ui.scratch_set(u, "@onew", ""), ["oid", "oname", "ocron", "oprompt"]), "bots.routine",
     [J.KV{"bot", J.Str{Bots.cur(u)}}, J.KV{"routine", J.Str{Bots.field(u, "oid")}}, J.KV{"name", J.Str{Bool.pick(String, String.is_empty(Bots.field(u, "oname")), "routine", Bots.field(u, "oname"))}},

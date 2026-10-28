@@ -28,7 +28,7 @@
     "src/core/cat.bend": "0130231a18e515a94d40d7584d19a9b5a2d1663f9601fbff944bf97e37f9fd6b",
     "src/core/cef.bend": "f2d3fa4c991d0e341620fe634ddb4e08da97f8e471ec46afac0b3de471cc69fb",
     "src/core/charter.bend": "7f906bdea712f6ff6162735c8cc133767ec0f9289c3d0bee6dfedbd4d75ad981",
-    "src/core/client.bend": "949a4654bafd3577f4fe03d114f47ac044ca26ee67565f8fe2de610d0b28fd37",
+    "src/core/client.bend": "b6aa7da2a86cc2d2e35cc91051b06f0131d2f48e8cb73c6121dd4b7b2d4cdbdd",
     "src/core/codec.bend": "33cb35c55f3712a18734e76e1149763001a9388af27948f0da4ead2c13d48b6f",
     "src/core/cron.bend": "6f89a001df0261a25c878616ea66c235e169f7fc1c726d39e695fce8adb57332",
     "src/core/deploy.bend": "ebee4e63a52cf41ae001bebcdbb7fb010ad71c1e04e481292585740d88a39cc4",
@@ -71,7 +71,7 @@
     "src/core/menu.bend": "807668923de70eaabb72ddb760f808cbf6d786b70822ba6a1180776758af7eee",
     "src/core/model.bend": "96a7baa0b71bb5efa085ee9259a126738623e87984596bed8e772ae30f0750e8",
     "src/core/modelpick.bend": "7a04676ab0f5e312e175347f4386b2dd53c69b35071bcdc3c70384d100d0b32f",
-    "src/core/msgs.bend": "c9710a237339f24b64fbacc72034df97d3f3bf8e90d7bb08366c5aafb3bd233c",
+    "src/core/msgs.bend": "fa075c7cf7ee34efbb131e839f9e89470e54ed1cacd8ae7e4316befc5d66a87d",
     "src/core/notice.bend": "ee87318c1f12fc6cfb23bb5e24e90709e1f9a2eadfd2832581d21590f596e5e0",
     "src/core/onboard.bend": "55ccccf20f706a0acad492de20e23aedc751c7e9ce61b6f3430bfd65796e9232",
     "src/core/once.bend": "c12f375e09045a035cfc66c87d73197f3348b2998fa0e0bb6c9876fca870577c",
@@ -83,11 +83,11 @@
     "src/core/qr.bend": "42aae4f454bbf55b201e8913e517b6dec531424b6cace582a4726e189636fbcc",
     "src/core/ref-origin.bend": "933dae7741d19f4c68b3d34de827fe42f490deb222282e4e185640a0eb4677fa",
     "src/core/ref.bend": "fa2dd3c0a4e9865ac9b185680361c681ce187f625a315e560f3a289e651e90f7",
-    "src/core/refs.bend": "052e9f525c04702c23343756f4e7a4dc51060c42a0a0356c5e535f79ebe0ea4c",
+    "src/core/refs.bend": "01139dc108b9189c8df1f161e9776dfa5ba685d76b66ef8a6100e5c5356b4cf6",
     "src/core/refview.bend": "aad18d93039af1c4b83cd245200c051192609bf1a3a7dc261d2b2f4c1dbf97c0",
     "src/core/release.bend": "682768765cbc4c0ff436a54e69ef37926c25c6b68adcfbb5eb25e992ec648b29",
     "src/core/review.bend": "4b4c2a380e48007218f15ea51130303a7e9d055adb9145ccdf703c58ea5f8120",
-    "src/core/sched.bend": "5b7282299d747def160098679b5afb6de4f581a730c0defe9bbe19d9007d4a05",
+    "src/core/sched.bend": "4d3dd0c181030fb6050bfb951d2fa938bad106c9de8b1b34e65df0748b82a283",
     "src/core/schematic.bend": "3280296fe33c84ae633405ed6bfbeb542f8260ccae3f91b55a5c2a044195aa89",
     "src/core/secret.bend": "2aa67d789bcaf5d4de369af089b533d2a3fdfc423d90e545f5d8a84423159bd6",
     "src/core/semver.bend": "a09f3e4f27f84287b5ee5e0c0840750017af34dda03dff67134958af096a4aee",
@@ -132,7 +132,7 @@
     "src/server/thin-mirror.bend": "b488dc7c45fe49bb1aa17966f454f1ee0e9cfef7db4d619c265c298c9bc94e92",
     "src/server/thin-sidebar.bend": "3f4f103551054d92d10a3d7d355f1b8db948900b83e2942009cb7d0e1e1cf5c7",
     "src/server/thin-view.bend": "af71114e1ab946f963f318e7fd6d32c1b6f3eff38e929517987755892da94465",
-    "src/web/bots.bend": "6d14a9efa8931a741c5a7b25af9516565373aef01574e592ee192d211d89de9b",
+    "src/web/bots.bend": "e4353e962b8e71e46a96b0f2a8c6815643b340751c0e2d812a1d807d14256cf6",
     "src/web/cat.bend": "301a7ba925f92fc25bdc35b63f79bcf8bf7b72619106c826c471247a0ace85ba",
     "src/web/dom.bend": "a564bbb014b7247fc3cd670a427bf13782e8f6217b3c32abadb91efc13d5cf7e",
     "src/web/icon.bend": "2abbb4ca75c31da241fa4d09431f517ee8b864de20ce5e15204d40701877d221",
@@ -143,7 +143,7 @@
     "src/web/space.bend": "b86a265e41a900498bc33c37c0404c4d6678554efe3d9054f329beb2cf35ee63",
     "src/web/usage-graph.bend": "fa06f7d2bf855a396a5f7a7b4725dfaa990145fbbcefe7ad21ae8f9a698a2679",
     "src/web/usage-page.bend": "706e3f17a4a3e5f159656d47aeb76a940d4825421f5c33228f9aef692ec926e3",
-    "src/web/view.bend": "4fd055bd4dc42fb587cb8c480a4e541ca30bcf0c9138181e623618c9fa5a47d5"
+    "src/web/view.bend": "44c70cbb2c360c780a6da84182c5f9cde40797686218f39fde7a0ff922fad3ff"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -253,5 +253,5 @@
       "sourceSnapshot": "/home/h/Documents/i2cjak/bp-coord/settle-fresh-work/SOURCE-structural-correction.json"
     }
   },
-  "reviewNote": "Keep a short project name whole in the breadcrumb, cut the title first"
+  "reviewNote": "Word member counts, the routine form and its done line right, and hint a new bot's chat"
 }
