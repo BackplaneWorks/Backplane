@@ -6,6 +6,7 @@ import ../core/model.bend as M
 import ../core/client.bend as U
 import ../core/codec.bend as C
 import ./screen.bend as S
+import ../core/native-sidebar.bend as NS
 import ./notify.bend as N
 import ../core/notice.bend as NO
 import ./view.bend as VW
@@ -770,13 +771,13 @@ def Hubs.register.at(hs: Hubs, +key: String, p: String, t: String, k: String, th
 def Hubs.routed(+action: String) -> Nat:
   C.Codec.pos(["select", "new-thread", "picker-open", "bot", "room", "remote", "uber", "uber-bot", "bot-new", "room-new", "proj-go", "hub-settings",
     "row-settle", "row-unsettle", "row-snooze", "row-delete", "toggle-settled", "add-project", "proj-remove",
-    "row-menu", "proj-menu", "row-pin", "row-unpin", "row-archive", "row-unarchive", "hist-tick", "row-rename", "rename-save", "uber-promote", "uber-home", "fab-open", "fab-edit", "buy", "fab-hide", "fab-show", "deploy-cancel", "thread-tree", "thread-child", "thread-detach"], action)
+    "row-menu", "proj-menu", "row-pin", "row-unpin", "row-archive", "row-unarchive", "hist-tick", "row-rename", "rename-save", "uber-promote", "uber-home", "fab-open", "fab-edit", "buy", "fab-hide", "fab-show", "deploy-cancel", "thread-tree", "thread-child", "thread-detach", "native-sidebar-page"], action)
 
 def Hubs.moves() -> Nat:
   12n
 
 def Hubs.routes() -> Nat:
-  39n
+  40n
 
 # answers to what any hub may be showing (its error, a delete or remove
 # to confirm); the project search is every hub's at once, since the list
@@ -2316,8 +2317,31 @@ def Hubs.bub.homes(ss: List<&2, Shown>) -> List<&2, J.Json>:
     case Shown{k, _, j} <> rest:
       J.Json.obj([J.KV{"hub", J.Str{k}}, J.KV{"home", J.Json.get_obj(j, "bubHome")}]) <> Hubs.bub.homes(rest)
 
+# Only negotiated per-hub snapshots contribute summary controls. A merged
+# phone screen never asserts that an old peer negotiated the capability.
+def Hubs.native.pages(ss: List<&2, Shown>) -> List<&2, J.Json>:
+  match ss:
+    case Nil{}: Nil{}
+    case Shown{_, _, +j} <> rest:
+      List.append(&2, J.Json, Bool.pick(List<&2, J.Json>, Nat.is_eq(J.Json.get_nat(j, "nativeSidebar", 0n), 1n),
+        J.Json.elems(J.Json.get_obj(j, "sidebarPages")), Nil{}), Hubs.native.pages(rest))
+
+def Hubs.native.marker(single: Bool, screen: J.Json) -> J.Json:
+  match single:
+    case False{}: screen
+    case True{}: NS.Obj.put(screen, "nativeSidebar", J.Num{"1"})
+
+def Hubs.native.finish.empty(empty: Bool, +ss: List<&2, Shown>, pages: List<&2, J.Json>, screen: J.Json) -> J.Json:
+  match empty:
+    case True{}: screen
+    case False{}: Hubs.native.marker(Nat.is_eq(List.length(&2, Shown, ss), 1n), NS.Obj.put(screen, "sidebarPages", J.Json.arr(pages)))
+
+def Hubs.native.finish(+ss: List<&2, Shown>, screen: J.Json) -> J.Json:
+  +pages = Hubs.native.pages(ss)
+  Hubs.native.finish.empty(List.is_empty(&2, J.Json, pages), ss, pages, screen)
+
 def Hubs.screen.p.loc(+lc: I.Loc, +pl: MPL.MUber, +ss: List<&2, Shown>, +cur: String, +list: List<&2, Hub>) -> J.Json:
-  J.Json.obj(List.append(&2, J.KV, Hubs.pl.kv(MPL.MUber.plane(pl)), [J.KV{"bubHomes", J.Json.arr(Hubs.bub.homes(ss))}, J.KV{"online", J.Json.bool(Hubs.all_on(ss))}, J.KV{"version", J.Json.str(J.Json.get_str(Hubs.of(ss, cur), "version", ""))},
+  Hubs.native.finish(ss, J.Json.obj(List.append(&2, J.KV, Hubs.pl.kv(MPL.MUber.plane(pl)), [J.KV{"bubHomes", J.Json.arr(Hubs.bub.homes(ss))}, J.KV{"online", J.Json.bool(Hubs.all_on(ss))}, J.KV{"version", J.Json.str(J.Json.get_str(Hubs.of(ss, cur), "version", ""))},
     J.KV{"error", J.Json.str(Hubs.said(ss, "error"))}, J.KV{"note", J.Json.str(Hubs.said(ss, "note"))},
     J.KV{"sel", J.Json.str(J.Json.get_str(Hubs.of(ss, cur), "sel", ""))},
     J.KV{"making", J.Json.bool(J.Json.get_bool(Hubs.of(ss, cur), "making", False{}))},
@@ -2352,7 +2376,7 @@ def Hubs.screen.p.loc(+lc: I.Loc, +pl: MPL.MUber, +ss: List<&2, Shown>, +cur: St
     J.KV{"hubs", J.Json.arr(Hubs.rows(ss))},
     J.KV{"usageMachines", J.Json.arr(Hubs.usage.machines(ss))},
     J.KV{"found", J.Json.arr(Hubs.found(list))},
-    J.KV{"tabs", Hubs.tabs(ss, list, Nat.is_gt(List.length(&2, Shown, ss), 1n))}]))
+    J.KV{"tabs", Hubs.tabs(ss, list, Nat.is_gt(List.length(&2, Shown, ss), 1n))}])))
 
 def Hubs.screen.p(+pl: MPL.MUber, +ss: List<&2, Shown>, +cur: String, +list: List<&2, Hub>) -> J.Json:
   Hubs.screen.p.loc(I.En{}, pl, ss, cur, list)

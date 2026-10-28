@@ -43,6 +43,20 @@ import Foundation
             var pictures = 0, redirects = 0
             for line in text.split(separator: "\n") where line.first == "{" {
                 let fixture = try! JSONSerialization.jsonObject(with: Data(line.utf8)) as! [String: Any]
+                if let screen = fixture["clientScreen"] as? [String: Any] {
+                    let decoded = try! JSONDecoder().decode(Screen.self, from: JSONSerialization.data(withJSONObject: screen))
+                    let projects = screen["projects"] as! [[String: Any]]
+                    precondition(decoded.projects.count == projects.count, "Actual client project was lost")
+                    precondition((decoded.sidebarPages?.count ?? 0) == (screen["sidebarPages"] as? [Any] ?? []).count)
+                    for (project, wire) in zip(decoded.projects, projects) {
+                        precondition(project.threads.count == (wire["threads"] as! [Any]).count)
+                        precondition(project.snoozed.count == (wire["snoozed"] as! [Any]).count)
+                        precondition(project.settled.count == (wire["settled"] as! [Any]).count)
+                        precondition((project.archived?.count ?? 0) == (wire["archived"] as? [Any] ?? []).count)
+                    }
+                    pictures += 1
+                    continue
+                }
                 let result = fixture["result"] as! [String: Any]
                 guard let shown = result["shown"] as? [String: Any] else {
                     precondition(result["nextTarget"] is [String: Any])
