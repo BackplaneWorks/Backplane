@@ -132,13 +132,16 @@ def Overlay.screen(+hs: H.Hubs, +js: J.Json, +cur: String) -> J.Json:
   H.Hubs.screen.k(H.Hubs.loc(hs), H.Hubs.relabel(Overlay.go(H.Hubs.list(hs), hs, J.Json.elems(js), cur)), cur, H.Hubs.list(hs), H.Hubs.pl.want(H.Hubs.list(hs), cur))
 
 # Existing native Find schema, populated from the bounded server search.
-# Selecting a row is an explicit normal thread choice, not an eager replay.
+# Selecting a row is an explicit normal thread choice, not an eager replay;
+# entry: the message found, which the phone then brings into view (paging
+# back to it) and lights, as the web does
 def Search.rows( +rows: List<&2, J.Json>, +hub: String) -> List<&2, J.Json>:
   match rows:
     case Nil{}: Nil{}
     case +row <> tail:
       J.Json.obj([J.KV{"label", J.Str{J.Json.get_str(row, "text", "")}}, J.KV{"action", J.Str{"select"}},
-        J.KV{"value", J.Str{hub ++ "|" ++ J.Json.get_str(row, "thread", "")}}, J.KV{"kind", J.Str{"thread"}}]) <> Search.rows(tail, hub)
+        J.KV{"value", J.Str{hub ++ "|" ++ J.Json.get_str(row, "thread", "")}}, J.KV{"kind", J.Str{"thread"}},
+        J.KV{"entry", J.Str{J.Json.get_str(row, "id", "")}}]) <> Search.rows(tail, hub)
 
 def Search.more( +more: Bool, +search: J.Json, +lc: I.Loc) -> List<&2, J.Json>:
   match more:

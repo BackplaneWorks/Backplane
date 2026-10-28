@@ -62,8 +62,9 @@ data class TourChoice(val label: String, val action: String, val value: String)
 data class Search(val open: Boolean, val query: String, val hint: String)
 
 // the project picker: its path field, the field's hint, an error, and the
-// rows (a tap sends action with value; one with no action is only shown)
-data class FolderRow(val label: String, val action: String, val value: String, val kind: String)
+// rows (a tap sends action with value; one with no action is only shown);
+// entry: a search result's message, shown once its thread opens
+data class FolderRow(val label: String, val action: String, val value: String, val kind: String, val entry: String = "")
 
 data class Folders(val text: String, val hint: String, val error: String, val items: List<FolderRow>)
 
@@ -540,7 +541,7 @@ private fun term(o: JSONObject) = Term(
 )
 
 private fun folderRows(a: JSONArray?) =
-    a.map { FolderRow(it.optString("label"), it.optString("action"), it.optString("value"), it.optString("kind")) }
+    a.map { FolderRow(it.optString("label"), it.optString("action"), it.optString("value"), it.optString("kind"), it.optString("entry")) }
 
 private fun thread(o: JSONObject) = threadOf(o).copy(
     earlier = o.optInt("earlier", 0),

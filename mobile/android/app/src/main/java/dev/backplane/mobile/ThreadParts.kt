@@ -1034,7 +1034,8 @@ fun FindSheet(m: AppModel, f: Find) {
                         leadingContent = {
                             Icon(when (r.kind) { "file" -> Icons.Filled.Description; "thread" -> Icons.AutoMirrored.Filled.Chat; else -> Icons.Filled.Bolt }, null)
                         },
-                        modifier = Modifier.clickable { m.act(r.action, r.value); m.act("find-close") },
+                        // a message found: its thread opens on it (Core.seek)
+                        modifier = Modifier.clickable { if (r.entry.isNotEmpty()) m.seek(r.value, r.entry); m.act(r.action, r.value); m.act("find-close") },
                     )
                 }
             }

@@ -895,6 +895,34 @@ class Core(private val app: Application) : Application.ActivityLifecycleCallback
                 if (jumpLeft <= 0) jumping = null
             }
         }
+        seeking?.let { k ->
+            val t = screen?.thread ?: return@let
+            if (t.id != k.thread) return@let
+            val e = t.entries.firstOrNull { it.id == k.entry || it.id.endsWith("|${k.entry}") }
+            if (e != null) {
+                seeking = null
+                jump = Jump(e.id, (jump?.n ?: 0) + 1)
+            } else if (t.earlier > 0 && k.pages < 40) {
+                // a page at a time, each once the one before it shows
+                val first = t.entries.firstOrNull()?.id
+                if (contentReady && first != k.first) {
+                    k.first = first
+                    k.pages += 1
+                    act("earlier", "")
+                }
+            } else seeking = null
+        }
+    }
+
+    // a search result opened: the message found, brought into view and lit
+    // once its thread shows it, paging back while the page shown does not
+    // hold it (at most 40 pages, as the web). It opened at the newest
+    // message, the one found off screen.
+    private class Seek(val thread: String, val entry: String, var pages: Int = 0, var first: String? = null)
+    private var seeking: Seek? = null
+
+    fun seek(thread: String, entry: String) {
+        seeking = if (thread.isEmpty() || entry.isEmpty()) null else Seek(thread, entry)
     }
 
     data class Jump(val id: String, val n: Int)
