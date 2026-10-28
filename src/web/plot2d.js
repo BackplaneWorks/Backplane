@@ -676,14 +676,18 @@ class View {
     g.globalAlpha = 1;
     // only while something fades in does it ask for the next frame
     if (fading) this.later();
-    // how it came, small in a corner
+    // how it came, small in a corner, on the page's background so a board
+    // panned under it never shows through
     const st = stats.get(this.key);
     if (st) {
       g.setTransform(1, 0, 0, 1, 0, 0);
-      g.fillStyle = "rgba(138,143,152,0.9)";
       g.font = font(this.canvas, 11 * dpr);
       g.textAlign = "left";
-      g.fillText(App.plot_stats(document.documentElement.lang, mb(st.bytes), st.waited.toFixed(1), st.waited > 0.5), 8 * dpr, h - 8 * dpr);
+      const text = App.plot_stats(document.documentElement.lang, mb(st.bytes), st.waited.toFixed(1), st.waited > 0.5);
+      g.fillStyle = this.bg;
+      g.fillRect(4 * dpr, h - 20 * dpr, g.measureText(text).width + 8 * dpr, 16 * dpr);
+      g.fillStyle = "rgba(138,143,152,0.9)";
+      g.fillText(text, 8 * dpr, h - 8 * dpr);
     }
   }
 }
