@@ -722,6 +722,16 @@ function mailRestore(anchor) {
   const row = [...el.children].find(row => row.dataset.mailId === anchor.id);
   if (row) el.scrollTop += row.getBoundingClientRect().top-el.getBoundingClientRect().top-anchor.offset;
 }
+// an entry brought into view and flashed (a Jump, a search result): the
+// view holds there (holdFix), or the next layout put it back at the end
+function jumpTo(tl, el) {
+  el.scrollIntoView({ block: "center" });
+  el.classList.remove("jumped");
+  void el.offsetWidth;
+  el.classList.add("jumped");
+  held = holdEnd(tl) ? null : anchorOf(tl);fixedAt = tl.scrollTop;heldSize = holdSize(tl);
+  holdSay(held ? App.sel(ui) : "");
+}
 function render() {
   mailCheckpoint();
   const mail = mailAnchor();
@@ -780,21 +790,13 @@ function render() {
   // an entry the history went back to (Jump): brought into view, flashed
   if (jump && tl2) {
     const el = tl2.querySelector(`[data-id="${CSS.escape(jump)}"]`);
-    if (el) {
-      el.scrollIntoView({ block: "center" });
-      el.classList.remove("jumped");
-      void el.offsetWidth;
-      el.classList.add("jumped");
-    }
+    if (el) jumpTo(tl2, el);
     jump = null;
   }
   if (searchJump && tl2 && searchJump.thread === (thin?.session?.sel ?? App.sel(ui))) {
     const el = tl2.querySelector(`[data-id="${CSS.escape(searchJump.id)}"]`);
     if (el) {
-      el.scrollIntoView({ block: "center" });
-      el.classList.remove("jumped");
-      void el.offsetWidth;
-      el.classList.add("jumped");
+      jumpTo(tl2, el);
       searchJump = null;
     } else if (thin?.window?.older && searchJump.pages < 40) {
       if (!searchJump.asked) { searchJump.asked = true; requestAnimationFrame(() => { if (searchJump) { searchJump.asked = false; if (thin.page()) searchJump.pages++; } }); }
