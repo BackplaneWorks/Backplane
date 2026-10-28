@@ -1,4 +1,4 @@
-name: Frozen 0.13 Windows runtime and desktop packaging recovery
+name: Existing frozen Windows service startup diagnostic (no compiler)
 on:
   workflow_dispatch:
     inputs:
@@ -10,98 +10,54 @@ permissions:
   contents: read
   actions: read
 concurrency:
-  group: frozen013-windows-recovery-74d943
+  group: frozen013-windows-startup-diagnostic
   cancel-in-progress: false
 jobs:
-  package-windows:
+  diagnose-owned-service:
     runs-on: windows-2025
-    timeout-minutes: 15
+    timeout-minutes: 6
     env:
       PYTHONUTF8: '1'
       PYTHONDONTWRITEBYTECODE: '1'
-      PYTHON: python
-      BACKPLANE_TELEMETRY: 'off'
-      BACKPLANE_DESKTOP_BROWSER: '1'
-      RUNTIME_URL: ${{ inputs.runtime_url }}
-      RUNTIME_SHA: ${{ inputs.runtime_sha256 }}
-      COMPONENTS_URL: ${{ inputs.components_url }}
-      COMPONENTS_SHA: ${{ inputs.components_sha256 }}
     steps:
-      - name: Preserve committed source bytes on Windows
-        shell: bash
+      - shell: bash
         run: git config --global core.autocrlf false
       - uses: actions/checkout@v4
         with:
           ref: 74d943b7db3ceab37893b350308cf1802f38fe6b
           path: source
           persist-credentials: false
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
       - uses: actions/download-artifact@v4
         with:
-          name: configured-service-build-windows-x64
-          run-id: 40748872940
+          name: windows013-recovered-component-and-desktop
+          run-id: 40752153377
           github-token: ${{ github.token }}
-          path: source/build
-      - name: Fetch exact retained runtime and current shell components
+          path: retained
+      - name: Capture only bounded owned-child startup failures with redacted output
         shell: bash
+        env:
+          DIAG_REDACT_GOOGLE_ID: ${{ secrets.BACKPLANE_GOOGLE_CLIENT_ID }}
+          DIAG_REDACT_GOOGLE_SECRET: ${{ secrets.BACKPLANE_GOOGLE_CLIENT_SECRET }}
+          DIAG_REDACT_TELEMETRY_KID: ${{ secrets.BACKPLANE_TELEMETRY_KID }}
+          DIAG_REDACT_TELEMETRY_KEY: ${{ secrets.BACKPLANE_TELEMETRY_KEY }}
         run: |
-          set -euo pipefail
-          python - <<'PY'
-          import pathlib,os,urllib.request,hashlib,tarfile
-          base=pathlib.Path('inputs');base.mkdir()
-          for name in ['RUNTIME','COMPONENTS']:
-              u=os.environ[name+'_URL'];h=os.environ[name+'_SHA'];assert u.startswith('https://') and len(h)==64
-              p=base/(name.lower()+'.tar.gz')
-              with urllib.request.urlopen(u,timeout=90) as response,p.open('wb') as f:
-                  while b:=response.read(1024*1024):f.write(b)
-              with p.open('rb') as f:assert hashlib.file_digest(f,'sha256').hexdigest()==h
-              dest=base/name.lower();dest.mkdir()
-              with tarfile.open(p) as tar:tar.extractall(dest,filter='fully_trusted')
-          PY
-          (cd source/desktop && npm ci --ignore-scripts --no-audit --no-fund)
-      - name: Retry only actual Windows ABI/component assembly with UTF8 locale
-        shell: bash
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          import pathlib,subprocess,hashlib,json,os
-          root=pathlib.Path.cwd();s=root/'source';raw=s/'build/bootstrap-js';binary=raw/'backplane-serve.exe';before=hashlib.sha256(binary.read_bytes()).hexdigest();out=root/'package';out.mkdir()
-          (out/'SOURCE-STATUS.txt').write_text(subprocess.check_output(['git','-C',str(s),'status','--porcelain','--untracked-files=all'],text=True))
-          assert subprocess.check_output(['git','-C',str(s),'rev-parse','HEAD'],text=True).strip()=='74d943b7db3ceab37893b350308cf1802f38fe6b'
-          assert subprocess.check_output(['git','-C',str(s),'rev-parse','HEAD^{tree}'],text=True).strip()=='a9231b10c14aeb0af2306dd7ee022922802d6e53'
-          run=lambda *args:subprocess.run(list(map(str,args)),check=True)
-          run('python',s/'scripts/service-runtime.py','--windows-runtime',root/'inputs/runtime','--source-root',s,'--build',raw,'--producer',s/'scripts/service-release.py','--producer-sha256','6dff1255e45b84df922e37ae984f9655583f1c0e6deac74cc2a5b5f9af654568','--out',s/'build/bootstrap-service')
-          assert hashlib.sha256(binary.read_bytes()).hexdigest()==before
-          service=s/'build/bootstrap-service/component/SERVICE.json';payload=service.parent/'payload'
-          run('node',s/'desktop/restore-modes.cjs',service,payload)
-          run('python',s/'desktop/freeze-target.py',s,root/'inputs/components/components',service,out/'freeze')
-          run('node',s/'desktop/produce-release.cjs','stage','--request',out/'freeze/stage.request.json','--output',out/'stage')
-          (out/'RECOVERY.json').write_text(json.dumps({'sourceCommit':'74d943b7db3ceab37893b350308cf1802f38fe6b','sourceTree':'a9231b10c14aeb0af2306dd7ee022922802d6e53','originalBuildRun':40748872940,'binarySha256':before,'toolingCommit':os.environ['GITHUB_SHA'],'compilerInvoked':False,'change':'PYTHONUTF8=1 for Windows locale; existing service binary retained; actual native icon branding and stage generation'},indent=2)+'\n')
-          PY
-      - name: Bounded native Windows desktop smoke with OS sandbox
-        shell: bash
-        run: node source/desktop/test/release-smoke.cjs --stage "$GITHUB_WORKSPACE/package/stage" --out "$GITHUB_WORKSPACE/package/evidence"
-      - name: Strict archive from actual native evidence
-        shell: bash
-        run: node source/desktop/archive-after-smoke.cjs --stage "$GITHUB_WORKSPACE/package/stage" --evidence "$GITHUB_WORKSPACE/package/evidence" --out "$GITHUB_WORKSPACE/package/acceptance" --dist "$GITHUB_WORKSPACE/package/dist"
+          node - <<'JS'
+          const fs=require('fs'),path=require('path'),os=require('os'),crypto=require('crypto'),cp=require('child_process');
+          const redactKeys=Object.keys(process.env).filter(k=>k.startsWith('DIAG_REDACT_')),secrets=redactKeys.map(k=>process.env[k]).filter(Boolean);if(secrets.length!==4)throw Error('Redaction inputs unavailable; no payload run');for(const k of redactKeys)delete process.env[k];
+          const safe=text=>{let s=String(text);for(const v of secrets)s=s.split(v).join('<redacted>');return s.split(/\r?\n/).filter(l=>l.length<350&&!/^\s*\d+\s*\|/.test(l)).map(l=>l.replace(/\b[0-9a-f]{32,}\b/gi,'<redacted-hex>')).join('\n').slice(-6000);};
+          const root=process.cwd(),component=path.join(root,'retained/source/build/bootstrap-service/component'),payload=path.join(component,'payload'),binary=path.join(payload,'backplane-serve.exe'),receipt=JSON.parse(fs.readFileSync(path.join(component,'SERVICE.json'),'utf8'));
+          if(receipt.sourceCommit!=='74d943b7db3ceab37893b350308cf1802f38fe6b'||receipt.sourceTree!=='a9231b10c14aeb0af2306dd7ee022922802d6e53')throw Error('Wrong retained component');
+          const digest=p=>crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');if(digest(binary)!=='0b2e043551d65a32621770af265773fc12c5368a2c60f20f0341905ce1af9942')throw Error('Wrong existing binary');
+          const captured=[],originalSpawn=cp.spawn;cp.spawn=function(file,args,opts){if(path.resolve(String(file)).toLowerCase()!==path.resolve(binary).toLowerCase())return originalSpawn.apply(this,arguments);const record={file:path.basename(file),args:args.map(String),stdout:'',stderr:''};const child=originalSpawn(file,args,{...opts,stdio:['ignore','pipe','pipe']});record.pid=child.pid;child.stdout.on('data',b=>record.stdout=(record.stdout+b).slice(-32768));child.stderr.on('data',b=>record.stderr=(record.stderr+b).slice(-32768));child.once('exit',(code,signal)=>{record.exit=code;record.signal=signal;});captured.push(record);return child;};
+          const {Service}=require(path.join(root,'source/desktop/service.cjs'));
+          (async()=>{const results=[];for(const suffix of ['ascii','日本語']){const home=fs.mkdtempSync(path.join(os.tmpdir(),'Backplane-diagnostic-'+suffix+'-')),agents=path.join(home,'agents');fs.mkdirSync(agents);const at=Math.floor(Date.now()/1000);fs.writeFileSync(path.join(home,'events.jsonl'),['mail.on','restart.continue','telemetry.share'].map(key=>JSON.stringify({$:'SettingSet',key,value:'off',at})).join('\n')+'\n');const prior=process.env;process.env={...prior,BACKPLANE_HOME:home,BACKPLANE_AGENTS:agents,BACKPLANE_NO_UPDATE:'1',BACKPLANE_TELEMETRY:'off',BACKPLANE_PEERS:''};for(const key of Object.keys(process.env))if(/TOKEN|API_KEY|SECRET|PASSWORD|CREDENTIAL|AUTH_COOKIE/.test(key))delete process.env[key];const service=new Service({home,binary,web:path.join(payload,'web'),expectedVersion:'0.13.0',residentService:true});let timer,result={case:suffix};try{const connection=await Promise.race([service.start(),new Promise((_,reject)=>timer=setTimeout(()=>reject(Error('Bounded startup timeout')),20000))]);result.ready=true;result.version=connection.version;}catch(error){result.ready=false;result.error=safe(error.message);}finally{clearTimeout(timer);if(service.child&&service.child.exitCode===null){service.child.kill('SIGTERM');await Promise.race([new Promise(resolve=>service.child.once('exit',resolve)),new Promise(resolve=>setTimeout(resolve,3000))]);}result.captured=captured.splice(0).map(v=>({...v,stdout:safe(v.stdout),stderr:safe(v.stderr)}));result.childExited=!service.child||service.child.exitCode!==null||service.child.signalCode!==null;process.env=prior;}results.push(result);}fs.mkdirSync('diagnostic');fs.writeFileSync('diagnostic/RESULT.json',JSON.stringify({kind:'owned-Windows-startup-diagnostic-only',status:results.every(r=>r.ready)?'DIAGNOSTIC_STARTUP_PASS_NOT_DESKTOP_QUALIFICATION':'DIAGNOSTIC_CAPTURED_STARTUP_FAILURE',sourceCommit:receipt.sourceCommit,sourceTree:receipt.sourceTree,binarySha256:digest(binary),originalCompilerRun:40748872940,compilerInvoked:false,privateProfilesOrDeviceTouched:false,results},null,2)+'\n');console.log('Diagnostic recorded; no compiler, private profile or production action');})().catch(()=>{console.error('Diagnostic runner failed; raw child output not printed');process.exitCode=1;});
+          JS
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: windows013-recovered-component-and-desktop
-          path: |
-            source/build/bootstrap-service/
-            package/RECOVERY.json
-            package/SOURCE-STATUS.txt
-            package/freeze/
-            package/evidence/
-            package/acceptance/
-            package/dist/*.zip
-            package/dist/*.sha256
-            package/dist/**/DESKTOP.json
-            package/dist/**/MANIFEST.json
+          name: windows013-service-diagnostic
+          path: diagnostic/
           retention-days: 14
