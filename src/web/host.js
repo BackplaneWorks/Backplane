@@ -1196,6 +1196,7 @@ function dispatch(action, value, timer) {
   if (action === "sealed") return sealedSave(value);
   if (["send", "send-alt"].includes(action)) historyClear();
   if (action === "side-toggle" || action === "rail-toggle") return foldToggle(action === "side-toggle" ? "side" : "rail");
+  if (action === "select") drawerShut();
   if (["term-toggle", "ws-term-hide", "ws-term-here"].includes(action) || action === "ws-go" && value === "term") terminalOutput.retire();
   else if (["select", "bot", "bot-tab", "uber", "uber-bot", "remote"].includes(action)) terminalOutput.clear();
   if (["select", "ref-go", "ref-back", "ref-fwd", "bot", "bot-tab", "uber", "uber-bot", "remote"].includes(action)) {
@@ -2034,19 +2035,47 @@ function panesSize() {
     side: document.documentElement.dataset.side ? strip : SIDE_W, strip, rail };
 }
 const panesN = (x) => BigInt(Math.max(0, Math.round(x)));
+// The sidebar the person opens where it cannot stand beside the thread's
+// minimum and the viewer (App.panes_drawer) lies over the thread as a
+// drawer, data-fold="drawer": a click outside it, Esc or a thread picked
+// (here or by any other way: drawerSel, the thread it opened over) puts
+// it back to its strip
+let drawerSel = null;
+const selNow = () => (thin?.session?.sel ?? App.sel(ui));
+function drawerShut() {
+  if (document.documentElement.dataset.fold !== "drawer") return false;
+  sideKept = false;
+  panes();
+  return true;
+}
 function panes() {
   const root = document.documentElement;
   if (!document.querySelector(".app.panel") || !wide()) {
     // the viewer shut (or a phone-sized page): the sidebar as it was
     sideKept = false;
+    drawerSel = null;
     delete root.dataset.fold;
     return;
   }
+  if (sideKept && drawerSel !== null && selNow() !== drawerSel) sideKept = false;
   const s = panesSize();
   const fold = App.panes_fold(panesN(s.w), panesN(s.side), panesN(s.strip), panesN(s.rail), sideKept);
-  if (fold) root.dataset.fold = "auto"; else delete root.dataset.fold;
+  const drawer = App.panes_drawer(panesN(s.w), panesN(s.side), panesN(s.strip), panesN(s.rail), sideKept);
+  if (drawer) root.dataset.fold = "drawer"; else if (fold) root.dataset.fold = "auto"; else delete root.dataset.fold;
+  drawerSel = drawer ? (drawerSel ?? selNow()) : null;
   viewerWidth(Number(App.panes_viewer(panesN(s.w), panesN(s.side), panesN(s.strip), panesN(s.rail), panesN(viewerDrag()), splitOn(), sideKept)));
 }
+document.addEventListener("pointerdown", (e) => {
+  if (document.documentElement.dataset.fold === "drawer" && e.target instanceof Element && !e.target.closest(".sidebar")) drawerShut();
+}, true);
+// (on the window, ahead of the page's own Esc: the drawer goes first, the
+// viewer stays)
+window.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape" || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return;
+  if (!drawerShut()) return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+}, true);
 document.addEventListener("pointerdown", (e) => {
   const edge = e.target instanceof Element ? e.target.closest(".viewer-split") : null;
   if (!edge || e.button !== 0) return;

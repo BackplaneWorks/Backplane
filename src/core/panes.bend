@@ -7,10 +7,14 @@ import Base
 # Panes.fair() px folds the sidebar by itself; it comes back when the
 # viewer closes or the window grows. The person's own choice wins: a
 # sidebar they shut stays shut, one they open while the viewer is open
-# stays open. The viewer then takes its width (dragged, or its share:
-# 11/21 of the room beside the sidebar, all but the thread's minimum for
-# Split) and never more than leaves the thread its minimum, nor less than
-# Panes.least(). Every width is in CSS px. Test: test/pane_room_test.bend.
+# stays open; where it cannot stand beside the thread's minimum and a
+# viewer of Panes.least() px, it opens over the thread as a drawer (the
+# panes stay as beside its strip) until a click outside it, Esc or a
+# thread picked puts it back. The viewer then takes its width (dragged, or
+# its share: 11/21 of the room beside the sidebar, all but the thread's
+# minimum for Split) and never more than leaves the thread its minimum,
+# nor less than Panes.least(). Every width is in CSS px. Test:
+# test/pane_room_test.bend.
 
 def Panes.thread() -> Nat:
   360n
@@ -46,6 +50,23 @@ def Panes.fold.k(keep: Bool, +w: Nat, +side: Nat, +strip: Nat, +rail: Nat) -> Bo
 def Panes.fold(+w: Nat, +side: Nat, +strip: Nat, +rail: Nat, keep: Bool) -> Bool:
   Panes.fold.k(keep, w, side, strip, rail)
 
+# the sidebar the person opened is a drawer over the thread: open, and the
+# room beside it short of the viewer's least
+def Panes.drawer.k(keep: Bool, +w: Nat, +side: Nat, +strip: Nat, +rail: Nat) -> Bool:
+  match keep:
+    case True{}:
+      Bool.and(Nat.is_gt(side, strip), Nat.is_lt(Panes.room(w, side, rail), Panes.least()))
+    case False{}:
+      False{}
+
+def Panes.drawer(+w: Nat, +side: Nat, +strip: Nat, +rail: Nat, keep: Bool) -> Bool:
+  Panes.drawer.k(keep, w, side, strip, rail)
+
+# the panes are laid out beside the sidebar's strip: folded by itself, or
+# open over the thread as a drawer
+def Panes.strip(+w: Nat, +side: Nat, +strip: Nat, +rail: Nat, +keep: Bool) -> Bool:
+  Bool.or(Panes.fold(w, side, strip, rail, keep), Panes.drawer(w, side, strip, rail, keep))
+
 # the viewer's wish: the width it was dragged to, else its share
 def Panes.want(+w: Nat, +side: Nat, +rail: Nat, +drag: Nat, split: Bool) -> Nat:
   Bool.pick(Nat, Nat.is_gt(drag, 0n), drag,
@@ -56,5 +77,6 @@ def Panes.at(+w: Nat, +side: Nat, +rail: Nat, +drag: Nat, split: Bool) -> Nat:
   Panes.max(Panes.least(), Panes.min(Panes.want(w, side, rail, drag, split), Panes.room(w, side, rail)))
 
 # the viewer's width: beside the strip while the sidebar folds by itself
+# or is a drawer
 def Panes.viewer(+w: Nat, +side: Nat, +strip: Nat, +rail: Nat, +drag: Nat, split: Bool, +keep: Bool) -> Nat:
-  Panes.at(w, Bool.pick(Nat, Panes.fold(w, side, strip, rail, keep), strip, side), rail, drag, split)
+  Panes.at(w, Bool.pick(Nat, Panes.strip(w, side, strip, rail, keep), strip, side), rail, drag, split)

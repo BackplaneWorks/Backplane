@@ -468,6 +468,10 @@ def tour_key(key: String) -> String:
 def panes_fold(w: Nat, side: Nat, strip: Nat, rail: Nat, keep: Bool) -> Bool:
   PN.Panes.fold(w, side, strip, rail, keep)
 
+# (and whether the sidebar the person opened is a drawer over the thread)
+def panes_drawer(w: Nat, side: Nat, strip: Nat, rail: Nat, keep: Bool) -> Bool:
+  PN.Panes.drawer(w, side, strip, rail, keep)
+
 def panes_viewer(w: Nat, side: Nat, strip: Nat, rail: Nat, drag: Nat, split: Bool, keep: Bool) -> Nat:
   PN.Panes.viewer(w, side, strip, rail, drag, split, keep)
 

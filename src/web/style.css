@@ -1558,11 +1558,11 @@ html:lang(ja) :is(.set-text, .set-ctl) { min-width: 0; }
   html[data-side="shut"] .app { grid-template-columns: 44px minmax(0, 1fr); }
   /* (data-fold: folded by itself beside the viewer, host.js's panes) */
   html[data-side="shut"] .app.panel, html[data-fold] .app.panel { grid-template-columns: 44px minmax(0, 1fr) var(--viewer-w, minmax(0, 1.1fr)); }
-  html[data-side="shut"] .sidebar, html[data-fold] .app.panel .sidebar { overflow: hidden; padding-bottom: 0; }
-  html[data-side="shut"] .sidebar > :not(.brand), html[data-fold] .app.panel .sidebar > :not(.brand) { display: none; }
-  html[data-side="shut"] .sidebar .brand, html[data-fold] .app.panel .sidebar .brand { flex-direction: column; justify-content: flex-start; gap: 10px; padding: 12px 0; border-bottom: 0; }
-  html[data-side="shut"] .sidebar .brand > :not(.brand-mark):not(.side-toggle), html[data-fold] .app.panel .sidebar .brand > :not(.brand-mark):not(.side-toggle) { display: none; }
-  html[data-side="shut"] .sidebar .side-toggle svg, html[data-fold] .app.panel .sidebar .side-toggle svg { transform: none; }
+  html[data-side="shut"] .sidebar, html[data-fold="auto"] .app.panel .sidebar { overflow: hidden; padding-bottom: 0; }
+  html[data-side="shut"] .sidebar > :not(.brand), html[data-fold="auto"] .app.panel .sidebar > :not(.brand) { display: none; }
+  html[data-side="shut"] .sidebar .brand, html[data-fold="auto"] .app.panel .sidebar .brand { flex-direction: column; justify-content: flex-start; gap: 10px; padding: 12px 0; border-bottom: 0; }
+  html[data-side="shut"] .sidebar .brand > :not(.brand-mark):not(.side-toggle), html[data-fold="auto"] .app.panel .sidebar .brand > :not(.brand-mark):not(.side-toggle) { display: none; }
+  html[data-side="shut"] .sidebar .side-toggle svg, html[data-fold="auto"] .app.panel .sidebar .side-toggle svg { transform: none; }
   html[data-rail="compact"] .workspace-thread > .workspace-bar { width: 44px; padding: 6px 3px; }
   html[data-rail="compact"] .workspace-rail button, html[data-rail="compact"] .workspace-close .viewer-close { font-size: 0; gap: 0; min-height: 38px; }
   html[data-rail="compact"] .workspace-feedback { display: none; }
@@ -1652,10 +1652,14 @@ kbd { font: calc(10px * var(--text-scale, 100) / 100)/1 var(--mono); color: var(
   /* (data-fold: folded by itself beside the viewer, host.js's panes) */
   html[data-side="shut"] .app.top { grid-template-columns: 44px minmax(0, 1fr); }
   html[data-side="shut"] .app.top.panel, html[data-fold] .app.top.panel { grid-template-columns: 44px minmax(0, 1fr) var(--viewer-w, minmax(0, 1.1fr)); }
-  html[data-side="shut"] .app.top .sidebar, html[data-fold] .app.top.panel .sidebar { overflow-x: hidden; padding: 0; scrollbar-width: none; }
-  html[data-side="shut"] .app.top .sidebar > :not(.side-strip), html[data-fold] .app.top.panel .sidebar > :not(.side-strip) { display: none; }
-  html[data-side="shut"] .app.top .sidebar > .side-strip, html[data-fold] .app.top.panel .sidebar > .side-strip { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 0; }
-  html[data-side="shut"] .side-strip .side-toggle svg, html[data-fold] .app.top.panel .side-strip .side-toggle svg { transform: none; }
+  html[data-side="shut"] .app.top .sidebar, html[data-fold="auto"] .app.top.panel .sidebar { overflow-x: hidden; padding: 0; scrollbar-width: none; }
+  html[data-side="shut"] .app.top .sidebar > :not(.side-strip), html[data-fold="auto"] .app.top.panel .sidebar > :not(.side-strip) { display: none; }
+  html[data-side="shut"] .app.top .sidebar > .side-strip, html[data-fold="auto"] .app.top.panel .sidebar > .side-strip { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 0; }
+  html[data-side="shut"] .side-strip .side-toggle svg, html[data-fold="auto"] .app.top.panel .side-strip .side-toggle svg { transform: none; }
+  /* the sidebar the person opened where it cannot stand beside the thread
+     and the viewer: a drawer over the thread, the panes laid out beside
+     its strip (data-fold="drawer", host.js's panes; core/panes.bend) */
+  html[data-fold="drawer"] .app.panel .sidebar { position: relative; z-index: 15; width: 264px; box-shadow: 8px 0 24px rgba(0, 0, 0, .45); }
   .side-strip button { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0; background: none; border-color: transparent; color: var(--tint, var(--dim)); }
   .side-strip button:hover { border-color: var(--line); background: var(--raise); }
   .side-strip .side-toggle { color: var(--dim); margin-bottom: 4px; }
