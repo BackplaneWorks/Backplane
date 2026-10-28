@@ -2196,6 +2196,49 @@ def SGroups.all(g: SGroups) -> List<&2, SRow>:
     case SGroups{l, q, o}:
       List.append(&2, SRow, l, List.append(&2, SRow, q, o))
 
+# The open thread's project keeps its place: for an hour after the open
+# thread settled (by itself, Settings' "Settle when done", or by the
+# person) the project counts as live, so it neither sinks nor fades under
+# the reader (cur: that project, "" for none: Side.groups; Side.cur.held)
+def SRow.pid(r: SRow) -> String:
+  match r:
+    case SRow{_, M.Project{id, _, _, _, _}, _}:
+      id
+
+def SRow.group.at(+now: Nat, +cur: String, +r: SRow) -> Nat:
+  Bool.pick(Nat, Bool.and(Bool.not(String.is_empty(cur)), String.eq(SRow.pid(r), cur)), 0n, SRow.group(now, r))
+
+def Side.groups.at(rs: List<&2, SRow>, +now: Nat, +cur: String) -> SGroups:
+  match rs:
+    case Nil{}:
+      SGroups{Nil{}, Nil{}, Nil{}}
+    case +r <> t:
+      SGroups.put(SRow.group.at(now, cur, r), r, Side.groups.at(t, now, cur))
+
+# the open thread's project ("" with none open)
+def Side.cur.of(+st: M.State, +sel: String) -> String:
+  Bool.pick(String, String.is_empty(sel), "", Ui.thread_project(Ui.thread(st, sel)))
+
+def Side.hold() -> Nat:
+  3600n
+
+def Side.cur.held.k(fresh: Bool, +st: M.State, +sel: String) -> String:
+  match fresh:
+    case True{}:
+      Side.cur.of(st, sel)
+    case False{}:
+      ""
+
+# the project the open thread holds in place: its own, while that thread
+# settled within Side.hold() ("" else: a thread settled long ago, opened
+# from a quiet project, moves nothing either)
+def Side.cur.held.at(+sa: Nat, +st: M.State, +sel: String, +now: Nat) -> String:
+  Side.cur.held.k(Bool.and(Bool.and(Bool.not(String.is_empty(sel)), Nat.is_gt(sa, 0n)), Nat.is_gt(Nat.add(sa, Side.hold()), now)), st, sel)
+
+# (the active view lists no projects: nothing to hold there)
+def Side.cur.held(+st: M.State, +sel: String, +now: Nat) -> String:
+  Bool.pick(String, String.eq(M.Setting.get(st, "sidebar.view", ""), "active"), "", Side.cur.held.at(M.Thread.settled_rank(Ui.thread(st, sel)), st, sel, now))
+
 # the sidebar's projects in order: live, quiet, older
 def Side.rows(+st: M.State, +now: Nat) -> List<&2, SRow>:
   SGroups.all(Side.groups(Side.sorted(st, now), now))
@@ -2203,6 +2246,13 @@ def Side.rows(+st: M.State, +now: Nat) -> List<&2, SRow>:
 # Side.rows from the index (law side_rows_ix_eq)
 def Side.rows.ix(+st: M.State, +ix: SIx, +now: Nat) -> List<&2, SRow>:
   SGroups.all(Side.groups(Side.sorted.ix(st, ix, now), now))
+
+# Side.rows.ix with the open thread's project held live
+def Side.rows.ix.at(+st: M.State, +ix: SIx, +now: Nat, +cur: String) -> List<&2, SRow>:
+  SGroups.all(Side.groups.at(Side.sorted.ix(st, ix, now), now, cur))
+
+def Side.rows.at(+st: M.State, +now: Nat, +cur: String) -> List<&2, SRow>:
+  SGroups.all(Side.groups.at(Side.sorted(st, now), now, cur))
 
 # Finding a project: while the sidebar's search is open (the "psearch"
 # flag) it shows only the projects whose name fuzzy-matches the query, form
@@ -2275,6 +2325,9 @@ def Side.fold.k(show: Bool, g: SGroups) -> List<&2, SRow>:
 
 def Side.unfolded(rs: List<&2, SRow>, +op: Map<&2, Bool>, +q: String, +now: Nat) -> List<&2, SRow>:
   Side.fold.k(Bool.or(Flag.get(op, "old-projects"), Bool.not(String.is_empty(q))), Side.groups(rs, now))
+
+def Side.unfolded.at(rs: List<&2, SRow>, +op: Map<&2, Bool>, +q: String, +now: Nat, +cur: String) -> List<&2, SRow>:
+  Side.fold.k(Bool.or(Flag.get(op, "old-projects"), Bool.not(String.is_empty(q))), Side.groups.at(rs, now, cur))
 
 def Side.tree_ids(+st: M.State, ts: List<&2, M.Thread>, +sel: String) -> List<&2, String>:
   ST.Tree.row_ids(ST.Tree.rows(st, ts, sel))
@@ -2368,11 +2421,11 @@ def Side.pids(rs: List<&2, SRow>) -> List<&2, String>:
     case SRow{_, M.Project{id, _, _, _, _}, _} <> t:
       id <> Side.pids(t)
 
-# the sidebar's projects, top to bottom
+# the sidebar's projects, top to bottom (the open thread's kept in place)
 def Side.projects(u: Ui) -> List<&2, String>:
   match u:
-    case Ui{+st, _, +dr, _, +op, _, +now, _, _, _, _, _, _, _, _, _, _}:
-      Side.pids(Side.unfolded(Side.shown(st, now, Find.q(op, dr)), op, Find.q(op, dr), now))
+    case Ui{+st, +sel, +dr, _, +op, _, +now, _, _, _, _, _, _, _, _, _, _}:
+      Side.pids(Side.unfolded.at(Find.rows(Side.rows.at(st, now, Side.cur.held(st, sel, now)), Find.q(op, dr)), op, Find.q(op, dr), now, Side.cur.held(st, sel, now)))
 
 def Side.only.k(keep: Bool, r: SRow, rest: List<&2, SRow>) -> List<&2, SRow>:
   match keep:
@@ -3771,6 +3824,37 @@ def Active.folded(show: Bool, p: AParts) -> List<&2, ARow>:
       List.append(&2, ARow, l, f)
     case False{} AParts{l, _}:
       l
+
+# A shut fold still shows the open thread's row: a thread that settled (or
+# was archived) while open stays in sight until the person moves on
+# (Settings' "Settle when done")
+def Side.sel.k(hit: Bool, t: M.Thread, rest: List<&2, M.Thread>) -> List<&2, M.Thread>:
+  match hit:
+    case True{}:
+      t <> rest
+    case False{}:
+      rest
+
+def Side.sel(ts: List<&2, M.Thread>, +sel: String) -> List<&2, M.Thread>:
+  match ts:
+    case Nil{}:
+      Nil{}
+    case +t <> r:
+      Side.sel.k(Bool.and(Bool.not(String.is_empty(sel)), String.eq(M.Thread.id(t), sel)), t, Side.sel(r, sel))
+
+def Active.sel.k(hit: Bool, a: ARow, rest: List<&2, ARow>) -> List<&2, ARow>:
+  match hit:
+    case True{}:
+      a <> rest
+    case False{}:
+      rest
+
+def Active.sel(rs: List<&2, ARow>, +sel: String) -> List<&2, ARow>:
+  match rs:
+    case Nil{}:
+      Nil{}
+    case ARow{u, a, +t, p, ti, f} <> r:
+      Active.sel.k(Bool.and(Bool.not(String.is_empty(sel)), String.eq(M.Thread.id(t), sel)), ARow{u, a, t, p, ti, f}, Active.sel(r, sel))
 
 def Active.faded_n(p: AParts) -> Nat:
   match p:
@@ -13829,8 +13913,8 @@ def Side.here(+u: Ui) -> List<&2, String>:
 # projects, so unrelated forests need not be expanded and discarded.
 def Side.projects.ix(u: Ui, +ix: SIx) -> List<&2, String>:
   match u:
-    case Ui{+st, _, +dr, _, +op, _, +now, _, _, _, _, _, _, _, _, _, _}:
-      Side.pids(Side.unfolded(Side.shown.ix(st, ix, now, Find.q(op, dr)), op, Find.q(op, dr), now))
+    case Ui{+st, +sel, +dr, _, +op, _, +now, _, _, _, _, _, _, _, _, _, _}:
+      Side.pids(Side.unfolded.at(Find.rows(Side.rows.ix.at(st, ix, now, Side.cur.held(st, sel, now)), Find.q(op, dr)), op, Find.q(op, dr), now, Side.cur.held(st, sel, now)))
 
 def Side.active.project(rs: List<&2, ARow>, +pid: String) -> List<&2, ARow>:
   match rs:

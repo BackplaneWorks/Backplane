@@ -130,6 +130,13 @@ def main() -> IO(Unit):
     C.Check.str("the header's fork is the open thread's", sent(U.Ui.act(act(base(), "select", "c"), "fork", "")), "{\"id\":1,\"m\":\"thread.fork\",\"p\":{\"thread\":\"c\"}}")
     C.Check.str("a fork's menu", menu(act(forked(), "row-menu", "b")), "New subthread,Fork thread,Bring back to its source,Pin,Rename,Settle,Snooze 1 hour,Snooze until tomorrow,Snooze 1 week,Archive,Delete,Copy link")
     C.Check.str("back from a row", sent(U.Ui.act(act(forked(), "row-menu", "b"), "back", "b")), "{\"id\":0,\"m\":\"thread.back\",\"p\":{\"thread\":\"b\"}}")
+    # the open thread keeps its place: its project stays live for an hour
+    # after that thread settled, and a shut fold still shows its row
+    C.Check.str("held: settled within the hour", U.Side.cur.held(st(), "f", now()), "p2")
+    C.Check.str("not held: settled long ago", U.Side.cur.held(st(), "e", now()) ++ "|" ++ U.Side.cur.held(st(), "", now()), "|")
+    C.Check.str("open thread's project held live", pids(act(base(), "select", "f")), "p2,p1,p4")
+    C.Check.str("held keeps the groups' order", String.join(U.Side.pids(U.SGroups.all(U.Side.groups.at(U.Side.rows(st(), now()), now(), ""))), ","), String.join(U.Side.pids(U.Side.rows(st(), now())), ","))
+    C.Check.str("shut fold shows the open row", String.join(U.Side.ids(U.Side.sel(U.Ui.threads(st()), "d")), ",") ++ "|" ++ String.join(U.Side.ids(U.Side.sel(U.Ui.threads(st()), "")), ","), "d|")
     C.Check.str("rename opens on the title", U.Ui.scratch(act(base(), "row-rename", "d"), "@ren") ++ "|" ++ U.Ui.scratch(act(base(), "row-rename", "d"), "@f.title"), "d|" ++ U.Active.title(U.Ui.thread(st(), "d")))
     C.Check.str("rename sends the edited title", sent(U.Ui.act(act(act(base(), "row-rename", "d"), "bfield", "title\u{1f}  Enclosure v2 "), "rename-save", "")), "{\"id\":0,\"m\":\"thread.rename\",\"p\":{\"thread\":\"d\",\"title\":\"Enclosure v2\"}}")
     C.Check.str("a phone's rename names the thread", sent(U.Ui.act(base(), "rename-save", "f\u{1f}Fixture")), "{\"id\":0,\"m\":\"thread.rename\",\"p\":{\"thread\":\"f\",\"title\":\"Fixture\"}}")

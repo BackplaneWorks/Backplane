@@ -286,7 +286,7 @@ def View.shelf.k(+lc: I.Loc, open: Bool, +key: String, +label: String, ts: List<
     case True{}:
       WI.WIcon.button("shelf open", "toggle-settled", key, MSG.T.common.hide(lc), "chevron-down", 14, label) <> View.rows_of(lc, ts, ix, st, sel, now)
     case False{}:
-      [WI.WIcon.button("shelf", "toggle-settled", key, MSG.T.common.show(lc), "chevron-right", 14, label)]
+      WI.WIcon.button("shelf", "toggle-settled", key, MSG.T.common.show(lc), "chevron-right", 14, label) <> View.rows_of(lc, U.Side.sel(ts, sel), ix, st, sel, now)
 
 # a collapsible shelf (Settled, Archived): its label and count, then its
 # rows when open; nothing when empty
@@ -449,7 +449,7 @@ def View.afaded.open(+lc: I.Loc, on: Bool, rs: List<&2, U.ARow>, +ix: U.SIx, +st
     case True{}:
       View.arows(lc, rs, ix, st, sel, q)
     case False{}:
-      Nil{}
+      View.arows(lc, U.Active.sel(rs, sel), ix, st, sel, q)
 
 # the settled rows folded under one "Settled N" row, shown while it is
 # open or a search is on (core's Active.open)
@@ -487,7 +487,7 @@ def View.list.k(+lc: I.Loc, active: Bool, +q: String, +open: Map<&2, Bool>, +ix:
     case True{}:
       View.active(lc, U.Active.rows.ix(st, ix, now, q), q, open, ix, st, sel)
     case False{}:
-      View.groups(lc, U.Side.groups(U.Side.shown.ix(st, ix, now, q), now), q, open, ix, st, sel, now, look, rm)
+      View.groups(lc, U.Side.groups.at(U.Find.rows(U.Side.rows.ix.at(st, ix, now, U.Side.cur.held(st, sel, now)), q), now, U.Side.cur.held(st, sel, now)), q, open, ix, st, sel, now, look, rm)
 
 # (what every row asks of the whole state is gathered once: core's Side.ix)
 def View.history.rows(+lc: I.Loc, ts: List<&2, M.Thread>, +q: String, +ix: U.SIx, +st: M.State, +sel: String, +now: Nat) -> List<&2, D.Node>:
@@ -690,7 +690,7 @@ def View.list.projected(+lc: I.Loc, active: Bool, +rows: List<&2, U.SRow>, raw: 
     case True{}:
       List.append(&2, D.Node, View.active(lc, U.Active.rows.given(st, ix, now, q, raw), q, open, ix, st, sel), View.history(lc, q, open, ix, st, sel, now))
     case False{}:
-      List.append(&2, D.Node, View.groups(lc, U.Side.groups(rows, now), q, open, ix, st, sel, now, look, rm), View.history(lc, q, open, ix, st, sel, now))
+      List.append(&2, D.Node, View.groups(lc, U.Side.groups.at(rows, now, U.Side.cur.held(st, sel, now)), q, open, ix, st, sel, now, look, rm), View.history(lc, q, open, ix, st, sel, now))
 
 def View.sidebar.projected(+lc: I.Loc, bots: List<&2, D.Node>, uber: List<&2, D.Node>, ms: List<&2, U.MRow>, mi: List<&2, U.MItem>, +ix: U.SIx, +u: U.Ui, rows: List<&2, U.SRow>, raw: List<&2, U.SRow>) -> D.Node:
   match u:
@@ -739,13 +739,13 @@ def View.sidebar.frame.rows(+lc: I.Loc, bots: List<&2, D.Node>, +u: U.Ui, +plain
     U.Side.pids(unfolded), View.sidebar.threads(u, plain, unfolded, raw)), View.strip(lc, U.Side.pids(unfolded), U.Ui.state(u), U.Side.cur(u)))
 
 def View.sidebar.frame.shown(+lc: I.Loc, bots: List<&2, D.Node>, +u: U.Ui, +plain: U.SIx, signals: U.SIx, +rows: List<&2, U.SRow>, raw: List<&2, U.SRow>) -> D.Node:
-  View.sidebar.frame.rows(lc, bots, u, plain, signals, rows, U.Side.unfolded(rows, U.Side.open(u), U.Ui.scratch(u, "@f.pq"), U.Side.now(u)), raw)
+  View.sidebar.frame.rows(lc, bots, u, plain, signals, rows, U.Side.unfolded.at(rows, U.Side.open(u), U.Ui.scratch(u, "@f.pq"), U.Side.now(u), U.Side.cur.held(U.Ui.state(u), U.Ui.sel(u), U.Side.now(u))), raw)
 
 def View.sidebar.frame.raw(+lc: I.Loc, bots: List<&2, D.Node>, +u: U.Ui, +plain: U.SIx, signals: U.SIx, +raw: List<&2, U.SRow>) -> D.Node:
   View.sidebar.frame.shown(lc, bots, u, plain, signals, U.Find.rows(raw, U.Ui.scratch(u, "@f.pq")), raw)
 
 def View.sidebar.frame(+lc: I.Loc, bots: List<&2, D.Node>, +u: U.Ui, +plain: U.SIx, signals: U.SIx) -> D.Node:
-  View.sidebar.frame.raw(lc, bots, u, plain, signals, U.Side.rows.ix(U.Ui.state(u), plain, U.Side.now(u)))
+  View.sidebar.frame.raw(lc, bots, u, plain, signals, U.Side.rows.ix.at(U.Ui.state(u), plain, U.Side.now(u), U.Side.cur.held(U.Ui.state(u), U.Ui.sel(u), U.Side.now(u))))
 
 def View.sidebar.x(+lc: I.Loc, bots: List<&2, D.Node>, +u: U.Ui, +ix: U.SIx) -> D.Node:
   View.sidebar.frame(lc, bots, u, ix, U.Side.signals.ix(ix, u))
