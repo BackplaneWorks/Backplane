@@ -142,12 +142,18 @@ def View.join(a: U.Act, cmds: List<&2, U.Cmd>) -> U.Act:
     case U.Act{u, cs}:
       U.Act{u, List.append(&2, U.Cmd, cmds, cs)}
 
+# (tree: where a schematic's hierarchy starts, client.bend's Bd.tree: in a
+# project with several boards, the board's own, so the Sheet menu lists its
+# sheets)
+def View.sync.ask(+u: U.Ui, +want: String, +kind: String, +root: String, +path: String, cmds: List<&2, U.Cmd>) -> U.Act:
+  View.join(U.Ui.rpc(U.Ui.scratch_set(u, "@view.at", want), "kicad.watch", List.append(&2, J.KV, View.ask(want, kind, root, path), [J.KV{"tree", J.Str{U.Bd.tree(u, path)}}])), cmds)
+
 def View.sync.k(same: Bool, u: U.Ui, +want: String, +kind: String, +root: String, +path: String, cmds: List<&2, U.Cmd>) -> U.Act:
   match same:
     case True{}:
       U.Act{u, cmds}
     case False{}:
-      View.join(U.Ui.rpc(U.Ui.scratch_set(u, "@view.at", want), "kicad.watch", View.ask(want, kind, root, path)), cmds)
+      View.sync.ask(u, want, kind, root, path, cmds)
 
 def View.sync.u(+u: U.Ui, cmds: List<&2, U.Cmd>) -> U.Act:
   View.sync.k(String.eq(View.want(u), U.Ui.scratch(u, "@view.at")), u, View.want(u), View.kind(u), U.Ui.root(u), View.path(u), cmds)
@@ -174,8 +180,12 @@ def View.sync.m(a: U.Act) -> U.Act:
     case U.Act{+u, cmds}:
       U.Mpage.sync.if(View.mech(u), View.sync.u(u, cmds))
 
+# (and the project card, client.bend's Fab.sync, when it is due: its boards
+# are what the Sheet menu offers in a project with several. A thread opened
+# on a phone and its viewer's actions never asked for it, so the menu never
+# had them)
 def View.sync(a: U.Act) -> U.Act:
-  View.fv(View.sync.m(a))
+  U.Fab.sync(View.fv(View.sync.m(a)))
 
 # a hub's answer to far.view: the viewer asks for the source again, now
 # that the folder is known (and to history.resolve: the version it picked
@@ -519,10 +529,16 @@ def View.board.list(+u: U.Ui) -> List<&2, J.Json>:
   Bool.pick(List<&2, J.Json>, Bool.and(U.Bd.many(u), Bool.or(String.eq(View.kind(u), "board"), Bool.or(String.eq(View.kind(u), "schematic"), String.eq(View.kind(u), "3d")))),
     View.board.rows(U.Bd.files(u), U.Bd.shown(u, View.file(u))), Nil{})
 
+# with a file shown in place of the project's own (a board picked from the
+# Sheet menu, a sheet opened from the Files tab), the sheet picked is shown
+# as that file: it was kept beside it and never shown
+def View.sheet.file(+u: U.Ui, +file: String) -> U.Ui:
+  Bool.pick(U.Ui, String.is_empty(View.file(u)), u, U.Ui.scratch_set(u, "@view.file:" ++ U.Ui.sel(u), file))
+
 # (the row is kept beside the file, "@view.sheet.i:<t>", so a file used by
 # two sheet instances lights the one picked)
 def View.sheet.go(+u: U.Ui, +i: Nat, +file: String) -> U.Act:
-  View.sync(U.Act{Pick.clear(U.Ui.scratch_set(U.Ui.scratch_set(u, "@view.sheet:" ++ U.Ui.sel(u), Bool.pick(String, Nat.is_eq(i, 0n), "", file)), "@view.sheet.i:" ++ U.Ui.sel(u), U.Sch.entry(u, View.rows(u), i))), Nil{}})
+  View.sync(U.Act{Pick.clear(U.Ui.scratch_set(U.Ui.scratch_set(View.sheet.file(u, file), "@view.sheet:" ++ U.Ui.sel(u), Bool.pick(String, Nat.is_eq(i, 0n), "", file)), "@view.sheet.i:" ++ U.Ui.sel(u), U.Sch.entry(u, View.rows(u), i))), Nil{}})
 
 def View.sheet.pick.u(+u: U.Ui, +v: String) -> U.Act:
   View.sheet.go(u, Maybe.default(&2, Nat, Nat.read(v), 0n), HI.Hier.file(View.rows(u), Maybe.default(&2, Nat, Nat.read(v), 0n)))
@@ -560,9 +576,14 @@ def View.sheet.pick.s(+u: U.Ui, +v: String) -> U.Act:
 def View.board.pick(+u: U.Ui, +rel: String) -> U.Act:
   View.fm.to(U.Act{U.Ui.scratch_set(u, "@view.sheet:" ++ U.Ui.sel(u), ""), Nil{}}, U.Bd.kind(View.kind(u)), FM.Fm.abs(U.Ui.root(u), U.Bd.path(U.Bd.kind(View.kind(u)), rel)))
 
+# the sheet on show: the file shown in place of the project's own, else
+# the sheet picked, else the root
+def View.sheet.cur(+u: U.Ui, +rs: List<&2, HI.Row>) -> String:
+  Bool.pick(String, String.is_empty(View.file(u)), Bool.pick(String, String.is_empty(View.sheet(u)), HI.Hier.file(rs, 0n), View.sheet(u)), View.file(u))
+
 # "^up": the parent of the row on show
 def View.sheet.up(+u: U.Ui) -> String:
-  Nat.show(HI.Hier.parent(View.rows(u), View.sheet.at(u, View.rows(u), Bool.pick(String, String.is_empty(View.sheet(u)), HI.Hier.file(View.rows(u), 0n), View.sheet(u)))))
+  Nat.show(HI.Hier.parent(View.rows(u), View.sheet.at(u, View.rows(u), View.sheet.cur(u, View.rows(u)))))
 
 def View.sheet.pick.v(up: Bool, +u: U.Ui, +v: String) -> U.Act:
   match up:
@@ -611,7 +632,7 @@ def View.sheet.menu(+u: U.Ui, +rs: List<&2, HI.Row>, +at: Nat) -> List<&2, J.Jso
 # the schematic's sheets for the phone's Sheet menu (none with one sheet)
 def View.sheet.list(+u: U.Ui) -> List<&2, J.Json>:
   Bool.pick(List<&2, J.Json>, Bool.and(String.eq(View.kind(u), "schematic"), Nat.is_gt(List.length(&2, HI.Row, View.rows(u)), 1n)),
-    View.sheet.menu(u, View.rows(u), View.sheet.at(u, View.rows(u), Bool.pick(String, String.is_empty(View.sheet(u)), HI.Hier.file(View.rows(u), 0n), View.sheet(u)))), Nil{})
+    View.sheet.menu(u, View.rows(u), View.sheet.at(u, View.rows(u), View.sheet.cur(u, View.rows(u)))), Nil{})
 
 # the 3D model with its parts or the board alone ("view-parts")
 def View.parts(+u: U.Ui) -> U.Act:

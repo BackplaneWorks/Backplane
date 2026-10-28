@@ -1461,16 +1461,21 @@ private fun ViewerControls(m: AppModel, v: Viewer, present: Set<Int>, modifier: 
         IconButton(onClick = { m.act("vw-light") }) {
             Icon(if (v.light) Icons.Filled.DarkMode else Icons.Filled.LightMode, if (v.light) NativeMessages.native_viewer_ground_dark(lang) else NativeMessages.native_viewer_ground_light(lang), tint = fg)
         }
+        // a project's boards lead the menu ("b:" values), then the sheets; the
+        // button names the sheet on show, or the board where there are none
         if (v.sheets.isNotEmpty()) Box {
             var open by remember { mutableStateOf(false) }
             OutlinedButton(onClick = { open = true }) {
-                Text(v.sheets.firstOrNull { it.on }?.label?.trim() ?: NativeMessages.native_viewer_sheet(lang), color = fg, maxLines = 1)
+                Text(v.sheets.lastOrNull { it.on }?.label?.trim() ?: NativeMessages.native_viewer_sheet(lang), color = fg, maxLines = 1)
                 Icon(Icons.Filled.ExpandMore, null, tint = fg)
             }
             DropdownMenu(open, { open = false }) {
-                for (sh in v.sheets) DropdownMenuItem(text = { Text(sh.label) }, enabled = !sh.loop,
-                    leadingIcon = { if (sh.on) Icon(Icons.Filled.Check, null) else Spacer(Modifier.width(24.dp)) },
-                    onClick = { open = false; m.act("view-sheet", sh.value) })
+                for ((i, sh) in v.sheets.withIndex()) {
+                    if (i > 0 && v.sheets[i - 1].value.startsWith("b:") && !sh.value.startsWith("b:")) HorizontalDivider()
+                    DropdownMenuItem(text = { Text(sh.label) }, enabled = !sh.loop,
+                        leadingIcon = { if (sh.on) Icon(Icons.Filled.Check, null) else Spacer(Modifier.width(24.dp)) },
+                        onClick = { open = false; m.act("view-sheet", sh.value) })
+                }
             }
         }
         if (layers.isNotEmpty()) Box {
