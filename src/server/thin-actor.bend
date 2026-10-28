@@ -407,11 +407,18 @@ def Actor.owed.go( +xs: List<&2, Sigma<&2, &2, String, _ => String>>, +scope: St
     case Nil{}: acc
     case (+id, +value) <> tail: Actor.owed.go(tail, scope, Actor.pref.put(String.eq(Actor.owed.scope(value), scope), acc, id, value))
 
-# (the same view keeps all; another keeps what was asked for it)
-def Actor.owed( +same: Bool, +pending: Map<&2, String>, +target: J.Json) -> Map<&2, String>:
+def Actor.owed.k( +moved: Bool, +pending: Map<&2, String>, +target: J.Json) -> Map<&2, String>:
+  match moved:
+    case True{}: Actor.owed.go(Map.to_list(&2, String, pending), Actor.scope(target), Map.new(&2, String))
+    case False{}: Map.new(&2, String)
+
+# (the same view keeps all; a page moved to another target keeps what was
+# asked for it; a replacement view of the same target keeps nothing: its
+# request ids may be another socket's)
+def Actor.owed( +same: Bool, +moved: Bool, +pending: Map<&2, String>, +target: J.Json) -> Map<&2, String>:
   match same:
     case True{}: pending
-    case False{}: Actor.owed.go(Map.to_list(&2, String, pending), Actor.scope(target), Map.new(&2, String))
+    case False{}: Actor.owed.k(moved, pending, target)
 
 # a thread this actor has shown no viewer for yet takes the page's record
 # of it (a page loaded again remembers threads its fresh actor never saw:
@@ -435,7 +442,7 @@ def Actor.refresh( +xs: List<&2, Actor>, +web: Bool, +st: M.State, +info: J.Json
       +same = Bool.and(String.eq(oldView, view), W.Target.same(target, J.Json.get_obj(p, "target")))
       Actor{Actor.composer(old, V.Session.renderer(web, Actor.resolve(U.Ui.info_merge(Actor.seed.view(String.is_empty(U.Ui.info(old, "view.kind:" ++ thread)),
         Actor.merge(fresh, old, same, thread, Maybe.is_some(&2, J.Json, J.Json.get(J.Json.get_obj(J.Json.get_obj(input, "session"), "drafts"), thread))), fresh, thread), info), thread), p)),
-        view, J.Json.get_obj(p, "target"), Actor.owed(same, pending, J.Json.get_obj(p, "target")), Bool.pick(List<&2, J.Json>, same, reads, Nil{}), dirty, Bool.pick(List<&2, Memo>, same, Actor.kept(memo), Nil{})}
+        view, J.Json.get_obj(p, "target"), Actor.owed(same, Bool.not(W.Target.same(target, J.Json.get_obj(p, "target"))), pending, J.Json.get_obj(p, "target")), Bool.pick(List<&2, J.Json>, same, reads, Nil{}), dirty, Bool.pick(List<&2, Memo>, same, Actor.kept(memo), Nil{})}
 
 # The hub's canonical projection is shared; each actor keeps its own pages,
 # drafts, request slots and exact scope. Compare only the selected body's
