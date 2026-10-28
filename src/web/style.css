@@ -1348,6 +1348,9 @@ html:lang(ja) :is(.set-text, .set-ctl) { min-width: 0; }
 .board-origin { padding: 5px 8px; }
 .board-option[hidden] { display: none; }
 .composer-foot, .composer .foot-end { min-width: 0; gap: 5px; }
+/* Send, Stop, Steer, Queue, Ask, Give: one width, so the buttons before
+   it stay where they are as it changes */
+.composer .foot-end > button.primary:last-child { min-width: calc(5ch + 20px); }
 /* the chip that opens the model picker: agent / model / effort in a box,
    its key, then the context the thread holds */
 .composer-foot .model-chip { min-width: 0; flex: 0 1 auto; max-width: 100%; margin-right: auto; display: flex; gap: 8px; align-items: center; height: 28px; padding: 0 8px; background: var(--bg); border: 1px solid var(--line); color: var(--text); font-size: 12px; }
