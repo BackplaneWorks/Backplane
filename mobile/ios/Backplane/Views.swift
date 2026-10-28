@@ -698,7 +698,7 @@ struct ProjectsView: View {
                 } else {
                     Button { model.act("picker-open") } label: { Image(systemName: "folder.badge.plus") }.accessibilityLabel(NativeMessages.sidebar_add_project(lang))
                 }
-                Button { model.switchTab(.settings) } label: { Image(systemName: "gearshape") }
+                Button { model.chooseTab(.settings) } label: { Image(systemName: "gearshape") }
                     .accessibilityLabel(NativeMessages.palette_settings(lang))
                 Menu {
                     Button(NativeMessages.palette_search(lang), systemImage: "magnifyingglass") { model.act("find-open", "search") }

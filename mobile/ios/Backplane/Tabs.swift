@@ -48,7 +48,9 @@ struct AppTabs: View {
     }
 
     private var tabs: some View {
-        TabView(selection: Binding(get: { model.tab }, set: { model.switchTab($0) })) {
+        TabView(selection: Binding(get: { model.tab }, set: { next in
+            if next != model.tab { model.chooseTab(next) }
+        })) {
             ForEach(AppTab.allCases) { t in
                 stack(t)
                     .toolbar(horizontalSizeClass == .compact ? .hidden : .automatic, for: .tabBar)
@@ -63,7 +65,7 @@ struct AppTabs: View {
         let selected = model.tab == t
         let count = badge(t)
         let title = t.title(screen.locale ?? "en")
-        return Button { model.switchTab(t) } label: {
+        return Button { model.chooseTab(t) } label: {
             VStack(spacing: 4) {
                 HStack(spacing: 3) {
                     Image(systemName: t.icon).font(.body)
