@@ -1505,6 +1505,33 @@ def Ui.flag_off(u: Ui, +k: String) -> Ui:
     case Ui{st, sel, dr, live, +op, on, now, ad, pa, ve, rid, w, er, note, nf, ob, tr}:
       Ui{st, sel, dr, live, Map.set(&2, Bool, op, k, False{}), on, now, ad, pa, ve, rid, w, er, note, nf, ob, tr}
 
+# Settings opened, whichever way (the top bar's gear, the palette, a
+# secret's Set, KiCad's path, Usage), shuts the selected thread's viewer as
+# its rail button would (the "panel" action: shut by hand), so Settings
+# fills the main area and the thread comes back without the viewer
+# (test/click_away_test.bend)
+def Settings.viewer.shut(open: Bool, u: Ui) -> Ui:
+  match open:
+    case True{}:
+      Act.ui(Ui.toggle_panel(u))
+    case False{}:
+      u
+
+def Settings.on(+u: Ui) -> Ui:
+  Ui.flag_on(Settings.viewer.shut(Ui.panel(u), u), "settings")
+
+# the "flag" action: a flag turned on or off; Settings turned on goes
+# through Settings.on
+def Ui.flag.k(opening: Bool, +u: Ui, +value: String) -> Act:
+  match opening:
+    case True{}:
+      Act{Settings.on(u), Nil{}}
+    case False{}:
+      Ui.toggle_settled(u, value)
+
+def Ui.flag.act(+u: Ui, +value: String) -> Act:
+  Ui.flag.k(Bool.and(String.eq(value, "settings"), Bool.not(Ui.flag(u, "settings"))), u, value)
+
 def Ui.dismiss(u: Ui) -> Act:
   match u:
     case Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w, _, note, nf, ob, tr}:
@@ -9949,7 +9976,7 @@ def Sbox.dismiss(+u: Ui, +name: String) -> Act:
 # (phones: a request's Set opens the box in Settings, where the masked
 # field is)
 def Sbox.open.set(+u: Ui, +name: String) -> Act:
-  Sbox.list(Ui.flag_on(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(u, "@sbox", Bool.pick(String, String.is_empty(name), "+", name)), "@sbox.th", ""), "@sbox.err", ""), "@f.sname", name), "settings"))
+  Sbox.list(Settings.on(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(Ui.scratch_set(u, "@sbox", Bool.pick(String, String.is_empty(name), "+", name)), "@sbox.th", ""), "@sbox.err", ""), "@f.sname", name)))
 
 # "secret-" actions: open (value: a name or ""), open-here (in the
 # selected thread), shut, sent, err (value: why), del (asks once), dismiss,
@@ -11417,7 +11444,7 @@ def Settings.focus(a: Act, id: String) -> Act:
     case Act{u, _}: Act{u, [Focus{id}]}
 
 def KN.path(+u: Ui) -> Act:
-  Settings.focus(Settings.go(Ui.scratch_set(Ui.flag_on(u, "settings"), "@f.kpath", M.Setting.get(Ui.state.of(u), "kicad.path", "")), "cad"), "kicad-path")
+  Settings.focus(Settings.go(Ui.scratch_set(Settings.on(u), "@f.kpath", M.Setting.get(Ui.state.of(u), "kicad.path", "")), "cad"), "kicad-path")
 
 def KN.save(+u: Ui) -> Act:
   Ui.setting(u, "kicad.path=" ++ Ui.scratch(u, "@f.kpath"))
@@ -12878,7 +12905,7 @@ def Usage.open(open: Bool, +u: Ui) -> Act:
     case True{}:
       Settings.go(u, "usage")
     case False{}:
-      Voice.flag("settings", Settings.go(Ui.flag_on(u, "settings"), "usage"))
+      Voice.flag("settings", Settings.go(Settings.on(u), "usage"))
 
 # Only inspect the thread prefix, leaving the potentially long key snapshot alone.
 def Ui.subs.thread(s: String, acc: String) -> String:
@@ -14517,7 +14544,7 @@ def Ui.act.k(+i: Nat, +u: Ui, +value: String) -> Act:
     case 17n:
       Ui.rpc(u, "app.update", Nil{})
     case 18n:
-      Models.opened(value, Voice.flag(value, Ui.toggle_settled(u, value)))
+      Models.opened(value, Voice.flag(value, Ui.flag.act(u, value)))
     case 19n:
       Ui.setting(u, value)
     case 20n:

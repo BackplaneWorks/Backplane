@@ -5,7 +5,8 @@ import ../src/core/model.bend as M
 import ../src/web/workspace.bend as WS
 
 # Leaving a full pane by picking something else, and the rail's toggles
-# (client.bend's Want.thread.k and Rail.*, workspace.bend's WS.key).
+# (client.bend's Want.thread.k and Rail.*, workspace.bend's WS.key);
+# Settings opened shuts the viewer (client.bend's Settings.on).
 
 def base() -> U.Ui:
   U.Ui.select.k(U.Ui.fold([M.ProjectCreated{"p", "Project", "/fixture", 1n},
@@ -26,6 +27,17 @@ def made(+u: U.Ui) -> U.Ui:
 # the viewer open on a kind, for the selected thread
 def shown(+u: U.Ui, +kind: String) -> U.Ui:
   U.Ui.view_put(u, kind, "")
+
+# Settings opened by its gear (the "flag" action) over the open board
+def gear(+u: U.Ui) -> U.Ui:
+  t_ui(U.Ui.act(u, "flag", "settings"))
+
+# "Settings" typed in the palette (Ctrl+K), then Enter
+def palette(+u: U.Ui) -> U.Ui:
+  t_ui(WS.WS.act("ws-palette-enter", t_ui(WS.WS.act("ws-palette-query", t_ui(WS.WS.act("ws-palette-open", u, "")), "Settings")), ""))
+
+def panel(+u: U.Ui) -> String:
+  Bool.show(U.Ui.panel(u))
 
 def main() -> IO(Unit):
   do IO<Unit>:
@@ -52,3 +64,22 @@ def main() -> IO(Unit):
     C.Check.str("Commands opens the palette", flag(t_ui(WS.WS.act("ws-palette-open", base(), "")), "palette"), "True")
     C.Check.str("Commands again shuts it", flag(t_ui(WS.WS.act("ws-palette-open", t_ui(WS.WS.act("ws-palette-open", base(), "")), "")), "palette"), "False")
     C.Check.str("the open palette's button shuts it", U.Rail.palette(True{}), "ws-palette-close")
+    C.Check.str("Settings opened: Settings is on", flag(gear(shown(base(), "board")), "settings"), "True")
+    C.Check.str("Settings opened: the viewer is shut", panel(gear(shown(base(), "board"))), "False")
+    C.Check.str("Settings opened: shut by hand, as its rail button", U.Ui.info(gear(shown(base(), "board")), "panel.hand:current"), "1")
+    C.Check.str("Settings opened: the rail lights nothing", U.Rail.tab(gear(shown(base(), "board"))), "")
+    C.Check.str("Settings opened with no viewer: none opens", panel(gear(base())), "False")
+    C.Check.str("Settings opened with no viewer: not marked by hand", U.Ui.info(gear(base()), "panel.hand:current"), "")
+    C.Check.str("back at the thread from Settings: no viewer", panel(t_ui(U.Ui.act(gear(shown(base(), "board")), "select", "current"))), "False")
+    C.Check.str("back at the thread from Settings: Settings goes", flag(t_ui(U.Ui.act(gear(shown(base(), "board")), "select", "current")), "settings"), "False")
+    C.Check.str("then the rail's Board shows the board again", U.Rail.tab(t_ui(U.Ui.act(t_ui(U.Ui.act(gear(shown(base(), "board")), "select", "current")), "view-kind", "board"))), "board")
+    C.Check.str("another thread and back: still no viewer", panel(t_ui(U.Ui.act(t_ui(U.Ui.act(gear(shown(base(), "schematic")), "select", "other")), "select", "current"))), "False")
+    C.Check.str("the gear again shuts Settings", flag(gear(gear(shown(base(), "board"))), "settings"), "False")
+    C.Check.str("Settings shut leaves a viewer opened meanwhile", panel(gear(shown(gear(base()), "board"))), "True")
+    C.Check.str("the palette's Settings opens Settings", flag(palette(shown(base(), "diff")), "settings"), "True")
+    C.Check.str("the palette's Settings shuts the viewer", panel(palette(shown(base(), "diff"))), "False")
+    C.Check.str("a secret's Set opens Settings", flag(t_ui(U.Ui.act(shown(base(), "files"), "secret-open-set", "TOKEN")), "settings"), "True")
+    C.Check.str("a secret's Set shuts the viewer", panel(t_ui(U.Ui.act(shown(base(), "files"), "secret-open-set", "TOKEN"))), "False")
+    C.Check.str("KiCad's path opens Settings without the viewer", panel(t_ui(U.Ui.act(shown(base(), "board"), "kicad-path", ""))), "False")
+    C.Check.str("Usage opens Settings without the viewer", panel(t_ui(U.Ui.act(shown(base(), "3d"), "usage-open", ""))), "False")
+    C.Check.str("another flag leaves the viewer alone", panel(t_ui(U.Ui.act(shown(base(), "board"), "flag", "models"))), "True")
