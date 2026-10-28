@@ -29,6 +29,7 @@ with tempfile.TemporaryDirectory(prefix="bp-ios-navigation-admission-decode-") a
         section("mobile/ios/Backplane/SpaceView.swift", "struct SpacePageModel:", "struct SpacePage:"),
         section("mobile/ios/Backplane/Cat.swift", "struct CatAnim:", "func catRig("),
         section("mobile/ios/Backplane/BubMove.swift", "struct BubMove:", "struct BubMoveOverlay:"),
+        section("mobile/ios/Backplane/Plane.swift", "struct UberCard:", "private func planeStatus("),
         "enum IslandAttributes {\n" + island[island.index("    struct Line: Codable, Hashable {"):],
     ]))
     subprocess.run(["swiftc", "-parse-as-library",
