@@ -146,13 +146,39 @@ def Src.key.of(s: Src) -> String:
     case Src{k, _, _, _, _, _, _, _}:
       k
 
-# the sources some phone still watches
-def Src.gc(ss: List<&2, Src>, +subs: List<&2, Sub>) -> List<&2, Src>:
+# a 3D model's source with its plot, or with one on the way (Pv.warm)
+def Src.model(s: Src) -> Bool:
+  match s:
+    case Src{_, +kd, _, _, _, _, b, pl}:
+      Bool.and(Pv.solid.kind(kd), Bool.or(b, Maybe.is_some(&2, P.Plot, pl)))
+
+# how many 3D models no view watches are kept (the newest first)
+def Src.kept() -> Nat:
+  3n
+
+def Src.left(take: Bool, +n: Nat) -> Nat:
+  match take n:
+    case True{} 1n+m:
+      m
+    case _ _:
+      n
+
+# a 3D model no view watches, kept while fewer than n are
+def Src.idle(+s: Src, +subs: List<&2, Sub>, +n: Nat) -> Bool:
+  Bool.and(Bool.not(Sub.watched(subs, Src.key.of(s))), Bool.and(Src.model(s), Nat.is_gt(n, 0n)))
+
+# the sources some phone still watches, and the last few 3D models no view
+# watches now (their plots kept: a model takes seconds to prepare, and the
+# next page or phone to ask for an unchanged board gets it at once)
+def Src.gc.n(ss: List<&2, Src>, +subs: List<&2, Sub>, +n: Nat) -> List<&2, Src>:
   match ss:
     case Nil{}:
       Nil{}
     case +s <> t:
-      Src.keep(Sub.watched(subs, Src.key.of(s)), s, Src.gc(t, subs))
+      Src.keep(Bool.or(Sub.watched(subs, Src.key.of(s)), Src.idle(s, subs, n)), s, Src.gc.n(t, subs, Src.left(Src.idle(s, subs, n), n)))
+
+def Src.gc(ss: List<&2, Src>, +subs: List<&2, Sub>) -> List<&2, Src>:
+  Src.gc.n(ss, subs, Src.kept())
 
 def Sub.keep(drop: Bool, s: Sub, rest: List<&2, Sub>) -> List<&2, Sub>:
   match drop:
@@ -825,6 +851,9 @@ def Pv.read.k(sm: U32 & String, +r: PR.Ran, +key: String, +kind: U32, +q: Chan(P
 def Pv.infos(+dir: String, +key: String) -> String:
   dir ++ "/" ++ U32.show(P.Key.hash(key, 2166136261)) ++ ".info"
 
+def Pv.note.json(+key: String, +text: String) -> String:
+  J.Json.show(J.Json.obj([J.KV{"t", J.Str{"plotnote"}}, J.KV{"key", J.Str{key}}, J.KV{"text", J.Str{text}}]))
+
 # a 3D model's note (Pv.missing.note, in its source's info file) to the
 # phones that watch it
 def Pv.note.fan(ss: List<&2, Sub>, +key: String, +text: String, +out: Chan(POut)) -> IO(Unit):
@@ -833,13 +862,21 @@ def Pv.note.fan(ss: List<&2, Sub>, +key: String, +text: String, +out: Chan(POut)
       IO.pure(Unit, Unit{})
     case +s <> t:
       do IO<Unit>:
-        Bool.pick(IO(Unit), Sub.is(s, key), Pv.say(out, Sub.client(s), J.Json.show(J.Json.obj([J.KV{"t", J.Str{"plotnote"}}, J.KV{"key", J.Str{key}}, J.KV{"text", J.Str{text}}]))), IO.pure(Unit, Unit{}))
+        Bool.pick(IO(Unit), Sub.is(s, key), Pv.say(out, Sub.client(s), Pv.note.json(key, text)), IO.pure(Unit, Unit{}))
         Pv.note.fan(t, key, text, out)
 
 def Pv.note(solid: Bool, +subs: List<&2, Sub>, +key: String, +dir: String, +out: Chan(POut)) -> IO(Unit):
   match solid:
     case True{}:
       IO.bind(String, Unit, K.Io.text(Pv.infos(dir, key)), t => Pv.note.fan(subs, key, String.trim(t), out))
+    case False{}:
+      IO.pure(Unit, Unit{})
+
+# the note to a view that starts on a 3D model already made
+def Pv.note.one(on: Bool, +client: U32, +key: String, +dir: String, +out: Chan(POut)) -> IO(Unit):
+  match on:
+    case True{}:
+      IO.bind(String, Unit, K.Io.text(Pv.infos(dir, key)), t => Pv.say(out, client, Pv.note.json(key, String.trim(t))))
     case False{}:
       IO.pure(Unit, Unit{})
 
@@ -886,12 +923,23 @@ def Pv.stamp.of.k(cmp: Bool, +path: String) -> IO(U32 & String):
 def Pv.stamp.of(+path: String) -> IO(U32 & String):
   Pv.stamp.of.k(Nat.is_eq(HS.Hist.kind(path), 2n), path)
 
-def Pv.read(+key: String, +kind: U32, +path: String, +q: Chan(PMsg), +dir: String) -> IO(Unit):
+# the child, or at low priority (nice) when it reads ahead of a view
+def Pv.run(low: Bool, +exe: String, +args: List<&2, String>) -> IO(PR.Ran):
+  match low:
+    case True{}:
+      PR.Proc.run("nice", "-n" <> "10" <> exe <> args, "/")
+    case False{}:
+      PR.Proc.run(exe, args, "/")
+
+def Pv.read.at(low: Bool, +key: String, +kind: U32, +path: String, +q: Chan(PMsg), +dir: String) -> IO(Unit):
   do IO<Unit>:
     st : U32 & String <- Pv.stamp.of(path)
     exe : String <- H.Sys.exe_path()
-    r : PR.Ran <- PR.Proc.run(EX.Exe.child(exe), ["--plot", U32.show(kind), path, Pv.infos(dir, key)], "/")
+    r : PR.Ran <- Pv.run(low, EX.Exe.child(exe), ["--plot", U32.show(kind), path, Pv.infos(dir, key)])
     Pv.read.k(st, r, key, kind, q)
+
+def Pv.read(+key: String, +kind: U32, +path: String, +q: Chan(PMsg), +dir: String) -> IO(Unit):
+  Pv.read.at(False{}, key, kind, path, q, dir)
 
 # Polling
 # -------
@@ -933,14 +981,16 @@ def Src.busy(s: Src) -> Bool:
     case Src{_, _, _, _, _, _, b, _}:
       b
 
-def Pv.poll(ss: List<&2, Src>, +q: Chan(PMsg), +dir: String) -> IO(List<&2, Src>):
+# (a kept model no view watches is not polled: Pv.warm or the next view
+# of it reads it again if it changed)
+def Pv.poll(ss: List<&2, Src>, +subs: List<&2, Sub>, +q: Chan(PMsg), +dir: String) -> IO(List<&2, Src>):
   match ss:
     case Nil{}:
       IO.pure(List<&2, Src>, Nil{})
     case +s <> t:
       do IO<List<&2, Src>>:
-        s2 : Src <- Pv.poll.one(Src.busy(s), s, q, dir)
-        t2 : List<&2, Src> <- Pv.poll(t, q, dir)
+        s2 : Src <- Pv.poll.one(Bool.or(Src.busy(s), Bool.not(Sub.watched(subs, Src.key.of(s)))), s, q, dir)
+        t2 : List<&2, Src> <- Pv.poll(t, subs, q, dir)
         return s2 <> t2
 
 def Pv.later(+q: Chan(PMsg)) -> IO(Unit):
@@ -1022,24 +1072,71 @@ def Sub.has(ss: List<&2, Sub>, +client: U32, +key: String) -> Bool:
     case +s <> t:
       Bool.or(Bool.and(U32.is_eq(Sub.client(s), client), Sub.is(s, key)), Sub.has(t, client, key))
 
+# A kept model (no view watches it) is shown at once to a view that asks
+# for it only while its file is as it was read: one of an older version,
+# or with a newer one being read, waits for the new one (the poll reads it)
+
+def Pv.fresh.pl(changed: Bool, pl: Maybe<&2, P.Plot>) -> Maybe<&2, P.Plot>:
+  match changed:
+    case True{}:
+      None{}
+    case False{}:
+      pl
+
+def Pv.fresh.k(sm: U32 & String, s: Src) -> Src:
+  (+s2, +m2) = sm
+  match s:
+    case Src{k, kd, p, +sz, +mt, re, b, pl}:
+      Src{k, kd, p, sz, mt, re, b, Pv.fresh.pl(RF.Revision.changed(s2, m2, sz, mt), pl)}
+
+def Pv.fresh.one(go: Bool, busy: Bool, s: Src) -> IO(Src):
+  match go busy s:
+    case True{} True{} Src{k, kd, p, sz, mt, re, b, _}:
+      IO.pure(Src, Src{k, kd, p, sz, mt, re, b, None{}})
+    case True{} False{} Src{k, kd, +p, sz, mt, re, b, pl}:
+      do IO<Src>:
+        st : U32 & String <- Pv.stamp.of(p)
+        return Pv.fresh.k(st, Src{k, kd, p, sz, mt, re, b, pl})
+    case _ _ _:
+      IO.pure(Src, s)
+
+def Pv.fresh(ss: List<&2, Src>, +key: String) -> IO(List<&2, Src>):
+  match ss:
+    case Nil{}:
+      IO.pure(List<&2, Src>, Nil{})
+    case +s <> t:
+      do IO<List<&2, Src>>:
+        s2 : Src <- Pv.fresh.one(Src.is(s, key), Src.busy(s), s)
+        t2 : List<&2, Src> <- Pv.fresh(t, key)
+        return s2 <> t2
+
+def Pv.fresh.at(watched: Bool, ss: List<&2, Src>, +key: String) -> IO(List<&2, Src>):
+  match watched:
+    case True{}:
+      IO.pure(List<&2, Src>, ss)
+    case False{}:
+      Pv.fresh(ss, key)
+
 # a view added: a source the client already watches while it keeps its
 # others stays as it is (the combined view asks again for all it shows
 # whenever any of it changes)
-def Pv.watch.add(has: Bool, +keep: Bool, st: PSt, +client: U32, +kind: U32, +key: String, +file: String, +q: Chan(PMsg), +out: Chan(POut)) -> IO(PSt):
+def Pv.watch.add(has: Bool, +keep: Bool, st: PSt, +client: U32, +kind: U32, +key: String, +file: String, +q: Chan(PMsg), +out: Chan(POut), +dir: String) -> IO(PSt):
   match has st:
     case True{} PSt{ss, subs, polling}:
       IO.pure(PSt, PSt{ss, subs, polling})
-    case False{} PSt{+ss, +subs, polling}:
+    case False{} PSt{ss, +subs, polling}:
       do IO<PSt>:
-        +ss2 : List<&2, Src> = Src.add(Src.has(ss, key), key, kind, file, ss)
+        +ss1 : List<&2, Src> <- Pv.fresh.at(Sub.watched(subs, key), ss, key)
+        +ss2 : List<&2, Src> = Src.add(Src.has(ss1, key), key, kind, file, ss1)
         sub : Sub <- Pv.watch.now(Src.plot(ss2, key), Sub.new(keep, client, key, subs), out)
+        Pv.note.one(Bool.and(Pv.solid.kind(kind), Maybe.is_some(&2, P.Plot, Src.plot(ss2, key))), client, key, dir, out)
         +subs2 : List<&2, Sub> = sub <> Pv.subs(keep, subs, client)
         p2 : Bool <- Pv.start(polling, q)
         return PSt{Src.gc(ss2, subs2), subs2, p2}
 
 # a phone now watches key (its other views dropped unless keep: a 3D view
 # watches the model and the board's plot)
-def Pv.watch.k(none: Bool, +keep: Bool, st: PSt, +client: U32, +kind: U32, +key: String, +file: String, +q: Chan(PMsg), +out: Chan(POut)) -> IO(PSt):
+def Pv.watch.k(none: Bool, +keep: Bool, st: PSt, +client: U32, +kind: U32, +key: String, +file: String, +q: Chan(PMsg), +out: Chan(POut), +dir: String) -> IO(PSt):
   match none st:
     case True{} PSt{ss, +subs, polling}:
       do IO<PSt>:
@@ -1047,13 +1144,13 @@ def Pv.watch.k(none: Bool, +keep: Bool, st: PSt, +client: U32, +kind: U32, +key:
         +subs2 : List<&2, Sub> = Pv.subs(keep, subs, client)
         return PSt{Src.gc(ss, subs2), subs2, polling}
     case False{} PSt{ss, +subs, polling}:
-      Pv.watch.add(Bool.and(keep, Sub.has(subs, client, key)), keep, PSt{ss, subs, polling}, client, kind, key, file, q, out)
+      Pv.watch.add(Bool.and(keep, Sub.has(subs, client, key)), keep, PSt{ss, subs, polling}, client, kind, key, file, q, out, dir)
 
 # a 3D view also watches the board's plot (its copper, mask and silk)
-def Pv.watch.board(board: Bool, st: PSt, +client: U32, +root: String, +path: String, +file: String, +q: Chan(PMsg), +out: Chan(POut)) -> IO(PSt):
+def Pv.watch.board(board: Bool, st: PSt, +client: U32, +root: String, +path: String, +file: String, +q: Chan(PMsg), +out: Chan(POut), +dir: String) -> IO(PSt):
   match board:
     case True{}:
-      Pv.watch.k(False{}, True{}, st, client, 0, Src.key(0, root, path), file, q, out)
+      Pv.watch.k(False{}, True{}, st, client, 0, Src.key(0, root, path), file, q, out, dir)
     case False{}:
       IO.pure(PSt, st)
 
@@ -1082,14 +1179,65 @@ def Sub.keeps(ss: List<&2, Sub>, +client: U32, +keys: List<&2, String>) -> List<
     case +s <> t:
       Sub.keep(Bool.and(U32.is_eq(Sub.client(s), client), Bool.not(Keys.has(keys, Sub.key.of(s)))), s, Sub.keeps(t, client, keys))
 
+# Reading ahead
+# A board shown (on any page or phone) has its 3D model prepared at low
+# priority, so the 3D view finds it ready: one not kept yet, or kept from
+# an older version of the board, is read (one being read, or watched and
+# so polled, is left alone); it is kept as a model no view watches.
+
+def Pv.warm.k(changed: Bool, s: Src, +q: Chan(PMsg), +dir: String) -> IO(Src):
+  match changed s:
+    case True{} Src{+k, +kd, +p, sz, mt, re, _, pl}:
+      do IO<Src>:
+        IO.spawn(Unit, Pv.read.at(True{}, k, kd, p, q, dir))
+        return Src{k, kd, p, sz, mt, re, True{}, pl}
+    case False{} _:
+      IO.pure(Src, s)
+
+def Pv.warm.st(sm: U32 & String, s: Src, +q: Chan(PMsg), +dir: String) -> IO(Src):
+  (+s2, +m2) = sm
+  match s:
+    case Src{k, kd, p, +sz, +mt, re, b, pl}:
+      Pv.warm.k(RF.Revision.changed(s2, m2, sz, mt), Src{k, kd, p, sz, mt, re, b, pl}, q, dir)
+
+def Pv.warm.at(go: Bool, s: Src, +q: Chan(PMsg), +dir: String) -> IO(Src):
+  match go s:
+    case True{} Src{k, kd, +p, sz, mt, re, b, pl}:
+      do IO<Src>:
+        st : U32 & String <- Pv.stamp.of(p)
+        Pv.warm.st(st, Src{k, kd, p, sz, mt, re, b, pl}, q, dir)
+    case False{} _:
+      IO.pure(Src, s)
+
+def Pv.warm.srcs(ss: List<&2, Src>, +key: String, +watched: Bool, +q: Chan(PMsg), +dir: String) -> IO(List<&2, Src>):
+  match ss:
+    case Nil{}:
+      IO.pure(List<&2, Src>, Nil{})
+    case +s <> t:
+      do IO<List<&2, Src>>:
+        s2 : Src <- Pv.warm.at(Bool.and(Src.is(s, key), Bool.not(Bool.or(watched, Src.busy(s)))), s, q, dir)
+        t2 : List<&2, Src> <- Pv.warm.srcs(t, key, watched, q, dir)
+        return s2 <> t2
+
+def Pv.warm(on: Bool, st: PSt, +root: String, +path: String, +file: String, +q: Chan(PMsg), +dir: String) -> IO(PSt):
+  match on st:
+    case False{} _:
+      IO.pure(PSt, st)
+    case True{} PSt{+ss, +subs, polling}:
+      do IO<PSt>:
+        +key : String = Src.key(2, root, path)
+        ss2 : List<&2, Src> <- Pv.warm.srcs(Src.add(Src.has(ss, key), key, 2, file, ss), key, Sub.watched(subs, key), q, dir)
+        return PSt{Src.gc(ss2, subs), subs, polling}
+
 # a view asked for: the file, the source watched (its other views dropped
 # unless keep), a schematic's sheets, and a 3D model's board too
-def Pv.watch.go(keep: Bool, st: PSt, +client: U32, +kind: U32, +root: String, +path: String, +tree: String, +q: Chan(PMsg), +out: Chan(POut), +n: String) -> IO(PSt):
+def Pv.watch.go(keep: Bool, st: PSt, +client: U32, +kind: U32, +root: String, +path: String, +tree: String, +q: Chan(PMsg), +out: Chan(POut), +n: String, +dir: String) -> IO(PSt):
   do IO<PSt>:
     +file : String <- Pv.file(kind, root, path)
-    st2 : PSt <- Pv.watch.k(String.is_empty(file), keep, st, client, kind, Src.key(kind, root, path), file, q, out)
+    st2 : PSt <- Pv.watch.k(String.is_empty(file), keep, st, client, kind, Src.key(kind, root, path), file, q, out, dir)
     Bool.pick(IO(Unit), U32.is_eq(kind, 1), IO.spawn(Unit, Pv.tree(client, root, path, tree, n, out)), IO.pure(Unit, Unit{}))
-    Pv.watch.board(Bool.and(Pv.solid.kind(kind), String.ends_with(file, ".kicad_pcb")), st2, client, root, path, file, q, out)
+    st3 : PSt <- Pv.watch.board(Bool.and(Pv.solid.kind(kind), String.ends_with(file, ".kicad_pcb")), st2, client, root, path, file, q, out, dir)
+    Pv.warm(Bool.and(U32.is_eq(kind, 0), String.ends_with(file, ".kicad_pcb")), st3, root, path, file, q, dir)
 
 def Sub.mine(+s: Sub, +client: U32, +key: String) -> Bool:
   Bool.and(U32.is_eq(Sub.client(s), client), Sub.is(s, key))
@@ -1125,9 +1273,9 @@ def Pv.info(+client: U32, +id: String, +file: String, +sig: U32, +idx: Nat, +out
 def Pv.handle(st: PSt, m: PMsg, +q: Chan(PMsg), +out: Chan(POut), +dir: String, +n: String) -> IO(PSt):
   match st m:
     case _ PWatch{+client, +kind, +root, +path, +tree}:
-      Pv.watch.go(False{}, st, client, kind, root, path, tree, q, out, n)
+      Pv.watch.go(False{}, st, client, kind, root, path, tree, q, out, n, dir)
     case _ PAlso{+client, +kind, +root, +path, +tree}:
-      Pv.watch.go(True{}, st, client, kind, root, path, tree, q, out, n)
+      Pv.watch.go(True{}, st, client, kind, root, path, tree, q, out, n, dir)
     case PSt{ss, +subs, polling} PKeep{+client, +keys}:
       do IO<PSt>:
         +subs2 : List<&2, Sub> = Sub.keeps(subs, client, keys)
@@ -1136,10 +1284,10 @@ def Pv.handle(st: PSt, m: PMsg, +q: Chan(PMsg), +out: Chan(POut), +dir: String, 
       do IO<PSt>:
         +subs2 : List<&2, Sub> = Sub.drop(subs, client)
         return PSt{Src.gc(ss, subs2), subs2, polling}
-    case PSt{ss, subs, _} PPoll{}:
+    case PSt{ss, +subs, _} PPoll{}:
       do IO<PSt>:
-        +ss2 : List<&2, Src> <- Pv.poll(ss, q, dir)
-        p2 : Bool <- Pv.next(Bool.not(List.is_empty(&2, Src, ss2)), q)
+        ss2 : List<&2, Src> <- Pv.poll(ss, subs, q, dir)
+        p2 : Bool <- Pv.next(Bool.not(List.is_empty(&2, Sub, subs)), q)
         return PSt{ss2, subs, p2}
     case PSt{ss, +subs, polling} PInfo{+client, +id, +key, at, +idx}:
       do IO<PSt>:
@@ -1150,7 +1298,7 @@ def Pv.handle(st: PSt, m: PMsg, +q: Chan(PMsg), +out: Chan(POut), +dir: String, 
         Bool.pick(IO(Unit), String.is_empty(err), IO.pure(Unit, Unit{}), Pv.fail(subs, key, err, out))
         +subs2 : List<&2, Sub> <- Pv.fan(Sub.clear(subs, key, Bool.not(String.is_empty(err))), key, pl, out)
         Pv.note(Bool.and(String.is_empty(err), Bool.or(String.starts_with(key, "2|"), String.starts_with(key, "3|"))), subs2, key, dir, out)
-        return PSt{Pv.got.srcs(ss, key, sz, mt, pl), subs2, polling}
+        return PSt{Src.gc(Pv.got.srcs(ss, key, sz, mt, pl), subs2), subs2, polling}
 
 def Pv.got(m: Maybe<&1, PMsg>, st: PSt, +q: Chan(PMsg), +out: Chan(POut), +dir: String, +n: String, k: PSt -> IO(Unit)) -> IO(Unit):
   match m:
