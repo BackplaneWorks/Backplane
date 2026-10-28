@@ -30,6 +30,19 @@ def t_ui(a: U.Act) -> U.Ui:
 def opened(+u: U.Ui, +pid: String) -> U.Ui:
   t_ui(U.Ui.act(u, "proj-intent", pid))
 
+# what an action sends the hub and asks the page to do, in order
+def cmds(cs: List<&2, U.Cmd>) -> String:
+  match cs:
+    case Nil{}: ""
+    case U.Send{t} <> rest: "send " ++ t ++ ";" ++ cmds(rest)
+    case U.Focus{id} <> rest: "focus " ++ id ++ ";" ++ cmds(rest)
+    case U.Later{_, a, v} <> rest: "later " ++ a ++ " " ++ v ++ ";" ++ cmds(rest)
+    case _ <> rest: "other;" ++ cmds(rest)
+
+def sent(a: U.Act) -> String:
+  match a:
+    case U.Act{_, cs}: cmds(cs)
+
 # the hub's card for the selected thread
 def card(+u: U.Ui, +intent: String) -> U.Ui:
   U.Ui.info_set(U.Ui.info_set(u, "fab.line:" ++ U.Ui.sel(u), "A lamp"), "fab.intent:" ++ U.Ui.sel(u), intent)
@@ -58,10 +71,9 @@ def main() -> IO(Unit):
     C.Check.str("Intent… asks the hub for it, once", U.Ui.scratch(opened(base(), "p"), "@fab.at"), U.Fab.at(opened(base(), "p")))
     C.Check.str("Intent… on another project opens its thread", U.Ui.sel(opened(base(), "q")), "amp")
     C.Check.str("Intent… on another project: on show there", Bool.show(U.Intent.on(opened(base(), "q"))), "True")
-    C.Check.str("another project: looked up once it shows", U.Ui.scratch(t_ui(U.Ui.act(opened(base(), "q"), "intent-look", "amp")), "@intent.try"), "1")
-    C.Check.str("another project: not again once answered", U.Ui.scratch(t_ui(U.Ui.act(card(t_ui(U.Ui.act(opened(base(), "q"), "intent-look", "amp")), "x"), "intent-look", "amp")), "@intent.try"), "1")
-    C.Check.str("another project: again while unanswered", U.Ui.scratch(t_ui(U.Ui.act(t_ui(U.Ui.act(opened(base(), "q"), "intent-look", "amp")), "intent-look", "amp")), "@intent.try"), "2")
-    C.Check.str("a late look for a thread left does nothing", U.Ui.scratch(t_ui(U.Ui.act(t_ui(U.Ui.act(opened(base(), "q"), "select", "other")), "intent-look", "amp")), "@intent.try"), "0")
+    C.Check.str("another project: asked for with the move, focused, nothing later", sent(U.Ui.act(base(), "proj-intent", "q")),
+      "send {\"id\":0,\"m\":\"fab.look\",\"p\":{\"thread\":\"amp\"}};focus intent;")
+    C.Check.str("another project: asked once", U.Ui.scratch(opened(base(), "q"), "@fab.at"), U.Fab.at(opened(base(), "q")))
     C.Check.str("Intent… from Settings leaves Settings", Bool.show(U.Ui.flag(opened(U.Ui.flag_on(base(), "settings"), "q"), "settings")), "False")
     C.Check.str("Intent… shuts the menu", U.Ui.scratch(opened(t_ui(U.Ui.act(base(), "proj-menu", "q")), "q"), "@menu"), "")
     C.Check.str("Intent… on its own project shuts the menu", U.Ui.scratch(opened(t_ui(U.Ui.act(base(), "proj-menu", "p")), "p"), "@menu"), "")

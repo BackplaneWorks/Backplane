@@ -219,6 +219,30 @@ test('an obsolete action nextTarget cannot navigate away from the newer selected
  const f=await fixture();f.open();f.host.request('bot-open','bot-C');const action=f.sent.at(-1);f.host.request('select','B');f.host.receive(f.reply());
  const response=f.reply(action,{nextTarget:{kind:'bot',id:'bot-C'},remoteReady:false});delete response.result.shown;const count=f.sent.length;f.host.receive(response);assert.equal(f.sent.length,count);assert.equal(f.getSession().sel,'B');assert.equal(f.host.ready,true);
 });
+// A project's Intent… opens the project's thread and asks the hub for its
+// intent at once (fab.look); the ask goes now, and the Focus on the dialog and
+// a Jump into the thread are for the view it opens, not the picture shown
+// while it comes.
+const moving=(f,action,cmds)=>{const r=f.reply(action,{nextTarget:{kind:'thread',id:'B'},remoteReady:false,cmds});delete r.result.shown;return r;};
+const intentCmds=[{type:'send',text:JSON.stringify({id:5,m:'fab.look',p:{thread:'B'}})},{type:'focus',id:'intent'},{type:'jump',id:'entry-9'}];
+test('a moving action asks at once and keeps its Focus and Jump for the view it opens',async()=>{
+ const f=await fixture();f.open();f.host.request('proj-intent','q');f.host.receive(moving(f,f.sent.at(-1),intentCmds));
+ assert.deepEqual(f.commands.map(c=>c.type),['send'],'the hub is asked at once; Focus and Jump wait');
+ assert.equal(f.sent.at(-1).m,'view.open');assert.deepEqual(f.sent.at(-1).p.target,{kind:'thread',id:'B'});
+ f.host.receive(f.reply());assert.equal(f.host.ready,true);
+ assert.deepEqual(f.commands.map(c=>c.type+':'+(c.id||'')),['send:','focus:intent','jump:entry-9'],'given once B is on show');
+ f.host.update();f.host.receive(f.reply());assert.equal(f.commands.length,3,'and only once');
+});
+test('a moving action\'s Focus and Jump are dropped when the person goes elsewhere first',async()=>{
+ const f=await fixture();f.open();f.host.request('proj-intent','q');f.host.receive(moving(f,f.sent.at(-1),intentCmds));
+ f.host.request('select','C');f.host.receive(f.reply());assert.deepEqual(f.getSession().sel,'C');
+ assert.deepEqual(f.commands.map(c=>c.type),['send'],'not on C');
+ f.host.request('select','B');f.host.receive(f.reply());assert.deepEqual(f.commands.map(c=>c.type),['send'],'nor on B later');
+});
+test('a failed move drops its Focus and Jump',async()=>{
+ const f=await fixture();f.open();f.host.request('proj-intent','q');f.host.receive(moving(f,f.sent.at(-1),intentCmds));
+ const open=f.sent.at(-1);f.host.receive({t:'reply',id:open.id,ok:false,error:{code:'UNAVAILABLE'}});assert.equal(f.host.forView,null);
+});
 test('a background update cannot discard a newer navigation action',async()=>{
  const f=await fixture();f.open();f.host.request('uber','bub');const action=f.sent.at(-1);
  f.host.update();const update=f.sent.at(-1);assert.equal(update.m,'view.update');f.host.receive(f.reply(update));

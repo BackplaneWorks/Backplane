@@ -770,13 +770,13 @@ def Hubs.register.at(hs: Hubs, +key: String, p: String, t: String, k: String, th
 def Hubs.routed(+action: String) -> Nat:
   C.Codec.pos(["select", "new-thread", "picker-open", "bot", "room", "remote", "uber", "uber-bot", "bot-new", "room-new", "proj-go", "hub-settings", "proj-intent",
     "row-settle", "row-unsettle", "row-snooze", "row-delete", "toggle-settled", "add-project", "proj-remove",
-    "row-menu", "proj-menu", "row-pin", "row-unpin", "row-archive", "row-unarchive", "hist-tick", "row-rename", "rename-save", "uber-promote", "uber-home", "fab-open", "fab-edit", "buy", "fab-hide", "fab-show", "deploy-cancel", "thread-tree", "thread-child", "thread-detach", "intent-close", "intent-look"], action)
+    "row-menu", "proj-menu", "row-pin", "row-unpin", "row-archive", "row-unarchive", "hist-tick", "row-rename", "rename-save", "uber-promote", "uber-home", "fab-open", "fab-edit", "buy", "fab-hide", "fab-show", "deploy-cancel", "thread-tree", "thread-child", "thread-detach", "intent-close"], action)
 
 def Hubs.moves() -> Nat:
   13n
 
 def Hubs.routes() -> Nat:
-  42n
+  41n
 
 # answers to what any hub may be showing (its error, a delete or remove
 # to confirm); the project search is every hub's at once, since the list

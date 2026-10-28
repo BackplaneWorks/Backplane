@@ -360,6 +360,27 @@ def Actor.lean(+info: J.Json) -> J.Json:
     case J.Obj{+fs}: J.Json.obj(List.reverse(&2, J.KV, Actor.lean.go(fs, Nil{})))
     case _: info
 
+# What the hub owes this view: the requests its actions sent (their ids,
+# each with the view it was asked for: Actor.scope, "term-input:" before it
+# for a terminal's keys), until their answers come (Actor.reply). A request
+# belongs to the view its action left the page on (Actor.accept), so an
+# action that opens another thread and asks the hub at once (a project's
+# Intent…, a reference, Fab.sync after a move) has its answer applied when
+# the page has moved there; moving to any other view drops it.
+def Actor.owed.scope(+value: String) -> String:
+  Bool.pick(String, String.starts_with(value, "term-input:"), String.drop(value, 11n), value)
+
+def Actor.owed.go( +xs: List<&2, Sigma<&2, &2, String, _ => String>>, +scope: String, +acc: Map<&2, String>) -> Map<&2, String>:
+  match xs:
+    case Nil{}: acc
+    case (+id, +value) <> tail: Actor.owed.go(tail, scope, Actor.pref.put(String.eq(Actor.owed.scope(value), scope), acc, id, value))
+
+# (the same view keeps all; another keeps what was asked for it)
+def Actor.owed( +same: Bool, +pending: Map<&2, String>, +target: J.Json) -> Map<&2, String>:
+  match same:
+    case True{}: pending
+    case False{}: Actor.owed.go(Map.to_list(&2, String, pending), Actor.scope(target), Map.new(&2, String))
+
 def Actor.refresh( +xs: List<&2, Actor>, +web: Bool, +st: M.State, +info: J.Json, +live: J.Json, +now: Nat, +p: J.Json, +view: String) -> Actor:
   match xs:
     case Nil{}: Actor.make(U.Refs.refresh(V.Session.current(web, st, info, live, now, Actor.safe_input(st, p))), view, J.Json.get_obj(p, "target"))
@@ -371,7 +392,7 @@ def Actor.refresh( +xs: List<&2, Actor>, +web: Bool, +st: M.State, +info: J.Json
       +fresh = V.Session.current(web, st, Actor.lean(info), live, now, input)
       +same = Bool.and(String.eq(oldView, view), W.Target.same(target, J.Json.get_obj(p, "target")))
       Actor{Actor.composer(old, V.Session.renderer(web, Actor.resolve(U.Ui.info_merge(Actor.merge(fresh, old, same, thread, Maybe.is_some(&2, J.Json, J.Json.get(J.Json.get_obj(J.Json.get_obj(input, "session"), "drafts"), thread))), info), thread), p)),
-        view, J.Json.get_obj(p, "target"), Bool.pick(Map<&2, String>, same, pending, Map.new(&2, String)), Bool.pick(List<&2, J.Json>, same, reads, Nil{}), dirty, Bool.pick(List<&2, Memo>, same, Actor.kept(memo), Nil{})}
+        view, J.Json.get_obj(p, "target"), Actor.owed(same, pending, J.Json.get_obj(p, "target")), Bool.pick(List<&2, J.Json>, same, reads, Nil{}), dirty, Bool.pick(List<&2, Memo>, same, Actor.kept(memo), Nil{})}
 
 # The hub's canonical projection is shared; each actor keeps its own pages,
 # drafts, request slots and exact scope. Compare only the selected body's
@@ -416,10 +437,12 @@ def Actor.reads( +cs: List<&2, J.Json>, +acc: List<&2, J.Json>) -> List<&2, J.Js
     case Nil{}: List.reverse(&2, J.Json, acc)
     case +c <> tail: Actor.reads(tail, Actor.read_add(Actor.followup(c), c, acc))
 
+# (a request is owed to the view the action leaves: where it moves the
+# page, its nextTarget, or the same view)
 def Actor.accept( +a: Actor, +r: V.ActResult, +queue: Bool) -> Actor:
   match a r:
-    case Actor{_, view, +target, pending, reads, dirty, memo} V.ActResult{u, +cs}:
-      Actor{u, view, target, Actor.note(cs, pending, Actor.scope(target)),
+    case Actor{_, view, target, pending, reads, dirty, memo} V.ActResult{+u, +cs}:
+      Actor{u, view, target, Actor.note(cs, pending, Actor.scope(V.Target.after(u))),
         List.append(&2, J.Json, reads, Bool.pick(List<&2, J.Json>, queue, Actor.reads(cs, Nil{}), Nil{})), dirty, memo}
 
 def Actor.mail_ready( +a: Actor) -> Actor:
@@ -591,8 +614,7 @@ def Actor.render(a: Actor, web: Bool, +st: M.State, index: T.Index, p: J.Json, e
   Actor.render.revision(a, web, st, index, p, epoch, now, rows, stream, M.State.seq(st))
 
 def Actor.pending_scope( +pending: Map<&2, String>, +id: String) -> String:
-  +value = U.Str.get(pending, id)
-  Bool.pick(String, String.starts_with(value, "term-input:"), String.drop(value, 11n), value)
+  Actor.owed.scope(U.Str.get(pending, id))
 
 def Actor.receive( +web: Bool, +u: U.Ui, +key: String, +now: Nat, +o: J.Json) -> V.ActResult:
   match web:
@@ -650,7 +672,10 @@ def Actor.reply(+a: Actor, +web: Bool, +key: String, +o: J.Json) -> Actor:
   match a:
     case Actor{+u, view, +target, +pending, reads, dirty, memo}:
       +id = J.Json.as_raw(J.Json.get(o, "id"), "")
-      Actor.terminal.ack(Bool.and(String.eq(J.Json.get_str(o, "t", ""), "reply"), String.eq(Actor.pending_scope(pending, id), Actor.scope(target))),
+      +scope = Actor.pending_scope(pending, id)
+      # owed to this view, or to the one the last action moved to before
+      # the page has opened it (Actor.accept)
+      Actor.terminal.ack(Bool.and(String.eq(J.Json.get_str(o, "t", ""), "reply"), Bool.or(String.eq(scope, Actor.scope(target)), String.eq(scope, Actor.scope(V.Target.after(u))))),
         Bool.and(TO.Output.enabled(web, u, U.Ui.scratch(u, "@terminal.owner")), Bool.and(String.starts_with(U.Str.get(pending, id), "term-input:"), Bool.and(J.Json.get_bool(o, "ok", False{}), String.is_empty(J.Json.get_str(o, "error", ""))))),
         Actor{u, view, target, Map.del(&2, String, pending, id), reads, dirty, memo}, web, key, o)
 

@@ -60,6 +60,8 @@ export class ThinHost {
     this.terminalBytes = 0;
     this.messages = new MessageParts();this.ordinary = new Map();this.refreshScheduled = null;this.pageError = null;
     this.pagePositions = new Map();this.pagePositionBytes = 0;this.restorePage = null;this.conversation = '';
+    // a moving action's Focus and Jump, for the view it moves to (handOver)
+    this.forView = null;
     this.client = new Views({ now: api.now,
       sidebarRegions: (api.renderer || 'web') === 'web',
       send: (_hub, request) => ({ type: 'request', request: request.p.session ? { ...request,
@@ -93,6 +95,7 @@ export class ThinHost {
     this.select(this.api.target(this.session));
   }
   select(target) {
+    if (this.forView && (this.forView.target.kind !== target?.kind || this.forView.target.id !== target?.id)) this.forView = null;
     this.rememberPage();
     this.restorePage = this.pagePositions.get(JSON.stringify([this.hub, this.epoch, target])) || null;
     this.retireTerminal('Queued terminal input was cancelled when the view changed.');
@@ -485,8 +488,12 @@ export class ThinHost {
     if (this.ordinary.size + result.cmds.filter(c => c.command.type === 'send').length > 128) { this.fail('Ordinary reply backlog limit');return true; }
     // Original actions settle once even when navigation overtook their view.
     // Only their own Keep may clear a draft, and never a newer edit.
+    // An action that moves the page (nextTarget) and asks for a Focus or a
+    // Jump means them for where it goes: they wait for that view (handOver).
+    const moving = (result.current || navigation) && r.nextTarget, held = [];
     for (const item of result.cmds) {
       if (item.type !== 'command') { this.fail('Invalid command adapter');return true; }
+      if (moving && (item.command.type === 'focus' || item.command.type === 'jump')) { held.push(item);continue; }
       const c = item.command, thread = this.api.threadKey?.(c.thread) ?? c.thread;
       const newer = this.drafts.get(thread)?.revision > (metadata?.revision ?? -1);
       if (c.type === 'keep' && newer) continue;
@@ -510,7 +517,7 @@ export class ThinHost {
     }
     this.api.sessionChanged(this.session, { remote: true, inputOnly: result.inputOnly });
     metadata?.operation?.settled?.(result.current && result.remoteReady && !r.nextTarget);
-    if ((result.current || navigation) && r.nextTarget) { this.select(r.nextTarget);return true; }
+    if (moving) { this.forView = held.length ? { target: r.nextTarget, cmds: held } : null;this.select(r.nextTarget);return true; }
     if (result.current && result.remoteReady && result.inputOnly) {
       // Input ACKs settle the existing queue without redrawing the conversation
       // or consuming a pending output invalidation. Output still owns its view.
@@ -536,11 +543,20 @@ export class ThinHost {
         page: paged && { direction: paged.direction, before: paged.before }, position });
       if ((metadata?.viewerRevision ?? 0) === this.viewerRevision) this.api.viewerChoice?.(null);
       this.api.state({ phase: 'presented', remoteReady: true, requestRevision: r.requestRevision, viewRevision: r.viewRevision, viewId: r.viewId });
+      this.handOver();
     } else if (result.current) this.fail('Current view is not ready');
     // Send queued navigation before a background read can snapshot its old route.
     this.pump(true);
     if (result.refreshDue || paged && !result.current) this.refreshSoon();
     return true;
+  }
+  // The view a moving action went to is on show: its Focus and Jump now
+  // find what they name (the intent over the thread, an entry in it).
+  handOver() {
+    const due = this.forView;
+    if (!due || due.target.kind !== this.target?.kind || due.target.id !== this.target?.id) return;
+    this.forView = null;
+    for (const item of due.cmds) this.api.command(item.command, item.input, true);
   }
   ack(envelope) {
     const original = this.ordinary.get(envelope.id);
@@ -597,7 +613,7 @@ export class ThinHost {
     return !!metadata && !!link && metadata.wireRevision === (metadata.pictureAuthority ? link.pictureRevision : link.revision) && metadata.target?.kind === link.target?.kind && metadata.target?.id === link.target?.id;
   }
   fail(reason) {
-    this.api.pageState?.(null);
+    this.api.pageState?.(null);this.forView = null;
     this.retireTerminal('Queued terminal input was not sent because the connection failed.');
     this.refreshScheduled = null;
     this.api.viewerChoice?.(null);
@@ -606,7 +622,7 @@ export class ThinHost {
     this.ready = false;this.api.state({ phase: 'error', remoteReady: false, reason });
   }
   disconnect() {
-    this.api.pageState?.(null);
+    this.api.pageState?.(null);this.forView = null;
     this.retireTerminal('Queued terminal input was not sent because the connection closed.');
     this.refreshScheduled = null;
     this.api.viewerChoice?.(null);

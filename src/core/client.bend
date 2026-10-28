@@ -7083,47 +7083,20 @@ def Intent.text(+u: Ui) -> String:
 def Intent.got(+u: Ui) -> Bool:
   Bool.not(String.is_empty(Ui.info(u, "fab.line:" ++ Ui.sel(u))))
 
-# Another thread is looked up once it is on show: an action that moves the
-# selection cannot ask the hub as well, since the web's hub-drawn page takes
-# the answer for the view it left. "intent-look" comes a moment later and
-# again until the answer is in, Intent.tries() times at most (laws intent_*)
-def Intent.wait() -> Nat:
-  300n
-
-def Intent.tries() -> Nat:
-  8n
-
-def Intent.later(+u: Ui, +th: String) -> Act:
-  Act{u, [Later{Intent.wait(), "intent-look", th}]}
-
-def Intent.retry.k(go: Bool, +u: Ui, +th: String, +n: Nat) -> Act:
-  match go:
-    case True{}:
-      Ui.also(Intent.look(Ui.scratch_set(u, "@intent.try", Nat.show(1n+n))), [Later{Intent.wait(), "intent-look", th}])
-    case False{}:
-      Act{u, Nil{}}
-
-# (the first look always goes; the later ones only while none has come)
-def Intent.retry.n(+u: Ui, +th: String, +n: Nat) -> Act:
-  Intent.retry.k(Bool.and(Bool.and(Intent.on(u), String.eq(Ui.sel(u), th)), Bool.and(Nat.is_lt(n, Intent.tries()), Bool.or(Nat.is_eq(n, 0n), Bool.not(Intent.got(u))))), u, th, n)
-
-def Intent.retry(+u: Ui, +th: String) -> Act:
-  Intent.retry.n(u, th, M.Switch.num(Ui.scratch(u, "@intent.try"), 0n))
-
 # (nothing for a project with no thread, or one on another machine, whose
 # files are there; the Fab actions route before the menus' own, so the menu
-# is shut here, and the thread's viewer comes with it as Ui.act's select's)
-def Intent.open.k(none: Bool, here: Bool, +u: Ui, +th: String) -> Act:
-  match none here:
-    case True{} _:
+# is shut here, and the thread's viewer comes with it as Ui.act's select's).
+# The look goes with the move: the hub-drawn page has the answer applied in
+# the thread it opens (server/thin-actor.bend's Actor.accept)
+def Intent.open.k(none: Bool, +u: Ui, +th: String) -> Act:
+  match none:
+    case True{}:
       Act{u, Nil{}}
-    case False{} True{}:
-      Intent.look(Ui.scratch_set(Ui.select.nav(u, th), "@intent", th))
-    case False{} False{}:
-      Intent.later(Ui.scratch_set(Ui.scratch_set(Ui.reselect(Ui.sel(u), Ui.select.nav(u, th)), "@intent", th), "@intent.try", "0"), th)
+    case False{}:
+      Intent.look(Ui.scratch_set(Ui.reselect(Ui.sel(u), Ui.select.nav(u, th)), "@intent", th))
 
 def Intent.open(+u: Ui, +pid: String) -> Act:
-  Intent.open.k(Bool.or(String.is_empty(Side.home(u, pid)), FR.Fr.is(pid)), String.eq(Side.home(u, pid), Ui.sel(u)), Ui.scratch_set(u, "@menu", ""), Side.home(u, pid))
+  Intent.open.k(Bool.or(String.is_empty(Side.home(u, pid)), FR.Fr.is(pid)), Ui.scratch_set(u, "@menu", ""), Side.home(u, pid))
 
 def Intent.close(+u: Ui) -> Act:
   Act{Ui.scratch_set(u, "@intent", ""), [Focus{"composer"}]}
@@ -7149,10 +7122,10 @@ def Fab.act.k(i: Nat, +u: Ui, +th: String) -> Act:
       Act{u, Nil{}}
 
 def Fab.actions() -> List<&2, String>:
-  ["fab-open", "fab-edit", "buy", "board-pick", "fab-hide", "fab-show", "proj-intent", "intent-close", "intent-look"]
+  ["fab-open", "fab-edit", "buy", "board-pick", "fab-hide", "fab-show", "proj-intent", "intent-close"]
 
 def Fab.is(+action: String) -> Bool:
-  Nat.is_lt(C.Codec.pos(Fab.actions(), action), 9n)
+  Nat.is_lt(C.Codec.pos(Fab.actions(), action), 8n)
 
 def Fab.act.v(+i: Nat, +u: Ui, +value: String) -> Act:
   match i:
@@ -7162,8 +7135,6 @@ def Fab.act.v(+i: Nat, +u: Ui, +value: String) -> Act:
       Intent.open(u, value)
     case 7n:
       Intent.close(u)
-    case 8n:
-      Intent.retry(u, value)
     case _:
       Fab.act.k(i, u, Fab.th(u, value))
 
