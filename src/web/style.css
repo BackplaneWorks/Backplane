@@ -1716,7 +1716,7 @@ kbd { font: calc(10px * var(--text-scale, 100) / 100)/1 var(--mono); color: var(
 .workspace-rail button .keycap { position: absolute; top: 3px; right: 3px; padding: 1px 3px; font-size: calc(9px * var(--text-scale, 100) / 100); line-height: 1; border-bottom-width: 1px; background: none; color: var(--faint); }
 .workspace-rail button.on .keycap { color: var(--accent); border-color: var(--accent); }
 .workspace-rail button:hover .keycap { color: var(--dim); }
-.app.top .sidebar [data-shortcut-kind="threads"]::after { opacity: 1; border-radius: 0; border-color: var(--line); border-bottom-width: 2px; background: none; color: var(--faint); line-height: 13px; }
+.app.top .sidebar [data-shortcut-kind="threads"]::after { border-radius: 0; border-color: var(--line); border-bottom-width: 2px; background: none; color: var(--faint); line-height: 13px; }
 .app.top .sidebar[data-shortcut-hints="threads"] [data-shortcut-kind="threads"]::after { border-color: var(--accent); background: var(--panel); color: var(--text); }
 .keys-legend { position: sticky; bottom: -24px; z-index: 5; margin: 16px 0 -24px; padding: 8px 12px 10px; display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; align-items: center; background: var(--panel); border-top: 1px solid var(--line); color: var(--faint); font-size: calc(11px * var(--text-scale, 100) / 100); }
 .keys-legend .keys { display: inline-flex; gap: 3px; white-space: nowrap; }
@@ -1725,6 +1725,13 @@ kbd { font: calc(10px * var(--text-scale, 100) / 100)/1 var(--mono); color: var(
 .keys-legend button.legend-all { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: center; padding: 0; background: none; border: 0; color: var(--faint); text-align: left; }
 .keys-legend button.legend-all:hover, .keys-legend button.legend-all:hover kbd { color: var(--text); }
 @media (min-width: 761px) { html[data-rail="compact"] .workspace-rail button .keycap { display: none; } }
+/* the keys show only while Ctrl (Cmd on a Mac) is held where they work
+   (workspace-hints.js's html[data-keys-held]); hidden, each keeps its room,
+   so nothing moves when they come (the tooltips still name them) */
+html:not([data-keys-held]) .workspace-rail button .keycap,
+html:not([data-keys-held]) .topbar .cmd kbd,
+html:not([data-keys-held]) .model-chip kbd,
+html:not([data-keys-held]) .keys-legend { visibility: hidden; }
 @media (max-width: 760px), (max-height: 560px) { .keys-legend { display: none; } }
 /* the legend keeps to the sidebar's foot: under the top bar the sidebar is a
    column, and the legend's auto margin takes the room left above it (wide

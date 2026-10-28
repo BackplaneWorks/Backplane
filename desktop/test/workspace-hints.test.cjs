@@ -24,7 +24,7 @@ function harness(installWorkspaceHints) {
   // dialogs in the page: shown ones have boxes, hidden ones (display:none) none
   const dialog = shown => ({ getClientRects: () => shown ? [{}] : [] });
   const doc = emitter({ activeElement:body, visibilityState:'visible', focused:true, blocked:false, hiddenDialog:false,
-    documentElement:{dataset:{backplaneRemoteReady:'true'}}, hasFocus: () => doc.focused,
+    documentElement:Object.assign(element(), {dataset:{backplaneRemoteReady:'true'}}), hasFocus: () => doc.focused,
     querySelector: selector => selector === '.sidebar' ? sidebar : null,
     querySelectorAll: () => [...(doc.hiddenDialog ? [dialog(false)] : []), ...(doc.blocked ? [dialog(true)] : [])] });
   let observer;
@@ -34,6 +34,7 @@ function harness(installWorkspaceHints) {
   const dispose = installWorkspaceHints({document:doc, window:win});
   return { doc, win, body, sidebar, p1, p2, parent, child, excluded, activeProject, dispose,
     refresh:() => observer(), mode:() => sidebar.getAttribute('data-shortcut-hints'),
+    held:() => doc.documentElement.getAttribute('data-keys-held'),
     key:(type, fields) => win.emit(type, input(fields)) };
 }
 
@@ -117,4 +118,25 @@ test('a dialog kept hidden in the page (the model picker) leaves the hints on; a
   h.doc.blocked = true;h.refresh();assert.equal(h.mode(), null);
   h.doc.blocked = false;h.refresh();assert.equal(h.mode(), 'projects');
   h.dispose();
+});
+
+// The page's other keycaps (the rail's, the top bar's Ctrl K, the sidebar's
+// legend) show only while Ctrl is held where the shortcuts work:
+// <html data-keys-held> (style.css)
+test('Ctrl held marks the page for every keycap; Alt, a PTY, a dialog or letting go clears it', async () => {
+  const { installWorkspaceHints } = await import('../../src/web/workspace-hints.js');
+  const h = harness(installWorkspaceHints);
+  assert.equal(h.held(), null);
+  h.key('keydown', {ctrlKey:true});assert.equal(h.held(), '1');
+  h.refresh();assert.equal(h.held(), '1');
+  h.key('keyup', {});assert.equal(h.held(), null);
+  h.key('keydown', {altKey:true});assert.equal(h.held(), null);
+  h.doc.activeElement = {id:'term', closest:() => ({})};
+  h.key('keydown', {ctrlKey:true});assert.equal(h.held(), null);
+  h.doc.activeElement = h.body;
+  h.key('keydown', {ctrlKey:true});assert.equal(h.held(), '1');
+  h.doc.blocked = true;h.refresh();assert.equal(h.held(), null);
+  h.doc.blocked = false;h.key('keydown', {ctrlKey:true});assert.equal(h.held(), '1');
+  h.win.emit('blur');assert.equal(h.held(), null);
+  h.key('keydown', {ctrlKey:true});h.dispose();assert.equal(h.held(), null);
 });

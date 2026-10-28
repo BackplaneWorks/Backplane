@@ -66,9 +66,17 @@ export function installWorkspaceHints({ document: doc = document, window: win = 
     for (const [element, { kind, digit }] of desired) {
       set(element, 'data-shortcut-kind', kind); set(element, 'data-shortcut-digit', digit); annotated.add(element);
     }
-    if (sidebar) set(sidebar, 'data-shortcut-hints', mode() || null);
+    show();
   };
-  const reset = () => { held = null; if (sidebar) set(sidebar, 'data-shortcut-hints', null); };
+  // Every keycap on the page (the rail's, the top bar's Ctrl K, the
+  // sidebar's legend) shows only while Ctrl (Cmd on a Mac) is held where
+  // its shortcuts work: <html data-keys-held> (style.css)
+  const show = () => {
+    const hint = mode();
+    if (sidebar) set(sidebar, 'data-shortcut-hints', hint || null);
+    set(doc.documentElement, 'data-keys-held', hint === 'threads' ? '1' : null);
+  };
+  const reset = () => { held = null; if (sidebar) set(sidebar, 'data-shortcut-hints', null); set(doc.documentElement, 'data-keys-held', null); };
   const keys = event => { held = event; sync(); };
   listen(win, 'keydown', keys); listen(win, 'keyup', keys);
   listen(win, 'blur', reset); listen(doc, 'visibilitychange', reset);
@@ -78,7 +86,7 @@ export function installWorkspaceHints({ document: doc = document, window: win = 
   const observer = new win.MutationObserver((records = []) => {
     // Streaming timeline updates should not rescan every sidebar label.
     if (!records.length || !sidebar?.isConnected || records.some(record => record.target === sidebar || sidebar.contains(record.target))) sync();
-    else if (sidebar) set(sidebar, 'data-shortcut-hints', mode() || null);
+    else show();
   });
   observer.observe(doc.documentElement, { childList: true, subtree: true, attributes: true,
     attributeFilter: ['data-shortcut-projects', 'data-shortcut-threads', 'data-backplane-remote-ready', 'data-shortcut-project', 'class'] });
