@@ -930,7 +930,7 @@ final class AppModel {
                 return nil
             }
         }
-        traceNavigation(.navigationCompleted, target: token.nav)
+        traceNavigation(.navigationCompleted, target: token.nav, navigationAdmitted: out?.navigationAccepted, outputPresent: out != nil)
         return out
     }
 
@@ -1485,7 +1485,8 @@ final class AppModel {
     // enums leave this function; route strings are used solely for equality.
     func traceNavigation(_ event: NavigationTraceEvent, target: String? = nil,
                          incoming: Screen? = nil, fresh: Bool? = nil,
-                         active: Bool? = nil, destinationReady: Bool? = nil, known: Bool? = nil) {
+                         active: Bool? = nil, destinationReady: Bool? = nil, known: Bool? = nil,
+                         navigationAdmitted: Bool? = nil, outputPresent: Bool? = nil) {
         #if targetEnvironment(simulator)
         guard navigationTraceEnabled else { return }
         if event == .open { navigationTraceTarget = target; navigationTraceLast.removeAll() }
@@ -1493,6 +1494,25 @@ final class AppModel {
         let hub = links.compactMap(Pairing.key).first { expected.hasPrefix($0 + "|") }
         let status = hub.flatMap { conn[$0] }
         let mark = hub.flatMap { thinReady[$0] }
+        // Only fixed categories leave the process. A server error's arbitrary
+        // detail, native URLs, drafts and reply bodies never enter this trace.
+        let viewFailures = [
+            "LIMIT": "limit", "UNAVAILABLE": "unavailable", "STALE_VIEW": "stale-view",
+            "UNAUTHORIZED": "unauthorized", "NOT_FOUND": "not-found",
+            "invalid view reply": "invalid-reply", "invalid view presentation": "invalid-presentation",
+            "invalid view command": "invalid-command", "invalid view route": "invalid-route",
+            "invalid view selection": "invalid-selection", "invalid compact action reply": "invalid-compact-reply",
+            "invalid sidebar region": "invalid-sidebar", "invalid request": "invalid-request",
+            "request limit": "request-limit", "pending request limit": "pending-limit",
+            "view unavailable": "view-unavailable", "view not ready": "view-not-ready",
+            "View request timed out; not resent": "request-timeout",
+            "Current view is not ready": "not-ready", "Invalid native materialization": "materialization",
+            "Ordinary reply backlog limit": "backlog", "Invalid ordinary counter": "ordinary-counter",
+            "Invalid request adapter": "request-adapter", "Missing shared request": "missing-request",
+            "Invalid native view greeting": "greeting", "Unsupported native view greeting": "unsupported-greeting",
+            "Thin frame exceeds wire limit": "wire-limit",
+            "Unexpected thin frame; compatibility must be chosen explicitly": "unexpected-frame"
+        ]
         var fields: [String: Any] = [
             "event": event.rawValue, "tracked": expected == navigationTraceTarget,
             "tab": tab.rawValue, "engineReady": ready, "contentReady": contentReady,
@@ -1507,12 +1527,15 @@ final class AppModel {
             "botPresent": screen?.bot != nil, "seenBot": seenBots[expected] != nil,
             "phase": status.map { String(describing: $0.phase) } ?? "none",
             "epoch": status?.epoch ?? 0, "failurePresent": status?.failure != nil,
+            "viewFailure": status?.stage == "failed" ? viewFailures[status?.detail ?? ""] ?? "other" : "none",
             "markPresent": mark != nil, "markMatches": mark?.nav == expected,
             "markEpochMatches": mark != nil && mark?.epoch == status?.epoch,
             "incomingPresent": incoming != nil, "incomingMatches": incoming.map(Self.nav) == expected,
             "incomingThreadMatches": incoming?.thread?.id == expected, "incomingBotPresent": incoming?.bot != nil
         ]
         if let fresh { fields["incomingFresh"] = fresh }
+        if let navigationAdmitted { fields["navigationAdmitted"] = navigationAdmitted }
+        if let outputPresent { fields["navigationOutputPresent"] = outputPresent }
         if let active { fields["destinationActive"] = active }
         if let destinationReady { fields["destinationReady"] = destinationReady }
         if let known { fields["destinationKnown"] = known }
