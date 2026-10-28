@@ -13776,9 +13776,14 @@ def Find.go.k2(active: Bool, +u: Ui, +v: String) -> Act:
     case False{}:
       Find.go.projects(u, v)
 
-# (a phone names the project it means: v)
-def Find.go(+u: Ui, +v: String) -> Act:
+def Find.go.named(+u: Ui, +v: String) -> Act:
   Find.go.k2(Bool.and(String.is_empty(v), String.eq(Side.view(Side.st(u)), "active")), u, v)
+
+# (a phone names the project it means: v; the web's field sends what was
+# typed, which names none: Enter goes to the first shown, never to a
+# project of that name, which made a thread in no project)
+def Find.go(+u: Ui, +v: String) -> Act:
+  Find.go.named(u, Bool.pick(String, FR.Fr.st.has.project(Side.st(u), v), v, ""))
 
 def Proj.go.k(none: Bool, u: Ui, +pid: String, +tid: String) -> Act:
   match none:
