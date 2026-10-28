@@ -139,7 +139,7 @@ export class ThinViews {
     if (!l || !viewTarget(target)) return { failed: 'invalid view selection', cmds: [] };
     if (session && own(session, 'route') && !compactRoute(session.route, target)) return { failed: 'invalid view route', cmds: [] };
     if (l.revision >= MAX_REVISION) return { failed: 'view revision exhausted', cmds: [] };
-    l.target = snapshot(target); l.viewId = ''; l.viewRevision = ''; l.updatePending = false; l.updateId = null; l.invalidated = false; l.changedRevision = null; l.readInvalidated = false;l.sidebar = null;l.terminalOwner = '';l.terminalOpen = false;
+    l.target = snapshot(target); l.accountBinding = ''; l.viewId = ''; l.viewRevision = ''; l.updatePending = false; l.updateId = null; l.invalidated = false; l.changedRevision = null; l.readInvalidated = false;l.sidebar = null;l.terminalOwner = '';l.terminalOpen = false;
     return this.request(hub, 'view.open', { session, cid });
   }
   request(hub, method, args = {}) {
@@ -172,6 +172,7 @@ export class ThinViews {
     let id; try { id = this.allocate(); } catch (e) { return { failed: e.message, cmds: [] }; }
     const p = { ...extra, version: 1, hub, generation: l.greeting.generation, epoch: l.greeting.epoch,
       requestRevision: l.revision, target: snapshot(l.target), viewId: l.viewId };
+    if (l.greeting.renderer === 'web') { p.accountProfiles = 1; p.accountBinding = l.accountBinding || ''; }
     const regionEnabled = this.api.sidebarRegions === true && l.greeting.renderer === 'web'
       && ['view.open','view.page','view.update','view.action'].includes(method);
     if (regionEnabled) p.sidebarRegion = sidebarOffer(l.sidebar);
@@ -250,6 +251,7 @@ export class ThinViews {
     const displayed = current && presentation && record(r.shown) && r.remoteReady === true;
     if (displayed) {
       l.viewId = r.viewId; l.viewRevision = r.viewRevision; l.shown = r.shown;
+      if (l.greeting.renderer === 'web') l.accountBinding = typeof r.accountBinding === 'string' ? r.accountBinding : '';
       l.terminalOpen = r.session?.open?.term === true;
       l.terminalOwner = bounded(r.session?.drafts?.['@terminal.owner'], 1024) ? r.session.drafts['@terminal.owner'] : '';
       l.sidebar = sidebar?.cache || null;
