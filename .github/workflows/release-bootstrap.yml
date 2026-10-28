@@ -1,61 +1,102 @@
-name: Focused native store sync portability
-run-name: Store sync ${{ inputs.source_commit }}
+name: Frozen 0.13 native Windows desktop packaging
 on:
   workflow_dispatch:
     inputs:
       source_commit: {type: string, required: true}
       source_tree: {type: string, required: true}
+      build_run: {type: string, required: true}
+      components_url: {type: string, required: true}
+      components_sha256: {type: string, required: true}
 permissions:
   contents: read
+  actions: read
 concurrency:
-  group: store-sync-${{ inputs.source_commit }}
+  group: frozen013-windows-package-${{ inputs.source_commit }}
   cancel-in-progress: false
 jobs:
-  file-sync:
-    strategy:
-      fail-fast: false
-      matrix:
-        runner: [windows-2025, macos-15]
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 5
+  package-windows:
+    runs-on: windows-2025
+    timeout-minutes: 12
     env:
       PYTHONUTF8: '1'
       PYTHONDONTWRITEBYTECODE: '1'
+      PYTHON: python
+      BACKPLANE_TELEMETRY: 'off'
+      BACKPLANE_DESKTOP_BROWSER: '1'
       SOURCE_COMMIT: ${{ inputs.source_commit }}
       SOURCE_TREE: ${{ inputs.source_tree }}
+      COMPONENTS_URL: ${{ inputs.components_url }}
+      COMPONENTS_SHA: ${{ inputs.components_sha256 }}
     steps:
-      - shell: bash
+      - name: Preserve committed source bytes
+        shell: bash
         run: git config --global core.autocrlf false
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.source_commit }}
+          path: source
           persist-credentials: false
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: '1.4.3'
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Real native file handle, atomic promotion, sync error and log preservation
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@v4
+        with:
+          name: configured-service-windows-x64
+          run-id: ${{ inputs.build_run }}
+          github-token: ${{ github.token }}
+          path: component
+      - name: Fetch exact prepared current-source shell and retained Electron
         shell: bash
         run: |
+          set -euo pipefail
           python - <<'PY'
-          import pathlib,subprocess,json,os,hashlib,time,platform
-          root=pathlib.Path.cwd();out=root/'build/file-sync-portability';out.mkdir(parents=True)
-          git=lambda *args:subprocess.check_output(['git',*args],text=True).strip()
-          assert git('rev-parse','HEAD')==os.environ['SOURCE_COMMIT'] and git('rev-parse','HEAD^{tree}')==os.environ['SOURCE_TREE']
-          assert subprocess.check_output(['bun','--version'],text=True).strip()=='1.4.3'
-          files=['src/server/effects/storeio.js','test/tools/store_sync_portability_test.cjs'];before={n:hashlib.sha256((root/n).read_bytes()).hexdigest() for n in files}
-          start=time.perf_counter();run=subprocess.run(['bun',files[1]],capture_output=True,text=True,timeout=45);wall=time.perf_counter()-start
-          (out/'stdout.log').write_text(run.stdout);(out/'stderr.log').write_text(run.stderr)
-          assert before=={n:hashlib.sha256((root/n).read_bytes()).hexdigest() for n in files}
-          result={'status':'PASS' if run.returncode==0 else 'FAIL','sourceCommit':os.environ['SOURCE_COMMIT'],'sourceTree':os.environ['SOURCE_TREE'],'platform':platform.system(),'architecture':platform.machine(),'bun':'1.4.3','wallSeconds':wall,'exitCode':run.returncode,'sourceFiles':before,'scope':'Real native filehandle and ordered promotion, ASCII/Unicode disposable homes, fatal fsync errors and unchanged authoritative log only; no service/UI/global proof qualification'}
-          if run.returncode==0:result['testReport']=json.loads(run.stdout.splitlines()[-1])
-          (out/'RESULT.json').write_text(json.dumps(result,indent=2)+'\n');print(json.dumps(result));raise SystemExit(run.returncode)
+          import pathlib,os,urllib.request,hashlib,tarfile
+          p=pathlib.Path('components.tar.gz');u=os.environ['COMPONENTS_URL'];assert u.startswith('https://')
+          with urllib.request.urlopen(u,timeout=90) as response,p.open('wb') as f:
+              while b:=response.read(1024*1024):f.write(b)
+          with p.open('rb') as f:assert hashlib.file_digest(f,'sha256').hexdigest()==os.environ['COMPONENTS_SHA']
+          with tarfile.open(p) as tar:tar.extractall('inputs',filter='fully_trusted')
           PY
+          (cd source/desktop && npm ci --ignore-scripts --no-audit --no-fund)
+      - name: Native icon branding and exact-source stage, without compiler
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import pathlib,subprocess,json,os
+          root=pathlib.Path.cwd();s=root/'source';run=lambda *a:subprocess.run(list(map(str,a)),check=True)
+          assert subprocess.check_output(['git','-C',str(s),'rev-parse','HEAD'],text=True).strip()==os.environ['SOURCE_COMMIT']
+          assert subprocess.check_output(['git','-C',str(s),'rev-parse','HEAD^{tree}'],text=True).strip()==os.environ['SOURCE_TREE']
+          assert not subprocess.check_output(['git','-C',str(s),'status','--porcelain','--untracked-files=all'],text=True).strip()
+          receipts=list((root/'component').rglob('SERVICE.json'));assert len(receipts)==1;service=receipts[0];d=json.loads(service.read_text())
+          assert (d['sourceCommit'],d['sourceTree'],d['version'],d['target'])==(os.environ['SOURCE_COMMIT'],os.environ['SOURCE_TREE'],'0.13.0','windows-x64')
+          run('node',s/'desktop/restore-modes.cjs',service,service.parent/'payload')
+          out=root/'package';out.mkdir()
+          run('python',s/'desktop/freeze-target.py',s,root/'inputs/components',service,out/'freeze')
+          run('node',s/'desktop/produce-release.cjs','stage','--request',out/'freeze/stage.request.json','--output',out/'stage')
+          PY
+      - name: Actual compiled ASCII startup and normal Unicode desktop smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          node inputs/owned-startup.cjs "$GITHUB_WORKSPACE/package/stage" "$GITHUB_WORKSPACE/source" "$GITHUB_WORKSPACE/package/evidence-ascii/RESULT.json"
+          node source/desktop/test/release-smoke.cjs --stage "$GITHUB_WORKSPACE/package/stage" --out "$GITHUB_WORKSPACE/package/evidence"
+      - name: Strict archive after actual native acceptance
+        shell: bash
+        run: node source/desktop/archive-after-smoke.cjs --stage "$GITHUB_WORKSPACE/package/stage" --evidence "$GITHUB_WORKSPACE/package/evidence" --out "$GITHUB_WORKSPACE/package/acceptance" --dist "$GITHUB_WORKSPACE/package/dist"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: file-sync-portability-${{ runner.os }}
-          path: build/file-sync-portability/
+          name: packaged-desktop-windows-x64
+          path: |
+            package/evidence-ascii/
+            package/evidence/
+            package/acceptance/
+            package/dist/*.zip
+            package/dist/*.sha256
+            package/dist/**/DESKTOP.json
+            package/dist/**/MANIFEST.json
           retention-days: 14
