@@ -984,9 +984,11 @@ def Pv.argv(low: Bool, +exe: String, +args: List<&2, String>) -> List<&2, String
 # a 3D model's child runs holding the plot folder's solid.lock (flock, where
 # there is one): reading a model takes gigabytes, so two at once (a model
 # prepared ahead and its view, or one board asked for by two names) would
-# add up; the second waits, then finds the first one's plot kept
+# add up; the second waits, then finds the first one's plot kept. The
+# folder and the lock file are made first (a new home has no plot folder
+# yet); where neither can be, the child runs without the lock
 def Pv.lock.sh() -> String:
-  "if command -v flock >/dev/null 2>&1; then exec flock \"$0\" \"$@\"; fi; exec \"$@\""
+  "if command -v flock >/dev/null 2>&1 && mkdir -p \"${0%/*}\" 2>/dev/null && : >> \"$0\" 2>/dev/null; then exec flock \"$0\" \"$@\"; fi; exec \"$@\""
 
 def Pv.locked(solid: Bool, +dir: String, +argv: List<&2, String>) -> List<&2, String>:
   match solid:
