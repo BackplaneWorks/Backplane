@@ -26,10 +26,17 @@ function requestSession(session, _action, target) {
   if (session.sel && !session.sel.startsWith('@') && Object.hasOwn(local, session.sel) && typeof local[session.sel] === 'string') {
     Object.defineProperty(drafts, session.sel, { value: local[session.sel], enumerable: true });
   }
+  // the selected thread's viewer and its sheets: a fresh view (a reload)
+  // starts from them (thin-actor.bend's Actor.seed.key); a running one
+  // keeps its own
+  const viewer = session.sel ? ['panel:', 'view.kind:', 'view.path:'].map(p => p + session.sel) : [];
+  for (const key of session.sel ? ['@sch:' + session.sel, '@split.sheet:' + session.sel] : []) {
+    if (typeof local[key] === 'string' && utf8Bytes(local[key]) <= 1024) Object.defineProperty(drafts, key, { value: local[key], enumerable: true });
+  }
   const route = compactRoute(session.route, target);
   return { sel: session.sel, rid: session.rid, drafts, outbox: {},
     open: choices(session.open, (_key, item) => typeof item === 'boolean'),
-    info: choices(session.info, (key, item) => (key.startsWith('fold:') || key.startsWith('subs:')) && typeof item === 'string' && utf8Bytes(item) <= 1024),
+    info: choices(session.info, (key, item) => (key.startsWith('fold:') || key.startsWith('subs:') || viewer.includes(key)) && typeof item === 'string' && utf8Bytes(item) <= 1024),
     adding: session.adding === true, panel: session.panel === true, wantNew: session.wantNew === true,
     ...(route ? { route } : {}) };
 }
@@ -521,8 +528,13 @@ export class ThinHost {
       if (result.method === 'view.action') for (const [key, text] of Object.entries(responseSession.drafts)) {
         if (key === responseSession.sel || key.startsWith('@')) Object.defineProperty(drafts, key, { value: text, enumerable: true, writable: true, configurable: true });
       }
+      // each thread's viewer open or shut ("panel:<t>") is this page's own,
+      // set as it leaves the thread (presentation.bend's Session.select);
+      // the hub's view says only the selected one's, as "panel"
+      const info = { ...this.session.info, ...responseSession.info };
+      for (const [key, value] of Object.entries(this.session.info || {})) if (key.startsWith('panel:')) info[key] = value;
       this.session = { ...this.session, ...responseSession, rid: this.session.rid, drafts,
-        info: { ...this.session.info, ...responseSession.info }, outbox: { ...this.session.outbox, ...responseSession.outbox } };
+        info, outbox: { ...this.session.outbox, ...responseSession.outbox } };
       for (const [thread, draft] of this.draftChanges) if (draft.revision > (metadata?.revision ?? -1)) {
         this.session.drafts = { ...this.session.drafts, [thread]: draft.text };
       }

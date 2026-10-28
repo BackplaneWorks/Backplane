@@ -348,6 +348,26 @@ function restoreSubs() {
   } catch {}
 }
 restoreSubs();
+// Each thread's viewer (open or shut, its tab, file and sheet) belongs to
+// this browser too: kept as client.bend's Viewer.keep packs it whenever
+// the hub's answer moves it, and put back before the first view, so a
+// reload opens the thread as it was (a fresh view starts from it)
+const VIEWER = "backplane-viewer:";
+try {
+  for (let i = 0; i < localStorage.length; i += 1) {
+    const k = localStorage.key(i);
+    if (k?.startsWith(VIEWER)) ui = App.viewer_restore(ui, k.slice(VIEWER.length), localStorage.getItem(k) ?? "");
+  }
+} catch {}
+let viewerKept = "";
+function keepViewer() {
+  const sel = App.sel(ui);
+  if (!sel || sel.startsWith("@")) return;
+  const text = App.viewer_keep(ui);
+  if (sel + text === viewerKept) return;
+  viewerKept = sel + text;
+  try { localStorage.setItem(VIEWER + sel, text); } catch {}
+}
 try {
   const selected = localStorage.getItem("backplane-selected");
   if (selected) ui = App.presentation_select(ui, selected);
@@ -2510,6 +2530,7 @@ async function startThin(again = false, reason = "initial") {
           // cursor stay in the fresh unsynced recipient, never in a picture.
           ui = App.unsync(App.presentation_handoff(ui, presentationJson(session)));
           document.documentElement.lang = App.lang(ui);
+          keepViewer();
         }
         if (!detail?.inputOnly) later();
       },

@@ -75,6 +75,18 @@ def Actor.prefs( +xs: List<&2, Sigma<&2, &2, String, _ => String>>, +prefs: Map<
     case Nil{}: prefs
     case (+key, value) <> tail: Actor.prefs(tail, Actor.pref.put(Actor.pref.key(key), prefs, key, value))
 
+# A fresh actor (a reload, a new connection) starts the target thread's
+# viewer from the page's record of it (client.bend's Viewer.keep: open or
+# shut, kind, file, sheet); an actor already running keeps its own
+# (Actor.merge takes only Actor.pref.key from the page)
+def Actor.seed.key(+thread: String, +key: String) -> Bool:
+  Bool.or(Actor.pref.key(key), Nat.is_lt(U.Keys.pos(["panel:" ++ thread, "view.kind:" ++ thread, "view.path:" ++ thread], key), 3n))
+
+def Actor.seeds( +thread: String, +xs: List<&2, Sigma<&2, &2, String, _ => String>>, +prefs: Map<&2, String>) -> Map<&2, String>:
+  match xs:
+    case Nil{}: prefs
+    case (+key, value) <> tail: Actor.seeds(thread, tail, Actor.pref.put(Actor.seed.key(thread, key), prefs, key, value))
+
 # Browser ownership is canonical, not an actor preference. Teach.info omits
 # an idle owner after handback; discard cached drive keys before installing
 # the current canonical info, while retaining all unrelated actor state.
@@ -111,6 +123,16 @@ def Actor.local.input(keys: List<&2, String>, +drafts: J.Json, out: J.Json) -> J
     case Nil{}: out
     case +key <> tail: Actor.local.input(tail, drafts, Actor.local.field(True{}, key, J.Json.get_obj(drafts, key), out))
 
+def Actor.sheet.field(+key: String, value: J.Json, out: J.Json) -> J.Json:
+  match value:
+    case J.Str{+text}: Actor.local.bounded(W.Wire.within(text, 1024n), key, text, out)
+    case _: out
+
+# the target thread's schematic sheets (the Schematic tab's, the combined
+# view's), for a fresh actor (Actor.seed.key)
+def Actor.sheet.input(+thread: String, +drafts: J.Json, out: J.Json) -> J.Json:
+  Actor.sheet.field("@split.sheet:" ++ thread, J.Json.get_obj(drafts, "@split.sheet:" ++ thread), Actor.sheet.field("@sch:" ++ thread, J.Json.get_obj(drafts, "@sch:" ++ thread), out))
+
 def Actor.local.copy(xs: List<&2, Sigma<&2, &2, String, _ => String>>, dr: Map<&2, String>) -> Map<&2, String>:
   match xs:
     case Nil{}: dr
@@ -132,10 +154,10 @@ def Actor.away.input(valid: Bool, +thread: String, +p: J.Json, out: J.Json) -> J
 def Actor.safe_input(+st: M.State, +p: J.Json) -> J.Json:
   +thread = V.Target.thread(st, J.Json.get_obj(p, "target"))
   +session = J.Json.get_obj(p, "session")
-  +drafts = Actor.away.input(Bool.and(Bool.not(String.is_empty(thread)), Bool.not(String.starts_with(thread, "@"))), thread, p,
-    Actor.local.input(["@lang", "@lang.os", "@lang.tag", "@lang.preview", "@local.view", "@local.usage", "@desktop.browser"], J.Json.get_obj(session, "drafts"), Actor.draft.safe(Bool.and(Bool.not(String.is_empty(thread)), Bool.not(String.starts_with(thread, "@"))), thread, J.Json.get_obj(session, "drafts"))))
+  +drafts = Actor.sheet.input(thread, J.Json.get_obj(session, "drafts"), Actor.away.input(Bool.and(Bool.not(String.is_empty(thread)), Bool.not(String.starts_with(thread, "@"))), thread, p,
+    Actor.local.input(["@lang", "@lang.os", "@lang.tag", "@lang.preview", "@local.view", "@local.usage", "@desktop.browser"], J.Json.get_obj(session, "drafts"), Actor.draft.safe(Bool.and(Bool.not(String.is_empty(thread)), Bool.not(String.starts_with(thread, "@"))), thread, J.Json.get_obj(session, "drafts")))))
   V.Obj.put(p, "session", V.Obj.put(V.Obj.put(V.Obj.put(session, "drafts", drafts), "outbox", J.Json.obj(Nil{})), "info",
-    J.Json.obj(P.Session.strings(Map.to_list(&2, String, Actor.prefs(Map.to_list(&2, String, P.Session.read.strings(J.Json.get_obj(session, "info"), Map.new(&2, String))), Map.new(&2, String)))))))
+    J.Json.obj(P.Session.strings(Map.to_list(&2, String, Actor.seeds(thread, Map.to_list(&2, String, P.Session.read.strings(J.Json.get_obj(session, "info"), Map.new(&2, String))), Map.new(&2, String)))))))
 
 def Actor.scope.keep(+key: String) -> Bool:
   Bool.not(Bool.or(Bool.or(String.starts_with(key, "@f."), String.starts_with(key, "@mr.")),
@@ -391,17 +413,28 @@ def Actor.owed( +same: Bool, +pending: Map<&2, String>, +target: J.Json) -> Map<
     case True{}: pending
     case False{}: Actor.owed.go(Map.to_list(&2, String, pending), Actor.scope(target), Map.new(&2, String))
 
+# a thread this actor has shown no viewer for yet takes the page's record
+# of it (a page loaded again remembers threads its fresh actor never saw:
+# Actor.seed.key); one it has shown keeps its own
+def Actor.seed.view(missing: Bool, +u: U.Ui, +fresh: U.Ui, +thread: String) -> U.Ui:
+  match missing:
+    case True{}:
+      U.Ui.scratch_set(U.Ui.scratch_set(U.Ui.info_set(U.Ui.info_set(u, "view.kind:" ++ thread, U.Ui.info(fresh, "view.kind:" ++ thread)), "view.path:" ++ thread, U.Ui.info(fresh, "view.path:" ++ thread)),
+        "@sch:" ++ thread, U.Ui.scratch(fresh, "@sch:" ++ thread)), "@split.sheet:" ++ thread, U.Ui.scratch(fresh, "@split.sheet:" ++ thread))
+    case False{}: u
+
 def Actor.refresh( +xs: List<&2, Actor>, +web: Bool, +st: M.State, +info: J.Json, +live: J.Json, +now: Nat, +p: J.Json, +view: String) -> Actor:
   match xs:
     case Nil{}: Actor.make(U.Refs.refresh(V.Session.current(web, st, info, live, now, Actor.safe_input(st, p))), view, J.Json.get_obj(p, "target"))
-    case Actor{old, oldView, +target, pending, reads, dirty, +memo} <> _:
+    case Actor{+old, oldView, +target, pending, reads, dirty, +memo} <> _:
       +input = Actor.safe_input(st, p)
       +thread = V.Target.thread(st, J.Json.get_obj(p, "target"))
       # the fresh Ui gives only its preferences (Actor.merge): the info,
       # models and all, is merged once, over the actor's own (Actor.lean)
       +fresh = V.Session.current(web, st, Actor.lean(info), live, now, input)
       +same = Bool.and(String.eq(oldView, view), W.Target.same(target, J.Json.get_obj(p, "target")))
-      Actor{Actor.composer(old, V.Session.renderer(web, Actor.resolve(U.Ui.info_merge(Actor.merge(fresh, old, same, thread, Maybe.is_some(&2, J.Json, J.Json.get(J.Json.get_obj(J.Json.get_obj(input, "session"), "drafts"), thread))), info), thread), p)),
+      Actor{Actor.composer(old, V.Session.renderer(web, Actor.resolve(U.Ui.info_merge(Actor.seed.view(String.is_empty(U.Ui.info(old, "view.kind:" ++ thread)),
+        Actor.merge(fresh, old, same, thread, Maybe.is_some(&2, J.Json, J.Json.get(J.Json.get_obj(J.Json.get_obj(input, "session"), "drafts"), thread))), fresh, thread), info), thread), p)),
         view, J.Json.get_obj(p, "target"), Actor.owed(same, pending, J.Json.get_obj(p, "target")), Bool.pick(List<&2, J.Json>, same, reads, Nil{}), dirty, Bool.pick(List<&2, Memo>, same, Actor.kept(memo), Nil{})}
 
 # The hub's canonical projection is shared; each actor keeps its own pages,

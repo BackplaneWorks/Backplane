@@ -220,8 +220,18 @@ def presentation_choice(action: String, session: J.Json, value: String) -> J.Jso
 def presentation_prepare(session: J.Json, input: J.Json, action: String) -> J.Json:
   PS.Session.prepare(session, input, action)
 
-def presentation_select(u: U.Ui, id: String) -> U.Ui:
-  U.Ui.select.nav(u, id)
+# (the thread's own viewer comes with it, open or shut, as Ui.act's
+# select brings it: a reload opens it as it was, Viewer.restore)
+def presentation_select(+u: U.Ui, id: String) -> U.Ui:
+  U.Ui.reselect(U.Ui.sel(u), U.Ui.select.nav(u, id))
+
+# the selected thread's viewer, as this browser keeps it across a reload
+# (client.bend's Viewer.keep), and a thread's put back at start
+def viewer_keep(u: U.Ui) -> String:
+  U.Viewer.keep(u)
+
+def viewer_restore(u: U.Ui, thread: String, text: String) -> U.Ui:
+  U.Viewer.restore(u, thread, text)
 
 def presentation_perform(+u: U.Ui, input: J.Json, +action: String, value: String) -> U.Act:
   act(presentation_handoff(u, PS.Session.prepare(presentation(u), input, action)), action, value)

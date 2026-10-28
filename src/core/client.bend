@@ -6775,6 +6775,36 @@ def Solid.sync.m(a: Act) -> Act:
 def Solid.sync(a: Act) -> Act:
   Fv.sync(Solid.sync.m(a))
 
+# A reload keeps each thread's viewer: whether it is open, what it shows
+# (its kind and file; a design-history step or a comparison comes back as
+# the live file it is of) and the schematic's sheet (the Schematic tab's
+# and the combined view's). The page keeps the selected thread's as
+# Viewer.keep packs it (host.js's "backplane-viewer:<t>"), and puts each
+# back before its first view (Viewer.restore); the hub's view of a fresh
+# connection starts from them (thin-actor.bend's Actor.safe_input)
+# (test/hist_test.bend)
+def Viewer.live(+path: String) -> String:
+  Bool.pick(String, Nat.is_eq(HI.Hist.kind(path), 0n), path, "")
+
+def Viewer.keep(+u: Ui) -> String:
+  J.Json.show(J.Json.obj([J.KV{"open", J.Str{Viewer.flag(Ui.panel(u))}}, J.KV{"kind", J.Str{Ui.info(u, "view.kind:" ++ Ui.sel(u))}},
+    J.KV{"path", J.Str{Viewer.live(Ui.info(u, "view.path:" ++ Ui.sel(u)))}}, J.KV{"sheet", J.Str{Ui.scratch(u, "@sch:" ++ Ui.sel(u))}},
+    J.KV{"split", J.Str{Ui.scratch(u, "@split.sheet:" ++ Ui.sel(u))}}]))
+
+def Viewer.restore.k(some: Bool, +u: Ui, +th: String, +o: J.Json) -> Ui:
+  match some:
+    case True{}:
+      Ui.scratch_set(Ui.scratch_set(Ui.info_set(Ui.info_set(Ui.info_set(u, "panel:" ++ th, Viewer.flag(String.eq(J.Json.get_str(o, "open", ""), "1"))),
+        "view.kind:" ++ th, J.Json.get_str(o, "kind", "")), "view.path:" ++ th, Viewer.live(J.Json.get_str(o, "path", ""))),
+        "@sch:" ++ th, J.Json.get_str(o, "sheet", "")), "@split.sheet:" ++ th, J.Json.get_str(o, "split", ""))
+    case False{}:
+      u
+
+# (a thread's record put back; one that does not parse changes nothing)
+def Viewer.restore(+u: Ui, +th: String, +text: String) -> Ui:
+  +o = Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{})
+  Viewer.restore.k(Bool.and(Bool.not(String.is_empty(th)), Maybe.is_some(&2, J.Json, J.Json.get(o, "open"))), u, th, o)
+
 # what the page says under its parts: where to get FreeCAD when the hub
 # has none, else nothing
 def Mpage.note.loc(+l: I.Loc, +u: Ui) -> String:

@@ -120,6 +120,15 @@ def act(u: U.Ui, +a: String, +v: String) -> U.Ui:
 def base() -> U.Ui:
   U.Ui.view_put(act(U.Ui.adopt(U.Ui.init(0n), state()), "select", "t"), "board", "/r/b.kicad_pcb")
 
+# the same, on a sheet of its schematic (its file and its place)
+def sheet() -> U.Ui:
+  U.Ui.scratch_set(U.Ui.view_put(base(), "schematic", "/r/sub/s.kicad_sch"), "@sch:t", "1\t/sub/")
+
+# a page loaded again with a thread's viewer as it was kept, the thread
+# selected (app.bend's presentation_select)
+def reload(+text: String) -> U.Ui:
+  U.Ui.reselect("", U.Ui.select.nav(U.Viewer.restore(U.Ui.adopt(U.Ui.init(0n), state()), "t", text), "t"))
+
 def path(+u: U.Ui) -> String:
   U.Ui.view_get(u, "view.path")
 
@@ -142,6 +151,13 @@ def main() -> IO(Unit):
   +cmp = act(act(u, "cmp", ""), "cmp-pick", "a\tc1\tStep 1\t/r/.git\t/r")
   do IO<Unit>:
     C.Check.str("bar live", bar(u), "True|3|0|Live · 3 steps||||FalseFalseFalse||Working copy|")
+    C.Check.str("a viewer kept comes back after a reload", path(reload(U.Viewer.keep(sheet()))) ++ "|"
+      ++ U.Ui.view_get(reload(U.Viewer.keep(sheet())), "view.kind") ++ "|"
+      ++ yes(U.Ui.panel(reload(U.Viewer.keep(sheet())))) ++ "|"
+      ++ U.Ui.scratch(U.Viewer.restore(U.Ui.adopt(U.Ui.init(0n), state()), "t", U.Viewer.keep(sheet())), "@sch:t"), "/r/sub/s.kicad_sch|schematic|yes|1	/sub/")
+    C.Check.str("a step on show comes back as the live file", path(reload(U.Viewer.keep(first))), "")
+    C.Check.str("a shut viewer stays shut", yes(U.Ui.panel(reload(U.Viewer.keep(act(sheet(), "panel", ""))))), "no")
+    C.Check.str("a record that does not parse changes nothing", U.Viewer.keep(reload("{oops")), "{\"open\":\"\",\"kind\":\"\",\"path\":\"\",\"sheet\":\"\",\"split\":\"\"}")
     C.Check.str("back from live: the last step", path(back), "git\t/r/.git\tc4\t2\t/r/b.kicad_pcb")
     C.Check.str("bar at the last", bar(back), "True|3|3|Step 3 of 3|m2|Done.|Done.|FalseFalseFalse|||")
     C.Check.str("first", path(first), "git\t/r/.git\tc1\t2\t/r/b.kicad_pcb")

@@ -88,9 +88,12 @@ def Session.read.flags(j: J.Json, acc: Map<&2, Bool>) -> Map<&2, Bool>:
 # what a session keeps of its info between requests: folds, form fields,
 # and a thread's ordering card from its fab.look reply (fab.ready:<t>,
 # fab.buy:<t>, fab.line:<t>...); without those the Ready to order bar and
-# the header's Buy it never showed in a thin view
+# the header's Buy it never showed in a thin view; and each thread's
+# viewer, open or shut, its kind and file, which the page keeps across a
+# reload (client.bend's Viewer.keep)
 def Session.info.key(+k: String) -> Bool:
-  Bool.or(String.starts_with(k, "fold:"), Bool.or(String.starts_with(k, "subs:"), Bool.or(String.starts_with(k, "@f."), String.starts_with(k, "fab."))))
+  Bool.or(Bool.or(String.starts_with(k, "fold:"), Bool.or(String.starts_with(k, "subs:"), Bool.or(String.starts_with(k, "@f."), String.starts_with(k, "fab.")))),
+    Bool.or(String.starts_with(k, "panel:"), Bool.or(String.starts_with(k, "view.kind:"), String.starts_with(k, "view.path:"))))
 
 def Session.info.put(keep: Bool, acc: Map<&2, String>, k: String, v: String) -> Map<&2, String>:
   match keep:
@@ -197,9 +200,11 @@ def Session.reading.ui(away: Bool, +u: U.Ui, +id: String, +seen: String, count: 
 def Session.reading(session: J.Json, id: String, seen: String, count: Nat, away: Bool) -> J.Json:
   Session.pack(Session.reading.ui(away, Session.adopt(U.Ui.init(0n), session), id, seen, count))
 
-# a thread picked in the hub-drawn view leaves Settings, as Ui.select does
+# a thread picked in the hub-drawn view leaves Settings, as Ui.select does,
+# and brings its own viewer, open or shut, as it was left (the one left
+# keeps its own: Ui.reselect)
 def Session.select(+session: J.Json, +id: String) -> J.Json:
-  Session.pack(U.Ui.select.nav(Session.adopt(U.Ui.init(0n), session), id))
+  Session.pack(U.Ui.reselect(J.Json.get_str(session, "sel", ""), U.Ui.select.nav(Session.adopt(U.Ui.init(0n), session), id)))
 
 def Session.draft(+session: J.Json, +text: String) -> J.Json:
   Session.pack(U.Ui.scratch_set(Session.adopt(U.Ui.init(0n), session), J.Json.get_str(session, "sel", ""), text))
