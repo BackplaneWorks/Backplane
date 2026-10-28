@@ -135,7 +135,7 @@ export function got(o, at = { bytes: 0, t: performance.now() }) {
     plots.set(key, { chunks: all, box, fam: typeof o.fam === "string" ? o.fam : key, n: (plots.get(key)?.n ?? 0) + 1, thick: typeof o.thick === "number" ? o.thick : 1600 });
   }
   lastKey = key;
-  for (const v of views.values()) if (v.key === key) { v.show(plots.get(key)); present(v); }
+  for (const v of views.values()) if (v.key === key) { v.show(plots.get(key)); present(v); prefetch(v); }
   changed(key);
 }
 
@@ -202,8 +202,24 @@ export function need(key) {
   if (had && (!missing || had.at === n)) return had.wait;
   const wait = fetchInfos(key).then((m) => { for (const [s, t] of m) tables.set(s, t); return m; }).catch(() => new Map());
   infos.set(key, { at: n, wait, all: null });
-  wait.then((m) => { const e = infos.get(key); if (e && e.wait === wait) e.all = m; changed(key); });
+  // (none found while some were missing, the hub not done writing them:
+  // the next need asks again)
+  wait.then((m) => { const e = infos.get(key); if (e && e.wait === wait) { if (!m.size && missing) infos.delete(key); else e.all = m; } changed(key); });
   return wait;
+}
+
+// A live plot on show has its infos read once it is drawn, while the page
+// is idle (and a schematic's board's), so the first probe is as quick as
+// the next; a version of the design history waits for a probe
+function prefetch(v) {
+  const key = v.key;
+  if (!key || /\|(git\t|diff\n)/.test(key)) return;
+  const idle = window.requestIdleCallback || ((f) => setTimeout(f, 200));
+  idle(() => {
+    if (v.key !== key || !plots.get(key)?.chunks) return;
+    need(key);
+    if (v.side === "schematic" && v.board) need(v.board);
+  }, { timeout: 2000 });
 }
 
 // the infos of a chunk
@@ -792,7 +808,7 @@ function mountOne(canvas) {
     view.asked = performance.now();
     view.hl = null;
     if (!same) { view.plot = null; view.fitted = false; view.back = left.get(key) || null; }
-    if (plots.has(key)) view.show(plots.get(key)); else view.later();
+    if (plots.has(key)) { view.show(plots.get(key)); prefetch(view); } else view.later();
   }
 }
 
