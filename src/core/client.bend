@@ -11416,6 +11416,18 @@ def Tour.back(+u: Ui) -> Bool:
 def Tour.on(+u: Ui) -> Bool:
   OB.Ob.live(Tour.at(u))
 
+# The KiCad notice waits while the tour is up (the card would sit over it,
+# and it is one thing more at once): it shows once the tour ends
+def Tour.kn.k(on: Bool, n: Maybe<&2, KH.KNote>) -> Maybe<&2, KH.KNote>:
+  match on:
+    case True{}:
+      None{}
+    case False{}:
+      n
+
+def Tour.kn(+u: Ui, n: Maybe<&2, KH.KNote>) -> Maybe<&2, KH.KNote>:
+  Tour.kn.k(Tour.on(u), n)
+
 # Scratch's lifetime in days (the "scratch.days" setting)
 def Tour.days(+u: Ui) -> String:
   Nat.show(Nat.div(M.Scratch.window(Ui.state(u)), 86400n))

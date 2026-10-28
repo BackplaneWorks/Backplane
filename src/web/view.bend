@@ -1891,8 +1891,12 @@ def View.settings.loc(+lc: I.Loc, +u: U.Ui, +st: M.State, +nf: Map<&2, String>, 
 def View.settings(+u: U.Ui, +st: M.State, +nf: Map<&2, String>, +v: String, +note: String) -> D.Node:
   View.settings.loc(U.Lang.loc(u), u, st, nf, v, note)
 
+# (tour: the first-run tour is up, and the KiCad notice waits for it: U.Tour.kn)
+def View.empty.t.loc(+lc: I.Loc, tour: Bool, n: Nat, nf: Map<&2, String>, st: M.State) -> D.Node:
+  D.El{"main", "empty", [D.At{"class", "empty"}], D.Dom.cat([D.Txt{Bool.pick(String, Nat.is_eq(n, 0n), MSG.T.empty.add(lc), MSG.T.empty.thread(lc))}], View.kn.loc(lc, U.Tour.kn.k(tour, U.KN.visible(nf, st)), True{}))}
+
 def View.empty.loc(+lc: I.Loc, n: Nat, nf: Map<&2, String>, st: M.State) -> D.Node:
-  D.El{"main", "empty", [D.At{"class", "empty"}], D.Dom.cat([D.Txt{Bool.pick(String, Nat.is_eq(n, 0n), MSG.T.empty.add(lc), MSG.T.empty.thread(lc))}], View.kn.loc(lc, U.KN.visible(nf, st), True{}))}
+  View.empty.t.loc(lc, False{}, n, nf, st)
 
 def View.empty(n: Nat, nf: Map<&2, String>, st: M.State) -> D.Node:
   View.empty.loc(I.En{}, n, nf, st)
@@ -3105,7 +3109,7 @@ def View.thread.p(+lc: I.Loc, +u: U.Ui, t: M.Thread, pend: List<&2, String>, +at
         D.At{"data-thread", id}, D.At{"data-drop", "attach"}, D.At{"data-drop-hover", "drop-hover"}],
         View.workspace.foot(View.rail(u), View.workspace.for(View.rail(u), lc, U.Rail.tab.of(panel, U.Str.get(nf, "view.kind:" ++ id), U.Str.get(nf, "view.path:" ++ id)), panel, term, U.Flag.get(op, "palette")), View.workspace.buy(U.Fab.rail(u))), List.concat(&2, D.Node, [
         View.top.own(own, View.rail(u), lc, hd, M.Thread{id, p, ti, c, a, turn, pe, ar, o, sa, ua, pi, en, br, wt, pr, mo, rm, im, se, de}, st, UZ.Chip.of(st, id, now), mini, panel, M.Snooze.on(now, U.Side.until(st, id)), U.Flag.get(op, "snooze"), term, String.eq(U.Str.get(nf, "view.kind:" ++ id), "diff"), String.eq(U.Str.get(drafts, "@del"), id), U.Str.get(drafts, "@ren"), U.Str.get(drafts, "@f.title")),
-        View.kx.note(U.KX.note(nf, sel), nf, sel), View.kn.loc(lc, U.KN.thread(nf, st, sel), True{}),
+        View.kx.note(U.KX.note(nf, sel), nf, sel), View.kn.loc(lc, U.Tour.kn(u, U.KN.thread(nf, st, sel)), True{}),
         View.thread.workbar.own(own, lc, BI.BU.chat.summary(st, id), st, nf, id, turn, pe, View.running(turn)),
         View.thread.subs.own(own, lc, st, nf, id, now),
         [D.El{"div", "timeline", [D.At{"class", "timeline"}, D.At{"id", "timeline"}], List.concat(&2, D.Node, [
@@ -3139,19 +3143,19 @@ def View.bot.h(+lc: I.Loc, +u: U.Ui, +b: BT.Bot, +hd: BI.Head) -> D.Node:
 def View.bot(+lc: I.Loc, +u: U.Ui, +b: BT.Bot) -> D.Node:
   View.bot.h(lc, u, b, BI.BU.head.bot(u, b))
 
-def View.main.s(+lc: I.Loc, settings: Bool, none: Bool, u: U.Ui, +sel: String, +n: Nat) -> D.Node:
+def View.main.s(+lc: I.Loc, settings: Bool, none: Bool, tour: Bool, u: U.Ui, +sel: String, +n: Nat) -> D.Node:
   match settings none u:
     case True{} _ U.Ui{+st, s2, d, l, o, on, now, ad, pa, +v, r, w, e, +note, +nf, ob, tr}:
       View.settings.loc(lc, U.Ui{st, s2, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}, st, nf, v, note)
     case False{} True{} U.Ui{st, _, _, _, _, _, _, _, _, _, _, _, _, _, nf, _, _}:
-      View.empty.loc(lc, n, nf, st)
+      View.empty.t.loc(lc, tour, n, nf, st)
     case False{} False{} U.Ui{+st, s2, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}:
       View.thread(lc, U.Ui{st, s2, d, l, o, on, now, ad, pa, v, r, w, e, note, nf, ob, tr}, U.Ui.thread(st, sel))
 
-def View.main.k(+lc: I.Loc, none: Bool, u: U.Ui, +sel: String, +n: Nat) -> D.Node:
+def View.main.k(+lc: I.Loc, none: Bool, +u: U.Ui, +sel: String, +n: Nat) -> D.Node:
   match none u:
     case _ U.Ui{+st, _, _, _, +o, _, _, _, _, +v, _, _, _, +note, +nf, +ob, +tr}:
-      View.main.s(lc, U.Flag.get(o, "settings"), none, u, sel, n)
+      View.main.s(lc, U.Flag.get(o, "settings"), none, U.Tour.on(u), u, sel, n)
 
 # settings, else a bot, a room or a bot elsewhere, else the thread
 def View.main.b(+lc: I.Loc, settings: Bool, bv: BI.View, +u: U.Ui, +sel: String, +n: Nat) -> D.Node:
