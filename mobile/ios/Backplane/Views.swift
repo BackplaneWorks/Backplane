@@ -1019,10 +1019,15 @@ struct ThreadDestination: View {
         .modifier(ViewerPresentationHost(model: model, thread: id))
         .task(id: watchKey) {
             let started = watchKey
+            model.traceNavigation(.destinationStart, target: id, active: active, destinationReady: ready, known: hasKnownContent)
             timedOut = false
             guard started.active, !started.ready else { return }
-            do { try await Task.sleep(for: .seconds(20)) } catch { return }
+            do { try await Task.sleep(for: .seconds(20)) } catch {
+                model.traceNavigation(.destinationCancelled, target: id, active: active, destinationReady: ready, known: hasKnownContent)
+                return
+            }
             guard !Task.isCancelled, watchKey == started, active, !ready else { return }
+            model.traceNavigation(.destinationTimeout, target: id, active: active, destinationReady: ready, known: hasKnownContent)
             timedOut = true
         }
     }
