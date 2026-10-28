@@ -1484,17 +1484,16 @@ def View.keys.list.loc(+lc: I.Loc, open: Bool, +u: U.Ui) -> List<&2, D.Node>:
 def View.keys.list(open: Bool, +u: U.Ui) -> List<&2, D.Node>:
   View.keys.list.loc(I.En{}, open, u)
 
-# (the key's field has no binding: its value never reaches the client's
-# state, a view action or a draft; host.js's keySave reads it and the name
-# once, at Save or Enter, into the request U.ApiKeys.req builds)
+# (the form is sealed, client.bend's Sealed: the key's value never reaches
+# the client's state, a view action or a draft; host.js's sealedSave reads
+# it and the name once, at Save or Enter, into the request U.ApiKeys.req
+# builds)
 def View.keys.form(+lc: I.Loc, open: Bool, +u: U.Ui) -> List<&2, D.Node>:
   match open:
     case True{}:
       [View.setrow(MSG.T.settings.keys.new(lc), U.ApiKeys.form.say(lc, u),
-        [WB.WB.input("kname", "kname", U.Ui.scratch(u, "@f.kname"), MSG.T.bots.name(lc), "key-save"),
-         D.El{"input", "kval", [D.At{"id", "kval"}, D.At{"class", "field"}, D.At{"type", "password"}, D.At{"autocomplete", "new-password"}, D.At{"spellcheck", "false"},
-           D.At{"placeholder", MSG.T.common.key(lc)}, D.At{"data-enter", "key-save"}], Nil{}},
-         D.Dom.button("primary", "key-save", "", MSG.T.settings.key.keep(lc), MSG.T.common.save(lc))])]
+        [WB.WB.sealed("kname", "key", "text", MSG.T.bots.name(lc)), WB.WB.sealed("kval", "key", "password", MSG.T.common.key(lc)),
+         D.Dom.button("primary", "sealed", "key", MSG.T.settings.key.keep(lc), MSG.T.common.save(lc))])]
     case False{}:
       Nil{}
 

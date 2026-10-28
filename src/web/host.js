@@ -997,27 +997,53 @@ function secretSave(packed) {
   return dispatch("secret-sent", "");
 }
 
-// Settings' API key Save (Enter in its fields too), as the secret box's:
-// the key's field has no binding, so its value is read here once, with the
-// name beside it, and emptied; Bend builds and checks the api-add request
-// (app.bend's key_req) and it goes straight to the hub, never through a
-// view action, the outbox, a draft or the client's state. The names come
-// back when "key-sent" asks for them.
-function keySave() {
-  const name = document.getElementById("kname"), field = document.getElementById("kval");
+// A sealed form's Save (Enter in its fields too; client.bend's Sealed),
+// as the secret box's: the form's fields have no binding, so what is typed
+// in them stays in this page. Save reads them once (data-sealed), Bend
+// builds and checks the form's request (app.bend's sealed_req), and it
+// goes straight to the hub, never through a view action, the outbox, a
+// draft or the client's state. The hub's answer to it (by its own id, past
+// the ordinary ones) empties the fields and says "sealed-sent", or
+// "sealed-err" with why, in the form.
+const sealedWait = new Map();
+let sealedNext = 2 ** 46;
+function sealedFields(form) {
+  return [...document.querySelectorAll("[data-sealed]")].filter(f => f.getAttribute("data-sealed") === form);
+}
+function sealedSave(form) {
+  const fields = sealedFields(form);
   let r;
-  try { r = JSON.parse(App.key_req((name?.value ?? "") + "\u001f" + (field?.value ?? ""))); } catch { return true; }
-  if (r.error) return dispatch("key-err", r.error);
-  if (!socket || socket.readyState !== 1) return dispatch("key-err", "Not connected to the hub");
-  if (field) field.value = "";
-  socket.send(fromList(App.wire_out(r.rpc)));
+  try { r = JSON.parse(App.sealed_req([form, ...fields.map(f => f.value ?? "")].join("\u001f"))); } catch { return true; }
+  if (r.error) return dispatch("sealed-err", form + "\u001f" + r.error);
+  if (!socket || socket.readyState !== 1) return dispatch("sealed-err", form + "\u001f" + "Not connected to the hub");
+  if ([...sealedWait.values()].some(w => w.form === form)) return true;
+  let rpc;
+  try { rpc = JSON.parse(r.rpc); } catch { return true; }
   r = null;
-  return dispatch("key-sent", "");
+  const id = sealedNext++;
+  rpc.id = id;
+  sealedWait.set(id, { form, timer: setTimeout(() => sealedDone(id, false, "The hub did not answer"), 15000) });
+  socket.send(fromList(App.wire_out(JSON.stringify(rpc))));
+  rpc = null;
+  return true;
+}
+function sealedDone(id, ok, why) {
+  const w = sealedWait.get(id);
+  if (!w) return;
+  sealedWait.delete(id);clearTimeout(w.timer);
+  if (ok) for (const f of sealedFields(w.form)) f.value = "";
+  dispatch(ok ? "sealed-sent" : "sealed-err", ok ? w.form : w.form + "\u001f" + why);
+}
+// the hub's answer to a sealed Save (true: it was one)
+function sealedReply(envelope) {
+  if (!sealedWait.has(envelope.id)) return false;
+  sealedDone(envelope.id, envelope.ok === true, typeof envelope.error === "string" && envelope.error ? envelope.error : "The hub refused it");
+  return true;
 }
 
 function dispatch(action, value, timer) {
   if (action === "secret-save") return secretSave(value);
-  if (action === "key-save") return keySave();
+  if (action === "sealed") return sealedSave(value);
   if (["send", "send-alt"].includes(action)) historyClear();
   if (action === "side-toggle" || action === "rail-toggle") return foldToggle(action === "side-toggle" ? "side" : "rail");
   if (["term-toggle", "ws-term-hide", "ws-term-here"].includes(action) || action === "ws-go" && value === "term") terminalOutput.retire();
@@ -2275,6 +2301,7 @@ async function startThin(again = false, reason = "initial") {
     try {
       const j = Wire.cbor(bytes, KEYS, WORDS), envelope = Wire.plain(j);
       if (envelope.t === "hb") { s.hb = true;diagnostic.heartbeat();return; }
+      if (envelope.t === "reply" && sealedReply(envelope)) return;
       if (envelope.t === "reply") outboxReply(envelope);
       if (envelope.t === "view") { diagnostic.greeting(envelope);clearTimeout(thinGreetingTimer);thin.greeting(envelope); }
       else if (!thin.receive(envelope) && envelope.t === "reply" && Number.isSafeInteger(envelope.id) && envelope.id < 2 ** 47) thin.ack(envelope);

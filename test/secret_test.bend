@@ -39,6 +39,31 @@ def req(packed: String) -> String:
 def key_req(packed: String) -> String:
   U.ApiKeys.req(packed)
 
+# every sealed form's Save on the web (client.bend's Sealed.req): the
+# value only in the request, never in a view action
+def sealed_req(packed: String) -> String:
+  U.Sealed.req(packed)
+
+def show.cmds(cs: List<&2, U.Cmd>) -> String:
+  match cs:
+    case Nil{}:
+      ""
+    case U.Send{t} <> rest:
+      t ++ ";" ++ show.cmds(rest)
+    case _ <> rest:
+      show.cmds(rest)
+
+# what the hub's answer to a sealed Save leaves (Sealed.after, a phone's
+# "key-sent"/"key-err" too): the form's note ("" for none), then the
+# requests it sends ("<why>|<requests>")
+def sealed_after.k(a: U.Act, form: String) -> String:
+  match a:
+    case U.Act{+u, cs}:
+      U.Sealed.err(u, form) ++ "|" ++ show.cmds(cs)
+
+def sealed_after(action: String, value: String, form: String) -> String:
+  sealed_after.k(U.Ui.act(U.Ui.init(0n), action, value), form)
+
 def handle(n: String) -> String:
   J.Json.show(S.Sec.handle(n, True{}))
 

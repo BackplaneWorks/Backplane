@@ -46,6 +46,14 @@ def WB.secret(+id: String, +field: String, +value: String, +ph: String) -> D.Nod
   D.El{"input", id, [D.At{"id", id}, D.At{"class", "field"}, D.At{"type", "password"}, D.At{"placeholder", ph}, D.At{"autocomplete", "off"},
     D.At{"value", value}, D.At{"data-bfield", field}, D.On{"input", "bfield"}], Nil{}}
 
+# a field that takes a secret (client.bend's Sealed): no binding and no
+# value, so what is typed stays in the page; Enter, like the form's Save,
+# is "sealed" with the form, and host.js reads every field of the form
+# (data-sealed) once. `kind` is the input's type ("password" or "text").
+def WB.sealed(+id: String, +form: String, +kind: String, +ph: String) -> D.Node:
+  D.El{"input", id, [D.At{"id", id}, D.At{"class", "field"}, D.At{"type", kind}, D.At{"placeholder", ph}, D.At{"autocomplete", Bool.pick(String, String.eq(kind, "password"), "new-password", "off")},
+    D.At{"spellcheck", "false"}, D.At{"data-sealed", form}, D.At{"data-enter", "sealed"}, D.At{"data-value", form}], Nil{}}
+
 def WB.area(+id: String, +field: String, +value: String, +ph: String) -> D.Node:
   D.El{"textarea", id, [D.At{"id", id}, D.At{"class", "field"}, D.At{"rows", "3"}, D.At{"placeholder", ph}, D.At{"value", value},
     D.At{"data-bfield", field}, D.On{"input", "bfield"}], Nil{}}

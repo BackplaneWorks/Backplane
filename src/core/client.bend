@@ -7913,6 +7913,46 @@ def Bots.token.clear(u: Ui) -> Ui:
 def Bots.token(u: Ui, +hook: String, +op: String) -> Act:
   Ui.rpc(Bots.token.clear(u), "bots.hook_token", [J.KV{"hook", J.Str{hook}}, J.KV{"op", J.Str{op}}])
 
+# Sealed fields
+# -------------
+# On the web (and the desktop app, the same page) a field that takes a
+# secret has no binding (bots.bend's WB.sealed), as the secret box's: what
+# is typed stays in the page, never in this state, a view action, a draft
+# or a frame from the hub. Save, or Enter in one of its fields, is the
+# action "sealed" with the form's name, which its fields carry too; host.js
+# (sealedSave) reads them once, Sealed.req builds and checks the form's
+# request ({"rpc"}, or {"error": why} and nothing is sent), and it goes
+# straight to the hub. The hub's answer to it comes back as "sealed-sent"
+# (value: the form) or "sealed-err" ("<form>\u001f<why>", said in the
+# form: Sealed.say). The forms are Sealed.forms (a form may carry an
+# argument, "<form>:<arg>"); phones and the window keep their own.
+
+def Sealed.first(ps: List<&2, String>) -> String:
+  match ps:
+    case +h <> _:
+      h
+    case Nil{}:
+      ""
+
+# a form without its argument ("agykey:GEMINI_API_KEY" is "agykey")
+def Sealed.base(+form: String) -> String:
+  Sealed.first(String.split(form, ':'))
+
+# why the form's last Save went nowhere ("" for none)
+def Sealed.err(+u: Ui, +form: String) -> String:
+  Ui.scratch(u, "@sealed:" ++ Sealed.base(form))
+
+# a form's note, or why its last Save went nowhere
+def Sealed.say(+u: Ui, +form: String, +note: String) -> String:
+  Bool.pick(String, String.is_empty(Sealed.err(u, form)), note, Sealed.err(u, form))
+
+def Sealed.forget(+u: Ui, +form: String) -> Ui:
+  Ui.scratch_set(u, "@sealed:" ++ Sealed.base(form), "")
+
+# a request for the host to send, or why nothing goes
+def Sealed.out(+bad: String, +rpc: String) -> String:
+  Bool.pick(String, String.is_empty(bad), J.Json.show(J.Json.obj([J.KV{"rpc", J.Str{rpc}}])), J.Json.show(J.Json.obj([J.KV{"error", J.Str{bad}}])))
+
 def Bots.google.rpc.x(+u: Ui, +op: String, +account: String, +pasted: String, +redirect: String) -> Act:
   Ui.rpc(u, "bots.google", [J.KV{"op", J.Str{op}}, J.KV{"clientId", J.Str{Bots.field(u, "gid")}}, J.KV{"clientSecret", J.Str{Bots.field(u, "gsecret")}},
     J.KV{"pasted", J.Str{pasted}}, J.KV{"account", J.Str{account}}, J.KV{"redirect", J.Str{redirect}}])
@@ -9325,13 +9365,10 @@ def ApiKeys.add(+u: Ui) -> Act:
 def ApiKeys.del(+u: Ui, +name: String) -> Act:
   Voice.rpc(u, "api-del", [J.KV{"name", J.Str{name}}])
 
-# The web's Save (host.js's keySave), as the secret box's: the key's field
-# has no binding, so its value is never in this state, a view action or a
-# draft; the host reads it once, at Save, with the name beside it
-# ("<name>\u001f<value>"), and sends the api-add request this builds
-# straight to the hub ({"rpc", "name"}, or {"error"}: Keys.bad). Then
-# "key-sent" shuts the form and asks for the names again, and "key-err"
-# says why nothing went (@keys.err, in the form's note).
+# The API key's sealed form ("key"): the name and the value ("<name>
+# \u001f<value>") into the api-add request ({"rpc", "name"}, or {"error"}:
+# Keys.bad). Once the hub has it, the form shuts and the names are asked
+# for again (ApiKeys.sent).
 def ApiKeys.req.k(+bad: String, +name: String, +value: String) -> String:
   Bool.pick(String, String.is_empty(bad),
     J.Json.show(J.Json.obj([J.KV{"rpc", J.Str{Rpc.text(0n, "bots.voice", [J.KV{"op", J.Str{"api-add"}}, J.KV{"name", J.Str{name}}, J.KV{"value", J.Str{value}}])}}, J.KV{"name", J.Str{AK.Keys.name(name)}}])),
@@ -9348,14 +9385,7 @@ def ApiKeys.req(+packed: String) -> String:
   ApiKeys.req.ps(String.split(packed, Chr{31}))
 
 def ApiKeys.sent(+u: Ui) -> Act:
-  Voice.rpc(Ui.flag_off(Ui.scratch_set(Ui.scratch_set(u, "@f.kname", ""), "@keys.err", ""), "keyform"), "status", Nil{})
-
-def ApiKeys.after(sent: Bool, +u: Ui, +why: String) -> Act:
-  match sent:
-    case True{}:
-      ApiKeys.sent(u)
-    case False{}:
-      Act{Ui.scratch_set(u, "@keys.err", why), Nil{}}
+  Voice.rpc(Ui.flag_off(Ui.scratch_set(u, "@f.kname", ""), "keyform"), "status", Nil{})
 
 # what Settings says about them (every client)
 def ApiKeys.note.loc(+l: I.Loc, +u: Ui) -> String:
@@ -9632,9 +9662,9 @@ def Sbox.reply(+o: J.Json, u: Ui) -> Ui:
 def ApiKeys.form.note(+l: I.Loc) -> String:
   MSG.T.apikeys.form(l)
 
-# the form's note, or why its Save sent nothing (the web's "key-err")
+# the form's note, or why its Save went nowhere (the web's sealed form)
 def ApiKeys.form.say(+l: I.Loc, +u: Ui) -> String:
-  Bool.pick(String, String.is_empty(Ui.scratch(u, "@keys.err")), ApiKeys.form.note(l), Ui.scratch(u, "@keys.err"))
+  Sealed.say(u, "key", ApiKeys.form.note(l))
 
 # a secret as it shows while typed: a dot a character
 def ApiKeys.dots(s: String) -> String:
@@ -9843,6 +9873,62 @@ def Agv.act.k(i: Nat, +u: Ui, +value: String) -> Act:
 # an "agy-" action
 def Agv.act(+u: Ui, +action: String, +value: String) -> Act:
   Agv.act.k(C.Codec.pos(["agy-install", "agy-signin", "agy-back", "agy-cancel", "agy-signout", "agy-forget", "agy-key", "agy-gcp", "agy-acct"], action), u, value)
+
+# The web's sealed forms (Sealed.*, above): each form's request, built
+# from its fields as host.js read them ("<form>\u001f<field>..."), and
+# what its Save leads to once the hub has answered.
+
+def Sealed.none() -> String:
+  J.Json.show(J.Json.obj([J.KV{"error", J.Str{"Nothing to save"}}]))
+
+def Sealed.req.k(i: Nat, +arg: String, +vs: List<&2, String>) -> String:
+  match i:
+    case 0n:
+      ApiKeys.req.ps(vs)
+    case _:
+      Sealed.none()
+
+# a form's argument ("agykey:GEMINI_API_KEY" has "GEMINI_API_KEY")
+def Sealed.arg(+form: String) -> String:
+  String.drop(form, Nat.add(String.length(Sealed.base(form)), 1n))
+
+def Sealed.forms() -> List<&2, String>:
+  ["key"]
+
+def Sealed.req.ps(ps: List<&2, String>) -> String:
+  match ps:
+    case +form <> +vs:
+      Sealed.req.k(C.Codec.pos(Sealed.forms(), Sealed.base(form)), Sealed.arg(form), vs)
+    case Nil{}:
+      Sealed.none()
+
+# a sealed form's request (host.js's sealedSave): "<form>\u001f<field>..."
+# to {"rpc"} or {"error": why}
+def Sealed.req(+packed: String) -> String:
+  Sealed.req.ps(String.split(packed, Chr{31}))
+
+# once the hub has a form's value: the API key's form shuts
+def Sealed.sent.k(i: Nat, +u: Ui) -> Act:
+  match i:
+    case 0n:
+      ApiKeys.sent(u)
+    case _:
+      Act{u, Nil{}}
+
+def Sealed.err.put(ps: List<&2, String>, u: Ui) -> Ui:
+  match ps:
+    case +form <> why:
+      Ui.scratch_set(u, "@sealed:" ++ Sealed.base(form), String.join(why, "\u{1f}"))
+    case Nil{}:
+      u
+
+# "sealed-sent" (value: the form) or "sealed-err" ("<form>\u001f<why>")
+def Sealed.after(sent: Bool, +u: Ui, +value: String) -> Act:
+  match sent:
+    case True{}:
+      Sealed.sent.k(C.Codec.pos(Sealed.forms(), Sealed.base(value)), Sealed.forget(u, value))
+    case False{}:
+      Act{Sealed.err.put(String.split(value, Chr{31}), u), Nil{}}
 
 # past the phone's upload: the viewer's history (Hs.act, from 31)
 def Upload.rest(hist: Bool, +i: Nat, +u: Ui, +value: String) -> Act:
@@ -14135,11 +14221,17 @@ def Ui.act.sec(sec: Bool, +u: Ui, +action: String, +value: String) -> Act:
     case False{}:
       Ui.act.r(String.starts_with(action, "rv-"), u, action, value)
 
-# (the web's API key Save, after host.js's keySave: "key-sent", "key-err")
+# a phone's API key Save (bridge.js's apiKey) says "key-sent" or
+# "key-err" (value: why): the "key" form's
+def Sealed.phone(+action: String, +value: String) -> String:
+  Bool.pick(String, String.eq(action, "key-sent"), "key", Bool.pick(String, String.eq(action, "key-err"), "key\u{1f}" ++ value, value))
+
+# (the web's sealed Save, after host.js's sealedSave: "sealed-sent",
+# "sealed-err"; a phone's API key Save: "key-sent", "key-err")
 def Ui.act.key(key: Bool, +u: Ui, +action: String, +value: String) -> Act:
   match key:
     case True{}:
-      ApiKeys.after(String.eq(action, "key-sent"), u, value)
+      Sealed.after(Bool.or(String.eq(action, "sealed-sent"), String.eq(action, "key-sent")), u, Sealed.phone(action, value))
     case False{}:
       Ui.act.sec(String.starts_with(action, "secret-"), u, action, value)
 
@@ -14148,7 +14240,7 @@ def Ui.act.g(agy: Bool, +u: Ui, +action: String, +value: String) -> Act:
     case True{}:
       Agv.act(u, action, value)
     case False{}:
-      Ui.act.key(Nat.is_lt(C.Codec.pos(["key-sent", "key-err"], action), 2n), u, action, value)
+      Ui.act.key(Nat.is_lt(C.Codec.pos(["sealed-sent", "sealed-err", "key-sent", "key-err"], action), 4n), u, action, value)
 
 # (browser tasks' "tk-" and "bb-" actions: Teach.act)
 # (the schematic's sheet navigation, "sch-": Sch.act)

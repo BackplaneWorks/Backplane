@@ -105,6 +105,26 @@ assert.deepEqual(keyRpc.p, { op: 'api-add', name: 'openai key', value: F1 });
 assert.equal(JSON.parse(raw.key_req(`  \u001f${F1}`)).error, 'Give the key a name');
 assert.equal(JSON.parse(raw.key_req('NAME\u001f  ')).error, 'Paste the key itself');
 assert.equal(JSON.parse(raw.key_req('garbage')).error, 'Give the key a name');
+// every sealed form's Save on the web (client.bend's Sealed.req): one
+// request with the value, or why nothing goes; the forms' fields as
+// host.js reads them ("<form>\u001f<field>...")
+const sealed = (...ps) => JSON.parse(raw.sealed_req(ps.join('\u001f')));
+const sealedRpc = (...ps) => { const o = sealed(...ps); assert.ok(o.rpc, JSON.stringify(o)); return JSON.parse(o.rpc); };
+const refusals = [['key', '', F1], ['nothing', F1]];
+assert.deepEqual(sealedRpc('key', 'openai key', F1).p, { op: 'api-add', name: 'openai key', value: F1 });
+assert.equal(sealed('key', '', F1).error, 'Give the key a name');
+assert.equal(sealed('key', 'NAME', ' ').error, 'Paste the key itself');
+assert.equal(sealed('nothing', F1).error, 'Nothing to save');
+assert.equal(sealed('').error, 'Nothing to save');
+// the hub's answer, said in the form (a phone's API key Save too)
+assert.ok(raw.sealed_after('sealed-err', 'keythe key could not be written', 'key').startsWith('the key could not be written|'));
+assert.ok(raw.sealed_after('key-err', 'Give the key a name', 'key').startsWith('Give the key a name|'));
+for (const [a, v] of [['sealed-sent', 'key'], ['key-sent', '']]) {
+  const after = raw.sealed_after(a, v, 'key');
+  assert.ok(after.startsWith('|') && after.includes('"op":"status"'), after);
+}
+// no refusal carries the value it was given
+for (const ps of refusals) assert.ok(!sealed(...ps).error.includes(F1), 'a refusal never carries the value');
 assert.match(raw.prompt('[{"name":"tailscale-bub","purpose":"p"}]'), /`tailscale-bub`/);
 assert.match(raw.prompt('[]'), /secret_request/);
 assert.ok(!raw.prompt('[]').includes('Set now'));
