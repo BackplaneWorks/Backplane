@@ -281,12 +281,16 @@ def View.rows_in(+lc: I.Loc, ts: List<&2, M.Thread>, +ix: U.SIx, +st: M.State, +
 def View.rows_of(+lc: I.Loc, ts: List<&2, M.Thread>, +ix: U.SIx, +st: M.State, +sel: String, +now: Nat) -> List<&2, D.Node>:
   View.rows_in(lc, ts, ix, st, sel, now, False{}, False{})
 
+# a shut shelf, with the open thread's row if it is on it (U.Shelf.words)
+def View.shelf.shut(+lc: I.Loc, +key: String, +label: String, +shown: List<&2, M.Thread>, +ix: U.SIx, +st: M.State, +sel: String, +now: Nat) -> List<&2, D.Node>:
+  WI.WIcon.button("shelf", "toggle-settled", key, MSG.T.common.show(lc), "chevron-right", 14, U.Shelf.words(lc, label, List.length(&2, M.Thread, shown))) <> View.rows_of(lc, shown, ix, st, sel, now)
+
 def View.shelf.k(+lc: I.Loc, open: Bool, +key: String, +label: String, ts: List<&2, M.Thread>, +ix: U.SIx, +st: M.State, +sel: String, +now: Nat) -> List<&2, D.Node>:
   match open:
     case True{}:
       WI.WIcon.button("shelf open", "toggle-settled", key, MSG.T.common.hide(lc), "chevron-down", 14, label) <> View.rows_of(lc, ts, ix, st, sel, now)
     case False{}:
-      WI.WIcon.button("shelf", "toggle-settled", key, MSG.T.common.show(lc), "chevron-right", 14, label) <> View.rows_of(lc, U.Side.sel(ts, sel), ix, st, sel, now)
+      View.shelf.shut(lc, key, label, U.Side.sel(ts, sel), ix, st, sel, now)
 
 # a collapsible shelf (Settled, Archived): its label and count, then its
 # rows when open; nothing when empty
@@ -453,13 +457,13 @@ def View.afaded.open(+lc: I.Loc, on: Bool, rs: List<&2, U.ARow>, +ix: U.SIx, +st
 
 # the settled rows folded under one "Settled N" row, shown while it is
 # open or a search is on (core's Active.open)
-def View.afaded.k(+lc: I.Loc, searching: Bool, +open: Bool, +n: Nat, rs: List<&2, U.ARow>, +ix: U.SIx, +st: M.State, +sel: String) -> List<&2, D.Node>:
+def View.afaded.k(+lc: I.Loc, searching: Bool, +open: Bool, +n: Nat, +rs: List<&2, U.ARow>, +ix: U.SIx, +st: M.State, +sel: String) -> List<&2, D.Node>:
   match searching:
     case True{}:
       View.arows(lc, rs, ix, st, sel, "search")
     case False{}:
       WI.WIcon.button(Bool.pick(String, open, "shelf older open", "shelf older"), "side-settled", "", MSG.T.sidebar.settled.note(lc),
-          Bool.pick(String, open, "chevron-down", "chevron-right"), 14, MSG.T.sidebar.settled.count(lc, Nat.show(n)))
+          Bool.pick(String, open, "chevron-down", "chevron-right"), 14, Bool.pick(String, open, MSG.T.sidebar.settled.count(lc, Nat.show(n)), U.Shelf.words(lc, MSG.T.sidebar.settled.count(lc, Nat.show(n)), List.length(&2, U.ARow, U.Active.sel(rs, sel)))))
         <> View.afaded.open(lc, open, rs, ix, st, sel, "")
 
 def View.afaded(+lc: I.Loc, rs: List<&2, U.ARow>, +q: String, +open: Map<&2, Bool>, +ix: U.SIx, +st: M.State, +sel: String) -> List<&2, D.Node>:

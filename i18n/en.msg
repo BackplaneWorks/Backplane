@@ -1012,6 +1012,7 @@ bots.delete.button.tip = Delete this bot
 viewer.layers.restore = Show every layer again
 files.preview.none = {name}: no preview here
 sidebar.shelf.count = {name} {count}
+sidebar.shelf.shown = {label} · {n} shown
 subagents.cancel.word = {action, select, release {Release} cancel {Cancel} other {Stop}}
 subagents.badge = {count} {plural, select, one {agent} other {agents}}
 subagents.busy = {count} at work

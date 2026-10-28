@@ -2,6 +2,7 @@ import Base
 import ./check.bend as C
 import ../src/core/model.bend as M
 import ../src/core/client.bend as U
+import ../src/core/i18n.bend as I
 
 # The simpler sidebar: quiet projects sink and fold away, the active view
 # puts what waits on the person first and fades the recently settled, and
@@ -164,3 +165,5 @@ def main() -> IO(Unit):
     C.Check.str("enter opens first active", U.Ui.sel(act(act(U.Ui.fold(List.append(&2, M.Change, log(), [M.SettingSet{"sidebar.view", "active", 1n}]), U.Ui.init(now())), "bfield", "pq\u{1f}pin swap"), "proj-go", "")), "b")
     C.Check.str("palette: a thread names its project", U.Palette.place(st(), "select", "a"), "board")
     C.Check.str("palette: a command names none", U.Palette.place(st(), "new-thread", "p1"), "")
+    C.Check.str("shut fold, nothing shown", U.Shelf.words(I.En{}, "Settled 2", 0n), "Settled 2")
+    C.Check.str("shut fold, the open row shown", U.Shelf.words(I.En{}, "Settled 2", 1n), "Settled 2 · 1 shown")

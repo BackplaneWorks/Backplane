@@ -1032,6 +1032,7 @@ bots.delete.button.tip = ボットを削除
 viewer.layers.restore = すべてのレイヤーを再表示
 files.preview.none = {name}：プレビューなし
 sidebar.shelf.count = {name}{count}件
+sidebar.shelf.shown = {label}・{n}件表示中
 subagents.cancel.word = {action, select, release {解除} cancel {キャンセル} other {停止}}
 subagents.badge = エージェント{count}件{plural, select, other {}}
 subagents.busy = {count}件が作業中
