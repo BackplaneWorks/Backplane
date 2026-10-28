@@ -12,6 +12,16 @@ on:
         description: Full root-frozen source commit containing these producers
         type: string
         required: true
+      targets:
+        description: JSON service target list for this artifact-only build
+        type: string
+        required: false
+        default: '["linux-x64","linux-arm64","darwin-x64","darwin-arm64","windows-x64"]'
+      runtime_targets:
+        description: JSON matching-host runtime include rows for selected service targets
+        type: string
+        required: false
+        default: '[{"target":"linux-x64","runner":"ubuntu-24.04","service":"backplane-serve","version":true},{"target":"linux-arm64","runner":"ubuntu-24.04-arm","service":"backplane-serve","version":true},{"target":"darwin-x64","runner":"macos-15-intel","service":"backplane-serve","version":true},{"target":"darwin-arm64","runner":"macos-15","service":"backplane-serve","version":true},{"target":"windows-x64","runner":"windows-2025","service":"backplane-serve.exe","version":false}]'
       operation:
         type: choice
         options: [js, android, android-signing-info]
@@ -44,8 +54,8 @@ concurrency:
 
 env:
   BACKPLANE_FROZEN_COMMIT: ${{ inputs.ref }}
-  BACKPLANE_VERSION: v0.12.3
-  BACKPLANE_VERSION_STAMP: '0.12.3'
+  BACKPLANE_VERSION: v0.13.0
+  BACKPLANE_VERSION_STAMP: '0.13.0'
   BACKPLANE_TELEMETRY_CHANNEL: release
 
 jobs:
@@ -54,7 +64,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [linux-x64, linux-arm64, darwin-x64, darwin-arm64, windows-x64]
+        target: ${{ fromJSON(inputs.targets) }}
     # every target cross-builds here: bun links the emitted JS onto the
     # target's own Bun runtime, pinned in scripts/release-bootstrap.py
     runs-on: ubuntu-24.04
@@ -111,14 +121,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { target: linux-x64,    runner: ubuntu-24.04,     service: backplane-serve,     version: true }
-          - { target: linux-arm64,  runner: ubuntu-24.04-arm, service: backplane-serve,     version: true }
-          - { target: darwin-x64,   runner: macos-15-intel,   service: backplane-serve,     version: true }
-          - { target: darwin-arm64, runner: macos-15,         service: backplane-serve,     version: true }
-          # Bend's JS runtime has no Win32 syscalls yet: the service is
-          # measured and assembled, its --version only reported
-          - { target: windows-x64,  runner: windows-2025,     service: backplane-serve.exe, version: false }
+        include: ${{ fromJSON(inputs.runtime_targets) }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     steps:
@@ -156,7 +159,7 @@ jobs:
           chmod 755 "$SERVICE"  # artifacts drop file modes
           v=$("$SERVICE" --version)
           echo "$v"
-          [ "$v" = "backplane 0.12.3" ]
+          [ "$v" = "backplane 0.13.0" ]
       - name: Measure matching-host system ABI and assemble genuine service component
         shell: bash
         env:
@@ -175,7 +178,7 @@ jobs:
             mkdir -p "$RUNNER_TEMP/winrt" && (cd "$RUNNER_TEMP" && tar -xzf winrt.tar.gz -C winrt)
             set -- --windows-runtime "$RUNNER_TEMP/winrt"
           fi
-          "$py" build/bootstrap-tools/scripts/service-runtime.py "$@" --source-root "$GITHUB_WORKSPACE" --build "$GITHUB_WORKSPACE/build/bootstrap-js" --producer "$GITHUB_WORKSPACE/build/bootstrap-tools/scripts/service-release.py" --producer-sha256 d2f87b26f3a01d0aab80d2bdbf7cad1d9a1504dc48c67d4d7406df555464a3dc --out "$GITHUB_WORKSPACE/build/bootstrap-service"
+          "$py" build/bootstrap-tools/scripts/service-runtime.py "$@" --source-root "$GITHUB_WORKSPACE" --build "$GITHUB_WORKSPACE/build/bootstrap-js" --producer "$GITHUB_WORKSPACE/build/bootstrap-tools/scripts/service-release.py" --producer-sha256 6dff1255e45b84df922e37ae984f9655583f1c0e6deac74cc2a5b5f9af654568 --out "$GITHUB_WORKSPACE/build/bootstrap-service"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
