@@ -1679,6 +1679,7 @@ kbd { font: calc(10px * var(--text-scale, 100) / 100)/1 var(--mono); color: var(
 .app.top .sidebar[data-shortcut-hints="threads"] [data-shortcut-kind="threads"]::after { border-color: var(--accent); background: var(--panel); color: var(--text); }
 .keys-legend { position: sticky; bottom: -24px; z-index: 5; margin: 16px 0 -24px; padding: 8px 12px 10px; display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; align-items: center; background: var(--panel); border-top: 1px solid var(--line); color: var(--faint); font-size: calc(11px * var(--text-scale, 100) / 100); }
 .keys-legend .keys { display: inline-flex; gap: 3px; white-space: nowrap; }
+.keys-legend .what { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .keys-legend kbd { font-size: calc(9px * var(--text-scale, 100) / 100); padding: 1px 4px; }
 .keys-legend button.legend-all { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: center; padding: 0; background: none; border: 0; color: var(--faint); text-align: left; }
 .keys-legend button.legend-all:hover, .keys-legend button.legend-all:hover kbd { color: var(--text); }

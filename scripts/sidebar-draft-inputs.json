@@ -143,7 +143,7 @@
     "src/web/space.bend": "b86a265e41a900498bc33c37c0404c4d6678554efe3d9054f329beb2cf35ee63",
     "src/web/usage-graph.bend": "fa06f7d2bf855a396a5f7a7b4725dfaa990145fbbcefe7ad21ae8f9a698a2679",
     "src/web/usage-page.bend": "706e3f17a4a3e5f159656d47aeb76a940d4825421f5c33228f9aef692ec926e3",
-    "src/web/view.bend": "c4b7e81d07c6585a7fdb1db1637bc24c28be9fe281e8e5f910851bad3d2e72d1"
+    "src/web/view.bend": "1c17e3526b5aff4ccdc9a14e7946c9c1656d139780f175cdc690ef2143f9aa9f"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -253,5 +253,5 @@
       "sourceSnapshot": "/home/h/Documents/i2cjak/bp-coord/settle-fresh-work/SOURCE-structural-correction.json"
     }
   },
-  "reviewNote": "Make each sidebar row say what it is: settled, pinned, or when it wakes"
+  "reviewNote": "Keep the Japanese sidebar legend on one line"
 }

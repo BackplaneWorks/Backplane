@@ -635,7 +635,7 @@ def View.sidebar.top(found: List<&2, D.Node> & List<&2, D.Node>, head: List<&2, 
 def View.legend.word(lc: I.Loc, +k: String) -> String:
   match lc:
     case I.Ja{}:
-      Bool.pick(String, String.eq(k, "move"), "前／次のスレッド", Bool.pick(String, String.eq(k, "new"), "ここに新しいスレッド", Bool.pick(String, String.eq(k, "jump"), "このプロジェクトのスレッドへ", Bool.pick(String, String.eq(k, "all"), "すべてのショートカット", "キーボードショートカット"))))
+      Bool.pick(String, String.eq(k, "move"), "前／次のスレッド", Bool.pick(String, String.eq(k, "new"), "ここに新しいスレッド", Bool.pick(String, String.eq(k, "jump"), "ここのスレッドへ移動", Bool.pick(String, String.eq(k, "all"), "すべてのショートカット", "キーボードショートカット"))))
     case _:
       Bool.pick(String, String.eq(k, "move"), "prev / next thread", Bool.pick(String, String.eq(k, "new"), "new thread here", Bool.pick(String, String.eq(k, "jump"), "jump to a thread here", Bool.pick(String, String.eq(k, "all"), "all shortcuts", "Keyboard shortcuts"))))
 
