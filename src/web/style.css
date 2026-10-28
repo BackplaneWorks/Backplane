@@ -99,6 +99,7 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .brand .ver { color: var(--faint); font-size: calc(11px * var(--text-scale, 100) / 100); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .conn { width: 7px; height: 7px; background: var(--bad); }
 .conn.on { background: var(--ok); }
+.hub-down .conn.on { background: var(--bad); }
 /* Sidebar brand mark. */
 .brand-mark { position: relative; display: block; width: 24px; height: 24px; flex: 0 0 24px; background: url("./apple-touch-icon.png") center / contain no-repeat; }
 .brand-mark .conn { position: absolute; right: -2px; bottom: -1px; border: 1px solid var(--panel); box-shadow: 0 0 0 1px var(--panel); }

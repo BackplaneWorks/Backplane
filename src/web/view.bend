@@ -4492,7 +4492,7 @@ def View.chrome.place(+lc: I.Loc, settings: Bool, bv: BI.View, +u: U.Ui) -> List
 def View.chrome.brand(+lc: I.Loc, +on: Bool, +v: String) -> List<&2, D.Node>:
   [D.El{"span", "", [D.At{"class", "brand-mark"}], [D.El{"span", "", [D.At{"class", Bool.pick(String, on, "conn on", "conn")},
      D.At{"role", "img"}, D.At{"title", MSG.T.native.hub.state(lc, Bool.pick(String, on, "online", "offline"))},
-     D.At{"aria-label", MSG.T.native.hub.state(lc, Bool.pick(String, on, "online", "offline"))}], Nil{}}]},
+     D.At{"aria-label", MSG.T.native.hub.state(lc, Bool.pick(String, on, "online", "offline"))}, D.At{"data-down", MSG.T.native.hub.state(lc, "offline")}], Nil{}}]},
    D.El{"span", "", [D.At{"class", "name"}, D.At{"title", "Backplane " ++ v}], [D.Txt{"Backplane"}]}]
 
 # the command palette's field (WS.palette, Ctrl+K)

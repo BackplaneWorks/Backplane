@@ -2186,17 +2186,31 @@ const connectionLog = new ConnectionLog({ storage: localStorage, bundle: CONNECT
   visibility: () => document.visibilityState || "unknown", online: () => navigator.onLine !== false });
 const thinBackoff = new Backoff(), thinRetry = new Retry();
 let downSince = 0, downNote = "", downTimer = 0;
+// The top bar's dot follows the link while the bar says it is down: the
+// hub drew it green and cannot redraw it now, so the page turns it (the
+// root's hub-down class) and says the words the hub left in data-down.
+function connDot(down) {
+  document.documentElement.classList.toggle("hub-down", down);
+  for (const dot of document.querySelectorAll(".brand-mark .conn")) {
+    if (down && dot.dataset.down) {
+      if (dot.dataset.upTitle === undefined) dot.dataset.upTitle = dot.title || "";
+      dot.title = dot.dataset.down;dot.setAttribute("aria-label", dot.dataset.down);
+    } else if (!down && dot.dataset.upTitle !== undefined) {
+      dot.title = dot.dataset.upTitle;dot.setAttribute("aria-label", dot.dataset.upTitle);delete dot.dataset.upTitle;
+    }
+  }
+}
 function downStatus(note) {
   downNote = note;
   if (!downSince) downSince = Date.now();
   clearTimeout(downTimer);
   const wait = Math.max(0, downSince + QUIET_MS - Date.now());
-  downTimer = setTimeout(() => { if (downSince) showViewStatus(waiting(downNote)); }, wait);
+  downTimer = setTimeout(() => { if (downSince) { showViewStatus(waiting(downNote));connDot(true); } }, wait);
 }
 function upStatus() {
   downSince = 0;clearTimeout(downTimer);downTimer = 0;
   thinBackoff.reset();thinRetry.cancel();
-  showViewStatus("");
+  showViewStatus("");connDot(false);
 }
 function thinReconnect() {
   if (!pairingAccepted || viewMode === "compatibility" || thinRetry.pending) return;
