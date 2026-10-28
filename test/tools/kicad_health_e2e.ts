@@ -62,7 +62,7 @@ async function start(name: string, path: string, homeOverride?: string) {
   mkdirSync(skills, { recursive: true }); writeFileSync(join(skills, "SKILL.md"), "---\nname: fixture\ndescription: test fixture\n---\n");
   const port = freePort();
   const proc = Bun.spawn([resolve(binary), "--foreground", "--home", home, "--port", String(port), "--no-tailscale"], {
-    env: { ...process.env, HOME: home, XDG_CACHE_HOME: join(home, ".cache"), BACKPLANE_AGENTS: fake, PATH: `${fake}:/usr/bin:/bin`, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_HOME: home, BACKPLANE_KICAD_TEST_COUNT: join(home, "version-calls"), BACKPLANE_KICAD: path, BACKPLANE_KICAD_CLI: "", BACKPLANE_PEERS: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_WAKE_TICK_MS: "1000", BACKPLANE_LOCK_DIR: join(home, "locks") },
+    env: { ...process.env, HOME: home, XDG_CACHE_HOME: join(home, ".cache"), BACKPLANE_AGENTS: fake, PATH: `${fake}:/usr/bin:/bin`, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_HOME: home, BACKPLANE_KICAD_TEST_COUNT: join(home, "version-calls"), BACKPLANE_KICAD: path, BACKPLANE_KICAD_CLI: "", BACKPLANE_PEERS: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_ORDER_SERVER: "http://127.0.0.1:9", BACKPLANE_WAKE_TICK_MS: "1000", BACKPLANE_LOCK_DIR: join(home, "locks") },
     stdout: Bun.file(join(home, "stdout.log")), stderr: Bun.file(join(home, "stderr.log"))
   });
   processes.push(proc);

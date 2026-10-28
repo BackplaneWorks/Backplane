@@ -66,7 +66,7 @@ const listen = Bun.listen({hostname:"127.0.0.1",port:0,socket:{data(){}}}); cons
 if (port<3799) throw new Error("test port below3799");
 const trace=join(root,"trace.json");
 const proc=Bun.spawn([bin,"--home",home,"--port",String(port),"--host","127.0.0.1","--no-tailscale","--foreground"], {
-  env:{...process.env,HOME:root,BACKPLANE_AGENTS:fake,PATH:`${fake}:${process.env.PATH}`,DISPLAY:"",WAYLAND_DISPLAY:"",BACKPLANE_NO_UPDATE:"1",BACKPLANE_KEYRING_LOCKED:"0",BACKPLANE_PEERS:"",BACKPLANE_LOCK_DIR:join(root,"locks"),BACKPLANE_DEPLOY_LOCKS:join(root,"deploy-locks"),BACKPLANE_TRACE:trace,FAKE_LOG:join(root,"agents.log"),FAKE_SECS:"60",FAKE_PER:"1",FAKE_CYCLE:"100000"},
+  env:{...process.env,HOME:root,BACKPLANE_AGENTS:fake,PATH:`${fake}:${process.env.PATH}`,DISPLAY:"",WAYLAND_DISPLAY:"",BACKPLANE_NO_UPDATE:"1",BACKPLANE_ORDER_SERVER:"http://127.0.0.1:9",BACKPLANE_KEYRING_LOCKED:"0",BACKPLANE_PEERS:"",BACKPLANE_LOCK_DIR:join(root,"locks"),BACKPLANE_DEPLOY_LOCKS:join(root,"deploy-locks"),BACKPLANE_TRACE:trace,FAKE_LOG:join(root,"agents.log"),FAKE_SECS:"60",FAKE_PER:"1",FAKE_CYCLE:"100000"},
   stdout:Bun.file(join(root,"stdout")),stderr:Bun.file(join(root,"stderr")),
 });
 const base=`http://127.0.0.1:${port}`, sockets:WebSocket[]=[], threads:string[]=[];

@@ -16,7 +16,7 @@ ev('ProjectCreated',{id:'fixture',title:'Terminal echo measurement',root:project
 for(let i=0;i<80;i++)ev('MessagePosted',{thread:'thread',msg:'m'+i,role:i%2?'user':'assistant',text:('Generated measurement history '+i+'. ').repeat(12)});
 for(let i=0;i<16;i++)ev('ThreadCreated',{id:'side'+i,project:'fixture',title:'Generated sidebar agent '+i,env:'local',branch:'',worktree:project,provider:'codex',model:''});
 for(const key of ['restart.continue','mail.on','telemetry.share'])ev('SettingSet',{key,value:'off'});ev('SettingSet',{key:'onboard.done',value:'1'});fs.writeFileSync(path.join(home,'events.jsonl'),events.map(JSON.stringify).join('\n')+'\n');
-Object.assign(process.env,{BACKPLANE_HOME:home,BACKPLANE_AGENTS:agents,BACKPLANE_COPY:'1',BACKPLANE_NO_UPDATE:'1',BACKPLANE_TELEMETRY:'off',BACKPLANE_PEERS:'',BACKPLANE_LOCK_DIR:home+'/locks',SHELL:shell});
+Object.assign(process.env,{BACKPLANE_HOME:home,BACKPLANE_AGENTS:agents,BACKPLANE_COPY:'1',BACKPLANE_NO_UPDATE:'1',BACKPLANE_ORDER_SERVER:'http://127.0.0.1:9',BACKPLANE_TELEMETRY:'off',BACKPLANE_PEERS:'',BACKPLANE_LOCK_DIR:home+'/locks',SHELL:shell});
 let service,browser;const result={stage,home,ptyLog,state:'started',limits:['Generated conversation/sidebar, disposable real PTY with raw byte echo process; no live user terminal/window/profile.','DOM echo is measured; second requestAnimationFrame is a next-frame presentation opportunity, not display scanout.'],frames:[]};
 (async()=>{try{
  const version=JSON.parse(fs.readFileSync(path.join(stage,'LOCAL.json'))).version;result.version=version;

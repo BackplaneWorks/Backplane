@@ -21,7 +21,7 @@ const events = [ev('ProjectCreated', { id: 'fixture', title: 'Memory fixture', r
 for (let i = 0; i < 300; i++) events.push({ ...ev('MemorySaved', { bot, key: 'memory-' + String(i).padStart(3, '0'),
   kind: ['user', 'pref', 'fact', 'howto', 'note'][i % 5], text: ('Fixture memory 日本語 ' + i + '. ').repeat(24), tags: 'fixture' }), at: at - i });
 fs.writeFileSync(path.join(home, 'events.jsonl'), events.map(JSON.stringify).join('\n') + '\n');
-Object.assign(process.env, { BACKPLANE_AGENTS: agents, BACKPLANE_COPY: '1', BACKPLANE_NO_UPDATE: '1', BACKPLANE_TELEMETRY: 'off', BACKPLANE_PEERS: '', BACKPLANE_LOCK_DIR: path.join(home, 'locks') });
+Object.assign(process.env, { BACKPLANE_AGENTS: agents, BACKPLANE_COPY: '1', BACKPLANE_NO_UPDATE: '1', BACKPLANE_ORDER_SERVER: 'http://127.0.0.1:9', BACKPLANE_TELEMETRY: 'off', BACKPLANE_PEERS: '', BACKPLANE_LOCK_DIR: path.join(home, 'locks') });
 const binary = path.join(stage, 'payload/backplane-serve'), web = path.join(stage, 'payload/web');
 const service = new Service({ home, binary, web, expectedVersion: info.version });
 let app, page; const errors = [], frames = [], start = performance.now();

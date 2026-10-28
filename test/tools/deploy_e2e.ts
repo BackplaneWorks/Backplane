@@ -79,7 +79,7 @@ type Hub = { proc: ReturnType<typeof Bun.spawn> };
 let deployArgs = "{}";
 const start = async (): Promise<Hub> => {
   const proc = Bun.spawn([join(prefix, "backplane"), "--home", home, "--port", String(PORT), "--no-tailscale", "--foreground"], {
-    env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "", BACKPLANE_GOOGLE_BAKE: "0", FAKE_LOG: log,
+    env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_ORDER_SERVER: "http://127.0.0.1:9", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "", BACKPLANE_GOOGLE_BAKE: "0", FAKE_LOG: log,
       BP_WORK_MS: "300", BP_TOOL_MS: "7000", ...(process.env.DEBUG ? { BACKPLANE_LOG: "debug" } : {}), BP_DEPLOY_ARGS: deployArgs, BACKPLANE_DEPLOY_LOCKS: lock, BACKPLANE_AGENTS: fake, PATH: `${fake}:${process.env.PATH}` },
     stdout: process.env.DEBUG ? Bun.file(join(root, "hub.out")) : "ignore",
     stderr: process.env.DEBUG ? Bun.file(join(root, "hub.err")) : "ignore",

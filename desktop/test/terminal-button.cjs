@@ -30,7 +30,7 @@ if (workspace) events.push(
   ev('ThreadCreated', { id: 'bub-thread', title: 'Fixture Bub chat', project: 'fixture', env: 'local', branch: '', worktree: project, provider: 'codex', model: '' }),
   ev('BotSet', { id: 'bub', name: 'Bub', thread: 'bub-thread', look: 306440, persona: '' }), ev('UberSet', { bot: 'bub', uid: 'terminal-fixture-uber' }));
 fs.writeFileSync(path.join(home, 'events.jsonl'), events.map(JSON.stringify).join('\n') + '\n');
-const env = { ...process.env, BACKPLANE_AGENTS: agents, BACKPLANE_COPY: '1', BACKPLANE_NO_UPDATE: '1', BACKPLANE_TELEMETRY: 'off',
+const env = { ...process.env, BACKPLANE_AGENTS: agents, BACKPLANE_COPY: '1', BACKPLANE_NO_UPDATE: '1', BACKPLANE_ORDER_SERVER: 'http://127.0.0.1:9', BACKPLANE_TELEMETRY: 'off',
   BACKPLANE_PEERS: '', BACKPLANE_LOCK_DIR: path.join(home, 'locks'), SHELL: missing ? '/missing/backplane-fixture-shell' : '/bin/sh' };
 Object.assign(process.env, env);
 const binary = path.join(stage, 'payload/backplane-serve'), web = path.join(stage, 'payload/web');

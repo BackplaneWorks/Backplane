@@ -7,7 +7,7 @@ const home=fs.mkdtempSync(path.join(os.tmpdir(),'bp-connection-capture-')),agent
 for(const n of ['claude','codex','grok','muse','agy','opencode'])fs.writeFileSync(path.join(agents,n),'#!/bin/sh\nexit 127\n',{mode:0o755});
 const at=Math.floor(Date.now()/1000),ev=($,x)=>({$,...x,at});
 fs.writeFileSync(path.join(home,'events.jsonl'),[ev('ProjectCreated',{id:'p',title:'Capture fixture',root:home}),ev('ThreadCreated',{id:'t',title:'Capture',project:'p',env:'local',branch:'',worktree:home,provider:'codex',model:'gpt-6.1-sol'}),ev('MessagePosted',{thread:'t',msg:'m',role:'user',text:'PRIVATE_BODY_MUST_NOT_APPEAR_IN_DIAGNOSTIC'}),...['mail.on','telemetry.share','restart.continue'].map(key=>ev('SettingSet',{key,value:'off'})),ev('SettingSet',{key:'onboard.done',value:'1'})].map(JSON.stringify).join('\n')+'\n');
-Object.assign(process.env,{BACKPLANE_AGENTS:agents,BACKPLANE_COPY:'1',BACKPLANE_NO_UPDATE:'1',BACKPLANE_TELEMETRY:'off',BACKPLANE_PEERS:'',BACKPLANE_LOCK_DIR:path.join(home,'locks')});
+Object.assign(process.env,{BACKPLANE_AGENTS:agents,BACKPLANE_COPY:'1',BACKPLANE_NO_UPDATE:'1',BACKPLANE_ORDER_SERVER:'http://127.0.0.1:9',BACKPLANE_TELEMETRY:'off',BACKPLANE_PEERS:'',BACKPLANE_LOCK_DIR:path.join(home,'locks')});
 const binary=path.join(stage,'payload/backplane-serve'),web=path.join(stage,'payload/web'),service=new Service({home,binary,web,expectedVersion:info.version});
 let app;const errors=[],start=performance.now();
 (async()=>{try{

@@ -20,7 +20,7 @@ esac
 `,{mode:0o755});
 for(const cli of ['claude','codex','grok','muse','agy','opencode'])fs.writeFileSync(agents+'/'+cli,'#!/bin/sh\nexit 127\n',{mode:0o755});
 const at=Math.floor(Date.now()/1000),events=[{$:'ProjectCreated',id:'p',title:'Provider fixture',root:project,at},...['pi','omp'].map(provider=>({$:'ThreadCreated',id:provider,project:'p',title:provider,provider,model:'',env:'local',branch:'',worktree:project,at})),...['restart.continue','mail.on','telemetry.share','onboard.done'].map(key=>({$:'SettingSet',key,value:key==='onboard.done'?'1':'off',at}))];fs.writeFileSync(home+'/events.jsonl',events.map(JSON.stringify).join('\n')+'\n');
-const env={...process.env,BACKPLANE_HOME:home,BACKPLANE_AGENTS:agents,BACKPLANE_COPY:'1',BACKPLANE_NO_UPDATE:'1',BACKPLANE_TELEMETRY:'off',BACKPLANE_PEERS:'',BACKPLANE_LOCK_DIR:home+'/locks',BACKPLANE_DESKTOP_BROWSER:'1'};Object.assign(process.env,env);
+const env={...process.env,BACKPLANE_HOME:home,BACKPLANE_AGENTS:agents,BACKPLANE_COPY:'1',BACKPLANE_NO_UPDATE:'1',BACKPLANE_ORDER_SERVER:'http://127.0.0.1:9',BACKPLANE_TELEMETRY:'off',BACKPLANE_PEERS:'',BACKPLANE_LOCK_DIR:home+'/locks',BACKPLANE_DESKTOP_BROWSER:'1'};Object.assign(process.env,env);
 const service=new Service({home,binary:stage+'/payload/backplane-serve',web:stage+'/payload/web',expectedVersion:meta.version});let app,page,step='startup';const checks=[];
 const rows=()=>fs.readFileSync(home+'/events.jsonl','utf8').split('\n').filter(Boolean).map(JSON.parse);
 async function ready(id){await page.waitForFunction(id=>document.documentElement.dataset.backplaneRemoteReady==='true'&&document.querySelector('main[data-thread]')?.dataset.thread===id&&document.querySelector('main')?.getAttribute('aria-busy')!=='true',id);}

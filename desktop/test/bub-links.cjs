@@ -18,7 +18,7 @@ const events=[event('ProjectCreated',{id:'fixture',title:'Exact Bub link fixture
  event('MessagePosted',{thread:bub,msg:'item_4-435337',role:'assistant',text}),event('MessagePosted',{thread:ids[0],msg:'normal-list',role:'assistant',text}),
  event('MessagePosted',{thread:bub,msg:'unsafe',role:'assistant',text:'**[unsafe](javascript:alert(1))** and **[unknown](unknown:payload)** and `**[literal](backplane://thread/t1)**`'})];
 fs.writeFileSync(path.join(home,'events.jsonl'),events.map(JSON.stringify).join('\n')+'\n');
-Object.assign(process.env,{BACKPLANE_AGENTS:agents,BACKPLANE_COPY:'1',BACKPLANE_NO_UPDATE:'1',BACKPLANE_TELEMETRY:'off',BACKPLANE_PEERS:'',BACKPLANE_LOCK_DIR:path.join(home,'locks')});
+Object.assign(process.env,{BACKPLANE_AGENTS:agents,BACKPLANE_COPY:'1',BACKPLANE_NO_UPDATE:'1',BACKPLANE_ORDER_SERVER:'http://127.0.0.1:9',BACKPLANE_TELEMETRY:'off',BACKPLANE_PEERS:'',BACKPLANE_LOCK_DIR:path.join(home,'locks')});
 const info=JSON.parse(fs.readFileSync(path.join(stage,'LOCAL.json')));
 const service=new Service({home,binary:path.join(stage,'payload/backplane-serve'),web:path.join(stage,'payload/web'),expectedVersion:info.version});
 let app,page;const start=performance.now(),navigation=[];

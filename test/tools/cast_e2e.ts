@@ -48,7 +48,7 @@ const home = join(root, "home"), proj = join(root, "proj");
 for (const d of [home, proj]) mkdirSync(d);
 writeFileSync(join(home, "events.jsonl"), "");
 const hub = Bun.spawn([resolve(bin), "--home", home, "--port", String(PORT), "--no-tailscale", "--foreground"], {
-  env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "", BACKPLANE_GOOGLE_BAKE: "0", TMPDIR: root },
+  env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_ORDER_SERVER: "http://127.0.0.1:9", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "", BACKPLANE_GOOGLE_BAKE: "0", TMPDIR: root },
   stdout: "ignore", stderr: Bun.file(join(root, "hub.err")),
 });
 try {

@@ -24,7 +24,7 @@ const events=[event('ProjectCreated',{id:'polish',title:'Local polish fixture',r
  event('MessagePosted',{thread:'bub-thread',msg:'bold-link',role:'assistant',text:link.replace('[Backplane','[**Backplane').replace('chrome]','chrome**]')}),
  event('MessagePosted',{thread:'bub-thread',msg:'literal',role:'assistant',text:'[unsafe](javascript:alert(1)) and <script>bad</script>; [External](https://example.com) is still a web link.'})];
 fs.writeFileSync(path.join(home,'events.jsonl'),events.map(JSON.stringify).join('\n')+'\n');
-Object.assign(process.env,{BACKPLANE_AGENTS:fake,BACKPLANE_NO_UPDATE:'1',BACKPLANE_TELEMETRY:'off',BACKPLANE_COPY:'1',BACKPLANE_PEERS:'',BACKPLANE_LOCK_DIR:path.join(home,'locks')});
+Object.assign(process.env,{BACKPLANE_AGENTS:fake,BACKPLANE_NO_UPDATE:'1',BACKPLANE_ORDER_SERVER:'http://127.0.0.1:9',BACKPLANE_TELEMETRY:'off',BACKPLANE_COPY:'1',BACKPLANE_PEERS:'',BACKPLANE_LOCK_DIR:path.join(home,'locks')});
 const service=new Service({home,binary:process.env.BACKPLANE_SERVICE,web:process.env.BACKPLANE_WEB,expectedVersion:process.env.BACKPLANE_SERVICE_VERSION});
 let app,page;const errors=[],observations=[],traffic=[],start=performance.now();
 (async()=>{

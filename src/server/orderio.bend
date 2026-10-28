@@ -35,6 +35,17 @@ def Od.install(+home: String) -> IO(String):
     +fresh : String <- GS.Gf.nonce(6n)
     Od.install.k(old, fresh, Od.tmp(home) ++ "/install-id")
 
+# the order server's address: Backplane's own (order.bend's Order.server)
+# unless the setting order.server replaces it. BACKPLANE_ORDER_SERVER
+# replaces Backplane's own: every test hub sets it to a dead local address,
+# so no test ever reaches the real server (with Ordering on by default); a
+# test that orders sets order.server to its own stand-in
+def Od.at.k(+server: String, +env: String) -> String:
+  Bool.pick(String, Bool.and(String.eq(server, OR.Order.server()), Bool.not(String.is_empty(env))), env, server)
+
+def Od.at(+server: String) -> IO(String):
+  IO.bind(String, String, GS.Gf.env("BACKPLANE_ORDER_SERVER", ""), e => IO.pure(String, Od.at.k(server, e)))
+
 def Od.heads(+install: String) -> List<&2, String>:
   ["X-Backplane-Install: " ++ install, "Accept: application/json"]
 
@@ -100,8 +111,10 @@ def Od.est.got(r: GS.GResp) -> J.Json:
 def Od.est.k(ask: Bool, +home: String, +server: String, +install: String, +body: String) -> IO(J.Json):
   match ask:
     case True{}:
-      IO.bind(GS.GResp, J.Json, GS.Gc.req(Od.tmp(home), server ++ "/v1/estimate", ["Content-Type: application/json", "X-Backplane-Install: " ++ install], body),
-        r => IO.pure(J.Json, Od.est.got(r)))
+      do IO<J.Json>:
+        +url : String <- Od.at(server)
+        r : GS.GResp <- GS.Gc.req(Od.tmp(home), url ++ "/v1/estimate", ["Content-Type: application/json", "X-Backplane-Install: " ++ install], body)
+        return Od.est.got(r)
     case False{}:
       IO.pure(J.Json, J.Null{})
 
@@ -141,7 +154,8 @@ def Od.health.k(ask: Bool, +home: String, +server: String) -> IO(J.Json):
     case True{}:
       do IO<J.Json>:
         Od.tmp.made(home)
-        r : GS.GResp <- GS.Gc.req(Od.tmp(home), server ++ "/v1/health", ["Accept: application/json"], "")
+        +url : String <- Od.at(server)
+        r : GS.GResp <- GS.Gc.req(Od.tmp(home), url ++ "/v1/health", ["Accept: application/json"], "")
         return Od.est.got(r)
     case False{}:
       IO.pure(J.Json, J.Null{})
@@ -298,7 +312,8 @@ def Od.upload(+home: String, +server: String, +install: String, +dir: String, ps
     +name : String <- GS.Gf.nonce(3n)
     +cfg : String = Od.tmp(home) ++ "/o-" ++ name ++ ".curl"
     +out : String = Od.tmp(home) ++ "/o-" ++ name ++ ".out"
-    GS.Gf.write(cfg, Od.upload.cfg(server ++ "/v1/quotes", install, dir, ps, out))
+    +url : String <- Od.at(server)
+    GS.Gf.write(cfg, Od.upload.cfg(url ++ "/v1/quotes", install, dir, ps, out))
     r : P.Ran <- P.Proc.run("curl", ["-sS", "--max-time", "300", "-K", cfg], dir)
     +said : String = GS.Gc.ran(r)
     text : String <- GS.Gf.text(out)
@@ -307,8 +322,10 @@ def Od.upload(+home: String, +server: String, +install: String, +dir: String, ps
     return Od.est.got(GS.GResp{GS.Gc.code(said), text, GS.Gc.said(said)})
 
 def Od.get(+home: String, +server: String, +install: String, +qid: String, +token: String) -> IO(J.Json):
-  IO.bind(GS.GResp, J.Json, GS.Gc.req(Od.tmp(home), server ++ "/v1/quotes/" ++ qid, ["Authorization: Bearer " ++ token, "X-Backplane-Install: " ++ install], ""),
-    r => IO.pure(J.Json, Od.est.got(r)))
+  do IO<J.Json>:
+    +url : String <- Od.at(server)
+    r : GS.GResp <- GS.Gc.req(Od.tmp(home), url ++ "/v1/quotes/" ++ qid, ["Authorization: Bearer " ++ token, "X-Backplane-Install: " ++ install], "")
+    return Od.est.got(r)
 
 def Od.pending(+q: J.Json) -> Bool:
   Bool.or(String.eq(J.Json.get_str(q, "status", ""), "received"), String.eq(J.Json.get_str(q, "status", ""), "analysing"))

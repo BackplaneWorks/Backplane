@@ -53,7 +53,7 @@ function createHome(mode) {
   for (const key of ['restart.continue', 'mail.on', 'telemetry.share']) event('SettingSet', { key, value: 'off' });
   event('SettingSet', { key: 'onboard.done', value: '1' });
   fs.writeFileSync(path.join(home, 'events.jsonl'), changes.map(JSON.stringify).join('\n') + '\n');
-  Object.assign(process.env, { BACKPLANE_HOME: home, BACKPLANE_AGENTS: agents, BACKPLANE_COPY: '1', BACKPLANE_NO_UPDATE: '1', BACKPLANE_TELEMETRY: 'off', BACKPLANE_PEERS: '', BACKPLANE_LOCK_DIR: home + '/locks', SHELL: shell });
+  Object.assign(process.env, { BACKPLANE_HOME: home, BACKPLANE_AGENTS: agents, BACKPLANE_COPY: '1', BACKPLANE_NO_UPDATE: '1', BACKPLANE_ORDER_SERVER: 'http://127.0.0.1:9', BACKPLANE_TELEMETRY: 'off', BACKPLANE_PEERS: '', BACKPLANE_LOCK_DIR: home + '/locks', SHELL: shell });
   return home;
 }
 async function clickDestination(page, action) {

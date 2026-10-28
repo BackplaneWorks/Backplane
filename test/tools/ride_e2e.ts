@@ -39,7 +39,7 @@ const events = () => (existsSync(log) ? readFileSync(log, "utf8").split("\n").fi
 const port = freePort();
 if (port === 3787) throw new Error("refusing the live port");
 const start = () => Bun.spawn([resolve(bin), "--home", home, "--port", String(port), "--no-tailscale", "--foreground"], {
-  env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "", BACKPLANE_GOOGLE_BAKE: "0",
+  env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_ORDER_SERVER: "http://127.0.0.1:9", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "", BACKPLANE_GOOGLE_BAKE: "0",
     RIDE_LOG: log, FAKE_LOG: join(root, "claude.log"), BACKPLANE_AGENTS: fake, PATH: `${fake}:${process.env.PATH}`, TMPDIR: root },
   stdout: "ignore", stderr: Bun.file(join(root, `hub-${Date.now()}.err`)),
 });

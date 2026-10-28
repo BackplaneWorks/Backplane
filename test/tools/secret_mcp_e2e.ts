@@ -87,7 +87,7 @@ const hub = async (copy: boolean) => {
   writeFileSync(join(home, "events.jsonl"), "");
   const port = freePort();
   const proc = Bun.spawn([resolve(bin), "--home", home, "--port", String(port), "--no-tailscale", "--foreground"], {
-    env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "", BACKPLANE_GOOGLE_BAKE: "0",
+    env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_ORDER_SERVER: "http://127.0.0.1:9", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "", BACKPLANE_GOOGLE_BAKE: "0",
       BACKPLANE_VAULT_KEYRING: "file", BACKPLANE_AGENTS: fake, PATH: `${fake}:${process.env.PATH}`, ...(copy ? { BACKPLANE_COPY: "1" } : {}) },
     stdout: "ignore",
     stderr: "ignore",

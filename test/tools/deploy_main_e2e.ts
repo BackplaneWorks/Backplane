@@ -92,7 +92,7 @@ const ran = () => read(runs).split("\n").filter(Boolean);
 type Hub = ReturnType<typeof Bun.spawn>;
 const start = async (): Promise<Hub> => {
   const p = Bun.spawn([join(prefix, "backplane"), "--home", home, "--port", String(PORT), "--no-tailscale", "--foreground"], {
-    env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "", BACKPLANE_GOOGLE_BAKE: "0",
+    env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_ORDER_SERVER: "http://127.0.0.1:9", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "", BACKPLANE_GOOGLE_BAKE: "0",
       BACKPLANE_DEPLOY_LOCKS: join(root, "no.lock"), FAKE_LOG: join(root, "claude.log"), BP_WORK_MS: "100", BACKPLANE_AGENTS: fake, PATH: `${fake}:${process.env.PATH}` },
     stdout: Bun.file(join(root, "hub.out")), stderr: Bun.file(join(root, "hub.err")),
   });

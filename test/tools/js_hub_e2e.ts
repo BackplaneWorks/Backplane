@@ -81,7 +81,7 @@ for (const c of [["git", "init", "-q", "-b", "main"], ["git", "add", "README"], 
 
 const N = 200, MS = 100; // a 20 s turn
 const env = {
-  ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_TELEMETRY: "off", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "",
+  ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_ORDER_SERVER: "http://127.0.0.1:9", BACKPLANE_TELEMETRY: "off", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "",
   BACKPLANE_GOOGLE_BAKE: "0", FAKE_LOG: log, BP_EOF_FINISH: "1", BP_STREAM_N: String(N), BP_STREAM_MS: String(MS),
   BP_DEPLOY_ARGS: JSON.stringify({ stage, note: "js hub e2e" }), BACKPLANE_WAKE_TICK_MS: "2000", BACKPLANE_DEPLOY_LOCKS: join(root, "none.lock"),
   BACKPLANE_LOCK_DIR: join(root, "locks"), BACKPLANE_AGENTS: fake, PATH: `${fake}:${process.env.PATH}`, TMPDIR: join(root, "tmp"),

@@ -27,7 +27,7 @@ for(let i=0;i<20;i++)ev('MessagePosted',{thread:'ta',msg:'ta-m'+i,role:i%2?'assi
 // after start by the stand-in's own permission_prompt call (theme-agent.cjs).
 for(const [key,value] of [['restart.continue','off'],['mail.on','off'],['telemetry.share','off'],['onboard.done','1'],['ui.theme','dark']])ev('SettingSet',{key,value});
 fs.writeFileSync(home+'/events.jsonl',events.map(JSON.stringify).join('\n')+'\n');
-const env={...process.env,BACKPLANE_HOME:home,BACKPLANE_AGENTS:agents,BACKPLANE_COPY:'1',BACKPLANE_TELEMETRY:'off',BACKPLANE_NO_UPDATE:'1',BACKPLANE_PEERS:'',BACKPLANE_LOCK_DIR:home+'/locks',BP_AGENT_TRACE:path.join(home,'agent-trace.jsonl'),SHELL:'/bin/sh'};Object.assign(process.env,env);
+const env={...process.env,BACKPLANE_HOME:home,BACKPLANE_AGENTS:agents,BACKPLANE_COPY:'1',BACKPLANE_TELEMETRY:'off',BACKPLANE_NO_UPDATE:'1',BACKPLANE_ORDER_SERVER:'http://127.0.0.1:9',BACKPLANE_PEERS:'',BACKPLANE_LOCK_DIR:home+'/locks',BP_AGENT_TRACE:path.join(home,'agent-trace.jsonl'),SHELL:'/bin/sh'};Object.assign(process.env,env);
 const binary=stage+'/payload/backplane-serve',web=stage+'/payload/web',service=new Service({home,binary,web,expectedVersion:info.version});
 let app,page,views,askId='',step='startup';const checks=[],rounds=[],trail=[],BODY={dark:'rgb(13, 15, 18)',light:'rgb(250, 250, 248)'};
 async function ready(id){await page.waitForFunction(id=>document.documentElement.dataset.backplaneRemoteReady==='true'&&document.querySelector('main[data-thread]')?.dataset.thread===id&&document.documentElement.dataset.backplaneCached!=='true',id);}

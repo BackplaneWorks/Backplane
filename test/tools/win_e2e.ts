@@ -59,7 +59,7 @@ if (port === 3787) throw new Error("refusing the live port");
 const t0 = Date.now();
 const proc = Bun.spawn([resolve(hub), "--home", home, "--port", String(port), "--no-tailscale", "--foreground"], {
   // as exit_e2e: no display, the keyring known unlocked (a turn waits on it), nothing baked
-  env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_PEERS: "",
+  env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_ORDER_SERVER: "http://127.0.0.1:9", BACKPLANE_PEERS: "",
     BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_GOOGLE_BAKE: "0", BACKPLANE_AGENTS: resolve(agents),
     FAKE_LOG: log, PATH: resolve(agents) + delimiter + (process.env.PATH ?? "") },
   stdout: "ignore",

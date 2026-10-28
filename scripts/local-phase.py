@@ -78,7 +78,7 @@ def boat(encoded):
         raise SystemExit('Unsupported remote phase')
     os.chdir(ROOT)
     os.environ.update(BEND_NO_TELEMETRY='1', BACKPLANE_TELEMETRY='off',
-        BACKPLANE_TELEMETRY_BAKE='0', BACKPLANE_GOOGLE_BAKE='0', BACKPLANE_NO_UPDATE='1',
+        BACKPLANE_TELEMETRY_BAKE='0', BACKPLANE_GOOGLE_BAKE='0', BACKPLANE_NO_UPDATE='1', BACKPLANE_ORDER_SERVER='http://127.0.0.1:9',
         CHECK_JOBS='1', CHECK_SHARDS='1', CHECK_FALLBACK='0', TEST_JOBS='2', TEST_SHARD_COUNT='1',
         BUN_JSC_forceRAMSize='4294967296')
     env = {**os.environ, 'BP_KEY_ROOTS': ' '.join(spec['roots'])} if spec['roots'] else os.environ

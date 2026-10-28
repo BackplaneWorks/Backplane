@@ -17,7 +17,7 @@ const at=Math.floor(Date.now()/1000),events=[],ev=($,fields)=>events.push({$,...
 ev('ProjectCreated',{id:'board',title:'Board',root});ev('ThreadCreated',{id:'ta',title:'Thread ta',project:'board',env:'local',branch:'',worktree:root,provider:'codex',model:''});
 for(const [key,value] of [['restart.continue','off'],['mail.on','off'],['telemetry.share','off'],['onboard.done','1'],['ui.theme','light']])ev('SettingSet',{key,value});
 fs.writeFileSync(home+'/events.jsonl',events.map(JSON.stringify).join('\n')+'\n');
-const env={...process.env,BACKPLANE_HOME:home,BACKPLANE_AGENTS:agents,BACKPLANE_COPY:'1',BACKPLANE_TELEMETRY:'off',BACKPLANE_NO_UPDATE:'1',BACKPLANE_PEERS:'',BACKPLANE_LOCK_DIR:home+'/locks',SHELL:'/bin/sh'};Object.assign(process.env,env);
+const env={...process.env,BACKPLANE_HOME:home,BACKPLANE_AGENTS:agents,BACKPLANE_COPY:'1',BACKPLANE_TELEMETRY:'off',BACKPLANE_NO_UPDATE:'1',BACKPLANE_ORDER_SERVER:'http://127.0.0.1:9',BACKPLANE_PEERS:'',BACKPLANE_LOCK_DIR:home+'/locks',SHELL:'/bin/sh'};Object.assign(process.env,env);
 const binary=stage+'/payload/backplane-serve',web=stage+'/payload/web',service=new Service({home,binary,web,expectedVersion:info.version});
 const LIGHT=[250,250,248];
 const recorder=`(()=>{let n=0;const f=()=>{if(n++>=12)return;const s=getComputedStyle(document.documentElement);

@@ -43,7 +43,7 @@ const stubBase = `http://127.0.0.1:${stub.port}`;
 const proc = Bun.spawn([binary, "--threads", "2", "--home", home, "--host", "127.0.0.1", "--port", String(port),
   "--no-tailscale", "--headless", "--foreground"], {
   env: { HOME: user, PATH: "/usr/bin:/bin", DISPLAY: "", WAYLAND_DISPLAY: "",
-    BACKPLANE_AGENTS: agents, BACKPLANE_NO_UPDATE: "1", BACKPLANE_PEERS: "", BACKPLANE_KEYRING_LOCKED: "0",
+    BACKPLANE_AGENTS: agents, BACKPLANE_NO_UPDATE: "1", BACKPLANE_ORDER_SERVER: "http://127.0.0.1:9", BACKPLANE_PEERS: "", BACKPLANE_KEYRING_LOCKED: "0",
     BACKPLANE_GOOGLE_OAUTH: stubBase, BACKPLANE_GOOGLE_API: stubBase,
     BACKPLANE_TELEMETRY: "off", DO_NOT_TRACK: "1", BEND_NO_TELEMETRY: "1" },
   stdout: Bun.file(join(root, "stdout")), stderr: Bun.file(join(root, "stderr")),

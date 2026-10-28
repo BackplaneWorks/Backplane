@@ -47,7 +47,7 @@ try {
   }
   const port = (() => { const s = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } }); const p = s.port; s.stop(true); return p; })();
   hub = small(["--home", join(root, "home"), "--port", String(port), "--no-tailscale", "--foreground"],
-    { BACKPLANE_AGENTS: fake, BACKPLANE_NO_UPDATE: "1", BACKPLANE_TELEMETRY: "off", DISPLAY: "", WAYLAND_DISPLAY: "" });
+    { BACKPLANE_AGENTS: fake, BACKPLANE_NO_UPDATE: "1", BACKPLANE_ORDER_SERVER: "http://127.0.0.1:9", BACKPLANE_TELEMETRY: "off", DISPLAY: "", WAYLAND_DISPLAY: "" });
   let up = false;
   for (let i = 0; i < 150 && !up; i++) {
     try { up = (await fetch(`http://127.0.0.1:${port}/hello`)).ok; } catch {}

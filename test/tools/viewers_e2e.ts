@@ -37,7 +37,7 @@ function freePort(): number {
 const home = mkdtempSync(join(tmpdir(), "bp-viewers-e2e-"));
 const port = freePort();
 const proc = Bun.spawn([resolve(bin), "--home", home, "--port", String(port), "--no-tailscale"], {
-  env: { ...process.env, DISPLAY: "" },
+  env: { ...process.env, DISPLAY: "", BACKPLANE_ORDER_SERVER: "http://127.0.0.1:9" },
   stdout: "ignore",
   stderr: "ignore",
 });

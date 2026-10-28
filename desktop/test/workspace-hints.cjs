@@ -11,7 +11,7 @@ for(const [id,project] of [['parent','hint-a'],['child','hint-a'],['settled','hi
 ev('ThreadParentSet',{id:'child',parent:'parent'});ev('ThreadSettled',{id:'settled',manual:true});
 for(const [key,value] of [['thread.tree.parent','1'],['restart.continue','off'],['mail.on','off'],['telemetry.share','off'],['onboard.done','1']])ev('SettingSet',{key,value});
 fs.writeFileSync(home+'/events.jsonl',events.map(JSON.stringify).join('\n')+'\n');
-const env={...process.env,BACKPLANE_HOME:home,BACKPLANE_AGENTS:agents,BACKPLANE_COPY:'1',BACKPLANE_TELEMETRY:'off',BACKPLANE_NO_UPDATE:'1',BACKPLANE_PEERS:'',BACKPLANE_LOCK_DIR:home+'/locks',BACKPLANE_DESKTOP_BROWSER:'1'};Object.assign(process.env,env);
+const env={...process.env,BACKPLANE_HOME:home,BACKPLANE_AGENTS:agents,BACKPLANE_COPY:'1',BACKPLANE_TELEMETRY:'off',BACKPLANE_NO_UPDATE:'1',BACKPLANE_ORDER_SERVER:'http://127.0.0.1:9',BACKPLANE_PEERS:'',BACKPLANE_LOCK_DIR:home+'/locks',BACKPLANE_DESKTOP_BROWSER:'1'};Object.assign(process.env,env);
 const binary=stage+'/payload/backplane-serve',web=stage+'/payload/web',service=new Service({home,binary,web,expectedVersion:info.version});
 const finalOnly=process.env.WORKSPACE_HINTS_FINAL==='1',resume=finalOnly||process.env.WORKSPACE_HINTS_RESUME==='1';
 let app,page,sinkId,step='startup';const checks=[],focusBoundary={};

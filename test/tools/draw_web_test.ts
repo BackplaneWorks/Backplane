@@ -49,7 +49,7 @@ writeFileSync(join(home, "events.jsonl"), [
 ].map((o) => JSON.stringify(o)).join("\n") + "\n");
 const port = (() => { const s = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } }); const p = s.port; s.stop(true); return p; })();
 const hub = Bun.spawn([resolve(binary), "--headless", "--foreground", "--home", home, "--port", String(port), "--web", resolve(web), "--no-tailscale"], {
-  env: { HOME: user, PATH: "/usr/bin:/bin", BACKPLANE_NO_UPDATE: "1", DISPLAY: "", WAYLAND_DISPLAY: "" }, stdout: "ignore", stderr: "ignore",
+  env: { HOME: user, PATH: "/usr/bin:/bin", BACKPLANE_NO_UPDATE: "1", BACKPLANE_ORDER_SERVER: "http://127.0.0.1:9", DISPLAY: "", WAYLAND_DISPLAY: "" }, stdout: "ignore", stderr: "ignore",
 });
 try {
   for (let i = 0; i < 120; i++) { try { if ((await fetch(`http://127.0.0.1:${port}/hello`)).ok) break; } catch {} await Bun.sleep(250); }

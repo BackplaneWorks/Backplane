@@ -82,7 +82,7 @@ const hello = async (port: number) => {
   }
 };
 const env = (extra: Record<string, string> = {}) => ({
-  HOME: user, DISPLAY: process.env.TEST_DISPLAY ?? "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "",
+  HOME: user, DISPLAY: process.env.TEST_DISPLAY ?? "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_ORDER_SERVER: "http://127.0.0.1:9", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "",
   BACKPLANE_GOOGLE_BAKE: "0", BACKPLANE_DEPLOY_LOCKS: join(root, "no-such.lock"), BACKPLANE_AGENTS: standins,
   PATH: `${real}:/usr/bin:/bin`, XDG_CACHE_HOME: join(user, ".cache"), TMPDIR: root, ...extra,
 });

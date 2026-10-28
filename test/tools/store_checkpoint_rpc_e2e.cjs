@@ -37,7 +37,7 @@ async function start() {
   hub = Bun.spawn([binary, '--home', home, '--port', String(port), '--host', '127.0.0.1', '--no-tailscale', '--headless'], {
     env: { ...process.env, HOME: root, DISPLAY: '', WAYLAND_DISPLAY: '',
       DBUS_SESSION_BUS_ADDRESS: '', BACKPLANE_AGENTS: agents, BACKPLANE_PEERS: '',
-      BACKPLANE_LOCK_DIR: path.join(root, 'locks'), BACKPLANE_TELEMETRY: 'off', BACKPLANE_NO_UPDATE: '1' },
+      BACKPLANE_LOCK_DIR: path.join(root, 'locks'), BACKPLANE_TELEMETRY: 'off', BACKPLANE_NO_UPDATE: '1', BACKPLANE_ORDER_SERVER: 'http://127.0.0.1:9' },
     stdout: 'ignore', stderr: Bun.file(path.join(root, 'service.log')),
   });
   for (let i = 0; i < 200; i++) {

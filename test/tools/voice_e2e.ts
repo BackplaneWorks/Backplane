@@ -95,7 +95,7 @@ if (process.env.NO_FFMPEG) {
 
 const port = freePort();
 const proc = Bun.spawn([resolve(bin), "--home", home, "--port", String(port), "--no-tailscale"], {
-  env: { ...process.env, DISPLAY: "", OPENAI_BASE_URL: `http://127.0.0.1:${mock.port}/v1`, BACKPLANE_AGENTS: fake, PATH: `${fake}:${process.env.PATH}` },
+  env: { ...process.env, DISPLAY: "", BACKPLANE_ORDER_SERVER: "http://127.0.0.1:9", OPENAI_BASE_URL: `http://127.0.0.1:${mock.port}/v1`, BACKPLANE_AGENTS: fake, PATH: `${fake}:${process.env.PATH}` },
   stdout: "ignore",
   stderr: "ignore",
 });

@@ -27,7 +27,7 @@ const dummy=Bun.serve({hostname:'127.0.0.3',port:0,fetch(req){return new Respons
 const dummyUrl=`http://127.0.0.3:${dummy.port}`;
 const lease=Bun.listen({hostname:'127.0.0.1',port:0,socket:{data(){}}});const port=lease.port;lease.stop(true);
 const err=Bun.file(join(root,'hub.stderr'));
-const child=Bun.spawn([resolve(binary),'--home',home,'--port',String(port),'--tailscale'],{env:{...process.env,HOME:userHome,PATH:`${fake}:/usr/bin:/bin`,DISPLAY:'',WAYLAND_DISPLAY:'',BACKPLANE_AGENTS:fake,BACKPLANE_NAME:'auth-alpha',BACKPLANE_NO_UPDATE:'1',BACKPLANE_TELEMETRY:'off',BACKPLANE_KEYRING_LOCKED:'0',BACKPLANE_PEERS:dummyUrl},stdout:Bun.file(join(root,'hub.stdout')),stderr:err});
+const child=Bun.spawn([resolve(binary),'--home',home,'--port',String(port),'--tailscale'],{env:{...process.env,HOME:userHome,PATH:`${fake}:/usr/bin:/bin`,DISPLAY:'',WAYLAND_DISPLAY:'',BACKPLANE_AGENTS:fake,BACKPLANE_NAME:'auth-alpha',BACKPLANE_NO_UPDATE:'1',BACKPLANE_ORDER_SERVER:'http://127.0.0.1:9',BACKPLANE_TELEMETRY:'off',BACKPLANE_KEYRING_LOCKED:'0',BACKPLANE_PEERS:dummyUrl},stdout:Bun.file(join(root,'hub.stdout')),stderr:err});
 let ws:WebSocket|undefined, machines:any, failed=false;const timings:any={};
 const check=(name:string,ok:boolean,got?:unknown)=>{console.log(`${ok?'ok':'FAIL'} ${name}${ok?'':': '+JSON.stringify(got)}`);if(!ok)failed=true;};
 const sleep=(n:number)=>new Promise(r=>setTimeout(r,n));

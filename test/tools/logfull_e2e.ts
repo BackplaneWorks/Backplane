@@ -37,7 +37,7 @@ const check = (ok: boolean, what: string) => {
 const port = freePort();
 const proc = Bun.spawn(
   ["/bin/bash", "-c", `ulimit -f ${limitKb}; trap '' XFSZ; exec "$0" --home "$1" --port "$2" --no-tailscale`, resolve(bin), home, String(port)],
-  { env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "" }, stdout: "ignore", stderr: "ignore" },
+  { env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_ORDER_SERVER: "http://127.0.0.1:9", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "" }, stdout: "ignore", stderr: "ignore" },
 );
 try {
   for (let i = 0; i < 200; i++) {

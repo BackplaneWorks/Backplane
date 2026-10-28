@@ -30,7 +30,7 @@ event('SettingSet', { key: 'onboard.done', value: '1' });
 const contents = events.map(JSON.stringify).join('\n') + '\n';events = null;
 fs.writeFileSync(path.join(home, 'events.jsonl'), contents);
 Object.assign(result, { home, historyRows: 4176, historyBytes: Buffer.byteLength(contents) });
-Object.assign(process.env, { BACKPLANE_HOME: home, BACKPLANE_AGENTS: agents, BACKPLANE_COPY: '1', BACKPLANE_NO_UPDATE: '1', BACKPLANE_TELEMETRY: 'off', BACKPLANE_PEERS: '', BACKPLANE_LOCK_DIR: home + '/locks' });
+Object.assign(process.env, { BACKPLANE_HOME: home, BACKPLANE_AGENTS: agents, BACKPLANE_COPY: '1', BACKPLANE_NO_UPDATE: '1', BACKPLANE_ORDER_SERVER: 'http://127.0.0.1:9', BACKPLANE_TELEMETRY: 'off', BACKPLANE_PEERS: '', BACKPLANE_LOCK_DIR: home + '/locks' });
 let service, browser, page;
 const frame = page => page.evaluate(() => new Promise(requestAnimationFrame));
 function sample() {

@@ -58,7 +58,7 @@ const events = () => read(xlog).split("\n").filter(Boolean).map((l) => JSON.pars
 const PORT = freePort();
 if (PORT === 3787) throw new Error("refusing the live port");
 const spawnHub = (n: number) => Bun.spawn([join(prefix, "backplane"), "--home", home, "--port", String(PORT), "--no-tailscale", "--foreground"], {
-  env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "", BACKPLANE_GOOGLE_BAKE: "0",
+  env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_ORDER_SERVER: "http://127.0.0.1:9", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "", BACKPLANE_GOOGLE_BAKE: "0",
     FAKE_LOG: clog, RIDE_LOG: xlog, BP_EOF_FINISH: "1", BP_STREAM_N: "60", BP_STREAM_MS: "100", BP_DEPLOY_ARGS: JSON.stringify({ stage, note: "resume e2e" }),
     BACKPLANE_WAKE_TICK_MS: "2000", BACKPLANE_DEPLOY_LOCKS: join(root, "none.lock"), BACKPLANE_LOCK_DIR: join(root, "locks"),
     BACKPLANE_AGENTS: fake, PATH: `${fake}:${process.env.PATH}`, TMPDIR: root },

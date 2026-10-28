@@ -28,7 +28,7 @@ for (const n of ["claude", "codex", "grok", "muse"]) chmodSync(join(fake, n), 0o
 const user = join(root, "user"); mkdirSync(join(user, "proj"), { recursive: true });
 const s = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } }); const port = s.port; s.stop(true);
 const proc = Bun.spawn([resolve(bin), "--home", join(root, "home"), "--port", String(port), "--no-tailscale", "--headless", "--foreground"], {
-  env: { ...process.env, HOME: user, DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "", BP_STANDIN_MODE: "plain", BACKPLANE_AGENTS: fake, PATH: `${fake}:${process.env.PATH}` },
+  env: { ...process.env, HOME: user, DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_ORDER_SERVER: "http://127.0.0.1:9", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "", BP_STANDIN_MODE: "plain", BACKPLANE_AGENTS: fake, PATH: `${fake}:${process.env.PATH}` },
   stdout: "ignore", stderr: "ignore" });
 console.log("hub pid", proc.pid, "port", port);
 let fail = false; const check = (n: string, ok: boolean, g?: unknown) => { console.log(ok ? `ok ${n}` : `FAIL ${n}: ${JSON.stringify(g)?.slice(0, 300)}`); if (!ok) fail = true; };

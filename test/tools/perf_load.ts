@@ -266,7 +266,7 @@ const env: Record<string, string> = {
   BACKPLANE_AGENTS: fake, PATH: `${fake}:/usr/local/bin:/usr/bin:/bin`,
   HOME: user, USER: process.env.USER ?? "h", LANG: process.env.LANG ?? "C.UTF-8",
   DISPLAY: display, WAYLAND_DISPLAY: "", DBUS_SESSION_BUS_ADDRESS: "unix:path=/nonexistent",
-  BACKPLANE_TRACE: trace, BACKPLANE_NO_UPDATE: "1", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "", BACKPLANE_LOCK_DIR: locks,
+  BACKPLANE_TRACE: trace, BACKPLANE_NO_UPDATE: "1", BACKPLANE_ORDER_SERVER: "http://127.0.0.1:9", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "", BACKPLANE_LOCK_DIR: locks,
   BACKPLANE_DEPLOY_LOCKS: `${locks}/bp-bend.lock:${locks}/bp-wt-build.lock`, BACKPLANE_APNS_URL: "http://127.0.0.1:9",
   BACKPLANE_HOOK_URL: "", BACKPLANE_GOOGLE_API: "http://127.0.0.1:9", BACKPLANE_GOOGLE_OAUTH: "http://127.0.0.1:9",
   FAKE_LOG: fakeLog, FAKE_SECS: "900", FAKE_PER: "3", FAKE_CYCLE: "30",

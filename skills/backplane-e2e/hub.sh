@@ -1,7 +1,8 @@
 #!/bin/sh
 # An isolated Backplane hub for the user stories (SKILL.md): its own home,
 # port and fixture projects, stand-in agents only, no tailnet, no update,
-# no keyring. Never the person's ~/.backplane-bend.
+# no keyring, Ordering off and the order server a dead local address (no
+# story ever reaches the real one). Never the person's ~/.backplane-bend.
 #
 #   hub.sh start NAME      start one; prints shell lines: PORT= TOKEN= URL=
 #                          PAIR= HOME_DIR= PROJ= MULTI= THREAD= PID=
@@ -80,7 +81,7 @@ start() {
   # its caches and config inside its own folder too, never the person's
   # (~/.cache/backplane-bend holds 3D model caches)
   env HOME="$root/userhome" XDG_CACHE_HOME="$root/userhome/.cache" XDG_CONFIG_HOME="$root/userhome/.config" \
-    XDG_DATA_HOME="$root/userhome/.local/share" XDG_STATE_HOME="$root/userhome/.local/state" PATH="$root/fake:$PATH" DISPLAY= WAYLAND_DISPLAY= BACKPLANE_NO_UPDATE=1 BACKPLANE_PEERS= \
+    XDG_DATA_HOME="$root/userhome/.local/share" XDG_STATE_HOME="$root/userhome/.local/state" PATH="$root/fake:$PATH" DISPLAY= WAYLAND_DISPLAY= BACKPLANE_NO_UPDATE=1 BACKPLANE_ORDER_SERVER=http://127.0.0.1:9 BACKPLANE_PEERS= \
     BACKPLANE_AGENTS="$root/fake" BACKPLANE_VAULT_KEYRING=file BP_STANDIN_USAGE=1 BP_STANDIN_MODE=stream BP_STREAM_N="$n" \
     BP_STREAM_MS="$ms" BP_STREAM_SEP="
 " "$@" > "$root/hub.log" 2>&1 &
@@ -88,6 +89,10 @@ start() {
   i=0; until curl -s -o /dev/null "http://127.0.0.1:$port/hello"; do i=$((i+1)); [ $i -lt 100 ] || { echo "hub did not start; see $root/hub.log" >&2; exit 1; }; sleep 0.2; done
   token=$(cat "$root/home/token")
   if [ $fresh = 1 ]; then
+    # Ordering off (it is on by default; BACKPLANE_ORDER_SERVER above is a
+    # dead address besides): a story that orders turns it on against its
+    # own stand-in (S38)
+    rpc setting.set '{"key":"order.enabled","value":"off"}' > /dev/null
     rpc project.add "{\"path\":\"$root/proj\"}" | python3 -c 'import json,sys;print(json.load(sys.stdin).get("thread",""))' > "$root/thread"
     rpc project.add "{\"path\":\"$root/multi\"}" > /dev/null
   fi

@@ -17,7 +17,7 @@ const quote=value=>"'"+value.replaceAll("'","'\\''")+"'";
 (async()=>{
  try{
   phase("launch UI");
-  app=await _electron.launch({executablePath:require('electron'),args:[path.join(root,'desktop')],env:{...process.env,BACKPLANE_HOME:home,BACKPLANE_SERVICE:artifact,BACKPLANE_WEB:web,BACKPLANE_SERVICE_VERSION:'0.11.2-dev.mail-45328b78',BACKPLANE_AGENTS:fake,BACKPLANE_NO_UPDATE:'1',BACKPLANE_PEERS:'',BACKPLANE_KEYRING_LOCKED:'0',BACKPLANE_GOOGLE_BAKE:'0',BACKPLANE_LOCK_DIR:path.join(home,'locks'),DISPLAY:process.env.DISPLAY||':0'},timeout:15000});
+  app=await _electron.launch({executablePath:require('electron'),args:[path.join(root,'desktop')],env:{...process.env,BACKPLANE_HOME:home,BACKPLANE_SERVICE:artifact,BACKPLANE_WEB:web,BACKPLANE_SERVICE_VERSION:'0.11.2-dev.mail-45328b78',BACKPLANE_AGENTS:fake,BACKPLANE_NO_UPDATE:'1',BACKPLANE_ORDER_SERVER:'http://127.0.0.1:9',BACKPLANE_PEERS:'',BACKPLANE_KEYRING_LOCKED:'0',BACKPLANE_GOOGLE_BAKE:'0',BACKPLANE_LOCK_DIR:path.join(home,'locks'),DISPLAY:process.env.DISPLAY||':0'},timeout:15000});
   page=await app.firstWindow({timeout:10000});
   page.on('pageerror',error=>console.log('persistence renderer error: '+error.message));
   // Capture the native child independently of UI readiness so failed startup

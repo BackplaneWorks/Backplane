@@ -29,7 +29,7 @@ const proc = Bun.spawn([resolve(binary), "--home", home, "--host", "0.0.0.0", "-
   env: {
     HOME: user, PATH: "/usr/bin:/bin", DISPLAY: "", WAYLAND_DISPLAY: "",
     XDG_CACHE_HOME: join(user, ".cache"), BACKPLANE_AGENTS: agents,
-    BACKPLANE_NO_UPDATE: "1", BACKPLANE_PEERS: "", BACKPLANE_KEYRING_LOCKED: "0",
+    BACKPLANE_NO_UPDATE: "1", BACKPLANE_ORDER_SERVER: "http://127.0.0.1:9", BACKPLANE_PEERS: "", BACKPLANE_KEYRING_LOCKED: "0",
     BACKPLANE_GOOGLE_BAKE: "0", BACKPLANE_DEPLOY_LOCKS: join(root, "no-lock"),
   },
   stdout: Bun.file(join(root, "stdout")), stderr: Bun.file(join(root, "stderr")),

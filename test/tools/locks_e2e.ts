@@ -17,7 +17,7 @@ for (const n of ["codex", "grok", "muse"]) { writeFileSync(join(fake, n), "#!/bi
 const socket = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } });
 const port = socket.port; socket.stop(true);
 if (port === 3787) throw new Error("refusing the live port");
-const env = { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "", BACKPLANE_GOOGLE_BAKE: "0", BACKPLANE_LOCK_DIR: locks, BACKPLANE_LOCK_URL: `http://127.0.0.1:${port}`, BP_WORK_MS: "100", FAKE_LOG: log, BACKPLANE_AGENTS: fake, PATH: `${fake}:${process.env.PATH}`, TMPDIR: root };
+const env = { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_ORDER_SERVER: "http://127.0.0.1:9", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "", BACKPLANE_GOOGLE_BAKE: "0", BACKPLANE_LOCK_DIR: locks, BACKPLANE_LOCK_URL: `http://127.0.0.1:${port}`, BP_WORK_MS: "100", FAKE_LOG: log, BACKPLANE_AGENTS: fake, PATH: `${fake}:${process.env.PATH}`, TMPDIR: root };
 let hub = Bun.spawn([resolve(bin), "--home", home, "--port", String(port), "--no-tailscale", "--foreground", "--headless"], { env, stdout: "ignore", stderr: Bun.file(join(root, "hub.log")) });
 const owned: ReturnType<typeof Bun.spawn>[] = [];
 let ws: WebSocket | undefined, fail = 0, seq = 0, crashWorkPid = 0;

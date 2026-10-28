@@ -30,7 +30,7 @@ fs.writeFileSync(path.join(home,'events.jsonl'),events.map(JSON.stringify).join(
 // takeover/handback. Only this explicit Browser-only suffix uses normal mode;
 // stand-in agents, loopback/no-tailnet service, mail/telemetry off still apply.
 const controlledBrowserOnly=process.env.INSPECTOR_HELPERS_ONLY==='1'&&process.env.BATCH_BROWSER==='1'&&process.env.BATCH_HIERARCHY==='0'&&process.env.BROWSER_CONTINUE_TAKEOVER==='1';
-Object.assign(process.env,{BACKPLANE_AGENTS:agents,BACKPLANE_COPY:controlledBrowserOnly?'0':'1',BACKPLANE_NO_UPDATE:'1',BACKPLANE_TELEMETRY:'off',BACKPLANE_PEERS:'',BACKPLANE_LOCK_DIR:path.join(home,'locks'),BACKPLANE_DESKTOP_BROWSER:'1'});
+Object.assign(process.env,{BACKPLANE_AGENTS:agents,BACKPLANE_COPY:controlledBrowserOnly?'0':'1',BACKPLANE_NO_UPDATE:'1',BACKPLANE_ORDER_SERVER:'http://127.0.0.1:9',BACKPLANE_TELEMETRY:'off',BACKPLANE_PEERS:'',BACKPLANE_LOCK_DIR:path.join(home,'locks'),BACKPLANE_DESKTOP_BROWSER:'1'});
 if(controlledBrowserOnly&&process.env.BROWSER_CONTINUE_HISTORY==='1')process.env.BACKPLANE_LOG_FILE=path.join(out,'browser-service.log');
 const binary=path.join(stage,'payload/backplane-serve'),web=path.join(stage,'payload/web'),service=new Service({home,binary,web,expectedVersion:info.version});
 const continueChild=process.env.INSPECTOR_CONTINUE_CHILD==='1';

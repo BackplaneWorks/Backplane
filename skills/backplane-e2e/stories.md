@@ -279,8 +279,10 @@ bar reads "Settings / page") and closes it. The "Jump or run a command" field
 Projects; a thread shows "‹ title ▾" with State under it; ‹ goes back.
 
 **S38 Buy in the rail** (W D)
-Settings → Ordering on (order.server pointed at a local stand-in, never the
-real one), in a project with fab files: the rail's foot shows "Buy it" with
+The test hub starts with Ordering off (hub.sh sets it, though a person's
+default is on) and the order server a dead local address. Point
+order.server at a local stand-in (never the real one), then Settings →
+Ordering on, in a project with fab files: the rail's foot shows "Buy it" with
 its price under a divider. Press it: a "Buy: <project>" thread opens, with
 no Buy of its own. The folded rail shows only the cart.
 

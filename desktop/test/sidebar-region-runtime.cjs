@@ -26,7 +26,7 @@ async function run(stage,label){
  for(let i=0;i<64;i++)ev.push({$:'MessagePosted',thread:'t0',msg:'m'+i,role:i%2?'assistant':'user',text:'Synthetic history '+i+' 日本語 '+'x'.repeat(100),at:at+2});
  for(const [key,value]of [['restart.continue','off'],['mail.on','off'],['telemetry.share','off'],['onboard.done','1'],['sidebar.view','active']])ev.push({$:'SettingSet',key,value,at:at+3});
  fs.writeFileSync(home+'/events.jsonl',ev.map(JSON.stringify).join('\n')+'\n');
- const env={...process.env,BACKPLANE_HOME:home,BACKPLANE_AGENTS:agents,BACKPLANE_COPY:'1',BACKPLANE_TELEMETRY:'off',BACKPLANE_NO_UPDATE:'1',BACKPLANE_PEERS:'',BACKPLANE_LOCK_DIR:home+'/locks',SHELL:'/bin/sh'};Object.assign(process.env,env);
+ const env={...process.env,BACKPLANE_HOME:home,BACKPLANE_AGENTS:agents,BACKPLANE_COPY:'1',BACKPLANE_TELEMETRY:'off',BACKPLANE_NO_UPDATE:'1',BACKPLANE_ORDER_SERVER:'http://127.0.0.1:9',BACKPLANE_PEERS:'',BACKPLANE_LOCK_DIR:home+'/locks',SHELL:'/bin/sh'};Object.assign(process.env,env);
  const binary=stage+'/payload/backplane-serve',web=stage+'/payload/web',service=new Service({home,binary,web,expectedVersion:info.version});let app,page,views;
  const row={label,stage,source:info.commit,threads:2786,projects:45,active:32,timings:[],checks:[],wire:[]};rows.push(row);
  const ready=async id=>page.waitForFunction(id=>document.documentElement.dataset.backplaneRemoteReady==='true'&&document.documentElement.dataset.backplaneCached!=='true'&&document.querySelector('main[data-thread]')?.dataset.thread===id&&document.querySelector('main')?.getAttribute('aria-busy')!=='true',id);

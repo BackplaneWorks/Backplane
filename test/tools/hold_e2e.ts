@@ -57,7 +57,7 @@ writeFileSync(join(home, "events.jsonl"), "");
 const args = [bin, "--home", home, "--port", String(port), "--no-tailscale", "--foreground"];
 if (web) args.push("--web", resolve(web));
 const proc = Bun.spawn(args, {
-  env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_PEERS: "", BACKPLANE_GOOGLE_BAKE: "0",
+  env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_ORDER_SERVER: "http://127.0.0.1:9", BACKPLANE_PEERS: "", BACKPLANE_GOOGLE_BAKE: "0",
     BP_STANDIN_MODE: "stream", BP_STREAM_N: "200", BP_STREAM_MS: "15", BP_STREAM_SEP: "\n\n", BACKPLANE_AGENTS: fake, PATH: `${fake}:/usr/bin:/bin` },
   stdout: "ignore",
   stderr: "ignore",

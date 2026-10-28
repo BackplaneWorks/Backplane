@@ -60,7 +60,7 @@ const port = freePort();
 type Hub = { proc: ReturnType<typeof Bun.spawn> };
 const start = async (): Promise<Hub> => {
   const proc = Bun.spawn([resolve(bin), "--home", home, "--port", String(port), "--no-tailscale", "--foreground"], {
-    env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "", BACKPLANE_GOOGLE_BAKE: "0", FAKE_LOG: log,
+    env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_ORDER_SERVER: "http://127.0.0.1:9", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "", BACKPLANE_GOOGLE_BAKE: "0", FAKE_LOG: log,
       BP_WORK_MS: "300", BACKPLANE_AGENTS: fake, PATH: `${fake}:${process.env.PATH}` },
     stdout: "ignore",
     stderr: "ignore",

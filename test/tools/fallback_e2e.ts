@@ -89,7 +89,7 @@ if (process.argv[2] === "--claude") {
     event("SettingSet", { key: "text.provider", value: "codex" }), event("SettingSet", { key: "text.model", value: "test-next" })].map(JSON.stringify).join("\n") + "\n");
   const listener = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } });
   const port = listener.port; listener.stop(true);
-  const env = { ...process.env, HOME: root, BACKPLANE_AGENTS: fake, PATH: `${fake}:${process.env.PATH}`, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_KEYRING_LOCKED: "", BACKPLANE_PEERS: "", BACKPLANE_GOOGLE_BAKE: "0", FALLBACK_AGENT_LOG: agentLog, FALLBACK_EFFECT: effect, BACKPLANE_LOCK_DIR: join(root, "locks"), BACKPLANE_DEPLOY_LOCKS: join(root, "deploy-locks") };
+  const env = { ...process.env, HOME: root, BACKPLANE_AGENTS: fake, PATH: `${fake}:${process.env.PATH}`, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_ORDER_SERVER: "http://127.0.0.1:9", BACKPLANE_KEYRING_LOCKED: "", BACKPLANE_PEERS: "", BACKPLANE_GOOGLE_BAKE: "0", FALLBACK_AGENT_LOG: agentLog, FALLBACK_EFFECT: effect, BACKPLANE_LOCK_DIR: join(root, "locks"), BACKPLANE_DEPLOY_LOCKS: join(root, "deploy-locks") };
   let proc: ReturnType<typeof Bun.spawn> | undefined, ws: WebSocket | undefined;
   let request = 0;
   const desktopMessages: any[] = [];

@@ -59,11 +59,11 @@ const testService=new Service({home,binary:artifact,web,expectedVersion});
 (async () => {
   const errors=[];
   try {
-    Object.assign(process.env,{BACKPLANE_AGENTS:fake,BP_AGENT_TRACE:path.join(home,'agent-trace.jsonl'),BACKPLANE_NO_UPDATE:'1',BACKPLANE_PEERS:'',BACKPLANE_KEYRING_LOCKED:'0',BACKPLANE_GOOGLE_BAKE:'0',BACKPLANE_LOCK_DIR:path.join(home,'locks')});
+    Object.assign(process.env,{BACKPLANE_AGENTS:fake,BP_AGENT_TRACE:path.join(home,'agent-trace.jsonl'),BACKPLANE_NO_UPDATE:'1',BACKPLANE_ORDER_SERVER:'http://127.0.0.1:9',BACKPLANE_PEERS:'',BACKPLANE_KEYRING_LOCKED:'0',BACKPLANE_GOOGLE_BAKE:'0',BACKPLANE_LOCK_DIR:path.join(home,'locks')});
     await testService.start();
     app = await _electron.launch({executablePath:require('electron'),args:[path.join(root,'desktop')],env:{...process.env,
       BACKPLANE_HOME:home,BACKPLANE_SERVICE:artifact,BACKPLANE_SERVICE_VERSION:expectedVersion,BACKPLANE_WEB:web,BACKPLANE_AGENTS:fake,BP_AGENT_TRACE:path.join(home,'agent-trace.jsonl'),
-      BACKPLANE_NO_UPDATE:'1',BACKPLANE_PEERS:'',BACKPLANE_KEYRING_LOCKED:'0',BACKPLANE_GOOGLE_BAKE:'0',
+      BACKPLANE_NO_UPDATE:'1',BACKPLANE_ORDER_SERVER:'http://127.0.0.1:9',BACKPLANE_PEERS:'',BACKPLANE_KEYRING_LOCKED:'0',BACKPLANE_GOOGLE_BAKE:'0',
       BACKPLANE_LOCK_DIR:path.join(home,'locks'),DISPLAY:process.env.DISPLAY || ':0'},timeout:60000});
     page=await app.firstWindow({timeout:60000});
     page.on('pageerror',e=>errors.push(e.message));

@@ -12,7 +12,7 @@ const events=[ev('ProjectCreated',{id:'sheets',title:'Sheet navigation fixture',
  ...['sheet-a','sheet-b'].map(id=>ev('ThreadCreated',{id,title:id,project:'sheets',env:'local',branch:'',worktree:project,provider:'codex',model:''})),
  ...[['restart.continue','off'],['mail.on','off'],['telemetry.share','off'],['onboard.done','1']].map(([key,value])=>ev('SettingSet',{key,value}))];
 fs.writeFileSync(home+'/events.jsonl',events.map(JSON.stringify).join('\n')+'\n');
-const env={...process.env,BACKPLANE_HOME:home,BACKPLANE_AGENTS:agents,BACKPLANE_COPY:'1',BACKPLANE_TELEMETRY:'off',BACKPLANE_NO_UPDATE:'1',BACKPLANE_PEERS:'',BACKPLANE_LOCK_DIR:home+'/locks',BACKPLANE_DESKTOP_BROWSER:'1'};
+const env={...process.env,BACKPLANE_HOME:home,BACKPLANE_AGENTS:agents,BACKPLANE_COPY:'1',BACKPLANE_TELEMETRY:'off',BACKPLANE_NO_UPDATE:'1',BACKPLANE_ORDER_SERVER:'http://127.0.0.1:9',BACKPLANE_PEERS:'',BACKPLANE_LOCK_DIR:home+'/locks',BACKPLANE_DESKTOP_BROWSER:'1'};
 Object.assign(process.env,env);
 const shellQuote=s=>"'"+s.replaceAll("'", "'\"'\"'")+"'";
 const wrapper=home+'/fixture-service';fs.writeFileSync(wrapper,'#!/bin/sh\nexec '+shellQuote(stage+'/payload/backplane-serve')+' "$@" >>'+shellQuote(out+'/service-stdio.log')+' 2>&1\n',{mode:0o755});

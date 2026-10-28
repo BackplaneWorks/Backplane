@@ -13,7 +13,7 @@ run() {
   home=$(mktemp -d)
   mkdir "$home/agents"
   BACKPLANE_AGENTS="$home/agents" BACKPLANE_PEERS= \
-    "$bin" --foreground --no-tailscale --web dist/web --home "$home" --port "$port" > "$home/out.log" 2>&1 &
+    BACKPLANE_ORDER_SERVER=http://127.0.0.1:9 "$bin" --foreground --no-tailscale --web dist/web --home "$home" --port "$port" > "$home/out.log" 2>&1 &
   pid=$!
   trap 'kill $pid 2>/dev/null || true' EXIT
   i=0

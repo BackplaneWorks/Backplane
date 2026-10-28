@@ -81,7 +81,7 @@ const hub = Bun.spawn([resolve(binary), "--home", home, "--port", String(port), 
   env: {
     ...process.env, HOME: home, XDG_CACHE_HOME: join(home, ".cache"), XDG_CONFIG_HOME: join(home, ".config"), XDG_DATA_HOME: join(home, ".local/share"), XDG_RUNTIME_DIR: xdg,
     BACKPLANE_AGENTS: fake, PATH: `${fake}:${dirname(bun)}:/usr/bin:/bin`, DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_HOME: home, BACKPLANE_KICAD: runtime, BACKPLANE_KICAD_CLI: "",
-    BACKPLANE_PEERS: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_LOCK_DIR: join(home, "locks"),
+    BACKPLANE_PEERS: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_ORDER_SERVER: "http://127.0.0.1:9", BACKPLANE_LOCK_DIR: join(home, "locks"),
   },
   stdout: Bun.file(join(home, "stdout.log")), stderr: Bun.file(join(home, "stderr.log")),
 });

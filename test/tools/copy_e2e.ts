@@ -43,7 +43,7 @@ for (const n of ["claude", "codex", "grok", "muse"]) { writeFileSync(join(fake, 
 const argv = (home: string) => [...(hub.endsWith(".js") ? [process.execPath, resolve(hub)] : [resolve(hub)]),
   "--home", home, "--port", String(PORT), "--no-tailscale", "--foreground", "--web", root];
 const env = (copy: boolean) => {
-  const e: Record<string, string> = { ...(process.env as Record<string, string>), DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_TELEMETRY: "off", BACKPLANE_PEERS: "",
+  const e: Record<string, string> = { ...(process.env as Record<string, string>), DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_ORDER_SERVER: "http://127.0.0.1:9", BACKPLANE_TELEMETRY: "off", BACKPLANE_PEERS: "",
     BACKPLANE_GOOGLE_BAKE: "0", BACKPLANE_AGENTS: fake, BACKPLANE_LOCK_DIR: join(root, "locks"), TMPDIR: join(root, "tmp") };
   delete e.BACKPLANE_HOME;
   delete e.BACKPLANE_COPY;

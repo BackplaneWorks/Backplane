@@ -17,7 +17,7 @@ for (const cli of ["claude", "codex", "grok", "muse", "gh", "tailscale", "kicad-
 const listener = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } });
 const port = listener.port; listener.stop(true);
 const proc = Bun.spawn([resolve(bin), "--home", home, "--port", String(port), "--web", resolve(web), "--headless", "--foreground", "--no-tailscale"], {
-  env: { ...process.env, HOME: root, PATH: `${fake}:${process.env.PATH}`, BACKPLANE_AGENTS: fake, BACKPLANE_NO_UPDATE: "1", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "", BACKPLANE_GOOGLE_BAKE: "0", BACKPLANE_LOCK_DIR: join(root, "locks") },
+  env: { ...process.env, HOME: root, PATH: `${fake}:${process.env.PATH}`, BACKPLANE_AGENTS: fake, BACKPLANE_NO_UPDATE: "1", BACKPLANE_ORDER_SERVER: "http://127.0.0.1:9", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "", BACKPLANE_GOOGLE_BAKE: "0", BACKPLANE_LOCK_DIR: join(root, "locks") },
   stdout: Bun.file(join(root, "stdout")), stderr: Bun.file(join(root, "stderr")),
 });
 try {

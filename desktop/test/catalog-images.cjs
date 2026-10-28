@@ -21,7 +21,7 @@ const text='Sent screenshots should appear here.\n\n'+['one.png','two.png','note
 events.push(ev('MessagePosted',{thread:'t0',msg:'sent-images',role:'user',text}),ev('MessagePosted',{thread:'t30',msg:'private-other-body',role:'assistant',text:'OTHER_BODY_MUST_NOT_APPEAR_IN_T0'}),
  ...['restart.continue','mail.on','telemetry.share'].map(key=>ev('SettingSet',{key,value:'off'})),ev('SettingSet',{key:'onboard.done',value:'1'}));
 fs.writeFileSync(path.join(home,'events.jsonl'),events.map(JSON.stringify).join('\n')+'\n');
-Object.assign(process.env,{BACKPLANE_AGENTS:agents,BACKPLANE_COPY:'1',BACKPLANE_NO_UPDATE:'1',BACKPLANE_TELEMETRY:'off',BACKPLANE_PEERS:'',BACKPLANE_LOCK_DIR:path.join(home,'locks')});
+Object.assign(process.env,{BACKPLANE_AGENTS:agents,BACKPLANE_COPY:'1',BACKPLANE_NO_UPDATE:'1',BACKPLANE_ORDER_SERVER:'http://127.0.0.1:9',BACKPLANE_TELEMETRY:'off',BACKPLANE_PEERS:'',BACKPLANE_LOCK_DIR:path.join(home,'locks')});
 const service=new Service({home,binary:path.join(stage,'payload/backplane-serve'),web:path.join(stage,'payload/web'),expectedVersion:info.version});
 let app,page;const start=performance.now();
 (async()=>{try{

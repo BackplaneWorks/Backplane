@@ -28,6 +28,9 @@
 set -eu
 cd "$(dirname "$0")/.."
 export BEND_NO_TELEMETRY=1
+# no test reaches the real order server (Ordering is on by default):
+# orderio.bend's Od.at sends Backplane's own address here instead
+export BACKPLANE_ORDER_SERVER=${BACKPLANE_ORDER_SERVER:-http://127.0.0.1:9}
 # Use the same bounded checker/runtime stack as check.sh. Tests exercise
 # large wire payloads and real render trees, beyond Bun's default stack.
 ulimit -s 1048576 2>/dev/null || true
