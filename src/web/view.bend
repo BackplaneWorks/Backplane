@@ -3342,10 +3342,20 @@ def View.board.relative(+path: String, +root: String) -> String:
 def View.board.near(+path: String, +f: String) -> Bool:
   Bool.or(View.board.on(path, f), Bool.and(Bool.not(String.is_empty(MC.Mech.parent(f))), U.Bd.on("/" ++ path, f)))
 
-def View.board.current(fs: List<&2, String>, +path: String) -> String:
+# (else the board in the file's own folder: a sub-sheet beside a board at
+# the project's top is that board's, not a board named after the sheet)
+def View.board.same(fs: List<&2, String>, +path: String) -> String:
   match fs:
     case Nil{}: path
-    case +f <> t: Bool.pick(String, View.board.near(path, f), f, View.board.current(t, path))
+    case +f <> t: Bool.pick(String, String.eq(MC.Mech.parent(f), MC.Mech.parent(path)), f, View.board.same(t, path))
+
+def View.board.current.go(fs: List<&2, String>, +path: String, +all: List<&2, String>) -> String:
+  match fs:
+    case Nil{}: View.board.same(all, path)
+    case +f <> t: Bool.pick(String, View.board.near(path, f), f, View.board.current.go(t, path, all))
+
+def View.board.current(+fs: List<&2, String>, +path: String) -> String:
+  View.board.current.go(fs, path, fs)
 
 def View.board.rows(fs: List<&2, String>, +cur: String, +own: String, +seen: List<&2, String>) -> List<&2, D.Node>:
   match fs:

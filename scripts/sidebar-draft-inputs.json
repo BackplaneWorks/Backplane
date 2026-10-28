@@ -143,7 +143,7 @@
     "src/web/space.bend": "b86a265e41a900498bc33c37c0404c4d6678554efe3d9054f329beb2cf35ee63",
     "src/web/usage-graph.bend": "fa06f7d2bf855a396a5f7a7b4725dfaa990145fbbcefe7ad21ae8f9a698a2679",
     "src/web/usage-page.bend": "706e3f17a4a3e5f159656d47aeb76a940d4825421f5c33228f9aef692ec926e3",
-    "src/web/view.bend": "162716a3c47ed2221dd0390a22850483432e6f0fad649c2c5746fe073ad21df0"
+    "src/web/view.bend": "206cd07f7bf178e459ddffb0de4a88474ee59dd06e1921cc41b9b32f438aac65"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -253,5 +253,5 @@
       "sourceSnapshot": "/home/h/Documents/i2cjak/bp-coord/settle-fresh-work/SOURCE-structural-correction.json"
     }
   },
-  "reviewNote": "The history bar counts changes without the design as it was before (Hist.track.changes, Hs.bar.k); sidebar drafts unchanged"
+  "reviewNote": "The board picker names the board on a sub-sheet beside it (View.board.same); sidebar drafts unchanged"
 }
