@@ -709,6 +709,19 @@ def Solid.thin(+ts: List<&2, G.Tri3>) -> List<&2, G.Tri3>:
 def Solid.of(ts: List<&2, G.Tri3>) -> Solid:
   SE.fin(SE.go(ts, SE{Enc.new(), 0, 0, 0, Nil{}}))
 
+# the biggest GLB the hub reads into a solid: reading one takes about 300
+# bytes of memory per byte of it (a 12 MB board's model 3.6 GB), so a
+# bigger one would take the hub's machine down; it is refused, saying so
+def Solid.most() -> U32:
+  12582912
+
+def Solid.fits(size: U32) -> Bool:
+  U32.is_le(size, Solid.most())
+
+# what a refused model says (its size in whole megabytes, rounded up)
+def Solid.big(size: U32) -> String:
+  "This 3D model is too big to show here (" ++ U32.show(U32.add(U32.shrn(size, 20n), 1)) ++ " MB; the hub reads models up to " ++ U32.show(U32.shrn(Solid.most(), 20n)) ++ " MB)"
+
 # A plot
 # ------
 

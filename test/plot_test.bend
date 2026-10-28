@@ -123,3 +123,8 @@ def main() -> IO(Unit):
     +so : P.Solid = P.Solid.of([G.Tri3{0.001, 0.0016, 0.002, 0.003, 0.0016, 0.002, 0.001, 0.0016, 0.004, 255}])
     C.Check.str("solid", solid(so), "1 [100,200,160,300,400,160] 255,200,400,320,400,0,0,399,400,0")
     C.Check.str("solid lines round trip", solid(P.Plot.solid(P.Scan.plot(P.Line.plot(P.Plot.of.solid(so))))), solid(so))
+    # a model too big to read in the plot child's memory is refused, saying
+    # so (a 12 MB board's model is read, in about 3.6 GB)
+    C.Check.str("a 12 MB model is read", Bool.show(P.Solid.fits(12401104)), "True")
+    C.Check.str("a bigger one is not", Bool.show(P.Solid.fits(12582913)), "False")
+    C.Check.str("what a refused model says", P.Solid.big(30000000), "This 3D model is too big to show here (29 MB; the hub reads models up to 12 MB)")

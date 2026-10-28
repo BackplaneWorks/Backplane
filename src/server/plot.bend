@@ -537,8 +537,35 @@ def Pv.solid.up(step: Bool, ts: List<&2, G.Tri3>) -> List<&2, G.Tri3>:
       ts
 
 # a model's plot as lines, from its GLB
-def Pv.solid.text(+glb: String, +step: Bool) -> IO(String):
+def Pv.solid.parse(+glb: String, +step: Bool) -> IO(String):
   IO.bind(List<&2, U32>, String, K.Io.bytes(glb), bs => IO.pure(String, P.Line.plot(P.Plot.of.solid(P.Solid.of(P.Solid.thin(Pv.solid.up(step, G.Mesh.tris(G.Glb.parse(bs)))))))))
+
+def Pv.solid.size.k(v: U32 & U32 & U32) -> U32:
+  (_, sm) = v
+  (sz, _) = sm
+  sz
+
+def Pv.solid.size(r: Result<&1, &1, U32 & String, U32 & U32 & U32>) -> U32:
+  match r:
+    case Done{v}:
+      Pv.solid.size.k(v)
+    case Fail{_}:
+      0
+
+def Pv.solid.text.k(fits: Bool, +size: U32, +glb: String, +step: Bool) -> IO(String):
+  match fits:
+    case True{}:
+      Pv.solid.parse(glb, step)
+    case False{}:
+      IO.die(String, 3, P.Solid.big(size))
+
+def Pv.solid.text.at(+size: U32, +glb: String, +step: Bool) -> IO(String):
+  Pv.solid.text.k(P.Solid.fits(size), size, glb, step)
+
+# (a GLB too big to read in this child's memory is refused, saying so:
+# P.Solid.fits)
+def Pv.solid.text(+glb: String, +step: Bool) -> IO(String):
+  IO.bind(Result<&1, &1, U32 & String, U32 & U32 & U32>, String, H.FS.stat(glb), r => Pv.solid.text.at(Pv.solid.size(r), glb, step))
 
 # a cached GLB's plot is kept beside it (keep), per build of the hub, so a
 # hub started again, or one that let the model go, does not build it again
