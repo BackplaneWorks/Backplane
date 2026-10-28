@@ -1,0 +1,161 @@
+{
+  "scope": "source-controlled Release simulator rendering comparison; not physical-device acceptance",
+  "bundleId": "dev.backplane.works",
+  "bridgeSha256": "c7aab6184cab1d8b5484fd22325797ff5d7325086292fea80f68961f34bebf4a",
+  "hubServiceSha256": "8981cff4d38ad92b76a2ee8e5dffc1e5f60f4282754ed1c5e01bdd0b946a15db",
+  "hubHelloCommit": "19dceb1b755523674fa358d43d5b38984d004c60",
+  "originalPhysicalFailureEnvironment": "occurred pre-swap ae735; cause not inferred from server version",
+  "observations": [
+    {
+      "source": "6612ba37074ebf386a7ef9eebaaeec1dfefc0963",
+      "image": "build/ios-qualification/release-home-repro/6612-postswap-home-blank.png",
+      "imageSha256": "5ae65a10aba0ad6b11fe538b7121c5647def5413062e3860ab8272eb861564af",
+      "paintCheck": {
+        "contentRectPixels": [
+          0,
+          200,
+          1170,
+          2058
+        ],
+        "distinctColors": 3,
+        "flatBody": true,
+        "nonBackgroundFraction": 0.000972,
+        "pixels": 2407860,
+        "scope": "blank-body rejection only; frames, visual and freshness checks remain required",
+        "screenshotSha256": "5ae65a10aba0ad6b11fe538b7121c5647def5413062e3860ab8272eb861564af"
+      },
+      "classification": "visual failure: blank Home and full-height selected-tab stripe; AX frame assertions passed falsely"
+    },
+    {
+      "source": "b3d2de545b299d2c042a5da897edbe2027b02f44",
+      "image": "build/ios-qualification/release-home-repro/b3d2-postswap-home-blank.png",
+      "imageSha256": "cec525f897dad832e68f51d54365c1d91452ca94fe9f157c843b77ed104b862c",
+      "paintCheck": {
+        "contentRectPixels": [
+          0,
+          200,
+          1170,
+          2058
+        ],
+        "distinctColors": 2,
+        "flatBody": true,
+        "nonBackgroundFraction": 0.0,
+        "pixels": 2407860,
+        "scope": "blank-body rejection only; frames, visual and freshness checks remain required",
+        "screenshotSha256": "cec525f897dad832e68f51d54365c1d91452ca94fe9f157c843b77ed104b862c"
+      },
+      "classification": "visual failure: selected-tab stripe removed but Home body remains blank; AX assertions insufficient"
+    },
+    {
+      "source": "81dbd1dbc3d7c5725fe9af4919f901ba010db596",
+      "image": "build/ios-qualification/release-home-repro/81db-postswap-home.png",
+      "imageSha256": "08eac885f14784a49729b59dc78e77699974484f326946574dd8eec159429522",
+      "paintCheck": {
+        "contentRectPixels": [
+          0,
+          200,
+          1170,
+          2056
+        ],
+        "distinctColors": 2399,
+        "flatBody": false,
+        "nonBackgroundFraction": 0.159217,
+        "pixels": 2405520,
+        "scope": "blank-body rejection only; frames, visual and freshness checks remain required",
+        "screenshotSha256": "08eac885f14784a49729b59dc78e77699974484f326946574dd8eec159429522"
+      },
+      "geometry": {
+        "appForeground": true,
+        "appFrame": {
+          "height": 844,
+          "width": 390,
+          "x": 0,
+          "y": 0
+        },
+        "appOpenAlert": false,
+        "homeContentFrames": [
+          {
+            "height": 70,
+            "width": 358,
+            "x": 16,
+            "y": 153
+          },
+          {
+            "height": 26.333333333333314,
+            "width": 14,
+            "x": 32,
+            "y": 277
+          },
+          {
+            "height": 13.333333333333314,
+            "width": 56.33333333333333,
+            "x": 32,
+            "y": 305.3333333333333
+          },
+          {
+            "height": 26.333333333333314,
+            "width": 14,
+            "x": 115.5,
+            "y": 277
+          },
+          {
+            "height": 13.333333333333314,
+            "width": 51.66666666666666,
+            "x": 115.5,
+            "y": 305.3333333333333
+          },
+          {
+            "height": 26.333333333333314,
+            "width": 14,
+            "x": 199,
+            "y": 277
+          },
+          {
+            "height": 26.333333333333314,
+            "width": 53.33333333333334,
+            "x": 199,
+            "y": 305.3333333333333
+          },
+          {
+            "height": 26.333333333333314,
+            "width": 14,
+            "x": 282.5,
+            "y": 277
+          },
+          {
+            "height": 26.333333333333314,
+            "width": 49,
+            "x": 282.5,
+            "y": 305.3333333333333
+          }
+        ],
+        "homeSelected": true,
+        "pairAddressVisible": false,
+        "screenshotPixelHeight": 2532,
+        "screenshotPixelWidth": 1170,
+        "screenshotScale": 3,
+        "springboardOpenAlert": false,
+        "tabHomeFrame": {
+          "height": 58,
+          "width": 78,
+          "x": 0,
+          "y": 752
+        },
+        "visibleContentCount": 9
+      },
+      "classification": "focused visual pass: actual Home card, metrics and running rows painted; parent independently reviewed"
+    }
+  ],
+  "nextCandidate": {
+    "source": "81dbd1dbc3d7c5725fe9af4919f901ba010db596",
+    "status": "frozen corrective candidate; fresh cold URL, all tabs and lifecycle acceptance pending"
+  },
+  "releaseQualified": false,
+  "conclusion": "Bounding only the tab button backgrounds removes the stripe; additionally bounding the strip background restores Home. Production data, geometry and bridge paths are unchanged.",
+  "regressionRecordProof": {
+    "work": "w-t1793120668-655983-714733",
+    "exitCode": 1,
+    "failure": "pre-existing Laws.post_running_delivers mismatch; no laws changed",
+    "logSha256": "6b7edcd4656515102383138560387d5173eed929209cb61a5d3efbf52026f08d"
+  }
+}

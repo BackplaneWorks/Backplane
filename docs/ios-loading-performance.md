@@ -2,6 +2,16 @@
 
 The verified 34de artifact is preserved. Product work continues with a measured native loading path, hidden-body materialization changes and current-source accessibility checks. This document does not replace the source-specific 34de qualification receipt.
 
+## Release rendering defect and corrective qualification
+
+The real iPhone report invalidates the earlier release-runtime assumption: build `202610280050` is available in TestFlight, but its normal compact Release UI can be blank. Earlier checks covered real-data Debug simulator flows, preserved pairing/selection, a separate unsigned Release build, and signed package verification. They did not establish fresh normal Release pairing through an external QR URL and visibly painted Home. Even the new accessibility frame predicates passed while an opaque background concealed the content. Those results are not visual acceptance.
+
+The exact shipped app source `6612ba37`, production bundle `dev.backplane.works`, Release configuration and unchanged c7aab bridge reproduced blank Home after normal URL confirmation. The original phone failure occurred against the older ae735 hub. The simulator reproduction occurred after the separately coordinated 8981 deployment; server causation is not inferred. The same paired simulator, hub and data were kept for the controlled native comparisons.
+
+Button-only candidate `b3d2de545` removed the full-height selected-column stripe while leaving the body blank. Candidate `81dbd1dbc3d7c5725fe9af4919f901ba010db596` also bounds the strip's background. Both calls now specify `ignoresSafeAreaEdges: []`; the strip's explicit bottom-only safe-area fill remains. No data, transport, layout sizing, Swift/Metal renderer or shared source changed. The second candidate restores the actual Bub card, metrics and running rows, independently reviewed by the integration parent. Its measured app is 390 × 844 points; the Home tab is (0, 752, 78, 58), and the 3× screenshot is 1170 × 2532 pixels. Nine Home content frames intersect the content area.
+
+The [comparison record](ios-release-home-rendering.json) pins source, screenshots, geometry and pixel results. The [paint guard](../test/ios-vc/check-body-paint.py) rejects both blank bodies and accepts the restored screenshot. It checks a specified screenshot rectangle without exposing image content; it is not a substitute for real content/frame assertions, freshness checks or human visual review. Run it with `uv run test/ios-vc/check-body-paint.py SCREENSHOT --rect X Y WIDTH HEIGHT`, using measured screenshot pixels outside status and tab bars. The historical real-data control also passes. Fresh cold external-URL pairing, all five actual tab bodies, foreground/relaunch and appearance remain pending on the frozen candidate; no corrective TestFlight release is qualified yet. The separate Home no-card state improvement is not included in this controlled fix.
+
 ## TestFlight release
 
 User authorization to release supersedes the earlier simulator-only delivery constraint. Version **0.12.2**, build **202610280050**, is available to the existing internal TestFlight group. Apple reports build `e182c488-1644-4b27-80a9-6c1898433b0d` as `VALID` and `IN_BETA_TESTING`; the reciprocal internal-group build list explicitly contains it. No external beta or public App Store submission was made.

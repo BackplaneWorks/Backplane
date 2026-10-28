@@ -37,5 +37,9 @@
     "exitCode": 1,
     "failure": "pre-existing Laws.post_running_delivers mismatch; no laws changed",
     "logSha256": "6b7edcd4656515102383138560387d5173eed929209cb61a5d3efbf52026f08d"
-  }
+  },
+  "runtimeQualificationStatus": "FAILED_FRESH_RELEASE_UI_REPRODUCTION",
+  "knownReleaseDefect": "Compact tab backgrounds cover the body; user real iPhone report reproduced in exact Release simulator. Apple VALID/availability is separate from runtime acceptance.",
+  "correctiveCandidate": "81dbd1dbc3d7c5725fe9af4919f901ba010db596",
+  "correctiveReleaseAvailable": false
 }
