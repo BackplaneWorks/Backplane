@@ -2211,9 +2211,9 @@ def T.menu.file.reveal(l: I.Loc) -> String:
 def T.menu.forkback(l: I.Loc) -> String:
   match l:
     case I.En{}:
-      "Bring back to its source"
+      "Merge into source thread"
     case I.Ja{}:
-      "元のスレッドに戻す"
+      "元のスレッドにマージ"
 
 def T.menu.intent(l: I.Loc) -> String:
   match l:

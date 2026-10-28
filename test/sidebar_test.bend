@@ -128,7 +128,7 @@ def main() -> IO(Unit):
     C.Check.str("fork from a row", sent(U.Ui.act(act(base(), "row-menu", "b"), "fork", "b")), "{\"id\":0,\"m\":\"thread.fork\",\"p\":{\"thread\":\"b\"}}")
     C.Check.str("fork shuts", U.Ui.scratch(act(act(base(), "row-menu", "b"), "fork", "b"), "@menu"), "")
     C.Check.str("the header's fork is the open thread's", sent(U.Ui.act(act(base(), "select", "c"), "fork", "")), "{\"id\":1,\"m\":\"thread.fork\",\"p\":{\"thread\":\"c\"}}")
-    C.Check.str("a fork's menu", menu(act(forked(), "row-menu", "b")), "New subthread,Fork thread,Bring back to its source,Pin,Rename,Settle,Snooze 1 hour,Snooze until tomorrow,Snooze 1 week,Archive,Delete,Copy link")
+    C.Check.str("a fork's menu", menu(act(forked(), "row-menu", "b")), "New subthread,Fork thread,Merge into source thread,Pin,Rename,Settle,Snooze 1 hour,Snooze until tomorrow,Snooze 1 week,Archive,Delete,Copy link")
     C.Check.str("back from a row", sent(U.Ui.act(act(forked(), "row-menu", "b"), "back", "b")), "{\"id\":0,\"m\":\"thread.back\",\"p\":{\"thread\":\"b\"}}")
     # the open thread keeps its place: its project stays live for an hour
     # after that thread settled, and a shut fold still shows its row

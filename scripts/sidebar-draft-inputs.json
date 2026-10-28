@@ -71,7 +71,7 @@
     "src/core/menu.bend": "807668923de70eaabb72ddb760f808cbf6d786b70822ba6a1180776758af7eee",
     "src/core/model.bend": "96a7baa0b71bb5efa085ee9259a126738623e87984596bed8e772ae30f0750e8",
     "src/core/modelpick.bend": "7a04676ab0f5e312e175347f4386b2dd53c69b35071bcdc3c70384d100d0b32f",
-    "src/core/msgs.bend": "e549dbc88818e83967ffb94baf0d04dc0b7ffbc48bde35030c43491217887836",
+    "src/core/msgs.bend": "91890aba0e01d8800b6879f4737dbdd7545a3361eadae1aa4d70d7a51dd76e00",
     "src/core/notice.bend": "ee87318c1f12fc6cfb23bb5e24e90709e1f9a2eadfd2832581d21590f596e5e0",
     "src/core/onboard.bend": "55ccccf20f706a0acad492de20e23aedc751c7e9ce61b6f3430bfd65796e9232",
     "src/core/once.bend": "c12f375e09045a035cfc66c87d73197f3348b2998fa0e0bb6c9876fca870577c",
@@ -115,7 +115,7 @@
     "src/core/thin.bend": "6b48a12893f531f83895142955fd2f50d574724575d6ac965f01065d21074bc9",
     "src/core/title.bend": "bac62f410792eb2feff74985b63f950130d03d9de75dc78fb6ac5f1e97f6d5eb",
     "src/core/todo.bend": "32f4f5c5f49643edfbbf5cd61e389098d82ebb4fcc4798a616e3d25736ba5604",
-    "src/core/tools.bend": "0a98141382a28eaf2c6d547b6a659ad9482e6894d97a6a90ad96e2b72b0ccf1a",
+    "src/core/tools.bend": "754442a96f667e166f93096811adea081888233b9ea9f0a3d994a4375bd42db7",
     "src/core/tz.bend": "96054e486c1ad8a7305fe0610ee7feb5266869b2ad7c78ed9fd5f1d375c06f40",
     "src/core/uber.bend": "b86d13523ed4fd08006c8cb1f00d00712c4ab3cdc13b7b03dc2808cc72d09938",
     "src/core/ubersync.bend": "1e94a7d5d085e876ba91eca8a04d960ddfb405db9f62b64d73a70055812dbdc1",
@@ -253,5 +253,5 @@
       "sourceSnapshot": "/home/h/Documents/i2cjak/bp-coord/settle-fresh-work/SOURCE-structural-correction.json"
     }
   },
-  "reviewNote": "The board picker names the board on a sub-sheet beside it (View.board.same); sidebar drafts unchanged"
+  "reviewNote": "Name a fork's way back Merge into source thread, apart from Bring back"
 }

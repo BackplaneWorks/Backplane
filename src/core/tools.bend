@@ -102,7 +102,7 @@ def Tools.fork() -> Tool:
 def Tools.back.loc(+l: LC.Loc, forked: Bool) -> List<&2, Tool>:
   match forked:
     case True{}:
-      [Tool{"undo", MSG.T.menu.bringback(l), MSG.T.tools.tip.back(l), "back", "", False{}, False{}, False{}}]
+      [Tool{"undo", MSG.T.menu.forkback(l), MSG.T.tools.tip.back(l), "back", "", False{}, False{}, False{}}]
     case False{}:
       Nil{}
 
