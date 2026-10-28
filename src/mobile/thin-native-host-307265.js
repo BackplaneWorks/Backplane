@@ -281,6 +281,10 @@ export class NativeThinHost307265 {
     const s = this.states.get(hub);
     if (!s || s.mode !== 'view-v1') return false;
     this.current = hub;
+    if (action === 'bfield' && fieldName(value) !== null) {
+      if (!s.typed) s.typed = new Map();
+      s.typed.set(fieldName(value), value.slice(fieldName(value).length + 1));
+    }
     const intent = this.api.intent(hub, copy(s.session), copy(s.target), action, value);
     if (!intent || intent.kind === 'blocked') return true;
     if (intent.kind === 'draft') {
@@ -367,6 +371,11 @@ export class NativeThinHost307265 {
     s.queue.push({ action, value, input: copy(s.session), revision: s.revision });
     this.pump(s); return true;
   }
+
+  // what was typed last in a field of hub's forms (its "bfield" text), sent
+  // or still waiting (undefined: nothing typed); forget lets it go
+  typed(hub, name) { return this.states.get(hub)?.typed?.get(name); }
+  forget(hub, name) { this.states.get(hub)?.typed?.delete(name); }
 
   // the page on show has its own request on its way (an action, an update,
   // a page): not a view still opening (select() clears the window)

@@ -741,6 +741,7 @@ globalThis.Backplane = {
   // Bend builds and checks (app.bend's secret_req): not an action, not the
   // kept state, not a draft.
   secret(packed) {
+    if (packed.startsWith("@apikey\u001f")) return this.apiKey(packed.slice(8));
     const key = previewCur || App.current(hubs);
     let r;
     try { r = JSON.parse(App.secret_req(packed)); } catch { r = { error: "The secret could not be sent" }; }
@@ -749,6 +750,28 @@ globalThis.Backplane = {
     const send = { type: "send", hub: key, data: App.wire(r.rpc) };
     r = null;
     const after = JSON.parse(this.act("secret-sent", ""));
+    after.cmds = [send].concat(after.cmds || []);
+    return JSON.stringify(after);
+  },
+  // Settings' API key Save, by the same vault Save (screen.bend's
+  // Mob.keys.form): "<the hub's name>\u001f<value>". The name is the one
+  // typed last (the hub's copy may be a key behind); the api-add request is
+  // built by Bend (app.bend's key_req) and goes straight to the hub, as the
+  // web's keySave: the value is never an action, a form field or kept, and
+  // the hub answers with names only. Nothing goes without a name and a value
+  // ("key-err" says why in the form).
+  apiKey(packed) {
+    const key = foregroundHub();
+    const cut = packed.indexOf("\u001f");
+    const name = thin.typed(key, "kname") ?? (cut < 0 ? "" : packed.slice(0, cut));
+    let r;
+    try { r = JSON.parse(App.key_req(name + "\u001f" + (cut < 0 ? "" : packed.slice(cut + 1)))); } catch { r = { error: "The key could not be sent" }; }
+    packed = "";
+    if (r.error) return this.act("key-err", r.error);
+    thin.forget(key, "kname");
+    const send = { type: "send", hub: key, data: App.wire(r.rpc) };
+    r = null;
+    const after = JSON.parse(this.act("key-sent", ""));
     after.cmds = [send].concat(after.cmds || []);
     return JSON.stringify(after);
   },

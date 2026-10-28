@@ -118,6 +118,12 @@ def cbor_words() -> List<&2, String>:
 def secret_req(+packed: String) -> String:
   U.Sbox.req(packed)
 
+# Settings' API key Save (bridge.js's Backplane.secret, the value from the
+# app's vault field, as the web's keySave): "<name>\u001f<value>" to
+# {"rpc": the api-add request, "name"} or {"error"} (client.bend's ApiKeys.req)
+def key_req(+packed: String) -> String:
+  U.ApiKeys.req(packed)
+
 def wire(text: String) -> String:
   SH.B64.encode(CB.Cbor.encode(Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{})))
 

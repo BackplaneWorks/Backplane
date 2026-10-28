@@ -1468,11 +1468,20 @@ def Mob.keys.list.loc(+lc: I.Loc, open: Bool, +u: U.Ui) -> List<&2, J.Json>:
 def Mob.keys.list(open: Bool, +u: U.Ui) -> List<&2, J.Json>:
   Mob.keys.list.loc(I.En{}, open, u)
 
+# The key's field is a "vault" field, as the secret box's value: the app
+# keeps what is typed and hands it over once, at Save, through the vault
+# Save (bridge.js's Backplane.secret, marked "@apikey", with the name the
+# hub has as the fallback for the one typed); bridge.js builds the api-add
+# request (app.bend's key_req) and it goes straight to the hub. The value
+# is never a form field, a view action or anything the hub sends back.
+def Mob.keys.vault(+lc: I.Loc) -> J.Json:
+  J.Json.obj([J.KV{"name", J.Json.str("kval")}, J.KV{"hint", J.Json.str(MSG.T.common.key(lc))}, J.KV{"secret", J.Json.bool(True{})}, J.KV{"vault", J.Json.bool(True{})}, J.KV{"value", J.Json.str("")}])
+
 def Mob.keys.form(+lc: I.Loc, open: Bool, +u: U.Ui) -> List<&2, J.Json>:
   match open:
     case True{}:
-      [Mob.set.row.f(MSG.T.settings.keys.new(lc), U.ApiKeys.form.note(lc), [Mob.set.field("kname", MSG.T.bots.name(lc), False{}, U.Ui.scratch(u, "@f.kname")), Mob.set.field("kval", MSG.T.common.key(lc), True{}, "")],
-        [Mob.set.btn(MSG.T.common.save(lc), "key-add", "", True{})])]
+      [Mob.set.row.f(MSG.T.settings.keys.new(lc), U.ApiKeys.form.say(lc, u), [Mob.set.field("kname", MSG.T.bots.name(lc), False{}, U.Ui.scratch(u, "@f.kname")), Mob.keys.vault(lc)],
+        [Mob.set.btn(MSG.T.common.save(lc), "secret-save", "@apikey" ++ "\u{1f}" ++ U.Ui.scratch(u, "@f.kname"), True{})])]
     case False{}:
       Nil{}
 

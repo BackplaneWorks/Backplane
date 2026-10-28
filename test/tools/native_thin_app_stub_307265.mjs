@@ -34,6 +34,7 @@ export default {
  thin_search:(text,query)=>{const s=JSON.parse(text),q=JSON.parse(query);return j({...s,find:{mode:'search',query:q.query,rows:q.rows.map(r=>({label:r.text,action:'select',value:s.hub+'|'+r.thread,kind:'thread'}))}});},
  screen_list_in:hs=>j(screen(hs.cur,'')),screenj:hs=>j(screen(hs.cur,'')),focus:()=>j(null),live_text:()=>'',live_nodes:text=>j([{text}]),
  wire:text=>text,alerts:()=> '[]',restore:hs=>hs,
+ key_req:packed=>{const [n,v]=packed.split('\u001f');return JSON.stringify(!n?{error:'Give the key a name'}:!v?{error:'Paste the key itself'}:{rpc:JSON.stringify({id:0,m:'bots.voice',p:{op:'api-add',name:n,value:v}}),name:n});},
  recv:()=>{observed.recv++;throw Error('Canonical recv reached');},act:()=>{observed.act++;throw Error('Canonical act reached');},
  online:()=>{throw Error('Canonical online reached');},online_same:()=>false,tick:()=>{observed.tick++;throw Error('Canonical tick reached');},
  register:()=>{observed.register++;throw Error('Canonical register reached');},register_at:(hs,key,platform,token,kind,thread,env,bundle)=>{observed.register++;const session=hs.sessions[key]||base(),id=session.rid,text=JSON.stringify({id,m:'device.register',p:{platform,token,kind,thread,env,bundle}});return{hubs:{...hs,sessions:{...hs.sessions,[key]:{...session,rid:id+1,outbox:{...session.outbox,[id]:text}}}},cmds:{$:'Con',head:{hub:key,cmd:{$:'Send',text}},tail:{$:'Nil'}}};},
