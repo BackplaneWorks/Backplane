@@ -386,7 +386,7 @@ class View {
   // triangle; then the smallest part whose box on that side of the board
   // holds the point), probed; nothing under it clears the probe
   pick(cx, cy) {
-    if (!probed || !this.pos || !board) return;
+    if (!probed || !this.pos || !board || !isBoard(this.key)) return;
     const c = this.canvas, b = c.getBoundingClientRect(), w = c.clientWidth, h = c.clientHeight;
     const cam = this.cam, s = cam.unit(h), eye = cam.eye(), t = cam.target();
     const px = (cx - b.left - w / 2) * s, py = (h / 2 - (cy - b.top)) * s;
@@ -418,7 +418,7 @@ class View {
   // model's axes (y up), and the heights of its side of the board
   lit() {
     const ref = this.probe.startsWith("c\t") ? this.probe.slice(2) : "";
-    if (!ref || !board) return null;
+    if (!ref || !board || !isBoard(this.key)) return null;
     const key = boardOf(this.key), ps = board.parts(key);
     if (!ps) { board.need(key); return null; }
     const e = ps.get(ref);
@@ -525,6 +525,8 @@ let probed = null;
 export function useBoard(b) { board = b; }
 export function onProbe(fn) { probed = fn; }
 const boardOf = (key) => `0|${key.slice(2)}`;
+// a board's model (the project's own, or a .kicad_pcb), not a part's (Mech)
+const isBoard = (key) => { const path = key.split("|").slice(2).join("|"); return path === "" || path.endsWith(".kicad_pcb"); };
 
 // the nearest triangle a ray from o along d meets (Möller–Trumbore), its
 // point, or null
