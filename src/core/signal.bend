@@ -83,21 +83,66 @@ def Signal.label(+lc: I.Loc, +n: Nat) -> String:
 # What a thread's State cell says (the web's top bar and work line): the
 # signal's name, or how its last turn ended when that says more. A turn
 # the person stopped, with nothing else going on, is "stopped" (grey, as
-# inactive). The dot keeps the signal's colour (Signal.name).
+# inactive); one whose agent failed, with no approval or question waiting
+# (pending), is "failed" (red, as blocked), not "needs you". The dot keeps
+# the signal's colour (Signal.name).
 def Signal.shown.k(+name: String, turn: M.TurnState, +pending: Nat) -> String:
   match turn:
     case M.Interrupted{}:
       Bool.pick(String, String.eq(name, "inactive"), "stopped", name)
+    case M.Failed{}:
+      Bool.pick(String, Bool.and(String.eq(name, "blocked"), Nat.is_eq(pending, 0n)), "failed", name)
     case _:
       name
 
 def Signal.shown(+n: Nat, turn: M.TurnState, +pending: Nat) -> String:
   Signal.shown.k(Signal.name(n), turn, pending)
 
-# the cell's sentence
-def Signal.label.shown(+lc: I.Loc, +n: Nat, +shown: String) -> String:
+# the cell's sentence: a failure says why (the failure's own words, why)
+def Signal.label.shown(+lc: I.Loc, +n: Nat, +shown: String, +why: String) -> String:
   Bool.pick(String, String.eq(shown, "stopped"), Bool.pick(String, String.eq(I.I18n.tag(lc), "ja"), "停止しました・実行中の作業はありません", "Stopped: nothing is running"),
-    Signal.label(lc, n))
+    Bool.pick(String, String.eq(shown, "failed"),
+      Bool.pick(String, String.eq(I.I18n.tag(lc), "ja"), "失敗しました", "Failed") ++ Bool.pick(String, String.is_empty(why), "", ": " ++ why)
+        ++ Bool.pick(String, Signal.active(n), Bool.pick(String, String.eq(I.I18n.tag(lc), "ja"), "（実行中の作業もあります）", "; work also active"), ""),
+      Signal.label(lc, n)))
+
+def Signal.error(e: M.Entry, +th: String) -> String:
+  match e:
+    case M.Act{_, +t, +tone, _, +summary, _}:
+      Bool.pick(String, Bool.and(String.eq(t, th), String.eq(tone, "error")), String.trim(summary), "")
+    case M.Msg{_, _, _, _, _}:
+      ""
+
+def Signal.asked(e: M.Entry, +th: String) -> Bool:
+  match e:
+    case M.Msg{_, +t, M.User{}, _, _}:
+      String.eq(t, th)
+    case _:
+      False{}
+
+# entries newest first: the first error of the thread's last turn (n more
+# to look at, 0 once found or at the person's message)
+def Signal.why.go(es: List<&2, M.Entry>, +th: String, n: Nat, +found: String) -> String:
+  match es n:
+    case +_ 0n:
+      found
+    case Nil{} 1n+_:
+      found
+    case +e <> t 1n+k:
+      Signal.why.go(t, th, Bool.pick(Nat, Bool.or(Signal.asked(e, th), Bool.not(String.is_empty(Signal.error(e, th)))), 0n, k), Signal.error(e, th))
+
+# why the thread's last turn failed: the error it logged ("" for none
+# among its newest 400 entries), at most 400 characters. Only for the
+# cell's sentence: the index above never reads the timeline.
+def Signal.why(+st: M.State, +th: String) -> String:
+  String.take(Signal.why.go(M.State.mine(st, th), th, 400n, ""), 400n)
+
+def Signal.why.if(failed: Bool, +st: M.State, +th: String) -> String:
+  match failed:
+    case True{}:
+      Signal.why(st, th)
+    case False{}:
+      ""
 
 def Signal.at.k(r: Map<&2, Nat> & Nat) -> Nat:
   (_, n) = r

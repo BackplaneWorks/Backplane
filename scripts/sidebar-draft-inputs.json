@@ -98,7 +98,7 @@
     "src/core/sidebar-drafts.bend": "694c4a21ae82cdbb4eb5cdf451128acb16eb2638b9594a062edd01da4725fef3",
     "src/core/sidebar-read.bend": "8b9952dbbe0c9ae89bf808e995b8ce643f20102587238724c9156076dd21419d",
     "src/core/sign.bend": "f6c4b636f7be64f7a4a03e8cc4d0b19eae2696e8c08a92236ad7e378d7120edc",
-    "src/core/signal.bend": "e5bc069ac069a2d955bef5a78b0a8451b213f91a19768b7c8db0691198964546",
+    "src/core/signal.bend": "dd80943822cf944ab5114b547da7c32444d926cd259c987cebcf257bf2ba23fe",
     "src/core/slash.bend": "4b88f73566a9b3694a888ede21f2117157df9449c50c52806648e4795d298932",
     "src/core/space.bend": "0caea2f71303b476291b0e9570459ce12c8fe58b81aefccb2bd935fe4bd56c3a",
     "src/core/stamp.bend": "aa17c4ef7492aab853c19c465f5e9e65e4484b496736d4da6a059ef121d76965",
@@ -143,7 +143,7 @@
     "src/web/space.bend": "b86a265e41a900498bc33c37c0404c4d6678554efe3d9054f329beb2cf35ee63",
     "src/web/usage-graph.bend": "fa06f7d2bf855a396a5f7a7b4725dfaa990145fbbcefe7ad21ae8f9a698a2679",
     "src/web/usage-page.bend": "706e3f17a4a3e5f159656d47aeb76a940d4825421f5c33228f9aef692ec926e3",
-    "src/web/view.bend": "70f36703e3f4fe3504489a8bda5c307b4e3067df9bbf21ed59753525378ea4d1"
+    "src/web/view.bend": "91d0fcf911dd023161fef45c51a0971250bd7b552265bd81d989ce6660e57f16"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -253,5 +253,5 @@
       "sourceSnapshot": "/home/h/Documents/i2cjak/bp-coord/settle-fresh-work/SOURCE-structural-correction.json"
     }
   },
-  "reviewNote": "Top bar: State says stopped for a stopped turn (Signal.shown); the sidebar draft keeps Signal.name"
+  "reviewNote": "Top bar: State says failed and why for a failed turn (Signal.shown, Signal.why); the sidebar draft keeps Signal.name"
 }

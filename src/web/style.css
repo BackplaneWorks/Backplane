@@ -204,6 +204,8 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .act .kind { color: var(--faint); flex: none; }
 .act .summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .act.error { color: var(--bad); }
+/* a failure says all of why it failed: its row wraps, never cut */
+.act.error .summary { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; }
 button.fold { align-self: flex-start; display: flex; align-items: center; gap: 6px; background: none; border-color: transparent; color: var(--dim); font-family: var(--mono); font-size: calc(12px * var(--text-scale, 100) / 100); padding: 2px 4px 2px 0; max-width: 860px; }
 button.fold:hover { color: var(--text); }
 button.fold span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

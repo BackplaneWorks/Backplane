@@ -17,19 +17,25 @@ def check(name: String, cs: List<&2, M.Change>, want: String) -> IO(Unit):
   C.Check.str(name, signal(state(cs), "p"), want)
 
 # what the State cell says (Signal.shown): the word, then its sentence
-def shown.w(+n: Nat, +w: String) -> String:
-  w ++ " | " ++ S.Signal.label.shown(I.En{}, n, w)
+def shown.w(+st: M.State, +id: String, +n: Nat, +w: String) -> String:
+  w ++ " | " ++ S.Signal.label.shown(I.En{}, n, w, S.Signal.why.if(String.eq(w, "failed"), st, id))
 
 def shown.t(+st: M.State, +id: String, t: M.Thread) -> String:
   match t:
     case M.Thread{_, _, _, _, _, +turn, +pending, _, _, _, _, _, _, _, _, _, _, _, _, _, _}:
-      shown.w(S.Signal.of(st, M.State.thread.get(st, id)), S.Signal.shown(S.Signal.of(st, M.State.thread.get(st, id)), turn, pending))
+      shown.w(st, id, S.Signal.of(st, M.State.thread.get(st, id)), S.Signal.shown(S.Signal.of(st, M.State.thread.get(st, id)), turn, pending))
 
 def shown(+st: M.State, +id: String) -> String:
   shown.t(st, id, M.State.thread.get(st, id))
 
 def cell(name: String, cs: List<&2, M.Change>, want: String) -> IO(Unit):
   C.Check.str(name, shown(state(cs), "p"), want)
+
+def asked(+at: Nat) -> M.Change:
+  M.MessagePosted{"p", "u" ++ Nat.show(at), M.User{}, "go", at}
+
+def failed(+text: String, +at: Nat) -> M.Change:
+  M.ActivityLogged{"p", "e" ++ Nat.show(at), "error", "codex", text, at}
 
 def delegated() -> M.Change:
   M.TaskDelegated{"task", "p", "c", 1n, "claude", "", 2n}
@@ -49,6 +55,9 @@ def main() -> IO(Unit):
     cell("a stopped turn says stopped", [M.TurnChanged{"p", M.Running{}, 2n}, M.TurnChanged{"p", M.Interrupted{}, 3n}], "stopped | Stopped: nothing is running")
     cell("a stopped and settled thread says settled", [M.TurnChanged{"p", M.Interrupted{}, 3n}, M.ThreadSettled{"p", True{}, 4n}], "settled | Settled")
     cell("a stopped thread with a question says needs you", [M.TurnChanged{"p", M.Interrupted{}, 3n}, ask("p", "input")], "blocked | Blocked: needs interaction")
+    cell("a failed turn says failed and why", [asked(2n), failed("old trouble", 3n), asked(4n), failed("codex exited (exit 127)", 5n), M.TurnChanged{"p", M.Failed{}, 5n}], "failed | Failed: codex exited (exit 127)")
+    cell("only the last turn's error is why", [asked(2n), failed("old trouble", 3n), asked(4n), M.TurnChanged{"p", M.Failed{}, 5n}], "failed | Failed")
+    cell("a failure with an approval waiting needs you", [M.TurnChanged{"p", M.Failed{}, 5n}, M.PendingChanged{"p", 1n, 6n}], "blocked | Blocked: needs interaction")
     cell("a finished turn says finished", [M.TurnChanged{"p", M.Completed{}, 5n}], "finished | Finished: ready for you to look at")
     cell("a new thread is idle", Nil{}, "inactive | Inactive: no confirmed active work")
     check("idle is gray", Nil{}, "inactive")

@@ -3031,7 +3031,7 @@ def View.workbar(+lc: I.Loc, +st: M.State, +info: Map<&2, String>, +id: String, 
   +signal = SG.Signal.cached(info, id)
   +shown = SG.Signal.shown(signal, turn, pending)
   D.El{"div", "workbar", [D.At{"class", "thread-workbar"}, D.At{"role", "group"}, D.At{"aria-label", View.work.label(lc)}],
-    List.append(&2, D.Node, [View.dot(lc, SG.Signal.name(signal)), D.Dom.span("work-state", SG.Signal.label.shown(lc, signal, shown))], View.tools(TO.Tools.stop.loc(lc, running)))}
+    List.append(&2, D.Node, [View.dot(lc, SG.Signal.name(signal)), D.Dom.span("work-state", SG.Signal.label.shown(lc, signal, shown, SG.Signal.why.if(String.eq(shown, "failed"), st, id)))], View.tools(TO.Tools.stop.loc(lc, running)))}
 
 # Keep a running Stop control, but never reserve a status strip for an
 # idle bot conversation. Ordinary thread workbars retain their summaries.
@@ -4267,10 +4267,10 @@ def View.chrome.state.word(lc: I.Loc, +name: String) -> String:
   match lc:
     case I.Ja{}:
       Bool.pick(String, String.eq(name, "blocked"), "対応待ち", Bool.pick(String, String.eq(name, "active"), "作業中", Bool.pick(String, String.eq(name, "settled"), "完了",
-        Bool.pick(String, String.eq(name, "finished"), "作業完了", Bool.pick(String, String.eq(name, "stopped"), "停止", "待機")))))
+        Bool.pick(String, String.eq(name, "finished"), "作業完了", Bool.pick(String, String.eq(name, "stopped"), "停止", Bool.pick(String, String.eq(name, "failed"), "失敗", "待機"))))))
     case _:
       Bool.pick(String, String.eq(name, "blocked"), "needs you", Bool.pick(String, String.eq(name, "active"), "working", Bool.pick(String, String.eq(name, "settled"), "settled",
-        Bool.pick(String, String.eq(name, "finished"), "finished", Bool.pick(String, String.eq(name, "stopped"), "stopped", "idle")))))
+        Bool.pick(String, String.eq(name, "finished"), "finished", Bool.pick(String, String.eq(name, "stopped"), "stopped", Bool.pick(String, String.eq(name, "failed"), "failed", "idle"))))))
 
 def View.chrome.changes.k(lc: I.Loc) -> String:
   match lc:
@@ -4328,7 +4328,7 @@ def View.chrome.state(+lc: I.Loc, +st: M.State, +info: Map<&2, String>, +id: Str
   +signal = SG.Signal.cached(info, id)
   +shown = SG.Signal.shown(signal, turn, pending)
   D.El{"span", "work", [D.At{"class", "kv state"}, D.At{"role", "group"}, D.At{"aria-label", View.work.label(lc)},
-    D.At{"title", SG.Signal.label.shown(lc, signal, shown)}],
+    D.At{"title", SG.Signal.label.shown(lc, signal, shown, SG.Signal.why.if(String.eq(shown, "failed"), st, id))}],
     List.append(&2, D.Node, [D.Dom.span("k", View.chrome.state.k(lc)), View.dot(lc, SG.Signal.name(signal)), D.Dom.span("v work-state", View.chrome.state.word(lc, shown))],
       View.tools(TO.Tools.stop.loc(lc, View.running(turn))))}
 
