@@ -1073,6 +1073,25 @@ def Mob.diff.loc(+lc: I.Loc, open: Bool, +text: String) -> J.Json:
 def Mob.diff(open: Bool, +text: String) -> J.Json:
   Mob.diff.loc(I.En{}, open, text)
 
+def Mob.diff.none(open: Bool, j: J.Json) -> J.Json:
+  match open:
+    case True{}:
+      j
+    case False{}:
+      J.Null{}
+
+# (none: the folder the hub found no repository in, "diff.none:t": the
+# summary says so and there are no files)
+def Mob.diff.at.k(git: Bool, +lc: I.Loc, open: Bool, +text: String, +none: String) -> J.Json:
+  match git:
+    case True{}:
+      Mob.diff.loc(lc, open, text)
+    case False{}:
+      Mob.diff.none(open, J.Json.obj([J.KV{"summary", J.Json.str(MSG.T.viewer.diff.nogit.why(lc, none))}, J.KV{"files", J.Json.arr(Nil{})}]))
+
+def Mob.diff.at(+lc: I.Loc, open: Bool, +text: String, +none: String) -> J.Json:
+  Mob.diff.at.k(String.is_empty(none), lc, open, text, none)
+
 def Mob.runs(rs: List<&2, VT.VRun>) -> List<&2, J.Json>:
   match rs:
     case Nil{}:
@@ -1294,7 +1313,7 @@ def Mob.thread(+lc: I.Loc, render: Bool, u: U.Ui, t: M.Thread, pend: List<&2, St
         J.KV{"attaching", J.Json.arr(Mob.chips(atts))}, J.KV{"uploading", J.Json.str(up)},
         J.KV{"chunk", J.Json.nat(AT.Att.chunk())},
         J.KV{"cap", J.Json.nat(AT.Att.cap())},
-        J.KV{"diff", Mob.diff.loc(lc, Bool.and(pa, String.eq(U.Str.get(nf, "view.kind:" ++ id), "diff")), U.Str.get(nf, "diff:" ++ id))},
+        J.KV{"diff", Mob.diff.at(lc, Bool.and(pa, String.eq(U.Str.get(nf, "view.kind:" ++ id), "diff")), U.Str.get(nf, "diff:" ++ id), U.Str.get(nf, "diff.none:" ++ id))},
         J.KV{"term", term},
         J.KV{"embs", embs},
         J.KV{"viewer", vw}])

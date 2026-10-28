@@ -2488,6 +2488,26 @@ def View.diff.loc(+lc: I.Loc, +text: String) -> List<&2, D.Node>:
 def View.diff(+text: String) -> List<&2, D.Node>:
   View.diff.loc(I.En{}, text)
 
+# a thread whose folder is no git repository has nothing to compare with:
+# the pane says so plainly and how to make it one, with no git actions
+def View.diff.nogit(+lc: I.Loc, +path: String) -> List<&2, D.Node>:
+  [D.El{"div", "", [D.At{"class", "diff-head"}], [D.Dom.span("summary", MSG.T.viewer.diff.nogit(lc))]},
+   D.El{"div", "", [D.At{"class", "diff-body diff-none"}], [
+     D.El{"p", "", Nil{}, [D.Txt{MSG.T.viewer.diff.nogit.why(lc, path)}]},
+     D.El{"p", "", Nil{}, [D.Txt{MSG.T.viewer.diff.nogit.how(lc)}]},
+     D.El{"pre", "", Nil{}, [D.Txt{"cd " ++ path ++ "\ngit init\ngit add -A\ngit commit -m start"}]}]}]
+
+def View.diff.at.k(git: Bool, +lc: I.Loc, +text: String, +none: String) -> List<&2, D.Node>:
+  match git:
+    case True{}:
+      View.diff.loc(lc, text)
+    case False{}:
+      View.diff.nogit(lc, none)
+
+# (none: the folder the hub found no repository in, "diff.none:t")
+def View.diff.at(+lc: I.Loc, +text: String, +none: String) -> List<&2, D.Node>:
+  View.diff.at.k(String.is_empty(none), lc, text, none)
+
 def View.pending.image(image: Bool, +p: String) -> List<&2, D.Node>:
   match image:
     case True{}:
@@ -4247,7 +4267,7 @@ def View.review(+lc: I.Loc, +u: U.Ui) -> List<&2, D.Node>:
 def View.aside.k(+lc: I.Loc, i: Nat, +u: U.Ui) -> List<&2, D.Node>:
   match i:
     case 0n:
-      View.diff.loc(lc, U.Ui.view_get(u, "diff"))
+      View.diff.at(lc, U.Ui.view_get(u, "diff"), U.Ui.view_get(u, "diff.none"))
     case 1n:
       View.browser.loc(lc, u)
     case 2n:

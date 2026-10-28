@@ -2783,12 +2783,21 @@ def GitJob.go(i: Nat, +tx: AG.Tx, +inbox: Chan(Msg), +client: U32, +id: String, 
     case _:
       IO.pure(Unit, Unit{})
 
+# outside a repository Diff answers an empty diff naming the folder
+# ("nogit"), so the viewer says so in its pane; the other jobs fail
+def GitJob.none(diff: Bool, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String) -> IO(Unit):
+  match diff:
+    case True{}:
+      GitJob.reply(inbox, client, id, True{}, J.Json.obj([J.KV{"diff", J.Str{""}}, J.KV{"thread", J.Str{thread}}, J.KV{"nogit", J.Str{cwd}}]))
+    case False{}:
+      GitJob.reply(inbox, client, id, False{}, J.Json.obj([J.KV{"text", J.Str{"not a git repository: " ++ cwd}}]))
+
 def GitJob.repo(ok: Bool, +tx: AG.Tx, +job: String, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +a: String, +b: String, +home: String, +seed: Nat) -> IO(Unit):
   match ok:
     case True{}:
       GitJob.go(C.Codec.pos(["worktree", "checkpoint0", "checkpoint", "diff", "revert", "act", "status", "name", "act_gen"], job), tx, inbox, client, id, thread, cwd, a, b, home, seed)
     case False{}:
-      Bool.pick(IO(Unit), String.is_empty(id), IO.pure(Unit, Unit{}), GitJob.reply(inbox, client, id, False{}, J.Json.obj([J.KV{"text", J.Str{"not a git repository: " ++ cwd}}])))
+      Bool.pick(IO(Unit), String.is_empty(id), IO.pure(Unit, Unit{}), GitJob.none(String.eq(job, "diff"), inbox, client, id, thread, cwd))
 
 # one git job; nothing happens outside a git repository (checkpoints are
 # skipped, requests answer why)

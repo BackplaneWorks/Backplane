@@ -6,7 +6,7 @@ import ../src/core/json.bend as J
 # An open Diff follows its thread (client.bend's Dv.*): a diff asked for
 # by hand opens the viewer and notes what it was asked at; Diff asks again
 # by itself only once the thread moved on, and its own answer only puts
-# the text in place.
+# the text in place; a folder that is no git repository is named.
 
 def ui(a: U.Act) -> U.Ui:
   match a:
@@ -20,7 +20,7 @@ def on(u: U.Ui, +id: String) -> U.Ui:
   ui(U.Ui.act(u, "select", id))
 
 def reply(+diff: String, +nogit: String) -> J.Json:
-  json("{\"t\":\"reply\",\"id\":7,\"ok\":true,\"result\":{\"diff\":\"" ++ diff ++ "\",\"thread\":\"a\"}}")
+  json("{\"t\":\"reply\",\"id\":7,\"ok\":true,\"result\":{\"diff\":\"" ++ diff ++ "\",\"thread\":\"a\",\"nogit\":\"" ++ nogit ++ "\"}}")
 
 def sends(a: U.Act) -> String:
   match a:
@@ -51,3 +51,5 @@ def main() -> IO(Unit):
     C.Check.str("its answer puts the text in place", U.Ui.info(quiet, "diff:a") ++ "|" ++ U.Ui.info(quiet, "diff.auto:a"), "y|")
     C.Check.str("a shut panel asks nothing", sends(follow(U.Ui.info_set(shut, "diff.at:a", "old"))), "")
     C.Check.str("a hand ask clears the mark", U.Ui.info(ui(U.Ui.act(asked, "diff", "")), "diff.auto:a"), "")
+    C.Check.str("no repository: the folder is named", U.Ui.info(U.Ui.recv(a, reply("", "/p")), "diff.none:a") ++ "|" ++ Bool.show(U.Ui.panel(U.Ui.recv(a, reply("", "/p")))), "/p|True")
+    C.Check.str("a repository again clears it", U.Ui.info(U.Ui.recv(U.Ui.recv(a, reply("", "/p")), reply("z", "")), "diff.none:a"), "")

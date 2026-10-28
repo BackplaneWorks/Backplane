@@ -748,16 +748,17 @@ def Ui.view_pick(u: Ui, +kind: String) -> Ui:
     case Ui{st, +sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, +nf, ob, tr}:
       Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, Viewer.put(nf, sel, kind, ""), ob, tr}
 
-# A diff is kept as "diff:t". An open Diff follows its thread (Dv.sync):
-# "diff.at:t" is the thread's turn and step count the diff on show was
-# asked at (Dv.at), and an answer to Diff's own ask ("diff.auto:t" "1")
-# only puts the text in place, leaving the panel as the person has it by
-# then.
+# A diff is kept as "diff:t", and "diff.none:t" names the folder when
+# thread t's is no git repository (the hub's "nogit": nothing to compare).
+# An open Diff follows its thread (Dv.sync): "diff.at:t" is the thread's
+# turn and step count the diff on show was asked at (Dv.at), and an answer
+# to Diff's own ask ("diff.auto:t" "1") only puts the text in place,
+# leaving the panel as the person has it by then.
 def Dv.at(+st: M.State, +th: String) -> String:
   C.Turn.name(M.Thread.turn(M.State.thread.get(st, th))) ++ "|" ++ Nat.show(List.length(&2, M.Entry, M.State.steps(st, th)))
 
 def Dv.text(+nf: Map<&2, String>, +th: String, +r: J.Json) -> Map<&2, String>:
-  Map.set(&2, String, nf, "diff:" ++ th, J.Json.get_str(r, "diff", ""))
+  Map.set(&2, String, Map.set(&2, String, nf, "diff:" ++ th, J.Json.get_str(r, "diff", "")), "diff.none:" ++ th, J.Json.get_str(r, "nogit", ""))
 
 # a diff asked for by hand opens its thread's viewer on it (on screen when
 # that thread is)
