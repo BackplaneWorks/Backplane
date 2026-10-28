@@ -62,6 +62,8 @@ export class ThinHost {
     this.pagePositions = new Map();this.pagePositionBytes = 0;this.restorePage = null;this.conversation = '';
     // a moving action's Focus and Jump, for the view it moves to (handOver)
     this.forView = null;
+    // a view asked for and on its way (select): a press meanwhile waits for it
+    this.opening = false;
     this.client = new Views({ now: api.now,
       sidebarRegions: (api.renderer || 'web') === 'web',
       send: (_hub, request) => ({ type: 'request', request: request.p.session ? { ...request,
@@ -109,7 +111,9 @@ export class ThinHost {
     this.messages.clear();this.target = target;
     this.ready = false;this.window = null;this.cursor = '';this.back = [];this.paging = null;this.pageError = null;this.api.pageState?.(null);this.api.state({ phase: 'loading', remoteReady: false });
     this.api.selection?.(target, this.session);
-    return this.flush(this.client.select(this.hub, target, requestSession(this.session, false, target), this.api.cid), { selection: true });
+    const sent = this.flush(this.client.select(this.hub, target, requestSession(this.session, false, target), this.api.cid), { selection: true });
+    this.opening = sent;
+    return sent;
   }
   rememberPage() {
     if (!this.ready || !this.target || this.paging?.direction === 'restore') return;
@@ -172,7 +176,12 @@ export class ThinHost {
       }
       return true;
     }
-    if (!this.ready) { settled?.(false);this.api.blocked();return true; }
+    // A press while the selected thread's view is on its way (a click right
+    // after picking a thread) is for that view: it waits in the queue and
+    // goes once the view is on show (pump). Only a terminal's keys, bound
+    // to the view they were typed in, are refused, as is anything while no
+    // view is coming (a failed or closed connection).
+    if (!this.ready && !(this.opening && !terminalInput)) { settled?.(false);this.api.blocked();return true; }
     // a message sent from an earlier page shows the newest (the hub's
     // Hub.thin.act moves the page there too)
     // A page still on its way is dropped when it comes: shown after the
@@ -527,7 +536,7 @@ export class ThinHost {
         const current = partial.get(previous.id);
         if (!current || current.version !== previous.version) this.messages.reset(previous.id);
       }
-      this.ready = true;this.window = result.window;
+      this.ready = true;this.opening = false;this.window = result.window;
       let position = paged?.position;
       if (result.method === 'view.open' && this.restorePage) {
         const saved = this.restorePage;this.restorePage = null;position = saved.position;
@@ -613,7 +622,7 @@ export class ThinHost {
     return !!metadata && !!link && metadata.wireRevision === (metadata.pictureAuthority ? link.pictureRevision : link.revision) && metadata.target?.kind === link.target?.kind && metadata.target?.id === link.target?.id;
   }
   fail(reason) {
-    this.api.pageState?.(null);this.forView = null;
+    this.api.pageState?.(null);this.forView = null;this.opening = false;
     this.retireTerminal('Queued terminal input was not sent because the connection failed.');
     this.refreshScheduled = null;
     this.api.viewerChoice?.(null);
@@ -622,7 +631,7 @@ export class ThinHost {
     this.ready = false;this.api.state({ phase: 'error', remoteReady: false, reason });
   }
   disconnect() {
-    this.api.pageState?.(null);this.forView = null;
+    this.api.pageState?.(null);this.forView = null;this.opening = false;
     this.retireTerminal('Queued terminal input was not sent because the connection closed.');
     this.refreshScheduled = null;
     this.api.viewerChoice?.(null);

@@ -1071,7 +1071,8 @@ function dispatch(action, value, timer) {
       localPresentation(action, value, thinSession);
       return true;
     }
-    if (thin?.ready) {
+    // (a press while a thread's view is on its way waits for it: thin-host.js)
+    if (thin?.ready || thin?.opening) {
       if (action === "earlier" || action === "view-page") return thin.page();
       if (action === "thin-search") return thin.search(value);
       if (action === "thin-message-more") {

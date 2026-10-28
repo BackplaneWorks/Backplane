@@ -243,6 +243,24 @@ test('a failed move drops its Focus and Jump',async()=>{
  const f=await fixture();f.open();f.host.request('proj-intent','q');f.host.receive(moving(f,f.sent.at(-1),intentCmds));
  const open=f.sent.at(-1);f.host.receive({t:'reply',id:open.id,ok:false,error:{code:'UNAVAILABLE'}});assert.equal(f.host.forView,null);
 });
+// A click right after picking a thread (the top bar's gear while its view is
+// on its way) was refused as "not ready" and lost; it waits for that view.
+test('a press while a thread\'s view is on its way goes once the view is on show',async()=>{
+ const f=await fixture();f.open();f.host.request('select','B');const open=f.sent.at(-1);assert.equal(open.m,'view.open');
+ let settled;f.host.request('flag','settings',ok=>settled=ok);assert.equal(f.sent.length,2,'nothing sent while B is on its way');assert.equal(settled,undefined,'and not refused');
+ f.host.receive(f.reply(open));const action=f.sent.at(-1);assert.equal(action.m,'view.action');assert.equal(action.p.action,'flag');assert.equal(action.p.value,'settings');
+ assert.deepEqual(action.p.target,{kind:'thread',id:'B'},'for B');f.host.receive(f.reply(action));assert.equal(settled,true);
+});
+test('a press waiting for a view is dropped when the person picks another thread first',async()=>{
+ const f=await fixture();f.open();f.host.request('select','B');let settled;f.host.request('flag','settings',ok=>settled=ok);
+ f.host.request('select','C');assert.equal(settled,false);f.host.receive(f.reply());assert.equal(f.sent.filter(x=>x.m==='view.action').length,0);
+});
+test('a press with no view on its way is still refused, and a terminal\'s keys always wait for theirs',async()=>{
+ const f=await fixture();f.host.request('flag','settings');assert.equal(f.sent.length,0,'before the greeting');
+ f.open();f.host.request('select','B');const open=f.sent.at(-1);f.host.receive({t:'reply',id:open.id,ok:false,error:{code:'UNAVAILABLE'}});
+ let settled;f.host.request('flag','settings',ok=>settled=ok);assert.equal(settled,false,'after a failed open');
+ const g=await fixture();g.open();g.host.request('select','B');let keys;g.host.request('term-key','a',ok=>keys=ok);assert.equal(keys,false);
+});
 test('a background update cannot discard a newer navigation action',async()=>{
  const f=await fixture();f.open();f.host.request('uber','bub');const action=f.sent.at(-1);
  f.host.update();const update=f.sent.at(-1);assert.equal(update.m,'view.update');f.host.receive(f.reply(update));
