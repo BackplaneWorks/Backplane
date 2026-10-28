@@ -1,4 +1,5 @@
 import Base
+import ./accounts.bend as ACCT
 import ./subthreads.bend as ST
 import ./mailtriage.bend as TRI
 import ./runlife.bend as RL
@@ -8768,7 +8769,7 @@ def Fallback.line.on(on: Bool, +terminal: Bool, +s: M.State, +now: Nat, +th: Str
     case False{}: normal
 
 def Fallback.line(+s: M.State, +now: Nat, +th: String, +o: J.Json, terminal: Bool, normal: Step) -> Step:
-  Fallback.line.on(Bool.and(FB.Chain.on(s), Bool.and(Hub.running(Hub.thread(s, th)), String.is_empty(J.Json.get_str(o, "parent_tool_use_id", "")))), terminal, s, now, th, o, normal)
+  Fallback.line.on(Bool.and(Bool.not(ACCT.Accounts.named(s, th)), Bool.and(FB.Chain.on(s), Bool.and(Hub.running(Hub.thread(s, th)), String.is_empty(J.Json.get_str(o, "parent_tool_use_id", ""))))), terminal, s, now, th, o, normal)
 
 # One durable alert per outage, plus an audit row in every affected thread.
 # The count includes active threads on the same unavailable scope at discovery.
@@ -9142,7 +9143,7 @@ def Fallback.attempt.k(held: Bool, +s: M.State, +caps: J.Json, +now: Nat, +th: S
     case True{}: Fallback.use(FB.Chain.pick(FB.Chain.suffix(FB.Chain.of(s), FB.Target.key(Fallback.target(Hub.thread(s, th)))), s, caps, now), s, now, th, cwd, text, uuid)
 
 def Fallback.attempt.quota(+s: M.State, caps: J.Json, +now: Nat, +th: String, cwd: String, text: String, uuid: String, original: List<&2, Out>) -> Step:
-  Fallback.attempt.k(Bool.and(FB.Chain.on(s), FB.Target.held(s, Fallback.target(Hub.thread(s, th)), now)), s, caps, now, th, cwd, text, uuid, original)
+  Fallback.attempt.k(Bool.and(Bool.not(ACCT.Accounts.named(s, th)), Bool.and(FB.Chain.on(s), FB.Target.held(s, Fallback.target(Hub.thread(s, th)), now))), s, caps, now, th, cwd, text, uuid, original)
 
 def Auth.attempt(wait: Bool, +s: M.State, caps: J.Json, +now: Nat, +th: String, cwd: String, text: String, uuid: String, original: List<&2, Out>) -> Step:
   match wait:

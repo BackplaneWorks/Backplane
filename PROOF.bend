@@ -13510,3 +13510,15 @@ def Laws.hook_body_kind():
 
 def Laws.hook_body_ask_event():
   {==}
+
+def Laws.accounts_legacy_allowed(s, th, provider):
+  {==}
+
+def Laws.accounts_legacy_catalog(info, s, th, provider):
+  {==}
+
+def Laws.accounts_profile_sessions_differ():
+  {==}
+
+def Laws.accounts_identity_sessions_differ():
+  {==}

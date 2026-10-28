@@ -17,6 +17,7 @@
   ],
   "closureScannerSha256": "118bf07ecfe1c3da0776cde55b23a824185daff7847bda4a73c503d6929c7826",
   "files": {
+    "src/core/accounts.bend": "522ef105ac2dac3664aa3cbfad4b1c05ac845399af81851ef1bf065992bb2764",
     "src/core/acp.bend": "9f199bd200f4c3cd4e0e7e0900e22cf2a93ca11e6a4a07f48611888e6dd88e2a",
     "src/core/agent.bend": "c9494b806dac38e3f37a246872a196508069a0f6801ac4444319bc6a87b5efa3",
     "src/core/agy.bend": "ec8c54a6e7d6fc9abd27476b48d76669393fc59d5ee8141bff3c699e3d476fab",
@@ -32,7 +33,7 @@
     "src/core/cat.bend": "0130231a18e515a94d40d7584d19a9b5a2d1663f9601fbff944bf97e37f9fd6b",
     "src/core/cef.bend": "f2d3fa4c991d0e341620fe634ddb4e08da97f8e471ec46afac0b3de471cc69fb",
     "src/core/charter.bend": "7f906bdea712f6ff6162735c8cc133767ec0f9289c3d0bee6dfedbd4d75ad981",
-    "src/core/client.bend": "f8d7c81e32cd29bd85d1e7af6610e777c252391c1879fc0dd1dd69c9b98bf2c9",
+    "src/core/client.bend": "b62cd06e1e26027136969c8cec39a519c66b573e8fb6e23a4960d60e0c977862",
     "src/core/codec.bend": "33cb35c55f3712a18734e76e1149763001a9388af27948f0da4ead2c13d48b6f",
     "src/core/cron.bend": "6f89a001df0261a25c878616ea66c235e169f7fc1c726d39e695fce8adb57332",
     "src/core/deploy.bend": "ebee4e63a52cf41ae001bebcdbb7fb010ad71c1e04e481292585740d88a39cc4",
@@ -152,7 +153,7 @@
     "src/web/space.bend": "b86a265e41a900498bc33c37c0404c4d6678554efe3d9054f329beb2cf35ee63",
     "src/web/usage-graph.bend": "fa06f7d2bf855a396a5f7a7b4725dfaa990145fbbcefe7ad21ae8f9a698a2679",
     "src/web/usage-page.bend": "706e3f17a4a3e5f159656d47aeb76a940d4825421f5c33228f9aef692ec926e3",
-    "src/web/view.bend": "1713fc39c8e04c62c032da8ee1a447c14a386ea74b6f38fb36800d3d213c1207"
+    "src/web/view.bend": "fe77acbee41ab37e1e77ddfd075e4e146f926ad74ab774bea369653f29c7a44a"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -297,6 +298,26 @@
       ],
       "nativeAssertions": 16,
       "proofLimit": "Focused executed checks only; no global proof or package/platform acceptance claimed."
+    },
+    "multiAccountProfiles": {
+      "base": "7eccc1e6f29187929d24e0cbb4a8d85127f9d713",
+      "sourcePacketSHA256": "ffc84a774f510767a6b6a513318b4ae7c21ce132fe33a2c1d616223fee8e2bc8",
+      "outputReceiptSHA256": "c06148ca4572f5c47579c0a6549ddd9a5f647f33e9ef0828fd6360bd2646fc19",
+      "independentGuardClearanceSHA256": "3571d64e977cd22562b921fef2fb6cd11f91c41e4d5430ae1d3f8b68e041865e",
+      "scope": "Account forms remain retained @ scratch; transient recipient info remains keyed. Canonical inventory, binding and catalog metadata revisions invalidate the image; full current composer and popup use complete Ui. Keys, unknown @ retention, sidebar filter, slots, nine bridges and fallback policies unchanged. Guard reader/output clearance only.",
+      "assertions": 89,
+      "targetedImageAssertions": 20,
+      "targetedTest": "test/accounts_guard_image_test.bend",
+      "targetedTestSHA256": "009f2a911bd16f61c1a9dd7e99625a32f9cc2ed42b0673e3c3fb9fc79b32e551",
+      "limits": "No feature/auth/socket/native/runtime acceptance. Initial fixed-revision fixture failed then was corrected without production change. Global PROOF inherited late-import failure remains explicit."
+    },
+    "multiAccountGlobalSettingsScope": {
+      "sourcePacketSHA256": "e43639867385d0bc667f774d6c7ee2f872a087e21208aba3e6a4ed88e9f9db1a",
+      "outputReceiptSHA256": "243a6cdd9c0fb8546137e3cefdbdfebd78c4c76087a6804cc5136f9e22d22a7a",
+      "independentGuardClearanceSHA256": "5cd538a4bfb1ae0a3819a6649b26b1f104ff1f1c7c4b20e86f7d2fb956cd4fe9",
+      "scope": "Only core/accounts request admission changed: global Settings RPCs have no conversation owner, view actions use authoritative selected target and explicit thread RPCs retain the identity generation fence. No reader, key, full-frame, draft filter, fallback, bridge, scanner or closure membership change.",
+      "assertions": 56,
+      "limits": "Guard-only; no whole-feature/auth/native/runtime acceptance. Earlier source/build receipts retained as historical."
     }
   },
   "reviewNote": "Search: a subagent's step opens its own thread (hits.bend Hits.owner/jump; thin.bend hides a deleted thread's subagent log); sidebar drafts unaffected"

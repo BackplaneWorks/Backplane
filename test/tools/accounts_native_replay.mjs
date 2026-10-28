@@ -1,0 +1,35 @@
+// Actual service read -> frozen released bridge -> client merged Screen/Out.
+// Envelope correlated to a fresh bridge request; service presentation is retained.
+import fs from 'node:fs';
+import vm from 'node:vm';
+import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
+import {cbor,plain} from '../../src/web/wire.js';
+const [readPath,out,bundle]=process.argv.slice(2);
+assert(readPath&&out&&bundle,'usage: node accounts_native_replay.mjs SERVICE_READ CLIENT_OUTPUT FROZEN_BDCD_BRIDGE');
+const sha=x=>createHash('sha256').update(x).digest('hex'),source=fs.readFileSync(bundle,'utf8');
+assert.equal(sha(source),'bdcd72cd0bb365dc0396933f519c7450f305fb48ec17462a7d4aaa706baa2d34');
+const actual=JSON.parse(fs.readFileSync(readPath)),hub=actual.result.hub;assert.equal(actual.ok,true);assert(actual.result.shown.error);assert(actual.result.overlay.j.error);assert.deepEqual(actual.result.cmds,[]);
+const head=(m,n)=>n<24?Buffer.from([(m<<5)|n]):n<256?Buffer.from([(m<<5)|24,n]):n<65536?Buffer.from([(m<<5)|25,n>>8,n&255]):Buffer.from([(m<<5)|26,n>>>24,(n>>>16)&255,(n>>>8)&255,n&255]);
+const encode=v=>v===null?Buffer.from([246]):typeof v==='boolean'?Buffer.from([v?245:244]):typeof v==='number'?(v>4294967295?Buffer.concat([Buffer.from([199]),encode(String(v))]):head(0,v)):typeof v==='string'?Buffer.concat([head(3,Buffer.byteLength(v)),Buffer.from(v)]):Array.isArray(v)?Buffer.concat([head(4,v.length),...v.map(encode)]):Buffer.concat([head(5,Object.keys(v).length),...Object.entries(v).flatMap(([k,x])=>[encode(k),encode(x)])]);
+const context=vm.createContext({console,Date});vm.runInContext(source,context,{timeout:10000});
+const call=(method,...args)=>{context.args=args;context.method=method;return vm.runInContext('Backplane[method](...args)',context,{timeout:10000});};
+const json=(m,...args)=>JSON.parse(call(m,...args)),dict=JSON.parse(call('headerKeys'));
+const requests=o=>o.cmds.filter(c=>c.type==='send').map(c=>plain(cbor(new Uint8Array(Buffer.from(c.data,'base64')),dict.keys,dict.words)));
+const recv=x=>json('recv',hub,encode(x).toString('base64'),'1',false,false);
+call('start','account-old-client-fixture','{}');call('hubs',[hub]);call('local','mailroom-renderer','ios-v1');assert.equal(call('nativeSidebar',1),true);call('connection',hub,'1','view-v1');
+json('act','select',hub+'|'+actual.result.target.id);
+const opening=recv({t:'view',version:1,renderer:'mobile',generation:'1',epoch:'origin',limits:{replyBytes:262144,entries:32,recent:24,searchResults:25,searchCandidates:128,chunkBytes:65536}}),request=requests(opening)[0];
+assert.equal(request.m,'view.open');assert.equal(request.p.nativeSidebar,1);assert(!Object.hasOwn(request.p,'accountProfiles'));
+assert.deepEqual(request.p.target,actual.result.target);
+const result={...actual.result,hub,generation:'1',epoch:'origin',requestRevision:request.p.requestRevision,viewId:'account-old-client-view',renderer:'mobile'};
+const presented=recv({t:'reply',id:request.id,ok:true,result});
+fs.writeFileSync(out+'.debug.json',JSON.stringify(presented,null,2));assert(!presented.sync.some(s=>s.phase==='failed'),JSON.stringify(presented.sync));assert(presented.sync.some(s=>s.phase==='presented'));assert(presented.screen);
+assert.equal(presented.screen.error,actual.result.shown.error);assert(presented.screen.thread,'lossy Screen must retain the actual thread');
+assert.equal(presented.screen.thread.id,hub+'|'+actual.result.target.id);
+assert.equal(presented.screen.thread.draft,actual.result.shown.thread.draft);
+assert.equal(presented.screen.thread.entries.length,actual.result.shown.thread.entries.length);
+assert(presented.screen.thread.picker,'old model picker remains a valid bounded object');
+assert.deepEqual(result.cmds,[]);
+fs.writeFileSync(out,JSON.stringify({name:'named-account-unsupported',clientScreen:presented.screen,clientOut:presented})+'\n');
+const receipt={scope:'Actual service unsupported account read through frozen released native bridge; no app/platform acceptance',passed:true,bridgeSHA256:sha(source),serviceReadSHA256:sha(fs.readFileSync(readPath)),clientJSONLSHA256:sha(fs.readFileSync(out)),offeredAccountProfiles:false,threadRetained:true,errorRetained:true};fs.writeFileSync(out+'.receipt.json',JSON.stringify(receipt,null,2)+'\n');console.log(JSON.stringify(receipt));

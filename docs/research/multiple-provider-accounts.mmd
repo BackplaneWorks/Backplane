@@ -1,0 +1,14 @@
+flowchart TD
+    T["Backplane thread: conversation history"] --> A["Binding A: hub + profile + identity epoch"]
+    T --> B["Binding B: hub + profile + identity epoch"]
+    A --> SA["Native session A + seen cursor + process generation"]
+    B --> SB["Native session B + seen cursor + process generation"]
+    A --> PA["Profile A: explicit child environment"]
+    B --> PB["Profile B: explicit child environment"]
+    PA --> CA["CLI-owned home / credential binding A"]
+    PB --> CB["CLI-owned home / credential binding B"]
+    PA --> MA["A model catalog + allowance snapshot"]
+    PB --> MB["B model catalog + allowance snapshot"]
+    MA --> V["Safe client projection: label, source, freshness, shared pool"]
+    MB --> V
+    SA -. "Explicit switch: hand over unseen context" .-> SB

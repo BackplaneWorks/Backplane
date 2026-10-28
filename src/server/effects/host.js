@@ -646,7 +646,7 @@ function bp_win_cmd(cmd) {
   return cmd;
 }
 
-function bp_proc_spawn(cmd, args, cwd, err) {
+function bp_proc_spawn(cmd, args, cwd, err, explicitEnv, deadlineMs = 0, onChild) {
   cmd = bp_win_cmd(cmd);
   const fs = require("fs");
   const argv = host_self([cmd, ...args]);
@@ -663,7 +663,7 @@ function bp_proc_spawn(cmd, args, cwd, err) {
     }
   }
   const env = {};
-  for (const [k, v] of Object.entries(process.env)) {
+  for (const [k, v] of Object.entries(explicitEnv ?? process.env)) {
     if (v !== undefined && k !== "" && !k.includes("=")) {
       env[k] = v;
     }
@@ -734,6 +734,10 @@ function bp_proc_spawn(cmd, args, cwd, err) {
   }
   child.once("error", () => {});
   child.exited = new Promise((res) => child.once("exit", () => res(child.exitCode)));
+  if (deadlineMs > 0) {
+    const deadline = setTimeout(() => child.kill(), Math.min(deadlineMs, 60000));
+    child.once("exit", () => clearTimeout(deadline));
+  }
   if (tmp !== null) {
     try {
       fs.renameSync(tmp, host_err_path(child.pid));
@@ -742,6 +746,7 @@ function bp_proc_spawn(cmd, args, cwd, err) {
   }
   const h = new (bp_proc_class())(child, err === 1 ? [child.stdout, child.stderr] : [child.stdout]);
   bp_procs().set(child.pid >>> 0, child);
+  if (onChild) onChild(child);
   return io_done(io_tup(child.pid >>> 0, globalThis.BP_H.add(h)));
 }
 
@@ -1543,6 +1548,8 @@ io_eff(CID(Sock.dup), sock_dup);
 io_eff(CID(Sock.peer), sock_peer);
 io_eff(CID(Sock.shutdown), sock_shutdown);
 io_eff(CID(Proc.spawn), proc_spawn);
+// Account-owned launches supply a fresh child environment; never mutate the hub.
+globalThis.BP_ACCOUNT_SPAWN = bp_proc_spawn;
 io_eff(CID(Proc.wait), proc_wait);
 io_eff(CID(Proc.kill), proc_kill);
 io_eff(CID(Proc.exited), proc_exited);

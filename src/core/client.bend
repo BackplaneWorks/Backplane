@@ -1,4 +1,5 @@
 import Base
+import ./accounts.bend as ACCT
 import ./subthreads.bend as ST
 import ./fallback.bend as FB
 import ./title.bend as TTL
@@ -1088,23 +1089,23 @@ def Rpc.text(+rid: Nat, m: String, p: List<&2, J.KV>) -> String:
 # every reconnect, until the server answers it
 def Ui.rpc.keep(u: Ui, +m: String, +p: List<&2, J.KV>) -> Act:
   match u:
-    case Ui{st, sel, dr, live, op, on, now, ad, pa, v, +rid, w, er, note, nf, +ob, tr}:
-      Act{Ui{st, sel, dr, live, op, on, now, ad, pa, v, 1n+rid, w, er, note, nf, Map.set(&2, String, ob, Nat.show(rid), Rpc.text(rid, m, p)), tr}, [Send{Rpc.text(rid, m, p)}]}
+    case Ui{+st, sel, dr, live, op, on, now, ad, pa, v, +rid, w, er, note, nf, +ob, tr}:
+      Act{Ui{st, sel, dr, live, op, on, now, ad, pa, v, 1n+rid, w, er, note, nf, Map.set(&2, String, ob, Nat.show(rid), Rpc.text(rid, m, ACCT.Accounts.rpc.params(st, p))), tr}, [Send{Rpc.text(rid, m, ACCT.Accounts.rpc.params(st, p))}]}
 
 def Ui.rpc(u: Ui, m: String, p: List<&2, J.KV>) -> Act:
   match u:
-    case Ui{st, sel, dr, live, op, on, now, ad, pa, v, +rid, w, er, note, nf, ob, tr}:
-      Act{Ui{st, sel, dr, live, op, on, now, ad, pa, v, 1n+rid, w, er, note, nf, ob, tr}, [Send{Rpc.text(rid, m, p)}]}
+    case Ui{+st, sel, dr, live, op, on, now, ad, pa, v, +rid, w, er, note, nf, ob, tr}:
+      Act{Ui{st, sel, dr, live, op, on, now, ad, pa, v, 1n+rid, w, er, note, nf, ob, tr}, [Send{Rpc.text(rid, m, ACCT.Accounts.rpc.params(st, p))}]}
 
 # a request about the selected thread, with more params
 def Ui.on_thread.p(u: Ui, m: String, p: List<&2, J.KV>) -> Act:
   match u:
-    case Ui{st, +sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}:
+    case Ui{+st, +sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}:
       Ui.rpc(Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}, m, J.KV{"thread", J.Str{sel}} <> p)
 
 def Ui.on_thread(u: Ui, m: String) -> Act:
   match u:
-    case Ui{st, +sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}:
+    case Ui{+st, +sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}:
       Ui.rpc(Ui{st, sel, dr, live, op, on, now, ad, pa, v, rid, w, er, note, nf, ob, tr}, m, [J.KV{"thread", J.Str{sel}}])
 
 def Ui.select.k(u: Ui, +id: String) -> Ui:
@@ -4315,8 +4316,10 @@ def Btw.got(has: Bool, u: Ui, +o: J.Json) -> Ui:
     case False{}:
       u
 
-def Btw.reply(u: Ui, +o: J.Json) -> Ui:
-  Btw.got(Btw.has(o), u, o)
+def Btw.reply(+u: Ui, +o: J.Json) -> Ui:
+  +result = J.Json.get_obj(o, "result")
+  +thread = J.Json.get_str(result, "thread", "")
+  Btw.got(Bool.and(Btw.has(o), Bool.or(Bool.not(ACCT.Accounts.named(Ui.state(u), thread)), String.eq(ACCT.Accounts.owner(Ui.state(u), thread), J.Json.get_str(result, "accountBinding", "")))), u, o)
 
 def Btw.close(+u: Ui) -> Act:
   Act{Ui.scratch_set(Ui.scratch_set(u, "@btw:" ++ Ui.sel(u), ""), "@btw.a:" ++ Ui.sel(u), ""), Nil{}}
@@ -4599,8 +4602,8 @@ def Mpk.steps(+nf: Map<&2, String>, +c: MPK.MpCur) -> List<&2, MPK.MpStep>:
 
 def Mpk.nf(u: Ui) -> Map<&2, String>:
   match u:
-    case Ui{_, _, _, _, _, _, _, _, _, _, _, _, _, _, nf, _, _}:
-      nf
+    case Ui{+st, +sel, _, _, _, _, _, _, _, _, _, _, _, _, +nf, _, _}:
+      ACCT.Accounts.nf(nf, st, sel)
 
 def Mpk.keep(+u: Ui, +c: MPK.MpCur) -> Ui:
   Ui.scratch_set(u, "@mp", MPK.ModelPick.show(Ui.sel(u), c))
@@ -10091,6 +10094,94 @@ type AgField is Data:
 type AgRow is Data:
   AgRow{label: String, note: String, fields: List<&2, AgField>, btns: List<&2, AgBtn>}
 
+# a form's argument ("agykey:GEMINI_API_KEY" has "GEMINI_API_KEY")
+def Sealed.arg(+form: String) -> String:
+  String.drop(form, Nat.add(String.length(Sealed.base(form)), 1n))
+
+# Account labels are metadata. Authorization responses use sealed forms only.
+def Acv.live(+u: Ui) -> J.Json:
+  ACCT.Accounts.parse(Ui.info(u, "accounts.live"))
+
+def Acv.provider(+u: Ui) -> String:
+  Ui.scratch(u, "@acct.provider")
+
+def Acv.selected.provider(+u: Ui) -> String:
+  Bool.pick(String, String.eq(Acv.provider(u), "claude"), "claude", "codex")
+
+def Acv.rpc(+u: Ui, +op: String, +id: String) -> Act:
+  Ui.rpc(u, "accounts", [J.KV{"op", J.Str{op}}, J.KV{"profile", J.Str{id}}])
+
+def Acv.sealed(+arg: String, +code: String) -> String:
+  Sealed.out(Bool.pick(String, String.is_empty(String.trim(code)), "Enter the provider's sign-in response", ""),
+    Rpc.text(0n, "accounts", [J.KV{"op", J.Str{"respond"}}, J.KV{"profile", J.Str{Sealed.base(arg)}}, J.KV{"attempt", J.Str{Sealed.arg(arg)}}, J.KV{"code", J.Str{String.trim(code)}}]))
+
+def Acv.select(+u: Ui, +id: String) -> Act:
+  +st = Ui.state(u)
+  +th = Ui.sel(u)
+  +pr = M.Thread.provider(Ui.thread(st, th))
+  Ui.on_thread.p(Ui.flag_off(u, "accounts"), "accounts.select", [J.KV{"profile", J.Str{id}},
+    J.KV{"epoch", J.Json.nat(J.Json.get_nat(ACCT.Accounts.profile(st, id), "epoch", 0n))},
+    J.KV{"expected", J.Str{M.Setting.get(st, ACCT.Accounts.binding.key(th, pr), "")}}])
+
+def Acv.act(+u: Ui, +action: String, +value: String) -> Act:
+  match action:
+    case "acct-provider": Act{Ui.scratch_set(u, "@acct.provider", value), Nil{}}
+    case "acct-open": Acv.rpc(Bool.pick(Ui, Ui.flag(u, "accounts"), Ui.flag_off(u, "accounts"), Ui.flag_on(u, "accounts")), "list", "")
+    case "acct-add": Ui.rpc(Ui.scratch_set(u, "@f.accountlabel", ""), "accounts", [J.KV{"op", J.Str{"add"}}, J.KV{"provider", J.Str{Acv.selected.provider(u)}}, J.KV{"label", J.Str{Ui.scratch(u, "@f.accountlabel")}}])
+    case "acct-login": Acv.rpc(u, "login", value)
+    case "acct-status": Acv.rpc(u, "status", value)
+    case "acct-disconnect": Acv.rpc(u, "disconnect", value)
+    case "acct-cancel": Ui.rpc(u, "accounts", [J.KV{"op", J.Str{"cancel"}}, J.KV{"profile", J.Str{Sealed.base(value)}}, J.KV{"attempt", J.Str{Sealed.arg(value)}}])
+    case "acct-select": Acv.select(u, value)
+    case "acct-default":
+      +p = ACCT.Accounts.profile(Ui.state(u), value)
+      Ui.rpc(u, "accounts.default", [J.KV{"provider", J.Str{J.Json.get_str(p, "provider", "")}}, J.KV{"profile", J.Str{value}}, J.KV{"epoch", J.Json.nat(J.Json.get_nat(p, "epoch", 0n))}])
+    case "acct-legacy-default": Ui.rpc(u, "accounts.default", [J.KV{"provider", J.Str{value}}, J.KV{"profile", J.Str{""}}, J.KV{"epoch", J.Json.nat(0n)}])
+    case _: Act{u, Nil{}}
+
+def Acv.reset(t: Nat) -> String:
+  match t:
+    case 0n: "unknown"
+    case 1n+k: TZ.Tz.iso(TZ.Tz.utc0(), 1n+k)
+
+def Acv.windows(xs: List<&2, J.Json>) -> String:
+  match xs:
+    case Nil{}: ""
+    case +w <> t:
+      " · " ++ J.Json.get_str(w, "name", "shared pool") ++ ": " ++ J.Json.as_raw(J.Json.get(w, "used_percent"), "?") ++ "% used; reset " ++ Acv.reset(J.Json.get_nat(w, "resets_at", 0n)) ++ " UTC" ++ Acv.windows(t)
+
+def Acv.note(+p: J.Json) -> String:
+  J.Json.get_str(p, "provider", "") ++ " · " ++ J.Json.get_str(p, "state", "unchecked") ++ " · " ++ J.Json.get_str(J.Json.get_obj(p, "identity"), "email", "Identity unverified") ++ " · " ++ J.Json.get_str(J.Json.get_obj(p, "identity"), "plan", "") ++
+    " · allowance: " ++ J.Json.get_str(J.Json.get_obj(p, "allowance"), "state", "unknown") ++ Acv.windows(J.Json.elems(J.Json.get_obj(J.Json.get_obj(p, "allowance"), "windows"))) ++
+    " · checked " ++ Nat.show(J.Json.get_nat(p, "checkedAt", 0n)) ++ "; provider pools may be shared across profiles. " ++ J.Json.get_str(p, "message", "")
+
+def Acv.profile.rows(xs: List<&2, J.Json>) -> List<&2, AgRow>:
+  match xs:
+    case Nil{}: Nil{}
+    case +p <> t:
+      +id = J.Json.get_str(p, "id", "")
+      AgRow{J.Json.get_str(p, "label", "Account"), Acv.note(p), Nil{},
+        [AgBtn{"Connect / Login", "acct-login", id, False{}}, AgBtn{"Status / Refresh", "acct-status", id, False{}},
+         AgBtn{"Disconnect", "acct-disconnect", id, False{}}, AgBtn{"Default for new threads", "acct-default", id, False{}}]} <> Acv.profile.rows(t)
+
+def Acv.attempt.rows(xs: List<&2, J.Json>) -> List<&2, AgRow>:
+  match xs:
+    case Nil{}: Nil{}
+    case +a <> t:
+      +arg = J.Json.get_str(a, "profile", "") ++ ":" ++ J.Json.get_str(a, "id", "")
+      AgRow{"Sign-in · " ++ J.Json.get_str(a, "state", ""), J.Json.get_str(a, "message", "") ++ " " ++ J.Json.get_str(a, "userCode", ""),
+        Bool.pick(List<&2, AgField>, Bool.and(String.eq(J.Json.get_str(a, "state", ""), "waiting"), String.is_empty(J.Json.get_str(a, "userCode", ""))),
+          [AgField{"account-" ++ J.Json.get_str(a, "id", ""), "If Claude asks: provider sign-in response", True{}, "", "acct-response:" ++ arg}], Nil{}),
+        List.append(&2, AgBtn, Bool.pick(List<&2, AgBtn>, String.is_empty(J.Json.get_str(a, "url", "")), Nil{}, [AgBtn{"Open provider sign-in", "open-url", J.Json.get_str(a, "url", ""), True{}}]),
+          [AgBtn{"Complete sign-in", "acct-response:" ++ arg, "", False{}}, AgBtn{"Cancel", "acct-cancel", arg, False{}}])} <> Acv.attempt.rows(t)
+
+def Acv.rows(+u: Ui) -> List<&2, AgRow>:
+  List.concat(&2, AgRow, [[AgRow{"Accounts on this machine", "Subscription accounts use private provider-owned stores. Existing Default accounts remain available. Claude Console accounts use a separate login store and are not supported here. " ++ J.Json.get_str(Acv.live(u), "error", ""),
+    [AgField{"accountlabel", "Account label (e.g. Personal)", False{}, Ui.scratch(u, "@f.accountlabel"), "acct-add"}],
+    [AgBtn{"Codex", "acct-provider", "codex", String.eq(Acv.selected.provider(u), "codex")}, AgBtn{"Claude", "acct-provider", "claude", String.eq(Acv.selected.provider(u), "claude")}, AgBtn{"Add account", "acct-add", "", True{}}]},
+    AgRow{"Existing Default accounts", "Preserve current CLI authentication and sessions; select explicitly beside the model.", Nil{}, [AgBtn{"Default Claude for new threads", "acct-legacy-default", "claude", False{}}, AgBtn{"Default Codex for new threads", "acct-legacy-default", "codex", False{}}]}],
+    Acv.profile.rows(ACCT.Accounts.profiles(Ui.state(u))), Acv.attempt.rows(J.Json.elems(J.Json.get_obj(Acv.live(u), "attempts")))])
+
 def Agv.info(+u: Ui) -> J.Json:
   J.Json.get_obj(Maybe.default(&2, J.Json, J.Json.parse(Ui.info(u, "models")), J.Null{}), "agy")
 
@@ -10300,8 +10391,9 @@ def Agv.back.req(+url: String) -> String:
 # the web's form for an Antigravity row's field or button: its key and its
 # way back are sealed ("" for the rest, which stay view actions)
 def Sealed.agy(+u: Ui, +action: String) -> String:
-  Bool.pick(String, String.eq(action, "agy-key"), "agykey:" ++ AGY.Agy.key(Agv.method(u)),
-    Bool.pick(String, String.eq(action, "agy-back"), "agyback", ""))
+  Bool.pick(String, String.starts_with(action, "acct-response:"), "account:" ++ String.drop(action, 14n),
+    Bool.pick(String, String.eq(action, "agy-key"), "agykey:" ++ AGY.Agy.key(Agv.method(u)),
+    Bool.pick(String, String.eq(action, "agy-back"), "agyback", "")))
 
 def Bots.google.req(+op: String, +id: String, +secret: String, +pasted: String) -> String:
   Rpc.text(0n, "bots.google", [J.KV{"op", J.Str{op}}, J.KV{"clientId", J.Str{String.trim(id)}}, J.KV{"clientSecret", J.Str{String.trim(secret)}},
@@ -10349,15 +10441,13 @@ def Sealed.req.k(i: Nat, +arg: String, +vs: List<&2, String>) -> String:
       Bots.google.paste.req(Sealed.first(vs))
     case 6n:
       Bots.join.req(Sealed.first(vs))
+    case 7n:
+      Acv.sealed(arg, Sealed.first(vs))
     case _:
       Sealed.none()
 
-# a form's argument ("agykey:GEMINI_API_KEY" has "GEMINI_API_KEY")
-def Sealed.arg(+form: String) -> String:
-  String.drop(form, Nat.add(String.length(Sealed.base(form)), 1n))
-
 def Sealed.forms() -> List<&2, String>:
-  ["key", "vkey", "agykey", "agyback", "google", "gpaste", "invite"]
+  ["key", "vkey", "agykey", "agyback", "google", "gpaste", "invite", "account"]
 
 def Sealed.req.ps(ps: List<&2, String>) -> String:
   match ps:
@@ -10901,7 +10991,7 @@ def Ui.infos(u: Ui) -> Map<&2, String>:
 def HubCache.save.k(installed: Bool, +u: Ui, vs: List<&2, HubView>) -> List<&2, HubView>:
   match installed:
     case True{}:
-      HubCache.put(HubView{Ui.info(u, "local.machine"), Ui.state.of(u), Ui.infos(u)}, vs)
+      HubCache.put(HubView{Ui.info(u, "local.machine"), Ui.state.of(u), Map.del(&2, String, Ui.infos(u), "accounts.live")}, vs)
     case False{}:
       vs
 
@@ -14842,12 +14932,17 @@ def Ui.act.key(key: Bool, +u: Ui, +action: String, +value: String) -> Act:
     case False{}:
       Ui.act.sec(String.starts_with(action, "secret-"), u, action, value)
 
-def Ui.act.g(agy: Bool, +u: Ui, +action: String, +value: String) -> Act:
+def Ui.act.g.legacy(agy: Bool, +u: Ui, +action: String, +value: String) -> Act:
   match agy:
     case True{}:
       Agv.act(u, action, value)
     case False{}:
       Ui.act.key(Nat.is_lt(C.Codec.pos(["sealed-sent", "sealed-err", "key-sent", "key-err"], action), 4n), u, action, value)
+
+def Acv.dispatch(account: Bool, +u: Ui, +action: String, +value: String) -> Act:
+  match account:
+    case True{}: Acv.act(u, action, value)
+    case False{}: Ui.act.g.legacy(String.starts_with(action, "agy-"), u, action, value)
 
 # (browser tasks' "tk-" and "bb-" actions: Teach.act)
 # (the schematic's sheet navigation, "sch-": Sch.act)
@@ -14856,7 +14951,7 @@ def Ui.act.sch(sch: Bool, +u: Ui, +action: String, +value: String) -> Act:
     case True{}:
       Sch.act(u, action, value)
     case False{}:
-      Ui.act.g(String.starts_with(action, "agy-"), u, action, value)
+      Acv.dispatch(String.starts_with(action, "acct-"), u, action, value)
 
 # (the combined view's "split-pane": a pane put away or back, kept as the
 # setting split.hide for every client of the hub)

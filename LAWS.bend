@@ -1,3 +1,4 @@
+import ./src/core/accounts.bend as ACCT
 import ./src/server/thin-actor.bend as CHATSIDE
 import ./src/core/sidebar-read.bend as SIDEREAD
 import ./src/server/thin-signals.bend as SGV
@@ -12801,3 +12802,24 @@ law hook_route_note:
 
 law hook_route_quiet:
   {WN.Wn.route("") == 0n : Nat}
+
+# An unset/default account preserves the existing provider contract exactly.
+law accounts_legacy_allowed:
+  for s: M.State
+  for th: String
+  for provider: String
+  {ACCT.Accounts.allowed.k(True{}, s, th, provider) == True{} : Bool}
+
+law accounts_legacy_catalog:
+  for info: J.Json
+  for s: M.State
+  for th: String
+  for provider: String
+  {ACCT.Accounts.overlay.k(True{}, info, s, th, provider) == info : J.Json}
+
+# Native sessions are owned by provider + profile + identity generation.
+law accounts_profile_sessions_differ:
+  {String.eq(ACCT.Accounts.session.key("t", "codex", "A", 2n), ACCT.Accounts.session.key("t", "codex", "B", 2n)) == False{} : Bool}
+
+law accounts_identity_sessions_differ:
+  {String.eq(ACCT.Accounts.session.key("t", "codex", "A", 2n), ACCT.Accounts.session.key("t", "codex", "A", 3n)) == False{} : Bool}

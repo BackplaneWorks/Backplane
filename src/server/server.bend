@@ -1,4 +1,8 @@
 import Base
+import ../core/handoff.bend as HD
+import ../core/thinq.bend as AQ
+import ../core/accounts.bend as ACCT
+import ./accountsio.bend as ACFX
 import ../core/signal.bend as SGR
 import ../core/native-sidebar.bend as NATIVE_SIDE
 import ./mailcontext.bend as MCTX
@@ -251,6 +255,7 @@ type Msg is Data:
   KFound{setting: String, rt: K.Rt}
   # the headless KiCad servers' lines changed (core/kserve.bend's KS.lines)
   KiServers{text: String}
+  AccountsFound{snapshot: String}
   ModelsFound{models: String, text: String}
   # opencode's models read again (OcJob.run): Oc.models.sh's lines
   OcFound{text: String}
@@ -407,14 +412,14 @@ type ThinCache is Data:
   ThinCache{index: THIN.Lazy, epoch: String, revision: Nat, streams: Map<&2, TLIVE.Stream>, mail: TMAIL.Lazy, waiting: List<&2, ThinWait>, notes: TPACE.Notes, store: String, signal_seq: Nat}
 
 type Cfg is Data:
-  Cfg{home: String, web: String, host: String, port: U32, prompt: String, dirs: List<&2, String>, version: String, net: Net, telemetry: List<&2, TI.TmCfg>, views: List<&2, ThinCache>}
+  Cfg{home: String, web: String, host: String, port: U32, prompt: String, dirs: List<&2, String>, version: String, net: Net, telemetry: List<&2, TI.TmCfg>, views: List<&2, ThinCache>, accounts: String}
 
 def ThinCache.first(xs: List<&2, ThinCache>) -> ThinCache:
   Maybe.default(&2, ThinCache, List.head(&2, ThinCache, xs), ThinCache{THIN.Built{THIN.Index.empty()}, "0", 0n, Map.new(&2, TLIVE.Stream), TMAIL.Built{TMAIL.Cache.empty()}, Nil{}, TPACE.Notes.empty(), "", 0n})
 
 def Cfg.thin.cache(cfg: Cfg) -> ThinCache:
   match cfg:
-    case Cfg{_, _, _, _, _, _, _, _, _, views}: ThinCache.first(views)
+    case Cfg{_, _, _, _, _, _, _, _, _, views, +accountInfo}: ThinCache.first(views)
 
 def ThinCache.lazy(c: ThinCache) -> THIN.Lazy:
   match c:
@@ -492,7 +497,7 @@ def Cfg.thin.signal_seq(cfg: Cfg) -> Nat:
 
 def Cfg.with_thin_cache(cfg: Cfg, cache: ThinCache) -> Cfg:
   match cfg:
-    case Cfg{h, w, ho, p, pr, ds, v, nt, tc, _}: Cfg{h, w, ho, p, pr, ds, v, nt, tc, [cache]}
+    case Cfg{h, w, ho, p, pr, ds, v, nt, tc, _, +accountInfo}: Cfg{h, w, ho, p, pr, ds, v, nt, tc, [cache], accountInfo}
 
 def Cfg.thin.next(+n: Nat) -> Nat:
   Nat.add(n, Bool.pick(Nat, Nat.is_lt(n, PRESENT.Session.nat.max()), 1n, 0n))
@@ -545,12 +550,12 @@ def LogCount.of(ls: List<&2, String>) -> Nat:
 
 def LogCount.n(c: Cfg) -> Nat:
   match c:
-    case Cfg{_, _, _, _, _, _, _, Net{_, _, _, _, _, _, _, _, _, _, _, bn, _, _, _, _}, +tcfg, +views}: BN.Bn.wire_n(bn)
+    case Cfg{_, _, _, _, _, _, _, Net{_, _, _, _, _, _, _, _, _, _, _, bn, _, _, _, _}, +tcfg, +views, +accountInfo}: BN.Bn.wire_n(bn)
 
 def LogCount.set(c: Cfg, n: Nat) -> Cfg:
   match c:
-    case Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, br, pk, tm, mc, pv, bn, mg, lk, fc, ks}, +tcfg, +views}:
-      Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, br, pk, tm, mc, pv, BN.Bn.with_wire_n(bn, n), mg, lk, fc, ks}, tcfg, views}
+    case Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, br, pk, tm, mc, pv, bn, mg, lk, fc, ks}, +tcfg, +views, +accountInfo}:
+      Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, br, pk, tm, mc, pv, BN.Bn.with_wire_n(bn, n), mg, lk, fc, ks}, tcfg, views, accountInfo}
 
 def LogCount.init(c: Cfg, ls: List<&2, String>) -> Cfg:
   LogCount.set(c, LogCount.of(ls))
@@ -571,16 +576,24 @@ type Client is Data:
   # log (core/outbox.bend); sock: a raw descriptor on its socket (0: none);
   # legacy: let in without its pairing token (core/auth.bend), so never
   # told the pairing link (Hub.pair)
-  Client{id: U32, out: Chan(Wire), look: DK.Look, cr: OB.Cr, sock: U32, legacy: Bool, mobile: List<&2, MobileStart>}
+  Client{id: U32, out: Chan(Wire), look: DK.Look, cr: OB.Cr, sock: U32, legacy: Bool, mobile: List<&2, MobileStart>, accounts: Bool}
 
 def Client.id(c: Client) -> U32:
   match c:
-    case Client{id, _, _, _, _, _, _}: id
+    case Client{id, _, _, _, _, _, _, +accountCap}: id
+
+def Client.accounts(c: Client) -> Bool:
+  match c:
+    case Client{_, _, _, _, _, _, _, supported}: supported
+
+def Client.accounts.with(c: Client, supported: Bool) -> Client:
+  match c:
+    case Client{id, out, look, cr, sock, legacy, mobile, _}: Client{id, out, look, cr, sock, legacy, mobile, supported}
 
 def Client.thin.mode(c: Client) -> String:
   match c:
-    case Client{_, _, _, _, _, _, MobileStart{_, _, mode} <> _}: mode
-    case Client{_, _, _, _, _, _, ThinStart{mode, _} <> _}: mode
+    case Client{_, _, _, _, _, _, MobileStart{_, _, mode} <> _, +accountCap}: mode
+    case Client{_, _, _, _, _, _, ThinStart{mode, _} <> _, +accountCap}: mode
     case _: ""
 
 def Client.thin(+c: Client) -> Bool:
@@ -681,7 +694,7 @@ def Store.path(+home: String) -> String:
 
 def Clients.hit(cs: List<&2, Client>, +id: U32) -> Bool:
   match cs:
-    case Client{i, _, _, _, _, _, _} <> _:
+    case Client{i, _, _, _, _, _, _, +accountCap} <> _:
       U32.is_eq(i, id)
     case Nil{}:
       False{}
@@ -709,13 +722,13 @@ def Clients.drop(cs: List<&2, Client>, +id: U32) -> List<&2, Client>:
   match cs:
     case Nil{}:
       Nil{}
-    case Client{+i, o, l, r, k, lgc, mb} <> t:
-      Clients.drop.k(U32.is_eq(i, id), Client{i, o, l, r, k, lgc, mb}, Clients.drop(t, id))
+    case Client{+i, o, l, r, k, lgc, mb, +accountCap} <> t:
+      Clients.drop.k(U32.is_eq(i, id), Client{i, o, l, r, k, lgc, mb, accountCap}, Clients.drop(t, id))
 
 def Clients.look.k(same: Bool, c: Client, +look: DK.Look) -> Client:
   match same c:
-    case True{} Client{i, o, _, r, k, lgc, mb}:
-      Client{i, o, look, r, k, lgc, mb}
+    case True{} Client{i, o, _, r, k, lgc, mb, +accountCap}:
+      Client{i, o, look, r, k, lgc, mb, accountCap}
     case False{} _:
       c
 
@@ -724,20 +737,20 @@ def Clients.look(cs: List<&2, Client>, +id: U32, +look: DK.Look) -> List<&2, Cli
   match cs:
     case Nil{}:
       Nil{}
-    case Client{+i, o, l, r, k, lgc, mb} <> t:
-      Clients.look.k(U32.is_eq(i, id), Client{i, o, l, r, k, lgc, mb}, look) <> Clients.look(t, id, look)
+    case Client{+i, o, l, r, k, lgc, mb, +accountCap} <> t:
+      Clients.look.k(U32.is_eq(i, id), Client{i, o, l, r, k, lgc, mb, accountCap}, look) <> Clients.look(t, id, look)
 
 def Clients.looks(cs: List<&2, Client>) -> List<&2, DK.At>:
   match cs:
     case Nil{}:
       Nil{}
-    case Client{i, _, l, _, _, _, _} <> t:
+    case Client{i, _, l, _, _, _, _, +accountCap} <> t:
       DK.At{i, l} <> Clients.looks(t)
 
 def Clients.cr.k(same: Bool, c: Client, +gen: U32, +n: Nat, +b: Nat) -> Client:
   match same c:
-    case True{} Client{i, o, l, r, k, lgc, mb}:
-      Client{i, o, l, OB.Cr.drained(r, gen, n, b), k, lgc, mb}
+    case True{} Client{i, o, l, r, k, lgc, mb, +accountCap}:
+      Client{i, o, l, OB.Cr.drained(r, gen, n, b), k, lgc, mb, accountCap}
     case False{} _:
       c
 
@@ -746,14 +759,14 @@ def Clients.cr(cs: List<&2, Client>, +id: U32, +gen: U32, +n: Nat, +b: Nat) -> L
   match cs:
     case Nil{}:
       Nil{}
-    case Client{+i, o, l, r, k, lgc, mb} <> t:
-      Clients.cr.k(U32.is_eq(i, id), Client{i, o, l, r, k, lgc, mb}, gen, n, b) <> Clients.cr(t, id, gen, n, b)
+    case Client{+i, o, l, r, k, lgc, mb, +accountCap} <> t:
+      Clients.cr.k(U32.is_eq(i, id), Client{i, o, l, r, k, lgc, mb, accountCap}, gen, n, b) <> Clients.cr(t, id, gen, n, b)
 
 def Clients.sockets(cs: List<&2, Client>) -> Nat:
   match cs:
     case Nil{}:
       0n
-    case Client{_, _, _, r, _, _, _} <> t:
+    case Client{_, _, _, r, _, _, _, +accountCap} <> t:
       Nat.add(Bool.pick(Nat, OB.Cr.native(r), 0n, 1n), Clients.sockets(t))
 
 # whether a broadcast is worth encoding once on the hub (two or more
@@ -859,7 +872,7 @@ def Agents.with(as: List<&2, Agent>, +th: String, +r: ARun) -> List<&2, Agent>:
 
 def Wire.cut(c: Client) -> IO(Unit):
   match c:
-    case Client{i, o, _, _, k, _, _}:
+    case Client{i, o, _, _, k, _, _, +accountCap}:
       do IO<Unit>:
         PS.Perf.add("hub.client_drop", 1)
         Log.info("client " ++ U32.show(i) ++ " fell too far behind: dropped (it reconnects from its sequence)")
@@ -883,12 +896,12 @@ def Wire.charged(native: Bool, w: Wire, n: Nat) -> Wire:
 
 def Wire.offer.k(c: Client, w: Wire, +n: Nat) -> IO(Maybe<&2, Client>):
   match c:
-    case Client{i, +o, l, +r, k, lgc, mb}:
+    case Client{i, +o, l, +r, k, lgc, mb, +accountCap}:
       do IO<Maybe<&2, Client>>:
         +charge : Nat = Bool.pick(Nat, OB.Cr.native(r), 0n, n)
         ok : Result<&1, &1, Wire, Unit> <- Chan.send(Wire, o, Wire.charged(OB.Cr.native(r), w, charge))
         +r2 : OB.Cr = OB.Cr.offer(r, charge)
-        Wire.kept(OB.Cr.over(r2), Client{i, o, l, r2, k, lgc, mb})
+        Wire.kept(OB.Cr.over(r2), Client{i, o, l, r2, k, lgc, mb, accountCap})
 
 # one frame of n bytes for a client: kept, or None when it was dropped
 def Wire.offer(c: Client, w: Wire, +n: Nat) -> IO(Maybe<&2, Client>):
@@ -896,7 +909,7 @@ def Wire.offer(c: Client, w: Wire, +n: Nat) -> IO(Maybe<&2, Client>):
 
 def Wire.native(c: Client) -> Bool:
   match c:
-    case Client{_, _, _, r, _, _, _}:
+    case Client{_, _, _, r, _, _, _, +accountCap}:
       OB.Cr.native(r)
 
 def Wire.offer.bs(c: Client, +bs: List<&2, U32>) -> IO(Maybe<&2, Client>):
@@ -920,9 +933,9 @@ def Client.thin.reply_actors(xs: List<&2, TA.Actor>, web: Bool, key: String, +o:
 
 def Client.thin.message(c: Client, +o: J.Json) -> Client:
   match c:
-    case Client{id, out, look, cr, sock, legacy, ThinStart{+mode, ThinContext{+hub, cid, target, view, revision, anchor, actors, control} <> _} <> _}:
+    case Client{id, out, look, cr, sock, legacy, ThinStart{+mode, ThinContext{+hub, cid, target, view, revision, anchor, actors, control} <> _} <> _, +accountCap}:
       Client{id, out, look, cr, sock, legacy, [ThinStart{mode, [ThinContext{hub, cid, target, view, revision, anchor,
-        Client.thin.reply_actors(actors, String.eq(mode, "view-web"), hub, o), control}]}]}
+        Client.thin.reply_actors(actors, String.eq(mode, "view-web"), hub, o), control}]}], accountCap}
     case _: c
 
 def Client.thin.reply(c: Client, +text: String) -> Client:
@@ -962,7 +975,7 @@ def Wire.text.if(empty: Bool, m: Maybe<&2, Client>, +text: String) -> IO(Maybe<&
 
 def Client.is(c: Client, +id: U32) -> Bool:
   match c:
-    case Client{i, _, _, _, _, _, _}:
+    case Client{i, _, _, _, _, _, _, +accountCap}:
       U32.is_eq(i, id)
 
 def Wire.to.one(hit: Bool, text: Bool, c: Client, w: Wire, +n: Nat, +t: String) -> IO(Maybe<&2, Client>):
@@ -1016,12 +1029,12 @@ def Wire.all.as(native: Bool, c: Client, +text: String, +bs: List<&2, U32>, +n: 
 
 def Wire.booting(c: Client) -> Bool:
   match c:
-    case Client{_, _, _, r, _, _, _}:
+    case Client{_, _, _, r, _, _, _, +accountCap}:
       OB.Cr.boot(r)
 
 def Wire.behind(c: Client) -> Bool:
   match c:
-    case Client{_, _, _, r, _, _, _}:
+    case Client{_, _, _, r, _, _, _, +accountCap}:
       OB.Cr.behind(r)
 
 # how a message goes to every client: kind 0 to all; 1 log changes (a
@@ -1070,10 +1083,10 @@ def Wire.post(qs: List<&2, Chan(Msg)>, +m: Msg) -> IO(Unit):
 
 def Wire.catch(c: Client, +a: All) -> IO(Maybe<&2, Client>):
   match c a:
-    case Client{+i, o, l, +r, k, lgc, mb} All{_, +log, +fresh, +fl, +qs}:
+    case Client{+i, o, l, +r, k, lgc, mb, +accountCap} All{_, +log, +fresh, +fl, +qs}:
       do IO<Maybe<&2, Client>>:
         Wire.post(qs, JoinMore{i, OB.Cr.gen(r)})
-        return Some{Client{i, o, l, OB.Cr.wait.set(OB.Cr.catch(r, All.at(log, fresh), fl), True{}), k, lgc, mb}}
+        return Some{Client{i, o, l, OB.Cr.wait.set(OB.Cr.catch(r, All.at(log, fresh), fl), True{}), k, lgc, mb, accountCap}}
 
 def Wire.all.k3(behind: Bool, +c: Client, +a: All, +text: String, +bs: List<&2, U32>, +n: Nat) -> IO(Maybe<&2, Client>):
   match behind:
@@ -1152,7 +1165,7 @@ def Wire.beat(+cs: List<&2, Client>, +text: String) -> IO(List<&2, Client>):
 
 def Client.legacy(c: Client) -> Bool:
   match c:
-    case Client{_, _, _, _, _, lg, mb}:
+    case Client{_, _, _, _, _, lg, mb, +accountCap}:
       lg
 
 # a message (the pairing link, Hub.pair_msg) for every client but those let in
@@ -1880,11 +1893,16 @@ def Info.net(n: Net) -> List<&2, J.KV>:
       List.append(&2, J.KV, [J.KV{"models", J.Str{ms}}, J.KV{"machines", J.Str{mc}}, J.KV{"bots.remote", J.Str{BN.Bn.dir(bnx)}}, J.KV{"tailnet", J.Str{Bool.pick(String, tn, Bool.pick(String, hs, "https", "on"), "off")}},
         J.KV{"update", J.Str{Bool.pick(String, mgd, "package", "releases")}}, J.KV{"tailscale", J.Str{Info.tailscale(tn, TN.Tailnet.report.state(lk))}}, J.KV{"freecad", J.Str{fc}}], Info.kicad(rt))
 
+def Cfg.with_accounts(c: Cfg, snapshot: String) -> Cfg:
+  match c:
+    case Cfg{h, w, ho, p, pr, ds, v, nt, tm, views, _}:
+      Cfg{h, w, ho, p, pr, ds, v, nt, tm, views, snapshot}
+
 # what this machine runs, for the settings screen and the model picker
 def Hub.info(c: Cfg) -> J.Json:
   match c:
-    case Cfg{+home, _, host, port, _, _, _, +net, +tcfg, +views}:
-      J.Json.obj(List.append(&2, J.KV, [J.KV{"telemetry.channel", J.Str{TI.Tio.channel(tcfg)}}, J.KV{"telemetry.id", J.Str{TI.Tio.id(tcfg)}}, J.KV{"telemetry.live", J.Str{Bool.pick(String, TI.Tio.can(tcfg, 0n), "1", "")}}, J.KV{"os", J.Str{TI.Tio.platform(tcfg, False{})}}, J.KV{"arch", J.Str{TI.Tio.platform(tcfg, True{})}}, J.KV{"home", J.Str{home}}, J.KV{"listen", J.Str{host ++ ":" ++ U32.show(port)}}], List.append(&2, J.KV, Info.net(net), Info.tch(net))))
+    case Cfg{+home, _, host, port, _, _, _, +net, +tcfg, +views, +accountInfo}:
+      J.Json.obj(List.append(&2, J.KV, [J.KV{"accounts.live", J.Str{accountInfo}}, J.KV{"telemetry.channel", J.Str{TI.Tio.channel(tcfg)}}, J.KV{"telemetry.id", J.Str{TI.Tio.id(tcfg)}}, J.KV{"telemetry.live", J.Str{Bool.pick(String, TI.Tio.can(tcfg, 0n), "1", "")}}, J.KV{"os", J.Str{TI.Tio.platform(tcfg, False{})}}, J.KV{"arch", J.Str{TI.Tio.platform(tcfg, True{})}}, J.KV{"home", J.Str{home}}, J.KV{"listen", J.Str{host ++ ":" ++ U32.show(port)}}], List.append(&2, J.KV, Info.net(net), Info.tch(net))))
 
 # Complete current info is part of the exact picture key. Equal-length
 # catalog changes cannot grant no-stream picture reuse.
@@ -1935,7 +1953,7 @@ def Hub.pair_msg.from(+kept: String, +lk: String) -> String:
 
 def Hub.pair_msg(c: Cfg) -> String:
   match c:
-    case Cfg{_, _, _, _, _, _, _, Net{_, _, _, _, _, _, _, _, _, _, _, bnx, _, +lk, _, _}, _, +views}:
+    case Cfg{_, _, _, _, _, _, _, Net{_, _, _, _, _, _, _, _, _, _, _, bnx, _, +lk, _, _}, _, +views, +accountInfo}:
       Hub.pair_msg.from(BN.Bn.pair(bnx), lk)
 
 # A link change is handled after it has been stored, through the inbox,
@@ -2156,7 +2174,7 @@ def Hub.busy.if(moved: Bool, h: Hub) -> IO(Hub):
 
 def Cfg.version(c: Cfg) -> String:
   match c:
-    case Cfg{_, _, _, _, _, _, v, nt, +tcfg, +views}:
+    case Cfg{_, _, _, _, _, _, v, nt, +tcfg, +views, +accountInfo}:
       v
 
 # which log this is: the time of its first change (a client resumes only
@@ -2224,7 +2242,7 @@ def Hub.desk(h: Hub, +client: U32, +thread: String, +focused: Bool) -> IO(Hub):
 
 def Hub.leave.close(m: Maybe<&2, Client>) -> IO(Unit):
   match m:
-    case Some{Client{_, c, _, _, k, _, _}}:
+    case Some{Client{_, c, _, _, k, _, _, +accountCap}}:
       do IO<Unit>:
         Chan.close(Wire, c)
         H.Fd.close(k)
@@ -2302,7 +2320,7 @@ def Codex.head.k(fresh: Bool, +session: String) -> List<&2, String>:
 
 def Cfg.prompt(c: Cfg) -> String:
   match c:
-    case Cfg{_, _, _, _, pr, _, _, _, +tcfg, +views}:
+    case Cfg{_, _, _, _, pr, _, _, _, +tcfg, +views, +accountInfo}:
       pr
 
 def Codex.failed(e: U32 & String, +thread: String, +gen: String, +inbox: Chan(Msg)) -> IO(Unit):
@@ -2665,6 +2683,58 @@ def GitJob.diff(+cwd: String, +thread: String, +a: String, +b: String) -> IO(Str
 # (AG.OneShot.input). "" when the CLI is missing, fails, or takes longer
 # than a minute; callers fall back.
 
+# Keep profile metadata boxed so adding it cannot widen native/kept ABI records.
+type TextOwner is Data:
+  TextOwner{tx: AG.Tx, home: String, profile: String, epoch: String, binding: String}
+
+type TextScope is Data:
+  TextScope{owners: List<&2, TextOwner>}
+
+def TextScope.owner(t: TextScope) -> TextOwner:
+  match t:
+    case TextScope{o <> _}: o
+    case _: TextOwner{AG.Tx{"claude", ""}, "", "", "0", ""}
+
+def TextScope.tx.owner(o: TextOwner) -> AG.Tx:
+  match o:
+    case TextOwner{tx, _, _, _, _}: tx
+
+def TextScope.tx(t: TextScope) -> AG.Tx:
+  TextScope.tx.owner(TextScope.owner(t))
+
+def TextScope.provider(t: TextScope) -> String:
+  AG.Tx.provider(TextScope.tx(t))
+
+def TextScope.of(+st: M.State, +home: String, +thread: String) -> TextScope:
+  +p = M.Thread.provider(B.Hub.thread(st, thread))
+  +profile = ACCT.Accounts.id(st, thread, p)
+  TextScope{[TextOwner{Bool.pick(AG.Tx, String.is_empty(profile), AG.Text.of(st), AG.Tx{p, B.Turn.model(B.Hub.thread(st, thread))}), home, profile, Nat.show(ACCT.Accounts.epoch(st, thread, p)), ACCT.Accounts.owner(st, thread)}]}
+
+def TextScope.args(xs: List<&2, String>) -> List<&2, String>:
+  match xs:
+    case _ <> _ <> tail: tail
+    case _: Nil{}
+
+def TextScope.spawn.legacy(legacy: Bool, +writer: AG.Tx, +home: String, +profile: String, +epoch: String, +system: String) -> IO(Result<&1, &1, U32 & String, U32 & Socket>):
+  match legacy:
+    case True{}: Spawn.agent("sh", PT.Port.timeout(AG.OneShot.args(writer, system)), "/tmp", 0)
+    case False{}: ACFX.AccountsFx.spawn_text(home, profile, epoch, AG.Tx.provider(writer), TextScope.args(AG.OneShot.args(writer, system)), "/tmp", 0)
+
+def TextScope.spawn.owner(+o: TextOwner, +system: String) -> IO(Result<&1, &1, U32 & String, U32 & Socket>):
+  match o:
+    case TextOwner{+writer, +home, +profile, +epoch, _}:
+      TextScope.spawn.legacy(String.is_empty(profile), writer, home, profile, epoch, system)
+
+def TextScope.spawn(+t: TextScope, +system: String) -> IO(Result<&1, &1, U32 & String, U32 & Socket>):
+  TextScope.spawn.owner(TextScope.owner(t), system)
+
+def TextScope.binding.owner(o: TextOwner) -> String:
+  match o:
+    case TextOwner{_, _, _, _, binding}: binding
+
+def TextScope.binding(t: TextScope) -> String:
+  TextScope.binding.owner(TextScope.owner(t))
+
 def OneShot.out(r: P.Ran, +provider: String) -> String:
   match r:
     case P.Ran{0, out}:
@@ -2692,28 +2762,28 @@ def OneShot.spawned(r: Result<&1, &1, U32 & String, U32 & Socket>, +input: Strin
       IO.pure(String, "")
 
 # the writer's answer to one text under a system prompt, in /tmp
-def OneShot.run(+tx: AG.Tx, +system: String, +input: String) -> IO(String):
-  IO.bind(Result<&1, &1, U32 & String, U32 & Socket>, String, Spawn.agent("sh", PT.Port.timeout(AG.OneShot.args(tx, system)), "/tmp", 0),
-    r => OneShot.spawned(r, AG.OneShot.input(AG.Tx.provider(tx), system, input), AG.Tx.provider(tx)))
+def OneShot.run(+tx: TextScope, +system: String, +input: String) -> IO(String):
+  IO.bind(Result<&1, &1, U32 & String, U32 & Socket>, String, TextScope.spawn(tx, system),
+    r => OneShot.spawned(r, AG.OneShot.input(TextScope.provider(tx), system, input), TextScope.provider(tx)))
 
 # a thread's first message: the writer titles it, and the hub keeps the
 # title only while the thread still has the placeholder (thread.titled)
-def TitleJob.run(+tx: AG.Tx, +inbox: Chan(Msg), +thread: String, +placeholder: String, +text: String) -> IO(Unit):
+def TitleJob.run(+tx: TextScope, +inbox: Chan(Msg), +thread: String, +placeholder: String, +text: String) -> IO(Unit):
   IO.bind(String, Unit, OneShot.run(tx, AG.Title.system(), text), a =>
-    GitJob.say(inbox, "thread.titled", [J.KV{"thread", J.Str{thread}}, J.KV{"placeholder", J.Str{placeholder}}, J.KV{"title", J.Str{a}}]))
+    GitJob.say(inbox, "thread.titled", [J.KV{"thread", J.Str{thread}}, J.KV{"placeholder", J.Str{placeholder}}, J.KV{"title", J.Str{a}}, J.KV{"accountBinding", J.Str{TextScope.binding(tx)}}]))
 
 # a side question (/btw): the writing model reads the thread and the
 # question; the answer goes to the asking client only
-def BtwJob.run(+tx: AG.Tx, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +q: String, +input: String) -> IO(Unit):
+def BtwJob.run(+tx: TextScope, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +q: String, +input: String) -> IO(Unit):
   IO.bind(String, Unit, OneShot.run(tx, AG.Btw.system(), input), a =>
-    GitJob.reply(inbox, client, id, True{}, J.Json.obj([J.KV{"thread", J.Str{thread}}, J.KV{"q", J.Str{q}}, J.KV{"btw", J.Str{a}}])))
+    GitJob.reply(inbox, client, id, True{}, J.Json.obj([J.KV{"thread", J.Str{thread}}, J.KV{"q", J.Str{q}}, J.KV{"btw", J.Str{a}}, J.KV{"accountBinding", J.Str{TextScope.binding(tx)}}])))
 
 # a summary for the composer's reference menu (refs.bend's Sum.*): of a
 # thread (kind "thread") or a project ("project"); the hub keeps it
 # (summary.set {id, kind, text})
-def SumJob.run(+tx: AG.Tx, +inbox: Chan(Msg), +id: String, +kind: String, +input: String) -> IO(Unit):
+def SumJob.run(+tx: TextScope, +inbox: Chan(Msg), +id: String, +kind: String, +input: String) -> IO(Unit):
   IO.bind(String, Unit, OneShot.run(tx, RF.Sum.system(), input), a =>
-    GitJob.say(inbox, "summary.set", [J.KV{"id", J.Str{id}}, J.KV{"kind", J.Str{kind}}, J.KV{"text", J.Str{a}}]))
+    GitJob.say(inbox, "summary.set", [J.KV{"id", J.Str{id}}, J.KV{"kind", J.Str{kind}}, J.KV{"text", J.Str{a}}, J.KV{"thread", J.Str{Bool.pick(String, String.eq(kind, "thread"), id, "")}}, J.KV{"accountBinding", J.Str{TextScope.binding(tx)}}]))
 
 def AgentJob.named(+r: String, +inbox: Chan(Msg), +thread: String) -> IO(Unit):
   Bool.pick(IO(Unit), GT.Git.failed(r), GitJob.note(inbox, thread, "error", "branch name: " ++ r),
@@ -2731,10 +2801,10 @@ def AgentJob.rename(+frag: String, +cwd: String, +old: String, +inbox: Chan(Msg)
 
 # a worktree thread's first message names its branch; without an answer
 # the temporary name stays
-def AgentJob.name(+tx: AG.Tx, +inbox: Chan(Msg), +thread: String, +cwd: String, +old: String, +text: String) -> IO(Unit):
+def AgentJob.name(+tx: TextScope, +inbox: Chan(Msg), +thread: String, +cwd: String, +old: String, +text: String) -> IO(Unit):
   IO.bind(String, Unit, OneShot.run(tx, AG.Name.system(), String.take(text, 4000n)), a => AgentJob.rename(AG.Name.fragment(a), cwd, old, inbox, thread))
 
-def AgentJob.write(+tx: AG.Tx, +d: String, +title: String) -> IO(String):
+def AgentJob.write(+tx: TextScope, +d: String, +title: String) -> IO(String):
   Bool.pick(IO(String), Bool.or(String.is_empty(String.trim(d)), GT.Git.failed(d)), IO.pure(String, title),
     IO.bind(String, String, OneShot.run(tx, AG.Commit.system(), AG.Commit.input(title, d)), a => IO.pure(String, AG.Commit.message(a, title))))
 
@@ -2758,13 +2828,13 @@ def AgentJob.commit(+msg: String, +inbox: Chan(Msg), +client: U32, +id: String, 
 # Commit & push / Open PR with a message written from the thread's diff
 # (checkpoint 0 against the work tree); the thread's title when there is
 # no diff or no answer
-def AgentJob.act(+tx: AG.Tx, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +action: String, +title: String) -> IO(Unit):
+def AgentJob.act(+tx: TextScope, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +action: String, +title: String) -> IO(Unit):
   do IO<Unit>:
     d : String <- GT.Git.checkpoint.diff_worktree(cwd, thread, 0n)
     msg : String <- AgentJob.write(tx, d, Bool.pick(String, String.is_empty(title), "Backplane: changes from this thread", title))
     AgentJob.commit(msg, inbox, client, id, thread, cwd, action)
 
-def GitJob.go(i: Nat, +tx: AG.Tx, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +a: String, +b: String, +home: String, +seed: Nat) -> IO(Unit):
+def GitJob.go(i: Nat, +tx: TextScope, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +a: String, +b: String, +home: String, +seed: Nat) -> IO(Unit):
   match i:
     case 0n:
       WtJob.run(inbox, thread, cwd, a, b)
@@ -2796,7 +2866,7 @@ def GitJob.none(diff: Bool, +inbox: Chan(Msg), +client: U32, +id: String, +threa
     case False{}:
       GitJob.reply(inbox, client, id, False{}, J.Json.obj([J.KV{"text", J.Str{"not a git repository: " ++ cwd}}]))
 
-def GitJob.repo(ok: Bool, +tx: AG.Tx, +job: String, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +a: String, +b: String, +home: String, +seed: Nat) -> IO(Unit):
+def GitJob.repo(ok: Bool, +tx: TextScope, +job: String, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +a: String, +b: String, +home: String, +seed: Nat) -> IO(Unit):
   match ok:
     case True{}:
       GitJob.go(C.Codec.pos(["worktree", "checkpoint0", "checkpoint", "diff", "revert", "act", "status", "name", "act_gen"], job), tx, inbox, client, id, thread, cwd, a, b, home, seed)
@@ -2805,7 +2875,7 @@ def GitJob.repo(ok: Bool, +tx: AG.Tx, +job: String, +inbox: Chan(Msg), +client: 
 
 # one git job; nothing happens outside a git repository (checkpoints are
 # skipped, requests answer why)
-def GitJob.run.git(+tx: AG.Tx, +job: String, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +a: String, +b: String, +home: String) -> IO(Unit):
+def GitJob.run.git(+tx: TextScope, +job: String, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +a: String, +b: String, +home: String) -> IO(Unit):
   do IO<Unit>:
     ok : Bool <- GT.Git.is_repo(cwd)
     t : U32 <- H.Clock.epoch()
@@ -3096,7 +3166,7 @@ def PdfJob.sent(r: P.Ran, +inbox: Chan(Msg), +client: U32, +id: String, +path: S
 def PdfJob.run(+inbox: Chan(Msg), +client: U32, +id: String, +home: String, +path: String, +page: String) -> IO(Unit):
   IO.bind(P.Ran, Unit, P.Proc.run("sh", ["-c", PdfJob.sh(), "sh", path, page, home ++ "/pdf"], "/"), r => PdfJob.sent(r, inbox, client, id, path, page))
 
-def GitJob.run.k(i: Nat, +tx: AG.Tx, +job: String, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +a: String, +b: String, +home: String) -> IO(Unit):
+def GitJob.run.k(i: Nat, +tx: TextScope, +job: String, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +a: String, +b: String, +home: String) -> IO(Unit):
   match i:
     case 0n:
       Files.list(inbox, client, id, thread, cwd)
@@ -3152,7 +3222,7 @@ def RvJob.reply(r: RVS.Res, +inbox: Chan(Msg), +client: U32, +id: String) -> IO(
         RvJob.ask(inbox, J.Json.get_obj(o, "report"))
         GitJob.reply(inbox, client, id, ok, o)
 
-def GitJob.run.r(rv: Bool, +tx: AG.Tx, +job: String, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +a: String, +b: String, +home: String) -> IO(Unit):
+def GitJob.run.r(rv: Bool, +tx: TextScope, +job: String, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +a: String, +b: String, +home: String) -> IO(Unit):
   match rv:
     case True{}:
       IO.bind(RVS.Res, Unit, RVS.RvJob.run(job, thread, cwd, a, b, home), r => RvJob.reply(r, inbox, client, id))
@@ -3160,7 +3230,7 @@ def GitJob.run.r(rv: Bool, +tx: AG.Tx, +job: String, +inbox: Chan(Msg), +client:
       GitJob.run.k(C.Codec.pos(["files", "snooze", "worktree", "merged", "wt_remove", "kicad", "title", "btw", "summary", "mech", "render", "step", "refs", "open", "dir", "pdf", "fab", "intent"], job), tx, job, inbox, client, id, thread, cwd, a, b, home)
 
 # a job the hub asked for: a git job, or one of the sidebar's
-def GitJob.run(+tx: AG.Tx, +job: String, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +a: String, +b: String, +home: String) -> IO(Unit):
+def GitJob.run(+tx: TextScope, +job: String, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +a: String, +b: String, +home: String) -> IO(Unit):
   GitJob.run.r(String.starts_with(job, "rv."), tx, job, inbox, client, id, thread, cwd, a, b, home)
 
 # Grok (grok agent stdio, ACP) and Muse (muse serve, MSP)
@@ -3375,6 +3445,19 @@ def Codex.refuse(+thread: String, +gen: String, +inbox: Chan(Msg)) -> IO(Unit):
     ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, inbox, SpawnFailed{thread, gen, "{\"type\":\"turn.failed\",\"not_started\":true,\"message\":" ++ J.Json.show(J.Str{KR.Keyring.refusal("codex")}) ++ "}"})
     return Unit{}
 
+def AccountSpawn.named(legacy: Bool, +home: String, +profile: String, +epoch: String, +cmd: String, args: List<&2, String>, +cwd: String, err: U32) -> IO(Result<&1, &1, U32 & String, U32 & Socket>):
+  match legacy:
+    case True{}: Spawn.agent("env", "MCP_TOOL_TIMEOUT=86400000" <> "CLAUDE_CODE_ENABLE_TODO_TOOLS=1" <> cmd <> args, cwd, err)
+    case False{}: ACFX.AccountsFx.spawn(home, profile, epoch, cmd, args, cwd, err)
+
+def AccountSpawn.run(+home: String, +st: M.State, +thread: String, +cmd: String, args: List<&2, String>, cwd: String, err: U32) -> IO(Result<&1, &1, U32 & String, U32 & Socket>):
+  AccountSpawn.named(String.is_empty(ACCT.Accounts.id(st, thread, cmd)), home, ACCT.Accounts.id(st, thread, cmd), Nat.show(ACCT.Accounts.epoch(st, thread, cmd)), cmd, args, cwd, err)
+
+def Codex.account(legacy: Bool, +home: String, +st: M.State, +args: List<&2, String>, +cwd: String, +thread: String, +gen: String, +inbox: Chan(Msg)) -> IO(Unit):
+  match legacy:
+    case True{}: Keyring.gate("codex", IO.bind(Result<&1, &1, U32 & String, U32 & Socket>, Unit, Spawn.agent("codex", args, cwd, 3), r => Codex.started(r, thread, gen, inbox)), Codex.refuse(thread, gen, inbox))
+    case False{}: IO.bind(Result<&1, &1, U32 & String, U32 & Socket>, Unit, AccountSpawn.run(home, st, thread, "codex", args, cwd, 3), r => Codex.started(r, thread, gen, inbox))
+
 def Codex.run(+args: List<&2, String>, +cwd: String, +thread: String, +gen: String, +inbox: Chan(Msg)) -> IO(Unit):
   Keyring.gate("codex", IO.bind(Result<&1, &1, U32 & String, U32 & Socket>, Unit, Spawn.agent("codex", args, cwd, 3), r => Codex.started(r, thread, gen, inbox)),
     Codex.refuse(thread, gen, inbox))
@@ -3497,7 +3580,7 @@ def Grok.run(+args: List<&2, String>, +t: MS.Proto, +cwd: String, +thread: Strin
 
 def Cfg.home(c: Cfg) -> String:
   match c:
-    case Cfg{h, _, _, _, _, _, _, _, +tcfg, +views}:
+    case Cfg{h, _, _, _, _, _, _, _, +tcfg, +views, +accountInfo}:
       h
 
 def Upgrade.note(kvs: List<&2, J.KV>) -> String:
@@ -3553,12 +3636,12 @@ def Upgrade.start.go(on: Bool, +inbox: Chan(Msg)) -> IO(Unit):
 
 def Cfg.net(c: Cfg) -> Net:
   match c:
-    case Cfg{_, _, _, _, _, _, _, n, +tcfg, +views}:
+    case Cfg{_, _, _, _, _, _, _, n, +tcfg, +views, +accountInfo}:
       n
 
 def Cfg.port(c: Cfg) -> U32:
   match c:
-    case Cfg{_, _, _, p, _, _, _, _, +tcfg, +views}:
+    case Cfg{_, _, _, p, _, _, _, _, +tcfg, +views, +accountInfo}:
       p
 
 def Net.token(n: Net) -> String:
@@ -3591,12 +3674,12 @@ def Hub.mcp_url(+cfg: Cfg, +thread: String) -> String:
 
 def Cfg.mtext(c: Cfg) -> String:
   match c:
-    case Cfg{_, _, _, _, _, _, _, Net{_, _, _, _, mt, _, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}, +tcfg, +views}:
+    case Cfg{_, _, _, _, _, _, _, Net{_, _, _, _, mt, _, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}, +tcfg, +views, +accountInfo}:
       mt
 
 def Cfg.rt(c: Cfg) -> K.Rt:
   match c:
-    case Cfg{_, _, _, _, _, _, _, Net{_, _, _, _, _, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}, +tcfg, +views}:
+    case Cfg{_, _, _, _, _, _, _, Net{_, _, _, _, _, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}, +tcfg, +views, +accountInfo}:
       rt
 
 def Hub.prompt.kicad(rt: K.Rt, ipc: Bool) -> String:
@@ -3618,7 +3701,7 @@ def Hub.keys.prompt(+home: String) -> IO(String):
 
 def Cfg.bn(c: Cfg) -> BN.Bn:
   match c:
-    case Cfg{_, _, _, _, _, _, _, Net{_, _, _, _, _, _, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}, +tcfg, +views}:
+    case Cfg{_, _, _, _, _, _, _, Net{_, _, _, _, _, _, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}, +tcfg, +views, +accountInfo}:
       bnx
 
 def Hub.prompt.machines.k(+m: String) -> String:
@@ -3668,7 +3751,7 @@ def Think.codex(think: Bool) -> List<&2, String>:
 
 def Hub.agent_args(+cfg: Cfg, +thread: String, +model: String, +session: String, +r: M.RuntimeMode, +i: M.InteractionMode, prompt: String, +effort: String, +gen: String, think: Bool) -> List<&2, String>:
   match cfg:
-    case Cfg{+home, _, _, _, _, +dirs, _, _, +tcfg, +views}:
+    case Cfg{+home, _, _, _, _, +dirs, _, _, +tcfg, +views, +accountInfo}:
       List.append(&2, String, Q.Claude.args(model, session, r, i, prompt, List.append(&2, String, dirs, [home ++ "/attachments"])), List.append(&2, String, List.append(&2, String, AG.Effort.args("claude", effort), Think.claude(think)), List.append(&2, String, Q.Claude.plugins(dirs),
         ["--mcp-config", "{\"mcpServers\":{\"backplane\":{\"type\":\"http\",\"url\":\"" ++ Hub.mcp_url.g(cfg, thread, gen) ++ "\"}," ++ Parts.mcp.claude() ++ "}}"])))
 
@@ -3823,13 +3906,13 @@ def Token.load(+home: String) -> IO(String):
 
 def Cfg.with_token(c: Cfg, +t: String) -> Cfg:
   match c:
-    case Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, _, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}, +tcfg, +views}:
-      Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}, tcfg, views}
+    case Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, _, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}, +tcfg, +views, +accountInfo}:
+      Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}, tcfg, views, accountInfo}
 
 def Cfg.with_managed(c: Cfg, m: Bool) -> Cfg:
   match c:
-    case Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, _, lk, fc, ksx}, +tcfg, +views}:
-      Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, m, lk, fc, ksx}, tcfg, views}
+    case Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, _, lk, fc, ksx}, +tcfg, +views, +accountInfo}:
+      Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, m, lk, fc, ksx}, tcfg, views, accountInfo}
 
 # Startup
 # -------
@@ -4051,12 +4134,12 @@ def Agent.pid_is(m: Maybe<&2, Agent>, +pid: U32) -> Bool:
 
 def Cfg.models(c: Cfg) -> String:
   match c:
-    case Cfg{_, _, _, _, _, _, _, Net{_, _, _, ms, _, _, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}, +tcfg, +views}:
+    case Cfg{_, _, _, _, _, _, _, Net{_, _, _, ms, _, _, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}, +tcfg, +views, +accountInfo}:
       ms
 
 def Cfg.pk(c: Cfg) -> Maybe<&2, Chan(PK.PMsg)>:
   match c:
-    case Cfg{_, _, _, _, _, _, _, Net{_, _, _, _, _, _, _, pk, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}, +tcfg, +views}:
+    case Cfg{_, _, _, _, _, _, _, Net{_, _, _, _, _, _, _, pk, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}, +tcfg, +views, +accountInfo}:
       pk
 
 def Park.put(m: Maybe<&2, Chan(PK.PMsg)>, +msg: PK.PMsg) -> IO(Unit):
@@ -4279,7 +4362,7 @@ def Net.with_ks(n: Net, q: Chan(KSV.KMsg)) -> Net:
 
 def Cfg.ks(c: Cfg) -> Maybe<&2, Chan(KSV.KMsg)>:
   match c:
-    case Cfg{_, _, _, _, _, _, _, Net{_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, x}, +tcfg, +views}:
+    case Cfg{_, _, _, _, _, _, _, Net{_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, x}, +tcfg, +views, +accountInfo}:
       x
 
 def Net.with_tm(n: Net, q: Chan(TM.TMsg)) -> Net:
@@ -4294,12 +4377,12 @@ def Net.with_pv(n: Net, q: Chan(PV.PMsg)) -> Net:
 
 def Cfg.pv(c: Cfg) -> Maybe<&2, Chan(PV.PMsg)>:
   match c:
-    case Cfg{_, _, _, _, _, _, _, Net{_, _, _, _, _, _, _, _, _, _, pv, bnx, mgd, lk, fc, ksx}, +tcfg, +views}:
+    case Cfg{_, _, _, _, _, _, _, Net{_, _, _, _, _, _, _, _, _, _, pv, bnx, mgd, lk, fc, ksx}, +tcfg, +views, +accountInfo}:
       pv
 
 def Cfg.tm(c: Cfg) -> Maybe<&2, Chan(TM.TMsg)>:
   match c:
-    case Cfg{_, _, _, _, _, _, _, Net{_, _, _, _, _, _, _, _, tm, mc, pvx, bnx, mgd, lk, fc, ksx}, +tcfg, +views}:
+    case Cfg{_, _, _, _, _, _, _, Net{_, _, _, _, _, _, _, _, tm, mc, pvx, bnx, mgd, lk, fc, ksx}, +tcfg, +views, +accountInfo}:
       tm
 
 # a shell's output, to the hub (which sends it to every client)
@@ -4367,9 +4450,9 @@ def Plot.put(m: Maybe<&2, Chan(PV.PMsg)>, +msg: PV.PMsg) -> IO(Unit):
 
 def CefCfg.depart(c: Cfg, +client: U32) -> Cfg:
   match c:
-    case Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, +bnx, mgd, lk, fc, ksx}, +tcfg, +views}:
+    case Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, +bnx, mgd, lk, fc, ksx}, +tcfg, +views, +accountInfo}:
       Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx,
-        BN.Bn.with_cef(bnx, CF.Cef.session.leave(BN.Bn.cef(bnx), client)), mgd, lk, fc, ksx}, tcfg, views}
+        BN.Bn.with_cef(bnx, CF.Cef.session.leave(BN.Bn.cef(bnx), client)), mgd, lk, fc, ksx}, tcfg, views, accountInfo}
 
 def Hub.leave(h: Hub, +client: U32, +now: Nat) -> IO(Hub):
   match h:
@@ -4482,7 +4565,7 @@ def AgentJob.skills(+inbox: Chan(Msg), +client: U32, +id: String, +thread: Strin
 
 # a job for the hub's Git effect: the skills a composer offers (anywhere),
 # or a git job (in a repository)
-def Jobs.run(+tx: AG.Tx, +job: String, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +a: String, +b: String, +home: String) -> IO(Unit):
+def Jobs.run(+tx: TextScope, +job: String, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +a: String, +b: String, +home: String) -> IO(Unit):
   Bool.pick(IO(Unit), String.eq(job, "skills"), AgentJob.skills(inbox, client, id, thread, cwd), GitJob.run(tx, job, inbox, client, id, thread, cwd, a, b, home))
 
 # a thread's reasoning effort setting ("" for the provider's default)
@@ -4713,7 +4796,7 @@ def Codex.go(+cfg: Cfg, +st: M.State, +thread: String, +cwd: String, +model: Str
     +fs : K.Files <- Files.prepared(thread, cwd, inbox, K.Rt.cli(Cfg.rt(cfg)))
     +ss : List<&2, AG.USkill> <- Skills.scan(cwd)
     +keys : String <- Hub.keys.prompt(Cfg.home(cfg))
-    Codex.run(Codex.args(cfg, thread, model, session, r, AG.Mention.expand("codex", text, ss), Hub.prompt(cfg, st, thread, cwd, fs, keys) ++ AG.USkill.prompt(ss), Hub.effort_of(st, thread), gen, MD.Disposition.launch(st, thread), MD.Disposition.triage.launch(st, thread), M.Think.on(st)), cwd, thread, gen, inbox)
+    Codex.account(String.is_empty(ACCT.Accounts.id(st, thread, "codex")), Cfg.home(cfg), st, Codex.args(cfg, thread, model, session, r, AG.Mention.expand("codex", text, ss), Hub.prompt(cfg, st, thread, cwd, fs, keys) ++ AG.USkill.prompt(ss), Hub.effort_of(st, thread), gen, MD.Disposition.launch(st, thread), MD.Disposition.triage.launch(st, thread), M.Think.on(st)), cwd, thread, gen, inbox)
 
 def Grok.go(+cfg: Cfg, +st: M.State, +thread: String, +cwd: String, +model: String, +session: String, +r: M.RuntimeMode, +text: String, +gen: String, +inbox: Chan(Msg)) -> IO(Unit):
   do IO<Unit>:
@@ -4884,7 +4967,7 @@ def Browser.exe() -> IO(String):
 
 def Cfg.br(c: Cfg) -> Maybe<&2, Chan(BR.BMsg)>:
   match c:
-    case Cfg{_, _, _, _, _, _, _, Net{_, _, _, _, _, _, br, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}, +tcfg, +views}:
+    case Cfg{_, _, _, _, _, _, _, Net{_, _, _, _, _, _, br, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}, +tcfg, +views, +accountInfo}:
       br
 
 def Desktop.policy(m: Maybe<&2, Chan(BR.BMsg)>, +owner: String, +known: Bool, +tch: TE.TeachSt) -> IO(Unit):
@@ -4985,14 +5068,14 @@ def Preview.shows(+o: J.Json) -> Bool:
 # inline terminals retain their normal bounded-view invalidation path.
 def Wire.terminal.fallback(c: Client) -> Client:
   match c:
-    case Client{id, out, look, cr, sock, legacy, ThinStart{mode, ThinContext{hub, cid, target, view, revision, anchor, actor <> _, control} <> _} <> _}:
-      Client{id, out, look, cr, sock, legacy, [ThinStart{mode, [ThinContext{hub, cid, target, view, revision, anchor, [TA.Actor.terminal.fallback(actor)], control}]}]}
+    case Client{id, out, look, cr, sock, legacy, ThinStart{mode, ThinContext{hub, cid, target, view, revision, anchor, actor <> _, control} <> _} <> _, +accountCap}:
+      Client{id, out, look, cr, sock, legacy, [ThinStart{mode, [ThinContext{hub, cid, target, view, revision, anchor, [TA.Actor.terminal.fallback(actor)], control}]}], accountCap}
     case _: c
 
 def Wire.terminal.offered(c: Client, ordinal: Nat) -> Client:
   match c:
-    case Client{id, out, look, cr, sock, legacy, ThinStart{mode, ThinContext{hub, cid, target, view, revision, anchor, actor <> _, control} <> _} <> _}:
-      Client{id, out, look, cr, sock, legacy, [ThinStart{mode, [ThinContext{hub, cid, target, view, revision, anchor, [TA.Actor.terminal.offered(actor, ordinal)], control}]}]}
+    case Client{id, out, look, cr, sock, legacy, ThinStart{mode, ThinContext{hub, cid, target, view, revision, anchor, actor <> _, control} <> _} <> _, +accountCap}:
+      Client{id, out, look, cr, sock, legacy, [ThinStart{mode, [ThinContext{hub, cid, target, view, revision, anchor, [TA.Actor.terminal.offered(actor, ordinal)], control}]}], accountCap}
     case _: c
 
 def Wire.terminal.written(cr: OB.Cr) -> Nat:
@@ -5015,7 +5098,7 @@ def Wire.terminal.ready(fast: Bool, +c: Client, u: UC.Ui, owner: String, generat
 
 def Wire.terminal.one(+c: Client, +owner: String, +epoch: String) -> IO(Maybe<&2, Client>):
   match c:
-    case Client{_, _, _, +cr, _, _, ThinStart{mode, ThinContext{_, _, target, view, _, _, +actor <> _, _} <> _} <> _}:
+    case Client{_, _, _, +cr, _, _, ThinStart{mode, ThinContext{_, _, target, view, _, _, +actor <> _, _} <> _} <> _, +accountCap}:
       +actual = Bool.pick(String, String.is_empty(owner), UC.Ui.scratch(TA.Actor.ui(actor), "@terminal.owner"), owner)
       Wire.terminal.ready(Bool.and(Bool.not(String.is_empty(view)), TOUT.Output.pending(String.eq(mode, "view-web"), TA.Actor.ui(actor), actual, Wire.terminal.written(cr))), c,
         TA.Actor.ui(actor), actual, U32.show(OB.Cr.gen(cr)), epoch, view, target, Nat.add(OB.Cr.sent(cr), 1n))
@@ -5037,7 +5120,7 @@ def Wire.terminal.drain_one(same: Bool, c: Client, epoch: String) -> IO(Maybe<&2
 
 def Wire.terminal.same(c: Client, +id: U32, +gen: U32) -> Bool:
   match c:
-    case Client{i, _, _, cr, _, _, _}: Bool.and(U32.is_eq(i, id), U32.is_eq(OB.Cr.gen(cr), gen))
+    case Client{i, _, _, cr, _, _, _, +accountCap}: Bool.and(U32.is_eq(i, id), U32.is_eq(OB.Cr.gen(cr), gen))
 
 def Wire.terminal.drained(cs: List<&2, Client>, +id: U32, +gen: U32, +epoch: String) -> IO(List<&2, Client>):
   match cs:
@@ -5087,13 +5170,13 @@ def Hub.term_to(h: Hub, +client: U32, +key: String, +cols: U32, +rows: U32, data
 
 def Cfg.with_rt(c: Cfg, +rt: K.Rt) -> Cfg:
   match c:
-    case Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, old, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}, +tcfg, +views}:
-      Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, K.Rt.set(rt, "auth.probe", J.Flag{J.Json.get_bool(K.Rt.health(rt), "auth.probe", J.Json.get_bool(K.Rt.health(old), "auth.probe", False{}))}), brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}, tcfg, views}
+    case Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, old, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}, +tcfg, +views, +accountInfo}:
+      Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, K.Rt.set(rt, "auth.probe", J.Flag{J.Json.get_bool(K.Rt.health(rt), "auth.probe", J.Json.get_bool(K.Rt.health(old), "auth.probe", False{}))}), brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}, tcfg, views, accountInfo}
 
 def Cfg.with_models(c: Cfg, +ms: String, +mt: String) -> Cfg:
   match c:
-    case Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, _, _, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}, +tcfg, +views}:
-      Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}, tcfg, views}
+    case Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, _, _, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}, +tcfg, +views, +accountInfo}:
+      Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}, tcfg, views, accountInfo}
 
 def Hub.models.k(h: Hub) -> IO(Hub):
   match h:
@@ -5373,14 +5456,14 @@ def Hub.kretry(h: Hub) -> IO(Hub):
 
 def Cfg.with_machines(c: Cfg, +mc: String) -> Cfg:
   match c:
-    case Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, _, pvx, bnx, mgd, lk, fc, ksx}, +tcfg, +views}:
-      Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}, tcfg, views}
+    case Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, _, pvx, bnx, mgd, lk, fc, ksx}, +tcfg, +views, +accountInfo}:
+      Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}, tcfg, views, accountInfo}
 
 # a new pairing link, its message made once and kept for every join
 def Cfg.with_link(c: Cfg, +lk: String) -> Cfg:
   match c:
-    case Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, _, fc, ksx}, +tcfg, +views}:
-      Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, BN.Bn.with_pair(bnx, lk ++ "\n" ++ Hub.pair_msg.of(lk)), mgd, lk, fc, ksx}, tcfg, views}
+    case Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, _, fc, ksx}, +tcfg, +views, +accountInfo}:
+      Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, BN.Bn.with_pair(bnx, lk ++ "\n" ++ Hub.pair_msg.of(lk)), mgd, lk, fc, ksx}, tcfg, views, accountInfo}
 
 # the tailnet listener is up: every client hears the pairing link. Each
 # one either is the owner's own device or came in with the token already,
@@ -5467,20 +5550,20 @@ def Skills.kistack(+dir: String) -> IO(String & List<&2, Q.Skill>):
 
 def Main.args(xs: List<String>, c: Cfg) -> Cfg:
   match xs c:
-    case "--port" <> p <> t Cfg{h, w, ho, _, pr, ds, v, nt, +tcfg, +views}:
-      Main.args(t, Cfg{h, w, ho, Maybe.default(&2, U32, U32.read(p), 3787), pr, ds, v, nt, tcfg, views})
-    case "--host" <> x <> t Cfg{h, w, _, po, pr, ds, v, nt, +tcfg, +views}:
-      Main.args(t, Cfg{h, w, x, po, pr, ds, v, nt, tcfg, views})
-    case "--web" <> x <> t Cfg{h, _, ho, po, pr, ds, v, nt, +tcfg, +views}:
-      Main.args(t, Cfg{h, x, ho, po, pr, ds, v, nt, tcfg, views})
-    case "--home" <> x <> t Cfg{_, w, ho, po, pr, ds, v, nt, +tcfg, +views}:
-      Main.args(t, Cfg{x, w, ho, po, pr, ds, v, nt, tcfg, views})
-    case "--no-tailscale" <> t Cfg{h, w, ho, po, pr, ds, v, Net{_, _, tok, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}, +tcfg, +views}:
-      Main.args(t, Cfg{h, w, ho, po, pr, ds, v, Net{False{}, False{}, tok, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}, tcfg, views})
-    case "--tailscale" <> t Cfg{h, w, ho, po, pr, ds, v, Net{_, https, tok, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}, +tcfg, +views}:
-      Main.args(t, Cfg{h, w, ho, po, pr, ds, v, Net{True{}, https, tok, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}, tcfg, views})
-    case "--tailscale-https" <> t Cfg{h, w, ho, po, pr, ds, v, Net{_, _, tok, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}, +tcfg, +views}:
-      Main.args(t, Cfg{h, w, ho, po, pr, ds, v, Net{True{}, True{}, tok, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}, tcfg, views})
+    case "--port" <> p <> t Cfg{h, w, ho, _, pr, ds, v, nt, +tcfg, +views, +accountInfo}:
+      Main.args(t, Cfg{h, w, ho, Maybe.default(&2, U32, U32.read(p), 3787), pr, ds, v, nt, tcfg, views, ""})
+    case "--host" <> x <> t Cfg{h, w, _, po, pr, ds, v, nt, +tcfg, +views, +accountInfo}:
+      Main.args(t, Cfg{h, w, x, po, pr, ds, v, nt, tcfg, views, ""})
+    case "--web" <> x <> t Cfg{h, _, ho, po, pr, ds, v, nt, +tcfg, +views, +accountInfo}:
+      Main.args(t, Cfg{h, x, ho, po, pr, ds, v, nt, tcfg, views, ""})
+    case "--home" <> x <> t Cfg{_, w, ho, po, pr, ds, v, nt, +tcfg, +views, +accountInfo}:
+      Main.args(t, Cfg{x, w, ho, po, pr, ds, v, nt, tcfg, views, ""})
+    case "--no-tailscale" <> t Cfg{h, w, ho, po, pr, ds, v, Net{_, _, tok, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}, +tcfg, +views, +accountInfo}:
+      Main.args(t, Cfg{h, w, ho, po, pr, ds, v, Net{False{}, False{}, tok, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}, tcfg, views, ""})
+    case "--tailscale" <> t Cfg{h, w, ho, po, pr, ds, v, Net{_, https, tok, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}, +tcfg, +views, +accountInfo}:
+      Main.args(t, Cfg{h, w, ho, po, pr, ds, v, Net{True{}, https, tok, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}, tcfg, views, ""})
+    case "--tailscale-https" <> t Cfg{h, w, ho, po, pr, ds, v, Net{_, _, tok, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}, +tcfg, +views, +accountInfo}:
+      Main.args(t, Cfg{h, w, ho, po, pr, ds, v, Net{True{}, True{}, tok, ms, mt, rt, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}, tcfg, views, ""})
     case _ <> t _:
       Main.args(t, c)
     case Nil{} _:
@@ -6494,6 +6577,27 @@ def Chips.loop(+fuel: Nat, +inbox: Chan(Msg), +path: String, +last: String) -> I
         IO.sleep(30000)
         Chips.loop(f, inbox, path, text)
 
+def AccountsJob.changed(same: Bool, +inbox: Chan(Msg), snapshot: String) -> IO(Unit):
+  match same:
+    case True{}: IO.pure(Unit, Unit{})
+    case False{}: Self.post(inbox, AccountsFound{snapshot})
+
+def AccountsJob.loop(fuel: Nat, +inbox: Chan(Msg), +home: String, +old: String) -> IO(Unit):
+  match fuel:
+    case 0n: IO.pure(Unit, Unit{})
+    case 1n+f:
+      do IO<Unit>:
+        +snapshot : String <- ACFX.AccountsFx.snapshot(home)
+        AccountsJob.changed(String.eq(old, snapshot), inbox, snapshot)
+        IO.sleep(1000)
+        AccountsJob.loop(f, inbox, home, snapshot)
+
+def AccountsJob.request(+inbox: Chan(Msg), +home: String, +client: U32, +id: String, request: String) -> IO(Unit):
+  do IO<Unit>:
+    +snapshot : String <- ACFX.AccountsFx.request(home, request)
+    Self.post(inbox, AccountsFound{snapshot})
+    GitJob.reply(inbox, client, id, String.is_empty(J.Json.get_str(ACCT.Accounts.parse(snapshot), "error", "")), ACCT.Accounts.parse(snapshot))
+
 def Refresh.start(+inbox: Chan(Msg), +cfg: Cfg) -> IO(Unit):
   do IO<Unit>:
     +user : String <- Env.get("HOME", "")
@@ -6512,7 +6616,7 @@ def Main.prepare(+user: String, +exe: String) -> IO(Boot):
 # the home and port the arguments name, before anything else is found
 # (the server binary takes the home's lock with them first)
 def Main.where(+user: String, args: List<String>) -> Cfg:
-  Main.args(args, Cfg{user ++ "/.backplane-bend", "", "127.0.0.1", 3787, "", Nil{}, "", Net{True{}, False{}, "", "", "", K.Rt.empty(), None{}, None{}, None{}, "", None{}, BN.Bn.empty(), False{}, "", "", None{}}, TI.Tio.empty(False{}), Nil{}})
+  Main.args(args, Cfg{user ++ "/.backplane-bend", "", "127.0.0.1", 3787, "", Nil{}, "", Net{True{}, False{}, "", "", "", K.Rt.empty(), None{}, None{}, None{}, "", None{}, BN.Bn.empty(), False{}, "", "", None{}}, TI.Tio.empty(False{}), Nil{}, ""})
 
 # the directories Claude threads get (--add-dir, --plugin-dir): the bundled
 # KiStack, none when the build carries none
@@ -6522,7 +6626,7 @@ def Main.dirs(+kdir: String) -> List<&2, String>:
 def Main.config(+user: String, +exe: String, args: List<String>, b: Boot) -> Cfg:
   Boot{kdir, skills, rt, ms, mt, +fc, +me} = b
   Main.args(args, Cfg{user ++ "/.backplane-bend", exe ++ "/web", "127.0.0.1", 3787,
-    Q.Prompt.runtime("Backplane") ++ "\n\n" ++ Q.Prompt.mech(fc, me), Main.dirs(kdir), Main.version(), Net{True{}, False{}, "", ms, mt, rt, None{}, None{}, None{}, "", None{}, BN.Bn.empty(), False{}, "", fc, None{}}, TI.Tio.empty(False{}), Nil{}})
+    Q.Prompt.runtime("Backplane") ++ "\n\n" ++ Q.Prompt.mech(fc, me), Main.dirs(kdir), Main.version(), Net{True{}, False{}, "", ms, mt, rt, None{}, None{}, None{}, "", None{}, BN.Bn.empty(), False{}, "", fc, None{}}, TI.Tio.empty(False{}), Nil{}, ""})
 
 def Sys.exe_dir.io() -> IO(String):
   H.Sys.exe_dir()
@@ -6696,7 +6800,7 @@ def Media.claude(+inbox: Chan(Msg), +thread: String, +cwd: String, +text: String
 
 # a Git out: the media jobs here (an upload piece runs on the hub, so the
 # pieces of a file land in order), git jobs off the hub
-def Media.run.k(i: Nat, +tx: AG.Tx, +job: String, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +a: String, +b: String, +home: String, +managed: Bool, +gen: String) -> IO(Unit):
+def Media.run.k(i: Nat, +tx: TextScope, +job: String, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +a: String, +b: String, +home: String, +managed: Bool, +gen: String) -> IO(Unit):
   match i:
     case 0n:
       Media.put(inbox, client, id, thread, a, b, home)
@@ -6709,7 +6813,7 @@ def Media.run.k(i: Nat, +tx: AG.Tx, +job: String, +inbox: Chan(Msg), +client: U3
     case _:
       IO.spawn(Unit, Jobs.run(tx, job, inbox, client, id, thread, cwd, a, b, home))
 
-def Media.run(+tx: AG.Tx, +job: String, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +a: String, +b: String, +home: String, +managed: Bool, +gen: String) -> IO(Unit):
+def Media.run(+tx: TextScope, +job: String, +inbox: Chan(Msg), +client: U32, +id: String, +thread: String, +cwd: String, +a: String, +b: String, +home: String, +managed: Bool, +gen: String) -> IO(Unit):
   Media.run.k(C.Codec.pos(["attach.put", "attach.file", "attach.claude", "update.check"], job), tx, job, inbox, client, id, thread, cwd, a, b, home, managed, gen)
 
 # thread_wait: the check (MC.Wait.now) goes through the hub each second,
@@ -6820,7 +6924,7 @@ def Hub.turn_done(h: Hub, +tag: String) -> IO(Hub):
 
 def Cfg.machines(c: Cfg) -> String:
   match c:
-    case Cfg{_, _, _, _, _, _, _, Net{_, _, _, _, _, _, _, _, _, mc, _, _, _, _, _, _}, +tcfg, +views}:
+    case Cfg{_, _, _, _, _, _, _, Net{_, _, _, _, _, _, _, _, _, mc, _, _, _, _, _, _}, +tcfg, +views, +accountInfo}:
       mc
 
 def Live.of(+cfg: Cfg) -> List<&2, LV.Buf>:
@@ -6828,8 +6932,8 @@ def Live.of(+cfg: Cfg) -> List<&2, LV.Buf>:
 
 def Cfg.with_bn(c: Cfg, b: BN.Bn) -> Cfg:
   match c:
-    case Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, _, mgd, lk, fc, ksx}, +tcfg, +views}:
-      Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, b, mgd, lk, fc, ksx}, tcfg, views}
+    case Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, _, mgd, lk, fc, ksx}, +tcfg, +views, +accountInfo}:
+      Cfg{h, w, ho, p, pr, ds, v, Net{tn, hs, t, ms, mt, rt, brx, pkx, tmx, mc, pvx, b, mgd, lk, fc, ksx}, tcfg, views, accountInfo}
 
 def Cfg.cef(c: Cfg) -> CF.CefSession:
   BN.Bn.cef(Cfg.bn(c))
@@ -6896,8 +7000,8 @@ def Hub.commit.failed(cut: Bool, +len: String, +err: String, st: M.State, f: Fil
 # Pending activity is invalidated only after the privacy settings were stored.
 def Cfg.telemetry.privacy_committed(cs: List<&2, M.Change>, cfg: Cfg) -> Cfg:
   match cfg:
-    case Cfg{h, w, ho, p, pr, ds, v, nt, tm, views}:
-      Cfg{h, w, ho, p, pr, ds, v, nt, TUI.Privacy.committed(cs, tm), views}
+    case Cfg{h, w, ho, p, pr, ds, v, nt, tm, views, +accountInfo}:
+      Cfg{h, w, ho, p, pr, ds, v, nt, TUI.Privacy.committed(cs, tm), views, accountInfo}
 
 def Hub.fold.state(fd: Folded, st: M.State) -> Folded:
   match fd:
@@ -6991,12 +7095,12 @@ def Hub.commit(+cs: List<&2, M.Change>, h: Hub, fresh: List<&2, String>) -> IO(H
 
 def Cfg.host(c: Cfg) -> String:
   match c:
-    case Cfg{_, _, ho, _, _, _, _, _, +tcfg, +views}:
+    case Cfg{_, _, ho, _, _, _, _, _, +tcfg, +views, +accountInfo}:
       ho
 
 def Cfg.tailnet(c: Cfg) -> Bool:
   match c:
-    case Cfg{_, _, _, _, _, _, _, Net{tn, _, _, _, _, _, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}, +tcfg, +views}:
+    case Cfg{_, _, _, _, _, _, _, Net{tn, _, _, _, _, _, brx, pkx, tmx, mc, pvx, bnx, mgd, lk, fc, ksx}, +tcfg, +views, +accountInfo}:
       tn
 
 def Hub.broadcast(h: Hub, +text: String) -> IO(Hub):
@@ -9373,7 +9477,7 @@ def Claude.job(+cfg: Cfg, +st: M.State, +thread: String, +cwd: String, +model: S
   do IO<Unit>:
     +fs : K.Files <- Files.prepared(thread, cwd, inbox, K.Rt.cli(Cfg.rt(cfg)))
     +keys : String <- Hub.keys.prompt(Cfg.home(cfg))
-    Keyring.gate("claude", IO.bind(Result<&1, &1, U32 & String, U32 & Socket>, Unit, Spawn.agent("env", "MCP_TOOL_TIMEOUT=86400000" <> "CLAUDE_CODE_ENABLE_TODO_TOOLS=1" <> "claude" <> Hub.agent_args(cfg, thread, model, session, r, i, Hub.prompt(cfg, st, thread, cwd, fs, keys), effort, gen, M.Think.on(st)), cwd, 3),
+    Keyring.gate("claude", IO.bind(Result<&1, &1, U32 & String, U32 & Socket>, Unit, AccountSpawn.run(Cfg.home(cfg), st, thread, "claude", Hub.agent_args(cfg, thread, model, session, r, i, Hub.prompt(cfg, st, thread, cwd, fs, keys), effort, gen, M.Think.on(st)), cwd, 3),
       res => Claude.started(res, thread, gen, cwd, input, inbox)), Claude.fail(thread, gen, KR.Keyring.refusal("claude"), inbox))
 
 def Agents.pid.k(same: Bool, a: Agent, +pid: U32) -> Agent:
@@ -9447,7 +9551,7 @@ def Hub.start.go(same: Bool, +m: Maybe<&2, Agent>, h: Hub, +thread: String, +cwd
 def Hub.start.k(+m: Maybe<&2, Agent>, h: Hub, +thread: String, +cwd: String, +model: String, +session: String, +r: M.RuntimeMode, +i: M.InteractionMode, +effort: String) -> IO(Hub):
   match h:
     case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
-      Hub.start.go(Agent.same(m, Agent.key(model, r, i, effort, M.Think.on(st))), m, Hub{st, f, ls, cl, as, inbox, cfg, note}, thread, cwd, model, session, r, i, effort)
+      Hub.start.go(Bool.and(String.is_empty(ACCT.Accounts.id(st, thread, "claude")), Agent.same(m, Agent.key(model, r, i, effort, M.Think.on(st)))), m, Hub{st, f, ls, cl, as, inbox, cfg, note}, thread, cwd, model, session, r, i, effort)
 
 def Hub.autoview(h: Hub, +thread: String, fs: K.Files) -> IO(Hub):
   match h:
@@ -10112,7 +10216,7 @@ def Hub.out(h: Hub, o: B.Out) -> IO(Hub):
     case Hub{+st, f, ls, cl, +as, +inbox, +cfg, note} B.Git{+client, +id, +job, +thread, +cwd, +a, +b}:
       do IO<Hub>:
         +now : Nat <- Now.nat()
-        KExportJob.route(String.eq(job, "kexport"), inbox, client, id, thread, cwd, Cfg.home(cfg), Cfg.rt(cfg), a, KiCadJob.route(String.eq(job, "kicad"), inbox, client, id, thread, cwd, Cfg.rt(cfg), Media.run(AG.Text.of(st), job, inbox, client, id, thread, cwd, Bot.attach(String.eq(job, "attach.claude"), cfg, st, now, thread, a), b, Cfg.home(cfg), Net.managed(Cfg.net(cfg)), Agents.gen(as, thread))))
+        KExportJob.route(String.eq(job, "kexport"), inbox, client, id, thread, cwd, Cfg.home(cfg), Cfg.rt(cfg), a, KiCadJob.route(String.eq(job, "kicad"), inbox, client, id, thread, cwd, Cfg.rt(cfg), Media.run(TextScope.of(st, Cfg.home(cfg), thread), job, inbox, client, id, thread, cwd, Bot.attach(String.eq(job, "attach.claude"), cfg, st, now, thread, a), b, Cfg.home(cfg), Net.managed(Cfg.net(cfg)), Agents.gen(as, thread))))
         return Claude.prep(Bool.and(String.eq(job, "attach.claude"), Bool.not(String.is_empty(b))), Hub{st, f, ls, cl, as, inbox, cfg, note}, thread, b)
     case Hub{st, f, ls, cl, as, inbox, +cfg, note} B.AskAnswered{+ask, +answer}:
       do IO<Hub>:
@@ -10218,17 +10322,17 @@ def Clients.swap(cs: List<&2, Client>, +id: U32, +m: Maybe<&2, Client>) -> List<
 
 def Boot.due(c: Client, +gen: U32) -> Bool:
   match c:
-    case Client{_, _, _, +r, _, _, _}:
+    case Client{_, _, _, +r, _, _, _, +accountCap}:
       Bool.and(Bool.and(OB.Cr.boot(r), U32.is_eq(OB.Cr.gen(r), gen)), OB.Cr.room(r))
 
 def Boot.cr(c: Client, +r: OB.Cr) -> Client:
   match c:
-    case Client{i, o, l, _, k, lgc, mb}:
-      Client{i, o, l, r, k, lgc, mb}
+    case Client{i, o, l, _, k, lgc, mb, +accountCap}:
+      Client{i, o, l, r, k, lgc, mb, accountCap}
 
 def Boot.r(c: Client) -> OB.Cr:
   match c:
-    case Client{_, _, _, r, _, _, _}:
+    case Client{_, _, _, r, _, _, _, +accountCap}:
       r
 
 def Boot.next(more: Bool, h: Hub, k: Hub -> IO(Hub)) -> IO(Hub):
@@ -10243,10 +10347,10 @@ def Boot.next(more: Bool, h: Hub, k: Hub -> IO(Hub)) -> IO(Hub):
 # message it reads and anything else waits behind at most a few
 def Kick.k(go: Bool, c: Client, +inbox: Chan(Msg)) -> IO(Client):
   match go c:
-    case True{} Client{+i, o, l, +r, k, lgc, mb}:
+    case True{} Client{+i, o, l, +r, k, lgc, mb, +accountCap}:
       do IO<Client>:
         Self.post.later(inbox, JoinMore{i, OB.Cr.gen(r)})
-        return Client{i, o, l, OB.Cr.wait.set(r, True{}), k, lgc, mb}
+        return Client{i, o, l, OB.Cr.wait.set(r, True{}), k, lgc, mb, accountCap}
     case False{} _:
       IO.pure(Client, c)
 
@@ -10255,7 +10359,7 @@ def Kick.due(+r: OB.Cr) -> Bool:
 
 def Client.mobile.pending(c: Client) -> Bool:
   match c:
-    case Client{_, _, _, _, _, _, mb}: Bool.not(List.is_empty(&2, MobileStart, mb))
+    case Client{_, _, _, _, _, _, mb, +accountCap}: Bool.not(List.is_empty(&2, MobileStart, mb))
 
 def Kick.one(+c: Client, +id: U32, +inbox: Chan(Msg)) -> IO(Client):
   Kick.k(Bool.and(Bool.not(Client.mobile.pending(c)), Bool.and(Client.is(c, id), Kick.due(Boot.r(c)))), c, inbox)
@@ -10364,8 +10468,8 @@ def Boot.m(m: Maybe<&2, Client>, h: Hub, +id: U32, +gen: U32) -> IO(Hub):
 
 def Boot.unwait.k(same: Bool, c: Client) -> Client:
   match same c:
-    case True{} Client{i, o, l, r, k, lgc, mb}:
-      Client{i, o, l, OB.Cr.wait.set(r, False{}), k, lgc, mb}
+    case True{} Client{i, o, l, r, k, lgc, mb, +accountCap}:
+      Client{i, o, l, OB.Cr.wait.set(r, False{}), k, lgc, mb, accountCap}
     case False{} _:
       c
 
@@ -10462,11 +10566,11 @@ def Hub.uber.after(h: Hub, +cs: List<&2, M.Change>) -> IO(Hub):
 
 def Cfg.telemetry(cfg: Cfg) -> List<&2, TI.TmCfg>:
   match cfg:
-    case Cfg{_, _, _, _, _, _, _, _, tcfg, +views}: tcfg
+    case Cfg{_, _, _, _, _, _, _, _, tcfg, +views, +accountInfo}: tcfg
 
 def Cfg.with_tm(cfg: Cfg, tm2: List<&2, TI.TmCfg>) -> Cfg:
   match cfg:
-    case Cfg{h, w, ho, p, pr, ds, v, nt, _, +views}: Cfg{h, w, ho, p, pr, ds, v, nt, tm2, views}
+    case Cfg{h, w, ho, p, pr, ds, v, nt, _, +views, +accountInfo}: Cfg{h, w, ho, p, pr, ds, v, nt, tm2, views, accountInfo}
 
 def Hub.telemetry.permit(h: Hub, gen: Nat, +view: TLM.TmView, reply: Chan(Bool)) -> IO(Hub):
   match h:
@@ -10620,10 +10724,14 @@ def Hub.step.k(p: M.State & Hub, cs: List<&2, M.Change>, os: List<&2, B.Out>) ->
 
 # a step's changes are stored (with the pending counts they move), then
 # its effects run; answers whether it was stored
+def Hub.step.accounts(pair: M.State & Hub, cs: List<&2, M.Change>, os: List<&2, B.Out>) -> IO(Hub & Bool):
+  (+st, h) = pair
+  Hub.step.k((st, h), ACCT.Accounts.created(cs, st), os)
+
 def Hub.step.ok(h: Hub, s: B.Step) -> IO(Hub & Bool):
   match s:
     case B.Step{+cs, +os}:
-      Hub.step.k(Hub.state(h), cs, os)
+      Hub.step.accounts(Hub.state(h), cs, os)
 
 def Hub.step.drop(r: Hub & Bool) -> Hub:
   (h, _) = r
@@ -10631,6 +10739,92 @@ def Hub.step.drop(r: Hub & Bool) -> Hub:
 
 def Hub.step(h: Hub, s: B.Step) -> IO(Hub):
   IO.bind(Hub & Bool, Hub, Hub.step.ok(h, s), r => IO.pure(Hub, Hub.step.drop(r)))
+
+# Account IO reports are projected through the same canonical event writer.
+# Attempts remain transient in Cfg/info; the event log receives metadata only.
+def Wire.accounts(cs: List<&2, Client>, +text: String) -> IO(List<&2, Client>):
+  match cs:
+    case Nil{}: IO.pure(List<&2, Client>, Nil{})
+    case +c <> t:
+      do IO<List<&2, Client>>:
+        mc : Maybe<&2, Client> <- Wire.text.if(Bool.or(Bool.not(Client.accounts(c)), Client.thin(c)), Some{c}, text)
+        rest : List<&2, Client> <- Wire.accounts(t, text)
+        return Clients.add(mc, rest)
+
+def Hub.accounts.broadcast(h: Hub, +snapshot: String) -> IO(Hub):
+  match h:
+    case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+      do IO<Hub>:
+        +text : String <- Info.json(J.Json.obj([J.KV{"t", J.Str{"info"}}, J.KV{"info", J.Json.obj([J.KV{"accounts.live", J.Str{snapshot}}])}]))
+        cl2 : List<&2, Client> <- Wire.accounts(cl, text)
+        return Hub{st, f, ls, cl2, as, inbox, Cfg.with_accounts(cfg, snapshot), note}
+
+def AccountsRpc.retired(+st: M.State, +th: String) -> Bool:
+  +provider = M.Thread.provider(B.Hub.thread(st, th))
+  +p = ACCT.Accounts.profile(st, ACCT.Accounts.id(st, th, provider))
+  Bool.and(ACCT.Accounts.named(st, th), Bool.or(Bool.not(Nat.is_eq(ACCT.Accounts.epoch(st, th, provider), J.Json.get_nat(p, "epoch", 0n))),
+    Bool.or(String.is_empty(J.Json.get_str(p, "id", "")), String.eq(J.Json.get_str(p, "state", ""), "disconnected"))))
+
+def AccountsRpc.retire.step(ts: List<&2, M.Thread>, +st: M.State, +now: Nat) -> B.Step:
+  match ts:
+    case Nil{}: B.Step.none()
+    case +t <> rest:
+      B.Step.cat(Bool.pick(B.Step, Bool.and(B.Hub.running(t), AccountsRpc.retired(st, M.Thread.id(t))),
+        B.Step{[M.TurnChanged{M.Thread.id(t), M.Interrupted{}, now}, M.ActivityLogged{M.Thread.id(t), "account-retired:" ++ Nat.show(now), "error", "account", "This account's verified identity changed or disconnected. Check status and explicitly select an account to continue.", now}], [B.AgentStop{M.Thread.id(t)}]}, B.Step.none()), AccountsRpc.retire.step(rest, st, now))
+
+def Hub.accounts.retire(h: Hub, +now: Nat) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
+      Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, AccountsRpc.retire.step(ACCT.Accounts.threads(st), st, now))
+
+def Hub.accounts.found(h: Hub, +snapshot: String, +now: Nat) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
+      IO.bind(Hub, Hub, Hub.step(Hub{st, f, ls, cl, as, inbox, cfg, note}, B.Step{ACCT.Accounts.changes(st, now, snapshot), Nil{}}), h2 => IO.bind(Hub, Hub, Hub.accounts.retire(h2, now), h3 => Hub.accounts.broadcast(h3, snapshot)))
+
+def Hub.accounts.active(ts: List<&2, M.Thread>, +st: M.State, +profile: String) -> Bool:
+  match ts:
+    case Nil{}: False{}
+    case +t <> rest:
+      Bool.or(Bool.and(B.Hub.running(t), String.eq(ACCT.Accounts.id(st, M.Thread.id(t), M.Thread.provider(t)), profile)), Hub.accounts.active(rest, st, profile))
+
+def Hub.accounts.select.go(same: Bool, +st: M.State, +now: Nat, +client: U32, +rid: String, +th: String, +provider: String, +profile: String, +epoch: Nat, +count: Nat, +entries: List<&2, M.Entry>) -> B.Step:
+  match same:
+    case True{}: B.Step.outs([B.Reply.ok(client, rid)])
+    case False{}:
+      +seen = ACCT.Accounts.seen(st, th, provider, profile, epoch)
+      B.Step{List.concat(&2, M.Change, [B.Switch.old(M.Queue.items(st, th), th, now),
+        ACCT.Accounts.select(st, now, th, provider, profile, epoch, M.Switch.sess(B.Hub.thread(st, th)), count),
+        B.Switch.ctx(Nat.is_eq(count, seen), th, HD.Hand.prefix() ++ "switch:account:" ++ Nat.show(now), HD.Hand.text("Selected another account. Recent conversation since this account last participated (at most 128 items); use thread_read with threadId " ++ th ++ " for earlier history:", HD.Hand.newest(Nat.sub(count, seen), entries), th), now),
+        [M.ActivityLogged{th, "account:" ++ Nat.show(now), "info", "account", "Selected " ++ Bool.pick(String, String.is_empty(profile), "Default account", J.Json.get_str(ACCT.Accounts.profile(st, profile), "label", "account")) ++ "; conversation context is handed to this account with the next message.", now}]]),
+        [B.AgentStop{th}, B.Reply.ok(client, rid)]}
+
+def Hub.accounts.select.valid(valid: Bool, +st: M.State, +now: Nat, +client: U32, +rid: String, +th: String, +provider: String, +profile: String, +epoch: Nat, +count: Nat, +entries: List<&2, M.Entry>) -> B.Step:
+  match valid:
+    case False{}: B.Step.outs([B.Reply.err(client, rid, "Account selection is stale, unavailable, or a turn is running. Stop the turn and check account status first.")])
+    case True{}: Hub.accounts.select.go(Bool.and(String.eq(ACCT.Accounts.id(st, th, provider), profile), Nat.is_eq(ACCT.Accounts.epoch(st, th, provider), epoch)), st, now, client, rid, th, provider, profile, epoch, count, entries)
+
+def Hub.accounts.select.step(+st: M.State, +now: Nat, +client: U32, +rid: String, +p: J.Json, +count: Nat, +entries: List<&2, M.Entry>) -> B.Step:
+  +th = J.Json.get_str(p, "thread", "")
+  +provider = B.Hub.provider(B.Hub.thread(st, th))
+  +profile = J.Json.get_str(p, "profile", "")
+  +epoch = J.Json.get_nat(p, "epoch", 0n)
+  Hub.accounts.select.valid(Bool.and(Bool.and(B.Hub.owns(st, th), Bool.not(FR.Fr.is(th))), Bool.and(ACCT.Accounts.supported(provider), Bool.and(Bool.not(B.Hub.running(B.Hub.thread(st, th))),
+    Bool.and(String.eq(J.Json.get_str(p, "expected", ""), M.Setting.get(st, ACCT.Accounts.binding.key(th, provider), "")), Bool.or(String.is_empty(profile), ACCT.Accounts.ready(ACCT.Accounts.profile(st, profile), provider, epoch)))))), st, now, client, rid, th, provider, profile, epoch, count, entries)
+
+def Hub.accounts.request.allowed(allowed: Bool, h: Hub, +client: U32, +rid: String, +p: J.Json) -> IO(Hub):
+  match allowed h:
+    case False{} _: Hub.out(h, B.Reply.err(client, rid, "Stop this account's active turns before changing its login."))
+    case True{} Hub{st, f, ls, cl, as, +inbox, +cfg, note}:
+      do IO<Hub>:
+        IO.spawn(Unit, AccountsJob.request(inbox, Cfg.home(cfg), client, rid, J.Json.show(p)))
+        return Hub{st, f, ls, cl, as, inbox, cfg, note}
+
+def Hub.accounts.request(h: Hub, +client: U32, +rid: String, +p: J.Json) -> IO(Hub):
+  match h:
+    case Hub{+st, f, ls, cl, as, inbox, cfg, note}:
+      Hub.accounts.request.allowed(Bool.or(Bool.not(Bool.or(String.eq(J.Json.get_str(p, "op", ""), "login"), String.eq(J.Json.get_str(p, "op", ""), "disconnect"))),
+        Bool.not(Hub.accounts.active(ACCT.Accounts.threads(st), st, J.Json.get_str(p, "profile", "")))), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, rid, p)
 
 # Teaching a bot's browser (docs/teach.md)
 # ----------------------------------------
@@ -11532,7 +11726,7 @@ def Hub.mobile.join(h: Hub, +client: U32, out: Chan(Wire), since: Nat, origin: S
   match h:
     case Hub{st, f, ls, cl, as, +inbox, +cfg, note}:
       do IO<Hub>:
-        m : Maybe<&2, Client> <- Wire.text(Client{client, out, DK.Look.none(), OB.Cr.wait.set(OB.Cr.new(gen, False{}, True{}, 0n), True{}), sock, legacy, [MobileStart{since, origin, mode}]},
+        m : Maybe<&2, Client> <- Wire.text(Client{client, out, DK.Look.none(), OB.Cr.wait.set(OB.Cr.new(gen, False{}, True{}, 0n), True{}), sock, legacy, [MobileStart{since, origin, mode}], False{}},
           Hub.presentation.first(mode, gen, Cfg.thin.epoch(cfg)) )
         Hub.presentation.timeout(mode, inbox, client, gen)
         return Hub{st, f, ls, Clients.add(m, cl), as, inbox, cfg, note}
@@ -11542,13 +11736,13 @@ def Hub.mobile.join(h: Hub, +client: U32, out: Chan(Wire), since: Nat, origin: S
 # while the same writer still reports the presentation frames it sent.
 def Hub.mobile.history.begin(+n: Nat, +s0: Nat, +origin: String, +xs: List<&2, String>, h: Hub, c: Client) -> IO(Hub):
   match h c:
-    case Hub{st, f, +ls, cl, as, +inbox, +cfg, note} Client{+id, out, look, +cr, sock, legacy, _}:
+    case Hub{st, f, +ls, cl, as, +inbox, +cfg, note} Client{+id, out, look, +cr, sock, legacy, _, +accountCap}:
       +k = List.length(&2, String, OB.Join.next(xs))
       +more = Bool.or(Nat.is_lt(Nat.add(s0, k), n), Bool.not(List.is_empty(&2, FR.In, Far.mirrors(cfg))))
       do IO<Hub>:
         +info : String <- Info.shown(cfg)
         m : Maybe<&2, Client> <- Wire.offer(Client{id, out, look,
-          PRESENT.Session.history_credit(cr, Nat.add(s0, k), more, OB.Join.from(ls, n, Nat.add(s0, k))), sock, legacy, Nil{}},
+          PRESENT.Session.history_credit(cr, Nat.add(s0, k), more, OB.Join.from(ls, n, Nat.add(s0, k))), sock, legacy, Nil{}, accountCap},
           Hub.log_items(origin, cfg, s0, List.take(&2, String, xs, k), more, info), 0n)
         m1 : Maybe<&2, Client> <- Hub.join.live(more, m, cfg)
         Hub.join.more(more, inbox, id, OB.Cr.gen(cr))
@@ -11560,9 +11754,9 @@ def Hub.mobile.history.window(+n: Nat, +origin: String, +since: Nat, oldOrigin: 
 
 def Hub.mobile.history.start(h: Hub, c: Client) -> IO(Hub):
   match h c:
-    case Hub{st, f, +ls, cl, as, inbox, +cfg, note} Client{id, out, look, cr, sock, legacy, MobileStart{since, origin, _} <> _}:
+    case Hub{st, f, +ls, cl, as, inbox, +cfg, note} Client{id, out, look, cr, sock, legacy, MobileStart{since, origin, _} <> _, +accountCap}:
       Hub.mobile.history.window(LogCount.n(cfg), Hub.origin(ls), since, origin, ls,
-        Hub{st, f, ls, cl, as, inbox, cfg, note}, Client{id, out, look, cr, sock, legacy, Nil{}})
+        Hub{st, f, ls, cl, as, inbox, cfg, note}, Client{id, out, look, cr, sock, legacy, Nil{}, accountCap})
     case _ _:
       IO.pure(Hub, h)
 
@@ -11585,14 +11779,14 @@ def Hub.mobile.timeout(h: Hub, +client: U32, gen: U32) -> IO(Hub):
 
 def Client.presentation.mode(c: Client) -> String:
   match c:
-    case Client{_, _, _, _, _, _, MobileStart{_, _, mode} <> _}: mode
-    case Client{_, _, _, _, _, _, ThinStart{mode, _} <> _}: mode
+    case Client{_, _, _, _, _, _, MobileStart{_, _, mode} <> _, +accountCap}: mode
+    case Client{_, _, _, _, _, _, ThinStart{mode, _} <> _, +accountCap}: mode
     case _: ""
 
 def Client.presentation.resume(c: Client, resume: PRESENT.Resume) -> Client:
   match c resume:
-    case Client{id, out, look, cr, sock, legacy, MobileStart{_, _, mode} <> _} PRESENT.Cursor{since, origin}:
-      Client{id, out, look, cr, sock, legacy, [MobileStart{since, origin, mode}]}
+    case Client{id, out, look, cr, sock, legacy, MobileStart{_, _, mode} <> _, +accountCap} PRESENT.Cursor{since, origin}:
+      Client{id, out, look, cr, sock, legacy, [MobileStart{since, origin, mode}], accountCap}
     case _ _: c
 
 def Hub.presentation.history.valid(valid: Bool, h: Hub, +client: U32, +id: String, c: Client) -> IO(Hub):
@@ -11671,7 +11865,7 @@ def ThinContext.blank() -> ThinContext:
 
 def Client.thin.context(+c: Client) -> ThinContext:
   match c:
-    case Client{_, _, _, _, _, _, ThinStart{_, contexts} <> _}: Maybe.default(&2, ThinContext, List.head(&2, ThinContext, contexts), ThinContext.blank())
+    case Client{_, _, _, _, _, _, ThinStart{_, contexts} <> _, +accountCap}: Maybe.default(&2, ThinContext, List.head(&2, ThinContext, contexts), ThinContext.blank())
     case _: ThinContext.blank()
 
 def ThinContext.view(+c: ThinContext) -> String:
@@ -11712,8 +11906,8 @@ def ThinContext.with_control(c: ThinContext, control: Nat) -> ThinContext:
 
 def Client.thin.with(+c: Client, +context: ThinContext) -> Client:
   match c:
-    case Client{i, out, look, cr, sock, legacy, MobileStart{_, _, mode} <> _}: Client{i, out, look, cr, sock, legacy, [ThinStart{mode, [context]}]}
-    case Client{i, out, look, cr, sock, legacy, ThinStart{mode, _} <> _}: Client{i, out, look, cr, sock, legacy, [ThinStart{mode, [context]}]}
+    case Client{i, out, look, cr, sock, legacy, MobileStart{_, _, mode} <> _, +accountCap}: Client{i, out, look, cr, sock, legacy, [ThinStart{mode, [context]}], accountCap}
+    case Client{i, out, look, cr, sock, legacy, ThinStart{mode, _} <> _, +accountCap}: Client{i, out, look, cr, sock, legacy, [ThinStart{mode, [context]}], accountCap}
     case _: c
 
 def Hub.thin.error(h: Hub, +client: U32, +o: J.Json, +code: String) -> IO(Hub):
@@ -11733,9 +11927,9 @@ def Hub.thin.result(+result: J.Json, +p: J.Json, +view: String, +renderer: Strin
 # RPC/MCP, background refresh, rejected requests and oversized replies do not.
 def Cfg.telemetry.ui_action(+st: M.State, cfg: Cfg, +o: J.Json, delivered: Bool, now: Nat) -> Cfg:
   match cfg:
-    case Cfg{h, w, ho, p, pr, ds, v, nt, tm, views}:
+    case Cfg{h, w, ho, p, pr, ds, v, nt, tm, views, +accountInfo}:
       Cfg{h, w, ho, p, pr, ds, v, nt, TUI.Human.mark(True{}, delivered, st,
-        J.Json.get_str(o, "m", ""), J.Json.get_str(J.Json.get_obj(o, "p"), "action", ""), tm, now), views}
+        J.Json.get_str(o, "m", ""), J.Json.get_str(J.Json.get_obj(o, "p"), "action", ""), tm, now), views, accountInfo}
 
 def Hub.thin.deliver(+fits: Bool, h: Hub, +client: U32, +o: J.Json, +answer: J.Json, +size: Nat, +c: Client, +context: ThinContext, +now: Nat) -> IO(Hub):
   match fits h:
@@ -11745,12 +11939,25 @@ def Hub.thin.deliver(+fits: Bool, h: Hub, +client: U32, +o: J.Json, +answer: J.J
         +cl2 : List<&2, Client> <- Wire.to.view(Clients.swap(cl, client, Some{Client.thin.with(c, context)}), client, answer, size)
         return Hub{st, f, ls, cl2, as, inbox, Cfg.telemetry.ui_action(st, cfg, o, Maybe.is_some(&2, Client, Clients.get(cl2, client)), now), note}
 
+def AccountsRpc.picture.legacy(named: Bool, +result: J.Json) -> J.Json:
+  match named:
+    case False{}: result
+    case True{}:
+      +message : String = "This thread uses a named account. Use updated Backplane web or desktop to continue. Your draft is preserved."
+      TV.Obj.put(TV.Obj.put(TV.Obj.put(result, "shown", TV.Obj.put(J.Json.get_obj(result, "shown"), "error", J.Str{message})),
+        "overlay", TV.Obj.put(J.Json.get_obj(result, "overlay"), "j", TV.Obj.put(J.Json.get_obj(J.Json.get_obj(result, "overlay"), "j"), "error", J.Str{message}))), "cmds", J.Json.arr(Nil{}))
+
+def AccountsRpc.picture(supported: Bool, +st: M.State, +target: J.Json, +result: J.Json) -> J.Json:
+  match supported:
+    case True{}: TV.Obj.put(result, "accountBinding", J.Str{ACCT.Accounts.owner(st, TV.Target.thread(st, target))})
+    case False{}: AccountsRpc.picture.legacy(ACCT.Accounts.named(st, TV.Target.thread(st, target)), result)
+
 def Hub.thin.respond.full(h: Hub, +client: U32, +o: J.Json, +result: J.Json, +c: Client, +context: ThinContext, +now: Nat) -> IO(Hub):
   match h:
-    case Hub{st, f, ls, cl, as, inbox, +cfg, note}:
+    case Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
       +p = J.Json.get_obj(o, "p")
       +answer = (J.Json.obj([J.KV{"t", J.Str{"reply"}}, J.KV{"id", Maybe.default(&2, J.Json, J.Json.get(o, "id"), J.Null{})}, J.KV{"ok", J.Flag{True{}}},
-        J.KV{"result", Hub.thin.result(result, p, ThinContext.view(context), Bool.pick(String, String.eq(Client.thin.mode(c), "view-web"), "web", "mobile"), Cfg.thin.revision(cfg))}]))
+        J.KV{"result", Hub.thin.result(AccountsRpc.picture(Client.accounts(c), st, J.Json.get_obj(p, "target"), result), p, ThinContext.view(context), Bool.pick(String, String.eq(Client.thin.mode(c), "view-web"), "web", "mobile"), Cfg.thin.revision(cfg))}]))
       +size = J.Json.bytes(answer)
       Hub.thin.deliver(Nat.is_le(size, Bool.pick(Nat, String.eq(J.Json.get_str(o, "m", ""), "view.search"), 65536n, 262144n)),
         Hub{st, f, ls, cl, as, inbox, cfg, note}, client, o, answer, size, c, context, now)
@@ -12268,9 +12475,81 @@ def Hub.rpc.sec(sec: Bool, +o: J.Json, h: Hub, +client: U32, +text: String, +now
     case False{}:
       Hub.rpc.view(String.starts_with(J.Json.get_str(o, "m", ""), "view."), o, h, client, text, now)
 
-def Hub.rpc.parse(h: Hub, +client: U32, +text: String, +now: Nat) -> IO(Hub):
+def AccountsRpc.entries(xs: List<&2, THIN.Row>) -> List<&2, M.Entry>:
+  match xs:
+    case Nil{}: Nil{}
+    case r <> t: THIN.Row.entry(r) <> AccountsRpc.entries(t)
+
+def Hub.accounts.select.store(empty: Bool, h: Hub, +st: M.State, +now: Nat, +client: U32, +rid: String, +p: J.Json, +db: String) -> IO(Hub):
+  match empty:
+    case True{}: Hub.step(h, Hub.accounts.select.step(st, now, client, rid, p, M.Switch.count(st, J.Json.get_str(p, "thread", "")), HD.Hand.mine(B.Hub.entries(st), J.Json.get_str(p, "thread", ""))))
+    case False{}:
+      do IO<Hub>:
+        +thread : String = J.Json.get_str(p, "thread", "")
+        counts : List<&2, List<&2, String>> <- TSTO.Ts.query(db, "SELECT count(*) FROM entry WHERE thread = ?1", [thread], 1)
+        rows : List<&2, List<&2, String>> <- TSTO.Ts.query(db, "SELECT seq, ord, id, thread, src, kind, role, akind, substr(text,1,2000), at FROM entry WHERE thread = ?1 ORDER BY ord DESC LIMIT 128", [thread], 128)
+        Hub.step(h, Hub.accounts.select.step(st, now, client, rid, p, TSTO.Ts.nat(counts), AccountsRpc.entries(AQ.Q.rows(rows))))
+
+def Hub.accounts.select(h: Hub, +st: M.State, +now: Nat, +client: U32, +rid: String, +p: J.Json) -> IO(Hub):
+  match h:
+    case Hub{s, f, ls, cl, as, inbox, +cfg, note}:
+      Hub.accounts.select.store(String.is_empty(Cfg.thin.store(cfg)), Hub{s, f, ls, cl, as, inbox, cfg, note}, st, now, client, rid, p, Cfg.thin.store(cfg))
+
+def Hub.rpc.account.kind(select: Bool, h: Hub, +st: M.State, +client: U32, +rid: String, +p: J.Json, +now: Nat) -> IO(Hub):
+  match select:
+    case True{}: Hub.accounts.select(h, st, now, client, rid, p)
+    case False{}: Hub.accounts.request(h, client, rid, p)
+
+def AccountsRpc.default.step(ok: Bool, +client: U32, +rid: String, +provider: String, +profile: String, +epoch: Nat, +now: Nat) -> B.Step:
+  match ok:
+    case False{}: B.Step.outs([B.Reply.err(client, rid, "Check and reconnect this account before making it the default.")])
+    case True{}: B.Step.reply(client, rid, [M.SettingSet{"account.default." ++ provider, ACCT.Accounts.binding.show(profile, epoch), now}])
+
+def Hub.rpc.account.default(default: Bool, select: Bool, h: Hub, +st: M.State, +client: U32, +rid: String, +p: J.Json, +now: Nat) -> IO(Hub):
+  match default:
+    case False{}: Hub.rpc.account.kind(select, h, st, client, rid, p, now)
+    case True{}:
+      +provider = J.Json.get_str(p, "provider", "")
+      +profile = J.Json.get_str(p, "profile", "")
+      +epoch = J.Json.get_nat(p, "epoch", 0n)
+      Hub.step(h, AccountsRpc.default.step(Bool.and(ACCT.Accounts.supported(provider), Bool.or(Bool.and(String.is_empty(profile), Nat.is_eq(epoch, 0n)), ACCT.Accounts.ready(ACCT.Accounts.profile(st, profile), provider, epoch))), client, rid, provider, profile, epoch, now))
+
+def Hub.rpc.accounts(account: Bool, h: Hub, +client: U32, +text: String, +now: Nat, +o: J.Json) -> IO(Hub):
+  match account h:
+    case False{} _: Hub.rpc.sec(String.starts_with(J.Json.get_str(o, "m", ""), "secret."), o, h, client, text, now)
+    case True{} Hub{+st, f, ls, cl, as, inbox, cfg, note}:
+      Hub.rpc.account.default(String.eq(J.Json.get_str(o, "m", ""), "accounts.default"), String.eq(J.Json.get_str(o, "m", ""), "accounts.select"), Hub{st, f, ls, cl, as, inbox, cfg, note}, st, client, J.Json.as_raw(J.Json.get(o, "id"), "0"), J.Json.get_obj(o, "p"), now)
+
+def Hub.state.only(h: Hub) -> M.State:
+  match h:
+    case Hub{st, _, _, _, _, _, _, _}: st
+
+def AccountsRpc.reserved(+o: J.Json) -> Bool:
+  +key = J.Json.get_str(J.Json.get_obj(o, "p"), "key", "")
+  Bool.and(String.eq(J.Json.get_str(o, "m", ""), "setting.set"), Bool.or(String.starts_with(key, "account."), String.starts_with(key, "accounts.")))
+
+def Hub.rpc.parse.accepted(h: Hub, +client: U32, +text: String, +now: Nat) -> IO(Hub):
   +o = Maybe.default(&2, J.Json, J.Json.parse(text), J.Null{})
-  Hub.rpc.sec(String.starts_with(J.Json.get_str(o, "m", ""), "secret."), o, h, client, text, now)
+  Hub.rpc.accounts(Bool.or(String.eq(J.Json.get_str(o, "m", ""), "accounts"), Bool.or(String.eq(J.Json.get_str(o, "m", ""), "accounts.select"), String.eq(J.Json.get_str(o, "m", ""), "accounts.default"))), h, client, text, now, o)
+
+def Hub.rpc.account.gate(allowed: Bool, h: Hub, +client: U32, +text: String, +now: Nat, +rid: String) -> IO(Hub):
+  match allowed:
+    case True{}: Hub.rpc.parse.accepted(h, client, text, now)
+    case False{}: Hub.out(h, B.Reply.err(client, rid, "This thread uses a named account. Use updated Backplane web or desktop to continue; your draft is preserved."))
+
+def Hub.rpc.account.client(mc: Maybe<&2, Client>, h: Hub, +client: U32, +text: String, +now: Nat, +o: J.Json) -> IO(Hub):
+  match mc h:
+    case Some{+c} Hub{+st, f, ls, cl, as, inbox, cfg, note}:
+      +offer = Bool.and(String.eq(Client.thin.mode(c), "view-web"), TVW.Wire.version(J.Json.get_obj(J.Json.get_obj(o, "p"), "accountProfiles")))
+      +cap = Bool.or(Client.accounts(c), offer)
+      Hub.rpc.account.gate(Bool.and(Bool.not(AccountsRpc.reserved(o)), Bool.and(ACCT.Accounts.request.current(st, o, TV.Target.thread(st, ThinContext.target(Client.thin.context(c)))), ACCT.Accounts.client.allowed(cap, st, o, TV.Target.thread(st, ThinContext.target(Client.thin.context(c)))))),
+        Hub{st, f, ls, Clients.swap(cl, client, Some{Client.accounts.with(c, cap)}), as, inbox, cfg, note}, client, text, now, J.Json.as_raw(J.Json.get(o, "id"), "0"))
+    case _ Hub{+st, f, ls, cl, as, inbox, cfg, note}: Hub.rpc.account.gate(Bool.and(Bool.not(AccountsRpc.reserved(o)), ACCT.Accounts.request.current(st, o, "")), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, text, now, J.Json.as_raw(J.Json.get(o, "id"), "0"))
+
+def Hub.rpc.parse(h: Hub, +client: U32, +text: String, +now: Nat) -> IO(Hub):
+  match h:
+    case Hub{st, f, ls, +cl, as, inbox, cfg, note}:
+      Hub.rpc.account.client(Clients.get(cl, client), Hub{st, f, ls, cl, as, inbox, cfg, note}, client, text, now, ACCT.Accounts.parse(text))
 
 # Thin requests are bounded before JSON parsing. Oversized packets close only
 # that captured client; no malformed request can trigger compatibility replay.
@@ -12352,10 +12631,22 @@ def Hub.line.m(m: Maybe<&2, ARun>, h: Hub, +thread: String, +line: String, +now:
     case None{}:
       Hub.line.k(Hub.state(h), thread, line, now)
 
-def Hub.line(h: Hub, +thread: String, +line: String, +now: Nat) -> IO(Hub):
+def Hub.accounts.observe(has: Bool, h: Hub, +thread: String, +reading: String, +now: Nat) -> IO(Hub):
+  match has h:
+    case False{} _: IO.pure(Hub, h)
+    case True{} Hub{+st, f, ls, cl, as, inbox, +cfg, note}:
+      do IO<Hub>:
+        snapshot : String <- ACFX.AccountsFx.observe(Cfg.home(cfg), ACCT.Accounts.id(st, thread, "claude"), Nat.show(ACCT.Accounts.epoch(st, thread, "claude")), reading)
+        Hub.accounts.found(Hub{st, f, ls, cl, as, inbox, cfg, note}, snapshot, now)
+
+def Hub.line.current(h: Hub, +thread: String, +line: String, +now: Nat) -> IO(Hub):
   match h:
     case Hub{st, f, ls, cl, +as, inbox, cfg, note}:
       Hub.line.m(Agents.run(as, thread), Hub{st, f, ls, cl, as, inbox, cfg, note}, thread, line, now)
+
+def Hub.line(h: Hub, +thread: String, +line: String, +now: Nat) -> IO(Hub):
+  +reading = J.Json.show(J.Json.get_obj(J.Json.get_obj(ACCT.Accounts.parse(line), "rate_limit_info"), "unifiedWindows"))
+  IO.bind(Hub, Hub, Hub.accounts.observe(Bool.not(String.eq(reading, "null")), h, thread, reading, now), h2 => Hub.line.current(h2, thread, line, now))
 
 def Agent.gone(r: Maybe<&2, ARun>, +st: M.State, +now: Nat, +th: String, +code: U32, +why: String) -> B.Step:
   match r:
@@ -13678,7 +13969,7 @@ def Far.view.relay(m: Maybe<&1, Msg>, +reply: Chan(List<&2, U32>)) -> IO(Unit):
 def Far.view.git(+st: M.State, +job: String, +thread: String, +cwd: String, +a: String, +b: String, +home: String, +reply: Chan(List<&2, U32>)) -> IO(Unit):
   do IO<Unit>:
     +pin : Chan(Msg) <- Chan.new(Msg, 8)
-    Jobs.run(AG.Text.of(st), job, pin, 0, "0", thread, cwd, a, b, home)
+    Jobs.run(TextScope.of(st, home, thread), job, pin, 0, "0", thread, cwd, a, b, home)
     ok : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, pin, Announce{""})
     m : Maybe<&1, Msg> <- Chan.recv(Msg, pin)
     Far.view.relay(m, reply)
@@ -15758,6 +16049,8 @@ def Msg.kind(m: Msg) -> String:
     case KProbe{_}: "kicad_probe"
     case KFound{_, _}: "kicad_health"
     case KiServers{_}: "kicad_servers"
+    case AccountsFound{_}:
+      "accounts"
     case ModelsFound{_, _}:
       "models"
     case OcFound{_}:
@@ -16773,7 +17066,7 @@ def Hub.join.here(h: Hub, +client: U32, +out: Chan(Wire), +gen: U32, +now: Nat) 
     case Hub{+st, f, +ls, +cl, as, inbox, +cfg, +note}:
       do IO<Hub>:
         +info : String <- Info.shown(cfg)
-        m : Maybe<&2, Client> <- Hub.join.state(Client{client, out, DK.Look.none(), OB.Cr.new(gen, True{}, False{}, 0n), 0, False{}, Nil{}}, WState{M.State.private(st), Hub.log_msg.k(0n, ls, cfg, 0n, info)})
+        m : Maybe<&2, Client> <- Hub.join.state(Client{client, out, DK.Look.none(), OB.Cr.new(gen, True{}, False{}, 0n), 0, False{}, Nil{}, False{}}, WState{M.State.private(st), Hub.log_msg.k(0n, ls, cfg, 0n, info)})
         m1 : Maybe<&2, Client> <- Far.join.here(Far.mirrors(cfg), m)
         m2 : Maybe<&2, Client> <- Wire.text.m(m1, LV.Live.msg(Live.of(cfg)))
         m3 : Maybe<&2, Client> <- Hub.join.notes(m2, note, Desk.join(DK.Desk.text(Clients.looks(cl), now)))
@@ -16788,7 +17081,7 @@ def Hub.join.k(+n: Nat, +s0: Nat, +xs: List<&2, String>, h: Hub, +client: U32, +
       +more = Bool.or(Nat.is_lt(Nat.add(s0, k), n), Bool.not(List.is_empty(&2, FR.In, Far.mirrors(cfg))))
       do IO<Hub>:
         +info : String <- Info.shown(cfg)
-        m : Maybe<&2, Client> <- Wire.offer(Client{client, out, DK.Look.none(), OB.Cr.rest.set(OB.Cr.wait.set(OB.Cr.new(gen, U32.is_eq(client, 0), more, Nat.add(s0, k)), more), OB.Join.from(ls, n, Nat.add(s0, k))), sock, legacy, Nil{}},
+        m : Maybe<&2, Client> <- Wire.offer(Client{client, out, DK.Look.none(), OB.Cr.rest.set(OB.Cr.wait.set(OB.Cr.new(gen, U32.is_eq(client, 0), more, Nat.add(s0, k)), more), OB.Join.from(ls, n, Nat.add(s0, k))), sock, legacy, Nil{}, False{}},
           Hub.log_items(origin, cfg, s0, List.take(&2, String, xs, k), more, info), 0n)
         m1 : Maybe<&2, Client> <- Hub.join.live(more, m, cfg)
         m2 : Maybe<&2, Client> <- Hub.join.notes(m1, note, Desk.join(DK.Desk.text(Clients.looks(cl), now)))
@@ -16821,8 +17114,8 @@ def ThinRead.jobs(cs: List<&2, J.Json>, +client: U32, +gen: U32, +view: String, 
 
 def Client.thin.drain(+c: Client) -> ThinDrained:
   match c:
-    case Client{+id, out, look, +cr, sock, legacy, ThinStart{mode, ThinContext{hub, cid, +target, +view, revision, anchor, +actor <> _, control} <> _} <> _}:
-      ThinDrained{[Client{id, out, look, cr, sock, legacy, [ThinStart{mode, [ThinContext{hub, cid, target, view, revision, anchor, [TA.Actor.clean(actor)], control}]}]}],
+    case Client{+id, out, look, +cr, sock, legacy, ThinStart{mode, ThinContext{hub, cid, +target, +view, revision, anchor, +actor <> _, control} <> _} <> _, +accountCap}:
+      ThinDrained{[Client{id, out, look, cr, sock, legacy, [ThinStart{mode, [ThinContext{hub, cid, target, view, revision, anchor, [TA.Actor.clean(actor)], control}]}], accountCap}],
         ThinRead.jobs(TA.Actor.queued(actor), id, OB.Cr.gen(cr), view, target), TA.Actor.dirty(actor)}
     case _: ThinDrained{[c], Nil{}, False{}}
 
@@ -17060,6 +17353,8 @@ def Hub.handle(h: Hub, m: Msg, +now: Nat) -> IO(Hub):
     case KProbe{force}: Hub.kcheck(h, force)
     case KFound{setting, rt}: Hub.kfound(h, setting, rt)
     case KiServers{text}: Hub.kiservers(h, text)
+    case AccountsFound{snapshot}:
+      Hub.accounts.found(h, snapshot, now)
     case ModelsFound{ms, mt}:
       Hub.models(h, ms, mt)
     case OcFound{text}:
@@ -17223,6 +17518,7 @@ def Main.headless(h: Hub, +inbox: Chan(Msg), +cfg: Cfg, +tok: Chan(Unit), front:
     IO.spawn(Unit, Beat.loop(Fuel.forever(), inbox))
     IO.spawn(Unit, Heart.loop(Fuel.forever(), inbox))
     Refresh.start(inbox, cfg)
+    IO.spawn(Unit, AccountsJob.loop(Fuel.forever(), inbox, Cfg.home(cfg), ""))
     IO.spawn(Unit, Od.resume(inbox, Cfg.home(cfg)))
     Self.post(inbox, KProbe{True{}})
     IO.spawn(Unit, Hub.loop(Fuel.forever(), h, inbox, tok))
@@ -17237,6 +17533,7 @@ def Main.serve(l: Listener, h: Hub, +web: String, +inbox: Chan(Msg), +cfg: Cfg, 
     IO.spawn(Unit, Beat.loop(Fuel.forever(), inbox))
     IO.spawn(Unit, Heart.loop(Fuel.forever(), inbox))
     Refresh.start(inbox, cfg)
+    IO.spawn(Unit, AccountsJob.loop(Fuel.forever(), inbox, Cfg.home(cfg), ""))
     IO.spawn(Unit, Od.resume(inbox, Cfg.home(cfg)))
     Self.post(inbox, KProbe{True{}})
     Machines.start(inbox, Cfg.port(cfg))
@@ -17300,7 +17597,7 @@ def Thin.warm(+c: ThinCache, +inbox: Chan(Msg)) -> IO(Unit):
 
 def Main.opened(r: Result<&1, &1, U32 & String, File>, +st: M.State, ls: List<&2, String>, cfg: Cfg, need: Bool, front: Chan(Msg) -> IO(Unit), t0: U32) -> IO(Unit):
   match r cfg:
-    case Done{f} Cfg{+home, +web, +host, +port, +pr, +ds, +v, nt0, +tcfg, +views}:
+    case Done{f} Cfg{+home, +web, +host, +port, +pr, +ds, +v, nt0, +tcfg, +views, +accountInfo}:
       do IO<Unit>:
         +inbox : Chan(Msg) <- Chan.new(Msg, 4096)
         +pri : Chan(Msg) <- Chan.new(Msg, 4096)
@@ -17337,12 +17634,12 @@ def Main.opened(r: Result<&1, &1, U32 & String, File>, +st: M.State, ls: List<&2
         # the agents a restart in place handed off are kept before anything
         # else can reach the hub (adopt.bend); recovery then leaves them be
         +now : Nat <- Now.nat()
-        h0 : Hub <- Hub.adopt(Hub{st, f, ls, Nil{}, Nil{}, inbox, Cfg{home, web, host, port, pr, ds, v, nt, tcfg, views}, ""}, now)
+        h0 : Hub <- Hub.adopt(Hub{st, f, ls, Nil{}, Nil{}, inbox, Cfg{home, web, host, port, pr, ds, v, nt, tcfg, views, ""}, ""}, now)
         t2 : U32 <- PS.Perf.span("boot.adopt", t1)
         l : Result<&1, &1, U32 & String, Listener> <- H.Net.listen(host, port)
         t3 : U32 <- PS.Perf.span("boot.listen", t2)
         Thin.warm(ThinCache.first(views), inbox)
-        Main.listened(l, h0, web, pri, host ++ ":" ++ U32.show(port), need, Cfg{home, web, host, port, pr, ds, v, nt, tcfg, views}, tok, front)
+        Main.listened(l, h0, web, pri, host ++ ":" ++ U32.show(port), need, Cfg{home, web, host, port, pr, ds, v, nt, tcfg, views, ""}, tok, front)
     case Fail{e} _:
       Main.nolog(e)
 
@@ -17386,7 +17683,7 @@ def Boot.state(+home: String, warm: Maybe<&2, HB.Warm>) -> IO(HB.Hot):
 
 def Main.boot(cfg: Cfg, need: Bool, front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
   match cfg:
-    case Cfg{+home, w, h, +p, pr, ds, v, nt, +tcfg, +views}:
+    case Cfg{+home, w, h, +p, pr, ds, v, nt, +tcfg, +views, +accountInfo}:
       do IO<Unit>:
         # the home's lock first: a second hub ends before the event store
         +held : String <- Lock.take(home, p)
@@ -17428,7 +17725,7 @@ def Main.boot(cfg: Cfg, need: Bool, front: Chan(Msg) -> IO(Unit)) -> IO(Unit):
         +off : String <- Env.get("BACKPLANE_NO_UPDATE", "")
         +ai : String <- Env.get("APPIMAGE", "")
         +tc : List<&2, TI.TmCfg> <- TI.Tio.config(TI.Tio.sb(tcfg))
-        finalCfg : Cfg = Cfg.with_managed(Cfg.with_models(Cfg.with_bn(Cfg.with_token(Cfg.with_rt(Cfg{home, w, h, p, pr, ds, v, nt, tc, views}, rt), tok), BN.Bn.with_dir(BN.Bn.empty(), BN.Bn.cache.load(bc, BO.World.peers(M.State.bots(st))))), BT.Cache.json(mc), BT.Cache.text(mc)), SV.Chan.managed(off, ai))
+        finalCfg : Cfg = Cfg.with_managed(Cfg.with_models(Cfg.with_bn(Cfg.with_token(Cfg.with_rt(Cfg{home, w, h, p, pr, ds, v, nt, tc, views, accountInfo}, rt), tok), BN.Bn.with_dir(BN.Bn.empty(), BN.Bn.cache.load(bc, BO.World.peers(M.State.bots(st))))), BT.Cache.json(mc), BT.Cache.text(mc)), SV.Chan.managed(off, ai))
         +cfg1 : Cfg = LogCount.init(finalCfg, ls)
         Log.info("log count " ++ Nat.show(LogCount.n(cfg1)))
         t5 : U32 <- PS.Perf.span("boot.cfg", t4)
