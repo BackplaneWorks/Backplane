@@ -245,10 +245,14 @@ def View.row.m.loc(+lc: I.Loc, +id: String, +title: String, +ago: String, +badge
 def View.row.m(+id: String, +title: String, +ago: String, +badge: String, +dot: String, +sel: String, +movable: Bool) -> D.Node:
   View.row.m.loc(I.En{}, id, title, ago, badge, dot, sel, movable)
 
-def View.row(+lc: I.Loc, +t: M.Thread, +ix: U.SIx, +st: M.State, +sel: String, +now: Nat, +movable: Bool, +snoozed: Bool) -> D.Node:
+# (settled: a settled thread among the live rows, U.Side.note)
+def View.row.s(+lc: I.Loc, +t: M.Thread, +ix: U.SIx, +st: M.State, +sel: String, +now: Nat, +movable: Bool, snoozed: Bool, settled: Bool) -> D.Node:
   match t:
     case M.Thread{+id, _, +title, _, +a, _, _, _, _, _, _, pinned, _, _, _, _, _, _, _, _, _}:
-      View.row.m.p.loc(lc, pinned, id, U.Label.title(st, id, TTL.Title.shown(lc, title)), Bool.pick(String, snoozed, I.I18n.ago(lc, U.Side.until(st, id), now), I.I18n.ago(lc, now, a)), View.sub.badge(lc, SB.Subs.count.ix(ix, st, id)), SG.Signal.name(U.Side.signal.ix(ix, t)), sel, movable)
+      View.row.m.p.loc(lc, pinned, id, U.Label.title(st, id, TTL.Title.shown(lc, title)), U.Side.note(lc, snoozed, settled, U.Side.until(st, id), now, a), View.sub.badge(lc, SB.Subs.count.ix(ix, st, id)), SG.Signal.name(U.Side.signal.ix(ix, t)), sel, movable)
+
+def View.row(+lc: I.Loc, +t: M.Thread, +ix: U.SIx, +st: M.State, +sel: String, +now: Nat, +movable: Bool, +snoozed: Bool) -> D.Node:
+  View.row.s(lc, t, ix, st, sel, now, movable, snoozed, False{})
 
 # Expanders are separate buttons beside the selection target: keyboard
 # activation never opens a thread accidentally, and every row has one.
@@ -265,18 +269,20 @@ def View.tree.create(show: Bool, +id: String, +depth: Nat) -> List<&2, D.Node>:
         [D.Dom.button("", "thread-child", id, "Create a conversation beneath this thread", "+ New subthread")]}]
     case False{}: Nil{}
 
-def View.tree.rows(+lc: I.Loc, rs: List<&2, ST.TRow>, +ix: U.SIx, +st: M.State, +sel: String, +now: Nat, +movable: Bool) -> List<&2, D.Node>:
+# (live: the rows of a live shelf, pinned or active, where a settled
+# thread's row says so)
+def View.tree.rows(+lc: I.Loc, rs: List<&2, ST.TRow>, +ix: U.SIx, +st: M.State, +sel: String, +now: Nat, +movable: Bool, +live: Bool) -> List<&2, D.Node>:
   match rs:
     case Nil{}: Nil{}
     case ST.TRow{+t, +depth, +expanded, +children} <> rest:
       +id = M.Thread.id(t)
       +indent = Bool.pick(Nat, Nat.is_gt(depth, 4n), 4n, depth)
       List.concat(&2, D.Node, [[D.El{"div", "tree:" ++ id, [D.At{"class", "thread-tree-row"}, D.At{"style", "--depth:" ++ Nat.show(indent)}],
-        [View.tree.expander(id, expanded, children), View.row(lc, t, ix, st, sel, now, Bool.and(movable, Nat.is_eq(depth, 0n)), M.Snooze.on(now, U.Side.until(st, id)))]}],
-        View.tree.create(Bool.and(expanded, U.ThreadTree.can_create(st, id)), id, indent), View.tree.rows(lc, rest, ix, st, sel, now, movable)])
+        [View.tree.expander(id, expanded, children), View.row.s(lc, t, ix, st, sel, now, Bool.and(movable, Nat.is_eq(depth, 0n)), M.Snooze.on(now, U.Side.until(st, id)), Bool.and(live, U.Side.settled(t)))]}],
+        View.tree.create(Bool.and(expanded, U.ThreadTree.can_create(st, id)), id, indent), View.tree.rows(lc, rest, ix, st, sel, now, movable, live)])
 
 def View.rows_in(+lc: I.Loc, ts: List<&2, M.Thread>, +ix: U.SIx, +st: M.State, +sel: String, +now: Nat, +movable: Bool, +snoozed: Bool) -> List<&2, D.Node>:
-  View.tree.rows(lc, ST.Tree.rows(st, ts, sel), ix, st, sel, now, movable)
+  View.tree.rows(lc, ST.Tree.rows(st, ts, sel), ix, st, sel, now, movable, movable)
 
 def View.rows_of(+lc: I.Loc, ts: List<&2, M.Thread>, +ix: U.SIx, +st: M.State, +sel: String, +now: Nat) -> List<&2, D.Node>:
   View.rows_in(lc, ts, ix, st, sel, now, False{}, False{})

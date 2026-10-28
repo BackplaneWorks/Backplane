@@ -3393,6 +3393,38 @@ def Side.phase.ix(+ix: SIx, +st: M.State, t: M.Thread) -> M.Phase:
       Side.phase.ix.k(st, ix, id, turn, pending, SIx.open(ix, id))
 
 # when a thread's snooze ends (0: not snoozed)
+def Side.wakes.span(l: I.Loc, +d: Nat) -> String:
+  match l:
+    case I.Ja{}: I.I18n.dur(I.Ja{}, d)
+    case _: I.I18n.ago(I.En{}, d, 0n)
+
+def Side.wakes.k(+l: I.Loc, soon: Bool, +d: Nat) -> String:
+  match soon:
+    case True{}: MSG.T.sidebar.wakes.soon(l)
+    case False{}: MSG.T.sidebar.wakes(l, Side.wakes.span(l, d))
+
+# a snoozed row's time says when it wakes ("wakes in 5m"), never an age
+def Side.wakes(+l: I.Loc, +until: Nat, +now: Nat) -> String:
+  Side.wakes.k(l, Nat.is_lt(Nat.sub(until, now), 60n), Nat.sub(until, now))
+
+def Side.settled.k(sh: M.Shelf) -> Bool:
+  match sh:
+    case M.Settled{}: True{}
+    case _: False{}
+
+# a thread that is settled though it shows among the live rows (a parent a
+# live subthread keeps there): its row says "settled" where its age goes
+def Side.settled(+t: M.Thread) -> Bool:
+  Side.settled.k(M.Shelf.of(t))
+
+# a row's note where its age goes: when a snoozed row wakes, "settled" on a
+# live shelf's settled row, else its age
+def Side.note(+l: I.Loc, snoozed: Bool, settled: Bool, +until: Nat, +now: Nat, +at: Nat) -> String:
+  match snoozed settled:
+    case True{} _: Side.wakes(l, until, now)
+    case False{} True{}: MSG.T.sidebar.row.settled(l)
+    case False{} False{}: I.I18n.ago(l, now, at)
+
 def Side.until(+st: M.State, +id: String) -> Nat:
   M.Nav.until(M.Nav.get(M.State.navs(st), id))
 
@@ -3851,12 +3883,20 @@ def Side.sel.k(hit: Bool, t: M.Thread, rest: List<&2, M.Thread>) -> List<&2, M.T
     case False{}:
       rest
 
+# the rows a shut shelf still shows: the open thread's, and a pinned one
+# (so a pin is never folded out of sight)
 def Side.sel(ts: List<&2, M.Thread>, +sel: String) -> List<&2, M.Thread>:
   match ts:
     case Nil{}:
       Nil{}
     case +t <> r:
-      Side.sel.k(Bool.and(Bool.not(String.is_empty(sel)), String.eq(M.Thread.id(t), sel)), t, Side.sel(r, sel))
+      Side.sel.k(Bool.or(Active.pinned(t), Bool.and(Bool.not(String.is_empty(sel)), String.eq(M.Thread.id(t), sel))), t, Side.sel(r, sel))
+
+# a shut fold's words: its name and count, and how many of its rows show
+# under it anyway (the open thread stays on screen: Side.sel, Active.sel),
+# so a shut chevron over a row never reads as a contradiction
+def Shelf.words(+lc: I.Loc, +label: String, +shown: Nat) -> String:
+  Bool.pick(String, Nat.is_eq(shown, 0n), label, MSG.T.sidebar.shelf.shown(lc, label, Nat.show(shown)))
 
 def Active.sel.k(hit: Bool, a: ARow, rest: List<&2, ARow>) -> List<&2, ARow>:
   match hit:
