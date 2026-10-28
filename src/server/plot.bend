@@ -1203,10 +1203,11 @@ def Sub.keeps(ss: List<&2, Sub>, +client: U32, +keys: List<&2, String>) -> List<
       Sub.keep(Bool.and(U32.is_eq(Sub.client(s), client), Bool.not(Keys.has(keys, Sub.key.of(s)))), s, Sub.keeps(t, client, keys))
 
 # Reading ahead
-# A board shown (on any page or phone) has its 3D model prepared at low
-# priority, so the 3D view finds it ready: one not kept yet, or kept from
-# an older version of the board, is read (one being read, or watched and
-# so polled, is left alone); it is kept as a model no view watches.
+# A live board shown (on any page or phone; not one in a commit or a
+# comparison) has its 3D model prepared at low priority, so the 3D view
+# finds it ready: one not kept yet, or kept from an older version of the
+# board, is read (one being read, or watched and so polled, is left
+# alone); it is kept as a model no view watches.
 
 def Pv.warm.k(changed: Bool, s: Src, +q: Chan(PMsg), +dir: String) -> IO(Src):
   match changed s:
@@ -1260,7 +1261,7 @@ def Pv.watch.go(keep: Bool, st: PSt, +client: U32, +kind: U32, +root: String, +p
     st2 : PSt <- Pv.watch.k(String.is_empty(file), keep, st, client, kind, Src.key(kind, root, path), file, q, out, dir)
     Bool.pick(IO(Unit), U32.is_eq(kind, 1), IO.spawn(Unit, Pv.tree(client, root, path, tree, n, out)), IO.pure(Unit, Unit{}))
     st3 : PSt <- Pv.watch.board(Bool.and(Pv.solid.kind(kind), String.ends_with(file, ".kicad_pcb")), st2, client, root, path, file, q, out, dir)
-    Pv.warm(Bool.and(U32.is_eq(kind, 0), String.ends_with(file, ".kicad_pcb")), st3, root, path, file, q, dir)
+    Pv.warm(Bool.and(U32.is_eq(kind, 0), Bool.and(Pv.live(file), String.ends_with(file, ".kicad_pcb"))), st3, root, path, file, q, dir)
 
 def Sub.mine(+s: Sub, +client: U32, +key: String) -> Bool:
   Bool.and(U32.is_eq(Sub.client(s), client), Sub.is(s, key))
