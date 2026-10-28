@@ -632,6 +632,41 @@ button.chip:hover { border-color: var(--bad); color: var(--bad); }
 .prow:hover, .prow.sel { background: var(--sel, rgba(255,255,255,.06)); }
 .prow.act { color: var(--accent); }
 .prow.off { color: var(--faint, var(--dim)); cursor: default; }
+/* the hub's dialogs (host.js's resultPanel: Search threads, a message's
+   rest): the page dimmed as behind the project picker, a head with the
+   title and its × at the far end */
+.shade.dim { background: rgba(0,0,0,.55); }
+.picker .phead { display: flex; align-items: center; gap: 8px; padding: 6px 6px 0 14px; color: var(--dim); font-size: calc(12px * var(--text-scale, 100) / 100); }
+.picker .phead .ptitle { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.picker .phead button { background: none; border: 0; color: var(--dim); padding: 2px 8px; font-size: calc(16px * var(--text-scale, 100) / 100); line-height: 1; }
+.picker .phead button:hover { color: var(--text); }
+/* Search threads (host.js's showThinSearch): results grouped under their
+   project / thread, each its snippet (lines kept, the query's words lit)
+   and its time; the chosen one has the accent edge, as in the palette */
+.picker.search-threads { width: min(720px, calc(100vw - 24px)); border-color: var(--accent); box-shadow: 0 12px 50px #000a; }
+.search-threads .find-note { padding: 0 14px 8px; color: var(--faint); font-size: calc(12px * var(--text-scale, 100) / 100); }
+.search-threads .find-note:empty { display: none; }
+.find-rows { min-height: 0; overflow-y: auto; overscroll-behavior: contain; border-top: 1px solid var(--line); padding-bottom: 4px; }
+.find-rows:empty { display: none; }
+.find-group { display: flex; align-items: baseline; padding: 8px 14px 2px; color: var(--faint); font-family: var(--mono); font-size: calc(11px * var(--text-scale, 100) / 100); white-space: nowrap; overflow: hidden; }
+.find-group .find-project { flex: none; text-transform: uppercase; letter-spacing: .04em; }
+.find-group .find-sep { flex: none; padding: 0 6px; }
+.find-group .find-thread { color: var(--dim); min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.find-group .find-here { flex: none; margin-left: 10px; color: var(--accent); }
+.find-hit { display: flex; align-items: flex-start; gap: 12px; width: 100%; text-align: left; padding: 5px 14px 5px 24px; background: none; border: 0; border-left: 2px solid transparent; color: var(--text); font-family: var(--mono); font-size: calc(12px * var(--text-scale, 100) / 100); line-height: 1.45; }
+.find-hit:hover { border-color: transparent; background: var(--sel, rgba(255,255,255,.06)); }
+.find-hit.on { color: var(--text); background: var(--sel, rgba(255,255,255,.06)); border-left-color: var(--accent); }
+.find-hit .find-snip { flex: 1; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden; }
+.find-hit mark { background: color-mix(in srgb, var(--accent) 30%, transparent); color: var(--text); padding: 0 1px; }
+.find-hit .find-when { flex: none; color: var(--faint); font-size: calc(11px * var(--text-scale, 100) / 100); }
+.find-more { display: block; width: 100%; text-align: left; margin-top: 4px; padding: 7px 14px; background: none; border: 0; border-top: 1px solid var(--line); color: var(--accent); }
+.find-more:hover { text-decoration: underline; }
+.picker.search-threads footer { flex: none; padding: 6px 14px; border-top: 1px solid var(--line); color: var(--faint); font-size: calc(11px * var(--text-scale, 100) / 100); }
+@media (max-width: 760px) {
+  .picker.search-threads { top: 8px; max-height: calc(100dvh - 16px); }
+  .find-hit { padding-left: 14px; }
+  .picker.search-threads footer { display: none; }
+}
 
 .machines { display: flex; flex-direction: column; gap: 4px; padding: 6px 12px; }
 .machines .machine { background: none; border: 1px solid var(--line); padding: 2px 8px; color: var(--dim); }
@@ -875,7 +910,11 @@ button.mic.starting, button.mic.stopping { border-color: var(--bad); color: var(
 .act.step button.step { display: flex; align-items: center; gap: 6px; background: none; border: 0; padding: 0; color: var(--accent); font-family: var(--mono); font-size: calc(12px * var(--text-scale, 100) / 100); max-width: 860px; }
 .act.step button.step span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .act.step button.step:hover { text-decoration: underline; }
-.jumped { animation: jumped 2.4s ease-out; box-shadow: inset 2px 0 0 var(--accent); }
+/* its accent edge just left of the entry, off its text */
+.jumped { animation: jumped 2.4s ease-out; box-shadow: -6px 0 0 -4px var(--accent); }
+/* the word a search result opened at, where it is in its entry (host.js's
+   searchLight) */
+::highlight(search-word) { background-color: rgba(95, 179, 255, 0.35); color: var(--text); }
 @keyframes jumped { from { background: rgba(95, 179, 255, 0.18); } to { background: transparent; } }
 .pair-qr { display: flex; flex-direction: column; align-items: center; gap: 8px; border: 1px solid var(--line); background: var(--panel); padding: 16px 12px; cursor: pointer; }
 .pair-qr svg { width: min(320px, 80vw); height: auto; background: #fff; fill: #000; }

@@ -447,15 +447,20 @@ export class ThinHost {
     }
     if (result.failed) {
       metadata?.operation?.settled?.(false);
+      // a search refused (a query the hub does not take) is the search's
+      // to say, not the view's: the view stays
+      if (result.method === 'view.search') { this.api.searchFailed?.(result.failed);this.pump(true);return true; }
       if (this.abortField(metadata) || this.isCurrent(metadata)) this.fail(result.failed);
       else this.api.warning?.(result.failed);
       this.pump(true);return true;
     }
     const r = result.result;
     if (['view.search', 'view.message', 'view.cancel'].includes(result.method)) {
-      if (result.current) {
-        if (result.method === 'view.search') this.api.search?.(r.search);
-        else if (result.method === 'view.message') {
+      // a search answered after an update of the same view (a thread
+      // streaming elsewhere) is still the search asked; another view's is not
+      if (result.method === 'view.search') { if (result.current || this.sameTarget(metadata)) this.api.search?.(r.search); }
+      else if (result.current) {
+        if (result.method === 'view.message') {
           try { this.api.message?.(this.messages.accept(r.message, metadata.input.cursor)); }
           catch { this.api.warning?.('Message continuation is unavailable; reopen it explicitly'); }
         } else this.api.cancelled?.(r.cancelled);
@@ -616,6 +621,10 @@ export class ThinHost {
     if (metadata?.operation?.action !== 'bfield' || target?.kind !== metadata.target?.kind || target?.id !== metadata.target?.id) return false;
     for (const operation of this.actions) operation.settled?.(false);
     this.actions = [];return true;
+  }
+  sameTarget(metadata) {
+    const link = this.client.links.get(this.hub);
+    return !!metadata && !!link && metadata.target?.kind === link.target?.kind && metadata.target?.id === link.target?.id;
   }
   isCurrent(metadata) {
     const link = this.client.links.get(this.hub);

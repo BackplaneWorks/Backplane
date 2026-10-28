@@ -722,10 +722,48 @@ function mailRestore(anchor) {
   const row = [...el.children].find(row => row.dataset.mailId === anchor.id);
   if (row) el.scrollTop += row.getBoundingClientRect().top-el.getBoundingClientRect().top-anchor.offset;
 }
+// the first place a word (as the search's snippet lit it) is written in
+// an entry, as a range: whole words first, its case as written, then any
+// case
+function wordRange(el, word) {
+  if (!word) return null;
+  const esc = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  for (const re of [new RegExp(`(^|[^\\p{L}\\p{N}_])(${esc})(?![\\p{L}\\p{N}_])`, "u"), new RegExp(`()(${esc})`, "iu")]) {
+    const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    for (let node = walk.nextNode(); node; node = walk.nextNode()) {
+      const m = re.exec(node.data);
+      if (!m) continue;
+      const range = document.createRange(), at = m.index + m[1].length;
+      range.setStart(node, at);range.setEnd(node, at + m[2].length);
+      return range;
+    }
+  }
+  return null;
+}
+// a search result's word, lit where it is in its entry (CSS.highlights:
+// the page's nodes are not touched) while the entry shows; its entry
+// flashed as the jump does. Renders put the entry's class back, so both
+// are kept for a while after the jump (searchLit.until)
+let searchLit = null;
+function searchLight(tl) {
+  if (!searchLit || !tl) return;
+  if (performance.now() > searchLit.until) { searchLit = null;CSS.highlights?.delete("search-word");return; }
+  const el = tl.querySelector(`[data-id="${CSS.escape(searchLit.id)}"]`);
+  if (!el) return;
+  if (performance.now() < searchLit.flash && !el.classList.contains("jumped")) el.classList.add("jumped");
+  const range = wordRange(el, searchLit.word);
+  if (range && typeof Highlight === "function" && CSS.highlights) CSS.highlights.set("search-word", new Highlight(range));
+}
 // an entry brought into view and flashed (a Jump, a search result): the
-// view holds there (holdFix), or the next layout put it back at the end
-function jumpTo(tl, el) {
-  el.scrollIntoView({ block: "center" });
+// view holds there (holdFix), or the next layout put it back at the end.
+// A search result's word is brought to the middle of the view when the
+// entry is taller than the view, else the entry is.
+function jumpTo(tl, el, word = "") {
+  const range = el.getBoundingClientRect().height > tl.clientHeight * 0.8 ? wordRange(el, word) : null;
+  if (range) {
+    const r = range.getBoundingClientRect(), v = tl.getBoundingClientRect();
+    tl.scrollTop += r.top - v.top - (tl.clientHeight - r.height) / 2;
+  } else el.scrollIntoView({ block: "center" });
   el.classList.remove("jumped");
   void el.offsetWidth;
   el.classList.add("jumped");
@@ -796,12 +834,14 @@ function render() {
   if (searchJump && tl2 && searchJump.thread === (thin?.session?.sel ?? App.sel(ui))) {
     const el = tl2.querySelector(`[data-id="${CSS.escape(searchJump.id)}"]`);
     if (el) {
-      jumpTo(tl2, el);
+      jumpTo(tl2, el, searchJump.word);
+      searchLit = { id: searchJump.id, word: searchJump.word, flash: performance.now() + 2400, until: performance.now() + 15000 };
       searchJump = null;
     } else if (thin?.window?.older && searchJump.pages < 40) {
       if (!searchJump.asked) { searchJump.asked = true; requestAnimationFrame(() => { if (searchJump) { searchJump.asked = false; if (thin.page()) searchJump.pages++; } }); }
     } else if (thin?.ready) searchJump = null;
   }
+  searchLight(tl2);
   Solid.mount(document.getElementById("solid"));
   Plot2d.mount([...document.querySelectorAll("canvas.plot2d")]);
   viewerSplit();
@@ -2056,16 +2096,19 @@ function retryNow() {
   else void startThin(false, "retry");
 }
 
-function resultPanel(title) {
+// a dialog over the page (the hub's answers to Search and to a message's
+// rest): the page dimmed behind it, its title and × in a head, Esc or a
+// click outside closes it
+function resultPanel(title, kind = "") {
   document.getElementById("thin-result")?.remove();
-  const shade = document.createElement("div");shade.id = "thin-result";shade.className = "shade";
-  const panel = document.createElement("section");panel.className = "picker";
+  const shade = document.createElement("div");shade.id = "thin-result";shade.className = "shade dim";
+  const panel = document.createElement("section");panel.className = kind ? "picker " + kind : "picker";
   panel.setAttribute("role", "dialog");panel.setAttribute("aria-modal", "true");panel.setAttribute("aria-label", title);
   const before = document.activeElement;
   const close = () => { shade.remove();root.inert = false;before?.focus?.();desktopBrowser.sync(); };
-  const heading = document.createElement("div");heading.className = "tools";
-  const label = document.createElement("span");label.textContent = title;heading.append(label);
-  const button = document.createElement("button");button.type = "button";button.textContent = "×";button.setAttribute("aria-label", "Close");button.addEventListener("click", close);heading.append(button);
+  const heading = document.createElement("header");heading.className = "phead";
+  const label = document.createElement("span");label.className = "ptitle";label.textContent = title;heading.append(label);
+  const button = document.createElement("button");button.type = "button";button.textContent = "×";button.setAttribute("aria-label", "Close");button.title = "Close · Esc";button.addEventListener("click", close);heading.append(button);
   panel.append(heading);shade.append(panel);document.body.append(shade);root.inert = true;
   shade.addEventListener("click", e => { if (e.target === shade) close(); });
   shade.addEventListener("keydown", e => {
@@ -2076,26 +2119,139 @@ function resultPanel(title) {
       e.preventDefault();focusable[next]?.focus();
     }
   });
-  button.focus();desktopBrowser.sync();return { panel, close };
+  button.focus();desktopBrowser.sync();return { panel, close, shade };
+}
+// The top bar's search (Ctrl+Shift+F) over every thread: the hub answers
+// a page of results in the order shown (server/thin-view.bend's
+// Search.found: the open thread's first, then by project and thread),
+// each with its snippet (snip: plain text and the query's words by turns)
+// and when it was said. It asks as the person types, one search at a
+// time (what was typed meanwhile goes when the answer comes); More
+// results adds the next page; Up/Down choose, Enter opens, Esc closes.
+let thinFind = null;
+function thinFindHead(row) {
+  const head = document.createElement("div");head.className = "find-group";
+  if (row.project) {
+    const p = document.createElement("span");p.className = "find-project";p.textContent = row.project;
+    const sep = document.createElement("span");sep.className = "find-sep";sep.textContent = "/";head.append(p, sep);
+  }
+  const t = document.createElement("span");t.className = "find-thread";t.textContent = row.title || "Untitled thread";head.append(t);
+  if (row.here) { const h = document.createElement("span");h.className = "find-here";h.textContent = "this thread";head.append(h); }
+  return head;
+}
+function thinFindRow(row, n) {
+  const button = document.createElement("button");button.type = "button";button.className = "find-hit";
+  button.id = "find-hit-" + n;button.setAttribute("role", "option");
+  const snip = document.createElement("span");snip.className = "find-snip";
+  const pieces = Array.isArray(row.snip) && row.snip.length ? row.snip : [row.text + (row.partial ? " …" : "")];
+  pieces.forEach((piece, i) => {
+    if (i % 2) { const mark = document.createElement("mark");mark.textContent = piece;snip.append(mark); }
+    else if (piece) snip.append(document.createTextNode(piece));
+  });
+  button.append(snip);
+  if (row.when) { const when = document.createElement("span");when.className = "find-when";when.textContent = row.when;button.append(when); }
+  return button;
 }
 function showThinSearch(search) {
-  const { panel, close } = resultPanel("Search");
-  const query = document.createElement("input");query.type = "search";query.value = search.query;query.setAttribute("aria-label", "Search conversations");
+  thinFind = null;
+  const { panel, close } = resultPanel("Search threads", "search-threads");
+  const query = document.createElement("input");query.type = "text";query.value = search.query;
+  query.placeholder = "Search every thread";query.autocomplete = "off";
+  query.setAttribute("aria-label", "Search every thread");query.setAttribute("role", "combobox");
+  query.setAttribute("aria-controls", "find-rows");query.setAttribute("aria-expanded", "true");
+  const note = document.createElement("div");note.className = "find-note";note.setAttribute("role", "status");
+  const rows = document.createElement("div");rows.id = "find-rows";rows.className = "find-rows";rows.setAttribute("role", "listbox");
+  const foot = document.createElement("footer");foot.textContent = "↑↓ choose · Enter open · Esc close";
+  panel.append(query, note, rows, foot);
+  // asked: the search on its way (its query and cursor); next: what to ask
+  // once it is answered; shown: the query whose results are on screen
+  const f = { asked: null, next: null, shown: null, hits: [], at: -1, group: null, timer: 0, more: null };
+  const choose = at => {
+    f.hits[f.at]?.el.classList.remove("on");f.hits[f.at]?.el.setAttribute("aria-selected", "false");
+    f.at = at;const hit = f.hits[at];
+    if (!hit) { query.removeAttribute("aria-activedescendant");return; }
+    hit.el.classList.add("on");hit.el.setAttribute("aria-selected", "true");query.setAttribute("aria-activedescendant", hit.el.id);
+    hit.el.scrollIntoView?.({ block: "nearest" });
+  };
+  const open = row => {
+    close();thinFind = null;
+    // the word lit in its snippet (else, a match past what the hub reads
+    // for snippets, the first word asked)
+    const word = Array.isArray(row.snip) && row.snip[1] || (query.value.match(/[\p{L}\p{N}]+/u)?.[0] ?? "");
+    searchJump = row.id ? { id: row.id, thread: row.thread, pages: 0, asked: false, word } : null;
+    dispatch("select", row.thread);later();
+  };
+  const ask = (text, cursor) => {
+    clearTimeout(f.timer);
+    if (!rows.isConnected) return;
+    if (!text.trim()) { f.next = null;f.shown = null;f.hits = [];f.at = -1;f.more = null;rows.replaceChildren();note.textContent = "Type a word said in any thread.";return; }
+    // one at a time: an answer lost is given up after a while
+    if (f.asked && Date.now() - f.asked.at < 8000) { f.next = { text, cursor };return; }
+    f.next = null;f.asked = { text, cursor, at: Date.now() };
+    if (!cursor) note.textContent = "Searching…";
+    if (!thin?.search(text, cursor)) { f.asked = null;note.textContent = "Search needs the hub: not connected."; }
+  };
+  const draw = (search, more) => {
+    if (!more) { rows.replaceChildren();f.hits = [];f.at = -1;f.group = null; }
+    f.more?.remove();f.more = null;
+    for (const row of search.rows || []) {
+      if (row.thread !== f.group) { rows.append(thinFindHead(row));f.group = row.thread; }
+      const el = thinFindRow(row, f.hits.length), n = f.hits.length;
+      el.addEventListener("click", () => open(row));
+      el.addEventListener("mousemove", () => { if (f.at !== n) choose(n); });
+      rows.append(el);f.hits.push({ row, el });
+    }
+    if (search.hasMore && search.cursor) {
+      const button = document.createElement("button");button.type = "button";button.className = "find-more";button.textContent = "More results";
+      button.addEventListener("click", () => { ask(search.query, search.cursor);query.focus(); });rows.append(button);f.more = button;
+    }
+    f.shown = search.query;
+    note.textContent = f.hits.length ? "" : `Nothing matches “${search.query.trim()}”.`;
+    if (!more && f.hits.length) choose(0);
+  };
+  thinFind = {
+    failed: code => {
+      f.asked = null;
+      if (f.next) { const next = f.next;f.next = null;ask(next.text, next.cursor);return; }
+      rows.replaceChildren();f.hits = [];f.at = -1;f.more = null;f.shown = null;
+      note.textContent = code === "LIMIT" ? "Search takes one to eight words of letters or digits." : `The search failed (${code}).`;
+    },
+    answer: search => {
+      const asked = f.asked;f.asked = null;
+      if (f.next) {
+        const next = f.next;f.next = null;
+        if (next.text !== search.query || next.cursor) ask(next.text, next.cursor);
+        if (next.text !== search.query) return;
+      }
+      if (search.query !== query.value) return;
+      draw(search, !!(asked?.cursor && asked.text === search.query && f.shown === search.query));
+    },
+  };
+  query.addEventListener("input", () => {
+    clearTimeout(f.timer);
+    if (!query.value.trim()) { ask("", "");return; }
+    f.timer = setTimeout(() => ask(query.value, ""), 180);
+  });
   query.addEventListener("keydown", e => {
-    if (e.key === "Enter" && !e.isComposing) { e.preventDefault();thin?.search(query.value); }
-  });panel.append(query);
-  const rows = document.createElement("div");rows.style.cssText = "overflow:auto;min-height:0;display:flex;flex-direction:column";
-  for (const row of search.rows) {
-    const button = document.createElement("button");button.type = "button";button.className = "row";
-    button.textContent = row.text + (row.partial ? " …" : "");
-    button.addEventListener("click", () => { close();searchJump = row.id ? { id: row.id, thread: row.thread, pages: 0, asked: false } : null;dispatch("select", row.thread); });rows.append(button);
-  }
-  panel.append(rows);
-  if (search.hasMore && search.cursor) {
-    const more = document.createElement("button");more.type = "button";more.textContent = "More results";
-    more.addEventListener("click", () => thin?.search(search.query, search.cursor));panel.append(more);
-  }
+    if (e.isComposing) return;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      if (f.hits.length) choose((f.at + (e.key === "ArrowDown" ? 1 : f.hits.length - 1)) % f.hits.length);
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (f.shown === query.value && f.hits[f.at]) open(f.hits[f.at].row);
+      else ask(query.value, "");
+    }
+  });
+  if (search.rows?.length) draw(search, false);
+  else note.textContent = search.query ? "" : "Type a word said in any thread.";
   query.focus();
+}
+function thinSearchAnswer(search) {
+  if (thinFind && document.getElementById("find-rows")?.isConnected) thinFind.answer(search);
+}
+function thinSearchFailed(code) {
+  if (thinFind && document.getElementById("find-rows")?.isConnected) thinFind.failed(code);
 }
 function showThinMessage(message) {
   if (viewMode === "view-v1") {
@@ -2237,7 +2393,7 @@ async function startThin(again = false, reason = "initial") {
       viewerChoice: choice => viewerFeedback.choice(choice),
       warning: message => showViewStatus(message),
       pageState: historyPageState,
-      search: showThinSearch, message: showThinMessage,
+      search: thinSearchAnswer, searchFailed: thinSearchFailed, message: showThinMessage,
       view: (node, detail) => {
         if (!current()) return;
         if (detail.page) historyPage = detail.page;

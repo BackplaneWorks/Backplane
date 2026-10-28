@@ -189,6 +189,15 @@ test('new navigation rejects a late search result without showing a stale result
  const f=await fixture();f.open();f.host.search('old');const query=f.sent.at(-1);f.host.request('select','B');f.host.receive(f.reply());
  f.host.receive(f.reply(query,{search:{query:'old',rows:[],cursor:'',hasMore:false,visited:0}}));assert.equal(f.searches.length,0);assert.equal(f.host.ready,true);assert.equal(f.getSession().sel,'B');
 });
+test('a search answered after an update of the same view still reaches the search dialog',async()=>{
+ const f=await fixture();f.open();const change={t:'view.changed',version:1,generation:'7',epoch:'actual',viewId:'view-A',target:{kind:'thread',id:'A'},viewRevision:'2'};
+ f.host.search('query');const query=f.sent.at(-1);f.host.receive(change);const update=f.sent.at(-1);assert.equal(update.m,'view.update');
+ f.host.receive(f.reply(query,{search:{query:'query',rows:[],cursor:'',hasMore:false,visited:0}}));assert.equal(f.searches.length,1);assert.equal(f.searches[0].query,'query');
+});
+test('a search the hub refuses is told to the search, and the view stays',async()=>{
+ const f=await fixture();const failed=[];f.api.searchFailed=code=>failed.push(code);f.open();f.host.search('???');const query=f.sent.at(-1);
+ f.host.receive({t:'reply',id:query.id,ok:false,error:{code:'LIMIT'}});assert.deepEqual(failed,['LIMIT']);assert.equal(f.host.ready,true);assert.equal(f.getSession().sel,'A');
+});
 test('auxiliary query cannot strand the selected update or consume its displayed revision',async()=>{
  const f=await fixture();f.open();const change={t:'view.changed',version:1,generation:'7',epoch:'actual',viewId:'view-A',target:{kind:'thread',id:'A'},viewRevision:'2'};
  f.host.receive(change);const update=f.sent.at(-1);f.host.search('query');const query=f.sent.at(-1);f.host.receive(f.reply(update,{viewRevision:'2'}));
