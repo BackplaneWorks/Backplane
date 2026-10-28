@@ -1004,12 +1004,37 @@ def Pv.run(argv: List<&2, String>) -> IO(PR.Ran):
     case +p <> t:
       PR.Proc.run(p, t, "/")
 
+# the size of a 3D model's GLB when it is already there (a .glb of its
+# own, or a STEP's or a board's made before), else 0
+def Pv.solid.known(solid: Bool, +kind: U32, +path: String) -> IO(U32):
+  match solid:
+    case True{}:
+      do IO<U32>:
+        +out : String <- Pv.solid.out(String.ends_with(path, ".glb"), Pv.is_step(path), U32.is_eq(kind, 3), U32.is_eq(kind, 4), path)
+        r : Result<&1, &1, U32 & String, U32 & U32 & U32> <- H.FS.stat(out)
+        return Pv.solid.size(r)
+    case False{}:
+      IO.pure(U32, 0)
+
+def Pv.read.run(fits: Bool, +size: U32, st: U32 & String, low: Bool, +key: String, +kind: U32, +path: String, +q: Chan(PMsg), +dir: String) -> IO(Unit):
+  match fits:
+    case True{}:
+      do IO<Unit>:
+        exe : String <- H.Sys.exe_path()
+        r : PR.Ran <- Pv.run(Pv.locked(Pv.solid.kind(kind), dir, Pv.argv(low, EX.Exe.child(exe), ["--plot", U32.show(kind), path, Pv.infos(dir, key)])))
+        Pv.read.k(st, r, key, kind, q)
+    case False{}:
+      Pv.read.k(st, PR.Ran{3, P.Solid.big(size)}, key, kind, q)
+
+# (a model whose GLB is known too big is refused here, at once: its child
+# would first wait for solid.lock behind any other model's read, and the 3D
+# view or Mech said nothing until that one was done; a GLB made by the
+# child is checked there, P.Solid.fits)
 def Pv.read.at(low: Bool, +key: String, +kind: U32, +path: String, +q: Chan(PMsg), +dir: String) -> IO(Unit):
   do IO<Unit>:
     st : U32 & String <- Pv.stamp.of(path)
-    exe : String <- H.Sys.exe_path()
-    r : PR.Ran <- Pv.run(Pv.locked(Pv.solid.kind(kind), dir, Pv.argv(low, EX.Exe.child(exe), ["--plot", U32.show(kind), path, Pv.infos(dir, key)])))
-    Pv.read.k(st, r, key, kind, q)
+    +size : U32 <- Pv.solid.known(Pv.solid.kind(kind), kind, path)
+    Pv.read.run(P.Solid.fits(size), size, st, low, key, kind, path, q, dir)
 
 def Pv.read(+key: String, +kind: U32, +path: String, +q: Chan(PMsg), +dir: String) -> IO(Unit):
   Pv.read.at(False{}, key, kind, path, q, dir)

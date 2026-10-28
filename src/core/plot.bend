@@ -720,7 +720,7 @@ def Solid.fits(size: U32) -> Bool:
 
 # what a refused model says (its size in whole megabytes, rounded up)
 def Solid.big(size: U32) -> String:
-  "This 3D model is too big to show here (" ++ U32.show(U32.add(U32.shrn(size, 20n), 1)) ++ " MB; the hub reads models up to " ++ U32.show(U32.shrn(Solid.most(), 20n)) ++ " MB)"
+  "This 3D model is too big to show here (" ++ U32.show(U32.shrn(U32.add(size, 1048575), 20n)) ++ " MB; the hub reads models up to " ++ U32.show(U32.shrn(Solid.most(), 20n)) ++ " MB)"
 
 # A plot
 # ------

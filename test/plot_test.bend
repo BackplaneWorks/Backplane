@@ -128,3 +128,4 @@ def main() -> IO(Unit):
     C.Check.str("a 12 MB model is read", Bool.show(P.Solid.fits(12401104)), "True")
     C.Check.str("a bigger one is not", Bool.show(P.Solid.fits(12582913)), "False")
     C.Check.str("what a refused model says", P.Solid.big(30000000), "This 3D model is too big to show here (29 MB; the hub reads models up to 12 MB)")
+    C.Check.str("a model of 13 MB says 13", P.Solid.big(13631488), "This 3D model is too big to show here (13 MB; the hub reads models up to 12 MB)")
