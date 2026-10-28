@@ -4227,7 +4227,7 @@ def View.review.tabs(ts: List<&2, U.RpTab>) -> List<&2, D.Node>:
 def View.review.body(+lc: I.Loc, has: Bool, +v: U.RpView, +extra: List<&2, D.Node>) -> D.Node:
   match has:
     case True{}:
-      D.El{"div", "review-body", [D.At{"class", "review-body body"}], List.append(&2, D.Node, extra, D.Md.render.loc(lc, U.RpView.md(v)))}
+      D.El{"div", "review-body", [D.At{"class", "review-body body rp-" ++ U.RpView.page(v)}], List.append(&2, D.Node, extra, D.Md.render.loc(lc, U.RpView.md(v)))}
     case False{}:
       D.El{"div", "review-body", [D.At{"class", "review-body"}], List.append(&2, D.Node, extra, [D.Dom.span("fm-note", Bool.pick(String, String.eq(U.RpView.page(v), "release"), Bool.pick(String, U.RpView.busy(v), "", Bool.pick(String, String.is_empty(U.RpView.err(v)), U.RpView.note.loc(lc, v), "")), U.RpView.note.loc(lc, v)))])}
 
