@@ -198,6 +198,8 @@ final class AppModel {
     // the first screen of this launch chooses the tab and carries the hub's
     // theme and thread list into App settings
     @ObservationIgnored private var started = false
+    // A choice on the cached UI is newer than startup's automatic default.
+    @ObservationIgnored private var startupTabChosen = false
     @ObservationIgnored private var sentView = false
     let settings = AppSettings.shared
     // the hub settings page: each hub's last rows, on disk beside the kept state
@@ -1384,6 +1386,11 @@ final class AppModel {
     // the tab on screen changes: it shows its own stack at once, and Bend
     // selects what that stack ends with (the page is cached, so it draws
     // now and goes live when its screen comes); an empty stack selects nothing
+    func chooseTab(_ t: AppTab) {
+        startupTabChosen = true
+        switchTab(t)
+    }
+
     func switchTab(_ t: AppTab) {
         guard t != tab else { return }
         tab = t
@@ -1913,7 +1920,7 @@ final class AppModel {
             if !started {
                 started = true
                 settings.migrate(theme: s.theme, view: s.view)
-                if Self.nav(s).isEmpty, path.isEmpty {
+                if !startupTabChosen, Self.nav(s).isEmpty, path.isEmpty {
                     if let t = AppTab(rawValue: settings.defaultTab), t != .settings { tab = t } else { tab = s.uber == nil ? .threads : .home }
                 }
                 if !sentView { sentView = true; run { await $0.local("view", AppSettings.shared.threadList) } }
@@ -1999,7 +2006,7 @@ final class AppModel {
                             continue
                         }
                         // "@tab=<home|threads|bots|routines|settings>": the tab bar's tap; "@push=<page>" pushes a page of this tab
-                        if kv[0] == "@tab", kv.count > 1, let t = AppTab(rawValue: kv[1]) { switchTab(t); continue }
+                        if kv[0] == "@tab", kv.count > 1, let t = AppTab(rawValue: kv[1]) { chooseTab(t); continue }
                         if kv[0] == "@push", kv.count > 1 { navigate(path + [kv[1]]); continue }
                         // "@back": what a swipe back does
                         if kv[0] == "@back" { navigate(Array(path.dropLast())); continue }
