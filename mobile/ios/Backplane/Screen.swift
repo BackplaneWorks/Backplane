@@ -47,6 +47,8 @@ struct Project: Decodable, Identifiable {
     let archived: [Row]?
     // no live thread: its header shows faded, after the live ones
     let quiet: Bool?
+    let settledCount, archivedCount: NativeSidebarCount?
+    let threadsPage, snoozedPage, settledPage, archivedPage: NativeSidebarPager?
 }
 
 // the folded shelf of older projects at the end of the list ("side-older"),
@@ -887,6 +889,7 @@ struct Screen: Decodable {
     let usageMachines: [MachineUsage]?
     let found: [Found]
     let projects: [Project]
+    let sidebarPages: [NativeSidebarHubPage]?
     // "projects" (sections) or "active" (one flat list of rows, active)
     let lang: Settings?
     let view: String?
@@ -1060,7 +1063,7 @@ extension KeyedDecodingContainer {
 // costs that field, never the whole screen (a blank app).
 extension Screen {
     private enum K: String, CodingKey {
-        case bubMove, locale, online, version, error, note, sel, empty, hub, hubs, usageMachines, found, projects, lang, view, making, active, legacy, older, settled,
+        case bubMove, locale, online, version, error, note, sel, empty, hub, hubs, usageMachines, found, projects, sidebarPages, lang, view, making, active, legacy, older, settled,
              rowMenu, bots, rooms, uber, plane, newBot, newRoom, bot, deleting, removing, renaming, tour, search,
              folders, settings, find, island, islands, thread, theme, tabs
     }
@@ -1079,7 +1082,12 @@ extension Screen {
         hubs = c.lossyList(.hubs)
         usageMachines = c.lossyList(.usageMachines)
         found = c.lossyList(.found)
+        // Reject malformed negotiated metadata without changing legacy row decoding.
+        if (try? c.nestedUnkeyedContainer(forKey: .projects)) != nil {
+            _ = try c.decode([NativeSidebarProjectValidation].self, forKey: .projects)
+        }
         projects = c.lossyList(.projects)
+        sidebarPages = try c.decodeIfPresent([NativeSidebarHubPage].self, forKey: .sidebarPages)
         lang = c.lossy(.lang)
         view = c.lossy(.view)
         making = c.lossy(.making)

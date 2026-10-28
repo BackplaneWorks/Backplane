@@ -624,6 +624,38 @@ struct ProjectsView: View {
         }
     }
 
+    private func hasControls(_ page: NativeSidebarPager?) -> Bool {
+        page?.previous != nil || page?.next != nil
+    }
+
+    @ViewBuilder private func pageControls(_ page: NativeSidebarPager?, scope: String, context: String) -> some View {
+        if let page, hasControls(page) {
+            ForEach(["previous", "next"], id: \.self) { direction in
+                if let control = direction == "previous" ? page.previous : page.next {
+                    Button { model.act(control.action, control.value) } label: {
+                        HStack {
+                            Text(control.label)
+                            Spacer(minLength: 8)
+                            Text(context).font(.caption).foregroundStyle(.secondary)
+                        }.frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    }
+                    .disabled(!model.contentReady)
+                    .accessibilityLabel(context + ", " + control.label)
+                    .accessibilityIdentifier("sidebar.page." + scope + "." + direction)
+                }
+            }
+        }
+    }
+
+    private func hubName(_ key: String) -> String {
+        screen.hubs.first(where: { $0.key == key })?.name ?? key
+    }
+
+    private var hasPageControls: Bool {
+        (screen.sidebarPages ?? []).contains { hasControls($0.projects) || hasControls($0.active) || hasControls($0.legacy) } ||
+        screen.projects.contains { hasControls($0.threadsPage) || hasControls($0.snoozedPage) || hasControls($0.settledPage) || hasControls($0.archivedPage) }
+    }
+
     var body: some View {
         List {
             // the search is always the list's first row (projects, or in the
@@ -633,7 +665,7 @@ struct ProjectsView: View {
             }
             if screen.view == "active" {
                 let rows = screen.active ?? []
-                if rows.isEmpty && screen.settled == nil {
+                if rows.isEmpty && screen.settled == nil && !(screen.sidebarPages ?? []).contains(where: { hasControls($0.active) }) {
                     if !screen.projects.isEmpty && (screen.search?.query ?? "").isEmpty {
                         ContentUnavailableView(NativeMessages.sidebar_nothing(lang), systemImage: "tray")
                             .listRowBackground(Color.clear)
@@ -655,15 +687,27 @@ struct ProjectsView: View {
                 ForEach(screen.projects) { p in projectSection(p) }
                 if let o = screen.older { foldRow(false, o, "side-older") }
             }
+            ForEach(screen.sidebarPages ?? [], id: \.hub) { hub in
+                if screen.view == "active", hasControls(hub.active) {
+                    Section { pageControls(hub.active, scope: hub.hub + ".active", context: hubName(hub.hub)) }
+                } else if screen.view != "active", hasControls(hub.projects) {
+                    Section { pageControls(hub.projects, scope: hub.hub + ".projects", context: hubName(hub.hub)) }
+                }
+            }
             if let legacy = screen.legacy, !legacy.isEmpty {
                 Section("Conversation history") {
                     ForEach(legacy) { ThreadRow(model: model, row: $0, hierarchy: false) { choosing = $0 } }
                 }
             }
+            ForEach(screen.sidebarPages ?? [], id: \.hub) { hub in
+                if hasControls(hub.legacy) {
+                    Section { pageControls(hub.legacy, scope: hub.hub + ".legacy", context: hubName(hub.hub)) }
+                }
+            }
         }
         .modifier(BackplaneListSurface())
         .overlay {
-            if screen.projects.isEmpty && (screen.legacy ?? []).isEmpty && (screen.active ?? []).isEmpty {
+            if screen.projects.isEmpty && (screen.legacy ?? []).isEmpty && (screen.active ?? []).isEmpty && !hasPageControls {
                 // a hub still catching up has not said what there is yet
                 if let h = screen.hubs.first(where: { (model.conn[$0.key]?.phase ?? .connecting) != .online }), !screen.online {
                     VStack(spacing: 12) {
@@ -752,13 +796,16 @@ struct ProjectsView: View {
     // one; its header (faded when quiet) takes a long press for its menu
     @ViewBuilder
     private func projectSection(_ p: Project) -> some View {
+        let context = p.id.firstIndex(of: "|").map { hubName(String(p.id[..<$0])) + ", " + p.title } ?? p.title
         Section {
             ForEach(p.threads) { ThreadRow(model: model, row: $0) { choosing = $0 } }
-            if !p.snoozed.isEmpty {
+            pageControls(p.threadsPage, scope: p.id + ".threads", context: context)
+            if !p.snoozed.isEmpty || hasControls(p.snoozedPage) {
                 Text(p.snoozedShelf).font(.subheadline).foregroundStyle(.secondary)
                 ForEach(p.snoozed) { ThreadRow(model: model, row: $0) { choosing = $0 } }
+                pageControls(p.snoozedPage, scope: p.id + ".snoozed", context: context + ", " + p.snoozedShelf)
             }
-            if !p.settled.isEmpty {
+            if (p.settledCount?.value ?? p.settled.count) > 0 {
                 Button { model.act("toggle-settled", p.id) } label: {
                     HStack {
                         Text(p.shelf).font(.subheadline)
@@ -767,18 +814,24 @@ struct ProjectsView: View {
                     }
                 }
                 .tint(.secondary)
-                if p.open { ForEach(p.settled) { ThreadRow(model: model, row: $0) { choosing = $0 } } }
+                if p.open {
+                    ForEach(p.settled) { ThreadRow(model: model, row: $0) { choosing = $0 } }
+                    pageControls(p.settledPage, scope: p.id + ".settled", context: context + ", " + p.shelf)
+                }
             }
-            if let arch = p.archived, !arch.isEmpty, let v = p.value {
+            if (p.archivedCount?.value ?? p.archived?.count ?? 0) > 0, let v = p.value {
                 Button { model.act("toggle-settled", v) } label: {
                     HStack {
-                        Text(NativeMessages.native_thread_archived(lang, String(arch.count))).font(.subheadline)
+                        Text(NativeMessages.native_thread_archived(lang, String(p.archivedCount?.value ?? p.archived?.count ?? 0))).font(.subheadline)
                         Spacer()
                         Image(systemName: p.archOpen == true ? "chevron.down" : "chevron.right").font(.caption).foregroundStyle(.tertiary)
                     }
                 }
                 .tint(.secondary)
-                if p.archOpen == true { ForEach(arch) { ThreadRow(model: model, row: $0) { choosing = $0 } } }
+                if p.archOpen == true {
+                    ForEach(p.archived ?? []) { ThreadRow(model: model, row: $0) { choosing = $0 } }
+                    pageControls(p.archivedPage, scope: p.id + ".archived", context: context)
+                }
             }
         } header: {
             HStack {
