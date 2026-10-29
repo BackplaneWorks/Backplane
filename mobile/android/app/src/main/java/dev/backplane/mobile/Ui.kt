@@ -38,6 +38,7 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.ChevronRight
@@ -996,6 +997,17 @@ fun ThreadScreen(m: AppModel, s: Screen, t: ThreadView, below: (@Composable () -
                                 color = if (u.busy.isNotEmpty()) PhaseColor.accent else MaterialTheme.colorScheme.outline)
                         }
                     }
+                    // the to-do list beside them: its count, a tap opens or
+                    // shuts its steps under the bar (shut until the person
+                    // opens it; nothing else opens it)
+                    t.todos?.let { td ->
+                        TextButton(onClick = { if (td.toggle.isNotEmpty()) m.act("fold", td.toggle) }) {
+                            Icon(Icons.Filled.Checklist, NativeMessages.native_thread_todos(lang, td.count),
+                                tint = if (td.open) PhaseColor.accent else MaterialTheme.colorScheme.outline)
+                            Text(td.count, Modifier.padding(start = 2.dp), style = MaterialTheme.typography.labelMedium,
+                                color = if (td.open) PhaseColor.accent else MaterialTheme.colorScheme.outline)
+                        }
+                    }
                     if (t.viewer.choices.isNotEmpty()) Box {
                         var boards by remember { mutableStateOf(false) }
                         IconButton(onClick = { boards = true }) { Icon(Icons.Filled.Memory, NativeMessages.native_thread_board(lang)) }
@@ -1059,6 +1071,8 @@ fun ThreadScreen(m: AppModel, s: Screen, t: ThreadView, below: (@Composable () -
                     }
                 },
             )
+            // the to-do list's steps, under the bar while it is open
+            t.todos?.let { td -> if (td.open) TodosPanel(m, td) }
             below?.invoke()
         } },
         bottomBar = {
@@ -1067,23 +1081,6 @@ fun ThreadScreen(m: AppModel, s: Screen, t: ThreadView, below: (@Composable () -
                     // the terminals pinned to the top of the thread
                     for (e in t.embs) if (e.pinned) key(e.key) { Box(Modifier.padding(bottom = 8.dp)) { EmbView(m, e, top = true) } }
                     for (a in t.asks) Box(Modifier.padding(bottom = 8.dp)) { AskCard(m, a) }
-                    t.todos?.let { td ->
-                        Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
-                            // the head opens and shuts the card
-                            Row(Modifier.fillMaxWidth().then(if (td.toggle.isNotEmpty()) Modifier.clickable { m.act("fold", td.toggle) } else Modifier),
-                                verticalAlignment = Alignment.CenterVertically) {
-                                Text(td.head, Modifier.weight(1f), style = MaterialTheme.typography.labelMedium)
-                                Text(if (td.open) "▾" else "▸", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
-                            }
-                            // every step scrolls within a third of the screen
-                            Column(Modifier.heightIn(max = 220.dp).verticalScroll(rememberScrollState())) {
-                                for (l in td.lines) Text(l.text, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                                    color = if (l.status == "completed") MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.onSurface)
-                            }
-                            if (td.more.isNotEmpty()) Text(td.more, Modifier.clickable { m.act("fold", td.moreValue) }.padding(vertical = 2.dp),
-                                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                        }
-                    }
                     for (q in t.queue) Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(q.tag, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.tertiary)
                         Text(q.text, Modifier.weight(1f).padding(horizontal = 8.dp),

@@ -504,6 +504,22 @@ private fun subColor(state: String) = when (state) {
     else -> PhaseColor.faint
 }
 
+// the to-do list's steps under the top bar, while the person has it open:
+// every step scrolls within a third of the screen; a long list ends in
+// "Show all 24" or "Show fewer"
+@Composable
+fun TodosPanel(m: AppModel, td: Todos) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+        Column(Modifier.heightIn(max = 220.dp).verticalScroll(rememberScrollState())) {
+            for (l in td.lines) Text(l.text, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                color = if (l.status == "completed") MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.onSurface)
+        }
+        if (td.more.isNotEmpty()) Text(td.more, Modifier.clickable { m.act("fold", td.moreValue) }.padding(vertical = 2.dp),
+            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+    }
+    HorizontalDivider()
+}
+
 // the subagent panel: what this thread delegated (a tap opens its thread)
 // and the agent's own (a tap opens or shuts its steps); outlined in the
 // accent while any are at work

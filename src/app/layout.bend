@@ -3419,13 +3419,19 @@ def Lay.qrows(qs: List<&2, M.QItem>, +ty: Ty, +i: Nat, +n: Nat, +run: Bool, +mor
 def Lay.qn(+qs: List<&2, M.QItem>) -> Nat:
   Bool.pick(Nat, Nat.is_gt(List.length(&2, M.QItem, qs), U.Qu.shown()), U.Qu.shown(), List.length(&2, M.QItem, qs))
 
-# The todo list above the queue: its head, then its rows (client.bend's
-# Todos.rows: the steps around the one being done and a line for the rest,
-# every step as many as fit, or none shut), then a long list's last line
-# ("Show all 24", "Show fewer"). The head and that line are clicks (fold).
+# The todo list at the top of the thread, under the subagents panel and in
+# its style: one line, "To-do" and "3/7", shut until the person opens it
+# (client.bend's Todos.open); open, its rows (client.bend's Todos.rows: the
+# steps around the one being done and a line for the rest, every step as
+# many as fit), then a long list's last line ("Show all 24", "Show fewer").
+# The head and that line are clicks (fold); the wheel over it scrolls its
+# rows (Pane).
+def Lay.tdbox(+rs: List<&2, TD.TRow>, +more: String) -> U32:
+  ((U32.from_nat(List.length(&2, TD.TRow, rs)) * 22 : U32) + Bool.pick(U32, List.is_empty(&2, TD.TRow, rs), 32, 36) + Bool.pick(U32, String.is_empty(more), 0, 22) : U32)
+
+# what it takes from the top, with the gap under it (none without a list)
 def Lay.tdh(+ts: List<&2, TD.Todo>, +rs: List<&2, TD.TRow>, +more: String) -> U32:
-  Bool.pick(U32, List.is_empty(&2, TD.Todo, ts), 0,
-    ((U32.from_nat(List.length(&2, TD.TRow, rs)) * 22 : U32) + 34 + Bool.pick(U32, String.is_empty(more), 0, 22) : U32))
+  Bool.pick(U32, List.is_empty(&2, TD.Todo, ts), 0, (Lay.tdbox(rs, more) + 12 : U32))
 
 def Lay.tdlines(rs: List<&2, TD.TRow>, +ty: Ty, +x0: U32, +x1: U32, +y: U32) -> List<&2, R.Op>:
   match rs:
@@ -3436,30 +3442,32 @@ def Lay.tdlines(rs: List<&2, TD.TRow>, +ty: Ty, +x0: U32, +x1: U32, +y: U32) -> 
           Bool.pick(U32, String.eq(TD.TRow.status(r), "completed"), T.Th.faint(), Bool.pick(U32, String.eq(TD.TRow.status(r), "in_progress"), T.Th.text(), T.Th.dim()))),
         Lay.tdlines(rest, ty, x0, x1, (y + 22 : U32)))
 
-# how many steps the window shows of every step: what half its height holds
+# how many steps the window shows of every step: what a third of its height
+# holds, like the subagents panel
 def Lay.tdcap(+h: U32) -> Nat:
-  U32.to_nat(U32.max((U32.shr(h) / 22 : U32), 6))
+  U32.to_nat(U32.max(((h / 3 : U32) / 22 : U32), 6))
 
-def Lay.todos.k(some: Bool, +ty: Ty, +ts: List<&2, TD.Todo>, +rs: List<&2, TD.TRow>, +more: String, +open: Bool, +all: Bool, +th: String, +off: Nat, +n: Nat, +x0: U32, +x1: U32, +bottom: U32) -> Out:
+def Lay.todos.k(some: Bool, +ty: Ty, +ts: List<&2, TD.Todo>, +rs: List<&2, TD.TRow>, +more: String, +open: Bool, +all: Bool, +th: String, +off: Nat, +n: Nat, +x0: U32, +x1: U32, +y: U32) -> Out:
   match some:
     case True{}:
-      +hh = Lay.tdh(ts, rs, more)
-      +top = {(bottom - hh : U32) : U32}
-      +ry = {(top + 28 + (U32.from_nat(List.length(&2, TD.TRow, rs)) * 22 : U32) : U32) : U32}
+      +bh = Lay.tdbox(rs, more)
+      +word = {TD.Todo.count(ts) ++ Pane.range.loc(Ty.loc(ty), off, List.length(&2, TD.TRow, rs), n) : String}
+      +ry = {(y + 30 + (U32.from_nat(List.length(&2, TD.TRow, rs)) * 22 : U32) : U32) : U32}
       Out.all([
-        Out.ops(List.concat(&2, R.Op, [Lay.box(D.Clip.all(), x0, top, (x1 - x0 : U32), (hh - 4 : U32), 0, T.Th.raise(), T.Th.line()),
-          Ty.text(ty, 2n, TD.Todo.head(ts) ++ Pane.range.loc(Ty.loc(ty), off, List.length(&2, TD.TRow, rs), n), D.Clip.all(), (x0 + 12 : U32), (top + 2 : U32), 26, T.Th.soft()),
-          Lay.icon(ty, Bool.pick(String, open, "chevron-down", "chevron-right"), D.Clip.all(), (x1 - 28 : U32), (top + 6 : U32), T.Th.faint()),
-          Lay.tdlines(rs, ty, x0, x1, (top + 28 : U32)),
+        Out{Nil{}, [Lay.hit(x0, y, (x1 - x0 : U32), bh, "pane", "todos:" ++ th ++ "|" ++ Nat.show(Nat.sub(n, 1n)))]},
+        Out.ops(List.concat(&2, R.Op, [Lay.box(D.Clip.all(), x0, y, (x1 - x0 : U32), bh, 8, T.Th.panel(), T.Th.line()),
+          Ty.text(ty, 2n, MSG.T.thread.todos(Ty.loc(ty)), D.Clip.all(), (x0 + 12 : U32), y, 32, T.Th.soft()),
+          Ty.text(ty, 2n, word, D.Clip.all(), (x1 - Ty.width(ty, 2n, word) - 36 : U32), y, 32, T.Th.faint()),
+          Lay.icon(ty, Bool.pick(String, open, "chevron-down", "chevron-right"), D.Clip.all(), (x1 - 28 : U32), (y + 8 : U32), T.Th.faint()),
+          Lay.tdlines(rs, ty, x0, x1, (y + 30 : U32)),
           Ty.text(ty, 2n, more, D.Clip.all(), (x0 + 12 : U32), ry, 22, T.Th.accent())])),
-        Out{Nil{}, List.concat(&2, S.Hit, [[Lay.hit(x0, top, (x1 - x0 : U32), hh, "pane", "todos:" ++ th ++ "|" ++ Nat.show(Nat.sub(n, 1n)))],
-          [Lay.hit(x0, top, (x1 - x0 : U32), 28, "fold", U.Todos.toggle(open, th))],
+        Out{Nil{}, List.concat(&2, S.Hit, [[Lay.hit(x0, y, (x1 - x0 : U32), 30, "fold", U.Todos.toggle(open, th))],
           Bool.pick(List<&2, S.Hit>, String.is_empty(more), Nil{}, [Lay.hit(x0, ry, (x1 - x0 : U32), 22, "fold", U.Todos.more.ask(all, th))])])}])
     case False{}:
       Out.none()
 
-def Lay.todos(+ty: Ty, +ts: List<&2, TD.Todo>, +rs: List<&2, TD.TRow>, +more: String, +open: Bool, +all: Bool, +th: String, +off: Nat, +n: Nat, +x0: U32, +x1: U32, +bottom: U32) -> Out:
-  Lay.todos.k(Bool.not(List.is_empty(&2, TD.Todo, ts)), ty, ts, rs, more, open, all, th, off, n, x0, x1, bottom)
+def Lay.todos(+ty: Ty, +ts: List<&2, TD.Todo>, +rs: List<&2, TD.TRow>, +more: String, +open: Bool, +all: Bool, +th: String, +off: Nat, +n: Nat, +x0: U32, +x1: U32, +y: U32) -> Out:
+  Lay.todos.k(Bool.not(List.is_empty(&2, TD.Todo, ts)), ty, ts, rs, more, open, all, th, off, n, x0, x1, y)
 
 # the queue's height above the composer
 def Lay.qh(+qs: List<&2, M.QItem>) -> U32:
@@ -7124,10 +7132,8 @@ def Lay.thread.k.ix(+ty: Ty, +memo: TLMemo, t: M.Thread, +draft: String, +held: 
       # the project card (Lay.fab) under the parent's link: its height and
       # drawing come from helpers (no binders here: Lay.thread.k is at Bend's
       # arity limit for the closure the timeline's split makes)
-      +top = {(52 + hy + kh + pl + Fab.h.of(ty, pics, sel, cw) + Subs.height(ts, svis, sopen) + Pins.height(pins) : U32) : U32}
-      +asks = U.Asks.open(st, sel)
-      +ah = Asks.h(ty, asks, pics, (cw - 32 : U32))
-      +qs = M.Queue.context(M.Queue.items(st, sel))
+      # the todo list under the subagents panel (Lay.todos), shut to its head
+      # until the person opens it
       +tds = U.Todos.shown(st, sel, Lay.running(turn))
       +tdo = U.Todos.open(pics, sel)
       +tda = U.Todos.all(pics, sel)
@@ -7135,7 +7141,11 @@ def Lay.thread.k.ix(+ty: Ty, +memo: TLMemo, t: M.Thread, +draft: String, +held: 
       +tdoff = Pane.clamp(Pane.off(pics, "todos:" ++ sel), List.length(&2, TD.TRow, tdall))
       +tdr = List.take(&2, TD.TRow, List.drop(&2, TD.TRow, tdall, tdoff), Lay.tdcap(h))
       +tdm = {Bool.pick(String, tdo, U.Todos.more(Ty.loc(ty), tda, tds), "") : String}
-      +qh = {(Lay.qh(qs) + Lay.tdh(tds, tdr, tdm) : U32) : U32}
+      +top = {(52 + hy + kh + pl + Fab.h.of(ty, pics, sel, cw) + Subs.height(ts, svis, sopen) + Lay.tdh(tds, tdr, tdm) + Pins.height(pins) : U32) : U32}
+      +asks = U.Asks.open(st, sel)
+      +ah = Asks.h(ty, asks, pics, (cw - 32 : U32))
+      +qs = M.Queue.context(M.Queue.items(st, sel))
+      +qh = Lay.qh(qs)
       # the composer grows by eh, and all above it moves up
       +ls = Comp.wrap(ty, draft, cw)
       # (and by the Ready to order bar's height when it shows: it sits right above)
@@ -7153,11 +7163,11 @@ def Lay.thread.k.ix(+ty: Ty, +memo: TLMemo, t: M.Thread, +draft: String, +held: 
           Lay.parent(ty, st, sel, cx0, (58 + hy + kh : U32)),
           Lay.fab.of(ty, pics, sel, cx0, cx1, (60 + hy + kh + pl : U32)),
           Lay.subs(ty, ts, svis, sopen, sel, soff, cx0, cx1, (60 + hy + kh + pl + Fab.h.of(ty, pics, sel, cw) : U32)),
-          Lay.pins(ty, ec, pins, cx0, cx1, (60 + hy + kh + pl + Fab.h.of(ty, pics, sel, cw) + Subs.height(ts, svis, sopen) : U32), fkey, blink),
+          Lay.todos(ty, tds, tdr, tdm, tdo, tda, sel, tdoff, List.length(&2, TD.TRow, tdall), cx0, cx1, (60 + hy + kh + pl + Fab.h.of(ty, pics, sel, cw) + Subs.height(ts, svis, sopen) : U32)),
+          Lay.pins(ty, ec, pins, cx0, cx1, (60 + hy + kh + pl + Fab.h.of(ty, pics, sel, cw) + Subs.height(ts, svis, sopen) + Lay.tdh(tds, tdr, tdm) : U32), fkey, blink),
           Lay.composer.a(ty, draft, ls, held, caret, mark, focus, blink, cx0, cx1, h, U.Follow.button(Ty.loc(ty), st, sel, Lay.running(turn), stop, draft), U.Follow.act(stop), Comp.chip(ty, U.Effort.label(U.Models.label(pr, mo), U.Effort.of(st, sel)), U.Usage.tail(st, sel), cx0, cx1, U.Follow.button(Ty.loc(ty), st, sel, Lay.running(turn), stop, draft)), rs, atts, up, path, pre),
           Lay.ready(ty, Ready.line(st, pics, sel, Lay.running(turn)), U.Fab.ready.btn.of(st, pics, sel), cx0, cx1, (h - eh - 124 + 2 : U32)),
           Lay.queued(ty, qs, Lay.running(turn), cx0, cx1, (h - eh : U32)),
-          Lay.todos(ty, tds, tdr, tdm, tdo, tda, sel, tdoff, List.length(&2, TD.TRow, tdall), cx0, cx1, (h - eh - 124 - Lay.qh(qs) : U32)),
           Lay.asks(ty, asks, draft, pics, cx0, cx1, (h - 132 - ah - qh - eh - bh + 4 : U32)),
           Btw.card.if(Bool.not(String.is_empty(bq)), ty, bq, ba, cx0, cx1, (h - 132 - qh - eh - bh + 4 : U32)),
           Lay.picker(picking, ty, mo, info, pr, cx0, cx1, (h - 128 - eh : U32), (60 + hy : U32), U.Chip.all(info, pr, mo), U.Effort.of(st, sel), moff,

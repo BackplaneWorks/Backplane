@@ -294,9 +294,11 @@ data class QButton(val label: String, val action: String, val value: String)
 data class QueueRow(val msg: String, val text: String, val tag: String, val buttons: List<QButton>)
 // the agent's todo list: "Todo 2/5" and a line per step
 data class TodoLine(val text: String, val status: String)
-// the todo card: open, and a tap on its head sends fold with toggle; more:
-// a long list's last line ("Show all 24", "Show fewer"; "" when it fits)
-data class Todos(val head: String, val lines: List<TodoLine>, val open: Boolean = true, val toggle: String = "", val more: String = "", val moreValue: String = "")
+// the todo list in the top bar beside the subagents: its count ("2/5"); a
+// tap sends fold with toggle, and only while open (shut until the person
+// opens it) its lines show under the bar; more: a long list's last line
+// ("Show all 24", "Show fewer"; "" when it fits)
+data class Todos(val head: String, val lines: List<TodoLine>, val open: Boolean = false, val toggle: String = "", val more: String = "", val moreValue: String = "", val count: String = "")
 
 data class ThreadView(
     val id: String, val title: String, val branch: String, val state: String,
@@ -591,7 +593,7 @@ private fun threadOf(o: JSONObject) = ThreadView(
             it.optJSONArray("buttons").map { b -> QButton(b.optString("label"), b.optString("action"), b.optString("value")) })
     },
     o.optJSONObject("todos")?.let { td -> Todos(td.optString("head"), td.optJSONArray("lines").map { TodoLine(it.optString("text"), it.optString("status")) },
-        td.optBoolean("open", true), td.optString("toggle"), td.optString("more"), td.optString("moreValue")) },
+        td.optBoolean("open", false), td.optString("toggle"), td.optString("more"), td.optString("moreValue"), td.optString("count")) },
     canChild = o.optBoolean("canChild"),
 )
 

@@ -252,6 +252,7 @@ native.thread.provider.item
 native.thread.search.clear
 native.thread.sending
 native.thread.subagents
+native.thread.todos
 native.thread.waiting
 palette.search
 sidebar.add.project
@@ -304,6 +305,7 @@ palette.terminal
 sched.kind.reminder
 terminal.pin
 thread.subagents
+thread.todos
 viewer.diff.pr
 viewer.files
 web.terminal.pinned

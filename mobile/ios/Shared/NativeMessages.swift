@@ -1229,6 +1229,11 @@ enum NativeMessages {
     tag == "ja" ? ("サブエージェント：" + arg0) : ("Subagents: " + arg0)
   }
 
+  // native.thread.todos
+  static func native_thread_todos(_ tag: String, _ arg0: String) -> String {
+    tag == "ja" ? ("ToDo：" + arg0) : ("To-do: " + arg0)
+  }
+
   // native.thread.waiting
   static func native_thread_waiting(_ tag: String, _ arg0: String) -> String {
     tag == "ja" ? (arg0 + "を待機中…") : ("Waiting for " + arg0 + "…")
@@ -1567,6 +1572,11 @@ enum NativeMessages {
   // thread.subagents
   static func thread_subagents(_ tag: String) -> String {
     tag == "ja" ? ("サブエージェント") : ("Subagents")
+  }
+
+  // thread.todos
+  static func thread_todos(_ tag: String) -> String {
+    tag == "ja" ? ("ToDo") : ("To-do")
   }
 
   // tools.pinned

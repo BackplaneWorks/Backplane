@@ -8,8 +8,9 @@ import ../src/app/layout.bend as L
 import ../src/core/subs.bend as SB
 import ../src/core/model.bend as M
 
-# Long threads' panes: the todo card opens and shuts with its head and shows
-# every step on "Show all" (client.bend's Todos), and the window's scrolling
+# Long threads' panes: the todo list starts shut, opens and shuts with its
+# head and shows every step on "Show all" (client.bend's Todos), and the
+# window's scrolling
 # panes (the subagents panel, the todo card) move by a row a wheel notch
 # within their rows (nui.bend's Pane, layout.bend's Pane).
 
@@ -31,6 +32,17 @@ def ui.of(a: U.Act) -> U.Ui:
 
 def fold(+u: U.Ui, +v: String) -> U.Ui:
   ui.of(U.Ui.act(u, "fold", v))
+
+# the person opens t1's list (its head, shut)
+def opened(+u: U.Ui) -> U.Ui:
+  fold(u, U.Todos.toggle(False{}, "t1"))
+
+def hit.value(m: Maybe<&2, N.Hit>) -> String:
+  match m:
+    case Some{N.Hit{_, _, _, _, _, value}}:
+      value
+    case None{}:
+      ""
 
 def nui.of(s: N.Step) -> N.Nui:
   match s:
@@ -95,8 +107,13 @@ def main() -> IO(Unit):
     C.Check.str("the row beside Stop selects", hit.action(N.Hit.find(hits(L.Sa.row(L.Ty.none(), task, 100, 900, 100)), 200, 110)), "select")
     +review : U.RpView = U.RpView{"erc", Nil{}, "ERC", "[Board](/tmp/board.kicad_pcb)", "", False{}}
     C.Check.str("a review link beats its scrolling pane", hit.action(N.Hit.find(hits(L.Rpw.body(True{}, L.Ty.none(), review, "t1", 0n, 100, 900, 500)), 125, 150)), "file-open")
+    # the window's todo list at the top (its head at y 500..530), shut
     +todo_out : L.Out = L.Lay.todos.k(True{}, L.Ty.none(), todos(4n), Nil{}, "", False{}, False{}, "t1", 0n, 4n, 100, 900, 500)
-    C.Check.str("the todo head beats its scrolling pane", hit.action(N.Hit.find(hits(todo_out), 200, 470)), "fold")
+    C.Check.str("the todo head beats its scrolling pane", hit.action(N.Hit.find(hits(todo_out), 200, 510)), "fold")
+    C.Check.str("a shut todo head opens it", hit.value(N.Hit.find(hits(todo_out), 200, 510)), "1todos:t1")
+    C.Check.str("shut, the window's list is one line", U32.show(L.Lay.tdbox(Nil{}, "")), "32")
+    C.Check.str("and takes that and its gap from the top", U32.show(L.Lay.tdh(todos(4n), Nil{}, "")), "44")
+    C.Check.str("no list takes nothing", U32.show(L.Lay.tdh(Nil{}, Nil{}, "")), "0")
     +ask : M.Ask = M.Ask{"a", "t1", "approval", "Bash", "Run ls", "", True{}, ""}
     +ask_out : L.Out = L.Ask.card(L.Ty.none(), ask, "", Map.new(&2, String), 100, 900, 100)
     C.Check.str("an approval's button beats its scrolling pane", hit.action(N.Hit.find(hits(ask_out), 880, (100 + L.Ask.h(L.Ty.none(), ask, Map.new(&2, String), 768) - 20 : U32))), "answer")
@@ -105,14 +122,18 @@ def main() -> IO(Unit):
     C.Check.str("a short list has no last line", U.Todos.more(I.En{}, False{}, todos(4n)), "")
     C.Check.str("a long one offers every step", U.Todos.more(I.En{}, False{}, many), "Show all 200")
     C.Check.str("shown all, it offers fewer", U.Todos.more(I.En{}, True{}, many), "Show fewer")
-    C.Check.str("the card starts open", bool(U.Todos.open(U.Ui.infos(u), "t1")), "true")
-    C.Check.str("and shows the fitted few", rows(u, many), "8")
-    C.Check.str("its head shuts it", bool(U.Todos.open(U.Ui.infos(fold(u, U.Todos.toggle(True{}, "t1"))), "t1")), "false")
-    C.Check.str("shut, it shows no steps", rows(fold(u, U.Todos.toggle(True{}, "t1")), many), "0")
-    C.Check.str("and opens again", bool(U.Todos.open(U.Ui.infos(fold(fold(u, U.Todos.toggle(True{}, "t1")), U.Todos.toggle(False{}, "t1"))), "t1")), "true")
-    C.Check.str("show all shows every step", rows(fold(u, U.Todos.more.ask(False{}, "t1")), many), "200")
-    C.Check.str("show fewer goes back", rows(fold(fold(u, U.Todos.more.ask(False{}, "t1")), U.Todos.more.ask(True{}, "t1")), many), "8")
-    C.Check.str("another thread's card is its own", bool(U.Todos.open(U.Ui.infos(fold(u, U.Todos.toggle(True{}, "t2"))), "t1")), "true")
+    C.Check.str("the list starts shut", bool(U.Todos.open(U.Ui.infos(u), "t1")), "false")
+    C.Check.str("and shows no steps", rows(u, many), "0")
+    C.Check.str("its head opens it", bool(U.Todos.open(U.Ui.infos(opened(u)), "t1")), "true")
+    C.Check.str("open, it shows the fitted few", rows(opened(u), many), "8")
+    C.Check.str("its head shuts it again", bool(U.Todos.open(U.Ui.infos(fold(opened(u), U.Todos.toggle(True{}, "t1"))), "t1")), "false")
+    C.Check.str("shut, it shows no steps", rows(fold(opened(u), U.Todos.toggle(True{}, "t1")), many), "0")
+    C.Check.str("and opens again", bool(U.Todos.open(U.Ui.infos(fold(fold(opened(u), U.Todos.toggle(True{}, "t1")), U.Todos.toggle(False{}, "t1"))), "t1")), "true")
+    C.Check.str("show all shows every step", rows(fold(opened(u), U.Todos.more.ask(False{}, "t1")), many), "200")
+    C.Check.str("show fewer goes back", rows(fold(fold(opened(u), U.Todos.more.ask(False{}, "t1")), U.Todos.more.ask(True{}, "t1")), many), "8")
+    C.Check.str("show all never opens a shut list", rows(fold(u, U.Todos.more.ask(False{}, "t1")), many), "0")
+    C.Check.str("another thread's list is its own", bool(U.Todos.open(U.Ui.infos(fold(u, U.Todos.toggle(False{}, "t2"))), "t1")), "false")
+    C.Check.str("and stays open when another opens", bool(U.Todos.open(U.Ui.infos(fold(opened(u), U.Todos.toggle(False{}, "t2"))), "t1")), "true")
     C.Check.str("a pane's hit value: key", N.Pane.at("subs:t1|7", 0n), "subs:t1")
     C.Check.str("a pane's hit value: its last row", N.Pane.at("subs:t1|7", 1n), "7")
     +n : N.Nui = N.Nui.init(u, 1400, 860)

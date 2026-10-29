@@ -1187,6 +1187,11 @@ struct ThreadScreen: View {
     var body: some View {
       let displayRevision = model.performanceRevision
       VStack(spacing: 0) {
+        // the to-do list's steps at the top, while the person has it open
+        // (the top bar's button opens and shuts it)
+        if let td = thread.todos, td.open == true {
+            TodosPanel(model: model, todos: td).disabled(!live)
+        }
         TimelineScroll(position: position, ids: thread.entries.map(\.id), earlier: thread.earlier ?? 0,
                        loadEarlier: { live && model.loadEarlier(thread.id, viewport: position.reading) },
                        later: thread.later ?? 0, loadLater: { live && model.loadLater(thread.id, viewport: position.reading) },
@@ -1337,6 +1342,21 @@ struct ThreadScreen: View {
                         .foregroundStyle(u.busy.isEmpty ? Color.secondary : PhaseColor.accent)
                     }
                     .accessibilityLabel(NativeMessages.native_thread_subagents(lang, u.word ?? u.busy))
+                    .disabled(!live)
+                }
+                // the to-do list beside them: its count, a tap opens or shuts
+                // its steps at the top of the thread (shut until the person
+                // opens it; nothing else opens it)
+                if let td = thread.todos {
+                    Button { if let t = td.toggle, !t.isEmpty { model.act("fold", t) } } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: "checklist")
+                            Text(td.count ?? "").font(.caption.monospacedDigit())
+                        }
+                        .foregroundStyle((td.open ?? false) ? PhaseColor.accent : Color.secondary)
+                    }
+                    .accessibilityLabel(NativeMessages.native_thread_todos(lang, td.count ?? ""))
+                    .accessibilityIdentifier("thread.todos")
                     .disabled(!live)
                 }
                 ForEach(thread.tools.filter { $0.action == "interrupt" }, id: \.self) { t in
