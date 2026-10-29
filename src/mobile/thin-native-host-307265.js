@@ -577,6 +577,10 @@ export class NativeThinHost307265 {
         s.deferredNavigation = { action, value, viewerIntent, target: copy(s.target), sel: s.session.sel, epoch: s.epoch };
         return true;
       }
+      // Once read navigation is held, a later action cannot overtake it and
+      // mutate the owner being left. Normal presenting-owner form edits still
+      // coalesce when no navigation is pending.
+      if (s.deferredNavigation) return !admission;
       if (!s.greeted || !((intent.kind === 'action' || intent.kind === 'search') && this.presenting(s))) return !admission;
     }
     // One page request at a time, each taken from the page shown. 'later'
