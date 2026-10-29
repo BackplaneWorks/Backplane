@@ -61,12 +61,12 @@ def page_visible_k(ok: Bool, +old: List<&2, String>, +fresh: List<&2, String>, +
     {H.History.ordered(visible, H.History.page.k(ok, old, fresh, candidate, visible, older)) == True{} : Bool}:
   match ok:
     case True{}: left(H.History.ordered(visible, candidate), Nat.is_ge(List.length(&2, String, candidate), List.length(&2, String, old)), h)
-    case False{}: adopt_visible(old, H.History.project(old, fresh, old, older), visible, before)
+    case False{}: adopt_visible(old, H.History.project.planned(old, fresh, old, older), visible, before)
 
 def page_visible(+old: List<&2, String>, +fresh: List<&2, String>, +keep: List<&2, String>, +visible: List<&2, String>, +older: Bool,
     before: {H.History.ordered(visible, old) == True{} : Bool}) ->
     {H.History.ordered(visible, H.History.page(old, fresh, keep, visible, older)) == True{} : Bool}:
-  +candidate = H.History.project(old, fresh, keep, older)
+  +candidate = H.History.project.planned(old, fresh, keep, older)
   page_visible_k(H.History.valid(old, candidate, visible), old, fresh, candidate, visible, older, before, {==})
 
 def page_size_k(ok: Bool, +old: List<&2, String>, +fresh: List<&2, String>, +candidate: List<&2, String>, +visible: List<&2, String>, +older: Bool,
@@ -74,9 +74,9 @@ def page_size_k(ok: Bool, +old: List<&2, String>, +fresh: List<&2, String>, +can
     {Nat.is_ge(List.length(&2, String, H.History.page.k(ok, old, fresh, candidate, visible, older)), List.length(&2, String, old)) == True{} : Bool}:
   match ok:
     case True{}: right(H.History.ordered(visible, candidate), Nat.is_ge(List.length(&2, String, candidate), List.length(&2, String, old)), h)
-    case False{}: adopt_size(old, H.History.project(old, fresh, old, older), visible)
+    case False{}: adopt_size(old, H.History.project.planned(old, fresh, old, older), visible)
 
 def page_size(+old: List<&2, String>, +fresh: List<&2, String>, +keep: List<&2, String>, +visible: List<&2, String>, +older: Bool) ->
     {Nat.is_ge(List.length(&2, String, H.History.page(old, fresh, keep, visible, older)), List.length(&2, String, old)) == True{} : Bool}:
-  +candidate = H.History.project(old, fresh, keep, older)
+  +candidate = H.History.project.planned(old, fresh, keep, older)
   page_size_k(H.History.valid(old, candidate, visible), old, fresh, candidate, visible, older, {==})

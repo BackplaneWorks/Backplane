@@ -59,6 +59,30 @@ def History.renamed(xs: List<&2, String>, +aliases: List<&2, Alias>) -> List<&2,
     case Nil{}: Nil{}
     case id <> rest: History.alias(id, aliases) <> History.renamed(rest, aliases)
 
+# A retained fold can already have a stable displayed key and a newer
+# canonical action target. Reuse that proved identity when the next page
+# ends inside the run and supplies no following shared row. Never infer a
+# new relationship merely because two fold headers are adjacent.
+def History.aliases.count(xs: List<&2, Alias>, +from: String, +to: String) -> Nat:
+  match xs:
+    case Nil{}: 0n
+    case Alias{f, t} <> rest:
+      Nat.add(Bool.pick(Nat, Bool.or(String.eq(f, from), String.eq(t, to)), 1n, 0n), History.aliases.count(rest, from, to))
+
+def History.aliases.kept(xs: List<&2, Alias>, +all: List<&2, Alias>, +old: List<&2, String>, +fresh: List<&2, String>) -> List<&2, Alias>:
+  match xs:
+    case Nil{}: Nil{}
+    case Alias{+from, +to} <> rest:
+      +eligible = Bool.and(String.starts_with(from, "fold:"), Bool.and(String.starts_with(to, "fold:"),
+        Bool.and(History.has(old, to), Bool.and(History.has(fresh, from),
+        Bool.and(Bool.not(History.has(old, from)), Bool.and(Bool.not(History.has(fresh, to)),
+          Nat.is_eq(History.aliases.count(all, from, to), 1n)))))))
+      History.aliases.k(eligible, from, to, History.aliases.kept(rest, all, old, fresh))
+
+def History.aliases.using(+old: List<&2, String>, +fresh: List<&2, String>, +known: List<&2, Alias>) -> List<&2, Alias>:
+  +held = History.aliases.kept(known, known, old, fresh)
+  List.append(&2, Alias, held, History.aliases(old, History.renamed(fresh, held)))
+
 # A bounded wire page is not the whole visible timeline. The presentation
 # host retains rows from the outgoing page until the reader leaves them.
 # Only identities are planned here; canonical entries and cursors stay put.
@@ -114,9 +138,12 @@ def History.project.k(shared: Bool, +old: List<&2, String>, +fresh: List<&2, Str
     case False{}:
       Bool.pick(List<&2, String>, older, List.append(&2, String, fresh, History.filter(old, keep)), List.append(&2, String, History.filter(old, keep), fresh))
 
+def History.project.planned(+old: List<&2, String>, +fresh: List<&2, String>, keep: List<&2, String>, older: Bool) -> List<&2, String>:
+  History.project.k(History.shared(old, fresh), old, fresh, keep, older)
+
 def History.project(+old: List<&2, String>, +fresh: List<&2, String>, keep: List<&2, String>, older: Bool) -> List<&2, String>:
   +named = History.renamed(fresh, History.aliases(old, fresh))
-  History.project.k(History.shared(old, named), old, named, keep, older)
+  History.project.planned(old, named, keep, older)
 
 # The visible source span must remain an ordered subsequence, including
 # split link rows and fold headers. A rejected plan leaves the picture alone.
@@ -148,16 +175,20 @@ def History.choose(ok: Bool, old: List<&2, String>, candidate: List<&2, String>)
 def History.adopt(+old: List<&2, String>, +candidate: List<&2, String>, visible: List<&2, String>) -> List<&2, String>:
   History.choose(History.valid(old, candidate, visible), old, candidate)
 
+# Page/refresh consume the exact identities already normalized by the
+# caller's returned alias plan. A second alias pass could discover another
+# relationship after the first rename that the host was never told about.
+# Inputs must already be alias-normalized, as the mobile adapter supplies.
 def History.refresh(+old: List<&2, String>, +fresh: List<&2, String>, keep: List<&2, String>, +visible: List<&2, String>, older: Bool) -> List<&2, String>:
-  +candidate = History.project(old, fresh, keep, older)
+  +candidate = History.project.planned(old, fresh, keep, older)
   History.choose(History.ordered(visible, candidate), old, candidate)
 
 def History.page.k(ok: Bool, +old: List<&2, String>, +fresh: List<&2, String>, candidate: List<&2, String>, +visible: List<&2, String>, older: Bool) -> List<&2, String>:
   match ok:
     case True{}: candidate
-    case False{}: History.adopt(old, History.project(old, fresh, old, older), visible)
+    case False{}: History.adopt(old, History.project.planned(old, fresh, old, older), visible)
 
 def History.page(+old: List<&2, String>, +fresh: List<&2, String>, keep: List<&2, String>, +visible: List<&2, String>, +older: Bool) -> List<&2, String>:
-  +candidate = History.project(old, fresh, keep, older)
+  +candidate = History.project.planned(old, fresh, keep, older)
   History.page.k(History.valid(old, candidate, visible), old, fresh, candidate, visible, older)
 

@@ -491,7 +491,11 @@ export class NativeThinHost307265 {
       // down while dropping the rows leading to it would create a gap.
       if (indices.length) for (const e of old.entries.slice(indices[0], indices.at(-1) + 1)) keep.add(e.id);
     }
+    // Identities only: no message bodies are copied into the lineage plan.
+    const identities = entries => entries.map(e => ({ id: e.id, kind: e.kind,
+      ...(e.kind === 'fold' ? { value: e.value, open: e.open } : {}) }));
     const plan = this.api.history({ old: old.entries.map(e => e.id), fresh: fresh.entries.map(e => e.id), keep: [...keep],
+      oldRows: identities(old.entries), freshRows: identities(fresh.entries),
       visible: (visible || old.entries).map(e => e.id), page: !!paged, older: paged?.direction !== 'newer' });
     const previous = new Map(old.entries.map(e => [e.id, e])), raw = new Map(fresh.entries.map(e => [e.id, e]));
     if (!object(plan) || !Array.isArray(plan.aliases) || plan.aliases.some(a => !exactKeys(a, ['from', 'to']) ||

@@ -31,9 +31,40 @@ def History.viewport(+input: J.Json) -> Bool:
   HW.History.viewport(History.strings(J.Json.elems(J.Json.get_obj(input, "ids"))), J.Json.get_str(input, "first", ""),
     J.Json.get_str(input, "last", ""), J.Json.get_str(input, "id", ""))
 
+# Mob.fold emits id=fold:<head> and value=<toggle><head>. Only a previously
+# retained/renamed fold has different displayed and canonical heads. That
+# action identity survives even when the next bounded page clips its tail.
+def History.fold.toggle(open: J.Json) -> String:
+  match open:
+    case J.Flag{True{}}: "0"
+    case J.Flag{False{}}: "1"
+    case _: ""
+
+def History.fold.head(+row: J.Json) -> String:
+  +id = J.Json.get_str(row, "id", "")
+  +value = J.Json.get_str(row, "value", "")
+  +toggle = History.fold.toggle(J.Json.get_obj(row, "open"))
+  Bool.pick(String, Bool.and(String.eq(J.Json.get_str(row, "kind", ""), "fold"),
+    Bool.and(String.starts_with(id, "fold:"), Bool.and(Nat.is_gt(String.length(id), 5n),
+      Bool.and(Nat.is_eq(String.length(toggle), 1n), Bool.and(String.starts_with(value, toggle), Nat.is_gt(String.length(value), 1n)))))), "fold:" ++ String.drop(value, 1n), "")
+
+def History.fold.current(rows: List<&2, J.Json>, +from: String) -> Bool:
+  match rows:
+    case Nil{}: False{}
+    case +row <> rest:
+      Bool.or(Bool.and(String.eq(J.Json.get_str(row, "id", ""), from), String.eq(History.fold.head(row), from)), History.fold.current(rest, from))
+
+def History.lineage(rows: List<&2, J.Json>, +fresh: List<&2, J.Json>) -> List<&2, HW.Alias>:
+  match rows:
+    case Nil{}: Nil{}
+    case +row <> rest:
+      +from = History.fold.head(row)
+      HW.History.aliases.k(History.fold.current(fresh, from), from, J.Json.get_str(row, "id", ""), History.lineage(rest, fresh))
+
 def History.plan(+input: J.Json) -> J.Json:
   +old = History.strings(J.Json.elems(J.Json.get_obj(input, "old")))
   +fresh = History.strings(J.Json.elems(J.Json.get_obj(input, "fresh")))
-  J.Json.obj([J.KV{"ids", J.Json.arr(History.json(History.plan.rows(J.Json.get_bool(input, "page", False{}), old, fresh, History.strings(J.Json.elems(J.Json.get_obj(input, "keep"))), History.strings(J.Json.elems(J.Json.get_obj(input, "visible"))), J.Json.get_bool(input, "older", True{}))))},
-    J.KV{"aliases", J.Json.arr(History.alias.json(HW.History.aliases(old, fresh)))}])
+  +aliases = HW.History.aliases.using(old, fresh, History.lineage(J.Json.elems(J.Json.get_obj(input, "oldRows")), J.Json.elems(J.Json.get_obj(input, "freshRows"))))
+  J.Json.obj([J.KV{"ids", J.Json.arr(History.json(History.plan.rows(J.Json.get_bool(input, "page", False{}), old, HW.History.renamed(fresh, aliases), History.strings(J.Json.elems(J.Json.get_obj(input, "keep"))), History.strings(J.Json.elems(J.Json.get_obj(input, "visible"))), J.Json.get_bool(input, "older", True{}))))},
+    J.KV{"aliases", J.Json.arr(History.alias.json(aliases))}])
 
