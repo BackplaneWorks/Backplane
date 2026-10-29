@@ -144,7 +144,7 @@
     "src/core/wnote.bend": "019cf6a357f4428774176585931a2df17b83d2347b9e1078428f578968e445d5",
     "src/mobile/hubs.bend": "8b5c6d93f51edd32ba76209516ad417b40f175aa7cdf21035dd4beb93e6e8f54",
     "src/mobile/screen.bend": "d3334e2a577435ddd319d39779bf1193cc158483aa61777ea4d04ae1ffcc7a70",
-    "src/server/thin-actor.bend": "c2bdffdf71e4a0c90722f3094fcf5898de62b8a3ad68a1101cd51aa5dba5256c",
+    "src/server/thin-actor.bend": "ad1ff678e5e416353959818db06886487cd2657a6267ab0902e5a3a8685eac2f",
     "src/server/thin-body.bend": "cc0b822d95259c88ce0261bb6bdfbb6903fad200c3eb57229d9dcfd56e0b1f46",
     "src/server/thin-mirror.bend": "b488dc7c45fe49bb1aa17966f454f1ee0e9cfef7db4d619c265c298c9bc94e92",
     "src/server/thin-sidebar.bend": "3f4f103551054d92d10a3d7d355f1b8db948900b83e2942009cb7d0e1e1cf5c7",
