@@ -35,10 +35,7 @@ def Vo.forever() -> Nat:
   4000000000n
 
 def Vo.exe() -> IO(String):
-  do IO<String>:
-    +d : String <- H.Sys.exe_dir()
-    ok : Bool <- K.Io.is_file(d ++ "/backplane-voice")
-    return Bool.pick(String, ok, d ++ "/backplane-voice", "backplane-voice")
+  K.Helper.find("backplane-voice")
 
 # Key and dictionary
 # ------------------

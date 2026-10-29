@@ -2976,6 +2976,22 @@ law todo_rows_last:
 law todo_rows_short:
   {TD.Todo.rows([TD.Todo{"1", "a", "", "completed"}, TD.Todo{"2", "b", "", "pending"}]) == [TD.TRow{"[x] a", "completed"}, TD.TRow{"[ ] b", "pending"}] : List<&2, TD.TRow>}
 
+# the list sits at the top of the thread as one line, shut until the
+# person opens it: nothing else opens it (not a new list, a turn, a thread
+# switch), only their own click, kept per thread
+law todos_start_shut:
+  {U.Todos.open(Map.new(&2, String), "t1") == False{} : Bool}
+
+law todos_click_opens:
+  {U.Todos.open(Map.set(&2, String, Map.new(&2, String), "fold:todos:t1", "1"), "t1") == True{} : Bool}
+
+law todos_shut_click_asks_open:
+  {U.Todos.toggle(False{}, "t1") == "1todos:t1" : String}
+
+# shut, it shows no steps
+law todos_shut_no_steps:
+  {U.Todos.rows(Map.new(&2, String), "t1", 100n, [TD.Todo{"1", "a", "", "pending"}]) == [] : List<&2, TD.TRow>}
+
 # an assistant message with a todo tool sets the thread's list, once
 law todo_write_sets_list:
   {List.length(&2, M.Change, H.Claude.todos(M.State.empty(), "t1", 5n, [J.Json.obj([J.KV{"type", J.Str{"tool_use"}}, J.KV{"name", J.Str{"TodoWrite"}}, J.KV{"input", J.Json.obj([J.KV{"todos", J.Json.arr([])}])}])])) == 1n : Nat}

@@ -465,11 +465,10 @@ def Pv.cli() -> IO(String):
     rt : K.Rt <- K.Rt.resolve(Result.default(&1, &1, U32 & String, String, e, ""), exe, Bool.pick(String, String.is_empty(data), home ++ "/.backplane-bend", data))
     return Pv.cli.k(rt)
 
+# (beside the hub, at the install's top for the desktop app's own hub, else
+# on PATH: K.Helper.find)
 def Pv.step2glb() -> IO(String):
-  do IO<String>:
-    +d : String <- H.Sys.exe_dir()
-    ok : Bool <- K.Io.is_file(d ++ "/backplane-step2glb")
-    return Bool.pick(String, ok, d ++ "/backplane-step2glb", "backplane-step2glb")
+  K.Helper.find("backplane-step2glb")
 
 def Pv.is_step(+p: String) -> Bool:
   Bool.or(String.ends_with(p, ".step"), Bool.or(String.ends_with(p, ".stp"), Bool.or(String.ends_with(p, ".STEP"), String.ends_with(p, ".STP"))))

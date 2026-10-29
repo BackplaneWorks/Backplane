@@ -5,8 +5,10 @@ import ./json.bend as J
 # plan artifact). Claude's task tools (TaskCreate, TaskUpdate; TodoWrite on
 # older versions), Codex's todo_list items and Grok's ACP plan all become
 # the same list of steps, each pending, in_progress or completed, stored as
-# JSON with the thread (TodosSet) and shown above the composer while the
-# turn runs or anything is left to do (laws todo_*).
+# JSON with the thread (TodosSet) and shown at the top of the thread,
+# beside its subagents, while the turn runs or anything is left to do (laws
+# todo_*). It shows as one line ("To-do 2/5") until the person opens it
+# (client.bend's Todos.open, laws todos_*).
 #
 # Claude's task tools change the list a step at a time, so the hub keeps
 # it: a created step waits under its tool call's id ("u:<id>") until the
@@ -165,13 +167,17 @@ def Todo.line(t: Todo) -> String:
       Bool.pick(String, String.eq(st, "completed"), "[x] " ++ text,
         Bool.pick(String, String.eq(st, "in_progress"), "[>] " ++ Todo.or(f, text), "[ ] " ++ text))
 
+# how far it got: "2/5", the steps completed of all
+def Todo.count(+ts: List<&2, Todo>) -> String:
+  Nat.show(Todo.done(ts)) ++ "/" ++ Nat.show(List.length(&2, Todo, ts))
+
 # the card's head: "Todo 2/5"
 def Todo.head(+ts: List<&2, Todo>) -> String:
-  "Todo " ++ Nat.show(Todo.done(ts)) ++ "/" ++ Nat.show(List.length(&2, Todo, ts))
+  "Todo " ++ Todo.count(ts)
 
 # What the card shows
 # -------------------
-# A long list does not fit above the composer, and its first steps are
+# A long list does not fit at the top of the thread, and its first steps are
 # mostly done: the card shows `Todo.fit()` steps from the one before the
 # first step not done, and a line each for the done steps before them and
 # the steps after them (laws todo_rows_*). Every client draws these rows.

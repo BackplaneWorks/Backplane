@@ -634,16 +634,18 @@ def View.sidebar.head(top: Bool, +lc: I.Loc, +ms: List<&2, U.MRow>, +open: Map<&
           D.El{"div", "", [D.At{"class", "sidebar-tools"}], WI.WIcon.button("settings-link", "flag", "settings", MSG.T.palette.settings(lc), "settings", 16, MSG.T.palette.settings(lc))
               <> View.machines.loc(lc, Nat.is_gt(List.length(&2, U.MRow, ms), 1n), U.Flag.get(open, "machines"), ms)}]
 
-# Under the top bar the sidebar starts with its filter, the add-project +
-# beside it and its own fold, a chevron like the rail's (host.js's
-# side-toggle, as the strip's chevron and Ctrl+B do); else the filter
+# Under the top bar the sidebar starts with its own fold, a chevron like
+# the rail's (host.js's side-toggle, as the strip's chevron and Ctrl+B
+# do), then its filter and the add-project + beside it. The fold comes
+# first so it stays where it is when the sidebar folds: the strip's
+# unfold chevron sits on the same spot (style.css); else the filter
 # follows the brand, Settings and the uberbot
 def View.sidebar.find(top: Bool, +lc: I.Loc, +active: Bool, +q: String) -> List<&2, D.Node> & List<&2, D.Node>:
   match top:
     case True{}:
-      ([D.El{"div", "", [D.At{"class", "find with-add"}], [WB.WB.input("proj-find", "pq", q, Bool.pick(String, active, MSG.T.palette.search(lc), MSG.T.sidebar.search.projects(lc)), "proj-go"),
-        WI.WIcon.button("icon add-project", "proj-open", "", MSG.T.sidebar.add.project(lc), "plus", 16, ""),
-        WI.WIcon.button("icon side-fold", "side-toggle", "", "Fold the sidebar · Ctrl+B", "chevron-left", 16, "")]}], Nil{})
+      ([D.El{"div", "", [D.At{"class", "find with-add"}], [WI.WIcon.button("icon side-fold", "side-toggle", "", "Fold the sidebar · Ctrl+B", "chevron-left", 16, ""),
+        WB.WB.input("proj-find", "pq", q, Bool.pick(String, active, MSG.T.palette.search(lc), MSG.T.sidebar.search.projects(lc)), "proj-go"),
+        WI.WIcon.button("icon add-project", "proj-open", "", MSG.T.sidebar.add.project(lc), "plus", 16, "")]}], Nil{})
     case False{}:
       (Nil{}, View.find.loc(lc, active, q))
 
@@ -1439,21 +1441,64 @@ def View.tdlines(rs: List<&2, TD.TRow>) -> List<&2, D.Node>:
     case +r <> rest:
       D.Dom.span("todo " ++ TD.TRow.status(r), TD.TRow.text(r)) <> View.tdlines(rest)
 
-# the agent's todo list above the queue (U.Todos.shown)
-# the todo card (client.bend's Todos): its head opens or shuts it, and a
-# long list ends in a line that shows every step or the fitted few again
+# The agent's todo list (U.Todos.shown) at the top of the thread, beside its
+# subagents and in their style: one line, "To-do 3/7", shut until the
+# person opens it (client.bend's Todos.open: nothing else ever opens it).
+# Open, its steps show under it, and a long list ends in a line that shows
+# every step or the fitted few again. Under the top bar the bar's To-do cell
+# is the head (View.chrome.todos) and the dock only the steps
+# (View.todos.dock); without the bar it is a section with its own head.
 def View.todo.more(+text: String, +ask: String) -> List<&2, D.Node>:
   Bool.pick(List<&2, D.Node>, String.is_empty(text), Nil{}, [D.Dom.button("more", "fold", ask, text, text)])
 
-def View.todos.k(+lc: I.Loc, +open: Bool, +all: Bool, +th: String, +ts: List<&2, TD.Todo>, +info: Map<&2, String>) -> List<&2, D.Node>:
-  WI.WIcon.after("head", "fold", U.Todos.toggle(open, th), Bool.pick(String, open, MSG.T.todos.hide(lc), MSG.T.todos.show(lc)), TD.Todo.head(ts),
-    Bool.pick(String, open, "chevron-down", "chevron-right"), 14)
-    <> List.append(&2, D.Node, View.tdlines(U.Todos.rows(info, th, U.Todos.cap.all(), ts)),
-      Bool.pick(List<&2, D.Node>, open, View.todo.more(U.Todos.more(lc, all, ts), U.Todos.more.ask(all, th)), Nil{}))
+def View.todo.more.if(open: Bool, +lc: I.Loc, +all: Bool, +th: String, +ts: List<&2, TD.Todo>) -> List<&2, D.Node>:
+  match open:
+    case True{}: View.todo.more(U.Todos.more(lc, all, ts), U.Todos.more.ask(all, th))
+    case False{}: Nil{}
 
+# the steps (none shut) and the last line
+def View.todos.rows(+lc: I.Loc, +open: Bool, +all: Bool, +th: String, +ts: List<&2, TD.Todo>, +info: Map<&2, String>) -> List<&2, D.Node>:
+  List.append(&2, D.Node, View.tdlines(U.Todos.rows(info, th, U.Todos.cap.all(), ts)), View.todo.more.if(open, lc, all, th, ts))
+
+def View.todos.body(rows: List<&2, D.Node>) -> D.Node:
+  D.El{"div", "todo-rows", [D.At{"id", "todo-rows"}, D.At{"class", "todos-body"}], rows}
+
+def View.todos.head(+lc: I.Loc, +open: Bool, +th: String, +ts: List<&2, TD.Todo>) -> D.Node:
+  D.El{"button", "todos-head", [D.At{"class", "todos-head"}, D.At{"type", "button"},
+    D.At{"aria-expanded", Bool.pick(String, open, "true", "false")}, D.At{"aria-controls", "todo-rows"},
+    D.At{"data-value", U.Todos.toggle(open, th)}, D.On{"click", "fold"},
+    D.At{"title", Bool.pick(String, open, MSG.T.todos.hide(lc), MSG.T.todos.show(lc))}],
+    [D.Dom.span("todos-label", MSG.T.thread.todos(lc)), D.Dom.span("todos-summary", TD.Todo.count(ts)), WI.WIcon.svg(Bool.pick(String, open, "chevron-down", "chevron-right"), 14)]}
+
+def View.todos.k(+lc: I.Loc, +open: Bool, +all: Bool, +th: String, +ts: List<&2, TD.Todo>, +info: Map<&2, String>) -> D.Node:
+  D.El{"section", "todos", [D.At{"aria-label", MSG.T.thread.todos(lc)}, D.At{"class", "todos" ++ Bool.pick(String, open, "", " shut")}],
+    [View.todos.head(lc, open, th, ts), View.todos.body(View.todos.rows(lc, open, all, th, ts, info))]}
+
+# without the top bar: the section, its head and (open) its steps
 def View.todos(+lc: I.Loc, +info: Map<&2, String>, +th: String, +ts: List<&2, TD.Todo>) -> D.Node:
-  D.El{"div", "", [D.At{"class", Bool.pick(String, U.Todos.all(info, th), "todos all", "todos")}], Bool.pick(List<&2, D.Node>, List.is_empty(&2, TD.Todo, ts), Nil{},
-    View.todos.k(lc, U.Todos.open(info, th), U.Todos.all(info, th), th, ts, info))}
+  View.todos.k(lc, U.Todos.open(info, th), U.Todos.all(info, th), th, ts, info)
+
+# under the top bar: only the steps, while the bar's To-do cell has them open
+def View.todos.dock.k(open: Bool, +lc: I.Loc, +info: Map<&2, String>, +th: String, +ts: List<&2, TD.Todo>) -> List<&2, D.Node>:
+  match open:
+    case True{}:
+      [D.El{"section", "todos", [D.At{"aria-label", MSG.T.thread.todos(lc)}, D.At{"class", "todos dock"}], [View.todos.body(View.todos.rows(lc, True{}, U.Todos.all(info, th), th, ts, info))]}]
+    case False{}:
+      Nil{}
+
+def View.todos.dock(+lc: I.Loc, +info: Map<&2, String>, +th: String, +ts: List<&2, TD.Todo>) -> List<&2, D.Node>:
+  View.todos.dock.k(Bool.and(Bool.not(List.is_empty(&2, TD.Todo, ts)), U.Todos.open(info, th)), lc, info, th, ts)
+
+def View.todos.box(none: Bool, +lc: I.Loc, +info: Map<&2, String>, +th: String, +ts: List<&2, TD.Todo>) -> List<&2, D.Node>:
+  match none:
+    case True{}: Nil{}
+    case False{}: [View.todos(lc, info, th, ts)]
+
+# what the thread's page draws of it, right under its subagents
+def View.thread.todos.own(own: Bool, +lc: I.Loc, +info: Map<&2, String>, +th: String, +ts: List<&2, TD.Todo>) -> List<&2, D.Node>:
+  match own:
+    case True{}: View.todos.dock(lc, info, th, ts)
+    case False{}: View.todos.box(List.is_empty(&2, TD.Todo, ts), lc, info, th, ts)
 
 # context handed over to go with the next message (M.Queue.context), each
 # with its buttons (U.Qu.row_buttons)
@@ -3329,13 +3374,13 @@ def View.thread.p(+lc: I.Loc, +u: U.Ui, t: M.Thread, pend: List<&2, String>, +at
         View.kx.note(U.KX.note(nf, sel), nf, sel), View.kn.loc(lc, U.Tour.kn(u, U.KN.thread(nf, st, sel)), True{}),
         View.thread.workbar.own(own, lc, BI.BU.chat.summary(st, id), st, nf, id, turn, pe, View.running(turn)),
         View.thread.subs.own(own, lc, st, nf, id, now),
+        View.thread.todos.own(own, lc, nf, id, U.Todos.shown(st, id, View.running(turn))),
         [D.El{"div", "timeline", [D.At{"class", "timeline"}, D.At{"id", "timeline"}], List.concat(&2, D.Node, [
           fab, View.parent(st, id, U.Tasks.up(st, id)),
           [D.El{"div", "work", [D.At{"class", "work"}], View.pins.loc(lc, U.Ec.pins(U.Ec.make(U.MailvLocal.terms(tr), st, id, now), st, id), U.Ec.make(U.MailvLocal.terms(tr), st, id, now))}],
           View.paged(lc, drafts, M.State.mine(st, id), st, id, nf, View.running(turn), U.Ec.make(U.MailvLocal.terms(tr), st, id, now)),
           View.sending.loc(lc, pend), View.thread.live.loc(lc, st, nf, live, id), View.hold.pill(pill)])},
          View.asks.box(lc, st, id, U.Str.get(drafts, sel), nf, drafts),
-         View.todos(lc, nf, id, U.Todos.shown(st, id, View.running(turn))),
          View.queued(lc, M.Queue.context(M.Queue.items(st, id)), View.running(turn))],
         rd, [View.composer.t(lc, st, sel, drafts, op, nf, turn, pr, mo, atts, up, vo, mic)]]))
 
@@ -4611,17 +4656,34 @@ def View.chrome.subs.k(+lc: I.Loc, +open: Bool, +th: String, +rs: List<&2, SB.Su
 def View.chrome.subs(+lc: I.Loc, +st: M.State, +info: Map<&2, String>, +th: String, +rs: List<&2, SB.SubRow>) -> List<&2, D.Node>:
   D.Dom.when(Bool.and(Bool.not(List.is_empty(&2, SB.SubRow, rs)), Bool.not(US.Ub.chat.is(st, th))), View.chrome.subs.k(lc, SB.Subs.panel.open(info, th, rs), th, rs, info))
 
+# the to-do list beside them: "To-do 3/7", a click opens or shuts its steps
+# under the bar (View.todos.dock); shut until the person opens it
+def View.chrome.todos.k(+lc: I.Loc, +open: Bool, +th: String, +ts: List<&2, TD.Todo>) -> D.Node:
+  D.El{"button", "todos-head", [D.At{"class", "kv todos-head"}, D.At{"type", "button"},
+    D.At{"aria-expanded", Bool.pick(String, open, "true", "false")}, D.At{"aria-controls", "todo-rows"},
+    D.At{"data-value", U.Todos.toggle(open, th)}, D.On{"click", "fold"},
+    D.At{"title", Bool.pick(String, open, MSG.T.todos.hide(lc), MSG.T.todos.show(lc))}],
+    [D.Dom.span("k", MSG.T.thread.todos(lc)), D.Dom.span("v", TD.Todo.count(ts)), WI.WIcon.svg("chevron-down", 12)]}
+
+def View.chrome.todos.if(none: Bool, +lc: I.Loc, +info: Map<&2, String>, +th: String, +ts: List<&2, TD.Todo>) -> List<&2, D.Node>:
+  match none:
+    case True{}: Nil{}
+    case False{}: [View.chrome.todos.k(lc, U.Todos.open(info, th), th, ts)]
+
+def View.chrome.todos(+lc: I.Loc, +info: Map<&2, String>, +th: String, +ts: List<&2, TD.Todo>) -> List<&2, D.Node>:
+  View.chrome.todos.if(List.is_empty(&2, TD.Todo, ts), lc, info, th, ts)
+
 def View.chrome.changes(+lc: I.Loc, +n: Nat) -> List<&2, D.Node>:
   D.Dom.when(Nat.is_gt(n, 0n), View.chrome.kv("changes", View.chrome.changes.tip(lc), View.chrome.changes.k(lc), [D.Dom.span("v", Nat.show(n))]))
 
 def View.chrome.branch(+b: String) -> List<&2, D.Node>:
   D.Dom.when(Bool.not(String.is_empty(b)), D.El{"span", "", [D.At{"class", "kv branch"}, D.At{"title", b}], [WI.WIcon.svg("git-branch", 12), D.Dom.span("v", b)]})
 
-# a thread's cells: its state, subagents, design changes, branch and chip;
+# a thread's cells: its state, subagents, to-do list, design changes, branch and chip;
 # none for a thread this client has not got yet (gone: U.Ui.thread's
 # blank, as on the page the browser draws while the hub's is on its way),
 # so the State cell never says "idle" for a thread it knows nothing of
-def View.chrome.cells(gone: Bool, +lc: I.Loc, +st: M.State, +nf: Map<&2, String>, +id: String, turn: M.TurnState, +pending: Nat, +branch: String, +now: Nat) -> List<&2, D.Node>:
+def View.chrome.cells(gone: Bool, +lc: I.Loc, +st: M.State, +nf: Map<&2, String>, +id: String, +turn: M.TurnState, +pending: Nat, +branch: String, +now: Nat) -> List<&2, D.Node>:
   match gone:
     case True{}:
       Nil{}
@@ -4629,6 +4691,7 @@ def View.chrome.cells(gone: Bool, +lc: I.Loc, +st: M.State, +nf: Map<&2, String>
       List.concat(&2, D.Node, [
         [View.chrome.state(lc, st, nf, id, turn, pending)],
         View.chrome.subs(lc, st, nf, id, SB.Subs.rows(st, nf, id, now)),
+        View.chrome.todos(lc, nf, id, U.Todos.shown(st, id, View.running(turn))),
         View.chrome.changes(lc, HS.Hist.changes(M.State.steps(st, id))),
         View.chrome.branch(branch),
         View.boat.chip.loc(lc, UZ.Chip.of(st, id, now))])

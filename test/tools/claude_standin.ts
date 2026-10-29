@@ -31,7 +31,11 @@
 //                "<tag>0 <tag>1 ..." (tag: the message's last word),
 //                BP_STREAM_MS (150) apart, then posts them whole (each
 //                followed by BP_STREAM_SEP, " "; "\n\n" makes lines);
-//                "tools:N" in the message runs N Bash calls first
+//                "tools:N" in the message runs N Bash calls first;
+//                "todos:N/D" sets a to-do list first (TodoWrite): N
+//                steps, the first D done, the next in progress;
+//                "agents:N" runs N background subagents (Agent calls)
+//                that finish once the text is posted
 //   delegate     the first command calls the hub's delegate_task (its MCP
 //                URL from --mcp-config) for a child "mode:plain child
 //                work", then ends; later commands as plain
@@ -323,6 +327,25 @@ async function run(c: Cmd, firstOne: boolean) {
       await sleep(ms);
       emit({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content: `${k}: (footprint "${tag}" (layer "F.Cu"))` }] }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
     }
+    // "todos:N/D": the agent's to-do list, N steps with the first D done
+    const todo = /todos:(\d+)\/(\d+)/.exec(c.text);
+    if (todo) {
+      const n = Number(todo[1]), d = Number(todo[2]), id = `toolu_${rnd()}`;
+      const todos = Array.from({ length: n }, (_, k) => ({ content: `Step ${k + 1} of ${tag}`, activeForm: `Doing step ${k + 1}`,
+        status: k < d ? "completed" : k === d ? "in_progress" : "pending" }));
+      emit({ type: "assistant", message: { id: `msg_${rnd()}`, type: "message", role: "assistant", model: "claude-haiku-4-5-20251001",
+        content: [{ type: "tool_use", id, name: "TodoWrite", input: { todos } }], usage: { input_tokens: 10, output_tokens: 5 } }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
+      emit({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content: "Todos have been modified successfully." }] }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
+    }
+    // "agents:N": N subagents in the background (task_started), ended after the text
+    const agents = Array.from({ length: Number(/agents:(\d+)/.exec(c.text)?.[1] ?? 0) }, (_, k) => {
+      const task = `a${process.pid}x${rnd()}`, tool = `toolu_${task}`, description = `Subagent ${k + 1} for ${tag}`;
+      emit({ type: "assistant", message: { id: `msg_${rnd()}`, type: "message", role: "assistant", model: "claude-haiku-4-5-20251001",
+        content: [{ type: "tool_use", id: tool, name: "Agent", input: { description, prompt: `Look into ${tag}`, subagent_type: "general-purpose", run_in_background: true } }], usage: { input_tokens: 10, output_tokens: 5 } }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
+      emit({ type: "system", subtype: "task_started", task_id: task, tool_use_id: tool, description, task_type: "local_agent", is_backgrounded: true, session_id: session });
+      emit({ type: "user", message: { role: "user", content: [{ tool_use_id: tool, type: "tool_result", content: `Async agent launched: ${task}` }] }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
+      return { task, tool };
+    });
     let full = "";
     emit({ type: "stream_event", event: { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
     for (let i = 0; i < n; i++) {
@@ -333,6 +356,8 @@ async function run(c: Cmd, firstOne: boolean) {
     }
     log(`STREAMED ${tag}`);
     say(full);
+    for (const a of agents)
+      emit({ type: "system", subtype: "task_notification", task_id: a.task, tool_use_id: a.tool, status: "completed", summary: `${a.task} done`, session_id: session });
     result(full);
     lc(c.uuid, "completed");
     return;

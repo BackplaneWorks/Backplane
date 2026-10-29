@@ -322,6 +322,17 @@ bar reads "Settings / page") and closes it. The "Jump or run a command" field
 (Ctrl+K) opens the palette. At 420 px wide: the list shows the mark and
 Projects; a thread shows "‹ title ▾" with State under it; ‹ goes back.
 
+**S50 The to-do list stays out of the way** (W D A)
+Send "todos:7/3 agents:1 plan" (the stand-in sets a to-do list of 7 steps,
+3 done, and runs a subagent): the top bar shows "TO-DO 3/7" right after
+Subagents (A: a checklist button with 3/7 beside the subagents' button),
+shut: no steps anywhere and nothing between the timeline and the composer.
+Click it: its steps show under the bar ("… 1 done", "[>] Doing step 4", …,
+"Show all 7"); click again: shut. Shut, send "todos:7/5 more": through the
+turn and after it the list stays shut and reads 5/7; go to another thread
+and back: still shut. Open it, go to another thread and back: still open.
+At 420 px wide the cell sits in the second row of cells.
+
 **S38 Buy in the rail** (W D)
 The test hub starts with Ordering off (hub.sh sets it, though a person's
 default is on) and the order server a dead local address. Point
