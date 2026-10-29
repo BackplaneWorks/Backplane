@@ -543,12 +543,21 @@ def Files.read(+root: String) -> IO(Files):
 # KiStack
 # -------
 
-# KiStack's skills come with the app: scripts/build-kistack.sh puts the
-# pinned commit's skills/ (checked against deploy/kistack.lock), its LICENSE
-# and a plugin.json of ours in <exe dir>/kistack, which every Claude thread
-# loads with --plugin-dir. The hub never fetches KiStack (it took the
-# repository's newest commit at each start, its own plugin manifest too, so
-# a hook or an .mcp.json there would have run in every Claude session).
+# KiStack's KiCad skills (github.com/BackplaneWorks/kistack, formerly
+# American-Embedded/KiStack, which GitHub redirects there) come two
+# ways, and every Claude thread loads the one in use with --plugin-dir (the
+# other agents get its skills in their <skills> block, server.bend's
+# Skills.scan):
+# - synced: at every start, once the hub serves, its default branch's newest
+#   commit is fetched in the background into <home>/kistack (KiStack.sync;
+#   server.bend's KSync.*). It wins whenever it is complete (KiStack.pick).
+# - bundled: scripts/build-kistack.sh puts the pinned commit (checked
+#   against deploy/kistack.lock) in <exe dir>/kistack (KiStack.dir), the
+#   offline fallback.
+# Either way only skills/** and the LICENSE are taken (KiStack.kept), with a
+# plugin.json of ours (KiStack.manifest): never the repository's own
+# manifest, hooks, .mcp.json, commands or agents, which would run in every
+# Claude session (an older hub took its whole newest commit: f31414b9d).
 # The desktop app's own hub runs from <prefix>/desktop/runtime/resources/
 # backplane-service in a Linux install (scripts/install-release.sh), which
 # puts KiStack in <prefix>/kistack, beside the classic hub: that one is its.
@@ -562,8 +571,344 @@ def KiStack.dir.k(desk: Bool, +exe: String) -> String:
     case False{}:
       exe ++ "/kistack"
 
+# the bundled copy
 def KiStack.dir(+exe: String) -> String:
   KiStack.dir.k(String.ends_with(exe, KiStack.desktop()), exe)
+
+# the synced copy, in the hub's home
+def KiStack.home(+home: String) -> String:
+  home ++ "/kistack"
+
+# where a sync stages the archive and the new copy: in the home too, so
+# the copy moves into place by a rename
+def KiStack.stage(+home: String) -> String:
+  home ++ "/kistack.sync"
+
+# Backplane's own plugin manifest (scripts/build-kistack.sh writes the same)
+def KiStack.manifest() -> String:
+  "{\"name\":\"kistack\",\"description\":\"KiStack KiCad skills by American Embedded\"}"
+
+# the copy in use: the synced one when it is complete, else the bundled one
+def KiStack.pick(synced: Bool, +home: String, +bundled: String) -> String:
+  match synced:
+    case True{}:
+      KiStack.home(home)
+    case False{}:
+      bundled
+
+# a Claude thread's --plugin-dir/--add-dir: the synced copy when it is
+# complete, else what the boot found (the bundled copy, or none)
+def KiStack.dirs(synced: Bool, +home: String, boot: List<&2, String>) -> List<&2, String>:
+  match synced:
+    case True{}:
+      [KiStack.home(home)]
+    case False{}:
+      boot
+
+# what a sync keeps of the repository (a path inside it): skills/** and its
+# LICENSE, nothing else
+def KiStack.kept(+path: String) -> Bool:
+  Bool.or(String.starts_with(path, "skills/"), String.eq(path, "LICENSE"))
+
+# Commits
+# -------
+
+def KiStack.hex.k(+c: U32) -> Bool:
+  Bool.or(Bool.and(U32.is_ge(c, 48), U32.is_le(c, 57)), Bool.and(U32.is_ge(c, 97), U32.is_le(c, 102)))
+
+def KiStack.hex(s: String) -> Bool:
+  match s:
+    case SNil{}:
+      True{}
+    case SCon{Chr{+c}, t}:
+      Bool.and(KiStack.hex.k(c), KiStack.hex(t))
+
+def KiStack.sha.k(forty: Bool, +s: String) -> String:
+  match forty:
+    case True{}:
+      Bool.pick(String, KiStack.hex(s), s, "")
+    case False{}:
+      ""
+
+def KiStack.first(+text: String) -> String:
+  String.trim(Maybe.default(&2, String, List.head(&2, String, String.lines(text)), ""))
+
+def KiStack.rev.of(+line: String) -> String:
+  KiStack.sha.k(Nat.is_eq(String.length(line), 40n), line)
+
+# the commit a REVISION file (or GitHub's answer) names: its first line when
+# that is 40 lowercase hex digits, else "" (a copy from a local source says
+# "local", never the newest commit)
+def KiStack.rev(+text: String) -> String:
+  KiStack.rev.of(KiStack.first(text))
+
+# the installed commit a sync compares with: only a complete copy's
+def KiStack.have(ok: Bool, +text: String) -> String:
+  match ok:
+    case True{}:
+      KiStack.rev(text)
+    case False{}:
+      ""
+
+# a script's last non-empty line
+def KiStack.last(ls: List<&2, String>, +acc: String) -> String:
+  match ls:
+    case Nil{}:
+      acc
+    case +l <> t:
+      KiStack.last(t, Bool.pick(String, String.is_empty(String.trim(l)), acc, String.trim(l)))
+
+def KiStack.got.ok(local: Bool, +r: String) -> String:
+  match local:
+    case True{}:
+      r
+    case False{}:
+      KiStack.rev(r)
+
+def KiStack.got.k(got: Bool, +r: String) -> String:
+  match got:
+    case True{}:
+      KiStack.got.ok(String.eq(r, "local"), r)
+    case False{}:
+      ""
+
+def KiStack.got.w(+w: String) -> String:
+  KiStack.got.k(String.starts_with(w, "got "), String.drop(w, 4n))
+
+# what the fetch got ("got <commit>" or "got local"); "" when it stopped
+# ("up to date at <commit>", "skip: why", "fail: why", or nothing when it
+# was timed out)
+def KiStack.got(+out: String) -> String:
+  KiStack.got.w(KiStack.last(String.lines(out), ""))
+
+# The archive
+# -----------
+# A tar listing's entries all sit in one top folder (GitHub's
+# "kistack-<commit>/"); the members extracted are <top>/skills and, when
+# there is one, <top>/LICENSE (each with what is under it, KiStack.kept).
+
+def KiStack.part(+l: String) -> String:
+  Maybe.default(&2, String, List.head(&2, String, String.split(l, '/')), "")
+
+def KiStack.top.step(+acc: String, +l: String) -> String:
+  Bool.pick(String, Bool.or(Bool.not(String.is_empty(acc)), Bool.or(String.is_empty(l), String.eq(l, "pax_global_header"))), acc, KiStack.part(l))
+
+# the top folder: the first part of the first entry
+def KiStack.top(ls: List<&2, String>, +acc: String) -> String:
+  match ls:
+    case Nil{}:
+      acc
+    case +l <> t:
+      KiStack.top(t, KiStack.top.step(acc, l))
+
+# an entry's path inside the repository ("" when it is not under top)
+def KiStack.inside(+top: String, +name: String) -> String:
+  Bool.pick(String, String.starts_with(name, top ++ "/"), String.drop(name, Nat.add(String.length(top), 1n)), "")
+
+def KiStack.in.k(+p: String, +root: String) -> Bool:
+  Bool.and(KiStack.kept(p), Bool.or(String.eq(p, root), String.starts_with(p, root ++ "/")))
+
+# whether an entry is kept and under root ("skills" or "LICENSE")
+def KiStack.in(+top: String, +root: String, +name: String) -> Bool:
+  KiStack.in.k(KiStack.inside(top, name), root)
+
+def KiStack.any(ls: List<&2, String>, +top: String, +root: String, acc: Bool) -> Bool:
+  match ls:
+    case Nil{}:
+      acc
+    case +l <> t:
+      KiStack.any(t, top, root, Bool.or(acc, KiStack.in(top, root, l)))
+
+def KiStack.lic(has: Bool, +top: String) -> List<&2, String>:
+  match has:
+    case True{}:
+      [top ++ "/LICENSE"]
+    case False{}:
+      Nil{}
+
+def KiStack.members.k(skills: Bool, lic: Bool, +top: String) -> List<&2, String>:
+  match skills:
+    case True{}:
+      (top ++ "/skills") <> KiStack.lic(lic, top)
+    case False{}:
+      Nil{}
+
+def KiStack.members.of(+ls: List<&2, String>, +top: String) -> List<&2, String>:
+  KiStack.members.k(Bool.and(Bool.not(String.is_empty(top)), KiStack.any(ls, top, "skills", False{})), KiStack.any(ls, top, "LICENSE", False{}), top)
+
+# the members to extract, from the archive's listing (tar -tzf): none when
+# it has no skills/ (the install then stops)
+def KiStack.members(+listing: String) -> List<&2, String>:
+  KiStack.members.of(String.lines(listing), KiStack.top(String.lines(listing), ""))
+
+# The sync
+# --------
+# Two scripts, POSIX sh and nothing GNU (macOS runs them as is), each under
+# a time limit. On Windows the fetch says so and stops: the bundled copy is
+# used there. Whatever fails, the copy in place stays.
+
+# why a hub does not sync ("" when it does): turned off; a hub on a copied
+# log (core/copy.bend: no network); a test hub (stand-in agents,
+# BACKPLANE_AGENTS) with no local source, unless BACKPLANE_KISTACK_SYNC=1
+def KiStack.off.k(no: Bool, yes: Bool, +agents: String, +src: String) -> String:
+  match no:
+    case True{}:
+      "BACKPLANE_KISTACK_SYNC=0"
+    case False{}:
+      Bool.pick(String, Bool.or(yes, Bool.or(String.is_empty(agents), Bool.not(String.is_empty(src)))), "",
+        "stand-in agents (BACKPLANE_AGENTS) and no BACKPLANE_KISTACK_SOURCE")
+
+def KiStack.off(+sync: String, copy: Bool, +agents: String, +src: String) -> String:
+  match copy:
+    case True{}:
+      "a hub on a copied log (BACKPLANE_COPY=1) reaches no network"
+    case False{}:
+      KiStack.off.k(String.eq(sync, "0"), String.eq(sync, "1"), agents, src)
+
+# The fetch: `get.sh DEST STAGE SOURCE HAVE MAX UNPACKED`. A swap cut short
+# is undone first (DEST.old back). With no SOURCE it asks GitHub for the
+# default branch's newest commit, stops ("up to date") when that is HAVE,
+# else downloads its archive; SOURCE (BACKPLANE_KISTACK_SOURCE, for
+# tests) is a local .tar.gz like GitHub's or a folder, packed the same way.
+# The archive is bounded (MAX bytes, UNPACKED bytes unpacked, 5000
+# entries) and listed into STAGE/list. Its last line: "got <commit>" or
+# "got local", "up to date at <commit>", "skip: why", "fail: why".
+def KiStack.get.sh() -> String:
+  "d=$1 st=$2 src=$3 have=$4 max=$5 unz=$6\n"
+    ++ "case \"$(uname -s 2>/dev/null)\" in CYGWIN*|MINGW*|MSYS*|Windows*) echo 'skip: not on Windows yet (the bundled copy is used)'; exit 0;; esac\n"
+    ++ "[ -d \"$d\" ] || [ ! -f \"$d.old/.claude-plugin/plugin.json\" ] || mv \"$d.old\" \"$d\"\n"
+    ++ "fail() { echo \"fail: $*\"; rm -rf \"$st\"; exit 1; }\n"
+    ++ "rm -rf \"$st\" && mkdir -p \"$st\" || fail \"cannot write $st\"\n"
+    ++ "z=$st/k.tgz\n"
+    ++ "if [ -n \"$src\" ]; then\n"
+    ++ "  rev=local\n"
+    ++ "  if [ -d \"$src\" ]; then tar -czf \"$z\" --exclude .git -C \"$(dirname \"$src\")\" \"$(basename \"$src\")\" 2>/dev/null || fail \"cannot pack $src\"\n"
+    ++ "  elif [ -f \"$src\" ]; then cp \"$src\" \"$z\" || fail \"cannot read $src\"\n"
+    ++ "  else fail \"no KiStack at $src\"; fi\n"
+    ++ "else\n"
+    ++ "  rev=$(curl -fsSL --proto =https --proto-redir =https --connect-timeout 15 --max-time 30 -H 'Accept: application/vnd.github.sha' https://api.github.com/repos/BackplaneWorks/kistack/commits/HEAD 2>\"$st/err\") || fail \"cannot ask GitHub for the newest commit ($(head -n 1 \"$st/err\"))\"\n"
+    ++ "  case $rev in ''|*[!0-9a-f]*) fail 'GitHub named no commit';; esac\n"
+    ++ "  [ ${#rev} = 40 ] || fail 'GitHub named no commit'\n"
+    ++ "  if [ \"$rev\" = \"$have\" ]; then rm -rf \"$st\"; echo \"up to date at $rev\"; exit 0; fi\n"
+    ++ "  curl -fsSL --proto =https --proto-redir =https --connect-timeout 15 --max-time 120 --max-filesize \"$max\" -o \"$z\" \"https://codeload.github.com/BackplaneWorks/kistack/tar.gz/$rev\" 2>\"$st/err\" || fail \"the download failed ($(head -n 1 \"$st/err\"))\"\n"
+    ++ "fi\n"
+    ++ "[ \"$(wc -c < \"$z\" | tr -d ' ')\" -le \"$max\" ] || fail \"the archive is over $max bytes\"\n"
+    ++ "[ \"$(gzip -dc < \"$z\" 2>/dev/null | head -c \"$((unz + 1))\" | wc -c | tr -d ' ')\" -le \"$unz\" ] || fail \"the archive unpacks to over $unz bytes\"\n"
+    ++ "tar -tzf \"$z\" > \"$st/list\" 2>/dev/null || fail 'the archive does not list'\n"
+    ++ "[ \"$(wc -l < \"$st/list\" | tr -d ' ')\" -le 5000 ] || fail 'the archive has over 5000 entries'\n"
+    ++ "echo \"got $rev\"\n"
+
+# The install: `put.sh DEST STAGE COMMIT MANIFEST MEMBERS...` extracts only
+# the members (KiStack.members; none stops it), refuses a link or anything
+# but files and folders among them, needs a skills/*/SKILL.md, writes our
+# manifest and REVISION beside them in STAGE/new, and only then swaps:
+# DEST to DEST.old, STAGE/new to DEST (the old copy back if that fails),
+# DEST.old gone. Its last line: "ok <files>" or "fail: why".
+def KiStack.put.sh() -> String:
+  "d=$1 st=$2 rev=$3 man=$4; shift 4\n"
+    ++ "fail() { echo \"fail: $*\"; rm -rf \"$st\"; exit 1; }\n"
+    ++ "[ $# -gt 0 ] || fail 'the archive has no skills/'\n"
+    ++ "x=$st/x n=$st/new\n"
+    ++ "rm -rf \"$x\" \"$n\" && mkdir -p \"$x\" \"$n/.claude-plugin\" || fail \"cannot write $st\"\n"
+    ++ "tar -xzf \"$st/k.tgz\" -C \"$x\" --strip-components=1 \"$@\" 2>\"$st/err\" || fail \"the archive did not unpack ($(head -n 1 \"$st/err\"))\"\n"
+    ++ "[ -z \"$(find \"$x\" ! -type f ! -type d | head -n 1)\" ] || fail 'a link or special file among the skills: refused'\n"
+    ++ "[ -n \"$(find \"$x/skills\" -name SKILL.md -type f | head -n 1)\" ] || fail 'no skills/*/SKILL.md'\n"
+    ++ "mv \"$x/skills\" \"$n/skills\" || fail 'cannot stage skills/'\n"
+    ++ "if [ -f \"$x/LICENSE\" ]; then mv \"$x/LICENSE\" \"$n/LICENSE\" || fail 'cannot stage the LICENSE'; fi\n"
+    ++ "printf '%s\\n' \"$man\" > \"$n/.claude-plugin/plugin.json\" && printf '%s\\n' \"$rev\" > \"$n/REVISION\" || fail 'cannot write the manifest'\n"
+    ++ "c=$(find \"$n/skills\" -type f | wc -l | tr -d ' ')\n"
+    ++ "rm -rf \"$d.old\"\n"
+    ++ "if [ -d \"$d\" ]; then mv \"$d\" \"$d.old\" || fail 'cannot move the old copy aside'; fi\n"
+    ++ "if ! mv \"$n\" \"$d\"; then [ -d \"$d.old\" ] && mv \"$d.old\" \"$d\"; fail 'cannot move the new copy into place'; fi\n"
+    ++ "rm -rf \"$d.old\" \"$st\"\n"
+    ++ "echo \"ok $c\"\n"
+
+# the archive's limits: 32 MB, 128 MB unpacked
+def KiStack.get.args(+home: String, +src: String, +have: String) -> List<&2, String>:
+  PORT.Port.timeout(["300", "sh", "-c", KiStack.get.sh(), "sh", KiStack.home(home), KiStack.stage(home), src, have, "33554432", "134217728"])
+
+def KiStack.put.args(+home: String, +rev: String, ms: List<&2, String>) -> List<&2, String>:
+  PORT.Port.timeout(List.append(&2, String, ["120", "sh", "-c", KiStack.put.sh(), "sh", KiStack.home(home), KiStack.stage(home), rev, KiStack.manifest()], ms))
+
+def KiStack.said.k(none: Bool, +w: String) -> String:
+  "kistack sync: " ++ Bool.pick(String, none, "stopped (timed out)", w)
+
+# the log line for a sync that stopped before installing (or failed in it)
+def KiStack.said(+w: String) -> String:
+  KiStack.said.k(String.is_empty(w), w)
+
+def KiStack.done.k(ok: Bool, +w: String, +rev: String, +d: String) -> String:
+  match ok:
+    case True{}:
+      "kistack sync: " ++ rev ++ " in " ++ d ++ " (" ++ String.drop(w, 3n) ++ " files)"
+    case False{}:
+      KiStack.said(w)
+
+def KiStack.done.w(+w: String, +rev: String, +d: String) -> String:
+  KiStack.done.k(String.starts_with(w, "ok "), w, rev, d)
+
+# the install's log line
+def KiStack.done(+out: String, +rev: String, +d: String) -> String:
+  KiStack.done.w(KiStack.last(String.lines(out), ""), rev, d)
+
+def KiStack.out(r: P.Ran) -> String:
+  match r:
+    case P.Ran{_, o}:
+      o
+
+def Io.is_dir.kind(v: U32 & U32 & U32) -> Bool:
+  (k, _) = v
+  U32.is_eq(k, 1)
+
+def Io.is_dir.k(r: Result<&1, &1, U32 & String, U32 & U32 & U32>) -> Bool:
+  match r:
+    case Done{v}:
+      Io.is_dir.kind(v)
+    case Fail{_}:
+      False{}
+
+def Io.is_dir(path: String) -> IO(Bool):
+  do IO<Bool>:
+    r : Result<&1, &1, U32 & String, U32 & U32 & U32> <- H.FS.stat(path)
+    return Io.is_dir.k(r)
+
+def KiStack.ready.k(none: Bool, +home: String) -> IO(Bool):
+  match none:
+    case True{}:
+      IO.pure(Bool, False{})
+    case False{}:
+      do IO<Bool>:
+        m : Bool <- Io.is_file(KiStack.home(home) ++ "/.claude-plugin/plugin.json")
+        s : Bool <- Io.is_dir(KiStack.home(home) ++ "/skills")
+        return Bool.and(m, s)
+
+# whether the synced copy is complete (our manifest and skills/)
+def KiStack.ready(+home: String) -> IO(Bool):
+  KiStack.ready.k(String.is_empty(home), home)
+
+# the copy in use now (a turn's skills, the composer's `$` list)
+def KiStack.live(+home: String, +exe: String) -> IO(String):
+  IO.bind(Bool, String, KiStack.ready(home), ok => IO.pure(String, KiStack.pick(ok, home, KiStack.dir(exe))))
+
+def KiStack.put(none: Bool, +home: String, +rev: String, +out: String) -> IO(String):
+  match none:
+    case True{}:
+      IO.pure(String, KiStack.said(KiStack.last(String.lines(out), "")))
+    case False{}:
+      do IO<String>:
+        ls : String <- Io.text(KiStack.stage(home) ++ "/list")
+        r : P.Ran <- P.Proc.run("sh", KiStack.put.args(home, rev, KiStack.members(ls)), "/")
+        return KiStack.done(KiStack.out(r), rev, KiStack.home(home))
+
+# KiStack's newest commit (or BACKPLANE_KISTACK_SOURCE's copy) into
+# <home>/kistack; the one log line that says how it went
+def KiStack.sync(+home: String, +src: String) -> IO(String):
+  do IO<String>:
+    ok : Bool <- KiStack.ready(home)
+    rv : String <- Io.text(KiStack.home(home) ++ "/REVISION")
+    r : P.Ran <- P.Proc.run("sh", KiStack.get.args(home, src, KiStack.have(ok, rv)), "/")
+    +out : String = KiStack.out(r)
+    KiStack.put(String.is_empty(KiStack.got(out)), home, KiStack.got(out), out)
 
 def KiCad.install.k(r: P.Ran) -> String:
   match r:
