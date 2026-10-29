@@ -5334,6 +5334,18 @@ def Laws.todo_rows_short():
 def Laws.todo_write_sets_list():
   {==}
 
+def Laws.todos_start_shut():
+  {==}
+
+def Laws.todos_click_opens():
+  {==}
+
+def Laws.todos_shut_click_asks_open():
+  {==}
+
+def Laws.todos_shut_no_steps():
+  {==}
+
 def Laws.todo_shown_while_left(run):
   match run:
     case True{}:

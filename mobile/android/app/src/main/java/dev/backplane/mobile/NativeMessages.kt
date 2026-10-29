@@ -980,6 +980,10 @@ object NativeMessages {
   fun native_thread_subagents(tag: String, arg0: String): String =
     if (tag == "ja") ("サブエージェント：" + arg0) else ("Subagents: " + arg0)
 
+  // native.thread.todos
+  fun native_thread_todos(tag: String, arg0: String): String =
+    if (tag == "ja") ("ToDo：" + arg0) else ("To-do: " + arg0)
+
   // native.thread.waiting
   fun native_thread_waiting(tag: String, arg0: String): String =
     if (tag == "ja") (arg0 + "を待機中…") else ("Waiting for " + arg0 + "…")
@@ -1251,6 +1255,10 @@ object NativeMessages {
   // thread.subagents
   fun thread_subagents(tag: String): String =
     if (tag == "ja") ("サブエージェント") else ("Subagents")
+
+  // thread.todos
+  fun thread_todos(tag: String): String =
+    if (tag == "ja") ("ToDo") else ("To-do")
 
   // tools.pinned
   fun tools_pinned(tag: String): String =

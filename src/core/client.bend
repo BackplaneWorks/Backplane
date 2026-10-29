@@ -7333,19 +7333,24 @@ def Todos.pick(show: Bool, ts: List<&2, TD.Todo>) -> List<&2, TD.Todo>:
 def Todos.shown(+st: M.State, +th: String, +run: Bool) -> List<&2, TD.Todo>:
   Todos.pick(TD.Todo.shown(Todos.of(st, th), run), Todos.of(st, th))
 
-# The card's two controls, on all four clients: its head opens or shuts it
-# (the "fold" action, key todos:<thread>; open until shut), and a list too
-# long for the card ends in a line that shows every step, or the fitted
-# few again (key todos.all:<thread>). A client that scrolls the card shows
-# every step; the window, which cannot, as many as cap leaves room for.
+# The list sits at the top of the thread beside its subagents, on all four
+# clients, as one line ("To-do 3/7"). Its two controls: that line opens or
+# shuts it (the "fold" action, key todos:<thread>), and a list too long for
+# it ends in a line that shows every step, or the fitted few again (key
+# todos.all:<thread>). A client that scrolls the list shows every step; the
+# window, which cannot, as many as cap leaves room for.
 def Todos.key(+th: String) -> String:
   "todos:" ++ th
 
 def Todos.all.key(+th: String) -> String:
   "todos.all:" ++ th
 
+# Shut until the person opens it: only their click (a stored "1") opens
+# it, never a new list, a turn starting or ending, or a thread switch (laws
+# todos_*). It was open until shut before; that default was never stored,
+# so a stored "1" is always the person's own click (shut, then opened).
 def Todos.open(+info: Map<&2, String>, +th: String) -> Bool:
-  FO.Fold.open(FO.Fold.user(info, Todos.key(th)), True{})
+  FO.Fold.open(FO.Fold.user(info, Todos.key(th)), False{})
 
 def Todos.all(+info: Map<&2, String>, +th: String) -> Bool:
   FO.Fold.open(FO.Fold.user(info, Todos.all.key(th)), False{})

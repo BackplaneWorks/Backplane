@@ -457,6 +457,7 @@ thread.title.placeholder = スレッド名
 # ja? sigils and their English kinds kept, as typed; A translated the words after them
 composer.placeholder = 何でも質問：@bot、>thread、%project、#room、$skill、/btw
 thread.subagents = サブエージェント
+thread.todos = ToDo
 approval.implement = 実装
 approval.dismiss = 閉じる
 approval.draft = 下書きで回答
@@ -1243,6 +1244,7 @@ native.thread.effort = 思考量
 native.thread.composer = エージェントに依頼
 native.thread.model.effort = モデル・思考量：{label}
 native.thread.subagents = サブエージェント：{word}
+native.thread.todos = ToDo：{count}
 native.thread.board = 基板ビューアー
 native.thread.sending = 送信中…
 native.thread.waiting = {hub}を待機中…
