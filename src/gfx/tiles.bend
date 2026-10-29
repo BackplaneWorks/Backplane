@@ -614,6 +614,40 @@ def Keep.ok(o: R.Op, +px: U32, +py: U32, +rx: U32, +ry: U32, +n: U32, ys: List<&
     case R.Op{+x0, +y0, +x1, +y1, +c, +a, +s}:
       Keep.ok.h(R.Region.hits(x0, y0, x1, y1, rx, ry, n), x0, y0, x1, y1, c, a, s, px, py, rx, ry, n, ys)
 
+# Advance the old list and compare its head from one clipped shape. The
+# former Keep.ys/Keep.ok pair clipped every run or polygon twice at every
+# visited child, including the unchanged children that the plan keeps.
+type KeepStep is Data:
+  KStep{ys: List<&2, R.Op>, same: Bool}
+
+def Keep.step.ys(s: KeepStep) -> List<&2, R.Op>:
+  match s:
+    case KStep{ys, _}: ys
+
+def Keep.step.same(s: KeepStep) -> Bool:
+  match s:
+    case KStep{_, same}: same
+
+def Keep.step.k(kept: Bool, +x0: U32, +y0: U32, +x1: U32, +y1: U32, +c: U32, +a: U32, s2: R.Shape, +ys: List<&2, R.Op>) -> KeepStep:
+  match kept:
+    case True{}:
+      KStep{Keep.drop1(ys), Keep.ok.c(x0, y0, x1, y1, c, a, s2, ys)}
+    case False{}:
+      KStep{ys, True{}}
+
+def Keep.step.h(hit: Bool, +x0: U32, +y0: U32, +x1: U32, +y1: U32, +c: U32, +a: U32, +s: R.Shape, +px: U32, +py: U32, +rx: U32, +ry: U32, +n: U32, +ys: List<&2, R.Op>) -> KeepStep:
+  match hit:
+    case True{}:
+      +s2 = R.Region.move(s, px, py, rx, ry, n)
+      Keep.step.k(Bool.not(R.Region.empty(s2)), x0, y0, x1, y1, c, a, s2, ys)
+    case False{}:
+      KStep{ys, True{}}
+
+def Keep.step(o: R.Op, +px: U32, +py: U32, +rx: U32, +ry: U32, +n: U32, +ys: List<&2, R.Op>) -> KeepStep:
+  match o:
+    case R.Op{+x0, +y0, +x1, +y1, +c, +a, +s}:
+      Keep.step.h(R.Region.hits(x0, y0, x1, y1, rx, ry, n), x0, y0, x1, y1, c, a, s, px, py, rx, ry, n, ys)
+
 # Eq.ops.go(Region.keep(ops, px, py, rx, ry, n), ys, ok) without building
 # the list (law keep_eq); it stops at the first op that differs
 def Keep.eq(ops: List<&2, R.Op>, +px: U32, +py: U32, +rx: U32, +ry: U32, +n: U32, +ys: List<&2, R.Op>, ok: Bool) -> Bool:
@@ -623,7 +657,8 @@ def Keep.eq(ops: List<&2, R.Op>, +px: U32, +py: U32, +rx: U32, +ry: U32, +n: U32
     case Nil{} True{}:
       Eq.ops.go(Nil{}, ys, True{})
     case +o <> t True{}:
-      Keep.eq(t, px, py, rx, ry, n, Keep.ys(o, px, py, rx, ry, n, ys), Keep.ok(o, px, py, rx, ry, n, ys))
+      +step = Keep.step(o, px, py, rx, ry, n, ys)
+      Keep.eq(t, px, py, rx, ry, n, Keep.step.ys(step), Keep.step.same(step))
 
 # Eq.ops(Cut.get(c), ys) (law cut_eq)
 def Cut.eq(c: Cut, +ys: List<&2, R.Op>) -> Bool:

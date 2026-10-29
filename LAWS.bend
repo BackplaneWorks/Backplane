@@ -8629,6 +8629,16 @@ law tiles_recat_exact:
 # ---- gfx-runs: tile plans that build only changed nodes' ops ----
 # comparing a child's ops as they reach it, straight from its parent's, is
 # exactly comparing the list Region.keep would build
+law keep_step_exact:
+  for +o: R.Op
+  for +px: U32
+  for +py: U32
+  for +rx: U32
+  for +ry: U32
+  for +n: U32
+  for +ys: List<&2, R.Op>
+  {T.Keep.step(o, px, py, rx, ry, n, ys) == T.KStep{T.Keep.ys(o, px, py, rx, ry, n, ys), T.Keep.ok(o, px, py, rx, ry, n, ys)} : T.KeepStep}
+
 law keep_eq:
   for ops: List<&2, R.Op>
   for +px: U32
