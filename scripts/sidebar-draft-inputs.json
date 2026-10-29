@@ -49,7 +49,7 @@
     "src/core/farlive.bend": "0fec3c222121256751cf620ad82248a178a7f54581c4f20570fdce2fa0b2e25c",
     "src/core/farsnap.bend": "7a07c3774070be7443dc5c0a9143f496767147cf0caac9fd916e3255466c005b",
     "src/core/fm.bend": "a25fe30ac6ac70ca63add2b335aaf49d38b5dba5994941022cd068eb3392913d",
-    "src/core/fold.bend": "82a1975d50651cfc8da972150cf092c1bda13946b24e10adb634ee6c7e0c47ee",
+    "src/core/fold.bend": "435cab9bde60790e7dbc0a855897b704c9e325f3221de78a437cd42827d15b87",
     "src/core/fuzzy.bend": "23098d1fc905bec7556734757cec8bfee65bc7fdbe9e317742e6c86f2e2f5e10",
     "src/core/fview.bend": "8b27131cec07e5697cf96ede00efc8423072619afa956d087008ff7edff29032",
     "src/core/glb.bend": "f2eb124f9c0967d8c03c0a96c3a7120aab3c024cb8af60af6e4263d70bb8fe75",
@@ -81,7 +81,7 @@
     "src/core/menu.bend": "807668923de70eaabb72ddb760f808cbf6d786b70822ba6a1180776758af7eee",
     "src/core/model.bend": "96a7baa0b71bb5efa085ee9259a126738623e87984596bed8e772ae30f0750e8",
     "src/core/modelpick.bend": "7a04676ab0f5e312e175347f4386b2dd53c69b35071bcdc3c70384d100d0b32f",
-    "src/core/msgs.bend": "a1a60e27cf91ad1793167d06822382220c7a27d0fee3a36a332b623e07357bd0",
+    "src/core/msgs.bend": "a262ca34d05477192d33c4f5b8fc6351667c99c084d5ab1f21cdf5735a5108f5",
     "src/core/native-sidebar.bend": "ad4018c6c5213f943ed4bb2472db4c88265555e90cb206907bacea2243ded20c",
     "src/core/notice.bend": "ee87318c1f12fc6cfb23bb5e24e90709e1f9a2eadfd2832581d21590f596e5e0",
     "src/core/onboard.bend": "55ccccf20f706a0acad492de20e23aedc751c7e9ce61b6f3430bfd65796e9232",
@@ -144,7 +144,7 @@
     "src/core/when.bend": "0c97fbba571d99a50a4977c5a3c6916ade1c64196173c20e959d8848d751476f",
     "src/core/wnote.bend": "019cf6a357f4428774176585931a2df17b83d2347b9e1078428f578968e445d5",
     "src/mobile/hubs.bend": "8b5c6d93f51edd32ba76209516ad417b40f175aa7cdf21035dd4beb93e6e8f54",
-    "src/mobile/screen.bend": "9ca896b91dc98846a9fb7e4f6c446292e2ffd980d6d5036e2a7b557d7c0e832b",
+    "src/mobile/screen.bend": "05129cc45396f7ba97f50a4890c8d189476b22dec7006071bee861dddf3fd002",
     "src/server/thin-actor.bend": "3adb274a8dc1d5accfaebf4e3bd2c25b7d8e49d2a1a5cb6352d742d189fcf555",
     "src/server/thin-body.bend": "cc0b822d95259c88ce0261bb6bdfbb6903fad200c3eb57229d9dcfd56e0b1f46",
     "src/server/thin-mirror.bend": "b488dc7c45fe49bb1aa17966f454f1ee0e9cfef7db4d619c265c298c9bc94e92",
@@ -164,7 +164,7 @@
     "src/web/space.bend": "b86a265e41a900498bc33c37c0404c4d6678554efe3d9054f329beb2cf35ee63",
     "src/web/usage-graph.bend": "fa06f7d2bf855a396a5f7a7b4725dfaa990145fbbcefe7ad21ae8f9a698a2679",
     "src/web/usage-page.bend": "706e3f17a4a3e5f159656d47aeb76a940d4825421f5c33228f9aef692ec926e3",
-    "src/web/view.bend": "c660c176832996c0ebd4652656b76e5fdddbc7d6ca5fc6f0690ada010765f503"
+    "src/web/view.bend": "daa4208312a023c422886d4e07d639ad9236aa31a079ed7eb7244406dde1fc22"
   },
   "review": {
     "source": "5f19ea0b9dbcff736e51ced0cb79e19bfef5bba6",
@@ -336,5 +336,5 @@
       "scope": "Owner-scoped private lanes hidden via existing RunSet plus shared run lookup; no changes to draft/image extraction or render/view bodies.24 full-output freshness checks passed; explicit private-context/publication tests passed. No native/device acceptance inherited."
     }
   },
-  "reviewNote": "To-do list moved to the thread's top (top-bar cell after Subagents, dock under the bar; section after the subagents' without the bar; phones' todos gain a count) and starts shut (Todos.open default); i18n adds thread.todos/native.thread.todos. No sidebar row, draft or sidebar reader changes; sidebar_draft_image_test 24 ok."
+  "reviewNote": "Tool-call drawers on top of the to-do move: fold.bend (runs shut by default, live label, RHead live flag), msgs.bend (fold.running), view.bend (drawer head, run marks on timeline rows) and screen.bend (fold row live, run marks) touch only thread timeline entries; the sidebar draft is unaffected (sidebar_draft_image_test 24 ok)"
 }
