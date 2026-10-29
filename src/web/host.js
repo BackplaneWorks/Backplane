@@ -6,6 +6,9 @@
 // is dumb).
 
 import App from "./app.bend";
+import Planner from "./timeline-plan.bend";
+import History from "./timeline-history.bend";
+import { TimelineScroller } from "./timeline-scroller.js";
 import { installImageActions } from "./image-actions.js";
 import { BubMoveObserver, showBubMove } from "./bub-move.js";
 const bubMoves = new BubMoveObserver((before, after) => Wire.plain(App.bub_move(JSON.stringify(before), JSON.stringify(after))));
@@ -236,6 +239,20 @@ function same(a, b) {
 function patch(el, v) {
   const old = el.__v;
   setAttrs(el, old.attrs, v.attrs);
+  if (el.id === "timeline") {
+    let scroller = timelineLists.get(el);
+    if (!scroller) {
+      scroller = new TimelineScroller(el, {
+        plan: input => Wire.plain(Planner.timeline_plan(presentationJson(input))), create, patch,
+        key: (node, i) => History.display_key_at(node, BigInt(i)),
+        onChange: timelineChanged,
+      });
+      timelineLists.set(el, scroller);
+    }
+    scroller.update([...each(v.kids)].map(expand), { follow: !(thin && thin.atNewest?.() === false) });
+    el.__v = v;
+    return;
+  }
   const kids = [];
   for (const k of each(v.kids)) kids.push(expand(k));
   const prev = el.__kids;
@@ -524,41 +541,13 @@ let jump = null;
 let searchJump = null;
 let earlierAsked = false;
 
-// Keep just the outgoing canonical page beside the incoming one. The server
-// still owns a 32-entry window; this small visual overlap prevents pruning a
-// visible message when a page is short, a tool run is folded, or the viewport
-// is taller than half a page. It never becomes session or request authority.
-let historyBase = null, historySpare = [], historyPage = null, historyRestored = null;
-// the rows the timeline drew last, in order (the page's and the spare's)
-let historyShown = [];
-let historyStatus = null;
-const historyBridges = new Map();let historyBridgeBytes = 0;
-function historyBridgeKey(target = thin?.target, conversation = thin?.conversation) {
-  return JSON.stringify([location.origin, cacheIdentity(document.cookie), App.lang(ui), thin?.epoch, target, conversation]);
-}
-function historyRememberBridge() {
-  const key = historyBridgeKey(), old = historyBridges.get(key);
-  if (old) { historyBridgeBytes -= old.bytes;historyBridges.delete(key); }
-  if (!historySpare.length) return;
-  const base = (historyBase || []).filter(historySnapshotRow), spare = historySpare.filter(historySnapshotRow);
-  const rows = historySpare.direction === "older" ? [...base, ...spare] : [...spare, ...base];
-  const bytes = new TextEncoder().encode(JSON.stringify(rows)).length;
-  if (bytes > 512 * 1024) return;
-  historyBridges.set(key, { rows, bytes });historyBridgeBytes += bytes;
-  while (historyBridges.size > 8 || historyBridgeBytes > 512 * 1024) {
-    const oldest = historyBridges.keys().next().value;historyBridgeBytes -= historyBridges.get(oldest).bytes;historyBridges.delete(oldest);
-  }
-}
-function historyRestoreBridge(detail) {
-  if (!detail.position) return;
-  const saved = historyBridges.get(historyBridgeKey(detail.target));
-  if (saved) { historyRestored = saved.rows;historyPage = null; }
-}
-function historyClear() {
-  historyBase = null;historySpare = [];historyPage = null;historyRestored = null;historyShown = [];
-  olderGestureUntil = newerGestureUntil = 0;stationaryPages = 0;
-  historyPageState(null);
-}
+// TanStack virtual-core 3.19.9's layout model is ported in timeline-plan.bend.
+// The host owns DOM lifetimes; Bend owns rows, geometry, range and following.
+const timelineLists = new WeakMap();
+let activeTimeline = null, historyNode = null, historyStatus = null;
+let held = false, away = "";
+function timelineList(tl = document.getElementById("timeline")) { return tl && timelineLists.get(tl); }
+function historyClear() { historyNode = null;historyDirection = "";historyPageState(null); }
 function historyPageState(state) {
   historyStatus = state;
   let el = document.getElementById("history-status");
@@ -570,281 +559,47 @@ function historyPageState(state) {
   el.style.top = Math.max(0, box?.top || 0) + "px";el.style.right = Math.max(8, innerWidth - (box?.right || innerWidth) + 8) + "px";
   el.replaceChildren(document.createTextNode(state.phase === "error" ? "Messages couldn’t load. " : state.direction !== "older" ? "Loading newer messages…" : "Loading earlier messages…"));
   if (state.phase === "error") {
-    olderGestureUntil = newerGestureUntil = 0;earlierAsked = laterAsked = false;
+    earlierAsked = laterAsked = false;
     const button = document.createElement("button");button.textContent = "Retry";
-    button.onclick = () => { const tl = document.getElementById("timeline");if (tl) { held = anchorOf(tl);heldSize = holdSize(tl); }thin?.retryPage(); };
+    button.onclick = () => thin?.retryPage();
     el.appendChild(button);
   }
 }
 function historyRow(node) {
   if (!is(node, "El")) return "";
   const attrs = [...each(node.attrs)];
-  const id = attrs.find(a => is(a, "At") && a.name === "data-id")?.value;
-  if (id) return id;
-  if (attrs.some(a => !is(a, "At") && a.event === "click" && a.action === "fold"))
-    return attrs.find(a => is(a, "At") && a.name === "data-value")?.value.slice(1) || "";
-  return "";
+  const classes = attrs.find(a => is(a, "At") && a.name === "class")?.value.split(/\s+/) || [];
+  if (classes.includes("live") || classes.includes("sending")) return "";
+  return attrs.find(a => is(a, "At") && a.name === "data-id")?.value || "";
 }
-function historySnapshotRow(node) {
-  if (!is(node, "El")) return false;
-  const attrs = [...each(node.attrs)], classes = attrs.find(a => is(a, "At") && a.name === "class")?.value.split(/\s+/) || [];
-  if (classes.includes("live") || classes.includes("sending") || !historyRow(node)) return false;
-  return classes.includes("msg") || attrs.some(a => !is(a, "At") && a.event === "click" && a.action === "fold");
-}
-function historyFoldKey(node) {
-  return is(node, "El") && node.tag === "button" && [...each(node.attrs)].some(a => !is(a, "At") && a.action === "fold")
-    ? node.key || "fold:" + historyRow(node) : "";
-}
-function historyProject(node) {
-  if (!is(node, "El")) return node;
-  const kids = [...each(node.kids)];
-  if ([...each(node.attrs)].some(a => is(a, "At") && a.name === "id" && a.value === "timeline")) {
-    const foldKeys = new Map(historyShown.filter(historyFoldKey).map(n => [historyRow(n), historyFoldKey(n)]));
-    for (let i = 0; i < kids.length; i++) {
-      const key = historyFoldKey(kids[i]) && foldKeys.get(historyRow(kids[i]));
-      if (key) kids[i] = { ...kids[i], key };
-    }
-    const ids = new Set(kids.map(historyRow).filter(Boolean));
-    if (historyRestored) {
-      const rows = historyRestored;historyRestored = null;
-      const shared = rows.map((n, i) => ids.has(historyRow(n)) ? i : -1).filter(i => i >= 0);
-      if (shared.length) {
-        const newer = rows.slice(shared.at(-1) + 1).filter(n => !ids.has(historyRow(n)));
-        historySpare = newer.length ? newer : rows.slice(0, shared[0]).filter(n => !ids.has(historyRow(n)));
-        historySpare.direction = newer.length ? "older" : "newer";
-      }
-    }
-    if (historyPage) {
-      const previous = historyBase || [];
-      const shared = previous.map((n, i) => ids.has(historyRow(n)) ? i : -1).filter(i => i >= 0);
-      const outgoing = !shared.length ? previous : historyPage.direction === "older" ? previous.slice(shared.at(-1) + 1) : previous.slice(0, shared[0]);
-      historySpare = outgoing.filter(n => historyRow(n) && !ids.has(historyRow(n)));
-      // A run cut at the old page boundary can gain an earlier fold head.
-      // Its following shared message identifies the same visible run.
-      if (held?.id.startsWith("fold:") && !ids.has(held.id.slice(5)) && !historySpare.some(n => historyRow(n) === held.id.slice(5))) {
-        const old = held.id.slice(5), at = previous.findIndex(n => historyRow(n) === old);
-        // An anchor in the visual bridge is not a run in this canonical
-        // page. slice(-1 + 1) used to match it to an unrelated older fold.
-        const next = at >= 0 && previous.slice(at + 1).find(n => ids.has(historyRow(n)));
-        const end = next && kids.findIndex(n => historyRow(n) === historyRow(next));
-        if (typeof end === "number") for (let i = end - 1; i >= 0; i--) {
-          const id = historyRow(kids[i]);
-          if (id && historyFoldKey(kids[i])) {
-            kids[i] = { ...kids[i], key: historyFoldKey(previous[at]) };
-            held = { ...held, id: "fold:" + id };
-            // The new head represents this same visible run. Do not let
-            // historyHeld resurrect its obsolete head beside it.
-            ids.add(old);break;
-          }
-          if (id) break;
-        }
-      }
-      historySpare.direction = historyPage.direction;historyPage = null;
-    }
-    historyBase = kids.slice();
-    let spare = historySpare.filter(n => !ids.has(historyRow(n)));
-    const bridge = historyHeld(ids, spare);
-    if (bridge) { historySpare = spare = bridge.rows;historySpare.direction = bridge.direction; }
-    // Place spare entries with the body, inside the existing scroll track.
-    // Work/fab controls and live/sending rows come only from the current view.
-    if (spare.length) {
-      const rowIndexes = kids.map((n, i) => historyRow(n) ? i : -1).filter(i => i >= 0);
-      const at = historySpare.direction === "older" ? (rowIndexes.at(-1) ?? kids.length - 1) + 1 : (rowIndexes[0] ?? kids.length);
-      kids.splice(at, 0, ...spare);
-    }
-    historyShown = kids.filter(n => historyRow(n));
-  } else {
-    for (let i = 0; i < kids.length; i++) kids[i] = historyProject(kids[i]);
-  }
-  let list = { $: "Nil" };for (let i = kids.length - 1; i >= 0; i--) list = { $: "Con", head: kids[i], tail: list };
-  return { ...node, kids: list };
-}
-
-// What is on screen never leaves under the reader. A reply whose rows and
-// spare leave out a row the reader sees (a second page asked for before
-// the first was drawn, a page an action overtook and a refresh then drew)
-// keeps the rows the timeline drew from the new rows out to the farthest
-// one on screen, on that side, as the spare: holdFix finds the held entry
-// with the rows under it still there, and nothing moves. null: all that is
-// on screen is shown anyway (or nothing is held, or nothing is shared).
-let historyKeep = null; // [first, last] row on screen when a held render began
-function historyHeld(ids, spare) {
-  if (!historyKeep || !historyShown.length) return null;
-  const index = id => historyShown.findIndex(n => historyRow(n) === id);
-  const a = index(historyKeep[0]), b = index(historyKeep[1]);
-  if (a < 0 || b < a) return null;
-  const kept = new Set(spare.map(historyRow));
-  if (historyShown.slice(a, b + 1).every(n => ids.has(historyRow(n)) || kept.has(historyRow(n)))) return null;
-  const shared = historyShown.map((n, i) => ids.has(historyRow(n)) ? i : -1).filter(i => i >= 0);
-  if (!shared.length) return null;
-  const at = spare.map(n => index(historyRow(n))).filter(i => i >= 0), first = shared[0], last = shared.at(-1);
-  const rows = (from, to) => historyShown.slice(from, to).filter(n => !ids.has(historyRow(n)));
-  if (a < first) return { rows: rows(Math.min(a, ...at.filter(i => i < first)), first), direction: "newer" };
-  if (b > last) return { rows: rows(last + 1, Math.max(b, ...at.filter(i => i > last)) + 1), direction: "older" };
-  return null;
-}
-// the rows on screen, first and last (as historyRow names them)
-function historySpan(tl) {
-  const box = tl.getBoundingClientRect();
-  let first = null, last = null;
-  for (const el of tl.children) {
-    const id = el.getAttribute("data-id") || (el.matches("button.fold") ? el.getAttribute("data-value")?.slice(1) : "");
-    if (!id) continue;
-    const r = el.getBoundingClientRect();
-    if (r.height <= 0 || r.bottom <= box.top + 1) continue;
-    if (r.top >= box.bottom - 1) break;
-    first ??= id;last = id;
-  }
-  return first ? [first, last] : null;
-}
-
-// the entry at the top of the timeline's view, and where it is in the
-// window (so a header or panel above the timeline growing moves it not)
 function anchorOf(tl) {
-  const box = tl.getBoundingClientRect(), visible = [];
-  for (const el of tl.querySelectorAll("[data-id], button.fold")) {
-    const r = el.getBoundingClientRect();
-    if (r.height <= 0 || r.bottom <= box.top + 1) continue;
-    if (r.top >= box.bottom && visible.length) break;
-    visible.push({ id: el.getAttribute("data-id") || "fold:" + el.getAttribute("data-value").slice(1), off: r.top });
-  }
-  return visible.length ? { ...visible[0], retained: visible.slice(1) } : null;
+  const position = timelineList(tl)?.position();
+  return position?.anchor ? { id: position.anchor, off: tl.getBoundingClientRect().top - position.offset } : null;
 }
 function anchorElement(tl, id) {
   return id.startsWith("fold:") ? [...tl.querySelectorAll("button.fold")].find(el => el.getAttribute("data-value")?.slice(1) === id.slice(5))
     : tl.querySelector(`[data-id="${CSS.escape(id)}"]`);
 }
-
-// Reading while the thread grows (client.bend's Hold): only a timeline at
-// its end (App.hold_at_end: within a few px) follows. Scrolled up, the
-// entry at the view's top and its offset are held, and whatever changes
-// size (a render, the streaming row, an image loading, the subagents or
-// todo panels, the asks and composer below) is made good before the page
-// paints, so nothing read moves. Leaving the end and coming back are told
-// to the client ("hold-away"/"hold-end": the "N new" pill).
-let held = null;
-// until when an upward gesture keeps the end from catching the view (leaveEnd)
-let leavingEndUntil = 0;
-// The last downward gesture (history direction; it does not enable following).
-let towardEndUntil = 0;
-let away = "";
-// where the last of our own corrections left the timeline: its scroll
-// event is ours, not the person's, and keeps the offset held (no drift)
-let fixedAt = -1;
-let heldSize = null;
-const holdInsets = new WeakMap();
-function holdSize(tl) {
-  return { tl, height: tl.scrollHeight, view: tl.clientHeight, width: tl.clientWidth };
-}
-function holdEnd(tl) {
-  return App.hold_at_end(BigInt(Math.max(0, Math.round(tl.scrollHeight - tl.scrollTop - tl.clientHeight))));
-}
-function holdFix(tl) {
-  if (!tl || tl.id !== "timeline") return;
-  heldSize = holdSize(tl);
-  if (!held) {
-    const end = tl.scrollHeight - tl.clientHeight;
-    if (tl.scrollTop < end) { tl.scrollTop = end; fixedAt = tl.scrollTop; }
-    return;
-  }
-  let el = anchorElement(tl, held.id);
-  if (!el) {
-    const next = held.retained?.find(row => anchorElement(tl, row.id));
-    if (next) { held = { ...next, retained: held.retained };el = anchorElement(tl, next.id); }
-  }
-  if (!el) return;
-  const d = el.getBoundingClientRect().top - held.off;
-  if (d) { tl.scrollTop += d; fixedAt = tl.scrollTop; }
-  // Some engines quantize scrollTop to a device pixel although text rows
-  // have fractional CSS heights. Keep the subpixel remainder in the track's
-  // top inset, rather than rounding the reading position on every page.
-  const remainder = el.getBoundingClientRect().top - held.off;
-  if (remainder && Math.abs(remainder) < 1) {
-    const old = holdInsets.get(tl) || 0;
-    // Keep this nonnegative: at scrollTop=0 a negative inset would need
-    // a negative scrollTop to make up the integral pixel, which is clamped.
-    const inset = ((old - remainder) % 1 + 1) % 1;
-    tl.style.setProperty("--anchor-inset", inset + "px");holdInsets.set(tl, inset);
-    const residual = el.getBoundingClientRect().top - held.off;
-    if (residual) tl.scrollTop += residual;
-    fixedAt = tl.scrollTop;heldSize = holdSize(tl);
-  }
-}
-// tell the client once each way; the thread is the one the view was away in
+function holdEnd(tl) { return timelineList(tl)?.atEnd() ?? true; }
 function holdSay(now) {
-  if (focusedNode && !frontendNode) return;
-  if (now === away) return;
-  const was = away;
-  away = now;
+  if (focusedNode && !frontendNode || now === away) return;
+  const was = away;away = now;
   queueMicrotask(() => dispatch(now ? "hold-away" : "hold-end", now || was));
 }
-// the newest entry the timeline shows (not a reply streaming in or a
-// message being sent): what comes after it is new (thin-view's Render.pill)
-function holdMark() {
-  const tl = document.getElementById("timeline");
-  const rows = tl ? [...tl.children].filter(el => el.getAttribute("data-id") && !el.getAttribute("data-id").startsWith("@") && !el.classList.contains("live") && !el.classList.contains("sending")) : [];
-  return rows.at(-1)?.getAttribute("data-id") || "";
+function timelineChanged(list) {
+  if (list !== activeTimeline || focusedNode && !frontendNode) return;
+  held = !list.atEnd() || !!thin && thin.atNewest?.() === false;
+  holdSay(held ? App.sel(ui) : "");
+  historyCheckSoon();
+  bodyWindows.observe(list.el, remoteReady && !!frontendNode);
 }
-// the pill's click: back to the end, which follows again (on an earlier
-// page, the newest page first)
+function holdMark() {
+  return timelineList()?.rows.map(historyRow).filter(id => id && !id.startsWith("@") && !id.startsWith("control:")).at(-1) || "";
+}
 function holdBottom() {
   if (thin && thin.atNewest?.() === false) { thin.newest();return; }
-  scroll = true;later();
+  timelineList()?.scrollToEnd();
 }
-// the person scrolled the timeline: the end follows, elsewhere holds
-function holdRead(tl) {
-  if (focusedNode && !frontendNode) return;
-  if (!tl || tl.id !== "timeline") return;
-  if (tl.scrollTop === fixedAt) return;
-  // Shrinking content can clamp scrollTop and queue a scroll event before
-  // ResizeObserver runs. It belongs to the changed layout, so repair the
-  // original anchor before deciding whether the reader reached the end.
-  const size = holdSize(tl);
-  if (held && heldSize?.tl === tl && (size.height !== heldSize.height || size.view !== heldSize.view || size.width !== heldSize.width)) {
-    holdFix(tl);
-    return;
-  }
-  heldSize = size;
-  fixedAt = -1;
-  // on an earlier page (thin-host's page/newer) the page's end is not the
-  // thread's: it holds like anywhere else, and newer rows come by scrolling
-  // while an upward gesture lasts the end does not catch the view again:
-  // a smooth scroll's first frames are still within the end's few px
-  // Streaming does not widen the end threshold. Near the bottom is still
-  // a reading position; only actually reaching it opts into following.
-  const nearEnd = holdEnd(tl);
-  held = nearEnd && performance.now() > leavingEndUntil && !(thin && thin.atNewest?.() === false) ? null : anchorOf(tl);
-  holdSay(held ? App.sel(ui) : "");
-}
-const holdBoxes = new WeakMap(), holdObserved = new Set();
-function holdResize(entries = []) {
-  const tl = document.getElementById("timeline");
-  if (!tl) return;
-  const size = holdSize(tl);
-  let changed = heldSize?.tl !== tl || size.height !== heldSize.height || size.view !== heldSize.view || size.width !== heldSize.width;
-  for (const { target } of entries) {
-    const box = target.getBoundingClientRect(), old = holdBoxes.get(target);
-    if (old && (old.width !== box.width || old.height !== box.height)) changed = true;
-    holdBoxes.set(target, { width: box.width, height: box.height });
-  }
-  // Observing a row queues an initial notification even when its size is
-  // unchanged. It must not undo user/compositor motion since the render.
-  if (changed) holdFix(tl);
-}
-const holdSizes = typeof ResizeObserver === "function" ? new ResizeObserver(holdResize) : null;
-function holdWatch(tl) {
-  if (!holdSizes) return;
-  const next = new Set(tl ? [tl, ...tl.children] : []);
-  for (const el of holdObserved) if (!next.has(el)) { holdSizes.unobserve(el);holdObserved.delete(el); }
-  if (!tl) return;
-  // Explicit message anchors own corrections, including scrollTop clamping.
-  tl.style.overflowAnchor = "none";
-  for (const el of next) {
-    const box = el.getBoundingClientRect();holdBoxes.set(el, { width: box.width, height: box.height });
-    if (!holdObserved.has(el)) { holdObserved.add(el);holdSizes.observe(el); }
-  }
-}
-document.addEventListener("scroll", (e) => holdRead(e.target), true);
 // a viewer's Layers list opens leftward from its button (style.css: the
 // button sits at the bar's right end); where that would leave the window,
 // the button wrapped to the start of a narrow bar, it opens rightward
@@ -929,20 +684,15 @@ function searchLight(tl) {
   if (range && typeof Highlight === "function" && CSS.highlights) CSS.highlights.set("search-word", new Highlight(range));
 }
 // an entry brought into view and flashed (a Jump, a search result): the
-// view holds there (holdFix), or the next layout put it back at the end.
+// view holds there through the Bend planner.
 // A search result's word is brought to the middle of the view when the
 // entry is taller than the view, else the entry is.
 function jumpTo(tl, el, word = "") {
-  const range = el.getBoundingClientRect().height > tl.clientHeight * 0.8 ? wordRange(el, word) : null;
-  if (range) {
-    const r = range.getBoundingClientRect(), v = tl.getBoundingClientRect();
-    tl.scrollTop += r.top - v.top - (tl.clientHeight - r.height) / 2;
-  } else el.scrollIntoView({ block: "center" });
+  const id = el.getAttribute("data-id") || "fold:" + el.getAttribute("data-value")?.slice(1);
+  timelineList(tl)?.scrollToKey(id, { align: "center" });
   el.classList.remove("jumped");
   void el.offsetWidth;
   el.classList.add("jumped");
-  held = holdEnd(tl) ? null : anchorOf(tl);fixedAt = tl.scrollTop;heldSize = holdSize(tl);
-  holdSay(held ? App.sel(ui) : "");
 }
 function render() {
   mailCheckpoint();
@@ -953,19 +703,7 @@ function render() {
   let page = frontendNode ? thinContinuations.project(App.presentation_overlay(frontendNode, presentationJson(modelFeedback.project(currentSession()))), node => node.tag === "bp-memo" && bodyWindows.parts.get(node.key)?.automatic === true ? node : expand(node))
     : transitionNode ? App.presentation_overlay(transitionNode, presentationJson(currentSession())) : focusedNode
     || (canonicalBoot ? App.view(ui) : App.presentation_node(presentationJson(themed(Wire.plain(App.presentation_view(App.presentation_wait(ui)))))));
-  // A wheel/touch may have moved since the last scroll event or page request.
-  // Capture at application time, before pruning or inserting any rows.
-  if (held && tl) held = anchorOf(tl) || held;
-  const beforeAnchor = held;
-  const bodyAnchor = frontendNode && held ? bodyWindows.anchor(tl) : null;
-  historyKeep = held && tl ? historySpan(tl) : null;
-  if (frontendNode) page = bodyWindows.project(historyProject(page));
-  // Projection may remap a fold head, but must not freeze an offset sampled
-  // before that work. A compositor fling can advance while JS computes.
-  if (held && beforeAnchor && tl) {
-    const el = anchorElement(tl, beforeAnchor.id);
-    if (el) held = { ...held, off: el.getBoundingClientRect().top };
-  }
+  if (frontendNode) page = bodyWindows.project(page);
   const t1 = PERF ? pnow() : 0;
   patch(root, { $: T.El, tag: "div", key: "", attrs: { $: "Nil" }, kids: { $: "Con", head: page, tail: { $: "Nil" } } });
   bubMoveSync();
@@ -991,38 +729,25 @@ function render() {
   desktopBrowser.sync();
   memoSweep();
   const tl2 = document.getElementById("timeline");
-  if (focusedNode && !frontendNode && tl !== tl2 && focusedAtEnd && tl2) tl2.scrollTop = tl2.scrollHeight;
-  // another timeline (or a send, a new thread: ScrollEnd) starts at its end
-  if (scroll || tl !== tl2) {
-    held = null;
-    // a send ends any gesture away from the end: the view follows its reply
-    leavingEndUntil = 0;
-    holdSay("");
-  }
-  if (transitionPosition && tl2) {
-    const position = transitionPosition;transitionPosition = null;
-    tl2.scrollTop = position.atEnd ? tl2.scrollHeight : position.top || 0;
-    const anchor = position.anchor && anchorElement(tl2, position.anchor);
-    if (!position.atEnd && anchor) {
-      tl2.scrollTop += anchor.getBoundingClientRect().top - tl2.getBoundingClientRect().top - position.offset;
-      held = {id:position.anchor, off:anchor.getBoundingClientRect().top};
-    } else held = null;
-    fixedAt = tl2.scrollTop;
-  }
+  const list = timelineList(tl2);
+  if (activeTimeline && activeTimeline !== list) activeTimeline.destroy();
+  activeTimeline = list || null;
+  list?.refresh();
+  if (transitionPosition && list) { list.restore(transitionPosition);transitionPosition = null; }
+  else if (scroll) list?.scrollToEnd();
   if (viewMode === "view-v1") document.querySelector("main")?.setAttribute("aria-busy", String(!remoteReady));
-  holdFix(tl2);
-  bodyWindows.restore(tl2, bodyAnchor);
   bodyWindows.observe(tl2, remoteReady && !!frontendNode);
-  holdWatch(tl2);
   if (historyStatus) historyPageState(historyStatus);
   scroll = false;
   // an entry the history went back to (Jump): brought into view, flashed
   if (jump && tl2) {
+    list?.scrollToKey(jump, { align: "center" });
     const el = tl2.querySelector(`[data-id="${CSS.escape(jump)}"]`);
     if (el) jumpTo(tl2, el);
     jump = null;
   }
   if (searchJump && tl2 && searchJump.thread === (thin?.session?.sel ?? App.sel(ui))) {
+    list?.scrollToKey(searchJump.id, { align: "center" });
     // (a tool call shut in its fold: the fold it starts)
     const el = tl2.querySelector(`[data-id="${CSS.escape(searchJump.id)}"]`) || anchorElement(tl2, "fold:" + searchJump.id);
     if (el) {
@@ -1040,10 +765,10 @@ function render() {
   earlierAsked = false;
   laterAsked = false;
   if (tl2 && thin?.atNewest?.() === false && tl2.scrollHeight - tl2.scrollTop - tl2.clientHeight <= tl2.clientHeight * 2) requestAnimationFrame(() => laterCheck(document.getElementById("timeline")));
-  // a page of entries the timeline does not draw (todo steps, a fold's
+  // A page of entries the timeline does not draw (todo steps, a fold's
   // calls) moves nothing and, at the very top, no scroll comes to ask for
   // the next: still near the top after a render, it is asked for
-  if (tl2 && tl2.querySelector("[data-earlier]") && tl2.scrollTop <= tl2.clientHeight * 2) requestAnimationFrame(() => earlierCheck(document.getElementById("timeline")));
+
   if (focus) {
     document.getElementById(focus)?.focus();
     focus = null;
@@ -1085,9 +810,8 @@ function laterPart() {
   });
 }
 
-// A delta changes only the shown thread's streaming row (app.bend's part
-// says "live"): that row alone is redrawn in place (app.bend's live, keyed
-// as the page keys it), the page when it has no such row.
+// Compatibility streaming uses the same Bend view and virtual row owner.
+// Stable row keys retain mounted message DOM through each update.
 let living = false;
 function laterLive() {
   if (queued || living) return;
@@ -1095,16 +819,8 @@ function laterLive() {
   requestAnimationFrame(() => {
     living = false;
     if (queued) return;
-    const tl = document.getElementById("timeline");
     const t0 = PERF ? pnow() : 0;
-    const v = expand(App.live(ui));
-    const hit = tl && tl.__kids && is(v, "El") ? tl.__kids.find((p) => is(p.v, "El") && p.v.key === v.key && p.v.tag === v.tag) : null;
-    if (!hit) { render(); return; }
-    // away, the pill comes with the first of it (a page render, once)
-    if (held && !tl.querySelector(".hold-pill")) { render(); return; }
-    patch(hit.node, v);
-    hit.v = v;
-    holdFix(tl);
+    render();
     if (PERF) PERF.live.push(pnow() - t0);
   });
 }
@@ -1293,9 +1009,7 @@ function dispatch(action, value, timer) {
     checkpointFocused();
     const timeline = document.getElementById("timeline");
     if (remoteReady && timeline) {
-      const anchor = anchorOf(timeline);
-      transitionViews.savePosition(transitionScope(), {top:timeline.scrollTop, atEnd:holdEnd(timeline),
-        anchor:anchor?.id || "", offset:anchor ? anchor.off - timeline.getBoundingClientRect().top : 0});
+      transitionViews.savePosition(transitionScope(), timelineList(timeline).position());
     }
   }
   if (action === "thin-search-open") {
@@ -1927,110 +1641,47 @@ document.addEventListener("click", (e) => {
   Plot2d.fit();
   Solid.fit();
 });
-// the timeline scrolled within two screens of its top while earlier
-// entries are left out (view.bend's mark): ask for them, once a render
+// The hub issues page cursors. The virtual list accumulates their data in
+// Bend; changing pages never removes the reader's already loaded rows.
+let laterAsked = false, historyFrame = false, historyDirection = "", historyTouchY = null;
 function earlierCheck(tl) {
-  if (viewMode !== "compatibility" && (!olderGestureUntil || performance.now() > olderGestureUntil)) return;
-  if (earlierAsked || !(tl instanceof Element) || tl.id !== "timeline") return;
-  const mark = tl.querySelector("[data-earlier]");
-  if (!mark || tl.scrollTop > tl.clientHeight * 2) return;
-  if (thin?.pageError || stationaryPages >= 4 || !historyCanPage(tl, "older")) return;
-  earlierAsked = true;
-  // a page already on its way refuses the request: nothing was asked, so
-  // the gesture still stands and the next check asks again
-  if (dispatch("earlier", mark.getAttribute("data-earlier") ?? "") === false) { earlierAsked = false;return; }
-  stationaryPages++;
+  if (historyDirection !== "older" || earlierAsked || !tl || tl.id !== "timeline" || !thin?.ready || thin.paging || thin.pageError) return;
+  if (!thin.window?.older || tl.scrollTop > tl.clientHeight * 2) return;
+  earlierAsked = thin.page();
 }
-document.addEventListener("scroll", (e) => {
-  const tl = e.target;if (tl?.id !== "timeline") return;
-  if (tl === historyScrollOwner && tl.scrollTop !== fixedAt) {
-    if (tl.scrollTop < historyScrollTop && olderGestureUntil) { olderGestureUntil = performance.now() + 1200;newerGestureUntil = 0;stationaryPages = 0; }
-    if (tl.scrollTop > historyScrollTop && newerGestureUntil) { newerGestureUntil = performance.now() + 1200;olderGestureUntil = 0;stationaryPages = 0; }
-  }
-  historyScrollOwner = tl;historyScrollTop = tl.scrollTop;historyCheckSoon();
-  bodyWindows.observe(tl, remoteReady && !!frontendNode);
-}, true);
-// and back down: on an earlier page, within two screens of its bottom after
-// a downward gesture, the next newer page (thin-host's newer, retracing the
-// pages that led here to the newest)
-let laterAsked = false, newerGestureUntil = 0;
 function laterCheck(tl) {
-  if (viewMode === "compatibility" || !thin || thin.atNewest?.() !== false) return;
-  if (!newerGestureUntil || performance.now() > newerGestureUntil) return;
-  if (laterAsked || !(tl instanceof Element) || tl.id !== "timeline") return;
+  if (historyDirection !== "newer" || laterAsked || !tl || !thin?.ready || thin.atNewest() || thin.paging || thin.pageError) return;
   if (tl.scrollHeight - tl.scrollTop - tl.clientHeight > tl.clientHeight * 2) return;
-  if (thin.pageError || stationaryPages >= 4 || !historyCanPage(tl, "newer")) return;
-  laterAsked = true;
-  if (!thin.newer()) { laterAsked = false;return; }
-  stationaryPages++;
-}
-let olderGestureUntil = 0, olderTouchY = null, stationaryPages = 0, historyFrame = false, historyScrollOwner = null, historyScrollTop = 0;
-function historyCanPage(tl, direction) {
-  // A page that came is drawn first: asked for from the page still on
-  // screen, the next one left out the rows being read (the spare it was
-  // judged against was about to go).
-  if (historyPage) return false;
-  if (!historyBase) return true;
-  const anchor = anchorOf(tl);
-  // The spare is only a visual bridge. Read into the canonical page before
-  // replacing that bridge, so a fast second request cannot remove the anchor.
-  if (!anchor) return true;
-  const id = anchor.id.replace(/^fold:/, "");
-  if (historyBase.some(n => historyRow(n) === id)) return true;
-  // Reversing into the bridge asks for that adjacent page, rather than
-  // treating it as the bridge about to be discarded in the other direction.
-  return (direction === "newer" && historySpare.direction === "older" || direction === "older" && historySpare.direction === "newer")
-    && historySpare.some(n => historyRow(n) === id);
+  laterAsked = thin.newer();
 }
 function historyCheckSoon() {
   if (historyFrame) return;
   historyFrame = true;
-  requestAnimationFrame(() => { historyFrame = false;const tl = document.getElementById("timeline");earlierCheck(tl);laterCheck(tl); });
+  requestAnimationFrame(() => {
+    historyFrame = false;
+    const tl = document.getElementById("timeline");
+    earlierCheck(tl);laterCheck(tl);
+  });
 }
-// An upward gesture leaves the end at once. Smooth scrolling (the desktop
-// window's) moves a few px in its first frame, still "at the end", and a
-// streamed reply's render then put the view back at the end, cancelling the
-// scroll: the first notch up did nothing while an agent worked.
-function leaveEnd(tl) {
-  if (!tl) return;
-  leavingEndUntil = performance.now() + 700;
-  if (held || (focusedNode && !frontendNode)) return;
-  if (tl.scrollHeight <= tl.clientHeight + 2 || tl.scrollTop <= 0) return;
-  held = anchorOf(tl);
-  heldSize = holdSize(tl);
-  holdSay(App.sel(ui));
-}
-function noteOlderGesture(e) {
-  if (!e.isTrusted) return;
-  const tl = e.target.closest?.("#timeline");
-  if (!tl && !(e.type === "keydown" && e.target === document.body)) return;
-  let older = false, newer = false;
-  if (e.type === "wheel") { older = e.deltaY < 0 && !e.ctrlKey; newer = e.deltaY > 0 && !e.ctrlKey; }
-  else if (e.type === "touchstart") olderTouchY = e.touches[0]?.clientY ?? null;
-  else if (e.type === "touchmove") {
+document.addEventListener("wheel", e => {
+  if (!e.isTrusted || e.ctrlKey || !e.target.closest?.("#timeline")) return;
+  const tl = document.getElementById("timeline");
+  historyDirection = e.deltaY < 0 ? "older" : e.deltaY > 0 ? "newer" : historyDirection;
+  if (e.deltaY < 0) earlierCheck(tl);
+  else if (e.deltaY > 0) laterCheck(tl);
+}, { capture: true, passive: true });
+
+for (const event of ["touchstart", "touchmove", "keydown"]) document.addEventListener(event, e => {
+  if (!e.isTrusted || !e.target.closest?.("#timeline") && !(event === "keydown" && e.target === document.body)) return;
+  if (event === "touchstart") historyTouchY = e.touches[0]?.clientY ?? null;
+  else if (event === "touchmove") {
     const y = e.touches[0]?.clientY;
-    older = typeof y === "number" && typeof olderTouchY === "number" && y > olderTouchY;
-    newer = typeof y === "number" && typeof olderTouchY === "number" && y < olderTouchY;
-    olderTouchY = y ?? null;
-  } else if (e.type === "pointerdown") {
-    older = newer = e.button === 0 && tl.scrollHeight > tl.clientHeight && e.clientX >= tl.getBoundingClientRect().right - 16;
-  } else if (e.type === "keydown") {
-    older = ["PageUp", "Home", "ArrowUp"].includes(e.key) && !e.target.isContentEditable;
-    newer = ["PageDown", "End", "ArrowDown", " "].includes(e.key) && !e.target.isContentEditable;
-  }
-  // the latest gesture's way wins: a swipe down right after one up must not
-  // still ask for the older page (and the other way round)
-  if (older && !newer) { olderGestureUntil = performance.now() + 1200;newerGestureUntil = 0; }
-  if (newer && !older) { newerGestureUntil = performance.now() + 1200;olderGestureUntil = 0;leavingEndUntil = 0;towardEndUntil = performance.now() + 700; }
-  if (older && !newer) towardEndUntil = 0;
-  if (older && !newer && e.type !== "pointerdown") leaveEnd(tl || document.getElementById("timeline"));
-  if (older && newer) { olderGestureUntil = newerGestureUntil = performance.now() + 1200; }
-  // A timeline already at its top or bottom does not scroll, so no scroll
-  // event comes to ask for the next page: the gesture asks itself. A page
-  // of folded tool calls is barely a screen, so this is the common case.
-  if (older || newer) { stationaryPages = 0;historyCheckSoon(); }
-}
-for (const event of ["wheel", "touchstart", "touchmove", "pointerdown", "keydown"]) document.addEventListener(event, noteOlderGesture, { capture: true, passive: true });
+    if (typeof y === "number" && typeof historyTouchY === "number") historyDirection = y > historyTouchY ? "older" : y < historyTouchY ? "newer" : historyDirection;
+    historyTouchY = y;
+  } else if (["PageUp", "Home", "ArrowUp"].includes(e.key)) historyDirection = "older";
+  else if (["PageDown", "End", "ArrowDown", " "].includes(e.key)) historyDirection = "newer";
+  historyCheckSoon();
+}, { capture: true, passive: true });
 
 document.addEventListener("click", (e) => {
   if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey) return;
@@ -2686,11 +2337,8 @@ async function startThin(again = false, reason = "initial") {
       command: command => presentationCommand(command),
       anchor: () => { const tl = document.getElementById("timeline"), a = tl && anchorOf(tl);return { id: a?.id || "", offset: Math.max(0, Math.round(a ? tl.getBoundingClientRect().top - a.off : 0)) }; },
       pagePosition: () => {
-        const tl = document.getElementById("timeline");if (!tl) return null;
-        historyRememberBridge();
-        const a = anchorOf(tl), id = a?.id.replace(/^fold:/, "");
-        return { position: { top: tl.scrollTop, atEnd: thin.atNewest() && holdEnd(tl), anchor: a?.id || "", offset: a ? a.off - tl.getBoundingClientRect().top : 0 },
-          adjacent: a && !historyBase?.some(n => historyRow(n) === id) ? historySpare.direction === "older" ? "newer" : "older" : "" };
+        const list = timelineList();
+        return list ? { position: { ...list.position(), atEnd: thin.atNewest() && list.atEnd() }, adjacent: "" } : null;
       },
       // Give an immediately following user action priority over an unsent
       // notification read. Timer is bounded and works while the page is hidden.
@@ -2707,17 +2355,16 @@ async function startThin(again = false, reason = "initial") {
       search: thinSearchAnswer, searchFailed: thinSearchFailed, message: showThinMessage, body: (message, input) => bodyWindows.accept(message, input), bodyFailed: (input, reason) => bodyWindows.failed(input, reason),
       view: (node, detail) => {
         if (!current()) return;
-        // the newest page at once (holdBottom): no bridge to it, its end
-        if (detail.page?.direction === "newest") { historyClear();scroll = true; }
-        else if (detail.page) historyPage = detail.page;
-        historyRestoreBridge(detail);
-        if (detail.page && !held) { const tl = document.getElementById("timeline");if (tl) { held = anchorOf(tl);heldSize = holdSize(tl); } }
+        if (detail.page?.direction === "newest") scroll = true;
+        const previous = historyNode || node;
+        node = History.project(previous, node, historyNode ? detail.page?.direction || "update" : "reset");
+        historyNode = node;
         terminalOutput.rebind();
         const field = mailReplyField(detail.shown);
         const accepted = field === undefined ? undefined : thinMailDraft.matches(detail.mailDraftContext, detail.epoch) ? thin.fieldValue("mrreply", field) : field;
         thinMailDraft.bind(detail.mailDraftContext, detail.epoch, accepted);
         thinContinuations.bind(location.origin, detail);
-        bodyWindows.bind(location.origin, detail, detail.accountBinding || "", node, !!held);
+        bodyWindows.bind(location.origin, detail, detail.accountBinding || "", node, held);
         if (detail.position) transitionPosition = detail.position;
         else if (!remoteReady) transitionPosition = transitionViews.position(transitionScope(detail.target)) || {atEnd:true};
         focusedView.remote(detail.epoch);remoteEpoch = detail.epoch;frontendNode = node;transitionNode = null;transitionFor = "";heldAt = 0;

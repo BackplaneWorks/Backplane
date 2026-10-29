@@ -1,3 +1,4 @@
+import ./src/core/timeline-virtual.bend as TLVIRTUAL
 import ./src/core/history-window.bend as NATIVEHISTORY
 import ./src/core/accounts.bend as ACCT
 import ./src/server/thin-actor.bend as CHATSIDE
@@ -12872,3 +12873,24 @@ law native_history_page_order:
   for +visible: List<&2, String>
   for h: {NATIVEHISTORY.History.ordered(visible, candidate) == False{} : Bool}
   {NATIVEHISTORY.History.adopt(old, candidate, visible) == old : List<&2, String>}
+
+# ---- Web/Electron TanStack-model port (2026-10-29), append-only ----
+
+# Repositioning a keyed anchor carries its signed within-row offset unchanged.
+law timeline_virtual_prepend_offset:
+  for +anchor: TLVIRTUAL.Anchor
+  for before: TLVIRTUAL.Px
+  for after: TLVIRTUAL.Px
+  {TLVIRTUAL.Position.offset(TLVIRTUAL.Anchor.move(anchor, after)) == TLVIRTUAL.Position.offset(TLVIRTUAL.Anchor.move(anchor, before)) : TLVIRTUAL.Px}
+
+# The actual render filter always retains the anchor even outside overscan.
+law timeline_virtual_anchor_rendered:
+  for inRange: Bool
+  {TLVIRTUAL.Window.keep(True{}, inRange) == True{} : Bool}
+
+# An unpinned viewport cannot take the automatic-follow branch.
+law timeline_virtual_follow_only_at_bottom:
+  for follow: Bool
+  for +held: TLVIRTUAL.Px
+  for end: TLVIRTUAL.Px
+  {TLVIRTUAL.Follow.choose(TLVIRTUAL.Follow.allowed(follow, False{}), held, end) == held : TLVIRTUAL.Px}
