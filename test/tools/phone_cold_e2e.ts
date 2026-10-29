@@ -129,7 +129,7 @@ const head = lines.length;
 const hubPort = freePort();
 const hub = Bun.spawn([resolve(bin), "--home", home, "--port", String(hubPort), "--no-tailscale", "--foreground"], {
   // no agent on the PATH: nothing in the log may start one
-  env: { PATH: "/usr/bin:/bin", HOME: process.env.HOME ?? "", DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_ORDER_SERVER: "http://127.0.0.1:9", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "" },
+  env: { PATH: "/usr/bin:/bin", HOME: process.env.HOME ?? "", DISPLAY: "", WAYLAND_DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_KISTACK_SYNC: "0", BACKPLANE_ORDER_SERVER: "http://127.0.0.1:9", BACKPLANE_KEYRING_LOCKED: "0", BACKPLANE_PEERS: "" },
   stdout: "ignore",
   stderr: "ignore",
 });

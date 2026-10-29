@@ -1,10 +1,12 @@
 #!/bin/sh
-# KiStack's skills, bundled with the app: the pinned commit
-# (deploy/kistack.lock) fetched at build time, its skills/ tree checked
-# against the pinned sha256, and only skills/** and its LICENSE kept, with
-# a plugin.json of our own. The hub never fetches KiStack and never takes
-# anything else from the repository (hooks, .mcp.json, its own manifest):
-# Claude loads the result with --plugin-dir.
+# KiStack's skills, bundled with the app as the offline fallback: the
+# pinned commit (deploy/kistack.lock) fetched at build time, its skills/
+# tree checked against the pinned sha256, and only skills/** and its LICENSE
+# kept, with a plugin.json of our own. Nothing else is taken from the
+# repository (hooks, .mcp.json, its own manifest): Claude loads the result
+# with --plugin-dir. The hub syncs the newest commit into <home>/kistack at
+# each start the same way (src/server/kicad.bend's KiStack.sync; the
+# manifest text is KiStack.manifest), and that copy wins once complete.
 #   scripts/build-kistack.sh DEST      (e.g. dist/kistack)
 set -eu
 cd "$(dirname "$0")/.."

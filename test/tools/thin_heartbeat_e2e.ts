@@ -26,7 +26,7 @@ mkdirSync(home);mkdirSync(proj);
 writeFileSync(join(home, "events.jsonl"), "");
 writeFileSync(join(home, "token"), TOKEN, { mode: 0o600 });
 const hub = Bun.spawn([bin, "--home", home, "--port", String(PORT), "--host", "127.0.0.1", "--no-tailscale", "--headless", "--foreground"], {
-  env: { ...process.env, DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_ORDER_SERVER: "http://127.0.0.1:9", BACKPLANE_TELEMETRY: "off", BACKPLANE_PEERS: "", BACKPLANE_GOOGLE_BAKE: "0" },
+  env: { ...process.env, DISPLAY: "", BACKPLANE_NO_UPDATE: "1", BACKPLANE_KISTACK_SYNC: "0", BACKPLANE_ORDER_SERVER: "http://127.0.0.1:9", BACKPLANE_TELEMETRY: "off", BACKPLANE_PEERS: "", BACKPLANE_GOOGLE_BAKE: "0" },
   stdout: "ignore", stderr: Bun.file(join(root, "hub.err")) });
 
 // Frames decoded as the clients do (wire.js), with the hub's dictionaries

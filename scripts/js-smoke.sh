@@ -35,7 +35,7 @@ set -- --foreground --no-tailscale --home "$home" --port "$port"
 # the basic one starts no agent at all
 agents=""
 [ "${BACKPLANE_SMOKE_FULL:-}" = 1 ] && agents=$home/agents
-BACKPLANE_TELEMETRY=off BACKPLANE_NO_UPDATE=1 BACKPLANE_ORDER_SERVER=http://127.0.0.1:9 BACKPLANE_GOOGLE_BAKE=0 \
+BACKPLANE_TELEMETRY=off BACKPLANE_NO_UPDATE=1 BACKPLANE_ORDER_SERVER=http://127.0.0.1:9 BACKPLANE_GOOGLE_BAKE=0 BACKPLANE_KISTACK_SYNC=0 \
   BACKPLANE_AGENTS=$agents BACKPLANE_PEERS= \
   "$bin" "$@" >"$home/out.log" 2>&1 &
 pid=$!

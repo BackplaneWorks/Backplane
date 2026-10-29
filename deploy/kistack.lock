@@ -1,5 +1,7 @@
-# KiStack (github.com/American-Embedded/KiStack), bundled with the app at
-# build time by scripts/build-kistack.sh: the commit, and the sha256 of its
+# KiStack (github.com/American-Embedded/KiStack, now BackplaneWorks/kistack),
+# bundled with the app at build time by scripts/build-kistack.sh as the
+# offline fallback (the hub syncs the newest commit into its home at each
+# start, src/server/kicad.bend's KiStack.sync): the commit, and the sha256 of its
 # skills/ tree (each file's sha256 and path, sorted, hashed again: GitHub's
 # tarballs are not byte-stable, the tree is). Change both together.
 rev 641ade9041bb0844c4530dfff11010eef30919af
