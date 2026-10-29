@@ -482,21 +482,27 @@ export class NativeThinHost307265 {
   projectHistory(s, view, paged) {
     const old = s.shown?.thread, fresh = view.shown?.thread;
     if (!this.api.history || s.historyReset || !old || !fresh || old.id !== fresh.id) return view;
-    const visible = this.visibleRows(s), keep = new Set((visible || old.entries).map(e => e.id));
+    // A run of tool calls the fresh picture shows shut owns its rows: an
+    // open run's rows carry its id ("run", screen.bend's Mob.run.mark), and
+    // one on screen when the run was shut is never kept (else a shut run
+    // stayed open on the phone, its rows held as visible context).
+    const shut = new Set(fresh.entries.filter(e => e.kind === 'fold' && e.open === false && typeof e.value === 'string').map(e => e.value.slice(1)));
+    const gone = e => typeof e.run === 'string' && shut.has(e.run);
+    const seen = this.visibleRows(s), visible = seen && seen.filter(e => !gone(e)), keep = new Set((visible || old.entries.filter(e => !gone(e))).map(e => e.id));
     // A full outgoing wire page provides context below/above the viewport.
     if (paged) {
       const page = new Set((s.historyPage || old.entries).map(e => e.id));
       const indices = old.entries.map((e, i) => keep.has(e.id) || page.has(e.id) ? i : -1).filter(i => i >= 0);
       // Keep the connecting rows too: retaining an isolated anchor farther
       // down while dropping the rows leading to it would create a gap.
-      if (indices.length) for (const e of old.entries.slice(indices[0], indices.at(-1) + 1)) keep.add(e.id);
+      if (indices.length) for (const e of old.entries.slice(indices[0], indices.at(-1) + 1)) if (!gone(e)) keep.add(e.id);
     }
     // Identities only: no message bodies are copied into the lineage plan.
     const identities = entries => entries.map(e => ({ id: e.id, kind: e.kind,
       ...(e.kind === 'fold' ? { value: e.value, open: e.open } : {}) }));
     const plan = this.api.history({ old: old.entries.map(e => e.id), fresh: fresh.entries.map(e => e.id), keep: [...keep],
       oldRows: identities(old.entries), freshRows: identities(fresh.entries),
-      visible: (visible || old.entries).map(e => e.id), page: !!paged, older: paged?.direction !== 'newer' });
+      visible: (visible || old.entries.filter(e => !gone(e))).map(e => e.id), page: !!paged, older: paged?.direction !== 'newer' });
     const previous = new Map(old.entries.map(e => [e.id, e])), raw = new Map(fresh.entries.map(e => [e.id, e]));
     if (!object(plan) || !Array.isArray(plan.aliases) || plan.aliases.some(a => !exactKeys(a, ['from', 'to']) ||
         raw.get(a.from)?.kind !== 'fold' || previous.get(a.to)?.kind !== 'fold') ||

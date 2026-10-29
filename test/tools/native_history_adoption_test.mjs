@@ -72,6 +72,33 @@ export function registerNativeHistoryChecks(check, harness) {
     assert.deepEqual(keys(x), ['p', 'fold:old', 'm']); assert.equal(s.shown.thread.entries[1].text, '2 calls');
     assert.equal(s.shown.thread.entries[1].value, '0new'); assert.equal(s.shown.thread.entries[1].open, true);
   });
+  check('a run shut on screen takes its rows: they are neither kept nor visible', () => {
+    const x = opened(['u', 'fold:a', 'a', 'b', 'm']), s = x.h.states.get('h');
+    for (const screen of [s.shown, s.overlay.j]) {
+      screen.thread.entries[1] = { id: 'fold:a', kind: 'fold', text: '2 calls', open: true, value: '0a' };
+      screen.thread.entries[2].run = 'a'; screen.thread.entries[3].run = 'a';
+    }
+    assert(x.h.viewport('h', 'a', { id: 'u', offset: -2, first: 'u', last: 'm' }));
+    x.api.history = input => {
+      assert.deepEqual(input.keep, ['u', 'fold:a', 'm']); assert.deepEqual(input.visible, ['u', 'fold:a', 'm']);
+      return plan(['u', 'fold:a', 'm']);
+    };
+    x.h.request('h', 'fold', '1a'); const req = x.h.drain().cmds[0].request;
+    x.answer(req.id, picture(x, ['u', 'fold:a', 'm'], { 'fold:a': { kind: 'fold', text: '2 calls', open: false, value: '1a' } }));
+    assert.deepEqual(keys(x), ['u', 'fold:a', 'm']); assert.equal(s.shown.thread.entries[1].open, false);
+  });
+  check('an open run keeps its rows on screen, and another run is not touched', () => {
+    const x = opened(['u', 'fold:a', 'a', 'm', 'fold:z', 'z']), s = x.h.states.get('h');
+    for (const screen of [s.shown, s.overlay.j]) {
+      screen.thread.entries[1] = { id: 'fold:a', kind: 'fold', text: '1 call', open: true, value: '0a' };
+      screen.thread.entries[2].run = 'a'; screen.thread.entries[5].run = 'z';
+    }
+    assert(x.h.viewport('h', 'a', { id: 'u', offset: -2, first: 'u', last: 'z' }));
+    x.api.history = input => { assert.deepEqual(input.keep, ['u', 'fold:a', 'a', 'm', 'fold:z', 'z']); return plan(['u', 'fold:a', 'a', 'm', 'fold:z', 'z']); };
+    x.h.request('h', 'fold', '1q'); const req = x.h.drain().cmds[0].request;
+    x.answer(req.id, picture(x, ['u', 'fold:a', 'a', 'm'], { 'fold:a': { kind: 'fold', text: '1 call', open: true, value: '0a' } }));
+    assert.deepEqual(keys(x), ['u', 'fold:a', 'a', 'm', 'fold:z', 'z']);
+  });
   check('local retention bound parks the new picture instead of clipping visible rows', () => {
     const x = opened(['a']), s = x.h.states.get('h'), ids = Array.from({ length: 260 }, (_, i) => 'old' + i);
     for (const screen of [s.shown, s.overlay.j]) screen.thread.entries = ids.map(id => ({ id, kind: 'assistant', text: id, blocks: [] }));

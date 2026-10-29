@@ -3684,6 +3684,18 @@ def Laws.fold_user_shut(live):
 def Laws.fold_default_live(live):
   {==}
 
+def Laws.fold_run_opened(live):
+  {==}
+
+def Laws.fold_run_shut(live):
+  {==}
+
+def Laws.fold_run_default_shut(live):
+  {==}
+
+def Laws.fold_run_live_shut(i, th, k, s, a):
+  {==}
+
 def Laws.hub_frames_cbor(t):
   {==}
 
@@ -4714,7 +4726,7 @@ def Laws.work_message_shown(live, u, b, info, now):
     case False{}:
       {==}
 
-def Laws.work_live_open(u, e, t, now):
+def Laws.work_live_shut(u, e, t, now):
   {==}
 
 def Laws.btw_command():

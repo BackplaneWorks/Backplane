@@ -11,9 +11,14 @@ import ./model.bend as M
 # Grouping loses no entry and keeps the order (law fold_keeps_entries), and
 # a run holds only tool calls (law fold_runs_only_tools).
 #
-# A run is open when the user opened it ("fold:<first id>" is "1" in the
-# client's info map), shut when they shut it ("0"), and otherwise open only
-# while it is the live one: the last thing in a thread whose turn runs.
+# A run is a drawer, shut unless the person opened it: "fold:<first id>"
+# is "1" in the client's info map after a click on its row (or a jump to
+# one of its calls, Fold.reveal), "0" after a click that shut it. With
+# nothing stored it is shut, whether its turn runs or not (laws
+# fold_run_*): only the person's own click opens one. The live run (the
+# last thing in a thread whose turn runs) says on its row what it does
+# now ("3 tool calls · running: Bash", Fold.label.live), so the work shows
+# without opening it.
 #
 # Only tool calls fold: a turn's messages always show (law
 # fold_roles_message_shown). The turn fold below ("Worked for …", Work.*)
@@ -186,6 +191,32 @@ def Fold.label(+l: I.Loc, +es: List<&2, M.Entry>) -> String:
   Bool.pick(String, Nat.is_eq(n, 0n), Fold.steps.label(l, d),
     Fold.calls.label(l, n, Fold.kinds(Fold.calls(es), Nil{})) ++ Bool.pick(String, Nat.is_eq(d, 0n), "", " · " ++ Fold.steps.label(l, d)))
 
+# the kind of a run's latest call ("" with none)
+def Fold.latest(es: List<&2, M.Entry>, +acc: String) -> String:
+  match es:
+    case Nil{}:
+      acc
+    case +e <> t:
+      Fold.latest(t, Fold.kind(e))
+
+# the live run's row: how many calls, then what the latest is
+# ("6 tool calls · running: Bash"); a run of design changes alone reads
+# as Fold.label
+def Fold.label.live(+l: I.Loc, +es: List<&2, M.Entry>) -> String:
+  +n = List.length(&2, M.Entry, Fold.calls(es))
+  +d = Fold.steps(es)
+  Bool.pick(String, Nat.is_eq(n, 0n), Fold.steps.label(l, d),
+    MSG.T.fold.calls(l, Nat.show(n), Bool.pick(String, Nat.is_eq(n, 1n), "one", "other"))
+      ++ Bool.pick(String, Nat.is_eq(d, 0n), "", " · " ++ Fold.steps.label(l, d))
+      ++ " · " ++ MSG.T.fold.running(l, Fold.latest(Fold.calls(es), "")))
+
+def Fold.label.k(live: Bool, +l: I.Loc, +es: List<&2, M.Entry>) -> String:
+  match live:
+    case True{}:
+      Fold.label.live(l, es)
+    case False{}:
+      Fold.label(l, es)
+
 # the run's id: its first entry's
 def Fold.run_id(es: List<&2, M.Entry>) -> String:
   match es:
@@ -209,8 +240,15 @@ def Fold.user(m: Map<&2, String>, +id: String) -> String:
   Fold.user.k(Map.get(String, "", m, Fold.key(id)))
 
 # the user's choice ("1" open, "0" shut) or, with none, whether it is live
+# (the subagents' and the to-dos' panels; a run of tool calls is
+# Fold.run.open)
 def Fold.open(+user: String, live: Bool) -> Bool:
   Bool.pick(Bool, String.eq(user, "1"), True{}, Bool.pick(Bool, String.eq(user, "0"), False{}, live))
+
+# a run of tool calls: open only when the person opened it, live or not
+# ("0" or nothing: shut)
+def Fold.run.open(+user: String, live: Bool) -> Bool:
+  String.eq(user, "1")
 
 # a click's value: the state it asks for, then the run's id
 def Fold.ask(+open: Bool, +id: String) -> String:
@@ -221,11 +259,12 @@ def Fold.ask(+open: Bool, +id: String) -> String:
 # What each entry shows as, one role per entry in order (Fold.flat), for a
 # UI that walks its entries: as it is, as the first of a run (the run's
 # row, then the entry itself when open) or as a later one (itself when
-# open).
+# open). A head is live while it is the last thing of a running turn (its
+# label then says what runs now).
 
 type Role is Data:
   RShow{}
-  RHead{id: String, label: String, open: Bool}
+  RHead{id: String, label: String, open: Bool, live: Bool}
   RIn{open: Bool}
   # the first entry of a turn's work: the turn's row, then (when open) the
   # entry as its own role says
@@ -238,12 +277,12 @@ def Fold.ins(es: List<&2, M.Entry>, +open: Bool) -> List<&2, Role>:
     case _ <> t:
       RIn{open} <> Fold.ins(t, open)
 
-def Fold.run.roles(+l: I.Loc, +es: List<&2, M.Entry>, +open: Bool) -> List<&2, Role>:
+def Fold.run.roles(+l: I.Loc, +es: List<&2, M.Entry>, +open: Bool, +live: Bool) -> List<&2, Role>:
   match es:
     case Nil{}:
       Nil{}
     case _ <> t:
-      RHead{Fold.run_id(es), Fold.label(l, es), open} <> Fold.ins(t, open)
+      RHead{Fold.run_id(es), Fold.label.k(live, l, es), open, live} <> Fold.ins(t, open)
 
 def Fold.last(gs: List<&2, Grp>) -> Bool:
   match gs:
@@ -257,7 +296,8 @@ def Fold.grp.roles(+l: I.Loc, g: Grp, last: Bool, +info: Map<&2, String>, +runni
     case GOne{_}:
       [RShow{}]
     case GRun{+xs}:
-      Fold.run.roles(l, xs, Fold.open(Fold.user(info, Fold.run_id(xs)), Bool.and(last, running)))
+      +live = Bool.and(last, running)
+      Fold.run.roles(l, xs, Fold.run.open(Fold.user(info, Fold.run_id(xs)), live), live)
 
 def Fold.roles.go(+l: I.Loc, gs: List<&2, Grp>, +info: Map<&2, String>, +running: Bool) -> List<&2, Role>:
   match gs:
@@ -390,11 +430,12 @@ def Work.done(+l: I.Loc, +m: Maybe<&2, Nat>, +b: List<&2, M.Entry>, +u: M.Entry,
     case _:
       Work.plain(b)
 
-# the turn still running: all of it is work, open unless shut
+# the turn still running: all of it is work, shut unless opened (as a run
+# of tool calls, Fold.run.open)
 def Work.turn.loc(+l: I.Loc, live: Bool, +u: M.Entry, +b: List<&2, M.Entry>, +info: Map<&2, String>, +now: Nat) -> List<&2, WRole>:
   match live:
     case True{}:
-      WPlain{} <> Work.block(b, Work.id(u), MSG.T.fold.working(l, Work.ago.loc(l, now, Work.at(u))), Fold.open(Fold.user(info, Work.id(u)), True{}))
+      WPlain{} <> Work.block(b, Work.id(u), MSG.T.fold.working(l, Work.ago.loc(l, now, Work.at(u))), Fold.run.open(Fold.user(info, Work.id(u)), True{}))
     case False{}:
       WPlain{} <> Work.done(l, Work.last(b, 0n, None{}), b, u, info, now)
 

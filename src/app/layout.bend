@@ -6528,7 +6528,7 @@ def TL.role(r: FO.Role, +ty: Ty, ls: List<&2, TLine>, +px: U32) -> List<&2, TLin
   match r:
     case FO.RShow{}:
       ls
-    case FO.RHead{+id, +label, +open}:
+    case FO.RHead{+id, +label, +open, _}:
       TL.fold.line(ty, id, label, open, px) <> TL.fold.shown(open, ls)
     case FO.RIn{open}:
       TL.fold.shown(open, ls)
@@ -6544,8 +6544,8 @@ def TL.turn(t: M.Thread) -> Bool:
     case M.Thread{_, _, _, _, _, turn, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _}:
       Lay.running(turn)
 
-# the roles of the open thread's entries (its last run stays open while
-# its turn runs)
+# the roles of the open thread's entries (every run shut until the
+# person opens it; the live one's row says what runs now)
 def TL.roles.loc(+l: I.Loc, es: List<&2, M.Entry>, +st: M.State, +sel: String, +pics: Map<&2, String>) -> List<&2, FO.Role>:
   FO.Fold.roles.loc(l, es, pics, TL.turn(U.Ui.thread(st, sel)))
 

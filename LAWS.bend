@@ -1669,9 +1669,9 @@ law fold_never_message:
   for +a: Nat
   {FO.Fold.tool(M.Msg{i, t, r, x, a}) == False{} : Bool}
 
-# a run the user opened stays open and one they shut stays shut, live or
-# not; one nobody touched is open only while live (the last thing in a
-# thread whose turn runs), so it shuts once the turn ends
+# a panel the user opened stays open and one they shut stays shut, live
+# or not; one nobody touched is open only while live (Fold.open: the
+# subagents' panel and the to-dos; a run of tool calls is fold_run_*)
 law fold_user_opened:
   for +live: Bool
   {FO.Fold.open("1", live) == True{} : Bool}
@@ -1683,6 +1683,32 @@ law fold_user_shut:
 law fold_default_live:
   for +live: Bool
   {FO.Fold.open("", live) == live : Bool}
+
+# a run of tool calls is a drawer the person opens: their click opens it
+# and shuts it again, and one nobody touched is shut, whether its turn
+# runs (live) or not
+law fold_run_opened:
+  for +live: Bool
+  {FO.Fold.run.open("1", live) == True{} : Bool}
+
+law fold_run_shut:
+  for +live: Bool
+  {FO.Fold.run.open("0", live) == False{} : Bool}
+
+law fold_run_default_shut:
+  for +live: Bool
+  {FO.Fold.run.open("", live) == False{} : Bool}
+
+# so a thread whose turn runs and whose last entry is a tool call shows
+# that call's run shut, its row saying what runs now
+law fold_run_live_shut:
+  for +i: String
+  for +th: String
+  for +k: String
+  for +s: String
+  for +a: Nat
+  {FO.Fold.roles([M.Act{i, th, "tool", k, s, a}], Map.new(&2, String), True{})
+    == [FO.RHead{i, "1 tool call · running: " ++ k, False{}, True{}}] : List<&2, FO.Role>}
 
 # a message is never folded away: it shows as itself wherever it sits
 law fold_roles_message_shown:
@@ -1697,7 +1723,7 @@ law fold_roles_message_shown:
   {List.head(&2, FO.Role, FO.Fold.roles(M.Msg{i, th, r, x, a} <> t, info, running)) == Some{FO.RShow{}} : Maybe<&2, FO.Role>}
 
 # a turn's work folds under its message: the message itself is never in
-# it, and while the turn runs its work stays open until shut by hand
+# it, and while the turn runs its work stays shut until opened by hand
 law work_message_shown:
   for live: Bool
   for +u: M.Entry
@@ -1706,13 +1732,13 @@ law work_message_shown:
   for +now: Nat
   {List.head(&2, FO.WRole, FO.Work.turn(live, u, b, info, now)) == Some{FO.WPlain{}} : Maybe<&2, FO.WRole>}
 
-law work_live_open:
+law work_live_shut:
   for +u: M.Entry
   for +e: M.Entry
   for +t: List<&2, M.Entry>
   for +now: Nat
   {FO.Work.turn(True{}, u, e <> t, Map.new(&2, String), now)
-    == FO.WPlain{} <> FO.WHead{FO.Work.id(u), "Working · started " ++ FO.Work.ago(M.Time.ago(now, FO.Work.at(u))), True{}} <> FO.Work.ins(t, True{}) : List<&2, FO.WRole>}
+    == FO.WPlain{} <> FO.WHead{FO.Work.id(u), "Working · started " ++ FO.Work.ago(M.Time.ago(now, FO.Work.at(u))), False{}} <> FO.Work.ins(t, False{}) : List<&2, FO.WRole>}
 
 # "/btw <question>" asks beside the turn: only the word itself starts one,
 # and the hub answers it with a job alone, logging nothing, so the thread

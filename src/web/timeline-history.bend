@@ -234,17 +234,62 @@ def H.weave.edges(e: HEdges, +fresh: List<&2, D.Node>, count: Nat) -> List<&2, D
   match e:
     case HEdges{p, s}: H.weave(fresh, H.weave.head(fresh), p, s, count, Map.new(&2, Bool), Nil{})
 
+def H.fold.node(n: D.Node) -> Bool:
+  match n:
+    case D.Txt{_}: False{}
+    case D.El{_, _, as, _}: H.fold(as)
+
+def H.fold.raw(n: D.Node) -> String:
+  match n:
+    case D.Txt{_}: ""
+    case D.El{_, _, as, _}: "fold:" ++ String.drop(H.attr(as, "data-value"), 1n)
+
+# A run of tool calls the fresh page shows shut owns its rows. An open
+# run's rows say which run they are in (view.bend's View.run.mark,
+# data-run); one kept from an earlier picture goes once the fresh page has
+# that run's head shut. Else a run open at the page's end (opened, then
+# shut) left its rows below the newest entry, headless.
+def H.shut.is(n: D.Node) -> Bool:
+  match n:
+    case D.Txt{_}: False{}
+    case D.El{_, _, +as, _}: Bool.and(H.fold(as), String.starts_with(H.attr(as, "data-value"), "1"))
+
+def H.shut.one(shut: Bool, +n: D.Node, acc: Map<&2, Bool>) -> Map<&2, Bool>:
+  match shut:
+    case True{}: Map.set(&2, Bool, Map.set(&2, Bool, acc, H.fold.raw(n), True{}), key(n), True{})
+    case False{}: acc
+
+# the heads of the runs shut on the fresh page, by their run ("fold:<id>")
+# and by the key they show under
+def H.shut(xs: List<&2, D.Node>, acc: Map<&2, Bool>) -> Map<&2, Bool>:
+  match xs:
+    case Nil{}: acc
+    case +h <> t: H.shut(t, H.shut.one(H.shut.is(h), h, acc))
+
+def H.run(n: D.Node) -> String:
+  match n:
+    case D.Txt{_}: ""
+    case D.El{_, _, as, _}: H.attr(as, "data-run")
+
+def H.gone.k(+r: String, +shut: Map<&2, Bool>) -> Bool:
+  Bool.and(Bool.not(String.is_empty(r)), H.has(shut, "fold:" ++ r))
+
+# a retained row of a run the fresh page shows shut
+def H.gone(+shut: Map<&2, Bool>, n: D.Node) -> Bool:
+  H.gone.k(H.run(n), shut)
+
 # Retained data can arrive from a restored snapshot, including duplicate old
 # rows or a historical identity which the fresh page now renders as live.
-# Fresh ownership wins before the assembled timeline is deduplicated.
-def H.without(xs: List<&2, D.Node>, +freshKeys: Map<&2, Bool>, acc: List<&2, D.Node>) -> List<&2, D.Node>:
+# Fresh ownership wins before the assembled timeline is deduplicated, and
+# a shut run's rows go with it (H.shut).
+def H.without(xs: List<&2, D.Node>, +freshKeys: Map<&2, Bool>, +shut: Map<&2, Bool>, acc: List<&2, D.Node>) -> List<&2, D.Node>:
   match xs:
     case Nil{}: List.reverse(&2, D.Node, acc)
-    case +h <> t: H.without(t, freshKeys, H.push(Bool.not(H.has(freshKeys, key(h))), h, acc))
+    case +h <> t: H.without(t, freshKeys, shut, H.push(Bool.not(Bool.or(H.has(freshKeys, key(h)), H.gone(shut, h))), h, acc))
 
-def H.edges.fresh(e: HEdges, +freshKeys: Map<&2, Bool>) -> HEdges:
+def H.edges.fresh(e: HEdges, +freshKeys: Map<&2, Bool>, +shut: Map<&2, Bool>) -> HEdges:
   match e:
-    case HEdges{p, s}: HEdges{H.without(p, freshKeys, Nil{}), H.without(s, freshKeys, Nil{})}
+    case HEdges{p, s}: HEdges{H.without(p, freshKeys, shut, Nil{}), H.without(s, freshKeys, shut, Nil{})}
 
 def H.entry(+n: D.Node) -> Bool:
   Bool.or(H.historical(n), H.transient.node(n))
@@ -268,17 +313,7 @@ def H.unique(xs: List<&2, D.Node>, +seen: Map<&2, Bool>, acc: List<&2, D.Node>) 
       H.unique(t, H.unique.seen(H.entry(h), h, seen), H.unique.step(H.entry(h), H.has(seen, key(h)), h, acc))
 
 def H.merge.rows(+old: List<&2, D.Node>, +fresh: List<&2, D.Node>, +rows: List<&2, D.Node>, direction: String) -> List<&2, D.Node>:
-  H.unique(H.weave.edges(H.edges.fresh(H.edges(old, H.bounds(old, H.keys(rows, Map.new(&2, Bool)), 0n, HBounds{False{}, 0n, 0n}), direction, 0n, HEdges{Nil{}, Nil{}}), H.keys(fresh, Map.new(&2, Bool))), fresh, H.count(rows, 0n)), Map.new(&2, Bool), Nil{})
-
-def H.fold.node(n: D.Node) -> Bool:
-  match n:
-    case D.Txt{_}: False{}
-    case D.El{_, _, as, _}: H.fold(as)
-
-def H.fold.raw(n: D.Node) -> String:
-  match n:
-    case D.Txt{_}: ""
-    case D.El{_, _, as, _}: "fold:" ++ String.drop(H.attr(as, "data-value"), 1n)
+  H.unique(H.weave.edges(H.edges.fresh(H.edges(old, H.bounds(old, H.keys(rows, Map.new(&2, Bool)), 0n, HBounds{False{}, 0n, 0n}), direction, 0n, HEdges{Nil{}, Nil{}}), H.keys(fresh, Map.new(&2, Bool)), H.shut(fresh, Map.new(&2, Bool))), fresh, H.count(rows, 0n)), Map.new(&2, Bool), Nil{})
 
 type HFolds is Data:
   HFolds{ids: Map<&2, String>, successors: Map<&2, String>, pending: String}

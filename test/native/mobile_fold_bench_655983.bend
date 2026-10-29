@@ -9,17 +9,17 @@ import ../../src/core/json.bend as J
 
 def render.old() -> String:
   +es = T.entries()
-  +rs : List<&2, F.Role> = [F.RShow{}, F.RHead{"fold", "tools", False{}}, F.RIn{False{}}, F.RShow{}, F.RShow{}]
+  +rs : List<&2, F.Role> = [F.RShow{}, F.RHead{"fold", "tools", False{}, False{}}, F.RIn{False{}}, F.RShow{}, F.RShow{}]
   +st = M.State.empty()
   +sp = ST.Stamps.of.s(es, st, 100n, False{}, False{})
-  J.Json.show(J.Json.arr(List.reverse(&2, J.Json, T.legacy(es, rs, st, sp, Nil{}))))
+  J.Json.show(J.Json.arr(List.reverse(&2, J.Json, T.legacy(es, rs, st, sp, "", Nil{}))))
 
 def render.new() -> String:
   +es = T.entries()
-  +rs : List<&2, F.Role> = [F.RShow{}, F.RHead{"fold", "tools", False{}}, F.RIn{False{}}, F.RShow{}, F.RShow{}]
+  +rs : List<&2, F.Role> = [F.RShow{}, F.RHead{"fold", "tools", False{}, False{}}, F.RIn{False{}}, F.RShow{}, F.RShow{}]
   +st = M.State.empty()
   +sp = ST.Stamps.of.s(es, st, 100n, False{}, False{})
-  J.Json.show(J.Json.arr(List.reverse(&2, J.Json, MOB.Mob.entries.go(I.En{}, es, rs, st, "t", Map.new(&2, String), sp, Nil{}))))
+  J.Json.show(J.Json.arr(List.reverse(&2, J.Json, MOB.Mob.entries.go(I.En{}, es, rs, st, "t", Map.new(&2, String), sp, "", Nil{}))))
 
 def render(old: Bool) -> String:
   match old:

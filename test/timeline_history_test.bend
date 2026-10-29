@@ -58,6 +58,13 @@ def main() -> IO(Unit):
     same("newest drops retained pages", H.project(tl([a, b, c]), tl([b1]), "newest"), tl([b1]))
     same("fold closing replaces old interior", H.project(tl([a, fold("0"), b, c, d]), tl([fold("1"), d]), "update"), tl([a, fold("1"), d]))
     same("fold opening uses same stable head", H.project(tl([a, fold("1"), d]), tl([fold("0"), b, c, d]), "update"), tl([a, fold("0"), b, c, d]))
+    +rb : D.Node = D.El{"div", "b", [D.At{"data-id", "b"}, D.At{"class", "act tool"}, D.At{"data-run", "run"}], [D.Txt{"b"}]}
+    +rc : D.Node = D.El{"bp-memo", "c", [D.At{"fn", "act"}, D.At{"data-run", "run"}], [D.Txt{"c"}]}
+    same("a run shut at the end takes its rows (no headless rows below)", H.project(tl([a, fold("0"), rb, rc]), tl([a, fold("1")]), "update"), tl([a, fold("1")]))
+    same("a run shut when its turn ends: its rows never trail the reply", H.project(tl([a, fold("0"), rb, rc]), tl([a, fold("1"), d]), "update"), tl([a, fold("1"), d]))
+    same("an open run keeps its retained rows", H.project(tl([a, fold("0"), rb, rc]), tl([a, fold("0"), rb]), "older"), tl([a, fold("0"), rb, rc]))
+    same("rows outside any run are retained as before", H.project(tl([a, fold("0"), b, c]), tl([a, fold("1")]), "update"), tl([a, fold("1"), b, c]))
+    same("another run's rows are kept", H.project(tl([a, fold("0"), D.El{"div", "x", [D.At{"data-id", "x"}, D.At{"data-run", "other"}], Nil{}}]), tl([a, fold("1")]), "update"), tl([a, fold("1"), D.El{"div", "x", [D.At{"data-id", "x"}, D.At{"data-run", "other"}], Nil{}}]))
     same("fresh duplicate shared rows appear once", H.project(tl([a, b, c]), tl([b1, b1, c1]), "older"), tl([a, b1, c1]))
     +memo : D.Node = D.El{"bp-memo", "memo", [D.At{"fn", "msg"}], [D.Txt{"memo text"}]}
     +memoRow : D.Node = D.El{"bp-memo", "memo-row", [D.At{"fn", "row"}], [D.Txt{"row text"}]}

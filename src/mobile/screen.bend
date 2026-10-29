@@ -643,10 +643,15 @@ def Mob.entry.k(+lc: I.Loc, mine: Bool, +e: M.Entry, +st: M.State, +dr: Map<&2, 
 def Mob.entry(+lc: I.Loc, +e: M.Entry, +st: M.State, +sel: String, +dr: Map<&2, String>, +sp: STP.Stamps) -> List<&2, J.Json>:
   Mob.entry.k(lc, String.eq(V.View.entry_thread(e), sel), e, st, dr, sp)
 
-# a run of tool calls as one row; "fold" with its value opens or shuts it
-def Mob.fold(+id: String, +label: String, +open: Bool) -> J.Json:
+# a run of tool calls as one row, a drawer shut until tapped; "fold" with
+# its value opens or shuts it. "live": the last thing while its turn runs
+# (its text then says what runs now)
+def Mob.fold.live(+id: String, +label: String, +open: Bool, +live: Bool) -> J.Json:
   J.Json.obj([J.KV{"id", J.Json.str("fold:" ++ id)}, J.KV{"kind", J.Json.str("fold")}, J.KV{"text", J.Json.str(label)},
-    J.KV{"open", J.Json.bool(open)}, J.KV{"value", J.Json.str(FO.Fold.ask(open, id))}])
+    J.KV{"open", J.Json.bool(open)}, J.KV{"live", J.Json.bool(live)}, J.KV{"value", J.Json.str(FO.Fold.ask(open, id))}])
+
+def Mob.fold(+id: String, +label: String, +open: Bool) -> J.Json:
+  Mob.fold.live(id, label, open, False{})
 
 # xs pushed onto a reversed accumulator
 def Mob.onto(xs: List<&2, J.Json>, acc: List<&2, J.Json>) -> List<&2, J.Json>:
@@ -668,8 +673,8 @@ def Mob.role(r: FO.Role, xs: List<&2, J.Json>, acc: List<&2, J.Json>) -> List<&2
   match r:
     case FO.RShow{}:
       Mob.onto(xs, acc)
-    case FO.RHead{+id, +label, +open}:
-      Mob.shown(open, xs, Mob.fold(id, label, open) <> acc)
+    case FO.RHead{+id, +label, +open, +live}:
+      Mob.shown(open, xs, Mob.fold.live(id, label, open, live) <> acc)
     case FO.RIn{open}:
       Mob.shown(open, xs, acc)
     case FO.RWork{+id, +label, open, inner}:
@@ -684,7 +689,7 @@ def Mob.role(r: FO.Role, xs: List<&2, J.Json>, acc: List<&2, J.Json>) -> List<&2
 def Mob.role.body(r: FO.Role) -> Bool:
   match r:
     case FO.RShow{}: True{}
-    case FO.RHead{_, _, open}: open
+    case FO.RHead{_, _, open, _}: open
     case FO.RIn{open}: open
     case FO.RWork{_, _, open, inner}:
       match open:
@@ -696,21 +701,45 @@ def Mob.entry.role(show: Bool, +lc: I.Loc, +e: M.Entry, +st: M.State, +sel: Stri
     case True{}: Mob.entry(lc, e, st, sel, dr, sp)
     case False{}: Nil{}
 
+# the run an entry's role puts it in: a head's own, a later entry's the
+# one before it, "" out of any run
+def Mob.run.of(r: FO.Role, +run: String) -> String:
+  match r:
+    case FO.RHead{+id, _, _, _}: id
+    case FO.RIn{_}: run
+    case _: ""
+
+def Mob.run.put(none: Bool, +run: String, j: J.Json) -> J.Json:
+  match none j:
+    case False{} J.Obj{fs}: J.Obj{J.Field{"run", J.Str{run}, fs}}
+    case _ other: other
+
+# an open run's rows say which run they are in ("run", its first entry's
+# id): a phone's kept history drops them once that run is shut
+# (thin-native-host's projectHistory), as the web's (View.run.mark)
+def Mob.run.mark(+run: String, xs: List<&2, J.Json>) -> List<&2, J.Json>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case x <> t:
+      Mob.run.put(String.is_empty(run), run, x) <> Mob.run.mark(run, t)
+
 # a thread's entries, tail-recursive (a thread can hold thousands)
-def Mob.entries.go(+lc: I.Loc, es: List<&2, M.Entry>, rs: List<&2, FO.Role>, +st: M.State, +sel: String, +dr: Map<&2, String>, +sp: STP.Stamps, acc: List<&2, J.Json>) -> List<&2, J.Json>:
+def Mob.entries.go(+lc: I.Loc, es: List<&2, M.Entry>, rs: List<&2, FO.Role>, +st: M.State, +sel: String, +dr: Map<&2, String>, +sp: STP.Stamps, +run: String, acc: List<&2, J.Json>) -> List<&2, J.Json>:
   match es rs:
     case Nil{} _:
       acc
     case e <> t +r <> rt:
-      Mob.entries.go(lc, t, rt, st, sel, dr, sp, Mob.role(r, Mob.entry.role(Mob.role.body(r), lc, e, st, sel, dr, sp), acc))
+      +at = Mob.run.of(r, run)
+      Mob.entries.go(lc, t, rt, st, sel, dr, sp, at, Mob.role(r, Mob.run.mark(at, Mob.entry.role(Mob.role.body(r), lc, e, st, sel, dr, sp)), acc))
     case e <> t Nil{}:
-      Mob.entries.go(lc, t, Nil{}, st, sel, dr, sp, Mob.onto(Mob.entry(lc, e, st, sel, dr, sp), acc))
+      Mob.entries.go(lc, t, Nil{}, st, sel, dr, sp, "", Mob.onto(Mob.entry(lc, e, st, sel, dr, sp), acc))
 
-# oldest first, runs of tool calls folded (the last stays open while its
-# turn runs); a reply's images are the ones found when it came
+# oldest first, runs of tool calls folded (each shut until the person
+# opens it; the live one says what runs now); a reply's images are the ones found when it came
 # (Mob.imgs.seen)
 def Mob.entries(+lc: I.Loc, +es: List<&2, M.Entry>, +st: M.State, +sel: String, +info: Map<&2, String>, +dr: Map<&2, String>, +running: Bool) -> List<&2, J.Json>:
-  List.reverse(&2, J.Json, Mob.entries.go(lc, es, FO.Fold.roles.loc(lc, es, info, running), st, sel, dr, STP.Stamps.of.w(es, st, FO.Fold.now(info), running, STP.Stamp.stopped(U.Ui.thread(st, sel)), SG.Signal.waiting(info, st, sel, running)), Nil{}))
+  List.reverse(&2, J.Json, Mob.entries.go(lc, es, FO.Fold.roles.loc(lc, es, info, running), st, sel, dr, STP.Stamps.of.w(es, st, FO.Fold.now(info), running, STP.Stamp.stopped(U.Ui.thread(st, sel)), SG.Signal.waiting(info, st, sel, running)), "", Nil{}))
 
 # a toolbar button (core/tools.bend): its icon, what it says, what it does
 # (tip) and the action it sends
