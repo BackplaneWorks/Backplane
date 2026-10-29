@@ -168,7 +168,11 @@ export class ThinViews {
       extra.terminalInput === true && ['term-key','term-paste'].includes(extra.action) &&
       extra.session?.open?.term === true && l.terminalOpen && bounded(extra.terminalOwner, 1024) &&
       extra.terminalOwner.length > 0 && extra.terminalOwner === l.terminalOwner;
-    if (terminalInputIntent) l.pictureRevision = previousPicture;
+    // Negotiated body queries publish text through their own source fence.
+    // They cannot replace a picture or retire an in-flight canonical refresh.
+    const bodyReadIntent = method === 'view.message' && extra.bodyPage === 1 &&
+      l.greeting.renderer === 'web' && this.api.bodyPages === true;
+    if (terminalInputIntent || bodyReadIntent) l.pictureRevision = previousPicture;
     let id; try { id = this.allocate(); } catch (e) { return { failed: e.message, cmds: [] }; }
     const p = { ...extra, version: 1, hub, generation: l.greeting.generation, epoch: l.greeting.epoch,
       requestRevision: l.revision, target: snapshot(l.target), viewId: l.viewId };

@@ -23,7 +23,7 @@ export class BodyWindows {
     const changedFence = fence !== this.fence;
     if (changedFence) this.pending = null;
     if (scope !== this.scope) this.parts.clear();
-    this.scope = scope;this.fence = fence;this.generation = detail.generation;this.viewId = detail.viewId;
+    this.scope = scope;this.fence = fence;this.generation = detail.generation;this.viewId = detail.viewId;this.owner = owner;
     if (!this.scopes.has(scope)) this.scopes.set(scope, new Map());
     const saved = this.scopes.get(scope);this.scopes.delete(scope);this.scopes.set(scope, saved);
     // A new authoritative connection/view may retry once. Same-fence failures
@@ -123,7 +123,7 @@ export class BodyWindows {
     const pending = this.pending;
     if (!pending || pending.fence !== this.fence || pending.id !== message.id || pending.cursor !== input.cursor
       || pending.version !== message.version || pending.thread !== message.thread || input.bodyVersion !== message.version
-      || input.generation !== pending.generation || input.viewId !== pending.viewId) return false;
+      || input.generation !== pending.generation || input.viewId !== pending.viewId || input.accountBinding !== pending.owner) return false;
     this.pending = null;
     const r = this.reader(message.id, true);
     if (!r || r.version !== message.version) return false;
@@ -145,7 +145,7 @@ export class BodyWindows {
   failed(input, reason) {
     if (!this.pending || this.pending.fence !== this.fence || this.pending.id !== input.entryId
       || this.pending.cursor !== input.cursor || this.pending.version !== input.bodyVersion) return;
-    if (input.generation !== this.pending.generation || input.viewId !== this.pending.viewId) return;
+    if (input.generation !== this.pending.generation || input.viewId !== this.pending.viewId || input.accountBinding !== this.pending.owner) return;
     const r = this.reader(input.entryId);this.pending = null;
     if (r && reason !== 'overtaken') r.error = reason;
     this.changed?.();
@@ -230,7 +230,7 @@ export class BodyWindows {
       const replacing = !previous && r.refreshTail && r.pages.length > 0;
       const cursor = replacing ? this.liveCursor(part, part.cursor, r.pages.at(-1).start) : previous ? r.pages[0]?.previous : r.pages.at(-1)?.cursor || (!r.pages.length ? part.cursor : '');
       if (!cursor) continue;
-      if (this.request?.(part, cursor, part.automatic && !r.pages.length && (part.id.startsWith('@live:') || timeline.scrollHeight - timeline.scrollTop - timeline.clientHeight <= 16))) this.pending = { id, thread: part.thread, version: part.version, cursor, fence: this.fence, direction: replacing ? 'replace' : previous ? 'previous' : 'next', generation: this.generation, viewId: this.viewId };
+      if (this.request?.(part, cursor, part.automatic && !r.pages.length && (part.id.startsWith('@live:') || timeline.scrollHeight - timeline.scrollTop - timeline.clientHeight <= 16))) this.pending = { id, thread: part.thread, version: part.version, cursor, fence: this.fence, direction: replacing ? 'replace' : previous ? 'previous' : 'next', generation: this.generation, viewId: this.viewId, owner: this.owner };
       return;
     }
   }
