@@ -57,6 +57,11 @@ def main() -> IO(Unit):
     C.Check.str("kistack beside the hub", K.KiStack.dir("/home/u/.local/share/backplane"), "/home/u/.local/share/backplane/kistack")
     C.Check.str("kistack for the desktop's hub", K.KiStack.dir("/home/u/.local/share/backplane/desktop/runtime/resources/backplane-service"), "/home/u/.local/share/backplane/kistack")
     C.Check.str("kistack for another service folder", K.KiStack.dir("/opt/x/resources/backplane-service"), "/opt/x/resources/backplane-service/kistack")
+    C.Check.str("helper beside the hub", K.Helper.pick(True{}, True{}, "/home/u/.local/share/backplane", "backplane-step2glb"), "/home/u/.local/share/backplane/backplane-step2glb")
+    C.Check.str("helper for the desktop's hub, at the install's top", K.Helper.pick(False{}, True{}, "/home/u/.local/share/backplane/desktop/runtime/resources/backplane-service", "backplane-step2glb"), "/home/u/.local/share/backplane/backplane-step2glb")
+    C.Check.str("helper beside the desktop's hub wins", K.Helper.pick(True{}, True{}, "/p/desktop/runtime/resources/backplane-service", "backplane-voice"), "/p/desktop/runtime/resources/backplane-service/backplane-voice")
+    C.Check.str("helper found nowhere: from PATH", K.Helper.pick(False{}, False{}, "/p/desktop/runtime/resources/backplane-service", "backplane-kipc"), "backplane-kipc")
+    C.Check.str("helper top of a plain hub is beside it", K.Helper.top("/opt/x/resources/backplane-service", "backplane-browser"), "/opt/x/resources/backplane-service/backplane-browser")
     # KiStack synced into the hub's home at each start: where, which wins
     C.Check.str("kistack synced in the home", K.KiStack.home("/h"), "/h/kistack")
     C.Check.str("kistack sync stage in the home", K.KiStack.stage("/h"), "/h/kistack.sync")

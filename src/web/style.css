@@ -1673,11 +1673,14 @@ kbd { font: calc(10px * var(--text-scale, 100) / 100)/1 var(--mono); color: var(
 .topbar .tb button + button { border-left: 0; }
 .topbar .tb button:hover { color: var(--text); }
 .topbar .tb button.on { color: var(--accent); }
-.app.top .sidebar .find.with-add { position: sticky; top: 0; z-index: 6; background: var(--panel); display: flex; align-items: center; gap: 4px; padding: 8px 6px 8px 12px; }
+.app.top .sidebar .find.with-add { position: sticky; top: 0; z-index: 6; background: var(--panel); display: flex; align-items: center; gap: 4px; padding: 6.75px 6px 6.75px 12px; }
 .app.top .sidebar .find.with-add input { flex: 1; min-width: 0; width: auto; }
 .app.top .sidebar .find .add-project { flex: none; height: 26px; padding: 0 5px; }
-/* the sidebar's own fold, a chevron like the rail's (view.bend's View.sidebar.find) */
-.app.top .sidebar .find .side-fold { flex: none; height: 26px; padding: 0 3px; margin-left: -2px; color: var(--faint); border-color: transparent; background: none; }
+/* the sidebar's own fold, a chevron like the rail's, first in the row
+   (view.bend's View.sidebar.find): the same 30 px square on the same spot
+   as the folded strip's unfold chevron (.side-strip below), so it does not
+   move as the sidebar folds and unfolds */
+.app.top .sidebar .find .side-fold { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0; margin-left: -5.5px; color: var(--faint); border-color: transparent; background: none; }
 .app.top .sidebar .find .side-fold:hover { color: var(--text); border-color: var(--line); }
 .app.top .sidebar-tools { position: static; }
 .thread-content > .subs.dock { border-bottom: 1px solid var(--line); }
@@ -1694,7 +1697,7 @@ kbd { font: calc(10px * var(--text-scale, 100) / 100)/1 var(--mono); color: var(
   html[data-side="shut"] .app.top.panel, html[data-fold] .app.top.panel { grid-template-columns: 44px minmax(0, 1fr) var(--viewer-w, minmax(0, 1.1fr)); }
   html[data-side="shut"] .app.top .sidebar, html[data-fold="auto"] .app.top.panel .sidebar { overflow-x: hidden; padding: 0; scrollbar-width: none; }
   html[data-side="shut"] .app.top .sidebar > :not(.side-strip), html[data-fold="auto"] .app.top.panel .sidebar > :not(.side-strip) { display: none; }
-  html[data-side="shut"] .app.top .sidebar > .side-strip, html[data-fold="auto"] .app.top.panel .sidebar > .side-strip { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 0; }
+  html[data-side="shut"] .app.top .sidebar > .side-strip, html[data-fold="auto"] .app.top.panel .sidebar > .side-strip { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6.75px 0 8px; }
   html[data-side="shut"] .side-strip .side-toggle svg, html[data-fold="auto"] .app.top.panel .side-strip .side-toggle svg { transform: none; }
   /* the sidebar the person opened where it cannot stand beside the thread
      and the viewer: a drawer over the thread, the panes laid out beside
