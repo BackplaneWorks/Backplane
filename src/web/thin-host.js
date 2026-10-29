@@ -331,13 +331,13 @@ export class ThinHost {
     return true;
   }
   page() {
-    if (!this.ready || !this.window?.older || this.window.older === this.cursor || this.paging || this.refreshPending()) return false;
+    if (!this.ready || !this.window?.older || this.window.older === this.cursor || this.paging || this.pageActionPending()) return false;
     const undo = { cursor: this.cursor, back: this.back.slice() };
     this.back.push(this.cursor);this.cursor = this.window.older;
     return this.pageTo(this.cursor, undo, 'older');
   }
   newer() {
-    if (!this.ready || !this.back.length || this.paging || this.refreshPending()) return false;
+    if (!this.ready || !this.back.length || this.paging || this.pageActionPending()) return false;
     const undo = { cursor: this.cursor, back: this.back.slice() };
     this.cursor = this.back.pop();
     return this.pageTo(this.cursor, undo, 'newer');
@@ -345,7 +345,7 @@ export class ThinHost {
   // Straight to the newest page (the "new" pill on an earlier page): the
   // trail is let go, as a send does.
   newest() {
-    if (!this.ready || this.atNewest() || this.paging || this.refreshPending()) return false;
+    if (!this.ready || this.atNewest() || this.paging || this.pageActionPending()) return false;
     const undo = { cursor: this.cursor, back: this.back.slice() };
     this.cursor = '';this.back = [];
     return this.pageTo('', undo, 'newest');
@@ -430,6 +430,14 @@ export class ThinHost {
     // completing during an action must not send a newer picture request with
     // the pre-click flags, even for an otherwise side-effect-free menu toggle.
     return !!this.pending.get(this.active)?.operation || this.actions.length > 0;
+  }
+  pageActionPending() {
+    // The automatic ordering-card lookup changes no presentation choice.
+    // A wheel page may overtake its picture; its original validated commands
+    // still settle once. All actions that can change the reader's view keep
+    // the existing ordering fence, as do native and nonempty requests.
+    const blocks = op => !!op && !((this.api.renderer || 'web') === 'web' && op.action === 'fab-look' && op.value === '');
+    return blocks(this.pending.get(this.active)?.operation) || this.actions.some(blocks);
   }
   refreshSoon() {
     if (!this.api.deferRefresh) return this.update();
