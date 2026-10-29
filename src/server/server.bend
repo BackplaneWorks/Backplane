@@ -5021,11 +5021,10 @@ def Net.with_pk(n: Net, q: Chan(PK.PMsg)) -> Net:
     case Net{a, b, c, d, e, f, g, _, i, mc, pvx, bnx, mgd, lk, fc, ksx}:
       Net{a, b, c, d, e, f, g, Some{q}, i, mc, pvx, bnx, mgd, lk, fc, ksx}
 
+# (beside the hub, at the install's top for the desktop app's own hub, else
+# on PATH: K.Helper.find)
 def Browser.exe() -> IO(String):
-  do IO<String>:
-    +d : String <- H.Sys.exe_dir()
-    ok : Bool <- K.Io.is_file(d ++ "/backplane-browser")
-    return Bool.pick(String, ok, d ++ "/backplane-browser", "backplane-browser")
+  K.Helper.find("backplane-browser")
 
 def Cfg.br(c: Cfg) -> Maybe<&2, Chan(BR.BMsg)>:
   match c:
