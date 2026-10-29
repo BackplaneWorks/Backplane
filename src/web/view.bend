@@ -2419,7 +2419,7 @@ def View.entries.r(+lc: I.Loc, es: List<&2, M.Entry>, rs: List<&2, FO.Role>, +st
 # a thread's entries, its runs of tool calls folded (the last stays open
 # while its turn runs)
 def View.entries.seen(+lc: I.Loc, +es: List<&2, M.Entry>, +st: M.State, +sel: String, +info: Map<&2, String>, +running: Bool, +ec: U.Ec) -> List<&2, D.Node>:
-  View.entries.r(lc, es, FO.Fold.roles.loc(lc, es, info, running), st, sel, ec, STP.Stamps.of.s(es, st, FO.Fold.now(info), running, STP.Stamp.stopped(U.Ui.thread(st, sel))))
+  View.entries.r(lc, es, FO.Fold.roles.loc(lc, es, info, running), st, sel, ec, STP.Stamps.of.w(es, st, FO.Fold.now(info), running, STP.Stamp.stopped(U.Ui.thread(st, sel)), SG.Signal.waiting(info, st, sel, running)))
 
 # (the design as it was before the edits is no change: HS.Hist.seen)
 def View.entries.shown(+lc: I.Loc, es: List<&2, M.Entry>, +st: M.State, +sel: String, +info: Map<&2, String>, +running: Bool, +ec: U.Ec) -> List<&2, D.Node>:
@@ -4436,10 +4436,10 @@ def View.chrome.state.word(lc: I.Loc, +name: String) -> String:
   match lc:
     case I.Ja{}:
       Bool.pick(String, String.eq(name, "blocked"), "対応待ち", Bool.pick(String, String.eq(name, "active"), "作業中", Bool.pick(String, String.eq(name, "settled"), "完了",
-        Bool.pick(String, String.eq(name, "finished"), "作業完了", Bool.pick(String, String.eq(name, "stopped"), "停止", Bool.pick(String, String.eq(name, "failed"), "失敗", "待機"))))))
+        Bool.pick(String, String.eq(name, "waiting"), "完了待ち", Bool.pick(String, String.eq(name, "finished"), "作業完了", Bool.pick(String, String.eq(name, "stopped"), "停止", Bool.pick(String, String.eq(name, "failed"), "失敗", "待機")))))))
     case _:
       Bool.pick(String, String.eq(name, "blocked"), "needs you", Bool.pick(String, String.eq(name, "active"), "working", Bool.pick(String, String.eq(name, "settled"), "settled",
-        Bool.pick(String, String.eq(name, "finished"), "finished", Bool.pick(String, String.eq(name, "stopped"), "stopped", Bool.pick(String, String.eq(name, "failed"), "failed", "idle"))))))
+        Bool.pick(String, String.eq(name, "waiting"), "waiting", Bool.pick(String, String.eq(name, "finished"), "finished", Bool.pick(String, String.eq(name, "stopped"), "stopped", Bool.pick(String, String.eq(name, "failed"), "failed", "idle")))))))
 
 def View.chrome.changes.k(lc: I.Loc) -> String:
   match lc:

@@ -19,7 +19,8 @@ import ./steer.bend as STR
 # today: the day it is now on the person's wall clock (days since the
 # epoch), worked out once a page; stops: the replies that end a turn the
 # person stopped (to 1), which say "Stopped" where the others say
-# "Finished"
+# "Finished", and the last turn's last reply while the thread waits on
+# work it started (to 2: "Waiting since", never "Finished" before it is)
 type Stamps is Data:
   Stamps{rule: TZ.TzRule, today: Nat, ends: Map<&2, Nat>, stops: Map<&2, Nat>}
 
@@ -172,12 +173,40 @@ def Stamp.stops.last(stopped: Bool, +es: List<&2, M.Entry>, stops: Map<&2, Nat>)
     case False{}:
       stops
 
+# the last turn's last reply says "Waiting since" while the thread waits
+# on work it started (signal.bend's waiting), unless it was stopped
+def Stamp.kind.at(r: Map<&2, Nat> & Nat) -> Nat:
+  (_, v) = r
+  v
+
+def Stamp.waits.put(free: Bool, +id: String, stops: Map<&2, Nat>) -> Map<&2, Nat>:
+  match free:
+    case True{}:
+      Map.set(&2, Nat, stops, id, 2n)
+    case False{}:
+      stops
+
+def Stamp.waits.k(+id: String, +stops: Map<&2, Nat>) -> Map<&2, Nat>:
+  Stamp.waits.put(Bool.and(Bool.not(String.is_empty(id)), Nat.is_eq(Stamp.kind.at(Map.get(Nat, 0n, stops, id)), 0n)), id, stops)
+
+def Stamp.waits.last(waiting: Bool, +es: List<&2, M.Entry>, stops: Map<&2, Nat>) -> Map<&2, Nat>:
+  match waiting:
+    case True{}:
+      Stamp.waits.k(Stamp.last.go(List.reverse(&2, M.Entry, es)), stops)
+    case False{}:
+      stops
+
 # what a client needs to stamp a page of entries: the person's zone, the
 # time now (seconds), the turns' ends and which of them were stopped
 # (stopped: the thread's last turn was)
 def Stamps.of.s(+es: List<&2, M.Entry>, +st: M.State, +now: Nat, +running: Bool, +stopped: Bool) -> Stamps:
   Stamps.at.s(SCH.Sched.person(st, 0n, True{}), now, Stamp.ends(es, running),
     Stamp.stops.last(Bool.and(stopped, Bool.not(running)), es, Stamp.stops(es, st, running)))
+
+# the same while the thread waits on work it started (waiting)
+def Stamps.of.w(+es: List<&2, M.Entry>, +st: M.State, +now: Nat, +running: Bool, +stopped: Bool, waiting: Bool) -> Stamps:
+  Stamps.at.s(SCH.Sched.person(st, 0n, True{}), now, Stamp.ends(es, running),
+    Stamp.waits.last(Bool.and(waiting, Bool.not(running)), es, Stamp.stops.last(Bool.and(stopped, Bool.not(running)), es, Stamp.stops(es, st, running))))
 
 def Stamps.of(+es: List<&2, M.Entry>, +st: M.State, +now: Nat, +running: Bool) -> Stamps:
   Stamps.of.s(es, st, now, running, False{})
@@ -219,6 +248,13 @@ def Stamp.stop.k(+l: I.Loc, known: Bool, +clock: String, +start: Nat, +at: Nat) 
     case False{}:
       MSG.T.stamp.stopped(l, clock)
 
+def Stamp.wait.k(+l: I.Loc, known: Bool, +clock: String, +start: Nat, +at: Nat) -> String:
+  match known:
+    case True{}:
+      MSG.T.stamp.waiting.took(l, clock, I.I18n.took(l, Nat.sub(at, start)))
+    case False{}:
+      MSG.T.stamp.waiting(l, clock)
+
 # the stopped turn's last reply says "Stopped 14:12 · 4s"
 def Stamp.reply.s(stopped: Bool, +l: I.Loc, +start: Nat, +clock: String, +at: Nat) -> String:
   match stopped:
@@ -226,6 +262,18 @@ def Stamp.reply.s(stopped: Bool, +l: I.Loc, +start: Nat, +clock: String, +at: Na
       Stamp.stop.k(l, Nat.is_gt(start, 1n), clock, start, at)
     case False{}:
       Stamp.reply(l, start, clock, at)
+
+# a turn's last reply by how the turn ended (stops' value: 0 finished,
+# 1 stopped, 2 waiting on work it started: "Waiting since 14:12 · 7m 3s")
+def Stamp.reply.w(waits: Bool, +kind: Nat, +l: I.Loc, +start: Nat, +clock: String, +at: Nat) -> String:
+  match waits:
+    case True{}:
+      Bool.pick(String, Nat.is_eq(start, 0n), clock, Stamp.wait.k(l, Nat.is_gt(start, 1n), clock, start, at))
+    case False{}:
+      Stamp.reply.s(Nat.is_eq(kind, 1n), l, start, clock, at)
+
+def Stamp.reply.k(+kind: Nat, +l: I.Loc, +start: Nat, +clock: String, +at: Nat) -> String:
+  Stamp.reply.w(Nat.is_eq(kind, 2n), kind, l, start, clock, at)
 
 def Stamp.start(r: Map<&2, Nat> & Nat) -> Nat:
   (_, v) = r
@@ -241,7 +289,7 @@ def Stamp.text.loc(+l: I.Loc, +s: Stamps, e: M.Entry) -> String:
     case Stamps{+r, +today, _, _} M.Msg{_, _, M.User{}, _, +at}:
       Stamp.clock(r, today, at)
     case Stamps{+r, +today, +ends, +stops} M.Msg{+id, _, M.Assistant{}, _, +at}:
-      Stamp.reply.s(Stamp.has(Map.has(&2, Nat, stops, id)), l, Stamp.start(Map.get(Nat, 0n, ends, id)), Stamp.clock(r, today, at), at)
+      Stamp.reply.k(Stamp.start(Map.get(Nat, 0n, stops, id)), l, Stamp.start(Map.get(Nat, 0n, ends, id)), Stamp.clock(r, today, at), at)
     case _ _:
       ""
 

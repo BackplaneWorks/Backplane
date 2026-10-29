@@ -693,7 +693,7 @@ def Mob.entries.go(+lc: I.Loc, es: List<&2, M.Entry>, rs: List<&2, FO.Role>, +st
 # turn runs); a reply's images are the ones found when it came
 # (Mob.imgs.seen)
 def Mob.entries(+lc: I.Loc, +es: List<&2, M.Entry>, +st: M.State, +sel: String, +info: Map<&2, String>, +dr: Map<&2, String>, +running: Bool) -> List<&2, J.Json>:
-  List.reverse(&2, J.Json, Mob.entries.go(lc, es, FO.Fold.roles.loc(lc, es, info, running), st, sel, dr, STP.Stamps.of.s(es, st, FO.Fold.now(info), running, STP.Stamp.stopped(U.Ui.thread(st, sel))), Nil{}))
+  List.reverse(&2, J.Json, Mob.entries.go(lc, es, FO.Fold.roles.loc(lc, es, info, running), st, sel, dr, STP.Stamps.of.w(es, st, FO.Fold.now(info), running, STP.Stamp.stopped(U.Ui.thread(st, sel)), SG.Signal.waiting(info, st, sel, running)), Nil{}))
 
 # a toolbar button (core/tools.bend): its icon, what it says, what it does
 # (tip) and the action it sends

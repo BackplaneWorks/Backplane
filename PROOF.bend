@@ -13158,6 +13158,21 @@ def Laws.signal_finished_needs_completed(n):
 def Laws.signal_finished_quiet():
   {==}
 
+def Laws.signal_waiting_named():
+  {==}
+
+def Laws.signal_waiting_active():
+  {==}
+
+def Laws.signal_waiting_not_finished():
+  {==}
+
+def Laws.signal_waiting_keeps_rest():
+  {==}
+
+def Laws.signal_waiting_turn_over():
+  {==}
+
 def Laws.signal_activity_input(st, th, act, tone, kind, summary, at):
   match st:
     case M.State{ps, ts, es, n, tk, sg, qu, ak, dv, nv, bw}: {==}

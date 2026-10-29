@@ -50,6 +50,10 @@ def state(cs: List<&2, M.Change>) -> M.State:
 def st.of(+es: List<&2, M.Entry>, +s: M.State, +running: Bool, +stopped: Bool, +i: Nat) -> String:
   S.Stamp.text(S.Stamps.of.s(es, s, at(3600n), running, stopped), Maybe.default(&2, M.Entry, List.get(&2, M.Entry, es, i), act("none", 0n)))
 
+# the same while the thread waits on work it started
+def st.w(+es: List<&2, M.Entry>, +s: M.State, +running: Bool, +stopped: Bool, +waiting: Bool, +i: Nat) -> String:
+  S.Stamp.text(S.Stamps.of.w(es, s, at(3600n), running, stopped, waiting), Maybe.default(&2, M.Entry, List.get(&2, M.Entry, es, i), act("none", 0n)))
+
 # a thread's entries as the hub posts them, for Stamp.stop.mark
 def posted(es: List<&2, M.Entry>) -> List<&2, M.Change>:
   match es:
@@ -100,6 +104,12 @@ def main() -> IO(Unit):
     C.Check.str("and once the next has finished", st.of(es3(), marked(), False{}, False{}, 1n), "Stopped 09:00 · 5s")
     C.Check.str("a finished turn between them says Finished", st.of(es3(), marked(), False{}, False{}, 3n), "Finished 09:01 · 10s")
     C.Check.str("a reply landing after the Stop ends its stopped turn", st.of(es3(), marked(), False{}, False{}, 6n), "Stopped 09:02 · 11s")
+    # a turn over while work it started is out: the last reply waits, never finishes
+    C.Check.str("waiting on subagents: the last reply says Waiting since", st.w(es(), state(Nil{}), False{}, False{}, True{}, 6n), "Waiting since 09:16 · 10s")
+    C.Check.str("waiting: the turns before still say Finished", st.w(es(), state(Nil{}), False{}, False{}, True{}, 3n), "Finished 09:07 · 7m 13s")
+    C.Check.str("done waiting: Finished", st.w(es(), state(Nil{}), False{}, False{}, False{}, 6n), "Finished 09:16 · 10s")
+    C.Check.str("a running turn does not wait", st.w(es(), state(Nil{}), True{}, False{}, True{}, 6n), "09:16")
+    C.Check.str("a stopped turn stays Stopped while work is out", st.w(es3(), marked(), False{}, True{}, True{}, 6n), "Stopped 09:02 · 11s")
     C.Check.str("the reply before it is not the turn's last", st.of(es3(), marked(), False{}, False{}, 5n), "09:02")
     C.Check.str("an unmarked last turn the thread stopped says Stopped", st.of(es(), state(Nil{}), False{}, True{}, 6n), "Stopped 09:16 · 10s")
     C.Check.str("with no mark, the turns before it say Finished", st.of(es(), state(Nil{}), False{}, True{}, 3n), "Finished 09:07 · 7m 13s")

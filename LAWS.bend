@@ -12083,6 +12083,26 @@ law signal_finished_needs_completed:
 law signal_finished_quiet:
   {Bool.or(SIGREV.Signal.active(5n), SIGREV.Signal.blocked(5n)) == False{} : Bool}
 
+# A thread whose own turn is over while work it started is out (its
+# delegated tasks, launched threads, background agents, watched work) is
+# waiting (signal.bend's 6 when work is confirmed at it, active but not
+# blocked; 7 when none is, no activity bit), never finished; a running
+# turn stays working
+law signal_waiting_named:
+  {[SIGREV.Signal.name(6n), SIGREV.Signal.name(7n)] == ["waiting", "waiting"] : List<&2, String>}
+
+law signal_waiting_active:
+  {[SIGREV.Signal.active(6n), SIGREV.Signal.blocked(6n), SIGREV.Signal.active(7n), SIGREV.Signal.blocked(7n)] == [True{}, False{}, False{}, False{}] : List<&2, Bool>}
+
+law signal_waiting_not_finished:
+  {[SIGREV.Signal.out.k(True{}, SIGREV.Signal.done(True{}, 0n)), SIGREV.Signal.out.k(True{}, 0n)] == [7n, 7n] : List<&2, Nat>}
+
+law signal_waiting_keeps_rest:
+  {[SIGREV.Signal.out.k(True{}, 1n), SIGREV.Signal.out.k(True{}, 2n), SIGREV.Signal.out.k(True{}, 3n), SIGREV.Signal.out.k(True{}, 4n)] == [1n, 2n, 3n, 4n] : List<&2, Nat>}
+
+law signal_waiting_turn_over:
+  {[SIGREV.Signal.waits(1n, False{}), SIGREV.Signal.waits(1n, True{}), SIGREV.Signal.waits(3n, False{})] == [6n, 1n, 3n] : List<&2, Nat>}
+
 # Typed signal inputs prove the only canonical-history exemptions.
 law signal_activity_input:
   for +st: M.State
