@@ -118,10 +118,10 @@ def main() -> IO(Unit):
     C.Check.str("edge", box(P.Plot.edge(pl)), "0,0,40000,40000")
     C.Check.str("lines keep the edge", box(P.Plot.edge(back)), box(P.Plot.edge(pl)))
     C.Check.str("a schematic has no edge", box(P.Plot.edge(P.Plot.of(items(B.Board.items(U.Utf8.encode(board("20 10")))), 1))), box(P.Box.empty()))
-    # a model's triangles: board axes (glTF z is the board's y, glTF y is
+    # a model's triangles: board axes (negative glTF z is board y, glTF y is
     # up), 10 micrometre units; colour XOR then zigzag deltas
     +so : P.Solid = P.Solid.of([G.Tri3{0.001, 0.0016, 0.002, 0.003, 0.0016, 0.002, 0.001, 0.0016, 0.004, 255}])
-    C.Check.str("solid", solid(so), "1 [100,200,160,300,400,160] 255,200,400,320,400,0,0,399,400,0")
+    C.Check.str("solid", solid(so), "1 [100,4294966896,160,300,4294967096,160] 255,200,399,320,400,0,0,399,399,0")
     C.Check.str("solid lines round trip", solid(P.Plot.solid(P.Scan.plot(P.Line.plot(P.Plot.of.solid(so))))), solid(so))
     # a model too big to read in the plot child's memory is refused, saying
     # so (a 12 MB board's model is read, in about 3.6 GB)

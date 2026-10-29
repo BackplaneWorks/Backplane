@@ -594,11 +594,12 @@ def SE.box(+x: U32, +y: U32, +z: U32, b: List<&2, U32>) -> List<&2, U32>:
 def SE.u(+m: F32) -> U32:
   Num.um(F32.mul(m, 100.0))
 
-# one vertex: x and y as board axes (glTF x and z), z up (glTF y)
+# Rotate glTF Y-up to Z-up: (x, -z, y). Swapping y and z without
+# negating z reflects the model and reverses its triangle winding.
 def SE.v(+gx: F32, +gy: F32, +gz: F32, st: SE) -> SE:
   match st:
     case SE{e, +pz, c, n, b}:
-      SE{Enc.num(Num.zig((SE.u(gy) - pz : U32)), Enc.pt(SE.u(gx), SE.u(gz), e)), SE.u(gy), c, n, SE.box(SE.u(gx), SE.u(gz), SE.u(gy), b)}
+      SE{Enc.num(Num.zig((SE.u(gy) - pz : U32)), Enc.pt(SE.u(gx), SE.u(F32.neg(gz)), e)), SE.u(gy), c, n, SE.box(SE.u(gx), SE.u(F32.neg(gz)), SE.u(gy), b)}
 
 def SE.tri.k(t: G.Tri3, st: SE) -> SE:
   match t:
