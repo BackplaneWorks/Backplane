@@ -1366,9 +1366,20 @@ final class AppModel {
 
     // Synchronous acceptance for the real-drag latch. An inert cached page
     // may remain readable while its current presentation is being refreshed.
-    func loadEarlier(_ thread: String) -> Bool {
+    func loadEarlier(_ thread: String, viewport: TimelineReading? = nil) -> Bool {
         guard contentReady, screen?.thread?.id == thread else { return false }
-        act("earlier", "")
+        act("earlier", viewport?.json ?? "")
+        return true
+    }
+
+    func timelineViewport(_ thread: String, _ viewport: TimelineReading) {
+        guard screen?.thread?.id == thread else { return }
+        run { await $0.viewport(thread, id: viewport.id, offset: viewport.offset, first: viewport.first, last: viewport.last) }
+    }
+
+    func loadLater(_ thread: String, viewport: TimelineReading? = nil) -> Bool {
+        guard contentReady, screen?.thread?.id == thread, (screen?.thread?.later ?? 0) > 0 else { return false }
+        act("later", viewport?.json ?? "")
         return true
     }
 

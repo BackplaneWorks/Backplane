@@ -282,6 +282,7 @@ class Engine(private val app: android.content.Context, source: () -> String, pri
     // a choice of this device that Bend draws by ("view": "projects" or "active")
     suspend fun local(key: String, value: String) = out("Backplane.local(${q(key)}, ${q(value)})", person = true)
     suspend fun screen() = out("Backplane.screen()", person = true)
+    internal suspend fun viewport(thread: String, value: TimelineReading) = out("Backplane.viewport(${q(thread)}, ${q(value.id)}, ${value.offset}, ${q(value.first)}, ${q(value.last)})", screen = false, person = true)
     // a binary frame from hub key, as base64
     suspend fun connection(key: String, epoch: String, mode: String = "") =
         out(if (mode.isEmpty()) "Backplane.connection(${q(key)}, ${q(epoch)})" else "Backplane.connection(${q(key)}, ${q(epoch)}, ${q(mode)})", screen = false, person = true)

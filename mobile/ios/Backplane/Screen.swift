@@ -509,6 +509,7 @@ struct ThreadView: Decodable {
     let todos: Todos?
     // how many older entries the page leaves out ("earlier" shows more)
     let earlier: Int?
+    var later: Int? = nil
     let live: [Block]
     let livePartial: MessagePartial?
     let working, draft, send: String

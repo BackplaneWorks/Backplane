@@ -10,6 +10,7 @@ import ./bots.bend as MB
 import ../core/msgs.bend as MSG
 import ./session.bend as PS
 import ./thin.bend as TH
+import ./history.bend as HISTORY
 import ../core/reflow.bend as RF
 import ../core/bub-move.bend as HOP
 
@@ -302,6 +303,15 @@ def thin_shown_draft(shown: J.Json, sessionText: String) -> J.Json:
 
 def thin_partial(shown: J.Json, window: J.Json) -> J.Json:
   TH.Partial.screen(shown, window)
+
+def thin_history(text: String) -> J.Json:
+  HISTORY.History.plan(json_parse(text))
+
+def thin_viewport(text: String) -> Bool:
+  HISTORY.History.viewport(json_parse(text))
+
+def thin_history_capacity(text: String) -> Bool:
+  HISTORY.History.capacity(json_parse(text))
 
 def thin_search(screenText: String, searchText: String) -> J.Json:
   TH.Search.screen(json_parse(screenText), json_parse(searchText))

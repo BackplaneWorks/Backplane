@@ -328,6 +328,8 @@ check('a burst of search keys keeps one search on its way, then the newest',()=>
 check('the thread list view chosen on the device reaches the hub with every view request',()=>{const x=harness();x.open();const s=x.h.states.get('h');s.session={...s.session,drafts:{...s.session.drafts,'@local.view':'active','@f.kname':'secret-ish'}};x.h.update(s);const req=x.h.drain().cmds[0].request;assert.equal(req.m,'view.update');assert.equal(req.p.session.drafts['@local.view'],'active');assert.equal(req.p.session.drafts['@f.kname'],undefined);});
 check('registration counter exhaustion is refused before calling Bend builder',()=>{const x=harness();x.open();x.h.states.get('h').session.rid=2**47-1;let invoked=0;x.api.registration=()=>{invoked++;return null;};x.h.register('h',['ios','token','alert','','env','bundle']);assert.equal(invoked,0);assert.equal(x.h.drain().cmds.length,0);});
 const {registerBridgeChecks}=await import('./native_thin_bridge_binding_307265.mjs');
+const {registerNativeHistoryChecks}=await import('./native_history_adoption_test.mjs');
+registerNativeHistoryChecks(check,harness);
 await registerBridgeChecks(check,stage,root);
 const {registerAncillaryChecks}=await import('./native_thin_ancillary_307265.mjs');
 await registerAncillaryChecks(check,harness,stage);

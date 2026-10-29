@@ -454,12 +454,77 @@ export class NativeThinHost307265 {
     return true;
   }
 
-  pageTo(s, cursor, back) {
+  viewport(hub, thread, value) {
+    const s = this.states.get(hub), rows = s?.shown?.thread?.entries;
+    if (!s?.greeted || s.mode !== 'view-v1' || this.current !== hub || !this.paired.has(hub) || !same(s.target, s.shownTarget) || !Array.isArray(rows) ||
+        s.shown.thread.id !== hub + '|' + thread && s.shown.thread.id !== thread ||
+        !exactKeys(value, ['id', 'offset', 'first', 'last']) ||
+        !Number.isFinite(value.offset) || Math.abs(value.offset) > 16777216) return false;
+    const ids = rows.map(e => e.id), first = ids.indexOf(value.first), last = ids.indexOf(value.last), anchor = ids.indexOf(value.id);
+    if (first < 0 || last < first || anchor < first || anchor > last) return false;
+    if (this.api.viewport && !this.api.viewport({ ids, ...value })) return false;
+    const moved = !s.viewport || ['id', 'first', 'last'].some(key => s.viewport[key] !== value[key]);
+    s.viewport = { ...value };
+    // Wire v1 uses an unsigned clipped amount. The local viewport keeps the
+    // exact signed native offset (points on iOS, pixels on Android).
+    s.anchor = { id: value.id, offset: Math.max(0, Math.round(-value.offset)) };
+    if (moved && s.historyParked) { s.historyParked = false; this.update(s); }
+    return true;
+  }
+
+  visibleRows(s) {
+    const rows = s.shown?.thread?.entries || [], v = s.viewport;
+    if (!v) return null;
+    const first = rows.findIndex(e => e.id === v.first), last = rows.findIndex(e => e.id === v.last);
+    return first >= 0 && last >= first ? rows.slice(first, last + 1) : null;
+  }
+
+  projectHistory(s, view, paged) {
+    const old = s.shown?.thread, fresh = view.shown?.thread;
+    if (!this.api.history || s.historyReset || !old || !fresh || old.id !== fresh.id) return view;
+    const visible = this.visibleRows(s), keep = new Set((visible || old.entries).map(e => e.id));
+    // A full outgoing wire page provides context below/above the viewport.
+    if (paged) {
+      const page = new Set((s.historyPage || old.entries).map(e => e.id));
+      const indices = old.entries.map((e, i) => keep.has(e.id) || page.has(e.id) ? i : -1).filter(i => i >= 0);
+      // Keep the connecting rows too: retaining an isolated anchor farther
+      // down while dropping the rows leading to it would create a gap.
+      if (indices.length) for (const e of old.entries.slice(indices[0], indices.at(-1) + 1)) keep.add(e.id);
+    }
+    const plan = this.api.history({ old: old.entries.map(e => e.id), fresh: fresh.entries.map(e => e.id), keep: [...keep],
+      visible: (visible || old.entries).map(e => e.id), page: !!paged, older: paged?.direction !== 'newer' });
+    const previous = new Map(old.entries.map(e => [e.id, e])), raw = new Map(fresh.entries.map(e => [e.id, e]));
+    if (!object(plan) || !Array.isArray(plan.aliases) || plan.aliases.some(a => !exactKeys(a, ['from', 'to']) ||
+        raw.get(a.from)?.kind !== 'fold' || previous.get(a.to)?.kind !== 'fold') ||
+        new Set(plan.aliases.map(a => a.from)).size !== plan.aliases.length ||
+        new Set(plan.aliases.map(a => a.to)).size !== plan.aliases.length) throw Error('Invalid history aliases');
+    const aliases = new Map(plan.aliases.map(a => [a.from, a.to]));
+    const canonical = fresh.entries.map(e => aliases.has(e.id) ? { ...e, id: aliases.get(e.id) } : e);
+    const incoming = new Map(canonical.map(e => [e.id, e])), ids = plan.ids;
+    if (!Array.isArray(ids) || new Set(ids).size !== ids.length || ids.some(id => !previous.has(id) && !incoming.has(id)) ||
+        [...keep].some(id => !ids.includes(id))) throw Error('Invalid history retention plan');
+    const visibleIDs = new Set(visible?.map(e => e.id));
+    let rows = ids.map(id => {
+      const current = incoming.get(id), held = paged && visibleIDs.has(id) ? previous.get(id) : null;
+      if (held?.kind === 'fold' && current?.kind === 'fold' && typeof current.value === 'string')
+        return { ...held, value: (held.open ? '0' : '1') + current.value.slice(1) };
+      return held || current || previous.get(id);
+    });
+    // Keep the already displayed picture if a reversed gesture would need
+    // more than four bounded reply pictures. Never evict a visible row to fit.
+    s.historyParked = !this.api.historyCapacity({ rows: rows.length, bytes: utf8Bytes(JSON.stringify(rows)) });
+    if (s.historyParked) rows = old.entries;
+    const project = screen => screen?.thread?.id === fresh.id ? { ...screen, thread: { ...screen.thread, entries: rows,
+      ...(s.viewport ? { historyAnchor: { ...s.viewport } } : {}) } } : screen;
+    return { shown: project(view.shown), overlay: { ...view.overlay, j: project(view.overlay.j) }, historyPage: canonical };
+  }
+
+  pageTo(s, cursor, back, direction) {
     const undo = { cursor: s.cursor, back: s.back };
-    const result = this.client.request(s.hub, 'view.page', { cursor, session: this.requestSession(s.session, 'view.page', s.target) });
+    const result = this.client.request(s.hub, 'view.page', { cursor, anchor: s.anchor || { id: '', offset: 0 }, session: this.requestSession(s.session, 'view.page', s.target) });
     s.cursor = cursor; s.back = back;
     if (!this.issue(s, result) || !result?.id) { s.cursor = undo.cursor; s.back = undo.back; return; }
-    s.paging = { id: result.id, undo };
+    s.paging = { id: result.id, undo, direction };
   }
 
   select(s, target, session) {
@@ -470,6 +535,7 @@ export class NativeThinHost307265 {
     s.followup = null;
     s.target = copy(target); s.session = copy(session); s.window = null;
     s.cursor = ''; s.back = []; s.paging = null;
+    s.viewport = null; s.historyPage = null; s.historyParked = false; s.historyReset = false;
     s.queue = []; s.messages.clear();
     return this.issue(s, this.client.select(s.hub, s.target, this.requestSession(s.session, 'view.open', s.target), this.api.cid()));
   }
@@ -587,11 +653,20 @@ export class NativeThinHost307265 {
     // retraces the trail back down to the newest: without it a phone that
     // paged up could never page back down (the list ended on the old page)
     if (intent.kind === 'page') {
-      if (!s.paging && s.window?.hasMore && s.window.older) this.pageTo(s, s.window.older, [...s.back, s.cursor]);
+      if (intent.viewport && !this.viewport(hub, s.session.sel, intent.viewport)) return true;
+      if (!s.paging && !s.historyParked && s.window?.hasMore && s.window.older) this.pageTo(s, s.window.older, [...s.back, s.cursor], 'older');
       return true;
     }
     if (intent.kind === 'later') {
-      if (!s.paging && s.back.length) this.pageTo(s, s.back[s.back.length - 1], s.back.slice(0, -1));
+      if (intent.viewport && !this.viewport(hub, s.session.sel, intent.viewport)) return true;
+      if (!s.paging && s.back.length) this.pageTo(s, s.back[s.back.length - 1], s.back.slice(0, -1), 'newer');
+      return true;
+    }
+    if (intent.kind === 'newest') {
+      if (!s.paging) {
+        s.historyReset = true; s.viewport = null; s.anchor = { id: '', offset: 0 };
+        this.pageTo(s, '', [], 'newest');
+      }
       return true;
     }
     if (intent.kind === 'search') {
@@ -627,6 +702,7 @@ export class NativeThinHost307265 {
     if (['send', 'send-alt'].includes(action)) {
       if (s.paging) s.overtaken.add(s.paging.id);
       s.cursor = ''; s.back = []; s.paging = null;
+      s.historyReset = true; s.viewport = null; s.historyParked = false;
       const draft = s.drafts.get(thread)?.revision || 0;
       const active = this.pending.get(s.active)?.operation;
       if ([active, ...s.queue].some(op => op && ['send', 'send-alt'].includes(op.action) && op.input.sel === thread && op.revision >= draft)) return true;
@@ -850,6 +926,7 @@ export class NativeThinHost307265 {
     if (paged && result.failed) { s.cursor = paged.undo.cursor; s.back = paged.undo.back; }
     if (!metadata || metadata.epoch !== s.epoch) return true;
     if (result.failed) {
+      s.historyReset = false;
       if (presentation(result.method) && this.isCurrent(metadata)) this.fail(hub, result.failed);
       else this.pump(s);
       return true;
@@ -898,9 +975,9 @@ export class NativeThinHost307265 {
     if (this.ordinary.size + result.cmds.filter(c => c.command?.type === 'send').length > 128) { this.fail(hub, 'Ordinary reply backlog limit'); return true; }
     // ThinViews validated the entire batch. Original actions retain their
     // lifetime after selection moves; only their captured commands settle.
-    let view = null;
+    let view = null, pageRows = null;
     if (result.current && result.remoteReady) {
-      try { view = this.api.materialize(r, s.session); }
+      try { view = this.api.materialize(r, s.session); pageRows = view.shown?.thread?.entries || []; view = this.projectHistory(s, view, paged); pageRows = view.historyPage || pageRows; }
       catch { this.fail(hub, 'Invalid native materialization'); return true; }
     }
     const commands = [];
@@ -923,15 +1000,23 @@ export class NativeThinHost307265 {
     this.enqueue(hub, ...commands);
     if (result.current && r.nextTarget) { this.select(s, r.nextTarget, s.session); return true; }
     if (result.current && result.remoteReady) {
-      for (const old of s.window?.partial || []) if (!result.window.partial.some(p => p.id === old.id && p.version === old.version)) s.messages.reset(old.id);
+      const displayed = new Map((view.shown?.thread?.entries || []).map(e => [e.id, e]));
+      const partial = new Map(result.window.partial.map(p => [p.id, p]));
+      for (const old of s.window?.partial || []) {
+        if (!partial.has(old.id) && displayed.get(old.id)?.partial?.version === old.version) partial.set(old.id, old);
+        else if (partial.get(old.id)?.version !== old.version) s.messages.reset(old.id);
+      }
       s.presentedRevision = r.requestRevision;
-      s.ready = true; s.window = copy(result.window); s.anchor = copy(result.window.anchor);
+      s.ready = true; s.window = { ...copy(result.window), partial: [...partial.values()] };
+      if (!s.viewport) s.anchor = copy(result.window.anchor);
+      s.historyPage = copy(pageRows);
       for (const entry of view.shown.thread?.entries || []) {
         const old = s.shown?.thread?.entries?.find(e => e.id === entry.id);
         if (old?.partial?.version !== entry.partial?.version) s.messages.reset(entry.id);
       }
       if (view.shown?.thread) view.shown.thread.later = s.back.length;
       s.shown = view.shown; s.overlay = view.overlay; s.shownTarget = copy(s.target);
+      s.historyReset = false;
       if (metadata.operation?.projectScope !== undefined)
         s.projectApplied = { scope: metadata.operation.projectScope, edit: metadata.operation.projectEdit, epoch: s.epoch, target: copy(s.target) };
       if (!s.flushed) { s.flushed = true; this.outboxFlush(hub); }

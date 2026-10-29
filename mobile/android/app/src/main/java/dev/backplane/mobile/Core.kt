@@ -584,6 +584,11 @@ class Core(private val app: Application) : Application.ActivityLifecycleCallback
 
     fun vault(text: String) { vaultText = text }
 
+    internal fun timelineViewport(thread: String, value: TimelineReading) {
+        if (screen?.thread?.id != thread) return
+        scope.launch { apply(engine.viewport(thread, value)) }
+    }
+
     fun act(action: String, value: String = "") {
         // the secret box's Save: the value joins the box's name, purpose and
         // thread and leaves in one secret.set request (Engine.secret)

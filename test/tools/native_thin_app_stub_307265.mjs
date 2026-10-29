@@ -28,6 +28,11 @@ export default {
  thin_target:text=>{const s=JSON.parse(text);return j(s.route?{kind:'bot',id:s.route.bot}:s.sel?{kind:'thread',id:s.sel}:{kind:'recent',id:''});},
  thin_choice:(text,a,v)=>{const s=noRoute(JSON.parse(text));if(a==='select')s.sel=v.includes('|')?v.slice(v.indexOf('|')+1):v;if(a==='draft')s.drafts={...s.drafts,[s.sel]:v};return j(s);},
  json_parse:text=>j(JSON.parse(text)),
+ // Transport fixtures keep the default one-row picture. Real history policy
+ // is covered by native_history_window_test.bend and emitted qualification.
+ thin_history:text=>j({ids:JSON.parse(text).fresh,aliases:[]}),
+ thin_viewport:()=>true,
+ thin_history_capacity:()=>true,
  thin_partial:(shown,window)=>{const s=p(shown),w=p(window);if(s.thread)s.thread.entries=s.thread.entries.map(e=>({...e,...(w.partial.find(x=>x.id===e.id)?{partial:w.partial.find(x=>x.id===e.id)}:{})}));return j(s);},
  thin_shown_draft:(overlay,text)=>{const o=p(overlay),s=JSON.parse(text);if(o.j.thread)o.j.thread.draft=s.drafts[s.sel]||'';return j(o);},
  thin_presentation:(hs,overlays,cur)=>{const o=p(overlays).find(o=>o.key===cur);return j({...o.j,hub:cur,sel:o.j.sel?cur+'|'+o.j.sel:'',hubs:hs.keys.map(key=>({key}))});},
