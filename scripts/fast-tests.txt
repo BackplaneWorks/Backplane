@@ -17,3 +17,7 @@ test/folded_actions_test.bend
 test/hotboot_thread_decode_law_test.bend
 test/storedb_test.bend
 test/hotboot_test.bend
+
+test/timeline_virtual_test.bend
+
+test/timeline_history_test.bend

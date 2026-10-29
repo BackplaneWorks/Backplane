@@ -18,6 +18,7 @@ async function fixture(supported=false, legacyProbe=false){
   checkpointFocused(){calls.push('checkpoint');},later(){},render(){},trace(){},KEYS:[],WORDS:[],restoreFocused:()=>{calls.push('focused-read');return new Promise(()=>{});},refreshFocusedIdentity:()=>{calls.push('identity');return new Promise(()=>{});},
   currentSession:()=>ctx.thinSession||{sel:'A',drafts:{A:'unsent 日本語'},rid:1},choosePresentation:(s,a,v)=>a==='select'?{...s,sel:v}:{...s,drafts:{...s.drafts,[s.sel]:v}},localPresentation(){},
   presentationJson:x=>x,fromList:x=>x,presentationCommand:c=>calls.push(c),anchorOf:()=>null,
+  History:{project:(_before,fresh)=>fresh},historyNode:null,timelineList:()=>null,
   App:{wire_out:t=>encoder.encode(t),presentation_node:n=>n,presentation_prepare:(s,input)=>({...input,rid:s.rid}),presentation_reply:s=>s,presentation_select:(u,id)=>({...u,sel:id}),presentation_handoff:(u,s)=>({...u,sel:s.sel}),unsync:u=>u,lang:()=> 'en'},
   Wire:{cbor:b=>JSON.parse(decoder.decode(b)),plain:x=>x},document:{getElementById:()=>null,documentElement:{style:{setProperty(){}}}},pairingReady:Promise.resolve(true),
   fallbackIntent:null,wantFrontend:true,Backoff,Retry,probeHub,QUIET_MS,navigator:{onLine:true},thinContinuations:{clear(){},accept:()=>false,bind(){},project:x=>x},presentationTarget,preservePresentationRoute,checkDeploy:()=>{},outbox:new Map(),OUTBOX:'outbox',OUTBOX_DAY:86400000,DRAFT:'draft:',

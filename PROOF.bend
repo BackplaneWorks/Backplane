@@ -1,3 +1,4 @@
+import ./test/timeline_virtual_proof.bend as TLVIRTUALPROOF
 import ./test/native_history_window_proof.bend as NATIVEHISTORYPROOF
 import ./src/server/thin-actor.bend as CHATSIDE
 import ./src/core/sidebar-read.bend as SIDEREAD
@@ -13547,3 +13548,14 @@ def Laws.native_history_page_size(old, fresh, keep, visible, older):
 
 def Laws.native_history_page_order(old, candidate, visible, h):
   NATIVEHISTORYPROOF.reject_order(old, candidate, visible, h)
+
+# ---- Web/Electron TanStack-model port (2026-10-29), append-only ----
+
+def Laws.timeline_virtual_prepend_offset(anchor, before, after):
+  TLVIRTUALPROOF.prepend_offset(anchor, before, after)
+
+def Laws.timeline_virtual_anchor_rendered(inRange):
+  TLVIRTUALPROOF.anchor_rendered(inRange)
+
+def Laws.timeline_virtual_follow_only_at_bottom(follow, held, end):
+  TLVIRTUALPROOF.follow_only_at_bottom(follow, held, end)

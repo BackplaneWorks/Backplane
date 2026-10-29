@@ -194,7 +194,7 @@ html[data-backplane-wait="true"] :is(.topbar .back, .topbar .crumbs, .topbar .kv
   .thread-workbar { padding-left: 10px; padding-right: 10px; }
   .viewer > .viewer-tabs { display: flex; position: relative; z-index: 4; }
 }
-.timeline { flex: 1; overflow-y: auto; overflow-anchor: none; padding: calc(16px + var(--anchor-inset, 0px)) 16px 8px; display: flex; flex-direction: column; gap: 10px; }
+.timeline { flex: 1; overflow-y: auto; overflow-anchor: none; padding: 0; display: block; position: relative; }
 /* away from the end with something new below (client.bend's Hold.pill).
    It takes no room in the timeline (its height and the gap before it given
    back by its margin), so its coming and going never changes how far the
@@ -622,7 +622,7 @@ button.chip:hover { border-color: var(--bad); color: var(--bad); }
   .thread-head .title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .thread-head .meta { display: none; }
   .thread-head .tools { width: 100%; overflow-x: auto; }
-  .timeline { padding: 12px 10px 8px; }
+  .timeline-virtual-row { padding-inline: 10px; }
   .msg.user { max-width: 92%; }
   .composer { padding: 8px 10px 10px; }
   .composer textarea { min-height: 48px; }
@@ -1802,3 +1802,9 @@ html:not([data-keys-held]) .keys-legend { visibility: hidden; }
   .composer-foot:has(> .account-chip) > label.attach { grid-area: 2 / 3; }
   .composer-foot:has(> .account-chip) > .foot-end { grid-area: 2 / 4; }
 }
+
+/* Geometry comes from the Bend port of TanStack virtual-core 3.19.9. */
+.timeline-virtual-track { overflow-anchor: none; }
+.timeline-virtual-row { box-sizing: border-box; padding-inline: 16px; display: flex; flex-direction: column; }
+.timeline-virtual-row > * { flex: none; }
+@media (max-width: 760px) { .timeline-virtual-row { padding-inline: 10px; } }

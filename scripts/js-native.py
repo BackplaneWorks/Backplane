@@ -71,9 +71,11 @@ Sec.mask's laws hold whatever it answers (the pure check follows it).
 Each is found by its shape and must be found exactly once, else the build
 stops (a new Bend that emits them otherwise needs this looked at again).
 With --server (scripts/build-js.sh: one bundle) that holds for every def;
-for the web client's chunks (no flag) String.cmp and Map.bit.go must be
-found exactly once and the others at most once (a chunk set need not use
-them).
+for the web client's chunks (no flag) each separately compiled Bend entry
+contributes its own Base helpers. String.cmp and Map.bit.go must have the
+same positive copy count; optional helpers occur at most once per copy.
+Every matched body must still be rewritten exactly once. Server fences
+remain exactly-one.
 `bun test/tools/js_native_test.ts` checks both against Base's definitions.
 
   scripts/js-native.py dist/web/chunk-*.js
@@ -194,11 +196,18 @@ for name, rx, required in (("String.cmp", CMP, True), ("Map.bit.go", BIT, True),
                            ("String.split", SPLIT, server), ("List.length", LEN, server),
                            ("String.starts_with", PRE, server), ("String.contains", HAS, server)):
     n = sum(len(rx.findall(s)) for s in srcs.values())
-    if n != 1 and (required or n > 1):
-        sys.exit(f"js-native: {name} found {n} times, not once")
+    if server and n != 1 or not server and required and n < 1:
+        sys.exit(f"js-native: {name} found {n} times, expected " + ("once" if server else "at least once"))
     found[name] = n
+if not server:
+    copies = found["String.cmp"]
+    if found["Map.bit.go"] != copies:
+        sys.exit("js-native: each web Bend entry needs matching String.cmp and Map.bit.go copies")
+    for name in ("String.split", "List.length", "String.starts_with", "String.contains"):
+        if found[name] > copies:
+            sys.exit(f"js-native: {name} exceeds the web Bend entry count")
 found["Sec.fine"] = sum(len(SEC_FINE.findall(s)) for s in srcs.values())
-if found["Sec.fine"] > 1 or (server and found["Sec.fine"] != 1):
+if (server and found["Sec.fine"] != 1) or (not server and found["Sec.fine"] > found["String.cmp"]):
     sys.exit(f"js-native: Sec.fine found {found['Sec.fine']} times, not once")
 if found["Sec.fine"] and hashlib.sha256(Path(__file__).parent.parent.joinpath("src/core/secret.bend").read_bytes()).hexdigest() != SEC_FINE_SOURCE_SHA256:
     sys.exit("js-native: Sec.fine pure source changed")
