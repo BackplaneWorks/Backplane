@@ -36,6 +36,13 @@ on:
         type: string
         required: false
         default: ''
+      components_url:
+        description: Hash-bound current-source desktop components
+        type: string
+        required: false
+      components_sha256:
+        type: string
+        required: false
       windows_runtime_url:
         description: js, windows-x64 only. The portable Cygwin runtime bundle (.tar.gz of RUNTIME.json, CLOSURE.json and their members); its contents are pinned in service-runtime.py
         type: string
@@ -54,8 +61,8 @@ concurrency:
 
 env:
   BACKPLANE_FROZEN_COMMIT: ${{ inputs.ref }}
-  BACKPLANE_VERSION: v0.13.0
-  BACKPLANE_VERSION_STAMP: '0.13.0'
+  BACKPLANE_VERSION: v0.13.1
+  BACKPLANE_VERSION_STAMP: '0.13.1'
   BACKPLANE_TELEMETRY_CHANNEL: release
   # Source scanners and receipts must use UTF-8 on Windows too.
   PYTHONUTF8: '1'
@@ -162,7 +169,7 @@ jobs:
           chmod 755 "$SERVICE"  # artifacts drop file modes
           v=$("$SERVICE" --version)
           echo "$v"
-          [ "$v" = "backplane 0.13.0" ]
+          [ "$v" = "backplane 0.13.1" ]
       - name: Measure matching-host system ABI and assemble genuine service component
         shell: bash
         env:
@@ -181,7 +188,7 @@ jobs:
             mkdir -p "$RUNNER_TEMP/winrt" && (cd "$RUNNER_TEMP" && tar -xzf winrt.tar.gz -C winrt)
             set -- --windows-runtime "$RUNNER_TEMP/winrt"
           fi
-          "$py" build/bootstrap-tools/scripts/service-runtime.py "$@" --source-root "$GITHUB_WORKSPACE" --build "$GITHUB_WORKSPACE/build/bootstrap-js" --producer "$GITHUB_WORKSPACE/build/bootstrap-tools/scripts/service-release.py" --producer-sha256 6dff1255e45b84df922e37ae984f9655583f1c0e6deac74cc2a5b5f9af654568 --out "$GITHUB_WORKSPACE/build/bootstrap-service"
+          "$py" build/bootstrap-tools/scripts/service-runtime.py "$@" --source-root "$GITHUB_WORKSPACE" --build "$GITHUB_WORKSPACE/build/bootstrap-js" --producer "$GITHUB_WORKSPACE/build/bootstrap-tools/scripts/service-release.py" --producer-sha256 5248ca2bdb8ce8cf87c2194957dd72eca78c08c87008ff3bded4a5c2d480eb7c --out "$GITHUB_WORKSPACE/build/bootstrap-service"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -265,4 +272,61 @@ jobs:
           name: android-configured-public-signer
           path: ${{ runner.temp }}/android-public-signer.json
           if-no-files-found: error
+          retention-days: 14
+
+  desktop:
+    if: inputs.operation == 'js'
+    needs: js-runtime
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {target: linux-x64, runner: ubuntu-22.04}
+          - {target: linux-arm64, runner: ubuntu-22.04-arm}
+          - {target: darwin-arm64, runner: macos-15}
+          - {target: windows-x64, runner: windows-2025}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 18
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Preserve committed bytes
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: configured-service-${{ matrix.target }}
+          path: build/native-input
+      - name: Stage, native startup and ordinary desktop smoke, strict archive
+        env:
+          COMPONENTS_URL: ${{ inputs.components_url }}
+          COMPONENTS_SHA: ${{ inputs.components_sha256 }}
+          TARGET: ${{ matrix.target }}
+          BACKPLANE_TELEMETRY: 'off'
+          BACKPLANE_DESKTOP_BROWSER: '1'
+        run: python scripts/release-0131-native.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: packaged-desktop-${{ matrix.target }}
+          path: |
+            build/release-0131/evidence-ascii/
+            build/release-0131/evidence/
+            build/release-0131/acceptance/
+            build/release-0131/dist/*.tar.gz
+            build/release-0131/dist/*.zip
+            build/release-0131/dist/*.sha256
+            build/release-0131/dist/**/DESKTOP.json
+            build/release-0131/dist/**/MANIFEST.json
+            build/release-0131/RESULT.json
           retention-days: 14
