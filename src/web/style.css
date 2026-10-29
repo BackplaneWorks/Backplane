@@ -237,9 +237,24 @@ html[data-backplane-wait="true"] :is(.topbar .back, .topbar .crumbs, .topbar .kv
 .act.error { color: var(--bad); }
 /* a failure says all of why it failed: its row wraps, never cut */
 .act.error .summary { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; }
-button.fold { align-self: flex-start; display: flex; align-items: center; gap: 6px; background: none; border-color: transparent; color: var(--dim); font-family: var(--mono); font-size: calc(12px * var(--text-scale, 100) / 100); padding: 2px 4px 2px 0; max-width: 860px; }
-button.fold:hover { color: var(--text); }
-button.fold span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A run of tool calls is a drawer (view.bend's View.fold.row.live): one
+   tidy line, shut until clicked, a click again shuts it. Open, its rows
+   (data-run, View.run.mark) hang under it on a rule that bridges the 10px
+   between rows. The live one (the last thing while its turn runs) says
+   what runs now and pulses. */
+button.fold { align-self: flex-start; display: flex; align-items: center; gap: 6px; box-sizing: border-box; background: var(--panel); border: 1px solid var(--line); color: var(--dim); font-family: var(--mono); font-size: calc(12px * var(--text-scale, 100) / 100); padding: 3px 10px 3px 6px; max-width: min(860px, 100%); min-width: 0; cursor: pointer; }
+button.fold:hover { color: var(--text); border-color: var(--faint); }
+button.fold span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+button.fold svg { flex: none; }
+button.fold.live::after { content: ""; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--st-work); animation: pulse 1.2s ease-in-out infinite; }
+.act[data-run] { position: relative; margin-left: 13px; padding-left: 12px; }
+.act[data-run]::before { content: ""; position: absolute; left: 0; top: -10px; bottom: 0; border-left: 1px solid var(--line); }
+/* the thin view's reader on an activity row (thin-continuations.js): a
+   small link at the row's end, the text it reads under the row */
+.act:has(> .thin-message-text) { flex-wrap: wrap; }
+.act > .thin-message-text { flex-basis: 100%; margin: 4px 0 0; color: var(--dim); font: inherit; }
+.act > button.thin-message-more { flex: none; align-self: center; background: none; border: 0; padding: 0 4px; color: var(--accent); font: inherit; cursor: pointer; }
+.act > button.thin-message-more:hover { text-decoration: underline; }
 .working { color: var(--faint); font-size: calc(12px * var(--text-scale, 100) / 100); }
 .phase { display: flex; align-items: center; gap: 8px; color: var(--faint); font-size: calc(12px * var(--text-scale, 100) / 100); }
 .dot.monitoring { background: var(--st-work); animation: pulse 1.2s ease-in-out infinite; }

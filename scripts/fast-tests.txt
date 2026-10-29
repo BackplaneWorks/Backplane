@@ -21,3 +21,6 @@ test/hotboot_test.bend
 test/timeline_virtual_test.bend
 
 test/timeline_history_test.bend
+
+# Tool calls fold into drawers, shut until the person clicks one (laws fold_run_*).
+test/fold_test.bend

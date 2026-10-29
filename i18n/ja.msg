@@ -283,6 +283,7 @@ fold.more = 、…
 fold.worked = {took}作業 · {ago}
 # ja? reads "たった今から" when the turn just started
 fold.working = 作業中 · {ago}から
+fold.running = 実行中: {kind}
 
 # bot tabs and moods
 bots.tab.chat = チャット

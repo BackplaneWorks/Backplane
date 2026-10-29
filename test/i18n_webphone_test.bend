@@ -65,6 +65,12 @@ def phone.settings(tag: String, page: String) -> String:
 def phone.plane(tag: String) -> String:
   J.Json.show(J.Json.get_obj(H.Hubs.screen(H.Hubs{"c", 200n, "test:3820", [H.Hub{"test:3820", U.Ui.fold([M.SettingSet{"machine.id", "test-machine", 109n}, M.UberSet{"b43", "u43", 110n}], F.Fixture.ui(tag))}]}), "plane"))
 
+# each phone row as "<id>=<run>" (an open drawer's rows name their run)
+def phone.runs(js: List<&2, J.Json>) -> List<&2, String>:
+  match js:
+    case Nil{}: Nil{}
+    case +j <> t: (J.Json.get_str(j, "id", "?") ++ "=" ++ J.Json.get_str(j, "run", "")) <> phone.runs(t)
+
 # Default is a wire key, even when the labels around it are Japanese.
 def model.about() -> J.Json:
   J.Json.obj([J.KV{"labels", J.Json.obj([J.KV{"default", J.Json.str("Provider default") }])},
@@ -153,3 +159,9 @@ def main() -> IO(Unit):
     C.Check.str("phone upload action preserved", J.Json.get_str(first(S.Mob.ask.btns.loc(I.Ja{}, 2n, "a", "", "")), "value", "?"), "a|accept")
     C.Check.str("phone minimized order route preserved", J.Json.get_str(first(S.Mob.menu.loc(I.Ja{}, "t", False{}, [TO.Tool{"shopping-bag", "Buy it", "", "fab-show", "t", False{}, False{}, False{}}])), "action", "?"), "fab-show")
     C.Check.str("ordering toggle localized", W.VLabel.option(I.Ja{}, "order.enabled", "off"), "オフ")
+    C.Check.str("phone live drawer en", J.Json.show(first(S.Mob.entries(I.En{}, [M.Act{"a", "t", "tool", "Bash", "x", 0n}], M.State.empty(), "t", Map.new(&2, String), Map.new(&2, String), True{}))),
+      "{\"id\":\"fold:a\",\"kind\":\"fold\",\"text\":\"1 tool call · running: Bash\",\"open\":false,\"live\":true,\"value\":\"1a\"}")
+    C.Check.str("phone live drawer ja, shut", J.Json.get_str(first(S.Mob.entries(I.Ja{}, [M.Act{"a", "t", "tool", "Bash", "x", 0n}], M.State.empty(), "t", Map.new(&2, String), Map.new(&2, String), True{})), "text", "?") ++ " " ++ Nat.show(List.length(&2, J.Json, S.Mob.entries(I.Ja{}, [M.Act{"a", "t", "tool", "Bash", "x", 0n}], M.State.empty(), "t", Map.new(&2, String), Map.new(&2, String), True{}))),
+      "ツール呼び出し1件 · 実行中: Bash 1")
+    C.Check.str("phone opened drawer: its rows name their run", String.join(phone.runs(S.Mob.entries(I.En{}, [M.Act{"a", "t", "tool", "Bash", "x", 0n}, M.Act{"b", "t", "tool", "Read", "y", 1n}, M.Msg{"m", "t", M.Assistant{}, "done", 2n}], M.State.empty(), "t", Map.set(&2, String, Map.new(&2, String), "fold:a", "1"), Map.new(&2, String), False{})), ","),
+      "fold:a=,a=a,b=a,m=")

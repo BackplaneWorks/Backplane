@@ -270,6 +270,7 @@ fold.steps = {count} {plural, select, one {design change} other {design changes}
 fold.more = , …
 fold.worked = Worked for {took} · {ago}
 fold.working = Working · started {ago}
+fold.running = running: {kind}
 
 # bot tabs and moods
 bots.tab.chat = Chat
