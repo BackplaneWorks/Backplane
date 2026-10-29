@@ -145,6 +145,10 @@ def Px.fraction(p: Px) -> Px:
     case Px{n, +d, +s}:
       Px.fraction.signed(n, Px.make(False{}, String.drop(d, Nat.sub(String.length(d), s)), s))
 
+def Px.ceil(+p: Px) -> Px:
+  +f = Px.fraction(p)
+  Bool.pick(Px, Px.same(f, Px.zero()), p, Px.add(Px.sub(p, f), Px.int(1n)))
+
 def Px.half(p: Px) -> Px:
   match p:
     case Px{n, +d, s}: Px.make(n, Dig.add(Dig.add(Dig.add(d, d), Dig.add(d, d)), d), 1n+s)
@@ -308,10 +312,15 @@ def Sizes.return.value(reply: SizeReply) -> String:
   match reply:
     case SizeReply{_, v}: v
 
-def Layout.total(n: Nat, start: Px) -> Px:
+def Layout.total(n: Nat, +start: Px) -> Px:
   match n:
     case 0n: Px.int(24n)
-    case 1n+_: Px.sub(start, Px.int(2n))
+    case 1n+_: Bool.pick(Px, Px.same(start, Px.int(16n)), Px.int(24n), Px.sub(start, Px.int(2n)))
+
+# Invisible controls have no space or gap. In particular the new-output pill
+# must not add/remove 10px at the bottom when its zero-height wrapper appears.
+def Layout.advance(+size: Px, +start: Px) -> Px:
+  Bool.pick(Px, Px.le(size, Px.zero()), start, Px.add(Px.add(start, size), Px.int(10n)))
 
 def Layout.make(keys: List<&2, J.Json>, sizes: Map<&2, String>, +n: Nat, +start: Px, acc: List<&2, Item>) -> Layout:
   match keys:
@@ -320,7 +329,7 @@ def Layout.make(keys: List<&2, J.Json>, sizes: Map<&2, String>, +n: Nat, +start:
       +key = J.Json.as_str(Some{j}, "")
       +reply = Sizes.reply(Map.get(String, "120", sizes, key))
       +size = Px.max(Px.zero(), Px.read(Sizes.return.value(reply)))
-      Layout.make(t, Sizes.return.map(reply), 1n+n, Px.add(Px.add(start, size), Px.int(10n)), Item{key, n, start, size} <> acc)
+      Layout.make(t, Sizes.return.map(reply), 1n+n, Layout.advance(size, start), Item{key, n, start, size} <> acc)
 
 def End.top(total: Px, view: Px) -> Px: Px.max(Px.zero(), Px.sub(total, view))
 
@@ -406,7 +415,8 @@ def Window.visible(xs: List<&2, Item>, anchor: String, lo: Px, hi: Px) -> List<&
 
 def Item.json(r: Item) -> J.Json:
   match r:
-    case Item{k, n, s, z}: J.Json.obj([J.KV{"key", J.Str{k}}, J.KV{"index", J.Json.nat(n)}, J.KV{"start", Px.json(s)}, J.KV{"size", Px.json(z)}])
+    case Item{+k, n, s, z}: J.Json.obj([J.KV{"key", J.Str{k}}, J.KV{"index", J.Json.nat(n)}, J.KV{"start", Px.json(s)}, J.KV{"size", Px.json(z)},
+      J.KV{"keepHeight", J.Flag{Bool.or(String.starts_with(k, "@live:"), String.starts_with(k, "live:"))}}])
 
 def Items.json(xs: List<&2, Item>, acc: List<&2, J.Json>) -> J.Json:
   match xs:
@@ -420,6 +430,7 @@ def Plan.output(+items: List<&2, Item>, +total: Px, +top: Px, +view: Px, preferr
   +visible = Window.visible(items, Anchor.key(a), Px.sub(top, overscan), Px.add(Px.add(top, view), overscan))
   J.Json.obj([J.KV{"items", Items.json(items, Nil{})}, J.KV{"visible", Items.json(visible, Nil{})},
     J.KV{"total", Px.json(total)}, J.KV{"top", Px.json(Px.add(top, trackOffset))}, J.KV{"view", Px.json(view)},
+    J.KV{"physicalTotal", Px.json(Px.ceil(Px.add(Px.max(total, Px.add(top, view)), trackOffset)))},
     J.KV{"logicalTop", Px.json(top)}, J.KV{"trackOffset", Px.json(trackOffset)},
     J.KV{"atEnd", J.Flag{End.at(total, top, view)}}, J.KV{"anchor", J.Str{Anchor.key(a)}}, J.KV{"offset", Px.json(Anchor.offset(a))}])
 

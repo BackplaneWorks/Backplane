@@ -1807,4 +1807,5 @@ html:not([data-keys-held]) .keys-legend { visibility: hidden; }
 .timeline-virtual-track { overflow-anchor: none; }
 .timeline-virtual-row { box-sizing: border-box; padding-inline: 16px; display: flex; flex-direction: column; }
 .timeline-virtual-row > * { flex: none; }
+.timeline-entry { display: flex; flex-direction: column; gap: 10px; }
 @media (max-width: 760px) { .timeline-virtual-row { padding-inline: 10px; } }

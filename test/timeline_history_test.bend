@@ -23,6 +23,12 @@ def same(+name: String, got: D.Node, want: D.Node) -> IO(Unit):
 def headed(+id: String, stable: String) -> D.Node:
   D.El{"button", stable, [D.At{"data-value", "1" ++ id}, D.On{"click", "fold"}], Nil{}}
 
+def source() -> D.Node:
+  D.Dom.button("link in", "select", "sender", "", "from sender")
+
+def sourced(+entry: D.Node) -> D.Node:
+  D.El{"div", H.key(entry), [D.At{"class", "timeline-entry"}, D.At{"data-timeline-entry", H.key(entry)}], [source(), entry]}
+
 def series(count: Nat, +start: Nat, acc: List<&2, D.Node>) -> List<&2, D.Node>:
   match count:
     case 0n: List.reverse(&2, D.Node, acc)
@@ -36,6 +42,11 @@ def main() -> IO(Unit):
     +d : D.Node = row("d", "d")
     +b1 : D.Node = row("b", "fresh b")
     +c1 : D.Node = row("c", "fresh c")
+    same("initial source label grouped with its stable message", H.project(tl([]), tl([a, source(), b, c]), "reset"), tl([a, sourced(b), c]))
+    same("retained source label never disappears on older overlap", H.project(tl([source(), b, source(), c]), tl([a, source(), b1]), "older"), tl([a, sourced(b1), sourced(c)]))
+    same("source metadata survives newer overlap", H.project(tl([a, source(), b, source(), c]), tl([source(), c1, d]), "newer"), tl([a, sourced(b), sourced(c1), d]))
+    same("grouping is idempotent across repeated updates", H.project(tl([sourced(b), c]), tl([source(), b1, c1]), "update"), tl([sourced(b1), c1]))
+    C.Check.str("grouped message remains same anchor identity", H.display_key(sourced(b)), H.display_key(b))
     +before : D.Node = D.Dom.button("earlier", "view-page", "older", "", "fresh earlier")
     +between : D.Node = D.Dom.span("middle", "fresh middle")
     +after : D.Node = D.Dom.button("later", "view-page", "newer", "", "fresh later")
@@ -53,6 +64,9 @@ def main() -> IO(Unit):
     +live : D.Node = D.El{"bp-memo", "live:t", [D.At{"fn", "live"}], [D.Txt{"old live"}]}
     +sending : D.Node = D.El{"div", "sending", [D.At{"class", "msg sending"}, D.At{"data-id", "pending"}], [D.Txt{"old sending"}]}
     +liveId : D.Node = D.El{"div", "live:t", [D.At{"data-id", "live:t"}], [D.Txt{"live keyed"}]}
+    +bodyLive : D.Node = D.El{"bp-memo", "@live:t", [D.At{"fn", "row"}], [D.Txt{"stream preview"}]}
+    same("body-window live key never becomes historical overlap", H.project(tl([c, d, bodyLive]), tl([a, b, bodyLive]), "older"), tl([a, b, c, d, bodyLive]))
+    same("stream refresh preserves chronological retained suffix", H.project(H.project(tl([c, d, bodyLive]), tl([a, b, bodyLive]), "older"), tl([a, b, bodyLive]), "update"), tl([a, b, c, d, bodyLive]))
     same("memo history retained and old transient/control nodes excluded", H.project(tl([before, memo, memoRow, live, sending, liveId]), tl([a, after]), "newer"), tl([memo, memoRow, a, after]))
     same("accumulates more than two visited pages", H.project(H.project(tl([a]), tl([b]), "newer"), tl([c]), "newer"), tl([a, b, c]))
     same("class timeline alone is not selected", H.project(tl([a]), D.Dom.div("timeline", [b]), "older"), D.Dom.div("timeline", [b]))

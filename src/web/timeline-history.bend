@@ -80,14 +80,14 @@ def H.word.go(s: String, +word: String, acc: String) -> Bool:
     case SCon{c, t}: H.word.go(t, word, acc ++ SCon{c, SNil{}})
 
 def H.transient(+k: String, +as: List<&2, D.Attr>) -> Bool:
-  Bool.or(String.starts_with(k, "live:"), Bool.or(String.eq(H.attr(as, "fn"), "live"),
+  Bool.or(Bool.or(String.starts_with(k, "live:"), String.starts_with(k, "@live:")), Bool.or(String.eq(H.attr(as, "fn"), "live"),
     Bool.or(H.word.go(H.attr(as, "class"), "live", ""), H.word.go(H.attr(as, "class"), "sending", ""))))
 
 def H.historical.allowed(blocked: Bool, +tag: String, +k: String, +as: List<&2, D.Attr>) -> Bool:
   match blocked:
     case True{}: False{}
     case False{}:
-      Bool.or(Bool.not(String.is_empty(H.attr(as, "data-id"))),
+      Bool.or(Bool.or(Bool.not(String.is_empty(H.attr(as, "data-id"))), Bool.not(String.is_empty(H.attr(as, "data-timeline-entry")))),
         Bool.or(Bool.and(H.fold(as), Bool.not(String.is_empty(String.drop(H.attr(as, "data-value"), 1n)))),
           Bool.and(String.eq(tag, "bp-memo"), Bool.and(Bool.not(String.is_empty(k)),
             Bool.or(String.eq(H.attr(as, "fn"), "msg"), Bool.or(String.eq(H.attr(as, "fn"), "row"), String.eq(H.attr(as, "fn"), "act")))))))
@@ -359,6 +359,45 @@ def H.first(xs: List<&2, D.Node>, fallback: D.Node) -> D.Node:
     case h <> _: h
     case Nil{}: fallback
 
+# An incoming-message source label belongs to that message, not to the current
+# hub page. Keep both in one keyed historical row so page overlap cannot remove
+# 32px between already visible messages. Generic page controls stay fresh-only.
+def H.source(n: D.Node) -> Bool:
+  match n:
+    case D.El{_, _, +as, _}: Bool.and(H.word.go(H.attr(as, "class"), "link", ""), H.word.go(H.attr(as, "class"), "in", ""))
+    case _: False{}
+
+def H.group(source: Bool, historical: Bool, +label: D.Node, +entry: D.Node) -> List<&2, D.Node>:
+  match source historical:
+    case True{} True{}:
+      [D.El{"div", key(entry), [D.At{"class", "timeline-entry"}, D.At{"data-timeline-entry", key(entry)}], [label, entry]}]
+    case _ _: [label, entry]
+
+def H.source.head(xs: List<&2, D.Node>) -> Bool:
+  match xs:
+    case a <> _: H.source(a)
+    case Nil{}: False{}
+
+# Walk one sibling at a time: a source label may follow any ordinary entry.
+def H.decorate(xs: List<&2, D.Node>, source: Bool, acc: List<&2, D.Node>) -> List<&2, D.Node>:
+  match xs source:
+    case Nil{} _: List.reverse(&2, D.Node, acc)
+    case a <> +b <> +t True{}:
+      H.decorate(t, H.source.head(t), H.onto(H.group(True{}, H.historical(b), a, b), acc))
+    case a <> +t _: H.decorate(t, H.source.head(t), a <> acc)
+
+def H.prepare(xs: List<&2, D.Node>, timeline: Bool, acc: List<&2, D.Node>) -> List<&2, D.Node>:
+  match xs timeline:
+    case Nil{} _: List.reverse(&2, D.Node, acc)
+    case D.El{tag, k, as, +ks} <> +t True{}:
+      H.prepare(t, H.head(t), D.El{tag, k, as, H.decorate(ks, H.source.head(ks), Nil{})} <> acc)
+    case D.El{tag, k, as, +ks} <> +t False{}:
+      H.prepare(t, H.head(t), D.El{tag, k, as, H.prepare(ks, H.head(ks), Nil{})} <> acc)
+    case h <> +t _: H.prepare(t, H.head(t), h <> acc)
+
+def H.prepared(+node: D.Node) -> D.Node:
+  H.first(H.prepare([node], H.timeline(node), Nil{}), node)
+
 def H.project(reset: Bool, +previous: D.Node, +fresh: D.Node, direction: String) -> D.Node:
   match reset:
     case True{}: fresh
@@ -367,4 +406,4 @@ def H.project(reset: Bool, +previous: D.Node, +fresh: D.Node, direction: String)
 
 # Public API consumed by host.js, importing this module as History.
 def project(previous: D.Node, fresh: D.Node, +direction: String) -> D.Node:
-  H.project(Bool.or(String.eq(direction, "reset"), String.eq(direction, "newest")), previous, fresh, direction)
+  H.project(Bool.or(String.eq(direction, "reset"), String.eq(direction, "newest")), H.prepared(previous), H.prepared(fresh), direction)
