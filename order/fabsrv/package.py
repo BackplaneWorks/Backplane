@@ -41,7 +41,7 @@ def is_gerber(name):
 OTHER_EXT = {".zip", ".csv", ".step", ".stp", ".dxf", ".json", ".md"}
 # what each kind may carry, and what it must
 FILE_ROLES = {
-    "pcb": ({"gerbers", "bom", "positions"}, {"gerbers"}),
+    **{k: ({"gerbers", "bom", "positions"}, {"gerbers"}) for k in catalog.BOARDS},
     "3dp": ({"step"}, {"step"}),
     "cnc": ({"step", "drawing"}, {"step"}),
     "sheetmetal": ({"step", "dxf"}, {"step"}),
@@ -118,16 +118,19 @@ def check_manifest(m):
             if role not in roles:
                 raise Bad(f"{name}: a {kind} needs its {role}")
         assemble = p.get("assemble", 0)
-        if kind != "pcb" and assemble:
-            raise Bad(f"{name}: only boards are assembled")
+        if kind not in catalog.ASSEMBLED and assemble:
+            raise Bad(f"{name}: only rigid FR-4 boards (pcb) are assembled" if kind in catalog.BOARDS
+                      else f"{name}: only boards are assembled")
         if isinstance(assemble, bool) or not isinstance(assemble, int) or not (0 <= assemble <= qty):
             raise Bad(f"{name}: assemble is how many of the {qty} boards to assemble")
         if assemble and assemble < catalog.MIN_ASSEMBLED:
             raise Bad(f"{name}: assembly starts at {catalog.MIN_ASSEMBLED} boards")
         if assemble and not ("bom" in roles and "positions" in roles):
             raise Bad(f"{name}: assembly needs the bom and positions files")
+        # the options the person chose (the rest are defaults, free to follow the board, catalog.board_rules)
+        given = sorted(k for k in p["options"]) if isinstance(p.get("options"), dict) else []
         out.append({"name": name, "kind": kind, "qty": qty, "options": opts, "features": feats,
-                    "files": roles, "assemble": assemble})
+                    "files": roles, "assemble": assemble, "given": given})
     title = m.get("title", "")
     title = title[:80] if isinstance(title, str) else ""
     return {"spec": SPEC, "ship_to": country, "title": title, "parts": out, "files": clean_files}

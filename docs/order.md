@@ -11,7 +11,8 @@ and orders it through a buy thread.
   - At the start of a request that changes them, the agent has a subagent update it.
   - The person edits it from the project card: Edit puts it in the composer as `/intent ...`, and sending saves it.
 - `*.fab.json`, beside each thing to order:
-  - fields: `kind` (`pcb`, `3dp`, `cnc` or `sheetmetal`), `name`, `source`, `qty`, `options`, measured `features`;
+  - fields: `kind`, `name`, `source`, `qty`, `options`, measured `features`;
+  - kinds: boards (`pcb` for rigid FR-4, `flex`, `hdi`, `aluminum`, `copper_core`, `rogers`, `ptfe`), `3dp`, `cnc` and `sheetmetal`. Every board kind is measured from its gerbers; only `pcb` boards are assembled. The options are the order server's (`order/fabsrv/catalog.py`, `GET /v1/catalog`), and the agents learn them from `Order.prompt.fab`;
   - `"order": false` leaves a part out;
   - files under `extra/` and `mfg/` are never read.
 - `mfg/<YYYYMMDD-HHMM>/`: what a buy thread exported, with its `manifest.json`. It is exported from the saved files, as the review's fingerprint is taken: an edit made through `kicad_ipc` (docs/kicad-ipc.md) counts once saved with SaveDocument.
