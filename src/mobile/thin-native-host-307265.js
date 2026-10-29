@@ -512,7 +512,7 @@ export class NativeThinHost307265 {
     });
     // Keep the already displayed picture if a reversed gesture would need
     // more than four bounded reply pictures. Never evict a visible row to fit.
-    s.historyParked = rows.length > 260 || utf8Bytes(JSON.stringify(rows)) > 4 * 262144;
+    s.historyParked = !this.api.historyCapacity({ rows: rows.length, bytes: utf8Bytes(JSON.stringify(rows)) });
     if (s.historyParked) rows = old.entries;
     const project = screen => screen?.thread?.id === fresh.id ? { ...screen, thread: { ...screen.thread, entries: rows,
       ...(s.viewport ? { historyAnchor: { ...s.viewport } } : {}) } } : screen;

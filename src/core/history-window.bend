@@ -1,5 +1,11 @@
 import Base
 
+# Retained display rows are local, separate from the 32-row wire page.
+# A full picture beyond this budget parks until a viewport refresh can retire
+# offscreen context; the host never clips the visible span to fit.
+def History.within(rows: Nat, bytes: Nat) -> Bool:
+  Bool.and(Nat.is_le(rows, 260n), Nat.is_le(bytes, 1048576n))
+
 type Alias is Data:
   Alias{from: String, to: String}
 

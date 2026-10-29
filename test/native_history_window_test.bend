@@ -7,6 +7,10 @@ def show(ids: List<&2, String>) -> String:
 
 def main() -> IO(Unit):
   do IO<Unit>:
+    C.Check.str("page adopts disjoint older rows with retained viewport", show(H.History.page(["a", "b"], ["p", "q"], ["a", "b"], ["a"], True{})), "p,q,a,b")
+    C.Check.str("retention row boundary is accepted", Bool.show(H.History.within(260n, 1048576n)), "True")
+    C.Check.str("retention row overflow parks", Bool.show(H.History.within(261n, 1n)), "False")
+    C.Check.str("retention byte overflow parks", Bool.show(H.History.within(1n, 1048577n)), "False")
     C.Check.str("older page keeps outgoing anchor and tail", show(H.History.project(["a", "b", "c"], ["p", "a"], ["a", "b", "c"], True{})), "p,a,b,c")
     C.Check.str("older page keeps visible rows beyond overlap", show(H.History.project(["a", "b", "c", "d"], ["p", "a", "b"], ["b", "c", "d"], True{})), "p,a,b,c,d")
     C.Check.str("newer page keeps outgoing visible prefix", show(H.History.project(["p", "a", "b"], ["b", "c", "d"], ["p", "a", "b"], False{})), "p,a,b,c,d")

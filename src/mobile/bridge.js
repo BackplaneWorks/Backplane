@@ -323,6 +323,7 @@ const thin = new NativeThinHost307265({
   },
   materialize: thinMaterialize,
   history: input => plain(App.thin_history(JSON.stringify(input))),
+  historyCapacity: input => App.thin_history_capacity(JSON.stringify(input)),
   viewport: input => App.thin_viewport(JSON.stringify(input)),
   message: thinMessage,
   find: (view, search) => {

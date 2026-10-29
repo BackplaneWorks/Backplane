@@ -9,7 +9,8 @@ export function registerNativeHistoryChecks(check, harness) {
       window: { ids: ids.map((_, i) => String(i + 1)), older: 'older-next', hasMore: true, anchor: { id: '', offset: 0 }, partial: [] } };
   };
   const opened = ids => {
-    const x = harness(); x.h.hubs(['h']); x.h.connection('h', '1', 'view-v1');
+    const x = harness(); x.api.historyCapacity = ({ rows, bytes }) => rows <= 260 && bytes <= 1048576;
+    x.h.hubs(['h']); x.h.connection('h', '1', 'view-v1');
     const request = x.greeting().cmds[0].request; x.answer(request.id, picture(x, ids)); return x;
   };
   const keys = x => x.h.states.get('h').shown.thread.entries.map(e => e.id);
@@ -20,6 +21,7 @@ export function registerNativeHistoryChecks(check, harness) {
     assert(x.h.viewport('h', 'a', { id: 'c', offset: -37.5, first: 'b', last: 'd' }));
     x.api.history = input => { assert.deepEqual(input.keep, ['b', 'c', 'd', 'a']); return plan(['p', 'a', 'b', 'c', 'd']); };
     x.h.request('h', 'earlier', ''); const req = x.h.drain().cmds[0].request;
+    assert.deepEqual(s.viewport, { id: 'c', offset: -37.5, first: 'b', last: 'd' });
     assert.deepEqual(req.p.anchor, { id: 'c', offset: 38 });
     x.answer(req.id, picture(x, ['p', 'a', 'b']));
     assert.deepEqual(keys(x), ['p', 'a', 'b', 'c', 'd']);
@@ -77,5 +79,11 @@ export function registerNativeHistoryChecks(check, harness) {
     x.api.history = () => plan(['p', ...ids]); x.h.request('h', 'earlier', ''); const req = x.h.drain().cmds[0].request;
     x.answer(req.id, picture(x, ['p'])); assert.deepEqual(keys(x), ids); assert.equal(s.historyParked, true);
     x.h.request('h', 'earlier', ''); assert.deepEqual(x.h.drain().cmds, []);
+    x.api.history = input => { assert.equal(input.page, false); return plan(['p', ids[0]]); };
+    assert(x.h.viewport('h', 'a', { id: ids[0], offset: -8, first: ids[0], last: ids[0] }));
+    const refresh = x.h.drain().cmds[0].request;
+    x.answer(refresh.id, picture(x, ['p']));
+    assert.equal(s.historyParked, false); assert.deepEqual(keys(x), ['p', ids[0]]);
+    x.h.request('h', 'earlier', ''); assert.equal(x.h.drain().cmds[0].request.m, 'view.page');
   });
 }

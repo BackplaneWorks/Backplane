@@ -32,6 +32,7 @@ export default {
  // is covered by native_history_window_test.bend and emitted qualification.
  thin_history:text=>j({ids:JSON.parse(text).fresh,aliases:[]}),
  thin_viewport:()=>true,
+ thin_history_capacity:()=>true,
  thin_partial:(shown,window)=>{const s=p(shown),w=p(window);if(s.thread)s.thread.entries=s.thread.entries.map(e=>({...e,...(w.partial.find(x=>x.id===e.id)?{partial:w.partial.find(x=>x.id===e.id)}:{})}));return j(s);},
  thin_shown_draft:(overlay,text)=>{const o=p(overlay),s=JSON.parse(text);if(o.j.thread)o.j.thread.draft=s.drafts[s.sel]||'';return j(o);},
  thin_presentation:(hs,overlays,cur)=>{const o=p(overlays).find(o=>o.key===cur);return j({...o.j,hub:cur,sel:o.j.sel?cur+'|'+o.j.sel:'',hubs:hs.keys.map(key=>({key}))});},
