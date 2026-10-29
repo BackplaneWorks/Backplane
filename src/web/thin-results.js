@@ -7,6 +7,15 @@ const object = x => x && typeof x === 'object' && !Array.isArray(x);
 const string = (x, cap = 1024) => typeof x === 'string' && utf8Bytes(x) <= cap;
 const decimal = x => string(x, 32) && /^(0|[1-9][0-9]*)$/.test(x);
 const flag = x => typeof x === 'boolean';
+export function validateBodyPage(m, input) {
+  return m?.bodyPage === 1 && input.bodyPage === 1 && string(m.text, 8196)
+    && Object.keys(m).every(k => ['id','thread','version','text','bodyPage','start','end','total','hasMore','complete','cursor','previous'].includes(k)) && m.version === input.bodyVersion && m.thread === input.bodyThread
+    && Number.isSafeInteger(m.start) && m.start >= 0 && Number.isSafeInteger(m.end) && m.end > m.start
+    && Number.isSafeInteger(m.total) && m.total >= m.end && m.total < 2 ** 47
+    && string(m.previous) && (m.start === 0 ? m.previous === '' : !!m.previous)
+    && m.hasMore === (m.end < m.total);
+}
+
 export function validateThinResult(r, input) {
   try {
     if (Object.hasOwn(r, 'modelMenuInput')) return modelMenuReply(r, input);
@@ -22,7 +31,8 @@ export function validateThinResult(r, input) {
       const m = r.message;
       return object(m) && m.id === input.entryId && string(m.id) && string(m.thread) && !!m.thread && decimal(m.version)
         && string(m.text, 65536) && string(m.cursor) && flag(m.hasMore) && flag(m.complete)
-        && (m.hasMore ? !!m.cursor && !m.complete : !m.cursor && m.complete);
+        && (m.hasMore ? !!m.cursor && !m.complete : !m.cursor && m.complete)
+        && (input.bodyPage === 1 ? validateBodyPage(m, input) : m.bodyPage === undefined);
     }
     if (Object.hasOwn(input, 'requestId')) return flag(r.cancelled);
     if (r.mailDraftContext != null && !mailDraftContext(r.mailDraftContext, r.epoch)) return false;
@@ -37,7 +47,10 @@ export function validateThinResult(r, input) {
     return object(w) && Array.isArray(w.ids) && w.ids.length <= 32 && w.ids.every(id => string(id) && !!id)
       && new Set(w.ids).size === w.ids.length && string(w.older) && flag(w.hasMore) && (!w.hasMore || !!w.older)
       && object(w.anchor) && string(w.anchor.id) && Number.isInteger(w.anchor.offset) && w.anchor.offset >= 0 && w.anchor.offset <= 2 ** 32 - 1
-      && Array.isArray(w.partial) && w.partial.length <= 33 && w.partial.every(p => object(p) && string(p.id) && !!p.id && string(p.cursor) && !!p.cursor && p.reason === 'byte-limit');
+      && Array.isArray(w.partial) && w.partial.length <= 33 && w.partial.every(p => object(p) && string(p.id) && !!p.id && string(p.cursor) && !!p.cursor && p.reason === 'byte-limit'
+        && (p.bodyPage === undefined || p.bodyPage === 1 && decimal(p.version) && string(p.thread) && !!p.thread && flag(p.automatic)
+          && (p.streamGeneration === undefined && p.streamCut === undefined && p.streamBlocks === undefined
+            || p.id.startsWith('@live:') && decimal(p.streamGeneration) && flag(p.streamCut) && Number.isSafeInteger(p.streamBlocks) && p.streamBlocks > 8 && p.streamBlocks < 2 ** 47)));
   } catch { return false; }
 }
 

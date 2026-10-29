@@ -22,6 +22,7 @@ import ./thin-still-picture.bend as ST
 import ../core/i18n.bend as I
 import ../core/emb.bend as E
 import ../core/native-sidebar.bend as NS
+import ../core/view-page.bend as VP
 
 # Private, connection-owned UI state. It never enters a client snapshot or
 # persisted event. Keep it behind a List in the connection context so the
@@ -39,6 +40,13 @@ type Memo is Data:
   SignalText{cache: SGT.SignalTextCache}
   SidebarSent{scope: String, token: String, node: J.Json}
   Still{picture: ST.Picture}
+  BodyIssued{entries: List<&2, J.Json>}
+
+def Bodies.keep(ms: List<&2, Memo>) -> List<&2, Memo>:
+  match ms:
+    case Nil{}: Nil{}
+    case BodyIssued{entries} <> _: [BodyIssued{entries}]
+    case _ <> rest: Bodies.keep(rest)
 
 type Actor is Data:
   Actor{ui: U.Ui, view: String, target: J.Json, pending: Map<&2, String>, reads: List<&2, J.Json>, dirty: Bool, memo: List<&2, Memo>}
@@ -56,8 +64,8 @@ def Actor.ui( +a: Actor) -> U.Ui:
 
 def Actor.terminal.fallback(a: Actor) -> Actor:
   match a:
-    case Actor{u, view, target, pending, reads, _, _}:
-      Actor{U.Ui.info_set(u, "local.terminal.pending", ""), view, target, pending, reads, True{}, Nil{}}
+    case Actor{u, view, target, pending, reads, _, ms}:
+      Actor{U.Ui.info_set(u, "local.terminal.pending", ""), view, target, pending, reads, True{}, Bodies.keep(ms)}
 
 def Actor.terminal.offered(a: Actor, ordinal: Nat) -> Actor:
   match a:
@@ -275,8 +283,68 @@ def Sidebar.base(ms: List<&2, Memo>) -> List<&2, Memo>:
     case SidebarWire{key, token} <> rest: SidebarWire{key, token} <> Sidebar.base(rest)
     case _ <> rest: Sidebar.base(rest)
 
+# Only metadata from successfully issued normal pictures may authorize an
+# automatic body read. No text, drafts, commands or caller-made ordinals.
+def Bodies.items(ms: List<&2, Memo>) -> List<&2, J.Json>:
+  match ms:
+    case Nil{}: Nil{}
+    case BodyIssued{entries} <> _: entries
+    case _ <> rest: Bodies.items(rest)
+
+def Bodies.drop(ms: List<&2, Memo>) -> List<&2, Memo>:
+  match ms:
+    case Nil{}: Nil{}
+    case BodyIssued{_} <> rest: Bodies.drop(rest)
+    case m <> rest: m <> Bodies.drop(rest)
+
+def Bodies.without.one(same: Bool, h: J.Json, rest: List<&2, J.Json>) -> List<&2, J.Json>:
+  match same:
+    case True{}: rest
+    case False{}: h <> rest
+
+def Bodies.without(xs: List<&2, J.Json>, +id: String) -> List<&2, J.Json>:
+  match xs:
+    case Nil{}: Nil{}
+    case +h <> rest: Bodies.without.one(String.eq(J.Json.get_str(h, "id", ""), id), h, Bodies.without(rest, id))
+
+def Bodies.add.one(body: Bool, +part: J.Json, acc: List<&2, J.Json>) -> List<&2, J.Json>:
+  match body:
+    case False{}: acc
+    case True{}:
+      J.Json.obj([J.KV{"id", J.Str{J.Json.get_str(part, "id", "")}}, J.KV{"thread", J.Str{J.Json.get_str(part, "thread", "")}},
+        J.KV{"version", J.Str{J.Json.get_str(part, "version", "")}}]) <> Bodies.without(acc, J.Json.get_str(part, "id", ""))
+
+def Bodies.add(parts: List<&2, J.Json>, acc: List<&2, J.Json>) -> List<&2, J.Json>:
+  match parts:
+    case Nil{}: List.take(&2, J.Json, acc, 128n)
+    case +part <> rest: Bodies.add(rest, Bodies.add.one(Nat.is_eq(J.Json.get_nat(part, "bodyPage", 0n), 1n), part, acc))
+
+def Bodies.record.on(on: Bool, a: Actor, result: J.Json) -> Actor:
+  match on a:
+    case False{} _: a
+    case True{} Actor{u, v, target, pending, reads, dirty, +ms}:
+      Actor{u, v, target, pending, reads, dirty, BodyIssued{Bodies.add(J.Json.elems(J.Json.get_obj(J.Json.get_obj(result, "window"), "partial")), Bodies.items(ms))} <> Bodies.drop(ms)}
+
+def Bodies.record(xs: List<&2, Actor>, +result: J.Json) -> List<&2, Actor>:
+  match xs:
+    case Nil{}: Nil{}
+    case a <> rest: Bodies.record.on(J.Json.get_bool(J.Json.get_obj(result, "window"), "bodyPages", False{}), a, result) <> rest
+
+def Bodies.find(xs: List<&2, J.Json>, +p: J.Json) -> Bool:
+  match xs:
+    case Nil{}: False{}
+    case +h <> rest:
+      Bool.or(Bool.and(String.eq(J.Json.get_str(h, "id", ""), J.Json.get_str(p, "entryId", "")), Bool.and(
+        String.eq(J.Json.get_str(h, "version", ""), J.Json.get_str(p, "bodyVersion", "")),
+        String.eq(J.Json.get_str(h, "thread", ""), J.Json.get_str(p, "bodyThread", "")))), Bodies.find(rest, p))
+
+def Bodies.allowed(xs: List<&2, Actor>, p: J.Json) -> Bool:
+  match xs:
+    case Nil{}: False{}
+    case Actor{_, _, _, _, _, _, ms} <> _: Bodies.find(Bodies.items(ms), p)
+
 def Sidebar.keep(+ms: List<&2, Memo>) -> List<&2, Memo>:
-  List.append(&2, Memo, Sidebar.base(ms), List.append(&2, Memo, SidebarImage.keep(ms), SidebarSent.keep(ms)))
+  List.append(&2, Memo, Bodies.keep(ms), List.append(&2, Memo, Sidebar.base(ms), List.append(&2, Memo, SidebarImage.keep(ms), SidebarSent.keep(ms))))
 
 def Signals.keep(ms: List<&2, Memo>) -> List<&2, Memo>:
   match ms:
@@ -743,10 +811,33 @@ def Acted.reduce(a: Acted) -> Acted:
     case Acted{Actor{u, v, target, pending, reads, dirty, memo}, V.ActResult{ui, cmds}}:
       Acted{Actor{NS.Ns.reduce(u), v, target, pending, reads, dirty, memo}, V.ActResult{NS.Ns.reduce(ui), cmds}}
 
+# Web fitting changes only private presentation budgets. The one accepted
+# post-action Ui and its command list are reused by every projection trial.
+def Acted.web_ui(+u: U.Ui) -> U.Ui:
+  +old = VP.Page.limit("threads", U.Ui.info(u, "local.view.budget"))
+  U.Ui.info_set(U.Ui.info_set(u, "local.view.budget", Nat.show(Nat.max(1n, Nat.div(old, 2n)))), "local.body.budget", "1")
+
+def Acted.web_reduce(a: Acted) -> Acted:
+  match a:
+    case Acted{Actor{u, v, target, pending, reads, dirty, memo}, V.ActResult{ui, cmds}}:
+      Acted{Actor{Acted.web_ui(u), v, target, pending, reads, dirty, memo}, V.ActResult{Acted.web_ui(ui), cmds}}
+
 def Acted.pressure(native: Bool, a: Acted) -> Acted:
   match native:
     case True{}: Acted.reduce(a)
     case False{}: a
+
+def Actor.loading.key.on(on: Bool, +u: U.Ui) -> String:
+  match on:
+    case False{}: ""
+    case True{}: J.Json.show(J.Json.obj([
+      J.KV{"pages", J.Str{U.Ui.info(u, "local.view.pages")}}, J.KV{"lists", J.Str{U.Ui.info(u, "local.view.budget")}},
+      J.KV{"bodies", J.Str{U.Ui.info(u, "local.body.budget")}}]))
+
+def Actor.loading.key(xs: List<&2, Actor>) -> String:
+  match xs:
+    case Nil{}: ""
+    case +a <> _: Actor.loading.key.on(String.eq(U.Ui.info(Actor.ui(a), "local.view.lazy"), "1"), Actor.ui(a))
 
 def Actor.acted(+a: Actor, +web: Bool, +p: J.Json, +epoch: String, +now: Nat) -> Acted:
   +ready = Actor.mail_ready(Actor.origin(a, epoch))
@@ -755,8 +846,8 @@ def Actor.acted(+a: Actor, +web: Bool, +p: J.Json, +epoch: String, +now: Nat) ->
 
 def Actor.render.acted(acted: Acted, +web: Bool, +st: M.State, index: T.Index, +p: J.Json, epoch: String, now: Nat, +rows: List<&2, String>, stream: TL.Stream, revision: Nat) -> Rendered:
   match acted:
-    case Acted{updated, +action}:
-      Actor.native.reconcile(Actor.native.page_result(web, p, Actor.render.result(TerminalInput.allowed(web, p, action), updated, action, web, st, index, p, epoch, now, rows, stream, revision)))
+    case Acted{+updated, +action}:
+      Actor.native.reconcile(Actor.native.page_result(web, p, Actor.render.result(TerminalInput.allowed(web, p, action), updated, action, web, st, index, V.Render.request(p, Actor.ui(updated)), epoch, now, rows, stream, revision)))
 
 def Actor.render.revision(+a: Actor, +web: Bool, +st: M.State, +index: T.Index, +p: J.Json, +epoch: String, +now: Nat, +rows: List<&2, String>, +stream: TL.Stream, revision: Nat) -> Rendered:
   +ready = Actor.mail_ready(Actor.origin(a, epoch))
@@ -778,7 +869,7 @@ def Actor.receive( +web: Bool, +u: U.Ui, +key: String, +now: Nat, +o: J.Json) ->
 
 def Actor.mark_dirty( +a: Actor) -> Actor:
   match a:
-    case Actor{u, view, target, pending, reads, _, _}: Actor{u, view, target, pending, reads, True{}, Nil{}}
+    case Actor{u, view, target, pending, reads, _, ms}: Actor{u, view, target, pending, reads, True{}, Bodies.keep(ms)}
 
 def Actor.now( +u: U.Ui) -> Nat:
   match u:
@@ -841,8 +932,8 @@ def Actor.reply(+a: Actor, +web: Bool, +key: String, +o: J.Json) -> Actor:
 # not settle a request, enqueue commands or become client-supplied state.
 def Actor.info(a: Actor, o: J.Json) -> Actor:
   match a:
-    case Actor{u, view, target, pending, reads, _, memo}:
-      Actor{U.Ui.info_merge(u, J.Json.get_obj(o, "info")), view, target, pending, reads, True{}, SidebarSent.keep(memo)}
+    case Actor{u, view, target, pending, reads, _, +memo}:
+      Actor{U.Ui.info_merge(u, J.Json.get_obj(o, "info")), view, target, pending, reads, True{}, List.append(&2, Memo, Bodies.keep(memo), SidebarSent.keep(memo))}
 
 # A thin socket receives rendered views, not raw info notifications or a
 # schematic's sheets. The server folds those privately and sends its
@@ -855,8 +946,8 @@ def Message.on_wire(+o: J.Json) -> Bool:
 # rendered viewer lists and navigates them (client.bend's Sch).
 def Actor.sheets(a: Actor, +o: J.Json) -> Actor:
   match a:
-    case Actor{u, view, target, pending, reads, _, memo}:
-      Actor{U.Sch.got(u, o), view, target, pending, reads, True{}, SidebarSent.keep(memo)}
+    case Actor{u, view, target, pending, reads, _, +memo}:
+      Actor{U.Sch.got(u, o), view, target, pending, reads, True{}, List.append(&2, Memo, Bodies.keep(memo), SidebarSent.keep(memo))}
 
 def Actor.message.kind(kind: String, a: Actor, web: Bool, key: String, o: J.Json) -> Actor:
   match kind:
@@ -940,6 +1031,7 @@ def Memo.reply(ms: List<&2, Memo>, +update: Bool, +key: String, +clock: Nat, +we
     case SideIndex{_} <> rest: Memo.reply(rest, update, key, clock, web, stream, thread, epoch, target, lc)
     case SignalText{_} <> rest: Memo.reply(rest, update, key, clock, web, stream, thread, epoch, target, lc)
     case SidebarImage{_, _} <> rest: Memo.reply(rest, update, key, clock, web, stream, thread, epoch, target, lc)
+    case BodyIssued{_} <> rest: Memo.reply(rest, update, key, clock, web, stream, thread, epoch, target, lc)
     case SidebarSent{_, _, _} <> rest: Memo.reply(rest, update, key, clock, web, stream, thread, epoch, target, lc)
     case Still{_} <> rest: Memo.reply(rest, update, key, clock, web, stream, thread, epoch, target, lc)
     case Memo{+k, +at, +partial, +res} <> _:

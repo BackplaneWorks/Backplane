@@ -44,6 +44,12 @@ def Q.sql.seq_at() -> String:
 def Q.cols.prefix() -> String:
   "seq, ord, id, thread, src, kind, role, akind, CASE WHEN kind = 'msg' THEN text ELSE substr(text, 1, 513) END AS text, at"
 
+# Negotiated timeline bodies: slice before crossing the SQLite/JS boundary.
+# 4097 scalars bound work and provide lookahead for an 8-block UTF-8 prefix.
+# Ordinary/native/store APIs keep their unchanged whole-message semantics.
+def Q.cols.body() -> String:
+  "seq, ord, id, thread, src, kind, role, akind, CASE WHEN kind = 'msg' THEN substr(text, 1, 4097) ELSE substr(text, 1, 513) END AS text, at"
+
 def Q.cols.full() -> String:
   "seq, ord, id, thread, src, kind, role, akind, text, at"
 
@@ -69,6 +75,11 @@ def Q.sql.chat.keep() -> String:
 def Q.sql.page.chat() -> String:
   "SELECT * FROM (SELECT * FROM (SELECT " ++ Q.cols.prefix() ++ " FROM entry WHERE thread = ?1 AND seq < ?2" ++ Q.sql.chat.keep() ++ " ORDER BY seq DESC LIMIT ?3)" ++
   " UNION ALL SELECT * FROM (SELECT " ++ Q.cols.prefix() ++ " FROM entry WHERE src = ?1 AND src <> '' AND seq < ?2" ++ Q.sql.chat.keep() ++ " ORDER BY seq DESC LIMIT ?3))" ++
+  " ORDER BY seq DESC LIMIT ?3"
+
+def Q.sql.page.body(+keep: String) -> String:
+  "SELECT * FROM (SELECT * FROM (SELECT " ++ Q.cols.body() ++ " FROM entry WHERE thread = ?1 AND seq < ?2" ++ keep ++ " ORDER BY seq DESC LIMIT ?3)" ++
+  " UNION ALL SELECT * FROM (SELECT " ++ Q.cols.body() ++ " FROM entry WHERE src = ?1 AND src <> '' AND seq < ?2" ++ keep ++ " ORDER BY seq DESC LIMIT ?3))" ++
   " ORDER BY seq DESC LIMIT ?3"
 
 # how many rows of a thread are older than seq ?2

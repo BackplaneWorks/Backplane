@@ -22,6 +22,8 @@ import ../web/view.bend as VW
 import ../mobile/session.bend as MS
 import ../mobile/hubs.bend as H
 import ../mobile/folded-actions.bend as FA
+import ./thin-body.bend as BW
+import ../core/view-page.bend as VP
 import ../core/hits.bend as HT
 
 # Pure server projection. The authoritative state is used for normal action
@@ -134,10 +136,13 @@ def State.window.add(+es: List<&2, M.Entry>, +st: M.State) -> M.State:
 # A launched thread's report stored cut short (before reports were kept
 # whole) reads whole: hub.bend's Lr.whole checks the row is exactly the old
 # cut form of the reply its id links to; any other row is read as stored.
+def Message.whole.changed(same: Bool, row: T.Row, +text: String) -> T.Row:
+  match same row:
+    case True{} _: row
+    case False{} T.Row{n, e, terms, _}: T.Row{n, T.Entry.with_text(e, text), terms, T.Blocks.of(text)}
+
 def Message.whole.k(+row: T.Row, +text: String) -> T.Row:
-  match row:
-    case T.Row{+n, +e, +terms, +blocks}:
-      Bool.pick(T.Row, String.eq(text, T.Entry.text(e)), T.Row{n, e, terms, blocks}, T.Row{n, T.Entry.with_text(e, text), terms, T.Blocks.of(text)})
+  Message.whole.changed(String.eq(text, T.Entry.text(T.Row.entry(row))), row, text)
 
 def Message.whole.e(+st: M.State, +row: T.Row, +e: M.Entry) -> T.Row:
   match e:
@@ -154,12 +159,32 @@ def Message.whole.source(far: Bool, +st: M.State, +row: T.Row) -> T.Row:
 def Message.whole(+st: M.State, +row: T.Row) -> T.Row:
   Message.whole.source(FR.Fr.is(M.Idx.thread(T.Row.entry(row))), st, row)
 
-# the window's entries: each row as shown (T.Row.preview), a report stored
-# cut short whole again (Message.whole), so no message reads cut
-def State.window.rows(ids: List<&2, String>, +st: M.State, +index: T.Index, acc: List<&2, M.Entry>) -> List<&2, M.Entry>:
+# Repair only the existing exact legacy report form before deriving partial
+# metadata; the repaired text stays out of the serialized picture.
+def State.body.rows(ids: List<&2, String>, +st: M.State, +index: T.Index, acc: List<&2, T.Row>) -> List<&2, T.Row>:
   match ids:
     case Nil{}: acc
-    case id <> tail: State.window.rows(tail, st, index, T.Row.preview(Message.whole(st, T.Index.row.k(Map.get(T.Row, T.Row.blank(), T.Index.rows(index), id)))) <> acc)
+    case id <> rest: State.body.rows(rest, st, index, Message.whole(st, T.Index.row(index, Maybe.default(&2, Nat, P.Session.nat(id, P.Session.nat.max()), 0n))) <> acc)
+
+def State.body.index(on: Bool, +st: M.State, +index: T.Index, +thread: String, rows: List<&2, String>) -> T.Index:
+  match on:
+    case False{}: index
+    case True{}: T.Index.window.rows(State.body.rows(rows, st, index, Nil{}), thread, index)
+
+# Legacy/non-negotiated callers retain their whole-message projection.
+# Body windows retain the immutable block index while clipping display text.
+def State.window.row(bounded: Bool, +st: M.State, +row: T.Row) -> M.Entry:
+  match bounded:
+    case False{}: T.Row.preview(Message.whole(st, row))
+    case True{}: T.Row.preview(row)
+
+def State.window.rows.body(+bounded: Bool, ids: List<&2, String>, +st: M.State, +index: T.Index, acc: List<&2, M.Entry>) -> List<&2, M.Entry>:
+  match ids:
+    case Nil{}: acc
+    case id <> tail: State.window.rows.body(bounded, tail, st, index, State.window.row(bounded, st, T.Index.row(index, Maybe.default(&2, Nat, P.Session.nat(id, P.Session.nat.max()), 0n))) <> acc)
+
+def State.window.rows(ids: List<&2, String>, st: M.State, index: T.Index, acc: List<&2, M.Entry>) -> List<&2, M.Entry>:
+  State.window.rows.body(False{}, ids, st, index, acc)
 
 # Auxiliary steps belong only to this selected conversation. Keep their
 # existing bounded window in original order, without importing another body.
@@ -170,6 +195,10 @@ def State.window(+st: M.State, +index: T.Index, +target: J.Json, +rows: List<&2,
   # Metadata feeds the sidebar; selected conversation history and its own
   # agent steps feed the timeline and inspector independently.
   State.window.add(State.window.rows(rows, st, index, Nil{}),
+    State.window.add(State.window.subs(st, target), State.window.empty(st, Threads.get(st))))
+
+def State.window.body(bounded: Bool, +st: M.State, +index: T.Index, +target: J.Json, +rows: List<&2, String>) -> M.State:
+  State.window.add(State.window.rows.body(bounded, rows, st, index, Nil{}),
     State.window.add(State.window.subs(st, target), State.window.empty(st, Threads.get(st))))
 
 # A route restores only transient selection. The normal bot tab policy
@@ -218,8 +247,8 @@ def Session.native_local(+u: U.Ui, +p: J.Json) -> U.Ui:
 def Session.renderer( +web: Bool, +u: U.Ui, +p: J.Json) -> U.Ui:
   match web:
     case True{}:
-      A.stamp(U.Ui.info_set(U.Ui.info_set(U.Ui.info_set(u, "local.terminal.output", Bool.pick(String, String.eq(J.Json.get_str(p, "terminalOutput", ""), "pane-v1"), "pane-v1", "")), "local.workspace.layout", Bool.pick(String, String.eq(J.Json.get_str(p, "workspaceLayout", ""), "rail-v1"), "rail-v1", "legacy")),
-        "local.workspace.chrome", Bool.pick(String, String.eq(J.Json.get_str(p, "workspaceChrome", ""), "top-v1"), "top-v1", "none")))
+      A.stamp(U.Ui.info_set(U.Ui.info_set(U.Ui.info_set(U.Ui.info_set(U.Ui.info_set(u, "local.terminal.output", Bool.pick(String, String.eq(J.Json.get_str(p, "terminalOutput", ""), "pane-v1"), "pane-v1", "")), "local.workspace.layout", Bool.pick(String, String.eq(J.Json.get_str(p, "workspaceLayout", ""), "rail-v1"), "rail-v1", "legacy")),
+        "local.workspace.chrome", Bool.pick(String, String.eq(J.Json.get_str(p, "workspaceChrome", ""), "top-v1"), "top-v1", "none")), "local.body.pages", Bool.pick(String, Nat.is_eq(J.Json.get_nat(p, "bodyPages", 0n), 1n), "1", "")), "local.view.lazy", Bool.pick(String, Nat.is_eq(J.Json.get_nat(p, "bodyPages", 0n), 1n), "1", "")))
     case False{}: Session.native_local(u, p)
 
 def Session.input(+st: M.State, +info: J.Json, +live: J.Json, +now: Nat, +p: J.Json) -> U.Ui:
@@ -255,13 +284,21 @@ def Partial.include(+part: J.Json, +acc: List<&2, J.Json>) -> List<&2, J.Json>:
     case J.Null{}: acc
     case +p: p <> acc
 
-def Partial.rows(+ids: List<&2, String>, +index: T.Index, +epoch: String, +target: J.Json, +acc: List<&2, J.Json>) -> List<&2, J.Json>:
+def Partial.row.body(large: Bool, +r: T.Row, epoch: String, target: J.Json, id: String) -> J.Json:
+  match large:
+    case True{}: BW.Body.part(r, epoch, target)
+    case False{}: Partial.one(T.Row.partial(r), r, W.Cursor.write(epoch, target, "message:" ++ id, 1n))
+
+def Partial.rows.body(+enabled: Bool, +p: J.Json, +ids: List<&2, String>, +index: T.Index, +epoch: String, +target: J.Json, +acc: List<&2, J.Json>) -> List<&2, J.Json>:
   match ids:
     case Nil{}: List.reverse(&2, J.Json, acc)
     case +id <> +tail:
       +r = T.Index.row.k(Map.get(T.Row, T.Row.blank(), T.Index.rows(index), id))
-      +part = Partial.one(T.Row.partial(r), r, W.Cursor.write(epoch, target, "message:" ++ id, 1n))
-      Partial.rows(tail, index, epoch, target, Partial.include(part, acc))
+      +part = Partial.row.body(Bool.and(enabled, BW.Body.large(r, p)), r, epoch, target, id)
+      Partial.rows.body(enabled, p, tail, index, epoch, target, Partial.include(part, acc))
+
+def Partial.rows(ids: List<&2, String>, index: T.Index, epoch: String, target: J.Json, acc: List<&2, J.Json>) -> List<&2, J.Json>:
+  Partial.rows.body(False{}, J.Null{}, ids, index, epoch, target, acc)
 
 def Page.last(+ids: List<&2, String>, +acc: String) -> String:
   match ids:
@@ -300,7 +337,7 @@ def Page.mid(+ids: List<&2, String>, +last: String) -> String:
 def Page.window(+index: T.Index, +th: String, +p: J.Json, +epoch: String, +ids: List<&2, String>) -> J.Json:
   +last = Page.last(ids, "")
   +older = Page.older(Bool.not(List.is_empty(&2, String, ids)), index, th, Page.number(last))
-  J.Json.obj([J.KV{"ids", J.Json.arr(Ids.json(ids))}, J.KV{"anchor", Anchor.safe(J.Json.get_obj(p, "anchor"))}, J.KV{"older", J.Str{Bool.pick(String, List.is_empty(&2, String, older), "", W.Cursor.write(epoch, J.Json.get_obj(p, "target"), "", Page.number(Page.mid(ids, last))))}}, J.KV{"hasMore", J.Flag{Bool.not(List.is_empty(&2, String, older))}}, J.KV{"remaining", J.Json.nat(Bool.pick(Nat, List.is_empty(&2, String, ids), 0n, T.Index.remaining(index, th, Page.number(last))))}, J.KV{"partial", J.Json.arr(Partial.rows(ids, index, epoch, J.Json.get_obj(p, "target"), Nil{}))}])
+  J.Json.obj([J.KV{"ids", J.Json.arr(Ids.json(ids))}, J.KV{"anchor", Anchor.safe(J.Json.get_obj(p, "anchor"))}, J.KV{"older", J.Str{Bool.pick(String, List.is_empty(&2, String, older), "", W.Cursor.write(epoch, J.Json.get_obj(p, "target"), "", Page.number(Page.mid(ids, last))))}}, J.KV{"hasMore", J.Flag{Bool.not(List.is_empty(&2, String, older))}}, J.KV{"remaining", J.Json.nat(Bool.pick(Nat, List.is_empty(&2, String, ids), 0n, T.Index.remaining(index, th, Page.number(last))))}, J.KV{"partial", J.Json.arr(Partial.rows.body(Nat.is_eq(J.Json.get_nat(p, "bodyPages", 0n), 1n), p, ids, index, epoch, J.Json.get_obj(p, "target"), Nil{}))}])
 
 type ActResult is Data:
   ActResult{ui: U.Ui, commands: List<&2, J.Json>}
@@ -325,8 +362,26 @@ def Partial.live( +s: TL.Stream, +thread: String, +epoch: String, +target: J.Jso
 def Window.live(+window: J.Json, +parts: List<&2, J.Json>) -> J.Json:
   Obj.put(window, "partial", J.Json.arr(List.append(&2, J.Json, J.Json.elems(J.Json.get_obj(window, "partial")), parts)))
 
+def Partial.live.include(large: Bool, s: TL.Stream, thread: String, epoch: String, target: J.Json) -> J.Json:
+  match large:
+    case False{}: J.Null{}
+    case True{}: BW.Body.live.part(s, thread, epoch, target)
+
+def Partial.live.body(on: Bool, +s: TL.Stream, +thread: String, +epoch: String, +target: J.Json) -> List<&2, J.Json>:
+  match on:
+    case False{}: Partial.live(s, thread, epoch, target)
+    case True{}:
+      Partial.include(Partial.live.include(Nat.is_gt(T.Blocks.n(TL.Stream.blocks(s)), 8n), s, thread, epoch, target), Nil{})
+
+def Render.window.marker(on: Bool, window: J.Json) -> J.Json:
+  match on:
+    case False{}: window
+    case True{}: Obj.put(window, "bodyPages", J.Flag{True{}})
+
 def Render.window(+s: TL.Stream, +index: T.Index, +thread: String, +p: J.Json, +epoch: String, +rows: List<&2, String>) -> J.Json:
-  Window.live(Page.window(index, thread, p, epoch, rows), Partial.live(s, thread, epoch, J.Json.get_obj(p, "target")))
+  +on = Nat.is_eq(J.Json.get_nat(p, "bodyPages", 0n), 1n)
+  +window = Window.live(Page.window(index, thread, p, epoch, rows), Partial.live.body(on, s, thread, epoch, J.Json.get_obj(p, "target")))
+  Render.window.marker(on, window)
 
 # Away from the end (host.js's hold), the page says what came after the
 # newest entry the reader had then ("@away.<thread>", sent by the page):
@@ -342,17 +397,45 @@ def Render.pill(+st: M.State, +thread: String, +seen: String, +stream: TL.Stream
 
 # The page's own window decides what is drawn, so the view's own pill (over
 # the page's entries) stays off: the pill the hub works out goes in "@pill"
+def State.window.info(u: U.Ui) -> Map<&2, String>:
+  match u:
+    case U.Ui{_, _, _, _, _, _, _, _, _, _, _, _, _, _, info, _, _}: info
+
+# Partial metadata and the clipped display must use the SAME private fitted
+# policy on every later refresh. A request cannot choose that policy.
+def Render.request(+p: J.Json, u: U.Ui) -> J.Json:
+  Obj.put(p, "bodyBudget", J.Json.nat(Bool.pick(Nat, String.eq(U.Ui.info(u, "local.body.budget"), "1"), 1n, 0n)))
+
+def Render.body_options(u: U.Ui) -> J.Json:
+  J.Json.obj([J.KV{"bodyBudget", J.Json.nat(Bool.pick(Nat, String.eq(U.Ui.info(u, "local.body.budget"), "1"), 1n, 0n))}])
+
+def Render.stream.entry(show: Bool, stream: TL.Stream, +thread: String, now: Nat) -> List<&2, M.Entry>:
+  match show:
+    case False{}: Nil{}
+    case True{}: [M.Msg{TL.Stream.id(thread), thread, M.Assistant{}, BW.Body.live.preview(True{}, stream), now}]
+
+def Render.stream.entries(on: Bool, +stream: TL.Stream, +thread: String, +now: Nat) -> List<&2, M.Entry>:
+  match on:
+    case False{}: TL.Stream.entries(Nat.is_gt(TL.Stream.size(stream), 0n), stream, thread, now)
+    case True{}: Render.stream.entry(Nat.is_gt(TL.Stream.size(stream), 0n), stream, thread, now)
+
 def Render.ui(+u: U.Ui, +st: M.State, +index: T.Index, +target: J.Json, +rows: List<&2, String>, +stream: TL.Stream, +now: Nat) -> U.Ui:
   U.Ui.adopt.raw(U.Ui.scratch_set(U.Ui.scratch_set(U.Ui.scratch_set(u, "@more." ++ Target.thread(st, target), "1"), "@away." ++ Target.thread(st, target), ""),
     "@pill", Render.pill(st, Target.thread(st, target), U.Ui.scratch(u, "@away." ++ Target.thread(st, target)), stream)),
-    State.window.add(TL.Stream.entries(Nat.is_gt(TL.Stream.size(stream), 0n), stream, Target.thread(st, target), now), State.window(st, index, target, rows)))
+    State.window.add(Render.stream.entries(String.eq(U.Ui.info(u, "local.body.pages"), "1"), stream, Target.thread(st, target), now), State.window.body(String.eq(U.Ui.info(u, "local.body.pages"), "1"), VP.Page.state(String.eq(U.Ui.info(u, "local.view.lazy"), "1"), st, State.window.info(u)), BW.Body.index(String.eq(U.Ui.info(u, "local.body.pages"), "1"), index, Target.thread(st, target), rows, Render.body_options(u)), target, rows)))
 
-def Partial.buttons( +parts: List<&2, J.Json>, +u: U.Ui) -> List<&2, D.Node>:
+def Partial.button(automatic: Bool, +part: J.Json, +u: U.Ui, rest: List<&2, D.Node>) -> List<&2, D.Node>:
+  match automatic:
+    case True{}: rest
+    case False{}:
+      D.Dom.button("thin-message-more", "thin-message-more", J.Json.show(J.Json.obj([J.KV{"entryId", J.Str{J.Json.get_str(part, "id", "")}}, J.KV{"cursor", J.Str{""}}])),
+        MSG.T.common.more(U.Lang.loc(u)), MSG.T.common.more(U.Lang.loc(u))) <> rest
+
+def Partial.buttons(+parts: List<&2, J.Json>, +u: U.Ui) -> List<&2, D.Node>:
   match parts:
     case Nil{}: Nil{}
     case +part <> tail:
-      D.Dom.button("thin-message-more", "thin-message-more", J.Json.show(J.Json.obj([J.KV{"entryId", J.Str{J.Json.get_str(part, "id", "")}}, J.KV{"cursor", J.Str{""}}])),
-        MSG.T.common.more(U.Lang.loc(u)), MSG.T.common.more(U.Lang.loc(u))) <> Partial.buttons(tail, u)
+      Partial.button(Bool.and(Nat.is_eq(J.Json.get_nat(part, "bodyPage", 0n), 1n), J.Json.get_bool(part, "automatic", False{})), part, u, Partial.buttons(tail, u))
 
 # what follows the timeline's rows: a partial entry's buttons, then the
 # pill (Render.pill), last so it sticks to the timeline's foot

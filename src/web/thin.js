@@ -173,6 +173,7 @@ export class ThinViews {
     const p = { ...extra, version: 1, hub, generation: l.greeting.generation, epoch: l.greeting.epoch,
       requestRevision: l.revision, target: snapshot(l.target), viewId: l.viewId };
     if (l.greeting.renderer === 'web') { p.accountProfiles = 1; p.accountBinding = l.accountBinding || ''; }
+    if (l.greeting.renderer === 'web' && this.api.bodyPages === true) p.bodyPages = 1;
     const regionEnabled = this.api.sidebarRegions === true && l.greeting.renderer === 'web'
       && ['view.open','view.page','view.update','view.action'].includes(method);
     if (regionEnabled) p.sidebarRegion = sidebarOffer(l.sidebar);

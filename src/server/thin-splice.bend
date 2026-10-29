@@ -7,6 +7,7 @@ import ../web/dom.bend as D
 import ../mobile/screen.bend as SC
 import ../mobile/thin.bend as MT
 import ./thin-view.bend as V
+import ./thin-body.bend as BW
 
 # A thin view's reply when only its thread's live row changed (fast hub R1).
 # Streamed deltas come 20 a second per busy thread; re-rendering the whole
@@ -172,10 +173,11 @@ def Splice.notlive(xs: List<&2, J.Json>, +id: String) -> List<&2, J.Json>:
       List.append(&2, J.Json, Bool.pick(List<&2, J.Json>, String.eq(J.Json.get_str(x, "id", ""), id), Nil{}, [x]), Splice.notlive(t, id))
 
 def Splice.window(+old: J.Json, +stream: TL.Stream, +thread: String, +epoch: String, +target: J.Json) -> J.Json:
-  V.Window.live(Jx.set(old, "partial", J.Json.arr(Splice.notlive(J.Json.elems(J.Json.get_obj(old, "partial")), TL.Stream.id(thread)))), V.Partial.live(stream, thread, epoch, target))
+  Jx.set(old, "partial", J.Json.arr(List.append(&2, J.Json, Splice.notlive(J.Json.elems(J.Json.get_obj(old, "partial")), TL.Stream.id(thread)),
+    V.Partial.live.body(J.Json.get_bool(old, "bodyPages", False{}), stream, thread, epoch, target))))
 
 # the reply res (a full render's, whose stream had the same chunk marker)
 # with stream's live row and its window: None when its live row is not
 # found exactly once where the renderer puts it
 def Splice.reply(+web: Bool, +res: J.Json, +stream: TL.Stream, +thread: String, +epoch: String, +target: J.Json, +lc: I.Loc) -> Maybe<&2, J.Json>:
-  Splice.k(Splice.ok.k(web, res, TL.Stream.id(thread)), web, res, Splice.window(J.Json.get_obj(res, "window"), stream, thread, epoch, target), TL.Stream.id(thread), TL.Stream.preview(stream), lc)
+  Splice.k(Splice.ok.k(web, res, TL.Stream.id(thread)), web, res, Splice.window(J.Json.get_obj(res, "window"), stream, thread, epoch, target), TL.Stream.id(thread), BW.Body.live.preview(Bool.and(web, J.Json.get_bool(J.Json.get_obj(res, "window"), "bodyPages", False{})), stream), lc)

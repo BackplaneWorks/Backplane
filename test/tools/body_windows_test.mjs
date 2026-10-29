@@ -1,0 +1,54 @@
+import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
+import {BodyWindows} from '../../src/web/body-windows.js';
+import {validateBodyPage} from '../../src/web/thin-results.js';
+const list = xs => xs.reduceRight((tail,head)=>({$: 'Con',head,tail}),{$:'Nil'});
+const elems = xs => {const out=[];for(;xs?.$==='Con';xs=xs.tail)out.push(xs.head);return out};
+const node = (tag,key,attrs={},kids=[])=>({$:'El',tag,key,attrs:list(Object.entries(attrs).map(([name,value])=>({$:'At',name,value}))),kids:list(kids)});
+const attrs = n => Object.fromEntries(elems(n.attrs).map(a=>[a.name,a.value]));
+const text = value => ({$:'Txt',text:value});
+const read = n => n?.$==='Txt'? n.text:elems(n?.kids).map(read).join('');
+const part = (automatic=true)=>({id:'m',thread:'a',version:'7',cursor:'0',bodyPage:1,automatic});
+const detail = (partial=[part()],generation='1',viewId='v')=>({epoch:'e',generation,viewId,target:{kind:'thread',id:'a'},window:{partial}});
+const root = (activity=false)=>node('div','timeline',{id:'timeline'},[activity?node('div','m',{class:'act','data-id':'m'},[text('tool summary')]):node('bp-memo','m',{fn:'msg',who:'a'},[text('real prefix')])]);
+function timeline(b,activity=false,direction='next',visible=true,inputRoot=root(activity)) {
+ const projected=b.project(inputRoot), all=[];
+ const walk=n=>{if(n?.$!=='El')return;const a=attrs(n);if(a['data-body-edge']||a['data-body-start']!==undefined)all.push(a);for(const k of elems(n.kids))walk(k)};walk(projected);
+ return {scrollTop:100,scrollHeight:1600,clientHeight:600,getBoundingClientRect:()=>({top:0,bottom:600}),querySelectorAll:s=>all.filter(a=>s==='[data-body-start]'?a['data-body-start']!==undefined:a['data-body-edge']).map(a=>({dataset:{bodyId:a['data-body-id'],bodyStart:String(a['data-body-start']),bodyEdge:a['data-body-edge']},getBoundingClientRect:()=>({top:visible&&(!a['data-body-edge']||a['data-body-edge']===direction)?100:5000,bottom:visible&&(!a['data-body-edge']||a['data-body-edge']===direction)?140:5040,height:40})}))};
+}
+let checks=0;const check=(name,f)=>{f();checks++;console.log('ok '+name)};
+const setup=(automatic=true)=>{const requests=[];const b=new BodyWindows({request:(p,cursor,tail)=>{requests.push({entryId:p.id,bodyPage:1,bodyVersion:p.version,bodyThread:p.thread,cursor,generation:b.generation,viewId:b.viewId,tail});return true},changed:()=>{}});b.bind('h',detail([part(automatic)]),'owner',root(!automatic));return {b,requests}};
+check('collapsed tool body has no node construction or automatic request',()=>{const {b,requests}=setup(false);assert.equal(read(b.project(root(true))),'tool summary');b.observe(timeline(b,true),true);assert.equal(requests.length,0)});
+check('offscreen large message does not request its body',()=>{const {b,requests}=setup();b.observe(timeline(b,false,'next',false),true);assert.equal(requests.length,0);assert(read(b.project(root())).includes('real prefix'))});
+check('explicit tool expansion requests actual scoped body only once',()=>{const {b,requests}=setup(false);assert(b.open('m'));b.observe(timeline(b,true),true);b.observe(timeline(b,true),true);assert.equal(requests.length,1);assert.equal(requests[0].bodyThread,'a')});
+check('complete traversal of1MiB source retains bounded displayed pages/envelopes',()=>{const {b,requests}=setup();const want=createHash('sha256'),got=createHash('sha256');for(let i=0;i<128;i++){const source=`chunk${String(i).padStart(3,'0')}:`+'x'.repeat(8183);want.update(source);b.observe(timeline(b),true);const input=requests.at(-1),m={id:'m',thread:'a',version:'7',bodyPage:1,start:i*8192,end:(i+1)*8192,total:128*8192,text:source,hasMore:i<127,complete:i===127,cursor:i<127?String((i+1)*8192):'',previous:i?String((i-1)*8192):''};assert(validateBodyPage(m,input));assert(b.accept(m,input));got.update(m.text);assert(b.retainedBytes()<=1024*1024);const projected=JSON.stringify(b.project(root()));assert(projected.length<130000);if(i>6)assert(!read(b.project(root())).includes('chunk000:'));}assert.equal(got.digest('hex'),want.digest('hex'));assert.equal(requests.length,128)});
+check('A to B to A rejects old body publication after generation/view change',()=>{const {b,requests}=setup();b.observe(timeline(b),true);const old=requests.at(-1);b.disconnect();b.bind('h',detail([part()],'2','v2'),'owner',root());const m={id:'m',thread:'a',version:'7',bodyPage:1,start:0,end:1,total:1,text:'stale owner content',hasMore:false,complete:true,cursor:'',previous:''};assert.equal(b.accept(m,old),false);assert(!read(b.project(root())).includes('stale owner content'))});
+check('new account never restores another account body pages',()=>{const {b,requests}=setup();b.observe(timeline(b),true);const input=requests.at(-1);assert(b.accept({id:'m',thread:'a',version:'7',bodyPage:1,start:0,end:1,total:1,text:'private-owner-A',hasMore:false,complete:true,cursor:'',previous:''},input));b.bind('h',detail(),'owner-B',root());assert(!read(b.project(root())).includes('private-owner-A'))});
+check('new short activity invalidates old expanded body cache',()=>{const {b}=setup(false);b.open('m');b.bind('h',detail([]),'owner',root(true));assert.equal(read(b.project(root(true))),'tool summary')});
+check('body packet rejects cross-thread, extra hidden data and oversize text',()=>{const input={bodyPage:1,bodyVersion:'7',bodyThread:'a'},m={id:'m',thread:'a',version:'7',bodyPage:1,start:0,end:1,total:1,text:'x',hasMore:false,complete:true,cursor:'',previous:''};assert(validateBodyPage(m,input));assert(!validateBodyPage({...m,thread:'b'},input));assert(!validateBodyPage({...m,extra:'hidden'},input));assert(!validateBodyPage({...m,text:'x'.repeat(8197)},input))});
+check('append-only live versions retain painted pages and refresh only their bounded tail',()=>{
+ const requests=[],id='@live:a';
+ const cursor=(version,start=0,until=0)=>JSON.stringify({version:1,epoch:'e',target:{kind:'thread',id:'a'},query:`body:${version}:${until}`,before:String(start)});
+ const live=(version,blocks=24,generation='1',cut=false)=>({...part(),id,version:String(version),cursor:cursor(version),streamGeneration:generation,streamBlocks:blocks,streamCut:cut});
+ const rr=node('div','timeline',{id:'timeline'},[node('bp-memo',id,{fn:'msg',who:'a'},[text('tail preview')])]);
+ const b=new BodyWindows({request:(p,c,tail)=>{requests.push({entryId:id,bodyPage:1,bodyVersion:p.version,bodyThread:p.thread,cursor:c,generation:b.generation,viewId:b.viewId,tail});return true},changed:()=>{}});
+ b.bind('h',detail([live(7)]),'owner',rr);
+ b.observe(timeline(b,false,'next',true,rr),true);
+ assert(b.accept({id,thread:'a',version:'7',bodyPage:1,start:8,end:24,total:24,text:'READING TEXT',hasMore:false,complete:true,cursor:'',previous:cursor(7,0,8)},requests.at(-1)));
+ const old=b.reader(id).pages[0];
+ b.bind('h',detail([live(8,25)]),'owner',rr,true);
+ assert.equal(b.reader(id).pages[0],old);assert(read(b.project(rr)).includes('READING TEXT'));
+ b.observe(timeline(b,false,'next',true,rr),true);
+ assert.equal(requests.at(-1).bodyVersion,'8');assert.equal(JSON.parse(requests.at(-1).cursor).before,'8');
+ assert(b.accept({id,thread:'a',version:'8',bodyPage:1,start:8,end:24,total:25,text:'READING TEXT plus append',hasMore:true,complete:false,cursor:cursor(8,24),previous:cursor(8,0,8)},requests.at(-1)));
+ assert(read(b.project(rr)).includes('READING TEXT plus append'));
+ b.bind('h',detail([live(9,26,'2')]),'owner',rr,true);assert.equal(b.reader(id),null,'new stream incarnation cannot inherit old text');
+ b.bind('h',detail([live(10,27)]),'owner',rr);b.reader(id,true);b.bind('h',detail([live(11,28,'1',true)]),'owner',rr,true);assert.equal(b.reader(id),null,'cut source cannot inherit block positions');
+});
+check('message Markdown construction is once per fetched page and never for collapsed tools',()=>{
+ const {b,requests}=setup();let count=0;b.renderBody=n=>{count++;return node('div','made',{},[node('div','',{class:'body'},[node('strong','',{},[text(read(n))])])])};
+ b.observe(timeline(b),true);assert(b.accept({id:'m',thread:'a',version:'7',bodyPage:1,start:0,end:7,total:7,text:'**bold**',hasMore:false,complete:true,cursor:'',previous:''},requests.at(-1)));
+ const page=b.project(root());assert.equal(count,1);b.project(root());assert.equal(count,1);assert(JSON.stringify(page).includes('strong'));
+ const closed=setup(false);closed.b.renderBody=()=>{throw Error('collapsed renderer executed')};closed.b.project(root(true));
+});
+console.log(JSON.stringify({pass:true,checks,scope:'Read-only body source, bounded retention and current owner/version fences; no service or DOM/anchor qualification'}));
