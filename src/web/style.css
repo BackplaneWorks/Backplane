@@ -342,8 +342,8 @@ button.fold span { overflow: hidden; text-overflow: ellipsis; white-space: nowra
 .sub-step:last-child { padding-bottom: 12px; }
 .sub-empty { display: block; padding: 0 16px 12px 32px; color: var(--dim); font-size: calc(12px * var(--text-scale, 100) / 100); }
 @media (max-width: 760px) {
-  .subs-head, .sub-row { min-height: 44px; padding-left: 10px; padding-right: 10px; }
-  .subs-body { max-height: 28dvh; }
+  .subs-head, .sub-row, .todos-head { min-height: 44px; padding-left: 10px; padding-right: 10px; }
+  .subs-body, .todos-body { max-height: 28dvh; }
   .sub-row { gap: 8px; }
   .sub .who { max-width: 22%; }
   .sub-step { gap: 8px; padding-left: 24px; padding-right: 10px; }
@@ -655,13 +655,22 @@ button.chip:hover { border-color: var(--bad); color: var(--bad); }
 .sbox .field { width: 100%; box-sizing: border-box; }
 .sbox-val { font-family: var(--mono); letter-spacing: 0.08em; }
 .sbox-btns { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
-.todos { display: flex; flex-direction: column; gap: 2px; margin: 0 16px 4px; padding: 6px 10px; border: 1px solid var(--line); background: var(--raise); font-size: calc(12px * var(--text-scale, 100) / 100); }
-.todos:empty { display: none; }
-.todos .head { display: flex; align-items: center; gap: 6px; width: 100%; color: var(--soft, inherit); margin-bottom: 2px; background: none; border: 0; padding: 0; text-align: left; cursor: pointer; font-size: inherit; }
-.todos .head svg { margin-left: auto; color: var(--faint); }
+/* the agent's to-do list at the top of the thread, beside the subagents and
+   in their style (view.bend's View.todos): one line until opened, then its
+   steps, which scroll within a third of the page */
+.thread-view > .todos, .thread-content > .todos { flex: none; min-width: 0; border-bottom: 1px solid var(--line); background: var(--panel); }
+.todos-head { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; padding: 8px 16px; color: var(--dim); font-size: calc(12px * var(--text-scale, 100) / 100); background: none; border: 0; text-align: left; cursor: pointer; }
+.todos-head:hover { background: var(--raise); color: var(--text); }
+.todos-head:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.todos-label { color: var(--text); font-weight: 600; }
+.todos-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.todos-head svg { flex: none; margin-left: auto; }
+.todos-body { display: flex; flex-direction: column; gap: 2px; max-height: min(32vh, 300px); overflow-y: auto; overscroll-behavior: contain; padding: 6px 16px 8px; border-top: 1px solid var(--line); font-size: calc(12px * var(--text-scale, 100) / 100); }
+.todos-body:empty, .todos.shut .todos-body { display: none; }
+.thread-content .todos-head { min-height: 32px; padding: 5px 12px; }
+.thread-content > .todos.dock .todos-body { border-top: 0; padding: 6px 12px 8px; }
 .todos .more { align-self: flex-start; background: none; border: 0; padding: 2px 0; color: var(--accent); cursor: pointer; font-size: inherit; }
-/* every step: the card scrolls, never taller than a third of the page */
-.todos.all { max-height: 34vh; overflow-y: auto; } .todos .todo.completed { color: var(--faint); } .todos .todo.pending { color: var(--dim, inherit); }
+.todos .todo { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .todos .todo.completed { color: var(--faint); } .todos .todo.pending { color: var(--dim, inherit); }
 .queue { display: flex; flex-direction: column; gap: 4px; margin: 0 16px; }
 .queue:empty { display: none; }
 .queued { display: flex; gap: 8px; align-items: center; padding: 4px 6px 4px 10px; border: 1px solid var(--line); background: var(--raise); font-size: calc(12px * var(--text-scale, 100) / 100); }
@@ -1511,7 +1520,7 @@ html:lang(ja) :is(.set-text, .set-ctl) { min-width: 0; }
   .viewer-tabs > button { min-height: 44px; }
   .thread-content { flex: 1; min-height: 0; }
   .thread-workbar { min-height: 32px; padding: 4px 10px; }
-  .thread-content .subs-head { min-height: 40px; padding: 5px 10px; }
+  .thread-content .subs-head, .thread-content .todos-head { min-height: 40px; padding: 5px 10px; }
   .composer { padding-bottom: max(8px, env(safe-area-inset-bottom)); }
   .composer-foot { flex-wrap: wrap; }
   .composer-foot .model-chip { max-width: calc(100% - 10px); }
@@ -1641,6 +1650,8 @@ html:lang(ja) :is(.set-text, .set-ctl) { min-width: 0; }
 .topbar .kv.subs-head svg { margin: 0; color: var(--faint); }
 .topbar .kv.subs-head[aria-expanded="true"] svg { transform: rotate(180deg); }
 .topbar .kv.subs-head.busy .v { color: var(--accent); }
+.topbar .kv.todos-head svg { margin: 0; color: var(--faint); }
+.topbar .kv.todos-head[aria-expanded="true"] svg { transform: rotate(180deg); }
 .topbar .kv.state button.tool { padding: 1px 7px 1px 5px; margin-left: 2px; font-size: calc(11px * var(--text-scale, 100) / 100); display: inline-flex; align-items: center; gap: 4px; color: var(--bad); border-color: var(--bad); background: none; }
 .topbar .kv.branch { gap: 5px; color: var(--dim); max-width: 220px; }
 .topbar .kv.branch svg { flex: none; color: var(--faint); }
