@@ -16,7 +16,6 @@ jobs:
       matrix:
         include:
           - {target: darwin-arm64, runner: macos-15}
-          - {target: windows-x64, runner: windows-2025}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 18
     env:

@@ -23,6 +23,7 @@ assert (S/'desktop/node_modules/ws/package.json').is_file(), 'npm ci must run in
 for name,directory in [('SHELL.json','shell-payload'),('ELECTRON.json','payload')]:
  run('node',S/'desktop/restore-modes.cjs',O/'inputs/components'/target/name,O/'inputs/components'/target/directory)
 run(sys.executable,S/'desktop/freeze-target.py',S,O/'inputs/components'/target,service,O/'freeze')
+if target=='darwin-arm64':os.umask(0o002)  # APFS copy preserves declared group-write modes under this owned process only.
 run('node',S/'desktop/produce-release.cjs','stage','--request',O/'freeze/stage.request.json','--output',O/'stage')
 env=dict(os.environ)
 if target=='windows-x64':
