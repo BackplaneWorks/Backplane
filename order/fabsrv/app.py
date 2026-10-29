@@ -247,7 +247,7 @@ def admin_ok(request: Request, k=""):
 async def admin(request: Request, k: str = ""):
     limited("pay", request)
     if not admin_ok(request, k):
-        raise HTTPException(404, "not found")
+        raise HTTPException(403, "forbidden")
     resp = HTMLResponse(pages.admin(store.orders()))
     if k:
         resp.set_cookie("fab_admin", k, httponly=True, secure=config.PUBLIC_URL.startswith("https"), samesite="strict",
@@ -259,7 +259,9 @@ async def admin(request: Request, k: str = ""):
 async def admin_files(qid: str, request: Request):
     """A paid quote's files as one zip, to hand to the fab (unpacked gerber copies left out)."""
     limited("pay", request)
-    if not admin_ok(request) or not QID.match(qid):
+    if not admin_ok(request):
+        raise HTTPException(403, "forbidden")
+    if not QID.match(qid):
         raise HTTPException(404, "not found")
     root = config.DATA / "quotes" / qid / "files"
     if not root.is_dir():
@@ -279,7 +281,7 @@ async def admin_files(qid: str, request: Request):
 async def admin_order(oid: str, request: Request):
     limited("pay", request)
     if not admin_ok(request):
-        raise HTTPException(404, "not found")
+        raise HTTPException(403, "forbidden")
     form = await request.form(max_files=0, max_fields=4, max_part_size=4096)
     status = str(form.get("status") or "")
     if status not in ("paid", "placed", "shipped", "delivered", "refunded", "cancelled"):
