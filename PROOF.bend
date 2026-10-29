@@ -11483,6 +11483,9 @@ def Laws.order_off_says_where():
 def Laws.order_on_says_buy_it():
   {==}
 
+def Laws.order_on_when_asked():
+  {==}
+
 def Laws.order_buy_board_only():
   {==}
 

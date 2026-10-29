@@ -86,7 +86,7 @@
     "src/core/notice.bend": "ee87318c1f12fc6cfb23bb5e24e90709e1f9a2eadfd2832581d21590f596e5e0",
     "src/core/onboard.bend": "55ccccf20f706a0acad492de20e23aedc751c7e9ce61b6f3430bfd65796e9232",
     "src/core/once.bend": "c12f375e09045a035cfc66c87d73197f3348b2998fa0e0bb6c9876fca870577c",
-    "src/core/order.bend": "187ebb7ea65e758e0e042e8e8d537708efc6d0cd571db7ea0aa5aee22b9e3774",
+    "src/core/order.bend": "c5b182904f26738302a090b327fdf5ad02ca555a14daf777b89ae057284aca29",
     "src/core/outbox.bend": "7e90d003d01434d86c041b83d837f8a85d9f39c7ae380d840e07bb141f3dd677",
     "src/core/plane.bend": "ac2a6be2c14c774b93f5b596178031b3fa485db82a60bcad4fa2590fc3c5717c",
     "src/core/presentation.bend": "345abf721cf37ca86de1f1052fa2edab17a57b3f8eb692de74c0352a3dcc3933",
@@ -336,5 +336,5 @@
       "scope": "Owner-scoped private lanes hidden via existing RunSet plus shared run lookup; no changes to draft/image extraction or render/view bodies.24 full-output freshness checks passed; explicit private-context/publication tests passed. No native/device acceptance inherited."
     }
   },
-  "reviewNote": "signal: a thread whose turn is over while work it started is out is 'waiting' (Signal values 6/7) and its last reply says 'Waiting since' (stamp.bend); merged with main's KiStack sync; display words only, no draft reader touched (sidebar_draft_image_test 24 ok)"
+  "reviewNote": "Only order.bend's Order.prompt.on text changed (an agent may work a fab's site when the person asks for it in their message; never payment details). Agent prompt text only, never reached by the sidebar renderer or any draft reader; 24 full-output draft/IME/search/info fallback cases passed on current source."
 }
