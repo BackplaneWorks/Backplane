@@ -1,7 +1,7 @@
 'use strict';
 const {test}=require('node:test'),assert=require('node:assert/strict');
 async function fixture(options={}){
- const {ThinHost}=await import(process.env.THIN_HOST_MODULE||'../../src/web/thin-host.js'),{ThinViews,VIEW_LIMITS}=await import('../../src/web/thin.js');
+ const {ThinHost}=await import(process.env.THIN_HOST_MODULE||'../../src/web/thin-host.js'),{ThinViews,VIEW_LIMITS}=await import(process.env.THIN_VIEWS_MODULE||'../../src/web/thin.js');
  let session={sel:'A',drafts:{A:'Unsent 日本語'},rid:1},counter=0;
  const sent=[],views=[],bodies=[],failures=[];
  const host=new ThinHost({hub:'https://fixture',cid:'c',bodyPages:true,now:()=>0,session:()=>session,target:s=>({kind:'thread',id:s.sel}),
@@ -34,8 +34,27 @@ test('invalid oversized body reply cannot reach the body renderer',async()=>{
  const f=await fixture();f.host.body(f.part,f.part.cursor);const q=f.sent.at(-1),r=f.answer(q);r.result.message.text='x'.repeat(8197);
  f.host.receive(r);assert.equal(f.bodies.length,0);assert.equal(f.failures.length,1);assert.equal(f.host.ready,true);
 });
+test('a negotiated readonly body cannot retire a fresh current-picture response or create a refresh loop',async()=>{
+ const f=await fixture(),before=f.views.length;
+ f.host.update();const update=f.sent.at(-1);assert.equal(update.m,'view.update');
+ assert(f.host.body(f.part,f.part.cursor));const body=f.sent.at(-1),count=f.sent.length;
+ f.host.receive(f.reply(update));
+ assert.equal(f.views.length,before+1,'the real fresh picture must still paint while a readonly body travels');
+ f.host.receive(f.answer(body));
+ assert.equal(f.bodies.length,1);assert.equal(f.host.ready,true);
+ assert.equal(f.sent.length,count,'reading a body cannot manufacture another full-picture refresh');
+ for(let n=0;n<15;n++){assert(f.host.body(f.part,f.part.cursor));const q=f.sent.at(-1);f.host.receive(f.answer(q));}
+ assert.equal(f.sent.filter(q=>q.m==='view.update').length,1,'sixteen body pages cannot manufacture sixteen full-picture updates');
+});
+test('body publication cannot consume a real canonical invalidation',async()=>{
+ const f=await fixture(),before=f.views.length;f.host.body(f.part,f.part.cursor);const body=f.sent.at(-1);
+ f.host.receive({t:'view.changed',version:1,generation:'7',epoch:'e',viewId:'view-A',target:{kind:'thread',id:'A'},viewRevision:'2'});
+ const update=f.sent.at(-1);assert.equal(update.m,'view.update');const count=f.sent.length;
+ f.host.receive(f.answer(body));assert.equal(f.views.length,before);assert.equal(f.bodies.length,1);
+ f.host.receive(f.reply(update,{viewRevision:'2'}));assert.equal(f.views.length,before+1);assert.equal(f.sent.length,count);assert.equal(f.host.ready,true);
+});
 test('actual host presentation binds a body reader that paints its validated source and isolates another account',async()=>{
- const {BodyWindows}=await import('../../src/web/body-windows.js');
+ const {BodyWindows}=await import(process.env.BODY_WINDOWS_MODULE||'../../src/web/body-windows.js');
  const list=xs=>xs.reduceRight((tail,head)=>({$:'Con',head,tail}),{$:'Nil'});
  const root={$:'El',tag:'div',key:'m',attrs:list([{$:'At',name:'class',value:'msg assistant'},{$:'At',name:'data-id',value:'m'}]),kids:list([])};
  const text=n=>n?.$?.endsWith('Txt')?n.text:n?.kids?nodes(n.kids).map(text).join(''):'';
@@ -56,4 +75,17 @@ test('actual host presentation binds a body reader that paints its validated sou
  assert.equal(body.accept(reply.result.message,{...next.p,generation:'stale-generation'}),false);
  assert.equal(body.accept(reply.result.message,{...next.p,viewId:'stale-view'}),false);
  active.host.receive(reply);assert.equal(accepted,true);assert.equal(painted(body.project(root)),'actual source');
+});
+test('an old-account body reply or failure cannot settle a new-account reader in the same view',async()=>{
+ const {BodyWindows}=await import(process.env.BODY_WINDOWS_MODULE||'../../src/web/body-windows.js');let f,accepted;
+ const body=new BodyWindows({request:(p,c)=>f.host.body(p,c),changed(){}});
+ f=await fixture({owner:'account-A',publishPart:true,view:(_n,d)=>body.bind('https://fixture',d,d.accountBinding||''),body:(m,p)=>accepted=body.accept(m,p)});
+ const edge={dataset:{bodyId:'m',bodyEdge:'next'},getBoundingClientRect:()=>({top:200,bottom:220})};
+ const timeline={clientHeight:600,scrollHeight:1200,scrollTop:0,getBoundingClientRect:()=>({top:0,bottom:600}),querySelectorAll:s=>s==='[data-body-edge]'?[edge]:[]};
+ body.observe(timeline,true);const old=f.sent.at(-1);assert.equal(old.p.accountBinding,'account-A');
+ f.host.update();f.host.receive(f.reply(undefined,{accountBinding:'account-B'}));
+ body.observe(timeline,true);const current=f.sent.at(-1);assert.equal(current.p.accountBinding,'account-B');
+ f.host.receive(f.answer(old));assert.equal(accepted,false,'a reply cannot revive across the account boundary');
+ body.failed(old.p,'timeout');const reply=f.answer(current);reply.result.accountBinding='account-B';
+ f.host.receive(reply);assert.equal(accepted,true,'old failure cannot retire the current account request');
 });

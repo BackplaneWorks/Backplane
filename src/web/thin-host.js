@@ -378,7 +378,7 @@ export class ThinHost {
   }
   body(part, cursor, tail = false) {
     if (!this.ready || this.active || this.paging || !part || part.bodyPage !== 1 || typeof cursor !== 'string' || !cursor) return false;
-    return this.flush(this.client.request(this.hub, 'view.message', { entryId: part.id, cursor, bodyPage: 1, bodyVersion: part.version, bodyThread: part.thread, bodyTail: tail }), { bodyRead: true });
+    return this.flush(this.client.request(this.hub, 'view.message', { entryId: part.id, cursor, bodyPage: 1, bodyVersion: part.version, bodyThread: part.thread, bodyTail: tail }), { bodyRead: true, pictureAuthority: false });
   }
   message(entryId, cursor) {
     if (!this.ready) return false;
