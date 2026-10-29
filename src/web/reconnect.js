@@ -103,7 +103,7 @@ export async function probeHub(fetch, { timeoutMs = 2000, now = Date.now } = {})
 }
 
 // The bundle a page runs, and the one index.html names now: a deploy changed
-// the web client when they differ. Only `chunk-<hash>.js` names count.
+// the web client when either script or stylesheet chunks differ.
 export function bundleOf(url) {
   const m = /\/(chunk-[A-Za-z0-9_-]+\.js)(?:[?#].*)?$/.exec(String(url || ""));
   return m ? m[1] : "";
@@ -112,7 +112,23 @@ export function bundleIn(html) {
   const m = /<script[^>]*\bsrc="\.?\/?(chunk-[A-Za-z0-9_-]+\.js)"/.exec(String(html || ""));
   return m ? m[1] : "";
 }
-export function deployed(running, html) {
+export function styleOf(url) {
+  const m = /\/(chunk-[A-Za-z0-9_-]+\.css)(?:[?#].*)?$/.exec(String(url || ""));
+  return m ? m[1] : "";
+}
+export function stylesIn(html) {
+  const styles = [];
+  for (const tag of String(html || "").match(/<link\b[^>]*>/gi) || []) {
+    if (!/\brel=["']stylesheet["']/i.test(tag)) continue;
+    const m = /\bhref=(["'])\.?\/?(chunk-[A-Za-z0-9_-]+\.css)\1/i.exec(tag);
+    if (m) styles.push(m[2]);
+  }
+  return [...new Set(styles)].sort();
+}
+export function deployed(running, html, runningStyles = []) {
   const now = bundleIn(html);
-  return !!running && !!now && now !== running;
+  if (!running || !now) return false;
+  if (now !== running) return true;
+  const styles = stylesIn(html), before = [...new Set(runningStyles)].sort();
+  return !!before.length && !!styles.length && (styles.length !== before.length || styles.some((s, i) => s !== before[i]));
 }

@@ -52,7 +52,7 @@ import { restoreCache } from "./replay.js";
 import { FocusedCache, FocusedView, captureFocused, cacheIdentity, mergeFocused, scopeKey } from "./focused-cache.js";
 import { refreshCacheIdentity } from "./cache-identity.js";
 import { discoverViews } from "./thin-discovery.js";
-import { Backoff, Retry, watchWake, probeHub, bundleOf, deployed, QUIET_MS } from "./reconnect.js";
+import { Backoff, Retry, watchWake, probeHub, bundleOf, styleOf, deployed, QUIET_MS } from "./reconnect.js";
 import { ThinHost, preservePresentationRoute, presentationTarget, refusedFallback } from "./thin-host.js";
 import { TerminalOutputPane } from "./terminal-output.js";
 import { ModelFeedback } from "./model-feedback.js";
@@ -2825,13 +2825,14 @@ window.addEventListener("pagehide", () => { thinSocket?.connectionDiagnostic?.no
 // A deploy: the hub serves a new web client. An open page reloads into it at
 // a quiet moment (drafts live in localStorage), so it never runs stale.
 const RUNNING = bundleOf(import.meta.url);
+const RUNNING_STYLES = [...document.querySelectorAll('link[rel="stylesheet"][href]')].map(link => styleOf(link.href)).filter(Boolean);
 let lastKey = 0, updating = false;
 document.addEventListener("keydown", () => { lastKey = Date.now(); }, true);
 async function checkDeploy() {
   if (!RUNNING || updating) return;
   let html = "";
   try { const r = await fetch("/", { cache: "no-store", credentials: "same-origin" }); if (r.ok) html = await r.text(); } catch { return; }
-  if (!deployed(RUNNING, html)) return;
+  if (!deployed(RUNNING, html, RUNNING_STYLES)) return;
   updating = true;trace("deploy", { running: RUNNING });
   const quiet = () => {
     const busy = document.getElementById("thin-result") || document.querySelector(".shade, .picker, [aria-modal=true]");
