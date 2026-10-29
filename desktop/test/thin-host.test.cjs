@@ -627,6 +627,63 @@ test('history ordering: an action waits for a page on its way, so the page is st
  assert.equal(f.sent.at(-1).p.action,'fab-look','then the action goes');
  f.host.receive(f.reply());f.host.page();f.host.request('stop','');assert.equal(f.sent.at(-1).p.action,'stop','Stop overtakes a page');
 });
+test('history independence: older, newer and newest page while an automatic ordering lookup is pending',async()=>{
+ for(const direction of ['older','newer','newest'])for(const actionFirst of [true,false]){
+  const f=await fixture();f.open();
+  if(direction!=='older'){f.host.page();f.host.receive(f.reply());}
+  const savedDraft=f.getSession().drafts.A;
+  f.host.request('fab-look','');const card=f.sent.at(-1),count=f.sent.length;
+  assert.equal(card.m,'view.action');assert.equal(f.host.active,card.id);
+  assert.equal(direction==='older'?f.host.page():f.host[direction](),true,'paging does not wait for the unrelated lookup');
+  const page=f.sent.at(-1);assert.equal(page.m,'view.page');assert.equal(f.sent.length,count+1);
+  assert.equal(f.host.page(),false,'only one page travels at a time');
+  const before=f.views.length,cardReply=f.reply(card,{shown:{type:'text',text:'OLD CARD PICTURE'},session:{...card.p.session,rid:100,drafts:{A:'old actor draft'}},cmds:[{type:'send',text:JSON.stringify({id:90,m:'fab.look',p:{thread:'A'}})}]});
+  if(actionFirst){f.host.receive(cardReply);assert.equal(f.views.length,before);f.host.receive(f.reply(page));}
+  else{f.host.receive(f.reply(page));f.host.receive(cardReply);}
+  assert.equal(f.views.length,before+1);assert.equal(f.views.at(-1).detail.page.direction,direction);
+  assert.equal(f.views.at(-1).n.text,'VIEW A');assert.equal(f.getSession().drafts.A,savedDraft);
+  assert.equal(f.commands.filter(c=>c.type==='send').length,1);assert.equal(f.host.receive(cardReply),false);
+  assert.equal(f.host.active,null);assert.equal(f.host.ready,true);
+ }
+});
+test('history independence: failed or expired ordering lookup cannot revoke a page or its draft',async()=>{
+ for(const failure of ['reply','timeout']){
+  const f=await fixture();f.open();f.host.request('fab-look','');const card=f.sent.at(-1);
+  if(failure==='timeout')f.tick(4000);
+  assert.equal(f.host.page(),true);const page=f.sent.at(-1);
+  f.host.request('draft','new 日本語 draft');
+  if(failure==='reply')f.host.receive({t:'reply',id:card.id,ok:false,error:{code:'UNAVAILABLE'}});
+  else f.tick(1001);
+  assert.equal(f.host.ready,true);assert.equal(f.host.paging.id,page.id);
+  f.host.receive(f.reply(page));assert.equal(f.host.ready,true);assert.equal(f.getSession().drafts.A,'new 日本語 draft');
+  assert.equal(f.views.at(-1).detail.page.direction,'older');
+ }
+});
+test('history independence: failed page restores its cursor while the unrelated lookup remains pending',async()=>{
+ const f=await fixture();f.open();f.host.request('fab-look','');const card=f.sent.at(-1);
+ assert.equal(f.host.page(),true);const page=f.sent.at(-1);
+ f.host.receive({t:'reply',id:page.id,ok:false,error:{code:'STALE_CURSOR'}});
+ assert.equal(f.host.ready,true);assert.equal(f.host.atNewest(),true);assert.equal(f.host.pageError.direction,'older');
+ assert.equal(f.host.active,card.id);assert.equal(f.host.retryPage(),true);
+ f.host.receive(f.reply());f.host.receive(f.reply(card));assert.equal(f.host.ready,true);assert.equal(f.host.atNewest(),false);
+});
+test('history independence: presentation actions, queued actions, native and nonempty lookups retain their fence',async()=>{
+ for(const [action,value]of [['flag','settings'],['fold','row'],['send',''],['ws-go','files'],['fab-look','nonempty']]){
+  const f=await fixture();f.open();f.host.request(action,value);const count=f.sent.length;
+  assert.equal(f.host.page(),false);assert.equal(f.sent.length,count);
+ }
+ const queued=await fixture();queued.open();queued.host.request('fab-look','');queued.host.request('flag','settings');
+ const count=queued.sent.length;assert.equal(queued.host.page(),false);assert.equal(queued.sent.length,count);
+ const native=await fixture({renderer:'mobile'});native.open();native.host.request('fab-look','');assert.equal(native.host.page(),false);
+});
+test('history independence: queued lookup still waits for the accepted page and canonical refresh keeps action ownership',async()=>{
+ const f=await fixture();f.open();f.host.request('fab-look','');const first=f.sent.at(-1);
+ f.host.request('fab-look','');assert.equal(f.host.page(),true);const page=f.sent.at(-1),count=f.sent.length;
+ f.host.update();assert.equal(f.sent.length,count,'background refresh still waits for the action');
+ f.host.receive(f.reply(first));assert.equal(f.sent.length,count,'queued lookup cannot retire a page in flight');
+ f.host.receive(f.reply(page));assert.equal(f.views.at(-1).detail.page.direction,'older');
+ assert.equal(f.sent.at(-1).m,'view.action');assert.equal(f.sent.at(-1).p.action,'fab-look');
+});
 test('the away mark rides on every view request for the shown thread; a switch lets it go',async()=>{
  const f=await fixture();f.open();assert.equal(f.sent.at(-1).p.away,'');
  f.host.away('A','m7');assert.equal(f.sent.at(-1).m,'view.update');assert.equal(f.sent.at(-1).p.away,'m7');f.host.receive(f.reply());
