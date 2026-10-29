@@ -1,4 +1,5 @@
 import Base
+import ../core/mailprivate.bend as PM
 import ../core/json.bend as J
 import ../core/model.bend as M
 import ../core/bot.bend as BT
@@ -21,7 +22,7 @@ def Context.owner.got(r: Maybe<&2, ML.Run>, +s: M.State, +caller: String) -> Str
     case Some{+r}: Context.owner.live(MD.Disposition.launch(s, caller), s, ML.Run.bot(r))
 
 def Context.owner(+s: M.State, +caller: String) -> String:
-  Context.owner.got(ML.Box.run_of(M.State.mail(s), caller), s, caller)
+  Bool.pick(String, PM.Private.live(s, caller), PM.Private.target(s, caller), Context.owner.got(ML.Box.run_of(M.State.mail(s), caller), s, caller))
 
 def Context.fields(j: J.Json) -> Bool:
   match j:

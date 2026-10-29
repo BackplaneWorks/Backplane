@@ -47,6 +47,8 @@ async function agent() {
           await tool('mail_dispose', { input, mode: 'done', reason: 'attempted mistaken silent classification' }, true);
           await tool('escalate', { to: 'person', input, key: 'actual-source-approval', text: 'A real source approval needs the person. Follow backplane://thread/worker; the approval remains pending.' });
           final = 'Escalated privately; no approval granted.';
+        } else if (current.includes('TRIAGE_ESC_EMPTY')) {
+          await tool('escalate', { to: 'bot', input, key: 'private-empty-case', text: 'COORD_SILENT: already known, no person update needed.' });
         } else if (current.includes('TRIAGE_COMPLETE') || current.includes('TRIAGE_DUPLICATE')) {
           await tool('escalate', { to: 'person', input, key: 'artifact-v1-complete', text: 'Meaningful artifact completion; ask Bub to contextualize it with backplane://thread/worker and backplane://project/p. Hardware remains held.' });
           final = 'Privately queued or already queued, never a raw user message.';
@@ -66,7 +68,17 @@ async function agent() {
           final = 'Notice acknowledged; underlying hardware work remains held.';
         }
       } else if (text.includes('[Private mailroom escalation;')) {
+        const listing = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: ++call, method: 'tools/list', params: {} }) }).then(r => r.text());
+        if (!listing.includes('tell_person') || !listing.includes('memory_save') || !listing.includes('thread_send')) throw Error('private coordinator lost tools');
+        await tool('mail_context', { query: 'hardware' });
+        if (text.includes('COORD_SILENT')) { log({ privateEmpty: true }); final = ''; }
+        else {
         final = 'Bub: I have a result or decision to review. Hardware testing remains held. [Worker](backplane://thread/worker) · [Project](backplane://project/p).';
+        const input = text.match(/\nInput: ([^\s]+)/)?.[1];
+        if (!input) throw Error('private coordinator lost input provenance');
+        await tool('tell_person', { text: final, key: 'coordinator:' + input });
+        final = 'Private final is not a second user message.';
+        }
       } else if (text.includes('TRIAGE_ASK')) {
         await tool('permission_prompt', { tool_name: 'Bash', input: { command: 'printf isolated-approval-placeholder' }, tool_use_id: 'isolated-approval-1' });
         final = 'Approval returned in isolated fixture.';
@@ -76,6 +88,7 @@ async function agent() {
         await tool('thread_send', { threadId: 'foh', text: 'TRIAGE_COMPLETE: same artifact, direct report route.' });
         final = 'TRIAGE_DUPLICATE: same artifact, launched report route.';
       } else if (text.includes('TRIAGE_COMPLETE')) final = 'TRIAGE_COMPLETE: raw worker artifact result; do not dump me into user chat.';
+      else if (text.includes('TRIAGE_ESC_EMPTY')) final = 'TRIAGE_ESC_EMPTY: routine completed coordination, no user output requested.';
       else if (text.includes('TRIAGE_UNKNOWN')) final = 'TRIAGE_UNKNOWN: worker reports unknown outcome.';
       else if (text.includes('TRIAGE_FAIL')) final = 'TRIAGE_FAIL: triage provider will fail.';
       else final = 'TRIAGE_QUIET: routine unchanged hold.';
@@ -143,9 +156,17 @@ else {
     check(await until(() => raceIds.every(id => events().some(e => e.$ === 'SettingSet' && e.key.startsWith('run.disposition.') && e.key.includes(id)))), 'both race notices commit exact dispositions');
     const raceRuns = events().filter(e => e.$ === 'RunSet' && raceIds.includes(e.mail));
     check(raceRuns.length === 2 && raceRuns[0].thread !== raceRuns[1].thread && ownerReplies().length === 0 && !events().some(e => e.$ === 'MessagePosted' && e.thread === raceRuns[0].thread && e.msg === raceIds[1]), 'newer notice uses separate run with no injection or user escalation');
+    const originalStarts = events().filter(e => e.$ === 'TurnChanged' && e.thread === 'foh' && e.state === 'running').length;
+    send('TRIAGE_ESC_EMPTY');
+    check(await until(() => logs().some(e => e.privateEmpty) && events().some(e => e.$ === 'TurnChanged' && e.thread.startsWith('mailcoord-b-') && e.state === 'completed')), 'empty private escalation completes normally');
+    check(ownerReplies().length === 0, 'empty private escalation adds NO user conversation message');
+    check(events().filter(e => e.$ === 'TurnChanged' && e.thread === 'foh' && e.state === 'running').length === originalStarts, 'empty escalation never starts or re-prompts original conversation');
+    const privatePromptCount = logs().filter(e => e.prompt?.includes('COORD_SILENT')).length;
+    check(privatePromptCount === 1, 'empty private reply has ONE provider prompt, no forced visible-output retry');
+    check(logs().some(e => e.tool === 'mail_context' && e.reply.includes('UDP address width')), 'private coordinator retains owner history access');
     send('TRIAGE_COMPLETE');
     check(await until(() => events().some(e => e.$ === 'SettingSet' && e.key.startsWith('triage.event.') && String(e.key).includes('artifact-v1-complete')) && ownerReplies().length === 1), 'triaged completion reaches original Bub conversation');
-    check(ownerReplies()[0]?.text.includes('[Worker](backplane://thread/worker)'), 'Bub authors a fresh contextual linked status');
+    check(ownerReplies()[0]?.text.includes('[Worker](backplane://thread/worker)'), 'only explicit tell_person publishes a fresh contextual linked status');
     send('TRIAGE_DUPLICATE');
     check(await until(() => events().some(e => e.$ === 'SettingSet' && e.key.startsWith('triage.escalated.') && String(e.value).startsWith('duplicate:'))), 'duplicate direct/launch routes share durable exact-event suppression');
     await sleep(300); check(ownerReplies().length === 1, 'same artifact surfaces once');

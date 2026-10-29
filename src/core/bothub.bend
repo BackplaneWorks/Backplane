@@ -1,4 +1,5 @@
 import Base
+import ./mailprivate.bend as PM
 import ./mailtriage.bend as TRI
 import ./i18n.bend as I18N
 import ./mailrun.bend as RUN
@@ -2628,8 +2629,15 @@ def Bots.call.scoped(relay: Bool, +s: M.State, +now: Nat, +dir: J.Json, +thread:
     case True{}: Bots.call.notice(RUN.Run.of(s, thread), s, now, thread, J.Json.get_obj(p, "arguments"))
     case False{}: Bots.call.bot(RUN.Run.bot(s, thread), s, now, dir, J.Json.get_str(p, "name", ""), J.Json.get_obj(p, "arguments"))
 
+# User chat publication from this lane is tell_person only. Do not feed an
+# explicit notification attempt back into triage recursively.
+def Bots.call.private(notify: Bool, +s: M.State, +now: Nat, +dir: J.Json, +thread: String, +p: J.Json) -> MC.Res:
+  match notify:
+    case True{}: MR.fail("Private coordinator: use tell_person(text, key) to publish into the original user conversation. No message was sent and no approval or source input was handled.")
+    case False{}: Bots.call.scoped(Bool.and(TRI.Triage.managed(s, thread), String.eq(J.Json.get_str(p, "name", ""), "notify_person")), s, now, dir, thread, p)
+
 def Bots.call(+s: M.State, +now: Nat, +dir: J.Json, +thread: String, +id: J.Json, +p: J.Json) -> MC.McpOut:
-  MC.Mcp.reply(id, Bots.call.scoped(Bool.and(TRI.Triage.managed(s, thread), String.eq(J.Json.get_str(p, "name", ""), "notify_person")), s, now, dir, thread, p))
+  MC.Mcp.reply(id, Bots.call.private(Bool.and(PM.Private.is(s, thread), String.eq(J.Json.get_str(p, "name", ""), "notify_person")), s, now, dir, thread, p))
 
 # tools/list for a bot's agent: Backplane's tools and the bots' own
 def Bots.list(+id: J.Json, +extra: List<&2, J.Json>) -> String:
@@ -2766,7 +2774,7 @@ def Bots.mcp(+s: M.State, +now: Nat, +thread: String, +models: J.Json, +version:
 def Bots.prompt.uber(yes: Bool) -> String:
   Bool.pick(String, yes, "\n# You are the uberbot\n\nThe person made you their main interface across all their projects, machines and bots: they come to you first. " ++
     "machine_list shows their machines; thread_list, thread_launch and thread_send reach threads on any of them; bot_send reaches the bots here and name@machine; plane_read lists what waits on them and what runs. " ++
-    "Keep track of what runs where and what waits on them, and answer for it. Worker reports are private mailroom input. Only triaged escalations wake you. Write a fresh, contextual status in THIS original conversation with actionable thread/project/bot/room links; never paste raw reports or source messages here. Resolve coordination yourself within existing authority; retain actual asks and approvals at their source. Surface meaningful completions, blockers and decisions once; consult told_check and record the topic with told_mark after telling the person. Routine FYI and unchanged holds stay quiet. Do not create wake subscriptions for launched-thread reports: those already use the single mailroom pipeline.\n", "")
+    "Keep track of what runs where and what waits on them, and answer for it. Worker reports are private mailroom input. Triaged escalations run in a separate private back-office lane, never as turns in this user conversation. Only explicit tell_person publishes a contextual status from that lane, with actionable thread/project/bot/room links. Private commentary and final responses remain private; empty private output is successful. Never paste raw reports or source messages here. Resolve coordination yourself within existing authority; retain actual asks and approvals at their source. Surface meaningful completions, blockers and decisions once; consult told_check and record the topic with told_mark after telling the person. Routine FYI and unchanged holds stay quiet. Do not create wake subscriptions for launched-thread reports: those already use the single mailroom pipeline.\n", "")
 
 def Bots.prompt.k(m: Maybe<&2, BT.Bot>, +s: M.State, +home: String) -> String:
   match m:
@@ -2817,8 +2825,13 @@ def Bots.prompt.scoped(run: Bool, +s: M.State, +thread: String, +home: String) -
     case True{}:
       "\n# Private coordinator mailroom\n\nYou are a private triage agent acting for the owning coordinator, not the person's conversational interface and not a separate owner. Your bot identity, durable memory, room memberships and project access belong to that coordinator. Its original conversation is " ++ RMAIL.Ref.uri(RMAIL.Ref.thread(TRI.Triage.thread(s))) ++ ". Use mail_context for its full stored history and memory_recall/list for its durable memory. Assess reports with that context and the charter. Routine FYI and unchanged holds receive a durable mail_dispose receipt. Meaningful completions, decisions, blockers, real asks/approvals and unknown outcomes use escalate with the exact input ID and a stable exact-event/version key. Even person escalations go privately through the coordinator. It writes its own contextual user update in the original conversation; never paste raw worker output or notify the person yourself. Do not claim authorization, answer approvals, resume holds or mark a private assessment as already told to the person. Coordinate in existing threads/rooms within authority, preserving provenance and source links. End only after every pending input is disposed or escalated; an unsuccessful final response is not a receipt.\n" ++ TRI.Triage.evidence.tools() ++ "\n"
 
+def Bots.prompt.private(private: Bool, +s: M.State, +thread: String, +home: String) -> String:
+  match private:
+    case False{}: Bots.prompt.scoped(TRI.Triage.is(s, thread), s, thread, home)
+    case True{}: Bots.prompt.k(RUN.Run.bot(s, thread), s, home) ++ TRI.Triage.context(s, PM.Private.owner(s, thread)) ++ PM.Private.brief()
+
 def Bots.prompt.for(+s: M.State, +thread: String, +home: String) -> String:
-  Bots.prompt.scoped(TRI.Triage.is(s, thread), s, thread, home)
+  Bots.prompt.private(PM.Private.is(s, thread), s, thread, home)
 
 def Bots.prompt(+s: M.State, +thread: String, +home: String) -> String:
   LP.Prompt.lang.add(Bots.prompt.for(s, thread, home), M.Setting.get(s, "agent.lang", "off"))

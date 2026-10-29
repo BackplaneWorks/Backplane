@@ -1,4 +1,5 @@
 import Base
+import ./mailprivate.bend as PM
 import ./model.bend as M
 import ./mail.bend as ML
 import ./bot.bend as BT
@@ -8,10 +9,15 @@ import ./mailtriage.bend as TRI
 
 # Shared lookup: runs use their owner's memory and prompt, never a FOH
 # session. Ordinary threads keep the pre-mail lookup.
+def Run.bot.private(private: Bool, +s: M.State, +thread: String) -> Maybe<&2, BT.Bot>:
+  match private:
+    case False{}: BT.World.of_thread(M.State.bots(s), thread)
+    case True{}: BT.World.find.id(BT.World.bot(M.State.bots(s), PM.Private.owner(s, thread)))
+
 def Run.bot.got(r: Maybe<&2, ML.Run>, +s: M.State, +thread: String) -> Maybe<&2, BT.Bot>:
   match r:
     case Some{+r}: BT.World.find.id(BT.World.bot(M.State.bots(s), ML.Run.bot(r)))
-    case None{}: BT.World.of_thread(M.State.bots(s), thread)
+    case None{}: Run.bot.private(PM.Private.is(s, thread), s, thread)
 
 def Run.of.on(on: Bool, +s: M.State, +thread: String) -> Maybe<&2, ML.Run>:
   match on:
@@ -30,7 +36,7 @@ def Run.is.got(r: Maybe<&2, ML.Run>) -> Bool:
     case None{}: False{}
 
 def Run.is(+s: M.State, +thread: String) -> Bool:
-  Run.is.got(Run.of(s, thread))
+  Bool.or(PM.Private.is(s, thread), Run.is.got(Run.of(s, thread)))
 
 def Run.settings(s: M.State) -> List<&2, String>:
   match s:

@@ -72,9 +72,10 @@
     "src/core/look.bend": "039d5756adb79dfb55304bdecdfeac0e9fe15a6aeb3b5676a3d1fd0703d6ed8c",
     "src/core/mail.bend": "621fde9e93c646f8a8a0a85b3e25f79dc20b9e71b9277bbf5ae131a628d5c010",
     "src/core/mailcontinuity.bend": "c9dcefe5d1863e11f85c4c522df1695a85b6cffdf89f6ee3cf7a58271ce8805d",
-    "src/core/maildisposition.bend": "1d106d14b7d0b967e18609364daceb24e7f515cfa6657fa771067107a8e0ca96",
-    "src/core/mailrun.bend": "4b5bd5d9010414a5584fca379f93dd482feafeafcdfbdb0faaaa062a7a1b5bd6",
-    "src/core/mailtriage.bend": "93e011d61182cd762ec6cfddce5068aed1f51c1f04584143378540cbbad1eb37",
+    "src/core/maildisposition.bend": "462b9657f23dfb60a18ebb2bfc8da3bde58189dbf01ed1f1ebd9b65d573ffbd0",
+    "src/core/mailprivate.bend": "1db74b1315b36957d1319aa3179e86dd854aec9d2cb3bdc2494ed3306f9dd835",
+    "src/core/mailrun.bend": "709d501d93ab531e8edd156700e1ba9470e8eefa17391de78f327bb240c15886",
+    "src/core/mailtriage.bend": "b033b6f58722ad66612ed6497ddd42fac8365ad1eae20d925531932da4e5a503",
     "src/core/mailview.bend": "e1cac757c5f34457a745f095642f6675befed68d5b87aae30f14b706dff015b1",
     "src/core/mech.bend": "79fb3307d0d6868a777924d4b934ac8a1671937e265942467f6c60cc4db82efb",
     "src/core/menu.bend": "807668923de70eaabb72ddb760f808cbf6d786b70822ba6a1180776758af7eee",
@@ -328,6 +329,11 @@
       "scope": "Only core/accounts request admission changed: global Settings RPCs have no conversation owner, view actions use authoritative selected target and explicit thread RPCs retain the identity generation fence. No reader, key, full-frame, draft filter, fallback, bridge, scanner or closure membership change.",
       "assertions": 56,
       "limits": "Guard-only; no whole-feature/auth/native/runtime acceptance. Earlier source/build receipts retained as historical."
+    },
+    "privateCoordinatorTurns": {
+      "base": "214c0c2f391b60227688424dd280d6c07d922649",
+      "changedClosureFiles": [],
+      "scope": "Owner-scoped private lanes hidden via existing RunSet plus shared run lookup; no changes to draft/image extraction or render/view bodies.24 full-output freshness checks passed; explicit private-context/publication tests passed. No native/device acceptance inherited."
     }
   },
   "reviewNote": "signal: a thread whose turn is over while work it started is out is 'waiting' (Signal values 6/7) and its last reply says 'Waiting since' (stamp.bend); merged with main's KiStack sync; display words only, no draft reader touched (sidebar_draft_image_test 24 ok)"

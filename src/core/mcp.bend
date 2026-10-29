@@ -1,4 +1,5 @@
 import Base
+import ./mailprivate.bend as PM
 import ./mailtriage.bend as TRI
 import ./mailrun.bend as RUN
 import ./maildisposition.bend as MD
@@ -246,7 +247,7 @@ def Mcp.bot(+s: M.State, +thread: String) -> Bool:
   Mcp.owner.got(RUN.Run.bot(s, thread))
 
 def Mcp.same_project(+s: M.State, +a: String, +b: String) -> Bool:
-  Bool.or(Mcp.bot(s, a), String.eq(Mcp.project_of(B.Hub.thread(s, a)), Mcp.project_of(B.Hub.thread(s, b))))
+  Bool.and(PM.Private.readable(s, a, b), Bool.or(Mcp.bot(s, a), String.eq(Mcp.project_of(B.Hub.thread(s, a)), Mcp.project_of(B.Hub.thread(s, b)))))
 
 def Mcp.threads.k(keep: Bool, +s: M.State, +t: M.Thread, rest: List<&2, J.Json>) -> List<&2, J.Json>:
   match keep:
@@ -510,7 +511,7 @@ def Mcp.launch.by(+s: M.State, +now: Nat, +thread: String, +by: String, +p: J.Js
   Mcp.launch.retired_guard(Bool.or(Mcp.launch.retired_id(J.Json.get_str(p, "project", "")), M.Scratch.is(Mcp.launch.proj(s, thread, J.Json.get_str(p, "project", "")))), s, now, thread, by, p)
 
 def Mcp.launch(+s: M.State, +now: Nat, +thread: String, +p: J.Json) -> Res:
-  Mcp.launch.by(s, now, thread, thread, p)
+  Mcp.launch.by(s, now, thread, Bool.pick(String, PM.Private.is(s, thread), PM.Private.target(s, thread), thread), p)
 
 def Mcp.first.k(e: M.Entry, +th: String, rest: String) -> String:
   match e:
@@ -664,7 +665,7 @@ def Mcp.send.k(ok: Bool, +s: M.State, +now: Nat, +thread: String, +target: Strin
 
 def Mcp.names() -> List<&2, String>:
   ["orchestrator_capabilities", "delegate_task", "task_status", "task_cancel", "thread_list", "thread_read", "thread_send", "viewer_show",
-   "thread_launch", "thread_update", "thread_wait", "thread_interrupt", "thread_wait_now", "terminal_open", "terminal_send", "terminal_close", "work_run", "work_watch", "work_list", "work_cancel", "work_unwatch", "review_comments", "review_comment", "wake_on", "wake_list", "wake_cancel", "deploy_restart", "deploy_status", "deploy_cancel", "lock_acquire", "lock_release", "lock_list", "lock_cancel", "deploy_main", "mail", "mail_list", "mail_read", "mail_search", "mail_tag", "mail_snooze", "mail_done", "decide", "escalate", "charter_set", "mail_dispose"]
+   "thread_launch", "thread_update", "thread_wait", "thread_interrupt", "thread_wait_now", "terminal_open", "terminal_send", "terminal_close", "work_run", "work_watch", "work_list", "work_cancel", "work_unwatch", "review_comments", "review_comment", "wake_on", "wake_list", "wake_cancel", "deploy_restart", "deploy_status", "deploy_cancel", "lock_acquire", "lock_release", "lock_list", "lock_cancel", "deploy_main", "mail", "mail_list", "mail_read", "mail_search", "mail_tag", "mail_snooze", "mail_done", "decide", "escalate", "charter_set", "mail_dispose", "tell_person"]
 
 def Mcp.lock.acquire(ok: Bool, +s: M.State, +now: Nat, +thread: String, +a: J.Json) -> Res:
   match ok:
@@ -1112,6 +1113,15 @@ def Mcp.dispose.got(r: Maybe<&2, ML.Run>, +s: M.State, +now: Nat, +a: J.Json) ->
 def Mcp.dispose(+s: M.State, +now: Nat, +thread: String, +a: J.Json) -> Res:
   Mcp.dispose.got(RUN.Run.of(s, thread), s, now, a)
 
+# Publication is explicit and owner-fixed. Finals never call this path.
+def Mcp.tell_person(+s: M.State, +now: Nat, +thread: String, +a: J.Json) -> Res:
+  +allowed = Bool.and(PM.Private.live(s, thread), PM.Private.args(a))
+  +text = String.trim(J.Json.get_str(a, "text", ""))
+  +key = String.trim(J.Json.get_str(a, "key", ""))
+  Res{allowed, J.Json.obj([J.KV{"ok", J.Flag{allowed}},
+    J.KV{"scope", J.Str{"Explicit publication to this private coordinator's original conversation only; no approval or source work changed"}}]),
+    B.Private.tell(allowed, s, now, thread, text, key)}
+
 def Mcp.call.k(i: Nat, +s: M.State, +now: Nat, +thread: String, +models: J.Json, +a: J.Json) -> Res:
   match i:
     case 0n:
@@ -1194,6 +1204,7 @@ def Mcp.call.k(i: Nat, +s: M.State, +now: Nat, +thread: String, +models: J.Json,
     case 42n: Mcp.run.call(Mcp.run.on(s, thread), i, s, now, thread, a)
     case 43n: Mcp.run.call(String.eq(M.Setting.get(s, "mail.on", "off"), "on"), i, s, now, thread, a)
     case 44n: Mcp.dispose(s, now, thread, a)
+    case 45n: Mcp.tell_person(s, now, thread, a)
     case _:
       Res.fail("unknown tool")
 
@@ -1508,7 +1519,7 @@ def Mcp.tools.uber.run(run: Bool) -> List<&2, J.Json>:
 
 def Mcp.tools.uber(+s: M.State, +thread: String) -> J.Json:
   +base = J.Json.elems(J.Json.get_obj(Mcp.tools(), "tools"))
-  +extra = List.append(&2, J.Json, Mcp.tools.uber.run(RUN.Run.is(s, thread)), Bool.pick(List<&2, J.Json>, MD.Disposition.launch(s, thread), List.append(&2, J.Json, Mcp.dispose.tools(), Mcp.context.tools()), Nil{}))
+  +extra = List.append(&2, J.Json, Mcp.tools.uber.run(Bool.and(RUN.Run.is(s, thread), Bool.not(PM.Private.is(s, thread)))), Bool.pick(List<&2, J.Json>, MD.Disposition.launch(s, thread), List.append(&2, J.Json, Mcp.dispose.tools(), Mcp.context.tools()), Nil{}))
   J.Json.obj([J.KV{"tools", J.Json.arr(List.append(&2, J.Json, base, extra))}])
 
 def Mcp.tools.pick(uber: Bool, +s: M.State, +thread: String) -> J.Json:
@@ -1516,8 +1527,15 @@ def Mcp.tools.pick(uber: Bool, +s: M.State, +thread: String) -> J.Json:
     case True{}: Mcp.tools.uber(s, thread)
     case False{}: Mcp.tools.live(MD.Disposition.launch(s, thread), String.eq(M.Setting.get(s, "mail.on", "off"), "on"))
 
+def Mcp.tools.private(private: Bool, tools: J.Json) -> J.Json:
+  match private:
+    case False{}: tools
+    case True{}: J.Json.obj([J.KV{"tools", J.Json.arr(List.append(&2, J.Json, J.Json.elems(J.Json.get_obj(tools, "tools")),
+      List.append(&2, J.Json, Mcp.context.tools(), [Tool.def("tell_person", "The ONLY explicit publication from a private coordinator turn into its original user conversation. All ordinary final/commentary text stays private; empty output is successful. Writes your own contextual text once per owner/event key, with provenance and a told ledger receipt. Never grants approval or completes source work. Target is authenticated owner, never caller supplied.",
+        [Tool.prop("text", "string", "Your fresh contextual message with actionable source links."), Tool.prop("key", "string", "Stable exact event/version key; repeated calls do not post twice.")], ["text", "key"])])))}])
+
 def Mcp.tools.for(+s: M.State, +thread: String) -> J.Json:
-  Mcp.tools.pick(Bool.and(Bool.not(String.eq(M.Setting.get(s, "mail.on", "off"), "on")), Mcp.mail.uber(s, thread)), s, thread)
+  Mcp.tools.private(PM.Private.live(s, thread), Mcp.tools.pick(Bool.and(Bool.not(String.eq(M.Setting.get(s, "mail.on", "off"), "on")), Mcp.mail.uber(s, thread)), s, thread))
 
 def Mcp.method.k(i: Nat, +s: M.State, +now: Nat, +thread: String, +models: J.Json, +version: String, +id: J.Json, +p: J.Json) -> McpOut:
   match i:
