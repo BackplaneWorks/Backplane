@@ -1,3 +1,4 @@
+import ./src/core/history-window.bend as NATIVEHISTORY
 import ./src/core/accounts.bend as ACCT
 import ./src/server/thin-actor.bend as CHATSIDE
 import ./src/core/sidebar-read.bend as SIDEREAD
@@ -12843,3 +12844,31 @@ law accounts_profile_sessions_differ:
 
 law accounts_identity_sessions_differ:
   {String.eq(ACCT.Accounts.session.key("t", "codex", "A", 2n), ACCT.Accounts.session.key("t", "codex", "A", 3n)) == False{} : Bool}
+
+# An adopted native page cannot remove or reorder visible rows, nor shrink
+# the displayed window. Offscreen retirement is a separate refresh, never
+# part of replacing a page under the reader.
+law native_history_page_visible:
+  for +old: List<&2, String>
+  for fresh: List<&2, String>
+  for keep: List<&2, String>
+  for +visible: List<&2, String>
+  for older: Bool
+  for before: {NATIVEHISTORY.History.ordered(visible, old) == True{} : Bool}
+  {NATIVEHISTORY.History.ordered(visible, NATIVEHISTORY.History.page(old, fresh, keep, visible, older)) == True{} : Bool}
+
+law native_history_page_size:
+  for +old: List<&2, String>
+  for fresh: List<&2, String>
+  for keep: List<&2, String>
+  for visible: List<&2, String>
+  for older: Bool
+  {Nat.is_ge(List.length(&2, String, NATIVEHISTORY.History.page(old, fresh, keep, visible, older)), List.length(&2, String, old)) == True{} : Bool}
+
+# A candidate which loses or reorders the visible span is never adopted.
+law native_history_page_order:
+  for +old: List<&2, String>
+  for +candidate: List<&2, String>
+  for +visible: List<&2, String>
+  for h: {NATIVEHISTORY.History.ordered(visible, candidate) == False{} : Bool}
+  {NATIVEHISTORY.History.adopt(old, candidate, visible) == old : List<&2, String>}

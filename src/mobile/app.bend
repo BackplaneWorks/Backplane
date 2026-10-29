@@ -303,6 +303,12 @@ def thin_shown_draft(shown: J.Json, sessionText: String) -> J.Json:
 def thin_partial(shown: J.Json, window: J.Json) -> J.Json:
   TH.Partial.screen(shown, window)
 
+def thin_history(text: String) -> J.Json:
+  TH.History.plan(json_parse(text))
+
+def thin_viewport(text: String) -> Bool:
+  TH.History.viewport(json_parse(text))
+
 def thin_search(screenText: String, searchText: String) -> J.Json:
   TH.Search.screen(json_parse(screenText), json_parse(searchText))
 

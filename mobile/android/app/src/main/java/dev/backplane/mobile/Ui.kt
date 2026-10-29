@@ -866,6 +866,16 @@ fun ThreadScreen(m: AppModel, s: Screen, t: ThreadView, below: (@Composable () -
     val snacks = remember { SnackbarHostState() }
     val list = rememberLazyListState()
     val userDragging by list.interactionSource.collectIsDraggedAsState()
+    val currentThread by rememberUpdatedState(t)
+    LaunchedEffect(list, t.id) {
+        var reportedSpan: List<String>? = null
+        snapshotFlow { timelineReading(list, currentThread) }.collect { reading ->
+            if (reading != null && reading.span != reportedSpan) {
+                reportedSpan = reading.span
+                m.timelineViewport(t.id, reading)
+            }
+        }
+    }
     var scrollGesture by remember(t.id) { mutableStateOf(false) }
     var readingDirection by remember(t.id) { mutableStateOf(0) }
     var acceptedPage by remember(t.id) { mutableStateOf("") }
@@ -939,7 +949,7 @@ fun ThreadScreen(m: AppModel, s: Screen, t: ThreadView, below: (@Composable () -
                 }
                 if (action.isNotEmpty() && acceptedPage != "$pageKey:$action") {
                     acceptedPage = "$pageKey:$action"
-                    m.act(action, "")
+                    m.act(action, timelineReading(list, t)?.json() ?: "")
                 }
             }
     }

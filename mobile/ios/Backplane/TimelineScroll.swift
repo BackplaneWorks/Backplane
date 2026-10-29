@@ -15,6 +15,7 @@ final class TimelinePosition {
     // Kept by the owning navigation context, without observing frame changes.
     // A controller may disappear while a linked source is open.
     @ObservationIgnored fileprivate var viewport: TimelineViewport?
+    @ObservationIgnored fileprivate(set) var reading: TimelineReading?
 
     fileprivate func report(following: Bool, unread: Int) {
         if self.following != following { self.following = following }
@@ -23,8 +24,21 @@ final class TimelinePosition {
 
     func resetToStart(firstID: String? = nil) {
         viewport = nil
+        reading = nil
         if let firstID { jump?(firstID) }
         else { beginning?() }
+    }
+}
+
+struct TimelineReading: Equatable {
+    let id: String
+    let offset: Double
+    let first: String
+    let last: String
+    var json: String {
+        guard let data = try? JSONSerialization.data(withJSONObject: ["id": id, "offset": offset, "first": first, "last": last]),
+              let value = String(data: data, encoding: .utf8) else { return "" }
+        return value
     }
 }
 
@@ -40,10 +54,13 @@ struct TimelineScroll<Content: View>: UIViewControllerRepresentable {
     let ids: [String]
     let earlier: Int
     let loadEarlier: () -> Bool
+    var later = 0
+    var loadLater: () -> Bool = { false }
     var earlierEnabled = true
     var startsAtLatest = true
     // Optional diagnostic callback; normal builds install none.
     var onDisplay: (() -> Void)? = nil
+    var onViewport: ((TimelineReading) -> Void)? = nil
     @ViewBuilder let content: () -> Content
 
     func makeUIViewController(context: Context) -> TimelineController<Content> {
@@ -51,7 +68,7 @@ struct TimelineScroll<Content: View>: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ controller: TimelineController<Content>, context: Context) {
-        controller.configure(ids: ids, earlier: earlier, enabled: earlierEnabled, loadEarlier: loadEarlier, onDisplay: onDisplay, content: content())
+        controller.configure(ids: ids, earlier: earlier, enabled: earlierEnabled, loadEarlier: loadEarlier, onDisplay: onDisplay, later: later, loadLater: loadLater, onViewport: onViewport, content: content())
     }
 }
 
@@ -78,6 +95,8 @@ final class TimelineController<Content: View>: UIViewController, UIScrollViewDel
     private let position: TimelinePosition
     private var anchor: (id: String, offset: CGFloat)?
     private var retained: [(id: String, offset: CGFloat)] = []
+    private var onViewport: ((TimelineReading) -> Void)?
+    private var reportedSpan: [String] = []
     private var pendingJump: String?
     private var following = true
     private var unread = 0
@@ -85,6 +104,9 @@ final class TimelineController<Content: View>: UIViewController, UIScrollViewDel
     private var earlier = 0
     private var earlierGate = EarlierPageGate()
     private var loadEarlier: (() -> Bool)?
+    private var later = 0
+    private var laterGate = EarlierPageGate()
+    private var loadLater: (() -> Bool)?
     private var correcting = false
     private var reportPending = false
     private var initialized = false
@@ -154,7 +176,7 @@ final class TimelineController<Content: View>: UIViewController, UIScrollViewDel
         }
     }
 
-    func configure(ids next: [String], earlier: Int, enabled: Bool, loadEarlier: @escaping () -> Bool, onDisplay: (() -> Void)?, content: Content) {
+    func configure(ids next: [String], earlier: Int, enabled: Bool, loadEarlier: @escaping () -> Bool, onDisplay: (() -> Void)?, later: Int = 0, loadLater: @escaping () -> Bool = { false }, onViewport: ((TimelineReading) -> Void)? = nil, content: Content) {
         // Count only entries appended after the old tail, never history prepends.
         if !following, let last = ids.last, let at = next.firstIndex(of: last) {
             unread += next.distance(from: next.index(after: at), to: next.endIndex)
@@ -163,6 +185,10 @@ final class TimelineController<Content: View>: UIViewController, UIScrollViewDel
         self.earlier = earlier
         earlierGate.configure(enabled: enabled, page: next.first ?? "")
         self.loadEarlier = loadEarlier
+        self.later = later
+        if later > 0 { following = false }
+        self.loadLater = loadLater
+        laterGate.configure(enabled: enabled, page: next.last ?? "")
         if onDisplay != nil || self.onDisplay != nil {
             displayLink?.invalidate()
             displayLink = nil
@@ -171,6 +197,7 @@ final class TimelineController<Content: View>: UIViewController, UIScrollViewDel
             displayLayout = nil
         }
         self.onDisplay = onDisplay
+        self.onViewport = onViewport
         host.rootView = content
         if onDisplay != nil { host.view.setNeedsLayout() }
         view.setNeedsLayout()
@@ -316,6 +343,16 @@ final class TimelineController<Content: View>: UIViewController, UIScrollViewDel
     private func report() {
         position.viewport = TimelineViewport(following: following, unread: unread,
                                              anchor: anchor, retained: retained)
+        // Keep exact local geometry, but cross the bridge only when the
+        // visible identities change. A page captures the latest offset below.
+        let visible = frames().filter { ids.contains($0.0) && $0.1.maxY > top && $0.1.minY < top + scroll.bounds.height }
+        if let held = anchor, let first = visible.first, let last = visible.last,
+           visible.contains(where: { $0.0 == held.id }) {
+            let reading = TimelineReading(id: held.id, offset: Double(held.offset - viewportTop), first: first.0, last: last.0)
+            position.reading = reading
+            let span = [held.id, first.0, last.0]
+            if span != reportedSpan { reportedSpan = span; onViewport?(reading) }
+        }
         guard !reportPending else { return }
         reportPending = true
         DispatchQueue.main.async { [weak self] in
@@ -326,6 +363,7 @@ final class TimelineController<Content: View>: UIViewController, UIScrollViewDel
     }
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
         earlierGate.beginDrag()
+        laterGate.beginDrag()
         gestureTop = top
         readingOlder = false
         following = false
@@ -336,7 +374,7 @@ final class TimelineController<Content: View>: UIViewController, UIScrollViewDel
         if abs(top - gestureTop) > 0.25 { readingOlder = top < gestureTop }
         gestureTop = top
         capture(frames())
-        following = abs(end - scroll.contentOffset.y) <= 2
+        following = later == 0 && abs(end - scroll.contentOffset.y) <= 2
         if following { unread = 0 }
         report()
         // Only a real drag/fling can request another page. Layout, restored
@@ -347,6 +385,10 @@ final class TimelineController<Content: View>: UIViewController, UIScrollViewDel
         if initialized, readingOlder, scroll.isDragging || scroll.isDecelerating,
            top < scroll.bounds.height * 2, earlier > 0, !following, let loadEarlier {
             earlierGate.request(earlier, perform: loadEarlier)
+        }
+        if initialized, !readingOlder, scroll.isDragging || scroll.isDecelerating,
+           end - top < scroll.bounds.height * 2, later > 0, let loadLater {
+            laterGate.request(later, perform: loadLater)
         }
     }
     private func showLatest() {

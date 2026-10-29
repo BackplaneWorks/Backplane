@@ -286,6 +286,9 @@ final class Engine: @unchecked Sendable {
     func reading(_ thread: String, seen: String, count: Int, away: Bool) async -> Out? {
         await out("reading", [thread, seen, count, away], screen: false, person: true)
     }
+    func viewport(_ thread: String, id: String, offset: Double, first: String, last: String) async -> Out? {
+        await out("viewport", [thread, id, offset, first, last], screen: false, person: true)
+    }
     func hubs(_ keys: [String]) async -> Out? { await out("hubs", [keys]) }
     func forgetHub(_ key: String) async -> Out? { await out("forgetHub", [key], screen: false, person: true) }
     func connection(_ key: String, _ epoch: String, mode: String? = nil) async -> Out? {

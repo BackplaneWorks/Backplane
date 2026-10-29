@@ -1,3 +1,4 @@
+import ./test/native_history_window_proof.bend as NATIVEHISTORYPROOF
 import ./src/server/thin-actor.bend as CHATSIDE
 import ./src/core/sidebar-read.bend as SIDEREAD
 import Base
@@ -13537,3 +13538,12 @@ def Laws.accounts_profile_sessions_differ():
 
 def Laws.accounts_identity_sessions_differ():
   {==}
+
+def Laws.native_history_page_visible(old, fresh, keep, visible, older, before):
+  NATIVEHISTORYPROOF.page_visible(old, fresh, keep, visible, older, before)
+
+def Laws.native_history_page_size(old, fresh, keep, visible, older):
+  NATIVEHISTORYPROOF.page_size(old, fresh, keep, visible, older)
+
+def Laws.native_history_page_order(old, candidate, visible, h):
+  NATIVEHISTORYPROOF.reject_order(old, candidate, visible, h)

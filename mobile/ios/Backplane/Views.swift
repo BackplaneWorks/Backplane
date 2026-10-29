@@ -1188,11 +1188,12 @@ struct ThreadScreen: View {
       let displayRevision = model.performanceRevision
       VStack(spacing: 0) {
         TimelineScroll(position: position, ids: thread.entries.map(\.id), earlier: thread.earlier ?? 0,
-                       loadEarlier: { live && model.loadEarlier(thread.id) },
+                       loadEarlier: { live && model.loadEarlier(thread.id, viewport: position.reading) },
+                       later: thread.later ?? 0, loadLater: { live && model.loadLater(thread.id, viewport: position.reading) },
                        earlierEnabled: live && model.contentReady && model.screen?.thread?.id == thread.id,
                        onDisplay: PerformanceTrace.shared.begin() == nil ? nil : {
                            model.performanceDisplayed(thread: thread.id, fresh: live, revision: displayRevision)
-                       }) {
+                       }, onViewport: { if live { model.timelineViewport(thread.id, $0) } }) {
                 VStack(alignment: .leading, spacing: 14) {
                     if let p = thread.parent { EntryRow(model: model, entry: p) { shown = $0 } }
                     ForEach(thread.entries) { e in
@@ -1240,7 +1241,10 @@ struct ThreadScreen: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .overlay(alignment: .bottomTrailing) {
             if !position.following {
-                Button { position.latest?() } label: {
+                Button {
+                    if live && (thread.later ?? 0) > 0 { model.act("history-newest", "") }
+                    position.latest?()
+                } label: {
                     Label(position.unread > 0 ? NativeMessages.native_thread_new(lang, String(position.unread)) : NativeMessages.native_thread_latest(lang), systemImage: "arrow.down")
                         .font(.caption.bold()).padding(.horizontal, 12).padding(.vertical, 8)
                         .background(.regularMaterial, in: Capsule())

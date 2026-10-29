@@ -95,7 +95,16 @@ export async function registerBridgeChecks(check,stage,root){
  check('actual accepted picture is delivered before coalesced follow-up',()=>{const update=coalescedUpdate();const out=answer(update,{viewRevision:'1'});assert(out.screen?.thread);assert.equal(out.cmds.length,0);assert(!out.sync.some(s=>s.phase==='presenting'));assert.equal(read(B.pulse()).cmds.length,0);assert.equal(typeof B.published(),'number');assert.equal(request(read(B.pulse())).m,'view.update');});
  check('quiet accepted picture survives flush before follow-up',()=>{const update=coalescedUpdate();const out=answer(update,{viewRevision:'1'},true);assert.equal(out.screen,null);assert.equal(out.cmds.length,0);assert.equal(read(B.pulse()).cmds.length,0);const flush=read(B.flush(false));assert(flush.screen?.thread);assert.equal(flush.cmds.length,0);assert.equal(read(B.pulse()).cmds.length,0,'a dropped flush is not acknowledged');const retry=read(B.flush(true));assert(retry.screen?.thread);B.published();assert.equal(request(read(B.pulse())).m,'view.update');});
  check('actual bridge oversized thin frame is rejected before canonical decoder path',()=>{boot();const o=read(B.recv('h','A'.repeat(400000),'1',false,false));assert.equal(o.sync[0].phase,'failed');assert.equal(o.cmds.length,0);assert.equal(observed.recv,0);});
- check('actual bridge scroll position persists anchor without page request',()=>{boot();answer();const o=read(B.reading('h|a','e',10,true));assert.equal(o.cmds.length,0);const saved=JSON.parse(B.savePresentation());assert.equal(saved.hubs[0].anchor.id,'e');});
+ check('actual bridge viewport anchor stays separate from newest-seen reading marker',()=>{boot();answer();
+  const o=read(B.viewport('h|a','e',-12.25,'e','e'));assert.equal(o.cmds.length,0);
+  read(B.reading('h|a','newest-unread-marker',10,true));
+  const saved=JSON.parse(B.savePresentation());assert.deepEqual(saved.hubs[0].anchor,{id:'e',offset:12});
+ });
+ check('actual bridge page captures viewport atomically and keeps fractional local offset',()=>{boot();answer();
+  const req=request(read(B.act('earlier',JSON.stringify({id:'e',offset:-9.5,first:'e',last:'e'}))));
+  assert.equal(req.m,'view.page');assert.deepEqual(req.p.anchor,{id:'e',offset:10});
+  const ready=answer(req);assert.equal(ready.screen.thread.historyAnchor.offset,-9.5);
+ });
  check('actual bridge Find opens locally then queries hub without changing readiness',()=>{boot();answer();const opened=read(B.act('find-open','search'));assert.equal(opened.cmds.length,0);assert.equal(opened.screen.find.mode,'search');const queried=read(B.act('find-q','needle'));assert.equal(queried.sync.length,0);const req=request(queried);assert.equal(req.m,'view.search');const got=answer(req,{search:{query:'needle',rows:[{id:'e',thread:'a',ordinal:'1',kind:'message',text:'match',partial:false}],cursor:'',hasMore:false,visited:1}});assert.equal(got.screen.find.rows[0].value,'h|a');});
  check('actual bridge API key Save sends the value once, straight to the hub, with the name typed last',()=>{boot();answer();const sends=o=>o.cmds.filter(c=>c.type==='send').map(c=>JSON.parse(c.data));const first=sends(read(B.quiet('bfield','kname\u001fE')));assert.equal(first.length,1);assert.equal(first[0].p.value,'kname\u001fE');
   assert.deepEqual(sends(read(B.quiet('bfield','kname\u001fE2E_KEY'))),[]);const saved=sends(read(B.secret('@apikey\u001fE\u001fsekret-value-4242')));assert.equal(saved.length,1);assert.equal(saved[0].m,'bots.voice');assert.deepEqual(saved[0].p,{op:'api-add',name:'E2E_KEY',value:'sekret-value-4242'});

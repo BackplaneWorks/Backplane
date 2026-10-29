@@ -246,8 +246,12 @@ function thinIntent(key, session, target, action, value) {
     return { kind: action === "select" ? "select" : "draft", session: next,
       target: plain(App.thin_target(JSON.stringify(next))) };
   }
-  if (action === "earlier") return { kind: "page" };
-  if (action === "later") return { kind: "later" };
+  if (action === "earlier" || action === "later") {
+    let viewport;
+    if (value) { try { viewport = JSON.parse(value); } catch { return { kind: "blocked" }; } }
+    return { kind: action === "earlier" ? "page" : "later", viewport };
+  }
+  if (action === "history-newest") return { kind: "newest" };
   if (action === "find-open" && value === "search") return { kind: "find", search: { query: "", rows: [], cursor: "", hasMore: false, visited: 0 } };
   if (action === "find-close") return { kind: "find", search: null };
   if (action === "find-q") return { kind: "search", args: { query: value, cursor: "" } };
@@ -318,6 +322,8 @@ const thin = new NativeThinHost307265({
     return { session: thinRoute(plain(App.session(registered.hubs, key)), session), cmds };
   },
   materialize: thinMaterialize,
+  history: input => plain(App.thin_history(JSON.stringify(input))),
+  viewport: input => App.thin_viewport(JSON.stringify(input)),
   message: thinMessage,
   find: (view, search) => {
     const project = screen => search === null ? { ...screen, find: null } : plain(App.thin_search(JSON.stringify(screen), JSON.stringify(search)));
@@ -620,8 +626,6 @@ globalThis.Backplane = {
     // Scroll anchoring is a local preference, never an older-page gesture.
     const thinKey = App.session_target(hubs, foregroundHub(), "select", thread);
     if (thin.thin(thinKey)) {
-      const state = thin.state(thinKey);
-      state.anchor = { id: String(seen), offset: 0 };
       return direct([], false);
     }
     const key = App.session_target(hubs, previewCur || App.current(hubs), "select", thread);
@@ -633,6 +637,11 @@ globalThis.Backplane = {
       return direct(recent.refresh(key), false);
     }
     hubs = App.session_adopt(hubs, key, JSON.stringify(next), App.current(hubs));
+    return direct([], false);
+  },
+  viewport(thread, id, offset, first, last) {
+    const key = App.session_target(hubs, foregroundHub(), "select", thread);
+    if (thin.thin(key)) thin.viewport(key, thread.startsWith(key + "|") ? thread.slice(key.length + 1) : thread, { id, offset, first, last });
     return direct([], false);
   },
   // hub k's socket query: resume from what this app already holds
