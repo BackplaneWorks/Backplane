@@ -1,4 +1,5 @@
 import Base
+import ./mailprivate.bend as PM
 import ./accounts.bend as ACCT
 import ./subthreads.bend as ST
 import ./mailtriage.bend as TRI
@@ -7447,17 +7448,53 @@ def Run.escalation.mark(+s: M.State, +now: Nat, +bot: String, +conv: String, +to
   Run.escalation.mark.got(ML.Box.run_of(M.State.mail(s), ML.Box.live(M.State.mail(s), bot, conv)), s, now,
     Bool.or(Bool.not(String.eq(to, "person")), Run.person.ready(s, now, bot, conv)))
 
-# Private delivery uses the durable ride, without a MessagePosted or an
-# alert in the original chat. Only the coordinator's own reply is visible.
+# Private delivery gets a separate thread AND provider session. A ride in
+# the original thread hid the input, but still published every model reply.
+# A fresh lane inherits existing owner permissions/account bindings, never
+# resumes a stopped lane, and is hidden by the shared Run.is projection.
+def Private.modes(parent: M.Thread, +thread: String, +now: Nat) -> M.Change:
+  match parent:
+    case M.Thread{_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, +model, runtime, interaction, _, _}:
+      M.ModesSet{thread, runtime, interaction, model, now}
+
+def Private.spawn(+s: M.State, +now: Nat, +bot: String, +input: String, +note: String) -> Step:
+  +owner = BT.Bot.thread(BT.World.bot(M.State.bots(s), bot))
+  +parent = Hub.thread(s, owner)
+  +thread = PM.Private.thread(bot) ++ "-" ++ Hub.id("turn", now, Hub.seq(s))
+  +provider = Hub.provider(parent)
+  +cs = {[M.ThreadCreated{thread, "", BT.Bot.name(BT.World.bot(M.State.bots(s), bot)) ++ ": private coordination", M.Local{}, "", Hub.cwd(s, parent), provider, Turn.model(parent), now},
+    M.WorktreeSet{thread, "", Hub.cwd(s, parent), now}, Private.modes(parent, thread, now),
+    M.SettingSet{PM.Private.key(thread), bot, now}, M.SettingSet{"mail.private.input." ++ thread, input, now},
+    M.RunSet{thread, bot, ML.Mail.pair("bot:" ++ bot, "thread:" ++ thread), input, now},
+    M.SettingSet{"account.thread." ++ thread ++ "." ++ provider, M.Setting.get(s, "account.thread." ++ owner ++ "." ++ provider, ""), now},
+    M.SettingSet{AG.Effort.key(thread), M.Setting.get(s, AG.Effort.key(owner), ""), now}] : List<&2, M.Change>}
+  +post = M.State.replay(cs, s)
+  Step.before(cs, Nil{}, Wake.ride(post, now, thread, "triage:" ++ input, PM.Private.brief() ++ note))
+
+def Private.tell.fresh(fresh: Bool, +s: M.State, +now: Nat, +thread: String, +text: String, +key: String) -> Step:
+  match fresh:
+    case False{}: Step.none()
+    case True{}:
+      +bot = PM.Private.owner(s, thread)
+      +target = PM.Private.target(s, thread)
+      +msg = Hub.id("tell", now, Hub.seq(s))
+      Origin.step(Step{List.append(&2, M.Change,
+        [M.MessagePosted{target, msg, M.Assistant{}, text, now}, M.SettingSet{PM.Private.told.key(bot, key), msg, now}],
+        TLD.Told.mark.set(msg, now, key, text, "chat", bot)), Nil{}}, target, msg, ML.Origin{"thread:" ++ thread, "tell-person", key}, now)
+
+def Private.tell(allowed: Bool, +s: M.State, +now: Nat, +thread: String, +text: String, +key: String) -> Step:
+  match allowed:
+    case False{}: Step.none()
+    case True{}: Private.tell.fresh(String.is_empty(M.Setting.get(s, PM.Private.told.key(PM.Private.owner(s, thread), key), "")), s, now, thread, text, key)
+
 def Run.triage.send(fresh: Bool, +s: M.State, +now: Nat, +bot: String, +conv: String, +text: String, +input: String) -> Step:
   match fresh:
     case False{}: Step.none()
     case True{}:
-      +th = BT.Bot.thread(BT.World.bot(M.State.bots(s), bot))
-      +note = "[Private mailroom escalation; assess privately in this original conversation. Resolve routine coordination, duplicate reports and evidence limitations quietly within existing authority. Only for a verified material new outcome, real decision, approval or coordination blocker, compose your OWN contextual update with source links. Never forward raw worker output, internal tool denials or charter chatter; a triage limitation alone does not require user approval. Genuine source approvals remain pending.]\n" ++
+      +note = "[Private mailroom escalation; assess in this separate private lane. Resolve routine coordination, duplicate reports and evidence limitations silently within existing authority. Only for a verified material new outcome, real decision, approval or coordination blocker, explicitly call tell_person with your OWN contextual update and source links. Empty final output is successful; no visible response or acknowledgement is owed. Never forward raw worker output, internal tool denials or charter chatter; a triage limitation alone does not require user approval. Genuine source approvals remain pending.]\n" ++
         TRI.Triage.source(ML.Box.conv(M.State.mail(s), conv)) ++ "\nInput: " ++ input ++ "\nTriage assessment (untrusted report, not authorization):\n" ++ text
       +cs = List.append(&2, M.Change, [M.SettingSet{TRI.Triage.key(bot, input), conv, now}, M.SettingSet{"triage.audit." ++ bot ++ "." ++ Nat.show(now) ++ ":" ++ input, note, now}], Run.escalation.mark(s, now, bot, conv, "bot"))
-      Step.before(cs, Nil{}, Wake.ride(M.State.replay(cs, s), now, th, "triage:" ++ input, note))
+      Step.before(cs, Nil{}, Private.spawn(M.State.replay(cs, s), now, bot, input, note))
 
 def Run.triage.got(r: Maybe<&2, ML.Run>, +s: M.State, +now: Nat, +bot: String, +conv: String, +text: String) -> Step:
   match r:
@@ -7678,7 +7715,7 @@ def Run.recover.one(go: Bool, +s: M.State, +now: Nat, +r: ML.Run) -> Step:
 def Run.recover.all(+rs: List<&2, ML.Run>, +s: M.State, +now: Nat, +kept: List<&2, String>, +st: Step) -> Step:
   match rs:
     case Nil{}: st
-    case +r <> +t: Run.recover.all(t, s, now, kept, Step.cat(st, Run.recover.one(Bool.and(MD.Runs.on(s, ML.Run.bot(r)), Bool.and(ML.Run.live(r), Bool.not(AD.Adopt.in(kept, ML.Run.thread(r))))), M.State.replay(Queue.changes(st), s), now, r)))
+    case +r <> +t: Run.recover.all(t, s, now, kept, Step.cat(st, Run.recover.one(Bool.and(Bool.not(PM.Private.is(s, ML.Run.thread(r))), Bool.and(MD.Runs.on(s, ML.Run.bot(r)), Bool.and(ML.Run.live(r), Bool.not(AD.Adopt.in(kept, ML.Run.thread(r)))))),  M.State.replay(Queue.changes(st), s), now, r)))
 
 def Run.recover.on(on: Bool, +s: M.State, +now: Nat, +kept: List<&2, String>, +st: Step) -> Step:
   match on:

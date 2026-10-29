@@ -12894,3 +12894,20 @@ law timeline_virtual_follow_only_at_bottom:
   for +held: TLVIRTUAL.Px
   for end: TLVIRTUAL.Px
   {TLVIRTUAL.Follow.choose(TLVIRTUAL.Follow.allowed(follow, False{}), held, end) == held : TLVIRTUAL.Px}
+
+# ---- Silent private coordinator turns (2026-10-29), additive ----
+law private_no_implicit_publication:
+  for s: M.State
+  for now: Nat
+  for th: String
+  for text: String
+  for key: String
+  {H.Private.tell(False{}, s, now, th, text, key) == H.Step.none() : H.Step}
+
+law private_duplicate_publication_none:
+  for s: M.State
+  for now: Nat
+  for th: String
+  for text: String
+  for key: String
+  {H.Private.tell.fresh(False{}, s, now, th, text, key) == H.Step.none() : H.Step}

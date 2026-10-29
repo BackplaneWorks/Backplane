@@ -1,4 +1,5 @@
 import Base
+import ../core/mailprivate.bend as PM
 import ../core/handoff.bend as HD
 import ../core/thinq.bend as AQ
 import ../core/accounts.bend as ACCT
@@ -4837,7 +4838,7 @@ def Codex.go(+cfg: Cfg, +st: M.State, +thread: String, +cwd: String, +model: Str
     +fs : K.Files <- Files.prepared(thread, cwd, inbox, K.Rt.cli(Cfg.rt(cfg)))
     +ss : List<&2, AG.USkill> <- Skills.scan(cwd)
     +keys : String <- Hub.keys.prompt(Cfg.home(cfg))
-    Codex.account(String.is_empty(ACCT.Accounts.id(st, thread, "codex")), Cfg.home(cfg), st, Codex.args(cfg, thread, model, session, r, AG.Mention.expand("codex", text, ss), Hub.prompt(cfg, st, thread, cwd, fs, keys) ++ AG.USkill.prompt(ss), Hub.effort_of(st, thread), gen, MD.Disposition.launch(st, thread), MD.Disposition.triage.launch(st, thread), M.Think.on(st)), cwd, thread, gen, inbox)
+    Codex.account(String.is_empty(ACCT.Accounts.id(st, thread, "codex")), Cfg.home(cfg), st, List.append(&2, String, PM.Private.codex(PM.Private.live(st, thread)), Codex.args(cfg, thread, model, session, r, AG.Mention.expand("codex", text, ss), Hub.prompt(cfg, st, thread, cwd, fs, keys) ++ AG.USkill.prompt(ss), Hub.effort_of(st, thread), gen, MD.Disposition.launch(st, thread), MD.Disposition.triage.launch(st, thread), M.Think.on(st))), cwd, thread, gen, inbox)
 
 def Grok.go(+cfg: Cfg, +st: M.State, +thread: String, +cwd: String, +model: String, +session: String, +r: M.RuntimeMode, +text: String, +gen: String, +inbox: Chan(Msg)) -> IO(Unit):
   do IO<Unit>:

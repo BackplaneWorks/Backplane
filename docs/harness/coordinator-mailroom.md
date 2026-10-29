@@ -34,9 +34,33 @@ An actual open source approval cannot be disposed as a routine notice. Decisions
 and receipts never supply permission, answer an approval or complete source work.
 
 `escalate` requires the exact input in coordinator runs. Both `bot` and `person`
-destinations privately queue an assessment to the owner's original conversation.
-This uses the durable ride and adds no raw message or source alert to that chat.
-Bub must write a fresh contextual answer with actionable source links. Original
+destinations create a separate private coordinator turn, with its own persisted
+thread and provider session. They never start or inject into the owner's
+original user conversation. The private lane inherits the owner's existing
+provider/model, runtime, account binding, bot identity, memory and project scope;
+the cheaper assessor remains a distinct first stage. It retains normal tools,
+including `thread_send`, source approval handling and memory operations, without
+granting new source permissions. The shared run projection hides these lanes;
+their source timelines remain readable by their owner. A fresh lane never
+resumes a previously stopped one.
+
+All private commentary, streaming output and final text remain on that lane.
+An empty final completes normally, with no user message and no visible-output
+retry or re-prompt. Completed private SDKs retire using the existing run lifecycle;
+pending approvals or work retain them. Merely writing a final answer, a decision,
+or an escalation cannot publish into the person's chat.
+
+The dedicated `tell_person(text, key)` tool is the sole publication path from a
+private coordinator turn. It accepts only a live owning coordinator, fixes the
+target to that owner's original conversation, rejects caller-supplied targets,
+and commits an assistant message, provenance, an owner/event dedup marker and a
+told-ledger receipt together. Repeating the same key, even from another private
+turn or after replay, publishes nothing again. The key identifies an exact
+event/version, not a broad topic. Bub must choose this explicitly and supply a
+fresh contextual answer with actionable source links. The ordinary front-of-house
+person-initiated conversation still receives normal model replies. A private
+`notify_person` attempt returns an instruction to use `tell_person`; it does not
+recursively enqueue another report. Original
 asks remain at their sources for the person to answer. Source alerts from
 managed workers/private runs/other bots are suppressed; browsing their timelines
 and approval cards remains available.
@@ -81,6 +105,9 @@ explicit disabled restart continuation retain their existing behavior.
 
 Validation belongs to the shared integration batch:
 
+- `bend test/private_mailroom_test.bend`: separate coordinator turns, empty
+  replies without user messages or re-prompts, private nonempty finals, explicit
+  owner-fixed publication, cross-turn dedup and source approvals.
 - `bend test/mailtriage_test.bend`: routing, scope, quiet receipts, asks, private
   escalation, event keys, read/done, model configuration, rooms, bot reports,
   duplicate subscriptions, failure, replay, restart and adopted runs.

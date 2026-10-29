@@ -13559,3 +13559,8 @@ def Laws.timeline_virtual_anchor_rendered(inRange):
 
 def Laws.timeline_virtual_follow_only_at_bottom(follow, held, end):
   TLVIRTUALPROOF.follow_only_at_bottom(follow, held, end)
+
+# ---- Silent private coordinator turns (2026-10-29), additive ----
+def Laws.private_no_implicit_publication(s, now, th, text, key): {==}
+
+def Laws.private_duplicate_publication_none(s, now, th, text, key): {==}

@@ -1,4 +1,5 @@
 import Base
+import ./mailprivate.bend as PM
 import ./model.bend as M
 import ./mail.bend as ML
 import ./mailcontinuity.bend as MC
@@ -15,7 +16,7 @@ def Runs.keep(on: Bool, r: ML.Run) -> Maybe<&2, ML.Run>:
 
 def Runs.gate(+s: M.State, r: Maybe<&2, ML.Run>) -> Maybe<&2, ML.Run>:
   match r:
-    case Some{+r}: Runs.keep(Runs.on(s, ML.Run.bot(r)), r)
+    case Some{+r}: Runs.keep(Bool.and(Runs.on(s, ML.Run.bot(r)), Bool.not(PM.Private.is(s, ML.Run.thread(r)))), r)
     case None{}: None{}
 
 # A disposition settles ONE received notice, never the underlying work,
@@ -43,7 +44,7 @@ def Disposition.running(t: M.TurnState) -> Bool:
     case _: False{}
 
 def Disposition.live(+s: M.State, +r: ML.Run) -> Bool:
-  Bool.and(Runs.on(s, ML.Run.bot(r)),
+  Bool.and(Bool.and(Runs.on(s, ML.Run.bot(r)), Bool.not(PM.Private.is(s, ML.Run.thread(r)))),
     Bool.and(ML.Run.live(r), Disposition.running(M.Thread.turn(M.State.thread.get(s, ML.Run.thread(r))))))
 
 def Disposition.matches(live: Bool, +input: String, +current: String) -> Bool:
