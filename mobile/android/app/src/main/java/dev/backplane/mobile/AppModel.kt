@@ -48,6 +48,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     fun pair(text: String) = core.pair(text)
     fun unpair(key: String) = core.unpair(key)
     fun act(action: String, value: String = "") = core.act(action, value)
+    internal fun timelineViewport(thread: String, value: TimelineReading) = core.timelineViewport(thread, value)
     fun seek(thread: String, entry: String) = core.seek(thread, entry)
     fun quiet(action: String, value: String) = core.quiet(action, value)
     fun draft(text: String) = core.draft(text)
