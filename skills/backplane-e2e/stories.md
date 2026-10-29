@@ -144,6 +144,23 @@ Drag the viewer's left edge: it resizes and keeps that width after a reload;
 a double-click resets it; it stops where the thread would get under 360 px.
 Close the viewer; open it again from the rail.
 
+**S47 The board picker reads the folder each time** (W D A)
+In `proj` (two boards), open the board picker on Board: it offers both. Shut
+it, copy a board and its project file into `proj/gamma/` on disk, open it
+again: `gamma` is listed within a second, the picker stays open and the
+board on show is the same. Open it once more with nothing changed: no row
+moves or flickers. Delete `gamma/`, open it again: it is gone. On a phone,
+shut the viewer and open it on Board: the Sheet menu lists the boards there
+are then.
+
+**S48 Mech re-checks its parts** (W D A)
+Put a STEP in `proj/mech/`, open Mech: it is listed and shown. Add a second,
+open Mech again (from Board, or after shutting the viewer): both are
+listed. Delete the part on show, open Mech again: it is gone, and another
+part shows in its place (never the deleted one); delete them all: Mech says
+there are none. With Mech open, choose another thread, add a part, come
+back: it is listed. The same on a phone's Mech.
+
 ## Settings and workspace
 
 **S20 Appearance** (W D A)
