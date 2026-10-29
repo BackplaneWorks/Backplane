@@ -194,7 +194,7 @@ html[data-backplane-wait="true"] :is(.topbar .back, .topbar .crumbs, .topbar .kv
   .thread-workbar { padding-left: 10px; padding-right: 10px; }
   .viewer > .viewer-tabs { display: flex; position: relative; z-index: 4; }
 }
-.timeline { flex: 1; overflow-y: auto; overflow-anchor: none; padding: 16px 16px 8px; display: flex; flex-direction: column; gap: 10px; }
+.timeline { flex: 1; overflow-y: auto; overflow-anchor: none; padding: calc(16px + var(--anchor-inset, 0px)) 16px 8px; display: flex; flex-direction: column; gap: 10px; }
 /* away from the end with something new below (client.bend's Hold.pill).
    It takes no room in the timeline (its height and the gap before it given
    back by its margin), so its coming and going never changes how far the
@@ -728,8 +728,8 @@ button.chip:hover { border-color: var(--bad); color: var(--bad); }
 .machines .machine { background: none; border: 1px solid var(--line); padding: 2px 8px; color: var(--dim); }
 .machines .machine.on { color: var(--text); border-color: var(--accent); }
 
-.msg .shot { display: block; margin: 8px 0; }
-.msg .shot img { display: block; max-width: 100%; max-height: 420px; border: 1px solid var(--line); background: var(--bg); }
+.msg .shot { display: block; margin: 8px 0; width: min(100%, 560px); aspect-ratio: 4 / 3; }
+.msg .shot img { display: block; width: 100%; height: 100%; object-fit: contain; border: 1px solid var(--line); background: var(--bg); }
 
 .msg a.link { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; overflow-wrap: anywhere; border: 0; padding: 0; font-size: inherit; white-space: normal; max-width: none; }
 .msg a.link.file code { color: inherit; }

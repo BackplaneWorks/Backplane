@@ -87,6 +87,8 @@ final class TimelineController<Content: View>: UIViewController, UIScrollViewDel
     private var reportPending = false
     private var initialized = false
     private var awaitingBeginning = false
+    private var gestureTop: CGFloat = 0
+    private var readingOlder = false
 
     init(position: TimelinePosition, startsAtLatest: Bool = true, content: Content) {
         self.position = position
@@ -146,7 +148,7 @@ final class TimelineController<Content: View>: UIViewController, UIScrollViewDel
         }
         ids = next
         self.earlier = earlier
-        earlierGate.configure(enabled: enabled)
+        earlierGate.configure(enabled: enabled, page: next.first ?? "")
         self.loadEarlier = loadEarlier
         host.rootView = content
         view.setNeedsLayout()
@@ -193,7 +195,7 @@ final class TimelineController<Content: View>: UIViewController, UIScrollViewDel
     private func reconcile() {
         guard isViewLoaded, view.window != nil, scroll.bounds.height > 0, !correcting else { return }
         correcting = true
-        defer { correcting = false }
+        defer { correcting = false; gestureTop = top }
         let rows = frames()
         guard !rows.isEmpty else { return }
         if awaitingBeginning {
@@ -235,6 +237,7 @@ final class TimelineController<Content: View>: UIViewController, UIScrollViewDel
         }
         initialized = true
         report()
+        prefetchEarlier()
     }
     private func report() {
         position.viewport = TimelineViewport(following: following, unread: unread,
@@ -249,18 +252,26 @@ final class TimelineController<Content: View>: UIViewController, UIScrollViewDel
     }
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
         earlierGate.beginDrag()
+        gestureTop = top
+        readingOlder = false
         following = false
         capture(frames())
     }
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
         guard !correcting, scroll.isDragging || scroll.isDecelerating else { return }
+        if abs(top - gestureTop) > 0.25 { readingOlder = top < gestureTop }
+        gestureTop = top
         capture(frames())
         following = abs(end - scroll.contentOffset.y) <= 2
         if following { unread = 0 }
         report()
         // Only a real drag/fling can request another page. Layout, restored
         // anchors, keyboard changes and programmatic search jumps must not.
-        if initialized, top < 400, earlier > 0, !following, let loadEarlier {
+        prefetchEarlier()
+    }
+    private func prefetchEarlier() {
+        if initialized, readingOlder, scroll.isDragging || scroll.isDecelerating,
+           top < scroll.bounds.height * 2, earlier > 0, !following, let loadEarlier {
             earlierGate.request(earlier, perform: loadEarlier)
         }
     }

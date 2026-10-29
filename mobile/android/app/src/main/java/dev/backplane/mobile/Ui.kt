@@ -866,9 +866,11 @@ fun ThreadScreen(m: AppModel, s: Screen, t: ThreadView, below: (@Composable () -
     val snacks = remember { SnackbarHostState() }
     val list = rememberLazyListState()
     val userDragging by list.interactionSource.collectIsDraggedAsState()
-    var pageAcceptedForDrag by remember(t.id) { mutableStateOf(true) }
+    var scrollGesture by remember(t.id) { mutableStateOf(false) }
+    var readingDirection by remember(t.id) { mutableStateOf(0) }
+    var acceptedPage by remember(t.id) { mutableStateOf("") }
     LaunchedEffect(userDragging) {
-        if (userDragging) pageAcceptedForDrag = false
+        if (userDragging) { scrollGesture = true; acceptedPage = "" }
     }
     var menu by remember { mutableStateOf(false) }
     // the subagents sheet (the top bar's button) is up
@@ -889,15 +891,9 @@ fun ThreadScreen(m: AppModel, s: Screen, t: ThreadView, below: (@Composable () -
         (if (t.earlier > 0) 1 else 0) + t.entries.size + t.sending.size + (if (t.live.isNotEmpty() || t.working.isNotEmpty()) 1 else 0) +
         (if (t.later > 0) 1 else 0)
     LaunchedEffect(t.id, m.scrolls) { if (count > 0) list.scrollToItem(count - 1) }
-    // earlier entries shown: the view goes back to the entry that was first
-    var keepAt by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(t.entries.firstOrNull()?.id) {
-        val k = keepAt ?: return@LaunchedEffect
-        keepAt = null
-        val i = t.entries.indexOfFirst { it.id == k }
-        val head = (if (t.parent != null) 1 else 0) + (if (t.earlier > 0) 1 else 0)
-        if (i >= 0) list.scrollToItem(head + i)
-    }
+    // LazyColumn retains the first visible entry key AND its pixel offset.
+    // An explicit scrollToItem after a prepend discards that offset and
+    // cancels the ongoing fling, so paging never issues a scroll command.
     // The newest line stays in view while the person is at the thread's end:
     // a reply streams within its own row (no new row comes) and the keyboard
     // coming up shortens the view; either left the view on the reply's first
@@ -906,7 +902,9 @@ fun ThreadScreen(m: AppModel, s: Screen, t: ThreadView, below: (@Composable () -
     var follow by remember(t.id) { mutableStateOf(false) }
     val later by rememberUpdatedState(t.later)
     LaunchedEffect(list, t.id) {
-        snapshotFlow { list.canScrollForward to userDragging }.collect { (more, drag) -> if (!more) follow = true else if (drag) follow = false }
+        snapshotFlow { Triple(list.canScrollForward, userDragging, later) }.collect { (more, drag, newer) ->
+            if (!more && newer == 0) follow = true else if (drag) follow = false
+        }
     }
     LaunchedEffect(list, t.id) {
         snapshotFlow { list.layoutInfo }.collect { li ->
@@ -915,14 +913,35 @@ fun ThreadScreen(m: AppModel, s: Screen, t: ThreadView, below: (@Composable () -
         }
     }
     LaunchedEffect(count, t.live) {
-        val last = list.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-        // an earlier page's end is not the thread's: it holds (the next page
-        // down comes by scrolling on)
-        if (count > 0 && last >= count - 3 && t.later == 0) {
-            list.animateScrollToItem(count - 1)
-            // a new row taller than the view: on to its end
-            if (follow && list.canScrollForward) list.scrollToItem(count - 1, Int.MAX_VALUE / 2)
-        }
+        if (count > 0 && follow && !userDragging && !list.isScrollInProgress && t.later == 0)
+            list.scrollToItem(count - 1, Int.MAX_VALUE / 2)
+    }
+    // Prefetch before the edge, including the deceleration after a real
+    // drag. One accepted request per displayed window; a new page can
+    // continue the same fling, while readiness alone cannot start one.
+    LaunchedEffect(list, t.id, t.entries.firstOrNull()?.id, t.entries.lastOrNull()?.id, t.earlier, t.later, m.contentReady) {
+        var previous = list.firstVisibleItemIndex to list.firstVisibleItemScrollOffset
+        val pageKey = "${t.entries.firstOrNull()?.id}:${t.entries.lastOrNull()?.id}:${t.earlier}:${t.later}"
+        snapshotFlow { Triple(list.firstVisibleItemIndex, list.firstVisibleItemScrollOffset, list.isScrollInProgress to userDragging) }
+            .collect { (index, offset, motion) ->
+                val (moving, dragging) = motion
+                if (dragging) scrollGesture = true
+                if (!moving && !dragging) scrollGesture = false
+                if (scrollGesture && (index != previous.first || offset != previous.second))
+                    readingDirection = if (index < previous.first || index == previous.first && offset < previous.second) -1 else 1
+                previous = index to offset
+                if (!scrollGesture || !m.contentReady || m.screen?.hub != s.hub || m.screen?.thread?.id != t.id) return@collect
+                val head = (if (t.parent != null) 1 else 0) + (if (t.earlier > 0) 1 else 0)
+                val action = when {
+                    readingDirection < 0 && t.earlier > 0 && index <= head + 4 -> "earlier"
+                    readingDirection > 0 && t.later > 0 && (list.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0) >= count - 6 -> "later"
+                    else -> ""
+                }
+                if (action.isNotEmpty() && acceptedPage != "$pageKey:$action") {
+                    acceptedPage = "$pageKey:$action"
+                    m.act(action, "")
+                }
+            }
     }
     // the design history's way back: the entry scrolled to (near the top)
     // and tinted, the tint fading out; after the rows the jump opened are laid out
@@ -1130,14 +1149,6 @@ fun ThreadScreen(m: AppModel, s: Screen, t: ThreadView, below: (@Composable () -
             // does not draw, todo steps or a fold's calls, moves nothing, and
             // the next is asked for when the person scrolls on)
             if (t.earlier > 0) item(key = "earlier:" + (t.entries.firstOrNull()?.id ?: "") + ":" + t.earlier) {
-                // only when the person scrolls here (not as the list opens)
-                LaunchedEffect(m.contentReady, s.hub, t.id) {
-                    // Programmatic startup/jump scrolling also sets
-                    // isScrollInProgress; only a person's drag requests data.
-                    snapshotFlow { userDragging && !pageAcceptedForDrag && m.contentReady && m.screen?.hub == s.hub && m.screen?.thread?.id == t.id }.first { it }
-                    pageAcceptedForDrag = true
-                    keepAt = t.entries.firstOrNull()?.id; m.act("earlier", "")
-                }
                 Spacer(Modifier.size(1.dp))
             }
             items(t.entries, key = { it.id }) { e ->
@@ -1152,11 +1163,6 @@ fun ThreadScreen(m: AppModel, s: Screen, t: ThreadView, below: (@Composable () -
             // on an earlier page, scrolled down to its end: the next page down
             // (as "earlier" at the top; the list keeps its place by entry key)
             if (t.later > 0) item(key = "later:" + (t.entries.lastOrNull()?.id ?: "") + ":" + t.later) {
-                LaunchedEffect(m.contentReady, s.hub, t.id) {
-                    snapshotFlow { userDragging && !pageAcceptedForDrag && m.contentReady && m.screen?.hub == s.hub && m.screen?.thread?.id == t.id }.first { it }
-                    pageAcceptedForDrag = true
-                    keepAt = t.entries.lastOrNull()?.id; m.act("later", "")
-                }
                 Spacer(Modifier.size(1.dp))
             }
             itemsIndexed(t.sending, key = { i, _ -> "sending:$i" }) { _, text -> SendingView(text) }

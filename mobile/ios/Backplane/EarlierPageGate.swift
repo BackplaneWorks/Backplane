@@ -4,9 +4,13 @@ struct EarlierPageGate {
     private var enabled = false
     private var began = false
     private var accepted = false
+    private var page = ""
 
-    mutating func configure(enabled: Bool) {
+    mutating func configure(enabled: Bool, page: String = "") {
         self.enabled = enabled
+        // A continuing real fling may prefetch the next displayed page.
+        // Readiness or a count-only refresh of the same page cannot rearm it.
+        if self.page != page { self.page = page; accepted = false }
     }
 
     mutating func beginDrag() {
