@@ -13,7 +13,7 @@ a=O/'components.tar.gz'
 with urllib.request.urlopen(u,timeout=120) as response,a.open('wb') as f:
  while block:=response.read(1024*1024):f.write(block)
 assert sha(a)==os.environ['COMPONENTS_SHA']
-with tarfile.open(a) as tar:tar.extractall(O/'inputs',filter='data')
+with tarfile.open(a) as tar:tar.extractall(O/'inputs',filter='fully_trusted')
 services=list((S/'build/native-input').rglob('SERVICE.json')); assert len(services)==1
 service=services[0];meta=json.loads(service.read_text());tree=subprocess.check_output(['git','rev-parse','HEAD^{tree}'],text=True).strip()
 assert (meta['sourceCommit'],meta['sourceTree'],meta['version'],meta['target'])==(commit,tree,'0.13.1',target)
