@@ -3,7 +3,7 @@
 const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),crypto=require('node:crypto');
 const {execFileSync}=require('node:child_process');
 const browserOverlay=require('./selected-browser.cjs');
-const VERSION='0.13.0',ELECTRON='44.9.2',HEX=/^[a-f0-9]{64}$/,GIT=/^[a-f0-9]{40}$/;
+const VERSION='0.13.1',ELECTRON='44.9.2',HEX=/^[a-f0-9]{64}$/,GIT=/^[a-f0-9]{40}$/;
 const TARGETS={
  'linux-x64':{suffix:'.tar.gz',root:'backplane-linux-x64',executable:'runtime/backplane-desktop',resources:'runtime/resources'},
  'linux-arm64':{suffix:'.tar.gz',root:'backplane-linux-arm64',executable:'runtime/backplane-desktop',resources:'runtime/resources'},
