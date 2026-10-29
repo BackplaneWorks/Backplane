@@ -1575,6 +1575,30 @@ html:lang(ja) :is(.set-text, .set-ctl) { min-width: 0; }
 }
 @media (max-width: 760px) { .rail-toggle, .sidebar .side-toggle, .sidebar .side-fold { display: none; } }
 
+/* Desktop tools occupy the window's last track, beyond an open viewer.
+   Share the app's columns without moving the navigation or conversation
+   nodes: history, drafts and keyboard ownership keep their existing home. */
+@media (min-width: 761px) {
+  html:has(.app > .workspace-thread) { --workspace-w: 76px; }
+  html[data-rail="compact"]:has(.app > .workspace-thread) { --workspace-w: 44px; }
+  .app:has(> .workspace-thread) { grid-template-columns: 264px minmax(0, 1fr) var(--workspace-w); }
+  .app.panel:has(> .workspace-thread) { grid-template-columns: 264px minmax(0, 1fr) var(--viewer-w, minmax(0, 1.1fr)) var(--workspace-w); }
+  html[data-side="shut"] .app:has(> .workspace-thread) { grid-template-columns: 44px minmax(0, 1fr) var(--workspace-w); }
+  html[data-side="shut"] .app.panel:has(> .workspace-thread), html[data-fold] .app.panel:has(> .workspace-thread) { grid-template-columns: 44px minmax(0, 1fr) var(--viewer-w, minmax(0, 1.1fr)) var(--workspace-w); }
+  .app.top:has(> .workspace-thread) { grid-template-areas: "top top top" "side main rail"; }
+  .app.top.panel:has(> .workspace-thread) { grid-template-areas: "top top top top" "side main view rail"; }
+  .app > .workspace-thread { display: grid; grid-template-columns: subgrid; grid-template-rows: minmax(0, 1fr); grid-column: 2 / -1; grid-row: 1; }
+  .app.top > .workspace-thread { grid-column: 2 / -1; grid-row: 2; }
+  .workspace-thread > .thread-content { grid-column: 1; grid-row: 1; }
+  .workspace-thread > .workspace-bar { grid-column: -2; grid-row: 1; border-right: 0; border-left: 1px solid var(--line); }
+  .app:has(> .workspace-thread) > .viewer { grid-column: 3; grid-row: 1; }
+  .app.top:has(> .workspace-thread) > .viewer { grid-row: 2; }
+  .workspace-bar button.on { box-shadow: inset -2px 0 var(--accent); }
+  .workspace-bar .rail-toggle svg { transform: scaleX(-1); }
+  html[data-rail="compact"] .workspace-bar .rail-toggle svg { transform: none; }
+  html:has(.app > .workspace-thread) .toast { right: calc(var(--workspace-w) + 16px); max-width: calc(100vw - var(--workspace-w) - 32px); }
+}
+
 /* The top bar (view.bend's View.chrome.bar, for a host that asks for it,
    .app.top): the window's one bar across the top. The mark, where you are as
    crumbs, the shown thread's state as key/value cells, the command field,
