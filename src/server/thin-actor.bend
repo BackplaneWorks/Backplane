@@ -413,9 +413,10 @@ def Sidebar.get(ms: List<&2, Memo>, +key: String) -> J.Json:
 def Sidebar.save(valid: Bool, a: Actor, key: String, node: J.Json) -> Actor:
   match valid a:
     case True{} Actor{u, view, target, pending, reads, dirty, +ms}:
-      Actor{u, view, target, pending, reads, dirty, Sidebar{key, node} <> List.append(&2, Memo, SidebarWire.keep(ms), SidebarSent.keep(ms))}
-    case False{} Actor{u, view, target, pending, reads, dirty, _}:
-      Actor{u, view, target, pending, reads, dirty, Nil{}}
+      Actor{u, view, target, pending, reads, dirty, Sidebar{key, node} <> List.append(&2, Memo, Bodies.keep(ms), List.append(&2, Memo, SidebarWire.keep(ms), SidebarSent.keep(ms)))}
+    case False{} Actor{u, view, target, pending, reads, dirty, ms}:
+      # Issued reading sources belong to the view, not the sidebar image.
+      Actor{u, view, target, pending, reads, dirty, Bodies.keep(ms)}
 
 def Sidebar.lookup(allowed: Bool, ms: List<&2, Memo>, key: String) -> J.Json:
   match allowed:
